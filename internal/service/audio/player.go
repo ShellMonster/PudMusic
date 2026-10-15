@@ -33,8 +33,8 @@ type Player struct {
 // Open 打开一个本地音频文件。
 //
 // 按扩展名分流：.flac 走自带的 flacdec（它同时吃裸 FLAC 和 MP4 里的 FLAC），
-// 其余交给 MyGo 已注册的格式（WAV / MP3 / AIFF / AIFC）。解码器持有的文件句柄
-// 挂在 Player 上，Close 会把它关掉。
+// 其余交给 MyGo 已注册的格式（WAV / MP3 / AIFF / AIFC / MP4 家族 / 裸 ADTS）。
+// 解码器持有的文件句柄挂在 Player 上，Close 会把它关掉。
 func Open(path string) (*Player, error) {
 	if strings.EqualFold(filepath.Ext(path), ".flac") {
 		d, err := flacdec.OpenFile(path)
@@ -57,7 +57,7 @@ func Open(path string) (*Player, error) {
 		return nil, err
 	}
 	// mygoaudio.NewDecoder 不负责关文件，得自己挂上，否则换歌会漏句柄。
-	return New(closingDecoder{Decoder: d, Closer: f}), nil
+	return New(owned(d, f)), nil
 }
 
 // New 用一个现成的解码器建播放器。解码器归播放器所有，Close 时会被关掉。
@@ -65,10 +65,37 @@ func New(d mygoaudio.Decoder) *Player {
 	return &Player{dec: d, play: mygoaudio.NewPlayer(d), vol: 1}
 }
 
-// closingDecoder 让播放器关闭时连着关掉解码器底下的文件。
+// owned 把解码器和它依赖的资源绑成一个整体，关的时候一起关。
+//
+// closers 是解码器之外要关的东西（目前是文件），按依赖顺序排：解码器自己
+// 要排在最前，因为 extaf 关 AudioToolbox 句柄的时候还要用到底下的文件。
+//
+// ⚠️ 解码器实现了 io.Closer 就一定要收进来。曾经只收了文件：播放照常、
+// fd 数也不涨，但 extaf 的 AudioFileID / ExtAudioFileRef 一直留在 AudioToolbox
+// 里，切到几百首才崩。测试见 handles_test.go。
+func owned(d mygoaudio.Decoder, closers ...io.Closer) mygoaudio.Decoder {
+	if c, ok := d.(io.Closer); ok {
+		closers = append([]io.Closer{c}, closers...)
+	}
+	return &closingDecoder{Decoder: d, closers: closers}
+}
+
+// closingDecoder 让播放器关闭时把该关的全关掉。
 type closingDecoder struct {
 	mygoaudio.Decoder
-	io.Closer
+	closers []io.Closer
+}
+
+// Close 按 owned() 排好的顺序逐个关：解码器自己先关（它关 AudioToolbox 句柄
+// 时还要用到底下的文件），文件最后。
+func (c *closingDecoder) Close() error {
+	var errs []error
+	for _, cl := range c.closers {
+		if err := cl.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // Play 从当前位置继续播；已经播到头的从头再来。

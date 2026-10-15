@@ -3,13 +3,13 @@ module github.com/ShellMonster/Biu_Go
 go 1.27.1
 
 require (
+	github.com/ebitengine/purego v0.11.1
 	github.com/egoist/mygo v0.5.1
 	github.com/mewkiz/flac v1.0.14
 	github.com/tphakala/go-m4a v0.7.0
 )
 
 require (
-	github.com/ebitengine/purego v0.11.1 // indirect
 	github.com/go-text/typesetting v0.3.5 // indirect
 	github.com/hajimehoshi/go-mp3 v0.3.4 // indirect
 	github.com/icza/bitio v1.1.0 // indirect
