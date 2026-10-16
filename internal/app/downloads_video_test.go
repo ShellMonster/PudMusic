@@ -259,13 +259,17 @@ func decodeMP4(t *testing.T, path string) *mp4.File {
 	return out
 }
 
-// waitDownloadSettled 等一项不再是「在下」的状态。
+// waitDownloadSettled 等一项不再「在飞」。
+//
+// ⚠️ 判的是 `Running()` 而不是「等于 running」：视频那两条流下完之后
+// 还要交织十几秒，那一段的状态是 `muxing`——它同样是在飞，而它下完之后
+// 才是 Done。
 func waitDownloadSettled(t *testing.T, a *app.App, id string) download.Snapshot {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		s, ok := a.DownloadSnapshot(id)
-		if ok && s.Status != download.StatusQueued && s.Status != download.StatusRunning {
+		if ok && !s.Status.Running() && s.Status != download.StatusQueued {
 			return s
 		}
 		time.Sleep(5 * time.Millisecond)

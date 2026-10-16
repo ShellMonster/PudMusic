@@ -108,7 +108,12 @@ func (c *fileCDN) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.mu.Lock()
-	c.reqs = append(c.reqs, rng)
+	// 探长度的那一发（`bytes=0-0`）**不算分块请求**——和 `cdn` 那个
+	// harness 一���。每一轮取流都要重新探一次（地址会过期、身份要再比
+	// 一次），那是必然的，不该被「续传时重下了多少」这类断言算进去。
+	if rng != "bytes=0-0" {
+		c.reqs = append(c.reqs, rng)
+	}
 	c.mu.Unlock()
 
 	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(c.body)))
@@ -465,4 +470,188 @@ func TestRemovingAVideoTaskDeletesEveryHalfProduct(t *testing.T) {
 	if got := leftovers(t, h.dir); len(got) != 0 {
 		t.Errorf("删完之后下载目录里还剩 %d 个东西：%v", len(got), got)
 	}
+}
+
+// ---- 六、重开应用时正好停在「交织中」 ----
+
+// TestAMuxingTaskSurvivesARestartAndFinishesOnResume 钉住
+// 「重开时状态是「交织中」的那一项」会变成什么。
+//
+// 交织一个几百 MB 的 MV 要十几秒，而用户在这十几秒里退出应用是常事。
+// 那一刻盘上躺着的是：**两条流都在、都下全了、`.mp4` 还没出来**。
+//
+// 这一条断的是「继续之后要走多远」：
+//
+//	两条流在盘上、分块记账是齐的 → 探长度、对身份、拉字节全都不用重做，
+//	直接走到交织那一步，几秒钟就出结果
+//
+// 而如果恢复时把「交织中」当成别的（比如当成 done），用户看到的是一行
+// 「已完成」而盘上什么都没有；当成 queued 的话「继续」会从头再下几百兆。
+func TestAMuxingTaskSurvivesARestartAndFinishesOnResume(t *testing.T) {
+	spV, spA := muxtest.VideoSpec(300), muxtest.AudioSpec(10)
+	dir := t.TempDir()
+	src := t.TempDir()
+	vp, ap := muxtest.PairIn(t, src, spV, spA)
+	video := newFileCDN(t, "video", vp)
+	audio := newFileCDN(t, "audio", ap)
+
+	// 造出「正下到一半被退出打断」那一刻的盘面：两条 `.part` 都在，
+	// 而且都**是全的**（下载引擎下完一条流就是整条下完才进交织）。
+	dest := filepath.Join(dir, "测试的 MV.mp4")
+	write := func(part string, body []byte) {
+		f, err := os.Create(part)
+		if err != nil {
+			t.Fatalf("建 %s：%v", part, err)
+		}
+		defer f.Close()
+		if _, err := f.Write(body); err != nil {
+			t.Fatalf("写 %s：%v", part, err)
+		}
+	}
+	write(partPath(dest), video.body)
+	write(companionPartPath(dest), audio.body)
+
+	task := &Task{
+		ID:       TaskID(bvid, cid),
+		Title:    "测试的 MV",
+		Identity: Identity{Bvid: bvid, Cid: cid, Quality: 120, Video: true, Length: int64(len(video.body))},
+		Ext:      videoExt,
+		Dest:     dest,
+		Video:    true,
+		Chunks:   allChunks(len(video.body)),
+		Companion: &Companion{
+			Length: int64(len(audio.body)),
+			Chunks: allChunks(len(audio.body)),
+		},
+		Status: StatusMuxing,
+	}
+	queueFile := filepath.Join(t.TempDir(), QueueFileName)
+
+	resolve := func(context.Context, Identity) (*Source, error) {
+		return &Source{
+			Bvid: bvid, Cid: cid, Quality: 120, Label: "1080P",
+			Video: true, URLs: []string{video.url()}, CompanionURLs: []string{audio.url()},
+		}, nil
+	}
+	m1, err := New(Options{Client: http.DefaultClient, Resolve: resolve}, queueFile)
+	if err != nil {
+		t.Fatalf("建队列：%v", err)
+	}
+	m1.mu.Lock()
+	m1.tasks[task.ID] = task
+	m1.order = []string{task.ID}
+	m1.mu.Unlock()
+	if err := m1.Save(queueFile); err != nil {
+		t.Fatalf("存队列：%v", err)
+	}
+	if err := m1.Close(""); err != nil {
+		t.Fatalf("关队列：%v", err)
+	}
+
+	// ⚠️ 队列文件里要真的写着「交织中」。
+	//
+	// `Save` 自己就会把「在飞的」一律落成暂停（`store.go` 的 `persistable`），
+	// 所以直接存出来的那份已经是 paused 了——那样测的就不是 `Restore`
+	// 对「交织中」的处理，而是「暂停」的往返。这一票要断的是前者：
+	// 一份写着「交织中」的记录（换句话说，别的版本写出来的，或者
+	// 退出时序卡在写盘之前）被读回来该变成什么。
+	forceStatusInQueueFile(t, queueFile, string(StatusMuxing))
+
+	// 重开。
+	m2, err := New(Options{Client: http.DefaultClient, Resolve: resolve}, queueFile)
+	if err != nil {
+		t.Fatalf("重开：%v", err)
+	}
+	defer m2.Close("")
+	got, ok := m2.Get(task.ID)
+	if !ok {
+		t.Fatal("重开之后队列里没有这一项")
+	}
+	if got.Status != StatusPaused {
+		t.Fatalf("重开之后状态是 %q，要的是暂停——"+
+			"那一轮的进程都没了，不可能是「交织中」", got.Status)
+	}
+
+	videoHits, audioHits := len(video.requests()), len(audio.requests())
+	if err := m2.Resume(task.ID); err != nil {
+		t.Fatalf("继续：%v", err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if s, _ := m2.Get(task.ID); s.Status == StatusDone {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	final, _ := m2.Get(task.ID)
+	if final.Status != StatusDone {
+		t.Fatalf("继续之后状态是 %q，%s", final.Status, final.Err)
+	}
+	// 🔴 一条字节都**不许重下**：两条流在盘上、分块记账是齐的。
+	if n := len(video.requests()) - videoHits; n != 0 {
+		t.Errorf("继续之后又发了 %d 发视频流请求——那几百 MB 白下了", n)
+	}
+	if n := len(audio.requests()) - audioHits; n != 0 {
+		t.Errorf("继续之后又发了 %d 发音频流请求", n)
+	}
+	f, err := os.Open(final.Dest)
+	if err != nil {
+		t.Fatalf("打开产物：%v", err)
+	}
+	defer f.Close()
+	out, err := mp4.DecodeFile(f)
+	if err != nil {
+		t.Fatalf("产物解不出来：%v", err)
+	}
+	if len(out.Moov.Traks) != 2 {
+		t.Errorf("产物里有 %d 条轨，要的是 2", len(out.Moov.Traks))
+	}
+}
+
+// forceStatusInQueueFile 把队列文件里那一项的状态改成 want。
+//
+// 它是**直接改 JSON**，不走 `Save`——因为要测的正是 `Save` 之外那条路
+// （见调用处那段注释）。
+func forceStatusInQueueFile(t *testing.T, path, want string) {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读队列文件：%v", err)
+	}
+	got := strings.Replace(string(b), `"status": "paused"`, `"status": "`+want+`"`, 1)
+	if got == string(b) {
+		t.Fatalf("队列文件里没找到 paused 那一项:\n%s", b)
+	}
+	if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+		t.Fatalf("写队列文件：%v", err)
+	}
+}
+
+// TestTheMuxingStatusIsNeitherDoneNorPausable 钉住「交织中」这几个语义。
+//
+//	Running   = true  它在读写几百 MB 的盘，用户看到的应该是「还在动」
+//	CanPause  = false 两条流已经在盘上了，没有「暂停到一半」这回事
+//	CanResume = false 那一项没出错，按「继续」是空的
+//
+// 而 `Restore` 把它变成暂停这件事由上面那条用例钉着。
+func TestTheMuxingStatusIsNeitherDoneNorPausable(t *testing.T) {
+	if !StatusMuxing.Running() {
+		t.Error("「交织中」不算 Running——那一刻网络空出来了，但它在动盘")
+	}
+	if StatusMuxing.CanPause() {
+		t.Error("「交织中」可以暂停——两条流已经下完了，暂停没有可续的")
+	}
+	if StatusMuxing.CanResume() {
+		t.Error("「交织中」可以继续——它没出错，按「继续」是空的")
+	}
+}
+
+// allChunks 是一条流的全部分块下标。
+func allChunks(size int) []int {
+	n := totalChunks(int64(size))
+	out := make([]int, 0, n)
+	for i := range n {
+		out = append(out, i)
+	}
+	return out
 }

@@ -74,7 +74,7 @@ func (m *Manager) persistable() []*Task {
 			continue
 		}
 		cp := *t
-		if cp.Status == StatusRunning || cp.Status == StatusQueued {
+		if cp.Status.Running() || cp.Status == StatusQueued {
 			cp.Status = StatusPaused
 		}
 		out = append(out, &cp)
@@ -116,8 +116,8 @@ func (m *Manager) Restore(path string) error {
 		}
 		// ⚠️ **只把「在飞的」改成暂停**，不是一律改。
 		//
-		// `running` / `queued`：重启之后那个在飞的请求早就不在了，记成
-		// running 会让界面上永远转圈。
+		// `running` / `queued` / `muxing`：重启之后那个在飞的动作早就不在
+		// 了，记成它们会让界面上永远转圈。
 		//
 		// `done`：歌已经在盘上了。改成暂停的话，记录页上每一行都写着
 		//「暂停」，而那一行上唯一能按的「继续」会把**已经下完的整首歌**
@@ -125,7 +125,7 @@ func (m *Manager) Restore(path string) error {
 		// 下完了就是下完了，它不需要「继续」。
 		//
 		// `paused` / `error`：本来就不是在飞的，原样带回来。
-		if t.Status == StatusRunning || t.Status == StatusQueued {
+		if t.Status.Running() || t.Status == StatusQueued {
 			t.Status = StatusPaused
 		}
 		t.Err = ""

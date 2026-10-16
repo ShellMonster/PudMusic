@@ -52,6 +52,16 @@ const (
 	StatusRunning Status = "running"
 	// StatusPaused 用户暂停了，或者应用退出时正在下的那些（见 `Restore`）。
 	StatusPaused Status = "paused"
+	// StatusMuxing 两条流都下完了，正在交织成一个 MP4（视频那一路）。
+	//
+	// ⚠️ 它是**在飞**的一种，不是「下完了」：两条几百 MB 的流要读一遍
+	// 再写一遍，那十几秒里界面上不能显示成完成。而它**不是** running：
+	// 那一刻网络已经空出来了，`Running()` 要说真话。
+	//
+	// 重开应用之后不可能「正在交织」——那一轮的进程都没了，所以恢复时
+	// 它一律变成暂停（见 `store.go`）。而「继续」是对的：两条流在盘上，
+	// 分块也是齐的，按「继续」会一路走到交织那一步，几秒钟就出结果。
+	StatusMuxing Status = "muxing"
 	// StatusDone 下完了，文件已经在 `Task.Dest` 上。
 	StatusDone Status = "done"
 	// StatusError 出错了。`Task.Err` 是人话。
@@ -64,8 +74,11 @@ func (s Status) CanPause() bool { return s == StatusRunning }
 // CanResume 报告这个状态现在能不能继续。
 func (s Status) CanResume() bool { return s == StatusPaused || s == StatusError }
 
-// Running 报告这个任务此刻是不是占着网络。
-func (s Status) Running() bool { return s == StatusRunning }
+// Running 报告这个任务此刻是不是在**忙着**。
+//
+// 「交织中」也算：那时网络空出来了，但它在读写几百 MB 的盘，而用户看到的
+// 应该是「还在动」而不是「停住了」。
+func (s Status) Running() bool { return s == StatusRunning || s == StatusMuxing }
 
 // Identity 是「这一段字节属于谁」。
 //

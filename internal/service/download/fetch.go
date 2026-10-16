@@ -189,6 +189,20 @@ func (m *Manager) pullStream(ctx context.Context, id string, companion bool, par
 	return pullErr
 }
 
+// markMuxing 把状态落成「交织中」，并叫界面要一帧。
+func (m *Manager) markMuxing(id string) {
+	m.mu.Lock()
+	t := m.tasks[id]
+	if t != nil {
+		t.Status = StatusMuxing
+	}
+	wake := m.wake
+	m.mu.Unlock()
+	if wake != nil {
+		wake()
+	}
+}
+
 // land 把半成品改名成最终落盘的那个文件。
 func (m *Manager) land(id, part string) error {
 	dest := m.destToLand(id)
@@ -232,6 +246,10 @@ func (m *Manager) runMux(ctx context.Context, id, videoPart, audioPart string) e
 	if dest == "" {
 		return ErrNotFound
 	}
+	// 那一刻网络空出来了，但盘在动：状态落成「交织中」，界面上才不是
+	// 「下完了卡住了」（见 `StatusMuxing`）。
+	m.markMuxing(id)
+
 	mix := mixPartPath(dest)
 	if _, err := mux.Mux(videoPart, audioPart, mix); err != nil {
 		return err
@@ -298,6 +316,13 @@ func (m *Manager) prepare(id string, src *Source, length int64) (string, error) 
 	// 内容对不上的坏文件（见 `Identity` 的注释）。
 	if !t.Identity.SameResource(src.IdentityOf(length)) {
 		t.resetChunks()
+		// ⚠️ 伴流也要清。资源身份变了 = 这一稿换了内容，而**两条流都是
+		// 旧内容的**。只清主流的话伴流那几百 KB 会**接着往下拼**——
+		// 出来的是一个音画来自两个不同版本的文件，能播、播一会儿就没声
+		// 了，而两条流各自的长度都「对得上」。
+		if t.Companion != nil {
+			t.Companion.Chunks = nil
+		}
 	}
 	t.Identity = src.IdentityOf(length)
 	if t.Label == "" {
@@ -376,6 +401,16 @@ func (m *Manager) prepareCompanion(id string, src *Source, length int64) (string
 		t.Companion.Chunks = nil
 	}
 	t.Companion.Length = length
+
+	// 账上有进度，盘上却对不上：文件被删了、被用户截短了、或者目录换了。
+	// 那那些字节已经没了，继续下会得到一个中间有洞的文件——**洞在
+	// fMP4 里就是「交织出来少几帧」**，而那种文件照样能播，只是结尾
+	// 突然断掉。所以重来。
+	if len(t.Companion.Chunks) > 0 {
+		if st, err := os.Stat(part); err != nil || st.Size() < length {
+			t.Companion.Chunks = nil
+		}
+	}
 
 	// 落盘名变了就删掉旧名字下的半成品——`prepare` 里那四步孤儿场景
 	// 在这儿一模一样地成立。

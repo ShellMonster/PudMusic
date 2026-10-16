@@ -493,7 +493,12 @@ func (m *Manager) runOne(id string) {
 			t.Err = ""
 		case errors.Is(err, context.Canceled), errors.Is(err, ErrPaused):
 			// 暂停 / 应用退出：这不是失败，用户还要接着下。
-			if t.Status == StatusRunning {
+			//
+			// ⚠️ 判的是 `Running()` 而不是「等于 running」：交织那一下也
+			// 认取消（用户点了暂停 / 应用在退出），那时候状态已经是
+			// `StatusMuxing` 了——只判 `running` 的话那一行会永远停在
+			// 「交织中」，而按钮上的「继续」按下去也不动。
+			if t.Status.Running() {
 				t.Status = StatusPaused
 			}
 		default:
