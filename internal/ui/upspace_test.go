@@ -290,6 +290,48 @@ func TestTheSpaceHeaderShowsTheBannerTheNameAndTheStats(t *testing.T) {
 	}
 }
 
+// TestTheStatsAreHiddenWithoutALogin 钉住「统计只在登录后画」。
+//
+// ⚠️ 这一条是**调研上游之后才发现的漏**：上游 `space-info.tsx:125` 那一支是
+// `{user?.isLogin ? stats.map(...) : null}`——整块统计都挂在登录态下面。
+//
+// 理由不是「没登录不好看」，是**画出来是个假数**：`/x/relation/stat` 要 Cookie，
+// 没登录时 B 站给不了粉丝数，而界面上会是一个干干净净的「粉丝数 0」——用户会
+// 以为他真的一个粉丝都没有。
+func TestTheStatsAreHiddenWithoutALogin(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "没登录看的 UP", 0, 123456)
+	s, tt, _ := newSpaceShell(t, b, false, "")
+
+	openSpace(t, s, tt, 42)
+
+	if showsText(tt, "粉丝数") {
+		t.Errorf("没登录还画着「粉丝数」（B 站那时给不了这个数，画出来是 0 = 假数），文字有 %q", tt.Texts())
+	}
+	if showsText(tt, "等级") {
+		t.Errorf("统计整块应该一起藏（上游把它算在 stats 里），文字有 %q", tt.Texts())
+	}
+	// 头图和昵称还是要的——那两样不需要登录。
+	if !showsText(tt, "没登录看的 UP") {
+		t.Errorf("没登录也该看得见昵称，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheStatsAreThereWithALogin 是上一条的反证。
+func TestTheStatsAreThereWithALogin(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "登录后看的 UP", 0, 123456)
+	s, tt, _ := newSpaceShell(t, b, true, "77")
+
+	openSpace(t, s, tt, 42)
+
+	for _, want := range []string{"粉丝数", "12.3万", "等级", "Lv4"} {
+		if !showsText(tt, want) {
+			t.Errorf("登录后该有 %q，文字有 %q", want, tt.Texts())
+		}
+	}
+}
+
 // TestTheHeaderTellsBlockedApartFromNotFollowed 钉住「拉黑是一个独立的状态」。
 //
 // 把拉黑画成「没关注」的话，用户按下去发出去的是**取关**，而 B 站对拉黑中

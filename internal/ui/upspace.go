@@ -422,8 +422,13 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 
 // viewSpaceActions 是右边那一排：关注按钮 + 粉丝数 + 等级。
 //
-// 「关注数」**只在自己看自己时画**（上游 `space-info.tsx:36-40` 的
-// `hidden: !isSelf`）：别人的关注数是 B 站不公开的那一档，画出来是 0。
+// 两条画不画的规矩都抄上游：
+//   - **关注按钮**只在「登录了、且看的不是自己」时画（`space-info.tsx:100`）；
+//   - **「关注数」只在自己看自己时画**（`space-info.tsx:36-40` 的
+//     `hidden: !isSelf`）：别人的关注数是 B 站不公开的那一档，画出来是 0。
+//
+// ⚠️ 上游的统计**只有这三个**——没有获赞数、没有播放数（`space-info.tsx:31-45`
+// 的 `stats` 表就三行）。这一版照它，不自己加。
 func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 	isSelf := s.app.SelfMid() == sp.mid
 
@@ -445,11 +450,20 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 			}
 		}
 
-		spaceStat(c, "粉丝数", formatCount(h.Stat.Follower))
-		if isSelf {
-			spaceStat(c, "关注数", formatCount(h.Stat.Following))
+		// ⚠️ **整块统计只在登录后画**（上游 `space-info.tsx:125` 的
+		// `{user?.isLogin ? stats.map(...) : null}`）。
+		//
+		// 原因不是「没登录不好看」，是**画出来是个假数**：`/x/relation/stat`
+		// 要 Cookie，没登录时 B 站要么回 -101、要么给 0，而界面上会是一个
+		// 干干净净的「粉丝数 0」——用户会以为他真的一个粉丝都没有。等级也是
+		// 一块（上游把它算在 `stats` 里），跟着一起藏。
+		if s.app.LoggedIn() {
+			spaceStat(c, "粉丝数", formatCount(h.Stat.Follower))
+			if isSelf {
+				spaceStat(c, "关注数", formatCount(h.Stat.Following))
+			}
+			spaceStat(c, "等级", fmt.Sprintf("Lv%d", h.User.Level))
 		}
-		spaceStat(c, "等级", fmt.Sprintf("Lv%d", h.User.Level))
 	})
 }
 
