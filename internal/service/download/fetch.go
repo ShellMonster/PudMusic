@@ -176,7 +176,18 @@ func (m *Manager) prepare(id string, src *Source, length int64) (string, error) 
 		if e := extFor(t, src); e != "" {
 			t.Ext = e
 		}
-		t.Dest = DestFor(filepath.Dir(t.Dest), t.Title, t.Ext, t.ID)
+		dest := DestFor(filepath.Dir(t.Dest), t.Title, t.Ext, t.ID)
+		if dest != t.Dest {
+			// 落盘名变了（这一轮取流的扩展名和上一轮不同，或者同名被别的
+			// 歌占了）：把旧名字下的半成品删掉。
+			//
+			// 不删的话它就是**孤儿**——`Remove` / `Clear` 只删当前 `Dest`
+			// 那一个，于是那几百 MB 永远留在用户的下载目录里，界面上再也
+			// 没有任何东西指向它。（能走到这里说明分块记账已经空了：资源
+			// 身份对不上，或者上一轮一块都没下完而 `.part` 已经预分配了。）
+			_ = os.Remove(partPath(t.Dest))
+		}
+		t.Dest = dest
 		part = partPath(t.Dest)
 	} else {
 		// 账上有进度，盘上却对不上：文件被删了、被用户截短了、或者目录换了。
@@ -461,11 +472,30 @@ func (m *Manager) probeOne(ctx context.Context, rawURL string) (int64, error) {
 	if resp.StatusCode >= 400 {
 		return 0, statusErr(resp)
 	}
-	// 认了 Range：206 的 Content-Range 是 `bytes 0-0/总数`。
-	if _, total, ok := parseContentRangeFull(resp.Header.Get("Content-Range")); ok && total > 0 {
-		return total, nil
+
+	// ⚠️ **必须按状态码分岔，不能「Content-Range 认不出来就退回
+	// Content-Length」**。
+	//
+	// 206 意味着服务器认了 Range，而分块规划只认 `Content-Range` 里那个
+	// 总长。RFC 7233 允许它写成 `*`（「实例长度未知」，第 4.4 节），这时
+	// **不能退回 `Content-Length`**：这一发只问了 `bytes=0-0`，所以
+	// Content-Length 说的是「这一个字节的长度」。
+	//
+	// 退回会发生什么：总长=1 → 只规划出一个分块 `bytes=0-0` → 下载
+	// 「成功」→ 落盘一个 1 字节的 `.m4s` → 状态报「已完成」。一首 30 MB
+	// 的歌变成 1 字节，而歌名、大小、状态全都看着像那么回事——这是这一票
+	// 里第二类「错了不报错」的东西（第一类是 200 拼出来的坏文件）。
+	//
+	// 宁可报错：这一首下不了，用户看到一句能看懂的话；下出一首 1 字节的
+	// 歌，用户要过很久才发现「怎么只放了两秒」。
+	if resp.StatusCode == http.StatusPartialContent {
+		if _, total, ok := parseContentRangeFull(resp.Header.Get("Content-Range")); ok && total > 0 {
+			return total, nil
+		}
+		return 0, fmt.Errorf("download: 服务器不肯说这条流有多长（Content-Range %q）——分块要靠总长规划，不猜", resp.Header.Get("Content-Range"))
 	}
-	// 不认 Range：回的是 200，Content-Length 就是整个文件的长度。
+
+	// 200：服务器没认 Range，回的是整个文件，`Content-Length` 就是总长。
 	// 正文一个字都不读——`defer Close` 只关连接，不会把几十兆读下来。
 	if resp.ContentLength > 0 {
 		return resp.ContentLength, nil
