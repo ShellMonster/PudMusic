@@ -339,3 +339,51 @@ func runMountChild(t *testing.T, path, mode string) {
 		t.Fatalf("子进程 %s 失败了：%v\n%s", mode, err, out)
 	}
 }
+
+// TestSettingsFailureIsVisibleWithoutAStore 验「设置存不住」这件事用户看得见。
+//
+// 拿不到设置文件路径时没有 store 可挂，但**不能就这么安静**：那时候界面用
+// 默认值跑着，用户改了主题，下次打开又变回默认，而界面上一个字的提示都没有。
+// 只在日志里留一行是不够的——日志只有排障的人看得到。
+func TestSettingsFailureIsVisibleWithoutAStore(t *testing.T) {
+	a := app.New()
+	t.Cleanup(a.Close)
+	a.RecordSettingsFailure(errors.New("拿不到应用数据目录，这次的改动关掉应用就没了"))
+
+	// 同一个错只报一次：界面每帧都问一次。
+	err := a.TakeSettingsError()
+	if err == nil {
+		t.Fatal("设置存不住这件事没有报给界面")
+	}
+	if again := a.TakeSettingsError(); again != nil {
+		t.Errorf("同一个错报了两遍：%v", again)
+	}
+
+	// 没有 store 也不能把界面带崩：给默认值、拒绝改动、收尾安全。
+	if !reflect.DeepEqual(a.SettingsSnapshot(), app.DefaultSettings("")) {
+		t.Errorf("存不住的时候给的设置不是默认值：%+v", a.SettingsSnapshot())
+	}
+	if _, err := a.UpdateSettings(func(s *app.Settings) { s.ThemeMode = app.ThemeModeDark }); !errors.Is(err, app.ErrSettingsNotMounted) {
+		t.Errorf("没有 store 时改设置拿到的是 %v", err)
+	}
+	if a.SettingsReadOnly() {
+		t.Error("没有 store 不等于只读")
+	}
+	if err := a.FlushSettings(); err != nil {
+		t.Errorf("收尾时报错：%v", err)
+	}
+	if err := a.CloseSettings(); err != nil {
+		t.Errorf("收尾时报错：%v", err)
+	}
+}
+
+// TestRecordSettingsFailureIgnoresNil 顺带钉一下空错不进账：否则界面上会冒出
+// 一条「设置：」这样的空提示。
+func TestRecordSettingsFailureIgnoresNil(t *testing.T) {
+	a := app.New()
+	t.Cleanup(a.Close)
+	a.RecordSettingsFailure(nil)
+	if err := a.TakeSettingsError(); err != nil {
+		t.Errorf("记了一个空错：%v", err)
+	}
+}

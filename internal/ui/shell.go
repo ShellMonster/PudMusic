@@ -162,6 +162,7 @@ func (s *Shell) viewMain(c *ui.Context) {
 
 	ui.Column(c).Fill().Children(func() {
 		s.viewNav(c)
+		s.viewThemeSwitch(c)
 		ui.Row(c).Grow(1).Children(func() {
 			s.viewSide(c)
 			s.viewRoutes(c)

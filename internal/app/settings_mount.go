@@ -17,6 +17,10 @@ import (
 )
 
 // settingsSlot 是一个 App 上挂着的那份设置。
+//
+// store 有可能是 nil：拿不到设置文件路径时就没有 store 可挂，但**照样要记下
+// 这个错**，否则界面无从知道「这次改的设置存不住」。下面每一个方法都把
+// store == nil 当成「没有设置可用」，不碰它。
 type settingsSlot struct {
 	store *SettingsStore
 
@@ -62,6 +66,19 @@ func (a *App) MountSettings(path string) error {
 	return err
 }
 
+// RecordSettingsFailure 记下一个「设置存不住」的错：没有 store，界面用默认值
+// 跑着，但**这件事用户必须看得见**（见 TakeSettingsError）。
+//
+// 用在拿不到设置文件路径那种场合。那不是「还没挂设置」（第一次运行），是
+// 「挂了但落不了盘」——用户改了主题，下次打开又变回默认。对用户是两件事，
+// 都不能安静。
+func (a *App) RecordSettingsFailure(err error) {
+	if err == nil {
+		return
+	}
+	mountedSettings.Store(a, &settingsSlot{loadErr: err})
+}
+
 // CloseSettings 收尾：把还欠着的改动落完，停掉后台写。可以重复调。
 //
 // ⚠️ 「改设置 → 杀进程 → 重启 → 设置还在」这条验收靠的就是 store 里那次
@@ -71,7 +88,11 @@ func (a *App) CloseSettings() error {
 	if !ok {
 		return nil
 	}
-	return v.(*settingsSlot).store.Close()
+	store := v.(*settingsSlot).store
+	if store == nil {
+		return nil
+	}
+	return store.Close()
 }
 
 // SettingsSnapshot 是这一帧该用的那份设置。
@@ -79,7 +100,7 @@ func (a *App) CloseSettings() error {
 // 每帧都要调，所以**没挂过 store 也不能返回零值**：一份零值的设置会让主题
 // 变成黑底黑字。给 Biu 的默认值，和「第一次运行」表现一致。
 func (a *App) SettingsSnapshot() Settings {
-	if slot := a.settingsSlot(); slot != nil {
+	if slot := a.settingsSlot(); slot != nil && slot.store != nil {
 		return slot.store.Snapshot()
 	}
 	return DefaultSettings("")
@@ -90,7 +111,7 @@ func (a *App) SettingsSnapshot() Settings {
 // 返回的 Settings 是改完之后的完整设置，界面可以直接拿去画下一帧。
 func (a *App) UpdateSettings(fn func(*Settings)) (Settings, error) {
 	slot := a.settingsSlot()
-	if slot == nil {
+	if slot == nil || slot.store == nil {
 		return DefaultSettings(""), ErrSettingsNotMounted
 	}
 	s, err := slot.store.Update(fn)
@@ -115,7 +136,7 @@ func (a *App) SetThemeMode(m ThemeMode) error {
 // 只读时任何改动都会被拒掉，界面该把设置页的控件关掉。
 func (a *App) SettingsReadOnly() bool {
 	slot := a.settingsSlot()
-	return slot != nil && slot.store.ReadOnly()
+	return slot != nil && slot.store != nil && slot.store.ReadOnly()
 }
 
 // FlushSettings 立刻落盘并等它完成。
@@ -124,7 +145,7 @@ func (a *App) SettingsReadOnly() bool {
 // 改完直接退出就丢了（见 CloseSettings 的注释）。
 func (a *App) FlushSettings() error {
 	slot := a.settingsSlot()
-	if slot == nil {
+	if slot == nil || slot.store == nil {
 		return nil
 	}
 	return slot.store.Flush()
@@ -143,7 +164,7 @@ func (a *App) TakeSettingsError() error {
 		return nil
 	}
 	err := slot.loadErr
-	if err == nil {
+	if err == nil && slot.store != nil {
 		err = slot.store.LastError()
 	}
 	if err == nil {

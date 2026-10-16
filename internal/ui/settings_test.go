@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,8 +25,9 @@ const (
 	sampleY = 300
 )
 
-// shellWithSettings 造一个「真 App + 盘上真有那份设置 + 真 Shell」。
-func shellWithSettings(t *testing.T, mode app.ThemeMode, systemDark bool) (*mygoui.Tester, *Shell, *app.App) {
+// shellWithSettings 造一个「真 App + 盘上真有那份设置 + 真 Shell」，返回设置
+// 文件的路径（持久化那几条断言要看它）。
+func shellWithSettings(t *testing.T, mode app.ThemeMode, systemDark bool) (*mygoui.Tester, *Shell, *app.App, string) {
 	t.Helper()
 
 	// 先把设置写到盘上，再挂上去——走的是「启动时读盘」那条路。
@@ -54,7 +56,7 @@ func shellWithSettings(t *testing.T, mode app.ThemeMode, systemDark bool) (*mygo
 	tt := mygoui.NewTester(s.View, 900, 600)
 	tt.SetDark(systemDark)
 	tt.Frame()
-	return tt, s, a
+	return tt, s, a, path
 }
 
 // wantBackground 是「设置 + 系统外观」这一对该画出来的窗口底色。
@@ -79,7 +81,7 @@ func assertBackground(t *testing.T, tt *mygoui.Tester, want mygoui.Color, what s
 // 断言的是像素，理由同文件开头：主题这件事的坑全在「真框架怎么对待它」，
 // 在 view 里读 `c.Theme()` 读到的是应用层已经看到的东西，比像素浅一层。
 func TestShellPaintsTheThemeThatTheSettingsSay(t *testing.T) {
-	tt, _, a := shellWithSettings(t, app.ThemeModeDark, true)
+	tt, _, a, _ := shellWithSettings(t, app.ThemeModeDark, true)
 	assertBackground(t, tt, wantBackground(t, a, true), "设置是深色、系统也是深色")
 	dark := tt.Image().RGBAAt(sampleX, sampleY)
 
@@ -112,7 +114,7 @@ func TestShellPaintsTheThemeThatTheSettingsSay(t *testing.T) {
 // 被消费时还会再多一遍。只在「档位变了」的那一遍里 SetTheme 的写法，第一遍
 // 画对了，第二遍就被悄悄打回系统色——不报错、不崩溃、屏幕上一闪而过。
 func TestShellKeepsTheThemeAfterClickingAround(t *testing.T) {
-	tt, _, a := shellWithSettings(t, app.ThemeModeLight, true)
+	tt, _, a, _ := shellWithSettings(t, app.ThemeModeLight, true)
 	if BuildTheme(a.SettingsSnapshot(), true).Dark {
 		t.Fatal("起点就不对：设置是浅色，却拼出了深色主题")
 	}
@@ -143,7 +145,7 @@ func TestShellKeepsTheThemeAfterClickingAround(t *testing.T) {
 // 崩溃后的错误页如果漏了 ApplyTheme，会用系统色画出来：用户选深色时崩了，
 // 看到一张亮色的错误页，像换了个应用。
 func TestShellCrashPageCarriesTheTheme(t *testing.T) {
-	tt, s, a := shellWithSettings(t, app.ThemeModeLight, true)
+	tt, s, a, _ := shellWithSettings(t, app.ThemeModeLight, true)
 	assertBackground(t, tt, wantBackground(t, a, true), "正常页")
 
 	s.crash = "坏掉了"
@@ -233,4 +235,136 @@ func TestMountSettingsUsesTheMyGoAppDataDirectory(t *testing.T) {
 	if got.ThemeMode != app.ThemeModeDark {
 		t.Errorf("落到盘上的档位是 %q，want dark", got.ThemeMode)
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 用户真的能切
+// ─────────────────────────────────────────────────────────────────────────────
+
+// clickTheme 点主题那三个按钮之一。
+func clickTheme(t *testing.T, tt *mygoui.Tester, label string) {
+	t.Helper()
+	if err := tt.Click(label); err != nil {
+		t.Fatalf("点「%s」失败：%v（界面上还有切换主题的入口吗）", label, err)
+	}
+	tt.Frame()
+}
+
+// TestUserCanSwitchTheThemeFromTheInterface 是「主题三档能切」这条验收。
+//
+// ⚠️ 这里点的是**界面上的按钮**，不是直接调 `a.SetThemeMode`。后者只能证明
+// 状态层有那个方法，证明不了界面上真有一个入口——三档摆在 `theme.go` 里没人
+// 调用过，就是这么漏过去的。
+//
+// 每一档都挑「和系统外观相反」的时刻去断言：颜色差得越远，越说明画出来的是
+// 设置里的档位而不是系统色。
+func TestUserCanSwitchTheThemeFromTheInterface(t *testing.T) {
+	// 系统是深色，起点是「跟随系统」。
+	tt, _, a, path := shellWithSettings(t, app.ThemeModeSystem, true)
+	assertBackground(t, tt, wantBackground(t, a, true), "起点：跟随系统，系统是深色")
+
+	clickTheme(t, tt, "浅色")
+	if got := a.SettingsSnapshot().ThemeMode; got != app.ThemeModeLight {
+		t.Fatalf("点了「浅色」之后设置是 %q", got)
+	}
+	assertBackground(t, tt, wantBackground(t, a, true), "点「浅色」之后")
+
+	// 系统外观变了也不该跟着动——档位是「浅色」就该一直是浅色。
+	tt.SetDark(false)
+	tt.Frame()
+	assertBackground(t, tt, wantBackground(t, a, false), "系统切回浅色之后")
+
+	// 点「深色」，并且**真的落到了盘上**（切换和持久化是同一条路）。
+	clickTheme(t, tt, "深色")
+	assertBackground(t, tt, wantBackground(t, a, false), "点「深色」之后，系统此时是浅色")
+	if err := a.FlushSettings(); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := app.LoadSettings(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.ThemeMode != app.ThemeModeDark {
+		t.Errorf("点完落到盘上的档位是 %q，want dark", saved.ThemeMode)
+	}
+
+	// 点回「跟随系统」：系统此刻是浅色，就该跟着变回浅色。
+	clickTheme(t, tt, "跟随系统")
+	if got := a.SettingsSnapshot().ThemeMode; got != app.ThemeModeSystem {
+		t.Fatalf("点回「跟随系统」之后设置是 %q", got)
+	}
+	assertBackground(t, tt, wantBackground(t, a, false), "点回「跟随系统」之后，系统是浅色")
+}
+
+// TestThemeSwitchSaysWhyItCannotSwitch 验设置只读（来自更新的版本）时按钮是
+// 关着的，并且说清了原因。
+//
+// 与其让用户按了没反应，不如把按钮关掉并说明——这一版的设置一个字都不能写
+// 回去，硬按只会让人以为是程序坏了。
+func TestThemeSwitchSaysWhyItCannotSwitch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), app.SettingsFileName)
+	if err := os.WriteFile(path, []byte(`{"schemaVersion": 99, "appSettings": {}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := app.New()
+	if err := a.MountSettings(path); !errors.Is(err, app.ErrSettingsFromNewer) {
+		t.Fatalf("拿到的是 %v，want ErrSettingsFromNewer", err)
+	}
+	t.Cleanup(func() {
+		a.Close()
+		_ = a.CloseSettings()
+	})
+
+	tt := mygoui.NewTester(New(a).View, 900, 600)
+	tt.SetDark(false)
+	tt.Frame()
+
+	if !tt.HasText("设置只读") {
+		t.Errorf("界面上没有说清为什么切不了，文字有 %q", tt.Texts())
+	}
+	clickTheme(t, tt, "深色")
+	if got := a.SettingsSnapshot().ThemeMode; got != app.ThemeModeSystem {
+		t.Errorf("只读的设置被改了：%q", got)
+	}
+}
+
+// TestShellSaysSoWhenSettingsCannotBeStored 验「设置存不住」时用户看得见。
+//
+// 这一条盯的是一个具体的坑：拿不到应用数据目录时没有 store 可挂，界面上什么
+// 都不会出现，只有日志里有一行——而日志只有排障的人看得到。用户看到的现象是
+// 「改了主题，下次打开又变回来了」，中间什么提示都没有。
+func TestShellSaysSoWhenSettingsCannotBeStored(t *testing.T) {
+	t.Run("记下失败之后界面有提示", func(t *testing.T) {
+		a := app.New()
+		t.Cleanup(a.Close)
+		a.RecordSettingsFailure(errors.New("拿不到应用数据目录，这次的改动关掉应用就没了"))
+
+		tt := mygoui.NewTester(New(a).View, 900, 600)
+		tt.Frame()
+		if !tt.HasText("这次的改动关掉应用就没了") {
+			t.Errorf("界面上没有提示设置存不住，文字有 %q", tt.Texts())
+		}
+		// 提示归提示，界面照常画：主题还是能用默认的那份。
+		assertBackground(t, tt, wantBackground(t, a, false), "存不住时")
+	})
+
+	t.Run("拿不到应用数据目录", func(t *testing.T) {
+		// os.UserConfigDir 只认 XDG_CONFIG_HOME 和 HOME，两个都清掉它就只能
+		// 报错——这是「拿不到目录」唯一的真实成因。
+		t.Setenv("HOME", "")
+		t.Setenv("XDG_CONFIG_HOME", "")
+
+		a := app.New()
+		t.Cleanup(a.Close)
+		if err := MountSettings(a); err == nil {
+			t.Skip("这个环境上 os.UserConfigDir 不靠 HOME/XDG_CONFIG_HOME，跳过")
+		}
+
+		tt := mygoui.NewTester(New(a).View, 900, 600)
+		tt.Frame()
+		if !tt.HasText("拿不到应用数据目录") {
+			t.Errorf("拿不到目录这件事界面上没有提示，文字有 %q", tt.Texts())
+		}
+	})
 }
