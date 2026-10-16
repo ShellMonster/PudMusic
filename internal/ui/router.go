@@ -66,16 +66,17 @@ var routes = []Route{
 		Title: "暂无内容",
 		Hint:  "下载过的音乐会出现在这里",
 	}},
-	// 设置页在上游不是一张内容页，是一长串表单，**没有空状态可抄**。这里直说
-	// 设置现在在哪儿：主题档位还挂在顶栏下面那一条上（settings.go 的
-	// viewThemeSwitch 自己就是这么写的），搬完才回这一页。
+	// 设置页在上游不是一张内容页，是一长串表单，**没有空状态可抄**——而这一页
+	// 也不是空页面：settings_page.go 已经把设置页本身接进 builtPage 了（主题、
+	// 圆角、窗口关闭三项）。所以这一条**不填 Empty**：填了就是一句没人会看到的
+	// 话，那一页根本走不到空状态那一支。
+	//
+	// 哪一页有内容，看 builtPage；哪一页空着，看这里的 Empty。两条都不给的那
+	// 一条画出来是一片白，`TestEveryRouteHasAView` 会先红。
 	//
 	// 另外 Biu 把设置放在头像下拉里（N-08），这里先挂侧栏底部，等头像那块
 	// 做出来再挪回去。
-	{Match: "/settings", Title: "设置", InMenu: true, Empty: emptyState{
-		Title: "设置项还在顶栏下面",
-		Hint:  "主题档位就在顶栏下面那条上切，设置页搬完就回这里",
-	}},
+	{Match: "/settings", Title: "设置", InMenu: true},
 	// 上游：`pages/search/index.tsx:19`，没输入搜索词时落的就是共享默认。
 	{Match: "/search", Title: "搜索", Empty: emptyState{
 		Title: "暂无内容",
@@ -183,14 +184,28 @@ func (s *Shell) page(c *ui.Context, r *ui.Route, rt Route) {
 	}, s.onPanic)(c)
 }
 
-// renderPage 是画页面内容的那一支（New 把它装成 pageBody，测试也正是替掉它
-// 来验「页面里 panic 进程不崩」）。
+// pageContent 画一页的内容（New 把它装成 pageBody，测试也正是替掉它来验
+// 「页面里 panic 进程不崩」）。
 //
-// 13 条路由走同一条路：这一页自己的空状态。真正的内容是后面的阶段接进来的，
-// 接的时候把 viewEmpty 换成真列表就行，外面的 key、recover、主题一个字不动。
-func (s *Shell) renderPage(c *ui.Context, r *ui.Route, rt Route) {
+// 三样，谁先谁后：
+//   - **404**：它有自己的页（notfound.go），说清楚是哪条路径不存在、还剩几秒回
+//     首页。比一条 Toast 有用得多——Toast 两秒就没了，而 404 上那一页一直在。
+//   - **已经有内容的页**：settings_page.go 的 builtPage 把它自己的 view 接
+//     进来（设置页是第一个）。接进来的页不用再走空状态那一支。
+//   - **别的**：这一页自己的空状态——routes 表里每一条都带一句「这里为什么空
+//     / 怎么才能不空」，出处标在那儿（见 empty.go）。真正的内容是后面的阶段
+//     接进来的，接的时候在这一支前面加一个 builtPage 就行，外面的 key、
+//     recover、主题一个字不动。
+//
+// 三样都空不了：一条路由既没接上 builtPage、Empty 又是空的，那一页画出来就是
+// 一片白，`TestEveryRouteHasAView` 会先红。
+func (s *Shell) pageContent(c *ui.Context, r *ui.Route, rt Route) {
 	if rt == notFound {
 		s.viewNotFound(c, r.Path())
+		return
+	}
+	if body := s.builtPage(rt); body != nil {
+		body(c, r)
 		return
 	}
 	s.viewEmpty(c, "page:"+rt.Match, rt.Empty)
@@ -202,8 +217,13 @@ func (s *Shell) renderPage(c *ui.Context, r *ui.Route, rt Route) {
 //   - 清 Toast：上一页的提示不该挂在下一页上（验收项）。
 //   - 清 crash：崩过一页之后切到别的页要能正常画，不是停在错误页里出不来。
 //
-// ⚠️ 这里**不再**弹「这一页还没做」了：13 条路由都有页面视图了（Biu 那边也是
-// 切过去就有页面），再弹一条等于用一句占位话盖住真页面。
+// ⚠️ 这里**一条 Toast 都不弹**了（原型那版会弹「这一页还没做」和
+// 「没有…这一页」）：
+//   - 「还没做」：14 条路由现在都有页面视图了——12 条是各自的空状态、设置页是
+//     它自己那一页、404 是兜底那一页。对着其中任何一页说「还没做」都是在说一件
+//     假事，用户只会以为这一页坏了。
+//   - 「没有…这一页」：404 页自己就写着是哪条路径不存在、几秒后回首页，一条
+//     两秒就消失的 Toast 反而盖住它。
 func (s *Shell) navigate(target string) {
 	s.clearToasts()
 	s.crash = nil

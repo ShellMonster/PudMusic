@@ -204,9 +204,14 @@ func shellOn(t *testing.T, mode app.ThemeMode) *Shell {
 // 「这里为什么空」是上游那一句，「怎么才能不空」是我们加的第二句。两句都要在
 // 画面上——这正是这一张要的「说得清的交代」。
 func TestEmptyStateCopySaysWhyAndHow(t *testing.T) {
+	s, _ := newShell(t)
 	for _, rt := range append(append([]Route{}, routes...), notFound) {
-		if rt == notFound {
+		switch {
+		case rt == notFound:
 			// 兜底那一页有自己的 view，说的是「哪条路径不存在」和「几秒后回首页」。
+			continue
+		case s.builtPage(rt) != nil:
+			// 已经有内容的页（设置页）画的是它自己，用不到空状态。
 			continue
 		}
 		if strings.TrimSpace(rt.Empty.Title) == "" {
@@ -226,8 +231,12 @@ func TestEmptyStateCopySaysWhyAndHow(t *testing.T) {
 // 全用共享默认 `暂无内容` 在上游是常态，可在这儿 13 个页面并排摆着，全一样就
 // 分不出谁是谁了。第二句（怎么才能不空）必须每页不同。
 func TestEmptyStatesAreDistinct(t *testing.T) {
+	s, _ := newShell(t)
 	seen := map[string]string{}
 	for _, rt := range routes {
+		if s.builtPage(rt) != nil {
+			continue
+		}
 		if prev, dup := seen[rt.Empty.Hint]; dup {
 			t.Errorf("%s 和 %s 的「怎么才能不空」是同一句：%q", rt.Match, prev, rt.Empty.Hint)
 		}

@@ -69,8 +69,11 @@ func TestParamRoutesMatch(t *testing.T) {
 
 // TestMenuItemsAllSwitch 验侧栏上每一项都切得动，而且切过去有这一页自己的
 // 页面——不是空白，也不是一句「还没做」。
+//
+// 「切得动」和「画的是什么」分开验：已经有内容的页（设置页）画的是它自己，
+// 别的页画的是这一页的空状态（routes 表里每一条都带的那句）。
 func TestMenuItemsAllSwitch(t *testing.T) {
-	_, tt := newShell(t)
+	s, tt := newShell(t)
 
 	menu := 0
 	for _, rt := range routes {
@@ -83,6 +86,12 @@ func TestMenuItemsAllSwitch(t *testing.T) {
 		}
 		tt.Frame()
 
+		if got := s.router.Path(); got != rt.Match {
+			t.Errorf("点了 %q，当前路径是 %q，文字有 %q", rt.Title, got, tt.Texts())
+		}
+		if s.builtPage(rt) != nil {
+			continue // 这一页有自己的内容（设置页），不画空状态
+		}
 		if !tt.HasText(rt.Empty.Title) {
 			t.Errorf("点了 %q，画面上没有这一页的空状态 %q，文字有 %q", rt.Title, rt.Empty.Title, tt.Texts())
 		}
@@ -92,12 +101,13 @@ func TestMenuItemsAllSwitch(t *testing.T) {
 	}
 }
 
-// TestEveryRouteHasItsOwnPage 钉住这一张的验收头一条：**14 条路由都能走通，
+// TestEveryRouteHasAView 钉住这一张的验收头一条：**14 条路由都能走通，
 // 没有一页是空白**。
 //
-// 怎么算「这一页有东西」：切过去之后画面上得有这一页自己的文案。13 条路由
-// 每一条的文案写死在 routes 表里（出处标在那儿），所以这里逐条断言它真的
-// 画出来了；兜底那条是 404 页，断言它说清楚是哪条路径不存在。
+// 怎么算「这一页有东西」：切过去之后画面上得有这一页自己的文案。已经有内容
+// 的页（设置页）画的是它自己，其余每一条的文案写死在 routes 表里（出处标在
+// 那儿），所以这里逐条断言它真的画出来了；兜底那条是 404 页，断言它说清楚
+// 是哪条路径不存在。
 func TestEveryRouteHasItsOwnPage(t *testing.T) {
 	// 逐条走的路径：参数路由要带一个真的参数，其余照 Match 走。
 	paths := map[string]string{
@@ -120,13 +130,21 @@ func TestEveryRouteHasItsOwnPage(t *testing.T) {
 			if !tt.HasText(rt.Title) {
 				t.Errorf("页面标题 %q 没画出来，文字有 %q", rt.Title, tt.Texts())
 			}
+			// 每一页要么有自己的内容（builtPage），要么有一句说得清的空状态。
+			// 两者都没有 = 画出来一片白，这正是这一张要消掉的东西。
+			if s.builtPage(rt) != nil {
+				return // 这一页有自己的内容（设置页），不画空状态
+			}
 			if rt.Empty.Title == "" {
-				t.Fatalf("%s 没填空状态文案——画出来就是一片白", rt.Match)
+				t.Fatalf("%s 既没接上 builtPage 又没填空状态文案——画出来就是一片白", rt.Match)
 			}
 			if !tt.HasText(rt.Empty.Title) {
 				t.Errorf("没有画出 %s 的空状态 %q，文字有 %q", rt.Match, rt.Empty.Title, tt.Texts())
 			}
-			if rt.Empty.Hint != "" && !tt.HasText(rt.Empty.Hint) {
+			if rt.Empty.Hint == "" {
+				t.Fatalf("%s 没说「怎么才能不空」", rt.Match)
+			}
+			if !tt.HasText(rt.Empty.Hint) {
 				t.Errorf("没有画出 %s 的「怎么才能不空」%q，文字有 %q", rt.Match, rt.Empty.Hint, tt.Texts())
 			}
 		})
@@ -149,10 +167,17 @@ func TestEveryRouteHasItsOwnPage(t *testing.T) {
 	})
 }
 
-// TestEmptyStateCopyIsNotBlank 钉住「每条路由都要有一句说得清的交代」：
-// 表里任何一条漏了标题，那一页画出来就是一片白，而且没有测试会红。
+// TestEmptyStateCopyIsNotBlank 钉住「每一条空着的路由都要有一句说得清的
+// 交代」：表里任何一条漏了标题，那一页画出来就是一片白，而且没有测试会红。
+//
+// 已经有内容的路由（设置页）跳过——它画的是自己的页面，用不到空状态，
+// 这一条里给它塞一句空状态反而是留了一句没人会看到的话。
 func TestEmptyStateCopyIsNotBlank(t *testing.T) {
+	s, _ := newShell(t)
 	for _, rt := range routes {
+		if s.builtPage(rt) != nil {
+			continue
+		}
 		if strings.TrimSpace(rt.Empty.Title) == "" {
 			t.Errorf("%s 没有空状态标题", rt.Match)
 		}
@@ -290,7 +315,7 @@ func TestPanicDoesNotBlockNavigation(t *testing.T) {
 	if !tt.HasText("回到首页") {
 		t.Errorf("错误页上没有「回到首页」，文字有 %q", tt.Texts())
 	}
-	s.pageBody = s.renderPage // 假装这一页修好了
+	s.pageBody = s.pageContent // 假装这一页修好了
 
 	if err := tt.Click("回到首页"); err != nil {
 		t.Fatal(err)
@@ -406,6 +431,10 @@ func TestRenderShots(t *testing.T) {
 	s.navigate("/empty")
 	tt.Frame()
 	save(t, dir, "14b-空状态落地页.png", tt)
+	// 已经有内容的那一页：设置页不画空状态，画的是它自己。
+	s.navigate("/settings")
+	tt.Frame()
+	save(t, dir, "14c-设置页.png", tt)
 
 	s.navigate("/根本没有这一页")
 	tt.Frame()

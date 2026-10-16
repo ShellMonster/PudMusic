@@ -342,7 +342,7 @@ func TestEveryPageViewIsGuarded(t *testing.T) {
 			}
 
 			// 换一页就该出来——一页崩了不能连累后面那些页。
-			s.pageBody = s.renderPage
+			s.pageBody = s.pageContent
 			s.navigate("/history")
 			tt.Frame()
 			if s.crash != nil {

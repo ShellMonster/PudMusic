@@ -1,4 +1,7 @@
-// 设置在界面层的这一半：文件放哪、挂上去、让用户切、出了事告诉用户。
+// 设置在界面层的这一半：文件放哪、挂上去、出了事告诉用户。
+//
+// 让用户改的那一半在 settings_page.go；这一份是「怎么落到盘上」和「出了事
+// 怎么说」。
 //
 // 为什么这一半留在界面层：「应用数据目录在哪」是框架的事，
 // `mygo.App.Path(mygo.PathUserData)` 是 MyGo 自己的 API（`paths.go:53`）。
@@ -15,7 +18,6 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/ui"
 )
 
 // MountSettings 把设置挂到 a 上：读盘、落盘、退出前 flush。
@@ -72,7 +74,7 @@ func (s *Shell) reportSettingsError() {
 	s.addToast("设置：" + strings.TrimPrefix(err.Error(), "app: "))
 }
 
-// themeModes 是三档主题，顺序就是从左到右的顺序。
+// themeModes 是三档主题，顺序就是从左到右的顺序。设置页那三个按钮用。
 var themeModes = []struct {
 	mode  app.ThemeMode
 	label string
@@ -80,39 +82,4 @@ var themeModes = []struct {
 	{app.ThemeModeSystem, "跟随系统"},
 	{app.ThemeModeLight, "浅色"},
 	{app.ThemeModeDark, "深色"},
-}
-
-// viewThemeSwitch 是主题档位那三个按钮：跟随系统 / 浅色 / 深色。
-//
-// 🔴 为什么临时放在顶栏下面，而不是设置页：Biu 的主题设置在 `/settings` 里，
-// 而 `/settings` 这一页现在只画一张空状态，文案就写明「设置项还在顶栏下面」
-// （routes 表里那一条）。设置页真做了，删掉这个函数、把同样的三个按钮搬过去
-// 就行，`SetThemeMode` 一个字都不用改。
-func (s *Shell) viewThemeSwitch(c *ui.Context) {
-	t := c.Theme()
-	cur := s.app.SettingsSnapshot().ThemeMode
-	// 设置来自更新的版本时一个字都不许写回去。与其让用户按了没反应，不如把
-	// 按钮关掉，并说清为什么。
-	readonly := s.app.SettingsReadOnly()
-
-	ui.Row(c).Key("theme-switch").Height(36).Padding(0, 12).Gap(4).
-		AlignItems(ui.Center).Justify(ui.End).Children(func() {
-		ui.Text(c, "主题").FontSize(12).TextColor(t.TextMuted)
-		if readonly {
-			ui.Text(c, "设置只读").FontSize(11).TextColor(t.TextMuted)
-		}
-		for _, opt := range themeModes {
-			b := ui.Button(c, opt.label).Radius(6).Disabled(readonly)
-			if opt.mode == cur {
-				b = b.Background(t.Accent)
-			}
-			if b.Clicked() {
-				// 改完立刻 invalidate 已经在 SetThemeMode 里做了：即时模式里
-				// 按完不会自己再画一帧，不叫醒它屏幕上就是「按了没反应」。
-				if err := s.app.SetThemeMode(opt.mode); err != nil {
-					s.addToast("主题切不了：" + err.Error())
-				}
-			}
-		}
-	})
 }
