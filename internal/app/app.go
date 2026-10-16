@@ -62,6 +62,16 @@ type State struct {
 	//
 	// **换流之后它会变**：B 站偶尔会给出比上次低的一档，用户得看见。
 	Quality string
+
+	// QualityPref 是用户**选的那一档**（`AudioQuality` 那组字符串）。
+	//
+	// 和 Quality 分开是因为它们是两件事：选的是「我要无损」，徽章说的是
+	// 「B 站给了无损」。降级发生之后界面上要同时出现两者——混成一句就变成
+	// 「用户要无损，系统给了无损」，看不出发生了降级。
+	//
+	// ⚠️ 它是**偏好**，本地文件播放时也照样有值：徽章只对在线流画，
+	// 而换档这个动作不该要求当前正好在放在线流。
+	QualityPref AudioQuality
 }
 
 // App 是应用的全部状态。
@@ -141,18 +151,25 @@ func (a *App) SetWake(fn func()) {
 func (a *App) Snapshot() State {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	// ⚠️ 偏好直接从 `a.streaming` 读，**不能**调 `a.AudioQuality()`：那把锁
+	// 已经在手里了，sync.Mutex 不可重入，那样写是当场死锁。
+	pref := AudioQualityAuto
+	if a.streaming != nil {
+		pref = BiliToPref(a.streaming.Quality)
+	}
 	return State{
-		HasTrack: a.player != nil,
-		Title:    a.title,
-		Path:     a.path,
-		CoverURL: a.cover,
-		Playing:  a.playing,
-		Position: a.position,
-		Duration: a.duration,
-		Volume:   a.volume,
-		Rate:     a.rate,
-		Err:      a.errText,
-		Quality:  a.quality,
+		HasTrack:    a.player != nil,
+		Title:       a.title,
+		Path:        a.path,
+		CoverURL:    a.cover,
+		Playing:     a.playing,
+		Position:    a.position,
+		Duration:    a.duration,
+		Volume:      a.volume,
+		Rate:        a.rate,
+		Err:         a.errText,
+		Quality:     a.quality,
+		QualityPref: pref,
 	}
 }
 

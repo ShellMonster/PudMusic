@@ -68,6 +68,11 @@ type onlineTrack struct {
 	reopening bool
 	// quality 是当前这条流的音质徽章。换流之后要跟着更新。
 	quality string
+	// tier 是这条流的**档位 id**（B 站的 30280 这种）。
+	//
+	// 徽章文字是给人看的，比不了；换音质的时候要判「新取回来的还是不是同一档」，
+	// 判的是这个。同档就没必要打断正在放的歌。
+	tier bili.Quality
 }
 
 // streamKey 是取流缓存的键。
@@ -90,16 +95,150 @@ func (a *App) MountStreaming(s Streaming) {
 // StreamingMounted 报告在线播放挂上没有。
 func (a *App) StreamingMounted() bool { return a.streamingSnapshot() != nil }
 
-// SetAudioQuality 换默认音质偏好。**对已经在放的那一首不生效**——
-// 正在下的字节不会因为改了偏好而变。要立刻生效得重新取流，那是一次
-// 用户可见的中断，交给「换一档音质」那个动作去做，不在这里偷偷做。
+// SetAudioQuality 换音质偏好，并且**立刻生效**。
+//
+// 「立刻生效」指的是正在放的那首在线流：重新按新档取一条流，从**原来的
+// 播放位置**接着播。不需要切歌，也不需要重启应用——用户在播放条上点一下就
+// 换好了，那正是这个控件存在的意义。
+//
+// 三件事一起做：
+//
+//	偏好落到设置里（下次启动还在）
+//	缓存清掉（否则下一首还会拿旧地址）
+//	正在放的那首重新取流（这是「立刻」两个字的意思）
+//
+// 拿不到新档（要无损但没有大会员）时**不打断正在放的歌**：取流失败就把
+// 原因报到播放条上，原来那条流继续放着。用户为无损付了钱，静默降级比报错
+// 更糟，而报错不该以「歌突然停了」的形式出现。
 func (a *App) SetAudioQuality(q bili.AudioQuality) {
 	a.mu.Lock()
-	if a.streaming != nil {
-		a.streaming.Quality = q
+	if a.streaming == nil {
+		a.mu.Unlock()
+		return
 	}
+	a.streaming.Quality = q
 	a.streamCache = map[string]*bili.StreamRef{}
+	tr := a.online
+	pos, want, gen := a.position, a.wantPlay, a.onlineGen
+	wake := a.wake
 	a.mu.Unlock()
+
+	a.rememberAudioQuality(q)
+	if tr != nil {
+		a.restreamOnline(tr, q, pos, want, gen)
+	}
+	if wake != nil {
+		wake()
+	}
+}
+
+// rememberAudioQuality 把偏好落到设置里，下次启动还是这一档。
+//
+// 存不住不算错：设置层自己有入口能看到「这次改的设置存不住」，
+// 在这里拦一次只会让换音质这件事本身失败——那比不记住更糟。
+func (a *App) rememberAudioQuality(q bili.AudioQuality) {
+	pref := BiliToPref(q)
+	_, _ = a.UpdateSettings(func(s *Settings) { s.AudioQuality = pref })
+}
+
+// restreamOnline 按新档重新取流，从原来的播放位置接着播。
+//
+// 先判「其实没变」：用户点的那一档拿回来的还是同一档（B 站只给了 320K，
+// 用户从自动点「高音质」），那就什么都别做——为一个听不出区别的改动
+// 打断一首歌，比点了没反应更糟。
+//
+// 换流之后的处理和 `refreshOnlineNow` 一样：跳回原来的**播放位置**，那一步
+// 是「换流后从原进度继续」的全部意义。
+func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Duration, want bool, gen int) {
+	s := a.streamingSnapshot()
+	if s == nil {
+		a.failOnline(gen, errStreamingMissing)
+		return
+	}
+
+	go func() {
+		ref, err := a.resolve(context.Background(), s, tr.item, q)
+		if err != nil {
+			a.failQualitySwitch(gen, q, err)
+			return
+		}
+		if ref.Quality == tr.tier {
+			// 同一档：换过去听不出区别，不打断。
+			return
+		}
+		src, p, err := a.buildFromRef(context.Background(), s, tr.item, gen, ref)
+		if err != nil {
+			a.failQualitySwitch(gen, q, err)
+			return
+		}
+
+		a.mu.Lock()
+		if a.onlineGen != gen || a.closed || a.online != tr {
+			// 已经不是这一条在线流了：切歌了，或者出错那条路
+			// （`refreshOnlineNow`）已经换过一遍。装上去就是两份播放器
+			// 抢一个播放位置。
+			a.mu.Unlock()
+			p.Close()
+			return
+		}
+		if a.streaming == nil || a.streaming.Quality != q {
+			// 用户又换了一档，而这一次的结果还没回来：作废。
+			// 不看这一条的话，连点两下时先发后到的那个会赢——
+			// 界面上是 A 档，声音是 B 档。
+			a.mu.Unlock()
+			p.Close()
+			return
+		}
+		old := a.player
+		a.player = p
+		a.duration = p.Duration()
+		a.position = pos
+		a.quality = ref.Label
+		a.online = &onlineTrack{
+			item: tr.item, ref: ref, source: src,
+			quality: ref.Label, tier: ref.Quality,
+		}
+		a.reportedErr = nil
+		a.errText = ""
+		wake := a.wake
+		a.mu.Unlock()
+
+		if old != nil {
+			old.Close()
+		}
+		if pos > 0 && pos < p.Duration() {
+			p.Seek(pos)
+		}
+		if want {
+			p.Play()
+		}
+		if wake != nil {
+			wake()
+		}
+	}()
+}
+
+// failQualitySwitch 报一次换音质的失败，**只在用户要的还是这一档时报**。
+//
+// 为什么成功的那一半要判「用户是不是又换档了」（`restreamOnline` 里
+// `a.streaming.Quality != q` 那一条），失败的这一半也得判——不然会留下
+// 一句**错的、且不会自己清掉**的红字：
+//
+//	点「无损」→ 取流慢，700ms 后失败
+//	点「高音质」→ 立刻成功，errText 被清空
+//	700ms 后第一条的失败才回来 → 播放条上写着「这一首没有无损」
+//
+// 而歌正按高音质好好地放着。`errText` 只在下一次成功播放/换流时才清，
+// 那可能是几首歌之后的事了。
+func (a *App) failQualitySwitch(gen int, q bili.AudioQuality, err error) {
+	a.mu.Lock()
+	stale := a.onlineGen != gen || a.streaming == nil || a.streaming.Quality != q
+	a.mu.Unlock()
+	if stale {
+		// 被后来的选择取代了：这一次的结果没人要了，报出去只会误导。
+		return
+	}
+	a.failOnline(gen, err)
 }
 
 // AudioQuality 返回当前偏好。
@@ -110,6 +249,41 @@ func (a *App) AudioQuality() bili.AudioQuality {
 		return bili.AudioAuto
 	}
 	return a.streaming.Quality
+}
+
+// PrefToBili 把设置里那一档翻译成取流用的那一档。
+//
+// 设置里存的是字符串（落盘给人看、跨版本稳），取流那边要的是 B 站的编号。
+// 认不出来的值一律当「自动」——宁可给最好的那一档，也不要因为设置文件里
+// 多了一个字符就整条在线播放放不出来。
+func PrefToBili(q AudioQuality) bili.AudioQuality {
+	switch q {
+	case AudioQualityLossless:
+		return bili.AudioLossless
+	case AudioQualityHigh:
+		return bili.AudioHigh
+	case AudioQualityMedium:
+		return bili.AudioMedium
+	case AudioQualityLow:
+		return bili.AudioLow
+	}
+	return bili.AudioAuto
+}
+
+// BiliToPref 是 `PrefToBili` 的反方向：取流那边那一档在设置里写成什么。
+// 界面拿它把「当前偏好」和菜单里的项对上。
+func BiliToPref(q bili.AudioQuality) AudioQuality {
+	switch q {
+	case bili.AudioLossless:
+		return AudioQualityLossless
+	case bili.AudioHigh:
+		return AudioQualityHigh
+	case bili.AudioMedium:
+		return AudioQualityMedium
+	case bili.AudioLow:
+		return AudioQualityLow
+	}
+	return AudioQualityAuto
 }
 
 // streamingSnapshot 拿一份配好的取流零件。没挂或者缺零件时是 nil。
@@ -196,7 +370,7 @@ func (a *App) runOnline(it Item, gen int) {
 	a.duration = p.Duration()
 	a.wantPlay, a.playing = true, true
 	a.quality = ref.Label
-	a.online = &onlineTrack{item: it, ref: ref, source: src, quality: ref.Label}
+	a.online = &onlineTrack{item: it, ref: ref, source: src, quality: ref.Label, tier: ref.Quality}
 	a.reportedErr = nil
 	a.errText = ""
 	wake := a.wake
@@ -227,6 +401,24 @@ func (a *App) buildOnline(ctx context.Context, s *Streaming, it Item, gen int) (
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	src, p, err := a.buildFromRef(ctx, s, it, gen, ref)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return src, p, ref, nil
+}
+
+// buildFromRef 拿一条**已经取到的**流建播放链路，不往 App 上装。
+//
+// 为什么要从 buildOnline 里拆出来：换音质的时候要先看一眼「新取回来的还是
+// 不是同一档」，是同一档就不该打断正在放的歌——那一下判断必须在建播放器
+// 之前，而建播放链路本身要开网络连接（`audio.OpenStream` 会去 CDN 探容器）。
+//
+// 音量和倍率在这里**现读**（`buildOnline` 那段注释说了为什么）。三条建播放
+// 链路的路——开新歌、换流重开、换音质——都走这里，所以三处一处都不会漏。
+func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
+	ref *bili.StreamRef,
+) (*audio.StreamSource, *audio.Player, error) {
 	src, err := audio.NewStreamSource(audio.StreamSourceOptions{
 		URLs:      ref.URLs,
 		ExpiresAt: ref.ExpiresAt,
@@ -239,18 +431,18 @@ func (a *App) buildOnline(ctx context.Context, s *Streaming, it Item, gen int) (
 		OnRefresh: func(r *audio.StreamReply) { a.noteQuality(gen, r.Quality) },
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	p, err := audio.OpenStream(src)
 	if err != nil {
 		src.Close()
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	a.mu.Lock()
 	vol, rate := a.volume, a.rate
 	a.mu.Unlock()
 	p.SetVolume(vol).SetRate(rate)
-	return src, p, ref, nil
+	return src, p, nil
 }
 
 // resolve 拿到一条能播的流。
@@ -457,7 +649,8 @@ func (a *App) refreshOnlineNow() {
 		a.duration = p.Duration()
 		a.position = pos
 		a.quality = ref.Label
-		a.online = &onlineTrack{item: tr.item, ref: ref, source: src, quality: ref.Label, reopening: true}
+		a.online = &onlineTrack{item: tr.item, ref: ref, source: src, quality: ref.Label,
+			tier: ref.Quality, reopening: true}
 		a.reportedErr = nil
 		a.errText = ""
 		wake := a.wake

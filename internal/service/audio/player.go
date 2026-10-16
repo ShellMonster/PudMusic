@@ -15,8 +15,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/audio/flacdec"
@@ -53,23 +51,19 @@ type Player struct {
 
 // Open 打开一个本地音频文件。
 //
-// 按扩展名分流：.flac 走自带的 flacdec（它同时吃裸 FLAC 和 MP4 里的 FLAC），
-// 其余交给 MyGo 已注册的格式（WAV / MP3 / AIFF / AIFC / MP4 家族 / 裸 ADTS）。
+// ⚠️ **不按扩展名分流**：认容器的是 `openDecoder` 那一张注册表，和在线流用的是
+// 同一个函数。曾经这里有一句「扩展名是 .flac 就走 flacdec」，那是**第二套**
+// 认容器的方式，两套迟早漂移——而漂移的那一半正好是在线流（本地放得了、
+// 在线放不了，或者反过来）。按头几个字节认，两条路就没有分别了：
+// 裸 FLAC 认成 FLAC，MP4 里的 FLAC 认成 MP4（交给系统解码器）。
+//
 // 解码器持有的文件句柄挂在 Player 上，Close 会把它关掉。
 func Open(path string) (*Player, error) {
-	if strings.EqualFold(filepath.Ext(path), ".flac") {
-		d, err := flacdec.OpenFile(path)
-		if err != nil {
-			return nil, err
-		}
-		return New(d), nil
-	}
-
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	d, _, err := mygoaudio.NewDecoder(f)
+	d, _, err := openDecoder(f)
 	if err != nil {
 		f.Close()
 		if errors.Is(err, mygoaudio.ErrFormat) {
@@ -106,34 +100,48 @@ type CloserReadSeeker interface {
 // OpenStream 打开一条**已经在流动的字节流**并建播放器。
 //
 // 在线流走这条：源是一个 `*StreamSource`（边下边播、可取消），它是
-// `io.ReadSeeker`，所以本地文件那套解码链一个字都不用改——认容器靠的是
-// **头几个字节**（`containers.go` 的 `????ftyp` / `\xff??`），不是后缀。
-//
-// 这也顺带解决了在线流「是什么格式」的问题：B 站的无损流是裸 FLAC，
-// 没有 magic 能注册进 MyGo 的格式表，所以最后再试一次 `flacdec`。
-// 顺序不能反过来：MP4 里的 FLAC 头几个字节是 `ftyp`，应该走 extaf，
-// 交给 flacdec 反而会把它当裸 FLAC 处理。
+// `io.ReadSeeker`，所以本地文件那套解码链一个字都不用改——**用的就是
+// `Open` 那同一个 `openDecoder`**。「本地文件」和「B 站 CDN 的字节」在这一层
+// 没有区别，走的注册表也是同一张。
 func OpenStream(r CloserReadSeeker) (*Player, error) {
-	d, _, err := mygoaudio.NewDecoder(r)
+	d, _, err := openDecoder(r)
 	if err != nil {
-		if !errors.Is(err, mygoaudio.ErrFormat) {
-			return nil, err
-		}
-		// 认不出来。裸 FLAC 走 flacdec（它同时吃裸 FLAC 和 MP4 里的 FLAC）。
-		fd, ferr := flacdec.Open(r)
-		if ferr != nil {
-			// 两个都不认：报告**第一个**错。那是「走完全套格式表都没认出来」，
-			// 比 flacdec 的那句「不像 FLAC」有用得多——后者会让人以为
-			// 文件损坏，而它可能只是一段还没下到的字节。
-			return nil, err
-		}
-		d = fd
+		return nil, err
 	}
 	p := New(owned(d, r))
 	// ⚠️ 见 Player.closers 那段注释：这个必须由 Close 同步做，
 	// 等不到解码 goroutine 醒来（它正阻塞在 r 的 Read 上）。
 	p.closers = []io.Closer{r}
 	return p, nil
+}
+
+// openDecoder 是**唯一**认容器的地方：`Open`（本地文件）和 `OpenStream`
+//（在线流）都调它。返回值第二项是认出来的容器名，只作记录和给测试看。
+//
+// 两步，顺序不能反过来：
+//
+//  1. MyGo 的格式表（`containers.go` 注册的 `????ftyp` / `????styp` / `\xff??`，
+//     加上 MP3 / WAV / AIFF 各自包的注册副作用）。
+//  2. 认不出来就试 `flacdec`——B 站的无损流是**裸 FLAC**，而 MyGo 的表是对
+//     字面量做匹配的，没法给变长的 magic（`fLaC` + STREAMINFO）注册一条。
+//
+// 反过来的话，MP4 里的 FLAC（头几个字节是 `ftyp`）会被 flacdec 当裸 FLAC 处理。
+func openDecoder(r io.ReadSeeker) (mygoaudio.Decoder, string, error) {
+	d, name, err := mygoaudio.NewDecoder(r)
+	if err == nil {
+		return d, name, nil
+	}
+	if !errors.Is(err, mygoaudio.ErrFormat) {
+		return nil, "", err
+	}
+	fd, ferr := flacdec.Open(r)
+	if ferr != nil {
+		// 两个都不认：报告**第一个**错。那是「走完全套格式表都没认出来」，
+		// 比 flacdec 的那句「不像 FLAC」有用得多——后者会让人以为
+		// 文件损坏，而它可能只是一段还没下到的字节。
+		return nil, "", err
+	}
+	return fd, "flac", nil
 }
 
 // Err 返回这一路播放里的第一条错误，播完或只是暂停过的话是 nil。

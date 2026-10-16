@@ -188,8 +188,11 @@ func pickAudio(d *dashInfo, pref AudioQuality) (audioStream, Quality, bool) {
 		return audioStream{}, QualityUnknown, false
 	}
 
-	dolby := d.Dolby
-	hasDolby := dolby != nil && len(dolby.Audio) > 0
+	var dolby []audioStream
+	if d.Dolby != nil {
+		dolby = playable(d.Dolby.Audio)
+	}
+	hasDolby := len(dolby) > 0
 	hasFlac := d.Flac != nil && d.Flac.Audio != nil && d.Flac.Audio.BaseURL != ""
 
 	// 只要无损/自动：先看 flac，再看 dolby。
@@ -198,11 +201,11 @@ func pickAudio(d *dashInfo, pref AudioQuality) (audioStream, Quality, bool) {
 		return s, Quality(s.ID), true
 	}
 	if pref == AudioAuto && hasDolby {
-		s := bestOf(dolby.Audio)
+		s := bestOf(dolby)
 		return s, Quality(s.ID), true
 	}
 
-	list := sortStreams(d.Audio)
+	list := sortStreams(playable(d.Audio))
 	switch pref {
 	case AudioLossless:
 		// 到这里还没有无损，而无损是被点名要的：不给。
@@ -221,13 +224,71 @@ func pickAudio(d *dashInfo, pref AudioQuality) (audioStream, Quality, bool) {
 		}
 	}
 
-	// 点名的档位没有，退到最好的那一条（Biu 上游的 selectAudioByQuality
-	// 对 high 的处理：取 sortedList[0]）。
+	// 点名的档位没有：退到**不高于**它的那一档里最好的（Biu 上游对 high 的
+	// 处理是直接取 sortedList[0]，那对「省流量」是反的——用户为了少流量点了
+	// 64K，拿到 320K，流量翻五倍）。真的一个都没有（比如 B 站只给了 320K），
+	// 退到最低的那一档：宁可少要一档，也不要多给——用户可以再点一次提高。
+	//
+	// 自动档不走这条路：它的意思就是「能给的多好就多好」，直接拿最好的那条。
 	if len(list) == 0 {
 		return audioStream{}, QualityUnknown, false
 	}
-	s := list[0]
+	if pref == AudioAuto {
+		s := list[0]
+		return s, Quality(s.ID), true
+	}
+	s := closestTo(list, wantedTier(pref))
 	return s, Quality(s.ID), true
+}
+
+// wantedTier 是这一档偏好点名要的那一档。取不到时按它比高低。
+func wantedTier(pref AudioQuality) Quality {
+	switch pref {
+	case AudioHigh:
+		return QualityHigh320
+	case AudioMedium:
+		return QualityMid128
+	case AudioLow:
+		return QualityLow64
+	}
+	return QualityHigh320
+}
+
+// closestTo 在 list（已按从好到坏排好）里挑最接近 want 的那一档：
+// 先要不超过 want 的最好的，没有就挑最低的。
+//
+// 认不出来的档位（`qualityRank` 里没有的）排在 0，也就是比所有已知档都低——
+// 我们不知道它有多好，宁可当成最低。
+func closestTo(list []audioStream, want Quality) audioStream {
+	worst := list[len(list)-1]
+	for _, s := range list {
+		if qualityRank[Quality(s.ID)] <= qualityRank[want] {
+			return s
+		}
+	}
+	return worst
+}
+
+// playable 剔掉**有条目但没有地址**的流。
+//
+// ⚠️ 这里挡的不是「那一段是空的」。真机实测过没有大会员时 B 站回的是
+// `dash.dolby = {"type":0,"audio":[]}`、`dash.flac = null`——那种由
+// `len(dolby.Audio) > 0` 那一句就挡住了，`playable` 对它不起任何作用。
+//
+// 它挡的是**另一种形状**：条目在，`baseUrl` 是空的。自动档会把它当成「有杜比」
+// 挑中它，然后由 `refFrom` 报一句「这个稿件没有音频流」——**而 `dash.audio`
+// 里好好的 320K 就在旁边摆着**。用户看到的是「这一首放不了」，而真因是我们
+// 挑错了列表里的一条。
+//
+// 一条没有地址的流不是流，这一条不需要理由。
+func playable(in []audioStream) []audioStream {
+	out := make([]audioStream, 0, len(in))
+	for _, s := range in {
+		if s.BaseURL != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // sortStreams 把一批流按「码率高的优先，码率一样时音质 id 高的优先」排。
