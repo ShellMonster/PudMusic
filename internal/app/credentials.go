@@ -300,7 +300,44 @@ type Manager struct {
 }
 
 // NewManager 建一个管理器，还没登录。
-func NewManager(store Store) *Manager { return &Manager{store: store} }
+//
+// **store 传 nil 是允许的**，会换成一个「哪儿都存不住」的后端。
+//
+// 为什么允许：这个平台可能压根没有系统保护存储（非 macOS / Windows），
+// 或者符号绑不上。调用方拿到的 `NewSystemStore` 错误本来就是 nil 后端，
+// 而应用层要做的是「降级 + 在界面上明说」，不是**启动就崩**。
+//
+// 不在这里兜住的话，`Manager.Load` 第一次 `m.store.Load(ctx)` 就是
+// 空接口上的方法调用 —— SIGSEGV，整进程没了，而用户什么都没做错。
+func NewManager(store Store) *Manager {
+	if store == nil {
+		store = unavailableStore{}
+	}
+	return &Manager{store: store}
+}
+
+// unavailableStore 是「这个平台存不住凭据」的后端。
+//
+// 三个方法的行为不一样，是刻意的：
+//
+//	Load   ErrUnavailable —— 调用方据此知道「读不回来是因为没有后端」，
+//	                        而不是把它当成「没登录过」安静咽下去。
+//	Clear  nil           —— 本来就没有东西，清不清都一样。
+//	                        退登必须能成功，不然用户会被卡在登出状态。
+//	Save   ErrUnavailable —— 不假装存成功了。
+type unavailableStore struct{}
+
+func (unavailableStore) Name() string { return "none" }
+
+func (unavailableStore) Load(context.Context) (Session, error) {
+	return Session{}, fmt.Errorf("%w: 这个平台没有可用的凭据后端", ErrUnavailable)
+}
+
+func (unavailableStore) Save(context.Context, Session) error {
+	return fmt.Errorf("%w: 这个平台没有可用的凭据后端", ErrUnavailable)
+}
+
+func (unavailableStore) Clear(context.Context) error { return nil }
 
 // BackendName 是后端的名字，写诊断信息用。
 func (m *Manager) BackendName() string { return m.store.Name() }
