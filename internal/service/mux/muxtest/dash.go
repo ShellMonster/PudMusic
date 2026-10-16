@@ -51,11 +51,23 @@ type Spec struct {
 	timescale uint32
 	dur       uint32
 	samples   int
+	// keyframeBytes >0 时关键帧给这么多字节（默认 3000）。
+	//
+	// 存在的理由：一个真视频的关键帧是几百 KB，而默认那 3000 字节**永远
+	// 走不到**搬运代码里「采样比中转缓冲区大」那条分支——于是那条分支
+	// 没人测，而它错起来是一个切片越界 panic。
+	keyframeBytes uint32
 }
 
 // VideoSpec 造一条视频流：`samples` 个采样，30 fps。
 func VideoSpec(samples int) Spec {
-	return Spec{video: true, timescale: VideoTimescale, dur: VideoDur, samples: samples}
+	return VideoSpecWithKeyframe(samples, 3000)
+}
+
+// VideoSpecWithKeyframe 是 `VideoSpec` 加一个「关键帧多大」。
+func VideoSpecWithKeyframe(samples int, keyframeBytes uint32) Spec {
+	return Spec{video: true, timescale: VideoTimescale, dur: VideoDur,
+		samples: samples, keyframeBytes: keyframeBytes}
 }
 
 // AudioSpec 造一条音频流：`seconds` 秒的 AAC。
@@ -119,7 +131,7 @@ func (s Spec) SizeOf(i int) uint32 {
 		return 400
 	}
 	if s.SyncOf(i) {
-		return 3000
+		return s.keyframeBytes
 	}
 	return 500
 }

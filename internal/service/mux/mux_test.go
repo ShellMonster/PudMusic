@@ -539,3 +539,36 @@ func writePair(t *testing.T, spVideo, spAudio streamSpec) (videoPath, audioPath 
 	t.Helper()
 	return muxtest.Pair(t, spVideo, spAudio)
 }
+
+// TestMuxHandlesAKeyframeBiggerThanTheCopyBuffer 钉住「大关键帧」。
+//
+// 搬采样数据时用的是一块 256 KB 的中转缓冲区，而一个 4K I 帧轻松到
+// 几百 KB。按 `buf[:size]` 切而不先扩缓冲区，那一行就是一个切片越界
+// panic——而交织跑在**后台 goroutine 上**，那里 panic 会一路冒到下载
+// 队列的循环里去（`runOne` → `loop` 谁都不 recover），表现是
+// **所有下载一起停住而界面上没有任何报错**。
+func TestMuxHandlesAKeyframeBiggerThanTheCopyBuffer(t *testing.T) {
+	dir := t.TempDir()
+	const keyframe = 600 << 10 // 600 KB > 256 KB 的中转缓冲区
+	spV := muxtest.VideoSpecWithKeyframe(30, keyframe)
+	spA := muxtest.AudioSpec(1)
+	video, audio := writePair(t, spV, spA)
+	dst := filepath.Join(dir, "v.mp4")
+
+	res, err := Mux(video, audio, dst)
+	if err != nil {
+		t.Fatalf("交织：%v", err)
+	}
+	if res.VideoSamples != spV.Samples() {
+		t.Errorf("视频采样数是 %d，源是 %d", res.VideoSamples, spV.Samples())
+	}
+
+	// 不止「没崩」——那个大关键帧的字节要**一字不差**地搬过去。
+	raw, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("读产物：%v", err)
+	}
+	if off := bytes.Index(raw, spV.PayloadOf(0)); off < 0 {
+		t.Errorf("那个 %d 字节的关键帧在产物里找不到", keyframe)
+	}
+}
