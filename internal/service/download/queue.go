@@ -1,0 +1,626 @@
+// 下载队列：谁在队里、现在轮到谁、暂停和继续、进度怎么报出去。
+//
+// # 一次只下一首
+//
+// 分块并发是 3（`fetch.go` 的 `concurrency`），而**任务**之间是串行的。
+// B 站上游是「任务并发 3 + 每任务分块并发 5」（`download-queue.ts:23` 和
+// `download-core.ts:434`），最坏 15 个在飞的请求。这里取串行有两个理由：
+// 一个歌下到一半换下一首，串行下用户等的是这一首的下一次重试而不是
+// 「第三首先下完」；而且 3×3 条连接对一个音乐应用来说是多的。
+//
+// # 进度不在这层节流，在这层**转发**
+//
+// 真正的节流在 `noteProgress`（500 毫秒）。字节数是从 `fetch.go` 的读
+// 回调里报上来的——每收到一个 TCP 包一次，一个任务每秒几千次，全走一遍
+// 队列的锁是没有意义的。
+//
+// # 状态写在锁里，网络在锁外
+//
+// 所有对 `Task` 字段的改动都在 `m.mu` 下面，只有取流和下载在锁外。
+// 一次 `runOne` 全程都不拿锁——不然界面在下载期间一帧都画不出来。
+
+package download
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"os"
+	"sync"
+	"time"
+)
+
+// ErrNotFound 是队列里没有这一项。
+var ErrNotFound = errors.New("download: 队列里没有这一项")
+
+// ErrPaused 是「这一项是被用户停掉的」，不是失败。
+var ErrPaused = errors.New("download: 已暂停")
+
+// Resolver 每次开始或续传时问一句：「这一首现在从哪儿下？」
+//
+// 是**函数**不是接口：B 站客户端在 app 层，download 不该认识它（依赖
+// 单向，见 `spec.md` 的架构分层）。地址会过期（实测两小时），所以**每次**
+// 开下都要重新问，不能拿着上次的地址续。
+//
+// 传进去的是任务自己的身份：只给一个 ctx 的话，Manager 就得自己知道
+// 「现在下的是哪一首」，而那正是 app 层才有的知识（`Item` 到 bvid/cid 的
+// 对应关系）。`want` 里的 `Quality` 对新任务是 0（还不知道 B 站会给哪
+// 一档），调用方按自己的偏好去问就行，返回的 `Source.Quality` 是 B 站
+// 真正给的那一档。
+type Resolver func(ctx context.Context, want Identity) (*Source, error)
+
+// Options 是 Manager 的装配。
+type Options struct {
+	// Resolve 是问地址的那一句。必填。
+	Resolve Resolver
+	// Client 是拉字节用的 http.Client。
+	//
+	// ⚠️ 它**必须**是 `app.CredentialTransport.Client(nil)`：带凭据边界但
+	// **不挂 jar**。B 站 CDN 跟 B 站 API 不是同一个凭据域，把 SESSDATA
+	// 发给一台存音频文件的机器没有任何理由。Referer 照给，不给直接 403
+	// （真机验过）。
+	Client *http.Client
+	// Now 是取时刻（Unix 毫秒）。nil 用真时钟。给它是给测试用的。
+	Now func() int64
+}
+
+// Manager 是下载队列。
+type Manager struct {
+	mu      sync.Mutex
+	tasks   map[string]*Task
+	order   []string // 入队顺序。界面按它排，记录页不按时间排。
+	cancels map[string]context.CancelFunc
+	lastAt  map[string]time.Time // 进度上次报出去的时刻（节流用）
+
+	client  *http.Client
+	resolve Resolver
+	now     func() int64
+
+	// wake 是「状态变了，要一帧」的回调，由界面层装。
+	wake func()
+
+	ctx    context.Context
+	quit   context.CancelFunc
+	wakeup chan struct{}
+	wg     sync.WaitGroup
+
+	closed bool
+}
+
+// New 建一个队列。**必须在开窗口之前调**（它会读盘）。
+//
+// path 是队列文件；非空时会 Restore 一次。恢复出来的任务一律是**暂停**
+// （见 store.go 的文件头）。
+func New(opts Options, path string) (*Manager, error) {
+	if opts.Resolve == nil {
+		return nil, errors.New("download: 少一个 Resolve —— 没有它就问不出地址")
+	}
+	if opts.Client == nil {
+		return nil, errors.New("download: 少一个 Client")
+	}
+	now := opts.Now
+	if now == nil {
+		now = func() int64 { return time.Now().UnixMilli() }
+	}
+
+	ctx, quit := context.WithCancel(context.Background())
+	m := &Manager{
+		tasks:   map[string]*Task{},
+		cancels: map[string]context.CancelFunc{},
+		lastAt:  map[string]time.Time{},
+		client:  opts.Client,
+		resolve: opts.Resolve,
+		now:     now,
+		ctx:     ctx,
+		quit:    quit,
+		wakeup:  make(chan struct{}, 1),
+	}
+	if path != "" {
+		if err := m.Restore(path); err != nil {
+			return nil, err
+		}
+	}
+	m.wg.Add(1)
+	go m.loop()
+	return m, nil
+}
+
+// SetWake 装「状态变了，要一帧」。由界面层装一次。
+func (m *Manager) SetWake(fn func()) {
+	m.mu.Lock()
+	m.wake = fn
+	m.mu.Unlock()
+}
+
+// AddRequest 是入队要给的东西。
+type AddRequest struct {
+	Bvid  string
+	Cid   string
+	Title string
+	Cover string
+	// Dir 是落盘目录。空 = 用 Manager 建的目录。
+	Dir string
+	// Ext 是扩展名（带点）。空 = 先按 `.m4a` 记一个**临时**名，真正开始
+	// 下之前按取流地址上的后缀重算（那一刻还没有地址，见 `Task.Ext`）。
+	Ext string
+}
+
+// Enqueue 把一首加进队列，返回它的快照。
+//
+// **同一首已经在队列里就返回那一个**，不会新加一个。判重用的是
+// `<bvid>|<cid>`（`Task.ID`）——同一首歌点了两次下载，用户要的是
+// 「就一个」，而不是两个任务抢同一个文件。已经在队列里的那一项：
+//
+//	下完了   什么都不做，返回它
+//	排着/在下/暂停   什么都不做，返回它
+//	出错了   把它重新排上（这是「重试」）
+func (m *Manager) Enqueue(req AddRequest) (Snapshot, error) {
+	if req.Bvid == "" || req.Cid == "" {
+		// 不是网络错也不是 bug：调用方给错了参数，重试和排队都救不回来。
+		return Snapshot{}, fmt.Errorf("download: 这一首缺稿件 id 或分 P id（bvid=%q cid=%q）", req.Bvid, req.Cid)
+	}
+	id := TaskID(req.Bvid, req.Cid)
+
+	// 落盘名在锁**外面**算。`DestFor` 要 stat 目录（同名要一个一个往后避让，
+	// 最坏试 9999 次），那是阻塞 IO——占着锁算的话，界面在这期间读队列
+	// 快照会跟着卡住，而入队是在界面线程上调的。
+	ext := extOr(req.Ext)
+	dest := DestFor(req.Dir, req.Title, ext, id)
+
+	m.mu.Lock()
+	if t := m.tasks[id]; t != nil {
+		retry := t.Status == StatusError
+		snap := SnapshotOf(t)
+		if retry {
+			t.Status = StatusQueued
+			t.Err = ""
+			snap = SnapshotOf(t)
+		}
+		m.mu.Unlock()
+		if retry {
+			m.kick()
+		} else {
+			m.notify()
+		}
+		return snap, nil
+	}
+
+	t := &Task{
+		ID:       id,
+		Title:    req.Title,
+		Cover:    req.Cover,
+		Identity: Identity{Bvid: req.Bvid, Cid: req.Cid},
+		Dest:     dest,
+		Ext:      ext,
+		Status:   StatusQueued,
+		AddedAt:  m.now(),
+	}
+	m.tasks[id] = t
+	m.order = append(m.order, id)
+	snap := SnapshotOf(t)
+	m.mu.Unlock()
+
+	m.kick()
+	return snap, nil
+}
+
+// Pause 停下一项。已经停着的什么都不做（可以重复调）。
+func (m *Manager) Pause(id string) error {
+	m.mu.Lock()
+	t := m.tasks[id]
+	if t == nil {
+		m.mu.Unlock()
+		return ErrNotFound
+	}
+	if !t.Status.CanPause() {
+		m.mu.Unlock()
+		return nil
+	}
+	// 状态先落成暂停：不落的话这一项在队列里还是 running，而暂停是
+	// **用户已经看到的意图**，它不该等到网络真的停下来才成立。
+	t.Status = StatusPaused
+	cancel := m.cancels[id]
+	m.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	m.notify()
+	return nil
+}
+
+// Resume 接着下一项。暂停的和出错的都归它（「继续」和「重试」是同一个动作）。
+func (m *Manager) Resume(id string) error {
+	m.mu.Lock()
+	t := m.tasks[id]
+	if t == nil {
+		m.mu.Unlock()
+		return ErrNotFound
+	}
+	if t.Status == StatusDone || t.Status.Running() {
+		m.mu.Unlock()
+		return nil
+	}
+	t.Status = StatusQueued
+	t.Err = ""
+	m.mu.Unlock()
+
+	m.kick()
+	return nil
+}
+
+// Remove 从队列里拿掉一项，并删掉它的半成品。
+//
+// **正在下的先取消再删**：不取消的话那个 goroutine 会在删完之后继续往
+// 一个已经不存在的任务里写，而那个任务的下一次落盘会凭空冒出一个
+// `.part` 文件——用户已经删掉的东西还在下载目录里躺着。
+func (m *Manager) Remove(id string) error {
+	m.mu.Lock()
+	t := m.tasks[id]
+	if t == nil {
+		m.mu.Unlock()
+		return ErrNotFound
+	}
+	cancel := m.cancels[id]
+	m.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+		// 等它真的停下来再删文件：不等的话删完之后那个 worker 还可能
+		// 往这个路径上写几个字节（fd 还开着，POSIX 语义），于是删掉的
+		// 那个 inode 上又多出几百 KB 的垃圾，而目录里干干净净——用户
+		// 看不到，磁盘也释放不掉。
+		m.waitIdle(id)
+	}
+
+	m.mu.Lock()
+	delete(m.tasks, id)
+	m.order = drop(m.order, id)
+	dest := t.Dest
+	m.mu.Unlock()
+
+	// 半成品删掉。已经下完的（真的那首歌）留着——用户删的是队列里这一
+	// 项，不是硬盘上那首歌。
+	_ = os.Remove(partPath(dest))
+	m.notify()
+	return nil
+}
+
+// Clear 清空队列并停掉所有在下的。已下完的文件留着。
+func (m *Manager) Clear() {
+	m.mu.Lock()
+	ids := append([]string(nil), m.order...)
+	cancels := make([]context.CancelFunc, 0, len(m.cancels))
+	for _, c := range m.cancels {
+		cancels = append(cancels, c)
+	}
+	dests := make([]string, 0, len(m.order))
+	for _, id := range ids {
+		if t := m.tasks[id]; t != nil {
+			dests = append(dests, t.Dest)
+		}
+	}
+	m.mu.Unlock()
+
+	for _, c := range cancels {
+		c()
+	}
+	for _, id := range ids {
+		m.waitIdle(id)
+	}
+
+	m.mu.Lock()
+	m.tasks = map[string]*Task{}
+	m.order = nil
+	m.cancels = map[string]context.CancelFunc{}
+	m.lastAt = map[string]time.Time{}
+	m.mu.Unlock()
+
+	for _, d := range dests {
+		_ = os.Remove(partPath(d))
+	}
+	m.notify()
+}
+
+// Snapshots 返回队列的一份拷贝，按入队顺序。改它不影响队列。
+func (m *Manager) Snapshots() []Snapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]Snapshot, 0, len(m.order))
+	for _, id := range m.order {
+		if t := m.tasks[id]; t != nil {
+			out = append(out, SnapshotOf(t))
+		}
+	}
+	return out
+}
+
+// Get 返回一项的快照。
+func (m *Manager) Get(id string) (Snapshot, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t := m.tasks[id]
+	if t == nil {
+		return Snapshot{}, false
+	}
+	return SnapshotOf(t), true
+}
+
+// Close 停掉所有在下的、落一次盘。可以重复调。
+//
+// **必须调**：它是退出前唯一一次把队列写下来的机会，而队列文件是
+// 「下到哪儿了」的全部依据。不调的话用户下次开应用看到的是空队列，
+// 盘上还有一堆 `.part`。
+func (m *Manager) Close(path string) error {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return nil
+	}
+	m.closed = true
+	for _, c := range m.cancels {
+		c()
+	}
+	m.mu.Unlock()
+
+	m.quit()
+	m.wg.Wait()
+
+	if path == "" {
+		return nil
+	}
+	return m.Save(path)
+}
+
+// ---- 后台那条线 ----
+
+// loop 一次下一首，下完接着下一首。
+func (m *Manager) loop() {
+	defer m.wg.Done()
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-m.wakeup:
+		}
+		for {
+			id, ok := m.nextQueued()
+			if !ok {
+				break
+			}
+			m.runOne(id)
+		}
+	}
+}
+
+// kick 叫后台那条线醒来。
+func (m *Manager) kick() {
+	select {
+	case m.wakeup <- struct{}{}:
+	default: // 已经在等着了
+	}
+	m.notify()
+}
+
+// notify 叫界面要一帧。
+//
+// ⚠️ 铁律三的后半段：**只投递不唤醒，界面永远停在旧帧**。这里的 wake
+// 由界面层装（`ui.Services.Invalidate`），而逐窗口的通知是界面层的事。
+func (m *Manager) notify() {
+	m.mu.Lock()
+	wake := m.wake
+	m.mu.Unlock()
+	if wake != nil {
+		wake()
+	}
+}
+
+// nextQueued 找下一个该下的。**先来先服务**。
+func (m *Manager) nextQueued() (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, id := range m.order {
+		if t := m.tasks[id]; t != nil && t.Status == StatusQueued {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+// runOne 下完一首。
+func (m *Manager) runOne(id string) {
+	m.mu.Lock()
+	t := m.tasks[id]
+	if t == nil || t.Status != StatusQueued || m.closed {
+		m.mu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(m.ctx)
+	t.Status = StatusRunning
+	t.Err = ""
+	m.cancels[id] = cancel
+	wake := m.wake
+	m.mu.Unlock()
+	if wake != nil {
+		wake()
+	}
+
+	err := m.run(ctx, id)
+	cancel()
+
+	m.mu.Lock()
+	delete(m.cancels, id)
+	if t := m.tasks[id]; t != nil {
+		switch {
+		case err == nil:
+			t.Status = StatusDone
+			t.Err = ""
+		case errors.Is(err, context.Canceled), errors.Is(err, ErrPaused):
+			// 暂停 / 应用退出：这不是失败，用户还要接着下。
+			if t.Status == StatusRunning {
+				t.Status = StatusPaused
+			}
+		default:
+			t.Status = StatusError
+			t.Err = err.Error()
+		}
+	}
+	wake = m.wake
+	m.mu.Unlock()
+	if wake != nil {
+		wake()
+	}
+}
+
+// waitIdle 等一个任务真的停下来（取消之后网络要断开、goroutine 要退出）。
+func (m *Manager) waitIdle(id string) {
+	// 有上限：网络层的取消是即时的，但真机上「服务器不回也不断」的
+	// 那种连接能拖十几秒。不能让界面上的「删除」按钮卡那么久。
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		m.mu.Lock()
+		_, running := m.cancels[id]
+		m.mu.Unlock()
+		if !running {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// ---- 锁内的小工具（给 fetch.go 用）----
+
+// ⚠️ 下面这几个「读一项」的小工具**每一个都自己拿锁**，不是「调用方拿好
+// 锁了再用」：调用点分散在 `fetch.go` 的各处，而 `m.tasks` 这张 map 会被
+// `Enqueue` / `Remove` / `Clear` 改（它们跑在别的 goroutine 上）。
+// `run` 是在 `runOne` 放开锁之后才进来的，那时候直接查 map 就是一次数据
+// 竞争——而它不一定每次都被 `-race` 抓到（要正好撞上）。
+
+// destOf 拿一项的落盘路径。
+func (m *Manager) destOf(id string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if t := m.tasks[id]; t != nil {
+		return t.Dest
+	}
+	return ""
+}
+
+// identityOf 拿一项的资源身份，取流要用。
+func (m *Manager) identityOf(id string) (Identity, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t := m.tasks[id]
+	if t == nil {
+		return Identity{}, false
+	}
+	return t.Identity, true
+}
+
+// pendingChunks 返回还没下完的分块下标。
+func (m *Manager) pendingChunks(id string) []int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t := m.tasks[id]
+	if t == nil {
+		return nil
+	}
+	done := make(map[int]bool, len(t.Chunks))
+	for _, i := range t.Chunks {
+		done[i] = true
+	}
+	n := t.totalChunks()
+	out := make([]int, 0, n)
+	for i := range n {
+		if !done[i] {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// chunkBounds 给一块的闭区间。第二个返回值是「这一块现在还算不算数」。
+func (m *Manager) chunkBounds(id string, i int) (int64, int64, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t := m.tasks[id]
+	if t == nil {
+		return 0, 0, false
+	}
+	return t.chunkRange(i)
+}
+
+// finishChunk 记下一块下完了，并报一次进度。
+func (m *Manager) finishChunk(id string, i int) {
+	m.mu.Lock()
+	t := m.tasks[id]
+	if t == nil {
+		m.mu.Unlock()
+		return
+	}
+	t.markChunk(i)
+	m.mu.Unlock()
+	m.noteProgress(id)
+}
+
+// noteProgress 报一次进度，**节流到 500 毫秒一次**。
+//
+// 字节数是从读回调里报上来的（每收到一个 TCP 包一次，一个任务每秒几千
+// 次）。不节流的话界面每秒要重画几千次，画出来的是同一帧。
+func (m *Manager) noteProgress(id string) {
+	m.mu.Lock()
+	t := m.tasks[id]
+	if t == nil {
+		m.mu.Unlock()
+		return
+	}
+	now := time.Now()
+	if now.Sub(m.lastAt[id]) < progressInterval {
+		m.mu.Unlock()
+		return
+	}
+	m.lastAt[id] = now
+	wake := m.wake
+	m.mu.Unlock()
+	if wake != nil {
+		wake()
+	}
+}
+
+// extOr 把空的扩展名换成 `.m4a`。
+//
+// 这是**入队时那个临时名**用的猜测：B 站绝大多数音频是 AAC 装在 MP4 里，
+// 而 B 站上游的 `getAudioExt()`（`download-core.ts:350`）也是这么兜的。
+// 它在真正开始下之前会被地址上的后缀覆盖，所以猜错也不会留在盘上。
+func extOr(ext string) string {
+	if ext == "" {
+		return ".m4a"
+	}
+	return ext
+}
+
+// partPath 是半成品的路径。
+//
+// **在最终文件名后面加 `.part`，下完才改名**。理由有两条，缺一条都不够：
+//
+//	用户在自己的下载目录里看到的是**完整的一首**。预分配到完整长度的
+//	做法（B 站上游的思路）会让一个半成品以完整大小躺在那里，用户点开
+//	就是「打不开」——而歌名、图标、大小全都对，看起来像一个坏文件。
+//	改名是原子的（同一个目录），所以中途退出也不会出现「两个歌名」。
+//
+//	它和最终文件在**同一个目录**，所以 rename 不跨设备。放到临时目录的
+//	话，最后那一下 rename 可能变成一次几百兆的拷贝，而那正好是用户
+//	快要看到「下完了」的那一刻。
+func partPath(dest string) string { return dest + ".part" }
+
+// drop 从 ids 里去掉一个。
+func drop(ids []string, id string) []string {
+	out := ids[:0]
+	for _, x := range ids {
+		if x != id {
+			out = append(out, x)
+		}
+	}
+	return out
+}
