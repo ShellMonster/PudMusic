@@ -41,7 +41,8 @@ import (
 const (
 	securityPath    = "/System/Library/Frameworks/Security.framework/Security"
 	coreFoundation  = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
-	securityDepNote = "这两个框架都是系统自带的，装应用时不用一起带。"
+	libcPath        = "/usr/lib/libSystem.B.dylib"
+	securityDepNote = "这几个框架都是系统自带的，装应用时不用一起带。"
 )
 
 // OSStatus 是 Security.framework 的返回码。
@@ -110,14 +111,27 @@ var (
 
 	secKeychainItemDelete func(item unsafe.Pointer) OSStatus
 
-	// cfRelease 归还 FindGenericPassword 给的两样东西：那块密码数据和
-	// itemRef（SecKeychainItemRef 是个 +1 的 CoreFoundation 对象引用）。
+	// cfRelease 归还 itemRef（SecKeychainItemRef 是个 +1 的
+	// CoreFoundation 对象引用）。
 	//
 	// ⚠️ 老的 SecKeychainFreeContent 在当前 macOS 上**已经被移出**导出表
 	// （实测 dlsym 找不到），Apple 现在让用 CFRelease 还。写死旧名字的
 	// 后果是整个后端在 init 阶段就 loadErr，于是「钥匙串不可用」变成
 	// 一个没人查得出来的静默降级。
 	cfRelease func(cf unsafe.Pointer)
+
+	// libcFree 归还 FindGenericPassword 给的那块**密码数据**。
+	//
+	// ⚠️ **它不是 CoreFoundation 对象**，是 malloc 出来的裸内存。
+	// 对它调 CFRelease 会直接 SIGTRAP（实测：整进程带栈挂掉，
+	// 栈顶就停在 CFRelease 那一帧）。
+	//
+	// 文档两处自相矛盾：老文档说用 SecKeychainFreeContent 释放，
+	// 新文档说改用 CFRelease —— 但后者对这块数据不成立。
+	// 所以这里按**它实际上是什么**来还：malloc 出来的就用 free。
+	// itemRef 才是 CF 对象，走 CFRelease。**两个别弄反**，
+	// 弄反了不是报错，是 SIGTRAP。
+	libcFree func(p unsafe.Pointer)
 )
 
 func init() {
@@ -156,6 +170,16 @@ func bindSystemSymbols() error {
 		return fmt.Errorf("app: CFRelease: %w", err)
 	}
 	purego.RegisterFunc(&cfRelease, addr)
+
+	libc, err := purego.Dlopen(libcPath, purego.RTLD_LAZY|purego.RTLD_GLOBAL)
+	if err != nil {
+		return fmt.Errorf("app: opening libSystem: %w", err)
+	}
+	addr, err = purego.Dlsym(libc, "free")
+	if err != nil {
+		return fmt.Errorf("app: free: %w", err)
+	}
+	purego.RegisterFunc(&libcFree, addr)
 	return nil
 }
 
@@ -219,23 +243,49 @@ func (k *keychainStore) Save(_ context.Context, s Session) error {
 		}
 		return nil
 	}
+	return k.addAndVerify(blob)
+}
 
-	status := secKeychainAddGenericPassword(0,
+// addAndVerify 新建这一项，然后**读回来核对**。
+//
+// # 为什么不看 SecKeychainAddGenericPassword 的返回值
+//
+// 它的返回类型是 `OSStatus *`（一个**指针**），而 purego 对指针类型的
+// 返回值给的是寄存器里的原始数值——成功时那是 0，在 Go 里就是 nil。
+//
+// 于是写「if *status == errSecSuccess」的后果是：**每次成功的新建都被
+// 当成失败**，表现为「第一次扫码登录存不进去，第二次（走改内容的路径）
+// 又好了」。实测就是这个。
+//
+// 与其猜 purego 对指针返回怎么处理，不如**不依赖那个返回值**：写完直接
+// 读回来比对。读回来的才是事实——「我以为写进去了」不算数。
+func (k *keychainStore) addAndVerify(blob []byte) error {
+	secKeychainAddGenericPassword(0,
 		uint32(len(k.service)), cstr(k.service),
 		uint32(len(k.account)), cstr(k.account),
 		uint32(len(blob)), &blob[0], nil)
-	if status == nil {
-		return fmt.Errorf("%w: 钥匙串写入了，但没有返回状态码", ErrBackend)
+
+	got, found, err := k.readPassword()
+	if err != nil {
+		return err
 	}
-	switch *status {
-	case errSecSuccess:
-		return nil
-	case errSecDuplicateItem:
-		// 并发：刚有人加上了同一项。退回去改内容。
-		return k.Save(context.Background(), s)
-	default:
-		return keychainError("写入", *status)
+	switch {
+	case !found:
+		// 可能是并发：刚有人加上了同一项（errSecDuplicateItem）。
+		// 退回去走改内容那条路。
+		item, exists, err := k.findItem()
+		if err == nil && exists {
+			defer cfRelease(item)
+			if status := secKeychainItemModifyContent(item, 0, uint32(len(blob)), &blob[0]); status != errSecSuccess {
+				return keychainError("改写", status)
+			}
+			return nil
+		}
+		return fmt.Errorf("%w: 写进钥匙串之后读不回来", ErrBackend)
+	case string(got) != string(blob):
+		return fmt.Errorf("%w: 写进钥匙串的内容跟写进去的不一样", ErrBackend)
 	}
+	return nil
 }
 
 // Clear 清掉这一项。没有就返回 nil——退登按钮连点两次不能报错。
@@ -247,7 +297,7 @@ func (k *keychainStore) Clear(context.Context) error {
 	if !found {
 		return nil
 	}
-	defer cfRelease(unsafe.Pointer(item))
+	defer cfRelease(item)
 	if status := secKeychainItemDelete(item); status != errSecSuccess {
 		return keychainError("删除", status)
 	}
@@ -280,10 +330,10 @@ func (k *keychainStore) readPassword() ([]byte, bool, error) {
 	// 而且这种泄漏在测试里完全看不见。
 	defer func() {
 		if data != nil {
-			cfRelease(data)
+			libcFree(data) // malloc 的裸内存，见 libcFree 的注释
 		}
 		if item != nil {
-			cfRelease(item)
+			cfRelease(item) // CF 对象
 		}
 	}()
 	if data == nil || length == 0 {
@@ -315,7 +365,7 @@ func (k *keychainStore) findItem() (unsafe.Pointer, bool, error) {
 		return nil, false, keychainError("查找", status)
 	}
 	if data != nil {
-		cfRelease(data)
+		libcFree(data)
 	}
 	if item == nil {
 		return nil, false, nil
