@@ -90,22 +90,41 @@ func TestInFlightTasksAreSavedAsPaused(t *testing.T) {
 //
 // 一开窗就发几十个请求，表现为「一启动就卡」和一堆红字——而应用启动时
 // 网络可能还没起来、机器可能根本没有网。自动续是界面层的决定。
+//
+// ⚠️ 断的是「一个请求都没发出去」，不是「某一项的状态是什么」——
+// 「已完成」的那些重开之后本来就还是已完成（那是另一个用例断的），
+// 拿它当这一条的样本会把两件事搅在一起。
 func TestRestoredTasksDoNotStartOnTheirOwn(t *testing.T) {
-	h := newHarness(t, 1024, 30280)
+	const size = 3 * chunkSize
+	h := newHarness(t, size, 30280)
 	id := TaskID(bvid, cid)
-	if _, err := h.m.Enqueue(AddRequest{Bvid: bvid, Cid: cid, Title: "歌", Dir: h.dir}); err != nil {
-		t.Fatal(err)
-	}
-	waitStatus(t, h.m, id, StatusDone)
+	dest := DestFor(h.dir, "半首", ".m4a", id)
 
-	h2 := h.reopen()                   // 真实的退出流程：退出前存一次，再读回来
+	// 造一个「下了一半、退出了」的世界。
+	writePart(t, h.cdn, partPath(dest), 0, size)
+	h.saveQueue(t, map[string]*Task{
+		id: {
+			ID: id, Title: "半首", Dest: dest,
+			Identity: Identity{Bvid: bvid, Cid: cid, Quality: 30280, Length: size},
+			Chunks:   []int{0}, Status: StatusRunning, AddedAt: 1,
+		},
+	})
+
+	h2 := h.restart()
 	time.Sleep(300 * time.Millisecond) // 给后台那条线一点时间「要是它会开下」
 
-	if s, _ := h2.m.Get(id); s.Status != StatusPaused {
-		t.Fatalf("恢复出来是 %q，它自己动起来了", s.Status)
+	if got := h2.cdn.requests(); len(got) != 0 {
+		t.Fatalf("恢复之后自己开下了，发了 %d 发请求：%v", len(got), got)
 	}
-	if got := len(h.cdn.requests()); got != 0 {
-		t.Fatalf("恢复之后又发了 %d 发请求", got)
+	got, ok := h2.m.Get(id)
+	if !ok {
+		t.Fatal("重开后队列里没有这一项")
+	}
+	if got.Status != StatusPaused {
+		t.Fatalf("恢复出来是 %q", got.Status)
+	}
+	if got.Done != chunkSize {
+		t.Fatalf("恢复出来的进度是 %d 字节", got.Done)
 	}
 }
 

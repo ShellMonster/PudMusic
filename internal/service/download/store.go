@@ -114,9 +114,20 @@ func (m *Manager) Restore(path string) error {
 		if !keepOnRestore(t) {
 			continue
 		}
-		// 恢复出来的**一律是暂停**。原状态是 running 的那些，重启之后
-		// 那个在飞的请求早就不在了；记成 running 会让界面上永远转圈。
-		t.Status = StatusPaused
+		// ⚠️ **只把「在飞的」改成暂停**，不是一律改。
+		//
+		// `running` / `queued`：重启之后那个在飞的请求早就不在了，记成
+		// running 会让界面上永远转圈。
+		//
+		// `done`：歌已经在盘上了。改成暂停的话，记录页上每一行都写着
+		//「暂停」，而那一行上唯一能按的「继续」会把**已经下完的整首歌**
+		//重新下一遍（`prepare` 看到 `.part` 已经不在了 → `resetChunks`）。
+		// 下完了就是下完了，它不需要「继续」。
+		//
+		// `paused` / `error`：本来就不是在飞的，原样带回来。
+		if t.Status == StatusRunning || t.Status == StatusQueued {
+			t.Status = StatusPaused
+		}
 		t.Err = ""
 		if m.tasks == nil {
 			m.tasks = map[string]*Task{}
