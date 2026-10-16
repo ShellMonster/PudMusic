@@ -22,7 +22,7 @@ import (
 // 出处：biu/shared/settings/app-settings.ts:1-31。
 //
 // 这张表是「拿一份 Biu 的设置导出比对键名」这条验收的机器版本：写出来的
-// JSON 必须正好是这些键，一个不多一个不少。少一个 = 用户来回切应用会丢设置。
+// JSON 至少要正好是这些键，一个不多一个不少。少一个 = 用户来回切应用会丢设置。
 var biuKeys = []string{
 	"autoStart",
 	"closeWindowOption",
@@ -46,6 +46,22 @@ var biuKeys = []string{
 	"localMusicDirs",
 }
 
+// ourOwnKeys 是**我们加的、Biu 没有的键**，一共这一个。
+//
+// 加它是有理由的：侧栏收藏夹的拖拽顺序要存，Biu 把这一份单独放在另一个
+// store 里（zustand persist 的 `"favorites-order"`，
+// `biu/src/store/favorite.ts:157-163`），不在 app-settings.json 里。
+// 我们不另开一份文件，是因为设置存储已经把 schema 版本、原子写、退出前
+// flush、只读保护做好了，另开一份等于把这些重造一遍，还少了只读保护。
+//
+// 代价说清楚：多这一个键，Biu 那边读到我们的文件会当它是不认识的键。
+// 会不会把它弄丢取决于 electron-store 的合并行为——最坏的情况也只是
+// **收藏夹的顺序弹回 Biu 给的那个顺序**，Biu 自己的设置一个键都没丢。
+// 这条取舍记在这里，想改主意时先看这一段。
+var ourOwnKeys = []string{
+	"sideMenuCollectionOrder",
+}
+
 // TestSettingsKeysMatchBiu 逐字比对键名。
 func TestSettingsKeysMatchBiu(t *testing.T) {
 	b, err := json.Marshal(app.DefaultSettings("/Users/x/Downloads"))
@@ -63,8 +79,17 @@ func TestSettingsKeysMatchBiu(t *testing.T) {
 		}
 		delete(got, k)
 	}
+	// 我们自己加的那几个（见 ourOwnKeys 的说明）是允许的，先摘掉再查剩下
+	// 的——不加这一步的话，「多了一个键」这条断言会一直红，而它本来防的是
+	// 「有人不小心加了键忘了想清楚」。
+	for _, k := range ourOwnKeys {
+		if _, ok := got[k]; !ok {
+			t.Errorf("少了自己加的键 %q", k)
+		}
+		delete(got, k)
+	}
 	for k := range got {
-		t.Errorf("多了一个 Biu 没有的键 %q", k)
+		t.Errorf("多了一个没人认领的键 %q", k)
 	}
 }
 
@@ -98,6 +123,22 @@ func TestNestedKeysMatchBiu(t *testing.T) {
 	for _, k := range []string{"created", "collected"} {
 		if _, ok := folded[k]; !ok {
 			t.Errorf("sideMenuCollectionFolded 少了键 %q", k)
+		}
+	}
+
+	o, err := json.Marshal(s.SideMenuCollectionOrder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order map[string]json.RawMessage
+	if err := json.Unmarshal(o, &order); err != nil {
+		t.Fatal(err)
+	}
+	// 两组的键名和 sideMenuCollectionFolded 一样，是刻意的：Biu 那边也是
+	// `{created, collected}` 摆在一处（favorite.ts:157-163）。
+	for _, k := range []string{"created", "collected"} {
+		if _, ok := order[k]; !ok {
+			t.Errorf("sideMenuCollectionOrder 少了键 %q", k)
 		}
 	}
 }
@@ -135,8 +176,9 @@ func TestEnvelopeMatchesBiuShape(t *testing.T) {
 	if err := json.Unmarshal(f.AppSettings, &keys); err != nil {
 		t.Fatal(err)
 	}
-	if len(keys) != len(biuKeys) {
-		t.Errorf("appSettings 里 %d 个键，want %d", len(keys), len(biuKeys))
+	if len(keys) != len(biuKeys)+len(ourOwnKeys) {
+		t.Errorf("appSettings 里 %d 个键，want %d（Biu 的 %d + 我们自己加的 %d）",
+			len(keys), len(biuKeys)+len(ourOwnKeys), len(biuKeys), len(ourOwnKeys))
 	}
 }
 

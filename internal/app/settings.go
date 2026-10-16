@@ -77,6 +77,36 @@ const (
 	MaxBorderRadius = 24.0
 )
 
+// 侧栏宽度的三个数，抄 Biu `src/layout/side/index.tsx:15-17`：
+//
+//	COLLAPSED_WIDTH = 72    折叠后多宽
+//	MIN_WIDTH       = 160   展开时的下限，拖到它下面就折叠
+//	MAX_WIDTH       = 480   展开时的上限
+//
+// 放在这一层而不是界面层，是因为 normalize 也要用：设置文件是用户能直接编辑的，
+// 一个 `sideMenuWidth: 99999` 不该一路穿到画界面的那一行。
+const (
+	CollapsedSideMenuWidth = 72.0
+	MinSideMenuWidth       = 160.0
+	MaxSideMenuWidth       = 480.0
+	DefaultSideMenuWidth   = 200.0
+)
+
+// ClampSideMenuWidth 把一个宽度拉进 [MinSideMenuWidth, MaxSideMenuWidth]。
+//
+// 拖动过程中**不要**用它：拖到 100 时画出来的就该是 100（折叠中的样子），
+// 只有落盘的值和重读设置时才钳。Biu 也是这个分工（`computeWidth` 里的
+// widthForView / widthToPersist 分开）。
+func ClampSideMenuWidth(v float64) float64 {
+	if v < MinSideMenuWidth {
+		return MinSideMenuWidth
+	}
+	if v > MaxSideMenuWidth {
+		return MaxSideMenuWidth
+	}
+	return v
+}
+
 // 主题档位。Biu 的 `ThemeMode = "system" | "light" | "dark"`。
 type ThemeMode string
 
@@ -147,10 +177,51 @@ type ProxySettings struct {
 	Password string    `json:"password"`
 }
 
-// SideMenuCollectionFolded 是侧栏两组收藏的折叠状态。
+// SideMenuCollectionFolded 是侧栏两组收藏的折叠状态。键名照 Biu 的
+// `sideMenuCollectionFolded`（`biu/shared/settings/app-settings.ts:25`）。
 type SideMenuCollectionFolded struct {
 	Created   bool `json:"created"`
 	Collected bool `json:"collected"`
+}
+
+// SideMenuCollectionOrder 是侧栏两组收藏的**顺序**：每组一条 ID 序列。
+//
+// ## 这是唯一一个我们加的、Biu 没有的键
+//
+// Biu 把这个顺序单独存在另一个 store 里（zustand persist 的
+// `"favorites-order"`，`{createdOrder, collectedOrder}`，
+// `biu/src/store/favorite.ts:157-163`），不在 app-settings.json 里。
+// 我们放进设置，是因为验收要求「顺序落盘」，而设置存储已经把 schema 版本、
+// 原子写、退出前 flush、只读保护这几件都做好了（见 settings.go），
+// 另开一份文件就等于把这些重造一遍——重造出来的那份还少了只读保护：
+// 设置来自更新的版本时，这一格照样会被旧版本按旧语义改写。
+//
+// 分工照 Biu：**条目不存，顺序才存**。条目每次从接口拉，存一份本地副本
+// 只会和接口对不上；顺序是用户拖出来的，接口不返回，只能存。
+//
+// 加键不用涨 SchemaVersion（见 SchemaVersion 的注释：只加新的可选键不用涨），
+// 读不到就是空序列，等于「还没排过序」。
+type SideMenuCollectionOrder struct {
+	Created   []int64 `json:"created"`
+	Collected []int64 `json:"collected"`
+}
+
+// list 报 g 这一组存下的顺序。
+func (o SideMenuCollectionOrder) list(g FavoriteGroup) []int64 {
+	if g == FavoritesCollected {
+		return o.Collected
+	}
+	return o.Created
+}
+
+// setList 把 g 这一组的顺序写成 v，返回新的整份。
+func (o SideMenuCollectionOrder) setList(g FavoriteGroup, v []int64) SideMenuCollectionOrder {
+	if g == FavoritesCollected {
+		o.Collected = v
+	} else {
+		o.Created = v
+	}
+	return o
 }
 
 // Settings 是一份完整的应用设置，键名与 Biu 一一对应。
@@ -175,6 +246,7 @@ type Settings struct {
 	SideMenuCollapsed        bool                     `json:"sideMenuCollapsed"`
 	SideMenuWidth            float64                  `json:"sideMenuWidth"`
 	SideMenuCollectionFolded SideMenuCollectionFolded `json:"sideMenuCollectionFolded"`
+	SideMenuCollectionOrder  SideMenuCollectionOrder  `json:"sideMenuCollectionOrder"`
 	ReportPlayHistory        bool                     `json:"reportPlayHistory"`
 	LocalMusicDirs           []string                 `json:"localMusicDirs"`
 
@@ -276,7 +348,11 @@ func DefaultSettings(downloadPath string) Settings {
 		ShowSearchHistory: true,
 		ProxySettings:     ProxySettings{Type: ProxyNone},
 		SideMenuCollapsed: false,
-		SideMenuWidth:     200,
+		SideMenuWidth:     DefaultSideMenuWidth,
+		SideMenuCollectionOrder: SideMenuCollectionOrder{
+			Created:   []int64{},
+			Collected: []int64{},
+		},
 		ReportPlayHistory: true,
 		LocalMusicDirs:    []string{},
 	}
@@ -382,9 +458,7 @@ func (s *Settings) normalize() {
 	if s.FontFamily == "" {
 		s.FontFamily = DefaultFontFamily
 	}
-	if s.SideMenuWidth <= 0 {
-		s.SideMenuWidth = 200
-	}
+	s.SideMenuWidth = ClampSideMenuWidth(s.SideMenuWidth)
 
 	s.ThemeMode = pickEnum(s.ThemeMode, ThemeModeSystem,
 		ThemeModeSystem, ThemeModeLight, ThemeModeDark)
@@ -416,6 +490,14 @@ func (s *Settings) normalize() {
 	}
 	if s.LocalMusicDirs == nil {
 		s.LocalMusicDirs = []string{}
+	}
+	// nil 和空序列在 JSON 里差一个 `null`，写出去会让「还没排过序」和
+	// 「排过序，排出来是空的」看起来是两回事。统一成空序列。
+	if s.SideMenuCollectionOrder.Created == nil {
+		s.SideMenuCollectionOrder.Created = []int64{}
+	}
+	if s.SideMenuCollectionOrder.Collected == nil {
+		s.SideMenuCollectionOrder.Collected = []int64{}
 	}
 }
 
