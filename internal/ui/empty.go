@@ -14,7 +14,15 @@ import "github.com/egoist/mygo/ui"
 type emptyState struct {
 	// Title 是上游那句：这里为什么空。
 	Title string
-	// Hint 怎么才能不空。空串就只画上面那一句（上游没有第二行）。
+	// Hint 怎么才能不空。
+	//
+	// ⚠️ 这一句要给用户**能做的下一步**，不是把 Title 换个说法，也不是讲实现进度
+	// 到哪了。「这个 UP 主还没有发过动态」和「还没有歌在放」都只是把标题又说
+	// 了一遍；「音乐榜和分区推荐还没有接进来」是写给开发者看的，用户拿它没法
+	// 办任何事。合格的写法长这样：「回首页听歌，或者换一个 UP 主的空间看看」。
+	//
+	// 空串就只画上面那一句（上游没有第二行）。判据在测试里：
+	// `TestEmptyStateCopySaysWhyAndHow` 要求每一句都带一个动作词。
 	Hint string
 }
 
@@ -46,7 +54,47 @@ func (s *Shell) viewEmpty(c *ui.Context, key string, e emptyState) {
 	})
 }
 
-// lyricsEmpty 是「没有歌词」这一条空状态。
+// SPEC 点名的四个空状态场景（PLAN.md 的 C-02 / S-01）。四条各有各的一句上游
+// 文案和一句「怎么才能不空」，`TestSpecEmptyStates` 逐条渲染出来验。
+//
+// 有宿主的直接被路由表引用（`/collection/{id}` 用 noFavorites、`/download-list`
+// 用 noDownloads）；还没有宿主的（noSearchResults、noLyrics）跟着它们该在的
+// 功能一起落地——搜索结果列表是阶段 5，歌词面板是阶段 6。在那之前它们由
+// `TestSpecEmptyStates` 直接驱动渲染器验，画面上是真画出来的，不是只对了个
+// 常量。
+
+// noFavorites 是「没有收藏夹」。
+//
+// 标题抄上游：`pages/video-collection/favorites/` 那两个文件一个字都没有，
+// 空的时候落到 `components/virtual-page-list` 的兜底（index.tsx:146）。
+var noFavorites = emptyState{
+	Title: "暂无内容",
+	Hint:  "在歌上点星标，挑一个收藏夹存进去，就能在这里看到",
+}
+
+// noSearchResults 是「搜了，但没有结果」。
+//
+// ⚠️ 别和「还没输入搜索词」混成一条：上游那是**两个**分支，画出来都是同一个
+// `<Empty />`（所以标题一样），但接下来该做的事不一样——
+//   - 还没输入：`pages/search/index.tsx:16` 的分支，叫用户去输入；
+//   - 搜了没有：`pages/search/video-list/index.tsx:176` 的分支，叫用户换个词。
+//
+// 现在 `/search` 那一页处在第一个分支（它还没有搜索框，见 routes 表里那一条），
+// 所以路由表上填的不是这一条。这一条跟着搜索功能一起落地。
+var noSearchResults = emptyState{
+	Title: "暂无内容",
+	Hint:  "换个词再搜一次，或者把关键词缩短一点",
+}
+
+// noDownloads 是「没有下载记录」。
+//
+// 标题抄上游 `pages/download-list/index.tsx:155` 的 `emptyContent`。
+var noDownloads = emptyState{
+	Title: "暂无内容",
+	Hint:  "搜一首歌，在它旁边点「下载」，下完的会出现在这里",
+}
+
+// noLyrics 是「没有歌词」。
 //
 // 标题抄上游 `src/components/lyrics/index.tsx:375`：那里是一句三选一，
 // 「歌词加载中...」/「暂无歌词」/ 歌词本身，这里取空的那一支。
@@ -54,11 +102,10 @@ func (s *Shell) viewEmpty(c *ui.Context, key string, e emptyState) {
 // Hint 是我们写的（上游那一句就是全部）：Biu 的歌词不是从 B 站拿的，是歌词
 // 搜索按歌名去两个源找的（`components/lyrics-search-modal/` 下的
 // `netease-tab` 和 `lrclib-tab`），没有上传这一说。所以「怎么才能不空」就是
-// 换个源再找一次、或者换一首——这不是替上游许诺，是说清这件事有哪几条路。
+// 换个源再找一次——这不是替上游许诺，是说清这件事有哪几条路。
 //
-// 现在挂在 `/empty` 那张空状态落地页上（P-29），见 routes 表里那一条。歌词
-// 面板本身是阶段 6 的东西（PLAN.md 的 S-08），到时候把这一件搬过去就行。
-var lyricsEmpty = emptyState{
+// 歌词面板是阶段 6 的东西（PLAN.md 的 S-08），到那时它才有地方落脚。
+var noLyrics = emptyState{
 	Title: "暂无歌词",
 	Hint:  "在歌词搜索里换个源（网易云 / LRCLIB）再找一次",
 }

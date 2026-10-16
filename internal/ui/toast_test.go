@@ -103,7 +103,17 @@ func TestAtMostThreeToasts(t *testing.T) {
 // imgcache 的 TestEveryWindowGetsWoken 守着。
 func TestToastGoesAwayOnItsOwn(t *testing.T) {
 	s, tt := newShell(t)
-	shortToasts(t, 50*time.Millisecond)
+	// ⚠️ 存活时间要**比一帧长**，不能只比「够短」。
+	//
+	// 这一条要在 addToast 之后先 Frame 一次、确认它画出来了，才能开始等它消失。
+	// 原来的 50ms 是在跟那一帧赛跑：`-race` 下建一帧本身就要十几到几十毫秒，
+	// 机器一忙（几个包的测试并行跑）帧就画完了、提示早到期被收走，于是报
+	// 「提示没画出来」——症状像是 Toast 根本没弹过。实测 `go test -race ./...`
+	// 撞到过两次。
+	//
+	// 300ms 仍然远小于下面那个 3 秒的等待上限，到点照样会消失，这条验的还是
+	// 「到点自己收走」这一件事。
+	shortToasts(t, 300*time.Millisecond)
 
 	s.addToast("一会儿就没了")
 	tt.Frame()

@@ -38,34 +38,31 @@ var routes = []Route{
 	// 推荐页本身落到共享默认。
 	{Match: "/", Title: "推荐音乐", InMenu: true, Empty: emptyState{
 		Title: "暂无内容",
-		Hint:  "音乐榜和分区推荐还没有接进来",
+		Hint:  "先在顶栏「打开文件」放几首进来，或者搜一首歌",
 	}},
 	// 上游：关注列表只转给 `components/virtual-grid-page-list`，空的时候是它
 	// 的兜底 `暂无内容`（index.tsx:160）。
 	{Match: "/follow", Title: "我的关注", InMenu: true, Empty: emptyState{
 		Title: "暂无内容",
-		Hint:  "登录之后关注的 UP 主会出现在这里",
+		Hint:  "登录之后点「关注」关注的 UP 主会出现在这里",
 	}},
 	// 上游：`pages/later/index.tsx:236`。
 	{Match: "/later", Title: "稍后再看", InMenu: true, Empty: emptyState{
 		Title: "暂无稍后再看内容",
-		Hint:  "登录之后点过「稍后再看」的歌会出现在这里",
+		Hint:  "登录之后在歌上点「稍后再看」，加进来的会出现在这里",
 	}},
 	// 上游：`pages/history/index.tsx:284`。
 	{Match: "/history", Title: "历史记录", InMenu: true, Empty: emptyState{
 		Title: "暂无历史记录",
-		Hint:  "登录之后听过的歌会出现在这里",
+		Hint:  "登录之后听过的歌会出现在这里，也可以「清空历史记录」",
 	}},
 	// 上游：`pages/local-music/index.tsx:263`。
 	{Match: "/local-music", Title: "本地音乐", InMenu: true, Empty: emptyState{
 		Title: "暂无内容",
 		Hint:  "用顶栏的「打开文件」把本地音乐加进来",
 	}},
-	// 上游：`pages/download-list/index.tsx:155` 的 `emptyContent`。
-	{Match: "/download-list", Title: "下载记录", InMenu: true, Empty: emptyState{
-		Title: "暂无内容",
-		Hint:  "下载过的音乐会出现在这里",
-	}},
+	// 「没有下载记录」，文案在 empty.go 的 noDownloads（上游出处也写在那儿）。
+	{Match: "/download-list", Title: "下载记录", InMenu: true, Empty: noDownloads},
 	// 设置页在上游不是一张内容页，是一长串表单，**没有空状态可抄**——而这一页
 	// 也不是空页面：settings_page.go 已经把设置页本身接进 builtPage 了（主题、
 	// 圆角、窗口关闭三项）。所以这一条**不填 Empty**：填了就是一句没人会看到的
@@ -77,10 +74,16 @@ var routes = []Route{
 	// 另外 Biu 把设置放在头像下拉里（N-08），这里先挂侧栏底部，等头像那块
 	// 做出来再挪回去。
 	{Match: "/settings", Title: "设置", InMenu: true},
-	// 上游：`pages/search/index.tsx:19`，没输入搜索词时落的就是共享默认。
+	// 搜索页上游有**两个** Empty 分支：`pages/search/index.tsx:16` 的「还没输入
+	// 搜索词」和 `pages/search/video-list/index.tsx:176` 的「搜了但没有结果」，
+	// 画出来都是同一个 `<Empty />`（所以标题一样），接下来该做的事不一样。
+	//
+	// 这一页现在处在**第一个**分支——它还没有搜索框（搜索是阶段 5 的事）。所以
+	// 这里填的是「去输入」那一句；「换个词再搜」那一句是 empty.go 的
+	// noSearchResults，跟着搜索功能一起落地，别拿这一条冒充它。
 	{Match: "/search", Title: "搜索", Empty: emptyState{
 		Title: "暂无内容",
-		Hint:  "输入歌名或 UP 主就能搜",
+		Hint:  "在上面的搜索框里输入歌名或 UP 主",
 	}},
 	// 上游：动态流作者栏是 `暂无关注`（`dynamic-feed/author-list.tsx:137`），
 	// 主列表那处上游写的是没翻译的 `Empty`（`dynamic-feed/index.tsx:184`），
@@ -88,30 +91,26 @@ var routes = []Route{
 	// 是有的，抄那一处。
 	{Match: "/dynamic-feed", Title: "用户动态", Empty: emptyState{
 		Title: "暂无动态",
-		Hint:  "关注的 UP 主发了新动态会出现在这里",
+		Hint:  "去「我的关注」关注几个 UP 主，他们的动态会出现在这里",
 	}},
 	// 上游：`pages/user-profile/dynamic-list/index.tsx:80`。
 	{Match: "/user/{id}", Title: "UP 主空间", Empty: emptyState{
 		Title: "暂无动态",
-		Hint:  "这个 UP 主还没有发过动态",
+		Hint:  "回首页听歌，或者换一个 UP 主的空间看看",
 	}},
-	// 上游：收藏夹 / 合集 / 系列都落到 `components/virtual-page-list` 的兜底
-	// `暂无内容`（index.tsx:146）——收藏夹自己一个字都没有。
-	{Match: "/collection/{id}", Title: "收藏夹 / 合集 / 系列", Empty: emptyState{
-		Title: "暂无内容",
-		Hint:  "这里还没有收藏",
-	}},
+	// 「没有收藏夹」，文案在 empty.go 的 noFavorites（上游出处也写在那儿）。
+	{Match: "/collection/{id}", Title: "收藏夹 / 合集 / 系列", Empty: noFavorites},
 	// 空状态落地页（P-29）。上游 `pages/empty/index.tsx:6` 在这里画的是
 	// `<Empty />`，也就是共享默认的 `暂无内容`——上游这一页整个就是一张空状态，
-	// 除此之外什么也没有。我们这里挂的是**歌词**那一支（`暂无歌词`）：上游唯一
-	// 一条不来自共享默认的空状态文案，放在这一页上正好是它该在的地方，也让任务
-	// 点名的「没有歌词」这个场景在应用里真的画得出来。歌词面板是阶段 6 的东西，
-	// 到时候把这一件搬过去，这一页退回共享默认。
-	{Match: "/empty", Title: "空状态", Empty: lyricsEmpty},
+	// 除此之外什么也没有。照抄，不拿它当别的场景的替身。
+	{Match: "/empty", Title: "空状态", Empty: emptyState{
+		Title: "暂无内容",
+		Hint:  "随便切到别的页面——每一页空着的时候都是这个样子",
+	}},
 	// 上游：`pages/mini-player/index.tsx:128`。
 	{Match: "/mini-player", Title: "迷你播放器", Empty: emptyState{
 		Title: "暂无播放内容",
-		Hint:  "还没有歌在放",
+		Hint:  "在主窗口里点「打开文件」，这边就会显示正在放什么",
 	}},
 }
 

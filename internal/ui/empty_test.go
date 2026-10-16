@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"image"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,65 +17,74 @@ import (
 //  2. 空状态**真的画出来了**，不是一片白、也不是一句转圈。只查元素框查不到
 //     「画出来看不见」，所以有的测试读到像素。
 
-// TestSpecEmptyStates 是这一张的验收点：SPEC 要求的空状态场景逐条对上。
+// TestSpecEmptyStates 是这一张的验收点：SPEC 点名的四个场景逐条对上。
 //
-// 每条都断言标题和「怎么才能不空」两句都在画面上。两句都断言是有意的：只有
-// 标题，用户看到「暂无内容」之后还是不知道该干什么，那一句就白说了。
+// 四条各渲染一遍，断言标题和「怎么才能不空」两句都在画面上。两条都断言是有意
+// 的：只有标题，用户看到「暂无内容」之后还是不知道该干什么，那一句就白说了。
+//
+// 「有宿主的」和「还没有宿主的」都走同一段：宿主在的用宿主那个外壳 navigate 过
+// 去验，宿主还没到的（搜索结果、歌词——分别是阶段 5 和阶段 6 的功能）直接把同一
+// 件空状态交给渲染器画。前者验的是「用户点得进去」，后者验的是「画出来就是这句
+// 话」，两条合起来才是「这个场景被覆盖了」。
 func TestSpecEmptyStates(t *testing.T) {
 	cases := []struct {
-		what  string
-		route string
-		// want 是上游那一句，出处写在 routes 表里那一条的注释上。
-		want string
+		what string
+		e    emptyState
+		// host 是宿主路由；空串表示这一件还没有宿主（功能在后面的阶段）。
+		host string
 	}{
-		{"没有收藏夹", "/collection/12345", "暂无内容"},
-		{"没有搜索结果", "/search", "暂无内容"},
-		{"没有下载记录", "/download-list", "暂无内容"},
+		{"没有收藏夹", noFavorites, "/collection/12345"},
+		{"没有搜索结果", noSearchResults, ""},
+		{"没有下载记录", noDownloads, "/download-list"},
+		{"没有歌词", noLyrics, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.what, func(t *testing.T) {
-			s, tt := newShell(t)
-			s.navigate(c.route)
-			tt.Frame()
+			if c.e.Title == "" {
+				t.Fatalf("%s 没有文案", c.what)
+			}
+			if c.e.Hint == "" {
+				t.Fatalf("%s 没说「怎么才能不空」", c.what)
+			}
 
-			rt := lookup(c.route)
-			if rt.Empty.Title != c.want {
-				t.Errorf("%s 的标题是 %q，want %q（抄错上游了）", c.what, rt.Empty.Title, c.want)
+			var texts []string
+			var at mygoui.Rect
+			var ok bool
+			var img *image.RGBA
+			if c.host != "" {
+				s, tt := newShell(t)
+				if got := lookup(c.host).Empty; got != c.e {
+					t.Fatalf("%s 这一页挂的不是 %s 那一条（%q / %q）", c.host, c.what, got.Title, got.Hint)
+				}
+				s.navigate(c.host)
+				tt.Frame()
+				texts, ok = tt.Texts(), tt.HasText(c.e.Title)
+				at, _ = tt.Find(c.e.Title)
+				img = tt.Image()
+			} else {
+				// 还没有宿主：把同一件空状态交给渲染器，画面上真画出来。
+				s, _ := newShell(t)
+				tt := mygoui.NewTester(func(ctx *mygoui.Context) {
+					s.viewEmpty(ctx, "spec:"+c.what, c.e)
+				}, 900, 600)
+				tt.Frame()
+				texts, ok = tt.Texts(), tt.HasText(c.e.Title)
+				at, _ = tt.Find(c.e.Title)
+				img = tt.Image()
 			}
-			if !tt.HasText(c.want) {
-				t.Errorf("%s 的 %q 没画出来，文字有 %q", c.what, c.want, tt.Texts())
+
+			if !ok {
+				t.Fatalf("%s 的 %q 没画出来，文字有 %q", c.what, c.e.Title, texts)
 			}
-			if !tt.HasText(rt.Empty.Hint) {
-				t.Errorf("%s 没说「怎么才能不空」，文字有 %q", c.what, tt.Texts())
+			if !strings.Contains(strings.Join(texts, ""), c.e.Hint) {
+				t.Errorf("%s 的「怎么才能不空」%q 没画出来，文字有 %q", c.what, c.e.Hint, texts)
+			}
+			// 画出来还得看得见：元素在、位置对、文字也在，可屏幕上什么也没有，
+			// 只查元素框的测试发现不了这一类。
+			if img.RGBAAt(int(at.X)+2, int(at.Y+at.H/2)) == img.RGBAAt(4, 4) {
+				t.Errorf("%s 的字和窗口底色同色，画出来看不见", c.what)
 			}
 		})
-	}
-}
-
-// TestLyricsEmptySaysSo 验第四个场景：没有歌词。
-//
-// 这一条现在**在应用里真的画得出来**：它挂在 `/empty` 那张空状态落地页上
-// （routes 表里那一条）。歌词面板本身是阶段 6 的东西（PLAN.md 的 S-08），
-// 在那之前，这一页就是它能落脚的地方——而不是一个只有测试引用的常量。
-func TestLyricsEmptySaysSo(t *testing.T) {
-	if lyricsEmpty.Title != "暂无歌词" {
-		t.Fatalf("歌词空状态的标题是 %q，want 暂无歌词（上游 components/lyrics/index.tsx:375）", lyricsEmpty.Title)
-	}
-	// 「怎么才能不空」也要有：和其余 13 条一个规矩（上游那一句是全部，第二句
-	// 是我们补的，见 empty.go）。
-	if lyricsEmpty.Hint == "" {
-		t.Error("歌词空状态没说「怎么才能不空」")
-	}
-
-	s, tt := newShell(t)
-	s.navigate("/empty")
-	tt.Frame()
-
-	if !tt.HasText("暂无歌词") {
-		t.Errorf("歌词空状态没画出来，文字有 %q", tt.Texts())
-	}
-	if !tt.HasText(lyricsEmpty.Hint) {
-		t.Errorf("歌词空状态的「怎么才能不空」没画出来，文字有 %q", tt.Texts())
 	}
 }
 
@@ -199,31 +209,70 @@ func shellOn(t *testing.T, mode app.ThemeMode) *Shell {
 	return s
 }
 
+// actionCues 是「怎么才能不空」这一句里必须出现的动作词。
+//
+// 为什么要有这张表：原来那条测试只查 Hint 非空、且不等于 Title，于是
+// 「这个 UP 主还没有发过动态」「还没有歌在放」这种**把标题又说了一遍**的句子
+// 照样过——用户看完还是不知道能干什么。「音乐榜和分区推荐还没有接进来」也是：
+// 那是写给开发者看的实现进度，用户拿它办不了事。
+//
+// 判据只能到「这句话里有个动作词」这一层：文案没法用单元测试证明有用。但这一层
+// 已经能把上面三句全揪出来（它们一个动作词都没有），比「非空」结实得多。
+var actionCues = []string{
+	"点", "打开", "输入", "搜", "登录", "选", "换", "切", "拖", "清空", "添加", "收藏", "去",
+}
+
 // TestEmptyStateCopySaysWhyAndHow 验每一条文案都把两件事说清了。
 //
-// 「这里为什么空」是上游那一句，「怎么才能不空」是我们加的第二句。两句都要在
-// 画面上——这正是这一张要的「说得清的交代」。
+// 「这里为什么空」是上游那一句，「怎么才能不空」是我们加的第二句，而且第二句
+// 必须给用户一个**能做的下一步**（见 actionCues）。
 func TestEmptyStateCopySaysWhyAndHow(t *testing.T) {
 	s, _ := newShell(t)
+	check := func(what string, e emptyState) {
+		t.Helper()
+		if strings.TrimSpace(e.Title) == "" {
+			t.Errorf("%s 没说「这里为什么空」", what)
+		}
+		if strings.TrimSpace(e.Hint) == "" {
+			t.Errorf("%s 没说「怎么才能不空」", what)
+			return
+		}
+		if e.Title == e.Hint {
+			t.Errorf("%s 两句说的是同一件事：%q", what, e.Title)
+		}
+		if !hasActionCue(e.Hint) {
+			t.Errorf("%s 的「怎么才能不空」%q 里没有动作词：它多半只是把「为什么空」"+
+				"又说了一遍，用户看完还是不知道能干什么", what, e.Hint)
+		}
+	}
+
 	for _, rt := range append(append([]Route{}, routes...), notFound) {
-		switch {
-		case rt == notFound:
+		if rt == notFound {
 			// 兜底那一页有自己的 view，说的是「哪条路径不存在」和「几秒后回首页」。
 			continue
-		case s.builtPage(rt) != nil:
+		}
+		if s.builtPage(rt) != nil {
 			// 已经有内容的页（设置页）画的是它自己，用不到空状态。
 			continue
 		}
-		if strings.TrimSpace(rt.Empty.Title) == "" {
-			t.Errorf("%s 没说「这里为什么空」", rt.Match)
-		}
-		if strings.TrimSpace(rt.Empty.Hint) == "" {
-			t.Errorf("%s 没说「怎么才能不空」", rt.Match)
-		}
-		if rt.Empty.Title == rt.Empty.Hint {
-			t.Errorf("%s 两句说的是同一件事：%q", rt.Match, rt.Empty.Title)
+		check(rt.Match, rt.Empty)
+	}
+	// 四个点名场景也都得过这一关——其中 noSearchResults 和 noLyrics 还没有宿主，
+	// 不在这里跑就没有任何测试看着它们。
+	check("没有收藏夹", noFavorites)
+	check("没有搜索结果", noSearchResults)
+	check("没有下载记录", noDownloads)
+	check("没有歌词", noLyrics)
+}
+
+// hasActionCue 报句子里有没有一个动作词。
+func hasActionCue(s string) bool {
+	for _, cue := range actionCues {
+		if strings.Contains(s, cue) {
+			return true
 		}
 	}
+	return false
 }
 
 // TestEmptyStatesAreDistinct 验 13 条路由的文案不是同一句。
