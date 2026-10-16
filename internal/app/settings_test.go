@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -670,94 +671,232 @@ func readJSON(t *testing.T, path string, v any) {
 	}
 }
 
-// TestABiuExportSurvivesARoundTripUnchanged 是「键名与 Biu 导出的 JSON 完全一致
-// （**双向无差集**）」这条验收的字面版本。
+// ─────────────────────────────────────────────────────────────────────────────
+// Biu 那两种文件，两种都得读得进来
+// ─────────────────────────────────────────────────────────────────────────────
+
+// biuAppSettings 是 Biu 一份设置的全部 20 个键。
 //
-// TestSettingsKeysMatchBiu 只比了**我们写出去的**键名；少的那一半是**读进来的**：
-// 一份完整的 Biu 导出，经过我们读一遍、写一遍之后，是不是还和原来一模一样。
-// 少一个键 = 用户从 Biu 切过来丢一项设置，而丢的那一项在界面上根本没有提示。
+// 值**全部用非默认值**，这是故意的：任何一项没被带过去，断言都会炸出来，而不是
+// 被默认值悄悄填上、看起来一切正常。默认值的设置文件读错了也是「全对」——
+// 那才是这类 bug 最难查的原因。
 //
-// fixture 是 Biu 的 electron-store 会写出来的那份形状：外面包一层
-// `{"appSettings": {...}}`，另外还有一段 `__internal__`（conf 的内部状态，
-// 见 biu/electron/store.ts:12-21）。值全部用**非默认**的，这样任何一个键没被
-// 带过去都会在这一条上炸出来，而不是被默认值悄悄填上。
-func TestABiuExportSurvivesARoundTripUnchanged(t *testing.T) {
-	const biuExport = `{
-	  "appSettings": {
-	    "autoStart": true,
-	    "closeWindowOption": "exit",
-	    "fontFamily": "PingFang SC",
-	    "borderRadius": 16,
-	    "downloadPath": "/Users/x/Downloads",
-	    "primaryColor": "#1ed760",
-	    "backgroundColor": "#101014",
-	    "audioQuality": "lossless",
-	    "hiddenMenuKeys": ["首页", "动态"],
-	    "displayMode": "compact",
-	    "ffmpegPath": "/opt/ffmpeg",
-	    "themeMode": "dark",
-	    "pageTransition": "fade",
-	    "showSearchHistory": false,
-	    "proxySettings": {"type": "socks5", "host": "127.0.0.1", "port": 7890, "username": "u", "password": "p"},
-	    "sideMenuCollapsed": true,
-	    "sideMenuWidth": 240,
-	    "sideMenuCollectionFolded": {"created": true, "collected": false},
-	    "reportPlayHistory": false,
-	    "localMusicDirs": ["/music/a", "/music/b"]
-	  },
-	  "__internal__": {"migrations": {"version": 1}}
-	}`
+// 键名和取值照抄 `biu/shared/settings/app-settings.ts` 的 `defaultAppSettings`，
+// 结构见 `biu/shared/types/app-setting.d.ts`。
+const biuAppSettings = `{
+  "autoStart": true,
+  "closeWindowOption": "exit",
+  "fontFamily": "PingFang SC",
+  "borderRadius": 16,
+  "downloadPath": "/Users/x/Downloads",
+  "primaryColor": "#1ed760",
+  "backgroundColor": "#101014",
+  "audioQuality": "lossless",
+  "hiddenMenuKeys": ["首页", "动态"],
+  "displayMode": "compact",
+  "ffmpegPath": "/opt/ffmpeg",
+  "themeMode": "dark",
+  "pageTransition": "fade",
+  "showSearchHistory": false,
+  "proxySettings": {"type": "socks5", "host": "127.0.0.1", "port": 7890, "username": "u", "password": "p"},
+  "sideMenuCollapsed": true,
+  "sideMenuWidth": 240,
+  "sideMenuCollectionFolded": {"created": true, "collected": false},
+  "reportPlayHistory": false,
+  "localMusicDirs": ["/music/a", "/music/b"]
+}`
 
-	path := filepath.Join(t.TempDir(), app.SettingsFileName)
-	write(t, path, biuExport)
+// Biu 的两种文件形状。
+//
+// ⚠️ 这两种**都是用户真的会拿到的文件**，必须都能直接读：
+//
+//   - 带信封的：electron-store 自己落在 `~/Library/Application Support/Biu/
+//     app-settings.json` 的那份（`biu/electron/store.ts:12-21`）。里面还会
+//     多一段 `__internal__`（conf 的内部状态）。
+//   - 裸的：设置页上「导出配置」按钮**下载给用户**的那份，文件名
+//     `biu-settings-<时间戳>.json`。`biu/src/pages/settings/export-import.tsx:19`
+//     写的是 `JSON.stringify(settingStore?.appSettings ?? defaultAppSettings, null, 2)`
+//     ——**`appSettings` 的值本身，外面没有那层信封**。
+//
+// 用户要导入配置时手里拿的是第二种。第一种躺在 Biu 的数据目录里，一般人根本
+// 不知道它在哪。所以认不出裸的那份不是「少支持一种格式」，是导入整个不工作。
+var biuFiles = map[string]string{
+	"「导出配置」下载的（裸的，没有信封）": biuAppSettings,
+	"electron-store 落盘的（带信封）": `{"appSettings": ` + biuAppSettings +
+		`, "__internal__": {"migrations": {"version": 1}}}`,
+}
 
-	st, err := app.OpenSettingsStore(path)
-	if err != nil {
-		t.Fatalf("Biu 导出的设置读不出来：%v", err)
-	}
-	// 改一笔再写回去：写出去的是「我们改过之后的」那份，只读不写的话这条就
-	// 什么都没验到。
-	if _, err := st.Update(func(s *app.Settings) { s.BorderRadius = 20 }); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
+// TestABiuFilesAreReadable 是「Biu 的文件读进来还是原样」。
+//
+// 这一条盯的是一个**静默**的失败：认不出形状时不会报错，整份文件被当成一个
+// 键都不认识的 JSON，退回全默认值——用户只会觉得「导入了但什么都没变」。
+// 所以这里逐键比，值也一样：fixture 里全是非默认值，读成默认值就等于全丢。
+func TestABiuFilesAreReadable(t *testing.T) {
+	for name, body := range biuFiles {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), app.SettingsFileName)
+			write(t, path, body)
 
-	var before, after struct {
-		AppSettings map[string]any `json:"appSettings"`
-	}
-	if err := json.Unmarshal([]byte(biuExport), &before); err != nil {
-		t.Fatal(err)
-	}
-	readJSON(t, path, &after)
-
-	// 两个方向都要查：少了的是丢设置，多了的是我们自造了 Biu 没有的键。
-	for k := range before.AppSettings {
-		if _, ok := after.AppSettings[k]; !ok {
-			t.Errorf("来回一趟之后丢了 Biu 的键 %q", k)
-		}
-	}
-	for k := range after.AppSettings {
-		if _, ok := before.AppSettings[k]; !ok {
-			t.Errorf("来回一趟之后多了一个 Biu 没有的键 %q", k)
-		}
-	}
-	// 值也要一样。Biu 导出的键名和取值都原样带走，用户换回 Biu 打开还是原样。
-	for k, want := range before.AppSettings {
-		got, ok := after.AppSettings[k]
-		if !ok {
-			continue // 上面已经报过了。
-		}
-		if k == "borderRadius" {
-			// 这一条是我们**故意**改的（上面 Update 改的就是它）。
-			if got != float64(20) {
-				t.Errorf("borderRadius 改成了 %v，want 20", got)
+			got, err := app.LoadSettings(path)
+			if err != nil {
+				t.Fatalf("Biu 的文件读不出来：%v", err)
 			}
-			continue
+			// 读出来的那份要原样等于 Biu 写下去的那 20 个键。
+			// normalize 不动这里的任何一个值（每项都在合法区间内），所以
+			// 这一比就是在验「有没有被丢掉」。比的是 `biuAppSettings` 而不是
+			// 文件正文：带信封的那种文件正文外面还包着 `appSettings` 和
+			// `__internal__` 两个键，那两个不属于「设置」。
+			assertSameKeys(t, biuAppSettings, mustMarshal(t, got), "读进来之后")
+		})
+	}
+}
+
+// TestABiuFilesSurviveARoundTripUnchanged 是「键名与 Biu 完全一致（**双向无
+// 差集**）」：Biu 的文件读一遍、我方改一笔、写回去，逐键双向比对。
+//
+// `TestSettingsKeysMatchBiu` 只比了**我们写出去的**键名；少的那一半是**读进来
+// 的**：一份完整的 Biu 文件，经过我们读一遍、写一遍之后，是不是还和原来一样。
+// 少一个键 = 用户从 Biu 切过来丢一项设置，而丢的那一项在界面上没有任何提示。
+func TestABiuFilesSurviveARoundTripUnchanged(t *testing.T) {
+	for name, body := range biuFiles {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), app.SettingsFileName)
+			write(t, path, body)
+
+			st, err := app.OpenSettingsStore(path)
+			if err != nil {
+				t.Fatalf("Biu 的文件读不出来：%v", err)
+			}
+			// 改一笔再写回去：写出去的是「我们改过之后的」那份。只读不写的
+			// 路径这条就验不到任何东西。
+			if _, err := st.Update(func(s *app.Settings) { s.BorderRadius = 20 }); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			var file struct {
+				AppSettings map[string]any `json:"appSettings"`
+			}
+			readJSON(t, path, &file)
+
+			// 两个方向都要查：少了的是丢设置，多了的是我们自造了 Biu 没有的键。
+			want := decodeObject(t, biuAppSettings)
+			got := file.AppSettings
+			for k := range want {
+				if _, ok := got[k]; !ok {
+					t.Errorf("来回一趟之后丢了 Biu 的键 %q", k)
+				}
+			}
+			for k := range got {
+				if _, ok := want[k]; !ok {
+					t.Errorf("来回一趟之后多了一个 Biu 没有的键 %q", k)
+				}
+			}
+			// 值也要一样。Biu 的键名和取值都原样带走，用户换回 Biu 打开还是原样。
+			for k, wantVal := range want {
+				gotVal, ok := got[k]
+				if !ok {
+					continue // 上面已经报过了。
+				}
+				if k == "borderRadius" {
+					// 这一条是我们**故意**改的（上面 Update 改的就是它）。
+					if gotVal != float64(20) {
+						t.Errorf("borderRadius 改成了 %v，want 20", gotVal)
+					}
+					continue
+				}
+				if !reflect.DeepEqual(gotVal, wantVal) {
+					t.Errorf("%s：来回一趟之后是 %#v，Biu 那边是 %#v", k, gotVal, wantVal)
+				}
+			}
+		})
+	}
+}
+
+// TestABiuExportWithTheBadFontValueStillGetsFixed 验裸的那份也会走 v0 迁移。
+//
+// Biu 自己留过一个 `"system-default"` 的错误默认值，读的时候专门兼容它
+// （`biu/src/store/settings.ts:37-39`）。**旧版本导出的文件里就是会有这个值**，
+// 而导出写的就是 appSettings 本身——所以走「导入」这条路时，那份文件是没有
+// schemaVersion 的裸 JSON，和「Biu 直接导出的」是同一件事，必须照样修掉。
+func TestABiuExportWithTheBadFontValueStillGetsFixed(t *testing.T) {
+	body := strings.Replace(biuAppSettings, `"PingFang SC"`, `"system-default"`, 1)
+	path := filepath.Join(t.TempDir(), app.SettingsFileName)
+	write(t, path, body)
+
+	s, err := app.LoadSettings(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.FontFamily != app.DefaultFontFamily {
+		t.Errorf("裸的那份没走 v0 迁移，fontFamily 还是 %q", s.FontFamily)
+	}
+}
+
+// TestAFileThatIsNotASettingsObjectIsCorrupt 验「既不是信封也不是设置」的文件
+// 会被当成坏文件：留证据、重置、还能继续用。
+//
+// 认形状的判据是顶层有没有 `appSettings`。这里守的是判据的另一头：顶层是个
+// **数组**或字符串时，不能因为「顶层没有 appSettings 键」就把它当成裸设置读
+// 进来——那会读出一个全零的设置，然后 normalize 出一份默认值，同样是静默的。
+func TestAFileThatIsNotASettingsObjectIsCorrupt(t *testing.T) {
+	for _, body := range []string{`[1, 2, 3]`, `"设置"`, `42`} {
+		path := filepath.Join(t.TempDir(), app.SettingsFileName)
+		write(t, path, body)
+
+		if _, err := app.LoadSettings(path); !errors.Is(err, app.ErrSettingsCorrupt) {
+			t.Errorf("%s 没有被当成坏文件，err 是 %v", body, err)
 		}
-		if !reflect.DeepEqual(got, want) {
-			t.Errorf("%s：来回一趟之后是 %#v，Biu 那边是 %#v", k, got, want)
+		if _, err := os.Stat(path + ".bak"); err != nil {
+			t.Errorf("%s 没有被备份下来：%v", body, err)
+		}
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+// decodeObject 把一段 JSON 对象解成 map，解不了就说明 fixture 写错了。
+func decodeObject(t *testing.T, body string) map[string]any {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal([]byte(body), &m); err != nil {
+		t.Fatalf("fixture 不是合法的 JSON 对象：%v\n%s", err, body)
+	}
+	return m
+}
+
+// mustMarshal 是给测试用的 json.Marshal：序列化一份设置失败是不能继续的。
+func mustMarshal(t *testing.T, s app.Settings) string {
+	t.Helper()
+	b, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// assertSameKeys 断言两份 JSON 的键**双向无差集**，值也一样。
+//
+// 键要多一个少一个都报（少 = 丢设置，多 = 自造了 Biu 没有的键），值不一样也报。
+// `what` 只是让失败信息说清是哪一步坏的。
+func assertSameKeys(t *testing.T, wantJSON, gotJSON, what string) {
+	t.Helper()
+	want, got := decodeObject(t, wantJSON), decodeObject(t, gotJSON)
+	for k := range want {
+		if _, ok := got[k]; !ok {
+			t.Errorf("%s：丢了键 %q", what, k)
+		}
+	}
+	for k := range got {
+		if _, ok := want[k]; !ok {
+			t.Errorf("%s：多了一个键 %q", what, k)
+		}
+	}
+	for k, wantVal := range want {
+		if gotVal, ok := got[k]; ok && !reflect.DeepEqual(gotVal, wantVal) {
+			t.Errorf("%s：%s 是 %#v，want %#v", what, k, gotVal, wantVal)
 		}
 	}
 }
