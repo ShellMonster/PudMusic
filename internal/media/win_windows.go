@@ -105,64 +105,6 @@ var (
 	procGetSystemMetrics   = dllUser32.NewProc("GetSystemMetrics")
 )
 
-// ---- GUID ----
-
-// guid 是一个 COM 的 GUID，按 Windows 那边在内存里的字节序存（就是
-// `{Data1, Data2, Data3, Data4[8]}` 依次铺开）。
-type guid [16]byte
-
-// mustGUID 解析 `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` 这种写法。
-//
-// 为什么用字符串而不是一串十六进制字面量：一串十六进制**抄错了编译得过**，
-// 而「看着不像一个 GUID」的一串字符更容易在评审里被看出端倪。抄错 IID 的
-// 后果是 `QueryInterface` 返回 `E_NOINTERFACE`，症状是「功能静默地不出现」——
-// 界面上、任务栏上、浮窗上都没有任何提示，只有日志里一行 HRESULT。
-//
-// 字节序是 GUID 的老规矩：`xxxxxxxx` 那 8 个十六进制数字**按小端**铺开，
-// `xxxx-xxxx` 那 4 个也是小端，最后 12 个按顺序铺。少铺一层或铺成顺序，
-// 编译照样过、`QueryInterface` 照样返回 `E_NOINTERFACE`。
-//
-// 格式不对就 panic：所有调用点都是包内写死的常量，没有运行期输入。
-func mustGUID(s string) guid {
-	var g guid
-	var b [32]byte
-	n := 0
-	for i := range len(s) {
-		if s[i] == '-' {
-			continue
-		}
-		c := hexVal(s[i])
-		if c < 0 {
-			panic("media: 不是 GUID：" + s)
-		}
-		b[n] = byte(c)
-		n++
-	}
-	if n != 32 {
-		panic("media: 不是 GUID：" + s)
-	}
-	// 前 8 个字节是四对十六进制数字，每对按小端换一次。
-	for i := range 8 {
-		g[i] = b[i*2+1]<<4 | b[i*2]
-	}
-	// 后 8 个字节是 Data4，按顺序铺。
-	copy(g[8:], b[16:])
-	return g
-}
-
-// hexVal 是一个十六进制字符的数字值，认不出来给 -1。
-func hexVal(c byte) int {
-	switch {
-	case c >= '0' && c <= '9':
-		return int(c - '0')
-	case c >= 'a' && c <= 'f':
-		return int(c-'a') + 10
-	case c >= 'A' && c <= 'F':
-		return int(c-'A') + 10
-	}
-	return -1
-}
-
 // ---- HRESULT ----
 
 // hresultFailed 是不是一个失败的 HRESULT。
