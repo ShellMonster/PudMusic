@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,12 +26,18 @@ import (
 	_ "github.com/egoist/mygo/audio/mp3"
 )
 
-// Player 是一首歌的播放链路：解码器 + MyGo 的播放器。
+// Player 是一首歌的播放链路：解码器 + 变速层 + MyGo 的播放器。
 //
 // 一个 Player 只服务一条播放路径——MyGo 用一个 goroutine 驱动一个解码器，
 // 迷你播放器和主播放器要各开一个。
 type Player struct {
-	dec  *errorDecoder
+	dec *errorDecoder
+	// vs 是保调变速层，夹在解码器和 MyGo 之间（见 rate.go）。
+	//
+	// ⚠️ MyGo 那个 `Player.SetSpeed` **不能**用来做倍速：它是重采样，音高会跟
+	// 着一块上去（1.5 倍速的人声是降了半个调的尖嗓）。所以 MyGo 播放器自己的
+	// speed 永远是 1，变速全在这一层里做。
+	vs   *varispeed
 	play *mygoaudio.Player
 	vol  float64
 
@@ -75,9 +82,15 @@ func Open(path string) (*Player, error) {
 }
 
 // New 用一个现成的解码器建播放器。解码器归播放器所有，Close 时会被关掉。
+//
+// 变速层是**无条件**套上的，哪怕倍率就是 1。1 倍速下它逐样本透明
+// （`rate_test.go` 的 TestUnityRateIsSampleForSample 钉着这一点），所以这里
+// 没有「要不要绕开它」的第二条路——两条路迟早会漂移，而漂移的那一份正好是
+// 「用户开着 1.5 倍速切回 1 倍速」这条。
 func New(d mygoaudio.Decoder) *Player {
 	ed := &errorDecoder{Decoder: d}
-	return &Player{dec: ed, play: mygoaudio.NewPlayer(ed), vol: 1}
+	vs := newVarispeed(ed)
+	return &Player{dec: ed, vs: vs, play: mygoaudio.NewPlayer(vs), vol: 1}
 }
 
 // CloserReadSeeker 是「既是字节来源、又必须被一起关掉」的那一类东西。
@@ -172,10 +185,30 @@ func (p *Player) Pause() { p.play.Pause() }
 func (p *Player) Playing() bool { return p.play.Playing() }
 
 // Seek 跳到从头算起的 t。位置会被夹在 [0, Duration] 里，拖到末尾是合法的。
+//
+// t 是**歌里的时间**，和倍率无关：变速层报给上层的帧号就是源帧，所以这一句
+// 在 0.5 倍速和 2 倍速下拖到同一处都是同一处（见 rate.go 的类型注释）。
 func (p *Player) Seek(t time.Duration) { p.play.Seek(t) }
 
-// Position 返回播到哪儿了。
-func (p *Player) Position() time.Duration { return p.play.Position() }
+// Position 返回播到哪儿了——**歌里的时间**。
+//
+// 不能直接用 MyGo 的 `play.Position()`：它数的是变速层吐出去的帧，除以采样率
+// 之后永远是「已经播了多少秒」，跟倍率无关（2 倍速下它会走成原速）。这里换算
+// 回源帧，见 `varispeed.SourceAt`。
+func (p *Player) Position() time.Duration {
+	rate := p.vs.SampleRate()
+	if rate <= 0 {
+		return p.play.Position()
+	}
+	played := p.play.Position()
+	frames := int64(math.Round(played.Seconds() * float64(rate)))
+	return framesToTime(p.vs.SourceAt(frames), rate)
+}
+
+// framesToTime 把帧号写成时长。
+func framesToTime(frames int64, rate int) time.Duration {
+	return time.Duration(float64(frames) / float64(rate) * float64(time.Second))
+}
 
 // Duration 返回这首歌有多长；文件没写时长时是 0。
 func (p *Player) Duration() time.Duration { return p.play.Duration() }
@@ -189,6 +222,21 @@ func (p *Player) SetVolume(v float64) *Player {
 
 // Volume 返回音量增益。
 func (p *Player) Volume() float64 { return p.vol }
+
+// SetRate 设播放倍率，夹在 [MinRate, MaxRate]（0.5~2.0）。1 是原速。
+//
+// **音高不变**：时间轴是在变速层里拉长/压短的（WSOLA），不是重采样。
+// 改的时候不用重开播放器，也不用 seek：变速层接着当前这一跳往下铺，位置不跳。
+//
+// 想让倍率在换歌之后还在，调用方自己存着（见 `App.SetRate`）——这一层只管
+// 手上这一首。
+func (p *Player) SetRate(r float64) *Player {
+	p.vs.setRate(r)
+	return p
+}
+
+// Rate 返回当前倍率。
+func (p *Player) Rate() float64 { return p.vs.rate() }
 
 // Close 停掉并释放解码器、字节源和文件句柄。可以重复调用。
 func (p *Player) Close() {

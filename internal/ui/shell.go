@@ -88,6 +88,10 @@ type Shell struct {
 	scrub float64
 	held  bool
 
+	// rateOpen 是倍率那个浮层开着没有。**只由 view 在主线程上读写**，
+	// 见 playbar_rate.go。
+	rateOpen bool
+
 	// 侧栏这一摊。**只由 view 在主线程上读写**，不跨 goroutine。
 	//
 	// sideWidth 是这一帧画出来的宽度：拖动中它跟着指针走（可能小于 160，

@@ -18,6 +18,12 @@ import (
 // 又不至于把 CPU 烧在重绘上（Invalidate 会合并，一帧里叫多少次都只画一次）。
 const tickInterval = 50 * time.Millisecond
 
+// RateSteps 是倍率的档位（0.5 / 0.75 / 1 / 1.25 / 1.5 / 1.75 / 2）。
+//
+// 这是音频层那份的原样转发，界面层只认 app 这一份：界面画的每一行档位都必须
+// 和 `SetRate` 认得的档位是同一份，两边各抄一份迟早会漂。
+var RateSteps = audio.RateSteps
+
 // State 是一帧里界面要读的全部状态。
 //
 // view 每帧开头调一次 Snapshot，拿到的是一份自洽的拷贝：它不会读到「歌名已经
@@ -41,6 +47,11 @@ type State struct {
 	Position time.Duration
 	Duration time.Duration
 	Volume   float64
+	// Rate 是当前的播放倍率（0.5~2.0，1 是原速）。
+	//
+	// 它是**用户的一个设置**，不是某一首歌的属性：换歌之后还在，切歌那一瞬间
+	// 也不该把它按成 1。所以它每帧都从 App 现读，界面上的按钮也一样。
+	Rate float64
 	// Err 是最近一次打开文件的失败原因，显示在播放条上，直到下一次打开成功。
 	Err string
 
@@ -63,6 +74,10 @@ type App struct {
 	position time.Duration
 	duration time.Duration
 	volume   float64
+	// rate 是播放倍率，和 volume 一样是**用户的选择**，换歌之后还在。
+	// 它必须由这一层记着：播放器只管手上这一首（`audio.Player.SetRate`），
+	// 而新歌是后开的播放器，得有人告诉它「用户要的是几倍」。
+	rate float64
 	// wantPlay 是用户的意图（按过播放），playing 是播放器此刻的实际状态。
 	// 两者分开是因为一首歌播完之后 wantPlay 还是 true，而 playing 变回 false；
 	// 进度条拖回中间时靠 wantPlay 才能接着播。
@@ -97,7 +112,7 @@ type App struct {
 
 // New 建一个空的应用状态，开后台时钟。
 func New() *App {
-	a := &App{volume: 1, queue: NewQueue(), done: make(chan struct{}),
+	a := &App{volume: 1, rate: audio.DefaultRate, queue: NewQueue(), done: make(chan struct{}),
 		streamCache: map[string]*bili.StreamRef{}}
 	go a.tick()
 	return a
@@ -135,6 +150,7 @@ func (a *App) Snapshot() State {
 		Position: a.position,
 		Duration: a.duration,
 		Volume:   a.volume,
+		Rate:     a.rate,
 		Err:      a.errText,
 		Quality:  a.quality,
 	}
@@ -174,7 +190,8 @@ func (a *App) Open(path string) error {
 
 	a.mu.Lock()
 	old := a.player
-	p.SetVolume(a.volume)
+	// 倍率和音量一样是「用户选的那个值」，换歌之后照旧——见 App.rate 那段。
+	p.SetVolume(a.volume).SetRate(a.rate)
 	a.player = p
 	a.online = nil
 	a.quality = ""
@@ -237,6 +254,29 @@ func (a *App) SetVolume(v float64) {
 
 	if p != nil {
 		p.SetVolume(v)
+	}
+	if wake != nil {
+		wake()
+	}
+}
+
+// SetRate 设播放倍率，夹在 [audio.MinRate, audio.MaxRate]（0.5~2.0）。1 是原速。
+//
+// 音高**不变**：时间轴是在音频层拉长/压短的（WSOLA，见
+// `internal/service/audio/rate.go`），不是重采样。
+//
+// 这一层记着它，是因为它是**用户的一个选择**而不是某一首歌的属性：换歌、
+// 换流重开之后都得照旧。没歌的时候也照收——用户先按了 2 倍速再点歌，
+// 那首歌就应该从第一秒起就是 2 倍速。
+func (a *App) SetRate(r float64) {
+	r = audio.SnapRate(r)
+	a.mu.Lock()
+	a.rate = r
+	p, wake := a.player, a.wake
+	a.mu.Unlock()
+
+	if p != nil {
+		p.SetRate(r)
 	}
 	if wake != nil {
 		wake()

@@ -173,11 +173,8 @@ func (a *App) runOnline(it Item, gen int) {
 		a.failOnline(gen, errStreamingMissing)
 		return
 	}
-	a.mu.Lock()
-	vol := a.volume
-	a.mu.Unlock()
 
-	src, p, ref, err := a.buildOnline(context.Background(), s, it, vol, gen)
+	src, p, ref, err := a.buildOnline(context.Background(), s, it, gen)
 	if err != nil {
 		a.failOnline(gen, err)
 		return
@@ -219,7 +216,11 @@ func (a *App) runOnline(it Item, gen int) {
 //
 // 开新歌和「从播放位置重开」走的是同一条路，所以它们共用这一个函数——
 // 两份实现迟早会漂移，而漂移的那一半正好是「换流后从原位置继续」这条规格。
-func (a *App) buildOnline(ctx context.Context, s *Streaming, it Item, vol float64, gen int) (
+//
+// 音量和倍率是**建好之后现读**的，不跟着调用方一路传下来：建一条在线流要走网络
+// （取流、等首字节），这中间用户完全可能按了音量或者换了倍速。建完才读，读到的
+// 才是当下那个值——传下来的那个反而是几十秒前的。
+func (a *App) buildOnline(ctx context.Context, s *Streaming, it Item, gen int) (
 	*audio.StreamSource, *audio.Player, *bili.StreamRef, error,
 ) {
 	ref, err := a.resolve(ctx, s, it, s.Quality)
@@ -245,7 +246,10 @@ func (a *App) buildOnline(ctx context.Context, s *Streaming, it Item, vol float6
 		src.Close()
 		return nil, nil, nil, err
 	}
-	p.SetVolume(vol)
+	a.mu.Lock()
+	vol, rate := a.volume, a.rate
+	a.mu.Unlock()
+	p.SetVolume(vol).SetRate(rate)
 	return src, p, ref, nil
 }
 
@@ -426,7 +430,7 @@ func (a *App) refreshOnlineNow() {
 	}
 	tr.reopening = true
 	gen := a.onlineGen
-	pos, vol, want := a.position, a.volume, a.wantPlay
+	pos, want := a.position, a.wantPlay
 	a.mu.Unlock()
 
 	s := a.streamingSnapshot()
@@ -436,7 +440,7 @@ func (a *App) refreshOnlineNow() {
 	}
 
 	go func() {
-		src, p, ref, err := a.buildOnline(context.Background(), s, tr.item, vol, gen)
+		src, p, ref, err := a.buildOnline(context.Background(), s, tr.item, gen)
 		if err != nil {
 			a.failOnline(gen, err)
 			return
