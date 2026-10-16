@@ -36,7 +36,13 @@ func main() {
 		log.Printf("biu: 挂下载失败，这次的下载功能用不了：%v", err)
 	}
 
-	if err := ui.Run(a); err != nil {
+	// 系统媒体会话（浮窗 / 锁屏 / 任务栏缩略图按钮）也必须在开窗口之前挂：
+	// macOS 那一半建的时候要注册 Objective-C 的类，而注册必须在还没有 ObjC
+	// 回调在跑的时候做。Windows 那一半反过来要等窗口（它的会话是按窗口算的），
+	// 所以这里拿到的是会话本身，绑窗口那一下交给 ui.Run。
+	sess := ui.MountMedia(a)
+
+	if err := ui.Run(a, sess); err != nil {
 		log.Fatal(err)
 	}
 }
