@@ -20,7 +20,13 @@ import (
 	"time"
 
 	"github.com/Eyevinn/mp4ff/mp4"
+
+	"github.com/ShellMonster/Biu_Go/internal/service/mux/muxtest"
 )
+
+// 造输入的那套在 `muxtest` 包里（和 `download` 包里端到端那一条共用）。
+// 这一层用 `muxtest.Spec` 的方法名，读起来比旧的一堆小函数清楚。
+type streamSpec = muxtest.Spec
 
 // decodeOut 把交织出来的东西解回来。
 func decodeOut(t *testing.T, path string) *mp4.File {
@@ -81,7 +87,7 @@ func sampleTimes(t *testing.T, trak *mp4.TrakBox) (dts, pts []uint64, size []uin
 // 「一个能播的 MP4，有两条轨，采样描述符是从源搬过去的」。
 func TestMuxProducesTwoTracksThatCarryTheSourceVerbatim(t *testing.T) {
 	dir := t.TempDir()
-	spV, spA := videoSpec(120), audioSpec(4)
+	spV, spA := muxtest.VideoSpec(120), muxtest.AudioSpec(4)
 	video, audio := writePair(t, spV, spA)
 	dst := filepath.Join(dir, "歌.mp4")
 
@@ -125,11 +131,11 @@ func TestMuxProducesTwoTracksThatCarryTheSourceVerbatim(t *testing.T) {
 	// 而且 moov 必须在 mdat 前面。
 	assertMoovBeforeMdat(t, dst)
 
-	if res.VideoSamples != spV.nrSamples {
-		t.Errorf("视频采样数是 %d，源是 %d", res.VideoSamples, spV.nrSamples)
+	if res.VideoSamples != spV.Samples() {
+		t.Errorf("视频采样数是 %d，源是 %d", res.VideoSamples, spV.Samples())
 	}
-	if res.AudioSamples != spA.nrSamples {
-		t.Errorf("音频采样数是 %d，源是 %d", res.AudioSamples, spA.nrSamples)
+	if res.AudioSamples != spA.Samples() {
+		t.Errorf("音频采样数是 %d，源是 %d", res.AudioSamples, spA.Samples())
 	}
 }
 
@@ -161,7 +167,7 @@ func assertMoovBeforeMdat(t *testing.T, path string) {
 // 解码时间要严格递增。
 func TestSampleTimesAreCarriedVerbatim(t *testing.T) {
 	dir := t.TempDir()
-	spV, spA := videoSpec(150), audioSpec(5)
+	spV, spA := muxtest.VideoSpec(150), muxtest.AudioSpec(5)
 	video, audio := writePair(t, spV, spA)
 	dst := filepath.Join(dir, "v.mp4")
 
@@ -172,18 +178,18 @@ func TestSampleTimesAreCarriedVerbatim(t *testing.T) {
 
 	for _, tc := range []struct {
 		handler string
-		sp      dashSpec
+		sp      streamSpec
 	}{
 		{"vide", spV},
 		{"soun", spA},
 	} {
 		trak := trakByHandler(t, out, tc.handler)
-		if got := trak.Mdia.Mdhd.Timescale; got != tc.sp.ts {
-			t.Errorf("%s 轨的时基是 %d，源是 %d（交织不该改时基）", tc.handler, got, tc.sp.ts)
+		if got := trak.Mdia.Mdhd.Timescale; got != tc.sp.Timescale() {
+			t.Errorf("%s 轨的时基是 %d，源是 %d（交织不该改时基）", tc.handler, got, tc.sp.Timescale())
 		}
 		dts, pts, sizes := sampleTimes(t, trak)
-		if len(dts) != tc.sp.nrSamples {
-			t.Errorf("%s 有 %d 个采样，源是 %d", tc.handler, len(dts), tc.sp.nrSamples)
+		if len(dts) != tc.sp.Samples() {
+			t.Errorf("%s 有 %d 个采样，源是 %d", tc.handler, len(dts), tc.sp.Samples())
 			continue
 		}
 		var d uint64
@@ -191,12 +197,12 @@ func TestSampleTimesAreCarriedVerbatim(t *testing.T) {
 			if dts[i] != d {
 				t.Fatalf("%s 第 %d 帧的 DTS 是 %d，逐帧累加应该是 %d", tc.handler, i, dts[i], d)
 			}
-			if want := uint64(int64(d) + int64(ctsOf(tc.sp, i))); pts[i] != want {
+			if want := uint64(int64(d) + int64(tc.sp.CtsOf(i))); pts[i] != want {
 				t.Errorf("%s 第 %d 帧的 PTS 是 %d，要的是 %d", tc.handler, i, pts[i], want)
 			}
-			d += uint64(tc.sp.dur)
-			if got := sizes[i]; got != sizeOf(tc.sp, i) {
-				t.Errorf("%s 第 %d 帧是 %d 字节，源是 %d", tc.handler, i, got, sizeOf(tc.sp, i))
+			d += uint64(tc.sp.Dur())
+			if got := sizes[i]; got != tc.sp.SizeOf(i) {
+				t.Errorf("%s 第 %d 帧是 %d 字节，源是 %d", tc.handler, i, got, tc.sp.SizeOf(i))
 			}
 		}
 
@@ -216,7 +222,7 @@ func TestSampleTimesAreCarriedVerbatim(t *testing.T) {
 		// 真实流就是这样，写死成相等会误报。
 		shown := append([]uint64(nil), pts...)
 		sort.Slice(shown, func(i, j int) bool { return shown[i] < shown[j] })
-		frameLen := uint64(tc.sp.dur)
+		frameLen := uint64(tc.sp.Dur())
 		// 成片时长，换算回这条轨自己的时基。末帧的呈现时间必须落在它
 		// 里面——落在外面的话播放器会把它砍掉，而少两帧是看不出来的。
 		// （`tkhd` 的时长是电影时基的，两条轨的时基还不一样，所以要换。）
@@ -256,7 +262,7 @@ func TestSampleTimesAreCarriedVerbatim(t *testing.T) {
 // 内容不对就是偏移算错了（而偏移算错的表现是「能播、播出来是花的」）。
 func TestSampleBytesSurviveTheMove(t *testing.T) {
 	dir := t.TempDir()
-	spV, spA := videoSpec(90), audioSpec(3)
+	spV, spA := muxtest.VideoSpec(90), muxtest.AudioSpec(3)
 	video, audio := writePair(t, spV, spA)
 	dst := filepath.Join(dir, "v.mp4")
 
@@ -271,15 +277,15 @@ func TestSampleBytesSurviveTheMove(t *testing.T) {
 
 	for _, tc := range []struct {
 		handler string
-		sp      dashSpec
+		sp      streamSpec
 	}{{"vide", spV}, {"soun", spA}} {
 		trak := trakByHandler(t, out, tc.handler)
 		offs := sampleOffsets(t, trak)
-		if len(offs) != tc.sp.nrSamples {
-			t.Fatalf("%s 从采样表算出 %d 帧，源是 %d 帧", tc.handler, len(offs), tc.sp.nrSamples)
+		if len(offs) != tc.sp.Samples() {
+			t.Fatalf("%s 从采样表算出 %d 帧，源是 %d 帧", tc.handler, len(offs), tc.sp.Samples())
 		}
 		for i, off := range offs {
-			want := payloadOf(tc.sp, i)
+			want := tc.sp.PayloadOf(i)
 			got, ok := bytesAt(raw, off, len(want))
 			if !ok || !bytes.Equal(got, want) {
 				t.Errorf("%s 第 %d 帧的字节不对（产物偏移 %d）：\n got %x\nwant %x",
@@ -347,7 +353,7 @@ func bytesAt(buf []byte, off int64, n int) ([]byte, bool) {
 // 文件里的字节顺序应该是一段视频、一段音频、一段视频、一段音频。
 func TestTracksAreInterleavedByTimeWindow(t *testing.T) {
 	dir := t.TempDir()
-	spV, spA := videoSpec(300), audioSpec(10)
+	spV, spA := muxtest.VideoSpec(300), muxtest.AudioSpec(10)
 	video, audio := writePair(t, spV, spA)
 	dst := filepath.Join(dir, "v.mp4")
 
@@ -412,7 +418,7 @@ func chunkOffsets(trak *mp4.TrakBox) []uint64 {
 func TestMuxRefusesStreamsThatDoNotLineUp(t *testing.T) {
 	dir := t.TempDir()
 	// 视频 10 秒，音频 3 秒——差 7 秒，远超允许的两秒。
-	video, audio := writePair(t, videoSpec(300), audioSpec(3))
+	video, audio := writePair(t, muxtest.VideoSpec(300), muxtest.AudioSpec(3))
 	dst := filepath.Join(dir, "v.mp4")
 
 	_, err := Mux(video, audio, dst)
@@ -434,7 +440,7 @@ func TestMuxRefusesStreamsThatDoNotLineUp(t *testing.T) {
 // 用户根本没法处理。
 func TestMuxAcceptsTheUsualFewMillisecondsOfSkew(t *testing.T) {
 	dir := t.TempDir()
-	video, audio := writePair(t, videoSpec(300), audioSpec(10))
+	video, audio := writePair(t, muxtest.VideoSpec(300), muxtest.AudioSpec(10))
 	dst := filepath.Join(dir, "v.mp4")
 
 	res, err := Mux(video, audio, dst)
@@ -457,7 +463,7 @@ func TestMuxAcceptsTheUsualFewMillisecondsOfSkew(t *testing.T) {
 // 而它能播。所以必须在门口问一句。
 func TestMuxRejectsTheWrongKindOfStreams(t *testing.T) {
 	dir := t.TempDir()
-	video, audio := writePair(t, videoSpec(60), audioSpec(2))
+	video, audio := writePair(t, muxtest.VideoSpec(60), muxtest.AudioSpec(2))
 	dst := filepath.Join(dir, "v.mp4")
 
 	if _, err := Mux(video, video, dst); err == nil {
@@ -475,7 +481,7 @@ func TestMuxRejectsTheWrongKindOfStreams(t *testing.T) {
 // 不看内容只说「交织成功了」，用户拿到的就是一个播两秒就没声的 MV。
 func TestMuxRejectsATruncatedStream(t *testing.T) {
 	dir := t.TempDir()
-	spV, spA := videoSpec(300), audioSpec(10)
+	spV, spA := muxtest.VideoSpec(300), muxtest.AudioSpec(10)
 	video, audio := writePair(t, spV, spA)
 	// 砍掉视频流的尾巴：前面的 moof 都在，就是最后一片没了。
 	cut(t, video, 0.6)
@@ -511,7 +517,7 @@ func cut(t *testing.T, path string, pct float64) {
 // 而那一趟里有几条不成立的分支——这条用例就是走它们。
 func TestMuxHandlesStreamsShorterThanOneWindow(t *testing.T) {
 	dir := t.TempDir()
-	spV, spA := videoSpec(4), audioSpec(0.1)
+	spV, spA := muxtest.VideoSpec(4), muxtest.AudioSpec(0.1)
 	video, audio := writePair(t, spV, spA)
 	dst := filepath.Join(dir, "v.mp4")
 
@@ -526,4 +532,10 @@ func TestMuxHandlesStreamsShorterThanOneWindow(t *testing.T) {
 	if len(out.Moov.Traks) != 2 {
 		t.Errorf("产物里有 %d 条轨", len(out.Moov.Traks))
 	}
+}
+
+// writePair 在临时目录里造一对流，返回两条路径。
+func writePair(t *testing.T, spVideo, spAudio streamSpec) (videoPath, audioPath string) {
+	t.Helper()
+	return muxtest.Pair(t, spVideo, spAudio)
 }

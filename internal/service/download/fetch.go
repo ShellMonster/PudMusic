@@ -36,6 +36,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/ShellMonster/Biu_Go/internal/service/mux"
 )
 
 // 取流和下载这一摊的哨兵错误。都拿 errors.Is 判。
@@ -83,6 +85,13 @@ type Source struct {
 	Ext string
 	// URLs 是同一段字节的多个地址：主地址在前，备用地址在后。
 	URLs []string
+	// CompanionURLs 是**第二那条流**的地址（视频下载里的音频）。
+	//
+	// **空 = 这一项只有一条流**，那是最常见的情况（音频下载），
+	// `prepareCompanion` 也就不会被调。视频那一路是两条：dash 返回的
+	// 视频流 + 音频流，各自下到自己的 `.part`，下完交织成一个 `.mp4`
+	// （见 `runMux`）。
+	CompanionURLs []string
 }
 
 // IdentityOf 把一次探测的结果凑成资源身份。
@@ -95,6 +104,10 @@ func (s *Source) IdentityOf(length int64) Identity {
 // 调用前：任务已经出队、状态是 running、锁已经放开。**返回 nil 就是下完了**
 // （文件已经落在 `Task.Dest` 上）；返回错误时任务已经在队列里被标成
 // `StatusError`，但已完成的分块还留着，重试只重来没下完的那些。
+//
+// 视频任务（`Task.Video`）多一段：两条流各自下完之后交织成一个 `.mp4`，
+// 交织这一步的错**同样回到这一行**（见 `runMux`）——记录页上那一行的
+// 红字因此是「交织」的真实原因，而不是「下完了」或者一句没头没尾的错。
 func (m *Manager) run(ctx context.Context, id string) error {
 	// 取流要的是这一项的**身份**（bvid / cid / 上一轮拿到的音质）。
 	// 在锁下拷一份出来，后面全程不碰那张 map。
@@ -115,28 +128,114 @@ func (m *Manager) run(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if err := m.pullStream(ctx, id, false, part, src.URLs); err != nil {
+		return err
+	}
 
+	if !m.hasCompanion(id) {
+		// 只有一条流：下完就是它。半成品留在 `.part` 上，用户在下载
+		// 目录里看到的就永远是完整的一首，不会有一首「打不开的歌」
+		// 混在里面。
+		return m.land(id, part)
+	}
+
+	// 第二那条流（音频）。**它和主那条流各自算进度、各自续传**——
+	// 混在一起记的话「下了一半」这句话就没意义了（见 `Companion`）。
+	clen, err := m.probeURLs(ctx, src.CompanionURLs)
+	if err != nil {
+		return fmt.Errorf("download: 音频流：%w", err)
+	}
+	cpart, err := m.prepareCompanion(id, src, clen)
+	if err != nil {
+		return err
+	}
+	if err := m.pullStream(ctx, id, true, cpart, src.CompanionURLs); err != nil {
+		return err
+	}
+	return m.runMux(ctx, id, part, cpart)
+}
+
+// hasCompanion 报这一项有没有第二那条流。**必须在锁下调**。
+func (m *Manager) hasCompanion(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t := m.tasks[id]
+	return t != nil && t.Companion != nil
+}
+
+// pullStream 把指定那条流下完。
+//
+// 和旧的那条路一模一样（探过的长度、铺好的 `.part`、三个并发），
+// 唯一多出来的是「哪一条流」这个参数——它决定记账记在 `Task.Chunks`
+// 还是 `Companion.Chunks` 上（见 `finishChunk`）。
+func (m *Manager) pullStream(ctx context.Context, id string, companion bool, part string, urls []string) error {
 	f, err := os.OpenFile(part, os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("download: 打开 %s：%w", part, err)
 	}
-	pullErr := m.pullAll(ctx, id, f, src.URLs)
-	// ⚠️ 改名之前必须**关掉句柄**，不能用 `defer`：Windows 上重命名一个
-	// 还开着的文件会直接失败（POSIX 允许，所以这段在 macOS 上看不出来）。
+	pullErr := m.pullAll(ctx, id, companion, f, urls)
+	// ⚠️ 关句柄之前不能改名，也不能交织：Windows 上重命名一个还开着的
+	// 文件会直接失败（POSIX 允许，所以这段在 macOS 上看不出来）。
 	if cerr := f.Close(); pullErr == nil && cerr != nil {
 		pullErr = fmt.Errorf("download: 关 %s：%w", part, cerr)
 	}
-	if pullErr != nil {
-		return pullErr
-	}
+	return pullErr
+}
 
-	// 只有全部下完才把 .part 改名成真正的歌。半成品留在 .part 上，
-	// 用户在下载目录里看到的就永远是完整的一首，不会有一首「打不开的
-	// 歌」混在里面。
+// land 把半成品改名成最终落盘的那个文件。
+func (m *Manager) land(id, part string) error {
 	dest := m.destToLand(id)
 	if err := os.Rename(part, dest); err != nil {
 		return fmt.Errorf("download: 落盘 %s：%w", dest, err)
 	}
+	return nil
+}
+
+// runMux 把两条流交织成一个 MP4。
+//
+// # 交织出来的名字叫什么
+//
+// 产物写到 `<最终名>.part.mix`（`mixPartPath`）——**和两条源流的半成品
+// 各占各的名字**，理由见 `mixPartPath` 那段（写成同一个路径会把正在
+// 读的源流截断，出来的是「结构完全正常、画面全是花的」文件）。
+//
+// 交织完再改名：落盘前那一眼（那个位置上是不是已经有别人的东西了）
+// 对视频同样要办（`destToLand`）。
+//
+// # 那两条源流怎么办
+//
+// 交织成功之后**删掉**。它们是 fMP4 分片流，用户点开是放不出来的，
+// 而留着就是盘上凭空多出**两个和成片一样大**的文件——用户会以为下重了。
+//
+// 交织失败**不删**：它们是下载的成果，而续传要靠它们（`prepare` 认的是
+// 这些路径和分块记账）。下一轮「重试」只要交织那一步的原因消失了，
+// 几百 MB 就不用重下。跟音频那一票一个规矩：出错时半成品留在 `.part`
+// 上，由 `Remove` / `Clear` 来删。
+//
+// # 错怎么报
+//
+// 交织的错**原样交上去**。它会落到记录页那一行的红字上，而那句话就是
+// 「为什么这个 MV 没下下来」的真话（「两条流对不上，差了 7 秒」、
+// 「视频流里一个关键帧都没有」），而不是一句笼统的「下载失败」。
+func (m *Manager) runMux(ctx context.Context, id, videoPart, audioPart string) error {
+	if err := ctx.Err(); err != nil {
+		return err // 用户按了暂停：别在暂停之后还交织一遍
+	}
+	dest := m.destToLand(id)
+	if dest == "" {
+		return ErrNotFound
+	}
+	mix := mixPartPath(dest)
+	if _, err := mux.Mux(videoPart, audioPart, mix); err != nil {
+		return err
+	}
+	if err := os.Rename(mix, dest); err != nil {
+		_ = os.Remove(mix)
+		return fmt.Errorf("download: 落盘 %s：%w", dest, err)
+	}
+	// 成片已经在 `dest` 上了，那两条源流就是没人要的东西了。
+	_ = os.Remove(videoPart)
+	_ = os.Remove(audioPart)
 	return nil
 }
 
@@ -214,7 +313,11 @@ func (m *Manager) prepare(id string, src *Source, length int64) (string, error) 
 			// 那一个，于是那几百 MB 永远留在用户的下载目录里，界面上再也
 			// 没有任何东西指向它。（能走到这里说明分块记账已经空了：资源
 			// 身份对不上，或者上一轮一块都没下完而 `.part` 已经预分配了。）
+			//
+			// ⚠️ **两个半成品都要删**。视频有两个，只删主那个的话伴流那几百 KB
+			// 变成孤儿——`Remove` / `Clear` 只认新名字下那两个。
 			_ = os.Remove(partPath(t.Dest))
+			_ = os.Remove(companionPartPath(t.Dest))
 		}
 		t.Dest = dest
 		part = partPath(t.Dest)
@@ -245,6 +348,44 @@ func (m *Manager) prepare(id string, src *Source, length int64) (string, error) 
 	return part, nil
 }
 
+// prepareCompanion 是 `prepare` 的第二那条流那一版。
+//
+// 和主那条流同款的三件事，**一件都不能少**：资源身份对不上就清空记账
+// 从头下、盘上的东西比总长短就重来、把文件铺到该有的长度（并发 3 的
+// 每一条写入都带绝对偏移，而偏移是按总长算出来的——不铺的话各分块
+// 的位置全指错，出来的是一个长度对得上、内容全是错的文件）。
+func (m *Manager) prepareCompanion(id string, src *Source, length int64) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	t := m.tasks[id]
+	if t == nil || t.Companion == nil {
+		return "", ErrNotFound
+	}
+	part := companionPartPath(t.Dest)
+
+	// 身份对不上：本地那些字节是**旧内容**的（见 `Identity`）。
+	if t.Companion.Length > 0 && t.Companion.Length != length {
+		t.Companion.Chunks = nil
+	}
+	t.Companion.Length = length
+
+	// 落盘名变了就删掉旧名字下的半成品——`prepare` 里那四步孤儿场景
+	// 在这儿一模一样地成立。
+	f, err := os.OpenFile(part, os.O_WRONLY|os.O_CREATE, 0o644)
+	if err != nil {
+		return "", fmt.Errorf("download: 建 %s：%w", part, err)
+	}
+	if err := f.Truncate(length); err != nil {
+		f.Close()
+		return "", fmt.Errorf("download: 铺 %s 到 %d 字节：%w", part, length, err)
+	}
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+	return part, nil
+}
+
 // extFor 决定这一首落盘用什么扩展名。
 //
 // 顺序是**地址 > 来源说的 > 入队时的临时值**。地址排第一是因为任务里
@@ -253,6 +394,13 @@ func (m *Manager) prepare(id string, src *Source, length int64) (string, error) 
 // `Source.Ext`（app 层从取流结果里的容器名换算来的）只在地址没带后缀时
 // 顶上；而入队时的 `.m4a` 排在最后，因为它只是个猜测。
 func extFor(t *Task, src *Source) string {
+	// ⚠️ **视频这一票不走「地址后缀」这条路**。两条 dash 流的地址后缀
+	// 都是 `.m4s`，而落盘的不是任何一条流——是**交织出来的那个 MP4**。
+	// 按地址算的话会落一个 `歌.m4s`：文件名在、内容对（确实是 fMP4），
+	// 而双击打不开。
+	if t.Video {
+		return videoExt
+	}
 	if len(src.URLs) > 0 {
 		if e := ExtOf(src.URLs[0]); e != "" {
 			return e
@@ -268,8 +416,8 @@ func extFor(t *Task, src *Source) string {
 //
 // **一个分块失败就整体停下来**，不去等别的分块跑完：留着那些已完成的
 // 记账，用户点「重试」时只重来没下完的几块，不亏。
-func (m *Manager) pullAll(ctx context.Context, id string, f *os.File, urls []string) error {
-	pending := m.pendingChunks(id)
+func (m *Manager) pullAll(ctx context.Context, id string, companion bool, f *os.File, urls []string) error {
+	pending := m.pendingChunks(id, companion)
 	if len(pending) == 0 {
 		return nil
 	}
@@ -303,15 +451,15 @@ func (m *Manager) pullAll(ctx context.Context, id string, f *os.File, urls []str
 				if ctx.Err() != nil {
 					return
 				}
-				start, end, ok := m.chunkBounds(id, i)
+				start, end, ok := m.chunkBounds(id, companion, i)
 				if !ok {
 					continue
 				}
-				if err := m.pullChunk(ctx, id, f, urls, start, end); err != nil {
+				if err := m.pullChunk(ctx, id, companion, f, urls, start, end); err != nil {
 					noteFailure(err)
 					return
 				}
-				m.finishChunk(id, i)
+				m.finishChunk(id, companion, i)
 			}
 		}()
 	}
@@ -347,13 +495,13 @@ func (m *Manager) pullAll(ctx context.Context, id string, f *os.File, urls []str
 // 换备用地址只对**地址类**的错误有意义：403、连接断了。服务器不认
 // Range（`ErrRangeUnsupported`）或者给的段不对（`ErrRangeMismatch`）是
 // **后端**的脾气，几个 CDN 节点背后是同一套，换节点只是白费一个请求。
-func (m *Manager) pullChunk(ctx context.Context, id string, f *os.File, urls []string, start, end int64) error {
+func (m *Manager) pullChunk(ctx context.Context, id string, companion bool, f *os.File, urls []string, start, end int64) error {
 	if len(urls) == 0 {
 		return ErrNoSource
 	}
 	var last error
 	for _, u := range urls {
-		err := m.pullFrom(ctx, id, f, u, start, end)
+		err := m.pullFrom(ctx, id, companion, f, u, start, end)
 		if err == nil {
 			return nil
 		}
@@ -375,7 +523,7 @@ func (m *Manager) pullChunk(ctx context.Context, id string, f *os.File, urls []s
 // 带了 `Range` 的请求只有 206 才是我们要的东西。回 200 意味着服务器
 // 把**整个文件**当正文发过来了，而这一块的位置在文件的中间——照写就是
 // 把整首歌的字节盖在文件中间，**长度还是对得上**。中止，别拼。
-func (m *Manager) pullFrom(ctx context.Context, id string, f *os.File, rawURL string, start, end int64) error {
+func (m *Manager) pullFrom(ctx context.Context, id string, companion bool, f *os.File, rawURL string, start, end int64) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return fmt.Errorf("download: 发请求：%w", err)
@@ -468,11 +616,16 @@ func (w *writerAt) Write(p []byte) (int, error) {
 //
 // 两个地址都问一遍：第一个 403（过期了）就换第二个。
 func (m *Manager) probeLength(ctx context.Context, src *Source) (int64, error) {
-	if len(src.URLs) == 0 {
+	return m.probeURLs(ctx, src.URLs)
+}
+
+// probeURLs 从一组地址问总长（主地址不行就换备用）。
+func (m *Manager) probeURLs(ctx context.Context, urls []string) (int64, error) {
+	if len(urls) == 0 {
 		return 0, ErrNoSource
 	}
 	var last error
-	for _, u := range src.URLs {
+	for _, u := range urls {
 		n, err := m.probeOne(ctx, u)
 		if err == nil {
 			return n, nil

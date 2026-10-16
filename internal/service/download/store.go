@@ -140,21 +140,40 @@ func (m *Manager) Restore(path string) error {
 
 // keepOnRestore 判一条记录要不要捡回来。
 //
-// 三种要扔的：
+// 四种要扔的：
 //
 //	ID 为空      认不出是哪一首，而它是队列里**唯一**的身份
 //	Dest 为空    不知道往哪儿下，而续传要往盘上写
 //	分块下标越界 版本对得上但记账是坏的（见 `Task.Done`）
+//	有伴流却没有伴流的长度 / 伴流的下标越界（见下面的注释）
 func keepOnRestore(t *Task) bool {
 	if t == nil || t.ID == "" || t.Dest == "" {
 		return false
 	}
-	if t.Identity.Length > 0 {
-		n := (t.Identity.Length + chunkSize - 1) / chunkSize
-		for _, i := range t.Chunks {
-			if i < 0 || int64(i) >= n {
-				return false
-			}
+	if !chunksInRange(t.Identity.Length, t.Chunks) {
+		return false
+	}
+	// 视频任务：伴流也得是条**完整**的记录。
+	//
+	// 「有伴流但长度是 0」意味着「这一项知道自己是视频，却不知道音频
+	// 有多长」——交织那一步一定会因为拿不到音频流而报错，而用户在
+	// 界面上看到的是一个下到一半的视频任务和一句没头没尾的话。宁可
+	// 整项丢掉：视频会重新下一遍，而丢一个任务用户看得见。
+	if t.Companion != nil && !chunksInRange(t.Companion.Length, t.Companion.Chunks) {
+		return false
+	}
+	return true
+}
+
+// chunksInRange 报记账里有没有越界的分块下标。
+func chunksInRange(length int64, chunks []int) bool {
+	if length <= 0 {
+		return true
+	}
+	n := totalChunks(length)
+	for _, i := range chunks {
+		if i < 0 || i >= n {
+			return false
 		}
 	}
 	return true

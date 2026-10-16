@@ -384,7 +384,7 @@ func TestTwoQueuedTasksNeverClaimTheSameLandingPath(t *testing.T) {
 	}
 	// 挑名字的纯逻辑也是同一条不变量。
 	claimed := map[string]bool{a.Dest: true}
-	if got := destFor(dir, "同名", ".m4a", "BV3|c3", claimed); got == a.Dest {
+	if got := destFor(dir, "同名", ".m4a", "BV3|c3", false, claimed); got == a.Dest {
 		t.Fatalf("避让没有躲开别人认领的名字：%s", got)
 	}
 }
