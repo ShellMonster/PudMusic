@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"os"
@@ -43,7 +44,14 @@ func newDownloadApp(t *testing.T, f *streamFixture, dlDir, queueFile string) *ap
 
 	cli := bili.NewClient(bili.Options{})
 	cli.TestOnlyPointHostsAtFixture(f.URL)
-	a.MountStreaming(app.Streaming{Client: cli, Media: f.Client()})
+	// ⚠️ 音质偏好要照 `ui.MountStreaming` 那样**从设置里读**（#67 加的）。
+	// 少了这一行，下载拿到的是零值 `AudioAuto`——于是「用户选了省流量、
+	// 下回来的却是 320K」这条在测试里看不出来。
+	a.MountStreaming(app.Streaming{
+		Client:  cli,
+		Media:   f.Client(),
+		Quality: app.PrefToBili(a.SettingsSnapshot().AudioQuality),
+	})
 
 	if err := a.MountDownloads(app.Downloads{
 		Media: f.Client(), QueueFile: queueFile,
@@ -139,6 +147,97 @@ func TestADownloadGoesFromAFavoriteItemToAFileOnDisk(t *testing.T) {
 	if hits.Load() == 0 {
 		t.Fatalf("一次 CDN 都没打")
 	}
+}
+
+// 🔴 下载用的是**用户在设置里选的那一档**，不是自动档。
+//
+// 主干把 #67（在线音质覆盖）合进来之后这一条才成立：`MountStreaming` 现在把
+// 设置里的偏好喂给 `Streaming.Quality`，而下载的取流走的是**同一个**
+// `Streaming`（`resolveDownload` → `streamingSnapshot`）。所以这条是白捡的
+// ——也正因为白捡，不钉住就会悄悄退回自动档：用户为了省流量选了 64K，下回来
+// 的是 320K，而界面上一点提示都没有（那不是「错」，是白花三倍流量下载）。
+//
+// ⚠️ 取流接口**不带 `qn`**——它把所有档都返回来，由 `bili.pickAudio` 按偏好
+// 在客户端挑。所以这条造的是「同一个 dash 里给两档、两个不同的地址」，断的是
+// 下载最后落在**哪一个**上。
+func TestDownloadUsesTheQualityTheUserPicked(t *testing.T) {
+	f := newStreamFixture(t)
+	const bigN, smallN = 4096, 512
+
+	serveFixed(f, "/cdn/high.m4s", bytes.Repeat([]byte("B"), bigN))
+	serveFixed(f, "/cdn/low.m4s", bytes.Repeat([]byte("s"), smallN))
+	f.onPlayURL(map[string]any{
+		"duration": 1,
+		"audio": []any{
+			map[string]any{"id": int(bili.QualityHigh320), "bandwidth": 110836,
+				"codecs": "mp4a.40.2", "mimeType": "audio/mp4",
+				"baseUrl": cdnURL(f.URL, "high.m4s", 2*time.Hour)},
+			map[string]any{"id": int(bili.QualityLow64), "bandwidth": 50000,
+				"codecs": "mp4a.40.2", "mimeType": "audio/mp4",
+				"baseUrl": cdnURL(f.URL, "low.m4s", 2*time.Hour)},
+		},
+	})
+
+	a := newDownloadApp(t, f, t.TempDir(), filepath.Join(t.TempDir(), "queue.json"))
+
+	// 用户选了「省流量」。
+	if _, err := a.UpdateSettings(func(s *app.Settings) {
+		s.AudioQuality = app.AudioQualityLow
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a.SetAudioQuality(app.PrefToBili(app.AudioQualityLow))
+
+	snap, err := a.Download(onlineItem("BV1", "c1", "省流量的歌"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := waitDone(t, a, snap.ID)
+	if got.Total != smallN {
+		t.Fatalf("下回来的是 %d 字节，期望省流量档的 %d —— 取的不是用户选的那一档", got.Total, smallN)
+	}
+	if got.Label != bili.QualityLow64.Label(50000) {
+		t.Fatalf("音质徽章是 %q，期望 64K", got.Label)
+	}
+}
+
+// waitDone 等一项下完（失败就直接红）。
+func waitDone(t *testing.T, a *app.App, id string) download.Snapshot {
+	t.Helper()
+	var last download.Snapshot
+	waitFor(t, 20*time.Second, "下完", func() bool {
+		last, _ = a.DownloadSnapshot(id)
+		return last.Status == download.StatusDone || last.Status == download.StatusError
+	})
+	if last.Status != download.StatusDone {
+		t.Fatalf("没下完：%s（%s）", last.Status, last.Err)
+	}
+	return last
+}
+
+// serveFixed 在某个 CDN 路径上架一份固定的字节，支持 Range。
+func serveFixed(f *streamFixture, path string, data []byte) {
+	f.on(path, func(w http.ResponseWriter, r *http.Request) {
+		start, end := 0, len(data)-1
+		if h := r.Header.Get("Range"); strings.HasPrefix(h, "bytes=") {
+			a, b, _ := strings.Cut(strings.TrimPrefix(h, "bytes="), "-")
+			start, _ = strconv.Atoi(a)
+			if b != "" {
+				end, _ = strconv.Atoi(b)
+			}
+		}
+		if start > len(data)-1 || start > end {
+			http.Error(w, "越界", http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		if end > len(data)-1 {
+			end = len(data) - 1
+		}
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(data)))
+		w.Header().Set("Content-Length", strconv.Itoa(end-start+1))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(data[start : end+1])
+	})
 }
 
 // 下载目录**来自设置**：用户换了目录之后点下载，下的是新目录。
