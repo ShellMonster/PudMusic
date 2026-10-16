@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -84,6 +85,32 @@ type Shell struct {
 
 	// crash 是上一帧 panic 到的东西，非 nil 时这一帧画错误页。
 	crash any
+
+	// quitting 是「已经进了退出流程」，只由 OnBeforeQuit 置位（主线程）。
+	//
+	// 存在的理由是退出流程本身要靠关窗口走完：框架的 prepareQuit 遍历窗口
+	// 挨个 close。所以「关掉窗口时怎么办」这个设置在退出途中必须让路，否则
+	// ⌘Q 会变成「退出不了」。见 planWindowClose。
+	quitting bool
+
+	// autostart 是「开机自启在系统上的那一份」，见 lifecycle.go 里的说明。
+	autostart autoStartService
+
+	// closeOption 是最近一次从设置里读到的「关闭窗口时怎么办」。
+	//
+	// ⚠️ 缓存是因为关窗口时的先后顺序：OnClosed 里会调 CloseSettings，那会把
+	// 设置的挂载摘掉；之后 `SettingsSnapshot()` 返回的是 DefaultSettings("")
+	// 而不是用户的设置（默认 hide）。而「窗口全关」那个回调恰好跑在 OnClosed
+	// 之后，于是现去问设置只会读到默认值，选了「直接退出」的用户点了关闭进程
+	// 却不退出。缓存绕开这个顺序，见 installLifecycle 里的注释。
+	closeOption app.CloseWindowOption
+
+	// tray 是通知区域的图标（**只在 Windows / Linux 上有**，macOS 不建托盘，
+	// 见 platform.TraySupported）。nil 表示这个平台没有托盘，或者建失败了。
+	//
+	// 句柄留着是为了不让它被回收：托盘图标的生命周期挂在它上面，GC 收走之后
+	// 通知区域里那一个格子就没了，而界面这边看不出任何异样（见 tray.go）。
+	tray *mygo.Tray
 }
 
 // New 建一个窗口外壳，绑在状态 a 上。
@@ -96,7 +123,13 @@ type Shell struct {
 //
 // TestPlayBarCoverWakeRedrawsTheWindow 走的就是这一行。
 func New(a *app.App) *Shell {
-	s := &Shell{app: a, router: ui.NewRouter("/"), clock: realClock{}, images: imgcache.New(imgcache.Options{})}
+	s := &Shell{
+		app:       a,
+		router:    ui.NewRouter("/"),
+		clock:     realClock{},
+		images:    imgcache.New(imgcache.Options{}),
+		autostart: systemAutoStart{},
+	}
 	s.images.AddWake(s.wake.invalidate)
 	// pageBody 是画页面内容的那一支：404 兜底 + 已经有内容的页（设置页）+ 每条
 	// 路由自己的空状态，三样拼在 pageContent 里（router.go）。
@@ -107,13 +140,40 @@ func New(a *app.App) *Shell {
 	return s
 }
 
-// Attach 把外壳接到窗口上：装唤醒回调，窗口关掉时收尾。
+// Attach 把外壳接到窗口上：装唤醒回调，装关闭策略，窗口真关掉时收尾。
+//
+// 一个窗口上的生命周期回调全在这儿，以后新增的（显示/隐藏、拖拽文件…）也挂这里：
+// 分成两处的话，总有一个回调会在换窗口的时候漏装，而漏装之后的症状
+// （「窗口没关干净」「图下完了界面不动」）都跟漏装的那一行毫无关系，极难查。
 func (s *Shell) Attach(w *mygo.Window) {
 	s.win = w
 	s.app.SetWake(s.wake.invalidate)
+
+	w.OnClose(func(e *mygo.CloseEvent) {
+		opt := s.app.SettingsSnapshot().CloseWindowOption
+		// 记一份：OnClosed 会把设置的挂载摘掉，之后再问就只剩默认值了（见
+		// installLifecycle 里 OnWindowAllClosed 那段的注释）。
+		s.closeOption = opt
+		if planWindowClose(s.quitting, opt) != closeToBackground {
+			return
+		}
+		e.PreventDefault()
+		platform.HideToBackground(w)
+	})
+
+	// ⚠️ 下面这条是**真的关掉窗口**才跑的收尾：关封面缓存、停播放、关 App。
+	// 「收起来」被上面拦在 OnClose 里了，压根到不了这里——所以关窗口时选
+	// 「隐藏」，播放不会停、应用不会死。这是两条不同的路，别混。
 	w.OnClosed(func() {
-		// 收掉 404 那个每秒一跳的定时器。窗口关了之后 `Invalidate` 对它是
+		if s.win == w {
+			s.win = nil
+		}
+		// 收掉 404 那个每秒一跳的定时器。窗口真关了之后 `Invalidate` 对它是
 		// no-op，留着不致命，但它会一直每秒钟醒一次到进程退出。
+		//
+		// ⚠️ 放这儿而不是 OnClose：选「隐藏到托盘」时 OnClosed 压根不跑（窗口
+		// 只是收起来了，应用还活着），那时候倒计时该继续走——用户把窗口叫回来
+		// 时本来就该看到已经回首页的样子，不是还停在一个倒计时的 404 上。
 		s.disarmNotFound()
 		s.images.Close()
 		s.app.Close()
@@ -134,11 +194,34 @@ func (s *Shell) Attach(w *mygo.Window) {
 // Run 开出一个窗口并跑起来。窗口骨架归界面层管：以后要加迷你播放器、
 // 要改标题栏、要调窗口尺寸，都在这一处。
 func Run(a *app.App) error {
+	// 单实例锁必须在 Run 之前拿：Run 之后事件循环才起来，那时候两个实例
+	// 同时抢就是竞态，谁抢到全看调度。抢不到的那个，框架已经把它的命令行
+	// 转交给第一个实例了（`platform.Lock`），自己立刻退出——**不能留在后台**
+	// 当一个没有窗口的僵尸进程。
+	if !platform.Lock() {
+		return nil
+	}
+
+	s := New(a)
+	// 菜单、退出、第二个实例、deep link 全在这里装。必须在 Run 之前，
+	// 否则启动命令行里的 biu:// 会在回调装好之前就被交付掉。
+	s.installLifecycle()
+
 	mygo.App.WhenReady(func() {
-		s := New(a)
-		w := mygo.NewWindow(WindowOptions(s.View))
-		// 装唤醒回调、接窗口关闭。必须在建窗口之后：外壳要拿得到窗口句柄。
-		s.Attach(w)
+		// scheme 在这里登记而不是 Run 之前：登记要走系统 API，事件循环起来
+		// 之后才接得住；而它又必须早于框架那次启动参数的交付——handleReady
+		// 把交付排在所有 WhenReady 回调之后（`mygo/app.go:266`），所以正好。
+		if err := platform.RegisterScheme(); err != nil {
+			// macOS 上没打包成 bundle 就必然登记不上，这是预期的，不是启动失败。
+			log.Printf("biu: 登记 %s:// 失败，从别的程序点这个链接不一定唤得起本应用：%v",
+				platform.URLScheme, err)
+		}
+		// 托盘也在这儿建：框架建托盘要过事件循环（NewTray 在没 ready 时 panic）。
+		// 托盘要在开窗口**之前**建：用户从托盘点「显示/隐藏」时窗口已经在那里，
+		// 顺序反了的话头几秒点托盘是没有反应的。
+		s.installTray()
+		s.syncAutoStart()
+		s.openWindow()
 	})
 	return mygo.App.Run()
 }
