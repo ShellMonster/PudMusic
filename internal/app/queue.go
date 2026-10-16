@@ -223,6 +223,37 @@ func (q *Queue) RemoveAt(i int) (Item, bool) {
 	return it, true
 }
 
+// MoveToNext 把第 i 项挪到**当前项后面**（下一首就放它），返回挪的是哪一项。
+//
+// 还没在放（cur 是 -1）时落到队首——那时「下一首」就是第一首。
+//
+// ⚠️ **挪的就是正在放的那首时返回 false**：它已经是下一首了（这一轮轮到它自己
+// 之前不会有人插队），把它往后挪只会让队列的顺序和听到的不一样。
+func (q *Queue) MoveToNext(i int) (Item, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if i < 0 || i >= len(q.items) {
+		return Item{}, false
+	}
+	if i == q.cur {
+		return q.items[i], false
+	}
+	it := q.items[i]
+	q.items = slices.Delete(q.items, i, i+1)
+	// 删掉它之后当前项的新下标（删的是它前面的一行，cur 要跟着往前一格）。
+	cur := q.cur
+	if i < cur {
+		cur--
+	}
+	dst := 0
+	if cur >= 0 {
+		dst = min(cur+1, len(q.items))
+	}
+	q.items = slices.Insert(q.items, dst, it)
+	q.cur = cur
+	return it, true
+}
+
 // selectAt 把当前项挪到第 i 首，返回那一项。i 是 -1 时是「还没开始」，此时没有
 // 当前项，返回 false。i 越界只返回 false，**不动 cur**。
 //
@@ -395,11 +426,13 @@ func (a *App) step(delta int) {
 // RemoveAt 把队列里第 i 项删掉。队列里没有这一项时返回错误。
 //
 // 删掉的正是正在放的那首时：后面还有歌就接着放下去（原处是末尾则绕回第一首），
-// 一首都不剩就停下来。**绝不「留着它继续响」**——歌还在放、队列里已经没有它，
-// 播放条和抽屉立刻说的不是同一件事。
+// 一首都不剩就停下来。
 //
-// 接着放的那首打不开时**不回滚**：回滚等于把用户刚删掉的那首放回队列，而它已经
-// 被用户从队列里拿走了。错误返回给调用方去说，队列停在下一首上是对的。
+// 接着放的那首**打不开**时停下来，并且返回一句说清了的错误。停下来不是认输，是
+// 别无选择：让刚才那首继续响的话，队列里已经没有它、播放条上还写着它的名字、
+// 抽屉把下一首高亮成正在放——三处各说各话，正是 App.Stop 要避免的那种不一致。
+// 错误里带上「已经删掉了」是为了让调用方别再说「删不掉」：删是真的删掉了，
+// 说它没删是另一回事。
 func (a *App) RemoveAt(i int) error {
 	cur := a.queue.CurrentIndex()
 	if _, ok := a.queue.RemoveAt(i); !ok {
@@ -414,7 +447,34 @@ func (a *App) RemoveAt(i int) error {
 		a.Stop()
 		return nil
 	}
-	return a.play(item)
+	if err := a.play(item); err != nil {
+		a.Stop()
+		return fmt.Errorf("已经删掉了，但接不上下一首：%w", err)
+	}
+	return nil
+}
+
+// MoveToNext 把队列里第 i 项挪到当前项后面，让它成为下一首。
+//
+// 这是 Biu 那个 `addToNext` / `nextId`（`play-list.ts`）在队列里的样子：Biu 那边
+// 记一个「下一首是谁」再在 next 里用，我们这边直接把队列挪一格——挪完立刻看得见
+// 它排在哪儿，不用等下一首轮到它才知道。
+//
+// 还没在放时落到队首。挪的就是正在放的那首、以及下标越界时，返回一句说清了的
+// 错误（这一票的验收要「接上真实操作」——按了没反应不算接上）。
+func (a *App) MoveToNext(i int) error {
+	if i < 0 || i >= a.queue.Len() {
+		return fmt.Errorf("队列里没有第 %d 首", i+1)
+	}
+	cur := a.queue.CurrentIndex()
+	item, moved := a.queue.MoveToNext(i)
+	if moved {
+		return nil
+	}
+	if cur == i {
+		return fmt.Errorf("「%s」正在放，不需要插队", item.Title)
+	}
+	return fmt.Errorf("「%s」已经是下一首了", item.Title)
 }
 
 // ClearQueue 清空队列并停下来。

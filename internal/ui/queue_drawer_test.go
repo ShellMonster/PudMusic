@@ -29,6 +29,16 @@ func onlineSong(bvid, title string) app.Item {
 	return app.Item{Source: "online", Type: "mv", Bvid: bvid, Cid: "1", Title: title}
 }
 
+// localSong 造一个**真的放得出来**的本地项：歌名就是文件名去掉后缀（所以起名
+// 就是选断言里用的那个字）。
+//
+// 要真能放，是因为有一批用例断的就是「这一项真的跳过去放了」——用在线条目的话，
+// 这个壳里没挂取流，`PlayAt` 会打不开然后把下标退回去，那条断言就成了永远绿。
+func localSong(t *testing.T, dir, name string) app.Item {
+	t.Helper()
+	return app.LocalItem(writeCopy(t, dir, name))
+}
+
 // queueEmptyHint 是抽屉空着时那一句话（queue_drawer.go 的 queueEmpty.Hint）。
 //
 // 这里写死一份是故意的：那句话是**给人看的**，改文案就该顺手改这里，而不是
@@ -281,6 +291,61 @@ func TestQueueDrawerMarksTheSongBeingPlayed(t *testing.T) {
 	}
 }
 
+// TestQueueRowDeleteStopsWhenTheNextSongWillNotPlay 是「从列表删除」接上
+// `App.RemoveAt` 之后，那一条坑在**界面这一层**的样子：删掉的正是正在放的那首、
+// 而队列里下一首打不开。
+//
+// 断的是三样：停下来（播放条上不再有歌）、话别说反（说的是「已经删掉了，但接不
+// 上下一首」，不是「删不掉」——它确实删掉了）、队列里确实没了。
+//
+// ⚠️ 这里用坐标右键，不用 `RightClick(歌名)`：要删的那首正在放，同一个名字在**播放
+// 条上也有**，按名字找会找中播放条那一处（那儿没有菜单）。
+func TestQueueRowDeleteStopsWhenTheNextSongWillNotPlay(t *testing.T) {
+	h := newHarness(t)
+	dir := t.TempDir()
+	enqueue(t, h, localSong(t, dir, "甲.flac"))
+	// 队列里下一首是一个打不开的文件（还没进队列的文件从没被放过，所以还不在队列里，
+	// 这里直接塞一个不存在的路径）。
+	h.app.Enqueue(app.LocalItem(filepath.Join(dir, "缺了这一首.flac")))
+	openDrawer(t, h)
+
+	// 抽屉里的第一行（视口 372-53 = 319，行高 64）：y 53~117。
+	h.tt.RightClickAt(500, 85)
+	if got := h.tt.Menu(); len(got) == 0 {
+		t.Fatalf("右键抽屉第一行没有菜单，文字：%q", h.tt.Texts())
+	}
+	if err := h.tt.ChooseMenuItem("从列表删除"); err != nil {
+		t.Fatalf("选不了「从列表删除」：%v", err)
+	}
+	h.tt.Frame()
+
+	if !h.tt.HasText("已经删掉了") {
+		t.Errorf("没有一句话说清「删掉了、下一首接不上」，文字：%q", h.tt.Texts())
+	}
+	if h.tt.HasText("删不掉") {
+		t.Errorf("说的是「删不掉」，可它确实删掉了，文字：%q", h.tt.Texts())
+	}
+	if st := h.app.Snapshot(); st.HasTrack || st.Title != "" {
+		t.Errorf("下一首打不开之后还在放已经删掉的那首：%+v", st)
+	}
+	if got := titlesOf(h.app.Queue().Items()); len(got) != 1 || got[0] != "缺了这一首" {
+		t.Errorf("删完之后队列是 %q，want 只剩「缺了这一首」", got)
+	}
+}
+
+// findRow 是「那一行现在**真的在画面上**吗」。
+//
+// ⚠️ 别直接用 `Tester.Find`：MyGo 会给滚出视口、但列表还留着它那个位置的行发一个
+// **大小是 0** 的节点，`Find` 照样报 ok=true。实测：目标偏移和行高对不上时，
+// 被定位的那一行就是这个 0×0 的样子——只断 `ok` 的话，「滚到了旁边那一首」是绿的。
+func findRow(h *harness, title string) (mygoui.Rect, bool) {
+	r, ok := h.tt.Find(title)
+	if !ok || r.W <= 0 || r.H <= 0 {
+		return r, false
+	}
+	return r, true
+}
+
 // TestLocateCurrentGlidesToTheCurrentSong 是验收里「定位当前播放能平滑滚过去」。
 //
 // 断的是三件事，一件一件都拿掉就会红：
@@ -299,7 +364,7 @@ func TestLocateCurrentGlidesToTheCurrentSong(t *testing.T) {
 	h.tt.Frame()
 	openDrawer(t, h)
 
-	if _, visible := h.tt.Find("第30首"); visible {
+	if _, visible := findRow(h, "第30首"); visible {
 		t.Fatal("没定位那一行就在画面上了，测不出滚动")
 	}
 	if err := h.tt.Click("定位当前播放"); err != nil {
@@ -307,17 +372,21 @@ func TestLocateCurrentGlidesToTheCurrentSong(t *testing.T) {
 	}
 	h.tt.Frame()
 
-	if _, visible := h.tt.Find("第30首"); visible {
+	if _, visible := findRow(h, "第30首"); visible {
 		t.Error("一点就跳到位了，那不是平滑滚过去（用了 ListState.ScrollTo？）")
 	}
 	h.tt.Advance(2 * time.Second)
-	r, visible := h.tt.Find("第30首")
+	r, visible := findRow(h, "第30首")
 	if !visible {
 		t.Fatalf("Advance 之后还是滚不过去，文字：%q", h.tt.Texts())
 	}
-	// 滚到的是「第 30 行的顶边」：40 行 × 64 = 2560，视口 372-53 = 319，
-	// MaxY 是 2241，30×64 = 1920 没被钳。列表视口的顶在 y=53，所以这一行的
-	// 顶边就该落在 53 上——差得越远说明算的不是 `targetIndex*64`。
+	// 滚到的是**第 30 行自己的顶边**，不是别的行的：40 行 × 64 = 2560，视口
+	// 372-53 = 319，MaxY 是 2241，30×64 = 1920 没被钳。列表视口的顶在 y=53，
+	// 所以这一行的顶边就该落在 53 上。
+	//
+	// 差得越远说明算的不是 `targetIndex*行高`：**行高和目标偏移用的是同一个数**
+	// （见 queue_drawer.go 的 locateCurrent）。两个数分家的时候，滚过去的是
+	// 另一首——这一行会变成那个 0×0 的节点，上面那句 `visible` 就把它挡下来了。
 	if r.Y > 56 {
 		t.Errorf("那一行停在 y=%v，want ≈53（滚到的是第 30 行的顶边）", r.Y)
 	}
@@ -360,6 +429,8 @@ func TestLocateCurrentSaysSoWhenThereIsNothingToLocate(t *testing.T) {
 	})
 }
 
+// TestQueueRowMenuOffersFiveItemsForAnOnlineSong 五项都在，而且项和顺序是写死的
+// 那一套（理由见 queueMenuItems：Biu 那五项里三项要还没做的 B 站接口）。
 func TestQueueRowMenuOffersFiveItemsForAnOnlineSong(t *testing.T) {
 	h := newHarness(t)
 	h.app.Queue().Append(onlineSong("BV1", "第一首"))
@@ -369,22 +440,27 @@ func TestQueueRowMenuOffersFiveItemsForAnOnlineSong(t *testing.T) {
 	if err := h.tt.RightClick("第一首"); err != nil {
 		t.Fatalf("右键不了这一行：%v", err)
 	}
-	want := []string{"收藏", "下载音频", "下载视频", "在 B 站打开", "从列表删除"}
+	want := []string{"播放", "插到下一首播放", "在 B 站打开", "清空播放列表", "从列表删除"}
 	got := h.tt.Menu()
 	if len(got) != len(want) {
 		t.Fatalf("菜单有 %d 项 %q，want %d 项 %q", len(got), got, len(want), want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Errorf("菜单第 %d 项是 %q，want %q（项和顺序照 Biu 的 menu.tsx）", i+1, got[i], want[i])
+			t.Errorf("菜单第 %d 项是 %q，want %q", i+1, got[i], want[i])
 		}
 	}
 }
 
-// TestQueueRowMenuOnALocalSongOnlyOffersDelete 本地项只摆「从列表删除」，
-// 照 Biu 那边的 hidden：收藏 / 下载 / 在 B 站打开对本地项都没意义（「在 B 站
-// 打开」本地项连来处都没有，按下去只能打开一个打不开的网页）。
-func TestQueueRowMenuOnALocalSongOnlyOffersDelete(t *testing.T) {
+// TestQueueRowMenuOffersTheSameFiveItemsForALocalSong 本地项也是**五项**。
+//
+// 这一条盯的是「今天唯一能进队列的入口是 enqueuePicked（本地文件）」：照 Biu 的
+// hidden 规则（收藏 / 下载 / 在 B 站打开对本地项都藏起来）的话，普通用户看到的
+// 行菜单永远只有「从列表删除」一项——五项一条都见不到。
+//
+// 第三项对本地项写的是「在访达中显示」（本地文件也有来处，只是不在 B 站上，
+// 和内容列表那一套菜单同一个判断，见 list.OpenLabel）。
+func TestQueueRowMenuOffersTheSameFiveItemsForALocalSong(t *testing.T) {
 	h := newHarness(t)
 	// 歌名起得特别一点：Tester 是按**精确的字**找元素的，歌名太普通会先撞上
 	// 播放条上那一行同一个名字（那儿也写着这一首）。
@@ -395,10 +471,192 @@ func TestQueueRowMenuOnALocalSongOnlyOffersDelete(t *testing.T) {
 	if err := h.tt.RightClick("本地那一首"); err != nil {
 		t.Fatalf("右键不了这一行：%v", err)
 	}
+	want := []string{"播放", "插到下一首播放", "在访达中显示", "清空播放列表", "从列表删除"}
 	got := h.tt.Menu()
-	if len(got) != 1 || got[0] != "从列表删除" {
-		t.Errorf("本地项的菜单是 %q，want 只有「从列表删除」", got)
+	if len(got) != len(want) {
+		t.Fatalf("本地项的菜单有 %d 项 %q，want %d 项 %q", len(got), got, len(want), want)
 	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("第 %d 项是 %q，want %q", i+1, got[i], want[i])
+		}
+	}
+}
+
+// TestQueueRowMenuItemsReallyDoTheirThing 钉验收那句话的后半段：**接上真实
+// 操作**。每一项按下去，队列都要真的动一下。
+//
+// 逐项走菜单（不是直接调 App 的方法）：走菜单才是用户按的那条路——菜单里少建一
+// 项、或者那一项接错了函数，只有这样才断得出来。
+//
+// 用**本地文件**（真的能放），不用在线条目：在线条目在这个壳里没挂取流
+// （`Streaming` 没装），`PlayAt` 会打不开然后把下标退回去，「播放」那一项就断不出
+// 「它有没有真的跳过去」。
+//
+// ⚠️ 「在访达中显示 / 在 B 站打开」这一项**不在这里按**：最后一步是
+// `mygo.Shell.ShowItemInFolder` / `OpenExternal`，它们要真的事件循环，在测试里
+// 会永远等下去（实测整个测试挂死）。那一项验的是它在菜单里（上面两条）以及它就是
+// 内容列表那一套已经测过的 Open（`list.Actions`）。
+func TestQueueRowMenuItemsReallyDoTheirThing(t *testing.T) {
+	t.Run("播放", func(t *testing.T) {
+		h := newHarness(t)
+		dir := t.TempDir()
+		enqueue(t, h, localSong(t, dir, "甲.flac"))
+		h.app.Enqueue(localSong(t, dir, "乙.flac"), localSong(t, dir, "丙.flac"))
+		openDrawer(t, h)
+		// 右键的是**没在放**的那一行：歌名撞上播放条上那一行同一个字的话，
+		// RightClick 会点中播放条，点出来是空的菜单。
+		chooseQueueItem(t, h, "丙", "播放")
+
+		waitFor(t, 2*time.Second, "跳到丙", func() bool {
+			h.tt.Frame()
+			return h.app.Snapshot().Title == "丙"
+		})
+		if got := h.app.Queue().CurrentIndex(); got != 2 {
+			t.Errorf("按了「播放」当前项是第 %d 首，want 第 3 首", got)
+		}
+	})
+
+	t.Run("插到下一首播放", func(t *testing.T) {
+		h := newHarness(t)
+		dir := t.TempDir()
+		enqueue(t, h, localSong(t, dir, "甲.flac"))
+		h.app.Enqueue(localSong(t, dir, "乙.flac"), localSong(t, dir, "丙.flac"))
+		openDrawer(t, h)
+		chooseQueueItem(t, h, "丙", "插到下一首播放")
+
+		got := titlesOf(h.app.Queue().Items())
+		want := []string{"甲", "丙", "乙"}
+		if len(got) != len(want) {
+			t.Fatalf("插队之后队列是 %q，want %q", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("插队之后队列是 %q，want %q", got, want)
+			}
+		}
+		if h.app.Queue().CurrentIndex() != 0 {
+			t.Errorf("插队把当前项也改了：第 %d 首", h.app.Queue().CurrentIndex())
+		}
+		if got := h.app.Snapshot().Title; got != "甲" {
+			t.Errorf("插队把正在放的歌换了：%q", got)
+		}
+	})
+
+	t.Run("清空播放列表", func(t *testing.T) {
+		h := newHarness(t)
+		dir := t.TempDir()
+		enqueue(t, h, localSong(t, dir, "甲.flac"))
+		h.app.Enqueue(localSong(t, dir, "乙.flac"))
+		openDrawer(t, h)
+		chooseQueueItem(t, h, "乙", "清空播放列表")
+
+		if n := h.app.Queue().Len(); n != 0 {
+			t.Errorf("按了「清空播放列表」队列还剩 %d 首", n)
+		}
+		if st := h.app.Snapshot(); st.HasTrack {
+			t.Errorf("按了「清空播放列表」还在放：%+v", st)
+		}
+	})
+
+	t.Run("从列表删除", func(t *testing.T) {
+		h := newHarness(t)
+		dir := t.TempDir()
+		enqueue(t, h, localSong(t, dir, "甲.flac"))
+		h.app.Enqueue(localSong(t, dir, "乙.flac"), localSong(t, dir, "丙.flac"))
+		openDrawer(t, h)
+		chooseQueueItem(t, h, "乙", "从列表删除")
+
+		got := titlesOf(h.app.Queue().Items())
+		if len(got) != 2 || got[0] != "甲" || got[1] != "丙" {
+			t.Errorf("按了「从列表删除」队列是 %q，want 甲/丙", got)
+		}
+	})
+}
+
+// chooseQueueItem 右键 title 那一行，再从菜单里选 label 那一项。
+func chooseQueueItem(t *testing.T, h *harness, title, label string) {
+	t.Helper()
+	if err := h.tt.RightClick(title); err != nil {
+		t.Fatalf("右键不了 %q 那一行：%v", title, err)
+	}
+	if err := h.tt.ChooseMenuItem(label); err != nil {
+		t.Fatalf("选不了菜单里的 %q（菜单是 %q）：%v", label, h.tt.Menu(), err)
+	}
+	h.tt.Frame()
+}
+
+// TestQueueRowsActOnTheirQueuePositionNotTheirRowNumber 队列是 **[甲, 甲, 乙]**：
+// 抽屉里去重之后画两行（甲、乙），可乙在**队列**里是第 3 首、在抽屉里是第 2 行。
+//
+// 这一条钉的就是那多出来的一格。把 `queueRowsFor` 里的 `at` 写成行号，原来那批
+// 用例**一条都不会红**——它们排的队列里没有重复项，行号和队列下标本来就是同一个
+// 数。差这一格的后果不是难看，是**删错/放错那一首**：右键第二行乙、按「从列表
+// 删除」，删掉的是队列里第二首（另一个甲）。
+//
+// 全用**本地文件**：在线条目在这个壳里放不了，「播放」那一项就断不出「它有没有
+// 真的跳到那一首」。
+func TestQueueRowsActOnTheirQueuePositionNotTheirRowNumber(t *testing.T) {
+	// dupQueue 排出 [甲, 甲, 乙] 并且正在放甲（队列下标 0）。
+	dupQueue := func(t *testing.T) (*harness, app.Item) {
+		t.Helper()
+		h := newHarness(t)
+		dir := t.TempDir()
+		a := localSong(t, dir, "甲.flac")
+		b := localSong(t, dir, "乙.flac")
+		enqueue(t, h, a)
+		h.app.Enqueue(a, b) // 队列变成 甲,甲,乙；正在放的仍然是第一个甲
+		if h.app.Queue().Len() != 3 {
+			t.Fatalf("测试自己没摆好：队列 %d 首", h.app.Queue().Len())
+		}
+		return h, b
+	}
+
+	t.Run("从列表删除", func(t *testing.T) {
+		h, _ := dupQueue(t)
+		openDrawer(t, h)
+		if got := countRows(h); got != 2 {
+			t.Fatalf("抽屉里画着 %d 行，want 2（去重之后）", got)
+		}
+		chooseQueueItem(t, h, "乙", "从列表删除")
+
+		got := titlesOf(h.app.Queue().Items())
+		if len(got) != 2 || got[0] != "甲" || got[1] != "甲" {
+			t.Fatalf("删完之后队列是 %q，want 两个「甲」", got)
+		}
+	})
+
+	t.Run("播放", func(t *testing.T) {
+		h, _ := dupQueue(t)
+		openDrawer(t, h)
+		if err := h.tt.Click("乙"); err != nil {
+			t.Fatalf("点不了第二行：%v", err)
+		}
+		waitFor(t, 2*time.Second, "跳到乙", func() bool {
+			h.tt.Frame()
+			return h.app.Snapshot().Title == "乙"
+		})
+		if got := h.app.Queue().CurrentIndex(); got != 2 {
+			t.Errorf("点第二行之后当前项是第 %d 首，want 第 3 首（它在队列里的位置）", got)
+		}
+	})
+
+	t.Run("插到下一首播放", func(t *testing.T) {
+		h, _ := dupQueue(t)
+		openDrawer(t, h)
+		chooseQueueItem(t, h, "乙", "插到下一首播放")
+
+		got := titlesOf(h.app.Queue().Items())
+		want := []string{"甲", "乙", "甲"}
+		if len(got) != len(want) {
+			t.Fatalf("插队之后队列是 %q，want %q", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("插队之后队列是 %q，want %q", got, want)
+			}
+		}
+	})
 }
 
 func TestQueueRowMenuRemovesThatSong(t *testing.T) {
@@ -430,30 +688,6 @@ func TestQueueRowMenuRemovesThatSong(t *testing.T) {
 	// 删的不是正在放的那首：歌照放。
 	if h.app.Queue().CurrentIndex() != 0 {
 		t.Errorf("删一首不在放的歌把当前项也改了：%d", h.app.Queue().CurrentIndex())
-	}
-}
-
-// TestQueueRowMenuSaysWhichItemIsNotWiredYet 还没接 B 站接口的那几项，按下去要
-// **说清是哪一项**——菜单有五项，只说「还没接」的话用户不知道说的是哪一项。
-func TestQueueRowMenuSaysWhichItemIsNotWiredYet(t *testing.T) {
-	for _, label := range []string{"收藏", "下载音频", "下载视频"} {
-		t.Run(label, func(t *testing.T) {
-			h := newHarness(t)
-			h.app.Queue().Append(onlineSong("BV1", "第一首"))
-			h.tt.Frame()
-			openDrawer(t, h)
-
-			if err := h.tt.RightClick("第一首"); err != nil {
-				t.Fatal(err)
-			}
-			if err := h.tt.ChooseMenuItem(label); err != nil {
-				t.Fatal(err)
-			}
-			h.tt.Frame()
-			if !h.tt.HasText("「" + label + "」") {
-				t.Errorf("按了「%s」没有一句话说清是哪一项，文字：%q", label, h.tt.Texts())
-			}
-		})
 	}
 }
 

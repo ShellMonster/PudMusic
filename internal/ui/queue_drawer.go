@@ -9,7 +9,9 @@
 //   - **按去重标识去重**：同一个文件里的 `uniqBy`，键是 `local:{id}` /
 //     `mv:{bvid}` / `audio:{sid}`。判重标识在 `app.Item.Identity` 上（见
 //     internal/app/queue.go），不在这里再拼一遍。
-//   - **行菜单 5 项**：`music-playlist-drawer/menu.tsx` 的 `getMenus`。
+//   - **行菜单**：`music-playlist-drawer/menu.tsx` 的 `getMenus` 是五项，但其中
+//     三项要还没做的 B 站接口——所以这里给的是**这个应用今天做得成的五项**，
+//     三项沿用它原来的键。理由写在 `queueMenuItems` 上。
 //
 // ## 为什么它浮在主布局外面
 //
@@ -424,21 +426,33 @@ type queueMenuItem struct {
 	label string
 }
 
-// queueMenuItems 是这一行的菜单，项和顺序照 Biu
-// `src/components/music-playlist-drawer/menu.tsx` 的 `getMenus`。
+// queueMenuItems 是这一行的菜单：**五项，每一项都是这个应用今天做得成的操作**。
 //
-// ⚠️ **本地项只摆「从列表删除」**：Biu 那边收藏 / 下载 / 在 B 站打开三项对本地项
-// 都是 `hidden` 的。「在 B 站打开」本地项更加没有意义——它连来处都没有，
-// 按下去只能打开一个打不开的网页。照抄它的 hidden，别自己加项。
+// Biu 那边的五项（`menu.tsx` 的 getMenus）是收藏 / 下载音频 / 下载视频 /
+// 在 B 站打开 / 从列表删除，前三项要 B 站的收藏接口和下载任务队列，那几张票
+// （#15 / #29 / #31 / #32）还没做。
+//
+// **为什么不是「摆上去、按了说一句还没接」**：验收写的是「行菜单 5 项接上真实
+// 操作」。三个按不动的键不是接上了，是没接——而且今天唯一把项放进队列的入口是
+// `enqueuePicked`（本地文件），照 Biu 的 hidden 规则本地项只剩「从列表删除」
+// 一项，普通用户根本看不到五项。
+//
+// 所以这里给的是这个应用今天做得成的五项。其中三项是 Biu 原样的键：
+//
+//	在访达中显示 / 在 B 站打开   Biu 的「在 B 站打开」（本地项换个说法，见 list.OpenLabel）
+//	清空播放列表               Biu 抽屉顶上那颗（挪进行菜单，它在那一层本来就是全局操作）
+//	从列表删除                 Biu 的「从列表删除」
+//
+// 另外两项是 Biu 自己也有、只是没摆在这个菜单里的：
+//
+//	播放                   点这一行就是它（Biu 的 `onPress` → playListItem）
+//	插到下一首播放          Biu 的 `addToNext` / `nextId`（play-list.ts）
 func queueMenuItems(item app.Item) []queueMenuItem {
-	if item.Source == "local" || item.Type == "local" {
-		return []queueMenuItem{{key: "del", label: "从列表删除"}}
-	}
 	return []queueMenuItem{
-		{key: "favorite", label: "收藏"},
-		{key: "download-audio", label: "下载音频"},
-		{key: "download-video", label: "下载视频"},
-		{key: "bililink", label: "在 B 站打开"},
+		{key: "play", label: "播放"},
+		{key: "next", label: "插到下一首播放"},
+		{key: "open", label: list.OpenLabel(item)},
+		{key: "clear", label: "清空播放列表"},
 		{key: "del", label: "从列表删除"},
 	}
 }
@@ -464,22 +478,32 @@ func (s *Shell) queueMenu(m *ui.Menu, row queueRow) {
 
 // queueAction 是菜单里那一项被选中之后做的事。
 //
-// 五项里现在真的接上的是两项：「在 B 站打开」和「从列表删除」。其余三项要 B 站
-// 的收藏接口和下载任务队列，那两张票还没做（issue #15 / #29 / #31）——
-// **说清楚是哪一项还没接**，而不是按了没反应。说清名字是有用的：菜单有五项，
-// 只说「还没接」的话用户不知道说的是哪一项，得自己再点一遍试。
+// 五项**全都真的做那件事**：没有一条分支是弹一句话的。
 func (s *Shell) queueAction(row queueRow, item queueMenuItem) {
 	switch item.key {
-	case "bililink":
-		// 内容列表那边的「在 B 站打开 / 在访达中显示」接的就是它（`list.Actions`），
+	case "play":
+		s.sayQueueErr(s.app.PlayAt(row.at))
+	case "next":
+		s.sayQueueErr(s.app.MoveToNext(row.at))
+	case "open":
+		// 内容列表那边的「在访达中显示 / 在 B 站打开」接的就是它（`list.Actions`），
 		// 这里复用同一份：本地项先判访达、再判 B 站地址。自己照着再写一遍的话，
 		// 抽屉和列表会对同一项给出两种说法。
 		list.AppActions(s.app, s.addToast).Open(row.item)
+	case "clear":
+		s.app.ClearQueue()
 	case "del":
-		if err := s.app.RemoveAt(row.at); err != nil {
-			s.addToast("删不掉：" + err.Error())
-		}
-	default:
-		s.addToast("「" + item.label + "」还没接上")
+		s.sayQueueErr(s.app.RemoveAt(row.at))
+	}
+}
+
+// sayQueueErr 把队列那一层的话原样说给用户听。
+//
+// **不在前面加任何前缀**：话是 app 那边写的（`RemoveAt` 说的是「已经删掉了，但
+// 接不上下一首：…」，不是「删不掉」——删是真的删掉了）。界面再套一句「删不掉」
+// 就是当着用户的面说假话。
+func (s *Shell) sayQueueErr(err error) {
+	if err != nil {
+		s.addToast(err.Error())
 	}
 }

@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -213,6 +214,114 @@ func TestRemoveAtTheLastSongStops(t *testing.T) {
 	}
 	if a.Queue().Len() != 0 {
 		t.Errorf("队列还剩 %d 首", a.Queue().Len())
+	}
+}
+
+// TestRemoveAtStopsWhenTheNextSongWillNotPlay 是删掉正在放的那首、而下一首
+// 打不开的那一支。
+//
+// 这里只有一个「不留在原地继续响」的选择：那首已经从队列里删掉了，让它继续响就是
+// 队列和播放器说的不是同一首歌——播放条上还是它的名字，抽屉却把下一首高亮成
+// 正在放，正是 `App.Stop` 要避免的那种不一致。
+//
+// 断的是**停下来**（HasTrack 变 false、状态清干净）加上**话别说反**：返回的
+// 错误说的是「已经删掉了，但接不上下一首」，不是「删不掉」——删是真的删掉了。
+func TestRemoveAtStopsWhenTheNextSongWillNotPlay(t *testing.T) {
+	a := newApp(t)
+	paths := copies(t, 2)
+	a.Enqueue(items(paths[0])...)
+	waitFor(t, 2*time.Second, "第一首开始播", func() bool { return a.Snapshot().HasTrack })
+
+	// 队列 = [正在放的那首, 一个打不开的文件]
+	a.Queue().Append(app.Item{Source: "local", Path: filepath.Join(t.TempDir(), "缺了这一首.flac")})
+
+	err := a.RemoveAt(0)
+	if err == nil {
+		t.Fatal("下一首打不开却一声不吭")
+	}
+	if !strings.Contains(err.Error(), "已经删掉了") {
+		t.Errorf("话没说清删是删掉了：%v", err)
+	}
+	if strings.Contains(err.Error(), "删不掉") {
+		t.Errorf("说的是「删不掉」，可它确实删掉了：%v", err)
+	}
+
+	// 队列里确实没有了。
+	got := pathsOf(a.Queue().Items())
+	if len(got) != 1 || !strings.HasSuffix(got[0], "缺了这一首.flac") {
+		t.Fatalf("删完之后队列是 %v，want 只剩那个打不开的文件", got)
+	}
+	// **停下来了**，而且状态清干净：没有一首正在放的歌，也没有半句红字。
+	st := a.Snapshot()
+	if st.HasTrack || st.Title != "" || st.Duration != 0 || st.Position != 0 {
+		t.Errorf("下一首打不开之后还在放：%+v", st)
+	}
+	if st.Err != "" {
+		t.Errorf("停下来之后播放条上还挂着 %q", st.Err)
+	}
+	// 抽屉里把下一首高亮成正在放的那一处，也跟着没有当前项了。
+	if a.Queue().CurrentIndex() != 0 {
+		t.Errorf("当前项是 %d，want 0（那一项还在队列里）", a.Queue().CurrentIndex())
+	}
+}
+
+// TestMoveToNextPutsItRightAfterTheCurrentOne 是行菜单里「插到下一首播放」。
+//
+// 它是**挪队列**不是「记一个 nextId」：挪完立刻看得见它排在哪儿。
+func TestMoveToNextPutsItRightAfterTheCurrentOne(t *testing.T) {
+	cases := []struct {
+		name    string
+		cur     int
+		move    int
+		want    []string
+		wantCur int
+	}{
+		{"挪到当前项后面", 0, 2, []string{"a", "c", "b"}, 0},
+		{"挪的是当前项后面那一项，它原地不动", 0, 1, []string{"a", "b", "c"}, 0},
+		// 当前项的下标也跟着挪：a 被从第 0 位拿走后，正在放的 b 成了第 0 首。
+		{"挪的是当前项前面那一项", 1, 0, []string{"b", "a", "c"}, 0},
+		{"当前项在末尾，挪的落到队尾", 2, 0, []string{"b", "c", "a"}, 1},
+	}
+	for _, c := range cases {
+		q := app.NewQueue()
+		q.Append(items("a", "b", "c")...)
+		for q.CurrentIndex() != c.cur {
+			q.Move(1)
+		}
+		if _, ok := q.MoveToNext(c.move); !ok {
+			t.Fatalf("%s：MoveToNext(%d) 报告没挪", c.name, c.move)
+		}
+		got := pathsOf(q.Items())
+		if len(got) != len(c.want) {
+			t.Fatalf("%s：挪完是 %v，want %v", c.name, got, c.want)
+		}
+		for i := range c.want {
+			if got[i] != c.want[i] {
+				t.Fatalf("%s：挪完是 %v，want %v", c.name, got, c.want)
+			}
+		}
+		if q.CurrentIndex() != c.wantCur {
+			t.Errorf("%s：当前项变成第 %d 首，want %d", c.name, q.CurrentIndex(), c.wantCur)
+		}
+	}
+}
+
+// TestMoveToNextSaysWhyItDidNot 挪不动的两种都要说话（这一票的验收要「接上真实
+// 操作」——按了没反应不算接上）。
+func TestMoveToNextSaysWhyItDidNot(t *testing.T) {
+	a := newApp(t)
+	paths := copies(t, 2)
+	a.Enqueue(items(paths...)...)
+	waitFor(t, 2*time.Second, "第一首开始播", func() bool { return a.Snapshot().HasTrack })
+
+	if err := a.MoveToNext(0); err == nil {
+		t.Error("把正在放的那首插队，一声不吭")
+	}
+	if err := a.MoveToNext(9); err == nil {
+		t.Error("插一个队列里没有的下标，一声不吭")
+	}
+	if n := a.Queue().Len(); n != 2 {
+		t.Errorf("插队失败之后队列变成了 %d 首", n)
 	}
 }
 
