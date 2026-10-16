@@ -63,6 +63,24 @@ func (a *App) explore() *bili.Client {
 // mountedExplore 是「这个 App 用的是哪个 B 站客户端」。
 var mountedExplore sync.Map // *App → *bili.Client
 
+// TestOnlyAdoptLogin 装一份登录态，**只给界面层的测试用**。
+//
+// 真机上的登录只有一条路（扫码，account.go 的 adopt）。测试要「登录了」
+// 那个状态（关注按钮只在登录后才画），而走一遍扫码会让每个界面用例都
+// 先摆一张二维码再轮询一次——测的不是被测的那件事。
+//
+// 之所以不是 `_test.go` 里的一个辅助：界面层的包外测试要用它，而那个包
+// 看不到这里的未导出字段。名字里带 TestOnly 是为了 grep 一下就找得到
+// （和 `TestOnlyPointHostsAtFixture` 一个理由）。
+func (a *App) TestOnlyAdoptLogin(mid string) {
+	if a.account == nil {
+		return
+	}
+	a.account.mgr.Adopt(Session{
+		SESSDATA: "test-sessdata", BiliJCT: "test-jct", DedeUserID: mid,
+	})
+}
+
 // SelfMid 是当前登录账号的 mid，0 是没登录。
 //
 // 动态流左侧的作者栏列的是「**我**关注的人」，所以要的是自己的 mid，
@@ -341,7 +359,7 @@ func (a *App) UpDynamics(ctx context.Context, mid int64, offset string) (bili.Dy
 	return cli.SpaceDynamics(ctx, mid, offset)
 }
 
-// DynamicFeed 拉动态流（关注的��发的什么）的一页。
+// DynamicFeed 拉动态流（关注的人在发什么）的一页。
 func (a *App) DynamicFeed(ctx context.Context, offset string) (bili.DynamicPage, error) {
 	cli := a.explore()
 	if cli == nil {

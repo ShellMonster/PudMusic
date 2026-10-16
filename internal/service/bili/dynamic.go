@@ -39,7 +39,7 @@ import (
 
 // 动态那几个接口的路径。
 const (
-	// dynamicFeedAllPath 是全部动态（关注的��）。
+	// dynamicFeedAllPath 是全部动态（关注的人在发什么）。
 	dynamicFeedAllPath = "/x/polymer/web-dynamic/v1/feed/all"
 	// dynamicFeedSpacePath 是某一个 UP 空间里的动态。**要签名**。
 	dynamicFeedSpacePath = "/x/polymer/web-dynamic/v1/feed/space"
@@ -153,7 +153,7 @@ type dynamicEnvelope struct {
 	HasMore bool              `json:"has_more"`
 }
 
-// DynamicFeed 拉「关注的��发的什么」，一页。
+// DynamicFeed 拉「关注的人在发什么」，一页。
 //
 // offset 空串表示第一页。⚠️ 这个接口**不要签名**（上游
 // `web-dynamic.ts:331-334` 没传 useWbi）。
@@ -161,7 +161,7 @@ func (c *Client) DynamicFeed(ctx context.Context, offset string) (DynamicPage, e
 	params := url.Values{}
 	// 上游这两个参数是写死的（`dynamic-feed/index.tsx:63-72`）：
 	// type=video 是「按视频那条取」，platform=web 告诉 B 站我们要网页版的形状。
-	// 不给的��� B 站会给 App 的形状，字段位置不一样。
+	// 不给的话 B 站会给 App 的形状，字段位置不一样。
 	params.Set("type", "video")
 	params.Set("platform", "web")
 	if offset != "" {

@@ -69,9 +69,18 @@ const upSeriesPageSize = 20
 // （`space-info.tsx:87-97` 用的 `top_photo_v2.l_200h_img`）。
 // 200 正好塞得下头图 + 头像 + 昵称 + 签名 + 三个统计。
 const (
+	// upHeaderH 是头图区一共多高。Biu 那边是 `h-[200px]`（`space-info.tsx:86`）。
 	upHeaderH = 200
+	// upBannerH 是头图（横幅）那一块多高，剩下的给下面那一行头像/昵称/关注。
+	//
+	// ⚠️ **不能两个都给 200**：那样横幅吃掉整个头图区，下面那行被压成 0 高，
+	// 文字还在（Tester 照样 `Find` 得到）而按钮点不到——「看得见、点不着」
+	// 是最难查的那一类。
+	upBannerH = upHeaderH - 72 - 2*upPad
+	// upAvatarS 是头像边长。
 	upAvatarS = 72
-	upPad     = 16
+	// upPad 是头图区内边距。Biu 是 `px-8 py-4`，这里取一个等价的整数。
+	upPad = 16
 )
 
 // upPathOf 是 mid 这个 UP 的空间地址。
@@ -106,11 +115,11 @@ type upSpace struct {
 	// tab 是当前停在哪个 Tab。它是 `ui.Tabs` 绑定的那个 int，所以**指针要
 	// 稳定**——每帧传 `&sp.tab` 就够（那是这一个字段的地址）。
 	tab int
-	// shown 是上一帧画的是哪个 Tab，-1 是还没画过。用来认出「切了 Tab」。
-	shown int
 	// header 是头部（昵称/头图/关注/统计）。取数、代次和唤醒在 app 层管。
 	header *app.UpSpace
 
+	// videosStarted 是「投稿」Tab 拉过第一页了没有。见 viewSpaceVideos。
+	videosStarted bool
 	// videos 是「投稿」Tab。直接用 `list.PagedList`——它就是干这个的：
 	// 三条翻页保障、防重入、页脚重试、回顶按钮全在里面了。
 	videos *list.PagedList
@@ -145,8 +154,6 @@ type upSpace struct {
 
 // upResult 是后台拉完之后投进信箱的东西。
 type upResult struct {
-	// gen 是发这一次时的代次。对不上就是换 Tab / 换 UP 之前的那个请求。
-	gen  uint64
 	tab  int
 	dyns []bili.Dynamic
 	cols []bili.UpCollection
@@ -168,7 +175,7 @@ func (s *Shell) upSpaceFor(mid int64) *upSpace {
 	if sp, ok := s.upSpaces[mid]; ok {
 		return sp
 	}
-	sp := &upSpace{mid: mid, header: s.app.UpSpaceOf(mid), shown: -1}
+	sp := &upSpace{mid: mid, header: s.app.UpSpaceOf(mid)}
 	// 拉页器的闭包捕获 mid（不是 sp）：换 UP 主就是换一份 sp，这个闭包里
 	// 拿到的永远是对的 UP。
 	sp.videos = list.NewPaged(s.images, list.AppActions(s.app, s.addToast),
@@ -213,8 +220,6 @@ type upPager struct {
 	// err 是上一次失败的错。有它就**不再自动重试**——不然就是自己打自己
 	// （解了闸门 → 下一帧看见还没画满 → 又拉 → 又失败）。等用户点重试。
 	err error
-	// gen 是代次。换 Tab 时 +1，在途的结果回来时对不上就扔。
-	gen uint64
 	// cancel 停掉在途的那一页。
 	cancel context.CancelFunc
 
@@ -236,57 +241,45 @@ func (p *upPager) want() bool {
 //
 // 🔴 **防重入就是第一个 if**：三条保障会在同一帧里挨着命中（首屏检查、
 // 末尾进画面、加载后再查），没有这把锁就是一次滚动三个请求。
-func (p *upPager) begin() (context.Context, uint64) {
+func (p *upPager) begin() context.Context {
 	if !p.want() {
-		return nil, 0
+		return nil
 	}
 	if p.cancel != nil {
 		p.cancel()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel, p.loading = cancel, true
-	return ctx, p.gen
+	return ctx
 }
 
-// settle 后台回来时调一次。返回 false 表示这一份作废（代次对上了别的查询）。
+// settle 后台回来时调一次，解开闸门。
 //
 // ⚠️ **`loading = false` 必须在这一行无条件执行**：请求失败、超时、返回不对、
 // 拉取的代码自己崩了，全走这一条。漏了它就是「界面永远转圈」。
-func (p *upPager) settle(gen uint64) bool {
+func (p *upPager) settle() {
 	if p.cancel != nil {
 		p.cancel()
 		p.cancel = nil
 	}
 	p.loading = false
-	return gen == p.gen
 }
 
-// reload 换查询：代次 +1、停掉在途的、忘掉上一次的一切。
-//
-// 单靠 cancel 停不掉已经在回来的那一页——那一次照样会走进 settle。
-// 作废靠的是这里 bump 的代次。
-func (p *upPager) reload() {
-	p.gen++
-	if p.cancel != nil {
-		p.cancel()
-		p.cancel = nil
-	}
-	p.loading, p.started, p.hasMore, p.err = false, false, false, nil
-	p.cursor, p.page = "", 0
-}
-
-// adopt 记一次成功的拉取。
+// adopt 记一次成功的拉取。got 是**这一页**返回了几行。
 //
 // ⚠️ **「这一页是空的」一律收口成到底**：接口在骗人（下一页还没生成）或者
 // 已经到头了，再拉就是空转。而空转的代价是界面上永远转圈——
-// `apply` 忘了 `loading = false` 时是同一个失败模式。
-func (p *upPager) adopt(cursor string, n int, hasMore bool) {
+// `settle` 忘了 `loading = false` 时是同一个失败模式。
+//
+// ⚠️ 判据是**这一页**的几行而不是累计的：累计的数在「第一页就空」和
+// 「翻到一半这一页空」上分不出来，而后者恰恰是「到头了」。
+func (p *upPager) adopt(cursor string, got int, hasMore bool) {
 	p.started = true
 	p.page++
 	if cursor != "" {
 		p.cursor = cursor
 	}
-	p.hasMore = hasMore && n > 0
+	p.hasMore = hasMore && got > 0
 	p.err = nil
 }
 
@@ -306,6 +299,13 @@ func (p *upPager) adopt(cursor string, n int, hasMore bool) {
 func (s *Shell) viewUpSpace(c *ui.Context, r *ui.Route) {
 	// 🔴 铁律二：每帧第一件事就是装主题，而且必须在最开头。
 	s.applyFrameTheme(c)
+
+	// ⚠️ **认页的是本项目自己那一份匹配**（`router.go` 的 `lookup`，见那里
+	// 「认页和画页合成一处」那段）：它认出「这一条路由是哪个」，但 MyGo 的
+	// `Route.params` 要**有人调过 `r.Match(pattern)` 之后**才有值。所以这里
+	// 补调一次——不补的话 `r.Param("id")` 永远是空串，界面上就是一句
+	// 「这个地址里没有 UP 主的编号」，而用户点进来时地址明明是对的。
+	r.Match(upPath)
 
 	mid, ok := parseMid(r.Param("id"))
 	if !ok {
@@ -332,17 +332,15 @@ func (s *Shell) viewUpSpace(c *ui.Context, r *ui.Route) {
 		sp.header.Load()
 	}
 
-	// 换 Tab 了：上一个 Tab 在途的作废，这三张重新从头来。
+	// ⚠️ **切 Tab 什么都不重置**——这是 PLAN 阶段 5 的一条验收（「切 Tab 的
+	// 滚动位置恢复与 Biu 一致」），也是 Biu 那边本来的行为（上游那四张 Tab
+	// 各自是独立的组件，状态各自留着）。
 	//
-	// ⚠️ **不重置滚动位置**：每张 Tab 各有一份 `ui.ListState`，框架按 key
-	// 各自记着自己的位置，而「切走再切回来还在原处」正是 PLAN 阶段 5 的
-	// 一条验收（「切 Tab 的滚动位置恢复与 Biu 一致」）。
-	if sp.tab != sp.shown {
-		sp.shown = sp.tab
-		sp.dyn.reload()
-		sp.fav.reload()
-		sp.ser.reload()
-	}
+	// 特别是**不要在这里 reload**：reload 会把闸门清成「第一页」，而已经
+	// 拿到的行还在 `dynItems` 里，于是下一次拉回来的是**同一页**，被直接
+	// 追加在后面——两个一模一样的行身份，框架按 key 对位时那几行共用一份
+	// 状态（Tester 里当场 panic，真窗口里选中一个另一个也亮）。
+	// 翻回一张 Tab 只会问「还要不要下一页」，而 `started` 为真时答案是否。
 
 	ui.Column(c).Key("page:" + upPath).Grow(1).FillHeight().Children(func() {
 		s.viewSpaceHeader(c, sp, h)
@@ -399,9 +397,9 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 		// ① 头图。没设头图的 UP 主占大多数（B 站这时候给的是空对象而不是
 		// 一张空白图），画一块纯色——**别去画 B 站的占位图**，那看着像加载失败。
 		if h.User.Banner != "" {
-			s.spaceFill(c, h.User.Banner, upHeaderH)
+			s.spaceFill(c, h.User.Banner, upBannerH)
 		} else {
-			ui.Box(c).Height(upHeaderH).Width(0).Background(t.Surface)
+			ui.Box(c).Height(upBannerH).Width(0).Background(t.Surface)
 		}
 		// ② 头像 + 昵称 + 签名 + 右边那一排关注和统计。
 		ui.Row(c).Key("space-head-info").Grow(1).Width(0).Gap(12).
@@ -539,6 +537,3 @@ func formatCount(n int64) string {
 		return strconv.FormatInt(n, 10)
 	}
 }
-
-// viewSpaceTabs 是那一条 Tab。
-//

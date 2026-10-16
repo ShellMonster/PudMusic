@@ -78,7 +78,6 @@ type dynamicFeed struct {
 
 // feedResult 是后台拉完之后投进信箱的东西。
 type feedResult struct {
-	gen     uint64
 	which   int // feedAuthors / feedItems
 	dyns    []bili.Dynamic
 	authors []bili.FollowAuthor
@@ -124,12 +123,15 @@ func (s *Shell) viewDynamicFeed(c *ui.Context, _ *ui.Route) {
 
 	// 首屏那两拉，**必须在画之前发出去**。画完再发的话这一帧画出来的是
 	// 「正在加载」，要等这一页回来才换掉——而那一段没有任何东西会叫醒界面。
-	if ctx, gen := f.feed.begin(); ctx != nil {
-		go s.fetchFeed(ctx, f, feedItems, gen)
+	// ⚠️ **cursor 和 page 在这里读**（界面线程），不在后台那条线上读：
+	// 闸门是界面线程的状态（铁律一），后台碰它就是数据竞争。
+	if ctx := f.feed.begin(); ctx != nil {
+		go s.fetchFeed(ctx, f, feedItems, f.feed.cursor, f.feed.page)
 	}
-	if ctx, gen := f.auth.begin(); ctx != nil {
-		go s.fetchFeed(ctx, f, feedAuthors, gen)
-	}
+	// ⚠️ **作者栏那一拉不在这里发**：它要的是「我关注的人」，没登录时那个接口
+	// 一定回 -101，而 -101 在这一层和「网络断了」长得一模一样。发出去的话
+	// 那一栏会一直亮着转圈，而界面上看不出原因是「你没登录」。
+	// 它在 `viewAuthorPane` 里、判完登录态之后发。
 
 	ui.Row(c).Key("page:" + dynamicFeedPath).Grow(1).FillHeight().Children(func() {
 		s.viewAuthorPane(c, f)
@@ -155,6 +157,11 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 			return
 		}
 
+		// 登录态过了才拉第一页。理由见 viewDynamicFeed 里那一段。
+		if ctx := f.auth.begin(); ctx != nil {
+			go s.fetchFeed(ctx, f, feedAuthors, f.auth.cursor, f.auth.page)
+		}
+
 		// 滚动条只在装上了东西的时候才问「末行进没进画面」——
 		// 没东西时 Visible 报的是上一帧，而上一帧什么也没有。
 		auth := &f.auth
@@ -166,25 +173,29 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 
 		st := &f.authState
 		// 🔴 铁律四：行身份是「这一行是谁」，不是序号。「全部」是
-		// `auth:0`，关注的人�� `auth:<mid>`（B 站的 mid 不会是 0，撞不上）。
+		// `auth:0`，关注的人是 `auth:<mid>`（B 站的 mid 不会是 0，撞不上）。
 		st.Key = func(i int) any { return authRowKey(f, i) }
 		st.Label = func(i int) string { return authRowLabel(f, i) }
 
-		ui.List(c, st, rows).
-			Key("feed-author-list").Grow(1).FillHeight().
-			Rows(func(r ui.ListRow) {
-				defer func() {
-					if rec := recover(); rec != nil {
-						log.Printf("biu: 作者栏那一行画崩了：%v\n%s", rec, debug.Stack())
-					}
-				}()
-				s.viewAuthorRow(r.Context, f, r.Index)
-			})
+		// ⚠️ Key 挂在外面的 Column 上：List 是自己管状态的控件，事后再挂
+		// key 会 panic（`ui/element.go` 的 `Key`）。理由见 upspace_tabs.go。
+		ui.Column(c).Key("feed-author-list").Grow(1).FillHeight().Children(func() {
+			ui.List(c, st, rows).
+				Grow(1).FillHeight().
+				Rows(func(r ui.ListRow) {
+					defer func() {
+						if rec := recover(); rec != nil {
+							log.Printf("biu: 作者栏那一行画崩了：%v\n%s", rec, debug.Stack())
+						}
+					}()
+					s.viewAuthorRow(r.Context, f, r.Index)
+				})
+		})
 
 		if auth.want() {
 			if _, last := st.Visible(); last >= rows-1 {
-				if ctx, gen := auth.begin(); ctx != nil {
-					go s.fetchFeed(ctx, f, feedAuthors, gen)
+				if ctx := auth.begin(); ctx != nil {
+					go s.fetchFeed(ctx, f, feedAuthors, auth.cursor, auth.page)
 				}
 			}
 		}
@@ -224,8 +235,8 @@ func (s *Shell) viewAuthorRow(c *ui.Context, f *dynamicFeed, i int) {
 		s.viewFeedSentinel(c, f.feedPager(feedAuthors), "继续往下滚，加载更多关注的人", func() {
 			auth := f.auth
 			auth.err = nil
-			if ctx, gen := auth.begin(); ctx != nil {
-				go s.fetchFeed(ctx, f, feedAuthors, gen)
+			if ctx := auth.begin(); ctx != nil {
+				go s.fetchFeed(ctx, f, feedAuthors, auth.cursor, auth.page)
 			}
 		})
 		return
@@ -306,31 +317,34 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 		return feedRowLabel(f.items[i])
 	}
 
-	ui.List(c, st, rows).
-		Key("feed-dynamic-list").Grow(1).FillHeight().FillWidth().
-		Rows(func(r ui.ListRow) {
-			defer func() {
-				if rec := recover(); rec != nil {
-					log.Printf("biu: 动态那一行画崩了：%v\n%s", rec, debug.Stack())
-				}
-			}()
-			if r.Index >= len(f.items) {
-				s.viewFeedSentinel(r.Context, feed, "继续往下滚，加载更多动态", func() {
-					feed.err = nil
-					if ctx, gen := feed.begin(); ctx != nil {
-						go s.fetchFeed(ctx, f, feedItems, gen)
+	// ⚠️ Key 挂在外面的 Column 上，理由见上面那一处。
+	ui.Column(c).Key("feed-dynamic-list").Grow(1).FillHeight().Children(func() {
+		ui.List(c, st, rows).
+			Grow(1).FillHeight().FillWidth().
+			Rows(func(r ui.ListRow) {
+				defer func() {
+					if rec := recover(); rec != nil {
+						log.Printf("biu: 动态那一行画崩了：%v\n%s", rec, debug.Stack())
 					}
-				})
-				return
-			}
-			s.viewDynamicCard(r.Context, f.items[r.Index])
-		})
+				}()
+				if r.Index >= len(f.items) {
+					s.viewFeedSentinel(r.Context, feed, "继续往下滚，加载更多动态", func() {
+						feed.err = nil
+						if ctx := feed.begin(); ctx != nil {
+							go s.fetchFeed(ctx, f, feedItems, feed.cursor, feed.page)
+						}
+					})
+					return
+				}
+				s.viewDynamicCard(r.Context, f.items[r.Index])
+			})
+	})
 
 	// 滚到底就拉下一页；容器没填满也拉（首屏那一拉在 view 开头已经发过了）。
 	if feed.want() {
 		if _, last := st.Visible(); last >= rows-1 {
-			if ctx, gen := feed.begin(); ctx != nil {
-				go s.fetchFeed(ctx, f, feedItems, gen)
+			if ctx := feed.begin(); ctx != nil {
+				go s.fetchFeed(ctx, f, feedItems, feed.cursor, feed.page)
 			}
 		}
 	}
@@ -410,7 +424,9 @@ func (s *Shell) viewFeedSentinel(c *ui.Context, p *upPager, hint string, retry f
 // ⚠️ **在后台 goroutine 里跑，而且自己 recover**：界面那一层的 recover
 // （行级的、页级的）一个都接不到它——Go 里没人在跑那个 goroutine，而这一段
 // 正是「解析接口返回」的地方。B 站改一个字段就是在这一行炸。
-func (s *Shell) fetchFeed(ctx context.Context, f *dynamicFeed, which int, gen uint64) {
+// cursor 和 page 是**调用方（界面线程）**在开这一拉那一刻读出来的闸门状态，
+// 不是这里自己读的——闸门是界面线程的状态，后台碰它就是数据竞争。
+func (s *Shell) fetchFeed(ctx context.Context, f *dynamicFeed, which int, cursor string, page int) {
 	var r feedResult
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -424,17 +440,14 @@ func (s *Shell) fetchFeed(ctx context.Context, f *dynamicFeed, which int, gen ui
 		s.wake.invalidate()
 	}()
 
-	r = feedResult{gen: gen, which: which}
-	p := f.feedPager(which)
+	r = feedResult{which: which}
 
 	switch which {
 	case feedAuthors:
-		// 没登录就不该走到这里（界面先判了），但**再判一次**：作者栏那一支
-		// 是「没登录就 return」，而这一条闸门是这一页共用的。
-		pg, err := s.app.FollowedAuthors(ctx, s.app.SelfMid(), p.page+1)
+		pg, err := s.app.FollowedAuthors(ctx, s.app.SelfMid(), page+1)
 		r.err, r.authors, r.hasMore = err, pg.Authors, pg.HasMore
 	default:
-		pg, err := s.app.DynamicFeed(ctx, p.cursor)
+		pg, err := s.app.DynamicFeed(ctx, cursor)
 		r.err, r.dyns, r.hasMore, r.dropped = err, pg.Items, pg.HasMore, pg.Dropped
 		r.cursor = pg.Offset
 	}
@@ -452,11 +465,9 @@ func (s *Shell) adoptFeed(f *dynamicFeed) {
 
 	for _, r := range box {
 		p := f.feedPager(r.which)
-		// ⚠️ **`settle` 必须先调**：代次对不上也是「这一拉结束了」，
-		// 不解开闸门的话那一格会永远停在「正在加载」。
-		if !p.settle(r.gen) {
-			continue
-		}
+		// ⚠️ **`settle` 必须先调**：失败、超时、返回不对、拉取的代码崩了，
+		// 全走这一条。漏了它那一格会永远停在「正在加载」。
+		p.settle()
 		if r.err != nil {
 			p.err = r.err
 			log.Printf("biu: 动态流拉失败了：%v", r.err)
@@ -470,10 +481,8 @@ func (s *Shell) adoptFeed(f *dynamicFeed) {
 			f.dropped = r.dropped
 			f.started = true
 		}
-		n := len(f.authors)
-		if r.which == feedItems {
-			n = len(f.items)
-		}
-		p.adopt(r.cursor, n, r.hasMore)
+		// ⚠️ 传的是**这一页**返回了几行，不是累计的：累计的数在「第一页就空」
+		// 和「翻到一半这一页空」上分不出来，而后者恰恰是「到头了」。
+		p.adopt(r.cursor, len(r.dyns)+len(r.authors), r.hasMore)
 	}
 }

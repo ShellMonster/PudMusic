@@ -20,7 +20,7 @@ import (
 
 // dynamicCoverW / dynamicCoverH 是投稿那一块的封面尺寸。
 //
-// B ���那边是 `h-32 w-48`（`dynamic-feed/item.tsx:118`），比例 1.5:1。
+// Biu 那边是 `h-32 w-48`（`dynamic-feed/item.tsx:118`），比例 1.5:1。
 const (
 	dynamicCoverW = 132
 	dynamicCoverH = 88

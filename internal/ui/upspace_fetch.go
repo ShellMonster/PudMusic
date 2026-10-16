@@ -42,7 +42,7 @@ func (s *Shell) fetchVideos(ctx context.Context, mid int64, page int) (list.Page
 		songs = append(songs, list.Music{
 			// 🔴 铁律四：行的身份带上 mid。两个 UP 各自的投稿 Tab 是两个
 			// PagedList（各有一份行），bvid 全局唯一本来够用——带上 mid 是
-			// 为了万�� B 站哪天给了重号时两页不会撞。
+			// 为了万一 B 站哪天给了重号时两页不会撞。
 			ID:       "up:" + strconv.FormatInt(mid, 10) + ":" + v.Bvid,
 			Title:    v.Title,
 			Cover:    v.Cover,
@@ -59,7 +59,9 @@ func (s *Shell) fetchVideos(ctx context.Context, mid int64, page int) (list.Page
 // ⚠️ **自己 recover**：界面那一层的 recover（行级的、页级的）一个都接不到
 // 它——Go 里没人在跑那个 goroutine，而这一段正是「解析接口返回」的地方，
 // B 站改一个字段就是在这一行炸。崩了当成一个错投进信箱，走正常那条路。
-func (s *Shell) fetchUp(ctx context.Context, sp *upSpace, tab int, gen uint64) {
+// cursor 和 page 是**调用方（界面线程）**在开这一拉那一刻读出来的
+// 闸门状态，不是这里自己读的——闸门是界面线程的状态，后台碰它就是数据竞争。
+func (s *Shell) fetchUp(ctx context.Context, sp *upSpace, tab int, cursor string, page int) {
 	var r upResult
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -74,12 +76,11 @@ func (s *Shell) fetchUp(ctx context.Context, sp *upSpace, tab int, gen uint64) {
 		s.wake.invalidate()
 	}()
 
-	r = upResult{gen: gen, tab: tab}
-	p := sp.pagerOf(tab)
+	r = upResult{tab: tab}
 
 	switch tab {
 	case upTabDynamic:
-		pg, err := s.app.UpDynamics(ctx, sp.mid, p.cursor)
+		pg, err := s.app.UpDynamics(ctx, sp.mid, cursor)
 		r.err, r.dyns, r.hasMore, r.dropped = err, pg.Items, pg.HasMore, pg.Dropped
 		r.cursor = pg.Offset
 	case upTabCollection:
@@ -88,7 +89,7 @@ func (s *Shell) fetchUp(ctx context.Context, sp *upSpace, tab int, gen uint64) {
 		cols, err := s.app.UpCollections(ctx, sp.mid)
 		r.err, r.cols, r.hasMore = err, cols, false
 	case upTabSeries:
-		pg, err := s.app.UpSeries(ctx, sp.mid, p.page+1, upSeriesPageSize)
+		pg, err := s.app.UpSeries(ctx, sp.mid, page+1, upSeriesPageSize)
 		r.err, r.cols, r.hasMore = err, pg.Collections, pg.HasMore
 	}
 }
@@ -105,11 +106,9 @@ func (s *Shell) adoptUp(sp *upSpace) {
 
 	for _, r := range box {
 		p := sp.pagerOf(r.tab)
-		// ⚠️ **`settle` 必须先调**：代次对不上也是「这一拉结束了」，
-		// 不解开闸门的话那一格会永远停在「正在加载」。
-		if !p.settle(r.gen) {
-			continue // 换 Tab 之前的那个请求。它说什么都不作数。
-		}
+		// ⚠️ **`settle` 必须先调**：失败、超时、返回不对、拉取的代码崩了，
+		// 全走这一条。漏了它那一格会永远停在「正在加载」。
+		p.settle()
 		if r.err != nil {
 			p.err = r.err
 			log.Printf("biu: UP 空间的「%s」拉失败了：%v", upTabNames[r.tab], r.err)
@@ -120,6 +119,6 @@ func (s *Shell) adoptUp(sp *upSpace) {
 		sp.dynItems = append(sp.dynItems, r.dyns...)
 		sp.cols[r.tab] = append(sp.cols[r.tab], r.cols...)
 		sp.dropped[r.tab] = r.dropped
-		p.adopt(r.cursor, upRowCount(sp, r.tab), r.hasMore)
+		p.adopt(r.cursor, len(r.dyns)+len(r.cols), r.hasMore)
 	}
 }

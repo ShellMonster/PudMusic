@@ -15,9 +15,18 @@ import (
 // 头图和状态在 upspace.go，卡片在 dynamiccard.go，取数在 upspace_fetch.go。
 // 这里只管「哪一张 Tab、这一张画什么」。
 
-// 点击、左右方向键、Home/End 全是框架给的，我们不去重写。
+// viewSpaceTabs 是那一条 Tab。
+//
+// 用的是 MyGo 自带的 `ui.Tabs`（`selected` 绑的是 sp.tab 那个地址）——点击、
+// 左右方向键、Home/End 全是框架给的，我们不去重写。
 func (s *Shell) viewSpaceTabs(c *ui.Context, sp *upSpace) {
-	ui.Tabs(c, &sp.tab, upTabNames...).Key("space-tabs").PaddingX(upPad)
+	// ⚠️ **Key 挂在外面的 Column 上，不能挂在 Tabs 上**：Tabs 是「自己管状态」
+	// 的那一类控件（Checkbox/Radio/Slider/List/TextInput 都一样），框架造它
+	// 的时候就把状态建好了，事后再挂 key 会 panic（`ui/element.go` 的 `Key`）。
+	// 给他外面套一层是最省事的做法。
+	ui.Column(c).Key("space-tabs").PaddingX(upPad).Children(func() {
+		ui.Tabs(c, &sp.tab, upTabNames...)
+	})
 }
 
 // viewSpaceTab 画当前那一张 Tab 的内容。
@@ -35,11 +44,22 @@ func (s *Shell) viewSpaceTab(c *ui.Context, sp *upSpace) {
 // 回顶按钮、行的稳定 key 全做完了（`internal/ui/widgets/list/paged.go`），
 // 这里再写一份就是两套翻页逻辑迟早对不上。
 func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
+	// ⚠️ **第一页必须在这里发出去，不能等 `PagedList` 自己那一发**。
+	//
+	// `PagedList` 是在自己的 `View` 里发第一页的（`if p.page == 0`），而下面
+	// 那一支在「还没加载过」时**不调 View**——于是第一页永远发不出去，
+	// 界面上是「暂无投稿」停在那儿，而 B 站那边一条都没拉过。
+	// `NewPaged` 的注释也写着「新页面不在构造器里拉第一页，由第一帧的 view 拉」。
+	if !sp.videosStarted {
+		sp.videosStarted = true
+		sp.videos.Reload()
+	}
+
 	p := sp.videos.Paged()
 	// 一条都没有、也没在拉、也没出错 = 真的没有投稿。这时候画空状态而不是
 	// 画一个空列表：`PagedList` 在这种时候把列表自己的空状态设成空串
 	// （见 paged.go 的 syncList），画出来是一片白。
-	if p.Loaded == 0 && !p.Loading && p.Err == nil {
+	if sp.videosStarted && p.Loaded == 0 && !p.Loading && p.Err == nil {
 		s.viewEmpty(c, "space:video:"+strconv.FormatInt(sp.mid, 10), emptyState{
 			Title: "暂无投稿",
 			Hint:  "他还没有投稿，或者换一个 UP 主看看",
@@ -55,13 +75,18 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	p := sp.pagerOf(tab)
 
-	// ① 首屏那一拉，必须在**画之前**发出去。
-	if ctx, gen := p.begin(); ctx != nil {
-		go s.fetchUp(ctx, sp, tab, gen)
+	// ① 首屏那一拉，必须在**画之前**发出去。翻回来的那几张 Tab 已经
+	// `started` 了，`begin` 会返回 nil —— 不会重拉，也不会重复追加。
+	//
+	// ⚠️ **cursor 和 page 在这里读，不在后台那条线上读**：闸门是界面线程的
+	// 状态（铁律一），后台碰它就是数据竞争。真机上平时看不出来（拉一趟就
+	// 回来了），而在慢帧上那一次读会和这一帧的 `adopt` 写撞上。
+	if ctx := p.begin(); ctx != nil {
+		go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
 	}
 
 	if !p.started && p.loading {
-		// 一条都还没有：第一页在途。这��就是它全部的内容。
+		// 一条都还没有：第一页在途。这一句就是它全部的内容。
 		s.viewEmpty(c, upEmptyKey(sp, tab), emptyState{Title: "正在加载" + upTabNames[tab] + "…"})
 		return
 	}
@@ -81,28 +106,35 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 
 	st := &sp.state[tab]
 	// 🔴 铁律四：行身份是这一行自己的 key，不是下标。每一帧重装是为了让
-	// 「忘了装」这件事不可能发生（漏了的话 `TestRowsKeepTheirIdentity...` 会红）。
+	// 「忘了装」这件事不可能发生（漏了的话 `TestADynamicKeepsItsIdentity...`
+	// 会红，见 upspace_test.go）。
 	st.Key = func(i int) any { return upRowKey(sp, tab, i) }
 	st.Label = func(i int) string { return upRowLabel(sp, tab, i) }
 
-	ui.List(c, st, rows).
-		Key("space-list:" + strconv.FormatInt(sp.mid, 10) + ":" + upTabNames[tab]).
-		Grow(1).FillHeight().FillWidth().
-		Rows(func(r ui.ListRow) {
-			// 🔴 行里 panic 会一路穿出 Cocoa 事件循环把进程带走。每一行
-			// 自己兜一层，**只废掉这一行**（页级的 Shell.page 接的是整棵树，
-			// 两者不重复）。
-			defer func() {
-				if rec := recover(); rec != nil {
-					log.Printf("biu: UP 空间那一行画崩了（%s）：%v\n%s",
-						upRowKey(sp, tab, r.Index), rec, debug.Stack())
-				}
-			}()
-			if r.Index >= upRowCount(sp, tab) {
-				s.viewUpSentinel(r.Context, sp, tab)
-				return
-			}
-			s.viewUpRow(r.Context, sp, tab, r.Index)
+	// ⚠️ **外面套一层 Column 有两个缘故**，少一个都踩坑：
+	//   - List 是自己管状态的控件，Key 只能挂在外面的元素上（见 element.go）；
+	//   - 滚动容器**直接**当别的容器的下一层时，它里面文字的盒子量出来是
+	//     0×0（BMG-16 记着的 Tester 那个坑），套一层就正常。
+	ui.Column(c).Key("space-list:" + upTabNames[tab]).Grow(1).FillHeight().
+		Children(func() {
+			ui.List(c, st, rows).
+				Grow(1).FillHeight().FillWidth().
+				Rows(func(r ui.ListRow) {
+					// 🔴 行里 panic 会一路穿出 Cocoa 事件循环把进程带走。每一行
+					// 自己兜一层，**只废掉这一行**（页级的 Shell.page 接的是整棵树，
+					// 两者不重复）。
+					defer func() {
+						if rec := recover(); rec != nil {
+							log.Printf("biu: UP 空间那一行画崩了（%s）：%v\n%s",
+								upRowKey(sp, tab, r.Index), rec, debug.Stack())
+						}
+					}()
+					if r.Index >= upRowCount(sp, tab) {
+						s.viewUpSentinel(r.Context, sp, tab)
+						return
+					}
+					s.viewUpRow(r.Context, sp, tab, r.Index)
+				})
 		})
 
 	// ②滚到底 ③加载后再查一遍。
@@ -112,8 +144,8 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	// 「滚到底了不加载」，少 ③ 是「他只有一页，底下留一大片空白还一直转圈」。
 	if p.want() {
 		if _, last := st.Visible(); last >= rows-1 {
-			if ctx, gen := p.begin(); ctx != nil {
-				go s.fetchUp(ctx, sp, tab, gen)
+			if ctx := p.begin(); ctx != nil {
+				go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
 			}
 		}
 	}
@@ -216,8 +248,8 @@ func (s *Shell) viewUpSentinel(c *ui.Context, sp *upSpace, tab int) {
 			ui.Text(c, "加载失败："+p.err.Error()).FontSize(13).TextColor(t.TextMuted)
 			if ui.Button(c, "重试").FontSize(13).Clicked() {
 				p.err = nil
-				if ctx, gen := p.begin(); ctx != nil {
-					go s.fetchUp(ctx, sp, tab, gen)
+				if ctx := p.begin(); ctx != nil {
+					go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
 				}
 			}
 		case p.loading:

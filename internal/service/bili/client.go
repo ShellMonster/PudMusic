@@ -330,6 +330,16 @@ func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("bili: 造请求: %w", err)
 	}
+	// ⚠️ **有表单体就必须带这个头**，不是锦上添花：B 站那边是 servlet，
+	// 少了 `application/x-www-form-urlencoded` 它**不会**去解析请求体，
+	// 于是 `fid` / `act` 全是空的——而返回多半还是 HTTP 200 + code 0。
+	// 表现是「关注按下去什么也没变」，一句错都没有。
+	//
+	// 这条是 2026-10-16 加的：`ModifyRelation`（关注/取关）是第一个真的带
+	// 表单参数的接口。之前那个退登接口发的是空表单，所以缺了也没人发现。
+	if call.Form != nil {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
 	c.setHeaders(req, csrf)
 
 	if c.onReq != nil {

@@ -266,7 +266,7 @@ func (c *Client) RelationStatOf(ctx context.Context, vmid int64) (*RelationStat,
 		Follower  int64 `json:"follower"`
 	}
 	if err := json.Unmarshal(raw, &d); err != nil {
-		return nil, fmt.Errorf("bili: 关注数��返回读不懂：%w", err)
+		return nil, fmt.Errorf("bili: 关注数那一份返回读不懂：%w", err)
 	}
 	return &RelationStat{Following: d.Following, Follower: d.Follower}, nil
 }
@@ -328,7 +328,7 @@ type UpVideo struct {
 	// Cid 是第一集的 cid。
 	//
 	// ⚠️ **必须有**：B 站的取流接口不给 cid 会取到**第一集**。多 P 投稿的
-	// 第三集放出来是��一集，不报错。
+	// 第三集放出来是第一集，不报错。
 	Cid string
 }
 
