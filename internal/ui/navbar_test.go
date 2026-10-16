@@ -189,6 +189,11 @@ func TestSearchSuggestsHistoryAfterTyping(t *testing.T) {
 }
 
 // TestSuggestCollapsesWhenSelectingOne 验「选中一条」会收起浮层。
+// TestSuggestCollapsesWhenSelectingOne 也钉着面板上那个 KeepFocus。
+//
+// 少了它，点历史那一条会先把焦点抢到那个按钮上，「失焦就收」在按下那一帧就成立，
+// 浮层在 Children 之前就没了，那一条根本点不到——实测下来「选中」变成了「停在
+// 首页」。摘掉 KeepFocus，这一��立刻红。
 func TestSuggestCollapsesWhenSelectingOne(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
@@ -317,6 +322,61 @@ func TestSubmittingSearchRecordsHistory(t *testing.T) {
 	}
 	if s.searchSuggest {
 		t.Error("回车之后浮层还开着")
+	}
+}
+
+// TestSubmittingSearchCarriesTheWordToThePage 验回车之后那个词真的到了搜索页。
+//
+// 这一条盯的是两半接起来：顶栏把词放在 URL 的 `q` 上（navbar_search.go 的
+// submitSearch），搜索页从 URL 上取 `q`（searchpage.go 的 viewSearch）。少任何
+// 一半，用户看到的都是「刚敲的词还在顶栏框里，正文却说请输入搜索词」——那句话
+// 在屏幕上摆着，一眼就是坏了。
+func TestSubmittingSearchCarriesTheWordToThePage(t *testing.T) {
+	s, tt := newShell(t)
+	tt.SetFocused(true)
+	tt.Frame()
+
+	tt.Click(searchLabel)
+	tt.Type("周杰伦")
+	tt.Key(0, mygoui.KeyEnter)
+
+	if got := s.router.Query(searchQuery); got != "周杰伦" {
+		t.Fatalf("URL 上的 q 是 %q，want 周杰伦", got)
+	}
+	if got := s.router.Path(); got != searchPath {
+		t.Errorf("提交之后在 %q，want %q", got, searchPath)
+	}
+	// 页面上画的是「搜了没有结果」那一支，不是「还没输入」那一支——
+	// 后者的正文写着「在上面的搜索框里输入歌名或 UP 主」，正是这条要防的。
+	if !tt.HasText(noSearchResults.Hint) {
+		t.Errorf("页面上没有「没有结果」那一句，文字有 %q", tt.Texts())
+	}
+	if tt.HasText(searchIdle.Hint) {
+		t.Errorf("页面上还是「还没输入」那一支，文字有 %q", tt.Texts())
+	}
+}
+
+// TestPickingAHistoryFillsTheBoxBack 验点浮层里的一条历史会把词填回顶栏框。
+//
+// Biu 上游是 `setValue(item.value)`（`search/index.tsx:154`）。不填的话框里留着
+// 用户敲的半截字，而页面搜的是这一条——两处对不上。
+func TestPickingAHistoryFillsTheBoxBack(t *testing.T) {
+	s, tt := newShell(t)
+	tt.SetFocused(true)
+	s.hist.add("林俊杰")
+	tt.Frame()
+
+	tt.Click(searchLabel)
+	tt.Type("杰")
+	if err := tt.Click("林俊杰"); err != nil {
+		t.Fatalf("点不到那条历史：%v，文字有 %q", err, tt.Texts())
+	}
+
+	if got := s.searchKeyword; got != "林俊杰" {
+		t.Errorf("点完之后顶栏框里是 %q，want 林俊杰", got)
+	}
+	if got := s.router.Query(searchQuery); got != "林俊杰" {
+		t.Errorf("URL 上的 q 是 %q，want 林俊杰", got)
 	}
 }
 
@@ -496,7 +556,60 @@ func TestDynamicDotPollsEveryFiveMinutes(t *testing.T) {
 	}
 }
 
-// TestDynamicDotShowsAndClears 验有更新时红点出来，点进去就清掉。
+// TestTheFeedPollerWakesTheWindowWhenTheIntervalElapses 验那一路「到点叫醒界面」
+// 的定时器真的在跑，而且 disarm 之后就不响了。
+//
+// 为什么单独拆一条：这一条验的是**定时器本身**（到点醒一次、每 interval 一次、
+// 停了就不响）。它不能写成「窗口静止着，推进时钟，红点自己就亮了」——无头 Tester
+// 的 `settle` 只在 `Frame()` / `Click()` 里跑（`ui/headless.go:214`），后台那个
+// 定时器调 `Invalidate` 只是把 `requested` 置上，没人驱动就没有帧。所以「定时器
+// 醒了 → 那一帧被画出来 → view 问了 tick」这半截在无头里验不了，能验的是前两截。
+// 接线那一截（view 每帧都调了 arm）由下面那条盯着。
+func TestTheFeedPollerWakesTheWindowWhenTheIntervalElapses(t *testing.T) {
+	clock := newFakeClock(fakeClockStart)
+	p := newFeedPoller(wantFeedInterval, nil)
+	woke := 0
+	p.arm(clock, func() { woke++ })
+
+	clock.Advance(wantFeedInterval - time.Millisecond)
+	if woke != 0 {
+		t.Fatalf("离 5 分钟还差 1ms 就已经叫醒了 %d 次", woke)
+	}
+	clock.Advance(time.Millisecond)
+	if woke != 1 {
+		t.Fatalf("到 5 分钟叫醒了 %d 次，want 1", woke)
+	}
+	clock.Advance(wantFeedInterval)
+	if woke != 2 {
+		t.Fatalf("到 10 分钟叫醒了 %d 次，want 2", woke)
+	}
+
+	p.disarm()
+	clock.Advance(wantFeedInterval)
+	if woke != 2 {
+		t.Errorf("disarm 之后还叫醒了，总数 %d，want 2", woke)
+	}
+	// 重复 disarm 是安全的（关窗收尾那条路可能走到两次）。
+	p.disarm()
+}
+
+// TestTheRedDotIsArmedWhileTheWindowIsUp 盯住接线那一截：只要顶栏画着，这一路
+// 定时器就得在。
+//
+// 没有它的话「arm 写了但没人调」就是一个永远绿的测试——而症状（窗口静止时红点不
+// 亮）要等五分钟才看得见一次。
+func TestTheRedDotIsArmedWhileTheWindowIsUp(t *testing.T) {
+	s, tt := newShell(t)
+	tt.SetFocused(true)
+	tt.Frame()
+
+	if s.feed.stop == nil {
+		t.Fatal("顶栏画过了，那一路「到点叫醒」的定时器却没装上：" +
+			"窗口静止时没有人画帧，于是到点了也没人去轮询")
+	}
+}
+
+// TestDynamicDotShowsAndClears 验有更新时红点出来，点进去就清掉。// TestDynamicDotShowsAndClears 验有更新时红点出来，点进去就清掉。
 func TestDynamicDotShowsAndClears(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
@@ -527,10 +640,6 @@ func TestDynamicDotShowsAndClears(t *testing.T) {
 	}
 }
 
-// TestSuggestCollapsesWhenSelectingOne 也是 KeepFocus 那一条的回归证据：
-// 少了面板上的 KeepFocus，点历史那一条会先把焦点抢到按钮上，「失焦就收」
-// 那一支在按下那一帧就成立，浮层在 Children 之前就没了，那一条根本点不到
-// （实测：选中变成了「停在首页」）。摘掉 KeepFocus 这一条就会红。
 func TestSearchClearButtonEmptiesTheField(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
@@ -552,7 +661,7 @@ func TestSearchClearButtonEmptiesTheField(t *testing.T) {
 	if s.searchKeyword != "" {
 		t.Errorf("清空之后搜索框里还有 %q", s.searchKeyword)
 	}
-	// 「清空」这个按钮只在框里有字的时候才画（`viewSearch` 里那一支）。它没了
+	// 「清空」这个按钮只在框里有字的时候才画（`viewSearchBox` 里那一支）。它没了
 	// 就是框里空了——输入框画出来的字是 bound value 驱动的（`ui/textinput.go:53`：
 	// 每帧拿 bound value 对一次，不一致就重设编辑器），所以值一空画面跟着空。
 	// 这一条断的就是「只清了变量、画面上的字还在」。
@@ -605,6 +714,61 @@ func TestSuggestClearAllEmptiesTheHistory(t *testing.T) {
 	// 一条都没有了，浮层就不该再摆一块空板子。
 	if tt.HasText("搜索历史") {
 		t.Errorf("清空之后浮层还摆着，文字有 %q", tt.Texts())
+	}
+}
+
+// TestLeavingTheSearchPageMidTransitionDoesNotCrashTheWindow 验从 /search 离开时
+// 不崩。
+//
+// 这一条是顶栏搜索框**回车之后最顺手的一步**就会踩到的：搜完随手点返回，或者点
+// 侧栏第一项。崩起来是整个窗口变成「界面出错了」——不是某一页坏了，是窗口坏了。
+//
+// 崩在搜索页的 `c.Router().Query(...)`：换页动画还没走完时，**正在离场
+// 的那一页**会被重新建一遍，而 MyGo 建离场页时故意不设 `c.router`
+// （`mygo/router.go:685`，`Context.Router` 的文档也写着 "or nil outside one"）。
+//
+// ⚠️ 这一条必须把切页动画**打开**（生产默认就是自动滑动）。`newShell` 为了让
+// 截图可复现把它关了，关着的时候离场页根本不重建，这条就永远是绿的——**测试
+// 绿了不算验过**。
+func TestLeavingTheSearchPageMidTransitionDoesNotCrashTheWindow(t *testing.T) {
+	s, tt := newShell(t)
+	s.router.Transition = mygoui.TransitionAuto
+	tt.SetFocused(true)
+
+	tt.Click(searchLabel)
+	tt.Type("周杰伦")
+	tt.Key(0, mygoui.KeyEnter)
+	if got := s.router.Path(); got != searchPath {
+		t.Fatalf("提交之后在 %q，want %q", got, searchPath)
+	}
+
+	// 返回按钮：走的是「回到上一页」那条路。
+	back, ok := tt.Find("Back")
+	if !ok {
+		t.Fatalf("没有后退，文字有 %q", tt.Texts())
+	}
+	tt.ClickAt(back.X+back.W/2, back.Y+back.H/2)
+	if s.crash != nil {
+		t.Errorf("点返回之后崩了：%v", s.crash)
+	}
+
+	// 侧栏第一项：换的是**另一条**路由，而搜索页仍在历史里躺着，一样要被重建。
+	if got := s.router.Path(); got != "/" {
+		t.Fatalf("点返回之后在 %q，want /", got)
+	}
+	if err := tt.Click(searchLabel); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("林俊杰")
+	tt.Key(0, mygoui.KeyEnter)
+	if err := tt.Click("我的关注"); err != nil {
+		t.Fatalf("点不到侧栏：%v，文字有 %q", err, tt.Texts())
+	}
+	if s.crash != nil {
+		t.Errorf("点侧栏之后崩了：%v", s.crash)
+	}
+	if got := s.router.Path(); got != "/follow" {
+		t.Errorf("点侧栏之后在 %q，want /follow", got)
 	}
 }
 

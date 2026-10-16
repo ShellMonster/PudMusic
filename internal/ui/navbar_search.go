@@ -36,6 +36,7 @@
 package ui
 
 import (
+	"net/url"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -203,6 +204,11 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 		Background(t.Surface).Border(1, t.Border).
 		Padding(2, 4, 2, 8).Gap(4).AlignItems(ui.Center).Children(func() {
 		if ui.Button(c, label).FontSize(12).Clicked() {
+			// ⚠️ **先把词填回框里**（Biu 的 `setValue(item.value)`，
+			// `search/index.tsx:154`）。不填的话用户点完历史，框里还是原来敲的
+			// 半截字，而页面那边搜的是这一条——两处对不上，按返回再回来还会
+			// 看到那个错的词。
+			s.searchKeyword = item.Value
 			s.submitSearch(item.Value)
 		}
 		// 删这一条。Biu 的 onClose。
@@ -216,19 +222,31 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 	})
 }
 
-// submitSearch 是「拿这个词去搜」：记进历史、切到搜索页、收起浮层。
+// submitSearch 是「拿这个词去搜」：记进历史、带着词切到搜索页、收起浮层。
 //
 // 逐条照 Biu 的 `submitSearch`（`search/index.tsx:52-61`）：空词不进历史；
-// 已经记过的那条挪到最前（`add` 里做的）；已经在搜索页就不再切一次。
+// 已经记过的那条挪到最前（`add` 里做的）。
+//
+// ⚠️ **词要跟着 URL 走**（`?q=…`），Biu 也是 `navigate("/search?q=" + keyword)`。
+// 不带的话用户回车之后落在搜索页的「还没输入」那一支：正文写着「在上面的搜索框里
+// 输入歌名或 UP 主」，而他刚敲的词还留在顶栏那个框里——从页面上看就是一句话也搜
+// 不成。搜索页从 URL 上取 `q`（见 searchpage.go 的 `searchQuery`），所以这里
+// 是那条链路的另一半，两头必须一起改。
+//
+// ⚠️ 已经在搜索页上时**不重发** `navigate`：同一个 target 再 push 一次会在历史里
+// 连着留两条一样的（`Router.Push` 不去重），返回键要按两下才回得去。
 func (s *Shell) submitSearch(keyword string) {
-	if strings.TrimSpace(keyword) == "" {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
 		return
 	}
 	s.hist.add(keyword)
 	s.searchSuggest = false
-	if s.router.Path() != searchPath {
-		s.navigate(searchPath)
+	target := searchPath + "?" + searchQuery + "=" + url.QueryEscape(keyword)
+	if s.router.Location() == target {
+		return
 	}
+	s.navigate(target)
 }
 
 // viewSearchClear 是搜索框右边那个清空按钮（Biu 的 `isClearable`）。

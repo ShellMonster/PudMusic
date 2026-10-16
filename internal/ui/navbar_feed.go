@@ -18,11 +18,19 @@
 // 所以 `tick` 收一个 `clockSource` 当参数：换一个 Shell.clock，这个节奏跟着换，
 // 不用记得再去改第二个地方。5 分钟的节奏在测试里是毫秒级的，**不用 time.Sleep**。
 //
-// 节奏本身是**帧驱动**的：`tick` 只看「现在到没到下一轮」，到没到由 view 在每一帧
-// 问一次。不用 `EveryFunc` 那个后台定时器，是因为后台定时器要么在真窗口里让界面
-// 停在旧帧（铁律三：只投递不唤醒 = 0 帧刷新），要么就得自己再维护一条唤醒链。
-// 帧驱动顺带把「没画帧就不轮询」变成了一个白拿的性质：界面没在动的时候本来就没人
-// 看得见红点。
+// ## 节奏是「帧驱动 + 到点叫醒」，两半缺一不可
+//
+// `tick` 只看「现在到没到下一轮」，问它的是 view——而 view 只在有帧的时候跑。
+// 只做这一半的话，窗口静止时 MyGo 根本不画帧，于是**到点了也不会有人去轮询**：
+// 红点要等到下一次碰巧有东西重画时才亮，而不是满 5 分钟就亮（实测：静置一分钟
+// 灌进 3 条更新，画面上什么都没有）。
+//
+// 所以另一半是 `arm`：每 `interval` 一次 `EveryFunc`，回调里**只**调
+// `wake.invalidate()` 要一帧，下一帧 view 自然就会问一次 `tick`。
+//
+// ⚠️ 回调里一个字都不许写 Shell 的字段（clock.go 的硬规矩）：定时器跑在后台
+// goroutine 上，而界面状态是主线程单点写入的（铁律一）。`wakeHandle.invalidate`
+// 自带锁，它内部存的是窗口的弱引用，所以这条唤醒链是并���安全的。
 package ui
 
 import (
@@ -63,6 +71,11 @@ type feedPoller struct {
 	next time.Time
 	// count 是上一次拿回来的条数，0 就不画红点。
 	count int
+	// stop 是「到点叫醒界面」那个定时器的停法，nil 表示没装。
+	//
+	// 只在主线程上读写（arm / disarm 都由 view 调），后台那个定时器只调 wake，
+	// 不碰这里——铁律一。
+	stop func()
 }
 
 // newFeedPoller 建一个节奏。fetch 为 nil 就是一个永远返回 0 的空拉。
@@ -95,10 +108,34 @@ func (p *feedPoller) clear() {
 	// Biu 也是只 `setUpdateCount(0)`（`user-feed/index.tsx:38`）。
 }
 
+// arm 装上「到点叫醒界面」的那一路，已经装过就什么都不做。
+//
+// 每一帧都调是安全的：装上了就直接返回。装完的那一趟从**这一刻**起每 interval
+// 醒一次，所以定时器和轮询时刻始终差着一个恒定的偏移（第一次装上的那一帧），
+// 而那个偏移小到看不见。
+func (p *feedPoller) arm(c clockSource, wake func()) {
+	if p.stop != nil {
+		return
+	}
+	p.stop = c.EveryFunc(p.interval, wake)
+}
+
+// disarm 停掉那一路。窗口真关掉之后 `Invalidate` 对它是 no-op，但它还会一直每
+// 五分钟醒一次到进程退出，所以要在收尾的地方停掉（见 shell.go 的 Attach）。
+func (p *feedPoller) disarm() {
+	if p.stop != nil {
+		p.stop()
+		p.stop = nil
+	}
+}
+
 // viewDynamicDot 是顶栏上的「动态」那一格：有新动态时右上角一个圆点。
 func (s *Shell) viewDynamicDot(c *ui.Context) {
 	t := c.Theme()
 	count := s.feed.tick(s.clock)
+	// ⚠️ 这一句是「窗口静止时也会轮询」的全部保证：光靠上面那一行，静止的窗口
+	// 永远没人问。到点的那一趟把界面叫醒，下一帧上面就会问。
+	s.feed.arm(s.clock, s.wake.invalidate)
 
 	// Biu 只在登录后摆这一格（`navbar/index.tsx:38` 的 `{Boolean(user?.isLogin) && ...}`）。
 	// 这里**没按登录态隐藏**——和头像下拉那六项同一个理由（见 navbar_avatar.go

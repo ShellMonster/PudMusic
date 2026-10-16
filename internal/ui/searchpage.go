@@ -56,11 +56,27 @@ const searchPageMaxWidth = 420
 // 这一版没有后端，结果区永远是空的——所以这一支就是现在真会发生的事，页面画
 // 的和实际状态是对得上的。等到阶段 5 把 P-08 的接口接进来，这一支自然换成
 // 「有结果时列结果、没有时画这一句」，页面结构一个字都不用改。
-func (s *Shell) viewSearch(c *ui.Context, _ *ui.Route) {
+func (s *Shell) viewSearch(c *ui.Context, r *ui.Route) {
 	// 🔴 铁律二：页面 view 的头一件正事就是装主题（见 theme.go）。
 	s.applyFrameTheme(c)
 
-	keyword := c.Router().Query(searchQuery)
+	// 🔴 **问 `r`，不要问 `c.Router()`。**
+	//
+	// 换页动画还没走完时，**正在离场的那一页**会被重新建一遍（`Router.View` 的
+	// leaving 那一支），而 MyGo 建离场页时**故意不设 `c.router`**
+	// （`mygo/router.go:685`），`Context.Router()` 的文档也写着
+	// 「or nil outside one」。于是 `c.Router().Query(...)` 在那一帧就是空指针
+	// 解引用，整个窗口被换成错误页。
+	//
+	// 症状：顶栏搜索框回车进这一页之后，只要在滑动还没走完时点返回（或点侧栏
+	// 第一项），就崩。别的目标（/follow、/settings…）不崩——只有**滑动型**换页
+	// 才重建离场的那一页，而 #46 那个 `s.router.Transition = None` 在生产里是
+	// 默认的自动动画。
+	//
+	// `(*ui.Route).Query` 读的是**它自己那条 entry 的 loc**（`mygo/router.go:447`），
+	// 正是这一页自己的查询串：离场重建时拿到的还是同一个 Route，所以既不会崩，
+	// 也不会在滑出去的那 250ms 里闪成另一个空状态。
+	keyword := r.Query(searchQuery)
 
 	ui.Column(c).Key("page:/search").Grow(1).Padding(28).Gap(16).AlignItems(ui.Stretch).
 		Children(func() {

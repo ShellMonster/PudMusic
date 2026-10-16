@@ -209,6 +209,10 @@ func (s *Shell) Attach(w *mygo.Window) {
 		if s.win == w {
 			s.win = nil
 		}
+		// 收掉红点那个每五分钟一跳的定时器（navbar_feed.go 的 arm）。和 404
+		// 那个一样：窗口真关了之后 Invalidate 对它是 no-op，留着不致命，但它会
+		// 一直醒到进程退出。
+		s.feed.disarm()
 		// 收掉 404 那个每秒一跳的定时器。窗口真关了之后 `Invalidate` 对它是
 		// no-op，留着不致命，但它会一直每秒钟醒一次到进程退出。
 		//
