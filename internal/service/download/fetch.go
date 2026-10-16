@@ -185,7 +185,7 @@ func (m *Manager) prepare(id string, src *Source, length int64) (string, error) 
 			// 那一个，于是那几百 MB 永远留在用户的下载目录里，界面上再也
 			// 没有任何东西指向它。（能走到这里说明分块记账已经空了：资源
 			// 身份对不上，或者上一轮一块都没下完而 `.part` 已经预分配了。）
-			_ = os.Remove(partPath(t.Dest)) // TEMP remove for commit test
+			_ = os.Remove(partPath(t.Dest))
 		}
 		t.Dest = dest
 		part = partPath(t.Dest)
