@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
 )
 
 // 本地音乐这一摊的测试跑在真磁盘上：真的建目录、真的写文件、真的删文件。
@@ -288,6 +290,86 @@ func TestChangingRootsToTheSameListDoesNothing(t *testing.T) {
 	}
 }
 
+// TestChangingRootsNeverShowsAnEmptyLibrary 钉住换根那一瞬间不能出现
+// 「已经扫完了、列表却是空的」。
+//
+// ⚠️ 症状是「搜了一下东西就没了，过一会儿又回来」：换根之后旧的那一批立刻
+// 从列表里清掉（那些歌确实不在新目录里），而新的一遍还在跑。这中间界面
+// 读到的那一份是 `tracks` 空 + `scanning` false，于是画「这里没有音频文件」
+// ——它在报一件还没发生的事。
+//
+// ⚠️ **每一次都要换成一个不一样的根**：连着两遍 `SetLocalRoots(同一个)` 是
+// 幂等的（`slicesEqual` 那一步就返回了），那样根本换不了根，这一遍扫描也就
+// 不会把还在飞的那一遍作废——而「作废」正是这条要验的那一段路。
+//
+// 拿掉修复的方式：`land` 在作废那一支直接 `return`（不读 `again`、不再扫一遍）——
+// 那一条是 `TestAScanVoidedByARootChangeStillFinishes` 在钉，两条一起兜住这一段。
+func TestChangingRootsNeverShowsAnEmptyLibrary(t *testing.T) {
+	roots := make([]string, 4)
+	for i := range roots {
+		roots[i] = t.TempDir()
+		song(t, roots[i], "歌.mp3")
+	}
+	f := newLib(t, roots[0])
+	f.app.StartLocalMusicWatch()
+	if got := len(waitScan(t, f.app).Tracks); got != 1 {
+		t.Fatalf("起手 %d 首", got)
+	}
+
+	// 反复换根，每换一次都在换的那一瞬间读一次状态。
+	for i := range 200 {
+		want := roots[i%len(roots)]
+		if want == f.app.LocalMusicState().Roots[0] {
+			want = roots[(i+1)%len(roots)]
+		}
+		f.app.SetLocalRoots([]string{want})
+		st := f.app.LocalMusicState()
+		if !st.Scanning && len(st.Tracks) == 0 {
+			t.Fatalf("换根的那一瞬间报的是「扫完了但一个文件都没有」")
+		}
+	}
+	// ⚠️ 而且最后**必须**落到「扫完了」：换根把还在飞的那一遍作废了，而正是
+	// 换根把「还要再扫一遍」记上的。作废那一支忘了管这个的话，
+	// `scanning` 永远停在 true——那一页永远转圈（`waitScan` 会超时）。
+	if got := len(waitScan(t, f.app).Tracks); got != 1 {
+		t.Errorf("换到最后停在 %d 首，want 1", got)
+	}
+}
+
+// TestAScanVoidedByARootChangeStillFinishes 单独把「作废 + 再要一遍」那一段拎
+// 出来钉。
+//
+// 症状：用户连着换目录（或者一边换一边按刷新），有一遍扫描是按老根算的、
+// 被作废了，而「还要再扫一遍」这个要求没人接——`scanning` 永远 true，
+// 那一页永远转圈，列表停在一个空状态上。
+//
+// 拿掉修复的方式：`land` 在作废那一支直接 `return`（不读 `again`、不再扫）。
+func TestAScanVoidedByARootChangeStillFinishes(t *testing.T) {
+	roots := make([]string, 6)
+	for i := range roots {
+		roots[i] = t.TempDir()
+		song(t, roots[i], "歌.mp3")
+	}
+	f := newLib(t, roots[0])
+	f.app.StartLocalMusicWatch()
+	waitScan(t, f.app)
+
+	// 连着换：每一个都可能在上一遍还在飞的时候到，于是反复作废。
+	for i := range 5 {
+		f.app.SetLocalRoots([]string{roots[i+1]})
+		f.app.RescanLocalMusic()
+	}
+	st := waitScan(t, f.app)
+	if !st.Scanning {
+		if len(st.Tracks) != 1 {
+			t.Errorf("停下来的时候扫到 %d 首，want 1", len(st.Tracks))
+		}
+		return
+	}
+	// 还在扫不算错，但最多再等它一会儿——它必须自己收尾。
+	waitUntilScan(t, f.app, 10*time.Second)
+}
+
 // TestConcurrentRescansDoNotStackUp 钉住防重入。
 //
 // 文件监听报告一次改动常常连着报好几次（改一个文件：写 + 移动 + 属性），
@@ -353,8 +435,14 @@ func TestDeleteOfAnUnknownIDTouchesNothing(t *testing.T) {
 
 	err := f.app.DeleteLocalTrack("根本不存在的一个 id")
 
-	if err == nil {
-		t.Fatal("删一个不存在的 id 竟然成功了")
+	// ⚠️ 断的**是哪一个错**，不是「有没有报错」。
+	//
+	// 本该报的是 `ErrMissing`（这一首已经不在列表里了）。如果实现改成
+	// 「拿 id 当路径直接删」，一个假 id 当然不在任何根下面，报的会是
+	// `ErrOutsideRoots`——**盘上的文件照样没动**（那一层还有一道），所以
+	// 「文件还在不在」验不到差别，只有这一个错能。
+	if !errors.Is(err, localmusic.ErrMissing) {
+		t.Fatalf("错是 %v，want localmusic.ErrMissing（这一首已经不在列表里了）", err)
 	}
 	if got := len(f.app.LocalMusicState().Tracks); got != 1 {
 		t.Errorf("失败的删除动了列表：还剩 %d 首，want 1", got)
@@ -462,6 +550,19 @@ func TestUsingAnUnmountedLibraryIsNotACrash(t *testing.T) {
 	a.StartLocalMusicWatch()
 	if err := a.DeleteLocalTrack("x"); !errors.Is(err, errLocalMusicMissing) {
 		t.Errorf("错是 %v，want errLocalMusicMissing", err)
+	}
+}
+
+// waitUntilScan 等扫描收尾，**上限 timeout**——`waitScan` 的 10 秒在这里
+// 太短：这条等的是「连着换了五次根之后最后一遍落地」。
+func waitUntilScan(t *testing.T, a *App, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for a.LocalMusicState().Scanning {
+		if time.Now().After(deadline) {
+			t.Fatalf("等了 %v 扫描还没收尾——永远转圈了", timeout)
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 }
 

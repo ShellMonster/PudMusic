@@ -50,8 +50,7 @@ var errLocalMusicMissing = errors.New("本地音乐还没接上")
 type DirWatch interface {
 	// Watch 盯 dir，变了调 onChange，返回停掉它的动作。
 	//
-	// ⚠️ onChange 在**它自己的 goroutine** 上调，而且可能连着来好几���
-	// 实现必须自己防抖。这一层的做法是扫描带代次 + 在飞的那次没回来就
+	// ⚠️ onChange 在**它自己的 goroutine** 上调，而且可能连着来好几次：	// 实现必须自己防抖。这一层的做法是扫描带代次 + 在飞的那次没回来就
 	// 不再起新的（见 `localLibrary.scan`）。
 	Watch(ctx context.Context, dir string, onChange func()) (stop func(), err error)
 }
@@ -256,7 +255,7 @@ func (a *App) SetLocalRoots(roots []string) {
 //
 // ⚠️ 这一条对**每个窗口**都要装一次，而这一层只存**一个**：所以界面层传
 // 进来的那个回调必须是「叫醒所有画过这一页的窗口」，不能只是主窗口那个。
-// 迷你窗口不画这一页的时候没关系，���它一旦画了（同一个 Shell 画两条路由）
+// 迷你窗口不画这一页的时候没关系，但它一旦画了（同一个 Shell 画两条路由）
 // 就得一起醒。实现见 `internal/ui/localmusic.go` 的 `localPage.invalidate`。
 func (a *App) SetLocalWake(fn func()) {
 	if lib := a.localMusicSnapshot(); lib != nil {
@@ -293,52 +292,96 @@ func (l *localLibrary) setWake(fn func()) {
 	l.mu.Unlock()
 }
 
-// scan 起一遍扫描，在飞的���遍没回来之前不重复起。
+// scan 起一遍扫描，在飞的那一遍没回来之前不重复起。
+//
+// ⚠️ `arm` 要在锁里调（它改 `flying` / `scanning` / `gen`），而 `launch`
+// **不能在锁里**调：它起一个 goroutine，那条 goroutine 落地时要拿同一把锁。
+// 所以锁只罩住 arm 这一句。
 func (l *localLibrary) scan() {
 	l.mu.Lock()
+	roots, prev, gen, ok := l.arm()
+	l.mu.Unlock()
+	if ok {
+		l.launch(roots, prev, gen)
+	}
+}
+
+// arm 决定「现在起不起一遍」，起的话把状态一次摆好。
+//
+// ⚠️ **必须持锁调**（它改 `flying` / `scanning` / `again` / `gen`）。两个调用点
+// 都守着这条：`scan` 自己在外面加了锁，`setRoots` 因为已经拿着锁所以直接调。
+//
+// 拆成 arm 和 run 两个函数只有一个理由：**中间不能有窗口**。
+// 「摆好状态」和「决定起不起」必须在同一把锁里做完，否则会出现这样一刻：
+// 根换了、`tracks` 清空了、`scanning` 还是 false、新的扫描还没起——界面读到
+// 这一份就画「这里没有音频文件」，下一帧那几首歌又冒出来（症状是「搜了一下
+// 东西就没了又回来」，`TestChangingRootsNeverShowsAnEmptyLibrary` 钉的就是它）。
+//
+// 抢不到（还在飞）时记一个 `again`，**不**把 `scanning` 落回去：在飞的那一遍
+// 起手时就已经把它置上了。
+func (l *localLibrary) arm() (roots []string, prev map[string]localmusic.Meta, gen uint64, ok bool) {
 	if l.closed {
-		l.mu.Unlock()
-		return
+		return nil, nil, 0, false
 	}
 	if l.flying {
 		l.again = true
-		l.mu.Unlock()
-		return
+		return nil, nil, 0, false
 	}
-	roots := append([]string(nil), l.roots...)
-	prev := l.cache
-	l.flying, l.scanning, l.again, l.gen = true, true, false, l.gen+1
-	gen := l.gen
+	roots, prev = append([]string(nil), l.roots...), l.cache
+	l.flying, l.scanning, l.again = true, true, false
+	l.gen++
+	return roots, prev, l.gen, true
+}
+
+// launch 把这一遍扫描放到后台 goroutine 上跑。
+//
+// ⚠️ **必须有这一步，而且必须在 `arm` 之后立刻做**。
+//
+// `arm` 只在锁里摆状态，真正的扫描是阻塞 IO（几千次 stat，每个没缓存上的文件
+// 还要开一次读一次标签）。直接在调用者的 goroutine 上跑它的话，「调用者」
+// 就是界面线程——`setRoots` 是每一帧从 `begin` 调的（`internal/ui/localmusic.go`），
+// 于是**每换一次目录，界面就卡住一整遍扫描的时间**。而目录筛选、手动刷新、
+// 文件监听这三个入口也都是同步调 `scan` 的，一个都跑不掉。
+//
+// `TestTheFirstScanIsNotOnTheCallingThread` 钉的就是这一句。
+func (l *localLibrary) launch(roots []string, prev map[string]localmusic.Meta, gen uint64) {
+	go func() {
+		res := localmusic.Scan(roots, prev)
+		l.land(res, gen)
+	}()
+}
+
+// land 把扫完的结果交回状态里。
+//
+// ⚠️ 这一段**不许**碰界面状态，它从后台 goroutine 上来：结果一律先落到锁
+// 里面，再通过 `wake` 去要一帧（只投递不唤醒 = 画面停在旧帧，实测 0 帧刷新）。
+func (l *localLibrary) land(res localmusic.Result, gen uint64) {
+	l.mu.Lock()
+	l.flying = false
+	// 作废的两种：应用关了，或者根在扫的时候换过（代次对不上，那一遍是按老根
+	// 算的）。作废的那一遍结果**不能**落地——用户换了目录，列表里不该还是旧的。
+	void := l.closed || gen != l.gen
+	if !void {
+		l.tracks, l.cache, l.scanErr = res.Tracks, res.Cache, res.Err
+	}
+	again := l.again
+	// ⚠️ `scanning` 只在「没人再要一遍」的时候才落回去。落早了就是界面读到
+	// 一次「扫完了」而列表还是空的。
+	if l.closed || (!void && !again) {
+		l.scanning = false
+	}
+	wake := l.wake
 	l.mu.Unlock()
 
-	go func() {
-		// ⚠️ 这一遍跑在后台，`Scan` 里有真实的磁盘 IO（几千次 stat，
-		// 每个没缓存上的文件还要开一次读一次标签）。它**不许**碰界面状态，
-		// 结果一律通过下面那个锁交回去。
-		res := localmusic.Scan(roots, prev)
-
-		l.mu.Lock()
-		l.flying = false
-		if l.closed || gen != l.gen {
-			// 换过根了：这一遍的结果按老根算的，扔掉。
-			l.mu.Unlock()
-			return
-		}
-		l.tracks, l.cache, l.scanErr = res.Tracks, res.Cache, res.Err
-		// 这一遍回来时用户又改了目录/又点了刷新：再扫一遍，
-		// 否则界面上停的是一份按老状态算出来的列表。
-		more := l.again
-		l.scanning = more
-		wake := l.wake
-		l.mu.Unlock()
-
-		if wake != nil {
-			wake()
-		}
-		if more {
-			l.scan()
-		}
-	}()
+	if wake != nil {
+		wake()
+	}
+	// ⚠️ **作废的那一支也得看 `again`**：换根会把还在飞的那一遍作废，而正是
+	// 换根把 `again` 置上的。在作废那一支直接 return 的话，`again` 就再也没人
+	// 管，`scanning` 永远停在 true——那一页永远转圈。
+	if again {
+		l.scan()
+	}
 }
 
 // setRoots 换根。换了就重扫、并且把文件监听挪到新的根上。
@@ -353,15 +396,18 @@ func (l *localLibrary) setRoots(roots []string) {
 	l.cache = map[string]localmusic.Meta{}
 	// 代次 +1：还在飞的那一遍是按老根算的，让它自己作废。
 	l.gen++
-	watch := l.watch
-	started := l.cancel != nil
+	// ⚠️ 在**同一把锁里**把新一轮 arm 好，不给「已清空但还没开扫」那个窗口。
+	scanRoots, prev, gen, ok := l.arm()
+	watch, started := l.watch, l.cancel != nil
 	l.mu.Unlock()
 
 	l.stopWatches()
 	if watch != nil && started {
 		l.startWatching()
 	}
-	l.scan()
+	if ok {
+		l.launch(scanRoots, prev, gen)
+	}
 }
 
 // startWatching 给每个根装一个监听。已经在盯就什么都不做。
