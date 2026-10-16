@@ -10,6 +10,8 @@
 // media.go 里（见「系统的词汇」那一段）。两个平台各占一个文件，不互相引用。
 package media
 
+import "time"
+
 // smtcStatus 是 `Windows.Media.MediaPlaybackStatus` 的值。
 //
 // ⚠️ **这些数字和 macOS 的不是一回事，两边差一位**：Windows 是
@@ -92,4 +94,29 @@ func smtcCommand(b smtcButton) (Command, bool) {
 		return CommandPrev, true
 	}
 	return CommandPlay, false
+}
+
+// ---- 时间 ----
+
+// windowsTicks 是 `Windows.Foundation.TimeSpan` 的单位：**100 纳秒**。
+//
+// ⚠️ **不是纳秒、也不是毫秒。** `time.Duration` 的底层单位就是纳秒，所以
+// 100 纳秒是 `100 * time.Nanosecond` —— 不是 `10 * time.Millisecond`
+// （那是 1000 万纳秒，**差十万倍**）。
+//
+// 差十万倍的症状是「歌才播了两秒，进度条走完了整首」，而歌名、按键、播放
+// 状态全都正常——只坏一根进度条，最难归因的那一种。所以它和这一张表放在
+// 一起而不是塞在 Windows 那一半：**这么容易写错的数字，必须能测**
+// （见 smtc_values_test.go 的 TestTicks）。
+const windowsTicks = 100 * time.Nanosecond
+
+// ticksOf 把时长换算成 Windows 的 100 纳秒单位。
+//
+// ⚠️ 往回夹到 0：负的 TimeSpan 传过去在那边是没有意义的（一个负的 EndTime），
+// 而它会变成「整根进度条画不出来」。
+func ticksOf(d time.Duration) int64 {
+	if d <= 0 {
+		return 0
+	}
+	return int64(d / windowsTicks)
 }

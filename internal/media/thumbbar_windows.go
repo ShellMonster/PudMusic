@@ -66,28 +66,6 @@ const (
 //
 // 结构体本身在 `winstruct.go`（不带平台标签：它的尺寸和偏移是能测的，测在那边）。
 
-// `dwMask` 的取值（shobjidl_core.h）。
-const (
-	thbmImageList = 0x00000001
-	thbmToolTip   = 0x00000002
-	thbmDisabled  = 0x00000004
-)
-
-// `dwFlags` 里的「这个按钮是灭的」。
-//
-// ⚠️ **和 `THBM_DISABLED` 不是同一个值，两处都得写**：前者负责画成灰色，
-// 后者负责让它真的按不动。只写前者的症状很特别——按钮看起来是灰的，
-// **按下去照样有反应**（Windows 仍把点击递给我们），于是「没有歌」的
-// 时候按上一首会放上一首。
-const thumbButtonDisabled = 0x00000004
-
-// ilcColor32 是 `ImageList_Create` 的 `ILC_COLOR32`。
-//
-// ⚠️ 它是 **0x4**，不是 0x40。写错的话位图被当成索引色的，而我们的颜色索引
-// 是 0/1/2/3——于是四个图标全被替换成调色板里的前四个颜色，界面上是一排
-// 纯色方块。
-const ilcColor32 = 0x00000004
-
 // `GetSystemMetrics` 的小图标尺寸。
 const (
 	smCXSmIcon = 49
@@ -155,8 +133,7 @@ func newThumbbar(hwnd uintptr, on func(Command, time.Duration)) (*thumbbar, erro
 	for _, p := range []*syscall.LazyProc{
 		procSetWindowSubclass, procDefSubclassProc, procRemoveWindowSubclass,
 		procImageListCreate, procImageListAdd, procImageListDestroy,
-		procImageListSetAlpha, procCreateDIBSection, procDeleteObject,
-		procCoCreateInstance,
+		procCreateDIBSection, procDeleteObject, procCoCreateInstance,
 	} {
 		if p.Find() != nil {
 			return nil, errPlatform("这个系统上少了一个任务栏需要的入口函数")
@@ -240,7 +217,10 @@ func thumbbarSubclassProc(hwnd, msg, wparam, lparam, idSubclass, refData uintptr
 			t.ensureAdded()
 		}
 	case wmCommand:
-		if t != nil {
+		// 高位是通知码 `THBN_CLICKED`，低位才是按钮 ID。**两段都要对**——
+		// 只看低位的话，同一个窗口上别的 `WM_COMMAND` 只要低位撞上就被
+		// 当成我们的按钮（见 thumbbar.go 里那个命令 ID 区间的理由）。
+		if t != nil && uint32(wparam>>16) == thbnClicked {
 			t.onClick(uint32(wparam & 0xFFFF))
 		}
 	}
@@ -353,16 +333,17 @@ func (t *thumbbar) push(bs [thumbbarCommandCount]thumbbarButton) {
 // 失败不重试也不退出：缩略图工具栏是**纯加分项**，它在不在都不影响浮窗、
 // 锁屏、播放和界面。
 func (t *thumbbar) callButtons(slot int, bs [thumbbarCommandCount]thumbbarButton) {
-	buttons, tips := buildThumbButtons(bs)
-	if hr := comCall(t.list, slot,
-		t.hwnd, uintptr(len(buttons)), uintptr(unsafe.Pointer(&buttons[0]))); hresultFailed(hr) {
-		logOnce("任务栏缩略图按钮调用失败", hresultError("ThumbBar", hr))
-		return
-	}
-	// tooltip 是**按指针**递过去的，系统那边会自己拷一份；返回之后我们就可以
-	// 收回了。但 Go 不保证这行之前参数还活着，所以显式 KeepAlive 一次。
-	runtime.KeepAlive(tips)
+	buttons := buildThumbButtons(bs)
+	// ⚠️ 这个 `len(buttons)` 是**给系统的**：它按「每个多少字节」来读，
+	// 而那个字节数是它自己那份定义定的（552）。我们这边结构体少一个字节，
+	// 它就多读 512 字节的邻居——所以 `winstruct_test.go` 那条布局测试
+	// 不是洁癖，是这一行的前提。
+	hr := comCall(t.list, slot,
+		t.hwnd, uintptr(len(buttons)), uintptr(unsafe.Pointer(&buttons[0])))
 	runtime.KeepAlive(buttons)
+	if hresultFailed(hr) {
+		logOnce("任务栏缩略图按钮调用失败", hresultError("ThumbBar", hr))
+	}
 }
 
 // close 收掉：摘子类、销毁位图列表、放掉 `ITaskbarList3`。
@@ -388,35 +369,37 @@ func (t *thumbbar) close() {
 
 // buildThumbButtons 把描述翻成 Win32 的结构体数组。
 //
-// ⚠️ 返回的第二样是那些 tooltip 的 UTF-16 缓冲，**必须在系统调用期间活着**——
-// 它们是按指针递过去的，不是一份拷贝。所以每次调用都新建一批，
-// 收尾由 freeThumbTips 放掉。
-func buildThumbButtons(bs [thumbbarCommandCount]thumbbarButton) ([]thumbbutton, []*uint16) {
+// ⚠️ **tooltip 直接填进 `szTip` 那个内联数组**，不是递一个指针。数组就在
+// 我们递出去的那个切片里，所以没有「必须活着到调用返回」这一说，也不需要
+// `runtime.KeepAlive` —— 比指针那一版少一整条生命周期上的讲究。
+func buildThumbButtons(bs [thumbbarCommandCount]thumbbarButton) []thumbbutton {
 	out := make([]thumbbutton, 0, len(bs))
-	tips := make([]*uint16, 0, len(bs))
 	for _, b := range bs {
-		tip := utf16z(tipOf(b.Command))
-		out = append(out, thumbbutton{
-			dwMask: thbmImageList | thbmToolTip,
-			iID:    b.ID,
-			// iBitmap 是**图标在图片列表里的下标**，而图标是按 glyph 的
-			// 编号放的（play=0、pause=1、prev=2、next=3）——所以这里直接
-			// 拿 Glyph 当下标用，两边共用一套编号，见 thumbbar_glyph.go。
-			iBitmap: uint32(b.Glyph),
-			szTip:   uintptr(unsafe.Pointer(tip)),
-			dwFlags: thumbButtonFlags(b.Enabled),
-		})
-		tips = append(tips, tip)
+		var btn thumbbutton
+		// ⚠️ 三个都要置：`THB_BITMAP` 管 iBitmap、`THB_TOOLTIP` 管 szTip、
+		// `THB_FLAGS` 管 dwFlags。少置 `THB_FLAGS` 的话 dwFlags 整个被忽略
+		//（文档：没标的成员一律忽略），于是没歌的时候按钮**看着是灰的、
+		// 按下去照样换歌**。
+		btn.dwMask = thbBitmap | thbToolTip | thbFlags
+		btn.iID = b.ID
+		// iBitmap 是**图标在图片列表里的下标**，而图标是按 glyph 的编号放的
+		//（play=0、pause=1、prev=2、next=3）——所以这里直接拿 Glyph 当下标用，
+		// 两边共用一套编号，见 thumbbar_glyph.go。
+		btn.iBitmap = uint32(b.Glyph)
+		btn.dwFlags = thumbButtonFlags(b.Enabled)
+		copy(btn.szTip[:], utf16z(tipOf(b.Command))[:])
+		out = append(out, btn)
 	}
-	return out, tips
+	return out
 }
 
-// thumbButtonFlags 灭的按钮两处都写上（理由见 thumbButtonDisabled 那段）。
+// thumbButtonFlags 能按就是 `THBF_ENABLED`（也就是不写），不能按是
+// `THBF_DISABLED`。
 func thumbButtonFlags(enabled bool) uint32 {
 	if enabled {
-		return 0
+		return thbfEnabled
 	}
-	return thumbButtonDisabled
+	return thbfDisabled
 }
 
 // tipOf 是某个命令在缩略图按钮上悬停时显示的那句话。
@@ -468,20 +451,16 @@ func buildGlyphImageList(size int) (uintptr, error) {
 			procImageListDestroy.Call(himl)
 			return 0, errPlatform("图标进不了列表")
 		}
-		// ⚠️ **这一步不能省**：32 位深并不自动等于「带 alpha」。`ImageList_Add`
-		// 之后列表里那张图的高字节是不确定的（BI_RGB 的 32 位位图按定义就
-		// 没有有效的 alpha 通道），而任务栏那个深色底会**原样透过来**——于是一张
-		// 白三角图标周围糊着一圈说不上来的颜色。`ImageList_SetAlphaImage`
-		// 是文档里为这件事给的那一个函数。
-		if r, _, _ := procImageListSetAlpha.Call(himl, idx, hbm); r == 0 {
-			// 只是图标变成实心了，不是致命错。记一条，接着往下走。
-			logOnce("按钮图标的透明通道没设上，图标周围可能糊着一圈底色")
-		}
-		// ⚠️ **DeleteObject 必须在 `ImageList_SetAlphaImage` 之后**：那个函数读的是
-		// 这张位图的像素，提前放掉的话它读的是一段已经还给系统的内存——
-		// 结果是 alpha 变成随机的，症状是「图标有时候透明有时候不透明」，
-		// 而且看着像渲染问题，不会有人往这儿想。
-		// `ImageList_Add` 已经把像素拷进列表了，所以这张位图到此为止。
+		// alpha **不需要另外设**：`ImageList_Add` 把 32 位 DIB 的像素整个拷
+		// 进列表，连高字节那个 alpha 一起。
+		//
+		// ⚠️ 这里**曾经**多调一个 `ImageList_SetAlphaImage`——那个函数根本不存在
+		// （comctl32 没有这个导出：MS 的 Image List 索引、mingw 的 commctrl.h、
+		// ReactOS/Wine 的导出表里都没有）。而 `newThumbbar` 开头有个「符号取不到
+		// 就 return」的门禁，于是它在**每一台** Windows 上都让整条按钮栏建不起来。
+		//
+		// 条件是列表必须是 `ILC_COLOR32`（上面那个 0x20）而且源位图是 32 位的
+		// BI_RGB DIB —— `glyphBitmapHandle` 两个都是。
 		procDeleteObject.Call(hbm)
 	}
 	return himl, nil
@@ -566,15 +545,15 @@ func iconSize(hwnd uintptr) int {
 // clsctxInprocServer 是 `CLSCTX_INPROC_SERVER`（1）：在进程内建这个对象。
 const clsctxInprocServer = 1
 
-// utf16z 把一个 Go 字符串变成一个以 0 结尾的 UTF-16 切片。
+// utf16z 把一个 Go 字符串变成一个**以 0 结尾**的 UTF-16 序列。
 //
-// 它交给系统之后**必须还活着**（Win32 那边存的是指针，不是一份拷贝），
-// 所以每个 tooltip 各要一份，不共用同一个底层数组。
-func utf16z(s string) *uint16 {
+// 以 0 结尾是必须的：`WCHAR szTip[260]` 是一个定长数组，系统把它当 C 字符串
+// 去扫的（`wcslen`），不给结尾那个 0 它会一路扫过数组末尾——读到结构体外面去。
+// 而这一点在「tooltip 只有三个字、数组有 260 个」的时候看不出来，只在某一个
+// 字特别长的时候炸，所以不能靠「反正够长」。
+func utf16z(s string) []uint16 {
 	units := utf16.Encode([]rune(s))
-	out := make([]uint16, len(units)+1)
-	copy(out, units)
-	return &out[0]
+	return append(units, 0)
 }
 
 // registerWindowMessage 注册一个窗口消息，返回它的编号。
@@ -584,7 +563,7 @@ func utf16z(s string) *uint16 {
 // 「某一天这条消息发给了别人」。
 func registerWindowMessage(name string) uintptr {
 	s := utf16z(name)
-	id, _, _ := procRegisterWindowMessage.Call(uintptr(unsafe.Pointer(s)))
+	id, _, _ := procRegisterWindowMessage.Call(uintptr(unsafe.Pointer(&s[0])))
 	runtime.KeepAlive(s)
 	return id
 }

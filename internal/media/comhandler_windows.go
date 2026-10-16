@@ -76,8 +76,16 @@ func genericQI(this, riid, out uintptr) uintptr {
 		return uintptr(hrNoInterface)
 	}
 	// 其余的一律认，返回 this 自己（见下面那段「为什么」）。
+	//
+	// ⚠️ **但对象已经被放掉的时候要拒**：那时候 `handlerRef` 找不到它、返回 0，
+	// 而 `this` 这个地址已经是一段被 GC 回收的内存了。返回 S_OK 等于递给系统
+	// 一个野指针，而症状是「系统调它的 `Invoke` 时随机崩，栈顶在系统内部，
+	// 离这儿十万八千里」。
+	if handlerRef(this, 1) == 0 {
+		*(*uintptr)(native(out)) = 0
+		return uintptr(hrNoInterface)
+	}
 	*(*uintptr)(native(out)) = this
-	handlerRef(this, 1)
 	return sOK
 }
 

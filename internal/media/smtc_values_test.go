@@ -1,6 +1,9 @@
 package media
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Windows 系统媒体会话的词汇表
@@ -184,5 +187,50 @@ func TestSmtcButtonValuesAreNotCommandValues(t *testing.T) {
 	}
 	if got, _ := smtcCommand(smtcButton(7)); got != CommandPrev {
 		t.Errorf("系统的 7 翻成了 %v，want prev", got)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 时间
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTicks 断「时长 ↔ Windows 的 100 纳秒」这个换算。
+//
+// ⚠️ **这一条是补上去的，因为 `windowsTicks` 一开始写成了 `10 * time.Millisecond`**
+// ——那是 1000 万纳秒，而 SMTC 的单位是 **100 纳秒**，**差十万倍**。
+//
+// 症状是「歌才播了两秒，进度条走完了整首」，而歌名、按键、播放状态全都正常。
+// 只坏一根进度条，加上一个错得离谱的常数，人在真机上盯着看只会以为是
+// 「Windows 的进度条算得不对」。
+func TestTicks(t *testing.T) {
+	if windowsTicks != 100*time.Nanosecond {
+		t.Fatalf("windowsTicks 是 %v，那边是 100ns（= 100 * time.Nanosecond）", windowsTicks)
+	}
+	for _, c := range []struct {
+		in   time.Duration
+		want int64
+	}{
+		{0, 0},
+		{100 * time.Nanosecond, 1},
+		{time.Microsecond, 10},
+		{time.Millisecond, 10_000},
+		{time.Second, 10_000_000},
+		// 225 秒 × 每秒一千万刻
+		{3*time.Minute + 45*time.Second, 2_250_000_000},
+	} {
+		if got := ticksOf(c.in); got != c.want {
+			t.Errorf("ticksOf(%v) = %d，want %d", c.in, got, c.want)
+		}
+	}
+}
+
+// TestTicksClampsToZero 断负的时长落成 0。
+//
+// 一个负的 EndTime 在 SMTC 上没有意义，而它会变成「整根进度条画不出来」。
+func TestTicksClampsToZero(t *testing.T) {
+	for _, d := range []time.Duration{-1, -time.Second, -time.Hour} {
+		if got := ticksOf(d); got != 0 {
+			t.Errorf("ticksOf(%v) = %d，want 0", d, got)
+		}
 	}
 }

@@ -87,8 +87,14 @@ const (
 	smtcPutIsPauseEnabled = 17
 	smtcPutIsPrevEnabled  = 25
 	smtcPutIsNextEnabled  = 27
-	smtcAddButtonPressed  = 32
-	smtcRemoveButton      = 33
+	// 我们**不接**的那五个（快进、倒带、录音、频道上下），见 applyStatus。
+	smtcPutIsRecordEnabled      = 19
+	smtcPutIsFastForwardEnabled = 21
+	smtcPutIsRewindEnabled      = 23
+	smtcPutIsChannelUpEnabled   = 29
+	smtcPutIsChannelDownEnabled = 31
+	smtcAddButtonPressed        = 32
+	smtcRemoveButton            = 33
 
 	// `ISystemMediaTransportControls2`
 	smtc2UpdateTimelineProperties = 12
@@ -127,12 +133,6 @@ const (
 // 很难归因。
 const playbackTypeMusic = 1
 
-// windowsTicks 是 `Windows.Foundation.TimeSpan` 的单位（100 纳秒）。
-//
-// ⚠️ **不是纳秒也不是毫秒**：SMTC 的时间轴全用 100 纳秒。差 100 倍的症状是
-// 「歌才播了两秒，进度条走完了整首」。
-const windowsTicks = 10 * time.Millisecond
-
 // windowsPlatform 是 Windows 那一半的平台实现。
 //
 // 零值不可用，请用 newPlatform。**没有窗口之前它什么都不是**：Windows 上的
@@ -155,6 +155,17 @@ type windowsPlatform struct {
 
 	// last 是最近一次 apply 过的快照。见 replayState。
 	last NowPlaying
+
+	// eventsMu 是**只管事件注册那一下**的锁：装上和摘下必须是串行的。
+	//
+	// ⚠️ 为什么不用 `mu`：`ensureEvents` 要跨 `add_ButtonPressed` 那次 COM 调用，
+	// 而这一次理论上可能回调进我们的 `Invoke`（它会去拿 `mu`）。同一个锁再套
+	// 一次就是死锁，所以事件这一段单独一把。
+	//
+	// 为什么需要它：`add_*` 要到调用返回才把令牌写进我们给的地址，而
+	// `unbind` 可能就卡在这个窗口里读令牌——读到 0 就不摘，于是下一次绑窗口
+	// 又挂一个处理器。症状是「关一次窗口再开一次，浮窗上按一次播放**跳两下**」。
+	eventsMu sync.Mutex
 
 	// 事件令牌。add 的时候系统写进来，摘的时候要原样还回去——
 	// 记不住就没法摘，而摘不掉的事件处理器会在每次换窗口时多挂一个。
@@ -205,7 +216,13 @@ func (p *windowsPlatform) bindWindow(hwnd uintptr) error {
 	if hresultFailed(hr) || smtc == 0 {
 		return hresultError("拿这个窗口的系统媒体会话", hr)
 	}
-	addRef(smtc)
+	// ⚠️ **不要再 AddRef**：`GetForWindow` 的第三个参数是 `[out, retval]`，
+	// 按 COM 的约定，caller 拿到的这个指针**已经持有一份引用**，该由我们
+	// `release` 掉（`unbind` 里就是 release 一次）。
+	// 多 AddRef 一次不会立刻出事——症状是「每开一次窗口漏掉一个 SMTC 对象，
+	// 而进程活得越久漏得越多」，也就是一个几十字节起步、永远回收不了的小泄漏。
+	// （对照 `activate`：那边 QI 之后要 AddRef，是因为 QI 借的那一份归
+	// raw 所有，raw 在 defer 里被 release 了。）
 
 	p.mu.Lock()
 	p.smtc = smtc
@@ -243,7 +260,6 @@ func (p *windowsPlatform) unbind() {
 	p.mu.Lock()
 	smtc, smtc2, thumb := p.smtc, p.smtc2, p.thumb
 	p.smtc, p.smtc2, p.thumb = 0, 0, nil
-	p.eventsUp = false
 	p.mu.Unlock()
 
 	if thumb != nil {
@@ -314,9 +330,17 @@ func (p *windowsPlatform) ensureEvents() {
 // 一次就多留一份——而浮窗上按一次播放会**跳两下**（两个处理器都响应），
 // 那是最难解释的一种错：它隔很久才出现一次，而且看着像「程序偶尔抽风」。
 func (p *windowsPlatform) removeEvents(smtc, smtc2 uintptr) {
+	// 与 `ensureEvents` 互斥：读到的令牌必须已经是写完的那一个。
+	p.eventsMu.Lock()
+	defer p.eventsMu.Unlock()
+
 	p.mu.Lock()
 	buttonToken, seekToken := p.buttonToken, p.seekToken
 	p.buttonToken, p.seekToken = 0, 0
+	// 摘完了就当没装过：下一次 `bindWindow` 会重新走一遍 `ensureEvents`。
+	// 忘了这一句的话，换一个窗口之后浮窗上的键**一个都不响应**——而日志上
+	// 干干净净，因为「装上了」那个标记一直是真的。
+	p.eventsUp = false
 	p.mu.Unlock()
 
 	if buttonToken != 0 {
@@ -447,6 +471,18 @@ func (p *windowsPlatform) applyStatus(smtc uintptr, n NowPlaying) {
 	comSetBool(smtc, smtcPutIsNextEnabled, hasTrack)
 	comSetBool(smtc, smtcPutIsPrevEnabled, hasTrack)
 	comSetBool(smtc, smtcPutIsStopEnabled, hasTrack)
+	// ⚠️ **这五个要显式关掉**，不能指望它们默认就是关的（`smtc_values.go`
+	// 里那条「接不住的键必须显式关掉」的约定就是指这里）。系统那边按的键会
+	// 原样走到 `onButton`，而那边认不出来的键我们只能当没听见——于是浮窗上
+	// 摆着一个「按下去什么都不发生」的快进/倒带/录音键。
+	//
+	// 症状特别难解释：用户看到浮窗上有六个键，按了快进没反应，
+	// 于是以为是自己按错了。
+	comSetBool(smtc, smtcPutIsRecordEnabled, false)
+	comSetBool(smtc, smtcPutIsFastForwardEnabled, false)
+	comSetBool(smtc, smtcPutIsRewindEnabled, false)
+	comSetBool(smtc, smtcPutIsChannelUpEnabled, false)
+	comSetBool(smtc, smtcPutIsChannelDownEnabled, false)
 }
 
 // applyTimeline 写浮窗上那根进度条。
@@ -500,17 +536,6 @@ func (p *windowsPlatform) replayState() {
 		return
 	}
 	p.apply(last)
-}
-
-// ticksOf 把时长换算成 Windows 的 100 纳秒单位。
-//
-// ⚠️ 往回夹到 0：负的 TimeSpan 传过去在那边是没有意义的（一个负的 EndTime），
-// 而它会变成「整根进度条画不出来」。
-func ticksOf(d time.Duration) int64 {
-	if d <= 0 {
-		return 0
-	}
-	return int64(d / windowsTicks)
 }
 
 // logOnce 同一个错只记一次。
