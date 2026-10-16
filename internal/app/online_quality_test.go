@@ -1,9 +1,11 @@
 package app_test
 
 import (
+	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -188,6 +190,76 @@ func TestA320KAACStreamFromCDNPlays(t *testing.T) {
 	}
 	if st.Duration <= 0 {
 		t.Errorf("时长 = %v，AAC 流应该报得出长度", st.Duration)
+	}
+}
+
+// TestALateFailureFromAStaleSwitchNeverReachesThePlaybar 盯「被取代的那次失败
+// 不许留下红字」。
+//
+// 评审给的那条探针，原样变成用例：
+//
+//	点「无损」→ 取流慢（这里造 700ms），失败
+//	点「高音质」→ 立刻成功，errText 被清空
+//	700ms 后第一条的失败才回来
+//
+// 没有那道判断时，播放条上会挂着「这一首没有无损（要的是「无损」）」，
+// 而歌正按高音质好好地放着——**一句错的、而且不会自己清掉**的红字
+// （`errText` 只在下一次成功播放/换流时才清，那可能是几首歌之后）。
+//
+// 触发要两次选择挨得近，B 站取流慢时最容易撞上——所以那个慢必须真的慢到
+// 第二次换档之后才回来。
+func TestALateFailureFromAStaleSwitchNeverReachesThePlaybar(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = readFlac(t)
+	dash := twoTierDash(cdnURL(f.URL, "a.flac", 2*time.Hour))
+
+	var calls atomic.Int32
+	f.on("/x/player/wbi/playurl", func(w http.ResponseWriter, r *http.Request) {
+		// 按第几次调用分派：
+		//	1 = 开播（正常）
+		//	2 = 「无损」那一下：要无损而 B 站没给，**而且慢**
+		//	3 = 「高音质」那一下：正常
+		n := calls.Add(1)
+		if n == 2 {
+			time.Sleep(700 * time.Millisecond)
+			writeStreamJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
+				"data": map[string]any{"timelength": 1000,
+					"dash": map[string]any{"duration": 1}}})
+			return
+		}
+		writeStreamJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
+			"data": map[string]any{"timelength": 1000, "dash": dash}})
+	})
+
+	a := newOnlineApp(t, f, t.TempDir())
+	if err := a.Enqueue(onlineItem("BV1", "1", "连着换两档的那首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "连着换两档的那首")
+	waitFor(t, 30*time.Second, "播放位置动起来", func() bool {
+		return a.Snapshot().Position > 300*time.Millisecond
+	})
+
+	a.SetAudioQuality(bili.AudioLossless) // 会失败，而且慢
+	time.Sleep(150 * time.Millisecond)    // 让它真的发出去了
+	a.SetAudioQuality(bili.AudioHigh)     // 紧接着换一档：立刻成功
+
+	waitFor(t, 15*time.Second, "偏好已经换到高音质", func() bool {
+		return a.AudioQuality() == bili.AudioHigh
+	})
+	// 等第一次那条失败落地（700ms 之后）。
+	time.Sleep(2 * time.Second)
+
+	st := a.Snapshot()
+	if st.Err != "" {
+		t.Errorf("播放条上挂着一次已被取代的失败：%q（偏好已经是 %v，徽章 %q）",
+			st.Err, a.AudioQuality(), st.Quality)
+	}
+	if st.Quality != "320K" {
+		t.Errorf("徽章 = %q，want 320K", st.Quality)
+	}
+	if n := calls.Load(); n < 2 {
+		t.Errorf("取流接口只被打了 %d 次，这条用例没验到东西（两次换档都该发一次）", n)
 	}
 }
 

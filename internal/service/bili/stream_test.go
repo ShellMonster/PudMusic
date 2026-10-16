@@ -260,12 +260,14 @@ func TestPlayURLNeverHandsBackABetterTierThanAsked(t *testing.T) {
 
 // TestPlayURLIgnoresStreamsWithoutAnAddress 盯「没有地址的流不算流」。
 //
-// B 站对「这一档你拿不到」的常见回答是把那一段对象照样摆出来，只是里面没有
-// 能播的东西（真机实测：没有大会员时 `dash.dolby` 是 `{"type":0,"audio":[]}`）。
-// 挑流的时候不把它剔掉，自动档就会挑中这条空壳，然后报一句「这个稿件没有
-// 音频流」——而 `dash.audio` 里好好的 320K 就在旁边摆着。
+// 造的是**条目在、地址空**那一种：`dash.dolby` 里摆着一条杜比，`baseUrl` 是
+// 空串。挑流的时候不把它剔掉，自动档就把它当成「有杜比」挑中，然后报一句
+// 「这个稿件没有音频流」——**而 `dash.audio` 里好好的 320K 就在旁边摆着**。
 //
-// 用户看到的是「这一首放不了」，真的是「有条流我们不敢用」。
+// ⚠️ 别和「那一段是空的」搞混：真机实测过没有大会员时 B 站回的是
+// `dash.dolby = {"type":0,"audio":[]}`、`dash.flac = null`，那种形状由
+// `len(dolby.Audio) > 0` 那一句就挡住了，跟这里要断的不是一回事
+// （用那个形状造这条用例的话，改动前后都是绿的）。
 func TestPlayURLIgnoresStreamsWithoutAnAddress(t *testing.T) {
 	exp := time.Unix(1702204169+7200, 0)
 	_, c := playurlClient(t, map[string]any{
@@ -273,7 +275,6 @@ func TestPlayURLIgnoresStreamsWithoutAnAddress(t *testing.T) {
 		"audio": []any{
 			audioItem(30280, 320000, "mp4a.40.2", streamURL(exp, "-320k.m4s")),
 		},
-		// 摆着一个空壳：对象在，里面的流没有地址。
 		"dolby": map[string]any{"type": 2, "audio": []any{
 			map[string]any{"id": 30250, "bandwidth": 448000, "codecs": "ec-3", "baseUrl": ""},
 		}},

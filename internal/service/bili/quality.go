@@ -269,13 +269,16 @@ func closestTo(list []audioStream, want Quality) audioStream {
 	return worst
 }
 
-// playable 剔掉拿不到地址的流。
+// playable 剔掉**有条目但没有地址**的流。
 //
-// B 站对**这一档你拿不到**的情况，常见的回答是把那一段对象照样摆出来
-// （真机实测：没有大会员时 `dash.dolby` 是个 `{"type":0,"audio":[]}` 的空壳，
-// 而 `dash.flac` 干脆是 `null`），只是里面没有能播的东西。挑流的时候把它们
-// 当作不存在，否则就会挑中一条空壳，然后由 `refFrom` 报一句
-// 「这个稿件没有音频流」——而 `dash.audio` 里好好的 320K 就在旁边摆着。
+// ⚠️ 这里挡的不是「那一段是空的」。真机实测过没有大会员时 B 站回的是
+// `dash.dolby = {"type":0,"audio":[]}`、`dash.flac = null`——那种由
+// `len(dolby.Audio) > 0` 那一句就挡住了，`playable` 对它不起任何作用。
+//
+// 它挡的是**另一种形状**：条目在，`baseUrl` 是空的。自动档会把它当成「有杜比」
+// 挑中它，然后由 `refFrom` 报一句「这个稿件没有音频流」——**而 `dash.audio`
+// 里好好的 320K 就在旁边摆着**。用户看到的是「这一首放不了」，而真因是我们
+// 挑错了列表里的一条。
 //
 // 一条没有地址的流不是流，这一条不需要理由。
 func playable(in []audioStream) []audioStream {

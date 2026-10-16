@@ -177,39 +177,59 @@ func compareSampleForSample(t *testing.T, what string, channels int, got, want [
 // TestTheStreamAndTheFileGoThroughOneRegistry 盯「本地文件和在线流走同一套
 // 格式注册，不是两套代码」。
 //
-// 断的是**两件事**：认出来的容器名一样，解出来的采样一个不差。
+// # 为什么两个入口都用公开的那两个
 //
-// 为什么这条重要：`Open`（本地）曾经有一句「扩展名是 .flac 就走 flacdec」，
-// 那和在线流那一套是**两套**认容器的方式。两套迟早漂移——漂移的那一半正是
-// 「本地放得了、在线放不了」或者反过来，而那种 bug 在真网上表现为
-// 「同一首歌，本地能放，在线放不了」，排查起来最费劲。
+// 写这条的时候它对文件和对流都直接调 `openDecoder`——那样**抓不到**
+// `Open` 里重新长出一句按扩展名分流的写法（回归测试：把「.flac 走
+// `flacdec.OpenFile`」放回去，这条仍然是绿的）。现在它走 `Open` 与
+// `OpenStream`：那是真正在生产里被调到的两个入口。
+//
+// # 为什么文件名一律叫 .flac
+//
+// 文件名是唯一能让「第二套认容器的方式」露馅的东西：只要 `Open` 里有一句
+// 按后缀分流，一份**内容不是 FLAC**、名字却是 `.flac` 的文件就会在**本地
+// 这一侧**被拒掉（或者走另一条路），而在线那侧照样放得出来。两个入口因此
+// 给出不一样的结果——那正是「两套代码」。
+//
+// 逐样本那一半在 `TestLosslessFLACFromTheStreamIsSampleForSample`：
+// `Player` 不外露解出来的采样，在这一层量采样就得绕开生产路径。
 func TestTheStreamAndTheFileGoThroughOneRegistry(t *testing.T) {
-	data := fixture(t, "mono16.flac")
+	for _, c := range []struct{ name, file string }{
+		{"裸 FLAC", "stereo16.flac"},
+		{"MP4 里的 FLAC", "stereo16.mp4"},
+		{"扩展名撒谎的（内容是 WAV）", "stereo16.wav"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			data := fixture(t, c.file)
 
-	f, err := os.Open(writeTemp(t, "mono16.flac", data))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	fromFile, nameFile, err := openDecoder(f)
-	if err != nil {
-		t.Fatalf("本地文件认不出容器：%v", err)
-	}
+			fromFile, err := Open(writeTemp(t, "同一段字节.flac", data))
+			if err != nil {
+				t.Fatalf("本地文件打不开：%v", err)
+			}
+			defer fromFile.Close()
 
-	fromStream, nameStream, err := openDecoder(newOnlineSource(t, newByteCDN(t, data)))
-	if err != nil {
-		t.Fatalf("在线流认不出容器：%v", err)
-	}
+			fromStream, err := OpenStream(newOnlineSource(t, newByteCDN(t, data)))
+			if err != nil {
+				t.Fatalf("同一段字节作为在线流打不开：%v", err)
+			}
+			defer fromStream.Close()
 
-	if nameFile != nameStream {
-		t.Fatalf("同一段字节，本地认成 %q、在线认成 %q——这不是同一套注册表", nameFile, nameStream)
+			if fromFile.Duration() != fromStream.Duration() {
+				t.Errorf("本地时长 %v、在线时长 %v——同一段字节不该有两个结果",
+					fromFile.Duration(), fromStream.Duration())
+			}
+			if fromFile.dec.SampleRate() != fromStream.dec.SampleRate() {
+				t.Errorf("本地 %d Hz、在线 %d Hz", fromFile.dec.SampleRate(), fromStream.dec.SampleRate())
+			}
+			if fromFile.dec.Channels() != fromStream.dec.Channels() {
+				t.Errorf("本地 %d 声道、在线 %d 声道",
+					fromFile.dec.Channels(), fromStream.dec.Channels())
+			}
+			if fromFile.Duration() <= 0 {
+				t.Errorf("时长 = %v，解码器没报出长度", fromFile.Duration())
+			}
+		})
 	}
-	if nameFile != "flac" {
-		t.Errorf("容器名 = %q，want flac", nameFile)
-	}
-
-	compareSampleForSample(t, "在线流", fromStream.Channels(),
-		decodeAll(t, fromStream), decodeAll(t, fromFile))
 }
 
 // TestContentDecidesTheContainerNotTheFileName 盯「按头几个字节认容器」。

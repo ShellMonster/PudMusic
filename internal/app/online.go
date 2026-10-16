@@ -159,7 +159,7 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 	go func() {
 		ref, err := a.resolve(context.Background(), s, tr.item, q)
 		if err != nil {
-			a.failOnline(gen, err)
+			a.failQualitySwitch(gen, q, err)
 			return
 		}
 		if ref.Quality == tr.tier {
@@ -168,7 +168,7 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 		}
 		src, p, err := a.buildFromRef(context.Background(), s, tr.item, vol, gen, ref)
 		if err != nil {
-			a.failOnline(gen, err)
+			a.failQualitySwitch(gen, q, err)
 			return
 		}
 
@@ -216,6 +216,29 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 			wake()
 		}
 	}()
+}
+
+// failQualitySwitch 报一次换音质的失败，**只在用户要的还是这一档时报**。
+//
+// 为什么成功的那一半要判「用户是不是又换档了」（`restreamOnline` 里
+// `a.streaming.Quality != q` 那一条），失败的这一半也得判——不然会留下
+// 一句**错的、且不会自己清掉**的红字：
+//
+//	点「无损」→ 取流慢，700ms 后失败
+//	点「高音质」→ 立刻成功，errText 被清空
+//	700ms 后第一条的失败才回来 → 播放条上写着「这一首没有无损」
+//
+// 而歌正按高音质好好地放着。`errText` 只在下一次成功播放/换流时才清，
+// 那可能是几首歌之后的事了。
+func (a *App) failQualitySwitch(gen int, q bili.AudioQuality, err error) {
+	a.mu.Lock()
+	stale := a.onlineGen != gen || a.streaming == nil || a.streaming.Quality != q
+	a.mu.Unlock()
+	if stale {
+		// 被后来的选择取代了：这一次的结果没人要了，报出去只会误导。
+		return
+	}
+	a.failOnline(gen, err)
 }
 
 // AudioQuality 返回当前偏好。
