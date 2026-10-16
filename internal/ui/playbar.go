@@ -6,24 +6,44 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/egoist/mygo/ui"
 )
 
-// viewPlayBar 是底部那条播放条：曲目名、上一首/播放/下一首、可拖的进度条、音量。
+// 播放条左边那一块的尺寸，数字全部照 Biu 的源码抄，不是自己挑的：
 //
-// 阶段 1 只有这些。播放列表面板、歌词、封面缓存都在后面的阶段。
+//	封面 56×56          _research/biu/src/layout/playbar/left/index.tsx:29-45 的
+//	                    width={56} height={56}
+//	封面与歌名之间 8px  同一处的 space-x-2
+//	整条左右内边距 16px playbar/index.tsx:23-31 的 px-4，由外层那个 Padding(16) 给
+//
+// Biu 的播放条总高 88px（layout/index.tsx:48 的 h-[88px]），88-56=32，上下各 16。
+// 本项目的播放条下面还有一行进度条，总高不止 88，但封面那一行上下留白同样由
+// Padding(16) 给，封面在行内是垂直居中的。
+const (
+	coverSize = 56
+	coverGap  = 8
+)
+
+// viewPlayBar 是底部那条播放条：封面、曲目名、上一首/播放/下一首、可拖的进度条、音量。
 func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 	t := c.Theme()
 
 	ui.Column(c).Key("playbar").Padding(16).Gap(10).
 		Background(t.Surface).Radius(12).Children(func() {
 		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-			title := st.Title
-			if !st.HasTrack {
-				title = "还没有打开文件"
-			}
-			ui.Text(c, title).FontSize(15).Bold().Grow(1).
-				TextColor(textColor(t, st.HasTrack))
+			// 左边一块是「封面 + 歌名」，照 Biu 的 playbar/left 摆。
+			// 封面与歌名之间是 8px（coverGap），歌名与右边那一排控件之间仍是 12。
+			ui.Row(c).Gap(coverGap).AlignItems(ui.Center).Grow(1).Children(func() {
+				s.viewCover(c, st)
+
+				title := st.Title
+				if !st.HasTrack {
+					title = "还没有打开文件"
+				}
+				ui.Text(c, title).FontSize(15).Bold().Grow(1).
+					TextColor(textColor(t, st.HasTrack))
+			})
 
 			// 音量条自己带无障碍标签，不用旁边再摆一个「音量」字。
 			vol := st.Volume
@@ -53,6 +73,14 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 			ui.Text(c, "打不开："+st.Err).FontSize(12).TextColor(t.Danger)
 		}
 	})
+}
+
+// viewCover 是播放条左边那张封面。
+//
+// 四种状态（没有地址 / 载入中 / 就绪 / 加载失败）都由 imgcache.View 画，
+// 这里不重复它的判断，也不替它决定长什么样——以后缓存换画法只改那一处。
+func (s *Shell) viewCover(c *ui.Context, st app.State) {
+	imgcache.View(c, s.images, st.CoverURL, coverSize, coverSize)
 }
 
 // viewStepButtons 是上一首和下一首。

@@ -22,7 +22,8 @@ import (
 // 本地项用得上，后四个字段先留好位置——接 B 站时队列的形状不用改。
 //
 // 字段名沿用 Biu 的叫法，值也沿用：Source 是 "local" / "online"，
-// Type 是 "local" / "mv" / "audio"。
+// Type 是 "local" / "mv" / "audio"。Cover 对应 Biu 那一侧的 `cover`
+// （播放条上取 `playItem.pageCover || playItem.cover`）。
 type Item struct {
 	Source string // 来源："local" 本地文件，"online" B 站
 	Type   string // 类型："local" / "mv" / "audio"
@@ -31,9 +32,13 @@ type Item struct {
 	Sid    string // 音频 id（audio 用）
 	Path   string // 本地文件的完整路径
 	Title  string // 显示在播放条上的名字
+	Cover  string // 封面地址，在线的歌才有
 }
 
 // LocalItem 把一个本地音频文件包成一项。
+//
+// Cover 留空：本地文件不读音频内嵌的图，Biu 上游也不读（见 State.CoverURL）。
+// 所以本地音乐在那边也是占位，这里照它来，不拿路径凑一个假地址。
 func LocalItem(path string) Item {
 	return Item{
 		Source: "local",
@@ -156,7 +161,18 @@ func (a *App) Enqueue(items ...Item) error {
 	if !ok {
 		return nil
 	}
-	return a.Open(item.Path)
+	return a.play(item)
+}
+
+// play 放队列里的一项：先开文件，开了成功再把它的封面地址记到状态上。
+//
+// 开失败时不动封面：歌没换，还在放上一首，封面也不该跟着换。
+func (a *App) play(item Item) error {
+	if err := a.Open(item.Path); err != nil {
+		return err
+	}
+	a.setCover(item.Cover)
+	return nil
 }
 
 // Next 放下一首。到末尾绕回第一首，和 Biu 一致。队列空的时候什么都不做。
@@ -179,7 +195,7 @@ func (a *App) step(delta int) {
 		a.setErr("这一首还不能放：还没有接来源")
 		return
 	}
-	if err := a.Open(item.Path); err != nil {
+	if err := a.play(item); err != nil {
 		a.queue.Move(-delta)
 	}
 }
