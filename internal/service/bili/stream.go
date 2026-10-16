@@ -70,9 +70,6 @@ type StreamRef struct {
 	// ExpiresAt 是地址的失效时刻，从地址里的 `deadline` 读出来。
 	ExpiresAt time.Time
 
-	// Size 是字节数。B 站给 Content-Length，给了就有。
-	Size int64
-
 	// Bvid / Cid 是这条流属于哪个稿件的哪一集。换流之后拿它们比对，
 	// 对不上就是取错了歌（见 `SameTrack`）。
 	Bvid string

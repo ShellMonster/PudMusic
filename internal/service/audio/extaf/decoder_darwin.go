@@ -92,6 +92,37 @@ var (
 type source struct {
 	r    io.ReadSeeker
 	size int64
+
+	// err 是字节源身上出的**第一条**非 EOF 的错误（比如网络断了）。
+	//
+	// 为什么需要它：AudioToolbox 的读回调只有「要到了几个字节」这一个出口，
+	// 读失败在回调里只能变成 0，而 0 在它眼里和「干净地读到末尾」是**同一个
+	// 东西**。不把它留一份，一次网络断开就会表现成「歌播完了」——
+	// 界面上什么提示都没有，用户以为歌放完了。
+	//
+	// 回调跑在 AudioToolbox 自己的线程上，而 Read 跑在解码 goroutine 上，
+	// 所以这里要加锁（Seek 那边本来就在阻塞等，加锁的代价可以忽略）。
+	mu  sync.Mutex
+	err error
+}
+
+// noteReadError 记下第一次真错。EOF 不算错——那是读完。
+func (s *source) noteReadError(err error) {
+	if err == nil || errors.Is(err, io.EOF) {
+		return
+	}
+	s.mu.Lock()
+	if s.err == nil {
+		s.err = err
+	}
+	s.mu.Unlock()
+}
+
+// readErr 返回记下的那个错。
+func (s *source) readErr() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.err
 }
 
 // readAt 把 [position, position+n) 交给 dst，返回真的读到的字节数。
@@ -105,9 +136,13 @@ func (s *source) readAt(position int64, n int, dst []byte) int {
 		return 0
 	}
 	if _, err := s.r.Seek(position, io.SeekStart); err != nil {
+		s.noteReadError(err)
 		return 0
 	}
-	got, _ := io.ReadFull(s.r, dst[:n])
+	// ⚠️ 这个 err 以前被丢掉了（`got, _ :=`）。本地文件读不出错，所以丢
+	// 掉无所谓；接了网络流之后它是**唯一**能告诉上层「歌断了」的东西。
+	got, err := io.ReadFull(s.r, dst[:n])
+	s.noteReadError(err)
 	return got
 }
 
@@ -285,6 +320,15 @@ func (d *Decoder) open() error {
 }
 
 // getProperty 问 ExtAudioFile 要一个属性。out 是定长结构或标量的地址。
+// readSourceErr 返回字节源身上记下的那个错（没有就是 nil）。
+func (d *Decoder) readSourceErr() error {
+	src := sourceFor(d.handle)
+	if src == nil {
+		return nil
+	}
+	return src.readErr()
+}
+
 func (d *Decoder) getProperty(prop uint32, out unsafe.Pointer, size uint32) error {
 	n := size
 	st := extAudioFileGetProperty(d.ef, prop, &n, out)
@@ -326,11 +370,26 @@ func (d *Decoder) Read(buf []float32) (int, error) {
 	}
 	got := uint32(frames)
 	st := extAudioFileRead(d.ef, unsafe.Pointer(&got), unsafe.Pointer(&list))
+
+	// ⚠️ 字节源真出过事的话，报**它**的错，不要报 AudioToolbox 给的东西。
+	//
+	// 顺序很重要，而且要放在状态码判断**前面**。AudioToolbox 在读回调里
+	// 只看得到「这次要到了几个字节」，它分不出「文件到头了」和「网络断了」，
+	// 于是两种情况它给的都是 0 字节 + 一个被逼出来的状态码（实测 -50）。
+	// 那个状态码说给用户听没有任何意义——「ExtAudioFileRead: OSStatus -50」
+	// 既不像网络问题也不像歌坏了，用户只会觉得应用自己也不知道出了什么事。
+	if err := d.readSourceErr(); err != nil {
+		return 0, err
+	}
 	if err := statusError("ExtAudioFileRead", st); err != nil {
 		return 0, err
 	}
 	if got == 0 {
-		// 状态码是 0 却一帧没要到：这是正常的读完，不是错误。
+		// 一帧没要到，字节源也没出过事：这是正常的读完。
+		//
+		// 直接返回 io.EOF 的话，`spec.md`「播放状态机」说的
+		// 「解码失败不能被当成播放结束」就又破了：一次断网表现成
+		// 「歌忽然放完了」，界面上什么提示都没有。
 		return 0, io.EOF
 	}
 

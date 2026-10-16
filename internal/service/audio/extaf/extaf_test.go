@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"sync"
 	"testing"
 )
 
@@ -359,3 +360,178 @@ type execErr struct {
 }
 
 func (e *execErr) Error() string { return e.name + ": " + e.err.Error() + ": " + e.out }
+
+// ---- 字节源中途死掉：不能被折成「读完」 ----
+//
+// # 为什么这一组要单独钉
+//
+// AudioToolbox 的读回调只有一个出口：「这次要到了几个字节」。读失败在回调里
+// 只能变成 0，而 0 在它眼里和「干净地读到末尾」是**同一个东西**——本文件
+// 的 `readAt` 以前把 `io.ReadFull` 的错误直接丢掉（`got, _ :=`），于是：
+//
+//	网络断了 → 回调交出 0 字节、状态码 0 → ExtAudioFileRead 说「没帧了」
+//	         → Decoder.Read 返回 io.EOF → 歌「放完了」
+//
+// 表现就是「歌播到一半忽然放完了」，界面上什么提示都没有。
+// `spec.md`「播放状态机」那一节说的「解码失败不能被当成播放结束」就是它。
+// 本地文件读不出错，所以这条在本地永远测不出来——必须用一个会死的字节源。
+
+// dyingSeeker 是一个「armed 之后读到某个偏移就报错」的字节源。
+//
+// 为什么要有 armed 这一下：`Open` 本身要读文件头（MP4 的话还要读尾部的
+// moov），所以得先让它整个读一遍，再把源「掐掉」。不这样的话，
+// AudioFileOpenWithCallbacks 在探类型的时候就拿到 -39，测不到我们要测的那段。
+type dyingSeeker struct {
+	r    *os.File
+	size int64
+	// mu 不是多余的：读回调跑在 AudioToolbox 自己的线程上，而 `armed` 是从
+	// 测试的 goroutine 上置的。没有它的话，读回调很可能**一直看见旧值**
+	// （实测就是这个：置了 armed 之后读回调还是照读不误，于是测试表现为
+	// 「字节源死了却还是 EOF」——而那恰好就是这条用例要抓的 bug，
+	// 查起来会把自己绕进去）。
+	mu    sync.Mutex
+	armed bool
+	// budget 是「开完之后还准读几个字节」。到 0 之后每一次读都报错。
+	//
+	// 为什么用「还准读几个字节」而不是「从第几个字节起死」：AudioToolbox
+	// 会在 Open 和头几次读里把文件**大段地读走**（它要探容器、还要拼 moov），
+	// 按绝对偏移设死点的话，那一下早就越过了，测不到解码阶段。
+	budget int64
+	pos    int64
+	read   int64
+}
+
+// newDyingSeeker 建一个。size 是文件总长——`Seek(0, SeekEnd)` 要靠它，
+// 而 `extaf.Open` 开口第一件事就是问长度。
+func newDyingSeeker(f *os.File, size, budget int64) *dyingSeeker {
+	return &dyingSeeker{r: f, size: size, budget: budget}
+}
+
+func (s *dyingSeeker) Read(p []byte) (int, error) {
+	s.mu.Lock()
+	if s.armed {
+		if s.budget <= 0 {
+			s.read += int64(len(p)) // 只是为了让失败信息里的字节数有意义
+			s.mu.Unlock()
+			return 0, errByteSourceDead
+		}
+		if int64(len(p)) > s.budget {
+			p = p[:s.budget]
+		}
+	}
+	n, err := s.r.Read(p)
+	s.pos += int64(n)
+	s.budget -= int64(n)
+	s.read += int64(n)
+	s.mu.Unlock()
+	return n, err
+}
+
+// arm 是从测试的 goroutine 上调的那个开关。
+func (s *dyingSeeker) arm() {
+	s.mu.Lock()
+	s.armed = true
+	s.mu.Unlock()
+}
+
+func (s *dyingSeeker) Seek(off int64, whence int) (int64, error) {
+	s.mu.Lock()
+	switch whence {
+	case io.SeekStart:
+		s.pos = off
+	case io.SeekCurrent:
+		s.pos += off
+	case io.SeekEnd:
+		s.pos = s.size + off
+	}
+	pos := s.pos
+	s.mu.Unlock()
+
+	if _, err := s.r.Seek(pos, io.SeekStart); err != nil {
+		return 0, err
+	}
+	return pos, nil
+}
+
+var errByteSourceDead = errors.New("测试用的字节源：网络断了")
+
+// TestAReadFailureIsNotAnEndOfFile 盯「拉不动了」没有被折成「放完了」。
+func TestAReadFailureIsNotAnEndOfFile(t *testing.T) {
+	path := filepath.Join("..", "flacdec", "testdata", "stereo16.mp4")
+	f, err := os.Open(path)
+	if err != nil {
+		t.Skipf("找不到 MP4 测试素材：%v", err)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Open 期间整个文件都能读；开完之后只准再读 32 KB，之后每一次读都失败。
+	src := newDyingSeeker(f, info.Size(), 32<<10)
+	d, err := Open(src)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+	src.arm()
+
+	buf := make([]float32, 4096*d.Channels())
+	var sawErr bool
+	for range 4000 {
+		n, err := d.Read(buf)
+		if err != nil {
+			// 关键：它得是**读失败**，不能是 io.EOF。
+			if errors.Is(err, io.EOF) {
+				t.Fatalf("字节源断了却被折成了「读完」——上层会以为歌放完了（第 %d 字节）", src.read)
+			}
+			if !errors.Is(err, errByteSourceDead) {
+				t.Fatalf("报的错不是字节源那个：%v", err)
+			}
+			sawErr = true
+			break
+		}
+		if n == 0 {
+			t.Fatal("一帧没要到又没有错")
+		}
+	}
+	if !sawErr {
+		t.Fatal("读完了整首都没报错（素材太小或者死得太晚，这条用例没验到东西）")
+	}
+}
+
+// TestAFinishedSourceStillEndsCleanly 盯反过来的那一半。
+//
+// 上一个用例把错误捞出来了，这个要保证**正常读完仍然是 io.EOF**——
+// 不然「歌放完了」会被说成「歌断了」，用户按重试也没用。
+func TestAFinishedSourceStillEndsCleanly(t *testing.T) {
+	path := filepath.Join("..", "flacdec", "testdata", "stereo16.mp4")
+	f, err := os.Open(path)
+	if err != nil {
+		t.Skipf("找不到 MP4 测试素材：%v", err)
+	}
+	info, _ := f.Stat()
+
+	src := newDyingSeeker(f, info.Size(), 1<<40) // 永远死不了
+	d, err := Open(src)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+	src.arm()
+
+	buf := make([]float32, 4096*d.Channels())
+	for range 200000 {
+		n, err := d.Read(buf)
+		if errors.Is(err, io.EOF) {
+			return // 对了
+		}
+		if err != nil {
+			t.Fatalf("正常读完却报了错：%v", err)
+		}
+		if n == 0 {
+			t.Fatal("一帧没要到又没有错")
+		}
+	}
+	t.Fatal("读完了一直不到头")
+}

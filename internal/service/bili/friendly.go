@@ -22,6 +22,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 )
 
 // codeMessages 是错误码到中文说明的表。
@@ -91,6 +93,15 @@ func Friendly(err error) string {
 		return "播放地址过期了，正在换一条新的"
 	case errors.Is(err, ErrNoLoginForOnline):
 		return "在线播放要先登录 B 站账号"
+	}
+
+	// 字节源拉不动了。**先说「不是歌坏了」**——这一条很容易被误读成
+	// 「文件损坏了」，而用户的正确反应是换网或者等一会儿，不是清缓存重下。
+	if errors.Is(err, audio.ErrStreamDead) {
+		if errors.Is(err, audio.ErrStreamChanged) {
+			return "B 站换了这条流，正在从刚才的位置重开"
+		}
+		return "连不上 B 站这条音频流了（网络或地址的问题，不是歌坏了）"
 	}
 
 	// B 站的业务错误：查表。

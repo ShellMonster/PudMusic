@@ -25,6 +25,7 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -227,7 +228,6 @@ func (a *App) buildOnline(ctx context.Context, s *Streaming, it Item, vol float6
 	}
 	src, err := audio.NewStreamSource(audio.StreamSourceOptions{
 		URLs:      ref.URLs,
-		Size:      ref.Size,
 		ExpiresAt: ref.ExpiresAt,
 		TempDir:   s.TempDir,
 		Client:    s.Media,
@@ -304,9 +304,12 @@ func (a *App) refetch(ctx context.Context, s *Streaming, it Item) *audio.StreamR
 	a.streamCache = map[string]*bili.StreamRef{streamKey(it): ref}
 	a.mu.Unlock()
 
+	// ⚠️ 这里**不填 Size**：取流接口的返回里没有长度，而 `StreamReply.Size`
+	// 的作用是「长度对不上就别硬接」。它在源那边是靠**两个响应各自报出来的
+	// Content-Length** 相比出来的（见 `stream_source_pump.go` 的 expectTotal），
+	// 所以这一处填 0 不会让那道防线失效——填一个猜的数才会。
 	return &audio.StreamReply{
 		URLs:      ref.URLs,
-		Size:      ref.Size,
 		ExpiresAt: ref.ExpiresAt,
 		Quality:   ref.Label,
 	}
@@ -350,6 +353,7 @@ func (a *App) noteQuality(gen int, label string) {
 func (a *App) checkPlayback() {
 	a.mu.Lock()
 	p := a.player
+	tr := a.online
 	a.mu.Unlock()
 	if p == nil {
 		return
@@ -357,6 +361,16 @@ func (a *App) checkPlayback() {
 	err := p.Err()
 	if err == nil {
 		return
+	}
+
+	// ⚠️ **在线流要看字节源自己的错，不要看解码器的**。解码器看到的是**后果**：
+	// 字节断了之后它多半先报「这一帧的 CRC 对不上」，而真正的原因是网络断了
+	// 或者地址失效了。把后果说给用户听，用户会以为歌坏了、缓存坏了，
+	// 于是去清缓存重下——而正确���反应是「换个网」。
+	if tr != nil && tr.source != nil {
+		if srcErr := tr.source.Err(); srcErr != nil && !errors.Is(srcErr, io.EOF) {
+			err = srcErr
+		}
 	}
 
 	// 同一条错误只报一次。解码器的 Err 记的是**第一条**错误、不自己清零，

@@ -43,6 +43,13 @@ var (
 	// 不是播放出错——界面上不该给用户一句红字。
 	ErrSourceClosed = errors.New("audio: 字节源已关闭")
 
+	// ErrStreamDead 是「这条流拉不下来了」。
+	//
+	// 它和 `io.EOF` 是两件事：EOF 是歌放完了，ErrStreamDead 是中途拉不动了。
+	// 上层要能把这两者分开说给用户听——「歌放完了」和「歌断了」在界面上
+	// 是完全不同的两句话，用户对它们的反应也完全不同。
+	ErrStreamDead = errors.New("audio: 在线流拉不下来了")
+
 	// ErrStreamChanged 是「换流换到了另一条流」。
 	//
 	// 同一首歌同音质重新取流，拿回来的是**同一段字节**，所以能从原偏移接上。
@@ -103,7 +110,9 @@ type StreamSourceOptions struct {
 	// URLs 是第一条流的地址（主 + 备）。空则源一建好就是坏的。
 	URLs []string
 	// Size 是第一条流的长度，已知时填；0 或 -1 表示不知道（源会从
-	// Content-Length 学）。
+	// 响应头的 Content-Length 学）。取流接口的返回里没有长度，所以生产
+	// 路径上这一项永远是「不知道」——留着是因为本地调用方可能已经知道
+	// （比如刚从磁盘缓存里读过一遍）。
 	Size int64
 	// ExpiresAt 是这组地址的失效时刻。零值表示不预判。
 	ExpiresAt time.Time
@@ -159,6 +168,17 @@ type StreamSource struct {
 	cur    int64  // 读游标
 	err    error  // 终态错误；io.EOF 是「正常读完」
 	closed bool
+
+	// expectTotal 是「换流之后，新流**应该**有多长」。
+	//
+	// 为什么需要它：换流拿回来的新流可能根本不是同一段字节（会员过期、
+	// 稿件被替换）。长度对不上还硬接，解出来的是噪声，而且**不在开头出错**——
+	// 要播到那个偏移才炸，比直接失败难查一百倍。
+	//
+	// 取流接口的返回里没有长度（`bili.StreamRef.Size` 因此拿不到东西），
+	// 所以这个数是靠**两个响应各自报出来的 Content-Length 相比**得到的：
+	// 旧流的长度在换流之前就知道了，新流的长度在收到它的响应头时才知道。
+	expectTotal int64
 
 	urls      []string
 	urlIdx    int
@@ -237,6 +257,18 @@ func NewStreamSource(o StreamSourceOptions) (*StreamSource, error) {
 	go s.pump()
 	go s.watchdog()
 	return s, nil
+}
+
+// Err 返回这条流为什么停下了。正常读完是 `io.EOF`，中途拉不动是
+// 一个包着 `ErrStreamDead` 的错。
+//
+// **为什么要单独问它**：解码器看到的是**后果**——字节断了之后它多半
+// 先报「这一帧的 CRC 对不上」，而真正的原因是网络断了或者地址失效。
+// 用户看到的应该是后者。
+func (s *StreamSource) Err() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.err
 }
 
 // Quality 返回当前这条流的音质徽章文字。换过流的话是新的那条。
@@ -401,7 +433,13 @@ func (s *StreamSource) Close() error {
 }
 
 // fail 记一个终态错误并叫醒所有等着的人。可以重复调用，第一条赢。
+//
+// 非 EOF 的终态错误都会包一层 `ErrStreamDead`——那是「拉不动了」的标记，
+// 上层靠它把「歌放完了」和「歌断了」分开说（见 ErrStreamDead）。
 func (s *StreamSource) fail(err error) {
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, ErrStreamDead) {
+		err = fmt.Errorf("%w：%w", ErrStreamDead, err)
+	}
 	s.mu.Lock()
 	if s.err == nil {
 		s.err = err

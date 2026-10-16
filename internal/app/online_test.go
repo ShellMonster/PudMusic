@@ -568,6 +568,98 @@ func TestStreamingNotMountedSaysSo(t *testing.T) {
 	}
 }
 
+// TestMidPlaybackDeathSurfacesOnThePlaybar 盯规格里的负路径「播放中断网」。
+//
+// `PLAN.md` 阶段 2 的负路径表里写着：「播放中断网——**不能被当成播完**——
+// 要停在缓冲态并提示」。这条钉的就是它：CDN 下到一半掐断连接之后，播放条上
+// 要出现一句人话，而不是安静地停住。
+//
+// 这条用例是**评审逼出来的**：它自己写了同名探针才发现
+// `App.tick()` 里根本没调 `checkPlayback`，而当时所有测试都是绿的——
+// 因为它们走的是 `failOnline`（同步那条路），不经过 tick。
+func TestMidPlaybackDeathSurfacesOnThePlaybar(t *testing.T) {
+	f := newStreamFixture(t)
+	data := readFlac(t)
+	f.media = data
+	alive := len(data) / 2 // 只发一半就掐断
+
+	f.on("/cdn/a.flac", func(w http.ResponseWriter, r *http.Request) {
+		start := rangeStartOf(r)
+		w.Header().Set("Content-Length", strconv.Itoa(len(data)-start))
+		if start > 0 {
+			w.Header().Set("Content-Range",
+				"bytes "+strconv.Itoa(start)+"-"+strconv.Itoa(len(data)-1)+"/"+strconv.Itoa(len(data)))
+			w.WriteHeader(http.StatusPartialContent)
+		}
+		w.Write(data[start:alive])
+		w.(http.Flusher).Flush()
+		panic(http.ErrAbortHandler)
+	})
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
+
+	a := newOnlineApp(t, f, t.TempDir())
+	if err := a.Enqueue(onlineItem("BV1", "1", "半路死掉的一首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "半路死掉的一首")
+
+	// 等到它真的停：位置不再前进。
+	waitFor(t, 60*time.Second, "播放停住", func() bool {
+		p1 := a.Snapshot().Position
+		if p1 == 0 {
+			return false
+		}
+		time.Sleep(700 * time.Millisecond)
+		return a.Snapshot().Position == p1
+	})
+	waitFor(t, 15*time.Second, "播放条上出现一句人话", func() bool {
+		return a.Snapshot().Err != ""
+	})
+
+	got := a.Snapshot().Err
+	// ⚠️ 必须是「拉不动了」而不是解码器那边的抱怨。字节断了之后 flacdec
+	// 先报的是「这一帧的 CRC 对不上」——把**后果**说给用户听，用户会以为
+	// 歌坏了、缓存坏了，于是去清缓存重下，而正确的反应是「换个网」。
+	if strings.Contains(got, "CRC") || strings.Contains(got, "flacdec") {
+		t.Errorf("说的是解码器的抱怨，不是真正的原因：%q", got)
+	}
+	if !strings.Contains(got, "连不上") {
+		t.Errorf("话没说清是「拉不动了」：%q", got)
+	}
+}
+
+// TestDeadStreamFromTheStartSaysSo 盯「地址一上来就是死的」。
+//
+// CDN 立刻 403（过期、被换掉、风控）——连一个字节都没下到。这时播放条上
+// 同样要有话，而且是「拉不动」而不是空白。
+func TestDeadStreamFromTheStartSaysSo(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = readFlac(t)
+	f.forbidden["/cdn/a.flac"] = true
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
+
+	a := newOnlineApp(t, f, t.TempDir())
+	if err := a.Enqueue(onlineItem("BV1", "1", "一开始就不行的一首")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 30*time.Second, "播放条上出现一句人话", func() bool {
+		return a.Snapshot().Err != ""
+	})
+	if got := a.Snapshot().Err; got == "" {
+		t.Error("话是空的")
+	}
+}
+
+// rangeStartOf 读 Range 头里的起点，没有就是 0。
+func rangeStartOf(r *http.Request) int {
+	h := r.Header.Get("Range")
+	if !strings.HasPrefix(h, "bytes=") {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(h, "bytes="), "-"))
+	return n
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 播放代次
 // ─────────────────────────────────────────────────────────────────────────────

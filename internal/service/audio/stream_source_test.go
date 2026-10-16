@@ -408,6 +408,146 @@ func TestAnExpiredURLSaysSoRatherThanTalkingAboutRanges(t *testing.T) {
 	}
 }
 
+// TestTheStreamSaysWhyItStopped 盯「拉不动了」和「放完了」是两件事。
+//
+// 字节源正常读完是 io.EOF，中途拉不动是一个包着 ErrStreamDead 的错。
+// 上层要能把这两者分开说给用户听——而**看解码器是看不出来的**：字节断了
+// 之后解码器多半先报「这一帧的 CRC 对不上」，那是后果不是原因。
+func TestTheStreamSaysWhyItStopped(t *testing.T) {
+	data := payload(64 << 10)
+	cut := len(data) / 2
+
+	srv, gate := cutAfter(data, cut, len(data), func(w http.ResponseWriter, r *http.Request) {
+		// 换流之后还是只发一半：这一次没有任何办法能拉完。
+		serveSome(w, r, data, cut)
+	})
+	t.Cleanup(srv.Close)
+
+	s, err := NewStreamSource(StreamSourceOptions{
+		URLs:    []string{srv.URL},
+		Client:  srv.Client(),
+		TempDir: t.TempDir(),
+		Refetch: func(context.Context, int64) *StreamReply {
+			return &StreamReply{URLs: []string{srv.URL + "/again"}}
+		},
+		MaxRefresh: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	if _, err := io.ReadFull(s, make([]byte, cut)); err != nil {
+		t.Fatal(err)
+	}
+	close(gate)
+	_, _ = io.ReadAll(s)
+
+	err = s.Err()
+	if err == nil {
+		t.Fatal("拉不动了却什么都没说")
+	}
+	if errors.Is(err, io.EOF) {
+		t.Errorf("中途拉不动被说成了「放完了」：%v", err)
+	}
+	if !errors.Is(err, ErrStreamDead) {
+		t.Errorf("err = %v，没有包 ErrStreamDead", err)
+	}
+}
+
+// TestAFinishedStreamIsNotADeadStream 盯反过来的那一半：放完了不是拉不动了。
+func TestAFinishedStreamIsNotADeadStream(t *testing.T) {
+	data := payload(32 << 10)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serveBytes(w, r, data, len(data))
+	}))
+	t.Cleanup(srv.Close)
+
+	s, err := NewStreamSource(StreamSourceOptions{
+		URLs:    []string{srv.URL},
+		Client:  srv.Client(),
+		TempDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	if _, err := io.ReadAll(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Err(); !errors.Is(err, io.EOF) {
+		t.Errorf("放完了却报了 %v，want io.EOF", err)
+	}
+	if errors.Is(s.Err(), ErrStreamDead) {
+		t.Error("放完了被说成了「拉不动了」")
+	}
+}
+
+// TestRefetchRefusesAStreamOfAnotherLengthEvenWhenNobodySaidItsSize 盯
+// 「换了另一条流就别硬接」这道防线**真的在跑**。
+//
+// 取流接口的返回里**没有长度**（`bili.StreamRef` 因此不提供 Size），
+// 所以调用方填不出大小来。防线得靠两个响应各自报出来的 Content-Length
+// 相比——否则它就是一条永远不触发的死代码，而「换到别的流还硬接」的
+// 后果是解出噪声、而且只在歌播到那个偏移才炸。
+func TestRefetchRefusesAStreamOfAnotherLengthEvenWhenNobodySaidItsSize(t *testing.T) {
+	const total = 32 << 10
+	data := payload(total)
+
+	var n int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n++
+		if n == 1 {
+			w.Header().Set("Content-Length", fmt.Sprint(total))
+			w.Write(data[:1024])
+			w.(http.Flusher).Flush()
+			panic(http.ErrAbortHandler)
+		}
+		// 第二条流**短得多**——换了另一段字节。
+		other := payload(9 << 10)
+		serveBytes(w, r, other, len(other))
+	}))
+	t.Cleanup(srv.Close)
+
+	s, err := NewStreamSource(StreamSourceOptions{
+		URLs: []string{srv.URL + "/v1"},
+		Size: total,
+		// ⚠️ 不填 Size：这就是生产路径上真实的样子。
+		Client: srv.Client(),
+		Refetch: func(context.Context, int64) *StreamReply {
+			return &StreamReply{URLs: []string{srv.URL + "/v2"}}
+		},
+		TempDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	if _, err := io.ReadFull(s, make([]byte, 1024)); err != nil {
+		t.Fatal(err)
+	}
+	_, err = io.ReadAll(s)
+	if !errors.Is(err, ErrStreamChanged) {
+		t.Errorf("err = %v，want ErrStreamChanged（长度对不上还硬接了）", err)
+	}
+}
+
+// serveSome 发 [from, until) 这一段，Content-Length 声明的是整段。
+func serveSome(w http.ResponseWriter, r *http.Request, data []byte, until int) {
+	from := rangeStart(r)
+	w.Header().Set("Content-Length", fmt.Sprint(int64(len(data))-from))
+	if from > 0 {
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", from, len(data)-1, len(data)))
+		w.WriteHeader(http.StatusPartialContent)
+	}
+	end := min(int(from)+until, len(data))
+	w.Write(data[from:end])
+	w.(http.Flusher).Flush()
+	panic(http.ErrAbortHandler)
+}
+
 // TestCloseUnblocksAReaderThatIsWaiting 盯「阻塞式读取必须可取消」。
 //
 // MyGo 的解码 goroutine 就阻塞在 `Read` 上，而它的 `close()`（`audio/source.go`

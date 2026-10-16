@@ -93,7 +93,9 @@ func (s *StreamSource) pour(resp *http.Response, from int64, buf []byte) error {
 		// 一样对不上偏移。
 		return fmt.Errorf("audio: 在线流不支持续传（HTTP %d）", resp.StatusCode)
 	}
-	s.learnTotal(from, resp)
+	if err := s.checkTotal(s.learnTotal(from, resp)); err != nil {
+		return err
+	}
 
 	for {
 		if s.stopped() {
@@ -237,6 +239,9 @@ func (s *StreamSource) recover(from int64, cause error) bool {
 func (s *StreamSource) adopt(reply *StreamReply) bool {
 	s.mu.Lock()
 	oldSize := s.size
+	// 新流自称的长度先记下来，等它的响应头到了再对账（`checkTotal`）。
+	// 调用方知道长度的话（`reply.Size > 0`）当场就能判，省掉一次等待。
+	s.expectTotal = oldSize
 	s.mu.Unlock()
 
 	if reply.Size > 0 && oldSize > 0 && reply.Size != oldSize {
@@ -414,12 +419,12 @@ func (s *StreamSource) markTotal(n int64) {
 	s.mu.Unlock()
 }
 
-// learnTotal 从响应头里学总长。
+// learnTotal 从响应头里学总长，返回这条流一共多少字节（不知道时是 -1）。
 //
 // 有 Range 时 Content-Length 是**剩下的那一段**，所以要加上已经下的。
 // 写成「直接用 Content-Length」的话，一首续传的歌会被当成只有尾巴那么长，
 // 表现是提前「播完了」。
-func (s *StreamSource) learnTotal(from int64, resp *http.Response) {
+func (s *StreamSource) learnTotal(from int64, resp *http.Response) int64 {
 	n := resp.ContentLength
 	if n < 0 {
 		if v := resp.Header.Get("Content-Length"); v != "" {
@@ -429,10 +434,10 @@ func (s *StreamSource) learnTotal(from int64, resp *http.Response) {
 		}
 	}
 	if n < 0 {
-		return
+		return -1
 	}
-	s.mu.Lock()
 	total := from + n
+	s.mu.Lock()
 	// 只在「还不知道」或者「服务器说得更长」时更新。已经下完的那条
 	// 不该被一个续传响应改回去。
 	if s.size < 0 || total > s.size {
@@ -440,6 +445,24 @@ func (s *StreamSource) learnTotal(from int64, resp *http.Response) {
 	}
 	s.cond.Broadcast()
 	s.mu.Unlock()
+	return total
+}
+
+// checkTotal 拿新流自称的长度对一下账。
+//
+// 对不上就是「换到了另一条流」，不是「换了个地址」。差一个字节都不能放行。
+func (s *StreamSource) checkTotal(total int64) error {
+	if total < 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.expectTotal > 0 && s.expectTotal != total {
+		return fmt.Errorf("%w（原来 %d 字节，换来的 %d 字节）",
+			ErrStreamChanged, s.expectTotal, total)
+	}
+	s.expectTotal = 0
+	return nil
 }
 
 // statusErr 把一个错误的状态码说成人话。

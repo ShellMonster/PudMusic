@@ -325,6 +325,14 @@ func (a *App) tick() {
 			if live && wake != nil {
 				wake()
 			}
+			// ⚠️ 这一句**不能省**。`Playing() == false` 有五种情况：暂停、
+			// 停止、关闭、播完、解码失败（`mygo/audio/audio.go`）。前四种
+			// 什么都不用做，第五种必须变成播放条上的一句话——不然一次断网
+			// 表现成「歌忽然放完了」，用户以为歌放完了。
+			//
+			// 放在锁外面调：它自己要拿 `a.mu`，而 `Player.Err()` 可能去碰
+			// 字节源。
+			a.checkPlayback()
 		}
 	}
 }
