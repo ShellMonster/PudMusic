@@ -218,6 +218,54 @@ type platform interface {
 	detach()
 }
 
+// windowBinder 是「平台那一半要一个**具体的窗口**」的那一种。
+//
+// **不是 `platform` 接口的一部分**，因为 macOS 不需要：那边的
+// `MPNowPlayingInfoCenter` 是全局的，会话一建就和窗口无关。而 Windows 的
+// SMTC 是**按窗口**的（`GetForWindow(HWND, …)`），任务栏缩略图工具栏更是
+// 直接长在某个 HWND 上——所以那边要等窗口建出来。
+//
+// 用一个可选接口而不是往 `platform` 上加一个方法，是为了不给 macOS 塞一个
+// 它永远不会用到、还得注释半天解释「为什么这里是空的」的方法。
+type windowBinder interface {
+	// bindWindow 接到一个窗口上。实现要能整体失败。
+	bindWindow(uintptr) error
+}
+
+// BindWindow 把会话接到一个窗口上。h 在 macOS 上是 `NSWindow*`、在 Windows
+// 上是 `HWND`——**只有 Windows 那边看它**，别的平台原样忽略（见 windowBinder）。
+//
+// ## 什么时候调：窗口建出来**之后**
+//
+// 这一句是 Windows 那一半和 macOS 那一半最大的不同，所以单独说明：
+// `ui.MountMedia` 在开窗口之前调（macOS 要在那里注册 Objective-C 的类，
+// 有回调在跑的时候再注册会直接 SIGTRAP），而 Windows 这边要等 `ui.Run`
+// 里那个窗口建出来才有句柄可用。
+//
+// 两边都要照顾到，所以顺序是：先 `New`（macOS 在那里把该注册的注册完），
+// 窗口出来之后再 `BindWindow`（Windows 在那里把系统会话建起来）。
+// 补推的那一下见 smtc_windows.go 的 replayState。
+//
+// 返回 false 表示这一轮系统那一半没接上（记了日志）。**不影响别的**：界面、
+// 播放、队列都跟它无关，会话这时就是个哑巴。
+//
+// 重复调是安全的：上一次那个窗口会先被收干净。
+func (s *Session) BindWindow(h uintptr) bool {
+	s.mu.Lock()
+	p := s.p
+	s.mu.Unlock()
+
+	b, ok := p.(windowBinder)
+	if !ok {
+		return true
+	}
+	if err := b.bindWindow(h); err != nil {
+		log.Printf("biu: 系统媒体会话没接上这个窗口（浮窗、锁屏、任务栏都没有）：%v", err)
+		return false
+	}
+	return true
+}
+
 // Session 是系统媒体会话。
 //
 // 零值不可用，请用 New。
