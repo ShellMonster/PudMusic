@@ -124,8 +124,13 @@ func (a *App) UpdateSettings(fn func(*Settings)) (Settings, error) {
 
 // SetThemeMode 换主题档位：跟随系统 / 浅色 / 深色。
 //
-// 设置页那三个按钮调它。档位只有这三个值，手改设置文件塞进来的别的东西
-// normalize 会兜回「跟随系统」。
+// ⚠️ **设置页那三个按钮不走这里**，它们走 `UpdateSettings`（见
+// `internal/ui/settings_page.go` 的 `applySetting`）。界面层要的是「所有设置
+// 共用一条路、一条报错提示」，为此每个控件调一次通用路比调各自的快捷方法更
+// 合适。这里留着是它本身就是这一项设置的**类型化写法**，语义清楚，也不怕以后
+// 「换主题」这件事要做校验——那时候校验该落在这里。
+//
+// 档位只有这三个值，手改设置文件塞进来的别的东西 normalize 会兜回「跟随系统」。
 func (a *App) SetThemeMode(m ThemeMode) error {
 	_, err := a.UpdateSettings(func(s *Settings) { s.ThemeMode = m })
 	return err

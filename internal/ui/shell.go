@@ -33,6 +33,13 @@ type Shell struct {
 	// （铁律四的验收点：页面里 panic，进程不能崩）。
 	pageBody func(*ui.Context, *ui.Route, Route)
 
+	// sideBody 是画侧栏的那一支，同样是为了能替掉它测崩溃。
+	//
+	// 侧栏比页面更需要这一层：它里面有拖拽、宽度动画和收藏夹列表，出事时
+	// 坏掉的是**整个窗口**（侧栏在外层布局里，一空就空一大块），而且出错
+	// 的地方往往不在页面上。
+	sideBody func(*ui.Context)
+
 	// images 是网络封面缓存。整个窗口共用一个。
 	images *imgcache.Cache
 
@@ -45,6 +52,22 @@ type Shell struct {
 	// 两个都只由 view 读写——view 永远跑在主线程上。
 	scrub float64
 	held  bool
+
+	// 侧栏这一摊。**只由 view 在主线程上读写**，不跨 goroutine。
+	//
+	// sideWidth 是这一帧画出来的宽度：拖动中它跟着指针走（可能小于 160，
+	// 看上去就是折叠着的），没在拖时宽度走 MyGo 的动画，见 sidebar.go。
+	//
+	// sideDragFromX / sideDragFromWidth 是这次拖拽的起点：按下那一刻指针的
+	// 横坐标，和当时的宽度。每一次拖拽重新记，不跨拖拽沿用。
+	sideWidth         float64
+	sideDragging      bool
+	sideDragFromX     float32
+	sideDragFromWidth float64
+
+	// sideLists 是两组收藏夹各自的列表状态。拖拽排序靠它，
+	// 两组一份是因为两组各排各的（见 sidebar_favorites.go）。
+	sideLists [favGroups]ui.ListState
 
 	// crash 是上一帧 panic 到的东西，非 nil 时这一帧画错误页。
 	crash any
@@ -71,7 +94,8 @@ type Shell struct {
 func New(a *app.App) *Shell {
 	s := &Shell{app: a, router: ui.NewRouter("/"), images: imgcache.New(imgcache.Options{})}
 	s.images.AddWake(s.wake.invalidate)
-	s.pageBody = s.placeholder
+	s.pageBody = s.pageContent
+	s.sideBody = s.viewSide
 	s.draw = Guard(s.viewMain, s.onPanic)
 	return s
 }
@@ -83,6 +107,17 @@ func (s *Shell) Attach(w *mygo.Window) {
 	w.OnClosed(func() {
 		s.images.Close()
 		s.app.Close()
+		// 关窗就收尾设置：停掉后台写盘，并把还欠着的改动同步落完。
+		//
+		// MountSettings 里那个 OnWillQuit 的 Flush 兜的是「退进程」这条路；
+		// 这一句兜的是「关窗口」——以后加了托盘（issue #28），关窗口不再等于
+		// 退进程，那条 OnWillQuit 就不一定会跑，两句要一起看。
+		//
+		// `CloseSettings` 可以重复调（内部先 LoadAndDelete），所以窗口关了之后
+		// 进程再退、再调一次都不会出错。
+		if err := s.app.CloseSettings(); err != nil {
+			log.Printf("biu: 关窗时保存设置失败：%v", err)
+		}
 	})
 }
 
@@ -177,9 +212,10 @@ func (s *Shell) viewMain(c *ui.Context) {
 
 	ui.Column(c).Fill().Children(func() {
 		s.viewNav(c)
-		s.viewThemeSwitch(c)
 		ui.Row(c).Grow(1).Children(func() {
-			s.viewSide(c)
+			// 侧栏是**一整块** view，外面包一层 Guard（铁律三）。它坏了的
+			// 表现是整个窗口空一大块，连报错的地方都没有。
+			Guard(s.sideBody, s.onPanic)(c)
 			s.viewRoutes(c)
 		})
 		s.viewPlayBar(c, st)

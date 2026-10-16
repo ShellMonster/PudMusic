@@ -13,7 +13,26 @@
 // Biu 和 MyGo 时不丢东西：这一版读得懂、写得回，用户换个应用打开还是原样。
 // 丢字段是最难查的一类数据丢失。
 //
-// 本文件写出的 JSON 一定包含全部键；Biu 导出的文件可能省略 `proxySettings.port`
+// ## Biu 有**两种**文件，两种都得能读
+//
+// 「Biu 的设置文件」不是一个形状，是两个：
+//
+//   - `app-settings.json`（electron-store 自己落的盘）：外面包一层信封
+//     `{"appSettings": {...}, "__internal__": {...}}`。
+//   - `biu-settings-<时间戳>.json`（设置页上「导出配置」按钮下载下来的）：
+//     **裸的 `{...}`，外面没有信封**——`export-import.tsx:19` 写的是
+//     `JSON.stringify(settingStore?.appSettings ?? defaultAppSettings, null, 2)`，
+//     写的是 `appSettings` 的值本身。Biu 自己的「导入配置」要的也是这个形状
+//     （同文件 :46-51，逐个 `defaultAppSettings` 的键去取）。
+//
+// 用户真正会拿到手上、真正会拿来「导入」的是**第二种**——第一种躺在
+// `~/Library/Application Support/Biu/` 里，用户一般不知道它在哪。所以认不出
+// 裸的那份不是「少支持一种格式」，是**导入功能整个不工作**：整份文件被当成没有
+// 任何已知键，退回全默认值，**一声不响**，用户只会觉得「导入了但什么都没变」。
+//
+// 判据见 `splitEnvelope`。
+//
+// 本文件写出的 JSON 一定包含全部键；Biu 的文件可能省略 `proxySettings.port`
 // 这类可选键，读的时候补默认值即可——两个方向的差别只在这里。
 //
 // ## 为什么原子写不够（Codex M9）
@@ -59,8 +78,12 @@ const SchemaVersion = 1
 //
 // ⚠️ 和 Biu 的 `app-settings.json` 不一样。Biu 那个名字是 electron-store 的
 // `StoreNameMap.AppSettings` 直接拼出来的，没有语义。我们按 `PLAN.md` §3.4
-// 用 `settings.json`——**键名一致才需要兼容，文件名不需要**。要导入 Biu 的
-// 备份，把文件内容贴进来即可，不用改文件名。
+// 用 `settings.json`——**键名一致才需要兼容，文件名不需要**。
+//
+// 导入 Biu 的配置就是把它的文件放到设置文件该在的位置上，**内容不用改**：
+// Biu 的两种形状（electron-store 的 `app-settings.json`、以及设置页「导出
+// 配置」下载的 `biu-settings-*.json`）都能直接读，见文件头的说明和
+// `splitEnvelope`。
 const SettingsFileName = "settings.json"
 
 // 设置文件里几个约定值。
@@ -76,6 +99,36 @@ const (
 	// MaxBorderRadius 是圆角的上限，也是 Biu 设置页滑块的右端点。
 	MaxBorderRadius = 24.0
 )
+
+// 侧栏宽度的三个数，抄 Biu `src/layout/side/index.tsx:15-17`：
+//
+//	COLLAPSED_WIDTH = 72    折叠后多宽
+//	MIN_WIDTH       = 160   展开时的下限，拖到它下面就折叠
+//	MAX_WIDTH       = 480   展开时的上限
+//
+// 放在这一层而不是界面层，是因为 normalize 也要用：设置文件是用户能直接编辑的，
+// 一个 `sideMenuWidth: 99999` 不该一路穿到画界面的那一行。
+const (
+	CollapsedSideMenuWidth = 72.0
+	MinSideMenuWidth       = 160.0
+	MaxSideMenuWidth       = 480.0
+	DefaultSideMenuWidth   = 200.0
+)
+
+// ClampSideMenuWidth 把一个宽度拉进 [MinSideMenuWidth, MaxSideMenuWidth]。
+//
+// 拖动过程中**不要**用它：拖到 100 时画出来的就该是 100（折叠中的样子），
+// 只有落盘的值和重读设置时才钳。Biu 也是这个分工（`computeWidth` 里的
+// widthForView / widthToPersist 分开）。
+func ClampSideMenuWidth(v float64) float64 {
+	if v < MinSideMenuWidth {
+		return MinSideMenuWidth
+	}
+	if v > MaxSideMenuWidth {
+		return MaxSideMenuWidth
+	}
+	return v
+}
 
 // 主题档位。Biu 的 `ThemeMode = "system" | "light" | "dark"`。
 type ThemeMode string
@@ -147,10 +200,51 @@ type ProxySettings struct {
 	Password string    `json:"password"`
 }
 
-// SideMenuCollectionFolded 是侧栏两组收藏的折叠状态。
+// SideMenuCollectionFolded 是侧栏两组收藏的折叠状态。键名照 Biu 的
+// `sideMenuCollectionFolded`（`biu/shared/settings/app-settings.ts:25`）。
 type SideMenuCollectionFolded struct {
 	Created   bool `json:"created"`
 	Collected bool `json:"collected"`
+}
+
+// SideMenuCollectionOrder 是侧栏两组收藏的**顺序**：每组一条 ID 序列。
+//
+// ## 这是唯一一个我们加的、Biu 没有的键
+//
+// Biu 把这个顺序单独存在另一个 store 里（zustand persist 的
+// `"favorites-order"`，`{createdOrder, collectedOrder}`，
+// `biu/src/store/favorite.ts:157-163`），不在 app-settings.json 里。
+// 我们放进设置，是因为验收要求「顺序落盘」，而设置存储已经把 schema 版本、
+// 原子写、退出前 flush、只读保护这几件都做好了（见 settings.go），
+// 另开一份文件就等于把这些重造一遍——重造出来的那份还少了只读保护：
+// 设置来自更新的版本时，这一格照样会被旧版本按旧语义改写。
+//
+// 分工照 Biu：**条目不存，顺序才存**。条目每次从接口拉，存一份本地副本
+// 只会和接口对不上；顺序是用户拖出来的，接口不返回，只能存。
+//
+// 加键不用涨 SchemaVersion（见 SchemaVersion 的注释：只加新的可选键不用涨），
+// 读不到就是空序列，等于「还没排过序」。
+type SideMenuCollectionOrder struct {
+	Created   []int64 `json:"created"`
+	Collected []int64 `json:"collected"`
+}
+
+// list 报 g 这一组存下的顺序。
+func (o SideMenuCollectionOrder) list(g FavoriteGroup) []int64 {
+	if g == FavoritesCollected {
+		return o.Collected
+	}
+	return o.Created
+}
+
+// setList 把 g 这一组的顺序写成 v，返回新的整份。
+func (o SideMenuCollectionOrder) setList(g FavoriteGroup, v []int64) SideMenuCollectionOrder {
+	if g == FavoritesCollected {
+		o.Collected = v
+	} else {
+		o.Created = v
+	}
+	return o
 }
 
 // Settings 是一份完整的应用设置，键名与 Biu 一一对应。
@@ -175,6 +269,7 @@ type Settings struct {
 	SideMenuCollapsed        bool                     `json:"sideMenuCollapsed"`
 	SideMenuWidth            float64                  `json:"sideMenuWidth"`
 	SideMenuCollectionFolded SideMenuCollectionFolded `json:"sideMenuCollectionFolded"`
+	SideMenuCollectionOrder  SideMenuCollectionOrder  `json:"sideMenuCollectionOrder"`
 	ReportPlayHistory        bool                     `json:"reportPlayHistory"`
 	LocalMusicDirs           []string                 `json:"localMusicDirs"`
 
@@ -276,7 +371,11 @@ func DefaultSettings(downloadPath string) Settings {
 		ShowSearchHistory: true,
 		ProxySettings:     ProxySettings{Type: ProxyNone},
 		SideMenuCollapsed: false,
-		SideMenuWidth:     200,
+		SideMenuWidth:     DefaultSideMenuWidth,
+		SideMenuCollectionOrder: SideMenuCollectionOrder{
+			Created:   []int64{},
+			Collected: []int64{},
+		},
 		ReportPlayHistory: true,
 		LocalMusicDirs:    []string{},
 	}
@@ -302,6 +401,9 @@ var (
 //
 // 没有这个文件**不是错误**，返回默认值——第一次运行就是这样。
 //
+// 读得懂三种形状（自己写的、Biu 的 electron-store 落盘文件、Biu「导出配置」
+// 下载的裸文件），见文件头和 `splitEnvelope`。
+//
 // 返回的 Settings 在出错时也总是可用的（要么是默认值，要么是从坏文件里
 // 尽力恢复出来的），调用方只需要看 error 决定要不要告诉用户。
 func LoadSettings(path string) (Settings, error) {
@@ -313,30 +415,66 @@ func LoadSettings(path string) (Settings, error) {
 		return DefaultSettings(""), fmt.Errorf("app: 读设置 %s: %w", path, err)
 	}
 
-	var f settingsFile
-	if err := json.Unmarshal(b, &f); err != nil {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(b, &top); err != nil {
 		// 先把坏文件留下来再重置。没有它，用户丢了设置都不知道丢了什么，
 		// 也没法把里面没坏的部分捞回来。
 		backupSettings(path)
 		return DefaultSettings(""), fmt.Errorf("%w: %s (%v)", ErrSettingsCorrupt, path, err)
 	}
 
-	// 文件里没有 schemaVersion 键时，解出来就是 0，也就是 v0——
-	// 正好是 Biu 直接导出的那份。两边用同一个数字，不需要再猜。
-	from := f.SchemaVersion
+	s, from, err := splitEnvelope(b, top)
+	if err != nil {
+		backupSettings(path)
+		return DefaultSettings(""), fmt.Errorf("%w: %s (%v)", ErrSettingsCorrupt, path, err)
+	}
+
 	if from > SchemaVersion {
 		// 不备份、不动它。这是别人（更新的版本）写的，我们无权处置。
 		return DefaultSettings(""), fmt.Errorf("%w: 文件是 v%d，我们只到 v%d（%s）",
 			ErrSettingsFromNewer, from, SchemaVersion, path)
 	}
 
-	s := f.AppSettings
 	if err := applyMigrations(&s, from); err != nil {
 		backupSettings(path)
 		return DefaultSettings(""), fmt.Errorf("app: 升级设置 %s 失败，已保留原文件: %w", path, err)
 	}
 	s.normalize()
 	return s, nil
+}
+
+// splitEnvelope 把一份设置文件拆成「设置」和「它是第几版」。
+//
+// 三种形状，认错任何一种的后果都是**静默丢设置**：
+//
+//  1. 我们自己写的：{"schemaVersion": 1, "appSettings": {...}}
+//  2. Biu 的 electron-store 落盘文件：{"appSettings": {...}, "__internal__": {...}}
+//     （`__internal__` 是 conf 的内部状态，标准库自动忽略，我们也不写回去）
+//  3. **Biu 设置页上「导出配置」下载的那份：裸的 `{...}`，外面没有信封。**
+//     `biu/src/pages/settings/export-import.tsx:19` 写的是
+//     `JSON.stringify(settingStore?.appSettings ?? defaultAppSettings, null, 2)`。
+//     用户真正拿得着的导入文件就是这一种。
+//
+// 判据只有一条：**顶层有没有 `appSettings` 这个键**。裸的那份里根本没有它
+// （那 20 个键是 autoStart、closeWindowOption……），两种形状不会认错。
+//
+// 裸的那份按 **v0** 读：它没有 schemaVersion 键，那就是 0，也就是「Biu 直接
+// 导出的那份」——和它带信封时走的是同一条迁移链，v0 那一步会把 Biu 自己那个
+// `"system-default"` 坏字体值修掉（`biu/src/store/settings.ts:37-39` 专门兼容
+// 它，旧版本导出的文件里就是会有）。
+func splitEnvelope(b []byte, top map[string]json.RawMessage) (Settings, int, error) {
+	if _, ok := top["appSettings"]; ok {
+		var f settingsFile
+		if err := json.Unmarshal(b, &f); err != nil {
+			return Settings{}, 0, err
+		}
+		return f.AppSettings, f.SchemaVersion, nil
+	}
+	var s Settings
+	if err := json.Unmarshal(b, &s); err != nil {
+		return Settings{}, 0, err
+	}
+	return s, 0, nil
 }
 
 // migration 把 v 升到 v+1。
@@ -382,8 +520,17 @@ func (s *Settings) normalize() {
 	if s.FontFamily == "" {
 		s.FontFamily = DefaultFontFamily
 	}
+	// 「没设过」和「被钳到区间里」是两件事，兜底值必须分开：
+	//
+	//   - 文件里没有这一格，或者写的是 0 → 给**默认的 200**，不是下限 160。
+	//     Biu 那边是 `sideMenuWidth ?? 200`（`biu/src/layout/side/index.tsx:49`），
+	//     兜底也是 200；而且下一次写盘就会把这个 200 永久写回去。少了这一条，
+	//     Biu 的旧导出、手写的设置文件第一次打开就变成 160，Biu 那边是 200。
+	//   - 写了但是越界（比如手改成 99999）→ 钳进 [160, 480]。
 	if s.SideMenuWidth <= 0 {
-		s.SideMenuWidth = 200
+		s.SideMenuWidth = DefaultSideMenuWidth
+	} else {
+		s.SideMenuWidth = ClampSideMenuWidth(s.SideMenuWidth)
 	}
 
 	s.ThemeMode = pickEnum(s.ThemeMode, ThemeModeSystem,
@@ -416,6 +563,14 @@ func (s *Settings) normalize() {
 	}
 	if s.LocalMusicDirs == nil {
 		s.LocalMusicDirs = []string{}
+	}
+	// nil 和空序列在 JSON 里差一个 `null`，写出去会让「还没排过序」和
+	// 「排过序，排出来是空的」看起来是两回事。统一成空序列。
+	if s.SideMenuCollectionOrder.Created == nil {
+		s.SideMenuCollectionOrder.Created = []int64{}
+	}
+	if s.SideMenuCollectionOrder.Collected == nil {
+		s.SideMenuCollectionOrder.Collected = []int64{}
 	}
 }
 

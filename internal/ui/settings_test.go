@@ -254,18 +254,87 @@ func TestMountSettingsUsesTheMyGoAppDataDirectory(t *testing.T) {
 // 用户真的能切
 // ─────────────────────────────────────────────────────────────────────────────
 
-// clickTheme 点主题那三个按钮之一。
+// clickTheme 点主题那三个按钮之一（设置页上）。
 func clickTheme(t *testing.T, tt *mygoui.Tester, label string) {
 	t.Helper()
 	if err := tt.Click(label); err != nil {
-		t.Fatalf("点「%s」失败：%v（界面上还有切换主题的入口吗）", label, err)
+		t.Fatalf("点「%s」失败：%v（设置页上还有切换主题的入口吗）", label, err)
 	}
 	tt.Frame()
 }
 
+// openSettings 从侧栏点进设置页。走的是用户真的走的那条路。
+func openSettings(t *testing.T, tt *mygoui.Tester) {
+	t.Helper()
+	if err := tt.Click("设置"); err != nil {
+		t.Fatalf("侧栏上点不到「设置」：%v，文字有 %q", err, tt.Texts())
+	}
+	settleSettingsPage(t, tt)
+	if !tt.HasText("窗口关闭") {
+		t.Fatalf("切到设置页了但没画出内容，文字有 %q", tt.Texts())
+	}
+}
+
+// settleStill 是「两个框算不算没动」的容差，单位 DIP。
+//
+// 切页动画里整页在滑，每帧差几十像素；走完之后剩下的抖动比这还小两个数量级。
+const settleStill = 0.25
+
+// settleSettingsPage 是「等切页动画走完」。
+//
+// ⚠️ 这一步少了，接下来所有点击都会**时灵时不灵**，症状很像「控件坏了」：router
+// 在新页滑入时会把**正在离开的那一页也建出来**，和新页并排摆着
+// （MyGo `ui/router.go` 的 `Router.build`），所以刚切过去那几帧控件的框还在
+// 窗口外面，或者整页还在往右滑。`tt.Click` 自己走不完——它只跑到没人再要新帧
+// 为止，那一刻动画才刚开始。
+//
+// 判据两条，缺一条都不算走完：
+//   - 正在离开的那一页不在画面上了（占位页那句「这一页还没做」没了）；
+//   - 设置页的框连着两帧不动了。
+//
+// 只判第一条不够：那一页还在画面里，控件也可能已经有尺寸了（只是还在滑），
+// 这时候按下去正好按空。只判第二条也不够：还没走完时它当然还在动，可一旦它
+// 恰好停在某一帧上，两帧也会一样。不数帧数：动画多长是框架的事，这里不猜。
+func settleSettingsPage(t *testing.T, tt *mygoui.Tester) {
+	t.Helper()
+	const maxFrames = 60 // 上限。真的停不下来时该报错，不该让它慢慢磨。
+	prev, seen := mygoui.Rect{}, false
+	for range maxFrames {
+		tt.Frame()
+		// 还在切换，或者这一帧没画出设置页：重新开始数。
+		if tt.HasText("这一页还没做") {
+			prev, seen = mygoui.Rect{}, false
+			continue
+		}
+		cur, ok := tt.Find("外观")
+		if !ok {
+			prev, seen = mygoui.Rect{}, false
+			continue
+		}
+		if seen && sameSpot(cur, prev) {
+			return
+		}
+		prev, seen = cur, true
+	}
+	t.Fatal("切页动画一直没停：设置页一直在滑")
+}
+
+// sameSpot 报两个框是不是几乎不动。
+func sameSpot(a, b mygoui.Rect) bool {
+	return abs(a.X-b.X) <= settleStill && abs(a.Y-b.Y) <= settleStill &&
+		abs(a.W-b.W) <= settleStill && abs(a.H-b.H) <= settleStill
+}
+
+func abs(v float32) float32 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
 // TestUserCanSwitchTheThemeFromTheInterface 是「主题三档能切」这条验收。
 //
-// ⚠️ 这里点的是**界面上的按钮**，不是直接调 `a.SetThemeMode`。后者只能证明
+// ⚠️ 这里点的是**设置页上的按钮**，不是直接调 `a.SetThemeMode`。后者只能证明
 // 状态层有那个方法，证明不了界面上真有一个入口——三档摆在 `theme.go` 里没人
 // 调用过，就是这么漏过去的。
 //
@@ -275,6 +344,7 @@ func TestUserCanSwitchTheThemeFromTheInterface(t *testing.T) {
 	// 系统是深色，起点是「跟随系统」。
 	tt, _, a, path := shellWithSettings(t, app.ThemeModeSystem, true)
 	assertBackground(t, tt, wantBackground(t, a, true), "起点：跟随系统，系统是深色")
+	openSettings(t, tt)
 
 	clickTheme(t, tt, "浅色")
 	if got := a.SettingsSnapshot().ThemeMode; got != app.ThemeModeLight {
@@ -332,6 +402,7 @@ func TestThemeSwitchSaysWhyItCannotSwitch(t *testing.T) {
 	tt := mygoui.NewTester(New(a).View, 900, 600)
 	tt.SetDark(false)
 	tt.Frame()
+	openSettings(t, tt)
 
 	if !tt.HasText("设置只读") {
 		t.Errorf("界面上没有说清为什么切不了，文字有 %q", tt.Texts())

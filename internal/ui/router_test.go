@@ -70,8 +70,11 @@ func TestParamRoutesMatch(t *testing.T) {
 }
 
 // TestMenuItemsAllSwitch 验侧栏上每一项都切得动。
+//
+// 「切得动」和「这一页还没做」分开验：已经做了内容的页（设置页）切过去不该
+// 再弹「还没做」——对着一页真做出来的东西说它还没做，是在说一件假事。
 func TestMenuItemsAllSwitch(t *testing.T) {
-	_, tt := newShell(t)
+	s, tt := newShell(t)
 
 	menu := 0
 	for _, rt := range routes {
@@ -84,8 +87,11 @@ func TestMenuItemsAllSwitch(t *testing.T) {
 		}
 		tt.Frame()
 
-		if _, ok := tt.Find(rt.Match); !ok {
-			t.Errorf("点了 %q，画面上没有路径 %q，文字有 %q", rt.Title, rt.Match, tt.Texts())
+		if got := s.router.Path(); got != rt.Match {
+			t.Errorf("点了 %q，当前路径是 %q，文字有 %q", rt.Title, got, tt.Texts())
+		}
+		if s.builtPage(rt) != nil {
+			continue
 		}
 		if !tt.HasText("这一页还没做") {
 			t.Errorf("%q 这一页没有「还没做」的提示，文字有 %q", rt.Title, tt.Texts())

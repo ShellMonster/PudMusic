@@ -152,61 +152,27 @@ func (s *Shell) placeholder(c *ui.Context, r *ui.Route, rt Route) {
 	})
 }
 
-// navigate 换页：先把上一页的提示全清掉，再跳过去，并弹一条「这一页还没做」。
+// navigate 换页：先把上一页的提示全清掉，再跳过去，还没做的页面弹一条提示。
 //
 // 三件事是一起的，缺一条就不对：
 //   - 清 Toast：上一页的提示不该挂在下一页上（验收项）。
 //   - 清 crash：崩过一页之后切到别的页要能正常画，不是停在错误页里出不来。
 //   - 弹 Toast：Biu 的验收是「点未实现的路由弹一条提示，不崩、不白屏」。
+//     **已经有内容的那一页不弹**——对着一页真做出来的东西说「还没做」，
+//     是在说一件假事，用户只会以为设置页也坏了。
 func (s *Shell) navigate(target string) {
 	s.clearToasts()
 	s.crash = nil
 	s.router.Push(target)
 
-	title := lookup(target).Title
-	if title == notFound.Title {
+	rt := lookup(target)
+	if rt.Title == notFound.Title {
 		s.addToast("没有「" + target + "」这一页")
 		return
 	}
-	s.addToast("「" + title + "」这一页还没做")
-}
-
-// viewSide 是左侧栏：品牌 + 菜单。
-//
-// Biu 的侧栏展开 200px、折叠 72px，右缘还有一条可拖的把手（SD-01/SD-02）。
-// 那些是后面的事，这里先摆一个固定宽度的。
-//
-// ⚠️ 必须自己拉满高：Row 默认把子元素**居中**跨轴摆放（`Align` 默认不是
-// Stretch），不写 `AlignSelf(Stretch)` 的话这一栏会按内容高度浮在中间。
-func (s *Shell) viewSide(c *ui.Context) {
-	t := c.Theme()
-	cur := s.router.Path()
-
-	ui.Column(c).Key("side").Width(200).AlignSelf(ui.Stretch).
-		Padding(12).Gap(4).Background(t.Surface).Children(func() {
-		// 红绿灯那一条已经被顶栏让出来了，侧栏从它下面开始，不用再顶开。
-		ui.Text(c, "Biu").FontSize(18).Bold().Padding(8, 8, 12, 8)
-
-		// ⚠️ Key 给的是这个 Column，不是里面每个 Button —— 构造之后再 Key
-		// 的坑见铁律四。菜单项之间靠顺序区分，本来也不需要 key。
-		ui.Column(c).Key("side-menu").Gap(2).Children(func() {
-			for _, rt := range routes {
-				if !rt.InMenu {
-					continue
-				}
-				item := ui.Button(c, rt.Title).Grow(1)
-				if rt.Match == cur {
-					item = item.Background(t.Accent)
-				}
-				if item.Clicked() {
-					s.navigate(rt.Match)
-				}
-			}
-		})
-
-		ui.Column(c).Grow(1)
-		ui.Text(c, "Biu MyGo").FontSize(11).TextColor(t.TextMuted).Padding(8)
-	})
+	if s.builtPage(rt) == nil {
+		s.addToast("「" + rt.Title + "」这一页还没做")
+	}
 }
 
 // viewNav 是顶部导航栏：后退/前进 + 当前页名 + 拖窗口的那一条。
