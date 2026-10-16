@@ -75,6 +75,14 @@ internal/ui/        → internal/app/ → internal/service/ → internal/platfor
 4. **单实例锁和退出回调都在 `mygo.App.Run()` 之前装。** 锁晚一步就是两个实例
    同时启动的竞态；回调晚一步，启动命令行里的 `biu://…` 会在它装好之前就被交付掉，
    点链接唤起应用什么都不会发生。
+5. **建窗口只能走 `App.WhenReady`，不能直接在回调里 `NewWindow`。** `App.Run()`
+   先把事件循环转起来，`applicationDidFinishLaunching` 才把 `ready` 置上；在这
+   两件事之间主线程上 `NewWindow` 是**直接 panic** 的。第二个实例正好落在这一段
+   里（它的回调走 `postMain`），症状是「图标连点两下，应用当场崩」。
+6. **`mygo.App.RequestSingleInstanceLock()` 挡不住同时启动的两个实例**（实测
+   20 轮 17 轮两个都拿到锁：两个都 Dial 失败 → 都删掉对方的 socket 文件 → 都
+   Listen 成功）。所以 `internal/platform` 在它之上还压了一把 flock，见
+   `single_instance.go` 的注释。
 
 还有两条是 MyGo 文档里没写的，都跟「正在被拖」有关，用错了都不报错、只是拖不动：
 

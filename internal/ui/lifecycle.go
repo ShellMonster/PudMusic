@@ -82,26 +82,39 @@ func (s *Shell) installLifecycle() {
 	// 框架在 macOS 上是 applicationShouldHandleReopen 才触发它，不是
 	// DidBecomeActive——所以这里不会因为 RestoreFromBackground 里的
 	// App.Focus 又绕回来。
-	mygo.App.OnActivate(func(bool) {
-		if s.win == nil {
-			return // 窗口还没开出来（或者正在退出）
-		}
-		platform.RestoreFromBackground(s.win)
-	})
+	mygo.App.OnActivate(func(bool) { s.openWindow() })
 }
 
-// openWindow 开主窗口。已经有一个活着的就把旧的叫回来，**绝不开第二个**。
+// openWindow 把主窗口叫回来；没有窗口就开一个。**绝不开第二个。**
 //
 // 单实例的意义就在这儿：从程序坞再点一下图标弹出两个窗口，两个窗口各放一首
 // 歌、进度条各走各的，是最难解释的一种错。
+//
+// ⚠️ 这里**必须绕一层 WhenReady，不能直接建窗口**。有一个很窄但是真实存在的
+// 窗口期：框架的 `App.Run()` 先把事件循环转起来（`b.Run()` 开始 drain
+// postMain 队列），`applicationDidFinishLaunching` 才把 `ready` 置上。在这两件
+// 事之间，第二个实例转交过来的命令行**已经会被处理**了——它的回调走的也是
+// postMain。而 `NewWindow` 在主线程上遇到「还没 ready」是直接 panic 的
+// （`mygo/window.go:374`）。
+//
+// 症状是：用户把图标连点两下（或者同一个链接点两下），第一个进程当场崩掉，
+// 栈顶是 `NewWindow ← openWindow ← OnSecondInstance`。改用 WhenReady 之后，
+// 应用没 ready 它就排进队列等 ready，ready 之后立刻建——没有窗口可开的时段
+// 也就没有了。
 func (s *Shell) openWindow() {
-	if s.win != nil {
-		if s.win.IsDestroyed() {
-			s.win = nil
-		} else {
-			platform.RestoreFromBackground(s.win)
-			return
-		}
+	if s.win != nil && !s.win.IsDestroyed() {
+		platform.RestoreFromBackground(s.win)
+		return
+	}
+	mygo.App.WhenReady(s.ensureWindow)
+}
+
+// ensureWindow 真的把窗口开出来。**只能在应用 ready 之后调**（见 openWindow）。
+func (s *Shell) ensureWindow() {
+	// 排队的这段时间里窗口可能已经被人叫起来了（两个第二实例几乎同时到）。
+	if s.win != nil && !s.win.IsDestroyed() {
+		platform.RestoreFromBackground(s.win)
+		return
 	}
 	s.Attach(mygo.NewWindow(WindowOptions(s.View)))
 }
