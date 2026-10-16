@@ -5,6 +5,7 @@ import (
 	"image"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -33,31 +34,46 @@ type uiBili struct {
 	// 服务器 goroutine 同时在读。没有锁的话 `-race` 会报，
 	// 而偶发的那次「读到半个 slice」会让测试莫名其妙地卡住。
 	mu sync.Mutex
-	// scans 是轮询依次回的状态码。
+	// scans 是轮询依次回的状态码，用完就转到 sticky。
 	scans []int
+	// sticky 是 scans 取空之后**一直**回的状态码。
+	//
+	// ⚠️ 这一条是为了治一个 flaky：早一版队列取空就固定回 86101，
+	// 于是「已扫待确认」这个状态只存在一次轮询（测试里是 2 ms），
+	// 采样点稍有延迟就错过——整包跑的时候十轮红三轮，单独跑 6/6 过。
+	//
+	// 真 B 站在用户点确认之前**就一直**回 86090，所以 sticky 就是它的
+	// 真实形态：要让「已扫待确认」成为一个能站着被断言的状态，
+	// 服务器就得一直这么说。
+	sticky int
 }
 
-// setScans 设好接下来几次轮询依次回什么。
-func (b *uiBili) setScans(codes ...int) {
+// setScans 设好接下来几次轮询依次回什么，用完之后回 sticky。
+func (b *uiBili) setScans(sticky int, codes ...int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.scans = codes
+	b.sticky, b.scans = sticky, codes
 }
 
 func (b *uiBili) nextScan() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if len(b.scans) == 0 {
-		return 86101
+		return b.sticky
 	}
 	code := b.scans[0]
 	b.scans = b.scans[1:]
 	return code
 }
 
-func newUIBili(t *testing.T, scans ...int) *uiBili {
+// newUIBili 建一台假 B 站。
+//
+// **只有「成功」和「过期」能靠 scans 走完**：那两个是终态，轮询循环
+// 收到之后自己就停了。「等扫码」和「已扫待确认」必须靠 sticky 站住，
+// 理由见 `sticky` 那段注释。
+func newUIBili(t *testing.T, sticky int, scans ...int) *uiBili {
 	t.Helper()
-	b := &uiBili{scans: scans}
+	b := &uiBili{sticky: sticky, scans: scans}
 	b.Server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/x/passport-login/web/qrcode/generate":
@@ -87,6 +103,15 @@ func newUIBili(t *testing.T, scans ...int) *uiBili {
 	t.Cleanup(b.Close)
 	b.addr = strings.TrimPrefix(b.URL, "https://")
 	return b
+}
+
+// hostOfFixture 是 fixture 地址里的主机名。
+func hostOfFixture(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }
 
 func writeUIJSON(t *testing.T, w http.ResponseWriter, code int, msg string, data any) {
@@ -161,27 +186,33 @@ func waitLogin(t *testing.T, a *app.App, want app.LoginPhase) {
 func TestLoginPageShowsTheThreeStatesEachWithItsOwnWords(t *testing.T) {
 	cases := []struct {
 		name   string
+		sticky int
 		scans  []int
 		want   app.LoginPhase
 		say    string
 		absent string
 	}{
 		{
+			// 服务器一直说「还没扫」——用户没举手机之前就是这个形态。
 			name:   "等扫码",
-			scans:  []int{86101},
+			sticky: 86101,
 			want:   app.LoginWaiting,
 			say:    "请用 bilibili 手机客户端扫码",
 			absent: "已扫码",
 		},
 		{
+			// 服务器一直说「扫了没确认」——用户在手机上还没点确认之前
+			// 就是这个形态，也正是最容易让用户以为「没扫成功」的那一段。
 			name:   "已扫待确认",
-			scans:  []int{86090},
+			sticky: 86090,
 			want:   app.LoginScanned,
 			say:    "已扫码，请在手机上确认",
 			absent: "请用 bilibili 手机客户端扫码",
 		},
 		{
+			// 过期是终态，循环自己会停，队列给一次就够。
 			name:   "二维码失效",
+			sticky: 86038,
 			scans:  []int{86038},
 			want:   app.LoginExpired,
 			say:    "过期",
@@ -190,7 +221,7 @@ func TestLoginPageShowsTheThreeStatesEachWithItsOwnWords(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			b := newUIBili(t, c.scans...)
+			b := newUIBili(t, c.sticky, c.scans...)
 			a := newLoginApp(t, b)
 			tt, _ := loginTester(a)
 			tt.Frame()
@@ -233,7 +264,7 @@ func TestLoginPageOffersRefreshOnlyWhenExpired(t *testing.T) {
 		t.Error("二维码还有效时就摆出了「刷新二维码」")
 	}
 
-	b2 := newUIBili(t, 86038)
+	b2 := newUIBili(t, 86038, 86038)
 	a2 := newLoginApp(t, b2)
 	tt2, _ := loginTester(a2)
 	tt2.Frame()
@@ -253,7 +284,7 @@ func TestLoginPageOffersRefreshOnlyWhenExpired(t *testing.T) {
 
 // TestExpiredQRCodeCanBeRefreshedFromTheUI 验刷新真的换了新码。
 func TestExpiredQRCodeCanBeRefreshedFromTheUI(t *testing.T) {
-	b := newUIBili(t, 86038, 86101)
+	b := newUIBili(t, 86101, 86038)
 	a := newLoginApp(t, b)
 	tt, s := loginTester(a)
 	tt.Frame()
@@ -278,7 +309,7 @@ func TestExpiredQRCodeCanBeRefreshedFromTheUI(t *testing.T) {
 
 // TestCancelStopsTheQRCodeFromTheUI 验取消。
 func TestCancelStopsTheQRCodeFromTheUI(t *testing.T) {
-	b := newUIBili(t, 86101, 86101, 86101, 86101)
+	b := newUIBili(t, 86101)
 	a := newLoginApp(t, b)
 	tt, _ := loginTester(a)
 	tt.Frame()
@@ -585,3 +616,54 @@ func newTesterFor(t *testing.T, a *app.App, s *Shell) *mygoui.Tester {
 // 渲染结果，不是「调了哪个函数」），所以这里读的是 Tester 记录下来的
 // 文本，不是状态。
 func screenText(tt *mygoui.Tester) string { return strings.Join(tt.Texts(), "\n") }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 降级：没有凭据后端的时候
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestLoginPageSaysTheCredentialsCannotBeKept 验「没有后端」时的提示。
+//
+// 这条路是天天走的：非 macOS / Windows 平台上根本没有系统保护存储。
+// 界面上必须**明说**「登录态关掉应用就没了」——用户以为凭据存住了，
+// 关掉再打开发现登出，比一开始就说清楚糟糕得多。
+//
+// 之前这里会因为 `mgr.BackendName()` 走到空接口上的方法调用而 SIGSEGV，
+// 而现在 NewManager(nil) 会换成一个「哪儿都存不住」的后端。
+func TestLoginPageSaysTheCredentialsCannotBeKept(t *testing.T) {
+	b := newUIBili(t, 0)
+	a := app.New()
+	t.Cleanup(a.Close)
+	// 故意不给后端：这就是 Linux 上的真实情况。
+	transport := &app.CredentialTransport{
+		Base:   b.Server.Client().Transport,
+		Policy: app.DefaultInjectPolicy().AllowBiliHost(hostOfFixture(b.URL)),
+	}
+	cli := bili.NewClient(bili.Options{Transport: transport})
+	cli.TestOnlyPointHostsAtFixture(b.URL)
+	a.MountLogin(nil, cli)
+	a.SetLoginPollInterval(2 * time.Millisecond)
+
+	tt, _ := loginTester(a)
+	tt.Frame()
+
+	a.BeginLogin()
+	// **等登录真的完成**再画一帧。
+	//
+	// 只等二维码出现是不够的：那一帧画出来的还是「等扫码」，
+	// 而断言读的是**画面上的字**——于是会看到「明明登录成功了，
+	// 界面上还在请扫码」。状态变了但界面还没跟上，
+	// 这正是即时模式里「异步结果必须唤醒」的坑。
+	waitLogin(t, a, app.LoginDone)
+	tt.Frame()
+
+	if !a.LoggedIn() {
+		t.Fatal("没有后端也该能登进去（只是存不住）")
+	}
+	words := screenText(tt)
+	if !strings.Contains(words, "凭据后端不可用") {
+		t.Errorf("没有告诉用户登录态存不住。\n画面上的字是：\n%s", words)
+	}
+	if !strings.Contains(words, "已登录") {
+		t.Errorf("没有显示已登录状态。\n画面上的字是：\n%s", words)
+	}
+}

@@ -430,6 +430,19 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult,
 		// 这正是要防的那件事：已经退掉的账号被在途的结果写回来。
 		log.Printf("biu: 扫码结果回来时登录态已经变了（多半是退登），这次结果作废")
 		a.hint(id, LoginIdle, "已取消登录")
+	case StoreUnavailable(err):
+		// 登录**是真的**（B 站认了、cookie 也拿到了），只是存不下来。
+		//
+		// 报「保存登录态失败」会让用户觉得刚才那一下白扫了——于是他再扫一次，
+		// 还是同样的结果。正确的做法是让他登进去用着，同时**明说**存不住：
+		// 界面上那一行「凭据后端不可用，登录态关掉应用就没了」就是干这个的。
+		log.Printf("biu: 这次登录没能存下来，先只在内存里用着：%v", err)
+		a.mgr.Adopt(sess)
+		a.setStateFor(id, LoginState{
+			Phase: LoginDone,
+			Hint:  "登录成功（这次没能存下来，关掉应用要重新登录）",
+			Err:   err.Error(),
+		})
 	case err != nil:
 		a.fail(id, "保存登录态失败："+err.Error())
 	default:
@@ -465,7 +478,26 @@ func (a *Account) logout() error {
 		stop()
 	}
 
-	// 先清 jar：Manager.Logout 可能失败（钥匙串锁了），
+	// 先让 B 站那边把这个会话也作废，**然后**再清本地的。
+	//
+	// 顺序不能反：注销请求自己也要带 SESSDATA 和 csrf，
+	// jar 先清了就变成一次匿名请求，服务端的会话原封不动地留着。
+	//
+	// 只清本地不留服务端会话也不是「没事」：
+	// 同一台机器上的另一个 B 站客户端仍然看得见这个会话在册，
+	// 而用户在这边看到的界面是「已经退出了」。
+	//
+	// 失败**不往上传**：本地已经清干净了，把一个远端的失败报给用户
+	// 只会让他以为退登没成功，而下次启动照样是登出状态。
+	// 这里给它 2 秒预算：网络正常时是百来毫秒，断网时最多卡 2 秒，
+	// 不会把「点退出登录」变成一次看起来像卡死的等待。
+	if a.cli != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), serverLogoutBudget)
+		a.cli.Logout(ctx)
+		cancel()
+	}
+
+	// 然后清 jar：Manager.Logout 可能失败（钥匙串锁了），
 	// 但**内存里的 cookie 无论如何都得清掉**——
 	// 宁可不彻底，也不能让用户退不出去。
 	_ = a.cli.SeedCookies(nil)
@@ -473,6 +505,13 @@ func (a *Account) logout() error {
 	a.wakeUp()
 	return err
 }
+
+// serverLogoutBudget 是「让服务端作废这个会话」的时间上限。
+//
+// 退登是用户点了就要看到结果的操作，所以这一步不能无限等。
+// 2 秒是个折中：正常的 B 站响应在 100~300 ms，
+// 而断网/被墙时也不会把界面冻住超过两秒。
+const serverLogoutBudget = 2 * time.Second
 
 // ─── 改状态的小工具 ───────────────────────────────────────────────────────────
 //

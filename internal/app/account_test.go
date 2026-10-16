@@ -44,13 +44,13 @@ const waitTimeout = 5 * time.Second
 //
 // 扫码登录的三个状态是**转瞬即逝**的：轮询间隔在测试里是 2 ms，
 // 从「已扫待确认」到「登录成功」也就两三毫秒。测试每 10 ms 轮询一次状态，
-// 于是只能看到其中���个——而这条用例的全部意义就是三��都要走到。
+// 于是只能看到其中一个——而这条用例的全部意义就是三个都要走到。
 //
 // 所以 fixture 支持两种放行方式：
 //
 //	默认        每次轮询立刻返回。适合「只关心最后变成什么」的用例。
 //	stepByHand  每次轮询都卡住，直到测试 `f.step()` 放行。
-//	           适合「三���状态一个都不能漏」的用例。
+//	           适合「三个状态一个都不能漏」的用例。
 //
 // ⚠️ 千万别用「sleep 一下看看状态」的写法来对付这个问题：那是 flaky 测试
 // 的标准形态，慢机器上偶发失败、快机器上白等。
@@ -67,7 +67,12 @@ type biliFixture struct {
 	gated      int
 	// seen 记下收到的每个请求路径。
 	seen []string
+	// exits 是收到过几次「让 B 站作废这个会话」的请求。
+	exits int
 }
+
+// pathExit 是「让 B 站作废这个会话」的接口。
+const pathExit = "/x/passport-login/exit"
 
 func newBiliFixture(t *testing.T) *biliFixture {
 	t.Helper()
@@ -85,6 +90,12 @@ func newBiliFixture(t *testing.T) *biliFixture {
 
 		f.mu.Lock()
 		f.seen = append(f.seen, r.URL.Path)
+		if r.URL.Path == pathExit {
+			f.exits++
+		}
+		if r.URL.Path == pathExit {
+			f.exits++
+		}
 		steps := f.steps
 		gate := isPoll && f.pollGateAt > 0 && f.gated >= f.pollGateAt
 		if gate {
@@ -148,6 +159,8 @@ func newBiliFixture(t *testing.T) *biliFixture {
 				"refresh_token": "rt-from-fixture",
 				"timestamp":     time.Now().UnixMilli(),
 			})
+		case pathExit:
+			writeFixtureJSON(t, w, 0, "0", nil)
 		default:
 			http.NotFound(w, r)
 		}
@@ -188,6 +201,13 @@ func (f *biliFixture) gateNthPoll(n int) {
 }
 
 func (f *biliFixture) unblock() { close(f.release) }
+
+// exitCount 是收到过几次「让 B 站作废会话」的请求。
+func (f *biliFixture) exitCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.exits
+}
 
 func (f *biliFixture) requests() []string {
 	f.mu.Lock()
@@ -557,6 +577,50 @@ func TestLogoutClearsEverything(t *testing.T) {
 	}
 	if a.LoginState().LoggedIn {
 		t.Error("界面拿到的状态还是登录中")
+	}
+}
+
+// TestLogoutAlsoEndsTheSessionOnBilibili 验退登**也**通知了 B 站。
+//
+// 只清本地不留服务端会话不是「没事」：
+// 同一台机器上的另一个 B 站客户端仍然看得见这个会话在册，
+// 而用户在这边看到的界面是「已经退出了」。
+//
+// ⚠️ 顺序也在这条里：注销请求自己也要带 SESSDATA 和 csrf，
+// 所以它必须发生在清 cookie jar **之前**。
+func TestLogoutAlsoEndsTheSessionOnBilibili(t *testing.T) {
+	f := newBiliFixture(t)
+	f.onScans(0)
+	a := newTestApp(t, f, app.NewMemoryStore("test"))
+	a.BeginLogin()
+	waitFor(t, waitTimeout, "登录成功", func() bool { return a.LoginState().Phase == app.LoginDone })
+
+	if err := a.Logout(); err != nil {
+		t.Fatalf("退登返回 %v", err)
+	}
+	// 退登是同步的：请求已经发出去了。再等一下只是防网络调度的抖动。
+	waitFor(t, waitTimeout, "B 站那边收到了退出通知", func() bool { return f.exitCount() > 0 })
+}
+
+// TestLogoutSurvivesAnUnreachableBilibili 验远端挂了不影响退登。
+//
+// 本地凭据已经清干净了，把远端的失败报给用户只会让他以为退登没成功，
+// 而下次启动照样是登出状态。
+func TestLogoutSurvivesAnUnreachableBilibili(t *testing.T) {
+	f := newBiliFixture(t)
+	f.onScans(0)
+	a := newTestApp(t, f, app.NewMemoryStore("test"))
+	a.BeginLogin()
+	waitFor(t, waitTimeout, "登录成功", func() bool { return a.LoginState().Phase == app.LoginDone })
+
+	// 把服务器关掉：从这一刻起任何请求都失败。
+	f.Close()
+
+	if err := a.Logout(); err != nil {
+		t.Errorf("B 站连不上时退登返回 %v，退登必须永远成功", err)
+	}
+	if a.LoggedIn() {
+		t.Error("本地凭据没清掉")
 	}
 }
 

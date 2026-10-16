@@ -209,6 +209,16 @@ func (s Session) Secrets() []string {
 		}
 	}
 	for _, c := range s.Cookies {
+		if c.Name == CookieDedeUserID {
+			// DedeUserID 是**公开**的数字账号标识——B 站每个账号的页面上
+			// 都印着它，它不是凭据。
+			//
+			// 不排掉它的后果不是泄露，是**诊断信息变得没用**：
+			// 它有 8~10 位，够得上「长到值得脱敏」的门槛，于是每一次
+			// 导出诊断信息里的 userId 都是 <redacted>，而那个字段本来
+			// 就是给排障的人看的（「用户报的问题是不是这个账号」）。
+			continue
+		}
 		if len(c.Value) >= 8 && c.Value != s.SESSDATA && c.Value != s.BiliJCT {
 			out = append(out, c.Value)
 		}
@@ -300,7 +310,44 @@ type Manager struct {
 }
 
 // NewManager 建一个管理器，还没登录。
-func NewManager(store Store) *Manager { return &Manager{store: store} }
+//
+// **store 传 nil 是允许的**，会换成一个「哪儿都存不住」的后端。
+//
+// 为什么允许：这个平台可能压根没有系统保护存储（非 macOS / Windows），
+// 或者符号绑不上。调用方拿到的 `NewSystemStore` 错误本来就是 nil 后端，
+// 而应用层要做的是「降级 + 在界面上明说」，不是**启动就崩**。
+//
+// 不在这里兜住的话，`Manager.Load` 第一次 `m.store.Load(ctx)` 就是
+// 空接口上的方法调用 —— SIGSEGV，整进程没了，而用户什么都没做错。
+func NewManager(store Store) *Manager {
+	if store == nil {
+		store = unavailableStore{}
+	}
+	return &Manager{store: store}
+}
+
+// unavailableStore 是「这个平台存不住凭据」的后端。
+//
+// 三个方法的行为不一样，是刻意的：
+//
+//	Load   ErrUnavailable —— 调用方据此知道「读不回来是因为没有后端」，
+//	                        而不是把它当成「没登录过」安静咽下去。
+//	Clear  nil           —— 本来就没有东西，清不清都一样。
+//	                        退登必须能成功，不然用户会被卡在登出状态。
+//	Save   ErrUnavailable —— 不假装存成功了。
+type unavailableStore struct{}
+
+func (unavailableStore) Name() string { return "none" }
+
+func (unavailableStore) Load(context.Context) (Session, error) {
+	return Session{}, fmt.Errorf("%w: 这个平台没有可用的凭据后端", ErrUnavailable)
+}
+
+func (unavailableStore) Save(context.Context, Session) error {
+	return fmt.Errorf("%w: 这个平台没有可用的凭据后端", ErrUnavailable)
+}
+
+func (unavailableStore) Clear(context.Context) error { return nil }
 
 // BackendName 是后端的名字，写诊断信息用。
 func (m *Manager) BackendName() string { return m.store.Name() }
@@ -365,6 +412,30 @@ func (m *Manager) Update(ctx context.Context, fn func(*Session) error) error {
 	m.cur, m.gen = next, m.gen+1
 	m.mu.Unlock()
 	return nil
+}
+
+// Adopt 把登录态装进内存，但**不落盘**。
+//
+// 只有一个用途：这个平台压根没有系统保护存储，或者后端此刻不可用
+// （钥匙串锁了、DPAPI 解不开）。这时候这次登录是**真的**——B 站认了、
+// cookie 也拿到了——只是留不到下次启动。
+//
+// 与其让用户「扫了半天码换来一句保存失败」然后这次登录也白扫，
+// 不如让他登进去用着，同时**明说**存不住（界面上是
+// 「凭据后端不可用，登录态关掉应用就没了」）。
+func (m *Manager) Adopt(s Session) {
+	s.Normalize(time.Now())
+	m.mu.Lock()
+	m.cur, m.gen = s, m.gen+1
+	m.mu.Unlock()
+}
+
+// StoreUnavailable 报「这次没能存下来」的错误。
+//
+// 判据是 `ErrUnavailable` 和 `ErrBackend` 这两个**后端**级的错误，
+// 不含 `ErrStaleGeneration`（那是「登录态已经变了」，处理方式完全不同）。
+func StoreUnavailable(err error) bool {
+	return err != nil && (errors.Is(err, ErrUnavailable) || errors.Is(err, ErrBackend))
 }
 
 // Logout 退登：清后端、清内存、代次 +1。
@@ -673,6 +744,11 @@ var secretParams = map[string]bool{
 	"csrf_token":    true,
 	"bili_jct":      true,
 	"accessKey2":    true,
+	// qrcode_key 是扫码登录那一轮的**一次性授权**：拿着它就能轮询出
+	// 这一张二维码对应的凭据。它跟 w_rid 一样属于「拼出来的地址本身就是
+	// 凭据」，所以必须按名字打掉——等登录成功后这个 key 就废了，
+	// 而开调试日志的恰恰是那种「登录出了问题」的时候。
+	"qrcode_key": true,
 }
 
 // Redacted 是打码后的样子。固定成一个词，方便 grep 诊断文件里「这里本该有东西」。

@@ -404,6 +404,27 @@ func TestRequestLoggerNeverWritesCredentials(t *testing.T) {
 	}
 }
 
+// TestRequestLoggerHidesTheQRCodeKey 验 qrcode_key 不进日志。
+//
+// 它是扫码登录那一轮的**一次性授权**：拿着它就能轮询出那张二维码对应的
+// 凭据。它跟 w_rid 一样属于「拼出来的地址本身就是凭据」那一类，
+// 而开调试日志的恰恰是「登录出了问题」的时候——正是它最该被打掉的时候。
+func TestRequestLoggerHidesTheQRCodeKey(t *testing.T) {
+	var log strings.Builder
+	logger := app.NewRequestLogger(&log, nil)
+
+	logger.Log("GET", "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"+
+		"?qrcode_key=AbCdEf1234567890XYZqrstuvwxYZ012345")
+
+	out := log.String()
+	if strings.Contains(out, "AbCdEf1234567890XYZqrstuvwxYZ012345") {
+		t.Errorf("qrcode_key 原样进了日志：\n%s", out)
+	}
+	if !strings.Contains(out, "qrcode_key=") {
+		t.Errorf("参数名也被打掉了，诊断时要看得见「这一轮轮询用的是哪张码」：\n%s", out)
+	}
+}
+
 // TestRequestLoggerFollowsTheCurrentSession 验脱敏名单跟着登录态走。
 //
 // 拿一个建好就缓存的名单的话，**登录之后**所有请求的 Cookie 值都会
@@ -482,6 +503,52 @@ func (l *lockWriter) Write(p []byte) (int, error) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 诊断导出
 // ─────────────────────────────────────────────────────────────────────────────
+
+// TestDiagnosticsUserIDIsActuallyThere 验 userId 不是恒为 <redacted>。
+//
+// DedeUserID 是**公开**的数字账号标识（B 站每个账号的页面上都印着它），
+// 诊断导出把它放出来是给排障的人用的：「用户报的问题是不是这个账号」。
+//
+// 它以前有 8~10 位，够得上 Secrets() 里「长到值得脱敏」的门槛，
+// 于是每一次导出都是 <redacted>——字段等于白留。
+func TestDiagnosticsUserIDIsActuallyThere(t *testing.T) {
+	a := app.New()
+	t.Cleanup(a.Close)
+	store := app.NewMemoryStore("test")
+	ctx := context.Background()
+	if err := store.Save(ctx, app.Session{
+		Cookies: []app.Cookie{
+			{Name: app.CookieDedeUserID, Value: "4242424242", Path: "/"},
+			{Name: app.CookieSESSDATA, Value: "sess-secret-0123456789", Path: "/"},
+		},
+		DedeUserID: "4242424242",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a.MountLogin(store, nil)
+
+	d := app.NewDiagnostics("test")
+	d.Attach(a)
+	if !d.LoggedIn {
+		t.Fatal("没有登录，验不了 userId")
+	}
+	if d.UserID != "4242424242" {
+		t.Errorf("诊断里的 userId 是 %q，want 4242424242（它不是凭据，不该被打掉）", d.UserID)
+	}
+
+	blob, err := d.JSON(a.Session())
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(blob)
+	if !strings.Contains(out, "4242424242") {
+		t.Errorf("导出的 JSON 里没有 userId：\n%s", out)
+	}
+	// 但 SESSDATA 照样不许出现——「不是凭据」说的是 UID，不是「都放行」。
+	if strings.Contains(out, "sess-secret-0123456789") {
+		t.Errorf("放行 userId 的同时也把 SESSDATA 放出去了：\n%s", out)
+	}
+}
 
 // TestDiagnosticsExportCarriesNoCredential 是验收原文那一条：
 // 「导出的 JSON 里 grep 不到敏感字段名」。
