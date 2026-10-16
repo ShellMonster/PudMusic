@@ -328,7 +328,12 @@ func (s *Shell) viewUpSpace(c *ui.Context, r *ui.Route) {
 	// 首屏那一拉。**必须在画之前发出去**，不是画完再发：画完再发的话这一帧
 	// 画出来的是「正在加载」，要等这一页回来才换掉。而那一段没有任何东西会
 	// 叫醒界面——唤醒只有「结果到了」那一次。
-	if !h.Loaded && !h.Loading {
+	//
+	// ⚠️ **`h.Err != ""` 时绝对不重发**：失败只把 `Loading` 落回 false，
+	// `Loaded` 仍是 false（那是「从没成功过」），而这一行每帧都跑——于是
+	// 头图一失败就变成一个每帧发一次的请求（实测 300 毫秒发了 138 次），
+	// 界面停在「打不开」上还在刷网络。唯一的出口是用户点「再试一次」。
+	if !h.Loaded && !h.Loading && h.Err == "" {
 		sp.header.Load()
 	}
 
@@ -363,16 +368,18 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 
 	switch {
 	case h.Loading && !h.Loaded:
-		ui.Row(c).Key(key).Height(upHeaderH).Width(0).Center().Children(func() {
+		ui.Row(c).Key(key).Height(upHeaderH).FillWidth().Center().Children(func() {
 			ui.Spinner(c).Label("正在打开这个 UP 主的空间")
 		})
 		return
 
 	case h.Err != "" && !h.Loaded:
-		ui.Column(c).Key(key).Height(upHeaderH).Width(0).Center().Gap(10).
+		ui.Column(c).Key(key).Height(upHeaderH).FillWidth().Center().Gap(10).
 			AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "打不开这个 UP 主的空间").FontSize(16).Bold()
-			ui.Text(c, h.Err).FontSize(12).TextColor(t.TextMuted).MaxLines(2).Ellipsis("…")
+			ui.Text(c, h.Err).FontSize(12).TextColor(t.TextMuted).MaxLines(3)
+			// ⚠️ **失败之后只有人能让它再来一次**：上面那一行每帧都跑，
+			// 没有这道门就是一个每帧发一次请求的死循环（见那里的注释）。
 			if ui.Button(c, "再试一次").Clicked() {
 				sp.header.Load()
 			}
@@ -382,7 +389,7 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 	case h.Relation.Blocked():
 		// 上游是整页换成一张「已拉黑」的图（`space-info.tsx:69-75`）。这里
 		// 保留头像和名字：用户多半只是想确认「我拉黑的是不是这个人」。
-		ui.Row(c).Key(key).Height(upHeaderH).Width(0).Gap(12).Center().Children(func() {
+		ui.Row(c).Key(key).Height(upHeaderH).FillWidth().Gap(12).Center().Children(func() {
 			s.spaceAvatar(c, h.User.Face, upAvatarS)
 			ui.Column(c).Gap(4).Children(func() {
 				ui.Text(c, spaceName(h.User)).FontSize(20).Bold()
@@ -393,16 +400,16 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 		return
 	}
 
-	ui.Column(c).Key(key).Height(upHeaderH).Width(0).Children(func() {
+	ui.Column(c).Key(key).Height(upHeaderH).FillWidth().Children(func() {
 		// ① 头图。没设头图的 UP 主占大多数（B 站这时候给的是空对象而不是
 		// 一张空白图），画一块纯色——**别去画 B 站的占位图**，那看着像加载失败。
 		if h.User.Banner != "" {
 			s.spaceFill(c, h.User.Banner, upBannerH)
 		} else {
-			ui.Box(c).Height(upBannerH).Width(0).Background(t.Surface)
+			ui.Box(c).Height(upBannerH).FillWidth().Background(t.Surface)
 		}
 		// ② 头像 + 昵称 + 签名 + 右边那一排关注和统计。
-		ui.Row(c).Key("space-head-info").Grow(1).Width(0).Gap(12).
+		ui.Row(c).Key("space-head-info").Grow(1).FillWidth().Gap(12).
 			Padding(upPad).AlignItems(ui.Center).Children(func() {
 			s.spaceAvatar(c, h.User.Face, upAvatarS)
 			ui.Column(c).Gap(2).Children(func() {
@@ -499,7 +506,7 @@ func spaceName(u app.User) string {
 // spaceAvatar 画头像。**没有头像画一个圆底色**，不是画一个「加载失败」。
 func (s *Shell) spaceAvatar(c *ui.Context, face string, side float32) {
 	t := c.Theme()
-	ui.Box(c).Size(side, side).Radius(side / 2).Clip().Children(func() {
+	ui.Box(c).Size(side, side).Radius(side / 2).Clip().Label(face).Children(func() {
 		if st := s.images.Get(face); face != "" && st.Ready() {
 			ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(side, side)
 			return
@@ -510,24 +517,32 @@ func (s *Shell) spaceAvatar(c *ui.Context, face string, side float32) {
 
 // spaceFill 画一张铺满宽度、指定高度的网络图（头图）。
 //
+// ⚠️ **铺满是 `FillWidth()`（percent 100），不是 `Width(0)`**：`Width(v)` 的
+// 单位是 DIP，`Width(0)` 就是**宽 0**（`mygo/ui/element.go:637`），而布局里
+// 「只要设过宽度就按它算」（`layout.go:323`）。写成 `Width(0)` 的后果是整块
+// 头图被压成零宽：昵称只剩一个省略号、头图永远画不出来、统计折成两行。
+//
 // 形状上不裁圆角：头图是横幅，方角是本来的样子（`space-info.tsx:86` 的
 // `bg-cover bg-center` + 一层黑色蒙版）。
 func (s *Shell) spaceFill(c *ui.Context, url string, h float32) {
 	t := c.Theme()
-	ui.Box(c).Height(h).Width(0).Clip().Children(func() {
+	ui.Box(c).Height(h).FillWidth().Clip().Children(func() {
 		if st := s.images.Get(url); st.Ready() {
 			ui.Image(c, st.Bitmap).Fit(ui.Cover)
 			return
 		}
-		ui.Box(c).Height(h).Width(0).Background(t.Surface)
+		ui.Box(c).Height(h).FillWidth().Background(t.Surface)
 	})
 }
 
 // spaceThumb 画一张指定大小的网络图，四态与 `imgcache.View` 一致
 // （空地址画空框、没好画底色、失败画底色），只是形状不跟着主题圆角走。
+//
+// ⚠️ **带一个 `Label`**：没有它这些图对方块是全隐形的——读屏软件念不出来，
+// 无头 Tester 也量不到（它只认 label / text，不认图片）。头像和头图同理。
 func (s *Shell) spaceThumb(c *ui.Context, url string, w, h float32) {
 	t := c.Theme()
-	ui.Box(c).Size(w, h).Clip().Children(func() {
+	ui.Box(c).Size(w, h).Clip().Label(url).Children(func() {
 		if st := s.images.Get(url); url != "" && st.Ready() {
 			ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(w, h)
 			return

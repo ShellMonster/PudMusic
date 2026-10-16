@@ -4,9 +4,12 @@
 package ui
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
+
+	mygoui "github.com/egoist/mygo/ui"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -61,6 +64,102 @@ func TestOnlyTheThreeTypesReachTheScreenAndTheRestNeverDo(t *testing.T) {
 	// 整页还是这一页，不是错误页。
 	if tt.HasText("界面出错了") {
 		t.Error("一条画不出来的动态把整页带成了错误页（那正是这一条要防的）")
+	}
+}
+
+// TestTheTextOfAGraphicalPostIsOnScreenOnce 钉住「同一句话只画一遍」。
+//
+// ⚠️ 判据是**数出来只有一遍**，不是 `HasText` —— 那个是**子串**匹配，两遍
+// 也照样为真（BMG-10 的收尾说明里就记着这个坑）。这一版早先的 fixture 又
+// 恰好把 `opus.summary.text` 留空，于是「正文被画两遍」那个 bug 被遮住了。
+func TestTheTextOfAGraphicalPostIsOnScreenOnce(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "发图文的 UP", 0, 1)
+	const body = "今天更新了一期视频，记得来看。"
+	b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		// desc 和 summary 是同一段——B 站正常返回就是这样（上游两处都
+		// `desc?.text || opus?.summary?.text`）。
+		uiExploreJSON(w, 0, map[string]any{"items": []any{
+			uiDynamicOpus("o1", body, "https://f/1.jpg"),
+		}, "offset": "", "has_more": false})
+	})
+	s, tt, _ := newSpaceShell(t, b, false, "")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+	waitFrames(t, tt, "动态加载完", func() bool { return sp.dyn.started })
+	tt.Frame()
+
+	// ⚠️ **不能断言「这句话只出现一次」**：卡片正文画一遍，而 `ListState.Label`
+	//（行的无障碍名字）也是同一句——那是同一句、两个用途，两处是对的。
+	//
+	// 真正要抓的是那个 bug 的特征：**同一句被拼进了一个标签**（`a\na`）。
+	// `countText` 只数全等，天然看不见拼接，所以这里直接找带换行的那一个。
+	if doubled := body + "\n" + body; countText(tt, doubled) != 0 {
+		t.Errorf("画面上有一句是 %q —— desc 和 summary 是同一段话，拼起来显示了两遍",
+			doubled)
+	}
+	if n := countText(tt, body); n == 0 {
+		t.Errorf("图文的正文一个字都没画出来，文字有 %q", tt.Texts())
+	}
+	if strings.Contains(sp.dynItems[0].Text, "\n") {
+		t.Errorf("模型里的正文里有换行：%q —— 两个字段是同一段话，只该取一次",
+			sp.dynItems[0].Text)
+	}
+}
+
+// countText 数画面上等于 s 的文字有几处。
+//
+// ⚠️ 不是 `HasText`：那是**子串**匹配（`mygo/ui/headless.go` 的 HasText 文档
+// 原话就是 "containing s"），数不出来。
+func countText(tt *mygoui.Tester, s string) int {
+	n := 0
+	for _, txt := range tt.Texts() {
+		if txt == s {
+			n++
+		}
+	}
+	return n
+}
+
+// TestTheNinePicturesWrapInsteadOfRunningOffTheEdge 钉住「九张图换行」。
+//
+// ⚠️ 九张 × 92 点 + 八道 6 点的缝 = 876 点，而窗口缩到 `MinWidth` 900
+// （`shell.go` 的 WindowOptions）时列表只有 660 点宽——一个不会换行的 Row
+// 把最后几张切在窗口边界外，既看不见也点不着。
+//
+// 判据是量出来的 y：第 4 张必须落在第 1 张**下面**（一行三张）。
+func TestTheNinePicturesWrapInsteadOfRunningOffTheEdge(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "发九张图的 UP", 0, 1)
+	pics := make([]string, 0, maxDynamicPics)
+	for i := range maxDynamicPics {
+		pics = append(pics, fmt.Sprintf("https://f/p%d.jpg", i))
+	}
+	b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{"items": []any{
+			uiDynamicOpus("o1", "九张图", pics...),
+		}, "offset": "", "has_more": false})
+	})
+	s, tt, _ := newSpaceShell(t, b, false, "")
+
+	// 缩到最小窗口宽度：那一档下列表装不下 876 点。
+	tt.SetSize(900, 700)
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+	waitFrames(t, tt, "动态加载完", func() bool { return sp.dyn.started })
+	tt.Frame()
+
+	first, ok1 := tt.Find("https://f/p0.jpg")
+	fourth, ok4 := tt.Find("https://f/p3.jpg")
+	if !ok1 || !ok4 {
+		t.Fatalf("量不到那几张图（%v / %v）——它们有没有 Label？", ok1, ok4)
+	}
+	if fourth.Y <= first.Y {
+		t.Errorf("第 4 张(y=%.1f) 没有落到第 1 张(y=%.1f)下面 —— 九张图仍排在一行里，"+
+			"缩到最小窗口时最后几张会被切在边界外", fourth.Y, first.Y)
+	}
+	if got := first.W; got < dynamicPicSide-1 || got > dynamicPicSide+1 {
+		t.Errorf("单张图的宽是 %.1f，want %d", got, dynamicPicSide)
 	}
 }
 

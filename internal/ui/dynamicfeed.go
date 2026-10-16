@@ -158,13 +158,25 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 		}
 
 		// 登录态过了才拉第一页。理由见 viewDynamicFeed 里那一段。
-		if ctx := f.auth.begin(); ctx != nil {
-			go s.fetchFeed(ctx, f, feedAuthors, f.auth.cursor, f.auth.page)
+		if !f.auth.started && f.auth.err == nil {
+			if ctx := f.auth.begin(); ctx != nil {
+				go s.fetchFeed(ctx, f, feedAuthors, f.auth.cursor, f.auth.page)
+			}
 		}
 
-		// 滚动条只在装上了东西的时候才问「末行进没进画面」——
-		// 没东西时 Visible 报的是上一帧，而上一帧什么也没有。
+		// ⚠️ **作者栏第一页拉失败也要说失败**：上面那一支是「登录之后能看到
+		// 你关注的人」，那是**没登录**的话；而拉失败了界面上一句话都不提，
+		// 切走再切回来也不会重拉（`want()` 因为 `err != nil` 一直挡着）。
 		auth := &f.auth
+		if !auth.started && auth.err != nil {
+			s.viewLoadError(c, "feed-err:authors", "重试加载关注的人", auth.err, func() {
+				auth.err = nil
+				if ctx := auth.begin(); ctx != nil {
+					go s.fetchFeed(ctx, f, feedAuthors, auth.cursor, auth.page)
+				}
+			})
+			return
+		}
 		sentinel := auth.started && (auth.hasMore || auth.err != nil)
 		rows := len(f.authors) + 1 // 「全部」那一行永远在
 		if sentinel {
@@ -232,7 +244,7 @@ func (s *Shell) viewAuthorRow(c *ui.Context, f *dynamicFeed, i int) {
 	t := c.Theme()
 
 	if i >= len(f.authors)+1 {
-		s.viewFeedSentinel(c, f.feedPager(feedAuthors), "继续往下滚，加载更多关注的人", func() {
+		s.viewFeedSentinel(c, f.feedPager(feedAuthors), "继续往下滚，加载更多关注的人", "重试加载关注的人", func() {
 			auth := f.auth
 			auth.err = nil
 			if ctx := auth.begin(); ctx != nil {
@@ -281,8 +293,21 @@ func (s *Shell) viewAuthorRow(c *ui.Context, f *dynamicFeed, i int) {
 func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 	feed := &f.feed
 
+	// ⚠️ **「拉失败了」必须排在「空」前面**：反过来的话第一页拉失败时
+	// 界面上是「暂无动态」——一句话都不提失败，而 `started` 仍是 false、
+	// `err` 非 nil，切走再切回来也不会重拉，用户看到的是「关注的人
+	// 真的什么都没发」。
+	if !f.started && feed.err != nil {
+		s.viewLoadError(c, "feed-err:items", "重试加载动态", feed.err, func() {
+			feed.err = nil
+			if ctx := feed.begin(); ctx != nil {
+				go s.fetchFeed(ctx, f, feedItems, feed.cursor, feed.page)
+			}
+		})
+		return
+	}
 	if !f.started && feed.loading {
-		// 一条都还没有：第一页在途。
+		// 一条都都没有：第一页在途。
 		s.viewEmpty(c, "feed:loading", emptyState{Title: "正在加载动态…"})
 		return
 	}
@@ -328,7 +353,7 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 					}
 				}()
 				if r.Index >= len(f.items) {
-					s.viewFeedSentinel(r.Context, feed, "继续往下滚，加载更多动态", func() {
+					s.viewFeedSentinel(r.Context, feed, "继续往下滚，加载更多动态", "重试加载动态", func() {
 						feed.err = nil
 						if ctx := feed.begin(); ctx != nil {
 							go s.fetchFeed(ctx, f, feedItems, feed.cursor, feed.page)
@@ -397,13 +422,13 @@ func feedRowLabel(d bili.Dynamic) string {
 // retry 是「点了再拉一次」那个动作。它**只能由人触发**：有 err 在闸门就一直
 // 挡着（见 `upPager.want`），不然就是自己打自己——解了闸门 → 下一帧看见
 // 容器还没填满 → 又拉 → 又失败。
-func (s *Shell) viewFeedSentinel(c *ui.Context, p *upPager, hint string, retry func()) {
+func (s *Shell) viewFeedSentinel(c *ui.Context, p *upPager, hint, retryLabel string, retry func()) {
 	t := c.Theme()
 	ui.Row(c).Key("feed-sentinel").Center().Gap(8).Padding(12).Children(func() {
 		switch {
 		case p.err != nil:
 			ui.Text(c, "加载失败："+p.err.Error()).FontSize(13).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
-			if retry != nil && ui.Button(c, "重试").FontSize(13).Clicked() {
+			if retry != nil && ui.Button(c, retryLabel).FontSize(13).Clicked() {
 				retry()
 			}
 		case p.loading:

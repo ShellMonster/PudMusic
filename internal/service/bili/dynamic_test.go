@@ -292,6 +292,62 @@ func TestAGraphicalPostWithNeitherTextNorPicsIsDropped(t *testing.T) {
 	}
 }
 
+// TestTheTextOfAnOpusIsTakenOnceNotTwice 钉住「正文二选一，不是拼起来」。
+//
+// ⚠️ B 站的正常返回里 `desc.text` 和 `opus.summary.text` 是**同一段话**
+// （上游两处都是 `desc?.text || opus?.summary?.text`）。拼起来的结果是
+// 界面上同一句话出现两遍——而这个 bug 很难被 `HasText` 抓到：那条断言是
+// **子串**匹配，两遍也照样为真。
+func TestTheTextOfAnOpusIsTakenOnceNotTwice(t *testing.T) {
+	const same = "今天更新了一期视频，记得来看。"
+	m := dynItem("dup", func(m map[string]any) {
+		major := majorOf(m)
+		major["type"] = "MAJOR_TYPE_OPUS"
+		major["opus"] = map[string]any{
+			"summary": map[string]any{"text": same},
+			"pics":    []any{map[string]any{"url_src": "https://f/1.jpg"}},
+		}
+	})
+	// dynItem 已经把 desc 设成了「正文 dup」——改成和 summary 同一段，
+	// 复现 B 站正常返回的形状。
+	mods := m["modules"].(map[string]any)
+	mods["module_dynamic"].(map[string]any)["desc"] = map[string]any{"text": same}
+	_, cli := dynamicFixture(t, []any{m}, "", false)
+
+	pg, err := cli.DynamicFeed(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pg.Items) != 1 {
+		t.Fatalf("拿到 %d 条，want 1", len(pg.Items))
+	}
+	if got := pg.Items[0].Text; got != same {
+		t.Errorf("正文是 %q，want %q（两处是同一段话，只该取一次；拼起来会显示两遍）", got, same)
+	}
+}
+
+// TestTheTextFallsBackToTheOpusSummaryWhenDescIsEmpty 是上一条的另一半：
+// desc 空的时候要拿 summary，否则图文的正文就没了。
+func TestTheTextFallsBackToTheOpusSummaryWhenDescIsEmpty(t *testing.T) {
+	m := dynItem("fallback", setEmptyBody(), func(m map[string]any) {
+		major := majorOf(m)
+		major["type"] = "MAJOR_TYPE_OPUS"
+		major["opus"] = map[string]any{
+			"summary": map[string]any{"text": "只有 summary 里的话"},
+			"pics":    []any{map[string]any{"url_src": "https://f/1.jpg"}},
+		}
+	})
+	_, cli := dynamicFixture(t, []any{m}, "", false)
+
+	pg, err := cli.DynamicFeed(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pg.Items) != 1 || pg.Items[0].Text != "只有 summary 里的话" {
+		t.Errorf("desc 空时该退回 summary，拿到 %+v", pg.Items)
+	}
+}
+
 // TestAnArchiveDynamicIsPlayable 钉住投稿型动态带出来的**队列项**
 // （bvid 那一格必须有——少了它点一下放不出来）。
 func TestAnArchiveDynamicIsPlayable(t *testing.T) {

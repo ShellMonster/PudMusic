@@ -94,14 +94,27 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic) {
 	})
 }
 
-// viewDynamicPics 画图文的图：一行三张（Biu 的 `w-1/3`）。
+// dynamicPicsPerRow 是图文的图一行摆几张。Biu 是 `w-1/3`（一行三张，
+// `item.tsx:141` 的图片区块）。
+const dynamicPicsPerRow = 3
+
+// viewDynamicPics 画图文的图：**一行三张，满了换下一行**。
+//
+// ⚠️ 换成多行不是审美，是它原来那一行放不下：九张 × 92 点 + 八道 6 点的缝
+// = 876 点，而窗口缩到 `MinWidth` 900 时列表只有 660 点宽——一个不会换行的
+// `Row` 把最后几张切在窗口边界外，用户既看不见也点不着（界面不滚动，
+// 一张图的方框贴在边上露半截）。
 func (s *Shell) viewDynamicPics(c *ui.Context, pics []string) {
 	if len(pics) > maxDynamicPics {
 		pics = pics[:maxDynamicPics]
 	}
-	ui.Row(c).Gap(6).Children(func() {
-		for _, p := range pics {
-			s.spaceThumb(c, p, dynamicPicSide, dynamicPicSide)
+	ui.Column(c).Key("dyn-pics").Gap(6).Children(func() {
+		for i := 0; i < len(pics); i += dynamicPicsPerRow {
+			ui.Row(c).Key(fmt.Sprintf("dyn-pics-row:%d", i/dynamicPicsPerRow)).Gap(6).Children(func() {
+				for _, p := range pics[i:min(i+dynamicPicsPerRow, len(pics))] {
+					s.spaceThumb(c, p, dynamicPicSide, dynamicPicSide)
+				}
+			})
 		}
 	})
 }

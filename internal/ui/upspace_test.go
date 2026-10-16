@@ -228,6 +228,10 @@ func uiDynamicArchive(id, bvid string) map[string]any {
 }
 
 // uiDynamicOpus 是造一条图文动态。
+//
+// ⚠️ **`desc.text` 和 `opus.summary.text` 造的是同一句话**，那正是 B 站正常
+// 返回的形状（上游两处都 `desc?.text || opus?.summary?.text`）。早一版这个
+// fixture 把 summary 留空，于是「正文被画两遍」那个 bug 恰好被它遮住了。
 func uiDynamicOpus(id, text string, pics ...string) map[string]any {
 	m := uiDynamic(id, text)
 	items := make([]any, 0, len(pics))
@@ -539,6 +543,232 @@ func TestTheEmptyStatesSayWhatToDoInsteadOfWhiteSpace(t *testing.T) {
 		if !tt.HasText(want) {
 			t.Errorf("%s 那一张空着时没说一句（want %q），文字有 %q", upTabNames[tab], want, tt.Texts())
 		}
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 头图区不能被压成零宽
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheHeaderIsNotSqueezedToZeroWidth 钉住「铺满是 `FillWidth()`，不是
+// `Width(0)`」。
+//
+// ⚠️ **`Width(v)` 的单位是 DIP**（`mygo/ui/element.go:637`），而布局里
+// 「只要设过宽度就按它算」（`layout.go:323`）——所以 `Width(0)` 就是**宽 0**，
+// 不是「没设宽度、随容器」。写成那样时整个头图区被压成零宽：昵称只剩一个
+// 省略号、头图永远画不出来、统计折成两行。
+//
+// 判据是**量出来的盒子宽**，不是「有没有画出来」：文字照样在，节点照样建，
+// 只有宽度在骗人。
+func TestTheHeaderIsNotSqueezedToZeroWidth(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "一个有很长签名的 UP 主", 0, 123456)
+	s, tt, _ := newSpaceShell(t, b, true, "77")
+	openSpace(t, s, tt, 42)
+
+	// ① 昵称和签名那两句**必须够宽**。零宽时实测是 27.3（只剩一个「⋯」）；
+	// 修好之后同一个窗口里是 184.3。取 100 做线：够宽裕，又不会因为字体
+	// 差异误报。
+	for _, what := range []string{"一个有很长签名的 UP 主", "这是一个签名"} {
+		r, ok := tt.Find(what)
+		if !ok {
+			t.Fatalf("画面上找不到 %q，文字有 %q", what, tt.Texts())
+		}
+		if r.W < 100 {
+			t.Errorf("%q 的盒子宽只有 %.1f，want ≥ 100 —— 头图区被压成零宽了"+
+				"（多半是拿 `Width(0)` 当成了「铺满」）", what, r.W)
+		}
+	}
+
+	// ② 统计那几格必须**在同一条横线上**。零宽时它们被折成两行，而「折行」
+	// 是量得出来的：同一个头图区里，数字在「粉丝数」下面多少点。
+	fan, ok1 := tt.Find("粉丝数")
+	lv, ok2 := tt.Find("等级")
+	if !ok1 || !ok2 {
+		t.Fatalf("统计没画出来（粉丝数 %v / 等级 %v），文字有 %q", ok1, ok2, tt.Texts())
+	}
+	if dy := abs32(lv.Y - fan.Y); dy > 2 {
+		t.Errorf("「粉丝数」(y=%.1f) 和「等级」(y=%.1f) 不在同一条横线上（差 %.1f）"+
+			"——统计被折成了两行", fan.Y, lv.Y, dy)
+	}
+	if fan.W <= 0 || lv.W <= 0 {
+		t.Errorf("统计那一格被压成零宽了（%.0f / %.0f）", fan.W, lv.W)
+	}
+}
+
+// abs32 是两个 float32 的差的绝对值。
+func abs32(v float32) float32 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+// TestTheFailedHeaderSaysSoAndOffersARetry 钉住「失败之后只有人能让它再来一次」。
+//
+// 两个坑叠在一起：①`viewUpSpace` 每帧问一次「还没加载过吗」，而失败只把
+// `Loading` 落回 false、`Loaded` 仍是 false——于是头图一失败就是**每帧发一次
+// 请求**（实测 300 毫秒 138 次）；②「再试一次」按钮被零宽压成 0×0，点不到，
+// 于是那 138 次永远停不下来。
+func TestTheFailedHeaderSaysSoAndOffersARetry(t *testing.T) {
+	b := newUIExplore(t)
+	b.on("/x/space/wbi/acc/info", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, -403, nil)
+	})
+	b.on("/x/relation/stat", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, -403, nil)
+	})
+	s, tt, _ := newSpaceShell(t, b, true, "77")
+
+	s.navigate(upPathOf(42))
+	tt.Frame()
+	sp := s.upSpaces[42]
+	waitSpace(t, "头加载完（失败也是完）", func() bool {
+		h := sp.header.Snapshot()
+		return h.Loaded || h.Err != ""
+	})
+
+	// 画 300 毫秒的帧：失败之后**不许**再发请求。
+	for i := 0; i < 30; i++ {
+		tt.Frame()
+	}
+	if n := countRequests(b, "/x/space/wbi/acc/info"); n > 1 {
+		t.Errorf("头图加载失败之后还请求了 %d 次（>1）：`viewUpSpace` 每帧都重发"+
+			"——失败只把 Loading 落回 false 而 Loaded 仍是 false", n)
+	}
+
+	if !showsText(tt, "打不开这个 UP 主的空间") {
+		t.Fatalf("没说打不开，文字有 %q", tt.Texts())
+	}
+	// 按钮必须**量得出来、点得到**。被零宽压成 0×0 的按钮 `tt.Find` 找得到
+	// 文字，但那个 0×0 的盒子点下去什么都不会发生。
+	r, ok := tt.Find("再试一次")
+	if !ok {
+		t.Fatalf("没有重试按钮，文字有 %q", tt.Texts())
+	}
+	if r.W <= 0 || r.H <= 0 {
+		t.Fatalf("「再试一次」是 %.0fx%.0f，点不到", r.W, r.H)
+	}
+	// 修好假 B 站再点一次：它必须能重来。
+	b.on("/x/space/wbi/acc/info", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{"mid": 42, "name": "修好了", "level": 4,
+			"official": map[string]any{"role": 0}})
+	})
+	if err := tt.Click("再试一次"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "重试之后加载成功", func() bool {
+		return sp.header.Snapshot().Loaded
+	})
+	tt.Frame()
+	if !showsText(tt, "修好了") {
+		t.Errorf("重试之后还是没加载出来，文字有 %q", tt.Texts())
+	}
+}
+
+// countRequests 数打到某条路径上的请求有几回。
+func countRequests(b *uiExplore, path string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := 0
+	for _, p := range b.paths {
+		if p == path {
+			n++
+		}
+	}
+	return n
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 拉失败要说失败
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestAFailedTabSaysItFailedAndOffersARetry 钉住「拉失败了」不能画成「没有」。
+//
+// 头一版把空状态排在错误前面：第一页拉失败时界面上是「暂无动态 / 暂无收藏夹
+// / 暂无合集」——一句话都不提失败，而闸门因为 `err != nil` 一直挡着重试，
+// 切走再切回来也不会重来。用户看到的是「他真的什么都没发」。
+func TestAFailedTabSaysItFailedAndOffersARetry(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "接口全挂的 UP", 0, 1)
+	for _, p := range []string{
+		"/x/polymer/web-dynamic/v1/feed/space",
+		"/x/v3/fav/folder/created/list",
+		"/x/polymer/web-space/seasons_series_list",
+	} {
+		b.on(p, func(w http.ResponseWriter, r *http.Request) {
+			uiExploreJSON(w, -412, nil) // 被风控
+		})
+	}
+	s, tt, _ := newSpaceShell(t, b, false, "")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+
+	for _, tab := range []int{upTabDynamic, upTabCollection, upTabSeries} {
+		sp.tab = tab
+		tt.Frame()
+		waitFrames(t, tt, upTabNames[tab]+" 拉完（失败也是完）", func() bool {
+			p := sp.pagerOf(tab)
+			return p.started || p.err != nil
+		})
+		tt.Frame()
+
+		if showsText(tt, upTabEmpty(tab, 0).Title) {
+			t.Errorf("%s 拉失败了，界面上却是空状态 %q——用户会以为他真的没有",
+				upTabNames[tab], upTabEmpty(tab, 0).Title)
+		}
+		if !showsText(tt, "这一块没拉出来") {
+			t.Errorf("%s 拉失败了却没说失败，文字有 %q", upTabNames[tab], tt.Texts())
+		}
+		label := "重试加载" + upTabNames[tab]
+		r, ok := tt.Find(label)
+		if !ok {
+			t.Errorf("%s 拉失败了却没有重试按钮（%q），文字有 %q", upTabNames[tab], label, tt.Texts())
+			continue
+		}
+		if r.W <= 0 || r.H <= 0 {
+			t.Errorf("%s 的重试按钮是 %.0fx%.0f，点不到", upTabNames[tab], r.W, r.H)
+		}
+	}
+}
+
+// TestARetryAfterAFailureActuallyReloads 钉住「那个重试是真能用的」。
+//
+// 光画一个按钮不够：闸门的 `want()` 因为 `err != nil` 一直挡着，所以按钮
+// 必须先把 err 清掉再开一拉。
+func TestARetryAfterAFailureActuallyReloads(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "先挂后好的 UP", 0, 1)
+	var fail = true
+	b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		if fail {
+			uiExploreJSON(w, -412, nil)
+			return
+		}
+		uiExploreJSON(w, 0, map[string]any{
+			"items": []any{uiDynamic("d1", "重试之后拿到了")}, "offset": "", "has_more": false})
+	})
+	s, tt, _ := newSpaceShell(t, b, false, "")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+	sp.tab = upTabDynamic
+	tt.Frame()
+	waitFrames(t, tt, "动态拉完（失败也是完）", func() bool {
+		return sp.dyn.started || sp.dyn.err != nil
+	})
+	tt.Frame()
+
+	fail = false
+	if err := tt.Click("重试加载" + upTabNames[upTabDynamic]); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "重试之后拉到了", func() bool { return len(sp.dynItems) == 1 })
+	tt.Frame()
+	if !showsText(tt, "重试之后拿到了") {
+		t.Errorf("重试之后没画出来，文字有 %q", tt.Texts())
+	}
+	if sp.dyn.err != nil {
+		t.Errorf("重试成功了但闸门上还留着错：%v", sp.dyn.err)
 	}
 }
 

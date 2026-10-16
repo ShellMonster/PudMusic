@@ -85,6 +85,19 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 		go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
 	}
 
+	// ⚠️ **「拉失败了」必须排在「空」前面**。反过来的话第一页拉失败时
+	// 界面上是「暂无动态 / 暂无收藏夹 / 暂无合集」——一句话都不提失败，
+	// 而 `started` 仍是 false、`err` 非 nil，切走再切回来也不会重拉，
+	// 用户看到的是「他真的什么都没有」。
+	if !p.started && p.err != nil {
+		s.viewLoadError(c, upLoadErrorKey(sp, tab), "重试加载"+upTabNames[tab], p.err, func() {
+			p.err = nil
+			if ctx := p.begin(); ctx != nil {
+				go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
+			}
+		})
+		return
+	}
 	if !p.started && p.loading {
 		// 一条都还没有：第一页在途。这一句就是它全部的内容。
 		s.viewEmpty(c, upEmptyKey(sp, tab), emptyState{Title: "正在加载" + upTabNames[tab] + "…"})
@@ -248,7 +261,7 @@ func (s *Shell) viewUpSentinel(c *ui.Context, sp *upSpace, tab int) {
 		switch {
 		case p.err != nil:
 			ui.Text(c, "加载失败："+p.err.Error()).FontSize(13).TextColor(t.TextMuted)
-			if ui.Button(c, "重试").FontSize(13).Clicked() {
+			if ui.Button(c, "重试加载"+upTabNames[tab]).FontSize(13).Clicked() {
 				p.err = nil
 				if ctx := p.begin(); ctx != nil {
 					go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
@@ -270,4 +283,12 @@ func (s *Shell) viewUpRow(c *ui.Context, sp *upSpace, tab, i int) {
 		return
 	}
 	s.viewCollectionRow(c, sp.cols[tab][i])
+}
+
+// upLoadErrorKey 是「这一张 Tab 第一页就拉失败」那一支的 key。
+//
+// **和空状态那个 key 分开**：同一个 key 上换文案，读屏软件读到的是同一句话，
+// 而「暂无」和「加载失败」必须被当成两件事。
+func upLoadErrorKey(sp *upSpace, tab int) string {
+	return "space-err:" + strconv.FormatInt(sp.mid, 10) + ":" + upTabNames[tab]
 }

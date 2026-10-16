@@ -340,7 +340,13 @@ func parseDynamic(raw json.RawMessage) (Dynamic, bool) {
 		return d, true
 	}
 
-	// ② 图文。正文可能写在 desc 里也可能只在 summary 里，两个都要看。
+	// ② 图文。正文**二选一**，不是两段拼起来。
+	//
+	// ⚠️ 这是实测过的：上游两处都是 `desc?.text || opus?.summary?.text`
+	// （`dynamic-feed/item.tsx:33`、`user-profile/dynamic-list/item.tsx:46`），
+	// 而 B 站的正常返回里 `desc.text` 和 `opus.summary.text` 是**同一段话**。
+	// 拼起来（`desc + "\n" + summary`）的结果是界面上同一句话出现两遍。
+	// 只在 `desc` 为空时才去取 summary。
 	if o := major.Opus; o != nil {
 		pics := make([]string, 0, len(o.Pics))
 		for _, p := range o.Pics {
@@ -348,10 +354,9 @@ func parseDynamic(raw json.RawMessage) (Dynamic, bool) {
 				pics = append(pics, u)
 			}
 		}
-		if s := strings.TrimSpace(o.Summary.Text); s != "" {
-			d.Text = d.Text + "\n" + s
+		if d.Text == "" {
+			d.Text = strings.TrimSpace(o.Summary.Text)
 		}
-		d.Text = strings.TrimSpace(d.Text)
 		if len(pics) == 0 && d.Text == "" {
 			// 声明是图文但既没图也没字：画出来是一个空卡片，比不画更糟。
 			return Dynamic{}, false

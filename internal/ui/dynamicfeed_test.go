@@ -61,16 +61,22 @@ func TestTheAuthorListPagesAndEachRowGoesToThatSpace(t *testing.T) {
 	}
 
 	// 翻页：滚到作者栏底部（哨兵进画面）就会拉下一页。
+	//
+	// ⚠️ **等的是终态而不是「多了一个」**：这一栏装不满时哨兵一直在画面里，
+	// 于是**一次滚动可能连翻好几页**（实测一帧就从 2 个翻到 5 个）。早一版按
+	// 「翻一页」一步一步等，读 `before` 的那一刻下一页可能已经到了，
+	// 于是永远等不到「比 before 多一个」。
 	for i := 0; i < 5 && len(f.authors) < 5; i++ {
-		if !f.auth.hasMore {
-			break
-		}
 		tt.Scroll(60, 400, 0, -2000)
 		tt.Frame()
-		before := len(f.authors)
-		waitFrames(t, tt, "作者栏翻到下一页", func() bool { return len(f.authors) > before })
-		tt.Frame()
+		if f.auth.started && !f.auth.hasMore {
+			break
+		}
 	}
+	waitFrames(t, tt, "作者栏翻到底", func() bool {
+		return len(f.authors) == 5 || (f.auth.started && !f.auth.hasMore)
+	})
+	tt.Frame()
 	if len(f.authors) != 5 {
 		t.Fatalf("翻了之后作者栏有 %d 个人，want 5（total 就是 5）", len(f.authors))
 	}
@@ -163,5 +169,62 @@ func TestBothPagesSurviveAPanicInTheirView(t *testing.T) {
 		if s.crash != nil {
 			t.Fatalf("%s 这一页崩了（%v）——它应该被页级 recover 接住才对", target, s.crash)
 		}
+	}
+}
+
+// TestAFailedDynamicFeedSaysItFailedAndOffersARetry 钉住「动态流拉失败要说
+// 失败」。
+//
+// 同一个坑在动态流这一页也有：空状态排在错误前面，于是第一页拉失败时
+// 界面上是「暂无动态」——一句话都不提失败，而闸门因为 `err != nil` 一直
+// 挡着重试，切走再切回来也不会重来。
+func TestAFailedDynamicFeedSaysItFailedAndOffersARetry(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "我自己", 0, 1)
+	for _, p := range []string{"/x/polymer/web-dynamic/v1/feed/all", "/x/relation/followings"} {
+		p := p
+		b.on(p, func(w http.ResponseWriter, r *http.Request) {
+			uiExploreJSON(w, -412, nil) // 被风控
+		})
+	}
+	s, tt, _ := newSpaceShell(t, b, true, "77")
+
+	s.navigate(dynamicFeedPath)
+	tt.Frame()
+	f := s.dynamicFeedOf()
+	waitFrames(t, tt, "动态流拉完（失败也是完）", func() bool {
+		return f.started || f.feed.err != nil
+	})
+	tt.Frame()
+
+	if showsText(tt, "暂无动态") {
+		t.Errorf("拉失败了，界面上却是「暂无动态」——用户会以为关注的人真的什么都没发，文字有 %q",
+			tt.Texts())
+	}
+	if !showsText(tt, "这一块没拉出来") {
+		t.Errorf("没说失败，文字有 %q", tt.Texts())
+	}
+	// ⚠️ 找**动态那一块**那个按钮，不是左边作者栏那个：这一页同时可能有两块
+	// 在失败，两个按钮必须带各自的名字（否则用户也分不清按的是哪个）。
+	r, ok := tt.Find("重试加载动态")
+	if !ok {
+		t.Fatalf("没有重试按钮，文字有 %q", tt.Texts())
+	}
+	if r.W <= 0 || r.H <= 0 {
+		t.Fatalf("重试按钮是 %.0fx%.0f，点不到", r.W, r.H)
+	}
+
+	// 修好假 B 站再点一次：它必须能重来。
+	b.on("/x/polymer/web-dynamic/v1/feed/all", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{
+			"items": []any{uiDynamic("d1", "重试之后拿到了")}, "offset": "", "has_more": false})
+	})
+	if err := tt.Click("重试加载动态"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "重试之后拉到了", func() bool { return len(f.items) == 1 })
+	tt.Frame()
+	if !showsText(tt, "重试之后拿到了") {
+		t.Errorf("重试之后没画出来，文字有 %q", tt.Texts())
 	}
 }
