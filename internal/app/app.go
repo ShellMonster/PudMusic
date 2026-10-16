@@ -13,6 +13,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/media"
 	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/service/download"
 )
 
 // tickInterval 是进度条时钟的间隔。每秒 20 次足够让进度条看起来是滑的，
@@ -116,6 +117,13 @@ type App struct {
 	// 错误、不自己清零，所以不比对的话每 50 ms 会重复报一次。
 	reportedErr error
 
+	// 下载这一摊，见 downloads.go。挂上去之前是 nil，界面要判空。
+	downloads *download.Manager
+	// downloadQueueFile 是队列落盘的位置。退出时写、重开时读。
+	downloadQueueFile string
+	// downloadFallbackDir 是设置里没选过下载目录时的去处（系统下载目录）。
+	downloadFallbackDir string
+
 	// artist 是当前这首的艺人（在线条目的 UP 主名）。本地文件是空的，
 	// 见 media.go 的 setArtist。跟 cover 一样只有媒体会话在用。
 	artist string
@@ -152,12 +160,16 @@ func (a *App) SetWake(fn func()) {
 	a.mu.Lock()
 	a.wake = fn
 	acct := a.account
+	dl := a.downloads
 	a.mu.Unlock()
 	// 挂登录早于装窗口（挂登录要读盘，装窗口要建窗口），所以挂登录时
 	// 这里还是 nil。顺手补一次，否则后台改了登录状态没有一帧会被叫醒，
-	// 界面会一直停在旧提示上。
+	// 界面会一直停在旧提示上。下载那一摊同理（`MountDownloads` 也读盘）。
 	if acct != nil {
 		acct.setWake(fn)
+	}
+	if dl != nil {
+		dl.SetWake(fn)
 	}
 }
 
@@ -375,6 +387,7 @@ func (a *App) Close() {
 	p := a.player
 	a.player = nil
 	a.playing = false
+	dl, dlPath := a.downloads, a.downloadQueueFile
 	a.mu.Unlock()
 
 	close(a.done)
@@ -390,6 +403,12 @@ func (a *App) Close() {
 	a.publishMedia()
 	if a.account != nil {
 		a.account.Close()
+	}
+	// 下载要**停掉并落盘**。停掉是为了别让在飞的请求在应用退出时还在往盘上
+	// 写；落盘是因为队列文件是「下到哪儿了」的唯一一份，丢了用户重启就得
+	// 从头下。写失败不往上报错：退出路径上没有用户在看。
+	if dl != nil {
+		_ = dl.Close(dlPath)
 	}
 }
 
