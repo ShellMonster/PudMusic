@@ -7,6 +7,7 @@ import (
 	"log"
 	"runtime/debug"
 	"sync"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
@@ -27,6 +28,24 @@ type Shell struct {
 
 	// router 是 Biu 那 14 条路由的调度，带前进/后退历史。
 	router *ui.Router
+
+	// clock 是界面层等东西用的时钟（clock.go）。测试会换成假的，于是「404 页
+	// 3 秒后回首页」不用真睡 3 秒。
+	clock clockSource
+
+	// shownPath 是上一帧画的是哪一页，syncRoute 拿它认出「换页了」。
+	shownPath string
+
+	// notFoundAt 是进 404 的那一刻，notFoundStop 是那个每秒一跳的倒计时。
+	// 两者都只由主线程读写（syncRoute 在主线程），后台那一跳只调
+	// wakeHandle.invalidate，所以不违反铁律一、也没有竞态。
+	notFoundAt   time.Time
+	notFoundStop func()
+
+	// themed 是 applyFrameTheme 最近一次装进去的那份主题，用来认出「这一帧
+	// 装过了」。见 theme.go 里那条注释——重复装会把「跟随系统」读成自己上一帧
+	// 的档位。
+	themed *ui.Theme
 
 	// pageBody 是画页面内容的那一支。单独拎出来是为了能替掉它测崩溃
 	// （铁律四的验收点：页面里 panic，进程不能崩）。
@@ -59,9 +78,9 @@ type Shell struct {
 //
 // TestPlayBarCoverWakeRedrawsTheWindow 走的就是这一行。
 func New(a *app.App) *Shell {
-	s := &Shell{app: a, router: ui.NewRouter("/"), images: imgcache.New(imgcache.Options{})}
+	s := &Shell{app: a, router: ui.NewRouter("/"), clock: realClock{}, images: imgcache.New(imgcache.Options{})}
 	s.images.AddWake(s.wake.invalidate)
-	s.pageBody = s.placeholder
+	s.pageBody = s.renderPage
 	s.draw = Guard(s.viewMain, s.onPanic)
 	return s
 }

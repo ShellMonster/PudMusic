@@ -85,9 +85,9 @@ var themeModes = []struct {
 // viewThemeSwitch 是主题档位那三个按钮：跟随系统 / 浅色 / 深色。
 //
 // 🔴 为什么临时放在顶栏下面，而不是设置页：Biu 的主题设置在 `/settings` 里，
-// 而这一阶段 `/settings` 还是占位路由（router.go）。验收项是「用户能切」，
-// 所以先摆在顶栏底下这条窄条上：设置页真做了，删掉这个函数、把同样的三个
-// 按钮搬过去就行，`SetThemeMode` 一个字都不用改。
+// 而 `/settings` 这一页现在只画一张空状态，文案就写明「设置项还在顶栏下面」
+// （routes 表里那一条）。设置页真做了，删掉这个函数、把同样的三个按钮搬过去
+// 就行，`SetThemeMode` 一个字都不用改。
 func (s *Shell) viewThemeSwitch(c *ui.Context) {
 	t := c.Theme()
 	cur := s.app.SettingsSnapshot().ThemeMode

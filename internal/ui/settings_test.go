@@ -20,9 +20,14 @@ import (
 
 // sampleAt 是页面区域里一个点的坐标：侧栏（200 宽）右边、导航栏下面、播放条
 // 上面。那里画的是窗口底色，也就是当前主题的 Background。
+//
+// ⚠️ 取的是页面区域里**空着**的那一块，不是页面中间。页面中间是空状态那两行
+// 文字（y≈265~315，居中），而文字是逐帧排的：采到它上面，这一帧读到的是
+// 抗锯齿的灰，下一帧可能读到白，同一条测试时而红时而绿。y=430 在那块下面、
+// 播放条上面，哪一页都不会画到。
 const (
 	sampleX = 700
-	sampleY = 300
+	sampleY = 430
 )
 
 // shellWithSettings 造一个「真 App + 盘上真有那份设置 + 真 Shell」，返回设置
@@ -130,7 +135,7 @@ func TestShellKeepsTheThemeAfterClickingAround(t *testing.T) {
 		tt.Frame()
 		assertBackground(t, tt, wantBackground(t, a, true), "点别的地方之后（第 "+string(rune('1'+i))+" 次）")
 	}
-	if !tt.HasText("这一页还没做") {
+	if !tt.HasText(lookup("/later").Empty.Title) {
 		t.Errorf("顺带验一下按钮确实点得动，文字有 %q", tt.Texts())
 	}
 
