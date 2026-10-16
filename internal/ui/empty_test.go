@@ -53,27 +53,28 @@ func TestSpecEmptyStates(t *testing.T) {
 
 // TestLyricsEmptySaysSo 验第四个场景：没有歌词。
 //
-// 歌词面板本身是阶段 6 的东西（PLAN.md 的 C-40 一带），这一张先把文案和画法
-// 定下来，所以这里直接拿 Tester 画那一件空状态，验它在画面上就是上游那一句
-// 「暂无歌词」。
+// 这一条现在**在应用里真的画得出来**：它挂在 `/empty` 那张空状态落地页上
+// （routes 表里那一条）。歌词面板本身是阶段 6 的东西（PLAN.md 的 S-08），
+// 在那之前，这一页就是它能落脚的地方——而不是一个只有测试引用的常量。
 func TestLyricsEmptySaysSo(t *testing.T) {
 	if lyricsEmpty.Title != "暂无歌词" {
 		t.Fatalf("歌词空状态的标题是 %q，want 暂无歌词（上游 components/lyrics/index.tsx:375）", lyricsEmpty.Title)
 	}
-	// 上游那一句就是全部，没有第二句：补一句「去哪儿找歌词」等于替上游许一个
-	// 它没有的承诺。
-	if lyricsEmpty.Hint != "" {
-		t.Errorf("歌词空状态多了第二句 %q，上游没有", lyricsEmpty.Hint)
+	// 「怎么才能不空」也要有：和其余 13 条一个规矩（上游那一句是全部，第二句
+	// 是我们补的，见 empty.go）。
+	if lyricsEmpty.Hint == "" {
+		t.Error("歌词空状态没说「怎么才能不空」")
 	}
 
-	s, _ := newShell(t)
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.viewEmpty(c, "lyrics", lyricsEmpty)
-	}, 900, 600)
+	s, tt := newShell(t)
+	s.navigate("/empty")
 	tt.Frame()
 
 	if !tt.HasText("暂无歌词") {
 		t.Errorf("歌词空状态没画出来，文字有 %q", tt.Texts())
+	}
+	if !tt.HasText(lyricsEmpty.Hint) {
+		t.Errorf("歌词空状态的「怎么才能不空」没画出来，文字有 %q", tt.Texts())
 	}
 }
 
@@ -101,54 +102,66 @@ func TestEmptyStateIsPaintedNotBlank(t *testing.T) {
 
 // TestPageViewAppliesTheThemeItself 验 🔴 铁律二在**页面 view 上**也成立。
 //
-// 这条是这一张新加的页面 view 会不会用系统色画出来的判据：系统是深色、设置
-// 选了浅色，而这里只画那一件空状态（外层没有 viewMain 替它装主题）。画面上
-// 出来是深色，就说明页面 view 忘了在开头装主题——它会用 MyGo 每帧重置好的
-// 系统色画出来，跟旁边的界面对不上。
+// 这条是这一张新加的页面 view 会不会用系统色画出来的判据：故意让**系统外观和
+// 设置要的相反**（系统深色 / 设置浅色，或者反过来），而这里只画那一件空状态
+// ——外层没有 viewMain 替它装主题。画面上跟系统那份一样，就说明页面 view 忘了
+// 在开头装主题：它会用 MyGo 每帧重置好的系统色画出来，跟旁边的界面对不上。
 func TestPageViewAppliesTheThemeItself(t *testing.T) {
-	s := shellOn(t, app.ThemeModeLight)
+	for _, c := range []struct {
+		mode     app.ThemeMode
+		sysDark  bool
+		wantDark bool
+	}{
+		{app.ThemeModeLight, true, false},
+		{app.ThemeModeDark, false, true},
+	} {
+		s := shellOn(t, c.mode)
+		tt := mygoui.NewTester(func(c *mygoui.Context) {
+			s.viewEmpty(c, "page", emptyState{Title: "这一页还没有内容", Hint: "空状态"})
+		}, 600, 400)
+		tt.SetDark(c.sysDark)
+		tt.Frame()
 
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.viewEmpty(c, "page", emptyState{Title: "这一页还没有内容", Hint: "空状态"})
-	}, 600, 400)
-	tt.SetDark(true)
-	tt.Frame()
-
-	// 期望的底色是「设置要浅色」，系统那份深色主题的底色另算一份。
-	want := BuildTheme(s.app.SettingsSnapshot(), true).Background
-	got := tt.Image().RGBAAt(300, 200)
-	w := mygoui.Color{R: got.R, G: got.G, B: got.B, A: got.A}
-	if w != want {
-		t.Errorf("系统深色 + 设置浅色，画面上却是 %v，want %v（页面 view 没装主题）", w, want)
+		// 期望的底色是「设置要的那一档」，系统那份另算一份——两者正好相反。
+		want := BuildTheme(s.app.SettingsSnapshot(), c.sysDark).Background
+		got := tt.Image().RGBAAt(300, 200)
+		w := mygoui.Color{R: got.R, G: got.G, B: got.B, A: got.A}
+		if w != want {
+			t.Errorf("设置 %v + 系统深色 %v：画面上却是 %v，want %v（页面 view 没装主题）",
+				c.mode, c.sysDark, w, want)
+		}
+		if got := BuildTheme(s.app.SettingsSnapshot(), c.sysDark).Dark; got != c.wantDark {
+			t.Fatalf("测试本身有问题：拼出来的是 %v 深色，want %v", got, c.wantDark)
+		}
 	}
 }
 
-// TestApplyThemeTwiceInOneFrameKeepsFollowingTheSystem 钉住那个防重复装的守卫。
+// TestApplyThemeRepeatedlyStillFollowsTheSystem 钉住 theme.go 顶上写的那条
+// 性质：**一帧里调几次结果都一样**。
 //
-// applyFrameTheme 一帧只该调一次——它读的是「MyGo 刚重置好的那一份」，第二次
-// 读到的已经是我们自己设的，「跟随系统」会整个反过来。现在页面 view 照惯例
-// 在开头也调一次，所以「认得出已经装过了」这件事必须有测试守着。
-func TestApplyThemeTwiceInOneFrameKeepsFollowingTheSystem(t *testing.T) {
+// 页面 view 在自己开头也要调一次（SetTheme 只影响它之后创建的控件），所以这
+// 一条天天在跑。以前有人在这里加过一个 `s.themed` 守卫，理由是「第二次读到的
+// 是自己刚设的那份，会把跟随系统搞反」——那个失败模式不存在，守卫删掉之后这条
+// 照样全绿。现在没有守卫，靠的就是下面这个性质本身。
+func TestApplyThemeRepeatedlyStillFollowsTheSystem(t *testing.T) {
 	s := shellOn(t, app.ThemeModeSystem)
 
-	var first, second bool
+	var after [3]bool
 	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.applyFrameTheme(c)
-		first = c.Theme().Dark
-		s.applyFrameTheme(c)
-		second = c.Theme().Dark
+		for i := range after {
+			s.applyFrameTheme(c)
+			after[i] = c.Theme().Dark
+		}
 	}, 300, 200)
 
-	tt.SetDark(true)
-	tt.Frame()
-	if !first || !second {
-		t.Fatalf("系统是深色，两次读到的是 %v / %v", first, second)
-	}
-
-	tt.SetDark(false)
-	tt.Frame()
-	if first || second {
-		t.Fatalf("系统切回浅色，两次读到的是 %v / %v", first, second)
+	for _, sysDark := range []bool{true, false, true} {
+		tt.SetDark(sysDark)
+		tt.Frame()
+		for i, got := range after {
+			if got != sysDark {
+				t.Errorf("系统深色 %v 时，第 %d 次装完读到的是 %v", sysDark, i+1, got)
+			}
+		}
 	}
 }
 

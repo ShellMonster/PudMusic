@@ -302,11 +302,17 @@ func TestNotFoundLeftCountsDown(t *testing.T) {
 	}
 }
 
-// TestEveryPageViewIsGuarded 验每一页 view 外面都包着 recover。
+// TestEveryPageViewIsGuarded 验每一页 view 里 panic 都不会带走进程。
 //
 // 🔴 SPEC 的「界面崩溃」那一条：原生 UI 下 view 里 panic 会直接杀进程，框架的
 // Dispatch 和 drain 都没有 recover。这里逐条跑一遍 14 条路由，每一条都往那一页
-// 的 pageBody 里塞一个 panic，验进程活着、并且切到了错误页。
+// 的 pageBody 里塞一个 panic，验进程活着、切到了错误页、而且换一页就出来。
+//
+// ⚠️ 它守的是**行为**，不是 page 里那道 Guard 本身：panic 从 page 穿出去之后，
+// viewMain 外层那道 Guard（`s.draw = Guard(s.viewMain, …)`）一样接得住，把
+// page 里面那道换成裸调用这一条照样全绿。里面那道是按 SPEC 的要求加的
+// （「每个页面 view 外包一层 recover」），留着是为了 page 这一层自己站得住，
+// 不依赖调用它的那一层恰好也有 Guard。
 func TestEveryPageViewIsGuarded(t *testing.T) {
 	paths := map[string]string{
 		"/user/{id}":       "/user/1",

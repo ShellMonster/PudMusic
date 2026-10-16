@@ -42,11 +42,6 @@ type Shell struct {
 	notFoundAt   time.Time
 	notFoundStop func()
 
-	// themed 是 applyFrameTheme 最近一次装进去的那份主题，用来认出「这一帧
-	// 装过了」。见 theme.go 里那条注释——重复装会把「跟随系统」读成自己上一帧
-	// 的档位。
-	themed *ui.Theme
-
 	// pageBody 是画页面内容的那一支。单独拎出来是为了能替掉它测崩溃
 	// （铁律四的验收点：页面里 panic，进程不能崩）。
 	pageBody func(*ui.Context, *ui.Route, Route)
@@ -90,6 +85,9 @@ func (s *Shell) Attach(w *mygo.Window) {
 	s.win = w
 	s.app.SetWake(s.wake.invalidate)
 	w.OnClosed(func() {
+		// 收掉 404 那个每秒一跳的定时器。窗口关了之后 `Invalidate` 对它是
+		// no-op，留着不致命，但它会一直每秒钟醒一次到进程退出。
+		s.disarmNotFound()
 		s.images.Close()
 		s.app.Close()
 	})

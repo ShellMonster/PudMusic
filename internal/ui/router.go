@@ -100,11 +100,13 @@ var routes = []Route{
 		Title: "暂无内容",
 		Hint:  "这里还没有收藏",
 	}},
-	// 上游：`pages/empty/index.tsx:6`，这一页整个就是一张空状态。
-	{Match: "/empty", Title: "空状态", Empty: emptyState{
-		Title: "暂无内容",
-		Hint:  "这就是一张空状态页，文案照 Biu 上游抄的",
-	}},
+	// 空状态落地页（P-29）。上游 `pages/empty/index.tsx:6` 在这里画的是
+	// `<Empty />`，也就是共享默认的 `暂无内容`——上游这一页整个就是一张空状态，
+	// 除此之外什么也没有。我们这里挂的是**歌词**那一支（`暂无歌词`）：上游唯一
+	// 一条不来自共享默认的空状态文案，放在这一页上正好是它该在的地方，也让任务
+	// 点名的「没有歌词」这个场景在应用里真的画得出来。歌词面板是阶段 6 的东西，
+	// 到时候把这一件搬过去，这一页退回共享默认。
+	{Match: "/empty", Title: "空状态", Empty: lyricsEmpty},
 	// 上游：`pages/mini-player/index.tsx:128`。
 	{Match: "/mini-player", Title: "迷你播放器", Empty: emptyState{
 		Title: "暂无播放内容",

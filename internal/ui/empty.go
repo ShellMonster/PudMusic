@@ -46,12 +46,19 @@ func (s *Shell) viewEmpty(c *ui.Context, key string, e emptyState) {
 	})
 }
 
-// lyricsEmpty 是歌词面板空着时说的话。
+// lyricsEmpty 是「没有歌词」这一条空状态。
 //
-// 上游 `src/components/lyrics/index.tsx:375` 是一句三选一：「歌词加载中...」
-// /「暂无歌词」/ 歌词本身，这里取空的那一支。Hint 留空：上游就是只有这一句，
-// 补一句「去哪儿找歌词」等于替上游许一个它没有的承诺。
+// 标题抄上游 `src/components/lyrics/index.tsx:375`：那里是一句三选一，
+// 「歌词加载中...」/「暂无歌词」/ 歌词本身，这里取空的那一支。
 //
-// 歌词面板本身是阶段 6 的东西（PLAN.md 的 C-40 一带），这一张先把文案和画法
-// 定下来，等它接上来的时候直接用。
-var lyricsEmpty = emptyState{Title: "暂无歌词"}
+// Hint 是我们写的（上游那一句就是全部）：Biu 的歌词不是从 B 站拿的，是歌词
+// 搜索按歌名去两个源找的（`components/lyrics-search-modal/` 下的
+// `netease-tab` 和 `lrclib-tab`），没有上传这一说。所以「怎么才能不空」就是
+// 换个源再找一次、或者换一首——这不是替上游许诺，是说清这件事有哪几条路。
+//
+// 现在挂在 `/empty` 那张空状态落地页上（P-29），见 routes 表里那一条。歌词
+// 面板本身是阶段 6 的东西（PLAN.md 的 S-08），到时候把这一件搬过去就行。
+var lyricsEmpty = emptyState{
+	Title: "暂无歌词",
+	Hint:  "在歌词搜索里换个源（网易云 / LRCLIB）再找一次",
+}

@@ -403,6 +403,9 @@ func TestRenderShots(t *testing.T) {
 	s.navigate("/local-music")
 	tt.Frame()
 	save(t, dir, "14-本地音乐空状态.png", tt)
+	s.navigate("/empty")
+	tt.Frame()
+	save(t, dir, "14b-空状态落地页.png", tt)
 
 	s.navigate("/根本没有这一页")
 	tt.Frame()

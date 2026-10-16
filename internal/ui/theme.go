@@ -38,22 +38,23 @@ func ApplyTheme(c *ui.Context, s app.Settings, systemDark bool) {
 // 自己设的档位，「跟随系统」在系统浅色时会画出深色——深浅整个反过来，而且
 // 不报错，只是界面和系统对不上。
 //
-// 正因为它必须读「MyGo 刚重置好的那一份」，**一帧里只能调一次**：第二次
-// 读到的已经是我们自己刚设进去的那份，重复调会把「跟随系统」整个搞反。
-// 于是认「这一帧装过了」的办法是比指针——`context.reset` 每个 build pass 都
-// 把 `c.theme` 换回框架那份（`&rt.passTheme`，地址不变），我们 `SetTheme`
-// 进去的是 `BuildTheme` 新建的那一份。两个指针不一样，就是还没装过。
+// **一帧里调几次都对**，页面 view 因此可以在自己开头照惯例也调一次（SetTheme
+// 只影响它之后创建的控件，页面 view 忘了装主题就会用系统色画出来，跟旁边的
+// 界面对不上）。两次结果一样，是两件事各自兜住的：
 //
-// 这样页面 view 就敢在开头照惯例再调一次（SetTheme 只影响它之后创建的控件，
-// 页面 view 忘了装主题就会用系统色画出来，跟旁边的界面对不上），而且调几次
-// 都不会把主题搞反。
+//   - 跨 build pass：MyGo 每个 pass 开头的 `context.reset`
+//     （ui/context.go:119）都把 `c.theme` 换回框架那份，而 `SetTheme` 只改
+//     `c.theme`、不碰 `rt.theme`，所以下一次读到的仍然是系统那份。
+//   - 同一 pass 内连着调：档位是浅色/深色时 `dark` 由档位说了算，读到的
+//     `Dark` 是几都不影响；档位是「跟随系统」时第一次装完 `Dark` 就等于
+//     系统深浅，第二次拿它当 `systemDark` 再走一遍，还是同一个值。
+//
+// （这两条曾经被写反过一次：一版注释说「一帧只能调一次，重复调会把跟随系统
+// 搞反」，还为此加了个 `s.themed` 守卫。枚举了（系统深浅 × 三档）八种组合，
+// 删掉守卫全绿——那个失败模式不存在。）
 func (s *Shell) applyFrameTheme(c *ui.Context) {
-	if c.Theme() == s.themed {
-		return
-	}
 	systemDark := c.Theme().Dark
 	ApplyTheme(c, s.app.SettingsSnapshot(), systemDark)
-	s.themed = c.Theme()
 }
 
 // BuildTheme 按设置拼出这一帧要用的主题。
