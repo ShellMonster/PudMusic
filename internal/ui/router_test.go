@@ -24,6 +24,9 @@ func newShell(t *testing.T) (*Shell, *mygoui.Tester) {
 	t.Cleanup(a.Close)
 	s := New(a)
 	t.Cleanup(s.images.Close)
+	// 搜索历史带着一个后台落盘的 goroutine（见 searchhistory.go）。每个外壳
+	// 一个，测试里建得比真窗口快得多，不收掉就是一堆挂着的 goroutine。
+	t.Cleanup(func() { _ = s.hist.Close() })
 
 	// 🔴 关掉切页动画。Tester 一帧画完，250ms 的滑动在里面永远走不完：那一帧
 	// 停在半路，上一页正往左挪、下一页正往右进，中间那道分界线正扫过页面区域。

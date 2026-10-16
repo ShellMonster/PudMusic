@@ -60,6 +60,12 @@ type Shell struct {
 	// 的地方往往不在页面上。
 	sideBody func(*ui.Context)
 
+	// navBody 是画顶栏的那一支，同样是为了能替掉它测崩溃。
+	//
+	// 顶栏也需要这一层：它里面有搜索框、建议浮层、原生菜单和轮询，出事时坏的
+	// 是**整条顶栏**——用户连窗口都拖不动了，而且报错的地方不在页面上。
+	navBody func(*ui.Context)
+
 	// images 是网络封面缓存。整个窗口共用一个。
 	images *imgcache.Cache
 
@@ -88,6 +94,22 @@ type Shell struct {
 	// sideLists 是两组收藏夹各自的列表状态。拖拽排序靠它，
 	// 两组一份是因为两组各排各的（见 sidebar_favorites.go）。
 	sideLists [favGroups]ui.ListState
+
+	// 顶栏这一摊。**同样只由 view 在主线程上读写**。
+	//
+	// searchFocused 是搜索框有没有焦点，顶栏用它染边框。浮层**不**靠它开
+	// （见 navbar_search.go 里那一段：焦点被 MyGo 还回来是个假信号）。
+	//
+	// ⚠️ 叫 searchKeyword 不叫 searchQuery：包级已经有一个 `searchQuery` 了
+	//（searchpage.go 的「URL 里搜索词那个键」，值是 "q"），两样东西没有关系，
+	// 同名却不同义最容易读错。
+	searchKeyword string
+	searchSuggest bool
+	searchFocused bool
+	// feed 是「动态更新红点」的 5 分钟节奏。假时钟在 navbar_feed.go。
+	feed *feedPoller
+	// hist 是搜索历史。没挂上盘时是内存里的一份（见 searchhistory.go）。
+	hist *searchHistory
 
 	// crash 是上一帧 panic 到的东西，非 nil 时这一帧画错误页。
 	crash any
@@ -146,11 +168,15 @@ func New(a *app.App) *Shell {
 		autostart: systemAutoStart{},
 	}
 	s.images.AddWake(s.wake.invalidate)
+	s.hist = newSearchHistory("")
+	s.feed = newFeedPoller(dynamicFeedInterval, nil)
 	// pageBody 是画页面内容的那一支：404 兜底 + 已经有内容的页（设置页）+ 每条
 	// 路由自己的空状态，三样拼在 pageContent 里（router.go）。
 	// sideBody 是侧栏那一支，搬去 sidebar.go 之后从那儿接进来。
+	// navBody 是顶栏那一支，搬去 navbar.go 之后从那儿接进来。
 	s.pageBody = s.pageContent
 	s.sideBody = s.viewSide
+	s.navBody = s.viewNav
 	s.draw = Guard(s.viewMain, s.onPanic)
 	return s
 }
@@ -183,6 +209,10 @@ func (s *Shell) Attach(w *mygo.Window) {
 		if s.win == w {
 			s.win = nil
 		}
+		// 收掉红点那个每五分钟一跳的定时器（navbar_feed.go 的 arm）。和 404
+		// 那个一样：窗口真关了之后 Invalidate 对它是 no-op，留着不致命，但它会
+		// 一直醒到进程退出。
+		s.feed.disarm()
 		// 收掉 404 那个每秒一跳的定时器。窗口真关了之后 `Invalidate` 对它是
 		// no-op，留着不致命，但它会一直每秒钟醒一次到进程退出。
 		//
@@ -203,6 +233,10 @@ func (s *Shell) Attach(w *mygo.Window) {
 		if err := s.app.CloseSettings(); err != nil {
 			log.Printf("biu: 关窗时保存设置失败：%v", err)
 		}
+		// 搜索历史同理：写盘是后台合并的，最后一下有可能还等在退避窗口里。
+		if err := s.hist.Close(); err != nil {
+			log.Printf("biu: 关窗时保存搜索历史失败：%v", err)
+		}
 	})
 }
 
@@ -218,6 +252,9 @@ func Run(a *app.App) error {
 	}
 
 	s := New(a)
+	// 搜索历史读盘是阻塞 IO，放在建窗口之前：早读进来早能用，也省得第一帧
+	// 是在一个空历史上画出来的（那也是 mountSearchHistory 的用途之一）。
+	s.mountSearchHistory()
 	// 菜单、退出、第二个实例、deep link 全在这里装。必须在 Run 之前，
 	// 否则启动命令行里的 biu:// 会在回调装好之前就被交付掉。
 	s.installLifecycle()
@@ -239,6 +276,22 @@ func Run(a *app.App) error {
 		s.openWindow()
 	})
 	return mygo.App.Run()
+}
+
+// mountSearchHistory 把搜索历史挂到盘上。
+//
+// 拿不到应用数据目录不算错误——记一条日志，接着用内存里那一份。搜索照常能用，
+// 只是关掉之后不记得搜过什么。为一件可有可无的东西挡住开窗口不值当。
+func (s *Shell) mountSearchHistory() {
+	dir, err := mygo.App.Path(mygo.PathUserData)
+	if err != nil {
+		log.Printf("biu: 拿不到应用数据目录，搜索历史这次关掉就没了：%v", err)
+		return
+	}
+	if err := s.hist.Close(); err != nil {
+		log.Printf("biu: 收尾内存里的搜索历史失败：%v", err)
+	}
+	s.hist = newSearchHistory(searchHistoryPath(dir))
 }
 
 // WindowOptions 是主窗口的样子。view 是这个窗口每帧要画的界面。
@@ -319,7 +372,9 @@ func (s *Shell) viewMain(c *ui.Context) {
 	st := s.app.Snapshot()
 
 	ui.Column(c).Fill().Children(func() {
-		s.viewNav(c)
+		// 顶栏同样外面包一层 Guard（铁律三）：它坏了坏掉的是整条顶栏，
+		// 用户连窗口都拖不动了，而出错的地方不在页面上。
+		Guard(s.navBody, s.onPanic)(c)
 		ui.Row(c).Grow(1).Children(func() {
 			// 侧栏是**一整块** view，外面包一层 Guard（铁律三）。它坏了的
 			// 表现是整个窗口空一大块，连报错的地方都没有。
