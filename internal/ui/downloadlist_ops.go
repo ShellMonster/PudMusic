@@ -1,0 +1,323 @@
+// 下载记录页上的那些操作：暂停 / 继续 / 重试 / 删除 / 清空，加删除前那道
+// 确认弹窗，和「打开文件所在文件夹」。
+//
+// 五种操作的名字和亮不亮的条件**逐条照** `biu/src/pages/download-list/actions.tsx`
+// 的那份 `actions` 数组（`show` 那一栏）：
+//
+//	暂停   只在 downloading        继续  只在 downloadPaused
+//	重试   只在 failed             删除  一直在
+//	打开文件 只在 completed        清空  页头（上游是表格右上角那个垃圾桶）
+//
+// 上游每个按钮按下之后会锁 2000ms（`lockAction`，因为它每个操作都是
+// `await window.electron.*`）。这边**不锁**：五种操作全是同步改一份内存里的
+// 状态，改完这一帧就画出来了，没有等第二下的那个窗口期；锁上只会让用户按第二
+// 下时按钮是灰的，而它灰得没有道理。
+
+package ui
+
+import (
+	"strconv"
+	"strings"
+
+	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
+)
+
+// 按钮上的字，和上游 `actions.tsx:71-136` 那一组 label 一个字不差。
+//
+// ⚠️ 这一列**不画图标**：上游每个按钮里是一个 Remix 图标，而 MyGo 的 `MenuItem`
+// / 这几颗文字按钮都没有图标位（widgets/list/menu.go 顶上那一段记着同一件事）。
+// 画一个不像的图标比画字更糟。
+const (
+	opPause  = "暂停"
+	opResume = "继续"
+	opRetry  = "重试"
+	opDelete = "删除"
+	opOpen   = "打开"
+)
+
+// viewToolbar 是页头那一行：标题 + 打开下载目录 + 清空记录。
+//
+// 上游是 `<h1>下载记录</h1>` 加右边一个写着下载路径的按钮（`index.tsx:99-103`）。
+//
+// ⚠️ **路径不在按钮上**：上游那样写，路径一长按钮就被截成半句话，用户看到
+// "/Users/daoz…" 得先猜一下点下去会发生什么。这里路径单独立一段（超长打
+// 省略号），按钮只说它做的那件事——两边说的都是同一件事，而这个更好读。
+func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
+	t := c.Theme()
+	dir := s.app.DownloadDir()
+
+	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, "下载记录").FontSize(22).Bold()
+
+		// 路径。空串是「还没有下载目录」（设置里没选、系统目录也没拿到，
+		// 见 `app.Downloads.FallbackDir`）——那时候要说出来，不能画一段空白
+		// 让用户以为按钮坏了。
+		path := dir
+		if path == "" {
+			path = "还没有下载目录"
+		}
+		// 超长被截掉的时候完整路径在 tooltip 里：用户不必去设置页才看得到它落在
+		// 哪儿。没有目录时那一截是空的（`Tooltip("")` 不画东西），没有可补充的。
+		ui.Text(c, path).Grow(1).FontSize(12).TextColor(t.TextMuted).
+			MaxLines(1).Ellipsis("…").Tooltip(dir)
+
+		// ⚠️ 没有目录时不摆这个按钮：按下去是打不开的。一个只会说「不行」的
+		// 按钮不如不摆（和首页不摆「全部播放」是同一个取舍）。
+		if dir != "" && ui.Button(c, "打开文件夹").Width(dlOpenDirW).Clicked() {
+			d.openDownloadDir(dir, s)
+		}
+		if ui.Button(c, "清空记录").Width(dlClearW).Disabled(len(d.rows) == 0).Clicked() {
+			d.askClear(s)
+		}
+	})
+}
+
+// dlOpenDirW / dlClearW 是页头那两个按钮的宽度。
+const (
+	dlOpenDirW = 96
+	dlClearW   = 88
+)
+
+// viewOps 是「操作」那一列。
+//
+// 哪一个亮着见文件头那张表。这里不判断「点了会怎样」——判断在 `download.Manager`
+// 那一侧（`Status.CanPause` / `CanResume` 就在状态类型上），这里只判断**摆不摆**
+// 这颗按钮。摆一颗按了没反应的按钮比不摆更糟。
+func (d *downloadsPage) viewOps(c *ui.Context, s *Shell, r download.Snapshot) {
+	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+		// 打开文件所在文件夹：只在真的下完、文件已经在盘上的时候摆
+		// （上游 `index.tsx:153-173` 的 `show: data.status === "completed"`）。
+		// 半成品和失败的那两支不摆——`Dest` 上要么是空的，要么是一个 `.part`，
+		// 在访达里指着它只会让用户以为那就是那首歌。
+		if r.Status == download.StatusDone {
+			d.opButton(c, opOpen, func() { d.revealFile(r, s) })
+		}
+		if r.Status.CanPause() {
+			d.opButton(c, opPause, func() { d.pause(r, s) })
+		}
+		if r.Status == download.StatusPaused {
+			d.opButton(c, opResume, func() { d.resume(r, s) })
+		}
+		if r.Status == download.StatusError {
+			d.opButton(c, opRetry, func() { d.resume(r, s) })
+		}
+		d.opButton(c, opDelete, func() { d.askDeleteOne(r, s) })
+	})
+}
+
+// opButton 是操作列里的一颗按钮。按钮一多就宽过列宽，所以列宽是按**最多同时亮
+// 的那几颗**挑的（完成时是「打开」+「删除」，出错的行是「重试」+「删除」，
+// 最多两颗，见 `dlOpsW`）。
+func (d *downloadsPage) opButton(c *ui.Context, label string, fn func()) {
+	if ui.Button(c, label).Width(dlOpW).Clicked() {
+		fn()
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 五种操作
+// ─────────────────────────────────────────────────────────────────────────────
+
+// pause 停下一项。
+func (d *downloadsPage) pause(r download.Snapshot, s *Shell) {
+	if err := s.app.PauseDownload(r.ID); err != nil {
+		s.addToast("暂停不了：" + trimDownloadErr(err))
+	}
+}
+
+// resume 接着下一项。暂停和出错走的是同一个动作（`download.Manager.Resume`：
+// 「继续」和「重试」是同一个动作，只是文案和亮着的条件不同），所以这两个按钮
+// 共用它。
+//
+// 引擎那一侧会把 `Err` 清掉并重新排上队（见 `Manager.Resume`），所以按了「重试」
+// 之后那一格画出来是「等待中」/「下载中」而不是原来那句红字——**重试必须让人
+// 看得出已经重来了**。
+func (d *downloadsPage) resume(r download.Snapshot, s *Shell) {
+	if err := s.app.ResumeDownload(r.ID); err != nil {
+		s.addToast("继续不了：" + trimDownloadErr(err))
+	}
+}
+
+// askDeleteOne 按「删除」之后弹出来的那一道。
+//
+// ⚠️ **什么时候问**：上游只在「还没下完」的时候问（`actions.tsx:137-146`：只有
+// downloading / downloadPaused / merging / … 那几个状态才 `onOpenConfirmModal`），
+// 下完的那一路是直接删。这里照它：删掉一条已经下完的记录只动记录不动文件，
+// 没什么好问的；而删掉一条下到一半的，那首歌就没了——问一句。
+func (d *downloadsPage) askDeleteOne(r download.Snapshot, s *Shell) {
+	if r.Status == download.StatusDone {
+		d.deleteOne(r, s)
+		return
+	}
+	d.ask = &confirmAsk{
+		title: "确认删除吗？",
+		body:  "当前任务未下载完成，确认删除后将无法恢复。",
+		ok:    opDelete,
+		doIt:  func() { d.deleteOne(r, s) },
+		open:  true,
+	}
+}
+
+// deleteOne 真的删掉一条。记录拿掉，半成品由引擎删（`Manager.Remove`）。
+func (d *downloadsPage) deleteOne(r download.Snapshot, s *Shell) {
+	if err := s.app.RemoveDownload(r.ID); err != nil {
+		s.addToast("删不掉：" + trimDownloadErr(err))
+	}
+}
+
+// askClear 按「清空记录」之后弹出来的那一道。
+//
+// ⚠️ 上游的「清空」是直接清的（`index.tsx:65-67` 就一句 `clearMediaDownloadTaskList`，
+// 没有确认弹窗）。而**这一边的清空比上游狠**：它会停掉所有正在下的，并把每一首
+// 的半成品删掉（`Manager.Clear`）——上游那边停不掉正在下的，因为它是每个任务
+// 一个 goroutine。所以这里加一道确认，说的也是这一边真正会发生的事。
+//
+// 「删一行」和「清空」是同一类动作（都不可恢复），所以走同一道弹窗，不另写一
+// 个。一条记录都没有时按钮是灰的，这一支走不到。
+func (d *downloadsPage) askClear(s *Shell) {
+	if len(d.rows) == 0 {
+		return
+	}
+	n := len(d.rows)
+	half := 0
+	for _, r := range d.rows {
+		if r.Status != download.StatusDone {
+			half++
+		}
+	}
+	body := "确认清空这 " + strconv.Itoa(n) + " 条下载记录吗？下完的歌留在盘上，删不掉。"
+	if half > 0 {
+		body += "其中 " + strconv.Itoa(half) + " 条还没下完，清空之后那些半成品也会被删掉。"
+	}
+	d.ask = &confirmAsk{
+		title: "确认清空吗？",
+		body:  body,
+		ok:    "清空",
+		doIt: func() {
+			s.app.ClearDownloads()
+			s.addToast("清空了 " + strconv.Itoa(n) + " 条下载记录")
+		},
+		open: true,
+	}
+}
+
+// openDownloadDir 在系统里打开下载目录。
+func (d *downloadsPage) openDownloadDir(dir string, s *Shell) {
+	if d.openDir == nil {
+		return
+	}
+	if err := d.openDir(dir); err != nil {
+		s.addToast("打不开那个目录：" + trimDownloadErr(err))
+	}
+}
+
+// systemOpenDir 是「打开下载目录」在真窗口里的那一份：在访达里开一个目录。
+//
+// 走 `mygo.Shell.OpenPath` 而不是 `OpenExternal`：后者是给网址用的（交给默认
+// 浏览器），而目录要交给系统的文件管理器。
+//
+// ⚠️ 这一句在**无头 Tester 里会 panic**：MyGo 的 `needsApp` 见到
+// `App.Run` 没跑过就直接 panic（mygo/app.go:128）。所以它只能挂在
+// `downloadsPage` 的接缝上（`newDownloadsPage`），测试建完外壳换成记动作的桩。
+func systemOpenDir(path string) error { return mygo.Shell.OpenPath(path) }
+
+// revealFile 在访达里显示这一首歌。
+//
+// 显出来的是 `Dest`（那首歌），不是目录（`ShowItemInFolder` 天然会把它所在
+// 的目录也打开，文件自己被选中）。
+func (d *downloadsPage) revealFile(r download.Snapshot, s *Shell) {
+	if r.Dest == "" {
+		// 队列里没有落盘路径 = 这一条是认不出位置的。回顶按钮已经在页头给出
+		// 了方向，这里说一句，别按了没反应。
+		s.addToast("这一条没有文件路径")
+		return
+	}
+	if d.reveal == nil {
+		return
+	}
+	d.reveal(r.Dest)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 确认弹窗
+// ─────────────────────────────────────────────────────────────────────────────
+
+// confirmAsk 是「你确定吗」那一弹窗：正在等用户点头的那一次操作。
+//
+// 状态长在页面上（不是 view 的局部变量）——即时模式每一帧都重画一遍，局部变
+// 量下一帧就没了（和 `Shell.searchDraft` 同一个理由）。
+type confirmAsk struct {
+	// title 是标题，body 是正文，ok 是确认按钮上的字。三样都摆出来，不靠
+	// 「你确定吗？」那一句话让用户猜自己在删什么。
+	title, body, ok string
+	// doIt 是点了确认之后要做的事。**闭包**（不是 id）：确认的时候队列可能
+	// 已经变了，按 id 回去找一条已经不在的记录是另一种错。
+	doIt func()
+	// open 是 `ui.Modal` 的那个开关，建的时候置 true（`ui.Modal` 在它是 false
+	// 的时候一个节点都不建），之后写它的是框架（点背景、按 Esc）。
+	open bool
+}
+
+// viewConfirm 画那道弹窗。
+//
+// ⚠️ 弹窗画在**整页画完之后**：删除按钮在表格里，按下它就把 `d.ask` 填上，同一
+// 帧的这一段就把弹窗画出来。放反了的话用户要等下一次重画才看见弹窗，而这一帧
+// 的重画不一定有（按钮按下之后没有任何东西会要求再画一帧）。
+//
+// Escape 和点背景都关掉它（`Dismissed`），并且**这一次删除不算数**——上游也是
+// 「取消」什么都不做。
+func (d *downloadsPage) viewConfirm(c *ui.Context, s *Shell) {
+	if d.ask == nil {
+		return
+	}
+	ask := d.ask
+	if m := ui.Modal(c, &ask.open, func() {
+		ui.Column(c).Width(dlAskW).Gap(12).Children(func() {
+			ui.Text(c, ask.title).FontSize(16).Bold()
+			// 正文允许折行：上游那句「当前任务未下载完成，确认删除后将无法恢复」
+			// 加上条数之后就宽过一行了，截掉就成了半句话。
+			ui.Text(c, ask.body).FontSize(13).TextColor(c.Theme().TextMuted).Wrap()
+			ui.Row(c).FillWidth().Gap(dlAskGap).Justify(ui.End).Children(func() {
+				if ui.Button(c, "取消").Width(dlAskBtnW).Clicked() {
+					d.ask = nil
+				}
+				if ui.PrimaryButton(c, ask.ok).Width(dlAskBtnW).Clicked() {
+					// 先关弹窗再做那件事：做的时候可能弹提示（addToast），
+					// 而弹窗还开着的话用户看到的是提示压在弹窗底下。
+					d.ask = nil
+					ask.doIt()
+				}
+			})
+		})
+	}); m.Dismissed() {
+		d.ask = nil
+	}
+}
+
+// 弹窗面板和里面两颗按钮的尺寸。dlAskGap 是它们之间的距离（布局上确认那颗
+// 排在「取消」右边，而 `Justify(ui.End)` 把这一行顶到右边）。
+const (
+	dlAskW    = 380
+	dlAskBtnW = 84
+	dlAskGap  = 8
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+// trimDownloadErr 把错误里那截前缀去掉。
+//
+// 错误都带一个包名前缀（`download: ` / `app: `，见 `internal/app/downloads.go`
+// 里那几个 `errDownloadsMissing` 和 `service/download` 里各个 `fmt.Errorf`），
+// 弹给用户看的时候那截前缀是白占地方——尤其在一条只有一格宽的提示里。
+//
+// ⚠️ 两截都要去：`app: ` 那一层是给日志认得出哪一层的，界面上用户只关心
+// 「删不掉」还是「打不开」。
+func trimDownloadErr(err error) string {
+	msg := err.Error()
+	for _, p := range []string{"download: ", "app: "} {
+		msg = strings.TrimPrefix(msg, p)
+	}
+	return msg
+}
