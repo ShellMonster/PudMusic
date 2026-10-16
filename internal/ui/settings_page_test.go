@@ -45,6 +45,9 @@ func shellOnSettings(t *testing.T, s app.Settings) (*mygoui.Tester, *Shell, *app
 	})
 
 	s2 := New(a)
+	// 关掉切页动画：Tester 一帧画完，250ms 的动画在里面永远走不完，留着它只会
+	// 让「读到的是哪一帧」变成随机的。理由和 newShell 里那一句一样。
+	s2.router.Transition = mygoui.TransitionNone
 	tt := mygoui.NewTester(s2.View, 1200, 800)
 	tt.Frame()
 	openSettings(t, tt)
@@ -56,7 +59,7 @@ func shellOnSettings(t *testing.T, s app.Settings) (*mygoui.Tester, *Shell, *app
 // 逐项点名，是因为设置页最可能的失败是「画出来了，但少了一项」——用户看见一个
 // 缺了「窗口关闭」的设置页，不会知道还有一项。
 func TestSettingsPageShowsItsContent(t *testing.T) {
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
 
 	for _, want := range []string{
 		"设置", "外观", "主题", "圆角",
@@ -68,8 +71,11 @@ func TestSettingsPageShowsItsContent(t *testing.T) {
 			t.Errorf("设置页上没有 %q，文字有 %q", want, tt.Texts())
 		}
 	}
-	if tt.HasText("这一页还没做") {
-		t.Errorf("设置页还在说「还没做」，文字有 %q", tt.Texts())
+	// 「不是占位页」这一条要能失败才算数。原来这里查的是占位页那句
+	// 「这一页还没做」——那句话连同占位页一起没了，断言恒为真，验不到任何东西。
+	// 现在查的是这一页真的接上了自己的画法（builtPage），接不上就会退回空状态。
+	if s.builtPage(lookup(settingsPath)) == nil {
+		t.Errorf("设置页没接上 builtPage，画出来的是空状态而不是设置页")
 	}
 	// macOS 上不建托盘（与 Biu 一致），「隐藏到托盘」在这边是收进程序坞。名字和
 	// 实际行为对不上时得说出来，否则用户会以为我们漏做了托盘。

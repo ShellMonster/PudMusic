@@ -50,7 +50,7 @@ func (s *Shell) viewNav(c *ui.Context) {
 
 	// Biu 的 `window-no-drag`（`index.tsx:22`）：建议浮层开着的时候整条不拖。
 	//
-	// 读的是**上一帧**的 searchSuggest：viewSearch 在 Children 里才跑，那一刻
+	// 读的是**上一帧**的 searchSuggest：viewSearchBox 在 Children 里才跑，那一刻
 	// 还没法知道这一帧的结果。一帧的差在这里没有后果——刚点开浮层的那一帧顶栏
 	// 还能拖，从第二帧起就不拖了。
 	if !s.searchSuggest {
@@ -67,7 +67,7 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// 页名。Biu 的顶栏没有这一行（那儿是侧栏高亮当前项），这是骨架里
 		// 留下来的：切路由时它是最省事的一处「我在哪」。
 		ui.Text(c, lookup(s.router.Path()).Title).FontSize(15).Bold()
-		s.viewSearch(c)
+		s.viewSearchBox(c)
 		// 中间那一段空处也是拖动区：这一列把搜索框和右边那几个按钮推开，
 		// 指针落在这里时命中的就是它和外层 Row。
 		ui.Column(c).Grow(1).DragWindow()

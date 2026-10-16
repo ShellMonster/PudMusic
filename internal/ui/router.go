@@ -12,37 +12,95 @@ import (
 // Layout 里（`/`、`later`、`history`、`follow`、`collection/:id`、
 // `user/:id`、`settings`、`download-list`、`dynamic-feed`、`local-music`、
 // `search`、`empty`），加上独立窗口的 `mini-player`，再加上兜底的 `*`（404）。
-//
-// ⚠️ 本阶段只做**占位**：切得动、看得见「还没做」就行。内容是后面阶段的事。
 type Route struct {
 	// Match 是匹配用的模式，`{id}` 是路径参数。这里写 MyGo 的写法，Biu 写的是
 	// `:id`（`src/routes.tsx`），指的是同一件事。
 	Match string
-	// Title 是 Biu 里这一页的名字，占位页、Toast 和导航栏上都写它。
+	// Title 是 Biu 里这一页的名字，导航栏和窗口标题上都写它。
 	Title string
 	// InMenu 的进侧栏的默认菜单组（Biu 的 side/default-menu，SD-04）。
 	// 参数路由和 404 不进：它们是从别的页面点进来的，不是菜单项。
 	InMenu bool
+	// Empty 是这一页没有内容时说的话。**每一条都得填**：留空就是这一页画出
+	// 来一片白，那正是这一张要消掉的东西（见 empty.go）。
+	Empty emptyState
 }
 
 // routes 是那 14 条。前面 InMenu 的六条，顺序就是侧栏菜单从上到下的顺序
 // （照 Biu 的 SD-04：推荐音乐 / 我的关注 / 稍后再看 / 历史记录 / 本地音乐 /
 // 下载记录）。
+//
+// 每条后面的注释是那句文案的**出处**：Biu 上游在哪儿写的，或者明写「上游没
+// 有专属文案」。抄的时候照着抄，别自己编——编出来的一句在这一页对不上的话，
+// 就等于把这一页从 Biu 搬过来的那件事做坏了。
 var routes = []Route{
-	{Match: "/", Title: "推荐音乐", InMenu: true},
-	{Match: "/follow", Title: "我的关注", InMenu: true},
-	{Match: "/later", Title: "稍后再看", InMenu: true},
-	{Match: "/history", Title: "历史记录", InMenu: true},
-	{Match: "/local-music", Title: "本地音乐", InMenu: true},
-	{Match: "/download-list", Title: "下载记录", InMenu: true},
-	// Biu 把设置放在头像下拉里（N-08）。占位阶段先挂侧栏底部，等头像那块
+	// 上游：`pages/music-recommend/new-music-top.tsx:213` 的那块用 `暂无数据`，
+	// 推荐页本身落到共享默认。
+	{Match: "/", Title: "推荐音乐", InMenu: true, Empty: emptyState{
+		Title: "暂无内容",
+		Hint:  "先在顶栏「打开文件」放几首进来，或者搜一首歌",
+	}},
+	// 上游：关注列表只转给 `components/virtual-grid-page-list`，空的时候是它
+	// 的兜底 `暂无内容`（index.tsx:160）。
+	{Match: "/follow", Title: "我的关注", InMenu: true, Empty: emptyState{
+		Title: "暂无内容",
+		Hint:  "登录之后点「关注」关注的 UP 主会出现在这里",
+	}},
+	// 上游：`pages/later/index.tsx:236`。
+	{Match: "/later", Title: "稍后再看", InMenu: true, Empty: emptyState{
+		Title: "暂无稍后再看内容",
+		Hint:  "登录之后在歌上点「稍后再看」，加进来的会出现在这里",
+	}},
+	// 上游：`pages/history/index.tsx:284`。
+	{Match: "/history", Title: "历史记录", InMenu: true, Empty: emptyState{
+		Title: "暂无历史记录",
+		Hint:  "登录之后听过的歌会出现在这里，也可以「清空历史记录」",
+	}},
+	// 上游：`pages/local-music/index.tsx:263`。
+	{Match: "/local-music", Title: "本地音乐", InMenu: true, Empty: emptyState{
+		Title: "暂无内容",
+		Hint:  "用顶栏的「打开文件」把本地音乐加进来",
+	}},
+	// 「没有下载记录」，文案在 empty.go 的 noDownloads（上游出处也写在那儿）。
+	{Match: "/download-list", Title: "下载记录", InMenu: true, Empty: noDownloads},
+	// 设置页在上游不是一张内容页，是一长串表单，**没有空状态可抄**——而这一页
+	// 也不是空页面：settings_page.go 已经把设置页本身接进 builtPage 了（主题、
+	// 圆角、窗口关闭三项）。所以这一条**不填 Empty**：填了就是一句没人会看到的
+	// 话，那一页根本走不到空状态那一支。
+	//
+	// 哪一页有内容，看 builtPage；哪一页空着，看这里的 Empty。两条都不给的那
+	// 一条画出来是一片白，`TestEveryRouteHasAView` 会先红。
+	//
+	// 另外 Biu 把设置放在头像下拉里（N-08），这里先挂侧栏底部，等头像那块
 	// 做出来再挪回去。
 	{Match: "/settings", Title: "设置", InMenu: true},
+	// 搜索页有搜索框和两个空状态（searchpage.go），所以**不填 Empty**：填了就是
+	// 一句没人会看到的话，那一页根本走不到空状态那一支。
 	{Match: "/search", Title: "搜索"},
-	{Match: "/dynamic-feed", Title: "用户动态"},
-	{Match: "/user/{id}", Title: "UP 主空间"},
-	{Match: "/collection/{id}", Title: "收藏夹 / 合集 / 系列"},
-	{Match: "/empty", Title: "空状态"},
+	// 上游：动态流作者栏是 `暂无关注`（`dynamic-feed/author-list.tsx:137`），
+	// 主列表那处上游写的是没翻译的 `Empty`（`dynamic-feed/index.tsx:184`），
+	// 明显是漏了。同一句中文上游在 `user-profile/dynamic-list/index.tsx:80`
+	// 是有的，抄那一处。
+	{Match: "/dynamic-feed", Title: "用户动态", Empty: emptyState{
+		Title: "暂无动态",
+		Hint:  "去「我的关注」关注几个 UP 主，他们的动态会出现在这里",
+	}},
+	// 上游：`pages/user-profile/dynamic-list/index.tsx:80`。
+	{Match: "/user/{id}", Title: "UP 主空间", Empty: emptyState{
+		Title: "暂无动态",
+		Hint:  "回首页听歌，或者换一个 UP 主的空间看看",
+	}},
+	// 「没有收藏夹」，文案在 empty.go 的 noFavorites（上游出处也写在那儿）。
+	{Match: "/collection/{id}", Title: "收藏夹 / 合集 / 系列", Empty: noFavorites},
+	// 空状态落地页（P-29）。上游 `pages/empty/index.tsx:6` 画的就是一个
+	// `<Empty />`——这一页整个的用处就是「让人看见空状态长什么样」，上游没给
+	// title，所以落回共享默认的「暂无内容」。照抄。
+	{Match: "/empty", Title: "空状态", Empty: emptyState{
+		Title: "暂无内容",
+		Hint:  "随便切到别的页面——每一页空着的时候都是这个样子",
+	}},
+	// 迷你播放器（nowplaying.go）：没歌时是上游的「暂无播放内容」，有歌时是歌名 +
+	// 歌词区。所以**不填 Empty**：填了就是一句没人会看到的话。
 	{Match: "/mini-player", Title: "迷你播放器"},
 	// 扫码登录。**不加 InMenu**：它不是侧栏菜单项，是从顶栏的登录
 	// 按钮进出来的（跟 Biu 把登录挂在头像下拉里是一回事）。
@@ -51,6 +109,9 @@ var routes = []Route{
 }
 
 // notFound 是兜底那一条：路径谁都不匹配就是它，对应 Biu 的 P-30。
+//
+// 它没有 Empty：这一页有自己的 view（notfound.go），说清楚是哪条路径不存在、
+// 还剩几秒回首页，比一句「暂无内容」有用得多。
 var notFound = Route{Match: "*", Title: "页面不存在"}
 
 // lookup 按路径找出它属于哪一条路由，照 `{id}` 是通配的规矩走。
@@ -90,45 +151,23 @@ func matchPath(pattern, path string) bool {
 	return len(pp) == len(sp)
 }
 
-// viewRoutes 是 14 条路由的分派。
+// viewRoutes 是全部路由的分派。
 //
 // **每一页外面都包一层 recover**：MyGo 的 Dispatch 和 drain 都没有 recover，
 // view 里 panic 会穿透 Cocoa 事件循环直接把进程带走。切路由时 recover 的
 // 状态由 navigate 复位，所以一页崩了不会连累后面那些页。
+//
+// 认页用 `lookup(r.Path())`，不再是一长串 `r.Match(...)`：认页和画页合成一处，
+// 表里加了一条就自动多一页，不会出现「表里有、switch 里忘了」的那种少一页。
+//
+// 画什么由 pageContent 决定（见下）：已经有内容的页走 builtPage，其余走这一页
+// 自己的空状态。
 func (s *Shell) viewRoutes(c *ui.Context) {
+	// 换页的收口（404 那个 3 秒倒计时就在这儿驱动），必须在画页之前。
+	s.syncRoute()
+
 	s.router.View(c, func(r *ui.Route) {
-		switch {
-		case r.Match("/"):
-			s.page(c, r, routes[0])
-		case r.Match("/follow"):
-			s.page(c, r, routes[1])
-		case r.Match("/later"):
-			s.page(c, r, routes[2])
-		case r.Match("/history"):
-			s.page(c, r, routes[3])
-		case r.Match("/local-music"):
-			s.page(c, r, routes[4])
-		case r.Match("/download-list"):
-			s.page(c, r, routes[5])
-		case r.Match("/settings"):
-			s.page(c, r, routes[6])
-		case r.Match("/search"):
-			s.page(c, r, routes[7])
-		case r.Match("/dynamic-feed"):
-			s.page(c, r, routes[8])
-		case r.Match("/user/{id}"):
-			s.page(c, r, routes[9])
-		case r.Match("/collection/{id}"):
-			s.page(c, r, routes[10])
-		case r.Match("/empty"):
-			s.page(c, r, routes[11])
-		case r.Match("/mini-player"):
-			s.page(c, r, routes[12])
-		case r.Match("/login"):
-			s.loginPage(c, r, routes[13])
-		default:
-			s.page(c, r, notFound)
-		}
+		s.page(c, r, lookup(r.Path()))
 	})
 }
 
@@ -140,37 +179,70 @@ func (s *Shell) page(c *ui.Context, r *ui.Route, rt Route) {
 	}, s.onPanic)(c)
 }
 
-// placeholder 是占位页的内容。**它不是最终的样子**，只是让这一页在切过去
-// 之后看得见自己在这儿，以及「还没做」。
-func (s *Shell) placeholder(c *ui.Context, r *ui.Route, rt Route) {
-	t := c.Theme()
-	ui.Column(c).Key("page:" + rt.Match).Grow(1).Padding(28).Gap(10).Children(func() {
-		ui.Text(c, rt.Title).FontSize(22).Bold()
-		ui.Text(c, "这一页还没做").FontSize(15).TextColor(t.Text)
-		ui.Text(c, "阶段 1 只搭路由占位，内容在后面的阶段补。").FontSize(12).TextColor(t.TextMuted)
-		ui.Text(c, r.Path()).FontSize(11).TextColor(t.TextMuted)
-	})
+// builtPage 是「这一页已经有内容了」的路由和画法；还没做就返回 nil。
+//
+// 它同时是那几页不写空状态的理由：接了 builtPage 的路由，`Route.Empty` 就用不
+// 上了，留着等于一句没人会看到的话（`TestEmptyStateCopySaysWhyAndHow` 会把这种
+// 「既没内容、Empty 又是空的」路由揪出来）。
+func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
+	switch rt.Match {
+	case settingsPath:
+		return s.viewSettings
+	case searchPath:
+		// 搜索页有搜索框，两个空状态从 URL 上的 q 分得出来（searchpage.go）。
+		return s.viewSearch
+	case miniPlayerPath:
+		// 正在放什么 + 它的歌词（nowplaying.go）。
+		return s.viewNowPlaying
+	case loginPath:
+		// 扫码登录（login.go）。
+		return s.viewLogin
+	}
+	return nil
 }
 
-// navigate 换页：先把上一页的提示全清掉，再跳过去，还没做的页面弹一条提示。
+// pageContent 画一页的内容（New 把它装成 pageBody，测试也正是替掉它来验
+// 「页面里 panic 进程不崩」）。
 //
-// 三件事是一起的，缺一条就不对：
+// 三样，谁先谁后：
+//   - **404**：它有自己的页（notfound.go），说清楚是哪条路径不存在、还剩几秒回
+//     首页。比一条 Toast 有用得多——Toast 两秒就没了，而 404 上那一页一直在。
+//   - **已经有内容的页**：settings_page.go 的 builtPage 把它自己的 view 接
+//     进来（设置页是第一个）。接进来的页不用再走空状态那一支。
+//   - **别的**：这一页自己的空状态——routes 表里每一条都带一句「这里为什么空
+//     / 怎么才能不空」，出处标在那儿（见 empty.go）。真正的内容是后面的阶段
+//     接进来的，接的时候在这一支前面加一个 builtPage 就行，外面的 key、
+//     recover、主题一个字不动。
+//
+// 三样都空不了：一条路由既没接上 builtPage、Empty 又是空的，那一页画出来就是
+// 一片白，`TestEveryRouteHasAView` 会先红。
+func (s *Shell) pageContent(c *ui.Context, r *ui.Route, rt Route) {
+	if rt == notFound {
+		s.viewNotFound(c, r.Path())
+		return
+	}
+	if body := s.builtPage(rt); body != nil {
+		body(c, r)
+		return
+	}
+	s.viewEmpty(c, "page:"+rt.Match, rt.Empty)
+}
+
+// navigate 换页：先把上一页的提示全清掉，再跳过去。
+//
+// 两件事是一起的，缺一条就不对：
 //   - 清 Toast：上一页的提示不该挂在下一页上（验收项）。
 //   - 清 crash：崩过一页之后切到别的页要能正常画，不是停在错误页里出不来。
-//   - 弹 Toast：Biu 的验收是「点未实现的路由弹一条提示，不崩、不白屏」。
-//     **已经有内容的那一页不弹**——对着一页真做出来的东西说「还没做」，
-//     是在说一件假事，用户只会以为设置页也坏了。
+//
+// ⚠️ 这里**一条 Toast 都不弹**了（原型那版会弹「这一页还没做」和
+// 「没有…这一页」）：
+//   - 「还没做」：14 条路由现在都有页面视图了——12 条是各自的空状态、设置页是
+//     它自己那一页、404 是兜底那一页。对着其中任何一页说「还没做」都是在说一件
+//     假事，用户只会以为这一页坏了。
+//   - 「没有…这一页」：404 页自己就写着是哪条路径不存在、几秒后回首页，一条
+//     两秒就消失的 Toast 反而盖住它。
 func (s *Shell) navigate(target string) {
 	s.clearToasts()
 	s.crash = nil
 	s.router.Push(target)
-
-	rt := lookup(target)
-	if rt.Title == notFound.Title {
-		s.addToast("没有「" + target + "」这一页")
-		return
-	}
-	if s.builtPage(rt) == nil {
-		s.addToast("「" + rt.Title + "」这一页还没做")
-	}
 }

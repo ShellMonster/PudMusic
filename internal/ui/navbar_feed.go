@@ -9,14 +9,20 @@
 //
 // SPEC 的 Testing Decisions 把假时钟列成每一阶段都要留下的回归证据之一
 // （「点赞长按 2.5 秒、全屏鼠标移出 3 秒、Toast 2 秒消失」是同一类）。
-// 所以 `feedPoller.now` 是可换的时钟：生产用 `time.Now`，测试换成一只手动拨的
-// 假表，5 分钟的节奏在毫秒里跑完，**不用 `time.Sleep`**。
 //
-// 节奏本身是**帧驱动**的：`due` 只看「现在到没到下一轮」，到没到由 view 在
-// 每一帧问一次。不用后台定时器，是因为后台定时器要么在真窗口里让界面停在旧帧
-// （铁律三：只投递不唤醒 = 0 帧刷新），要么就得自己再维护一条唤醒链。帧驱动
-// 顺带把「没画帧就不轮询」这件事变成了一个白拿的性质：界面没在动的时候本来
-// 就没人看得见红点。
+// 时钟走的是界面层那一个（`clock.go` 的 `clockSource`），**不是自己再带一个**：
+// 那个文件的头一句话是「界面层所有『等一会儿』都从这里走」，这里另立一份就等于
+// 同一个包里两个时刻的来源——测试换上假时钟之后红点还按真时钟走，而那恰恰是它
+// 最难查的那种错（不报错，只是节奏不对）。
+//
+// 所以 `tick` 收一个 `clockSource` 当参数：换一个 Shell.clock，这个节奏跟着换，
+// 不用记得再去改第二个地方。5 分钟的节奏在测试里是毫秒级的，**不用 time.Sleep**。
+//
+// 节奏本身是**帧驱动**的：`tick` 只看「现在到没到下一轮」，到没到由 view 在每一帧
+// 问一次。不用 `EveryFunc` 那个后台定时器，是因为后台定时器要么在真窗口里让界面
+// 停在旧帧（铁律三：只投递不唤醒 = 0 帧刷新），要么就得自己再维护一条唤醒链。
+// 帧驱动顺带把「没画帧就不轮询」变成了一个白拿的性质：界面没在动的时候本来就没人
+// 看得见红点。
 package ui
 
 import (
@@ -45,8 +51,6 @@ const dynamicFeedPath = "/dynamic-feed"
 type feedPoller struct {
 	// interval 是两轮之间隔多久。
 	interval time.Duration
-	// now 是时钟。做成字段是为了测试能换成一只假表（见文件头）。
-	now func() time.Time
 	// fetch 拉一次更新，返回有几条没看过的。
 	//
 	// 这一版还没有 B 站接口，所以它默认返回 0。**接上真接口之后它会变成异步的**，
@@ -66,26 +70,19 @@ func newFeedPoller(interval time.Duration, fetch func() int) *feedPoller {
 	if fetch == nil {
 		fetch = func() int { return 0 }
 	}
-	return &feedPoller{
-		interval: interval,
-		now:      time.Now,
-		fetch:    fetch,
-	}
+	return &feedPoller{interval: interval, fetch: fetch}
 }
-
-// due 报该不该轮了。
-func (p *feedPoller) due() bool { return !p.now().Before(p.next) }
 
 // tick 到点就轮一次，返回这一帧该画几个红点。
 //
 // 下一轮的时刻从**轮完这一刻**起算（`now + interval`），不是从上一轮推——
 // 两种算法在准点时一模一样，差的是「轮完这一次花了 300ms」之后：按上一轮推会
 // 让实际间隔越缩越短，最后快到连着发。
-func (p *feedPoller) tick() int {
-	if !p.due() {
+func (p *feedPoller) tick(c clockSource) int {
+	now := c.Now()
+	if now.Before(p.next) {
 		return p.count
 	}
-	now := p.now()
 	p.next = now.Add(p.interval)
 	p.count = max(p.fetch(), 0)
 	return p.count
@@ -101,10 +98,14 @@ func (p *feedPoller) clear() {
 // viewDynamicDot 是顶栏上的「动态」那一格：有新动态时右上角一个圆点。
 func (s *Shell) viewDynamicDot(c *ui.Context) {
 	t := c.Theme()
-	count := s.feed.tick()
+	count := s.feed.tick(s.clock)
 
-	// Biu 只在登录后摆这一格（`navbar/index.tsx:38`）。这一版还没有登录，
-	// 但红点接口本身不需要登录态，摆在明面上更早能看见它在动。
+	// Biu 只在登录后摆这一格（`navbar/index.tsx:38` 的 `{Boolean(user?.isLogin) && ...}`）。
+	// 这里**没按登录态隐藏**——和头像下拉那六项同一个理由（见 navbar_avatar.go
+	// 文件头）：菜单/顶栏的形状不随登录态变来变去。而且红点这一格不点它也只
+	// 是一次轮询，没登录时轮回来的是 0，红点自然不亮。
+	//
+	// 代价说清楚：登录之后这一格还在，而 Biu 那时候已经把它藏了。
 	ui.Row(c).Key("nav-feed").Gap(4).AlignItems(ui.Start).Children(func() {
 		ui.Column(c).Key("nav-feed-btn").Children(func() {
 			if ui.Button(c, "动态").FontSize(13).Clicked() {

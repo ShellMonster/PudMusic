@@ -20,9 +20,14 @@ import (
 
 // sampleAt 是页面区域里一个点的坐标：侧栏（200 宽）右边、导航栏下面、播放条
 // 上面。那里画的是窗口底色，也就是当前主题的 Background。
+//
+// ⚠️ 取的是页面区域里**空着**的那一块，不是页面中间。页面中间是空状态那两行
+// 文字（y≈265~315，居中），而文字是逐帧排的：采到它上面，这一帧读到的是
+// 抗锯齿的灰，下一帧可能读到白，同一条测试时而红时而绿。y=430 在那块下面、
+// 播放条上面，哪一页都不会画到。
 const (
 	sampleX = 700
-	sampleY = 300
+	sampleY = 430
 )
 
 // shellWithSettings 造一个「真 App + 盘上真有那份设置 + 真 Shell」，返回设置
@@ -53,6 +58,15 @@ func shellWithSettings(t *testing.T, mode app.ThemeMode, systemDark bool) (*mygo
 	})
 
 	s := New(a)
+	// 🔴 关掉切页动画，否则这个文件里的像素断言是随机的。
+	//
+	// Router 默认 TransitionAuto：切页是 250ms 的滑动，而 Tester 一帧就画完，
+	// 那一帧永远停在半路——上一页正往左挪、下一页正往右进，中间那道竖直的
+	// 分界线正好扫过页面区域。于是「点一下再读 (700,430) 那个点」这一次读到
+	// 底色、下一次读到分界线，实测八次里挂两次。
+	//
+	// 这个文件验的是主题，不是切页动画，动画在这里只会添乱。
+	s.router.Transition = mygoui.TransitionNone
 	tt := mygoui.NewTester(s.View, 900, 600)
 	tt.SetDark(systemDark)
 	tt.Frame()
@@ -143,7 +157,7 @@ func TestShellKeepsTheThemeAfterClickingAround(t *testing.T) {
 		tt.Frame()
 		assertBackground(t, tt, wantBackground(t, a, true), "点别的地方之后（第 "+string(rune('1'+i))+" 次）")
 	}
-	if !tt.HasText("这一页还没做") {
+	if !tt.HasText(lookup("/later").Empty.Title) {
 		t.Errorf("顺带验一下按钮确实点得动，文字有 %q", tt.Texts())
 	}
 
@@ -288,31 +302,31 @@ const settleStill = 0.25
 // 窗口外面，或者整页还在往右滑。`tt.Click` 自己走不完——它只跑到没人再要新帧
 // 为止，那一刻动画才刚开始。
 //
-// 判据两条，缺一条都不算走完：
-//   - 正在离开的那一页不在画面上了（占位页那句「这一页还没做」没了）；
-//   - 设置页的框连着两帧不动了。
+// **造外壳的那几个函数已经把动画关掉了**（newShell / shellWithSettings /
+// shellOnSettings 里都是 `s.router.Transition = TransitionNone`）：Tester 一帧
+// 画完，250ms 的动画在里面永远走不完，留着它只会让「读到的是哪一帧」变成随机
+// 的——实测同一个点这次读到窗口底色、下次读到滑动中的分界线。
 //
-// 只判第一条不够：那一页还在画面里，控件也可能已经有尺寸了（只是还在滑），
-// 这时候按下去正好按空。只判第二条也不够：还没走完时它当然还在动，可一旦它
-// 恰好停在某一帧上，两帧也会一样。不数帧数：动画多长是框架的事，这里不猜。
+// 这一段留着当兜底：万一哪天某个外壳忘了关，这里还能等它停下来（**连着三帧
+// 不动**才算停——两帧不够：动画停在某一帧上时两帧当然一样）。
 func settleSettingsPage(t *testing.T, tt *mygoui.Tester) {
 	t.Helper()
 	const maxFrames = 60 // 上限。真的停不下来时该报错，不该让它慢慢磨。
-	prev, seen := mygoui.Rect{}, false
+	prev, seen, still := mygoui.Rect{}, false, 0
 	for range maxFrames {
 		tt.Frame()
-		// 还在切换，或者这一帧没画出设置页：重新开始数。
-		if tt.HasText("这一页还没做") {
-			prev, seen = mygoui.Rect{}, false
-			continue
-		}
 		cur, ok := tt.Find("外观")
 		if !ok {
-			prev, seen = mygoui.Rect{}, false
+			prev, seen, still = mygoui.Rect{}, false, 0
 			continue
 		}
 		if seen && sameSpot(cur, prev) {
-			return
+			still++
+			if still >= 2 {
+				return // 连着三帧不动：停了
+			}
+		} else {
+			still = 0
 		}
 		prev, seen = cur, true
 	}

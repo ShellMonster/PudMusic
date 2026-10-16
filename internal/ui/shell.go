@@ -7,6 +7,7 @@ import (
 	"log"
 	"runtime/debug"
 	"sync"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
@@ -29,6 +30,24 @@ type Shell struct {
 
 	// router 是 Biu 那 14 条路由的调度，带前进/后退历史。
 	router *ui.Router
+
+	// clock 是界面层等东西用的时钟（clock.go）。测试会换成假的，于是「404 页
+	// 3 秒后回首页」不用真睡 3 秒。
+	clock clockSource
+
+	// shownPath 是上一帧画的是哪一页，syncRoute 拿它认出「换页了」。
+	shownPath string
+
+	// searchDraft 是搜索框里正在敲的字。放在壳上而不是页面的局部变量：即时模式
+	// 每一帧都重画一遍，局部变量下一帧就没了（只有 view 里显式声明并被元素
+	// 认下的状态才留得住）。
+	searchDraft string
+
+	// notFoundAt 是进 404 的那一刻，notFoundStop 是那个每秒一跳的倒计时。
+	// 两者都只由主线程读写（syncRoute 在主线程），后台那一跳只调
+	// wakeHandle.invalidate，所以不违反铁律一、也没有竞态。
+	notFoundAt   time.Time
+	notFoundStop func()
 
 	// pageBody 是画页面内容的那一支。单独拎出来是为了能替掉它测崩溃
 	// （铁律四的验收点：页面里 panic，进程不能崩）。
@@ -80,7 +99,11 @@ type Shell struct {
 	//
 	// searchFocused 是搜索框有没有焦点，顶栏用它染边框。浮层**不**靠它开
 	// （见 navbar_search.go 里那一段：焦点被 MyGo 还回来是个假信号）。
-	searchQuery   string
+	//
+	// ⚠️ 叫 searchKeyword 不叫 searchQuery：包级已经有一个 `searchQuery` 了
+	//（searchpage.go 的「URL 里搜索词那个键」，值是 "q"），两样东西没有关系，
+	// 同名却不同义最容易读错。
+	searchKeyword string
 	searchSuggest bool
 	searchFocused bool
 	// feed 是「动态更新红点」的 5 分钟节奏。假时钟在 navbar_feed.go。
@@ -140,12 +163,17 @@ func New(a *app.App) *Shell {
 	s := &Shell{
 		app:       a,
 		router:    ui.NewRouter("/"),
+		clock:     realClock{},
 		images:    imgcache.New(imgcache.Options{}),
 		autostart: systemAutoStart{},
 	}
 	s.images.AddWake(s.wake.invalidate)
 	s.hist = newSearchHistory("")
 	s.feed = newFeedPoller(dynamicFeedInterval, nil)
+	// pageBody 是画页面内容的那一支：404 兜底 + 已经有内容的页（设置页）+ 每条
+	// 路由自己的空状态，三样拼在 pageContent 里（router.go）。
+	// sideBody 是侧栏那一支，搬去 sidebar.go 之后从那儿接进来。
+	// navBody 是顶栏那一支，搬去 navbar.go 之后从那儿接进来。
 	s.pageBody = s.pageContent
 	s.sideBody = s.viewSide
 	s.navBody = s.viewNav
@@ -181,6 +209,13 @@ func (s *Shell) Attach(w *mygo.Window) {
 		if s.win == w {
 			s.win = nil
 		}
+		// 收掉 404 那个每秒一跳的定时器。窗口真关了之后 `Invalidate` 对它是
+		// no-op，留着不致命，但它会一直每秒钟醒一次到进程退出。
+		//
+		// ⚠️ 放这儿而不是 OnClose：选「隐藏到托盘」时 OnClosed 压根不跑（窗口
+		// 只是收起来了，应用还活着），那时候倒计时该继续走——用户把窗口叫回来
+		// 时本来就该看到已经回首页的样子，不是还停在一个倒计时的 404 上。
+		s.disarmNotFound()
 		s.images.Close()
 		s.app.Close()
 		// 关窗就收尾设置：停掉后台写盘，并把还欠着的改动同步落完。

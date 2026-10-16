@@ -59,29 +59,6 @@ var closeWindowOptions = []struct {
 // 路由分派
 // ─────────────────────────────────────────────────────────────────────────────
 
-// pageContent 画一页的内容：做了的走自己的画法，还没做的走占位页。
-//
-// 分派放在本包而不是 router.go 那个 switch 里：那里这一阶段别的分支正在改，
-// 而「这一页已经不是占位页了」是界面层自己的事。
-func (s *Shell) pageContent(c *ui.Context, r *ui.Route, rt Route) {
-	if body := s.builtPage(rt); body != nil {
-		body(c, r)
-		return
-	}
-	s.placeholder(c, r, rt)
-}
-
-// builtPage 是「这一页已经有内容了」的路由和画法；还没做就返回 nil。
-//
-// router.go 的 navigate 用它判断该不该弹「这一页还没做」——弹给一个真做了的
-// 页面，是在说一件假事。
-func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
-	if rt.Match == settingsPath {
-		return s.viewSettings
-	}
-	return nil
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 页面
 // ─────────────────────────────────────────────────────────────────────────────

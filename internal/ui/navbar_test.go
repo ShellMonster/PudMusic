@@ -62,16 +62,35 @@ func newLoggedInShell(t *testing.T, mid string) (*Shell, *mygoui.Tester) {
 	return s, mygoui.NewTester(s.View, 1200, 800)
 }
 
-// loginPath 是扫码登录那一页的路由。
+// 扫码登录那一页的路由用 login.go 里那个 loginPath，这里不另立一份。
+
+// Biu 的 `pollingInterval: 300000`（`navbar/user-feed/index.tsx:24`）。
 //
-// 拿字符串比而不是拿表里的下标：那条表一改顺序这里跟着错，而且错得很安静。
-const loginPath = "/login"
+// ⚠️ **这里写死 5 分钟，不引用 `dynamicFeedInterval`**：用那边常量算期望的话，
+// 常量一改，步进和期望一起变，测试照样绿——「把间隔改成 4 分钟」这种改动就发现
+// 不了了。这个仓库在封面那条（playbar 的 Biu 尺寸）上踩过同一个坑。
+const wantFeedInterval = 5 * time.Minute
 
 // fakeClockStart 是那只假表从哪儿起算。
 //
 // 挑一个整点：这一组断言里出现的时刻全都能手算出来，看日志时不用去猜
 // 「0 基点是哪一刻」。
+//
+// 用的是界面层那一个假时钟（clock.go 的 fakeClock），不是另做一只——红点那个
+// 节奏走的就是 `Shell.clock`，换上别的表等于没换（见 navbar_feed.go 文件头）。
 var fakeClockStart = time.Date(2026, time.October, 16, 9, 0, 0, 0, time.UTC)
+
+// fakeClockOn 把这只假表装到外壳上。
+//
+// `next` 拨回零值：造外壳的时候已经画过一帧，那一帧走的是真时钟，它已经把
+// 「下一次该轮的时刻」推到 5 分钟之后了。拨回零值，下面第一帧才是干净的
+// 「挂上就该先问一次」。
+func fakeClockOn(s *Shell, t time.Time) *fakeClock {
+	c := newFakeClock(t)
+	s.clock = c
+	s.feed.next = time.Time{}
+	return c
+}
 
 // TestNavBarSpansTheTopOfTheWindow 验顶栏真的横贯窗口顶上的一条。
 //
@@ -219,7 +238,7 @@ func TestSuggestCollapsesOnEscape(t *testing.T) {
 	if tt.HasText("搜索历史") {
 		t.Errorf("浮层还在画面上，文字有 %q", tt.Texts())
 	}
-	if got := s.searchQuery; got != "周" {
+	if got := s.searchKeyword; got != "周" {
 		t.Errorf("按 Esc 把字也清了，搜索框里是 %q，want 周", got)
 	}
 }
@@ -441,13 +460,9 @@ func TestDynamicDotPollsEveryFiveMinutes(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
 
-	now := fakeClockStart
+	clock := fakeClockOn(s, fakeClockStart)
 	polls := 0
-	s.feed.now = func() time.Time { return now }
 	s.feed.fetch = func() int { polls++; return 0 }
-	// newShell 建出来的时候已经画过一帧了，那一帧用的是真时钟。把「下一次该
-	// 轮的时刻」拨回零值，下面第一帧才是干净的「挂上就该先问一次」。
-	s.feed.next = time.Time{}
 
 	tt.Frame()
 	if polls != 1 {
@@ -455,22 +470,25 @@ func TestDynamicDotPollsEveryFiveMinutes(t *testing.T) {
 	}
 
 	// 还没到点：走多少帧都不该轮。
-	now = fakeClockStart.Add(dynamicFeedInterval - time.Millisecond)
+	clock.Advance(wantFeedInterval - time.Millisecond)
 	tt.Frame()
 	tt.Frame()
 	if polls != 1 {
 		t.Fatalf("离 5 分钟还差 1ms 就已经轮了 %d 次，want 1", polls)
 	}
+	if got := dynamicFeedInterval; got != wantFeedInterval {
+		t.Fatalf("轮询间隔是 %v，Biu 的 pollingInterval: 300000 是 %v", got, wantFeedInterval)
+	}
 
 	// 到点：轮一次。
-	now = fakeClockStart.Add(dynamicFeedInterval)
+	clock.Advance(time.Millisecond)
 	tt.Frame()
 	if polls != 2 {
 		t.Fatalf("到 5 分钟轮了 %d 次，want 2", polls)
 	}
 
 	// 再一个周期：又一次，而且只有一次。
-	now = fakeClockStart.Add(2 * dynamicFeedInterval)
+	clock.Advance(wantFeedInterval)
 	tt.Frame()
 	tt.Frame()
 	if polls != 3 {
@@ -483,10 +501,8 @@ func TestDynamicDotShowsAndClears(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
 
-	now := fakeClockStart
-	s.feed.now = func() time.Time { return now }
+	clock := fakeClockOn(s, fakeClockStart)
 	s.feed.fetch = func() int { return 3 }
-	s.feed.next = time.Time{}
 
 	tt.Frame()
 	if !tt.HasText("3 条新动态") {
@@ -504,7 +520,7 @@ func TestDynamicDotShowsAndClears(t *testing.T) {
 	}
 
 	// 下一个 5 分钟再拉一次，还是 3 条：红点会再出来。
-	now = now.Add(dynamicFeedInterval)
+	clock.Advance(wantFeedInterval)
 	tt.Frame()
 	if !tt.HasText("3 条新动态") {
 		t.Errorf("下一轮之后红点没回来，文字有 %q", tt.Texts())
@@ -523,8 +539,8 @@ func TestSearchClearButtonEmptiesTheField(t *testing.T) {
 
 	tt.Click(searchLabel)
 	tt.Type("周")
-	if s.searchQuery != "周" {
-		t.Fatalf("没敲进去，搜索框里是 %q", s.searchQuery)
+	if s.searchKeyword != "周" {
+		t.Fatalf("没敲进去，搜索框里是 %q", s.searchKeyword)
 	}
 	if _, ok := tt.Find("清空"); !ok {
 		t.Fatalf("敲了字却没有「清空」，文字有 %q", tt.Texts())
@@ -533,8 +549,8 @@ func TestSearchClearButtonEmptiesTheField(t *testing.T) {
 	if err := tt.Click("清空"); err != nil {
 		t.Fatalf("点不到「清空」：%v，文字有 %q", err, tt.Texts())
 	}
-	if s.searchQuery != "" {
-		t.Errorf("清空之后搜索框里还有 %q", s.searchQuery)
+	if s.searchKeyword != "" {
+		t.Errorf("清空之后搜索框里还有 %q", s.searchKeyword)
 	}
 	// 「清空」这个按钮只在框里有字的时候才画（`viewSearch` 里那一支）。它没了
 	// 就是框里空了——输入框画出来的字是 bound value 驱动的（`ui/textinput.go:53`：

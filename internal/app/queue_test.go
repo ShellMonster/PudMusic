@@ -121,6 +121,82 @@ func TestEnqueueFirstStartsPlayingAndRestJustWaits(t *testing.T) {
 	}
 }
 
+// TestPlayFromSwapsTheQueueAndStartsAtTheFirst 是列表里「播放」那一项接的那条路
+// （widgets/list 的 Actions.Play）：换掉整个队列，从第一首开始播。
+//
+// 跟 Enqueue 的差要钉住：Enqueue 是往队尾追加（点「加歌」），PlayFrom 是换掉
+// 整个队列（点「播放」）。分不清的话，用户点了一首歌之后队列里多出来的还是
+// 原来那一整张列表。
+func TestPlayFromSwapsTheQueueAndStartsAtTheFirst(t *testing.T) {
+	a := newApp(t)
+	paths := copies(t, 3)
+
+	a.Enqueue(items(paths...)...)
+	if err := a.PlayFrom(items(paths[1], paths[2])...); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, "第一首开始播", func() bool { return a.Snapshot().Title == "b" })
+
+	got := a.Queue().Items()
+	if len(got) != 2 {
+		t.Fatalf("队列里有 %d 首，want 2（a 被换掉了）", len(got))
+	}
+	if got[0].Path != paths[1] || got[1].Path != paths[2] {
+		t.Errorf("队列里是 %q / %q，want b / c", got[0].Path, got[1].Path)
+	}
+}
+
+// TestPlayFromWithNothingToPlayLeavesTheQueueAlone 验给空是「什么都不做」，
+// 不是「清空队列」。
+//
+// 清空是 Queue.Reset() 的事，两者混在一起的表现最难查：调用方给不出东西时，
+// 用户的队列悄悄没了，正在放的那首还在响，播放条和队列对不上，而调用方拿到的是
+// nil（成功）。
+func TestPlayFromWithNothingToPlayLeavesTheQueueAlone(t *testing.T) {
+	a := newApp(t)
+	paths := copies(t, 3)
+	a.Enqueue(items(paths...)...)
+	a.Next()
+	waitFor(t, 2*time.Second, "换到第二首", func() bool { return a.Snapshot().Title == "b" })
+
+	if err := a.PlayFrom(); err != nil {
+		t.Fatalf("PlayFrom()：%v", err)
+	}
+
+	got := a.Queue().Items()
+	if len(got) != 3 {
+		t.Fatalf("给空之后队列里有 %d 首，want 还是原来那 3 首", len(got))
+	}
+	if title := a.Snapshot().Title; title != "b" {
+		t.Errorf("给空之后播放条变成了 %q，want 还是 b", title)
+	}
+}
+
+// TestPlayFromKeepsTheQueueWhenTheFirstSongWillNotPlay 验打不开的歌不该把用户
+// 原来的队列弄丢。
+//
+// 表现上就是「按了一首放不了的歌，队列和播放条还停在原来那一首」：队列被换掉
+// 了、播放条却还是旧的，两者对不上（和 step 里同一个道理）。
+func TestPlayFromKeepsTheQueueWhenTheFirstSongWillNotPlay(t *testing.T) {
+	a := newApp(t)
+	paths := copies(t, 2)
+	a.Enqueue(items(paths...)...)
+
+	missing := app.Item{Source: "local", Path: filepath.Join(t.TempDir(), "没有这个文件.flac")}
+	if err := a.PlayFrom(missing); err == nil {
+		t.Fatal("放一首打不开的歌居然没报错")
+	}
+
+	got := a.Queue().Items()
+	if len(got) != 2 || got[0].Path != paths[0] || got[1].Path != paths[1] {
+		t.Fatalf("打不开之后队列变成了 %+v，want 原来那两首", got)
+	}
+	// 当前项也得换回去：播放条停在 a，队列的当前项就该是 a。
+	if cur, ok := a.Queue().Current(); !ok || cur.Path != paths[0] {
+		t.Errorf("当前项是 %q，want %q（播放条和队列对不上）", cur.Path, paths[0])
+	}
+}
+
 func TestNextAndPrevWalkTheQueue(t *testing.T) {
 	a := newApp(t)
 	paths := copies(t, 3)

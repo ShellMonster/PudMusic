@@ -1,0 +1,286 @@
+// Package list 是所有内容页的底座：一个虚拟列表、音乐卡片，和它们的右键菜单。
+//
+// 首页、收藏夹、搜索结果、UP 空间、稍后再看全都建在它上面。所以这里最要紧的
+// 不是画得好不好看，是下面两条约定：
+//
+//   - 🔴 铁律四（界面状态管理四条铁律的第 4 条）：**行的身份是 Music.ID，
+//     不是序号**。MyGo 默认拿「父 ID + 兄弟序号」当身份，在前面插入一行会让
+//     后面所有行的状态整体错配——实测：头部插入后，不带 key 的列表选中项会
+//     变成旁边另一首。`ListState.Key` 就是为这件事存在的，本包每一帧都按 ID
+//     装它（见 View），并且有一条测试钉住它。
+//
+//   - 🔴 铁律二（`SetTheme` 每帧在 view 开头调）：**本包一次都不调
+//     `SetTheme`**。主题由页面在每一帧开头装好（`internal/ui.ApplyTheme`），
+//     放到切换按钮回调里只调一次会被 MyGo 在帧开头静默重置掉。这里一律用
+//     `c.Theme()` 读当前这一帧的那份。
+//
+// 虚拟滚动和变高行**不用自己写**：`ui.List` 只建看得见的那几行（两头各多两行，
+// `mygo/ui/list.go` 的 listOverscan），行高按实际量出来、还没量到的按量过的
+// 平均值估（同一处的 listHeights）。本包要做的只是**别把行高写死**——见
+// card.go 里标题为什么折行而不是截断。
+//
+// ⚠️ 本包不认识 app.App 之外的世界，也不碰网络：封面走 imgcache，音乐条目是
+// 调用方给的 Music，操作走 Actions（接在哪儿见 actions.go）。
+//
+// `AppActions` 和 `BiliLink` 现在还没有调用方，这是有意的：挂这个列表的是
+// PLAN.md 阶段 5 的那 14 个内容页，那一张做出来时直接用它，别再写一份接线。
+package list
+
+import (
+	"fmt"
+	"log"
+	"runtime/debug"
+	"strconv"
+	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/egoist/mygo/ui"
+)
+
+// Music 是列表里的一首歌：这一行要显示的，和操作要用的。
+//
+// 字段照 Biu 的 `src/components/music-list-item/index.tsx` 那一行取：
+// 封面、标题、UP 名，外加列表里定位一首歌要用的标识。Biu 那行还有播放量和
+// 投稿时间两列，这里没画——它们要 B 站接口的数据才有值（本地音乐没有这两个），
+// 空着画一列是给用户看一片空白。等接了 B 站再加，别提前画。
+type Music struct {
+	// ID 是这一行的身份，**必须稳定且唯一**。
+	//
+	// 🔴 铁律四：填这一首歌自己的 ID（B 站的 bvid / sid、本地文件的完整
+	// 路径），**不要填序号**。序号是「父 ID + 兄弟序号」那一套，在前面插一行
+	// 会让后面所有行的状态整体错配。
+	//
+	// ID 变了就是另一首歌了（换了个来源），这是有意的：界面要保住的是
+	// 「用户选中的那一首」，不是「第几行」。
+	//
+	// 重复的 ID 在 Tester 里当场 panic 并报出代码行号（`ui/diagnostics.go`），
+	// 真窗口里则是一首歌两行的状态串在一起。宁可崩也不要静默串行。
+	ID string
+
+	// Title 是歌名。一行摆不下时折到第二行（Biu 的 `line-clamp-2`），
+	// 这是本列表行高会变的唯一原因，见 card.go。
+	Title string
+
+	// Cover 是封面地址。**空串是「没有封面」，不是「加载失败」**——imgcache
+	// 的 drawCover 里这是分开的两支。本地文件永远是空的：Biu 上游也不读音频
+	// 里内嵌的图。
+	Cover string
+
+	// Owner 是 UP 名。空串时那一行不画它。
+	Owner string
+
+	// Duration 是时长，零值时那一列不画。本地文件要扫过才有值。
+	Duration time.Duration
+
+	// Item 是播放和右键菜单真正用的那一项。B 站的歌以后由接口填，
+	// 现在先有本地文件（app.LocalItem）。
+	Item app.Item
+}
+
+// List 是一个虚拟列表：几千行也只建看得见的那几行。
+//
+// **建一次，存进页面自己的状态里，每一帧调 View。不要每一帧新建一个**：
+// `ui.ListState` 记着滚动位置和选中项，新建的等于每帧都跳回顶上（而且框架
+// 会因为「同一个 ListState 被两个 List 显示」而 panic，`ui/list.go` 的
+// buildList）。
+type List struct {
+	songs []Music
+	state ui.ListState
+
+	// sel 是选中的行，-1 是没选。帧里的点击由 ui.List 自己写进来。
+	sel int
+
+	// cache 是封面缓存。整个窗口共用一个，壳（Shell）建好之后传进来。
+	cache *imgcache.Cache
+
+	// acts 是这个列表会做的操作，见 actions.go。
+	acts Actions
+
+	// failed 是画崩了的行（按 ID 记），下一帧不重试。
+	//
+	// 为什么要记：MyGo 的事件循环没有 recover，行里一个 panic 会一路穿出去
+	// 把整个进程带走（本包自己 recover 住，见 viewRow）。不记的话这一行
+	// 每帧崩一次，日志被刷爆、帧率拖垮——比画不出来糟得多。
+	failed map[string]bool
+}
+
+// New 建一个列表。
+//
+// cache 是封面缓存（整个窗口共用一个），acts 是操作。两者都要传：封面走
+// imgcache.View，操作走右键菜单和双击，缺一个这个列表就只能看不能动。
+//
+// ⚠️ cache 不能是 nil：imgcache.View 一拿到非空的封面地址就在它上面取状态，
+// nil 会让**带封面的每一行**画不出来（每行各 recover 一次并记一行日志）。
+// 没有封面的行照画（imgcache 对空地址早返回），所以看到「一部分行挂了、一部分
+// 好好的」就是这个原因。
+func New(cache *imgcache.Cache, acts Actions) *List {
+	return &List{cache: cache, acts: acts, sel: -1}
+}
+
+// SetSongs 换掉列表里的歌。
+//
+// 🔴 换完之后行身份跟着 ID 走：原来选中的那一首，选的还是它（见
+// TestInsertingARowAtTheHeadKeepsTheChosenSong）。这里直接接管调用方给的
+// 切片，不复制——调用方要换就整份换新，别在画着的时候改它。
+//
+// ⚠️ 只能由界面线程调（就是跑 view 的那个线程）：它改的正是 view 每帧读的
+// 那份状态。
+func (l *List) SetSongs(songs []Music) {
+	l.songs = songs
+	l.warnDuplicateIDs(songs)
+}
+
+// warnDuplicateIDs 把重复的行标识指出来。
+//
+// ⚠️ 重复 ID 的后果在**真窗口里是静默的**：MyGo 的 Tester 会当场 panic 并报出
+// 代码行号（`ui/diagnostics.go`），真窗口里它只打一行日志，然后那几行**共用
+// 一份状态**——选中一个，另一个也亮着。铁律四要的正好是反过来。
+//
+// 这里只说不动：偷偷改掉某一行的 ID，界面上画的那首和调用方拿到的那首就对不上
+// 了，那比报错更难查。要改就改 Music.ID，让它真的唯一。
+func (l *List) warnDuplicateIDs(songs []Music) {
+	seen := make(map[string]struct{}, len(songs))
+	for _, m := range songs {
+		if _, dup := seen[m.ID]; dup {
+			log.Printf("biu: 列表里有几行用了同一个 ID（%q），它们的选中状态会串在一起", m.ID)
+		}
+		seen[m.ID] = struct{}{}
+	}
+}
+
+// ScrollTo 把列表滚到第 row 行，align 是 ui.Start（顶上）、ui.Center（中间）
+// 或 ui.End（底下）。
+//
+// 页面要它做两件事：换路由回来时回到原位，以及 PLAN 4.1 里那个「滚了 400 像素
+// 才出现的回顶按钮」。
+//
+// ⚠️ 只能由界面线程调（就是跑 view 的那个线程），并且**要连着几帧**看效果：
+// 列表是在布局时才滚过去的，而行高是量出来的，量完才知道那一条落在哪儿。
+func (l *List) ScrollTo(row int, align ui.Align) { l.state.ScrollTo(row, align) }
+
+// Selected 返回选中的那首，没有选中是 ok=false。
+//
+// 返回的是**歌**不是序号：序号在插一行之后就指另一首了，调用方拿着它去干什么
+// 都是错的（这就是铁律四）。
+func (l *List) Selected() (Music, bool) {
+	if l.sel < 0 || l.sel >= len(l.songs) {
+		return Music{}, false
+	}
+	return l.songs[l.sel], true
+}
+
+// View 画这个列表。页面在每一帧开头调一次。
+//
+// 列表自己占了 Grow(1)：**调用方要给它一块地方**，把它放进一个 Grow(1) 的
+// Column（纵向页面）或一个 Grow(1) 配 FillHeight 的 Row（旁边还有东西的页面）里。
+// 直接摆在根上不给高度的话，它会按自己的行数去要高度，几千行直接撑爆窗口。
+func (l *List) View(c *ui.Context) {
+	// 🔴 铁律四：这一行是整个包存在的理由。Key 每一帧都重装，装的是 ID。
+	//
+	// 为什么不装在 New 里：Key 是一个闭包，闭包捕获的是 l.songs 这一个切片
+	// 变量而不是当时的内容，换歌之后它照样读得到新的——所以**装一次就够**，
+	// 这里每帧重装是为了让「忘了装」这件事不可能发生：漏了的话
+	// TestInsertingARowAtTheHeadKeepsTheChosenSong 会红。
+	//
+	// ⚠️ 别改成序号：那正是实测踩过的坑（头部插入后选中项变成旁边另一首）。
+	l.state.Key = func(i int) any { return l.songs[i].ID }
+	// Label 是这一行给无障碍和「打字选中」用的名字。
+	l.state.Label = func(i int) string { return l.songs[i].Title }
+	// Selected 让点击能选中一行（画成主色），双击提交。
+	l.state.Selected = &l.sel
+
+	ui.List(c, &l.state, len(l.songs)).
+		Grow(1).
+		FillWidth().
+		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击：
+		// `biu/src/components/music-list-item/index.tsx`）。
+		OnSubmit(func() { l.playFrom(l.sel) }).
+		// 没有歌时列表是空的，Children 里那一支就是它的空状态。
+		Children(func() {
+			if len(l.songs) == 0 {
+				ui.Text(c, "这里还没有歌").FontSize(13).
+					TextColor(c.Theme().TextMuted).Padding(16)
+			}
+		}).
+		Rows(func(r ui.ListRow) { l.viewRow(r) })
+}
+
+// viewRow 画一行。
+//
+// 🔴 行里 panic 会一路穿出 Cocoa 事件循环把整个进程带走（框架的 Dispatch 和
+// drain 都没有 recover）。所以每一行自己兜一层，**只废掉这一行**：
+//
+//   - 界面上是「几千行里坏一行」，不是整页变成错误页——页级的 `internal/ui.Guard`
+//     兜的是整棵树，那是另一回事，两者不重复。
+//   - recover 是在 build 中间接住的，MyGo 下一遍会从头重建一次，所以这一帧
+//     剩下的部分照常画得出来，不用整帧作废。
+//
+// 崩过的行记进 failed，不再重试：否则同一行每一帧崩一次，日志被刷爆、帧率
+// 拖垮，比「这一行画不出来」糟得多。
+func (l *List) viewRow(r ui.ListRow) {
+	c, i := r.Context, r.Index
+	m := l.songs[i]
+
+	if l.failed[m.ID] {
+		ui.Text(c, "这一行画不出来").FontSize(13).TextColor(c.Theme().TextMuted).
+			Padding(cardPadY, cardPadX).MaxLines(1)
+		return
+	}
+
+	defer func() {
+		if rec := recover(); rec != nil {
+			if l.failed == nil {
+				l.failed = map[string]bool{}
+			}
+			l.failed[m.ID] = true
+			log.Printf("biu: 列表行画崩了（%s）：%v\n%s", m.ID, rec, debug.Stack())
+		}
+	}()
+
+	l.viewCard(r)
+}
+
+// playFrom 从第 i 首往后接进队列并开始播。
+//
+// 给的是**从这一首起的全部**，和 Biu 的「在 B 站打开这一首从这儿听」一致：
+// 点了一首，接下来的队列就应该是它和它后面那些，不是整个歌单从头。
+// i 不在范围里是什么都不做——双击事件偶尔会落在已经被换掉的那一帧上。
+func (l *List) playFrom(i int) {
+	if i < 0 || i >= len(l.songs) {
+		return
+	}
+	items := make([]app.Item, len(l.songs)-i)
+	for k := i; k < len(l.songs); k++ {
+		items[k-i] = l.songs[k].Item
+	}
+	if l.acts.Play != nil {
+		l.acts.Play(items)
+	}
+}
+
+// notify 说一句话。给还没接上的操作用：按了没反应最难解释，说一句就好解释。
+func (l *List) notify(text string) {
+	if l.acts.Notify != nil {
+		l.acts.Notify(text)
+	}
+}
+
+// indexText 是这一行前面那个序号。Biu 是 1 起的（`#` 列）。
+func indexText(i int) string { return strconv.Itoa(i + 1) }
+
+// formatDuration 是时长那一列的字。Biu 用 `tabular-nums`，所以宽度要定住，
+// 不然 3:05 和 10:05 两列会左右跳。
+//
+// 超过一小时带小时（Biu 的 formatDuration 一样）：不写的话一小时的歌会显示成
+// 「61:30」，用户得在心里换算一次才知道那是多长。
+func formatDuration(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	s := int(d.Round(time.Second).Seconds())
+	if h := s / 3600; h > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", h, s/60%60, s%60)
+	}
+	return fmt.Sprintf("%d:%02d", s/60, s%60)
+}

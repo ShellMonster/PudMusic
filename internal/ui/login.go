@@ -36,17 +36,8 @@ import (
 // 原因见那个函数的注释。
 const qrSide = 200
 
-// loginPage 是登录页外面那层页面级的 recover。
-//
-// **不能复用 `s.page`**：那个走的是 `pageBody`，而 `pageBody` 是整个
-// Shell 共用的一个函数指针（默认是占位页）。为了登录页改它，
-// 等于把**所有**路由的画法都换掉。
-func (s *Shell) loginPage(c *ui.Context, r *ui.Route, rt Route) {
-	Guard(func(c *ui.Context) {
-		r.Title(rt.Title)
-		s.viewLogin(c, r, rt)
-	}, s.onPanic)(c)
-}
+// loginPath 是登录页那条路由，和 routes 表里登记的是同一个字符串。
+const loginPath = "/login"
 
 // goLogin 切到登录页。
 //
@@ -65,12 +56,12 @@ func (s *Shell) goLogin() {
 //
 // 外面套一层 Scroll：窗口矮的时候（尤其是缩到最小高度）内容会比这一页高。
 // 不套的话最后那排按钮会掉到播放条底下去——界面上还看得见，但**点不到**。
-func (s *Shell) viewLogin(c *ui.Context, r *ui.Route, rt Route) {
+func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 	t := c.Theme()
 	st := s.app.LoginState()
 
 	ui.Scroll(c).Key("login-scroll").Grow(1).Children(func() {
-		ui.Column(c).Key("page:" + rt.Match).Grow(1).Padding(20).Gap(12).
+		ui.Column(c).Key("page:" + loginPath).Grow(1).Padding(20).Gap(12).
 			AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "扫码登录").FontSize(22).Bold()
 

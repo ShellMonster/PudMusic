@@ -60,14 +60,14 @@ const (
 	searchHeight = 28
 )
 
-// searchPath 是搜索页那条路由，和 router.go 里登记的是同一个字符串。
-//
-// 拿字符串比而不是拿 `routes[7]`：那条表一改顺序这里跟着错，而且错得很安静——
-// 搜索框提交之后停在首页，看不出任何异样。
-const searchPath = "/search"
+// 搜索页那条路由是 `searchPath`（在 searchpage.go 里），这里直接用它，不另立一份
+// 常量：两条路由同一个字符串，两个定义迟早会分家。
 
-// viewSearch 是顶栏上的搜索框 + 建议浮层。
-func (s *Shell) viewSearch(c *ui.Context) {
+// viewSearchBox 是顶栏上的搜索框 + 建议浮层。
+//
+// ⚠️ 名字里的 Box 不能省：searchpage.go 有一个 `viewSearch`，那是**搜索页**
+// （一个页面 view，签名都差一个 `*ui.Route`）。顶栏这个是框，页面那个是页。
+func (s *Shell) viewSearchBox(c *ui.Context) {
 	t := c.Theme()
 	// 焦点在输入框上时把边框染成主色（Biu 是 `group-data-[focus=true]`）。
 	// 读的是**上一帧**的 searchFocused——边框样式跟在这一帧的判断后面走，
@@ -84,7 +84,7 @@ func (s *Shell) viewSearch(c *ui.Context) {
 
 		// ⚠️ **不许给输入框加 Key**：Key 只能挂在「创建时没有处理输入」的控件上，
 		// 挂上去直接 panic（`ui/element.go:537`）。外面这一格有 Key 就够了。
-		field := ui.TextInputBase(c, &s.searchQuery).
+		field := ui.TextInputBase(c, &s.searchKeyword).
 			Label(searchLabel).Placeholder(searchLabel).
 			Grow(1).Shrink(0)
 
@@ -132,10 +132,10 @@ func (s *Shell) viewSearch(c *ui.Context) {
 
 		// 回车 = 拿这个词去搜。Biu 的 submitSearch。
 		if field.Submitted() {
-			s.submitSearch(s.searchQuery)
+			s.submitSearch(s.searchKeyword)
 		}
 
-		if s.searchQuery != "" {
+		if s.searchKeyword != "" {
 			s.viewSearchClear(c)
 		}
 		s.viewSuggest(c, field)
@@ -236,7 +236,7 @@ func (s *Shell) submitSearch(keyword string) {
 // 它在浮层**外面**，所以点它落不到面板里的任何东西上。
 func (s *Shell) viewSearchClear(c *ui.Context) {
 	if ui.Button(c, "清空").FontSize(11).TextColor(c.Theme().TextMuted).Clicked() {
-		s.searchQuery = ""
+		s.searchKeyword = ""
 	}
 }
 
