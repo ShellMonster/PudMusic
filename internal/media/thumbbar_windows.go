@@ -63,19 +63,8 @@ const (
 )
 
 // ---- `THUMBBUTTON` ----
-
-// thumbbutton 是 Win32 的 `THUMBBUTTON`。
 //
-// 字段顺序和类型与那个结构体一致（Go 的字段对齐规则和 C 在这两个平台上相同），
-// **不能改顺序也不能改宽度**：它是按字节交给系统的。
-type thumbbutton struct {
-	dwMask  uint32
-	iID     uint32
-	iBitmap uint32
-	hIcon   uintptr
-	szTip   uintptr
-	dwFlags uint32
-}
+// 结构体本身在 `winstruct.go`（不带平台标签：它的尺寸和偏移是能测的，测在那边）。
 
 // `dwMask` 的取值（shobjidl_core.h）。
 const (
@@ -496,21 +485,6 @@ func buildGlyphImageList(size int) (uintptr, error) {
 		procDeleteObject.Call(hbm)
 	}
 	return himl, nil
-}
-
-// bitmapInfoHeader 是 Win32 的 `BITMAPINFOHEADER`。
-type bitmapInfoHeader struct {
-	Size          uint32
-	Width         int32
-	Height        int32
-	Planes        uint16
-	BitCount      uint16
-	Compression   uint32
-	SizeImage     uint32
-	XPelsPerMeter int32
-	YPelsPerMeter int32
-	ClrUsed       uint32
-	ClrImportant  uint32
 }
 
 // glyphBitmapHandle 把一张 RGBA 变成一个能塞进 `ImageList_Add` 的 HBITMAP。
