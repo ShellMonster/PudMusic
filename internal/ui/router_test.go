@@ -23,6 +23,17 @@ func newShell(t *testing.T) (*Shell, *mygoui.Tester) {
 	t.Cleanup(a.Close)
 	s := New(a)
 	t.Cleanup(s.images.Close)
+
+	// 🔴 关掉切页动画。Tester 一帧画完，250ms 的滑动在里面永远走不完：那一帧
+	// 停在半路，上一页正往左挪、下一页正往右进，中间那道分界线正扫过页面区域。
+	// 于是「点一下再读某个点」这一次读到窗口底色、下次读到分界线，同一条测试
+	// 时而红时而绿（实测八次里挂两次）。
+	//
+	// 造外壳的三个函数（这里、shellWithSettings、shellOnSettings）都关，是为了
+	// 同一个理由：屏幕上的任何一个采样点都要是确定的。设置页那几条另有
+	// settleSettingsPage 兜底，万一哪个外壳忘了关还能等它停下来。
+	s.router.Transition = mygoui.TransitionNone
+
 	return s, mygoui.NewTester(s.View, 1200, 800)
 }
 
