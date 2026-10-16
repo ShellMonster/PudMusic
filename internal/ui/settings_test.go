@@ -58,6 +58,15 @@ func shellWithSettings(t *testing.T, mode app.ThemeMode, systemDark bool) (*mygo
 	})
 
 	s := New(a)
+	// 🔴 关掉切页动画，否则这个文件里的像素断言是随机的。
+	//
+	// Router 默认 TransitionAuto：切页是 250ms 的滑动，而 Tester 一帧就画完，
+	// 那一帧永远停在半路——上一页正往左挪、下一页正往右进，中间那道竖直的
+	// 分界线正好扫过页面区域。于是「点一下再读 (700,430) 那个点」这一次读到
+	// 底色、下一次读到分界线，实测八次里挂两次。
+	//
+	// 这个文件验的是主题，不是切页动画，动画在这里只会添乱。
+	s.router.Transition = mygoui.TransitionNone
 	tt := mygoui.NewTester(s.View, 900, 600)
 	tt.SetDark(systemDark)
 	tt.Frame()
