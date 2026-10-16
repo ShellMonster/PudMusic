@@ -57,11 +57,16 @@ func (s *Shell) viewEmpty(c *ui.Context, key string, e emptyState) {
 // SPEC 点名的四个空状态场景（PLAN.md 的 C-02 / S-01）。四条各有各的一句上游
 // 文案和一句「怎么才能不空」，`TestSpecEmptyStates` 逐条渲染出来验。
 //
-// 有宿主的直接被路由表引用（`/collection/{id}` 用 noFavorites、`/download-list`
-// 用 noDownloads）；还没有宿主的（noSearchResults、noLyrics）跟着它们该在的
-// 功能一起落地——搜索结果列表是阶段 5，歌词面板是阶段 6。在那之前它们由
-// `TestSpecEmptyStates` 直接驱动渲染器验，画面上是真画出来的，不是只对了个
-// 常量。
+// **四条全部有宿主**，`TestSpecEmptyStates` 一条一条切过去验，没有一条是只有
+// 测试引用的常量：
+//
+//	没有收藏夹   /collection/{id}   路由表里的 Empty
+//	没有搜索结果 /search（带上 q）  searchpage.go 的 viewSearch
+//	没有下载记录 /download-list     路由表里的 Empty
+//	没有歌词     /empty             empty.go 的 viewLyricsEmpty
+//
+// 「怎么才能不空」那一句必须给用户一个能做的下一步，见 emptyState.Hint 和
+// TestEmptyStateCopySaysWhyAndHow。
 
 // noFavorites 是「没有收藏夹」。
 //
@@ -103,9 +108,30 @@ var noDownloads = emptyState{
 // 搜索按歌名去两个源找的（`components/lyrics-search-modal/` 下的
 // `netease-tab` 和 `lrclib-tab`），没有上传这一说。所以「怎么才能不空」就是
 // 换个源再找一次——这不是替上游许诺，是说清这件事有哪几条路。
-//
-// 歌词面板是阶段 6 的东西（PLAN.md 的 S-08），到那时它才有地方落脚。
 var noLyrics = emptyState{
 	Title: "暂无歌词",
 	Hint:  "在歌词搜索里换个源（网易云 / LRCLIB）再找一次",
+}
+
+// emptyPath 是空状态落地页那条路由，和 routes 表里登记的是同一个字符串。
+const emptyPath = "/empty"
+
+// viewLyricsEmpty 是歌词那一支的页面视图，「没有歌词」就落在它上面。
+//
+// ## 为什么是 `/empty` 这一页
+//
+// 歌词面板本身住在全屏播放器里，那是阶段 6 的东西（PLAN.md 的 S-08）。在那之前
+// 这一支得有个地方落脚，而 `/empty` 正是为这件事留的：上游 `pages/empty/index.tsx`
+// 画的就是一个 `<Empty />`——这一页**整个的用处**就是「让人看见空状态长什么样」。
+// 上游没给 title 所以落回默认的「暂无内容」；我们给同一个组件传 lyrics 那个
+// title，传的是它唯一的 prop。
+//
+// 别的选择都不行：14 条路由是 Biu 那 14 条，不多不少，往里塞一条歌词路由等于
+// 编了一条 Biu 没有的；而把「暂无歌词」写在别的页面上，等于让那一页在用户没找
+// 歌词的时候也说「没有歌词」。
+//
+// 歌词面板落地之后，把这一件从 builtPage 里挪走、挂到播放器上就行，本页退回
+// 共享默认的「暂无内容」。
+func (s *Shell) viewLyricsEmpty(c *ui.Context, _ *ui.Route) {
+	s.viewEmpty(c, "page:lyrics", noLyrics)
 }

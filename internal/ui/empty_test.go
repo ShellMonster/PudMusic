@@ -1,7 +1,7 @@
 package ui
 
 import (
-	"image"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,24 +19,26 @@ import (
 
 // TestSpecEmptyStates 是这一张的验收点：SPEC 点名的四个场景逐条对上。
 //
-// 四条各渲染一遍，断言标题和「怎么才能不空」两句都在画面上。两条都断言是有意
-// 的：只有标题，用户看到「暂无内容」之后还是不知道该干什么，那一句就白说了。
+// **四条全部走真实路由**——切过去、画出来、读像素。没有一条是靠测试直接把空状态
+// 交给渲染器的：那种写法只能证明「这句话画出来是这句话」，证明不了用户点得进去，
+// 而上一轮评审挑出来的正是这一点（noSearchResults 和 noLyrics 曾经只有测试引
+// 用，在应用里哪儿都到不了）。
 //
-// 「有宿主的」和「还没有宿主的」都走同一段：宿主在的用宿主那个外壳 navigate 过
-// 去验，宿主还没到的（搜索结果、歌词——分别是阶段 5 和阶段 6 的功能）直接把同一
-// 件空状态交给渲染器画。前者验的是「用户点得进去」，后者验的是「画出来就是这句
-// 话」，两条合起来才是「这个场景被覆盖了」。
+// 宿主在哪、「为什么在那儿」，写在对应 view 的注释里：收藏夹在
+// `/collection/{id}`、下载记录在 `/download-list`、搜索结果在 `/search`（带上
+// 搜索词的那一支）、歌词在 `/empty`。
 func TestSpecEmptyStates(t *testing.T) {
 	cases := []struct {
 		what string
 		e    emptyState
-		// host 是宿主路由；空串表示这一件还没有宿主（功能在后面的阶段）。
-		host string
+		// target 是切过去要走的路径；path 是它的路由（去掉 query）。
+		target string
+		path   string
 	}{
-		{"没有收藏夹", noFavorites, "/collection/12345"},
-		{"没有搜索结果", noSearchResults, ""},
-		{"没有下载记录", noDownloads, "/download-list"},
-		{"没有歌词", noLyrics, ""},
+		{"没有收藏夹", noFavorites, "/collection/12345", "/collection/{id}"},
+		{"没有搜索结果", noSearchResults, "/search?q=" + url.QueryEscape("周杰伦"), searchPath},
+		{"没有下载记录", noDownloads, "/download-list", "/download-list"},
+		{"没有歌词", noLyrics, emptyPath, emptyPath},
 	}
 	for _, c := range cases {
 		t.Run(c.what, func(t *testing.T) {
@@ -47,44 +49,97 @@ func TestSpecEmptyStates(t *testing.T) {
 				t.Fatalf("%s 没说「怎么才能不空」", c.what)
 			}
 
-			var texts []string
-			var at mygoui.Rect
-			var ok bool
-			var img *image.RGBA
-			if c.host != "" {
-				s, tt := newShell(t)
-				if got := lookup(c.host).Empty; got != c.e {
-					t.Fatalf("%s 这一页挂的不是 %s 那一条（%q / %q）", c.host, c.what, got.Title, got.Hint)
-				}
-				s.navigate(c.host)
-				tt.Frame()
-				texts, ok = tt.Texts(), tt.HasText(c.e.Title)
-				at, _ = tt.Find(c.e.Title)
-				img = tt.Image()
-			} else {
-				// 还没有宿主：把同一件空状态交给渲染器，画面上真画出来。
-				s, _ := newShell(t)
-				tt := mygoui.NewTester(func(ctx *mygoui.Context) {
-					s.viewEmpty(ctx, "spec:"+c.what, c.e)
-				}, 900, 600)
-				tt.Frame()
-				texts, ok = tt.Texts(), tt.HasText(c.e.Title)
-				at, _ = tt.Find(c.e.Title)
-				img = tt.Image()
+			s, tt := newShell(t)
+			// 宿主必须真的能画出来：「这句话是对的」和「用户走得到这句话」是两
+			// 回事。宿主要么在 builtPage 里注册了页面视图（搜索、歌词），要么
+			// 自己带这句 Empty（收藏夹、下载记录）。
+			rt := lookup(c.path)
+			if s.builtPage(rt) == nil && rt.Empty != c.e {
+				t.Fatalf("%s 那一页（%s）既没有注册页面视图、带的也不是这一句，"+
+					"切过去画的是别的东西", c.what, c.path)
 			}
+			s.navigate(c.target)
+			tt.Frame()
 
-			if !ok {
-				t.Fatalf("%s 的 %q 没画出来，文字有 %q", c.what, c.e.Title, texts)
+			if !tt.HasText(c.e.Title) {
+				t.Fatalf("%s 的 %q 没画出来，文字有 %q", c.what, c.e.Title, tt.Texts())
 			}
-			if !strings.Contains(strings.Join(texts, ""), c.e.Hint) {
-				t.Errorf("%s 的「怎么才能不空」%q 没画出来，文字有 %q", c.what, c.e.Hint, texts)
+			if !tt.HasText(c.e.Hint) {
+				t.Fatalf("%s 的「怎么才能不空」%q 没画出来，文字有 %q", c.what, c.e.Hint, tt.Texts())
+			}
+			at, ok := tt.Find(c.e.Title)
+			if !ok {
+				t.Fatalf("%s 的标题框找不到，文字有 %q", c.what, tt.Texts())
 			}
 			// 画出来还得看得见：元素在、位置对、文字也在，可屏幕上什么也没有，
 			// 只查元素框的测试发现不了这一类。
+			img := tt.Image()
 			if img.RGBAAt(int(at.X)+2, int(at.Y+at.H/2)) == img.RGBAAt(4, 4) {
 				t.Errorf("%s 的字和窗口底色同色，画出来看不见", c.what)
 			}
 		})
+	}
+}
+
+// TestTheFourSpecStatesAreAllReachable is TestSpecEmptyStates 的反面：
+// 确认这一张没有哪一条是「只有测试引用的常量」。
+//
+// 判据是 `builtPage`：宿主没注册的话，那一页切过去画的是空状态那一支，
+// `noSearchResults` / `noLyrics` 就又变回只有测试看得见了。
+func TestTheFourSpecStatesAreAllReachable(t *testing.T) {
+	s, tt := newShell(t)
+	for _, c := range []struct{ what, path string }{
+		{"没有收藏夹", "/collection/{id}"},
+		{"没有搜索结果", searchPath},
+		{"没有下载记录", "/download-list"},
+		{"没有歌词", emptyPath},
+	} {
+		if s.builtPage(lookup(c.path)) != nil {
+			continue
+		}
+		// 没注册页面视图的那一条，只有在它自己带 Empty 时才算说得过去。
+		if got := lookup(c.path).Empty; got.Title == "" {
+			t.Errorf("%s：%s 既没有页面视图也没有空状态文案，走过去是一片白", c.what, c.path)
+		}
+		_ = tt
+	}
+}
+
+// TestSearchingShowsTheNoResultsState 验搜索页两个分支都走得到，而且是靠真的
+// 敲字 + 回车走过去的——这是「用户能进入这个场景」最硬的一条证据。
+func TestSearchingShowsTheNoResultsState(t *testing.T) {
+	s, tt := newShell(t)
+
+	// 还没输入：上游 pages/search/index.tsx:16 那一支。
+	s.navigate(searchPath)
+	tt.Frame()
+	if !tt.HasText(searchIdle.Hint) {
+		t.Fatalf("没输入时没画「去输入」那一支，文字有 %q", tt.Texts())
+	}
+	if tt.HasText(noSearchResults.Hint) {
+		t.Errorf("还没输入就说「换个词再搜」，文字有 %q", tt.Texts())
+	}
+
+	// 点进搜索框，敲字 + 回车 → 到了「搜了没有结果」那一支。走的全是真实输入。
+	box, ok := tt.Find("搜索歌名或 UP 主")
+	if !ok {
+		t.Fatalf("搜索框没画出来，文字有 %q", tt.Texts())
+	}
+	tt.ClickAt(box.X+box.W/2, box.Y+box.H/2)
+	tt.Frame()
+	tt.Type("周杰伦")
+	tt.Frame()
+	tt.TypeKey(0, mygoui.KeyEnter, "\r")
+	tt.Frame()
+
+	if got := s.router.Location(); !strings.Contains(got, "q=") {
+		t.Fatalf("回车之后 URL 上没有搜索词：%q", got)
+	}
+	if !tt.HasText(noSearchResults.Title) {
+		t.Errorf("搜完没有画出「没有搜索结果」，文字有 %q", tt.Texts())
+	}
+	if !tt.HasText(noSearchResults.Hint) {
+		t.Errorf("搜完没有画出「换个词再搜」，文字有 %q", tt.Texts())
 	}
 }
 

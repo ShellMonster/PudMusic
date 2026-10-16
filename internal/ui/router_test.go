@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"image/png"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -439,9 +440,18 @@ func TestRenderShots(t *testing.T) {
 	s.navigate("/local-music")
 	tt.Frame()
 	save(t, dir, "14-本地音乐空状态.png", tt)
+	// 搜索页的两个分支：还没输入 / 搜了没有结果。
+	s.navigate("/search")
+	tt.Frame()
+	save(t, dir, "14a-搜索-还没输入.png", tt)
+	s.navigate("/search?q=" + url.QueryEscape("周杰伦"))
+	tt.Frame()
+	save(t, dir, "14a2-搜索-没有结果.png", tt)
+
+	// 歌词那一支落在空状态落地页上（见 empty.go 的 viewLyricsEmpty）。
 	s.navigate("/empty")
 	tt.Frame()
-	save(t, dir, "14b-空状态落地页.png", tt)
+	save(t, dir, "14b-空状态落地页-歌词.png", tt)
 	// 已经有内容的那一页：设置页不画空状态，画的是它自己。
 	s.navigate("/settings")
 	tt.Frame()

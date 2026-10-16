@@ -59,21 +59,6 @@ var closeWindowOptions = []struct {
 // 路由分派
 // ─────────────────────────────────────────────────────────────────────────────
 
-// builtPage 是「这一页已经有内容了」的路由和画法；还没做就返回 nil。
-//
-// 分派的其余部分在 router.go 的 `pageContent`（404 那一页、每条路由自己的空
-// 状态都在那边）。这个函数只回答一件事：**哪几条路由已经不是空页面了。**
-//
-// 它同时是那几页不写空状态的理由：接了 builtPage 的路由，`Route.Empty` 就用不
-// 上了，留着等于一句没人会看到的话（`TestEmptyStateCopySaysWhyAndHow` 会把这种
-// 「既没内容、Empty 又是空的」路由揪出来）。
-func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
-	if rt.Match == settingsPath {
-		return s.viewSettings
-	}
-	return nil
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 页面
 // ─────────────────────────────────────────────────────────────────────────────

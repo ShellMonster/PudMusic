@@ -37,6 +37,11 @@ type Shell struct {
 	// shownPath 是上一帧画的是哪一页，syncRoute 拿它认出「换页了」。
 	shownPath string
 
+	// searchDraft 是搜索框里正在敲的字。放在壳上而不是页面的局部变量：即时模式
+	// 每一帧都重画一遍，局部变量下一帧就没了（只有 view 里显式声明并被元素
+	// 认下的状态才留得住）。
+	searchDraft string
+
 	// notFoundAt 是进 404 的那一刻，notFoundStop 是那个每秒一跳的倒计时。
 	// 两者都只由主线程读写（syncRoute 在主线程），后台那一跳只调
 	// wakeHandle.invalidate，所以不违反铁律一、也没有竞态。

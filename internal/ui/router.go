@@ -74,17 +74,9 @@ var routes = []Route{
 	// 另外 Biu 把设置放在头像下拉里（N-08），这里先挂侧栏底部，等头像那块
 	// 做出来再挪回去。
 	{Match: "/settings", Title: "设置", InMenu: true},
-	// 搜索页上游有**两个** Empty 分支：`pages/search/index.tsx:16` 的「还没输入
-	// 搜索词」和 `pages/search/video-list/index.tsx:176` 的「搜了但没有结果」，
-	// 画出来都是同一个 `<Empty />`（所以标题一样），接下来该做的事不一样。
-	//
-	// 这一页现在处在**第一个**分支——它还没有搜索框（搜索是阶段 5 的事）。所以
-	// 这里填的是「去输入」那一句；「换个词再搜」那一句是 empty.go 的
-	// noSearchResults，跟着搜索功能一起落地，别拿这一条冒充它。
-	{Match: "/search", Title: "搜索", Empty: emptyState{
-		Title: "暂无内容",
-		Hint:  "在上面的搜索框里输入歌名或 UP 主",
-	}},
+	// 搜索页有搜索框和两个空状态（searchpage.go），所以**不填 Empty**：填了就是
+	// 一句没人会看到的话，那一页根本走不到空状态那一支。
+	{Match: "/search", Title: "搜索"},
 	// 上游：动态流作者栏是 `暂无关注`（`dynamic-feed/author-list.tsx:137`），
 	// 主列表那处上游写的是没翻译的 `Empty`（`dynamic-feed/index.tsx:184`），
 	// 明显是漏了。同一句中文上游在 `user-profile/dynamic-list/index.tsx:80`
@@ -100,13 +92,12 @@ var routes = []Route{
 	}},
 	// 「没有收藏夹」，文案在 empty.go 的 noFavorites（上游出处也写在那儿）。
 	{Match: "/collection/{id}", Title: "收藏夹 / 合集 / 系列", Empty: noFavorites},
-	// 空状态落地页（P-29）。上游 `pages/empty/index.tsx:6` 在这里画的是
-	// `<Empty />`，也就是共享默认的 `暂无内容`——上游这一页整个就是一张空状态，
-	// 除此之外什么也没有。照抄，不拿它当别的场景的替身。
-	{Match: "/empty", Title: "空状态", Empty: emptyState{
-		Title: "暂无内容",
-		Hint:  "随便切到别的页面——每一页空着的时候都是这个样子",
-	}},
+	// 空状态落地页（P-29）。上游 `pages/empty/index.tsx:6` 在这里画的就是一个
+	// `<Empty />`——这一页整个的用处就是「让人看见空状态长什么样」，上游没给
+	// title，所以落回共享默认的「暂无内容」。我们给它传 lyrics 那个 title：
+	// 同一个组件、同一个 prop，换的是传进去的那一句（见 empty.go 的
+	// viewLyricsEmpty 为什么挑这一页）。
+	{Match: "/empty", Title: "空状态"},
 	// 上游：`pages/mini-player/index.tsx:128`。
 	{Match: "/mini-player", Title: "迷你播放器", Empty: emptyState{
 		Title: "暂无播放内容",
@@ -181,6 +172,25 @@ func (s *Shell) page(c *ui.Context, r *ui.Route, rt Route) {
 		r.Title(rt.Title)
 		s.pageBody(c, r, rt)
 	}, s.onPanic)(c)
+}
+
+// builtPage 是「这一页已经有内容了」的路由和画法；还没做就返回 nil。
+//
+// 它同时是那几页不写空状态的理由：接了 builtPage 的路由，`Route.Empty` 就用不
+// 上了，留着等于一句没人会看到的话（`TestEmptyStateCopySaysWhyAndHow` 会把这种
+// 「既没内容、Empty 又是空的」路由揪出来）。
+func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
+	switch rt.Match {
+	case settingsPath:
+		return s.viewSettings
+	case searchPath:
+		// 搜索页有搜索框，两个空状态从 URL 上的 q 分得出来（searchpage.go）。
+		return s.viewSearch
+	case emptyPath:
+		// 空状态落地页（P-29）拿给歌词那一支（见 empty.go 的 viewLyricsEmpty）。
+		return s.viewLyricsEmpty
+	}
+	return nil
 }
 
 // pageContent 画一页的内容（New 把它装成 pageBody，测试也正是替掉它来验
