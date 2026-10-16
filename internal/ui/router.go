@@ -44,6 +44,10 @@ var routes = []Route{
 	{Match: "/collection/{id}", Title: "收藏夹 / 合集 / 系列"},
 	{Match: "/empty", Title: "空状态"},
 	{Match: "/mini-player", Title: "迷你播放器"},
+	// 扫码登录。**不加 InMenu**：它不是侧栏菜单项，是从顶栏的登录
+	// 按钮进出来的（跟 Biu 把登录挂在头像下拉里是一回事）。
+	// 加进菜单的话用户每次想登录都要先在侧栏里找一圈。
+	{Match: "/login", Title: "扫码登录"},
 }
 
 // notFound 是兜底那一条：路径谁都不匹配就是它，对应 Biu 的 P-30。
@@ -120,6 +124,8 @@ func (s *Shell) viewRoutes(c *ui.Context) {
 			s.page(c, r, routes[11])
 		case r.Match("/mini-player"):
 			s.page(c, r, routes[12])
+		case r.Match("/login"):
+			s.loginPage(c, r, routes[13])
 		default:
 			s.page(c, r, notFound)
 		}
@@ -199,5 +205,6 @@ func (s *Shell) viewNav(c *ui.Context) {
 		if ui.Button(c, "打开文件").Clicked() {
 			s.pickAndEnqueue()
 		}
+		s.viewLoginEntry(c)
 	})
 }
