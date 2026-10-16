@@ -82,6 +82,10 @@ const lockAnswerEnv = "BIU_TEST_LOCK_ANSWER"
 // 第二次调用直接返回 true（`mygo/single_instance.go` 的 `singleInstance.locked`
 // 那一支）。真正要验的是**另一个进程**启动时拿不到锁、并且它的命令行被转交给
 // 第一个——所以这里把测试二进制自己再跑一遍。
+//
+// 跑完会在临时目录里留一个 `mygo-<uid>-<hash>.sock`：框架是在 App.OnQuit 里
+// 释放锁的，测试进程不会走到那儿。不清也没关系——下次启动时框架连不上就会把
+// 它当成崩溃留下的陈旧 socket 删掉（`mygo/single_instance.go` 里那一支）。
 func TestLockRejectsASecondProcess(t *testing.T) {
 	// 子进程：只回答一个问题，然后把答案写进文件。
 	if path := os.Getenv(lockAnswerEnv); path != "" {
