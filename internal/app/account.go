@@ -110,6 +110,15 @@ type Account struct {
 	state LoginState
 	// stop 是当前那一轮登录的取消函数。再开一轮之前先调它。
 	stop context.CancelFunc
+	// runID 是「当前是第几轮登录」。每次开始或取消都 +1。
+	//
+	// 它的用处是让**上一轮的 goroutine 闭嘴**：取消只是把 ctx 掐掉，
+	// 而那一次在途的请求回来之后，照样会走进 `run` 里改状态——
+	// 于是用户点了「取消」，界面过一会儿又变回「等扫码」。
+	//
+	// 单靠 `ctx.Err()` 挡不住：检查和写状态之间还有时间窗，
+	// 而那个窗口正好落在「用户点取消」的那一刻。
+	runID uint64
 
 	wake func()
 }
@@ -251,16 +260,17 @@ func (a *Account) beginLogin() {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a.stop = cancel
+	a.runID++
+	id := a.runID
 
 	// **代次在这时候拿**。它记的是「用户按下登录那一刻」的登录态版本。
 	// 扫码成功要写回时对不上（最常见的是中间退了登），Lease 会挡住。
 	lease := a.mgr.BeginRenew()
-	st := LoginState{Phase: LoginWaiting, Hint: "正在向 B 站申请二维码…"}
-	a.state = st
+	a.state = LoginState{Phase: LoginWaiting, Hint: "正在向 B 站申请二维码…"}
 	a.mu.Unlock()
 	a.wakeUp()
 
-	go a.run(ctx, lease)
+	go a.run(ctx, lease, id)
 }
 
 // RefreshLoginCode 换一张二维码。
@@ -282,6 +292,8 @@ func (a *Account) cancel() {
 	a.mu.Lock()
 	stop := a.stop
 	a.stop = nil
+	// +1 让在途的那一轮闭嘴：它回来之后写的任何状态都会被挡掉。
+	a.runID++
 	a.state = LoginState{Phase: LoginIdle}
 	a.mu.Unlock()
 	if stop != nil {
@@ -301,7 +313,7 @@ func (a *Account) wakeUp() {
 }
 
 // run 是那一轮登录的完整流程：申请 → 画 → 循环轮询 → 落盘。
-func (a *Account) run(ctx context.Context, lease *Lease) {
+func (a *Account) run(ctx context.Context, lease *Lease, id uint64) {
 	defer lease.Discard() // 没走到 Commit 的路径一律作废代次
 
 	qr, err := a.cli.NewQRCode(ctx)
@@ -309,17 +321,17 @@ func (a *Account) run(ctx context.Context, lease *Lease) {
 		if ctx.Err() != nil {
 			return // 用户取消了，这不是错误
 		}
-		a.fail("申请二维码失败：" + err.Error())
+		a.fail(id, "申请二维码失败："+err.Error())
 		return
 	}
 	code, err := qr.Render()
 	if err != nil {
-		a.fail("二维码画不出来：" + err.Error())
+		a.fail(id, "二维码画不出来："+err.Error())
 		return
 	}
 
 	a.mu.Lock()
-	if a.state.Phase == LoginIdle {
+	if a.runID != id {
 		a.mu.Unlock() // 已经被取消了
 		return
 	}
@@ -343,20 +355,20 @@ func (a *Account) run(ctx context.Context, lease *Lease) {
 				// 网络抖一下不算失败：**继续等**。
 				// 在这里报失败的话，用户在地铁里看到的就是
 				// 「登录失败」，而实际上扫完码就好了。
-				a.note("连不上 B 站，正在重试…")
+				a.note(id, "连不上 B 站，正在重试…")
 				continue
 			}
 			switch res.State {
 			case bili.ScanWaiting:
-				a.hint(LoginWaiting, bili.ScanWaiting.String())
+				a.hint(id, LoginWaiting, bili.ScanWaiting.String())
 			case bili.ScanScanned:
-				a.hint(LoginScanned, bili.ScanScanned.String())
+				a.hint(id, LoginScanned, bili.ScanScanned.String())
 			case bili.ScanExpired:
 				// 过期是终态：停在这里等用户点刷新。
-				a.hint(LoginExpired, bili.ScanExpired.String())
+				a.hint(id, LoginExpired, bili.ScanExpired.String())
 				return
 			case bili.ScanConfirmed:
-				a.finish(ctx, lease, res)
+				a.finish(ctx, lease, res, id)
 				return
 			}
 		}
@@ -364,7 +376,7 @@ func (a *Account) run(ctx context.Context, lease *Lease) {
 }
 
 // finish 把扫成功的凭据存进去。
-func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult) {
+func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult, id uint64) {
 	sess := Session{RefreshToken: res.RefreshToken}
 	if !res.LoggedInAt.IsZero() {
 		sess.SavedAt = res.LoggedInAt
@@ -383,7 +395,7 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult)
 		// 接口改了，或者响应被中间层改过。
 		// 不落盘——落一份「登不进」的凭据，下次启动会一直 -101，
 		// 而用户看到的现象是「一打开就掉登录」。
-		a.fail("扫码成功了，但没有拿到登录凭据")
+		a.fail(id, "扫码成功了，但没有拿到登录凭据")
 		return
 	}
 
@@ -396,11 +408,11 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult)
 		// 用户在这中间退了登。**什么都不写**，安静收工——
 		// 这正是要防的那件事：已经退掉的账号被在途的结果写回来。
 		log.Printf("biu: 扫码结果回来时登录态已经变了（多半是退登），这次结果作废")
-		a.hint(LoginIdle, "已取消登录")
+		a.hint(id, LoginIdle, "已取消登录")
 	case err != nil:
-		a.fail("保存登录态失败：" + err.Error())
+		a.fail(id, "保存登录态失败："+err.Error())
 	default:
-		a.setState(LoginState{Phase: LoginDone, Hint: "登录成功", LoggedIn: true})
+		a.setStateFor(id, LoginState{Phase: LoginDone, Hint: "登录成功", LoggedIn: true})
 	}
 }
 
@@ -425,6 +437,7 @@ func (a *Account) logout() error {
 	a.mu.Lock()
 	stop := a.stop
 	a.stop = nil
+	a.runID++
 	a.state = LoginState{Phase: LoginIdle}
 	a.mu.Unlock()
 	if stop != nil {
@@ -441,10 +454,25 @@ func (a *Account) logout() error {
 }
 
 // ─── 改状态的小工具 ───────────────────────────────────────────────────────────
+//
+// ⚠️ 这几个函数**全都带 runID**，而且对不上就**什么都不做**。
+//
+// 原因：那一次在途的请求回来的时候，用户可能早就点了取消或者退登、
+// 或者又点了一次登录。这时候旧的一轮如果照样写状态，
+// 界面上就会出现「点了取消，过一会儿又变回等扫码」
+// 或者「刷新之后，旧二维码又被画回来了」——
+// 而且它写完就结束了，新的一轮随后也写一次，用户看到的是闪一下。
+//
+// 不写 id 就得靠调用方每次自己查 `ctx.Err()`，而查和写之间
+// 还是有窗口——而那个窗口正好是用户点按钮的那一刻。
 
 // hint 换阶段和提示，不动二维码。
-func (a *Account) hint(phase LoginPhase, hint string) {
+func (a *Account) hint(id uint64, phase LoginPhase, hint string) {
 	a.mu.Lock()
+	if a.runID != id {
+		a.mu.Unlock()
+		return
+	}
 	st := a.state
 	st.Phase, st.Hint = phase, hint
 	a.state = st
@@ -456,8 +484,12 @@ func (a *Account) hint(phase LoginPhase, hint string) {
 //
 // 它**不改阶段**——把「等扫码」变成「失败」再变回来，会让界面上
 // 那条提示闪一下，而用户根本不知道发生了什么。
-func (a *Account) note(text string) {
+func (a *Account) note(id uint64, text string) {
 	a.mu.Lock()
+	if a.runID != id {
+		a.mu.Unlock()
+		return
+	}
 	st := a.state
 	st.Hint = text
 	a.state = st
@@ -466,10 +498,22 @@ func (a *Account) note(text string) {
 }
 
 // fail 记一次失败。
-func (a *Account) fail(reason string) {
+func (a *Account) fail(id uint64, reason string) {
 	reason = strings.TrimPrefix(reason, "bili: ")
 	log.Printf("biu: 登录失败：%s", reason)
-	a.setState(LoginState{Phase: LoginFailed, Err: reason, Hint: reason})
+	a.setStateFor(id, LoginState{Phase: LoginFailed, Err: reason, Hint: reason})
+}
+
+// setStateFor 写状态，但只在这一轮还是当前那一轮时才写。
+func (a *Account) setStateFor(id uint64, st LoginState) {
+	a.mu.Lock()
+	if a.runID != id {
+		a.mu.Unlock()
+		return
+	}
+	a.state = st
+	a.mu.Unlock()
+	a.wakeUp()
 }
 
 // Account 返回登录管理器。没挂过返回 nil（界面要判空）。

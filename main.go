@@ -19,6 +19,9 @@ func main() {
 	if err := ui.MountSettings(a); err != nil {
 		log.Printf("biu: 拿不到应用数据目录，这次的设置存不住：%v", err)
 	}
+	// 登录也在开窗口之前挂好：读钥匙串是阻塞 IO，
+	// 放到界面线程上读的表现是开窗时卡一下。
+	ui.MountLogin(a)
 
 	if err := ui.Run(a); err != nil {
 		log.Fatal(err)
