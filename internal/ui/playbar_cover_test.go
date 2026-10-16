@@ -161,40 +161,33 @@ func TestPlayBarCoverFailedShowsTheFailedState(t *testing.T) {
 
 // ---- 唤醒 ----
 
-// TestPlayBarCoverWakeIsWiredAndFires 钉住 imgcache/view.go 顶上那条约定：
+// TestPlayBarCoverWakeRedrawsTheWindow 钉住 imgcache/view.go 顶上那条约定：
 // 图下完之后必须叫醒窗口，否则界面永远停在占位（实测 0 帧刷新）。
 //
-// 这一条只走生产接线，测试自己一个 AddWake 都不去替它装：
+// 这一条只走生产接线，测试不去替它装任何唤醒、也不去替它数通知：
 //
-//	Shell.New 里 s.images.AddWake(s.wake.invalidate)  ← 下面第一段就断它
-//	App.Enqueue 一项带 Cover 的歌 → State.CoverURL
-//	Shell.View → viewPlayBar → imgcache.View
+//	Shell.New 里 s.images.AddWake(s.wake.invalidate)
+//	App.Enqueue 一项带 Cover 的歌 → State.CoverURL → Shell.View → imgcache.View
 //	Cache.finish → notify → wakeHandle.invalidate → Services().Invalidate
+//	  → 窗口被请求一帧 → settle 多画一帧 → 占位自己换成图
 //
-// 分两段断：
+// ⚠️ MyGo 的 Tester 是**拉**式的：测试不调 Frame()，它一帧都不画。所以「有人叫醒
+// 了窗口」和「没人叫醒」的唯一区别，就是 settle 自己多跑的那一帧——而那一帧只有
+// requested 被置上才会跑（headless.go 的 settle 在 runFrame 之后才看这个标志），
+// requested 又只有 Services().Invalidate() 会置。**把生产那一路换成
+// `AddWake(func() {})`，settle 就只画一帧，占位留在屏幕上，这里立刻挂。**
 //
-//  1. WakeCount 为 0 = 生产代码根本没注册唤醒。**把 New 里那一行删掉，这一步
-//     就失败。**唤醒是个回调，从外面看不见有没有被调过；缓存里留了 WakeCount
-//     就是为了让「装没装」这件事本身可查。
-//  2. 放行服务端之后**一次 Frame() 都不调**，只等计数器自己涨上来。这一段证的是
-//     缓存好了真的通知到了那一路；只投递不唤醒的话它永远停在 0。
-func TestPlayBarCoverWakeIsWiredAndFires(t *testing.T) {
+// 为了让唤醒落在 settle 的循环**里面**（落在循环之后就看不见了），测试在第一帧
+// 画完之后就地等图进缓存，再给 notify 一点时间——这段等待发生在一帧之内。
+func TestPlayBarCoverWakeRedrawsTheWindow(t *testing.T) {
 	g := newGatedCover(t)
 
 	a := app.New()
 	t.Cleanup(a.Close)
-	s := New(a) // ← 生产接线：New 里给 s.images 装好了唤醒
+	s := New(a) // ← 生产接线就在这里
 	t.Cleanup(s.images.Close)
 
-	if n := s.images.WakeCount(); n == 0 {
-		t.Fatal("Shell 没给封面缓存注册唤醒：图下完之后界面会永远停在占位（imgcache/view.go 顶上那条）")
-	}
-
-	var wakes atomic.Int32
-	// 只为了量一量，不是替代上面那一路：notify 会把注册过的每一路都调一遍，
-	// 这里量到它，就说明生产那一路也被调到了。
-	s.images.AddWake(func() { wakes.Add(1) })
-
+	url := g.url()
 	// 走真实的那条路：一个能放的文件 + 一个有地址的封面。阶段 1 只有本地项，
 	// 所以这是头一次把「队列项带封面」这半边跑通——本地文件那边 Cover 是空的，
 	// 这里显式摆上去。
@@ -203,24 +196,44 @@ func TestPlayBarCoverWakeIsWiredAndFires(t *testing.T) {
 		Type:   "audio",
 		Path:   flacPath(t),
 		Title:  "在线的一首歌",
-		Cover:  g.url(),
+		Cover:  url,
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// 暂停：播放器那个 50ms 的时钟也会叫醒窗口（真实窗口里 Attach 装了 app 的
+	// 唤醒回调），让它醒着的话「是谁叫醒的」就说不清了。
+	a.Toggle()
 
-	tt := mygoui.NewTester(s.View, 760, coverWinH)
-	if !tt.HasText("载入中") {
-		t.Fatalf("第一帧应该是占位，文字有 %q", tt.Texts())
+	frames, cached := 0, false
+	tt := mygoui.NewTester(func(c *mygoui.Context) {
+		frames++
+		s.View(c)
+		if cached {
+			return // 只在第一帧里喂一次
+		}
+		cached = true
+
+		g.open() // 放行：图开始下
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if s.images.Get(url).Ready() {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		// finish 里是先落终态、再 notify：看到图进了缓存，不代表 notify 已经到
+		// 窗口了。留一段余量让这一路 wake 走完。
+		time.Sleep(400 * time.Millisecond)
+	}, 760, coverWinH)
+
+	if !s.images.Get(url).Ready() {
+		t.Fatal("图一直没进缓存，这条测的就不是唤醒了")
 	}
-	waitCover(t, 5*time.Second, "封面请求发出去了", func() bool { return g.hits.Load() > 0 })
-
-	g.open() // 图可以回来了，但从这里到 wakes 涨起来之间不许碰 Frame()
-
-	waitCover(t, 5*time.Second, "图下完之后缓存叫了唤醒", func() bool { return wakes.Load() > 0 })
-
-	tt.Frame()
+	if frames < 2 {
+		t.Errorf("只画了 %d 帧：缓存好了却没人请求窗口重绘，文字有 %q", frames, tt.Texts())
+	}
 	if tt.HasText("载入中") {
-		t.Errorf("唤醒之后画面还停在占位，文字有 %q", tt.Texts())
+		t.Errorf("没人叫醒窗口，画面停在占位，文字有 %q", tt.Texts())
 	}
 	// 整窗里播放条是最后一个孩子、整条贴底，所以条顶在 coverWinH-88；封面该落在
 	// 那 88 的正中间（上下各 16）。条一高封面就往上跑，这里立刻挂。

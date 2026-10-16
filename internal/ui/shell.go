@@ -54,9 +54,11 @@ type Shell struct {
 //
 // ⚠️ 封面缓存的唤醒在这里装，不在 Attach 里：注册的是这个外壳自己的唤醒句柄，
 // 跟窗口没有关系（wakeHandle 内部只存 Context 给的服务句柄，窗口关了自动失效）。
-// 放在 Attach 的后果是：那个注册只有真能建窗口时才发生，无头 Tester 永远碰不到，
+// 放在 Attach 的后果是：那条注册只有真能建窗口时才发生，无头 Tester 永远碰不到，
 // 「建了外壳却忘了注册唤醒 → 图下完之后界面停在占位」这个 bug 就没有任何测试
 // 钉得住（实测：只投递不唤醒 = 0 帧刷新）。**每个窗口一个外壳，也就注册一次。**
+//
+// TestPlayBarCoverWakeRedrawsTheWindow 走的就是这一行。
 func New(a *app.App) *Shell {
 	s := &Shell{app: a, router: ui.NewRouter("/"), images: imgcache.New(imgcache.Options{})}
 	s.images.AddWake(s.wake.invalidate)
