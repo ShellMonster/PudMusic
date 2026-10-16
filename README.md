@@ -73,9 +73,21 @@ internal/ui/        → internal/app/ → internal/service/ → internal/platfor
 3. **每个 view 外面包一层 `Guard`（recover）。** MyGo 的 `Dispatch`/`drain` 都没有
    recover，view 里 panic 会穿透 Cocoa 事件循环杀掉整个进程。
 
-还有一条是 MyGo 文档里没写的：**滑块的「正在被拖」要用 `Pressed()`，不能用 `Dragging()`。**
-`Dragging()` 报的是 `Drag`/`Draggable` 两套机制，普通滑块对它永远是 `false`
-（MyGo 自带的 `examples/timeline` 用的就是 `Dragging()`，那一处的判断是失效的）。
+还有两条是 MyGo 文档里没写的，都跟「正在被拖」有关，用错了都不报错、只是拖不动：
+
+1. **不要用 `Dragging()` 判拖动。** 它报的是 `Drag`/`Draggable` 两套机制，
+   普通滑块和普通控件对它永远是 `false`（MyGo 自带的 `examples/timeline`
+   用的就是 `Dragging()`，那一处的判断是失效的）。
+2. **`Pressed()` 还要求「指针仍在控件框内」。** 进度条那种轨道横跨整个行程、
+   指针一直留在框里的控件用它没问题；**一条 8 像素宽的拖拽把手用它只能拖动
+   16 像素就卡住**——指针往左挪 9 个像素就出框了，它当场变 `false`
+   （`ui/input.go:1028`）。薄把手要用 `Dragged()` 判按着没有，再用
+   `PointerPosition()` 取指针位置（侧栏那条把手就是这么做的，见
+   `internal/ui/sidebar.go`）。
+
+   顺带：**别拿 `Dragged()` 的位移累加**。`dragX` 要到一帧结束才清掉，而一帧里
+   view 要跑好几遍（`ui/runtime.go:657`），每一遍读到的都是同一个位移，
+   累加起来就是拖快好几倍。取绝对位置就没有这个问题。
 
 ## 版本
 
