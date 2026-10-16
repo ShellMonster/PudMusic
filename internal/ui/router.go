@@ -168,36 +168,3 @@ func (s *Shell) navigate(target string) {
 		s.addToast("「" + rt.Title + "」这一页还没做")
 	}
 }
-
-// viewNav 是顶部导航栏：后退/前进 + 当前页名 + 拖窗口的那一条。
-//
-// Biu 的 navbar（N-01~N-09）整条就是拖窗口的区（`window-drag`），搜索框聚焦
-// 或用户下拉打开时才切成不拖。这里对应的是那条空白：拖动区只给那一块，按钮
-// 还在外面，免得点按钮变成拖窗口。
-func (s *Shell) viewNav(c *ui.Context) {
-	// 后退/前进也是换页：上一页的提示同样不该留着，崩过的状态同样该复位。
-	back := func() { s.clearToasts(); s.crash = nil }
-
-	// ⚠️ 隐藏标题栏的窗口里，红黄绿是叠在内容上面的。左边让出 bar.Left、
-	// 右边让出 bar.Right，才不会把它们压住。
-	bar := c.TitleBar()
-
-	ui.Row(c).Key("nav").Height(max(bar.Height, 32)).
-		Padding(0, bar.Right+8, 0, bar.Left+8).
-		Gap(8).AlignItems(ui.Center).Children(func() {
-		if ui.BackButton(c, s.router).Clicked() {
-			back()
-		}
-		if ui.ForwardButton(c, s.router).Clicked() {
-			back()
-		}
-		ui.Text(c, lookup(s.router.Path()).Title).FontSize(15).Bold()
-		ui.Column(c).Grow(1).DragWindow()
-		// 阶段 1 唯一的入口：选一个本地文件。Biu 里对应侧栏的「本地音乐」。
-		// 走的是播放条「加歌」那一条路：多选的文件全都进队列，用它打开的歌
-		// 上一首/下一首才是亮的（直接调 app.Open 就进不了队列，见 pickAndEnqueue）。
-		if ui.Button(c, "打开文件").Clicked() {
-			s.pickAndEnqueue()
-		}
-	})
-}

@@ -22,6 +22,9 @@ func newShell(t *testing.T) (*Shell, *mygoui.Tester) {
 	t.Cleanup(a.Close)
 	s := New(a)
 	t.Cleanup(s.images.Close)
+	// 搜索历史带着一个后台落盘的 goroutine（见 searchhistory.go）。每个外壳
+	// 一个，测试里建得比真窗口快得多，不收掉就是一堆挂着的 goroutine。
+	t.Cleanup(func() { _ = s.hist.Close() })
 	return s, mygoui.NewTester(s.View, 1200, 800)
 }
 
