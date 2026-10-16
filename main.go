@@ -29,6 +29,13 @@ func main() {
 	// 开窗口之前，「第一次点歌」就不会替「开窗」买单。
 	ui.MountStreaming(a, cli)
 
+	// 下载也挂在开窗口之前：它要读盘（恢复上次的队列）。取流零件
+	// （`MountStreaming` 那个）可以晚一点挂，缺了也只是点了下载时给一句
+	// 人话，而不会开窗就报错。
+	if err := ui.MountDownloads(a); err != nil {
+		log.Printf("biu: 挂下载失败，这次的下载功能用不了：%v", err)
+	}
+
 	if err := ui.Run(a); err != nil {
 		log.Fatal(err)
 	}
