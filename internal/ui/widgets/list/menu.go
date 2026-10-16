@@ -64,10 +64,20 @@ func menuItems(m Music) []menuItem {
 // 真正会错的是拿 i 当**身份**：序号在插一行之后就指另一首了（铁律四）。
 // 这里 i 只用来读当行，身份由 Music.ID 担着。
 func (l *List) buildMenu(menu *ui.Menu, i int) {
-	if i < 0 || i >= len(l.songs) {
+	buildSongMenu(menu, l.songs, l.acts, i, l.playFrom)
+}
+
+// buildSongMenu 是**两种视图共用**的一份菜单：列表的一行和网格的一格都是它。
+//
+// 网格复用它，不是「照着再写一份」——菜单项、顺序、「在 B 站打开」还是「在访达
+// 中显示」这些判断只在这一处，列表和网格不可能对不上。
+//
+// playFrom 是从这一首往后放队列，各视图自己接（列表按行，网格按格）。
+func buildSongMenu(menu *ui.Menu, songs []Music, acts Actions, i int, playFrom func(int)) {
+	if i < 0 || i >= len(songs) {
 		return
 	}
-	song := l.songs[i]
+	song := songs[i]
 
 	for _, item := range menuItems(song) {
 		if item.sep {
@@ -76,30 +86,30 @@ func (l *List) buildMenu(menu *ui.Menu, i int) {
 		}
 		// ⚠️ 每一项都要 Item 一遍：只有 Chosen 的那一项为 true。
 		if menu.Item(item.label).Chosen() {
-			l.doAction(item, i, song)
+			doAction(item, i, song, acts, playFrom)
 			return
 		}
 	}
 }
 
-// doAction 是菜单项被选中之后做的事。i 是这一行的下标，song 是它那一首。
-func (l *List) doAction(item menuItem, i int, song Music) {
+// doAction 是菜单项被选中之后做的事。i 是这一项的下标，song 是它那一首。
+func doAction(item menuItem, i int, song Music, acts Actions, playFrom func(int)) {
 	switch item.key {
 	case "play":
-		l.playFrom(i)
+		playFrom(i)
 	case "queue":
-		if l.acts.Add != nil {
-			l.acts.Add([]app.Item{song.Item})
+		if acts.Add != nil {
+			acts.Add([]app.Item{song.Item})
 		}
 	case "open":
-		if l.acts.Open != nil {
-			l.acts.Open(song.Item)
+		if acts.Open != nil {
+			acts.Open(song.Item)
 		}
 	case "favorite", "download-audio":
 		// 说清楚比按了没反应好。这两项要 B 站接口，那一张票还没做。
 		//
 		// 话里带上用户按的那个字：菜单有五项，只说「还没接」的话用户不知道
 		// 说的是哪一项，得自己再点一遍试。
-		l.notify("「" + item.label + "」还没接 B 站接口")
+		notify(acts, "「"+item.label+"」还没接 B 站接口")
 	}
 }

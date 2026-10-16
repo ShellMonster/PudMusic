@@ -12,6 +12,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -328,15 +329,11 @@ func WindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 // onPanic 拿到崩掉的东西，界面用它换一张错误页。崩了以后这一帧已经建了一半，
 // MyGo 的 build pass 会在下一次 pass 从头重建，所以 onPanic 里只要记下状态
 // 并要一帧，画面下一帧就是完整的。
+//
+// 实现本身在 `internal/ui/guard`：控件层（widgets/list）也要给自己的 view 包
+// 一层，放这里的话它就得反过来 import 界面层，那是个环。
 func Guard(draw func(*ui.Context), onPanic func(any)) func(*ui.Context) {
-	return func(c *ui.Context) {
-		defer func() {
-			if r := recover(); r != nil {
-				onPanic(r)
-			}
-		}()
-		draw(c)
-	}
+	return guard.Wrap(draw, onPanic)
 }
 
 // View 画一帧，MyGo 在需要新画面的时候调它。
