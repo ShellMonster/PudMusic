@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
@@ -79,6 +80,27 @@ func sideWidthOnScreen(t *testing.T, tt *mygoui.Tester) float32 {
 	}
 	t.Fatalf("画面上找不到折叠按钮，文字有 %q", tt.Texts())
 	return 0
+}
+
+// TestTheSidebarTransitionIsBiuTwoHundredMilliseconds 钉住验收里那个数。
+//
+// ⚠️ 「走的是过渡，不是一步到位」这件事在无头 Tester 里**钉不住**，别再试：
+// MyGo 的动画按墙上时间推进，而 `Tester.Frame()` 一帧里 settle 最多跑 20 遍
+// view（`ui/headless.go:215`）。20 遍在 -race 下足够走完 200ms，中间态一次
+// 也抓不到——写成「折叠那一帧的宽既不是 300 也不是 72」，实测 -race 下
+// 20 次错 4 次。那种测试比没有更糟：它会把「跑得慢」报成「功能没做」。
+//
+// 能钉住的是这个数：过渡时长就是 200ms（Biu 的 `duration-200`，
+// `biu/src/layout/side/index.tsx:146`）。谁把它换成弹簧、或者随手写成
+// 150ms，这条会红。过渡本身由 `viewSide` 里那句 `AnimateTo` 保证
+// （拖动那一支用 `Jump`，Biu 的 `transition-none`）。
+func TestTheSidebarTransitionIsBiuTwoHundredMilliseconds(t *testing.T) {
+	if sideWidthTransition != 200*time.Millisecond {
+		t.Errorf("侧栏过渡是 %v，want 200ms（Biu 的 duration-200）", sideWidthTransition)
+	}
+	if sideGrip != 8 {
+		t.Errorf("把手宽是 %d，want 8（Biu 的 w-2）", sideGrip)
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
