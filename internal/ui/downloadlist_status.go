@@ -135,8 +135,12 @@ func (d *downloadsPage) viewStatus(c *ui.Context, r download.Snapshot) {
 	})
 }
 
-// dlPctW 是百分比那一段的宽度。「100%」四个字符加内边距，44 够。
-const dlPctW = 44
+// dlPctW 是百分比那一段的宽度。
+//
+// 40 是按「100%」在 12px 下约 26 加一点余量挑的，而它是从**状态列**里扣的
+// （进度条和它共用那一行，见 `downloadlist.go` 里 `dlStatusW` 那段算式）——
+// 这里多给一个像素，状态列的条就少一个。
+const dlPctW = 40
 
 // dangerBar 画一条红色的进度条。
 //

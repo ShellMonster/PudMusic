@@ -141,15 +141,68 @@ func newDownloads(t *testing.T, tasks ...queuedTask) (*Shell, *ui.Tester) {
 // 也走真引擎，「排队中」和「交织中」两格就永远走不到。
 func newRows(t *testing.T, rows ...download.Snapshot) (*Shell, *ui.Tester) {
 	t.Helper()
+	return newRowsIn(t, dlWide, rows...)
+}
+
+// newRowsIn 是 `newRows` 加一个窗口宽度。窄那一档的布局只有它量得出来（
+// `TestTheFileColumnStaysReadableAtTheNarrowestWindow`）。
+func newRowsIn(t *testing.T, w int, rows ...download.Snapshot) (*Shell, *ui.Tester) {
+	t.Helper()
 	a := app.New()
 	t.Cleanup(a.Close)
 	s := newDownloadShell(t, a)
 	s.downloads.rowsFn = func() []download.Snapshot { return rows }
 
-	tt := ui.NewTester(s.View, 1200, 800)
+	tt := ui.NewTester(s.View, w, 800)
 	s.navigate(downloadListPath)
 	dlFrame(tt)
 	return s, tt
+}
+
+// dlWide 是这一组默认的窗口宽度（应用自己定的 `Width: 1200`，见 `WindowOptions`）。
+const dlWide = 1200
+
+// newRowsOnSide 是 `newRowsIn` 加一个侧栏宽度。
+//
+// 侧栏走设置里的 `SideMenuWidth`（`app.MaxSideMenuWidth` = 480），而它能把内容
+// 压到多少是这一页布局最坏的一档——比窗口最窄那一档还坏，所以单独一个夹具。
+// 设置先写到盘上再挂：那是「启动时读盘」那条路，和真窗口一样。
+func newRowsOnSide(t *testing.T, w int, side float64, rows ...download.Snapshot) *ui.Tester {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), app.SettingsFileName)
+	st, err := app.OpenSettingsStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Update(func(cur *app.Settings) {
+		*cur = app.DefaultSettings("")
+		cur.SideMenuWidth = side
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	a := app.New()
+	if err := a.MountSettings(path); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		a.Close()
+		_ = a.CloseSettings()
+	})
+
+	s := New(a)
+	t.Cleanup(s.images.Close)
+	t.Cleanup(func() { _ = s.hist.Close() })
+	s.router.Transition = ui.TransitionNone
+	s.downloads.rowsFn = func() []download.Snapshot { return rows }
+
+	tt := ui.NewTester(s.View, w, 800)
+	s.navigate(downloadListPath)
+	dlFrame(tt)
+	return tt
 }
 
 // newDownloadShell 建外壳、把两个「打开」换成记动作的桩。
@@ -218,6 +271,78 @@ func TestTheTableShowsEveryTask(t *testing.T) {
 	// 页面自己的那一行（上游的 `<h1>下载记录</h1>`）。
 	if !shows(tt, "下载记录") {
 		t.Errorf("没有画出页标题，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheFileColumnStaysReadableAtTheNarrowestWindow 钉住**最窄那一档窗口**下
+// 歌名还读得出来。
+//
+// 900 是这个应用自己定的 `WindowOptions.MinWidth`（shell.go），而这一页最难看
+// 的尺寸就是它：减去侧栏和页面内边距，表格只剩约 660。MyGo 的 `ui.Table` 把没给
+// `Width` 的列当「吃剩下的」，四个定宽吃掉多少，文件那一列就只剩多少——第一版
+// 那四个数合计 560，于是文件列只剩 100，封面占掉 48 之后**歌名一行放得下两个
+// 字**，剩下的全是「…」。而那一版的注释还说这一档「摆得下封面 + 歌名」，那是
+// 错的。
+//
+// 两种内容宽度各断一遍，因为压着歌名的两样东西各管一半：
+//
+//	侧栏默认（200）  定宽合计 452 → 文件列剩 208，装得下，所以**不许滚动**
+//	                （一个「反正列都有 MinWidth、能滚就行」的实现也绿，而用户在
+//	                 最小尺寸下得先滚才够得着删除）
+//	侧栏拖到最宽    内容只剩约 400，四个定宽装不下 → 表格横向滚动，文件列由
+//	（480）          `MinWidth` 兜在 200 上（MyGo 的 `clampWidth` 只认
+//	                `TableColumn.MinWidth`，`mygo/ui/table.go`）
+//
+// 量法：表头那个框是**字**的框，而两个表头之间隔着的正是文件列的整宽（两个表头
+// 格子各自左右各留 10 的内边距，一来一回抵掉）；表格的左边界是「文件」那个框
+// 往左 10（单元格里边距），右边界是窗口减去页面的内边距 20。
+func TestTheFileColumnStaysReadableAtTheNarrowestWindow(t *testing.T) {
+	// dlNarrow 抄的是 `WindowOptions.MinWidth`（internal/ui/shell.go）。抄而不
+	// 查是因为那边是个结构体字面量、没有导出的名字可引；而这一条的全部意义就是
+	// 「应用自己定的那一档」。
+	const dlNarrow = 900
+	row := dlSnapshot("歌名很长很长很长的一首歌", download.StatusRunning, dlProgress, dlChunk)
+
+	for _, c := range []struct {
+		what string
+		side float64
+		fits bool // 这一档五列**装得下**（装不下就横向滚动）
+	}{
+		{"侧栏默认", app.DefaultSideMenuWidth, true},
+		{"侧栏拖到最宽", app.MaxSideMenuWidth, false},
+	} {
+		tt := newRowsOnSide(t, dlNarrow, c.side, row)
+
+		file, okFile := tt.Find("文件")
+		status, okStatus := tt.Find("状态")
+		if !okFile || !okStatus {
+			t.Errorf("%s：表头没画出来，文字有 %q", c.what, tt.Texts())
+			continue
+		}
+		if got := status.X - file.X; got < dlFileMin {
+			t.Errorf("%s：窗口 %d 时「文件」列只有 %.0f 宽，want ≥ %d：封面和内边距"+
+				"占掉 76，剩下的歌名只够 %d 个汉字", c.what, dlNarrow, got, dlFileMin,
+				int((got-dlCover-8-20)/14))
+		}
+
+		// 表格实际有多宽（内容那一块的宽度）。
+		//
+		// ⚠️ **别改成量「操作」那一列的表头框跑没跑到窗口外面**：跑到外面时框架
+		// 会把它裁成宽 0（量过一次，`x=889 / w=0`），于是 `x+w > 窗口` 永远不
+		// 成立——一个「五列在最小尺寸下要滚动才够得着删除」的实现照样绿。
+		// 量表格的边界是量**布局**，量表头是量**裁剪之后**。
+		const cellPad = 10 // MyGo 单元格里边距 t.Space(2.5)
+		const pagePad = 20 // 这一页的内边距（viewDownloadList 的 Padding(20)）
+		content := float32(dlNarrow) - pagePad - (file.X - cellPad)
+		need := dlFileMin + dlStatusW + dlSizeW + dlTimeW + dlOpsW
+		if c.fits && float32(need) > content {
+			t.Errorf("%s：窗口 %d 时表格只有 %.0f 宽，五列最少要 %d：这一档要横向"+
+				"滚动才够得着删除（歌名不挤了，可删除按钮挤没了）", c.what, dlNarrow, content, need)
+		}
+		if !c.fits && float32(need) <= content {
+			t.Logf("%s：窗口 %d 时五列还装得下（%.0f ≥ %d），横向滚动那一条走不到——"+
+				"这一档只是侧栏太宽时的一个兜底", c.what, dlNarrow, content, need)
+		}
 	}
 }
 

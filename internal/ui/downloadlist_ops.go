@@ -142,18 +142,26 @@ func (d *downloadsPage) resume(r download.Snapshot, s *Shell) {
 
 // askDeleteOne 按「删除」之后弹出来的那一道。
 //
-// ⚠️ **什么时候问**：上游只在「还没下完」的时候问（`actions.tsx:137-146`：只有
-// downloading / downloadPaused / merging / … 那几个状态才 `onOpenConfirmModal`），
-// 下完的那一路是直接删。这里照它：删掉一条已经下完的记录只动记录不动文件，
-// 没什么好问的；而删掉一条下到一半的，那首歌就没了——问一句。
+// ⚠️ **一律问**，包括已经下完的那一条——这一票的验收项写的是「删除走确认弹窗」，
+// 而第一版照上游（`actions.tsx:137-146`）只对「还没下完」的才问，比验收项的字面
+// 窄了一格。评审把它挑出来是对的：这一页上「删除」不是一个只有一处的动作，
+// 用户在弹窗里看到的是这一行的歌名和它下面的状态，而删除是不可撤销的（
+// 队列里那一项没了就是没了）——多按一下换来一个统一的预期。
+//
+// 正文按状态分，因为两件事的后果完全不同，说错一句就是在骗用户：
+//
+//	没下完  上游那一句：「当前任务未下载完成，确认删除后将无法恢复」——半成品会
+//	         被删掉，那首歌就没了
+//	已下完  文件在 `Dest` 上、**不会**被动（`Manager.Remove` 只删 `.part`），
+//	         所以正文说的是「删除的只是这条记录，下载目录里的歌留着」
 func (d *downloadsPage) askDeleteOne(r download.Snapshot, s *Shell) {
+	body := "当前任务未下载完成，确认删除后将无法恢复。"
 	if r.Status == download.StatusDone {
-		d.deleteOne(r, s)
-		return
+		body = "这一条已经下完，删除的只是这条记录，下载目录里的歌留着。"
 	}
 	d.ask = &confirmAsk{
 		title: "确认删除吗？",
-		body:  "当前任务未下载完成，确认删除后将无法恢复。",
+		body:  body,
 		ok:    opDelete,
 		doIt:  func() { d.deleteOne(r, s) },
 		open:  true,

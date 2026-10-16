@@ -239,24 +239,42 @@ func TestConfirmingTheDeleteTakesTheTaskAway(t *testing.T) {
 	}
 }
 
-// TestDeletingAFinishedTaskDoesNotAsk 上游只在**没下完**的时候问
-// （`actions.tsx:137-146`），下完的那一路是直接删：删掉一条记录只动记录不动
-// 文件，没有什么不可恢复的。
+// TestDeletingAFinishedTaskStillAsks 删一条**已经下完**的也要问。
 //
-// 这一条也钉住了别把弹窗滥用到每一颗删除上：一颗每次都要多点一下的按钮，用久
-// 了就变成不看内容直接按，弹窗也就没有意义了。
-func TestDeletingAFinishedTaskDoesNotAsk(t *testing.T) {
-	s, tt := newDownloads(t, newTask("歌 甲", download.StatusDone, dlChunk, 100))
+// 第一版照上游（`actions.tsx:137-146`）只在没下完的时候问，而这一票的验收项写
+// 的是「删除走确认弹窗」——评审把这一格挑出来是对的：这一页上「删除」不是只有
+// 一处的动作，用户在弹窗里看的是这一行删掉的是什么，而删除是不可撤销的。
+//
+// 这一条同时钉住**正文按状态分**：已经下完的那一条，删掉的只是记录，那首歌在
+// 下载目录里留着（`Manager.Remove` 只删 `.part`）。正文照抄上游那句「未下载
+// 完成…无法恢复」就是在骗用户，而它恰恰是最容易照抄的一句。
+func TestDeletingAFinishedTaskStillAsks(t *testing.T) {
+	s, tt := newDownloads(t,
+		newTask("歌 甲", download.StatusDone, dlChunk, 100),
+		newTask("歌 乙", download.StatusPaused, dlProgress, 50),
+	)
 
 	if err := tt.Click(opDelete); err != nil {
 		t.Fatal(err)
 	}
 	dlFrame(tt)
-	if shows(tt, "确认删除吗？") {
-		t.Errorf("删一条已经下完的记录也弹了确认框，文字有 %q", tt.Texts())
+
+	if !shows(tt, "确认删除吗？") {
+		t.Fatalf("删一条已经下完的记录没有弹确认框，文字有 %q", tt.Texts())
 	}
-	if got := s.app.DownloadSnapshots(); len(got) != 0 {
-		t.Errorf("删了之后队列里还剩 %d 条", len(got))
+	if !tt.HasText("下载目录里的歌留着") {
+		t.Errorf("正文没有说清歌还在，文字有 %q", tt.Texts())
+	}
+	if tt.HasText("确认删除后将无法恢复") {
+		t.Error("一条已经下完的记录，正文却说「确认删除后将无法恢复」：那首歌还在盘上")
+	}
+	if got := s.app.DownloadSnapshots(); len(got) != 2 {
+		t.Fatalf("还没点头，记录就已经被删了：队列里剩 %d 条", len(got))
+	}
+
+	dlClickConfirm(t, tt)
+	if got := s.app.DownloadSnapshots(); len(got) != 1 || got[0].Title != "歌 乙" {
+		t.Errorf("确认之后队列里剩的是 %v，want 只有「歌 乙」", dlTitles(got))
 	}
 }
 
