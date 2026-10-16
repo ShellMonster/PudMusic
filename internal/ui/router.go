@@ -46,16 +46,13 @@ var routes = []Route{
 		Title: "暂无内容",
 		Hint:  "登录之后点「关注」关注的 UP 主会出现在这里",
 	}},
-	// 上游：`pages/later/index.tsx:236`。
-	{Match: "/later", Title: "稍后再看", InMenu: true, Empty: emptyState{
-		Title: "暂无稍后再看内容",
-		Hint:  "登录之后在歌上点「稍后再看」，加进来的会出现在这里",
-	}},
-	// 上游：`pages/history/index.tsx:284`。
-	{Match: "/history", Title: "历史记录", InMenu: true, Empty: emptyState{
-		Title: "暂无历史记录",
-		Hint:  "登录之后听过的歌会出现在这里，也可以「清空历史记录」",
-	}},
+	// 稍后再看（later.go）：**不填 Empty**。这一页接上了自己的 view，空状态由
+	// 它自己说（`laterEmpty`，抄上游 `pages/later/index.tsx:236`）——留着等于一句
+	// 没人会看到的话，理由见下面设置页那条。
+	{Match: laterPath, Title: "稍后再看", InMenu: true},
+	// 历史记录（history.go）：同上，空状态是 `historyEmpty`（抄上游
+	// `pages/history/index.tsx:284`）。
+	{Match: historyPath, Title: "历史记录", InMenu: true},
 	// 上游：`pages/local-music/index.tsx:263`。
 	{Match: "/local-music", Title: "本地音乐", InMenu: true, Empty: emptyState{
 		Title: "暂无内容",
@@ -197,6 +194,12 @@ func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
 	case loginPath:
 		// 扫码登录（login.go）。
 		return s.viewLogin
+	case laterPath:
+		// 稍后再看：关键词 + 日期范围 + 会自己翻页的列表（later.go）。
+		return s.viewLater
+	case historyPath:
+		// 历史记录：同一副骨架，多一列播放进度（history.go）。
+		return s.viewHistory
 	}
 	return nil
 }

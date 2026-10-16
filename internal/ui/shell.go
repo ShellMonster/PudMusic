@@ -44,6 +44,14 @@ type Shell struct {
 	// 认下的状态才留得住）。
 	searchDraft string
 
+	// laterPage / historyPage 是「稍后再看」和「历史记录」这两页各自的状态
+	// （见 librarypage.go）。挂在壳上而不是页面的局部变量，理由同上。
+	laterPage   libraryPage
+	historyPage libraryPage
+	// searchWatchStop 是那个 500ms 关键词防抖的钟。醒着的时候只有一个，
+	// 两页共用——用户一次只能在一页上敲字。
+	searchWatchStop func()
+
 	// notFoundAt 是进 404 的那一刻，notFoundStop 是那个每秒一跳的倒计时。
 	// 两者都只由主线程读写（syncRoute 在主线程），后台那一跳只调
 	// wakeHandle.invalidate，所以不违反铁律一、也没有竞态。
@@ -171,6 +179,7 @@ func New(a *app.App) *Shell {
 	s.images.AddWake(s.wake.invalidate)
 	s.hist = newSearchHistory("")
 	s.feed = newFeedPoller(dynamicFeedInterval, nil)
+	s.buildLibraryPages()
 	// pageBody 是画页面内容的那一支：404 兜底 + 已经有内容的页（设置页）+ 每条
 	// 路由自己的空状态，三样拼在 pageContent 里（router.go）。
 	// sideBody 是侧栏那一支，搬去 sidebar.go 之后从那儿接进来。
@@ -365,6 +374,9 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 就是这一帧真正用的那份，用户选了深色也只在这一帧是对的。
 	s.applyFrameTheme(c)
 	s.reportSettingsError()
+	// 收「那个 500ms 防抖的钟要不要醒着」。**每帧一次**，所以用户切走时它一定
+	// 会跟着停（见 syncSearchWatch）。
+	s.syncSearchWatch()
 
 	st := s.app.Snapshot()
 
