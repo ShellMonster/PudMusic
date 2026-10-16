@@ -294,41 +294,85 @@ func TaskID(bvid, cid string) string {
 // DestFor 算出落盘的完整路径，并让开同名的文件。
 //
 // 冲突处理照 B 站上游（`ffmpeg-processor.ts:17`）：`名字 (1).m4a`、
-// `名字 (2).m4a` 这样往后排。**不做**的话第二首同名歌会把第一首**直接
-// 盖掉**，而记录页上两行都显示「已完成」，用户点开发现少了一首。
+// `名字 (2).m4a` 这样往后排。
 //
-// 只在**还没有任何进度**时调（见 `Manager.start`）：一旦下过了就换名字，
-// 等于把已经下了一半的字节挪到另一个文件名下面，而续传记的是分块下标
-// 不是文件内偏移——换个文件那些下标全指错了位置。
+// # 「占着」有三样，缺一样就撞车
+//
+//  1. 盘上的**最终文件**——别的歌已经下完落在这儿了
+//  2. 盘上的 **`.part`**——另一首正在下，它还没改名，所以只 stat 最终名
+//     会漏掉它
+//  3. **队列里别的任务已经认领的** `Dest`——它可能一个字节都还没下，
+//     盘上什么都没有，再过几秒就有了
+//
+// 少了第 3 样就是评审第一轮那个 critical：
+//
+//	① 首（30MB）出错退出，盘上留着 同名.m4a.part
+//	② 第二首（40MB）同名入队 → DestFor 只 stat 同名.m4a（不存在）→ 也拿到
+//	   同名.m4a → 下完落在 同名.m4a，41943040 字节
+//	③ 回头重试第一首 → 它的 Dest 还是 同名.m4a → os.Rename 把它那 31457280
+//	   字节盖上去
+//	④ 第二首那条记录还写着「已完成 41943040/41943040」——而那个文件现在是
+//	   别的歌。目录里只剩一个文件，界面上显示一切正常。
+//
+// 所以 `claimed` 由 `Manager.destFor` 从队列里现算：`DestFor` 自己看不到队列，
+// 而撞车恰恰发生在队列里。
+//
+// # 255 的预算含扩展名、含同名避让的 ` (1)`、含 `.part`
+//
+// 之前这里是 `FileName(title, "")` 先把词干截到 255 再在外面拼，于是 84 个
+// 汉字（252 字节）+ `.m4a` = 256 字节。而 `.part` 之后还要再加 5——
+// 评审第二轮量到：251 个 ASCII 字符的歌名，落盘名 255 字符、`.part`
+// 260 字符，`os.Create` 报 `file name too long`，**这一首一个字节都下不了**。
+//
+// （macOS 的真实上限是 255 个**字符**不是字节，评审实测过。但按字节算是
+// 更严的那一边，所以守住字节预算就一定守得住字符上限。）
 func DestFor(dir, title, ext, id string) string {
-	// ⚠️ **255 的预算要含扩展名，也含同名避让加的那个 ` (1)`。**
-	// 之前这里是 `FileName(title, "")` 先把词干截到 255 再拼扩展名，于是
-	// 84 个汉字（252 字节）+ `.m4a` = 256 字节：词干自己没超，整个名字超了。
-	// 而 `.part` 之后还要再加 5。所以这里把「后缀」整个交给 `FileName`
-	// 去算预算——`FileName` 的第二个参数是**必须留在名字末尾的东西**，
-	// 不只是扩展名。
-	base := FileName(title, ext)
+	return destFor(dir, title, ext, id, nil)
+}
+
+// destFor 是挑名字的纯逻辑。`claimed` 是队列里别的任务已经认领的路径，
+// 可以是 nil（外面没有队列的场景，比如测试）。
+func destFor(dir, title, ext, id string, claimed map[string]bool) string {
+	// 末尾那一段之外，还要给 `.part` 留出位置——它和正式文件名同名同目录，
+	// 用户在下载目录里一眼就能看出「这是在下的那一首」，所以不能另起一个
+	// 截短的名字，只能让正式名让出这 5 个字节。
+	base := fileName(title, ext, len(partSuffix))
 	if base == "" {
 		// 歌名实在净化不出东西。拿内容 id 当名字：至少能看出是哪一首，
 		// 而编一个「未命名」在记录页上一眼看得出是名字丢了。
-		base = FileName(idSanitized(id), ext)
+		base = fileName(idSanitized(id), ext, len(partSuffix))
 	}
-	if _, err := os.Stat(filepath.Join(dir, base)); err != nil {
+	taken := func(p string) bool {
+		if claimed != nil && claimed[p] {
+			return true
+		}
+		// 别人的 `.part` 也算占着：它正在往那个位置里写。
+		return exists(p) || exists(partPath(p))
+	}
+	if !taken(filepath.Join(dir, base)) {
 		return filepath.Join(dir, base)
 	}
 	stem := strings.TrimSuffix(base, ext)
-	for i := 1; i < 10000; i++ {
+	for i := 1; i < maxNameTries; i++ {
 		// 同名避让的 ` (1)` 也要算进预算：词干再长的话它得让出这几个字节。
-		cand := FileName(stem, fmt.Sprintf(" (%d)%s", i, ext))
+		cand := fileName(stem, fmt.Sprintf(" (%d)%s", i, ext), len(partSuffix))
 		if cand == "" {
 			continue
 		}
-		if p := filepath.Join(dir, cand); !exists(p) {
+		if p := filepath.Join(dir, cand); !taken(p) {
 			return p
 		}
 	}
-	return filepath.Join(dir, base)
+	// 避让不出来（同名多到离谱）：拿内容 id 顶上，它在队列里是唯一的。
+	return filepath.Join(dir, fileName(idSanitized(id), ext, len(partSuffix)))
 }
+
+// maxNameTries 是同名避让最多试几个。
+//
+// 上游是 9999（`ffmpeg-processor.ts:17`）。这里是 1000：挑名字是**在队列的锁
+// 下面**做的（它要看别的任务占了谁），9999 次 `stat` 会把锁按到毫秒级，而
+// 界面读队列快照也要这把锁。真的避让不出来时还有内容 id 兜底。
+const maxNameTries = 1000
 
 // exists 报这个路径上有没有东西。
 func exists(p string) bool {

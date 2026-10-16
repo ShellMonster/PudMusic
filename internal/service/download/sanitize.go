@@ -75,15 +75,25 @@ func ExtOf(rawURL string) string {
 // 劈开的那半个会让整个文件名变成非法 UTF-8，HFS+ 上表现为「文件打不开」，
 // 而且它**不会报错**，只是 Finder 里那个名字显示成乱码。所以先给末尾留出
 // 位置，剩下的按字符边界往回退。
-func FileName(title, ext string) string {
+func FileName(title, ext string) string { return fileName(title, ext, 0) }
+
+// fileName 是真身，`reserve` 是**除了末尾那一段之外还要预留给别人的字节数**。
+//
+// 谁在用 `reserve`：`destFor` 预留 `.part` 的 5 个字节。半成品和正式文件名
+// 同名同目录是故意的（用户在下载目录里一眼看出「这是在下的那一首」），所以
+// 它不能另起一个截短的名字，只能让正式名让出位置——否则 251 个 ASCII 字符
+// 的歌名会落在 255 字符、`.part` 落在 260 字符，`os.Create` 直接报
+// `file name too long`，**这一首一个字节都下不了**。
+func fileName(title, ext string, reserve int) string {
 	name := sanitize(title)
 
 	// 末尾那一段自己也得夹在预算里。`.flac` 5 字节，`.m4a` 4 字节，
 	// 带上同名避让的话是 `名字 (1).flac` 那种 9 字节。
-	budget := maxNameBytes - len(ext)
+	budget := maxNameBytes - len(ext) - reserve
 	if budget <= 0 {
-		// 末尾那一段就快把 255 吃光了（不会发生，但别让它变成一个
-		// 没有上界的减法——那会从这一行直接切出去，panic）。
+		// 末尾那一段（加上别人预留给 `.part` 的）就快把 255 吃光了
+		//（不会发生，但别让它变成一个没有上界的减法——那会从这一行
+		// 直接切出去，panic）。
 		return ""
 	}
 	if len(name) > budget {

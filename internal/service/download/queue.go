@@ -162,11 +162,10 @@ func (m *Manager) Enqueue(req AddRequest) (Snapshot, error) {
 	}
 	id := TaskID(req.Bvid, req.Cid)
 
-	// 落盘名在锁**外面**算。`DestFor` 要 stat 目录（同名要一个一个往后避让，
-	// 最坏试 9999 次），那是阻塞 IO——占着锁算的话，界面在这期间读队列
-	// 快照会跟着卡住，而入队是在界面线程上调的。
+	// ⚠️ 落盘名在**锁里面**算：它要看队列里别的任务认领了谁（`destFor`），
+	// 那张表在锁下才读得到。stat 的那几下一并在锁里——同名避让最多试 1000 次
+	//（`maxNameTries`），正常情况下就是 1~2 次，够短。
 	ext := extOr(req.Ext)
-	dest := DestFor(req.Dir, req.Title, ext, id)
 
 	m.mu.Lock()
 	if t := m.tasks[id]; t != nil {
@@ -191,12 +190,13 @@ func (m *Manager) Enqueue(req AddRequest) (Snapshot, error) {
 		Title:    req.Title,
 		Cover:    req.Cover,
 		Identity: Identity{Bvid: req.Bvid, Cid: req.Cid},
-		Dest:     dest,
 		Ext:      ext,
 		Status:   StatusQueued,
 		AddedAt:  m.now(),
 	}
+	// 先把自己放进表里再挑名字：`destFor` 认得 id，会跳过自己。
 	m.tasks[id] = t
+	t.Dest = m.destFor(req.Dir, t)
 	m.order = append(m.order, id)
 	snap := SnapshotOf(t)
 	m.mu.Unlock()
@@ -497,14 +497,22 @@ func (m *Manager) waitIdle(id string) {
 // `run` 是在 `runOne` 放开锁之后才进来的，那时候直接查 map 就是一次数据
 // 竞争——而它不一定每次都被 `-race` 抓到（要正好撞上）。
 
-// destOf 拿一项的落盘路径。
-func (m *Manager) destOf(id string) string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if t := m.tasks[id]; t != nil {
-		return t.Dest
+// destFor 给 t 挑一个落盘路径。**必须在锁下调**——它要看队列里别的任务
+// 认领了谁。
+//
+// 这就是 `DestFor` 少的那一样：`DestFor` 面对的是**盘**，而撞车恰恰发生在
+// **队列**里（另一项排在队上认领了一个名字，盘上却什么都没有）。漏了它，
+// 两首同名歌会拿到同一个路径，后下的那个把先下完的静默盖掉——见 `DestFor`
+// 那段注释里的四步。
+func (m *Manager) destFor(dir string, t *Task) string {
+	claimed := make(map[string]bool, len(m.tasks))
+	for id, other := range m.tasks {
+		if id == t.ID || other.Dest == "" {
+			continue
+		}
+		claimed[other.Dest] = true
 	}
-	return ""
+	return destFor(dir, t.Title, t.Ext, t.ID, claimed)
 }
 
 // identityOf 拿一项的资源身份，取流要用。
@@ -612,7 +620,11 @@ func extOr(ext string) string {
 //	它和最终文件在**同一个目录**，所以 rename 不跨设备。放到临时目录的
 //	话，最后那一下 rename 可能变成一次几百兆的拷贝，而那正好是用户
 //	快要看到「下完了」的那一刻。
-func partPath(dest string) string { return dest + ".part" }
+func partPath(dest string) string { return dest + partSuffix }
+
+// partSuffix 是半成品的后缀。挑落盘名时要给它预留位置（见 `destFor`），
+// 不预留的话长歌名的 `.part` 会顶破文件名上限。
+const partSuffix = ".part"
 
 // drop 从 ids 里去掉一个。
 func drop(ids []string, id string) []string {
