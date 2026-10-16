@@ -65,34 +65,13 @@ func TestRightClickOpensTheBiuMenu(t *testing.T) {
 	}
 }
 
-// TestRightClickOnEachRowOpensItsOwnMenu 验菜单挂在**行**上，不是整列共用一份。
+// TestChoosingPlayQueuesThisSongAndTheRestAfterIt 钉住两件事：
 //
-// 挂错的表现是右键第二行弹出来的还是第一行的菜单（或者干脆不弹）——用户在
-// 第二行按「播放」，放出来的是第一首，比不弹更糟。
-func TestRightClickOnEachRowOpensItsOwnMenu(t *testing.T) {
-	rec := &recorded{}
-	_, tt := newList(t, rec.actions(), onlineSongs(3))
-
-	if err := tt.RightClick("在线的歌 C"); err != nil {
-		t.Fatal(err)
-	}
-	if err := tt.ChooseMenuItem("播放"); err != nil {
-		t.Fatal(err)
-	}
-	if len(rec.played) != 1 {
-		t.Fatalf("点了「播放」，收到 %d 次播放", len(rec.played))
-	}
-	// 传的是**从这一首起的全部**：Biu 的「播放」是接这一首往后接，不是重播这一首。
-	got := rec.played[0]
-	if len(got) != 1 || got[0].Bvid != "BV3" {
-		t.Errorf("点第三行的「播放」，换进队列的是 %+v，want 只有 BV3 那一首", got)
-	}
-}
-
-// TestChoosingPlayQueuesThisSongAndTheRestAfterIt 钉住「播放」的语义。
-//
-// 从这一首往后接（Biu 的 music-list-item 双击、从一页的第一首开始听都是这个意思）。
-// 少一首就是「点了一首只放一首」，多一首就是「把整张列表从头又放了一遍」。
+//   - 菜单挂在**行**上：按的是第二行，放出来的就得是第二首。菜单挂到整列上共用
+//     一份的话，按第二行放出来的会是第一首——那比不弹还糟。
+//   - 「播放」的语义是从这一首往后接（Biu 的 music-list-item 双击、从一页的第一首
+//     开始听都是这个意思）。少一首就是「点了一首只放一首」，多一首就是「把整张
+//     列表从头又放了一遍」。
 func TestChoosingPlayQueuesThisSongAndTheRestAfterIt(t *testing.T) {
 	rec := &recorded{}
 	_, tt := newList(t, rec.actions(), onlineSongs(5))

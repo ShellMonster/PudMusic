@@ -21,6 +21,9 @@
 //
 // ⚠️ 本包不认识 app.App 之外的世界，也不碰网络：封面走 imgcache，音乐条目是
 // 调用方给的 Music，操作走 Actions（接在哪儿见 actions.go）。
+//
+// `AppActions` 和 `BiliLink` 现在还没有调用方，这是有意的：挂这个列表的是
+// PLAN.md 阶段 5 的那 14 个内容页，那一张做出来时直接用它，别再写一份接线。
 package list
 
 import (
@@ -107,8 +110,10 @@ type List struct {
 // cache 是封面缓存（整个窗口共用一个），acts 是操作。两者都要传：封面走
 // imgcache.View，操作走右键菜单和双击，缺一个这个列表就只能看不能动。
 //
-// ⚠️ cache 不能是 nil：imgcache.View 会立刻在它上面取状态，nil 会让**每一行**
-// 都画不出来（每行各 recover 一次，日志刷满）。
+// ⚠️ cache 不能是 nil：imgcache.View 一拿到非空的封面地址就在它上面取状态，
+// nil 会让**带封面的每一行**画不出来（每行各 recover 一次并记一行日志）。
+// 没有封面的行照画（imgcache 对空地址早返回），所以看到「一部分行挂了、一部分
+// 好好的」就是这个原因。
 func New(cache *imgcache.Cache, acts Actions) *List {
 	return &List{cache: cache, acts: acts, sel: -1}
 }
@@ -121,7 +126,28 @@ func New(cache *imgcache.Cache, acts Actions) *List {
 //
 // ⚠️ 只能由界面线程调（就是跑 view 的那个线程）：它改的正是 view 每帧读的
 // 那份状态。
-func (l *List) SetSongs(songs []Music) { l.songs = songs }
+func (l *List) SetSongs(songs []Music) {
+	l.songs = songs
+	l.warnDuplicateIDs(songs)
+}
+
+// warnDuplicateIDs 把重复的行标识指出来。
+//
+// ⚠️ 重复 ID 的后果在**真窗口里是静默的**：MyGo 的 Tester 会当场 panic 并报出
+// 代码行号（`ui/diagnostics.go`），真窗口里它只打一行日志，然后那几行**共用
+// 一份状态**——选中一个，另一个也亮着。铁律四要的正好是反过来。
+//
+// 这里只说不动：偷偷改掉某一行的 ID，界面上画的那首和调用方拿到的那首就对不上
+// 了，那比报错更难查。要改就改 Music.ID，让它真的唯一。
+func (l *List) warnDuplicateIDs(songs []Music) {
+	seen := make(map[string]struct{}, len(songs))
+	for _, m := range songs {
+		if _, dup := seen[m.ID]; dup {
+			log.Printf("biu: 列表里有几行用了同一个 ID（%q），它们的选中状态会串在一起", m.ID)
+		}
+		seen[m.ID] = struct{}{}
+	}
+}
 
 // ScrollTo 把列表滚到第 row 行，align 是 ui.Start（顶上）、ui.Center（中间）
 // 或 ui.End（底下）。

@@ -1,8 +1,11 @@
 package list
 
 import (
+	"bytes"
 	"fmt"
 	"image/color"
+	"log"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -57,6 +60,18 @@ func songsOf(n int, owner string) []Music {
 		out[i] = song("id-"+strconv.Itoa(i), fmt.Sprintf("歌 %d", i+1), owner)
 	}
 	return out
+}
+
+// onScreen 报 title 那一行此刻在不在画面上。
+//
+// ⚠️ **不能用 `tt.HasText`**：它是**子串**匹配（`ui/headless.go` 的
+// `strings.Contains`），「歌 1」在「歌 10」「歌 1000」里都找得到——歌单一长，
+// 这些断言就永远为真，等于没写。`tt.Find` 是**全等**匹配（`n.text == s`），
+// 而且优先命中行的 Label（我们在 ListState.Label 里装的就是歌名），拿到的
+// 正好是**整行**的盒子。
+func onScreen(tt *ui.Tester, title string) bool {
+	_, ok := tt.Find(title)
+	return ok
 }
 
 // rowPixel 是某一行的底色。
@@ -122,10 +137,10 @@ func TestThousandsOfSongsOnlyBuildTheOnesInView(t *testing.T) {
 	if n := len(tt.Texts()); n > 200 {
 		t.Errorf("5000 行的首屏画出了 %d 个元素，want ≤ 200（首屏不该建全部行）", n)
 	}
-	if !tt.HasText("歌 1") {
+	if !onScreen(tt, "歌 1") {
 		t.Errorf("第一行没画出来，文字有 %q", tt.Texts())
 	}
-	if tt.HasText("歌 5000") {
+	if onScreen(tt, "歌 5000") {
 		t.Error("最后一行在首屏就画出来了")
 	}
 
@@ -134,11 +149,61 @@ func TestThousandsOfSongsOnlyBuildTheOnesInView(t *testing.T) {
 	if n := len(tt.Texts()); n > 200 {
 		t.Errorf("滚到第 2500 行之后画出了 %d 个元素，want ≤ 200", n)
 	}
-	if !tt.HasText("歌 2501") {
+	if !onScreen(tt, "歌 2501") {
 		t.Errorf("滚过去之后第 2501 行没画出来，文字有 %q", tt.Texts())
 	}
-	if tt.HasText("歌 1") {
+	if onScreen(tt, "歌 1") {
 		t.Error("滚到第 2500 行，第一行还画在画面上")
+	}
+}
+
+// TestLongListWithMixedRowHeightsLandsOnTheRightRow 是变高行那条验收的**长列表**
+// 那一半：行高参差不齐时，滚到半路仍然落在该落的那一行。
+//
+// ⚠️ 这一条和 `TestRowsTakeTheHeightOfWhatIsInThem` 不是同一件事：那条只比两行
+// 的高低，这条走的是「没量过的行按量过的平均值估」那条路——滚到第 2501 行的时候
+// 它还没被量过，位置是估的，估错了要靠量出来的那一批把它推回去。歌名一样长的
+// 列表走不到这一步（每行都一样高，估得准不准没区别）。
+//
+// 判据是**画面上的位置**：顶上的那一行就该是第 2501 首（歌名长、那一行高 76），
+// 紧跟它的那行就要按**这一行量出来的高度**摆下去（差值约 76），不是按平均值。
+func TestLongListWithMixedRowHeightsLandsOnTheRightRow(t *testing.T) {
+	const n = 5000
+	long := strings.Repeat("很长的歌名", 10)
+	songs := make([]Music, n)
+	for i := range songs {
+		title := "歌 " + strconv.Itoa(i+1)
+		if i%2 == 0 { // 偶数行折成两行，高一些
+			title = long + strconv.Itoa(i+1)
+		}
+		songs[i] = song("id-"+strconv.Itoa(i), title, "某个 UP 主")
+	}
+
+	l := New(newCache(t), Actions{})
+	l.SetSongs(songs)
+	tt := ui.NewTester(l.View, testerW, testerH)
+	tt.Frame()
+
+	l.ScrollTo(2500, ui.Start)
+	frame(tt)
+
+	top, ok := tt.Find(long + "2501")
+	if !ok {
+		t.Fatalf("滚到第 2501 首之后它没在画面上，文字有 %q", tt.Texts())
+	}
+	if top.Y > 2 {
+		t.Errorf("顶上那一行在 y=%v，want 0（滚到 2500 却没有落在那里）", top.Y)
+	}
+	next, ok := tt.Find("歌 2502")
+	if !ok {
+		t.Fatalf("紧跟的那一行没在画面上，文字有 %q", tt.Texts())
+	}
+	// 差值要是**这一行自己的**高（两行歌名 ≈ 76），而不是全表的平均值。
+	if got := next.Y - top.Y; got < 60 || got > 96 {
+		t.Errorf("第一行到第二行隔了 %v，want 约 76（两行歌名那一行自己的高）", got)
+	}
+	if onScreen(tt, "歌 1") {
+		t.Error("滚到第 2501 首，第一行还画在画面上")
 	}
 }
 
@@ -276,24 +341,35 @@ func TestWithoutKeysTheChosenSongDoesSlide(t *testing.T) {
 	t.Logf("对照成立：不带 Key 时头部插入两行，sel=%d 现在指的是 %q（不再是 b）", sel, ids[sel])
 }
 
-// TestRowKeysMustBeUnique 钉住「唯一」那半句。
+// TestRowKeysMustBeUnique 钉住「唯一」那半句，两层：
 //
-// 断言的是**框架的诊断行为**，不是我们自己检查了什么：我们没写任何校验，是
-// `ui/diagnostics.go` 在 Tester 里当场 panic 并报出代码行号。真窗口里没有这个
-// 诊断，同一个错的表现是一首歌两行的状态串在一起——那种错得在界面上找很久。
-// 所以这条是回归基线：框架哪天不报了，这条会红，那时要补的是我们这边的校验。
+//   - **Tester 里当场炸**：重复的 ID 在 Tester 里 panic 并报出代码行号
+//     （`ui/diagnostics.go`）。这一层是回归基线。
+//   - **真窗口里会说话**：真窗口没有那个诊断，重复的 ID 只是让那几行共用一份
+//     状态——选中一个另一个也亮着（铁律四要的正好反过来）。`SetSongs` 里那条
+//     警告是唯一的提示，所以它也得验。
 func TestRowKeysMustBeUnique(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("两行用了同一个 ID，列表却一声不吭")
-		} else {
-			t.Logf("重复 ID 被当场拦下：%v", r)
-		}
-	}()
-	_, _ = newList(t, Actions{}, []Music{
+	dupes := []Music{
 		song("same", "第一首", "UP 甲"),
 		song("same", "第二首", "UP 乙"),
-	})
+	}
+
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatal("两行用了同一个 ID，列表却一声不吭")
+			}
+		}()
+		_, _ = newList(t, Actions{}, dupes)
+	}()
+
+	if !strings.Contains(buf.String(), "同一个 ID") {
+		t.Errorf("重复 ID 没有被 SetSongs 说出来，日志是 %q", buf.String())
+	}
 }
 
 // TestSelectedKeepsNamingTheSameSongAcrossARefresh 走一遍公开的取法：选中项
@@ -380,7 +456,8 @@ func TestAnEmptyListAfterASelectionDoesNotCrash(t *testing.T) {
 	}
 }
 
-// TestARowThatCannotBeDrawnDoesNotTakeTheRestDown 验行级 recover 真的兜得住。
+// TestARowThatCannotBeDrawnDoesNotTakeTheRestDown 验行级 recover 真的兜得住，
+// 而且崩过的行**不再重试**。
 //
 // ⚠️ 怎么让一行画崩：用 `New` 文档里说了「不能这么用」的 nil 缓存。有封面的
 // 那一行会在 imgcache.View 里空指针崩掉，没有封面的照画——正好把「只废掉那一行」
@@ -388,7 +465,14 @@ func TestAnEmptyListAfterASelectionDoesNotCrash(t *testing.T) {
 //
 // 这一条要是挂了，表现是把整个进程带走：MyGo 的事件循环没有 recover，view 里的
 // panic 穿出去就是进程没了（铁律三的由来）。
+//
+// ⚠️ 日志是收进 buf 的，不往 stderr 吐：这一行每次跑都带一整份 `debug.Stack()`，
+// 打到 CI 日志里看着像崩了。同时它也是「不重试」的判据——重试一次就多一行日志。
 func TestARowThatCannotBeDrawnDoesNotTakeTheRestDown(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
 	l := New(nil, Actions{})
 	l.SetSongs([]Music{
 		{ID: "bad1", Title: "画不出来的第一首", Cover: "https://example.invalid/a.png"},
@@ -398,32 +482,21 @@ func TestARowThatCannotBeDrawnDoesNotTakeTheRestDown(t *testing.T) {
 	tt := ui.NewTester(l.View, testerW, testerH)
 	tt.Frame()
 
-	if !tt.HasText("这一行画不出来") {
-		t.Errorf("画崩的那一行没有占位，文字有 %q", tt.Texts())
+	if n := strings.Count(strings.Join(tt.Texts(), "|"), "这一行画不出来"); n != 2 {
+		t.Errorf("画崩的两行里有 %d 行画了占位，want 2，文字有 %q", n, tt.Texts())
 	}
-	if !tt.HasText("画得出来的一首") {
+	if !onScreen(tt, "画得出来的一首") {
 		t.Errorf("一行崩了把别的行也带走了，文字有 %q", tt.Texts())
 	}
+	after := buf.String()
 
-	// 第二帧：崩过的那两行不重试（不然每帧刷一遍日志，帧率也拖垮）。
-	//
-	// 判据是**帧之后还在那儿**占着位，而不是又崩了一遍——第一帧就已经是占位了，
-	// 单看一次分不出「重试了」和「没重试」。
+	// 连着再画四帧：那两行崩过就该记下来不再崩（每帧每行各打一份栈，帧率和日志
+	// 都受不了）。日志条数不变 = 没重试。
 	frame(tt)
-	if n := countText(tt.Texts(), "这一行画不出来"); n != 2 {
-		t.Errorf("画不出来的行有 %d 行，want 2", n)
+	frame(tt)
+	if got, want := strings.Count(buf.String(), "列表行画崩了"), strings.Count(after, "列表行画崩了"); got != want {
+		t.Errorf("再画四帧之后崩了 %d 次，第一次是 %d 次：崩过的行每帧都在重试", got, want)
 	}
-}
-
-// countText 是 texts 里有几个等于 want 的。
-func countText(texts []string, want string) int {
-	n := 0
-	for _, s := range texts {
-		if s == want {
-			n++
-		}
-	}
-	return n
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

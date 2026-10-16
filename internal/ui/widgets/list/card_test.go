@@ -118,21 +118,22 @@ func TestALocalSongHasAnEmptyCoverNotAFailedOne(t *testing.T) {
 
 // TestTheCoverSitsNextToTheTitle 验封面和文字是并排的一行，不是上下堆着。
 //
-// 判据是**画面上的位置**：封面的上边缘和歌名那一块的上边缘该在同一行上。
-// 排版坏掉时（封面跑到下一行去了、或者行高被钉死）这条会红。
+// 判据是**画面上的位置**：UP 名那一块的左边正好落在「内边距 + 序号列 + 间距 +
+// 封面 + 间距」那一处（8+40+8+48+8=112）。写死这个数是有意的——只判「比封面
+// 靠右」的话，封面挪到 x=0 也照样过。
 func TestTheCoverSitsNextToTheTitle(t *testing.T) {
 	_, tt := newList(t, Actions{}, []Music{
 		song("a", "夜空中最亮的星", "逃跑计划"),
 	})
 
-	title, ok := tt.Find("逃跑计划")
+	r, ok := tt.Find("逃跑计划")
 	if !ok {
 		t.Fatalf("UP 名没画出来，文字有 %q", tt.Texts())
 	}
-	// 封面是歌名左边那一块。它的左边是歌名的左边减去内边距、间距和序号列。
-	if title.X <= coverSize {
-		t.Errorf("UP 名那一块的左边在 %v，want 封面右边（> %v）：封面和文字没并排",
-			title.X, coverSize)
+	want := cardPadX + indexWidth + cardGap + coverSize + cardGap
+	if d := r.X - float32(want); d > 1 || d < -1 {
+		t.Errorf("UP 名那一块在 x=%v，want %v（左边就是封面），排版不是「序号 封面 文字」",
+			r.X, want)
 	}
 }
 
