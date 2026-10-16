@@ -81,10 +81,14 @@ say "产物"
 for d in build/*/; do
   [ -d "$d" ] || continue
   printf '\n  %s\n' "${d%/}"
-  # 只列用户能拿走的东西（安装包、镜像、可执行文件），不列中间产物。
+  # 只列用户能拿走的东西（镜像、安装包、应用包），不列中间产物。
+  #
+  # ⚠️ 用 `du -sh` 不用 `du -h`：给目录传 `du -h` 在这台 macOS 上会输出**多行**
+  # （目录加它下面的每一项），`$( )` 全收进来之后 printf 只给第一行补空格，
+  # 后面的几行就顶到行首去了——产物列表看起来像坏掉了。
   find "$d" -maxdepth 1 \( -name '*.dmg' -o -name '*Setup*.exe' -o -name '*.app' \) -print 2>/dev/null |
-    while read -r f; do
-      printf '    %-56s %s\n' "$(basename "$f")" "$(du -h "$f" | cut -f1)"
+    while IFS= read -r f; do
+      printf '    %-40s %6s\n' "$(basename "$f")" "$(du -sh "$f" | cut -f1)"
     done
 done
 
