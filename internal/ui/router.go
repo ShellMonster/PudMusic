@@ -146,23 +146,27 @@ func (s *Shell) placeholder(c *ui.Context, r *ui.Route, rt Route) {
 	})
 }
 
-// navigate 换页：先把上一页的提示全清掉，再跳过去，并弹一条「这一页还没做」。
+// navigate 换页：先把上一页的提示全清掉，再跳过去，还没做的页面弹一条提示。
 //
 // 三件事是一起的，缺一条就不对：
 //   - 清 Toast：上一页的提示不该挂在下一页上（验收项）。
 //   - 清 crash：崩过一页之后切到别的页要能正常画，不是停在错误页里出不来。
 //   - 弹 Toast：Biu 的验收是「点未实现的路由弹一条提示，不崩、不白屏」。
+//     **已经有内容的那一页不弹**——对着一页真做出来的东西说「还没做」，
+//     是在说一件假事，用户只会以为设置页也坏了。
 func (s *Shell) navigate(target string) {
 	s.clearToasts()
 	s.crash = nil
 	s.router.Push(target)
 
-	title := lookup(target).Title
-	if title == notFound.Title {
+	rt := lookup(target)
+	if rt.Title == notFound.Title {
 		s.addToast("没有「" + target + "」这一页")
 		return
 	}
-	s.addToast("「" + title + "」这一页还没做")
+	if s.builtPage(rt) == nil {
+		s.addToast("「" + rt.Title + "」这一页还没做")
+	}
 }
 
 // viewNav 是顶部导航栏：后退/前进 + 当前页名 + 拖窗口的那一条。

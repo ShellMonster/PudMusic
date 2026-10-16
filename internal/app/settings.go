@@ -13,7 +13,26 @@
 // Biu 和 MyGo 时不丢东西：这一版读得懂、写得回，用户换个应用打开还是原样。
 // 丢字段是最难查的一类数据丢失。
 //
-// 本文件写出的 JSON 一定包含全部键；Biu 导出的文件可能省略 `proxySettings.port`
+// ## Biu 有**两种**文件，两种都得能读
+//
+// 「Biu 的设置文件」不是一个形状，是两个：
+//
+//   - `app-settings.json`（electron-store 自己落的盘）：外面包一层信封
+//     `{"appSettings": {...}, "__internal__": {...}}`。
+//   - `biu-settings-<时间戳>.json`（设置页上「导出配置」按钮下载下来的）：
+//     **裸的 `{...}`，外面没有信封**——`export-import.tsx:19` 写的是
+//     `JSON.stringify(settingStore?.appSettings ?? defaultAppSettings, null, 2)`，
+//     写的是 `appSettings` 的值本身。Biu 自己的「导入配置」要的也是这个形状
+//     （同文件 :46-51，逐个 `defaultAppSettings` 的键去取）。
+//
+// 用户真正会拿到手上、真正会拿来「导入」的是**第二种**——第一种躺在
+// `~/Library/Application Support/Biu/` 里，用户一般不知道它在哪。所以认不出
+// 裸的那份不是「少支持一种格式」，是**导入功能整个不工作**：整份文件被当成没有
+// 任何已知键，退回全默认值，**一声不响**，用户只会觉得「导入了但什么都没变」。
+//
+// 判据见 `splitEnvelope`。
+//
+// 本文件写出的 JSON 一定包含全部键；Biu 的文件可能省略 `proxySettings.port`
 // 这类可选键，读的时候补默认值即可——两个方向的差别只在这里。
 //
 // ## 为什么原子写不够（Codex M9）
@@ -59,8 +78,12 @@ const SchemaVersion = 1
 //
 // ⚠️ 和 Biu 的 `app-settings.json` 不一样。Biu 那个名字是 electron-store 的
 // `StoreNameMap.AppSettings` 直接拼出来的，没有语义。我们按 `PLAN.md` §3.4
-// 用 `settings.json`——**键名一致才需要兼容，文件名不需要**。要导入 Biu 的
-// 备份，把文件内容贴进来即可，不用改文件名。
+// 用 `settings.json`——**键名一致才需要兼容，文件名不需要**。
+//
+// 导入 Biu 的配置就是把它的文件放到设置文件该在的位置上，**内容不用改**：
+// Biu 的两种形状（electron-store 的 `app-settings.json`、以及设置页「导出
+// 配置」下载的 `biu-settings-*.json`）都能直接读，见文件头的说明和
+// `splitEnvelope`。
 const SettingsFileName = "settings.json"
 
 // 设置文件里几个约定值。
@@ -378,6 +401,9 @@ var (
 //
 // 没有这个文件**不是错误**，返回默认值——第一次运行就是这样。
 //
+// 读得懂三种形状（自己写的、Biu 的 electron-store 落盘文件、Biu「导出配置」
+// 下载的裸文件），见文件头和 `splitEnvelope`。
+//
 // 返回的 Settings 在出错时也总是可用的（要么是默认值，要么是从坏文件里
 // 尽力恢复出来的），调用方只需要看 error 决定要不要告诉用户。
 func LoadSettings(path string) (Settings, error) {
@@ -389,30 +415,66 @@ func LoadSettings(path string) (Settings, error) {
 		return DefaultSettings(""), fmt.Errorf("app: 读设置 %s: %w", path, err)
 	}
 
-	var f settingsFile
-	if err := json.Unmarshal(b, &f); err != nil {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(b, &top); err != nil {
 		// 先把坏文件留下来再重置。没有它，用户丢了设置都不知道丢了什么，
 		// 也没法把里面没坏的部分捞回来。
 		backupSettings(path)
 		return DefaultSettings(""), fmt.Errorf("%w: %s (%v)", ErrSettingsCorrupt, path, err)
 	}
 
-	// 文件里没有 schemaVersion 键时，解出来就是 0，也就是 v0——
-	// 正好是 Biu 直接导出的那份。两边用同一个数字，不需要再猜。
-	from := f.SchemaVersion
+	s, from, err := splitEnvelope(b, top)
+	if err != nil {
+		backupSettings(path)
+		return DefaultSettings(""), fmt.Errorf("%w: %s (%v)", ErrSettingsCorrupt, path, err)
+	}
+
 	if from > SchemaVersion {
 		// 不备份、不动它。这是别人（更新的版本）写的，我们无权处置。
 		return DefaultSettings(""), fmt.Errorf("%w: 文件是 v%d，我们只到 v%d（%s）",
 			ErrSettingsFromNewer, from, SchemaVersion, path)
 	}
 
-	s := f.AppSettings
 	if err := applyMigrations(&s, from); err != nil {
 		backupSettings(path)
 		return DefaultSettings(""), fmt.Errorf("app: 升级设置 %s 失败，已保留原文件: %w", path, err)
 	}
 	s.normalize()
 	return s, nil
+}
+
+// splitEnvelope 把一份设置文件拆成「设置」和「它是第几版」。
+//
+// 三种形状，认错任何一种的后果都是**静默丢设置**：
+//
+//  1. 我们自己写的：{"schemaVersion": 1, "appSettings": {...}}
+//  2. Biu 的 electron-store 落盘文件：{"appSettings": {...}, "__internal__": {...}}
+//     （`__internal__` 是 conf 的内部状态，标准库自动忽略，我们也不写回去）
+//  3. **Biu 设置页上「导出配置」下载的那份：裸的 `{...}`，外面没有信封。**
+//     `biu/src/pages/settings/export-import.tsx:19` 写的是
+//     `JSON.stringify(settingStore?.appSettings ?? defaultAppSettings, null, 2)`。
+//     用户真正拿得着的导入文件就是这一种。
+//
+// 判据只有一条：**顶层有没有 `appSettings` 这个键**。裸的那份里根本没有它
+// （那 20 个键是 autoStart、closeWindowOption……），两种形状不会认错。
+//
+// 裸的那份按 **v0** 读：它没有 schemaVersion 键，那就是 0，也就是「Biu 直接
+// 导出的那份」——和它带信封时走的是同一条迁移链，v0 那一步会把 Biu 自己那个
+// `"system-default"` 坏字体值修掉（`biu/src/store/settings.ts:37-39` 专门兼容
+// 它，旧版本导出的文件里就是会有）。
+func splitEnvelope(b []byte, top map[string]json.RawMessage) (Settings, int, error) {
+	if _, ok := top["appSettings"]; ok {
+		var f settingsFile
+		if err := json.Unmarshal(b, &f); err != nil {
+			return Settings{}, 0, err
+		}
+		return f.AppSettings, f.SchemaVersion, nil
+	}
+	var s Settings
+	if err := json.Unmarshal(b, &s); err != nil {
+		return Settings{}, 0, err
+	}
+	return s, 0, nil
 }
 
 // migration 把 v 升到 v+1。
