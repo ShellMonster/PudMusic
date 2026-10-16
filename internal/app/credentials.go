@@ -575,26 +575,39 @@ func hasSuffix(suffixes []string, host string) bool {
 
 // Sanitize 按分类把请求上的凭据删干净。
 //
-// 网络层（阶段 3 的 RoundTripper）每个请求、**以及每一次 redirect 之后**
+// 网络层（`CredentialTransport`）每个请求、**以及每一次 redirect 之后**
 // 都要调它一遍——B 站和中间 CDN 有 302 是常态，不重新判就等于把凭据
 // 跟着 302 送到了别处。
 func (p InjectPolicy) Sanitize(req *http.Request) {
 	if req == nil {
 		return
 	}
-	switch p.Classify(req.URL.String()) {
-	case CredBiliFull:
-		// 该带的已经在 jar 和 CSRF 注入那一步带上了，这里不删。
+	p.SanitizeAs(req, p.Classify(req.URL.String()))
+}
+
+// SanitizeAs 按**已经算好的**分类删凭据。
+//
+// 存在的理由只有一个：`Classify` 只看主机、不看协议，所以「HTTPS 降到
+// HTTP 但主机名没变」它判不出来——那一跳主机还是 `api.bilibili.com`，
+// 白名单认得，凭据就顺明文链路走了。判协议的那一层在
+// `CredentialTransport.classOf` 里，判完之后用这个版本删。
+//
+// 分类传 CredBiliFull 就什么都不删（该带的已经在 jar 和 CSRF 注入那一步
+// 带上了）。别的都删 Cookie / Authorization / Proxy-Authorization。
+func (p InjectPolicy) SanitizeAs(req *http.Request, class CredentialClass) {
+	if req == nil {
 		return
-	default:
-		// 只给 Referer 的和什么都没有的，Cookie 一律不留。
-		//
-		// Authorization / Proxy-Authorization 也一起删：它们同样是凭据，
-		// 「我们只认 Cookie」这种想法在有代理的机器上会把代理密码发出去。
-		req.Header.Del("Cookie")
-		req.Header.Del("Authorization")
-		req.Header.Del("Proxy-Authorization")
 	}
+	if class == CredBiliFull {
+		return
+	}
+	// 只给 Referer 的和什么都没有的，Cookie 一律不留。
+	//
+	// Authorization / Proxy-Authorization 也一起删：它们同样是凭据，
+	// 「我们只认 Cookie」这种想法在有代理的机器上会把代理密码发出去。
+	req.Header.Del("Cookie")
+	req.Header.Del("Authorization")
+	req.Header.Del("Proxy-Authorization")
 	req.Header.Del(CookieSESSDATA)
 	req.Header.Del(CookieBiliJCT)
 	req.Header.Del(CSRFHeaderName)

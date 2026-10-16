@@ -63,6 +63,10 @@ type App struct {
 
 	queue *Queue // 播放队列，见 queue.go
 
+	// account 是扫码登录那摊事（状态、轮询、落盘），见 account.go。
+	// 挂上去之前是 nil，界面要判空。
+	account *Account
+
 	wake   func() // 界面层装：状态写完后叫它要一帧
 	done   chan struct{}
 	closed bool
@@ -84,7 +88,14 @@ func New() *App {
 func (a *App) SetWake(fn func()) {
 	a.mu.Lock()
 	a.wake = fn
+	acct := a.account
 	a.mu.Unlock()
+	// 挂登录早于装窗口（挂登录要读盘，装窗口要建窗口），所以挂登录时
+	// 这里还是 nil。顺手补一次，否则后台改了登录状态没有一帧会被叫醒，
+	// 界面会一直停在旧提示上。
+	if acct != nil {
+		acct.setWake(fn)
+	}
 }
 
 // Snapshot 返回当前状态的拷贝。
