@@ -118,5 +118,5 @@ const ilcColor32 = 0x00000020
 //
 // `THBN_CLICKED(id) = MAKEWPARAM(id, THBN_CLICKED)`——所以低位是按钮 ID、
 // 高位是这个。**两段都要对**：只看低位的话，同一个窗口上别的 `WM_COMMAND`
-// 只要低位撞上就���当成我们的按钮（见 thumbbar.go 里 ID 区间的理由）。
+// 只要低位撞上就被当成我们的按钮（见 thumbbar.go 里 ID 区间的理由）。
 const thbnClicked = 0x1800

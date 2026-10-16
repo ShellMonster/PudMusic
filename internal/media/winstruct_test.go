@@ -169,7 +169,7 @@ func TestILCColor32UsesTheRealFlag(t *testing.T) {
 	}
 }
 
-// TestTHBNClickedIsTheHighWord 断「按钮被按」那���通知码。
+// TestTHBNClickedIsTheHighWord 断「按钮被按」那道通知码。
 //
 // `THBN_CLICKED(id) = MAKEWPARAM(id, THBN_CLICKED)`：低位是按钮 ID、高位是
 // 这个通知码。**两段都要对**——只看低位的话，同一个窗口上别的 `WM_COMMAND`
