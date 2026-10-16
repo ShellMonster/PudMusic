@@ -10,7 +10,7 @@ import (
 // 要占多大地方，只在这里定一次。
 //
 // ⚠️ 调用方必须先用 Cache.AddWake 注册一路唤醒，否则图下完之后界面会永远
-// 停在占位（实测：只投递不唤醒 = 0 帧刷新）。Shell.Attach 里已经注册了。
+// 停在占位（实测：只投递不唤醒 = 0 帧刷新）。Shell.New 里已经注册了。
 func View(c *ui.Context, cache *Cache, url string, w, h float32) ui.Element {
 	// 圆角跟着主题走，不写死数字：Biu 那边的 radius="md" 也是跟着主题的，
 	// 不是常量。主题的 Radius 来自设置里的 app.Settings.BorderRadius

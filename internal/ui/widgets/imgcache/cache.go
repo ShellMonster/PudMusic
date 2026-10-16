@@ -158,6 +158,23 @@ func (c *Cache) AddWake(fn func()) (remove func()) {
 	}
 }
 
+// WakeCount 报现在注册了几路唤醒。
+//
+// 这一条是为了让「有没有接上唤醒」这件事能被验：注册是缓存的硬约定（不唤醒
+// 界面就永远停在占位），但唤醒本身是个回调，从外面看不见有没有被调过。
+// 接上唤醒的那一方（Shell.New）在测试里拿不到窗口，只能靠它确认自己装上了。
+func (c *Cache) WakeCount() int {
+	c.wakeMu.Lock()
+	defer c.wakeMu.Unlock()
+	n := 0
+	for _, fn := range c.wakes {
+		if fn != nil {
+			n++
+		}
+	}
+	return n
+}
+
 // notify 叫醒所有注册过的窗口。任何 goroutine 都能调。
 func (c *Cache) notify() {
 	c.wakeMu.Lock()

@@ -26,42 +26,50 @@ import (
 // coverColor 是测出来的封面用的颜色：画面上别处不会出现，一扫就能找到它画在哪。
 var coverColor = color.RGBA{R: 255, G: 0, B: 128, A: 255}
 
+// Biu 的那几个数，**在这里写死字面量**，不去用 playbar.go 里的同名常量。
+//
+// 为什么不用那边的常量：布局和期望都用它的话，常量一改，两边一起跟着变，
+// 测试就发现不了了——把 playbarHeight 从 88 改成 122，期望也跟着变成 122，
+// 照样全绿。而这几条正是本任务要钉死的东西（「总高 88px，封面上下各 16」），
+// 它们的真值只来自 Biu 的源码，不来自我们的常量。
 const (
-	// 播放条那一行控件加起来就要 600 出头，窗口得比它宽，不然布局会缩。
-	coverWinW = 760
-	coverWinH = 240
+	biuPlaybarHeight = 88 // layout/index.tsx:48 的 h-[88px]
+	biuPlaybarPadX   = 16 // playbar/index.tsx:23-31 的 px-4
+	biuCoverSize     = 56 // playbar/left/index.tsx:29-45 的 width={56} height={56}
+	biuCoverGap      = 8  // playbar/left/index.tsx 的 space-x-2
 )
 
-// coverTester 起一个只画播放条的窗口，状态由测试给。
-//
-// 为什么不是 s.View：那条路的状态是 app.Snapshot() 给的，而封面地址今天只能
-// 由队列项带下来（本地文件是空的，见 app.State.CoverURL）。要摆出「有地址」
-// 这两种状态，就得自己把状态递进去。viewPlayBar 是 viewMain 直接调的那一个
-// 函数，走它并不绕开生产代码。
-func coverTester(t *testing.T, st app.State) (*Shell, *mygoui.Tester) {
-	t.Helper()
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
+// 测试窗口的高度：几个都要用到 88 这条，窗口高写成一个常量，位置才能一次算清。
+const coverWinH = 460
 
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.wake.set(c) // 和 Shell.View 每帧开头做的事一样，唤醒要用它
-		s.viewPlayBar(c, st)
-	}, coverWinW, coverWinH)
-	return s, tt
+// TestPlayBarUsesBiuNumbers 是那几个数字本身的一条：playbar.go 里改成了别的数，
+// 这里就挂。下面的测试是从画面上量像素，那是另一层保险。
+func TestPlayBarUsesBiuNumbers(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		got, want float32
+		fromBiuAt string
+	}{
+		{"播放条总高", playbarHeight, biuPlaybarHeight, "layout/index.tsx:48 的 h-[88px]"},
+		{"左右内边距", playbarPadX, biuPlaybarPadX, "playbar/index.tsx 的 px-4"},
+		{"封面边长", coverSize, biuCoverSize, "playbar/left 的 width={56} height={56}"},
+		{"封面与歌名的间距", coverGap, biuCoverGap, "playbar/left 的 space-x-2"},
+	} {
+		if c.got != c.want {
+			t.Errorf("playbar.go 里 %s 是 %v，Biu 的是 %v（%s）", c.name, c.got, c.want, c.fromBiuAt)
+		}
+	}
 }
 
 // ---- 四个状态 ----
 
-// TestPlayBarCoverWithNoURLIsABlankBoxIsCoverStateEmpty：没有地址 → 画一个空框。
+// TestPlayBarCoverWithNoURLIsABlankBox：没有地址 → 画一个空框。
 //
 // ⚠️ 这不是「加载失败」。imgcache 的 drawCover 里这是分开的两支：空地址压根
 // 没有东西可显示，失败是有个地址但取不回来。这里两样都断：文字上不出现占位也
-// 不出现失败，网络上一个请求都不该发。
+// 不出现失败，并且给歌名留出的位置仍然是「16 + 56 + 8」——空框也占地方。
 func TestPlayBarCoverWithNoURLIsABlankBox(t *testing.T) {
-	// 状态里带上一个地址、又指望它别被用上，是自相矛盾的。所以这里就是不给地址。
-	_, tt := coverTester(t, app.State{HasTrack: true, Title: "本地的一首歌", CoverURL: ""})
+	_, tt := coverBarTester(t, app.State{HasTrack: true, Title: "本地的一首歌"})
 
 	if tt.HasText("载入中") {
 		t.Errorf("没有地址不该画占位，文字有 %q", tt.Texts())
@@ -70,20 +78,20 @@ func TestPlayBarCoverWithNoURLIsABlankBox(t *testing.T) {
 		t.Errorf("没有地址被画成了加载失败，文字有 %q", tt.Texts())
 	}
 
-	// 空框也占地方：歌名照样从封面右边 8px 开始（16 + 56 + 8）。
-	coverBox, ok := tt.Find("本地的一首歌")
+	title, ok := tt.Find("本地的一首歌")
 	if !ok {
 		t.Fatalf("画面上找不到歌名，文字有 %q", tt.Texts())
 	}
-	if coverBox.X != 16+56+8 {
-		t.Errorf("歌名从 x=%v 开始，应该是 16+56+8=80", coverBox.X)
+	if want := float32(biuPlaybarPadX + biuCoverSize + biuCoverGap); title.X != want {
+		t.Errorf("歌名从 x=%v 开始，应该是 %v（Biu 的 %d 左边距 + %d 封面 + %d 间距）",
+			title.X, want, biuPlaybarPadX, biuCoverSize, biuCoverGap)
 	}
 }
 
 // TestPlayBarCoverWhileLoadingShowsThePlaceholder 是载入中：占位。
 func TestPlayBarCoverWhileLoadingShowsThePlaceholder(t *testing.T) {
 	g := newGatedCover(t)
-	_, tt := coverTester(t, app.State{HasTrack: true, Title: "在线的一首歌", CoverURL: g.url()})
+	_, tt := coverBarTester(t, app.State{HasTrack: true, Title: "在线的一首歌", CoverURL: g.url()})
 
 	// 服务端卡着不回，第一帧一定是占位。
 	if !tt.HasText("载入中") {
@@ -102,13 +110,14 @@ func TestPlayBarCoverWhileLoadingShowsThePlaceholder(t *testing.T) {
 	}
 }
 
-// TestPlayBarCoverShowsTheImageWhenItIsReady 是就绪：图。
+// TestPlayBarCoverShowsTheImageWhenItIsReady 是就绪：图，并且量它的位置。
 //
-// 尺寸和位置照 Biu 抄（playbar.go 顶上那三个常量）：56×56、离左边 16、
-// 歌名在它右边 8。这里从像素上量，不用问控件要尺寸。
+// 尺寸和位置照 Biu 抄（playbar.go 顶上那几个常量）：播放条 88 高、左右 16、
+// 封面 56×56 在这一行里垂直居中（上下各 16）、到歌名 8。这里从像素上量，
+// 不是问控件要尺寸。
 func TestPlayBarCoverShowsTheImageWhenItIsReady(t *testing.T) {
 	g := newGatedCover(t)
-	_, tt := coverTester(t, app.State{HasTrack: true, Title: "在线的一首歌", CoverURL: g.url()})
+	_, tt := coverBarTester(t, app.State{HasTrack: true, Title: "在线的一首歌", CoverURL: g.url()})
 
 	g.open() // 放行，图马上就能到
 	waitCover(t, 5*time.Second, "画面上换成图", func() bool {
@@ -119,20 +128,16 @@ func TestPlayBarCoverShowsTheImageWhenItIsReady(t *testing.T) {
 		t.Fatalf("图下完了却画了失败态，文字有 %q", tt.Texts())
 	}
 
-	box := paintedBox(t, tt, coverColor)
-	if box.Dx() != 56 || box.Dy() != 56 {
-		t.Errorf("封面是 %dx%d，Biu 是 56x56，画在 %v", box.Dx(), box.Dy(), box)
-	}
-	if box.Min.X != 16 {
-		t.Errorf("封面左边在 x=%d，Biu 的播放条内边距是 16", box.Min.X)
-	}
+	// 只画播放条时它贴在画面顶上：封面该落在 y=16..72，上下各 16。
+	assertCoverGeometry(t, tt, 0)
 
 	title, ok := tt.Find("在线的一首歌")
 	if !ok {
 		t.Fatalf("画面上找不到歌名，文字有 %q", tt.Texts())
 	}
-	if gap := title.X - float32(box.Max.X); gap != 8 {
-		t.Errorf("封面到歌名之间是 %v，Biu 的 space-x-2 是 8", gap)
+	box := paintedBox(t, tt, coverColor)
+	if gap := title.X - float32(box.Max.X); gap != biuCoverGap {
+		t.Errorf("封面到歌名之间是 %v，Biu 的 space-x-2 是 %d", gap, biuCoverGap)
 	}
 }
 
@@ -143,7 +148,7 @@ func TestPlayBarCoverFailedShowsTheFailedState(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, tt := coverTester(t, app.State{HasTrack: true, Title: "在线的一首歌", CoverURL: srv.URL + "/404.png"})
+	_, tt := coverBarTester(t, app.State{HasTrack: true, Title: "在线的一首歌", CoverURL: srv.URL + "/404.png"})
 
 	waitCover(t, 5*time.Second, "画面上画出失败态", func() bool {
 		tt.Frame()
@@ -156,35 +161,54 @@ func TestPlayBarCoverFailedShowsTheFailedState(t *testing.T) {
 
 // ---- 唤醒 ----
 
-// TestPlayBarCoverWakeReachesTheWindow 钉住 imgcache/view.go 顶上那条约定：
-// 调用方必须先 AddWake，否则图下完了界面永远停在占位（实测 0 帧刷新）。
+// TestPlayBarCoverWakeIsWiredAndFires 钉住 imgcache/view.go 顶上那条约定：
+// 图下完之后必须叫醒窗口，否则界面永远停在占位（实测 0 帧刷新）。
 //
-// 关键在这一段：**不调 Frame()**，只等唤醒次数自己涨上来。少注册一路唤醒的
-// 话，wakes 会一直是 0，测试到这里就失败——而四个状态那条测试照样全绿，
-// 因为它们是自己一帧一帧催出来的。这就是「看着对但永远不刷新」混过测试的样子。
-func TestPlayBarCoverWakeReachesTheWindow(t *testing.T) {
+// 这一条只走生产接线，测试自己一个 AddWake 都不去替它装：
+//
+//	Shell.New 里 s.images.AddWake(s.wake.invalidate)  ← 下面第一段就断它
+//	App.Enqueue 一项带 Cover 的歌 → State.CoverURL
+//	Shell.View → viewPlayBar → imgcache.View
+//	Cache.finish → notify → wakeHandle.invalidate → Services().Invalidate
+//
+// 分两段断：
+//
+//  1. WakeCount 为 0 = 生产代码根本没注册唤醒。**把 New 里那一行删掉，这一步
+//     就失败。**唤醒是个回调，从外面看不见有没有被调过；缓存里留了 WakeCount
+//     就是为了让「装没装」这件事本身可查。
+//  2. 放行服务端之后**一次 Frame() 都不调**，只等计数器自己涨上来。这一段证的是
+//     缓存好了真的通知到了那一路；只投递不唤醒的话它永远停在 0。
+func TestPlayBarCoverWakeIsWiredAndFires(t *testing.T) {
 	g := newGatedCover(t)
 
 	a := app.New()
 	t.Cleanup(a.Close)
-	s := New(a)
+	s := New(a) // ← 生产接线：New 里给 s.images 装好了唤醒
 	t.Cleanup(s.images.Close)
 
+	if n := s.images.WakeCount(); n == 0 {
+		t.Fatal("Shell 没给封面缓存注册唤醒：图下完之后界面会永远停在占位（imgcache/view.go 顶上那条）")
+	}
+
 	var wakes atomic.Int32
-	// Attach 装的就是这一路（shell.go 的 s.images.AddWake(s.wake.invalidate)），
-	// 照着它装一遍：缓存好了 → 叫醒这个窗口。窗口句柄要真窗口才拿得到，
-	// 无头 Tester 里只能装这一路。
-	s.images.AddWake(func() {
-		wakes.Add(1)
-		s.wake.invalidate()
-	})
+	// 只为了量一量，不是替代上面那一路：notify 会把注册过的每一路都调一遍，
+	// 这里量到它，就说明生产那一路也被调到了。
+	s.images.AddWake(func() { wakes.Add(1) })
 
-	url := g.url()
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.wake.set(c) // 没有这一步，下面的 invalidate 什么也不会做
-		s.viewPlayBar(c, app.State{HasTrack: true, Title: "在线的一首歌", CoverURL: url})
-	}, coverWinW, coverWinH)
+	// 走真实的那条路：一个能放的文件 + 一个有地址的封面。阶段 1 只有本地项，
+	// 所以这是头一次把「队列项带封面」这半边跑通——本地文件那边 Cover 是空的，
+	// 这里显式摆上去。
+	if err := a.Enqueue(app.Item{
+		Source: "online",
+		Type:   "audio",
+		Path:   flacPath(t),
+		Title:  "在线的一首歌",
+		Cover:  g.url(),
+	}); err != nil {
+		t.Fatal(err)
+	}
 
+	tt := mygoui.NewTester(s.View, 760, coverWinH)
 	if !tt.HasText("载入中") {
 		t.Fatalf("第一帧应该是占位，文字有 %q", tt.Texts())
 	}
@@ -192,20 +216,20 @@ func TestPlayBarCoverWakeReachesTheWindow(t *testing.T) {
 
 	g.open() // 图可以回来了，但从这里到 wakes 涨起来之间不许碰 Frame()
 
-	waitCover(t, 5*time.Second, "图下完之后窗口收到唤醒", func() bool { return wakes.Load() > 0 })
+	waitCover(t, 5*time.Second, "图下完之后缓存叫了唤醒", func() bool { return wakes.Load() > 0 })
 
 	tt.Frame()
 	if tt.HasText("载入中") {
 		t.Errorf("唤醒之后画面还停在占位，文字有 %q", tt.Texts())
 	}
-	if box := paintedBox(t, tt, coverColor); box.Dx() != 56 {
-		t.Errorf("唤醒之后画出来的封面是 %v，Biu 是 56x56", box)
-	}
+	// 整窗里播放条是最后一个孩子、整条贴底，所以条顶在 coverWinH-88；封面该落在
+	// 那 88 的正中间（上下各 16）。条一高封面就往上跑，这里立刻挂。
+	assertCoverGeometry(t, tt, coverWinH-biuPlaybarHeight)
 }
 
-// TestPlayBarCoverGoesThroughTheRealShell 是接线的那一条：整个窗口跑起来，
-// 放的是本地文件——今天本地文件没有封面，播放条上应该是空框，不是占位也不是
-// 失败，更不该为了「有东西显示」去发一个请求。
+// TestPlayBarCoverGoesThroughTheRealShell 走完整 Shell.View 放本地文件：
+// 今天本地文件没有封面，播放条上应该是空框，不是占位也不是失败，更不该为了
+// 「有东西显示」去发一个请求。
 func TestPlayBarCoverGoesThroughTheRealShell(t *testing.T) {
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -222,7 +246,7 @@ func TestPlayBarCoverGoesThroughTheRealShell(t *testing.T) {
 	if err := a.Open(flacPath(t)); err != nil {
 		t.Fatal(err)
 	}
-	tt := mygoui.NewTester(s.View, 760, 460)
+	tt := mygoui.NewTester(s.View, 760, coverWinH)
 	tt.Frame()
 
 	if got := a.Snapshot().CoverURL; got != "" {
@@ -240,6 +264,54 @@ func TestPlayBarCoverGoesThroughTheRealShell(t *testing.T) {
 }
 
 // ---- 小工具 ----
+
+// coverBarTester 起一个整屏的窗口，状态由测试给。
+//
+// 只用来摆「有地址 / 没地址」那两种状态——封面地址在生产里是队列项带下来的
+// （本地文件是空的，见 app.State.CoverURL），要把有地址的那两种状态摆出来就
+// 得自己递状态进去。走的是 viewPlayBar，和 viewMain 调的是同一个函数。
+func coverBarTester(t *testing.T, st app.State) (*Shell, *mygoui.Tester) {
+	t.Helper()
+	a := app.New()
+	t.Cleanup(a.Close)
+	s := New(a)
+	t.Cleanup(s.images.Close)
+
+	tt := mygoui.NewTester(func(c *mygoui.Context) {
+		s.wake.set(c) // 和 Shell.View 每帧开头做的事一样，唤醒要用它
+		s.viewPlayBar(c, st)
+	}, 760, coverWinH)
+	return s, tt
+}
+
+// assertCoverGeometry 量封面在整张画面上的位置。
+//
+// barTop 是播放条顶边在画面上的 y。播放条是 88 高的一行、封面 56 在行内垂直居中，
+// 所以封面该落在 [barTop+16, barTop+72]：上下各 16 是怎么来的——(88-56)/2。
+//
+// 这几条一起断的是「总高 88 + 上下各 16」。播放条一高封面就跟着往上跑，底边那条
+// 先挂；上下留白不对，中间那条挂。只画播放条时它贴在画面顶上，barTop 就是 0；
+// 走整窗时它是最后一个孩子、整条贴底，barTop 就是 winH-88。
+func assertCoverGeometry(t *testing.T, tt *mygoui.Tester, barTop int) {
+	t.Helper()
+	box := paintedBox(t, tt, coverColor)
+	// (88-56)/2 = 16：上下各留 16 就是这么来的。
+	mid := (biuPlaybarHeight - biuCoverSize) / 2
+
+	if box.Dx() != biuCoverSize || box.Dy() != biuCoverSize {
+		t.Errorf("封面是 %dx%d，Biu 是 %dx%d，画在 %v", box.Dx(), box.Dy(), biuCoverSize, biuCoverSize, box)
+	}
+	if want := barTop + mid; box.Min.Y != want {
+		t.Errorf("封面的上边在 y=%d，按 %d 高的播放条该在 y=%d（上下留白 (88-56)/2 = 16）",
+			box.Min.Y, biuPlaybarHeight, want)
+	}
+	if want := barTop + biuPlaybarHeight - mid; box.Max.Y != want {
+		t.Errorf("封面的下边在 y=%d，离播放条底边 16 该是 y=%d", box.Max.Y, want)
+	}
+	if box.Min.X != biuPlaybarPadX {
+		t.Errorf("封面的左边在 x=%d，Biu 的播放条内边距是 %d", box.Min.X, biuPlaybarPadX)
+	}
+}
 
 // flacPath 是现成的测试音频，放一首歌进去才有一条「在放什么」。
 func flacPath(t *testing.T) string {

@@ -251,6 +251,32 @@ func TestEveryWindowGetsWoken(t *testing.T) {
 	}
 }
 
+// TestWakeCountCountsTheLiveOnes 验 WakeCount 数的是还挂着的那些。
+//
+// WakeCount 是给接上唤醒的那一方自查用的（它拿不到窗口，没法从界面那边看回调
+// 有没有被调过），所以它自己得先站得住：注销掉的不能再算进去。
+func TestWakeCountCountsTheLiveOnes(t *testing.T) {
+	c := New(Options{})
+	t.Cleanup(c.Close)
+
+	if got := c.WakeCount(); got != 0 {
+		t.Fatalf("刚建好的缓存数出 %d 路唤醒", got)
+	}
+	removeMain := c.AddWake(func() {})
+	removeMini := c.AddWake(func() {})
+	if got := c.WakeCount(); got != 2 {
+		t.Errorf("注册两路之后数出 %d 路", got)
+	}
+	removeMini()
+	if got := c.WakeCount(); got != 1 {
+		t.Errorf("注销一路之后数出 %d 路", got)
+	}
+	removeMain()
+	if got := c.WakeCount(); got != 0 {
+		t.Errorf("全注销之后数出 %d 路", got)
+	}
+}
+
 // TestDiskCacheSkipsRedownload 验落盘之后不用再下一次。
 func TestDiskCacheSkipsRedownload(t *testing.T) {
 	var hits atomic.Int32
