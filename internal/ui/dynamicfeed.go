@@ -361,6 +361,9 @@ func feedEmptyKey(f *dynamicFeed) string {
 
 // feedEmpty 是右边一个格子都没有时说的话。
 //
+// 「真的没有」那一支**读路由表**（`router.go` 里那一条，出处和上游的对应
+// 都记在那儿），不在这儿抄一遍——抄一遍就是两句话各改各的。
+//
 // ⚠️ **「有丢弃」和「真的没有」必须说两句话**：B 站的动态有二十多种形态，
 // 这一版只画三种。说成「暂无动态」的话，用户会以为关注的人都没发过。
 func feedEmpty(f *dynamicFeed) emptyState {
@@ -371,10 +374,7 @@ func feedEmpty(f *dynamicFeed) emptyState {
 				"（纯文字、图文、投稿），刚才那 %d 条都落在别的形态上了", f.dropped),
 		}
 	}
-	return emptyState{
-		Title: "暂无动态",
-		Hint:  "去「我的关注」关注几个 UP 主，他们的动态会出现在这里",
-	}
+	return lookup(dynamicFeedPath).Empty
 }
 
 // feedRowLabel 是一条动态给无障碍和「打字选中」用的名字。

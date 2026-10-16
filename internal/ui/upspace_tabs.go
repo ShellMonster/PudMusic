@@ -232,7 +232,9 @@ func upTabEmpty(tab int, dropped int) emptyState {
 	case upTabSeries:
 		return emptyState{Title: "暂无合集", Hint: "他还没有建合集或者系列"}
 	}
-	return emptyState{Title: "暂无动态", Hint: "回首页听歌，或者换一个 UP 主的空间看看"}
+	// 「动态」那一格读路由表（`router.go` 里那一条）：出处和上游的对应记在
+	// 那儿，不在这儿抄一遍。
+	return lookup(upPath).Empty
 }
 
 // viewUpSentinel 是末尾那一行：还有就拉，拉失败让人点重试。
