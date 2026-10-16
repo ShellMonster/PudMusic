@@ -408,9 +408,32 @@ func (a *App) tick() {
 			a.mu.Lock()
 			p := a.player
 			live := a.wantPlay || a.playing
+			wake := a.wake
+			a.mu.Unlock()
+
+			// ⚠️ `p.Position()` 必须在 `a.mu` **外面**调，理由和下面那句
+			// `checkPlayback` 是同一条（它自己要拿 `a.mu`）：
+			//
+			// 它要过变速层那把锁，而那一把锁可能被一次**网络读**持着——在线流
+			// 正在从 CDN 下这一段，CDN 卡一下锁就卡一下。而界面每一帧的第一件
+			// 事就是 `Snapshot()`（要 `a.mu`），于是 CDN 卡 2 秒，整个窗口就跟着
+			// 卡 2 秒；`StreamSource` 的卡死判定是 20 秒（`stream_source.go` 的
+			// `defaultStallTimeout`），最坏就是**窗口卡 20 秒**。
+			//
+			// 变速层那一边已经改成读内层时不持锁了（`rate.go` 的 `readInner`），
+			// 这一句是把最后那一层放大也去掉：即便它还要等，也等的是自己一个
+			// goroutine 的事，不占着界面每帧都要的那把锁。
+			var pos time.Duration
+			var playing bool
 			if p != nil && live {
-				a.position = p.Position()
-				a.playing = p.Playing()
+				pos, playing = p.Position(), p.Playing()
+			}
+
+			a.mu.Lock()
+			// 位置和 playing 是**这一台播放器**的：这中间换歌了（换歌在锁里把
+			// `a.player` 换成新的），就不能把旧那台的位置写到新歌头上。
+			if p != nil && live && a.player == p {
+				a.position, a.playing = pos, playing
 			}
 			// 锁屏上的进度条是**系统自己外推**出来的（Apple 头文件原话），
 			// 而外推的是它的时间：我们这边卡一下解码、换一次流、音频设备
@@ -422,7 +445,6 @@ func (a *App) tick() {
 			if publish {
 				a.mediaAt = now
 			}
-			wake := a.wake
 			a.mu.Unlock()
 
 			if publish {

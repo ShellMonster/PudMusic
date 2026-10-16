@@ -34,6 +34,7 @@
 package audio
 
 import (
+	"errors"
 	"io"
 	"math"
 	"sort"
@@ -257,6 +258,10 @@ func (v *varispeed) SetPosition(frame int64) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.reset(frame)
+	// 和读一样：跳位置要碰解码器，碰的是哪一段是解码器自己的事（flacdec 可能
+	// 得从上一个关键帧解过来）。同样不许拿着位置锁做，见 readInner。
+	v.mu.Unlock()
+	defer v.mu.Lock()
 	return v.inner.SetPosition(frame)
 }
 
@@ -267,6 +272,13 @@ func (v *varispeed) Close() error {
 	}
 	return nil
 }
+
+// errShortBuffer 是「调用方给的缓冲连一整个帧都装不下」。
+//
+// MyGo 对 `Read` 的约定是「buf 是整数个帧」（`mygoaudio.Decoder` 的注释），
+// `mygo/audio/source.go` 的 `stream.decode` 也固定传 `make([]float32, 2048*ch)`。
+// 所以这是**调用方的 bug**，而这里能做的诚实回答只有报错。
+var errShortBuffer = errors.New("audio: 缓冲装不下一整个帧")
 
 // Read 铺出尽量多的输出帧。
 //
@@ -279,11 +291,13 @@ func (v *varispeed) Read(buf []float32) (int, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
+	// 装不下整帧 → 报错。**不能**把 want 抬到 v.ch 来「凑」：buf 本身就只有那么
+	// 零碎几个元素，往 `buf[n:want]` 里写会当场越界 panic（实测：给一个
+	// len=0、cap=0 的缓冲就是 `slice bounds out of range [:2] with capacity 0`）。
+	// 躲开截断和躲开 panic 是两件事，这里躲开的是后者。
 	want := len(buf) - len(buf)%v.ch
 	if want == 0 {
-		// 调用方给了一个装不下整帧的缓冲。真按 want=0 返回的话就是
-		// (0, nil)，MyGo 那边读成「流到头了」——整首歌被一个畸形缓冲截断。
-		want = v.ch
+		return 0, errShortBuffer
 	}
 	n := 0
 	for n < want {
@@ -541,7 +555,7 @@ func (v *varispeed) fill() {
 		return
 	}
 	for v.avail() < int64(v.look) {
-		n, err := v.inner.Read(v.scratch)
+		n, err := v.readInner()
 		n -= n % v.ch
 		if n > 0 {
 			v.in = append(v.in, v.scratch[:n]...)
@@ -558,6 +572,33 @@ func (v *varispeed) fill() {
 			return
 		}
 	}
+}
+
+// readInner 读内层解码器，**手上不持有 v.mu**。
+//
+// # 为什么必须放开
+//
+// 那一读对本地文件是纯 CPU，对**在线流是网络**（`StreamSource.Read` 在等 CDN）。
+// 拿着 `v.mu` 读，CDN 卡一下锁就跟着卡一下，而 `Position()` → `SourceAt` 正是要
+// 这把锁——再往上，`App.tick` 是**持着 `a.mu`** 调 `Position()` 的，而界面每一帧
+// 的第一件事就是 `Snapshot()`（要 `a.mu`）。于是 CDN 卡 2 秒，整个窗口就跟着卡
+// 2 秒；而 `StreamSource` 的卡死判定是 20 秒（`stream_source.go` 的
+// `defaultStallTimeout`），最坏就是**窗口卡 20 秒**。
+//
+// 这条链是这一票引入的：改之前 `Position()` 只碰 MyGo 自己的 `mu`、从不碰 IO。
+//
+// # 放开的那一段里共享状态一个都没动
+//
+// `v.scratch` 只有解码 goroutine 用（MyGo 保证 `Decoder` 一次只被一个 goroutine
+// 用），`v.in` / `v.inEnd` / `v.eof` / `v.err` 都在重新拿到锁之后才碰。读锁的
+// `SourceAt` 在这期间看到的仍然是「上一次铺帧结束」的那份自洽状态——
+// 对它来说那就是「位置停住了」，而不是「位置是半截的」。
+//
+// `defer v.mu.Lock()` 保证内层 panic 了锁也回到手里（哪怕那一刻进程已经完了）。
+func (v *varispeed) readInner() (int, error) {
+	v.mu.Unlock()
+	defer v.mu.Lock()
+	return v.inner.Read(v.scratch)
 }
 
 // trim 丢掉分析位置之前的输入。

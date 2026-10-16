@@ -4,6 +4,7 @@ import (
 	"io"
 	"math"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -482,6 +483,129 @@ func TestChangingRateMidStreamNeverGoesBackwards(t *testing.T) {
 			// 一路换完还能把剩下的读完，且不越界。
 			drain(t, v, 1)
 		})
+	}
+}
+
+// stallDec 是「第一次 Read 一直卡到 gate 被打开」的解码器。
+//
+// 它是这一票**最贵的一个回归**的复现器（见下面那条用例）：读内层解码器时如果
+// 拿着位置锁，CDN 卡一下锁就跟着卡一下，而 `Position()` 要这把锁——再往上，
+// `App.tick` 拿着 `a.mu` 调 `Position()`，界面每帧开头的 `Snapshot()` 也要
+// `a.mu`。于是 CDN 卡 2 秒，整个窗口卡 2 秒；`StreamSource` 的卡死判定是 20 秒。
+type stallDec struct {
+	samples  []float32
+	ch, rate int
+	pos      int64
+
+	entered chan struct{} // 读到哪一步了：它正在 Read 里卡着
+	release chan struct{} // 打开它：放它出来
+	once    sync.Once
+}
+
+func (d *stallDec) SampleRate() int { return d.rate }
+func (d *stallDec) Channels() int   { return d.ch }
+func (d *stallDec) Len() int64      { return int64(len(d.samples) / d.ch) }
+
+func (d *stallDec) SetPosition(f int64) error { d.pos = max(f, 0); return nil }
+
+func (d *stallDec) Read(buf []float32) (int, error) {
+	d.once.Do(func() { close(d.entered); <-d.release })
+	left := d.Len() - d.pos
+	if left <= 0 {
+		return 0, io.EOF
+	}
+	frames := min(int64(cap(buf)/d.ch), left)
+	copy(buf, d.samples[d.pos*int64(d.ch):(d.pos+frames)*int64(d.ch)])
+	d.pos += frames
+	return int(frames) * d.ch, nil
+}
+
+// TestPositionDoesNotWaitOnTheDecoder 盯「源卡住时界面不会跟着卡住」。
+//
+// 这条钉的是 `rate.go` 的 `readInner`：读内层解码器**不持有位置锁**。
+// 回归过一次：那时锁横跨 `v.inner.Read`，一个卡住的在线流会把整层锁住，
+// `Position()` 于是跟着卡住，再往上 `App.tick` 是**持着 `a.mu`** 调 `Position()`
+// 的，而界面每一帧的第一件事就是 `Snapshot()`（要 `a.mu`）——实测 CDN 卡 2 秒，
+// 界面一帧卡 2.07 秒，而 `StreamSource` 的卡死判定是 20 秒。
+//
+// 走 `Player` 而不是直接量 `SourceAt`：那样连「上层真的会去问位置」这一段也
+// 一起量到了——`Player.Position()` 就是拿 `SourceAt` 换算的。
+func TestPositionDoesNotWaitOnTheDecoder(t *testing.T) {
+	const rate = 44100
+	src := gritty(tone(rate, 2, 440, 5))
+	d := &stallDec{
+		samples: src, ch: 2, rate: rate,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+
+	// `New` 自己就起了解码 goroutine：它会读内层，于是卡在 entered 上。
+	p := New(d)
+	defer p.Close()
+
+	select {
+	case <-d.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("解码器压根没被读到")
+	}
+
+	// ⚠️ 这一段必须带看门狗。锁真的横跨读内层时，`Position()` 会**一直**等下去
+	//（放解码器的信号在循环之后才发），直接量就会把整条用例挂到 go test 的
+	// 十分钟超时——那不是「红」，那是「挂」，下一个人只会以为这机器慢。
+	measure := func() time.Duration {
+		done := make(chan time.Duration, 1)
+		go func() {
+			start := time.Now()
+			for range 100 {
+				_ = p.Position()
+			}
+			done <- time.Since(start)
+		}()
+		select {
+		case el := <-done:
+			return el
+		case <-time.After(3 * time.Second):
+			close(d.release) // 先放它出去，别把收尾一起挂住
+			t.Fatal("源卡住的时候 Position() 一直拿不到锁——" +
+				"界面每帧开头都要问一次位置，CDN 一卡整个窗口就跟着卡" +
+				"（生产上的卡死判定是 20 秒）")
+			return 0
+		}
+	}
+
+	if el := measure(); el > 200*time.Millisecond {
+		t.Errorf("源卡住的时候 100 次 Position() 花了 %v——"+
+			"界面每帧开头都要问一次位置，CDN 一卡整个窗口就跟着卡"+
+			"（生产上的卡死判定是 20 秒）", el)
+	}
+
+	close(d.release) // 放它出来，后面的收尾才走得完
+}
+
+// TestReadRejectsABufferTooSmallForAFrame 盯畸形缓冲是**报错**而不是 panic。
+//
+// MyGo 的约定是「buf 是整数个帧」，`stream.decode` 固定传
+// `make([]float32, 2048*channels)`，所以这是**调用方的 bug**。但它不能变成
+// panic：`buf[n:want]` 在一个零长切片上会当场越界，而那个 panic 发生在解码
+// goroutine 上——整个进程跟着没。
+//
+// 也不能返回 (0, nil)：MyGo 那边读成「流到头了」（`mygo/audio/source.go` 的
+// `if err != nil || n == 0`），一首好好的歌被当场截断。
+func TestReadRejectsABufferTooSmallForAFrame(t *testing.T) {
+	const rate = 44100
+	src := gritty(tone(rate, 2, 440, 3))
+
+	for _, size := range []int{0, 1} {
+		v := newVarispeed(&memDec{samples: src, ch: 2, rate: rate})
+		buf := make([]float32, size)
+		n, err := v.Read(buf)
+		if err == nil {
+			t.Errorf("给了 %d 个元素的缓冲（两声道一帧要 2 个），却没报错：n=%d",
+				size, n)
+		}
+		if n != 0 {
+			t.Errorf("给了 %d 个元素的缓冲，却往里写了 %d 个样本", size, n)
+		}
 	}
 }
 
