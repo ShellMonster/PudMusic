@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -198,28 +197,13 @@ func (s *Shell) viewCrash(c *ui.Context) {
 	})
 }
 
-// pickFile 弹系统文件框。
-//
-// 对话框在另一个 goroutine 里开：MyGo 把弹框请求 post 到主线程再等系统回调，
-// 在主线程里等就是死等，事件循环会卡死。
-//
-// ⚠️ 文件框是多选的，选回来的每一条都得进队列——只取 paths[0] 会把用户其余选
-// 好的歌静默丢掉，用户看不出自己选漏了。所以这里和播放条的「加歌」走同一条路
-// 同一套语义：队列空着就从第一首开始放，已经有歌在放就排在后面等下一首。
-func (s *Shell) pickFile() {
-	win := s.win
-	go func() {
-		paths, err := platform.PickAudioFile(win)
-		if err != nil || len(paths) == 0 {
-			return
-		}
-		s.enqueuePicked(paths)
-	}()
-}
-
 // enqueuePicked 把文件框选回来的每一条路径都排进队列。
 //
 // 一条都不能少：少了的那几条在界面上看不出任何异样，用户只会以为是自己没选上。
+//
+// 为什么单独拎出来：文件框要系统面板，测试里调不了；路径进队列这一步是纯逻辑，
+// 拎出来才测得到（见 shell_pick_test.go）。弹框本身只有一个调用方
+// （pickAndEnqueue），在这里没有第二条路。
 func (s *Shell) enqueuePicked(paths []string) {
 	items := make([]app.Item, len(paths))
 	for i, p := range paths {

@@ -74,8 +74,15 @@ func (s *Shell) viewStepButtons(c *ui.Context) {
 //
 // 队列空的时候加歌会直接开始播，所以点一下就能听见声音；之后再加就只是排着。
 //
+// 这是**唯一**一个弹文件框的入口：播放条的「加歌」和导航栏的「打开文件」
+// 都调它。两个入口曾经各写一份，一个只取 paths[0]、还绕过队列直接 app.Open，
+// 结果用它打开的歌上一首/下一首永远是灰的。现在只剩这一条路。
+//
+// ⚠️ 文件框是多选的，选回来的每一条都得进队列——只取 paths[0] 会把用户其余选
+// 好的歌静默丢掉，用户在界面上看不出自己选漏了。
+//
 // ⚠️ 必须放在另一个 goroutine 里：MyGo 把弹框请求 post 到主线程再等系统回调，
-// 在主线程里等就是死等，事件循环会卡死（和 shell.go 的 pickFile 同一个道理）。
+// 在主线程里等就是死等，事件循环会卡死。
 func (s *Shell) pickAndEnqueue() {
 	win := s.win
 	go func() {
@@ -83,11 +90,7 @@ func (s *Shell) pickAndEnqueue() {
 		if err != nil || len(paths) == 0 {
 			return
 		}
-		items := make([]app.Item, len(paths))
-		for i, p := range paths {
-			items[i] = app.LocalItem(p)
-		}
-		s.app.Enqueue(items...)
+		s.enqueuePicked(paths)
 	}()
 }
 

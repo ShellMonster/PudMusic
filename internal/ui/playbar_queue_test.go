@@ -12,8 +12,8 @@ import (
 // 上一首/下一首这条验收项：按钮在播放条上、加了三首歌能来回切。
 //
 // 加歌这一步走的是 app.Enqueue 而不是文件框——文件框要系统面板，Tester 里
-// 开不了。按钮接的也是同一个 app.Enqueue，所以这条链路是通的（见
-// pickAndEnqueue）。
+// 开不了。导航栏的「打开文件」和播放条的「加歌」调的是同一个
+// pickAndEnqueue，底下接的就是这里这条 app.Enqueue，所以那条链路同样成立。
 
 // copiesOf 把 FLAC 素材复制成 n 个不同路径的歌名，这样「换到下一首了」
 // 是能认出来的，而不是靠时间猜。
@@ -77,7 +77,7 @@ func TestStepButtonsWalkTheQueue(t *testing.T) {
 }
 
 // TestStepButtonsDoNothingWithoutAQueue 盯的是「没进队列就不许跳」：
-// 打开文件按钮放的那一首不在队列里，按钮必须是灰的，点了也不该换歌。
+// 不走 Enqueue 放的那一首不在队列里，按钮必须是灰的，点了也不该换歌。
 func TestStepButtonsDoNothingWithoutAQueue(t *testing.T) {
 	h := newHarness(t)
 	h.open(t)
