@@ -22,7 +22,12 @@ func main() {
 	}
 	// 登录也在开窗口之前挂好：读钥匙串是阻塞 IO，
 	// 放到界面线程上读的表现是开窗时卡一下。
-	ui.MountLogin(a)
+	cli := ui.MountLogin(a)
+
+	// 在线取流跟着登录一起挂：它要用的**就是同一个** B 站客户端和同一张
+	// 凭据白名单。这里只是把零件递过去，不发请求，所以早晚无所谓——但放在
+	// 开窗口之前，「第一次点歌」就不会替「开窗」买单。
+	ui.MountStreaming(a, cli)
 
 	if err := ui.Run(a); err != nil {
 		log.Fatal(err)

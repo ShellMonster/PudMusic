@@ -213,11 +213,20 @@ func indexOfItem(items []Item, it Item) int {
 	return -1
 }
 
-// play 放队列里的一项：先开文件，开了成功再把它的封面地址记到状态上。
+// play 放队列里的一项：先开，开了成功再把它的封面地址记到状态上。
+//
+// 在线条目走 `playOnline`（它自己管代次和后台 goroutine），本地条目还是
+// 原来那条同步开文件的路。
 //
 // 开失败时不动封面：歌没换，还在放上一首，封面也不该跟着换。
 func (a *App) play(item Item) error {
-	if err := a.Open(item.Path); err != nil {
+	var err error
+	if item.isOnline() {
+		err = a.playOnline(item)
+	} else {
+		err = a.Open(item.Path)
+	}
+	if err != nil {
 		return err
 	}
 	a.setCover(item.Cover)
@@ -239,7 +248,7 @@ func (a *App) step(delta int) {
 	if !ok {
 		return
 	}
-	if item.Path == "" {
+	if item.Path == "" && !item.isOnline() {
 		a.queue.Move(-delta)
 		a.setErr("这一首还不能放：还没有接来源")
 		return

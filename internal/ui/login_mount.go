@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -31,11 +32,14 @@ const debugLogEnv = "BIU_DEBUG_HTTP"
 // 装不出凭据后端也不是致命的——那意味着这一轮只能「登进去、
 // 关掉就没了」，界面上会明说（见 viewAccountFooter）。
 // 一个钥匙串出问题的应用起不来，比一个要重新登录一次的应用糟得多。
-func MountLogin(a *app.App) {
+//
+// 返回建好的那个 B 站客户端：在线取流（`MountStreaming`）要用的**就是它**。
+// 全项目一个客户端这件事（`spec.md`「网络」一节）在这里露出来：换个调用点
+// 建第二个，取流就会走第二份请求头和第二份 cookie jar。
+func MountLogin(a *app.App) *bili.Client {
 	dir, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil {
 		log.Printf("biu: 拿不到应用数据目录，这次的登录态存不住：%v", err)
-		return
 	}
 	store, err := app.NewSystemStore(dir)
 	if err != nil {
@@ -51,6 +55,7 @@ func MountLogin(a *app.App) {
 		OnRequest: debugRequestLogger(dir, a),
 	})
 	a.MountLogin(store, cli)
+	return cli
 }
 
 // newCredentialTransport 是整个应用的网络层：唯一一个 http.Client 的底座。
@@ -58,7 +63,23 @@ func MountLogin(a *app.App) {
 // 凭据边界在这一层，不在业务代码里。业务代码只管发请求，
 // 「这个请求能不能带 Cookie」由白名单回答——
 // 靠每个调用点自己判断的话，漏一个就是一次泄露，而漏的那个没人会发现。
+var (
+	transportOnce sync.Once
+	transportVal  *app.CredentialTransport
+)
+
+// newCredentialTransport 返回**整个应用唯一**的网络层。
+//
+// 建一次就够：`app.CredentialTransport` 本身没有状态（白名单是只读的、
+// base 是个连接池），但每个 `http.Transport` 各自有一套连接池和空闲连接。
+// 建两个就等于把连接数翻倍，而「同一个请求带了哪些头」这件事也就有了
+// 两个可能不一样的来源——凭据这件事上「有两个来源」等于「有一个在偷偷生效」。
 func newCredentialTransport() *app.CredentialTransport {
+	transportOnce.Do(func() { transportVal = buildCredentialTransport() })
+	return transportVal
+}
+
+func buildCredentialTransport() *app.CredentialTransport {
 	base := &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   10 * time.Second,

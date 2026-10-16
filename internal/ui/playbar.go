@@ -77,13 +77,29 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 		title = "还没有打开文件"
 	}
 
-	ui.Column(c).Grow(1).Children(func() {
+	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, title).FontSize(15).Bold().
 			TextColor(textColor(t, st.HasTrack))
-		if st.Err != "" {
-			ui.Text(c, "打不开："+st.Err).FontSize(12).TextColor(t.Danger)
-		}
+		s.viewQualityBadge(c, st, t)
 	})
+
+	if st.Err != "" {
+		ui.Text(c, "打不开："+st.Err).FontSize(12).TextColor(t.Danger)
+	}
+}
+
+// viewQualityBadge 是歌名右边那个音质徽章（「无损 FLAC」/「320K」）。
+//
+// 本地文件不画：那是文件格式（FLAC / AAC），不是「音质」——
+// 拿格式凑一个徽章会让「无损」这两个字在两个意思之间飘。
+//
+// ⚠️ **换流之后它会变**，所以它必须每帧从 `State` 现读，不能缓存。
+// B 站换流拿回来的可能是降级过的那一档：无声地降级会让人以为自己还在听无损。
+func (s *Shell) viewQualityBadge(c *ui.Context, st app.State, t *ui.Theme) {
+	if st.Quality == "" {
+		return
+	}
+	ui.Text(c, st.Quality).FontSize(11).TextColor(t.TextMuted)
 }
 
 // viewTransport 是上一首、下一首、播放/暂停。
