@@ -369,12 +369,11 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult)
 	if !res.LoggedInAt.IsZero() {
 		sess.SavedAt = res.LoggedInAt
 	}
-	for _, c := range a.cli.SessionCookies() {
-		// 只要 B 站自己的 cookie。B 站会顺带下 buvid 之类的东西，
-		// 它们不是登录凭据，存进钥匙串只会让「保存了什么」变得不透明。
-		if !isBilibiliHost(c.Domain) {
-			continue
-		}
+	// IssuedCookies 已经只包含 B 站自己主机上下发的那一批（见 session.go
+	// 里 isBilibiliHost 的注释：按 cookie 自己的域过滤会把登录凭据滤掉）。
+	// 这里全都收下——SESSDATA / bili_jct / DedeUserID 三个都在里面，
+	// 少一个都会让「登录成功之后第一个要用的接口」失败。
+	for _, c := range a.cli.IssuedCookies() {
 		sess.Cookies = append(sess.Cookies, CookieFromHTTP(c))
 	}
 	sess.Normalize(sess.SavedAt)
@@ -403,12 +402,6 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult)
 	default:
 		a.setState(LoginState{Phase: LoginDone, Hint: "登录成功", LoggedIn: true})
 	}
-}
-
-// isBilibiliHost 判 cookie 的域是不是 B 站的。
-func isBilibiliHost(domain string) bool {
-	d := strings.ToLower(strings.TrimPrefix(domain, "."))
-	return d == "bilibili.com" || strings.HasSuffix(d, ".bilibili.com")
 }
 
 // Logout 退出登录。
@@ -481,6 +474,49 @@ func (a *Account) fail(reason string) {
 
 // Account 返回登录管理器。没挂过返回 nil（界面要判空）。
 func (a *App) Account() *Account { return a.account }
+
+// LoginState 是界面画登录页要读的那份拷贝。没挂登录时是 LoginIdle。
+func (a *App) LoginState() LoginState {
+	acc := a.account
+	if acc == nil {
+		return LoginState{Phase: LoginIdle}
+	}
+	return acc.LoginState()
+}
+
+// LoggedIn 报此刻有没有登录态。没挂登录时是 false。
+func (a *App) LoggedIn() bool {
+	acc := a.account
+	return acc != nil && acc.LoggedIn()
+}
+
+// Session 是当前登录态。没登录时 LoggedIn() 是 false。
+func (a *App) Session() Session {
+	acc := a.account
+	if acc == nil {
+		return Session{}
+	}
+	return acc.Session()
+}
+
+// CredentialBackendName 是凭据后端的名字，写诊断信息用。
+func (a *App) CredentialBackendName() string {
+	acc := a.account
+	if acc == nil {
+		return "none"
+	}
+	return acc.BackendName()
+}
+
+// SetLoginPollInterval 改扫码轮询的间隔。
+//
+// ⚠️ **只给测试用**：真等待就 2 秒。存在的理由是那 2 秒没法写进测试
+// ——「等了 2 秒」既慢又不稳定，而这条逻辑的三态、退登竞速都要跑很多遍。
+func (a *App) SetLoginPollInterval(d time.Duration) {
+	if acc := a.account; acc != nil {
+		acc.SetPollInterval(d)
+	}
+}
 
 // String 让 fmt 能打出可读的状态。
 func (s LoginState) String() string {

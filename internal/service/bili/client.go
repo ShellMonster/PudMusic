@@ -198,6 +198,36 @@ func (c *Client) cookieURL() *url.URL {
 	return u
 }
 
+// TestOnlyPointHostsAtFixture 把三个主机和 cookie 地址全都指到一台
+// 本地服务器上。
+//
+// # 为什么需要它
+//
+// jar 是**按域匹配**的。B 站的 cookie 域是 `.bilibili.com`，所以读写
+// cookie 必须用一个 B 站域名——而在测试里请求打在 `127.0.0.1` 上。
+// 没有这一条，包外的测试（app 那边的登录流程用例）会**打到真的
+// passport.bilibili.com 上去**：不报错、结果还挺合理，
+// 于是测试变成「取决于能不能连上 B 站」——能连上就一直轮询，
+// 连不上就报网络错误，两种都跟被测的逻辑无关。
+//
+// # 为什么名字里带 TestOnly
+//
+// 它是一个只给测试用的后门，挂在生产二进制里没有害（只是把主机指到别处，
+// 而这个后门没有任何生产调用方），但**必须一眼能看出它是后门**。
+// 用 `TestOnly` 前缀是因为 Go 生态约定：带这个前缀的东西被误用时
+// 编译器不会拦，但 grep 一下就找得到，而找不到才是真危险。
+func (c *Client) TestOnlyPointHostsAtFixture(base string) {
+	c.hostAPI = base
+	c.hostPassport = base
+	c.hostMember = base
+	c.sessionBase = base
+	// 已经取过的 WBI key 是从旧主机来的，换了主机就不能再用。
+	c.wbiState.mu.Lock()
+	c.wbiState.key = ""
+	c.wbiState.expiry = time.Time{}
+	c.wbiState.mu.Unlock()
+}
+
 // NewClient 按 Options 建一个客户端。
 //
 // 默认值：UA/Referer 用上面的常量、10 秒超时、带 WBI 密钥缓存、
