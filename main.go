@@ -4,7 +4,7 @@
 // 当前阶段：14 条路由的占位 + 全局 Toast + 网络封面缓存，本地音频能出声。
 //
 // 窗口怎么开、标题栏什么样、1200×800 这些，都在界面层的 ui.Run 里 ——
-// 那才是窗口骨架该待的地方。
+// 那才是窗口骨架该待的地方。设置挂在哪儿、退出时怎么存，在 ui.MountSettings 里。
 package main
 
 import (
@@ -15,7 +15,12 @@ import (
 )
 
 func main() {
-	if err := ui.Run(app.New()); err != nil {
+	a := app.New()
+	if err := ui.MountSettings(a); err != nil {
+		log.Printf("biu: 拿不到应用数据目录，这次的设置存不住：%v", err)
+	}
+
+	if err := ui.Run(a); err != nil {
 		log.Fatal(err)
 	}
 }

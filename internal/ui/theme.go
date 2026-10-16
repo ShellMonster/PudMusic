@@ -10,15 +10,8 @@
 // 写法看起来能用，切完那一帧是对的，下一帧就没了。官方文档没写这个坑，
 // `apply()` 下面那条测试就是为了钉住它。
 //
-// 接进 shell 的位置（本阶段不归我改 shell.go，只给约定）：
-//
-//	func (s *Shell) viewMain(c *ui.Context) {
-//	    ui.ApplyTheme(c, s.app.SettingsSnapshot())   ← 加这一行，且在第一行
-//	    ...
-//	}
-//
-// viewCrash 也要加：那也是一个窗口的一帧，不加的话崩溃后的错误页
-// 会用系统色画出来。
+// 接进 shell 的位置：`Shell.applyFrameTheme`，viewMain 和 viewCrash 的第一行
+// 各调它一次。别的地方不许直接调 `c.SetTheme`——漏一处就有一帧用系统色。
 package ui
 
 import (
@@ -36,6 +29,17 @@ import (
 // **必须先读再设**，反过来的话读到的是自己上一帧设的值。
 func ApplyTheme(c *ui.Context, s app.Settings, systemDark bool) {
 	c.SetTheme(BuildTheme(s, systemDark))
+}
+
+// applyFrameTheme 是每帧开头那一次 ApplyTheme，界面层唯一的入口。
+//
+// ⚠️ **先读 `c.Theme().Dark` 再设**：读到的是 MyGo 刚在帧开头重置好的、跟随
+// 系统的那份，也就是「系统现在是不是深色」。反过来的话读到的是我们上一帧
+// 自己设的档位，「跟随系统」在系统浅色时会画出深色——深浅整个反过来，而且
+// 不报错，只是界面和系统对不上。
+func (s *Shell) applyFrameTheme(c *ui.Context) {
+	systemDark := c.Theme().Dark
+	ApplyTheme(c, s.app.SettingsSnapshot(), systemDark)
 }
 
 // BuildTheme 按设置拼出这一帧要用的主题。
