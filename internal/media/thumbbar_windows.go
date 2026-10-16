@@ -321,16 +321,26 @@ func (t *thumbbar) apply(n NowPlaying) {
 
 // ensureAdded 把按钮贴上去。贴过就不贴第二次。
 //
-// ⚠️ 「贴过」这个标记**在真正调成功之后才置上**：任务栏按钮还没建好的那一次
-// 调用会返回 S_OK 却是**空操作**，而那时候若把标记置上，就再也不会重试
-// ——症状是「任务栏缩略图上永远没有按钮」，而且重开的 Explorer 也带不出来
-// （那条注册消息只在**任务栏按钮被重建**时才来，而它已经被我们标记成贴过了）。
+// **什么时候会贴第二次**：`TaskbarButtonCreated` 那条消息。资源管理器重建了
+// 任务栏按钮（它自己重启过）的时候，之前贴的按钮连同那个按钮一起没了，
+// 必须重贴——那次 `WM_REGISTERED` 会先把 `added` 清掉再走到这里。
+//
+// 那不会贴出第二排：任务栏按钮被重建，旧的那一排**跟着没了**，所以第二次
+// Add 是往一个空的工具栏上加。MSDN 也没有说同一批 ID 再 Add 一次会替换，
+// 所以这里只在这两种情况下 Add。
+//
+// ⚠️ **`added` 是在调之前就置上的，不是在调成功之后**：任务栏按钮还没建好的
+// 那一次调用会返回 S_OK 却是**空操作**，所以「返回成功」证明不了任何事。
+// 而如果改成「成功才置」，那么 `newThumbbar` 里那一次和同时到达的
+// `WM_REGISTERED` 那一次就可能各贴一遍——症状是缩略图下面出现**六个**
+// 按钮，而且每按一次跳两首。
 func (t *thumbbar) ensureAdded() {
 	t.mu.Lock()
 	if t.list == 0 || t.added {
 		t.mu.Unlock()
 		return
 	}
+	t.added = true
 	want := t.cur
 	if !t.haveCur {
 		want = thumbbarButtons(false, false)
@@ -338,9 +348,6 @@ func (t *thumbbar) ensureAdded() {
 	t.mu.Unlock()
 
 	t.callButtons(taskbarThumbBarAdd, want)
-	t.mu.Lock()
-	t.added = true
-	t.mu.Unlock()
 }
 
 // push 用 `ThumbBarUpdateButtons` 把一版新样式贴上去。
@@ -481,6 +488,12 @@ func buildGlyphImageList(size int) (uintptr, error) {
 			// 只是图标变成实心了，不是致命错。记一条，接着往下走。
 			logOnce("按钮图标的透明通道没设上，图标周围可能糊着一圈底色")
 		}
+		// ⚠️ **DeleteObject 必须在 `ImageList_SetAlphaImage` 之后**：那个函数读的是
+		// 这张位图的像素，提前放掉的话它读的是一段已经还给系统的内存——
+		// 结果是 alpha 变成随机的，症状是「图标有时候透明有时候不透明」，
+		// 而且看着像渲染问题，不会有人往这儿想。
+		// `ImageList_Add` 已经把像素拷进列表了，所以这张位图到此为止。
+		procDeleteObject.Call(hbm)
 	}
 	return himl, nil
 }

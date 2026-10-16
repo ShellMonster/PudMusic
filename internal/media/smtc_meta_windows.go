@@ -36,12 +36,12 @@ func (p *windowsPlatform) applyMetadata(smtc uintptr, n NowPlaying) {
 		logOnce("系统媒体浮窗的曲目信息拿不到，浮窗上只有歌名之外的东西")
 		return
 	}
-	updater := queryInterface(raw, iidDisplayUpdater)
-	release(raw)
-	if updater == 0 {
-		logOnce("系统媒体浮窗的曲目信息接口不对（IID 抄错了？）")
-		return
-	}
+	// ⚠️ **直接用返回值，不再 QueryInterface 一次**：按 IDL，那个 getter 递出来的
+	// 已经就是 `ISystemMediaTransportControlsDisplayUpdater*` 本身了（C++ 那边
+	// 等于一次 `static_cast`）。多问一次看着更保险，实际是把**一个本可以绕开的
+	// IID 抄错风险**放到关键路径上——而这一票在 Windows 上没法真机验。
+	// 下面 `get_MusicProperties` 同理。
+	updater := raw
 	defer release(updater)
 
 	// 没有歌就把浮窗上那一栏整个清掉。⚠️ 不清的话，关掉一首歌之后锁屏上会
@@ -66,12 +66,7 @@ func (p *windowsPlatform) applyMetadata(smtc uintptr, n NowPlaying) {
 		logOnce("浮窗的音乐属性接口拿不到，浮窗上没有歌名和艺人")
 		return
 	}
-	music := queryInterface(rawMusic, iidMusicProps)
-	release(rawMusic)
-	if music == 0 {
-		logOnce("浮窗的音乐属性接口不对（IID 抄错了？）")
-		return
-	}
+	music := rawMusic
 	defer release(music)
 
 	putStr(music, musicPutTitle, n.Title)

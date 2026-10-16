@@ -292,6 +292,12 @@ var iidActivationFactory = mustGUID("00000035-0000-0000-c000-000000000046")
 // `ISystemMediaTransportControlsInterop`，而我们要的是**后一个**——桌面应用
 // 拿到媒体会话的正规途径就是直接问这个工厂要 `GetForWindow`。
 func activationFactory(class string, iid guid) (uintptr, error) {
+	// `LazyProc.Call` 在符号找不到时会 panic，而这里调用它的位置是「会话刚
+	// 建起来的那一刻」——在 COM 那条路上 panic 会直接带走进程，界面、播放、
+	// 队列全跟着完。先探一次。
+	if procRoGetFactory.Find() != nil {
+		return 0, errPlatform("这个系统上没有 WinRT 激活入口")
+	}
 	name, err := winString(class)
 	if err != nil {
 		return 0, err

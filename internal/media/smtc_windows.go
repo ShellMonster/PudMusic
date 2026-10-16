@@ -61,11 +61,11 @@ var (
 	// 它是一个可激活类，所以要的是它自己那个 IID。
 	iidSmtcTimeline = mustGUID("5125316a-c3a2-475b-8507-93534dc88f15")
 
-	// iidDisplayUpdater 是 `SystemMediaTransportControlsDisplayUpdater`。
-	iidDisplayUpdater = mustGUID("8abbc53e-fa55-4ecf-ad8e-c984e5dd1550")
-
-	// iidMusicProps 是 `IMusicDisplayProperties`（歌名、艺人都在它上面）。
-	iidMusicProps = mustGUID("6bbf0c59-d0a0-4d26-92a0-f978-e1d18e7b")
+	// ⚠️ 这里**故意没有** `IDisplayUpdater` 和 `IMusicProperties` 的 IID：
+	// `get_DisplayUpdater` / `get_MusicProperties` 递出来的已经就是那两个接口
+	// 本身，按 IDL 它们是该类型的指针（C++ 那边等于一次 static_cast）。
+	// 再 QI 一次看着更保险，实际是把两个本可以绕开的 IID 抄错风险放到关键
+	// 路径上——抄错了的症状是「浮窗上什么都没有」而日志上什么都看不到。
 )
 
 // ---- 虚表下标 ----
@@ -396,6 +396,11 @@ func (p *windowsPlatform) attach(fn func(Command, time.Duration)) {
 
 // detach 摘掉命令处理器。**不清 SMTC 里的曲目信息**——那件事归 `apply`，
 // `Session.Clear` 会专门发一次 StateNone（为什么这么写见 media.go）。
+//
+// ⚠️ 这里**故意不 `unbind`**（不放 SMTC、不摘窗口子类）。走到这里只有一条路：
+// 进程正在退出（`ui.MountMedia` 把它挂在 `OnWillQuit` 上）。这时候去摘子类
+// 反而多一次跨线程的窗口消息——而摘它唯一的理由是「免得下一个窗口收到
+// 指向已释放对象的回调」，而下一个窗口在退出流程里根本不会出现。
 func (p *windowsPlatform) detach() {
 	p.mu.Lock()
 	thumb := p.thumb
