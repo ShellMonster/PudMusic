@@ -226,7 +226,28 @@ func (a *Account) restore(cli *bili.Client) error {
 		_ = a.mgr.Logout(context.Background())
 		return err
 	}
+	if cli == nil {
+		// 没有客户端就没有地方装 cookie。这条路只有测试会走
+		//（MountLogin(store, nil)），但**不许**让它 panic：
+		// 从这里 panic 出去会是在界面线程上，整个进程没了。
+		return errors.New("app: 没有 B 站客户端，读回来的登录态装不进去")
+	}
 	return cli.SeedCookies(httpCookiesOf(a.mgr.Current()))
+}
+
+// Close 停掉在途的轮询。App.Close 调它。
+//
+// 不调也能靠进程退出收拾掉，但那样「退出应用」到「进程真的没了」之间
+// 还会一直往 B 站打请求——而且退出前那一刻用户点了一下登录的话，
+// 那个 goroutine 会一直等在 ctx 上。
+func (a *Account) Close() {
+	a.mu.Lock()
+	stop := a.stop
+	a.stop = nil
+	a.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
 }
 
 // httpCookiesOf 把落盘的 cookie 变成 net/http 认的形式。

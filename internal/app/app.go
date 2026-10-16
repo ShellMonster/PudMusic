@@ -264,6 +264,9 @@ func (a *App) Close() {
 	if p != nil {
 		p.Close()
 	}
+	if a.account != nil {
+		a.account.Close()
+	}
 }
 
 // tick 是进度条的时钟：把播放器的当前位置读回来，界面上的进度条才会自己走。
