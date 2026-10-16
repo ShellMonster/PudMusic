@@ -379,8 +379,12 @@ func TestRedirectWithinWhitelistKeepsUpToItsOwnLevel(t *testing.T) {
 }
 
 // TestPolicyRoundTripThroughRealRedirect 是 `PLAN.md` 阶段 3 的验收用例
-// （「用假 HTTP 服务断言 redirect 到陌生 host 时不带 Cookie」），
-// 先在这里跑一遍：阶段 3 拿到的是已经验过的策略，不是刚写的假设。
+// （「用假 HTTP 服务断言 redirect 到陌生 host 时不带 Cookie」）。
+//
+// 这一条从「策略测试」升级成了**生产那一层**的测试：走的是
+// `CredentialTransport` 本身，不是这里临时搭的一个 helper——
+// 临时搭的那个验的是「策略能删 Cookie」，而用户遇到的是
+// 「整个传输层有没有在每一跳调它」。
 func TestPolicyRoundTripThroughRealRedirect(t *testing.T) {
 	var cdnGot string
 	cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -389,57 +393,36 @@ func TestPolicyRoundTripThroughRealRedirect(t *testing.T) {
 	}))
 	defer cdn.Close()
 
+	// 陌生主机收到了一个 302，把用户往 CDN 送。
 	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 陌生主机收到了一个 302，把用户往真正的 CDN 送。
 		http.Redirect(w, r, cdn.URL+"/cover.jpg", http.StatusFound)
 	}))
 	defer foreign.Close()
 
 	p := app.DefaultInjectPolicy()
-	var last *http.Request
+	tr := &app.CredentialTransport{Base: http.DefaultTransport, Policy: p}
 	jar, _ := cookiejar.New(nil)
-	c := &http.Client{
-		Jar: jar,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if p.RedirectClass(via[len(via)-1].URL, req.URL) == app.CredNone {
-				req.Header.Del("Cookie")
-			}
-			last = req
-			return nil
-		},
-		Transport: redactAfter(&http.Transport{}, p),
-	}
+	c := tr.Client(jar)
 
-	res, err := c.Get(foreign.URL + "/cover.jpg")
+	req, err := http.NewRequest(http.MethodGet, foreign.URL+"/cover.jpg", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer res.Body.Close()
+	req.Header.Set("Cookie", "SESSDATA=abcdef123456")
 
-	if last == nil {
-		t.Fatal("没有走过重定向")
+	res, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := last.Header.Get("Cookie"); got != "" {
-		t.Errorf("陌生主机上收到了 Cookie：%q", got)
+	res.Body.Close()
+
+	if got := req.Header.Get("Cookie"); got != "SESSDATA=abcdef123456" {
+		t.Errorf("调用方的请求被改了：%q", got)
 	}
 	if cdnGot != "" {
 		t.Errorf("被 302 送过去的 CDN 上有 Cookie：%q", cdnGot)
 	}
 }
-
-// redactAfter 包一层 Transport：每次发出前按策略删凭据。
-// 网络层阶段 3 要实现的正是这个，这里先有个能跑的版本当证据。
-func redactAfter(rt http.RoundTripper, p app.InjectPolicy) http.RoundTripper {
-	return roundTripperFunc(func(req *http.Request) (*http.Response, error) {
-		clone := req.Clone(req.Context())
-		p.Sanitize(clone)
-		return rt.RoundTrip(clone)
-	})
-}
-
-type roundTripperFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 脱敏边界：诊断信息里能出现什么
