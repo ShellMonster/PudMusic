@@ -112,6 +112,10 @@ type Shell struct {
 	// hist 是搜索历史。没挂上盘时是内存里的一份（见 searchhistory.go）。
 	hist *searchHistory
 
+	// collection 是歌单内容页（`/collection/{id}`）此刻的那一份状态。
+	// 换容器就整个换掉，见 `collectionFor`。
+	collection *collectionPage
+
 	// crash 是上一帧 panic 到的东西，非 nil 时这一帧画错误页。
 	crash any
 

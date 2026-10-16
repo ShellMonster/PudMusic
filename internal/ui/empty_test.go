@@ -36,11 +36,24 @@ func TestSpecEmptyStates(t *testing.T) {
 		// target 是切过去要走的路径；path 是它的路由（去掉 query）。
 		target string
 		path   string
+		// setup 是「切过去之前先把这页要用的东西挂上」。没有就不调。
+		//
+		// ⚠️ 需要它的是收藏夹那一页：它现在**有内容了**（头图区 + 列表 +
+		// 批量操作条，collectionpage.go），而「没有收藏夹」是这一页**自己
+		// 里面**的一支——容器拉回来了、里面一条都没有。所以那一句要真的跑
+		// 到它，就得先有一个真能回「空收藏夹」的 B 站。
+		setup func(t *testing.T, s *Shell)
 	}{
-		{"没有收藏夹", noFavorites, "/collection/12345", "/collection/{id}"},
-		{"没有搜索结果", noSearchResults, "/search?q=" + url.QueryEscape("周杰伦"), searchPath},
-		{"没有下载记录", noDownloads, "/download-list", "/download-list"},
-		{"没有歌词", noLyrics, miniPlayerPath, miniPlayerPath},
+		{
+			what: "没有收藏夹", e: noFavorites,
+			target: "/collection/12345", path: "/collection/{id}",
+			setup: func(t *testing.T, s *Shell) {
+				s.app.MountCollections(app.CollectionRefs{Client: newEmptyFolderClient(t)})
+			},
+		},
+		{"没有搜索结果", noSearchResults, "/search?q=" + url.QueryEscape("周杰伦"), searchPath, nil},
+		{"没有下载记录", noDownloads, "/download-list", "/download-list", nil},
+		{"没有歌词", noLyrics, miniPlayerPath, miniPlayerPath, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.what, func(t *testing.T) {
@@ -53,12 +66,15 @@ func TestSpecEmptyStates(t *testing.T) {
 
 			s, tt := newShell(t)
 			// 宿主必须真的能画出来：「这句话是对的」和「用户走得到这句话」是两
-			// 回事。宿主要么在 builtPage 里注册了页面视图（搜索、迷你播放器），
-			// 要么自己带这句 Empty（收藏夹、下载记录）。
+			// 回事。宿主要么在 builtPage 里注册了页面视图（搜索、迷你播放器、
+			// 收藏夹），要么自己带这句 Empty（下载记录）。
 			rt := lookup(c.path)
 			if s.builtPage(rt) == nil && rt.Empty != c.e {
 				t.Fatalf("%s 那一页（%s）既没有注册页面视图、带的也不是这一句，"+
 					"切过去画的是别的东西", c.what, c.path)
+			}
+			if c.setup != nil {
+				c.setup(t, s)
 			}
 			// 「没有歌词」有前提：得先有歌在放。没打开任何文件就说「暂无歌词」，
 			// 那句话和屏幕上的事实对不上。
@@ -74,6 +90,11 @@ func TestSpecEmptyStates(t *testing.T) {
 				openATrack(t, s)
 			}
 			s.navigate(c.target)
+			// 收藏夹那一页要先等后台把容器拉回来（头图区第一帧是「正在加载…」，
+			// 空状态那一支要 `info.Loaded` 才画得出来）；别的三页不发请求。
+			if c.setup != nil {
+				waitCollectionHeader(t, s, tt)
+			}
 			tt.Frame()
 
 			if !tt.HasText(c.e.Title) {
@@ -333,6 +354,24 @@ func TestEmptyStateCopySaysWhyAndHow(t *testing.T) {
 	check("没有搜索结果", noSearchResults)
 	check("没有下载记录", noDownloads)
 	check("没有歌词", noLyrics)
+}
+
+// waitCollectionHeader 等歌单内容页把容器拉回来（头图区第一帧是「正在加载…」）。
+func waitCollectionHeader(t *testing.T, s *Shell, tt *mygoui.Tester) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		tt.Frame()
+		// ⚠️ 判据是**结果**不是帧数：那一趟跑在 goroutine 里，而 Tester 一帧
+		// 只要几十微秒——按帧数等就是按运气等，慢机器上会偶发地红。
+		if s.collection != nil && s.app.Collection(s.collection.ref).Loaded {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("等了 2s，收藏夹的元信息还没加载完，文字有 %q", tt.Texts())
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // hasActionCue 报句子里有没有一个动作词。

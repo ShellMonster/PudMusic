@@ -29,6 +29,11 @@ func main() {
 	// 开窗口之前，「第一次点歌」就不会替「开窗」买单。
 	ui.MountStreaming(a, cli)
 
+	// 歌单内容页（收藏夹 / 合集 / 系列）用的是**同一个**客户端和同一张
+	// 凭据白名单。它不发请求，所以挂在开窗口之前只是「零件都齐了」这件事
+	// 看得见一点，不是怕它抢时间。
+	ui.MountCollections(a, cli)
+
 	if err := ui.Run(a); err != nil {
 		log.Fatal(err)
 	}
