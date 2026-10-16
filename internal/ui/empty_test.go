@@ -2,9 +2,11 @@ package ui
 
 import (
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
@@ -26,7 +28,7 @@ import (
 //
 // 宿主在哪、「为什么在那儿」，写在对应 view 的注释里：收藏夹在
 // `/collection/{id}`、下载记录在 `/download-list`、搜索结果在 `/search`（带上
-// 搜索词的那一支）、歌词在 `/empty`。
+// 搜索词的那一支）、歌词在 `/mini-player`（**得先有歌在放**——见下面那条注释）。
 func TestSpecEmptyStates(t *testing.T) {
 	cases := []struct {
 		what string
@@ -38,7 +40,7 @@ func TestSpecEmptyStates(t *testing.T) {
 		{"没有收藏夹", noFavorites, "/collection/12345", "/collection/{id}"},
 		{"没有搜索结果", noSearchResults, "/search?q=" + url.QueryEscape("周杰伦"), searchPath},
 		{"没有下载记录", noDownloads, "/download-list", "/download-list"},
-		{"没有歌词", noLyrics, emptyPath, emptyPath},
+		{"没有歌词", noLyrics, miniPlayerPath, miniPlayerPath},
 	}
 	for _, c := range cases {
 		t.Run(c.what, func(t *testing.T) {
@@ -51,12 +53,25 @@ func TestSpecEmptyStates(t *testing.T) {
 
 			s, tt := newShell(t)
 			// 宿主必须真的能画出来：「这句话是对的」和「用户走得到这句话」是两
-			// 回事。宿主要么在 builtPage 里注册了页面视图（搜索、歌词），要么
-			// 自己带这句 Empty（收藏夹、下载记录）。
+			// 回事。宿主要么在 builtPage 里注册了页面视图（搜索、迷你播放器），
+			// 要么自己带这句 Empty（收藏夹、下载记录）。
 			rt := lookup(c.path)
 			if s.builtPage(rt) == nil && rt.Empty != c.e {
 				t.Fatalf("%s 那一页（%s）既没有注册页面视图、带的也不是这一句，"+
 					"切过去画的是别的东西", c.what, c.path)
+			}
+			// 「没有歌词」有前提：得先有歌在放。没打开任何文件就说「暂无歌词」，
+			// 那句话和屏幕上的事实对不上。
+			if c.what == "没有歌词" {
+				if s.app.Snapshot().HasTrack {
+					t.Fatalf("测试自己出了问题：还没打开文件就有歌在放")
+				}
+				s.navigate(c.target)
+				tt.Frame()
+				if tt.HasText(noLyrics.Title) {
+					t.Fatalf("没打开任何文件就说「暂无歌词」，文字有 %q", tt.Texts())
+				}
+				openATrack(t, s)
 			}
 			s.navigate(c.target)
 			tt.Frame()
@@ -92,7 +107,7 @@ func TestTheFourSpecStatesAreAllReachable(t *testing.T) {
 		{"没有收藏夹", "/collection/{id}"},
 		{"没有搜索结果", searchPath},
 		{"没有下载记录", "/download-list"},
-		{"没有歌词", emptyPath},
+		{"没有歌词", miniPlayerPath},
 	} {
 		if s.builtPage(lookup(c.path)) != nil {
 			continue
@@ -346,4 +361,30 @@ func TestEmptyStatesAreDistinct(t *testing.T) {
 		}
 		seen[rt.Empty.Hint] = rt.Match
 	}
+}
+
+// openATrack 给外壳塞进一首真的歌，走的是应用层那扇正门（app.Open）。
+//
+// 歌词那一支的前提是「有歌在放」：没打开任何文件就说「暂无歌词」，那句话和
+// 屏幕上的事实对不上——上一轮把它挂在一张通用展示页上就是这么错的。
+//
+// 用的是 flacdec 的测试素材，和 playbar_test.go 那套一样（那边在外部测试包里，
+// 这里够不着）。`Open` 是异步的（解码在 goroutine 上），所以得轮询等快照翻过来。
+func openATrack(t *testing.T, s *Shell) {
+	t.Helper()
+	p := filepath.Join("..", "service", "audio", "flacdec", "testdata", "stereo16.flac")
+	if _, err := os.Stat(p); err != nil {
+		t.Skipf("找不到 FLAC 测试素材：%v", err)
+	}
+	if err := s.app.Open(p); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.app.Snapshot().HasTrack {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("等了 5 秒，快照里还是没有歌在放")
 }

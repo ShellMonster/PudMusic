@@ -448,10 +448,10 @@ func TestRenderShots(t *testing.T) {
 	tt.Frame()
 	save(t, dir, "14a2-搜索-没有结果.png", tt)
 
-	// 歌词那一支落在空状态落地页上（见 empty.go 的 viewLyricsEmpty）。
+	// 空状态落地页：上游的默认空状态。
 	s.navigate("/empty")
 	tt.Frame()
-	save(t, dir, "14b-空状态落地页-歌词.png", tt)
+	save(t, dir, "14b-空状态落地页.png", tt)
 	// 已经有内容的那一页：设置页不画空状态，画的是它自己。
 	s.navigate("/settings")
 	tt.Frame()
@@ -466,6 +466,12 @@ func TestRenderShots(t *testing.T) {
 	s.clock.(*fakeClock).Advance(time.Second)
 	tt.Frame()
 	save(t, dir, "17-404后自动回首页.png", tt)
+
+	// 歌词那一支：先打开一首真的歌，再进迷你播放器（nowplaying.go）。
+	openATrack(t, s)
+	s.navigate("/mini-player")
+	tt.Frame()
+	save(t, dir, "19-迷你播放器-没有歌词.png", tt)
 
 	// 深色下同一批页面——顺带看一眼页面 view 装没装主题。
 	tt.SetDark(true)

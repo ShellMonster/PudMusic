@@ -63,7 +63,12 @@ func (s *Shell) viewEmpty(c *ui.Context, key string, e emptyState) {
 //	没有收藏夹   /collection/{id}   路由表里的 Empty
 //	没有搜索结果 /search（带上 q）  searchpage.go 的 viewSearch
 //	没有下载记录 /download-list     路由表里的 Empty
-//	没有歌词     /empty             empty.go 的 viewLyricsEmpty
+//	没有歌词     /mini-player（有歌在放时）  nowplaying.go 的 viewNowPlaying
+//
+// 「没有歌词」这一条的前提是**有歌在放**——没打开任何文件的时候不该看见「暂无
+// 歌词」，那句话和屏幕上的事实对不上。宿主是迷你播放器：它是 14 条路由里唯一
+// 一条表示「正在放什么」的页面，而歌词是「正在放的这首歌」的属性。理由写在
+// nowplaying.go 顶上。
 //
 // 「怎么才能不空」那一句必须给用户一个能做的下一步，见 emptyState.Hint 和
 // TestEmptyStateCopySaysWhyAndHow。
@@ -111,27 +116,4 @@ var noDownloads = emptyState{
 var noLyrics = emptyState{
 	Title: "暂无歌词",
 	Hint:  "在歌词搜索里换个源（网易云 / LRCLIB）再找一次",
-}
-
-// emptyPath 是空状态落地页那条路由，和 routes 表里登记的是同一个字符串。
-const emptyPath = "/empty"
-
-// viewLyricsEmpty 是歌词那一支的页面视图，「没有歌词」就落在它上面。
-//
-// ## 为什么是 `/empty` 这一页
-//
-// 歌词面板本身住在全屏播放器里，那是阶段 6 的东西（PLAN.md 的 S-08）。在那之前
-// 这一支得有个地方落脚，而 `/empty` 正是为这件事留的：上游 `pages/empty/index.tsx`
-// 画的就是一个 `<Empty />`——这一页**整个的用处**就是「让人看见空状态长什么样」。
-// 上游没给 title 所以落回默认的「暂无内容」；我们给同一个组件传 lyrics 那个
-// title，传的是它唯一的 prop。
-//
-// 别的选择都不行：14 条路由是 Biu 那 14 条，不多不少，往里塞一条歌词路由等于
-// 编了一条 Biu 没有的；而把「暂无歌词」写在别的页面上，等于让那一页在用户没找
-// 歌词的时候也说「没有歌词」。
-//
-// 歌词面板落地之后，把这一件从 builtPage 里挪走、挂到播放器上就行，本页退回
-// 共享默认的「暂无内容」。
-func (s *Shell) viewLyricsEmpty(c *ui.Context, _ *ui.Route) {
-	s.viewEmpty(c, "page:lyrics", noLyrics)
 }

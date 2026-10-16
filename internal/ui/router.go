@@ -92,17 +92,16 @@ var routes = []Route{
 	}},
 	// 「没有收藏夹」，文案在 empty.go 的 noFavorites（上游出处也写在那儿）。
 	{Match: "/collection/{id}", Title: "收藏夹 / 合集 / 系列", Empty: noFavorites},
-	// 空状态落地页（P-29）。上游 `pages/empty/index.tsx:6` 在这里画的就是一个
+	// 空状态落地页（P-29）。上游 `pages/empty/index.tsx:6` 画的就是一个
 	// `<Empty />`——这一页整个的用处就是「让人看见空状态长什么样」，上游没给
-	// title，所以落回共享默认的「暂无内容」。我们给它传 lyrics 那个 title：
-	// 同一个组件、同一个 prop，换的是传进去的那一句（见 empty.go 的
-	// viewLyricsEmpty 为什么挑这一页）。
-	{Match: "/empty", Title: "空状态"},
-	// 上游：`pages/mini-player/index.tsx:128`。
-	{Match: "/mini-player", Title: "迷你播放器", Empty: emptyState{
-		Title: "暂无播放内容",
-		Hint:  "在主窗口里点「打开文件」，这边就会显示正在放什么",
+	// title，所以落回共享默认的「暂无内容」。照抄。
+	{Match: "/empty", Title: "空状态", Empty: emptyState{
+		Title: "暂无内容",
+		Hint:  "随便切到别的页面——每一页空着的时候都是这个样子",
 	}},
+	// 迷你播放器（nowplaying.go）：没歌时是上游的「暂无播放内容」，有歌时是歌名 +
+	// 歌词区。所以**不填 Empty**：填了就是一句没人会看到的话。
+	{Match: "/mini-player", Title: "迷你播放器"},
 }
 
 // notFound 是兜底那一条：路径谁都不匹配就是它，对应 Biu 的 P-30。
@@ -186,9 +185,9 @@ func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
 	case searchPath:
 		// 搜索页有搜索框，两个空状态从 URL 上的 q 分得出来（searchpage.go）。
 		return s.viewSearch
-	case emptyPath:
-		// 空状态落地页（P-29）拿给歌词那一支（见 empty.go 的 viewLyricsEmpty）。
-		return s.viewLyricsEmpty
+	case miniPlayerPath:
+		// 正在放什么 + 它的歌词（nowplaying.go）。
+		return s.viewNowPlaying
 	}
 	return nil
 }
