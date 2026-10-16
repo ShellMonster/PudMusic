@@ -57,7 +57,9 @@ func TestNotFoundRedirectsHomeAfterThreeSeconds(t *testing.T) {
 	if tt.HasText("秒后回到主页...") {
 		t.Errorf("已经回首页了，画面上还留着倒计时，文字有 %q", tt.Texts())
 	}
-	if !tt.HasText(routes[0].Empty.Title) {
+	// 判首页画出来了没有看它自己的那一排 Tab：`routes[0].Empty.Title` 那句
+	// 「暂无内容」是上游的共享默认文案，13 个页面都画它，拿它当判据等于没断。
+	if !tt.HasText(homeTabs[0]) {
 		t.Errorf("回首页之后首页没画出来，文字有 %q", tt.Texts())
 	}
 }
