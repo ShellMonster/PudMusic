@@ -275,6 +275,44 @@ func (a *App) ScrubEnd(fraction float64) {
 	}
 }
 
+// Stop 停掉播放并把当前曲目清空，**队列不动**。没有在放的时候什么都不做。
+//
+// 「清空播放列表」和「把正在放的那一首删掉」最后都落到这里。停了还留着状态是
+// 不行的：那之后播放条上还是那首歌的名字，抽屉里已经没有它了——用户看到的界面
+// 和它说的事实对不上，而且再按「播放」会试图重开一个用户已经删掉的文件。
+//
+// ⚠️ **不停后台时钟**。clock 是 Close 的事（进程要退了才停）；这里停了还要能再
+// 放下一首。
+func (a *App) Stop() {
+	a.mu.Lock()
+	p := a.player
+	a.player = nil
+	a.playing = false
+	// ⚠️ **代次要加**：在途的在线流回来时只对一遍代次（`online.go` 的 runOnline
+	// / failOnline / noteQuality 都对）。不加的话，用户把正在放的那首删掉之后
+	// 那条流才建好——它照样会装上来，队列是空的、播放器却在放一首不在队列里的歌，
+	// 正是 Stop 要避免的那件事。
+	a.onlineGen++
+	a.online = nil
+	a.quality = ""
+	a.reportedErr = nil
+	a.title, a.path, a.cover = "", "", ""
+	a.position, a.duration = 0, 0
+	a.wantPlay = false
+	a.errText = ""
+	wake := a.wake
+	a.mu.Unlock()
+
+	// 先把状态摘干净，再关解码器：和 Open 换歌同一个道理，关的过程中 tick 拿到
+	// 的不会再是这一个。
+	if p != nil {
+		p.Close()
+	}
+	if wake != nil {
+		wake()
+	}
+}
+
 // Close 停掉播放、关掉解码器和文件句柄，并停掉后台时钟。可以重复调用。
 func (a *App) Close() {
 	a.mu.Lock()

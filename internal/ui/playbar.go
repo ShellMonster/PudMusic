@@ -51,7 +51,7 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 				s.viewProgress(c, st)
 			})
 
-			// 右：音量 + 加歌。
+			// 右：音量 + 加歌 + 播放列表。
 			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 				// 音量条自己带无障碍标签，不用旁边再摆一个「音量」字。
 				vol := st.Volume
@@ -61,6 +61,15 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 
 				if ui.Button(c, "加歌").Width(56).Clicked() {
 					s.pickAndEnqueue()
+				}
+
+				// 抽屉的开关。Biu 把它放在播放条右边
+				//（`biu/src/layout/playbar/right/index.tsx` 的
+				// `<OpenPlaylistDrawerButton />`），这里跟着放。
+				//
+				// 宽度要放得下四个汉字：按 56 画出来是「播放...」，看着像坏了。
+				if ui.Button(c, "播放列表").Width(88).Clicked() {
+					s.drawerOpen = !s.drawerOpen
 				}
 			})
 		})
@@ -87,12 +96,20 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 
 	ui.Column(c).Grow(1).Children(func() {
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, title).FontSize(15).Bold().
+			// ⚠️ **最多两行**：这一层只有两行的位置（88 高的播放条），歌名折到第三
+			// 行就把底下那行错误推出播放条外面——字画了，但没人看得见。
+			//
+			// 为什么是两行而不是一行：窗口窄的时候右边那一块（音量 / 加歌 /
+			// 播放列表）挤掉的宽度是实打实的，一行截断会让歌名只剩十几个字。
+			// 两行是「窄窗口下仍然读得到歌名」和「88 高放得下」之间那个折中。
+			// （Biu 那边是 `truncate` 单行，它那三个键都是图标，比我们窄。）
+			ui.Text(c, title).FontSize(15).Bold().MaxLines(2).
 				TextColor(textColor(t, st.HasTrack))
 			s.viewQualityBadge(c, st, t)
 		})
 		if st.Err != "" {
-			ui.Text(c, "打不开："+st.Err).FontSize(12).TextColor(t.Danger)
+			// **一行**：它排在歌名下面，歌名已经可能要两行，它再折就没有位置了。
+			ui.Text(c, "打不开："+st.Err).FontSize(12).SingleLine().TextColor(t.Danger)
 		}
 	})
 }
