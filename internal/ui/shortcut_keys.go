@@ -203,6 +203,11 @@ const (
 	// `200px` 宽（`shortcut-settings.tsx:102`），高度按一行字加内边距取。
 	shortcutFieldWidth  = 200
 	shortcutFieldHeight = 30
+
+	// clearButtonSize 是那个 × 的边长。Biu 摆的是 16px 的圆圈图标（`RiCloseCircleFill
+	// size={16}`），这里取 18 上下：格子只有 30 高，按钮默认的内边距会让它撑到 29.3
+	// 高（几乎占满整格），钉死之后它才是「一个 ×」而不是「一整条按钮」。
+	clearButtonSize = 18
 )
 
 // shortcutRecorder 画快捷键那一格：没在录的时候显示它现在的键，点了开始录。
@@ -256,11 +261,23 @@ func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcut
 		color = t.Danger
 	}
 
-	field := ui.Box(c).Key(shortcutFieldKey(slot)).
+	// 🔴 **这一格必须是 `ui.Row`，不是 `ui.Box`。**
+	//
+	// `ui.Box` 就是**列**（`ui/context.go` 的 coreBox → coreColumn）：子元素从上往下
+	// 排，而且**每一个都拉满列的宽度**。所以「键 + ×」在 Box 里是**上下两层**：键占满
+	// 184 宽的那一层，× 同样占满 184 宽、而高度有 29，于是它整个掉到框的**外面**去
+	// ——点不到（Biu 那个 × 变成死按钮），而且从画面上看是「两层框、× 压着下一行」。
+	// 键也在上面那一层贴着上边框，没有上下居中。
+	//
+	// 实测（`TestEveryRecorderCellKeepsItsClearButtonInside` 的注释里有整张表）：
+	//
+	//	Box(Text + Button) → 键 184x15.3 @ y=0    × 184x29.3 @ y=15.3   ← 掉出框外
+	//	Row(Text.Grow + Button) → 键 145.9x15.3 @ y=7.3  × 38.1x29.3 @ y=0.3 ← 框内、居中
+	field := ui.Row(c).Key(shortcutFieldKey(slot)).
 		Width(shortcutFieldWidth).Height(shortcutFieldHeight).
 		Radius(t.Radius).Background(t.Surface).Border(1, border).
-		Padding(0, 8).FocusBind(&s.recording, slot).
-		Label(recorderLabel(item, slot))
+		Padding(0, 8).AlignItems(ui.Center).
+		FocusBind(&s.recording, slot).Label(recorderLabel(item, slot))
 	if ro {
 		// 只读时这一格既不该吃键也不该抢焦点：Disabled 的元素不取焦点、不响应
 		// 点击、不处理输入（`ui/element.go:1252`）。FocusBind 已经把它标成可
@@ -272,29 +289,32 @@ func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcut
 	}
 
 	field.Children(func() {
-		// 🔴 **这里不能 `.Grow(1)`。**
-		//
-		// MyGo 的排版里，「一个 Grow(1) 的 Text 后面跟一个 Button」会把那个 Text
-		// 压成 0.7 DIP 高——不是 0，是 0.7：框还在，字一个也没画出来。实测（见
-		// `TestEveryRecorderCellActuallyDrawsItsKey`）：
-		//
-		//	Text.Grow + Button      → 200x0.7   ← 字不见了
-		//	Text.Shrink(0) + Button  → 200x15.3  ← 正常
-		//	Text.Grow + Text         → 200x14.7  ← 兄弟是 Text 就没事
-		//	Text.Grow + Icon         → 200x17.0  ← 兄弟是 Icon 就没事
-		//
-		// 症状极难认：× 只在「不录的时候」才画，所以正在录的那一格字是好的，录完
-		// 退出来就变成空框；而无头 Tester 的 `HasText` 是**按标签**匹配的，「⌘+P」
-		// 在 `Texts()` 里仍然在（标签是画不画都在的），`Find` 也仍然找得到（返回
-		// 一个 0x0 的框）。所以测试要读**画出来的像素**，不能读文字列表。
-		ui.Text(c, text).FontSize(13).SingleLine().Shrink(0).TextColor(color)
+		// `Grow(1)`：把 × 右边剩下的宽度全吃掉，于是 × 永远贴着右边，超长的键被
+		// `SingleLine` 截断而不是把 × 顶出框外（手改过的设置文件里可能有很长的值）。
+		ui.Text(c, text).FontSize(13).SingleLine().Grow(1).Shrink(0).TextColor(color)
 		// 清空。Biu 的 `endContent` 那个 ×（`shortcut-key-input/index.tsx:46`），
-		// 这一格没设键的时候不画——没东西可清的时候摆一个叉只是让人多按一次
-		// 空的。
-		if !recording && !ro && item.Shortcut != "" &&
+		// 它的显示条件是「不是只读**且**有值」——**不是**「没在录」。
+		//
+		// 🔴 「没在录时才摆」会让这个 × 变成**永远点不到的死按钮**：点它的那一下，
+		// 指针事件是在帧之前落到引擎上的（`ui/input.go` 的 pointerDown），我们的
+		// `InputPointerDown` 立刻把 `s.recording` 设成这一格；紧接着 view 才跑，
+		// 于是那一帧「正在录」成立，× **根本没被建出来**，`Clicked()` 自然读不到。
+		// 用户看到的是一个点下去没反应的图标——整格扫 60 个点，一个都清不掉。
+		//
+		// 所以照 Biu：只要有值就摆着。点它 = 清空**并且**退出录制（清空是一个收尾
+		// 动作，不该顺手把这一格留在「等着录下一个键」的状态里）。
+		//
+		// 这一格没设键的时候不摆：没东西可清的时候摆一个叉只是让人多按一次空的。
+		//
+		// ⚠️ 尺寸是钉死的：不钉的话 Button 默认的内边距让它有 29.3 高，在 30 高的
+		// 格里上下各只让出 0.35 DIP，看上去就是「贴边的一个大方块」而不是一个 ×。
+		if !ro && item.Shortcut != "" &&
 			ui.Button(c, "×").Label("清空「"+item.Name+"」的快捷键").
-				FontSize(13).TextColor(t.TextMuted).Clicked() {
+				FontSize(12).TextColor(t.TextMuted).
+				Size(clearButtonSize, clearButtonSize).Padding(0).Radius(clearButtonSize/2).
+				Clicked() {
 			s.rejected = shortcutSlot{}
+			s.recording = shortcutSlot{}
 			s.applyShortcut(slot, "")
 		}
 	})

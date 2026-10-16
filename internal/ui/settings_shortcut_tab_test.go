@@ -393,3 +393,127 @@ func TestEveryRecorderCellHasAKeyOfItsOwn(t *testing.T) {
 		t.Errorf("一共 %d 个 key，want 12（六条命令 × 两列）", len(seen))
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 那一格右上角那个 ×
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheClearButtonInEveryRecorderCellActuallyClears 验十二个 × **每一个都点得动**、
+// 而且点了真的会清空。
+//
+// 这一条是被一个从头带进来的 bug 逼出来的，两处原因叠在一起，缺一处都看不出来：
+//
+//  1. **那一格是 `ui.Box`（列）**，子元素从上往下排，而且每一个都拉满列宽——于是
+//     「键 + ×」变成上下两层，× 那一块（184x29.3）整个掉到 30 高的框**外面**，落在
+//     命中区之外。整格扫 60 个点，一个都点不到它。
+//  2. **× 只在「没在录」的时候摆**：点它的那一下指针事件先落地，我们的
+//     `InputPointerDown` 立刻把 `s.recording` 设成这一格，紧接着 view 才跑——那一帧
+//     「正在录」成立，× 根本没被建出来，`Clicked()` 读不到。
+//
+// 症状是「整格扫 60 个点：清空 0 个，50 个反而把那一格切进录制状态」。两处都改成
+// Biu 的样子（那一格是 Row；× 只要有值就摆着）之后才有这一条。
+func TestTheClearButtonInEveryRecorderCellActuallyClears(t *testing.T) {
+	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	openSettingsTab(t, tt, "快捷键设置")
+
+	cur := defaultShortcutSettings()
+	for _, group := range [][]shortcutItem{cur.Shortcuts, cur.GlobalShortcuts} {
+		for _, item := range group {
+			label := "清空「" + item.Name + "」的快捷键"
+			r, ok := tt.Find(label)
+			if !ok {
+				t.Fatalf("没有「%s」那个 ×，文字有 %q", label, tt.Texts())
+			}
+			tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+			tt.Frame()
+
+			got := s.keys.snapshot()
+			list := got.Shortcuts
+			if _, isGlobal := findShortcut(item.ID, got.GlobalShortcuts); isGlobal &&
+				sameShortcut(got.GlobalShortcuts, got.Shortcuts) {
+				list = got.GlobalShortcuts
+			}
+			if it, _ := findShortcut(item.ID, list); it.Shortcut != "" {
+				t.Errorf("点了「%s」的 × 之后那一格还是 %q", label, it.Shortcut)
+			}
+			// 清空是一个收尾动作：不该把这一格留在「等着录下一个键」的状态里。
+			if s.recording != (shortcutSlot{}) {
+				t.Errorf("点了「%s」的 × 之后还在录 %+v", label, s.recording)
+			}
+			// 清空之后那一格画的是「未设置」，× 也不摆了。
+			if !hasExactText(tt, "未设置") {
+				t.Errorf("清空之后那一格画的不是「未设置」，文字有 %q", tt.Texts())
+			}
+			// 摆回默认值，好让下一个 × 有东西可清。
+			if err := s.keys.set(shortcutSlot{id: item.ID}, item.Shortcut); err != nil {
+				t.Fatal(err)
+			}
+			if _, isGlobal := findShortcut(item.ID, s.keys.snapshot().GlobalShortcuts); isGlobal &&
+				sameShortcut(s.keys.snapshot().GlobalShortcuts, s.keys.snapshot().Shortcuts) {
+				if err := s.keys.set(shortcutSlot{global: true, id: item.ID}, item.Shortcut); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tt.Frame()
+		}
+	}
+}
+
+// sameShortcut 报两列的内容一模一样（默认设置里两列只差一个 Alt）。
+func sameShortcut(a, b []shortcutItem) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestEveryRecorderCellKeepsItsClearButtonInside 验 × **在格子里面**，键在格子里
+// **上下居中**。
+//
+// 这一条盯的是上一条那个 bug 的另一半（几何那一半）：上一条点的是 × 的**中心**，
+// 而 × 掉出框外时它的中心仍然可点（只是点在框外那块空白上），所以只验「点得动」
+// 抓不到「画成两层框、× 压着下一行」。
+func TestEveryRecorderCellKeepsItsClearButtonInside(t *testing.T) {
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	openSettingsTab(t, tt, "快捷键设置")
+
+	cur := defaultShortcutSettings()
+	for _, item := range append(append([]shortcutItem{}, cur.Shortcuts...), cur.GlobalShortcuts...) {
+		cell, ok1 := tt.Find("应用内快捷键：" + item.Name)
+		if !ok1 {
+			cell, ok1 = tt.Find("全局快捷键：" + item.Name)
+		}
+		if !ok1 {
+			t.Fatalf("没有「%s」那一格，文字有 %q", item.Name, tt.Texts())
+		}
+		x, ok2 := tt.Find("清空「" + item.Name + "」的快捷键")
+		if !ok2 {
+			t.Fatalf("没有「%s」那个 ×，文字有 %q", item.Name, tt.Texts())
+		}
+		if x.X < cell.X || x.Y < cell.Y ||
+			x.X+x.W > cell.X+cell.W || x.Y+x.H > cell.Y+cell.H {
+			t.Errorf("「%s」那个 × 掉出了格子：× %.1f,%.1f %.1fx%.1f，格 %.1f,%.1f %.1fx%.1f",
+				item.Name, x.X, x.Y, x.W, x.H, cell.X, cell.Y, cell.W, cell.H)
+		}
+
+		// 键在格子里上下居中：文字的中线和格子的中线差不到两个像素。
+		key, ok3 := tt.Find(formatAccel(accelerator(item.Shortcut)))
+		if !ok3 {
+			t.Fatalf("「%s」那一格里没有键 %q", item.Name, item.Shortcut)
+		}
+		mid := func(r mygoui.Rect) float32 { return r.Y + r.H/2 }
+		if d := mid(key) - mid(cell); d > 2 || d < -2 {
+			t.Errorf("「%s」那一格里的键没有上下居中：键中线 %.1f，格子中线 %.1f",
+				item.Name, mid(key), mid(cell))
+		}
+		// 键也不能被挤到第二行（`ui.Box` 是列，排成两层就是那个症状）。
+		if key.Y+key.H > cell.Y+cell.H {
+			t.Errorf("「%s」那一格里的键掉出了格子", item.Name)
+		}
+	}
+}
