@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/egoist/mygo"
@@ -289,11 +290,6 @@ func openSettings(t *testing.T, tt *mygoui.Tester) {
 	}
 }
 
-// settleStill 是「两个框算不算没动」的容差，单位 DIP。
-//
-// 切页动画里整页在滑，每帧差几十像素；走完之后剩下的抖动比这还小两个数量级。
-const settleStill = 0.25
-
 // settleSettingsPage 是「等切页动画走完」。
 //
 // ⚠️ 这一步少了，接下来所有点击都会**时灵时不灵**，症状很像「控件坏了」：router
@@ -307,43 +303,58 @@ const settleStill = 0.25
 // 画完，250ms 的动画在里面永远走不完，留着它只会让「读到的是哪一帧」变成随机
 // 的——实测同一个点这次读到窗口底色、下次读到滑动中的分界线。
 //
-// 这一段留着当兜底：万一哪天某个外壳忘了关，这里还能等它停下来（**连着三帧
-// 不动**才算停——两帧不够：动画停在某一帧上时两帧当然一样）。
+// 这一段留着当兜底：万一哪天某个外壳忘了关，这里还能等它停下来。
+//
+// ## 「等」这件事在 v0.5.5 换了写法（2026-10-16 升级时踩过）
+//
+// 之前这里是「循环 `tt.Frame()`，数着连着三帧不动就算停」。**现在不能这么数了。**
+//
+// MyGo v0.5.5 起 Tester 有了一只**站着不动的钟**：动画、`Context.After`、双击
+// 判定全都走它，只有测试自己调 `Advance` 它才走（见 `ui/headless.go` 里
+// Tester 的注释：「Its clock stands still unless the test moves it with
+// Advance」）。v0.5.1 没有这只钟，动画走的是真实时间，所以「多画几帧」就等
+// 得到——那是老写法的全部依据。
+//
+// 钟不走的直接后果：**「框不动了」不再等于「动画停了」**。这一页会永远停在动画
+// 的第一帧上（实测卡在 x=1228，也就是 1200 宽的窗口外面），而「连着三帧不动」
+// 读到的恰恰是「不动」——它平静地判定「停了」并返回。接着 `tt.Click` 照着窗口
+// 外那个坐标点下去，**照样返回 nil，什么也没发生**。整条链路上没有一步会报错，
+// 只有下一条断言莫名其妙地说「点不中」。这正是 SPEC「版本策略」里点名过的那个
+// 坑（「点了没反应」而不是「等不到」）。
+//
+// 改成下面这样：**推着钟走，问「view 还在要帧吗」**（`FramePending`），不数帧。
+// 推进的钟是真的在动，动画结束后 `FramePending` 立刻转 false，所以这个判据在
+// 钟冻住的时候也不会骗人——只会一路撞到上限然后大声报错。顺带还比原来准：
+// 原来要三帧不动才敢认停（两帧不够，动画停在某一帧上时两帧本来就一样），现在
+// 动画一结束就停，实测 16ms × 15 = 240ms，和那个 250ms 的切页动画对得上。
 func settleSettingsPage(t *testing.T, tt *mygoui.Tester) {
 	t.Helper()
-	const maxFrames = 60 // 上限。真的停不下来时该报错，不该让它慢慢磨。
-	prev, seen, still := mygoui.Rect{}, false, 0
-	for range maxFrames {
+	// step × maxSteps = 1.28s 的假时间，切页动画是 250ms：够走完，还留着余量。
+	const (
+		step     = 16 * time.Millisecond
+		maxSteps = 80 // 上限。真的停不下来时该报错，不该让它慢慢磨。
+	)
+	for range maxSteps {
+		tt.Advance(step)
 		tt.Frame()
+		if tt.FramePending() {
+			continue // 还在滑，接着推钟
+		}
+		// view 不要再帧了：动画走完了。
+		//
+		// 「停了」还得是「停在对的地方」——这一页必须真的量出宽高。停在动画某一
+		// 帧上（或者还没排版就报了停）量出来是 0×0，而 `Tester.Click` 照着那个
+		// 坐标点下去照样返回 nil。在这儿喊停，别让下一步去报一个骗人的错。
 		cur, ok := tt.Find("外观")
 		if !ok {
-			prev, seen, still = mygoui.Rect{}, false, 0
-			continue
+			t.Fatal("设置页不再要帧了，可「外观」这一行找不到了")
 		}
-		if seen && sameSpot(cur, prev) {
-			still++
-			if still >= 2 {
-				return // 连着三帧不动：停了
-			}
-		} else {
-			still = 0
+		if cur.W <= 0 || cur.H <= 0 {
+			t.Fatalf("设置页停下来了但没量出大小（%v）：多半卡在了切页动画的某一帧上", cur)
 		}
-		prev, seen = cur, true
+		return
 	}
 	t.Fatal("切页动画一直没停：设置页一直在滑")
-}
-
-// sameSpot 报两个框是不是几乎不动。
-func sameSpot(a, b mygoui.Rect) bool {
-	return abs(a.X-b.X) <= settleStill && abs(a.Y-b.Y) <= settleStill &&
-		abs(a.W-b.W) <= settleStill && abs(a.H-b.H) <= settleStill
-}
-
-func abs(v float32) float32 {
-	if v < 0 {
-		return -v
-	}
-	return v
 }
 
 // TestUserCanSwitchTheThemeFromTheInterface 是「主题三档能切」这条验收。
