@@ -79,6 +79,10 @@ func BuildTheme(s app.Settings, systemDark bool) *ui.Theme {
 	}
 
 	t.Radius = radiusOf(s.BorderRadius)
+	// 🔴 字体和圆角一样是**每帧**从设置里读的，所以它在这里装一次就够，别的地方
+	// 不用再管。`system-ui` 是 MyGo 认得的系统自己的字体（`ui/element.go` 里 `Font`
+	// 的注释点名的两个之一），空串已经在设置那边的 normalize 里换成它了。
+	t.Font = s.FontFamily
 	if c, ok := parseHexColor(s.BackgroundColor); ok {
 		t.Background = c
 	}

@@ -50,3 +50,29 @@ func audioOpenOptions(parent *mygo.Window) mygo.OpenDialogOptions {
 func PickAudioFile(parent *mygo.Window) ([]string, error) {
 	return mygo.Dialog.Open(audioOpenOptions(parent))
 }
+
+// PickPath 弹系统文件框让用户挑一条路径：dir 为 true 是挑文件夹，否则挑文件。
+// 一次只挑一个（设置里的下载目录、FFmpeg 路径都是单值），用户取消时返回空串。
+//
+// ⚠️ 同样的理由：必须从非主线程调用。
+func PickPath(parent *mygo.Window, dir bool) (string, error) {
+	opts := mygo.OpenDialogOptions{
+		Parent:    parent,
+		Directory: dir,
+	}
+	opts.Title, opts.Message = pathDialogLabels(dir)
+	paths, err := mygo.Dialog.Open(opts)
+	if err != nil || len(paths) == 0 {
+		return "", err
+	}
+	return paths[0], nil
+}
+
+// pathDialogLabels 是挑文件夹和挑文件时对话框上的两行字。挑文件夹的时候那个
+// 「新建文件夹」按钮要摆出来——下载目录用户经常要新建一个。
+func pathDialogLabels(dir bool) (title, message string) {
+	if dir {
+		return "选择文件夹", "选一个用来保存下载内容的位置"
+	}
+	return "选择文件", "选一个文件"
+}

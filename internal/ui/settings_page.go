@@ -1,15 +1,18 @@
-// 设置页：Biu 的 `/settings`（`src/pages/settings/`，本体是 `system-settings.tsx`）。
+// 设置页：Biu 的 `/settings`（`src/pages/settings/`，`index.tsx` 是那一页的壳）。
 //
-// ## 这一版摆什么、不摆什么
+// ## 四个 Tab 是哪四个
 //
-// 摆的是「用户改了立刻能看见差别」的那三项：主题、全局圆角、窗口关闭。
-// Biu 那一页上的下载目录、代理、音质、字体、播放记录**先不在这里**——不是忘了，
-// 是它们要么还没有对应的功能（在线播放、代理、托盘），要么是别的阶段的活儿。
-// 摆一堆按了没反应的开关比不摆更糟：用户分不清「还没做」和「按了没用」。
+// 照 Biu 的 `index.tsx:124-138`：`常规设置` / `菜单设置` / `快捷键设置` /
+// `代理设置`，连顺序都照抄。每一个 Tab 的内容在各自的文件里（`settings_tab_*.go`），
+// 这一份只管壳、共用的行、以及「只读时怎么办」。
 //
-// 每一个控件改的都是**盘上已经有的键**，一个都不新造（见
-// `internal/app/settings_test.go` 的 `biuKeys`）。设置页是那些键的入口，不是
-// 键名的发明地——用户来回切 Biu 和 MyGo 时丢设置，是最难查的一类数据丢失。
+// ## 每一个控件改的都是**盘上已经有的键**，一个都不新造
+//
+// 常规/菜单/代理三个 Tab 改的是 `app.Settings`（键名见
+// `internal/app/settings_test.go` 的 `biuKeys`）；快捷键 Tab 改的是
+// `shortcuts.json`（Biu 自己也是单独一个 store，见 shortcuts.go）。
+// 设置页是那些键的入口，不是键名的发明地——用户来回切 Biu 和 MyGo 时丢设置，
+// 是最难查的一类数据丢失。
 //
 // 🔴 本文件里的任何 view **不许**调 `c.SetTheme`：主题每帧开头装一次就够，
 // 别的页面照样生效（铁律二，见 theme.go）。
@@ -29,6 +32,31 @@ import (
 // 而且错得很安静——设置页退回占位页，没人看得出来。
 const settingsPath = "/settings"
 
+// settingsPageState 是设置页自己那一摊，**只由 view 在主线程上读写**。
+type settingsPageState struct {
+	// tab 是切在第几个 Tab。建在 Shell 上而不是每帧的局部变量：即时模式每一帧
+	// 都重画一遍，局部变量下一帧就没了（见 Shell.searchDraft 的注释）。
+	tab int
+
+	// scroll 是这一页的滚动位置。按 Tab 时回到顶上——Biu 的 Tabs 换了面板就是
+	// 新的一页，滚到一半切过去会落在半截上。
+	scroll ui.ScrollState
+
+	// shownTab 是上一帧画的是第几个 Tab，用它认出「刚按了 Tab」。
+	shownTab int
+}
+
+// 四个 Tab。顺序就是从左到右的顺序，和 Biu 那一页一样。
+const (
+	settingsTabGeneral = iota
+	settingsTabMenu
+	settingsTabShortcut
+	settingsTabProxy
+)
+
+// settingsTabNames 是四个 Tab 上的字。照 Biu `index.tsx:125-137` 的 title。
+var settingsTabNames = []string{"常规设置", "菜单设置", "快捷键设置", "代理设置"}
+
 // 控件的宽度。Biu 那一页右边固定 360px（`w-[360px]`），三档切换占 300。
 //
 // 300 是量出来的，不是挑的：主题那三个按钮里「跟随系统」四个汉字最宽，按钮
@@ -39,6 +67,10 @@ const (
 	radiusWidth    = 360
 	radiusReadoutW = 48
 )
+
+// selectWidth 是下拉框多宽。Biu 是 `w-[180px]`（`system-settings.tsx:164`），
+// 代理那一页是 `w-[240px]`（`proxy-settings.tsx:43`）。
+const selectWidth = 180
 
 // closeWindowOptions 是窗口关闭那两档，顺序就是从左到右的顺序。
 //
@@ -55,21 +87,13 @@ var closeWindowOptions = []struct {
 	{app.CloseWindowExit, "直接退出"},
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 路由分派
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 页面
-// ─────────────────────────────────────────────────────────────────────────────
-
-// viewSettings 是设置页本身。
+// viewSettings 是设置页本身：标题 + 只读提示 + 四个 Tab。
 //
-// ⚠️ 这里用 Column 而不是 Scroll：MyGo v0.5.1 的 `Scroll` **不约束子元素的
-// 宽度**（它是 `coreBox` 加一个滚动标志，宽度按内容算）。实测：右边那些固定
-// 宽度的控件会被整排顶到窗口外面去——「深色」「直接退出」点不到，用户看见的
-// 是一片空白加半个按钮。等设置项多到装不下的时候再换 Scroll，同时把控件宽度
-// 从固定值改成能自己收窄的那种（现在 `settingRow` 右边是写死的宽度）。
+// ⚠️ 外面这一层是 `Scroll`，里面那一层 `Column` 必须 `FillWidth()`。
+// MyGo 的 `Scroll` 是「一个带滚动标志的 Box」（`ui/scroll.go` 的 coreScroll），
+// **不约束子元素的宽度**——子元素按内容算宽。右边那些固定宽度的控件会被整排顶到
+// 窗口外面去，「深色」「直接退出」点不到，用户看见的是一片空白加半个按钮。
+// `FillWidth()` 才是把里面那一格钉到可视区宽度上的那一句。
 func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 	t := c.Theme()
 	st := s.app.SettingsSnapshot()
@@ -77,41 +101,55 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 	// 控件全关掉，并说清为什么——跟顶栏那三个按钮一个道理。
 	ro := s.app.SettingsReadOnly()
 
-	ui.Column(c).Key("page:/settings").Grow(1).Padding(28).Gap(18).Children(func() {
-		ui.Text(c, "设置").FontSize(22).Bold()
+	// 切走就停录：`FocusBind` 的「焦点在哪一格」在控件没建出来时会一直等下去，
+	// 切回来时焦点又回到那一格，用户在还没准备好的时候敲的第一下键就被录进去了。
+	if s.settings.tab != settingsTabShortcut {
+		s.recording = shortcutSlot{}
+		s.rejected = shortcutSlot{}
+	}
 
-		if ro {
-			ui.Text(c, "设置只读：这份设置来自更新的版本，这一版一个字都不会写回去。").
-				FontSize(12).TextColor(t.Danger)
-		}
+	// 按 Tab 时回到顶上：Biu 换了面板就是新的一页。
+	if last, tab := s.settings.shownTab, s.settings.tab; last != tab {
+		s.settings.shownTab, s.settings.scroll.Y = tab, 0
+	}
 
-		s.settingSection(c, "外观")
-		s.settingRow(c, "主题", "选择浅色或深色主题",
-			func() { s.pickTheme(c, st, ro) })
-		s.settingRow(c, "圆角", "调整界面控件的圆角大小",
-			func() { s.pickRadius(c, st, ro) })
+	ui.Scroll(c).Key("settings-scroll").Grow(1).TrackScroll(&s.settings.scroll).
+		Children(func() {
+			ui.Column(c).FillWidth().Padding(28).Gap(16).Children(func() {
+				ui.Text(c, "设置").FontSize(22).Bold()
 
-		ui.Divider(c)
+				if ro {
+					ui.Text(c, "设置只读：这份设置来自更新的版本，这一版一个字都不会写回去。").
+						FontSize(12).TextColor(t.Danger)
+				}
 
-		s.settingSection(c, "系统")
-		s.settingRow(c, "窗口关闭", "选择窗口关闭时的行为",
-			func() { s.pickCloseWindow(c, st, ro) })
-		if !platform.TraySupported() {
-			// macOS 上没有托盘（与 Biu 一致），「隐藏到托盘」这一档在这儿是
-			// 「收进 Dock」。得说出来，不然用户以为 Biu 有而我们没做。
-			ui.Text(c, "macOS 上不建托盘图标（与 Biu 一致）：「隐藏到托盘」是收进程序坞，"+
-				"图标还在，点一下就回来。").
-				FontSize(12).TextColor(t.TextMuted)
-		}
-		s.settingRow(c, "开机自启", "系统登录后自动启动应用",
-			func() { s.pickAutoStart(c, st, ro) })
-	})
+				ui.Tabs(c, &s.settings.tab, settingsTabNames...)
+
+				ui.Column(c).FillWidth().Gap(18).Children(func() {
+					switch s.settings.tab {
+					case settingsTabGeneral:
+						s.settingsGeneral(c, st, ro)
+					case settingsTabMenu:
+						s.settingsMenu(c, st, ro)
+					case settingsTabShortcut:
+						s.settingsShortcuts(c)
+					case settingsTabProxy:
+						s.settingsProxy(c, st, ro)
+					}
+				})
+			})
+		})
 }
 
 // settingSection 是一组设置上面的那个标题。Biu 用的是 `<h2>`（system-settings.tsx
 // 的「外观」「播放」「下载」…）。
 func (s *Shell) settingSection(c *ui.Context, title string) {
-	ui.Text(c, title).FontSize(16).Bold().Padding(0, 0, 8, 0)
+	ui.Text(c, title).FontSize(16).Bold().Padding(0, 0, 4, 0)
+}
+
+// settingSectionEnd 是两组设置之间那条分隔线。Biu 的 `<Divider />`。
+func (s *Shell) settingSectionEnd(c *ui.Context) {
+	ui.Divider(c).FillWidth()
 }
 
 // settingRow 是设置项的一行：左边标题加一句说明，右边控件。
@@ -131,14 +169,14 @@ func (s *Shell) settingRow(c *ui.Context, title, desc string, control func()) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 三项控件
+// 共用的控件
 // ─────────────────────────────────────────────────────────────────────────────
 
 // pickTheme 是主题那三档。
 //
 // 换完之后 `applyFrameTheme` 下一帧就装上新主题：改档位 → UpdateSettings →
 // invalidate → 重画，一帧之内的事。走 `applySetting` 而不是 `SetThemeMode`，
-// 是为了和另外两项共用同一条报错提示。
+// 是为了和另外十几项共用同一条报错提示。
 func (s *Shell) pickTheme(c *ui.Context, st app.Settings, ro bool) {
 	t := c.Theme()
 	ui.Row(c).Key("setting:themeMode").Width(segWidth).Gap(4).Children(func() {
@@ -151,23 +189,6 @@ func (s *Shell) pickTheme(c *ui.Context, st app.Settings, ro bool) {
 				s.applySetting("主题", func(cur *app.Settings) { cur.ThemeMode = opt.mode })
 			}
 		}
-	})
-}
-
-// pickRadius 是全局圆角：一个滑块加一个 px 读数。
-//
-// 拖动时每一帧都是一次改动，落盘在后台合并成一次（`writeDebounce`，见
-// internal/app/settings.go），不是一帧写一遍盘。读数显示的是这一帧拖到的值，
-// 不是设置里还存着的旧值——慢一帧的话读数会一直追不上手指。
-func (s *Shell) pickRadius(c *ui.Context, st app.Settings, ro bool) {
-	v := st.BorderRadius
-	ui.Row(c).Key("setting:borderRadius").Width(radiusWidth).Gap(12).
-		AlignItems(ui.Center).Children(func() {
-		sl := ui.Slider(c, &v, 0, app.MaxBorderRadius).Grow(1).Label("全局圆角").Disabled(ro)
-		if sl.Changed() {
-			s.applySetting("圆角", func(cur *app.Settings) { cur.BorderRadius = v })
-		}
-		ui.Textf(c, "%.0fpx", v).FontSize(12).Width(radiusReadoutW)
 	})
 }
 
@@ -190,7 +211,7 @@ func (s *Shell) pickCloseWindow(c *ui.Context, st app.Settings, ro bool) {
 
 // pickAutoStart 是开机自启那个开关。
 //
-// 它和另外两项不一样：**不是改一个键就完了**，得真的去系统里注册/注销登录项
+// 它和别的那几项不一样：**不是改一个键就完了**，得真的去系统里注册/注销登录项
 // （macOS 是 SMAppService / LaunchAgent，Windows 是注册表 Run 项）。所以走的是
 // `Shell.SetAutoStart`——先动系统、成功了才写设置，顺序反了会留下
 // 「设置说开、系统说关」，而启动时的对齐只补这一种（见 lifecycle.go 的注释）。
@@ -203,7 +224,8 @@ func (s *Shell) pickAutoStart(c *ui.Context, st app.Settings, ro bool) {
 	// 控件节点上；给它一个 Key 等于每帧换一个新节点，动画每帧从头开始——于是这一页
 	// 永远停不下来（实测：加了 Key 之后 `settleSettingsPage` 跑满 60 帧还在滑，
 	// 去掉就好了）。上面那两排按钮能加 Key，是因为 Row 本身没有动画。
-	sw := ui.Switch(c, &on).Disabled(ro)
+	// ⚠️ 那个 `Label` 不能省，原因见 `pickSwitch`：开关自己一个字都没有。
+	sw := ui.Switch(c, &on).Label("开关：开机自启").Disabled(ro)
 	if !sw.Changed() {
 		return
 	}
@@ -211,6 +233,17 @@ func (s *Shell) pickAutoStart(c *ui.Context, st app.Settings, ro bool) {
 		s.addToast("开机自启没设上：" + strings.TrimPrefix(err.Error(), "app: "))
 		// 下一帧 `on` 会从设置里重新读（没写成功，所以还是旧值），开关自己弹回去。
 	}
+}
+
+// pickTrayNote 是 macOS 上「没有托盘」那句话。只在该说的话的时候摆。
+func (s *Shell) pickTrayNote(c *ui.Context) {
+	if platform.TraySupported() {
+		return
+	}
+	// macOS 上没有托盘（与 Biu 一致），「隐藏到托盘」这一格在这儿是「收进 Dock」。
+	// 得说出来，不然用户以为 Biu 有而我们没做。
+	ui.Text(c, "macOS 上不建托盘图标（与 Biu 一致）：「隐藏到托盘」是收进程序坞，"+
+		"图标还在，点一下就回来。").FontSize(12).TextColor(c.Theme().TextMuted)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
