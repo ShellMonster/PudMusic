@@ -62,7 +62,7 @@ internal/ui/        → internal/app/ → internal/service/ → internal/platfor
 
 `main.go` 只做一件事：建状态、建窗口、把两者接上。
 
-## 三条踩过坑的规矩
+## 踩过坑的规矩
 
 写在代码里，也写在这里，因为它们都不是从代码本身能看出来的：
 
@@ -72,6 +72,9 @@ internal/ui/        → internal/app/ → internal/service/ → internal/platfor
    走 `ui.Services.Invalidate()`（见 `internal/ui/wake.go`）。
 3. **每个 view 外面包一层 `Guard`（recover）。** MyGo 的 `Dispatch`/`drain` 都没有
    recover，view 里 panic 会穿透 Cocoa 事件循环杀掉整个进程。
+4. **单实例锁和退出回调都在 `mygo.App.Run()` 之前装。** 锁晚一步就是两个实例
+   同时启动的竞态；回调晚一步，启动命令行里的 `biu://…` 会在它装好之前就被交付掉，
+   点链接唤起应用什么都不会发生。
 
 还有一条是 MyGo 文档里没写的：**滑块的「正在被拖」要用 `Pressed()`，不能用 `Dragging()`。**
 `Dragging()` 报的是 `Drag`/`Draggable` 两套机制，普通滑块对它永远是 `false`

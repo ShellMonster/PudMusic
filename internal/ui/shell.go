@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -47,6 +48,16 @@ type Shell struct {
 
 	// crash 是上一帧 panic 到的东西，非 nil 时这一帧画错误页。
 	crash any
+
+	// quitting 是「已经进了退出流程」，只由 OnBeforeQuit 置位（主线程）。
+	//
+	// 存在的理由是退出流程本身要靠关窗口走完：框架的 prepareQuit 遍历窗口
+	// 挨个 close。所以「关掉窗口时怎么办」这个设置在退出途中必须让路，否则
+	// ⌘Q 会变成「退出不了」。见 planWindowClose。
+	quitting bool
+
+	// autostart 是「开机自启在系统上的那一份」，见 lifecycle.go 里的说明。
+	autostart autoStartService
 }
 
 // New 建一个窗口外壳，绑在状态 a 上。
@@ -59,18 +70,42 @@ type Shell struct {
 //
 // TestPlayBarCoverWakeRedrawsTheWindow 走的就是这一行。
 func New(a *app.App) *Shell {
-	s := &Shell{app: a, router: ui.NewRouter("/"), images: imgcache.New(imgcache.Options{})}
+	s := &Shell{
+		app:       a,
+		router:    ui.NewRouter("/"),
+		images:    imgcache.New(imgcache.Options{}),
+		autostart: systemAutoStart{},
+	}
 	s.images.AddWake(s.wake.invalidate)
 	s.pageBody = s.placeholder
 	s.draw = Guard(s.viewMain, s.onPanic)
 	return s
 }
 
-// Attach 把外壳接到窗口上：装唤醒回调，窗口关掉时收尾。
+// Attach 把外壳接到窗口上：装唤醒回调，装关闭策略，窗口真关掉时收尾。
+//
+// 窗口可能被关掉又开（见 openWindow），所以这一段是**一个函数**：两处各写一份
+// 的话，以后漏掉一个回调的症状是「窗口没关干净」，那种问题极难查。
 func (s *Shell) Attach(w *mygo.Window) {
 	s.win = w
 	s.app.SetWake(s.wake.invalidate)
+
+	w.OnClose(func(e *mygo.CloseEvent) {
+		opt := s.app.SettingsSnapshot().CloseWindowOption
+		if planWindowClose(s.quitting, opt) != closeToBackground {
+			return
+		}
+		e.PreventDefault()
+		platform.HideToBackground(w)
+	})
+
+	// ⚠️ 下面这条是**真的关掉窗口**才跑的收尾：关封面缓存、停播放、关 App。
+	// 「收起来」被上面拦在 OnClose 里了，压根到不了这里——所以关窗口时选
+	// 「隐藏」，播放不会停、应用不会死。这是两条不同的路，别混。
 	w.OnClosed(func() {
+		if s.win == w {
+			s.win = nil
+		}
 		s.images.Close()
 		s.app.Close()
 	})
@@ -79,11 +114,30 @@ func (s *Shell) Attach(w *mygo.Window) {
 // Run 开出一个窗口并跑起来。窗口骨架归界面层管：以后要加迷你播放器、
 // 要改标题栏、要调窗口尺寸，都在这一处。
 func Run(a *app.App) error {
+	// 单实例锁必须在 Run 之前拿：Run 之后事件循环才起来，那时候两个实例
+	// 同时抢就是竞态，谁抢到全看调度。抢不到的那个，框架已经把它的命令行
+	// 转交给第一个实例了（`platform.Lock`），自己立刻退出——**不能留在后台**
+	// 当一个没有窗口的僵尸进程。
+	if !platform.Lock() {
+		return nil
+	}
+
+	s := New(a)
+	// 菜单、退出、第二个实例、deep link 全在这里装。必须在 Run 之前，
+	// 否则启动命令行里的 biu:// 会在回调装好之前就被交付掉。
+	s.installLifecycle()
+
 	mygo.App.WhenReady(func() {
-		s := New(a)
-		w := mygo.NewWindow(WindowOptions(s.View))
-		// 装唤醒回调、接窗口关闭。必须在建窗口之后：外壳要拿得到窗口句柄。
-		s.Attach(w)
+		// scheme 在这里登记而不是 Run 之前：登记要走系统 API，事件循环起来
+		// 之后才接得住；而它又必须早于框架那次启动参数的交付——handleReady
+		// 把交付排在所有 WhenReady 回调之后（`mygo/app.go:266`），所以正好。
+		if err := platform.RegisterScheme(); err != nil {
+			// macOS 上没打包成 bundle 就必然登记不上，这是预期的，不是启动失败。
+			log.Printf("biu: 登记 %s:// 失败，从别的程序点这个链接不一定唤得起本应用：%v",
+				platform.URLScheme, err)
+		}
+		s.syncAutoStart()
+		s.openWindow()
 	})
 	return mygo.App.Run()
 }
