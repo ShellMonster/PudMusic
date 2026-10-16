@@ -102,6 +102,10 @@ var routes = []Route{
 	// 迷你播放器（nowplaying.go）：没歌时是上游的「暂无播放内容」，有歌时是歌名 +
 	// 歌词区。所以**不填 Empty**：填了就是一句没人会看到的话。
 	{Match: "/mini-player", Title: "迷你播放器"},
+	// 扫码登录。**不加 InMenu**：它不是侧栏菜单项，是从顶栏的登录
+	// 按钮进出来的（跟 Biu 把登录挂在头像下拉里是一回事）。
+	// 加进菜单的话用户每次想登录都要先在侧栏里找一圈。
+	{Match: "/login", Title: "扫码登录"},
 }
 
 // notFound 是兜底那一条：路径谁都不匹配就是它，对应 Biu 的 P-30。
@@ -147,15 +151,17 @@ func matchPath(pattern, path string) bool {
 	return len(pp) == len(sp)
 }
 
-// viewRoutes 是 14 条路由的分派。
+// viewRoutes 是全部路由的分派。
 //
 // **每一页外面都包一层 recover**：MyGo 的 Dispatch 和 drain 都没有 recover，
 // view 里 panic 会穿透 Cocoa 事件循环直接把进程带走。切路由时 recover 的
 // 状态由 navigate 复位，所以一页崩了不会连累后面那些页。
 //
-// 认页用 `lookup(r.Path())`，不再是一长串 `r.Match(...)`：每页画什么已经由
-// routes 表里的 Empty 决定了（见 empty.go），认页和画页合成一处，表里加了
-// 一条就自动多一页，不会出现「表里有、switch 里忘了」的那种少一页。
+// 认页用 `lookup(r.Path())`，不再是一长串 `r.Match(...)`：认页和画页合成一处，
+// 表里加了一条就自动多一页，不会出现「表里有、switch 里忘了」的那种少一页。
+//
+// 画什么由 pageContent 决定（见下）：已经有内容的页走 builtPage，其余走这一页
+// 自己的空状态。
 func (s *Shell) viewRoutes(c *ui.Context) {
 	// 换页的收口（404 那个 3 秒倒计时就在这儿驱动），必须在画页之前。
 	s.syncRoute()
@@ -188,6 +194,9 @@ func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
 	case miniPlayerPath:
 		// 正在放什么 + 它的歌词（nowplaying.go）。
 		return s.viewNowPlaying
+	case loginPath:
+		// 扫码登录（login.go）。
+		return s.viewLogin
 	}
 	return nil
 }
@@ -268,5 +277,6 @@ func (s *Shell) viewNav(c *ui.Context) {
 		if ui.Button(c, "打开文件").Clicked() {
 			s.pickAndEnqueue()
 		}
+		s.viewLoginEntry(c)
 	})
 }

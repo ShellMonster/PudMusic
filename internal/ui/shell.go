@@ -11,6 +11,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -90,6 +91,15 @@ type Shell struct {
 
 	// crash 是上一帧 panic 到的东西，非 nil 时这一帧画错误页。
 	crash any
+
+	// qrBitmap 是当前那张二维码的位图，qrFor 是它对应的那张二维码。
+	//
+	// **只由 view 读写**（view 永远跑在主线程上），所以没有锁。
+	// 键是指针：换了一张码就换一个，自动重建那张 GPU 纹理。
+	// 见 login.go 的 qrImage。
+	qrBitmap    *ui.Bitmap
+	qrDimBitmap *ui.Bitmap
+	qrFor       *bili.Code
 
 	// quitting 是「已经进了退出流程」，只由 OnBeforeQuit 置位（主线程）。
 	//
