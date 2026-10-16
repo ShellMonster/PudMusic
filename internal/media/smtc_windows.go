@@ -138,8 +138,7 @@ const windowsTicks = 10 * time.Millisecond
 // 媒体会话是**按窗口**的（`GetForWindow`），所以它由 `bindWindow` 激活，
 // 而不是由 `newPlatform`。
 type windowsPlatform struct {
-	mu   sync.Mutex
-	hwnd uintptr
+	mu sync.Mutex
 
 	// smtc 是 `ISystemMediaTransportControls`。0 表示还没有窗口 / 建不上。
 	smtc uintptr
@@ -208,7 +207,7 @@ func (p *windowsPlatform) bindWindow(hwnd uintptr) error {
 	addRef(smtc)
 
 	p.mu.Lock()
-	p.smtc, p.hwnd = smtc, hwnd
+	p.smtc = smtc
 	p.smtc2 = queryInterface(smtc, iidSmtc2)
 	p.mu.Unlock()
 
@@ -242,7 +241,7 @@ func (p *windowsPlatform) bindWindow(hwnd uintptr) error {
 func (p *windowsPlatform) unbind() {
 	p.mu.Lock()
 	smtc, smtc2, thumb := p.smtc, p.smtc2, p.thumb
-	p.smtc, p.smtc2, p.thumb, p.hwnd = 0, 0, nil, 0
+	p.smtc, p.smtc2, p.thumb = 0, 0, nil
 	p.eventsUp = false
 	p.mu.Unlock()
 
