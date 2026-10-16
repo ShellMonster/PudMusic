@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,6 +89,16 @@ const lockChildTimeout = 15 * time.Second
 // 用来当那个「活下来的第一个实例」，后面还要拿它验还能不能接收转交。
 const lockStayEnv = "BIU_TEST_LOCK_STAY"
 
+// lockProbeEnv 设成 "1" 时，子进程**只**调 lockExclusive，不碰框架那把 unix
+// socket 锁，回答「拿到了没有」。
+//
+// 为什么单开这个模式：另外两条并发测试靠的是框架的 unix socket，而那条路在
+// Windows 上能不能走要看系统（AF_UNIX，Win10 1703+ 才有）。而 `lockExclusive`
+// 本身在三个平台上都要验——Windows 那份是一个独立的实���（LockFileEx），上一轮
+// review 就抓到过它只在 darwin 上跑过、逻辑错了没人发现。这个模式不依赖任何
+// socket，所以**每个平台都会跑**。
+const lockProbeEnv = "BIU_TEST_LOCK_PROBE"
+
 // TestLockHelper 只是给下面三条测试当子进程用的，回答一个问题：锁拿到了没有。
 func TestLockHelper(t *testing.T) {
 	path := os.Getenv(lockAnswerEnv)
@@ -95,7 +106,13 @@ func TestLockHelper(t *testing.T) {
 		t.Skip("只有被下面几条测试当子进程拉起来时才有事做")
 	}
 	got := "second"
-	if Lock() {
+	if os.Getenv(lockProbeEnv) == "1" {
+		// 只验内核那一把锁，不碰框架的 socket。
+		got = "no"
+		if lockExclusive() {
+			got = "yes"
+		}
+	} else if Lock() {
 		got = "first"
 	}
 	if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
@@ -162,10 +179,22 @@ func helperCmd(file string, sink *bytes.Buffer) *exec.Cmd {
 // helperCmdStay 造子进程；stay=true 时它写完答案不退出（当那个「活着的第一个
 // 实例」用）。
 func helperCmdStay(file string, sink *bytes.Buffer, stay bool) *exec.Cmd {
+	return helperCmdMode(file, sink, stay, false)
+}
+
+// helperProbeCmd 造一个「只调 lockExclusive」的子进程。
+func helperProbeCmd(file string, sink *bytes.Buffer, stay bool) *exec.Cmd {
+	return helperCmdMode(file, sink, stay, true)
+}
+
+func helperCmdMode(file string, sink *bytes.Buffer, stay, probe bool) *exec.Cmd {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestLockHelper$")
 	cmd.Env = append(os.Environ(), lockAnswerEnv+"="+file)
 	if stay {
 		cmd.Env = append(cmd.Env, lockStayEnv+"=1")
+	}
+	if probe {
+		cmd.Env = append(cmd.Env, lockProbeEnv+"=1")
 	}
 	cmd.Stdout, cmd.Stderr = sink, sink
 	cmd.WaitDelay = lockChildTimeout
@@ -219,10 +248,7 @@ func readAnswer(t *testing.T, file string) string {
 // 释放锁的，测试进程不会走到那儿。不清也没关系——下次启动时框架连不上就会把
 // 它当成崩溃留下的陈旧 socket 删掉（`mygo/single_instance.go` 里那一支）。
 func TestLockRejectsASecondProcess(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		// unix socket 在 Windows 上要靠系统开着 AF_UNIX，这条在 macOS 上验。
-		t.Skip("Windows 上 unix socket 的可用性随版本变化")
-	}
+	requireUnixSocket(t)
 	isolateLockDir(t)
 
 	if !Lock() {
@@ -264,9 +290,7 @@ func TestLockRejectsASecondProcess(t *testing.T) {
 // 跑 10 轮不是凑数：修复前实测 20 轮里 17 轮两边都拿到锁，只跑一轮的话有
 // 三成概率把坏的东西放过。
 func TestLockRacesTwoFreshProcesses(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows 上 unix socket 的可用性随版本变化，这条在 macOS 上验")
-	}
+	requireUnixSocket(t)
 	isolateLockDir(t)
 	// 本进程不许占着锁：占着的话两个子进程都抢不到，这条就变成一个空过的绿。
 	releaseTestLock()
@@ -325,9 +349,7 @@ func TestLockRacesTwoFreshProcesses(t *testing.T) {
 // 第三个，它必须拿到 second（也就是成功转交）。第三步才是关键：前两步过了并不
 // 代表 socket 还在。
 func TestLockSurvivorKeepsForwarding(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows 上 unix socket 的可用性随版本变化，这条在 macOS 上验")
-	}
+	requireUnixSocket(t)
 	isolateLockDir(t)
 	releaseTestLock()
 
@@ -403,4 +425,104 @@ func survivorRound(t *testing.T, dir, tag string) {
 			got, outA.String(), outB.String(), out.String())
 	}
 	_ = winner
+}
+
+// requireUnixSocket 在这个平台的 unix socket 不可用时跳过。
+//
+// ⚠️ 别写成「Windows 一律跳过」：上一轮 review 指出过，正因为那样写，Windows 那份
+// lockExclusive 的逻辑（LockFileEx，一个独立的实现）在 darwin 上从来没被执行过，
+// 于是「建空文件 → 还没写 pid → 另一个进程删掉重建」这个竞态谁也没看见。Windows
+// 10 1703+ 有 AF_UNIX，Go 的 net 也支持，所以真正该问的是「这台机器上能不能建
+// unix socket」，不是「这是不是 Windows」。
+func requireUnixSocket(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		return
+	}
+	ln, err := net.Listen("unix", filepath.Join(t.TempDir(), "probe.sock"))
+	if err != nil {
+		t.Skipf("这个平台上 unix socket 不可用，这两条验不了：%v", err)
+		return
+	}
+	_ = ln.Close()
+}
+
+// waitAnswerIs 等子进程把答案写成 want 为止。
+func waitAnswerIs(t *testing.T, file, want string) {
+	t.Helper()
+	deadline := time.Now().Add(lockChildTimeout)
+	for {
+		if b, err := os.ReadFile(file); err == nil {
+			if got := strings.TrimSpace(string(b)); got == want {
+				return
+			} else if got != "" {
+				t.Fatalf("等的是 %q，子进程写的是 %q", want, got)
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("等了 %v，子进程一直没写出 %q（%s）", lockChildTimeout, want, file)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestLockExclusiveIsExclusive 验内核那一把锁本身是互斥的，**三个平台都跑**。
+//
+// 为什么单独立一条：另外两条并发测试靠框架的 unix socket，在 Windows 上能不能走要
+// 看系统有没有 AF_UNIX。而 `lockExclusive` 在三个平台上是**三份不同的实现**
+// （unix 是 flock，Windows 是 LockFileEx），必须各自验一遍。
+//
+// 上一轮 review 抓到过 Windows 那份的问题：它建出一个空的锁文件、还没写 pid 的
+// 那个窗口里，第二个进程读到 `pid<=0` 就把第一个的锁删了、自己重建——两个都成了
+// first。而那两条并发测试在 Windows 上是 `t.Skip` 掉的，这个 bug 谁也没看见。
+// 现在这条不依赖 socket，所以它一定会在 Windows 上跑。
+func TestLockExclusiveIsExclusive(t *testing.T) {
+	isolateLockDir(t)
+	// 本进程不许占着锁，否则第一个子进程就抢不到了。
+	releaseTestLock()
+
+	dir := t.TempDir()
+	pa := filepath.Join(dir, "a")
+	var outA bytes.Buffer
+	a := helperProbeCmd(pa, &outA, true)
+	if err := a.Start(); err != nil {
+		skipIfNoSpawn(t, err)
+		t.Fatalf("起不来子进程：%v", err)
+	}
+	defer func() {
+		if a.Process != nil {
+			_ = a.Process.Kill()
+		}
+		_ = a.Wait()
+	}()
+
+	// 等它真的拿到锁（拿到了才会一直 stay 在那里）。
+	waitAnswerIs(t, pa, "yes")
+
+	// 它活着、锁在它手上，第二个必须拿不到。
+	pc := filepath.Join(dir, "c")
+	var outC bytes.Buffer
+	c := helperProbeCmd(pc, &outC, false)
+	if err := c.Run(); err != nil {
+		skipIfNoSpawn(t, err)
+		t.Fatalf("第二个子进程没跑完：%v\n%s", err, outC.String())
+	}
+	if got := readAnswer(t, pc); got != "no" {
+		t.Fatalf("第一个进程还活着、锁在它手上，第二个却拿到了锁（%q）", got)
+	}
+
+	// 第一个退出（内核放回锁）之后，第三个应该能拿到——锁必须跟着进程走，
+	// 不能留下一个「谁也拿不到」的死状态。
+	_ = a.Process.Kill()
+	_, _ = a.Process.Wait()
+
+	pd := filepath.Join(dir, "d")
+	var outD bytes.Buffer
+	d := helperProbeCmd(pd, &outD, false)
+	if err := d.Run(); err != nil {
+		t.Fatalf("第三个子进程没跑完：%v\n%s", err, outD.String())
+	}
+	if got := readAnswer(t, pd); got != "yes" {
+		t.Fatalf("持锁的进程已经退出，第三个还是拿不到锁（%q）：锁没有跟着进程走", got)
+	}
 }
