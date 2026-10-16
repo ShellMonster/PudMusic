@@ -224,24 +224,40 @@ func TestFirstRenderKeepsPullingUntilTheContainerIsFilled(t *testing.T) {
 	}
 }
 
-// TestWhileTheFirstPageIsInFlightItSaysSo 是「第一页在途时画什么」。
+// TestTheVeryFirstFrameAlreadySaysLoading 是验收里那条「用户第一眼看到什么」。
 //
-// 一行都还没有的时候末尾那一行就是唯一那一行：这时要是还照默认那样说
-// 「这里还没有歌」，同一屏上就摆着两句打架的话（一句说没有、一句在转圈）。
-func TestWhileTheFirstPageIsInFlightItSaysSo(t *testing.T) {
+// 第一页在途的时候，第一帧画出来就该是「正在加载…」，**不是**「这里还没有歌」。
+//
+// ⚠️ 这一条不是洁癖：拉第一页**必须**在画之前发出去。画完再发的话——
+//
+//   - 这一帧的 loading 还是 false，空状态装不上「正在加载…」；
+//   - 而且画完到这一页回来之间**没有任何东西会叫醒界面**（唤醒只有「结果
+//     到了」那一次），所以那句「这里还没有歌」会一直摆到第一页回来。
+//
+// ⚠️ `ui.NewTester` 自己就跑过一帧（构造函数里的 settle），所以**这里不能再
+// `tt.Frame()`**：要看的正是那第一帧。
+func TestTheVeryFirstFrameAlreadySaysLoading(t *testing.T) {
 	st := newStub().with(1, 200, false).gate(1)
-	p, tt := newPaged(t, st.fetch)
+	p := NewPaged(newCache(t), Actions{Notify: func(string) {}}, st.fetch)
+	tt := ui.NewTester(p.View, testerW, testerH)
 
-	pump(t, tt, "第一页发出去", func() bool { return p.Paged().Loading })
-	frame(tt)
-
+	// loading 是 load 里同步置的（拉页本身在后台 goroutine 里），所以这一句
+	// 不用等：第一帧画的时候它已经是 true 了。
+	if !p.Paged().Loading {
+		t.Errorf("第一帧画的时候还没在拉页：第一页是画完之后才发出去的吧")
+	}
 	if tt.HasText("这里还没有歌") {
-		t.Errorf("第一页还没回来就说「这里还没有歌」，文字有 %q", tt.Texts())
+		t.Errorf("第一帧说的是「这里还没有歌」，文字有 %q", tt.Texts())
 	}
 	if !tt.HasText("正在加载…") {
-		t.Errorf("第一页在途时没有说「正在加载…」，文字有 %q", tt.Texts())
+		t.Errorf("第一帧没有说「正在加载…」，文字有 %q", tt.Texts())
+	}
+	pump(t, tt, "第一页真的发出去了", func() bool { return len(st.callsOf()) == 1 })
+	if c := st.callsOf(); c[0] != 1 {
+		t.Errorf("叫了 %v 页，want [1]", c)
 	}
 
+	// 拉回来之后，那句话要换掉。
 	st.release(1)
 	pump(t, tt, "第一页落地", func() bool { return p.Paged().Loaded == 200 && !p.Paged().Loading })
 	if tt.HasText("正在加载…") {
@@ -375,6 +391,31 @@ func TestAFailedPageUnlocksAndOffersARetry(t *testing.T) {
 	}
 }
 
+// TestAFailureOnTheVeryFirstPageLeavesOneWayOut 是「一行都还没有的时候失败」
+// （开 app 时连不上网就是这一种）。
+//
+// 这时候屏幕上只该留那一个重试按钮：既不能说「这里还没有歌」（还不知道有没有
+// 歌），也不能一直转圈。
+func TestAFailureOnTheVeryFirstPageLeavesOneWayOut(t *testing.T) {
+	st := newStub().fails(1, errors.New("连不上"))
+	p, tt := newPaged(t, st.fetch)
+
+	pump(t, tt, "第一页失败", func() bool { return p.Paged().Err != nil })
+
+	if p.Paged().Loading {
+		t.Fatalf("第一页失败之后还在 Loading，界面会永远转圈")
+	}
+	if tt.HasText("这里还没有歌") {
+		t.Errorf("第一页就失败却说「这里还没有歌」，文字有 %q", tt.Texts())
+	}
+	if tt.HasText("正在加载…") {
+		t.Errorf("第一页就失败却还在说「正在加载…」，文字有 %q", tt.Texts())
+	}
+	if !tt.HasText("加载失败，点此重试") {
+		t.Errorf("第一页就失败，屏幕上没有一条走得出去的路，文字有 %q", tt.Texts())
+	}
+}
+
 // TestATimeoutUnlocksToo 是验收第 3 条的后半句：超时也要把锁解开。
 //
 // 超时和失败是同一条路（fetch 自己把 ctx 的错报出来），但它是最容易被漏的
@@ -406,131 +447,144 @@ func TestATimeoutUnlocksToo(t *testing.T) {
 	}
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 取消与旧结果作废
-// ─────────────────────────────────────────────────────────────────────────────
-
-// TestReloadCancelsThePageInFlight 是验收第 3 条的前半句：中途改关键词能取消
-// 在途请求。取消是真的取消（fetch 的 ctx 收到 Done，服务端收得到）。
-func TestReloadCancelsThePageInFlight(t *testing.T) {
-	st := newStub().with(1, 200, true).gate(2)
-	p, tt := newPaged(t, st.fetch)
-
-	pump(t, tt, "第一页落地", func() bool { return p.Paged().Loaded == 200 })
-	tt.Scroll(testerW/2, testerH/2, 0, scrollToBottom)
-	pump(t, tt, "第 2 页发出去", func() bool { return p.Paged().Loading })
-
-	p.Reload() // 换关键词了
-	pump(t, tt, "看见取消", func() bool { return st.sawCancel(2) })
-}
-
-// TestAStaleResultNeverLands 是 PLAN 风险栏点名的那一条：
-// **用户连点筛选条件时，旧请求的结果不能覆盖新条件的结果**。
+// TestAFetcherThatPanicDoesNotTakeTheProcessDown 是「Fetcher 在后台 goroutine
+// 里 panic 会直接带走整个进程」那条。
 //
-// 这一条是 cancel 挡不住的：请求已经回来了、正往信箱里投的时候，cancel 已经
-// 来不及。所以靠的是代次（gen）。
-func TestAStaleResultNeverLands(t *testing.T) {
-	st := newStub().with(1, 200, true).stickyPage(2)
+// 这一支是**本票里唯一一处没有 recover 的 panic**：fetch 跑在后台 goroutine
+// 里，行级 / 页级 / view 自己那三层 recover 一个都接不到它（没有人在跑那个
+// goroutine）。而 Fetcher 正是「解析接口返回」的那一段——接口一变就在这里炸。
+//
+// 这条测试要是没有那层 recover，跑它的时候整个测试进程当场就没了。
+func TestAFetcherThatPanicDoesNotTakeTheProcessDown(t *testing.T) {
+	fetch := func(ctx context.Context, page int) (Page, error) {
+		if page == 2 {
+			panic("接口返回了预期外的东西")
+		}
+		return Page{Songs: pageSongs(page, 200), HasMore: page == 1}, nil
+	}
+	p, tt := newPaged(t, fetch)
+
+	pump(t, tt, "第一页落地", func() bool { return p.Paged().Loaded == 200 })
+	tt.Scroll(testerW/2, testerH/2, 0, scrollToBottom)
+	pump(t, tt, "第 2 页崩了", func() bool { return p.Paged().Err != nil })
+
+	// 崩了也要走 apply 那条正常路：解锁、记一笔、页脚上出现重试。
+	if p.Paged().Loading {
+		t.Fatalf("拉页器崩了之后还在 Loading，界面会永远转圈")
+	}
+	if !errors.Is(p.Paged().Err, errFetcherPanic) {
+		t.Errorf("Err = %v，want 含有 %v", p.Paged().Err, errFetcherPanic)
+	}
+	if !tt.HasText("加载失败，点此重试") {
+		t.Errorf("拉页器崩了之后没有给人一条重试的路，文字有 %q", tt.Texts())
+	}
+}
+
+// TestAPanicWhileDrawingDoesNotTakeTheProcessDown 验的是 view 外面那道
+// guard.Wrap：控件自己画崩了，不该把进程带走，而且下一帧还能画出来。
+func TestAPanicWhileDrawingDoesNotTakeTheProcessDown(t *testing.T) {
+	st := newStub().fails(1, errors.New("连不上"))
+	notified := 0
+	acts := Actions{Notify: func(string) {
+		notified++
+		if notified == 1 {
+			panic("提示画崩了") // 只有第一次崩：要看得见它之后活下来了
+		}
+	}}
+	p := NewPaged(newCache(t), acts, st.fetch)
+	tt := ui.NewTester(p.View, testerW, testerH)
+
+	// apply 里 notify 炸的那一帧：没有这道 recover，测试进程当场就没了。
+	pump(t, tt, "第一页失败（那一帧里 notify 崩了一次）", func() bool { return notified > 0 })
+	frame(tt)
+
+	if p.Paged().Loading {
+		t.Errorf("画崩之后还在 Loading，界面会永远转圈")
+	}
+	if !tt.HasText("加载失败，点此重试") {
+		t.Errorf("画崩之后下一帧没画出来，文字有 %q", tt.Texts())
+	}
+	if tt.HasText("这里还没有歌") {
+		t.Errorf("画崩之后说「这里还没有歌」，文字有 %q", tt.Texts())
+	}
+}
+
+// TestPagesThatOverlapAreDeduped 是铁律四在翻页上最容易踩的那一处：
+// **两页返回同一首歌**（B 站的翻页本来就可能重叠，同一首歌挪个名次就出现两次）。
+//
+// 不去重的话同一个 ID 出现两次：Tester 当场 panic（这条测试就是靠那个 panic
+// 兜住的），真窗口里那两行共用一份状态——选中一个另一个也亮。
+func TestPagesThatOverlapAreDeduped(t *testing.T) {
+	first := pageSongs(1, 200)
+	st := newStub().withSongs(1, first, true).withSongs(2, first, false)
 	p, tt := newPaged(t, st.fetch)
 
 	pump(t, tt, "第一页落地", func() bool { return p.Paged().Loaded == 200 })
 	tt.Scroll(testerW/2, testerH/2, 0, scrollToBottom)
-	pump(t, tt, "第 2 页发出去", func() bool { return p.Paged().Loading })
-
-	// 换关键词：这一页作废。**先**换好新条件的答案再 Reload —— Reload 当场就
-	// 发第一页，答案换晚了它会拉到旧条件的那一份（那就是这个测试要抓的东西）。
-	st.serve(1, Page{Songs: pageSongs(9, 3), HasMore: false}, nil)
-	p.Reload()
-	st.release(2) // 旧的那一页这时候才回来（它没理 ctx，照样给了 200 行）
-	pump(t, tt, "新条件的第一页落地", func() bool { return p.Paged().Loaded == 3 && !p.Paged().Loading })
-	frame(tt)
+	pump(t, tt, "第 2 页落地", func() bool { return !p.Paged().Loading && p.Paged().Page == 2 })
 	frame(tt)
 
-	if got := p.Paged().Loaded; got != 3 {
-		t.Errorf("加载了 %d 行，want 3：旧条件那 200 行漏进来了", got)
+	if got := p.Paged().Loaded; got != 200 {
+		t.Errorf("两页返回同一批歌，加载了 %d 行，want 200", got)
 	}
-	if p.Paged().Page != 1 {
-		t.Errorf("Page = %d，want 1", p.Paged().Page)
-	}
-	if onScreen(tt, "第 2 页 歌 1") {
-		t.Errorf("旧条件那页的行还在画面上")
+	// 画面上还是那一批歌（滚到底了，所以看的是末尾那一行）。
+	if !onScreen(tt, "第 1 页 歌 200") {
+		t.Errorf("翻完页末尾那一行不在画面上，文字有 %q", tt.Texts())
 	}
 }
 
-// TestReloadClearsAndGoesBackToTheTop 是「切路由回顶」：换查询之后从第一页
-// 重新来，滚动位置回到顶上。
-func TestReloadClearsAndGoesBackToTheTop(t *testing.T) {
-	st := newStub().with(1, 200, true)
-	p, tt := newPaged(t, st.fetch)
-
-	pump(t, tt, "第一页落地", func() bool { return p.Paged().Loaded == 200 })
-	tt.Scroll(testerW/2, testerH/2, 0, scrollToBottom)
-	frame(tt)
-	if p.scroll.Y < 400 {
-		t.Fatalf("没滚下去（Y=%v），后面那句就是假的", p.scroll.Y)
-	}
-
-	st.serve(1, Page{Songs: pageSongs(9, 3), HasMore: false}, nil)
-	p.Reload()
-	pump(t, tt, "新查询落地", func() bool { return p.Paged().Loaded == 3 && !p.Paged().Loading })
-	frame(tt)
-
-	if p.scroll.Y != 0 {
-		t.Errorf("换查询之后滚到 Y=%v，want 0（切路由要回顶）", p.scroll.Y)
-	}
-	if !onScreen(tt, "第 9 页 歌 1") {
-		t.Errorf("换查询之后第一行不在画面上，文字有 %q", tt.Texts())
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 回顶按钮
-// ─────────────────────────────────────────────────────────────────────────────
-
-// TestBackToTopAppearsAfter400Pixels 是验收第 4 条的后半句。400 是死数。
-func TestBackToTopAppearsAfter400Pixels(t *testing.T) {
+// TestEveryWindowThatDrewItGetsWoken 是铁律三的后半句：**逐窗口通知**。
+//
+// 一个列表可能被两个窗口画（迷你播放器那条路由将来就是第二个窗口）。只叫醒
+// 「最后画过的那个」，另一个窗口就停在旧帧——实测那样是 0 帧刷新。
+//
+// ⚠️ 这里只验通知这一段：同一个窗口登记两次只占一条（认的是 Services），
+// 有两条就都要叫醒。真有两个窗口的 Tester 是另一票的事（那时候才有）。
+func TestEveryWindowThatDrewItGetsWoken(t *testing.T) {
 	st := newStub().with(1, 200, false)
 	p, tt := newPaged(t, st.fetch)
 
-	pump(t, tt, "第一页落地", func() bool { return p.Paged().Loaded == 200 })
-	if tt.HasText("返回顶部") {
-		t.Fatalf("还没滚就出现回顶按钮了")
+	p.wakeMu.Lock()
+	one := len(p.wakes)
+	p.wakeMu.Unlock()
+	if one != 1 {
+		t.Fatalf("一个窗口画了一帧之后记了 %d 条唤醒句柄，want 1", one)
 	}
 
-	// 滚 300 像素：不够，不出现。
-	tt.Scroll(testerW/2, testerH/2, 0, 300)
-	frame(tt)
-	if p.scroll.Y < 300 {
-		t.Skipf("Tester 一次滚不动 300 像素（Y=%v），这一条验不了", p.scroll.Y)
-	}
-	if tt.HasText("返回顶部") {
-		t.Errorf("滚了 %v 像素就出现回顶按钮了，want 400 以后", p.scroll.Y)
+	frame(tt) // 同一个窗口再画一帧：还是一条
+	p.wakeMu.Lock()
+	again := len(p.wakes)
+	p.wakeMu.Unlock()
+	if again != 1 {
+		t.Fatalf("同一个窗口画了第二帧之后记了 %d 条，want 1（覆盖式登记）", again)
 	}
 
-	// 再滚到 400 以上：出现。
-	tt.Scroll(testerW/2, testerH/2, 0, 200)
-	frame(tt)
-	if p.scroll.Y <= backTopPx {
-		t.Fatalf("滚到 %v 像素还是没有回顶按钮", p.scroll.Y)
-	}
-	if !tt.HasText("返回顶部") {
-		t.Fatalf("滚过 400 像素却没有回顶按钮，文字有 %q", tt.Texts())
-	}
+	// 手工加一条「另一个窗口」，两个都得叫醒。
+	var woke [2]int
+	p.wakeMu.Lock()
+	p.wakes[0].wake = func() { woke[0]++ }
+	p.wakes = append(p.wakes, wakeEntry{wake: func() { woke[1]++ }})
+	p.wakeMu.Unlock()
 
-	// 点它：回顶。
-	if err := tt.Click("返回顶部"); err != nil {
-		t.Fatalf("点不到回顶按钮：%v", err)
+	p.invalidate()
+	if woke[0] != 1 || woke[1] != 1 {
+		t.Errorf("叫醒了 %v，want [1 1]：逐窗口通知，两个窗口都得醒", woke)
 	}
-	frame(tt)
-	frame(tt)
-	if p.scroll.Y != 0 {
-		t.Errorf("点了回顶之后 Y=%v，want 0", p.scroll.Y)
+}
+
+// TestTheLogSaysWhoAskedForThePage 是排查用的小钉子：用户点的重试不能被记成
+// 「容器没填满叫的」——那句话会把人往错的方向引。
+func TestTheLogSaysWhoAskedForThePage(t *testing.T) {
+	want := map[trigger]string{
+		trigFirstRender: "首次渲染检查叫的",
+		trigScrollEnd:   "滚到底叫的",
+		trigRefill:      "容器没填满叫的",
+		trigRetry:       "用户点了重试",
 	}
-	if tt.HasText("返回顶部") {
-		t.Errorf("回到顶上之后按钮还在")
-	}
-	if !onScreen(tt, "第 1 页 歌 1") {
-		t.Errorf("回到顶上之后第一行不在画面上，文字有 %q", tt.Texts())
+	for got, text := range want {
+		if got.String() != text {
+			t.Errorf("trigger %d 说的是 %q，want %q", got, got.String(), text)
+		}
 	}
 }
 

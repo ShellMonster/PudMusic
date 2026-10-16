@@ -114,8 +114,10 @@ type List struct {
 	// scroll 是这个列表把滚动位置写回来的那个句柄，为 nil 时不写。
 	scroll *ui.ScrollState
 
-	// empty 是一行歌都没有时说的话，空串是 defaultEmpty（见 SetEmpty）。
-	empty string
+	// empty 是一行歌都没有时说的话（见 SetEmpty）。emptySet 为 false 是没调过
+	// SetEmpty（用 defaultEmpty 那句）。
+	empty    string
+	emptySet bool
 
 	// failed 是画崩了的行（按 ID 记），下一帧不重试。
 	//
@@ -156,13 +158,15 @@ func (l *List) SetSongs(songs []Music) {
 // ⚠️ 只能由界面线程调，同 SetSongs。
 func (l *List) SetFooter(fn func(c *ui.Context)) { l.footer = fn }
 
-// SetEmpty 换掉「没有歌时说的那句话」，空串是恢复默认（defaultEmpty）。
+// SetEmpty 换掉「没有歌时说的那句话」。
 //
-// 分页列表用它：第一页还没回来的时候说「正在加载…」，免得一句「这里还没有歌」
-// 和页脚那一行的话打架（没东西的时候页脚就是唯一一行，见 paged.go）。
+// **空串是不画**：一句都不说（列表就是空的）。不调它是用默认那句
+// （defaultEmpty）。分页列表两种都要——第一页在途时说「正在加载…」，而
+// 失败时页面上只留那一个重试按钮，不该再摆一句「这里还没有歌」（见
+// paged.go 的 syncList）。
 //
 // ⚠️ 只能由界面线程调，同 SetSongs。
-func (l *List) SetEmpty(text string) { l.empty = text }
+func (l *List) SetEmpty(text string) { l.empty, l.emptySet = text, true }
 
 // SetScroll 让这个列表把滚动位置写进 s（每帧写一次），调用方读它就知道滚到
 // 哪儿了，也能靠改它把列表滚到某处。传 nil 就断开。
@@ -189,12 +193,12 @@ const defaultEmpty = "这里还没有歌"
 // 完整路径）不是一个来源，所以带一个前缀。
 const footerFailed = "biu:footer"
 
-// emptyText 是这一帧该说的那句空状态。
+// emptyText 是这一帧该说的那句空状态，空串是「什么都不说」。
 func (l *List) emptyText() string {
-	if l.empty != "" {
-		return l.empty
+	if !l.emptySet {
+		return defaultEmpty
 	}
-	return defaultEmpty
+	return l.empty
 }
 
 // rows 是这个列表有几行，含末尾那一行（没装 footer 就不算）。
@@ -286,10 +290,13 @@ func (l *List) View(c *ui.Context) {
 		// `biu/src/components/music-list-item/index.tsx`）。
 		OnSubmit(func() { l.playFrom(l.sel) }).
 		// 没有歌时列表是空的，Children 里那一支就是它的空状态。
+		// 一句都不说的时候连这一支都不建（见 SetEmpty）。
 		Children(func() {
 			if len(l.songs) == 0 {
-				ui.Text(c, l.emptyText()).FontSize(13).
-					TextColor(c.Theme().TextMuted).Padding(16)
+				if s := l.emptyText(); s != "" {
+					ui.Text(c, s).FontSize(13).
+						TextColor(c.Theme().TextMuted).Padding(16)
+				}
 			}
 		}).
 		Rows(func(r ui.ListRow) { l.viewRow(r) })

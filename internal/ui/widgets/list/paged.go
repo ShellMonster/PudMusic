@@ -19,14 +19,26 @@
 //   - **防重入**：Biu 用一个 loadLock ref。三条保障挨着跑（Biu 的 effect 也是
 //     挨着的），没有这把锁一次滚动能发三个请求。
 //   - **取消与旧结果作废**：连点筛选条件时，旧请求的结果不能盖掉新条件的
-//     （代次 gen 就是干这个的）。
+//     （代次 gen 就是干这件事的）。
+//
+// ⚠️ 三条「panic 不能杀进程」的约定，这一层都自己包了：
+//
+//   - **Fetcher 在后台 goroutine 里**：崩了会直接带走整个进程（那一层 recover
+//     接不到），所以 fetch 外面包一层，崩了当成一个错走正常那条路（见 fetchOne）。
+//   - **View**：包 guard.Wrap（行级那一层见 List.guarded，页级那一层在
+//     `internal/ui/router.go` 的 Shell.page）。
 package list
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
+	"runtime/debug"
+	"slices"
 	"sync"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/egoist/mygo/ui"
 )
@@ -47,9 +59,14 @@ const (
 	backTopRadius = 999
 )
 
+// maxWakes 是记着的唤醒句柄上限：一个窗口一条，多出来的挤掉最久没画的那个
+// （它已经不画了，句柄留着是空转）。
+const maxWakes = 4
+
 // Page 是一次拉页的结果。
 type Page struct {
-	// Songs 是这一页的歌，**按顺序接在已有那些后面**。
+	// Songs 是这一页的歌，**按顺序接在已有那些后面**（重了的会被去掉，见
+	// apply）。
 	Songs []Music
 	// HasMore 后面还有没有。false 就是到底了，自动补屏就此停手。
 	HasMore bool
@@ -61,6 +78,7 @@ type Page struct {
 // （Biu 那边是组件卸载，效果一样）。
 //
 // ⚠️ 它在**后台 goroutine 里**调：里面不许碰界面状态，要通知界面就往返回值里放。
+// 它要是 panic 了，这一页就当失败处理（见 fetchOne）。
 type Fetcher func(ctx context.Context, page int) (Page, error)
 
 // Paged 是一页分页列表此刻的状态。页面照它画（转圈 / 重试 / 「还有多少」），
@@ -72,8 +90,8 @@ type Paged struct {
 	Loaded int
 	// HasMore 后面还有没有。
 	HasMore bool
-	// Loading 是「正在拉」。**失败、超时、返回不对都必须是 false**——不然界面
-	// 永远转圈（见 apply）。
+	// Loading 是「正在拉」。**失败、超时、返回不对、拉页器崩了都必须是
+	// false**——不然界面永远转圈（见 apply）。
 	Loading bool
 	// Err 是上一次拉页的错，成功时为 nil。
 	Err error
@@ -83,6 +101,10 @@ type Paged struct {
 //
 // 建一次，存进页面自己的状态里，每一帧调 View（同 List）。
 type PagedList struct {
+	// draw 是包了 recover 的画法，见 View。建的时候包一次就够（每帧包一次是
+	// 白花开闭包）。
+	draw func(*ui.Context)
+
 	list  *List
 	fetch Fetcher
 
@@ -90,7 +112,12 @@ type PagedList struct {
 
 	// items 是已经拿到的全部行。**追加在尾部**，所以每次翻页接的是新的一截，
 	// 不会动到上面那些行的身份（铁律四，见 apply）。
-	items   []Music
+	items []Music
+	// seen 是 items 里已有的 ID。翻页时两页返回同一首歌很常见（B 站的翻页
+	// 本来就可能重叠），不去重就是同一个 ID 出现两次：行身份直接串在一起
+	//（Tester 当场 panic，真窗口里那两行共用一份状态——选中一个另一个也亮）。
+	seen map[string]bool
+
 	page    int
 	hasMore bool
 	loading bool
@@ -120,15 +147,30 @@ type PagedList struct {
 	// shownRev 是上一次交给 List 的那一版的 rev。
 	shownRev int
 
-	// wake 是后台投递完结果之后叫醒界面的那个回调（铁律三）。每帧在 view
-	// 开头重新登记，用的是这一帧的窗口句柄。
+	// ── 跨 goroutine 的只有下面这两小摊 ──────────────────────────────────
+
+	// wakes 是**每个画过这个列表的窗口**一条。deliver 全部叫醒：只叫醒一个的
+	// 话，另一个窗口停在旧帧（实测：只投递不唤醒 = 0 帧刷新）。
+	//
+	// 认窗口靠 svc：weak.Pointer 的比较规则是「同一个窗口的两次 Services
+	// 相等，换一个窗口就不相等」，所以同一窗口每帧重登记只占一条。
 	wakeMu sync.Mutex
-	wake   func()
+	wakes  []wakeEntry
+	// frame 是登记了几次，用来认出「最久没画的那一个」。
+	frame uint64
 
-	// ── 跨 goroutine 的只有下面这一小摊：后台只往信箱里投，界面线程取 ──────
-
+	// mu 只护着信箱：后台往里投，界面线程在 view 开头取。
 	mu  sync.Mutex
 	box []pageResult
+}
+
+// wakeEntry 是一个窗口的唤醒句柄。
+type wakeEntry struct {
+	// svc 是这个窗口的身份（认它用），wake 是叫醒它的动作。
+	svc  ui.Services
+	wake func()
+	// seen 是这个窗口上一次登记时的帧号。
+	seen uint64
 }
 
 // pageResult 是后台拉完一页之后投进信箱的东西。
@@ -144,11 +186,19 @@ type pageResult struct {
 //
 // cache 和 acts 的意思同 New（封面缓存、这一页会做的操作）。fetch 是拉页的
 // 那一支，见 Fetcher。
+//
+// ⚠️ **不在这里拉第一页**：NewPaged 可能在界面线程之外被调（页面的状态在
+// 构造器里建），那时候还没有唤醒句柄也没有画面。第一页由第一帧的 view 拉。
 func NewPaged(cache *imgcache.Cache, acts Actions, fetch Fetcher) *PagedList {
 	p := &PagedList{
 		list:  New(cache, acts),
 		fetch: fetch,
+		// 「还有没有」要等有人问过才知道。在那之前一律当作还有——不然第一帧
+		// 会以为到底了，连页脚那一行都不画。
+		hasMore: true,
+		seen:    map[string]bool{},
 	}
+	p.draw = guard.Wrap(p.view, p.onPanic)
 	return p
 }
 
@@ -177,6 +227,7 @@ func (p *PagedList) Reload() {
 	p.stop() // 含 p.loading = false
 	p.gen++
 	p.items = nil
+	p.seen = map[string]bool{}
 	p.page = 0
 	p.hasMore = true
 	p.err = nil
@@ -206,46 +257,83 @@ func (p *PagedList) ScrollTop() {
 
 // View 画这一页。页面在每一帧开头调一次，装好 Grow(1) 的位置（同 List.View）。
 //
-// ⚠️ **这里没有 `ui.Guard`**：`Guard` 住在 `internal/ui`，而这个包是界面的
-// 底座（界面层将来 import 它，不是反过来），所以这一层拿不到它——好在也不
-// 需要：它是**页面的一部分**，页面级的 recover 本来就兜着它
-// （`internal/ui/router.go` 的 `Shell.page` 给每一页都包了一层）。本包自己
-// 手里那一层是行级的（`List.guarded`），两层各管各的，不重复。
-func (p *PagedList) View(c *ui.Context) {
-	// 🔴 铁律三：把这一帧的唤醒句柄重新登记上。后台投递完结果要靠它叫醒界面，
+// 🔴 外面包着 recover（`guard.Wrap`，建的时候包一次，见 NewPaged）：view 里
+// panic 会一路穿到 Cocoa 事件循环上去把整个进程带走。画在页面里时页级那道
+// Guard（`internal/ui` 的 `Shell.page`）也接得住，但这个控件不是只给页面用的
+// ——它自己这一道必须有，包一层是这里最便宜的保险。
+func (p *PagedList) View(c *ui.Context) { p.draw(c) }
+
+// onPanic 记一笔并要一帧。
+//
+// 要下一帧是必须的：recover 接住的是 build pass 中间，那一帧剩下的部分没建，
+// 画出来是半张（`internal/ui` 的 Shell.onPanic 补 Invalidate 是同一个道理）。
+//
+// ⚠️ 这里**不换错误页**：坏的是这一个控件，页面上别的东西照常用。这和行级
+// `List.guarded` 是同一个取舍（「几千行里坏一行」好过「整页变成错误页」）。
+func (p *PagedList) onPanic(rec any) {
+	log.Printf("biu: 分页列表画崩了：%v\n%s", rec, debug.Stack())
+	p.invalidate()
+}
+
+// view 是真的画法，View 是它外面那道 recover。
+func (p *PagedList) view(c *ui.Context) {
+	// 🔴 铁律三：把这一帧的窗口登记进去。后台投递完结果要靠它叫醒界面，
 	// 不唤醒就是「结果到了、画面停在旧帧」（实测 0 帧刷新）。
-	p.setWake(c.Services().Invalidate)
+	p.setWake(c.Services())
 
 	// 先收后台投回来的页，再画：这样这一帧画的就是**已经加上**的那几行，
 	// 不用等下一帧。
 	p.adopt()
 
+	// ① 首次渲染检查。**必须在画之前发出去**，不是画完再发：
+	//   - 画完再发的话，这一帧画出来的是「这里还没有歌」，要等这一页回来才
+	//     换掉——用户第一眼看到的是空列表（这条有测试钉住，见 paged_test.go 的
+	//     TestTheVeryFirstFrameAlreadySaysLoading）。
+	//   - 而且那一段没有任何东西会叫醒界面：唤醒只有「结果到了」那一次。
+	if p.page == 0 {
+		p.load(trigFirstRender)
+	}
+
+	p.syncList()
+	p.list.View(c)
+
+	// ②③ 在这里跑（必须排在 List.View 之后：Visible 报的是**上一帧**的行，
+	// mygo 的 ListState.Visible 注释：「the row the list showed in the last frame」）。
+	p.afterFrame()
+	p.viewBackToTop(c)
+}
+
+// syncList 把这一帧该给 List 的东西给过去。只在真变了的时候才 SetSongs。
+func (p *PagedList) syncList() {
 	if p.rev != p.shownRev {
 		p.list.SetSongs(p.items)
 		p.shownRev = p.rev
 	}
-	// 一行都没有的时候，页脚就是唯一那一行：这时别再让空状态说「这里还没有歌」
-	// ——它和页脚的话会打架（一句说没有、一句在转圈）。
-	if len(p.items) == 0 && p.loading {
+
+	switch {
+	case len(p.items) == 0 && p.loading:
+		// 一行都还没有：第一页在途。这时候列表里那一句就是它全部的内容，
+		// 页脚先收起来——同一句摆两遍（空状态一句 + 页脚一句）是噪音。
 		p.list.SetEmpty("正在加载…")
-	} else {
-		p.list.SetEmpty("")
-	}
-	// 末尾那一行**只在还有下一页（或刚失败要人重试）时才有**（Biu 的
-	// `count = hasMore ? items.length + 1 : items.length`）：拉到底之后它就不该
-	// 再占一行空白。
-	if p.hasMore || p.blocked {
-		p.list.SetFooter(p.footerView)
-	} else {
 		p.list.SetFooter(nil)
+	case len(p.items) == 0 && p.blocked:
+		// 一行都没有还失败了：页面上就留那一个重试按钮，一句话都不多说。
+		p.list.SetEmpty("")
+		p.list.SetFooter(p.footerView)
+	default:
+		p.list.SetEmpty("")
+		// 末尾那一行**只在还有下一页（或刚失败要人重试）时才有**（Biu 的
+		// `count = hasMore ? items.length + 1 : items.length`）：拉到底之后它
+		// 就不该再占一行空白。
+		if p.hasMore || p.blocked {
+			p.list.SetFooter(p.footerView)
+		} else {
+			p.list.SetFooter(nil)
+		}
 	}
+
 	// 滚动位置要写回来：回顶按钮靠它，三重保障里「在不在顶上」也靠它。
 	p.list.SetScroll(&p.scroll)
-	p.list.View(c)
-
-	// 三重保障在这里面跑（必须在 List.View 之后：它读的是这一帧画出来的行）。
-	p.afterFrame()
-	p.viewBackToTop(c)
 }
 
 // adopt 取走信箱里的结果，一条一条落到界面的状态上。只能由界面线程调。
@@ -263,8 +351,8 @@ func (p *PagedList) adopt() {
 // apply 落一页结果。
 //
 // 🔴 **锁在这一行解开，而且只有这一行解**（`p.loading = false`）：请求失败、
-// 超时、返回格式不对（fetch 自己把那个错报出来），全走这一条。漏了它就是
-// 「界面永远转圈」——验收里点名要钉住的那一条。
+// 超时、返回格式不对、拉页器自己崩了（fetchOne 把 panic 变成了错），全走这一
+// 条。漏了它就是「界面永远转圈」——验收里点名要钉住的那一条。
 func (p *PagedList) apply(r pageResult) {
 	if r.gen != p.gen {
 		// 换查询之前发出去的那一页。作废，别让它盖掉新条件的结果。
@@ -280,7 +368,7 @@ func (p *PagedList) apply(r pageResult) {
 		// 解了锁，但**不再自动重试**：不然就是自己打自己（见 blocked）。
 		p.err = r.err
 		p.blocked = true
-		log.Printf("biu: 第 %d 页拉失败（触发它的保障：%s）：%v", r.page, p.why, r.err)
+		log.Printf("biu: 第 %d 页拉失败（%s）：%v", r.page, p.why, r.err)
 		p.list.notify("加载更多失败：" + r.err.Error())
 		return
 	}
@@ -293,14 +381,23 @@ func (p *PagedList) apply(r pageResult) {
 		// 一页空的还说「还有」：接口在骗人，或者已经到头了。再拉就是空转。
 		p.hasMore = false
 	}
-	// 🔴 铁律四：追加是**尾部**插 key（筛选后重建才是头部插，两条规则不一样）。
+	// 🔴 铁律四：追加是**尾部**插 key（筛选后重建才是头部插，两条规则不一样），
 	// 尾部追加不动已有行的位置，所以「选中的那一首」翻完页还是它。
-	p.items = append(p.items, r.pg.Songs...)
+	//
+	// 重了的在这里去掉：翻页重叠是常事（同一首歌挪了名次就会出现在两页里），
+	// 两个一样的 ID 就是两行共用一份状态——选中一个另一个也亮。
+	for _, m := range r.pg.Songs {
+		if p.seen[m.ID] {
+			continue
+		}
+		p.seen[m.ID] = true
+		p.items = append(p.items, m)
+	}
 	p.rev++
 }
 
-// trigger 是「这次翻页是被哪一条保障叫起来的」。三条走的是同一段代码，
-// 记下来只是为了**出错时说得清是哪一条**（见 apply 的那行日志）。
+// trigger 是「这次翻页是被哪一条叫起来的」。三条保障走的是同一段代码，记下来
+// 只是为了**出错时说得清是哪一条**（见 apply 的那行日志）。
 type trigger uint8
 
 const (
@@ -310,35 +407,32 @@ const (
 	trigScrollEnd
 	// trigRefill 是③加载结束后再检一次（顺带也是拖窗口变高变矮之后的那次）。
 	trigRefill
+	// trigRetry 是用户点了页脚那行的「重试」。它不是保障，是人。
+	trigRetry
 )
 
 func (t trigger) String() string {
 	switch t {
 	case trigFirstRender:
-		return "首次渲染"
+		return "首次渲染检查叫的"
 	case trigScrollEnd:
-		return "滚到底"
+		return "滚到底叫的"
+	case trigRetry:
+		return "用户点了重试"
 	default:
-		return "容器没填满"
+		return "容器没填满叫的"
 	}
 }
 
-// afterFrame 是三重保障。每一帧跑一次——三条保障不是三个不同的钩子，是同一个
-// 判断（末尾那一行进没进画面）在不同时刻的三个取值，所以这里每帧问一遍：
-// 「一页刚落地那一帧」和「刚拖过窗口大小那一帧」自然就问到了。
+// afterFrame 是三重保障的②③（①在 view 开头，见那里）。每一帧跑一次——三条保障
+// 不是三个不同的钩子，是同一个判断（末尾那一行进没进画面）在不同时刻的三个取
+// 值，所以这里每帧问一遍：「一页刚落地那一帧」和「刚拖过窗口大小那一帧」自然
+// 就问到了。
 //
-// ⚠️ 必须排在 List.View 之后：Visible 报的是**上一帧画出来**的行
-// （mygo 的 ListState.Visible 注释：「the first and the last row the list
-// showed in the last frame」）。
+// ⚠️ 必须排在 List.View 之后：Visible 报的是**上一帧画出来**的行。
 func (p *PagedList) afterFrame() {
-	// ① 首次渲染检查：还一页都没有就先拉第一页。列在开关前面是故意的——
-	// 还没拉过时 hasMore 是 false（还没人说过还有没有），拿它当闸门会把第一页
-	// 也关掉。
-	if p.page == 0 {
-		p.load(trigFirstRender)
-		return
-	}
 	// 防重入闸门：正在拉、上一页失败了、或者已经到底，都不再拉。
+	// （还一页都没有的那一条不在这里，见 view。）
 	if p.loading || p.blocked || !p.hasMore {
 		return
 	}
@@ -380,34 +474,83 @@ func (p *PagedList) load(why trigger) {
 
 	go func() {
 		defer cancel()
-		pg, err := p.fetch(ctx, next)
+		pg, err := p.fetchOne(ctx, next)
 		p.deliver(pageResult{gen: gen, page: next, pg: pg, err: err})
 	}()
+}
+
+// errFetcherPanic 是拉页器自己崩了之后变成的那个错。
+var errFetcherPanic = errors.New("拉页的代码崩了")
+
+// fetchOne 调 fetch，**崩了也变成一个错**。
+//
+// 🔴 不包这一层就是进程当场没了：fetch 跑在后台 goroutine 里，界面那一层的
+// recover（行级的、页级的、这个 view 自己的）一个都接不到它——Go 里没人在
+// 跑那个 goroutine。而 Fetcher 正是「解析接口返回」的那一段，接口一变就在
+// 这里炸（Biu 的三个 effect 里没有这一层，它是同步的所以碰不到）。
+//
+// 变成错之后就走 apply 那条正常路：解锁、记一笔、页脚上出现重试——
+// 正好是「返回格式不对」那一条要的行为。
+func (p *PagedList) fetchOne(ctx context.Context, page int) (pg Page, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("biu: 第 %d 页的拉页器崩了：%v\n%s", page, rec, debug.Stack())
+			pg, err = Page{}, fmt.Errorf("%w：%v", errFetcherPanic, rec)
+		}
+	}()
+	return p.fetch(ctx, page)
 }
 
 // deliver 把一页结果投进信箱，然后叫醒界面。任何 goroutine 都能调。
 //
 // 🔴 铁律三：投递完**必须**唤醒。不唤醒就是「结果到了、画面停在旧帧」
-// （实测 0 帧刷新）。
+// （实测 0 帧刷新）；只唤醒一个窗口就是另一个窗口停在旧帧，所以是逐窗口
+// 通知。
 func (p *PagedList) deliver(r pageResult) {
 	p.mu.Lock()
 	p.box = append(p.box, r)
 	p.mu.Unlock()
 
-	p.wakeMu.Lock()
-	wake := p.wake
-	p.wakeMu.Unlock()
-	if wake != nil {
-		wake()
-	}
+	p.invalidate()
 }
 
-// setWake 登记唤醒回调。每帧在 view 开头调（句柄是窗口的弱引用，窗口关了
-// 自动失效）。
-func (p *PagedList) setWake(fn func()) {
+// setWake 登记这一帧的窗口（每个窗口一条，见 wakes）。只能由界面线程调。
+func (p *PagedList) setWake(svc ui.Services) {
+	wake := svc.Invalidate // 方法值：一个窗口一条，所以每帧一个闭包不算多
+
 	p.wakeMu.Lock()
-	p.wake = fn
+	defer p.wakeMu.Unlock()
+	p.frame++
+	for i := range p.wakes {
+		if p.wakes[i].svc == svc {
+			p.wakes[i].wake, p.wakes[i].seen = wake, p.frame
+			return
+		}
+	}
+	if len(p.wakes) >= maxWakes {
+		// 挤掉最久没画的那一个：那个窗口已经不画了，它的句柄留着是空转。
+		oldest := 0
+		for i := range p.wakes {
+			if p.wakes[i].seen < p.wakes[oldest].seen {
+				oldest = i
+			}
+		}
+		p.wakes = append(p.wakes[:oldest], p.wakes[oldest+1:]...)
+	}
+	p.wakes = append(p.wakes, wakeEntry{svc: svc, wake: wake, seen: p.frame})
+}
+
+// invalidate 叫醒所有画过这个列表的窗口。任何 goroutine 都能调。
+func (p *PagedList) invalidate() {
+	p.wakeMu.Lock()
+	wakes := slices.Clone(p.wakes)
 	p.wakeMu.Unlock()
+
+	for _, w := range wakes {
+		if w.wake != nil {
+			w.wake()
+		}
+	}
 }
 
 // stop 停掉在途的那一页。它只是**不让结果落地**：真正的作废靠 gen（Reload 里
@@ -432,7 +575,7 @@ func (p *PagedList) footerView(c *ui.Context) {
 			if p.blocked {
 				if ui.Button(c, "加载失败，点此重试").FontSize(13).Clicked() {
 					p.blocked = false
-					p.load(trigRefill)
+					p.load(trigRetry)
 				}
 				return
 			}
