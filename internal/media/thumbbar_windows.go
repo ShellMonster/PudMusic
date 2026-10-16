@@ -320,7 +320,7 @@ func (t *thumbbar) ensureAdded() {
 	//
 	// `ThumbBarSetImageList` 是 `ITaskbarList3` 的方法，而 MSDN 明写「必须先
 	// 收到 `TaskbarButtonCreated` 才能调任何一个」——早调是**空操作**，而它同样
-	// 返回 S_OK。所以它在构造期调过一次是不够的（而那一��大概率早于任务栏按钮
+	// 返回 S_OK。所以它在构造期调过一次是不够的（而那一次大概率早于任务栏按钮
 	// 存在），一旦落空就是三个**永远没有图标的空格子**。
 	//
 	// 还必须**每次**重设：资源管理器重启之后任务栏按钮是被重建的，
@@ -470,7 +470,7 @@ func buildGlyphImageList(size int) (uintptr, error) {
 		// 保证**低 32 位**有意义，上半截是编译器留的。拿 `uintptr` 去和
 		// `0xFFFFFFFF` 比，判不判得中取决于 MSVC 有没有把 eax 零扩展到 rax
 		// ——判空了就拿着一个根本没进列表的下标继续走，而用户看到的是三个
-		// 空按钮，**日志上什么都��有**。
+		// 空按钮，**日志上什么有**。
 		if int32(idx) == -1 {
 			procImageListDestroy.Call(himl)
 			return 0, errPlatform("图标进不了列表")
