@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -185,19 +184,4 @@ func (s *Shell) viewCrash(c *ui.Context) {
 			}
 		})
 	})
-}
-
-// pickFile 弹系统文件框。
-//
-// 对话框在另一个 goroutine 里开：MyGo 把弹框请求 post 到主线程再等系统回调，
-// 在主线程里等就是死等，事件循环会卡死。
-func (s *Shell) pickFile() {
-	win := s.win
-	go func() {
-		paths, err := platform.PickAudioFile(win)
-		if err != nil || len(paths) == 0 {
-			return
-		}
-		s.app.Open(paths[0])
-	}()
 }
