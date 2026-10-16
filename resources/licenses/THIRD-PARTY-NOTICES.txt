@@ -1,0 +1,25 @@
+# Biu MyGo 第三方许可清单
+#
+# 这个应用把下列模块**静态链接**进了可执行文件。每一行的最后一列是这个模块的
+# 许可证原文，在同一个目录里（Windows 上是装在可执行文件旁边的 licenses\ 子目录）。
+#
+# 清单不是照着 go.mod 抄的，是照着 `go list -deps` 的实际结果核出来的：
+# 见 internal/licensing/licensing_test.go。改依赖之后跑
+# `go generate ./internal/licensing/` 重新生成。
+#
+# module<TAB>version<TAB>SPDX<TAB>许可证原文文件
+#
+# ⚠️ 本项目**不含任何 LGPL 代码**（Plan §4 R13）。purego 是 Apache-2.0，不是 MIT；
+# go-mp3 是 Apache-2.0，也不是 MIT。两处都曾经被写错过。
+
+github.com/ebitengine/purego	v0.11.1	Apache-2.0	github.com-ebitengine-purego-LICENSE.txt
+github.com/egoist/mygo	v0.5.5	MIT	github.com-egoist-mygo-LICENSE.txt
+github.com/go-text/typesetting	v0.3.5	Unlicense OR BSD-3-Clause	github.com-go-text-typesetting-LICENSE.txt
+github.com/hajimehoshi/go-mp3	v0.3.4	Apache-2.0	github.com-hajimehoshi-go-mp3-LICENSE.txt
+github.com/icza/bitio	v1.1.0	Apache-2.0	github.com-icza-bitio-LICENSE.txt
+github.com/mewkiz/flac	v1.0.14	Unlicense	github.com-mewkiz-flac-LICENSE.txt
+github.com/mewkiz/pkg	v0.0.0-20250417130911-3f050ff8c56d	Unlicense	github.com-mewkiz-pkg-LICENSE.txt
+github.com/mewpkg/term	v0.0.0-20241026122259-37a80af23985	Unlicense	github.com-mewpkg-term-LICENSE.txt
+github.com/tphakala/go-m4a	v0.7.0	MIT	github.com-tphakala-go-m4a-LICENSE.txt
+golang.org/x/image	v0.46.0	BSD-3-Clause	golang.org-x-image-LICENSE.txt
+golang.org/x/text	v0.43.0	BSD-3-Clause	golang.org-x-text-LICENSE.txt
