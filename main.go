@@ -29,6 +29,12 @@ func main() {
 	// 开窗口之前，「第一次点歌」就不会替「开窗」买单。
 	ui.MountStreaming(a, cli)
 
+	// UP 空间与动态流也是**同一个**客户端（`bili` 全项目一个，见
+	// client.go 的文件头）。传第二个的话，登录态、请求头、WBI 密钥全都不是
+	// 同一份，而症状是「登录成功了，一打开空间就 -101」——那句话读起来
+	// 像是「你没权限看这个人」，跟「客户端不是同一个」没有任何关系。
+	a.MountExplore(cli)
+
 	if err := ui.Run(a); err != nil {
 		log.Fatal(err)
 	}

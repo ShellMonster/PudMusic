@@ -197,6 +197,17 @@ func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
 	case loginPath:
 		// 扫码登录（login.go）。
 		return s.viewLogin
+	case upPath:
+		// UP 主空间：头图 + 关注 + 统计 + 四个 Tab（upspace.go）。
+		//
+		// ⚠️ 这是**参数路由**：`upPath` 是 `"/user/{id}"`，那一条的
+		// `Route.Empty` 从此用不上了——留着等于一句没人会看到的话
+		// （`TestEmptyStateCopySaysWhyAndHow` 会把这种「既没内容、Empty
+		// 又是空的」路由揪出来）。空状态在 upspace_tabs.go 里按 Tab 分。
+		return s.viewUpSpace
+	case dynamicFeedPath:
+		// 用户动态：左边关注的人、右边动态（dynamicfeed.go）。
+		return s.viewDynamicFeed
 	}
 	return nil
 }
