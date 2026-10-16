@@ -63,8 +63,12 @@ type StreamRef struct {
 	Bitrate int
 
 	// Codecs 是 B 站的编码名（`mp4a.40.2` / `flac` / `mp4a.40.5`）。
-	Codecs string
-	// Container 是我们据此选解码器的容器：`mp4` / `flac`。
+	//
+	// ⚠️ 它和 Container 都只是**给人看的记录**，播放那一侧不用它们选解码器：
+	// 解码器是按字节流的头几个字节嗅探出来的（`audio.containers.go` 注册的
+	// `????ftyp` / `fLaC`，`audio.OpenStream` 先试 MyGo 的格式表再试 flacdec）。
+	// 换句话说，即使这两个字段填错了，歌照样放得出来——所以别拿它们做判断。
+	Codecs    string
 	Container string
 
 	// ExpiresAt 是地址的失效时刻，从地址里的 `deadline` 读出来。
@@ -211,12 +215,15 @@ func refFrom(d *playurlData, bvid, cid string, pref AudioQuality) (*StreamRef, e
 	return ref, nil
 }
 
-// containerOf 判断这条流的容器，我们据此选解码器。
+// containerOf 记下这条流的容器名，**只作记录**。
 //
-// 判据是**编码名**而不是 `mimeType`：B 站的音频 mime 是
-// `audio/mp4`，无损那条也是 `audio/mp4`（装 FLAC 的还是 MP4 盒），
-// 靠 mime 分不出 FLAC 和 AAC。而 `codecs` 里写的是 `flac` ——
-// 这一位是从无争议的地方取的事实。
+// 判据是**编码名**而不是 `mimeType`：B 站的音频 mime 是 `audio/mp4`，
+// 无损那条也是 `audio/mp4`（装 FLAC 的还是 MP4 盒），靠 mime 分不出
+// FLAC 和 AAC。而 `codecs` 里写的是 `flac`。
+//
+// ⚠️ 播放那一侧**不用**这个结果去选解码器——见 `StreamRef.Container` 的
+// 注释：解码器是按头几个字节嗅探的。这里记一份是为了诊断和日志里能一眼
+// 看出「这会儿在放的是 mp4 还是 flac」。
 func containerOf(s audioStream, q Quality) string {
 	if q.IsLossless() || strings.Contains(s.Codecs, "flac") {
 		// `dash.flac.audio` 里可能是裸 FLAC 也可能是 MP4 里的 FLAC，

@@ -93,9 +93,12 @@ func (s *StreamSource) pour(resp *http.Response, from int64, buf []byte) error {
 		// 一样对不上偏移。
 		return fmt.Errorf("audio: 在线流不支持续传（HTTP %d）", resp.StatusCode)
 	}
-	if err := s.checkTotal(s.learnTotal(from, resp)); err != nil {
+	// 先对账，再记账。顺序反了基准就被污染了（见 commitTotal）。
+	total := totalFrom(from, resp)
+	if err := s.checkTotal(total); err != nil {
 		return err
 	}
+	s.commitTotal(total)
 
 	for {
 		if s.stopped() {
@@ -419,12 +422,14 @@ func (s *StreamSource) markTotal(n int64) {
 	s.mu.Unlock()
 }
 
-// learnTotal 从响应头里学总长，返回这条流一共多少字节（不知道时是 -1）。
+// totalFrom 从响应头里算出这条流一共多少字节。**纯计算，不改任何状态。**
 //
 // 有 Range 时 Content-Length 是**剩下的那一段**，所以要加上已经下的。
 // 写成「直接用 Content-Length」的话，一首续传的歌会被当成只有尾巴那么长，
 // 表现是提前「播完了」。
-func (s *StreamSource) learnTotal(from int64, resp *http.Response) int64 {
+//
+// 不知道时返回 -1（响应没给 Content-Length）。
+func totalFrom(from int64, resp *http.Response) int64 {
 	n := resp.ContentLength
 	if n < 0 {
 		if v := resp.Header.Get("Content-Length"); v != "" {
@@ -436,7 +441,25 @@ func (s *StreamSource) learnTotal(from int64, resp *http.Response) int64 {
 	if n < 0 {
 		return -1
 	}
-	total := from + n
+	return from + n
+}
+
+// commitTotal 把一个**已经对过账**的总长记下来。
+//
+// ⚠️ 它必须发生在 `checkTotal` **之后**。以前这里是 `learnTotal` 一边算一边
+// 写进 `s.size`，于是：
+//
+//	换流第一次 → adopt 拿旧流的 250400 当基准 → 新流自称 604754 → 对不上，
+//	            ErrStreamChanged（第一次拦住了）
+//	换流第二次 → adopt 又拿 `s.size` 当基准——而那已经是**被污染过的**
+//	            604754 了 → 新流自称 604754 → 对上了 → **放行**
+//
+// 于是两段不同文件的字节被接在一起，解出来是噪声。拦住一次不算拦住，
+// 第二次也要拦得住，而基准值不能被试过的那一条改掉。
+func (s *StreamSource) commitTotal(total int64) {
+	if total < 0 {
+		return
+	}
 	s.mu.Lock()
 	// 只在「还不知道」或者「服务器说得更长」时更新。已经下完的那条
 	// 不该被一个续传响应改回去。
@@ -445,7 +468,6 @@ func (s *StreamSource) learnTotal(from int64, resp *http.Response) int64 {
 	}
 	s.cond.Broadcast()
 	s.mu.Unlock()
-	return total
 }
 
 // checkTotal 拿新流自称的长度对一下账。

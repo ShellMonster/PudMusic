@@ -260,20 +260,3 @@ func pickExact(list []audioStream, q Quality) (audioStream, bool) {
 	}
 	return audioStream{}, false
 }
-
-// qualityOf 把接口里的 id 变成 Quality，顺手兜住两件事：
-// B 站给的无损流 id 有好几个（归到 QualityFLAC），以及将来出现的新 id
-// （归到 QualityUnknown，Label 会改用码率）。
-func qualityOf(id, bitrate int) Quality {
-	switch q := Quality(id); {
-	case q.IsLossless():
-		return q
-	case q == QualityDolby, q == QualityDolbyHiRes,
-		q == QualityLow64, q == QualityMid128, q == QualityHigh320:
-		return q
-	}
-	// 没见过的 id：如果是 FLAC 编码，它就是无损。判据用 codecs 而不是
-	// 「名字里有没有 flac」——B 站的 codecs 写的是 `flac` / `mp4a.40.2`
-	// 这类标准串，`.audio` 段是「容器里的音频轨」而不是文件名。
-	return QualityUnknown
-}

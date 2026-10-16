@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -544,6 +545,98 @@ func serveSome(w http.ResponseWriter, r *http.Request, data []byte, until int) {
 	}
 	end := min(int(from)+until, len(data))
 	w.Write(data[from:end])
+	w.(http.Flusher).Flush()
+	panic(http.ErrAbortHandler)
+}
+
+// TestTheLengthGuardSurvivesASecondRefresh 盯那道防线**第二次也拦得住**。
+//
+// 曾经的错：算长度的那一步一边算一边把新流的长度写进 `s.size`，于是
+//
+//	换流第一次 → 基准是旧流的 250400 → 新流自称 604754 → 对不上，拦住了
+//	换流第二次 → 基准变成了**试过那条的** 604754 → 对上了 → 放行
+//
+// 于是 stereo16.flac 的前三段 + stereo24.flac 的后半段被接在一起，解出来
+// 是噪声，而错误出现在歌播到那个偏移的时候——「拦住一次」根本不算拦住。
+//
+// 断言的是「换了**几次**流都被认出来」，而不是「最后一次是什么错」：
+// 拦一次就放行的话，playCalls 只会是 1。
+func TestTheLengthGuardSurvivesASecondRefresh(t *testing.T) {
+	first := readTestdata(t, "flacdec/testdata/stereo16.flac")
+	second := readTestdata(t, "flacdec/testdata/stereo24.flac")
+	if len(first) == len(second) {
+		t.Fatalf("两个素材一样长，这条用例就验不到东西了")
+	}
+	cut := len(first) / 3
+
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			// 第一条流：发到 cut 就掐断。
+			serveThenAbort(w, r, first, cut)
+			return
+		}
+		// 换来的那条是**另一份文件**（长度、内容都不同）。
+		serveBytes(w, r, second, len(second))
+	}))
+	t.Cleanup(srv.Close)
+
+	var refetches atomic.Int32
+	s, err := NewStreamSource(StreamSourceOptions{
+		URLs:       []string{srv.URL + "/v1"},
+		Size:       int64(len(first)),
+		Client:     srv.Client(),
+		TempDir:    t.TempDir(),
+		MaxRefresh: 3,
+		Refetch: func(context.Context, int64) *StreamReply {
+			refetches.Add(1)
+			return &StreamReply{URLs: []string{srv.URL + "/v2"}}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	// 先把断开之前那一段读完，和 `cutAfter` 一样的理由。
+	if _, err := io.ReadFull(s, make([]byte, cut)); err != nil {
+		t.Fatal(err)
+	}
+	_, err = io.ReadAll(s)
+	if !errors.Is(err, ErrStreamChanged) {
+		t.Fatalf("err = %v，want ErrStreamChanged", err)
+	}
+	if got := refetches.Load(); got < 2 {
+		t.Errorf("只换流 %d 次就放行了——第二次的长度没跟第一次的基准比，"+
+			"两段不同文件的字节被接在一起（基准值被试过的那条污染了）", got)
+	}
+}
+
+// readTestdata 读一份测试素材（路径相对本包，flacdec 的素材就在子目录里）。
+func readTestdata(t *testing.T, rel string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.FromSlash(rel))
+	if err != nil {
+		// 这里**不能 Skip**：跳过在输出里长得跟通过一样，而这条用例正是为了
+		// 证明「第二次换流也拦得住」，悄悄跳过去等于什么都没验。
+		t.Fatalf("找不到素材 %s：%v", rel, err)
+	}
+	return b
+}
+
+// serveThenAbort 发 body 的开头若干字节，然后**掐断连接**。
+//
+// Content-Length 声明的是整条流，所以客户端那边读到的是 unexpected EOF
+// 而不是干净的 io.EOF——那才是「下到一半断了」的真实形态。
+func serveThenAbort(w http.ResponseWriter, r *http.Request, body []byte, until int) {
+	from := rangeStart(r)
+	w.Header().Set("Content-Length", fmt.Sprint(int64(len(body))-from))
+	if from > 0 {
+		w.Header().Set("Content-Range",
+			fmt.Sprintf("bytes %d-%d/%d", from, len(body)-1, len(body)))
+		w.WriteHeader(http.StatusPartialContent)
+	}
+	w.Write(body[from:min(int(from)+until, len(body))])
 	w.(http.Flusher).Flush()
 	panic(http.ErrAbortHandler)
 }

@@ -483,6 +483,98 @@ func TestAutoPrefersLossless(t *testing.T) {
 	}
 }
 
+// TestStreamChangedReopensFromTheSamePosition 盯规格里点名「这条是重点」的那条：
+// **换流后从原来播放的位置继续，不是从头开始。**
+//
+// 触发方式是「换了另一条流」——B 站给回来的新流和旧的不是同一段字节
+// （这里靠后缀不同造出来，`sameContainer` 判它们不是同一条）。字节偏移对不上，
+// 所以字节源拒绝硬接并报 `audio.ErrStreamChanged`；这时候能从原位置接着播的
+// 只有**播放位置**（时间），而只有 App 知道上一个位置是多少——所以这一层
+// 负责：关掉重开 + `Seek` 跳回去。
+//
+// 断的是「位置不许倒退」，不是「有没有报错」：从头播一遍这个功能看起来
+// **完全正常**（歌在响、没有红字），只有拿位置去量才发现。
+func TestStreamChangedReopensFromTheSamePosition(t *testing.T) {
+	f := newStreamFixture(t)
+	data := readFlac(t)
+	f.media = data
+	// 一半：够歌播上一阵子（有东西可以「保持」），又留得下后半截让泵断在中间。
+	f.failMediaAfter = len(data) / 2
+
+	// v1 是 .flac，v2 是 .m4s —— 不同容器，源会拒绝把它们接在一起。
+	f.onPlayURL(dashFor(cdnURL(f.URL, "v1.flac", time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "v2.m4s", time.Hour), int(bili.QualityHigh320), 110836))
+
+	a := newOnlineApp(t, f, t.TempDir())
+	if err := a.Enqueue(onlineItem("BV1", "1", "换了流的一首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "换了流的一首")
+
+	// 等歌真的播起来了才开始采样。
+	//
+	// ⚠️ 采样窗口**必须在放行掐断之前**就开始，而断言是「窗口内位置单调不减」。
+	// 反过来写（「重开之后采样，别掉回 0」）会量到一个空窗口——歌从头播一遍
+	// 这个 bug 看起来完全正常，只有「不许倒退」才量得出来。
+	waitFor(t, 30*time.Second, "播放位置走起来", func() bool {
+		return a.Snapshot().Position > 700*time.Millisecond
+	})
+
+	// 采样在它自己的 goroutine 里跑，**切片只归它所有**：收尾时用一个
+	// channel 交回来。用共享变量 + 一个 bool 收尾是最容易写出数据竞争的那种
+	// 写法（`-race` 一跑就红，而且红的还是测试而不是产品代码）。
+	stop := make(chan struct{})
+	collected := make(chan []time.Duration, 1)
+	go func() {
+		var out []time.Duration
+		for {
+			if p := a.Snapshot().Position; p > 0 {
+				out = append(out, p)
+			}
+			select {
+			case <-stop:
+				collected <- out
+				return
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
+	}()
+
+	// 放行掐断：泵看到连接断了 → 换流 → 容器对不上 → ErrStreamChanged
+	// → checkPlayback → refreshOnlineNow。
+	close(f.mediaGate)
+
+	// 等重开真的发生了：CDN 上第二条流（.m4s）被取过，且取流接口打过第二次。
+	waitFor(t, 30*time.Second, "重开时取了第二条流", func() bool {
+		return f.playCalls.Load() >= 2
+	})
+	time.Sleep(3 * time.Second)
+	close(stop)
+	samples := <-collected
+
+	if len(samples) < 10 {
+		t.Fatalf("只采到 %d 个位置，验不了什么：%v", len(samples), samples)
+	}
+	// 位置不许倒退。相邻两次采样之间最多只走了 50ms，所以给 400ms 的
+	// 余量（seek 落点按采样帧算，会差几帧）。
+	for i := 1; i < len(samples); i++ {
+		if got, prev := samples[i], samples[i-1]; got < prev-400*time.Millisecond {
+			t.Fatalf("第 %d 次采样位置从 %v 倒回 %v——这是「从头开始」，"+
+				"不是「从原来的位置继续」", i, prev.Round(time.Millisecond), got.Round(time.Millisecond))
+		}
+	}
+	if samples[0] < 500*time.Millisecond {
+		t.Errorf("开始采样时歌才放到 %v，还不够证明「从原位置继续」", samples[0].Round(time.Millisecond))
+	}
+
+	if a.Snapshot().Title != "换了流的一首" {
+		t.Errorf("重开之后在放的歌变了：%q", a.Snapshot().Title)
+	}
+	if last := samples[len(samples)-1]; last < samples[0] {
+		t.Errorf("采样结束时 %v 比开始时 %v 还小", last, samples[0])
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 错误怎么变成人话
 // ─────────────────────────────────────────────────────────────────────────────

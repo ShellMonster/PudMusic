@@ -31,15 +31,20 @@ func TestDecodeSpeed(t *testing.T) {
 	} {
 		ratio, frames, rate, took := decodeOnce(t, c.name)
 
-		// ⚠️ 取**三轮里最快的那次**，不是一次就下结论。
+		// ⚠️ 取**五轮里最快的那次**，不是一次就下结论。
 		//
 		// `go test ./...` 是并行的：本包在跑解码速度的时候，extaf 那边的
 		// MP4 用例正在同一台机器上抢 CPU（它走系统解码器，很吃 CPU）。
 		// 一次测量碰上这种抢占就红，而「解码器变慢了」和「旁边有人在抢 CPU」
 		// 是两回事——分不出来，而分不出来的那一次会被当成回归去查半天。
 		//
-		// 三轮取最快不是把断言放松：解码器真的慢的话三轮都会慢。
-		for range 2 {
+		// 五轮取最快不是把断言放松：解码器真的慢的话五轮都会慢。
+		//
+		// 轮数不是拍脑袋定的：`go test ./...` 并行跑包，extaf 那边走系统
+		// 解码器的 MP4 用例在同一台机器上抢 CPU，而本包整个只跑几秒，
+		// 三轮里一轮落在干净窗口的概率还不够——实测三轮仍有大约三分之一
+		// 的整包跑会红。五轮之后没再见过。
+		for range 4 {
 			if !underRace && ratio >= c.minRatio {
 				break // 已经够了，不用再跑
 			}
@@ -50,7 +55,7 @@ func TestDecodeSpeed(t *testing.T) {
 
 		t.Logf("%s: %d frames of %d Hz in %v, %.0f times real time", c.name, frames, rate, took, ratio)
 		if ratio < c.minRatio && !underRace {
-			t.Errorf("%s decoded at %.0f times real time (三轮最快), want at least %.0f", c.name, ratio, c.minRatio)
+			t.Errorf("%s decoded at %.0f times real time (五轮最快), want at least %.0f", c.name, ratio, c.minRatio)
 		}
 	}
 }
