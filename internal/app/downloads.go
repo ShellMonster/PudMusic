@@ -96,6 +96,32 @@ func (a *App) DownloadMounted() bool { return a.downloadsSnapshot() != nil }
 // 返回的错误只包含「同步就能看出来」的那几种（条目不完整、没挂下载、
 // 同一首已经在队列里还下完了）。网络上的失败走记录页上那一行的红字。
 func (a *App) Download(it Item) (download.Snapshot, error) {
+	return a.download(it, download.AddRequest{})
+}
+
+// DownloadVideo 把一个视频条目加进下载队列。落盘的是**交织完的单个
+// `.mp4`**，不是两条 dash 流。
+//
+// qn 是要的视频画质档。传 0 表示让 B 站按它自己的默认给。
+//
+// 队列里**同一首只能有一个任务**（`Task.ID` 是 `<bvid>|<cid>`，与音质
+// 无关，见 `download.Task.ID` 的注释），所以「下载音频」和「下载视频」
+// 撞在同一个 `<bvid>|<cid>` 上时，后者拿回的是前者的那一项。要让两条
+// 各自成一项，得把「要哪一路」放进键里——那是记录页那一票的事。
+func (a *App) DownloadVideo(it Item, qn bili.VideoQuality) (download.Snapshot, error) {
+	return a.download(it, download.AddRequest{Video: true, VideoQ: int(qn)})
+}
+
+// download 是上面两者的共同那一半。
+//
+// **扩展名留空**：让 download 从取流地址里取。B 站给的 URL 后缀就是
+// `.m4a` / `.flac`（任务里点名了这一条），按扩展名直接落盘，**不封装**。
+// 给空是因为入队这一刻还没有地址——取流是几百毫秒的网络往返，不能在
+// 界面线程上做。
+//
+// （视频是例外：落盘的既不是任何一条源流，也不是改个后缀就行的东西，
+// 所以 `AddRequest.Video` 一说，`download` 那边直接给 `.mp4`。）
+func (a *App) download(it Item, req download.AddRequest) (download.Snapshot, error) {
 	if err := playableOnline(it); err != nil {
 		return download.Snapshot{}, err
 	}
@@ -103,17 +129,12 @@ func (a *App) Download(it Item) (download.Snapshot, error) {
 	if m == nil {
 		return download.Snapshot{}, errDownloadsMissing
 	}
-	return m.Enqueue(download.AddRequest{
-		Bvid:  it.Bvid,
-		Cid:   it.Cid,
-		Title: it.Title,
-		Cover: it.Cover,
-		Dir:   a.downloadDir(),
-		// 扩展名留空：让 download 从取流地址里取。B 站给的 URL 后缀就是
-		// `.m4a` / `.flac`（任务里点名了这一条），按扩展名直接落盘，
-		// **不封装**。给空是因为入队这一刻还没有地址——取流是几百毫秒的
-		// 网络往返，不能在界面线程上做。
-	})
+	req.Bvid = it.Bvid
+	req.Cid = it.Cid
+	req.Title = it.Title
+	req.Cover = it.Cover
+	req.Dir = a.downloadDir()
+	return m.Enqueue(req)
 }
 
 // downloadDir 是这一首该下到哪儿。
@@ -214,6 +235,9 @@ func (a *App) resolveDownload(ctx context.Context, want download.Identity) (*dow
 	if s == nil || s.Client == nil {
 		return nil, errStreamingMissing
 	}
+	if want.Video {
+		return a.resolveVideoDownload(ctx, s, want)
+	}
 	ref, err := s.Client.PlayURL(ctx, want.Bvid, want.Cid, s.Quality)
 	if err != nil {
 		return nil, err
@@ -239,6 +263,47 @@ func (a *App) resolveDownload(ctx context.Context, want download.Identity) (*dow
 		// （`bili.StreamRef.Container` 的注释），但**落盘文件名**用它是对的：
 		// 它记的就是这一段字节的容器，而文件后缀要说的正是这件事。
 		Ext: extOfContainer(ref.Container),
+	}, nil
+}
+
+// resolveVideoDownload 是「下载视频」那一条的取流：拿 dash 的**一对**流。
+//
+// 画质用的是 `want.VideoQ`——**入队那一刻用户点的那一档**，存在身份里。
+// 那一档得跟着这一项走完整个下载过程：`.mp4` 是「视频流 + 音频流」交织
+// 出来的，而两条流必须来自同一档（理由见 `download.Identity.VideoQ`）。
+//
+// 画质偏好**从哪来**是设置页的事，而设置页还没有视频画质那一项
+// （记录页那一票会把它一起接上）。在那之前调用方传什么就是什么，
+// 传 0 就是让 B 站给它的默认——在这里硬编一个「只下 360P 省流量」或者
+// 「无脑 4K」都是替用户做决定。
+//
+// ⚠️ 每次都重新取，和音频那条同一个理由：B 站的地址带 `deadline`，
+// 实测两小时就失效，而一个几百 MB 的 MV 很可能下超过两小时。
+func (a *App) resolveVideoDownload(ctx context.Context, s *Streaming, want download.Identity) (*download.Source, error) {
+	pair, err := s.Client.PlayDash(ctx, want.Bvid, want.Cid, bili.VideoQuality(want.VideoQ), s.Quality)
+	if err != nil {
+		return nil, err
+	}
+	// 两条流必须都是这一首。`PlayDash` 自己也会查一遍，而这里查的是
+	// **另一件事**：交织那一步会不会把两个 cid 的流拼在一起。
+	// （真网上取错的表现是「能播、播两分钟就没声了」——见 mux 的注释。）
+	for _, ref := range []*bili.StreamRef{pair.Video, pair.Audio} {
+		if ref.Bvid != want.Bvid || ref.Cid != want.Cid {
+			return nil, fmt.Errorf("%w: 取流回来的不是这一首（要 %s/%s，拿到 %s/%s）",
+				bili.ErrNoStream, want.Bvid, want.Cid, ref.Bvid, ref.Cid)
+		}
+	}
+	return &download.Source{
+		Bvid:          pair.Video.Bvid,
+		Cid:           pair.Video.Cid,
+		Quality:       int(pair.Video.Quality),
+		Label:         pair.Video.Label,
+		Video:         true,
+		URLs:          pair.Video.URLs,
+		CompanionURLs: pair.Audio.URLs,
+		// ⚠️ `Ext` **故意不给**：它是「地址上没带后缀时的后备」，而视频
+		// 落盘的既不是视频流也不是音频流，是交织出来的那个 `.mp4`
+		// （见 `download.extFor`）。给一个 `.m4s` 会让落盘名错掉。
 	}, nil
 }
 

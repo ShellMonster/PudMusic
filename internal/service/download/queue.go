@@ -151,6 +151,9 @@ type AddRequest struct {
 	//	落盘名（`.mp4` 还是 `.m4a`）和「要不要多留一段半成品的位置」
 	//	都得在**入队那一刻**定下来
 	//
+	// VideoQ 是点名要的那一档视频画质（B 站的 `qn` 号）。0 = 不点名。
+	// 和 `Video` 一样是入队时就定的——理由见 `Identity.VideoQ`。
+	VideoQ int
 	// 一旦定了就**不能改**：`Dest` 变了等于把已经下了一半的字节挪到另一个
 	// 文件名下面，而续传记的是分块下标、不是「文件里的偏移」——换个文件，
 	// 那些下标就全指错了位置（见 `Task.Dest`）。
@@ -200,7 +203,7 @@ func (m *Manager) Enqueue(req AddRequest) (Snapshot, error) {
 		ID:       id,
 		Title:    req.Title,
 		Cover:    req.Cover,
-		Identity: Identity{Bvid: req.Bvid, Cid: req.Cid},
+		Identity: Identity{Bvid: req.Bvid, Cid: req.Cid, Video: req.Video, VideoQ: req.VideoQ},
 		Ext:      ext,
 		Status:   StatusQueued,
 		AddedAt:  m.now(),

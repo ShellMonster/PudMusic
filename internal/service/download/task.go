@@ -85,6 +85,25 @@ type Identity struct {
 	Bvid    string `json:"bvid"`
 	Cid     string `json:"cid"`
 	Quality int    `json:"quality"`
+	// Video 报「这一项要下的是视频」。
+	//
+	// 它在身份里而不在 `Task` 上，是**因为重开应用之后还得知道**：
+	// 取流是 `resolve(ctx, want Identity)` —— 只看得到 `want`，
+	// 而重开时那个 goroutine 还没起、队列里除了这份身份什么都没有。
+	// 不在这一位上记着，重开之后取到的就还是一条音频流，于是任务在
+	// 「下音频」和「交织」之间来回横跳。
+	Video bool `json:"video,omitempty"`
+	// VideoQ 是点名要的那一档视频画质（B 站的 `qn` 号）。
+	//
+	// 它在身份里，是因为**每一轮取流都得用同一个档**：这一条 `.mp4` 是
+	// 「视频流 + 音频流」交织出来的，而两条流必须来自同一档、同一个 cid。
+	// 续传时若换了档，视频流的长度会变，于是续出来的文件里一半是旧档的
+	// 画面、一半是新档的——**能播**，播到一半画质就变了（而 `Identity` 只
+	// 比 bvid/cid/音质/长度，长度变了会被拦下，可「同档不同编码」这种
+	// 长度相同内容不同的换法拦不住）。
+	//
+	// 0 = 不点名，让 B 站给它的默认。
+	VideoQ int `json:"videoQ,omitempty"`
 	// Length 是**主那条流**的总字节数。**0 是「还没探到」，不是「零字节」**。
 	//
 	// 视频任务有两条流（视频 + 音频），第二那条的长度在 `Companion.Length`

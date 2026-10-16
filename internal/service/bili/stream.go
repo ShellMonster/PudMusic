@@ -15,7 +15,6 @@ package bili
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -70,6 +69,14 @@ type StreamRef struct {
 	// 换句话说，即使这两个字段填错了，歌照样放得出来——所以别拿它们做判断。
 	Codecs    string
 	Container string
+
+	// Width / Height 是视频那条流的分辨率（音频流恒为 0）。
+	//
+	// **只作记录**：视频下载这一路不转码，所以宽高不参与任何计算。
+	// 记下来是因为诊断文件里能一眼看出「这一条是 1080P 还是 720P」，
+	// 而那正是「为什么这个 MV 这么大」的第一个答案。
+	Width  int
+	Height int
 
 	// ExpiresAt 是地址的失效时刻，从地址里的 `deadline` 读出来。
 	ExpiresAt time.Time
@@ -146,34 +153,13 @@ func (c *Client) PlayURL(ctx context.Context, bvid, cid string, pref AudioQualit
 		// 不是 ErrNoStream：调用方给错了参数，换一条流也救不回来。
 		return nil, fmt.Errorf("%w: 稿件或分 P 不完整（bvid=%q cid=%q）", ErrNoStream, bvid, cid)
 	}
-
-	q := url.Values{}
-	q.Set("bvid", bvid)
-	q.Set("cid", cid)
-	q.Set("fnval", fmt.Sprint(dashAll))
-	q.Set("fnver", "0")
-	q.Set("fourk", "1")
-
-	// ⚠️ 这个接口**不强制**要 WBI 签名：不带 w_rid 也能通（实测）。
-	// 这里仍然签名，因为带签名的调用在风控下更稳，而签名本身由
-	// `wbi.go` 那唯一一份实现负责，不存在「这一处忘了签」的可能。
-	raw, err := c.Do(ctx, Call{
-		Method: "GET",
-		URL:    c.hostAPI + playurlPath,
-		Query:  q,
-		WBI:    true,
-	})
+	// 不带 `qn`：取流接口把所有档都返回来，由 `pickAudio` 按偏好在客户端挑
+	//（B 站那边也是这么用的）。视频那一路才需要点明一档（见 `fetchPlayurl`）。
+	d, err := c.fetchPlayurl(ctx, bvid, cid, VideoQualityUnknown)
 	if err != nil {
 		return nil, err
 	}
-
-	var d playurlData
-	if err := json.Unmarshal(raw, &d); err != nil {
-		// 接口回了 200、code 也是 0，但 data 的形状不是我们认识的那个。
-		// 这通常是 B 站改接口改出来的，不要把它当成网络错——重试没用。
-		return nil, fmt.Errorf("bili: 取流接口的返回读不懂：%w", err)
-	}
-	return refFrom(&d, bvid, cid, pref)
+	return refFrom(d, bvid, cid, pref)
 }
 
 // refFrom 把取流响应变成一个 StreamRef。
