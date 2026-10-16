@@ -21,6 +21,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -294,7 +295,18 @@ func (c *Client) wbiKey(ctx context.Context) (string, error) {
 func (c *Client) fetchWBIKey(ctx context.Context) (string, error) {
 	data, err := c.Do(ctx, Call{Method: "GET", URL: c.hostAPI + pathNav})
 	if err != nil {
-		return "", err
+		// ⚠️ **B 站没登录的时候也会把 key 给我们**：`nav` 回的是
+		// `{"code":-101,...,"data":{"wbi_img":{...}}}`。把它当成「取不到 key」
+		// 的话，未登录用户一个签名接口都调不了，而 `signWBI` 顶上那句
+		// 「拿不到 key 就原样放行」也永远没机会执行。
+		//
+		// 所以这里不是「吞掉错误」，是**去错误里把数据捞出来**：捞到并且
+		// 真的含 key 才当成功，捞不到就把错误原样还回去。
+		var api *APIError
+		if !errors.As(err, &api) || len(api.Data) == 0 {
+			return "", err
+		}
+		data = api.Data
 	}
 	var raw navData
 	if err := json.Unmarshal(data, &raw); err != nil {

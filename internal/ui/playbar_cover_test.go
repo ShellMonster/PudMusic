@@ -188,14 +188,20 @@ func TestPlayBarCoverWakeRedrawsTheWindow(t *testing.T) {
 	t.Cleanup(s.images.Close)
 
 	url := g.url()
-	// 走真实的那条路：一个能放的文件 + 一个有地址的封面。阶段 1 只有本地项，
-	// 所以这是头一次把「队列项带封面」这半边跑通——本地文件那边 Cover 是空的，
-	// 这里显式摆上去。
+	// 走真实的那条路：一个能放的文件 + 一个有地址的封面。
+	//
+	// ⚠️ 这里摆的是**本地**项。测试原来写的是 `Source: "online"`，那时候
+	// `play` 还不分来源，在线两项走的就是「开本地文件」那条路，所以那个标签
+	// 只是个装饰。现在在线两项真的走取流（`app.playOnline`），一个没有
+	// bvid/cid 的在线项会被当场拒掉——那是对的。
+	//
+	// 要测的仍然是「队列项把封面带下来」这一半，`play` 里 `setCover` 那一步
+	// 对本地和在线是同一条。取流那一半在 `internal/app/online_test.go` 里测。
 	if err := a.Enqueue(app.Item{
-		Source: "online",
-		Type:   "audio",
+		Source: "local",
+		Type:   "local",
 		Path:   flacPath(t),
-		Title:  "在线的一首歌",
+		Title:  "带封面的歌",
 		Cover:  url,
 	}); err != nil {
 		t.Fatal(err)

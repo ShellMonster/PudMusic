@@ -69,6 +69,15 @@ type APIError struct {
 	Code     int
 	Message  string
 	Endpoint string
+
+	// Data 是那一段业务数据，**即使 code 不是 0 也带着**。
+	//
+	// ⚠️ 不要把它当成「错误就是没有数据」。B 站在「没登录」时回的是
+	// `{"code":-101,"message":"账号未登录","data":{"isLogin":false,
+	// "wbi_img":{...}}}`——**WBI 签名要用的 key 就在里面**。把它丢掉的话，
+	// 未登录用户连一个签名接口都调不了（`fetchWBIKey` 会直接把 -101 往上抛，
+	// 于是 `signWBI` 那句「拿不到 key 就原样放行」根本没机会执行）。
+	Data json.RawMessage
 }
 
 func (e *APIError) Error() string {
@@ -353,7 +362,12 @@ func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
 		return nil, fmt.Errorf("%w: %s %s: 响应不是 JSON（多半是被风控挡了）", ErrRiskControl, method, endpoint.Path)
 	}
 	if env.Code != 0 {
-		return nil, &APIError{Code: env.Code, Message: env.Message, Endpoint: endpoint.Path}
+		return nil, &APIError{
+			Code:     env.Code,
+			Message:  env.Message,
+			Endpoint: endpoint.Path,
+			Data:     env.Data,
+		}
 	}
 	return env.Data, nil
 }

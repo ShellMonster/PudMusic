@@ -71,6 +71,14 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 //
 // 第二行的位置是 Biu 的副标题（本地音乐 / UP 主名）。我们没有那些信息，
 // 只在真出错时说一句——88 高的播放条里塞不下第三行，错误总得有个地方说。
+//
+// ⚠️ **外面必须是 Column**。这里曾经为了塞下音质徽章把 Column 拆成了一个裸
+// Row（歌名和徽章并排），结果错误文字变成了这一层的**兄弟**——它落到了
+// 歌名右边的外层行上，把歌名挤成 20px 宽、88px 高的竖条并被裁掉。
+// 而「出错时播放条上有一句人话」正是这一票要保证的东西，结构不能为它让路。
+//
+// 徽章是**在 Column 里面**跟歌名并排的：外层永远是竖着堆的两行（歌名行、
+// 错误行），徽章只占第一行里的右边一小块。
 func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 	title := st.Title
 	if !st.HasTrack {
@@ -78,12 +86,29 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 	}
 
 	ui.Column(c).Grow(1).Children(func() {
-		ui.Text(c, title).FontSize(15).Bold().
-			TextColor(textColor(t, st.HasTrack))
+		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, title).FontSize(15).Bold().
+				TextColor(textColor(t, st.HasTrack))
+			s.viewQualityBadge(c, st, t)
+		})
 		if st.Err != "" {
 			ui.Text(c, "打不开："+st.Err).FontSize(12).TextColor(t.Danger)
 		}
 	})
+}
+
+// viewQualityBadge 是歌名右边那个音质徽章（「无损 FLAC」/「320K」）。
+//
+// 本地文件不画：那是文件格式（FLAC / AAC），不是「音质」——
+// 拿格式凑一个徽章会让「无损」这两个字在两个意思之间飘。
+//
+// ⚠️ **换流之后它会变**，所以它必须每帧从 `State` 现读，不能缓存。
+// B 站换流拿回来的可能是降级过的那一档：无声地降级会让人以为自己还在听无损。
+func (s *Shell) viewQualityBadge(c *ui.Context, st app.State, t *ui.Theme) {
+	if st.Quality == "" {
+		return
+	}
+	ui.Text(c, st.Quality).FontSize(11).TextColor(t.TextMuted)
 }
 
 // viewTransport 是上一首、下一首、播放/暂停。

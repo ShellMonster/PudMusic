@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/audio"
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 )
 
 // tickInterval 是进度条时钟的间隔。每秒 20 次足够让进度条看起来是滑的，
@@ -42,6 +43,14 @@ type State struct {
 	Volume   float64
 	// Err 是最近一次打开文件的失败原因，显示在播放条上，直到下一次打开成功。
 	Err string
+
+	// Quality 是当前这条流的音质徽章（「无损 FLAC」/「320K」）。
+	//
+	// 空串 = 这一首是本地文件，没有音质这回事（本地文件是什么格式和
+	// 「音质」不是一回事，不要拿文件格式凑一个）。
+	//
+	// **换流之后它会变**：B 站偶尔会给出比上次低的一档，用户得看见。
+	Quality string
 }
 
 // App 是应用的全部状态。
@@ -67,6 +76,20 @@ type App struct {
 	// 挂上去之前是 nil，界面要判空。
 	account *Account
 
+	// 在线播放这一摊，见 online.go。挂上去之前 streaming 是 nil。
+	streaming   *Streaming
+	streamCache map[string]*bili.StreamRef
+	// onlineGen 是**播放代次**。每开一次在线流就加一，异步回来的结果
+	// 先对一遍，对不上就走人（快速切歌时旧曲的结果不能覆盖新曲）。
+	onlineGen int
+	// online 是当前正在放的那条在线流，nil 表示放的是本地文件。
+	online *onlineTrack
+	// quality 是 State.Quality 的存放处，跟着换流更新。
+	quality string
+	// reportedErr 是已经往界面上报过的那一条。解码器的 Err 记的是**第一条**
+	// 错误、不自己清零，所以不比对的话每 50 ms 会重复报一次。
+	reportedErr error
+
 	wake   func() // 界面层装：状态写完后叫它要一帧
 	done   chan struct{}
 	closed bool
@@ -74,7 +97,8 @@ type App struct {
 
 // New 建一个空的应用状态，开后台时钟。
 func New() *App {
-	a := &App{volume: 1, queue: NewQueue(), done: make(chan struct{})}
+	a := &App{volume: 1, queue: NewQueue(), done: make(chan struct{}),
+		streamCache: map[string]*bili.StreamRef{}}
 	go a.tick()
 	return a
 }
@@ -112,6 +136,7 @@ func (a *App) Snapshot() State {
 		Duration: a.duration,
 		Volume:   a.volume,
 		Err:      a.errText,
+		Quality:  a.quality,
 	}
 }
 
@@ -151,6 +176,9 @@ func (a *App) Open(path string) error {
 	old := a.player
 	p.SetVolume(a.volume)
 	a.player = p
+	a.online = nil
+	a.quality = ""
+	a.reportedErr = nil
 	a.title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	a.path = path
 	// 手上只有一个本地路径，没有封面地址（见 State.CoverURL）。队列里的项自带
@@ -262,8 +290,12 @@ func (a *App) Close() {
 
 	close(a.done)
 	if p != nil {
+		// Player.Close 会把字节源一起关掉（在线流那条路）。
 		p.Close()
 	}
+	a.mu.Lock()
+	a.online = nil
+	a.mu.Unlock()
 	if a.account != nil {
 		a.account.Close()
 	}
@@ -293,6 +325,14 @@ func (a *App) tick() {
 			if live && wake != nil {
 				wake()
 			}
+			// ⚠️ 这一句**不能省**。`Playing() == false` 有五种情况：暂停、
+			// 停止、关闭、播完、解码失败（`mygo/audio/audio.go`）。前四种
+			// 什么都不用做，第五种必须变成播放条上的一句话——不然一次断网
+			// 表现成「歌忽然放完了」，用户以为歌放完了。
+			//
+			// 放在锁外面调：它自己要拿 `a.mu`，而 `Player.Err()` 可能去碰
+			// 字节源。
+			a.checkPlayback()
 		}
 	}
 }

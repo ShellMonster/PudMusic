@@ -1,7 +1,12 @@
-// Package audio decodes and plays the audio files Biu opens from disk.
+// Package audio decodes and plays audio — 本地文件和 B 站在线流。
 //
 // 依赖方向：这一层可以 import platform，但不能被 platform import；它不认识界面，
-// 也不知道谁在调用，只负责「给一个路径，拿到一个能播、能停、能跳、能关的播放器」。
+// 也不知道谁在调用，只负责「给一段字节，拿到一个能播、能停、能跳、能关、
+// 能说出自己哪里错了的播放器」。
+//
+// 在线流走的是同一条解码链：`StreamSource` 是一个可取消的 `io.ReadSeeker`，
+// 容器是按**头几个字节**认的（`containers.go`），所以「本地文件」和「B 站 CDN」
+// 在这一层没有区别。
 package audio
 
 import (
@@ -25,9 +30,18 @@ import (
 // 一个 Player 只服务一条播放路径——MyGo 用一个 goroutine 驱动一个解码器，
 // 迷你播放器和主播放器要各开一个。
 type Player struct {
-	dec  mygoaudio.Decoder
+	dec  *errorDecoder
 	play *mygoaudio.Player
 	vol  float64
+
+	// closers 是这个播放器**自己**占着的资源，目前只有在线字节源。
+	//
+	// ⚠️ 它们必须由 Close **同步**关掉，不能指望解码 goroutine 醒来之后
+	// 顺手关掉（`closingDecoder` 会做那件事，但那个 goroutine 此刻正阻塞在
+	// 字节源的 Read 上——而只有字节源被关掉，它才会醒）。等自己关自己就是
+	// 死等：切歌之后下载 goroutine 还在、缓存文件还在、那个解码 goroutine
+	// 也在，永远等不到。
+	closers []io.Closer
 }
 
 // Open 打开一个本地音频文件。
@@ -62,8 +76,58 @@ func Open(path string) (*Player, error) {
 
 // New 用一个现成的解码器建播放器。解码器归播放器所有，Close 时会被关掉。
 func New(d mygoaudio.Decoder) *Player {
-	return &Player{dec: d, play: mygoaudio.NewPlayer(d), vol: 1}
+	ed := &errorDecoder{Decoder: d}
+	return &Player{dec: ed, play: mygoaudio.NewPlayer(ed), vol: 1}
 }
+
+// CloserReadSeeker 是「既是字节来源、又必须被一起关掉」的那一类东西。
+//
+// 在线流的 `StreamSource` 就是它。把它合成一个参数是因为这两件事**必须成对**
+// 出现：只接不关的话下载 goroutine、缓存文件和临时目录里的残留全都跟着换歌
+// 累积起来；只关不接的话下一首歌读的是上一首的字节源。
+type CloserReadSeeker interface {
+	io.ReadSeeker
+	io.Closer
+}
+
+// OpenStream 打开一条**已经在流动的字节流**并建播放器。
+//
+// 在线流走这条：源是一个 `*StreamSource`（边下边播、可取消），它是
+// `io.ReadSeeker`，所以本地文件那套解码链一个字都不用改——认容器靠的是
+// **头几个字节**（`containers.go` 的 `????ftyp` / `\xff??`），不是后缀。
+//
+// 这也顺带解决了在线流「是什么格式」的问题：B 站的无损流是裸 FLAC，
+// 没有 magic 能注册进 MyGo 的格式表，所以最后再试一次 `flacdec`。
+// 顺序不能反过来：MP4 里的 FLAC 头几个字节是 `ftyp`，应该走 extaf，
+// 交给 flacdec 反而会把它当裸 FLAC 处理。
+func OpenStream(r CloserReadSeeker) (*Player, error) {
+	d, _, err := mygoaudio.NewDecoder(r)
+	if err != nil {
+		if !errors.Is(err, mygoaudio.ErrFormat) {
+			return nil, err
+		}
+		// 认不出来。裸 FLAC 走 flacdec（它同时吃裸 FLAC 和 MP4 里的 FLAC）。
+		fd, ferr := flacdec.Open(r)
+		if ferr != nil {
+			// 两个都不认：报告**第一个**错。那是「走完全套格式表都没认出来」，
+			// 比 flacdec 的那句「不像 FLAC」有用得多——后者会让人以为
+			// 文件损坏，而它可能只是一段还没下到的字节。
+			return nil, err
+		}
+		d = fd
+	}
+	p := New(owned(d, r))
+	// ⚠️ 见 Player.closers 那段注释：这个必须由 Close 同步做，
+	// 等不到解码 goroutine 醒来（它正阻塞在 r 的 Read 上）。
+	p.closers = []io.Closer{r}
+	return p, nil
+}
+
+// Err 返回这一路播放里的第一条错误，播完或只是暂停过的话是 nil。
+//
+// **不要用 `Playing() == false` 去推断「播完了」**：暂停、停止、关闭、
+// 解码失败在那边都是 false（见 `decoder.go` 顶上那段）。
+func (p *Player) Err() error { return p.dec.Err() }
 
 // owned 把解码器和它依赖的资源绑成一个整体，关的时候一起关。
 //
@@ -126,5 +190,13 @@ func (p *Player) SetVolume(v float64) *Player {
 // Volume 返回音量增益。
 func (p *Player) Volume() float64 { return p.vol }
 
-// Close 停掉并释放解码器和文件句柄。可以重复调用。
-func (p *Player) Close() { p.play.Close() }
+// Close 停掉并释放解码器、字节源和文件句柄。可以重复调用。
+func (p *Player) Close() {
+	// 先放字节源，再停 MyGo：反过来的话，MyGo 那边的解码 goroutine 还会
+	// 阻塞在 Read 上，而它退出与否取决于字节源。
+	for i := len(p.closers) - 1; i >= 0; i-- {
+		_ = p.closers[i].Close()
+	}
+	p.closers = nil
+	p.play.Close()
+}
