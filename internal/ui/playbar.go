@@ -6,53 +6,109 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/egoist/mygo/ui"
 )
 
-// viewPlayBar 是底部那条播放条：曲目名、上一首/播放/下一首、可拖的进度条、音量。
+// 播放条的尺寸，数字全部照 Biu 的源码抄，不是自己挑的：
 //
-// 阶段 1 只有这些。播放列表面板、歌词、封面缓存都在后面的阶段。
+//	总高 88px        _research/biu/src/layout/index.tsx:48 的 h-[88px]
+//	左右内边距 16px  playbar/index.tsx:23-31 的 px-4
+//	封面 56×56       playbar/left/index.tsx:29-45 的 width={56} height={56}
+//	封面与歌名 8px   同一处的 space-x-2
+//
+// ⚠️ 关键是 Biu 那条**只有 px-4，没有上下内边距**：88 高的一行内容垂直居中，
+// 56 的封面就正好上下各留 16（88-56=32）。所以这里是 Height(88) + PaddingX(16)
+// + 一行 AlignItems(Center)，不是四边都 Padding(16) 再往上堆第二行——那样算
+// 出来是 98 起（Biu 那条提示的 toastOffset=90 也会被压穿）。
+const (
+	playbarHeight = 88
+	playbarPadX   = 16
+	coverSize     = 56
+	coverGap      = 8
+)
+
+// viewPlayBar 是底部那条播放条：封面、歌名、上一首/下一首/播放、可拖的进度条、音量。
+//
+// 一行摆完，横着分三块，和 Biu 的 playbar/left|center|right 一一对应：
+// 左边封面加歌名，中间控制在上进度在下，右边音量和加歌。
 func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 	t := c.Theme()
 
-	ui.Column(c).Key("playbar").Padding(16).Gap(10).
+	ui.Column(c).Key("playbar").Height(playbarHeight).PaddingX(playbarPadX).
 		Background(t.Surface).Radius(12).Children(func() {
-		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-			title := st.Title
-			if !st.HasTrack {
-				title = "还没有打开文件"
-			}
-			ui.Text(c, title).FontSize(15).Bold().Grow(1).
-				TextColor(textColor(t, st.HasTrack))
+		ui.Row(c).Fill().Gap(12).AlignItems(ui.Center).Children(func() {
+			// 左：封面 + 歌名。封面与歌名之间是 8（coverGap），歌名与右边那两块
+			// 之间仍是 12。
+			ui.Row(c).Gap(coverGap).AlignItems(ui.Center).Grow(1).Children(func() {
+				s.viewCover(c, st)
+				s.viewTrackText(c, st, t)
+			})
 
-			// 音量条自己带无障碍标签，不用旁边再摆一个「音量」字。
-			vol := st.Volume
-			if ui.Slider(c, &vol, 0, 1).Width(120).Label("音量").Changed() {
-				s.app.SetVolume(vol)
-			}
+			// 中：控制在上、进度在下。Biu 的 playbar/center 就是一个 flex-col。
+			ui.Column(c).Gap(2).Children(func() {
+				s.viewTransport(c, st)
+				s.viewProgress(c, st)
+			})
 
-			if ui.Button(c, "加歌").Width(56).Clicked() {
-				s.pickAndEnqueue()
-			}
-			s.viewStepButtons(c)
-
-			if st.Playing {
-				if ui.Button(c, "暂停").Width(76).Clicked() {
-					s.app.Toggle()
+			// 右：音量 + 加歌。
+			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+				// 音量条自己带无障碍标签，不用旁边再摆一个「音量」字。
+				vol := st.Volume
+				if ui.Slider(c, &vol, 0, 1).Width(120).Label("音量").Changed() {
+					s.app.SetVolume(vol)
 				}
-			} else {
-				if ui.PrimaryButton(c, "播放").Width(76).Disabled(!st.HasTrack).Clicked() {
-					s.app.Toggle()
+
+				if ui.Button(c, "加歌").Width(56).Clicked() {
+					s.pickAndEnqueue()
 				}
-			}
+			})
 		})
+	})
+}
 
-		s.viewProgress(c, st)
+// viewTrackText 是封面右边那几行字：歌名，出错时下面补一句原因。
+//
+// 第二行的位置是 Biu 的副标题（本地音乐 / UP 主名）。我们没有那些信息，
+// 只在真出错时说一句——88 高的播放条里塞不下第三行，错误总得有个地方说。
+func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
+	title := st.Title
+	if !st.HasTrack {
+		title = "还没有打开文件"
+	}
 
+	ui.Column(c).Grow(1).Children(func() {
+		ui.Text(c, title).FontSize(15).Bold().
+			TextColor(textColor(t, st.HasTrack))
 		if st.Err != "" {
 			ui.Text(c, "打不开："+st.Err).FontSize(12).TextColor(t.Danger)
 		}
 	})
+}
+
+// viewTransport 是上一首、下一首、播放/暂停。
+func (s *Shell) viewTransport(c *ui.Context, st app.State) {
+	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+		s.viewStepButtons(c)
+
+		if st.Playing {
+			if ui.Button(c, "暂停").Width(76).Clicked() {
+				s.app.Toggle()
+			}
+		} else {
+			if ui.PrimaryButton(c, "播放").Width(76).Disabled(!st.HasTrack).Clicked() {
+				s.app.Toggle()
+			}
+		}
+	})
+}
+
+// viewCover 是播放条左边那张封面。
+//
+// 四种状态（没有地址 / 载入中 / 就绪 / 加载失败）都由 imgcache.View 画，
+// 这里不重复它的判断，也不替它决定长什么样——以后缓存换画法只改那一处。
+func (s *Shell) viewCover(c *ui.Context, st app.State) {
+	imgcache.View(c, s.images, st.CoverURL, coverSize, coverSize)
 }
 
 // viewStepButtons 是上一首和下一首。

@@ -25,6 +25,17 @@ type State struct {
 	HasTrack bool
 	Title    string
 	Path     string
+	// CoverURL 是当前这首的封面地址，交给界面的封面缓存去取。空串表示没有封面。
+	//
+	// ⚠️ 本地文件永远是空的，而且这是照抄 Biu 的行为，不是省事：Biu 上游也不读
+	// 音频文件里内嵌的图（`electron/ipc/local-music.ts` 用 music-metadata 但只取
+	// title 和 duration，result.push 里没有任何 picture 字段），所以本地音乐在
+	// Biu 里也是占位。别拿文件路径去凑一个假地址——缓存拿到空串画的是空框，
+	// 不是「加载失败」，这两个状态在 imgcache 的 drawCover 里是分开的两支。
+	//
+	// 字段本身先立好：接 B 站在线歌时那才有真封面，那时只要让队列项把它带下来，
+	// 界面和缓存都不用改。
+	CoverURL string
 	Playing  bool
 	Position time.Duration
 	Duration time.Duration
@@ -39,6 +50,7 @@ type App struct {
 	player   *audio.Player
 	title    string
 	path     string
+	cover    string
 	position time.Duration
 	duration time.Duration
 	volume   float64
@@ -83,11 +95,30 @@ func (a *App) Snapshot() State {
 		HasTrack: a.player != nil,
 		Title:    a.title,
 		Path:     a.path,
+		CoverURL: a.cover,
 		Playing:  a.playing,
 		Position: a.position,
 		Duration: a.duration,
 		Volume:   a.volume,
 		Err:      a.errText,
+	}
+}
+
+// setCover 记下当前这首的封面地址。
+//
+// 值不变就不叫醒界面：本地文件的封面是空串，每一次换歌、每一次入队都会走到
+// 这里，为一个没变的值多要一帧是白要的。
+func (a *App) setCover(url string) {
+	a.mu.Lock()
+	if a.cover == url {
+		a.mu.Unlock()
+		return
+	}
+	a.cover = url
+	wake := a.wake
+	a.mu.Unlock()
+	if wake != nil {
+		wake()
 	}
 }
 
@@ -111,6 +142,9 @@ func (a *App) Open(path string) error {
 	a.player = p
 	a.title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	a.path = path
+	// 手上只有一个本地路径，没有封面地址（见 State.CoverURL）。队列里的项自带
+	// 封面的话，App.play 会在开成功之后补上。
+	a.cover = ""
 	a.position = 0
 	a.duration = p.Duration()
 	a.wantPlay, a.playing = true, true

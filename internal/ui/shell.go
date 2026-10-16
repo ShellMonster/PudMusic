@@ -50,8 +50,17 @@ type Shell struct {
 }
 
 // New 建一个窗口外壳，绑在状态 a 上。
+//
+// ⚠️ 封面缓存的唤醒在这里装，不在 Attach 里：注册的是这个外壳自己的唤醒句柄，
+// 跟窗口没有关系（wakeHandle 内部只存 Context 给的服务句柄，窗口关了自动失效）。
+// 放在 Attach 的后果是：那条注册只有真能建窗口时才发生，无头 Tester 永远碰不到，
+// 「建了外壳却忘了注册唤醒 → 图下完之后界面停在占位」这个 bug 就没有任何测试
+// 钉得住（实测：只投递不唤醒 = 0 帧刷新）。**每个窗口一个外壳，也就注册一次。**
+//
+// TestPlayBarCoverWakeRedrawsTheWindow 走的就是这一行。
 func New(a *app.App) *Shell {
 	s := &Shell{app: a, router: ui.NewRouter("/"), images: imgcache.New(imgcache.Options{})}
+	s.images.AddWake(s.wake.invalidate)
 	s.pageBody = s.placeholder
 	s.draw = Guard(s.viewMain, s.onPanic)
 	return s
@@ -61,9 +70,6 @@ func New(a *app.App) *Shell {
 func (s *Shell) Attach(w *mygo.Window) {
 	s.win = w
 	s.app.SetWake(s.wake.invalidate)
-	// 封面下完 / 解完要叫醒这个窗口。**每个窗口注册一次**，只通知主窗口的话
-	// 迷你窗口会一直停在占位图上（实测）。
-	s.images.AddWake(s.wake.invalidate)
 	w.OnClosed(func() {
 		s.images.Close()
 		s.app.Close()
