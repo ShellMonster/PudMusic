@@ -210,6 +210,10 @@ func (a *App) runOnline(it Item, gen int) {
 		old.Close()
 	}
 	p.Play()
+	// 歌词跟着换歌一起换：先重置成默认值，再从缓存恢复（见 lyrics.go）。
+	// 放在换上播放器**之后**——歌词区问的是「现在放的是哪一首」，那一刻
+	// 播放器已经换成新的了。
+	a.setLyricTrack(it)
 	if wake != nil {
 		wake()
 	}
