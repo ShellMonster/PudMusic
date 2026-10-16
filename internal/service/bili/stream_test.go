@@ -218,6 +218,101 @@ func TestPlayURLFallsBackWhenTheNamedTierIsMissing(t *testing.T) {
 	}
 }
 
+// TestPlayURLNeverHandsBackABetterTierThanAsked 盯「要省流量别给高音质」。
+//
+// 上一条断的是「要高的没有 → 退到低的」，那是对的。这条断的是反过来的
+// 那一半，同样重要：用户为了少流量点了 64K，B 站没给 64K，而旧写法会直接
+// 取最好的那一条——也就是 320K。流量翻五倍，而界面上只多一个「320K」徽章，
+// 用户多半不会注意到自己多花了钱。
+//
+// 退路是「不高于点名那一档里最好的」；一条都不低于点名的那档时才退到最低的
+// 那条（宁可少要一档，也不要多给——用户可以再点一次提高）。
+func TestPlayURLNeverHandsBackABetterTierThanAsked(t *testing.T) {
+	exp := time.Unix(1702204169+7200, 0)
+	// ⚠️ **不放 64K**：放了它，「要省流量」就会在点名命中那一档上短路，
+	// 根本走不到退路，断的就不是这条要断的东西了。
+	_, c := playurlClient(t, map[string]any{
+		"duration": 100,
+		"audio": []any{
+			audioItem(30232, 128000, "mp4a.40.2", streamURL(exp, "-128k.m4s")),
+			audioItem(30280, 320000, "mp4a.40.2", streamURL(exp, "-320k.m4s")),
+		},
+	})
+
+	for _, tc := range []struct {
+		name string
+		pref AudioQuality
+		want Quality
+	}{
+		{"要省流量", AudioLow, QualityMid128},
+		{"要标准", AudioMedium, QualityMid128},
+		{"要高音质", AudioHigh, QualityHigh320},
+	} {
+		ref, err := c.PlayURL(context.Background(), testBvid, testCid, tc.pref)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if ref.Quality != tc.want {
+			t.Errorf("%s（%v）拿到的是 %d，want %d", tc.name, tc.pref, ref.Quality, tc.want)
+		}
+	}
+}
+
+// TestPlayURLIgnoresStreamsWithoutAnAddress 盯「没有地址的流不算流」。
+//
+// B 站对「这一档你拿不到」的常见回答是把那一段对象照样摆出来，只是里面没有
+// 能播的东西（真机实测：没有大会员时 `dash.dolby` 是 `{"type":0,"audio":[]}`）。
+// 挑流的时候不把它剔掉，自动档就会挑中这条空壳，然后报一句「这个稿件没有
+// 音频流」——而 `dash.audio` 里好好的 320K 就在旁边摆着。
+//
+// 用户看到的是「这一首放不了」，真的是「有条流我们不敢用」。
+func TestPlayURLIgnoresStreamsWithoutAnAddress(t *testing.T) {
+	exp := time.Unix(1702204169+7200, 0)
+	_, c := playurlClient(t, map[string]any{
+		"duration": 100,
+		"audio": []any{
+			audioItem(30280, 320000, "mp4a.40.2", streamURL(exp, "-320k.m4s")),
+		},
+		// 摆着一个空壳：对象在，里面的流没有地址。
+		"dolby": map[string]any{"type": 2, "audio": []any{
+			map[string]any{"id": 30250, "bandwidth": 448000, "codecs": "ec-3", "baseUrl": ""},
+		}},
+	})
+
+	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioAuto)
+	if err != nil {
+		t.Fatalf("自动档被一条没有地址的流带偏了：%v", err)
+	}
+	if ref.Quality != QualityHigh320 {
+		t.Errorf("自动档拿到的是 %d，want 30280", ref.Quality)
+	}
+}
+
+// TestPlayURLGivesTheOnlyTierThereIs 盯「全都比点名的那档高」。
+//
+// B 站只给了 320K，而用户点了「省流量」。这时没法不越级——那就给唯一的那条，
+// 让徽章说出真相（用户看得见自己没省到流量，可以再决定）。
+func TestPlayURLGivesTheOnlyTierThereIs(t *testing.T) {
+	exp := time.Unix(1702204169+7200, 0)
+	_, c := playurlClient(t, map[string]any{
+		"duration": 100,
+		"audio": []any{
+			audioItem(30280, 320000, "mp4a.40.2", streamURL(exp, "-320k.m4s")),
+		},
+	})
+
+	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioLow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Quality != QualityHigh320 {
+		t.Errorf("音质 = %d，want 30280（只有这一档）", ref.Quality)
+	}
+	if ref.Label != "320K" {
+		t.Errorf("徽章 = %q，want 320K（徽章要说实话，用户才知道没省到流量）", ref.Label)
+	}
+}
+
 // —— 地址与有效期 ——
 
 // TestPlayURLReadsTheDeadline 盯有效期是从地址上读出来的。
