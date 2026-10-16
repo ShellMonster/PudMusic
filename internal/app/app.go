@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/media"
 	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 )
@@ -89,6 +90,19 @@ type App struct {
 	// reportedErr 是已经往界面上报过的那一条。解码器的 Err 记的是**第一条**
 	// 错误、不自己清零，所以不比对的话每 50 ms 会重复报一次。
 	reportedErr error
+
+	// artist 是当前这首的艺人（在线条目的 UP 主名）。本地文件是空的，
+	// 见 media.go 的 setArtist。跟 cover 一样只有媒体会话在用。
+	artist string
+	// stopped 是「用户按了停止」：和暂停分开，因为它让进度条回到开头，
+	// 而系统那边也是两个不同的状态（见 media.go 的 Stop）。
+	stopped bool
+
+	// mediaSink 是「该跟系统媒体会话说一声了」的那只手，由界面层装一次。
+	// nil = 没装（这一层不参与，Publish 是空操作）。
+	mediaSink func(media.NowPlaying)
+	// mediaAt 是上一次跟系统说话的��刻。用来限住「多久校正一次进度」。
+	mediaAt time.Time
 
 	wake   func() // 界面层装：状态写完后叫它要一帧
 	done   chan struct{}
@@ -184,9 +198,13 @@ func (a *App) Open(path string) error {
 	// 手上只有一个本地路径，没有封面地址（见 State.CoverURL）。队列里的项自带
 	// 封面的话，App.play 会在开成功之后补上。
 	a.cover = ""
+	// 本地文件没有艺人（Biu 上游也不读内嵌标签，见 media.go 的 setArtist）。
+	// 队列里的项自带的话，App.play 会在开成功之后补上。
+	a.artist = ""
 	a.position = 0
 	a.duration = p.Duration()
 	a.wantPlay, a.playing = true, true
+	a.stopped = false
 	a.errText = ""
 	wake := a.wake
 	a.mu.Unlock()
@@ -196,6 +214,7 @@ func (a *App) Open(path string) error {
 		old.Close()
 	}
 	p.Play()
+	a.publishMedia()
 	if wake != nil {
 		wake()
 	}
@@ -221,7 +240,13 @@ func (a *App) Toggle() {
 	if !a.playing {
 		a.wantPlay = false
 	}
+	// 按播放把一首停住的歌放起来时，「停过」这件事就过去了。
+	if a.playing {
+		a.stopped = false
+	}
 	a.mu.Unlock()
+	// 锁屏上的播放/暂停按钮是跟着状态走的，这一句在 App/media.go 的说明里。
+	a.publishMedia()
 	if wake != nil {
 		wake()
 	}
@@ -268,8 +293,15 @@ func (a *App) ScrubEnd(fraction float64) {
 	a.mu.Lock()
 	a.position = t
 	a.playing = p.Playing()
+	// 用户动过时间线了，「停到开头」这件事就过去��。系统那边跟着回到
+	// playing / paused——它看到的进度条此刻在 t 上，状态却说「停在开头」，
+	// 那是两句互相打架的话。
+	a.stopped = false
 	wake := a.wake
 	a.mu.Unlock()
+	// 锁屏上那根进度条和界面上这根是同一根：不报的话它在原地漂着，
+	// 直到下一次校正（mediaPublishEvery）才跟上。
+	a.publishMedia()
 	if wake != nil {
 		wake()
 	}
@@ -296,6 +328,9 @@ func (a *App) Close() {
 	a.mu.Lock()
 	a.online = nil
 	a.mu.Unlock()
+	// 告诉系统「没有歌了」。不做这一步的话，退出去之后锁屏上还会留着
+	// 一首已经不存在的歌，而控制中心的播放键按下去还能收到命令。
+	a.publishMedia()
 	if a.account != nil {
 		a.account.Close()
 	}
@@ -312,6 +347,7 @@ func (a *App) tick() {
 		case <-a.done:
 			return
 		case <-t.C:
+			now := time.Now()
 			a.mu.Lock()
 			p := a.player
 			live := a.wantPlay || a.playing
@@ -319,9 +355,22 @@ func (a *App) tick() {
 				a.position = p.Position()
 				a.playing = p.Playing()
 			}
+			// 锁屏上的进度条是**系统自己外推**出来的（Apple 头文件原话），
+			// 而外推的是它的时间：我们这边卡一下解码、换一次流、音频设备
+			// 被抢占，它都不知道。所以每隔几秒把真位置报回去校正一次。
+			//
+			// ⚠️ 只在**在放**的时候校正：暂停时系统不外推，而位置一变
+			// publishMedia 那一次就已经报过了。
+			publish := a.mediaSink != nil && a.playing && now.Sub(a.mediaAt) >= mediaPublishEvery
+			if publish {
+				a.mediaAt = now
+			}
 			wake := a.wake
 			a.mu.Unlock()
 
+			if publish {
+				a.publishMedia()
+			}
 			if live && wake != nil {
 				wake()
 			}
