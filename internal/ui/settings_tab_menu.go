@@ -30,11 +30,13 @@ const menuGroupName = "系统默认菜单"
 
 // settingsMenu 是菜单那一页。
 func (s *Shell) settingsMenu(c *ui.Context, st app.Settings, ro bool) {
-	s.settingSection(c, menuGroupName)
-	// 一格复选框 Biu 摆的是一个标题 + 一组勾选框（`flex items-start space-x-[100px]`），
-	// 这里照抄那个左右分栏的排法。
+	// ⚠️ **只摆一个标题**。Biu 那一页把同一个词写了两遍——`<h2>设置侧边菜单项显示和
+	// 隐藏</h2>` 之后，分栏左边那个 `text-medium` 又是「系统默认菜单」
+	// （`menu-settings.tsx:23-38`）。那边第一句是**整页**的标题、第二句是**这一组**
+	// 的名字，所以不算重复；我们这一页还摆着侧栏折叠和侧栏宽度，「整页的标题」
+	// 用在这里就不对了，于是只剩「这一组的名字」——所以只摆它一次。
 	ui.Row(c).FillWidth().Gap(24).AlignItems(ui.Start).Children(func() {
-		ui.Text(c, menuGroupName).FontSize(14).Bold().Width(menuLabelWidth)
+		ui.Text(c, menuGroupName).FontSize(16).Bold().Width(menuLabelWidth)
 		ui.Column(c).Grow(1).Gap(8).Children(func() {
 			s.pickMenuVisibility(c, st, ro)
 			ui.Divider(c).FillWidth()
@@ -200,5 +202,86 @@ func (s *Shell) pickSideMenu(c *ui.Context, st app.Settings, ro bool) {
 			s.applySetting("侧栏宽度", func(cur *app.Settings) { cur.SideMenuWidth = w })
 		}
 		ui.Textf(c, "%.0fpx", w).FontSize(12).Width(radiusReadoutW)
+	})
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 本地音乐目录
+// ─────────────────────────────────────────────────────────────────────────────
+
+// pickLocalMusicDirs 是本地音乐目录那一组：一个一个列出来，每个后面一个 ×，
+// 底下「添加文件夹」。
+//
+// ## 为什么摆在设置页上，而不是「本地音乐」那一页
+//
+// Biu 是摆在 local-music 页里的（`local-music/index.tsx` 的目录列表）。本项目的
+// local-music 现在**还是一个空状态**（`router.go` 里那条路由的 `Empty` 还是
+// 「暂无内容」），目录管理器是那一页的活儿。所以它先落在设置页上——
+// 「所有设置项都要在界面上能改」这一条比「摆在哪一页」更要紧，而摆在这一页用户
+// 找得到；等 local-music 页接上之后再搬过去（Biu 就是那么摆的）。
+func (s *Shell) pickLocalMusicDirs(c *ui.Context, st app.Settings, ro bool) {
+	t := c.Theme()
+	s.settingSection(c, "音乐库")
+	ui.Row(c).FillWidth().Gap(24).AlignItems(ui.Center).Children(func() {
+		ui.Column(c).Grow(1).Children(func() {
+			ui.Text(c, "本地音乐目录").FontSize(14).Bold()
+			ui.Text(c, "从这些文件夹里读取本地音乐").FontSize(12).TextColor(t.TextMuted).Wrap()
+		})
+		if ui.Button(c, "添加文件夹").Width(96).Disabled(ro).Clicked() {
+			s.pickPath("本地音乐目录", true, func(path string) {
+				s.applySetting("本地音乐目录", func(cur *app.Settings) {
+					// 不加重复的：同一个目录摆两遍，音乐列表里也会出现两遍。
+					if !slices.Contains(cur.LocalMusicDirs, path) {
+						cur.LocalMusicDirs = append(slices.Clone(cur.LocalMusicDirs), path)
+					}
+				})
+			})
+		}
+	})
+
+	if len(st.LocalMusicDirs) == 0 {
+		ui.Text(c, "还没有目录").FontSize(12).TextColor(t.TextMuted).Padding(4, 0, 0, 0)
+		return
+	}
+	// ⚠️ **重复的目录只画一次**。设置文件是用户能直接编辑的（也能从 Biu 那边来），
+	// 两个一模一样的目录在文件里完全合法——而这一行的 key 就是路径：MyGo 在同一层里
+	// 拿到两个一样的 key 会**当场 panic**（`ui/context.go` 的 duplicateKey），那一格
+	// 带着整个设置页换成错误页，用户之前改好的设置全看不见。
+	//
+	// 这里去重而不是去改设置：写设置是 `internal/app` 那一层的事，那份文件不是这一票
+	// 的；而重复的目录本来就该只出现一遍（Biu 的 local-music 页也是这么去的）。
+	seen := make(map[string]bool, len(st.LocalMusicDirs))
+	ui.Column(c).FillWidth().Gap(4).Children(func() {
+		for i, dir := range st.LocalMusicDirs {
+			if seen[dir] {
+				continue
+			}
+			seen[dir] = true
+			ui.Row(c).Key("local-dir:" + dir).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+				// ⚠️ 这一行的 key 用的是**路径**，不是序号（🔴 铁律四）：删掉中间
+				// 那一条之后序号会整体前移一格，按序号排的身份就落到旁边那条上
+				// 了，而 × 删掉的是它自己那一格还是隔壁那一格，从画面上看不出来。
+				ui.Text(c, dir).FontSize(13).Grow(1).SingleLine()
+				if ui.Button(c, "×").Label("移除目录「" + dir + "」").
+					FontSize(13).TextColor(t.TextMuted).Disabled(ro).Clicked() {
+					s.removeLocalMusicDir(i)
+				}
+			})
+		}
+	})
+}
+
+// removeLocalMusicDir 删掉第 i 个目录。
+//
+// ⚠️ 一定要 `Clone` 之后才 `Delete`：`SettingsSnapshot` 返回的切片是**和 store
+// 共享**的（`internal/app/settings.go` 的 Snapshot 注释里写着），直接 `Delete` 会
+// 把 store 里的顺序改掉，而那一格还没写盘——用户下次打开看到的顺序是乱的。
+func (s *Shell) removeLocalMusicDir(i int) {
+	s.applySetting("本地音乐目录", func(cur *app.Settings) {
+		list := slices.Clone(cur.LocalMusicDirs)
+		if i < 0 || i >= len(list) {
+			return
+		}
+		cur.LocalMusicDirs = slices.Delete(list, i, i+1)
 	})
 }

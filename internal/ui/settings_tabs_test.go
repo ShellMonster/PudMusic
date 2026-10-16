@@ -4,8 +4,10 @@ import (
 	"image"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	mygoui "github.com/egoist/mygo/ui"
 )
@@ -682,4 +684,105 @@ func contains(list []string, v string) bool {
 		}
 	}
 	return false
+}
+
+// TestTheLocalMusicDirectoriesAreEditable 验 `localMusicDirs` 改得了。
+//
+// 这一条是被审阅挑出来的：`localMusicDirs` 在整个应用里**一处写它的地方都没有**
+// （只有 app 包里的字段定义、默认值、normalize），所以「所有设置项都在界面上能改」
+// 实际差这一个键。Biu 把它摆在 local-music 页上，而本项目那一页现在还是空状态，
+// 所以它落在设置页上——见 `pickLocalMusicDirs` 的说明。
+//
+// 三个动作挨个走一遍：加、重复加不重复、删。重复加那一条最要紧：同一个目录摆两遍，
+// 音乐列表里也会出现两遍，而用户以为自己只加了一次。
+func TestTheLocalMusicDirectoriesAreEditable(t *testing.T) {
+	st := app.DefaultSettings("")
+	st.LocalMusicDirs = []string{"/music/rock", "/music/jazz"}
+	tt, s, a, _ := shellOnSettings(t, st)
+
+	// 起点两条都在画面上。
+	for _, dir := range st.LocalMusicDirs {
+		if !hasExactText(tt, dir) {
+			t.Fatalf("起点没有摆出「%s」，文字有 %q", dir, tt.Texts())
+		}
+	}
+
+	// 加一条。文件框在无头环境里调不了，替掉 `s.picker`（和 autostart 同一个道理）。
+	fake := &fakePicker{path: "/music/classic"}
+	s.picker = fake
+	clickSetting(t, tt, s, "添加文件夹")
+	waitFor(t, func() bool { return len(a.SettingsSnapshot().LocalMusicDirs) == 3 })
+
+	// 再加一次同一个：不该出现两遍。
+	fake.path = "/music/classic"
+	clickSetting(t, tt, s, "添加文件夹")
+	waitFor(t, func() bool { return len(a.SettingsSnapshot().LocalMusicDirs) >= 3 })
+	tt.Frame()
+	if got := a.SettingsSnapshot().LocalMusicDirs; len(got) != 3 {
+		t.Errorf("同一个目录加了两次之后是 %q，want 三条", got)
+	}
+
+	// 删掉中间那一条，留下的两条顺序不能乱。
+	//
+	// ⚠️ `before` 是**删之前**从 store 里拿的一份快照，它和 store 自己**共享**那一段
+	// 数组（`internal/app/settings.go` 的 Snapshot 注释里写着）。所以删完之后 `before`
+	// 必须还是原来那两条——直接对共享的数组 `slices.Delete` 会把顺序改掉，而那一格
+	// 还没写盘，于是下次打开看到的是乱的。
+	before := a.SettingsSnapshot()
+	clickSetting(t, tt, s, "移除目录「/music/rock」")
+	tt.Frame()
+	got := a.SettingsSnapshot().LocalMusicDirs
+	if len(got) != 2 || got[0] != "/music/jazz" || got[1] != "/music/classic" {
+		t.Fatalf("删掉中间一条之后是 %q，want [/music/jazz /music/classic]", got)
+	}
+	if len(before.LocalMusicDirs) != 3 ||
+		before.LocalMusicDirs[0] != "/music/rock" ||
+		before.LocalMusicDirs[1] != "/music/jazz" ||
+		before.LocalMusicDirs[2] != "/music/classic" {
+		t.Errorf("删的那一下把共享的那段数组改了：%q", before.LocalMusicDirs)
+	}
+}
+
+// TestTheLocalMusicDirectoriesDoNotCrashOnADuplicate 验设置文件里有重复目录时这一页
+// **画得出来**。
+//
+// ⚠️ 这一条是被一个真崩溃逼出来的：那一行的 key 就是路径，而 MyGo 在同一层里拿到
+// 两个一样的 key 会**当场 panic**——那一格带着整个设置页换成错误页，用户之前改好的
+// 设置一个都看不见。设置文件是用户能直接编辑的（也能从 Biu 那边来），两个一样的
+// 目录在文件里完全合法，所以这一格必须自己去重。
+func TestTheLocalMusicDirectoriesDoNotCrashOnADuplicate(t *testing.T) {
+	st := app.DefaultSettings("")
+	st.LocalMusicDirs = []string{"/music/rock", "/music/rock", "/music/jazz"}
+	tt, _, _, _ := shellOnSettings(t, st)
+
+	if tt.HasText("界面出错了") {
+		t.Fatalf("有重复目录就把整页画崩了，文字有 %q", tt.Texts())
+	}
+	if got := countText(tt, "/music/rock"); got != 1 {
+		t.Errorf("重复的目录画了 %d 遍，want 1", got)
+	}
+	if got := countText(tt, "/music/jazz"); got != 1 {
+		t.Errorf("/music/jazz 画了 %d 遍，want 1", got)
+	}
+}
+
+// fakePicker 是替掉真的系统文件框的那一份。
+type fakePicker struct {
+	path string
+	err  error
+}
+
+func (f *fakePicker) pick(*mygo.Window, bool) (string, error) { return f.path, f.err }
+
+// waitFor 等一个后台结果（文件框是弹在另一个 goroutine 上的，见 pickPath）。
+func waitFor(t *testing.T, done func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if done() {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatal("等了两秒，那个后台结果还没到")
 }

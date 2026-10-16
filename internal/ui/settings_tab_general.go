@@ -79,6 +79,8 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 	s.settingRow(c, "FFmpeg 路径", "手动指定 FFmpeg 可执行文件路径",
 		func() { s.pickFFmpegPath(c, st, ro) })
 
+	s.pickLocalMusicDirs(c, st, ro)
+
 	s.settingSectionEnd(c)
 	s.settingSection(c, "搜索")
 	s.settingRow(c, "显示搜索历史", "在搜索框中显示搜索历史记录",

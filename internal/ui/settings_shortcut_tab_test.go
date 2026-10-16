@@ -1,11 +1,26 @@
 package ui
 
 import (
+	"image"
+	"strings"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
 )
+
+// inkCount 数一小片画面里有几个深色像素。
+func inkCount(img *image.RGBA, r mygoui.Rect) int {
+	n := 0
+	for y := int(r.Y); y < int(r.Y+r.H); y++ {
+		for x := int(r.X); x < int(r.X+r.W); x++ {
+			if inkAt(img, float32(x), float32(y)) {
+				n++
+			}
+		}
+	}
+	return n
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 快捷键那一页
@@ -233,4 +248,148 @@ func TestAShortcutFileFromANewerVersionIsRefusedOnThePage(t *testing.T) {
 		t.Error("只读的时候居然录进去了")
 	}
 	_ = a
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 每一格是不是真的画出来了
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestEveryRecorderCellActuallyDrawsItsKey 验十二个录制格里**那个键真的画在框里**。
+//
+// 这条是被一条真 bug 逼出来的：`ui.Text(...).Grow(1)` 后面跟一个 `ui.Button`，
+// MyGo 会把那个 Text 压成 0.7 DIP 高——框还在、标签还在（Label 不画也在）、
+// `Find` 也找得到（返回一个 0x0 的框），可是**一个字都没画出来**。
+//
+// 所以这一条只能读**像素**：`HasText` 验不到（标签是画不画都在的），`Find` 验不到
+// （框在、字不在）。数那一格里的深色像素，十二格都得有。
+//
+// ⚠️ 那个 × 只在「不录的时候」才画，所以**正在录的那一格不会**中招——症状是
+// 「打开这一页全是空框，一格一个键都看不见」。
+func TestEveryRecorderCellActuallyDrawsItsKey(t *testing.T) {
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	openSettingsTab(t, tt, "快捷键设置")
+
+	img := tt.Image()
+	cur := defaultShortcutSettings()
+	for _, group := range []struct {
+		items  []shortcutItem
+		header string
+	}{
+		{cur.Shortcuts, "应用内"},
+		{cur.GlobalShortcuts, "全局"},
+	} {
+		for _, it := range group.items {
+			text := formatAccel(accelerator(it.Shortcut))
+			r, ok := tt.Find(text)
+			if !ok {
+				t.Fatalf("%s那一列没有「%s」这个键，文字有 %q", group.header, it.Name, tt.Texts())
+			}
+			if r.H <= 1 {
+				t.Errorf("%s「%s」那一格里的字塌成了 %.1f DIP 高"+
+					"（`Grow(1)` 的 Text 后面跟一个 Button 就是这个下场，见 shortcutRecorder）",
+					group.header, it.Name, r.H)
+				continue
+			}
+			if ink := inkCount(img, r); ink == 0 {
+				t.Errorf("%s「%s」那一格里有字的位置 %q 框高 %.1f，却一个深色像素都没有："+
+					"字没画出来", group.header, it.Name, text, r.H)
+			}
+		}
+	}
+}
+
+// TestTheRecorderCellsKeepTheirIdentityWhenTheCommandListChanges 验**行和格的身份
+// 是命令 id，不是它在列表里的位置**（🔴 铁律四）。
+//
+// 命令列表不是写死的：它来自用户自己的 `shortcuts.json`，而列表里既可以有用户
+// 自己加的命令，也可以没有我们默认的那几条（少一条的会补回来、补在**末尾**）。所以
+// 「前面多出一条」「上面那条没了」「顺序变了」都是会真的发生的事。
+//
+// 默认的元素身份是「父 ID + 兄弟序号」（`ui/context.go`），三种情况都会让序号从
+// 某一格开始整体错位一格——于是用户点着「上一首」在录，录完一看，改到「音量减」
+// 头上去了，而且界面上没有任何报错。这一条盯的就是这个。
+func TestTheRecorderCellsKeepTheirIdentityWhenTheCommandListChanges(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(shortcutSettings) shortcutSettings
+	}{
+		{"前面多出一条命令（用户自己加的）", func(s shortcutSettings) shortcutSettings {
+			s.Shortcuts = append([]shortcutItem{
+				{ID: "mine", Name: "我加的", Shortcut: "CommandOrControl+9"},
+			}, s.Shortcuts...)
+			return s
+		}},
+		{"上面那条没了", func(s shortcutSettings) shortcutSettings {
+			s.Shortcuts = s.Shortcuts[1:]
+			return s
+		}},
+		{"整个顺序倒过来", func(s shortcutSettings) shortcutSettings {
+			rev := make([]shortcutItem, len(s.Shortcuts))
+			for i := range s.Shortcuts {
+				rev[i] = s.Shortcuts[len(s.Shortcuts)-1-i]
+			}
+			s.Shortcuts = rev
+			return s
+		}},
+	}
+	for _, c := range cases {
+		tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+		openSettingsTab(t, tt, "快捷键设置")
+
+		// 先点第二行那一列（`prev`）开始录。
+		clickCell(t, tt, "全局快捷键：上一首")
+		if got := s.recording; got != (shortcutSlot{global: true, id: "prev"}) {
+			t.Fatalf("%s：点了「上一首」之后在录 %+v", c.name, got)
+		}
+
+		s.keys.mu.Lock()
+		s.keys.cur = c.mutate(s.keys.cur)
+		s.keys.mu.Unlock()
+		tt.Frame()
+
+		if got := s.recording; got != (shortcutSlot{global: true, id: "prev"}) {
+			t.Errorf("%s：录制跑到别的命令上去了（%+v，want prev）——"+
+				"行和格的身份跟的是位置，不是命令 id（🔴 铁律四）", c.name, got)
+		}
+		if !tt.Focused("全局快捷键：上一首") {
+			t.Errorf("%s：焦点没跟着「上一首」走", c.name)
+		}
+		s.keys.Close()
+	}
+}
+
+// TestEveryRecorderCellHasAKeyOfItsOwn 钉住那十二个 key 是**两两不同**的，而且是从
+// 命令 id 上来的。
+//
+// 上面那条盯的是行为；这一条盯的是「key 到底是什么」。两半分开是因为方向相反：
+// 上面那条在「状态存成命令 id」时是绿的（今天就是这样），这一条在「key 被整个去掉」
+// 时仍然是绿的——真正让上面那条变红的是 `keepRecordingFocus` 每一帧把焦点按回正在
+// 录的那一格，它顺带把「身份错了」也盖住了。两条一起在，才说得清现在靠的是哪
+// 一样、以及哪一样是规矩要求的。
+func TestEveryRecorderCellHasAKeyOfItsOwn(t *testing.T) {
+	cur := defaultShortcutSettings()
+	seen := map[string]shortcutSlot{}
+	for _, item := range cur.Shortcuts {
+		for _, slot := range []shortcutSlot{{id: item.ID}, {global: true, id: item.ID}} {
+			key := shortcutFieldKey(slot)
+			if key == "" {
+				t.Errorf("%+v 这一格没有 key", slot)
+				continue
+			}
+			if !strings.Contains(key, slot.id) {
+				t.Errorf("「%s」的 key 是 %q，里面没有命令 id——那是位置，不是身份", item.Name, key)
+			}
+			// 位置不能是 key 的一部分：把一条命令换到别的位置之后 key 必须不变。
+			if moved := shortcutFieldKey(shortcutSlot{id: "whatever", global: slot.global}); moved == key {
+				t.Errorf("%+v 和别的命令共用了同一个 key %q", slot, key)
+			}
+			if other, dup := seen[key]; dup {
+				t.Errorf("%+v 和 %+v 共用了同一个 key %q", slot, other, key)
+			}
+			seen[key] = slot
+		}
+	}
+	if len(seen) != 12 {
+		t.Errorf("一共 %d 个 key，want 12（六条命令 × 两列）", len(seen))
+	}
 }

@@ -272,7 +272,22 @@ func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcut
 	}
 
 	field.Children(func() {
-		ui.Text(c, text).FontSize(13).Grow(1).Shrink(0).TextColor(color)
+		// 🔴 **这里不能 `.Grow(1)`。**
+		//
+		// MyGo 的排版里，「一个 Grow(1) 的 Text 后面跟一个 Button」会把那个 Text
+		// 压成 0.7 DIP 高——不是 0，是 0.7：框还在，字一个也没画出来。实测（见
+		// `TestEveryRecorderCellActuallyDrawsItsKey`）：
+		//
+		//	Text.Grow + Button      → 200x0.7   ← 字不见了
+		//	Text.Shrink(0) + Button  → 200x15.3  ← 正常
+		//	Text.Grow + Text         → 200x14.7  ← 兄弟是 Text 就没事
+		//	Text.Grow + Icon         → 200x17.0  ← 兄弟是 Icon 就没事
+		//
+		// 症状极难认：× 只在「不录的时候」才画，所以正在录的那一格字是好的，录完
+		// 退出来就变成空框；而无头 Tester 的 `HasText` 是**按标签**匹配的，「⌘+P」
+		// 在 `Texts()` 里仍然在（标签是画不画都在的），`Find` 也仍然找得到（返回
+		// 一个 0x0 的框）。所以测试要读**画出来的像素**，不能读文字列表。
+		ui.Text(c, text).FontSize(13).SingleLine().Shrink(0).TextColor(color)
 		// 清空。Biu 的 `endContent` 那个 ×（`shortcut-key-input/index.tsx:46`），
 		// 这一格没设键的时候不画——没东西可清的时候摆一个叉只是让人多按一次
 		// 空的。
