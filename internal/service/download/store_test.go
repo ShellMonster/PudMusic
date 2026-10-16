@@ -292,3 +292,97 @@ func mustJSON(t *testing.T, v any) []byte {
 	}
 	return b
 }
+
+// TestAMuxingTaskNeverSurvivesARestartAsMuxing 钉住「交织中」不会带着「交织中」
+// 重开。
+//
+// 交织是视频那一路（PLAN 8.9 / #32），这一版还没有交织器，所以**没有任何
+// 正常路径会置它**——这一条是把那一项直接按成交织中，然后走一遍真实的
+// 存盘 → 读回。留这个状态位是为了记录页能画它，而它一旦**跨过一次重启**还叫
+// 「交织中」，表现是：界面上永远有一条进度条在走、永远走不完、也永远等不到
+// 「下载完成」——用户能做的只有退出应用。
+//
+// 断的是**存下去的那一份**（不是「有没有报错」）：磁盘上写着的必须是暂停。
+func TestAMuxingTaskNeverSurvivesARestartAsMuxing(t *testing.T) {
+	const size = chunkSize
+	h := newHarness(t, size, 30280)
+	h.queueFile = filepath.Join(h.dir, QueueFileName)
+	id := TaskID(bvid, cid)
+	dest := DestFor(h.dir, "交织中的歌", ".mp4", id)
+
+	// 字节全下完了（分块齐了），交织还没写完 —— 这正是交织中的样子。
+	h.m.mu.Lock()
+	h.m.tasks[id] = &Task{
+		ID: id, Title: "交织中的歌", Dest: dest, Ext: ".mp4",
+		Identity: Identity{Bvid: bvid, Cid: cid, Quality: 30280, Length: size},
+		Chunks:   []int{0},
+		Status:   StatusMuxing,
+		AddedAt:  1700000000000,
+	}
+	h.m.order = append(h.m.order, id)
+	h.m.mu.Unlock()
+
+	// ① 存盘那一层：写下去的就该是暂停。
+	if err := h.m.Save(h.queueFile); err != nil {
+		t.Fatalf("存队列：%v", err)
+	}
+	var onDisk queueFile
+	b, err := os.ReadFile(h.queueFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &onDisk); err != nil {
+		t.Fatal(err)
+	}
+	if len(onDisk.Tasks) != 1 {
+		t.Fatalf("队列文件里有 %d 项，want 1", len(onDisk.Tasks))
+	}
+	if got := onDisk.Tasks[0].Status; got != StatusPaused {
+		t.Fatalf("交织中的那一项存成了 %q，want %q：重开之后界面上会永远转圈", got, StatusPaused)
+	}
+
+	// ② 读回那一层：万一有一份别处写的队列文件带着交织中，它也该被读成暂停。
+	raw := string(b)
+	raw = strings.Replace(raw, string(StatusPaused), string(StatusMuxing), 1)
+	if err := os.WriteFile(h.queueFile, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h2 := h.restart()
+	got := h2.m.Snapshots()
+	if len(got) != 1 {
+		t.Fatalf("恢复出 %d 项", len(got))
+	}
+	if got[0].Status != StatusPaused {
+		t.Fatalf("带着交织中的队列文件重开，恢复出来是 %q，want %q", got[0].Status, StatusPaused)
+	}
+	// 而交织过的分块记账要留着：接着下去不能把那几兆重下一遍。
+	if got[0].Done != size {
+		t.Fatalf("恢复出来只记着下了 %d 字节，want %d：交织过的字节还在盘上，账上不能没有",
+			got[0].Done, size)
+	}
+}
+
+// TestTheReservedMuxingStatusIsInFlight 钉住交织中算「在飞」的那一半语义：
+// 它不能暂停、也不能继续。
+//
+// 这两条不是此刻的偏好，是 #32 接上来之前就得定下来的：交织器拿着的那几个
+// 字节停不下来（Biu 那边有 `mergePaused`，那要交织器自己支持存点），而
+// 「继续」对它没有可继续的东西——字节全下完了。真出错了那一路会落在
+// `StatusError` 上，由重试从头走。
+func TestTheReservedMuxingStatusIsInFlight(t *testing.T) {
+	if StatusMuxing.CanPause() {
+		t.Error("交织中能暂停：这一版停不下来交织，摆一颗按了会停不下来的按钮是骗用户")
+	}
+	if StatusMuxing.CanResume() {
+		t.Error("交织中能继续：字节已经全下完了，没有可继续的东西")
+	}
+	if !StatusMuxing.Running() {
+		t.Error("交织中不算在飞：退出时它会被存成「交织中」，重开之后永远转圈（见上面那一条）")
+	}
+	// 下完了 / 出错了 / 暂停了都不在飞。
+	for _, s := range []Status{StatusDone, StatusError, StatusPaused} {
+		if s.Running() {
+			t.Errorf("%q 被算成在飞", s)
+		}
+	}
+}
