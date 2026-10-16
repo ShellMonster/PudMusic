@@ -79,5 +79,10 @@ func (s *Shell) viewNav(c *ui.Context) {
 		}
 		s.viewDynamicDot(c)
 		s.viewAvatar(c)
+		// 登录 / 退出登录那个入口（login.go 的 viewLoginEntry）。它在 router.go
+		// 那一行末尾——顶栏那一行是从那儿搬过来的，所以这一句也跟着搬过来。
+		// 放在头像**旁边**而不是头像**里面**：头像是原生菜单的触发点，
+		// 按下是弹菜单不是切路由（见 navbar_avatar.go）。
+		s.viewLoginEntry(c)
 	})
 }

@@ -28,13 +28,16 @@ func newShell(t *testing.T) (*Shell, *mygoui.Tester) {
 	return s, mygoui.NewTester(s.View, 1200, 800)
 }
 
-// TestFourteenRoutes 盯住「14 条」这个数：少一条是漏了，多一条是编的。
+// TestFourteenRoutes 盯住「Biu 那 14 条」这个数：少一条是漏了，多一条是编的。
 //
-// 13 条在表里，第 14 条是兜底的 404 —— 它不是一条能 Match 的模式，而是
-// viewRoutes 的 default 分支，所以不在 routes 里。
+// **扫码登录不在这 14 条里**——它是本项目自己加的第 15 条（对应 Biu
+// 挂在导航栏头像下拉里的那个登录入口），所以单独断言，不混进 want。
+//
+// 兜底的 404 也不是一条能 Match 的模式，而是 viewRoutes 的 default 分支，
+// 所以它不在 routes 里。
 func TestFourteenRoutes(t *testing.T) {
-	if got := len(routes) + 1; got != 14 {
-		t.Fatalf("路由一共 %d 条（表里 %d 条 + 兜底 1 条），want 14", got, len(routes))
+	if got := len(routes) + 1; got != 15 {
+		t.Fatalf("路由一共 %d 条（表里 %d 条 + 兜底 1 条），want 15（Biu 的 14 条 + 扫码登录）", got, len(routes))
 	}
 	want := []string{
 		"/", "/follow", "/later", "/history", "/local-music", "/download-list",

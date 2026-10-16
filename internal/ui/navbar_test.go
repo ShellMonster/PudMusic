@@ -8,12 +8,14 @@
 package ui
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -36,6 +38,34 @@ func newShellWithSettings(t *testing.T) (*Shell, *mygoui.Tester) {
 	t.Cleanup(func() { _ = s.hist.Close() })
 	return s, mygoui.NewTester(s.View, 1200, 800)
 }
+
+// newLoggedInShell 建一个**已经登录**的外壳：先往凭据后端里存一份登录态，
+// 再 MountLogin——`MountLogin` 会把它读回来，所以走的是生产那条路，
+// 不是往界面上硬塞一个「已登录」标志。
+//
+// 凭据后端用内存那一份（不碰真的钥匙串）；B 站客户端给一个空的：这一组只验
+// 「菜单项接到了哪」，不联网，而 `SeedCookies` 只动 jar，不发请求。
+func newLoggedInShell(t *testing.T, mid string) (*Shell, *mygoui.Tester) {
+	t.Helper()
+	a := app.New()
+	t.Cleanup(a.Close)
+
+	store := app.NewMemoryStore("test")
+	if err := store.Save(context.Background(), app.Session{SESSDATA: "sess", DedeUserID: mid}); err != nil {
+		t.Fatal(err)
+	}
+	a.MountLogin(store, bili.NewClient(bili.Options{}))
+
+	s := New(a)
+	t.Cleanup(s.images.Close)
+	t.Cleanup(func() { _ = s.hist.Close() })
+	return s, mygoui.NewTester(s.View, 1200, 800)
+}
+
+// loginPath 是扫码登录那一页的路由。
+//
+// 拿字符串比而不是拿表里的下标：那条表一改顺序这里跟着错，而且错得很安静。
+const loginPath = "/login"
 
 // fakeClockStart 是那只假表从哪儿起算。
 //
@@ -61,6 +91,12 @@ func TestNavBarSpansTheTopOfTheWindow(t *testing.T) {
 	if !ok {
 		t.Fatalf("顶栏上没有头像，文字有 %q", tt.Texts())
 	}
+	// 最右边那一格是登录入口（login.go 的 viewLoginEntry），顶栏「顶满」验的是
+	// 它，不是头像——头像右边还有别的控件，拿头像验会得出一个假的「没顶满」。
+	login, ok := tt.Find("登录")
+	if !ok {
+		t.Fatalf("顶栏上没有登录入口，文字有 %q", tt.Texts())
+	}
 
 	if back.Y < 0 || back.Y+back.H > navMinHeight {
 		t.Errorf("后退按钮在 %v，不在顶上那 %v 高里", back, navMinHeight)
@@ -68,12 +104,23 @@ func TestNavBarSpansTheTopOfTheWindow(t *testing.T) {
 	if avatar.Y < 0 || avatar.Y+avatar.H > navMinHeight {
 		t.Errorf("头像在 %v，不在顶上那 %v 高里", avatar, navMinHeight)
 	}
+	if login.Y < 0 || login.Y+login.H > navMinHeight {
+		t.Errorf("登录入口在 %v，不在顶上那 %v 高里", login, navMinHeight)
+	}
 	// 左边贴着窗口左边、右边贴着窗口右边 = 这一条横贯整个宽度。
+	//
+	// 留出来的 slack 是：顶栏自己的右内边距（8，见 viewNav 的 Padding）
+	// 加那个控件自己的内边距。**Tester 只能量到文字/名字那一小块**，
+	// 量不到按钮本身——`Find` 给的是标签节点的框（`ui/runtime.go:964`）。
+	// 所以这里量的是「顶栏那一组控件顶到了窗口右边附近」，不是「按钮的边缘
+	// 正好等于窗口边缘」。
+	const slack = 32
 	if back.X < 8 {
 		t.Errorf("后退按钮左边缘 %v，快贴到窗口外了", back.X)
 	}
-	if right := avatar.X + avatar.W; float32(1200)-right > 16 {
-		t.Errorf("头像右边缘 %v，离窗口右边还有 %v，顶栏没顶满", right, 1200-right)
+	if right := login.X + login.W; float32(1200)-right > slack {
+		t.Errorf("登录入口右边缘 %v，离窗口右边还有 %v（容差 %v），顶栏没顶满",
+			right, 1200-right, slack)
 	}
 	if s.router.Path() != "/" {
 		t.Errorf("看了一顶栏，路径变成了 %q", s.router.Path())
@@ -293,10 +340,27 @@ func TestAvatarMenuGoesToItsRoute(t *testing.T) {
 		t.Errorf("选了「设置」之后在 %q，want %q", got, settingsPath)
 	}
 
-	// 个人资料要认得出登录态：没登录就没有 mid，给一条 `/user/` 等于把用户
-	// 送进 404，所以那一支该说「还没登录」。
-	s.user = navUser{loggedIn: true, mid: "2"}
-	tt.Frame()
+	// 「登录」接的是扫码登录页。
+	if err := tt.Click(avatarLabel); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("登录"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.router.Path(); got != loginPath {
+		t.Errorf("选了「登录」之后在 %q，want %q", got, loginPath)
+	}
+}
+
+// TestAvatarMenuProfileUsesTheLoggedInMid 验「个人资料」认的是登录态里那个 mid。
+//
+// 这一条钉的是「登录态的来源只有 app」：头像这一层不存第二份，mid 一律现去问
+// `app.Session()`。存两份的后果是退登之后头像还显示着上一个人的样子，而界面上
+// 没有任何一个地方会提示「没退干净」。
+func TestAvatarMenuProfileUsesTheLoggedInMid(t *testing.T) {
+	s, tt := newLoggedInShell(t, "2")
+	tt.SetFocused(true)
+
 	if err := tt.Click(avatarLabel); err != nil {
 		t.Fatal(err)
 	}
@@ -308,27 +372,55 @@ func TestAvatarMenuGoesToItsRoute(t *testing.T) {
 	}
 }
 
-// TestAvatarMenuSaysWhatIsNotDoneYet 验做不了的菜单项说清楚，而不是没反应。
+// TestAvatarMenuWithoutALoginSaysSo 验没登录时那两项说清楚，而不是带用户走进 404。
 //
-// 「问题反馈」是唯一真能做的：它把地址交给系统（`Context.OpenURL`）。
-func TestAvatarMenuSaysWhatIsNotDoneYet(t *testing.T) {
+// Biu 那两条是按登录态隐藏掉的。我们六项一直都在（见 navbar_avatar.go 文件头），
+// 于是「个人资料」和「退出登录」在没登录时必须有话说。
+func TestAvatarMenuWithoutALoginSaysSo(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
 
-	for _, want := range []string{"刷新数据", "退出登录", "登录"} {
+	for _, item := range []string{"个人资料", "退出登录", "刷新数据"} {
 		s.clearToasts()
 		if err := tt.Click(avatarLabel); err != nil {
 			t.Fatal(err)
 		}
-		if err := tt.ChooseMenuItem(want); err != nil {
-			t.Fatalf("选 %q 失败：%v", want, err)
+		if err := tt.ChooseMenuItem(item); err != nil {
+			t.Fatalf("选 %q 失败：%v", item, err)
 		}
 		if got := toastTexts(s.visibleToasts()); len(got) != 1 {
-			t.Fatalf("选了 %q 之后有 %d 条提示 %q，want 1 条", want, len(got), got)
+			t.Fatalf("选了 %q 之后有 %d 条提示 %q，want 1 条", item, len(got), got)
+		}
+		if got := s.router.Path(); got != "/" {
+			t.Errorf("选了 %q 之后却切到了 %q", item, got)
 		}
 	}
+}
 
-	s.clearToasts()
+// TestAvatarMenuLogoutActuallyLogsOut 验「退出登录」是真退，不是弹一句话。
+func TestAvatarMenuLogoutActuallyLogsOut(t *testing.T) {
+	s, tt := newLoggedInShell(t, "2")
+	tt.SetFocused(true)
+
+	if !s.app.LoggedIn() {
+		t.Fatal("装上去的登录态没生效")
+	}
+	if err := tt.Click(avatarLabel); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("退出登录"); err != nil {
+		t.Fatal(err)
+	}
+	if s.app.LoggedIn() {
+		t.Error("选了「退出登录」之后还是登录态")
+	}
+}
+
+// TestAvatarMenuOpensTheIssuePage 验「问题反馈」把地址交给系统。
+func TestAvatarMenuOpensTheIssuePage(t *testing.T) {
+	_, tt := newShell(t)
+	tt.SetFocused(true)
+
 	if err := tt.Click(avatarLabel); err != nil {
 		t.Fatal(err)
 	}

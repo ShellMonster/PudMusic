@@ -10,6 +10,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -82,8 +83,6 @@ type Shell struct {
 	searchQuery   string
 	searchSuggest bool
 	searchFocused bool
-	// user 是头像下拉认的那个人。这一版还没有登录，所以恒为零值。
-	user navUser
 	// feed 是「动态更新红点」的 5 分钟节奏。假时钟在 navbar_feed.go。
 	feed *feedPoller
 	// hist 是搜索历史。没挂上盘时是内存里的一份（见 searchhistory.go）。
@@ -91,6 +90,15 @@ type Shell struct {
 
 	// crash 是上一帧 panic 到的东西，非 nil 时这一帧画错误页。
 	crash any
+
+	// qrBitmap 是当前那张二维码的位图，qrFor 是它对应的那张二维码。
+	//
+	// **只由 view 读写**（view 永远跑在主线程上），所以没有锁。
+	// 键是指针：换了一张码就换一个，自动重建那张 GPU 纹理。
+	// 见 login.go 的 qrImage。
+	qrBitmap    *ui.Bitmap
+	qrDimBitmap *ui.Bitmap
+	qrFor       *bili.Code
 
 	// quitting 是「已经进了退出流程」，只由 OnBeforeQuit 置位（主线程）。
 	//
