@@ -669,3 +669,95 @@ func readJSON(t *testing.T, path string, v any) {
 		t.Fatalf("写出来的不是合法 JSON：%v\n%s", err, b)
 	}
 }
+
+// TestABiuExportSurvivesARoundTripUnchanged 是「键名与 Biu 导出的 JSON 完全一致
+// （**双向无差集**）」这条验收的字面版本。
+//
+// TestSettingsKeysMatchBiu 只比了**我们写出去的**键名；少的那一半是**读进来的**：
+// 一份完整的 Biu 导出，经过我们读一遍、写一遍之后，是不是还和原来一模一样。
+// 少一个键 = 用户从 Biu 切过来丢一项设置，而丢的那一项在界面上根本没有提示。
+//
+// fixture 是 Biu 的 electron-store 会写出来的那份形状：外面包一层
+// `{"appSettings": {...}}`，另外还有一段 `__internal__`（conf 的内部状态，
+// 见 biu/electron/store.ts:12-21）。值全部用**非默认**的，这样任何一个键没被
+// 带过去都会在这一条上炸出来，而不是被默认值悄悄填上。
+func TestABiuExportSurvivesARoundTripUnchanged(t *testing.T) {
+	const biuExport = `{
+	  "appSettings": {
+	    "autoStart": true,
+	    "closeWindowOption": "exit",
+	    "fontFamily": "PingFang SC",
+	    "borderRadius": 16,
+	    "downloadPath": "/Users/x/Downloads",
+	    "primaryColor": "#1ed760",
+	    "backgroundColor": "#101014",
+	    "audioQuality": "lossless",
+	    "hiddenMenuKeys": ["首页", "动态"],
+	    "displayMode": "compact",
+	    "ffmpegPath": "/opt/ffmpeg",
+	    "themeMode": "dark",
+	    "pageTransition": "fade",
+	    "showSearchHistory": false,
+	    "proxySettings": {"type": "socks5", "host": "127.0.0.1", "port": 7890, "username": "u", "password": "p"},
+	    "sideMenuCollapsed": true,
+	    "sideMenuWidth": 240,
+	    "sideMenuCollectionFolded": {"created": true, "collected": false},
+	    "reportPlayHistory": false,
+	    "localMusicDirs": ["/music/a", "/music/b"]
+	  },
+	  "__internal__": {"migrations": {"version": 1}}
+	}`
+
+	path := filepath.Join(t.TempDir(), app.SettingsFileName)
+	write(t, path, biuExport)
+
+	st, err := app.OpenSettingsStore(path)
+	if err != nil {
+		t.Fatalf("Biu 导出的设置读不出来：%v", err)
+	}
+	// 改一笔再写回去：写出去的是「我们改过之后的」那份，只读不写的话这条就
+	// 什么都没验到。
+	if _, err := st.Update(func(s *app.Settings) { s.BorderRadius = 20 }); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var before, after struct {
+		AppSettings map[string]any `json:"appSettings"`
+	}
+	if err := json.Unmarshal([]byte(biuExport), &before); err != nil {
+		t.Fatal(err)
+	}
+	readJSON(t, path, &after)
+
+	// 两个方向都要查：少了的是丢设置，多了的是我们自造了 Biu 没有的键。
+	for k := range before.AppSettings {
+		if _, ok := after.AppSettings[k]; !ok {
+			t.Errorf("来回一趟之后丢了 Biu 的键 %q", k)
+		}
+	}
+	for k := range after.AppSettings {
+		if _, ok := before.AppSettings[k]; !ok {
+			t.Errorf("来回一趟之后多了一个 Biu 没有的键 %q", k)
+		}
+	}
+	// 值也要一样。Biu 导出的键名和取值都原样带走，用户换回 Biu 打开还是原样。
+	for k, want := range before.AppSettings {
+		got, ok := after.AppSettings[k]
+		if !ok {
+			continue // 上面已经报过了。
+		}
+		if k == "borderRadius" {
+			// 这一条是我们**故意**改的（上面 Update 改的就是它）。
+			if got != float64(20) {
+				t.Errorf("borderRadius 改成了 %v，want 20", got)
+			}
+			continue
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s：来回一趟之后是 %#v，Biu 那边是 %#v", k, got, want)
+		}
+	}
+}

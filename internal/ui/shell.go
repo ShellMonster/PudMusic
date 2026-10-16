@@ -61,7 +61,7 @@ type Shell struct {
 func New(a *app.App) *Shell {
 	s := &Shell{app: a, router: ui.NewRouter("/"), images: imgcache.New(imgcache.Options{})}
 	s.images.AddWake(s.wake.invalidate)
-	s.pageBody = s.placeholder
+	s.pageBody = s.pageContent
 	s.draw = Guard(s.viewMain, s.onPanic)
 	return s
 }
@@ -73,6 +73,17 @@ func (s *Shell) Attach(w *mygo.Window) {
 	w.OnClosed(func() {
 		s.images.Close()
 		s.app.Close()
+		// 关窗就收尾设置：停掉后台写盘，并把还欠着的改动同步落完。
+		//
+		// MountSettings 里那个 OnWillQuit 的 Flush 兜的是「退进程」这条路；
+		// 这一句兜的是「关窗口」——以后加了托盘（issue #28），关窗口不再等于
+		// 退进程，那条 OnWillQuit 就不一定会跑，两句要一起看。
+		//
+		// `CloseSettings` 可以重复调（内部先 LoadAndDelete），所以窗口关了之后
+		// 进程再退、再调一次都不会出错。
+		if err := s.app.CloseSettings(); err != nil {
+			log.Printf("biu: 关窗时保存设置失败：%v", err)
+		}
 	})
 }
 
@@ -167,7 +178,6 @@ func (s *Shell) viewMain(c *ui.Context) {
 
 	ui.Column(c).Fill().Children(func() {
 		s.viewNav(c)
-		s.viewThemeSwitch(c)
 		ui.Row(c).Grow(1).Children(func() {
 			s.viewSide(c)
 			s.viewRoutes(c)
