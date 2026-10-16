@@ -49,6 +49,8 @@ type App struct {
 	playing  bool
 	errText  string
 
+	queue *Queue // 播放队列，见 queue.go
+
 	wake   func() // 界面层装：状态写完后叫它要一帧
 	done   chan struct{}
 	closed bool
@@ -56,7 +58,7 @@ type App struct {
 
 // New 建一个空的应用状态，开后台时钟。
 func New() *App {
-	a := &App{volume: 1, done: make(chan struct{})}
+	a := &App{volume: 1, queue: NewQueue(), done: make(chan struct{})}
 	go a.tick()
 	return a
 }

@@ -5,12 +5,13 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/egoist/mygo/ui"
 )
 
-// viewPlayBar 是底部那条播放条：曲目名、播放/暂停、可拖的进度条、音量。
+// viewPlayBar 是底部那条播放条：曲目名、上一首/播放/下一首、可拖的进度条、音量。
 //
-// 阶段 1 只有这些。队列、列表、歌词、封面缓存都在后面的阶段。
+// 阶段 1 只有这些。播放列表面板、歌词、封面缓存都在后面的阶段。
 func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 	t := c.Theme()
 
@@ -30,6 +31,11 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 				s.app.SetVolume(vol)
 			}
 
+			if ui.Button(c, "加歌").Width(56).Clicked() {
+				s.pickAndEnqueue()
+			}
+			s.viewStepButtons(c)
+
 			if st.Playing {
 				if ui.Button(c, "暂停").Width(76).Clicked() {
 					s.app.Toggle()
@@ -47,6 +53,42 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 			ui.Text(c, "打不开："+st.Err).FontSize(12).TextColor(t.Danger)
 		}
 	})
+}
+
+// viewStepButtons 是上一首和下一首。
+//
+// 能不能按看的是队列：没放过歌、或者只有刚打开的那一首（没进队列）时是灰的。
+// 队列里只有一首歌时按钮仍然是亮的——按下去听到的是同一首从头来，
+// 表现成按了没反应更让人困惑。
+func (s *Shell) viewStepButtons(c *ui.Context) {
+	// 宽度要放得下三个汉字：按 64 画出来是「上...」「下...」，看着像坏了。
+	if ui.Button(c, "上一首").Width(88).Disabled(!s.app.CanPrev()).Clicked() {
+		s.app.Prev()
+	}
+	if ui.Button(c, "下一首").Width(88).Disabled(!s.app.CanNext()).Clicked() {
+		s.app.Next()
+	}
+}
+
+// pickAndEnqueue 弹文件框，把选中的歌加到队列尾部。
+//
+// 队列空的时候加歌会直接开始播，所以点一下就能听见声音；之后再加就只是排着。
+//
+// ⚠️ 必须放在另一个 goroutine 里：MyGo 把弹框请求 post 到主线程再等系统回调，
+// 在主线程里等就是死等，事件循环会卡死（和 shell.go 的 pickFile 同一个道理）。
+func (s *Shell) pickAndEnqueue() {
+	win := s.win
+	go func() {
+		paths, err := platform.PickAudioFile(win)
+		if err != nil || len(paths) == 0 {
+			return
+		}
+		items := make([]app.Item, len(paths))
+		for i, p := range paths {
+			items[i] = app.LocalItem(p)
+		}
+		s.app.Enqueue(items...)
+	}()
 }
 
 // viewProgress 是那一行进度。
