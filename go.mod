@@ -4,7 +4,7 @@ go 1.27.1
 
 require (
 	github.com/ebitengine/purego v0.11.1
-	github.com/egoist/mygo v0.5.1
+	github.com/egoist/mygo v0.5.5
 	github.com/mewkiz/flac v1.0.14
 	github.com/tphakala/go-m4a v0.7.0
 )
