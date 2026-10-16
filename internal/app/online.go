@@ -366,9 +366,11 @@ func (a *App) runOnline(it Item, gen int) {
 	a.title = it.Title
 	a.path = ""
 	a.cover = it.Cover
+	a.artist = it.Artist
 	a.position = 0
 	a.duration = p.Duration()
 	a.wantPlay, a.playing = true, true
+	a.stopped = false
 	a.quality = ref.Label
 	a.online = &onlineTrack{item: it, ref: ref, source: src, quality: ref.Label, tier: ref.Quality}
 	a.reportedErr = nil
@@ -381,6 +383,7 @@ func (a *App) runOnline(it Item, gen int) {
 		old.Close()
 	}
 	p.Play()
+	a.publishMedia()
 	if wake != nil {
 		wake()
 	}
@@ -578,10 +581,20 @@ func (a *App) checkPlayback() {
 	}
 	a.reportedErr = err
 	a.playing = false
+	wake := a.wake
 	a.mu.Unlock()
+
+	// 歌停了（解码失败、网络断、换流换不动）。系统那边的播放状态也得跟着
+	// 变成「不在放」，否则控制中心上还是「播放中」——用户按暂停，
+	// 系统说它已经在暂停了，那一下就没反应。
+	a.publishMedia()
+	if wake != nil {
+		wake()
+	}
 
 	switch classifyOnlineError(err) {
 	case onlineErrIgnore:
+		// 切歌/退出带出来的，不是错。状态已经被 publishMedia 报成「不在放」了。
 	case onlineErrReopen:
 		// 换到了另一条流：字节偏移接不上，但**播放位置**还在原处。
 		// 从那儿重开就是「换流后从原来的位置继续」。
@@ -667,6 +680,7 @@ func (a *App) refreshOnlineNow() {
 		if want {
 			p.Play()
 		}
+		a.publishMedia()
 		if wake != nil {
 			wake()
 		}
