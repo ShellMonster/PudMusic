@@ -6,6 +6,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/egoist/mygo/ui"
 )
@@ -99,6 +100,13 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 
 // viewQualityBadge 是歌名右边那个音质徽章（「无损 FLAC」/「320K」）。
 //
+// 它同时是**换音质的入口**：点一下开菜单，五档里选一档。
+//
+// 为什么是徽章而不是另摆一个控件：播放条只有 88 高，左右两边（进度条、音量、
+// 加歌）都已经占满了，而「我在放的是哪一档」这件事用户本来就在看这行字。
+// 另摆一个下拉框就是把播放条挤坏——上一票为了塞下徽章把歌名挤成竖条，
+// 那次结构性的破坏就是从这个方向来的。
+//
 // 本地文件不画：那是文件格式（FLAC / AAC），不是「音质」——
 // 拿格式凑一个徽章会让「无损」这两个字在两个意思之间飘。
 //
@@ -108,7 +116,32 @@ func (s *Shell) viewQualityBadge(c *ui.Context, st app.State, t *ui.Theme) {
 	if st.Quality == "" {
 		return
 	}
-	ui.Text(c, st.Quality).FontSize(11).TextColor(t.TextMuted)
+	ui.Text(c, st.Quality).FontSize(11).TextColor(t.TextMuted).
+		Tooltip("音质：" + st.Quality + "（点一下换）").
+		Menu(func(m *ui.Menu) {
+			for _, q := range qualityChoices {
+				// `Checked` 是「当前选的是这一档」。选的和给的要能分开看：
+				// 降级发生的时候，用户要能看见自己选的和系统给的不是同一档。
+				if m.Item(q.Label()).
+					Checked(app.BiliToPref(q) == st.QualityPref).
+					Chosen() {
+					s.app.SetAudioQuality(q)
+				}
+			}
+		})
+}
+
+// qualityChoices 是徽章菜单里的五档。
+//
+// 顺序从「交给 B 站决定」到「省流量」，和设置里那份一致。标签取自
+// `bili.AudioQuality.Label`——那是「用户要什么」的说法，不是「B 站给了什么」
+// （后者是徽章），两者混起来就看不出有没有降级。
+var qualityChoices = []bili.AudioQuality{
+	bili.AudioAuto,
+	bili.AudioLossless,
+	bili.AudioHigh,
+	bili.AudioMedium,
+	bili.AudioLow,
 }
 
 // viewTransport 是上一首、下一首、播放/暂停。

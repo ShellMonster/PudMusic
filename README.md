@@ -23,18 +23,30 @@ go tool mygo build
 
 ## 支持哪些格式
 
-| 格式 | 谁在解 | 备注 |
+认容器的是**头几个字节**，不是扩展名——本地文件和 B 站在线流走的是同一个
+`openDecoder`（`internal/service/audio/player.go`）。
+
+| 容器 | 谁在解 | 备注 |
 |---|---|---|
-| FLAC（裸流 `.flac`） | `internal/service/audio/flacdec` | 自带解码器，已逐样本验证 |
-| FLAC（MP4 容器里的） | 同上 | B 站的 FLAC 音轨是这种 |
+| 裸 FLAC（`.flac`） | `internal/service/audio/flacdec` | 自带解码器，已逐样本验证 |
+| MP4 家族（`.m4a` / `.m4s` / `.mp4`） | `internal/service/audio/extaf` | 走 macOS AudioToolbox；**MP4 里的 FLAC 也走这里** |
+| 裸 ADTS（`.aac`） | 同上 | 没有容器，头两字节就是同步字 |
 | MP3 | `mygo/audio/mp3` | MyGo 自带 |
 | AIFF / AIFC | `internal/service/audio/aiff.go` | 本项目写的，只认未压缩的 PCM |
 | WAV | `mygo/audio` | MyGo 自带 |
 
-**AAC 留到下一阶段**（走 macOS AudioToolbox / Windows MediaFoundation）。
+注册表认不出来、而头几个字节是 `fLaC` 的，落回 `flacdec`——B 站的无损流就是
+裸 FLAC，而 MyGo 的表是对字面量做匹配的，给变长的 magic 注册不了。
 
 FLAC 解码器是 t-0017 验证过的实现，本仓库里带着它的 64 项测试和测试素材
 （`internal/service/audio/flacdec/`）。搬进来时只改了 import 路径，代码逐字未动。
+
+## 在线音质
+
+B 站在线流分两档路：**无损 FLAC**（`dash.flac`，要大会员）和**有损 AAC**
+（`dash.audio`，最高 320K）。用户选的那一档在 `internal/service/bili/quality.go`
+里翻译成 B 站的档位 id；播放条上歌名右边的徽章点一下就能换档，换完立刻按新档
+重新取流、从原来的播放位置接着播（不需要切歌，也不需要重启）。
 
 ## 怎么测
 
