@@ -164,6 +164,55 @@ func (a *App) Enqueue(items ...Item) error {
 	return a.play(item)
 }
 
+// PlayFrom 把队列换成给定的几项，并从第一首开始播。
+//
+// 这是「在列表里点了一首，从这儿听」那一条路：接进来的从第一首起，往后都是
+// 它自己的顺序。跟 Enqueue 的差在两点——Enqueue 是往队尾**追加**（点「加歌」
+// 用的），PlayFrom 是**换掉整个队列**（点「播放」用的）；后者还得马上起播，
+// 不像 Enqueue 只在队列原本是空的时候才播。
+//
+// 给空就是什么都不做，**不是清空队列**。清空是另一件事（`Queue.Reset()`），
+// 混在一起的表现是：调用方给不出东西时，用户的队列悄悄没了、正在放的那首
+// 还在响，播放条和队列对不上。
+//
+// 打头一项打不开就把队列原样换回去，错误返回：播不了的歌不该把用户原来的
+// 队列弄丢，也不该让播放条停在一首放不了的歌上（和 step 里同一个道理）。
+func (a *App) PlayFrom(items ...Item) error {
+	if len(items) == 0 {
+		return nil
+	}
+	old := a.queue.Items()
+	cur, hadCur := a.queue.Current()
+	// 给空已经在上面挡掉了，Reset 这里一定放得下（它返回的第一项就是 items[0]）。
+	item, _ := a.queue.Reset(items...)
+	if err := a.play(item); err != nil {
+		// 换回去：Reset 把 cur 落在 0，Move 把当前项挪回它原来在的位置。
+		//
+		// ⚠️ 挪之前要看找没找着：找不到时 Move(-1) 会绕到**最后**一首（Move 是
+		// 取模的），于是「换回去」变成了「跳到队尾」——比不换还糟。
+		if _, ok := a.queue.Reset(old...); ok && hadCur {
+			if j := indexOfItem(old, cur); j >= 0 {
+				a.queue.Move(j)
+			}
+		}
+		return err
+	}
+	return nil
+}
+
+// indexOfItem 是 it 在 items 里的下标，找不到是 -1。
+//
+// 按整项比：Biu 的判重标识是 {source, type, bvid, cid, sid}，路径也在结构体
+// 里，整项相等就意味着是同一首（本地项的标识就是路径，见 Item 的注释）。
+func indexOfItem(items []Item, it Item) int {
+	for i, x := range items {
+		if x == it {
+			return i
+		}
+	}
+	return -1
+}
+
 // play 放队列里的一项：先开文件，开了成功再把它的封面地址记到状态上。
 //
 // 开失败时不动封面：歌没换，还在放上一首，封面也不该跟着换。
