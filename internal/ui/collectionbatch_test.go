@@ -211,12 +211,13 @@ func TestDeletingAsksFirst(t *testing.T) {
 	if err := tt.Click("删除"); err != nil {
 		t.Fatal(err)
 	}
-	settleFrame(tt)
+	// ⚠️ 删是**后台 goroutine** 里的活儿（`startCollectionDelete` 立刻返回），
+	// 而 Tester 三帧只要几十微秒——按帧数等就是按运气等，慢机器上会偶发地红。
+	// 上面那句「取消了还是删了 N 批」也是靠这一条才有意义：真删了的话它会在
+	// 这一段等待里出现。
+	waitUntil(t, "删除那一批发出去", func() bool { return len(b.removedBatches()) == 1 })
 
 	got := b.removedBatches()
-	if len(got) != 1 {
-		t.Fatalf("删了 %d 批，want 1", len(got))
-	}
 	// 一条都不能少，而且 id 和 type 要成对（只给 id 的话 B 站删不掉任何东西
 	// **而且不报错**）。
 	if parts := strings.Split(got[0], ","); len(parts) != 2 {
