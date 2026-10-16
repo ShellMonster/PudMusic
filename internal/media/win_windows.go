@@ -95,14 +95,19 @@ var (
 	procGetDpiForWindow        = dllUser32.NewProc("GetDpiForWindow")
 	procGetSystemMetricsForDPI = dllUser32.NewProc("GetSystemMetricsForDpi")
 
-	procImageListCreate   = dllComctl.NewProc("ImageList_Create")
-	procImageListAdd      = dllComctl.NewProc("ImageList_Add")
-	procImageListSetAlpha = dllComctl.NewProc("ImageList_SetAlphaImage")
-	procImageListDestroy  = dllComctl.NewProc("ImageList_Destroy")
-	procCreateDIBSection  = dllGDI32.NewProc("CreateDIBSection")
-	procDeleteObject      = dllGDI32.NewProc("DeleteObject")
-	procCoCreateInstance  = dllOle32.NewProc("CoCreateInstance")
-	procGetSystemMetrics  = dllUser32.NewProc("GetSystemMetrics")
+	// ⚠️ 这里**没有** `ImageList_SetAlphaImage` 的声明，尽管曾经有过一个：
+	// comctl32 没有这个导出（MS 的 Image List 索引、mingw 的 commctrl.h、
+	// ReactOS/Wine 的导出表里都没有）。一个取不到的符号在 `Find()` 里是
+	// 一个 error，而 `Call` 会 panic——那一行曾经让整条缩略图按钮栏在每一台
+	// Windows 上都建不起来（`newThumbbar` 开头那个「符号取不到就 return」
+	// 的门禁）。
+	procImageListCreate  = dllComctl.NewProc("ImageList_Create")
+	procImageListAdd     = dllComctl.NewProc("ImageList_Add")
+	procImageListDestroy = dllComctl.NewProc("ImageList_Destroy")
+	procCreateDIBSection = dllGDI32.NewProc("CreateDIBSection")
+	procDeleteObject     = dllGDI32.NewProc("DeleteObject")
+	procCoCreateInstance = dllOle32.NewProc("CoCreateInstance")
+	procGetSystemMetrics = dllUser32.NewProc("GetSystemMetrics")
 )
 
 // ---- HRESULT ----

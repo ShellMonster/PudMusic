@@ -169,15 +169,15 @@ func newThumbbar(hwnd uintptr, on func(Command, time.Duration)) (*thumbbar, erro
 	t.list = list
 	// `HrInit` 必须先调一次：没调过的话后面每个 `ITaskbarList3` 方法都返回
 	// `CLASS_E_NOAGGREGATION`。
+	//
+	// ⚠️ **这里不调 `ThumbBarSetImageList`**：它也是一个 `ITaskbarList3` 方法，
+	// 而 MSDN 明写「必须先收到 `TaskbarButtonCreated` 才能调任何一个」——
+	// 早调是**空操作**，而它同样返回 S_OK。那次调用放在 `ensureAdded` 里，
+	// 和 `ThumbBarAddButtons` 待在一起（见那里的解释）。
 	if hr := comCall(list, taskbarHrInit); hresultFailed(hr) {
 		release(list)
 		procImageListDestroy.Call(images)
 		return nil, hresultError("初始化任务栏列表", hr)
-	}
-	if hr := comCall(list, taskbarThumbBarImages, hwnd, images); hresultFailed(hr) {
-		// 没有图标列表，按钮就画不出图标。**继续往下走**：图标没了还能有
-		// 三个能按的格子，比什么都没有好定位。
-		logOnce("缩略图按钮的图标列表挂不上", hresultError("ThumbBarSetImageList", hr))
 	}
 
 	// 挂上子类：之后「按钮被按」（`WM_COMMAND`）和那条注册消息都会先到我们
@@ -316,6 +316,21 @@ func (t *thumbbar) ensureAdded() {
 	}
 	t.mu.Unlock()
 
+	// ⚠️ **图标列表和按钮要一起、而且每次都一起设。**
+	//
+	// `ThumbBarSetImageList` 是 `ITaskbarList3` 的方法，而 MSDN 明写「必须先
+	// 收到 `TaskbarButtonCreated` 才能调任何一个」——早调是**空操作**，而它同样
+	// 返回 S_OK。所以它在构造期调过一次是不够的（而那一��大概率早于任务栏按钮
+	// 存在），一旦落空就是三个**永远没有图标的空格子**。
+	//
+	// 还必须**每次**重设：资源管理器重启之后任务栏按钮是被重建的，
+	// 新按钮不认旧的图标列表。这一条和「重新 Add」是同一个理由，所以它们
+	// 在同一个地方、同一次调用里做。
+	if hr := comCall(t.list, taskbarThumbBarImages, t.hwnd, t.images); hresultFailed(hr) {
+		// 没有图标列表，按钮就画不出图标。**继续往下走**：图标没了还能有
+		// 三个能按的格子，比什么都没有好定位。
+		logOnce("缩略图按钮的图标列表挂不上", hresultError("ThumbBarSetImageList", hr))
+	}
 	t.callButtons(taskbarThumbBarAdd, want)
 }
 
@@ -444,24 +459,32 @@ func buildGlyphImageList(size int) (uintptr, error) {
 			procImageListDestroy.Call(himl)
 			return 0, err
 		}
-		// `ImageList_Add` 会把像素拷进列表，所以位图可以马上放掉。
 		idx, _, _ := procImageListAdd.Call(himl, hbm, 0)
+		// ⚠️ **只有这一处放位图**（`ImageList_Add` 已经把像素拷进列表了）。
+		// 失败那一支也走同一句：两次之间没有创建任何 GDI 对象，句柄不会被
+		// 回收，所以第二次 `DeleteObject` 只是安静地失败——而一个「安静地失败」
+		// 的重复释放是最难查的那一类。
 		procDeleteObject.Call(hbm)
-		if idx == 0xFFFFFFFF {
+		// ⚠️ **判断写成 `int32(idx) == -1`**，不写 `idx == 0xFFFFFFFF`：
+		// `ImageList_Add` 返回的是 `int`，失败给 -1；而 win64 的调用约定只
+		// 保证**低 32 位**有意义，上半截是编译器留的。拿 `uintptr` 去和
+		// `0xFFFFFFFF` 比，判不判得中取决于 MSVC 有没有把 eax 零扩展到 rax
+		// ——判空了就拿着一个根本没进列表的下标继续走，而用户看到的是三个
+		// 空按钮，**日志上什么都��有**。
+		if int32(idx) == -1 {
 			procImageListDestroy.Call(himl)
 			return 0, errPlatform("图标进不了列表")
 		}
 		// alpha **不需要另外设**：`ImageList_Add` 把 32 位 DIB 的像素整个拷
 		// 进列表，连高字节那个 alpha 一起。
 		//
-		// ⚠️ 这里**曾经**多调一个 `ImageList_SetAlphaImage`——那个函数根本不存在
-		// （comctl32 没有这个导出：MS 的 Image List 索引、mingw 的 commctrl.h、
+		// ⚠️ 这里**曾经**多调一个 `ImageList_SetAlphaImage` ——那个函数根本不存在
+		//（comctl32 没有这个导出：MS 的 Image List 索引、mingw 的 commctrl.h、
 		// ReactOS/Wine 的导出表里都没有）。而 `newThumbbar` 开头有个「符号取不到
 		// 就 return」的门禁，于是它在**每一台** Windows 上都让整条按钮栏建不起来。
 		//
-		// 条件是列表必须是 `ILC_COLOR32`（上面那个 0x20）而且源位图是 32 位的
+		// 条件是列表必须是 `ILC_COLOR32`（那个 0x20）而且源位图是 32 位的
 		// BI_RGB DIB —— `glyphBitmapHandle` 两个都是。
-		procDeleteObject.Call(hbm)
 	}
 	return himl, nil
 }

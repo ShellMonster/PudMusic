@@ -280,6 +280,17 @@ func (p *windowsPlatform) unbind() {
 // 重复 add 的话系统会挂两个处理器，用户在浮窗上按一次播放**歌会跳两下**——
 // 那正是这一票要防的「一次按键切两首」的另一种样子。
 func (p *windowsPlatform) ensureEvents() {
+	// ⚠️ **全程持 `eventsMu`**：从「看一眼装上没有」到「令牌已经存好」是一段
+	// 不可分割的事。中间放开的话 `unbind` → `removeEvents` 会读到令牌 0 而
+	// 跳过摘除，于是下一次绑窗口又挂一个处理器 —— 症状是「关一次窗口再开
+	// 一次，浮窗上按一次播放**跳两下**」。
+	//
+	// 这道锁**必须和 removeEvents 那边的互为反向**，只加一边等于没加。
+	// 眼下两个调用点（`bindWindow`、`attach`）都在 UI 线程上串行，所以缺了它
+	// 也触发不了——而那正是它容易被误删的理由（注释写着、代码里没有）。
+	p.eventsMu.Lock()
+	defer p.eventsMu.Unlock()
+
 	p.mu.Lock()
 	if p.eventsUp || p.smtc == 0 || p.on == nil {
 		p.mu.Unlock()
@@ -290,7 +301,7 @@ func (p *windowsPlatform) ensureEvents() {
 	p.mu.Unlock()
 
 	// ⚠️ **令牌写在局部变量上，不直接写进 p**：系统是把 token 写进我们给的
-	// 那个地址的，而 `p.buttonToken` 同时被 removeEvents 拿着锁在读——
+	// 那个地址的，而 `p.buttonToken` 同时被 removeEvents 拿着 `p.mu` 在读——
 	// 直接写进去就是一次数据竞争，症状是「关窗口再开，偶尔摘不掉那个处理器，
 	// 于是浮窗上按一次播放跳两下」，而且只在 `-race` 下面偶尔红一次。
 	var buttonToken int64
