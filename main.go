@@ -29,6 +29,10 @@ func main() {
 	// 开窗口之前，「第一次点歌」就不会替「开窗」买单。
 	ui.MountStreaming(a, cli)
 
+	// 系统媒体会话（控制中心 / 锁屏）也必须在开窗口之前：它建的时候要注册
+	// Objective-C 的类，而注册必须在还没有 ObjC 回调在跑的时候做。
+	ui.MountMedia(a)
+
 	if err := ui.Run(a); err != nil {
 		log.Fatal(err)
 	}
