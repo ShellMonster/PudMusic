@@ -1,13 +1,16 @@
-//go:build !darwin
+//go:build (!darwin && !windows) || (windows && !amd64 && !arm64)
 
 package media
 
-// 非 macOS 的那一半：一个什么都不做的平台实现。
+// macOS 和 Windows 之外的平台：一个什么都不做的平台实现。
 //
-// 不是「以后再说」的空壳——**Windows 的 SMTC 和 Linux 的 MPRIS 走的是同一
-// 个 `platform` 接口**（写 info、接命令），加上它们只是这个文件之外的事。
-// 而这一层此刻是安全的：会话在那两个平台上就是一个哑巴，`Publish` 什么都不
-// 做、`SetHandler` 不会被调用，界面和播放一点都察觉不到。
+// Windows 那一半在 smtc_windows.go（SMTC + 任务栏缩略图按钮），macOS 那一半
+// 在 mp_darwin.go。**两个平台各占一个文件、互不引用**——它们各自要查的系统
+// 头文件没有一份是共通的，而混在一起的结果就是「改 macOS 的代码去修 Windows
+// 的 bug」这种谁也查不出来的错。
+//
+// 而这一层此刻是安全的：会话在这些平台上就是一个哑巴，`Publish` 什么都不做、
+// `SetHandler` 不会被调用，界面和播放一点都察觉不到。
 
 import "time"
 
@@ -21,11 +24,6 @@ func newPlatform(Options) (platform, error) {
 
 // errUnsupported 是「这个平台上还没有媒体会话」。
 var errUnsupported = errPlatform("这个平台上还没有系统媒体会话")
-
-// errPlatform 是「平台没做」这一类错误。
-type errPlatform string
-
-func (e errPlatform) Error() string { return "media: " + string(e) }
 
 // noPlatform 是一个什么都不做的平台。
 type noPlatform struct{}
