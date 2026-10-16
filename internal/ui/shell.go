@@ -14,6 +14,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -69,6 +70,13 @@ type Shell struct {
 
 	// images 是网络封面缓存。整个窗口共用一个。
 	images *imgcache.Cache
+
+	// home 是首页自己那一摊状态：三个 Tab 各自的列表、新歌速递那一块、切在哪个
+	// Tab。见 homepage.go。
+	//
+	// ⚠️ 建在 Shell 上而不是每帧新建：三个 `list.List` 各自记着自己的滚动位置，
+	// 新建一个等于每帧回到顶上，「切 Tab 回到原位」这条就永远不成立。
+	home *homePage
 
 	// toasts 是右下角那些提示，addToast / clearToasts 是唯一改它的地方。
 	toastMu  sync.Mutex
@@ -187,6 +195,9 @@ func New(a *app.App) *Shell {
 		autostart: systemAutoStart{},
 	}
 	s.images.AddWake(s.wake.invalidate)
+	// 首页自己那一摊要在建好之后才有（它要用封面缓存），所以接在 images 后面。
+	// 操作接在应用状态上、提示接自己的 Toast，接法见 widgets/list 的 AppActions。
+	s.home = newHomePage(s.images, list.AppActions(a, s.addToast), s.wake.invalidate)
 	s.hist = newSearchHistory("")
 	s.feed = newFeedPoller(dynamicFeedInterval, nil)
 	// pageBody 是画页面内容的那一支：404 兜底 + 已经有内容的页（设置页）+ 每条
