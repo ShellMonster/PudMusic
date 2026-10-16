@@ -101,15 +101,49 @@ const (
 	lockReadyWait = 5 * time.Second
 )
 
-// lockFile 是 unix 那把 flock 锁住的文件句柄（见 single_instance_lock_unix.go）。
+// lockFile 是那把内核锁锁住的文件句柄（unix 是 flock，Windows 是 LockFileEx）。
 //
-// 声明在共用文件里而不是 unix 那一份，是为了测试在三个平台上都编得过。Windows
-// 那边永远不设它——那边的互斥是「锁文件存在」这件事，不需要留句柄。
+// 声明在共用文件里而不是某个平台的那一份，是为了测试在三个平台上都编得过。
 var lockFile *os.File
 
-// 锁文件的两行：主人的 pid，和「socket 已经建好」的信号。
+// 🔴 **锁和 ready 信号是两个文件，不是同一个。**
 //
-// 内容长这样：
+// 这一条是被 Windows 教会的：`LockFileEx` 锁住的是一段**字节**，而持锁的进程通过
+// **另一个句柄**也读不到、写不进那一段（微软文档里写明：锁住之后，locking process
+// 也不能用第二个 handle 去访问被锁的区域）。所以一旦把两样东西放进同一个文件——
+// 锁第 0 个字节、ready 信号也写在第 0 个字节——`writeLockFile` 的 `os.WriteFile`
+// 就会失败，而那个错误是 `_ =` 吞掉的：
+//
+//	第一个实例写不进 ready → 后来者 `lockIsReady()` 永远读到 false
+//	→ 每次第二实例、每次 deep link 都白等 lockReadyWait（5 秒）才走兜底
+//	→ 而且**表面上看不出任何错**，只是「唤起这个应用要等五秒」。
+//
+// 分成两个文件之后，锁那份的内容永远没人读，ready 那份永远没人锁。
+func lockPath() string  { return lockStatePath(".instance.lock") }
+func readyPath() string { return lockStatePath(".instance.ready") }
+
+// lockStatePath 把一个状态文件名放到「这个用户的、这个应用的」目录下。
+//
+// 放应用数据目录而不是临时目录：那个目录本来就是按用户分开的
+// （`mygo.App.Path(mygo.PathUserData)` → `os.UserConfigDir()` 拼出来的），
+// 三个平台都按用户分，不用自己再拼 uid。
+func lockStatePath(name string) string {
+	dir, err := mygo.App.Path(mygo.PathUserData)
+	if err == nil {
+		return filepath.Join(dir, name)
+	}
+	// 拿不到应用数据目录（只读家目录之类）。用临时目录兜着，名字带上 uid：
+	// Linux 的 /tmp 是所有用户共用的。Windows 上没有 uid（Getuid 恒为 -1），
+	// 那边的临时目录本来就是每个用户一份。
+	if uid := os.Getuid(); uid >= 0 {
+		name = "biu-mygo-" + strconv.Itoa(uid) + "." + name
+	} else {
+		name = "biu-mygo." + name
+	}
+	return filepath.Join(os.TempDir(), name)
+}
+
+// ready 文件的内容。两行：主人的 pid，和「socket 已经建好」的信号。
 //
 //	pid=12345
 //	ready
@@ -117,70 +151,60 @@ var lockFile *os.File
 // `ready` 那一行是 **socket 建好之后**才补上的，所以「文件里有 pid」只说明
 // 「有人正在抢」，「有 ready」才说明「可以往他那里递东西了」。
 const (
-	lockFilePid   = "pid="
-	lockFileReady = "ready"
+	readyFilePid   = "pid="
+	readyFileReady = "ready"
 )
 
 // markLockReady 写下自己的 pid 和 ready：我是第一个，socket 已经建好了。
-func markLockReady() { writeLockFile(true) }
+func markLockReady() { writeReadyFile(true) }
+
+// clearLockReady 在**拿到内核锁之后**把上一次留下的 ready 抹掉。
+//
+// 为什么要抹：ready 文件是上一次运行留下来的话，后来者会以为「第一个实例已经就绪」，
+// 于是不等就去连——而那时第一个实例可能正在建 socket，连不上，它就把 socket 抢过来；
+// 紧接着第一个实例 Listen 失败、重试时连上了**它**，反过来退出。两个都没了。
+//
+// 时机也很要紧：必须在内核锁**拿到之后、框架那把锁之前**。这中间没有别人能拿到内核
+// 锁，所以不会有另一个进程看到「锁被拿了但 ready 还没抹」而误判。
+func clearLockReady() { writeReadyFile(false) }
 
 // lockIsReady 报第一个实例是不是已经可以接收转交了。
-func lockIsReady() bool { _, ready := readLockFile(); return ready }
+func lockIsReady() bool { _, ready := readReadyFile(); return ready }
 
-// writeLockFile 写锁文件。ready=false 时只写 pid。
+// writeReadyFile 写 ready 文件。withReady=false 时只写 pid（等于把上一次的 ready 抹掉）。
 //
-// 用「整个重写」而不是「追加」：ready 是一次性的事实，追加的话重试几次就会写出
-// 好几行 ready，读的那边也没法分辨是哪一个进程写的。
-func writeLockFile(ready bool) {
-	body := lockFilePid + strconv.Itoa(os.Getpid()) + "\n"
-	if ready {
-		body += lockFileReady + "\n"
+// 用「整个重写」而不是「追加」：ready 是一次性的事实，追加的话重试几次就会写出好几行
+// ready，读的那边也没法分辨是哪一个进程写的。
+func writeReadyFile(withReady bool) {
+	body := readyFilePid + strconv.Itoa(os.Getpid()) + "\n"
+	if withReady {
+		body += readyFileReady + "\n"
 	}
 	// 写坏了就写坏了：那只是让后来的实例多等一轮，超时之后照样会问框架。
-	_ = os.WriteFile(lockPath(), []byte(body), 0o644)
+	_ = os.WriteFile(readyPath(), []byte(body), 0o644)
 }
 
-// readLockFile 读锁文件里的 pid 和 ready。读不出来（文件还没建、内容被写了一半、
+// readReadyFile 读 ready 文件里的 pid 和 ready。读不出来（文件还没建、内容被写了一半、
 // 格式不认识）一律当成「什么都没有」——宁可多等一轮，不能把一次半截的写当成
 // 「有人就绪」。
-func readLockFile() (pid int, ready bool) {
-	b, err := os.ReadFile(lockPath())
+func readReadyFile() (pid int, ready bool) {
+	b, err := os.ReadFile(readyPath())
 	if err != nil {
 		return 0, false
 	}
 	for _, line := range strings.Split(string(b), "\n") {
 		line = strings.TrimSpace(line)
 		switch {
-		case line == lockFileReady:
+		case line == readyFileReady:
 			ready = true
-		case strings.HasPrefix(line, lockFilePid):
-			pid, _ = strconv.Atoi(strings.TrimPrefix(line, lockFilePid))
+		case strings.HasPrefix(line, readyFilePid):
+			pid, _ = strconv.Atoi(strings.TrimPrefix(line, readyFilePid))
 		}
 	}
 	if pid <= 0 {
 		return 0, false
 	}
 	return pid, ready
-}
-
-// lockPath 是那把内核锁锁在哪个文件上。
-//
-// 放在应用数据目录而不是临时目录：那个目录本来就是「按用户分开」的
-// （`mygo.App.Path(mygo.PathUserData)` → `os.UserConfigDir()` 拼出来的），
-// 三个平台都按用户分，不用自己再拼 uid。
-func lockPath() string {
-	dir, err := mygo.App.Path(mygo.PathUserData)
-	if err == nil {
-		return filepath.Join(dir, ".instance.lock")
-	}
-	// 拿不到应用数据目录（只读家目录之类）。用临时目录兜着，名字带上 uid：
-	// Linux 的 /tmp 是所有用户共用的。Windows 上没有 uid（Getuid 恒为 -1），
-	// 那边的临时目录本来就是每个用户一份。
-	name := "biu-mygo.lock"
-	if uid := os.Getuid(); uid >= 0 {
-		name = "biu-mygo-" + strconv.Itoa(uid) + ".lock"
-	}
-	return filepath.Join(os.TempDir(), name)
 }
 
 // RegisterScheme 注册 URLScheme，让 `biu://…` 找得到这个应用。

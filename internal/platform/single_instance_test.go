@@ -526,3 +526,105 @@ func TestLockExclusiveIsExclusive(t *testing.T) {
 		t.Fatalf("持锁的进程已经退出，第三个还是拿不到锁（%q）：锁没有跟着进程走", got)
 	}
 }
+
+// TestTheReadySignalIsNotInsideTheLockedFile 钉住「锁和 ready 信号不能是同一个
+// 文件」。
+//
+// 上一轮 review 抓到的问题：Windows 上 `LockFileEx` 锁住的是一段**字节**，持锁的
+// 进程通过**另一个句柄**也读写不进那一段（微软文档写明）。而当时锁的是
+// `.instance.lock` 的第 0 个字节，ready 信号也写在同一个文件的第 0 个字节——于是
+// `writeLockFile` 的 `os.WriteFile` 失败，错误被 `_ =` 吞掉，ready 永远不可见，
+// 每个第二实例、每次 deep link 都白等 `lockReadyWait`（5 秒）才走兜底。
+//
+// 这条断言在**每个平台**上都成立，而且直接就是那次的教训：谁把两样东西又塞回一个
+// 文件里，这条立刻红。
+func TestTheReadySignalIsNotInsideTheLockedFile(t *testing.T) {
+	if lockPath() == readyPath() {
+		t.Fatalf("锁和 ready 信号用的是同一个文件（%s）：Windows 上 LockFileEx 锁住的"+
+			"字节段连持锁进程自己都访问不到，ready 永远写不进去", lockPath())
+	}
+}
+
+// TestTheReadySignalSurvivesTheHeldLock 验拿着锁的时候 ready 写得进去、读得回来。
+//
+// 这是上一轮那条的具体化：锁已经在手上（`lockExclusive` 返回 true），再
+// `markLockReady()`，然后立刻 `lockIsReady()`。在 Windows 上，如果 ready 和锁在
+// 同一个文件，这一步的读会拿到 false——而那次它是被吞掉的错误，谁也看不见。
+func TestTheReadySignalSurvivesTheHeldLock(t *testing.T) {
+	isolateLockDir(t)
+	releaseTestLock()
+
+	if !lockExclusive() {
+		t.Fatal("拿不到内核锁，这条验不了")
+	}
+	t.Cleanup(releaseTestLock)
+
+	// 刚拿到锁时：上一个进程留下的 ready 必须已经被抹掉。
+	clearLockReady()
+	if lockIsReady() {
+		t.Error("拿到锁之后上一个进程留下的 ready 还在：后来者会以为第一个实例已就绪，" +
+			"去抢一个还不存在的 socket")
+	}
+
+	markLockReady()
+	if !lockIsReady() {
+		pid, _ := readReadyFile()
+		t.Fatalf("**持着锁**的时候 ready 信号读不回来（文件里读到 pid=%d）："+
+			"锁住的那段字节和 ready 的内容重叠了。Windows 上 LockFileEx 会让持锁进程"+
+			"通过第二个句柄也访问不到那一段", pid)
+	}
+}
+
+// TestALateStarterDoesNotWaitForTheTimeout 验后来的实例**立刻**就绪，不等兜底。
+//
+// 这一条盯的是「每次第二实例固定等 5 秒」那个现象：`Lock()` 里等 ready 的上限是
+// `lockReadyWait`，拿不到就白等那么多。真机上的代价是「唤起这个应用要等五秒」，
+// 而且日志里一句错都没有。
+//
+// 所以这里量的是**时间**：第一个实例已经写好 ready 之后，后来者必须在 1 秒内被放行。
+// 1 秒是 `lockPollEvery` 的六十多倍，正常路径一次轮询就该读到。
+func TestALateStarterDoesNotWaitForTheTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("这条要两个进程各走一段 Lock（第一个还要真的建框架的 socket），" +
+			"在 Windows 上要等真机；Windows 那份 ready 读写由上面两条同进程地兜住")
+	}
+	isolateLockDir(t)
+	releaseTestLock()
+
+	dir := t.TempDir()
+	pa := filepath.Join(dir, "pa")
+	var outA bytes.Buffer
+	a := helperCmdStay(pa, &outA, true)
+	if err := a.Start(); err != nil {
+		skipIfNoSpawn(t, err)
+		t.Fatalf("起不来子进程：%v", err)
+	}
+	defer func() {
+		if a.Process != nil {
+			_ = a.Process.Kill()
+		}
+		_ = a.Wait()
+	}()
+	waitAnswerIs(t, pa, "first") // 它已经建好 socket、写好 ready 了
+
+	// 现在起第二个：它走「等 ready → 连上去转交 → 退出」那条路。
+	pb := filepath.Join(dir, "pb")
+	var outB bytes.Buffer
+	start := time.Now()
+	b := helperCmd(pb, &outB)
+	if err := b.Run(); err != nil {
+		t.Fatalf("第二个实例没跑完：%v\n%s", err, outB.String())
+	}
+	elapsed := time.Since(start)
+
+	if got := readAnswer(t, pb); got != "second" {
+		t.Fatalf("第二个实例拿到 %q，want second", got)
+	}
+	// 阈值取**超时的一半**，不是某个固定的小数：再慢也不该慢到兜底那一档。
+	// 写死 1 秒会在 -race 下误报（竞态检测器把子进程启动拖慢好几倍——实测
+	// 满负载时一次要 1.2 秒），而 5 秒那次是真的。
+	if half := lockReadyWait / 2; elapsed > half {
+		t.Errorf("第二个实例花了 %v 才转交完（上限 %v，超时兜底是 %v）："+
+			"ready 信号多半读不到，后来者只能白等到兜底", elapsed, half, lockReadyWait)
+	}
+}

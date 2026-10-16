@@ -76,9 +76,10 @@ func lockExclusive() bool {
 	switch {
 	case r != 0:
 		lockFile = f
-		// 只写 pid，不写 ready：ready 的意思是「socket 建好了」，那要等到
-		// Lock 里调完框架那把锁之后才补上（见 markLockReady）。
-		writeLockFile(false)
+		// 拿到锁就先抹掉上一次留下的 ready（见 clearLockReady 的注释：留着它
+		// 会让后来者以为第一个实例已经就绪，白白去抢它的 socket）。
+		// 这一步必须在框架那把锁**之前**：这中间没有别人能拿到内核锁。
+		clearLockReady()
 		return true
 	case errors.Is(callErr, errorLockViolation):
 		_ = f.Close()
