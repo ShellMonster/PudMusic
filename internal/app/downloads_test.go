@@ -200,8 +200,6 @@ func TestTheQueueIsSavedOnQuitAndRestoredOnStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 等到真的有东西下下来再退出（这一段用 fixture 的普通 CDN 就够，
-	// 断的只是「进度报出来了没有」）。
 	waitFor(t, 20*time.Second, "开始下", func() bool {
 		return len(a1.DownloadSnapshots()) > 0
 	})
@@ -211,20 +209,32 @@ func TestTheQueueIsSavedOnQuitAndRestoredOnStart(t *testing.T) {
 	if _, err := os.Stat(queueFile); err != nil {
 		t.Fatalf("队列文件没落盘：%v", err)
 	}
+	before, _ := a1.DownloadSnapshot(snap.ID)
 	a1.Close()
 
-	// 第二段：重开。队列读回来了，而且**是暂停的**——重开那一刻没有
-	// 那个在飞的 HTTP 请求，记成 running 会让界面上永远转圈。
+	// 第二段：重开。队列读回来了。
 	a2 := newDownloadApp(t, f, dir, queueFile)
 	got := a2.DownloadSnapshots()
 	if len(got) != 1 || got[0].ID != snap.ID {
 		t.Fatalf("重开后队列是 %+v", got)
 	}
-	if got[0].Status != download.StatusPaused {
-		t.Fatalf("恢复出来的状态是 %q，要的是暂停", got[0].Status)
+	if got[0].Title != "半首" || got[0].Dest != before.Dest {
+		t.Fatalf("恢复出来的是 %+v，退出前是 %+v", got[0], before)
 	}
-	if got[0].Title != "半首" {
-		t.Fatalf("歌名没恢复：%q", got[0].Title)
+
+	// 状态按「退出那一刻它在干什么」还原：下完了还是下完，出错了还是
+	// 出错，只有**在飞的**那些变成暂停（重开那一刻那个 HTTP 请求早就不
+	// 存在了，记成 running 会让界面上永远转圈）。
+	switch before.Status {
+	case download.StatusRunning, download.StatusQueued:
+		if got[0].Status != download.StatusPaused {
+			t.Fatalf("在飞的恢复成 %q，要的是暂停", got[0].Status)
+		}
+	default:
+		if got[0].Status != before.Status {
+			t.Fatalf("恢复出来是 %q，退出前是 %q —— 下完了就该还是下完",
+				got[0].Status, before.Status)
+		}
 	}
 }
 
