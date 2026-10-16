@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 )
@@ -38,41 +39,129 @@ const URLScheme = "biu"
 // 后台**当一个没有窗口的僵尸进程，那在用户的任务栏/活动监视器里就是一个怎么点都
 // 没反应、只能强杀的应用。
 //
-// ## 为什么在框架那把锁之外还要自己拿一把
+// ## 两把锁的分工，以及为什么是这个顺序
 //
-// 框架那把锁（`mygo/single_instance.go`）抢得到的时候是好用的：后一个实例 Dial
-// 连上第一个、把手里的命令行递过去、拿到 false、退出。**但两个实例真正同时启动
-// 时，它会对两个都返回 true。**
+// 框架那把锁（`mygo/single_instance.go`）管的是「第二个实例把 biu:// 递过来」。
+// 但它**挡不住两个实例真正同时启动**：谁都还没建好 socket，两个进程 Dial 都失败；
+// 接着两个都 `os.Remove(path)`——后到的把先到的刚建出来的 socket 文件删了；然后
+// 两个 `net.Listen(path)` 都成功（路径已经空出来，inode 不同），两个都返回 true。
+// 实测 20 轮里 17 轮两边都拿到。
 //
-// 原因在它的循环里：谁都还没建好 socket，于是两个进程 Dial 都失败；接着两个都
-// `os.Remove(path)`——后到的那个把先到的刚建出来的 socket 文件删了；然后两个
-// `net.Listen(path)` 都成功（路径已经空出来，inode 不同），两个都认为自己拿到
-// 了锁。实测（`TestLockRacesTwoFreshProcesses`，两个进程同一瞬间启动，20 轮）
-// **17 轮两边都拿到**。
+// 更麻烦的是上面那个 `os.Remove`：它不只让两个都自称第一个，还会让**活下来的那个
+// 失去 socket**——它的 socket 文件被另一个进程删了、那个进程又建了个新的然后退出，
+// 于是之后每一个新实例都连不上它，deep link 再也递不进来（实测 40/40 轮）。
 //
-// 现象是用户把程序坞图标连点两下，就有两个 Biu MyGo 同时起来，两个播放列表、
-// 两个进度条。这条验收就是防它的，所以上面再压一把**内核给的独占锁**：同一个
-// 文件上 flock，同时来的进程里内核只认一个。框架那把锁继续管「第二个实例把
-// biu:// 递过来」那件事，两层分工不重叠。
+// 所以顺序是：**先内核锁（谁说了算），再框架锁（递命令行的通道）**，中间隔一个
+// 「我准备好了」的信号：
 //
-// 上游修好这个竞态之后，这层可以整个删掉——`TestLockRacesTwoFreshProcesses`
-// 会一直是绿的。
+//  1. 抢到内核锁的那个就是第一个。它先建 socket，再把 `ready` 写进锁文件。
+//  2. 没抢到的**先等那个信号**，等到了才去调框架那把锁——这时 socket 一定在，
+//     连得上、递得进去，自己退出。
+//
+// 「先等信号」这一条是整件事的关键：不等的话，没抢到内核锁的那个会趁第一个还没
+// 建 socket 就把它的 socket 文件删掉、自己建一个，第一个紧接着 Listen 失败、
+// 重试时连上了**它**，反过来退出——两个都没了。
 func Lock() bool {
-	// 第一层，框架那把：抢不到就说明确实已经有一个在跑，它会把我们的命令行
-	// 接过去。抢到了也不作数，见下面。
-	first := mygo.App.RequestSingleInstanceLock()
-	if !first {
-		return false
+	deadline := time.Now().Add(lockReadyWait)
+	for {
+		// 一、谁说了算：内核锁。同时来的进程里内核只认一个。
+		if lockExclusive() {
+			// 建 socket（此刻没有别人跟我抢），再告诉后来者「可以递了」。
+			first := mygo.App.RequestSingleInstanceLock()
+			markLockReady()
+			return first
+		}
+
+		// 二、别人占着：等它的 socket 建好。
+		if lockIsReady() {
+			// 连上去，把命令行（含 biu://）递过去，返回值必然是 false。
+			mygo.App.RequestSingleInstanceLock()
+			return false
+		}
+
+		// 三、它还没就绪（刚起来），或者它已经死了（内核锁被内核放回去了，
+		// 下一轮就能抢到）。两种都再等一会儿重来。
+		if time.Now().After(deadline) {
+			// 兜底：等太久了，别让用户点图标没反应。直接问框架——有人在就递过去，
+			// 没有人就当自己是第一个（这一刻内核锁不在我们手上，属于极窄的降级）。
+			return mygo.App.RequestSingleInstanceLock()
+		}
+		time.Sleep(lockPollEvery)
 	}
-	// 第二层，内核那把。同时启动的两个进程里只有一个拿得到。
-	return lockExclusive()
 }
+
+// 等「第一个实例就绪」的两个参数。
+//
+// 轮询要密：一个正常跑着的第一个实例，它那一行 `ready` 早就写好了，所以常见的
+// 情况是**第一次读就读到、一次都不睡**。只有真的撞上同时启动才会等，而那一次
+// 等的是另一个进程建 socket 的时间——微秒级。5 秒的上限只是防「等一个永远不会
+// 就绪的实例」，用户的图标不该点下去之后毫无反应。
+const (
+	lockPollEvery = 15 * time.Millisecond
+	lockReadyWait = 5 * time.Second
+)
 
 // lockFile 是 unix 那把 flock 锁住的文件句柄（见 single_instance_lock_unix.go）。
 //
 // 声明在共用文件里而不是 unix 那一份，是为了测试在三个平台上都编得过。Windows
 // 那边永远不设它——那边的互斥是「锁文件存在」这件事，不需要留句柄。
 var lockFile *os.File
+
+// 锁文件的两行：主人的 pid，和「socket 已经建好」的信号。
+//
+// 内容长这样：
+//
+//	pid=12345
+//	ready
+//
+// `ready` 那一行是 **socket 建好之后**才补上的，所以「文件里有 pid」只说明
+// 「有人正在抢」，「有 ready」才说明「可以往他那里递东西了」。
+const (
+	lockFilePid   = "pid="
+	lockFileReady = "ready"
+)
+
+// markLockReady 写下自己的 pid 和 ready：我是第一个，socket 已经建好了。
+func markLockReady() { writeLockFile(true) }
+
+// lockIsReady 报第一个实例是不是已经可以接收转交了。
+func lockIsReady() bool { _, ready := readLockFile(); return ready }
+
+// writeLockFile 写锁文件。ready=false 时只写 pid。
+//
+// 用「整个重写」而不是「追加」：ready 是一次性的事实，追加的话重试几次就会写出
+// 好几行 ready，读的那边也没法分辨是哪一个进程写的。
+func writeLockFile(ready bool) {
+	body := lockFilePid + strconv.Itoa(os.Getpid()) + "\n"
+	if ready {
+		body += lockFileReady + "\n"
+	}
+	// 写坏了就写坏了：那只是让后来的实例多等一轮，超时之后照样会问框架。
+	_ = os.WriteFile(lockPath(), []byte(body), 0o644)
+}
+
+// readLockFile 读锁文件里的 pid 和 ready。读不出来（文件还没建、内容被写了一半、
+// 格式不认识）一律当成「什么都没有」——宁可多等一轮，不能把一次半截的写当成
+// 「有人就绪」。
+func readLockFile() (pid int, ready bool) {
+	b, err := os.ReadFile(lockPath())
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case line == lockFileReady:
+			ready = true
+		case strings.HasPrefix(line, lockFilePid):
+			pid, _ = strconv.Atoi(strings.TrimPrefix(line, lockFilePid))
+		}
+	}
+	if pid <= 0 {
+		return 0, false
+	}
+	return pid, ready
+}
 
 // lockPath 是那把内核锁锁在哪个文件上。
 //

@@ -81,6 +81,22 @@ type Shell struct {
 
 	// autostart 是「开机自启在系统上的那一份」，见 lifecycle.go 里的说明。
 	autostart autoStartService
+
+	// closeOption 是最近一次从设置里读到的「关闭窗口时怎么办」。
+	//
+	// ⚠️ 缓存是因为关窗口时的先后顺序：OnClosed 里会调 CloseSettings，那会把
+	// 设置的挂载摘掉；之后 `SettingsSnapshot()` 返回的是 DefaultSettings("")
+	// 而不是用户的设置（默认 hide）。而「窗口全关」那个回调恰好跑在 OnClosed
+	// 之后，于是现去问设置只会读到默认值，选了「直接退出」的用户点了关闭进程
+	// 却不退出。缓存绕开这个顺序，见 installLifecycle 里的注释。
+	closeOption app.CloseWindowOption
+
+	// tray 是通知区域的图标（**只在 Windows / Linux 上有**，macOS 不建托盘，
+	// 见 platform.TraySupported）。nil 表示这个平台没有托盘，或者建失败了。
+	//
+	// 句柄留着是为了不让它被回收：托盘图标的生命周期挂在它上面，GC 收走之后
+	// 通知区域里那一个格子就没了，而界面这边看不出任何异样（见 tray.go）。
+	tray *mygo.Tray
 }
 
 // New 建一个窗口外壳，绑在状态 a 上。
@@ -117,6 +133,9 @@ func (s *Shell) Attach(w *mygo.Window) {
 
 	w.OnClose(func(e *mygo.CloseEvent) {
 		opt := s.app.SettingsSnapshot().CloseWindowOption
+		// 记一份：OnClosed 会把设置的挂载摘掉，之后再问就只剩默认值了（见
+		// installLifecycle 里 OnWindowAllClosed 那段的注释）。
+		s.closeOption = opt
 		if planWindowClose(s.quitting, opt) != closeToBackground {
 			return
 		}
@@ -172,6 +191,10 @@ func Run(a *app.App) error {
 			log.Printf("biu: 登记 %s:// 失败，从别的程序点这个链接不一定唤得起本应用：%v",
 				platform.URLScheme, err)
 		}
+		// 托盘也在这儿建：框架建托盘要过事件循环（NewTray 在没 ready 时 panic）。
+		// 托盘要在开窗口**之前**建：用户从托盘点「显示/隐藏」时窗口已经在那里，
+		// 顺序反了的话头几秒点托盘是没有反应的。
+		s.installTray()
 		s.syncAutoStart()
 		s.openWindow()
 	})

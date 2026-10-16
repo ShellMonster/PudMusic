@@ -62,6 +62,7 @@ func TestSettingsPageShowsItsContent(t *testing.T) {
 		"设置", "外观", "主题", "圆角",
 		"跟随系统", "浅色", "深色",
 		"系统", "窗口关闭", "隐藏到托盘", "直接退出",
+		"开机自启",
 	} {
 		if !tt.HasText(want) {
 			t.Errorf("设置页上没有 %q，文字有 %q", want, tt.Texts())
@@ -70,10 +71,10 @@ func TestSettingsPageShowsItsContent(t *testing.T) {
 	if tt.HasText("这一页还没做") {
 		t.Errorf("设置页还在说「还没做」，文字有 %q", tt.Texts())
 	}
-	// 「隐藏到托盘」这一档托盘还没做（issue #28），得说出来：一个点了没反应的
-	// 选项比没有更让人困惑。
-	if !tt.HasText("托盘还没做") {
-		t.Errorf("没说清托盘还没做，文字有 %q", tt.Texts())
+	// macOS 上不建托盘（与 Biu 一致），「隐藏到托盘」在这边是收进程序坞。名字和
+	// 实际行为对不上时得说出来，否则用户会以为我们漏做了托盘。
+	if !tt.HasText("macOS 上不建托盘图标") {
+		t.Errorf("没说清 macOS 上没有托盘，文字有 %q", tt.Texts())
 	}
 }
 
@@ -334,5 +335,48 @@ func runPageChild(t *testing.T, path, mode string) {
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("子进程 %s 失败了：%v\n%s", mode, err, out)
+	}
+}
+
+// TestTheAutoStartSwitchIsOnThePage 验开机自启有控件可点。
+//
+// 这一条单独立出来，是因为它的失败方式最阴：设置页照样画得出来、其它三项照样
+// 点得动，只是「开机自启」那一行根本不存在——用户界面上没有任何地方能开它，
+// 而 `Shell.SetAutoStart` 只有一个测试在调，生产代码里没有第二个调用者。
+func TestTheAutoStartSwitchIsOnThePage(t *testing.T) {
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+
+	if !tt.HasText("开机自启") {
+		t.Fatalf("设置页上没有「开机自启」这一行，文字有 %q", tt.Texts())
+	}
+	if !tt.HasText("系统登录后自动启动应用") {
+		t.Errorf("「开机自启」没有说明，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTogglingAutoStartGoesThroughTheSystem 验开关是**真的**在动系统。
+//
+// 这条盯的是「写设置」和「动系统」的顺序：反了会留下「设置说开、系统说关」，
+// 而启动时的对齐（`syncAutoStart`）恰好只补这一种——于是用户下次开机发现根本没
+// 自启，界面上那个开关却还亮着。
+//
+// 系统那一份在这里是替掉的（`autoStartService`，见 lifecycle.go）：真的那一份
+// 要过事件循环，无头环境里没有。
+func TestTogglingAutoStartGoesThroughTheSystem(t *testing.T) {
+	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	fake := &fakeAutoStart{}
+	s.autostart = fake
+
+	if err := s.SetAutoStart(true); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.calls) != 1 || !fake.calls[0] {
+		t.Fatalf("系统那边被调了 %v，want 一次 set(true)", fake.calls)
+	}
+
+	// 页面上那个开关要跟着设置走：改了设置、下一帧就该是亮的。
+	tt.Frame()
+	if !s.app.SettingsSnapshot().AutoStart {
+		t.Error("设置里没存上开机自启")
 	}
 }

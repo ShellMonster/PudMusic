@@ -52,11 +52,17 @@ func (s *Shell) installLifecycle() {
 	//
 	// 但设置说「关掉就退出」的时候不能这样。那一条就是用户要的退出，不放行
 	// 就变成了「进程活着但什么都没有，用户只能强杀」。
+	//
+	// ⚠️ 这里读的是 **closeOption 那份缓存**，不是现去问设置。现去问会读到错的
+	// 值：窗口真关掉时 OnClosed 已经调过 `CloseSettings`，把设置的挂载摘掉了，
+	// 那一刻 `SettingsSnapshot()` 返回的不是用户的设置、是 `DefaultSettings("")`
+	// 也就是 hide。于是选了「直接退出」的用户点关闭 → 窗口没了、进程还在，
+	// 而界面上那个设置还亮着（issue #28 验收第 1 条就是这么红的）。
+	// 缓存就绕开了这个先后顺序：OnClose 每关一次窗口都会读一次（那会儿挂载还在）。
 	mygo.App.OnWindowAllClosed(func() {
-		if s.app.SettingsSnapshot().CloseWindowOption == app.CloseWindowHide {
-			return
+		if s.closeOption == app.CloseWindowExit {
+			mygo.App.Quit()
 		}
-		mygo.App.Quit()
 	})
 
 	// 第二个实例来了。它转交过来的命令行里要是有 biu://…，框架自己会投给

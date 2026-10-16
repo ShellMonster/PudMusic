@@ -35,6 +35,9 @@ func lockExclusive() bool {
 	switch {
 	case err == nil:
 		lockFile = f
+		// 只写 pid，不写 ready：ready 的意思是「socket 建好了」，那要等到
+		// Lock 里调完框架那把锁之后才补上（见 markLockReady）。
+		writeLockFile(false)
 		return true
 	case errors.Is(err, syscall.EWOULDBLOCK), errors.Is(err, syscall.EAGAIN):
 		// 有人在用。Linux 上 flock 返回 EWOULDBLOCK，Darwin 上是 EAGAIN，

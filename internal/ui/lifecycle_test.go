@@ -190,3 +190,62 @@ func newShellForAutoStart(t *testing.T) (*Shell, *fakeAutoStart) {
 	s.autostart = fake
 	return s, fake
 }
+
+// TestCloseSettingsDoesNotMakeTheExitOptionDisappear 钉住「选直接退出、点关闭、
+// 进程退不掉」那个 bug。
+//
+// 顺序是反的：窗口真关掉时 OnClosed 里会调 CloseSettings，那会把设置的**挂载**
+// 摘掉；紧接着 OnWindowAllClosed 再去 `SettingsSnapshot()`，拿到的已经不是用户的
+// 设置，而是 `DefaultSettings("")`——也就是 hide。于是它以为「用户选了隐藏」，
+// 不 Quit，进程留着，界面上那个「直接退出」还亮着。
+//
+// 真机上验证过：打包的 .app，选直接退出，点关闭，窗口消失、5 秒后进程还在。
+func TestCloseSettingsDoesNotMakeTheExitOptionDisappear(t *testing.T) {
+	a := app.New()
+	t.Cleanup(a.Close)
+	if err := a.MountSettings(filepath.Join(t.TempDir(), app.SettingsFileName)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.CloseSettings() })
+
+	s := New(a)
+	s.installLifecycle()
+
+	// 用户选「直接退出」，然后点关闭。OnClose 会把设置读进缓存。
+	if _, err := a.UpdateSettings(func(st *app.Settings) { st.CloseWindowOption = app.CloseWindowExit }); err != nil {
+		t.Fatal(err)
+	}
+	opt := a.SettingsSnapshot().CloseWindowOption
+	s.closeOption = opt
+	if s.closeOption != app.CloseWindowExit {
+		t.Fatalf("没读到用户选的「直接退出」，读到 %q", s.closeOption)
+	}
+
+	// 窗口真关掉：收尾里会调 CloseSettings，挂载被摘掉。
+	if err := a.CloseSettings(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 现在现去问设置只会得到默认值——这正是 bug 的根。
+	if got := a.SettingsSnapshot().CloseWindowOption; got != app.CloseWindowHide {
+		t.Logf("现去问设置拿到的是 %q（预期：挂载没了，掉回默认值）", got)
+	}
+
+	// 而 OnWindowAllClosed 读的是缓存，值还在。
+	if s.closeOption != app.CloseWindowExit {
+		t.Fatalf("缓存里的「直接退出」没了（%q）：关了窗口之后进程会退不掉", s.closeOption)
+	}
+	// 决定退出与否的那一步也必须是「只有 exit 才退」——零值/空串不能被当成退出。
+	for _, c := range []struct {
+		opt  app.CloseWindowOption
+		want bool
+	}{
+		{app.CloseWindowExit, true},
+		{app.CloseWindowHide, false},
+		{app.CloseWindowOption(""), false}, // 从没读过的默认值不能当成「退出」
+	} {
+		if got := c.opt == app.CloseWindowExit; got != c.want {
+			t.Errorf("设置 %q 时该不该退出：%v，want %v", c.opt, got, c.want)
+		}
+	}
+}

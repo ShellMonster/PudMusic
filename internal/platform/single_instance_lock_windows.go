@@ -23,10 +23,7 @@ package platform
 
 import (
 	"errors"
-	"fmt"
 	"os"
-	"strconv"
-	"strings"
 )
 
 // lockExclusive 拿那把独占锁。拿到返回 true，拿不到（别人拿着）返回 false。
@@ -38,8 +35,10 @@ func lockExclusive() bool {
 	for attempt := 0; attempt < 3; attempt++ {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o644)
 		if err == nil {
-			fmt.Fprintf(f, "%d\n", os.Getpid())
 			_ = f.Close()
+			// 只写 pid，不写 ready：ready 的意思是「socket 建好了」，那要等到
+			// Lock 里调完框架那把锁之后才补上（见 markLockReady）。
+			writeLockFile(false)
 			return true
 		}
 		if !errors.Is(err, os.ErrExist) {
@@ -48,7 +47,7 @@ func lockExclusive() bool {
 			// 「不是同时启动」的重复启动。
 			return true
 		}
-		if !lockHolderAlive(path) {
+		if !lockHolderAlive() {
 			// 上一次的主人已经不在了，清掉这份陈旧锁再来一轮。
 			_ = os.Remove(path)
 			continue
@@ -58,14 +57,10 @@ func lockExclusive() bool {
 	return false
 }
 
-// lockHolderAlive 报写 path 的那个进程还在不在。
-func lockHolderAlive(path string) bool {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return false // 读不到就当它没了（被清掉了，或者权限不够——后者少见得多）
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
-	if err != nil || pid <= 0 {
+// lockHolderAlive 报锁文件里那个进程还在不在。
+func lockHolderAlive() bool {
+	pid, _ := readLockFile()
+	if pid <= 0 {
 		return false
 	}
 	// Windows 上 os.FindProcess 内部是 OpenProcess，进程没了它会报错。

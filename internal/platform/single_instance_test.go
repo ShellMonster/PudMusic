@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -83,11 +84,15 @@ const lockAnswerEnv = "BIU_TEST_LOCK_ANSWER"
 // 毫秒就完了。这个上限只是防挂死，不是给人等的。
 const lockChildTimeout = 15 * time.Second
 
-// TestLockHelper 只是给下面两条测试当子进程用的，回答一个问题：锁拿到了没有。
+// lockStayEnv 设成 "1" 时，子进程写完答案**不退出**。
+// 用来当那个「活下来的第一个实例」，后面还要拿它验还能不能接收转交。
+const lockStayEnv = "BIU_TEST_LOCK_STAY"
+
+// TestLockHelper 只是给下面三条测试当子进程用的，回答一个问题：锁拿到了没有。
 func TestLockHelper(t *testing.T) {
 	path := os.Getenv(lockAnswerEnv)
 	if path == "" {
-		t.Skip("只有被下面两条测试当子进程拉起来时才有事做")
+		t.Skip("只有被下面几条测试当子进程拉起来时才有事做")
 	}
 	got := "second"
 	if Lock() {
@@ -96,16 +101,41 @@ func TestLockHelper(t *testing.T) {
 	if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
 		os.Exit(1)
 	}
+	if os.Getenv(lockStayEnv) == "1" {
+		// 睡而不是 select{}：select{} 在所有 goroutine 都闲着时会被运行时
+		// 判成死锁直接把进程干掉，这里要的是一个安静活着的进程。
+		time.Sleep(5 * time.Minute)
+	}
 }
 
 // isolateLockDir 把「应用数据目录」指到临时目录，别让测试在用户真的
 // ~/Library/Application Support 下面建锁文件。
+// isolateLockDir 把这个测试和它的子进程关进一个自己的家目录：应用的设置、
+// 我们那把内核锁、以及框架那把 socket 锁，全都落在这个目录下面。
+//
+// ⚠️ 这个目录必须**短**。框架的 socket 路径是 `filepath.Join(dir, 文件名)`，
+// unix socket 路径上限约 100 字节，超了它就退到 `/tmp`——于是所有测试、所有
+// 跑次又撞回同一个 socket 上（`t.TempDir()` 在 macOS 上是
+// `/var/folders/…/T/测试名…/001`，两下就超）。退回去之后的症状很阴险：上一条
+// 测试的子进程刚被 Wait 回收，socket 文件还在（框架是在 App.OnQuit 里删的，
+// 测试进程走不到那儿），下一个测试的子进程 Dial 上去拿到 false，于是报出来的是
+// 「两个进程都没拿到锁」这种跟真实原因八竿子打不着的错，时好时坏。
 func isolateLockDir(t *testing.T) {
 	t.Helper()
-	dir := t.TempDir()
-	t.Setenv("HOME", dir)            // darwin
-	t.Setenv("XDG_CONFIG_HOME", dir) // linux
-	t.Setenv("APPDATA", dir)         // windows
+	dir, err := os.MkdirTemp("/tmp", "biulock")
+	if err != nil {
+		// 退一步用 t.TempDir()：隔离差一点（socket 可能共用），也比让测试
+		// 直接失败好。真走到这一步说明 /tmp 不可写，那本身就该有人看见。
+		dir = t.TempDir()
+		t.Logf("用不了 /tmp，退回 t.TempDir()（socket 路径可能不再互相隔离）：%v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	t.Setenv("HOME", dir)            // darwin：应用数据目录
+	t.Setenv("XDG_CONFIG_HOME", dir) // linux：同上
+	t.Setenv("APPDATA", dir)         // windows：同上
+	t.Setenv("TMPDIR", dir)          // os.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", dir) // 框架的 socket 优先落这儿
 }
 
 // releaseTestLock 放掉本进程手上那把内核锁。
@@ -126,11 +156,38 @@ func releaseTestLock() {
 // 管不了管道。WaitDelay 再兜一道底。这两条测试挂死的代价，比它们验的那件事
 // 本身还大（整个 `go test ./...` 跟着挂）。
 func helperCmd(file string, sink *bytes.Buffer) *exec.Cmd {
+	return helperCmdStay(file, sink, false)
+}
+
+// helperCmdStay 造子进程；stay=true 时它写完答案不退出（当那个「活着的第一个
+// 实例」用）。
+func helperCmdStay(file string, sink *bytes.Buffer, stay bool) *exec.Cmd {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestLockHelper$")
 	cmd.Env = append(os.Environ(), lockAnswerEnv+"="+file)
+	if stay {
+		cmd.Env = append(cmd.Env, lockStayEnv+"=1")
+	}
 	cmd.Stdout, cmd.Stderr = sink, sink
 	cmd.WaitDelay = lockChildTimeout
 	return cmd
+}
+
+// waitAnswer 等子进程把答案写出来。
+//
+// 必须等，不能假定 Start 之后答案就在：两个进程在抢内核锁，那个抢到的还要再去
+// 建 socket 才会写 ready，几十毫秒很正常。
+func waitAnswer(t *testing.T, file string) string {
+	t.Helper()
+	deadline := time.Now().Add(lockChildTimeout)
+	for {
+		if b, err := os.ReadFile(file); err == nil && len(bytes.TrimSpace(b)) > 0 {
+			return strings.TrimSpace(string(b))
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("等了 %v，子进程一直没写答案（%s）", lockChildTimeout, file)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 // skipIfNoSpawn 在「环境根本不让起进程」时跳过而不是失败——那种沙箱里这条
@@ -220,26 +277,31 @@ func TestLockRacesTwoFreshProcesses(t *testing.T) {
 	for r := 1; r <= rounds; r++ {
 		pa, pb := filepath.Join(dir, "pa"), filepath.Join(dir, "pb")
 		var oa, ob bytes.Buffer
-		ca, cb := helperCmd(pa, &oa), helperCmd(pb, &ob)
+		// **两个都必须 stay**：抢到锁的那个如果写完答案就退出，内核立刻把锁还回去，
+		// 没抢到的那个下一轮就合法地拿到锁、也报 first——那时候它确实是「第一个
+		// 实例」，因为前一个已经死了。这不是 bug，是这个测法自己站不住。
+		// 两个都活着，内核锁才在整轮里始终只有一个主人，「两边都 first」才是
+		// 真的出了事。
+		ca, cb := helperCmdStay(pa, &oa, true), helperCmdStay(pb, &ob, true)
 
-		// 两个都要 Start 之后才 Wait：一个等完了再起第二个，那就不是「同时」。
+		// 两个都要 Start 之后才等答案：一个等完了再起第二个，那就不是「同时」。
 		if err := ca.Start(); err != nil {
 			skipIfNoSpawn(t, err)
 			t.Fatalf("起不来子进程：%v", err)
 		}
 		if err := cb.Start(); err != nil {
-			_ = ca.Wait()
+			_ = ca.Process.Kill()
+			_, _ = ca.Process.Wait()
 			skipIfNoSpawn(t, err)
 			t.Fatalf("起不来子进程：%v", err)
 		}
-		if err := ca.Wait(); err != nil {
-			t.Fatalf("第 %d 轮子进程 a 没跑完：%v\n%s", r, err, oa.String())
-		}
-		if err := cb.Wait(); err != nil {
-			t.Fatalf("第 %d 轮子进程 b 没跑完：%v\n%s", r, err, ob.String())
+
+		a, b := waitAnswer(t, pa), waitAnswer(t, pb)
+		for _, c := range []*exec.Cmd{ca, cb} {
+			_ = c.Process.Kill()
+			_, _ = c.Process.Wait()
 		}
 
-		a, b := readAnswer(t, pa), readAnswer(t, pb)
 		if a == "first" && b == "first" {
 			bothFirst++
 			t.Errorf("第 %d 轮：两个进程同时启动，两个都拿到了锁 —— 会出现两个应用", r)
@@ -248,4 +310,97 @@ func TestLockRacesTwoFreshProcesses(t *testing.T) {
 	if bothFirst == 0 {
 		t.Logf("%d 轮同时启动，每轮最多只有一个拿到锁 ✓", rounds)
 	}
+}
+
+// TestLockSurvivorKeepsForwarding 钉住「同时启动之后，活下来的那个还能不能收
+// biu://」。
+//
+// 这条比「最多一个拿到锁」要紧一格。框架那把锁在同时启动时会先 `os.Remove`
+// 掉对方刚建出来的 socket 文件——于是两个进程虽然只有一个活下来，**活下来的那个
+// 的 socket 已经被删了**，之后每一个新实例都连不上它，路由再也递不进来。
+// 症状是：用户连点两下之后 deep link 就再也唤不醒这个应用，而界面上看不出任何
+// 异常（第二轮 review 实测 40/40 轮都这样）。
+//
+// 三步：两个同时起 → 断言正好一个 first → **让 first 那个继续活着** → 再起一个
+// 第三个，它必须拿到 second（也就是成功转交）。第三步才是关键：前两步过了并不
+// 代表 socket 还在。
+func TestLockSurvivorKeepsForwarding(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows 上 unix socket 的可用性随版本变化，这条在 macOS 上验")
+	}
+	isolateLockDir(t)
+	releaseTestLock()
+
+	dir := t.TempDir()
+
+	// 跑三轮：踩中那个竞态要靠两个进程真正撞在同一瞬间，跑一轮有相当概率撞不上。
+	// 这条测试是概率性的，不是结构性的断言——真正让它 100% 成立的是 Lock() 里
+	// 「没拿到内核锁的先等 ready 再碰框架那把锁」那一步（见 single_instance.go）。
+	// 这里能做的是：一旦那个顺序被改回去（比如有人图省事把两层调换，或者去掉
+	// ready 那一等），三轮里总会有一轮抓到 socket 被删掉。
+	for round := 1; round <= 3; round++ {
+		t.Run(fmt.Sprintf("第%d轮", round), func(t *testing.T) {
+			survivorRound(t, dir, fmt.Sprintf("r%d", round))
+		})
+	}
+}
+
+// survivorRound 是上面那一条的一轮：两个同时起，留活下来的那个，再起第三个。
+func survivorRound(t *testing.T, dir, tag string) {
+	// ⚠️ 两个子进程**各接各的**缓冲区。共用一个的话它们同时往里写，就是一个货
+	// 真价实的数据竞争（-race 会报），而报的还跟这条测试要验的东西毫无关系。
+	var outA, outB bytes.Buffer
+
+	// 两个都 stay：起先不知道谁是 first，得两个都留着，之后再把输的那个杀掉。
+	pa, pb := filepath.Join(dir, tag+"a"), filepath.Join(dir, tag+"b")
+	a := helperCmdStay(pa, &outA, true)
+	b := helperCmdStay(pb, &outB, true)
+	if err := a.Start(); err != nil {
+		skipIfNoSpawn(t, err)
+		t.Fatalf("起不来子进程：%v", err)
+	}
+	if err := b.Start(); err != nil {
+		_ = a.Process.Kill()
+		_, _ = a.Process.Wait()
+		skipIfNoSpawn(t, err)
+		t.Fatalf("起不来子进程：%v", err)
+	}
+	defer func() {
+		for _, c := range []*exec.Cmd{a, b} {
+			if c.Process != nil {
+				_ = c.Process.Kill()
+			}
+			_ = c.Wait()
+		}
+	}()
+
+	ansA := waitAnswer(t, pa)
+	ansB := waitAnswer(t, pb)
+	if ansA == ansB {
+		t.Fatalf("两个进程都拿到了锁，或者都没拿到（a=%q b=%q）", ansA, ansB)
+	}
+
+	// 把输的那个杀掉，只留活下来的那个在跑。
+	loser, winner := b, a
+	if ansB == "first" {
+		loser, winner = a, b
+	}
+	_ = loser.Process.Kill()
+	_, _ = loser.Process.Wait()
+
+	// 第三个实例：它必须连上活下来的那个、把命令行递过去，然后自己退出。
+	// 连不上就会拿到 first —— 那就是 socket 已经没了。
+	var out bytes.Buffer
+	pc := filepath.Join(dir, tag+"c")
+	c := helperCmd(pc, &out)
+	if err := c.Run(); err != nil {
+		skipIfNoSpawn(t, err)
+		t.Fatalf("第三个实例没跑完：%v\n%s", err, out.String())
+	}
+	if got := readAnswer(t, pc); got != "second" {
+		t.Fatalf("同时启动之后，活下来的那个已经收不到转交了（第三个实例拿到 %q，want second）——"+
+			"它的 socket 被另一个进程的 os.Remove 删掉了，之后 deep link 再也唤不醒它\na: %s\nb: %s\nc: %s",
+			got, outA.String(), outB.String(), out.String())
+	}
+	_ = winner
 }
