@@ -133,15 +133,44 @@ func (m *Manager) run(ctx context.Context, id string) error {
 	// 只有全部下完才把 .part 改名成真正的歌。半成品留在 .part 上，
 	// 用户在下载目录里看到的就永远是完整的一首，不会有一首「打不开的
 	// 歌」混在里面。
-	//
-	// dest 重新从锁下读一次：`prepare` 在还没下过一个字节时可能重新避让
-	// 过一次同名文件，而上面那个 t 是进 `run` 时拿的，那个字段可能已经
-	// 是旧的了。
-	dest := m.destOf(id)
+	dest := m.destToLand(id)
 	if err := os.Rename(part, dest); err != nil {
 		return fmt.Errorf("download: 落盘 %s：%w", dest, err)
 	}
 	return nil
+}
+
+// destToLand 拿下这一项要落到的最终路径：那个位置上已经有东西了就避让。
+//
+// # 为什么落盘前还要再看一眼
+//
+// `Dest` 是**入队那一刻**定的，而那一刻到下载完之间世界会变。`destFor`
+// 在挑名字时已经避开了「队列里别的任务认领的名字」和「盘上的 `.part`」，
+// 但它避不开**这之后**才发生的事：另一首同名歌下完了、或者用户自己往那儿
+// 丢了个文件。
+//
+// 而 `os.Rename` 在目标存在时是**直接盖掉**的（POSIX）。盖掉的后果不是
+// 这一首出错，是**另一首从界面上消失**：队列里它那条还写着
+// 「已完成 41943040/41943040」，而那个文件现在装的是别的歌——目录里只剩
+// 一个文件，界面上一切正常。宁可换一个名字落，也不能静默吃掉别人的歌。
+//
+// 换个名字是安全的：分块已经全在 `.part` 里了，改名不碰一个字节。
+func (m *Manager) destToLand(id string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	t := m.tasks[id]
+	if t == nil || t.Dest == "" {
+		return ""
+	}
+	// 我们自己下出来的东西只会是 `.part`——`.part` 在 `run` 里单独处理，
+	// 而我们不会去建 `Dest`。所以这里存在的东西**不是我们的**。
+	if !exists(t.Dest) {
+		return t.Dest
+	}
+	dest := m.destFor(filepath.Dir(t.Dest), t)
+	t.Dest = dest
+	return dest
 }
 
 // prepare 探完长度之后要做的事：对身份、校验半成品、把文件铺到该有的长度。
@@ -176,7 +205,7 @@ func (m *Manager) prepare(id string, src *Source, length int64) (string, error) 
 		if e := extFor(t, src); e != "" {
 			t.Ext = e
 		}
-		dest := DestFor(filepath.Dir(t.Dest), t.Title, t.Ext, t.ID)
+		dest := m.destFor(filepath.Dir(t.Dest), t)
 		if dest != t.Dest {
 			// 落盘名变了（这一轮取流的扩展名和上一轮不同，或者同名被别的
 			// 歌占了）：把旧名字下的半成品删掉。
