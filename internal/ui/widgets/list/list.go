@@ -28,8 +28,6 @@ package list
 
 import (
 	"fmt"
-	"log"
-	"runtime/debug"
 	"strconv"
 	"time"
 
@@ -128,25 +126,7 @@ func New(cache *imgcache.Cache, acts Actions) *List {
 // 那份状态。
 func (l *List) SetSongs(songs []Music) {
 	l.songs = songs
-	l.warnDuplicateIDs(songs)
-}
-
-// warnDuplicateIDs 把重复的行标识指出来。
-//
-// ⚠️ 重复 ID 的后果在**真窗口里是静默的**：MyGo 的 Tester 会当场 panic 并报出
-// 代码行号（`ui/diagnostics.go`），真窗口里它只打一行日志，然后那几行**共用
-// 一份状态**——选中一个，另一个也亮着。铁律四要的正好是反过来。
-//
-// 这里只说不动：偷偷改掉某一行的 ID，界面上画的那首和调用方拿到的那首就对不上
-// 了，那比报错更难查。要改就改 Music.ID，让它真的唯一。
-func (l *List) warnDuplicateIDs(songs []Music) {
-	seen := make(map[string]struct{}, len(songs))
-	for _, m := range songs {
-		if _, dup := seen[m.ID]; dup {
-			log.Printf("biu: 列表里有几行用了同一个 ID（%q），它们的选中状态会串在一起", m.ID)
-		}
-		seen[m.ID] = struct{}{}
-	}
+	warnDuplicateIDs(songs)
 }
 
 // ScrollTo 把列表滚到第 row 行，align 是 ui.Start（顶上）、ui.Center（中间）
@@ -209,15 +189,8 @@ func (l *List) View(c *ui.Context) {
 // viewRow 画一行。
 //
 // 🔴 行里 panic 会一路穿出 Cocoa 事件循环把整个进程带走（框架的 Dispatch 和
-// drain 都没有 recover）。所以每一行自己兜一层，**只废掉这一行**：
-//
-//   - 界面上是「几千行里坏一行」，不是整页变成错误页——页级的 `internal/ui.Guard`
-//     兜的是整棵树，那是另一回事，两者不重复。
-//   - recover 是在 build 中间接住的，MyGo 下一遍会从头重建一次，所以这一帧
-//     剩下的部分照常画得出来，不用整帧作废。
-//
-// 崩过的行记进 failed，不再重试：否则同一行每一帧崩一次，日志被刷爆、帧率
-// 拖垮，比「这一行画不出来」糟得多。
+// drain 都没有 recover）。所以每一行自己兜一层，**只废掉这一行**——兜法
+// （含崩了不再重试的理由）在 shared.go 的 guardFailed 里，网格那一行共用它。
 func (l *List) viewRow(r ui.ListRow) {
 	c, i := r.Context, r.Index
 	m := l.songs[i]
@@ -228,43 +201,15 @@ func (l *List) viewRow(r ui.ListRow) {
 		return
 	}
 
-	defer func() {
-		if rec := recover(); rec != nil {
-			if l.failed == nil {
-				l.failed = map[string]bool{}
-			}
-			l.failed[m.ID] = true
-			log.Printf("biu: 列表行画崩了（%s）：%v\n%s", m.ID, rec, debug.Stack())
-		}
-	}()
-
-	l.viewCard(r)
+	guardFailed(&l.failed, "列表行", m.ID, func() { l.viewCard(r) })
 }
 
 // playFrom 从第 i 首往后接进队列并开始播。
 //
 // 给的是**从这一首起的全部**，和 Biu 的「在 B 站打开这一首从这儿听」一致：
 // 点了一首，接下来的队列就应该是它和它后面那些，不是整个歌单从头。
-// i 不在范围里是什么都不做——双击事件偶尔会落在已经被换掉的那一帧上。
-func (l *List) playFrom(i int) {
-	if i < 0 || i >= len(l.songs) {
-		return
-	}
-	items := make([]app.Item, len(l.songs)-i)
-	for k := i; k < len(l.songs); k++ {
-		items[k-i] = l.songs[k].Item
-	}
-	if l.acts.Play != nil {
-		l.acts.Play(items)
-	}
-}
-
-// notify 说一句话。给还没接上的操作用：按了没反应最难解释，说一句就好解释。
-func (l *List) notify(text string) {
-	if l.acts.Notify != nil {
-		l.acts.Notify(text)
-	}
-}
+// 实现和网格共用（shared.go），两个视图的「播放」语义不可能对不上。
+func (l *List) playFrom(i int) { playFrom(l.songs, l.acts, i) }
 
 // indexText 是这一行前面那个序号。Biu 是 1 起的（`#` 列）。
 func indexText(i int) string { return strconv.Itoa(i + 1) }
