@@ -228,8 +228,10 @@ func (s *Shell) viewNav(c *ui.Context) {
 		ui.Text(c, lookup(s.router.Path()).Title).FontSize(15).Bold()
 		ui.Column(c).Grow(1).DragWindow()
 		// 阶段 1 唯一的入口：选一个本地文件。Biu 里对应侧栏的「本地音乐」。
+		// 走的是播放条「加歌」那一条路：多选的文件全都进队列，用它打开的歌
+		// 上一首/下一首才是亮的（直接调 app.Open 就进不了队列，见 pickAndEnqueue）。
 		if ui.Button(c, "打开文件").Clicked() {
-			s.pickFile()
+			s.pickAndEnqueue()
 		}
 	})
 }

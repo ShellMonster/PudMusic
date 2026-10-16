@@ -196,7 +196,8 @@ func TestStepButtonsAreOffUntilThereIsAQueue(t *testing.T) {
 		t.Error("放上歌之后上一首/下一首还是灰的")
 	}
 
-	// 直接 Open（打开文件按钮）不进队列，按钮应该灭回去。
+	// 直接调 Open 不进队列（界面上两个入口现在都走 Enqueue，只有 app.Open
+	// 这一层 API 才是裸的），按钮应该灭回去。
 	a2 := newApp(t)
 	if err := a2.Open(flac(t)); err != nil {
 		t.Fatal(err)
