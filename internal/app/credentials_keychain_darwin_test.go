@@ -97,7 +97,7 @@ func testStore(t *testing.T) *keychainStore {
 // CI、容器、ssh 会话里都可能没有（没有登录钥匙串、或者访问要弹窗）。
 // 那种环境下 skip 而不是 fail——这里要证明的是「代码对不对」，
 // 不是「这台机器上有没有钥匙串」。
-func keychainAvailable(t *testing.T) {
+func requireSelftest(t *testing.T) {
 	t.Helper()
 	if !selftestOn {
 		t.Skip("要动真钥匙串，设 BIU_KEYCHAIN_SELFTEST=1 再跑")
@@ -105,8 +105,28 @@ func keychainAvailable(t *testing.T) {
 	if loadErr != nil {
 		t.Skipf("钥匙串符号取不到，跳过：%v", loadErr)
 	}
+}
+
+// keychainAvailable 在 requireSelftest 之外再确认这一项可写。
+//
+// ⚠️ 它会**写一笔**。所以验「空钥匙串」那种用例不能用它——
+// 探针本身就是一项，后面 Load 当然读得到东西。
+func keychainAvailable(t *testing.T) {
+	t.Helper()
+	requireSelftest(t)
 	k := testStore(t)
-	// 用一个空值先探一下：能加进去说明这一项可写。
+	// **先清干净再探**。
+	//
+	// 这一步以前是反的（直接探、靠 t.Cleanup 收尾），于是
+	// 「空钥匙串 Load 返回 ErrNotLoggedIn」那条用例读到的是上一个用例
+	// 刚写进去的那一份，Load 当然返回成功——它验的其实不是空钥匙串。
+	//
+	// 先清还有个副作用是好的：上一次运行如果崩在中途（SIGTRAP 那种，
+	// cleanup 根本来不及跑），留下的东西也会在这里被清掉。
+	if err := k.Clear(context.Background()); err != nil {
+		t.Skipf("这台机器的钥匙串不可用，跳过：%v", err)
+	}
+	// 再写一笔，确认这一项可写。
 	if err := k.Save(context.Background(), Session{SESSDATA: "probe-not-a-real-token"}); err != nil {
 		t.Skipf("这台机器的钥匙串不可用，跳过：%v", err)
 	}
@@ -207,9 +227,17 @@ func TestKeychainClearIsIdempotent(t *testing.T) {
 }
 
 // TestKeychainLoadOnEmptyIsNotLoggedIn 验「没存过」是正常状态。
+//
+// 这一条**不能**走 keychainAvailable：那个探针自己就往钥匙串里写了一笔，
+// 于是 Load 读到的是探针 —— 用例名字叫「空钥匙串」，验的却是「非空」。
+// 这里自己清干净再读。
 func TestKeychainLoadOnEmptyIsNotLoggedIn(t *testing.T) {
-	keychainAvailable(t)
-	if _, err := testStore(t).Load(context.Background()); !errors.Is(err, ErrNotLoggedIn) {
+	requireSelftest(t)
+	k := testStore(t)
+	if err := k.Clear(context.Background()); err != nil {
+		t.Fatalf("清空这一项失败：%v", err)
+	}
+	if _, err := k.Load(context.Background()); !errors.Is(err, ErrNotLoggedIn) {
 		t.Errorf("空钥匙串 Load 返回 %v，want ErrNotLoggedIn", err)
 	}
 }
