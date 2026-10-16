@@ -58,6 +58,7 @@ type cdn struct {
 	probes      int      // 探长度的请求数
 	ignoreRange bool     // 回 200 而不是 206
 	wrongRange  bool     // 回 206 但 Content-Range 指别处
+	starTotal   bool     // 回 206 但 Content-Range 的总长写 `*`（不肯说长度）
 	cutAt       int64    // >0：每次响应只给这么多字节就掐断
 	broken      bool     // 一律 403（地址过期）
 }
@@ -86,7 +87,7 @@ func (c *cdn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer c.track(-1)
 
 	c.mu.Lock()
-	broken, ignore, wrong, cut, variant := c.broken, c.ignoreRange, c.wrongRange, c.cutAt, c.variant
+	broken, ignore, wrong, star, cut, variant := c.broken, c.ignoreRange, c.wrongRange, c.starTotal, c.cutAt, c.variant
 	c.mu.Unlock()
 
 	if broken {
@@ -126,7 +127,15 @@ func (c *cdn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			c.write(w, variant, 0, c.size, cut)
 			return
 		}
-		w.Header().Set("Content-Range", fmt.Sprintf("bytes 0-0/%d", c.size))
+		if star {
+			// RFC 7233 允许总长写成 `*`（「实例长度未知」）。而
+			// `Content-Length` 说的是**这一发实际会发的几个字节**（1），
+			// 不是整首歌——引擎要是拿它当总长就会规划出一个分块、下出
+			// 一个 1 字节的「歌」。
+			w.Header().Set("Content-Range", "bytes 0-0/*")
+		} else {
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes 0-0/%d", c.size))
+		}
 		w.Header().Set("Content-Length", "1")
 		w.WriteHeader(http.StatusPartialContent)
 		c.write(w, variant, 0, 1, cut)
