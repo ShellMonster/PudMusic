@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/media"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
@@ -181,6 +182,30 @@ type Shell struct {
 	// 句柄留着是为了不让它被回收：托盘图标的生命周期挂在它上面，GC 收走之后
 	// 通知区域里那一个格子就没了，而界面这边看不出任何异样（见 tray.go）。
 	tray *mygo.Tray
+
+	// media 是系统媒体会话，由 main 那边 MountMedia 递过来（见 media_mount.go）。
+	//
+	// ⚠️ 可以是 nil：那一次 `media.New` 没装上（`Available()` 是 false）。
+	// bindMedia 判的就是这个——挂不上系统会话不该拦住开窗口，而 bindMedia
+	// 在 `ensureWindow` 里，那个位置**不能**因为一个加分项开天窗。
+	media *media.Session
+}
+
+// bindMedia 把系统媒体会话接到这个窗口上。
+//
+// **只有 Windows 那一边看它**：那边的媒体会话是按窗口算的（`GetForWindow`），
+// 任务栏缩略图上的按钮更是直接长在某个 HWND 上，而窗口要到这里才有句柄。
+// macOS 那边是全局的，绑定是一次空操作——所以它不能在 MountMedia 里做
+// （那时候窗口还不存在）。
+//
+// 重复调安全：`Session.BindWindow` 会先把上一个窗口收干净。
+func (s *Shell) bindMedia(w *mygo.Window) {
+	if s.media == nil || w == nil {
+		return
+	}
+	// NativeHandle 在 macOS 上是 NSWindow*、Linux 上是 GtkWindow*，
+	// 那边 bindWindow 原样忽略（见 media.windowBinder）。
+	s.media.BindWindow(w.NativeHandle())
 }
 
 // New 建一个窗口外壳，绑在状态 a 上。
@@ -284,7 +309,11 @@ func (s *Shell) Attach(w *mygo.Window) {
 
 // Run 开出一个窗口并跑起来。窗口骨架归界面层管：以后要加迷你播放器、
 // 要改标题栏、要调窗口尺寸，都在这一处。
-func Run(a *app.App) error {
+//
+// sess 是 `MountMedia` 递过来的那个系统媒体会话，可以是 nil（那一轮没装上，
+// 或者调用方不想要）。**它得在这一层而不是在 MountMedia 里绑窗口**：
+// Windows 的媒体会话是按窗口算的，而窗口在这里才建出来——见 bindMedia。
+func Run(a *app.App, sess *media.Session) error {
 	// 单实例锁必须在 Run 之前拿：Run 之后事件循环才起来，那时候两个实例
 	// 同时抢就是竞态，谁抢到全看调度。抢不到的那个，框架已经把它的命令行
 	// 转交给第一个实例了（`platform.Lock`），自己立刻退出——**不能留在后台**
@@ -294,6 +323,7 @@ func Run(a *app.App) error {
 	}
 
 	s := New(a)
+	s.media = sess
 	// 搜索历史读盘是阻塞 IO，放在建窗口之前：早读进来早能用，也省得第一帧
 	// 是在一个空历史上画出来的（那也是 mountSearchHistory 的用途之一）。
 	s.mountSearchHistory()
