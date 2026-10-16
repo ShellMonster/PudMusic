@@ -23,9 +23,8 @@ import (
 // `biu://settings` 由系统直接转给已经跑着的那个应用（根本不会起第二个进程），
 // Windows / Linux 上这条 URL 跟着命令行走，由单实例锁转交（见 Lock）。
 //
-// 名字跟着 bundle 标识符走：`biu` 而不是 `biugo`，用户手输时短一点，
-// 撞上别的应用的概率也低一点。真撞上了系统会让用户选，默认处理器由
-// RegisterScheme 决定。
+// 取 `biu` 是图短、好手输，撞上别的应用的概率低。真撞上了系统会让用户选，
+// 默认处理器由 RegisterScheme 决定。
 const URLScheme = "biu"
 
 // Lock 拿单实例锁。返回 true 表示「我是第一个实例，该继续跑」。

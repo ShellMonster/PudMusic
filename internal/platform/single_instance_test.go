@@ -1,8 +1,10 @@
 package platform
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -76,6 +78,11 @@ func TestURLSchemeIsDeclaredInMygoJSON(t *testing.T) {
 // 设了它，这一轮就是子进程，不再是测试。
 const lockAnswerEnv = "BIU_TEST_LOCK_ANSWER"
 
+// lockChildTimeout 是子进程最多能花多久。给得很短：框架那把锁自己的超时是
+// 拨号 1 秒 + 最多 5 次退避重试（`mygo/single_instance.go`），正常情况几十
+// 毫秒就完了。这个上限只是防挂死，不是给人等的。
+const lockChildTimeout = 15 * time.Second
+
 // TestLockRejectsASecondProcess 走一次真的两个进程。
 //
 // 单实例没法在同一个进程里测两遍：框架的锁记的是「这个进程拿到了锁」，
@@ -108,12 +115,28 @@ func TestLockRejectsASecondProcess(t *testing.T) {
 	}
 
 	answer := filepath.Join(t.TempDir(), "answer")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), lockChildTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestLockRejectsASecondProcess$")
 	cmd.Env = append(os.Environ(), lockAnswerEnv+"="+answer)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("子进程跑不起来：%v\n%s", err, out)
+	// ⚠️ 子进程的输出直接接缓冲区，**不要用 CombinedOutput**：它是拿 os.Pipe
+	// 再开 goroutine 抄的，一旦子进程（或它的子进程）把管道握在手里不放，
+	// Wait 就会一直等下去——外面那个 ctx 只管杀进程，管不了管道。这条测试
+	// 拖死整个 `go test` 的代价，比它验的那件事本身还大。
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	// 再加一道保险：进程退了但管道还开着时，WaitDelay 到点就把管道关掉返回，
+	// 绝不让这条测试有挂死的可能。
+	cmd.WaitDelay = lockChildTimeout
+
+	err := cmd.Run()
+	if err != nil && ctx.Err() == nil && (errors.Is(err, os.ErrPermission) || errors.Is(err, exec.ErrNotFound)) {
+		// 环境根本不让起进程（受限的沙箱）。这里说清楚，别让它变成一个
+		// 「看起来跑过了」的假通过。
+		t.Skipf("这个环境里起不了子进程，这条验不了：%v", err)
+	}
+	if err != nil {
+		t.Fatalf("子进程没跑完：%v\n%s", err, out.String())
 	}
 	got, err := os.ReadFile(answer)
 	if err != nil {
