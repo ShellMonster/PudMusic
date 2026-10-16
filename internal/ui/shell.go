@@ -196,3 +196,18 @@ func (s *Shell) viewCrash(c *ui.Context) {
 		})
 	})
 }
+
+// enqueuePicked 把文件框选回来的每一条路径都排进队列。
+//
+// 一条都不能少：少了的那几条在界面上看不出任何异样，用户只会以为是自己没选上。
+//
+// 为什么单独拎出来：文件框要系统面板，测试里调不了；路径进队列这一步是纯逻辑，
+// 拎出来才测得到（见 shell_pick_test.go）。弹框本身只有一个调用方
+// （pickAndEnqueue），在这里没有第二条路。
+func (s *Shell) enqueuePicked(paths []string) {
+	items := make([]app.Item, len(paths))
+	for i, p := range paths {
+		items[i] = app.LocalItem(p)
+	}
+	s.app.Enqueue(items...)
+}
