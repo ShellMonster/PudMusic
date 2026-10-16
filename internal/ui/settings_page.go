@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -43,8 +44,9 @@ const (
 //
 // 值和 Biu 的 `closeWindowOption` 一字不差（`shared/settings/app-settings.ts:3`）。
 //
-// ⚠️「隐藏到托盘」这一档这一版**只有存储和选择**，托盘实现在 issue #28。
-// 页面上要把这件事说出来：一个点了没反应的选项比没有更让人困惑。
+// ⚠️「隐藏到托盘」这一档在 **macOS 上不是托盘**：那边不建托盘图标（与 Biu
+// 一致），它是「收进程序坞，点 Dock 图标回来」。页面上把这件事说出来——一个
+// 名字和实际行为对不上的选项，比没有更让人困惑。
 var closeWindowOptions = []struct {
 	value app.CloseWindowOption
 	label string
@@ -117,10 +119,15 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 		s.settingSection(c, "系统")
 		s.settingRow(c, "窗口关闭", "选择窗口关闭时的行为",
 			func() { s.pickCloseWindow(c, st, ro) })
-		// 托盘还没做（issue #28），这一版只存不生效——得说出来，否则「隐藏到托盘」
-		// 点了和没点一样，用户会当成 bug。
-		ui.Text(c, "托盘还没做（issue #28），「隐藏到托盘」这一版先只存着。").
-			FontSize(12).TextColor(t.TextMuted)
+		if !platform.TraySupported() {
+			// macOS 上没有托盘（与 Biu 一致），「隐藏到托盘」这一档在这儿是
+			// 「收进 Dock」。得说出来，不然用户以为 Biu 有而我们没做。
+			ui.Text(c, "macOS 上不建托盘图标（与 Biu 一致）：「隐藏到托盘」是收进程序坞，"+
+				"图标还在，点一下就回来。").
+				FontSize(12).TextColor(t.TextMuted)
+		}
+		s.settingRow(c, "开机自启", "系统登录后自动启动应用",
+			func() { s.pickAutoStart(c, st, ro) })
 	})
 }
 
@@ -202,6 +209,31 @@ func (s *Shell) pickCloseWindow(c *ui.Context, st app.Settings, ro bool) {
 			}
 		}
 	})
+}
+
+// pickAutoStart 是开机自启那个开关。
+//
+// 它和另外两项不一样：**不是改一个键就完了**，得真的去系统里注册/注销登录项
+// （macOS 是 SMAppService / LaunchAgent，Windows 是注册表 Run 项）。所以走的是
+// `Shell.SetAutoStart`——先动系统、成功了才写设置，顺序反了会留下
+// 「设置说开、系统说关」，而启动时的对齐只补这一种（见 lifecycle.go 的注释）。
+//
+// 动不了的时候（没打包成 bundle、用户没给权限）弹一条提示，**设置一个字都不改**：
+// 界面上亮着一个实际上没开的开关，比暗着更坏——用户会以为明天开机它自己就起来了。
+func (s *Shell) pickAutoStart(c *ui.Context, st app.Settings, ro bool) {
+	on := st.AutoStart
+	// ⚠️ 这里**不能** .Key()。Switch 的旋钮是 `Animate("knob", …)`，动画状态记在
+	// 控件节点上；给它一个 Key 等于每帧换一个新节点，动画每帧从头开始——于是这一页
+	// 永远停不下来（实测：加了 Key 之后 `settleSettingsPage` 跑满 60 帧还在滑，
+	// 去掉就好了）。上面那两排按钮能加 Key，是因为 Row 本身没有动画。
+	sw := ui.Switch(c, &on).Disabled(ro)
+	if !sw.Changed() {
+		return
+	}
+	if err := s.SetAutoStart(on); err != nil {
+		s.addToast("开机自启没设上：" + strings.TrimPrefix(err.Error(), "app: "))
+		// 下一帧 `on` 会从设置里重新读（没写成功，所以还是旧值），开关自己弹回去。
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

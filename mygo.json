@@ -2,5 +2,6 @@
   "name": "Biu MyGo",
   "identifier": "io.github.shellmonster.biu",
   "version": "0.1.0",
-  "out": "build"
+  "out": "build",
+  "urlSchemes": ["biu"]
 }
