@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -462,11 +463,12 @@ func TestDraggingAFavoriteReordersItAndKeepsItAfterARestart(t *testing.T) {
 	if !ok {
 		t.Fatalf("侧栏上没有第三条收藏夹，文字有 %q", tt.Texts())
 	}
-	// 落在第三条那一行的上半边：落点是「排在它前面」，所以 1 号停在 2、3
-	// 之间，得到 我建的 2、我建的 3、我建的 1、我建的 4。
+	// 落在第三条那一行的上半边（MyGo 的 dropAt：落在某行的上半边 = 插到
+	// 那一行**前面**，指示线就画在它的上边缘）。所以 1 号要停在「我建的 3」
+	// 上方：得到 我建的 2、我建的 1、我建的 3、我建的 4。
 	dragFrom(tt, from.X+from.W/2, from.Y+from.H/2, to.X+to.W/2, to.Y+to.H*0.25)
 
-	want := []string{"我建的 2", "我建的 3", "我建的 1", "我建的 4"}
+	want := []string{"我建的 2", "我建的 1", "我建的 3", "我建的 4"}
 	if got := favTitles(a, app.FavoritesCreated); !slices.Equal(got, want) {
 		t.Fatalf("拖完侧栏上是 %q，want %q", got, want)
 	}
@@ -475,7 +477,7 @@ func TestDraggingAFavoriteReordersItAndKeepsItAfterARestart(t *testing.T) {
 	// 序号」那一套，顺序一变每一行的状态就串到别的收藏夹上——实测的
 	// 症状就是「正在操作的那一首变成了旁边另一首」。
 	keys := s.sideLists[app.FavoritesCreated].Key
-	for i, wantID := range []int64{2, 3, 1, 4} {
+	for i, wantID := range []int64{2, 1, 3, 4} {
 		if got := keys(i); got != wantID {
 			t.Errorf("第 %d 行的 key 是 %v，want %v（收藏夹的 ID，不是序号）", i, got, wantID)
 		}
@@ -497,6 +499,82 @@ func TestDraggingAFavoriteReordersItAndKeepsItAfterARestart(t *testing.T) {
 	}
 }
 
+// TestDroppingOnARowPutsTheDraggedOneRightAboveIt 钉住**落点和结果**对得上。
+//
+// MyGo 给的落点是「插到第 to 行前面」，屏幕上那条指示线就画在第 to 行的
+// **上边缘**（`mygo/ui/list.go:727` 的 dropAt、`list.go:744` 的 boundary）。
+// 所以验法只有一句：拖走的那一条，最后必须**紧挨着落在那一行的上面**。
+//
+// 这条是拖拽排序的验收本体。之前的写法把「挪到某行的位置」当成了「插到某行
+// 的前面」，往下拖的时候落点比指示线低一格，而错的那条顺序还会被
+// ReorderFavorite 立刻写进设置文件——重开还是错的。
+func TestDroppingOnARowPutsTheDraggedOneRightAboveIt(t *testing.T) {
+	const n = 4
+
+	for to := 1; to < n; to++ {
+		t.Run(fmt.Sprintf("落在第 %d 行的上边缘", to+1), func(t *testing.T) {
+			_, a, tt, _ := favShell(t, n, 0)
+
+			from, ok := tt.Find("我建的 1")
+			if !ok {
+				t.Fatalf("侧栏上没有第一条，文字有 %q", tt.Texts())
+			}
+			row, ok := tt.Find(fmt.Sprintf("我建的 %d", to+1))
+			if !ok {
+				t.Fatalf("侧栏上没有第 %d 条，文字有 %q", to+1, tt.Texts())
+			}
+			dragFrom(tt, from.X+from.W/2, from.Y+from.H/2,
+				row.X+row.W/2, row.Y+row.H*0.25)
+
+			assertDroppedJustAbove(t, a, to, fmt.Sprintf("我建的 %d", to+1))
+		})
+	}
+
+	t.Run("落在最后一条下面 = 排到最后面", func(t *testing.T) {
+		_, a, tt, _ := favShell(t, n, 0)
+
+		from, ok := tt.Find("我建的 1")
+		if !ok {
+			t.Fatalf("侧栏上没有第一条，文字有 %q", tt.Texts())
+		}
+		last, ok := tt.Find(fmt.Sprintf("我建的 %d", n))
+		if !ok {
+			t.Fatalf("侧栏上没有第 %d 条，文字有 %q", n, tt.Texts())
+		}
+		// 落在最后一条的**下半边**：MyGo 的落点这时是「列表的行数」。
+		dragFrom(tt, from.X+from.W/2, from.Y+from.H/2,
+			last.X+last.W/2, last.Y+last.H*0.9)
+
+		got := favTitles(a, app.FavoritesCreated)
+		if got[n-1] != "我建的 1" {
+			t.Errorf("拖到最后面之后是 %q，最后一条不是「我建的 1」", got)
+		}
+	})
+}
+
+// assertDroppedJustAbove 断言「我建的 1」现在正好压在第 to 行那条的上面。
+func assertDroppedJustAbove(t *testing.T, a *app.App, to int, target string) {
+	t.Helper()
+	got := favTitles(a, app.FavoritesCreated)
+	if got[to] != target {
+		t.Errorf("落点是「插到 %q 前面」，那一行应该在第 %d 位，实际在第 %d 位：%q",
+			target, to, indexOf(got, target), got)
+	}
+	if got[to-1] != "我建的 1" {
+		t.Errorf("落点是「插到 %q 前面」，它上面一条应该是被拖的那条，实际是 %q：%q",
+			target, got[to-1], got)
+	}
+}
+
+func indexOf(list []string, want string) int {
+	for i, v := range list {
+		if v == want {
+			return i
+		}
+	}
+	return -1
+}
+
 // favTitles 是一组当前摆出来的标题。
 func favTitles(a *app.App, g app.FavoriteGroup) []string {
 	items := a.SideFavorites(g)
@@ -507,27 +585,58 @@ func favTitles(a *app.App, g app.FavoriteGroup) []string {
 	return out
 }
 
-// TestDragReorderIsOffWhenTheGroupIsFolded 验折叠时拖不动。
+// TestDragReorderIsOffWhenTheGroupIsFolded 验折叠时拖不动（Biu 的 SD-09）。
 //
-// Biu 的 SD-09「排序项渲染器」就是这一条。折叠时那一列根本没建，拖不动是
-// 自然发生的——这条测试盯的是「别因为折叠而漏了一帧又把它建出来」。
+// 折叠时那一列根本没建，拖不动是自然发生的——这条测试盯的是「别因为折叠而
+// 漏了一帧又把它建出来」，所以除了断言画面上没有了，还要在折叠标题上真的
+// 拖一次，再断言**顺序一个字节都没动**（`Reorder` 没被调用、设置里也没多出
+// 任何东西）。
+//
+// ⚠️ 认标题要认对：fixture 的标题是「我建的 1/2/3」（`favShell` 里带前缀），
+// 之前这里找的是「收藏 1」——那个串画面上从来没有过，所以折不折叠都通过，
+// 整条测试等于空跑，SD-09 一条证据也没有。
 func TestDragReorderIsOffWhenTheGroupIsFolded(t *testing.T) {
-	_, _, tt, _ := favShell(t, 3, 0)
+	_, a, tt, _ := favShell(t, 3, 0)
+
+	// 起点：这一列确实在，而且标题是能找着的。
+	if _, ok := tt.Find("我建的 1"); !ok {
+		t.Fatalf("起点就没有「我建的 1」，这条测试什么也证明不了，文字有 %q", tt.Texts())
+	}
+	before := favTitles(a, app.FavoritesCreated)
 
 	if err := tt.Click("▾ 我创建的"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if tt.HasText("收藏 1") {
+	if _, ok := tt.Find("我建的 1"); ok {
 		t.Fatalf("折叠之后收藏夹还摆着，文字有 %q", tt.Texts())
 	}
 
-	// 折叠位置（侧栏里那个标题）上拖一下，不该有任何顺序变化。
+	// 在折叠标题上拖一次：不该有任何反应，也不该有顺序变化。
 	head, ok := tt.Find("▸ 我创建的")
 	if !ok {
 		t.Fatalf("画面上找不到折叠标题，文字有 %q", tt.Texts())
 	}
 	dragFrom(tt, head.X+head.W/2, head.Y+head.H/2, head.X, head.Y+120)
+
+	if got := favTitles(a, app.FavoritesCreated); !slices.Equal(got, before) {
+		t.Errorf("折叠时拖了一下，顺序从 %q 变成了 %q", before, got)
+	}
+	if got := a.SettingsSnapshot().SideMenuCollectionOrder.Created; len(got) != 0 {
+		t.Errorf("折叠时拖了一下，设置里多出了一条顺序：%v", got)
+	}
+
+	// 展开回来顺序还在——证明刚才不是「碰巧一样」。
+	if err := tt.Click("▸ 我创建的"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if _, ok := tt.Find("我建的 1"); !ok {
+		t.Fatalf("展开之后收藏夹不见了，文字有 %q", tt.Texts())
+	}
+	if got := favTitles(a, app.FavoritesCreated); !slices.Equal(got, before) {
+		t.Errorf("展开之后顺序是 %q，want %q", got, before)
+	}
 }
 
 // TestTheRowKeysAreUniqueAcrossTheTwoGroups 验两组的行 key 不撞。
@@ -542,10 +651,16 @@ func TestTheRowKeysAreUniqueAcrossTheTwoGroups(t *testing.T) {
 	}
 }
 
-// TestTheSidebarPanicIsCaught 验铁律三：侧栏画崩了，进程不崩。
+// TestTheSidebarPanicIsCaught 验侧栏画崩了，**程序不崩**，而且切到错误页。
 //
-// 侧栏在外层布局里，它一空就是整个窗口空一大块——所以它必须和页面一样
-// 有一层 Guard。
+// ⚠️ 这条证明不了「是侧栏自己那层 Guard 接住的」。`New()` 里 viewMain 外面
+// 已经包了一层 `Guard`（`shell.go`），侧栏在里面，外层照样接得住——把
+// viewMain 里那句 `Guard(s.sideBody, s.onPanic)(c)` 换成裸的 `s.sideBody(c)`，
+// 这条照样绿。所以它证明的是**用户看得见的行为**（崩了不死、错误页、有记录），
+// 不是哪一层接的。侧栏那层 Guard 是任务要求的写法，靠 code review 守着。
+//
+// 放在这里的理由：侧栏在外层布局里，它一空就是整个窗口空一大块，比某一页崩了
+// 更显眼，所以要单独有一条盯着它崩了之后的样子。
 func TestTheSidebarPanicIsCaught(t *testing.T) {
 	s, _, tt, _ := sideShell(t)
 
@@ -563,5 +678,8 @@ func TestTheSidebarPanicIsCaught(t *testing.T) {
 	}
 	if !tt.HasText("界面出错了") {
 		t.Errorf("没有切到错误页，文字有 %q", tt.Texts())
+	}
+	if !tt.HasText("侧栏画崩了") {
+		t.Errorf("错误页上没有崩掉的原因，文字有 %q", tt.Texts())
 	}
 }

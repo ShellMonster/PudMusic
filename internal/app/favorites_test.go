@@ -57,39 +57,49 @@ func favMounted(t *testing.T) (*app.App, string) {
 	return a, path
 }
 
-// TestReorderMovesTheRowToWhereItWasDropped 验拖拽排序本身的语义。
+// TestReorderPutsTheRowInFrontOfTheDropPoint 钉住拖拽排序的**语义**：
+// 落点是「插到第 to 行前面」，不是「挪到第 to 行的位置」。
 //
-// 拖拽是**插到目标那一行的位置**，不是和目标换位置。往后拖时这两种算法的
-// 结果一样，往回拖时不一样：换位置会把中间那一行顶到最末尾，而用户看到的是
-// 自己那一行停在了手里松开的地方。
-func TestReorderMovesTheRowToWhereItWasDropped(t *testing.T) {
-	a, _ := favMounted(t)
-	a.SetFavorites(app.FavoritesCreated, favItems(5))
+// 差一格的那个坑：Biu 的 `reorderList` 是 `splice(to, 0, moved)`，to 取目标
+// **删之前**的下标，语义是「挪到目标的最终位置」。从目标前面拖到后面时，按旧
+// 下标插进去会越过目标一行——屏幕上是指示线画在目标**上边缘**、落下去却停在
+// 目标**下面**，而且错的顺序会立刻被写进设置文件。
+//
+// 往下拖和往上拖要分开看，因为只有往下拖会错：往上拖时 from > before，删除
+// 不影响 before 的下标，两种算法碰巧一样。所以这张表两头都摆上。
+func TestReorderPutsTheRowInFrontOfTheDropPoint(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		id     int64 // 拖哪一条
+		before int64 // 放到哪一条前面；0 = 最后面
+		want   string
+	}{
+		{"往下拖一格", 1, 3, "2,1,3,4"},
+		{"往下拖两格", 1, 4, "2,3,1,4"},
+		{"往下拖到最末", 1, 0, "2,3,4,1"},
+		{"往上拖一格", 4, 2, "1,4,2,3"},
+		{"往上拖到最前", 4, 1, "4,1,2,3"},
+		{"从中间往下拖", 2, 4, "1,3,2,4"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, _ := favMounted(t)
+			a.SetFavorites(app.FavoritesCreated, favItems(4))
 
-	// 往后拖：1 号拖到 3 号那一行。
-	moved, err := a.ReorderFavorite(app.FavoritesCreated, 1, 3)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !moved {
-		t.Fatal("1 → 3 报告说没动")
-	}
-	if got := favIDs(a, app.FavoritesCreated); got != "2,3,1,4,5" {
-		t.Errorf("往后拖之后是 %s，want 2,3,1,4,5", got)
-	}
-
-	// 往回拖：现在 5 号在最末尾，拖到 1 号那一行。
-	//
-	// 落点是「1 号那一行的前面」，所以 5 停在 2,3 和 1 之间，而不是跑到最前面
-	// ——后者是拖到了第 0 行。两种算法的差别正是在这一条上分出来的。
-	if moved, err = a.ReorderFavorite(app.FavoritesCreated, 5, 1); err != nil {
-		t.Fatal(err)
-	}
-	if !moved {
-		t.Fatal("5 → 1 报告说没动")
-	}
-	if got := favIDs(a, app.FavoritesCreated); got != "2,3,5,1,4" {
-		t.Errorf("往回拖之后是 %s，want 2,3,5,1,4（和目标换位置的算法会给出 4,2,3,1,5）", got)
+			moved, err := a.ReorderFavorite(app.FavoritesCreated, tc.id, tc.before)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !moved {
+				t.Fatal("报告说没动")
+			}
+			if got := favIDs(a, app.FavoritesCreated); got != tc.want {
+				t.Errorf("顺序是 %s，want %s", got, tc.want)
+			}
+			// 落盘的必须是屏幕上那个顺序，不是另一个。
+			if got := idsOf(a.SettingsSnapshot().SideMenuCollectionOrder.Created); got != tc.want {
+				t.Errorf("落到盘上的顺序是 %s，want %s", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -146,14 +156,15 @@ func TestTheTwoGroupsReorderIndependently(t *testing.T) {
 		t.Fatal("我收藏的那一组拖不动")
 	}
 
-	if got := favIDs(a, app.FavoritesCreated); got != "2,3,4,1" {
-		t.Errorf("我创建的排成了 %s，want 2,3,4,1", got)
+	// 1 挪到 4 那一行的**前面**（不是它的位置）：2,3,1,4。
+	if got := favIDs(a, app.FavoritesCreated); got != "2,3,1,4" {
+		t.Errorf("我创建的排成了 %s，want 2,3,1,4", got)
 	}
 	if got := favIDs(a, app.FavoritesCollected); got != "3,1,2" {
 		t.Errorf("我收藏的排成了 %s，want 3,1,2", got)
 	}
 	order := a.SettingsSnapshot().SideMenuCollectionOrder
-	if got := idsOf(order.Created); got != "2,3,4,1" {
+	if got := idsOf(order.Created); got != "2,3,1,4" {
 		t.Errorf("设置里我创建的顺序是 %s", got)
 	}
 	if got := idsOf(order.Collected); got != "3,1,2" {
@@ -176,16 +187,16 @@ func TestTheOrderSurvivesARestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	first.SetFavorites(app.FavoritesCreated, items)
-	// 1,2,3,4,5 → 把 1 拖到 4 那一行 → 2,3,4,1,5
+	// 1,2,3,4,5 → 把 1 挪到 4 那一行前面 → 2,1,3,4,5
 	if _, err := first.ReorderFavorite(app.FavoritesCreated, 1, 4); err != nil {
 		t.Fatal(err)
 	}
-	// 再把末尾的 5 拖到最前面（2 那一行）→ 5,2,3,4,1
+	// 再把末尾的 5 挪到最前面（2 那一行前面）→ 5,2,3,1,4
 	if _, err := first.ReorderFavorite(app.FavoritesCreated, 5, 2); err != nil {
 		t.Fatal(err)
 	}
-	if got := favIDs(first, app.FavoritesCreated); got != "5,2,3,4,1" {
-		t.Fatalf("两次拖完内存里是 %s，want 5,2,3,4,1", got)
+	if got := favIDs(first, app.FavoritesCreated); got != "5,2,3,1,4" {
+		t.Fatalf("两次拖完内存里是 %s，want 5,2,3,1,4", got)
 	}
 	if err := first.FlushSettings(); err != nil {
 		t.Fatal(err)
@@ -206,8 +217,8 @@ func TestTheOrderSurvivesARestart(t *testing.T) {
 	}
 	second.SetFavorites(app.FavoritesCreated, items)
 
-	if got := favIDs(second, app.FavoritesCreated); got != "5,2,3,4,1" {
-		t.Errorf("重启之后顺序是 %s，want 5,2,3,4,1", got)
+	if got := favIDs(second, app.FavoritesCreated); got != "5,2,3,1,4" {
+		t.Errorf("重启之后顺序是 %s，want 5,2,3,1,4", got)
 	}
 }
 
@@ -321,7 +332,7 @@ func TestAFreshInstallHasTwoEmptyGroups(t *testing.T) {
 
 // TestTheSidebarWidthIsClampedOnTheWayIn 验侧栏宽度从设置文件进来就被钳住。
 //
-// 设置文件是用户能直接编辑的，也可能从 B 站那边的导入、手改的备份里来。
+// 设置文件是用户能直接编辑的，也可能从 Biu 的旧导出、手改的备份里来。
 // 一个 `sideMenuWidth: 99999` 不该一路穿到画界面的那一行——那样侧栏会把
 // 整个窗口吃掉，内容区一点不剩。
 func TestTheSidebarWidthIsClampedOnTheWayIn(t *testing.T) {
@@ -347,5 +358,37 @@ func TestTheSidebarWidthIsClampedOnTheWayIn(t *testing.T) {
 	}
 	if got.SideMenuWidth != app.MaxSideMenuWidth {
 		t.Errorf("读进来的是 %v，want %v", got.SideMenuWidth, app.MaxSideMenuWidth)
+	}
+}
+
+// TestAMissingSidebarWidthFallsBackTo200 而不是下限 160。
+//
+// 「文件里没有这一格」和「写了但越界」是两件事：Biu 的兜底是
+// `sideMenuWidth ?? 200`（`biu/src/layout/side/index.tsx:49`），不是 160。
+// 而 normalize 跑完就会把结果写回去——所以一旦这里给了 160，任何一份缺这一格
+// 的设置文件（Biu 的旧导出、手写的）在**第一次打开**时就变成 160，Biu 那边是
+// 200，两边对不上，而且再也回不去。
+func TestAMissingSidebarWidthFallsBackTo200(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content string
+	}{
+		{"没有这一格", `{"schemaVersion":1,"appSettings":{"themeMode":"dark"}}`},
+		{"写了 0", `{"schemaVersion":1,"appSettings":{"sideMenuWidth":0}}`},
+		{"写了负数", `{"schemaVersion":1,"appSettings":{"sideMenuWidth":-5}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), app.SettingsFileName)
+			write(t, path, tc.content)
+
+			got, err := app.LoadSettings(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.SideMenuWidth != app.DefaultSideMenuWidth {
+				t.Errorf("兜底是 %v，want %v（Biu 的 `?? %v`）",
+					got.SideMenuWidth, app.DefaultSideMenuWidth, app.DefaultSideMenuWidth)
+			}
+		})
 	}
 }

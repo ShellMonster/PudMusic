@@ -458,7 +458,18 @@ func (s *Settings) normalize() {
 	if s.FontFamily == "" {
 		s.FontFamily = DefaultFontFamily
 	}
-	s.SideMenuWidth = ClampSideMenuWidth(s.SideMenuWidth)
+	// 「没设过」和「被钳到区间里」是两件事，兜底值必须分开：
+	//
+	//   - 文件里没有这一格，或者写的是 0 → 给**默认的 200**，不是下限 160。
+	//     Biu 那边是 `sideMenuWidth ?? 200`（`biu/src/layout/side/index.tsx:49`），
+	//     兜底也是 200；而且下一次写盘就会把这个 200 永久写回去。少了这一条，
+	//     Biu 的旧导出、手写的设置文件第一次打开就变成 160，Biu 那边是 200。
+	//   - 写了但是越界（比如手改成 99999）→ 钳进 [160, 480]。
+	if s.SideMenuWidth <= 0 {
+		s.SideMenuWidth = DefaultSideMenuWidth
+	} else {
+		s.SideMenuWidth = ClampSideMenuWidth(s.SideMenuWidth)
+	}
 
 	s.ThemeMode = pickEnum(s.ThemeMode, ThemeModeSystem,
 		ThemeModeSystem, ThemeModeLight, ThemeModeDark)

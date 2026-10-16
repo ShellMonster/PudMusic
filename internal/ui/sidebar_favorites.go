@@ -149,22 +149,30 @@ func (s *Shell) viewFavoriteList(c *ui.Context, g app.FavoriteGroup, items []app
 
 // reorderFavorite 是拖完那一刻把顺序落下去。
 //
-// `to` 是**拖动前**那一列里的序号，落点是「排在它前面」，`len(items)` 是排到
-// 最后面。`app.ReorderFavorite` 的语义正是「插到目标那一行的位置」，所以
-// 这里只需要把序号换成 ID；落点是末尾时用最后一条当目标，落点一样。
+// `to` 是 MyGo 给的**落点**：要插到第 `to` 行**前面**；`to` 等于列表的行数
+// 就是排到最后面。依据是 `mygo/ui/list.go:727` 的 dropAt——「the row before
+// which rows dropped at y go」——落点那条指示线就画在第 `to` 行的**上边缘**
+// （`list.go:744` 的 boundary）。
+//
+// ⚠️ 这里只把序号换成 ID，**不许**再自己挪一格。之前写的是「to 超过末行就改用
+// 最后一行」，那把「插到某行前面」当成了「挪到某行的位置」：往下拖的时候指示
+// 线画在目标上边缘、落下去却停在目标**下面**，差一格，而且错的那条顺序会立刻
+// 被 ReorderFavorite 写进设置文件。
+//
+// 末尾那一档交给 beforeID = 0 表示（见 app.Favorites.Reorder），别拿最后一行
+// 当目标顶替——那会把「拖到最后面」变成「拖到最后一行前面」。
 func (s *Shell) reorderFavorite(g app.FavoriteGroup, items []app.Favorite, rows []int, to int) {
 	// 侧栏一次只拖一行（没有多选）。真来了多行，跳过而不是做半截：
 	// 做一半的表现是「拖了三条只动了一条」，比不动更难解释。
 	if len(rows) != 1 || len(items) == 0 {
 		return
 	}
-	if to < 0 {
-		to = 0
+	// before 保持 0 时，app 那边理解为「挪到最后面」。
+	before := int64(0)
+	if to >= 0 && to < len(items) {
+		before = items[to].ID
 	}
-	if to >= len(items) {
-		to = len(items) - 1
-	}
-	if _, err := s.app.ReorderFavorite(g, items[rows[0]].ID, items[to].ID); err != nil {
+	if _, err := s.app.ReorderFavorite(g, items[rows[0]].ID, before); err != nil {
 		s.addToast("顺序存不住：" + err.Error())
 	}
 }

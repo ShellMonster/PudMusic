@@ -99,14 +99,26 @@ func (f *Favorites) Replace(g FavoriteGroup, items []Favorite, order []int64) {
 	f.groups[g] = applySavedOrder(items, order)
 }
 
-// Reorder 把 id 挪到 target 那一行的位置，返回挪完之后的顺序。
+// Reorder 把 id 挪到 before 那一行的**前面**，返回挪完之后的顺序。
 //
-// 语义照 Biu 的 `reorderList`（`favorite.ts:47-59`）：**按目标位置插进去**，
-// 不是「和目标交换」。往回拖和往后拖都能用同一条路。
+// before 是收藏夹的 ID；**before 为 0 表示挪到最后面**——B 站的 media_id
+// 不会是 0，所以 0 在这里是空着的。调用方（侧栏）拿到的是「插到第几行前面」
+// 或者「列表的行数」（= 最后面），由它换算成这一个参数。
 //
-// 没动过（id 不在列表里、target 不在列表里、或者本来就在那）时返回 false，
+// ⚠️ **这条语义不是「挪到目标的最终下标」，是「插到目标前面」。** 差一格：
+// 往下拖（id 原本排在 before 前面）时，按旧下标插进去，被拖的那条会越过目标
+// 一行——屏幕上是指示线画在目标**上边缘**、落下去却停在目标**下面**。
+// 所以这里先把 id 拿出来，再在**缩短后的**列表里找 before 的位置插进去。
+// 往上拖（id 原本排在 before 后面）时两种算法碰巧一样，差只差在往下拖。
+//
+// ⚠️ 这也是**不能照抄 Biu 的 `reorderList`** 的原因（`favorite.ts:47-59`）：
+// 它是 `splice(to, 0, moved)`，to 取的是目标删之前的下标，语义是「挪到目标
+// 的最终位置」。Biu 的 dnd-kit 给的 over.id 和这里给的 before 不是一回事，
+// 照抄过来在往下拖的时候正好差一格。
+//
+// 没动过（id 不在列表里、before 不在列表里、或者本来就在那）时返回 false，
 // 调用方据此判断要不要落盘——Biu 在这种情况下 `return state`，一个字都不写。
-func (f *Favorites) Reorder(g FavoriteGroup, id, target int64) ([]int64, bool) {
+func (f *Favorites) Reorder(g FavoriteGroup, id, before int64) ([]int64, bool) {
 	if !g.Valid() {
 		return nil, false
 	}
@@ -114,14 +126,28 @@ func (f *Favorites) Reorder(g FavoriteGroup, id, target int64) ([]int64, bool) {
 	defer f.mu.Unlock()
 
 	from := slices.IndexFunc(f.groups[g], func(x Favorite) bool { return x.ID == id })
-	to := slices.IndexFunc(f.groups[g], func(x Favorite) bool { return x.ID == target })
-	if from < 0 || to < 0 || from == to {
+	if from < 0 {
 		return nil, false
 	}
 
 	next := slices.Clone(f.groups[g])
 	moved := next[from]
 	next = slices.Delete(next, from, from+1)
+
+	// before == 0 → 落到最后面，也就是插到末尾。
+	to := len(next)
+	if before != 0 {
+		to = slices.IndexFunc(next, func(x Favorite) bool { return x.ID == before })
+		if to < 0 {
+			return nil, false
+		}
+	}
+	// 插回原来的位置 = 没动。from 是缩短**前**的下标，恰好等于缩短后的
+	// 落点时就说明顺序没变。
+	if to == from {
+		return nil, false
+	}
+
 	next = slices.Insert(next, to, moved)
 	f.groups[g] = next
 	return orderOf(next), true
@@ -213,15 +239,17 @@ func (a *App) SideFavorites(g FavoriteGroup) []Favorite {
 	return a.FavoritesOf().Snapshot(g)
 }
 
-// ReorderFavorite 把一组里的 id 挪到 target 那一行的位置，并**立刻落盘**。
+// ReorderFavorite 把一组里的 id 挪到 before 那一行的**前面**，并**立刻落盘**。
+//
+// before 为 0 表示挪到最后面（见 Favorites.Reorder）。
 //
 // 落盘写在同一次调用里，是有意跟别处不一样：拖拽排序是「用户做了个决定」，
 // 不是「调了个参数」。调完之后界面上还看不出任何区别（要重启才知道）的话，
 // 用户只会以为没拖成。
 //
 // 没动过的时候返回 false 且一个字都不写（见 Favorites.Reorder）。
-func (a *App) ReorderFavorite(g FavoriteGroup, id, target int64) (bool, error) {
-	ids, moved := a.FavoritesOf().Reorder(g, id, target)
+func (a *App) ReorderFavorite(g FavoriteGroup, id, before int64) (bool, error) {
+	ids, moved := a.FavoritesOf().Reorder(g, id, before)
 	if !moved {
 		return false, nil
 	}
