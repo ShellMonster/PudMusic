@@ -2,9 +2,12 @@ package ui
 
 import (
 	"fmt"
+	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 
 	mygoui "github.com/egoist/mygo/ui"
 )
@@ -193,4 +196,103 @@ func TestErrorShowsNextToTheTitle(t *testing.T) {
 	if !tt.HasText("在线的一首") {
 		t.Errorf("出错时歌名不见了：%q", tt.Texts())
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 徽章就是换音质的入口
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheBadgeMenuSwitchesQuality 盯「点徽章能换音质」。
+//
+// 这一条是「音质切换后立即生效，无需重启」的**入口**：用户在播放条上点一下
+// 徽章、选一档，偏好就换了。没有这个入口的话，换音质只能去设置页——而那里
+// 改的是「下一首」，改完当前这首纹丝不动，用户会以为没生效。
+//
+// 这条断的是「点了菜单那一项，App 的偏好真的变了」。换流、跳回原位置那些
+// 是 `internal/app` 那边的用例（那边能造出「B 站只给了 320K」这种界面造不
+// 出来的 fixture）。
+func TestTheBadgeMenuSwitchesQuality(t *testing.T) {
+	a := streamingApp(t)
+	s := New(a)
+	t.Cleanup(s.images.Close)
+
+	// 偏好每帧从 App 现读，和界面别的地方一样。徽章那一行固定住（这一条测的
+	// 是菜单，不是换流），变的只有偏好那一项。
+	st := app.State{
+		HasTrack:    true,
+		Title:       "在线的一首",
+		Quality:     "320K",
+		QualityPref: app.AudioQualityAuto,
+	}
+	tt := mygoui.NewTester(func(c *mygoui.Context) {
+		s.wake.set(c)
+		st.QualityPref = a.Snapshot().QualityPref
+		s.viewPlayBar(c, st)
+	}, 760, coverWinH)
+	tt.Frame()
+
+	if err := tt.Click("320K"); err != nil {
+		t.Fatalf("点不动徽章：%v（画面上的字：%q）", err, tt.Texts())
+	}
+	want := []string{"自动", "无损", "高音质", "标准", "省流量"}
+	if got := tt.Menu(); !slices.Equal(got, want) {
+		t.Fatalf("菜单里的项 = %q，want %q", got, want)
+	}
+	if err := tt.ChooseMenuItem("无损"); err != nil {
+		t.Fatalf("选不了「无损」：%v", err)
+	}
+	if got := a.AudioQuality(); got != bili.AudioLossless {
+		t.Errorf("选完之后偏好 = %v，want AudioLossless", got)
+	}
+	if got := a.Snapshot().QualityPref; got != app.AudioQualityLossless {
+		t.Errorf("状态里的偏好 = %q，want %q", got, app.AudioQualityLossless)
+	}
+
+	// 菜单不是一次性的：换完一档之后还能接着换。菜单里勾中的那一项由这一帧
+	// 的状态说了算，所以它得是现读的——缓存住的话勾永远停在换之前那一档。
+	if err := tt.Click("320K"); err != nil {
+		t.Fatalf("第二次点不动徽章：%v", err)
+	}
+	if got := tt.Menu(); !slices.Equal(got, want) {
+		t.Fatalf("第二次的菜单 = %q，want %q", got, want)
+	}
+	if err := tt.ChooseMenuItem("省流量"); err != nil {
+		t.Fatalf("选不了「省流量」：%v", err)
+	}
+	if got := a.AudioQuality(); got != bili.AudioLow {
+		t.Errorf("第二次选完偏好 = %v，want AudioLow", got)
+	}
+}
+
+// TestNoQualityMenuWithoutABadge 盯本地文件不弹这个菜单。
+//
+// 徽章说的是「B 站给了哪一档」，本地文件没有这一档，也就没有档可换。点歌名
+// 不该弹出音质菜单——那会让用户以为点哪儿都能换音质。
+func TestNoQualityMenuWithoutABadge(t *testing.T) {
+	tt := qualityBarTester(t, app.State{HasTrack: true, Title: "本地的一首"})
+	if err := tt.Click("本地的一首"); err != nil {
+		t.Fatal(err)
+	}
+	if items := tt.Menu(); items != nil {
+		t.Errorf("本地文件也弹出了音质菜单：%q", items)
+	}
+}
+
+// streamingApp 建一个挂了在线播放的 App。
+//
+// ⚠️ 菜单里的选择最终要落到 `App.SetAudioQuality` 上，而它一看「没挂取流」
+// 就直接走人。所以这一条要的是**真挂了**，不是摆一个空壳：菜单项点了没反应
+// 和菜单项根本没接上是两回事。
+//
+// 这里挂的客户端不会发任何请求——`SetAudioQuality` 在没有在线流的时候只改
+// 偏好，不取流。
+func streamingApp(t *testing.T) *app.App {
+	t.Helper()
+	a := app.New()
+	t.Cleanup(a.Close)
+	a.MountStreaming(app.Streaming{
+		Client: bili.NewClient(bili.Options{}),
+		Media:  http.DefaultClient,
+	})
+	return a
 }
