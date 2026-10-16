@@ -79,7 +79,7 @@ const (
 	interopGetForWindow = 6
 
 	// `ISystemMediaTransportControls`
-	smtcPutPlaybackStatus  = 7
+	smtcPutPlaybackStatus = 7
 	smtcGetDisplayUpdater = 8
 	smtcPutIsEnabled      = 11
 	smtcPutIsPlayEnabled  = 13
@@ -107,11 +107,12 @@ const (
 	seekArgsGetRequestedPos = 6
 
 	// `SystemMediaTransportControlsDisplayUpdater`
-	updaterPutType   = 7
-	updaterPutThumb  = 11
-	updaterGetMusic  = 12
-	updaterClearAll  = 16
-	updaterUpdate    = 17
+	updaterPutType = 7
+	// ⚠️ 故意没有 `put_Thumbnail`（第 11 格）：封面那一支没做，理由在
+	// `smtc_meta_windows.go` 顶上。留着那个常量会让人以为有。
+	updaterGetMusic = 12
+	updaterClearAll = 16
+	updaterUpdate   = 17
 
 	// `IMusicDisplayProperties`
 	musicPutTitle       = 7

@@ -58,11 +58,11 @@ func smtcPlaybackStatus(s State) smtcStatus {
 type smtcButton int32
 
 const (
-	smtcButtonPlay smtcButton = 0
+	smtcButtonPlay  smtcButton = 0
 	smtcButtonPause smtcButton = 1
-	smtcButtonStop smtcButton = 2
-	smtcButtonNext smtcButton = 6
-	smtcButtonPrev smtcButton = 7
+	smtcButtonStop  smtcButton = 2
+	smtcButtonNext  smtcButton = 6
+	smtcButtonPrev  smtcButton = 7
 )
 
 // smtcCommand 把系统按下的那个键翻成我们的命令。

@@ -37,7 +37,7 @@ const sOK = 0
 // handler 是一个 COM 对象：只有一个方法（Invoke）加 IUnknown 那三个。
 type handler struct {
 	// vtbl 必须在第一个字段：系统那边把我们的地址当 `IUnknown*` 用，
-	 // `QueryInterface` 里那第一句就是把它当虚表指针解引用。
+	// `QueryInterface` 里那第一句就是把它当虚表指针解引用。
 	vtbl *[4]uintptr
 	refs int32
 	fn   func(sender, args uintptr)

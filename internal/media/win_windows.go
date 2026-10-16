@@ -52,7 +52,7 @@ var sysDir = systemDirectory()
 func systemDLL(name string) *syscall.LazyDLL { return syscall.NewLazyDLL(sysDir + `\` + name) }
 
 var (
-	dllWinRT  = systemDLL("combase.dll")    // RoInitialize / RoGetActivationFactory
+	dllWinRT  = systemDLL("combase.dll") // RoInitialize / RoGetActivationFactory
 	dllWinStr = systemDLL("kernelbase.dll")
 	dllOle32  = systemDLL("ole32.dll")
 	dllUser32 = systemDLL("user32.dll")
@@ -85,8 +85,8 @@ func winStringProcs() (create, del *syscall.LazyProc) {
 
 var (
 	procWinStringCreate, procWinStringDelete = winStringProcs()
-	procRoInitialize                        = dllWinRT.NewProc("RoInitialize")
-	procRoGetFactory                        = dllWinRT.NewProc("RoGetActivationFactory")
+	procRoInitialize                         = dllWinRT.NewProc("RoInitialize")
+	procRoGetFactory                         = dllWinRT.NewProc("RoGetActivationFactory")
 
 	procRegisterWindowMessage  = dllUser32.NewProc("RegisterWindowMessageW")
 	procSetWindowSubclass      = dllComctl.NewProc("SetWindowSubclass")
@@ -95,14 +95,14 @@ var (
 	procGetDpiForWindow        = dllUser32.NewProc("GetDpiForWindow")
 	procGetSystemMetricsForDPI = dllUser32.NewProc("GetSystemMetricsForDpi")
 
-	procImageListCreate    = dllComctl.NewProc("ImageList_Create")
-	procImageListAdd       = dllComctl.NewProc("ImageList_Add")
-	procImageListSetAlpha  = dllComctl.NewProc("ImageList_SetAlphaImage")
-	procImageListDestroy   = dllComctl.NewProc("ImageList_Destroy")
-	procCreateDIBSection   = dllGDI32.NewProc("CreateDIBSection")
-	procDeleteObject       = dllGDI32.NewProc("DeleteObject")
-	procCoCreateInstance   = dllOle32.NewProc("CoCreateInstance")
-	procGetSystemMetrics   = dllUser32.NewProc("GetSystemMetrics")
+	procImageListCreate   = dllComctl.NewProc("ImageList_Create")
+	procImageListAdd      = dllComctl.NewProc("ImageList_Add")
+	procImageListSetAlpha = dllComctl.NewProc("ImageList_SetAlphaImage")
+	procImageListDestroy  = dllComctl.NewProc("ImageList_Destroy")
+	procCreateDIBSection  = dllGDI32.NewProc("CreateDIBSection")
+	procDeleteObject      = dllGDI32.NewProc("DeleteObject")
+	procCoCreateInstance  = dllOle32.NewProc("CoCreateInstance")
+	procGetSystemMetrics  = dllUser32.NewProc("GetSystemMetrics")
 )
 
 // ---- HRESULT ----

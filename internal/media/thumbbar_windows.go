@@ -397,8 +397,8 @@ func buildThumbButtons(bs [thumbbarCommandCount]thumbbarButton) ([]thumbbutton, 
 	for _, b := range bs {
 		tip := utf16z(tipOf(b.Command))
 		out = append(out, thumbbutton{
-			dwMask:  thbmImageList | thbmToolTip,
-			iID:     b.ID,
+			dwMask: thbmImageList | thbmToolTip,
+			iID:    b.ID,
 			// iBitmap 是**图标在图片列表里的下标**，而图标是按 glyph 的
 			// 编号放的（play=0、pause=1、prev=2、next=3）——所以这里直接
 			// 拿 Glyph 当下标用，两边共用一套编号，见 thumbbar_glyph.go。
