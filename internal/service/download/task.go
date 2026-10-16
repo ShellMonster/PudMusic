@@ -106,11 +106,19 @@ func (i Identity) SameResource(o Identity) bool {
 // 起步），让它跟着引用到处传只会把锁的边界搅乱。`Snapshot` 拷一份出去，
 // 界面拿着看。
 type Task struct {
-	// ID 是这一项在队列里的唯一身份：`<bvid>|<cid>|<quality>`。
+	// ID 是这一项在队列里的唯一身份：`<bvid>|<cid>`（见 `TaskID`）。
 	//
 	// 用内容身份而不是随机 UUID（B 站上游用的是 UUID）：同一首歌重复点两次
 	// 下载，用户要的是「就一个」，而不是队列里躺着两个下同一首歌的任务。
-	// 音质进键是因为「同一首要 320K 和要无损」在 B 站那边确实是两段字节。
+	//
+	// ⚠️ 音质**不在键里**，这是有原因的：入队那一刻还不知道 B 站会给哪
+	// 一档（要问一次网络，而入队在界面线程上）。音质在续传那一步单独比
+	// （`Identity`），对不上就重下——那才是真正要拦住「两段不同字节拼在
+	// 一起」的地方。
+	//
+	// 代价：同一首歌换一档音质再点下载，会被当成同一项静默忽略。
+	// 解开它要一次取流（网络）或者一个显式的「换音质重下」动作，都不是
+	// 这一票的范围——留给记录页那一票（#31）在界面上把话说清楚。
 	ID string `json:"id"`
 
 	// Title 是歌名。落盘前要过一遍 `FileName`。
@@ -293,22 +301,39 @@ func TaskID(bvid, cid string) string {
 // 等于把已经下了一半的字节挪到另一个文件名下面，而续传记的是分块下标
 // 不是文件内偏移——换个文件那些下标全指错了位置。
 func DestFor(dir, title, ext, id string) string {
-	stem := FileName(title, "")
-	if stem == "" {
+	// ⚠️ **255 的预算要含扩展名，也含同名避让加的那个 ` (1)`。**
+	// 之前这里是 `FileName(title, "")` 先把词干截到 255 再拼扩展名，于是
+	// 84 个汉字（252 字节）+ `.m4a` = 256 字节：词干自己没超，整个名字超了。
+	// 而 `.part` 之后还要再加 5。所以这里把「后缀」整个交给 `FileName`
+	// 去算预算——`FileName` 的第二个参数是**必须留在名字末尾的东西**，
+	// 不只是扩展名。
+	base := FileName(title, ext)
+	if base == "" {
 		// 歌名实在净化不出东西。拿内容 id 当名字：至少能看出是哪一首，
 		// 而编一个「未命名」在记录页上一眼看得出是名字丢了。
-		stem = idSanitized(id)
+		base = FileName(idSanitized(id), ext)
 	}
-	if _, err := os.Stat(filepath.Join(dir, stem+ext)); err != nil {
-		return filepath.Join(dir, stem+ext)
+	if _, err := os.Stat(filepath.Join(dir, base)); err != nil {
+		return filepath.Join(dir, base)
 	}
+	stem := strings.TrimSuffix(base, ext)
 	for i := 1; i < 10000; i++ {
-		cand := filepath.Join(dir, fmt.Sprintf("%s (%d)%s", stem, i, ext))
-		if _, err := os.Stat(cand); err != nil {
-			return cand
+		// 同名避让的 ` (1)` 也要算进预算：词干再长的话它得让出这几个字节。
+		cand := FileName(stem, fmt.Sprintf(" (%d)%s", i, ext))
+		if cand == "" {
+			continue
+		}
+		if p := filepath.Join(dir, cand); !exists(p) {
+			return p
 		}
 	}
-	return filepath.Join(dir, stem+ext)
+	return filepath.Join(dir, base)
+}
+
+// exists 报这个路径上有没有东西。
+func exists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 // idSanitized 把内容 id 变成能当文件名的样子（`/` 和 `|` 都要换掉）。
