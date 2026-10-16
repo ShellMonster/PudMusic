@@ -167,6 +167,41 @@ func TestColumnsAreEvenlyWideAcrossTheRow(t *testing.T) {
 	}
 }
 
+// TestColumnsFollowTheContainersWidthNotTheWindows 钉住「按**容器**宽算列数」
+// 这条被注释称作承重的决定：Biu 量的是网格自己那个 wrapper（`useSize(wrapperRef)`），
+// 真机上页面左边有侧栏，容器比窗口窄一截。
+//
+// ⚠️ 别的用例里窗口**就是**网格容器（网格直接摆在根上），所以它们分不出这两种
+// 做法——把 View 里量宽的那句从 `g.width` 换成 `c.Size()`（窗口宽），它们照样全绿。
+// 这里在网格左边摆一条 220 宽的侧栏：窗口 1400，容器 1180。按容器算是 4 列
+// （1024~1279 那一档），按窗口算是 5 列——差一档。
+//
+// ⚠️ 网格外面套一层 Column 是为了 Tester 量得到格子：滚动容器直接当 Row 的下一层
+// 时，它里面那些文字的盒子量出来是空的（`Tester.Find` 给一个 0×0 的矩形），怎么
+// 摆都分不出几列（试过 Row.Fill / Row.FillHeight / Column+Row.Grow 三种）。真窗口
+// 里画得好好的，量不到只是无头那套的记录方式。
+func TestColumnsFollowTheContainersWidthNotTheWindows(t *testing.T) {
+	const winW, sideW = 1400, 220
+	g := NewGrid(newCache(t), Actions{})
+	g.SetSongs(songsOf(gridN, "UP 主"))
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Row(c).Fill().Children(func() {
+			ui.Box(c).Width(sideW) // 侧栏，和真窗口一样占着左边一块
+			ui.Column(c).Grow(1).FillHeight().Children(func() {
+				g.View(c) // 网格吃剩下的 1180
+			})
+		})
+	}, winW, gridH)
+	tt.Frame()
+	frame(tt)
+
+	if got := songsOnTopRow(t, tt, gridN); got != 4 {
+		t.Errorf("窗口 %d 宽、侧栏 %d 宽（容器 %d）时顶上那一行放 %d 首，want 4 列"+
+			"（按容器的宽算，不是按窗口的宽）", winW, sideW, winW-sideW, got)
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 滚动锚点
 // ─────────────────────────────────────────────────────────────────────────────
@@ -209,6 +244,46 @@ func TestResizingAcrossABreakpointKeepsTheSameSongInView(t *testing.T) {
 		// 没有跳回顶部：跳回顶部是「锚点丢了」最常见的那种坏法。
 		if top, ok := tt.Find("歌 1"); ok && top.H > 0 {
 			t.Errorf("宽 %d 改成 %d 之后画面回到了第一首（滚动锚点丢了）", c.from, c.to)
+		}
+	}
+}
+
+// TestDraggingTheWindowEdgeKeepsTheSameSongInView 是验收第 2 条在**人真正的做法**
+// 下的那一半：上面那条走的是「一步跳到某个宽度」，可人拖窗口边是一帧一帧拖过去
+// 的，中间要连着跨过好几个断点。
+//
+// 🔴 这一条钉的是「锚点记的是**那一首歌**，不是「第几行」」：滚动单位是行，歌在
+// 第几行是算出来的（歌的下标除以列数），一取整就丢。记行号的话每跨一档丢一次，
+// 拖 1600→500 要连丢四次（6→5→4→3→2），误差累加起来用户盯着的那首整个掉出画面
+// ——实测漂 6 首、掉到 y=632（窗口才 700 高），而同样宽度一步跳过去它还在。
+//
+// 判据是**每一拖都还在顶上那一行**，不是「最后还在」：中途掉下去再被后面的帧
+// 拉回来，最后一条是绿的，中间那一路用户已经跟丢了。
+func TestDraggingTheWindowEdgeKeepsTheSameSongInView(t *testing.T) {
+	const anchor = 5000 // 6 列下它是顶上那一行的第 3 格（0 起），不是行首
+	g, tt := newGrid(t, Actions{}, songsOf(8000, "UP 主"), 1600, gridH)
+
+	g.ScrollToItem(anchor, ui.Start)
+	frame(tt)
+	if !songOnTopRow(t, tt, anchor) {
+		t.Fatalf("滚到第 %d 首之后它不在顶上那一行", anchor+1)
+	}
+
+	// 每帧 20 像素地拖窄：真机上拖窗口边就是这个节奏（一次拖动经过好几档）。
+	for w := 1600; w > 500; w -= 20 {
+		tt.SetSize(w, gridH)
+		frame(tt)
+		if !songOnTopRow(t, tt, anchor) {
+			t.Fatalf("拖到宽 %d 时，第 %d 首掉出顶上那一行了"+
+				"（锚点存的是行号，误差逐跳累加了）", w, anchor+1)
+		}
+	}
+	// 来回拖才是窗口边被反复拽的样子：拖回去也得守住同一首。
+	for w := 500; w < 1600; w += 20 {
+		tt.SetSize(w, gridH)
+		frame(tt)
+		if !songOnTopRow(t, tt, anchor) {
+			t.Fatalf("拖回宽 %d 时，第 %d 首掉出顶上那一行了", w, anchor+1)
 		}
 	}
 }

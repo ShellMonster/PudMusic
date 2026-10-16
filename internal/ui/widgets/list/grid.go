@@ -104,8 +104,21 @@ type Grid struct {
 	// acts 是这个网格会做的操作，见 actions.go。
 	acts Actions
 
-	// failed 是画崩了的行（按 ID 记），下一帧不重试。理由见 shared.go。
-	failed map[string]bool
+	// failed 是画崩了的**格**、failedRow 是画崩了的**行**（都按那一首的 ID 记），
+	// 崩过的不再重试。理由见 shared.go。
+	//
+	// ⚠️ 分成两张表是必须的：行的键是这一行**第一首**的 ID，和格子的键会撞上
+	// （第一格崩了记的就是第一首的 ID）。共用一张表的话，下一帧行先短路成
+	// 「这一行画不出来」，同一行里另外几首好的也跟着没了——按格兜就白兜了。
+	failed, failedRow map[string]bool
+
+	// anchorID 是滚动锚点守着的那**一首歌**的 ID。
+	//
+	// ⚠️ 必须是歌，不是「第几行」：换列数时行要重新分，歌在第几行是**算出来**
+	// 的（歌的下标除以列数），一取整就丢。存行号的话每跨一档就丢一次，而人拖
+	// 窗口边正是一帧一帧跨过去的——6→5→4→3→2 丢四次，用户盯着的那首就整个掉
+	// 出画面了（实测拖 1600→500 漂 6 首，一步跳到同一个宽度则漂 0 首）。
+	anchorID string
 
 	// width 是这个网格**上一帧**量出来的容器宽，用来判断点。
 	width float32
@@ -185,6 +198,9 @@ func (g *Grid) Selected() (Music, bool) {
 //
 // 收的是**第几首**不是第几行（`List.ScrollTo` 收的是行号）：列数会变，同一个
 // 行号一会儿是这一首一会儿是那一首，拿行号来滚，滚过去的是哪一首说不准。
+//
+// 顺带把滚动锚点记成这一首：调用方刚说过「我要看这一首」，之后用户拖窗口边、
+// 列数换了，守着的就是它，不用等下一次换列数时猜「他此刻盯着哪首」。
 func (g *Grid) ScrollToItem(item int, align ui.Align) {
 	// ⚠️ 用局部变量，不要就地改 g.cols：那个字段是「上一帧的列数」，
 	// keepAnchor 靠它把行号换算成第几首，这里顺手改掉会算错下一帧的锚点。
@@ -192,12 +208,21 @@ func (g *Grid) ScrollToItem(item int, align ui.Align) {
 	if cols <= 0 {
 		cols = gridMinCols // 还没画过一帧，按最窄那档算
 	}
+	if item >= 0 && item < len(g.songs) {
+		g.anchorID = g.songs[item].ID
+	}
 	g.state.ScrollTo(item/cols, align)
 }
 
 // View 画这个网格。页面在每一帧开头调一次。
 //
 // 摆法和 `List.View` 一样：自己占 Grow(1)，调用方要给它一块地方。
+//
+// 🔴 断点看的是**容器**的宽（g.width，这个列表元素自己的盒子，见下面那句
+// Bounds），不是窗口的：Biu 量的是网格自己那个 wrapper，页面左边有侧栏时两者
+// 差着一截，差一档就是差一列。真机上窗口 1400 + 侧栏 220 → 容器 1180 → 4 列；
+// 按窗口宽算是 5 列。TestColumnsFollowTheContainersWidthNotTheWindows 钉的就是
+// 这一条（别的用例里网格摆在根上，窗口就是容器，分不出这两种做法）。
 func (g *Grid) View(c *ui.Context) {
 	w := g.width
 	if w <= 0 {
@@ -209,7 +234,8 @@ func (g *Grid) View(c *ui.Context) {
 	}
 
 	cols := columnsFor(w)
-	// ⚠️ 必须在换掉 g.cols **之前**算锚点：它靠 g.cols 把行号换算成第几首。
+	// ⚠️ 必须在换掉 g.cols **之前**算锚点：keepAnchor 那一段里的行号是用 g.cols
+	// （旧的列数）换算的。
 	g.keepAnchor(cols)
 
 	rows := (len(g.songs) + cols - 1) / cols
@@ -248,11 +274,18 @@ func (g *Grid) View(c *ui.Context) {
 // keepAnchor 是「换列数时滚动锚点保持」的那一段（验收第 2 条）。
 //
 // 换列数是**布局变了，数据没变**：同一首歌在 6 列时是第 120 行，在 2 列时是
-// 第 40 行。什么都不做的话滚动量不变，同一个滚动量在两种布局下指的是完全不同的
+// 第 360 行。什么都不做的话滚动量不变，同一个滚动量在两种布局下指的是完全不同的
 // 歌——用户盯着的那首会整个跳走，拖一下窗口边就丢了位置。
 //
-// 所以：列数一变，就把「顶上那一行的第一首」换算成新列数下的行号，滚到那里。
-// 顶上那一行是用户此刻正看着的那行，它的第一首就是最靠上、最该留在眼前的那首。
+// 🔴 **锚点记的是那一首歌（anchorID），不是「第几行」**：滚动单位是行，而歌在
+// 第几行是**算出来**的（歌的下标除以列数），一取整就丢。记行号的话每跨一档丢一次，
+// 而人拖窗口边正是一帧一帧跨过去的——6→5→4→3→2 连丢四次，误差累加起来用户盯着
+// 的那首就整个掉出画面（实测：拖 1600→500 漂 6 首，一步跳到同样宽度漂 0 首）。
+// 记歌就没有这个问题：跨多少档都是同一首，它最多换到顶上那一行的另一格。
+//
+// 什么时候换锚：锚点守着的歌**还在画面上就不换**（换列数不该把用户盯着的那首
+// 换成别的歌）；它滚出画面了（用户自己滚走了）才换人守，换的是这一刻顶上那一行
+// 的第一首。
 //
 // ⚠️ 为什么不等框架的 `ListState.Key` 自己找回：它按 key 找回锚点时**只在
 // 前后各 1000 行里线性找**（`mygo/ui/list.go` 的 listSearch）。一千首的歌单
@@ -269,7 +302,16 @@ func (g *Grid) keepAnchor(cols int) {
 		// 硬滚反而会跳。
 		return
 	}
-	g.state.ScrollTo(first*g.cols/cols, ui.Start)
+	// ⚠️ 这一段里的行号都除以 g.cols——**旧**的列数：歌的下标是它在旧布局里的
+	// 位置，换算回去也用旧的。View 是在 keepAnchor 之后才把 g.cols 换成新值的。
+	j := indexOfID(g.songs, g.anchorID)
+	if j < 0 || j/g.cols < first || j/g.cols > last {
+		if j = first * g.cols; j >= len(g.songs) {
+			return // 这一行是空的（歌没了），没有可守的
+		}
+		g.anchorID = g.songs[j].ID
+	}
+	g.state.ScrollTo(j/cols, ui.Start)
 }
 
 // viewRow 画一行：一行 cols 首歌。
@@ -284,8 +326,21 @@ func (g *Grid) keepAnchor(cols int) {
 // 两层都是 shared.go 的 guardFailed，崩过的按 ID 记下来，下一帧不再重试。
 func (g *Grid) viewRow(r ui.ListRow, cols int, cell float32) {
 	c, first := r.Context, r.Index*cols
+	m := g.songs[first]
 
-	guardFailed(&g.failed, "网格行", g.songs[first].ID, func() {
+	// 崩过的那一行**不再画**（和 List.viewRow 一个写法）：不然它每一帧崩一次、
+	// 每帧打一整份 debug.Stack，日志被刷爆、帧率拖垮，比「这一行画不出来」
+	// 糟得多。
+	//
+	// ⚠️ 记在 failedRow 里，不是 failed（格子的那张表）：两张表的键都是那一首
+	// 的 ID，第一格崩了记的就是第一首的 ID，共用一张表的话下一帧行先短路成
+	// 「这一行画不出来」，同行里另外几首好的也跟着没了。
+	if g.failedRow[m.ID] {
+		ui.Text(c, "这一行画不出来").FontSize(13).TextColor(c.Theme().TextMuted).
+			Padding(cardPadY, cardPadX).MaxLines(1)
+		return
+	}
+	guardFailed(&g.failedRow, "网格行", m.ID, func() {
 		// ⚠️ Stretch：格子要撑满这一行的高，选中那一格的底色才是一整块，
 		// 而不是只有歌名那一小块。
 		ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(gridGap).Children(func() {
