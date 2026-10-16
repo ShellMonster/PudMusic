@@ -22,8 +22,13 @@
 // ⚠️ 本包不认识 app.App 之外的世界，也不碰网络：封面走 imgcache，音乐条目是
 // 调用方给的 Music，操作走 Actions（接在哪儿见 actions.go）。
 //
-// `AppActions` 和 `BiliLink` 现在还没有调用方，这是有意的：挂这个列表的是
-// PLAN.md 阶段 5 的那 14 个内容页，那一张做出来时直接用它，别再写一份接线。
+// 包里有两层：list.go 这一层是虚拟列表 + 卡片，**要翻页的内容页在它上面**，
+// 见 paged.go 的 PagedList（拉页、防重入、取消、容器没填满自动续拉、回顶按钮）。
+// PagedList 现在还没有调用方，这也是有意的：同下面那一条。
+//
+// `AppActions`、`BiliLink` 和 `NewPaged` 现在还没有调用方，这是有意的：挂这个
+// 列表的是 PLAN.md 阶段 5 的那 14 个内容页，那一张做出来时直接用它，别再写一份
+// 接线。
 package list
 
 import (
@@ -97,6 +102,21 @@ type List struct {
 	// acts 是这个列表会做的操作，见 actions.go。
 	acts Actions
 
+	// footer 是末尾多出来的那一行的画法，为 nil 时没有这一行。
+	//
+	// 它是**哨兵行**：翻页的列表用它占住「下面还有」的位置，滚到它就拉下一页
+	// （见 paged.go 的三重保障之二）。没有它，「滚到底」就得靠另外的办法去猜
+	// 「内容是不是到底了」，而末尾那一行本身就是这个答案。
+	//
+	// 它不是歌，所以行身份是 footerKey：一个歌 ID 不可能撞上的类型。
+	footer func(c *ui.Context)
+
+	// scroll 是这个列表把滚动位置写回来的那个句柄，为 nil 时不写。
+	scroll *ui.ScrollState
+
+	// empty 是一行歌都没有时说的话，空串是 defaultEmpty（见 SetEmpty）。
+	empty string
+
 	// failed 是画崩了的行（按 ID 记），下一帧不重试。
 	//
 	// 为什么要记：MyGo 的事件循环没有 recover，行里一个 panic 会一路穿出去
@@ -129,6 +149,63 @@ func New(cache *imgcache.Cache, acts Actions) *List {
 func (l *List) SetSongs(songs []Music) {
 	l.songs = songs
 	l.warnDuplicateIDs(songs)
+}
+
+// SetFooter 装末尾那一行的画法（通常是转圈 + 重试），传 nil 去掉。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (l *List) SetFooter(fn func(c *ui.Context)) { l.footer = fn }
+
+// SetEmpty 换掉「没有歌时说的那句话」，空串是恢复默认（defaultEmpty）。
+//
+// 分页列表用它：第一页还没回来的时候说「正在加载…」，免得一句「这里还没有歌」
+// 和页脚那一行的话打架（没东西的时候页脚就是唯一一行，见 paged.go）。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (l *List) SetEmpty(text string) { l.empty = text }
+
+// SetScroll 让这个列表把滚动位置写进 s（每帧写一次），调用方读它就知道滚到
+// 哪儿了，也能靠改它把列表滚到某处。传 nil 就断开。
+//
+// MyGo 的 List 自己按行记位置（`ListState` 注释：「A List keeps its place by
+// its rows instead」），但**滚动到哪儿**这个数它不往外说 —— 要判「滚过多少
+// 像素」「是不是在顶上」就得靠它（见 paged.go 的回顶按钮与三重保障）。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (l *List) SetScroll(s *ui.ScrollState) { l.scroll = s }
+
+// footerKey 是末尾那一行的身份。**不用字符串**：歌的 ID 是 bvid / 完整路径
+// 之类的用户数据，理论上能撞上一个叫 "footer" 的；类型撞不上。
+type footerKey struct{}
+
+// footerLabel 是末尾那一行给无障碍和「打字选中」用的名字。固定一句话，不跟着
+// 状态变（转圈 / 重试）——它在无障碍里念出来总比一句会变的话稳。
+const footerLabel = "加载更多"
+
+// defaultEmpty 是一行歌都没有时默认说的话。
+const defaultEmpty = "这里还没有歌"
+
+// footerFailed 是末尾那一行在 failed 里用的键。它和歌的 ID（用户数据，bvid 或
+// 完整路径）不是一个来源，所以带一个前缀。
+const footerFailed = "biu:footer"
+
+// emptyText 是这一帧该说的那句空状态。
+func (l *List) emptyText() string {
+	if l.empty != "" {
+		return l.empty
+	}
+	return defaultEmpty
+}
+
+// rows 是这个列表有几行，含末尾那一行（没装 footer 就不算）。
+//
+// paged.go 的「末尾进了画面没有」问的是它，所以行数只有一个算法（就是这里）。
+func (l *List) rows() int {
+	n := len(l.songs)
+	if l.footer != nil {
+		n++
+	}
+	return n
 }
 
 // warnDuplicateIDs 把重复的行标识指出来。
@@ -184,13 +261,25 @@ func (l *List) View(c *ui.Context) {
 	// TestInsertingARowAtTheHeadKeepsTheChosenSong 会红。
 	//
 	// ⚠️ 别改成序号：那正是实测踩过的坑（头部插入后选中项变成旁边另一首）。
-	l.state.Key = func(i int) any { return l.songs[i].ID }
+	//
+	// 末尾那一行（footer）不是歌，给它一个歌不可能撞上的身份，别在这里越界。
+	l.state.Key = func(i int) any {
+		if i >= len(l.songs) {
+			return footerKey{}
+		}
+		return l.songs[i].ID
+	}
 	// Label 是这一行给无障碍和「打字选中」用的名字。
-	l.state.Label = func(i int) string { return l.songs[i].Title }
+	l.state.Label = func(i int) string {
+		if i >= len(l.songs) {
+			return footerLabel
+		}
+		return l.songs[i].Title
+	}
 	// Selected 让点击能选中一行（画成主色），双击提交。
 	l.state.Selected = &l.sel
 
-	ui.List(c, &l.state, len(l.songs)).
+	list := ui.List(c, &l.state, l.rows()).
 		Grow(1).
 		FillWidth().
 		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击：
@@ -199,17 +288,36 @@ func (l *List) View(c *ui.Context) {
 		// 没有歌时列表是空的，Children 里那一支就是它的空状态。
 		Children(func() {
 			if len(l.songs) == 0 {
-				ui.Text(c, "这里还没有歌").FontSize(13).
+				ui.Text(c, l.emptyText()).FontSize(13).
 					TextColor(c.Theme().TextMuted).Padding(16)
 			}
 		}).
 		Rows(func(r ui.ListRow) { l.viewRow(r) })
+
+	// 滚动位置写回调用方的句柄（见 SetScroll）。
+	if l.scroll != nil {
+		list.TrackScroll(l.scroll)
+	}
 }
 
 // viewRow 画一行。
+func (l *List) viewRow(r ui.ListRow) {
+	c, i := r.Context, r.Index
+
+	// 末尾那一行：翻页的哨兵 / 转圈 / 重试（见 paged.go）。它同样要 recover，
+	// 只是不参与选中（Selected 越界时是 ok=false）。
+	if i >= len(l.songs) {
+		l.guarded(c, footerFailed, func() { l.footer(c) })
+		return
+	}
+
+	l.guarded(c, l.songs[i].ID, func() { l.viewCard(r) })
+}
+
+// guarded 画一行，崩了只废掉这一行。
 //
 // 🔴 行里 panic 会一路穿出 Cocoa 事件循环把整个进程带走（框架的 Dispatch 和
-// drain 都没有 recover）。所以每一行自己兜一层，**只废掉这一行**：
+// drain 都没有 recover）。所以每一行自己兜一层：
 //
 //   - 界面上是「几千行里坏一行」，不是整页变成错误页——页级的 `internal/ui.Guard`
 //     兜的是整棵树，那是另一回事，两者不重复。
@@ -218,11 +326,8 @@ func (l *List) View(c *ui.Context) {
 //
 // 崩过的行记进 failed，不再重试：否则同一行每一帧崩一次，日志被刷爆、帧率
 // 拖垮，比「这一行画不出来」糟得多。
-func (l *List) viewRow(r ui.ListRow) {
-	c, i := r.Context, r.Index
-	m := l.songs[i]
-
-	if l.failed[m.ID] {
+func (l *List) guarded(c *ui.Context, id string, draw func()) {
+	if l.failed[id] {
 		ui.Text(c, "这一行画不出来").FontSize(13).TextColor(c.Theme().TextMuted).
 			Padding(cardPadY, cardPadX).MaxLines(1)
 		return
@@ -233,12 +338,12 @@ func (l *List) viewRow(r ui.ListRow) {
 			if l.failed == nil {
 				l.failed = map[string]bool{}
 			}
-			l.failed[m.ID] = true
-			log.Printf("biu: 列表行画崩了（%s）：%v\n%s", m.ID, rec, debug.Stack())
+			l.failed[id] = true
+			log.Printf("biu: 列表行画崩了（%s）：%v\n%s", id, rec, debug.Stack())
 		}
 	}()
 
-	l.viewCard(r)
+	draw()
 }
 
 // playFrom 从第 i 首往后接进队列并开始播。
