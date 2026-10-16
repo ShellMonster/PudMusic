@@ -25,11 +25,13 @@ defer d.Close()                     // 关文件句柄
 audio.NewPlayer(d)                  // MyGo 驱动的流式播放
 ```
 
-本项目里实际走的是 `internal/service/audio.Open()`，它按扩展名分流，
-FLAC 交给这个包，其余交给 MyGo 已注册的格式。
+本项目里实际走的是 `internal/service/audio.Open()`（本地文件）与
+`OpenStream()`（B 站在线流），两条路调的是**同一个** `openDecoder`：按头几个字节
+查 MyGo 的注册表，认不出来才落到这个包的 `Open`。
 
 ## 搬进来之后要留意的一件事
 
 `mygoflac` 子包（注册裸 FLAC 到 `audio.RegisterFormat`）也一起搬了，但**本项目不 import 它**：
-MP4 里的 FLAC 没有 magic 可注册，`audio.RegisterFormat` 认不出来，所以
-`internal/service/audio` 直接按 `.flac` 扩展名调 `OpenFile`——那是唯一能同时吃两种容器的入口。
+注册表是对字面量做匹配的，给变长的 magic（`fLaC` + STREAMINFO）注册不了，
+所以 `openDecoder` 在注册表认不出来之后**试一次** `flacdec.Open`。
+MP4 里的 FLAC 头几个字节是 `ftyp`，注册表认得出来，走的是系统解码器那条路。
