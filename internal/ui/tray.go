@@ -21,7 +21,7 @@ func (s *Shell) installTray() {
 	if !platform.TraySupported() {
 		return // macOS：收进 Dock，不是托盘（见 platform.TraySupported）
 	}
-	tray, err := platform.NewTray(platform.TrayIcon(), s.trayMenu())
+	tray, err := platform.NewTray(platform.TrayIconPNG(), s.trayMenu())
 	if err != nil {
 		log.Printf("biu: 托盘图标建不出来，隐藏之后只能再启动一个应用唤回来：%v", err)
 		return
