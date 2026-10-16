@@ -164,13 +164,26 @@ type Options struct {
 
 // defaultFetch 是默认的取图方式。
 //
-// 就是一个不带 cookie jar、不带任何头的普通客户端：封面地址是公开的
-// CDN 地址（B 站给了就能看），把登录凭据发给存图的机器没有任何理由。
+// ⚠️ **Referer 要给**：B 站的图床不给就拒（和 CDN 上的音频一个脾气，真机验过；
+// `imgcache` 那边也是这么发的）。Referer 不是凭据——它不含任何能代表用户的东西，
+// 而缺了它就是一张都下不来。
+//
+// 除了 Referer 和 User-Agent，**什么别的都不给**：不带 cookie jar、不带任何
+// 凭据。封面地址是公开的 CDN 地址（B 站给了就能看），把 SESSDATA 发给一台
+// 存图的机器没有任何理由（`spec.md`「网络」一节，和 `app/online.go` 里的
+// 媒体客户端是同一个道理）。
+//
 // 超时给 15 秒，理由和界面上的封面缓存一样（`imgcache.Options`）。
 func defaultFetch(url string) ([]byte, error) {
 	const timeout = 15 * time.Second
 	client := &http.Client{Timeout: timeout}
-	resp, err := client.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Referer", biliReferer)
+	req.Header.Set("User-Agent", fetchUserAgent)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -180,6 +193,13 @@ func defaultFetch(url string) ([]byte, error) {
 	}
 	return readAllLimit(resp.Body)
 }
+
+// biliReferer 是取 B 站图床时给的 Referer，和 `imgcache` 那边一致。
+const biliReferer = "https://www.bilibili.com/"
+
+// fetchUserAgent 是取图时给的 User-Agent。B 站的 CDN 对空 UA 会挑。
+const fetchUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 " +
+	"(KHTML, like Gecko) Version/18.0 Safari/605.1.15"
 
 // platform 是平台那一半要提供的东西。
 //

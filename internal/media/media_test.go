@@ -1,6 +1,9 @@
 package media
 
 import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -464,5 +467,64 @@ func TestCommandNamesAreDistinct(t *testing.T) {
 			t.Errorf("命令 %d 和 %d 同名（%q）", int(c), int(prev), name)
 		}
 		seen[name] = c
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 取封面
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheCoverFetchAsksPolitely 盯请求头。
+//
+// 两个都是真机验过的：B 站的图床**不给 Referer 就拒**（和 CDN 上的音频一个
+// 脾气），对空 User-Agent 也会挑。而这两个之外的东西一个都不该有——
+// 封面地址是公开的 CDN 地址，把登录凭据发给存图的机器没有任何理由。
+func TestTheCoverFetchAsksPolitely(t *testing.T) {
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.Write([]byte("图片字节"))
+	}))
+	defer srv.Close()
+
+	body, err := defaultFetch(srv.URL + "/cover.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "图片字节" {
+		t.Errorf("取回来的是 %q", body)
+	}
+	if ref := got.Get("Referer"); ref != biliReferer {
+		t.Errorf("Referer = %q，want %q（B 站图床不给就拒）", ref, biliReferer)
+	}
+	if ua := got.Get("User-Agent"); ua == "" {
+		t.Error("User-Agent 是空的——B 站的 CDN 对空 UA 会挑")
+	}
+	if len(got.Values("Cookie")) != 0 {
+		t.Errorf("请求里带了 Cookie：%v", got.Values("Cookie"))
+	}
+	for _, h := range []string{"Authorization", "SESSDATA", "X-Csrf-Token"} {
+		if v := got.Get(h); v != "" {
+			t.Errorf("请求里带了 %s = %q——凭据不该发给存图的机器", h, v)
+		}
+	}
+}
+
+// TestANonImageResponseIsNotAnErrorState 盯非 200 要能分得出来。
+//
+// 「这张图取不到」和「网络断了」是两种事：前者不值得重试（地址就是错的），
+// 后者值得。
+func TestANonImageResponseIsNotAnErrorState(t *testing.T) {
+	for _, code := range []int{http.StatusNotFound, http.StatusForbidden} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(code)
+		}))
+		_, err := defaultFetch(srv.URL)
+		srv.Close()
+
+		var se *httpStatusError
+		if !errors.As(err, &se) {
+			t.Errorf("HTTP %d 报的是 %v，want 一个 httpStatusError", code, err)
+		}
 	}
 }
