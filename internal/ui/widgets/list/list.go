@@ -22,19 +22,22 @@
 // ⚠️ 本包不认识 app.App 之外的世界，也不碰网络：封面走 imgcache，音乐条目是
 // 调用方给的 Music，操作走 Actions（接在哪儿见 actions.go）。
 //
-// 包里有两层：list.go 这一层是虚拟列表 + 卡片，**要翻页的内容页在它上面**，
-// 见 paged.go 的 PagedList（拉页、防重入、取消、容器没填满自动续拉、回顶按钮）。
-// PagedList 现在还没有调用方，这也是有意的：同下面那一条。
+// 包里有三层，一层比一层往上是「同一份数据、不同的摆法」：
 //
-// `AppActions`、`BiliLink` 和 `NewPaged` 现在还没有调用方，这是有意的：挂这个
-// 列表的是 PLAN.md 阶段 5 的那 14 个内容页，那一张做出来时直接用它，别再写一份
-// 接线。
+//	list.go  虚拟列表，一行一首（虚拟滚动 + 变高行 + 行身份）
+//	grid.go  网格，一行几首，列数按 Biu 的四个断点分档换
+//	paged.go 翻页那一层：拉页、防重入、取消、容器没填满自动续拉、回顶按钮
+//
+// 列表和网格共用的那几件（查重、兜住画崩的一行、放队列、说一句话）在
+// shared.go，只写一遍。
+//
+// ⚠️ `AppActions`、`BiliLink`、`NewPaged` 和 `NewGrid` 现在还没有调用方，这是
+// 有意的：挂它们的是 PLAN.md 阶段 5 的那 14 个内容页，那一张做出来时直接用，
+// 别再写一份接线。
 package list
 
 import (
 	"fmt"
-	"log"
-	"runtime/debug"
 	"strconv"
 	"time"
 
@@ -150,7 +153,7 @@ func New(cache *imgcache.Cache, acts Actions) *List {
 // 那份状态。
 func (l *List) SetSongs(songs []Music) {
 	l.songs = songs
-	l.warnDuplicateIDs(songs)
+	warnDuplicateIDs(songs)
 }
 
 // SetFooter 装末尾那一行的画法（通常是转圈 + 重试），传 nil 去掉。
@@ -210,24 +213,6 @@ func (l *List) rows() int {
 		n++
 	}
 	return n
-}
-
-// warnDuplicateIDs 把重复的行标识指出来。
-//
-// ⚠️ 重复 ID 的后果在**真窗口里是静默的**：MyGo 的 Tester 会当场 panic 并报出
-// 代码行号（`ui/diagnostics.go`），真窗口里它只打一行日志，然后那几行**共用
-// 一份状态**——选中一个，另一个也亮着。铁律四要的正好是反过来。
-//
-// 这里只说不动：偷偷改掉某一行的 ID，界面上画的那首和调用方拿到的那首就对不上
-// 了，那比报错更难查。要改就改 Music.ID，让它真的唯一。
-func (l *List) warnDuplicateIDs(songs []Music) {
-	seen := make(map[string]struct{}, len(songs))
-	for _, m := range songs {
-		if _, dup := seen[m.ID]; dup {
-			log.Printf("biu: 列表里有几行用了同一个 ID（%q），它们的选中状态会串在一起", m.ID)
-		}
-		seen[m.ID] = struct{}{}
-	}
 }
 
 // ScrollTo 把列表滚到第 row 行，align 是 ui.Start（顶上）、ui.Center（中间）
@@ -308,75 +293,50 @@ func (l *List) View(c *ui.Context) {
 }
 
 // viewRow 画一行。
+//
+// 🔴 行里 panic 会一路穿出 Cocoa 事件循环把整个进程带走（框架的 Dispatch 和
+// drain 都没有 recover）。所以每一行自己兜一层，**只废掉这一行**——兜法
+// （含崩了不再重试的理由）在 shared.go 的 guardFailed 里，网格那一行共用它。
 func (l *List) viewRow(r ui.ListRow) {
 	c, i := r.Context, r.Index
 
-	// 末尾那一行：翻页的哨兵 / 转圈 / 重试（见 paged.go）。它同样要 recover，
+	// 末尾那一行：翻页的哨兵 / 转圈 / 重试（见 paged.go）。它同样要兜住，
 	// 只是不参与选中（Selected 越界时是 ok=false）。
 	if i >= len(l.songs) {
-		l.guarded(c, footerFailed, func() { l.footer(c) })
+		l.viewFooter(c)
 		return
 	}
 
-	l.guarded(c, l.songs[i].ID, func() { l.viewCard(r) })
+	m := l.songs[i]
+	if l.failed[m.ID] {
+		l.failedRowText(c)
+		return
+	}
+
+	guardFailed(&l.failed, "列表行", m.ID, func() { l.viewCard(r) })
 }
 
-// guarded 画一行，崩了只废掉这一行。
-//
-// 🔴 行里 panic 会一路穿出 Cocoa 事件循环把整个进程带走（框架的 Dispatch 和
-// drain 都没有 recover）。所以每一行自己兜一层：
-//
-//   - 界面上是「几千行里坏一行」，不是整页变成错误页——页级的 `internal/ui.Guard`
-//     兜的是整棵树，那是另一回事，两者不重复。
-//   - recover 是在 build 中间接住的，MyGo 下一遍会从头重建一次，所以这一帧
-//     剩下的部分照常画得出来，不用整帧作废。
-//
-// 崩过的行记进 failed，不再重试：否则同一行每一帧崩一次，日志被刷爆、帧率
-// 拖垮，比「这一行画不出来」糟得多。
-func (l *List) guarded(c *ui.Context, id string, draw func()) {
-	if l.failed[id] {
-		ui.Text(c, "这一行画不出来").FontSize(13).TextColor(c.Theme().TextMuted).
-			Padding(cardPadY, cardPadX).MaxLines(1)
+// viewFooter 画末尾那一行，崩了也只废掉这一行（同一套兜法，同一张表）。
+func (l *List) viewFooter(c *ui.Context) {
+	if l.failed[footerFailed] {
+		l.failedRowText(c)
 		return
 	}
+	guardFailed(&l.failed, "列表末尾那一行", footerFailed, func() { l.footer(c) })
+}
 
-	defer func() {
-		if rec := recover(); rec != nil {
-			if l.failed == nil {
-				l.failed = map[string]bool{}
-			}
-			l.failed[id] = true
-			log.Printf("biu: 列表行画崩了（%s）：%v\n%s", id, rec, debug.Stack())
-		}
-	}()
-
-	draw()
+// failedRowText 是「这一行画不出来」那一行的占位。
+func (l *List) failedRowText(c *ui.Context) {
+	ui.Text(c, "这一行画不出来").FontSize(13).TextColor(c.Theme().TextMuted).
+		Padding(cardPadY, cardPadX).MaxLines(1)
 }
 
 // playFrom 从第 i 首往后接进队列并开始播。
 //
 // 给的是**从这一首起的全部**，和 Biu 的「在 B 站打开这一首从这儿听」一致：
 // 点了一首，接下来的队列就应该是它和它后面那些，不是整个歌单从头。
-// i 不在范围里是什么都不做——双击事件偶尔会落在已经被换掉的那一帧上。
-func (l *List) playFrom(i int) {
-	if i < 0 || i >= len(l.songs) {
-		return
-	}
-	items := make([]app.Item, len(l.songs)-i)
-	for k := i; k < len(l.songs); k++ {
-		items[k-i] = l.songs[k].Item
-	}
-	if l.acts.Play != nil {
-		l.acts.Play(items)
-	}
-}
-
-// notify 说一句话。给还没接上的操作用：按了没反应最难解释，说一句就好解释。
-func (l *List) notify(text string) {
-	if l.acts.Notify != nil {
-		l.acts.Notify(text)
-	}
-}
+// 实现和网格共用（shared.go），两个视图的「播放」语义不可能对不上。
+func (l *List) playFrom(i int) { playFrom(l.songs, l.acts, i) }
 
 // indexText 是这一行前面那个序号。Biu 是 1 起的（`#` 列）。
 func indexText(i int) string { return strconv.Itoa(i + 1) }

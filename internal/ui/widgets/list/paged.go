@@ -369,7 +369,7 @@ func (p *PagedList) apply(r pageResult) {
 		p.err = r.err
 		p.blocked = true
 		log.Printf("biu: 第 %d 页拉失败（%s）：%v", r.page, p.why, r.err)
-		p.list.notify("加载更多失败：" + r.err.Error())
+		notify(p.list.acts, "加载更多失败："+r.err.Error())
 		return
 	}
 
