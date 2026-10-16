@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"image/png"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
@@ -22,6 +24,17 @@ func newShell(t *testing.T) (*Shell, *mygoui.Tester) {
 	t.Cleanup(a.Close)
 	s := New(a)
 	t.Cleanup(s.images.Close)
+
+	// 🔴 关掉切页动画。Tester 一帧画完，250ms 的滑动在里面永远走不完：那一帧
+	// 停在半路，上一页正往左挪、下一页正往右进，中间那道分界线正扫过页面区域。
+	// 于是「点一下再读某个点」这一次读到窗口底色、下次读到分界线，同一条测试
+	// 时而红时而绿（实测八次里挂两次）。
+	//
+	// 造外壳的三个函数（这里、shellWithSettings、shellOnSettings）都关，是为了
+	// 同一个理由：屏幕上的任何一个采样点都要是确定的。设置页那几条另有
+	// settleSettingsPage 兜底，万一哪个外壳忘了关还能等它停下来。
+	s.router.Transition = mygoui.TransitionNone
+
 	return s, mygoui.NewTester(s.View, 1200, 800)
 }
 
@@ -69,10 +82,11 @@ func TestParamRoutesMatch(t *testing.T) {
 	}
 }
 
-// TestMenuItemsAllSwitch 验侧栏上每一项都切得动。
+// TestMenuItemsAllSwitch 验侧栏上每一项都切得动，而且切过去有这一页自己的
+// 页面——不是空白，也不是一句「还没做」。
 //
-// 「切得动」和「这一页还没做」分开验：已经做了内容的页（设置页）切过去不该
-// 再弹「还没做」——对着一页真做出来的东西说它还没做，是在说一件假事。
+// 「切得动」和「画的是什么」分开验：已经有内容的页（设置页）画的是它自己，
+// 别的页画的是这一页的空状态（routes 表里每一条都带的那句）。
 func TestMenuItemsAllSwitch(t *testing.T) {
 	s, tt := newShell(t)
 
@@ -91,14 +105,104 @@ func TestMenuItemsAllSwitch(t *testing.T) {
 			t.Errorf("点了 %q，当前路径是 %q，文字有 %q", rt.Title, got, tt.Texts())
 		}
 		if s.builtPage(rt) != nil {
-			continue
+			continue // 这一页有自己的内容（设置页），不画空状态
 		}
-		if !tt.HasText("这一页还没做") {
-			t.Errorf("%q 这一页没有「还没做」的提示，文字有 %q", rt.Title, tt.Texts())
+		if !tt.HasText(rt.Empty.Title) {
+			t.Errorf("点了 %q，画面上没有这一页的空状态 %q，文字有 %q", rt.Title, rt.Empty.Title, tt.Texts())
 		}
 	}
 	if menu != 7 {
 		t.Errorf("侧栏上有 %d 项，want 7", menu)
+	}
+}
+
+// TestEveryRouteHasAView 钉住这一张的验收头一条：**14 条路由都能走通，
+// 没有一页是空白**。
+//
+// 怎么算「这一页有东西」：切过去之后画面上得有这一页自己的文案。已经有内容
+// 的页（设置页）画的是它自己，其余每一条的文案写死在 routes 表里（出处标在
+// 那儿），所以这里逐条断言它真的画出来了；兜底那条是 404 页，断言它说清楚
+// 是哪条路径不存在。
+func TestEveryRouteHasItsOwnPage(t *testing.T) {
+	// 逐条走的路径：参数路由要带一个真的参数，其余照 Match 走。
+	paths := map[string]string{
+		"/user/{id}":       "/user/12345",
+		"/collection/{id}": "/collection/678",
+	}
+	for _, rt := range routes {
+		t.Run(rt.Match, func(t *testing.T) {
+			s, tt := newShell(t)
+			target, ok := paths[rt.Match]
+			if !ok {
+				target = rt.Match
+			}
+			s.navigate(target)
+			tt.Frame()
+
+			if s.router.Path() != target {
+				t.Fatalf("没切到 %q（在 %q）", target, s.router.Path())
+			}
+			if !tt.HasText(rt.Title) {
+				t.Errorf("页面标题 %q 没画出来，文字有 %q", rt.Title, tt.Texts())
+			}
+			// 每一页要么有自己的内容（builtPage），要么有一句说得清的空状态。
+			// 两者都没有 = 画出来一片白，这正是这一张要消掉的东西。
+			if s.builtPage(rt) != nil {
+				return // 这一页有自己的内容（设置页），不画空状态
+			}
+			if rt.Empty.Title == "" {
+				t.Fatalf("%s 既没接上 builtPage 又没填空状态文案——画出来就是一片白", rt.Match)
+			}
+			if !tt.HasText(rt.Empty.Title) {
+				t.Errorf("没有画出 %s 的空状态 %q，文字有 %q", rt.Match, rt.Empty.Title, tt.Texts())
+			}
+			if rt.Empty.Hint == "" {
+				t.Fatalf("%s 没说「怎么才能不空」", rt.Match)
+			}
+			if !tt.HasText(rt.Empty.Hint) {
+				t.Errorf("没有画出 %s 的「怎么才能不空」%q，文字有 %q", rt.Match, rt.Empty.Hint, tt.Texts())
+			}
+		})
+	}
+
+	t.Run("404", func(t *testing.T) {
+		s, tt := newShell(t)
+		s.navigate("/根本没有这一页")
+		tt.Frame()
+
+		if s.router.Path() != "/根本没有这一页" {
+			t.Fatalf("没停在不存在的路径上（在 %q）", s.router.Path())
+		}
+		if !tt.HasText("没有「/根本没有这一页」这一页") {
+			t.Errorf("404 没有说清楚是哪条路径不存在，文字有 %q", tt.Texts())
+		}
+		if !tt.HasText("秒后回到主页...") {
+			t.Errorf("404 没有说要回首页，文字有 %q", tt.Texts())
+		}
+	})
+}
+
+// TestEmptyStateCopyIsNotBlank 钉住「每一条空着的路由都要有一句说得清的
+// 交代」：表里任何一条漏了标题，那一页画出来就是一片白，而且没有测试会红。
+//
+// 已经有内容的路由（设置页）跳过——它画的是自己的页面，用不到空状态，
+// 这一条里给它塞一句空状态反而是留了一句没人会看到的话。
+func TestEmptyStateCopyIsNotBlank(t *testing.T) {
+	s, _ := newShell(t)
+	for _, rt := range routes {
+		if s.builtPage(rt) != nil {
+			continue
+		}
+		if strings.TrimSpace(rt.Empty.Title) == "" {
+			t.Errorf("%s 没有空状态标题", rt.Match)
+		}
+		if strings.TrimSpace(rt.Empty.Hint) == "" {
+			t.Errorf("%s 没有说「怎么才能不空」", rt.Match)
+		}
+	}
+	// 兜底那条自己的页（notfound.go）不是空状态，单独确认它有自己的文案。
+	if notFound.Empty.Title != "" || notFound.Empty.Hint != "" {
+		t.Errorf("404 不该走通用空状态，它有自己的页（notfound.go）：%+v", notFound.Empty)
 	}
 }
 
@@ -107,25 +211,47 @@ func TestMenuItemsAllSwitch(t *testing.T) {
 func TestToastDoesNotSurviveNavigation(t *testing.T) {
 	s, tt := newShell(t)
 
-	if err := tt.Click("我的关注"); err != nil {
-		t.Fatal(err)
-	}
+	s.addToast("上一页的提示")
 	tt.Frame()
-	if !tt.HasText("这一页还没做") {
-		t.Fatalf("点菜单没有弹提示，文字有 %q", tt.Texts())
+	if !tt.HasText("上一页的提示") {
+		t.Fatalf("提示没画出来，文字有 %q", tt.Texts())
 	}
 
-	// 第一张提示还在的时候换页：走的是 navigate，它先清后加。
 	if err := tt.Click("历史记录"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 
-	if got := s.visibleToasts(); len(got) != 1 {
-		t.Fatalf("换页之后有 %d 条提示，want 1：%q", len(got), toastTexts(got))
+	if got := s.visibleToasts(); len(got) != 0 {
+		t.Fatalf("换页之后还留着 %d 条提示：%q", len(got), toastTexts(got))
 	}
-	if got := s.visibleToasts()[0].text; !strings.Contains(got, "历史记录") {
-		t.Errorf("剩下的提示是 %q，应该是「历史记录」那一条", got)
+	if tt.HasText("上一页的提示") {
+		t.Errorf("换页之后提示还挂在画面上，文字有 %q", tt.Texts())
+	}
+}
+
+// TestNavigationDoesNotToast「还没做」验没了：13 条路由都有页面视图了，再弹
+// 一句「这一页还没做」等于用占位话盖住真页面（Biu 那边也是切过去就有页面）。
+func TestNavigationDoesNotToast(t *testing.T) {
+	s, tt := newShell(t)
+
+	for _, rt := range routes {
+		if err := tt.Click(rt.Title); err != nil {
+			continue // 不在侧栏上的（搜索、动态、参数路由）本来就点不到
+		}
+		tt.Frame()
+	}
+
+	s.navigate("/search")
+	tt.Frame()
+
+	for _, text := range s.visibleToasts() {
+		if strings.Contains(text.text, "还没做") {
+			t.Errorf("换页还弹「还没做」：%q", text.text)
+		}
+	}
+	if tt.HasText("这一页还没做") {
+		t.Errorf("画面上还有「这一页还没做」，文字有 %q", tt.Texts())
 	}
 }
 
@@ -156,7 +282,7 @@ func TestPagePanicIsCaught(t *testing.T) {
 	// 换掉画页面内容的那一支，走的正是 viewRoutes 里 14 条路由用的那条 Guard。
 	s.pageBody = func(*mygoui.Context, *mygoui.Route, Route) { panic("这一页画崩了") }
 
-	if _, ok := tt.Find("这一页还没做"); !ok {
+	if _, ok := tt.Find(routes[0].Empty.Title); !ok {
 		t.Fatalf("起始页没画出来，文字有 %q", tt.Texts())
 	}
 	tt.Frame()
@@ -204,7 +330,7 @@ func TestPanicDoesNotBlockNavigation(t *testing.T) {
 	if !tt.HasText("回到首页") {
 		t.Errorf("错误页上没有「回到首页」，文字有 %q", tt.Texts())
 	}
-	s.pageBody = s.placeholder // 假装这一页修好了
+	s.pageBody = s.pageContent // 假装这一页修好了
 
 	if err := tt.Click("回到首页"); err != nil {
 		t.Fatal(err)
@@ -217,7 +343,7 @@ func TestPanicDoesNotBlockNavigation(t *testing.T) {
 	if tt.HasText("界面出错了") {
 		t.Errorf("换页之后还在错误页，文字有 %q", tt.Texts())
 	}
-	if _, ok := tt.Find("/"); !ok {
+	if _, ok := tt.Find(routes[0].Empty.Title); !ok {
 		t.Errorf("没有回到首页，文字有 %q", tt.Texts())
 	}
 }
@@ -237,7 +363,7 @@ func TestNavigateResetsTheCrash(t *testing.T) {
 	if tt.HasText("界面出错了") {
 		t.Errorf("换页之后还在错误页，文字有 %q", tt.Texts())
 	}
-	if _, ok := tt.Find("/download-list"); !ok {
+	if _, ok := tt.Find(lookup("/download-list").Empty.Title); !ok {
 		t.Errorf("没有切到下载记录，文字有 %q", tt.Texts())
 	}
 }
@@ -250,7 +376,7 @@ func TestBackReturnsToThePreviousPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if _, ok := tt.Find("/later"); !ok {
+	if _, ok := tt.Find(lookup("/later").Empty.Title); !ok {
 		t.Fatalf("没切到稍后再看，文字有 %q", tt.Texts())
 	}
 
@@ -289,6 +415,10 @@ func TestRenderShots(t *testing.T) {
 	}
 	s, tt := newShell(t)
 
+	// 不做切页动画：Tester 一帧就画完，250ms 的滑动停在半路，存出来的图上
+	// 上一页的文字还压在左边（看着像渲染错了，其实是动画没走完）。
+	s.router.Transition = mygoui.TransitionNone
+
 	save(t, dir, "10-首页.png", tt)
 	if err := tt.Click("我的关注"); err != nil {
 		t.Fatal(err)
@@ -305,6 +435,52 @@ func TestRenderShots(t *testing.T) {
 	s.crash = "这一页画崩了"
 	tt.Frame()
 	save(t, dir, "13-错误页.png", tt)
+
+	// 空状态与 404：这一张的正面。倒计时用的是假时钟，存图时才推一下，
+	// 否则图上永远是「3 秒后回到主页...」。
+	s.crash = nil
+	s.clock = newFakeClock(time.Unix(2026, 0))
+	s.navigate("/local-music")
+	tt.Frame()
+	save(t, dir, "14-本地音乐空状态.png", tt)
+	// 搜索页的两个分支：还没输入 / 搜了没有结果。
+	s.navigate("/search")
+	tt.Frame()
+	save(t, dir, "14a-搜索-还没输入.png", tt)
+	s.navigate("/search?q=" + url.QueryEscape("周杰伦"))
+	tt.Frame()
+	save(t, dir, "14a2-搜索-没有结果.png", tt)
+
+	// 空状态落地页：上游的默认空状态。
+	s.navigate("/empty")
+	tt.Frame()
+	save(t, dir, "14b-空状态落地页.png", tt)
+	// 已经有内容的那一页：设置页不画空状态，画的是它自己。
+	s.navigate("/settings")
+	tt.Frame()
+	save(t, dir, "14c-设置页.png", tt)
+
+	s.navigate("/根本没有这一页")
+	tt.Frame()
+	save(t, dir, "15-404-倒计时3秒.png", tt)
+	s.clock.(*fakeClock).Advance(2 * time.Second)
+	tt.Frame()
+	save(t, dir, "16-404-倒计时1秒.png", tt)
+	s.clock.(*fakeClock).Advance(time.Second)
+	tt.Frame()
+	save(t, dir, "17-404后自动回首页.png", tt)
+
+	// 歌词那一支：先打开一首真的歌，再进迷你播放器（nowplaying.go）。
+	openATrack(t, s)
+	s.navigate("/mini-player")
+	tt.Frame()
+	save(t, dir, "19-迷你播放器-没有歌词.png", tt)
+
+	// 深色下同一批页面——顺带看一眼页面 view 装没装主题。
+	tt.SetDark(true)
+	s.navigate("/download-list")
+	tt.Frame()
+	save(t, dir, "18-深色下的空状态.png", tt)
 }
 
 func save(t *testing.T, dir, name string, tt *mygoui.Tester) {
