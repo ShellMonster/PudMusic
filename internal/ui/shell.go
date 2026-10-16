@@ -158,10 +158,17 @@ func (s *Shell) onPanic(r any) {
 
 // viewMain 是正常的那一帧：上导航 + 左边栏 + 路由页 + 播放条，右下角浮着提示。
 func (s *Shell) viewMain(c *ui.Context) {
+	// 🔴 铁律二：每帧第一件事就是装主题，而且必须在最开头——SetTheme 只影响
+	// 它之后创建的控件。不装的话 MyGo 在帧开头重置好的那份跟随系统的主题
+	// 就是这一帧真正用的那份，用户选了深色也只在这一帧是对的。
+	s.applyFrameTheme(c)
+	s.reportSettingsError()
+
 	st := s.app.Snapshot()
 
 	ui.Column(c).Fill().Children(func() {
 		s.viewNav(c)
+		s.viewThemeSwitch(c)
 		ui.Row(c).Grow(1).Children(func() {
 			s.viewSide(c)
 			s.viewRoutes(c)
@@ -175,6 +182,10 @@ func (s *Shell) viewMain(c *ui.Context) {
 // viewCrash 是崩溃后那一帧。Biu 原来的 ErrorBoundary 也是这么做的：程序活着，
 // 出事的那块换一张说明页。
 func (s *Shell) viewCrash(c *ui.Context) {
+	// 错误页也是一帧。不装主题的话它会用系统色画出来：用户选深色时崩了，
+	// 看到的却是一张亮色的错误页，像换了个应用。
+	s.applyFrameTheme(c)
+
 	t := c.Theme()
 	ui.Column(c).Fill().Center().Gap(10).Padding(24).Children(func() {
 		ui.Text(c, "界面出错了，播放器已经停在这一页").FontSize(18).Bold()
@@ -197,6 +208,10 @@ func (s *Shell) viewCrash(c *ui.Context) {
 //
 // 对话框在另一个 goroutine 里开：MyGo 把弹框请求 post 到主线程再等系统回调，
 // 在主线程里等就是死等，事件循环会卡死。
+//
+// ⚠️ 文件框是多选的，选回来的每一条都得进队列——只取 paths[0] 会把用户其余选
+// 好的歌静默丢掉，用户看不出自己选漏了。所以这里和播放条的「加歌」走同一条路
+// 同一套语义：队列空着就从第一首开始放，已经有歌在放就排在后面等下一首。
 func (s *Shell) pickFile() {
 	win := s.win
 	go func() {
@@ -204,6 +219,17 @@ func (s *Shell) pickFile() {
 		if err != nil || len(paths) == 0 {
 			return
 		}
-		s.app.Open(paths[0])
+		s.enqueuePicked(paths)
 	}()
+}
+
+// enqueuePicked 把文件框选回来的每一条路径都排进队列。
+//
+// 一条都不能少：少了的那几条在界面上看不出任何异样，用户只会以为是自己没选上。
+func (s *Shell) enqueuePicked(paths []string) {
+	items := make([]app.Item, len(paths))
+	for i, p := range paths {
+		items[i] = app.LocalItem(p)
+	}
+	s.app.Enqueue(items...)
 }
