@@ -1,0 +1,68 @@
+// 设置在界面层的这一半：文件放哪、挂上去、出了事告诉用户。
+//
+// 为什么这一半留在界面层：「应用数据目录在哪」是框架的事，
+// `mygo.App.Path(mygo.PathUserData)` 是 MyGo 自己的 API（`paths.go:53`）。
+// **不要自己拼 `~/Library/Application Support/...`**——拼错的后果不是报错，
+// 是「读不到文件」，而读不到文件按第一次运行处理：用默认值安静地开起来，
+// 用户只发现设置一直存不住，换台机器再丢一次。框架自己的窗口状态文件
+// （`WindowOptions.StateKey`）也放在这个目录里。
+package ui
+
+import (
+	"log"
+	"strings"
+
+	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/egoist/mygo"
+)
+
+// MountSettings 把设置挂到 a 上：读盘、落盘、退出前 flush。
+//
+// 必须在开窗口**之前**调：读盘是阻塞 IO。
+//
+// 返回的 error 只可能是「拿不到应用数据目录」这一种硬失败。读盘失败不算：
+// 设置照样挂上（内容是默认值，或从坏文件里恢复出来的），程序不会起不来。
+func MountSettings(a *app.App) error {
+	dir, err := mygo.App.Path(mygo.PathUserData)
+	if err != nil {
+		return err
+	}
+
+	path := app.SettingsPath(dir)
+	if err := a.MountSettings(path); err != nil {
+		// 界面上也会弹一条给用户看；日志是给排障用的。
+		log.Printf("biu: 读设置 %s 有问题，先按默认值用着：%v", path, err)
+	}
+
+	// 退出前把还欠着的改动落完。
+	//
+	// 挂 OnWillQuit 而不是 OnQuit：前者跑在事件循环停下**之前**，能拿到 error
+	//（框架 app.go 的 prepareQuit 就是这么说的：「callers needing error
+	// handling may Flush explicitly from a quit listener」），写失败还能进日志。
+	//
+	// 为什么非要这一次同步 flush：后台落盘是合并写（拖圆角滑块时 120ms 一次），
+	// 最后那一下有可能还等在退避窗口里，用户改完直接退出就丢了。SIGKILL 拦不住，
+	// 任何异步写盘都得配一个同步收尾才敢说「设置存住了」。
+	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
+		if err := a.FlushSettings(); err != nil {
+			log.Printf("biu: 退出时保存设置失败：%v", err)
+		}
+	})
+	return nil
+}
+
+// reportSettingsError 把设置的问题告诉用户。**每帧都调**。
+//
+// 去重不在这里做，靠 `TakeSettingsError`：同一个错只交一次，所以这里每帧问
+// 一句是安全的（界面上会一直是一样的话在闪，比设置本身出问题还难解释）。
+//
+// 用现成的 addToast：右下角、避开播放条、同时最多 3 条、两秒后自己消失。
+// 不另造一套提示机制——那才会是「同一个错误提示出现两遍」。
+func (s *Shell) reportSettingsError() {
+	err := s.app.TakeSettingsError()
+	if err == nil {
+		return
+	}
+	// 设置的错自带中文说明，前面那个「app: 」是包名，去掉。
+	s.addToast("设置：" + strings.TrimPrefix(err.Error(), "app: "))
+}
