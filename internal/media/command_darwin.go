@@ -53,9 +53,13 @@ var (
 
 // commandTargets 是我们接的命令。
 //
-// ⚠️ `play` / `pause` / `togglePlayPause` **三个都要接**，不是重复：控制中心
-// 的那个按钮在「在放」时发 pause、不在放时发 play，而耳机线控那一个键发的是
-// toggle。少接一个，那条路上按下去就什么也不发生。
+// ⚠️ `play` / `pause` / `togglePlayPause` **三个都要接**，不是重复：系统按
+// 当前状态挑发哪一条（控制中心的按钮在「在放」时发 pause、不在放时发 play，
+// 耳机线控那一个键发的是 toggle）。少接一个，那条路上按下去就什么也不发生。
+//
+// 这一段是照 Apple 的分发规则写的，**不是在这台机器上实测出来的**——本票
+// 没能造出真的命令事件（见 command_darwin_test.go 顶上那段），所以「三条
+// 都接」是照着文档来的保险做法，不是「少一条就会坏」的实测结论。
 var commandTargets = []struct {
 	selector string
 	cmd      Command

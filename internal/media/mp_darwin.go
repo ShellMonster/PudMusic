@@ -30,8 +30,13 @@ import (
 // ⚠️ **这些 key 一半是长名、一半是短名**，Apple 把它们全声明成
 // `NSString * const`，头文件里看不到值，而**写错了系统静默忽略、不报错**：
 // 调 `setNowPlayingInfo:` 返回得很干脆，锁屏上就是没有那一栏。
-// 实测下来系统认的就是下面这一套（`MPMediaItemProperty*` 是短名，
-// `MPNowPlayingInfoProperty*` 是它自己那个长名）。
+//
+// 这里写的这一套**不是照着头文件推的**：在 dyld 共享缓存里把 MediaPlayer 的
+// 镜像扒了一遍，这八个字符串（`title` / `artist` / `artwork` /
+// `playbackDuration` / `albumTitle` 加上那几个 `MPNowPlayingInfoProperty*`
+// 长名）**都在那个镜像里**，而那一长串短名在任何别的框架里都不这么成组出现。
+// 这是「名字对」的证据，**不是**「控制中心真的画出来了」的证据——那一条在
+// 这台机器上验不了（终端没有录屏权限，看不见控制中心），见任务报告。
 const (
 	keyTitle     = "title"
 	keyArtist    = "artist"
