@@ -308,8 +308,19 @@ func TestTheQueueIsSavedOnQuitAndRestoredOnStart(t *testing.T) {
 	if _, err := os.Stat(queueFile); err != nil {
 		t.Fatalf("队列文件没落盘：%v", err)
 	}
-	before, _ := a1.DownloadSnapshot(snap.ID)
+
+	// ⚠️ **`before` 必须在 Close 之后读**。
+	//
+	// 这一项在下的时候还在变：扩展名从入队那一刻的临时 `.m4a` 变成取流
+	// 地址上真的那个（`prepare` 干的事，见 `download.Task.Ext`），徽章被
+	// 填上，总长被填上。而 `App.Close` **会再存一次**（`App.Close` 里
+	// `dl.Close(dlPath)` 那一步），所以盘上落的是**退出那一刻**的状态。
+	//
+	// 在 Close **之前**读快照再拿它跟恢复出来的比，比的是两个不同时刻：
+	// 快的那一拍下载刚好还在改字段，于是「退出前是 `半首.m4a`、恢复出来是
+	// `半首.m4s`」——而两边其实都对，只是量的不是同一刻。
 	a1.Close()
+	before, _ := a1.DownloadSnapshot(snap.ID)
 
 	// 第二段：重开。队列读回来了。
 	a2 := newDownloadApp(t, f, dir, queueFile)
