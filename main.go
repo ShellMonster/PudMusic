@@ -35,7 +35,20 @@ func main() {
 	// 请求头和第二份 cookie jar。
 	a.MountLibrary(cli)
 
-	if err := ui.Run(a); err != nil {
+	// 下载也挂在开窗口之前：它要读盘（恢复上次的队列）。取流零件
+	// （`MountStreaming` 那个）可以晚一点挂，缺了也只是点了下载时给一句
+	// 人话，而不会开窗就报错。
+	if err := ui.MountDownloads(a); err != nil {
+		log.Printf("biu: 挂下载失败，这次的下载功能用不了：%v", err)
+	}
+
+	// 系统媒体会话（浮窗 / 锁屏 / 任务栏缩略图按钮）也必须在开窗口之前挂：
+	// macOS 那一半建的时候要注册 Objective-C 的类，而注册必须在还没有 ObjC
+	// 回调在跑的时候做。Windows 那一半反过来要等窗口（它的会话是按窗口算的），
+	// 所以这里拿到的是会话本身，绑窗口那一下交给 ui.Run。
+	sess := ui.MountMedia(a)
+
+	if err := ui.Run(a, sess); err != nil {
 		log.Fatal(err)
 	}
 }

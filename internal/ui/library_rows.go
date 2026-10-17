@@ -109,8 +109,9 @@ type pagedRows struct {
 	render func(c *ui.Context, r ui.ListRow) ui.Element
 	menu   func(m *ui.Menu, i int)
 
-	// emptyText 是一行都没有时说的话。由页面在建好之后装上（两页的话不一样）。
-	emptyText string
+	// empty 是一行都没有时说的那两句话。由页面在建好之后装上（两页的话不一样，
+	// 而且出处都写在 `routes` 表里那一条上，见 SetEmpty）。
+	empty emptyState
 
 	fetch libraryFetcher
 	acts  list.Actions
@@ -239,14 +240,18 @@ func (p *pagedRows) ScrollTop() {
 	p.state.ScrollTo(0, ui.Start)
 }
 
-// SetEmpty 换掉「一行都没有时说的那句话」。
+// SetEmpty 换掉「一行都没有时说的那两句话」。
 //
-// 两页的话不一样（Biu 的 `later/index.tsx:236` 是「暂无稍后再看内容」，
-// `history/index.tsx:284` 是「暂无历史记录」），所以由页面装。空串是不画：
-// 失败时页面上只留那一个重试按钮，不该再摆一句「这里还没有…」。
+// **由页面把 `routes` 表里那一条的 `Empty` 原样递进来**，不在这儿另抄一份：
+// 文案的出处（上游哪个文件）写在路由表里那一条的注释上，抄一份就多一份会对不
+// 上的来源——而这一页的文案对不上时用户看不出任何异样。
+//
+// 两句都画（和别的页一样）：第一句说这里为什么空，第二句给一个**能做的下一步**。
+// 这一页尤其需要第二句——用户常常是筛完了才空的，他要的是「怎么才能不空」，
+// 不是再看一遍「这里什么都没有」。
 //
 // ⚠️ 只能由界面线程调。
-func (p *pagedRows) SetEmpty(text string) { p.emptyText = text }
+func (p *pagedRows) SetEmpty(e emptyState) { p.empty = e }
 
 // Drop 丢掉某一行的本地副本（用户在菜单里删掉了一条之后调它）。
 //
@@ -352,6 +357,7 @@ func (p *pagedRows) showFooter() bool {
 
 // drawList 画那个虚拟列表。
 func (p *pagedRows) drawList(c *ui.Context) {
+	t := c.Theme()
 	n := p.listRows()
 
 	empty := ""
@@ -363,7 +369,7 @@ func (p *pagedRows) drawList(c *ui.Context) {
 	case len(p.rows) == 0 && p.blocked:
 		// 一行都没有还失败了：页面上就留那一个重试按钮，一句话都不多说。
 	case len(p.rows) == 0:
-		empty = p.emptyText
+		empty = p.empty.Title
 	}
 
 	ui.List(c, &p.state, n).
@@ -372,9 +378,15 @@ func (p *pagedRows) drawList(c *ui.Context) {
 		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击）。
 		OnSubmit(func() { p.playFrom(p.sel) }).
 		Children(func() {
-			if empty != "" {
-				ui.Text(c, empty).FontSize(13).TextColor(c.Theme().TextMuted).Padding(16)
+			if empty == "" {
+				return
 			}
+			ui.Column(c).Grow(1).Center().Gap(6).Padding(16).Children(func() {
+				ui.Text(c, empty).FontSize(15).TextColor(t.Text)
+				if p.empty.Hint != "" {
+					ui.Text(c, p.empty.Hint).FontSize(12).TextColor(t.TextMuted)
+				}
+			})
 		}).
 		Rows(func(r ui.ListRow) { p.viewRow(r) }).
 		TrackScroll(&p.scroll)

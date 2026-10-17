@@ -44,9 +44,6 @@ import (
 // historyPath 是历史记录那条路由，和 routes 表里登记的是同一个字符串。
 const historyPath = "/history"
 
-// historyEmpty 是「一行都没有」时说的话。抄上游 `history/index.tsx:284`。
-const historyEmpty = "暂无历史记录"
-
 // 历史记录那一行的列宽。播放进度要放得下「12:34 / 45:00」，观看时间要放得下
 // 「2026-10-16 21:04」——都是定死的，不然上下两行的这两列会左右跳。
 const (

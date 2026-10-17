@@ -694,3 +694,47 @@ func TestAgainstTheRealBiliAPIIsNotCovered(t *testing.T) {
 	t.Log("  5. 本地画的二维码 B 站 App 真的扫得出来")
 	t.Log("  6. 本机网络能不能连到 passport.bilibili.com")
 }
+
+// TestACancelledRequestStillLooksCancelled 钉住「被取消」这件事在包出去之后还
+// 认得出来。
+//
+// 断的是错误链而不是错误消息：`errors.Is(err, context.Canceled)` 必须成立。
+//
+// ⚠️ 这一句现在只是末尾一个动词的差别（`%v` → `%w`，见 `Client.Do` 那一段的
+// 注释），而它决定的是**下载记录页上按「暂停」之后显示什么**：下载队列判
+// 「这一项是用户停掉的、不是失败」靠的就是它，而取流途中那一段（几百毫秒）
+// 恰恰是最容易被用户按停的时候——用 `%v` 时那一刻界面上是一行红色的「任务出错」
+// 加一颗「重试」。
+func TestACancelledRequestStillLooksCancelled(t *testing.T) {
+	f := newFakeBili(t)
+	// 一直挂着，直到这一发请求被取消为止。
+	f.on(pathNav, func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	})
+	c := f.client(t, Options{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		// 等请求真的发出去了再取消（否则可能取消得太早，连请求都没造出来）。
+		for range 2000 {
+			if len(f.requests()) > 0 {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+		cancel()
+	}()
+	defer cancel()
+
+	_, err := c.Nav(ctx)
+	if err == nil {
+		t.Fatal("请求被取消了却没报错")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("取消之后 errors.Is(err, context.Canceled) 不成立：%v", err)
+	}
+	// 另一头仍然要成立：这一层包它就是为了分清「网断了」和别的。
+	if !errors.Is(err, ErrNetwork) {
+		t.Errorf("取消之后 errors.Is(err, ErrNetwork) 不成立了：%v", err)
+	}
+}

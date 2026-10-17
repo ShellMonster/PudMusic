@@ -60,9 +60,9 @@ var knownDecoders = []registryRow{
 	// 裸 ADTS：没有容器，头两字节就是同步字。
 	{name: "aac", magic: "\xff??", exts: []string{"aac"}},
 
-	// FLAC 是唯一的例外：audio.Open 先按扩展名把它交给 flacdec.OpenFile，
-	// 它压根不进注册表（flacdec/mygoflac 那个注册只有它自己的测试在用）。
-	{name: "flac", via: "audio.Open 按 .flac 扩展名直接走 flacdec.OpenFile", exts: []string{"flac"}},
+	// FLAC 是唯一的例外：它压根不进注册表（flacdec/mygoflac 那个注册只有它
+	// 自己的测试在用），注册表认不出头几个字节时由 openDecoder 落到 flacdec.Open。
+	{name: "flac", via: "注册表认不出来时 audio.openDecoder 落到 flacdec.Open", exts: []string{"flac"}},
 }
 
 // TestKnownDecodersCoversEveryRegistration 是让上面这张表不腐烂的那道关：

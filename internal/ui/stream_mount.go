@@ -24,5 +24,10 @@ func MountStreaming(a *app.App, cli *bili.Client) {
 	a.MountStreaming(app.Streaming{
 		Client: cli,
 		Media:  media,
+		// 偏好从设置里读，而不是留个默认值。用户上次选的是无损，
+		// 这次启动就该按无损取流——「重启之后又变回自动」是那种没人会说的 bug。
+		//
+		// ⚠️ 必须在 MountSettings 之后调（main.go 里的顺序就是）。
+		Quality: app.PrefToBili(a.SettingsSnapshot().AudioQuality),
 	})
 }

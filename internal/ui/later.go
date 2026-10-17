@@ -41,13 +41,6 @@ import (
 // 而且错得很安静——这一页退回占位页，没人看得出来。
 const laterPath = "/later"
 
-// laterEmpty 是「一行都没有」时说的话。抄上游 `later/index.tsx:236`。
-//
-// ⚠️ 路由表里原来挂着的那一句 `Empty` 已经拿掉了：这一页接上了自己的 view，
-// 空状态由这一页自己说（见 `pagedRows.SetEmpty`）——留着等于一句没人会看到的
-// 话，理由写在 `router.go` 的 routes 表里。
-const laterEmpty = "暂无稍后再看内容"
-
 // 列宽。Biu 那一行是 `grid-cols-[40px_1fr_150px_150px_150px_40px]`，取同样的
 // 量级。定死是为了让这几列上下对齐（Biu 用 `tabular-nums`）。
 const (
@@ -69,8 +62,8 @@ const (
 // 「忘了建某一页」这件事只有切过去看才知道。
 func (s *Shell) buildLibraryPages() {
 	acts := list.AppActions(s.app, s.addToast)
-	s.laterPage.init(s.clock.Now(), s.drawLaterRow, s.laterMenu, s.fetchLater, acts, laterEmpty)
-	s.historyPage.init(s.clock.Now(), s.drawHistoryRow, s.historyMenu, s.fetchHistory, acts, historyEmpty)
+	s.laterPage.init(s.clock.Now(), s.drawLaterRow, s.laterMenu, s.fetchLater, acts, lookup(laterPath).Empty)
+	s.historyPage.init(s.clock.Now(), s.drawHistoryRow, s.historyMenu, s.fetchHistory, acts, lookup(historyPath).Empty)
 }
 
 // fetchLater 是稍后再看那一页的拉页器。它在**后台 goroutine 里**跑，所以里面

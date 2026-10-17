@@ -62,7 +62,7 @@ type libraryPage struct {
 // 一行都没有时说的话，now 是把两个日期输入框填成今天的那一下时钟。
 func (p *libraryPage) init(now time.Time,
 	render func(*ui.Context, ui.ListRow) ui.Element, menu func(*ui.Menu, int),
-	fetch libraryFetcher, acts list.Actions, empty string) {
+	fetch libraryFetcher, acts list.Actions, empty emptyState) {
 	p.dates = newDateFilter(now)
 	p.rows = newPagedRows(render, menu, fetch, acts)
 	p.rows.SetEmpty(empty)
@@ -120,21 +120,31 @@ func (p *libraryPage) viewKeywordBox(c *ui.Context) bool {
 	return box.Submitted()
 }
 
-// viewLibraryMissing 是「B 站客户端没挂上」时这一页画的东西。
+// viewLibraryMissing 是「B 站客户端没挂上」时这两页画的东西。
 //
-// **为什么不照样去请求、失败了再说**：那一句话就晚了半秒，而且它长得跟「B 站
+// **为什么不照样去请求、失败了再说**：那句话就晚了半秒，而且它长得跟「B 站
 // 连不上」一模一样——用户会去检查网络、换网、清缓存，而真正的原因是这个应用
 // 少装了一摊零件。直接说清是哪一件事，比让它猜要快得多。
 //
-// 这一页照样摆标题：用户是从侧栏点过来的，一句「没接上」飘在空白页上会以为
-// 侧栏点坏了。
+// ⚠️ **照旧把 `routes` 表里那一句 Empty 也画出来**，而且它在前面。这一页平时
+// 空着的时候画的就是那一句（见 `pagedRows.SetEmpty`），用户先看到熟悉的
+// 「暂无稍后再看内容」，再看到「没接上接口」这个**这一次**特别的原因——而不是
+// 两句话换来换去。少画那一句的话，从别的页面切过来的那条路（`homepage_test.go`
+// 和 `settings_test.go` 都按 `lookup(path).Empty.Title` 认「切过去了」）就断了。
 func (s *Shell) viewLibraryMissing(c *ui.Context, key, title string) {
 	t := c.Theme()
+	e := lookup(s.router.Path()).Empty
 	ui.Column(c).Key(key).Grow(1).Center().Gap(8).Padding(24).
 		Children(func() {
 			ui.Text(c, title).FontSize(22).Bold()
-			ui.Text(c, "还没接上 B 站接口，这一页暂时拉不了内容。").FontSize(13).
-				TextColor(t.TextMuted)
+			if e.Title != "" {
+				ui.Text(c, e.Title).FontSize(15)
+			}
+			if e.Hint != "" {
+				ui.Text(c, e.Hint).FontSize(12).TextColor(t.TextMuted)
+			}
+			ui.Text(c, "还没接上 B 站接口，这一页暂时拉不了内容。").FontSize(12).
+				TextColor(t.Danger)
 		})
 }
 

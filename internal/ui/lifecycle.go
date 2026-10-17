@@ -122,7 +122,12 @@ func (s *Shell) ensureWindow() {
 		platform.RestoreFromBackground(s.win)
 		return
 	}
-	s.Attach(mygo.NewWindow(WindowOptions(s.View)))
+	w := mygo.NewWindow(WindowOptions(s.View))
+	s.Attach(w)
+	// 系统媒体会话在 Windows 上是**按窗口**的（浮窗和锁屏走 SMTC，任务栏
+	// 缩略图上那三个按钮直接长在这个 HWND 上），而窗口到这里才建出来——
+	// 所以只能在建完之后补这一步。macOS 那边是全局的，这一句是空操作。
+	s.bindMedia(w)
 }
 
 // autoStartService 是「开机自启在系统上的那一份」。

@@ -306,6 +306,61 @@ func (s *Shell) pageOf(path string) *libraryPage {
 	panic("测试用错了路径：" + path)
 }
 
+// TestTheEmptyStateSaysWhyAndHow 钉住「一行都没有」时画的那两句话。
+//
+// 两句都要在：第一句说这里为什么空，第二句给一个**能做的下一步**。这一页尤其
+// 需要第二句——用户常常是筛完了才空的，他要的是「怎么才能不空」，不是再看一遍
+// 「这里什么都没有」。
+//
+// 文案是**从 `routes` 表里那一条拿的**（出处标在那儿），所以这里断言的也是那
+// 一条：另抄一份就多一个会对不上的来源，而对不上时用户看不出任何异样。
+func TestTheEmptyStateSaysWhyAndHow(t *testing.T) {
+	for _, path := range []string{laterPath, historyPath} {
+		t.Run(path, func(t *testing.T) {
+			// 一页都不给，就是「什么都没有」那一支。
+			f := newLibFake(t)
+			tt, s := libraryShell(t, f, path)
+
+			e := lookup(path).Empty
+			if e.Title == "" || e.Hint == "" {
+				t.Fatalf("routes 表里 %s 那一条的空状态不完整：%+v", path, e)
+			}
+			settle(t, tt, "把空状态画出来", func() bool { return tt.HasText(e.Title) })
+			if !tt.HasText(e.Hint) {
+				t.Errorf("%s 空着的时候没说「怎么才能不空」，文字有 %q", path, tt.Texts())
+			}
+			_ = s
+		})
+	}
+}
+
+// TestAnUnmountedLibraryStillShowsTheEmptyState 盯「没挂上 B 站客户端」那一支。
+//
+// 那一支不能只说「没接上」就完事：用户是从侧栏点过来的，他先要看到这一页平时
+// 空着的那一句（「这里为什么空」），**然后**才是这一次特别的原因。少画前一句，
+// 从别的页面切过来的那条路（`homepage_test.go`、`settings_test.go` 都按
+// `lookup(path).Empty.Title` 认「切过去了」）就断了。
+//
+// 这一条用的是 `newShell`——它**不挂** B 站客户端。
+func TestAnUnmountedLibraryStillShowsTheEmptyState(t *testing.T) {
+	for _, path := range []string{laterPath, historyPath} {
+		t.Run(path, func(t *testing.T) {
+			s, tt := newShell(t) // ⚠️ 它**不挂** B 站客户端，这正是这一条要的
+			tt.Frame()
+			s.navigate(path)
+			tt.Frame()
+
+			e := lookup(path).Empty
+			if !tt.HasText(e.Title) {
+				t.Errorf("%s 没挂上接口时连「这里为什么空」都没说，文字有 %q", path, tt.Texts())
+			}
+			if !tt.HasText("还没接上 B 站接口") {
+				t.Errorf("%s 没挂上接口时说清了为什么，文字有 %q", path, tt.Texts())
+			}
+		})
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 关键词
 // ─────────────────────────────────────────────────────────────────────────────
