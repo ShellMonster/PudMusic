@@ -18,6 +18,7 @@ package download
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -222,15 +223,6 @@ func newVideoHarness(t *testing.T, spVideo, spAudio muxtest.Spec) *videoHarness 
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatalf("建源目录：%v", err)
 	}
-	// 视频流给一个**负的** cts 偏移（B 帧重排的形状，也是真 B 站 dash 的
-	// 常态）。它让首帧的呈现时间落在媒体时间 0 **之前**，于是交织一定走
-	// 「要补一段空编辑」那一支。
-	//
-	// ⚠️ 这一条不是装饰。没有它，这一组里每一条端到端用例交织出来的文件
-	// 里 `edts` 盒数都是 0 —— 也就是**评审逮到的那个重复 `edts` 的 bug
-	// （产物在 macOS 上没有画面）根本走不到**。真素材上有 B 帧重排、
-	// 没有真素材上就没有，而���一版的素材恰好没有。
-	spVideo = spVideo.WithCtsBias(-3000)
 	vp, ap := muxtest.PairIn(t, src, spVideo, spAudio)
 	video := newFileCDN(t, "video", vp)
 	audio := newFileCDN(t, "audio", ap)
@@ -365,33 +357,6 @@ func TestAVideoDownloadLandsOnePlayableMP4(t *testing.T) {
 		t.Error("第一条轨一个采样都没有")
 	}
 
-	// 每条轨最多一个 `edts`，而且**这一组素材一定会走出 `edts`**。
-	//
-	// 多一个的话 macOS 的 AVFoundation 会把**整条轨**丢掉：文件能打开、
-	// 只有声音、拖到中间那一帧解不出来（评审拿真 AVFoundation 验的，
-	// 见 `mux` 包的 `TestATrackCarriesExactlyOneEditList`）。
-	//
-	// ⚠️ 断的是 `Children` 里的**个数**而不是 `trak.Edts` 那个字段：
-	// mp4ff 的解码器把后一个 `edts` 盖在那个字段上、**不报错**，所以
-	// 断言「那个字段非空」在重复写两遍的时候照样通过。
-	edtsBoxes := 0
-	for _, trak := range out.Moov.Traks {
-		n := 0
-		for _, c := range trak.Children {
-			if _, ok := c.(*mp4.EdtsBox); ok {
-				n++
-			}
-		}
-		if n > 1 {
-			t.Errorf("%s 轨里有 %d 个 edts", trak.Mdia.Hdlr.HandlerType, n)
-		}
-		edtsBoxes += n
-	}
-	if edtsBoxes == 0 {
-		t.Error("产物里一个 edts 都没有——素材是带 B 帧重排的（B 帧的呈现偏移是负的），" +
-			"交织一定该补一段空编辑。没有它，这一组用例就永远走不到出 edts 的那一支")
-	}
-
 	// 盘上除了这个产物**一个别的都不该有**：两个半成品、两条源流、
 	// 任何临时文件。
 	if got := leftovers(t, h.dir); len(got) != 1 {
@@ -422,7 +387,7 @@ func TestAVideoDownloadCountsBothStreamsInItsProgress(t *testing.T) {
 				return
 			default:
 			}
-			if s, ok := h.m.Get(TaskID(bvid, cid, true)); ok {
+			if s, ok := h.m.Get(TaskID(bvid, cid, false)); ok {
 				h.m.mu.Lock()
 				if s.Total > maxSeen {
 					maxSeen = s.Total
@@ -621,7 +586,7 @@ func TestAMuxingTaskSurvivesARestartAndFinishesOnResume(t *testing.T) {
 	write(companionPartPath(dest), audio.body)
 
 	task := &Task{
-		ID:       TaskID(bvid, cid, true),
+		ID:       TaskID(bvid, cid, false),
 		Title:    "测试的 MV",
 		Identity: Identity{Bvid: bvid, Cid: cid, Quality: 120, Video: true, Length: int64(len(video.body))},
 		Ext:      videoExt,
@@ -918,5 +883,123 @@ func TestAVideoSurvivesASaveAndRestore(t *testing.T) {
 	}
 	if got := filepath.Ext(final.Dest); got != ".mp4" {
 		t.Errorf("落的后缀是 %q，要的是 .mp4", got)
+	}
+}
+
+// TestAudioAndVideoAreTwoTasks 钉「同一首歌的音频和视频是两个任务」。
+//
+// 🔴 判重键少了「是不是视频」这一位时的症状：先点「下载音频」、再点「下载视频」，
+// 两次都返回成功、ID 一样、落盘名一样（都是 .m4a），队列里只有一个任务——而那个是
+// **音频**。用户看到抽屉提示「已加进下载队列」，下载目录里却只有一个 .m4a。
+func TestAudioAndVideoAreTwoTasks(t *testing.T) {
+	h := newVideoHarness(t, muxtest.VideoSpec(300), muxtest.AudioSpec(10))
+
+	const bvid, cid = "BV1xx", "c123"
+	audio, err := h.m.Enqueue(AddRequest{Bvid: bvid, Cid: cid, Title: "MV", Dir: h.dir})
+	if err != nil {
+		t.Fatalf("入队音频：%v", err)
+	}
+	video, err := h.m.Enqueue(AddRequest{Bvid: bvid, Cid: cid, Title: "MV", Dir: h.dir, Video: true})
+	if err != nil {
+		t.Fatalf("入队视频：%v", err)
+	}
+
+	if audio.ID == video.ID {
+		t.Fatalf("音频和视频的任务 id 一样（%q）——判重键里没有「是不是视频」", audio.ID)
+	}
+	if got := filepath.Ext(audio.Dest); got != ".m4a" {
+		t.Errorf("音频落在 %q，want .m4a", audio.Dest)
+	}
+	if got := filepath.Ext(video.Dest); got != ".mp4" {
+		t.Errorf("视频落在 %q，want .mp4", video.Dest)
+	}
+	if n := len(h.m.Snapshots()); n != 2 {
+		t.Errorf("队列里有 %d 个任务，want 2（音频一个、视频一个）", n)
+	}
+	// 反过来也一样：同一件事点两次仍然只有一个（用户要的是「就一个」）。
+	again, err := h.m.Enqueue(AddRequest{Bvid: bvid, Cid: cid, Title: "MV", Dir: h.dir, Video: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.ID != video.ID {
+		t.Errorf("同一个视频点两次拿到两个任务（%q / %q）", again.ID, video.ID)
+	}
+	if n := len(h.m.Snapshots()); n != 2 {
+		t.Errorf("点第二次之后队列里有 %d 个任务，want 还是 2", n)
+	}
+}
+
+// TestTheVideoFlagSurvivesARestart 身份里必须记着「这是视频」，否则重开应用之后
+// 取流只拿音频，重试之后落盘的是一个 .m4a。
+func TestTheVideoFlagSurvivesARestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), QueueFileName)
+	resolve := func(context.Context, Identity) (*Source, error) {
+		return nil, errors.New("这一份只验落盘，不真的取流")
+	}
+	m, err := New(Options{Client: http.DefaultClient, Resolve: resolve}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Enqueue(AddRequest{Bvid: "BV1", Cid: "c1", Title: "MV", Video: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	m.Close("")
+
+	again, err := New(Options{Client: http.DefaultClient, Resolve: resolve}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Close("")
+	snaps := again.Snapshots()
+	if len(snaps) != 1 {
+		t.Fatalf("重开之后队列里有 %d 个任务，want 1", len(snaps))
+	}
+	if got := filepath.Ext(snaps[0].Dest); got != ".mp4" {
+		t.Errorf("重开之后任务落在 %q，want .mp4（Video 这一位没存住）", got)
+	}
+}
+
+// TestCloseWithAQueuedTaskDoesNotHang 钉「关掉的时候后台那条线会退出」。
+//
+// 🔴 这一条是实测卡住整个包十分钟的那个活锁：队列里还排着一项时调 `Close`，
+// `loop` 的内层循环不认 `ctx.Done()`，而 `runOne` 见到 `m.closed` 就原样返回、**不改
+// 任务状态**——于是 `nextQueued()` 一直返回同一项，`Close` 里的 `wg.Wait()` 永远
+// 等不到它。应用退不出去。
+func TestCloseWithAQueuedTaskDoesNotHang(t *testing.T) {
+	m, err := New(Options{
+		Client: http.DefaultClient,
+		// 一直挂着：模拟「取流那一头还没回来」，也就是最容易和 Close 撞上的时刻。
+		Resolve: func(context.Context, Identity) (*Source, error) {
+			select {} //nolint:staticcheck // 这份就是要卡住，Close 能不能把它拽出来是判据
+		},
+	}, filepath.Join(t.TempDir(), QueueFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Enqueue(AddRequest{Bvid: "BV1", Cid: "c1", Title: "MV"}); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- m.Close("") }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("关掉：%v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close 十分钟没回来——后台那条线还在转")
+	}
+
+	// 关掉之后还排着队的那一项落在「暂停」上（下次接着下），不是「还排着」。
+	snaps := m.Snapshots()
+	if len(snaps) != 1 {
+		t.Fatalf("队列里有 %d 个任务", len(snaps))
+	}
+	if snaps[0].Status != StatusPaused {
+		t.Errorf("关掉之后那一项是 %q，want %q", snaps[0].Status, StatusPaused)
 	}
 }

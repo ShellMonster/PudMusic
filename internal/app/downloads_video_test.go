@@ -144,7 +144,10 @@ func TestAVideoDownloadLandsAnMP4WithBothTracks(t *testing.T) {
 	}
 }
 
-// TestAudioAndVideoAreTwoDifferentQueueEntries 钉住「音频和视频是两项」。
+// TestDownloadingAudioAndVideoAreTwoQueueEntries 钉住「音频和视频是两项」。
+//
+// （函数名沿用上游 `b0515e9` 里的那一条——合流时我把它改写过，改完之后名字也
+// 改回了它原来的，这样 diff 里看得到的是「这条加强了」而不是「这条没了又新来一条」。）
 //
 // ⚠️ 这一条**原来断言的是反的**（我当初写的是「同一首先点音频再点视频，拿到
 // 的是同一项」，并在报告里把它列成「需要人拍板」）。上游后来在
@@ -160,7 +163,11 @@ func TestAVideoDownloadLandsAnMP4WithBothTracks(t *testing.T) {
 // 所以这条用例现在是**钉住修好的那个行为**：两次入队拿到两个不同的任务。
 // 而「音频那一支保持旧格式」也一起钉住——落盘的队列文件按那个字符串当键，
 // 改了格式的话升级过的用户重启之后整个队列一个都认不出来（看起来像队列空了）。
-func TestAudioAndVideoAreTwoDifferentQueueEntries(t *testing.T) {
+//
+// 比上游那一条多断了一样：那一条只断「两次拿到的 ID 不同」，没断**音频那个
+// ID 具体是什么**。而那正是不能动的那个格式——它一改，所有升级过的用户重启
+// 之后队列就空了。
+func TestDownloadingAudioAndVideoAreTwoQueueEntries(t *testing.T) {
 	d := newDashPairFixture(t)
 	a := d.app(t, t.TempDir())
 	item := onlineItem("BV1xx", "c123", "同一首")
