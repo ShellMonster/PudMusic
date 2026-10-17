@@ -201,7 +201,7 @@ func (s *Shell) newCollectionPage(ref app.CollectionRef) *collectionPage {
 // 换排序时整个换掉列表而不是换 fetcher，同一个道理（换 fetcher 还是闭包读
 // 字段）。
 func (s *Shell) newCollectionList(p *collectionPage) *list.PagedList {
-	acts := list.AppActions(s.app, s.addToast)
+	acts := s.listActions()
 	ref, sort, media := p.ref, p.sort, &p.media
 	return list.NewPaged(s.images, acts, func(ctx context.Context, pageNo int) (list.Page, error) {
 		return s.fetchCollectionPage(ctx, ref, sort, pageNo, media)

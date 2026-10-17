@@ -87,7 +87,11 @@ func (s *Shell) viewFavoriteGroup(c *ui.Context, st app.Settings, g app.Favorite
 	})
 }
 
-// viewFavoriteHeader 是那一组的折叠开关。
+// viewFavoriteHeader 是那一组的折叠开关，右边跟着一个「新建收藏夹」。
+//
+// 「新建」只给「我创建的」那组（Biu 的 `collection/index.tsx:486-498`：那个
+// + 号是 `renderFavoriteGroup` 的 `titleExtra`，只有 created 那一组传了它）。
+// 「我收藏的」里新建出来的东西属于**别人**，自己建的会出现在上面那一组。
 func (s *Shell) viewFavoriteHeader(c *ui.Context, g app.FavoriteGroup, folded bool) {
 	arrow := "▾"
 	if folded {
@@ -100,8 +104,28 @@ func (s *Shell) viewFavoriteHeader(c *ui.Context, g app.FavoriteGroup, folded bo
 	// 也不写 `Grow(1)`：Column 默认就把子元素拉满宽（`docs/ui/layout.md`），
 	// 而 Grow 是纵向的「吃掉剩下的空间」——写在这里，它在折叠的那一组里
 	// 会把下面的东西顶没了。
-	if ui.Button(c, arrow+" "+g.String()).Clicked() {
-		s.toggleFavoriteFolded(g, folded)
+	ui.Row(c).Gap(2).Center().Children(func() {
+		fold := ui.Button(c, arrow+" "+g.String()).Grow(1)
+		if fold.Clicked() {
+			s.toggleFavoriteFolded(g, folded)
+		}
+		// ⚠️ **折叠的时候不画**：72 宽的侧栏摆不下两个字，而 Biu 那边这个 +
+		// 是在 `renderFavoriteGroup` 的 titleExtra 里、折叠态同样不画
+		// （`collection/index.tsx:432-434` 那段把 children 一起折了）。
+		if g == app.FavoritesCreated && !folded {
+			s.viewNewFavoriteButton(c)
+		}
+	})
+}
+
+// viewNewFavoriteButton 是「我创建的」那一组标题右边那个 +。
+//
+// ⚠️ **图标用「+」**：Biu 那个是 `RiAddLine`（remixicon 的图标），本项目还没
+// 接图标资源，而字形它自带。`Label` 补上「新建收藏夹」是为了读屏和 Tooltip——
+// 画面上只有一个 +，光看不知道是什么。
+func (s *Shell) viewNewFavoriteButton(c *ui.Context) {
+	if ui.Button(c, "+").Tooltip("新建收藏夹").Label("新建收藏夹").Clicked() {
+		s.openFolderEdit(0)
 	}
 }
 
@@ -243,11 +267,16 @@ func (s *Shell) favoriteMenu(g app.FavoriteGroup, f app.Favorite, m *ui.Menu) {
 
 // favoriteAction 是右键菜单被选中之后做的事。
 //
-// **只有「隐藏」是真的**：Biu 就是把 ID 写进 `hiddenMenuKeys`
-// （`collection/index.tsx:232-244`），而那一格就在我们的设置里。其余几项
-// 全都要 B 站接口（阶段 3 的另一张票），说清楚比按了没反应好。
+// 「隐藏」写进 `hiddenMenuKeys`（Biu 就是这么做的，
+// `collection/index.tsx:232-244`），「修改」开出编辑弹窗。其余几项还要
+// B 站接口，说清楚比按了没反应好。
 func (s *Shell) favoriteAction(f app.Favorite, item favMenuAction) {
 	switch item.key {
+	case "edit":
+		// ⚠️ 传的是收藏夹的 **id**，不是序号：B 站的接口要的是 media_id。
+		// 传错的话弹窗打开、拉回来的是另一个收藏夹的名字，而用户是在改这一
+		// 个——症状是「打开之后标题栏上写着别人的收藏夹名」。
+		s.openFolderEdit(f.ID)
 	case "hide":
 		key := strconv.FormatInt(f.ID, 10)
 		_, err := s.app.UpdateSettings(func(st *app.Settings) {

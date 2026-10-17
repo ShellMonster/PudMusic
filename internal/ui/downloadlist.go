@@ -200,20 +200,20 @@ func (s *Shell) viewDownloadList(c *ui.Context, _ *ui.Route) {
 
 	ui.Column(c).Key("page:" + downloadListPath).Grow(1).Padding(20).Gap(12).
 		AlignItems(ui.Stretch).Children(func() {
-			d.viewToolbar(c, s)
+		d.viewToolbar(c, s)
 
-			// 一条记录都没有时画的是**这一页**的空状态（routes 表里
-			// `/download-list` 那一条，出处和其余 13 条写在一起）。不用表格自己的
-			// 空行：那一行只有一句「暂无内容」，说不了「怎么才能不空」。
-			//
-			// ⚠️ 这一支是 return，不是少画表格：`ui.Table` 哪怕 n=0 也会画表头，
-			// 于是空着的时候页面上还杵着五个列名 —— 比空状态更让人以为这一页坏了。
-			if len(d.rows) == 0 {
-				s.viewEmpty(c, "downloads:empty", lookup(downloadListPath).Empty)
-				return
-			}
-			d.viewTable(c, s)
-		})
+		// 一条记录都没有时画的是**这一页**的空状态（routes 表里
+		// `/download-list` 那一条，出处和其余 13 条写在一起）。不用表格自己的
+		// 空行：那一行只有一句「暂无内容」，说不了「怎么才能不空」。
+		//
+		// ⚠️ 这一支是 return，不是少画表格：`ui.Table` 哪怕 n=0 也会画表头，
+		// 于是空着的时候页面上还杵着五个列名 —— 比空状态更让人以为这一页坏了。
+		if len(d.rows) == 0 {
+			s.viewEmpty(c, "downloads:empty", lookup(downloadListPath).Empty)
+			return
+		}
+		d.viewTable(c, s)
+	})
 
 	// 弹窗画在这一列**外面**：它盖的是整个窗口，一个 `Grow(1)` 的页面列里
 	// 放它的话面板会跟着页面走位。

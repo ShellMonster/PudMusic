@@ -15,7 +15,6 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -135,6 +134,23 @@ type Shell struct {
 	// 换容器就整个换掉，见 `collectionFor`。
 	collection *collectionPage
 
+	// folderEdit 是「新建 / 修改收藏夹」那个弹窗（folderedit.go）。
+	// nil 表示从没开过。
+	//
+	// ⚠️ 挂在窗口上而不是每帧新建：表单里每一个字段都是用户敲的，
+	// 下一帧没了就等于用户敲一个字丢一个（铁律一）。
+	folderEdit *folderEdit
+
+	// folderSelect 是「把这一首放进哪些收藏夹」那个弹窗（folderselect.go）。
+	folderSelect *folderSelect
+
+	// pickImage 是「弹文件框选一张封面图」那个**接缝**（folderpick.go）。
+	//
+	// ⚠️ 真实现要去系统里弹面板，而那一条在无头 Tester 里会 panic（`mygo`
+	// 的 needsApp：`mygo.App.Run` 没跑过）。测试建完外壳换成桩，于是
+	// 「选中的图有没有被解码、有没有被裁成 16:9」能自动验。
+	pickImage func(*mygo.Window) ([]string, error)
+
 	// crash 是上一帧 panic 到的东西，非 nil 时这一帧画错误页。
 	crash any
 
@@ -214,11 +230,12 @@ func New(a *app.App) *Shell {
 		clock:     realClock{},
 		images:    imgcache.New(imgcache.Options{}),
 		autostart: systemAutoStart{},
+		pickImage: pickImageFile,
 	}
 	s.images.AddWake(s.wake.invalidate)
 	// 首页自己那一摊要在建好之后才有（它要用封面缓存），所以接在 images 后面。
 	// 操作接在应用状态上、提示接自己的 Toast，接法见 widgets/list 的 AppActions。
-	s.home = newHomePage(s.images, list.AppActions(a, s.addToast), s.wake.invalidate)
+	s.home = newHomePage(s.images, s.listActions(), s.wake.invalidate)
 	// 下载记录页同理（downloadlist.go）：两个「打开」接系统那一份，它们在无头
 	// Tester 里会 panic，测试建完外壳就换成记动作的桩；记录那一条接应用层。
 	s.downloads = newDownloadsPage(a.DownloadSnapshots, systemOpenDir, mygo.Shell.ShowItemInFolder)
@@ -439,7 +456,38 @@ func (s *Shell) viewMain(c *ui.Context) {
 		s.viewPlayBar(c, st)
 	})
 
+	// 收藏夹管理那几个弹窗（新建 / 修改 / 选封面 / 裁剪 / 选收藏夹）。
+	//
+	// ⚠️ 排在**最后**：它们是模态的，要盖住整页；而外面这一层 Guard 不可省
+	//（铁律四）——view 里 panic 会穿透 Cocoa 事件循环杀掉整个进程。
+	Guard(s.viewFolderDialogs, s.onPanic)(c)
+
 	s.viewToasts(c)
+}
+
+// viewFolderDialogs 画收藏夹管理那几个弹窗，**并收掉后台回来的结果**。
+//
+// 每帧开头**先**收结果再画：`TakeFolderResult` 是「取走而不是读」，取过就不再
+// 有，而收结果这一趟会改 `submitting`——先画后收的话，界面上会有一帧是
+// 「提交完了但按钮还在转」，而用户看到的就是「点了没反应」。
+func (s *Shell) viewFolderDialogs(c *ui.Context) {
+	s.flushFolderResults()
+	s.syncFolderDialogs(c)
+
+	// 裁剪弹窗画在编辑弹窗**外面**（不是里面）：`ui.Modal` 自己带一层遮罩，
+	// 嵌在另一个 Modal 的面板里的话遮罩只有面板那么大，裁剪台周围那一圈点不
+	// 到——而那一圈正是「点外面想关掉」的地方。
+	if e := s.folderEdit; e != nil && e.crop.open {
+		s.viewCoverCrop(c, &e.crop)
+	}
+	s.viewFolderSelect(c)
+}
+
+// syncFolderDialogs 是那些「每一帧都要问一次后台」的地方。
+func (s *Shell) syncFolderDialogs(c *ui.Context) {
+	if f := s.folderSelect; f != nil {
+		s.syncFolderList(f)
+	}
 }
 
 // viewCrash 是崩溃后那一帧。Biu 原来的 ErrorBoundary 也是这么做的：程序活着，

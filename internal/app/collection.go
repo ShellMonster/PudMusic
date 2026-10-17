@@ -202,6 +202,7 @@ type collections struct {
 	folderChoices folderChoices
 	folderResult  folderResult
 	coverURL      coverURL
+	folderDraft   folderDraft
 }
 
 // MountCollections 把歌单内容页要用的零件挂上。**在开窗口之前调**。

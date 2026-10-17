@@ -360,3 +360,79 @@ func dealDoneText(added, removed int) string {
 	}
 	return "修改成功"
 }
+
+// ── 改之前先把原来那份拉回来 ───────────────────────────────────────────────
+
+// FolderDraftView 是一个收藏夹现在的样子，填进编辑弹窗的表单。
+//
+// ⚠️ **`Public` 是「是不是公开」，不是 B 站的 `privacy`**：服务层那边是 0 公开
+// 1 私密，而这里问的是界面那个开关。翻两次的后果是「界面上选了公开、传过去
+// 的是 1」，B 站那边不报错——用户建出来的是私密收藏夹，而界面上写着公开。
+type FolderDraftView struct {
+	ID     int64
+	Title  string
+	Intro  string
+	Cover  string
+	Public bool
+}
+
+// folderDraft 是后台拉回来那一份的存放处（带锁：写它的是后台 goroutine）。
+type folderDraft struct {
+	mu     sync.Mutex
+	loaded bool
+	view   FolderDraftView
+}
+
+func (d *folderDraft) put(v FolderDraftView) {
+	d.mu.Lock()
+	d.loaded, d.view = true, v
+	d.mu.Unlock()
+}
+
+// take 取走。**取走过就没有了**——理由同 `TakeFolderResult`：读而不取的话
+// 表单会被填第二遍，而第二遍会把用户在这中间敲的字冲掉。
+func (d *folderDraft) take() (FolderDraftView, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.loaded {
+		return FolderDraftView{}, false
+	}
+	d.loaded = false
+	return d.view, true
+}
+
+// LoadFolder 后台拉一个收藏夹现在的样子。**立刻返回**。
+//
+// 「修改」弹窗打开时调它。侧栏那一行只有标题，名称之外的三个字段（简介、封面、
+// 公开私密）一个都推不出来——照着标题填进去，其余三项会**存成空**，而用户
+// 以为他只是改了名字。
+func (a *App) LoadFolder(id int64) {
+	c := a.collectionsSnapshot()
+	if c == nil {
+		return
+	}
+	go func() {
+		raw, err := c.refs.Client.CollectionInfo(context.Background(), id, bili.CollectionFavorite)
+		if err != nil {
+			log.Printf("biu: 拉收藏夹 %d 的信息失败：%v", id, err)
+			c.folderResult.add(FolderResult{OK: false, Text: "打不开这个收藏夹：" + bili.Friendly(err)})
+			a.wakeUI()
+			return
+		}
+		c.folderDraft.put(FolderDraftView{
+			ID: raw.ID, Title: raw.Title, Intro: raw.Intro, Cover: raw.Cover,
+			// attr 第 0 位是「私密」，界面那个开关问的是「是不是公开」。
+			Public: !raw.Private,
+		})
+		a.wakeUI()
+	}()
+}
+
+// TakeFolderDraft 取走后台拉回来的那一份表单，取走之后就轮到下一份。
+func (a *App) TakeFolderDraft() (FolderDraftView, bool) {
+	c := a.collectionsSnapshot()
+	if c == nil {
+		return FolderDraftView{}, false
+	}
+	return c.folderDraft.take()
+}

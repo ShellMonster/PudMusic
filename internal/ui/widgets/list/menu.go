@@ -105,11 +105,17 @@ func doAction(item menuItem, i int, song Music, acts Actions, playFrom func(int)
 		if acts.Open != nil {
 			acts.Open(song.Item)
 		}
-	case "favorite", "download-audio":
-		// 说清楚比按了没反应好。这两项要 B 站接口，那一张票还没做。
-		//
-		// 话里带上用户按的那个字：菜单有五项，只说「还没接」的话用户不知道
-		// 说的是哪一项，得自己再点一遍试。
+	case "favorite":
+		if acts.Favorite == nil {
+			// 说清楚比按了没反应好（见 download-audio 那一支的注释）。
+			notify(acts, "「"+item.label+"」还没接 B 站接口")
+			return
+		}
+		acts.Favorite(song.Item)
+	case "download-audio":
+		// ⚠️ 下载服务还没接上（issue #29 已并进来的是下载记录页，批量下载的
+		// 队列入口还没有）。话里带上用户按的那个字：菜单有五项，只说「还没接」
+		// 的话用户不知道说的是哪一项，得自己再点一遍试。
 		notify(acts, "「"+item.label+"」还没接 B 站接口")
 	}
 }

@@ -26,6 +26,15 @@ type Actions struct {
 	// 里打开 B 站。
 	Open func(item app.Item)
 
+	// Favorite 打开「把这一首放进哪些收藏夹」那个弹窗。
+	//
+	// 是**弹窗**不是直接收藏：B 站那边一次能放进几个收藏夹，而收藏状态是
+	// 「在哪些收藏夹里」——直接收藏只能二选一，用户想同时放进「通勤」和
+	// 「循环」就得收藏两次再手动去两个收藏夹里删。
+	//
+	// nil 表示这一票没接上（见 menu.go 的那一支）。
+	Favorite func(item app.Item)
+
 	// Notify 说一句话。刚接的操作（比如还没接 B 站接口的收藏）按不动就是靠它。
 	Notify func(text string)
 }
@@ -45,7 +54,8 @@ func AppActions(a *app.App, notify func(string)) Actions {
 				notify("加不进队列：" + err.Error())
 			}
 		},
-		Open: func(item app.Item) { open(item, notify) },
+		Open:     func(item app.Item) { open(item, notify) },
+		Favorite: nil,
 		Notify: func(text string) {
 			if notify != nil {
 				notify(text)
