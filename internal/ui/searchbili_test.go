@@ -54,6 +54,8 @@ type biliFixture struct {
 	searched []string
 	// pagelistCalls 数分 P 列表被叫了几次——「放歌之前有没有问过」就看你叫没叫。
 	pagelistCalls int
+	// videoPages 顶掉分 P 列表的回包。nil 是默认那**一集**。
+	videoPages []any
 	// served 数**已经回了**的搜索响应。放行一个卡住的响应之后靠它知道「旧的回去
 	// 了」——不等它的话，断言可能在那一趟还在网络上时就跑完了，看着全绿其实什么
 	// 都没验到。
@@ -195,7 +197,13 @@ func (f *biliFixture) serveSearch(w http.ResponseWriter, r *http.Request) {
 func (f *biliFixture) serveVideoPages(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.pagelistCalls++
+	pages := f.videoPages
 	f.mu.Unlock()
+
+	if pages != nil {
+		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1, "data": pages})
+		return
+	}
 
 	writeBiliJSON(w, map[string]any{
 		"code": 0, "message": "0", "ttl": 1,
@@ -206,6 +214,16 @@ func (f *biliFixture) serveVideoPages(w http.ResponseWriter, r *http.Request) {
 			"first_frame": "//i0.hdslb.com/bfs/storyff/n10500.jpg",
 		}},
 	})
+}
+
+// setVideoPages 换掉分 P 列表的回包（nil = 回到那一集）。
+//
+// 全屏播放器的分集面板要的是「多 P 的稿子」（Biu 的 `playItem.hasMultiPart`），
+// 而默认那份 fixture 只回一集——面板的入口按 Biu 是不摆的。
+func (f *biliFixture) setVideoPages(pages []any) {
+	f.mu.Lock()
+	f.videoPages = pages
+	f.mu.Unlock()
 }
 
 func (f *biliFixture) servePlayURL(w http.ResponseWriter, r *http.Request) {

@@ -5,6 +5,7 @@
 package app
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -181,6 +182,29 @@ type App struct {
 	// `time.Sleep`——而 `PLAN.md` 的验收项明写「用假钟，不靠 time.Sleep」。
 	// 用得着的只有歌词那 500ms 的防抖窗口（见 lyrics.go）。
 	after func(d time.Duration, fn func()) func()
+
+	// fullPlayerPrefs 是全屏播放器自己那一份偏好（见 fullplayer_prefs.go）。
+	// 挂上之前是 nil，`FullPlayerPrefs` 判空之后给默认值。
+	fullPlayerPrefs *fullPlayerPrefsStore
+	// specBars 是频谱条那一行的高度（0~1），每一帧复用同一块。
+	// 频谱是**每帧**要画的（条子每帧都在动），所以这里绝不能每帧新建。
+	specBars []float32
+	// parts 是当前这首的分集列表，partsBvid 是它属于哪一个稿件。见 fullplayer.go。
+	partsMu     sync.Mutex
+	parts       []bili.VideoPart
+	partsBvid   string
+	partsErr    error
+	partsLoaded bool
+	partsWanted bool
+	// partsTriedAt 是上一次**发起**那一问的时刻，问失败之后拿它算退避
+	// （`partsRetryAfter`）。成功之后用不上——`partsLoaded` 已经挡住了。
+	partsTriedAt time.Time
+	// partsFetch 是问分集的那一趟，nil = 走取流零件上的 `bili.Client.VideoPages`。
+	//
+	// **只由界面那一侧读写**：`ensureParts` 在那里把它取出来递给后台那个
+	// goroutine，goroutine 不碰这个字段。生产上永远是 nil（所以不需要锁）；
+	// 测试里替成一个假函数，才能量「失败之后到底有没有再问」。
+	partsFetch func(context.Context, string) ([]bili.VideoPart, error)
 
 	// 本地音乐库，见 localmusic.go。挂上去之前是 nil，界面要判空。
 	localMusic *localLibrary

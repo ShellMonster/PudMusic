@@ -296,12 +296,75 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 	})
 }
 
-// viewCover 是播放条左边那张封面。
+// viewCover 是播放条左边那张封面。**点它开全屏播放器**。
 //
 // 四种状态（没有地址 / 载入中 / 就绪 / 加载失败）都由 imgcache.View 画，
 // 这里不重复它的判断，也不替它决定长什么样——以后缓存换画法只改那一处。
+//
+// 🔴 它带着 `coverTransition(identity)`，而满屏上那一张带的是同一个——这就是
+// 「封面从列表行放大成全屏背景」那一段，等价于 SwiftUI 的 `matchedGeometryEffect`
+// （理由见 fullplayer.go 的 coverMatch）。**这一层是转场的另一半**：少了它，
+// 满屏的封面找不到「上一个」，就只是「啪」地一下就位。
+//
+// ⚠️ 它在**每一帧**都要重新装一遍 Match（`ElementTransition` 是每帧重新登记的，
+// 框架只认这一帧装的那个）。而框架只留一帧的记录（`rec.frame+1 < rt.frame` 就
+// 删），所以漏一帧就等于转场没了。
 func (s *Shell) viewCover(c *ui.Context, st app.State) {
-	imgcache.View(c, s.images, st.CoverURL, coverSize, coverSize)
+	// 🔴 外面这一层 `Size(56,56)` 不是多余的：**`Absolute()` 是相对父容器摆的**，
+	// 而这一行的父容器是上面那个「封面 + 歌名」的 `Grow(1)` Row。不套这一层的话
+	// 悬停浮层盖住的是**整块左半边播放条**——实测那块黑从 x≈8 铺到 x≈1048，歌名
+	// `stereo16` 被压在底下，⤢ 落在整块的中心 x≈540 而不是落在 56×56 的封面上。
+	//
+	// `queue_drawer.go` 的 `viewQueueCover` 就是这个套法（它外面套的是
+	// `Width(queueCoverSize)` 那一层），照抄。
+	//
+	// 🔴 **可点的是外面这一层 wrapper，不是里面那张图。**
+	//
+	// 命中链是「最上面那个含点的框 + 它**自己的父链**」，**兄弟不在链上**
+	// （`mygo/ui/input.go:131-145` 的 `appendHitChain`）；而 `flagPassThrough` 只
+	// 跳过那一个自己的命中框、子节点照登记（`runtime.go:953`）。于是只要可点的
+	// 是浮层的**兄弟**，浮层里任何一个字都会把它挡住：⤢ 正好落在封面正中，而
+	// 「把鼠标移过去、点一下」点的就是那个正中。
+	//
+	// 症状很有意思：点封面**边角**能开（那儿没有文字），点**正中**什么也不会发生。
+	//
+	// 两条改法都验过（改回去都红）：
+	//
+	//	① 可点的挪到 wrapper 上（本票）。wrapper 是浮层的**父级**，于是浮层里不管
+	//	   画什么，链都走得到它。往浮层里再加东西也吃不掉点击。
+	//	② 给 ⤢ 那个字加 `PassThrough()`（评审给的最小改法）。字不登记了，链落到
+	//	   里面那张图上——也通，但那是**逐个子元素**修的：下一个往浮层里加的东西
+	//	   还得再记着加一次。
+	//
+	// 选了 ①，顺手也给字加了 `PassThrough()`（`toast.go` 那边也是这么写的）——
+	// 那个字自己不该接指针：指针停在一个字上却报成「停在封面旁边的空气上」，
+	// 悬停反馈的位置就不对了。
+	//
+	// `queue_drawer.go` 的 `viewQueueRow` 本来就是这个形状——可点的行是封面的
+	// **祖先**，所以那边浮层里画 ▶ 还是 ⤢ 都吃不掉点击。
+	wrap := ui.Row(c).Key("playbar-cover").Size(coverSize, coverSize)
+	wrap.Children(func() {
+		// 共享元素转场留在里面那张图上（它才是转场的那一半）。
+		imgcache.View(c, s.images, st.CoverURL, coverSize, coverSize).
+			Label("当前封面").
+			Transition(coverTransition(coverIdentity(s, st)))
+
+		if wrap.Hovered() {
+			// Biu 那边是 hover 时浮一层 `bg-[rgba(0,0,0,0.5)]` 加一个向上的箭头
+			// （`layout/playbar/left/index.tsx:38-41`）。没有这一层的话，用户不知道
+			// 那张封面是能点的。
+			//
+			// PassThrough：浮层这一层和里面那个字都不接点击。
+			ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Radius(c.Theme().Radius).
+				PassThrough().Center().Background(ui.RGBA(0, 0, 0, 0.5)).Children(func() {
+				ui.Text(c, "⤢").FontSize(20).TextColor(ui.RGBA(255, 255, 255, 0.92)).
+					PassThrough()
+			})
+		}
+	})
+	if wrap.Clicked() {
+		s.openFullPlayer()
+	}
 }
 
 // viewStepButtons 是上一首和下一首。
@@ -310,10 +373,21 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 // 队列里只有一首歌时按钮仍然是亮的——按下去听到的是同一首从头来，
 // 表现成按了没反应更让人困惑。
 func (s *Shell) viewStepButtons(c *ui.Context) {
-	// 宽度要放得下三个汉字：按 64 画出来是「上...」「下...」，看着像坏了。
+	s.viewPrevButton(c)
+	s.viewNextButton(c)
+}
+
+// viewPrevButton / viewNextButton 是那两首键。分成两个是为了全屏播放器能把它们
+// 摆到播放键**两边**（Biu 的 `MusicPlayControl` 就是 上一首 · 播放 · 下一首）。
+//
+// 宽度要放得下三个汉字：按 64 画出来是「上...」「下...」，看着像坏了。
+func (s *Shell) viewPrevButton(c *ui.Context) {
 	if ui.Button(c, "上一首").Width(88).Disabled(!s.app.CanPrev()).Clicked() {
 		s.app.Prev()
 	}
+}
+
+func (s *Shell) viewNextButton(c *ui.Context) {
 	if ui.Button(c, "下一首").Width(88).Disabled(!s.app.CanNext()).Clicked() {
 		s.app.Next()
 	}

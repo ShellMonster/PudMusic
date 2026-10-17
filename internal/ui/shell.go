@@ -130,6 +130,18 @@ type Shell struct {
 	scrub float64
 	held  bool
 
+	// fullScrub / fullHeld 是**全屏播放器上那条**进度条自己的一份。
+	//
+	// ⚠️ 不能和上面那一份共用：两处会各自按住、各自 `ScrubStart`/`ScrubEnd`，
+	// 而 `ScrubEnd` 是一次真的 seek。共用的话在全屏里拖一下进度条，底下那条
+	// 也会跟着跳（而它这会儿压根没被按着）。
+	fullScrub float64
+	fullHeld  bool
+
+	// full 是全屏播放器自己那一摊，见 fullplayer.go。
+	// **只由 view 在主线程上读写**，不跨 goroutine（铁律一）。
+	full fullPlayer
+
 	// rateOpen 是倍率那个浮层开着没有。**只由 view 在主线程上读写**，
 	// 见 playbar_rate.go。
 	rateOpen bool
@@ -729,7 +741,13 @@ func (s *Shell) viewMain(c *ui.Context) {
 			Guard(s.sideBody, s.onPanic)(c)
 			s.viewRoutes(c)
 		})
-		s.viewPlayBar(c, st)
+		// ⚠️ **全屏开着的时候不建播放条**。理由见 fullplayer.go 顶上那一段：
+		// 共享元素转场要的是「上一帧没被摆过的那个」，播放条那个封面下一帧
+		// 还会被摆一次，满屏的封面就找不到「上一个」了——封面会「啪」地一下
+		// 就位而不是长过去。它反正被一层不透明的背景盖着，少建它看不出异样。
+		if !s.full.open {
+			s.viewPlayBar(c, st)
+		}
 	})
 
 	// 抽屉是浮在侧栏和页面**上面**的一层，不是主布局里的另一块。Biu 那边它是
@@ -743,6 +761,10 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// ⚠️ 排在**最后**：它们是模态的，要盖住整页；而外面这一层 Guard 不可省
 	//（铁律四）——view 里 panic 会穿透 Cocoa 事件循环杀掉整个进程。
 	Guard(s.viewFolderDialogs, s.onPanic)(c)
+
+	// 全屏播放器排在收藏夹弹窗**之后**、Toast **之前**：它盖住整个窗口，
+	// 而提示要浮在最上面（右下角那句话在满屏里也得看得见）。
+	Guard(s.viewFullPlayer, s.onPanic)(c)
 
 	s.viewToasts(c)
 }
