@@ -731,9 +731,10 @@ func TestLoggingOutStopsTheReporting(t *testing.T) {
 	if n := b.opensCount(); n != opensAfter {
 		t.Errorf("退登之后又多开了 %d 次头", n-opensAfter)
 	}
-	b.mu.Lock()
+	// ⚠️ **不要在外面再套一把 `b.mu`**：`allBeats` 自己已经加了锁，
+	// 而 `sync.Mutex` 不可重入 —— 套上去就是一次自死锁，整个包的测试
+	// 会挂到 10 分钟超时才报出来，而不是指着你这一行。
 	after := b.allBeats()[beatsAfter:]
-	b.mu.Unlock()
 	if len(after) != 0 {
 		t.Errorf("退登之后还发了 %d 条心跳：%v", len(after), playTypesOf(after))
 	}
