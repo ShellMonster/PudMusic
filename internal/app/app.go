@@ -57,6 +57,19 @@ type State struct {
 	// Err 是最近一次打开文件的失败原因，显示在播放条上，直到下一次打开成功。
 	Err string
 
+	// Artist 是当前这首的 UP 主名，播放条上那一行字点它进 UP 主空间。
+	//
+	// **本地文件永远是空的**：Biu 上游也不读音频内嵌的标签（见 media.go 的
+	// setArtist），所以本地音乐在那边也是没有 UP 名的一行。空串时播放条
+	// 压根不画那一行——摆一句空的地方不如不摆。
+	Artist string
+
+	// ArtistMid 是上面那个 UP 主的 mid，也就是 `/user/{id}` 里那个 id。
+	//
+	// ⚠️ **它可以是 0 而 Artist 不是空串**：有的来源只给名字不给编号（动态流
+	// 那一批）。那种情况下 UP 名照样显示，只是**点不动**（见 `Item.ArtistMid`）。
+	ArtistMid int64
+
 	// Quality 是当前这条流的音质徽章（「无损 FLAC」/「320K」）。
 	//
 	// 空串 = 这一首是本地文件，没有音质这回事（本地文件是什么格式和
@@ -138,8 +151,14 @@ type App struct {
 	updates *updater
 
 	// artist 是当前这首的艺人（在线条目的 UP 主名）。本地文件是空的，
-	// 见 media.go 的 setArtist。跟 cover 一样只有媒体会话在用。
+	// 见 media.go 的 setArtist。它有两个用户：系统媒体会话，和界面上播放条
+	// 那一行 UP 名（`State.Artist`）。
 	artist string
+	// artistMid 是那个 UP 主的 mid，播放条上点 UP 名进 `/user/{id}` 用它。
+	//
+	// ⚠️ 它和 artist **一起**换、一起清：只换名字不换编号的话，播放条上的
+	// UP 名会指着**上一个 UP 主**的空间，而界面上看不出任何异样。
+	artistMid int64
 	// stopped 是「用户按了停止」：和暂停分开，因为它让进度条回到开头，
 	// 而系统那边也是两个不同的状态（见 media.go 的 Stop）。
 	stopped bool
@@ -209,6 +228,8 @@ func (a *App) Snapshot() State {
 		Err:         a.errText,
 		Quality:     a.quality,
 		QualityPref: pref,
+		Artist:      a.artist,
+		ArtistMid:   a.artistMid,
 	}
 }
 
@@ -260,6 +281,7 @@ func (a *App) Open(path string) error {
 	// 本地文件没有艺人（Biu 上游也不读内嵌标签，见 media.go 的 setArtist）。
 	// 队列里的项自带的话，App.play 会在开成功之后补上。
 	a.artist = ""
+	a.artistMid = 0
 	a.position = 0
 	a.duration = p.Duration()
 	a.wantPlay, a.playing = true, true
@@ -419,6 +441,7 @@ func (a *App) ClearTrack() {
 	a.reportedErr = nil
 	a.title, a.path, a.cover = "", "", ""
 	a.artist = ""
+	a.artistMid = 0
 	a.position, a.duration = 0, 0
 	a.wantPlay = false
 	a.errText = ""

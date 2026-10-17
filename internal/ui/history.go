@@ -237,6 +237,9 @@ func (s *Shell) historyMenu(m *ui.Menu, i int) {
 	// "archive"`，这里由 app 层判好传下来）。
 	case m.Item("播放").Disabled(!row.CanPlay).Chosen():
 		acts.Play(i)
+	// 「下一首播放」判的是同一个 CanPlay，理由见 laterMenu 里那一项。
+	case m.Item("下一首播放").Disabled(!row.CanPlay).Chosen():
+		acts.PlayNext(i)
 	case m.Item("添加到队列").Disabled(!row.CanPlay).Chosen():
 		acts.Add(i)
 	case m.Item("在 B 站打开").Chosen():

@@ -47,6 +47,9 @@ func ItemOfMedia(m bili.Media) Item {
 		Source: "online",
 		Title:  m.Title,
 		Cover:  m.Cover,
+		// 播放条上那一行 UP 名 + 点它进空间（见 `Item.Artist`）。
+		Artist:    m.Owner,
+		ArtistMid: m.OwnerMid,
 		// Sid 一直带着：Type=12（音频）靠它，Type=2 的条目也指着它
 		// （`list.BiliLink` 有 bvid 时优先用 bvid，所以不会串）。
 		Sid: strconv.FormatInt(m.ID, 10),

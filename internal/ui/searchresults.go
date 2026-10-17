@@ -432,6 +432,13 @@ func (s *Shell) searchUserActions() list.Actions {
 		Add: func([]app.Item) {
 			s.addToast("UP 主不是歌，加不进队列；进他的空间听他的歌")
 		},
+		// 「下一首播放」照实说一句为什么不**能用**：菜单是列表和网格共用的一份
+		// （`widgets/list` 的 menuItems），这一项在用户 Tab 照样摆着。给 nil
+		// 的话它会落到那句「还没接上」——而它其实早接上了（UP 主确实不是歌，
+		// 和上面两项是同一个理由）。
+		PlayNext: func(app.Item) {
+			s.addToast("UP 主不是歌，没有东西可排；进他的空间听他的歌")
+		},
 		Open: func(item app.Item) {
 			mid, ok := searchUserMid(item)
 			if !ok {

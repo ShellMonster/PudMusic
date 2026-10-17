@@ -394,6 +394,7 @@ func (a *App) runOnline(it Item, gen int) {
 	a.path = ""
 	a.cover = it.Cover
 	a.artist = it.Artist
+	a.artistMid = it.ArtistMid
 	a.position = 0
 	a.duration = p.Duration()
 	a.wantPlay, a.playing = true, true

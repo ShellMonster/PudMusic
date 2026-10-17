@@ -482,8 +482,13 @@ func (p *pagedRows) playFrom(i int) {
 // 网格里放不出来」那种最难查的错（BMG-10 的收尾说明点名过同一件事）。
 type RowActions struct {
 	Play func(i int) // 从第 i 行往后接进队列并开始播
-	Add  func(i int) // 把第 i 行追加到队列末尾
-	Open func(i int) // 在系统里打开第 i 行的来处
+	// PlayNext 把第 i 行排在**正在放的那首后面**（「下一首播放」）。
+	//
+	// 和 Add 的分界就是插在哪：Add 接在队尾（得等整张列表放完），这一条接在
+	// 当前的下一位（这一首放完就是它）。
+	PlayNext func(i int)
+	Add      func(i int) // 把第 i 行追加到队列末尾
+	Open     func(i int) // 在系统里打开第 i 行的来处
 	// FavSelect 把第 i 行放进哪些收藏夹（开那个选择弹窗）。
 	FavSelect func(i int)
 	// Download 把第 i 行排进下载队列。
@@ -494,6 +499,7 @@ type RowActions struct {
 func (p *pagedRows) actions() RowActions {
 	return RowActions{
 		Play:      p.playFrom,
+		PlayNext:  p.playNextOne,
 		Add:       p.addOne,
 		Open:      p.openOne,
 		FavSelect: p.favSelectOne,
@@ -514,6 +520,19 @@ func (p *pagedRows) addOne(i int) {
 	row, ok := p.Row(i)
 	if ok && p.acts.Add != nil {
 		p.acts.Add([]app.Item{row.Item})
+	}
+}
+
+// playNextOne 把第 i 行排在正在放的那首后面。
+//
+// ⚠️ **底下那一层可能是 nil**：这一层不认接线是谁给的（测试里那份
+// `list.Actions{}` 什么都没有，`FavSelect` 也是同一个处境，见 `favSelectOne`）。
+// 判空之后什么也不做——**调用一个 nil 函数是当场崩**，而这一崩会一路穿出
+// Cocoa 事件循环把进程带走（铁律四）。
+func (p *pagedRows) playNextOne(i int) {
+	row, ok := p.Row(i)
+	if ok && p.acts.PlayNext != nil {
+		p.acts.PlayNext(row.Item)
 	}
 }
 

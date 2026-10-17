@@ -380,13 +380,21 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 	t := c.Theme()
 	m := g.songs[i]
 	chosen := i == g.sel
+	playing := isPlaying(g.acts, m.Item)
 
 	// 选中那一格：主色底 + 主色上的反色字，和列表选中行是同一套颜色
 	//（`ui/table.go` 的 node.Selected 就是这么画的）。深色主题下换成别的
 	// 颜色会看不清。
+	//
+	// ⚠️ 「正在放」是**第二档**、不是并进去的第二种底色：它只把歌名染成主色
+	// 并挂一句「正在播放」。换底色就和「选中」分不出来了——而这两个问的是两件
+	// 不同的事（见 card.go 里同一段）。
 	titleColor, metaColor := t.Text, t.TextMuted
-	if chosen {
+	switch {
+	case chosen:
 		titleColor, metaColor = t.AccentText, t.AccentText.Alpha(0.75)
+	case playing:
+		titleColor = t.Accent
 	}
 
 	box := ui.Column(c).Radius(t.Radius).
@@ -430,6 +438,16 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 					if m.Owner != "" {
 						ui.Text(c, m.Owner).Grow(1).FontSize(12).LineHeight(ownerLeading).
 							TextColor(metaColor).MaxLines(1).Ellipsis("…")
+					}
+					// 正在放的那一格：时长换成一句「正在播放」。
+					//
+					// ⚠️ **换掉时长而不是加在后面**：一格就那么宽，两样都画必然把
+					// 时长挤成「0:」——而用户读的是「正在放」不是那半截时长。
+					if playing {
+						// 标签带上歌名，理由见 card.go 那一处。
+						ui.Text(c, playingMark).Label(m.Title + " " + playingMark).
+							FontSize(11).TextColor(t.Accent).MaxLines(1)
+						return
 					}
 					// 时长没有就不画（Biu 的 `durationText` 为空时那一块
 					// 整个不渲染）。

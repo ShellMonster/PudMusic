@@ -386,7 +386,7 @@ func TestRightClickOnACardOpensTheSameMenuAsAListRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := tt.Menu()
-	want := []string{"播放", "添加到队列", "-", "在 B 站打开", "-", "收藏", "下载音频"}
+	want := []string{"播放", "下一首播放", "添加到队列", "-", "在 B 站打开", "-", "收藏", "下载音频"}
 	if !slices.Equal(got, want) {
 		t.Errorf("卡片上的菜单有 %q，want %q", got, want)
 	}
