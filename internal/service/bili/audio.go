@@ -372,6 +372,15 @@ func (c *Client) songExpiry(urls []string, timeout int) time.Time {
 
 // CollResourceCheck 报 rid / type 这一条收藏了没有。
 //
+// ⚠️ **这一票还没有生产调用方**。它的消费方是**播放条上的收藏态**（上游
+// `store/music-fav.ts` 的 `refreshIsFav`），而那是 PLAN 6.9 / C-24（审计 A4）
+// 那一票的范围——项目里目前还没有那个收藏按钮。收藏判重现在走的是
+// `favorite.go` 的 `/x/v3/fav/resource/ids`。
+//
+// 写在这里是为了**方法与注释一起留着**：接口的形状（路径、`rid`/`type` 参数、
+// `data` 是 0/1 而不是对象）都经 Biu 上游核对过并测过，那张票接上就能直接调；
+// 而**假装它已经接上了**比留着不动更糟——那会让「收藏态读不到」这件事没有出处。
+//
 // typ 用 `MediaVideo`（2）/ `MediaAudio`（12）那两个，别的地方都这么填。
 //
 // ⚠️ 这个接口的 `data` **不是一个对象**，而是一个 0/1 的数。所以
