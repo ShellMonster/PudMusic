@@ -299,7 +299,18 @@ func TestLockRacesTwoFreshProcesses(t *testing.T) {
 	const rounds = 10
 	bothFirst := 0
 	for r := 1; r <= rounds; r++ {
-		pa, pb := filepath.Join(dir, "pa"), filepath.Join(dir, "pb")
+		// ⚠️ **答案文件必须一轮一个**（这里曾经十轮共用 pa/pb 两个文件）。
+		//
+		// `waitAnswer` 是「文件里有东西就返回」，它分不清那个东西是**这一轮**
+		// 写的还是上一轮留下的。上一轮那个子进程写完就退出了，文件还在；这一轮
+		// 的两个进程还没写完，`waitAnswer` 已经把上一轮的 "first" 当成本轮的
+		// 答案读了出来——于是「两边都 first」被凭空造出来。
+		//
+		// 症状是「前几轮绿、后几轮连着红」：机器一忙，子进程从 Start 到写完
+		// 要几十上百毫秒，而 `waitAnswer` 第一个 5 ms 就去读了。实测全量并行
+		// 跑的时候第 6~10 轮连着红，隔离跑偶尔红——**测的其实不是锁**。
+		pa := filepath.Join(dir, fmt.Sprintf("pa-%d", r))
+		pb := filepath.Join(dir, fmt.Sprintf("pb-%d", r))
 		var oa, ob bytes.Buffer
 		// **两个都必须 stay**：抢到锁的那个如果写完答案就退出，内核立刻把锁还回去，
 		// 没抢到的那个下一轮就合法地拿到锁、也报 first——那时候它确实是「第一个
