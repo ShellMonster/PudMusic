@@ -40,12 +40,13 @@ import (
 //
 //   - `Settle` 零值用 `favoriteSettleDelay`；测试会把它设小，见 clock.go 的
 //     「假时钟」那一套。
-//   - `Downloader` 为 nil 是**正常状态**：批量下载要接的是 issue #29 那一票，
-//     它还没开工。界面拿到 nil 会把按钮按成不可用并说清楚，而不是假装能下。
+//   - `Downloader` 为 nil 是**仍然可能的**（测试和没装下载服务的那一次启动），
+//     界面拿到 nil 会把按钮按成不可用并说清楚，而不是假装能下。生产上它由
+//     `ui.MountCollections` 挂上的是 `App` 自己（见 `App.EnqueueDownload`）。
 type CollectionRefs struct {
 	Client *bili.Client
 
-	// Downloader 是批量下载那一摊。留接口不实现，理由见 Downloader。
+	// Downloader 是批量下载那一摊。见 Downloader。
 	Downloader Downloader
 
 	// Settle 是收藏 / 取消收藏之后等多久才去刷新元信息。
@@ -54,13 +55,12 @@ type CollectionRefs struct {
 
 // Downloader 是「批量下载」要接的那一份服务。
 //
-// **这一票只留接口，一行实现都没有**：issue #29（下载服务）还没开工，而
-// 下载要碰的东西（分 P、并发、断点续传、磁盘配额）没有一样属于这一页。
-// 现在把**接线**定死——谁调它、传什么、没挂上时界面说什么——那一票来了只要
-// 补一个实现，不用再回头改这一页。
+// 实现是 `App` 自己（`EnqueueDownload`，见 `collection_download.go`）——
+// 下载队列本来就挂在 App 上，再造一个中间人只是多一层转发。
 //
 // 为什么是接口而不是一个函数字段：实现那一侧要能挂自己的状态（队列、进度），
-// 函数字段装不下，而整包先定义接口是 Go 的惯例。
+// 函数字段装不下，而整包先定义接口是 Go 的惯例。**它也是这一页和下载那一层
+// 唯一的接缝**：换掉整个下载实现，这一页一个字节都不用改。
 type Downloader interface {
 	// EnqueueDownload 把这些条目排进下载队列。folder 是它们来自哪个容器
 	// （下载任务要在界面上写「来自哪个收藏夹」）。
@@ -218,7 +218,7 @@ func (a *App) MountCollections(refs CollectionRefs) {
 // CollectionsMounted 报告歌单这一摊挂上没有。
 func (a *App) CollectionsMounted() bool { return a.collectionsSnapshot() != nil }
 
-// DownloaderMounted 报告批量下载的服务接上没有（issue #29）。
+// DownloaderMounted 报告批量下载的服务接上没有。
 func (a *App) DownloaderMounted() bool {
 	c := a.collectionsSnapshot()
 	return c != nil && c.refs.Downloader != nil
@@ -409,8 +409,11 @@ func (a *App) RemoveMedias(ctx context.Context, ref CollectionRef, medias []bili
 
 // DownloadMedias 把这些条目排进下载队列。**同步**（调用方在后台 goroutine 里）。
 //
-// 没挂下载服务（issue #29 还没开工）时如实报错——**不假装成功**：假装成功
-// 的话界面上会弹一句「下载任务已添加」，而用户等一小时什么也不会发生。
+// 没挂下载服务时如实报错——**不假装成功**：假装成功的话界面上会弹一句
+// 「下载任务已添加」，而用户等一小时什么也不会发生。
+//
+// 返回的错**已经是一句说全了的话**（`EnqueueDownload` 编的），界面上不再往前
+// 加任何前缀。
 func (a *App) DownloadMedias(ctx context.Context, ref CollectionRef, medias []bili.Media) error {
 	c := a.collectionsSnapshot()
 	if c == nil {
@@ -425,11 +428,60 @@ func (a *App) DownloadMedias(ctx context.Context, ref CollectionRef, medias []bi
 	return c.refs.Downloader.EnqueueDownload(ctx, ref, medias)
 }
 
-// errDownloaderMissing 是「批量下载还没接上」。
+// ResolveFavoriteID 给一个**只有 bvid** 的条目补上稿件 id（avid）。
+// **立刻返回**，补好之后走 done。
 //
-// 单独一个哨兵错误（而不是拿一句字符串去比）是因为界面要拿它判「这个按钮
-// 是不是可用」，而那句话的措辞以后会改。
-var errDownloaderMissing = errors.New("biu: 下载服务还没接上（issue #29）")
+// # 为什么要有它
+//
+// 收藏夹那个选择弹窗要的是 **avid**（B 站的 `resource/deal` 收的是它，不是
+// bvid），而**大多数列表接口都不给 avid**：搜索结果、历史记录、UP 空间的投稿
+// 都只有 bvid。收藏夹那一页给的 `bili.Media.ID` 本身就是 avid，所以那一页不用
+// 走这里。
+//
+// ⚠️ **bvid → avid 是一次网络往返**（`bili.ArchiveID`），而界面线程上一次都
+// 不许有——所以这里是后台，返回之后界面那边才去开弹窗。
+//
+// 已经有 avid（`it.Sid` 非空）的**原样交出去**：问一次是白跑一趟，而白跑的
+// 那一趟会让 B 站以为我们在刷。
+func (a *App) ResolveFavoriteID(it Item, done func(Item, error)) {
+	c := a.collectionsSnapshot()
+	if c == nil {
+		likeDone(done, it, errCollectionsMissing)
+		return
+	}
+	if it.Sid != "" {
+		likeDone(done, it, nil)
+		return
+	}
+	if it.Bvid == "" {
+		likeDone(done, it, errors.New("这一首还没有可以收藏的身份"))
+		return
+	}
+	go func() {
+		aid, err := c.refs.Client.ArchiveID(context.Background(), it.Bvid)
+		if err != nil {
+			log.Printf("biu: 问 %s 的稿件 id 失败：%v", it.Bvid, err)
+			likeDone(done, it, err)
+			return
+		}
+		it.Sid = strconv.FormatInt(aid, 10)
+		likeDone(done, it, nil)
+	}()
+}
+
+// likeDone 是那个结果回调。done 是 nil 的调用方什么都不用做。
+func likeDone(done func(Item, error), it Item, err error) {
+	if done != nil {
+		done(it, err)
+	}
+}
+
+// errDownloaderMissing 是「这次启动没有把下载服务挂上」。
+//
+// 正常情况下它不该出现（`ui.MountCollections` 挂的是 `App` 自己），但它是
+// **可能**的：没装下载服务的那一次启动、以及测试。所以它留着，界面也照它把
+// 按钮按成不可用——不能因为「正常路径不会走到」就删掉那条判断。
+var errDownloaderMissing = errors.New("biu: 下载服务还没挂上")
 
 // DownloaderMissing 报这个错是不是「下载服务还没接上」。
 func DownloaderMissing(err error) bool { return errors.Is(err, errDownloaderMissing) }

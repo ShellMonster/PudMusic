@@ -3,6 +3,7 @@ package app_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -289,5 +290,63 @@ func TestSteppingAnEmptyQueueDoesNothing(t *testing.T) {
 	a.Prev()
 	if st := a.Snapshot(); st.HasTrack || st.Err != "" {
 		t.Errorf("空队列上按上一首/下一首改了状态：%+v", st)
+	}
+}
+
+// ── 下一首播放 ───────────────────────────────────────────────────────────────
+
+// TestInsertNextLandsRightAfterTheCurrentOne 插在**正在放的那首后面**。
+//
+// 这是「下一首播放」的字面意思。三条一起钉：
+//
+//  1. 位置对（下一首就是它，不是队尾）；
+//  2. **正在放的那首不动**——而它是靠身份认的，不是靠下标（改 cur 的话用户
+//     听着听着歌会自己跳一首）；
+//  3. 队列里其余的顺序原样往后挪（不是换掉后面那一首）。
+func TestInsertNextLandsRightAfterTheCurrentOne(t *testing.T) {
+	q := app.NewQueue()
+	q.Append(items("a", "b", "c")...)
+	if _, ok := q.Move(1); !ok { // 落在 a
+		t.Fatal("没落到第一首")
+	}
+
+	q.InsertNext(app.LocalItem("x"))
+	want := []string{"a", "x", "b", "c"}
+	if got := pathsOf(q.Items()); !slices.Equal(got, want) {
+		t.Fatalf("队列是 %v，want %v", got, want)
+	}
+	// 正在放的仍然是 a。
+	if cur, ok := q.Current(); !ok || cur.Path != "a" {
+		t.Errorf("当前项是 %v，want a（插在它后面不该动它）", cur)
+	}
+	// 下一首就是刚插的那首。
+	if next, ok := q.Move(1); !ok || next.Path != "x" {
+		t.Errorf("Move(+1) = %v，want x", next)
+	}
+}
+
+// TestInsertNextWhenNothingHasPlayedYet 还没开始放的时候插到最前面。
+//
+// 队列里的东西都还没轮到，而用户按的是「下一首播放」——队尾那个位置要等整张
+// 列表放完才轮得到（症状是「按了，一小时之后才响」）。
+func TestInsertNextWhenNothingHasPlayedYet(t *testing.T) {
+	q := app.NewQueue()
+	q.Append(items("a", "b")...)
+	q.InsertNext(app.LocalItem("x"))
+
+	if got, ok := q.Move(1); !ok || got.Path != "x" {
+		t.Errorf("第一个放出来的是 %v，want x", got)
+	}
+}
+
+// TestInsertNextIntoAnEmptyQueue 空的队列里它就是自己。
+func TestInsertNextIntoAnEmptyQueue(t *testing.T) {
+	q := app.NewQueue()
+	q.InsertNext(app.LocalItem("x"))
+	if q.Len() != 1 {
+		t.Fatalf("队列里有 %d 首，want 1", q.Len())
+	}
+	if cur, ok := q.Current(); !ok || cur.Path != "x" {
+		t.Errorf("当前项是 %v，want x", cur)
 	}
 }

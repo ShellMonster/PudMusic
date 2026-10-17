@@ -214,11 +214,16 @@ func (s *Shell) pickSideMenu(c *ui.Context, st app.Settings, ro bool) {
 //
 // ## 为什么摆在设置页上，而不是「本地音乐」那一页
 //
-// Biu 是摆在 local-music 页里的（`local-music/index.tsx` 的目录列表）。本项目的
-// local-music 现在**还是一个空状态**（`router.go` 里那条路由的 `Empty` 还是
-// 「暂无内容」），目录管理器是那一页的活儿。所以它先落在设置页上——
-// 「所有设置项都要在界面上能改」这一条比「摆在哪一页」更要紧，而摆在这一页用户
-// 找得到；等 local-music 页接上之后再搬过去（Biu 就是那么摆的）。
+// Biu 是摆在 local-music 页里的（`local-music/index.tsx` 的目录列表）。本项目
+// 的 local-music **早就接上了**（本地音乐扫描与页面，issue #30 已 CLOSED，commit
+// `2a28190`；那一页有自己的表格 / 列表 / 网格三档、行里的「打开文件夹」和
+// 「删除文件」），而这一组目录管理器**一直留在设置页**没搬过去。
+//
+// ⚠️ 这一点曾经被写反过：这段注释说「local-music 现在还是一个空状态……等它接上
+// 之后再搬过去」。接上早就在它之前发生了，而「等接上之后」这句话挂在代码上挂了
+// 很久——读的人会以为这一页还是占位，于是要么去重做一遍，要么以为这里摆错了地方。
+// **这一页和 Biu 不一致是真的**（Biu 把目录管理器摆在本地音乐页里），摆错位置是
+// 一件该改的事，但它不是「因为那一页还没接上」。
 func (s *Shell) pickLocalMusicDirs(c *ui.Context, st app.Settings, ro bool) {
 	t := c.Theme()
 	s.settingSection(c, "音乐库")

@@ -312,12 +312,16 @@ func TestDeletingWithNothingPickedSaysSo(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 批量下载（#29 的接口还没接）
+// 批量下载
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestDownloadingSaysItIsNotWiredYet 批量下载现在接不上——**不假装成功**。
+// TestDownloadingSaysItIsNotWiredYet 没挂下载服务时**不假装成功**。
 //
 // 假装成功的话界面上会弹一句「下载任务已添加」，而用户等一小时什么也不会发生。
+//
+// ⚠️ 这一条盯的是**没挂上**那一支（`MountCollections` 没传 `Downloader`，也就是
+// 测试和「这一次启动没装下载服务」那两条路）。挂上了的那一条是
+// `TestTheDownloadInterfaceIsWiredOnceImplemented`。
 func TestDownloadingSaysItIsNotWiredYet(t *testing.T) {
 	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
 	waitSongs(t, tt, s, 2)
@@ -353,13 +357,16 @@ func TestDownloadingSaysItIsNotWiredYet(t *testing.T) {
 		t.Fatal(err)
 	}
 	settleFrame(tt)
-	wantText(t, tt, "下载还没接上：下载服务（issue #29）还没做")
+	wantText(t, tt, "下载还没挂上：这个应用没把下载服务装进来")
 	dontWantText(t, tt, "下载任务已添加")
 }
 
 // TestTheDownloadInterfaceIsWiredOnceImplemented 下载服务接上之后，这条路要真的走。
 //
 // 这一条钉的是**接线**：勾上的那几首 + 它们来自哪个容器，原样交过去。
+//
+// 生产上挂的是 App 自己（`MountCollections` 传 `Downloader: a`），这里用桩是
+// 为了验「这一页确实把东西交出去了」，而桩不碰盘也不发网络。
 func TestTheDownloadInterfaceIsWiredOnceImplemented(t *testing.T) {
 	b, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
 	waitSongs(t, tt, s, 3)
@@ -468,8 +475,14 @@ func TestTheStarToggles(t *testing.T) {
 	// ⚠️ **这里用的是真正的 500 毫秒**（界面上没有把 Settle 调小）。故意的：
 	// 别的用例等的是「画出来变成什么样」，这一条顺带把「等够 500ms 才刷新」
 	// 在界面上也走通一遍——app 层钉的是顺序和那个常数本身。
+	//
+	// ⚠️ **判据里带着那句话**，不能只等 `Faved`：app 那边是**先** `cache.put(info)`
+	// （Faved 变 true）**再** `notice.add(...)`（那句话进界面），两句之间有一个
+	// 窗口；而 `waitFrameFor` 是「画一帧 → 再问判据」，所以判据一旦为真就立刻返回，
+	// 读到的却是**上一帧**——那一句还没画上去。满载时那个窗口足够宽到偶发红
+	// （症状是「收藏成功了，可画面上只有『正在收藏…』」）。
 	waitFrameFor(t, tt, "收藏状态刷新回界面", func() bool {
-		return s.app.Collection(s.collection.ref).Faved
+		return s.app.Collection(s.collection.ref).Faved && tt.HasText("已收藏这个收藏夹")
 	})
 	wantText(t, tt, "已收藏这个收藏夹")
 }

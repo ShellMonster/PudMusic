@@ -45,6 +45,11 @@ const (
 	dynamicFeedSpacePath = "/x/polymer/web-dynamic/v1/feed/space"
 	// followingsPath 是「我关注的人」分页列表。动态流左侧作者栏用它。
 	followingsPath = "/x/relation/followings"
+	// dynamicThumbPath 是给一条动态点赞 / 取消点赞。
+	//
+	// ⚠️ **不是 `/x/v2/dynamic/feed/like/thumb`**（那一个要的是稿件 id，评的是
+	// 视频）；动态自己评的是这一条，见 `LikeDynamic` 的注释。
+	dynamicThumbPath = "/x/dynamic/feed/dyn/thumb"
 )
 
 // 顶层 `type` 里我们画得出的三种（上游 `DynamicType` 枚举的三个值）。
@@ -143,6 +148,16 @@ type Dynamic struct {
 	Pics []string
 	// Video 是投稿。Kind 不为 DynamicVideo 时是 nil。
 	Video *DynamicArchive
+	// Liked 是「我赞了这一条没有」。
+	//
+	// ⚠️ **未登录时它恒为 false，而那不是「这条没人赞」**：B 站不给未登录的
+	// 登录态，`module_stat.like.status` 直接没有（见 rawDynamic）。所以界面上
+	// 画赞不画赞是按这一栏，而**赞的数量**（`LikeCount`）在两种情况下都有值。
+	// 把两者混成「有没有赞过」，未登录用户会看到一个永远点不动的已赞样式。
+	Liked bool
+	// LikeCount 是赞的数量。B 站给的是**数**，不是「1.2万」那种写好的字
+	// （播放数给的是字，见 `DynamicArchive.Play`）。
+	LikeCount int
 }
 
 // DynamicPage 是一页动态。
@@ -219,6 +234,55 @@ func (c *Client) SpaceDynamics(ctx context.Context, mid int64, offset string) (D
 		return DynamicPage{}, err
 	}
 	return dynamicPageFrom(raw)
+}
+
+// LikeDynamic 给一条动态点赞（like=true）或取消点赞。**写操作**。
+//
+// # 评的是「这一条动态」，不是它里面那个视频
+//
+// B 站有**两个**点赞接口，长得像、评的不是一回事：
+//
+//	POST /x/v2/dynamic/feed/like/thumb     给**稿件**点赞（参数 bvid / up）
+//	POST /x/dynamic/feed/dyn/thumb          给**这一条动态**点赞（dyn_id_str / up）
+//
+// 这里用第二个。理由：动态卡片上那一下，评的是这条动态——用户在评论区看到的
+// 那个赞；而 `major.archive` 那一份是这个动态**转发**的投稿，在动态流里赞它，
+// 赞数不会记在这条动态上。反过来用第一个，动态流里每张投稿卡片赞的都是同一
+// 个视频，多个 UP 转发同一支片子时那个数字还会自己往上加。
+//
+// up 的取值照抄接口清单（`docs/dynamic/action.md`）：1 点赞、2 取消点赞。
+// **0 是切换，我们不用它**——切换在界面重画之后会点成反的，用户连点两下等于
+// 没点。
+//
+// ⚠️ **请求体是 JSON，不是表单**：这一条收的是
+// `{"dyn_id_str":"…","up":1}`。写成表单的话 B 站回的是「参数错误」
+// （4100001）而不是 csrf 校验失败，排障方向从第一步就错了。
+//
+// csrf 走查询串和 `bili-jct` 头（`Call.CSRF` 已经放了两处），**体里没有**。
+func (c *Client) LikeDynamic(ctx context.Context, dynID string, like bool) error {
+	dynID = strings.TrimSpace(dynID)
+	if dynID == "" {
+		return fmt.Errorf("bili: 动态 id 是空的")
+	}
+	up := 1
+	if !like {
+		up = 2
+	}
+	if _, err := c.Do(ctx, Call{
+		Method: "POST", URL: c.hostAPI + dynamicThumbPath, CSRF: true,
+		JSON: map[string]any{"dyn_id_str": dynID, "up": up},
+	}); err != nil {
+		return fmt.Errorf("bili: 给动态 %s %s: %w", dynID, likeOrUnlike(like), err)
+	}
+	return nil
+}
+
+// likeOrUnlike 是日志里那句话的动词。
+func likeOrUnlike(like bool) string {
+	if like {
+		return "点赞"
+	}
+	return "取消点赞"
 }
 
 // dynamicPageFrom 把一页返回变成 DynamicPage。
@@ -300,6 +364,17 @@ type rawDynamic struct {
 			PubTime string `json:"pub_time"`
 			PubTS   int64  `json:"pub_ts"`
 		} `json:"module_author"`
+		// Stat 是这一条被互动了多少（`modules.module_stat`）。
+		//
+		// ⚠️ **未登录时整个 `module_stat` 都没有**：那时候三个字段全是零值，
+		// 分不出「没人赞」和「没登录看不到」，所以 `Liked` 只在登录了的时候
+		// 才有意义（见 Dynamic.Liked 的注释）。
+		Stat struct {
+			Like struct {
+				Count  int  `json:"count"`
+				Status bool `json:"status"`
+			} `json:"like"`
+		} `json:"module_stat"`
 		Dynamic struct {
 			Desc struct {
 				Text string `json:"text"`
@@ -377,8 +452,10 @@ func parseDynamic(raw json.RawMessage) (Dynamic, bool) {
 			Name: r.Modules.Author.Name,
 			Face: r.Modules.Author.Face,
 		},
-		Time: dynamicTime(r.Modules.Author.PubTime, r.Modules.Author.PubTS),
-		Text: strings.TrimSpace(r.Modules.Dynamic.Desc.Text),
+		Time:      dynamicTime(r.Modules.Author.PubTime, r.Modules.Author.PubTS),
+		Text:      strings.TrimSpace(r.Modules.Dynamic.Desc.Text),
+		Liked:     r.Modules.Stat.Like.Status,
+		LikeCount: max(r.Modules.Stat.Like.Count, 0),
 	}
 
 	major := r.Modules.Dynamic.Major

@@ -11,9 +11,11 @@
 // **非有这一列不可**：没有它用户看到的是一列标题，得自己回想看过多少。「听了一半」
 // 这个状态在界面上完全看不出来，于是每一首都得从头听或者拖进度条试一遍。
 //
-// 另外两处：页头右上角的「清空历史记录」是批量删除、确认弹窗（C-43）还没做，
-// **不摆**；「记录播放历史」那个开关改的是设置里已有的 `reportPlayHistory`
-// （`app.Settings`），摆上用户就不用去设置页里找。
+// 另外两处：页头右上角的「清空历史记录」是批量删除、而本项目还没有一份**共用**
+// 的确认弹窗（PLAN 的 C-43 / L-05：收藏夹批量删、本地音乐删文件/删目录、下载
+// 记录删/清空各自有一份，这一页是剩下那几处之一），所以**不摆**；「记录播放
+// 历史」那个开关改的是设置里已有的 `reportPlayHistory`（`app.Settings`），摆上
+// 用户就不用去设置页里找。
 //
 // 🔴 本文件里的 view **不许**调 `c.SetTheme`（铁律二，见 theme.go）。
 package ui
@@ -217,7 +219,11 @@ func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 }
 
 // historyMenu 是这一行的右键菜单，抄上游 `history/menu.tsx` 的顺序：能放的那几项在
-// 前，在 B 站打开，然后是删除。理由和 `laterMenu` 那段一样：只摆我们真能做的。
+// 前，在 B 站打开，然后是**这一页自己的**删除。
+//
+// ⚠️ 「收藏 / 下载音频」排在**删除之前**，而不是像上游那样排在最后——删掉一条
+// 播放记录之后想把它收藏回来是办得到的（收藏夹里那份还在），而把收藏夹里的东西
+// 删了就没了。顺序摆在这里是因为它们属于「这一行是什么」，不属于「这一页怎么改」。
 func (s *Shell) historyMenu(m *ui.Menu, i int) {
 	p := &s.historyPage
 	row, ok := p.rows.Row(i)
@@ -235,6 +241,11 @@ func (s *Shell) historyMenu(m *ui.Menu, i int) {
 		acts.Add(i)
 	case m.Item("在 B 站打开").Chosen():
 		acts.Open(i)
+	// 收藏 / 下载：和稍后再看那一页摆的是同两项，理由见 laterMenu 的注释。
+	case m.Item("收藏").Chosen():
+		acts.FavSelect(i)
+	case m.Item("下载音频").Chosen():
+		acts.Download(i)
 	case m.Item("删除").Chosen():
 		p.rows.Remove(i, s.app.LibraryOf().RemoveHistory)
 	}

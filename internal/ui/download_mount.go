@@ -54,7 +54,7 @@ func MountDownloads(a *app.App) error {
 
 // downloadsDir 是「用户还没选过下载目录」时的去处。
 //
-// 设置里 `downloadPath` 的默认值是空串，而 `filepath.Join("", "歌.m4a")`
+// 设置里 `downloadPath` 的默认值是空串，而 `filepath.Join("", "歌.m4a")」
 // 出来的是**相对路径**——歌会落到进程的当前工作目录里（双击图标启动时
 // 那是 `/`），用户在 Finder 里根本看不见，也永远不会去那儿找。
 //
@@ -68,4 +68,47 @@ func downloadsDir() string {
 		return ""
 	}
 	return dir
+}
+
+// ── 界面上那几个下载按钮 ─────────────────────────────────────────────────────
+
+// downloadLater 是「下载音频 / 下载视频」按钮的**异步**那一条。**立刻返回**。
+//
+// # 和 `queue_drawer.go` 的 startDownload 有什么不一样
+//
+// 那一条是同步的（`App.Download`），界面线程上一次网络往返都不许有，所以它
+// 只对**手里已经有 cid 的条目**有用（队列里的歌都是从播放过来的，cid 一定在）。
+//
+// 这一条是给**手里没有 cid 的条目**用的：收藏夹的行（`bili.Media` 不带 cid）
+// 和动态卡片（`major.archive` 不带 cid）。补 cid 要问 B 站一次分 P，所以走
+// `App.DownloadItem`——它在后台补，结果回来才说话。
+//
+// ⚠️ **别把这一条改成同步的**：那会在用户按下按钮的那一帧冻住窗口几百毫秒，
+// 而症状是「点一下下载整个应用卡一下」，很难往回找。
+//
+// label 是菜单 / 按钮上写的那几个字，进失败的话里——菜单里有五项，只说
+// 「下载不了」的话用户不知道说的是哪一项。
+func (s *Shell) downloadLater(it app.Item, video bool, label string) {
+	done := func(err error) {
+		s.sayDownloadDone(label, err)
+		s.wake.invalidate()
+	}
+	if video {
+		s.app.DownloadItemVideo(it, done)
+		return
+	}
+	s.app.DownloadItem(it, done)
+}
+
+// sayDownloadDone 是异步下载跑完之后说的那句话。
+//
+// ⚠️ **它在后台 goroutine 上被调**：Toast 自己带锁（`Shell.toastMu`），
+// 而 `wake.invalidate` 只是叫醒界面，两者都不碰界面状态（铁律一）。
+func (s *Shell) sayDownloadDone(label string, err error) {
+	switch {
+	case err == nil:
+		s.addToast("已加进下载队列")
+	default:
+		s.addToast(label + "没成：" + err.Error())
+	}
 }

@@ -428,11 +428,17 @@ func (a *App) runOnline(it Item, gen int) {
 //
 // 返回的错会被 `failOnline` 报到播放条上，所以那句话要说清「是问不出这一集」，而不是
 // 「取不到流」：用户在播放条上看到的得是他能照着做的下一步（换个词重搜 / 等网络好）。
+//
+// ⚠️ **`s` 可能是 nil**：没挂取流时 `streamingSnapshot()` 给的就是 nil，而这一
+// 层原本只判了 `s.Client == nil`。从播放那一条路进来时 `s` 一定非 nil
+// （`playOnline` 先判了 `StreamingMounted`），所以那个空判断一直没被走到；
+// 从下载那一路进来就直接崩在「读一个 nil 指针的字段」上，而症状是**整个批量
+// 下载一按就闪退**，不是一个能说给用户听的错。
 func (a *App) withCid(ctx context.Context, s *Streaming, it Item) (Item, error) {
 	if it.Cid != "" {
 		return it, nil
 	}
-	if s.Client == nil {
+	if s == nil || s.Client == nil {
 		return it, errStreamingMissing
 	}
 	cid, err := s.Client.FirstVideoCid(ctx, it.Bvid)
