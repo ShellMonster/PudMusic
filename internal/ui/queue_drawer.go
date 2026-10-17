@@ -429,16 +429,17 @@ func (s *Shell) queueMenu(m *ui.Menu, row queueRow) {
 
 // queueAction 是菜单里那一项被选中之后做的事。
 //
-// 五项里 **三项是真的在做事**（下载音频 / 打开来处 / 从列表删除），另外两项要 B 站
-// 那边还没有的能力，各自说一句具体的话——不是一句笼统的「还没接」：
+// 五项里 **三项是真的在做事**（下载音频 / 打开来处 / 从列表删除），另外两项是**占位**：
 //
-//	收藏        要能列出用户的收藏夹、再往选中的那一格放（收藏夹那张票的事）。
-//	            这一层连「你的收藏夹有哪些」都拿不到，而选哪一格是用户的事，不该
-//	            替他挑一个。
-//	下载视频    取流只给音频（`bili.Client.PlayURL`），视频流和音视频交织还没有。
+//	收藏      →  BMG-32（收藏夹管理与封面上传，GitHub #15）
+//	下载视频  →  BMG-39（视频下载的音视频交织，GitHub #32）
 //
-// 摆这两个键而不是藏起来，是因为验收要的是「五项接上真实操作」：藏起来等于这一项
-// 根本不存在，用户看不到「这两项是做什么的、为什么按不动」。
+// ⚠️ **只留接口，不留实现**：那两张票已经把这两块派出去了，在这里写一遍等于同一份
+// 代码在两张票上各写一遍，合并时必撞。按下这两项给一句说清差什么的话，是这一项目
+// 里那 14 条路由占位同一个路子（`router.go` 里每条路由的 Empty）。
+//
+// 摆着而不是藏起来：藏起来这一项就等于不存在，用户看不到「它是做什么的、为什么按
+// 不动」。
 func (s *Shell) queueAction(row queueRow, item queueMenuItem) {
 	switch item.key {
 	case "favorite", "download-video":
@@ -485,10 +486,10 @@ func (s *Shell) startDownload(item app.Item) {
 	s.addToast("已加进下载队列")
 }
 
-// queueUnsupported 说的是「这一项按下那一项时为什么做不了」。
+// queueUnsupported 是那两项占位按下去之后说的话。
 //
-// **话必须具体**：菜单有五项，只说「还没接」的话用户既不知道说的是哪一项，也不知道
-// 差的是什么、值不值得等。
+// **话要具体**：菜单有五项，只说「还没接」的话用户既不知道说的是哪一项，也不知道差
+// 的是什么、值不值得等。
 func queueUnsupported(item app.Item, mi queueMenuItem) string {
 	local := item.Source == "local" || item.Type == "local"
 	switch mi.key {
