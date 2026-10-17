@@ -308,3 +308,45 @@ func probeFormatName(magic string) (string, error) {
 	}
 	return name, nil
 }
+
+// ── 选封面的那个文件框 ─────────────────────────────────────────────────────
+
+// TestImageFiltersMatchWhatTheCropperAccepts 选封面白名单和裁剪那一层能解的格式
+// 必须对得上。
+//
+// ⚠️ 和上面音频那一对是同一个道理，只是那边有解码器注册表当活的标准，这边
+// 没有——`internal/ui/covercrop.go` 的 `decodeCover` 用 `image.Decode`，而它的
+// 注册器是 `image/jpeg` 和 `image/png` 两个包。白名单写了别的（用户选得到、
+// 选完被拒），或者少了（用户根本选不到）。
+func TestImageFiltersMatchWhatTheCropperAccepts(t *testing.T) {
+	// 那边注册的是哪几个。改 `covercrop.go` 的 import 时记得改这里。
+	decodable := map[string]bool{"jpg": true, "jpeg": true, "png": true}
+	allowed := filterExtensions(imageFilters)
+
+	for ext := range allowed {
+		if !decodable[ext] {
+			t.Errorf("文件框里能选 .%s，可裁剪那一层解不了它", ext)
+		}
+	}
+	for ext := range decodable {
+		if !allowed[ext] {
+			t.Errorf("裁剪那一层能解 .%s，文件框里却选不到它", ext)
+		}
+	}
+}
+
+// TestImageFiltersKeepTheEscapeHatch 白名单里必须留着「所有文件」。
+//
+// ⚠️ 白名单只是把该看见的摆到前面，**不是拦路虎**。真有一张 `.webp` 的封面时
+// （B 站自己的封面全是 `.webp`），拒掉它不如让用户选——选错了上层会说
+// 「只支持 jpeg 或 png」，那句话指得准；而不给选，用户只会看到「怎么不能选
+// 这张」。
+func TestImageFiltersKeepTheEscapeHatch(t *testing.T) {
+	if len(imageFilters) == 0 {
+		t.Fatal("选封面的文件框一项都没有")
+	}
+	last := imageFilters[len(imageFilters)-1]
+	if len(last.Extensions) != 1 || last.Extensions[0] != "*" {
+		t.Errorf("最后一项是 %v，want 一项「所有文件」（Extensions 只有一个 *）", last.Extensions)
+	}
+}
