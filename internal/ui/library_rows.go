@@ -41,7 +41,7 @@ import (
 
 // libraryRow 是这两页的一行 = `list.Music` 加上那几列它画不出来的。
 //
-// ⚠️ 嵌入而不是另立一个结构体：共用���那几组（ID / 标题 / 封面 / UP 名 / 时长 /
+// ⚠️ 嵌入而不是另立一个结构体：共用着那几组（ID / 标题 / 封面 / UP 名 / 时长 /
 // 队列项）就一份定义，页面画行时拿到的是同一个 `list.Music`。
 type libraryRow struct {
 	list.Music
