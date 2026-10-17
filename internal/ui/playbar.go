@@ -52,13 +52,16 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 				s.viewProgress(c, st)
 			})
 
-			// 右：音量 + 加歌。
+			// 右：音量 + 倍速 + 加歌。
 			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 				// 音量条自己带无障碍标签，不用旁边再摆一个「音量」字。
 				vol := st.Volume
 				if ui.Slider(c, &vol, 0, 1).Width(120).Label("音量").Changed() {
 					s.app.SetVolume(vol)
 				}
+
+				// 倍速紧挨着音量：两个都是「听感」旋钮，加歌是另一类事。
+				s.viewRate(c, st)
 
 				if ui.Button(c, "加歌").Width(56).Clicked() {
 					s.pickAndEnqueue()

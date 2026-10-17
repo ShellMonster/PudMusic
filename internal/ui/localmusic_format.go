@@ -9,7 +9,6 @@ package ui
 import (
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -108,19 +107,16 @@ func filepathDir(dir string) string {
 	return trimmed
 }
 
-// fileSize 把字节数写成 Biu 那一栏的样子（`filesize` 包，默认十进制）。
-func fileSize(n int64) string {
-	const unit = 1000
-	if n < unit {
-		return strconv.FormatInt(n, 10) + " B"
-	}
-	div, exp := int64(unit), 0
-	for m := n / unit; m >= unit && exp < 3; m /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "kMGT"[exp])
-}
+// 这一页的「大小」那一栏**用** `downloadlist_status.go` 那个 `fileSize`，不在
+// 这里再写一份。
+//
+// ⚠️ 两边各写一份的话，下载记录页是 1024 进制（写 `250.4 KB`）、本地音乐是
+// 1000 进制（写 `250.4 kB`）——**两个数在同一个应用里差 2.4%**，而它们标的是
+// 同一个东西。Biu 上游两处都用 `filesize` 包的默认配置（1000 进制），是我们
+// 下载记录页先选了 1024；这一票跟它对齐，而不是把不一致扩大。
+//
+// 代价是本地音乐这一栏和 Biu 差一个字母（`KB` / `kB`）——比同一个应用里两个
+// 大小标法好。
 
 // durText 把时长写成 `m:ss` / `h:mm:ss`。读不出来给「-」。
 //
