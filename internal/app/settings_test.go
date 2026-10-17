@@ -47,20 +47,24 @@ var biuKeys = []string{
 	"localMusicDirs",
 }
 
-// ourOwnKeys 是**我们加的、Biu 没有的键**，一共这一个。
+// ourOwnKeys 是**我们加的、Biu 没有的键**。
 //
-// 加它是有理由的：侧栏收藏夹的拖拽顺序要存，Biu 把这一份单独放在另一个
-// store 里（zustand persist 的 `"favorites-order"`，
-// `biu/src/store/favorite.ts:157-163`），不在 app-settings.json 里。
-// 我们不另开一份文件，是因为设置存储已经把 schema 版本、原子写、退出前
-// flush、只读保护做好了，另开一份等于把这些重造一遍，还少了只读保护。
+// 加它们是有理由的：Biu 把这两样东西各自单独放在另一个 store 里
+// （zustand persist 的 `"favorites-order"`，`biu/src/store/favorite.ts:157-163`；
+// 以及 `play-list` store 自己的 partialize，`biu/src/store/play-list.ts:978`），
+// **不在 app-settings.json 里**。我们不另开一份文件，是因为设置存储已经把
+// schema 版本、原子写、退出前 flush、只读保护做好了，另开一份等于把这些
+// 重造一遍，还少了只读保护。
 //
-// 代价说清楚：多这一个键，Biu 那边读到我们的文件会当它是不认识的键。
-// 会不会把它弄丢取决于 electron-store 的合并行为——最坏的情况也只是
-// **收藏夹的顺序弹回 Biu 给的那个顺序**，Biu 自己的设置一个键都没丢。
+// 代价说清楚：多这几个键，Biu 那边读到我们的文件会把它们当不认识的键。
+// 会不会把它们弄丢取决于 electron-store 的合并行为——最坏的情况也只是
+// **收藏夹的顺序弹回 Biu 给的那个顺序**、以及**播放模式回到 Biu 那边记的
+// 那一档**，Biu 自己的设置一个键都没丢。
 // 这条取舍记在这里，想改主意时先看这一段。
 var ourOwnKeys = []string{
 	"sideMenuCollectionOrder",
+	"playMode",
+	"shouldKeepPagesOrderInRandomPlayMode",
 }
 
 // TestSettingsKeysMatchBiu 逐字比对键名。
@@ -921,24 +925,29 @@ func mustMarshal(t *testing.T, s app.Settings) string {
 	return string(b)
 }
 
-// ourOwnKeysJSON 是 ourOwnKeys 里那几个键在「什么都没排过序」时的样子——
-// Biu 的文件里没有它们，读进来是零值，normalize 把空序列拉成 `[]`（和
-// `hiddenMenuKeys` / `localMusicDirs` 一样的处理），读完再写回去还是这个。
+// ourOwnKeysJSON 是 ourOwnKeys 里那几个键在「Biu 的文件里没有它们」时的样子
+// ——读进来是零值（`playMode` 是空串，normalize 把它拉成 loop；另一个布尔是
+// false，而 false 就是它的零值），读完之后写回去还是这个。
 //
 // 写成 JSON 而不是 Go 值，是为了让 `wantSettings` 能和 `ourOwnKeys` 交叉核对：
 // 谁改了一边忘了另一边，那条核对会直接报出来。
-const ourOwnKeysJSON = `{"sideMenuCollectionOrder": {"created": [], "collected": []}}`
+const ourOwnKeysJSON = `{
+	"sideMenuCollectionOrder": {"created": [], "collected": []},
+	"playMode": "loop",
+	"shouldKeepPagesOrderInRandomPlayMode": false
+}`
 
 // wantSettings 是「读完一份 Biu 的文件之后应该拿到的那份设置」。
 //
 // Biu 的 20 个键（biuAppSettings，一个不多一个不少），**加上** ourOwnKeys 里
-// 我们自己的那一个（见它在上面那段说明：侧栏收藏夹的顺序，Biu 放在另一个
-// store 里，我们放进设置是为了复用 schema 版本 / 原子写 / 退出前 flush /
+// 我们自己的那三个（见它在上面那段说明：收藏夹的顺序和播放模式，Biu 放在另外
+// 的 store 里，我们放进设置是为了复用 schema 版本 / 原子写 / 退出前 flush /
 // 只读保护）。
 //
-// 之所以要在每条「Biu 的文件」测试里都加上它：Biu 的文件里当然没有这个键，
-// 读进来是零值、写出去还是零值。**它本来就该在**——真正要盯的是「Biu 的那
-// 20 个键有没有原样带过去」，以及「有没有多出别的键来」。
+// 之所以要在每条「Biu 的文件」测试里都加上它们：Biu 的文件里当然没有这几个键，
+// 读进来是零值、normalize 拉成默认值，写出去还是那个默认值。**它们本来就该
+// 在**——真正要盯的是「Biu 的那 20 个键有没有原样带过去」，以及「有没有多出
+// 别的键来」。
 func wantSettings(t *testing.T) map[string]any {
 	t.Helper()
 	m := decodeObject(t, biuAppSettings)
