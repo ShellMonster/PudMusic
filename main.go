@@ -47,7 +47,6 @@ func main() {
 	sess := ui.MountMedia(a)
 
 	if err := ui.Run(a, sess); err != nil {
-
 		log.Fatal(err)
 	}
 }
