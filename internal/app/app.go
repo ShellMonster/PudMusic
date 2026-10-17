@@ -114,7 +114,10 @@ type App struct {
 	account *Account
 
 	// 在线播放这一摊，见 online.go。挂上去之前 streaming 是 nil。
-	streaming   *Streaming
+	streaming *Streaming
+	// 歌单内容页这一摊，见 collection.go。挂上去之前是 nil（界面判空）。
+	collections *collections
+
 	streamCache map[string]*bili.StreamRef
 	// onlineGen 是**播放代次**。每开一次在线流就加一，异步回来的结果
 	// 先对一遍，对不上就走人（快速切歌时旧曲的结果不能覆盖新曲）。

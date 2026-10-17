@@ -26,6 +26,24 @@ type Actions struct {
 	// 里打开 B 站。
 	Open func(item app.Item)
 
+	// FavSelect 打开「把这一首放进哪些收藏夹」那个**选择弹窗**
+	// （`internal/ui/folderselect.go`）。
+	//
+	// 是**弹窗**不是直接收藏：B 站那边一次能放进几个收藏夹，而收藏状态是
+	// 「在哪些收藏夹里」——直接收藏只能二选一，用户想同时放进「通勤」和
+	// 「循环」就得收藏两次再手动去两个收藏夹里删。
+	//
+	// ⚠️ **名字是 `FavSelect` 而不是 `Favorite`，是为了和 BMG-25（播放列表抽屉）
+	// 那张票错开**：人裁定「把这一首收藏起来」这个**动作**归它做，而它多半会
+	// 在这个结构体上**加一个同形状的字段**。两个字段都叫 `Favorite` 时，Git 在
+	// 同一个位置各加一行 → 要么文本冲突，要么合并后两个 `AppActions` 都在给
+	// 同一个字段赋值、后者盖掉前者，而那种合并是**编译通过、行为静默错**的。
+	//
+	// BMG-25 那一票应该**调这一条**（它要开的正是这个弹窗，Biu 的抽屉也是这么
+	// 开的：`music-playlist-drawer/index.tsx:40`），而不是自己再写一个开弹窗的
+	// 入口——那一份在 `internal/ui/folderselect.go`。
+	FavSelect func(item app.Item)
+
 	// Notify 说一句话。刚接的操作（比如还没接 B 站接口的收藏）按不动就是靠它。
 	Notify func(text string)
 }
@@ -45,7 +63,8 @@ func AppActions(a *app.App, notify func(string)) Actions {
 				notify("加不进队列：" + err.Error())
 			}
 		},
-		Open: func(item app.Item) { open(item, notify) },
+		Open:      func(item app.Item) { open(item, notify) },
+		FavSelect: nil,
 		Notify: func(text string) {
 			if notify != nil {
 				notify(text)
