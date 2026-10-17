@@ -93,12 +93,12 @@ func TestTheTextOfAGraphicalPostIsOnScreenOnce(t *testing.T) {
 	//（行的无障碍名字）也是同一句——那是同一句、两个用途，两处是对的。
 	//
 	// 真正要抓的是那个 bug 的特征：**同一句被拼进了一个标签**（`a\na`）。
-	// `countText` 只数全等，天然看不见拼接，所以这里直接找带换行的那一个。
-	if doubled := body + "\n" + body; countText(tt, doubled) != 0 {
+	// `countExactText` 只数全等，天然看不见拼接，所以这里直接找带换行的那一个。
+	if doubled := body + "\n" + body; countExactText(tt, doubled) != 0 {
 		t.Errorf("画面上有一句是 %q —— desc 和 summary 是同一段话，拼起来显示了两遍",
 			doubled)
 	}
-	if n := countText(tt, body); n == 0 {
+	if n := countExactText(tt, body); n == 0 {
 		t.Errorf("图文的正文一个字都没画出来，文字有 %q", tt.Texts())
 	}
 	if strings.Contains(sp.dynItems[0].Text, "\n") {
@@ -107,11 +107,16 @@ func TestTheTextOfAGraphicalPostIsOnScreenOnce(t *testing.T) {
 	}
 }
 
-// countText 数画面上等于 s 的文字有几处。
+// countExactText 数画面上**一字不差**等于 s 的文字有几处。
 //
 // ⚠️ 不是 `HasText`：那是**子串**匹配（`mygo/ui/headless.go` 的 HasText 文档
 // 原话就是 "containing s"），数不出来。
-func countText(tt *mygoui.Tester, s string) int {
+//
+// ⚠️ 名字带 `Exact` 是因为包里已经有别人的 `countText`
+// （`settings_tabs_test.go`，#73 加的），同名会让整个包编不过 ——
+// 两边各加一个同名辅助函数，合并时 Git 看不见冲突，编译器才看得见。
+// 本包的辅助一律带 `Exact` / `Space` 之类的限定词，免得再撞。
+func countExactText(tt *mygoui.Tester, s string) int {
 	n := 0
 	for _, txt := range tt.Texts() {
 		if txt == s {
