@@ -47,6 +47,12 @@ type Shell struct {
 	// 认下的状态才留得住）。
 	searchDraft string
 
+	// search 是搜索页的状态：三个 Tab 各一份分页列表、各一套排序、各记着各自
+	// 滚到哪儿（见 searchresults.go）。
+	//
+	// 同样是因为即时模式：这些都得跨帧活着，而局部变量下一帧就没了。
+	search searchState
+
 	// notFoundAt 是进 404 的那一刻，notFoundStop 是那个每秒一跳的倒计时。
 	// 两者都只由主线程读写（syncRoute 在主线程），后台那一跳只调
 	// wakeHandle.invalidate，所以不违反铁律一、也没有竞态。
@@ -279,6 +285,10 @@ func New(a *app.App) *Shell {
 	s.keys = newShortcutKeys("")
 	s.picker = systemPathPicker{}
 	s.feed = newFeedPoller(dynamicFeedInterval, nil)
+	// 搜索页那三个 Tab 各建一份分页列表。建在这里而不是第一次画到搜索页时：
+	// 翻页列表要在**第一帧之前**就建好（它的滚动位置、翻页状态全在里头），
+	// 等到画到那一页再建就是每进一次搜索页从头滚一次。
+	s.search.init(s)
 	// pageBody 是画页面内容的那一支：404 兜底 + 已经有内容的页（设置页）+ 每条
 	// 路由自己的空状态，三样拼在 pageContent 里（router.go）。
 	// sideBody 是侧栏那一支，搬去 sidebar.go 之后从那儿接进来。
