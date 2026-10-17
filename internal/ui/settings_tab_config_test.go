@@ -332,6 +332,17 @@ func TestPressingTheBiuImportButtonActuallySwapsTheSettingsIn(t *testing.T) {
 	waitForFrames(t, tt, func() bool {
 		return a.SettingsSnapshot().PrimaryColor == "#17c964"
 	})
+	// ⚠️ **还要等 `rememberImport` 落地**。它是那个**后台 goroutine**里的最后一步
+	// （`settings_tab_config.go` 的 `go func`），而上面等的是「设置有没有换掉」——
+	// 换掉了不代表报告已经写进包级的 `migration.r`。
+	//
+	// 测试一返回 cleanup 就恢复；那个 goroutine 可能还在跑，于是**恢复完之后它再写
+	// 进去**，污染就留下了（`restoreMigrationAfter` 的注释防的是「记错了那一份」，
+	// 防不住「记完之后才写」）。留下的后果在同文件那段注释里写着：后面每一个新建的
+	// Shell 第一帧弹一条主色底的 toast，而 `settings_test.go` 的采样点正好落在上面。
+	//
+	// 实测：不加这一等，`internal/ui` 整包跑约三次里红一次（origin/main 上同样）。
+	waitForFrames(t, tt, func() bool { return LastMigration().Imported.Any() })
 
 	got := a.SettingsSnapshot()
 	if got.DownloadPath != "/Users/x/Downloads" {
