@@ -242,6 +242,32 @@ func TestAFailedUpgradeSaysTheOldFilesAreStillThere(t *testing.T) {
 }
 
 // withMigration 临时换掉最近一次的迁移报告。
+// restoreMigrationAfter 记住**此刻**的迁移报告，测试结束时恢复回去。
+//
+// ⚠️ 为什么 `withMigration` 的 cleanup 不够：它只恢复**它自己设进去的那一份**。而
+// 按一下「从 Biu 导入」按钮会走 `rememberImport`，那是**直接把报告写进包级的
+// `migration.r`** 的——不在任何 cleanup 的射程里。
+//
+// 留下的内容会让**后面**每一个新建的 Shell 在第一帧弹一条 toast
+// （`viewMain` → `announceMigration`），而 toast 的卡片底色是**主色**
+// （`viewToast`：Biu 的 `color: "primary"`）。`internal/ui/settings_test.go` 那些
+// 验「窗口底色」的测试取的采样点 `(700, 430)`（900×600 窗口的右下角）**正好落在
+// toast 上**——实测那几条红成「画面那个点是 {30 215 96}」，那个值就是
+// `DefaultPrimaryColor` 逐字。
+//
+// 所以**任何点了导入按钮的测试都要在开头调这个**，而不是指望 `withMigration`。
+func restoreMigrationAfter(t *testing.T) {
+	t.Helper()
+	migration.mu.Lock()
+	before := migration.r
+	migration.mu.Unlock()
+	t.Cleanup(func() {
+		migration.mu.Lock()
+		migration.r = before
+		migration.mu.Unlock()
+	})
+}
+
 func withMigration(t *testing.T, r MigrationReport) {
 	t.Helper()
 	migration.mu.Lock()
@@ -289,6 +315,11 @@ func TestPressingTheBiuImportButtonActuallySwapsTheSettingsIn(t *testing.T) {
 	// 可写的目录。不指到临时目录上的话，这个测试会改用户的文件。
 	withUserDataDir(t, filepath.Dir(path))
 
+	// ⚠️ **必须在 `withMigration` 之前调**：它记的是「此刻」的值，而此刻应该是
+	// **什么都没有**。反过来的话它记下的是刚被 `withMigration` 设进去的那一份
+	// （带 `BiuDirs`），cleanup 恢复成它 —— 于是每一条测试跑完都还留着一份报告，
+	// 后面每一个新建的 Shell 第一帧照样弹 toast，采样点照样被盖。
+	restoreMigrationAfter(t)
 	withMigration(t, MigrationReport{BiuDirs: []string{biu}})
 
 	// 按钮因为找得到 Biu 才摆——这是设置页上的可观察行为。
@@ -454,7 +485,9 @@ func TestTheFirstFrameSaysTheMigrationHappened(t *testing.T) {
 	s, tt := newShell(t)
 	tt.Frame()
 
-	if !tt.HasText("已从 Biu 导入") {
+	// ⚠️ 首帧那句**刻意是短的**：toast 的卡片底色是主色（`viewToast`），而它一旦
+	// 换行就向上扩展、盖住页面内容区。完整清单在设置页「配置」那一段。
+	if !tt.HasText("从 Biu 导入了一批数据") {
 		t.Fatalf("第一帧没有说「从 Biu 导入过」，文字有 %q", tt.Texts())
 	}
 	if !tt.HasText("重新登录") {
@@ -462,9 +495,9 @@ func TestTheFirstFrameSaysTheMigrationHappened(t *testing.T) {
 	}
 	// **只弹一次**：第二帧还在，但那条提示已经不在了（toast 两秒后自己走，
 	// 而这里没在等它过期——要验的是「没有再弹一条同样的」）。
-	before := countText(tt, "已从 Biu 导入")
+	before := countText(tt, "从 Biu 导入了一批数据")
 	tt.Frame()
-	if after := countText(tt, "已从 Biu 导入"); after != before {
+	if after := countText(tt, "从 Biu 导入了一批数据"); after != before {
 		t.Errorf("每帧都在重弹同一条提示：%d → %d", before, after)
 	}
 	_ = s

@@ -36,6 +36,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -415,13 +416,37 @@ func (s *Shell) announceMigration() {
 	case rep.UpgradeErr != nil:
 		s.addToast("数据升级失败：" + rep.Upgraded)
 	case rep.Imported.Any(), len(rep.Imported.Notes) > 0:
-		if !rep.Imported.Any() {
-			s.addToast("没从 Biu 那里带过来任何东西")
-			return
-		}
-		// 「请重新登录」那句一定要在这一条里，不只是在设置页上。
-		s.addToast(biuImportToast(rep.Imported))
+		// 🔴 **这里只弹最短的那一句，绝不弹完整报告。**
+		//
+		// toast 在右下角、抬过播放条 `playbarClearance`（90px），而它的高度随文字
+		// 增长——一句话几十个字就会换行三四行，向上**盖住页面内容区**。实测一条完整
+		// 的导入报告（`biuImportToast` 的那一整串）能把内容区压掉一多半，界面上
+		// 变成「上面是半条消息、下面是残缺的页面」，而它在两秒后就消失，用户根本
+		// 看不到发生了什么。
+		//
+		// 所以：首帧只说「有事」，**说什么、跳过了什么**一律留给设置页「配置」那一
+		// 段——那里逐条列着，位置固定、不会被盖住、用户想看多久看多久。
+		//
+		// 「请重新登录」这一句仍然必须出现在首帧：用户不会主动去设置页。
+		s.addToast(shortImportToast(rep.Imported))
 	}
+}
+
+// shortImportToast 是首帧弹的那一句：**短**，最多一行。
+//
+// 「短」是硬要求而不是风格偏好——见 `announceMigration` 的注释：toast 一旦换行就
+// 会盖住页面内容区。完整清单在设置页上，不在这里。
+func shortImportToast(r app.Imported) string {
+	if !r.Any() {
+		return "没从 Biu 那里带过来任何东西"
+	}
+	// 「要重新登录」是唯一一件用户**现在就得动手**的事，优先说它。
+	for _, n := range r.Notes {
+		if strings.Contains(n, "重新登录") {
+			return "从 Biu 导入了一批数据；Biu 的登录信息不迁，请在这个应用里重新登录一次（设置页「配置」那一段里有完整清单）"
+		}
+	}
+	return "从 Biu 导入了一批数据（设置页「配置」那一段里有完整清单）"
 }
 
 // upgradeFile 是一次升级要处理的那一份文件：路径 + 它的迁移入口。
