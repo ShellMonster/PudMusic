@@ -375,25 +375,23 @@ func trimTrakChildren(trak *mp4.TrakBox, t *track) []mp4.Box {
 	trak.Edts = edts
 
 	out := make([]mp4.Box, 0, len(trak.Children)+1)
+	inserted := false
 	for _, c := range trak.Children {
 		if _, ok := c.(*mp4.EdtsBox); ok {
-			continue
-		}
-		if edts != nil {
-			// edts 惯例上紧跟在 tkhd 后面（ISO/IEC 14496-12 §8.3.1）。
-			out = append(out, c)
-			if _, ok := c.(*mp4.TkhdBox); ok {
-				out = append(out, edts)
-			}
-			continue
+			continue // 源带来的那一份（见函数头那段），整个丢掉
 		}
 		out = append(out, c)
-	}
-	if edts != nil && len(out) > 0 {
-		if _, ok := out[len(out)-1].(*mp4.EdtsBox); !ok {
-			// 没有 tkhd 可挂（不该发生），挂在最后总比不写强。
-			out = append(out, edts)
+		if edts != nil && !inserted {
+			// edts 惯例上紧跟在 tkhd 后面（ISO/IEC 14496-12 §8.3.1）。
+			if _, ok := c.(*mp4.TkhdBox); ok {
+				out = append(out, edts)
+				inserted = true
+			}
 		}
+	}
+	if edts != nil && !inserted {
+		// 没有 tkhd 可挂（不该发生），挂在最后总比不写强。
+		out = append(out, edts)
 	}
 	return out
 }
