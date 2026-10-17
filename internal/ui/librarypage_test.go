@@ -174,28 +174,13 @@ func biliOK(data any) string {
 func libraryShell(t *testing.T, f *libFake, path string) (*mygoui.Tester, *Shell) {
 	t.Helper()
 
-	a := app.New()
-	t.Cleanup(a.Close)
-	a.MountLibrary(biliForTest(t, f))
-
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	t.Cleanup(func() { _ = s.hist.Close() })
-	// 收掉关键词防抖那个钟：`TestTheSearchWatchStopsWhenThePageIsLeft` 敲完字就
-	// 切走，收在那里的定时器就没人停了——每条这样的测试留一个每秒醒四次的 goroutine
-	// 到测试进程退出为止。
-	t.Cleanup(func() {
-		if s.searchWatchStop != nil {
-			s.searchWatchStop()
-			s.searchWatchStop = nil
-		}
-	})
-	// 理由同 newShell：切页动画在 Tester 里永远走不完，留着它只会让「读到的是哪
-	// 一帧」变成随机的。
-	s.router.Transition = mygoui.TransitionNone
-	s.clock = newFakeClock(now)
-
-	tt := mygoui.NewTester(s.View, 1200, 800)
+	b := newTestShell(t,
+		mounted(func(_ *testing.T, a *app.App) { a.MountLibrary(biliForTest(t, f)) }),
+		withClock(newFakeClock(now)))
+	s, tt := b.s, b.tt
+	// 关键词防抖那个钟由基座的 `Shell.Close` 收：以前这里手写一份
+	// `searchWatchStop`，而 `TestTheSearchWatchStopsWhenThePageIsLeft` 敲完字就
+	// 切走——漏一次就是一条每秒醒四次的 goroutine 到测试进程退出为止。
 	tt.Frame()
 	s.navigate(path)
 	tt.Frame()
@@ -219,21 +204,6 @@ func biliForTest(t *testing.T, f *libFake) *bili.Client {
 // settle 跑到 cond 成立为止。每一轮走一帧，顺带让后台那一支有机会跑。
 //
 // ⚠️ 不能只 `tt.Frame()` 一次：拉页在后台 goroutine 里，结果要靠唤醒才进下一帧。
-func settle(t *testing.T, tt *mygoui.Tester, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		tt.Frame()
-		if cond() {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("等了三秒还没%s，文字有 %q", what, tt.Texts())
-		}
-		time.Sleep(time.Millisecond)
-	}
-}
-
 // rowsShown 是已经拿到的行数。
 func rowsShown(p *libraryPage) int { return len(p.rows.Rows()) }
 
@@ -314,7 +284,7 @@ func TestBothLibraryPagesDrawTheirOwnContent(t *testing.T) {
 			}
 
 			// 内容真的来了，不是转圈。
-			settle(t, tt, "把内容拉回来", func() bool { return rowsShown(s.pageOf(c.path)) == 3 })
+			waitFrames(t, tt, "把内容拉回来", func() bool { return rowsShown(s.pageOf(c.path)) == 3 })
 			for _, title := range []string{"甲", "乙", "丙"} {
 				if !tt.HasText(title) {
 					t.Errorf("%s 的第 %q 首没画出来，文字有 %q", c.title, title, tt.Texts())
@@ -348,7 +318,7 @@ func TestTheLibraryPagesEmptyStateSaysWhyAndHow(t *testing.T) {
 			if e.Title == "" || e.Hint == "" {
 				t.Fatalf("routes 表里 %s 那一条的空状态不完整：%+v", path, e)
 			}
-			settle(t, tt, "把空状态画出来", func() bool { return tt.HasText(e.Title) })
+			waitFrames(t, tt, "把空状态画出来", func() bool { return tt.HasText(e.Title) })
 			if !tt.HasText(e.Hint) {
 				t.Errorf("%s 空着的时候没说「怎么才能不空」，文字有 %q", path, tt.Texts())
 			}
@@ -394,7 +364,7 @@ func TestAnUnmountedLibraryStillShowsTheEmptyState(t *testing.T) {
 func TestTheKeywordReachesTheServerAfterTheDebounce(t *testing.T) {
 	f := newLibFake(t).withLater(1, 1, "甲")
 	tt, s := libraryShell(t, f, laterPath)
-	settle(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
 
 	typeKeyword(t, tt, "周杰伦")
 	tt.Frame()
@@ -406,7 +376,7 @@ func TestTheKeywordReachesTheServerAfterTheDebounce(t *testing.T) {
 	}
 
 	advance(s, 600*time.Millisecond)
-	settle(t, tt, "把新条件的那一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 2 })
+	waitFrames(t, tt, "把新条件的那一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 2 })
 	if got := f.queriesOf(laterPathAPI)[1].Get("key"); got != "周杰伦" {
 		t.Errorf("查询串里 key = %q，want 周杰伦", got)
 	}
@@ -416,12 +386,12 @@ func TestTheKeywordReachesTheServerAfterTheDebounce(t *testing.T) {
 func TestEnterSearchesWithoutWaiting(t *testing.T) {
 	f := newLibFake(t).withLater(1, 1, "甲")
 	tt, _ := libraryShell(t, f, laterPath)
-	settle(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
 
 	typeKeyword(t, tt, "林俊杰")
 	tt.TypeKey(0, mygoui.KeyEnter, "\r")
 	tt.Frame()
-	settle(t, tt, "回车之后立刻就搜了", func() bool { return f.callsOf(laterPathAPI) == 2 })
+	waitFrames(t, tt, "回车之后立刻就搜了", func() bool { return f.callsOf(laterPathAPI) == 2 })
 	if got := f.queriesOf(laterPathAPI)[1].Get("key"); got != "林俊杰" {
 		t.Errorf("回车之后查询串里 key = %q", got)
 	}
@@ -434,14 +404,14 @@ func TestEnterSearchesWithoutWaiting(t *testing.T) {
 func TestChangingTheKeywordThrowsTheOldPageAway(t *testing.T) {
 	f := newLibFake(t).withLater(1, 1, "旧词的第一页")
 	tt, s := libraryShell(t, f, laterPath)
-	settle(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 1 })
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 1 })
 
 	f.withLater(1, 1, "新词的第一页")
 	typeKeyword(t, tt, "新词")
 	advance(s, 600*time.Millisecond)
 	tt.TypeKey(0, mygoui.KeyEnter, "\r")
 	tt.Frame()
-	settle(t, tt, "把新条件的那一页拉回来", func() bool {
+	waitFrames(t, tt, "把新条件的那一页拉回来", func() bool {
 		return tt.HasText("新词的第一页") && !tt.HasText("旧词的第一页")
 	})
 }
@@ -473,7 +443,7 @@ func TestTheFourPresetsAskForThatRange(t *testing.T) {
 		t.Run(c.label, func(t *testing.T) {
 			f := newLibFake(t).withLater(1, 1, "甲")
 			tt, _ := libraryShell(t, f, laterPath)
-			settle(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
+			waitFrames(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
 
 			if !tt.HasText("不按日期筛") {
 				t.Errorf("默认没有说清不筛，文字有 %q", tt.Texts())
@@ -482,7 +452,7 @@ func TestTheFourPresetsAskForThatRange(t *testing.T) {
 				t.Fatalf("点不到「%s」：%v，文字有 %q", c.label, err, tt.Texts())
 			}
 			tt.Frame()
-			settle(t, tt, "按新的日期重新拉", func() bool { return f.callsOf(laterPathAPI) == 2 })
+			waitFrames(t, tt, "按新的日期重新拉", func() bool { return f.callsOf(laterPathAPI) == 2 })
 
 			q := f.queriesOf(laterPathAPI)[1]
 			gotStart, gotEnd := q.Get("add_time_start"), q.Get("add_time_end")
@@ -512,7 +482,7 @@ func TestTheFourPresetsAskForThatRange(t *testing.T) {
 func TestTheTwoDateInputsDriveTheFilter(t *testing.T) {
 	f := newLibFake(t).withLater(1, 1, "甲")
 	tt, _ := libraryShell(t, f, laterPath)
-	settle(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
 
 	// 点开起始日期那一格，它会弹出一个月的日历。
 	if err := tt.Click("起始日期"); err != nil {
@@ -527,7 +497,7 @@ func TestTheTwoDateInputsDriveTheFilter(t *testing.T) {
 	}
 	tt.Frame()
 
-	settle(t, tt, "按手动挑的日期重新拉", func() bool { return f.callsOf(laterPathAPI) == 2 })
+	waitFrames(t, tt, "按手动挑的日期重新拉", func() bool { return f.callsOf(laterPathAPI) == 2 })
 	if got := f.queriesOf(laterPathAPI)[1].Get("add_time_start"); got != strconv.FormatInt(day(2026, 10, 3).Unix(), 10) {
 		t.Errorf("手动挑了一天之后 add_time_start = %q，want 2026-10-03 那一秒", got)
 	}
@@ -548,7 +518,7 @@ func TestTheTwoDateInputsDriveTheFilter(t *testing.T) {
 func TestHistoryShowsHowFarYouGot(t *testing.T) {
 	f := newLibFake(t).withHistory(1, 754, 2700, "看了一半的那首")
 	tt, _ := libraryShell(t, f, historyPath)
-	settle(t, tt, "把历史记录拉回来", func() bool { return tt.HasText("看了一半的那首") })
+	waitFrames(t, tt, "把历史记录拉回来", func() bool { return tt.HasText("看了一半的那首") })
 
 	if !tt.HasText("12:34 / 45:00") {
 		t.Errorf("没有画出「看了 12:34 / 一共 45:00」，文字有 %q", tt.Texts())
@@ -567,7 +537,7 @@ func TestHistoryShowsHowFarYouGot(t *testing.T) {
 func TestAHistoryRowThatWasNeverPlayedShowsZeroProgress(t *testing.T) {
 	f := newLibFake(t).withHistory(1, 0, 2700, "刚点开就退出的")
 	tt, _ := libraryShell(t, f, historyPath)
-	settle(t, tt, "把历史记录拉回来", func() bool { return tt.HasText("刚点开就退出的") })
+	waitFrames(t, tt, "把历史记录拉回来", func() bool { return tt.HasText("刚点开就退出的") })
 
 	if !tt.HasText("0:00 / 45:00") {
 		t.Errorf("零秒的进度没有写成「0:00 / 45:00」，文字有 %q", tt.Texts())
@@ -583,7 +553,7 @@ func TestAHistoryRowThatWasNeverPlayedShowsZeroProgress(t *testing.T) {
 func TestAHistoryRowWithNoLengthShowsOnlyWhatWasWatched(t *testing.T) {
 	f := newLibFake(t).withHistory(1, 754, 0, "某场直播")
 	tt, _ := libraryShell(t, f, historyPath)
-	settle(t, tt, "把历史记录拉回来", func() bool { return tt.HasText("某场直播") })
+	waitFrames(t, tt, "把历史记录拉回来", func() bool { return tt.HasText("某场直播") })
 
 	if !tt.HasText("12:34") {
 		t.Errorf("没有画出看过多少，文字有 %q", tt.Texts())
@@ -607,7 +577,7 @@ func TestAHistoryRowWithNoLengthShowsOnlyWhatWasWatched(t *testing.T) {
 func TestInsertingARowAtTheHeadKeepsTheChosenSong(t *testing.T) {
 	f := newLibFake(t).withLater(1, 3, "第一首", "第二首", "第三首")
 	tt, s := libraryShell(t, f, laterPath)
-	settle(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 3 })
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 3 })
 
 	if err := tt.Click("第二首"); err != nil {
 		t.Fatal(err)
@@ -650,7 +620,7 @@ func TestInsertingARowAtTheHeadKeepsTheChosenSong(t *testing.T) {
 func TestTwoViewingsOfOneVideoAreTwoRows(t *testing.T) {
 	f := newLibFake(t).withHistory(1, 100, 600, "同一首歌 第一次", "同一首歌 第二次")
 	tt, s := libraryShell(t, f, historyPath)
-	settle(t, tt, "把两行拉回来", func() bool { return rowsShown(&s.historyPage) == 2 })
+	waitFrames(t, tt, "把两行拉回来", func() bool { return rowsShown(&s.historyPage) == 2 })
 
 	rows := s.historyPage.rows.Rows()
 	if rows[0].Item.Bvid != rows[1].Item.Bvid {

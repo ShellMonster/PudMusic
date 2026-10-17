@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
@@ -100,26 +99,21 @@ func uiExploreJSON(w http.ResponseWriter, code int, data any) {
 // （照 Biu `space-info.tsx:100`），所以要验那个按钮就得带登录态。
 func newSpaceShell(t *testing.T, b *uiExplore, loggedIn bool, mid string) (*Shell, *mygoui.Tester, *app.App) {
 	t.Helper()
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	t.Cleanup(func() { _ = s.hist.Close() })
-	s.router.Transition = mygoui.TransitionNone
-
-	transport := &app.CredentialTransport{Base: b.Server.Client().Transport, Policy: app.DefaultInjectPolicy()}
-	cli := bili.NewClient(bili.Options{Transport: transport})
-	cli.TestOnlyPointHostsAtFixture(b.URL)
-	a.MountLogin(app.NewMemoryStore("test"), cli)
-	a.MountExplore(cli)
-	// 在线播放也要挂上：`App.PlayFrom` 在没挂取流时会**把队列整个换回去**
-	// （那是它该做的——播不了的歌不该把用户原来的队列弄丢），而挂上之后
-	// `playOnline` 立刻返回 nil，队列就留住了，接下来是后台 goroutine 的事。
-	a.MountStreaming(app.Streaming{Client: cli, Media: b.Server.Client()})
-	if loggedIn {
-		a.TestOnlyAdoptLogin(mid)
-	}
-	return s, mygoui.NewTester(s.View, 1200, 800), a
+	sh := newTestShell(t, mounted(func(_ *testing.T, a *app.App) {
+		transport := &app.CredentialTransport{Base: b.Server.Client().Transport, Policy: app.DefaultInjectPolicy()}
+		cli := bili.NewClient(bili.Options{Transport: transport})
+		cli.TestOnlyPointHostsAtFixture(b.URL)
+		a.MountLogin(app.NewMemoryStore("test"), cli)
+		a.MountExplore(cli)
+		// 在线播放也要挂上：`App.PlayFrom` 在没挂取流时会**把队列整个换回去**
+		// （那是它该做的——播不了的歌不该把用户原来的队列弄丢），而挂上之后
+		// `playOnline` 立刻返回 nil，队列就留住了，接下来是后台 goroutine 的事。
+		a.MountStreaming(app.Streaming{Client: cli, Media: b.Server.Client()})
+		if loggedIn {
+			a.TestOnlyAdoptLogin(mid)
+		}
+	}))
+	return sh.s, sh.tt, sh.a
 }
 
 // showsText 报「画面上**有**这一句」（全等匹配）。
@@ -133,50 +127,13 @@ func showsText(tt *mygoui.Tester, s string) bool {
 	return ok
 }
 
-// waitSpace 等一个条件成立。
-//
-// ⚠️ **不是 `Advance` 出动画**：这几页没有动画，要等的是**后台 goroutine**
-// 那个网络往返回来。真等（等状态真的变了）之后那一帧画出来的就是换完的样子
-// ——即时模式里「异步结果必须唤醒」的那个坑正是在这条路上（不叫醒就停在旧帧）。
-func waitSpace(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-	for i := 0; i < 3000; i++ {
-		if cond() {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("等了 3 秒还没：%s", what)
-}
-
-// waitFrames 等一个条件成立，**每转一圈先画一帧**。
-//
-// ⚠️ 什么时候必须用这一条而不是 `waitSpace`：凡是「只在 view 里被收进
-// 界面的状态」（`PagedList` 的 `Loaded`、`upPager.started`、收进 `dynItems`
-// 的那几条）都是这样——后台把结果投进信箱之后，要等**下一帧**的 `adopt`
-// 才会落到状态上。不画那一帧的话条件永远不成立，而症状是「等了 3 秒还没」。
-//
-// 反过来，`app.UpSpace` 的头部状态是后台 goroutine 自己写的
-// （见 explore.go 的 Load），那一支不画帧也等得到——两种都要有。
-func waitFrames(t *testing.T, tt *mygoui.Tester, what string, cond func() bool) {
-	t.Helper()
-	for i := 0; i < 3000; i++ {
-		if cond() {
-			return
-		}
-		time.Sleep(time.Millisecond)
-		tt.Frame()
-	}
-	t.Fatalf("画了 3000 帧还没：%s", what)
-}
-
 // openSpace 切到某个 UP 的空间并等头加载完。
 func openSpace(t *testing.T, s *Shell, tt *mygoui.Tester, mid int64) *upSpace {
 	t.Helper()
 	s.navigate(upPathOf(mid))
 	tt.Frame()
 	sp := s.upSpaces[mid]
-	waitSpace(t, "头加载完", func() bool {
+	waitFor(t, "头加载完", func() bool {
 		h := sp.header.Snapshot()
 		return h.Loaded || h.Err != ""
 	})
@@ -418,7 +375,7 @@ func TestFollowingChangesTheButtonOnScreen(t *testing.T) {
 	if err := tt.Click("关注"); err != nil {
 		t.Fatal(err)
 	}
-	waitSpace(t, "关系变成已关注", func() bool {
+	waitFor(t, "关系变成已关注", func() bool {
 		return sp.header.Snapshot().Relation.Followed()
 	})
 	tt.Frame()
@@ -651,7 +608,7 @@ func TestTheFailedHeaderSaysSoAndOffersARetry(t *testing.T) {
 	s.navigate(upPathOf(42))
 	tt.Frame()
 	sp := s.upSpaces[42]
-	waitSpace(t, "头加载完（失败也是完）", func() bool {
+	waitFor(t, "头加载完（失败也是完）", func() bool {
 		h := sp.header.Snapshot()
 		return h.Loaded || h.Err != ""
 	})

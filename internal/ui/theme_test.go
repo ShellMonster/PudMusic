@@ -432,19 +432,19 @@ func (p *probeTester) frame() { p.tt.Frame() }
 // shell.go 现在还没接 ApplyTheme（那个文件不归本阶段改），这条用真实的
 // Shell 跑，把「接上去之后该是什么样子」钉住：正常页和错误页都带着当前设置。
 func TestShellFramesCarryTheTheme(t *testing.T) {
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-
 	settings := app.DefaultSettings("")
 	settings.ThemeMode = app.ThemeModeDark
 
 	var got themeProbe
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		ApplyTheme(c, settings, c.Theme().Dark)
-		got = readTheme(c)
-		s.View(c)
-	}, 700, 400)
+	b := newTestShell(t, at(700, 400), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			ApplyTheme(c, settings, c.Theme().Dark)
+			got = readTheme(c)
+			s.View(c)
+
+		}
+	}))
+	s, tt := b.s, b.tt
 
 	tt.Frame()
 	if !got.dark {

@@ -24,26 +24,22 @@ import (
 // `ErrSettingsNotMounted` 挡掉——这一组要验的正好是「存没存住」。
 func sideShell(t *testing.T) (*Shell, *app.App, *mygoui.Tester, string) {
 	t.Helper()
+	// 宽度过渡是 200ms 的动画，无头 Tester 一帧最多 settle 20 帧，走不完。
+	// 开了 ReduceMotion，动画直接落到终点——这里要验的是**终点**，动的那段
+	// 200ms 人眼看的，不是能自动断言的东西。
+	//
+	// `withSettings` 要一份 Settings 值，而这一条要的是「盘上一个**还不存在**
+	// 的设置文件」（走的是真程序第一次启动那条路），所以路径自己给。
 	path := filepath.Join(t.TempDir(), app.SettingsFileName)
-
 	a := app.New()
 	if err := a.MountSettings(path); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		a.Close()
-		_ = a.CloseSettings()
-	})
-
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	tt := mygoui.NewTester(s.View, 1200, 800)
-	// 宽度过渡是 200ms 的动画，无头 Tester 一帧最多 settle 20 帧，走不完。
-	// 开了 ReduceMotion，动画直接落到终点——这里要验的是**终点**，动的那段
-	// 200ms 人眼看的，不是能自动断言的东西。
-	tt.SetPreferences(mygoui.Preferences{ReduceMotion: true, TextScale: 1})
+	b := newTestShell(t, onApp(a),
+		withPrefs(mygoui.Preferences{ReduceMotion: true, TextScale: 1}))
+	tt := b.tt
 	tt.Frame()
-	return s, a, tt, path
+	return b.s, a, tt, path
 }
 
 // dragFrom 按下 (x, y)，分四步移到 (tx, ty)，在那里松手。
@@ -245,16 +241,11 @@ func sideShellOn(t *testing.T, path string) (*Shell, *app.App, *mygoui.Tester, s
 	if err := a.MountSettings(path); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		a.Close()
-		_ = a.CloseSettings()
-	})
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	tt := mygoui.NewTester(s.View, 1200, 800)
-	tt.SetPreferences(mygoui.Preferences{ReduceMotion: true, TextScale: 1})
+	b := newTestShell(t, onApp(a),
+		withPrefs(mygoui.Preferences{ReduceMotion: true, TextScale: 1}))
+	tt := b.tt
 	tt.Frame()
-	return s, a, tt, path
+	return b.s, a, tt, path
 }
 
 // TestTheCollapseButtonRoundTrips 验底下那个折叠按钮：点了就折叠，再点就

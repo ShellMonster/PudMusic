@@ -16,7 +16,6 @@ import (
 	"strconv"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
@@ -174,7 +173,7 @@ func collectionShell(t *testing.T, id string, medias ...map[string]any) (*favBil
 
 	s.navigate("/collection/" + id)
 	// 等容器拉回来（头图区第一帧是「正在加载…」）。
-	waitFrameFor(t, tt, "容器元信息加载完", func() bool {
+	waitFrames(t, tt, "容器元信息加载完", func() bool {
 		return s.collection != nil && s.app.Collection(s.collection.ref).Loaded
 	})
 	return b, s, tt
@@ -184,7 +183,11 @@ func collectionShell(t *testing.T, id string, medias ...map[string]any) (*favBil
 //
 // ⚠️ **它不等后台**。后台那一趟（拉元信息、拉内容页）跑在 goroutine 里，
 // 而 Tester 的 `Frame()` 一帧只要几十微秒——跑八帧后台多半还没回来。
-// 「等后台」用 `waitFor`，它的判据是**结果**，不是帧数。
+// 「等后台」用 `waitFrames`，它的判据是**结果**，不是帧数。
+//
+// ⚠️ 这里数帧是有理由的：它等的不是任何后台结果，而是「MyGo 一遍 `Frame()` 会跑
+// 两遍 view、点击被消费时再多一遍」这件事——要等的是**那个固定的遍数走完**，而
+// 它和机器负载无关。凡是等后台结果的地方都不许用它，改 `waitFrames` 加条件。
 func settleFrame(tt *ui.Tester) {
 	for range 3 {
 		tt.Frame()
@@ -201,27 +204,10 @@ func settleFrame(tt *ui.Tester) {
 // 不跑帧就看不见——而「跑够几帧」当判据在慢机器上会偶发地红，所以判据一律是
 // 这里传进来的 cond（结果），帧只是让它有机会被看见。
 //
-// ⚠️ 它原来叫 `waitFor`，和 `settings_tabs_test.go` 里那个（#73 带来的）
-// 同名同包。合并时 Git 看不出来（不同的文件），编译才报。
-func waitFrameFor(t *testing.T, tt *ui.Tester, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		tt.Frame()
-		if cond() {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("等了 2s，%s 还没发生，文字有 %q", what, tt.Texts())
-		}
-		time.Sleep(time.Millisecond)
-	}
-}
-
 // waitSongs 等这一页已经拉到了 n 首歌。
 func waitSongs(t *testing.T, tt *ui.Tester, s *Shell, n int) {
 	t.Helper()
-	waitFrameFor(t, tt, strconv.Itoa(n)+" 首歌加载完", func() bool {
+	waitFrames(t, tt, strconv.Itoa(n)+" 首歌加载完", func() bool {
 		return s.collection != nil && s.collection.list.Paged().Loaded == n
 	})
 }
@@ -310,7 +296,7 @@ func TestPrivateFoldersSaySo(t *testing.T) {
 	s.app.LoadCollection(s.collection.ref)
 	// ⚠️ 判据是**画面上那句话**而不是「缓存里那个字段变了」：缓存改完到下一帧
 	// 画出来之间还有一步，只查缓存的话断言会在那一步之前就通过。
-	waitFrameFor(t, tt, "新的元信息画出来", func() bool {
+	waitFrames(t, tt, "新的元信息画出来", func() bool {
 		return tt.HasText("私密收藏夹 • 1 条视频")
 	})
 	wantText(t, tt, "私密收藏夹 • 1 条视频")
@@ -343,7 +329,7 @@ func TestAllThreeSortsReachTheInterface(t *testing.T) {
 		// 换档会重建整个分页列表，而那一页是后台拉回来的——查得早了会看到
 		// 上一次的 order，于是这条用例变成按运气过的。
 		n := i + 2
-		waitFrameFor(t, tt, "第 "+strconv.Itoa(n)+" 次内容请求带着 order="+want[i+1], func() bool {
+		waitFrames(t, tt, "第 "+strconv.Itoa(n)+" 次内容请求带着 order="+want[i+1], func() bool {
 			got := b.seenOrders()
 			return len(got) >= n && got[n-1] == want[i+1]
 		})

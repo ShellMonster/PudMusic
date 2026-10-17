@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
@@ -56,7 +55,7 @@ func TestExportingWritesAFileWithNoCredentialAndSaysSo(t *testing.T) {
 	s.picker = fake
 
 	clickSetting(t, tt, s, "导出配置")
-	waitFor(t, func() bool { _, err := os.Stat(target); return err == nil })
+	waitFor(t, "代理配置写到盘上", func() bool { _, err := os.Stat(target); return err == nil })
 
 	body, err := os.ReadFile(target)
 	if err != nil {
@@ -105,7 +104,7 @@ func TestImportingAConfigChangesOnlyWhatThatFileMentions(t *testing.T) {
 	s.picker = &fakePicker{configPath: patch}
 
 	clickSetting(t, tt, s, "导入配置")
-	waitFor(t, func() bool { return a.SettingsSnapshot().ThemeMode == app.ThemeModeDark })
+	waitFor(t, "设置落成深色", func() bool { return a.SettingsSnapshot().ThemeMode == app.ThemeModeDark })
 
 	got := a.SettingsSnapshot()
 	if got.BorderRadius != 20 {
@@ -138,7 +137,7 @@ func TestImportingAConfigActuallyReachesTheDisk(t *testing.T) {
 	s.picker = &fakePicker{configPath: patch}
 
 	clickSetting(t, tt, s, "导入配置")
-	waitFor(t, func() bool {
+	waitFor(t, "字号写进配置文件", func() bool {
 		b, err := os.ReadFile(path)
 		return err == nil && strings.Contains(string(b), "21")
 	})
@@ -158,7 +157,7 @@ func TestImportingAFileWeCannotReadSaysSo(t *testing.T) {
 
 	before := a.SettingsSnapshot().BorderRadius
 	clickSetting(t, tt, s, "导入配置")
-	waitForFrames(t, tt, func() bool { return tt.HasText("导入配置失败") })
+	waitFrames(t, tt, "画面上出现「导入配置失败」", func() bool { return tt.HasText("导入配置失败") })
 
 	if got := a.SettingsSnapshot().BorderRadius; got != before {
 		t.Errorf("一份坏掉的文件把设置改了：%v → %v", before, got)
@@ -186,9 +185,8 @@ func TestImportingIntoSettingsFromANewerVersionIsRefusedLoudly(t *testing.T) {
 		a.Close()
 		_ = a.CloseSettings()
 	})
-	s := New(a)
-	s.router.Transition = mygoui.TransitionNone
-	tt := mygoui.NewTester(s.View, 1200, 800)
+	b := newTestShell(t, onApp(a))
+	s, tt := b.s, b.tt
 	tt.Frame()
 	openSettings(t, tt)
 
@@ -203,7 +201,7 @@ func TestImportingIntoSettingsFromANewerVersionIsRefusedLoudly(t *testing.T) {
 	s.picker = &fakePicker{configPath: patch}
 
 	clickSetting(t, tt, s, "导入配置")
-	waitForFrames(t, tt, func() bool { return tt.HasText("导入配置失败") })
+	waitFrames(t, tt, "画面上出现「导入配置失败」", func() bool { return tt.HasText("导入配置失败") })
 	// 那份文件一个字节都没动。
 	if got := readFile(t, path); got != body {
 		t.Fatalf("一份未来的设置文件被改写了：\n改前 %s\n改后 %s", body, got)
@@ -281,25 +279,6 @@ func withMigration(t *testing.T, r MigrationReport) {
 	})
 }
 
-// waitForFrames 等一个后台结果，**每轮都重画一帧**。
-//
-// 和 `waitFor` 的区别：结果可能是**画在屏幕上的一行字**（一条提示）。画面是
-// 上一帧的产物，不 `Frame()` 就永远读不到那一帧——而提示是在后台 goroutine 里
-// 投的，那个 goroutine 调的 `invalidate` 对无头 Tester 是不起作用的。
-func waitForFrames(t *testing.T, tt *mygoui.Tester, done func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		tt.Frame()
-		if done() {
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	tt.Frame()
-	t.Fatal("等了两秒，那个后台结果还没画出来")
-}
-
 // 点「从 Biu 导入」：设置真的换成了 Biu 那一份，而且**旧的那份留了备份**。
 //
 // 这是「用户点一下就能导」的正面对照——前面 `TestAFreshInstall…` 测的是启动时
@@ -329,7 +308,7 @@ func TestPressingTheBiuImportButtonActuallySwapsTheSettingsIn(t *testing.T) {
 	}
 
 	clickSetting(t, tt, s, "从 Biu 导入")
-	waitForFrames(t, tt, func() bool {
+	waitFrames(t, tt, "Biu 那份主色写进设置", func() bool {
 		return a.SettingsSnapshot().PrimaryColor == "#17c964"
 	})
 
@@ -400,7 +379,7 @@ func TestImportingADarkThemeActuallyTurnsTheWholeWindowDark(t *testing.T) {
 	s.picker = &fakePicker{configPath: patch}
 
 	clickSetting(t, tt, s, "导入配置")
-	waitFor(t, func() bool { return a.SettingsSnapshot().ThemeMode == app.ThemeModeDark })
+	waitFor(t, "设置落成深色", func() bool { return a.SettingsSnapshot().ThemeMode == app.ThemeModeDark })
 	tt.Frame()
 
 	want := BuildTheme(a.SettingsSnapshot(), false) // 系统仍然是浅色
@@ -420,7 +399,7 @@ func TestImportingADarkThemeActuallyTurnsTheWholeWindowDark(t *testing.T) {
 	}
 	s.picker = &fakePicker{configPath: follow}
 	clickSetting(t, tt, s, "导入配置")
-	waitFor(t, func() bool { return a.SettingsSnapshot().ThemeMode == app.ThemeModeSystem })
+	waitFor(t, "设置落成跟随系统", func() bool { return a.SettingsSnapshot().ThemeMode == app.ThemeModeSystem })
 	tt.SetDark(true)
 	tt.Frame()
 

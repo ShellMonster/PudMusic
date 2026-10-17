@@ -11,37 +11,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
 // 路由这一组测试跑的是 MyGo 的 Tester：和真窗口一模一样的 layout 与绘制，
 // 只是画到内存里。点得到、找得到文字，所以「切得动」这件事能自动验。
 
+// newShell 造一个**没挂任何东西**的外壳：没有设置、没有登录、没有 B 站客户端。
+// 收尾（定时器、封面缓存、应用、设置/历史/快捷键的落盘）由基座无条件挂上。
 func newShell(t *testing.T) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	// 搜索历史带着一个后台落盘的 goroutine（见 searchhistory.go）。每个外壳
-	// 一个，测试里建得比真窗口快得多，不收掉就是一堆挂着的 goroutine。
-	t.Cleanup(func() { _ = s.hist.Close() })
-
-	// 🔴 关掉切页动画。Tester 一帧画完，250ms 的滑动在里面永远走不完：那一帧
-	// 停在半路，上一页正往左挪、下一页正往右进，中间那道分界线正扫过页面区域。
-	// 于是「点一下再读某个点」这一次读到窗口底色、下次读到分界线，同一条测试
-	// 时而红时而绿（实测八次里挂两次）。
-	//
-	// 造外壳的三个函数（这里、shellWithSettings、shellOnSettings）都关，是为了
-	// 同一个理由：屏幕上的任何一个采样点都要是确定的。设置页那几条另有
-	// settleSettingsPage 兜底，万一哪个外壳忘了关还能等它停下来。
-	s.router.Transition = mygoui.TransitionNone
-
-	return s, mygoui.NewTester(s.View, 1200, 800)
+	b := newTestShell(t)
+	return b.s, b.tt
 }
 
-// settleText 跑到画面上出现 want 为止，最多两秒。
+// settleText 跑到画面上出现 want 为止。
 //
 // # 为什么搜索页的那几条要它
 //
@@ -55,17 +39,7 @@ func newShell(t *testing.T) (*Shell, *mygoui.Tester) {
 // 的 CI 上会偶发红，而它红的时候和被测的逻辑一点关系都没有。
 func settleText(t *testing.T, tt *mygoui.Tester, want string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		tt.Frame()
-		if tt.HasText(want) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("等了两秒画面上还是没有 %q，文字有 %q", want, tt.Texts())
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitFrames(t, tt, "画面上出现 "+want, func() bool { return tt.HasText(want) })
 }
 
 // TestFourteenRoutes 盯住「Biu 那 14 条」这个数：少一条是漏了，多一条是编的。

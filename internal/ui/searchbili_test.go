@@ -358,7 +358,7 @@ func TestASearchResultActuallyStartsPlaying(t *testing.T) {
 	}
 
 	// 等它真的出声。
-	settleSearch(t, tt, "搜出来的那首开始出声", func() bool { return s.app.Snapshot().HasTrack })
+	waitFrames(t, tt, "搜出来的那首开始出声", func() bool { return s.app.Snapshot().HasTrack })
 	if got := s.app.Snapshot().Err; got != "" {
 		t.Errorf("播放条上有错误：%s", got)
 	}
@@ -405,7 +405,7 @@ func TestASearchResultSaysWhyWhenThePartCannotBeAsked(t *testing.T) {
 	}
 
 	// 播放条上要说明白是「问不出这一集」，而不是一句看不懂的「取不到流」。
-	settleSearch(t, tt, "播放条上说明白原因", func() bool { return s.app.Snapshot().Err != "" })
+	waitFrames(t, tt, "播放条上说明白原因", func() bool { return s.app.Snapshot().Err != "" })
 	if got := s.app.Snapshot().Err; !strings.Contains(got, "问不出") {
 		t.Errorf("播放条上写的是 %q，要说清是「问不出这一集是哪一集」", got)
 	}
@@ -445,7 +445,7 @@ func TestStaleResponseDoesNotReachPlayAllOnTheRealPath(t *testing.T) {
 	// 放行旧的：先等它真的回到应用，再往下判。
 	before := f.servedCount()
 	f.release("旧词")
-	settleSearch(t, tt, "迟到的旧响应回到应用", func() bool { return f.servedCount() > before })
+	waitFrames(t, tt, "迟到的旧响应回到应用", func() bool { return f.servedCount() > before })
 	for range 2 {
 		tt.Frame() // 从网络里回来的那一下落地（或被代次作废）
 	}

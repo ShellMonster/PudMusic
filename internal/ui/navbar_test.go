@@ -9,7 +9,6 @@ package ui
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -25,18 +24,8 @@ import (
 // `Update` 直接返回 ErrSettingsClosed（见 internal/app/settings_mount.go）。
 func newShellWithSettings(t *testing.T) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	a := app.New()
-	if err := a.MountSettings(filepath.Join(t.TempDir(), app.SettingsFileName)); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		a.Close()
-		_ = a.CloseSettings()
-	})
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	t.Cleanup(func() { _ = s.hist.Close() })
-	return s, mygoui.NewTester(s.View, 1200, 800)
+	b := newTestShell(t, withSettings(app.DefaultSettings("")))
+	return b.s, b.tt
 }
 
 // newLoggedInShell 建一个**已经登录**的外壳：先往凭据后端里存一份登录态，
@@ -47,19 +36,14 @@ func newShellWithSettings(t *testing.T) (*Shell, *mygoui.Tester) {
 // 「菜单项接到了哪」，不联网，而 `SeedCookies` 只动 jar，不发请求。
 func newLoggedInShell(t *testing.T, mid string) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	a := app.New()
-	t.Cleanup(a.Close)
-
-	store := app.NewMemoryStore("test")
-	if err := store.Save(context.Background(), app.Session{SESSDATA: "sess", DedeUserID: mid}); err != nil {
-		t.Fatal(err)
-	}
-	a.MountLogin(store, bili.NewClient(bili.Options{}))
-
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	t.Cleanup(func() { _ = s.hist.Close() })
-	return s, mygoui.NewTester(s.View, 1200, 800)
+	b := newTestShell(t, mounted(func(t *testing.T, a *app.App) {
+		store := app.NewMemoryStore("test")
+		if err := store.Save(context.Background(), app.Session{SESSDATA: "sess", DedeUserID: mid}); err != nil {
+			t.Fatal(err)
+		}
+		a.MountLogin(store, bili.NewClient(bili.Options{}))
+	}))
+	return b.s, b.tt
 }
 
 // 扫码登录那一页的路由用 login.go 里那个 loginPath，这里不另立一份。

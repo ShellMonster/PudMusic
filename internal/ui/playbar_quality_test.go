@@ -24,15 +24,15 @@ func qualityBarTester(t *testing.T, st app.State, width ...int) *mygoui.Tester {
 	if len(width) > 0 {
 		w = width[0]
 	}
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
+	// 只画播放条那一块，不走整窗：`withView` 就是为「绕过整窗、单独画一块」留的。
+	b := newTestShell(t, at(w, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			s.viewPlayBar(c, st)
 
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.wake.set(c)
-		s.viewPlayBar(c, st)
-	}, w, coverWinH)
+		}
+	}))
+	tt := b.tt
 	tt.Frame()
 	return tt
 }
@@ -53,16 +53,15 @@ func TestQualityBadgeShowsForAnOnlineTrack(t *testing.T) {
 // B 站把 320K 降成 128K 时用户看到的还是「320K」——无声地降级会让人以为
 // 自己还在听原来那一档。
 func TestQualityBadgeFollowsTheRefresh(t *testing.T) {
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
-
 	st := app.State{HasTrack: true, Title: "在线的一首", Quality: "320K"}
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.wake.set(c)
-		s.viewPlayBar(c, st) // ← 闭包读的是外面那个变量
-	}, 760, coverWinH)
+	b := newTestShell(t, at(760, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			s.viewPlayBar(c, st) // ← 闭包读的是外面那个变量
+
+		}
+	}))
+	tt := b.tt
 
 	tt.Frame()
 	if !tt.HasText("320K") {
@@ -213,8 +212,6 @@ func TestErrorShowsNextToTheTitle(t *testing.T) {
 // 出来的 fixture）。
 func TestTheBadgeMenuSwitchesQuality(t *testing.T) {
 	a := streamingApp(t)
-	s := New(a)
-	t.Cleanup(s.images.Close)
 
 	// 偏好每帧从 App 现读，和界面别的地方一样。徽章那一行固定住（这一条测的
 	// 是菜单，不是换流），变的只有偏好那一项。
@@ -224,11 +221,15 @@ func TestTheBadgeMenuSwitchesQuality(t *testing.T) {
 		Quality:     "320K",
 		QualityPref: app.AudioQualityAuto,
 	}
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.wake.set(c)
-		st.QualityPref = a.Snapshot().QualityPref
-		s.viewPlayBar(c, st)
-	}, 760, coverWinH)
+	b := newTestShell(t, onApp(a), at(760, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			st.QualityPref = a.Snapshot().QualityPref
+			s.viewPlayBar(c, st)
+
+		}
+	}))
+	tt := b.tt
 	tt.Frame()
 
 	if err := tt.Click("320K"); err != nil {

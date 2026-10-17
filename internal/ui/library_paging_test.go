@@ -8,7 +8,6 @@ package ui
 
 import (
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -35,13 +34,13 @@ func TestScrollingToTheEndLoadsTheNextPage(t *testing.T) {
 		withLater(1, 60, manyTitles(1, 40)...).
 		withLater(2, 60, manyTitles(2, 20)...)
 	tt, s := libraryShell(t, f, laterPath)
-	settle(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 40 })
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 40 })
 	if got := f.callsOf(laterPathAPI); got != 1 {
 		t.Fatalf("第一页还没滚到底就发了 %d 次请求——那是③，不是我要验的那条", got)
 	}
 
 	scrollToBottom(t, tt)
-	settle(t, tt, "滚到底之后自动续拉", func() bool { return rowsShown(&s.laterPage) == 60 })
+	waitFrames(t, tt, "滚到底之后自动续拉", func() bool { return rowsShown(&s.laterPage) == 60 })
 	if got := f.callsOf(laterPathAPI); got != 2 {
 		t.Errorf("一共发了 %d 次请求，want 2", got)
 	}
@@ -68,9 +67,9 @@ func TestRefillLoadsTheNextPageWithoutScrolling(t *testing.T) {
 	tt, s := libraryShell(t, f, laterPath)
 	// ⚠️ 这里**不能**等「正好两行」：③ 要验的就是它自己把第二页拉上来，第一帧
 	// 之后可能已经是三行了。等「至少两行」。
-	settle(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) >= 2 })
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) >= 2 })
 
-	settle(t, tt, "没滚过也把第二页补上来了", func() bool { return rowsShown(&s.laterPage) == 3 })
+	waitFrames(t, tt, "没滚过也把第二页补上来了", func() bool { return rowsShown(&s.laterPage) == 3 })
 	if !tt.HasText("第二页第一首") {
 		t.Errorf("第二页没画出来，文字有 %q", tt.Texts())
 	}
@@ -86,10 +85,10 @@ func TestAFailingPageOffersARetry(t *testing.T) {
 	f.mu.Unlock()
 
 	tt, s := libraryShell(t, f, laterPath)
-	settle(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 40 })
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 40 })
 
 	scrollToBottom(t, tt)
-	settle(t, tt, "页面停在那一个重试按钮上", func() bool { return tt.HasText("加载失败，点此重试") })
+	waitFrames(t, tt, "页面停在那一个重试按钮上", func() bool { return tt.HasText("加载失败，点此重试") })
 	if s.laterPage.rows.Status().Loading {
 		t.Error("失败之后还在转圈")
 	}
@@ -104,7 +103,7 @@ func TestAFailingPageOffersARetry(t *testing.T) {
 func TestTheDebounceRestartsOnEveryKeystroke(t *testing.T) {
 	f := newLibFake(t).withLater(1, 1, "甲")
 	tt, s := libraryShell(t, f, laterPath)
-	settle(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
 
 	typeKeyword(t, tt, "周")
 	advance(s, 400*time.Millisecond)
@@ -128,7 +127,7 @@ func TestTheDebounceRestartsOnEveryKeystroke(t *testing.T) {
 
 	// 再等够 500ms 才真的搜出去。
 	advance(s, 400*time.Millisecond)
-	settle(t, tt, "距最后一次输入满 500ms 之后搜出去", func() bool { return f.callsOf(laterPathAPI) == 2 })
+	waitFrames(t, tt, "距最后一次输入满 500ms 之后搜出去", func() bool { return f.callsOf(laterPathAPI) == 2 })
 	if got := f.queriesOf(laterPathAPI)[1].Get("key"); got != "周杰" {
 		t.Errorf("搜出去的词是 %q，want 周杰（两个字的都要）", got)
 	}
@@ -141,7 +140,7 @@ func TestTheDebounceRestartsOnEveryKeystroke(t *testing.T) {
 func TestTheSearchWatchStopsWhenThePageIsLeft(t *testing.T) {
 	f := newLibFake(t).withLater(1, 1, "甲")
 	tt, s := libraryShell(t, f, laterPath)
-	settle(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 1 })
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 1 })
 
 	typeKeyword(t, tt, "周")
 	if s.searchWatchStop == nil {
@@ -189,7 +188,7 @@ func TestChangingTheFilterWhilePagesAreFetchingIsNotADataRace(t *testing.T) {
 				withHistory(1, 100, 600, manyTitles(1, 40)...)
 			tt, s := libraryShell(t, f, path)
 			p := s.pageOf(path)
-			settle(t, tt, "把第一页拉回来", func() bool { return rowsShown(p) > 0 })
+			waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(p) > 0 })
 
 			// 每一轮都是「换条件 → Reload → 后台 fetch 正在跑 → 再换」。
 			for i := range 200 {
@@ -199,7 +198,7 @@ func TestChangingTheFilterWhilePagesAreFetchingIsNotADataRace(t *testing.T) {
 				p.apply()
 				tt.Frame()
 			}
-			settle(t, tt, "最后那一页落地", func() bool { return !p.rows.Status().Loading })
+			waitFrames(t, tt, "最后那一页落地", func() bool { return !p.rows.Status().Loading })
 		})
 	}
 }
@@ -275,32 +274,13 @@ func TestTheReportHistorySwitchReallyWritesTheSetting(t *testing.T) {
 	f := newLibFake(t).withHistory(1, 100, 600, "听过的那首")
 
 	// 挂一份真的设置（和 `shellOnSettings` 同一套路），否则 applySetting 写不出去。
-	path := filepath.Join(t.TempDir(), app.SettingsFileName)
-	st, err := app.OpenSettingsStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.Update(func(cur *app.Settings) { *cur = app.DefaultSettings("") }); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	a := app.New()
-	t.Cleanup(a.Close)
-	if err := a.MountSettings(path); err != nil {
-		t.Fatal(err)
-	}
 	cli := biliForTest(t, f)
-	a.MountLibrary(cli)
-
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	t.Cleanup(func() { _ = s.hist.Close() })
-	s.router.Transition = mygoui.TransitionNone
-	s.clock = newFakeClock(now)
-	tt := mygoui.NewTester(s.View, 1200, 800)
+	b := newTestShell(t,
+		withSettings(app.DefaultSettings("")),
+		mounted(func(_ *testing.T, a *app.App) { a.MountLibrary(cli) }),
+		withClock(newFakeClock(now)))
+	a, s, tt := b.a, b.s, b.tt
+	path := b.settingsPath
 	tt.Frame()
 	s.navigate(historyPath)
 	tt.Frame()
