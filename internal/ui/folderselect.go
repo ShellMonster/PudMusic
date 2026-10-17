@@ -197,7 +197,7 @@ func (s *Shell) viewFolderPickRow(c *ui.Context, f *folderSelect, i int) {
 	t := c.Theme()
 	item := f.list[i]
 
-	row := ui.Column(c).Key(favRowKey(favSelectGroup, item.ID)).Grow(1).
+	row := ui.Column(c).Key(favSelectRowKey(item.ID)).Grow(1).
 		Radius(6).Padding(6, 8).Gap(2)
 	if row.Hovered() {
 		row = row.Background(t.SurfaceHover)
@@ -230,8 +230,19 @@ func selectRowSubtitle(f bili.CreatedFolder) string {
 	return sub
 }
 
-// favSelectGroup 是这一列的 key 组名，见 favRowKey。
-const favSelectGroup = 9001
+// favSelectRowKey 是选择弹窗里一行的 key。
+//
+// 🔴 **用收藏夹的 id**（铁律四），不是序号。默认的元素身份是「父 ID + 兄弟
+// 序号」，而这一列会变长（用户收藏到第 4 个收藏夹之后回到这一列，前面多了一
+// 行）——序号整体错一位，于是**后面每一行的勾都串到别的收藏夹上**：勾了 A、
+// 界面把 B 画成没勾，用户点确认，B 站那边收到的 del_media_ids 里就有 B。
+//
+// 和侧栏那两列的 key 不冲突：它们带的是组名（`favRowKey`），这里带的是
+// `fav-sel-row:`。Tester 在同一个父底下撞 key 是直接 panic 的
+// （`ui/diagnostics.go`），两个弹窗又是同一个窗口。
+func favSelectRowKey(id int64) string {
+	return "fav-sel-row:" + strconv.FormatInt(id, 10)
+}
 
 // ── 勾选 ───────────────────────────────────────────────────────────────────
 

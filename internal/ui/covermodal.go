@@ -117,6 +117,13 @@ func (s *Shell) pickCover(crop *cropState) {
 // 就是每点一次冻一下窗口。解码失败要说给用户听——「点了没反应」比「选错了
 // 格式」难解释得多。
 func (s *Shell) loadCoverFile(crop *cropState, path string) {
+	// ⚠️ **同一个文件不重来一遍**：换图要重新解码（几十到几百毫秒）和重建
+	// GPU 纹理，而用户连点两下「选择照片」选的是同一个文件是常事。
+	if crop.srcFor == path && crop.src != nil {
+		crop.open = true
+		s.wake.invalidate()
+		return
+	}
 	img, err := readAndDecodeCover(path)
 	if err != nil {
 		s.addToast(err.Error())
@@ -129,9 +136,6 @@ func (s *Shell) loadCoverFile(crop *cropState, path string) {
 }
 
 // setSource 换掉正在裁的那张图。
-//
-// ⚠️ **同一个文件不重来一遍**：换图要重新解码（几十到几百毫秒）和重建 GPU
-// 纹理，而用户连续点两下「选择照片」选的是同一个文件是常事。
 func (c *cropState) setSource(img *image.RGBA, path string) {
 	c.src, c.srcFor = img, path
 	c.bitmap = ui.NewBitmap(img)

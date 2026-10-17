@@ -474,6 +474,7 @@ func (s *Shell) viewFolderDialogs(c *ui.Context) {
 	s.flushFolderResults()
 	s.syncFolderDialogs(c)
 
+	s.viewFolderEdit(c)
 	// 裁剪弹窗画在编辑弹窗**外面**（不是里面）：`ui.Modal` 自己带一层遮罩，
 	// 嵌在另一个 Modal 的面板里的话遮罩只有面板那么大，裁剪台周围那一圈点不
 	// 到——而那一圈正是「点外面想关掉」的地方。
