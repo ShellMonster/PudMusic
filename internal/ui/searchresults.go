@@ -119,6 +119,13 @@ type searchState struct {
 	//
 	// ⚠️ 它跑在后台 goroutine 里，读的每一样共享状态都得自己护住（见 searchTab.mu）。
 	fetch func(tab int, ctx context.Context, page int) (list.Page, error)
+
+	// client 是拉页要用的那一个 B 站客户端，默认是 App 上那一个（`App.BiliClient`）。
+	//
+	// 做成字段是为了**能在不挂登录的情况下测真的那条拉页路**（`App.BiliClient` 只有
+	// 走过 `MountLogin` 之后才有值，而挂登录要碰凭据后端）。同一个理由跟 `fetch`
+	// 一样：这一层的依赖是显式的，测试换掉的是它背后那一个。
+	client func() *bili.Client
 }
 
 // searchTab 是一个 Tab 的分页列表，外加「现在画着的这批结果是谁的」。
@@ -133,6 +140,15 @@ type searchTab struct {
 	// mu 护着下面两样：拉页在后台 goroutine 里，界面线程同时在画、在点「全部播放」，
 	// 不加锁就是竞态（`go test -race` 会当场报出来）。
 	mu sync.Mutex
+	// gen 是这一 Tab 的代次，每次换查询 +1（见 current）。
+	//
+	// 🔴 分页列表自己也有一个代次，但**它管不到下面那个 loaded**：那是这里另抄的一份
+	// 「已经拿到手的行」，收结果的那一趟不经过分页列表的 `apply`，所以它的代次检查
+	// （`PagedList.apply` 里那句 `r.gen != p.gen`）盖不住它。没有这一道的话：换完关键词
+	// 之后**旧的**那一页迟到，用户在列表上已经看不见它了，按「全部播放」却把它一起
+	// 加进队列——用户搜的是新词，队列里混着旧词的歌（评审复现：先完成新响应再释放旧
+	// 响应，`loaded` 成了 [BVnew, BVold]）。
+	gen uint64
 	// query 是交给后台那次拉页用的查询。写它的是界面线程（换查询时），读它的
 	// 是后台 goroutine。
 	query searchQuerySpec
@@ -152,7 +168,7 @@ type searchQuerySpec struct {
 
 // init 把三个 Tab 建起来。Shell.New 调它。
 func (st *searchState) init(s *Shell) {
-	st.fetch = s.fetchSearchTab
+	st.fetch, st.client = s.fetchSearchTab, s.app.BiliClient
 	for i := range st.lists {
 		st.lists[i].list = list.NewPaged(s.images, s.searchActions(i), s.searchFetcher(i))
 	}
@@ -170,10 +186,11 @@ func (s *Shell) searchFetcher(tab int) list.Fetcher {
 func (s *Shell) fetchSearchTab(tab int, ctx context.Context, page int) (list.Page, error) {
 	t := &s.search.lists[tab]
 	t.mu.Lock()
-	q := t.query
+	q, gen := t.query, t.gen
 	t.mu.Unlock()
 
-	cli := s.app.BiliClient()
+	st := &s.search
+	cli := st.client()
 	if cli == nil {
 		return list.Page{}, errSearchNotMounted
 	}
@@ -200,10 +217,16 @@ func (s *Shell) fetchSearchTab(tab int, ctx context.Context, page int) (list.Pag
 		return list.Page{}, err
 	}
 
-	// 留一份给「全部播放」。去重在按下按钮那一刻做（见 searchPlayAll），
-	// 这里照原样收着：B 站翻页会重叠，两页同一首歌是常事。
+	// 留一份给「全部播放」。去重在按下按钮那一刻做（见 searchPlayAll）。
+	//
+	// 🔴 **代次对不上就整个丢掉**：换查询之后旧的那一页还会回来（cancel 只停请求，
+	// 已经回来的那一趟照样给结果），它已经不该出现在任何地方了——分页列表会靠自己的
+	// 代次把它作废，而这一份是绕过分页列表收进来的。
 	t.mu.Lock()
-	t.loaded = append(t.loaded, songs...)
+	if gen == t.gen {
+		// B 站翻页会重叠，同一个 bvid 落进两页里是常事，原样收着、按下去那一刻再去重。
+		t.loaded = append(t.loaded, songs...)
+	}
 	t.mu.Unlock()
 
 	return list.Page{Songs: songs, HasMore: hasMore}, nil
@@ -282,6 +305,7 @@ func (t *searchTab) current(q searchQuerySpec) {
 	}
 	t.kw = key
 	t.mu.Lock()
+	t.gen++ // 作废旧查询在途的那几趟，见上面 gen 的注释
 	t.query, t.loaded = q, nil
 	t.mu.Unlock()
 	t.list.Reload()

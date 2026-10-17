@@ -46,10 +46,35 @@ type searchStub struct {
 	// overlap 让第 2 页的头一行重复第 1 页的最后一行，模拟 B 站翻页重叠
 	// （真会这样：同一首歌挪了名次就落进两页里）。
 	overlap bool
+	// gates 把某一次拉页卡住，直到 release：用来造「旧查询的响应迟到」。
+	gates map[string]chan struct{}
 
 	mu    sync.Mutex
 	calls []searchCall
 }
+
+// hold 把「某个词的那一页」卡住，返回放行的函数。
+func (st *searchStub) hold(keyword string, page int) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.gates == nil {
+		st.gates = map[string]chan struct{}{}
+	}
+	st.gates[gateKey(keyword, page)] = make(chan struct{})
+}
+
+// release 放行那一次。
+func (st *searchStub) release(keyword string, page int) {
+	st.mu.Lock()
+	ch := st.gates[gateKey(keyword, page)]
+	delete(st.gates, gateKey(keyword, page))
+	st.mu.Unlock()
+	if ch != nil {
+		close(ch)
+	}
+}
+
+func gateKey(keyword string, page int) string { return keyword + "|" + strconv.Itoa(page) }
 
 // newSearchStub 造一份假拉页器。**所有字段都要在它接上之前定好**：接上之后
 // 第一趟请求可能已经在后台跑了，那时候再改字段就是竞态。
@@ -66,17 +91,24 @@ func (st *searchStub) install(s *Shell) {
 func (st *searchStub) fetch(tab int, _ context.Context, page int) (list.Page, error) {
 	t := &st.shell.search.lists[tab]
 	t.mu.Lock()
-	q := t.query
+	q, gen := t.query, t.gen
 	t.mu.Unlock()
 
 	st.mu.Lock()
 	st.calls = append(st.calls, searchCall{tab: tab, page: page, keyword: q.keyword, sort: q.sort})
 	rows := st.rows(tab, page)
+	ch := st.gates[gateKey(q.keyword, page)]
 	st.mu.Unlock()
+	if ch != nil {
+		<-ch // 放行之前这一趟不落地（模拟「旧查询的响应迟到」）
+	}
 
-	// 「全部播放」那份副本：和真的那一支走同一段逻辑（见 fetchSearchTab）。
+	// 「全部播放」那份副本：和真的那一支走同一段逻辑，包括**代次对不上就整个丢掉**
+	// （见 fetchSearchTab）。这里抄的是真实现，测的才是真实现那条闸门。
 	t.mu.Lock()
-	t.loaded = append(t.loaded, rows...)
+	if gen == t.gen {
+		t.loaded = append(t.loaded, rows...)
+	}
 	t.mu.Unlock()
 
 	has := len(rows) > 0 && page*st.perPage < st.total
@@ -655,6 +687,55 @@ func TestTheResultRowsArePaintedNotBlank(t *testing.T) {
 	}
 	if !painted {
 		t.Errorf("那一行的盒子里全是底色 %v：画出来一片白", bg)
+	}
+}
+
+// TestStaleResponseDoesNotReachPlayAll 盯「旧查询的响应迟到不会进「全部播放」那条路」。
+//
+// ⚠️ 这一条走的是**真的** `fetchSearchTab`（配一台会答的假 B 站），不是那个假拉页
+// 器：代次闸门长在真实现里，用假拉页器测它等于没测——假的那一份自己也会照抄闸门，
+// 把真实现里的闸门删掉照样全绿（评审抓的就是这一层）。
+//
+// 这是评审挑出来的那条 major：分页列表有自己的代次（`PagedList.apply` 里那句
+// `r.gen != p.gen`）把迟到的那一页作废了，但「全部播放」要的那份副本是搜索页**另外**
+// 收的，绕过了分页列表的代次检查。于是用户搜了新词、界面上看着已经换成新结果，按一下
+// 「全部播放」，旧词的歌也跟着进了队列（评审实测：`loaded` 成了 [BVnew, BVold]）。
+//
+// 判据是**队列里到底有什么**：副本对不对是内部的，用户看得见的是队列。
+func TestStaleResponseDoesNotReachPlayAll(t *testing.T) {
+	// 一页一条：迟到的旧响应有没有漏进来，看的是**条数**，一比一最清楚。
+	st := newSearchStub(1, 1)
+	st.hold("旧词", 1) // 旧查询的第一页卡住，不落地
+	s, tt := newSearchPage(t, "旧词", st)
+	settleSearch(t, tt, "旧查询发出去", func() bool { return len(st.callsOf(searchTabSong)) == 1 })
+
+	// 换词：新查询立刻回来。
+	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("新词"))
+	settleSearch(t, tt, "新查询落地", loadedTo(s, searchTabSong, 1))
+
+	// 现在放行旧的那一趟——它回来得比新结果晚，正是 cancel 拦不住的那一种。
+	st.release("旧词", 1)
+	for range 4 {
+		tt.Frame()
+	}
+
+	// 副本里只剩新查询那一份（旧的那一趟被代次作废）。
+	if got := len(s.search.lists[searchTabSong].snapshot()); got != 1 {
+		t.Fatalf("「全部播放」那份副本里有 %d 行，want 1（迟到的旧响应漏进来了）", got)
+	}
+
+	if err := tt.Click("全部播放"); err != nil {
+		t.Fatalf("点不到「全部播放」：%v，文字有 %q", err, tt.Texts())
+	}
+	tt.Frame()
+	tt.Frame()
+
+	items := s.app.Queue().Items()
+	if len(items) != 1 {
+		t.Fatalf("队列里有 %d 项，want 1（迟到的旧响应被加进队列了）", len(items))
+	}
+	if items[0].Bvid != stubBvid(1, 0) {
+		t.Errorf("队列里那一首的 bvid 是 %q", items[0].Bvid)
 	}
 }
 

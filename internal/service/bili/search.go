@@ -6,16 +6,18 @@
 // B 站的一个 search_type，它就是**限定在音乐分区的视频**——上游那个默认开着、写着
 // 「仅音乐分区」的开关发的就是这个请求（`video-list/index.tsx:24` 与 `:40`）。
 //
-// # 🔴 返回里没有 cid，而在线播放要 cid
+// # ⚠️ 返回里没有 cid，在线播放要自己去问
 //
 // B 站的搜索结果**只给 bvid，不给分 P id**（上游的 `SearchVideoItem` 定义里就没有它；
-// 上游要放歌时另外调一次 `/x/web-interface/view` 才拿到 `pages[].cid`，见
-// `store/play-list.ts:129` 的 `getMVData`）。所以 `VideoHit.Cid` 多数情况是空的，搜出来
-// 的条目放进队列之后在线播放会按「缺稿件 id 或分 P id」拒掉（`app.playableOnline`）
-// ——那条限制是有道理的：多 P 投稿不给 cid 会**静默地**取到第一集。
+// 上游要放歌时另外调一次拿 `pages[].cid`，见 `store/play-list.ts:129` 的
+// `getMVData`）。所以 `VideoHit.Cid` 多数情况是空的——
 //
-// 这一层只管搜索，不动在线播放那条路；解析分 P 跟着在线播放一起补。B 站偶尔会在
-// 结果里带上 `cid`，带上了我们就用（`parseCid`），别因为「反正一般是空的」就扔掉。
+// 这一层**不**去补那 24 条：用户多半只会听其中一首，为另外 23 首各发一次带签名的往返
+// 不划算。补在真正要放的那一刻（`app.runOnline` 的 `withCid`，见 video.go）。所以搜
+// 出来的条目进队列时**确实是空的 cid**，它靠的是放歌那一刻那一次问，而不是这里。
+//
+// B 站偶尔会在结果里带上 `cid`，带上了我们就用（`parseCid`），别因为「反正一般是
+// 空的」就扔掉。
 
 package bili
 
@@ -332,10 +334,20 @@ func userOrderOf(s UserSort) string {
 // （`video-list/index.tsx:54`），只是改成用页码算：分页列表自己会去重，已加载数可能
 // 被去重改小，用它判断会在最后一页之前就停手。
 //
+// 🔴 **页码上限也算到底**：`pageOf` 把第 101 页夹成第 100 页，于是 B 站每次都回同一份
+// 末页数据。只按 `总数` 判的话这一页永远算「还有」——翻页列表就一直拉第 100 页，
+// 一条新的都拿不到，而每一次都是一次带 WBI 签名的往返（评审复现：传 100/101/102 三趟，
+// 录到的请求全是 page=100，三次 HasMore 都是 true）。
+//
 // ⚠️ **一页空就说到底了**：接口返回 `numResults: 9999` 而这一页 `result` 是空数组
 // 的时候（B 站在风控边缘偶尔这么干），没有它就是无限翻页。
 func searchHasMore(page, got, total int) bool {
-	return got > 0 && page*searchPageSize < total
+	if got == 0 {
+		return false
+	}
+	p := pageOf(page)
+	// 夹到上限的那一页就是最后一页，再往后拿回来的还是它。
+	return p < searchMaxPage && p*searchPageSize < total
 }
 
 // parseCid 把 B 站那个数字 cid 变成字符串；0 是「没有」。用字符串是因为

@@ -317,6 +317,67 @@ func TestHasMoreStopsAtTheLastPage(t *testing.T) {
 	}
 }
 
+// TestHasMoreStopsAtThePageCap 盯页码上限也算到底（评审的 major 那一条）。
+//
+// `pageOf` 把第 101 页夹成第 100 页，于是 B 站每次都回**同一份**末页数据。只按
+// 「总数」判的话这一页永远算「还有」——翻页列表就一直拉第 100 页，一条新的都拿不到，
+// 而每一次都是一次带 WBI 签名的往返（评审实测：传 100/101/102 三趟，录到的请求全是
+// page=100，三次 HasMore 都是 true）。
+func TestHasMoreStopsAtThePageCap(t *testing.T) {
+	const total = 10000 // B 站报的总数：100 页 × 100 条，远超一页 24 条
+	// 还没到上限的那些照旧说「还有」——第 99 页之后还有第 100 页，那一页是真的新数据。
+	if !searchHasMore(99, searchPageSize, total) {
+		t.Errorf("第 99 页就说到底了，第 100 页还拿得到新数据")
+	}
+	for _, page := range []int{100, 101, 102} {
+		if searchHasMore(page, searchPageSize, total) {
+			t.Errorf("第 %d 页说还有下一页（夹到上限之后拿回来的还是它）", page)
+		}
+	}
+}
+
+// TestPagesAboveTheCapAllAskForTheSameOne 钉住「夹页码」这一支本身：传 100/101/102
+// 三趟，录到的请求必须**都是** page=100。
+//
+// 这条不是重复上一条：上一条钉的是「别再说还有」，这一条钉的是「夹了要真的夹」。
+func TestPagesAboveTheCapAllAskForTheSameOne(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(pathNav, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			"wbi_img": map[string]string{
+				"img_url": "https://i0.hdslb.com/bfs/wbi/" + sampleImgKey + ".png",
+				"sub_url": "https://i0.hdslb.com/bfs/wbi/" + sampleSubKey + ".png",
+			},
+		}))
+	})
+	f.on(searchPath, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			"numResults": 10000, "numPages": 100,
+			"result": []any{videoItem("BV1", "末页"), videoItem("BV2", "末页第二首")},
+		}))
+	})
+	c := f.client(t, Options{Now: func() time.Time { return time.Unix(1702204169, 0) }})
+
+	for _, page := range []int{100, 101, 102} {
+		if _, err := c.SearchVideos(context.Background(), VideoQuery{Keyword: "x", Page: page}); err != nil {
+			t.Fatalf("第 %d 页：%v", page, err)
+		}
+	}
+	n := 0
+	for _, r := range f.requests() {
+		if r.Path != searchPath {
+			continue
+		}
+		n++
+		if got := r.Query.Get("page"); got != "100" {
+			t.Errorf("第 %d 趟请求发的 page=%q，want 100", n, got)
+		}
+	}
+	if n != 3 {
+		t.Errorf("录到 %d 趟搜索请求，want 3", n)
+	}
+}
+
 // TestAnEmptyPageAlwaysEndsIt 盯「一页空的还说还有」：B 站在风控边缘偶尔会回
 // `numResults: 9999` 而 `result` 是空数组，没有这条判据就一直拉下去。
 func TestAnEmptyPageAlwaysEndsIt(t *testing.T) {

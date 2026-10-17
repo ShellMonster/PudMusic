@@ -1,0 +1,394 @@
+package ui
+
+// 这一组是搜索页**接上真 B 站客户端**的那一半：真的走 `bili.Client`、真的发
+// WBI 签名的请求、真的把流拉下来解码。
+//
+// 上一组（searchpage_test.go）用的是假拉页器，它替掉的只有网络那一段——但代次闸门
+// 和 cid 补齐都长在**真的**拉页路里，用假的那一份测它们等于没测（把真实现里的
+// 闸门删掉，假拉页器照样给自己补一道，全绿）。这两条评审指出来的缺口就是从这儿漏
+// 过去的，所以这一组特意走真的。
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+)
+
+// gateWait 是卡住一个响应最多等多久（兜底，别让一条红了的用例把整包卡到超时）。
+const gateWait = 5 * time.Second
+
+// testSearchBvid 是这台假 B 站回的那一条结果的 bvid。
+const testSearchBvid = "BVsearchResultOnly"
+
+// wbiImgKey / wbiSubKey 是签名用的两个 key。值本身不重要（这一层只是把它们拼进
+// 哈希），重要的是 B 站的 nav **给了**它们——不给的话搜索请求过不了签名那一步。
+const (
+	wbiImgKey = "7cd084941338484aae1ad9425b84077c"
+	wbiSubKey = "4932caff0ff746eab6f01bf08b70ac45"
+)
+
+// biliFixture 是一台会答 B 站接口的假服务器：WBI 的 key、分类搜索、分 P 列表、
+// 取流、CDN 字节，全在这一台上。
+type biliFixture struct {
+	*httptest.Server
+
+	mu sync.Mutex
+	// gates 按搜索词把响应卡住，直到 release：造「旧查询的响应迟到」。
+	gates map[string]chan struct{}
+	// searchCids 记每次取流带的 cid——「补没补上分 P id」就看你真的带上没有。
+	searchCids []string
+	// searched 记被叫过的搜索请求的关键词（按顺序）。
+	searched []string
+	// served 数**已经回了**的搜索响应。放行一个卡住的响应之后靠它知道「旧的回去
+	// 了」——不等它的话，断言可能在那一趟还在网络上时就跑完了，看着全绿其实什么
+	// 都没验到。
+	served int
+	media  []byte
+}
+
+// newBiliFixture 建一台假 B 站。search 造几页，每页 n 条。
+func newBiliFixture(t *testing.T, n int) *biliFixture {
+	t.Helper()
+	f := &biliFixture{gates: map[string]chan struct{}{}}
+
+	f.media, _ = os.ReadFile(flacAssetPath(t))
+	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
+	// ⚠️ 收尾**必须**把所有卡住的响应都放掉：`httptest.Server.Close` 会等所有在途
+	// 请求返回，而一个永远等着的 handler 会让它一直等到测试的十分钟上限——于是「这条
+	// 用例红了」变成「整个包卡死十分钟」。
+	t.Cleanup(func() {
+		f.releaseAll()
+		f.Close()
+	})
+	return f
+}
+
+func (f *biliFixture) serve(w http.ResponseWriter, r *http.Request) {
+	switch {
+	case r.URL.Path == "/x/web-interface/nav":
+		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
+			"data": map[string]any{"wbi_img": map[string]string{
+				"img_url": "https://i0.hdslb.com/bfs/wbi/" + wbiImgKey + ".png",
+				"sub_url": "https://i0.hdslb.com/bfs/wbi/" + wbiSubKey + ".png",
+			}}})
+
+	case r.URL.Path == "/x/web-interface/wbi/search/type":
+		f.serveSearch(w, r)
+
+	case r.URL.Path == "/x/player/pagelist":
+		// 只给 bvid 的条目放歌时要靠这一趟补 cid。
+		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
+			"data": map[string]any{"pages": []any{
+				map[string]any{"cid": 777, "page": 1, "part": "第一集"},
+			}}})
+
+	case r.URL.Path == "/x/player/wbi/playurl":
+		f.servePlayURL(w, r)
+
+	case strings.HasPrefix(r.URL.Path, "/cdn/"):
+		f.serveMedia(w, r)
+
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (f *biliFixture) serveSearch(w http.ResponseWriter, r *http.Request) {
+	kw := r.URL.Query().Get("keyword")
+
+	f.mu.Lock()
+	f.searched = append(f.searched, kw)
+	// ⚠️ 这里**不删**门：删了就没人放行了（`release` 从这张表里取），那条响应会一直
+	// 挂到 `gateWait` 兜底才自己回去——而用例早就断言完了，看着全绿其实什么都没验到。
+	ch := f.gates[kw]
+	f.mu.Unlock()
+	if ch != nil {
+		select {
+		case <-ch: // 放行之前这一趟不落地
+		case <-time.After(gateWait):
+			// 兜底：用例提前失败、没人来放行时，这一条也回去，不把整个包卡死。
+		}
+	}
+	f.mu.Lock()
+	f.served++
+	f.mu.Unlock()
+
+	// 一页一条。bvid **不带 cid**：这正是搜索结果的形状。
+	writeBiliJSON(w, map[string]any{
+		"code": 0, "message": "0", "ttl": 1,
+		"data": map[string]any{
+			"numResults": 1, "numPages": 1,
+			"result": []any{map[string]any{
+				"type": "video", "bvid": testSearchBvid,
+				"title":    "只有 bvid 的<em class=\"keyword\">结果</em>",
+				"author":   "某UP",
+				"mid":      1,
+				"pic":      "//i0.hdslb.com/a.jpg",
+				"duration": "4:20",
+			}},
+		},
+	})
+}
+
+func (f *biliFixture) servePlayURL(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	f.searchCids = append(f.searchCids, r.URL.Query().Get("cid"))
+	f.mu.Unlock()
+
+	writeBiliJSON(w, map[string]any{
+		"code": 0, "message": "0", "ttl": 1,
+		"data": map[string]any{
+			"timelength": 1000,
+			"dash": map[string]any{
+				"duration": 1,
+				"audio": []any{map[string]any{
+					"id": 30280, "bandwidth": 110836, "codecs": "mp4a.40.2",
+					"mimeType": "audio/mp4", "baseUrl": f.mediaURL(),
+				}},
+			},
+		},
+	})
+}
+
+func (f *biliFixture) mediaURL() string {
+	return f.URL + "/cdn/a.flac?deadline=" +
+		strconv.FormatInt(time.Now().Add(2*time.Hour).Unix(), 10) + "&upsig=deadbeef"
+}
+
+func (f *biliFixture) serveMedia(w http.ResponseWriter, r *http.Request) {
+	data := f.media
+	start := 0
+	if h := r.Header.Get("Range"); strings.HasPrefix(h, "bytes=") {
+		start, _ = strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(h, "bytes="), "-"))
+	}
+	if start > len(data) {
+		http.Error(w, "越界", http.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+	w.Header().Set("Content-Length", fmt.Sprint(len(data)-start))
+	if start > 0 {
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, len(data)-1, len(data)))
+		w.WriteHeader(http.StatusPartialContent)
+	}
+	w.Write(data[start:])
+}
+
+func writeBiliJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// hold 把某个词的搜索响应卡住，release 才放行。
+func (f *biliFixture) hold(keyword string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.gates[keyword] = make(chan struct{})
+}
+
+func (f *biliFixture) release(keyword string) {
+	f.mu.Lock()
+	ch := f.gates[keyword]
+	delete(f.gates, keyword)
+	f.mu.Unlock()
+	if ch != nil {
+		close(ch)
+	}
+}
+
+// releaseAll 放掉所有还卡着的（收尾用）。
+func (f *biliFixture) releaseAll() {
+	f.mu.Lock()
+	chans := f.gates
+	f.gates = map[string]chan struct{}{}
+	f.mu.Unlock()
+	for _, ch := range chans {
+		close(ch)
+	}
+}
+
+// servedCount 是已经回了多少个搜索响应。
+func (f *biliFixture) servedCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.served
+}
+
+func (f *biliFixture) cids() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.searchCids...)
+}
+
+// client 建一个指着这台服务器的 B 站客户端。
+func (f *biliFixture) client() *bili.Client {
+	c := bili.NewClient(bili.Options{Transport: stickyTransport{}})
+	c.TestOnlyPointHostsAtFixture(f.URL)
+	return c
+}
+
+// stickyTransport 是「无视取消」的那一层网络。
+//
+// 换筛选条件时 `PagedList.Reload` 会 cancel 掉在途的那一趟请求——**真的 http
+// 往返会因此报错**，于是旧结果自然落不下来。要复现「响应已经回来了、用户这时候才
+// 换的筛选条件」这一种（cancel 拦不住的那一种，评审的探针就是这么造的），这一层
+// 把 ctx 上的取消摘掉再发。
+type stickyTransport struct{}
+
+func (stickyTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	// **无条件**摘掉取消，不是「已经取消时才摘」：请求是在 cancel 之前发出去的，
+	// 摘晚了等于没摘（base 会在 cancel 到达的那一刻把连接掐了，err 直接从 Do 出来，
+	// 旧结果自然就落不下来了——那样这条用例测不到任何东西）。
+	return http.DefaultTransport.RoundTrip(r.Clone(context.WithoutCancel(r.Context())))
+}
+
+// searchOnRealClient 把外壳的搜索接上真的客户端（走真的 fetchSearchTab 那条路）。
+func searchOnRealClient(s *Shell, c *bili.Client) { s.search.client = func() *bili.Client { return c } }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 搜出来的歌放得起来（评审的 critical）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestASearchResultActuallyStartsPlaying 盯「搜出来的歌真的放得起来」。
+//
+// 这是评审挑出来的那条 critical：B 站的搜索结果**只给 bvid**，而在线播放当年要求
+// cid，于是搜出来的歌一首都放不了，播放条上红字写「缺稿件 id 或分 P id」——用户按的
+// 就是搜索结果，说他缺一个他压根拿不到的东西。
+//
+// 这一条走的是**整条链**：真的搜索接口 → 真的映射成列表行 → 真的按「全部播放」→
+// 真的补 cid → 真的取流 → 真的解码出声。判据是 `HasTrack` 与取流请求里**真的带上**
+// 那个 cid——只验「放出来了」不够，B 站不给 cid 时按第一集给也能过，而那正是要消掉
+// 的「放错那一集」。
+func TestASearchResultActuallyStartsPlaying(t *testing.T) {
+	f := newBiliFixture(t, 1)
+	s, tt := newShell(t)
+	cli := f.client()
+	searchOnRealClient(s, cli)
+	s.app.MountStreaming(app.Streaming{Client: cli, Media: f.Client(), TempDir: t.TempDir()})
+
+	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("周杰伦"))
+	settleText(t, tt, "只有 bvid 的结果") // 剥掉 <em> 之后的标题，见 bili 的 stripHTML
+
+	if err := tt.Click("全部播放"); err != nil {
+		t.Fatalf("点不到「全部播放」：%v，文字有 %q", err, tt.Texts())
+	}
+
+	// 等它真的出声。
+	settleSearch(t, tt, "搜出来的那首开始出声", func() bool { return s.app.Snapshot().HasTrack })
+	if got := s.app.Snapshot().Err; got != "" {
+		t.Errorf("播放条上有错误：%s", got)
+	}
+	cids := f.cids()
+	if len(cids) == 0 {
+		t.Fatalf("取流接口一次都没被叫")
+	}
+	for i, c := range cids {
+		if c != "777" {
+			t.Errorf("第 %d 次取流带的 cid 是 %q，want 777（问来的那一集）", i+1, c)
+		}
+	}
+}
+
+// TestASearchResultPlaysWhenThereIsNoClientForPages 盯「补 cid 那一趟问不到也不是
+// 放不了」。
+//
+// 问分 P 本身就是一次网络往返：它被风控挡了、断了、改了——那时候报「不能放」，
+// 等于为一个拿不到手的 id 把用户的手堵死。B 站的取流接口不带 cid 时按第一集返回，
+// 那��路照样通。
+func TestASearchResultPlaysWhenThereIsNoClientForPages(t *testing.T) {
+	f := newBiliFixture(t, 1)
+	// 分 P 列表这一段直接顶掉：挡掉它（和真被风控一样）。
+	f.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/x/player/pagelist" {
+			http.Error(w, "风控", http.StatusForbidden)
+			return
+		}
+		f.serve(w, r)
+	})
+
+	s, tt := newShell(t)
+	cli := f.client()
+	searchOnRealClient(s, cli)
+	s.app.MountStreaming(app.Streaming{Client: cli, Media: f.Client(), TempDir: t.TempDir()})
+
+	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("周杰伦"))
+	settleText(t, tt, "只有 bvid 的结果")
+	if err := tt.Click("全部播放"); err != nil {
+		t.Fatalf("点不到「全部播放」：%v，文字有 %q", err, tt.Texts())
+	}
+	settleSearch(t, tt, "照样出声", func() bool { return s.app.Snapshot().HasTrack })
+
+	// 补不到的时候**不许编一个 cid 出来**：传下去的是别人的集。
+	for i, c := range f.cids() {
+		if c != "" {
+			t.Errorf("第 %d 次取流带上了 cid=%q，want 空（问不到就不该编）", i+1, c)
+		}
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 旧查询的响应迟到（评审的 major）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestStaleResponseDoesNotReachPlayAllOnTheRealPath 是「旧响应不进全部播放」那条的
+// **真实现**版本（走真的 fetchSearchTab）。
+//
+// 另有一条用假拉页器的同名用例在 searchpage_test.go：那条验的是界面上看得见的
+// 结果（队列里只有新词那几首），这一条验的是闸门本身在真的拉页路里——假拉页器会
+// 给自己照抄一道闸门，真实现里删掉了它，假的那条照样绿。
+//
+// 做法和评审的探针一样：先把旧查询的第一页卡住，换词让新查询先落地，再放行旧的那一趟。
+func TestStaleResponseDoesNotReachPlayAllOnTheRealPath(t *testing.T) {
+	f := newBiliFixture(t, 1)
+	f.hold("旧词")
+
+	s, tt := newShell(t)
+	searchOnRealClient(s, f.client())
+	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("旧词"))
+	settleText(t, tt, "正在加载") // 旧查询那一页被卡住了
+
+	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("新词"))
+	settleText(t, tt, "只有 bvid 的结果")
+
+	// 放行旧的：先等它真的回到应用，再往下判。
+	before := f.servedCount()
+	f.release("旧词")
+	settleSearch(t, tt, "迟到的旧响应回到应用", func() bool { return f.servedCount() > before })
+	for range 2 {
+		tt.Frame() // 从网络里回来的那一下落地（或被代次作废）
+	}
+
+	if got := len(s.search.lists[searchTabSong].snapshot()); got != 1 {
+		t.Fatalf("「全部播放」那份副本里有 %d 行，want 1（迟到的旧响应漏进来了）", got)
+	}
+	if err := tt.Click("全部播放"); err != nil {
+		t.Fatalf("点不到「全部播放」：%v，文字有 %q", err, tt.Texts())
+	}
+	tt.Frame()
+	tt.Frame()
+	if n := s.app.Queue().Len(); n != 1 {
+		t.Errorf("队列里有 %d 项，want 1（迟到的旧响应被加进队列了）", n)
+	}
+}
+
+// flacAssetPath 是那份 FLAC 素材。真解码出声要用真的字节。
+func flacAssetPath(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join("..", "service", "audio", "flacdec", "testdata", "stereo16.flac")
+	if _, err := os.Stat(p); err != nil {
+		t.Skipf("找不到 FLAC 测试素材：%v", err)
+	}
+	return p
+}

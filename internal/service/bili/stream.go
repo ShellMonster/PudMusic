@@ -135,21 +135,28 @@ type playurlData struct {
 
 // PlayURL 问 B 站要一条音频流。
 //
-// pref 是用户选的音质档（`AudioAuto` 是默认）。bvid / cid 指向收藏夹里的
-// 一个条目——**cid 必填**：B 站的多 P 投稿不给 cid 会取到第一集，
-// 表现为「点第三集放出来的是第一集」，且不报错。
+// pref 是用户选的音质档（`AudioAuto` 是默认）。bvid / cid 指向一个条目。
+//
+// ⚠️ **cid 可以是空的**：B 站的搜索结果只给 bvid，而调用方拿到的条目多半还没有分 P
+// id（见 search.go 的文件头）。空的时候**不发 cid 参数**，B 站按**第一集**返回。
+// 那和多 P 投稿「放错了那一集」是同一件事，所以调用方要尽量先把 cid 补上——
+// `app.runOnline` 就是先问一次 `VideoPages`（见 video.go）再调这里，补不上才退到
+// 这一条。
+//
+// bvid 是**必填**的：没有它就不知道去问哪个稿件，那是真的给错了参数。
 //
 // 返回的 `StreamRef` 里没有任何凭据，**不要**把它写进日志：地址带
 // `upsig` 签名，诊断文件里有它就等于把这条流公开了。
 func (c *Client) PlayURL(ctx context.Context, bvid, cid string, pref AudioQuality) (*StreamRef, error) {
-	if bvid == "" || cid == "" {
-		// 不是 ErrNoStream：调用方给错了参数，换一条流也救不回来。
-		return nil, fmt.Errorf("%w: 稿件或分 P 不完整（bvid=%q cid=%q）", ErrNoStream, bvid, cid)
+	if bvid == "" {
+		return nil, fmt.Errorf("%w: 没有稿件 id", ErrNoStream)
 	}
 
 	q := url.Values{}
 	q.Set("bvid", bvid)
-	q.Set("cid", cid)
+	if cid != "" {
+		q.Set("cid", cid)
+	}
 	q.Set("fnval", fmt.Sprint(dashAll))
 	q.Set("fnver", "0")
 	q.Set("fourk", "1")
