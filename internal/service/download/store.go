@@ -107,8 +107,16 @@ func (m *Manager) Restore(path string) error {
 	if err := json.Unmarshal(b, &f); err != nil {
 		return fmt.Errorf("download: 队列文件读不懂（%s）：%w", filepath.Base(path), err)
 	}
-	if f.Version != storeVersion {
+	if f.Version > storeVersion {
+		// 更高的版本我们读不懂，**整份不碰**。往一份我们没有能力重写的文件上
+		// 动手，比什么都不做糟得多。
 		return fmt.Errorf("download: 队列文件是第 %d 版的，这一版认第 %d 版", f.Version, storeVersion)
+	}
+	// 更低（或没有 version 键）的走迁移链，见 `migrate.go` 的 queueMigrations。
+	// ⚠️ 这一条不能省：一份 v0 文件曾在这里被当成「读不懂」，整个队列丢，
+	// 而用户重启看到的是空队列、盘上却躺着一堆 `.part`。
+	if err := runQueueMigrations(&f, f.Version); err != nil {
+		return fmt.Errorf("%w", err)
 	}
 
 	m.mu.Lock()

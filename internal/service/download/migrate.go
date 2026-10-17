@@ -19,9 +19,34 @@ import (
 
 // queueMigrations 把 v 升到 v+1。key 是**升级前**的版本号。
 //
-// v0 是「文件里没有 version 键」的那一份——包括用户手写的一份和我们读不出来的
-// 一份。真出现时要迁什么，到时候在这里写。
-var queueMigrations = map[int]func(*queueFile){}
+// v0 是「文件里没有 `version` 键」的那一份。**它必须有这条路**：没有的话
+// `Restore` 判它「版本对不上」就把整个队列丢（用户重启看到空队列，而盘上躺着一堆
+// `.part`），而 `MigrateFile` 直接报错，会让启动那一轮升级整轮回滚。
+//
+// 这一条迁移是空的：`Task` 的结构从 v1 起一个字段都没动过（`task.go` 的注释里
+// 记着「改记账方式要涨 `QueueVersion`」，也就是**那时**才往这张表里写真东西）。
+// 链是空的，但它得在——链断一环的后果是「认不出的文件被按旧语义重写一遍」。
+var queueMigrations = map[int]func(*queueFile){
+	0: func(*queueFile) {},
+}
+
+// runQueueMigrations 从 from 走到 storeVersion。链断了一环就返回错。
+//
+// 走完之后**把 f.Version 推到 storeVersion**：迁完的那一份是我们自己的形状，
+// 而「它是第几版」这件事记在文件里。忘了推的后果是下一次启动又把同一份文件
+// 当 v0 迁一遍——链是空的那一轮看不出问题，但只要有人往里加了真的迁移，
+// 那一次就会被跑两次。
+func runQueueMigrations(f *queueFile, from int) error {
+	for v := from; v < storeVersion; v++ {
+		m, ok := queueMigrations[v]
+		if !ok {
+			return fmt.Errorf("download: 没有从队列 v%d 升到 v%d 的路", v, v+1)
+		}
+		m(f)
+	}
+	f.Version = storeVersion
+	return nil
+}
 
 // MigrateFile 把 path 这份队列文件迁到当前版本，就地写回。
 //
@@ -51,12 +76,8 @@ func MigrateFile(path string) error {
 		return nil
 	}
 
-	for v := f.Version; v < storeVersion; v++ {
-		m, ok := queueMigrations[v]
-		if !ok {
-			return fmt.Errorf("download: 没有从队列 v%d 升到 v%d 的路，原文件没动", v, v+1)
-		}
-		m(&f)
+	if err := runQueueMigrations(&f, f.Version); err != nil {
+		return fmt.Errorf("%w，原文件没动", err)
 	}
 
 	b, err := json.MarshalIndent(f, "", "  ")

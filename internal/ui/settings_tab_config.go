@@ -210,7 +210,7 @@ func (s *Shell) reloadShortcuts() { s.mountShortcuts() }
 // 旧的 Manager 没被关掉——它自己那个循环在下载跑完之前不会停，而刚导进来的任务
 // 一条都没开始下，所以现在这样不会有两个 Manager 同时写同一份队列文件。
 func (s *Shell) reloadDownloads() {
-	dir, err := mygo.App.Path(mygo.PathUserData)
+	dir, err := userDataDir()
 	if err != nil {
 		return
 	}
@@ -225,7 +225,19 @@ func (s *Shell) reloadDownloads() {
 }
 
 // userDataDir 是本应用的用户数据目录。
-func userDataDir() (string, error) { return mygo.App.Path(mygo.PathUserData) }
+//
+// ⚠️ **必须走这个函数，不要在调用点直接调 `mygo.App.Path`**。无头 Tester 里
+// `mygo.App.Path` 会返回一个**真的、可写的**目录（`~/Library/Application
+// Support/<测试二进制名>/`），于是「从 Biu 导入」那个测试会把 Biu 的设置真的
+// 写进用户的目录里——下次跑同一批测试读到的是上一次留下的，而用户目录里多出
+// 一个他从来没见过的文件夹。测试替掉这一格（见 `settings_tab_config_test.go`
+// 里的 `withUserDataDir`）。
+//
+// `MountMigration` 也需要这个目录，而它走的是自己的 `mygo.App.Path`：它是
+// `main` 里的第一个调用，跑在框架 ready 之前，且没有界面对应的替身，所以**测
+// 不到**。这一层的逻辑（`runUpgrade` / `firstBiuImport`）都是拿目录当参数的纯
+// 函数，那两个才是被测的。
+var userDataDir = func() (string, error) { return mygo.App.Path(mygo.PathUserData) }
 
 // biuImportToast 把导入结果压成一句给用户看的话。
 //

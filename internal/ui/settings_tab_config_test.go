@@ -285,3 +285,68 @@ func readFile(t *testing.T, path string) string {
 
 // itoa 是 strconv.Itoa 的短写法，这一组测试用得上两三次。
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// 点「从 Biu 导入」：设置真的换成了 Biu 那一份，而且**旧的那份留了备份**。
+//
+// 这是「用户点一下就能导」的正面对照——前面 `TestAFreshInstall…` 测的是启动时
+// 自动走的那条路，那条路用户没有选择权。这一条是他在设置页上自己按下去的。
+func TestPressingTheBiuImportButtonActuallySwapsTheSettingsIn(t *testing.T) {
+	biu := biuHomeDir(t)
+
+	mine := app.DefaultSettings("/Users/y/Mine")
+	mine.ThemeMode = app.ThemeModeLight
+	tt, s, a, path := shellOnSettings(t, mine)
+	before := readFile(t, path)
+	// 导入写到的是「本应用的用户数据目录」，而那个目录在无头环境里是一个真的、
+	// 可写的目录。不指到临时目录上的话，这个测试会改用户的文件。
+	withUserDataDir(t, filepath.Dir(path))
+
+	withMigration(t, MigrationReport{BiuDirs: []string{biu}})
+
+	// 按钮因为找得到 Biu 才摆——这是设置页上的可观察行为。
+	tt.Frame()
+	if !hasExactText(tt, "从 Biu 导入") {
+		t.Fatalf("找得到 Biu 数据目录时没有摆「从 Biu 导入」，文字有 %q", tt.Texts())
+	}
+
+	clickSetting(t, tt, s, "从 Biu 导入")
+	waitForFrames(t, tt, func() bool {
+		return a.SettingsSnapshot().PrimaryColor == "#17c964"
+	})
+
+	got := a.SettingsSnapshot()
+	if got.DownloadPath != "/Users/x/Downloads" {
+		t.Errorf("下载目录还是我自己那份：%q", got.DownloadPath)
+	}
+	if !got.SideMenuCollapsed {
+		t.Errorf("侧栏折叠状态不是 Biu 那一份：%v", got.SideMenuCollapsed)
+	}
+	// 我原来那份留了备份。这是这一票里最坏的一种丢数据的入口——
+	// 「我导入了 Biu 的设置，我的设置没了」，而用户连那份文件在哪都说不出来。
+	bak := readFile(t, path+".bak")
+	if !strings.Contains(bak, "/Users/y/Mine") {
+		t.Fatalf("备份里不是我自己那份设置：%s", bak)
+	}
+	if !strings.Contains(before, "/Users/y/Mine") {
+		t.Fatalf("导入前的文件内容不对：%s", before)
+	}
+	// 而导入完成之后界面上要说清做了什么。
+	tt.Frame()
+	if !tt.HasText("已从 Biu 导入") && !tt.HasText("Biu") {
+		t.Errorf("导入完成之后没有告诉用户做了什么，文字有 %q", tt.Texts())
+	}
+}
+
+// withUserDataDir 把「本应用的用户数据目录」指到临时目录上。
+//
+// ⚠️ 这一格**必须替**。无头 Tester 里 `mygo.App.Path(mygo.PathUserData)` 返回的是
+// 一个真的、可写的目录（`~/Library/Application Support/<测试二进制名>/`），
+// 不替的话「从 Biu 导入」这个测试会把 Biu 的设置真的写进用户的目录里——用户在
+// 文件夹里看到一个他从来没见过的 `ui.test/`，而下一次跑同一批测试读到的是上一次
+// 留下的内容。这条约束是被跑出来之后才发现的。
+func withUserDataDir(t *testing.T, dir string) {
+	t.Helper()
+	before := userDataDir
+	userDataDir = func() (string, error) { return dir, nil }
+	t.Cleanup(func() { userDataDir = before })
+}

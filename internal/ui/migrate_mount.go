@@ -209,10 +209,18 @@ func firstBiuImport(dir string, dirs []string, upgradeErr error) app.Imported {
 	return app.Imported{}
 }
 
-// hasAnyOwnFile 报本应用的数据目录里是不是已经有我们自己的文件。
+// hasAnyOwnFile 报本应用的数据目录里是不是已经有**我们自己的数据**。
+//
+// ⚠️ **不算总控标记**（`data-version.json`）。`MountMigration` 是先升级、后判断要不要
+// 导入的，而第一次运行时那一轮升级会**写下标记**（哪怕四份文件一个都不存在）——
+// 把它算成「已有数据」的话，自动导入在第一次运行时永远被跳过，而那恰恰是它唯一
+// 该跑的场景。
+//
+// 判据是那四份真实数据：设置、快捷键、搜索历史、下载队列。用户动过任何一样，
+// 就说明他已经用了一阵子了。
 func hasAnyOwnFile(dir string) bool {
 	for _, n := range []string{
-		app.UpgradeFileName, app.SettingsFileName, shortcutFileName,
+		app.SettingsFileName, shortcutFileName,
 		searchHistoryFileName, download.QueueFileName,
 	} {
 		if _, err := os.Stat(filepath.Join(dir, n)); err == nil {
