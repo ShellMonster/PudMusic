@@ -78,25 +78,66 @@ type StreamRef struct {
 	Width  int
 	Height int
 
-	// ExpiresAt 是地址的失效时刻，从地址里的 `deadline` 读出来。
+	// ExpiresAt 是地址的失效时刻。
+	//
+	// 两条取流路径的来源不一样：投稿那路从地址上的 `deadline` 读
+	// （`deadlineOf`），音乐库那路用接口给的 `timeout` 秒数（`songExpiry`）。
 	ExpiresAt time.Time
 
 	// Bvid / Cid 是这条流属于哪个稿件的哪一集。换流之后拿它们比对，
 	// 对不上就是取错了歌（见 `SameTrack`）。
 	Bvid string
 	Cid  string
+
+	// Sid 是这条流属于音乐库里的哪一条（auid）。
+	//
+	// ⚠️ **音乐库那一路 Bvid / Cid 都是空的**，只有一个 sid。所以只按
+	// Bvid+Cid 判身份的话，音乐库的任何两条流都会被认成同一首——而换流的
+	// 那道防线（`SameTrack`）正是拿它拦「静默换成另一首歌」的。
+	Sid string
+
+	// MusicTier 是**音乐库那一路**的档位。投稿那一路是空的（它的档位在
+	// Quality 里）。
+	//
+	// 两套编号不合并，理由见 `quality.go` 的文件头。判断「换回来的还是不是
+	// 同一档」用 `SameTier`，它两边都认。
+	MusicTier MusicTier
 }
 
-// SameTrack 报告 ref 说的是不是同一首（同一稿件、同一集）。
+// SameTrack 报告 ref 说的是不是同一首。
 //
 // 换流之后必须比一次：取流接口在稿件被删、被替换成别的内容时会
 // 静默给一条**看着正常**的流，不比对的话用户会在毫无提示的情况下
 // 听到另一首歌。
+//
+// ⚠️ **两边都有 sid 就只比 sid**：音乐库那一路 Bvid / Cid 都是空的，只按
+// Bvid+Cid 比的话这一路的任何两条流都会被认成同一首，那道防线在音乐库上
+// 整个失效。
 func (ref *StreamRef) SameTrack(other *StreamRef) bool {
 	if ref == nil || other == nil {
 		return false
 	}
+	if ref.Sid != "" || other.Sid != "" {
+		return ref.Sid != "" && ref.Sid == other.Sid
+	}
 	return ref.Bvid == other.Bvid && ref.Cid == other.Cid
+}
+
+// SameTier 报告 ref 说的是不是同一档音质。
+//
+// 换音质时判的就是这个：用户点的档拿回来的还是同一档，就不该打断正在放的
+// 歌——为一个听不出区别的改动把歌从中间截断，比点了没反应更糟。
+//
+// 徽章文字比不了（那是给人看的，会改写），所以比的是**档位本身**。
+func (ref *StreamRef) SameTier(other *StreamRef) bool {
+	if ref == nil || other == nil {
+		return false
+	}
+	// 音乐库那一路只有 MusicTier；投稿那一路只有 Quality。哪一路有值就比哪一路。
+	if ref.MusicTier != 0 || other.MusicTier != 0 {
+		return ref.MusicTier == other.MusicTier
+	}
+	return ref.Quality == other.Quality
 }
 
 // Usable 报告这个引用现在还能不能拿去播。
@@ -143,6 +184,9 @@ type playurlData struct {
 // PlayURL 问 B 站要一条音频流。
 //
 // pref 是用户选的音质档（`AudioAuto` 是默认）。bvid / cid 指向一个条目。
+//
+// ⚠️ **这一条只管投稿（mv）**。音乐库条目（sid）走的是另一个接口、另一套档位
+// 编号，见 `audio.go` 的 `AudioStreamURL`。
 //
 // 🔴 **cid 必填**（上游 `player-playurl.ts:9` 的 `cid: number | string`，那行没有
 // `?`）。不给 cid，B 站多半按第一集给——多 P 投稿放出来的和用户点的不是一回事，

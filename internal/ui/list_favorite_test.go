@@ -36,12 +36,13 @@ func favoriteOnAListPage(t *testing.T, f *libFake, path string) (*Shell, *ui.Tes
 func TestFavoritingFromTheLaterListOpensTheDialog(t *testing.T) {
 	f := newLibFake(t).withLater(1, 1, "周杰伦的歌")
 	_, tt := favoriteOnAListPage(t, f, laterPath)
-	// ⚠️ 等的是**那一行画出来了**，不是「请求发出去了」。
-	// 「发出去」和「回来并画出来」之间隔着一次后台往返和一次排版，机器一忙就错开
-	// ——错开的那一次，下一句 `RightClick` 就找不到「周杰伦的歌」而报
-	// "no element shows …"，而这一页跟它测的那件事（接线换没换）毫无关系。
-	// 本来就是这么写的，等改掉。
-	settle(t, tt, "把第一页拉回来并画出来", func() bool { return tt.HasText("周杰伦的歌") })
+	// ⚠️ **等的是「行画出来了」，不是「请求发出去了」**。两者之间隔着响应 →
+	// 解码 → 投递状态 → 唤醒 → 画一帧，机器一忙就赶不上——而下一步
+	// `RightClick` 要的正是那一行。原来的判据是 `callsOf(...) == 1`（请求记上了），
+	// 它比这一步需要的东西早，于是整包并行跑时偶发地红（症状是
+	// `ui: no element shows "…"`）。见 `librarypage_test.go` 里 `settle` 顶上
+	// 那一段：判据一律是结果。
+	settle(t, tt, "第一页的条目画出来", func() bool { return tt.HasText("周杰伦的歌") })
 
 	if err := tt.RightClick("周杰伦的歌"); err != nil {
 		t.Fatal(err)
@@ -67,8 +68,13 @@ func TestFavoritingFromTheLaterListOpensTheDialog(t *testing.T) {
 func TestFavoritingFromTheHistoryListOpensTheDialog(t *testing.T) {
 	f := newLibFake(t).withHistory(1, 10, 100, "听过的一首")
 	_, tt := favoriteOnAListPage(t, f, historyPath)
-	// 同上：等那一行画出来，不等「请求发出去了」。
-	settle(t, tt, "把第一页拉回来并画出来", func() bool { return tt.HasText("听过的一首") })
+	// ⚠️ **等的是「行画出来了」，不是「请求发出去了」**。两者之间隔着响应 →
+	// 解码 → 投递状态 → 唤醒 → 画一帧，机器一忙就赶不上——而下一步
+	// `RightClick` 要的正是那一行。原来的判据是 `callsOf(...) == 1`（请求记上了），
+	// 它比这一步需要的东西早，于是整包并行跑时偶发地红（症状是
+	// `ui: no element shows "…"`）。见 `librarypage_test.go` 里 `settle` 顶上
+	// 那一段：判据一律是结果。
+	settle(t, tt, "第一页的条目画出来", func() bool { return tt.HasText("听过的一首") })
 
 	if err := tt.RightClick("听过的一首"); err != nil {
 		t.Fatal(err)
@@ -93,7 +99,8 @@ func TestFavoritingFromTheSearchListOpensTheDialog(t *testing.T) {
 	b := newCollectionBili(t)
 	s.app.MountCollections(app.CollectionRefs{Client: collectionClient(t, b), Settle: 0})
 
-	settleSearch(t, tt, "结果回来", func() bool { return pageOf(s, searchTabSong).Loaded > 0 })
+	// 同样等「行画出来了」而不是「这一页 Loaded 了」——理由见上面那一条。
+	settleSearch(t, tt, "结果的行画出来", func() bool { return tt.HasText("第 1 页 第 1 首") })
 
 	if err := tt.RightClick("第 1 页 第 1 首"); err != nil {
 		t.Fatal(err)
