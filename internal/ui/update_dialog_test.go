@@ -509,6 +509,15 @@ func TestAFailedInstallPutsTheReasonInTheDialogAndOffersARetry(t *testing.T) {
 	if !f.tt.HasText("重试下载") {
 		t.Errorf("没有「重试下载」，文字有 %q", f.tt.Texts())
 	}
+	// ⚠️ 设置页那一行**不能**说「上一次没查成」。这一次的失败是验签没过（下载安装
+	// 那一段），用户的检查是成功的——告诉他「没查成」，他会去怪网络或者怪版本还没
+	// 发出来，而真正该做的是重试下载。
+	if f.tt.HasText("上一次没查成") {
+		t.Errorf("装失败被说成了「没查成」，文字有 %q", f.tt.Texts())
+	}
+	if !f.tt.HasText("没能装上") {
+		t.Errorf("设置页那一行没说「没能装上」，文字有 %q", f.tt.Texts())
+	}
 	// 按下去真的重来一次（第二趟用的是同一版）。
 	if err := pressDialog(f.tt, "重试下载"); err != nil {
 		t.Fatal(err)
@@ -543,6 +552,14 @@ func TestAFailedCheckPutsTheReasonUnderTheButtonAndKeepsItPressable(t *testing.T
 
 	if !f.tt.HasText("no such host") {
 		t.Errorf("设置页上没把失败原因整句摆出来，文字有 %q", f.tt.Texts())
+	}
+	// 这一档**才是**「没查成」。和上面那条装失败正好互为反面：同一个 `UpdateFailed`
+	// 相位，两句话说错了任何一句都是在把用户往错的方向领（见 updateHint）。
+	if !f.tt.HasText("上一次没查成") {
+		t.Errorf("查失败没被说成「上一次没查成」，文字有 %q", f.tt.Texts())
+	}
+	if f.tt.HasText("没能装上") {
+		t.Errorf("查失败被说成了「没能装上」，文字有 %q", f.tt.Texts())
 	}
 	if f.s.update.wanted {
 		t.Error("查失败就自己把弹窗打开了")

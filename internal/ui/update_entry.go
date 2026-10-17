@@ -79,6 +79,19 @@ func (s *Shell) updateHint(st app.UpdateState) string {
 	case app.UpdateAvailable:
 		return "点右边看这次的更新日志，想不想下由你定"
 	case app.UpdateFailed:
+		// ⚠️ **分清「没查成」和「没装成」**。这一档是两件事共用一个相位（查和装
+		// 都会落到 `UpdateFailed`），而「上一次没查成：signature: ed25519
+		// verification failed」这句话在骗用户：验签没过的是**下载安装**那一段，
+		// 他的检查是成功的。让他以为自己网络不好或者版本没发出来，下一次他还是
+		// 会先怀疑那两样，而不是重试下载。
+		//
+		// 判据是 `Available()`——它认的是「`Latest` 非空且和正在跑的不是同一个
+		// 版本」。走到装那一段，`Latest` 必然非空（`StartUpdateDownload` 要求它
+		// 非空）；而查失败时 `check()` 只在 `rel == nil`（已是最新）那支清空
+		// `Latest`，那条路同时把相位设回 `Idle`。所以这一个判断就够。
+		if st.Available() {
+			return "没能装上：" + st.Err
+		}
 		return "上一次没查成：" + st.Err
 	}
 	if st.LastCheck.IsZero() {

@@ -529,6 +529,8 @@ func (u *updater) check(user bool) {
 
 	var notice string
 	var phase UpdatePhase
+	// prefs 是**出了 u.mu 之后**才写盘的那一份（见下面 ⚠️）。
+	var prefs *updatePrefsFile
 	u.mu.Lock()
 	switch {
 	case u.closed:
@@ -548,7 +550,7 @@ func (u *updater) check(user bool) {
 		// 「它到底查没查」都回答不了。
 		u.state.phase = UpdateIdle
 		u.state.latest, u.state.notes, u.state.released = "", "", time.Time{}
-		u.prefs.put(updatePrefsFile{LastCheck: now, KnownVersion: u.current})
+		prefs = &updatePrefsFile{LastCheck: now, KnownVersion: u.current}
 		if user {
 			notice = "当前版本为最新版本"
 		}
@@ -558,7 +560,7 @@ func (u *updater) check(user bool) {
 		u.state.fellBack = false
 		// 记下「上次查到的版本」：离线启动的那一次也能在设置页看到有新版本，
 		// 不用干等网络。
-		u.prefs.put(updatePrefsFile{LastCheck: now, KnownVersion: rel.Version})
+		prefs = &updatePrefsFile{LastCheck: now, KnownVersion: rel.Version}
 		if !user {
 			// 后台查到的：留一句话，让界面弹一条 Toast，然后用户自己决定要不要看。
 			// 硬弹窗是最招人烦的一种做法（见函数头）。
@@ -569,6 +571,16 @@ func (u *updater) check(user bool) {
 		u.notice = notice
 	}
 	u.mu.Unlock()
+
+	// ⚠️ **落盘写在锁外面**，这正是 `update_prefs.go` 里 `put` 的注释要求的：
+	// `writeFileAtomic` 是 CreateTemp + Write + Sync + Close + Chmod + Rename
+	// 六步真 IO，而 `UpdateSnapshot` 每帧要拿 `u.mu`。拿着锁写就是「一次几毫秒的
+	// 写卡住界面一帧」——检查最多一小时一次、用户主动那一次也在后台 goroutine
+	// 上（不占主线程），所以它不致命，但它正是那段注释说要避免的那件事，
+	// 自己写的规矩自己破掉就没有规矩了。
+	if prefs != nil {
+		u.prefs.put(*prefs)
+	}
 	u.wake()
 }
 

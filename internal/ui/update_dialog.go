@@ -53,6 +53,19 @@ const (
 	// 的话他会以为刚才那次其实没失败。
 	updateBtnRetry = "重试下载"
 	// updateBtnOK 是**查**失败了（还不知道有没有更新）时那个按钮。
+	//
+	// ⚠️ **这一支今天到不了，它是兜底**：`updateOpen` 只在相位
+	// Available/Downloading/Ready/Failed 时开弹窗，而后三档 `Latest` 必然非空
+	// （`StartUpdateDownload` 要求它非空；`check()` 只在「已是最新」那一支清空
+	// `Latest`，而那一支同时把相位设回 `Idle`）。所以走到 `UpdateFailed` 时
+	// `Available()` 恒真，返回的一直是「重试下载」。
+	//
+	// 留着它是**为了以后**：哪一天查失败也走 `UpdateFailed`（比如说把
+	// 「查失败」和「装失败」拆成两个相位，但只留一个弹窗状态），这一支就是那个
+	// 出口，没有它用户会卡在一个关不掉的弹窗里。
+	//
+	// ⚠️ **它没有测试覆盖，也不要当成覆盖到了**：任何一条测试里点不到它，所以
+	// 把它写进台账或者报告里的「验收项 → 测试」那张表都是撒谎。
 	updateBtnOK = "知道了"
 	// updateBtnInstall 是下完之后那一个，也是这张票的验收词之一。
 	updateBtnInstall = "退出并安装更新"
