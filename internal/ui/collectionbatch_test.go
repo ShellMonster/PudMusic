@@ -475,8 +475,14 @@ func TestTheStarToggles(t *testing.T) {
 	// ⚠️ **这里用的是真正的 500 毫秒**（界面上没有把 Settle 调小）。故意的：
 	// 别的用例等的是「画出来变成什么样」，这一条顺带把「等够 500ms 才刷新」
 	// 在界面上也走通一遍——app 层钉的是顺序和那个常数本身。
+	//
+	// ⚠️ **判据里带着那句话**，不能只等 `Faved`：app 那边是**先** `cache.put(info)`
+	// （Faved 变 true）**再** `notice.add(...)`（那句话进界面），两句之间有一个
+	// 窗口；而 `waitFrameFor` 是「画一帧 → 再问判据」，所以判据一旦为真就立刻返回，
+	// 读到的却是**上一帧**——那一句还没画上去。满载时那个窗口足够宽到偶发红
+	// （症状是「收藏成功了，可画面上只有『正在收藏…』」）。
 	waitFrameFor(t, tt, "收藏状态刷新回界面", func() bool {
-		return s.app.Collection(s.collection.ref).Faved
+		return s.app.Collection(s.collection.ref).Faved && tt.HasText("已收藏这个收藏夹")
 	})
 	wantText(t, tt, "已收藏这个收藏夹")
 }

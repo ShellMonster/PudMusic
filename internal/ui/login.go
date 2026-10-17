@@ -41,8 +41,12 @@ const loginPath = "/login"
 
 // goLogin 切到登录页。
 //
-// 不用 `navigate`：`navigate` 是给「还没做的页面」用的，每切一次都会弹
-// 「这一页还没做」。登录页是真的做了，弹那句话会让用户以为点错了。
+// 不用 `navigate`：那三句是**原样抄**的（清 Toast / 清 crash / Push），
+// `navigate` 自己**一条 Toast 都不弹**了（见 `router.go` 的 `navigate`）。
+//
+// ⚠️ 这一段注释曾经写着「`navigate` 是给『还没做的页面』用的，每切一次都会弹
+// 『这一页还没做』」——`navigate` 早就不弹那句了（原型那版才弹）。真照着那句去读
+// 代码的人会以为换掉 `navigate` 会少一个提示，而实际上少不掉任何东西。
 func (s *Shell) goLogin() {
 	s.clearToasts()
 	s.crash = nil
