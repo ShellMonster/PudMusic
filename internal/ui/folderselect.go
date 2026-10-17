@@ -58,6 +58,12 @@ type folderSelect struct {
 
 // newFolderSelect 建一份，打开，并且**后台拉全量**。
 func (s *Shell) openFolderSelect(item app.Item) {
+	// ⚠️ **没挂上就别开弹窗**：理由同 `openFolderEdit`（提交那一下会什么
+	// 都不发生，而用户看到的是「点了没反应」）。
+	if !s.app.CollectionsMounted() {
+		s.addToast("收藏夹还没接上：这一页要 B 站接口")
+		return
+	}
 	rid, typ, ok := favTarget(item)
 	if !ok {
 		s.addToast("这一首还没有可以收藏的身份")

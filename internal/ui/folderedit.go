@@ -156,6 +156,12 @@ func submitLabel(busy bool) string {
 // id 为 0 是新建，不为 0 是修改（**修改要在后台拉一份原来的样子**：名称、简介、
 // 公开私密、封面一个都不能靠侧栏那一行标题推出来——侧栏只有标题）。
 func (s *Shell) openFolderEdit(id int64) {
+	// ⚠️ **没挂上就别开弹窗**：弹窗开着而提交那一下什么都不会发生（后台那一层
+	// 直接就走了），用户看到的是「点了提交，界面一点反应都没有」。
+	if !s.app.CollectionsMounted() {
+		s.addToast("收藏夹还没接上：这一页要 B 站接口")
+		return
+	}
 	e := newFolderEdit()
 	e.editID = id
 	e.open = true
