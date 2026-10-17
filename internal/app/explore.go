@@ -30,6 +30,7 @@ package app
 import (
 	"context"
 	"errors"
+	"log"
 	"strconv"
 	"sync"
 
@@ -579,4 +580,30 @@ func (a *App) FollowedAuthors(ctx context.Context, vmid int64, page int) (bili.F
 		return bili.FollowPage{}, errExploreMissing
 	}
 	return cli.Followings(ctx, vmid, page)
+}
+
+// LikeDynamic 给一条动态点赞 / 取消点赞。**立刻返回**，结果走 done。
+//
+// 🔴 **没有登录态就立刻说，不发请求**：B 站对写接口回 -101，而界面上那一下
+// 是乐观的（先点亮再发），所以等它失败再告诉用户「没登录」的话，赞已经先亮
+// 过一下又灭回去了——两次跳变。
+func (a *App) LikeDynamic(dynID string, like bool, done func(error)) {
+	if a.explore() == nil {
+		sayThumbDone(done, errExploreMissing)
+		return
+	}
+	go func() {
+		err := a.explore().LikeDynamic(context.Background(), dynID, like)
+		if err != nil {
+			log.Printf("biu: 给动态 %s 点赞失败：%v", dynID, err)
+		}
+		sayThumbDone(done, err)
+	}()
+}
+
+// sayThumbDone 是那个结果回调。done 是 nil 的调用方什么都不用做。
+func sayThumbDone(done func(error), err error) {
+	if done != nil {
+		done(err)
+	}
 }

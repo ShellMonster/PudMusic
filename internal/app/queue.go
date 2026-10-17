@@ -73,10 +73,11 @@ func LocalItem(path string) Item {
 // 键里带来源前缀不是多余的：Bvid / Sid / 路径三样都是用户数据，不加前缀的话
 // 一个叫 `1293494` 的 sid 和一个叫 `1293494` 的本地文件名会认成同一首。
 func (it Item) Identity() string {
-	// ⚠️ Source 和 Type 都判：`LocalItem` 两个都填，而手写的 Item 常常只填
-	// Type。少判一个的话，本地项会掉到下面那两支里去拿一个空标识。
+	// ⚠️ Source 和 Type 都判（见 IsLocal）：`LocalItem` 两个都填，而手写的
+	// Item 常常只填 Type。少判一个的话，本地项会掉到下面那两支里去拿一个空
+	// 标识。
 	switch {
-	case it.Source == "local" || it.Type == "local":
+	case it.IsLocal():
 		if it.Path == "" {
 			return ""
 		}
@@ -94,6 +95,17 @@ func (it Item) Identity() string {
 	}
 	return ""
 }
+
+// IsLocal 报这一项是不是本地文件。
+//
+// 🔴 **Source 和 Type 都判**：两个字段**都有**填成在线、也都有只填 Type 的手写
+// 项（`ui` 里从 B 站接口翻成 Item 的那几处都填全了，而将来谁手写一个只填
+// `Type: "mv"` 的项就会踩到）。只判一个的话漏掉的那种会被当成本地文件，而症状
+// 是「在线的歌在访达里显示」——用户看到的是「这一首没有来处」。
+//
+// 界面层和下载这一层都问它，**别再各写一份**——两处各写一份的代价是改了
+// 这里忘了那里，而本地项认错了的表现是「在访达里显示一个在线的歌」。
+func (it Item) IsLocal() bool { return it.Source == "local" || it.Type == "local" }
 
 // Queue 是播放队列。零值不可用，请用 NewQueue。
 //
@@ -117,6 +129,35 @@ func (q *Queue) Append(items ...Item) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.items = append(q.items, items...)
+}
+
+// InsertNext 把一项插到**正在放的那首后面**——「下一首播放」那一下。
+//
+// 和 Append 的分界就是插在哪：Append 接在**队尾**（用户下次翻到队尾才听得到），
+// 这一条插在**当前的下一位**（这一首放完就是它）。
+//
+// ⚠️ **cur 不动**：插在 cur 的**后面**，所以当前项的下标不变——而改它的话用户正
+// 在听的那首会被顶到别处（表现是「按了下一首播放，正在放的歌跳了一首」）。
+//
+// ⚠️ **cur == -1（还没开始放）时插到最前面**：那时候队列里的东西都还没轮到，
+// 新来的这一首理应是下一个。插在队尾的话用户会以为它排在最后。
+//
+// 队列是空的那一支把 cur 落在 0：没有正在放的那首，「下一首」就是它自己。
+// 起播是 `App.EnqueueNext` 的事（它照 `App.Enqueue` 那样判「队列原本空不空」）。
+func (q *Queue) InsertNext(item Item) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if len(q.items) == 0 {
+		q.items = []Item{item}
+		q.cur = 0
+		return
+	}
+	at := 0
+	if q.cur >= 0 {
+		at = min(q.cur+1, len(q.items))
+	}
+	q.items = slices.Insert(q.items, at, item)
 }
 
 // Len 返回队列里有多少项。
@@ -326,6 +367,25 @@ func (a *App) Enqueue(items ...Item) error {
 		return nil
 	}
 	return a.play(item)
+}
+
+// EnqueueNext 把一项排在**正在放的那首后面**（「下一首播放」）。
+//
+// 和 `Enqueue` 的分界只在插的位置：那个接在队尾，这一个接在当前的下一位。
+//
+// 队列原本是空的时候直接起播——和 `Enqueue` 同一句理由：用户点了「下一首播放」，
+// 队列里什么都没有，他总得听见声音。
+func (a *App) EnqueueNext(item Item) error {
+	wasEmpty := a.queue.Len() == 0
+	a.queue.InsertNext(item)
+	if !wasEmpty {
+		return nil
+	}
+	it, ok := a.queue.Current()
+	if !ok {
+		return nil
+	}
+	return a.play(it)
 }
 
 // PlayFrom 把队列换成给定的几项，并从第一首开始播。

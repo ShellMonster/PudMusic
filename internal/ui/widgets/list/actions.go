@@ -44,6 +44,16 @@ type Actions struct {
 	// 入口——那一份在 `internal/ui/folderselect.go`。
 	FavSelect func(item app.Item)
 
+	// Download 把这一首排进下载队列。
+	//
+	// ⚠️ **缺 cid 的条目按不动，这是真的「下不了」而不是「还没接」**：下载按
+	// 分 P 存文件，而 B 站的搜索结果只给 bvid。缺 cid 的条目按下去会得到一句
+	// 「还没取到分 P id」——那句话说清了原因，不是假装成功。
+	//
+	// 需要 cid 的界面（收藏夹的行、动态卡片）传的是 `App.DownloadItem`：
+	// 它在后台去问一次分 P，见 `AppActions` 下面那一段。
+	Download func(item app.Item)
+
 	// Notify 说一句话。刚接的操作（比如还没接 B 站接口的收藏）按不动就是靠它。
 	Notify func(text string)
 }
@@ -51,6 +61,14 @@ type Actions struct {
 // AppActions 把 Actions 接在应用状态上，界面上真正用的那一份。
 //
 // notify 是说一句话的地方：界面层传它自己的 Toast（Biu 是右下角那张小卡片）。
+//
+// 🔴 **这里的 Download 是「同步、不补 cid」的那一条**（`App.Download`）：界面
+// 线程上一次网络往返都不许有，而补 cid 就是一次往返。所以这一份只对**手里已经
+// 有 cid 的条目**有用——首页推荐、稍后再看、历史记录、UP 空间的投稿都是。
+//
+// 拿不到 cid 的两处（收藏夹的行、动态卡片）各自在那一页把这一项换掉成
+// `App.DownloadItem`（后台补 cid，见 `ui` 里的两处），**别在这里改成后台的**：
+// 搜索结果的条目也只有 bvid，而它**要**如实拒绝——见 `Actions.Download`。
 func AppActions(a *app.App, notify func(string)) Actions {
 	return Actions{
 		Play: func(items []app.Item) {
@@ -65,6 +83,28 @@ func AppActions(a *app.App, notify func(string)) Actions {
 		},
 		Open:      func(item app.Item) { open(item, notify) },
 		FavSelect: nil,
+		Download: func(item app.Item) {
+			if item.IsLocal() {
+				// 本地文件已经在磁盘上了，没有东西可下载。**先说这一句**，
+				// 别让用户读到「这一首还不能放：缺稿件 id」——那是放的说法，
+				// 会让他以为这首本地歌坏了。
+				if notify != nil {
+					notify("这一首已经在你磁盘上了，没有东西可下载")
+				}
+				return
+			}
+			if _, err := a.Download(item); err != nil {
+				if notify != nil {
+					notify("下载不了：" + err.Error())
+				}
+				return
+			}
+			// 成了一样要说一句：按下去之后界面上没有任何变化的话，用户会以为
+			// 这一项是死的（下载记录页确实多了一行，但他在别的页面上）。
+			if notify != nil {
+				notify("已加进下载队列")
+			}
+		},
 		Notify: func(text string) {
 			if notify != nil {
 				notify(text)
