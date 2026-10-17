@@ -124,18 +124,26 @@ func near(got, want, tol float64) bool {
 // 那种时候报「倍率没套上」是把机器的事说成代码的事，下一个人会照着去改
 // `App.tick`，改完还是红的。
 //
-// 0.6 是两头量的：1 倍速的定义就是 1.0，掉到 0.6 以下时比值里的机器噪声已经和要
-// 量的东西一样大。真要是**1 倍速本身**走慢了，那该由另一条单独断（它是进度条
-// 时钟的问题，不是倍率的问题）——混在这一族里只会让它既报不出倍率的问题、
-// 又盖住时钟的问题。
-const realtimeFloor = 0.6
+// 0.85 是两头量的：1 倍速的定义就是 1.0，而这一族要的恰恰是「走得比实时快多少倍」——
+// 机器得先能跟上实时，那个比值才有意义。实测踩过的坑：`TestRateSurvivesTrackChanges`
+// 在原速基准 0.6 那一档上放过了一次，2 倍速窗口才量到 1.16，报「切歌之前就走得不够快」
+// ——而它给的下限（0.6）离「能跟上实时」差着一大截。掉到 0.85 以下时，机器噪声
+// 已经和要量的东西一样大了。
+//
+// 真要是**1 倍速本身**走慢了，那该由另一条单独断（它是进度条时钟的问题，不是倍率的
+// 问题）——混在这一族里只会让它既报不出倍率的问题、又盖住时钟的问题。
+const realtimeFloor = 0.85
 
 // requireRealtime 量一段原速窗口，顺带确认这台机器放得动实时音频。
 //
 // 放不动就**跳过**——跳过说的是「这个环境测不了这条」，不是「这条过了」。
 // 跳过的信息里带着实测值，等负载降下来重跑就行。
 //
-// 返回的是基准值本身，调用方拿它当比值的分母。
+// 返回的是基准值本身。调用方拿它当**分母**，于是判据写成「比原速快 1.3 倍」
+// 而不是「一秒走 1.3 秒歌内」——后者只在原速基准恰好是 1.0 时成立，而一台
+// **能跟上实时**的机器上它就有百分之十几的偏差（实测基准 0.85 时，绝对判据
+// `before < 1.3` 会把一个真的 2 倍速误判成没套上）。按比例算，两边同源，
+// 测的是「比原速快多少」这件事本身。
 func requireRealtime(t *testing.T, a *app.App, from, to time.Duration) float64 {
 	t.Helper()
 	v := secPerSong(t, a, from, to)
@@ -232,7 +240,7 @@ func TestRateIsRememberedBeforeAnyTrackIsOpen(t *testing.T) {
 	if err := a.Open(longWav(t, "量基准的一首.wav")); err != nil {
 		t.Fatal(err)
 	}
-	requireRealtime(t, a, 2*time.Second, 3*time.Second)
+	one := requireRealtime(t, a, 2*time.Second, 3*time.Second)
 
 	a.SetRate(2)
 	if err := a.Open(longWav(t, "先按后放.wav")); err != nil {
@@ -241,8 +249,8 @@ func TestRateIsRememberedBeforeAnyTrackIsOpen(t *testing.T) {
 	if got := a.Snapshot().Rate; got != 2 {
 		t.Fatalf("开歌之后倍率变成了 %v，want 2", got)
 	}
-	if got := secPerSong(t, a, 3*time.Second, 4*time.Second); got < 1.3 {
-		t.Errorf("先按的 2 倍速没套到新歌上：原速该是 1，实测 %.2f", got)
+	if got := secPerSong(t, a, 3*time.Second, 4*time.Second); got < one*1.3 {
+		t.Errorf("先按的 2 倍速没套到新歌上：原速基准 %.2f，2 倍速该有它的 1.3 倍以上，实测 %.2f", one, got)
 	}
 }
 
@@ -269,7 +277,7 @@ func TestRateSurvivesTrackChanges(t *testing.T) {
 
 	// 先在原速上量一段，确认这台机器放得动实时音频（见 requireRealtime），再量
 	// 倍速。窗口往后挪是因为原速那一段已经占掉了歌的前四秒。
-	requireRealtime(t, a, 2*time.Second, 3*time.Second)
+	unity := requireRealtime(t, a, 2*time.Second, 3*time.Second)
 
 	a.SetRate(2)
 	before := secPerSong(t, a, 7*time.Second, 8*time.Second)
@@ -284,8 +292,8 @@ func TestRateSurvivesTrackChanges(t *testing.T) {
 	}
 	after := secPerSong(t, a, 2*time.Second, 3*time.Second)
 
-	if before < 1.3 {
-		t.Errorf("切歌之前就走得不够快：%.2f（原速是 1）", before)
+	if before < unity*1.3 {
+		t.Errorf("切歌之前就走得不够快：原速基准 %.2f，2 倍速该有它的 1.3 倍以上，实测 %.2f", unity, before)
 	}
 	if !near(after, before, 1.8) {
 		t.Errorf("切歌之后从 %.2f 掉到 %.2f——新播放器没套上倍率", before, after)
@@ -316,7 +324,7 @@ func TestOnlineTrackKeepsTheRate(t *testing.T) {
 		t.Fatal(err)
 	}
 	playing(t, a, "在线的一首")
-	requireRealtime(t, a, 2*time.Second, 3*time.Second)
+	one := requireRealtime(t, a, 2*time.Second, 3*time.Second)
 
 	// 真正要验的那一遍：先按倍率再开这一首。
 	a.SetRate(2)
@@ -328,8 +336,8 @@ func TestOnlineTrackKeepsTheRate(t *testing.T) {
 	if got := a.Snapshot().Rate; got != 2 {
 		t.Fatalf("在线歌的倍率是 %v，want 2", got)
 	}
-	if got := secPerSong(t, a, 3*time.Second, 4*time.Second); got < 1.3 {
-		t.Errorf("在线歌没套上 2 倍速：原速该是 1，实测 %.2f", got)
+	if got := secPerSong(t, a, 3*time.Second, 4*time.Second); got < one*1.3 {
+		t.Errorf("在线歌没套上 2 倍速：原速基准 %.2f，2 倍速该有它的 1.3 倍以上，实测 %.2f", one, got)
 	}
 }
 
