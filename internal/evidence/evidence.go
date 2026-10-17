@@ -99,7 +99,12 @@ var Items = []Item{
 	{
 		Category: Play,
 		Spec:     "错误不许粘住：坏文件之后放好文件，那句话要清掉",
-		Tests:    []string{"TestTheErrorDoesNotStickToTheNextSong"},
+		Tests: []string{
+			"TestTheErrorDoesNotStickToTheNextSong",
+			// 同一句话的另一半：换音质失败留下的红字，在随后一次「拿回同一档、
+			// 不该打断」的换档里同样会变成一句错的、且不会自己清掉的话。
+			"TestAFailedQualitySwitchDoesNotLeaveItsWordsBehind",
+		},
 	},
 	{
 		Category: Play,
@@ -157,6 +162,10 @@ var Items = []Item{
 			"TestDragAACToEnd",
 		},
 	},
+
+	// ⚠️ 「界面上标成可放的条目真的放得出来」那一格在下面「画出来的每一行都放得了」
+	// 那一条里（`Play` 组，靠后）——它连着那张表一起钉，而那才是它该在的地方。
+	// 别在这里再抄一份：台账里有两条说同一句话的，读的人得自己猜哪条才是活的。
 
 	// ── 假时钟 ─────────────────────────────────────────────────────────────
 	{
@@ -217,6 +226,23 @@ var Items = []Item{
 		Category: HTTP,
 		Spec:     "取流超时会回来，不是挂着",
 		Tests:    []string{"TestSlowServerIsCutOffByTheTimeout", "TestALateStarterDoesNotWaitForTheTimeout"},
+	},
+	{
+		Category: HTTP,
+		// 音乐库（type=12 / sid）是**另一套接口、另一套档位编号**，连错误说明
+		// 那个字段都叫 `msg` 而不是 `message`。这一条钉的就是「形状别抄错」。
+		//
+		// ⚠️ 「试听片段」那一半是这里最要紧的：B 站对没权限的那一档不报错，
+		// 回的是一段能下能播、只有开头几十秒的流。放它过去的话用户听到的是
+		// 「歌放到一半静默停住」，界面上一个错都没有。
+		Spec: "音乐库那一路的形状：元信息 / 取流 / 收藏态，试听片段不算流",
+		Tests: []string{
+			"TestSongInfoReadsTheFieldsThePlaybarNeeds",
+			"TestMusicStreamURLTakesTheDefaultTier",
+			"TestCollResourceCheckReadsTheNumber",
+			"TestAMusicPreviewIsNeverHandedBackAsAStream",
+			"TestAPaidSongFallsBackToAFreeTier",
+		},
 	},
 
 	// ── PCM ────────────────────────────────────────────────────────────────
@@ -530,6 +556,70 @@ var Items = []Item{
 		},
 	},
 	{
+		Category: Platform,
+		// 「录进去了，什么也不发生」（BMG-47 §4 A6）——设置页里能录、能存、
+		// 冲突看得出来，而按下去什么也不发生。这比没有更坏：用户以为设上了。
+		//
+		// 钉的是「真的按下去会走那一条命令」和「焦点在输入框里时不抢按键」两半。
+		// 后一半是 SPEC 114 点名的，量法是「焦点在搜索框里按那个键，字进了搜索框、
+		// 那条命令没有触发」——只验前半句的话，一个把所有快捷键都关掉的实现照样通过。
+		//
+		// 另有几条钉的是接线本身：存下来的 accelerator 串认得回来（认不回来的症状
+		// 是设置页一切正常、按下去没反应），以及**正在录的那一格**优先于窗口登记的
+		// 组合键（引擎会先问「有没有人认领这个键」，而录制格靠 HandleInput 吃键）。
+		//
+		// ⚠️ 「让开」必须收得干净，这一条自己有个反面的坑：让开的状态一旦卡住
+		// （录完不清、走开也不清），**六条命令当场全哑而界面上一个字都不提**——
+		// 和 BMG-47 A6 一模一样的症状换了个原因。所以后面两条专门钉它。
+		Spec: "快捷键按下去真的会触发那条命令；焦点在输入框里打字时快捷键让路（SPEC 110、112、114。BMG-47 A6 说的「录进去了什么也不发生」）",
+		Tests: []string{
+			"TestAPressedShortcutRunsItsCommand",
+			"TestAShortcutWithNoModifierRunsWhenNothingElseHasTheFocus",
+			"TestTheSearchBoxGetsTheKeyBeforeAnyShortcut",
+			"TestTheRecorderCellStillGetsAKeyThatIsARegisteredShortcut",
+			"TestTheShortcutsComeBackTheMomentARecordingFinishes",
+			"TestWalkingAwayMidRecordingDoesNotSilenceTheShortcutsForever",
+			"TestEveryRecordedKeyComesBackAsItself",
+			"TestTheShortcutsHandEditedIntoTheFileStillWork",
+			"TestTheSixCommandsCallTheirOwnThing",
+			"TestAShortcutRunsTheSameCommandWhicheverWayItArrives",
+			"TestTheShortcutPageSaysWhatTheTwoColumnsAreFor",
+		},
+	},
+	{
+		Category: Platform,
+		// 全局快捷键（SPEC 111）。量的是**两段**：按设置把那一列登记到系统上
+		// （用存下来的那一串，一个字不翻译）、以及系统的回调真的走到那条命令。
+		//
+		// ⚠️ **没有**量到的是最后一跳：系统（macOS 的 Carbon 热键）到底会不会把
+		// 一个在别的应用里按下的组合键送到本进程。那一下在框架里（`mygo` 的
+		// `internal/darwin/hotkey.go`），我们既没重写也不该重写——重写一遍的结果
+		// 是两条热键链，而只有一条被测过。要验它得切到别的应用按一次，那一半留在
+		// 人工清单里。
+		//
+		// 「注册不上要降级」也是这一条的一半：别的应用先占了那个键、Wayland 上没有
+		// 桌面 portal、Linux 上没有 X11 会话——这些都得只让那一条失效，而不是让整个
+		// 快捷键功能一起瘫掉。
+		//
+		// 「录制期间要从系统上撤下来」是第三半：Carbon 热键到不了焦点上的元素，
+		// 不撤的话那六个默认全局键**在任何一格都录不进去**（真机上量过）。
+		Spec: "全局快捷键：按设置登记到系统上、按下来走那一条命令、录制期间从系统上撤下来；**系统真的把别的应用里按下的键送过来**这一跳没有量（在框架里，真机人工清单那一半）。注册不上只让那一条失效，不拖累其余，更不拖累应用内那一列（SPEC 111）",
+		Tests: []string{
+			"TestTheGlobalColumnIsRegisteredOnStartup",
+			"TestTurningGlobalShortcutsOffUnregistersThem",
+			"TestRecordingAGlobalShortcutRegistersTheNewKey",
+			"TestResettingTheShortcutsRegistersThemAgain",
+			"TestAGlobalShortcutThatIsAlsoAnInAppOneIsNotRegistered",
+			"TestTwoSpellingsOfTheSameKeyAreNotBothRegistered",
+			"TestTheGlobalShortcutsStepAsideWhileRecording",
+			"TestOneGlobalShortcutThatCannotRegisterDoesNotTakeTheRestDown",
+			"TestEveryGlobalShortcutThatFailsStillLetsTheOthersRun",
+			"TestQuittingUnregistersTheGlobalShortcuts",
+			"TestSyncingTwiceLeavesNoDuplicate",
+		},
+		RealOnly: true,
+	},
+	{
 		Category: Paging,
 		// 「页面壳子做完了、数据源没排票，于是交付时一片绿、用户打开是空的」
 		// （BMG-47 §4 查出的模式，七个页面命中）。首页那张票（#13）就是：票面
@@ -545,13 +635,21 @@ var Items = []Item{
 		// 而且三档各走一遍——因为 A1 的原教训正是「画得出来」那一半被验了、
 		// 「取数」那一半没人管。这一页钉取数的两条在下面。
 		//
-		// 今天这一条**不是全过**：侧栏第二项「我的关注」**连壳子都没有**（现有的
-		// followings / stat / modify 三个 relation 接口是动态流和 UP 空间在用），
-		// 而且**它连工单都还没有**（BMG-47 §3 A2）。它在
-		// 表上是一条**欠条**：必须点名到编号、写清差什么，并且**当场证明它现在
-		// 真的是空的**——不然欠条会变成万能借口：数据早就接上了它还赖着，谁也
-		// 看不出来。排到票之后把欠条换成真数据即可。
-		Spec: "每一页至少要有一条真数据（假 B 站喂了内容之后，画面上出现的是内容而不是那一页的空状态；还欠着的页面必须点名到编号、写清差什么，并且当场证明它现在真的是空的——「我的关注」是今天唯一欠着的一条，它连工单都还没有）",
+		// ✅ 这一条**现在是全过的**：BMG-47 §3 A2 点名的最后一条欠条（「侧栏第二项
+		//『我的关注』连壳子都没有，而且连工单都还没有」）已经由 BMG-49 还清——
+		// `internal/ui/follow.go`（分组 Tab + 虚拟网格 + 页内搜索）加上它自己
+		// 的四个接口（`internal/service/bili/follow.go`）。它走的是**真接口的
+		// 假 B 站**，不是往模型里塞数据。
+		//
+		// ⚠️ 欠条撤掉之后，这张表自己的规矩（「已经能打开却有欠条：数据接上了就
+		// 把欠条撤掉」）是唯一还醒着的那道：`TestEveryRouteShowsARealRowOr…`
+		// 的「欠着」那一支要求 `Open == nil`，而它**只在 `Debt != ""` 时才检查**
+		// 那一支；`TestEveryRouteHasAPageViewOrAnOpenDebt` 又在
+		// `builtPage != nil` 时直接 `continue`。两条同时不响的时候，一条过期欠条
+		// 还能一直挂着——而它挂着的时候「当场证明自己还欠着」也照样通过，因为
+		// 那个空壳画的是「还没接上 B 站接口」那一支，**顺带**含有 `NowEmpty`
+		// 那一句。所以这一格下面那行 `Want` 钉的是真数据，不是空状态。
+		Spec: "每一页至少要有一条真数据（假 B 站喂了内容之后，画面上出现的是内容而不是那一页的空状态；还欠着的页面必须点名到编号、写清差什么，并且当场证明它现在真的是空的）",
 		Tests: []string{
 			"TestEveryRouteShowsARealRowOrSaysWhichTicketIsMissing",
 			"TestTheRealDataLedgerCoversEveryRoute",
@@ -568,8 +666,8 @@ var Items = []Item{
 	{
 		Category: Play,
 		// 「判据说可放、实际放不了」——界面上的谎言。`bili.Media.Playable()`
-		// 照抄了 Biu 的 `![2,12].includes(type)`，**判据抄对了**，而我们没实现
-		// 的那一条路（type=12，B 站音乐库）没有被跟上：收藏夹里那条照常画成一
+		// 照抄了 Biu 的 `![2,12].includes(type)`，**判据抄对了**，而那时我们没实
+		// 现的那一条路（type=12，B 站音乐库）没有被跟上：收藏夹里那条照常画成一
 		// 行、照常进队列、抽屉里还标着「B 站音乐」，用户按播放才被
 		// `app.playableOnline` 拒绝。判据一路绿，判据的测试也一路绿，只有真的
 		// 按下去那一刻才说话。
@@ -578,15 +676,19 @@ var Items = []Item{
 		// 放，同步那一步不许拒绝它**；判据说「放不了」的行不许进队列；判据不
 		// 许自己长（改判据就要改那张表），而每一类内容都必须在表上。
 		//
-		// ⚠️ type=12 今天**欠着**（BMG-47 §3 A31，还没有工单：取流 / 元信息 /
-		// 收藏态三个接口一个都没有）。它写成一条**欠条**而不是一段红的测试，
-		// 理由和上一条一样：一个永远红的 `go test ./...` 没有人再跑它，那比绿
-		// 着更坏。把欠条删掉，这条断言自己就开始要求它真放得了。
-		Spec: "画出来的每一行都放得了：判据与界面那一步必须说同一句话（type=12「B 站音乐库」今天欠着 A31，欠条要点名到编号并钉住那句人话；判据不许自己长，每一类内容都必须在表上）",
+		// ⚠️ type=12 那一行**欠过**（BMG-47 §3 A31 → BMG-50），当时写成一条
+		// **欠条**而不是一段红的测试，理由和上一条一样：一个永远红的
+		// `go test ./...` 没有人再跑它，那比绿着更坏。把欠条删掉之后，这条断言
+		// 自己就开始要求它真放得了——而**下面那两条就是它转正之后的样子**：一条
+		// 钉判据与播放器认不认（`internal/ui`），一条钉真的取得到流（`internal/app`）。
+		// 只钉判据不够，接线断了照样绿，那正是当初漏掉的那一半。
+		Spec: "画出来的每一行都放得了：判据与界面那一步必须说同一句话（type=12「B 站音乐库」欠过 A31，BMG-50 已交付，欠条撤掉，断言转为要求它真放得了；判据不许自己长，每一类内容都必须在表上）",
 		Tests: []string{
 			"TestEveryRowWeDrawHasAVerdictThatMatchesWhatHappens",
 			"TestEveryContentTypeInTheCodebaseIsOnTheVerdictLedger",
 			"TestEveryListedExtensionIsToldApartFromThePlayableOnes",
+			"TestEveryPlayableCollectionEntryIsAcceptedByThePlayer",
+			"TestEveryPlayableEntryCanActuallyBeStreamed",
 			// 服务层那三条：判据本身，以及「放不了的那一种在界面上必须说清楚」。
 			"TestOnlyVideoAndAudioArePlayable",
 			"TestAnUnplayableFormatIsNamedAsSuch",

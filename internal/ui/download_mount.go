@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/egoist/mygo"
 )
@@ -104,11 +105,20 @@ func (s *Shell) downloadLater(it app.Item, video bool, label string) {
 //
 // ⚠️ **它在后台 goroutine 上被调**：Toast 自己带锁（`Shell.toastMu`），
 // 而 `wake.invalidate` 只是叫醒界面，两者都不碰界面状态（铁律一）。
+//
+// 🔴 **走 `bili.Friendly` 而不是 `err.Error()`**。两件事：
+//
+//   - `err.Error()` 是 Go 的原话。取流那一路的错会带着「bili: 问不出这一集是哪一集
+//     （BV1xx）」这种内部说法，而 `Friendly` 给的是「等网络好一些」——
+//     **两句对同一件事的说法不一样时，用户只能照着错的那句去做**。
+//   - 更要紧的是**地址**：取流的错里可能带一条带 `upsig` 签名的 CDN 地址，
+//     而 `Friendly` 末尾那道「不许把地址原样打出去」就是为它准备的
+//     （见 `service/bili/friendly.go` 的注释）。
 func (s *Shell) sayDownloadDone(label string, err error) {
 	switch {
 	case err == nil:
 		s.addToast("已加进下载队列")
 	default:
-		s.addToast(label + "没成：" + err.Error())
+		s.addToast(label + "没成：" + bili.Friendly(err))
 	}
 }

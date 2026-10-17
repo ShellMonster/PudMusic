@@ -42,11 +42,20 @@ import (
 // 🔴 **全项目只有这一份**：界面层画列表时也要用（`ui.onlineItemOf`），两份
 // 各写一遍的话，改了字段只改一处，症状是「收藏夹里的歌在列表里有、在队列里
 // 打不开」。
+//
+// ⚠️ **Type 非空的那些必须真的放得出来**：`bili.Media.Playable` 判「可放」的
+// 类型（2 / 12）在这里都要变成一条能取到流的项（见 `app.streamFor`）。少一条
+// 取流路径就会让「可放」在界面上变成一句谎话——条目照常画、照常进队列，
+// 按播放才报错。`ui.TestEveryPlayableCollectionEntryIsAcceptedByThePlayer`
+// 盯着这件事。
 func ItemOfMedia(m bili.Media) Item {
 	it := Item{
 		Source: "online",
 		Title:  m.Title,
 		Cover:  m.Cover,
+		// 收藏夹接口已经给了 UP 主名，而这一栏之前一直空着——于是系统媒体
+		// 控制中心上的「艺人」永远是空的（见 `Item.Artist` 的注释）。
+		Artist: m.Owner,
 		// Sid 一直带着：Type=12（音频）靠它，Type=2 的条目也指着它
 		// （`list.BiliLink` 有 bvid 时优先用 bvid，所以不会串）。
 		Sid: strconv.FormatInt(m.ID, 10),
@@ -116,13 +125,23 @@ func (a *App) EnqueueDownload(ctx context.Context, folder CollectionRef, medias 
 //
 // 「这一首下不了」的两种：合集 / 电影（`Playable` 判掉，它们没有音频流），
 // 以及 B 站音乐库里的音频条目（有 sid 没有 bvid，而下载按稿件存文件）。
+// ErrNoAudioDownload 是「B 站音乐库里的条目（type=12）还没有下载通道」。
+//
+// 🔴 **下载那一路是按稿件 + 分 P 取流的**（`resolveDownload` → `PlayURL(bvid, cid)`），
+// 而音乐库条目只有一个 auid（sid），没有 bvid 也没有 cid。所以这一类**现在**下不了。
+//
+// 单独一个哨兵是因为两处要说**同一句话**：批量那条（`downloadableItem`）和单首那条
+// （`downloadLater`）。两处各写一个字面量的话，改了一处另一处就开始说别的，而
+// 那是同一页上两个出口——用户对照着看会发现「同一个东西两句话」。
+var ErrNoAudioDownload = errors.New("B 站音乐库里的条目还没有下载通道")
+
 func (a *App) downloadableItem(ctx context.Context, m bili.Media) (Item, error) {
 	if !m.Playable() {
 		return Item{}, errors.New("合集和剧集那一类没有单独的音频流")
 	}
 	it := ItemOfMedia(m)
 	if it.Bvid == "" {
-		return Item{}, errors.New("B 站音乐库里的条目还没有下载通道")
+		return Item{}, ErrNoAudioDownload
 	}
 	return a.withCid(ctx, a.streamingSnapshot(), it)
 }
@@ -157,6 +176,22 @@ func (a *App) downloadLater(it Item, req download.AddRequest, done func(error)) 
 	}
 	if err := playableOnline(it); err != nil {
 		finishDownload(done, err)
+		return
+	}
+	// 🔴 **sid（音乐库）那条路在这里就拒掉，别让它走到 `withCid`**。
+	//
+	// `playableOnline` 现在放行它了——**放得出来不等于下得了**：这一路是按
+	// 稿件 + 分 P 取流的（`resolveDownload` → `PlayURL(bvid, cid)`），而音乐库条目
+	// 只有一个 auid，没有 bvid 也没有 cid。
+	//
+	// 不在这里挡的话它会一路走到 `withCid` 去问一个空稿件的分 P，问出来的是
+	// 「问不出这一集是哪一集」——而 `Friendly` 对那一句说的是「等网络好一些，
+	// 或者换个词重新搜一次」。**把一件永远不可能成功的事说成网络问题**：用户会去
+	// 查网、换网络、等它好，而真正要做的（等下载通道接上）跟网络一点关系都没有。
+	//
+	// 批量那一路早就这么拒了（`downloadableItem`），这里是同一个错在另一个出口。
+	if it.Bvid == "" {
+		finishDownload(done, ErrNoAudioDownload)
 		return
 	}
 	if a.downloadsSnapshot() == nil {
