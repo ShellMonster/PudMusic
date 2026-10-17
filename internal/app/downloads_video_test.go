@@ -19,7 +19,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -62,7 +61,9 @@ func newDashPairFixture(t *testing.T) *dashPairFixture {
 	f := newStreamFixture(t)
 	// 源流是真的 fMP4——交织要读 `moov` 和一串 `moof`，编不出来。
 	src := t.TempDir()
-	vp, ap := muxtest.PairIn(t, src, muxtest.VideoSpec(120), muxtest.AudioSpec(4))
+	// 视频流带负的 cts 偏移（B 帧重排 = 真 dash 的常态），让交织一定走
+	// 「要补一段空编辑」那一支。理由见 download 包里同名的那条注释。
+	vp, ap := muxtest.PairIn(t, src, muxtest.VideoSpec(120).WithCtsBias(-3000), muxtest.AudioSpec(4))
 	d := &dashPairFixture{f: f, video: mustReadFile(t, vp), audio: mustReadFile(t, ap)}
 	f.on("/cdn/video.m4s", rangeHandler(d.video))
 	f.on("/cdn/audio.m4s", rangeHandler(d.audio))
@@ -112,6 +113,25 @@ func TestAVideoDownloadLandsAnMP4WithBothTracks(t *testing.T) {
 	if !sawVideo || !sawAudio {
 		t.Errorf("产物里视频轨带 avcC=%v、音频轨带 esds=%v，两样都要有", sawVideo, sawAudio)
 	}
+	// 每条轨最多一个 `edts`。多一个的话 macOS 的 AVFoundation 会把
+	// **整条轨**丢掉（表现为「文件能打开、只有声音」，见 mux 那边的
+	// `TestATrackCarriesExactlyOneEditList`）。
+	for _, trak := range out.Moov.Traks {
+		n := 0
+		for _, c := range trak.Children {
+			if _, ok := c.(*mp4.EdtsBox); ok {
+				n++
+			}
+		}
+		if n > 1 {
+			t.Errorf("%s 轨里有 %d 个 edts，macOS 会因此把整条轨丢掉",
+				trak.Mdia.Hdlr.HandlerType, n)
+		}
+	}
+	if trakByHandler(t, out, "soun").Edts == nil {
+		t.Error("音频轨没有编辑列表——素材本来是让它晚半秒起的，" +
+			"这一条断言是为了确认这一支真的走到了")
+	}
 
 	// 两条源流不再留在下载目录里：它们是 fMP4，用户点开放不出来，
 	// 留着就是凭空多占两倍盘（见 `download.runMux`）。
@@ -124,52 +144,66 @@ func TestAVideoDownloadLandsAnMP4WithBothTracks(t *testing.T) {
 	}
 }
 
-// TestDownloadingAudioAndVideoAreTheSameQueueEntry 钉住「同一首只有一个任务」。
+// TestDownloadingAudioAndVideoAreTwoQueueEntries 钉住「音频和视频是两项」。
 //
-// `Task.ID` 是 `<bvid>|<cid>`，与「要音频还是要视频」无关。所以同一首先
-// 点「下载音频」再点「下载视频」，第二次拿到的是**同一项**。
+// （函数名沿用上游 `b0515e9` 里的那一条——合流时我把它改写过，改完之后名字也
+// 改回了它原来的，这样 diff 里看得到的是「这条加强了」而不是「这条没了又新来一条」。）
 //
-// 这一条是**已知的行为**，不是理想状态：要让两条各自成一项，得把「要哪
-// 一路」放进键里，而那会破坏「同一首歌重复点两次下载，用户要的是就一个」
-// 那条更重要的性质（见 `download.Task.ID`）。解开它要一个显式的
-// 「换成视频重下」之类的动作，是记录页那一票的事。
-// ⚠️ 这一条**原来断言的是「同一首的音频和视频是同一项」**，那是错的（评审第五轮
-// 抓出来的）：那一票的判重键是 `<bvid>|<cid>`，不带「是不是视频」这一位，于是
-// 「先点下载音频、再点下载视频」第二次拿到的是**音频那一个**——两次都返回成功，抽屉
-// 照样提示「已加进下载队列」，而用户的下载目录里只有一个 .m4a。
+// ⚠️ 这一条**原来断言的是反的**（我当初写的是「同一首先点音频再点视频，拿到
+// 的是同一项」，并在报告里把它列成「需要人拍板」）。上游后来在
+// `download.TaskID` 里定了：视频那一项的键多一段 `|video`，音频保持
+// `bvid|cid` 不变。
 //
-// 音频和视频是两个文件、两次下载，所以是两个任务（`download.TaskID` 现在带
-// `|video` 那一位）。同一件事点两次仍然只有一个——那是这一条真正要守的东西。
+// 原来的那个行为的后果很具体：
+//
+//	先点「下载音频」→ 一项
+//	再点「下载视频」→ **拿到音频那一个**（两次都返回成功，抽屉照样提示
+//	「已加进下载队列」），而用户的下载目录里只有一个 .m4a
+//
+// 所以这条用例现在是**钉住修好的那个行为**：两次入队拿到两个不同的任务。
+// 而「音频那一支保持旧格式」也一起钉住——落盘的队列文件按那个字符串当键，
+// 改了格式的话升级过的用户重启之后整个队列一个都认不出来（看起来像队列空了）。
+//
+// 比上游那一条多断了一样：那一条只断「两次拿到的 ID 不同」，没断**音频那个
+// ID 具体是什么**。而那正是不能动的那个格式——它一改，所有升级过的用户重启
+// 之后队列就空了。
 func TestDownloadingAudioAndVideoAreTwoQueueEntries(t *testing.T) {
 	d := newDashPairFixture(t)
 	a := d.app(t, t.TempDir())
 	item := onlineItem("BV1xx", "c123", "同一首")
 
-	first, err := a.Download(item)
+	audio, err := a.Download(item)
 	if err != nil {
 		t.Fatalf("入队（音频）：%v", err)
 	}
-	second, err := a.DownloadVideo(item, bili.VideoQualityUnknown)
+	video, err := a.DownloadVideo(item, bili.VideoQualityUnknown)
 	if err != nil {
 		t.Fatalf("入队（视频）：%v", err)
 	}
-	if first.ID == second.ID {
-		t.Errorf("两次入队拿到了同一个任务（%q）——判重键里没有「是不是视频」", first.ID)
+
+	// 音频那一支的键**一个字都不能变**——落盘的队列文件按它当键。
+	if audio.ID != "BV1xx|c123" {
+		t.Errorf("音频那一项的键是 %q，要的是 %q（改了格式的话，"+
+			"升级过的用户重启之后整个队列一个都认不出来）", audio.ID, "BV1xx|c123")
+	}
+	if video.ID == audio.ID {
+		t.Errorf("两次入队拿到了同一个任务：%q——于是「先点音频再点视频」"+
+			"会拿到音频那一个，而用户的下载目录里只有一个 .m4a", video.ID)
 	}
 	if got := len(a.DownloadSnapshots()); got != 2 {
-		t.Errorf("队列里有 %d 项，要的是 2 项（音频一个、视频一个）", got)
+		t.Errorf("队列里有 %d 项，要的是 2（音频一项、视频一项）", got)
 	}
 
-	// 同一件事点两次：还是一个。
+	// 同一件事点两次仍然只拿一个（这一条没变）。
 	again, err := a.DownloadVideo(item, bili.VideoQualityUnknown)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("再入队一次（视频）：%v", err)
 	}
-	if again.ID != second.ID {
-		t.Errorf("同一个视频点两次拿到了两个任务：%q 和 %q", again.ID, second.ID)
+	if again.ID != video.ID {
+		t.Errorf("同一件事点两次拿到了两个任务：%q 和 %q", again.ID, video.ID)
 	}
 	if got := len(a.DownloadSnapshots()); got != 2 {
-		t.Errorf("点第二次之后队列里有 %d 项，要的是还是 2 项", got)
+		t.Errorf("点完两次之后队列里有 %d 项，要的是 2", got)
 	}
 }
 
@@ -192,14 +226,6 @@ func TestTheVideoDownloadAsksForNoQualityByDefault(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := newDashPairFixture(t)
-			// 记下取流请求里的 qn。挂在 playURL 那条路上，所以它一定
-			// 是在**取流真的发生**的时候被记下来的（不会读到还没发的）。
-			var seen sync.Map
-			d.f.on("/x/player/wbi/playurl", func(w http.ResponseWriter, r *http.Request) {
-				seen.Store(r.URL.Query().Get("qn"), true)
-				d.f.servePlayURL(w, r.URL.Query())
-			})
-
 			a := d.app(t, t.TempDir())
 			snap, err := a.DownloadVideo(onlineItem("BV1xx", "c123", "MV"), tc.qn)
 			if err != nil {
@@ -207,23 +233,30 @@ func TestTheVideoDownloadAsksForNoQualityByDefault(t *testing.T) {
 			}
 			waitDownloadSettled(t, a, snap.ID)
 
-			if _, ok := seen.Load(tc.want); !ok {
-				t.Errorf("取流请求里的 qn 里没有 %q（实际记到的是 %v）",
-					tc.want, seenKeys(&seen))
+			// 取流请求里的 qn 由 `streamFixture` 自己录（`playQueries`），
+			// 那条路上一早就录着每一次调用的查询串了——自己再录一遍只会多
+			// 一份要同步的。
+			got := qnsSeen(d.f)
+			if len(got) == 0 {
+				t.Fatal("一次取流请求都没发出去")
 			}
-			if tc.want == "" && len(seenKeys(&seen)) != 1 {
-				t.Errorf("默认那次只该有一次取流，实际记到 %v", seenKeys(&seen))
+			for i, q := range got {
+				if q != tc.want {
+					t.Errorf("第 %d 次取流带的 qn 是 %q，要的是 %q", i+1, q, tc.want)
+				}
 			}
 		})
 	}
 }
 
-func seenKeys(m *sync.Map) []string {
-	var out []string
-	m.Range(func(k, _ any) bool {
-		out = append(out, fmt.Sprint(k))
-		return true
-	})
+// qnsSeen 读 fixture 录到的每一次取流请求带的 `qn`。
+func qnsSeen(f *streamFixture) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.playQueries))
+	for _, q := range f.playQueries {
+		out = append(out, q.Get("qn"))
+	}
 	return out
 }
 
@@ -261,6 +294,18 @@ func mustReadFile(t *testing.T, path string) []byte {
 		t.Fatalf("读 %s：%v", path, err)
 	}
 	return b
+}
+
+// trakByHandler 按 `hdlr` 找那条轨。
+func trakByHandler(t *testing.T, f *mp4.File, handler string) *mp4.TrakBox {
+	t.Helper()
+	for _, trak := range f.Moov.Traks {
+		if trak.Mdia != nil && trak.Mdia.Hdlr != nil && trak.Mdia.Hdlr.HandlerType == handler {
+			return trak
+		}
+	}
+	t.Fatalf("产物里没有 %s 轨", handler)
+	return nil
 }
 
 // decodeMP4 把产物解回来。
