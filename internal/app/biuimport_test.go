@@ -620,3 +620,88 @@ func saysSomethingAbout(notes []string, word string) bool {
 	}
 	return false
 }
+
+// macOS 上 `Biu` 和 `biu` 是**同一个目录**（默认 APFS 大小写不敏感），只列一个。
+//
+// 这一条是被真机验证带出来的：在本机上跑 `FindBiuDirs()` 返回了三条，其中
+// `…/Biu` 和 `…/biu` 指向同一个 inode。按路径字符串去重会漏掉它们，于是设置页上
+// 出现两条一模一样的「从 … 导入」，导入报告里也会列两遍。判据是 `os.SameFile`
+// （设备号 + inode），那是文件系统给的唯一身份。
+//
+// 在大小写**敏感**的卷上（Linux、Windows）那两个路径是两个不同的目录，各留一个
+// 才是对的——所以先探一下这个卷的行为，再决定断言什么。
+func TestTheTwoSpellingsOfBiuAreOneDirectory(t *testing.T) {
+	root := t.TempDir()
+	// ⚠️ 用 MkdirAll 而不是 Mkdir：在大小写不敏感的卷上（macOS），
+	// 第二个 Mkdir("biu") 会因为 "Biu" 已经在而报 "file exists"。
+	for _, name := range []string{"Biu", "biu", "biu-dev"} {
+		if err := os.MkdirAll(filepath.Join(root, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// 放一份数据，别让「目录存在但没数据」那条判据把它滤掉。
+		mustWrite(t, filepath.Join(root, name, biuSettingsFile), biuAppSettings)
+	}
+
+	got := findBiuDirsUnder(root)
+	if len(got) < 1 {
+		t.Fatalf("一个都没找到：%v", got)
+	}
+
+	upper := filepath.Join(root, "Biu")
+	lower := filepath.Join(root, "biu")
+	same, err := os.Stat(upper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := os.Stat(lower)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(same, other) {
+		// 这个卷大小写敏感，两个路径是两个目录——都该留着。
+		if len(got) != 3 {
+			t.Errorf("大小写敏感的卷上列了 %d 条，want 3（Biu、biu、biu-dev 各一个）：%v", len(got), got)
+		}
+		return
+	}
+
+	seen := map[string]bool{}
+	for _, p := range got {
+		if seen[p] {
+			t.Errorf("同一个目录列了两次：%v", got)
+		}
+		seen[p] = true
+	}
+	// 正式版排第一（设置页上按钮旁边写的就是它）。
+	if !strings.HasSuffix(got[0], "Biu") {
+		t.Errorf("正式版没有排在最前面：%v", got)
+	}
+}
+
+// dev 版排在正式版**后面**。
+//
+// 那里面是开发调试时留下的数据，未必是用户想要的那一份；而自动导入取 `dirs[0]`
+// ——它排在前面就意味着用户点的是哪一份，决定在他看见的那句话里。
+func TestTheDevBuildDirectoryComesLast(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"Biu", "biu-dev"} {
+		if err := os.MkdirAll(filepath.Join(root, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		mustWrite(t, filepath.Join(root, name, biuSettingsFile), biuAppSettings)
+	}
+	got := findBiuDirsUnder(root)
+	if len(got) != 2 {
+		t.Fatalf("列了 %d 条：%v", len(got), got)
+	}
+	if !strings.HasSuffix(got[0], "Biu") || !strings.HasSuffix(got[1], "biu-dev") {
+		t.Errorf("顺序不对，正式版应该在 dev 版前面：%v", got)
+	}
+}
+
+// 不存在的目录不出现。
+func TestMissingDirectoriesDoNotShowUp(t *testing.T) {
+	if got := findBiuDirsUnder(t.TempDir()); len(got) != 0 {
+		t.Fatalf("一个空目录下列出了东西：%v", got)
+	}
+}

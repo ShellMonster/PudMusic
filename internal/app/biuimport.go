@@ -43,6 +43,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -109,34 +110,31 @@ type BiuScan struct {
 	Notes []string
 }
 
-// FindBiuDirs 找本机上 Biu 可能的数据目录，**从最可能的排在前面**。
+// FindBiuDirs 找本机上 Biu 可能的数据目录，**正式版排在最前面**。
 //
 // 三条来源，按优先级：
 //
 //  1. 正式版：`app.getPath("userData")`（`biu/electron/utils.ts:13`），
 //     macOS 上是 `~/Library/Application Support/Biu`，Windows 是 `%APPDATA%\Biu`，
 //     Linux 是 `~/.config/Biu`。目录名来自 package.json 的 `productName`（"Biu"）。
-//  2. 开发版：同一个函数在 `isDev` 时拼的是 `app.getPath("appData")/biu-dev`
+//  2. 同名的小写目录（`…/biu`）：**macOS 上它和 `Biu` 是同一个目录**（默认的
+//     APFS 大小写不敏感），Windows 和 Linux 上是两个不同的路径。
+//  3. 开发版：同一个函数在 `isDev` 时拼的是 `app.getPath("appData")/biu-dev`
 //     （`utils.ts:15`，`main.ts:30` 也会 `setPath` 到那儿）。装了开发版的人机器上
-//     常有它，而那里面往往是**最新**的数据。
-//  3. 同名的小写目录（`~/Library/Application Support/biu`）：macOS 的文件系统
-//     大小写不敏感，`Biu` 和 `biu` 在同一个卷上是同一个目录，去重时按**路径
-//     字符串**比会漏掉。
+//     常有它，而那里面往往是**最新的数据**——但它也是**开发调试时留下的**，
+//     未必是用户想要的那一份，所以排在正式版之后。
 //
-// 不存在的目录直接不出现。返回结果永远**不为空判断而靠 nil**——调用方拿到的
-// 每一项都是真的存在的目录。
-func FindBiuDirs() []string {
-	seen := map[string]bool{}
-	add := func(p string) {
-		if p == "" || seen[p] {
-			return
-		}
-		if st, err := os.Stat(p); err != nil || !st.IsDir() {
-			return
-		}
-		seen[p] = true
-	}
+// ⚠️ **按「同一个文件」去重，不是按路径字符串**。真机上验出来过：`Biu` 和 `biu`
+// 两个路径在 macOS 上 `os.Stat` 拿到的是同一个 inode，按字符串比会列两遍，而用户
+// 在设置页上会看到两条一模一样的「从 … 导入」，导入报告里也会列两遍。
+// `os.SameFile` 比的是设备号 + inode，那是文件系统给的唯一身份。
+//
+// 不存在的目录直接不出现。返回结果里的每一项都是真的存在的目录。
+func FindBiuDirs() []string { return findBiuDirsUnder(biuConfigRoot()) }
 
+// biuConfigRoot 是 Biu 那几个候选目录的共同父目录，也就是 Electron 的
+// `app.getPath("appData")` 在各平台上的位置（`biu/electron/utils.ts:15`）。
+func biuConfigRoot() string {
 	var root string
 	switch runtime.GOOS {
 	case "windows":
@@ -157,18 +155,37 @@ func FindBiuDirs() []string {
 			root = filepath.Join(home, ".config")
 		}
 	}
+	if root == "" {
+		return ""
+	}
+	return root
+}
 
-	add(filepath.Join(root, "Biu"))
-	add(filepath.Join(root, "biu-dev"))
-	add(filepath.Join(root, "biu"))
+// findBiuDirsUnder 在一个已知的父目录下面找那几个候选。测试走这一条，
+// 因为拼 `root` 那部分（`os.UserHomeDir` / 环境变量）在无头环境里没法替换，
+// 而这里才是「同一个文件去重」「优先级排序」真正发生的地方。
+func findBiuDirsUnder(root string) []string {
+	// 顺序就是优先级：正式版先，同名的小写目录次之，dev 版最后。
+	candidates := []string{
+		filepath.Join(root, "Biu"),
+		filepath.Join(root, "biu"),
+		filepath.Join(root, "biu-dev"),
+	}
 
-	out := make([]string, 0, len(seen))
-	for p := range seen {
+	var out []string
+	var infos []os.FileInfo
+	for _, p := range candidates {
+		st, err := os.Stat(p)
+		if err != nil || !st.IsDir() {
+			continue
+		}
+		// 同一个文件已经收过了。
+		if slices.ContainsFunc(infos, func(seen os.FileInfo) bool { return os.SameFile(seen, st) }) {
+			continue
+		}
+		infos = append(infos, st)
 		out = append(out, p)
 	}
-	// map 的遍历顺序是随机的。导入报告里会逐条列目录名，顺序不稳的话同一个问题
-	// 每次刷出来的顺序都不一样，看起来像随机行为。
-	sort.Strings(out)
 	return out
 }
 
