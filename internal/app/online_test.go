@@ -1258,11 +1258,16 @@ func TestAMusicPreviewNeverReachesThePlayer(t *testing.T) {
 	}
 }
 
-// TestChangingQualityKeepsAMusicLibraryTrack 换音质在音乐库这一路上也成立。
+// TestChangingQualityKeepsAMusicLibraryTrack 换音质在音乐库这一路上**整条跑得通**。
 //
-// 换回来还是同一档时不该打断正在放的歌（`SameTier`）。这一条盯的是它在
-// 音乐库这一路上认的是 `MusicTier` 而不是投稿那套 `Quality`——认错的话每点一次
-// 音质都把歌从中间截断，而听不出任何区别。
+// 换回来还是同一档时不该打断正在放的歌（`SameTier`），而这一条盯的是那一整条路
+// 在音乐库条目上没被弄坏：换了档、没报错、歌还在放、徽章没变、位置没退。
+//
+// ⚠️ **它不钉 `SameTier` 的对错**：真让 `SameTier` 恒假（等于每次点音质都重开
+// 播放器），这一条仍然是绿的——重开那一步会把歌**从原位置接着放**，界面上看得出
+// 的只有一瞬间的接缝，无头环境量不到。钉那个逻辑的是
+// `bili.TestSameTierComparesBothNumberings`（把 `SameTier` 改成恒假就红）。
+// 这一条钉的是它的**四周**：接线、缓存、徽章、位置。
 func TestChangingQualityKeepsAMusicLibraryTrack(t *testing.T) {
 	f := newMusicFixture(t)
 	a := newOnlineApp(t, f, t.TempDir())
@@ -1274,15 +1279,27 @@ func TestChangingQualityKeepsAMusicLibraryTrack(t *testing.T) {
 
 	before := a.Snapshot().Position
 	// 点「省流量」：这台假服务器上要到的 128K 会退到 192K——和现在这一档一样。
+	//
+	// ⚠️ **判据一律是结果，不是睡固定时长**（同一个道理见 `collectionpage_test.go`
+	// 的 `waitFrameFor` 顶上那段）：这一趟走完了 = 取流接口又被打了一次。原来
+	// 这里睡两秒，慢机器上要么白等、要么不够；而这一组整体还要跑十几分钟，
+	// 白等两秒是实打实的账。
+	wantCalls := f.songCalls.Load() + 1
 	a.SetAudioQuality(bili.AudioLow)
-	time.Sleep(2 * time.Second)
+	waitFor(t, 15*time.Second, "换音质那一趟走完", func() bool {
+		return f.songCalls.Load() >= wantCalls
+	})
+	// 而它**没有打断歌**：位置还在往前走。真被打断的话 `Playing` 会变 false
+	// 并且不会自己回来，这一等就会超时——这比「睡完再看一眼」可靠，而且顺带
+	// 给了那条 goroutine 跑完的时间（不然会偶发地红）。
+	waitFor(t, 15*time.Second, "歌没被打断（位置还在往前走）", func() bool {
+		st := a.Snapshot()
+		return st.Playing && st.Position > before
+	})
 
 	st := a.Snapshot()
 	if st.Err != "" {
 		t.Errorf("换音质失败：%s", st.Err)
-	}
-	if !st.Playing {
-		t.Error("同一档的换音质把正在放的歌打断了（SameTier 没认音乐库那一路）")
 	}
 	if st.Quality != "192K" {
 		t.Errorf("徽章 = %q，want 192K", st.Quality)
