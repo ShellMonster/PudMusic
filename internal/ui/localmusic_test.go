@@ -383,3 +383,42 @@ func TestAnUnplayableFormatIsNamedAsSuch(t *testing.T) {
 		t.Errorf("没有点名是哪一种格式，文字有 %q", tt.Texts())
 	}
 }
+
+// TestDirectoryLabelsAreAllDifferent 钉住「目录选项不许重名」。
+//
+// ⚠️ 这一条来自评审：下拉框的**选项就是值**，而选中项是按值反查路径的。
+// 两个选项同名 → 反查永远命中第一个 → 选第三项筛出来的却是第二个目录，
+// 「移除此目录」删的也是第二个。
+//
+// 评审给的反例是 `/a/x/music`、`/b/x/music`、`/c/x/music`：原来「撞了往前
+// 多带一段」只躲得开**一个**重名，第三项又和第二项撞上。
+//
+// 断的是**两两不同**这件事本身，不是「看起来不一样」。
+func TestDirectoryLabelsAreAllDifferent(t *testing.T) {
+	roots := []string{
+		"/a/x/music", "/b/x/music", "/c/x/music", // 三条同尾
+		"/a/music",       // 和第一条同尾
+		"/完全一样", "/完全一样", // 两条一模一样
+	}
+	labels := dirLabels(roots)
+
+	if len(labels) != len(roots)+1 {
+		t.Fatalf("标签有 %d 个，want %d（一个「全部目录」+ 每个根一个）", len(labels), len(roots))
+	}
+	seen := map[string]int{}
+	for i, l := range labels[1:] { // labels[0] 是「全部目录」
+		if prev, dup := seen[l]; dup {
+			t.Errorf("第 %d 和第 %d 个根的标签撞了：%q（%v 和 %v）",
+				prev, i, l, roots[prev], roots[i])
+		}
+		seen[l] = i
+	}
+	// 而且每一个都要能反查回**它自己**那一个根。
+	for i, r := range roots {
+		p := &localPage{dirLabel: labels[i+1]}
+		if got := p.currentRoot(roots); got != r {
+			t.Errorf("选中标签 %q 反查得到 %q，want %q（反查撞到了别的目录）",
+				labels[i+1], got, r)
+		}
+	}
+}

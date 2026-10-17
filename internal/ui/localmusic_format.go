@@ -67,17 +67,59 @@ func (p *localPage) currentRoot(roots []string) string {
 // 而不是路径——整条 `/Users/我/Music` 摆进下拉框里没人读得下去。Biu 那边是
 // `label: getDirName(dir)`（`local-music.ts:226`），同一个道理。
 //
-// 同名的两个目录（「音乐」和「A/音乐」）显示名撞在一起就分不清了，所以撞了
-// 的那个往前多带一段。
+// ## 显示名必须两两不同，否则会选错目录
+//
+// 选项就是值，而 `currentRoot` 是**按值反查路径**的。两个选项同名 → 反查永远
+// 命中第一个 → 选第三项筛出来的却是第二个目录，「移除此目录」删的也是第二个。
+//
+// ⚠️ 评审给的反例：`/a/x/music`、`/b/x/music`、`/c/x/music`。原来「撞了就
+// 往前多带一段」只能躲开**一个**重名的：`music`、`x/music`、然后第三个又是
+// `x/music`——前两个被带过的和第三个又撞上了。
+//
+// 所以这里是**逐段往回加、加到不撞为止**（`x/music` 撞就成 `b/x/music`，
+// 还撞就成 `a/b/x/music`），路径短到头还撞（两个一模一样的目录，用户把同一个
+// 目录加了两次）才加一个序号。宁可名字长一点，也不能有两个选项同名。
 func dirLabels(roots []string) []string {
 	out := make([]string, 0, len(roots)+1)
 	out = append(out, allDirs)
 	for _, r := range roots {
-		label := dirName(r)
-		if slices.Index(out, label) >= 0 {
-			label = dirName(filepathDir(r)) + "/" + label
+		segs := pathSegments(r)
+		label := ""
+		for n := 1; n <= len(segs); n++ {
+			if cand := strings.Join(segs[len(segs)-n:], "/"); !slices.Contains(out, cand) {
+				label = cand
+				break
+			}
+		}
+		if label == "" {
+			// 两条路径的段**完全一样**（同一个目录被加了两次）：加个序号，
+			// 至少保证两个选项不重名——不然 `currentRoot` 还是会反查错。
+			for n := 2; ; n++ {
+				if cand := fmt.Sprintf("%s (%d)", strings.Join(segs, "/"), n); !slices.Contains(out, cand) {
+					label = cand
+					break
+				}
+			}
 		}
 		out = append(out, label)
+	}
+	return out
+}
+
+// pathSegments 把一条路径拆成段（去掉空的）。
+//
+// 不用 `filepath.Split`：那个在 Windows 上认 `\\`，而这里只是**为了显示**，
+// 按 `/` 和 `\\` 切就够——一个只在界面上露脸的字符串。
+func pathSegments(dir string) []string {
+	raw := strings.FieldsFunc(dir, func(r rune) bool { return r == '/' || r == '\\' })
+	out := raw[:0]
+	for _, seg := range raw {
+		if seg != "" && seg != "." {
+			out = append(out, seg)
+		}
+	}
+	if len(out) == 0 {
+		return []string{dir}
 	}
 	return out
 }
@@ -93,16 +135,6 @@ func dirName(dir string) string {
 	}
 	if i := strings.LastIndexAny(trimmed, `/\`); i >= 0 {
 		return trimmed[i+1:]
-	}
-	return trimmed
-}
-
-// filepathDir 是 `filepath.Dir` 的薄壳：这一页不想 import path/filepath 只是
-// 为了两个字符串操作，而 `dirLabels` 只需要「去掉最后一段」。
-func filepathDir(dir string) string {
-	trimmed := strings.TrimRight(dir, `/\`)
-	if i := strings.LastIndexAny(trimmed, `/\`); i > 0 {
-		return trimmed[:i]
 	}
 	return trimmed
 }
