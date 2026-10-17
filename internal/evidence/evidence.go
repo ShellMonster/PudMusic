@@ -286,6 +286,97 @@ var Items = []Item{
 
 	// ── 负路径 ─────────────────────────────────────────────────────────────
 	{
+		Category: Platform,
+		// SPEC 107。⚠️ 这一条量到的是**我们这一层**：查、说、下载进度、装、退出并
+		// 进去、以及落盘那份会不会说谎。
+		//
+		// **没有**量到的是：ed25519 签名校验、增量补丁、原地替换整个 `.app`
+		// bundle——那三件事全在框架里（`mygo/updater.go` 的 `update.Verify` /
+		// `ApplyDelta` / `swapBundle`），我们既没重写也不该重写（重写一遍的结果
+		// 是两条更新链，而只有一条被测过）。而且它们**一次都还没在真机上跑过**：
+		// 要跑需要一把真私钥 + 一个发布源 + 第二台机器。
+		//
+		// 还有一件更要紧的：今天**任何一个构建都还更新不了**——更新源的地址和
+		// 公钥是 `mygo build` 用 `-ldflags` 塞进去的，而 `mygo.json` 里还没有
+		// `updates` 那一段（公钥要 `mygo keygen`，是打包发布那一票的活儿）。
+		// 所以 `Enabled()` 在开发构建和没打包的构建里都是 false，界面上那一格
+		// 老老实实写着「这个版本不能自动更新」。
+		Spec: "新版本能被查到、说给用户、能下能装能退出去（SPEC 107。签名校验、增量、原地换整个 bundle 在框架里，没真机端到端；今天任何构建都还更新不了——`mygo.json` 里还没有 `updates` 段，公钥是打包发布那一票的事）",
+		Tests: []string{
+			"TestACheckFindsTheNewVersionAndKeepsIt",
+			"TestAnAppThatIsUpToDateSaysSo",
+			"TestABackgroundCheckLeavesANoticeInsteadOfOpeningAnything",
+			"TestABackgroundCheckThatFailsKeepsQuiet",
+			"TestACheckTheUserAskedForSaysWhatWentWrong",
+			"TestInstallingAVersionThatJustGotSupersededGoesBackAndChecksAgain",
+			"TestNoCheckSurvivesTheQuit",
+			"TestABuildThatCannotUpdateSaysWhy",
+			"TestWithoutTheUpdaterEveryEntryPointIsQuiet",
+			"TestTheSettingsPageHasAnAboutSectionWithTheVersionAndAButton",
+			"TestCheckingFindsANewVersionAndTheRowSaysSo",
+			"TestABackgroundCheckShowsAToastInsteadOfOpeningTheDialog",
+			"TestTheAboutSectionSaysWhyThisBuildCannotUpdate",
+		},
+	},
+	{
+		Category: Platform,
+		// SPEC 108。「更新前看到更新日志」这一条，量的是**更新前那一份画面**：
+		// 日志渲染成富文本、下载时四个数同时在、下完了给「退出并安装更新」。
+		Spec: "更新日志渲染成富文本，空的那一档说「暂无更新日志」；下载时速度/已传/总量/百分比两位小数四个数同时在画面上；下完了给「退出并安装更新」（SPEC 108）",
+		Tests: []string{
+			"TestTheDialogRendersTheReleaseNotes",
+			"TestTheDialogSaysSoWhenThereAreNoNotes",
+			"TestTheDialogShowsSpeedTransferredTotalAndPercentWithTwoDecimals",
+			"TestThePercentAlwaysHasExactlyTwoDecimals",
+			"TestTheProgressCarriesBytesSpeedAndPercent",
+			"TestTheSpeedNeedsTwoSamplesBeforeItSaysAnything",
+			"TestThePercentIsClampedToTheBox",
+			"TestTheReadyDialogOffersToQuitAndInstall",
+			"TestTheDialogCannotGoAwayWhileTheUpdateIsDownloading",
+			"TestTheDialogCanBeDismissedWhenNothingIsDownloading",
+			"TestTheDialogCannotBeDismissedWhileDownloading",
+			"TestDismissingAnAvailableUpdatePutsItBack",
+			"TestAFailedInstallPutsTheReasonInTheDialogAndOffersARetry",
+			"TestAFailedCheckPutsTheReasonUnderTheButtonAndKeepsItPressable",
+			"TestAFailedInstallSaysWhy",
+		},
+	},
+	{
+		Category: Negative,
+		// 票面点名的已知问题：dmg 装来的应用**第一次**增量最容易失败（磁盘镜像
+		// 里那份没有公证票据，补丁对不上磁盘上的现状）。框架自己会回退整个
+		// 安装包，而**回退有一处用户能看见的表现**——进度条倒退、百分比变小、
+		// 速度归零再跳起来。Biu 那套（electron-updater）没有这个现象，所以上游
+		// 没有这一支代码。
+		//
+		// 这一组量的是两半：**认得出**（`total` 变了 / `downloaded` 倒回去了），
+		// 以及**不认错**（一次正常下载的第一个采样点也有 `total`，把它算成回退
+		// 会让每一次下载都说一句错话）。
+		Spec: "增量补丁没拼出来时回退整个安装包，并且**把这件事说给用户听**（票面点名的已知问题：dmg 装来的应用第一次增量最容易走到）",
+		Tests: []string{
+			"TestADeltaThatFailsFallsBackToTheWholeArchiveAndSaysSo",
+			"TestTheFirstSampleOfADownloadIsNotAFallback",
+			"TestARestartWithTheSameTotalIsStillAFallback",
+			"TestTheDialogSaysSoWhenTheDeltaIsNotUsable",
+			"TestTheDialogDoesNotBlameTheDeltaOnANormalDownload",
+		},
+	},
+	{
+		Category: Negative,
+		// SPEC 118。要点在「**落盘那份里没有任何『正在下』的字段**」：有了它，
+		// 中途退出之后读回来的东西必然是自洽的（「上次查到了 0.2.0，但还没装上」）。
+		// 反过来写，就得额外去定义「那一份半截下载算不算数」。
+		Spec: "更新中途退出应用：下载被取消、磁盘上那份应用一个字节没动、落盘那份里没有任何「正在下」的字段（SPEC 118）",
+		Tests: []string{
+			"TestQuittingWhileDownloadingLeavesNothingBroken",
+			"TestQuittingWhileCheckingIsQuiet",
+			"TestThePrefsFileRoundTrips",
+			"TestACorruptPrefsFileIsIgnoredNotFatal",
+			"TestAPrefsFileFromANewerVersionIsLeftAlone",
+			"TestNoUserDataDirMeansMemoryOnly",
+		},
+	},
+	{
 		Category: Negative,
 		Spec:     "快速切歌 5 首：只有最后一首，旧的不留句柄和 goroutine",
 		Tests: []string{

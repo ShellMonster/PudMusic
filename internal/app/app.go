@@ -166,6 +166,13 @@ type App struct {
 	// downloadFallbackDir 是设置里没选过下载目录时的去处（系统下载目录）。
 	downloadFallbackDir string
 
+	// updates 是自动更新那一摊，见 update.go。挂上去之前是 nil，界面要判空。
+	//
+	// ⚠️ 它和 downloads/account/localMusic 一样是**自己的锁**：后台那个下载
+	// goroutine 一边下一边写，而界面每帧要读它，混进 a.mu 会把界面那一帧的
+	// 等待时间变成「网络那一趟」。
+	updates *updater
+
 	// artist 是当前这首的艺人（在线条目的 UP 主名）。本地文件是空的，
 	// 见 media.go 的 setArtist。跟 cover 一样只有媒体会话在用。
 	artist string
@@ -481,6 +488,7 @@ func (a *App) Close() {
 	a.playing = false
 	dl, dlPath := a.downloads, a.downloadQueueFile
 	lib := a.localMusic
+	upd := a.updates
 	a.mu.Unlock()
 
 	close(a.done)
@@ -509,6 +517,12 @@ func (a *App) Close() {
 	// 还在那儿收着目录事件。
 	if lib != nil {
 		lib.close()
+	}
+	// 更新这一摊也要收尾，而且**排在最后**：它要取消在下的那一次下载并等它真的
+	// 停了（SPEC 118「下载中退出应用，状态一致不损坏」）。等的时候不能有别的
+	// goroutine 还在往界面上投递状态——界面已经拆了。
+	if upd != nil {
+		upd.close()
 	}
 }
 
