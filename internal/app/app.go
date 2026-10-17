@@ -140,9 +140,11 @@ type App struct {
 	// report 是「往 B 站写播放记录」这一摊，见 playreport.go。
 	// 挂上在线播放（`MountStreaming`）之前是 nil。
 	//
-	// ⚠️ 它有**自己的锁**，而且**拿锁的顺序是 `a.mu` → `report.mu`**，
-	// 反过来就是死锁：上报器会在自己的锁里去问登录态和设置，
-	// 那两样都要过 App 这边。
+	// ⚠️ **唯一一处两把锁叠着拿的地方，是上报器拿着自己的锁去问
+	// `App.account`**（`reportTick` / `stopTrack` 都是先放掉 `a.mu`、
+	// 再去拿上报器的锁）。所以**永远不要在拿着 `a.mu` 的时候去拿
+	// 上报器的锁**——反过来的顺序凑齐了就是一次死锁，而死锁在这个位置上
+	// 表现为「整个应用冻住」（进度条的时钟每一拍都要过 `a.mu`）。
 	report *playReporter
 
 	// artist 是当前这首的艺人（在线条目的 UP 主名）。本地文件是空的，
@@ -415,7 +417,7 @@ func (a *App) ClearTrack() {
 	// 🔴 位置和时长要在**清零之前**抄下来：下面那句 `stopTrack` 要用它们
 	// 去结掉播放记录那一轮，而清零之后再取就只剩 0 了——B 站那边这一条会
 	// 变成「从头开始听就停了」，而用户明明听到了 3 分 20 秒。
-	at, dur := a.position, a.duration
+	at := a.position
 	a.player = nil
 	a.playing = false
 	// 「停到开头」这件事也就过去了：没有播放器就是「什么都没有」，不是「停在开头」
@@ -439,7 +441,7 @@ func (a *App) ClearTrack() {
 
 	// 「这一首到此为止」也是终止：播放记录那一轮到此结束（见 playreport.go
 	// 的「一、什么时候发」）。它和 `Stop` 是同一件事的两个入口。
-	a.stopTrack(at, dur)
+	a.stopTrack(at)
 
 	// 先把状态摘干净，再关解码器：和 Open 换歌同一个道理，关的过程中 tick 拿到
 	// 的不会再是这一个。
@@ -469,7 +471,7 @@ func (a *App) Close() {
 	upd := a.updates
 	rep := a.report
 	a.report = nil
-	at, dur := a.position, a.duration
+	at := a.position
 	a.mu.Unlock()
 
 	close(a.done)
@@ -482,7 +484,7 @@ func (a *App) Close() {
 	// ⚠️ 锁外面调：`close` 要等一条 goroutine，而那条 goroutine 每一拍都要拿
 	// `a.mu` 问设置和登录态——锁里面等就是死锁。
 	if rep != nil {
-		rep.finishOnClose(at, dur)
+		rep.finishOnClose(at)
 	}
 	if p != nil {
 		// Player.Close 会把字节源一起关掉（在线流那条路）。
@@ -589,15 +591,20 @@ func (a *App) tick() {
 			// ⚠️ **`ended` 不是「放完了」**：解码失败和断流也是「从在放变成不
 			// 在放」。拿它去发 `played_time = -1`（B 站靠它把一条标成「看完」）
 			// 等于往用户的账号里写一句他没做过的事，而那一条会在他的历史记录
-			// 页上一直摆着。真的放完了必须是「不在放了」**且**这一台没有报错
-			// ——和 `TestACorruptFileNeverLooksLikeItFinished` 是同一条判据。
+			// 页上一直摆着。真的放完了必须是「不在放了」**且**这一台没有报错。
+			// 那是 `TestACorruptFileNeverLooksLikeItFinished` 那个道理的另外
+			// 一半：那边量「位置到没到头」，这边量「有没有报错」，两半合起来
+			// 才分得出「放完了」和「挂掉了」。
 			//
 			// 这里每一拍都调（哪怕此刻没有歌）：它只读内存、往队列里塞一条，
 			// 没有在报的时候立刻回来，绝不碰网络。
 			//
-			// `p.Err()` 已经在这一拍上被 `checkPlayback` 调过一次了（就在下面
-			// 两行），这里再调一次读的还是同一个存好的值，不碰字节源。
-			a.reportTick(playing, ended && p != nil && p.Err() == nil)
+			// 多读一次 `p.Err()` 不花钱：解器把它存好了（`decoder.go` 那个
+			// 错误记录器带自己的锁），底下两行的 `checkPlayback` 读的是同一个值。
+			//
+			// 「在不在放」它自己去 `a.playing` 读，不收这里那个局部变量——
+			// 理由见 `reportTick` 那段。
+			a.reportTick(ended && p != nil && p.Err() == nil)
 
 			if live && wake != nil {
 				wake()

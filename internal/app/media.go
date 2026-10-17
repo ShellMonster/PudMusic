@@ -207,13 +207,12 @@ func (a *App) Stop() {
 	a.playing, a.wantPlay, a.stopped = false, false, true
 	a.position = 0
 	wake := a.wake
-	dur := a.duration
 	a.mu.Unlock()
 
 	// 「停止」是**终止**：这一轮到此为止，会话要结掉（见 playreport.go 的
 	// 「一、什么时候发」）。暂停留会话、停止结会话，靠的就是这一句——
 	// 两者的区别只有在这里才知道。
-	a.stopTrack(at, dur)
+	a.stopTrack(at)
 
 	p.Pause()
 	p.Seek(0)

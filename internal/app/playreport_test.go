@@ -56,6 +56,8 @@ type reportBili struct {
 	viewHits int
 	// failBeats 非 0 时心跳那一路一律回这个 code（模拟 B 站不收 / 网抖）。
 	failBeats int
+	// failOpens 是「开一轮的头」还要再失败几次。用来造网络抖。
+	failOpens int
 	// viewFails 让「bvid → aid」那一问失败（模拟这个稿件问不着）。
 	viewFails bool
 	// viewGate 非 nil 时「bvid → aid」那一问先卡在它上面，放开才回。
@@ -95,7 +97,15 @@ func newReportBili(t *testing.T) *reportBili {
 	mux.HandleFunc(openPathWanted, func(w http.ResponseWriter, r *http.Request) {
 		b.mu.Lock()
 		b.opens = append(b.opens, formOf(r))
+		fail := b.failOpens
+		if fail > 0 {
+			b.failOpens--
+		}
 		b.mu.Unlock()
+		if fail > 0 {
+			writeReportCode(w, -500, "B 站抖了")
+			return
+		}
 		writeReportJSON(w, map[string]any{})
 	})
 	mux.HandleFunc(beatPathWanted, func(w http.ResponseWriter, r *http.Request) {
@@ -150,6 +160,16 @@ func (b *reportBili) beatsOf(action string) []url.Values {
 		}
 	}
 	return out
+}
+
+// allBeats 是收到的全部心跳（加锁取快照）。
+//
+// ⚠️ 记心跳的是 httptest 自己的 goroutine，测试这一边不加锁读它就是一处
+// 数据竞争——`-race` 会指出来，而不带 `-race` 跑就是另一种「有时绿有时红」。
+func (b *reportBili) allBeats() []url.Values {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]url.Values(nil), b.beats...)
 }
 
 func (b *reportBili) opensCount() int {
@@ -208,7 +228,13 @@ func reportItem(bvid, cid string) Item {
 	return Item{Source: "online", Type: "mv", Bvid: bvid, Cid: cid, Title: "一首"}
 }
 
-// putTrack 把「此刻在放什么」摆好（不真的开流）。
+// putTrack 把「此刻在放什么」摆进 App 的状态里（不真的开流）。
+//
+// ⚠️ **摆完就完事，测试不去自己调 `reportTick`**：进度条的时钟（`tick`）
+// 本来就在跑，它每一拍读的就是 `a.online` / `a.position` / `a.duration` /
+// `a.playing` 这几栏。自己再手动调一遍的话是**两个驱动源**——时钟看到的是
+// 「没有播放器」，每一拍都会报一次「暂停」，而手动那一遍报的是「在放」。
+// 两边对着干，量到的东西和真链路上的不一样。
 func putTrack(a *App, it Item, pos, dur time.Duration, playing bool) {
 	a.mu.Lock()
 	if it.Bvid == "" {
@@ -218,19 +244,34 @@ func putTrack(a *App, it Item, pos, dur time.Duration, playing bool) {
 	}
 	a.position, a.duration = pos, dur
 	a.playing = playing
+	a.wantPlay = playing
 	a.mu.Unlock()
 }
 
-// play 摆好一首歌并跑一拍（进度条那一拍就是调 `reportTick`）。
+// play 摆好一首歌在放。
 func play(a *App, it Item, pos, dur time.Duration) {
 	putTrack(a, it, pos, dur, true)
-	a.reportTick(true, false)
 }
 
-// pauseBeat 摆好「暂停了」并跑一拍。
+// finishOnce 造一次「真的放完了」的那一拍。
+//
+// 🔴 这一条**只能**直接进上报器：真链路上的「放完」是解器读到 EOF、
+// `tick` 判出 `p.Err() == nil` 才有的，而这里没有真播放器（`putTrack`
+// 只摆状态）。所以这是整个仓库里唯一能造出 `finished=true` 的地方。
+func finishOnce(t *testing.T, a *App, it Item, pos, dur time.Duration) {
+	t.Helper()
+	a.mu.Lock()
+	r := a.report
+	a.mu.Unlock()
+	if r == nil {
+		t.Fatal("上报器没装上")
+	}
+	r.sync(it, dur, pos, false, true)
+}
+
+// pauseBeat 摆好「暂停了」。
 func pauseBeat(a *App, it Item, pos, dur time.Duration) {
 	putTrack(a, it, pos, dur, false)
-	a.reportTick(false, false)
 }
 
 // untilBeats 等到「至少有 n 条指定动作的心跳」为止。
@@ -246,7 +287,7 @@ func untilBeats(t *testing.T, b *reportBili, action string, n int) []url.Values 
 			b.mu.Lock()
 			defer b.mu.Unlock()
 			t.Fatalf("等了 5 秒还没有 %d 条 play_type=%s 的心跳，实际收到 %d 条：%v",
-				n, action, len(b.beats), playTypesOf(b.beats))
+				n, action, len(b.beats), playTypesOf(b.beats)) // 此刻持着锁
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -411,6 +452,72 @@ func TestSwitchingEndsTheOldRoundAndOpensANewOne(t *testing.T) {
 	}
 }
 
+// TestTheRoundThatEndsCarriesItsOwnDuration 盯切歌时上一轮发的是**它自己的**时长。
+//
+// 🔴 这一条钉的是一个会写错数据的坑。「下一首」走的是
+// `step` → `playOnline` → `runOnline`，那条路**不清轨道**（点队列里某一行
+// 和「删掉正在放的那首」那两条才清）。而 `runOnline` 是在一个临界区里同时
+// 换掉「在放哪一首 / 时长 / 位置」的，于是紧跟着的那一拍上，上一轮的结束
+// 那一条如果现读时长，读到的是**下一首**的。
+//
+// 后果：B 站那边一条 30 秒的视频配上一个 600 秒的 `video_duration`，
+// 历史记录里那一列播放进度会读成「看了 3%」——用户明明听到了头。
+func TestTheRoundThatEndsCarriesItsOwnDuration(t *testing.T) {
+	a, b := newReportRig(t)
+	old := reportItem("BV1short", "707")
+	neu := reportItem("BV1long", "808")
+
+	play(a, old, 20*time.Second, 30*time.Second) // 30 秒的那首
+	untilBeats(t, b, "1", 1)
+
+	// 「下一首」：一个 30 秒的视频按到了一首 10 分钟的。
+	play(a, neu, 0, 600*time.Second)
+	end := untilBeats(t, b, "4", 1)[0]
+
+	if end.Get("video_duration") != "30" {
+		t.Errorf("上一首的时长被报成了 %q 秒，want 30（那是**下一首**的时长）",
+			end.Get("video_duration"))
+	}
+	if end.Get("played_time") != "20" {
+		t.Errorf("played_time = %q，want 20", end.Get("played_time"))
+	}
+	// 新一轮自己带着自己的时长。
+	if got := untilBeats(t, b, "1", 2)[1]; got.Get("video_duration") != "600" {
+		t.Errorf("新一轮的 video_duration = %q，want 600", got.Get("video_duration"))
+	}
+}
+
+// TestAFailedOpenDoesNotSilenceThatVideoForever 一次网络抖不该让这一首从此不记。
+//
+// 开不了头多半是抖一下，而那一轮的心跳照样在发（B 站那边靠心跳也能把这一条
+// 建出来）。要是失败之后记一笔「这一首别记了」，用户等这一轮结束再放同一首
+// 时就再也报不上——一次抖动换来「这一首今天不记了」。
+func TestAFailedOpenDoesNotSilenceThatVideoForever(t *testing.T) {
+	a, b := newReportRig(t)
+	it := reportItem("BV1flaky", "909")
+
+	// 先让「开那一轮的头」失败一次。
+	b.mu.Lock()
+	b.failOpens = 1
+	b.mu.Unlock()
+
+	play(a, it, 0, 900*time.Second)
+	// 头没开成，而**心跳照样在发**——那才是真正的进度，B 站那边靠它也能
+	// 把这一条建出来。
+	untilBeats(t, b, "0", 1)
+
+	// 这一轮结束，再放同一首：这一次得开得起来。
+	a.stopTrack(50 * time.Second)
+	untilBeats(t, b, "4", 1)
+	opensAfterFail := b.opensCount()
+
+	play(a, it, 0, 900*time.Second)
+	untilBeats(t, b, "1", 1)
+	if n := b.opensCount(); n <= opensAfterFail {
+		t.Errorf("开过一次头失败之后，这一首再也不开新一轮了（共 %d 次）", n)
+	}
+}
+
 // TestStoppingEndsTheRoundAndDoesNotOpenItAgain 盯「停止」。
 //
 // 🔴 后半句是这里最容易写错的地方：停止之后播放状态是「不在放」，而
@@ -423,13 +530,11 @@ func TestStoppingEndsTheRoundAndDoesNotOpenItAgain(t *testing.T) {
 	play(a, it, 200*time.Second, 900*time.Second)
 	untilBeats(t, b, "1", 1)
 
-	// 用户按停止：位置和时长在清零之前抄下来。
-	a.mu.Lock()
-	at, dur := a.position, a.duration
-	a.playing, a.wantPlay, a.stopped = false, false, true
-	a.position = 0
-	a.mu.Unlock()
-	a.stopTrack(at, dur)
+	// 用户按停止（`App.Stop` 那条路）：位置先清零，而那一下抄下来的是
+	// 清零**之前**的位置。
+	at := 200 * time.Second
+	putTrack(a, it, 0, 900*time.Second, false)
+	a.stopTrack(at)
 
 	end := untilBeats(t, b, "4", 1)[0]
 	if end.Get("played_time") != "200" {
@@ -438,10 +543,7 @@ func TestStoppingEndsTheRoundAndDoesNotOpenItAgain(t *testing.T) {
 
 	// 停止之后连着跑十拍：用户**没有**再按播放。
 	opensAfterStop := b.opensCount()
-	for i := 0; i < 10; i++ {
-		a.reportTick(false, false)
-		time.Sleep(5 * time.Millisecond)
-	}
+	time.Sleep(300 * time.Millisecond)
 	if n := b.opensCount(); n != opensAfterStop {
 		t.Errorf("停止之后又多开了 %d 次头——用户明明已经停了", n-opensAfterStop)
 	}
@@ -458,8 +560,7 @@ func TestFinishingSaysItFinished(t *testing.T) {
 	play(a, it, 899*time.Second, 900*time.Second)
 	untilBeats(t, b, "1", 1)
 
-	putTrack(a, it, 900*time.Second, 900*time.Second, false)
-	a.reportTick(false, true) // 进度条的 tick 说「这一轮真的放完了」
+	finishOnce(t, a, it, 900*time.Second, 900*time.Second)
 
 	end := untilBeats(t, b, "4", 1)[0]
 	if end.Get("played_time") != "-1" {
@@ -483,16 +584,16 @@ func TestAFailedStreamIsNeverReportedAsFinished(t *testing.T) {
 	// 这一拍是「从在放变成不在放」，但**不是**放完了（`finished=false`，
 	// 那是 `tick` 判过 `p.Err() != nil` 之后的结果）。
 	putTrack(a, it, 120*time.Second, 900*time.Second, false)
-	a.reportTick(false, false)
 	untilBeats(t, b, "2", 1)
 
-	for _, f := range b.beats {
+	for _, f := range b.allBeats() {
 		if f.Get("played_time") == "-1" {
 			t.Fatalf("断流被报成了播完：play_type=%s", f.Get("play_type"))
 		}
 	}
 	// 而它确实发出去了一条——用户听不下去停在那儿，那 120 秒得记上。
-	if last := b.beats[len(b.beats)-1]; last.Get("played_time") != "120" {
+	all := b.allBeats()
+	if last := all[len(all)-1]; last.Get("played_time") != "120" {
 		t.Errorf("断流那一条的 played_time = %q，want 120（听到哪儿就记到哪儿）",
 			last.Get("played_time"))
 	}
@@ -510,12 +611,9 @@ func TestLocalFilesAreNeverReported(t *testing.T) {
 	a, b := newReportRig(t)
 
 	putTrack(a, Item{}, 42*time.Second, 900*time.Second, true)
-	for i := 0; i < 10; i++ {
-		a.reportTick(true, false)
-	}
-	time.Sleep(150 * time.Millisecond)
-	if n := len(b.beats); n != 0 {
-		t.Errorf("本地文件也发了 %d 条心跳：%v", n, playTypesOf(b.beats))
+	time.Sleep(250 * time.Millisecond)
+	if got := b.allBeats(); len(got) != 0 {
+		t.Errorf("本地文件也发了 %d 条心跳：%v", len(got), playTypesOf(got))
 	}
 	if n := b.opensCount(); n != 0 {
 		t.Errorf("本地文件也开了 %d 次头", n)
@@ -539,7 +637,7 @@ func TestTheSwitchOffMeansNothingIsSent(t *testing.T) {
 		play(a, it, time.Duration(i+1)*time.Second, 900*time.Second)
 		time.Sleep(25 * time.Millisecond)
 	}
-	if n := len(b.beats); n != 0 {
+	if n := len(b.allBeats()); n != 0 {
 		t.Errorf("开关关着还是发了 %d 条心跳", n)
 	}
 	if n := b.opensCount(); n != 0 {
@@ -561,8 +659,12 @@ func TestASessionInFlightDiesWithTheRoundThatStartedIt(t *testing.T) {
 	b.viewGate = blocked
 	b.mu.Unlock()
 
+	// 每换一首之间留一拍（50 ms），让时钟真的看见那一次切换——
+	// 全挤在一拍里的话时钟只看得见最后一首，代次守卫就没被量到。
 	play(a, reportItem("BV1rushed", "1"), 0, 900*time.Second)
+	time.Sleep(80 * time.Millisecond)
 	play(a, reportItem("BV1rushed2", "2"), 0, 900*time.Second)
+	time.Sleep(80 * time.Millisecond)
 	play(a, reportItem("BV1rushed3", "3"), 0, 900*time.Second)
 
 	// 只放开最后一轮：前两轮的问 aid 一回来就发现代次变了。
@@ -572,14 +674,31 @@ func TestASessionInFlightDiesWithTheRoundThatStartedIt(t *testing.T) {
 	}()
 	untilBeats(t, b, "1", 1)
 
-	b.mu.Lock()
-	sent := append([]url.Values(nil), b.beats...)
-	b.mu.Unlock()
-	for _, f := range sent {
-		if f.Get("bvid") != "BV1rushed3" {
-			t.Errorf("发出去的心跳记的是 %q，want BV1rushed3（只有最后一轮该活）", f.Get("bvid"))
+	// 钉的是「**开出去的那一轮**只能是最后一轮」：B 站那边「开一轮」就是往
+	// 历史记录里加一条，前两轮各加一条的话，用户点三下就得到三条他没听完的
+	// 记录。
+	starts := b.beatsOf("1")
+	if len(starts) != 1 || starts[0].Get("bvid") != "BV1rushed3" {
+		t.Errorf("开出去的轮次是 %v，want 只有 BV1rushed3 一轮", bvidOf(starts))
+	}
+	// ⚠️ 被跳过的那几轮**排好的结束那一条仍然会发出去**——`live` 给上一轮
+	// 放行一格是故意的（每一次切歌都不发结束是更糟的毛病）。所以这里只钉
+	// 「第一轮的在途消息一条都不许发」：那一条连头都没开成功，发出去就是
+	// 凭空造一条记录。
+	for _, f := range b.beatsOf("0") {
+		if f.Get("bvid") == "BV1rushed" {
+			t.Errorf("第一轮明明已经不在了，还有心跳发出去：%v", f)
 		}
 	}
+}
+
+// bvidOf 列出这些心跳各记的是哪一首。
+func bvidOf(beats []url.Values) []string {
+	out := make([]string, 0, len(beats))
+	for _, f := range beats {
+		out = append(out, f.Get("bvid"))
+	}
+	return out
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -604,7 +723,7 @@ func TestLoggingOutStopsTheReporting(t *testing.T) {
 
 	// 退登之后这一首还在放着（我们不因为退登就停歌），但不该再记了。
 	opensAfter := b.opensCount()
-	beatsAfter := len(b.beats)
+	beatsAfter := len(b.allBeats())
 	for i := 0; i < 12; i++ {
 		play(a, it, time.Duration(60+i)*time.Second, 900*time.Second)
 		time.Sleep(25 * time.Millisecond)
@@ -613,7 +732,7 @@ func TestLoggingOutStopsTheReporting(t *testing.T) {
 		t.Errorf("退登之后又多开了 %d 次头", n-opensAfter)
 	}
 	b.mu.Lock()
-	after := b.beats[beatsAfter:]
+	after := b.allBeats()[beatsAfter:]
 	b.mu.Unlock()
 	if len(after) != 0 {
 		t.Errorf("退登之后还发了 %d 条心跳：%v", len(after), playTypesOf(after))
@@ -641,12 +760,12 @@ func TestTheProgressNeverLandsOnTheNextAccount(t *testing.T) {
 		SESSDATA: "other-sessdata", BiliJCT: "other-jct", DedeUserID: "8888",
 	})
 
-	before := len(b.beats)
+	before := len(b.allBeats())
 	for i := 0; i < 12; i++ {
 		play(a, it, time.Duration(30+i)*time.Second, 900*time.Second)
 		time.Sleep(25 * time.Millisecond)
 	}
-	for _, f := range b.beats[before:] {
+	for _, f := range b.allBeats()[before:] {
 		if f.Get("mid") == "8888" {
 			t.Fatalf("上一个账号的进度被记到了 8888 名下：%v", f)
 		}
@@ -684,7 +803,7 @@ func TestAFailedReportDoesNotReachTheUser(t *testing.T) {
 		t.Errorf("播放条上冒出了一句：%s", err)
 	}
 	// B 站拒了，但它**一直在拒**——我们这边必须一次都没停过。
-	if n := len(b.beats); n < 5 {
+	if n := len(b.allBeats()); n < 5 {
 		t.Errorf("B 站拒了之后我们只发了 %d 次心跳——失败一次就不记了", n)
 	}
 	// 位置还在往前走：上报这条路上没有任何东西能卡住播放。

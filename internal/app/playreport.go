@@ -143,6 +143,16 @@ type reportSess struct {
 	mid string
 	// bvid / cid 是这一轮记的是哪一稿的哪一集。切歌就是比这两个。
 	bvid, cid string
+	// dur 是**这一轮**的时长（秒）。
+	//
+	// 🔴 它记在这里而不是每拍现读，是因为现读会拿到**下一首**的：
+	// 「下一首」走 `step` → `playOnline` → `runOnline`，那条路**不清轨道**
+	// （`PlayAt` 和「删掉正在放的那首」那两条才清）。而 `runOnline` 是在一个
+	// 临界区里同时换掉 `a.online` / `a.duration` / `a.position` 的，于是紧跟着
+	// 那一拍上，上一轮的结束那一条就会带着下一首的时长发出去——
+	// B 站那边一条 30 秒的视频配上一个 600 秒的 video_duration，历史记录里
+	// 那一列进度会读成「看了 3%」。
+	dur int64
 	// startTS 是这一轮开始的 Unix 秒。
 	startTS int64
 	// maxPlayed 是这一轮到过的最远处。拖回去重听不会把它拽回来，
@@ -217,31 +227,53 @@ func (a *App) SetPlayReportInterval(d time.Duration) {
 
 // mountPlayReport 装上上报器（`MountStreaming` 调，因为只有在线流才报）。
 func (a *App) mountPlayReport(cli *bili.Client) {
-	if cli == nil {
-		return
-	}
 	// ⚠️ **换客户端时上一条 goroutine 得走掉**，否则它还拿着旧客户端在发，
-	// 而那个客户端的 jar 可能已经被换掉了。`close` 会等它真的退出，
-	// 所以它一定是在拿着旧客户端发完手上那一条之后才走的。
+	// 而那个客户端的 jar 可能已经被换掉了。
 	//
 	// ⚠️ `old` 要**在锁外面**关：`close` 要等一条 goroutine，而那条
 	// goroutine 每一拍都要拿 `a.mu`（问设置和登录态）。锁里面等 = 死锁。
+	//
+	// ⚠️ 没有客户端时**也要先把旧的关掉**：传 nil 进来不是「别动」，而是
+	// 「在线播放没了」，留着上一条 goroutine 就等于收尾被漏掉了。
 	a.mu.Lock()
 	old := a.report
-	a.report = newPlayReporter(cli, a.accountMid,
-		func() bool { return a.SettingsSnapshot().ReportPlayHistory })
+	a.report = nil
+	closed := a.closed
 	a.mu.Unlock()
 	if old != nil {
 		old.close()
 	}
+	if cli == nil {
+		return
+	}
+	if closed {
+		// 应用已经退出了，这时候再起一条永远没人收的 goroutine。
+		return
+	}
+
+	a.mu.Lock()
+	a.report = newPlayReporter(cli, a.accountMid,
+		func() bool { return a.SettingsSnapshot().ReportPlayHistory })
+	a.mu.Unlock()
 }
 
 // accountMid 是当前登录账号的 DedeUserID。没挂登录时是空串。
+//
+// ⚠️ **`a.account` 是在 `a.mu` 里读的**：它由 `MountLogin` 写，而上报器那条
+// goroutine 会**隔着好几层**去问它。不加锁的话，「重挂一次登录」就是一次
+// 数据竞争——今天没暴露只因为 `main.go` 先 `MountLogin` 再 `MountStreaming`
+// （而写在上家的 goroutine 创建之前），那个先后是约定，不是代码保证的。
+//
+// 它要在**上报器自己的锁**里调，所以这把锁叠在 `a.mu` 上面。方向见
+// `App.report` 那段：只能是「上报器的锁 → App 的锁」，反过来会死锁。
 func (a *App) accountMid() string {
-	if acc := a.account; acc != nil {
-		return acc.Session().DedeUserID
+	a.mu.Lock()
+	acc := a.account
+	a.mu.Unlock()
+	if acc == nil {
+		return ""
 	}
-	return ""
+	return acc.Session().DedeUserID
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -250,18 +282,22 @@ func (a *App) accountMid() string {
 
 // reportTick 是进度条那一拍调的那个入口（`app.go` 的 tick）。
 //
-// ⚠️ **它不发任何网络请求**：位置、时长、在不在放都是从 App 的状态里抄的
-// （`tick` 已经把它们写回去了），真正的网络在 `run` 那一条 goroutine 上。
-// 理由和 `app.runOnline` 那句「界面线程上不碰网络」是同一条：上报晚一拍
-// 没有关系，卡住窗口有。
-func (a *App) reportTick(playing, finished bool) {
+// ⚠️ **它不发任何网络请求**：在放哪一首、时长、位置、在不在放都是从 App 的
+// 状态里抄的，真正的网络在 `run` 那一条 goroutine 上。理由和 `app.runOnline`
+// 那句「界面线程上不碰网络」是同一条：上报晚一拍没有关系，卡住窗口有。
+//
+// 🔴 **「在不在放」读的是 `a.playing`，不是从 tick 传进来。** `a.playing`
+// 是 App 记着的那个状态（换歌、暂停、停止、播完都会改它），而 tick 手上的
+// 那个局部变量只在 `p != nil && live` 时才有值——歌刚被换掉的那一拍它就
+// 落回 `false` 了，于是那一拍会被报成「用户暂停了」。
+func (a *App) reportTick(finished bool) {
 	a.mu.Lock()
 	r := a.report
 	var it Item
 	if a.online != nil {
 		it = a.online.item
 	}
-	dur, pos := a.duration, a.position
+	dur, pos, playing := a.duration, a.position, a.playing
 	a.mu.Unlock()
 	if r == nil {
 		return
@@ -306,7 +342,7 @@ func (r *playReporter) sync(it Item, dur, pos time.Duration, playing, finished b
 
 	// 2. 切歌 / 清空 / 从在线换成本地文件：上一轮到头了，本轮另开。
 	if cur != nil && (!online || it.Bvid != cur.bvid || it.Cid != cur.cid) {
-		r.pushLocked(r.beatOf(cur, pos, dur, bili.PlayEnd, false))
+		r.pushLocked(r.beatOf(cur, pos, bili.PlayEnd, false))
 		r.dropLocked()
 		cur = nil
 	}
@@ -357,18 +393,18 @@ func (r *playReporter) sync(it Item, dur, pos time.Duration, playing, finished b
 	case finished:
 		// 🔴 `played_time` 发 -1，B 站靠它把这一条标成「看完」（接口文档：
 		// 「视频播放进度（秒），完成为 -1」）。**只有真放完了才发**。
-		r.pushLocked(r.beatOf(cur, pos, dur, bili.PlayEnd, true))
+		r.pushLocked(r.beatOf(cur, pos, bili.PlayEnd, true))
 		r.dropLocked()
 		return
 	case !playing && cur.playing:
-		r.pushLocked(r.beatOf(cur, pos, dur, bili.PlayPause, false))
+		r.pushLocked(r.beatOf(cur, pos, bili.PlayPause, false))
 	case playing && !cur.playing:
-		r.pushLocked(r.beatOf(cur, pos, dur, bili.PlayResume, false))
+		r.pushLocked(r.beatOf(cur, pos, bili.PlayResume, false))
 	case playing:
 		// 心跳按节奏发。**刚发过就别发**：上面那两种已经带上了最新进度，
 		// 紧接着再补一条 play_type=0 只是多一次请求。
 		if at := time.Now(); at.Sub(cur.lastAt) >= r.every {
-			r.pushLocked(r.beatOf(cur, pos, dur, bili.PlayPlaying, false))
+			r.pushLocked(r.beatOf(cur, pos, bili.PlayPlaying, false))
 		}
 	}
 	cur.playing = playing
@@ -389,7 +425,7 @@ func (r *playReporter) startLocked(it Item, mid string, pos, dur time.Duration) 
 		gen: r.gen, id: id, mid: mid,
 		bvid: it.Bvid, cid: it.Cid,
 		startTS: at.Unix(), lastAt: at, playing: true,
-		maxPlayed: secsOf(pos),
+		dur: secsOf(dur), maxPlayed: secsOf(pos),
 	}
 	r.pushLocked(reportMsg{
 		kind: kindOpen, gen: r.gen,
@@ -401,10 +437,13 @@ func (r *playReporter) startLocked(it Item, mid string, pos, dur time.Duration) 
 
 // stopTrack 结掉当前这一轮：用户按了停止，或这一首被从队列里拿掉了。
 //
-// ⚠️ **`pos` 和 `dur` 要由调用方在清零之前抄下来**：`App.Stop` 和
-// `App.ClearTrack` 都是先把播放位置清成 0 才走到这里的，用那之后的 0
-// 报上去，B 站那边这一条就成了「从头开始听然后立刻停了」。
-func (a *App) stopTrack(pos, dur time.Duration) {
+// ⚠️ **`pos` 要由调用方在清零之前抄下来**：`App.Stop` 和 `App.ClearTrack`
+// 都是先把播放位置清成 0 才走到这里的，用那之后的 0 报上去，B 站那边这一条
+// 就成了「从头开始听然后立刻停了」。
+//
+// 时长不用传：那一轮记着自己开的时候是多久（`reportSess.dur`），现读
+// `a.duration` 有可能已经换成下一首的了。
+func (a *App) stopTrack(pos time.Duration) {
 	a.mu.Lock()
 	r := a.report
 	a.mu.Unlock()
@@ -417,7 +456,7 @@ func (a *App) stopTrack(pos, dur time.Duration) {
 		return
 	}
 	cur := r.sess
-	r.pushLocked(r.beatOf(cur, pos, dur, bili.PlayEnd, false))
+	r.pushLocked(r.beatOf(cur, pos, bili.PlayEnd, false))
 	r.dropLocked()
 }
 
@@ -431,6 +470,10 @@ func (a *App) stopTrack(pos, dur time.Duration) {
 // 代次是**开新一轮**时涨的（`startLocked`）。那才是它该管的事：新一轮
 // 一开，上一轮还在队列里的消息自动作废，而上一轮**已经排好的**那条结束
 // 心跳排在前面，会先发出去。
+//
+// 另一处涨代次的地方是 `stopAccount`（退登）。那一次**没有**结束心跳可发，
+// 涨了正好作废掉排队里的东西——它安全靠的是 `live` 里那句「账号对不上就不发」，
+// 不是靠代次。改 `stopAccount` 之前先想清楚这一条。
 func (r *playReporter) dropLocked() {
 	r.sess = nil
 }
@@ -443,7 +486,7 @@ func (r *playReporter) dropLocked() {
 // 而那一下和刚才那条继续说的是同一件事。
 //
 // 调用方拿着 r.mu。
-func (r *playReporter) beatOf(s *reportSess, pos, dur time.Duration, act bili.PlayAction, finished bool) reportMsg {
+func (r *playReporter) beatOf(s *reportSess, pos time.Duration, act bili.PlayAction, finished bool) reportMsg {
 	played := secsOf(pos)
 	switch {
 	case finished:
@@ -462,7 +505,7 @@ func (r *playReporter) beatOf(s *reportSess, pos, dur time.Duration, act bili.Pl
 		kind: kindBeat, gen: s.gen,
 		bvid: s.bvid, cid: cidOf(s.cid),
 		start: s.startTS, id: s.id, mid: s.mid,
-		played: played, dur: secsOf(dur), max: s.maxPlayed, action: act,
+		played: played, dur: s.dur, max: s.maxPlayed, action: act,
 	}
 }
 
@@ -501,10 +544,10 @@ func (r *playReporter) stopAccount() {
 // ⚠️ **先结这一轮再停**：`close` 一执行那条 goroutine 就不会再发了，而退出
 // 这一刻用户多半正听到一半——那一条 PlayEnd 是这一轮最后一次把进度写进
 // B 站的机会。
-func (r *playReporter) finishOnClose(pos, dur time.Duration) {
+func (r *playReporter) finishOnClose(pos time.Duration) {
 	r.mu.Lock()
 	if !r.closed && r.sess != nil {
-		r.pushLocked(r.beatOf(r.sess, pos, dur, bili.PlayEnd, false))
+		r.pushLocked(r.beatOf(r.sess, pos, bili.PlayEnd, false))
 		r.dropLocked()
 	}
 	r.mu.Unlock()
@@ -586,7 +629,7 @@ func (r *playReporter) deliver(m reportMsg, curGen uint64, curAid int64) (uint64
 	switch m.kind {
 	case kindOpen:
 		// aid 要另外问一次（bvid → aid，`ArchiveID`）。问不到就是这一首
-		// 不记——记 `skip` 是为了别每 50 ms 再问一次。
+		// 不记——记 `skip` 是为了别每 50 ms 再问一次（那是一秒二十次）。
 		aid, err := r.cli.ArchiveID(ctx, m.bvid)
 		if err != nil {
 			log.Printf("biu: 问不到这一首的稿件 id，播放记录不记：%v", err)
@@ -595,13 +638,25 @@ func (r *playReporter) deliver(m reportMsg, curGen uint64, curAid int64) (uint64
 		}
 		curGen, curAid = m.gen, aid
 
+		// ⚠️ **再对一遍**（代次 + 账号）：上面那一次问 aid 是一次网络往返
+		//（慢的话好几秒），用户完全有时间在这中间退登或者切歌。不对就
+		// **连这一发都不发**——发出去的那一下带的是上一个账号的 mid，
+		// 而 jar 已经是新账号的了。
+		if !r.live(m) {
+			return curGen, curAid
+		}
+
 		err = r.cli.PlayReportOpen(ctx, bili.PlayReportOpen{
 			Mid: midOf(m.mid), Aid: aid, Bvid: m.bvid, Cid: m.cid,
 			Session: m.id, StartTS: m.start,
 		})
 		if err != nil {
+			// 🔴 **这里不许 `markSkipped`**。开不了头多半是网络抖一下，
+			// 而这一轮的心跳照样在发（`curGen`/`curAid` 已经记上了，B 站那边
+			// 靠心跳也能把这一条建出来）。记一笔「这一首别记了」的话，
+			// 用户等这一轮结束再放同一首，就再也报不上了——一次网络抖动
+			// 换来「这一首今天不记了」。
 			log.Printf("biu: 播放记录开不了头：%v", err)
-			r.markSkipped(m.bvid)
 			return curGen, curAid
 		}
 		// 开完头紧接着补一条 PlayStart：「开始播」这件事 B 站那边是记在
@@ -619,6 +674,13 @@ func (r *playReporter) deliver(m reportMsg, curGen uint64, curAid int64) (uint64
 
 // sendBeat 发一条心跳，失败只记日志。
 func (r *playReporter) sendBeat(ctx context.Context, aid int64, m reportMsg, act bili.PlayAction) {
+	// ⚠️ 发之前**再对一遍**（`live` 里代次和账号一起对）：从队列里取出到这一行
+	// 之间隔着别的网络往返（问 aid、开那一轮的头），用户完全有时间在这中间
+	// 退登或者切歌。不对就不发——发出去的那一条要么会被记到别人的账号名下，
+	// 要么会给一首已经不听的歌凭空开一条记录。
+	if !r.live(m) {
+		return
+	}
 	err := r.cli.PlayReportBeat(ctx, bili.PlayReportBeat{
 		Mid: midOf(m.mid), Aid: aid, Bvid: m.bvid, Cid: m.cid,
 		Played: m.played, Realtime: m.played, RealPlayed: m.played,
@@ -656,18 +718,28 @@ func (r *playReporter) live(m reportMsg) bool {
 		// 代次已经过去了——不放行的话，**每一次切歌都不会发 PlayEnd**，
 		// B 站那边每一首的最后一次进度都停在 30 秒前那个采样点上。
 		//
-		// 只给结束那一条放一格，而且只放一格：连开头一起放的话，用户飞快
-		// 连点五首时前四首都会被开成一轮，B 站那边看过去是同一首歌听了五遍。
-		if m.gen+1 != r.gen || m.action != bili.PlayEnd {
+		// 只给**结束那一条**放一格，而且只放一格：连「开一轮的头」一起放的
+		// 话，用户飞快连点五首时前四首都会被开成一轮，B 站那边看过去是同一首
+		// 歌听了五遍。
+		//
+		// ⚠️ 判据写的是「**是心跳**且**是结束**」，不是「动作不是结束」：
+		// 后者会让「开一轮的头」靠它零值是 `PlayPlaying` 而碰巧放行——
+		// 那是碰对的，不是设计对的，而碰对的东西最容易在某次重构里变成碰错。
+		if m.kind != kindBeat || m.action != bili.PlayEnd || m.gen+1 != r.gen {
 			return false
 		}
 	}
-	// ⚠️ **再对一遍账号**：从 `sync` 塞进队列到这一行之间隔着一次网络往返
-	//（问 aid），用户完全有时间在这中间退登。
+	// ⚠️ **每一次真发出去之前都要对一遍**（`sendBeat` 那里还会再对一次）。
+	// 从 `sync` 塞进队列到发出去之间隔着别的网络往返（问 aid、开那一轮的头），
+	// 用户完全有时间在这中间退登。
 	return m.mid != "" && m.mid == r.mid()
 }
 
-// markSkipped 记下「这一首开不了会话」，别反复问同一个稿件 id。
+// markSkipped 记下「这一首的稿件 id 问不出来」，别反复问同一个。
+//
+// ⚠️ **只管「问不到 aid」这一种**。别的失败（网络抖、`click/web/h5` 那一发
+// 没过）**不许**走这里：那两种下一轮就好，记一笔「别记了」等于让用户之后
+// 再放这一首时也报不上，而理由只是刚才抖了一下。
 func (r *playReporter) markSkipped(bvid string) {
 	r.mu.Lock()
 	r.skip = bvid

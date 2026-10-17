@@ -548,6 +548,7 @@ var Items = []Item{
 			"TestAHeartbeatKeepsGoingWhileItPlays",
 			"TestPausingAndResumingAreToldApart",
 			"TestSwitchingEndsTheOldRoundAndOpensANewOne",
+			"TestTheRoundThatEndsCarriesItsOwnDuration",
 			"TestStoppingEndsTheRoundAndDoesNotOpenItAgain",
 			"TestFinishingSaysItFinished",
 			// 什么不许发。
@@ -560,6 +561,7 @@ var Items = []Item{
 			"TestTheProgressNeverLandsOnTheNextAccount",
 			// 失败不许影响播放。
 			"TestAFailedReportDoesNotReachTheUser",
+			"TestAFailedOpenDoesNotSilenceThatVideoForever",
 			"TestAViewThatFailsIsNotAskedAgainAndAgain",
 			// 退出与换客户端：上报那条 goroutine 得收掉。
 			"TestClosingTheAppStopsTheReportingGoroutine",
