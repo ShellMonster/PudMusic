@@ -146,7 +146,6 @@ func lastToast(s *Shell) string {
 	return s.toasts[len(s.toasts)-1].text
 }
 
-
 // TestFavoritingAnItemWithoutASourceSaysSo 一条 **Source 不是 online** 的项按
 // 「收藏」：**说一句就停**，不许递归。
 //

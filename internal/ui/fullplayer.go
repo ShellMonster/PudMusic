@@ -207,6 +207,18 @@ func (s *Shell) viewFullPlayer(c *ui.Context) {
 	})
 }
 
+// fullNothing 是「满屏开着、此刻没有歌」那一句。
+//
+// ⚠️ **不能复用 `nowplaying.go` 那一份**：那边那句提示是写给迷你播放器的
+// （「在主窗口里点『打开文件』，这边就会显示正在放什么」），而在满屏里主窗口整个
+// 被盖住了，照抄过来那句话指向的地方用户根本看不到。
+//
+// 提示写的是**这一屏里做得到的事**：按 Esc 或者点左上角退出去，主窗口里放歌。
+var fullNothing = emptyState{
+	Title: "暂无播放内容",
+	Hint:  "按 Esc 退回去，在主窗口里放几首歌进来",
+}
+
 // viewFullEmpty 是「满屏开着、此刻没有歌」的那一屏。
 //
 // 三样都留着：背景、顶栏（关掉的那一条）、指针那三秒。少任何一样，用户就是被
@@ -233,8 +245,8 @@ func (s *Shell) viewFullEmpty(c *ui.Context) {
 			ui.Column(c).Key("full-empty").
 				Absolute().Left(0).Top(0).Right(0).Bottom(0).
 				Center().Gap(6).Children(func() {
-				ui.Text(c, nothingPlaying.Title).FontSize(15).TextColor(fullOnColor)
-				ui.Text(c, nothingPlaying.Hint).FontSize(12).TextColor(fullDimColor)
+				ui.Text(c, fullNothing.Title).FontSize(15).TextColor(fullOnColor)
+				ui.Text(c, fullNothing.Hint).FontSize(12).TextColor(fullDimColor)
 			})
 		})
 

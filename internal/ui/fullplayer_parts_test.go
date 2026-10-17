@@ -282,7 +282,7 @@ func TestAFullPlayerWithNoTrackShowsAnEmptyStateInsteadOfVanishing(t *testing.T)
 	if !s.full.open {
 		t.Fatal("清掉播放器之后满屏自己关上了")
 	}
-	if !tt.HasText(nothingPlaying.Title) {
+	if !tt.HasText(fullNothing.Title) {
 		t.Errorf("没有歌的那一屏没有说「暂无播放内容」，文字有 %q", tt.Texts())
 	}
 	if !tt.HasText("关闭全屏") {
