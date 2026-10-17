@@ -4,11 +4,14 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/ShellMonster/Biu_Go/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -301,5 +304,241 @@ func TestAVideoFromThePostTabCanBeQueued(t *testing.T) {
 	}
 	if items[0].Source != "online" || items[0].Type != "mv" {
 		t.Errorf("队列那一项的来源/类型是 %q/%q，want online/mv", items[0].Source, items[0].Type)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 动态卡片上的动作
+// ─────────────────────────────────────────────────────────────────────────────
+
+// thumbCall 是收到的一次「给动态点赞」。
+type thumbCall struct {
+	id   string
+	like bool
+}
+
+// recordThumbs 让那台假 B 站答得上来点赞，并记下每一次。fail 是让它一律报错。
+//
+// ⚠️ **请求体是 JSON 而不是表单**（见 `bili.LikeDynamic`）：这一段自己解，
+// 解不出来就回「参数错误」。写成读表单的话 handler 照样答 0，而用例会看见
+// 「发出去了、id 是空的」——钉不住任何东西。
+func recordThumbs(t *testing.T, b *uiExplore, fail bool) func() []thumbCall {
+	t.Helper()
+	var (
+		mu    sync.Mutex
+		calls []thumbCall
+	)
+	b.on("/x/dynamic/feed/dyn/thumb", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			ID   string `json:"dyn_id_str"`
+			Like int    `json:"up"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			uiExploreJSON(w, 4100001, nil)
+			return
+		}
+		mu.Lock()
+		calls = append(calls, thumbCall{id: body.ID, like: body.Like == 1})
+		mu.Unlock()
+		if fail {
+			uiExploreJSON(w, -101, nil)
+			return
+		}
+		uiExploreJSON(w, 0, map[string]any{})
+	})
+	return func() []thumbCall {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]thumbCall(nil), calls...)
+	}
+}
+
+// setLike 给一条造出来的动态装上赞状态（`modules.module_stat.like`）。
+func setLike(item map[string]any, count int, liked bool) {
+	item["modules"].(map[string]any)["module_stat"] = map[string]any{
+		"like": map[string]any{"count": count, "status": liked},
+	}
+}
+
+// dynamicCardShell 造一个只有一条动态的 UP 空间。
+func dynamicCardShell(t *testing.T, b *uiExplore, item map[string]any) (*Shell, *mygoui.Tester, *app.App) {
+	// 这一组只需要 Tester 和 App（动作都是往 App 上发的），但外壳仍然要建在
+	// 一个 `*Shell` 上——界面状态只在它身上。
+	t.Helper()
+	uiSpaceData(b, "发动态的 UP", 0, 1)
+	b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{"items": []any{item}, "offset": "", "has_more": false})
+	})
+	s, tt, a := newSpaceShell(t, b, false, "")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+	waitFrames(t, tt, "动态加载完", func() bool { return sp.dyn.started })
+	tt.Frame()
+	return s, tt, a
+}
+
+// TestLikingADynamicReallyReachesBili 「赞」不是一句「还没接」。
+//
+// 钉三样：**按钮摆出来了**、**按下去发的是这一条的 id**、**界面上立刻变了**。
+// 最后一条是乐观更新：用户按完到界面变化之间隔着一次网络往返，不立刻变的话他
+// 会再按一下，于是他点了三次而他以为点了一次。
+func TestLikingADynamicReallyReachesBili(t *testing.T) {
+	b := newUIExplore(t)
+	thumbs := recordThumbs(t, b, false)
+	item := uiDynamicArchive("v1", "BV1play")
+	setLike(item, 12, false)
+
+	_, tt, _ := dynamicCardShell(t, b, item)
+
+	if !tt.HasText("赞 12") {
+		t.Fatalf("画面上没有「赞 12」，文字有 %q", tt.Texts())
+	}
+	if err := tt.Click("赞 12"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+
+	// 还没等 B 站回话，界面已经变了。
+	if !tt.HasText("赞 13") {
+		t.Errorf("按了之后赞数没变，文字有 %q", tt.Texts())
+	}
+	waitFor(t, "点赞请求到了 B 站", func() bool { return len(thumbs()) == 1 })
+	if got := thumbs()[0]; got.id != "v1" || !got.like {
+		t.Errorf("发出去的是 %+v，want id=v1 且是点赞", got)
+	}
+}
+
+// TestUnlikingTakesTheCountBackDown 取消赞也要真的发出去。
+func TestUnlikingTakesTheCountBackDown(t *testing.T) {
+	b := newUIExplore(t)
+	thumbs := recordThumbs(t, b, false)
+	item := uiDynamicArchive("v1", "BV1play")
+	setLike(item, 12, true)
+
+	_, tt, _ := dynamicCardShell(t, b, item)
+
+	if err := tt.Click("赞 12"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("赞 11") {
+		t.Errorf("取消赞之后数字没减，文字有 %q", tt.Texts())
+	}
+	waitFor(t, "取消赞的请求到了 B 站", func() bool { return len(thumbs()) == 1 })
+	if got := thumbs()[0]; got.like {
+		t.Errorf("发出去的是赞，不是取消赞：%+v", got)
+	}
+}
+
+// TestAFailedLikeGoesBackToWhatItWas B 站说不行就**撤回去**。
+//
+// 不撤的话界面上会停在一个用户从来没设过的状态（他赞过、他没赞过都不是）。
+func TestAFailedLikeGoesBackToWhatItWas(t *testing.T) {
+	b := newUIExplore(t)
+	recordThumbs(t, b, true)
+	item := uiDynamicArchive("v1", "BV1play")
+	setLike(item, 12, false)
+
+	_, tt, _ := dynamicCardShell(t, b, item)
+
+	if err := tt.Click("赞 12"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "赞失败之后撤回去", func() bool { return tt.HasText("赞 12") })
+	if !tt.HasText("赞不了") {
+		t.Errorf("失败了却一句话不说，文字有 %q", tt.Texts())
+	}
+}
+
+// TestAVideoDynamicOffersBothDownloads 投稿型动态上才有「下载音频 / 下载视频」。
+func TestAVideoDynamicOffersBothDownloads(t *testing.T) {
+	_, tt, _ := dynamicCardShell(t, newUIExplore(t), uiDynamicArchive("v1", "BV1play"))
+
+	for _, want := range []string{"下载音频", "下载视频"} {
+		if !tt.HasText(want) {
+			t.Errorf("投稿型动态上没有 %q，文字有 %q", want, tt.Texts())
+		}
+	}
+}
+
+// TestATextDynamicHasNoDownloadButtons 纯文字动态上**不摆**下载。
+//
+// 摆出来按不动（没有取流通道）——Biu 那边的下载按钮也只挂在视频上。
+func TestATextDynamicHasNoDownloadButtons(t *testing.T) {
+	_, tt, _ := dynamicCardShell(t, newUIExplore(t), uiDynamic("t1", "纯文字的那一条"))
+
+	// 赞还在：文本动态也评赞（B 站给纯文字和图文都评）。
+	if !tt.HasText("赞") {
+		t.Errorf("纯文字动态上没有赞，文字有 %q", tt.Texts())
+	}
+	if tt.HasText("下载音频") || tt.HasText("下载视频") {
+		t.Errorf("纯文字动态上摆着下载（按了也下不了），文字有 %q", tt.Texts())
+	}
+}
+
+// TestDownloadingFromADynamicReallyReachesTheQueue 「下载音频」真的进队列。
+//
+// ⚠️ 动态接口给的稿件**不带 cid**（`major.archive` 里没有这个字段），而下载
+// 队列的判重（`<bvid>|<cid>`）要它——所以这一条顺带钉了「它自己去问了一次分 P」
+// （`App.DownloadItem` 那一层），而界面线程上一次网络往返都没有。
+func TestDownloadingFromADynamicReallyReachesTheQueue(t *testing.T) {
+	b := newUIExplore(t)
+	b.on("/x/player/pagelist", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, []any{map[string]any{
+			"cid": 555, "page": 1, "part": "P1", "duration": 200,
+		}})
+	})
+	_, tt, a := dynamicCardShell(t, b, uiDynamicArchive("v1", "BV1play"))
+
+	// 下载这一摊得挂着，否则按下去是一句「下载还没挂上」（那是对的，但验不到接线）。
+	if err := a.MountDownloads(app.Downloads{
+		Media: b.Server.Client(), FallbackDir: t.TempDir(),
+	}); err != nil {
+		t.Fatalf("挂下载：%v", err)
+	}
+	if err := tt.Click("下载音频"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "下载进了队列", func() bool { return len(a.DownloadSnapshots()) == 1 })
+	if got := a.DownloadSnapshots()[0].ID; got != "BV1play|555" {
+		t.Errorf("队列里那一项是 %q，want BV1play|555（cid 是它自己问来的）", got)
+	}
+}
+
+// TestPlayNextFromADynamicLandsOnTheNextSlot 「下一首播放」不是「添加到队尾」。
+//
+// 这一条盯的就是那个分界：按钮上写的是「下一首」，而用户按它是因为想在这支
+// 片子之后立刻听它。接成 `Enqueue`（接队尾）的症状是「按了，什么也没发生，
+// 直到整张动态队列放完」。
+func TestPlayNextFromADynamicLandsOnTheNextSlot(t *testing.T) {
+	_, tt, a := dynamicCardShell(t, newUIExplore(t), uiDynamicArchive("v1", "BV1next"))
+
+	// 队列里先有一首在放。
+	a.Queue().Reset(app.Item{Source: "online", Type: "mv", Bvid: "BVplaying", Title: "正在放的那首"})
+	before := a.Queue().Items()
+
+	if err := tt.Click("下一首播放"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+
+	after := a.Queue().Items()
+	if len(after) != len(before)+1 {
+		t.Fatalf("按了之后队列里有 %d 首，want %d（多了一首）", len(after), len(before)+1)
+	}
+	// 位置：正在放的那首后面就是它，**不是队尾**。
+	if after[0].Bvid != "BVplaying" {
+		t.Fatalf("正在放的那首被顶走了，队头是 %q", after[0].Bvid)
+	}
+	if after[1].Bvid != "BV1next" {
+		t.Errorf("第 2 首是 %q，want BV1next（下一首就该是它）", after[1].Bvid)
+	}
+}
+
+// TestATextDynamicHasNoPlayNextButton 纯文字 / 图文里没有可放的东西。
+func TestATextDynamicHasNoPlayNextButton(t *testing.T) {
+	_, tt, _ := dynamicCardShell(t, newUIExplore(t), uiDynamic("t1", "纯文字的那一条"))
+	if tt.HasText("下一首播放") {
+		t.Errorf("纯文字动态上摆着「下一首播放」（那一栏里根本没有东西可放），文字有 %q", tt.Texts())
 	}
 }

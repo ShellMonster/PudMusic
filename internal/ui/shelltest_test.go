@@ -2,7 +2,9 @@ package ui
 
 import (
 	"image/color"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -358,6 +360,100 @@ func TestALeakedMigrationReportCannotReachTheNextShell(t *testing.T) {
 				i, f, sampleX, sampleY, got, want, len(s.visibleToasts()))
 		}
 	}
+}
+
+// TestTheTestSuiteDoesNotGrowASecondWayToDoEitherThing 钉住本票的两条约定。
+//
+// ## 为什么需要一条测试来钉「约定」
+//
+// 两条约定都已经因为「漏一条」各付过一次账：
+//
+//   - **造外壳**：漏收 `shortcutKeys` 的后台写循环和几个定时器，于是同包几百个
+//     外壳把它们留到测试二进制退出。量过：改之前建 40 个外壳残留 86 个 goroutine。
+//   - **等条件**：墙钟预算扛不住同包的负载，满载时偶发红。
+//
+// 而这两条约定**已经在三次合并里各被重新违反过三次**：`#84` 的 `newHomeShell`、
+// `#85` 的 `realdata_test.go` / `rowplayable_test.go`、这一次的
+// `dynamiccard_test.go` / `list_favorite_test.go` / `sidebar_favorites_actions_test.go`
+// ——每一次都是新写的测试顺手用回老写法（不是谁忘了，是那套写法在这个包里本来就
+// 存在、读起来也通顺）。每一次都要等合并时才在编译器报错或者在跑出来时飘。
+//
+// 所以把「只有这两种等法、只有一个造外壳的地方」写成断言：新写的测试再犯，本地
+// 立刻红，而不是等到合并或者到板上才发现。
+//
+// ⚠️ 例外只有一个：`package ui_test` 那四个文件用不了内部基座（见文件头），
+// 它们的老写法在这一条里放过。
+func TestTheTestSuiteDoesNotGrowASecondWayToDoEitherThing(t *testing.T) {
+	// 这一票合成掉的那些重复辅助。它们和基座那两条同名同义，只是判据里没有
+	// 「等什么」，失败时报不出有用的那句话。
+	//
+	// ⚠️ `settleFrame` **不在**这一列：它数的是「MyGo 一遍 Frame() 跑两遍 view、
+	// 点击被消费时再多一遍」那个**固定遍数**，和机器负载无关，而它等的是那个遍数
+	// 走完、不是任何后台结果。`collectionpage_test.go` 里它还活着、也有理由。
+	retired := []string{
+		"settle(", "settleSearch(", "waitUntilTrue(", "waitFrameFor(",
+		"waitForFrames(", "waitSpace(", "waitUI(", "waitCover(", "waitForScan(",
+	}
+
+	for _, name := range filesInThisPackage(t) {
+		// 这一条自己得放过：它逐个列着那些名字（不然就查不出来），而它也调 New(a)。
+		if name == "shelltest_test.go" {
+			continue
+		}
+		src := readFileOrFail(t, name)
+		// ⚠️ `package ui_test` 那四个文件用不了内部基座（见文件头），它们的老写法
+		// 这一次放过。等它们搬进来，这里自然就开始管它们了。
+		if strings.HasPrefix(src, "package ui_test") ||
+			strings.Contains(src[:min(len(src), 400)], "package ui_test") {
+			continue
+		}
+		for _, call := range retired {
+			// 只看调用点，跳过注释里提到它们的地方（注释可以解释为什么没有了）。
+			for i, line := range strings.Split(src, "\n") {
+				if !strings.Contains(line, call) {
+					continue
+				}
+				if strings.HasPrefix(strings.TrimSpace(line), "//") {
+					continue
+				}
+				t.Errorf("%s:%d 用了已经合成掉的 %q——这个包里等条件只有基座那两条"+
+					"（waitFor / waitFrames），见本文件头", name, i+1, call)
+			}
+		}
+		// 造外壳：出现 `New(a)` 就是绕过了基座（基座自己在 shelltest_test.go 里调）。
+		for i, line := range strings.Split(src, "\n") {
+			if !strings.Contains(line, "New(a)") {
+				continue
+			}
+			if strings.HasPrefix(strings.TrimSpace(line), "//") {
+				continue
+			}
+			t.Errorf("%s:%d 直接 New(a) 造外壳——走 `newTestShell`（本文件），"+
+				"收尾是无条件挂上的，漏一次就是一组挂到测试二进制结束的 goroutine",
+				name, i+1)
+		}
+	}
+}
+
+// filesInThisPackage 列出这个包里所有非外部（`package ui`）的测试文件。
+func filesInThisPackage(t *testing.T) []string {
+	t.Helper()
+	// 编译期就在这个包里，所以这里就在这个目录；只认 `_test.go`。
+	matches, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return matches
+}
+
+// readFileOrFail 读一个测试文件。读不到就当它不存在（不该发生，但别把整个套件带崩）。
+func readFileOrFail(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(name)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

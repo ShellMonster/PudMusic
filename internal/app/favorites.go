@@ -177,6 +177,25 @@ func (f *Favorites) Upsert(g FavoriteGroup, item Favorite) {
 	f.groups[g] = append(f.groups[g], item)
 }
 
+// Remove 把这一组里的某一行拿掉。
+//
+// 用在两件事上：用户删掉了一个自己创建的收藏夹、取消收藏了别人的一个。
+// **不立刻落盘**——落盘在 `App.forgetFavorite` 那一步（连着顺序一起改），
+// 所以这一层只是内存里的删除。
+//
+// 拿掉之后**顺序里其余的行不动**：用户拖出来的相对顺序必须原样留着，
+// 少一个元素不该让剩下的重排。
+func (f *Favorites) Remove(g FavoriteGroup, id int64) {
+	if !g.Valid() {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if i := slices.IndexFunc(f.groups[g], func(x Favorite) bool { return x.ID == id }); i >= 0 {
+		f.groups[g] = slices.Delete(slices.Clone(f.groups[g]), i, i+1)
+	}
+}
+
 // IDs 是这一组当前的 ID 顺序，落盘用。
 func (f *Favorites) IDs(g FavoriteGroup) []int64 {
 	if !g.Valid() {

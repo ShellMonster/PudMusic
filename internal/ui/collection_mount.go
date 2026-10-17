@@ -4,16 +4,11 @@
 // 客户端，这一票要用的就是它——再起第二个就等于第二份 cookie jar 和第二份
 // 请求头，而那正是 `internal/service/bili` 的包注释里明说要避免的事。
 //
-// ⚠️ **批量下载没有在这里传 `Downloader`**，而缺的不是那个服务——**服务早就在
-// 那里了**：`internal/service/download`（音频下载与断点续传，issue #29 已 CLOSED，
-// commit `54596d1`），`main.go` 里 `ui.MountDownloads(a)` 也早就在调。
+// # 批量下载接的就是 App 自己
 //
-// 缺的是**这一行接线**：`DownloaderMounted()` 读的是 `CollectionRefs.Downloader`
-// （`internal/app/collection.go`），这个函数没传它，所以它恒为 false，收藏夹的
-// 「批量下载」按钮于是永远是灰的、点下去只会得到一句「还没接上」。
-//
-// 写这一段是因为「下载服务还没做」这句话在这里站不住：#29 早就关了，服务写好了
-// 一整套，而下一个读代码的人会以为下载这一摊还是一张白纸。
+// `Downloader` 传的是 `a`——下载队列本来就挂在 App 上（`MountDownloads`），
+// 所以这一层不需要中间人（见 `app.EnqueueDownload`）。真正在这一层发生的只有
+// 一件事：**把两个 Mount 排在一起**，于是「开窗口之前该挂的都挂完了」看得见。
 package ui
 
 import (
@@ -25,6 +20,10 @@ import (
 //
 // 它自己不读盘也不发请求，所以顺序上没那么严；放这儿是为了和另外两个
 // Mount 排在一起——「开窗口之前该挂的都挂完了」这件事看得见。
+//
+// ⚠️ `Downloader` 传的是 `a` 自己，而它要用的下载队列是 `MountDownloads` 挂的
+// 那一个。**两个 Mount 谁先谁后都行**：批量下载是用户点了按钮才发生的，那时
+// 队列早就挂好了；而真没挂上时 `App.Download` 会如实说「下载还没挂上」。
 func MountCollections(a *app.App, cli *bili.Client) {
-	a.MountCollections(app.CollectionRefs{Client: cli})
+	a.MountCollections(app.CollectionRefs{Client: cli, Downloader: a})
 }

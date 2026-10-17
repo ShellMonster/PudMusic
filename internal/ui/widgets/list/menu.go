@@ -103,20 +103,20 @@ func doAction(item menuItem, i int, song Music, acts Actions, playFrom func(int)
 		}
 	case "favorite":
 		if acts.FavSelect == nil {
-			// 说清楚比按了没反应好（见 download-audio 那一支的注释）。
+			// 说清楚比按了没反应好。**话里带上用户按的那个字**：菜单有五项，
+			// 只说「还没接」的话用户不知道说的是哪一项，得自己再点一遍试。
 			notify(acts, "「"+item.label+"」还没接 B 站接口")
 			return
 		}
 		acts.FavSelect(song.Item)
 	case "download-audio":
-		// ⚠️ 这一项**还没接线**，而缺的不是那个服务：下载服务早就写好了
-		//（`internal/service/download`，issue #29 已 CLOSED），抽屉那一支也早就
-		// 能下载（`queue_drawer.go` 的 `startDownloadAudio`）。缺的是
-		// `list.Actions` 上**根本没有 `Download` 这个字段**——列表这一侧压根没把
-		// 下载递过来，所以任何一页的列表菜单都走不到它。
-		//
-		// 话里带上用户按的那个字：菜单有五项，只说「还没接」的话用户不知道说的
-		// 是哪一项，得自己再点一遍试。
-		notify(acts, "「"+item.label+"」还没接 B 站接口")
+		if acts.Download == nil {
+			// 同上。Biu 对本地项和「用户不是歌」那几种是把这一项藏起来的，
+			// 我们不藏（见 `queue_drawer.go` 的 queueMenuItems 那一段），
+			// 所以这里要有一句能说清「为什么这一项按不动」的话。
+			notify(acts, "「"+item.label+"」还没接 B 站接口")
+			return
+		}
+		acts.Download(song.Item)
 	}
 }

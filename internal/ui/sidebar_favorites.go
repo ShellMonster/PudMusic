@@ -1,9 +1,15 @@
 // 侧栏里那两组收藏夹：Biu 的 SD-05~SD-09。
 //
 // 两组（我创建的 / 我收藏的）各有折叠、右键菜单、拖拽排序，顺序由
-// `internal/app/favorites.go` 落盘。这一阶段还没有 B 站接口，条目是谁给的
-// 见那个文件的包注释；空的时候两组照画标题和折叠开关，里面一行
-// 「还没有收藏夹」，不假装有内容。
+// `internal/app/favorites.go` 落盘；菜单里那几件能动的事（播放 / 添加到列表 /
+// 删除 / 取消收藏）在 `app/sidebar_folders.go` 里——那一层认识 B 站，这一层
+// 不认识。
+//
+// ⚠️ **两组还没有从 B 站拉全量**：条目由谁调 `SetFavorites` 谁负责，而拉全量
+// 那一趟还没接（见 `app/favorites.go` 的包注释）。所以空的时候两组照画标题和
+// 折叠开关，里面一行「还没有收藏夹」，不假装有内容——而「新建收藏夹」建出来
+// 的那一行是立刻进侧栏的（`app.CreateFolder` 会 `Upsert`），所以菜单里那几件
+// 事并不是只有测试走得到。
 package ui
 
 import (
@@ -269,9 +275,14 @@ func (s *Shell) favoriteMenu(g app.FavoriteGroup, f app.Favorite, m *ui.Menu) {
 
 // favoriteAction 是右键菜单被选中之后做的事。
 //
-// 「隐藏」写进 `hiddenMenuKeys`（Biu 就是这么做的，
-// `collection/index.tsx:232-244`），「修改」开出编辑弹窗。其余几项还要
-// B 站接口，说清楚比按了没反应好。
+// 五项里现在**五项都在做那件事**：编辑 / 隐藏是本地的，播放 / 添加到列表是
+// 拉内容（`app.PlayFolder` / `app.EnqueueFolder`），删除 / 取消收藏动的是用户
+// 真实的数据（`app.DeleteFavoriteFolder` / `app.UnfavoriteFolder`）。
+//
+// 🔴 **「删除」和「取消收藏」的分界在这一点上**：删除连同里面的歌一起没了，
+// 所以先弹二次确认（`viewFavoriteDelete`）；取消收藏只是把我这一份摘掉，
+// 歌还在 UP 主那里，所以**不要确认框**——撤回来只要再点一次，而点错之后还弹
+// 一个框只会更烦。
 func (s *Shell) favoriteAction(f app.Favorite, item favMenuAction) {
 	switch item.key {
 	case "edit":
@@ -293,9 +304,68 @@ func (s *Shell) favoriteAction(f app.Favorite, item favMenuAction) {
 			return
 		}
 		s.addToast("已把「" + f.Title + "」从侧栏藏起来")
+	case "play":
+		s.app.PlayFolder(f, s.sayFolderDone)
+	case "add-to-playlist":
+		s.app.EnqueueFolder(f, s.sayFolderDone)
+	case "delete":
+		// 只记，不做：真正那一下在 `viewFavoriteDelete` 里（确认框是系统
+		// 模态，在它上面点任何别的控件都不该生效，所以两步必须分开）。
+		s.folderDelete = favoriteDeleteAsk{open: true, id: f.ID, title: f.Title}
+	case "unfavorite":
+		s.app.UnfavoriteFolder(f, s.sayFolderDone)
 	default:
 		s.addToast("「" + item.label + "」还没接收藏夹接口")
 	}
+}
+
+// favoriteDeleteAsk 是「删掉这个收藏夹」那个二次确认要跨帧活着的状态。
+//
+// 挂在壳上而不是局部变量：即时模式下一帧一新建，而确认框要开着不动（铁律一）。
+type favoriteDeleteAsk struct {
+	open  bool
+	id    int64
+	title string
+}
+
+// viewFavoriteDelete 是那个二次确认。
+//
+// ⚠️ **它不在侧栏里画**，而是挂在 `viewFolderDialogs` 那儿（模态弹窗都在那儿）。
+// 画在侧栏里的后果不是「位置不对」：侧栏整个折叠时不画收藏夹，弹窗就跟着
+// 不见了，而用户刚按完「删除」——按下去之后界面毫无反应。
+//
+// 用 MyGo 的 `AlertDialog`（系统原生确认框）：它免费给到「点外面不关」和
+// 「Esc 当取消」——**点外面不关正是二次确认要的**（自绘浮层很容易漏掉，而漏掉
+// 的后果是误删整个收藏夹）。
+func (s *Shell) viewFavoriteDelete(c *ui.Context) {
+	d := &s.folderDelete
+	if !d.open {
+		return
+	}
+	switch ui.AlertDialog(c, &d.open,
+		"删掉「"+d.title+"」吗？",
+		"这个收藏夹和里面的所有歌都会没，撤不回来。", "取消", "删除") {
+	case 1:
+		// ⚠️ 先关掉再干活：删成功之后侧栏那一行没了，而 `d` 是下一帧还要读
+		// 的状态（不清的话下一帧同一个框又弹一次）。
+		d.open = false
+		s.app.DeleteFavoriteFolder(app.Favorite{ID: d.id, Title: d.title}, s.sayFolderDone)
+	case ui.AlertDismissed:
+		// Esc = 取消。
+		d.open = false
+	}
+}
+
+// sayFolderDone 是侧栏收藏夹那几个后台动作跑完之后说的话。
+//
+// ⚠️ **它在后台 goroutine 上被调**（App 那四条都是「立刻返回 + 回调」）：Toast
+// 自己带锁，而 `wake.invalidate` 只是叫醒界面，两者都不碰界面状态。
+//
+// 参数是**已经说全了一整句**的话，成功和失败都是（见
+// `app/sidebar_folders.go` 的文件头）——这一层不再加任何前缀。
+func (s *Shell) sayFolderDone(msg string) {
+	s.addToast(msg)
+	s.wake.invalidate()
 }
 
 // hiddenMenuKeys 是被藏起来的那些 ID。Biu 存的是十进制字符串
