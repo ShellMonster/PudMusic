@@ -479,6 +479,59 @@ var Items = []Item{
 		},
 	},
 	{
+		Category: Platform,
+		// 「录进去了，什么也不发生」（BMG-47 §4 A6）——设置页里能录、能存、
+		// 冲突看得出来，而按下去什么也不发生。这比没有更坏：用户以为设上了。
+		//
+		// 钉的是「真的按下去会走那一条命令」和「焦点在输入框里时不抢按键」两半。
+		// 后一半是 SPEC 114 点名的，量法是「焦点在搜索框里按那个键，字进了搜索框、
+		// 那条命令没有触发」——只验前半句的话，一个把所有快捷键都关掉的实现照样通过。
+		//
+		// 另有几条钉的是接线本身：存下来的 accelerator 串认得回来（认不回来的症状
+		// 是设置页一切正常、按下去没反应），以及**正在录的那一格**优先于窗口登记的
+		// 组合键（引擎会先问「有没有人认领这个键」，而录制格靠 HandleInput 吃键）。
+		Spec: "快捷键按下去真的会触发那条命令；焦点在输入框里打字时快捷键让路（SPEC 110、112、114。BMG-47 A6 说的「录进去了什么也不发生」）",
+		Tests: []string{
+			"TestAPressedShortcutRunsItsCommand",
+			"TestAShortcutWithNoModifierRunsWhenNothingElseHasTheFocus",
+			"TestTheSearchBoxGetsTheKeyBeforeAnyShortcut",
+			"TestTheRecorderCellStillGetsAKeyThatIsARegisteredShortcut",
+			"TestEveryRecordedKeyComesBackAsItself",
+			"TestTheShortcutsHandEditedIntoTheFileStillWork",
+			"TestTheSixCommandsCallTheirOwnThing",
+			"TestAShortcutRunsTheSameCommandWhicheverWayItArrives",
+			"TestTheShortcutPageSaysWhatTheTwoColumnsAreFor",
+		},
+	},
+	{
+		Category: Platform,
+		// 全局快捷键（SPEC 111）。量的是**两段**：按设置把那一列登记到系统上
+		// （用存下来的那一串，一个字不翻译）、以及系统的回调真的走到那条命令。
+		//
+		// ⚠️ **没有**量到的是最后一跳：系统（macOS 的 Carbon 热键）到底会不会把
+		// 一个在别的应用里按下的组合键送到本进程。那一下在框架里（`mygo` 的
+		// `internal/darwin/hotkey.go`），我们既没重写也不该重写——重写一遍的结果
+		// 是两条热键链，而只有一条被测过。要验它得切到别的应用按一次，那一半留在
+		// 人工清单里。
+		//
+		// 「注册不上要降级」也是这一条的一半：别的应用先占了那个键、Wayland 上没有
+		// 桌面 portal、Linux 上没有 X11 会话——这些都得只让那一条失效，而不是让整个
+		// 快捷键功能一起瘫掉。
+		Spec: "全局快捷键：按设置登记到系统上、按下来走那一条命令；**系统真的把别的应用里按下的键送过来**这一跳没有量（在框架里，真机人工清单那一半）。注册不上只让那一条失效，不拖累其余，更不拖累应用内那一列（SPEC 111）",
+		Tests: []string{
+			"TestTheGlobalColumnIsRegisteredOnStartup",
+			"TestTurningGlobalShortcutsOffUnregistersThem",
+			"TestRecordingAGlobalShortcutRegistersTheNewKey",
+			"TestResettingTheShortcutsRegistersThemAgain",
+			"TestAGlobalShortcutThatIsAlsoAnInAppOneIsNotRegistered",
+			"TestOneGlobalShortcutThatCannotRegisterDoesNotTakeTheRestDown",
+			"TestEveryGlobalShortcutThatFailsStillLetsTheOthersRun",
+			"TestQuittingUnregistersTheGlobalShortcuts",
+			"TestSyncingTwiceLeavesNoDuplicate",
+		},
+		RealOnly: true,
+	},
+	{
 		Category: Paging,
 		// 「页面壳子做完了、数据源没排票，于是交付时一片绿、用户打开是空的」
 		// （BMG-47 §4 查出的模式，七个页面命中）。首页那张票（#13）就是：票面

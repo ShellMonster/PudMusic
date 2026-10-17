@@ -421,8 +421,13 @@ func (s *Shell) takeRecordedKey(field ui.Element, slot shortcutSlot) {
 //
 // 和 `applySetting` 一个道理：静默丢掉是这一页最坏的失败方式，用户以为改了、
 // 下次打开又变回去，中间屏幕上什么都没发生过。
+//
+// 存住之后重新登记全局那一列：录的正是全局那一格时（`slot.global`）不登记的话，
+// 用户在设置页上录的键在别的应用里压根不响——而录完就退出录制、界面上一切正常。
 func (s *Shell) applyShortcut(slot shortcutSlot, accel string) {
 	if err := s.keys.set(slot, accel); err != nil {
 		s.addToast("快捷键没存上：" + strings.TrimPrefix(err.Error(), "app: "))
+		return
 	}
+	s.syncGlobalShortcuts()
 }

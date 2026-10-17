@@ -214,18 +214,11 @@ func TestTwoCellsWithTheSameKeyAreMarkedAsConflicting(t *testing.T) {
 	}
 }
 
-// TestTheShortcutCellSaysItOnlyRecords 验这一页把「这一版只录不生效」说出来了。
-//
-// 一个按了没反应的快捷键设置页，用户只会以为应用坏了。把没做的那一半说出来，
-// 比让人自己撞上去便宜得多。
-func TestTheShortcutCellSaysItOnlyRecords(t *testing.T) {
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	openSettingsTab(t, tt, "快捷键设置")
-
-	if !tt.HasText("这一版先把键录下来存住") {
-		t.Errorf("这一页没说清「改了不会立刻生效」，文字有 %q", tt.Texts())
-	}
-}
+// 快捷键这一页现在把两列分别管什么说出来了（`shortcut_dispatch_test.go` 里的
+// TestTheShortcutPageSaysWhatTheTwoColumnsAreFor 钉着）。原来钉着「这一版只录
+// 不生效」的那一条在快捷键接上生效之后就成了页面上的假话——一句已经不做的话留在
+// 页面上比没有更坏：用户按了 ⌘P 发现能用了，而页面上仍写着「按下去什么也不会
+// 发生」，于是反过来以为应用出了别的毛病。
 
 // TestAShortcutFileFromANewerVersionIsRefusedOnThePage 验只读时页面上也动不了。
 //
