@@ -459,6 +459,36 @@ func LoadSettings(path string) (Settings, error) {
 	return s, nil
 }
 
+// parseSettingsFile 从一段字节里认出一份设置和它是第几版。
+//
+// 它和 `LoadSettings` 的区别只有一处：**不碰磁盘**。导入（`biuimport.go` 那边）
+// 拿到的是 Biu 的一份 JSON 字节、要认的形状和设置文件完全一样（两种，见文件头），
+// 让它先落盘再走 `LoadSettings` 是「为了读一份文件而写一份文件」——会覆盖用户
+// 现在的设置，而且报出来的错会指向一个临时路径。
+//
+// 返回的 from 是文件**自己说的**版本（没有 `schemaVersion` 键就是 0，见
+// `splitEnvelope`），调用方自己决定要不要走迁移链。
+func parseSettingsFile(b []byte) (Settings, int, error) {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(b, &top); err != nil {
+		return Settings{}, 0, err
+	}
+	return splitEnvelope(b, top)
+}
+
+// marshalSettingsFile 按我们自己的 schema 把一份设置写成字节。
+//
+// 信封是 `{"schemaVersion": N, "appSettings": {...}}`（`settingsFile`），
+// 和 `SettingsStore.Flush` 写出去的是同一份形状——导出的那份配置**不带**这个
+// 信封，那是另一条路（见 `export.go`），因为 Biu 设置页「导出配置」下载的
+// 就是裸的 `appSettings`。
+func marshalSettingsFile(s Settings) ([]byte, error) {
+	return json.MarshalIndent(settingsFile{
+		SchemaVersion: SchemaVersion,
+		AppSettings:   s,
+	}, "", "  ")
+}
+
 // splitEnvelope 把一份设置文件拆成「设置」和「它是第几版」。
 //
 // 三种形状，认错任何一种的后果都是**静默丢设置**：
@@ -750,7 +780,7 @@ func (s *SettingsStore) Flush() error {
 	s.mu.Unlock()
 
 	if err == nil {
-		err = writeSettingsAtomic(s.path, b)
+		err = writeFileAtomic(s.path, b)
 	}
 	if err != nil {
 		// 放回去，否则这次改动就永远丢了——内存里有、磁盘上没有，
@@ -838,10 +868,14 @@ func (s *SettingsStore) LastError() error {
 	return nil
 }
 
-// writeSettingsAtomic 原子写：临时文件 → fsync → rename。
+// writeFileAtomic 原子写：临时文件 → fsync → rename。
 //
 // 任何一步失败都把临时文件删掉，不留垃圾。
-func writeSettingsAtomic(path string, b []byte) (err error) {
+//
+// 这一份服务的是**这一包里的任何一份文件**（设置、总控标记、回滚时写回去的备份），
+// 不是只服务设置——名字带 settings 是历史，改叫通用名是为了让 `upgrade.go` 那边的
+// 调用读起来诚实（它写的是标记和备份，不是设置）。
+func writeFileAtomic(path string, b []byte) (err error) {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".settings-*.tmp")
 	if err != nil {

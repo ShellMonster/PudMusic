@@ -474,3 +474,136 @@ func TestTheFourQueueActionsAreWired(t *testing.T) {
 		t.Fatalf("清空之后队列里还有 %d 项", len(got))
 	}
 }
+
+// 🔴 换挂下载时，**本次会话新加进队列的歌一个都不能丢**。
+//
+// 这一条是被评审的探针抓出来的，而**那个数据丢失是这一票自己上一轮的「修复」造成的**：
+// 为了「关掉旧的 Manager」，我在 `MountDownloads` 里加了 `old.Close("")`——而
+// `Close("")` 是「取消在飞 + 等 loop 退出 + **不落盘**」。队列文件会话期间只在
+// 退出时写一次，于是：
+//
+//	本次会话点的那一首     只在内存里
+//	按一次「从 Biu 导入」  旧 Manager 被不落盘地关掉 → 那一首随它没了
+//	新 Manager Restore    读的是**陈旧**的文件，里面只有上次留下的
+//	退出时落盘            用户点的歌从队列文件里被抹掉
+//
+// 正确做法是先把内存里那一份**并进**文件（不是覆盖——那会抹掉刚导入进来的几十条），
+// 再不落盘地关掉旧的。
+func TestRemountingDownloadsDoesNotLoseWhatWasAddedThisSession(t *testing.T) {
+	f := newStreamFixture(t)
+	dir := t.TempDir()
+	queue := filepath.Join(dir, download.QueueFileName)
+
+	// 上一次退留下来的那一条，此刻在文件里。
+	stale := `{"version":1,"tasks":[{
+      "id":"old|1","title":"上次留下的","dest":"/x/old.m4a",
+      "status":"paused","identity":{"bvid":"old","cid":"1"},
+      "addedAt":1
+    }]}`
+	if err := os.WriteFile(queue, []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := newDownloadApp(t, f, "", queue)
+
+	// 本次会话点下载：此刻**只在内存里**，文件还是上面那份旧的。
+	// 故意不取流（`resolveDownload` 会真的发请求），这里要验的是队列的接线。
+	if _, err := a.Download(onlineItem("fresh", "2", "本次会话加的")); err != nil {
+		t.Fatal(err)
+	}
+	before := a.DownloadSnapshots()
+	if len(before) != 2 {
+		t.Fatalf("入队之后队列里有 %d 条，期望 2 条", len(before))
+	}
+	if _, ok := a.DownloadSnapshot("fresh|2"); !ok {
+		t.Fatal("本次会话加的那一条不在队列里")
+	}
+	if got := readQueueFile(t, queue); !strings.Contains(got, "fresh|2") {
+		// 现在还没落盘是对的——落盘只发生在退出时。这一条是为了钉住前提。
+		t.Logf("入队后文件里还没有本次会话那条（还没到落盘点）：%s", got)
+	}
+
+	// 换挂一次（导入完重新读队列走的就是这条路）。
+	if err := a.MountDownloads(app.Downloads{
+		Media: f.Client(), QueueFile: queue, FallbackDir: dir,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	after := a.DownloadSnapshots()
+	if len(after) != 2 {
+		t.Fatalf("换挂之后队列里有 %d 条，期望 2 条（旧的 + 本次会话的）：%+v", len(after), after)
+	}
+	if _, ok := a.DownloadSnapshot("fresh|2"); !ok {
+		t.Fatalf("换挂把本次会话加的那一条弄没了：%+v", after)
+	}
+
+	// 退出时落盘：它必须在文件里。
+	if err := a.SaveDownloads(); err != nil {
+		t.Fatal(err)
+	}
+	got := readQueueFile(t, queue)
+	for _, want := range []string{"old|1", "fresh|2"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("落盘之后 %q 不在队列文件里，它被抹掉了：\n%s", want, got)
+		}
+	}
+}
+
+// 换挂时**刚被导入进来的那几十条**也不能被旧的内存快照覆盖掉。
+//
+// 这是上一条的反面：`old.Close(path)` 会拿内存里那份盖住文件，而内存里没有刚并
+// 进来的那些。所以必须走「并进去」而不是「覆盖上去」。
+func TestRemountingDownloadsDoesNotLoseWhatWasJustImported(t *testing.T) {
+	f := newStreamFixture(t)
+	dir := t.TempDir()
+	queue := filepath.Join(dir, download.QueueFileName)
+	if err := os.WriteFile(queue, []byte(`{"version":1,"tasks":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := newDownloadApp(t, f, "", queue)
+	if _, err := a.Download(onlineItem("mine", "1", "本次会话加的")); err != nil {
+		t.Fatal(err)
+	}
+
+	// 导入：Biu 那一条被并进文件（`MergeIntoQueue`），文件里此刻有两条。
+	if err := download.MergeIntoQueue(queue, []*download.Task{{
+		ID: "frombiu|9", Title: "Biu 里下完的那首", Dest: "/x/biu.m4a",
+		Status: download.StatusDone, AddedAt: 2,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 换挂。
+	if err := a.MountDownloads(app.Downloads{
+		Media: f.Client(), QueueFile: queue, FallbackDir: dir,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{"mine|1", "frombiu|9"} {
+		if _, ok := a.DownloadSnapshot(want); !ok {
+			t.Errorf("换挂之后 %q 不在队列里（导入进来的或本次会话的，丢了一个）", want)
+		}
+	}
+	if err := a.SaveDownloads(); err != nil {
+		t.Fatal(err)
+	}
+	got := readQueueFile(t, queue)
+	for _, want := range []string{"mine|1", "frombiu|9"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("落盘之后 %q 被抹掉了：\n%s", want, got)
+		}
+	}
+}
+
+// readQueueFile 读队列文件的内容，测试专用。
+func readQueueFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}

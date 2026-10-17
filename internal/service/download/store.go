@@ -70,6 +70,15 @@ func (m *Manager) Save(path string) error {
 	return writeAtomic(path, b)
 }
 
+// Persistable 拷一份能落盘的任务列表，把在飞的改成暂停。
+//
+// 导出的（`persistable` 私有）是同一件事，供**外部**把内存里这一份并进队列文件：
+// 队列文件会话期间只在退出时写一次，所以任何一次「换掉这个 Manager」的动作
+// 都必须先把内存里的任务落到盘上——只 `Close("")` 的话，本次会话刚加进来的歌
+// 会随旧 Manager 一起没了，而退出时新 Manager 落的是它自己那份（从陈旧文件
+// Restore 来的），**用户点的歌从队列文件里被抹掉**。见 `app.MountDownloads`。
+func (m *Manager) Persistable() []*Task { return m.persistable() }
+
 // persistable 拷一份能落盘的任务列表，把在飞的改成暂停。
 func (m *Manager) persistable() []*Task {
 	m.mu.Lock()
@@ -107,8 +116,16 @@ func (m *Manager) Restore(path string) error {
 	if err := json.Unmarshal(b, &f); err != nil {
 		return fmt.Errorf("download: 队列文件读不懂（%s）：%w", filepath.Base(path), err)
 	}
-	if f.Version != storeVersion {
+	if f.Version > storeVersion {
+		// 更高的版本我们读不懂，**整份不碰**。往一份我们没有能力重写的文件上
+		// 动手，比什么都不做糟得多。
 		return fmt.Errorf("download: 队列文件是第 %d 版的，这一版认第 %d 版", f.Version, storeVersion)
+	}
+	// 更低（或没有 version 键）的走迁移链，见 `migrate.go` 的 queueMigrations。
+	// ⚠️ 这一条不能省：一份 v0 文件曾在这里被当成「读不懂」，整个队列丢，
+	// 而用户重启看到的是空队列、盘上却躺着一堆 `.part`。
+	if err := runQueueMigrations(&f, f.Version); err != nil {
+		return fmt.Errorf("%w", err)
 	}
 
 	m.mu.Lock()

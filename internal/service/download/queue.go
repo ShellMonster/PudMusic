@@ -411,7 +411,12 @@ func (m *Manager) Close(path string) error {
 	// 下」），但那是捡到才标，捡不到的那些没人管。实测这条竞态占 `go test` 的失败
 	// 率约八成（连跑五次红四次），而它本该是确定的。
 	//
-	// 所以这里补上确定的那一步：`loop` 已经退出，不会再有并发改状态。
+	// 所以这里补上确定的一步：`loop` 已经退出，不会再有并发改状态。
+	//
+	// ⚠️ 这一段**与 `origin/main` 的 `#82` 修的是同一个问题**（那一票先一步把同样的
+	// 逻辑抽成了 `pauseQueued`）。两边独立撞上同一条，说明它不是某一张票的边角——
+	// 是 `Close` 的 `wg.Wait()` 之后必然有一批 `queued` 谁都没管。合并时采用上游那一
+	// 份：它是个有名字的方法（可以单独被测），注释也写清了「为什么不能改成别的」。
 	m.pauseQueued()
 
 	if path == "" {
@@ -517,7 +522,35 @@ func (m *Manager) runOne(id string) {
 		wake()
 	}
 
-	err := m.run(ctx, id)
+	// 🔴 **不能无限等 `run` 返回。**
+	//
+	// `Close` 里的 `wg.Wait()` 等的就是这条后台线，而这条线的 `runOne` 卡在 `run`
+	// 里——`run` 的第一件事是 `m.resolve(ctx, want)`，**取流**。所以只要取流那一方
+	// 不理 ctx，`Close` 就永远返回不了，**应用退不出去**（实测整个测试包卡满
+	// 10 分钟超时）。
+	//
+	// 我们的 `resolveDownload` 走的是 `bili.Client.PlayURL(ctx, …)`，`http` 会尊重
+	// ctx，所以真机上不会挂在这里。但「关掉应用」是一个**必须保证**的动作，不能
+	// 建立在一句「大家都会尊重 ctx」上——`Resolver` 是个函数类型，谁实现它都能不
+	// 理。
+	//
+	// 做法：把 `run` 放出去，用 select 等「它回来了」或者「ctx 取消了」。后者直接
+	// 当这一页放弃，让 `runOne` 走下去把状态改成暂停、让后台线退出去。
+	//
+	// ⚠️ 代价：还在跑的 `run` 被丢在后台，它那个 goroutine 会**泄漏**，而且它可能
+	// 还在往 `.part` 里写（而状态已经被标成暂停了）。这一条只在那条「取流方不理
+	// ctx」的路上发生，而进程正要退出——**退不出去**和**退出时漏一个 goroutine**
+	// 之间，后者明显更好。用户点「暂停」也走这条路，但那时我们的 `resolve` 尊重
+	// ctx，`run` 会立刻自己退出来，select 几乎总是等 `done` 那一支。
+	runDone := make(chan error, 1)
+	go func() { runDone <- m.run(ctx, id) }()
+
+	var err error
+	select {
+	case err = <-runDone:
+	case <-ctx.Done():
+		err = context.Canceled
+	}
 	cancel()
 
 	m.mu.Lock()
