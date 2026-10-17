@@ -105,6 +105,14 @@ type List struct {
 	// acts 是这个列表会做的操作，见 actions.go。
 	acts Actions
 
+	// sel2 是「多选」那一摊接线，为零值时列表只有单选。
+	//
+	// ⚠️ 名字和 `sel`（选中的行号）差一个字是因为它们确实是两件事：
+	// `sel` 是**光标**（按了哪一行、右键菜单弹在哪、播放从哪儿起），
+	// `sel2` 是**勾选**（批量操作作用在哪些行）。Biu 的歌单页两个同时存在，
+	// 拖动滚轮刷过几百行不会改勾选，点勾也不会改光标。
+	sel2 Selection
+
 	// footer 是末尾多出来的那一行的画法，为 nil 时没有这一行。
 	//
 	// 它是**哨兵行**：翻页的列表用它占住「下面还有」的位置，滚到它就拉下一页
@@ -180,6 +188,49 @@ func (l *List) SetEmpty(text string) { l.empty, l.emptySet = text, true }
 //
 // ⚠️ 只能由界面线程调，同 SetSongs。
 func (l *List) SetScroll(s *ui.ScrollState) { l.scroll = s }
+
+// Selection 是「多选」那一摊接线。
+//
+// **零值就是没有多选**：勾选框一格都不画，列表回到只有单选的样子。
+// 装了之后每一行最左边多一个勾选框，点它改的是 `Toggle` 指的那个下标。
+//
+// ⚠️ `On` 和 `Toggle` 都要判空用：`On` 为 nil 时画出来的永远是没勾上的框，
+// 而 `Toggle` 为 nil 时点了没反应——按了没反应比不画更难解释。
+type Selection struct {
+	// On 报第 i 行此刻有没有被勾上。**每一帧每一行都会问一次**，所以它要便宜。
+	On func(i int) bool
+
+	// Toggle 是用户点了第 i 行的勾。框架已经把勾翻过来了，页面照自己的那
+	// 份状态翻转回去就行。
+	Toggle func(i int)
+}
+
+// SetSelection 装多选那一摊接线，传零值去掉。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (l *List) SetSelection(s Selection) { l.sel2 = s }
+
+// Len 是这个列表有几行**歌**（末尾那一行哨兵不算）。
+//
+// 页面上「全选」那个判定要拿它和已加载的行数比，所以这个数得能从外面读到。
+func (l *List) Len() int { return len(l.songs) }
+
+// At 返回第 i 行那一首，没有这一行是 ok=false。
+//
+// 收的是**下标**而不是那一首：调用方要问的是「列表里现在有哪些歌」
+// （全选、清空勾选、批量操作收集），问的是位置。
+//
+// ⚠️ 下标只在**同一份 songs** 里有意义。换了歌之后旧的下标指另一首（铁律四），
+// 所以别把下标存起来隔几帧再用——要记就记 ID。
+func (l *List) At(i int) (Music, bool) {
+	if i < 0 || i >= len(l.songs) {
+		return Music{}, false
+	}
+	return l.songs[i], true
+}
+
+// HasSelection 报这个列表有没有装多选接线。
+func (l *List) HasSelection() bool { return l.sel2.On != nil }
 
 // footerKey 是末尾那一行的身份。**不用字符串**：歌的 ID 是 bvid / 完整路径
 // 之类的用户数据，理论上能撞上一个叫 "footer" 的；类型撞不上。

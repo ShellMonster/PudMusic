@@ -83,6 +83,10 @@ func (l *List) viewCard(r ui.ListRow) {
 		//（`ui/menu.go` 的 menuTarget），挂到列表外面的话整列共用一份菜单。
 		ContextMenu(func(m *ui.Menu) { l.buildMenu(m, i) }).
 		Children(func() {
+			// ⓪ 多选态：这一行最左边的勾选框。没装多选就一格都不画
+			//（见 SetSelection）。
+			l.viewCheckbox(c, i, m.Title)
+
 			// ① 序号。定宽 + 靠右（贴着封面），1 和 1000 在同一条竖线上，
 			// Biu 的 `min-w-8 text-center` 是同一个效果。
 			ui.Text(c, indexText(i)).Width(indexWidth).TextAlign(ui.End).
@@ -110,4 +114,25 @@ func (l *List) viewCard(r ui.ListRow) {
 					FontSize(12).TextColor(t.TextMuted).MaxLines(1)
 			}
 		})
+}
+
+// viewCheckbox 画这一行最左边那个勾选框，没装多选就什么都不画。
+//
+// ⚠️ **勾的值是一帧一个的局部变量**，不是页面存的那份。理由是几千行的歌单
+// 存不起几千个 bool（而且只有屏幕上那十几行需要）：每一帧现问接线
+// `Selection.On`，框架点完之后翻的是这个局部变量，`Changed()` 一响就把这次
+// 翻转交给 `Selection.Toggle` 记进页面自己的那份。
+//
+// `Label` 要给：勾选框本身没有可见文字，没有名字的话读屏软件只会念一句
+// 「复选框」，Tester 也没法 `Click` 它。
+func (l *List) viewCheckbox(c *ui.Context, i int, title string) {
+	if l.sel2.On == nil {
+		return
+	}
+	checked := l.sel2.On(i)
+	box := ui.Checkbox(c, &checked, "")
+	if box.Changed() && l.sel2.Toggle != nil {
+		l.sel2.Toggle(i)
+	}
+	box.Label("选择 " + title)
 }

@@ -15,7 +15,6 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
@@ -179,6 +178,36 @@ type Shell struct {
 	// hist 是搜索历史。没挂上盘时是内存里的一份（见 searchhistory.go）。
 	hist *searchHistory
 
+	// collection 是歌单内容页（`/collection/{id}`）此刻的那一份状态。
+	// 换容器就整个换掉，见 `collectionFor`。
+	collection *collectionPage
+
+	// folderEdit 是「新建 / 修改收藏夹」那个弹窗（folderedit.go）。
+	// nil 表示从没开过。
+	//
+	// ⚠️ 挂在窗口上而不是每帧新建：表单里每一个字段都是用户敲的，
+	// 下一帧没了就等于用户敲一个字丢一个（铁律一）。
+	folderEdit *folderEdit
+
+	// folderSelect 是「把这一首放进哪些收藏夹」那个弹窗（folderselect.go）。
+	folderSelect *folderSelect
+
+	// coverPick 是「后台把那个封面文件读出来、解好了」的那个交接槽。
+	// 带锁，写它的是后台 goroutine、读它的是界面线程（见 folderpick.go）。
+	coverPick coverPick
+
+	// pickImage 是「弹文件框选一张封面图」那个**接缝**（folderpick.go）。
+	//
+	// ⚠️ 真实现要去系统里弹面板，而那一条在无头 Tester 里会 panic（`mygo`
+	// 的 needsApp：`mygo.App.Run` 没跑过）。测试建完外壳换成桩，于是
+	// 「选中的图有没有被解码、有没有被裁成 16:9」能自动验。
+	//
+	// ⚠️ **和上面那个 `picker`（pathPicker）是两回事，别合成一个**：那一个挑
+	// 的是「一条路径」（下载目录、FFmpeg），要的是标题加一句问话；这一个挑
+	// 的是「图片」，要的是**格式白名单**。合并的话有一边要带一个它不用的参数，
+	// 而那个参数以后会有人传错。
+	pickImage func(*mygo.Window) ([]string, error)
+
 	// keys 是快捷键。和 hist 一样是单独一份文件（见 shortcuts.go）。没挂上盘时
 	// 是内存里的一份：设置页照常能录，只是关掉之后不记得。
 	keys *shortcutKeys
@@ -313,19 +342,23 @@ func New(a *app.App) *Shell {
 		clock:     realClock{},
 		images:    imgcache.New(imgcache.Options{}),
 		autostart: systemAutoStart{},
+		pickImage: pickImageFile,
 	}
 	s.images.AddWake(s.wake.invalidate)
 	// 首页自己那一摊要在建好之后才有（它要用封面缓存），所以接在 images 后面。
 	// 操作接在应用状态上、提示接自己的 Toast，接法见 widgets/list 的 AppActions。
-	s.home = newHomePage(s.images, list.AppActions(a, s.addToast), s.wake.invalidate)
+	s.home = newHomePage(s.images, s.listActions(), s.wake.invalidate)
 	// 下载记录页同理（downloadlist.go）：两个「打开」接系统那一份，它们在无头
 	// Tester 里会 panic，测试建完外壳就换成记动作的桩；记录那一条接应用层。
 	s.downloads = newDownloadsPage(a.DownloadSnapshots, systemOpenDir, mygo.Shell.ShowItemInFolder)
 	// 本地音乐页同理。⚠️ 传进去的唤醒是 `s.local.invalidate` 而不是
 	// `s.wake.invalidate`：后台扫完了要把**所有画过这一页的窗口**都叫醒，
 	// 只叫醒这一个外壳的窗口的话，另一个停在旧帧（铁律三）。
-	s.local = newLocalPage(a, s.images, list.AppActions(a, s.addToast),
-		s.addToast, s.pickDir)
+	// ⚠️ 用 `s.listActions()` 而不是 `list.AppActions(...)`：同一份列表操作给
+	// 每一处用（见 folderpick.go 里那个函数）。本地文件收藏不了（`favTarget`
+	// 只认在线的），所以「收藏」那一项在本地音乐这一页会走「说清楚为什么」
+	// 那一支——那也是对的答案。
+	s.local = newLocalPage(a, s.images, s.listActions(), s.addToast, s.pickDir)
 	s.hist = newSearchHistory("")
 	s.keys = newShortcutKeys("")
 	s.picker = systemPathPicker{}
@@ -624,7 +657,44 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// `data-[placement=right]`），底下那一层页面照旧看得见、点得着；塞进上面
 	// 那个 Row 里就成了「窗口窄一块」，页面被挤着走——那不是抽屉。
 	Guard(s.viewQueueDrawer, s.onPanic)(c)
+
+	// 收藏夹管理那几个弹窗（新建 / 修改 / 选封面 / 裁剪 / 选收藏夹）。
+	//
+	// ⚠️ 排在**最后**：它们是模态的，要盖住整页；而外面这一层 Guard 不可省
+	//（铁律四）——view 里 panic 会穿透 Cocoa 事件循环杀掉整个进程。
+	Guard(s.viewFolderDialogs, s.onPanic)(c)
+
 	s.viewToasts(c)
+}
+
+// viewFolderDialogs 画收藏夹管理那几个弹窗，**并收掉后台回来的结果**。
+//
+// 每帧开头**先**收结果再画：`TakeFolderResult` 是「取走而不是读」，取过就不再
+// 有，而收结果这一趟会改 `submitting`——先画后收的话，界面上会有一帧是
+// 「提交完了但按钮还在转」，而用户看到的就是「点了没反应」。
+func (s *Shell) viewFolderDialogs(c *ui.Context) {
+	s.flushFolderResults()
+	s.flushCoverPick()
+	s.syncFolderDialogs()
+
+	s.viewFolderEdit(c)
+	// 裁剪弹窗画在编辑弹窗**外面**（不是里面）：`ui.Modal` 自己带一层遮罩，
+	// 嵌在另一个 Modal 的面板里的话遮罩只有面板那么大，裁剪台周围那一圈点不
+	// 到——而那一圈正是「点外面想关掉」的地方。
+	if e := s.folderEdit; e != nil && e.crop.open {
+		s.viewCoverCrop(c, &e.crop)
+	}
+	s.viewFolderSelect(c)
+}
+
+// syncFolderDialogs 是那些「每一帧都要问一次后台」的地方。
+//
+// ⚠️ **在 flushFolderResults 之后调**：列表换掉之后 `flushFolderResults` 才拿得到
+// 刚回来的那一批勾选状态，反过来的话这一帧的勾是按旧列表算的。
+func (s *Shell) syncFolderDialogs() {
+	if f := s.folderSelect; f != nil {
+		s.syncFolderList(f)
+	}
 }
 
 // viewCrash 是崩溃后那一帧。Biu 原来的 ErrorBoundary 也是这么做的：程序活着，

@@ -51,6 +51,38 @@ func PickAudioFile(parent *mygo.Window) ([]string, error) {
 	return mygo.Dialog.Open(audioOpenOptions(parent))
 }
 
+// imageFilters 是选封面时的格式白名单。
+//
+// ⚠️ **只有 jpeg / png 两项，末位的「所有文件」必须留着**：白名单只是把该
+// 看见的摆到前面，不是拦路虎——真有一张 `.webp` 的封面时，拒掉它不如让用户
+// 选（选错了上层会说「只支持 jpeg 或 png」，那句话指得准；而不给选，用户
+// 只会看到「怎么不能选这张」）。
+//
+// webp / avif **不在**这一项里：B 站自己的封面全是 `.webp`，所以上游那个
+// 收藏夹列表在传 `.avif` 参数（PLAN §0.9 已改成 `.webp`）——但那说的是**读**，
+// 上传那边 Biu 只收 jpeg / png（`image-upload/index.tsx:82`）。
+var imageFilters = []mygo.FileFilter{
+	{Name: "图片文件", Extensions: []string{"jpg", "jpeg", "png"}},
+	{Name: "JPEG", Extensions: []string{"jpg", "jpeg"}},
+	{Name: "PNG", Extensions: []string{"png"}},
+	{Name: "所有文件", Extensions: []string{"*"}},
+}
+
+// PickImageFile 弹系统文件框让用户选一张本地的图片当收藏夹封面。
+//
+// 单选：封面只可能是一张，而多选的文件框会让「选了两张」这种结果只能靠
+// 静默丢掉第一张来解释。
+//
+// ⚠️ 调用约束和 `PickAudioFile` 一样：**必须从非主线程调**。
+func PickImageFile(parent *mygo.Window) ([]string, error) {
+	return mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent:  parent,
+		Title:   "选择封面图片",
+		Message: "选一张本地的图片，会裁成 16:9",
+		Filters: imageFilters,
+	})
+}
+
 // PickPath 弹系统对话框让用户挑一条路径：dir 为 true 是挑文件夹，否则挑文件。
 // 返回空串表示用户取消（不是错误——「用户不想选」是正常结果，不是出错）。
 //

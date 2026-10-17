@@ -267,6 +267,10 @@ func firstRune(s string) string {
 }
 
 // collectionPath 是一个收藏夹在侧栏里点进去的路由。
+//
+// ⚠️ 前缀用 `collectionPathPrefix`（collectionpage.go 里那一处）：那边要从同
+// 一个前缀上切出 id，两边各写一遍字符串的话，改了一边就会变成「侧栏点进去
+// 404」。
 func collectionPath(id int64) string {
-	return "/collection/" + strconv.FormatInt(id, 10)
+	return collectionPathPrefix + strconv.FormatInt(id, 10)
 }

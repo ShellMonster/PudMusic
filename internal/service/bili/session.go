@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -155,6 +156,34 @@ func (c *Client) IssuedCookies() []*http.Cookie {
 		return nil
 	}
 	return cookies
+}
+
+// SelfMid 是当前登录用户的 uid，B 站那边叫 mid。
+//
+// # 为什么从 cookie 里读，不发一次 `/x/web-interface/nav`
+//
+// 「我创建的收藏夹」那个接口要 `up_mid`（`CreatedFolders`）。Biu 上游是从
+// `useUser` 那个 store 里拿的，而那个 store 是登录时调 nav 接口填的——
+// 代价是多一个接口、多一份 fixture、以及登录之后第一次用它之前的一次往返。
+//
+// `DedeUserID` 这个 cookie 里装的就是 mid，扫码登录成功时 B 站自己下发的。
+// 读它是一行、零往返。**没登录时是 0**，而 0 在调用方那里会被挡住不发给
+// 接口（见 `CreatedFolders`），界面上是一句「还没登录」，而不是一次 -400。
+//
+// ⚠️ 认的是**不带哈希后缀的那一个**：B 站同时下发 `DedeUserID` 和
+// `DedeUserID__ckMd5`，后者是算过 md5 的，不能当 id 用。
+func (c *Client) SelfMid() int64 {
+	for _, ck := range c.SessionCookies() {
+		if ck.Name != "DedeUserID" {
+			continue
+		}
+		id, err := strconv.ParseInt(ck.Value, 10, 64)
+		if err != nil {
+			return 0
+		}
+		return id
+	}
+	return 0
 }
 
 // isOwnHost 判一个主机是不是「这个客户端自己会去聊的主机」。
