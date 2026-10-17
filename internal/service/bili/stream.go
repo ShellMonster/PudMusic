@@ -15,7 +15,6 @@ package bili
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -70,6 +69,14 @@ type StreamRef struct {
 	// 换句话说，即使这两个字段填错了，歌照样放得出来——所以别拿它们做判断。
 	Codecs    string
 	Container string
+
+	// Width / Height 是视频那条流的分辨率（音频流恒为 0）。
+	//
+	// **只作记录**：视频下载这一路不转码，所以宽高不参与任何计算。
+	// 记下来是因为诊断文件里能一眼看出「这一条是 1080P 还是 720P」，
+	// 而那正是「为什么这个 MV 这么大」的第一个答案。
+	Width  int
+	Height int
 
 	// ExpiresAt 是地址的失效时刻，从地址里的 `deadline` 读出来。
 	ExpiresAt time.Time
@@ -135,45 +142,31 @@ type playurlData struct {
 
 // PlayURL 问 B 站要一条音频流。
 //
-// pref 是用户选的音质档（`AudioAuto` 是默认）。bvid / cid 指向收藏夹里的
-// 一个条目——**cid 必填**：B 站的多 P 投稿不给 cid 会取到第一集，
-// 表现为「点第三集放出来的是第一集」，且不报错。
+// pref 是用户选的音质档（`AudioAuto` 是默认）。bvid / cid 指向一个条目。
+//
+// 🔴 **cid 必填**（上游 `player-playurl.ts:9` 的 `cid: number | string`，那行没有
+// `?`）。不给 cid，B 站多半按第一集给——多 P 投稿放出来的和用户点的不是一回事，
+// 而本地 fixture 放不放假参数，所以「它会不会老实按第一集给」没人验过：既然上游的
+// 合同写着必填，这里就不去赌它。
+//
+// B 站的搜索结果只给 bvid（见 search.go 的文件头），所以**调用方要先补上 cid**：
+// `app.runOnline` 问一次 `VideoPages`（见 video.go）再调这里。补不上就报错，
+// 不硬着头皮发一个没有 cid 的请求。
 //
 // 返回的 `StreamRef` 里没有任何凭据，**不要**把它写进日志：地址带
 // `upsig` 签名，诊断文件里有它就等于把这条流公开了。
 func (c *Client) PlayURL(ctx context.Context, bvid, cid string, pref AudioQuality) (*StreamRef, error) {
 	if bvid == "" || cid == "" {
-		// 不是 ErrNoStream：调用方给错了参数，换一条流也救不回来。
+		// 不是网络错也不是重试能救的：调用方没给全。重试一万次还是这一句。
 		return nil, fmt.Errorf("%w: 稿件或分 P 不完整（bvid=%q cid=%q）", ErrNoStream, bvid, cid)
 	}
-
-	q := url.Values{}
-	q.Set("bvid", bvid)
-	q.Set("cid", cid)
-	q.Set("fnval", fmt.Sprint(dashAll))
-	q.Set("fnver", "0")
-	q.Set("fourk", "1")
-
-	// ⚠️ 这个接口**不强制**要 WBI 签名：不带 w_rid 也能通（实测）。
-	// 这里仍然签名，因为带签名的调用在风控下更稳，而签名本身由
-	// `wbi.go` 那唯一一份实现负责，不存在「这一处忘了签」的可能。
-	raw, err := c.Do(ctx, Call{
-		Method: "GET",
-		URL:    c.hostAPI + playurlPath,
-		Query:  q,
-		WBI:    true,
-	})
+	// 不带 `qn`：取流接口把所有档都返回来，由 `pickAudio` 按偏好在客户端挑
+	//（B 站那边也是这么用的）。视频那一路才需要点明一档（见 `fetchPlayurl`）。
+	d, err := c.fetchPlayurl(ctx, bvid, cid, VideoQualityUnknown)
 	if err != nil {
 		return nil, err
 	}
-
-	var d playurlData
-	if err := json.Unmarshal(raw, &d); err != nil {
-		// 接口回了 200、code 也是 0，但 data 的形状不是我们认识的那个。
-		// 这通常是 B 站改接口改出来的，不要把它当成网络错——重试没用。
-		return nil, fmt.Errorf("bili: 取流接口的返回读不懂：%w", err)
-	}
-	return refFrom(&d, bvid, cid, pref)
+	return refFrom(d, bvid, cid, pref)
 }
 
 // refFrom 把取流响应变成一个 StreamRef。

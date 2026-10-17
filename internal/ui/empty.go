@@ -117,3 +117,38 @@ var noLyrics = emptyState{
 	Title: "暂无歌词",
 	Hint:  "在歌词搜索里换个源（网易云 / LRCLIB）再找一次",
 }
+
+// viewLoadError 是「这一块拉失败了」的提示 + 一个重试按钮。
+//
+// # 为什么它不能是 `viewEmpty` 的一个空状态
+//
+// 三个理由，每一个都够单独一票：
+//
+//  1. **文案不能混**。「暂无动态」和「加载失败」在用户那边是两件完全不同
+//     的事，而闸门一失败就把第一支挡住了（不重试），界面上只剩「暂无」——
+//     用户会以为那个人真的什么都没发。
+//  2. **必须有重试按钮**。空状态那一支没有按钮，于是失败之后唯一能
+//     继续的路是人点一下。
+//  3. **切走再切回来不会自己好**。这一页的状态按 mid 缓存着，翻回来
+//     还是那份失败，而 `want()` 因为 `err != nil` 一直挡着。
+//
+// ⚠️ 它自己**不碰闸门**：`retry` 是调用方给的闭包，闸门那一摊在
+// `upspace_tabs.go` / `dynamicfeed.go` 那边，离得近才好改。
+//
+// ⚠️ **每个重试按钮要带自己的名字**（`retryLabel`），不能全叫「重试」：
+// 动态流那一页同时有两块会失败（左边的关注的人、右边的动态），两个同名
+// 按钮摆在一起，用户分不清按的是哪个——按错了的那一块没反应，另一块还在
+// 转圈，看起来就像「点了没用」。
+func (s *Shell) viewLoadError(c *ui.Context, key, retryLabel string, err error, retry func()) {
+	// 🔴 铁律二：和 viewEmpty 一样，每一帧开头装主题。
+	s.applyFrameTheme(c)
+
+	t := c.Theme()
+	ui.Column(c).Key(key).Grow(1).Center().Gap(8).Padding(20, 28).Children(func() {
+		ui.Text(c, "这一块没拉出来").FontSize(15).TextColor(t.Text)
+		ui.Text(c, err.Error()).FontSize(12).TextColor(t.TextMuted).MaxLines(3)
+		if retry != nil && ui.Button(c, retryLabel).Clicked() {
+			retry()
+		}
+	})
+}

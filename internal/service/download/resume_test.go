@@ -25,7 +25,7 @@ import (
 func TestOnlyUnfinishedChunksAreRefetchedOnResume(t *testing.T) {
 	const size = 3 * chunkSize // 三块，正好三发
 	h := newHarness(t, size, 30280)
-	id := TaskID(bvid, cid)
+	id := TaskID(bvid, cid, false)
 	dest := DestFor(h.dir, "测试的歌", ".m4a", id)
 
 	// 造一个「下完第 0 块就退出了」的世界：分块记账 + 盘上的半成品。
@@ -74,7 +74,7 @@ func TestOnlyUnfinishedChunksAreRefetchedOnResume(t *testing.T) {
 func TestAResumeAfterTheStreamChangedRestartsFromZero(t *testing.T) {
 	const size = 2 * chunkSize
 	h := newHarness(t, size, 30232) // 上一轮是 128K
-	id := TaskID(bvid, cid)
+	id := TaskID(bvid, cid, false)
 	dest := DestFor(h.dir, "测试的歌", ".m4a", id)
 
 	// 盘上是 variant 0（旧那档）的前一块。

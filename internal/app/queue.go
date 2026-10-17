@@ -1,7 +1,9 @@
 package app
 
 import (
+	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -56,6 +58,43 @@ func LocalItem(path string) Item {
 	}
 }
 
+// Identity 是这一项的判重标识，也就是 Biu 那个抽屉用来去重的那个键
+// （`biu/src/components/music-playlist-drawer/index.tsx` 的 uniqBy）：
+//
+//	本地 → local:<完整路径>     （Biu 的 local:<id>，本地项的 id 就是路径）
+//	MV   → mv:<bvid>
+//	音乐 → audio:<sid>
+//
+// **认不出是哪一首时返回空串**，调用方必须自己拿这个空串当「没法判重」处理，
+// 不能拿它去查表或者当行身份。空串不是「谁都跟它一样」——那样会把两首不同的歌
+// 并成一行，看起来像是其中一首不见了。真出现这种项时（还没接来源的占位项），
+// 抽屉改用它在队列里的下标当身份。
+//
+// 键里带来源前缀不是多余的：Bvid / Sid / 路径三样都是用户数据，不加前缀的话
+// 一个叫 `1293494` 的 sid 和一个叫 `1293494` 的本地文件名会认成同一首。
+func (it Item) Identity() string {
+	// ⚠️ Source 和 Type 都判：`LocalItem` 两个都填，而手写的 Item 常常只填
+	// Type。少判一个的话，本地项会掉到下面那两支里去拿一个空标识。
+	switch {
+	case it.Source == "local" || it.Type == "local":
+		if it.Path == "" {
+			return ""
+		}
+		return "local:" + it.Path
+	case it.Type == "mv":
+		if it.Bvid == "" {
+			return ""
+		}
+		return "mv:" + it.Bvid
+	case it.Type == "audio":
+		if it.Sid == "" {
+			return ""
+		}
+		return "audio:" + it.Sid
+	}
+	return ""
+}
+
 // Queue 是播放队列。零值不可用，请用 NewQueue。
 //
 // 末尾的行为照抄 Biu 的 play-list.ts：next 和 prev 都是取模绕回，队列里只有
@@ -106,6 +145,33 @@ func (q *Queue) Current() (Item, bool) {
 	return q.items[q.cur], true
 }
 
+// itemAt 是队列里第 i 项，下标越界时是零值。
+//
+// 「点一行跳过去」要读**目标那项**（和当前项比是不是同一首），所以队列得能按
+// 下标读一项——`Items()` 也能，但那是拷一整列。
+func (q *Queue) itemAt(i int) (Item, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if i < 0 || i >= len(q.items) {
+		return Item{}, false
+	}
+	return q.items[i], true
+}
+
+// CurrentIndex 返回正在放的那一项在队列里的下标，-1 是还没开始。
+//
+// 界面上「定位当前播放」「这一行是不是正在放」都要下标，不要项：项是值拷贝，
+// 拿去比相等只能认出完全相同的那一项（见 indexOfItem），而抽屉里认的是同一首
+// 歌（Biu 的 `isSame` 那一层，判重标识，见 Item.Identity）。
+func (q *Queue) CurrentIndex() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.cur < 0 || q.cur >= len(q.items) {
+		return -1
+	}
+	return q.cur
+}
+
 // Move 从当前项挪 delta 格（+1 下一首，-1 上一首），返回落到的那一项。
 //
 // 两端都绕回，和 Biu 一样。队列空时返回 false。还没开始播（cur 是 -1）时，
@@ -141,6 +207,96 @@ func (q *Queue) Reset(items ...Item) (Item, bool) {
 	}
 	q.cur = 0
 	return items[0], true
+}
+
+// RemoveAt 把第 i 项从队列里删掉，返回删掉的是哪一项。下标越界时是 false。
+//
+// 删完之后 cur 仍然指着**同一首正在放的歌**：
+//
+//   - 删的是它前面的一行 → cur 往前挪一格，不挪的话指针就落到下一首去了，
+//     界面上（播放条 / 抽屉）会显示歌还在放、下标指的却是另一首。
+//   - 删的就是它自己 → cur 停在原处，也就是后面那一首；删的是末尾则绕回第一首。
+//   - 一首都不剩了 → cur 是 -1。
+//
+// ⚠️ 这一层**只管队列**。删掉正在放的那首之后到底要不要接着放下一首，是 App
+// 那边的事（要开播放器），见 App.RemoveAt。
+func (q *Queue) RemoveAt(i int) (Item, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if i < 0 || i >= len(q.items) {
+		return Item{}, false
+	}
+	it := q.items[i]
+	q.items = slices.Delete(q.items, i, i+1)
+
+	switch {
+	case len(q.items) == 0:
+		q.cur = -1
+	case q.cur > i:
+		q.cur--
+	case q.cur == i:
+		// 删掉的正是当前项，它原来的下标现在指着后面那一首；删的是末尾就绕回
+		// 第一首（和 Move 两端绕回一个道理，见文件头的说明）。
+		if q.cur >= len(q.items) {
+			q.cur = 0
+		}
+	}
+	return it, true
+}
+
+// RemoveIdentity 把队列里**所有**判重标识等于 id 的项删掉，返回删掉的是哪几项、
+// 被删的里面有没有正在放的那首、以及有没有删掉东西。id 是空串时一概不删。
+//
+// 为什么是「全部」而不是「一份」：抽屉那一行是按标识画的，同一首排了两遍只画一行，
+// 删一份的话那一行画完还在——用户按了「从列表删除」，什么也没变。Biu 的
+// `play-list.ts` 里 `del` 用的就是 `isSame` 删全部。
+//
+// cur 的算法和 `RemoveAt` 一样（删掉当前项 → 落在后面那一首；删别的 → 跟着往前挪），
+// 只是这里要照顾「删掉好几项」：从**后往前**删，下标和 cur 的相对关系才不会在删的
+// 过程中变掉。
+func (q *Queue) RemoveIdentity(id string) (removed []Item, wasCurrent, ok bool) {
+	if id == "" {
+		return nil, false, false
+	}
+	items := q.Items()
+	cur := q.CurrentIndex()
+	for i := len(items) - 1; i >= 0; i-- {
+		if items[i].Identity() != id {
+			continue
+		}
+		it, done := q.RemoveAt(i)
+		if !done {
+			continue
+		}
+		if i == cur {
+			wasCurrent = true
+		}
+		removed = append(removed, it)
+	}
+	slices.Reverse(removed) // 从后往前删的，翻回来才是队列里的顺序
+	return removed, wasCurrent, len(removed) > 0
+}
+
+// selectAt 把当前项挪到第 i 首，返回那一项。i 是 -1 时是「还没开始」，此时没有
+// 当前项，返回 false。i 越界只返回 false，**不动 cur**。
+//
+// **不走 Move 的取模**：Move 两端绕回（那是「上一首 / 下一首」要的），而这里
+// 用户指着队列里的某一行，放到别的行上去就是错的那一行。
+//
+// 不导出：设 cur 只有「跳过去放」这一条路（App.PlayAt），多导出一个就多一处能
+// 把队列和播放器对不上的地方。回滚也走它（i 传 -1 就是退回「还没开始」）。
+func (q *Queue) selectAt(i int) (Item, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if i < 0 {
+		q.cur = -1
+		return Item{}, false
+	}
+	if i >= len(q.items) {
+		return Item{}, false
+	}
+	q.cur = i
+	return q.items[i], true
 }
 
 // ---- App 这一侧的接线 ----
@@ -208,6 +364,77 @@ func (a *App) PlayFrom(items ...Item) error {
 	return nil
 }
 
+// PlayAt 把当前项挪到队列里的第 i 首并放它。队列里没有这一项时返回错误。
+//
+// 这是抽屉里点一行的那条路：**不换队列**（那是 PlayFrom），只是跳过去。
+// 放不了就退回原来那一首，和 step 同一个道理——用户点的是这一首，不能因为放
+// 不开就把他放到了另一首上，而抽屉里的高亮还得跟着下标走。
+//
+// 点**正在放**的那一首什么都不做：Biu 的 `playListItem` 也是开头一句
+// `if (get().playId === id) return`。重头播是播放条上「播放」那个键的活。
+//
+// ⚠️ 「正在放」有两层，两层都要：
+//
+//  1. **真的���歌在放**（`hasTrack`）。只看队列的当前项的话，「接歌失败 → 停下来」
+//     之后当前项还指着那一首，于是再点它永远是什么也不做——文件补回来了、用户按的
+//     也是「播放」，却再也放不出来。
+//  2. **同一首**（判重标识），不是同一个下标。队列 `[A, A]` 时抽屉去重只画一行
+//     （第一份），而正在放的可能正是**第二份**；按下标认，这一行会被当成「另一首」
+//     而从头重播——用户点的就是他正在听的那一行。
+func (a *App) PlayAt(i int) error {
+	if i < 0 || i >= a.queue.Len() {
+		return fmt.Errorf("队列里没有第 %d 首", i+1)
+	}
+	target, _ := a.queue.itemAt(i)
+	cur := a.queue.CurrentIndex()
+	if a.hasTrack() {
+		playing, ok := a.queue.Current()
+		switch {
+		case cur == i:
+			return nil // 同一项、正在放
+		case ok && sameSong(playing, target):
+			// 同一首的另一份：把队列的当前项指过去，**不重播**。指过去是为了
+			// 「下一首」从这一行后面接着走。
+			a.queue.selectAt(i)
+			return nil
+		}
+		if target.isOnline() {
+			// 换成在线的一首：**先把还在响的那首停掉**。在线流是后台建的（取流要
+			// 几百毫秒的网络往返），开它的那一刻界面上还没有新歌——**还响着的是上
+			// 一首**，而抽屉已经按新的当前项把高亮挪走了。用户看到的是「播放条上是
+			// 旧的那首、抽屉里高亮的是新的那一首」，而真正出声的偏偏还是旧的。
+			//
+			// 下一首打不开时（`failOnline` 只报一句错）也就不会「旧歌继续响」——
+			// 那时候什么都没有在放，抽屉也不高亮任何一行，两边说的是同一件事。
+			//
+			// 本地项不用这样：`Open` 是同步的，换歌和换歌之间没有缝。
+			a.ClearTrack()
+		}
+	}
+	item, _ := a.queue.selectAt(i)
+	if err := a.play(item); err != nil {
+		a.queue.selectAt(cur) // cur 是 -1 时就是退回「还没开始」
+		return err
+	}
+	return nil
+}
+
+// sameSong 报两项是不是同一首（判重标识相同）。
+//
+// **认不出是哪一首的（标识是空串）一律当不同**：两首都认不出的歌在标识上长得一样，
+// 当成同一首就会把「点一行」变成「什么都不做」。
+func sameSong(x, y Item) bool {
+	id := x.Identity()
+	return id != "" && id == y.Identity()
+}
+
+// hasTrack 报告现在有没有歌在放（「播放器还开着」就是有）。
+func (a *App) hasTrack() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.player != nil
+}
+
 // indexOfItem 是 it 在 items 里的下标，找不到是 -1。
 //
 // 按整项比：Biu 的判重标识是 {source, type, bvid, cid, sid}，路径也在结构体
@@ -265,6 +492,83 @@ func (a *App) step(delta int) {
 	if err := a.play(item); err != nil {
 		a.queue.Move(-delta)
 	}
+}
+
+// RemoveAt 把队列里第 i 项删掉。队列里没有这一项时返回错误。
+//
+// 删掉的正是正在放的那首时：后面还有歌就接着放下去（原处是末尾则绕回第一首），
+// 一首都不剩就停下来。
+//
+// 接着放的那首**打不开**时停下来，并且返回一句说清了的错误。停下来不是认输，是
+// 别无选择：让刚才那首继续响的话，队列里已经没有它、播放条上还写着它的名字、
+// 抽屉把下一首高亮成正在放——三处各说各话，正是 App.ClearTrack 要避免的那种不一致。
+// 错误里带上「已经删掉了」是为了让调用方别再说「删不掉」：删是真的删掉了，
+// 说它没删是另一回事。
+func (a *App) RemoveAt(i int) error {
+	cur := a.queue.CurrentIndex()
+	if _, ok := a.queue.RemoveAt(i); !ok {
+		return fmt.Errorf("队列里没有第 %d 首", i+1)
+	}
+	if cur != i {
+		return nil
+	}
+	return a.playNextAfterCurrent()
+}
+
+// RemoveSongFromList 把队列里**所有**和它同一首的项删掉，返回删掉了几份。
+//
+// 这是抽屉那一行「从列表删除」接的那一条：那一行是**按判重标识**画的，同一首排了
+// 两遍就只画一行——只删一份的话那一行画完还在（顶上的计数也不变），用户会以为按了
+// 没反应。Biu 的 `play-list.ts` 里 `del` 用 `isSame` 删掉全部同身份项，就是这个道理。
+//
+// 认不出是哪一首的项（`Identity` 是空串）**一概不删**：两首都认不出来的歌在标识上
+// 长得一样，按一次删掉两首不同的歌比按了没反应糟得多。
+func (a *App) RemoveSongFromList(it Item) (int, error) {
+	removed, wasCurrent, ok := a.queue.RemoveIdentity(it.Identity())
+	if !ok {
+		return 0, fmt.Errorf("队列里没有「%s」", it.Title)
+	}
+	if !wasCurrent {
+		return len(removed), nil
+	}
+	return len(removed), a.playNextAfterCurrent()
+}
+
+// playNextAfterCurrent 是「当前项已经不在队列里了，接着放下一首」那一条。
+//
+// 两条路（RemoveAt / RemoveSongFromList）都走它，因为**漏了哪一条，界面上都是
+// 「队列里没有它、歌还在响、播放条和抽屉各说各话」**。
+//
+//  1. **下一首是在线的 → 先把正在响的停掉再开新的。** 在线流是后台建的（取流要几百
+//     毫秒的网络往返），开它的那一刻界面上还没有新歌，**还响着的是刚刚从队列里删掉
+//     的那首**。本地项不用这样：`Open` 是同步的，换歌和换歌之间没有缝。先调
+//     `ClearTrack` 正好合适——它加一次播放代次，把后面这次开流和上一次隔开。
+//  2. **下一首打不开 → 停下来，并说一句说清了的错误。** 停下来不是认输，是别无选择。
+//     错误里带上「已经删掉了」是为了让调用方别再说「删不掉」：删是真的删掉了。
+func (a *App) playNextAfterCurrent() error {
+	item, ok := a.queue.Current()
+	if !ok {
+		// 一首都不剩了。
+		a.ClearTrack()
+		return nil
+	}
+	if item.isOnline() {
+		a.ClearTrack()
+	}
+	if err := a.play(item); err != nil {
+		a.ClearTrack()
+		return fmt.Errorf("已经删掉了，但接不上下一首：%w", err)
+	}
+	return nil
+}
+
+// ClearQueue 清空队列并停下来。
+//
+// 停了还得把当前曲目清干净（见 ClearTrack）：只停声的话，播放条上还是那首歌的名字，
+// 队列里已经空了。
+func (a *App) ClearQueue() {
+	a.queue.Reset()
+	a.ClearTrack()
 }
 
 // setErr 在播放条上显示一条错误，直到下一次打开成功。

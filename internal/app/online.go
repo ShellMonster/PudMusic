@@ -25,6 +25,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -302,17 +303,25 @@ func (it Item) isOnline() bool { return it.Source == "online" }
 
 // playableOnline 报告这个在线条目现在有没有足够的信息去取流。
 //
-// 只有 **mv**（bvid + cid）这一种是通的：B 站的收藏夹里放的是投稿，
-// cid 是分 P 的 id，**不给它会取到第一集**——不报错，只是放错了那一集。
+// 只有 **mv**（bvid）这一种是通的：B 站的收藏夹里放的是投稿，cid 是分 P 的 id。
 //
-// 「audio」（sid，B 站音乐库）是另一种来源，走的是另一个接口，
-// 现在还没接。给它一句人话，而不是放一个打不开的条目让人猜。
+// ⚠️ **cid 不再是「有没有」的判据**：B 站的搜索结果只给 bvid，而搜索页那一整个
+// Tab 都是这样的条目（见 `service/bili/search.go` 的文件头）。以前这里要求 cid，
+// 表现是搜出来的歌一首都放不了，播放条上红字写「缺稿件 id 或分 P id」——用户按的
+// 就是搜索结果，说他缺一个他压根拿不到的东西，这句话是错的。
+//
+// cid 缺失时不是「放不了」而是「放哪一集还不知道」：那是**要问一次**才能知道的
+// 事情，不是当场能判出来的。`runOnline` 在后台问一次分 P（`bili.VideoPages`），
+// 问不到才退到第一集。同步能判出来的仍然是「压根没有 bvid」和「不是投稿」这两种。
+//
+// 「audio」（sid，B 站音乐库）是另一种来源，走的是另一个接口，现在还没接。给它一句
+// 人话，而不是放一个打不开的条目让人猜。
 func playableOnline(it Item) error {
-	if it.Type != "mv" || it.Bvid == "" || it.Cid == "" {
+	if it.Type != "mv" || it.Bvid == "" {
 		if it.Type == "audio" && it.Sid != "" {
 			return errors.New("B 站音乐库那条路还没接上，先放收藏夹里的投稿")
 		}
-		return errors.New("这一首还不能放：缺稿件 id 或分 P id")
+		return errors.New("这一首还不能放：缺稿件 id")
 	}
 	return nil
 }
@@ -345,6 +354,24 @@ func (a *App) runOnline(it Item, gen int) {
 	s := a.streamingSnapshot()
 	if s == nil {
 		a.failOnline(gen, errStreamingMissing)
+		return
+	}
+
+	// 🔴 缺 cid 的条目（搜索结果全都是）先问一次该放哪一集，再去取流。
+	//
+	// 为什么在这一层问、而不是在搜索那一层把每一条结果都补上：用户多半只会听其中
+	// 一首，为另外 23 首各发一次带签名的往返不划算（上游 Biu 是进队列时问的，见
+	// `store/play-list.ts:129` 的 `getMVData`）。为什么不在 `playableOnline` 里问：
+	// 那是在界面线程上调的，一次网络往返会冻住窗口。
+	//
+	// 🔴 **问不到就报错，不硬发**。上游把 cid 列为必填（`player-playurl.ts:9`），
+	// 而「B 站能不能接受一个没有 cid 的请求」没有任何人能验——本地 fixture 放不
+	// 放假参数，所以拿它当「反正会按第一集给」的依据是不成立的。发一个缺 cid 的
+	// 请求，换回来的是一段不知道是哪一集的音频：能出声，但可能不是用户点的那个。
+	// 说清「问不出这一集是哪一集」，比放错一集好。
+	it, err := a.withCid(context.Background(), s, it)
+	if err != nil {
+		a.failOnline(gen, err)
 		return
 	}
 
@@ -387,6 +414,34 @@ func (a *App) runOnline(it Item, gen int) {
 	if wake != nil {
 		wake()
 	}
+}
+
+// withCid 是「缺分 P id 就去问一次」的那一步，**只在这一层问一次**。
+//
+// 已经有 cid 的原样返回（收藏夹、稍后再看、UP 空间来的条目接口都给 cid，问它们是
+// 白跑一趟）。问不到就**把错原样交出去**，不去编一个 cid——编出来的那个取回来的是
+// 别人的集（见 `service/bili/video.go`）。
+//
+// 返回的错会被 `failOnline` 报到播放条上，所以那句话要说清「是问不出这一集」，而不是
+// 「取不到流」：用户在播放条上看到的得是他能照着做的下一步（换个词重搜 / 等网络好）。
+func (a *App) withCid(ctx context.Context, s *Streaming, it Item) (Item, error) {
+	if it.Cid != "" {
+		return it, nil
+	}
+	if s.Client == nil {
+		return it, errStreamingMissing
+	}
+	cid, err := s.Client.FirstVideoCid(ctx, it.Bvid)
+	if err != nil {
+		// 包上 `ErrNoPart`：界面上要说清「问不出这一集」，而不是把它底下那个
+		// 网络错原样报出去（`bili.Friendly` 靠这个哨兵把两句话说开）。
+		return it, fmt.Errorf("%w（%s）：%w", bili.ErrNoPart, it.Bvid, err)
+	}
+	if cid == "" {
+		return it, fmt.Errorf("%w：%s 的分 P 列表里没有可用的分 P id", bili.ErrNoPart, it.Bvid)
+	}
+	it.Cid = cid
+	return it, nil
 }
 
 // buildOnline 建一套「流引用 + 字节源 + 播放器」，**不往 App 上装**。
