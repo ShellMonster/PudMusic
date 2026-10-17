@@ -62,6 +62,16 @@ type Downloads struct {
 //
 // 取流零件（`Streaming`）**可以**晚挂：真正要取流是用户点了下载之后，
 // 那时缺零件会给出一句人话而不是开窗就报错。
+//
+// ## 重复挂（导入完重新读队列）时旧的那个会被关掉
+//
+// 换 Manager 之前必须关旧的，否则旧的 `loop()` goroutine 还在跑：用户退出时
+// `SaveDownloads` 落的是**新** Manager 的队列，而旧的那批正在下的任务进度永远
+// 不会被写下来。
+//
+// 关的时候**传空路径**，也就是不落盘：队列文件此刻已经是**最新**的了（要么刚
+// 被导入写进去过，要么是上一次退出写下来的），旧 Manager 的内存快照比文件旧，
+// 让它落盘等于把文件回退到导入之前——那比不关还糟。
 func (a *App) MountDownloads(d Downloads) error {
 	if d.Media == nil {
 		return errDownloadsMissing
@@ -72,6 +82,11 @@ func (a *App) MountDownloads(d Downloads) error {
 	}, d.QueueFile)
 	if err != nil {
 		return err
+	}
+
+	// 新的建好了才关旧的：建失败时旧的那份还能继续用。
+	if old := a.downloadsSnapshot(); old != nil {
+		_ = old.Close("") // 见函数头：空路径 = 不落盘
 	}
 
 	a.mu.Lock()

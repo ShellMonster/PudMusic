@@ -80,7 +80,7 @@ func TestAFreshInstallBringsEverythingOverFromBiu(t *testing.T) {
 	biu := biuHomeDir(t)
 	dst := t.TempDir()
 
-	r := firstBiuImport(dst, []string{biu}, nil)
+	r := firstBiuImport(dst, []string{biu}, nil, false)
 	if !r.Any() {
 		t.Fatalf("自动导入没带过来任何东西：%+v", r)
 	}
@@ -223,7 +223,7 @@ func TestAnInstallThatAlreadyHasDataIsNotOverwrittenByAnAutomaticImport(t *testi
 		t.Fatal(err)
 	}
 
-	r := firstBiuImport(dst, []string{biu}, nil)
+	r := firstBiuImport(dst, []string{biu}, nil, false)
 	if r.Any() {
 		t.Fatalf("已经有数据了却还是自动导入了：%+v", r)
 	}
@@ -244,7 +244,7 @@ func TestNoAutomaticImportWhenTheUpgradeFailed(t *testing.T) {
 	biu := biuHomeDir(t)
 	dst := t.TempDir()
 
-	r := firstBiuImport(dst, []string{biu}, os.ErrInvalid)
+	r := firstBiuImport(dst, []string{biu}, os.ErrInvalid, false)
 	if r.Any() {
 		t.Fatalf("升级失败了却还是导入了：%+v", r)
 	}
@@ -256,7 +256,7 @@ func TestNoAutomaticImportWhenTheUpgradeFailed(t *testing.T) {
 // 机器上没有 Biu：什么都不做，也不报错。
 func TestNoBiuOnThisMachineIsNotAnError(t *testing.T) {
 	dst := t.TempDir()
-	if r := firstBiuImport(dst, nil, nil); r.Any() {
+	if r := firstBiuImport(dst, nil, nil, false); r.Any() {
 		t.Fatalf("机器上没有 Biu 却导出了东西：%+v", r)
 	}
 	// 而目录里一个文件都不该多出来。
@@ -329,11 +329,130 @@ func TestTheFirstRunUpgradesAndThenStillImportsFromBiu(t *testing.T) {
 		t.Fatalf("第一次运行没有写下总控标记：%v", err)
 	}
 
-	r := firstBiuImport(dst, []string{biu}, nil)
+	r := firstBiuImport(dst, []string{biu}, nil, false)
 	if !r.Any() {
 		t.Fatalf("第一次运行升级之后没有自动导入：%+v", r)
 	}
 	if !r.Settings || !r.Shortcuts || r.Downloads != 1 || r.Lyrics != 1 {
 		t.Fatalf("四样没有全带过来：%+v", r)
+	}
+}
+
+// 数据目录来自更新的版本时，自动导入**一个字节都不许写进去**。
+//
+// 这一条是被探针抓出来的：`runUpgrade` 自己说的是「数据目录来自更新的版本，这一版
+// 一个字都不会写回去」，而紧跟着的 `firstBiuImport` 照样把 Biu 的四样全灌了进去。
+// 守门只有一个 `hasAnyOwnFile`，而一个**只装得下 `data-version.json` 的目录**对
+// 它是空的——于是「用户把应用换回旧版」这个状态，在导入那条路上根本不存在。
+//
+// 判据是**判决有没有传下去**：`BeginUpgrade` 判出来的只读要一路传到
+// `firstBiuImport`，两条路（自动 / 设置页按钮）都要先问它。
+func TestDowngradingIntoAnEmptyDirDoesNotImportAnythingIntoIt(t *testing.T) {
+	biu := biuHomeDir(t)
+	dst := t.TempDir()
+	// 一个「用户换回了旧版」的目录：标记说是 v99，四份数据文件一个都没有。
+	mustWriteHere(t, filepath.Join(dst, app.UpgradeFileName),
+		`{"version":`+itoa(app.CurrentDataVersion+98)+`}`)
+
+	var rep MigrationReport
+	if err := runUpgrade(dst, &rep); err != nil {
+		t.Fatalf("升级不该报错（来自更新版本不是失败）：%v", err)
+	}
+	if !rep.ReadOnly {
+		t.Fatal("升级那一半没有把「来自更新的版本」记进报告：导入那条路会照写不误")
+	}
+
+	r := firstBiuImport(dst, []string{biu}, nil, rep.ReadOnly)
+	if r.Any() {
+		t.Fatalf("只读目录里还是写进去了东西：%+v", r)
+	}
+	for _, name := range []string{
+		app.SettingsFileName, shortcutFileName,
+		"download-queue.json", app.LyricsCacheDirName,
+	} {
+		if _, err := os.Stat(filepath.Join(dst, name)); err == nil {
+			t.Errorf("只读目录里多出了 %s", name)
+		}
+	}
+}
+
+// 导入到一半失败（快捷键那份认不出形状）时，**已经带过来的那三样要留下**，
+// 而且报告一起带回去。
+//
+// 原来那一版的判据是 `err == nil && r.Any()`：部分成功被判成「完全失败」，成果
+// 连同报告一起丢掉，然后循环不停、拿下一个 Biu 目录再导一遍——而那第二个目录
+// 通常是 `biu-dev`，它那份会把刚从正式版导进来的设置整份盖掉。
+func TestAPartialImportKeepsWhatItAlreadyBroughtIn(t *testing.T) {
+	biu := t.TempDir()
+	// 设置、下载、歌词都正常；只有快捷键那份认不出形状。
+	mustWriteHere(t, filepath.Join(biu, biuSettingsName), `{"appSettings":{"primaryColor":"#17c964"}}`)
+	mustWriteHere(t, filepath.Join(biu, biuShortcutsName), `{"somethingElse":[1,2,3]}`)
+	mustWriteHere(t, filepath.Join(biu, biuDownloadsName), `{"t1":{"id":"t1","status":"completed","outputFileType":"audio","title":"Biu 里下完的那首","bvid":"BV1aa411c7mD","cid":12345,"createdTime":1700000000000,"savePath":"/Users/x/Downloads/那首.flac","totalBytes":31457280}}`)
+	mustWriteHere(t, filepath.Join(biu, biuLyricsName), `{"BV1aa411c7mD-12345":{"lyrics":"[00:00] 词"}}`)
+
+	dst := t.TempDir()
+	r := firstBiuImport(dst, []string{biu}, nil, false)
+
+	if !r.Settings {
+		t.Errorf("设置没被留下：%+v", r)
+	}
+	if r.Downloads != 1 {
+		t.Errorf("下载记录没被留下（%d 条）：%+v", r.Downloads, r)
+	}
+	if r.Lyrics != 1 {
+		t.Errorf("歌词没被留下（%d 条）：%+v", r.Lyrics, r)
+	}
+	if r.Shortcuts {
+		t.Errorf("认不出形状的快捷键不该算成功")
+	}
+	// 跳过的原因要跟着报告一起回来——这一条原来也是丢的（返回零值）。
+	if len(r.Notes) == 0 {
+		t.Errorf("部分失败的理由没被报告出来：%+v", r)
+	}
+	if !saysAbout(r.Notes, "快捷键") {
+		t.Errorf("报告里没有点名快捷键：%v", r.Notes)
+	}
+	// 落盘的成果要真的在。
+	if _, err := os.Stat(app.SettingsPath(dst)); err != nil {
+		t.Errorf("设置没有落盘：%v", err)
+	}
+}
+
+// 部分成功之后**不许**拿下一个 Biu 目录接着盖。
+func TestAPartialImportDoesNotFallThroughToTheNextBiuDir(t *testing.T) {
+	good := t.TempDir()
+	mustWriteHere(t, filepath.Join(good, biuSettingsName),
+		`{"appSettings":{"primaryColor":"#17c964"}}`)
+	mustWriteHere(t, filepath.Join(good, biuShortcutsName), `{"somethingElse":[1,2,3]}`)
+
+	// 第二个目录：快捷键也是坏的，但设置是**另一个**颜色。
+	worse := t.TempDir()
+	mustWriteHere(t, filepath.Join(worse, biuSettingsName),
+		`{"appSettings":{"primaryColor":"#00ff00"}}`)
+	mustWriteHere(t, filepath.Join(worse, biuShortcutsName), `{"somethingElse":[4,5,6]}`)
+
+	dst := t.TempDir()
+	r := firstBiuImport(dst, []string{good, worse}, nil, false)
+
+	if r.Dir != good {
+		t.Fatalf("用的是第二个目录 %q，应该是第一个 %q", r.Dir, good)
+	}
+	got, err := app.LoadSettings(app.SettingsPath(dst))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PrimaryColor != "#17c964" {
+		t.Fatalf("第一个目录导进来的设置被第二个盖掉了：%q", got.PrimaryColor)
+	}
+}
+
+// mustWriteHere 写一个文件，测试专用。
+func mustWriteHere(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

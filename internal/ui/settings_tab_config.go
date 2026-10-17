@@ -49,6 +49,7 @@ import (
 // 「这份设置来自更新的版本」，那句话由 `applySetting` 那条路统一报。
 func (s *Shell) settingsConfig(c *ui.Context) {
 	t := c.Theme()
+	rep := LastMigration()
 	s.settingSection(c, "配置")
 	s.settingSectionEnd(c)
 
@@ -62,9 +63,15 @@ func (s *Shell) settingsConfig(c *ui.Context) {
 			}
 		})
 
-		// 「从 Biu 导入」只在**找得到** Biu 的数据目录时才摆。摆一个点了必然说
-		// 「没找到 Biu」的按钮，等于让用户自己判断这台机器上有没有装过 Biu。
-		if dirs := LastMigration().BiuDirs; len(dirs) > 0 {
+		// 数据目录来自更新的版本：整个目录一个字都不写，**导入按钮也就没有意义**
+		// ——按下去每一样都会被各自的只读判断挡掉，用户只会看到四句「没带过来」。
+		// 摆一句说明，比摆一个必然失败的按钮诚实。
+		if rep.ReadOnly {
+			ui.Text(c, "数据目录来自更新的版本，这一版一个字都不会写回去，所以下面几样都没有带过来。").
+				FontSize(12).TextColor(t.Danger).Wrap()
+		} else if dirs := rep.BiuDirs; len(dirs) > 0 {
+			// 「从 Biu 导入」只在**找得到** Biu 的数据目录时才摆。摆一个点了必然说
+			// 「没找到 Biu」的按钮，等于让用户自己判断这台机器上有没有装过 Biu。
 			ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 				if ui.Button(c, "从 Biu 导入").FontSize(13).Clicked() {
 					s.importFromBiu(dirs)
@@ -76,8 +83,35 @@ func (s *Shell) settingsConfig(c *ui.Context) {
 
 		// 上一次启动做了什么，原样摆出来。用户看不见发生了什么的话，下次遇到
 		// 「我的设置怎么变了」没有任何线索——迁移是一条会改他数据的路。
-		if note := migrationNote(LastMigration()); note != "" {
+		if note := migrationNote(rep); note != "" {
 			ui.Text(c, note).FontSize(12).TextColor(t.TextMuted).Wrap()
+		}
+
+		// **「没带过来的」逐条摆出来**，这是这一段最要紧的部分。
+		//
+		// 任务书明写「凭据可以不迁，要提示重新登录」——那句提示就在这里。
+		// 不摆的后果不是「少一句话」：用户导完之后发现要重新登录，而界面上从头到尾
+		// 没提过，他会以为是应用把他踢下线了，或者干脆不知道发生过一次导入。
+		//
+		// 之前这里写的是「见下方清单」而下方**什么都没有**（`Imported.Notes` 全程
+		// 没被读过），那句话是纯骗人的。
+		s.importNotes(c, rep)
+	})
+}
+
+// importNotes 把「没带过来的」「故意不迁的」逐条摆出来。
+//
+// 一次都没有导入过时不画：那一段下面空着比摆一句「一切正常」干净，而真正有事
+// 的时候它会自己出现。
+func (s *Shell) importNotes(c *ui.Context, rep MigrationReport) {
+	if len(rep.Imported.Notes) == 0 {
+		return
+	}
+	t := c.Theme()
+	ui.Column(c).FillWidth().Gap(4).Children(func() {
+		ui.Text(c, "这次没有带过来的：").FontSize(12).Bold()
+		for _, n := range rep.Imported.Notes {
+			ui.Text(c, "· "+n).FontSize(12).TextColor(t.TextMuted).Wrap()
 		}
 	})
 }
@@ -146,12 +180,18 @@ func (s *Shell) importConfig() {
 
 // importFromBiu 从 Biu 的数据目录导入。
 //
-// **明确告知会覆盖设置**：这是这一票里唯一一个会**整份替换**用户设置的动作，
-// 而用户在点它之前多半不知道。Toast 说清「设置会被 Biu 那份替换（旧的留一份
-// .bak）」，而不是等用户事后才发现。
+// ⚠️ **数据目录来自更新的版本时按下去什么都不做**。那条路上每一项都会被各自的
+// 只读判断挡掉（设置、快捷键、队列各自判），用户看到的是四句「没带过来的」，
+// 而他刚才明明点了一个看着能用的按钮。按钮在那条路上已经不摆（`settingsConfig`），
+// 这里再判一次是因为**界面和这一层之间隔着一个 goroutine**：那时数据目录的版本
+// 可能已经被别的东西改过了。
 func (s *Shell) importFromBiu(dirs []string) {
 	dir := dirs[0]
 	go func() {
+		if LastMigration().ReadOnly {
+			s.addToast("数据目录来自更新的版本，这一版一个字都不会写回去")
+			return
+		}
 		udir, err := userDataDir()
 		if err != nil {
 			s.addToast("从 Biu 导入失败：" + err.Error())
@@ -172,9 +212,21 @@ func (s *Shell) importFromBiu(dirs []string) {
 		if r.Downloads > 0 {
 			s.reloadDownloads()
 		}
+		// 报告落进 `LastMigration()`，设置页「配置」那一段会把它逐条列出来。
+		rememberImport(r)
 		s.addToast(biuImportToast(r))
 		s.wake.invalidate()
 	}()
+}
+
+// rememberImport 把一次手动导入的结果并进最近一次的报告。
+//
+// **为什么不能只弹 toast**：toast 两秒就没了，而「Biu 那份登录信息不迁、请重新
+// 登录」这句话用户不在那两秒里看见，就等于没说。设置页上那一段是长期摆着的。
+func rememberImport(r app.Imported) {
+	migration.mu.Lock()
+	migration.r.Imported = r
+	migration.mu.Unlock()
 }
 
 // reloadSettings 把设置文件重新读一遍推进 store。
@@ -206,9 +258,10 @@ func (s *Shell) reloadShortcuts() { s.mountShortcuts() }
 
 // reloadDownloads 让下载队列重新读一次文件。
 //
-// `MountDownloads` 会重新 `download.New`，它里面 `Restore` 一次（`download/store.go`）。
-// 旧的 Manager 没被关掉——它自己那个循环在下载跑完之前不会停，而刚导进来的任务
-// 一条都没开始下，所以现在这样不会有两个 Manager 同时写同一份队列文件。
+// `MountDownloads` 会重新 `download.New`（它里面 `Restore` 一次）并**把旧的关掉**
+// （`app.MountDownloads` 的注释说了为什么关的时候不落盘）。这一点原先是个洞：
+// 旧的 Manager 还在跑它自己的循环，而退出时只有新 Manager 会落盘——旧的那批正在
+// 下的任务进度永远不会被写下来。
 func (s *Shell) reloadDownloads() {
 	dir, err := userDataDir()
 	if err != nil {
@@ -261,10 +314,13 @@ func biuImportToast(r app.Imported) string {
 		parts = append(parts, fmt.Sprintf("%d 首歌词", r.Lyrics))
 	}
 	msg := "已从 Biu 导入：" + joinNames(parts)
+	// 「设置页里有完整的清单」这句话只有在**清单真的在设置页上**时才可以说。
+	// 它现在在了（`settingsConfig` 的 `importNotes`）——之前这里写着「见下方清单」
+	// 而下方什么都没有，而那句「请重新登录」正是用户最需要看到的。
 	if n := len(r.Notes); n > 0 {
 		msg += fmt.Sprintf("。%s", r.Notes[0])
 		if n > 1 {
-			msg += fmt.Sprintf("（另有 %d 条，设置页里有完整的清单）", n-1)
+			msg += fmt.Sprintf("（设置页「配置」那一段里有全部 %d 条）", n)
 		}
 	}
 	return msg
@@ -274,13 +330,16 @@ func biuImportToast(r app.Imported) string {
 //
 // 没有话说时返回空串（界面上那一行就不画）。**升级失败那一句必须带着「原文件
 // 一个字节都没少」**——用户最怕的是「升级失败之后我的设置没了」。
+//
+// 「见下方清单」那句现在是真的了（下面紧接着就是 `importNotes`），但那句话本身
+// 改成自足的一句：它说的是「导入过」，而**没带过来的那几条**由下面逐条列出来。
 func migrationNote(r MigrationReport) string {
 	var parts []string
 	if r.Upgraded != "" {
 		parts = append(parts, r.Upgraded)
 	}
 	if r.Imported.Any() {
-		parts = append(parts, "已从 Biu 导入过数据（见下方清单）")
+		parts = append(parts, "已从 Biu 导入过数据")
 	}
 	if len(parts) == 0 {
 		return ""

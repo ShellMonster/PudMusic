@@ -24,6 +24,16 @@ import (
 	"path/filepath"
 )
 
+// ErrQueueFromNewer 是「这份队列来自更新的版本，一个字都不许写回去」。
+//
+// 单独拎出来而不是只用一句错字符串：调用方要**区别**「对方比我们新（该只读）」和
+// 「文件坏了 / 磁盘满了（该报错）」——前者要告诉用户「你换回旧版了」，后者要告诉
+// 用户「出了别的问题」。合成一句的话，导入那边只能把两者都报成「没能带过来」。
+//
+// 和 `internal/app` 的 `ErrSettingsFromNewer`、`internal/ui` 的
+// `errShortcutsReadOnly` 是同一件事的三份，各自在自己的存储里。
+var ErrQueueFromNewer = errors.New("download: 队列来自更新的版本，本次只读不写")
+
 // MergeIntoQueue 把 extra 并进 path 这份队列文件，按 ID 去重。
 //
 // 现有队列排在前面，extra 里没见过的追加在后（extra 内部保持给进来的顺序）。
@@ -48,11 +58,9 @@ func MergeIntoQueue(path string, extra []*Task) error {
 		if err := json.Unmarshal(b, &f); err != nil {
 			return fmt.Errorf("download: 队列文件读不懂（%s），没有动它：%w", filepath.Base(path), err)
 		}
-		if f.Version != storeVersion {
-			// 和 `Restore` 同一道门：一份我们读不懂的队列，往里并东西等于在
-			// 一份我们没有能力重写的文件上动手。
-			return fmt.Errorf("download: 队列文件是第 %d 版的，这一版认第 %d 版，没有动它",
-				f.Version, storeVersion)
+		if f.Version > storeVersion {
+			return fmt.Errorf("%w：文件是第 %d 版的，我们只到第 %d 版，没有动它",
+				ErrQueueFromNewer, f.Version, storeVersion)
 		}
 		tasks = f.Tasks
 	} else if !errors.Is(err, os.ErrNotExist) {

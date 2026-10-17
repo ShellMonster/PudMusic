@@ -62,6 +62,12 @@ func (r Imported) Any() bool {
 //
 // **不整体回滚**：一份读不出来的文件不该把已经搬过来的几十条下载记录也撤回去
 // （见 `biuimport.go` 文件头）。每项各自成败，各自记一句话。
+//
+// **但每一项都要先问「目标那一份是不是来自更新的版本」**。用户把应用换回旧版
+// 时整个数据目录一个字节都不该被写——这个承诺是升级那一半给出的（
+// `ErrUpgradeFromNewer`、各 store 自己的只读标志），而导入是**另一条**写这个目录
+// 的路：不在这里也问一遍，它就会在用户换回旧版之后往那个目录里塞一份 v1 的设置，
+// 等用户升级回来时看到的是「我的设置怎么变了」。
 func (s *BiuScan) Import(dst string) (Imported, error) {
 	r := Imported{Dir: s.Dir, Notes: append([]string(nil), s.Notes...)}
 	var firstErr error
@@ -72,17 +78,25 @@ func (s *BiuScan) Import(dst string) (Imported, error) {
 	}
 
 	if s.HasSettings {
-		if err := importSettings(dst, s.Settings); err != nil {
+		switch err := importSettings(dst, s.Settings); {
+		case errors.Is(err, ErrSettingsFromNewer):
+			r.Notes = append(r.Notes, "你现在的设置来自更新的版本，这一版一个字都不会写回去，所以设置没有带过来。")
+		case err != nil:
 			fail("导入设置：%v", err)
 			r.Notes = append(r.Notes, fmt.Sprintf("设置没能带过来：%v", err))
-		} else {
+		default:
 			r.Settings = true
 		}
 	}
 
 	if n, err := importDownloads(dst, s.Downloads); err != nil {
-		fail("导入下载记录：%v", err)
-		r.Notes = append(r.Notes, fmt.Sprintf("下载记录没能带过来：%v", err))
+		if !errors.Is(err, download.ErrQueueFromNewer) {
+			fail("导入下载记录：%v", err)
+			r.Notes = append(r.Notes, fmt.Sprintf("下载记录没能带过来：%v", err))
+		} else {
+			// 版本对不上：队列自己已经说了「没有动它」，这里补一句人话给用户。
+			r.Notes = append(r.Notes, "你现在的下载记录来自更新的版本，这一版一个字都不会写回去，所以下载记录没有带过来。")
+		}
 	} else {
 		r.Downloads = n
 	}
@@ -107,9 +121,18 @@ func (s *BiuScan) Import(dst string) (Imported, error) {
 // 读用 `parseSettingsFile`（认 Biu 的两种形状）、写用 `writeSettingsFile`
 // （按我们自己的 schema），中间隔着一次 `normalize`。
 //
-// 目标文件已经存在就先挪成 `.bak`（`backupFile`）。用户已经用了一阵子 MyGo
-// 再点导入，现在的设置里有他自己调过的东西。
+// **目标那一份来自更新的版本时返回 `ErrSettingsFromNewer` 并且不碰它**——哪怕
+// 这次导入是用户在设置页上自己按下去的。理由同上：那个目录是「用户换回了旧版」
+// 的证据，往里面写一份 v1 的东西会毁掉他升级之后的��置。
+//
+// 目标文件存在且是当前版本时先挪成 `.bak`（`backupFile`）。用户已经用了一阵子
+// MyGo 再点导入，现在的设置里有他自己调过的东西。
 func importSettings(dst string, raw []byte) error {
+	path := SettingsPath(dst)
+	if err := guardNewerTarget(path); err != nil {
+		return err
+	}
+
 	s, from, err := parseSettingsFile(raw)
 	if err != nil {
 		return err
@@ -119,11 +142,37 @@ func importSettings(dst string, raw []byte) error {
 	}
 	s.normalize()
 
-	path := SettingsPath(dst)
 	if _, err := os.Stat(path); err == nil {
 		backupFile(path)
 	}
 	return writeSettingsFile(path, s)
+}
+
+// guardNewerTarget 拦住「目标那一份来自更新的版本」。
+//
+// **只在真的读得出版本号时才拦**。目标文件存在但读不懂，那是**用户自己的**数据
+// 坏了——那一份要走正常路径（先备份再覆盖），而不是拿「只读」当借口把它留在
+// 一个用户看不懂的状态里。
+func guardNewerTarget(path string) error {
+	_, from, err := readSettingsForImport(path)
+	if err != nil {
+		return nil // 不存在，或者读不出版本号：都不构成「来自更新版本」
+	}
+	if from > SchemaVersion {
+		return fmt.Errorf("%w：%s 是 v%d 的，我们只到 v%d",
+			ErrSettingsFromNewer, filepath.Base(path), from, SchemaVersion)
+	}
+	return nil
+}
+
+// readSettingsForImport 读**目标**设置文件现在是什么版本。文件不存在时返回
+// `os.ErrNotExist`。
+func readSettingsForImport(path string) (Settings, int, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return Settings{}, 0, err
+	}
+	return parseSettingsFile(raw)
 }
 
 // writeSettingsFile 把一份设置按我们自己的 schema 写下去（临时文件 + rename）。

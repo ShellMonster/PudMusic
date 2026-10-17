@@ -162,3 +162,22 @@ func probeSchemaVersion(raw []byte) (int, error) {
 	}
 	return *probe.SchemaVersion, nil
 }
+
+// errShortcutsFromNewer 是「目标那一份快捷键来自更新的版本，一个字都不许写回去」。
+//
+// 和 `internal/app` 的 `ErrSettingsFromNewer`、`download` 的 `ErrQueueFromNewer` 是
+// 同一件事的三份。导入那一侧要**区别**它和「文件坏了」：前者是「你换回旧版了」，
+// 后者是「出了别的问题」，两句人话不一样。
+var errShortcutsFromNewer = errors.New("biu: 快捷键来自更新的版本，本次只读不写")
+
+// probeSchemaVersionAt 报**某一个文件**现在自称是第几版。
+//
+// 文件不存在、或者读不出 `schemaVersion` 键，都不算「来自更新版本」——那是
+// 「还没有」或者「读不出来」，不是「比我们新」。
+func probeSchemaVersionAt(path string) (int, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	return probeSchemaVersion(raw)
+}

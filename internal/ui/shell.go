@@ -103,6 +103,14 @@ type Shell struct {
 	toasts   []toast
 	toastSeq uint64
 
+	// migrationAnnounced 是「启动时的迁移/导入结果已经弹过一次 toast 了」。
+	//
+	// 只由界面线程读写（`viewMain` 第一帧），所以不需要锁。挂在 Shell 上而不是
+	// 包级的 map 上，是因为「每个窗口各弹一次」才是对的：迷你播放器窗口是**另
+	// 一个窗口**，它的第一帧不该因为主窗口已经弹过就跳过（它也有自己的屏幕可
+	// 以弹）。见 `announceMigration`。
+	migrationAnnounced bool
+
 	// scrub 是进度条的值（0..1），held 是指针有没有按在它上面。
 	// 两个都只由 view 读写——view 永远跑在主线程上。
 	scrub float64
@@ -512,6 +520,12 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 就是这一帧真正用的那份，用户选了深色也只在这一帧是对的。
 	s.applyFrameTheme(c)
 	s.reportSettingsError()
+	// 启动时自动导入的结果，第一帧弹一条 toast 说一声。
+	//
+	// 为什么非弹不可：任务要求「凭据可以不迁，**要提示重新登录**」。那句提示只在
+	// 设置页「配置」那一段里，而用户不会主动去那儿——他在启动时什么也没点，
+	// 然后发现要重新登录，而界面上从头到尾没提过发生过一次导入。
+	s.announceMigration()
 
 	st := s.app.Snapshot()
 

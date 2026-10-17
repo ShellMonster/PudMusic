@@ -189,7 +189,7 @@ func migratingFiles(t *testing.T, dir string) []string {
 	return out
 }
 
-// snapshotFiles 列出降级快照。
+// snapshotFiles 列出降级快照（**不含**那份说明）。
 func snapshotFiles(t *testing.T, dir string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(filepath.Join(dir, UpgradeSnapshotDir))
@@ -198,6 +198,9 @@ func snapshotFiles(t *testing.T, dir string) []string {
 	}
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
+		if e.Name() == SnapshotReadmeName {
+			continue
+		}
 		out = append(out, e.Name())
 	}
 	return out
@@ -323,9 +326,44 @@ func TestASuccessfulUpgradeLeavesThePreviousVersionOnDisk(t *testing.T) {
 	if !strings.Contains(mustRead(t, settingsPath), fmtSchemaVersion()) {
 		t.Fatalf("当前文件没被迁到当前 schema：%s", mustRead(t, settingsPath))
 	}
-	snap := filepath.Join(dir, UpgradeSnapshotDir, "settings.json.v0.json")
+	// Biu 导出的裸设置没有 schemaVersion 键，也就是它自称 v0——快照名照它说的写。
+	snap := filepath.Join(dir, UpgradeSnapshotDir, "settings.json.v0.bak")
 	if got := mustRead(t, snap); !strings.Contains(got, "#abcdef") {
 		t.Fatalf("快照里不是升级前的内容：%s", got)
+	}
+}
+
+// 快照名里那个版本号是**这一份文件自己**的，不是整轮升级之前的总版本号。
+//
+// 两者在一个场景里不一样：一个老用户第一次装上带总标记的这一版——那时还没有
+// `data-version.json`，总版本号记成 0，于是四份文件明明已经是当前形状的 v1，快照
+// 却会被命名成 `.v0`。**降级时用户正是照着这个名字去挑的**，说谎的名字会让他
+// 拿错一份。
+func TestTheSnapshotNameIsTheFilesOwnVersionNotTheTotals(t *testing.T) {
+	dir, settingsPath := upgradeDir(t, `{"schemaVersion":1,"appSettings":{"primaryColor":"#abcdef"}}`)
+
+	tx, err := BeginUpgrade(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Stage(settingsPath); err != nil {
+		t.Fatal(err)
+	}
+	// 这一轮升完之后标记是 v1；快照里那一份自称的却是 v1（已经是当前形状了）。
+	if err := MigrateSettingsFile(settingsPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 没有 `.v0` 那一份——总版本号虽然是 0，但那不是这份文件的版本。
+	if _, err := os.Stat(filepath.Join(dir, UpgradeSnapshotDir, "settings.json.v0.bak")); err == nil {
+		t.Fatalf("快照名里用的是总版本号（v0），而这一份文件自称 v1")
+	}
+	snap := filepath.Join(dir, UpgradeSnapshotDir, "settings.json.v1.bak")
+	if got := mustRead(t, snap); !strings.Contains(got, "#abcdef") {
+		t.Fatalf("快照不在 %s：%s", snap, got)
 	}
 }
 
@@ -357,7 +395,9 @@ func TestTheSnapshotOnlyKeepsTheVersionRightBelow(t *testing.T) {
 	if err := tx2.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	if snaps := snapshotFiles(t, dir); len(snaps) != 1 || snaps[0] != "settings.json.v0.json" {
+	// 第二轮之后目录里**只有一份** settings.json 的快照：第一轮留的那份
+	// （当时文件自称 v0）被这一份（文件自称 v1）替掉了。
+	if snaps := snapshotFiles(t, dir); len(snaps) != 1 || snaps[0] != "settings.json.v1.bak" {
 		t.Fatalf("快照攒了一串：%v", snaps)
 	}
 }
@@ -459,6 +499,38 @@ func TestAMissingMarkerIsJustAFreshInstall(t *testing.T) {
 	}
 	if snaps := snapshotFiles(t, dir); len(snaps) != 0 {
 		t.Fatalf("第一次运行留下了快照：%v", snaps)
+	}
+}
+
+// 快照目录里那份说明要说清楚**怎么用**。
+//
+// 快照没有任何代码读——它是给用户手动换回去用的。而一个用户在自己硬盘上看到一个
+// 自己没建过的目录、里面躺着四份自己的配置，他唯一能做的就是把它删掉或者永远不管
+// 它。真正会用它的场景是「降级之后发现刚在 Biu 里设的东西怎么没了」，那时候他
+// 正在翻这个目录。
+func TestTheSnapshotDirectoryExplainsItself(t *testing.T) {
+	dir, settingsPath := upgradeDir(t, `{"schemaVersion":1,"appSettings":{"primaryColor":"#abcdef"}}`)
+	tx, _ := BeginUpgrade(dir)
+	if _, err := tx.Stage(settingsPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateSettingsFile(settingsPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	body := mustRead(t, filepath.Join(dir, UpgradeSnapshotDir, SnapshotReadmeName))
+	for _, want := range []string{
+		"旧版",            // 什么时候用
+		"换回了旧版",         // 同上
+		"拷回",            // 怎么做
+		"settings.json", // 拿哪一份
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("说明里没有 %q：\n%s", want, body)
+		}
 	}
 }
 

@@ -416,3 +416,124 @@ func TestImportingADarkThemeActuallyTurnsTheWholeWindowDark(t *testing.T) {
 func asColor(p color.RGBA) mygoui.Color {
 	return mygoui.Color{R: p.R, G: p.G, B: p.B, A: p.A}
 }
+
+// 任务书明写「凭据可以不迁，**要提示重新登录**」——那句话必须出现在界面上。
+//
+// 这一条是被探针抓出来的：`Imported.Notes` 在设置页和 toast 上**一次都没被读过**，
+// 界面上写着「见下方清单」而那个清单根本不存在。用户在启动时什么也没点，然后发现
+// 要重新登录，而界面上从头到尾没提过发生过一次导入。
+func TestTheSettingsPageSaysOutWhatDidNotComeOver(t *testing.T) {
+	withMigration(t, MigrationReport{
+		Upgraded: "数据已升到 v1",
+		Imported: app.Imported{
+			Dir:       "/Users/x/Library/Application Support/Biu",
+			Settings:  true,
+			Shortcuts: true,
+			Downloads: 1,
+			Notes: []string{
+				"Biu 那边是登录状态。Biu 的登录信息是加密存的，这一版不搬过来——请在这个应用里重新登录一次。",
+				"Biu 的歌词缓存里有 2 条读不出来，已经跳过。",
+			},
+		},
+	})
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+
+	// 逐条点名，不只查「有没有提到登录」——那两句是**两件不同的事**。
+	for _, want := range []string{
+		"这次没有带过来的：",
+		"请在这个应用里重新登录一次",
+		"Biu 的歌词缓存里有 2 条读不出来",
+	} {
+		if !tt.HasText(want) {
+			t.Errorf("设置页上没有 %q，文字有 %q", want, tt.Texts())
+		}
+	}
+	// 「见下方清单」那句话曾经指着一个不存在的东西；现在清单在下面，但不能靠
+	// 一句指路的话代替它本身。
+	if tt.HasText("见下方清单") {
+		t.Errorf("还在说「见下方清单」，文字有 %q", tt.Texts())
+	}
+}
+
+// 启动时的自动导入结果要弹一条 toast 说出来——用户不会主动去设置页。
+func TestTheFirstFrameSaysTheMigrationHappened(t *testing.T) {
+	withMigration(t, MigrationReport{
+		Imported: app.Imported{
+			Dir:      "/Users/x/…/Biu",
+			Settings: true,
+			Notes:    []string{"Biu 那边是登录状态……请在这个应用里重新登录一次。"},
+		},
+	})
+	s, tt := newShell(t)
+	tt.Frame()
+
+	if !tt.HasText("已从 Biu 导入") {
+		t.Fatalf("第一帧没有说「从 Biu 导入过」，文字有 %q", tt.Texts())
+	}
+	if !tt.HasText("重新登录") {
+		t.Fatalf("第一帧没有提示重新登录，文字有 %q", tt.Texts())
+	}
+	// **只弹一次**：第二帧还在，但那条提示已经不在了（toast 两秒后自己走，
+	// 而这里没在等它过期——要验的是「没有再弹一条同样的」）。
+	before := countText(tt, "已从 Biu 导入")
+	tt.Frame()
+	if after := countText(tt, "已从 Biu 导入"); after != before {
+		t.Errorf("每帧都在重弹同一条提示：%d → %d", before, after)
+	}
+	_ = s
+}
+
+// 一次顺顺利利的升级**不弹** toast。
+//
+// 用户没要求知道「数据已是最新」；弹一条「已升到 v1」是在打扰他，而且真出事
+// （升级失败）时那条提示就混在一堆无害提示里，不显眼。
+func TestASuccessfulQuietUpgradeSaysNothing(t *testing.T) {
+	withMigration(t, MigrationReport{
+		Upgraded:      "数据已升到 v1（动了：settings.json）",
+		UpgradedFiles: []string{"settings.json"},
+	})
+	_, tt := newShell(t)
+	tt.Frame()
+
+	if tt.HasText("已升到 v1") {
+		t.Errorf("一次顺顺利利的升级弹了一条 toast，文字有 %q", tt.Texts())
+	}
+}
+
+// 升级失败要弹，而且那句话必须带着「原文件一个字节都没少」。
+func TestAFailedUpgradeIsAnnouncedOnTheFirstFrameToo(t *testing.T) {
+	withMigration(t, MigrationReport{
+		Upgraded:   "升级到 v1 失败：这一份读不懂。原来的数据一个字节都没少。",
+		UpgradeErr: os.ErrInvalid,
+		Rollback:   true,
+	})
+	_, tt := newShell(t)
+	tt.Frame()
+
+	if !tt.HasText("数据升级失败") {
+		t.Fatalf("升级失败没有在第一帧说出来，文字有 %q", tt.Texts())
+	}
+	if !tt.HasText("一个字节都没少") {
+		t.Fatalf("那句话里没有说原文件还在，文字有 %q", tt.Texts())
+	}
+}
+
+// 数据目录来自更新的版本：导入按钮**不摆**，并把为什么说清楚。
+//
+// 摆在那个位置的话，用户按下去每一样都会被各自的只读判断挡掉，看到的是四句
+// 「没带过来的」，而他刚才明明点了一个看着能用的按钮。
+func TestTheBiuImportButtonIsGoneWhenTheDataComesFromANewerBuild(t *testing.T) {
+	withMigration(t, MigrationReport{
+		ReadOnly: true,
+		Upgraded: "数据目录来自更新的版本，这一版一个字都不会写回去。",
+		BiuDirs:  []string{"/Users/x/…/Biu"},
+	})
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+
+	if hasExactText(tt, "从 Biu 导入") {
+		t.Errorf("只读目录里还摆着「从 Biu 导入」，文字有 %q", tt.Texts())
+	}
+	if !tt.HasText("数据目录来自更新的版本") {
+		t.Errorf("没有把「为什么没有导入按钮」说清楚，文字有 %q", tt.Texts())
+	}
+}

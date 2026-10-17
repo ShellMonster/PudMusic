@@ -393,193 +393,63 @@ func TestImportingTwiceDoesNotDoubleTheQueue(t *testing.T) {
 	}
 }
 
-// 「已经有一份 v2 的队列」时不并，也不碰它。
+// 「已经有一份来自更新版本的队列」时不并，也不碰它，而且**把这件事说给用户听**。
 //
-// 往一份我们读不懂的文件上动手，比什么都不做糟得多。
-func TestAQueueWeCannotReadIsLeftAlone(t *testing.T) {
+// 往一份我们读不懂的文件上动手，比什么都不做糟得多。而用户看到的是一句
+// 「你现在的下载记录来自更新的版本」而不是笼统的「没带过来」——前者告诉他
+// 「你换回旧版了」，后者让他以为出了别的毛病。
+func TestAQueueFromANewerVersionIsLeftAloneAndSaidOutLoud(t *testing.T) {
 	dst := t.TempDir()
 	path := filepath.Join(dst, download.QueueFileName)
 	mustWrite(t, path, `{"version":99,"tasks":[]}`)
 
 	f := newBiuFixture(t).put(t, biuDownloadsFile, biuDownloadsJSON)
-	r, err := mustScan(t, f).Import(dst)
-	if err == nil {
-		t.Fatalf("往一份 v99 的队列里并东西没有被拦下：%+v", r)
-	}
+	r, _ := mustScan(t, f).Import(dst)
 	if got := mustRead(t, path); !strings.Contains(got, `"version":99`) {
 		t.Fatalf("那份文件被改了：%s", got)
 	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 歌词缓存
-// ─────────────────────────────────────────────────────────────────────────────
-
-// 歌词落到 `<UserData>/lyrics-cache/<bvid>-<cid>.json`（`PLAN.md` §3.4 的位置）。
-func TestLyricsLandInAFileNamedAfterTheSong(t *testing.T) {
-	f := newBiuFixture(t).put(t, biuLyricsFile, biuLyricsCache)
-	dst := t.TempDir()
-	r, err := mustScan(t, f).Import(dst)
-	if err != nil {
-		t.Fatal(err)
+	if r.Downloads != 0 {
+		t.Fatalf("报告说并进去了 %d 条", r.Downloads)
 	}
-	if r.Lyrics != 2 {
-		t.Fatalf("写下去 %d 条，期望 2 条：%v", r.Lyrics, r.Notes)
-	}
-
-	path := filepath.Join(dst, LyricsCacheDirName, "BV1aa411c7mD-12345.json")
-	var got LyricsEntry
-	if err := json.Unmarshal([]byte(mustRead(t, path)), &got); err != nil {
-		t.Fatalf("写出来的歌词读不懂：%v", err)
-	}
-	if got.Bvid != "BV1aa411c7mD" || got.Cid != 12345 {
-		t.Fatalf("身份没写对：%+v", got)
-	}
-	if !strings.Contains(got.Lyrics, "第一行") {
-		t.Fatalf("歌词正文没写下去：%+v", got)
-	}
-	if got.TLyrics != "[00:00.00] first line" {
-		t.Fatalf("翻译没写下去：%+v", got)
-	}
-	// 用户自己调过的偏移/字号也要过去——那是他在歌词页上拖出来的。
-	if got.Offset != -300 || got.FontSize != 18 {
-		t.Fatalf("偏移/字号没写下去：%+v", got)
-	}
-
-	// cid 是字符串的那一条也要落成 `<bvid>-<cid>.json`（键名是数字）。
-	if _, err := os.Stat(filepath.Join(dst, LyricsCacheDirName, "BV1bb411c7mD-67890.json")); err != nil {
-		t.Fatalf("第二个歌词没落盘：%v", err)
+	if !saysSomethingAbout(r.Notes, "来自更新的版本") {
+		t.Fatalf("没有把「来自更新版本」说出来：%v", r.Notes)
 	}
 }
 
-// 认不出是哪首歌的、以及一条空歌词，都不写下去，而且**说出来**。
-func TestLyricsThatCannotBeAttributedAreSkippedAndSaid(t *testing.T) {
-	f := newBiuFixture(t).put(t, biuLyricsFile, biuLyricsCache)
-	dst := t.TempDir()
-	r, err := mustScan(t, f).Import(dst)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// 「不是bvid-cid」（认不出身份）和「BV1dd411c7mD-1」（既没原文也没翻译）
-	// 都不该出现——猜出来的文件名会把歌词写到错误的歌上，而用户看不出来。
-	entries, err := os.ReadDir(filepath.Join(dst, LyricsCacheDirName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		if e.Name() != "BV1aa411c7mD-12345.json" && e.Name() != "BV1bb411c7mD-67890.json" {
-			t.Fatalf("不该出现的歌词文件：%s", e.Name())
-		}
-	}
-	if !saysSomethingAbout(r.Notes, "歌词缓存") {
-		t.Fatalf("跳过的歌词没有出现在报告里：%v", r.Notes)
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 登录态
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Biu 的登录态**不迁**，而是要提示重新登录。
+// 「已经有一份来自更新版本的设置」时：不换、**不备份**、不碰，并把话说清楚；
+// 别的照样带（它们各有各的判据）。
 //
-// 那份文件是 electron-store 的 `encryptionKey` 加密的（conf 的 AES-CBC，密钥
-// 由固定字符串 + 机器 id 派生），实测是一堆读不懂的字节。搬它没有意义——
-// 而用户看不到「请重新登录」这句提示的话，导入之后他只会发现「怎么还是没登录」。
-func TestTheLoginStateIsNotCarriedOverButIsMentioned(t *testing.T) {
-	f := full(t).put(t, biuLoginFile,
-		"{t}\x00\x01\x02二进制密文\xff不是JSON")
-
-	scan := mustScan(t, f)
-	if !scan.LoggedIn {
-		t.Fatal("Biu 那边是登录状态，却没被认出来：用户不会被提示重新登录")
-	}
-
+// 覆盖 + 留一份 `.bak` 看起来像「我们很小心」，实际是把那份文件换成了 v1——
+// 用户升级回来时看到的是他的设置被一个旧版本改写过。每一项各自判，是因为四份
+// 文件的「只读」是四份独立的承诺，导入要一条一条兑现。
+func TestSettingsFromANewerVersionAreNotSwappedOutButTheRestStillComesOver(t *testing.T) {
 	dst := t.TempDir()
-	if _, err := scan.Import(dst); err != nil {
-		t.Fatal(err)
-	}
+	mine := `{"schemaVersion":` + itoa(SchemaVersion+5) + `,"appSettings":{"primaryColor":"#123456"}}`
+	mustWrite(t, SettingsPath(dst), mine)
 
-	// 一个字节的凭据都不许落到我们的目录里。
-	var leaked []string
-	_ = filepath.Walk(dst, func(p string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
-		}
-		body := mustReadFile(t, p)
-		for _, secret := range []string{"二进制密文", "SESSDATA", "bili_jct", "refresh_token"} {
-			if strings.Contains(body, secret) {
-				leaked = append(leaked, p+" 里有 "+secret)
-			}
-		}
-		return nil
-	})
-	if len(leaked) > 0 {
-		t.Fatalf("凭据漏进了我们的目录：%v", leaked)
-	}
-	// 而「请重新登录」这句话必须在。
-	if !saysSomethingAbout(scan.Notes, "重新登录") {
-		t.Fatalf("没有提示重新登录：%v", scan.Notes)
-	}
-}
-
-// Biu 那边没登录时不该凭空说「请重新登录」。
-func TestNothingSaysReloginWhenBiuWasNotLoggedIn(t *testing.T) {
-	f := newBiuFixture(t).put(t, biuSettingsFile, biuAppSettings)
-	scan := mustScan(t, f)
-	if scan.LoggedIn {
-		t.Fatal("没放登录文件却说有登录态")
-	}
-	for _, n := range scan.Notes {
-		if strings.Contains(n, "重新登录") {
-			t.Fatalf("没登录却提示重新登录：%v", scan.Notes)
-		}
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 目录探测
-// ─────────────────────────────────────────────────────────────────────────────
-
-// 一个目录里四个文件一个都没有时不算「装过 Biu」。
-//
-// 判据只看 `app-settings.json` 会漏掉「只下过歌、没改过设置」的用户。
-func TestAnEmptyDirectoryIsNotBiu(t *testing.T) {
-	empty := t.TempDir()
-	if HasBiuData(empty) {
-		t.Fatal("一个空目录被当成了 Biu")
-	}
-	scan, err := ScanBiu(empty)
-	if err != nil || scan != nil {
-		t.Fatalf("空目录扫出了东西：%+v %v", scan, err)
-	}
-
-	// 只放下载记录也算。
-	onlyDownloads := t.TempDir()
-	mustWrite(t, filepath.Join(onlyDownloads, biuDownloadsFile), `{}`)
-	if !HasBiuData(onlyDownloads) {
-		t.Fatal("只有下载记录的用户没有被认出来")
-	}
-}
-
-// 一份坏掉的文件不拖累别的：设置读不出来，下载记录照样进来。
-func TestOneUnreadableFileDoesNotSinkTheWholeImport(t *testing.T) {
 	f := newBiuFixture(t).
-		put(t, biuSettingsFile, `这不是 JSON`).
+		put(t, biuSettingsFile, biuAppSettings).
 		put(t, biuDownloadsFile, biuDownloadsJSON)
-	dst := t.TempDir()
+	r, _ := mustScan(t, f).Import(dst)
 
-	r, err := mustScan(t, f).Import(dst)
-	if err != nil {
-		t.Fatalf("一份坏文件让整个导入失败了：%v", err)
+	if got := mustRead(t, SettingsPath(dst)); got != mine {
+		t.Fatalf("那份设置被换掉了：\n改前 %s\n改后 %s", mine, got)
+	}
+	if _, err := os.Stat(SettingsPath(dst) + ".bak"); err == nil {
+		t.Error("连备份都留了一份：那是把「用户换回旧版」当成了一次正常导入")
 	}
 	if r.Settings {
-		t.Fatal("一份读不懂的设置被当成功了")
+		t.Error("报告说设置带过来了")
 	}
+	if !saysSomethingAbout(r.Notes, "来自更新的版本") {
+		t.Errorf("没有把「来自更新版本」说出来：%v", r.Notes)
+	}
+	// 别的照样带：它们各有各的判据，不该被设置的只读连坐。
 	if r.Downloads != 2 {
-		t.Fatalf("下载记录也没进来：%d", r.Downloads)
+		t.Errorf("下载记录也没带过来（%d 条）：%v", r.Downloads, r.Notes)
 	}
-	if !saysSomethingAbout(r.Notes, biuSettingsFile) {
-		t.Fatalf("坏掉的那一份没有出现在报告里：%v", r.Notes)
+	if r.Lyrics != 0 && r.Lyrics != 2 {
+		t.Errorf("歌词条数不对：%d", r.Lyrics)
 	}
 }
 

@@ -30,8 +30,9 @@
 //
 // 用户把应用换回旧版时，旧版读到新版的文件要么只读（各 store 自己判，见
 // `ErrSettingsFromNewer`），要么干脆读不懂。有一份**上一版的完整副本**就能换回去。
-// 升级成功时把迁移前的备份挪到 `data-snapshots/<原文件名>.v<旧版本>.json`
-// （覆盖同名，不累积），用户降级时把它拷回原位即可。
+// 升级成功时把迁移前的备份挪到 `data-snapshots/<原文件名>.v<那一版>.bak`
+// （覆盖同名，不累积），用户降级时把它拷回原位即可。名字里的版本号是**这一份
+// 文件自己**的版本，不是总版本号（`toSnapshot` 的注释说了为什么这两个会不一样）。
 //
 // 为什么留快照而不是「新版本写出旧版也读得懂的子集」：新版本加的键没法凭空藏起来
 // （Biu 那边还要靠这些键双向兼容），而「子集」这个承诺只要哪一次迁移顺手多写了一个
@@ -44,6 +45,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -257,9 +259,8 @@ func (t *Tx) writeMarker() error {
 // 式的：升 v1→v2 存一份 `.v1.json`，将来升 v2→v3 覆盖成 `.v2.json`——用户目录里
 // 不会越攒越多，而「上一版」这个保证一直在。
 func (t *Tx) Commit() error {
-	from := t.marker.Version
 	for _, b := range t.backups {
-		if err := b.toSnapshot(t.dir, from); err != nil {
+		if err := b.toSnapshot(t.dir, b.ownVersion()); err != nil {
 			return err
 		}
 	}
@@ -311,7 +312,7 @@ func (bk *Backup) Commit() error {
 	if bk == nil || bk.b == nil {
 		return nil
 	}
-	return bk.b.toSnapshot(bk.tx.dir, bk.tx.marker.Version)
+	return bk.b.toSnapshot(bk.tx.dir, bk.b.ownVersion())
 }
 
 // Rollback 这一份改砸了。把它自己恢复回去（不动别的）。
@@ -322,17 +323,34 @@ func (bk *Backup) Rollback() error {
 	return bk.b.restore()
 }
 
-// toSnapshot 把备份挪到 `data-snapshots/<原文件名>.v<旧版本>.json`。
+// toSnapshot 把备份挪到 `data-snapshots/<原文件名>.v<那一版>.bak`，
+// 并把**同一份文件的更旧那份**删掉。
 //
-// from 是整轮升级**之前**的总版本号，也就是这一份文件迁移前的那一版。
+// ver 是**这一份文件自己**迁移前自称的版本，**不是**整轮升级之前那个总版本号。
 //
-// 这一份文件本来就不存在的时候没有可留的东西，直接把那个占位的备份文件删掉。
-func (b *backup) toSnapshot(dir string, from int) error {
+// 这两者在「一个老用户第一次装上带总标记的这一版」时不一样：那时还没有
+// `data-version.json`，总版本号记成 0，于是四份文件明明已经是当前形状的 v1，快照
+// 却会被命名成 `.v0`——**名字在说谎**，而降级时用户正是照着这个名字去挑的。
+//
+// ## 为什么每份文件只留最近一份
+//
+// 名字里的版本号既然是这一份文件自己的，它就**单调递增**：`v0` → `v1` → `v2`
+// 各是一个不同的文件名，「覆盖同名」这个做法已经不成立了（那是在名字还是总版本号
+// 时的事）。
+//
+// 那就让每一份文件**只有一份**快照：新的一份来了就把它之前那份删掉。用户要的是
+// 「**上一版**的数据」——从 v4 降回 v3 只需要 v3 时期的那一份，`.v1.bak` 对他是
+// 死重量；而留着它们，用户目录里每升一版就多几份文件，几年后没人说得清哪份是哪
+// 份。
+func (b *backup) toSnapshot(dir string, ver int) error {
 	dirSnap := filepath.Join(dir, UpgradeSnapshotDir)
 	if err := os.MkdirAll(dirSnap, 0o755); err != nil {
 		return fmt.Errorf("app: 建快照目录：%w", err)
 	}
-	name := fmt.Sprintf("%s.v%d.json", filepath.Base(b.file), from)
+	// 扩展名是 `.bak` 不是 `.json`：备份是「上一版留下来的东西」，不是
+	// 「本应用会读的配置」。用户一眼能看出它不属于哪一版。
+	base := filepath.Base(b.file)
+	name := fmt.Sprintf("%s.v%d.bak", base, ver)
 	dst := filepath.Join(dirSnap, name)
 	if err := os.Rename(b.snap, dst); err != nil {
 		// 跨卷时 rename 会失败（备份和快照目录理论上在同一卷，但保险起见退化成
@@ -347,7 +365,53 @@ func (b *backup) toSnapshot(dir string, from int) error {
 		}
 		_ = os.Remove(b.snap)
 	}
+	dropOlderSnapshotsOf(dirSnap, base, name)
+	writeSnapshotReadme(dirSnap)
 	return nil
+}
+
+// dropOlderSnapshotsOf 删掉同一个文件名的其它快照，只留 keep 这一份。
+//
+// 删不掉就算了：那是一个纯副产物，留着只是多几个文件，而为它把整轮升级报成失败
+// 是更糟的。
+func dropOlderSnapshotsOf(dir, base, keep string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if name == keep || !strings.HasPrefix(name, base+".") || !strings.HasSuffix(name, ".bak") {
+			continue
+		}
+		_ = os.Remove(filepath.Join(dir, name))
+	}
+}
+
+// ownVersion 报**这一份文件**自己自称是第几版。读不出来或没有版本键时是 0。
+//
+// 函数是 `Stage` 的接收者，因为备份文件就在原文件旁边，读备份和读原文件一样。
+func (b *backup) ownVersion() int {
+	raw, err := os.ReadFile(b.snap)
+	if err != nil {
+		return 0
+	}
+	var probe struct {
+		SchemaVersion *int `json:"schemaVersion"`
+		Version       *int `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return 0
+	}
+	// 设置用 `schemaVersion`，队列用 `version`（`download/store.go` 的
+	// `queueFile`）。两个都认，因为这一层不认识任何一份文件的内容。
+	if probe.SchemaVersion != nil {
+		return *probe.SchemaVersion
+	}
+	if probe.Version != nil {
+		return *probe.Version
+	}
+	return 0
 }
 
 // restore 把备份内容拷回原位。
@@ -375,3 +439,42 @@ func (b *backup) restore() error {
 // 挪不动也不报错——已经出过一次问题了，不能因为留个证据再报一次，那会把真正的原因
 // 淹掉（和 `settings.go` 的 `backupSettings` 同一个道理）。
 func backupFile(path string) { _ = os.Rename(path, path+".bak") }
+
+// SnapshotReadmeName 是快照目录里那份说明文件的名字。
+const SnapshotReadmeName = "怎么用.txt"
+
+// SnapshotReadme 是写在快照目录里的那份说明。
+//
+// 为什么要有它：`data-snapshots/` 里的东西**没有任何代码读**——它们是给「用户把
+// 应用换回旧版」时**手动**换回去用的。而一个用户在自己硬盘上看到一个自己没建过的
+// 目录，里面躺着四份自己的配置，他唯一能做的就是把它删掉或者永远不管它。
+//
+// 一句话说明，比「以后再说文档」有用得多：真正会用它的场景是用户降级之后发现
+// 「我刚在 Biu 里设的那些东西怎么没了」，那时候他在翻这个目录。
+const SnapshotReadme = `这是「上一版」的用户数据备份。
+
+应用每次升级之前会把设置、快捷键、搜索历史和下载队列各存一份在这里，
+文件名里的版本号是那份文件自己在被存下来之前自称的版本。
+每一份文件只留最近一份——你要的是「上一版」，更早的那些对降级没有用。
+
+什么时候用：你把应用换回了旧版，而旧版读不懂新版的文件
+（旧版会说「这份设置来自更新的版本」并且不写它）。这时候把
+对应的那一份从下面拷回去，覆盖应用数据目录里同名的那一份，重开应用即可。
+
+例（把 macOS 上的路径换成你自己的）：
+
+  cp "data-snapshots/settings.json.v1.bak" \
+     "$HOME/Library/Application Support/Biu MyGo/settings.json"
+
+拷之前先把原来那份改名留一手（.bak.bak）——拷错了还能换回去。
+
+这个目录可以整个删掉，下次升级会重新建。它不参与应用的任何判断。
+`
+
+// writeSnapshotReadme 在快照目录里放一份说明。写不了就算了。
+//
+// ⚠️ **不要**用 `toSnapshot` 那条路的失败来卡升级：一个纯副产物写不进去（目录只读、
+// 配额满），用户的数据已经是新版的了，为它把整轮升级报成失败是更糟的。
+func writeSnapshotReadme(dirSnap string) {
+	_ = writeFileAtomic(filepath.Join(dirSnap, SnapshotReadmeName), []byte(SnapshotReadme))
+}
