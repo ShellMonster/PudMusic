@@ -52,11 +52,15 @@ const (
 
 // buildLibraryPages 把「稍后再看」和「历史记录」两页接上。**在 New 里调一次**。
 //
-// 两页在这一行里一起建，是因为它们共用同一份操作接线（`list.AppActions`），
+// 两页在这一行里一起建，是因为它们共用同一份操作接线（`s.listActions()`），
 // 各自的部分只有拉页器（一行）和行画法（各一个方法）。分开两处建的话，
 // 「忘了建某一页」这件事只有切过去看才知道。
+//
+// ⚠️ **用 `s.listActions()` 而不是 `list.AppActions(...)`**：那份里
+// `FavSelect` 是 nil，而这两页的行右键「收藏」会落到那句「还没接 B 站接口」
+// 上去——接口早就在了（`app.FavoriteSong`），那句是假的。
 func (s *Shell) buildLibraryPages() {
-	acts := list.AppActions(s.app, s.addToast)
+	acts := s.listActions()
 	s.laterPage.init(s.clock.Now(), s.drawLaterRow, s.laterMenu, s.fetchLater, acts, lookup(laterPath).Empty)
 	s.historyPage.init(s.clock.Now(), s.drawHistoryRow, s.historyMenu, s.fetchHistory, acts, lookup(historyPath).Empty)
 }
@@ -197,13 +201,12 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 	})
 }
 
-// laterMenu 是这一行的右键菜单。上游 `later/menu.tsx` 是六项，这里留三项：
+// laterMenu 是这一行的右键菜单，六项：播放 / 添加到队列 / 在 B 站打开 /
+// 收藏 / 下载音频 / 移除。
 //
-//   - **下一首播放 / 添加到播放列表**：我们的队列只有「追加到末尾」和「从这一首往后
-//     接」（`app.Queue` 到现在只有 `Append`），没有「插到下一首」。上游那一支在我们
-//     这儿就是「添加到队列」。
-//   - **下载音频 / 下载视频**：要写盘、要选目录，是 PLAN 的 P-26。摆一个按了只说
-//     「还没接」的项不如不摆——那两行和「在 B 站打开」长得一样，用户分不出哪个能用。
+// 上游 `later/menu.tsx` 的「下一首播放」这里**没有**：插到下一首那一手
+// （`app.EnqueueNext`）已经在了，但它是动态卡片那一票顺手做的，给这一页补上是
+// 另一件事（各页菜单逐页补那一项），不在这一张的范围里。
 //
 // ⚠️ **每一项都要 Item 一遍**：菜单是这趟全部建出来的，只有被 Chosen 的那一项为
 // true（`ui/menu.go` 的 buildMenu）。少建一项，那一项就永远点不到。
@@ -226,6 +229,13 @@ func (s *Shell) laterMenu(m *ui.Menu, i int) {
 		acts.Add(i)
 	case m.Item("在 B 站打开").Chosen():
 		acts.Open(i)
+	// 收藏 / 下载这两项和内容列表那套菜单是同一份（Biu 的
+	// `music-list-item` 菜单对每一行都一样），摆在这里而不是不摆：用户在一个
+	// 列表上收藏了某一首，切到收藏夹页再收藏一次是白折腾。
+	case m.Item("收藏").Chosen():
+		acts.FavSelect(i)
+	case m.Item("下载音频").Chosen():
+		acts.Download(i)
 	case m.Item("移除").Chosen():
 		p.rows.Remove(i, s.app.LibraryOf().RemoveLater)
 	}

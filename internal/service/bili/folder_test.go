@@ -310,3 +310,47 @@ func TestDealWithNothingIsANoOp(t *testing.T) {
 		t.Errorf("发出了 %d 个请求，want 0", n)
 	}
 }
+
+// TestDeleteFolderSendsTheMediaIDsName 删收藏夹的参数名是 `media_ids`。
+//
+// ⚠️ 抄成 `media_id` 的话 B 站回 -400「参数错误」——它不认那个名字，而一个
+// 只把收藏夹名字写错的事故症状是「点了删除，它说参数错误」。
+func TestDeleteFolderSendsTheMediaIDsName(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(pathFolderDel, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", 0))
+	})
+	err := f.client(t, Options{CSRF: func() string { return "jct" }}).
+		DeleteFolder(context.Background(), 1182306172)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reqs := f.requests()
+	if len(reqs) != 1 || reqs[0].Path != pathFolderDel {
+		t.Fatalf("请求是 %+v，want 一次 %s", reqs, pathFolderDel)
+	}
+	if got := reqs[0].Form.Get("media_ids"); got != "1182306172" {
+		t.Errorf("media_ids = %q，want 1182306172", got)
+	}
+	if got := reqs[0].Form.Get("media_id"); got != "" {
+		t.Errorf("发了 media_id = %q，B 站不认这个名字", got)
+	}
+	if got := reqs[0].Form.Get("csrf"); got != "jct" {
+		t.Errorf("csrf = %q，want jct", got)
+	}
+}
+
+// TestDeleteFolderNeedsAnID 空的收藏夹 id 不该发请求。
+func TestDeleteFolderNeedsAnID(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(pathFolderDel, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", 0))
+	})
+	if err := f.client(t, Options{}).DeleteFolder(context.Background(), 0); err == nil {
+		t.Fatal("空 id 也当成功")
+	}
+	if n := len(f.requests()); n != 0 {
+		t.Errorf("空 id 还是发了 %d 次请求", n)
+	}
+}

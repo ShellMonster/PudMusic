@@ -36,6 +36,7 @@
 package bili
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -294,6 +295,18 @@ type Call struct {
 	Query url.Values
 	// Form 是表单体。只有 POST 用；非 nil 时 CSRF 也写进表单。
 	Form url.Values
+	// JSON 是 JSON 请求体，会被编码成 `{"k":v}` 发出去（Content-Type 是
+	// `application/json`）。
+	//
+	// **和 Form 互斥**：两个都给的话 JSON 赢（`Form` 被丢掉）。写成互斥而不是
+	// 报错，是因为 B 站这批接口几乎全是表单，只有「动态点赞」那几个要 JSON——
+	// 为它加一道「两个都给就返回错误」的判断，只是把一个不会发生的组合变成
+	// 一段谁也走不到的分岔。
+	//
+	// ⚠️ csrf **不进这个体**：B 站的写接口认的 csrf 是查询串和 `bili-jct` 头
+	// （`Client.Do` 里的 `Call.CSRF` 已经放了两处），体里那份只有 web 端自己
+	// 转发时才有。
+	JSON any
 	// CSRF 表示这次调用是写操作：自动带上 csrf 参数和 bili-jct 头。
 	CSRF bool
 	// WBI 表示这次调用要 WBI 签名。
@@ -339,13 +352,26 @@ func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
 	endpoint.RawQuery = q.Encode()
 
 	var body io.Reader
-	if call.Form != nil {
+	// contentType 非空时由这里设。留空就让 setHeaders 那一句兜底
+	// （它认的是「有请求体就补 urlencoded」，对 JSON 来说是错的）。
+	switch {
+	case call.JSON != nil:
+		raw, err := json.Marshal(call.JSON)
+		if err != nil {
+			return nil, fmt.Errorf("bili: JSON 请求体编不出来: %w", err)
+		}
+		body = bytes.NewReader(raw)
+		call.Form = nil
+	case call.Form != nil:
 		body = strings.NewReader(call.Form.Encode())
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, endpoint.String(), body)
 	if err != nil {
 		return nil, fmt.Errorf("bili: 造请求: %w", err)
+	}
+	if call.JSON != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	// ⚠️ **有表单体就必须带这个头**，不是锦上添花：B 站那边是 servlet，
 	// 少了 `application/x-www-form-urlencoded` 它**不会**去解析请求体，

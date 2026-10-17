@@ -219,7 +219,11 @@ func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 }
 
 // historyMenu 是这一行的右键菜单，抄上游 `history/menu.tsx` 的顺序：能放的那几项在
-// 前，在 B 站打开，然后是删除。理由和 `laterMenu` 那段一样：只摆我们真能做的。
+// 前，在 B 站打开，然后是**这一页自己的**删除。
+//
+// ⚠️ 「收藏 / 下载音频」排在**删除之前**，而不是像上游那样排在最后——删掉一条
+// 播放记录之后想把它收藏回来是办得到的（收藏夹里那份还在），而把收藏夹里的东西
+// 删了就没了。顺序摆在这里是因为它们属于「这一行是什么」，不属于「这一页怎么改」。
 func (s *Shell) historyMenu(m *ui.Menu, i int) {
 	p := &s.historyPage
 	row, ok := p.rows.Row(i)
@@ -237,6 +241,11 @@ func (s *Shell) historyMenu(m *ui.Menu, i int) {
 		acts.Add(i)
 	case m.Item("在 B 站打开").Chosen():
 		acts.Open(i)
+	// 收藏 / 下载：和稍后再看那一页摆的是同两项，理由见 laterMenu 的注释。
+	case m.Item("收藏").Chosen():
+		acts.FavSelect(i)
+	case m.Item("下载音频").Chosen():
+		acts.Download(i)
 	case m.Item("删除").Chosen():
 		p.rows.Remove(i, s.app.LibraryOf().RemoveHistory)
 	}

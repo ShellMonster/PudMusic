@@ -192,6 +192,17 @@ type Shell struct {
 	// folderSelect 是「把这一首放进哪些收藏夹」那个弹窗（folderselect.go）。
 	folderSelect *folderSelect
 
+	// folderDelete 是侧栏收藏夹「删除」那个二次确认要跨帧活着的状态
+	// （sidebar_favorites.go）。
+	//
+	// 零值是「没在问」。和 folderEdit 一样只能由界面线程读写（铁律一）。
+	folderDelete favoriteDeleteAsk
+
+	// dynLikes 是动态卡片上「赞」的那一份状态（dynamiccard.go）。挂在壳上
+	// 而不是页面状态里：动态流和 UP 空间是两个页面，但同一条动态在两边是同一
+	// 个赞——放两份的话，用户在动态流赞完、切到那个 UP 的空间里看到的是没赞。
+	dynLikes dynLikes
+
 	// coverPick 是「后台把那个封面文件读出来、解好了」的那个交接槽。
 	// 带锁，写它的是后台 goroutine、读它的是界面线程（见 folderpick.go）。
 	coverPick coverPick
@@ -695,6 +706,9 @@ func (s *Shell) viewFolderDialogs(c *ui.Context) {
 		s.viewCoverCrop(c, &e.crop)
 	}
 	s.viewFolderSelect(c)
+	// 侧栏收藏夹的「删除」二次确认（sidebar_favorites.go）。同样排在这里：
+	// 它是模态的，要盖住整页，而侧栏是折叠的时候就不画东西的那一块。
+	s.viewFavoriteDelete(c)
 }
 
 // syncFolderDialogs 是那些「每一帧都要问一次后台」的地方。

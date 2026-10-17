@@ -406,14 +406,21 @@ func searchUserSpaceURL(mid string) string {
 
 // searchActions 是这一 Tab 的列表会做的操作。
 //
-// 歌曲 / 视频就是 `list.AppActions`（右键、双击、加队列、在 B 站打开）；
-// 用户那一 Tab 换一份——用户不是歌，「播放」是进他的空间，「加进队列」照实
-// 说一句为什么不行。
+// 歌曲 / 视频就是 `s.listActions()`（右键、双击、加队列、收藏、在 B 站打开、
+// 下载）；用户那一 Tab 换一份——用户不是歌，「播放」是进他的空间，「加进队列」
+// 照实说一句为什么不行。
+//
+// ⚠️ **歌曲 / 视频这一份的「下载」是接上了的，而结果多半是「下不了」**：
+// B 站的搜索接口只给 bvid、不给 cid（`bili.SearchVideo`），而下载按分 P 存
+// 文件。所以那一项按下去会得到一句「还没取到分 P id」——**这是如实的，不是
+// 没接**。别为了「让它看起来能用」把 cid 偷偷补上：搜索结果里的条目是**搜出来的
+// 片段**，用户按「下载音频」时想下的是他搜到的那一支，而补出来的是那支稿件的
+// 第一集（多 P 的第三集也是第一集）。
 func (s *Shell) searchActions(tab int) list.Actions {
 	if tab == searchTabUser {
 		return s.searchUserActions()
 	}
-	return list.AppActions(s.app, s.addToast)
+	return s.listActions()
 }
 
 // searchUserActions 是用户 Tab 的那一份操作。
@@ -434,6 +441,15 @@ func (s *Shell) searchUserActions() list.Actions {
 			if err := mygo.Shell.OpenExternal(searchUserSpaceURL(mid)); err != nil {
 				s.addToast("打不开：" + err.Error())
 			}
+		},
+		// ⚠️ 收藏 / 下载这两项**给的不是 nil**：给 nil 的话 `doAction` 会说
+		// 「还没接 B 站接口」——那是一句假话（接口早就在了），而用户会以为这
+		// 个应用还没做完。UP 主不是歌，这两句是真的。
+		FavSelect: func(app.Item) {
+			s.addToast("UP 主不是歌，没有东西可收藏；进他的空间收藏他的歌")
+		},
+		Download: func(app.Item) {
+			s.addToast("UP 主不是视频，没有东西可下载")
 		},
 		Notify: s.addToast,
 	}
