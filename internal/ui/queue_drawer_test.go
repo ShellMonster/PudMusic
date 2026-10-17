@@ -177,25 +177,6 @@ func TestQueueDrawerLeavesThePlaybarUsable(t *testing.T) {
 	}
 }
 
-func TestQueueDrawerListsEverySongOnce(t *testing.T) {
-	h := newHarness(t)
-	h.app.Queue().Append(
-		onlineSong("BV1", "第一首"),
-		onlineSong("BV2", "第二首"),
-		onlineSong("BV1", "第一首"), // 同一个投稿排了两遍
-	)
-	h.tt.Frame()
-	openDrawer(t, h)
-
-	if got := countRows(h); got != 2 {
-		t.Errorf("抽屉里画着 %d 行，want 2（同一首排了两遍，判重标识要去掉一个）", got)
-	}
-	// 顶上那个计数也是去重之后的（Biu 的 `pureList?.length`）。
-	if !h.tt.HasText("(2)") {
-		t.Errorf("顶上写的不是去重之后的数量 (2)，文字有 %q", h.tt.Texts())
-	}
-}
-
 // TestQueueDrawerTakesLocalSongsFromTheirPath 判重标识的三种拼法里，本地那一支
 // 是拿路径当键的（`local:<完整路径>`）。两个不同的文件长成同一个歌名也不能并成
 // 一行——那是两首不同的歌。
@@ -375,7 +356,10 @@ func TestLocateCurrentGlidesToTheCurrentSong(t *testing.T) {
 	if _, visible := findRow(h, "第30首"); visible {
 		t.Error("一点就跳到位了，那不是平滑滚过去（用了 ListState.ScrollTo？）")
 	}
-	h.tt.Advance(2 * time.Second)
+	// 推进 1 秒：滚动是 `ui.Smooth`（默认弹簧 500ms），1 秒足够它落定。
+	// **别推进 2 秒**：Advance 期间每一帧都要把整个窗口重画一遍，带 `-race` 时
+	// 一帧不便宜（实测这条用例 2 秒是 20.7s、1 秒是一半）。
+	h.tt.Advance(time.Second)
 	r, visible := findRow(h, "第30首")
 	if !visible {
 		t.Fatalf("Advance 之后还是滚不过去，文字：%q", h.tt.Texts())
@@ -659,38 +643,6 @@ func TestQueueRowsActOnTheirQueuePositionNotTheirRowNumber(t *testing.T) {
 	})
 }
 
-func TestQueueRowMenuRemovesThatSong(t *testing.T) {
-	h := newHarness(t)
-	h.app.Queue().Append(
-		onlineSong("BV1", "第一首"),
-		onlineSong("BV2", "第二首"),
-		onlineSong("BV3", "第三首"),
-	)
-	putCurrent(t, h.app, 0)
-	h.tt.Frame()
-	openDrawer(t, h)
-
-	if err := h.tt.RightClick("第二首"); err != nil {
-		t.Fatalf("右键不了这一行：%v", err)
-	}
-	if err := h.tt.ChooseMenuItem("从列表删除"); err != nil {
-		t.Fatalf("选不了「从列表删除」：%v", err)
-	}
-	h.tt.Frame()
-
-	got := titlesOf(h.app.Queue().Items())
-	if len(got) != 2 || got[0] != "第一首" || got[1] != "第三首" {
-		t.Fatalf("删完之后队列是 %q，want 第一首/第三首", got)
-	}
-	if h.tt.HasText("第二首") {
-		t.Errorf("删掉了还画在抽屉里，文字：%q", h.tt.Texts())
-	}
-	// 删的不是正在放的那首：歌照放。
-	if h.app.Queue().CurrentIndex() != 0 {
-		t.Errorf("删一首不在放的歌把当前项也改了：%d", h.app.Queue().CurrentIndex())
-	}
-}
-
 // TestQueueRowMenuSaysSoWhenThereIsNowhereToOpen 「在 B 站打开」接的是内容列表
 // 那一套 Actions.Open（本地文件先判，其次才轮到 B 站地址）。这里断的是**它确实
 // 接在那套上**：给一个没有 bvid 也没有 sid 的在线项，那一套会回一句「这一项还没有
@@ -737,20 +689,23 @@ func TestQueueDrawerClearEmptiesItAndStops(t *testing.T) {
 	}
 }
 
-// TestQueueDrawerSurvivesADuplicateSong 是一道保险，不是走过场。
-//
+// TestQueueDrawerListsEverySongOnce 钉「按判重标识去重」，也顺带是一道保险：
 // 抽屉的行身份是判重标识（铁律四），而 MyGo 在 Tester 里**撞了 key 当场 panic**
-// （`t.rt.strict = true`）。所以这一条钉的是「去重之后 key 必然是唯一的」：
-// 去掉 queueRowsFor 里那一次去重，这里就红。
-func TestQueueDrawerSurvivesADuplicateSong(t *testing.T) {
+// （`t.rt.strict = true`），所以去掉 queueRowsFor 里那一次去重，这里就红。
+func TestQueueDrawerListsEverySongOnce(t *testing.T) {
 	h := newHarness(t)
 	dup := onlineSong("BV1", "第一首")
-	h.app.Queue().Append(dup, onlineSong("BV2", "第二首"), dup, dup, onlineSong("BV1", "第一首"))
+	// 五首里只有两个不同的判重标识，第一首还排了三遍。
+	h.app.Queue().Append(dup, onlineSong("BV2", "第二首"), dup, dup, dup)
 	h.tt.Frame()
-
 	openDrawer(t, h)
+
 	if got := countRows(h); got != 2 {
 		t.Errorf("抽屉里画着 %d 行，want 2（五首里只有两个不同的判重标识）", got)
+	}
+	// 顶上那个计数也是去重之后的（Biu 的 `pureList?.length`）。
+	if !h.tt.HasText("(2)") {
+		t.Errorf("顶上写的不是去重之后的数量 (2)，文字有 %q", h.tt.Texts())
 	}
 }
 

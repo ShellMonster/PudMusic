@@ -1,25 +1,12 @@
-// 播放列表抽屉：Biu 的 `components/music-playlist-drawer` + 开抽屉的那个按钮
-// （`components/open-playlist-drawer-button`，Biu 把它放在播放条右边；我们放顶栏
-// ——播放条右边放不下第四个控件，理由见 navbar.go 里那一句）。
+// 播放列表抽屉：Biu 的 `components/music-playlist-drawer`。行高 64
+// （`index.tsx:12` 的 `RowHeight`，也是 `scrollToPlayItem` 那个
+// `targetIndex * 64` 的出处）、按判重标识去重（同一处的 `uniqBy`，键在
+// `app.Item.Identity` 上）、行菜单五项（`menu.tsx` 的 `getMenus`，理由见
+// `queueMenuItems`）。
 //
-// 三件事，各对一处上游：
-//
-//   - **行高 64**：`music-playlist-drawer/index.tsx:12` 的 `const RowHeight = 64`。
-//     「定位当前播放」滚到的 `targetIndex * 64` 就是这一行的出处（同一份文件里
-//     的 `scrollToPlayItem`）。
-//   - **按去重标识去重**：同一个文件里的 `uniqBy`，键是 `local:{id}` /
-//     `mv:{bvid}` / `audio:{sid}`。判重标识在 `app.Item.Identity` 上（见
-//     internal/app/queue.go），不在这里再拼一遍。
-//   - **行菜单**：`music-playlist-drawer/menu.tsx` 的 `getMenus` 是五项，但其中
-//     三项要还没做的 B 站接口——所以这里给的是**这个应用今天做得成的五项**，
-//     三项沿用它原来的键。理由写在 `queueMenuItems` 上。
-//
-// ## 为什么它浮在主布局外面
-//
-// Biu 那边是右侧浮出来的 Drawer，底下那一层页面照旧看得见。我们也走
-// `ui.Overlay` + `Absolute`（MyGo 文档 `docs/ui/overlays.md` 里就有一个抽屉的
-// 例子），**不**在 `viewMain` 那个 `Row` 里给它留一列：留在那儿的话抽屉一开
-// 窗口就窄一块，页面被挤着走，那不是抽屉。
+// 它浮在主布局**外面**：`ui.Overlay` + `Absolute`（MyGo 文档
+// `docs/ui/overlays.md` 里有一个抽屉的例子），不在 `viewMain` 那个 `Row` 里
+// 留一列——留在那儿抽屉一开窗口就窄一块，页面被挤着走，那不是抽屉。
 package ui
 
 import (
@@ -31,32 +18,21 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// 抽屉的尺寸，数字照 Biu：
-//
-//	行高 64     music-playlist-drawer/index.tsx:12 的 RowHeight
-//	宽 384     HeroUI Drawer 的 size="sm"（w-[384px]），和那一行
-//	           `h-12 w-12` 的 48 封面、`p-2` 的 8 内边距配得上（48+8+8 = 64）
+// 尺寸照 Biu：行高 64（`RowHeight`）、宽 384（HeroUI Drawer 的 size="sm"）、封面
+// 48（`h-12 w-12`）、行内边距 8（`p-2`，48+8+8 正好 64）、顶上那条 52。
 const (
-	queueRowHeight   = 64
-	queueDrawerWidth = 384
-
-	// queueCoverSize 是行里那张封面。Biu 是 `h-12 w-12`。
-	queueCoverSize = 48
-
-	// queuePadY / queuePadX 是行的上下和左右内边距，Biu 的 `p-2`。
-	queuePadY = 8
-	queuePadX = 8
-
-	// queueHeaderHeight 是顶上那一条多高。Biu 是 `px-4 py-3` 加一行字（12+12+24
-	// = 48），这里留到 52 让两个按钮有地方站。
+	queueRowHeight    = 64
+	queueDrawerWidth  = 384
+	queueCoverSize    = 48
+	queuePadY         = 8
+	queuePadX         = 8
 	queueHeaderHeight = 52
 )
 
 // queueRow 是抽屉里画出来的一行。
 //
-// `at` 是它在**队列**里的下标：去重之后行号和下标不再是一回事（同一个 `local:`
-// 键的第一条留在队列第 3 位，在抽屉里就是第 1 行），点一行、放一首、清掉一行
-// 用的都是 `at`，拿行号去调队列就是删错/放错那一首。
+// `at` 是它在**队列**里的下标：去重之后行号和下标不再是一回事（同一个键的第一条
+// 留在队列第 3 位、在抽屉里是第 1 行），点一行 / 放一首 / 删一行用的都是 `at`。
 type queueRow struct {
 	item app.Item
 	at   int
@@ -88,9 +64,8 @@ func queueRowKey(id string, at int) string {
 
 // queueRowsFor 是抽屉这一帧要画的那几行：队列按判重标识去重之后的样子。
 //
-// **保留第一次出现的**（`uniqBy` 的语义）：同一首在队列里排了两遍时，用户最先
-// 看见的那一行就是他要的那一行，而它在队列里的位置（`at`）仍然是第一次入队
-// 那个——播放条和「下一首」走的是队列，抽屉跟着走同一个才不至于各说各话。
+// **保留第一次出现的**（`uniqBy` 的语义）：那一行在队列里的位置（`at`）也还是
+// 第一次入队那个，播放条和「下一首」走的是队列，抽屉跟着走同一个才不至于各说各话。
 func queueRowsFor(items []app.Item) []queueRow {
 	rows := make([]queueRow, 0, len(items))
 	seen := make(map[string]bool, len(items))
@@ -109,13 +84,11 @@ func queueRowsFor(items []app.Item) []queueRow {
 
 // viewQueueDrawer 是播放列表抽屉。没开就一个字都不建。
 //
-// 🔴 铁律二：**这一层不调 SetTheme**。它在 `viewMain` 的同一个 build pass 里
-// 建（`viewMain` 第一行就 `applyFrameTheme` 过，`ui.Overlay` 也是当场建），读到
-// 的 `c.Theme()` 已经是用户选的那一档。跟 `viewToasts` 一样。
+// 🔴 铁律二：**这一层不调 SetTheme**——它在 `viewMain` 的同一个 build pass 里建
+// （`viewMain` 第一行就 `applyFrameTheme` 过），读到的 `c.Theme()` 已经是用户选
+// 的那一档。跟 `viewToasts` 一样。
 //
-// ⚠️ 外面那层 `Guard` 是 `viewMain` 加的（铁律三）：抽屉一崩，崩掉的是**整个
-// 窗口**——它是浮在所有东西上面的一层，一空就空一大块，而出错的地方（队列的
-// 下标、菜单的项数）都在页面上。
+// ⚠️ 外面那层 `Guard` 是 `viewMain` 加的（铁律三）：抽屉一崩，崩掉的是**整个窗口**。
 func (s *Shell) viewQueueDrawer(c *ui.Context) {
 	if !s.drawerOpen {
 		return
@@ -160,10 +133,8 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 	})
 }
 
-// viewQueueHeader 是顶上那一条：标题 + 定位 + 清空。
-//
-// 两个键只在队列非空时才摆（Biu 的 `Boolean(pureList?.length) && …`）：空队列
-// 上摆一个按下去只会说「没有歌」的按钮，不如不摆。
+// viewQueueHeader 是顶上那一条：标题 + 定位 + 清空。两个键只在队列非空时才摆
+// （Biu 的 `Boolean(pureList?.length) && …`）。
 func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 	rows := s.queueRows
 
@@ -185,10 +156,8 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 	ui.Row(c).Key("queue-header-rule").FillWidth().Height(1).Background(t.Border)
 }
 
-// viewQueueBody 是抽屉下面那一块：有歌就是那一列，没有歌是一句空状态。
-//
-// 两者的分岔是 Biu 那样写的（`{list.length ? <VirtualList/> : <Empty/>}`）：
-// 空列表也建一列的话，画出来的是一片什么都没有，窗口再大也不会自己长出字来。
+// viewQueueBody 是抽屉下面那一块：有歌就是那一列，没有歌是一句空状态（分岔照
+// Biu 的 `{list.length ? <VirtualList/> : <Empty/>}`）。
 func (s *Shell) viewQueueBody(c *ui.Context, t *ui.Theme) {
 	if len(s.queueRows) == 0 {
 		ui.Column(c).Key("queue-empty").Grow(1).Center().Padding(20, 16).Children(func() {
@@ -200,11 +169,8 @@ func (s *Shell) viewQueueBody(c *ui.Context, t *ui.Theme) {
 	s.viewQueueList(c, t)
 }
 
-// viewQueueList 是抽屉里那一列队列。
-//
-// 行身份是判重标识（铁律四），行高定死 64——「定位当前播放」滚到的
-// `targetIndex * 64` 靠的就是这个定值：行高一变，那个乘法算出来的就不是这一行
-// 的顶边了。
+// viewQueueList 是抽屉里那一列队列。行身份是判重标识（铁律四），行高定死 64——
+// 「定位当前播放」滚到的 `targetIndex * 64` 靠的就是这个定值。
 func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme) {
 	rows := s.queueRows
 	playing := playingIdentity(s.app.Queue().Current())
@@ -229,9 +195,8 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme) {
 
 // currentRow 是「正在放的那一首」在抽屉里的行号，没有是 -1。
 //
-// 按**判重标识**认，不按下标认：队列里同一首排了两遍时，正在放的可能不是抽屉
-// 留下的那一条（留下的是第一次出现的那条）。按标识认出来的是同一首歌——这正是
-// 用户看到「这一行在放」的意思，也正是 Biu 的 `isSame(playItem, item)`。
+// 按**判重标识**认，不按下标认（同一首排了两遍时，正在放的可能不是抽屉留下的
+// 那一条）。这也是 Biu 的 `isSame(playItem, item)`。
 func currentRow(rows []queueRow, playing string) int {
 	if playing == "" {
 		return -1
@@ -244,10 +209,10 @@ func currentRow(rows []queueRow, playing string) int {
 	return -1
 }
 
-// playingIdentity 是正在放的那一首的判重标识，没有在放（或认不出是哪一首）是空串。
+// playingIdentity 是正在放的那一首的判重标识，没有在放（或认不出）是空串。
 //
-// **空串必须和「没有在放」是一回事**：认不出的项之间身份都是空串，拿它去比会
-// 让抽屉一开就有一行莫名高亮。
+// **空串必须和「没有在放」是一回事**：认不出的项之间身份都是空串，拿它去比会让
+// 抽屉一开就有一行莫名高亮。
 func playingIdentity(cur app.Item, ok bool) string {
 	if !ok {
 		return ""
@@ -308,12 +273,9 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 	rowEl.ContextMenu(func(m *ui.Menu) { s.queueMenu(m, row) })
 }
 
-// viewQueueCover 是行里那张封面。
-//
-// 四种状态（没有地址 / 载入中 / 就绪 / 加载失败）都由 imgcache.View 画，这里不
-// 重复它的判断。悬停时上面浮一个「▶」（Biu 的 `group-hover:opacity-100` 那层
-// 蒙版 + 播放图标）：正在放的那首不浮——它已经在放了，再盖一个「可以播」的
-// 提示是假的。
+// viewQueueCover 是行里那张封面。四种状态（没有地址 / 载入中 / 就绪 / 加载失败）
+// 都由 imgcache.View 画，这里不重复它的判断。悬停时上面浮一个「▶」（Biu 那层
+// 蒙版 + 播放图标）；正在放的那首不浮——它已经在放了。
 func (s *Shell) viewQueueCover(c *ui.Context, item app.Item, playing, hovered bool) {
 	ui.Row(c).Width(queueCoverSize).FillHeight().Children(func() {
 		imgcache.View(c, s.images, item.Cover, queueCoverSize, queueCoverSize)
@@ -349,11 +311,9 @@ func playlistSubColor(t *ui.Theme, playing bool) ui.Color {
 	return t.TextMuted
 }
 
-// itemSubtitle 是歌名下面那一行。
-//
-// Biu 摆的是 UP 主名（本地音乐摆「本地音乐」）。我们这一层还没有 UP 主名——
-// `app.Item` 上没有那个字段，而拿类型去冒充它是编一句话：用户会以为那是个人名。
-// 所以这里摆的是能从这一项**真的读出来**的来源。
+// itemSubtitle 是歌名下面那一行。Biu 摆的是 UP 主名，我们这一层还没有那个字段，
+// 而拿类型去冒充它是编一句话——用户会以为那是个人名。所以这里摆的是能从这一项
+// **真的读出来**的来源。
 func itemSubtitle(item app.Item) string {
 	switch item.Identity() {
 	case "":
@@ -370,17 +330,16 @@ func itemSubtitle(item app.Item) string {
 
 // locateCurrent 是顶上那个「定位当前播放」。
 //
-// 滚到 `targetIndex * 64`（Biu 的 `scrollToPlayItem` 逐字抄的那个乘法）：
-// 列表是定高 64 的，第 i 行的顶边就在 i*64 处，所以目标偏移是**算出来的**，
-// 不是量出来的——这也是行高必须定死的原因。
+// 滚到 `targetIndex * 64`（Biu 的 `scrollToPlayItem` 那个乘法）：列表定高 64，
+// 第 i 行的顶边就在 i*64 处，所以偏移是**算出来的**，这也是行高必须定死的原因。
 //
-// `ScrollState.ScrollTo` 带的是 `ui.Smooth`：Biu 那边是
-// `scrollTo({behavior: "smooth"})`，一并抄过来。**别换成 `ListState.ScrollTo`**
-// ——那个是一跳到位（`mygo/ui/list.go` 的 ScrollTo），用户按下去会「啪」地一下
-// 跳过去，而验收要的是「平滑滚过去」。
+// ⚠️ `ScrollState.ScrollTo(..., ui.Smooth)`，**别换成 `ListState.ScrollTo`**——
+// 那个是一跳到位（`mygo/ui/list.go`），按下去「啪」地一下就过去了，而验收要的是
+// 「平滑滚过去」。末尾几行会按 MaxY 钳住，和 Biu 那个 `Math.min(targetTop, maxTop)`
+// 同一件事，这里不自己算一遍。
 //
-// 两种「滚不了」都要说话（Biu 的两个 addToast）：没在放、这一首不在抽屉里。默默
-// 不动的话，用户分不清是按钮坏了还是自己记错了。
+// 两种「滚不了」都要说话（Biu 的两个 addToast）：默默不动的话，用户分不清是按钮
+// 坏了还是自己记错了。
 func (s *Shell) locateCurrent() {
 	cur, ok := s.app.Queue().Current()
 	if !ok {
@@ -498,11 +457,9 @@ func (s *Shell) queueAction(row queueRow, item queueMenuItem) {
 	}
 }
 
-// sayQueueErr 把队列那一层的话原样说给用户听。
-//
-// **不在前面加任何前缀**：话是 app 那边写的（`RemoveAt` 说的是「已经删掉了，但
-// 接不上下一首：…」，不是「删不掉」——删是真的删掉了）。界面再套一句「删不掉」
-// 就是当着用户的面说假话。
+// sayQueueErr 把队列那一层的话原样说给用户听，**不加工任何前缀**：话是 app 那边
+// 写的（`RemoveAt` 说的是「已经删掉了，但接不上下一首：…」，不是「删不掉」——
+// 删是真的删掉了）。界面再套一句就是在当着用户的面说假话。
 func (s *Shell) sayQueueErr(err error) {
 	if err != nil {
 		s.addToast(err.Error())
