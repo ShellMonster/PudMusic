@@ -151,14 +151,24 @@ func TestTheMetaLabelsAreNotTruncated(t *testing.T) {
 	}
 }
 
+// ownerNameMinW 是这一条断言的阈值。
+//
+// ⚠️ **它是一个独立的绝对数，不是生产那边的那个下限（`playbar.artistMinW`）**：
+// 阈值取自被测对象的话，把那个下限删成 0 这条断言照样全绿——而它恰恰是为
+// 「UP 名被挤成 0 宽」写的那一条（第一版就是这么写的，`artistMinW` 一改它
+// 跟着改，等于没断言）。
+//
+// 40 是从「一个 UP 名要认得出来」倒推的：12 号字一个汉字 12 宽，40 能放下
+// 三个字多一个偏旁；比它更窄的话用户读到的是「听不…」，那和没有是一回事。
+// 这一条只管「宽到能认出」，不管「完整」——名字长到放不下是可以缩的
+// （`Ellipsis` 那一档），没有宽度才是坏的。
+const ownerNameMinW = 40
+
 // TestTheOwnerIsNeverSqueezedOutOfExistence 盯 UP 名不会被挤成 0 宽。
 //
 // 窗口窄的时候左边那一块只剩 110，而「收藏」「下载」两个键加两道缝要 112——
 // 不给 UP 名留一个下限的话它一个像素都分不到，而**界面上看不出坏了**：按钮和
 // 那两行字都还在，只有名字没了，用户看到的是「这一首没有 UP 主」。
-//
-// 断的是「它分到了宽度」，不是「它是完整的」：名字长到放不下是可以缩的
-// （`Ellipsis` 那一档），没有宽度才是坏的。
 func TestTheOwnerIsNeverSqueezedOutOfExistence(t *testing.T) {
 	const owner = "一个非常非常非常非常非常非常长的 UP 主名字"
 	for _, width := range []int{760, 900, 1000, 1200, 1280} {
@@ -171,9 +181,9 @@ func TestTheOwnerIsNeverSqueezedOutOfExistence(t *testing.T) {
 			if !ok {
 				t.Fatalf("宽度 %d：画面上没有那个 UP 名：%q", width, tt.Texts())
 			}
-			if r.W < artistMinW-8 {
-				t.Errorf("宽度 %d：UP 名只剩 %.1f 宽——它被两个键挤没了，"+
-					"而界面上看不出坏了（按钮和字都还在）", width, r.W)
+			if r.W < ownerNameMinW {
+				t.Errorf("宽度 %d：UP 名只剩 %.1f 宽（下限 %d）——它被两个键挤没了，"+
+					"而界面上看不出坏了（按钮和字都还在）", width, r.W, ownerNameMinW)
 			}
 		})
 	}

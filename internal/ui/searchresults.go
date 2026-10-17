@@ -340,6 +340,10 @@ func searchVideoMusic(hit bili.VideoHit) list.Music {
 			Cid:    hit.Cid,
 			Title:  hit.Title,
 			Cover:  hit.Cover,
+			// UP 名 + 编号：播放条上那一句要显示它、点它进他的空间
+			//（`app.Item.Artist`）。`VideoHit` 两样都带，往下传就是了。
+			Artist:    hit.Owner,
+			ArtistMid: hit.Mid,
 		},
 	}
 }

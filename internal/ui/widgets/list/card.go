@@ -60,11 +60,15 @@ const (
 	ownerLeading = 1
 )
 
-// playingMark 是「这一行正在放」那个标记。Biu 那一行画的是一段跳动的波形，
+// PlayingMark 是「这一行正在放」那个标记。Biu 那一行画的是一段跳动的波形，
 // 这里写死成一句字：⚠️ **它不跳**——跳要一帧一变，而快速切歌时帧率本来就紧，
 // 而帧率一掉「正在放」就跟着糊掉。认出来靠的是「只有一行是这个颜色 + 只有
 // 这一行有这句字」，不靠动。
-const playingMark = "正在播放"
+//
+// ⚠️ **导出是为了外面那一套自己画的行也用它**（`ui` 里「稍后再看」「历史记录」
+// 两页的行不走本包，见 `ui/library_rows.go` 的 `viewPlayingMark`）。同一个应用
+// 里两套列表写着两种说法，用户会以为是两个意思。
+const PlayingMark = "正在播放"
 
 // viewCard 画一行：Biu 的 music-list-item 在 MyGo 里的样子。
 //
@@ -141,7 +145,7 @@ func (l *List) viewCard(r ui.ListRow) {
 		// 的话，他得自己猜是哪一首。顺带它也让这一行在 Tester 里可认——
 		// 同一首歌排了两行时，两个标签各不相同（铁律四保证 ID 不同）。
 		if playing {
-			ui.Text(c, playingMark).Label(m.Title + " " + playingMark).
+			ui.Text(c, PlayingMark).Label(m.Title + " " + PlayingMark).
 				FontSize(11).TextColor(t.Accent).MaxLines(1)
 		}
 	})

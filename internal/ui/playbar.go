@@ -168,9 +168,9 @@ func (s *Shell) viewTrackMeta(c *ui.Context, st app.State, t *ui.Theme) {
 // viewArtist 是那一行里的 UP 名。**点它进 `/user/{id}`**（Biu 的播放条上就是
 // 这么摆的：`playbar/left/index.tsx` 的 ownerName 是个链接）。
 //
-// ⚠️ **有名字、没有编号时照样显示，只是点不动**：有些来源只给名字不给 mid
-// （动态流那一批就是）。把名字藏起来是另一种撒谎——用户看到的是「这一首
-// 没有 UP 主」（见 `app.Item.ArtistMid`）。
+// ⚠️ **有名字、没有编号时照样显示，只是点不动**：B 站有的接口只给名字不给
+// mid（见 `app.Item.ArtistMid`）。把名字藏起来是另一种撒谎——用户看到的是
+// 「这一首没有 UP 主」。
 //
 // ⚠️ 走的是 `upPathPrefix` 而不是写死 `"/user/"`：路由表里那一条改了的话
 // 这里跟着错，而且错得很安静（空间页退回占位页，没人看得出来）。

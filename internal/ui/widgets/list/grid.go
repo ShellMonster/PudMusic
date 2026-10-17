@@ -445,7 +445,7 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 					// 时长挤成「0:」——而用户读的是「正在放」不是那半截时长。
 					if playing {
 						// 标签带上歌名，理由见 card.go 那一处。
-						ui.Text(c, playingMark).Label(m.Title + " " + playingMark).
+						ui.Text(c, PlayingMark).Label(m.Title + " " + PlayingMark).
 							FontSize(11).TextColor(t.Accent).MaxLines(1)
 						return
 					}

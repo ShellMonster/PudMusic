@@ -104,3 +104,71 @@ func queueTitles(items []app.Item) []string {
 	}
 	return out
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 「正在播放」高亮（这两页自己画的行）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestBothLibraryPagesMarkThePlayingRow 盯稍后再看 / 历史记录这两页也标出
+// 正在放的那一行。
+//
+// ⚠️ 这两页**不走** `widgets/list` 的卡片：它们的行多两到三列，表头是另外画的
+// （`laterHeader` / `historyHeader`），所以卡片上那个标记不会自动出现在这儿。
+// 只补了菜单没补高亮的话，同一个应用里两套列表对「正在放」的说法不一致。
+//
+// 断的是**那一行的下边沿**：只断「画面上有这几个字」的话，标错了行也照样通过。
+func TestBothLibraryPagesMarkThePlayingRow(t *testing.T) {
+	for _, c := range []struct{ path, title string }{
+		{laterPath, "稍后再看"},
+		{historyPath, "历史记录"},
+	} {
+		t.Run(c.title, func(t *testing.T) {
+			f := newLibFake(t).
+				withLater(1, 2, "甲", "乙").
+				withHistory(1, 10, 200, "甲", "乙")
+			tt, s := libraryShell(t, f, c.path)
+			settle(t, tt, "把内容拉回来", func() bool { return rowsShown(s.pageOf(c.path)) == 2 })
+
+			rows := s.pageOf(c.path).rows
+			items := rows.Rows()
+			// 摆一条两首的队列并让**第一首**在放——而它在这一页上是第一行。
+			// 摆的是队列那一层（`Queue.Reset` 不起播），所以这一条不需要播放器。
+			if _, ok := s.app.Queue().Reset(items[0].Item, items[1].Item); !ok {
+				t.Fatal("队列摆不进去")
+			}
+			// `Reset` 不起播、也就没有「叫醒界面」那一下（它不是用户动作）。
+			// Tester 的 `Find` 读的是**上一帧**画出来的东西，所以这里要自己
+			// 要一帧。
+			tt.Frame()
+
+			// 该不该标看的是**判重标识**，不是第几行——历史记录那一页的假数据
+			// 两条记录是**同一首歌**（B 站就是这样的两条，见 `historyBody`），
+			// 所以两行都该亮，而少亮一行同样是错的。
+			playing := items[0].Item.Identity()
+			marked := 0
+			for i, r := range items {
+				row, ok := tt.Find(r.Title)
+				if !ok {
+					t.Fatalf("画面上找不到「%s」，文字有 %q", r.Title, tt.Texts())
+				}
+				mark, got := tt.Find(r.Title + " " + playingMark)
+				want := r.Item.Identity() == playing
+				if got != want {
+					t.Errorf("第 %d 行「%s」标成正在放 = %v，want %v（画面：%q）",
+						i+1, r.Title, got, want, tt.Texts())
+					continue
+				}
+				if got {
+					marked++
+					if mark.Y < row.Y || mark.Y+mark.H > row.Y+row.H {
+						t.Errorf("第 %d 行「%s」的标记 {%.1f,%.1f} 不在那一行 {%.1f,%.1f} 里",
+							i+1, r.Title, mark.X, mark.Y, row.X, row.Y)
+					}
+				}
+			}
+			if marked == 0 {
+				t.Errorf("一页上没有任何一行被标成正在放，而队列里明明有在放的那首")
+			}
+		})
+	}
+}

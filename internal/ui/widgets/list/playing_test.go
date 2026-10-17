@@ -45,7 +45,7 @@ func markedOn(t *testing.T, tt *ui.Tester, title string) bool {
 	if _, ok := tt.Find(title); !ok {
 		t.Fatalf("画面上找不到「%s」，文字有 %q", title, tt.Texts())
 	}
-	_, ok := tt.Find(title + " " + playingMark)
+	_, ok := tt.Find(title + " " + PlayingMark)
 	return ok
 }
 
@@ -57,7 +57,7 @@ func markedOn(t *testing.T, tt *ui.Tester, title string) bool {
 func countMarks(tt *ui.Tester) int {
 	n := 0
 	for _, s := range tt.Texts() {
-		if s == playingMark || strings.HasSuffix(s, " "+playingMark) {
+		if s == PlayingMark || strings.HasSuffix(s, " "+PlayingMark) {
 			n++
 		}
 	}
@@ -267,25 +267,56 @@ func TestTheHoverButtonPlaysThatSongAndTheRestAfterIt(t *testing.T) {
 	}
 }
 
+// ownersAre 是 n 行歌，**每行的 UP 名都不一样**（"UP A" 到 "UP E"）。
+//
+// 为什么非要唯一：这一组要量的是**行里某一块东西的横坐标**，而量它就得先找到
+// 它——`Tester.Find` 认的是控件的文本，两行画着同一个字的时候它只给回第一块。
+//
+// ⚠️ **量的是 UP 名那一块，不是时长**：时长是这一行最后一块、且靠右对齐，它
+// 的位置由行的右边界决定。序号那一列变宽时被推走的是**标题列的左边**，
+// 也就是 UP 名那一块——时长一动不动（实测：按钮加宽 30，歌名和封面右移了，
+// 时长的 x 一个像素没变）。
+func ownersAre(n int) []Music {
+	songs := onlineSongs(n)
+	for i := range songs {
+		songs[i].Owner = "UP " + string(rune('A'+i))
+	}
+	return songs
+}
+
 // TestTheHoverButtonStaysInTheIndexColumn 盯按钮出现时那一行**不横着跳一下**。
 //
-// 序号那一列是定宽 40 的（Biu 的 `min-w-8 text-center`），按钮用它自己的宽度就
-// 会把封面往右推——而指针正在往那一行上移，行在指针底下滑一下是很难受的。
+// 序号那一列是定宽 `indexWidth` 的（Biu 的 `min-w-8 text-center`），按钮用它
+// 自己的宽度就会把封面、连同后面每一块一起往右推——而指针正在往那一行上移，
+// 行在指针底下滑一下是很难受的。
+//
+// ⚠️ **量的是行里的 UP 名那一块，不是歌名**：歌名要量它就得用
+// `Tester.Find(歌名)`，而它命中的是 `ui.List` 挂在**整行**上的无障碍盒子
+// （见 `List.View` 里那句 `l.state.Label`），那个盒子的 X **永远是 0**——
+// 第一版就是这么写的，于是把按钮从 `indexWidth` 改成 70（封面整体右移 32px）
+// 它照样一路绿。
 func TestTheHoverButtonStaysInTheIndexColumn(t *testing.T) {
-	_, tt := newList(t, (&recorded{}).actions(), onlineSongs(5))
+	_, tt := newList(t, (&recorded{}).actions(), ownersAre(5))
 
-	// 一条歌名短到不会折行，这样量出来的封面左边就是序号右边。
-	before, ok := tt.Find("在线的歌 C")
+	// 第三行的 UP 名。它在序号和封面右边，而左边就是序号那一列。
+	before, ok := tt.Find("UP C")
 	if !ok {
-		t.Fatal("找不到那一行")
+		t.Fatalf("找不到第三行的 UP 名，文字有 %q", tt.Texts())
 	}
+	if before.X <= indexWidth+coverSize {
+		t.Fatalf("第三行的 UP 名只在 x=%.1f，连序号（%d）加封面（%d）都没让开——"+
+			"量错了东西，这条用例什么也证明不了", before.X, indexWidth, coverSize)
+	}
+
 	hoverOn(t, tt, "在线的歌 C")
-	after, ok := tt.Find("在线的歌 C")
+
+	after, ok := tt.Find("UP C")
 	if !ok {
-		t.Fatal("hover 之后找不到那一行")
+		t.Fatalf("hover 之后找不到第三行的 UP 名，文字有 %q", tt.Texts())
 	}
-	if before.X != after.X {
-		t.Errorf("hover 之后那一行横着挪了 %.1f（%.1f → %.1f）——指针底下的行不该动",
+	if after.X != before.X {
+		t.Errorf("hover 之后第三行横着挪了 %.1f（%.1f → %.1f）——"+
+			"按钮比序号那一列宽，它右边的每一块都被推走了，而指针就在那一行上",
 			after.X-before.X, before.X, after.X)
 	}
 }

@@ -166,13 +166,22 @@ func laterHeader(c *ui.Context) {
 // 列表的行高就不一样了，那正是变高行存在的理由。
 func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 	t := c.Theme()
-	m := s.laterPage.rows.Rows()[r.Index]
+	rows := s.laterPage.rows
+	m := rows.Rows()[r.Index]
+	playing := rows.isPlaying(m)
 
 	// 选中那一行的底色由 `ui.List` 自己刷（主色底），字色得跟着换——不换就是
 	// 主色底上的深色字，深色主题下直接看不见。
+	//
+	// ⚠️ 「正在放」是**第二档**而不是并进去的第二种底色：它只把歌名染成主色、
+	// 在下面挂一句「正在播放」。换成主色底就和「选中」分不出来了，而这两个问的
+	// 是两件不同的事（见 `widgets/list` 的 card.go 里同一段）。
 	titleColor, ownerColor := t.Text, t.TextMuted
-	if r.Selected() {
+	switch {
+	case r.Selected():
 		titleColor, ownerColor = t.AccentText, t.AccentText.Alpha(0.75)
+	case playing:
+		titleColor = t.Accent
 	}
 
 	return ui.Row(c).Key("later-row:"+m.ID).AlignSelf(ui.Stretch).Gap(rowGap).
@@ -189,6 +198,9 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 			if m.Owner != "" {
 				ui.Text(c, m.Owner).FontSize(12).LineHeight(1).
 					TextColor(ownerColor).MaxLines(1).Ellipsis("…")
+			}
+			if playing {
+				viewPlayingMark(c, t, m.Title)
 			}
 		})
 

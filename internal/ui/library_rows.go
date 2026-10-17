@@ -460,6 +460,38 @@ func (p *pagedRows) viewBackToTop(c *ui.Context) {
 	})
 }
 
+// playingMark 是「这一行正在放」那个标记。
+//
+// ⚠️ **直接用 `list.PlayingMark` 而不是另写一遍**：这两个页面自己画行、
+// 不走 `widgets/list` 的卡片，可它们和那一套说的是同一件事——同一个应用里
+// 两套列表写着两种说法，用户会以为是两个意思。
+const playingMark = list.PlayingMark
+
+// isPlaying 报这一行这一首是不是正在放的那首。
+//
+// 判据和理由全在 `list.Actions.IsPlaying` 那一段（按 `app.Item.Identity`，
+// 不是行的序号也不是 `Music.ID`）。没装判据时一律当不在放。
+func (p *pagedRows) isPlaying(m libraryRow) bool {
+	if p.acts.IsPlaying == nil {
+		return false
+	}
+	return p.acts.IsPlaying(m.Item)
+}
+
+// viewPlayingMark 是「这一行正在放」那个标记，画在标题那一列的最下面。
+//
+// ⚠️ **画在 Grow 那一列里，而不是当成新的一列**：这两页有表头，而表头上
+// 只有「# 标题 播放量 加入时间 时长」——多一格内容表头就对不上，而对不上的
+// 表头在界面上不像坏了。
+//
+// ⚠️ **无障碍标签带上了歌名**：读屏软件读的是标签而不是画出来的字，光说
+// 「正在播放」的话用户听到的是一句没头没尾的话。顺带它让这一行在 Tester 里
+// 可认（理由同 `widgets/list` 的 `card.go`）。
+func viewPlayingMark(c *ui.Context, t *ui.Theme, title string) {
+	ui.Text(c, playingMark).Label(title + " " + playingMark).
+		FontSize(11).TextColor(t.Accent).MaxLines(1)
+}
+
 // playFrom 从第 i 行往后接进队列并开始播。
 //
 // 给的是**从这一行起的全部**，和 Biu 的「在 B 站打开这一首从这儿听」一致：点

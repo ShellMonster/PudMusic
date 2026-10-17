@@ -1,6 +1,10 @@
 package app
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 // `App.IsPlaying`：列表上「正在播放」那一行的判据（对照审计的 A24）。
 //
@@ -123,5 +127,74 @@ func TestIsPlayingSaysNoWhenNothingIsPlaying(t *testing.T) {
 
 	if a.IsPlaying(onlineItemOf("BV1", "一首歌")) {
 		t.Errorf("还没有放任何东西，IsPlaying 却说了 true")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UP 主从队列项一路走到界面上
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ownerTestFLAC 是一份能真的放起来的测试素材。
+//
+// ⚠️ 不复用 `app_test.go` 里那个 `flac`：那一份在**外部**测试包
+// （`package app_test`），而这个文件在包内（它要碰 `Queue.Reset` 这些内部
+// 形状）。两个包同名不冲突，可同名也不共享。
+func ownerTestFLAC(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join("..", "service", "audio", "flacdec", "testdata", "stereo16.flac")
+	if _, err := os.Stat(p); err != nil {
+		t.Skipf("找不到 FLAC 测试素材：%v", err)
+	}
+	return p
+}
+
+// TestPlayHandsTheUPOwnerToTheState 盯 `play` 真的把 UP 名交给界面。
+//
+// 播放条上那一行 UP 名读的是 `State.Artist` / `State.ArtistMid`，而它们只在
+// `play` 这一处被填。漏了这一步的症状是「每一页的队列项都带着 UP 主，可播放条
+// 上那一行就是不画」——数据全对，只差最后一跳。
+//
+// ⚠️ 这里拿一个**本地文件配上一个 UP 名**来构造队列项。真实数据里本地项不带
+// UP 名（`Item.Artist` 那段），而这一条要量的是 `play` 这一跳本身：它对
+// 每一项一视同仁，给什么传什么。
+func TestPlayHandsTheUPOwnerToTheState(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	it := LocalItem(ownerTestFLAC(t))
+	it.Artist, it.ArtistMid = "某个 UP 主", 4242
+	if err := a.Enqueue(it); err != nil {
+		t.Fatalf("放不了：%v", err)
+	}
+
+	st := a.Snapshot()
+	if st.Artist != "某个 UP 主" {
+		t.Errorf("状态里的 UP 名是 %q，want %q——播放条上那一行整个不画", st.Artist, "某个 UP 主")
+	}
+	if st.ArtistMid != 4242 {
+		t.Errorf("状态里的 UP 编号是 %d，want 4242——名字显示得出来却点不动", st.ArtistMid)
+	}
+}
+
+// TestTheUPOwnerIsClearedWithTheTrack 盯名字和编号**一起**清干净。
+//
+// 只清名字的话，界面上「没有 UP 名」那一行不画了，而下一首（同一套接线）
+// 的名字写进去之前那半帧里编号还指着上一个 UP 主——用户点进的是**别人的空间**，
+// 而界面上看不出任何异样。
+func TestTheUPOwnerIsClearedWithTheTrack(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	it := LocalItem(ownerTestFLAC(t))
+	it.Artist, it.ArtistMid = "某个 UP 主", 4242
+	if err := a.Enqueue(it); err != nil {
+		t.Fatalf("放不了：%v", err)
+	}
+
+	a.ClearTrack()
+	st := a.Snapshot()
+	if st.Artist != "" || st.ArtistMid != 0 {
+		t.Errorf("停下来之后还留着 UP 名 %q / 编号 %d，want 空串和 0",
+			st.Artist, st.ArtistMid)
 	}
 }
