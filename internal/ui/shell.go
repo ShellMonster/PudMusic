@@ -188,6 +188,14 @@ type Shell struct {
 	// 换容器就整个换掉，见 `collectionFor`。
 	collection *collectionPage
 
+	// lyric 是歌词区自己那一摊：滚动位置、上一帧量到的两个框、正在滚向哪一句、
+	// 以及右下角那两个浮层开着没有。见 lyrics.go。
+	//
+	// ⚠️ **逐窗口一份**（同 rateOpen / drawerOpen 的理由）：两个窗口画的是同一
+	// 首歌，但歌词滚到了哪儿是各人各眼的事——迷你播放器窗口停在用户上次看到的那
+	// 一句，主窗口跟着歌往前走，这才是对的。
+	lyric lyricsView
+
 	// folderEdit 是「新建 / 修改收藏夹」那个弹窗（folderedit.go）。
 	// nil 表示从没开过。
 	//

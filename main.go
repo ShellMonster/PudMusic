@@ -79,6 +79,10 @@ func main() {
 	// 文件监听关掉」，而那要走 App.Close（退出流程里跑的）。
 	ui.MountLocalMusic(a)
 
+	// 歌词缓存同理：`NewCache` 要建目录，那是阻塞 IO。它不发请求，所以排在
+	// 这里只是「所有零件都齐了」这件事在开窗口之前看得见一点。
+	ui.MountLyrics(a)
+
 	// 自动更新也挂在开窗口之前：`mygo.Updater.Enabled()` 要在应用旁边建一个
 	// 临时目录试写，那是阻塞 IO，而它的结果（能不能更新）要在界面第一帧上就
 	// 是对的。真正开始查是 `ui.Run` 的 WhenReady 里（见那里）。
