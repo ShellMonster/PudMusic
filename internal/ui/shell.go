@@ -144,6 +144,10 @@ type Shell struct {
 	// folderSelect 是「把这一首放进哪些收藏夹」那个弹窗（folderselect.go）。
 	folderSelect *folderSelect
 
+	// coverPick 是「后台把那个封面文件读出来、解好了」的那个交接槽。
+	// 带锁，写它的是后台 goroutine、读它的是界面线程（见 folderpick.go）。
+	coverPick coverPick
+
 	// pickImage 是「弹文件框选一张封面图」那个**接缝**（folderpick.go）。
 	//
 	// ⚠️ 真实现要去系统里弹面板，而那一条在无头 Tester 里会 panic（`mygo`
@@ -472,6 +476,7 @@ func (s *Shell) viewMain(c *ui.Context) {
 // 「提交完了但按钮还在转」，而用户看到的就是「点了没反应」。
 func (s *Shell) viewFolderDialogs(c *ui.Context) {
 	s.flushFolderResults()
+	s.flushCoverPick()
 	s.syncFolderDialogs()
 
 	s.viewFolderEdit(c)

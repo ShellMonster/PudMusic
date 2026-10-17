@@ -99,40 +99,60 @@ func (c *cropState) size() (int32, int32) {
 // ⚠️ `pick` 是**接缝**：真实现要去系统里弹面板，而那一条在无头 Tester 里会
 // panic。测试建完外壳换成「记下路径然后给一张图」的桩，于是「选中的图有没有
 // 被解码、有没有被裁成 16:9」能自动验。
-func (s *Shell) pickCover(crop *cropState) {
+//
+// 🔴 **这一趟只往 `s.coverPick` 那个带锁的小槽里放，绝不碰 `cropState`**。
+// 读盘 + 解一张几千像素的照片是几十到几百毫秒，在界面线程上做就是每点一次
+// 冻一下窗口，所以它**必须**在后台；而 `cropState` 是界面状态，**只由界面
+// 线程读写**（铁律一）。
+//
+// 早一版是在这个 goroutine 里直接 `crop.setSource(...)` + `crop.open = true`
+// ——那是一处真的数据竞争：`-race` 报「goroutine N 写 crop.open，主线程读
+// crop.open」，症状是裁剪弹窗**有时候开不起来**（`-race` 下跑十次红三四次），
+// 而单线程跑十次全绿。两边都在同一份内存上，只是时序不同。
+func (s *Shell) pickCover() {
 	win := s.win
 	pick := s.pickImage
 	go func() {
 		paths, err := pick(win)
 		if err != nil || len(paths) == 0 {
+			// 用户取消：什么都不用说，也不用叫醒界面。
 			return
 		}
-		s.loadCoverFile(crop, paths[0])
+		img, derr := readAndDecodeCover(paths[0])
+		s.coverPick.put(img, paths[0], derr)
+		s.wake.invalidate()
 	}()
 }
 
-// loadCoverFile 读一个文件、解码它，开裁剪弹窗。
+// flushCoverPick 取走后台解码好的那张图，**在界面线程上**开裁剪弹窗。
 //
-// 它在后台跑：读盘 + 解一张几千像素的照片是几十到几百毫秒，在界面线程上做
-// 就是每点一次冻一下窗口。解码失败要说给用户听——「点了没反应」比「选错了
-// 格式」难解释得多。
-func (s *Shell) loadCoverFile(crop *cropState, path string) {
+// 每帧调一次（由 `viewFolderDialogs`）。**必须**在界面线程上：开弹窗、
+// 建 `ui.Bitmap`、改裁剪框，全是界面状态。
+//
+// 解码失败要说给用户听——「点了没反应」比「选错了格式」难解释得多。
+func (s *Shell) flushCoverPick() {
+	img, path, errMsg, ok := s.coverPick.take()
+	if !ok {
+		return
+	}
+	if errMsg != "" {
+		s.addToast(errMsg)
+		return
+	}
+	e := s.folderEdit
+	if e == nil || !e.open {
+		// 表单已经关了（比如用户在这几百毫秒里按了 Esc）：那张图没人要了，
+		// 直接丢掉——一张 8000×8000 的照片解码完是 256MB。
+		return
+	}
 	// ⚠️ **同一个文件不重来一遍**：换图要重新解码（几十到几百毫秒）和重建
 	// GPU 纹理，而用户连点两下「选择照片」选的是同一个文件是常事。
-	if crop.srcFor == path && crop.src != nil {
-		crop.open = true
-		s.wake.invalidate()
+	if e.crop.srcFor == path && e.crop.src != nil {
+		e.crop.open = true
 		return
 	}
-	img, err := readAndDecodeCover(path)
-	if err != nil {
-		s.addToast(err.Error())
-		s.wake.invalidate()
-		return
-	}
-	crop.setSource(img, path)
-	crop.open = true
-	s.wake.invalidate()
+	e.crop.setSource(img, path)
+	e.crop.open = true
 }
 
 // setSource 换掉正在裁的那张图。
@@ -351,7 +371,7 @@ func (s *Shell) viewCoverPicker(c *ui.Context, e *folderEdit) {
 		ui.Text(c, "点击上传图片").FontSize(13).TextColor(t.TextMuted)
 	})
 	if btn.Clicked() {
-		s.pickCover(&e.crop)
+		s.pickCover()
 	}
 
 	ui.Text(c, coverHint).FontSize(11).TextColor(t.TextMuted).MaxLines(1)
