@@ -18,6 +18,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown"
 )
 
 // Shell 是一个窗口的全部东西：状态、画法、唤醒句柄。
@@ -196,6 +197,26 @@ type Shell struct {
 	// settings 是设置页自己那一摊：切在哪个 Tab。建在 Shell 上而不是每帧新建，
 	// 理由和 home 一模一样：切走再切回来要停在原来那一格上。
 	settings settingsPageState
+
+	// update 是更新弹窗自己那一摊，见 update_dialog.go。
+	//
+	// ⚠️ 它挂在 Shell 上而不是 `App` 上，所以**每个窗口各有一份**。今天这个
+	// 应用只有一个窗口（`openWindow` 的注释写着「绝不开第二个」），于是「这一份」
+	// 和全局的那一份是同一件事。写成这样是为了**将来**：真开了第二个窗口，弹窗
+	// 在哪个窗口开着就是个该由那个窗口自己回答的问题，而更新器那一摊状态仍然
+	// 只有一份（它在 `App` 上）。
+	update struct {
+		// wanted 是「用户按了检查更新 / 有更新可看，弹窗该开」。
+		wanted bool
+		// notes 是渲染更新日志的那份 markdown 选项。**建一次存着**：
+		// `markdown.Options` 里有一张图片缓存表（`images sync.Map`），每帧新建
+		// 等于每帧丢掉缓存，而更新日志是在下载中反复重画的那一块。
+		notes *markdown.Options
+		// scroll 是更新日志那一段的滚动位置。换一版更新日志要回到顶上。
+		scroll ui.ScrollState
+		// shownNotes 是上一帧画的是哪一版日志，用它认出「换版了」。
+		shownNotes string
+	}
 
 	// picker 弹系统文件框挑路径（下载目录、FFmpeg）。做成字段是为了能替掉它：
 	// 真的那一份要过事件循环，无头 Tester 里没有事件循环，不替掉就只能等上真
@@ -453,6 +474,14 @@ func Run(a *app.App, sess *media.Session) error {
 		// 在应用还没 ready 的时候调会 panic（框架的 `needsApp`，
 		// `mygo/app.go:128`），而 `Run` 之前是那一刻。
 		a.StartLocalMusicWatch()
+		// 后台自动查更新。**必须在 `WhenReady` 里**：第一次查询要走网络，而
+		// `WhenReady` 之前事件循环还没转起来，那时候发请求等于在一条还没开始
+		// 跑的路上走（框架自己也把「需要事件循环」的 API 挡在 ready 之前，见
+		// 上面 `StartLocalMusicWatch` 那一条）。
+		//
+		// 停掉它的是 `App.Close`（`updater.close`），而 `Close` 挂在退出流程上——
+		// 所以关掉应用之后不会有下一次查询在后台跑着。
+		a.StartAutoChecks()
 		s.openWindow()
 	})
 	return mygo.App.Run()
@@ -562,6 +591,8 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 收「那个 500ms 防抖的钟要不要醒着」。**每帧一次**，所以用户切走时它一定
 	// 会跟着停（见 syncSearchWatch）。
 	s.syncSearchWatch()
+	// 更新器留给界面的那一句提示（后台查到了新版本之类），取走就没了。
+	s.reportUpdateNotice()
 	// 启动时自动导入的结果，第一帧弹一条 toast 说一声。
 	//
 	// 为什么非弹不可：任务要求「凭据可以不迁，**要提示重新登录**」。那句提示只在

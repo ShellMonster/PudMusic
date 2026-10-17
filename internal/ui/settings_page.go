@@ -158,10 +158,22 @@ func (s *Shell) settingSectionEnd(c *ui.Context) {
 // 的标题和说明，右边固定宽度的控件）。两边的伸缩比例照抄：文字吃掉剩下的
 // 宽度，说明换行了控件也不会被挤走。
 func (s *Shell) settingRow(c *ui.Context, title, desc string, control func()) {
+	s.settingRowEl(c, func() { ui.Text(c, title).FontSize(14).Bold() }, desc, control)
+}
+
+// settingRowEl 是 settingRow 那一行，标题那一格换成自己画的。
+//
+// 什么时候要它：标题**不是一段字**的时候——「关于应用」那一行要的是「当前版本
+// 0.1.0 → 1.2.0」这样一个两段、还带颜色的东西（照 Biu 的
+// `system-settings.tsx` 那一段）。硬塞进 `settingRow` 的字符串参数里就只剩一种
+// 颜色，而那一段新版本号用主色正是「有更新」这件事唯一的视觉标记。
+//
+// 其余的行一律用 `settingRow`：那一个签名足够的地方不要多一个。
+func (s *Shell) settingRowEl(c *ui.Context, title func(), desc string, control func()) {
 	t := c.Theme()
 	ui.Row(c).FillWidth().Gap(24).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).Children(func() {
-			ui.Text(c, title).FontSize(14).Bold()
+			title()
 			ui.Text(c, desc).FontSize(12).TextColor(t.TextMuted).Wrap()
 		})
 		control()
