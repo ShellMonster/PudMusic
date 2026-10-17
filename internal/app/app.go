@@ -51,6 +51,19 @@ type State struct {
 	//
 	// **换流之后它会变**：B 站偶尔会给出比上次低的一档，用户得看见。
 	Quality string
+
+	// Buffering 是「这一首正在缓冲」。
+	//
+	// 网络断了或者 B 站那边一时下不动时，歌停在原地等着，网络回来接着走
+	// （见 `audio.StreamSource.Waiting`）。这时候**没有错误**——所以
+	// `Err` 是空串而这里是 true，两者说的不是一件事：
+	//
+	//	Err == ""            什么都没出错
+	//	Err == "" && Buffering  正在等网络（用户该知道歌为什么停着）
+	//	Err != ""            放弃了，而且有一条能照着做的话
+	//
+	// 本地文件永远是 false。
+	Buffering bool
 }
 
 // App 是应用的全部状态。
@@ -86,6 +99,11 @@ type App struct {
 	online *onlineTrack
 	// quality 是 State.Quality 的存放处，跟着换流更新。
 	quality string
+	// buffering 是 State.Buffering 的存放处，字节源在等网络时为 true。
+	//
+	// 它和 `errText` 是两回事：等网络**不是出错**，播放条上的话也不该是
+	// 红字（见 State.Buffering）。
+	buffering bool
 	// reportedErr 是已经往界面上报过的那一条。解码器的 Err 记的是**第一条**
 	// 错误、不自己清零，所以不比对的话每 50 ms 会重复报一次。
 	reportedErr error
@@ -127,16 +145,17 @@ func (a *App) Snapshot() State {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return State{
-		HasTrack: a.player != nil,
-		Title:    a.title,
-		Path:     a.path,
-		CoverURL: a.cover,
-		Playing:  a.playing,
-		Position: a.position,
-		Duration: a.duration,
-		Volume:   a.volume,
-		Err:      a.errText,
-		Quality:  a.quality,
+		HasTrack:  a.player != nil,
+		Title:     a.title,
+		Path:      a.path,
+		CoverURL:  a.cover,
+		Playing:   a.playing,
+		Position:  a.position,
+		Duration:  a.duration,
+		Volume:    a.volume,
+		Err:       a.errText,
+		Quality:   a.quality,
+		Buffering: a.buffering,
 	}
 }
 
@@ -179,6 +198,7 @@ func (a *App) Open(path string) error {
 	a.online = nil
 	a.quality = ""
 	a.reportedErr = nil
+	a.buffering = false
 	a.title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	a.path = path
 	// 手上只有一个本地路径，没有封面地址（见 State.CoverURL）。队列里的项自带
@@ -286,6 +306,7 @@ func (a *App) Close() {
 	p := a.player
 	a.player = nil
 	a.playing = false
+	a.buffering = false
 	a.mu.Unlock()
 
 	close(a.done)

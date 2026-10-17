@@ -1,17 +1,12 @@
 package app_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,226 +22,7 @@ import (
 // 「下到第 N 字节时地址失效」精确造出来。这里测的是它被接对了没有：
 // 代次、音质徽章、错误怎么冒到界面上、凭据边界有没有被绕过。
 //
-// # fixture 的形状从哪来
-//
-// `/x/player/wbi/playurl` 的字段名和取值抄的是 2026-10-16 打真 B 站拿到的
-// 响应（`dash.audio[].id/bandwidth/codecs/baseUrl`、地址上的 `deadline`）。
-// 素材用的是真的 FLAC 文件，走真的解码链——用假的字节测「能播」等于没测。
-//
-// 但**没有任何一条断言是在证明「B 站真的这么返回」**，那要真机回归。
-
-// ─────────────────────────────────────────────────────────────────────────────
-// fixture
-// ─────────────────────────────────────────────────────────────────────────────
-
-// flacFixturePath 是那份 FLAC 素材。
-func flacFixturePath(t *testing.T) string {
-	t.Helper()
-	p := filepath.Join("..", "service", "audio", "flacdec", "testdata", "stereo16.flac")
-	if _, err := os.Stat(p); err != nil {
-		t.Skipf("找不到 FLAC 测试素材：%v", err)
-	}
-	return p
-}
-
-// streamFixture 是一台「B 站」：取流接口、扫码接口和 CDN 都在一台服务器上。
-type streamFixture struct {
-	*httptest.Server
-	t *testing.T
-
-	mu sync.Mutex
-	// playURLs 是取流接口**依次**该回的 dash。最后一条会一直用。
-	playURLs []map[string]any
-	// overrides 是按路径整段替换掉默认处理。
-	overrides map[string]http.HandlerFunc
-	// playCalls 数取流接口被打了多少次。
-	playCalls atomic.Int32
-
-	// media 是 CDN 上那份字节。
-	media []byte
-	// mediaHits 数 CDN 被打了多少次。
-	mediaHits atomic.Int32
-	// forbidden 的 CDN 路径一律回 403（模拟「这条地址过期了」）。
-	forbidden map[string]bool
-
-	// failMediaAfter > 0 时，发到这个字节就掐断连接（模拟地址中途失效）。
-	failMediaAfter int
-	// mediaGate 关掉之后才真的掐断。理由见 audio 包里同名 helper。
-	mediaGate chan struct{}
-	mediaOnce sync.Once
-}
-
-func (f *streamFixture) onPlayURL(dash map[string]any) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.playURLs = append(f.playURLs, dash)
-}
-
-func (f *streamFixture) on(path string, h http.HandlerFunc) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.overrides[path] = h
-}
-
-func (f *streamFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	f.mu.Lock()
-	h := f.overrides[r.URL.Path]
-	f.mu.Unlock()
-	if h != nil {
-		h(w, r)
-		return
-	}
-
-	switch {
-	case r.URL.Path == "/x/web-interface/nav":
-		writeStreamJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
-			"data": map[string]any{"wbi_img": map[string]string{
-				"img_url": "https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png",
-				"sub_url": "https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png",
-			}}})
-
-	case r.URL.Path == "/x/player/wbi/playurl":
-		f.servePlayURL(w)
-
-	case strings.HasPrefix(r.URL.Path, "/cdn/"):
-		f.serveMedia(w, r)
-
-	default:
-		http.NotFound(w, r)
-	}
-}
-
-func (f *streamFixture) servePlayURL(w http.ResponseWriter) {
-	f.mu.Lock()
-	n := int(f.playCalls.Add(1)) - 1
-	if n >= len(f.playURLs) {
-		n = len(f.playURLs) - 1
-	}
-	var dash map[string]any
-	if n >= 0 {
-		dash = f.playURLs[n]
-	}
-	f.mu.Unlock()
-
-	writeStreamJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
-		"data": map[string]any{"timelength": 1000, "dash": dash}})
-}
-
-func (f *streamFixture) serveMedia(w http.ResponseWriter, r *http.Request) {
-	f.mediaHits.Add(1)
-	if f.forbidden[r.URL.Path] {
-		http.Error(w, "地址失效了", http.StatusForbidden)
-		return
-	}
-
-	data := f.media
-	start := 0
-	if h := r.Header.Get("Range"); strings.HasPrefix(h, "bytes=") {
-		start, _ = strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(h, "bytes="), "-"))
-	}
-	if start > len(data) {
-		http.Error(w, "越界", http.StatusRequestedRangeNotSatisfiable)
-		return
-	}
-
-	// Content-Length 写的是**这一次实际会发多少**，不是整段长度。写成总长的���，
-	// 声明和实际对不上，客户端读到的是 unexpected EOF。
-	w.Header().Set("Content-Length", fmt.Sprint(len(data)-start))
-	if start > 0 {
-		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, len(data)-1, len(data)))
-		w.WriteHeader(http.StatusPartialContent)
-	}
-
-	if f.failMediaAfter > 0 && start < f.failMediaAfter {
-		w.Write(data[start:f.failMediaAfter])
-		w.(http.Flusher).Flush()
-		f.mediaOnce.Do(func() { <-f.mediaGate })
-		panic(http.ErrAbortHandler)
-	}
-	w.Write(data[start:])
-}
-
-func writeStreamJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func newStreamFixture(t *testing.T) *streamFixture {
-	t.Helper()
-	f := &streamFixture{
-		t:         t,
-		overrides: map[string]http.HandlerFunc{},
-		forbidden: map[string]bool{},
-		mediaGate: make(chan struct{}),
-	}
-	f.Server = httptest.NewServer(f)
-	t.Cleanup(func() {
-		select {
-		case <-f.mediaGate:
-		default:
-			close(f.mediaGate)
-		}
-		f.Close()
-	})
-	return f
-}
-
-// dashFor 造一份取流的 dash 段：一条有损流。
-func dashFor(mediaURL string, qualityID, bandwidth int) map[string]any {
-	return map[string]any{
-		"duration": 1,
-		"audio": []any{map[string]any{
-			"id": qualityID, "bandwidth": bandwidth, "codecs": "flac",
-			"mimeType": "audio/mp4", "baseUrl": mediaURL,
-		}},
-	}
-}
-
-// cdnURL 造一个带 deadline 的 B 站 CDN 地址。
-func cdnURL(base, name string, expiresIn time.Duration) string {
-	return base + "/cdn/" + name + "?deadline=" +
-		strconv.FormatInt(time.Now().Add(expiresIn).Unix(), 10) + "&upsig=deadbeef"
-}
-
-// newOnlineApp 建一个挂了在线播放的 App。
-//
-// ⚠️ 这里 Media 直接用 fixture 的 client，不走 `CredentialTransport`——
-// 凭据边界有它自己的一条用例（`TestTheMediaClientGivesTheCDNNoCookie`），
-// 这里要验的是换流与接线。
-func newOnlineApp(t *testing.T, f *streamFixture, dir string) *app.App {
-	t.Helper()
-	a := app.New()
-	t.Cleanup(a.Close)
-
-	cli := bili.NewClient(bili.Options{})
-	cli.TestOnlyPointHostsAtFixture(f.URL)
-
-	a.MountStreaming(app.Streaming{Client: cli, Media: f.Client(), TempDir: dir})
-	return a
-}
-
-// onlineItem 是收藏夹里的一条投稿。
-func onlineItem(bvid, cid, title string) app.Item {
-	return app.Item{Source: "online", Type: "mv", Bvid: bvid, Cid: cid, Title: title}
-}
-
-func readFlac(t *testing.T) []byte {
-	t.Helper()
-	data, err := os.ReadFile(flacFixturePath(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return data
-}
-
-// playing 盯到 App 真的在放队列里那一条。
-func playing(t *testing.T, a *app.App, title string) {
-	t.Helper()
-	waitFor(t, 30*time.Second, "「"+title+"」开始出声", func() bool {
-		st := a.Snapshot()
-		return st.HasTrack && st.Title == title
-	})
-}
+// 断网与恢复在 `online_buffer_test.go` 里（它是这一组里唯一会等网络的那种）。
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 能播
@@ -663,8 +439,13 @@ func TestStreamingNotMountedSaysSo(t *testing.T) {
 // TestMidPlaybackDeathSurfacesOnThePlaybar 盯规格里的负路径「播放中断网」。
 //
 // `PLAN.md` 阶段 2 的负路径表里写着：「播放中断网——**不能被当成播完**——
-// 要停在缓冲态并提示」。这条钉的就是它：CDN 下到一半掐断连接之后，播放条上
-// 要出现一句人话，而不是安静地停住。
+// 要停在缓冲态并提示」。这条钉的就是它，而且它现在有**两段**：
+//
+//	先亮缓冲态  断网不是失败。歌停在原地、网络回来接着放
+//	再给一句人话  缓冲预算用完了还是下不动，才说明白为什么
+//
+// ⚠️ 只有第二段的话，界面就跟没修一样：断网之后用户看到的是「不动，
+// 什么也没说」，那和卡死没有区别。
 //
 // 这条用例是**评审逼出来的**：它自己写了同名探针才发现
 // `App.tick()` 里根本没调 `checkPlayback`，而当时所有测试都是绿的——
@@ -689,14 +470,50 @@ func TestMidPlaybackDeathSurfacesOnThePlaybar(t *testing.T) {
 	})
 	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
 
-	a := newOnlineApp(t, f, t.TempDir())
+	// 缓冲预算给得比默认短：这一条要验的是「缓冲之后**确实会给一句交代**」，
+	// 而那一段的时长是产品决定（默认一分钟），不该让测试等那么久。
+	a := app.New()
+	t.Cleanup(a.Close)
+	cli := bili.NewClient(bili.Options{})
+	cli.TestOnlyPointHostsAtFixture(f.URL)
+	a.MountStreaming(app.Streaming{
+		Client: cli, Media: f.Client(), TempDir: t.TempDir(), MaxWait: 8 * time.Second,
+	})
+
 	if err := a.Enqueue(onlineItem("BV1", "1", "半路死掉的一首")); err != nil {
 		t.Fatal(err)
 	}
 	playing(t, a, "半路死掉的一首")
 
+	// ⚠️ **采样必须在任何 waitFor 之前就起来**。
+	//
+	// 缓冲窗口只有七八秒，而「等播放停住」那个 waitFor 在满负载的机器上
+	// （`-race` + 全包并行）可能要几十秒才通过。等它返回了再开始采���的话，
+	// 缓冲早开早关，一条记录都收不到——而用例仍然是绿的。
+	var seen playbackWatch
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		for {
+			st := a.Snapshot()
+			if st.Buffering && st.Err == "" {
+				seen.markBuffering()
+			}
+			if st.Err != "" {
+				seen.markSentence(st.Err)
+			}
+			select {
+			case <-done:
+				return
+			case <-time.After(20 * time.Millisecond):
+			}
+		}
+	}()
+	defer func() { close(done); <-stopped }()
+
 	// 等到它真的停：位置不再前进。
-	waitFor(t, 60*time.Second, "播放停住", func() bool {
+	waitFor(t, 120*time.Second, "播放停住", func() bool {
 		p1 := a.Snapshot().Position
 		if p1 == 0 {
 			return false
@@ -704,19 +521,30 @@ func TestMidPlaybackDeathSurfacesOnThePlaybar(t *testing.T) {
 		time.Sleep(700 * time.Millisecond)
 		return a.Snapshot().Position == p1
 	})
-	waitFor(t, 15*time.Second, "播放条上出现一句人话", func() bool {
-		return a.Snapshot().Err != ""
-	})
 
-	got := a.Snapshot().Err
+	// ⚠️ 两段是**先后**出现的，而且中间那段「有缓冲态但没有错误」不能被跳过。
+	// 分成两次 `waitFor` 是不行的：缓冲窗口只有几秒，第一次等到的时候
+	// 第二段可能已经过去了（或者反过来），于是顺序错了也看不出来。
+	waitFor(t, 60*time.Second, "缓冲态和那句人话都出现", func() bool {
+		buf, sentence := seen.get()
+		return buf && sentence != ""
+	})
+	buf, sentence := seen.get()
+	if !buf {
+		t.Error("从头到尾没亮过缓冲态——断网和卡死在界面上长得一模一样")
+	}
+	if a.Snapshot().Buffering {
+		t.Error("已经报错了缓冲态还亮着——界面上会一边「正在恢复」一边「打不开」")
+	}
+
 	// ⚠️ 必须是「拉不动了」而不是解码器那边的抱怨。字节断了之后 flacdec
 	// 先报的是「这一帧的 CRC 对不上」——把**后果**说给用户听，用户会以为
 	// 歌坏了、缓存坏了，于是去清缓存重下，而正确的反应是「换个网」。
-	if strings.Contains(got, "CRC") || strings.Contains(got, "flacdec") {
-		t.Errorf("说的是解码器的抱怨，不是真正的原因：%q", got)
+	if strings.Contains(sentence, "CRC") || strings.Contains(sentence, "flacdec") {
+		t.Errorf("说的是解码器的抱怨，不是真正的原因：%q", sentence)
 	}
-	if !strings.Contains(got, "连不上") {
-		t.Errorf("话没说清是「拉不动了」：%q", got)
+	if !strings.Contains(sentence, "连不上") {
+		t.Errorf("话没说清是「拉不动了」：%q", sentence)
 	}
 }
 

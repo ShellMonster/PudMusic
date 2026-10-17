@@ -51,6 +51,12 @@ type Streaming struct {
 	Quality bili.AudioQuality
 	// TempDir 是下载缓存落在哪。空 = 系统临时目录。
 	TempDir string
+	// MaxWait 是「缓冲多久之后才放弃」。零值用 `audio` 那边的默认（一分钟）。
+	//
+	// 这是产品决定而不是实现细节：网络抖一下就该接着放，网络真的断了
+	// 也不能让「缓冲中……」永远亮着——用户等的是「这歌到底还救不救得回来」。
+	// 超时之后播放条上会出现一句说清原因的话。
+	MaxWait time.Duration
 }
 
 // onlineTrack 是「当前正在放的那条在线流」。
@@ -161,6 +167,7 @@ func (a *App) playOnline(it Item) error {
 	gen := a.onlineGen
 	a.errText = ""
 	a.mu.Unlock()
+	a.clearBuffering()
 
 	go a.runOnline(it, gen)
 	return nil
@@ -202,6 +209,7 @@ func (a *App) runOnline(it Item, gen int) {
 	a.online = &onlineTrack{item: it, ref: ref, source: src, quality: ref.Label}
 	a.reportedErr = nil
 	a.errText = ""
+	a.buffering = false // 新源还没开始下，不可能已经在缓冲
 	wake := a.wake
 	a.mu.Unlock()
 
@@ -231,6 +239,7 @@ func (a *App) buildOnline(ctx context.Context, s *Streaming, it Item, vol float6
 		ExpiresAt: ref.ExpiresAt,
 		TempDir:   s.TempDir,
 		Client:    s.Media,
+		MaxWait:   s.MaxWait,
 		// 续传的偏移在源那边，它要接就从同一个字节接着下。
 		// 这里重新取的是**整条**流——偏移只是告诉调用方「你从哪里断的」，
 		// 而取流接口没有「从第几个字节开始」这个参数。
@@ -343,7 +352,7 @@ func (a *App) noteQuality(gen int, label string) {
 	}
 }
 
-// checkPlayback 每 50 ms 看一眼：这一路播放是不是出了错。
+// checkPlayback 每 50 ms 看一眼：这一路播放是在缓冲，还是出了错。
 //
 // **为什么不能靠 `Playing() == false` 判断**：暂停、停止、关闭、播完、
 // 解码失败在那边**全都是 false**（`mygo/audio/audio.go` 的 `Playing`）。
@@ -358,6 +367,14 @@ func (a *App) checkPlayback() {
 	if p == nil {
 		return
 	}
+
+	// ⚠️ **缓冲态必须先刷，而且它不是错误**。
+	//
+	// 字节源在等网络时 `Err()` 是 nil，所以下面那句 `err == nil` 会直接
+	// 返回——不先刷的话，界面上就一直是「歌停了但什么都没说」的样子，
+	// 而用户看到的现象和「卡死了」一模一样。
+	a.syncBuffering(tr)
+
 	err := p.Err()
 	if err == nil {
 		return
@@ -366,7 +383,7 @@ func (a *App) checkPlayback() {
 	// ⚠️ **在线流要看字节源自己的错，不要看解码器的**。解码器看到的是**后果**：
 	// 字节断了之后它多半先报「这一帧的 CRC 对不上」，而真正的原因是网络断了
 	// 或者地址失效了。把后果说给用户听，用户会以为歌坏了、缓存坏了，
-	// 于是去清缓存重下——而正确���反应是「换个网」。
+	// 于是去清缓存重下——而正确的反应是「换个网」。
 	if tr != nil && tr.source != nil {
 		if srcErr := tr.source.Err(); srcErr != nil && !errors.Is(srcErr, io.EOF) {
 			err = srcErr
@@ -393,6 +410,42 @@ func (a *App) checkPlayback() {
 	default:
 		a.setErr(bili.Friendly(err))
 	}
+}
+
+// syncBuffering 把字节源的「正在等网络」搬进 App 状态。
+//
+// 只在**变了**的时候叫醒界面：每 50 ms 一次的无条件 Invalidate 会在
+// 断网的那一分钟里白白刷掉一千多帧。
+func (a *App) syncBuffering(tr *onlineTrack) {
+	want := tr != nil && tr.source != nil && tr.source.Waiting()
+
+	a.mu.Lock()
+	if a.buffering == want {
+		a.mu.Unlock()
+		return
+	}
+	a.buffering = want
+	wake := a.wake
+	a.mu.Unlock()
+
+	if wake != nil {
+		wake()
+	}
+}
+
+// clearBuffering 在换歌、退出这些地方把缓冲态按下去。
+//
+// ⚠️ 不能只靠 `syncBuffering`：换歌到新歌真的建起来之前，`a.online` 指的还是
+// 上一首，而上一首的字节源可能正亮着缓冲态——那会让新歌一露面就写着
+// 「缓冲中……」，而它其实连流都还没取。
+func (a *App) clearBuffering() {
+	a.mu.Lock()
+	if !a.buffering {
+		a.mu.Unlock()
+		return
+	}
+	a.buffering = false
+	a.mu.Unlock()
 }
 
 // failOnline 报一次在线播放的失败。
@@ -456,6 +509,7 @@ func (a *App) refreshOnlineNow() {
 		a.online = &onlineTrack{item: tr.item, ref: ref, source: src, quality: ref.Label, reopening: true}
 		a.reportedErr = nil
 		a.errText = ""
+		a.buffering = false // 同上：刚建好的源还没开始下
 		wake := a.wake
 		a.mu.Unlock()
 
