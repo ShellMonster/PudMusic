@@ -73,6 +73,29 @@ var Items = []Item{
 	},
 	{
 		Category: Play,
+		// 「哪一首正在放」和「下一首放哪首」这两个问题的答法，都不能是**位置**。
+		//
+		// 队列会重排：「下一首播放」插在当前后面、拖拽排序、随机模式，每一个都
+		// 在动当前项的下标；而列表里的行号是另一套。用位置答出来的症状是
+		// 「高亮跳到旁边那一首」「按了下一首播放，正在放的歌换了一首」——
+		// **界面上看不出任何异样**，声音和画面各说各话。
+		//
+		// 判据是 `app.Item.Identity`（本地按路径、mv 按 bvid、音频按 sid），
+		// 也就是 Biu 那个抽屉去重时用的同一把尺子。顺带钉住「认的是**同一首**
+		// 而不是同一份」：同一首歌排了两遍时（内容列表不判重）两行都该亮，
+		// 而认整项的话两行都不亮——用户在**正在放**的那份上看到「哪首都没在放」。
+		Spec: "「正在播放」按歌认（队列重排了也还对，同一首排两遍算一首）；「下一首播放」插在当前项后面而不是队尾",
+		Tests: []string{
+			"TestIsPlayingFindsTheSongWhereverTheQueuePutIt",
+			"TestIsPlayingSurvivesTheQueueBeingRearranged",
+			"TestIsPlayingIsAboutTheSongNotAboutThatCopy",
+			"TestTheSameSongInTwoRowsIsOneHighlight",
+			"TestAppActionsPlayNextLandsRightAfterTheCurrentOne",
+			"TestInsertNextLandsRightAfterTheCurrentOne",
+		},
+	},
+	{
+		Category: Play,
 		Spec:     "取消代次：连点五首，只有最后一首能活",
 		Tests: []string{
 			"TestOnlyTheLastTrackWinsWhenSwitchingFast",

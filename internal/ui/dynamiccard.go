@@ -182,7 +182,7 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic) {
 		// ③ 内容：三种类型。
 		switch {
 		case d.Kind == bili.DynamicVideo && d.Video != nil:
-			s.viewDynamicVideo(c, d.Video)
+			s.viewDynamicVideo(c, d.Video, d.Author)
 		case len(d.Pics) > 0:
 			s.viewDynamicPics(c, d.Pics)
 		}
@@ -223,15 +223,15 @@ func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 			return
 		}
 		if ui.Button(c, "下一首播放").FontSize(12).TextColor(t.TextMuted).Clicked() {
-			s.playNextFromDynamic(d.Video)
+			s.playNextFromDynamic(d.Video, d.Author)
 		}
 		// ⚠️ 下载走 `downloadLater`（异步补 cid）：动态接口给的稿件**不带
 		// cid**（`major.archive` 里没有这个字段），而下载按分 P 存文件。
 		if ui.Button(c, "下载音频").FontSize(12).TextColor(t.TextMuted).Clicked() {
-			s.downloadLater(dynVideoItem(d.Video), false, "下载音频")
+			s.downloadLater(dynVideoItem(d.Video, d.Author), false, "下载音频")
 		}
 		if ui.Button(c, "下载视频").FontSize(12).TextColor(t.TextMuted).Clicked() {
-			s.downloadLater(dynVideoItem(d.Video), true, "下载视频")
+			s.downloadLater(dynVideoItem(d.Video, d.Author), true, "下载视频")
 		}
 	})
 }
@@ -241,8 +241,8 @@ func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 // ⚠️ **不许换成 `Enqueue`**：那个接在**队尾**，而这一项的字面意思是「下一首就
 // 放它」。用户按这一下是因为他听见歌不好，想把某支片子插到眼前这一首后面，
 // 而它在队尾的话他得等到整张列表放完——症状是「按了，什么也没发生，直到一小时后」。
-func (s *Shell) playNextFromDynamic(v *bili.DynamicArchive) {
-	if err := s.app.EnqueueNext(dynVideoItem(v)); err != nil {
+func (s *Shell) playNextFromDynamic(v *bili.DynamicArchive, author bili.DynamicAuthor) {
+	if err := s.app.EnqueueNext(dynVideoItem(v, author)); err != nil {
 		s.addToast("放不了这一首：" + err.Error())
 		return
 	}
@@ -280,12 +280,12 @@ func (s *Shell) viewDynamicPics(c *ui.Context, pics []string) {
 //
 // **整块可点，点它从这一首往后播**——和列表里双击一首是一个意思。
 // 真放不了的时候说一句话（`list.Actions.Play` 里的 Toast），不装死。
-func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive) {
+func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author bili.DynamicAuthor) {
 	t := c.Theme()
 	box := ui.Row(c).Grow(1).Gap(8).Padding(6).Radius(6).
 		Background(t.Surface).AlignItems(ui.Center).Key("dynv:" + v.Bvid)
 	if box.Clicked() {
-		list.AppActions(s.app, s.addToast).Play([]app.Item{dynVideoItem(v)})
+		list.AppActions(s.app, s.addToast).Play([]app.Item{dynVideoItem(v, author)})
 	}
 	box.Children(func() {
 		s.spaceThumb(c, v.Cover, dynamicCoverW, dynamicCoverH)
@@ -317,16 +317,34 @@ func dynVideoMeta(v *bili.DynamicArchive) string {
 }
 
 // dynVideoItem 把一份动态里的投稿变成队列里的一项。
-func dynVideoItem(v *bili.DynamicArchive) app.Item {
-	return app.Item{Source: "online", Type: "mv", Bvid: v.Bvid, Title: v.Title, Cover: v.Cover}
+//
+// ⚠️ **author 要单独传进来**：`bili.DynamicArchive` 里只有稿件，而发这条动态
+// 的人挂在 `bili.Dynamic.Author` 上（`DynamicAuthor` 名和编号都有）。少传
+// 的话从动态流放的歌在播放条上**没有 UP 名**——那一行整个不画，而界面上看
+// 不出任何异样（见 `app.Item.Artist`）。
+func dynVideoItem(v *bili.DynamicArchive, author bili.DynamicAuthor) app.Item {
+	return app.Item{
+		Source: "online", Type: "mv", Bvid: v.Bvid, Title: v.Title, Cover: v.Cover,
+		Artist:    author.Name,
+		ArtistMid: author.Mid,
+	}
 }
 
 // spaceVideoItem 把「投稿」Tab 的一条变成队列里的一项。
 //
 // ⚠️ **cid 必须带上**：B 站的取流接口不给 cid 会取到**第一集**，多 P 投稿
 // 的第三集放出来是第一集，不报错（见 `bili.UpVideo.Cid`）。
-func spaceVideoItem(v bili.UpVideo) app.Item {
-	return app.Item{Source: "online", Type: "mv", Bvid: v.Bvid, Cid: v.Cid, Title: v.Title, Cover: v.Cover}
+//
+// ownerMid 是这一页所属的那个 UP（`fetchVideos` 手上就有）：B 站的投稿接口
+// 逐条给了名字（`UpVideo.Author`），可没给编号，而播放条上那一句 UP 名要靠
+// 编号拼 `/user/{id}`。
+func spaceVideoItem(v bili.UpVideo, ownerMid int64) app.Item {
+	return app.Item{
+		Source: "online", Type: "mv", Bvid: v.Bvid, Cid: v.Cid,
+		Title: v.Title, Cover: v.Cover,
+		Artist:    v.Author,
+		ArtistMid: ownerMid,
+	}
 }
 
 // parseDurationText 把 B 站写的时长（`3:20` / `1:02:03`）读成 time.Duration。
