@@ -211,38 +211,19 @@ func readShortcuts(path string) (shortcutSettings, bool) {
 	if err != nil {
 		return def, false
 	}
-	// 先探一遍顶层有没有 `shortcuts`：光 unmarshal 到 shortcutSettings 分不出
-	// 「文件里没有这个键」和「shortcuts 是个空数组」，而这两种要分开处理。
-	var probe struct {
-		SchemaVersion *int            `json:"schemaVersion"`
-		Shortcuts     *[]shortcutItem `json:"shortcuts"`
-	}
-	if err := json.Unmarshal(b, &probe); err != nil {
+	from, s, ok, err := probeShortcuts(b)
+	if err != nil {
 		backupShortcuts(path)
 		return def, false
 	}
-	if probe.Shortcuts == nil {
+	if !ok {
 		return def, true
-	}
-
-	var s shortcutSettings
-	if err := json.Unmarshal(b, &s); err != nil {
-		backupShortcuts(path)
-		return def, false
-	}
-	from := 0
-	if probe.SchemaVersion != nil {
-		from = *probe.SchemaVersion
 	}
 	if from > shortcutSchema {
 		return def, true
 	}
-	for v := from; v < shortcutSchema; v++ {
-		m, ok := shortcutMigrations[v]
-		if !ok {
-			return def, true
-		}
-		m(&s)
+	if err := runShortcutMigrations(&s, from); err != nil {
+		return def, true
 	}
 	return s.mergeMissing(def), false
 }

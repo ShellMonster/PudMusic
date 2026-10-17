@@ -915,16 +915,35 @@ func TestEachPathButtonAsksItsOwnQuestion(t *testing.T) {
 //
 // ⚠️ `dir` 和那两行字都记下来：那一格挑的是不是文件夹、对话框上说的是不是这一件事，
 // 都是界面上看得见的——记下来才能在测试里断言它们没有串台。
+//
+// 「挑配置文件」和「存到哪」各有各的一格返回值（`configPath` / `savedAs`），
+// 因为它们和 `path` 问的不是一件事：`path` 是「下载目录」「本地音乐目录」，
+// 另两个是设置页末尾「配置」那一段的两个按钮。
 type fakePicker struct {
 	path    string
 	err     error
 	gotDir  bool
 	gotText [2]string
+
+	configPath string
+	configErr  error
+	savedAs    string
+	savedName  string
+	saveErr    error
 }
 
 func (f *fakePicker) pick(_ *mygo.Window, dir bool, title, message string) (string, error) {
 	f.gotDir, f.gotText = dir, [2]string{title, message}
 	return f.path, f.err
+}
+
+func (f *fakePicker) pickConfig(_ *mygo.Window) (string, error) {
+	return f.configPath, f.configErr
+}
+
+func (f *fakePicker) saveConfig(_ *mygo.Window, defaultName string) (string, error) {
+	f.savedName = defaultName
+	return f.savedAs, f.saveErr
 }
 
 // waitFor 等一个后台结果（文件框是弹在另一个 goroutine 上的，见 pickPath）。
