@@ -230,6 +230,44 @@ func TestDeletingAsksFirst(t *testing.T) {
 	}
 }
 
+// TestDeletingSaysWhenItCannotFindAllOfThem 勾了 5 首却只找齐 3 条完整信息时，
+// **要说出来**，不能闷头删 3 条然后显示成功。
+//
+// `pickedMedias` 拿不到的那几条只会被静默跳过——而界面上写的是「已选 5 首」。
+// 用户看着删除成功、刷新之后那两首还在，而界面上从头到尾没有一句话说过
+// 「有两首没删掉」。那种「少做了一半还说做完了」比报错难查得多。
+func TestDeletingSaysWhenItCannotFindAllOfThem(t *testing.T) {
+	b, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
+	waitSongs(t, tt, s, 3)
+	enterMulti(t, tt)
+	for _, title := range []string{"歌 一", "歌 二"} {
+		if err := tt.Click("选择 " + title); err != nil {
+			t.Fatal(err)
+		}
+		settleFrame(tt)
+	}
+
+	// 模拟「查得到这一行、但完整信息那张表里没有它」：现在这两首都会被跳过。
+	s.collection.media.reset()
+
+	if err := tt.Click("批量删除"); err != nil {
+		t.Fatal(err)
+	}
+	settleFrame(tt)
+	if err := tt.Click("删除"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, tt, "那句话说出来", func() bool {
+		return tt.HasText("有 2 首查不到完整信息，这次先删其余的")
+	})
+	// 一条都找不齐时不发请求——**也不说「先勾几首再删」**：用户明明勾了，
+	// 那是一句假话，而它会把真正的原因盖掉。
+	dontWantText(t, tt, "先勾几首再删")
+	if n := len(b.removedBatches()); n != 0 {
+		t.Errorf("一条都找不齐还是发了 %d 批删除请求", n)
+	}
+}
+
 // TestEscapeCancelsTheDelete Esc = 取消，而且**下一帧不许再问一遍**。
 func TestEscapeCancelsTheDelete(t *testing.T) {
 	b, s, tt := collectionShellNoFrame(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))

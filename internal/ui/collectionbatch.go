@@ -242,10 +242,29 @@ func (s *Shell) setCollectionFav(p *collectionPage, fav bool) {
 // `app.RemoveMedias`），这里自己把列表重来一遍。
 func (s *Shell) startCollectionDelete(p *collectionPage) {
 	medias := s.pickedMedias(p)
+
+	// ⚠️ **「勾了 5 首却只找齐 3 条」要说出来，不能闷头删 3 条**。
+	//
+	// `pickedMedias` 拿不到的那几条（完整信息在 `media` 表里找不到）只会被
+	// 静默跳过——而界面上写的是「已选 5 首」。用户看着删除成功、刷新之后那两首
+	// 还在，而界面上从头到尾没有一句话说过「有两首没删掉」。那种「少做了一半
+	// 还说做完了」比报错难查得多。
+	//
+	// ⚠️ 这一句**排在「一条都没有」的前面**：一条都找不齐时它才是真正发生的那
+	// 一件事（「先勾几首再删」是句假话——用户明明勾了）。
+	missing := len(p.picked) - len(medias)
+	if missing > 0 {
+		log.Printf("biu: 勾了 %d 首却只找齐 %d 条完整信息，%d 首会被跳过",
+			len(p.picked), len(medias), missing)
+		s.addToast("有 " + strconv.Itoa(missing) + " 首查不到完整信息，这次先删其余的")
+	}
 	if len(medias) == 0 {
-		s.addToast("先勾几首再删")
+		if missing == 0 {
+			s.addToast("先勾几首再删")
+		}
 		return
 	}
+
 	// 列表当场重来（它顺带清掉了勾选）：那几首已经不在收藏夹里了，勾着没有
 	// 意义——留着的话「全选」那一格会在重拉之后对不上新的总数。
 	s.reloadCollection(p)
