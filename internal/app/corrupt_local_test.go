@@ -151,11 +151,19 @@ func TestACorruptFileNeverLooksLikeItFinished(t *testing.T) {
 			// ⚠️ 不能一开口就断言：此刻 Playing 还是 true、Err 还是空的，
 			// 那一刻什么都证明不了。坏 FLAC 要读到坏的那一帧才炸，等到那一刻
 			// 才是真的在验「解码失败有没有被说出口」。
-			waitFor(t, 40*time.Second, "它要么说出一句为什么停了、要么真的放到头", func() bool {
-				st := a.Snapshot()
-				return st.Err != "" || reachedEnd(st)
-			})
-			st := a.Snapshot()
+			//
+			// 这里自己写循环而不调 `waitFor`：等不到的时候要**把最后那一刻的
+			// 状态一起打出来**。只报「等了 40s 还没发生」的话，剩下要查的是
+			// 「它当时到底停在哪」，而那正是这条要验的东西。
+			deadline := time.Now().Add(40 * time.Second)
+			var st app.State
+			for time.Now().Before(deadline) {
+				st = a.Snapshot()
+				if st.Err != "" || reachedEnd(st) {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
 			if st.Err == "" && !reachedEnd(st) {
 				t.Errorf("文件是坏的，界面却一声不吭地停住了"+
 					"（Playing=%v、Err 为空、位置 %v/%v）——那看起来就是「歌放完了」",
@@ -223,9 +231,15 @@ func TestTheErrorDoesNotStickToTheNextSong(t *testing.T) {
 
 // reachedEnd 报这一首是不是真的放到头了。
 //
-// 「放完了」和「坏在那儿停了」在界面上只差一句话，所以这里用**位置**当裁判：
-// 真放完的位置会走到时长附近（留 10% 是因为最后一帧之后位置还会再走一点，
-// 而有的解码器报出来的时长比能解出来的最后一帧短一点）。
+// 「放完了」和「坏在那儿停了」在界面上只差一句话，所以这里用**位置**当裁判。
+//
+// ⚠️ 容差是**量出来的**，不是拍的：播放器报出来的位置会停在时长前面一点点
+// （实测 200ms 的文件停在 179.95ms、4s 的文件停在 3.65s）——最后一个缓冲
+// 里的样本没被走完，位置就停在末尾之前一点。这个差是**正常的**，
+// 而容差给小了，这条就会把「好好放完了」判成「一声不吭地停住」。
+//
+// 容差取 `max(50ms, 十分之一)`：文件越短，最后一个缓冲占的比例越大，
+// 所以短文件要的是绝对值、长文件要的是比例，两个都得留。
 //
 // `st` 是值不是指针：Snapshot 每次都返回一份拷贝，这里读的是同一帧里的
 // 三个字段，不会出现「位置是这一帧的、时长是那一帧的」。
@@ -233,7 +247,7 @@ func reachedEnd(st app.State) bool {
 	if st.Duration <= 0 {
 		return false
 	}
-	return st.Position >= st.Duration*9/10
+	return st.Duration-st.Position <= max(50*time.Millisecond, st.Duration/10)
 }
 
 // fixturePath 找那份素材。两个 testdata 目录都要看：FLAC/MP4/WAV 的素材在
