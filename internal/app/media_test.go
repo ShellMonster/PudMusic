@@ -419,3 +419,38 @@ func TestCommandsOnAnEmptyAppDoNothing(t *testing.T) {
 		t.Errorf("没有歌的时候报给系统的是 %v，want none", got)
 	}
 }
+
+// TestASongFinishingReachesTheSystem 盯「歌自然放完了要说一声」。
+//
+// 这一条曾经**漏了**，而漏掉的样子和「代码没跑」完全不同：歌放完了、界面上的
+// 进度条走到底，一切正常，只有**锁屏和控制中心**还停在「正在播放」——进度条
+// 卡在最后一格，播放键画的是一个已经在响的按钮。
+//
+// 为什么容易漏：App 每 50ms 写一次播放位置，而「位置」这一项按规矩**不**
+// 一变化就报（系统自己外推）。于是「在放 → 不在放」这个变化，恰好被那条
+// 「位置不动就不报」的规则一起吃掉了——它只在**播放中**才校正，歌一停校正
+// 也跟着停了。
+func TestASongFinishingReachesTheSystem(t *testing.T) {
+	a, s := mountedApp(t)
+	if err := a.Open(flac(t)); err != nil {
+		t.Fatal(err)
+	}
+	s.await(t, 2, "打开一首歌")
+
+	// 等它真的放到头。
+	waitFor(t, 30*time.Second, "歌放到头", func() bool {
+		st := a.Snapshot()
+		return st.HasTrack && st.Duration > 0 && st.Position >= st.Duration
+	})
+	waitFor(t, 5*time.Second, "播放器自己报「不在放」", func() bool {
+		return !a.Snapshot().Playing
+	})
+
+	// 再给系统一点时间，然后看它收到的那一份。
+	time.Sleep(300 * time.Millisecond)
+	got := s.last()
+	if got.State == media.StatePlaying {
+		t.Errorf("歌已经放完了（位置 %v / %v），系统那边还是 playing",
+			a.Snapshot().Position, a.Snapshot().Duration)
+	}
+}

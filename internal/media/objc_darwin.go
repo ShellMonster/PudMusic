@@ -78,8 +78,6 @@ var (
 	// msgNSSize 是返回 NSSize 的那种。返回值能封送（纯 Go 那边是照着
 	// 结果缓冲写回去的），所以这里老老实实声明成结构。
 	msgNSSize func(obj id, sel objc.SEL) nsSize
-
-	poolPush, poolPop uintptr
 )
 
 func init() {
@@ -121,9 +119,6 @@ func loadObjC() {
 			return
 		}
 	}
-	poolPush, _ = purego.Dlsym(h, "objc_autoreleasePoolPush")
-	poolPop, _ = purego.Dlsym(h, "objc_autoreleasePoolPop")
-
 	// MediaPlayer 里的两个类要用，所以先把它加载进来（类得先注册才能
 	// GetClass 到）。AppKit 只为了 NSImage。
 	for _, p := range []string{pathFoundation, pathAppKit, pathMediaPlayer} {
@@ -223,19 +218,38 @@ func sendSize(obj id, selector string) nsSize {
 }
 
 // ---- Foundation 类型 ----
-
-// nsString 返回一个自动释放的 NSString。
 //
-// ⚠️ 字节必须在调用期间活着，所以这里显式 `runtime.KeepAlive`：这个调用
-// 返回之后 ObjC 那边（autorelease 之前）可能还拿着它。
-func nsString(s string) id {
+// ⚠️ **这一层造出来的每一个对象都是自己持有的（+1），用完自己 release。**
+//
+// 一个更省事的做法是让它们 autorelease，靠 Objective-C 的自动释放池收。但那条路
+// **收不了**：自动释放池是**每线程**的状态，而这一层的调用来自 Go 的任意 goroutine，
+// 那些 goroutine 随时会换 OS 线程，于是「谁负责放它」这件事没人说得清——
+// 实测那是必崩的（崩在纯 native 代码里，连一行 Go 栈都没有），见
+// `objcthread_darwin.go` 顶上那一整段。
+//
+// 自己持有的代价是每个调用点都要配一次 release，而这一层每次推系统只造七八个对象，
+// 那点代码换掉一整类说不清的崩溃，划算。**别改回 autorelease。**
+
+// release 放掉一个自己持有的对象。
+func release(o id) {
+	if o != 0 {
+		send(o, "release")
+	}
+}
+
+// newString 造一个 **+1 的** NSString。
+//
+// ⚠️ 用 `initWithBytes:length:encoding:` 而不是 `stringWithUTF8String:`：后者要的是
+// NUL 结尾的 C 字符串，而中文的 UTF-8 字节里可能就有 NUL，且按字节算长度在中文上
+// 会截断。歌名全是中文——症状是锁屏上的歌名少一半。
+func newString(s string) id {
 	if s == "" {
 		return 0
 	}
-	str := send(send(id(class("NSString")), "alloc"), "initWithBytes:length:encoding:",
+	str := sendSel(send(id(class("NSString")), "alloc"), sel("initWithBytes:length:encoding:"),
 		uintptr(unsafe.Pointer(unsafe.StringData(s))), uintptr(len(s)), nsUTF8StringEncoding)
 	runtime.KeepAlive(s)
-	return autorelease(str)
+	return str
 }
 
 // goString 把一个 NSString 抄回 Go 字符串。objc 为 0 时是空串。
@@ -251,34 +265,39 @@ func goString(str id) string {
 	return string(unsafe.Slice(*(**byte)(unsafe.Pointer(&p)), n))
 }
 
-// nsNumberDouble 返回一个自动释放的 NSNumber。
-func nsNumberDouble(v float64) id {
-	return autorelease(msgNumberWith(id(class("NSNumber")), sel("numberWithDouble:"), v))
+// newNumberDouble 造一个 **+1 的** NSNumber。
+func newNumberDouble(v float64) id {
+	return msgNumberWith(id(class("NSNumber")), sel("numberWithDouble:"), v)
 }
 
-// nsData 返回一个自动释放的 NSData，拷走 b 的内容。
-func nsData(b []byte) id {
+// newData 造一个 **+1 的** NSData，拷走 b 的内容。
+func newData(b []byte) id {
 	var p unsafe.Pointer
 	if len(b) > 0 {
 		p = unsafe.Pointer(&b[0])
 	}
-	d := send(id(class("NSData")), "dataWithBytes:length:", uintptr(p), uintptr(len(b)))
-	runtime.KeepAlive(b)
-	return d
+	return sendSel(send(id(class("NSData")), "alloc"), sel("initWithBytes:length:"), uintptr(p), uintptr(len(b)))
 }
 
-// nsMutableDictionary 返回一个新的自动释放的可变字典。
-func nsMutableDictionary() id {
-	return send(id(class("NSMutableDictionary")), "dictionary")
+// newMutableDictionary 造一个 **+1 的** NSMutableDictionary。
+func newMutableDictionary() id {
+	return sendSel(send(id(class("NSMutableDictionary")), "alloc"), sel("init"))
 }
 
 // dictPut 往字典里放一个值。value / key 为 0 都不放：
 // Objective-C 的字典收 nil 会抛 `object cannot be nil`，而这一层宁可不放。
+//
+// key 自己建、自己放（`dictPut` 负责 release 掉它）——调用点只管给 value 的归属。
 func dictPut(dict id, key string, value id) {
 	if dict == 0 || value == 0 || key == "" {
 		return
 	}
-	send(dict, "setObject:forKey:", uintptr(value), uintptr(nsString(key)))
+	k := newString(key)
+	if k == 0 {
+		return
+	}
+	send(dict, "setObject:forKey:", uintptr(value), uintptr(k))
+	release(k)
 }
 
 // allocInit 造一个 +1 的实例（`[[Cls alloc] init]`）。
@@ -287,28 +306,4 @@ func allocInit(cls objc.Class) id {
 		return 0
 	}
 	return sendSel(send(id(cls), "alloc"), sel("init"))
-}
-
-// autorelease 放进自动释放池。
-func autorelease(o id) id {
-	if o == 0 {
-		return 0
-	}
-	return send(o, "autorelease")
-}
-
-// withPool 在一个自动释放池里跑 fn。
-//
-// ⚠️ 自动释放池**属于压它的那个线程**，在别的线程上 pop 会崩。所以这里
-// 把线程锁住：`objc_autoreleasePoolPush` / `Pop` 之间不换线程。
-func withPool(fn func()) {
-	if poolPush == 0 || poolPop == 0 {
-		fn()
-		return
-	}
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-	pool, _, _ := purego.SyscallN(poolPush)
-	defer purego.SyscallN(poolPop, pool)
-	fn()
 }

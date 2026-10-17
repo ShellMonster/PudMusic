@@ -32,6 +32,9 @@ func mpTestPlatform(t *testing.T) *mpSession {
 // ─────────────────────────────────────────────────────────────────────────────
 // 胶水层：发消息、Foundation 类型
 // ─────────────────────────────────────────────────────────────────────────────
+//
+// 这一层造出来的对象都是自己持有的（+1），测试里也一样要当场 release——
+// 测试比产品代码更容易漏，漏了就是一条谁也查不着的偶发崩溃。
 
 // TestNSStringRoundTrip 盯字符串进得去也出得来，含中文和 emoji。
 //
@@ -40,7 +43,9 @@ func mpTestPlatform(t *testing.T) *mpSession {
 // 中文上是**按字节截断**的，而歌名全是中文——症状是锁屏上的歌名少一半。
 func TestNSStringRoundTrip(t *testing.T) {
 	for _, want := range []string{"", "hello", "一首歌", "无损 FLAC 🎵", "a\x00b"} {
-		got := goString(nsString(want))
+		held := newString(want)
+		got := goString(held)
+		release(held)
 		if want == "" {
 			// 空串故意返回 nil 对象（见 nsString），所以这里只能是空。
 			if got != "" {
@@ -61,7 +66,10 @@ func TestNSStringRoundTrip(t *testing.T) {
 // 只是时长和进度全是垃圾，而且没有任何报错。
 func TestNSNumberDouble(t *testing.T) {
 	for _, want := range []float64{0, 1, 199.5, 3600} {
-		if got := sendDouble(nsNumberDouble(want), "doubleValue"); got != want {
+		n := newNumberDouble(want)
+		got := sendDouble(n, "doubleValue")
+		release(n)
+		if got != want {
 			t.Errorf("%.1f 变成了 %.1f", want, got)
 		}
 	}
@@ -69,17 +77,18 @@ func TestNSNumberDouble(t *testing.T) {
 
 // TestDictionaryRoundTrip 盯字典里的键和值都拿得回来。
 func TestDictionaryRoundTrip(t *testing.T) {
-	d := nsMutableDictionary()
+	d := newMutableDictionary()
 	if d == 0 {
 		t.Fatal("建不出 NSMutableDictionary")
 	}
-	dictPut(d, keyTitle, nsString("歌名"))
-	dictPut(d, keyRate, nsNumberDouble(1))
+	defer release(d)
+	putString(d, keyTitle, "歌名")
+	putNumber(d, keyRate, 1)
 
-	if got := goString(send(d, "objectForKey:", uintptr(nsString(keyTitle)))); got != "歌名" {
+	if got := goString(objectForKey(d, keyTitle)); got != "歌名" {
 		t.Errorf("取回来的是 %q，want 歌名", got)
 	}
-	if got := sendDouble(send(d, "objectForKey:", uintptr(nsString(keyRate))), "doubleValue"); got != 1 {
+	if got := sendDouble(objectForKey(d, keyRate), "doubleValue"); got != 1 {
 		t.Errorf("速率取回来是 %v，want 1", got)
 	}
 	// 放 0 值不该把字典搞坏——Objective-C 收到 nil 会抛
@@ -96,9 +105,29 @@ func nowPlayingCenter() id {
 	return send(id(class("MPNowPlayingInfoCenter")), "defaultCenter")
 }
 
-// infoValue 从系统里那份曲目信息里取一个键。
-func infoValue(center id, key string) id {
+// infoValue 是系统里那份曲目信息。
+//
+// ⚠️ **它归系统所有**，释放它就是多释放一次——实测那会当场段错误。
+// 只有这一层自己 `new*` 造出来的东西才归我们管。
+func infoValue(center id) id {
 	return send(center, "nowPlayingInfo")
+}
+
+// objectForKey 从字典里取一个键。返回的对象由字典持有，**不要 release**。
+func objectForKey(dict id, key string) id {
+	k := newString(key)
+	defer release(k)
+	return send(dict, "objectForKey:", uintptr(k))
+}
+
+// objValue 取一个键并把结果抄成字符串。
+func objValue(dict id, key string) string {
+	return goString(objectForKey(dict, key))
+}
+
+// numValue 取一个键的数值。
+func numValue(dict id, key string) float64 {
+	return sendDouble(objectForKey(dict, key), "doubleValue")
 }
 
 // TestNowPlayingInfoRoundTrip 盯写进去的系统读得回来，值也对。
@@ -118,24 +147,24 @@ func TestNowPlayingInfoRoundTrip(t *testing.T) {
 		Position: 90 * time.Second,
 	}, 0)
 
-	info := infoValue(center, keyTitle)
+	info := infoValue(center)
 	if info == 0 {
 		t.Fatal("写进去之后 nowPlayingInfo 是空的")
 	}
-	if got := goString(send(info, "objectForKey:", uintptr(nsString(keyTitle)))); got != "一首歌" {
+	if got := objValue(info, keyTitle); got != "一首歌" {
 		t.Errorf("歌名是 %q，want 一首歌", got)
 	}
-	if got := goString(send(info, "objectForKey:", uintptr(nsString(keyArtist)))); got != "某某" {
+	if got := objValue(info, keyArtist); got != "某某" {
 		t.Errorf("艺人是 %q，want 某某", got)
 	}
-	if got := sendDouble(send(info, "objectForKey:", uintptr(nsString(keyDuration))), "doubleValue"); got != 210 {
+	if got := numValue(info, keyDuration); got != 210 {
 		t.Errorf("时长是 %v 秒，want 210", got)
 	}
-	if got := sendDouble(send(info, "objectForKey:", uintptr(nsString(keyElapsed))), "doubleValue"); got != 90 {
+	if got := numValue(info, keyElapsed); got != 90 {
 		t.Errorf("进度是 %v 秒，want 90", got)
 	}
 	// 播放速率是必设的（系统不看我们的音频会话）。
-	if got := sendDouble(send(info, "objectForKey:", uintptr(nsString(keyRate))), "doubleValue"); got != 1 {
+	if got := numValue(info, keyRate); got != 1 {
 		t.Errorf("在放时的速率是 %v，want 1", got)
 	}
 
@@ -160,8 +189,11 @@ func TestThePlaybackRateFollowsTheState(t *testing.T) {
 		{StateStopped, 0},
 	} {
 		p.push(NowPlaying{State: c.state, Title: "一首歌", Duration: time.Minute}, 0)
-		info := infoValue(center, keyRate)
-		got := sendDouble(send(info, "objectForKey:", uintptr(nsString(keyRate))), "doubleValue")
+		info := infoValue(center)
+		if info == 0 {
+			t.Fatalf("状态 %v 之后 nowPlayingInfo 是空的", c.state)
+		}
+		got := numValue(info, keyRate)
 		if got != c.want {
 			t.Errorf("状态 %v 时速率是 %v，want %v", c.state, got, c.want)
 		}
@@ -211,11 +243,11 @@ func TestClearingRemovesTheNowPlayingInfo(t *testing.T) {
 	center := nowPlayingCenter()
 
 	p.push(NowPlaying{State: StatePlaying, Title: "一首歌", Duration: time.Minute}, 0)
-	if infoValue(center, keyTitle) == 0 {
+	if infoValue(center) == 0 {
 		t.Fatal("前面的写入没生效，后面的清空就断不出东西")
 	}
 	p.push(NowPlaying{State: StateNone}, 0)
-	if info := infoValue(center, keyTitle); info != 0 {
+	if info := infoValue(center); info != 0 {
 		t.Errorf("清空之后 nowPlayingInfo 还在（%s）", goString(send(info, "description")))
 	}
 }
@@ -258,6 +290,7 @@ func TestTheArtworkClassAnswersWithTheImage(t *testing.T) {
 	if src == 0 {
 		t.Fatal("一段合法的 PNG 解不出 NSImage")
 	}
+	defer release(src)
 	// 解不开的字节 NSImage 不报错，它给你一个**尺寸 0×0** 的空对象。
 	// 那张图放进锁屏上就是一块空白——所以这里核尺寸。
 	if got := sendSize(src, "size"); got.W != 32 || got.H != 32 {
@@ -337,10 +370,111 @@ func requestArtwork(art id, w, h float64, completion objc.Block) {
 
 // TestBytesThatAreNotAnImageAreRejected 盯解不开的字节不会硬造一个对象。
 func TestBytesThatAreNotAnImageAreRejected(t *testing.T) {
-	if img := nsImageFromBytes([]byte("这不是一张图")); img != 0 {
-		t.Error("拿一段垃圾造出了一个 NSImage")
+	for _, b := range [][]byte{[]byte("这不是一张图"), nil, {}} {
+		img := nsImageFromBytes(b)
+		if img != 0 {
+			release(img)
+			t.Errorf("拿一段 %d 字节的垃圾造出了一个 NSImage", len(b))
+		}
 	}
-	if img := nsImageFromBytes(nil); img != 0 {
-		t.Error("拿空字节造出了一个 NSImage")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 反复推：这一段是为了钉住一个**曾经必崩**的形状
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestRepeatedPushesWithGapsDoNotCrash 盯「隔一段时间推一次」这个形状。
+//
+// 这不是「顺便跑一跑」：这一段曾经**每次都崩**，而且崩在纯 native 代码里——
+// 连一行 Go 栈都没有，`signal: segmentation fault` 就是全部。触发它的正是
+// 这一层最早用的那个构造：通过 purego 驱动 Objective-C 的**自动释放池**。
+// 那套池子是**每线程**的状态，而这里的调用来自 Go 的任意 goroutine，那些
+// goroutine 随时会换 OS 线程，「谁负责放它」就没人说得清了。
+//
+// 现在这一层造出来的每个对象都是自己持有的（`new*` → 用完 `release`），
+// 一次 `publish` 造七八个、放七八个，一个都不留在系统的池子里；
+// 顺带所有 ObjC 动作都排在一条钉住的 OS 线程上（`objcthread_darwin.go`）。
+//
+// ⚠️ **别把这个用例调快**。老代码是在**第二三次**推的时候崩的，间隔大一点
+// 才能让 goroutine 有机会换线程；把它压成紧凑循环它反而不会崩（实测：
+// 紧凑 200 轮不崩，带间隔 120 轮必崩）。这是这个 bug 最难缠的地方。
+func TestRepeatedPushesWithGapsDoNotCrash(t *testing.T) {
+	const rounds = 60
+	const gap = 100 * time.Millisecond
+
+	sess := New(Options{})
+	if !sess.Available() {
+		t.Fatal("会话没起来")
+	}
+	defer sess.Close()
+	sess.SetHandler(func(Command, time.Duration) {})
+
+	for i := 0; i < rounds; i++ {
+		sess.Publish(NowPlaying{
+			State:    StatePlaying,
+			Title:    "一首歌",
+			Duration: time.Minute,
+			Position: time.Duration(i) * gap,
+		})
+		time.Sleep(gap)
+	}
+
+	// 走完了还要看系统那边有没有落下最后一份。
+	center := nowPlayingCenter()
+	if got := objValue(infoValue(center), keyTitle); got != "一首歌" {
+		t.Errorf("推了 %d 轮之后系统那边是 %q，want 一首歌", rounds, got)
+	}
+}
+
+// TestTheArtworkArrivesAfterAPush 盯「封面下好之后会补推一次」。
+//
+// 那条补推是**绕开**去抖的：去抖比的是「用户听见的东西变没变」，封面到货
+// 不该被它吃掉（用户换歌时歌名和进度是立刻的，封面晚几百毫秒）。
+// 少了这一步，锁屏上的封面就永远停在上一首——而界面上明明已经是新歌了。
+func TestTheArtworkArrivesAfterAPush(t *testing.T) {
+	p := mpTestPlatform(t)
+	fetched := make(chan struct{}, 4)
+	p.fetch = func(string) ([]byte, error) {
+		select {
+		case fetched <- struct{}{}:
+		default:
+		}
+		return testPNG(t, 64, 64), nil
+	}
+
+	// 走 apply 而不是 push：取封面是在 apply 里发起的（push 只管往系统写）。
+	p.apply(NowPlaying{State: StatePlaying, Title: "有封面的一首", Duration: time.Minute})
+	if v := objectForKey(infoValue(nowPlayingCenter()), keyArtwork); v != 0 {
+		t.Error("推的那一份里居然已经有封面了——封面是异步的")
+	}
+
+	// 换歌：地址变了，去下。
+	p.apply(NowPlaying{
+		State:      StatePlaying,
+		Title:      "有封面的一首",
+		Duration:   time.Minute,
+		ArtworkURL: "https://example.invalid/cover.png",
+	})
+
+	select {
+	case <-fetched:
+	case <-time.After(5 * time.Second):
+		t.Fatal("封面没有被取")
+	}
+	// 等它下好之后那一次补推。
+	deadline := time.Now().Add(5 * time.Second)
+	var art id
+	for time.Now().Before(deadline) {
+		if v := objectForKey(infoValue(nowPlayingCenter()), keyArtwork); v != 0 {
+			art = v
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if art == 0 {
+		t.Fatal("封面下好了，但系统那一份里还是没有 artwork")
+	}
+	if cls := goString(send(send(art, "class"), "description")); cls != artworkClassName {
+		t.Errorf("artwork 的类是 %q，want %q", cls, artworkClassName)
 	}
 }
