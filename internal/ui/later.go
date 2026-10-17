@@ -166,13 +166,22 @@ func laterHeader(c *ui.Context) {
 // 列表的行高就不一样了，那正是变高行存在的理由。
 func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 	t := c.Theme()
-	m := s.laterPage.rows.Rows()[r.Index]
+	rows := s.laterPage.rows
+	m := rows.Rows()[r.Index]
+	playing := rows.isPlaying(m)
 
 	// 选中那一行的底色由 `ui.List` 自己刷（主色底），字色得跟着换——不换就是
 	// 主色底上的深色字，深色主题下直接看不见。
+	//
+	// ⚠️ 「正在放」是**第二档**而不是并进去的第二种底色：它只把歌名染成主色、
+	// 在下面挂一句「正在播放」。换成主色底就和「选中」分不出来了，而这两个问的
+	// 是两件不同的事（见 `widgets/list` 的 card.go 里同一段）。
 	titleColor, ownerColor := t.Text, t.TextMuted
-	if r.Selected() {
+	switch {
+	case r.Selected():
 		titleColor, ownerColor = t.AccentText, t.AccentText.Alpha(0.75)
+	case playing:
+		titleColor = t.Accent
 	}
 
 	return ui.Row(c).Key("later-row:"+m.ID).AlignSelf(ui.Stretch).Gap(rowGap).
@@ -190,6 +199,9 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 				ui.Text(c, m.Owner).FontSize(12).LineHeight(1).
 					TextColor(ownerColor).MaxLines(1).Ellipsis("…")
 			}
+			if playing {
+				viewPlayingMark(c, t, m.Title)
+			}
 		})
 
 		ui.Text(c, playCountText(m.View)).Width(colCount).TextAlign(ui.End).
@@ -201,12 +213,8 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 	})
 }
 
-// laterMenu 是这一行的右键菜单，六项：播放 / 添加到队列 / 在 B 站打开 /
-// 收藏 / 下载音频 / 移除。
-//
-// 上游 `later/menu.tsx` 的「下一首播放」这里**没有**：插到下一首那一手
-// （`app.EnqueueNext`）已经在了，但它是动态卡片那一票顺手做的，给这一页补上是
-// 另一件事（各页菜单逐页补那一项），不在这一张的范围里。
+// laterMenu 是这一行的右键菜单，七项：播放 / 下一首播放 / 添加到队列 /
+// 在 B 站打开 / 收藏 / 下载音频 / 移除。
 //
 // ⚠️ **每一项都要 Item 一遍**：菜单是这趟全部建出来的，只有被 Chosen 的那一项为
 // true（`ui/menu.go` 的 buildMenu）。少建一项，那一项就永远点不到。
@@ -225,6 +233,11 @@ func (s *Shell) laterMenu(m *ui.Menu, i int) {
 		// **画成灰的而不是不画**：不画的话同一份列表里有的行能播有的不能，用户会
 		// 以为是坏的。
 		acts.Play(i)
+	case m.Item("下一首播放").Disabled(!row.CanPlay).Chosen():
+		// 和「播放」同样判 `CanPlay`：插进队列的那一首照样要放得了，
+		// 而队列里插一首放不了的歌，下一首就会停在那里一声不响
+		// （`App.step` 退回上一首并说一句）。
+		acts.PlayNext(i)
 	case m.Item("添加到队列").Disabled(!row.CanPlay).Chosen():
 		acts.Add(i)
 	case m.Item("在 B 站打开").Chosen():

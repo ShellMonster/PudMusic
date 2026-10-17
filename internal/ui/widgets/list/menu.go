@@ -33,6 +33,10 @@ var menuSeparator = menuItem{sep: true}
 // menuItems 是这一行的菜单，项和顺序照 Biu 的
 // `biu/src/pages/music-recommend/menu.tsx`（搜索结果那一套完全一样）。
 //
+// 「下一首播放」的位置也是抄上游：Biu 把它摆在「播放」和「添加到队列」**之间**
+// （`music-recommend/index.tsx:204-213`）——三个是同一件事的三档（立刻听 / 听
+// 完这首就听 / 排到最后），连着摆用户才看得出这是个梯度。
+//
 // ⚠️ **「打开来处」按这一项有没有来处分**：本地文件没有 bvid，写「在 B 站打开」
 // 只能打开一个打不开的网页，所以换成「在访达中显示」。那个判断在
 // `actions.go` 的 OpenLabel 里，播放列表抽屉的行菜单也调它。
@@ -41,6 +45,7 @@ var menuSeparator = menuItem{sep: true}
 func menuItems(m Music) []menuItem {
 	return []menuItem{
 		{key: "play", label: "播放"},
+		{key: "play-next", label: "下一首播放"},
 		{key: "queue", label: "添加到队列"},
 		menuSeparator,
 		{key: "open", label: OpenLabel(m.Item)},
@@ -93,6 +98,13 @@ func doAction(item menuItem, i int, song Music, acts Actions, playFrom func(int)
 	switch item.key {
 	case "play":
 		playFrom(i)
+	case "play-next":
+		if acts.PlayNext == nil {
+			// 说清楚比按了没反应好（和下面两项同一个道理）。
+			notify(acts, "「"+item.label+"」还没接上")
+			return
+		}
+		acts.PlayNext(song.Item)
 	case "queue":
 		if acts.Add != nil {
 			acts.Add([]app.Item{song.Item})

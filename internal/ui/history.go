@@ -188,11 +188,18 @@ func historyHeader(c *ui.Context) {
 // drawHistoryRow 画第 r 行。结构和稍后再看那一行一样，多出来的两列在右边。
 func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 	t := c.Theme()
-	m := s.historyPage.rows.Rows()[r.Index]
+	rows := s.historyPage.rows
+	m := rows.Rows()[r.Index]
+	playing := rows.isPlaying(m)
 
+	// 「正在放」和「选中」分成两档，理由见 `drawLaterRow` 里那一段
+	// （这一页和稍后再看是同一副骨架）。
 	titleColor, ownerColor := t.Text, t.TextMuted
-	if r.Selected() {
+	switch {
+	case r.Selected():
 		titleColor, ownerColor = t.AccentText, t.AccentText.Alpha(0.75)
+	case playing:
+		titleColor = t.Accent
 	}
 
 	return ui.Row(c).Key("history-row:"+m.ID).AlignSelf(ui.Stretch).Gap(rowGap).
@@ -208,6 +215,9 @@ func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 			if m.Owner != "" {
 				ui.Text(c, m.Owner).FontSize(12).LineHeight(1).
 					TextColor(ownerColor).MaxLines(1).Ellipsis("…")
+			}
+			if playing {
+				viewPlayingMark(c, t, m.Title)
 			}
 		})
 
@@ -237,6 +247,9 @@ func (s *Shell) historyMenu(m *ui.Menu, i int) {
 	// "archive"`，这里由 app 层判好传下来）。
 	case m.Item("播放").Disabled(!row.CanPlay).Chosen():
 		acts.Play(i)
+	// 「下一首播放」判的是同一个 CanPlay，理由见 laterMenu 里那一项。
+	case m.Item("下一首播放").Disabled(!row.CanPlay).Chosen():
+		acts.PlayNext(i)
 	case m.Item("添加到队列").Disabled(!row.CanPlay).Chosen():
 		acts.Add(i)
 	case m.Item("在 B 站打开").Chosen():

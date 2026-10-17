@@ -134,10 +134,21 @@ func (s *Shell) viewToasts(c *ui.Context) {
 // 主色上的文字），**不要用 Theme.Inverse**：主题没设它的时候它是零值，
 // 等于 Background —— 白底白卡片，元素排版排得好好的，屏幕上什么也看不见
 // （头less Tester 只查元素框，查不到这个坑）。
+//
+// 🔴 **卡片本身也 `PassThrough`**——和外面那个铺满窗口的容器一样（见 viewToasts）。
+// 一条提示**一个控件都没有**：它不可点、不可关、也不带任何动作。挡在它底下的东西
+// 却是实打实的可点控件，而提示在右下角、抬过播放条之后正好压住页面右下角那一块
+// （设置页「快捷键」那一页最后那行的 × 就在那儿）。
+//
+// 症状是「刚改完一个设置，右下角弹出一句提示，两秒之内那个 × 点不动」——而提示
+// 两秒后自己没了，于是这件事看起来像是那个 × 偶尔失灵，最容易被当成界面坏了。
+//
+// 框架那一边也是同一个做法：它自己的 tooltip 也是 `Absolute().PassThrough()`
+// （`mygo/ui/tooltip.go:80`）——同样的话，同样没有控件可点。
 func (s *Shell) viewToast(c *ui.Context, t toast, theme *ui.Theme) {
-	ui.Column(c).Width(320).Radius(10).
+	ui.Column(c).Width(320).Radius(10).PassThrough().
 		Background(theme.Accent).Padding(12, 16).
 		Children(func() {
-			ui.Text(c, t.text).FontSize(13).TextColor(theme.AccentText)
+			ui.Text(c, t.text).FontSize(13).TextColor(theme.AccentText).PassThrough()
 		})
 }

@@ -22,6 +22,14 @@ type Actions struct {
 	// Add 把这一首追加到队列末尾，不打断正在放的那首。
 	Add func(items []app.Item)
 
+	// PlayNext 把这一首排在**正在放的那首后面**——「下一首播放」那一下。
+	//
+	// 和 Add 的分界就是插在哪：Add 接在**队尾**（用户下次翻到队尾才听得到），
+	// 这一条插在**当前的下一位**（这一首放完就是它）。摆一个接队尾的按钮
+	// 标着「下一首播放」比不摆更坏：按下去一小时后才听得见，而界面上
+	// 看不出它其实排到了最后。
+	PlayNext func(item app.Item)
+
 	// Open 在系统里打开这一项的来处：本地文件在访达里显示，在线的在浏览器
 	// 里打开 B 站。
 	Open func(item app.Item)
@@ -56,6 +64,17 @@ type Actions struct {
 
 	// Notify 说一句话。刚接的操作（比如还没接 B 站接口的收藏）按不动就是靠它。
 	Notify func(text string)
+
+	// IsPlaying 报这一首是不是**正在放的那首**，列表据此给那一行画高亮。
+	//
+	// 为 nil 时不高亮任何一行（每一行都跟别的行长得一样）——那是列表在测试里
+	// 用的那份接线，**不是漏接**：真窗口上的每一份都经 `AppActions` 装上了。
+	//
+	// 🔴 **判据在接线里，不在本包里**：本包不许拿行的下标或者 `Music.ID` 去认
+	// 「正在放的那首」——队列会重排（下一首播放、拖拽排序、随机模式），而
+	// `Music.ID` 是**行的**身份（铁律四），不是「这是不是同一首歌」。
+	// 真正的判据是 `app.App.IsPlaying`（按 `app.Item.Identity`）。
+	IsPlaying func(item app.Item) bool
 }
 
 // AppActions 把 Actions 接在应用状态上，界面上真正用的那一份。
@@ -79,6 +98,11 @@ func AppActions(a *app.App, notify func(string)) Actions {
 		Add: func(items []app.Item) {
 			if err := a.Enqueue(items...); err != nil && notify != nil {
 				notify("加不进队列：" + err.Error())
+			}
+		},
+		PlayNext: func(item app.Item) {
+			if err := a.EnqueueNext(item); err != nil && notify != nil {
+				notify("排不进下一首：" + err.Error())
 			}
 		},
 		Open:      func(item app.Item) { open(item, notify) },
@@ -110,6 +134,9 @@ func AppActions(a *app.App, notify func(string)) Actions {
 				notify(text)
 			}
 		},
+		// 🔴 **每帧现读**（闭包拿的是 `a`）：正在放的那首会换，缓存住的话
+		// 换歌之后列表上的高亮还钉在上一首——而那一首已经不在放了。
+		IsPlaying: a.IsPlaying,
 	}
 }
 

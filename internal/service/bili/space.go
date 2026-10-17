@@ -325,6 +325,13 @@ type UpVideo struct {
 	Play string
 	// Description 是简介。
 	Description string
+	// Author 是 UP 名（B 站那个接口给的 `author` 字段）。
+	//
+	// ⚠️ **这一页上它对每一行都是同一个人**（这一页是某个 UP 的投稿 Tab），
+	// 而 B 站仍然逐条给了一遍。播放条上那一句 UP 名要显示它、点它进他的
+	// 空间（见 `app.Item.Artist`），不给的话从这一页放的歌在播放条上就没有
+	// UP 名。
+	Author string
 	// Cid 是第一集的 cid。
 	//
 	// ⚠️ **必须有**：B 站的取流接口不给 cid 会取到**第一集**。多 P 投稿的
@@ -447,6 +454,7 @@ func upVideoPageFrom(raw []byte, q UpVideoQuery) (UpVideoPage, error) {
 			Duration:    upVideoDuration(v.Length),
 			Play:        strconv.Itoa(v.Play),
 			Description: v.Description,
+			Author:      v.Author,
 			Cid:         upVideoCid(v.Cid),
 		})
 	}

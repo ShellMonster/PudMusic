@@ -80,21 +80,26 @@ func (a *App) mediaSnapshotLocked() media.NowPlaying {
 	}
 }
 
-// setArtist 记下当前这首的艺人（在线条目的 UP 主名）。
+// setArtist 记下当前这首的艺人（在线条目的 UP 主名）和他的 mid。
 //
 // 本地文件永远是空的——Biu 上游也不读音频内嵌的标签（`app/open.go` 那条
 // 备注），所以本地音乐在那边也是没有艺人的一行。**别拿文件夹名去凑一个**：
 // 那是个猜测，而猜出来的东西会一直显示在锁屏上，用户看不出它是猜的。
 //
+// ⚠️ **名字和编号一起判**：有的来源只给名字不给编号（见 `Item.ArtistMid`）。
+// 只判名字的话，同一个 UP 主的第二首换了编号时这一句会当成「没变」而整个
+// 走人，播放条上的 UP 名就指着上一个编号——用户点进的是**别的 UP 主的空间**，
+// 而界面上看不出任何异样。
+//
 // 值不变就不叫系统：换歌、入队都会走到这里，为一个没变的值重建一次
 // 系统字典是白花的。
-func (a *App) setArtist(name string) {
+func (a *App) setArtist(name string, mid int64) {
 	a.mu.Lock()
-	if a.artist == name {
+	if a.artist == name && a.artistMid == mid {
 		a.mu.Unlock()
 		return
 	}
-	a.artist = name
+	a.artist, a.artistMid = name, mid
 	a.mu.Unlock()
 	a.publishMedia()
 }
