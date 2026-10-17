@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,8 +28,12 @@ import (
 // uiExplore 是一台给空间/动态测试用的假 B 站。
 type uiExplore struct {
 	*httptest.Server
-	mu       sync.Mutex
-	paths    []string
+	mu    sync.Mutex
+	paths []string
+	// queries 和 paths 一一对应：有的接口同一个路径要按查询串回答（首页那三个
+	// Tab 里有两个打的是分区推荐，区别只在 from_region 上），只录路径的话
+	// 「鬼畜那一档发的是音乐分区」压根测不到。
+	queries  []url.Values
 	handlers map[string]http.HandlerFunc
 }
 
@@ -38,6 +43,7 @@ func newUIExplore(t *testing.T) *uiExplore {
 	b.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b.mu.Lock()
 		b.paths = append(b.paths, r.URL.Path)
+		b.queries = append(b.queries, r.URL.Query())
 		h := b.handlers[r.URL.Path]
 		b.mu.Unlock()
 		if h != nil {
@@ -74,6 +80,19 @@ func (b *uiExplore) countHit(path string) int {
 		}
 	}
 	return n
+}
+
+// lastQueryOf 是最后一次打给某条路径时的查询串。没有打过这一条是 nil。
+func (b *uiExplore) lastQueryOf(path string) url.Values {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out url.Values
+	for i, p := range b.paths {
+		if p == path {
+			out = b.queries[i]
+		}
+	}
+	return out
 }
 
 func (b *uiExplore) hit(path string) bool {

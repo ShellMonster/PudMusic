@@ -182,6 +182,17 @@ type newMusicGrid struct {
 	//
 	// ⚠️ 只有它被记着：窗口高每一帧现读 `c.Size()`，不存（见 view 里那三段）。
 	rows int
+
+	// ── 下面这一摊是取数状态（homepage_feed.go 递进来的）──────────────
+
+	// loading 是那一摊正在拉。画一个转圈，**不画「暂无数据」**——那是
+	// 「B 站真的没有」的说法，而正在拉的时候说它就是在骗用户。
+	loading bool
+	// err 是上一次失败的原因（已经翻成人话，见 homeFailureOf）。空 = 没失败。
+	err error
+	// retry 是「重试」按钮按下去要干的活。首页给的闭包（`homePage.retryNew`）。
+	// nil 时那一块画不出重试按钮。
+	retry func()
 }
 
 // newNewMusic 建新歌速递那一块。
@@ -212,6 +223,19 @@ func (g *newMusicGrid) SetSongs(songs []list.Music) {
 	g.songs = songs
 	g.clampPage()
 }
+
+// SetStatus 递进那一摊的取数状态。首页每一帧画到这一块之前调一次。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (g *newMusicGrid) SetStatus(loading bool, err error) {
+	g.loading, g.err = loading, err
+}
+
+// SetRetry 装「重试」按钮按下去要干的活。首页在 newHomePage 里装一次。
+//
+// ⚠️ **这一块自己不管取数**（它只管画），所以重试不是它发请求，是它回调
+// 首页那一摊——两边的状态合成一处，只有首页知道。
+func (g *newMusicGrid) SetRetry(fn func()) { g.retry = fn }
 
 // clampPage 把页码夹进 [1, 总页数]。总页数为 0（一首都没有）时是 1。
 func (g *newMusicGrid) clampPage() {
@@ -282,7 +306,32 @@ func (g *newMusicGrid) view(c *ui.Context) {
 	ui.Column(c).Key("new-music").FillWidth().Gap(12).Children(func() {
 		g.viewHeader(c, total)
 
-		if total == 0 {
+		// ⚠️ **三态分开画**（理由同 `viewTabBody`）：正在拉 / 拉不到 / 真的
+		// 没有，是三件不同的事。合成一句「暂无数据」的话，用户在风控、断网、
+		// 登录态过期这三样上读到的都是「B 站没有新歌」。
+		switch {
+		case g.err != nil && len(g.songs) == 0:
+			// 高度照「暂无数据」那一支（`new-music-top.tsx:186` 的 h-[200px]）：
+			// 失败之后网格整个换掉，这一块的高度跟着换会让下面那个列表跳一格。
+			ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
+				Background(t.Surface).Center().Gap(8).Children(func() {
+				ui.Text(c, "新歌速递没拉出来").FontSize(13).TextColor(t.Text)
+				ui.Text(c, g.err.Error()).FontSize(12).TextColor(t.TextMuted).MaxLines(2)
+				if g.retry != nil && ui.Button(c, "重试加载新歌速递").Clicked() {
+					g.retry()
+				}
+			})
+			return
+
+		case g.loading && len(g.songs) == 0:
+			// 上游 `new-music-top.tsx:207-209`：拉的时候就是一个转圈。
+			ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
+				Background(t.Surface).Center().Children(func() {
+				ui.Spinner(c).Label("正在加载新歌速递")
+			})
+			return
+
+		case total == 0:
 			// 上游 `new-music-top.tsx:211-214`：整块宽的一张卡片，正中间一句
 			// 「暂无数据」。这里照它（那一句是上游的文案，别自己编）。
 			ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).

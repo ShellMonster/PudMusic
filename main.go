@@ -59,6 +59,11 @@ func main() {
 	// 所以这里没有额外零件要装，直接挂即可。
 	a.MountLibrary(cli)
 
+	// 首页（推荐音乐）：三个 Tab 的推荐单 + 新歌速递。同一个客户端，同一张
+	// 凭据白名单——首页不登录也能拉到公开推荐（登录之后是更合口味的那一批，
+	// 见 `internal/app/recommend.go`）。
+	a.MountRecommend(cli)
+
 	// 本地音乐也挂在开窗口之前：它不读盘，真正要等的是「退出时把那几摊
 	// 文件监听关掉」，而那要走 App.Close（退出流程里跑的）。
 	ui.MountLocalMusic(a)

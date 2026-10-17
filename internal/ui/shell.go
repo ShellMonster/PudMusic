@@ -389,6 +389,15 @@ func New(a *app.App) *Shell {
 	// 首页自己那一摊要在建好之后才有（它要用封面缓存），所以接在 images 后面。
 	// 操作接在应用状态上、提示接自己的 Toast，接法见 widgets/list 的 AppActions。
 	s.home = newHomePage(s.images, s.listActions(), s.wake.invalidate)
+	// 首页那一摊的取数接线（三个 Tab 的推荐单 + 新歌速递）：规则见
+	// homepage_feed.go。这里只递「要拉什么」，不管什么时候拉。
+	s.home.initLoads(homeLoads{
+		mounted: func() bool { return s.app.RecommendOf().Mounted() },
+		tab:     s.fetchHomeTab,
+		new:     s.fetchHomeNewMusic,
+		selfMid: s.app.SelfMid,
+		wake:    s.wake.invalidate,
+	})
 	// 下载记录页同理（downloadlist.go）：两个「打开」接系统那一份，它们在无头
 	// Tester 里会 panic，测试建完外壳就换成记动作的桩；记录那一条接应用层。
 	s.downloads = newDownloadsPage(a.DownloadSnapshots, systemOpenDir, mygo.Shell.ShowItemInFolder)

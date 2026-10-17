@@ -442,4 +442,40 @@ var Items = []Item{
 		Spec:     "铁律四：动态列表的行键稳定且唯一",
 		Tests:    []string{"TestRowKeysMustBeUnique", "TestTheChosenSongSurvivesInsertingOneAtTheHead"},
 	},
+	{
+		Category: HTTP,
+		// 首页推荐那一摊。**参数和签名逐个对着上游抄**：少一个的症状是
+		// 「B 站给了别的分区的推荐」或者「被风控挡成 -403」，而那两样在
+		// 界面上分别长成「切了 Tab 还是那一批」和「没有权限看推荐」。
+		//
+		// 「流行」那一档走的是**音乐榜**而不是第三个分区，这一条钉的是它。
+		Spec: "首页三个 Tab 各自的接口、参数和签名：音乐/鬼畜是分区推荐（1003/1007，带 WBI 签名），流行是音乐榜（不带），新歌速递走那两个带 csrf 的接口",
+		Tests: []string{
+			"TestRegionFeedSendsEveryParamAndSignsIt",
+			"TestTheGuichuRegionIsItsOwnNumber",
+			"TestMusicRankSendsItsOwnParams",
+			"TestMusicRankPrefersTheRelatedArchive",
+			"TestNewMusicSendsItsParamsAndCSRF",
+			"TestEachTabAsksForItsOwnThing",
+			"TestTheRecommendFailuresSaySomethingUseful",
+		},
+	},
+	{
+		Category: Negative,
+		// 「没有内容」和「拉不到」是两件事，界面上必须是两句话。合成一句的话，
+		// 用户读到「暂无内容」会以为 B 站没有推荐给他，于是永远不会去按那个
+		// 本该在那儿的重试。
+		//
+		// 「失败之后不许每帧重发」这一条是防那个自激循环：实测 300 毫秒能发
+		// 138 次，界面停在「打不开」上还在刷网络。
+		Spec: "首页拉不到推荐：说的是「拉不到」并给一次重试、失败后不自己绕圈；空列表说的是「没有内容」；新歌速递那一块挂掉不牵连下面那一档",
+		Tests: []string{
+			"TestAFailedRecommendSaysSoAndOffersARetry",
+			"TestAnEmptyRecommendListIsNotAFailure",
+			"TestTheNewMusicBlockFailsOnItsOwn",
+			"TestTheHomePageSaysItIsLoadingUntilTheFirstPageIsBack",
+			"TestNewMusicIsOnlyPulledOnThePopTab",
+			"TestLoggingInReloadsTheRecommendations",
+		},
+	},
 }
