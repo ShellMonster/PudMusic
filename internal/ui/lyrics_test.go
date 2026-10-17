@@ -731,7 +731,10 @@ func TestTheCacheIsWhatFeedsTheView(t *testing.T) {
 
 	s := New(a)
 	t.Cleanup(s.images.Close)
+	// 和 newShell 一样把那几个后台 goroutine 收掉（见 router_test.go 里那段）。
 	t.Cleanup(func() { _ = s.hist.Close() })
+	t.Cleanup(func() { _ = s.keys.Close() })
+	t.Cleanup(s.feed.disarm)
 	s.router.Transition = mygoui.TransitionNone
 	tt := mygoui.NewTester(s.View, 1200, 800)
 
