@@ -38,9 +38,12 @@ func waitLyrics(t *testing.T, d time.Duration, what string, cond func() bool) {
 	t.Fatalf("等了 %v，%s", d, what)
 }
 
-// song 是测试里用的一个在线条目：在线的歌按 bvid+cid 做缓存键（上游
+// onlineSong 是测试里用的一个在线条目：在线的歌按 bvid+cid 做缓存键（上游
 // `lyrics/index.tsx:90`），所以这两个字段得填。
-func song(bvid, cid string) Item {
+//
+// ⚠️ 叫 `onlineSong` 不叫 `song`：`localmusic_test.go` 里已经有一个叫 `song` 的
+// 辅助函数（造一个 .mp3 文件），同一个包里重名会直接编译不过。
+func onlineSong(bvid, cid string) Item {
 	return Item{Source: "online", Type: "mv", Bvid: bvid, Cid: cid, Title: bvid}
 }
 
@@ -51,18 +54,18 @@ func song(bvid, cid string) Item {
 // 那一帧露馅——而那一帧正是用户换歌时看见的那一帧。
 func TestSwitchingSongsResetsTheOffsetBeforeRestoringIt(t *testing.T) {
 	a, c := lyricsApp(t)
-	if err := c.Save(lyricKeyOf(song("BV1", "1")), lyrics.Entry{
+	if err := c.Save(lyricKeyOf(onlineSong("BV1", "1")), lyrics.Entry{
 		Lyrics: "[00:01.00]甲", OffsetMS: -1500, FontSize: 32,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Save(lyricKeyOf(song("BV2", "2")), lyrics.Entry{
+	if err := c.Save(lyricKeyOf(onlineSong("BV2", "2")), lyrics.Entry{
 		Lyrics: "[00:01.00]乙", OffsetMS: 2000, FontSize: 14,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	a.setLyricTrack(song("BV1", "1"))
+	a.setLyricTrack(onlineSong("BV1", "1"))
 	waitLyrics(t, 2*time.Second, "甲的歌词读回来", func() bool {
 		return a.Lyrics().HasLyrics
 	})
@@ -72,7 +75,7 @@ func TestSwitchingSongsResetsTheOffsetBeforeRestoringIt(t *testing.T) {
 
 	// 换歌。读盘是异步的，所以换完歌这一刻读到的应该是**默认值**，
 	// 而不是甲留下的 -1500。
-	a.setLyricTrack(song("BV2", "2"))
+	a.setLyricTrack(onlineSong("BV2", "2"))
 	if got := a.Lyrics(); got.OffsetMS != 0 || got.FontSize != DefaultLyricsFontSize {
 		t.Errorf("换歌那一刻读到的是 %+v，want 偏移 0、字号 %v——"+
 			"带着上一首的值换歌，用户会以为新歌的词对不上", got, DefaultLyricsFontSize)
@@ -102,7 +105,7 @@ func TestSwitchingSongsResetsTheOffsetBeforeRestoringIt(t *testing.T) {
 // 后面（实测去掉守卫后 5 次全红）。
 func TestALateCacheReadDoesNotWipeTheLyricsYouJustAdopted(t *testing.T) {
 	a, _ := lyricsApp(t)
-	a.setLyricTrack(song("BV1", "1"))
+	a.setLyricTrack(onlineSong("BV1", "1"))
 
 	// 缓存里什么都没有（正是「这首歌还没找过歌词」的情形），紧接着换一份。
 	a.PutLyrics("[00:01.00]刚找到的词", "")
@@ -131,7 +134,7 @@ func TestTheDebounceWindowHoldsTheWrite(t *testing.T) {
 	const window = 500 * time.Millisecond
 
 	a, c, clock := lyricsAppOnFakeClock(t)
-	it := song("BV1", "1")
+	it := onlineSong("BV1", "1")
 	a.setLyricTrack(it)
 	// 采用歌词**当场就写**（它要记住换来的这一版），所以下面的判据是缓存里的
 	// **偏移**，不是「有没有这条」。
@@ -165,7 +168,7 @@ func TestTheDebounceWindowHoldsTheWrite(t *testing.T) {
 // 重置会把用户刚调好的偏移抹掉，而用户那一下什么都没做。
 func TestTheSameSongIsNotAReset(t *testing.T) {
 	a, c := lyricsApp(t)
-	it := song("BV1", "1")
+	it := onlineSong("BV1", "1")
 	if err := c.Save(lyricKeyOf(it), lyrics.Entry{Lyrics: "[00:01.00]词"}); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +186,7 @@ func TestTheSameSongIsNotAReset(t *testing.T) {
 // TestEachSongKeepsItsOwnOffset：两首歌的偏移各存各的。切回去还得是原来那个。
 func TestEachSongKeepsItsOwnOffset(t *testing.T) {
 	a, _ := lyricsApp(t)
-	first := song("BV1", "1")
+	first := onlineSong("BV1", "1")
 	a.setLyricTrack(first)
 	a.PutLyrics("[00:01.00]甲的词", "") // 歌词有了，偏移才有地方可附
 
@@ -191,7 +194,7 @@ func TestEachSongKeepsItsOwnOffset(t *testing.T) {
 	a.SetLyricsFontSize(40)
 	flushLyricsNow(t, a)
 
-	second := song("BV2", "2")
+	second := onlineSong("BV2", "2")
 	a.setLyricTrack(second)
 	a.PutLyrics("[00:01.00]乙的词", "")
 	a.SetLyricsOffset(700)
@@ -290,7 +293,7 @@ func lyricsAppOnFakeClock(t *testing.T) (*App, *lyrics.Cache, *fakeAfter) {
 // 又要从头调一遍——而调偏移恰恰是「一次调好、永远不管」的那种操作。
 func TestTheAdjustedValuesSurviveARestart(t *testing.T) {
 	a, c := lyricsApp(t)
-	it := song("BV1", "1")
+	it := onlineSong("BV1", "1")
 	if err := c.Save(lyricKeyOf(it), lyrics.Entry{Lyrics: "[00:01.00]词"}); err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +326,7 @@ func TestTheAdjustedValuesSurviveARestart(t *testing.T) {
 // `{offset, fontSize}` 的空壳文件——每听一首积一个，界面上那个值还没有出处。
 func TestNothingIsWrittenForASongWithoutLyrics(t *testing.T) {
 	a, c := lyricsApp(t)
-	a.setLyricTrack(song("BV1", "1"))
+	a.setLyricTrack(onlineSong("BV1", "1"))
 
 	a.SetLyricsOffset(500)
 	a.SetLyricsFontSize(28)
@@ -343,7 +346,7 @@ func TestNothingIsWrittenForASongWithoutLyrics(t *testing.T) {
 // （index.tsx:269-278 的 handleLyricsAdopted），不动这两个。
 func TestSwapLyricsKeepsTheUsersAdjustments(t *testing.T) {
 	a, _ := lyricsApp(t)
-	a.setLyricTrack(song("BV1", "1"))
+	a.setLyricTrack(onlineSong("BV1", "1"))
 	a.SetLyricsOffset(300)
 	a.SetLyricsFontSize(30)
 
@@ -362,7 +365,7 @@ func TestSwapLyricsKeepsTheUsersAdjustments(t *testing.T) {
 // 「新的原文 + 旧的译文」——两行对不上的字比没有译文更难懂。
 func TestSwapLyricsDropsTheOldTranslation(t *testing.T) {
 	a, _ := lyricsApp(t)
-	a.setLyricTrack(song("BV1", "1"))
+	a.setLyricTrack(onlineSong("BV1", "1"))
 	a.PutLyrics("[00:01.00]有译文的歌", "[00:01.00]旧译文")
 
 	a.PutLyrics("[00:01.00]没译文的歌", "")
@@ -383,7 +386,7 @@ func TestSwapLyricsDropsTheOldTranslation(t *testing.T) {
 // 歌词整体飞到歌外面去，而界面上看不出是哪儿错了。
 func TestTheTwoKnobsAreClampedToTheUpstreamRanges(t *testing.T) {
 	a, _ := lyricsApp(t)
-	a.setLyricTrack(song("BV1", "1"))
+	a.setLyricTrack(onlineSong("BV1", "1"))
 
 	for _, c := range []struct {
 		set          func()
@@ -414,7 +417,7 @@ func TestNoCacheMeansNoLyricsAndNoCrash(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
 
-	a.setLyricTrack(song("BV1", "1"))
+	a.setLyricTrack(onlineSong("BV1", "1"))
 	if ls := a.Lyrics(); ls.HasLyrics {
 		t.Errorf("没挂缓存却读出了歌词：%+v", ls)
 	}

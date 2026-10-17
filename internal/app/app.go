@@ -156,6 +156,9 @@ type App struct {
 	// 用得着的只有歌词那 500ms 的防抖窗口（见 lyrics.go）。
 	after func(d time.Duration, fn func()) func()
 
+	// 本地音乐库，见 localmusic.go。挂上去之前是 nil，界面要判空。
+	localMusic *localLibrary
+
 	// 下载这一摊，见 downloads.go。挂上去之前是 nil，界面要判空。
 	downloads *download.Manager
 	// downloadQueueFile 是队列落盘的位置。退出时写、重开时读。
@@ -429,6 +432,7 @@ func (a *App) Close() {
 	a.player = nil
 	a.playing = false
 	dl, dlPath := a.downloads, a.downloadQueueFile
+	lib := a.localMusic
 	a.mu.Unlock()
 
 	close(a.done)
@@ -452,6 +456,11 @@ func (a *App) Close() {
 	// 从头下。写失败不往上报错：退出路径上没有用户在看。
 	if dl != nil {
 		_ = dl.Close(dlPath)
+	}
+	// 本地音乐的文件监听也要关：它每个根一个 goroutine，不关的话退出之后
+	// 还在那儿收着目录事件。
+	if lib != nil {
+		lib.close()
 	}
 }
 
