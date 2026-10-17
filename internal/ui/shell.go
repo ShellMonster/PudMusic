@@ -138,6 +138,30 @@ type Shell struct {
 	// hist 是搜索历史。没挂上盘时是内存里的一份（见 searchhistory.go）。
 	hist *searchHistory
 
+	// keys 是快捷键。和 hist 一样是单独一份文件（见 shortcuts.go）。没挂上盘时
+	// 是内存里的一份：设置页照常能录，只是关掉之后不记得。
+	keys *shortcutKeys
+	// recording 是设置页上**正在录**的那一格，零值表示没有在录。
+	//
+	// 🔴 它同时是「焦点在哪一格」：`FocusBind` 把两者绑成同一件事，所以这一格
+	// 必须可比较（见 shortcutSlot）。别在这里加指针或者切片——加了会让
+	// FocusBind 直接 panic，而那条 panic 说的是「需要可比较的值」，和真因隔得
+	// 十万八千里。
+	recording shortcutSlot
+	// rejected 是「刚才按的那个键不能录成快捷键」的那一格，描红用。按下一个合法
+	// 的键或者按 Esc 就清掉——红色停在屏幕上不动的话，用户会以为那里出了什么
+	// 错，而它其实只是「刚才那一下没录上」。
+	rejected shortcutSlot
+
+	// settings 是设置页自己那一摊：切在哪个 Tab。建在 Shell 上而不是每帧新建，
+	// 理由和 home 一模一样：切走再切回来要停在原来那一格上。
+	settings settingsPageState
+
+	// picker 弹系统文件框挑路径（下载目录、FFmpeg）。做成字段是为了能替掉它：
+	// 真的那一份要过事件循环，无头 Tester 里没有事件循环，不替掉就只能等上真
+	// 系统才验得到「选回来写进设置」这条链。和 autostart 同一个道理。
+	picker pathPicker
+
 	// crash 是上一帧 panic 到的东西，非 nil 时这一帧画错误页。
 	crash any
 
@@ -242,6 +266,8 @@ func New(a *app.App) *Shell {
 	s.local = newLocalPage(a, s.images, list.AppActions(a, s.addToast),
 		s.addToast, s.pickDir)
 	s.hist = newSearchHistory("")
+	s.keys = newShortcutKeys("")
+	s.picker = systemPathPicker{}
 	s.feed = newFeedPoller(dynamicFeedInterval, nil)
 	// pageBody 是画页面内容的那一支：404 兜底 + 已经有内容的页（设置页）+ 每条
 	// 路由自己的空状态，三样拼在 pageContent 里（router.go）。
@@ -332,6 +358,10 @@ func (s *Shell) Attach(w *mygo.Window) {
 		if err := s.hist.Close(); err != nil {
 			log.Printf("biu: 关窗时保存搜索历史失败：%v", err)
 		}
+		// 快捷键同理。
+		if err := s.keys.Close(); err != nil {
+			log.Printf("biu: 关窗时保存快捷键失败：%v", err)
+		}
 	})
 }
 
@@ -355,6 +385,7 @@ func Run(a *app.App, sess *media.Session) error {
 	// 搜索历史读盘是阻塞 IO，放在建窗口之前：早读进来早能用，也省得第一帧
 	// 是在一个空历史上画出来的（那也是 mountSearchHistory 的用途之一）。
 	s.mountSearchHistory()
+	s.mountShortcuts()
 	// 菜单、退出、第二个实例、deep link 全在这里装。必须在 Run 之前，
 	// 否则启动命令行里的 biu:// 会在回调装好之前就被交付掉。
 	s.installLifecycle()
@@ -396,6 +427,20 @@ func (s *Shell) mountSearchHistory() {
 		log.Printf("biu: 收尾内存里的搜索历史失败：%v", err)
 	}
 	s.hist = newSearchHistory(searchHistoryPath(dir))
+}
+
+// mountShortcuts 把快捷键挂到盘上。和搜索历史同一套规矩：拿不到应用数据目录不算
+// 错误——记一条日志，接着用内存里那一份，设置页照常能录，只是关掉之后不记得。
+func (s *Shell) mountShortcuts() {
+	dir, err := mygo.App.Path(mygo.PathUserData)
+	if err != nil {
+		log.Printf("biu: 拿不到应用数据目录，快捷键这次关掉就没了：%v", err)
+		return
+	}
+	if err := s.keys.Close(); err != nil {
+		log.Printf("biu: 收尾内存里的快捷键失败：%v", err)
+	}
+	s.keys = newShortcutKeys(shortcutPath(dir))
 }
 
 // WindowOptions 是主窗口的样子。view 是这个窗口每帧要画的界面。
