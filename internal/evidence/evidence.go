@@ -102,6 +102,19 @@ var Items = []Item{
 		Tests:    []string{"TestTheErrorDoesNotStickToTheNextSong"},
 	},
 	{
+		// 频谱挂在解码器输出端，而 MyGo 的解码器**领先放音约一秒**（PLAN 阶段 6
+		// 的风险表点名了这一条）。所以「每一段标着源帧号、按播放位置取」不是优化，
+		// 是「鼓点晚整整一拍」和「拖完进度条频谱还停在老地方」的病根。
+		Category: Play,
+		Spec:     "频谱按播放位置取到对应的那一段（解码器领先解约一秒）",
+		Tests: []string{
+			"TestEachBlockIsTaggedWithItsSourceFrames",
+			"TestSeekClearsTheHistory",
+			"TestTheRingKeepsAboutFourSeconds",
+			"TestTheTapIsTransparent",
+		},
+	},
+	{
 		Category: Play,
 		Spec:     "系统媒体状态映射（暂停/停止/播完/解码失败不是同一个数）",
 		Tests:    []string{"TestPlaybackStateMapping", "TestSmtcStatusIsNotTheMacNumber"},
@@ -126,6 +139,17 @@ var Items = []Item{
 		Category: FakeClock,
 		Spec:     "真时钟那一半也接得上（醒得过来、停得下来）",
 		Tests:    []string{"TestRealClockEveryFuncWakesAndStops"},
+	},
+	{
+		// SPEC「回归证据」里点名的第三处假时钟（另外两处是歌词的 500ms 防抖和
+		// 点赞的 2500ms 长按）。三条都是「等一会儿」，而真等就是一条测试几秒钟。
+		Category: FakeClock,
+		Spec:     "全屏播放器：指针不动 3000ms 界面自己藏起来，动一下回来",
+		Tests: []string{
+			"TestTheInterfaceHidesAfterThreeSeconds",
+			"TestTheHiddenInterfaceIsReallyGoneFromTheScreen",
+			"TestMovingThePointerBringsTheInterfaceBack",
+		},
 	},
 
 	// ── 严格 HTTP fixture ──────────────────────────────────────────────────

@@ -172,12 +172,39 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 	})
 }
 
-// viewCover 是播放条左边那张封面。
+// viewCover 是播放条左边那张封面。**点它开全屏播放器**。
 //
 // 四种状态（没有地址 / 载入中 / 就绪 / 加载失败）都由 imgcache.View 画，
 // 这里不重复它的判断，也不替它决定长什么样——以后缓存换画法只改那一处。
+//
+// 🔴 它带着 `coverTransition(identity)`，而满屏上那一张带的是同一个——这就是
+// 「封面从列表行放大成全屏背景」那一段，等价于 SwiftUI 的 `matchedGeometryEffect`
+// （理由见 fullplayer.go 的 coverMatch）。**这一层是转场的另一半**：少了它，
+// 满屏的封面找不到「上一个」，就只是「啪」地一下就位。
+//
+// ⚠️ 它在**每一帧**都要重新装一遍 Match（`ElementTransition` 是每帧重新登记的，
+// 框架只认这一帧装的那个）。而框架只留一帧的记录（`rec.frame+1 < rt.frame` 就
+// 删），所以漏一帧就等于转场没了。
 func (s *Shell) viewCover(c *ui.Context, st app.State) {
-	imgcache.View(c, s.images, st.CoverURL, coverSize, coverSize)
+	el := imgcache.View(c, s.images, st.CoverURL, coverSize, coverSize).
+		Label("当前封面").
+		Transition(coverTransition(coverIdentity(s, st)))
+
+	hovered := el.Hovered()
+	if hovered {
+		// Biu 那边是 hover 时浮一层 `bg-[rgba(0,0,0,0.5)]` 加一个向上的箭头
+		// （`layout/playbar/left/index.tsx:38-41`）。没有这一层的话，用户不知道
+		// 那张封面是能点的。
+		//
+		// PassThrough：**不让这一层吃掉点击**（理由同 queue_drawer 的 viewQueueCover）。
+		ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Radius(c.Theme().Radius).
+			PassThrough().Center().Background(ui.RGBA(0, 0, 0, 0.5)).Children(func() {
+			ui.Text(c, "⤢").FontSize(20).TextColor(ui.RGBA(255, 255, 255, 0.92))
+		})
+	}
+	if el.Clicked() {
+		s.openFullPlayer()
+	}
 }
 
 // viewStepButtons 是上一首和下一首。
@@ -186,10 +213,21 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 // 队列里只有一首歌时按钮仍然是亮的——按下去听到的是同一首从头来，
 // 表现成按了没反应更让人困惑。
 func (s *Shell) viewStepButtons(c *ui.Context) {
-	// 宽度要放得下三个汉字：按 64 画出来是「上...」「下...」，看着像坏了。
+	s.viewPrevButton(c)
+	s.viewNextButton(c)
+}
+
+// viewPrevButton / viewNextButton 是那两首键。分成两个是为了全屏播放器能把它们
+// 摆到播放键**两边**（Biu 的 `MusicPlayControl` 就是 上一首 · 播放 · 下一首）。
+//
+// 宽度要放得下三个汉字：按 64 画出来是「上...」「下...」，看着像坏了。
+func (s *Shell) viewPrevButton(c *ui.Context) {
 	if ui.Button(c, "上一首").Width(88).Disabled(!s.app.CanPrev()).Clicked() {
 		s.app.Prev()
 	}
+}
+
+func (s *Shell) viewNextButton(c *ui.Context) {
 	if ui.Button(c, "下一首").Width(88).Disabled(!s.app.CanNext()).Clicked() {
 		s.app.Next()
 	}
