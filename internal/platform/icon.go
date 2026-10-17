@@ -66,7 +66,8 @@ const (
 // 而 4096 以上的画布（4 倍超采样后是 16384²）要 1 GB 内存，一个图标而已。
 func AppIconPNG(size int) ([]byte, error) {
 	size = min(max(size, 16), 4096)
-	img := AppIcon(size)
+	// 只读就行——马上要 png.Encode，而 png.Encode 不改源图。
+	img := AppIconShared(size)
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
 		return nil, err
@@ -74,10 +75,41 @@ func AppIconPNG(size int) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// iconCache 是 `AppIconShared` 画好的成品图，键是边长。
+//
+// # 为什么缓存
+//
+// 画图是**纯函数**：同一个边长画出来永远是同一张，没有随机、没有外部状态、
+// 读的是代码里的常量（`iconGreen` / `iconWhite` 和那几个比例）。而它不便宜——1024
+// 那一档是在 4096² 的超采样画布上逐像素画的，一千六百多万次几何判定。
+//
+// 重复问同一档的地方是现成的：`cmd/genicon` 的尺寸表里 256 和 512 各出现两次
+// （`.icns` 和 `.ico` 各要一档），于是每次生成图标都把最贵的两张图白画一遍。
+//
+// # 为什么不是「按尺寸攒满一整套」
+//
+// 缓存是懒的：谁问谁填。而**产品运行时要的只有 32 那一档**（`TrayIconPNG`），
+// 平时就一直只驻留这一张小图（4 KB）。整套尺寸表加起来有五兆多，只有 `genicon`
+// 那种一次性跑完就退出的工具才会把它填满——对那种进程，五兆无关紧要。
+//
+// # ⚠️ 这里存的那张图是**进程内共享的一份**，谁拿到都**不能改**
+//
+// 改了就等于改了整个进程里之后所有的调用方——包括托盘图标——而且没有任何
+// 测试会红（后面那几条测试读到的还是「改完之后」那张图，它们只断图案形状，
+// 断不出「这张图被别人改过」）。
+//
+// 所以这个缓存**只由 `AppIconShared` 用**，它的返回值在签名和文档上都标了
+// 「只读」。要一张自己能改的图请用 `AppIcon`——它每次都新画一张。
+var iconCache sync.Map // int → *image.NRGBA
+
 // AppIcon 画应用图标，返回 size×size 的图（已经是缩好的最终尺寸）。
 //
 // 超采样在内部完成，调用方拿到的是干净的边。返回 `*image.NRGBA`：PNG 要的是
 // 非预乘的 alpha，`image.NRGBA` 直接就是。
+//
+// 每次调用都**新画一张**，调用方可以随意改它，不会影响别处（也包括之后
+// 再调一次拿到的图）。代价是同一尺寸画几次就画几次——只需要读一遍的那些地方
+// （编码、逐像素检查）用 `AppIconShared`。
 func AppIcon(size int) *image.NRGBA {
 	big := size * iconSupersample
 	src := image.NewNRGBA(image.Rect(0, 0, big, big))
@@ -86,6 +118,21 @@ func AppIcon(size int) *image.NRGBA {
 	// 面积平均缩回来。框不满就留透明，不补边——canvas 永远是 size×size。
 	dst := image.NewNRGBA(image.Rect(0, 0, size, size))
 	downsample(src, dst)
+	return dst
+}
+
+// AppIconShared 是 `AppIcon` 的只读版本：同一个尺寸多次调用给的是**同一张**，
+// 省掉重复的逐像素光栅化。
+//
+// ⚠️ **返回值不能改。** 它是进程内共享的（见 `iconCache` 上那段为什么），
+// 在返回值上 `SetNRGBA` 会把之后所有调用方（包括托盘图标）一起改掉，
+// 而且没有任何测试会红。要一张能改的用 `AppIcon`。
+func AppIconShared(size int) *image.NRGBA {
+	if v, ok := iconCache.Load(size); ok {
+		return v.(*image.NRGBA)
+	}
+	dst := AppIcon(size)
+	iconCache.Store(size, dst)
 	return dst
 }
 

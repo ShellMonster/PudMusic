@@ -403,32 +403,40 @@ func (m *Manager) Close(path string) error {
 	m.quit()
 	m.wg.Wait()
 
-	// 关掉时**还排在队上**的那几项，落成「暂停」。
+	// 🔴 后台那条线退出时**可能没走完队列**：`loop` 的外层 select 命中
+	// `ctx.Done()` 就直接 return，还没轮到内层那个 `for`。那些项于是留在「排队中」。
 	//
-	// 🔴 为什么 `loop` 不改它们：`runOne` 只改**它捡起来的那一项**。而 `loop` 可能
-	// 在被 `wakeup` 唤醒之前就收到了 `m.ctx.Done()` 直接返回——那一项就永远停在
-	// `queued` 了。对用户那意味着「关掉时正在下」的东西，下次打开还是 `queued`，
-	// 而 `Restore` 只把 `inflight()` 的改成暂停、`queued` 原样留着，于是它显示成
-	// 「已加入队列」却没人下（`loop` 已经退出）。
+	// 而「排队中」是不该被存下去的语义——下次启动会**自动**接着下，用户关应用时
+	// 可没要求过这件事。`runOne` 在关着的时候会把捡到的那一项标成暂停（「下次接着
+	// 下」），但那是捡到才标，捡不到的那些没人管。实测这条竞态占 `go test` 的失败
+	// 率约八成（连跑五次红四次），而它本该是确定的。
 	//
-	// 语义上这也是对的：关应用时还排着队的，就是「下次接着下」的那一种
-	// （`persistable()` 对正在下的也是这么记的）。
-	m.mu.Lock()
-	for _, id := range m.order {
-		if t := m.tasks[id]; t != nil && t.Status == StatusQueued {
-			t.Status = StatusPaused
-		}
-	}
-	wake := m.wake
-	m.mu.Unlock()
-	if wake != nil {
-		wake()
-	}
+	// 所以这里补上确定的一步：`loop` 已经退出，不会再有并发改状态。
+	//
+	// ⚠️ 这一段**与 `origin/main` 的 `#82` 修的是同一个问题**（那一票先一步把同样的
+	// 逻辑抽成了 `pauseQueued`）。两边独立撞上同一条，说明它不是某一张票的边角——
+	// 是 `Close` 的 `wg.Wait()` 之后必然有一批 `queued` 谁都没管。合并时采用上游那一
+	// 份：它是个有名字的方法（可以单独被测），注释也写清了「为什么不能改成别的」。
+	m.pauseQueued()
 
 	if path == "" {
 		return nil
 	}
 	return m.Save(path)
+}
+
+// pauseQueued 把还在排队的项落到「暂停」。
+//
+// ⚠️ 必须在后台那条线退出之后（`Close` 里 `wg.Wait()` 之后）调：这时才不会有并发
+// 在改同一批状态。
+func (m *Manager) pauseQueued() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, t := range m.tasks {
+		if t != nil && t.Status == StatusQueued {
+			t.Status = StatusPaused
+		}
+	}
 }
 
 // ---- 后台那条线 ----
