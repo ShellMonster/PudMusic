@@ -13,6 +13,7 @@ package mux
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"sort"
@@ -91,7 +92,7 @@ func TestMuxProducesTwoTracksThatCarryTheSourceVerbatim(t *testing.T) {
 	video, audio := writePair(t, spV, spA)
 	dst := filepath.Join(dir, "歌.mp4")
 
-	res, err := Mux(video, audio, dst)
+	res, err := Mux(context.Background(), video, audio, dst)
 	if err != nil {
 		t.Fatalf("交织：%v", err)
 	}
@@ -171,7 +172,7 @@ func TestSampleTimesAreCarriedVerbatim(t *testing.T) {
 	video, audio := writePair(t, spV, spA)
 	dst := filepath.Join(dir, "v.mp4")
 
-	if _, err := Mux(video, audio, dst); err != nil {
+	if _, err := Mux(context.Background(), video, audio, dst); err != nil {
 		t.Fatalf("交织：%v", err)
 	}
 	out := decodeOut(t, dst)
@@ -266,7 +267,7 @@ func TestSampleBytesSurviveTheMove(t *testing.T) {
 	video, audio := writePair(t, spV, spA)
 	dst := filepath.Join(dir, "v.mp4")
 
-	if _, err := Mux(video, audio, dst); err != nil {
+	if _, err := Mux(context.Background(), video, audio, dst); err != nil {
 		t.Fatalf("交织：%v", err)
 	}
 	out := decodeOut(t, dst)
@@ -357,7 +358,7 @@ func TestTracksAreInterleavedByTimeWindow(t *testing.T) {
 	video, audio := writePair(t, spV, spA)
 	dst := filepath.Join(dir, "v.mp4")
 
-	if _, err := Mux(video, audio, dst); err != nil {
+	if _, err := Mux(context.Background(), video, audio, dst); err != nil {
 		t.Fatalf("交织：%v", err)
 	}
 	out := decodeOut(t, dst)
@@ -421,7 +422,7 @@ func TestMuxRefusesStreamsThatDoNotLineUp(t *testing.T) {
 	video, audio := writePair(t, muxtest.VideoSpec(300), muxtest.AudioSpec(3))
 	dst := filepath.Join(dir, "v.mp4")
 
-	_, err := Mux(video, audio, dst)
+	_, err := Mux(context.Background(), video, audio, dst)
 	if err == nil {
 		t.Fatal("两条流差了 7 秒还是交织成功了")
 	}
@@ -443,7 +444,7 @@ func TestMuxAcceptsTheUsualFewMillisecondsOfSkew(t *testing.T) {
 	video, audio := writePair(t, muxtest.VideoSpec(300), muxtest.AudioSpec(10))
 	dst := filepath.Join(dir, "v.mp4")
 
-	res, err := Mux(video, audio, dst)
+	res, err := Mux(context.Background(), video, audio, dst)
 	if err != nil {
 		t.Fatalf("交织：%v", err)
 	}
@@ -466,10 +467,10 @@ func TestMuxRejectsTheWrongKindOfStreams(t *testing.T) {
 	video, audio := writePair(t, muxtest.VideoSpec(60), muxtest.AudioSpec(2))
 	dst := filepath.Join(dir, "v.mp4")
 
-	if _, err := Mux(video, video, dst); err == nil {
+	if _, err := Mux(context.Background(), video, video, dst); err == nil {
 		t.Error("两条视频流交织成功了")
 	}
-	if _, err := Mux(audio, audio, dst); err == nil {
+	if _, err := Mux(context.Background(), audio, audio, dst); err == nil {
 		t.Error("两条音频流交织成功了")
 	}
 }
@@ -487,7 +488,7 @@ func TestMuxRejectsATruncatedStream(t *testing.T) {
 	cut(t, video, 0.6)
 
 	dst := filepath.Join(dir, "v.mp4")
-	if _, err := Mux(video, audio, dst); err == nil {
+	if _, err := Mux(context.Background(), video, audio, dst); err == nil {
 		t.Error("视频流缺了尾巴还是交织成功了")
 	}
 	// 写坏的那个路径不能留在盘上：调用方给的是一个临时路径，留下来
@@ -521,7 +522,7 @@ func TestMuxHandlesStreamsShorterThanOneWindow(t *testing.T) {
 	video, audio := writePair(t, spV, spA)
 	dst := filepath.Join(dir, "v.mp4")
 
-	res, err := Mux(video, audio, dst)
+	res, err := Mux(context.Background(), video, audio, dst)
 	if err != nil {
 		t.Fatalf("交织：%v", err)
 	}
@@ -555,7 +556,7 @@ func TestMuxHandlesAKeyframeBiggerThanTheCopyBuffer(t *testing.T) {
 	video, audio := writePair(t, spV, spA)
 	dst := filepath.Join(dir, "v.mp4")
 
-	res, err := Mux(video, audio, dst)
+	res, err := Mux(context.Background(), video, audio, dst)
 	if err != nil {
 		t.Fatalf("交织：%v", err)
 	}
@@ -571,4 +572,76 @@ func TestMuxHandlesAKeyframeBiggerThanTheCopyBuffer(t *testing.T) {
 	if off := bytes.Index(raw, spV.PayloadOf(0)); off < 0 {
 		t.Errorf("那个 %d 字节的关键帧在产物里找不到", keyframe)
 	}
+}
+
+// TestTheSyncSampleBoxListsTheKeyFrames 钉住 `stss` 列的是**关键帧**。
+//
+// 这一条是被评审逮出来的（第一版把 `if s.sync` 写成了 `if !s.sync`）：
+//
+//	错法一：列的是**非**关键帧
+//	  文件**照样能从头顺下来播**——播放器的解码会话从 0 建，一路解得下去。
+//	  但拖进度条时每一次 seek 都按 `stss` 找一个起点，而它给的是 P/B 帧：
+//	  出来的是花的，或者播放���干脆不解那一段。顺放看不出来，所以肉眼验
+//	  「能播」验不出这个错。
+//
+//	错法二：全都不是关键帧时写成 `entry_count = 0`
+//	  那个数字的意思是「**一个同步采样都没有**」，而缺这个盒子才是
+//	  「全都是同步采样」。音频轨是常态（AAC 每一帧独立可解，源里不给
+//	  同步标志），而它会让播放器认为这条轨一个 seek 点都没有——
+//	  **拖进度条拖不动**。
+func TestTheSyncSampleBoxListsTheKeyFrames(t *testing.T) {
+	dir := t.TempDir()
+	spV, spA := muxtest.VideoSpec(20), muxtest.AudioSpec(1)
+	video, audio := writePair(t, spV, spA)
+	dst := filepath.Join(dir, "v.mp4")
+	if _, err := Mux(context.Background(), video, audio, dst); err != nil {
+		t.Fatalf("交织：%v", err)
+	}
+	out := decodeOut(t, dst)
+
+	vt := trakByHandler(t, out, "vide")
+	got := syncSamples(vt)
+	var want []int
+	for i := range spV.Samples() {
+		if spV.SyncOf(i) {
+			want = append(want, i+1)
+		}
+	}
+	if len(got) == 0 {
+		t.Fatal("视频轨一个关键帧都没记进 stss——拖进度条会全部落在非关键帧上")
+	}
+	if len(got) != len(want) {
+		t.Fatalf("stss 记了 %d 个同步采样，源里有 %d 个：\n got %v\nwant %v",
+			len(got), len(want), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("stss 第 %d 项是采样 %d，源里那个位置的关键帧是采样 %d\n got %v\nwant %v",
+				i, got[i], want[i], got, want)
+		}
+	}
+
+	// 音频轨：一个 `stss` 都不该有。
+	//
+	// 写成 `entry_count = 0` 的话，那句话是「这条轨一个同步采样都没有」，
+	// 播放器于是拒绝在音频轨上 seek——而音频是每一帧都能独立解码的。
+	at := trakByHandler(t, out, "soun")
+	if stss := at.Mdia.Minf.Stbl.Stss; stss != nil {
+		t.Errorf("音频轨写了一个 stss（%d 项），而缺这个盒子才是对的"+
+			"（一个 entry_count=0 的 stss 说的是「没有同步采样」）",
+			len(stss.SampleNumber))
+	}
+}
+
+// syncSamples 读出一条轨的 `stss`（没有 `stss` 就是「全部都是」）。
+func syncSamples(trak *mp4.TrakBox) []int {
+	stss := trak.Mdia.Minf.Stbl.Stss
+	if stss == nil {
+		return nil
+	}
+	out := make([]int, 0, len(stss.SampleNumber))
+	for _, n := range stss.SampleNumber {
+		out = append(out, int(n))
+	}
+	return out
 }

@@ -189,6 +189,35 @@ func (m *Manager) pullStream(ctx context.Context, id string, companion bool, par
 	return pullErr
 }
 
+// destOf 拿这一项当前的 `Dest`。**必须在锁下调**。
+func (m *Manager) destOf(id string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if t := m.tasks[id]; t != nil {
+		return t.Dest
+	}
+	return ""
+}
+
+// restoreDest 把 `Dest` 放回它交织失败之前的样子。
+//
+// 用在 `runMux`：交织失败时那两条半成品留在**旧**路径上（见那里的四步），
+// 而 `Dest` 被 `destToLand` 改到了新路径。不放回去的话，下一轮重试会
+// 判成「半成品不见了」而从零重下几百兆。
+//
+// 只在**失败**那条路上调：成功时新名字才是对的（`Remove` / `Clear` 要删的
+// 是新名字那两个）。
+func (m *Manager) restoreDest(id, dest string) {
+	if dest == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if t := m.tasks[id]; t != nil {
+		t.Dest = dest
+	}
+}
+
 // markMuxing 把状态落成「交织中」，并叫界面要一帧。
 func (m *Manager) markMuxing(id string) {
 	m.mu.Lock()
@@ -242,6 +271,17 @@ func (m *Manager) runMux(ctx context.Context, id, videoPart, audioPart string) e
 	if err := ctx.Err(); err != nil {
 		return err // 用户按了暂停：别在暂停之后还交织一遍
 	}
+	// ⚠️ `destToLand` **可能改 `Dest`**（那个位置上已经有别人的东西时
+	// 让开）。而那两条半成品是按**改之前**那个 `Dest` 建出来的——交织失败
+	// 时它们留在旧路径上，`Dest` 却指到了新路径。
+	//
+	// 后果是「几百 MB 白下」：下一轮「重试」走 `prepare` 的 else 分支，
+	// `os.Stat` 新路径上的半成品当然不存在 → `resetChunks` → **两条流
+	// 从零重下**，而旧路径上那两个几百 MB 成了孤儿（`Remove` / `Clear`
+	// 只认当前 `Dest`，永远不会去删它们）。
+	//
+	// 所以失败时把 `Dest` **放回去**：让它和半成品在的地方始终一致。
+	old := m.destOf(id)
 	dest := m.destToLand(id)
 	if dest == "" {
 		return ErrNotFound
@@ -251,11 +291,13 @@ func (m *Manager) runMux(ctx context.Context, id, videoPart, audioPart string) e
 	m.markMuxing(id)
 
 	mix := mixPartPath(dest)
-	if _, err := mux.Mux(videoPart, audioPart, mix); err != nil {
+	if _, err := mux.Mux(ctx, videoPart, audioPart, mix); err != nil {
+		m.restoreDest(id, old)
 		return err
 	}
 	if err := os.Rename(mix, dest); err != nil {
 		_ = os.Remove(mix)
+		m.restoreDest(id, old)
 		return fmt.Errorf("download: 落盘 %s：%w", dest, err)
 	}
 	// 成片已经在 `dest` 上了，那两条源流就是没人要的东西了。

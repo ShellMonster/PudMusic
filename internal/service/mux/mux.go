@@ -27,6 +27,7 @@
 package mux
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -72,12 +73,17 @@ const maxDrift = 2 * time.Second
 
 // Mux 交织两条流，写到 dst。
 //
+// **可取消**（ctx）：交织一个几百 MB 的 MV 要读一遍再写一遍，那十几秒里
+// 用户要能退出、要能删掉这一项。`Manager.Close` 会等后台那条线退出，
+// 而那条线正卡在这里——不认 ctx 的话「退出应用」就变成「等交织完」。
+// 每搬一段采样查一次（见 `build`），所以取消的响应是亚秒级的。
+//
 // videoPath / audioPath 是下好的两条 dash 流（磁盘上的 `.m4s`）。
 // **dst 由调用方决定它是什么**：这一层直接写那个路径，写到一半失败会
 // 把它删掉（那是一份没人要的垃圾），但**改名那一下不归它管**——
 // 给它一个临时路径、由调用方改��最终名，是下载那一层的事（它还要在
 // 改名之前再看一眼那个位置上有没有别人的东西，见 `download.destToLand`）。
-func Mux(videoPath, audioPath, dst string) (*Result, error) {
+func Mux(ctx context.Context, videoPath, audioPath, dst string) (*Result, error) {
 	video, err := readSource(videoPath)
 	if err != nil {
 		return nil, err
@@ -108,7 +114,7 @@ func Mux(videoPath, audioPath, dst string) (*Result, error) {
 		return nil, fmt.Errorf("mux: 建 %s：%w", filepath.Base(dst), err)
 	}
 	written := int64(0)
-	tracks, err := build(&countingWriter{f: f, n: &written}, video, audio, movieTS)
+	tracks, err := build(ctx, &countingWriter{f: f, n: &written}, video, audio, movieTS)
 	if cerr := f.Close(); err == nil && cerr != nil {
 		err = fmt.Errorf("mux: 关 %s：%w", filepath.Base(dst), cerr)
 	}

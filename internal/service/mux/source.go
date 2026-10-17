@@ -68,12 +68,20 @@ type source struct {
 	nextDTS uint64
 	// mediaDur 是全部采样的时长之和（媒体时基）。
 	mediaDur uint64
-	// firstPTS 是第一个**呈现**出来的采样出现在哪儿（媒体时基）。
+	// firstPTS 是第一个**呈现**出来的采样出现在哪儿（媒体时基，**已减掉
+	// `origin`**）。
 	//
-	// 它跟 0 不一定相等：B 帧重排会让头几个采样的 cts 是负的，而
-	// 有 B 站的流第一条轨也不是从 0 开始。两条轨的首帧差就是**音画差**，
-	// 靠它算编辑列表。
+	// 它跟 0 不一定相等：B 帧重排会让头几个采样的 cts 是负的。而
+	// `origin + firstPTS` 才是这条轨**在原时间轴上**的首帧位置——两条轨
+	// 的差就是**音画差**，编辑列表靠它算（见 `build.layoutEdits`）。
 	firstPTS int64
+	// origin 是第一个采样的原始 DTS（第一个分片的 `tfdt`）。
+	//
+	// 为什么要留着：每条源流的时间轴都是**自己**从某个 `tfdt` 起的，而
+	// 两条独立流的 `tfdt` 之差就是音画差。把每条各自归零（媒体时间轴从 0
+	// 起，这本身是对的）会把那个差**抹掉**，于是「音轨比视频轨晚一秒」
+	// 就变成了「两条轨同时开始」——编辑列表整个不写，播放器从 0 就出声。
+	origin uint64
 	// endDTS 是最后一个采样的 dts+dur（媒体时基）。
 	endDTS uint64
 	// endPTS 是最后一个采样**呈现完**的时刻（媒体时基）。
@@ -136,7 +144,11 @@ func readSource(path string) (*source, error) {
 			if src.trak == nil {
 				return nil, fmt.Errorf("mux: %s 里 %s 在 moov 之前", filepath.Base(path), hdr.name)
 			}
-			if err := src.readMoof(r, hdr, pos); err != nil {
+			moof, err := readMoofBox(r, hdr)
+			if err != nil {
+				return nil, err
+			}
+			if err := src.readMoof(moof, pos); err != nil {
 				return nil, err
 			}
 			consumed = true
@@ -178,6 +190,16 @@ func (s *source) readMoov(r io.Reader, hdr boxHeader) error {
 		return fmt.Errorf("mux: %s 的轨缺 tkhd / mdia / mdhd / hdlr", filepath.Base(s.path))
 	}
 
+	// ⚠️ 校验要一路到 `stsd`。只查 `tkhd`/`mdia`/`mdhd`/`hdlr` 的话，一个
+	// 解得开而没有 `minf`/`stbl`/`stsd` 的 `moov` 能一路走到交织前那道
+	// 关里那个解引用 `stsd` 的 switch 上——**panic**。而交织跑在后台
+	// goroutine 上，那里 panic 会一路冒到下载队列的循环（`runOne` →
+	// `loop` 谁都不 recover）：表现是**所有下载一起停住而界面上没有
+	// 任何报错**。
+	if trak.Mdia.Minf == nil || trak.Mdia.Minf.Stbl == nil || trak.Mdia.Minf.Stbl.Stsd == nil {
+		return fmt.Errorf("mux: %s 的轨没有 minf / stbl / stsd", filepath.Base(s.path))
+	}
+
 	// trex 是分片流里那些「这一段没写、按默认来」的值的出处。抽掉了它，
 	// trun 里没写的字段就全是 0——那样每一帧的时长都会变成 0。
 	if moov.Mvex == nil || len(moov.Mvex.Trexs) != 1 {
@@ -209,21 +231,12 @@ func (s *source) readMoov(r io.Reader, hdr boxHeader) error {
 }
 
 // readMoof 解一个分片头，把这一片里的采样记进表。
-func (s *source) readMoof(r io.Reader, hdr boxHeader, moofStart int64) error {
-	b, err := readBox(r, hdr)
-	if err != nil {
-		return err
-	}
-	moof, ok := b.(*mp4.MoofBox)
-	if !ok {
-		return fmt.Errorf("mux: %s 里第 %d 字节那个 moof 读出来是 %T", filepath.Base(s.path), moofStart, b)
-	}
-
+func (s *source) readMoof(moof *mp4.MoofBox, moofStart int64) error {
 	for _, traf := range moof.Trafs {
 		if traf.Tfhd == nil || traf.Tfhd.TrackID != s.trackID || len(traf.Truns) == 0 {
 			continue // 别轨（B 站一条流里只有一条，但别写成「假定没有」）
 		}
-		if err := s.addTraf(moofStart, traf); err != nil {
+		if err := s.addTraf(moofStart, moof, traf); err != nil {
 			return err
 		}
 	}
@@ -231,16 +244,28 @@ func (s *source) readMoof(r io.Reader, hdr boxHeader, moofStart int64) error {
 }
 
 // addTraf 把一个 traf 里的采样记进表。
-func (s *source) addTraf(moofStart int64, traf *mp4.TrafBox) error {
+func (s *source) addTraf(moofStart int64, moof *mp4.MoofBox, traf *mp4.TrafBox) error {
 	tfhd := traf.Tfhd
 
 	// 基准位置：这一片的数据算在哪儿起算。
 	//
 	// `default-base-is-moof` 是分片流里压倒性的写法（B 站就是它），
-	// 基准是 moof 自己那个位置。没有这个标志又没写 base-data-offset 的
-	// 时候，规范说基准是**这一片最前面那条 traf 的**数据起点——而这里
-	// 一条流只有一条 traf，那个起点就是 moof 的起点。
-	base := uint64(moofStart)
+	// 基准是 moof 自己那个位置。
+	//
+	// 没有这个标志又没写 `base-data-offset` 的时候，**规范**
+	// （ISO/IEC 14496-12 §8.8.7）说基准是**这个 moof 后面的第一个字节**，
+	// 不是 moof 的起点——两者差着整个 moof 的长度（几 KB）。照 moof 起点
+	// 算出来的每一个偏移都会落进 moof 的字节里，而那几 KB 是**解得开的**
+	// 分片元数据：于是采样被换成了 `trun` 的内容，而出来的文件轨道数对、
+	// 时长对、能播，播出来是花的。
+	var moofSize uint64
+	if moof != nil {
+		moofSize = moof.Size()
+	}
+	base := uint64(moofStart) + moofSize
+	if tfhd.Flags&mp4.TfhdDefaultBaseIsMoofFlag != 0 {
+		base = uint64(moofStart)
+	}
 	if tfhd.HasBaseDataOffset() {
 		base = tfhd.BaseDataOffset
 	}
@@ -260,7 +285,18 @@ func (s *source) addTraf(moofStart int64, traf *mp4.TrafBox) error {
 		// 时长/大小都是 0，而时长全是 0 的文件**能打开、能播、就是不动**。
 		trun.AddSampleDefaultValues(tfhd, s.trex)
 		if trun.HasDataOffset() {
+			// ⚠️ `data_offset` 是**有符号**的，可以是负的（往 moof 前面指）。
+			// `uint64(base) + uint64(负数)` 在 Go 里是**回绕**，得到一个天文
+			// 数字；不挡的话下面那句「在文件里吗」会因为回绕后仍然很大而
+			// 漏过去，最后在搬数据时变成一句看不懂的 EINVAL。
+			if trun.DataOffset < 0 && uint64(-int64(trun.DataOffset)) > base {
+				return fmt.Errorf("mux: 一个分片的数据偏移落在源文件之前（基准 %d，偏移 %d）",
+					base, trun.DataOffset)
+			}
 			off = base + uint64(int64(trun.DataOffset))
+			if off < base {
+				return fmt.Errorf("mux: 一个分片的数据偏移算出来落在源文件之前")
+			}
 		}
 		for _, smp := range trun.Samples {
 			end := int64(off) + int64(smp.Size)
@@ -289,6 +325,7 @@ func (s *source) finish() error {
 	}
 
 	origin := s.samples[0].dts
+	s.origin = origin
 	s.firstPTS = int64(1) << 62
 	for i := range s.samples {
 		sp := &s.samples[i]
@@ -304,6 +341,19 @@ func (s *source) finish() error {
 	}
 	s.mediaDur = s.endDTS
 	return nil
+}
+
+// readMoofBox 把一个 `moof` 读进内存解出来。
+func readMoofBox(r io.Reader, hdr boxHeader) (*mp4.MoofBox, error) {
+	b, err := readBox(r, hdr)
+	if err != nil {
+		return nil, err
+	}
+	moof, ok := b.(*mp4.MoofBox)
+	if !ok {
+		return nil, fmt.Errorf("mux: 那个 moof 读出来是 %T", b)
+	}
+	return moof, nil
 }
 
 // boxHeader 是一个顶层 box 的头。

@@ -655,3 +655,53 @@ func allChunks(size int) []int {
 	}
 	return out
 }
+
+// ---- 七、交织失败时 `Dest` 不能被改掉 ----
+
+// TestAFailedMuxKeepsTheHalfProductsWhereTheyAre 钉住「交织失败不挪 `Dest`」。
+//
+// `runMux` 落盘前要再看一眼那个位置上有没有别人的东西（`destToLand`），
+// 而那一步**可能改 `Dest`**。交织失败时那两条半成品还留在**旧**路径上，
+// `Dest` 却指到了新路径 —— 于是下一轮「重试」：
+//
+//	prepare 走 else 分支（账上有进度）→ os.Stat 新路径当然不存在
+//	→ resetChunks → **两条流从零重下几百兆**
+//
+// 而旧路径上那两个几百 MB 成了**孤儿**：`Remove` / `Clear` 只认当前 `Dest`，
+// 永远不会去删它们。用户看到的是「重试一次，又下了一遍，然后下载目录里
+// 莫名其妙多出一份」。
+func TestAFailedMuxKeepsTheHalfProductsWhereTheyAre(t *testing.T) {
+	// 视频 10 秒、音频 3 秒：交织必然拒绝。
+	h := newVideoHarness(t, muxtest.VideoSpec(300), muxtest.AudioSpec(3))
+	snap := h.enqueue(StatusError)
+	if snap.Err == "" {
+		t.Fatal("交织失败了却一个字都没说")
+	}
+
+	// 造一个「那个位置上已经有别人的东西」的现场，逼 `destToLand` 让开。
+	squatter := snap.Dest
+	if err := os.WriteFile(squatter, []byte("别人的歌"), 0o644); err != nil {
+		t.Fatalf("占位：%v", err)
+	}
+	before, ok := h.m.Get(snap.ID)
+	if !ok {
+		t.Fatal("队列里没有这一项")
+	}
+	if err := h.m.Resume(snap.ID); err != nil {
+		t.Fatalf("重试：%v", err)
+	}
+	after := h.wait(snap.ID, StatusError)
+
+	if after.Dest != before.Dest {
+		t.Errorf("重试之后落盘名从 %q 变成了 %q，而那两条半成品还在旧路径上"+
+			"——下一次重试会判成「半成品不见了」而从零重下几百兆，旧的那两个"+
+			"又成了没人删的孤儿",
+			before.Dest, after.Dest)
+	}
+	// 半成品要还在原来的位置上（重试失败不该删掉它们，那是续传的凭据）。
+	for _, p := range []string{partPath(before.Dest), companionPartPath(before.Dest)} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("半成品 %s 不在了：%v", filepath.Base(p), err)
+		}
+	}
+}

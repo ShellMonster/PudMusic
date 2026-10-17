@@ -241,3 +241,81 @@ func TestVideoQualityLabels(t *testing.T) {
 		}
 	}
 }
+
+// TestPlayDashRespectsTheQualityTheUserPicked 钉住「点名的那一档算数」。
+//
+// ⚠️ 这一条是被评审逮出来的（第一版 `pickVideo` 根本没有 `want` 这个参数，
+// 拿的是响应里最高的那一档）。
+//
+// 它躲过了所有「能下下来」的验收，因为 `qn` **确实**被发到了请求上——
+// 只是 `fnval=4048` + `fourk=1` 会让 B 站**把别的档一并返回**，而客户端
+// 那个「不超过点名的那一档」的判断没有。
+//
+// 后果很具体：用户点了「下载 360P 省流量」，拿回来的是 4K（几百 MB），
+// 而界面上从头到尾写着 360P。**要靠 `qn` 去相信服务端已经替我们限好了**，
+// 那是把用户的选择交给接口的默认行为。
+func TestPlayDashRespectsTheQualityTheUserPicked(t *testing.T) {
+	exp := time.Now().Add(time.Hour)
+	// 响应里有 4K、1080P、720P、360P 四档（B 站带 `fourk=1` 时就是全给）。
+	dash := dashWithVideo(
+		videoItem(120, 9_000_000, 3840, 2160, streamURL(exp, "-v120.m4s")),
+		videoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-v80.m4s")),
+		videoItem(64, 900_000, 1280, 720, streamURL(exp, "-v64.m4s")),
+		videoItem(16, 300_000, 640, 360, streamURL(exp, "-v16.m4s")),
+	)
+	c := dashClient(t, dash)
+
+	for _, tc := range []struct {
+		name string
+		qn   VideoQuality
+		want int
+	}{
+		{"点名 360P 就给 360P", VideoQuality360, 16},
+		{"点名 720P 就给 720P", VideoQuality720, 64},
+		{"点名 1080P 就给 1080P", VideoQuality1080, 80},
+		{"没点名就给最好的（4K）", VideoQualityUnknown, 120},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pair, err := c.PlayDash(context.Background(), testBvid, testCid, tc.qn, AudioAuto)
+			if err != nil {
+				t.Fatalf("取流：%v", err)
+			}
+			if got := int(pair.Video.Quality); got != tc.want {
+				t.Errorf("挑的是第 %d 档，要的是 %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPlayDashTakesTheLeastBadWhenNoneIsLowEnough 钉住「一档都不满足时往
+// 哪边退」。
+//
+// 用户点名 360P，而这个稿件最低只给到 480P——`bestNotAbove` 一条都不剩。
+// 这时候给**最低的那一档**（480P），不是最高的（1080P）。
+//
+// 为什么这条值得单列：`fnval=4048` + `fourk=1` 会让 B 站把整条阶梯都返回，
+// 所以「一档都不满足」在真网上很常见（很多老稿件没有 360P 那一档）。
+// 而**往高里退**是最坏的方向：用户明明白白选了「省流量」，结果拿回
+// 一个几百 MB 的 1080P，而界面上从头到尾写着 360P。
+//
+// ⚠️ 素材要**三档以上**而且都高于点名的那一档：只有两档时「最低」和
+// 「最高」是同一档，这个用例就白写了（第一版就是这么写的，跑了两遍
+// 才发现它压根没走到那个分支）。
+func TestPlayDashTakesTheLeastBadWhenNoneIsLowEnough(t *testing.T) {
+	exp := time.Now().Add(time.Hour)
+	// 点名 360P；稿件只给 480P / 720P / 1080P，一档都不满足。
+	c := dashClient(t, dashWithVideo(
+		videoItem(16, 300_000, 640, 360, ""), // 有一档没地址，挡掉
+		videoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-v80.m4s")),
+		videoItem(64, 900_000, 1280, 720, streamURL(exp, "-v64.m4s")),
+		videoItem(32, 500_000, 854, 480, streamURL(exp, "-v32.m4s")),
+	))
+	pair, err := c.PlayDash(context.Background(), testBvid, testCid, VideoQuality360, AudioAuto)
+	if err != nil {
+		t.Fatalf("取流：%v", err)
+	}
+	if got := int(pair.Video.Quality); got != 32 {
+		t.Errorf("挑的是第 %d 档，要的是这几档里最低的 32（480P）"+
+			"——往高里退的话用户明选了「省流量」却拿回一个几百 MB 的 1080P", got)
+	}
+}

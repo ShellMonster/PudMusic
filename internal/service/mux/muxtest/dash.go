@@ -51,6 +51,21 @@ type Spec struct {
 	timescale uint32
 	dur       uint32
 	samples   int
+	// startOffset 是第一个采样的 `tfdt`（媒体时基）。默认 0。
+	//
+	// 存在的理由：**「一条流比另一条晚开始」是真实情况**（音轨的开头
+	// 有几帧静音、或者视频轨开头是黑场），而它是编辑列表那一整段逻辑
+	// 唯一的输入。造不出它，「音画首帧不齐」这条路就没有用例——而它错
+	// 起来是「开头多出小半秒没声音、之后慢慢错开」，能从头顺放的人
+	// 看不出来。
+	startOffset int64
+	// ctsBias 是加在**每一个**采样呈现偏移上的常量（媒体时基）。默认 0。
+	//
+	// 存在的理由：一条流的**首帧**在媒体时间轴上不是 0 的情况，只有靠
+	// 「所有采样的 cts 都偏一点」才造得出来（真实流里那是编码器 priming，
+	// 比如 AAC 的编码延迟）。而它正是编辑列表里 `media_time` 那个字段唯一
+	// 会非零的场合——造不出它，`media_time` 的单位错了就没人测得到。
+	ctsBias int32
 	// keyframeBytes >0 时关键帧给这么多字节（默认 3000）。
 	//
 	// 存在的理由：一个真视频的关键帧是几百 KB，而默认那 3000 字节**永远
@@ -68,6 +83,30 @@ func VideoSpec(samples int) Spec {
 func VideoSpecWithKeyframe(samples int, keyframeBytes uint32) Spec {
 	return Spec{video: true, timescale: VideoTimescale, dur: VideoDur,
 		samples: samples, keyframeBytes: keyframeBytes}
+}
+
+// VideoSpecStartingLate 造一条**晚了 `offset` 秒**开始的视频流。
+func VideoSpecStartingLate(samples int, offsetSeconds float64) Spec {
+	s := VideoSpec(samples)
+	s.startOffset = int64(offsetSeconds * float64(s.timescale))
+	return s
+}
+
+// WithCtsBias 是「每个采样的呈现偏移都偏 `bias` 个媒体刻度」。
+//
+// 音频那一条���得加 `+1024`（一帧）才像真的——AAC 编码器的 priming 就是
+// 这么回事：解码出来的第一帧对应的是「编码器吐出来的第一帧」，它在呈现
+// 时间上要往后挪一帧。
+func (s Spec) WithCtsBias(bias int32) Spec {
+	s.ctsBias = bias
+	return s
+}
+
+// AudioSpecStartingLate 造一条**晚了 `offset` 秒**开始的音频流。
+func AudioSpecStartingLate(seconds, offsetSeconds float64) Spec {
+	s := AudioSpec(seconds)
+	s.startOffset = int64(offsetSeconds * float64(s.timescale))
+	return s
 }
 
 // AudioSpec 造一条音频流：`seconds` 秒的 AAC。
@@ -106,16 +145,18 @@ func (s Spec) Seconds() float64 {
 // 排好序之后必须是 0, 1, 2, 3, …，一个不多一个不少。
 func (s Spec) CtsOf(i int) int32 {
 	if !s.video {
-		return 0
+		return s.ctsBias
 	}
+	var c int32
 	switch i % GopLen {
 	case 0: // I 帧：呈现时间就是解码时间
-		return 0
+		c = 0
 	case 1: // P 帧：要等到两个采样之后才呈现
-		return int32(2 * s.dur)
+		c = int32(2 * s.dur)
 	default: // 两个 B 帧：参照的是「还没到」的那一帧
-		return -int32(s.dur)
+		c = -int32(s.dur)
 	}
+	return c + s.ctsBias
 }
 
 // SyncOf 报第 i 个采样是不是关键帧。
@@ -163,7 +204,7 @@ func Write(tb testing.TB, path string, s Spec) {
 		tb.Fatalf("写初始化段：%v", err)
 	}
 
-	var dts uint64
+	dts := uint64(s.startOffset)
 	for seq, start := 1, 0; start < s.samples; seq, start = seq+1, start+PerFragment {
 		frag, err := mp4.CreateFragment(uint32(seq), trak.Tkhd.TrackID)
 		if err != nil {

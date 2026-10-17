@@ -36,6 +36,7 @@
 package mux
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"math"
@@ -84,8 +85,8 @@ type run struct {
 	chunk int   // 它是这条轨的第几个 chunk（写进 `co64` 时要按轨编号）
 }
 
-// build 交织两条流，写到 out。
-func build(out io.Writer, video, audio *source, movieTS uint32) ([]*track, error) {
+// build 交织两条流，写到 out。**每搬一个 chunk 认一次取消**（见 `Mux`）。
+func build(ctx context.Context, out io.Writer, video, audio *source, movieTS uint32) ([]*track, error) {
 	tracks := []*track{
 		{src: video, id: 1, movieTS: movieTS},
 		{src: audio, id: 2, movieTS: movieTS},
@@ -128,7 +129,7 @@ func build(out io.Writer, video, audio *source, movieTS uint32) ([]*track, error
 	if err := mp4.EncodeHeaderWithSize("mdat", uint64(payload+mdatHdr), mdatHdr == 16, out); err != nil {
 		return nil, fmt.Errorf("mux: 写 mdat 的头：%w", err)
 	}
-	if err := copySamples(out, tracks); err != nil {
+	if err := copySamples(ctx, out, tracks); err != nil {
 		return nil, err
 	}
 	return tracks, nil
@@ -145,14 +146,19 @@ func build(out io.Writer, video, audio *source, movieTS uint32) ([]*track, error
 //
 // 绝大多数情况两条轨的首帧都是 0，空编辑是 0 字节——`edts` 整个不写。
 func layoutEdits(tracks []*track) {
+	// 首帧在**原时间轴**上的位置：归零之后每条轨都从 0 起，差就抹掉了
+	// （见 `source.origin`）。
+	startOf := func(t *track) int64 {
+		return int64(t.src.origin) + t.src.firstPTS
+	}
 	base := int64(math.MaxInt64)
 	for _, t := range tracks {
-		if p := rescale(t.src.firstPTS, t.src.timescale, t.movieTS); p < base {
+		if p := rescale(startOf(t), t.src.timescale, t.movieTS); p < base {
 			base = p
 		}
 	}
 	for _, t := range tracks {
-		start := rescale(t.src.firstPTS, t.src.timescale, t.movieTS)
+		start := rescale(startOf(t), t.src.timescale, t.movieTS)
 		// 呈现的范围是 [firstPTS, endPTS)。
 		//
 		// ⚠️ 右端用 `endPTS` 而不是 `mediaDur`：B 帧重排让最后几帧的
@@ -163,7 +169,24 @@ func layoutEdits(tracks []*track) {
 		if from < 0 {
 			from = 0
 		}
-		pres := uint64(rescale(t.src.endPTS-from, t.src.timescale, t.movieTS))
+		// 一个「所有采样时长都是 0」的源会走到 `endPTS < from`，而
+		// `uint64(负数)` 是天文数字——`presDur` 跟着绕回成 0，
+		// 于是写出来的 `mvhd`/`tkhd` 时长是 0 而采样表是满的：
+		// **打开正常、轨道数正常、就是一片黑**。
+		if t.src.endPTS < from {
+			t.delay, t.mediaTime, t.presDur = 0, 0, 0
+			continue
+		}
+		// 🔴 两���时长量的**单位不一样**，别混：
+		//
+		//	`delay` 是 `elst` 的 `segment_duration`，单位是**电影**时基
+		//	`mediaTime` 是 `elst` 的 `media_time`，单位是**这条轨自己的媒体**时基
+		//
+		// 拿电影时基的数去填 `media_time` 的话，音频轨（48000）会被按
+		// 90000 解释——**差 1.875 倍**。症状是「开头多出小半秒没声音，
+		// 之后音画慢慢错开」，而两条轨首帧都是 0 的常见情况下这一段代码
+		// 根本不执行，所以它躲过了所有「能播」的验收。
+		pres := rescale(t.src.endPTS-from, t.src.timescale, t.movieTS)
 		if start < 0 {
 			// 首帧的呈现时间在 0 之前（B 帧重排的常见结果）：空编辑先垫上
 			// 这段，之后整条媒体原样呈现。
@@ -171,9 +194,9 @@ func layoutEdits(tracks []*track) {
 			t.mediaTime = 0
 		} else {
 			t.delay = uint64(start - base)
-			t.mediaTime = start
+			t.mediaTime = from // **媒体时基**，不是电影时基
 		}
-		t.presDur = t.delay + pres
+		t.presDur = t.delay + uint64(pres)
 	}
 }
 
@@ -413,7 +436,11 @@ func fillSampleTables(stbl *mp4.StblBox, samples []sampleRef, runs []*run) {
 		if s.size != samples[0].size || s.size == 0 {
 			uniform = false
 		}
-		if !s.sync {
+		// ⚠️ `stss` 列的是**关键帧**。少写一个符号就变成「列的是非关键帧」，
+		// 而那个文件**照样能从头顺下来播**——拖进度条时每一次 seek 都落在
+		// 一个 P/B 帧上，出来的是花的或者直接不解码。顺放看不出来，所以
+		// 这一条要单独断。
+		if s.sync {
 			stss.SampleNumber = append(stss.SampleNumber, uint32(i+1))
 		}
 	}
@@ -429,8 +456,16 @@ func fillSampleTables(stbl *mp4.StblBox, samples []sampleRef, runs []*run) {
 		ctts = &mp4.CttsBox{Version: cttsVersion}
 		_ = ctts.AddSampleCountsAndOffset(cttsCounts, cttsOffsets)
 	}
-	if len(stss.SampleNumber) == len(samples) {
-		stss = nil // 全是关键帧：没有 stss 就是这个意思
+	// 两种情况都**不要** `stss` 这个盒子，而缺它就是这个意思：
+	//
+	//	全是关键帧（或者一个关键帧都没有）→ 没有 seek 点要记，
+	//	                                 缺 `stss` 正是这句话
+	//	写成 `entry_count = 0` 却是**反过来的**意思：「一个同步采样都没有」
+	//
+	// 后者对音频轨是常态（AAC 每一帧都能独立解码，源里不给同步标志），
+	// 而它会让播放器认为这条轨一个 seek 点都没有——于是**拖进度条拖不动**。
+	if len(stss.SampleNumber) == 0 || len(stss.SampleNumber) == len(samples) {
+		stss = nil
 	}
 
 	stsc, co64 := buildChunkTables(runs)
@@ -490,7 +525,11 @@ func assignChunkOffsets(tracks []*track, dataStart uint64) {
 }
 
 // copySamples 把采样数据按交错顺序搬进 `mdat`。
-func copySamples(w io.Writer, tracks []*track) error {
+//
+// 这是**唯一**长时间的一段（几百 MB 的读+写），所以取消在这里查。
+// 一个 chunk 是半秒的内容（`interleaveWindowPerSec` 那个窗），于是取消
+// 的响应时间就是「一个窗」的量级——亚秒。
+func copySamples(ctx context.Context, w io.Writer, tracks []*track) error {
 	files := make(map[int]*os.File, len(tracks))
 	defer func() {
 		for _, f := range files {
@@ -510,6 +549,9 @@ func copySamples(w io.Writer, tracks []*track) error {
 
 	buf := make([]byte, copyBufSize)
 	for _, p := range all {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		t := tracks[p.idx]
 		f, ok := files[p.idx]
 		if !ok {

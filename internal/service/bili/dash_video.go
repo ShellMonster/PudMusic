@@ -124,19 +124,22 @@ func (c *Client) PlayDash(ctx context.Context, bvid, cid string, qn VideoQuality
 	if err != nil {
 		return nil, err
 	}
-	return pairFrom(d, bvid, cid, pref)
+	return pairFrom(d, bvid, cid, qn, pref)
 }
 
 // pairFrom 把取流响应变成「视频 + 音频」这一对。
 //
+// qn 是调用方点名要的那一档；`VideoQualityUnknown`（0）表示「不点名，
+// 能多好就多好」。
+//
 // 拆出来是为了「解析」这件事能被 fixture 直接测：解析错了在真网上
 // 表现为「下载视频」永远报「这个稿件没有视频」，而真实原因是字段名
 // 写错了或者档位挑不出来。
-func pairFrom(d *playurlData, bvid, cid string, pref AudioQuality) (*DashPair, error) {
+func pairFrom(d *playurlData, bvid, cid string, qn VideoQuality, pref AudioQuality) (*DashPair, error) {
 	if d == nil || d.Dash == nil {
 		return nil, fmt.Errorf("%w: 这个稿件没有 dash 流", ErrNoStream)
 	}
-	v, ok := pickVideo(d.Dash)
+	v, ok := pickVideo(d.Dash, qn)
 	if !ok {
 		return nil, fmt.Errorf("%w: 稿件 %s 的第 %s 集没有视频流", ErrNoStream, bvid, cid)
 	}
@@ -193,7 +196,7 @@ func videoContainer(v dashVideo) string {
 // 4K 和杜比**排在点名的那一档之上就不给**：它们不是「更清晰的同一支
 // 片子」，而是另一个量级的东西（4K 的码率是 1080P 的三四倍，杜比那一条
 // HDR 的播放器支持还是个问题）。要它们得显式点名（见 `videoQualityRank`）。
-func pickVideo(d *dashInfo) (dashVideo, bool) {
+func pickVideo(d *dashInfo, want VideoQuality) (dashVideo, bool) {
 	if d == nil {
 		return dashVideo{}, false
 	}
@@ -210,6 +213,30 @@ func pickVideo(d *dashInfo) (dashVideo, bool) {
 		return dashVideo{}, false
 	}
 
+	// 点名了一档：**不超过它的里面挑最好的**。
+	//
+	// ⚠️ 少了这个判断，用户点了「下载 360P 省流量」而拿回来的是 4K——
+	// 而 `qn=16` 只是让 B 站**也**把别的档一并返回（`fnval=4048` + `fourk=1`），
+	// 不代表别的档就没回来。整个 4K 下下来几百 MB，而界面上从头到尾写着
+	// 用户点的那一档。**要靠 `qn` 去相信服务端已经替我们限好了**，那是把
+	// 用户的选择交给接口的默认行为。
+	if want != VideoQualityUnknown {
+		if best, ok := bestNotAbove(list, want); ok {
+			return best, true
+		}
+		// 一档都不超过点名的那一档（B 站没给）：只能拿最低的那一档，
+		// 而不是最高的那一档。宁可少一档，也不要多给——和音频那条
+		// `closestTo` 同一个道理（见 `quality.go`）。
+		worst := list[0]
+		for _, v := range list[1:] {
+			if videoQualityRank[VideoQuality(v.ID)] < videoQualityRank[VideoQuality(worst.ID)] {
+				worst = v
+			}
+		}
+		return worst, true
+	}
+
+	// 没点名：能多好就多好。
 	best := list[0]
 	for _, v := range list[1:] {
 		if videoQualityRank[VideoQuality(v.ID)] > videoQualityRank[VideoQuality(best.ID)] {
@@ -217,6 +244,18 @@ func pickVideo(d *dashInfo) (dashVideo, bool) {
 		}
 	}
 	return best, true
+}
+
+// bestNotAbove 在 list 里挑不超过 want 的最好的那一档。
+func bestNotAbove(list []dashVideo, want VideoQuality) (dashVideo, bool) {
+	limit := videoQualityRank[want]
+	best, found := dashVideo{}, false
+	for _, v := range list {
+		if r := videoQualityRank[VideoQuality(v.ID)]; r <= limit && (!found || r > videoQualityRank[VideoQuality(best.ID)]) {
+			best, found = v, true
+		}
+	}
+	return best, found
 }
 
 // fetchPlayurl 发那一次取流请求。
