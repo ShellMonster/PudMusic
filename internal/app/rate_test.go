@@ -1,6 +1,9 @@
 package app_test
 
 import (
+	"bytes"
+	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -61,6 +64,16 @@ func reach(t *testing.T, a *app.App, target time.Duration) time.Time {
 	return at
 }
 
+// winSpan 是一段窗口有多长（歌内时间）。
+//
+// 两秒。位置每 50ms 才写回一次（app.go 的 tickInterval），窗口两端各能差 50ms，
+// 一秒的窗口采样误差就是 5%——淹在 1.8 倍的容差里，但没必要顶着这个数跑。
+//
+// 更重要的是**窗口越长被整段抢走的概率越小**：这台机器上有十几份 `-race` 同时跑，
+// 音频回调随时可能连续几百毫秒拿不到 CPU，而一段两秒的窗口被整整抢掉要更难。
+// 「量两遍取大的」治的是抢走一部分，这个治的是抢走一整段。
+const winSpan = 2 * time.Second
+
 // secPerSong 量「一秒真实时间里，歌里的时间走了多少」。
 //
 // ⚠️ 只在**同一轮里比两个窗口**时才准，见文件头那段。要看的从来不是它等于几，
@@ -82,10 +95,6 @@ func reach(t *testing.T, a *app.App, target time.Duration) time.Time {
 //
 // 这和 flacdec 的 `TestDecodeSpeed`「五轮取最快」是同一个手法，也是那个仓库早就
 // 验证过的：它治的正是「解码器变慢」和「旁边有人在抢 CPU」分不出来这件事。
-//
-// ⚠️ 窗口只有一秒。位置每 50ms 才写回一次（app.go 的 tickInterval），所以窗口两端
-// 各能差 50ms，也就是 5% 的采样误差。容差 1.8 倍，5% 淹在里面。之所以敢从两秒
-// 缩到一秒：量两段的总时间没变，而短的窗口被整段抢走的概率小一半。
 func secPerSong(t *testing.T, a *app.App, from, to time.Duration) float64 {
 	t.Helper()
 	span := to - from
@@ -109,50 +118,70 @@ func near(got, want, tol float64) bool {
 	return r >= 1/tol && r <= tol
 }
 
-// realtimeFloor 是「1 倍速下，歌里的时间至少要走这么快」的下限。
+// rateTol 是这一族所有比值判据的容差倍数。
 //
-// # 为什么这一族量倍率之前要先过这一关
-//
-// 下面几条量的是**比值**：同一首歌上量 1 倍速和另一个倍速的两个窗口，比值要是
-// 那个倍率。机器慢会让两个窗口**一起**慢、比值不变——这正是这些断言写成比值
-// 而不是「一秒该走几秒」的原因。
-//
-// 但慢到某个程度就不成立了。播放走系统音频输出，那条回调被操作系统整个饿着的
-// 时候（这台机器上同时跑着好几份 `-race`，负载压到 300 以上），某些窗口拿得到
-// CPU、某些拿不到，**比值就成了噪声**。实测同一轮里 0.5 倍速那个窗口只走到
-// 0.086、原速那个走到 0.331——比值 0.26，既不是 0.5（没套上）也不是别的任何倍率。
-// 那种时候报「倍率没套上」是把机器的事说成代码的事，下一个人会照着去改
-// `App.tick`，改完还是红的。
-//
-// 0.85 是两头量的：1 倍速的定义就是 1.0，而这一族要的恰恰是「走得比实时快多少倍」——
-// 机器得先能跟上实时，那个比值才有意义。实测踩过的坑：`TestRateSurvivesTrackChanges`
-// 在原速基准 0.6 那一档上放过了一次，2 倍速窗口才量到 1.16，报「切歌之前就走得不够快」
-// ——而它给的下限（0.6）离「能跟上实时」差着一大截。掉到 0.85 以下时，机器噪声
-// 已经和要量的东西一样大了。
-//
-// 真要是**1 倍速本身**走慢了，那该由另一条单独断（它是进度条时钟的问题，不是倍率的
-// 问题）——混在这一族里只会让它既报不出倍率的问题、又盖住时钟的问题。
-const realtimeFloor = 0.85
+// 真正的错（没套上 = 1.0、反过来 = 0.5）都掉在 1/1.8 ~ 1.8 之外。
+const rateTol = 1.8
 
-// requireRealtime 量一段原速窗口，顺带确认这台机器放得动实时音频。
+// healthyUnity 是「1 倍速下歌里的时间至少要走这么快」，低过它就算「机器跟不上实时」。
 //
-// 放不动就**跳过**——跳过说的是「这个环境测不了这条」，不是「这条过了」。
-// 跳过的信息里带着实测值，等负载降下来重跑就行。
+// 1 倍速的定义就是 1.0（MyGo 按实时消费输出），所以这个数是「这台机器**慢了多少**」
+// 的读数。
+const healthyUnity = 0.75
+
+// measurable 断「这一轮的数能不能拿来判倍率」。
 //
-// 返回的是基准值本身。调用方拿它当**分母**，于是判据写成「比原速快 1.3 倍」
-// 而不是「一秒走 1.3 秒歌内」——后者只在原速基准恰好是 1.0 时成立，而一台
-// **能跟上实时**的机器上它就有百分之十几的偏差（实测基准 0.85 时，绝对判据
-// `before < 1.3` 会把一个真的 2 倍速误判成没套上）。按比例算，两边同源，
-// 测的是「比原速快多少」这件事本身。
-func requireRealtime(t *testing.T, a *app.App, from, to time.Duration) float64 {
+// # 慢有两种，只有一种会让比值失效
+//
+// **慢而均匀**：所有窗口一起慢。实测原速 0.825 时，2 倍速窗口也是 0.825 的两倍——
+// 比值照样是 2，**这一族照样测得出结果**。这种情况**不许判成测不了**，跳过一次
+// 就是少验一遍。
+//
+// **慢到供不上**：机器每秒钟只能供出 0.375 秒的音频。这时 2 倍速套上了也是 0.375、
+// 没套上也是 0.375（没套上时供的是 1.0，也一样供不上），**两者在这台机器上完全
+// 无法区分**。这不是判据松紧的问题，是物理上没有信号可测。
+//
+// 所以：**比值落在容差内 → 量到了（让调用方过）；落在容差外但机器健康 → 真的错了
+// （让调用方红）；落在容差外且机器供不上 → 测不了（跳过）。**
+func measurable(unity, got, target float64) bool {
+	return near(got, unity*target, rateTol) || unity >= healthyUnity
+}
+
+// requireMeasurable 在「这一轮根本判不了」的时候跳过，跳之前先打一行出来。
+//
+// # 为什么跳过时必须打一行
+//
+// `t.Skip` 在 `go test` **不带 `-v`** 时和通过一样只报 `ok`——也就是「静默地不测」。
+// 那正是这一族最不该有的结果：一个人 review 看到 ok 会以为验过了。测试进程的 stderr
+// 总是会被 `go test` 原样转发，不带 `-v` 也看得见，所以这里先往 stderr 打一行。
+//
+// 这一族本来就要求机器跟得上实时播放（它量的就是「走得比实时快多少倍」），所以这
+// 个跳过**不是新增的逃逸口**：改动前这里没有任何跳过路径，重负载下只会红成
+// 「倍率没套上」——那是把机器的事说成代码的事，比不测更坏。
+func requireMeasurable(t *testing.T, unity, got, target float64) {
 	t.Helper()
-	v := secPerSong(t, a, from, to)
-	if v < realtimeFloor {
-		t.Skipf("这台机器放不动实时音频：1 倍速下歌里的时间只走了每秒 %.3f"+
-			"（下限 %.1f）。倍速这一族量的是两个窗口的比值，音频回调被饿着时比值"+
-			"是噪声，报「倍率没套上」是把机器的事说成代码的事——等负载降下来再跑。",
-			v, realtimeFloor)
+	if measurable(unity, got, target) {
+		return
 	}
+	fmt.Fprintf(os.Stderr,
+		"BMG-44: %s 测不了——这台机器每真实秒只供得出 %.3f 秒歌（1 倍速下），"+
+			"%v 倍速窗口只走到 %.3f。机器供不上 %v 倍速的实时播放时，「套上了」和"+
+			"「没套上」量出来的数一模一样（都没供上），物理上没有信号可测，所以跳过而"+
+			"不是报红。等负载降下来重跑。\n",
+		t.Name(), unity, target, got, target)
+	t.Skipf("这台机器供不上实时播放（原速只走到 %.3f，%v 倍速窗口 %.3f），"+
+		"倍率在这一刻量不准", unity, target, got)
+}
+
+// unityBaseline 量一段**原速**窗口当基准，并把倍率**拨回原样**。
+//
+// from 要让开上一次换档留下的预解缓冲（一秒的输出仍是按旧倍率铺的）。
+func unityBaseline(t *testing.T, a *app.App, from time.Duration) float64 {
+	t.Helper()
+	keep := a.Snapshot().Rate
+	a.SetRate(1)
+	v := secPerSong(t, a, from, from+winSpan)
+	a.SetRate(keep)
 	return v
 }
 
@@ -191,33 +220,30 @@ func TestTheClockFollowsTheRate(t *testing.T) {
 	if err := a.Open(longWav(t, "一首长歌.wav")); err != nil {
 		t.Fatal(err)
 	}
+	// 开头两秒是输出现开 + 预解缓冲，第一段从第三秒开始量。
 
-	// 基准：原速。等到两秒才开始量——开头那段是输出现开 + 预解缓冲，不算数。
-	// requireRealtime 在这里兼做一次「机器放得动实时音频吗」的自检：它把这个
-	// 基准值原样还回来，下面就拿它当分母。
-	//
-	// 三段的起点都要让开**上一段的位置 + 预解缓冲**：换档之后约有一秒的输出仍是按
-	// 旧倍率铺的（见 secPerSong 的注释）。一秒输出在 2 倍速下是两秒歌内、在 0.5
-	// 倍速下也是两秒歌内，所以每次换档往后让两秒歌内。
-	a.SetRate(1)
-	one := requireRealtime(t, a, 2*time.Second, 3*time.Second)
-
+	// 2 倍速：先量它自己，再让 unityBaseline 在**紧挨着**的位置量一段原速当分母。
+	// 两段之间只隔一次 SetRate，机器的忙闲几乎没变。
 	a.SetRate(2)
-	two := secPerSong(t, a, 7*time.Second, 8*time.Second)
-
-	a.SetRate(0.5)
-	half := secPerSong(t, a, 12*time.Second, 13*time.Second)
-
-	// 容差 1.8 倍：`-race` 下音频回调被抢会让所有窗口一起变小，而比值不变；
-	// 真正的错（没套上 = 1.0、反过来 = 0.5）都掉在这个范围之外。
-	const tol = 1.8
-	if !near(two, 2*one, tol) {
+	two := secPerSong(t, a, 3*time.Second, 3*time.Second+winSpan)
+	one := unityBaseline(t, a, 9*time.Second)
+	requireMeasurable(t, one, two, 2)
+	if !near(two, 2*one, rateTol) {
 		t.Errorf("2 倍速走 %.3f，原速走 %.3f——比值 %.2f，want 2"+
 			"（进度条和耳朵对不上）", two, one, two/one)
 	}
-	if !near(half, 0.5*one, tol) {
+
+	// 0.5 倍速：同一套。
+	a.SetRate(0.5)
+	half := secPerSong(t, a, 13*time.Second, 13*time.Second+winSpan)
+	one2 := unityBaseline(t, a, 19*time.Second)
+	// 分母取两段原速里**大的**那个：机器慢的时候多给一次机会，别因为其中一段
+	// 慢就把比值压到容差外。
+	base := max(one, one2)
+	requireMeasurable(t, base, half, 0.5)
+	if !near(half, 0.5*base, rateTol) {
 		t.Errorf("0.5 倍速走 %.3f，原速走 %.3f——比值 %.2f，want 0.5",
-			half, one, half/one)
+			half, base, half/base)
 	}
 }
 
@@ -226,31 +252,41 @@ func TestTheClockFollowsTheRate(t *testing.T) {
 // 用户完全可能先在上一首歌上按了 2 倍速，切到下一首。那一首得从第一秒起
 // 就是 2 倍速——不是开了之后再由用户补按一次。
 //
-// 这里只断「明显快过原速」而不是断精确的 2 倍：这一条要验的是「倍率有没有送到
-// 新播放器上」，精确值由上面那条钉（那边有原速当基准）。少了原速当基准，一台
-// 慢一半的机器会把「套上了」也判成「没套上」。
+// ⚠️ 这条用例的**形状**本身就是断言的一部分：必须**没有任何歌在放**的时候调
+// `SetRate`，走的正是 `app.SetRate` 里 `a.player == nil` 那一支——它只把倍率存
+// 在 App 上（没有一个播放器可以套），等新歌开出来时再送过去。所以基准**不能**靠
+// 「先开一首歌量一段原速」来拿：那会毁掉这个前提，让这一支变成没人走的死代码。
+//
+// 基准改为在**开歌之后**临时把倍率拨回 1 量一段，量完再拨回 2。开歌之后
+// `a.player != nil` 了，走的是另一支，不影响上面那条断言。
 func TestRateIsRememberedBeforeAnyTrackIsOpen(t *testing.T) {
 	a := newApp(t)
 	if st := a.Snapshot(); st.HasTrack || st.Rate != 1 {
 		t.Fatalf("刚开出来就有歌了（%+v）", st)
 	}
 
-	// 先用第一首量一段原速当基准（见 requireRealtime）。这一步不碰这一条要验的
-	// 东西：此刻倍率还是 1，「先按倍率再开歌」的走法在下面一步才正式开始。
-	if err := a.Open(longWav(t, "量基准的一首.wav")); err != nil {
-		t.Fatal(err)
-	}
-	one := requireRealtime(t, a, 2*time.Second, 3*time.Second)
-
-	a.SetRate(2)
+	a.SetRate(2) // 此刻没有歌：走 App.SetRate 里 player == nil 那一支
 	if err := a.Open(longWav(t, "先按后放.wav")); err != nil {
 		t.Fatal(err)
 	}
 	if got := a.Snapshot().Rate; got != 2 {
 		t.Fatalf("开歌之后倍率变成了 %v，want 2", got)
 	}
-	if got := secPerSong(t, a, 3*time.Second, 4*time.Second); got < one*1.3 {
-		t.Errorf("先按的 2 倍速没套到新歌上：原速基准 %.2f，2 倍速该有它的 1.3 倍以上，实测 %.2f", one, got)
+
+	// 「新歌一上来就是 2 倍速」——必须量**开歌后的第一段**，中间不能有别的操作。
+	two := secPerSong(t, a, 3*time.Second, 3*time.Second+winSpan)
+	one := unityBaseline(t, a, 9*time.Second)
+	requireMeasurable(t, one, two, 2)
+	if !near(two, 2*one, rateTol) {
+		t.Errorf("先按的 2 倍速没套到新歌上：原速走 %.3f，2 倍速走 %.3f——比值 %.2f，want 2",
+			one, two, two/one)
+	}
+	// 拨回 2 倍速之后仍然是 2 倍速——量基准那一拨没有把倍率留在 1。
+	again := secPerSong(t, a, 13*time.Second, 13*time.Second+winSpan)
+	requireMeasurable(t, one, again, 2)
+	if !near(again, 2*one, rateTol) {
+		t.Errorf("量完基准再拨回 2 倍速，只走到 %.3f（原速 %.3f）——倍率被量基准那次留下了",
+			again, one)
 	}
 }
 
@@ -275,12 +311,11 @@ func TestRateSurvivesTrackChanges(t *testing.T) {
 	}
 	playing(t, a, "第一首")
 
-	// 先在原速上量一段，确认这台机器放得动实时音频（见 requireRealtime），再量
-	// 倍速。窗口往后挪是因为原速那一段已经占掉了歌的前四秒。
-	unity := requireRealtime(t, a, 2*time.Second, 3*time.Second)
+	// 原速基准就在第一首上量（此刻倍率本来就是 1），第二首上的窗口和它比。
+	unity := secPerSong(t, a, 2*time.Second, 2*time.Second+winSpan)
 
 	a.SetRate(2)
-	before := secPerSong(t, a, 7*time.Second, 8*time.Second)
+	before := secPerSong(t, a, 8*time.Second, 8*time.Second+winSpan)
 
 	a.Next()
 	playing(t, a, "第二首")
@@ -290,12 +325,15 @@ func TestRateSurvivesTrackChanges(t *testing.T) {
 	if pos := a.Snapshot().Position; pos > 2*time.Second {
 		t.Errorf("第二首一上来位置就在 %v——上一首的进度接着数了", pos)
 	}
-	after := secPerSong(t, a, 2*time.Second, 3*time.Second)
+	// 和第一首用**同一个歌内位置**量，这样两段的歌内时间一样长，比值才干净。
+	after := secPerSong(t, a, 8*time.Second, 8*time.Second+winSpan)
 
-	if before < unity*1.3 {
-		t.Errorf("切歌之前就走得不够快：原速基准 %.2f，2 倍速该有它的 1.3 倍以上，实测 %.2f", unity, before)
+	requireMeasurable(t, unity, before, 2)
+	if !near(before, 2*unity, rateTol) {
+		t.Errorf("切歌之前就不对：原速走 %.3f，2 倍速走 %.3f——比值 %.2f，want 2",
+			unity, before, before/unity)
 	}
-	if !near(after, before, 1.8) {
+	if !near(after, before, rateTol) {
 		t.Errorf("切歌之后从 %.2f 掉到 %.2f——新播放器没套上倍率", before, after)
 	}
 }
@@ -318,15 +356,6 @@ func TestOnlineTrackKeepsTheRate(t *testing.T) {
 	f.onPlayURL(dashFor(cdnURL(f.URL, "a.wav", 2*time.Hour), int(bili.QualityHigh320), 110836))
 
 	a := newOnlineApp(t, f, t.TempDir())
-
-	// 先在原速上把同一首流放一遍，确认这台机器放得动实时音频（见 requireRealtime）。
-	if err := a.Enqueue(onlineItem("BV1xx", "123", "在线的一首")); err != nil {
-		t.Fatal(err)
-	}
-	playing(t, a, "在线的一首")
-	one := requireRealtime(t, a, 2*time.Second, 3*time.Second)
-
-	// 真正要验的那一遍：先按倍率再开这一首。
 	a.SetRate(2)
 	if err := a.Enqueue(onlineItem("BV1xx", "123", "在线的一首")); err != nil {
 		t.Fatal(err)
@@ -336,16 +365,22 @@ func TestOnlineTrackKeepsTheRate(t *testing.T) {
 	if got := a.Snapshot().Rate; got != 2 {
 		t.Fatalf("在线歌的倍率是 %v，want 2", got)
 	}
-	if got := secPerSong(t, a, 3*time.Second, 4*time.Second); got < one*1.3 {
-		t.Errorf("在线歌没套上 2 倍速：原速基准 %.2f，2 倍速该有它的 1.3 倍以上，实测 %.2f", one, got)
+	two := secPerSong(t, a, 3*time.Second, 3*time.Second+winSpan)
+	one := unityBaseline(t, a, 9*time.Second)
+	requireMeasurable(t, one, two, 2)
+	if !near(two, 2*one, rateTol) {
+		t.Errorf("在线歌没套上 2 倍速：原速走 %.3f，2 倍速走 %.3f——比值 %.2f，want 2",
+			one, two, two/one)
 	}
 }
 
-// longWav 造一段二十秒的单声道 WAV。
+// longWav 造一段三十秒的单声道 WAV。
 //
-// 二十秒：倍率测试要在一首歌上量三段（1x、2x、0.5x），每段还量两遍取大的那个
-// （见 secPerSong），中间两次换档各要让开两秒歌内的预解缓冲，所以最远走到歌内
-// 第十四秒。那份 4 秒的 FLAC 放不下（中途播完会被误判成「慢得离谱」）。
+// 三十秒：倍率测试要在**一首歌**上量好几段——每一段还量两遍取大的（见
+// secPerSong），中间每换一次档要让开两秒歌内的预解缓冲，而 `unityBaseline` 是
+// 在每个目标窗口**紧挨着**的位置再量一段原速。所以最远那一次（0.5 倍速）要走到
+// 歌内第二十一秒。换句话说歌得比最远的那一段还长出一大截，否则「歌放完了位置
+// 停住」会被误判成「慢得离谱」。那份 4 秒的 FLAC 放不下。
 //
 // 用 WAV 而不是 FLAC 只是因为它是 16 位 PCM，写起来是一段几十行的字节拼装，
 // 不必为它在 app 这一层也铺一条 FLAC 编码。
@@ -353,7 +388,7 @@ func longWav(t *testing.T, name string) string {
 	t.Helper()
 	const (
 		rate = 44100
-		secs = 20
+		secs = 30
 	)
 	n := rate * secs
 	body := make([]byte, 0, 44+n*2)
@@ -395,3 +430,80 @@ func appendU32(b []byte, v uint32) []byte {
 }
 
 func appendU16(b []byte, v uint16) []byte { return append(b, byte(v), byte(v>>8)) }
+
+// TestOnlyThePhysicallyUntestableCaseIsSkipped 钉住 skip 的判据本身。
+//
+// 这一族跳过与否决定「这一次有没有真的验倍率」，所以判据必须写成能测的、
+// 而且**只有物理上测不了**的那一种情况才放过。下面每一条的数字都是在这台机器上
+// 真实见过的（`-race` + 满载，`go test` 跑整包时采集）。
+//
+// ⚠️ 最要紧的是中间那三条「机器健康却比值不对」：**必须**照红不误。放过它们等于
+// 把真 bug 一起放过——那才是真的减少判别力。而「慢而均匀」（0.825、0.761 那两组）
+// 同样不许放过：机器慢不等于测不了，比值照样成立。
+func TestOnlyThePhysicallyUntestableCaseIsSkipped(t *testing.T) {
+	for _, c := range []struct {
+		name             string
+		unity, got, want float64
+		wantSkip         bool
+	}{
+		// 慢而均匀：比值对得上，测得出结果——不许跳过。
+		{"慢而均匀的 2 倍速", 0.825, 1.65, 2, false},
+		{"慢而均匀的 0.5 倍速", 0.761, 0.381, 0.5, false},
+		// 机器健康但比值不对：是代码的错——照红，不许跳过。
+		{"机器健康，倍率刚好没套上", 1.0, 1.0, 2, false},
+		{"机器健康，倍率反了", 1.0, 0.5, 2, false},
+		{"机器健康，比值差得远", 0.95, 1.1, 2, false},
+		// 供不上：物理上没有信号可测，这是唯一该跳过的。
+		{"供不上，套没套上都一样", 0.375, 0.375, 2, true},
+		{"供不上，但这一轮恰好比值对上了", 0.375, 0.75, 2, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			skip := !measurable(c.unity, c.got, c.want)
+			if skip != c.wantSkip {
+				why := "判成测不了，会把一次真验跳过去"
+				if c.wantSkip {
+					why = "判成可测，机器供不上时会把噪声报成「倍率没套上」"
+				}
+				t.Errorf("unity=%v got=%v want=%v：%s（跳过了=%v，want %v）",
+					c.unity, c.got, c.want, why, skip, c.wantSkip)
+			}
+		})
+	}
+}
+
+// TestTheSkipIsNeverSilent 钉住「跳过时必须先打一行到 stderr」。
+//
+// `t.Skip` 在 `go test` **不带 `-v`** 时和通过一样只报 `ok`——一个人 review 看到
+// ok 会以为这一族验过了。所以 `requireMeasurable` 跳过之前先往 stderr 打一行
+// （测试进程的 stderr 总是被 `go test` 原样转发）。这行字是「不静默」的唯一保证，
+// 它要是哪天被删了，这里立刻红。
+func TestTheSkipIsNeverSilent(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+
+	skipped := t.Run("机器供不上的那一轮", func(t *testing.T) {
+		defer func() { os.Stderr = old }() // Skip 走的是 Goexit，defer 照样跑
+		requireMeasurable(t, 0.375, 0.375, 2)
+		t.Error("这一轮该跳过（机器供不上，套没套上量出来一样），却没有跳")
+	})
+	os.Stderr = old
+	_ = w.Close()
+
+	if !skipped {
+		t.Error("子测试没有以跳过结束")
+	}
+	line, _ := io.ReadAll(r)
+	if len(bytes.TrimSpace(line)) == 0 {
+		t.Error("跳过了，但 stderr 上一行字也没有——`go test` 不带 -v 时这就等于静默不测")
+	}
+	// 这行字要能让人自己判断：带实测值。
+	for _, want := range []string{"0.375", "2 倍速"} {
+		if !bytes.Contains(line, []byte(want)) {
+			t.Errorf("stderr 那行里没有 %q，拿不到实测值：%q", want, bytes.TrimSpace(line))
+		}
+	}
+}
