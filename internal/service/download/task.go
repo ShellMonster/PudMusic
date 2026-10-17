@@ -56,16 +56,38 @@ const (
 	StatusDone Status = "done"
 	// StatusError 出错了。`Task.Err` 是人话。
 	StatusError Status = "error"
+	// StatusMuxing 字节全下完了，正在交织成一个能播的文件。
+	//
+	// ⚠️ **这一版没有任何代码会置它**：交织是视频那一路的事（PLAN 8.9 / #32），
+	// 这一版只下音频、直接落盘（见 `fetch.go` 的 run）。留在这里是为了**状态位
+	// 先占好**：记录页要按它画出「交织中」那一格，而等 #32 接上的时候，「这个
+	// 状态能不能暂停」「退出时怎么存」这两件事不用临时再想一遍——想晚了表现
+	// 成「重启之后界面上永远转圈」。
+	StatusMuxing Status = "muxing"
 )
 
 // CanPause 报告这个状态现在能不能暂停。
+//
+// ⚠️ 交织不算能暂停：Biu 有 `mergePaused`，而这里停不下来——交织器拿在手里
+// 的那几个字节不会停在半路上。要给它加「交织暂停」是 #32 的活儿，不是在这里
+// 把门开着却没有实现（见 `StatusMuxing`）。
 func (s Status) CanPause() bool { return s == StatusRunning }
 
 // CanResume 报告这个状态现在能不能继续。
+//
+// 交织中同样不算：字节已经全下完了，「继续」对它没有可继续的东西。真出错了
+// 那一路会落在 `StatusError` 上，由重试从头走（那时交织会重来）。
 func (s Status) CanResume() bool { return s == StatusPaused || s == StatusError }
 
-// Running 报告这个任务此刻是不是占着网络。
-func (s Status) Running() bool { return s == StatusRunning }
+// Running 报告这个任务此刻是不是占着资源。
+//
+// 交织算在飞，虽然它不再占着网络：它占着这一项，而且它**正在往盘上写**。判据
+// 是「用户还没法对这一项动手」，不是「有没有 HTTP 请求在飞」。
+func (s Status) Running() bool { return s == StatusRunning || s == StatusMuxing }
+
+// inflight 报告这个状态是不是「在飞的」——退出或重开时它就该变成暂停，因为
+// 那个活儿已经不存在了（进程都没了）。
+func (s Status) inflight() bool { return s == StatusQueued || s.Running() }
 
 // Identity 是「这一段字节属于谁」。
 //
