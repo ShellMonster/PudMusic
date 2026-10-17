@@ -412,7 +412,10 @@ func TestBackReturnsToThePreviousPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if _, ok := tt.Find(lookup("/later").Empty.Title); !ok {
+	// 认的是**页面自己的标题**。这一页后来接上了自己的 view（later.go），空状态
+	// 由那一页自己说，`Route.Empty` 里那一句已经拿掉了——认空状态那句的话，
+	// 这一页再画得再好也会被判成「没切过去」。
+	if _, ok := tt.Find(lookup("/later").Title); !ok {
 		t.Fatalf("没切到稍后再看，文字有 %q", tt.Texts())
 	}
 

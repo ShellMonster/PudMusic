@@ -17,7 +17,7 @@ import (
 func TestTheQueueRoundTripsThroughAFile(t *testing.T) {
 	const size = 3 * chunkSize
 	h := newHarness(t, size, 30280)
-	id := TaskID(bvid, cid)
+	id := TaskID(bvid, cid, false)
 	dest := DestFor(h.dir, "半首", ".m4a", id)
 
 	// 造一份「下完两块就退出了」的队列：分块记账 + 半成品。
@@ -69,7 +69,7 @@ func TestInFlightTasksAreSavedAsPaused(t *testing.T) {
 	h := newHarness(t, size, 30280)
 	// 每发只给 1 MB 就掐断：任务会失败，但仍然是「在队列里、有进度」。
 	h.cdn.set(func(c *cdn) { c.cutAt = 1 << 20 })
-	id := TaskID(bvid, cid)
+	id := TaskID(bvid, cid, false)
 	if _, err := h.m.Enqueue(AddRequest{Bvid: bvid, Cid: cid, Title: "歌", Dir: h.dir}); err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestInFlightTasksAreSavedAsPaused(t *testing.T) {
 func TestRestoredTasksDoNotStartOnTheirOwn(t *testing.T) {
 	const size = 3 * chunkSize
 	h := newHarness(t, size, 30280)
-	id := TaskID(bvid, cid)
+	id := TaskID(bvid, cid, false)
 	dest := DestFor(h.dir, "半首", ".m4a", id)
 
 	// 造一个「下了一半、退出了」的世界。
@@ -307,7 +307,7 @@ func TestAMuxingTaskNeverSurvivesARestartAsMuxing(t *testing.T) {
 	const size = chunkSize
 	h := newHarness(t, size, 30280)
 	h.queueFile = filepath.Join(h.dir, QueueFileName)
-	id := TaskID(bvid, cid)
+	id := TaskID(bvid, cid, false)
 	dest := DestFor(h.dir, "交织中的歌", ".mp4", id)
 
 	// 字节全下完了（分块齐了），交织还没写完 —— 这正是交织中的样子。
