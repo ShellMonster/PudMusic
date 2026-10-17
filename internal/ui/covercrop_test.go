@@ -51,7 +51,7 @@ func TestCropIsAlwaysSixteenByNine(t *testing.T) {
 			if ch >= float32(img[1])-0.5 {
 				continue
 			}
-			if ratio := cw / ch; abs32(ratio-cropAspect) > 0.01 {
+			if ratio := cw / ch; absF32(ratio-cropAspect) > 0.01 {
 				t.Errorf("%dx%d 的图、宽 %v%%：裁出来 %vx%v，比例 %v，want %v",
 					img[0], img[1], w, cw, ch, ratio, cropAspect)
 			}
@@ -88,14 +88,14 @@ func TestMovingTheBoxFollowsThePointer(t *testing.T) {
 
 	// 台子上往右挪 32 点（16:9 的图铺满台子，所以 32 点 = 32/320 = 10%）。
 	got := moveCrop(cropBox{X: 10, Y: 10, W: 80, H: 80}, 32, 0, iw, ih)
-	if abs32(got.X-20) > 0.01 {
+	if absF32(got.X-20) > 0.01 {
 		t.Errorf("往右挪 32 点之后 X = %v，want 20（10%% + 32/%v * 100）", got.X, fw)
 	}
 	_ = fx
 
 	// 往右挪到头就停在贴边，不会拖出图。
 	edge := moveCrop(cropBox{X: 10, Y: 10, W: 80, H: 80}, 9999, 0, iw, ih)
-	if abs32(edge.X+edge.W-100) > 0.01 {
+	if absF32(edge.X+edge.W-100) > 0.01 {
 		t.Errorf("拖到头之后右边在 %v，want 100", edge.X+edge.W)
 	}
 }
@@ -135,25 +135,25 @@ func TestResizingFromACorner(t *testing.T) {
 
 	// 从左下角往右拉一个框那么宽（40% → 80%）。
 	got := resizeCrop(b, cornerBL, left+2*boxW, iw, ih)
-	if abs32(got.W-80) > 0.01 {
+	if absF32(got.W-80) > 0.01 {
 		t.Errorf("往右拉之后宽度 = %v，want 80", got.W)
 	}
-	if abs32(got.X-b.X) > 0.5 {
+	if absF32(got.X-b.X) > 0.5 {
 		t.Errorf("左边动了：X = %v，want %v", got.X, b.X)
 	}
-	if abs32(got.Y+got.H-(b.Y+b.H)) > 0.5 {
+	if absF32(got.Y+got.H-(b.Y+b.H)) > 0.5 {
 		t.Errorf("下边缘动了：%v+%v vs %v+%v", got.Y, got.H, b.Y, b.H)
 	}
-	if cw, ch := got.W/100*iw, got.H/100*ih; abs32(cw/ch-cropAspect) > 0.01 {
+	if cw, ch := got.W/100*iw, got.H/100*ih; absF32(cw/ch-cropAspect) > 0.01 {
 		t.Errorf("拉完之后比例 = %v，want %v", cw/ch, cropAspect)
 	}
 
 	// 从右上角往左拉：右边缘钉住不动（宽度变小了，左边要往右让）。
 	got2 := resizeCrop(b, cornerTR, left+boxW/2, iw, ih)
-	if abs32(got2.X+got2.W-(b.X+b.W)) > 0.5 {
+	if absF32(got2.X+got2.W-(b.X+b.W)) > 0.5 {
 		t.Errorf("右边缘动了：%v+%v vs %v+%v", got2.X, got2.W, b.X, b.W)
 	}
-	if abs32(got2.Y-b.Y) > 0.5 {
+	if absF32(got2.Y-b.Y) > 0.5 {
 		t.Errorf("上边缘动了：Y = %v，want %v", got2.Y, b.Y)
 	}
 }

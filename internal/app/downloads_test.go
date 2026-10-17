@@ -398,7 +398,9 @@ func TestDownloadRefusesWhatItCannotDoAndSaysWhy(t *testing.T) {
 	} {
 		if _, err := a2.Download(it); err == nil {
 			t.Fatalf("%+v 被收下了", it)
-		} else if !strings.Contains(err.Error(), "还不能放") && !strings.Contains(err.Error(), "还没接上") {
+		} else if !strings.Contains(err.Error(), "还不能放") &&
+			!strings.Contains(err.Error(), "还不能下") && // 缺分 P id 走的是这一句（downloads.go）
+			!strings.Contains(err.Error(), "还没接上") {
 			t.Fatalf("%+v 的错不像人话：%v", it, err)
 		}
 	}

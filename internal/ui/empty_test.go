@@ -91,11 +91,17 @@ func TestSpecEmptyStates(t *testing.T) {
 			}
 			s.navigate(c.target)
 			// 收藏夹那一页要先等后台把容器拉回来（头图区第一帧是「正在加载…」，
-			// 空状态那一支要 `info.Loaded` 才画得出来）；别的三页不发请求。
+			// 空状态那一支要 `info.Loaded` 才画得出来）；别的几页不发请求。
 			if c.setup != nil {
 				waitCollectionHeader(t, s, tt)
 			}
-			tt.Frame()
+			// ⚠️ 搜索页那一条要多等几帧：结果是异步回来的，「画不画空状态」
+			// 这个判断读的是上一帧的状态（理由见 settleText）。
+			//
+			// 两条**都要**：第一个等的是「容器元信息回来了」（那一页的空状态要
+			// `info.Loaded` 才画得出来），第二个等的是「那一句话画出来了」。
+			// 少任何一个都会让下面 `HasText` 变成按运气过。
+			settleText(t, tt, c.e.Title)
 
 			if !tt.HasText(c.e.Title) {
 				t.Fatalf("%s 的 %q 没画出来，文字有 %q", c.what, c.e.Title, tt.Texts())

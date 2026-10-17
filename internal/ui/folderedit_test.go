@@ -235,7 +235,7 @@ func TestPickingACoverOpensTheCropDialog(t *testing.T) {
 		t.Errorf("初始框 %+v，want X=10 W=80", b)
 	}
 	// 800×600 的图上，80% 宽 = 640，16:9 的高 = 360，占全图 60%。
-	if want := float32(60); abs32(b.H-want) > 0.5 {
+	if want := float32(60); absF32(b.H-want) > 0.5 {
 		t.Errorf("初始框的高 = %v%%，want %v%%（80 宽的 16:9）", b.H, want)
 	}
 }
@@ -279,7 +279,7 @@ func TestTheUploadedCoverIsSixteenByNine(t *testing.T) {
 			if w != tc.wantW || h != tc.wantH {
 				t.Errorf("传上去的是 %dx%d，want %dx%d", w, h, tc.wantW, tc.wantH)
 			}
-			if ratio := float32(w) / float32(h); abs32(ratio-cropAspect) > 0.01 {
+			if ratio := float32(w) / float32(h); absF32(ratio-cropAspect) > 0.01 {
 				t.Errorf("传上去那张的比例是 %v，want %v", ratio, cropAspect)
 			}
 

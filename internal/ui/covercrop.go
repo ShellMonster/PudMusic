@@ -163,7 +163,7 @@ func cornerAt(x, y float32, rx, ry, rw, rh float32) cropCorner {
 		{cornerBR, rx + rw, ry + rh},
 		{cornerBL, rx, ry + rh},
 	} {
-		if abs32(x-c.hx) <= h && abs32(y-c.hy) <= h {
+		if absF32(x-c.hx) <= h && absF32(y-c.hy) <= h {
 			return c.cropCorner
 		}
 	}
@@ -173,7 +173,13 @@ func cornerAt(x, y float32, rx, ry, rw, rh float32) cropCorner {
 	return cornerNone
 }
 
-func abs32(v float32) float32 {
+// absF32 是 float32 的绝对值。
+//
+// ⚠️ **名字里带着 `F32` 不是啰嗦**：`upspace_test.go`（#65 带来的）里也有一个
+// `abs32`，同包同名，合并时 Git 看不出来（不同的文件），编译才报——而一个
+// 测试文件里声明的辅助函数和一个**生产文件**里声明的撞在一起，编译器报的那
+// 行数会指着测试文件，而真因是生产文件里那个。
+func absF32(v float32) float32 {
 	if v < 0 {
 		return -v
 	}
