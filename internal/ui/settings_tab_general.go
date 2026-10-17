@@ -96,10 +96,6 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 	s.pickTrayNote(c)
 	s.settingRow(c, "开机自启", "系统登录后自动启动应用",
 		func() { s.pickAutoStart(c, st, ro) })
-
-	// 「配置」段（导出 / 导入 / 从 Biu 导入）排在最后，照 Biu 的位置
-	// （`system-settings.tsx:388-402` 的「关于应用」段就在「系统」之后）。
-	s.settingsConfig(c)
 }
 
 // pickSwitch 是一个开关行。set 拿到的是这一帧开关上的新值。
