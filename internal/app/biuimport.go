@@ -371,7 +371,14 @@ func convertBiuTask(t biuTask) (*download.Task, bool) {
 		length = t.AudioTotalBytes
 	}
 	return &download.Task{
-		ID:      download.TaskID(bvid, cid),
+		// ⚠️ `video=false`，而且**这一票里每一处都是 false**：视频任务在
+		// `convertBiuTask` 开头就被挡住了（这一版只下音频、没有交织）。
+		//
+		// 「保持旧格式」（音频那一支就是 `bvid|cid`）不是偷懒，是硬约束：
+		// 落盘的队列文件按这个字符串当键，改了格式的话已经升级过的用户重启之后
+		// 整个队列一个都认不出来——界面上看起来就是队列空了（`download.TaskID`
+		// 的注释写着同一条）。
+		ID:      download.TaskID(bvid, cid, false),
 		Title:   t.Title,
 		Cover:   t.Cover,
 		Label:   biuQualityLabel(t.AudioCodecs),
