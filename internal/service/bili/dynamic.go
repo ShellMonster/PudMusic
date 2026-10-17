@@ -107,6 +107,11 @@ type DynamicAuthor struct {
 //
 // 名字跟着 B 站的 `major.archive` 走，不叫 DynamicVideo —— 那一个名字已经是
 // 「动态类型」那一档了（`DynamicVideo` 常量）。
+//
+// ⚠️ **这里没有 Cid**：B 站的动态接口给的是稿件本身，不给分 P id。取流接口
+// 不给 cid 会取到**第一集**（多 P 投稿的第三集放出来是第一集，且不报错）——
+// 所以 `app.playOnline` 前面有一道 `withCid`：缺 cid 就拿 bvid 去问一次。
+// 这里**不要**自己编一个 cid 填上。
 type DynamicArchive struct {
 	Bvid  string
 	Title string

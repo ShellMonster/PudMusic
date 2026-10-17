@@ -219,16 +219,16 @@ func TestClickingTheAuthorGoesIntoHisSpace(t *testing.T) {
 	}
 }
 
-// TestClickingAnArchiveDynamicSaysWhyItCannotPlayInsteadOfDoingNothing
-// 钉住「点投稿那一块不是没反应」。
+// TestClickingAnArchiveDynamicQueuesIt 钉住「点投稿那一块 = 从它往后播」。
 //
-// ⚠️ **这一版放不了动态里的投稿**，而且是**故意说清楚**而不是装死：动态接口
-// 给的 `major.archive` 里**没有 cid**（`bili.DynamicArchive` 的注释里写了
-// 为什么），而 B 站的取流接口不给 cid 会取到**第一集**——多 P 投稿的第三集
-// 放出来是第一集，且不报错。宁可现在说清楚，也不要悄悄放错的那一集。
+// ⚠️ 这条测试**改过一次断言**：早一版钉的是「点了会说放不了」——那是因为
+// 动态接口给的 `major.archive` 里没有 cid，而 B 站的取流接口不给 cid 会取到
+// **第一集**（多 P 投稿的第三集放出来是第一集，且不报错）。
 //
-// 「投稿」Tab 那边的条目是有 cid 的（`bili.UpVideo.Cid`），点得开。
-func TestClickingAnArchiveDynamicSaysWhyItCannotPlayInsteadOfDoingNothing(t *testing.T) {
+// 现在 `app.playOnline` 前面有一道 `withCid`（`online.go`）：缺 cid 就拿 bvid
+// 去问一次（`FirstVideoCid`），所以这一首**放得开了**。断言跟着改成「点了会进
+// 队列」——那才是用户按下那一块想要的。
+func TestClickingAnArchiveDynamicQueuesIt(t *testing.T) {
 	b := newUIExplore(t)
 	uiSpaceData(b, "发动态的 UP", 0, 1)
 	b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
@@ -247,20 +247,20 @@ func TestClickingAnArchiveDynamicSaysWhyItCannotPlayInsteadOfDoingNothing(t *tes
 	}
 	tt.Frame()
 
-	var said string
-	for _, toast := range s.toasts {
-		said = toast.text
+	items := a.Queue().Items()
+	if len(items) != 1 {
+		t.Fatalf("点了那一块队列里有 %d 项，want 1（队列 %+v）", len(items), items)
 	}
-	if said == "" {
-		t.Fatalf("点了那一块一句话都没有（队列 %+v）——按了没反应最难解释", a.Queue().Items())
+	if items[0].Bvid != "BV1play" || items[0].Title != "投稿 BV1play" {
+		t.Errorf("进队列的不是那一首：%+v", items[0])
 	}
-	if !strings.Contains(said, "放不了") {
-		t.Errorf("说的是 %q，want 一句「放不了这一首：…」", said)
+	if items[0].Source != "online" || items[0].Type != "mv" {
+		t.Errorf("来源/类型是 %q/%q，want online/mv", items[0].Source, items[0].Type)
 	}
-	// 队列不该被换掉：`PlayFrom` 在播不了的时候会把队列原样换回去
-	// （播不了的歌不该把用户原来的队列弄丢）。
-	if got := len(a.Queue().Items()); got != 0 {
-		t.Errorf("队列里多了 %d 项，want 0（播不了的歌不该把队列换掉）", got)
+	// cid 在这一步还是空的：`withCid` 是在 `playOnline` 里补的，补在**队列之后**
+	// ——所以这里断的不是 cid，是「点了之后队列换了没有」。
+	if a.Snapshot().HasTrack && a.Queue().Items()[0].Bvid != "BV1play" {
+		t.Error("队列换成了别的歌")
 	}
 }
 
