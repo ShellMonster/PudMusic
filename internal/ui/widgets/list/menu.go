@@ -109,9 +109,14 @@ func doAction(item menuItem, i int, song Music, acts Actions, playFrom func(int)
 		}
 		acts.FavSelect(song.Item)
 	case "download-audio":
-		// ⚠️ 下载服务还没接上（issue #29 已并进来的是下载记录页，批量下载的
-		// 队列入口还没有）。话里带上用户按的那个字：菜单有五项，只说「还没接」
-		// 的话用户不知道说的是哪一项，得自己再点一遍试。
+		// ⚠️ 这一项**还没接线**，而缺的不是那个服务：下载服务早就写好了
+		//（`internal/service/download`，issue #29 已 CLOSED），抽屉那一支也早就
+		// 能下载（`queue_drawer.go` 的 `startDownloadAudio`）。缺的是
+		// `list.Actions` 上**根本没有 `Download` 这个字段**——列表这一侧压根没把
+		// 下载递过来，所以任何一页的列表菜单都走不到它。
+		//
+		// 话里带上用户按的那个字：菜单有五项，只说「还没接」的话用户不知道说的
+		// 是哪一项，得自己再点一遍试。
 		notify(acts, "「"+item.label+"」还没接 B 站接口")
 	}
 }

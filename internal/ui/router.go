@@ -6,12 +6,18 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// Route 是 Biu 的一条路由。
+// Route 是一条路由。
 //
-// 14 条全在这儿登记，和 Biu 的 `src/routes.tsx` 一条一条对得上：12 条在
-// Layout 里（`/`、`later`、`history`、`follow`、`collection/:id`、
+// ⚠️ **口径照这一段的数来，别照旧注释里的数来**：Biu 的 `src/routes.tsx` 在
+// Layout 里登记 12 条（`/`、`later`、`history`、`follow`、`collection/:id`、
 // `user/:id`、`settings`、`download-list`、`dynamic-feed`、`local-music`、
-// `search`、`empty`），加上独立窗口的 `mini-player`，再加上兜底的 `*`（404）。
+// `search`、`empty`），加上独立窗口的 `mini-player` 共 13 条；我们另加了第 14 条
+// `/login`（上游把登录挂在头像下拉里，我们给它一条路由）。兜底的 `*`（404）
+// **不在 `routes` 表里**——它是 `notFound` 那一个单独的值，因为 404 不是一条能
+// Match 的模式（见 `viewRoutes`）。
+//
+// 换句话说：`len(routes) == 14`，加上 `notFound` 一共 15 条（`TestFourteenRoutes`
+// 钉的就是这个 15）。
 type Route struct {
 	// Match 是匹配用的模式，`{id}` 是路径参数。这里写 MyGo 的写法，Biu 写的是
 	// `:id`（`src/routes.tsx`），指的是同一件事。
@@ -26,9 +32,13 @@ type Route struct {
 	Empty emptyState
 }
 
-// routes 是那 14 条。前面 InMenu 的六条，顺序就是侧栏菜单从上到下的顺序
-// （照 Biu 的 SD-04：推荐音乐 / 我的关注 / 稍后再看 / 历史记录 / 本地音乐 /
-// 下载记录）。
+// routes 是那 14 条。**InMenu 的七条**，顺序就是侧栏菜单从上到下的顺序：前六条
+// 照 Biu 的 SD-04（推荐音乐 / 我的关注 / 稍后再看 / 历史记录 / 本地音乐 /
+// 下载记录），第七条「设置」是我们自己多摆的（Biu 那边设置只从头像下拉进）。
+//
+// ⚠️ 「几条」这一段曾经写着「六条」，而表里当时就已经是七条了——`/settings`
+// 早就标了 `InMenu: true`。写错的那几天里没有人去数，而**注释里数错了的条数
+// 正是下一位读代码的人拿来判断「还差什么」的依据**。要数就数表，别数注释。
 //
 // 每条后面的注释是那句文案的**出处**：Biu 上游在哪儿写的，或者明写「上游没
 // 有专属文案」。抄的时候照着抄，别自己编——编出来的一句在这一页对不上的话，
@@ -308,9 +318,11 @@ func (s *Shell) pageContent(c *ui.Context, r *ui.Route, rt Route) {
 //
 // ⚠️ 这里**一条 Toast 都不弹**了（原型那版会弹「这一页还没做」和
 // 「没有…这一页」）：
-//   - 「还没做」：14 条路由现在都有页面视图了——12 条是各自的空状态、设置页是
-//     它自己那一页、404 是兜底那一页。对着其中任何一页说「还没做」都是在说一件
-//     假事，用户只会以为这一页坏了。
+//   - 「还没做」：`routes` 那 14 条里**已经有 12 条有自己的画法**（`builtPage`），
+//     加上兜底的 404 那一页，一共 13 页有内容；剩下两条走的是这一页自己的空状态
+//     ——`/follow`（还没排票，BMG-47 §3 A2）和 `/empty`（它就是空状态落地页，
+//     按设计该空）。对着其中任何一页说「这一页还没做」都是在说一件假事，用户只会
+//     以为这一页坏了。
 //   - 「没有…这一页」：404 页自己就写着是哪条路径不存在、几秒后回首页，一条
 //     两秒就消失的 Toast 反而盖住它。
 func (s *Shell) navigate(target string) {
