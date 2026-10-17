@@ -484,14 +484,20 @@ type RowActions struct {
 	Play func(i int) // 从第 i 行往后接进队列并开始播
 	Add  func(i int) // 把第 i 行追加到队列末尾
 	Open func(i int) // 在系统里打开第 i 行的来处
+	// FavSelect 把第 i 行放进哪些收藏夹（开那个选择弹窗）。
+	FavSelect func(i int)
+	// Download 把第 i 行排进下载队列。
+	Download func(i int)
 }
 
-// actions 返回这三个动作（两页的菜单拿它建菜单项）。
+// actions 返回这几个动作（两页的菜单拿它建菜单项）。
 func (p *pagedRows) actions() RowActions {
 	return RowActions{
-		Play: p.playFrom,
-		Add:  p.addOne,
-		Open: p.openOne,
+		Play:      p.playFrom,
+		Add:       p.addOne,
+		Open:      p.openOne,
+		FavSelect: p.favSelectOne,
+		Download:  p.downloadOne,
 	}
 }
 
@@ -516,6 +522,27 @@ func (p *pagedRows) openOne(i int) {
 	row, ok := p.Row(i)
 	if ok && p.acts.Open != nil {
 		p.acts.Open(row.Item)
+	}
+}
+
+// favSelectOne 开第 i 行的「放进哪些收藏夹」那个弹窗。
+//
+// ⚠️ **底下那一层可能是 nil**（`list.AppActions` 的 FavSelect 就是 nil，而那个
+// 函数看不见界面、开不了弹窗——理由见 `list.actions.go`）。所以这里判空之后
+// 什么也不做：`list.doAction` 那边的「说一句」在这条路上够不着，而菜单项是
+// 这一层自己摆的，宁可按了没反应也不能调一个 nil 函数。
+func (p *pagedRows) favSelectOne(i int) {
+	row, ok := p.Row(i)
+	if ok && p.acts.FavSelect != nil {
+		p.acts.FavSelect(row.Item)
+	}
+}
+
+// downloadOne 把第 i 行排进下载队列。
+func (p *pagedRows) downloadOne(i int) {
+	row, ok := p.Row(i)
+	if ok && p.acts.Download != nil {
+		p.acts.Download(row.Item)
 	}
 }
 

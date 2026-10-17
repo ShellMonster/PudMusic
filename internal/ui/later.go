@@ -50,11 +50,15 @@ const (
 
 // buildLibraryPages 把「稍后再看」和「历史记录」两页接上。**在 New 里调一次**。
 //
-// 两页在这一行里一起建，是因为它们共用同一份操作接线（`list.AppActions`），
+// 两页在这一行里一起建，是因为它们共用同一份操作接线（`s.listActions()`），
 // 各自的部分只有拉页器（一行）和行画法（各一个方法）。分开两处建的话，
 // 「忘了建某一页」这件事只有切过去看才知道。
+//
+// ⚠️ **用 `s.listActions()` 而不是 `list.AppActions(...)`**：那份里
+// `FavSelect` 是 nil，而这两页的行右键「收藏」会落到那句「还没接 B 站接口」
+// 上去——接口早就在了（`app.FavoriteSong`），那句是假的。
 func (s *Shell) buildLibraryPages() {
-	acts := list.AppActions(s.app, s.addToast)
+	acts := s.listActions()
 	s.laterPage.init(s.clock.Now(), s.drawLaterRow, s.laterMenu, s.fetchLater, acts, lookup(laterPath).Empty)
 	s.historyPage.init(s.clock.Now(), s.drawHistoryRow, s.historyMenu, s.fetchHistory, acts, lookup(historyPath).Empty)
 }
@@ -224,6 +228,13 @@ func (s *Shell) laterMenu(m *ui.Menu, i int) {
 		acts.Add(i)
 	case m.Item("在 B 站打开").Chosen():
 		acts.Open(i)
+	// 收藏 / 下载这两项和内容列表那套菜单是同一份（Biu 的
+	// `music-list-item` 菜单对每一行都一样），摆在这里而不是不摆：用户在一个
+	// 列表上收藏了某一首，切到收藏夹页再收藏一次是白折腾。
+	case m.Item("收藏").Chosen():
+		acts.FavSelect(i)
+	case m.Item("下载音频").Chosen():
+		acts.Download(i)
 	case m.Item("移除").Chosen():
 		p.rows.Remove(i, s.app.LibraryOf().RemoveLater)
 	}

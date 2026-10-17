@@ -73,10 +73,11 @@ func LocalItem(path string) Item {
 // 键里带来源前缀不是多余的：Bvid / Sid / 路径三样都是用户数据，不加前缀的话
 // 一个叫 `1293494` 的 sid 和一个叫 `1293494` 的本地文件名会认成同一首。
 func (it Item) Identity() string {
-	// ⚠️ Source 和 Type 都判：`LocalItem` 两个都填，而手写的 Item 常常只填
-	// Type。少判一个的话，本地项会掉到下面那两支里去拿一个空标识。
+	// ⚠️ Source 和 Type 都判（见 IsLocal）：`LocalItem` 两个都填，而手写的
+	// Item 常常只填 Type。少判一个的话，本地项会掉到下面那两支里去拿一个空
+	// 标识。
 	switch {
-	case it.Source == "local" || it.Type == "local":
+	case it.IsLocal():
 		if it.Path == "" {
 			return ""
 		}
@@ -94,6 +95,16 @@ func (it Item) Identity() string {
 	}
 	return ""
 }
+
+// IsLocal 报这一项是不是本地文件。
+//
+// 🔴 **Source 和 Type 都判**：手写的 `Item` 常常只填 `Type`（见
+// `ui` 里的 `spaceVideoItem` 那一批——它们填 Type 不填 Source），只判一个
+// 的话那一批会被当成本地文件，而症状是「在线的歌在访达里显示」。
+//
+// 界面层和下载这一层都问它，**别再各写一份**——两处各写一份的代价是改了
+// 这里忘了那里，而本地项认错了的表现是「在访达里显示一个在线的歌」。
+func (it Item) IsLocal() bool { return it.Source == "local" || it.Type == "local" }
 
 // Queue 是播放队列。零值不可用，请用 NewQueue。
 //

@@ -534,10 +534,10 @@ func (s *Shell) canDownload(item app.Item) bool {
 
 // isLocalItem 报这一项是不是本地文件。
 //
-// `Item.Type` 的取值表在 app 那边；两处各写一份「本地文件长什么样」，早晚会对不上。
-func isLocalItem(item app.Item) bool {
-	return item.Source == "local" || item.Type == "local"
-}
+// 判断在 `app.Item.IsLocal` 那边——**别在这里再写一份**：这个项目里已经因为
+// 「两处各写一份本地文件长什么样」付过一次代价（少判一个字段的话，手写的
+// Item 会被当成本地文件，而症状是「在线的歌在访达里显示」）。
+func isLocalItem(item app.Item) bool { return item.IsLocal() }
 
 // favoriteQueueRow 是「收藏」。
 //

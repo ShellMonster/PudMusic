@@ -66,7 +66,7 @@ func (s *Shell) openFolderSelect(item app.Item) {
 	}
 	rid, typ, ok := favTarget(item)
 	if !ok {
-		s.addToast("这一首还没有可以收藏的身份")
+		s.askFavoriteIDThen(item)
 		return
 	}
 	f := &folderSelect{
@@ -82,6 +82,35 @@ func (s *Shell) openFolderSelect(item app.Item) {
 	}
 	s.folderSelect = f
 	s.app.LoadCreatedFolders(rid)
+}
+
+// askFavoriteIDThen 是「手里只有 bvid」那一条：先在后台问一次稿件 id，再开弹窗。
+//
+// # 为什么不能直接说「这一首还没有可以收藏的身份」
+//
+// B 站的收藏接口收的是 **avid**，而**大多数列表接口都不给 avid**：搜索结果、
+// 历史记录、UP 空间的投稿都只有 bvid（收藏夹那一页给的 `bili.Media.ID` 就是
+// avid，所以那一页不走这里）。一句话打发掉的话，「收藏」在这些页面上就永远是
+// 死的——而它其实只差一次 bvid → avid 的查询。
+//
+// ⚠️ **bvid → avid 是一次网络往返**，而界面线程上一次都不许有（铁律三）。所以
+// 这里是后台 + 回调，弹窗在那之后才开。
+//
+// ⚠️ **不许递归**：回来的那一项如果还是没有稿件 id，那一分支直接报错返回，
+// 不会又走回这里——否则一个问不出来的 bvid 会变成一个停不下来的循环。
+func (s *Shell) askFavoriteIDThen(item app.Item) {
+	if item.Bvid == "" || item.IsLocal() {
+		s.addToast("这一首还没有可以收藏的身份")
+		return
+	}
+	s.app.ResolveFavoriteID(item, func(fixed app.Item, err error) {
+		if err != nil {
+			s.addToast("收藏不了：" + bili.Friendly(err))
+		} else {
+			s.openFolderSelect(fixed)
+		}
+		s.wake.invalidate()
+	})
 }
 
 // favTarget 从一个队列项上认出「B 站那边的 id 和类型」。

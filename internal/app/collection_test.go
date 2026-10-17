@@ -37,12 +37,25 @@ type collectionFixture struct {
 	orders []string
 	// removed 记下每一次 batch-del 的 resources。
 	removed []string
+	// overrides 是按路径整段替换掉下面那张 switch 的默认处理：下载那一段要
+	// 问「这个稿件有哪几集」（`/x/player/pagelist`），而那不是这一摊的接口。
+	overrides map[string]http.HandlerFunc
 }
 
 func newCollectionFixture(t *testing.T) *collectionFixture {
 	t.Helper()
-	f := &collectionFixture{}
+	f := &collectionFixture{overrides: map[string]http.HandlerFunc{}}
 	f.Server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// ⚠️ overrides 先看，而且**不拿这一把锁**跑它：替换掉的那一段自己要
+		// 能读 f（要读 medias 就得进锁，而锁在上面已经拿住了）。
+		f.mu.Lock()
+		h := f.overrides[r.URL.Path]
+		f.mu.Unlock()
+		if h != nil {
+			h(w, r)
+			return
+		}
+
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		switch r.URL.Path {

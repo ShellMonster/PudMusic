@@ -45,6 +45,8 @@ type favBili struct {
 	faved bool
 	// removed 记下每一次 batch-del 的 resources。
 	removed []string
+	// deleted 记下每一次 folder/del 的 media_ids（侧栏「删除」那一项用）。
+	deleted []string
 }
 
 func newCollectionBili(t *testing.T) *favBili {
@@ -88,6 +90,26 @@ func newCollectionBili(t *testing.T) *favBili {
 			_ = r.ParseForm()
 			b.removed = append(b.removed, r.PostForm.Get("resources"))
 			writeCollectionJSON(t, w, 0, "0", nil)
+		case "/x/v3/fav/folder/del":
+			_ = r.ParseForm()
+			b.deleted = append(b.deleted, r.PostForm.Get("media_ids"))
+			writeCollectionJSON(t, w, 0, "0", 0)
+		case "/x/web-interface/view":
+			// bvid → avid。列表页的条目大多只有 bvid，而收藏夹那个弹窗要的是
+			// avid（`app.ResolveFavoriteID` 走的就是这一个查询）。
+			bvid := r.URL.Query().Get("bvid")
+			n := 0
+			for _, c := range bvid {
+				if c >= '0' && c <= '9' {
+					n = n*10 + int(c-'0')
+				}
+			}
+			if n == 0 {
+				n = 90000 + len(bvid)
+			}
+			writeCollectionJSON(t, w, 0, "0", map[string]any{
+				"aid": n, "bvid": bvid, "title": "看着像",
+			})
 		default:
 			http.NotFound(w, r)
 		}
@@ -123,6 +145,13 @@ func (b *favBili) removedBatches() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]string(nil), b.removed...)
+}
+
+// deletedFolders 是被删掉的那些收藏夹 id（side「删除」那一项）。
+func (b *favBili) deletedFolders() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.deleted...)
 }
 
 func (b *favBili) isFaved() bool {

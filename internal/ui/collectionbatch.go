@@ -9,9 +9,10 @@
 //   - 🔴 **全选判定是严格长度相等**（`allSelected`），不是集合比较。PLAN 的
 //     C-50 点名的就是这一条：改成集合比较的话，「三首里选了两首」在某个歌单
 //     上会被画成全选，而用户点「批量删除」会删掉他没勾的那一首。
-//   - **批量下载现在接不上**（issue #29）。留的是接口（`app.Downloader`），
-//     没挂上时按钮按成不可用并说清楚，**不假装成功**——假装的话界面上会弹一句
-//     「下载任务已添加」，而用户等一小时什么也不会发生。
+//   - **批量下载没挂上时不假装成功**。没挂上的话（正常路径不会，测试和没装
+//     下载服务的那一次启动会）按钮按成不可用并说清楚——假装的话界面上会弹一句
+//     「下载任务已添加」，而用户等一小时什么也不会发生。挂上了之后走的是
+//     `app.Downloader`，实现是 App 自己（见 `collection_mount.go`）。
 //
 // # 这一层外面包着 Guard
 //
@@ -58,7 +59,7 @@ func (s *Shell) viewCollectionBatchBar(c *ui.Context, p *collectionPage) {
 
 		dl := ui.Button(c, "批量下载")
 		if !s.app.DownloaderMounted() {
-			dl = dl.Disabled(true).Tooltip("下载服务还没接上（issue #29）")
+			dl = dl.Disabled(true).Tooltip("这个应用没把下载服务挂上")
 		}
 		if dl.Clicked() {
 			s.askConfirm(p, confirmDownload, chosen, true)
@@ -281,15 +282,15 @@ func (s *Shell) startCollectionDelete(p *collectionPage) {
 
 // startCollectionDownload 批量下载。
 //
-// 🔴 **下载服务还没接上**（issue #29），所以这里现在只有两件事：没挂上就如实
-// 说，挂上了就把这一批交过去。**不假装成功**——假装的话界面上会弹一句
-// 「下载任务已添加」，而用户等一小时什么也不会发生。
+// 交过去的那一趟在后台（`app.EnqueueDownload` 要补分 P id，那是一次网络往返，
+// 界面线程上一次都不许有）。**结果一句话说全**——那一层编好的话里带着「几首
+// 进去了、几首没进去」，所以这里不再往前加任何前缀。
 //
 // only 决定范围：批量操作条传 true（只下勾上的），⋯ 菜单的「下载全部」传
 // false（把已经加载出来的全部）。
 func (s *Shell) startCollectionDownload(p *collectionPage, only bool) {
 	if !s.app.DownloaderMounted() {
-		s.addToast("下载还没接上：下载服务（issue #29）还没做")
+		s.addToast("下载还没挂上：这个应用没把下载服务装进来")
 		return
 	}
 	medias := s.pickedMedias(p)
@@ -313,14 +314,18 @@ func (s *Shell) startCollectionDownload(p *collectionPage, only bool) {
 }
 
 // downloadDoneText 是批量下载跑完之后说的那句话。
+//
+// ⚠️ **err 不是空的时候原样说出来**，前面什么都不加：批量下载那一层编好的
+// 错已经是一整句（「已加进 3 首的下载队列，另有 2 首没加进去：…」），而加上
+// 一句「下载不了：」会把它读成「一首都没进去」。
 func downloadDoneText(err error) string {
 	switch {
 	case err == nil:
 		return "下载任务已添加"
 	case app.DownloaderMissing(err):
-		return "下载还没接上：下载服务（issue #29）还没做"
+		return "下载还没挂上：这个应用没把下载服务装进来"
 	}
-	return "下载不了：" + bili.Friendly(err)
+	return err.Error()
 }
 
 // pickedMedias 是当前勾上的那些条目的完整信息，**按列表里的顺序**。

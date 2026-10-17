@@ -235,6 +235,11 @@ func (s *Shell) historyMenu(m *ui.Menu, i int) {
 		acts.Add(i)
 	case m.Item("在 B 站打开").Chosen():
 		acts.Open(i)
+	// 收藏 / 下载：和稍后再看那一页摆的是同两项，理由见 laterMenu 的注释。
+	case m.Item("收藏").Chosen():
+		acts.FavSelect(i)
+	case m.Item("下载音频").Chosen():
+		acts.Download(i)
 	case m.Item("删除").Chosen():
 		p.rows.Remove(i, s.app.LibraryOf().RemoveHistory)
 	}

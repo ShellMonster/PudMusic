@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -35,6 +36,100 @@ const dynamicPicSide = 92
 // 只是多占一行布局，而这一行的行高是量出来的（变高行），布局一变
 // 滚动就会跳。
 const maxDynamicPics = 9
+
+// dynLikes 是「这一次会话里用户动过的那几条赞」。
+//
+// 🔴 **它存在的理由是「点了之后要马上变」**：那一按是**乐观**的（先点亮再发
+// 请求），而界面上如果还是原来那一帧，用户会以为没点上，于是再点一下——
+// 那一下把刚才那一下撤掉了。他什么都没做，赞数却动了两次。
+//
+// 🔴 **带锁**：写它的是界面线程（按下那一下）和后台 goroutine（B 站说「赞不了」
+// 时要撤回去）。不加锁 `-race` 会红，而红的那次症状是「赞的按钮偶尔自己弹回去」
+// ——因为撤回去那一条正好盖掉了用户紧接着按的第二下。
+//
+// 没动过的那些不在这儿：读的是 B 站拉回来的那份（`bili.Dynamic.Liked`）。
+type dynLikes struct {
+	mu sync.Mutex
+	m  map[string]dynLike
+}
+
+// dynLike 是一条动态此刻的赞状态。
+type dynLike struct {
+	liked bool
+	count int
+}
+
+// get 读这一条此刻的赞状态。没有动过就给拉回来的那一份（wasLiked / wasCount）。
+func (l *dynLikes) get(id string, wasLiked bool, wasCount int) (bool, int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	v, ok := l.m[id]
+	if !ok {
+		return wasLiked, wasCount
+	}
+	return v.liked, v.count
+}
+
+// flip 是「按了一下赞」：翻过来，赞数跟着 +1 / −1，返回翻之后的那一份。
+func (l *dynLikes) flip(id string, wasLiked bool, wasCount int) dynLike {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	prev, ok := l.m[id]
+	if !ok {
+		// 没动过的那一条从 B 站拉回来的那份起算。
+		prev = dynLike{liked: wasLiked, count: wasCount}
+	}
+	next := dynLike{liked: !prev.liked}
+	if next.liked {
+		next.count = prev.count + 1
+	} else {
+		// ⚠️ **不许减到负数**：未登录时 B 站那个字段整个没有（赞数是 0），
+		// 减下去界面上会出现「赞 -1」。
+		next.count = max(prev.count-1, 0)
+	}
+	if l.m == nil {
+		l.m = map[string]dynLike{}
+	}
+	l.m[id] = next
+	return next
+}
+
+// revert 把这一条从表里拿掉，界面于是回到**B 站拉回来的那一份**。
+//
+// 拿掉而不是写回旧值：B 站那边根本没有变（请求失败了），所以「拉回来的那份」
+// 就是事实本身。写回一个副本的话，用户下一次翻页重新拉到同一条时会读到那个
+// 副本，而两份不一样——界面上会显示一个他从来没设过的赞数。
+func (l *dynLikes) revert(id string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.m, id)
+}
+
+// toggleDynamicLike 是「按了赞」那一下。
+//
+// **乐观**：先翻过来（界面立刻变），再发请求；B 站说不行就撤回去并说一句为什么。
+// 不这么做的话，从按下到界面变化之间隔着一次网络往返（几百毫秒），而用户在这
+// 段时间里会再按一下——于是他点了三次，最后的状态和他以为的相反。
+func (s *Shell) toggleDynamicLike(d bili.Dynamic) {
+	next := s.dynLikes.flip(d.ID, d.Liked, d.LikeCount)
+	s.wake.invalidate()
+
+	s.app.LikeDynamic(d.ID, next.liked, func(err error) {
+		if err != nil {
+			s.dynLikes.revert(d.ID)
+			s.addToast(likeFailText(next.liked, err))
+		}
+		s.wake.invalidate()
+	})
+}
+
+// likeFailText 是赞 / 取消赞失败时说的那句话。
+func likeFailText(like bool, err error) string {
+	if like {
+		return "赞不了：" + err.Error()
+	}
+	return "取消不了赞：" + err.Error()
+}
 
 // viewCollectionRow 画一张收藏夹 / 合集卡片。**整行可点**，跳到那个的内容页。
 func (s *Shell) viewCollectionRow(c *ui.Context, col bili.UpCollection) {
@@ -90,6 +185,57 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic) {
 			s.viewDynamicVideo(c, d.Video)
 		case len(d.Pics) > 0:
 			s.viewDynamicPics(c, d.Pics)
+		}
+
+		// ④ 那一排动作：赞 +（投稿型的）下载音频 / 下载视频。
+		//
+		// ⚠️ **「下一首播放」不在这四项里**：队列现在只有「追加到队尾」和
+		// 「从这一首往后换队列」两种（`app.Enqueue` / `app.PlayFrom`），没有
+		// 「插到当前这一首后面」。那一项是 A9 那张票的事；在它落地之前摆一个
+		// 按下去只是加到队尾的按钮，用户会以为它排在了正在放的那首后面——
+		// 而它排在队尾。这比不摆更坏（见 `later.go` 里「清除已看完」为什么
+		// 故意不摆，同一个理由）。
+		s.viewDynamicActions(c, d)
+	})
+}
+
+// viewDynamicActions 是卡片最下面那一排按钮。
+//
+// 项照 Biu 的 `src/pages/dynamic-feed/item.tsx:112`（点赞）、`:134`/`:135`
+// （下载音频 / 下载视频）：
+//
+//   - **赞**对三种卡片都有——B 站给纯文字和图文也评赞。
+//   - **下载**只有投稿型有：B 站音乐库里的音频条目没有取流通道（Biu 那边的
+//     下载按钮也只挂在视频上），摆出来按不动。
+func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
+	t := c.Theme()
+	ui.Row(c).Key("dyn-acts:" + d.ID).Gap(6).Children(func() {
+		liked, count := s.dynLikes.get(d.ID, d.Liked, d.LikeCount)
+		label := "赞"
+		if count > 0 {
+			label = "赞 " + strconv.Itoa(count)
+		}
+		btn := ui.Button(c, label).FontSize(12)
+		if liked {
+			// 点亮的那一下是**看得见的**（「我赞过了」不是数字变大）。
+			btn = btn.TextColor(t.Accent)
+		} else {
+			btn = btn.TextColor(t.TextMuted)
+		}
+		if btn.Clicked() {
+			s.toggleDynamicLike(d)
+		}
+
+		if d.Kind != bili.DynamicVideo || d.Video == nil {
+			return
+		}
+		// ⚠️ 下载走 `downloadLater`（异步补 cid）：动态接口给的稿件**不带
+		// cid**（`major.archive` 里没有这个字段），而下载按分 P 存文件。
+		if ui.Button(c, "下载音频").FontSize(12).TextColor(t.TextMuted).Clicked() {
+			s.downloadLater(dynVideoItem(d.Video), false, "下载音频")
+		}
+		if ui.Button(c, "下载视频").FontSize(12).TextColor(t.TextMuted).Clicked() {
+			s.downloadLater(dynVideoItem(d.Video), true, "下载视频")
 		}
 	})
 }

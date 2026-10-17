@@ -12,6 +12,7 @@
 //
 //	POST /x/v3/fav/folder/add            新建收藏夹
 //	POST /x/v3/fav/folder/edit           修改收藏夹
+//	POST /x/v3/fav/folder/del            删掉自己创建的收藏夹
 //	GET  /x/v3/fav/folder/created/list   拉某个人创建的全部收藏夹（分页）
 //	POST /x/vu/web/cover/up              上传一张封面，返回它的地址
 //	POST /x/v3/fav/resource/deal         往收藏夹里放 / 拿出内容
@@ -36,6 +37,7 @@ import (
 const (
 	pathFolderAdd     = "/x/v3/fav/folder/add"
 	pathFolderEdit    = "/x/v3/fav/folder/edit"
+	pathFolderDel     = "/x/v3/fav/folder/del"
 	pathFolderCreated = "/x/v3/fav/folder/created/list"
 	pathCoverUpload   = "/x/vu/web/cover/up"
 	pathResourceDeal  = "/x/v3/fav/resource/deal"
@@ -183,6 +185,27 @@ func (c *Client) EditFolder(ctx context.Context, id int64, d FolderDraft) (*Fold
 		"privacy":  {strconv.Itoa(d.Privacy)},
 		"cover":    {d.Cover},
 	})
+}
+
+// DeleteFolder 删掉一个**自己创建的**收藏夹。
+//
+// ⚠️ **参数叫 `media_ids`（复数、逗号分隔）而不是 `media_id`**：这一条一个
+// 请求能删几个，照抄成 `media_id` 的话 B 站回 -400「参数错误」——它不认那个名字。
+//
+// ⚠️ 删的是**收藏夹和它里面的全部内容**，不可撤销。界面那边有二次确认
+// （见 `ui` 的收藏夹删除弹窗），这一层不重复问一遍。
+//
+// 合集和系列删不掉（那是 UP 主建在稿件上的），那两类在侧栏里没有「删除」这一项。
+func (c *Client) DeleteFolder(ctx context.Context, id int64) error {
+	if id <= 0 {
+		return fmt.Errorf("bili: 收藏夹 id 不对（%d）", id)
+	}
+	if _, err := c.Do(ctx, c.writeCall(c.hostAPI+pathFolderDel, url.Values{
+		"media_ids": {strconv.FormatInt(id, 10)},
+	})); err != nil {
+		return fmt.Errorf("bili: %s %d: %w", pathFolderDel, id, err)
+	}
+	return nil
 }
 
 func (c *Client) writeFolder(ctx context.Context, path string, form url.Values) (*FolderInfo, error) {
