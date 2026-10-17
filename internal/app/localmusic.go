@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
@@ -204,7 +205,10 @@ func (a *App) DeleteLocalTrack(id string) error {
 		return fmt.Errorf("%w：这一首已经不在列表里了", localmusic.ErrMissing)
 	}
 
-	err := localmusic.Delete(track.Path, roots)
+	// ⚠️ 传的是**整个 track**：删除那一侧要拿 `track.Canonical` 做一道身份
+	// 检查（`localmusic.Delete` 的规矩 4），只给路径它无从判断「这个位置上
+	// 的东西还是不是扫描时那一个」。
+	err := localmusic.Delete(track, roots)
 
 	lib.mu.Lock()
 	if err == nil || errors.Is(err, localmusic.ErrMissing) {
@@ -346,7 +350,28 @@ func (l *localLibrary) arm() (roots []string, prev map[string]localmusic.Meta, g
 // `TestTheFirstScanIsNotOnTheCallingThread` 钉的就是这一句。
 func (l *localLibrary) launch(roots []string, prev map[string]localmusic.Meta, gen uint64) {
 	go func() {
-		res := localmusic.Scan(roots, prev)
+		// 🔴 **这一层 recover 不是可有可无的保险。**
+		//
+		// 这一遍跑在一个没人管的 goroutine 上：界面层的 `Guard`、行级的
+		// recover、`widgets/list` 那个 `fetchOne` 的 recover，**一个都接不住
+		// 它**——Go 里没有人在跑那条 goroutine。解析器在畸形文件上切错一个
+		// 切片（评审就逮到过一个四字节的 `RIFF` 让它越界），panic 会一路
+		// 上去把**整个应用**带走，退出码 2，而界面上什么都看不见。
+		//
+		// 音乐目录里出现半截文件是常事（拷到一半、被中断的下载留下的
+		// `.part` 改名来的、正在被写的一个）。所以这里把崩了变成「这一遍
+		// 什么都没有」+ 一条日志，下一遍扫描（用户按刷新、或者文件又变了）
+		// 自然会再试。
+		var res localmusic.Result
+		func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					log.Printf("biu: 扫本地音乐时崩了（多半是目录里有畸形文件）：%v\n%s",
+						rec, debug.Stack())
+				}
+			}()
+			res = localmusic.Scan(roots, prev)
+		}()
 		l.land(res, gen)
 	}()
 }

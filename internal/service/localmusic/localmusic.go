@@ -118,6 +118,17 @@ type Track struct {
 	// 外面去了（见包头那三条规矩）。
 	Path string
 
+	// Canonical 是**扫描那一刻** `Track.Path` 解析出来的真实路径。
+	//
+	// ⚠️ 它是删除前的**第二道**身份检查（见 `Delete`）：列表上那一行记的是
+	// 「当时那个位置上的那个文件」，而 `Path` 只是一个位置。有人（或者某个
+	// 脚本）在扫完之后把根目录换成指向别处的符号链接，再点删除时，
+	// `Path` 解析出来已经是**库外**的另一个文件了——只查「在不在某个根下面」
+	// 拦不住（根自己也变了），比对 Canonical 拦得住。
+	//
+	// 它同时也是 `ID` 的来源（`identityPath(Canonical)`），所以不用另算。
+	Canonical string
+
 	// Root 是它来自哪个根目录。界面上按目录筛选用它。
 	Root string
 
@@ -232,7 +243,12 @@ func uniqueRoots(roots []string) []string {
 	var out []string
 	seen := map[string]bool{}
 	for _, r := range roots {
-		r = strings.TrimSpace(r)
+		// ⚠️ **只跳空串，绝不 TrimSpace**：目录名末尾带空格是完全合法的
+		// （macOS/Linux 都许），而 `strings.TrimSpace("/Music ")` 变出来的
+		// `/Music` 是**另一个文件夹**。裁一次的后果不是「读不到」：
+		// 设置里那个带空格的目录被换成了隔壁那个，而删除那一侧的根检查
+		// （`underAnyRoot`）也认了它——用户选的是 `Music `，文件却从
+		// `Music` 里没的。
 		if r == "" {
 			continue
 		}
@@ -306,12 +322,13 @@ func trackOf(root string, entry fs.DirEntry, prev, next map[string]Meta, seen ma
 	}
 
 	track := Track{
-		ID:      id,
-		Path:    path,
-		Root:    root,
-		Size:    target.Size(),
-		Format:  ext,
-		Created: Created(target),
+		ID:        id,
+		Path:      path,
+		Canonical: canon,
+		Root:      root,
+		Size:      target.Size(),
+		Format:    ext,
+		Created:   Created(target),
 	}
 
 	// 大小 + 修改时间都没变就复用上一次的标签和时长：这两样才是要花 IO 的。

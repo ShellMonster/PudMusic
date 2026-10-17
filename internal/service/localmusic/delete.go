@@ -54,23 +54,50 @@ var (
 	ErrNotRegular = errors.New("不是一个普通文件，不删")
 	// ErrMissing 是「它已经不在了」。
 	ErrMissing = errors.New("文件已经不在了")
+	// ErrMoved 是「这个位置上的东西已经不是你列表里看到的那一个了」。
+	ErrMoved = errors.New("这个位置上的文件已经换了，不删")
 )
 
-// Delete 把 path 那个文件从磁盘上删掉。
+// Delete 把 tr 那一项从磁盘上删掉。
 //
-// ⚠️ **path 必须是列表里那一行的 `Track.Path`**（目录里原本的那个路径），
-// 不是 `Track.ID` 那份 canonical。这两者混用就是删到别处去（见包头规矩 1）。
+// ⚠️ **传的是整个 `Track`，不是光一条路径**：这一层要拿 `Track.Canonical`
+// 做一道身份检查（见下面「规矩 4」），只有路径的话它无从判断「这个位置
+// 上的东西还是不是扫���时那个」。
 //
 // roots 是用户当前配的音乐目录。传空的话什么都不会删——那不是「有权限删」，
 // 是「用户没告诉我能删哪儿」。
-func Delete(path string, roots []string) error {
-	clean := filepath.Clean(strings.TrimSpace(path))
+func Delete(tr Track, roots []string) error {
+	path := tr.Path
+	// ⚠️ **不 TrimSpace**：文件名末尾带空格是完全合法的，而
+	// `filepath.Clean(strings.TrimSpace("/Music /歌.mp3"))` 指向的是
+	// `/Music/歌.mp3`——**另一个文件**。这一层是删除前的最后一道门，
+	// 在这里换掉用户选的那一个是最坏的一种错。
+	clean := filepath.Clean(path)
 	if clean == "" || clean == "." {
 		return fmt.Errorf("%w：路径是空的", ErrOutsideRoots)
 	}
 	// 规矩 1：必须在某个根下面。
 	if !underAnyRoot(clean, roots) {
 		return fmt.Errorf("%w：%s", ErrOutsideRoots, clean)
+	}
+
+	// 规矩 4：**这一行记的还是不是扫���时那个文件。**
+	//
+	// 前面那条「在不在某个根下面」挡不住这一种：把根目录 `library` 改名，
+	// 再在原处建一个指向 `outside` 的符号链接，那么 `library/歌.mp3` 解析出来
+	// 已经是 `outside/歌.mp3`——一个**从没被扫过、也不在音乐库里**的文件，
+	// 而路径在词法上仍然规规矩矩地待在 `library` 底下。
+	//
+	// 比对 `EvalSymlinks` 现在的结果和 `Track.Canonical`（扫描那一刻记下的），
+	// 两者不等就说明这个位置上换过东西了，拒删。
+	//
+	// ⚠️ 这里解析只是为了**比对**；真正删的仍然是词法上的 `clean`（规矩 3）。
+	now, err := filepath.EvalSymlinks(clean)
+	if err != nil {
+		return fmt.Errorf("%w：%s", ErrMissing, clean)
+	}
+	if tr.Canonical != "" && now != tr.Canonical {
+		return fmt.Errorf("%w：%s 现在指向 %s", ErrMoved, clean, now)
 	}
 
 	// Lstat 而不是 Stat：我们要知道**这一条路径本身**是什么。
@@ -108,7 +135,9 @@ func Delete(path string, roots []string) error {
 // 用 `strings.HasPrefix(rel, "..")` 会被错当成在外面。
 func underAnyRoot(path string, roots []string) bool {
 	for _, root := range roots {
-		root = strings.TrimSpace(root)
+		// ⚠️ **只跳空串，绝不 TrimSpace**（理由同 `uniqueRoots` 那一行）：
+		// 把 `/Music ` 裁成 `/Music` 就等于把「用户选的那个文件夹」换成了
+		// 隔壁那个，而这一层是**最后一道**删除前的门。
 		if root == "" {
 			continue
 		}

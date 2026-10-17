@@ -520,3 +520,57 @@ func TestAPanicInThisPageDoesNotKillTheProcess(t *testing.T) {
 		t.Errorf("崩过之后这一页画不出来，文字有 %q", tt.Texts())
 	}
 }
+
+// TestDeletingFromARootWithATrailingSpace 钉住「尾部带空格的目录」在**整条
+// 链路上**都指对地方。
+//
+// ⚠️ 这一条来自评审，而且它是**从真实 Shell 上点出来的**：把 `Music `（末尾
+// 一个空格）配进设置，页面上出现的是**隔壁** `Music` 里那首歌，点删除 + 确认
+// 之后删掉的是隔壁那首，而 `Music ` 里的没动。
+//
+// 服务层那一条（`localmusic` 包的 `TestDeleteRefusesARootWithATrailingSpace`）
+// 断的是「根检查不裁空格」。这里断的是**整条链路**：设置 → 扫描 → 列表 →
+// 按删除 → 按确认 → 磁盘，中间任何一环再裁一次空格就又错了。
+func TestDeletingFromARootWithATrailingSpace(t *testing.T) {
+	base := t.TempDir()
+	plain := filepath.Join(base, "Music")
+	spaced := filepath.Join(base, "Music ") // 末尾一个空格
+	for _, d := range []string{plain, spaced} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 用户配的是**带空格**那个，里面只有 chosen-only.mp3。
+	chosen := libSong(t, spaced, "chosen-only.mp3")
+	// 隔壁那个里有**同名**的歌：一旦哪一环把空格裁掉，删的就会是它。
+	other := libSong(t, plain, "other-only.mp3")
+
+	tt, _, _, _ := shellOnLocalMusic(t, spaced)
+
+	if !tt.HasText("chosen-only") {
+		t.Fatalf("列表里不是带空格那个目录里的歌，文字有 %q", tt.Texts())
+	}
+	if tt.HasText("other-only") {
+		t.Fatalf("隔壁目录的歌出现在列表里了，文字有 %q", tt.Texts())
+	}
+
+	if err := tt.Click(deleteRowLabel); err != nil {
+		t.Fatalf("点不到行里的「%s」：%v，文字有 %q", deleteRowLabel, err, tt.Texts())
+	}
+	tt.Frame()
+	// 弹窗上摆的必须是带空格那个目录里的那条完整路径。
+	if !tt.HasText(chosen) {
+		t.Fatalf("弹窗上摆的路径不是 %q，文字有 %q", chosen, tt.Texts())
+	}
+	if err := tt.Click(deleteConfirmLabel); err != nil {
+		t.Fatalf("点不到弹窗里的「%s」：%v，文字有 %q", deleteConfirmLabel, err, tt.Texts())
+	}
+	tt.Frame()
+
+	if exists(chosen) {
+		t.Error("用户选的那首还在")
+	}
+	if !exists(other) {
+		t.Fatal("隔壁目录里的歌被删了——哪一环把尾部空格裁掉了")
+	}
+}
