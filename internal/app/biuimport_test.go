@@ -283,9 +283,6 @@ func TestBiuDownloadsBecomeOurOwnQueueEntries(t *testing.T) {
 	if done.Label != "无损 FLAC" {
 		t.Fatalf("音质徽章没翻过来：%q", done.Label)
 	}
-	if len(done.Chunks) != 3 {
-		t.Fatalf("下完的那首应该三块全齐，实际 %v", done.Chunks)
-	}
 
 	half, ok := byID["BV1bb411c7mD|67890"]
 	if !ok {
@@ -299,15 +296,6 @@ func TestBiuDownloadsBecomeOurOwnQueueEntries(t *testing.T) {
 	// cid 是字符串的那个也要转成字符串——`"67890"` 和 `67890` 不是同一个键。
 	if half.Identity.Cid != "67890" {
 		t.Fatalf("字符串形式的 cid 没转成字符串：%q", half.Identity.Cid)
-	}
-	// 三块里只下完两块：第三块 done=false，不该被算成已完成。
-	if len(half.Chunks) != 2 {
-		t.Fatalf("下到一半的那首应该两块齐，实际 %v", half.Chunks)
-	}
-	for _, i := range half.Chunks {
-		if i != 0 && i != 1 {
-			t.Fatalf("没下完的那块被算成已完成：%v", half.Chunks)
-		}
 	}
 	if half.Label != "320K" {
 		t.Fatalf("音质徽章没翻过来：%q", half.Label)
@@ -339,41 +327,54 @@ func TestAVideoDownloadDoesNotBecomeAnAudioRow(t *testing.T) {
 	}
 }
 
-// 分块下标是从字节区间换算出来的，而且**只算我们格式下合法的**下标。
+// **分块记账一个都不搬**，因为 Biu 的分块文件不在我们盘上。
 //
-// 换算错了的后果不是「进度显示不准」，是续传把两段不同的字节拼在一起——歌能
-// 打开、播到一半就断，而长度对得上所以没人会去怀疑拼接。
-func TestBiuChunkBookkeepingTurnsIntoOurIndices(t *testing.T) {
-	// 总长 25 MiB = 2.5 块，也就是**三块**。第四条记的 end 落在第四块上，而那一块
-	// 按总长根本不存在——Biu 那边换了转码、文件大小对不上时会留下这种记录。
-	body := `{"t":{
-      "id":"t","status":"completed","outputFileType":"audio","title":"歌",
-      "bvid":"BV1xx411c7mD","cid":1,"savePath":"/x/a.m4a","totalBytes":26214400,
-      "chunks":[
-        {"type":"audio","start":0,"end":10485759,"done":true},
-        {"type":"audio","start":10485760,"end":20971519,"done":true},
-        {"type":"audio","start":20971520,"end":26214399,"done":true},
-        {"type":"audio","start":26214400,"end":31457279,"done":true}
-      ]}}`
-	f := newBiuFixture(t).put(t, biuDownloadsFile, body)
+// 这是被评审验出来的：这一票原先把 Biu 的 `done: true` 换算成我们的分块下标，
+// 而两边的「分块」根本不是同一个东西——Biu 把每一块写成独立文件
+// （`join(tempDir, "audio.part1")`，`download-core.ts:387`），我们是并发 3 写
+// **同一个** `.part`。带上一份「盘上并不存在的分块记账」，等于声称前 N 块已经下好了：
+// 按「继续」时续传跳过那些下标，拼出来是一个坏文件。
+//
+// 而不跳过的那条路也不通：我们不知道 Biu 那边下的是哪一档（`Identity.Quality`
+// 是零值），`SameResource` 会把记账清空从头重下——那一道拦住的是坏文件，代价是
+// Biu 里下到 80% 的歌从头再来。
+//
+// 所以诚实地不带：记录和路径带过来，进度从 0% 开始。
+func TestNoChunkBookkeepingComesOverBecauseThoseBytesAreNotOnOurDisk(t *testing.T) {
+	f := newBiuFixture(t).put(t, biuDownloadsFile, biuDownloadsJSON)
 	dst := t.TempDir()
-	if _, err := mustScan(t, f).Import(dst); err != nil {
+	r, err := mustScan(t, f).Import(dst)
+	if err != nil {
 		t.Fatal(err)
 	}
 	tasks := readQueue(t, filepath.Join(dst, download.QueueFileName))
-	if len(tasks) != 1 {
-		t.Fatalf("队列里 %d 条", len(tasks))
+	if len(tasks) != 2 {
+		t.Fatalf("队列里有 %d 条", len(tasks))
 	}
-	// 合法下标是 0/1/2（第三块只有一半，done=true 说得过去）；
-	// 第四条落在第四块上，越界，必须被丢掉——`Restore` 的 `keepOnRestore`
-	// 会因为同样的理由丢掉越界的记账，而在导入这一层就丢，用户看到的报告里
-	// 就没有一条「明明下到 80% 却没带过来」的死行。
-	got := tasks[0].Chunks
-	if len(got) != 3 {
-		t.Fatalf("换算出 %v，期望三块（下标 0/1/2）", got)
+	for _, task := range tasks {
+		if len(task.Chunks) != 0 {
+			t.Errorf("「%s」带了一���分块记账 %v，而盘上那些字节并不存在", task.Title, task.Chunks)
+		}
 	}
-	if got[0] != 0 || got[1] != 1 || got[2] != 2 {
-		t.Fatalf("换算出 %v，期望 [0 1 2]", got)
+	// 记录本身带过来了——路径、标题、状态、身份全在。
+	// 「已下完」的那些文件是真的在盘上的（`savePath` 指着它），那条记录有意义。
+	var done, half *download.Task
+	for i := range tasks {
+		if tasks[i].Status == download.StatusDone {
+			done = &tasks[i]
+		} else {
+			half = &tasks[i]
+		}
+	}
+	if done == nil || half == nil {
+		t.Fatalf("状态没翻过来：%v", tasks)
+	}
+	if done.Dest == "" || half.Dest == "" {
+		t.Errorf("保存路径没带过来：%+v", tasks)
+	}
+	// 而这件事要告诉用户，不能让他以为「从 Biu 带过来的下载都能续传」。
+	if !saysSomethingAbout(r.Notes, "续传") {
+		t.Errorf("没有说「续传带不过来」：%v", r.Notes)
 	}
 }
 

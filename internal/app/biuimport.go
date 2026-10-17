@@ -291,17 +291,6 @@ type biuTask struct {
 	} `json:"chunks"`
 }
 
-// biuChunkSize 是 Biu 一个分块多大。10 MB。
-//
-// 照抄 `electron/ipc/download/download-core.ts:371` 的 `chunkSize = 10 * 1024 *
-// 1024`，和我们这边 `task.go` 的 `chunkSize` 同一个数——**必须一样**，否则换算
-// 出来的分块下标指向的是别的字节范围，续传会把两段不同的字节拼在一起。
-//
-// ⚠️ 它和 `download.chunkSize` 是两个私有常量，两边各一份：那边不导出是为了不让
-// 别的包把分块大小当成自己的事去算，而这边要用它做**换算**（外来下标 → 我们的
-// 下标），必须知道那个数。真要改分块大小的话，这两处要一起改。
-const biuChunkSize = 10 << 20
-
 // biuDownloads 把 Biu 的下载记录翻成我们的任务。
 //
 // 形状是 `Record<string, FullMediaDownloadTask>`：key 是任务 id，值是任务本身
@@ -341,6 +330,15 @@ func biuDownloads(raw []byte, notes []string) ([]*download.Task, []string) {
 	if skipped > 0 {
 		notes = append(notes, fmt.Sprintf(
 			"Biu 的下载记录里有 %d 条没能带过来（视频任务、认不出是哪一首的、或没写保存路径的）。", skipped))
+	}
+	// 续传带不过来这件事**必须说出来**。不说的话用户在记录页上看到一堆从 Biu 来的
+	// 「暂停」，按「继续」发现从头开始，而界面上没有任何一句话解释过为什么——
+	// 而他刚刚亲手导入了这些记录。
+	if len(out) > 0 {
+		notes = append(notes,
+			"下载记录带过来了，但**续传带不过来**：Biu 的半成品是分开的若干块文件，"+
+				"都在它自己的临时目录里，这边盘上一个字节都没有。"+
+				"所以没下完的那几首进度从 0% 开始；已经下完的那些文件是真的在那儿的。")
 	}
 	return out, notes
 }
@@ -384,7 +382,7 @@ func convertBiuTask(t biuTask) (*download.Task, bool) {
 		Identity: download.Identity{
 			Bvid: bvid, Cid: cid, Length: length,
 		},
-		Chunks: biuChunks(t.Chunks, length),
+		// ⚠️ **不带 Chunks**，理由见 `biuTask.Chunks` 的注释。
 	}, true
 }
 
@@ -452,48 +450,6 @@ func biuQualityLabel(codecs string) string {
 		return "128K"
 	}
 	return ""
-}
-
-// biuChunks 把 Biu 的分块换算成我们的分块下标。
-//
-// Biu 记的是**字节区间**（`{start, end, done}`，`electron/ipc/download/types.ts`），
-// 我们记的是**分块下标**（`download.Task.Chunks`）——见 `task.go` 文件头：按前缀
-// 长度记在并发写下是不准的，只有「哪几块齐了」是确定的事实。
-//
-// 两边的块都是 10 MB（`biuChunkSize` 和 `download.chunkSize`），所以下标 =
-// `end / 块大小`。用 `end` 而不是 `start`：Biu 的 `end` 是**闭区间**的最后一个
-// 字节，用 `start` 的话第一块会算成 0、下标 -1。
-//
-// 换算出来的下标要落在范围内（`start/块大小 <= 下标 < 块数`），越界的丢��——
-// `Restore` 的 `keepOnRestore` 会因为同样的理由丢掉越界的记账，而在**导入**这一层
-// 就丢掉，用户看到的报告里就没有一条「明明在 Biu 里下到 80% 却没带过来」的死行。
-func biuChunks(in []struct {
-	Type string `json:"type"`
-	End  int64  `json:"end"`
-	Done bool   `json:"done"`
-}, length int64) []int {
-	if length <= 0 {
-		// 总长都不知道就没法判断下标合不合法，全丢。
-		return nil
-	}
-	total := (length + biuChunkSize - 1) / biuChunkSize
-	seen := map[int64]bool{}
-	out := make([]int, 0, len(in))
-	for _, c := range in {
-		if !c.Done || (c.Type != "" && c.Type != "audio") {
-			continue
-		}
-		idx := c.End / biuChunkSize
-		if idx < 0 || idx >= total || seen[idx] {
-			continue
-		}
-		seen[idx] = true
-		out = append(out, int(idx))
-	}
-	// 队列里的分块是「完成了哪些」，顺序没有语义，但排一下让落盘的文件两次
-	// 导入结果逐字一样（评审和排障时能直接 diff 两份文件）。
-	sort.Ints(out)
-	return out
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
