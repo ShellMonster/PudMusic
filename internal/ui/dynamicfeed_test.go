@@ -383,9 +383,16 @@ func TestTheAuthorRetryWhilePendingDoesNotSendASecondRequest(t *testing.T) {
 	})
 
 	tt.Click("重试加载关注的人")
-	for range 10 {
-		tt.Frame()
-	}
+	// ⚠️ 要**等请求真的被发出去**，不能只画固定几帧：重试走的是后台 goroutine，
+	// handler 一进来才 `pn2++`，而机器一忙那几帧里请求还在路上——读出来就是
+	// 「0 次」，而按钮确实按下去了。表现是这条**只在整仓并行跑时**红（实测三次里
+	// 一次），单跑 20 次全绿。
+	waitFrames(t, tt, "重试发起了第二页的请求", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return pn2 > before
+	})
+	tt.Frame()
 	if _, ok := tt.Find("重试加载关注的人"); ok {
 		t.Errorf("重试之后按钮还在 —— 闸门的 loading 没写回真实的那一份" +
 			"（`auth := f.auth` 是复制），可以再点一次并发发第二个请求")
