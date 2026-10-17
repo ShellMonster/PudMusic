@@ -52,13 +52,20 @@ var routes = []Route{
 		Title: "暂无内容",
 		Hint:  "登录之后点「关注」关注的 UP 主会出现在这里",
 	}},
-	// 上游：`pages/later/index.tsx:236`。
-	{Match: "/later", Title: "稍后再看", InMenu: true, Empty: emptyState{
+	// ⚠️ 稍后再看和历史记录已经有自己的内容了（later.go / history.go），但这两
+	// 条的 `Empty` **不是一句没人会看到的话**：它们在自己的 view 里画的就是这
+	// 一条（`pagedRows.SetEmpty`，走的是列表那一块而不是 `pageContent` 的兜底
+	// ——兜底那一支会把上面那一排筛选一起换掉，而用户正是要靠那一排把条件改回去）。
+	// 理由和上面首页、下面下载记录那两条一样，别照着「已经有内容的页不用 Empty」
+	// 那条把它清掉。
+	//
+	// 上游：稍后再看 `pages/later/index.tsx:236`，历史记录
+	// `pages/history/index.tsx:284`。
+	{Match: laterPath, Title: "稍后再看", InMenu: true, Empty: emptyState{
 		Title: "暂无稍后再看内容",
 		Hint:  "登录之后在歌上点「稍后再看」，加进来的会出现在这里",
 	}},
-	// 上游：`pages/history/index.tsx:284`。
-	{Match: "/history", Title: "历史记录", InMenu: true, Empty: emptyState{
+	{Match: historyPath, Title: "历史记录", InMenu: true, Empty: emptyState{
 		Title: "暂无历史记录",
 		Hint:  "登录之后听过的歌会出现在这里，也可以「清空历史记录」",
 	}},
@@ -83,6 +90,10 @@ var routes = []Route{
 	// 搜索页有搜索框和两个空状态（searchpage.go），所以**不填 Empty**：填了就是
 	// 一句没人会看到的话，那一页根本走不到空状态那一支。
 	{Match: "/search", Title: "搜索"},
+	// ⚠️ 这一条已经接上 `builtPage`（dynamicfeed.go），所以下面这两句空状态
+	// **不是留着没用**——是页面在「右边一个格子都没有」时**直接读它**
+	// （见 `feedEmpty`）。出处标在这儿是为了让「这句话抄自哪里」只有一个地方。
+	//
 	// 上游：动态流作者栏是 `暂无关注`（`dynamic-feed/author-list.tsx:137`），
 	// 主列表那处上游写的是没翻译的 `Empty`（`dynamic-feed/index.tsx:184`），
 	// 明显是漏了。同一句中文上游在 `user-profile/dynamic-list/index.tsx:80`
@@ -91,6 +102,9 @@ var routes = []Route{
 		Title: "暂无动态",
 		Hint:  "去「我的关注」关注几个 UP 主，他们的动态会出现在这里",
 	}},
+	// ⚠️ 同上：这一条也接上了 `builtPage`（upspace.go），下面这句是「动态」
+	// 那一张 Tab 空着时说的话（见 `upTabEmpty`）。出处同上。
+	//
 	// 上游：`pages/user-profile/dynamic-list/index.tsx:80`。
 	{Match: "/user/{id}", Title: "UP 主空间", Empty: emptyState{
 		Title: "暂无动态",
@@ -219,6 +233,23 @@ func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
 	case loginPath:
 		// 扫码登录（login.go）。
 		return s.viewLogin
+	case upPath:
+		// UP 主空间：头图 + 关注 + 统计 + 四个 Tab（upspace.go）。
+		//
+		// ⚠️ 这是**参数路由**：`upPath` 是 `"/user/{id}"`，那一条的
+		// `Route.Empty` 从此用不上了——留着等于一句没人会看到的话
+		// （`TestEmptyStateCopySaysWhyAndHow` 会把这种「既没内容、Empty
+		// 又是空的」路由揪出来）。空状态在 upspace_tabs.go 里按 Tab 分。
+		return s.viewUpSpace
+	case dynamicFeedPath:
+		// 用户动态：左边关注的人、右边动态（dynamicfeed.go）。
+		return s.viewDynamicFeed
+	case laterPath:
+		// 稍后再看：关键词 + 日期范围 + 会自己翻页的列表（later.go）。
+		return s.viewLater
+	case historyPath:
+		// 历史记录：同一副骨架，多一列播放进度（history.go）。
+		return s.viewHistory
 	case localMusicPath:
 		// 本地音乐（localmusic.go）：表格 / 列表 / 网格三档 + 每行的
 		// 「打开文件夹」和「删除文件」。

@@ -173,7 +173,7 @@ func TestImportingAFileWeCannotReadSaysSo(t *testing.T) {
 func TestImportingIntoSettingsFromANewerVersionIsRefusedLoudly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), app.SettingsFileName)
 	// 一份未来的设置文件。
-	body := `{"schemaVersion":` + itoa(app.SchemaVersion+5) + `,"appSettings":{"borderRadius":7}}`
+	body := `{"schemaVersion":` + strconv.Itoa(app.SchemaVersion+5) + `,"appSettings":{"borderRadius":7}}`
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -283,9 +283,6 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(b)
 }
-
-// itoa 是 strconv.Itoa 的短写法，这一组测试用得上两三次。
-func itoa(n int) string { return strconv.Itoa(n) }
 
 // 点「从 Biu 导入」：设置真的换成了 Biu 那一份，而且**旧的那份留了备份**。
 //
