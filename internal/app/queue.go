@@ -318,6 +318,23 @@ func (q *Queue) RemoveIdentity(id string) (removed []Item, wasCurrent, ok bool) 
 	return removed, wasCurrent, len(removed) > 0
 }
 
+// replaceAt 把第 i 项就地换成 item。队列位置和当前项都**不动**。
+//
+// 只有换分集用得到（`App.PlayPart`）：同一个 bvid 的另一集在判重上是同一首，
+// 插一项新的会让抽屉和队列里同时出现同一首。
+//
+// 不导出：它和 `selectAt` 一样只许「App.PlayPart」这一条路调，多导出一个就多一处
+// 能把队列和播放器对不上的地方。i 越界是 false 且什么都不动。
+func (q *Queue) replaceAt(i int, item Item) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if i < 0 || i >= len(q.items) {
+		return false
+	}
+	q.items[i] = item
+	return true
+}
+
 // selectAt 把当前项挪到第 i 首，返回那一项。i 是 -1 时是「还没开始」，此时没有
 // 当前项，返回 false。i 越界只返回 false，**不动 cur**。
 //

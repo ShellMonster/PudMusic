@@ -159,6 +159,20 @@ type App struct {
 	// 用得着的只有歌词那 500ms 的防抖窗口（见 lyrics.go）。
 	after func(d time.Duration, fn func()) func()
 
+	// fullPlayerPrefs 是全屏播放器自己那一份偏好（见 fullplayer_prefs.go）。
+	// 挂上之前是 nil，`FullPlayerPrefs` 判空之后给默认值。
+	fullPlayerPrefs *fullPlayerPrefsStore
+	// specBars 是频谱条那一行的高度（0~1），每一帧复用同一块。
+	// 频谱是**每帧**要画的（条子每帧都在动），所以这里绝不能每帧新建。
+	specBars []float32
+	// parts 是当前这首的分集列表，partsBvid 是它属于哪一个稿件。见 fullplayer.go。
+	partsMu     sync.Mutex
+	parts       []bili.VideoPart
+	partsBvid   string
+	partsErr    error
+	partsLoaded bool
+	partsWanted bool
+
 	// 本地音乐库，见 localmusic.go。挂上去之前是 nil，界面要判空。
 	localMusic *localLibrary
 
