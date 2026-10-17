@@ -287,8 +287,8 @@ func (g *newMusicGrid) view(c *ui.Context) {
 			// 「暂无数据」。这里照它（那一句是上游的文案，别自己编）。
 			ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
 				Background(t.Surface).Center().Children(func() {
-				ui.Text(c, "暂无数据").FontSize(13).TextColor(t.TextMuted)
-			})
+					ui.Text(c, "暂无数据").FontSize(13).TextColor(t.TextMuted)
+				})
 			return
 		}
 

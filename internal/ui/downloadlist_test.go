@@ -553,7 +553,7 @@ func dlSnapshot(title string, st download.Status, total, done int64) download.Sn
 	}
 	s := download.Snapshot{
 		ID: "BV1" + title + "|" + title, Title: title, Label: "无损 FLAC",
-		Dest:   filepath.Join(dlDir, title+".m4a"),
+		Dest: filepath.Join(dlDir, title+".m4a"),
 		Status: st, Done: done, Total: total, Percent: p,
 		AddedAt: dlAddedAt,
 	}
