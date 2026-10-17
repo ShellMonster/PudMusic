@@ -62,7 +62,9 @@ func newDashPairFixture(t *testing.T) *dashPairFixture {
 	f := newStreamFixture(t)
 	// 源流是真的 fMP4——交织要读 `moov` 和一串 `moof`，编不出来。
 	src := t.TempDir()
-	vp, ap := muxtest.PairIn(t, src, muxtest.VideoSpec(120), muxtest.AudioSpec(4))
+	// 视频流带负的 cts 偏移（B 帧重排 = 真 dash 的常态），让交织一定走
+	// 「要补一段空编辑」那一支。理由见 download 包里同名的那条注释。
+	vp, ap := muxtest.PairIn(t, src, muxtest.VideoSpec(120).WithCtsBias(-3000), muxtest.AudioSpec(4))
 	d := &dashPairFixture{f: f, video: mustReadFile(t, vp), audio: mustReadFile(t, ap)}
 	f.on("/cdn/video.m4s", rangeHandler(d.video))
 	f.on("/cdn/audio.m4s", rangeHandler(d.audio))
@@ -111,6 +113,25 @@ func TestAVideoDownloadLandsAnMP4WithBothTracks(t *testing.T) {
 	}
 	if !sawVideo || !sawAudio {
 		t.Errorf("产物里视频轨带 avcC=%v、音频轨带 esds=%v，两样都要有", sawVideo, sawAudio)
+	}
+	// 每条轨最多一个 `edts`。多一个的话 macOS 的 AVFoundation 会把
+	// **整条轨**丢掉（表现为「文件能打开、只有声音」，见 mux 那边的
+	// `TestATrackCarriesExactlyOneEditList`）。
+	for _, trak := range out.Moov.Traks {
+		n := 0
+		for _, c := range trak.Children {
+			if _, ok := c.(*mp4.EdtsBox); ok {
+				n++
+			}
+		}
+		if n > 1 {
+			t.Errorf("%s 轨里有 %d 个 edts，macOS 会因此把整条轨丢掉",
+				trak.Mdia.Hdlr.HandlerType, n)
+		}
+	}
+	if trakByHandler(t, out, "soun").Edts == nil {
+		t.Error("音频轨没有编辑列表——素材本来是让它晚半秒起的，" +
+			"这一条断言是为了确认这一支真的走到了")
 	}
 
 	// 两条源流不再留在下载目录里：它们是 fMP4，用户点开放不出来，
@@ -242,6 +263,18 @@ func mustReadFile(t *testing.T, path string) []byte {
 		t.Fatalf("读 %s：%v", path, err)
 	}
 	return b
+}
+
+// trakByHandler 按 `hdlr` 找那条轨。
+func trakByHandler(t *testing.T, f *mp4.File, handler string) *mp4.TrakBox {
+	t.Helper()
+	for _, trak := range f.Moov.Traks {
+		if trak.Mdia != nil && trak.Mdia.Hdlr != nil && trak.Mdia.Hdlr.HandlerType == handler {
+			return trak
+		}
+	}
+	t.Fatalf("产物里没有 %s 轨", handler)
+	return nil
 }
 
 // decodeMP4 把产物解回来。

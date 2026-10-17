@@ -416,3 +416,86 @@ func TestBothTracksStartingBeforeZeroKeepTheirRealGap(t *testing.T) {
 		})
 	}
 }
+
+// TestATrackCarriesExactlyOneEditList 钉住「一条轨最多一个 `edts`」。
+//
+// 这条是被评审第三轮逮出来的（`review/duplicate-edts-macos-cannot-play.txt`），
+// 而且它是最重的一个：**产物在 macOS 上根本没有画面**。
+//
+// # 症状
+//
+// AVFoundation（= QuickTime 的引擎）读同一个文件：
+//
+//	交织器的产物：playable=true tracks=1  ← 只剩音频，视频轨整条被丢掉
+//	              decodedFrame@3s: Cannot Open
+//	对照组（只删掉多出来的那个 edts）：tracks=2，3 秒处那一帧解得出来
+//
+// **差的就是那 48 个字节**。而这不是素材的运气：另外两个产物也一样，
+// 其中一条**连打开都打不开**（`playable=false tracks=0`）。
+//
+// # 根因
+//
+// `trimTrakChildren` 把 `edts` 插在 `tkhd` 后面（惯例位置），然后又问
+// 「最后一项是不是 `edts`」——而最后一项是 `mdia`，于是又追加了一次。
+//
+// # 为什么测试抓不到
+//
+// mp4ff 的解码器**不报错**：它把后一个 `edts` 盖在 `TrakBox.Edts` 那个
+// 字段上，而测试断言的一律是 `trak.Edts.Elst[0]`——**正好是被盖掉的那个
+// 指针**。所以「写了两遍」这件事在测试里完全不可见。
+//
+// 所以这条断言数的是 `trak.Children` 里 `*mp4.EdtsBox` 的**个数**，
+// 而不是「那个字段是不是非空」。
+func TestATrackCarriesExactlyOneEditList(t *testing.T) {
+	dir := t.TempDir()
+	// 用「音轨晚半秒起」那种素材：它一定走出 `edts` 那一支，而两条轨
+	// 首帧**都**在 0 之前的那种是上一条用例管的事。
+	spV := muxtest.VideoSpec(120)
+	spA := muxtest.AudioSpecStartingLate(4, 0.5)
+	video, audio := writePair(t, spV, spA)
+	dst := filepath.Join(dir, "v.mp4")
+
+	if _, err := Mux(context.Background(), video, audio, dst); err != nil {
+		t.Fatalf("交织：%v", err)
+	}
+	out := decodeOut(t, dst)
+
+	for _, trak := range out.Moov.Traks {
+		n := 0
+		for _, c := range trak.Children {
+			if _, ok := c.(*mp4.EdtsBox); ok {
+				n++
+			}
+		}
+		if n > 1 {
+			var names []string
+			for _, c := range trak.Children {
+				names = append(names, c.Type())
+			}
+			t.Errorf("%s 轨里有 %d 个 edts（%v）——ISO/IEC 14496-12 规定最多一个，"+
+				"而 macOS 的 AVFoundation 遇到两个就把**整条轨**丢掉"+
+				"（表现为「文件能打开、只有声音、拖到中间解不出那一帧」）",
+				trak.Mdia.Hdlr.HandlerType, n, names)
+		}
+		if n == 1 {
+			// 惯例上紧跟在 tkhd 后面（§8.3.1）。
+			idx := -1
+			for i, c := range trak.Children {
+				if c.Type() == "edts" {
+					idx = i
+				}
+			}
+			if trak.Children[max(idx-1, 0)].Type() != "tkhd" {
+				t.Errorf("%s 轨的 edts 排在 %d，而它前面是 %s（惯例上应该在 tkhd 后面）",
+					trak.Mdia.Hdlr.HandlerType, idx, trak.Children[idx-1].Type())
+			}
+		}
+	}
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}

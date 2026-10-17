@@ -222,6 +222,15 @@ func newVideoHarness(t *testing.T, spVideo, spAudio muxtest.Spec) *videoHarness 
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatalf("建源目录：%v", err)
 	}
+	// 视频流给一个**负的** cts 偏移（B 帧重排的形状，也是真 B 站 dash 的
+	// 常态）。它让首帧的呈现时间落在媒体时间 0 **之前**，于是交织一定走
+	// 「要补一段空编辑」那一支。
+	//
+	// ⚠️ 这一条不是装饰。没有它，这一组里每一条端到端用例交织出来的文件
+	// 里 `edts` 盒数都是 0 —— 也就是**评审逮到的那个重复 `edts` 的 bug
+	// （产物在 macOS 上没有画面）根本走不到**。真素材上有 B 帧重排、
+	// 没有真素材上就没有，而���一版的素材恰好没有。
+	spVideo = spVideo.WithCtsBias(-3000)
 	vp, ap := muxtest.PairIn(t, src, spVideo, spAudio)
 	video := newFileCDN(t, "video", vp)
 	audio := newFileCDN(t, "audio", ap)
@@ -354,6 +363,33 @@ func TestAVideoDownloadLandsOnePlayableMP4(t *testing.T) {
 	// 采样要真的搬过去了，不是两个空壳。
 	if n := out.Moov.Traks[0].GetNrSamples(); n == 0 {
 		t.Error("第一条轨一个采样都没有")
+	}
+
+	// 每条轨最多一个 `edts`，而且**这一组素材一定会走出 `edts`**。
+	//
+	// 多一个的话 macOS 的 AVFoundation 会把**整条轨**丢掉：文件能打开、
+	// 只有声音、拖到中间那一帧解不出来（评审拿真 AVFoundation 验的，
+	// 见 `mux` 包的 `TestATrackCarriesExactlyOneEditList`）。
+	//
+	// ⚠️ 断的是 `Children` 里的**个数**而不是 `trak.Edts` 那个字段：
+	// mp4ff 的解码器把后一个 `edts` 盖在那个字段上、**不报错**，所以
+	// 断言「那个字段非空」在重复写两遍的时候照样通过。
+	edtsBoxes := 0
+	for _, trak := range out.Moov.Traks {
+		n := 0
+		for _, c := range trak.Children {
+			if _, ok := c.(*mp4.EdtsBox); ok {
+				n++
+			}
+		}
+		if n > 1 {
+			t.Errorf("%s 轨里有 %d 个 edts", trak.Mdia.Hdlr.HandlerType, n)
+		}
+		edtsBoxes += n
+	}
+	if edtsBoxes == 0 {
+		t.Error("产物里一个 edts 都没有——素材是带 B 帧重排的（B 帧的呈现偏移是负的），" +
+			"交织一定该补一段空编辑。没有它，这一组用例就永远走不到出 edts 的那一支")
 	}
 
 	// 盘上除了这个产物**一个别的都不该有**：两个半成品、两条源流、
