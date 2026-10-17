@@ -108,12 +108,21 @@ func TestPutLyricsRacesTheDebouncedSave(t *testing.T) {
 	a.SetLyricsOffset(-1000) // ← 排上**真的** 500ms 定时器
 
 	// 这边连着换歌词，那边 500ms 后准时来落盘。
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		for i := range 50 {
 			a.PutLyrics(fmt.Sprintf("[00:0%d.00]换了第 %d 遍", i%9+1, i), "")
 		}
 	}()
 	time.Sleep(lyricsSaveDelay + 200*time.Millisecond)
+
+	// ⚠️ **必须等它跑完再返回**。`PutLyrics` 是往盘上写文件的，而 `t.TempDir()`
+	// 的清理是在测试返回**之后**去删那个目录的：这条 goroutine 还在写的时候清理就
+	// 动手，于是报 `TempDir RemoveAll cleanup: directory not empty`——
+	// 机器一忙 goroutine 活得比测试久，整仓跑时约三次红一次（实测）。
+	// 一个自己会红的测试比一条 flaky 更糟：它把整张票卡住。
+	<-done
 }
 
 // TestAnAdjustmentIsNotLostWhenTheSongChangesMidDebounce 盯住「防抖窗口内换歌」。
