@@ -112,14 +112,14 @@ type Tx struct {
 }
 
 // backup 是一份文件的迁移前副本。
+//
+// 进这个表的一定是**盘上真有备份文件**的那一份：Stage 时文件不存在的那些直接
+// 不入表（见 `Stage` 里那一段）。
 type backup struct {
 	// file 是原文件。
 	file string
 	// snap 是备份落在哪。Stage 时写在原文件旁边，Commit 时挪进快照目录。
 	snap string
-	// existed 是「Stage 之前这个文件在不在」。不在的话回滚是删掉它——
-	// 一个原本没有的文件，升级失败之后不该多出来一个。
-	existed bool
 }
 
 // BeginUpgrade 开一次升级，读总控标记。
@@ -191,18 +191,20 @@ func (t *Tx) Stage(file string) (*Backup, error) {
 	// 会退化成拷贝加删除，中途失败就是两份都没有）。
 	snap := filepath.Join(filepath.Dir(file), "."+filepath.Base(file)+".migrating")
 
-	ent := &backup{file: file, snap: snap}
 	b, err := os.ReadFile(file)
-	switch {
-	case err == nil:
-		if err := os.WriteFile(snap, b, 0o644); err != nil {
-			return nil, fmt.Errorf("app: 备份 %s 失败：%w", file, err)
-		}
-		ent.existed = true
-	case errors.Is(err, os.ErrNotExist):
-		// 第一次运行，没有这一份。回滚时把它删掉。
-	default:
+	if errors.Is(err, os.ErrNotExist) {
+		// 这个文件本来就不在（第一次运行）。**不进 backups、不给句柄**：
+		// 没有东西可备份，回滚时也就没什么可恢复的；而把它记进 backups 会让
+		// 回滚去**删掉**这个文件——那份文件可能是升级期间被别的进程建出来的，
+		// 我们没备份过它，就没有资格处置它。
+		return nil, nil
+	}
+	if err != nil {
 		return nil, fmt.Errorf("app: 读 %s 以便备份：%w", file, err)
+	}
+	ent := &backup{file: file, snap: snap}
+	if err := os.WriteFile(snap, b, 0o644); err != nil {
+		return nil, fmt.Errorf("app: 备份 %s 失败：%w", file, err)
 	}
 
 	t.backups = append(t.backups, ent)
@@ -326,10 +328,6 @@ func (bk *Backup) Rollback() error {
 //
 // 这一份文件本来就不存在的时候没有可留的东西，直接把那个占位的备份文件删掉。
 func (b *backup) toSnapshot(dir string, from int) error {
-	if !b.existed {
-		_ = os.Remove(b.snap)
-		return nil
-	}
 	dirSnap := filepath.Join(dir, UpgradeSnapshotDir)
 	if err := os.MkdirAll(dirSnap, 0o755); err != nil {
 		return fmt.Errorf("app: 建快照目录：%w", err)
@@ -353,15 +351,11 @@ func (b *backup) toSnapshot(dir string, from int) error {
 }
 
 // restore 把备份内容拷回原位。
+//
+// 备份不在这一表里（Stage 时文件就不存在）的那些**不会走到这里**——我们没有备份
+// 过那个文件，也就没有资格处置它。它是升级期间被别的进程建出来的话，删掉它是在
+// 毁别人的东西。
 func (b *backup) restore() error {
-	if !b.existed {
-		// 本来就没有：把它删掉。留着的话用户会看到一个从没生成过的文件，
-		// 而下一次启动它会被当成「一份已有数据」读进来。
-		if err := os.Remove(b.file); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("app: 回滚 %s：%w", b.file, err)
-		}
-		return nil
-	}
 	raw, err := os.ReadFile(b.snap)
 	if err != nil {
 		return fmt.Errorf("app: 回滚 %s：%w", b.file, err)
@@ -369,6 +363,10 @@ func (b *backup) restore() error {
 	if err := writeFileAtomic(b.file, raw); err != nil {
 		return fmt.Errorf("app: 回滚 %s：%w", b.file, err)
 	}
+	// 恢复完了就把备份删掉。它现在的职责（让回滚有东西可恢复）已经尽到；而留着
+	// 它就是让用户的目录里躺着一堆 `.<文件名>.migrating`——下一次升级会被当成
+	// 「上一份备份」重新用起来，而它的内容是**上一次**的。
+	_ = os.Remove(b.snap)
 	return nil
 }
 

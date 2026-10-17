@@ -74,9 +74,21 @@ type searchHistoryFile struct {
 	Items         []searchItem `json:"items"`
 }
 
-// searchHistoryMigrations 把 v 升到 v+1。现在没有要迁的——留着是为了以后加键时
-// 有一条明着的地方可写，而不是「到时候再说」。
-var searchHistoryMigrations = map[int]func(*searchHistoryFile){}
+// searchHistoryMigrations 把 v 升到 v+1。
+//
+// v0 是「文件里没有 `schemaVersion` 键」的那一份。**它必须有这条路**：没有的话
+// `readSearchHistory` 会把一份 v0 文件判成「没有可走的迁移路径 → 只读」，用户在
+// 搜索框里记一条东西都存不住；而 `MigrateSearchHistoryFile`（`migrate_files.go`）
+// 会直接报错，让启动那一轮升级整轮回滚。
+//
+// 它从哪来：这一份文件是照 Biu 的 `src/store/search-history.ts` 建的，那个 store
+// 也是一个 zustand persist，键名（`value` / `time`）和结构**从第一版起就没变过**。
+// 所以 v0 → v1 结构上不用搬东西——这条空的迁移是为了让那条路**存在**，
+// 不是为了改值（和 `settings.go` 的 `migrations[0]` 同一个道理，那一条修的是
+// Biu 一个已知的坏值）。
+var searchHistoryMigrations = map[int]func(*searchHistoryFile){
+	0: func(*searchHistoryFile) {},
+}
 
 // searchHistory 是搜索历史。
 //
