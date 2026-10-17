@@ -79,6 +79,22 @@ func BuildTheme(s app.Settings, systemDark bool) *ui.Theme {
 	}
 
 	t.Radius = radiusOf(s.BorderRadius)
+	// 🔴 字体和圆角一样是**每帧**从设置里读的，所以它在这里装一次就够，别的地方
+	// 不用再管。
+	//
+	// ⚠️ **「系统默认」这一档必须一个字节都不改**。`t.Font` 的零值是「系统自己的
+	// 字体」（`ui/theme.go` 里 LightTheme/DarkTheme 都不设它），而设置里默认是
+	// `"system-ui"`——那**是另一个字符串**：设上去之后 MyGo 按这个名字去解析字体，
+	// 解析到的那一族和「不设」不一定同一个，于是**全应用的字宽都变了**。
+	//
+	// 实测：把 `t.Font = s.FontFamily` 无条件设上，`internal/ui` 的
+	// `TestDragAACToEnd` 在 `-race` 下三次里红两次——播放条上「暂停」那个按钮的位置
+	// 变了，`tt.Click("暂停")` 点了个空气（`playbar_aac_test.go:113`）。
+	//
+	// 「用户选了系统默认」本来就该等于「什么都没变」，所以这里判一下再设。
+	if s.FontFamily != "" && s.FontFamily != app.DefaultFontFamily {
+		t.Font = s.FontFamily
+	}
 	if c, ok := parseHexColor(s.BackgroundColor); ok {
 		t.Background = c
 	}

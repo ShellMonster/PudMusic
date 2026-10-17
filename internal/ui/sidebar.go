@@ -7,6 +7,7 @@
 package ui
 
 import (
+	"slices"
 	"strconv"
 	"time"
 
@@ -230,7 +231,9 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 	// 就处理了输入」的控件上会 panic（`ui/element.go:537`），要给就包一层。
 	ui.Column(c).Key("side-menu").Gap(2).Children(func() {
 		for _, rt := range routes {
-			if !rt.InMenu {
+			// 设置页「菜单设置」里藏起来的那几项（`hiddenMenuKeys`）不摆。
+			// 这是 Biu 的 `DefaultMenus` 那一支（`side/index.tsx` 的 filter）。
+			if !rt.InMenu || slices.Contains(st.HiddenMenuKeys, rt.Match) {
 				continue
 			}
 			label := rt.Title

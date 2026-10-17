@@ -82,3 +82,34 @@ func PickImageFile(parent *mygo.Window) ([]string, error) {
 		Filters: imageFilters,
 	})
 }
+
+// PickPath 弹系统对话框让用户挑一条路径：dir 为 true 是挑文件夹，否则挑文件。
+// 返回空串表示用户取消（不是错误——「用户不想选」是正常结果，不是出错）。
+//
+// 两行字由调用方给：同一个系统对话框，问的问题不一样——本地音乐那页问的是
+// 「挑的音频会出现在哪儿」，设置页的下载目录问的是「下载的东西会存到哪儿」。
+// 把它们写死在一个函数里，就有一边在说错的话。
+//
+// ⚠️ 和 PickAudioFile 一样**必须从非主线程调**：MyGo 的对话框把请求 post 到主线程
+// 再等系统回调，主线程自己进去等就是死等，事件循环再也转不起来。
+func PickPath(parent *mygo.Window, dir bool, title, message string) (string, error) {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent:    parent,
+		Title:     title,
+		Message:   message,
+		Directory: dir,
+	})
+	if err != nil || len(paths) == 0 {
+		return "", err
+	}
+	return paths[0], nil
+}
+
+// PickDirectory 弹系统对话框让用户选一个文件夹，返回选中的路径。用户取消时
+// 返回空串（不是错误——「用户不想选」是正常结果，不是出错）。
+//
+// 用于本地音乐页的「添加目录」。parent 非空时对话框挂在那个窗口下面。
+func PickDirectory(parent *mygo.Window) (string, error) {
+	return PickPath(parent, true,
+		"选择音乐文件夹", "选一个文件夹，它的**第一层**里的音频文件会出现在本地音乐里")
+}

@@ -79,7 +79,7 @@ func TestTheSidebarsEditMenuOpensTheSameDialog(t *testing.T) {
 	wantText(t, tt, "修改收藏夹")
 
 	// 后台那一趟回来之后表单被填上。
-	waitFor(t, tt, "收藏夹信息拉回来", func() bool {
+	waitFrameFor(t, tt, "收藏夹信息拉回来", func() bool {
 		return s.folderEdit != nil && !s.folderEdit.loading && s.folderEdit.title != ""
 	})
 	// ⚠️ 读的是状态而不是画面：Tester 能找到输入框（它有 Label），但读不到
@@ -171,7 +171,7 @@ func TestSubmittingCannotBeDismissed(t *testing.T) {
 
 	// 后台回来之后才关。
 	release()
-	waitFor(t, tt, "提交结果回来之后弹窗关掉", func() bool {
+	waitFrameFor(t, tt, "提交结果回来之后弹窗关掉", func() bool {
 		return s.folderEdit == nil || !s.folderEdit.open
 	})
 	writes := f.writes()
@@ -212,7 +212,7 @@ func openCropDialog(t *testing.T, s *Shell, tt *mygoui.Tester) {
 	if err := tt.Click("点击上传图片"); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, tt, "裁剪弹窗打开", func() bool {
+	waitFrameFor(t, tt, "裁剪弹窗打开", func() bool {
 		return s.folderEdit != nil && s.folderEdit.crop.open
 	})
 }
@@ -266,14 +266,14 @@ func TestTheUploadedCoverIsSixteenByNine(t *testing.T) {
 
 			// ⚠️ **先跑一帧**：DPR 是在绘制回调里记的（见 covermodal.go 的包
 			// 注释），所以它是上一帧的值。第一帧记下的默认是 Tester 的 1。
-			waitFor(t, tt, "记下这台机器的像素密度", func() bool {
+			waitFrameFor(t, tt, "记下这台机器的像素密度", func() bool {
 				return s.folderEdit.crop.dpr == tc.scale
 			})
 
 			if err := tt.Click("上传"); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, tt, "封面传上去", func() bool { return len(f.coversSent()) == 1 })
+			waitFrameFor(t, tt, "封面传上去", func() bool { return len(f.coversSent()) == 1 })
 
 			w, h := decodeSentCover(t, f.coversSent()[0])
 			if w != tc.wantW || h != tc.wantH {
@@ -284,7 +284,7 @@ func TestTheUploadedCoverIsSixteenByNine(t *testing.T) {
 			}
 
 			// 传完之后裁剪弹窗关掉、地址落到表单上。
-			waitFor(t, tt, "封面落到表单上", func() bool {
+			waitFrameFor(t, tt, "封面落到表单上", func() bool {
 				return s.folderEdit.crop.uploading == false && s.folderEdit.cover != ""
 			})
 			if s.folderEdit.cover != "https://i0.hdslb.com/c.jpg" {
@@ -347,7 +347,7 @@ func TestTheRowKeysFollowTheFolderNotItsPosition(t *testing.T) {
 	f.unlock()
 	s.app.LoadCreatedFolders(s.folderSelect.rid)
 
-	waitFor(t, tt, "新列表换上去", func() bool {
+	waitFrameFor(t, tt, "新列表换上去", func() bool {
 		return s.folderSelect != nil && len(s.folderSelect.list) == 4 &&
 			s.folderSelect.list[0].ID == 100
 	})

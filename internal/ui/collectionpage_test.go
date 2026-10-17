@@ -174,7 +174,7 @@ func collectionShell(t *testing.T, id string, medias ...map[string]any) (*favBil
 
 	s.navigate("/collection/" + id)
 	// 等容器拉回来（头图区第一帧是「正在加载…」）。
-	waitFor(t, tt, "容器元信息加载完", func() bool {
+	waitFrameFor(t, tt, "容器元信息加载完", func() bool {
 		return s.collection != nil && s.app.Collection(s.collection.ref).Loaded
 	})
 	return b, s, tt
@@ -196,7 +196,14 @@ func settleFrame(tt *ui.Tester) {
 // ⚠️ 判据一律是**结果**（画出来没有、内容加载完没有），不是「跑了多少帧」：
 // 后台那一趟什么时候回来跟机器负载有关，按帧数等就是按运气等，慢机器上会
 // 偶发地红。
-func waitFor(t *testing.T, tt *ui.Tester, what string, cond func() bool) {
+// ⚠️ 名字里的「Frame」是关键：**它边等边跑帧**（`tt.Frame()`），而这一组里
+// 另有不跑帧的轮询（`waitUntilTrue`）。后台那一趟的状态是投递进去的，
+// 不跑帧就看不见——而「跑够几帧」当判据在慢机器上会偶发地红，所以判据一律是
+// 这里传进来的 cond（结果），帧只是让它有机会被看见。
+//
+// ⚠️ 它原来叫 `waitFor`，和 `settings_tabs_test.go` 里那个（#73 带来的）
+// 同名同包。合并时 Git 看不出来（不同的文件），编译才报。
+func waitFrameFor(t *testing.T, tt *ui.Tester, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
@@ -214,7 +221,7 @@ func waitFor(t *testing.T, tt *ui.Tester, what string, cond func() bool) {
 // waitSongs 等这一页已经拉到了 n 首歌。
 func waitSongs(t *testing.T, tt *ui.Tester, s *Shell, n int) {
 	t.Helper()
-	waitFor(t, tt, strconv.Itoa(n)+" 首歌加载完", func() bool {
+	waitFrameFor(t, tt, strconv.Itoa(n)+" 首歌加载完", func() bool {
 		return s.collection != nil && s.collection.list.Paged().Loaded == n
 	})
 }
@@ -303,7 +310,7 @@ func TestPrivateFoldersSaySo(t *testing.T) {
 	s.app.LoadCollection(s.collection.ref)
 	// ⚠️ 判据是**画面上那句话**而不是「缓存里那个字段变了」：缓存改完到下一帧
 	// 画出来之间还有一步，只查缓存的话断言会在那一步之前就通过。
-	waitFor(t, tt, "新的元信息画出来", func() bool {
+	waitFrameFor(t, tt, "新的元信息画出来", func() bool {
 		return tt.HasText("私密收藏夹 • 1 条视频")
 	})
 	wantText(t, tt, "私密收藏夹 • 1 条视频")
@@ -336,7 +343,7 @@ func TestAllThreeSortsReachTheInterface(t *testing.T) {
 		// 换档会重建整个分页列表，而那一页是后台拉回来的——查得早了会看到
 		// 上一次的 order，于是这条用例变成按运气过的。
 		n := i + 2
-		waitFor(t, tt, "第 "+strconv.Itoa(n)+" 次内容请求带着 order="+want[i+1], func() bool {
+		waitFrameFor(t, tt, "第 "+strconv.Itoa(n)+" 次内容请求带着 order="+want[i+1], func() bool {
 			got := b.seenOrders()
 			return len(got) >= n && got[n-1] == want[i+1]
 		})

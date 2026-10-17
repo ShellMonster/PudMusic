@@ -71,6 +71,13 @@ type Shell struct {
 	// images 是网络封面缓存。整个窗口共用一个。
 	images *imgcache.Cache
 
+	// local 是本地音乐那一页自己的一摊状态：表格 / 列表 / 网格三档的控件、
+	// 筛选条件、两道确认弹窗、以及**逐窗口**的唤醒句柄表。见 localmusic.go。
+	//
+	// ⚠️ 建在 Shell 上而不是每帧新建：`ui.ListState` 记着滚动位置和选中行，
+	// `widgets/list` 的两个控件各记各的，新建等于每帧回到顶上。
+	local *localPage
+
 	// home 是首页自己那一摊状态：三个 Tab 各自的列表、新歌速递那一块、切在哪个
 	// Tab。见 homepage.go。
 	//
@@ -153,7 +160,36 @@ type Shell struct {
 	// ⚠️ 真实现要去系统里弹面板，而那一条在无头 Tester 里会 panic（`mygo`
 	// 的 needsApp：`mygo.App.Run` 没跑过）。测试建完外壳换成桩，于是
 	// 「选中的图有没有被解码、有没有被裁成 16:9」能自动验。
+	//
+	// ⚠️ **和上面那个 `picker`（pathPicker）是两回事，别合成一个**：那一个挑
+	// 的是「一条路径」（下载目录、FFmpeg），要的是标题加一句问话；这一个挑
+	// 的是「图片」，要的是**格式白名单**。合并的话有一边要带一个它不用的参数，
+	// 而那个参数以后会有人传错。
 	pickImage func(*mygo.Window) ([]string, error)
+
+	// keys 是快捷键。和 hist 一样是单独一份文件（见 shortcuts.go）。没挂上盘时
+	// 是内存里的一份：设置页照常能录，只是关掉之后不记得。
+	keys *shortcutKeys
+	// recording 是设置页上**正在录**的那一格，零值表示没有在录。
+	//
+	// 🔴 它同时是「焦点在哪一格」：`FocusBind` 把两者绑成同一件事，所以这一格
+	// 必须可比较（见 shortcutSlot）。别在这里加指针或者切片——加了会让
+	// FocusBind 直接 panic，而那条 panic 说的是「需要可比较的值」，和真因隔得
+	// 十万八千里。
+	recording shortcutSlot
+	// rejected 是「刚才按的那个键不能录成快捷键」的那一格，描红用。按下一个合法
+	// 的键或者按 Esc 就清掉——红色停在屏幕上不动的话，用户会以为那里出了什么
+	// 错，而它其实只是「刚才那一下没录上」。
+	rejected shortcutSlot
+
+	// settings 是设置页自己那一摊：切在哪个 Tab。建在 Shell 上而不是每帧新建，
+	// 理由和 home 一模一样：切走再切回来要停在原来那一格上。
+	settings settingsPageState
+
+	// picker 弹系统文件框挑路径（下载目录、FFmpeg）。做成字段是为了能替掉它：
+	// 真的那一份要过事件循环，无头 Tester 里没有事件循环，不替掉就只能等上真
+	// 系统才验得到「选回来写进设置」这条链。和 autostart 同一个道理。
+	picker pathPicker
 
 	// crash 是上一帧 panic 到的东西，非 nil 时这一帧画错误页。
 	crash any
@@ -243,7 +279,17 @@ func New(a *app.App) *Shell {
 	// 下载记录页同理（downloadlist.go）：两个「打开」接系统那一份，它们在无头
 	// Tester 里会 panic，测试建完外壳就换成记动作的桩；记录那一条接应用层。
 	s.downloads = newDownloadsPage(a.DownloadSnapshots, systemOpenDir, mygo.Shell.ShowItemInFolder)
+	// 本地音乐页同理。⚠️ 传进去的唤醒是 `s.local.invalidate` 而不是
+	// `s.wake.invalidate`：后台扫完了要把**所有画过这一页的窗口**都叫醒，
+	// 只叫醒这一个外壳的窗口的话，另一个停在旧帧（铁律三）。
+	// ⚠️ 用 `s.listActions()` 而不是 `list.AppActions(...)`：同一份列表操作给
+	// 每一处用（见 folderpick.go 里那个函数）。本地文件收藏不了（`favTarget`
+	// 只认在线的），所以「收藏」那一项在本地音乐这一页会走「说清楚为什么」
+	// 那一支——那也是对的答案。
+	s.local = newLocalPage(a, s.images, s.listActions(), s.addToast, s.pickDir)
 	s.hist = newSearchHistory("")
+	s.keys = newShortcutKeys("")
+	s.picker = systemPathPicker{}
 	s.feed = newFeedPoller(dynamicFeedInterval, nil)
 	// pageBody 是画页面内容的那一支：404 兜底 + 已经有内容的页（设置页）+ 每条
 	// 路由自己的空状态，三样拼在 pageContent 里（router.go）。
@@ -253,7 +299,29 @@ func New(a *app.App) *Shell {
 	s.sideBody = s.viewSide
 	s.navBody = s.viewNav
 	s.draw = Guard(s.viewMain, s.onPanic)
+	// 本地音乐这一摊建好之后才能装唤醒回调（`SetLocalWake` 要一个能叫醒
+	// **所有**画过这一页的窗口的函数，而那正是 `s.local.invalidate`）。
+	a.SetLocalWake(s.local.invalidate)
 	return s
+}
+
+// pickDir 是本地音乐页「添加目录」要用的那一次系统对话框。
+//
+// 界面上没有它就进不去任何一个目录，而这一页的第一句空状态就是「点右上角
+// 「添加目录」选一个文件夹」——那句话和这个函数是同一件事的两半。
+//
+// ⚠️ 返回的路径**不保证**是绝对路径（macOS 的对话框有时给相对路径），
+// `app.SetLocalRoots` 那边会自己补成绝对路径。
+func (s *Shell) pickDir() (string, error) {
+	return platform.PickDirectory(s.win)
+}
+
+// viewLocalMusic 是本地音乐页。
+//
+// 页面级的 recover 在 `Shell.page` 上（和其余 14 条路由共用那道 Guard），
+// 这一页自己的 view 另外还包了一层（`localPage` 构造时包，见 localmusic.go）。
+func (s *Shell) viewLocalMusic(c *ui.Context, _ *ui.Route) {
+	s.local.View(c)
 }
 
 // Attach 把外壳接到窗口上：装唤醒回调，装关闭策略，窗口真关掉时收尾。
@@ -312,6 +380,10 @@ func (s *Shell) Attach(w *mygo.Window) {
 		if err := s.hist.Close(); err != nil {
 			log.Printf("biu: 关窗时保存搜索历史失败：%v", err)
 		}
+		// 快捷键同理。
+		if err := s.keys.Close(); err != nil {
+			log.Printf("biu: 关窗时保存快捷键失败：%v", err)
+		}
 	})
 }
 
@@ -335,6 +407,7 @@ func Run(a *app.App, sess *media.Session) error {
 	// 搜索历史读盘是阻塞 IO，放在建窗口之前：早读进来早能用，也省得第一帧
 	// 是在一个空历史上画出来的（那也是 mountSearchHistory 的用途之一）。
 	s.mountSearchHistory()
+	s.mountShortcuts()
 	// 菜单、退出、第二个实例、deep link 全在这里装。必须在 Run 之前，
 	// 否则启动命令行里的 biu:// 会在回调装好之前就被交付掉。
 	s.installLifecycle()
@@ -353,6 +426,10 @@ func Run(a *app.App, sess *media.Session) error {
 		// 顺序反了的话头几秒点托盘是没有反应的。
 		s.installTray()
 		s.syncAutoStart()
+		// 本地音乐目录的文件监听。⚠️ 必须在 `WhenReady` 里：`mygo.WatchFiles`
+		// 在应用还没 ready 的时候调会 panic（框架的 `needsApp`，
+		// `mygo/app.go:128`），而 `Run` 之前是那一刻。
+		a.StartLocalMusicWatch()
 		s.openWindow()
 	})
 	return mygo.App.Run()
@@ -372,6 +449,20 @@ func (s *Shell) mountSearchHistory() {
 		log.Printf("biu: 收尾内存里的搜索历史失败：%v", err)
 	}
 	s.hist = newSearchHistory(searchHistoryPath(dir))
+}
+
+// mountShortcuts 把快捷键挂到盘上。和搜索历史同一套规矩：拿不到应用数据目录不算
+// 错误——记一条日志，接着用内存里那一份，设置页照常能录，只是关掉之后不记得。
+func (s *Shell) mountShortcuts() {
+	dir, err := mygo.App.Path(mygo.PathUserData)
+	if err != nil {
+		log.Printf("biu: 拿不到应用数据目录，快捷键这次关掉就没了：%v", err)
+		return
+	}
+	if err := s.keys.Close(); err != nil {
+		log.Printf("biu: 收尾内存里的快捷键失败：%v", err)
+	}
+	s.keys = newShortcutKeys(shortcutPath(dir))
 }
 
 // WindowOptions 是主窗口的样子。view 是这个窗口每帧要画的界面。

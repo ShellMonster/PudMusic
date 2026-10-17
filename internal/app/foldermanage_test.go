@@ -160,7 +160,7 @@ func TestLoadsEveryFolderOneHundredAtATime(t *testing.T) {
 	a := folderApp(t, f)
 
 	a.LoadCreatedFolders(77)
-	waitFor(t, "两页都翻完", 2*time.Second, func() bool {
+	waitUntil(t, "两页都翻完", 2*time.Second, func() bool {
 		list, loaded := a.CreatedFolderChoices(77)
 		return loaded && len(list) == 101
 	})
@@ -200,7 +200,7 @@ func TestFoldersAreGroupedByTheContentAsked(t *testing.T) {
 	a := folderApp(t, f)
 
 	a.LoadCreatedFolders(77)
-	waitFor(t, "第一份拉回来", 2*time.Second, func() bool {
+	waitUntil(t, "第一份拉回来", 2*time.Second, func() bool {
 		_, ok := a.CreatedFolderChoices(77)
 		return ok
 	})
@@ -209,7 +209,7 @@ func TestFoldersAreGroupedByTheContentAsked(t *testing.T) {
 		t.Errorf("问的是 78 却拿到了 77 那份：%v", list)
 	}
 	a.LoadCreatedFolders(78)
-	waitFor(t, "第二份拉回来", 2*time.Second, func() bool {
+	waitUntil(t, "第二份拉回来", 2*time.Second, func() bool {
 		_, ok := a.CreatedFolderChoices(78)
 		return ok
 	})
@@ -288,7 +288,7 @@ func TestCoverURLIsItsOwnChannel(t *testing.T) {
 	a := folderApp(t, f)
 
 	a.UploadCover("data:image/jpeg;base64,AAAA")
-	waitFor(t, "封面地址回来", 2*time.Second, func() bool {
+	waitUntil(t, "封面地址回来", 2*time.Second, func() bool {
 		_, ok := a.TakeCoverURL()
 		return ok
 	})
@@ -403,7 +403,7 @@ func TestDealSaysWhichOfTheThreeThingsHappened(t *testing.T) {
 func waitFolderResult(t *testing.T, a *App, d time.Duration) FolderResult {
 	t.Helper()
 	var res FolderResult
-	waitFor(t, "后台结果回来", d, func() bool {
+	waitUntil(t, "后台结果回来", d, func() bool {
 		var ok bool
 		res, ok = a.TakeFolderResult()
 		return ok

@@ -130,7 +130,10 @@ func hostOf(raw string) string {
 //
 // ⚠️ 不用 `time.Sleep` 一次睡到底：后台那一趟什么时候跑完跟机器负载有关，
 // 睡一个固定的时长要么白等，要么在慢机器上不够——后者表现为偶发的红。
-func waitFor(t *testing.T, what string, d time.Duration, cond func() bool) {
+// ⚠️ 它原来叫 `waitFor`，和 `localmusic_test.go` 里那个（#78 带来的、
+// 参数顺序还是反的：`waitFor(t, cond, msg)`）同包同名。合并时 Git 看不出来
+// （不同的文件），编译才报。
+func waitUntil(t *testing.T, what string, d time.Duration, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(d)
 	for time.Now().Before(deadline) {
@@ -178,7 +181,7 @@ func TestCollectionCachesTheHeader(t *testing.T) {
 	withFixture(t, a, f, 0)
 
 	a.LoadCollection(testRef)
-	waitFor(t, "元信息到缓存里", time.Second, func() bool { return a.Collection(testRef).Loaded })
+	waitUntil(t, "元信息到缓存里", time.Second, func() bool { return a.Collection(testRef).Loaded })
 
 	info := a.Collection(testRef)
 	if info.Title != "通勤路上" || info.MediaCount != 1 || info.OwnerName != "UP" {
@@ -255,7 +258,7 @@ func waitNotice(t *testing.T, a *App, ref CollectionRef) (CollectionNotice, bool
 	t.Helper()
 	var got CollectionNotice
 	var ok bool
-	waitFor(t, "取到要显示的那句话", time.Second, func() bool {
+	waitUntil(t, "取到要显示的那句话", time.Second, func() bool {
 		got, ok = a.TakeCollectionNotice(ref)
 		return ok
 	})
@@ -290,7 +293,7 @@ func TestFavoritingDoesNotRefreshBeforeItSettles(t *testing.T) {
 
 	a.SetFavorite(testRef, true)
 	// 写接口已经打过去了（B 站那边已经改好了），但缓存还是旧的。
-	waitFor(t, "收藏请求发出去", time.Second, func() bool {
+	waitUntil(t, "收藏请求发出去", time.Second, func() bool {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		return f.faved
@@ -305,7 +308,7 @@ func TestFavoritingDoesNotRefreshBeforeItSettles(t *testing.T) {
 	t.Cleanup(a2.Close)
 	withFixture(t, a2, f2, 0)
 	a2.SetFavorite(testRef, true)
-	waitFor(t, "收藏状态刷新进缓存", time.Second, func() bool {
+	waitUntil(t, "收藏状态刷新进缓存", time.Second, func() bool {
 		return a2.Collection(testRef).Faved
 	})
 }
@@ -319,7 +322,7 @@ func TestCancellingFavoritingGoesTheOtherWay(t *testing.T) {
 	withFixture(t, a, f, 0)
 
 	a.SetFavorite(testRef, false)
-	waitFor(t, "收藏状态变成没收藏", time.Second, func() bool {
+	waitUntil(t, "收藏状态变成没收藏", time.Second, func() bool {
 		return !a.Collection(testRef).Faved
 	})
 }
