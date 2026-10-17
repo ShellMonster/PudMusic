@@ -325,14 +325,17 @@ func TestBothLibraryPagesDrawTheirOwnContent(t *testing.T) {
 	}
 }
 
-// TestTheEmptyStateSaysWhyAndHow 钉住「一行都没有」时画的那两句话。
+// TestTheLibraryPagesEmptyStateSaysWhyAndHow 钉住这两页「一行都没有」时画的两句话。
+//
+// 名字带 `TheLibraryPages` 是因为主干上已经有一个同名的（`localmusic_test.go`
+// 的那一条，测的是本地音乐那一页）。
 //
 // 两句都要在：第一句说这里为什么空，第二句给一个**能做的下一步**。这一页尤其
 // 需要第二句——用户常常是筛完了才空的，他要的是「怎么才能不空」。
 //
 // 文案是**从 `routes` 表里那一条拿的**（出处标在那儿），所以这里断言的也是那一
 // 条：另抄一份就多一个会对不上的来源，而对不上时用户看不出任何异样。
-func TestTheEmptyStateSaysWhyAndHow(t *testing.T) {
+func TestTheLibraryPagesEmptyStateSaysWhyAndHow(t *testing.T) {
 	for _, path := range []string{laterPath, historyPath} {
 		t.Run(path, func(t *testing.T) {
 			// 一页都不给，就是「什么都没有」那一支。

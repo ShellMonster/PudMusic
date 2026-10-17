@@ -80,6 +80,13 @@ type Shell struct {
 	// images 是网络封面缓存。整个窗口共用一个。
 	images *imgcache.Cache
 
+	// local 是本地音乐那一页自己的一摊状态：表格 / 列表 / 网格三档的控件、
+	// 筛选条件、两道确认弹窗、以及**逐窗口**的唤醒句柄表。见 localmusic.go。
+	//
+	// ⚠️ 建在 Shell 上而不是每帧新建：`ui.ListState` 记着滚动位置和选中行，
+	// `widgets/list` 的两个控件各记各的，新建等于每帧回到顶上。
+	local *localPage
+
 	// home 是首页自己那一摊状态：三个 Tab 各自的列表、新歌速递那一块、切在哪个
 	// Tab。见 homepage.go。
 	//
@@ -226,6 +233,11 @@ func New(a *app.App) *Shell {
 	// 下载记录页同理（downloadlist.go）：两个「打开」接系统那一份，它们在无头
 	// Tester 里会 panic，测试建完外壳就换成记动作的桩；记录那一条接应用层。
 	s.downloads = newDownloadsPage(a.DownloadSnapshots, systemOpenDir, mygo.Shell.ShowItemInFolder)
+	// 本地音乐页同理。⚠️ 传进去的唤醒是 `s.local.invalidate` 而不是
+	// `s.wake.invalidate`：后台扫完了要把**所有画过这一页的窗口**都叫醒，
+	// 只叫醒这一个外壳的窗口的话，另一个停在旧帧（铁律三）。
+	s.local = newLocalPage(a, s.images, list.AppActions(a, s.addToast),
+		s.addToast, s.pickDir)
 	s.hist = newSearchHistory("")
 	s.feed = newFeedPoller(dynamicFeedInterval, nil)
 	s.buildLibraryPages()
@@ -237,7 +249,29 @@ func New(a *app.App) *Shell {
 	s.sideBody = s.viewSide
 	s.navBody = s.viewNav
 	s.draw = Guard(s.viewMain, s.onPanic)
+	// 本地音乐这一摊建好之后才能装唤醒回调（`SetLocalWake` 要一个能叫醒
+	// **所有**画过这一页的窗口的函数，而那正是 `s.local.invalidate`）。
+	a.SetLocalWake(s.local.invalidate)
 	return s
+}
+
+// pickDir 是本地音乐页「添加目录」要用的那一次系统对话框。
+//
+// 界面上没有它就进不去任何一个目录，而这一页的第一句空状态就是「点右上角
+// 「添加目录」选一个文件夹」——那句话和这个函数是同一件事的两半。
+//
+// ⚠️ 返回的路径**不保证**是绝对路径（macOS 的对话框有时给相对路径），
+// `app.SetLocalRoots` 那边会自己补成绝对路径。
+func (s *Shell) pickDir() (string, error) {
+	return platform.PickDirectory(s.win)
+}
+
+// viewLocalMusic 是本地音乐页。
+//
+// 页面级的 recover 在 `Shell.page` 上（和其余 14 条路由共用那道 Guard），
+// 这一页自己的 view 另外还包了一层（`localPage` 构造时包，见 localmusic.go）。
+func (s *Shell) viewLocalMusic(c *ui.Context, _ *ui.Route) {
+	s.local.View(c)
 }
 
 // Attach 把外壳接到窗口上：装唤醒回调，装关闭策略，窗口真关掉时收尾。
@@ -337,6 +371,10 @@ func Run(a *app.App, sess *media.Session) error {
 		// 顺序反了的话头几秒点托盘是没有反应的。
 		s.installTray()
 		s.syncAutoStart()
+		// 本地音乐目录的文件监听。⚠️ 必须在 `WhenReady` 里：`mygo.WatchFiles`
+		// 在应用还没 ready 的时候调会 panic（框架的 `needsApp`，
+		// `mygo/app.go:128`），而 `Run` 之前是那一刻。
+		a.StartLocalMusicWatch()
 		s.openWindow()
 	})
 	return mygo.App.Run()

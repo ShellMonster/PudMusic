@@ -50,3 +50,26 @@ func audioOpenOptions(parent *mygo.Window) mygo.OpenDialogOptions {
 func PickAudioFile(parent *mygo.Window) ([]string, error) {
 	return mygo.Dialog.Open(audioOpenOptions(parent))
 }
+
+// PickDirectory 弹系统对话框让用户选一个文件夹，返回选中的路径。用户取消时
+// 返回空串（不是错误——「用户不想选」是正常结果，不是出错）。
+//
+// 用于本地音乐页的「添加目录」。parent 非空时对话框挂在那个窗口下面。
+//
+// ⚠️ 和 PickAudioFile 一样**必须从非主线程调**：MyGo 的对话框把请求 post 到
+// 主线程再等系统回调，主线程自己进去等就是死等。
+func PickDirectory(parent *mygo.Window) (string, error) {
+	dirs, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent:    parent,
+		Title:     "选择音乐文件夹",
+		Message:   "选一个文件夹，它的**第一层**里的音频文件会出现在本地音乐里",
+		Directory: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(dirs) == 0 {
+		return "", nil
+	}
+	return dirs[0], nil
+}

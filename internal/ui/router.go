@@ -232,6 +232,10 @@ func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
 	case historyPath:
 		// 历史记录：同一副骨架，多一列播放进度（history.go）。
 		return s.viewHistory
+	case localMusicPath:
+		// 本地音乐（localmusic.go）：表格 / 列表 / 网格三档 + 每行的
+		// 「打开文件夹」和「删除文件」。
+		return s.viewLocalMusic
 	}
 	return nil
 }
