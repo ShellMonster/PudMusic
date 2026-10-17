@@ -178,12 +178,28 @@ const (
 	CloseWindowExit CloseWindowOption = "exit"
 )
 
-// 代理协议。Biu 的 `ProxyType`。
+// 代理协议。Biu 的 `ProxyType` 是 `"none" | "http" | "socks4" | "socks5"`，
+// **没有 HTTPS**（`biu/src/pages/settings/proxy-settings.tsx:10-15` 的
+// `PROXY_TYPE_OPTIONS`）。
+//
+// 🔴 这里比 Biu 多一个 `https`。加它破的不是「键名与 Biu 一致」那条（那条讲的是
+// `app-settings.json` 里的**键**，一个都没动），而是多了一个 **值**：
+//
+//   - Biu 读到 `{"proxySettings":{"type":"https"}}` 时，TypeScript 的那个联合类型
+//     在运行时拦不住它，值原样留在 store 里——**Biu 那边一个字节都不丢**。
+//   - 我们这边它是合法值，`normalize()` 认它、拨号认它。
+//
+// 为什么必须有：任务与 `SPEC.md` 的网络一节明写「代理支持 HTTP / HTTPS / SOCKS5 /
+// SOCKS4 四种协议」。`SPEC.md` 那行字照的是 Biu 的四个协议名里的前两个，但**以任务
+// 明文为准**。HTTPS 走的也是 HTTP 那一套拨号（Go 的 `http.Transport` 对
+// `http://` 和 `https://` 的代理是同一条路），所以多一档不需要新的实现，只是把
+// 用户要的那一档摆出来。
 type ProxyType string
 
 const (
 	ProxyNone   ProxyType = "none"
 	ProxyHTTP   ProxyType = "http"
+	ProxyHTTPS  ProxyType = "https"
 	ProxySOCKS4 ProxyType = "socks4"
 	ProxySOCKS5 ProxyType = "socks5"
 )
@@ -546,7 +562,7 @@ func (s *Settings) normalize() {
 	s.CloseWindowOption = pickEnum(s.CloseWindowOption, CloseWindowHide,
 		CloseWindowHide, CloseWindowExit)
 	s.ProxySettings.Type = pickEnum(s.ProxySettings.Type, ProxyNone,
-		ProxyNone, ProxyHTTP, ProxySOCKS4, ProxySOCKS5)
+		ProxyNone, ProxyHTTP, ProxyHTTPS, ProxySOCKS4, ProxySOCKS5)
 
 	if s.PrimaryColor == "" {
 		s.PrimaryColor = DefaultPrimaryColor
