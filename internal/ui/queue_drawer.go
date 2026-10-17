@@ -13,6 +13,7 @@ import (
 	"strconv"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
@@ -448,23 +449,25 @@ func (s *Shell) queueMenu(m *ui.Menu, row queueRow) {
 
 // queueAction 是菜单里那一项被选中之后做的事。
 //
-// 五项里 **三项是真的在做事**（下载音频 / 打开来处 / 从列表删除），另外两项是**占位**：
+// **五项全都真的在做那件事**，这一层只有「点了 → 调服务 → 把结果说给用户」：
 //
-//	收藏      →  BMG-32（收藏夹管理与封面上传，GitHub #15）
-//	下载视频  →  BMG-39（视频下载的音视频交织，GitHub #32）
+//	收藏        App.FavoriteSong —— 接口调用、把 bvid 换成 avid、挑哪一格、判重复，
+//	            全在 `internal/service/bili/favorite.go` 里（这里一句 B 站的知识都没有）
+//	下载音频    App.Download
+//	下载视频    App.DownloadVideo —— 取视频流 + 交织成一个 mp4 都在下载服务里
+//	打开来处    list.Actions.Open
+//	从列表删除  App.RemoveSongFromList
 //
-// ⚠️ **只留接口，不留实现**：那两张票已经把这两块派出去了，在这里写一遍等于同一份
-// 代码在两张票上各写一遍，合并时必撞。按下这两项给一句说清差什么的话，是这一项目
-// 里那 14 条路由占位同一个路子（`router.go` 里每条路由的 Empty）。
-//
-// 摆着而不是藏起来：藏起来这一项就等于不存在，用户看不到「它是做什么的、为什么按
-// 不动」。
+// 收藏要问 B 站四到五次，所以走**回调**（见 App.FavoriteSong）；下载是「加进队列、
+// 立刻返回」。
 func (s *Shell) queueAction(row queueRow, item queueMenuItem) {
 	switch item.key {
-	case "favorite", "download-video":
-		s.addToast(queueUnsupported(row.item, item))
+	case "favorite":
+		s.favoriteQueueRow(row)
 	case "download-audio":
 		s.startDownload(row.item)
+	case "download-video":
+		s.startDownloadVideo(row.item)
 	case "bililink":
 		// 内容列表那套 `list.Actions.Open`：本地项先判访达、再判 B 站地址。
 		// 自己照着再写一遍的话，抽屉和列表会对同一项给出两种说法。
@@ -494,7 +497,7 @@ func (s *Shell) removeQueueRow(row queueRow) {
 
 // startDownload 是「下载音频」：加进下载队列（`app.Download`，下载那一票的实现）。
 func (s *Shell) startDownload(item app.Item) {
-	if item.Source == "local" || item.Type == "local" {
+	if !s.canDownload(item) {
 		s.addToast("这一首已经在你磁盘上了，没有东西可下载")
 		return
 	}
@@ -505,25 +508,58 @@ func (s *Shell) startDownload(item app.Item) {
 	s.addToast("已加进下载队列")
 }
 
-// queueUnsupported 是那两项占位按下去之后说的话。
+// startDownloadVideo 是「下载视频」：取视频流、交织成一个 mp4，落在下载目录里。
 //
-// **话要具体**：菜单有五项，只说「还没接」的话用户既不知道说的是哪一项，也不知道差
-// 的是什么、值不值得等。
-func queueUnsupported(item app.Item, mi queueMenuItem) string {
-	local := item.Source == "local" || item.Type == "local"
-	switch mi.key {
-	case "favorite":
-		if local {
-			return "「收藏」是把歌收进 B 站的收藏夹，本地文件在 B 站上没有对应的东西"
-		}
-		return "「收藏」还差 B 站的收藏夹接口：要先能列出你的收藏夹、再往选中的那一格放"
-	case "download-video":
-		if local {
-			return "「下载视频」下的是 B 站上的视频，本地文件没有视频"
-		}
-		return "「下载视频」还差视频流和音视频交织：现在取流只给音频（音频那一档已经能下）"
+// **画质那一档传 `bili.VideoQualityUnknown`**（让 B 站按它的默认给）：设置页还没接
+// 「视频下哪一档」，这里写死一个高画质只会让用户在流量不多的网络下下几百兆，
+// 却不知道为什么这么大。
+func (s *Shell) startDownloadVideo(item app.Item) {
+	if !s.canDownload(item) {
+		s.addToast("本地文件没有视频可下载")
+		return
 	}
-	return "「" + mi.label + "」这一项还没接"
+	if _, err := s.app.DownloadVideo(item, bili.VideoQualityUnknown); err != nil {
+		s.addToast("下不了这个视频：" + err.Error())
+		return
+	}
+	s.addToast("已加进下载队列")
+}
+
+// canDownload 报这一项有没有东西可下载。
+//
+// 本地文件没有：B 站上还没有它，而「下载」下的是 B 站上还没下过的那一段。
+func (s *Shell) canDownload(item app.Item) bool {
+	return !isLocalItem(item) && item.Bvid != ""
+}
+
+// isLocalItem 报这一项是不是本地文件。
+//
+// `Item.Type` 的取值表在 app 那边；两处各写一份「本地文件长什么样」，早晚会对不上。
+func isLocalItem(item app.Item) bool {
+	return item.Source == "local" || item.Type == "local"
+}
+
+// favoriteQueueRow 是「收藏」。
+//
+// 结果走**回调**（`App.FavoriteSong` 要问 B 站四到五次，不该在界面线程上等），回调
+// 里弹的那句已经由 app 层用 `bili.Friendly` 说好了——这一层不判断成功失败，它只知道
+// 「成了 / 没成，理由是什么」。
+func (s *Shell) favoriteQueueRow(row queueRow) {
+	if isLocalItem(row.item) || row.item.Bvid == "" {
+		s.addToast("这一首是本地文件，B 站上没有对应的东西")
+		return
+	}
+	s.app.FavoriteSong(row.item, func(folder bili.FavFolder, err error) {
+		if err != nil {
+			s.addToast("收藏不了：" + err.Error())
+			return
+		}
+		name := folder.Title
+		if name == "" {
+			name = "收藏夹"
+		}
+		s.addToast("已收藏到「" + name + "」")
+	})
 }
 
 // sayQueueErr 把队列那一层的话原样说给用户听，**不加工任何前缀**：话是 app 那边

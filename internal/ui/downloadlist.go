@@ -16,9 +16,13 @@
 // ## 交织中的那一格
 //
 // 视频那一路下完字节之后还要交织成一个能播的文件（PLAN 8.9 / #32），交织期间
-// 记录页上多出「交织中」这一格。这一版还没有交织器，所以**没有任何代码会走到
-// 那一格**——状态位在 `download.StatusMuxing` 先占着，文案和画法在这里先写好，
-// `TestTheMuxingCellSaysSoAndDoesNotClaimToBeDone` 钉住它。
+// 记录页上多出「交织中」这一格。
+//
+// 这一格是**先占好、后接上**的：记录页那一票（#77）把状态位、文案和画法写好
+// 了，而交织器（#39）把 `download.StatusMuxing` 真的置上了——于是这一格现在
+// 会走到。`TestTheMuxingCellSaysSoAndDoesNotClaimToBeDone` 钉的是画法
+// （它说「交织中」，而且**不假装自己下完了**：字节是 100% 而交织没做完，
+// 那一格画的是一条不确定长度的条）。
 //
 // ## 「复用 widgets/list」是什么意思
 //
@@ -151,10 +155,11 @@ type downloadsPage struct {
 
 	// rowsFn 是 `rows` 的来源。`Shell.New` 里接的是 `app.DownloadSnapshots`。
 	//
-	// 为什么不直接调那一句：六种状态里有两种（排队中、交织中）**没有任何代码
-	// 会置**，而这一页要画它们（`download.StatusMuxing`）。直接调应用层的话
-	// 那两格永远走不到，只剩一句注释说它们画对了——而注释不会红。测试把它换成
-	// 给定的快照，那两格就真的被画出来过（`TestTheMuxingCellSaysSoAnd…`）。
+	// 为什么不直接调那一句：「排队中」和「交织中」这两格，各自有它自己的理由要
+	// 单测（前者是刚入队还没轮到，后者是字节 100% 而交织没做完），而直接调
+	// 应用层的话那一格就跟着真实时序跑了——测试没法稳定地把它停在那个状态上。
+	// 所以这里收的是一个函数：生产环境接 `app.DownloadSnapshots`（`Shell.New`），
+	// 测试接一份给定的快照（`TestTheMuxingCellSaysSoAndDoesNotClaimToBeDone`）。
 	rowsFn func() []download.Snapshot
 
 	// failed 是画崩了的格子（按「行 id + 列号」记），下一帧不重试。理由和

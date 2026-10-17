@@ -474,8 +474,12 @@ func TestQueueRowMenuOffersTheSameFiveItemsForALocalSong(t *testing.T) {
 }
 
 // TestQueueRowMenuItemsReallyDoTheirThing 钉验收那句话的后半段：**接上真实
-// 操作**。五项里能做的三项按下去都要真的动，逐项走菜单（不是直接调 App 的方法）——
-// 走菜单才是用户按的那条路，菜单里少建一项、或者那一项接错了函数，只有这样断得出来。
+// 操作**。这里断的是不需要 B 站和下载管理器就能断的两项（下载音频 / 从列表删除），
+// 逐项走菜单（不是直接调 App 的方法）——走菜单才是用户按的那条路，菜单里少建一项、
+// 或者那一项接错了函数，只有这样断得出来。
+//
+// 「收藏」和「下载视频」两条的端到端证据在 `queue_drawer_favorite_test.go`
+// （`package ui`）：它们要真的 B 站客户端和真的下载管理器，那台假 B 站在那边。
 //
 // ⚠️ 「在访达中显示 / 在 B 站打开」不按：最后一步是 `mygo.Shell.ShowItemInFolder` /
 // `OpenExternal`，它们要真的事件循环，在测试里会永远等下去（实测整个测试挂死）。
@@ -512,33 +516,6 @@ func TestQueueRowMenuItemsReallyDoTheirThing(t *testing.T) {
 			t.Errorf("按了「从列表删除」队列是 %q，want 甲/丙", got)
 		}
 	})
-}
-
-// TestQueueRowMenuSaysExactlyWhyTheOtherTwoAreOff 「收藏」和「下载视频」这两项
-// 这个应用今天还做不了，但**要说清是哪一项、差的是什么**，不是一句笼统的
-// 「还没接」——菜单有五项，用户得知道自己在按哪一项、为什么按不动。
-func TestQueueRowMenuSaysExactlyWhyTheOtherTwoAreOff(t *testing.T) {
-	for _, c := range []struct {
-		label string
-		want  string
-	}{
-		{"收藏", "收藏夹"},
-		{"下载视频", "只给音频"},
-	} {
-		t.Run(c.label, func(t *testing.T) {
-			h := newHarness(t)
-			h.app.Queue().Append(onlineSong("BV1", "在线那一首"))
-			openDrawer(t, h)
-			chooseQueueItem(t, h, "在线那一首", c.label)
-
-			if !h.tt.HasText(c.label) {
-				t.Errorf("那句话里没有点名「%s」：%q", c.label, h.tt.Texts())
-			}
-			if !h.tt.HasText(c.want) {
-				t.Errorf("那句话没说要差什么（want %q）：%q", c.want, h.tt.Texts())
-			}
-		})
-	}
 }
 
 // mountDownloads 把下载挂上（真实入口是 `download_mount.go`）。不挂的话

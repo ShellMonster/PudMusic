@@ -330,6 +330,15 @@ func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("bili: 造请求: %w", err)
 	}
+	if call.Form != nil {
+		// ⚠️ **Content-Type 不写，B 站就收不到表单**：`net/http` 不会替我们推断，
+		// 而缺了它时 B 站的写接口（收藏的 `resource/deal`、批量删的
+		// `batch-del`，上游那边都是 `useFormData: true`）会把参数当查询串解析、
+		// 丢掉表单里的一切，返回 0（成功）却什么都没写。
+		//
+		// 之前没写是因为唯一那个写调用（退出登录）传的是**空**表单，丢不丢都一样。
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
 	c.setHeaders(req, csrf)
 
 	if c.onReq != nil {

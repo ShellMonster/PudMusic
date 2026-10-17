@@ -52,25 +52,34 @@ const (
 	StatusRunning Status = "running"
 	// StatusPaused 用户暂停了，或者应用退出时正在下的那些（见 `Restore`）。
 	StatusPaused Status = "paused"
+	// StatusMuxing 字节全下完了，正在交织成一个能播的文件（视频那一路）。
+	//
+	// ⚠️ 它是**在飞**的一种，不是「下完了」：两条几百 MB 的流要读一遍
+	// 再写一遍，那十几秒里界面上不能显示成完成。而它**不是** running：
+	// 那一刻网络已经空出来了，`Running()` 要说真话（这一条是它算在飞
+	// 的理由，见下面）。
+	//
+	// 这个状态位是记录页那一票（#77）先占好的，那一版还没有代码会置它；
+	// 视频下载那一票（#32/#39）接上交织之后它才真的有地方来。
+	//
+	// 重开应用之后不可能「正在交织」——那一轮的进程都没了，所以恢复时
+	// 它一律变成暂停（见 `store.go` 的 `inflight`）。而「继续」是对的：
+	// 两条流在盘上、分块也是齐的，按「继续」会一路走到交织那一步，
+	// 一条字节都不重下，几秒钟就出结果。
+	StatusMuxing Status = "muxing"
 	// StatusDone 下完了，文件已经在 `Task.Dest` 上。
 	StatusDone Status = "done"
 	// StatusError 出错了。`Task.Err` 是人话。
 	StatusError Status = "error"
-	// StatusMuxing 字节全下完了，正在交织成一个能播的文件。
-	//
-	// ⚠️ **这一版没有任何代码会置它**：交织是视频那一路的事（PLAN 8.9 / #32），
-	// 这一版只下音频、直接落盘（见 `fetch.go` 的 run）。留在这里是为了**状态位
-	// 先占好**：记录页要按它画出「交织中」那一格，而等 #32 接上的时候，「这个
-	// 状态能不能暂停」「退出时怎么存」这两件事不用临时再想一遍——想晚了表现
-	// 成「重启之后界面上永远转圈」。
-	StatusMuxing Status = "muxing"
 )
 
 // CanPause 报告这个状态现在能不能暂停。
 //
-// ⚠️ 交织不算能暂停：Biu 有 `mergePaused`，而这里停不下来——交织器拿在手里
-// 的那几个字节不会停在半路上。要给它加「交织暂停」是 #32 的活儿，不是在这里
-// 把门开着却没有实现（见 `StatusMuxing`）。
+// ⚠️ 交织不算能暂停。**不是**因为停不下来——`mux.Mux` 认 ctx，删掉这一项 /
+// 退出应用都能把它掐掉（`runOne` 那条取消分支就是靠这个把状态收回暂停）。
+// 真正的原因是**暂停对它没有意义**：两条流已经在盘上、分块记账是齐的，
+// 而「暂停」答应用户的是「之后能从断的地方接着来」——交织没有断的地方，
+// 要么做完，要么重来（重来时两条流一条字节都不用重下）。
 func (s Status) CanPause() bool { return s == StatusRunning }
 
 // CanResume 报告这个状态现在能不能继续。
@@ -107,8 +116,142 @@ type Identity struct {
 	Bvid    string `json:"bvid"`
 	Cid     string `json:"cid"`
 	Quality int    `json:"quality"`
-	// Length 是总字节数。**0 是「还没探到」，不是「零字节」**。
+	// Video 报「这一项要下的是视频」。
+	//
+	// 它在身份里而不在 `Task` 上，是**因为重开应用之后还得知道**：
+	// 取流是 `resolve(ctx, want Identity)` —— 只看得到 `want`，
+	// 而重开时那个 goroutine 还没起、队列里除了这份身份什么都没有。
+	// 不在这一位上记着，重开之后取到的就还是一条音频流，于是任务在
+	// 「下音频」和「交织」之间来回横跳。
+	Video bool `json:"video,omitempty"`
+	// VideoQ 是点名要的那一档视频画质（B 站的 `qn` 号）。
+	//
+	// 它在身份里，是因为**每一轮取流都得用同一个档**：这一条 `.mp4` 是
+	// 「视频流 + 音频流」交织出来的，而两条流必须来自同一档、同一个 cid。
+	// 续传时若换了档，视频流的长度会变，于是续出来的文件里一半是旧档的
+	// 画面、一半是新档的——**能播**，播到一半画质就变了（而 `Identity` 只
+	// 比 bvid/cid/音质/长度，长度变了会被拦下，可「同档不同编码」这种
+	// 长度相同内容不同的换法拦不住）。
+	//
+	// 0 = 不点名，让 B 站给它的默认。
+	VideoQ int `json:"videoQ,omitempty"`
+	// Length 是**主那条流**的总字节数。**0 是「还没探到」，不是「零字节」**。
+	//
+	// 视频任务有两条流（视频 + 音频），第二那条的长度在 `Companion.Length`
+	// ——**分两条记而不是求和**，是因为续传要逐条比：B 站重新转码的
+	// 时候两条流的字节数**各自**都可能变，只比合计会漏掉「视频没变、
+	// 音频变了」那一种。
 	Length int64 `json:"length"`
+}
+
+// Companion 是第二那条流。
+//
+// # 为什么是「挂在旁边的一条」而不是「一个流数组」
+//
+// 绝大多数任务只有一条流，而那条流的所有记账（`Task.Chunks`、
+// `Task.Identity.Length`）本来就是按「这一项要下的东西」记的。要把它
+// 套进一个 `[]Stream`，每一处 `chunkRange`/`Done`/`Complete` 都得跟一个
+// 下标走，落盘的格式也得换，而**换来的是视频这一种类型**。
+//
+// 所以两条流时第二条挂在这儿：一条流的任务（绝大多数）完全不受影响，
+// `Companion` 是 nil，两条流的任务多算一次同样的账。
+//
+// # 它恒定是音频
+//
+// 因为视频下载永远是「一条视频 + 一条音频」交织成一个 MP4
+// （`mux.Mux`）。B 站的音频不封装、下载下来直接是 `.m4a`，所以主那条流
+// 永远是音频、伴流永远是 nil；视频这一路反过来。
+type Companion struct {
+	// Length 是这一条一共多少字节。**0 是「还没探到」**（同上）。
+	Length int64 `json:"length"`
+	// Chunks 是它已经完成的分块下标。语义和 `Task.Chunks` 一模一样，
+	// 而且**必须分开记**：并发 3 时两条流各下各的，谁先下完谁先记，
+	// 混在一起会算出「一半」的进度。
+	Chunks []int `json:"chunks,omitempty"`
+}
+
+// completeOf 报这条流下完了没有。
+func completeOf(length int64, chunks []int) bool {
+	n := totalChunks(length)
+	if n == 0 {
+		return false
+	}
+	seen := make(map[int]bool, len(chunks))
+	for _, i := range chunks {
+		seen[i] = true
+	}
+	for i := range n {
+		if !seen[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// totalChunks 是这条流一共几块。
+func totalChunks(length int64) int {
+	if length <= 0 {
+		return 0
+	}
+	return int((length + chunkSize - 1) / chunkSize)
+}
+
+// chunkRangeOf 给这条流的第 i 块算出**闭区间**的 [start, end]。
+func chunkRangeOf(length int64, i int) (start, end int64, ok bool) {
+	if i < 0 || i >= totalChunks(length) {
+		return 0, 0, false
+	}
+	start = int64(i) * chunkSize
+	end = start + chunkSize - 1
+	if last := length - 1; end > last {
+		end = last
+	}
+	return start, end, true
+}
+
+// doneOf 是这条流已经下到盘上的字节数。
+func doneOf(length int64, chunks []int) int64 {
+	var n int64
+	for _, i := range chunks {
+		start, end, ok := chunkRangeOf(length, i)
+		if !ok {
+			// 下标越界：这份记录是旧版本或坏记录留下的（见 `Manager.Restore`）。
+			// 宁可少算也不能算错——算多了会报出「下完了」而实际没下完。
+			continue
+		}
+		n += end - start + 1
+	}
+	return n
+}
+
+// markChunkOf 记下一块下完了，返回它是不是**刚刚**记上的（已经记过的返回
+// false）——重复记会让 Done() 多算一遍，进度直接超过 100%。
+func markChunkOf(chunks []int, i int) ([]int, bool) {
+	for _, x := range chunks {
+		if x == i {
+			return chunks, false
+		}
+	}
+	return append(chunks, i), true
+}
+
+// adoptSource 用源里的事实更新身份，**但保住这一项自己带着的那两样**。
+//
+// `prepare` 要靠它做资源身份的校验（见 `Identity` 那段注释），而它校验
+// 完之后要把新身份写回去——**整份**写回去。于是这一项自己带着的
+// `Video` / `VideoQ` 会被顺带抹掉，除非在这里把它们捞回来。
+//
+// 那两样是**用户点的**，不是源告诉我们的：源不知道这一项是要音频还是要
+// 视频（它只是「给了两条地址」），也不知道用户点名的是哪一档。抹掉它们的
+// 后果是「暂停一下再继续」和「退出重开」这两种最普通的操作之后取流问错了
+// 问题（`want.Video` 变成 false → 只问了一条音频），而界面上没有任何提示。
+func (t *Task) adoptSource(src *Source, length int64) {
+	video, videoQ := t.Identity.Video, t.Identity.VideoQ
+	t.Identity = src.IdentityOf(length)
+	t.Identity.Video, t.Identity.VideoQ = video, videoQ
+	// `Video` 在 Task 上也有一份（落盘名和三个半成品都看它）。那份是入队时
+	// 定的，源改不了它——所以这里以它为准，把两份对齐。
+	t.Identity.Video = t.Video || video
 }
 
 // SameResource 报两个身份说的是不是同一段字节。
@@ -169,8 +312,16 @@ type Task struct {
 	// 网络往返——而落盘名要等到取完才知道。
 	Ext string `json:"ext,omitempty"`
 
-	// Chunks 是已经完成的分块下标。
+	// Chunks 是**主那条流**已经完成的分块下标。
 	Chunks []int `json:"chunks,omitempty"`
+
+	// Video 报这一项是视频下载：主那条流是视频，`Companion` 是它的音频，
+	// 两条都下完之后交织成一个 `.mp4`（见 `runMux`）。
+	//
+	// 音频任务它恒定是 false，而 `Companion` 是 nil。
+	Video bool `json:"video,omitempty"`
+	// Companion 是第二那条流。只有 `Video` 的任务才有它。
+	Companion *Companion `json:"companion,omitempty"`
 
 	Status Status `json:"status"`
 	// Err 是出错时的人话。成功后清空。
@@ -180,88 +331,90 @@ type Task struct {
 	AddedAt int64 `json:"addedAt"`
 }
 
-// totalChunks 是这个资源一共几块。
-func (t *Task) totalChunks() int {
-	if t.Identity.Length <= 0 {
-		return 0
-	}
-	return int((t.Identity.Length + chunkSize - 1) / chunkSize)
-}
+// totalChunks 是主那条流一共几块。
+func (t *Task) totalChunks() int { return totalChunks(t.Identity.Length) }
 
-// chunkRange 给第 i 块算出**闭区间**的 [start, end]。
+// chunkRange 给主那条流的第 i 块算出**闭区间**的 [start, end]。
 //
 // 闭区间是 HTTP Range 的写法（`bytes=0-10485759` 是前 10 MB），也是
 // B 站上游 `splitChunks` 的写法（`download-core.ts:371`）。用开区间的话
 // 每处都要多写一次 `-1`，而那种「少一个 1」的错误在 10 MB 那一档上
 // 只会让最后一块多一个字节——很难发现。
 func (t *Task) chunkRange(i int) (start, end int64, ok bool) {
-	if i < 0 || i >= t.totalChunks() {
-		return 0, 0, false
-	}
-	start = int64(i) * chunkSize
-	end = start + chunkSize - 1
-	if last := t.Identity.Length - 1; end > last {
-		end = last
-	}
-	return start, end, true
+	return chunkRangeOf(t.Identity.Length, i)
 }
 
-// Done 返回已经下到盘上的字节数。
+// streamLen 是指定那条流的长度。`companion` 为 true 时取第二那条。
+func (t *Task) streamLen(companion bool) int64 {
+	if companion {
+		if t.Companion == nil {
+			return 0
+		}
+		return t.Companion.Length
+	}
+	return t.Identity.Length
+}
+
+// streamChunks 是指定那条流已完成的分块下标。返回的是**头**不是拷贝：
+// 只在锁下调，而且只在紧接着要改的那一处用。
+func (t *Task) streamChunks(companion bool) []int {
+	if companion {
+		if t.Companion == nil {
+			return nil
+		}
+		return t.Companion.Chunks
+	}
+	return t.Chunks
+}
+
+// Total 是这一项一共要下多少字节（两条流加起来）。
+func (t *Task) Total() int64 {
+	n := t.Identity.Length
+	if t.Companion != nil {
+		n += t.Companion.Length
+	}
+	return n
+}
+
+// Done 返回已经下到盘上的字节数（两条流加起来）。
 //
 // 只算**整块**下完的：进行中的那一块现在算进去会让进度条来回跳
 // （三个分块各完成一半时是 50%，下一个瞬间某个分块完成变成 100% 又回去），
 // 而用户看到的是进度条自己往回走。
 func (t *Task) Done() int64 {
-	var n int64
-	for _, i := range t.Chunks {
-		start, end, ok := t.chunkRange(i)
-		if !ok {
-			// 下标越界：这份记录是旧版本或坏记录留下的（见 `Manager.Restore`）。
-			// 宁可少算也不能算错——算多了会报出「下完了」而实际没下完。
-			continue
-		}
-		n += end - start + 1
+	n := doneOf(t.Identity.Length, t.Chunks)
+	if t.Companion != nil {
+		n += doneOf(t.Companion.Length, t.Companion.Chunks)
 	}
 	return n
 }
 
 // Complete 报这一项是不是已经下完。
+//
+// 视频任务**两条流都下完**才算完：少一条就交织不出一个能播的文件，
+// 而那种文件（只有画面没声音）**照样能打开**。
 func (t *Task) Complete() bool {
-	n := t.totalChunks()
-	if n == 0 {
+	if !completeOf(t.Identity.Length, t.Chunks) {
 		return false
 	}
-	seen := make(map[int]bool, len(t.Chunks))
-	for _, i := range t.Chunks {
-		seen[i] = true
+	if t.Companion == nil {
+		return true
 	}
-	for i := range n {
-		if !seen[i] {
-			return false
-		}
-	}
-	return true
+	return completeOf(t.Companion.Length, t.Companion.Chunks)
 }
 
-// markChunk 记下一块下完了。返回它是不是**刚刚**记上的（已经记过的返回
-// false）——重复记会让 Done() 多算一遍，进度直接超过 100%。
+// markChunk 记下**主那条流**的一块下完了。
 func (t *Task) markChunk(i int) bool {
-	for _, x := range t.Chunks {
-		if x == i {
-			return false
-		}
-	}
-	t.Chunks = append(t.Chunks, i)
-	return true
+	var fresh bool
+	t.Chunks, fresh = markChunkOf(t.Chunks, i)
+	return fresh
 }
 
-// resetChunks 清掉分块记账，表示「这块东西要重下了」。
+// resetChunks 清掉主那条流的分块记账，表示「这块东西要重下了」。
 //
 // 用在两个地方：资源身份对不上（本地那些字节是**另一段内容**的，留着只会
 // 拼出坏文件），以及落盘时发现文件已经被删了。
-func (t *Task) resetChunks() {
-	t.Chunks = nil
-}
+func (t *Task) resetChunks() { t.Chunks = nil }
 
 // Snapshot 是给界面看的一份拷贝。
 //
@@ -289,7 +442,7 @@ func SnapshotOf(t *Task) Snapshot {
 	s := Snapshot{
 		ID: t.ID, Title: t.Title, Cover: t.Cover, Label: t.Label,
 		Dest: t.Dest, Status: t.Status, Err: t.Err, AddedAt: t.AddedAt,
-		Total: t.Identity.Length, Percent: -1,
+		Total: t.Total(), Percent: -1,
 	}
 	s.Done = t.Done()
 	if s.Total > 0 {
@@ -349,16 +502,25 @@ func TaskID(bvid, cid string) string {
 // （macOS 的真实上限是 255 个**字符**不是字节，评审实测过。但按字节算是
 // 更严的那一边，所以守住字节预算就一定守得住字符上限。）
 func DestFor(dir, title, ext, id string) string {
-	return destFor(dir, title, ext, id, nil)
+	return destFor(dir, title, ext, id, false, nil)
 }
 
 // destFor 是挑名字的纯逻辑。`claimed` 是队列里别的任务已经认领的路径，
-// 可以是 nil（外面没有队列的场景，比如测试）。
-func destFor(dir, title, ext, id string, claimed map[string]bool) string {
-	// 末尾那一段之外，还要给 `.part` 留出位置——它和正式文件名同名同目录，
+// 可以是 nil（外面没有队列的场景，比如测试）。`video` 决定要不要多给
+// 第二那条流的半成品留位置。
+func destFor(dir, title, ext, id string, video bool, claimed map[string]bool) string {
+	// 末尾那一段之外，还要给半成品留出位置——它和正式文件名同名同目录，
 	// 用户在下载目录里一眼就能看出「这是在下的那一首」，所以不能另起一个
-	// 截短的名字，只能让正式名让出这 5 个字节。
-	base := fileName(title, ext, len(partSuffix))
+	// 截短的名字，只能让正式名让出这几个字节。
+	//
+	// 视频要多留一段：它有**两个**半成品（见 `companionPartPath`）。
+	// 不留的话长歌名的伴流半成品会顶破文件名上限，而那种错在下载快
+	// 结束的时候才暴露。
+	reserve := len(partSuffix)
+	if video {
+		reserve += len(companionSuffix)
+	}
+	base := fileName(title, ext, reserve)
 	if base == "" {
 		// 歌名实在净化不出东西。拿内容 id 当名字：至少能看出是哪一首，
 		// 而编一个「未命名」在记录页上一眼看得出是名字丢了。
@@ -369,7 +531,7 @@ func destFor(dir, title, ext, id string, claimed map[string]bool) string {
 			return true
 		}
 		// 别人的 `.part` 也算占着：它正在往那个位置里写。
-		return exists(p) || exists(partPath(p))
+		return exists(p) || exists(partPath(p)) || exists(companionPartPath(p))
 	}
 	if !taken(filepath.Join(dir, base)) {
 		return filepath.Join(dir, base)
@@ -377,7 +539,7 @@ func destFor(dir, title, ext, id string, claimed map[string]bool) string {
 	stem := strings.TrimSuffix(base, ext)
 	for i := 1; i < maxNameTries; i++ {
 		// 同名避让的 ` (1)` 也要算进预算：词干再长的话它得让出这几个字节。
-		cand := fileName(stem, fmt.Sprintf(" (%d)%s", i, ext), len(partSuffix))
+		cand := fileName(stem, fmt.Sprintf(" (%d)%s", i, ext), reserve)
 		if cand == "" {
 			continue
 		}
