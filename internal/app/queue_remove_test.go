@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -265,66 +266,6 @@ func TestRemoveAtStopsWhenTheNextSongWillNotPlay(t *testing.T) {
 	}
 }
 
-// TestMoveToNextPutsItRightAfterTheCurrentOne 是行菜单里「插到下一首播放」。
-//
-// 它是**挪队列**不是「记一个 nextId」：挪完立刻看得见它排在哪儿。
-func TestMoveToNextPutsItRightAfterTheCurrentOne(t *testing.T) {
-	cases := []struct {
-		name    string
-		cur     int
-		move    int
-		want    []string
-		wantCur int
-	}{
-		{"挪到当前项后面", 0, 2, []string{"a", "c", "b"}, 0},
-		{"挪的是当前项后面那一项，它原地不动", 0, 1, []string{"a", "b", "c"}, 0},
-		// 当前项的下标也跟着挪：a 被从第 0 位拿走后，正在放的 b 成了第 0 首。
-		{"挪的是当前项前面那一项", 1, 0, []string{"b", "a", "c"}, 0},
-		{"当前项在末尾，挪的落到队尾", 2, 0, []string{"b", "c", "a"}, 1},
-	}
-	for _, c := range cases {
-		q := app.NewQueue()
-		q.Append(items("a", "b", "c")...)
-		for q.CurrentIndex() != c.cur {
-			q.Move(1)
-		}
-		if _, ok := q.MoveToNext(c.move); !ok {
-			t.Fatalf("%s：MoveToNext(%d) 报告没挪", c.name, c.move)
-		}
-		got := pathsOf(q.Items())
-		if len(got) != len(c.want) {
-			t.Fatalf("%s：挪完是 %v，want %v", c.name, got, c.want)
-		}
-		for i := range c.want {
-			if got[i] != c.want[i] {
-				t.Fatalf("%s：挪完是 %v，want %v", c.name, got, c.want)
-			}
-		}
-		if q.CurrentIndex() != c.wantCur {
-			t.Errorf("%s：当前项变成第 %d 首，want %d", c.name, q.CurrentIndex(), c.wantCur)
-		}
-	}
-}
-
-// TestMoveToNextSaysWhyItDidNot 挪不动的两种都要说话（这一票的验收要「接上真实
-// 操作」——按了没反应不算接上）。
-func TestMoveToNextSaysWhyItDidNot(t *testing.T) {
-	a := newApp(t)
-	paths := copies(t, 2)
-	a.Enqueue(items(paths...)...)
-	waitFor(t, 2*time.Second, "第一首开始播", func() bool { return a.Snapshot().HasTrack })
-
-	if err := a.MoveToNext(0); err == nil {
-		t.Error("把正在放的那首插队，一声不吭")
-	}
-	if err := a.MoveToNext(9); err == nil {
-		t.Error("插一个队列里没有的下标，一声不吭")
-	}
-	if n := a.Queue().Len(); n != 2 {
-		t.Errorf("插队失败之后队列变成了 %d 首", n)
-	}
-}
-
 // TestClearQueueEmptiesAndStops 同上，但走抽屉顶上那个「清空」。
 func TestClearQueueEmptiesAndStops(t *testing.T) {
 	a := newApp(t)
@@ -429,6 +370,110 @@ func TestPlayAtOutOfRangeSaysSo(t *testing.T) {
 	}
 	if got := a.Snapshot().Title; got != "a" {
 		t.Errorf("越界之后放的是 %q，want 还是 a", got)
+	}
+}
+
+// TestRemoveSongFromListRemovesEveryCopy 钉「从列表删除」删的是**全部**同身份项。
+//
+// 抽屉那一行是按判重标识画的：队列里 [甲,甲,乙] 只画两行（甲、乙）。只删一份的
+// 话，用户按了「从列表删除」之后那一行还在（顶上的计数也不变），看起来就是按了
+// 没反应。Biu 的 `play-list.ts` 里 `del` 用 `isSame` 删的就是全部。
+func TestRemoveSongFromListRemovesEveryCopy(t *testing.T) {
+	a := newApp(t)
+	paths := copies(t, 2)
+	dup := app.LocalItem(paths[0])
+	a.Enqueue(app.LocalItem(paths[0]))
+	a.Enqueue(dup, app.LocalItem(paths[1])) // 队列：甲,甲,乙
+	if n := a.Queue().Len(); n != 3 {
+		t.Fatalf("测试自己没摆好：队列 %d 首", n)
+	}
+
+	n, err := a.RemoveSongFromList(dup)
+	if err != nil {
+		t.Fatalf("删不掉：%v", err)
+	}
+	if n != 2 {
+		t.Errorf("删掉了 %d 份，want 2", n)
+	}
+	got := pathsOf(a.Queue().Items())
+	if len(got) != 1 || got[0] != paths[1] {
+		t.Fatalf("删完之后队列是 %v，want 只剩 %s", got, paths[1])
+	}
+}
+
+// TestRemoveSongFromListTakesTheCurrentOneWithIt 删掉的里面有正在放的那首时，
+// 接着放下一首——和删一份那条同一个道理。
+func TestRemoveSongFromListTakesTheCurrentOneWithIt(t *testing.T) {
+	a := newApp(t)
+	paths := copies(t, 2)
+	a.Enqueue(app.LocalItem(paths[0]))
+	dup := app.LocalItem(paths[0])
+	a.Enqueue(dup, app.LocalItem(paths[1])) // 队列：甲,甲,乙，正在放甲
+
+	if _, err := a.RemoveSongFromList(dup); err != nil {
+		t.Fatalf("删不掉：%v", err)
+	}
+	waitFor(t, 2*time.Second, "接着放乙", func() bool { return a.Snapshot().Title == "b" })
+	if got := a.Queue().CurrentIndex(); got != 0 {
+		t.Errorf("当前项是第 %d 首，want 第 1 首（就是乙）", got)
+	}
+}
+
+// TestRemoveSongFromListRefusesUnidentifiableItems 认不出是哪一项的，**这个口
+// 一概不删**：两首都认不出来的歌在标识上长得一样，按一次删掉两首不同的歌比按了
+// 没反应糟得多。界面上那条行自己知道位置，走 `RemoveAt`（按位置删一份）。
+func TestRemoveSongFromListRefusesUnidentifiableItems(t *testing.T) {
+	a := newApp(t)
+	a.Queue().Append(app.Item{Title: "甲"}, app.Item{Title: "乙"})
+
+	if _, err := a.RemoveSongFromList(app.Item{Title: "甲"}); err == nil {
+		t.Error("拿一个认不出来的项走「删全部同身份」，居然报告成功了")
+	}
+	if n := a.Queue().Len(); n != 2 {
+		t.Errorf("队列剩下 %d 首（把两首都删了？）", n)
+	}
+}
+
+// TestPlayAtRetriesTheCurrentSongWhenNothingIsPlaying 是「接歌失败 → 停下来」
+// 之后的重试：队列的当前项还指着那一首，但**没有歌在放**，用户再点它就得真的
+// 把它放出来（文件补回来了、或者网好了）。
+//
+// 判据原来只是「当前项 == 这一项就什么都不做」，于是接歌失败之后那一行永远按
+// 不动——用户按的确实是「播放」，而界面上一个字错误都没有。
+func TestPlayAtRetriesTheCurrentSongWhenNothingIsPlaying(t *testing.T) {
+	a := newApp(t)
+	paths := copies(t, 1)
+	a.Enqueue(items(paths[0])...)
+	waitFor(t, 2*time.Second, "第一首开始播", func() bool { return a.Snapshot().HasTrack })
+
+	// 队列里加一首打不开的文件，删掉正在放的 → 接不上，停下来。
+	missing := filepath.Join(t.TempDir(), "缺了这一首.flac")
+	a.Queue().Append(app.Item{Source: "local", Path: missing})
+	if err := a.RemoveAt(0); err == nil {
+		t.Fatal("删掉正在放的那首、下一首打不开，却一声不吭")
+	}
+	st := a.Snapshot()
+	if st.HasTrack {
+		t.Fatalf("接不上之后还在放：%+v", st)
+	}
+	if a.Queue().CurrentIndex() != 0 {
+		t.Fatalf("测试自己没摆好：当前项是第 %d 首", a.Queue().CurrentIndex())
+	}
+
+	// 把那个文件补回来（复制一份真的 FLAC 过去），再点当前行 = 重试。
+	b, err := os.ReadFile(flac(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(missing, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.PlayAt(0); err != nil {
+		t.Fatalf("重试：%v", err)
+	}
+	waitFor(t, 2*time.Second, "重试之后放出来了", func() bool { return a.Snapshot().HasTrack })
+	if got := a.Snapshot().Title; got != "缺了这一首" {
+		t.Errorf("重试之后放的是 %q，want 缺了这一首", got)
 	}
 }
 

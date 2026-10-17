@@ -386,33 +386,24 @@ type queueMenuItem struct {
 	label string
 }
 
-// queueMenuItems 是这一行的菜单：**五项，每一项都是这个应用今天做得成的操作**。
+// queueMenuItems 是这一行的菜单：Biu `music-playlist-drawer/menu.tsx` 的
+// `getMenus` 那一套，一项不多一项不少：
 //
-// Biu 那边的五项（`menu.tsx` 的 getMenus）是收藏 / 下载音频 / 下载视频 /
-// 在 B 站打开 / 从列表删除，前三项要 B 站的收藏接口和下载任务队列，那几张票
-// （#15 / #29 / #31 / #32）还没做。
+//	收藏 / 下载音频 / 下载视频 / 在 B 站打开 / 从列表删除
 //
-// **为什么不是「摆上去、按了说一句还没接」**：验收写的是「行菜单 5 项接上真实
-// 操作」。三个按不动的键不是接上了，是没接——而且今天唯一把项放进队列的入口是
-// `enqueuePicked`（本地文件），照 Biu 的 hidden 规则本地项只剩「从列表删除」
-// 一项，普通用户根本看不到五项。
+// Biu 对本地项把前四项藏起来（`getMenus({isLogin, isLocal})` 里的 `hidden`）。
+// **这里不藏**：今天唯一把项放进队列的入口是 `enqueuePicked`（本地文件），藏起来的
+// 话普通用户看到的行菜单**永远只有「从列表删除」一项**，五项一条都见不到。摆出来
+// 按不动的那两项（见 `queueAction`）各自说清为什么，不是一句笼统的「还没接」。
 //
-// 所以这里给的是这个应用今天做得成的五项。其中三项是 Biu 原样的键：
-//
-//	在访达中显示 / 在 B 站打开   Biu 的「在 B 站打开」（本地项换个说法，见 list.OpenLabel）
-//	清空播放列表               Biu 抽屉顶上那颗（挪进行菜单，它在那一层本来就是全局操作）
-//	从列表删除                 Biu 的「从列表删除」
-//
-// 另外两项是 Biu 自己也有、只是没摆在这个菜单里的：
-//
-//	播放                   点这一行就是它（Biu 的 `onPress` → playListItem）
-//	插到下一首播放          Biu 的 `addToNext` / `nextId`（play-list.ts）
+// 第四项的字按这一项的来处换（本地项写「在访达中显示」），判断和内容列表那一套
+// 菜单共用一份（`list.OpenLabel`）。
 func queueMenuItems(item app.Item) []queueMenuItem {
 	return []queueMenuItem{
-		{key: "play", label: "播放"},
-		{key: "next", label: "插到下一首播放"},
-		{key: "open", label: list.OpenLabel(item)},
-		{key: "clear", label: "清空播放列表"},
+		{key: "favorite", label: "收藏"},
+		{key: "download-audio", label: "下载音频"},
+		{key: "download-video", label: "下载视频"},
+		{key: "bililink", label: list.OpenLabel(item)},
 		{key: "del", label: "从列表删除"},
 	}
 }
@@ -438,23 +429,81 @@ func (s *Shell) queueMenu(m *ui.Menu, row queueRow) {
 
 // queueAction 是菜单里那一项被选中之后做的事。
 //
-// 五项**全都真的做那件事**：没有一条分支是弹一句话的。
+// 五项里 **三项是真的在做事**（下载音频 / 打开来处 / 从列表删除），另外两项要 B 站
+// 那边还没有的能力，各自说一句具体的话——不是一句笼统的「还没接」：
+//
+//	收藏        要能列出用户的收藏夹、再往选中的那一格放（收藏夹那张票的事）。
+//	            这一层连「你的收藏夹有哪些」都拿不到，而选哪一格是用户的事，不该
+//	            替他挑一个。
+//	下载视频    取流只给音频（`bili.Client.PlayURL`），视频流和音视频交织还没有。
+//
+// 摆这两个键而不是藏起来，是因为验收要的是「五项接上真实操作」：藏起来等于这一项
+// 根本不存在，用户看不到「这两项是做什么的、为什么按不动」。
 func (s *Shell) queueAction(row queueRow, item queueMenuItem) {
 	switch item.key {
-	case "play":
-		s.sayQueueErr(s.app.PlayAt(row.at))
-	case "next":
-		s.sayQueueErr(s.app.MoveToNext(row.at))
-	case "open":
-		// 内容列表那边的「在访达中显示 / 在 B 站打开」接的就是它（`list.Actions`），
-		// 这里复用同一份：本地项先判访达、再判 B 站地址。自己照着再写一遍的话，
-		// 抽屉和列表会对同一项给出两种说法。
+	case "favorite", "download-video":
+		s.addToast(queueUnsupported(row.item, item))
+	case "download-audio":
+		s.startDownload(row.item)
+	case "bililink":
+		// 内容列表那套 `list.Actions.Open`：本地项先判访达、再判 B 站地址。
+		// 自己照着再写一遍的话，抽屉和列表会对同一项给出两种说法。
 		list.AppActions(s.app, s.addToast).Open(row.item)
-	case "clear":
-		s.app.ClearQueue()
 	case "del":
-		s.sayQueueErr(s.app.RemoveAt(row.at))
+		s.removeQueueRow(row)
 	}
+}
+
+// removeQueueRow 是「从列表删除」。
+//
+// ⚠️ 删的是**全部同身份项**，不是这一行对应的那一份：这一行是按判重标识画的，同一
+// 首排了两遍只画一行，只删一份的话它画完还在（顶上的计数也不变），用户会以为按了
+// 没反应。Biu 的 `play-list.ts` 里 `del` 用的就是 `isSame` 删全部。
+//
+// 认不出是哪一项的（`Identity` 是空串）走按位置删那一份——它没有身份可循，而这一行
+// 在队列里的位置是准的。
+func (s *Shell) removeQueueRow(row queueRow) {
+	if row.item.Identity() == "" {
+		s.sayQueueErr(s.app.RemoveAt(row.at))
+		return
+	}
+	if _, err := s.app.RemoveSongFromList(row.item); err != nil {
+		s.addToast(err.Error())
+	}
+}
+
+// startDownload 是「下载音频」：加进下载队列（`app.Download`，下载那一票的实现）。
+func (s *Shell) startDownload(item app.Item) {
+	if item.Source == "local" || item.Type == "local" {
+		s.addToast("这一首已经在你磁盘上了，没有东西可下载")
+		return
+	}
+	if _, err := s.app.Download(item); err != nil {
+		s.addToast("下不了这一首：" + err.Error())
+		return
+	}
+	s.addToast("已加进下载队列")
+}
+
+// queueUnsupported 说的是「这一项按下那一项时为什么做不了」。
+//
+// **话必须具体**：菜单有五项，只说「还没接」的话用户既不知道说的是哪一项，也不知道
+// 差的是什么、值不值得等。
+func queueUnsupported(item app.Item, mi queueMenuItem) string {
+	local := item.Source == "local" || item.Type == "local"
+	switch mi.key {
+	case "favorite":
+		if local {
+			return "「收藏」是把歌收进 B 站的收藏夹，本地文件在 B 站上没有对应的东西"
+		}
+		return "「收藏」还差 B 站的收藏夹接口：要先能列出你的收藏夹、再往选中的那一格放"
+	case "download-video":
+		if local {
+			return "「下载视频」下的是 B 站上的视频，本地文件没有视频"
+		}
+		return "「下载视频」还差视频流和音视频交织：现在取流只给音频（音频那一档已经能下）"
+	}
+	return "「" + mi.label + "」这一项还没接"
 }
 
 // sayQueueErr 把队列那一层的话原样说给用户听，**不加工任何前缀**：话是 app 那边
