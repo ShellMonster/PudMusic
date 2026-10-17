@@ -383,16 +383,27 @@ func TestTheAuthorRetryWhilePendingDoesNotSendASecondRequest(t *testing.T) {
 	})
 
 	tt.Click("重试加载关注的人")
-	// ⚠️ 要**等请求真的被发出去**，不能只画固定几帧：重试走的是后台 goroutine，
-	// handler 一进来才 `pn2++`，而机器一忙那几帧里请求还在路上——读出来就是
-	// 「0 次」，而按钮确实按下去了。表现是这条**只在整仓并行跑时**红（实测三次里
-	// 一次），单跑 20 次全绿。
-	waitFrames(t, tt, "重试发起了第二页的请求", func() bool {
+
+	// ⚠️ **等请求真的发出**，不要按固定帧数。
+	//
+	// 这一拉是在 goroutine 里发出去的（`go s.fetchFeed`），而请求要经过 DNS/连接
+	// 往返才打到 fixture。原来这里是「画 10 帧就断言」——机器负载一高，10 帧
+	// （毫秒级）走不到网络那一层，于是断言数到 0 次，看起来像「点了重试没反应」。
+	//
+	// ⚠️ 这一条**在 origin/main 上同样会红**（不是本票引入的），但验收命令要求
+	// 全绿，而一条随负载随机红的测试会把整张票卡住，所以在这儿修：等的是**它要
+	// 断言的那件事真的发生**，而不是「过了 10 毫秒」。
+	waitFrames(t, tt, "重试之后第二页真的被请求了一次", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
-		return pn2 > before
+		return pn2 == before+1
 	})
-	tt.Frame()
+
+	// 之后再确认「按钮不见了 + 没有第二个请求」这两条：多画几帧，让任何一次
+	// 重复请求都有机会发生。
+	for range 30 {
+		tt.Frame()
+	}
 	if _, ok := tt.Find("重试加载关注的人"); ok {
 		t.Errorf("重试之后按钮还在 —— 闸门的 loading 没写回真实的那一份" +
 			"（`auth := f.auth` 是复制），可以再点一次并发发第二个请求")

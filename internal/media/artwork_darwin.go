@@ -187,7 +187,7 @@ func newArtwork(img id) id {
 	return art
 }
 
-// nsImageFromBytes 把一段图片字节变成 NSImage。解不开时返回 0。
+// nsImageFromBytes 把一段图片字节变成 **+1 的** NSImage。解不开时返回 0。
 //
 // `NSImage` 自己认格式（走 ImageIO），所以这一层不需要知道拿到的是 PNG
 // 还是 JPEG——B 站的封面两种都发过。
@@ -195,14 +195,23 @@ func nsImageFromBytes(b []byte) id {
 	if len(b) == 0 {
 		return 0
 	}
-	data := nsData(b)
+	data := newData(b)
 	if data == 0 {
 		return 0
 	}
-	img := send(id(class("NSImage")), "alloc")
-	img = sendSel(img, sel("initWithData:"), uintptr(data))
+	defer release(data)
+	return sendSel(send(id(class("NSImage")), "alloc"), sel("initWithData:"), uintptr(data))
+}
+
+// newArtworkFromBytes 从字节造一个封面对象，中间那两个对象当场释放。
+//
+// 造出来的 `MPMediaItemArtwork` 是**故意不释放**的（理由见 images 那段），
+// 而它内部 hold 住了这张 NSImage，所以把这张图我们自己那份放掉是安全的。
+func newArtworkFromBytes(b []byte) id {
+	img := nsImageFromBytes(b)
 	if img == 0 {
 		return 0
 	}
-	return autorelease(img)
+	defer release(img)
+	return newArtwork(img)
 }

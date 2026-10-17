@@ -60,8 +60,12 @@ var (
 	// 声明成具体签名的消息。带 double 的那些**必须**声明成 float64：
 	// double 走的是浮点寄存器那一组，按整数传过去的话参数会被解释成
 	// 一个恰好落在浮点寄存器里的垃圾位。
-	msgDouble     func(obj id, sel objc.SEL) float64
-	msgNumberWith func(cls id, sel objc.SEL, v float64) id
+	msgDouble func(obj id, sel objc.SEL) float64
+	// msgInitDouble / msgInitInt 是「接收一个数、返回一个对象」的那一类消息。
+	// `newNumberDouble` / `newNumberInt` 要用它们——见那里为什么**不能**用
+	// `+numberWithDouble:` / `+numberWithInt:`（工厂方法是 autorelease 的）。
+	msgInitDouble func(obj id, sel objc.SEL, v float64) id
+	msgInitInt    func(obj id, sel objc.SEL, v int) id
 	// msgRequestImage 是 `-[MPMediaItemArtwork requestImageWithSize:completionHandler:]`
 	// 的**入向**声明（返回值是 void，所以只有参数）。
 	//
@@ -75,11 +79,11 @@ var (
 	// `objc_msgSend` 按它自己那份类型编码传参，我们的实现按两个 double 收，
 	// 拿到的是同一对寄存器。
 	msgRequestImage func(obj id, sel objc.SEL, w, h float64, completion objc.Block)
+	// pthreadSelfFn 是 `pthread_self()`，用来认出「是不是那条钉住的线程」。
+	pthreadSelfFn func() uint64
 	// msgNSSize 是返回 NSSize 的那种。返回值能封送（纯 Go 那边是照着
 	// 结果缓冲写回去的），所以这里老老实实声明成结构。
 	msgNSSize func(obj id, sel objc.SEL) nsSize
-
-	poolPush, poolPop uintptr
 )
 
 func init() {
@@ -121,9 +125,6 @@ func loadObjC() {
 			return
 		}
 	}
-	poolPush, _ = purego.Dlsym(h, "objc_autoreleasePoolPush")
-	poolPop, _ = purego.Dlsym(h, "objc_autoreleasePoolPop")
-
 	// MediaPlayer 里的两个类要用，所以先把它加载进来（类得先注册才能
 	// GetClass 到）。AppKit 只为了 NSImage。
 	for _, p := range []string{pathFoundation, pathAppKit, pathMediaPlayer} {
@@ -133,8 +134,29 @@ func loadObjC() {
 		}
 	}
 
+	// pthread_self：libobjc 自己链着 libSystem，所以先问 libobjc 的句柄
+	// （dlsym 会顺着依赖链找），不行再直接问 libSystem。
+	for _, lib := range []uintptr{h, 0} {
+		if lib == 0 {
+			l, err := purego.Dlopen("/usr/lib/libSystem.B.dylib", purego.RTLD_GLOBAL|purego.RTLD_NOW)
+			if err != nil {
+				break
+			}
+			lib = l
+		}
+		if a, err := purego.Dlsym(lib, "pthread_self"); err == nil {
+			purego.RegisterFunc(&pthreadSelfFn, a)
+			break
+		}
+	}
+	if pthreadSelfFn == nil {
+		loadErr = fmt.Errorf("media: 取不到 pthread_self，没法确认写系统时在那条线程上")
+		return
+	}
+
 	purego.RegisterFunc(&msgDouble, msgSend)
-	purego.RegisterFunc(&msgNumberWith, msgSend)
+	purego.RegisterFunc(&msgInitDouble, msgSend)
+	purego.RegisterFunc(&msgInitInt, msgSend)
 	purego.RegisterFunc(&msgRequestImage, msgSend)
 	purego.RegisterFunc(&msgNSSize, msgSend)
 }
@@ -223,19 +245,51 @@ func sendSize(obj id, selector string) nsSize {
 }
 
 // ---- Foundation 类型 ----
-
-// nsString 返回一个自动释放的 NSString。
 //
-// ⚠️ 字节必须在调用期间活着，所以这里显式 `runtime.KeepAlive`：这个调用
-// 返回之后 ObjC 那边（autorelease 之前）可能还拿着它。
-func nsString(s string) id {
+// ⚠️ **这一层造出来的每一个对象都是自己持有的（+1），用完自己 release。**
+//
+// 一个更省事的做法是让它们 autorelease，靠 Objective-C 的自动释放池收。但那条路
+// **收不了**：自动释放池是**每线程**的状态，而这一层的调用来自 Go 的任意 goroutine，
+// 那些 goroutine 随时会换 OS 线程，于是「谁负责放它」这件事没人说得清——
+// 实测那是必崩的（崩在纯 native 代码里，连一行 Go 栈都没有），见
+// `objcthread_darwin.go` 顶上那一整段。
+//
+// 自己持有的代价是每个调用点都要配一次 release，而这一层每次推系统只造七八个对象，
+// 那点代码换掉一整类说不清的崩溃，划算。**别改回 autorelease。**
+//
+// ⚠️ 而且**每一个都必须自己 alloc**：Objective-C 的那些「工厂方法」
+// （`+numberWithDouble:`、`+dataWithBytes:`、`+dictionary`…）交回来的都是
+// **autorelease 过的**，当 +1 用就是多放一次。本层现在用的形状，逐个是：
+//
+//	newString            [[NSString alloc] initWithBytes:length:encoding:]
+//	newNumberDouble      [[NSNumber alloc] initWithDouble:]      ← 评审在这里翻过车
+//	newData              [[NSData alloc] initWithBytes:length:]
+//	newMutableDictionary [[NSMutableDictionary alloc] init]
+//	nsImageFromBytes     [[NSImage alloc] initWithData:]
+//
+// 判据在 `TestEveryOwnedHelperSurvivesAnAutoreleasePoolPop`：在一个真池子里造、
+// 放、pop，再**用一次**。多放过的对象会当场段错误。
+
+// release 放掉一个自己持有的对象。
+func release(o id) {
+	if o != 0 {
+		send(o, "release")
+	}
+}
+
+// newString 造一个 **+1 的** NSString。
+//
+// ⚠️ 用 `initWithBytes:length:encoding:` 而不是 `stringWithUTF8String:`：后者要的是
+// NUL 结尾的 C 字符串，而中文的 UTF-8 字节里可能就有 NUL，且按字节算长度在中文上
+// 会截断。歌名全是中文——症状是锁屏上的歌名少一半。
+func newString(s string) id {
 	if s == "" {
 		return 0
 	}
-	str := send(send(id(class("NSString")), "alloc"), "initWithBytes:length:encoding:",
+	str := sendSel(send(id(class("NSString")), "alloc"), sel("initWithBytes:length:encoding:"),
 		uintptr(unsafe.Pointer(unsafe.StringData(s))), uintptr(len(s)), nsUTF8StringEncoding)
 	runtime.KeepAlive(s)
-	return autorelease(str)
+	return str
 }
 
 // goString 把一个 NSString 抄回 Go 字符串。objc 为 0 时是空串。
@@ -251,34 +305,69 @@ func goString(str id) string {
 	return string(unsafe.Slice(*(**byte)(unsafe.Pointer(&p)), n))
 }
 
-// nsNumberDouble 返回一个自动释放的 NSNumber。
-func nsNumberDouble(v float64) id {
-	return autorelease(msgNumberWith(id(class("NSNumber")), sel("numberWithDouble:"), v))
+// newNumberDouble 造一个 **+1 的** NSNumber。
+//
+// ⚠️ **不能用 `+[NSNumber numberWithDouble:]`**，尽管它短得多。
+// 那是个**工厂方法**：它内部 `[[NSNumber alloc] initWithDouble:]` 之后**又
+// autorelease 了一次**，所以交回来的是「归自动释放池所有」的（实测
+// retainCount = 1，而不是 alloc 出来的 -1）。
+//
+// 这一层按「自己持有、用完自己 release」的规矩用它，就成了**多放一次**：
+// 现在这条线程上没有池子，autorelease 找不到主人，那份引用就一直在，
+// 后面那一次 release 恰好抵消了它——**看着是好的**；一旦这条线程上有了池子
+// （AppKit 内部推的、或者谁加回来的），pop 就会对着同一个对象再放一次，
+// 当场段错误（评审的探针就是这么复现的，产物在
+// `data/tasks/Biu_MyGo/26/review/nsnumber-ownership-and-pool.txt`）。
+//
+// 「恰好抵消」不是所有权，是运气。所以老老实实 alloc/init，那才是 +1。
+func newNumberDouble(v float64) id {
+	n := send(id(class("NSNumber")), "alloc")
+	if n == 0 {
+		return 0
+	}
+	return msgInitDouble(n, sel("initWithDouble:"), v)
 }
 
-// nsData 返回一个自动释放的 NSData，拷走 b 的内容。
-func nsData(b []byte) id {
+// newNumberInt 造一个 **+1 的** NSInteger 盒子。
+//
+// 和 `newNumberDouble` 同理：不能用 `+[NSNumber numberWithInt:]`（工厂方法，
+// 交回来的是 autorelease 过的），要 `[[NSNumber alloc] initWithInt:]`。
+func newNumberInt(v int) id {
+	n := send(id(class("NSNumber")), "alloc")
+	if n == 0 {
+		return 0
+	}
+	return msgInitInt(n, sel("initWithInt:"), v)
+}
+
+// newData 造一个 **+1 的** NSData，拷走 b 的内容。
+func newData(b []byte) id {
 	var p unsafe.Pointer
 	if len(b) > 0 {
 		p = unsafe.Pointer(&b[0])
 	}
-	d := send(id(class("NSData")), "dataWithBytes:length:", uintptr(p), uintptr(len(b)))
-	runtime.KeepAlive(b)
-	return d
+	return sendSel(send(id(class("NSData")), "alloc"), sel("initWithBytes:length:"), uintptr(p), uintptr(len(b)))
 }
 
-// nsMutableDictionary 返回一个新的自动释放的可变字典。
-func nsMutableDictionary() id {
-	return send(id(class("NSMutableDictionary")), "dictionary")
+// newMutableDictionary 造一个 **+1 的** NSMutableDictionary。
+func newMutableDictionary() id {
+	return sendSel(send(id(class("NSMutableDictionary")), "alloc"), sel("init"))
 }
 
 // dictPut 往字典里放一个值。value / key 为 0 都不放：
 // Objective-C 的字典收 nil 会抛 `object cannot be nil`，而这一层宁可不放。
+//
+// key 自己建、自己放（`dictPut` 负责 release 掉它）——调用点只管给 value 的归属。
 func dictPut(dict id, key string, value id) {
 	if dict == 0 || value == 0 || key == "" {
 		return
 	}
-	send(dict, "setObject:forKey:", uintptr(value), uintptr(nsString(key)))
+	k := newString(key)
+	if k == 0 {
+		return
+	}
+	send(dict, "setObject:forKey:", uintptr(value), uintptr(k))
+	release(k)
 }
 
 // allocInit 造一个 +1 的实例（`[[Cls alloc] init]`）。
@@ -287,28 +376,4 @@ func allocInit(cls objc.Class) id {
 		return 0
 	}
 	return sendSel(send(id(cls), "alloc"), sel("init"))
-}
-
-// autorelease 放进自动释放池。
-func autorelease(o id) id {
-	if o == 0 {
-		return 0
-	}
-	return send(o, "autorelease")
-}
-
-// withPool 在一个自动释放池里跑 fn。
-//
-// ⚠️ 自动释放池**属于压它的那个线程**，在别的线程上 pop 会崩。所以这里
-// 把线程锁住：`objc_autoreleasePoolPush` / `Pop` 之间不换线程。
-func withPool(fn func()) {
-	if poolPush == 0 || poolPop == 0 {
-		fn()
-		return
-	}
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-	pool, _, _ := purego.SyscallN(poolPush)
-	defer purego.SyscallN(poolPop, pool)
-	fn()
 }
