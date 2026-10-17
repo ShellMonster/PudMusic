@@ -312,7 +312,12 @@ func TestPagePanicIsCaught(t *testing.T) {
 	// 换掉画页面内容的那一支，走的正是 viewRoutes 里 14 条路由用的那条 Guard。
 	s.pageBody = func(*mygoui.Context, *mygoui.Route, Route) { panic("这一页画崩了") }
 
-	if _, ok := tt.Find(routes[0].Empty.Title); !ok {
+	// 起始页是首页，它现在有自己的一屏（三个 Tab），判据是那一排 Tab 里的第一个。
+	// ⚠️ 别再拿 `routes[0].Empty.Title` 当「起始页画出来了」的判据：首页接上内容
+	// 之后那一句话画在**每一个空着的 Tab 里面**，而这一屏的其余页面也都画
+	// 「暂无内容」（那是上游的共享默认文案），这个断言于是永远为真——它已经不再
+	// 断「起始页画出来了」，只是在别处找一个说得通的字。
+	if _, ok := tt.Find(homeTabs[0]); !ok {
 		t.Fatalf("起始页没画出来，文字有 %q", tt.Texts())
 	}
 	tt.Frame()
@@ -373,7 +378,8 @@ func TestPanicDoesNotBlockNavigation(t *testing.T) {
 	if tt.HasText("界面出错了") {
 		t.Errorf("换页之后还在错误页，文字有 %q", tt.Texts())
 	}
-	if _, ok := tt.Find(routes[0].Empty.Title); !ok {
+	// 同上：判首页画出来了没有，看它自己的那一排 Tab。
+	if _, ok := tt.Find(homeTabs[0]); !ok {
 		t.Errorf("没有回到首页，文字有 %q", tt.Texts())
 	}
 }

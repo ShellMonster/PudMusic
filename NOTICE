@@ -1,0 +1,41 @@
+Biu MyGo
+========
+
+Biu MyGo 是用 MyGo 框架（https://github.com/egoist/mygo）重写的 Biu 音乐播放器。
+界面是 MyGo 自己画的原生 UI（即时模式，没有 webview），音频在 Go 里解码。
+它**不是** Biu 的分支，也**不是** Biu 打包产物的重新分发：代码是重写的。
+
+Biu 的著作权
+------------
+
+Biu 的著作权属于原作者 wood3n。PolyForm Noncommercial 1.0.0 的 Notices 一节要求
+随软件分发时**逐字**保留下面这一行：
+
+    Required Notice: Copyright (c) 2022–2025 wood3n
+
+这一行写在 LICENSE 的第 5 行，随包发出去的那一份（licenses/BIU-LICENSE.txt）
+是它的逐字副本。internal/licensing/licenses_test.go 的
+TestBiuNoticeShipsVerbatim 守着这件事——删掉或改写这行不会让任何构建失败，
+包照发、DMG 照做，只是法律上已经不合规。
+
+本项目沿用同一份许可发布（PolyForm-Noncommercial-1.0.0，即「开源发布但不盈利」）。
+要商业化必须先单独向原作者取得授权。
+
+第三方
+------
+
+本应用把下列模块**静态链接**进了可执行文件。它们各自的许可证原文随包发出去，
+完整清单见 resources/licenses/THIRD-PARTY-NOTICES.txt（macOS 上在 app bundle 的
+Contents/Resources/licenses/，Windows 上在可执行文件旁边的 licenses\）。
+
+清单不是照 go.mod 抄的，是照 go list -deps 的实际结果核出来的，四个构建目标
+（darwin 与 windows，各两个架构）都核。改依赖之后跑：
+
+    go generate ./internal/licensing/
+
+go test ./internal/licensing/ 会在清单和实际依赖对不上时失败。
+
+本项目**不含任何 LGPL 代码**。两处曾经被写错过，现已由测试钉住：
+
+  - github.com/ebitengine/purego 是 **Apache-2.0**，不是 MIT
+  - github.com/hajimehoshi/go-mp3 是 **Apache-2.0**，不是 MIT

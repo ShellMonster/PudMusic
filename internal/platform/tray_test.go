@@ -24,7 +24,7 @@ func TestTraySupportedSkipsMacOS(t *testing.T) {
 // 坏法在真机上极难看出来（用户看到「没有图标」，不会想到是 PNG 坏了）。这里
 // 把它钉住。
 func TestTrayIconIsAValidPNG(t *testing.T) {
-	b := TrayIcon()
+	b := TrayIconPNG()
 	if len(b) == 0 {
 		t.Fatal("托盘图标是空的")
 	}
