@@ -47,6 +47,9 @@ type favBili struct {
 	removed []string
 	// deleted 记下每一次 folder/del 的 media_ids（侧栏「删除」那一项用）。
 	deleted []string
+	// paths 记下每一次请求打到了哪条路径（发没发请求本身就是一条断言：
+	// 「为了一个认不出的项去问 B 站」是白跑的一趟）。
+	paths []string
 }
 
 func newCollectionBili(t *testing.T) *favBili {
@@ -61,6 +64,7 @@ func newCollectionBili(t *testing.T) *favBili {
 	b.Server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b.mu.Lock()
 		defer b.mu.Unlock()
+		b.paths = append(b.paths, r.URL.Path)
 		switch r.URL.Path {
 		case "/x/v3/fav/folder/info":
 			state := 0
@@ -152,6 +156,19 @@ func (b *favBili) deletedFolders() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]string(nil), b.deleted...)
+}
+
+// hitsOf 数打到某条路径上的请求有几回。
+func (b *favBili) hitsOf(path string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := 0
+	for _, p := range b.paths {
+		if p == path {
+			n++
+		}
+	}
+	return n
 }
 
 func (b *favBili) isFaved() bool {

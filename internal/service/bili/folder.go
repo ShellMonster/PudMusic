@@ -195,7 +195,9 @@ func (c *Client) EditFolder(ctx context.Context, id int64, d FolderDraft) (*Fold
 // ⚠️ 删的是**收藏夹和它里面的全部内容**，不可撤销。界面那边有二次确认
 // （见 `ui` 的收藏夹删除弹窗），这一层不重复问一遍。
 //
-// 合集和系列删不掉（那是 UP 主建在稿件上的），那两类在侧栏里没有「删除」这一项。
+// ⚠️ **合集和系列（21 / 31）删不掉**——那是 UP 主建在稿件上的，B 站没有这个
+// 接口。侧栏那一行删不掉时会拿到 B 站给的错，原样说给用户（界面上不做类型判断：
+// `favMenuItems` 只按组分支，而「我创建的」那一组里可能混着合集）。
 func (c *Client) DeleteFolder(ctx context.Context, id int64) error {
 	if id <= 0 {
 		return fmt.Errorf("bili: 收藏夹 id 不对（%d）", id)

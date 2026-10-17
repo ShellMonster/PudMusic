@@ -56,7 +56,11 @@ type folderSelect struct {
 	ls ui.ListState
 }
 
-// newFolderSelect 建一份，打开，并且**后台拉全量**。
+// openFolderSelect 是「把这一首放进哪些收藏夹」那个入口。
+//
+// 它自己**只调一次**解析（`askFavoriteIDThen`），而解析那一趟回来之后走的是
+// `openFolderSelectNow`——**不是这里**。这两步分开不是洁癖，是下面那条命名的
+// 唯一保证。
 func (s *Shell) openFolderSelect(item app.Item) {
 	// ⚠️ **没挂上就别开弹窗**：理由同 `openFolderEdit`（提交那一下会什么
 	// 都不发生，而用户看到的是「点了没反应」）。
@@ -64,11 +68,18 @@ func (s *Shell) openFolderSelect(item app.Item) {
 		s.addToast("收藏夹还没接上：这一页要 B 站接口")
 		return
 	}
-	rid, typ, ok := favTarget(item)
-	if !ok {
-		s.askFavoriteIDThen(item)
+	if rid, typ, ok := favTarget(item); ok {
+		s.openFolderSelectNow(item, rid, typ)
 		return
 	}
+	s.askFavoriteIDThen(item)
+}
+
+// openFolderSelectNow 是真的把弹窗摆出来。**认不出身份的人不许调它**——
+// 它没有兜底那一支，所以拿不到 rid 的人必须先在 `openFolderSelect` 里被拦住。
+//
+// 把它单独拎出来就是**为了让递归在结构上不成立**（理由见 `askFavoriteIDThen`）。
+func (s *Shell) openFolderSelectNow(item app.Item, rid int64, typ int) {
 	f := &folderSelect{
 		open: true, rid: rid, contentType: typ,
 		title:  "把《" + firstNonEmpty(item.Title, "这一首") + "》放到收藏夹",
@@ -84,7 +95,8 @@ func (s *Shell) openFolderSelect(item app.Item) {
 	s.app.LoadCreatedFolders(rid)
 }
 
-// askFavoriteIDThen 是「手里只有 bvid」那一条：先在后台问一次稿件 id，再开弹窗。
+// askFavoriteIDThen 是「`favTarget` 认不出来」那一条：先在后台问一次稿件 id，
+// 认得出来了就开弹窗。
 //
 // # 为什么不能直接说「这一首还没有可以收藏的身份」
 //
@@ -96,18 +108,44 @@ func (s *Shell) openFolderSelect(item app.Item) {
 // ⚠️ **bvid → avid 是一次网络往返**，而界面线程上一次都不许有（铁律三）。所以
 // 这里是后台 + 回调，弹窗在那之后才开。
 //
-// ⚠️ **不许递归**：回来的那一项如果还是没有稿件 id，那一分支直接报错返回，
-// 不会又走回这里——否则一个问不出来的 bvid 会变成一个停不下来的循环。
+// # 🔴 不许递归，而这条保证是**结构**给的，不是靠判据
+//
+// 回调里调的是 `openFolderSelectNow`，**不是 `openFolderSelect`**——所以这一趟
+// 不可能再走回 `askFavoriteIDThen`，一环就到底了。
+//
+// 早一版回调里调的是 `openFolderSelect`，守卫只有 `item.Bvid == "" || isLocal`，
+// 而 `favTarget` 真正卡人的是 **`item.Source == "online"`**。于是「Source 不是
+// online、Bvid 非空、Sid 为空」的那一项会这样：
+//
+//	openFolderSelect → favTarget 失败 → askFavoriteIDThen → 问出 Sid 填上
+//	  → openFolderSelect → **favTarget 还是失败（Source 没变）**
+//	  → askFavoriteIDThen → 这一趟 Sid 已经有了，ResolveFavoriteID **同步**返回
+//	    → openFolderSelect → ……
+//
+// 零网络开销的紧递归，几百毫秒内把 goroutine 栈撑到 1 GB，`fatal error: stack
+// overflow`——**Go 里那个不可 recover，整个进程死掉**。今天所有 Item 都填了
+// Source，所以够不着；那是运气，不是设计。
+//
+// 下面那道 `Source != "online"` 的守卫是第二道（它让上面那种条目当场就说清），
+// 但**保证不靠它**——把它删掉也不会有递归。
 func (s *Shell) askFavoriteIDThen(item app.Item) {
-	if item.Bvid == "" || item.IsLocal() {
+	if item.Source != "online" || item.Bvid == "" {
 		s.addToast("这一首还没有可以收藏的身份")
 		return
 	}
 	s.app.ResolveFavoriteID(item, func(fixed app.Item, err error) {
-		if err != nil {
+		switch {
+		case err != nil:
 			s.addToast("收藏不了：" + bili.Friendly(err))
-		} else {
-			s.openFolderSelect(fixed)
+		default:
+			rid, typ, ok := favTarget(fixed)
+			if !ok {
+				// 问回来了还是认不出（协议变了，或者 B 站给了一个空 id）。
+				// **到这里就停**——再调 `openFolderSelect` 就是那条死循环。
+				s.addToast("这一首还没有可以收藏的身份")
+				break
+			}
+			s.openFolderSelectNow(fixed, rid, typ)
 		}
 		s.wake.invalidate()
 	})

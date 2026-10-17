@@ -187,26 +187,19 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic) {
 			s.viewDynamicPics(c, d.Pics)
 		}
 
-		// ④ 那一排动作：赞 +（投稿型的）下载音频 / 下载视频。
-		//
-		// ⚠️ **「下一首播放」不在这四项里**：队列现在只有「追加到队尾」和
-		// 「从这一首往后换队列」两种（`app.Enqueue` / `app.PlayFrom`），没有
-		// 「插到当前这一首后面」。那一项是 A9 那张票的事；在它落地之前摆一个
-		// 按下去只是加到队尾的按钮，用户会以为它排在了正在放的那首后面——
-		// 而它排在队尾。这比不摆更坏（见 `later.go` 里「清除已看完」为什么
-		// 故意不摆，同一个理由）。
+		// ④ 那一排动作：赞 +（投稿型的）下一首播放 / 下载音频 / 下载视频。
 		s.viewDynamicActions(c, d)
 	})
 }
 
 // viewDynamicActions 是卡片最下面那一排按钮。
 //
-// 项照 Biu 的 `src/pages/dynamic-feed/item.tsx:112`（点赞）、`:134`/`:135`
-// （下载音频 / 下载视频）：
+// 项照 Biu 的 `src/pages/dynamic-feed/item.tsx:112`（点赞）、`:118`（下一首播放）、
+// `:134`/`:135`（下载音频 / 下载视频）：
 //
 //   - **赞**对三种卡片都有——B 站给纯文字和图文也评赞。
-//   - **下载**只有投稿型有：B 站音乐库里的音频条目没有取流通道（Biu 那边的
-//     下载按钮也只挂在视频上），摆出来按不动。
+//   - 其余三项只有投稿型有：纯文字和图文里没有可放的东西（B 站音乐库里的音频
+//     条目还没有取流通道），摆出来按不动。
 func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 	t := c.Theme()
 	ui.Row(c).Key("dyn-acts:" + d.ID).Gap(6).Children(func() {
@@ -229,6 +222,9 @@ func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 		if d.Kind != bili.DynamicVideo || d.Video == nil {
 			return
 		}
+		if ui.Button(c, "下一首播放").FontSize(12).TextColor(t.TextMuted).Clicked() {
+			s.playNextFromDynamic(d.Video)
+		}
 		// ⚠️ 下载走 `downloadLater`（异步补 cid）：动态接口给的稿件**不带
 		// cid**（`major.archive` 里没有这个字段），而下载按分 P 存文件。
 		if ui.Button(c, "下载音频").FontSize(12).TextColor(t.TextMuted).Clicked() {
@@ -238,6 +234,21 @@ func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 			s.downloadLater(dynVideoItem(d.Video), true, "下载视频")
 		}
 	})
+}
+
+// playNextFromDynamic 是动态卡片上的「下一首播放」。
+//
+// ⚠️ **不许换成 `Enqueue`**：那个接在**队尾**，而这一项的字面意思是「下一首就
+// 放它」。用户按这一下是因为他听见歌不好，想把某支片子插到眼前这一首后面，
+// 而它在队尾的话他得等到整张列表放完——症状是「按了，什么也没发生，直到一小时后」。
+func (s *Shell) playNextFromDynamic(v *bili.DynamicArchive) {
+	if err := s.app.EnqueueNext(dynVideoItem(v)); err != nil {
+		s.addToast("放不了这一首：" + err.Error())
+		return
+	}
+	// 这一句在两种情况下都是真的：队列里已经有歌时它排在下一位，而队列原本是
+	// 空的时候它就是接下来要放的那首（`EnqueueNext` 那时会直接起播）。
+	s.addToast("已经加进队列，下一首就放它")
 }
 
 // dynamicPicsPerRow 是图文的图一行摆几张。Biu 是 `w-1/3`（一行三张，

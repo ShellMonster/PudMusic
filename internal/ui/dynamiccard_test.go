@@ -504,3 +504,41 @@ func TestDownloadingFromADynamicReallyReachesTheQueue(t *testing.T) {
 		t.Errorf("队列里那一项是 %q，want BV1play|555（cid 是它自己问来的）", got)
 	}
 }
+
+// TestPlayNextFromADynamicLandsOnTheNextSlot 「下一首播放」不是「添加到队尾」。
+//
+// 这一条盯的就是那个分界：按钮上写的是「下一首」，而用户按它是因为想在这支
+// 片子之后立刻听它。接成 `Enqueue`（接队尾）的症状是「按了，什么也没发生，
+// 直到整张动态队列放完」。
+func TestPlayNextFromADynamicLandsOnTheNextSlot(t *testing.T) {
+	_, tt, a := dynamicCardShell(t, newUIExplore(t), uiDynamicArchive("v1", "BV1next"))
+
+	// 队列里先有一首在放。
+	a.Queue().Reset(app.Item{Source: "online", Type: "mv", Bvid: "BVplaying", Title: "正在放的那首"})
+	before := a.Queue().Items()
+
+	if err := tt.Click("下一首播放"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+
+	after := a.Queue().Items()
+	if len(after) != len(before)+1 {
+		t.Fatalf("按了之后队列里有 %d 首，want %d（多了一首）", len(after), len(before)+1)
+	}
+	// 位置：正在放的那首后面就是它，**不是队尾**。
+	if after[0].Bvid != "BVplaying" {
+		t.Fatalf("正在放的那首被顶走了，队头是 %q", after[0].Bvid)
+	}
+	if after[1].Bvid != "BV1next" {
+		t.Errorf("第 2 首是 %q，want BV1next（下一首就该是它）", after[1].Bvid)
+	}
+}
+
+// TestATextDynamicHasNoPlayNextButton 纯文字 / 图文里没有可放的东西。
+func TestATextDynamicHasNoPlayNextButton(t *testing.T) {
+	_, tt, _ := dynamicCardShell(t, newUIExplore(t), uiDynamic("t1", "纯文字的那一条"))
+	if tt.HasText("下一首播放") {
+		t.Errorf("纯文字动态上摆着「下一首播放」（那一栏里根本没有东西可放），文字有 %q", tt.Texts())
+	}
+}
