@@ -971,9 +971,20 @@ func TestTheVideoFlagSurvivesARestart(t *testing.T) {
 func TestCloseWithAQueuedTaskDoesNotHang(t *testing.T) {
 	m, err := New(Options{
 		Client: http.DefaultClient,
-		// 一直挂着：模拟「取流那一头还没回来」，也就是最容易和 Close 撞上的时刻。
-		Resolve: func(context.Context, Identity) (*Source, error) {
-			select {} //nolint:staticcheck // 这份就是要卡住，Close 能不能把它拽出来是判据
+		// 一直挂着，但**能被取消**——这才是「取流那一头还没回来」的真实样子。
+		//
+		// ⚠️ 别写成 `select {}`（连 ctx 都不看）。那样的话只要后台那条线**先**捡起了
+		// 这一项，它就卡在一个永远解不开的阻塞上，`Close` 里的 cancel 拽它不回来——
+		// 于是这条用例测的变成了「能不能取消一个不可取消的阻塞」，而不是它要问的
+		// 「Close 能不能收工」。实测那个写法下这条用例约三成概率红在
+		// 「Close 十分钟没回来」上，而代码没毛病，是这个替身造出来的死结。
+		//
+		// 改成等 ctx 之后两种时序都成立：后台先捡起 → Close 的 cancel 解开它 →
+		// `runOne` 看到 `context.Canceled` 把状态落成「暂停」；Close 先跑 → 后台那条
+		// 线直接退出，队列里那一项由 `Close` 里的 `pauseQueued` 落成「暂停」。
+		Resolve: func(ctx context.Context, _ Identity) (*Source, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
 		},
 	}, filepath.Join(t.TempDir(), QueueFileName))
 	if err != nil {

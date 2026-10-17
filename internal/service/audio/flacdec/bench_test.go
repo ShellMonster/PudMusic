@@ -44,12 +44,19 @@ func TestDecodeSpeed(t *testing.T) {
 		// 解码器的 MP4 用例在同一台机器上抢 CPU，而本包整个只跑几秒，
 		// 三轮里一轮落在干净窗口的概率还不够——实测三轮仍有大约三分之一
 		// 的整包跑会红。五轮之后没再见过。
-		for range 4 {
-			if !underRace && ratio >= c.minRatio {
-				break // 已经够了，不用再跑
-			}
-			if r, _, _, tk := decodeOnce(t, c.name); r > ratio {
-				ratio, took = r, tk
+		//
+		// ⚠️ `-race` 下**一轮都不多跑**。这一族在 `underRace` 时判据是空的
+		// （下面那个 `&& !underRace`），取五轮最快是为了「够格去判」，没有判据
+		// 的那几轮量出来的数谁也不看——而每轮是一次完整解码，五个 fixture 就是
+		// 二十五次。这曾经是 `-race` 下这个包最贵的一段开销，而它一个字都判不了。
+		if !underRace {
+			for range 4 {
+				if ratio >= c.minRatio {
+					break // 已经够了，不用再跑
+				}
+				if r, _, _, tk := decodeOnce(t, c.name); r > ratio {
+					ratio, took = r, tk
+				}
 			}
 		}
 
