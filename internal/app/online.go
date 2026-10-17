@@ -360,9 +360,18 @@ func playableOnline(it Item) error {
 
 // OnlineReady 报告这一项在线播放的身份齐了没。
 //
-// 界面层拿它判「这一行该不该摆成能放的样子」——`bili.Media.Playable` 说能放的
-// 那些，翻成 `Item` 之后都要经它再过一遍。它和 `playableOnline` 是同一个判据，
-// 分成两个是因为一个要给界面看、一个要在播放那一步报出原因。
+// ⚠️ **生产代码里目前没有一处调它**——界面层筛条目的那一步用的是
+// `bili.Media.Playable`（`itemsOfMedias`），而它在翻成 `Item` 之前就筛完了。
+// 它是给**测试**用的：那条不变量要钉的正是「`Playable` 说的和播放器认的认的是
+// 不是同一件事」，而在测试里比对的就是 `bili.Media.Playable()` 和这一步
+// （`ui.TestEveryPlayableCollectionEntryIsAcceptedByThePlayer`）。
+//
+// 留着这个导出是因为判据本身就该有一处能直接问「这一项放不放得了」的地方：
+// 将来界面真要按 `Item` 筛的时候有它可调，而今天没有调用方这件事不该写成一
+// 句「界面层拿它判……」（那句话会让下一个人去找一个不存在的调用点）。
+//
+// 它和 `playableOnline` 是同一个判据，分成两个是因为一个给断言用、一个要在
+// 播放那一步报出原因。
 func (it Item) OnlineReady() bool { return playableOnline(it) == nil }
 
 // playOnline 开一条在线流。**立刻返回**，真正的活儿在后台 goroutine 里。

@@ -125,13 +125,23 @@ func (a *App) EnqueueDownload(ctx context.Context, folder CollectionRef, medias 
 //
 // 「这一首下不了」的两种：合集 / 电影（`Playable` 判掉，它们没有音频流），
 // 以及 B 站音乐库里的音频条目（有 sid 没有 bvid，而下载按稿件存文件）。
+// ErrNoAudioDownload 是「B 站音乐库里的条目（type=12）还没有下载通道」。
+//
+// 🔴 **下载那一路是按稿件 + 分 P 取流的**（`resolveDownload` → `PlayURL(bvid, cid)`），
+// 而音乐库条目只有一个 auid（sid），没有 bvid 也没有 cid。所以这一类**现在**下不了。
+//
+// 单独一个哨兵是因为两处要说**同一句话**：批量那条（`downloadableItem`）和单首那条
+// （`downloadLater`）。两处各写一个字面量的话，改了一处另一处就开始说别的，而
+// 那是同一页上两个出口——用户对照着看会发现「同一个东西两句话」。
+var ErrNoAudioDownload = errors.New("B 站音乐库里的条目还没有下载通道")
+
 func (a *App) downloadableItem(ctx context.Context, m bili.Media) (Item, error) {
 	if !m.Playable() {
 		return Item{}, errors.New("合集和剧集那一类没有单独的音频流")
 	}
 	it := ItemOfMedia(m)
 	if it.Bvid == "" {
-		return Item{}, errors.New("B 站音乐库里的条目还没有下载通道")
+		return Item{}, ErrNoAudioDownload
 	}
 	return a.withCid(ctx, a.streamingSnapshot(), it)
 }
@@ -166,6 +176,22 @@ func (a *App) downloadLater(it Item, req download.AddRequest, done func(error)) 
 	}
 	if err := playableOnline(it); err != nil {
 		finishDownload(done, err)
+		return
+	}
+	// 🔴 **sid（音乐库）那条路在这里就拒掉，别让它走到 `withCid`**。
+	//
+	// `playableOnline` 现在放行它了——**放得出来不等于下得了**：这一路是按
+	// 稿件 + 分 P 取流的（`resolveDownload` → `PlayURL(bvid, cid)`），而音乐库条目
+	// 只有一个 auid，没有 bvid 也没有 cid。
+	//
+	// 不在这里挡的话它会一路走到 `withCid` 去问一个空稿件的分 P，问出来的是
+	// 「问不出这一集是哪一集」——而 `Friendly` 对那一句说的是「等网络好一些，
+	// 或者换个词重新搜一次」。**把一件永远不可能成功的事说成网络问题**：用户会去
+	// 查网、换网络、等它好，而真正要做的（等下载通道接上）跟网络一点关系都没有。
+	//
+	// 批量那一路早就这么拒了（`downloadableItem`），这里是同一个错在另一个出口。
+	if it.Bvid == "" {
+		finishDownload(done, ErrNoAudioDownload)
 		return
 	}
 	if a.downloadsSnapshot() == nil {
