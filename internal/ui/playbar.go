@@ -169,6 +169,7 @@ func (s *Shell) viewTrackMeta(c *ui.Context, st app.State, t *ui.Theme) {
 		if st.Artist != "" {
 			s.viewArtist(c, st, t)
 		}
+		s.viewLikeStar(c, st)
 		s.viewFavButton(c, st)
 		s.viewDownloadButton(c, st)
 	})
@@ -202,9 +203,24 @@ func (s *Shell) viewArtist(c *ui.Context, st app.State, t *ui.Theme) {
 // `State` 那一组里没有 B 站的稿件 id，而收藏夹弹窗要 avid（`favTarget`）——
 // 真拿到按钮却拿不到身份的话，用户点的是一个画在那儿的东西。
 // 取不到就**说一句**，不静悄悄地走人。
+//
+// 🔴 **已经收藏过的那一首，这个键是亮的**（主色，和赞过的星标一样，见 like.go）。
+// 它认的是 `App.LikeState().Favorited`，而那一栏有两个来源：换歌时问一次
+// `archive/relation`，以及**长按三连那一次的回包**（B 站顺手收藏了这一首，
+// 那是 `bili.TripleResult.Favorited`）。
+//
+// 为什么必须有这一栏：三连是一次「用户没按收藏键、却被收藏了」的操作。不显示它，
+// 用户在三连之后完全看不出收藏夹里多了一首——而他去一看真的有。
 func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
-	if ui.Button(c, "收藏").Width(metaBtnW).Padding(1, 6).MaxLines(1).
-		Tooltip("把这一首放进收藏夹").Clicked() {
+	faved := s.app.LikeState().Favorited
+	btn := ui.Button(c, "收藏").Width(metaBtnW).Padding(1, 6).MaxLines(1).
+		Tooltip(favTooltip(faved))
+	if faved {
+		// ⚠️ **只在这一支设颜色**：没收藏的那一支一个字都不改，好让「默认那个颜色」
+		// 继续由按钮自己决定（BMG-103 量过这个键的宽度和截断）。
+		btn = btn.TextColor(c.Theme().Accent)
+	}
+	if btn.Clicked() {
 		it, ok := s.app.PlayingItem()
 		if !ok {
 			s.addToast("这一首还没有取回来，收藏不了")
@@ -212,6 +228,14 @@ func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
 		}
 		s.openFolderSelect(it)
 	}
+}
+
+// favTooltip 是收藏键悬停时那句话。
+func favTooltip(faved bool) string {
+	if faved {
+		return "这一首已经收藏过了（点一下看收在哪一格）"
+	}
+	return "把这一首放进收藏夹"
 }
 
 // viewDownloadButton 是「下载」那个键。
@@ -361,8 +385,20 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 					PassThrough()
 			})
 		}
+
+		// 长按 2.5 秒 = 一键三连（SPEC 需求 69），500ms 起进度环。
+		//
+		// ⚠️ **它在 `Children` 里面**：环画的是「这一帧按了多久」，而那要靠
+		// `wrap.Pressed()` 问出来（见 like.go 的 viewLikeRing）。
+		s.viewLikeRing(c, wrap.Pressed())
 	})
+
 	if wrap.Clicked() {
+		// 🔴 **长按三连之后松手补发的那一次 click 必须吞掉**，否则凭空弹出全屏
+		// 播放器（原因见 like.go 文件头：Biu 那边漏了它是一次多余的赞）。
+		if s.like.swallowClick() {
+			return
+		}
 		s.openFullPlayer()
 	}
 }

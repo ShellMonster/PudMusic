@@ -65,6 +65,16 @@ type biliFixture struct {
 	// favoritedIn 是「这一首已经在哪些收藏夹里」；favoriteCalls 记下每一次写。
 	favoritedIn   []int64
 	favoriteCalls []url.Values
+
+	// 点赞那三个接口的答案（见 like_test.go 的 onLike）。
+	//
+	// relLiked/relFaved 是「赞没赞、收藏没收藏」那一问的答案；
+	// tripleBody 是三连那一趟的回包（可以改成「B 站只做成了一部分」）。
+	relLiked, relFaved bool
+	tripleBody         string
+	// likePosts 记每一次赞的 up（1 赞 / 2 取消赞），triplePosts 数三连。
+	likePosts, triplePosts int
+	lastUp                 string
 }
 
 // fixture 那一摊收藏用的固定值。
@@ -132,6 +142,15 @@ func (f *biliFixture) serve(w http.ResponseWriter, r *http.Request) {
 		f.favoriteCalls = append(f.favoriteCalls, r.PostForm)
 		f.mu.Unlock()
 		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1})
+
+	case r.URL.Path == "/x/web-interface/archive/relation":
+		f.serveArchiveRelation(w)
+
+	case r.URL.Path == "/x/web-interface/archive/like":
+		f.serveArchiveLike(w, r)
+
+	case r.URL.Path == "/x/web-interface/archive/like/triple":
+		f.serveArchiveTriple(w, r)
 
 	case r.URL.Path == "/x/web-interface/wbi/search/type":
 		f.serveSearch(w, r)
