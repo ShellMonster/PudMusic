@@ -88,12 +88,6 @@ func TestSystemAudioOutputOpens(t *testing.T) {
 
 func TestOpenRejectsWhatItCannotPlay(t *testing.T) {
 	dir := t.TempDir()
-	// 扩展名是 .flac，内容不是：这时该报「不是 FLAC 流」，而不是放一段噪声。
-	notFLAC := writeTemp(t, "bad.flac", []byte("RIFF\x00\x00\x00\x00WAVEfmt "))
-	if _, err := Open(notFLAC); err == nil {
-		t.Error("拿一个 WAV 改名叫 .flac 居然打开成功了")
-	}
-
 	junk := writeTemp(t, "junk.mp3", []byte("not audio at all"))
 	if _, err := Open(junk); err == nil {
 		t.Error("拿一个纯文本改名叫 .mp3 居然打开成功了")
@@ -102,6 +96,10 @@ func TestOpenRejectsWhatItCannotPlay(t *testing.T) {
 	if _, err := Open(filepath.Join(dir, "missing.flac")); err == nil {
 		t.Error("打开一个不存在的文件居然成功了")
 	}
+
+	// ⚠️ 「把 WAV 改名成 .flac」曾经也放在这儿，断言它打不开——那是**按
+	// 扩展名认容器**的行为。现在认的是头几个字节，那份文件是能放的，
+	// 由 `TestContentDecidesTheContainerNotTheFileName` 断。
 }
 
 // buildWAV 造一份 16 位小端 PCM 的 WAV，用来验 MyGo 自带的 WAV 那一路。
