@@ -72,6 +72,12 @@ func dragTo(t *testing.T, tt *mygoui.Tester, to float64) {
 	if !ok {
 		t.Fatalf("画面上找不到进度条，文字有 %q", tt.Texts())
 	}
+	// ⚠️ **量不出大小就直说**（`settings_page_test.go` 的 `clickSetting` 是同一个形状）。
+	// 少这一句的话，按在一个还没排好版的框上什么也不会发生，而症状报在两三步之后
+	// 「位置没变」——离真因隔了三层。
+	if bar.W <= 0 || bar.H <= 0 {
+		t.Fatalf("进度条没量出大小（%v），按不中：文字有 %q", bar, tt.Texts())
+	}
 	x := bar.X + bar.W*float32(to)
 	y := bar.Y + bar.H/2
 	tt.Press(bar.X+bar.W/2, y)
@@ -170,9 +176,27 @@ func TestDragToEndDoesNotCrash(t *testing.T) {
 
 	dragTo(t, h.tt, 1) // 一路拖到最右端
 
-	if got := h.app.Snapshot().Position; got < dur-30*time.Millisecond {
-		t.Errorf("拖到末尾之后位置是 %v，时长 %v", got, dur)
-	}
+	// ⚠️ **等条件，不要画完就读**。
+	//
+	// `ScrubEnd` 是**同步**把 `a.position` 写成那一刻的时刻的（`app.go` 里那句
+	// 「立刻把位置改过来」就是为了这个）。可是后台那个 50ms 的时钟（`App.tick`）
+	// 在**放着**的时候，每 50ms 会把 `a.position` 覆盖成**播放器自己的真实位置**
+	// ——而解码器真的跳到 4s 是要花时间的。中间那段时间里，位置是「还没跳过去的
+	// 旧值」，画完立刻读就正好读它。
+	//
+	// 量过了：拖完之后按 5ms 一采，**前 20ms 读到 0s、之后才是 4s**。满载的机器上
+	// `dragTo` 收尾那一帧更久、时钟更容易落在里面，于是读到的是
+	// 31.995464ms（同一个窗口的另一个数）——那就是「这一帧时钟赢了」的证据。
+	//
+	// 为什么只有这一条飘：`TestProgressBarDrags` 按完先 `Toggle()` 暂停了，而
+	// 暂停时 `tick` 的 `live` 是假的，那个覆盖压根不发生。
+	//
+	// 等的是结果（位置到了末尾），不是「过了几帧」也不是「过了几毫秒」：seek 真的
+	// 发生了就一定到；而它没发生（压根没按中）的话这里等不到、超时、照样红。
+	// **判据没有放宽。**
+	waitFor(t, 5*time.Second, "拖到末尾之后位置到了末尾", func() bool {
+		return h.app.Snapshot().Position >= dur-30*time.Millisecond
+	})
 	// 末尾没有声音可放，播放器应当自然停下来，而不是卡住。
 	waitFor(t, 5*time.Second, "拖到末尾后播放器停下来", func() bool {
 		h.tt.Frame()
