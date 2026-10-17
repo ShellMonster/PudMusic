@@ -2,6 +2,7 @@ package ui
 
 import (
 	"encoding/json"
+	"image/color"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -349,4 +350,69 @@ func withUserDataDir(t *testing.T, dir string) {
 	before := userDataDir
 	userDataDir = func() (string, error) { return dir, nil }
 	t.Cleanup(func() { userDataDir = before })
+}
+
+// 导入一份「深色主题 + 白色背景」的配置之后，**整个窗口真的变成深色**。
+//
+// 这一条钉的是 🔴 铁律二在**这条路上**也成立：主题是每帧开头由 `viewMain` 装的，
+// 而导入是**改设置 → invalidate → 重画**，重画的那一帧开头会读到新的设置。
+// 少了那一步的表现不是「主题不换」，是「主题悄悄跳回系统色」——不报错、不崩溃、
+// 不打日志（`theme.go` 的文件头写着这一条）。
+//
+// 判据是**像素**：只查 `BuildTheme` 的话，改设置存没存住和界面用没用上是两件事，
+// 而后者才是用户看见的那一件。
+func TestImportingADarkThemeActuallyTurnsTheWholeWindowDark(t *testing.T) {
+	// 系统是浅色，而配置要深色——两者相反，才看得出是「按设置走」还是「按系统走」。
+	tt, s, a, _ := shellOnSettings(t, app.DefaultSettings(""))
+	tt.SetDark(false)
+	tt.Frame()
+
+	// 采样点选在内容区的空白处（x=300），不落在任何一个控件上——滚一下设置页
+	// (600, 300) 就会落到某个控件的颜色上，而那一帧看着像是「主题没换」。
+	const probeX, probeY = 300, 400
+	lightBG := BuildTheme(a.SettingsSnapshot(), false).Background
+	if w := asColor(tt.Image().RGBAAt(probeX, probeY)); w != lightBG {
+		t.Fatalf("起点不是浅色（%v），这一条验不出什么：want %v", w, lightBG)
+	}
+
+	patch := filepath.Join(t.TempDir(), "biu-settings-x.json")
+	if err := os.WriteFile(patch, []byte(`{"themeMode":"dark"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.picker = &fakePicker{configPath: patch}
+
+	clickSetting(t, tt, s, "导入配置")
+	waitFor(t, func() bool { return a.SettingsSnapshot().ThemeMode == app.ThemeModeDark })
+	tt.Frame()
+
+	want := BuildTheme(a.SettingsSnapshot(), false) // 系统仍然是浅色
+	if want.Dark != true {
+		t.Fatalf("测试本身有问题：设置要深色、系统浅色，却拼出了浅色主题")
+	}
+	w := asColor(tt.Image().RGBAAt(probeX, probeY))
+	if w != want.Background {
+		t.Fatalf("导入深色主题之后画面还是 %v，want %v（这一帧的主题还是系统那份）", w, want.Background)
+	}
+
+	// 反过来：再导一份「跟随系统」并把系统外观切成深色，画面要跟着**系统**走。
+	// 这一条排除的是「界面根本不看 themeMode、一直深色」这种蒙混过关的实现。
+	follow := filepath.Join(t.TempDir(), "biu-settings-y.json")
+	if err := os.WriteFile(follow, []byte(`{"themeMode":"system"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.picker = &fakePicker{configPath: follow}
+	clickSetting(t, tt, s, "导入配置")
+	waitFor(t, func() bool { return a.SettingsSnapshot().ThemeMode == app.ThemeModeSystem })
+	tt.SetDark(true)
+	tt.Frame()
+
+	sysBG := BuildTheme(a.SettingsSnapshot(), true).Background
+	if got := asColor(tt.Image().RGBAAt(probeX, probeY)); got != sysBG {
+		t.Errorf("「跟随系统」+ 系统深色：画面是 %v，want %v", got, sysBG)
+	}
+}
+
+// asColor 把一个像素换成 ui.Color，好和 `BuildTheme` 的输出直接比。
+func asColor(p color.RGBA) mygoui.Color {
+	return mygoui.Color{R: p.R, G: p.G, B: p.B, A: p.A}
 }
