@@ -177,7 +177,7 @@ func layoutEdits(tracks []*track) {
 			t.delay, t.mediaTime, t.presDur = 0, 0, 0
 			continue
 		}
-		// 🔴 两���时长量的**单位不一样**，别混：
+		// 🔴 这两个时长的**单位不一样**，别混：
 		//
 		//	`delay` 是 `elst` 的 `segment_duration`，单位是**电影**时基
 		//	`mediaTime` 是 `elst` 的 `media_time`，单位是**这条轨自己的媒体**时基

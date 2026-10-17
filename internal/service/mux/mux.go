@@ -81,7 +81,7 @@ const maxDrift = 2 * time.Second
 // videoPath / audioPath 是下好的两条 dash 流（磁盘上的 `.m4s`）。
 // **dst 由调用方决定它是什么**：这一层直接写那个路径，写到一半失败会
 // 把它删掉（那是一份没人要的垃圾），但**改名那一下不归它管**——
-// 给它一个临时路径、由调用方改��最终名，是下载那一层的事（它还要在
+// 给它一个临时路径、由调用方改成最终名，是下载那一层的事（它还要在
 // 改名之前再看一眼那个位置上有没有别人的东西，见 `download.destToLand`）。
 func Mux(ctx context.Context, videoPath, audioPath, dst string) (*Result, error) {
 	video, err := readSource(videoPath)

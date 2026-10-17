@@ -94,7 +94,7 @@ func VideoSpecStartingLate(samples int, offsetSeconds float64) Spec {
 
 // WithCtsBias 是「每个采样的呈现偏移都偏 `bias` 个媒体刻度」。
 //
-// 音频那一条���得加 `+1024`（一帧）才像真的——AAC 编码器的 priming 就是
+// 音频那一条得加 `+1024`（一帧）才像真的——AAC 编码器的 priming 就是
 // 这么回事：解码出来的第一帧对应的是「编码器吐出来的第一帧」，它在呈现
 // 时间上要往后挪一帧。
 func (s Spec) WithCtsBias(bias int32) Spec {

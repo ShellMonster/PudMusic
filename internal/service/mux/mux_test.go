@@ -300,7 +300,7 @@ func TestSampleBytesSurviveTheMove(t *testing.T) {
 //
 // **自己算**而不是用库的现成函数，是为了这一步真的在读交织写的那三张表：
 // 采样在文件里是**交错**着的，所以偏移必须由 chunk 起点加上段内逐帧累加
-// 得出——顺��顺着读验不到任何东西。偏移错的表现是「能播、播出来是花的」。
+// 得出——顺着顺着读验不到任何东西。偏移错的表现是「能播、播出来是花的」。
 func sampleOffsets(t *testing.T, trak *mp4.TrakBox) []int64 {
 	t.Helper()
 	stbl := trak.Mdia.Minf.Stbl
@@ -581,7 +581,7 @@ func TestMuxHandlesAKeyframeBiggerThanTheCopyBuffer(t *testing.T) {
 //	错法一：列的是**非**关键帧
 //	  文件**照样能从头顺下来播**——播放器的解码会话从 0 建，一路解得下去。
 //	  但拖进度条时每一次 seek 都按 `stss` 找一个起点，而它给的是 P/B 帧：
-//	  出来的是花的，或者播放���干脆不解那一段。顺放看不出来，所以肉眼验
+//	  出来的是花的，或者播放器干脆不解那一段。顺放看不出来，所以肉眼验
 //	  「能播」验不出这个错。
 //
 //	错法二：全都不是关键帧时写成 `entry_count = 0`

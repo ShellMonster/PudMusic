@@ -109,7 +109,7 @@ func (c *fileCDN) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	c.mu.Lock()
 	// 探长度的那一发（`bytes=0-0`）**不算分块请求**——和 `cdn` 那个
-	// harness 一���。每一轮取流都要重新探一次（地址会过期、身份要再比
+	// harness 一致。每一轮取流都要重新探一次（地址会过期、身份要再比
 	// 一次），那是必然的，不该被「续传时重下了多少」这类断言算进去。
 	if rng != "bytes=0-0" {
 		c.reqs = append(c.reqs, rng)
