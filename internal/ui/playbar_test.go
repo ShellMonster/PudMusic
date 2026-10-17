@@ -163,17 +163,22 @@ func TestProgressBarDrags(t *testing.T) {
 //
 // 这条专门盯 t-0017 验过的边界：seek 到 Len() 是合法的位置，但容器层
 // 「seek 到自己的末尾」会拒绝，必须由解码器自己兜住。
+//
+// ⚠️ **不断言「拖完之后位置还在末尾」**：一首歌放完之后播放模式立刻接管
+// （这里是队列空 → 停在开头，见 `App.onTrackFinished`），而接管发生在 50ms 一
+// 次的那个 tick 上。所以拖完之后读到的是「末尾」还是「开头」要**看那一帧和
+// 那个 tick 谁先**，断它等于断一次抛硬币——它翻掉时和功能坏掉时长得一模一样。
+//
+// 假死那一半没有因此变松：下面断的是**终态**（停下来、往回拖能接着播、界面还
+// 点得动）。而真正要防的「seek 到末尾把解码器搞崩」也不用那个瞬时值来防——
+// 那会是解码 goroutine 里的 panic，它带走的是整个测试进程，这条用例自己就没了。
 func TestDragToEndDoesNotCrash(t *testing.T) {
 	h := newHarness(t)
 	h.open(t)
-	dur := h.app.Snapshot().Duration
 
 	dragTo(t, h.tt, 1) // 一路拖到最右端
 
-	if got := h.app.Snapshot().Position; got < dur-30*time.Millisecond {
-		t.Errorf("拖到末尾之后位置是 %v，时长 %v", got, dur)
-	}
-	// 末尾没有声音可放，播放器应当自然停下来，而不是卡住。
+	// 队列是空的 → 没有下一首可放 → 停下来。不是卡住。
 	waitFor(t, 5*time.Second, "拖到末尾后播放器停下来", func() bool {
 		h.tt.Frame()
 		return !h.app.Snapshot().Playing
