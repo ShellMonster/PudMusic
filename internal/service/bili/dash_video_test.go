@@ -23,12 +23,7 @@ import (
 	"time"
 )
 
-// dashVideoItem 造一条 `dash.video[]` 项。
-//
-// ⚠️ 叫 `dashVideoItem` 而不是 `videoItem`：搜索那条路上（`search_test.go`）
-// 也有一个 `videoItem`，那是**一条视频搜索结果**（bvid + 标题），形状完全不同。
-// 同名会直接编译不过——而两个函数一个造搜索结果、一个造 dash 流，混在一起看
-// 只会更糊涂。
+// videoItem 造一条 `dash.video[]` 项。
 func dashVideoItem(id, bandwidth, w, h int, url string) map[string]any {
 	return map[string]any{
 		"id": id, "bandwidth": bandwidth, "codecs": "avc1.640028",

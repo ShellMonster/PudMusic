@@ -1,4 +1,4 @@
-// 启动时的数据升级：schema 号 + 迁移链 + 迁移前备份 + 多文件一致性 + 降级快照。
+// 启动时的数据升级，以及从 Biu 的首次导入。**必须是最先跑的那一件。**
 //
 // # 为什么在所有 Mount 之前
 //
@@ -12,17 +12,21 @@
 //   - **只读判断要在迁移之后**。一份来自更新的版本的文件，挂载时判出只读、
 //     一个字都不写；迁移如果在挂载之后跑，它就已经把它按旧语义改过了。
 //
-// # 四件原子写管不了的事
+// # 两件事，风险完全不同
 //
-// 临时文件 + rename 只保证「写到一半被断电」不会留下半个文件。它不管 schema
-// 版本、迁移失败怎么办、版本回退、多文件一致性。这四件在 `internal/app/upgrade.go`
-// （事务那一半）与各份文件自己的迁移链里，见那两个文件的头。
+// | | 从 Biu 首次导入 | MyGo N→N+1 升级 |
+// |---|---|---|
+// | 触发 | 这台机器上有 Biu 的数据，而**本应用一个数据文件都没有** | 总标记说数据还是旧版 |
+// | 风险 | 低。只读别人的文件，写的是自己的目录 | 高。写坏的是用户自己的数据 |
+// | 失败 | 逐项跳过并如实报告（`app.Imported.Notes`） | 整轮回滚，**原文件一个字节不少**，并报错 |
 //
-// # 这一票的范围
+// 详见 `internal/app/upgrade.go`（事务那一半）和 `internal/app/biuimport.go`
+// （导入那一半）的文件头。
 //
-// 这里只有「MyGo N→N+1 升级」。**从 Biu 首次导入**是同一件工作的另一半
-// （`Biu 那边迁过来的数据也得落到这一套 schema 上」），它在另一张票里，
-// 接缝就是这里的 `MountMigration`——它跑完升级之后要不要接着导入，由那边决定。
+// # 凭据不迁
+//
+// Biu 的 `user-login-info.json` 是加密的（conf 的 `encryptionKey`），我们不搬，
+// 而是在报告里说一句「请重新登录」。见 `app.BiuScan.LoggedIn`。
 package ui
 
 import (
@@ -38,10 +42,10 @@ import (
 	"github.com/egoist/mygo"
 )
 
-// MigrationReport 是这一次启动升级做了什么。
+// MigrationReport 是这一次启动做了/没做什么。
 //
-// 界面拿它做两件事：设置页上把「升了什么」如实摆出来，以及首帧弹一条 toast。
-// **宁可不弹，也不要说错**——「已升到 v1」和「没升过」在用户看来是一回事，
+// 界面拿它做两件事：设置页上把「导了些什么」如实摆出来，以及首帧弹一条 toast。
+// **宁可不弹，也不要说错**——「已导入 0 条」和「没导入过」在用户看来是一回事，
 // 而前者是错的。
 type MigrationReport struct {
 	// Upgraded 报这一轮升级做了什么。
@@ -49,25 +53,34 @@ type MigrationReport struct {
 	// 三种取值：
 	//
 	//   - "" —— 没有要升的（数据已经是最新，或第一次运行）
-	//   - "数据已升到 v1（动了：settings.json、shortcuts.json）"
+	//   - "已把设置、快捷键、搜索历史、下载队列升到 v1"
 	//   - 一句错（`UpgradeErr` 非 nil），末尾带「原来的数据一个字节都没少」
 	Upgraded string
 	// UpgradeErr 是升级的错。非 nil 时 `Upgraded` 里那句话就是它。
 	UpgradeErr error
 	// UpgradedFiles 是这一轮真的动了哪几份文件（按文件名）。
 	//
-	// 「真的动了」= 备份里那份和现在那份**内容不同**。一份 v1 的文件迁到 v1
+	// 「真的动了」= 备份里那份和现在这份**内容不同**。一份 v1 的文件迁到 v1
 	// （链是空的）不算动过——报成动过了，用户会以为应用改了他的数据。
 	UpgradedFiles []string
 	// Rollback 是「这一轮回滚了，原文件恢复了」。用户该知道数据没被改。
 	Rollback bool
 	// ReadOnly 是「这个数据目录来自更新的版本」——**整个目录一个字节都不许写**。
 	//
-	// ⚠️ 这不只是升级这一半的事：**从 Biu 导入是另一条写这个目录的路**，而它的
-	// 守门只有一个「目录里有没有我们自己的数据」。一个只装得下 `data-version.json`
-	// 的目录对那个守门是空的，于是用户换回旧版之后一启动，Biu 的数据就被灌进了
-	// 那个「一个字都不写回去」的目录。所以这个判决必须交给调用方。
+	// ⚠️ 这不只是升级那一半的事：**导入是另一条写这个目录的路**，而
+	// `firstBiuImport` 的守门只有一个「目录里有没有我们自己的数据」。一个只装得下
+	// `data-version.json` 的目录对那个守门是空的，于是用户换回旧版之后一启动，
+	// Biu 的数据就被灌进了那个「一个字都不写回去」的目录。
+	//
+	// 所以这个判决从 `runUpgrade` 一路传到导入两条路（自动 / 设置页上的按钮），
+	// 三处都先问它。
 	ReadOnly bool
+
+	// Imported 是首次导入的结果。零值表示这次没导入过（已经导过了，或者这台
+	// 机器上没有 Biu）。
+	Imported app.Imported
+	// BiuDirs 是这台机器上还找得到的 Biu 数据目录，设置页的「从 Biu 导入」用。
+	BiuDirs []string
 }
 
 // migration 是最近一次的报告。进程里通常只有一份。
@@ -76,20 +89,23 @@ var migration struct {
 	r  MigrationReport
 }
 
-// MountMigration 跑一次数据升级。**必须在所有 Mount 之前调。**
+// MountMigration 跑一次数据升级与首次导入。**必须在所有 Mount 之前调。**
 //
-// 返回的 error 是「有东西没办成」。它**不阻止程序起来**：拿不到目录就什么都不做，
-// 用户照常用这个应用（设置存不住这件事界面上会另有提示，见 `reportSettingsError`）。
+// 返回的 error 是「有东西没办成」——升级失败、导入有跳过的项。它**不阻止程序
+// 起���**：拿不到目录就什么都不做，用户照常用这个应用（设置存不住这件事界面上会
+// 另有提示，见 `reportSettingsError`）。
 func MountMigration() error {
 	dir, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil {
-		log.Printf("biu: 拿不到应用数据目录，这次没法升级数据：%v", err)
+		log.Printf("biu: 拿不到应用数据目录，这次没法升级数据、也没法导入：%v", err)
 		return err
 	}
 
 	var rep MigrationReport
 	upgradeErr := runUpgrade(dir, &rep)
 	rep.UpgradeErr = upgradeErr
+	rep.BiuDirs = app.FindBiuDirs()
+	rep.Imported = firstBiuImport(dir, rep.BiuDirs, upgradeErr, rep.ReadOnly)
 
 	migration.mu.Lock()
 	migration.r = rep
@@ -120,8 +136,8 @@ func runUpgrade(dir string, rep *MigrationReport) error {
 		// 「来自更新的版本」不是失败，是用户把应用换回了旧版。这种情况下**一
 		// 个文件都不碰**：事务压根没开，`rep.Upgraded` 记成一句话让用户看见。
 		//
-		// ⚠️ `rep.ReadOnly = true` 是给**别的写这个目录的路**看的（从 Biu 导入）。
-		// 不能只把这句话写给用户看——「一个字都不写回去」这个承诺，那些路也得兑现。
+		// ⚠️ `rep.ReadOnly = true` 是给**导入那两条路**看的。不能只把这句话写给
+		// 用户看——「一个字都不写回去」这个承诺，导入那条路也得兑现。
 		if errors.Is(err, app.ErrUpgradeFromNewer) {
 			rep.ReadOnly = true
 			rep.Upgraded = "数据目录来自更新的版本，这一版一个字都不会写回去。"
@@ -184,30 +200,136 @@ func runUpgrade(dir string, rep *MigrationReport) error {
 	return nil
 }
 
-// announceMigration 第一帧把「升级做了什么」弹成一条 toast。**只弹一次。**
+// firstBiuImport 第一次启动且本应用还没有任何数据时，自动从 Biu 导入一次。
 //
-// 挂在 `viewMain` 的第一帧而不是 `MountMigration` 里：后者跑在 `main` 里、界面
-// 还没建，而 toast 是界面的一部分。
+// 三道门，每一道都拦得住「往一个不该写的数据目录里写」：
 //
-// 只弹**用户需要知道**的那两类：升级失败（「原来的数据一个字节都没少」），以及
-// 数据目录来自更新的版本（这一版不会写它）。一次顺顺利利的升级**不弹**——用户
-// 没要求知道「数据已是最新」，弹一条「已升到 v1」是在打扰他，而真出事时那条提示
-// 混在一堆无害提示里就不显眼了。
+//  1. **目录来自更新的版本**（`readOnly`）——用户把应用换回了旧版。整个目录一个
+//     字节都不该动，写进去的 v1 设置会毁掉他升级之后的设置。升级那一半已经判出
+//     这一条（`runUpgrade` 的 `ErrUpgradeFromNewer`），**那个判决必须传到这里**：
+//     它不传的话，守门只剩 `hasAnyOwnFile`，而一个只装得下 `data-version.json`
+//     的目录对它是空的，于是导入照跑不误。
+//  2. **升级失败**——那时的目录可能正处于「回滚了但标记说不清」的状态，在上面写
+//     东西是给一个说不清的状态再加一层说不清。
+//  3. **本应用已经有自己的数据**——用户已经用过一阵子了，就不要抢他的数据；他要
+//     的话设置页上还有「从 Biu 导入」那个按钮。
 //
-// ⚠️ 界面线程调（`viewMain` 里），`addToast` 自己有锁。
-func (s *Shell) announceMigration() {
-	if s.migrationAnnounced {
-		return
+// **找到第一个有东西的就停**，不往下试下一个目录。哪怕这一份是**部分**成功的
+// （设置进来了、快捷键那份认不出形状），成果连同报告一起带回去——拿第二个目录
+// 接着导，是拿一份正式版的数据去盖掉刚从正式版导进来的设置。
+func firstBiuImport(dir string, dirs []string, upgradeErr error, readOnly bool) app.Imported {
+	if readOnly || upgradeErr != nil {
+		return app.Imported{}
 	}
-	s.migrationAnnounced = true
+	if hasAnyOwnFile(dir) {
+		return app.Imported{}
+	}
+	for _, d := range dirs {
+		// **不看 err**：err 只是「这一项没带过来」，而已经带过来的那几样是要
+		// 留下的。拿 err==nil 当判据的话，部分成功会被当成完全失败丢掉，然后
+		// 循环继续——那是本函数原来最大的一个洞。
+		r, _ := importFromBiu(d, dir)
+		if r.Any() {
+			return r
+		}
+	}
+	return app.Imported{}
+}
 
-	rep := LastMigration()
-	switch {
-	case rep.UpgradeErr != nil:
-		s.addToast("数据升级失败：" + rep.Upgraded)
-	case rep.ReadOnly:
-		s.addToast("数据目录来自更新的版本，这一版一个字都不会写回去")
+// hasAnyOwnFile 报本应用的数据目录里是不是已经有**我们自己的数据**。
+//
+// ⚠️ **不算总控标记**（`data-version.json`）。`MountMigration` 是先升级、后判断要不要
+// 导入的，而第一次运行时那一轮升级会**写下标记**（哪怕四份文件一个都不存在）——
+// 把它算成「已有数据」的话，自动导入在第一次运行时永远被跳过，而那恰恰是它唯一
+// 该跑的场景。
+//
+// 判据是那四份真实数据：设置、快捷键、搜索历史、下载队列。用户动过任何一样，
+// 就说明他已经用了一阵子了。
+func hasAnyOwnFile(dir string) bool {
+	for _, n := range []string{
+		app.SettingsFileName, shortcutFileName,
+		searchHistoryFileName, download.QueueFileName,
+	} {
+		if _, err := os.Stat(filepath.Join(dir, n)); err == nil {
+			return true
+		}
 	}
+	return false
+}
+
+// importFromBiu 从一个 Biu 目录导入，设置 / 下载记录 / 歌词缓存在 `app` 那边写，
+// 快捷键在这一层写（那份存储的代码在这一层，见 `app.BiuScan.Shortcuts`）。
+//
+// 返回的 `Imported` **总是可用**：即使每一项都失败，它也有 `Dir` 和 `Notes`
+// （「没带过来的原因」）。err 只在「一个字节都没写下去」时非空——
+// `firstBiuImport` 用 `r.Any()` 而不是 err 判成功，正是靠这一点。
+func importFromBiu(biuDir, dir string) (app.Imported, error) {
+	scan, err := app.ScanBiu(biuDir)
+	if err != nil {
+		return app.Imported{}, err
+	}
+	if scan == nil {
+		return app.Imported{}, nil
+	}
+	r, importErr := scan.Import(dir)
+
+	if scan.HasShortcuts {
+		if err := importShortcuts(scan.Shortcuts, shortcutPath(dir)); err != nil {
+			if errors.Is(err, errShortcutsFromNewer) {
+				r.Notes = append(r.Notes,
+					"你现在的快捷键来自更新的版本，这一版一个字都不会写回去，所以快捷键没有带过来。")
+			} else {
+				r.Notes = append(r.Notes, fmt.Sprintf("快捷键没能带过来：%v", err))
+			}
+		} else {
+			r.Shortcuts = true
+		}
+	}
+	return r, importErr
+}
+
+// importShortcuts 把 Biu 的快捷键文件写进我们自己的那份。
+//
+// **目标那一份来自更新的版本时返回 `errShortcutsFromNewer` 并且不碰它**——理由和
+// 设置那边一样（`app.importSettings`）：那个目录是「用户换回了旧版」的证据，
+// 往里面写一份当前版本的快捷键会毁掉他升级之后的东西。
+//
+// 目标文件存在且是当前版本时先挪成 `.bak`：用户可能已经在这个应用里改过快捷键了。
+func importShortcuts(raw []byte, path string) error {
+	if from, err := probeSchemaVersionAt(path); err == nil && from > shortcutSchema {
+		return fmt.Errorf("%w：%s 是 v%d 的，这一版只到 v%d",
+			errShortcutsFromNewer, filepath.Base(path), from, shortcutSchema)
+	}
+
+	_, s, ok, err := probeShortcuts(raw)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("认不出是快捷键文件（顶层没有 shortcuts）")
+	}
+	from, err := probeSchemaVersion(raw)
+	if err != nil {
+		return err
+	}
+	if from > shortcutSchema {
+		return fmt.Errorf("Biu 那份是 v%d 的，这一版只到 v%d", from, shortcutSchema)
+	}
+	if err := runShortcutMigrations(&s, from); err != nil {
+		return err
+	}
+	// 补上文件里没有的那几条命令：加了新命令之后老用户的文件里没有它，
+	// 不补的话设置页上那一条就整个消失（`mergeMissing`）。
+	s = s.mergeMissing(defaultShortcutSettings())
+
+	if _, err := os.Stat(path); err == nil {
+		backupShortcuts(path)
+	}
+	b, err := marshalShortcutFile(s)
+	if err != nil {
+		return err
+	}
+	return writeShortcutsAtomic(path, b)
 }
 
 // joinNames 把文件名列表连成一句人话。
@@ -226,4 +348,38 @@ func joinNames(names []string) string {
 		out += n
 	}
 	return out
+}
+
+// announceMigration 第一帧把「启动时做了什么」弹成一条 toast。**只弹一次。**
+//
+// 挂在 `viewMain` 的第一帧而不是 `MountMigration` 里：后者跑在 `main` 里、界面
+// 还没建，而 toast 是界面的一部分。
+//
+// 只弹「**需要用户做事**」的那一类：
+//
+//   - 升级失败（「原来的数据一个字节都没少」）
+//   - 自动导入带过来的东西里有需要他去处理的（重新登录、什么也没带过来）
+//
+// 一次成功的、顺顺利利的升级不弹——用户没要求知道「数据已是最新」，弹一条
+// 「已升到 v1」是在打扰他。
+//
+// ⚠️ 界面线程调（`viewMain` 里），`addToast` 自己有锁。
+func (s *Shell) announceMigration() {
+	if s.migrationAnnounced {
+		return
+	}
+	s.migrationAnnounced = true
+
+	rep := LastMigration()
+	switch {
+	case rep.UpgradeErr != nil:
+		s.addToast("数据升级失败：" + rep.Upgraded)
+	case rep.Imported.Any(), len(rep.Imported.Notes) > 0:
+		if !rep.Imported.Any() {
+			s.addToast("没从 Biu 那里带过来任何东西")
+			return
+		}
+		// 「请重新登录」那句一定要在这一条里，不只是在设置页上。
+		s.addToast(biuImportToast(rep.Imported))
+	}
 }
