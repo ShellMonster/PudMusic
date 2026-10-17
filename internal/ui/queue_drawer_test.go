@@ -487,6 +487,9 @@ func TestQueueRowMenuItemsReallyDoTheirThing(t *testing.T) {
 		if n := len(h.app.DownloadSnapshots()); n != 1 {
 			t.Errorf("下载队列里有 %d 个任务，want 1", n)
 		}
+		// 队列不等它下完（取流那一头本票没挂），但也别留一条 Queued 的任务给
+		// Close 去等——见 mountDownloads 那段注释。
+		h.app.ClearDownloads()
 	})
 
 	t.Run("从列表删除", func(t *testing.T) {
@@ -533,6 +536,17 @@ func TestQueueRowMenuSaysExactlyWhyTheOtherTwoAreOff(t *testing.T) {
 
 // mountDownloads 把下载挂上（真实入口是 `download_mount.go`）。不挂的话
 // `App.Download` 回「下载还没接上」，那验的是「没挂」不是「菜单接上了」。
+//
+// ⚠️ **挂完立刻排一条 cleanup 把队列清空**：cleanup 是后进先出的，所以它跑在
+// `newHarness` 登记的 `app.Close` **之前**。不清的话，队列里躺着一条 Queued 的
+// 任务，而 `app.Close` → `downloads.Close` 会等后台那条线退出——那条线此时正卡在
+// 一个活锁里（`download.(*Manager).loop` 的内层循环不认 `ctx.Done()`，而
+// `runOne` 见到 `m.closed` 会原样返回、不改任务状态，于是它一直转、一直返回同一
+// 条任务），`Close` 就永远等不到它。窗口很窄但实测会中：满负载时这个包会卡满 10
+// 分钟然后超时死掉。
+//
+// 上游那个活锁是 `internal/service/download` 的事（#71 那一票的地界），这里只是
+// 别踩它。
 func mountDownloads(t *testing.T, a *app.App) {
 	t.Helper()
 	dir := t.TempDir()
@@ -543,6 +557,7 @@ func mountDownloads(t *testing.T, a *app.App) {
 	}); err != nil {
 		t.Fatalf("挂下载：%v", err)
 	}
+	t.Cleanup(a.ClearDownloads)
 }
 
 // chooseQueueItem 右键 title 那一行，再从菜单里选 label 那一项。
