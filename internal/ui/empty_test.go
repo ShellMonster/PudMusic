@@ -74,7 +74,9 @@ func TestSpecEmptyStates(t *testing.T) {
 				openATrack(t, s)
 			}
 			s.navigate(c.target)
-			tt.Frame()
+			// ⚠️ 搜索页那一条要多等几帧：结果是异步回来的，「画不画空状态」
+			// 这个判断读的是上一帧的状态（理由见 settleText）。
+			settleText(t, tt, c.e.Title)
 
 			if !tt.HasText(c.e.Title) {
 				t.Fatalf("%s 的 %q 没画出来，文字有 %q", c.what, c.e.Title, tt.Texts())
