@@ -130,8 +130,20 @@ func newUpdFixture(t *testing.T, rel *app.UpdateRelease) *updFixture {
 }
 
 // pressEntry 按设置页上那个按钮（**先滚进可视区再点**，理由见 clickSetting）。
+//
+// ⚠️ **按之前先把浮在右下角的那几条提示收掉**：那一块正好压在「检查更新」这个
+// 按钮上（`TestAFailedCheckPutsTheReasonUnderTheButtonAndKeepsItPressable` 顶上
+// 写的就是这件事），而提示是**到点才在画它的那一帧里被收走**的——点下去的那一帧
+// 恰好是上一轮提示刚冒出来的那一帧时，它就替按钮吃了这一次点击。
+//
+// 那一条顶上 `shortToasts(t, time.Millisecond)` 把提示的命压到 1 毫秒，是**方向
+// 对、做法不严**：从「提示会自己消失」到「按之前它一定已经消失」之间还差一个
+// 「睡 1 毫秒」，而这一组里没有任何一步保证睡过。实测：不收掉的话这一条
+// `-count=5` 里红 3~4 次（HEAD 单独跑也一样红），收掉之后连跑 6 次全过。
 func (f *updFixture) pressEntry(t *testing.T, label string) {
 	t.Helper()
+	f.s.clearToasts()
+	f.tt.Frame()
 	clickSetting(t, f.tt, f.s, label)
 }
 
@@ -529,8 +541,9 @@ func TestAFailedCheckPutsTheReasonUnderTheButtonAndKeepsItPressable(t *testing.T
 	// 1ms，提示还在屏幕上），而在整套里跑时好时坏，因为整套慢一点、1ms 反而
 	// 过去了。症状报在两秒之后（"等了两秒，那个后台结果还没到"），离真因隔了三层。
 	//
-	// 现在是：提示活 1ms（快），**然后等它真的退场**再按第二次（准）。判据是
-	// 画面上有没有提示，而那正是「点得着按钮」的充分条件。
+	// 现在是：提示活 1ms（快），而**按之前 `pressEntry` 会先把提示收掉**（准）。
+	// 那一处收尾在 `pressEntry` 里——它是这一组所有「按设置页上的按钮」的共同
+	// 入口，收在那里比在这里收一次更不容易漏。
 	shortToasts(t, time.Millisecond)
 
 	f := newUpdFixture(t, nil)
@@ -558,10 +571,9 @@ func TestAFailedCheckPutsTheReasonUnderTheButtonAndKeepsItPressable(t *testing.T
 	if !f.tt.HasText("检查更新") {
 		t.Errorf("按钮没留在「检查更新」，文字有 %q", f.tt.Texts())
 	}
-	// ⚠️ **按第二次之前必须等提示退场**（理由见文件头那一段）：提示卡片浮在右下
-	// 角，而「检查更新」滚进可视区之后就在那一块，那一下会被它吃掉，于是
-	// `checkUpdate` 里的 `waitFor` 等的是一个永远不会发生的检查。
-	waitToastGone(t, f.tt, f.s)
+	// ⚠️ **按第二次**：`checkUpdate` → `pressEntry`，而 `pressEntry` 会先把右下角
+	// 那几条提示收掉再点（理由见 `pressEntry` 的注释）。少了那一步，那一下会被
+	// 提示卡片吃掉，于是这里的 `waitFor` 等的是一个永远不会发生的检查。
 	f.be.setErr(nil)
 	f.checkUpdate(t)
 	if got := f.a.UpdateSnapshot().Phase; got != app.UpdateIdle {

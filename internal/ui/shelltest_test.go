@@ -446,25 +446,3 @@ func waitPixel(t *testing.T, tt *mygoui.Tester, x, y int, want color.RGBA, what 
 	t.Errorf("%s：画面 (%d,%d) 那个点是 %v，want %v", what, x, y, got, want)
 	return got
 }
-
-// waitToastGone 等右下角那些提示**真的**退场了。
-//
-// ⚠️ 不要用「把存活时间改短 + 睡一下」代替它。提示是浮在右下角的一层，它盖住
-// 设置页上滚到底部的那几行——「检查更新」那个按钮就在那儿。于是「赌它已经过期」
-// 就是在赌机器够不够慢：实测同一个测试在整套里跑时好时坏，单独跑 30 次挂 28 次
-// （快的机器上，从「画完那一帧」到「按第二次按钮」不到 1ms，提示还在屏幕上，
-// 那一下点在了提示卡片上，被它吃掉了——而症状是「等了两秒，那个后台结果还没
-// 到」，离真正的原因隔了三层）。
-//
-// 判据用 `visibleToasts`（viewToasts 画的就是它）而不是「按毫秒推算」：这一条
-// 等的正是**画面上还有没有提示**，而那正是「点得着按钮」的充分条件。
-func waitToastGone(t *testing.T, tt *mygoui.Tester, s *Shell) {
-	t.Helper()
-	waitFrames(t, tt, "右下角的提示退场", func() bool { return len(s.visibleToasts()) == 0 })
-	// 再画一帧再问一次：visibleToasts 是在 viewToasts 里读的，那一帧之前收掉的
-	// 条目，画面上要再过一帧才真的没有。
-	tt.Frame()
-	if n := len(s.visibleToasts()); n != 0 {
-		t.Fatalf("提示退场之后又冒出 %d 条，文字有 %q", n, tt.Texts())
-	}
-}

@@ -6,10 +6,16 @@
 // 「流行」Tab 上**（上游 `index.tsx:295` 的 `{activeTab === "pop" && <NewMusicTop …
 // />}`），另外两个 Tab 上没有它。
 //
-// **还没有歌**：B 站的推荐接口还没接（PLAN 阶段 5 的 P-08 起），所以三个 Tab 的
-// 列表和那一块网格现在都是空的。空着的时候画的是 `routes` 表里 `/` 那一条的空
-// 状态（`viewEmpty`），不是三个列表各自那句「这里还没有歌」——那句话只说这一屏
-// 是空的，没说怎么才能不空，而 `routes` 表里这一条两句话都在。
+// 三档的内容是**接上 B 站的推荐接口**之后拉回来的（取数那一摊在
+// homepage_feed.go，服务层在 `service/bili/recommend.go`）。**没登录时照拉**：
+// 三个接口不登录都给公开的那一批（分区推荐给的是热门，音乐榜和新歌速递本来
+// 就是公开榜），所以这一页不因为没登录就换成一句「请先登录」——理由和那一
+// 票写下来的取舍见 `app/recommend.go` 的「未登录时显示什么」那一段。
+//
+// 一档都还没拉到、**而且也没有失败**的时候（刚拉完 B 站给了空的，或者压根
+// 没挂上 B 站客户端），画的是 `routes` 表里 `/` 那一条的空状态（`viewEmpty`），
+// 不是三个列表各自那句「这里还没有歌」——那句话只说这一屏是空的，没说怎么
+// 才能不空，而 `routes` 表里这一条两句话都在。
 //
 // 🔴 铁律二：这一页的 view **不许**把 `SetTheme` 放到别的地方调，见
 // `viewHome` 开头那一行和 theme.go。
@@ -57,8 +63,8 @@ const homePopTab = 2
 
 // homeSongs 是首页这一屏要画的两摊歌。
 //
-// 现在没有任何地方填它（B 站接口还没接）：留着这个形状，是因为接上接口的那一
-// 张只需要在拿到结果之后调一次 `homePage.SetSongs`，页面结构一个字都不用改。
+// 歌是 `homePage.feed` 拉回来的（见 homepage_feed.go），外部塞进来的走
+// `SetSongs`（测试和还没接上的环境用）。
 type homeSongs struct {
 	// tabs 是三个 Tab 各自的推荐单，下标对着 homeTabs。
 	tabs [homeTabCount][]list.Music
@@ -85,6 +91,14 @@ type homePage struct {
 	// songs 是这一屏要画的歌，由 SetSongs 换。三个列表和那一块网格都读它。
 	songs homeSongs
 
+	// feed 是四摊取数的状态（三个 Tab + 新歌速递）和那个信箱，见
+	// homepage_feed.go。
+	feed homeFeed
+
+	// loads 是「去拉」的那几个活儿（接线在 Shell 那一层，见 homepage_feed.go
+	// 的 homeLoads）。
+	loads homeLoads
+
 	// tab 是现在选中的那个 Tab，从 0 起，对着 homeTabs。
 	//
 	// ⚠️ 它就是 `ui.Tabs` 直接写的那一个 int——框架把点中的下标写进来，我们不再
@@ -102,6 +116,9 @@ type homePage struct {
 // 要下一帧（那一帧只建了一半，画出来是半张，见 guard 包的注释）。
 func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePage {
 	h := &homePage{acts: acts, newGrid: newNewMusic(cache, acts, wake)}
+	// 新歌速递的「重试」回到这一页：那一块自己管不着取数（它只管画），
+	// 而重试要能重新拉那一摊。
+	h.newGrid.SetRetry(func() { h.retryNew() })
 	for i := range h.lists {
 		l := list.New(cache, acts)
 		// 空状态**不在这里说**：一句都没接上时是**这一页**的空状态（routes 表里
@@ -153,30 +170,70 @@ func (s *Shell) viewHome(c *ui.Context, _ *ui.Route) {
 // 下面那一块给了 Grow(1) 的是列表，`list.List` 自己就占了 Grow(1)（见
 // widgets/list 的 List.View），所以它拿走了剩下的高度。
 //
-// s 是拿来画这一页的空状态的（`viewEmpty`），别的地方都用不上它。
+// 头两句是取数：**先收**后台投回来的结果（铁律三：不收的话这一帧画的是
+// 旧内容，而唤醒只有「结果到了」那一次），**再发**该发的那一摊（画之前
+// 发：画完再发的话这一帧画的是「正在加载」，要等这一页回来才换掉）。
+// 两句的规矩见 homepage_feed.go 的文件头。
+//
+// s 是拿来画这一页的空状态和失败状态的（`viewEmpty` / `viewLoadError`）。
 func (h *homePage) view(c *ui.Context, s *Shell) {
+	h.adopt()
+	h.pull()
+
 	ui.Column(c).Key("page:" + homePath).Grow(1).Padding(20).Gap(12).
 		AlignItems(ui.Stretch).Children(func() {
 		h.viewTabs(c)
 
 		// 新歌速递只画在「流行」这一屏的顶部，别的地方一律不画（上游
-		// index.tsx:295）。
+		// index.tsx:295）。它自己那三态（拉取中 / 拉不到 / 正常）是它内部
+		// 的事，这里只把这一摊的状态递过去。
 		if h.tab == homePopTab {
+			h.newGrid.SetStatus(h.feed.loadingOf(homeNewMusic), h.feed.newTab.err)
 			h.newGrid.View(c)
 		}
 
-		// 选中那一屏的内容。一行歌都没有时是**这一页**的空状态。
+		h.viewTabBody(c, s)
+	})
+}
+
+// viewTabBody 画选中那一档的内容。四种状态四种样子。
+//
+// ⚠️ **「没拉到」和「没有内容」是两件事，界面上必须分开**：
+//
+//	正在拉   转圈（上游 index.tsx:284-288 的 Spinner）
+//	拉失败   一句原因 + 一个「重试」
+//	真的没有 routes 表里 `/` 那一条的空状态
+//	有歌     列表
+//
+// 把「拉失败」画成「没有内容」，用户读到的是「B 站没有推荐给我」，
+// 于是他永远不会去点那个本该在那儿的「重试」——而 B 站的风控、断网、
+// 登录态过期全都会走到那一支。
+func (h *homePage) viewTabBody(c *ui.Context, s *Shell) {
+	songs := h.songs.tabs[h.tab]
+	err := h.feed.stateOf(h.tab).err
+	switch {
+	case err != nil && len(songs) == 0:
+		// ⚠️ `len(songs) == 0` 那一半：手上已经有歌的时候不画失败（那会把
+		// 用户正在看的一屏换成一句错）。首页每档只拉一次，所以「有歌又失败」
+		// 只可能出现在一次失败的重试之后。
 		//
+		// 用共用的 `viewLoadError`（不是 `viewEmpty` 的一个空状态），理由在
+		// empty.go 那一段：失败必须有重试按钮，而且不能被「暂无内容」盖住。
+		tab := h.tab
+		s.viewLoadError(c, "home:fail:"+homeTabs[tab], "重试加载"+homeTabs[tab]+"推荐",
+			err, func() { h.retryTab(tab) })
+	case err == nil && h.feed.loadingOf(h.tab) && len(songs) == 0:
+		ui.Column(c).Key("home:loading").Grow(1).Center().Children(func() {
+			ui.Spinner(c).Label("正在加载" + homeTabs[h.tab] + "推荐")
+		})
+	case len(songs) == 0:
 		// ⚠️ 走 `viewEmpty`（`routes` 表里 `/` 那一条，出处和其余 13 条写在
 		// 一起），不是让 `list.List` 说它自己那句「这里还没有歌」：那句只说
 		// 这一屏是空的，那一页的两句话连着说了「为什么空」和「怎么才能不空」。
-		// 接口接上之后这一支自然走不到，页面结构一个字都不用改。
-		if len(h.songs.tabs[h.tab]) == 0 {
-			s.viewEmpty(c, "home:empty", lookup(homePath).Empty)
-			return
-		}
+		s.viewEmpty(c, "home:empty", lookup(homePath).Empty)
+	default:
 		h.lists[h.tab].View(c)
-	})
+	}
 }
 
 // viewTabs 画那三个 Tab。
@@ -184,9 +241,9 @@ func (h *homePage) view(c *ui.Context, s *Shell) {
 // ⚠️ Biu 把 Tab 那一排和右边一个「全部播放」按钮放在同一个 `justify-between`
 // 的行里（`index.tsx:262-294`）。按钮**这一版不摆**：它是 `addList`（往播放
 // 列表里**追加**，不换队列也不起播，Biu 的 `handlePlayAll` 就是这么写的），而
-// 这一屏现在一行歌都没有，按下去除了弹一句「暂无可播放内容」什么都不会发生。
-// 摆一个只能这样用的按钮不如不摆——和 widgets/list 里「收藏/下载两项会说话、
-// 不装死」是同一个取舍的做法，区别是这里那句话连信息都没有。
+// 我们的队列只有「从这一首往后播」和「追加到末尾」（`app.Queue` 到今天只有
+// 那两条路）。要摆它就得先决定「全部播放」到底是哪一种——而那是另一个决定，
+// 不该在接数据源这一票里顺手定下来。摆一个连语义都还没定的按钮不如不摆。
 func (h *homePage) viewTabs(c *ui.Context) {
 	ui.Row(c).Key("home:tabbar").FillWidth().AlignItems(ui.Center).Children(func() {
 		// 🔴 Key 要写在 `ui.Tabs` 的构造**之前**：Tabs 里面是个 List，它的状态在

@@ -290,13 +290,20 @@ func TestPressingTheBiuImportButtonActuallySwapsTheSettingsIn(t *testing.T) {
 	waitFrames(t, tt, "Biu 那份主色写进设置", func() bool {
 		return a.SettingsSnapshot().PrimaryColor == "#17c964"
 	})
-	// ⚠️ **还要等 `rememberImport` 跑完**，光等主色不够。那条后台线里的顺序是
-	// 「reloadSettings → rememberImport → addToast」，而主色是 reloadSettings 改的，
-	// 所以主色对上的时候报告**可能还没写**。测试这时就收工的话，收尾先把包级那份
-	// 恢复成零，紧跟着后台线再写进去——那份报告就漏给了后面每一个测试，于是它们
-	// 第一帧都弹一条主色底色的 toast（见 `resetMigrationReport` 的注释）。
+	// ⚠️ **还要等那一趟整个跑完**，不能停在「设置换掉了」这里。
 	//
-	// 症状和这里等的东西隔了三层：本条全绿，红的是别的文件里读像素的那几条。
+	// 「从 Biu 导入」是**后台 goroutine**（`settings_tab_config.go` 的那个
+	// `go func`），而它写包级 `migration.r` 的那一句 `rememberImport(r)` 排在
+	// `reloadSettings()` **之后**：设置一换掉，上面那个等待当场就成立，于是这个
+	// 测试可能在收尾已经把 `migration.r` 抹回零之后，那一趟才把它写回来。
+	// 留下的报告会让**后面每一个新建的 Shell** 在第一帧弹一条 toast
+	// （`viewMain` → `announceMigration`），而 toast 的卡片底色是主色、正好
+	// 盖住 `settings_test.go` 那些验窗口底色的采样点 (700,430)——症状就长那样：
+	// 「画面那个点是 {30 215 96}」，那个数是 `DefaultPrimaryColor` 逐字。
+	//
+	// 包级那份报告现在归**基座**管了（`resetMigrationReport`：造外壳之前抹成零、
+	// 收尾时恢复，见那里），所以这一句等的是「基座那次恢复落在这一趟后面」——
+	// 等它真的写完了，恢复才盖得住。
 	waitFrames(t, tt, "导入结果记进迁移报告", func() bool { return LastMigration().Imported.Any() })
 
 	got := a.SettingsSnapshot()
