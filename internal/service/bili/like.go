@@ -15,7 +15,7 @@
 // 音乐库里的歌（`Item.Type == "audio"`）在 B 站那边是 `sid`，这三个接口一个都不收它。
 // Biu 那边对 audio 是拿 `coll-resource-check` 问「收没收藏」，而**赞**照样给的是
 // false（`music-fav.ts` 那一支的 `setIsThumb(false)`）——和这里一致：本地文件和音乐库
-// 条目一律「不可赞」，界面那一层因此不摆星标（见 `ui.likeable`）。
+// 条目一律「不可赞」，界面那一层因此不摆星标（判据是 `app.Likeable`）。
 //
 // # ⚠️ 写操作**绝不自动重试**
 //
@@ -36,8 +36,9 @@ import (
 const (
 	// pathArchiveRelation 问「我对这一首赞了没有、收藏了没有」。
 	//
-	// ⚠️ 它要 Cookie（不登录时给的是没有 `like`/`favorite` 的关系），所以界面那一层
-	// 只在登录了的时候问（由 app 那层判，见 app.LikeState）。
+	// ⚠️ **没登录时它也给 code 0**，只是两个字段都是 false —— 那说的是「不知道」，
+	// 不是「没赞」。所以调用方**别把 false 当答案**（见 `ArchiveRelation` 那段），
+	// 真要写的时候让 B 站回 -101，那才是真话。
 	pathArchiveRelation = "/x/web-interface/archive/relation"
 	// pathArchiveLike 是赞 / 取消赞。**POST，要 CSRF**。
 	pathArchiveLike = "/x/web-interface/archive/like"
@@ -51,9 +52,14 @@ const (
 
 // ArchiveRelation 是「我对这一首做过什么」。
 //
-// ⚠️ **两个字段一个都不能当成「没有就是没有」**：B 站没登录（或 Cookie 过期）时
-// 这两个字段给的是 false，而那说的是「不知道」，不是「没赞」。调用方
-// （`app.LikeState`）只在登录了的时候问这一句，所以到不了这儿。
+// ⚠️ **false 说的是「没有」还是「不知道」，这一层分不出来**：B 站没登录（或者
+// Cookie 过期）时 `archive/relation` 照样回 `code 0`，两个字段都是 false。
+//
+// 所以**没登录的人看到的是「没赞」**，而界面上那两个键（赞星标、收藏）也就照着它
+// 摆着——和旁边那个「收藏」键是同一条路：都摆，写的时候让 B 站回 -101，那一句
+// 「赞要连着 B 站账号用」会弹出来。我们没有在没登录时把键藏起来，是**故意**跟着
+// 现有的收藏键走：藏起来的话用户看到的是「这个功能怎么有时候没有」，而那比一次
+// 说清楚的失败更让人困惑。
 type ArchiveRelation struct {
 	// Liked 是「我赞了这一首没有」。
 	Liked bool
