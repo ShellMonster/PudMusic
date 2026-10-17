@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 
@@ -69,11 +70,6 @@ type onlineTrack struct {
 	reopening bool
 	// quality 是当前这条流的音质徽章。换流之后要跟着更新。
 	quality string
-	// tier 是这条流的**档位 id**（B 站的 30280 这种）。
-	//
-	// 徽章文字是给人看的，比不了；换音质的时候要判「新取回来的还是不是同一档」，
-	// 判的是这个。同档就没必要打断正在放的歌。
-	tier bili.Quality
 }
 
 // streamKey 是取流缓存的键。
@@ -163,7 +159,7 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 			a.failQualitySwitch(gen, q, err)
 			return
 		}
-		if ref.Quality == tr.tier {
+		if ref.SameTier(tr.ref) {
 			// 同一档：换过去听不出区别，不打断。
 			return
 		}
@@ -197,7 +193,7 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 		a.quality = ref.Label
 		a.online = &onlineTrack{
 			item: tr.item, ref: ref, source: src,
-			quality: ref.Label, tier: ref.Quality,
+			quality: ref.Label,
 		}
 		a.reportedErr = nil
 		a.errText = ""
@@ -303,7 +299,16 @@ func (it Item) isOnline() bool { return it.Source == "online" }
 
 // playableOnline 报告这个在线条目现在有没有足够的信息去取流。
 //
-// 只有 **mv**（bvid）这一种是通的：B 站的收藏夹里放的是投稿，cid 是分 P 的 id。
+// 两条取流路径各认一种身份：
+//
+//	mv     bvid（cid 缺了能补，见下）
+//	audio  sid（B 站音乐库的 auid）
+//
+// ⚠️ **判据必须和「真能放」一致**。这一条判「可放」的东西，界面上就会照着画、
+// 照着进队列——所以这里放行一种而那一路没接上，表现就是「收藏夹里的条目能看见、
+// 能进队列，按播放必然报错」。`bili.Media.Playable` 当初就是那个情况（判据抄了
+// Biu 的 `[2, 12]`，而 sid 那一路没实现）。加一条路径进来的时候，取流那一段
+// （`streamFor`）要一起加；`TestEveryPlayableEntryCanActuallyBeStreamed` 盯着这件事。
 //
 // ⚠️ **cid 不再是「有没有」的判据**：B 站的搜索结果只给 bvid，而搜索页那一整个
 // Tab 都是这样的条目（见 `service/bili/search.go` 的文件头）。以前这里要求 cid，
@@ -313,18 +318,25 @@ func (it Item) isOnline() bool { return it.Source == "online" }
 // cid 缺失时不是「放不了」而是「放哪一集还不知道」：那是**要问一次**才能知道的
 // 事情，不是当场能判出来的。`runOnline` 在后台问一次分 P（`bili.VideoPages`），
 // 问不到才退到第一集。同步能判出来的仍然是「压根没有 bvid」和「不是投稿」这两种。
-//
-// 「audio」（sid，B 站音乐库）是另一种来源，走的是另一个接口，现在还没接。给它一句
-// 人话，而不是放一个打不开的条目让人猜。
 func playableOnline(it Item) error {
-	if it.Type != "mv" || it.Bvid == "" {
-		if it.Type == "audio" && it.Sid != "" {
-			return errors.New("B 站音乐库那条路还没接上，先放收藏夹里的投稿")
+	switch {
+	case it.Type == "audio":
+		if it.Sid == "" {
+			return errors.New("这一首还不能放：缺音频 id")
 		}
-		return errors.New("这一首还不能放：缺稿件 id")
+		return nil
+	case it.Type == "mv" && it.Bvid != "":
+		return nil
 	}
-	return nil
+	return errors.New("这一首还不能放：缺稿件 id")
 }
+
+// OnlineReady 报告这一项在线播放的身份齐了没。
+//
+// 界面层拿它判「这一行该不该摆成能放的样子」——`bili.Media.Playable` 说能放的
+// 那些，翻成 `Item` 之后都要经它再过一遍。它和 `playableOnline` 是同一个判据，
+// 分成两个是因为一个要给界面看、一个要在播放那一步报出原因。
+func (it Item) OnlineReady() bool { return playableOnline(it) == nil }
 
 // playOnline 开一条在线流。**立刻返回**，真正的活儿在后台 goroutine 里。
 //
@@ -369,7 +381,9 @@ func (a *App) runOnline(it Item, gen int) {
 	// 放假参数，所以拿它当「反正会按第一集给」的依据是不成立的。发一个缺 cid 的
 	// 请求，换回来的是一段不知道是哪一集的音频：能出声，但可能不是用户点的那个。
 	// 说清「问不出这一集是哪一集」，比放错一集好。
-	it, err := a.withCid(context.Background(), s, it)
+	//
+	// 音乐库条目走的是另一半（补元信息）：它没有 cid 要补，见 `withSource`。
+	it, err := a.withSource(context.Background(), s, it)
 	if err != nil {
 		a.failOnline(gen, err)
 		return
@@ -399,7 +413,7 @@ func (a *App) runOnline(it Item, gen int) {
 	a.wantPlay, a.playing = true, true
 	a.stopped = false
 	a.quality = ref.Label
-	a.online = &onlineTrack{item: it, ref: ref, source: src, quality: ref.Label, tier: ref.Quality}
+	a.online = &onlineTrack{item: it, ref: ref, source: src, quality: ref.Label}
 	a.reportedErr = nil
 	a.errText = ""
 	wake := a.wake
@@ -414,6 +428,58 @@ func (a *App) runOnline(it Item, gen int) {
 	if wake != nil {
 		wake()
 	}
+}
+
+// withSource 按这一项的类型，补上取流要 / 界面要的东西。**只在这一层问一次**。
+//
+//	mv     缺 cid 就问一次分 P（`withCid`）
+//	audio  问一次元信息，把空的作者名补上（`withSongInfo`）
+//
+// 放在这里而不是 `playableOnline` 里的理由和补 cid 那一条一样：那是在界面线程上
+// 调的，一次网络往返会冻住窗口。也不放在列表那一层：用户多半只会听其中一首。
+func (a *App) withSource(ctx context.Context, s *Streaming, it Item) (Item, error) {
+	if it.Type == "audio" {
+		return a.withSongInfo(ctx, s, it)
+	}
+	return a.withCid(ctx, s, it)
+}
+
+// withSongInfo 问一次音乐库的元信息，把这一项缺的东西补上（作者名为主）。
+//
+// 照上游 Biu 的做法（`store/play-list.ts:157` 的 `getAudioData`）：放一个
+// sid 条目时先问一次 `song/info`，拿 title / cover / duration / author。
+//
+// 🔴 **问不到不拦播放**：取流只要 sid，元信息是**锦上添花**。把它变成硬依赖的
+// 后果是「网络抖一下就放不出歌」，而那时候歌其实取得到。问不到就少一个作者名，
+// 播放条上那一句空着——空着是不好看，装错了是骗人。
+//
+// 只补**空着**的字段：收藏夹列表已经给了标题和封面，不该被一次网络往返改掉
+// 用户眼前的东西。
+func (a *App) withSongInfo(ctx context.Context, s *Streaming, it Item) (Item, error) {
+	if s.Client == nil {
+		return it, errStreamingMissing
+	}
+	info, err := s.Client.SongInfo(ctx, it.Sid)
+	if err != nil {
+		// 吞掉，但留一行字：排障时「作者名怎么是空的」只有一个解释。
+		log.Printf("biu: 音乐库元信息问不到（不挡播放）：%v", err)
+		return it, nil
+	}
+	if it.Title == "" {
+		it.Title = info.Title
+	}
+	if it.Cover == "" {
+		it.Cover = info.Cover
+	}
+	// 作者名优先用 `Author`：Biu 那边占 `ownerName` 的也是它（一个 UP 主的
+	// 昵称和这首歌的作者多半不是同一个人）。
+	if it.Artist == "" {
+		it.Artist = info.Author
+		if it.Artist == "" {
+			it.Artist = info.Uname
+		}
+	}
+	return it, nil
 }
 
 // withCid 是「缺分 P id 就去问一次」的那一步，**只在这一层问一次**。
@@ -503,6 +569,35 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	return src, p, nil
 }
 
+// streamFor 去 B 站要这一项的流。**两条取流路径在这一处分派**。
+//
+//	mv     bili.PlayURL（dash）
+//	audio  bili.AudioStreamURL（音乐库，sid）
+//
+// 为什么要分派而不是在两个调用点各判一次类型：换音质那条路（`resolve`）和
+// 换流那条路（`refetch`）都要取流，分开判的话早晚有一处忘了改，而那种错在
+// 界面上是「换流之后突然放不出来了」。
+func (a *App) streamFor(ctx context.Context, s *Streaming, it Item, pref bili.AudioQuality) (*bili.StreamRef, error) {
+	if it.Type == "audio" {
+		return s.Client.AudioStreamURL(ctx, it.Sid, pref)
+	}
+	return s.Client.PlayURL(ctx, it.Bvid, it.Cid, pref)
+}
+
+// sameItem 报 ref 是不是 it 这一项的流。
+//
+// 比 Bvid+Cid 或者 sid：这一条是「取回来的这条是不是用户点的那个」的最后一道
+// 闸，而音乐库那一路 Bvid / Cid 都是空的——不认 sid 的话它恒真。
+func sameItem(ref *bili.StreamRef, it Item) bool {
+	if ref == nil {
+		return false
+	}
+	if it.Type == "audio" {
+		return ref.Sid != "" && ref.Sid == it.Sid
+	}
+	return ref.Bvid == it.Bvid && ref.Cid == it.Cid
+}
+
 // resolve 拿到一条能播的流。
 //
 // 这就是**播放前预判**那一条路径：手上有一条这个条目的流（上次放过、
@@ -518,7 +613,7 @@ func (a *App) resolve(ctx context.Context, s *Streaming, it Item, pref bili.Audi
 	if cached != nil && cached.Usable(time.Now()) {
 		return cached, nil
 	}
-	ref, err := s.Client.PlayURL(ctx, it.Bvid, it.Cid, pref)
+	ref, err := a.streamFor(ctx, s, it, pref)
 	if err != nil {
 		return nil, err
 	}
@@ -542,14 +637,14 @@ func (a *App) refetch(ctx context.Context, s *Streaming, it Item) *audio.StreamR
 	prev := a.currentRef()
 	a.mu.Unlock()
 
-	ref, err := s.Client.PlayURL(ctx, it.Bvid, it.Cid, s.Quality)
+	ref, err := a.streamFor(ctx, s, it, s.Quality)
 	if err != nil {
 		return nil
 	}
 	if prev != nil && !prev.SameTrack(ref) {
 		return nil
 	}
-	if ref.Bvid != it.Bvid || ref.Cid != it.Cid {
+	if !sameItem(ref, it) {
 		return nil
 	}
 
@@ -718,7 +813,7 @@ func (a *App) refreshOnlineNow() {
 		a.position = pos
 		a.quality = ref.Label
 		a.online = &onlineTrack{item: tr.item, ref: ref, source: src, quality: ref.Label,
-			tier: ref.Quality, reopening: true}
+			reopening: true}
 		a.reportedErr = nil
 		a.errText = ""
 		wake := a.wake

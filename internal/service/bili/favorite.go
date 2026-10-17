@@ -277,9 +277,7 @@ func (c *Client) dealFavMedia(ctx context.Context, rid string, typ int, addID, d
 //
 // 这一步是一次网络往返（bvid → aid，见文件头），所以它**在这里**而不是界面上。
 //
-// audio 的那一路用 sid 当 rid（B 站的音乐库就是这么收的），而我们这一层还没有接
-// 音乐库的接口，所以 `Type == "audio"` 这里会回一句人话，而不是发一次注定失败的
-// 请求。
+// audio 的那一路用 sid 当 rid（B 站的音乐库就是这么收的），**不用那次往返**。
 func (c *Client) ridAndType(ctx context.Context, s FavTarget) (rid string, typ int, err error) {
 	switch s.Type {
 	case "mv", "":
@@ -293,15 +291,19 @@ func (c *Client) ridAndType(ctx context.Context, s FavTarget) (rid string, typ i
 		return strconv.FormatInt(aid, 10), FavTypeVideo, nil
 	case "audio":
 		if s.Sid == "" {
-			return "", 0, ErrMusicLibraryUnsupported
+			return "", 0, ErrNoAudio
 		}
 		return s.Sid, FavTypeAudio, nil
 	}
 	return "", 0, fmt.Errorf("bili: 认不出的条目类型 %q", s.Type)
 }
 
-// ErrMusicLibraryUnsupported 是「收藏夹里的音频那一路还没接上」。
+// ErrNoAudio 是「这一项认不出是音乐库里的哪一条」。
 //
-// 单独一个哨兵：它和「这一首收藏不了」要分开说——这一条等音乐库接上就好了，
-// 而别的收藏失败重试多少次都一样（见 `app.playableOnline` 那边同一个说法的哨兵）。
-var ErrMusicLibraryUnsupported = errors.New("bili: 音乐库那一路还没接上")
+// 和 `ErrNoVideo` 是同一件事的两面：那边缺 bvid，这边缺 sid，都不是网络错也不是
+// 重试能救的（调用方没给全）。
+//
+// ⚠️ 这一条以前叫「音乐库那一路还没接上」，而**它现在接上了**（见 `audio.go`）——
+// 留着那句话的话，用户收藏一条音乐库条目失败时看到的是「还没接上」，而真因是他点的
+// 那一项压根没有音频 id。
+var ErrNoAudio = errors.New("bili: 缺音频 id")

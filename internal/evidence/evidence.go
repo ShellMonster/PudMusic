@@ -106,6 +106,21 @@ var Items = []Item{
 		Spec:     "系统媒体状态映射（暂停/停止/播完/解码失败不是同一个数）",
 		Tests:    []string{"TestPlaybackStateMapping", "TestSmtcStatusIsNotTheMacNumber"},
 	},
+	{
+		Category: Play,
+		// 🔴 这一条是被一次对照审计逼进来的：判据抄对了（「可放」的那几种
+		// 类型），被判为可放的那条取流路径没跟上，于是「可放」成了界面上的
+		// 谎言——条目照常画、照常进队列，按播放才报错，而且一路绿过所有测试。
+		//
+		// 前一条钉的是「界面上摆出来的那一项播放器认不认」，后一条钉的是
+		// 「它真的取得到流」。**少任何一条，那种错都能悄悄回来**：只钉判据的
+		// 话，接线断了照样绿。
+		Spec: "**界面上标成「可放」的条目真的放得出来**（判据不许撒谎）",
+		Tests: []string{
+			"TestEveryPlayableCollectionEntryIsAcceptedByThePlayer",
+			"TestEveryPlayableEntryCanActuallyBeStreamed",
+		},
+	},
 
 	// ── 假时钟 ─────────────────────────────────────────────────────────────
 	{
@@ -166,6 +181,23 @@ var Items = []Item{
 		Category: HTTP,
 		Spec:     "取流超时会回来，不是挂着",
 		Tests:    []string{"TestSlowServerIsCutOffByTheTimeout", "TestALateStarterDoesNotWaitForTheTimeout"},
+	},
+	{
+		Category: HTTP,
+		// 音乐库（type=12 / sid）是**另一套接口、另一套档位编号**，连错误说明
+		// 那个字段都叫 `msg` 而不是 `message`。这一条钉的就是「形状别抄错」。
+		//
+		// ⚠️ 「试听片段」那一半是这里最要紧的：B 站对没权限的那一档不报错，
+		// 回的是一段能下能播、只有开头几十秒的流。放它过去的话用户听到的是
+		// 「歌放到一半静默停住」，界面上一个错都没有。
+		Spec: "音乐库那一路的形状：元信息 / 取流 / 收藏态，试听片段不算流",
+		Tests: []string{
+			"TestSongInfoReadsTheFieldsThePlaybarNeeds",
+			"TestMusicStreamURLTakesTheDefaultTier",
+			"TestCollResourceCheckReadsTheNumber",
+			"TestAMusicPreviewIsNeverHandedBackAsAStream",
+			"TestAPaidSongFallsBackToAFreeTier",
+		},
 	},
 
 	// ── PCM ────────────────────────────────────────────────────────────────

@@ -237,14 +237,21 @@ func (s *Shell) fetchCollectionPage(ctx context.Context, ref app.CollectionRef, 
 // onlineItemOf 把一条 B 站内容翻成播放队列认的那一项。
 //
 // ⚠️ **合集（21）和电影（24）也给 Source="online"**，但 Type 空着：它们没有
-// 音频流，而 `app.playableOnline` 对 Type 空的会回一句「这一首还不能放」，
-// 那句话说的就是事实。给它们编一个 Type 的话错误信息会指向另一个原因
-// （见 `app.playableOnline` 的注释）。
+// 音频流，而 `app.OnlineReady` 对 Type 空的会回 false，那句话说的就是事实。
+// 给它们编一个 Type 的话错误信息会指向另一个原因（见 `app.playableOnline`）。
+//
+// ⚠️ **Type 非空的那些必须真的放得出来**：`bili.Media.Playable` 判「可放」的
+// 类型（2 / 12）在这里都要变成一条能取到流的项。少一条取流路径（见
+// `app.streamFor`）就会让「可放」在界面上变成一句谎话——条目照常画、照常进
+// 队列，按播放才报错。
 func onlineItemOf(m bili.Media) app.Item {
 	it := app.Item{
 		Source: "online",
 		Title:  m.Title,
 		Cover:  m.Cover,
+		// 收藏夹接口已经给了 UP 主名，而这一栏之前一直空着——于是系统媒体
+		// 控制中心上的「艺人」永远是空的（见 `Item.Artist` 的注释）。
+		Artist: m.Owner,
 		// Sid 一直带着：Type=12（音频）靠它，Type=2 的条目也指着它
 		// （`list.BiliLink` 有 bvid 时优先用 bvid，所以不会串）。
 		Sid: strconv.FormatInt(m.ID, 10),
