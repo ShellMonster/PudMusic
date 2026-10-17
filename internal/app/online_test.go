@@ -414,14 +414,18 @@ func TestStreamCutMidwayRefetchesAndKeepsPlaying(t *testing.T) {
 	before := a.Snapshot().Position
 	close(f.mediaGate)
 
+	// ⚠️ 「位置往前走」**不代表换过流**。源里已经缓冲下来的那几秒还会照放，
+	// 而泵是另一条 goroutine：它发现连接断了、正在走换流那条路（一次带
+	// 签名的往返，200~400 ms），界面上的位置就先动了。`-race` 下一慢，
+	// 这个窗口宽到每次都踩中——于是 `playCalls` 还停在 1，下一句断言就红。
+	//
+	// 所以这里等的是**两件同时成立**：换流真的发生了（取流接口被打第二次），
+	// 而且位置还在往前走。后一句断言才有意义。
 	waitFor(t, 30*time.Second, "换流之后继续往前播", func() bool {
-		return a.Snapshot().Position > before
+		return f.playCalls.Load() >= 2 && a.Snapshot().Position > before
 	})
 	if st := a.Snapshot(); st.Err != "" {
 		t.Errorf("换流之后播放条上有错：%s", st.Err)
-	}
-	if n := f.playCalls.Load(); n < 2 {
-		t.Errorf("地址掐断了却没有换流（取流接口只打了 %d 次）", n)
 	}
 	if q := a.Snapshot().Quality; q != "320K" {
 		t.Errorf("换流之后徽章 = %q，want 320K", q)

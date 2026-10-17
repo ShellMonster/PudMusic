@@ -215,6 +215,14 @@ func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
 	case miniPlayerPath:
 		// 正在放什么 + 它的歌词（nowplaying.go）。
 		return s.viewNowPlaying
+	case downloadListPath:
+		// 下载记录（downloadlist.go）：表格 + 三段进度 + 五种操作 + 确认弹窗。
+		//
+		// ⚠️ 它和首页一样，**空状态画在自己里面**（一条记录都没有时画
+		// `routes` 表里 `/download-list` 那一条），所以那条的 `Empty` 仍然
+		// 有用，别当成「已经有内容了就该清掉」——`TestTheEmptyListStillSaysWhyItIsEmpty`
+		// 钉的就是它。
+		return s.viewDownloadList
 	case loginPath:
 		// 扫码登录（login.go）。
 		return s.viewLogin
