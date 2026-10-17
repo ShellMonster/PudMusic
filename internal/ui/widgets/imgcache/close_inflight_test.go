@@ -1,6 +1,7 @@
 package imgcache
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -131,37 +132,67 @@ func TestCloseWhileACoverIsStillLoading(t *testing.T) {
 	}
 }
 
-// TestTheLastCoverStillArrivingDoesNotWakeAnything 关掉之后**才**回来的那张图。
+// TestNothingWakesAWindowAfterCloseReturns 盯「关掉之后还在解码的那些结果」。
 //
-// 和上面那条是同一条路的另一半：上面是「请求还挂着」，这条是「请求刚好在这
-// 一刻回来了」。后者更阴险——`finish` 会记一笔、然后 notify，而这时候
-// 窗口已经没了。
+// 和上面那条是同一条路的另一半：上面是「请求还挂着（字节一个没到）」，
+// 这一条是**字节真的到了、正在解码**。后者更接近真机上会发生的那个情况：
+// 用户关窗的那一刻，屏幕上还有几张图正在解码队列里排着。
 //
-// 这里用一个**先把结果备好、再放行**的服务端造出这个时序：请求在 Close
-// 之前已经拿到字节，正等着解码 worker 把它捡起来。
+// ⚠️ 这一条**不断言「解码会不会在 Close 之后才落地」**——那是时序，机器一忙
+// 就不一样，断言它等于写一条 flaky。它断言的是那条**不管时序如何都成立**的：
 //
-// 断言只有一条：叫醒次数不许变。它变了的症状是退出之后界面还莫名其妙重画
-// ——在真机上那是主窗口关了、迷你窗口自己刷新了一下。
-func TestTheLastCoverStillArrivingDoesNotWakeAnything(t *testing.T) {
-	s := newStalledServer(t)
-	c := New(Options{})
+//	`Close()` 回来之后，不会再有任何人叫醒窗口。
+//
+// 这一条是 `Close` 的实现给的（它等的是 `lifeWG`（下载）和 `decodeWG`（解码
+// worker）两组 goroutine），而它正是「窗口没了之后不该再有人 Invalidate 一个
+// 死窗口」这条保证的落脚点。真机上的症状是：主窗口关了、迷你窗口莫名其妙自己
+// 刷新了一下。
+//
+// 所以这一条必须**真的有图在解码**：服务端发的是真的 PNG 字节，缓存是
+// `Decoders: 1`（一次解一张），一共发好几张——于是 Close 的时候队列里
+// 一定还压着活。
+func TestNothingWakesAWindowAfterCloseReturns(t *testing.T) {
+	const (
+		imgs = 24
+		side = 512 // 图要**够大**：8×8 那种一瞬间就解完，关窗时队列是空的，
+		//      这条就变成空过的绿（拿掉 Close 里那句 decodeWG.Wait() 它照样绿）
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(pngBytes(t, side, side))
+	}))
+	defer srv.Close()
+
+	c := New(Options{Decoders: 1, MaxInflight: imgs})
 	woke := &atomic.Int32{}
 	c.AddWake(func() { woke.Add(1) })
 
-	c.Get(s.url())
-	select {
-	case <-s.arrived:
-	case <-time.After(10 * time.Second):
-		t.Fatal("请求一直没发出去")
+	urls := make([]string, imgs)
+	for i := range urls {
+		urls[i] = fmt.Sprintf("%s/%d.png", srv.URL, i)
+		c.Get(urls[i])
+	}
+	// 真的解出来一张：不然「解码队列」这件事压根没发生。
+	waitFor(t, 10*time.Second, "至少一张真的解码完了", func() bool { return woke.Load() > 0 })
+
+	// 🔴 **关掉之前队列里必须还压着活**，否则这条验的是「关掉一件已经没在做的事」。
+	// 这一句是该用例非空过的保证：去掉它，下面那条断言在「全都解完了」的情况下
+	// 也照样为真（实测：图只有 8×8 时，去掉 Close 里的 decodeWG.Wait() 它仍绿）。
+	ready := 0
+	for _, u := range urls {
+		if c.Get(u).Ready() {
+			ready++
+		}
+	}
+	if ready >= imgs {
+		t.Fatalf("Close 之前 %d 张全解完了，队列是空的——这条测的不是「关掉时还在解码」", ready)
 	}
 
-	// 下载确实在途：不然下面那些断言全都会 trivially 成立。
-	waitFor(t, 5*time.Second, "下载在途", func() bool { return s.hits.Load() == 1 })
-
 	c.Close()
+	// ⚠️ 基线取在 **Close 之后**，不是之前：Close 等的就是那些还在解码的，
+	// 它们在等待期间叫醒几次是正常的（那时候窗口还在）。
 	before := woke.Load()
 	time.Sleep(300 * time.Millisecond)
 	if n := woke.Load(); n != before {
-		t.Errorf("关掉之后又叫醒了 %d 次窗口", n-before)
+		t.Errorf("Close 回来之后又叫醒了 %d 次窗口：还有解码/下载活着", n-before)
 	}
 }
