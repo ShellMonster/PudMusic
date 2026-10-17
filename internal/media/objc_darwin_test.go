@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ebitengine/purego"
 	"github.com/ebitengine/purego/objc"
 )
 
@@ -476,5 +477,115 @@ func TestTheArtworkArrivesAfterAPush(t *testing.T) {
 	}
 	if cls := goString(send(send(art, "class"), "description")); cls != artworkClassName {
 		t.Errorf("artwork 的类是 %q，want %q", cls, artworkClassName)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 所有权：这一段是为了钉住一个**评审探出来**的错
+// ─────────────────────────────────────────────────────────────────────────────
+
+// 池子那两个符号**只在测试里**取——产品代码一次都不碰它（碰它就是那个必崩的
+// 段错误，见 objc_darwin.go 顶上）。
+func poolForTest(t *testing.T) (push func() uintptr, pop func(uintptr)) {
+	t.Helper()
+	h, err := purego.Dlopen("/usr/lib/libobjc.A.dylib", purego.RTLD_GLOBAL|purego.RTLD_NOW)
+	if err != nil {
+		t.Skipf("拿不到 libobjc：%v", err)
+	}
+	pa, err := purego.Dlsym(h, "objc_autoreleasePoolPush")
+	if err != nil {
+		t.Skipf("没有 objc_autoreleasePoolPush：%v", err)
+	}
+	po, err := purego.Dlsym(h, "objc_autoreleasePoolPop")
+	if err != nil {
+		t.Skipf("没有 objc_autoreleasePoolPop：%v", err)
+	}
+	purego.RegisterFunc(&push, pa)
+	purego.RegisterFunc(&pop, po)
+	return push, pop
+}
+
+// TestEveryOwnedHelperSurvivesAnAutoreleasePoolPop 盯「这一层造出来的每个对象
+// 都是自己持有的」。
+//
+// 这是评审探出来的一个真错：`newNumberDouble` 原来用的是
+// `+[NSNumber numberWithDouble:]`——一个**工厂方法**，它交回来的对象归自动
+// 释放池所有。按「自己持有、用完自己 release」的规矩去用它就多放了一次。
+//
+// **为什么平时看不出来**：这一层故意不建池子，于是那个 autorelease 找不到主人、
+// 一直挂着，恰好被后面那一次 release 抵消——**看着是好的**。要让它现形，
+// 就得在同一条线程上真的推一个池子，然后 pop：pop 会对着同一个对象再放一次，
+// 进程当场段错误（不是断言失败，是测试进程直接死）。
+//
+// ⚠️ 池子**必须和活儿在同一条线程上**：自动释放池属于压它的那个线程。
+// 而这一层的 ObjC 动作都排在 `onObjCThread` 那条钉住的线程上——池子也就必须
+// 推在那条线程上。推在别处再 pop，会变成「在 A 线程 pop 了 B 线程的池子」，
+// 那崩的是测试自己（踩过一次）。
+//
+// 所以这个用例的断言是「跑完还在」，它证明的是**这一层不在系统那边欠下任何
+// 引用**——而那正是这一层敢自己 release 的前提。
+
+// TestEveryOwnedHelperSurvivesAnAutoreleasePoolPop 盯「这一层造出来的每个对象
+// 都是自己持有的」。
+//
+// 这是评审探出来的一个真错：`newNumberDouble` 原来用的是
+// `+[NSNumber numberWithDouble:]`——一个**工厂方法**，它交回来的对象归自动
+// 释放池所有。按「自己持有、用完自己 release」的规矩去用它就多放了一次。
+//
+// **为什么平时看不出来**：这一层故意不建池子，于是那个 autorelease 找不到主人、
+// 一直挂着，恰好被后面那一次 release 抵消——**看着是好的**。要让它现形，
+// 就得在同一条线程上真的推一个池子，然后 pop：pop 会对着同一个对象再放一次。
+//
+// ⚠️ 两个坑，都是踩出来的：
+//
+//  1. 池子**必须和活儿在同一条线程上**。自动释放池属于压它的线程，而这一层的
+//     ObjC 动作都排在 `onObjCThread` 那条钉住的线程上——池子也就必须推在那条
+//     线程上。推在别处再 pop 是「在 A 线程 pop 了 B 线程的池子」，崩的是测试自己。
+//  2. **pop 之后必须再用一次那些对象**。多放一次不会当场报错，只是引用计数
+//     归零；真正炸的是下一次往那个野指针上发消息。不碰它，用例就永远绿——
+//     第一版的写法就是这样，反向验证时它对着有 bug 的代码也过了。
+//
+// 所以这个用例的断言是「pop 之后再读，值还在」。它证明的是**这一层不在系统那边
+// 欠下任何引用**——而那正是这一层敢自己 release 的前提。
+//
+// （别改用 retainCount 去判形状：tagged pointer 上它返回的是
+// 9223372036854775807 这种溢出值，量不出东西来。池子才是那个真判据。）
+func TestEveryOwnedHelperSurvivesAnAutoreleasePoolPop(t *testing.T) {
+	push, pop := poolForTest(t)
+
+	// ⚠️ 调的是 `applyOnObjCThread` 而不是 `apply`——后者会再排一次
+	// `onObjCThread`，而我们已经在那条线程上了，那才是死等（见
+	// objcthread_darwin.go 顶上「这里不能重入」那段）。
+	onObjCThread(func() {
+		pool := push()
+		d := newMutableDictionary()
+		putString(d, "s", "一首歌")
+		putNumber(d, "n", 1.5)
+		// 这一句就是要抓的那一下：任何 autorelease 来的对象都会在这里被
+		// 多放一次，引用计数归零。
+		pop(pool)
+
+		// 然后再用一次。多放过的已经是野指针，这里就是当场段错误。
+		if got := objValue(d, "s"); got != "一首歌" {
+			t.Errorf("pop 之后歌名变成了 %q", got)
+		}
+		if got := numValue(d, "n"); got != 1.5 {
+			t.Errorf("pop 之后数值变成了 %v", got)
+		}
+		release(d)
+	})
+
+	// 整条推走一遍：那条路上每一步都造了东西。
+	p := mpTestPlatform(t)
+	onObjCThread(func() {
+		pool := push()
+		p.applyOnObjCThread(NowPlaying{State: StatePlaying, Title: "一首歌", Duration: time.Minute})
+		pop(pool)
+	})
+	// pop 之后再从系统那份里读一次：那本字典是系统 retain 着的，值也归它，
+	// 所以这里读到的必须是活的。
+	center := nowPlayingCenter()
+	if got := objValue(infoValue(center), keyTitle); got != "一首歌" {
+		t.Errorf("pop 之后系统那份的歌名是 %q", got)
 	}
 }

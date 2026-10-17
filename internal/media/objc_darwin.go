@@ -60,8 +60,10 @@ var (
 	// 声明成具体签名的消息。带 double 的那些**必须**声明成 float64：
 	// double 走的是浮点寄存器那一组，按整数传过去的话参数会被解释成
 	// 一个恰好落在浮点寄存器里的垃圾位。
-	msgDouble     func(obj id, sel objc.SEL) float64
-	msgNumberWith func(cls id, sel objc.SEL, v float64) id
+	msgDouble func(obj id, sel objc.SEL) float64
+	// msgInitDouble 是「接收一个 double、返回一个对象」的那一类消息。
+	// `newNumberDouble` 要用它——见那里为什么**不能**用 `+numberWithDouble:`。
+	msgInitDouble func(obj id, sel objc.SEL, v float64) id
 	// msgRequestImage 是 `-[MPMediaItemArtwork requestImageWithSize:completionHandler:]`
 	// 的**入向**声明（返回值是 void，所以只有参数）。
 	//
@@ -129,7 +131,7 @@ func loadObjC() {
 	}
 
 	purego.RegisterFunc(&msgDouble, msgSend)
-	purego.RegisterFunc(&msgNumberWith, msgSend)
+	purego.RegisterFunc(&msgInitDouble, msgSend)
 	purego.RegisterFunc(&msgRequestImage, msgSend)
 	purego.RegisterFunc(&msgNSSize, msgSend)
 }
@@ -229,6 +231,19 @@ func sendSize(obj id, selector string) nsSize {
 //
 // 自己持有的代价是每个调用点都要配一次 release，而这一层每次推系统只造七八个对象，
 // 那点代码换掉一整类说不清的崩溃，划算。**别改回 autorelease。**
+//
+// ⚠️ 而且**每一个都必须自己 alloc**：Objective-C 的那些「工厂方法」
+// （`+numberWithDouble:`、`+dataWithBytes:`、`+dictionary`…）交回来的都是
+// **autorelease 过的**，当 +1 用就是多放一次。本层现在用的形状，逐个是：
+//
+//	newString            [[NSString alloc] initWithBytes:length:encoding:]
+//	newNumberDouble      [[NSNumber alloc] initWithDouble:]      ← 评审在这里翻过车
+//	newData              [[NSData alloc] initWithBytes:length:]
+//	newMutableDictionary [[NSMutableDictionary alloc] init]
+//	nsImageFromBytes     [[NSImage alloc] initWithData:]
+//
+// 判据在 `TestEveryOwnedHelperSurvivesAnAutoreleasePoolPop`：在一个真池子里造、
+// 放、pop，再**用一次**。多放过的对象会当场段错误。
 
 // release 放掉一个自己持有的对象。
 func release(o id) {
@@ -266,8 +281,26 @@ func goString(str id) string {
 }
 
 // newNumberDouble 造一个 **+1 的** NSNumber。
+//
+// ⚠️ **不能用 `+[NSNumber numberWithDouble:]`**，尽管它短得多。
+// 那是个**工厂方法**：它内部 `[[NSNumber alloc] initWithDouble:]` 之后**又
+// autorelease 了一次**，所以交回来的是「归自动释放池所有」的（实测
+// retainCount = 1，而不是 alloc 出来的 -1）。
+//
+// 这一层按「自己持有、用完自己 release」的规矩用它，就成了**多放一次**：
+// 现在这条线程上没有池子，autorelease 找不到主人，那份引用就一直在，
+// 后面那一次 release 恰好抵消了它——**看着是好的**；一旦这条线程上有了池子
+// （AppKit 内部推的、或者谁加回来的），pop 就会对着同一个对象再放一次，
+// 当场段错误（评审的探针就是这么复现的，产物在
+// `data/tasks/Biu_MyGo/26/review/nsnumber-ownership-and-pool.txt`）。
+//
+// 「恰好抵消」不是所有权，是运气。所以老老实实 alloc/init，那才是 +1。
 func newNumberDouble(v float64) id {
-	return msgNumberWith(id(class("NSNumber")), sel("numberWithDouble:"), v)
+	n := send(id(class("NSNumber")), "alloc")
+	if n == 0 {
+		return 0
+	}
+	return msgInitDouble(n, sel("initWithDouble:"), v)
 }
 
 // newData 造一个 **+1 的** NSData，拷走 b 的内容。
