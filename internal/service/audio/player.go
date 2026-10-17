@@ -103,7 +103,7 @@ func OpenStream(r CloserReadSeeker) (*Player, error) {
 }
 
 // openDecoder 是**唯一**认容器的地方：`Open`（本地文件）和 `OpenStream`
-// （在线流）都调它。返回值第二项是认出来的容器名，只作记录和给测试看。
+//（在线流）都调它。返回值第二项是认出来的容器名，只作记录和给测试看。
 //
 // 两步，顺序不能反过来：
 //
