@@ -464,7 +464,19 @@ func (a *App) Logout() error {
 	if acc == nil {
 		return nil
 	}
-	return acc.logout()
+	err := acc.logout()
+	// 🔴 **播放记录上报要停**（见 playreport.go「二、退登与换人要停」）。
+	//
+	// 不停的话那一条 goroutine 还会每 30 秒往 B 站打一次心跳，而 jar 刚被
+	// 清空——B 站看到的是一次次匿名请求。更要紧的是**换人登录**之后它还在
+	// 发：那些进度会被记到**新登录的那个账号**名下，而那是他没听过的歌。
+	a.mu.Lock()
+	rep := a.report
+	a.mu.Unlock()
+	if rep != nil {
+		rep.stopAccount()
+	}
+	return err
 }
 
 func (a *Account) logout() error {
