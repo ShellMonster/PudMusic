@@ -306,7 +306,6 @@ func (a *App) resolveVideoDownload(ctx context.Context, s *Streaming, want downl
 		Cid:           pair.Video.Cid,
 		Quality:       int(pair.Video.Quality),
 		Label:         pair.Video.Label,
-		Video:         true,
 		URLs:          pair.Video.URLs,
 		CompanionURLs: pair.Audio.URLs,
 		// ⚠️ `Ext` **故意不给**：它是「地址上没带后缀时的后备」，而视频

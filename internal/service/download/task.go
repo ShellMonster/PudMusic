@@ -235,6 +235,25 @@ func markChunkOf(chunks []int, i int) ([]int, bool) {
 	return append(chunks, i), true
 }
 
+// adoptSource 用源里的事实更新身份，**但保住这一项自己带着的那两样**。
+//
+// `prepare` 要靠它做资源身份的校验（见 `Identity` 那段注释），而它校验
+// 完之后要把新身份写回去——**整份**写回去。于是这一项自己带着的
+// `Video` / `VideoQ` 会被顺带抹掉，除非在这里把它们捞回来。
+//
+// 那两样是**用户点的**，不是源告诉我们的：源不知道这一项是要音频还是要
+// 视频（它只是「给了两条地址」），也不知道用户点名的是哪一档。抹掉它们的
+// 后果是「暂停一下再继续」和「退出重开」这两种最普通的操作之后取流问错了
+// 问题（`want.Video` 变成 false → 只问了一条音频），而界面上没有任何提示。
+func (t *Task) adoptSource(src *Source, length int64) {
+	video, videoQ := t.Identity.Video, t.Identity.VideoQ
+	t.Identity = src.IdentityOf(length)
+	t.Identity.Video, t.Identity.VideoQ = video, videoQ
+	// `Video` 在 Task 上也有一份（落盘名和三个半成品都看它）。那份是入队时
+	// 定的，源改不了它——所以这里以它为准，把两份对齐。
+	t.Identity.Video = t.Video || video
+}
+
 // SameResource 报两个身份说的是不是同一段字节。
 //
 // **长度只在两边都知道的时候比**：0 是「还没探到」，拿它去比任何数都会

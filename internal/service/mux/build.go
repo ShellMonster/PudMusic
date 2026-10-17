@@ -189,8 +189,18 @@ func layoutEdits(tracks []*track) {
 		pres := rescale(t.src.endPTS-from, t.src.timescale, t.movieTS)
 		if start < 0 {
 			// 首帧的呈现时间在 0 之前（B 帧重排的常见结果）：空编辑先垫上
-			// 这段，之后整条媒体原样呈现。
-			t.delay = uint64(-start)
+			// 这段，之后整条媒体从 0 原样呈现。
+			//
+			// 🔴 这段是「**比基准晚多少**」**加上**「自己首帧在 0 之前的那
+			// 一段」，两样都要有。只写 `-start` 的话，两条轨的首帧都在 0
+			// 之前时（两条流各自的编码器 priming / B 帧重排都会这样），
+			// 每一条都被挪到「电影时间 0」——于是**它们之间真实的先后被抹
+			// 掉**：差 12 ms 的两条轨出来是同时出现的，差半秒的那两条出来
+			// 画面比声音早 12.5 帧。
+			//
+			// 而「只有一条在 0 之前」是常见情形，那时 `-start` 恰好等于
+			// 正确答案——所以这一支在别的用例里一次都走不到。
+			t.delay = uint64(start-base) + uint64(-start)
 			t.mediaTime = 0
 		} else {
 			t.delay = uint64(start - base)

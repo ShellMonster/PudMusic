@@ -85,13 +85,6 @@ type Source struct {
 	Ext string
 	// URLs 是同一段字节的多个地址：主地址在前，备用地址在后。
 	URLs []string
-	// Video 报「这是视频那一对流」。
-	//
-	// 和 `Identity.Video` 分开是因为它们在不同的时刻、由不同的那一层
-	// 决定：入队那一刻（界面线程上，没有地址）靠 `Identity.Video` 记着
-	// 「这一项是视频」；取流回来之后这一位才填得上（app 层知道 B 站给
-	// 的那一对是不是视频流）。
-	Video bool
 	// CompanionURLs 是**第二那条流**的地址（视频下载里的音频）。
 	//
 	// **空 = 这一项只有一条流**，那是最常见的情况（音频下载），
@@ -102,6 +95,20 @@ type Source struct {
 }
 
 // IdentityOf 把一次探测的结果凑成资源身份。
+//
+// ⚠️ 它**只包含源告诉我们的那几样**（是谁、哪一档、多长）。这一项
+// 自己带着的那两样——`Video` 和 `VideoQ`——**不在这里**，而是由 `Task`
+// 保住（见 `Task.adoptSource`）。
+//
+// ⚠️ 别把这两个字段加回来。它们**曾经**在这里，而那是个陷阱：
+// `prepare` 每次都会 `t.Identity = src.IdentityOf(length)`（那是续传
+// 身份校验的一部分），于是只要有一个 `Source` 忘了填，「这一项是不是
+// 视频」「用户点的是哪一档」就**被抹成零值**了——
+//
+//	暂停一下再继续 → 取流看到 want.Video=false → 只问音频
+//	                → 「音频流：没有能下的地址」
+//
+// 而这两种情况下界面上的那一行都不给任何提示：它只是再也下不完了。
 func (s *Source) IdentityOf(length int64) Identity {
 	return Identity{Bvid: s.Bvid, Cid: s.Cid, Quality: s.Quality, Length: length}
 }
@@ -366,7 +373,7 @@ func (m *Manager) prepare(id string, src *Source, length int64) (string, error) 
 			t.Companion.Chunks = nil
 		}
 	}
-	t.Identity = src.IdentityOf(length)
+	t.adoptSource(src, length)
 	if t.Label == "" {
 		t.Label = src.Label
 	}

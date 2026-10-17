@@ -50,6 +50,40 @@ type fileCDN struct {
 	cutAt     int64 // >0：每次响应只给这么多字节就掐断（模拟下到一半）
 	inFlight  int
 	peakRatio int
+
+	// gate 非 nil 时，每次响应在送正文**之前**先等它关上。
+	//
+	// 它存在是为了把下载**确定地**按在「请求发出去了、正文一个字节还没到」
+	// 那一刻：靠「素材够大所以慢」来撞那个时机，在负载一高的机器上就是
+	// 时好时坏（而它时好时坏的样子是「照样通过，看不出自己没测到东西」）。
+	gate      chan struct{}
+	blocked   int
+	requests0 int
+}
+
+// hold 把这台 CDN 关上，直到 release。
+func (c *fileCDN) hold() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.gate = make(chan struct{})
+}
+
+// release 放行。
+func (c *fileCDN) release() {
+	c.mu.Lock()
+	g := c.gate
+	c.gate = nil
+	c.mu.Unlock()
+	if g != nil {
+		close(g)
+	}
+}
+
+// waiting 报有几发请求正卡在闸门上。
+func (c *fileCDN) waiting() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.blocked
 }
 
 func newFileCDN(t *testing.T, name, path string) *fileCDN {
@@ -116,6 +150,27 @@ func (c *fileCDN) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	c.mu.Unlock()
 
+	c.mu.Lock()
+	g := c.gate
+	c.mu.Unlock()
+	if g != nil {
+		c.mu.Lock()
+		c.blocked++
+		c.mu.Unlock()
+		select {
+		case <-g:
+		case <-r.Context().Done():
+			// 被取消了：这一发一个正文都不给（而这一块因此没下全）。
+			c.mu.Lock()
+			c.blocked--
+			c.mu.Unlock()
+			return
+		}
+		c.mu.Lock()
+		c.blocked--
+		c.mu.Unlock()
+	}
+
 	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(c.body)))
 	w.WriteHeader(http.StatusPartialContent)
 	c.write(w, start, end+1, cut)
@@ -150,11 +205,12 @@ func (c *fileCDN) write(w http.ResponseWriter, start, end, cut int64) {
 
 // videoHarness 是一套会下视频的队列。
 type videoHarness struct {
-	t     *testing.T
-	m     *Manager
-	dir   string
-	video *fileCDN
-	audio *fileCDN
+	t         *testing.T
+	m         *Manager
+	dir       string
+	queueFile string
+	video     *fileCDN
+	audio     *fileCDN
 }
 
 func newVideoHarness(t *testing.T, spVideo, spAudio muxtest.Spec) *videoHarness {
@@ -170,17 +226,34 @@ func newVideoHarness(t *testing.T, spVideo, spAudio muxtest.Spec) *videoHarness 
 	video := newFileCDN(t, "video", vp)
 	audio := newFileCDN(t, "audio", ap)
 
-	h := &videoHarness{t: t, dir: dir, video: video, audio: audio}
+	h := &videoHarness{t: t, dir: dir, queueFile: filepath.Join(t.TempDir(), QueueFileName),
+		video: video, audio: audio}
 	m, err := New(Options{
 		Client:  http.DefaultClient,
 		Resolve: h.resolver(),
-	}, filepath.Join(t.TempDir(), QueueFileName))
+	}, h.queueFile)
 	if err != nil {
 		t.Fatalf("建队列：%v", err)
 	}
 	h.m = m
 	t.Cleanup(func() { _ = m.Close("") })
 	return h
+}
+
+// reopen 走真实的退出流程（先把队列落盘）再读回来。
+func (h *videoHarness) reopen() *videoHarness {
+	h.t.Helper()
+	if err := h.m.Save(h.queueFile); err != nil {
+		h.t.Fatalf("存队列：%v", err)
+	}
+	m, err := New(Options{Client: http.DefaultClient, Resolve: h.resolver()}, h.queueFile)
+	if err != nil {
+		h.t.Fatalf("重开：%v", err)
+	}
+	h.t.Cleanup(func() { _ = m.Close("") })
+	h2 := &videoHarness{t: h.t, m: m, dir: h.dir, queueFile: h.queueFile,
+		video: h.video, audio: h.audio}
+	return h2
 }
 
 // resolver 是这套队列的取流：两条 dash 流。
@@ -527,11 +600,15 @@ func TestAMuxingTaskSurvivesARestartAndFinishesOnResume(t *testing.T) {
 	}
 	queueFile := filepath.Join(t.TempDir(), QueueFileName)
 
-	resolve := func(context.Context, Identity) (*Source, error) {
-		return &Source{
+	resolve := func(_ context.Context, want Identity) (*Source, error) {
+		src := &Source{
 			Bvid: bvid, Cid: cid, Quality: 120, Label: "1080P",
-			Video: true, URLs: []string{video.url()}, CompanionURLs: []string{audio.url()},
-		}, nil
+			URLs: []string{video.url()},
+		}
+		if want.Video {
+			src.CompanionURLs = []string{audio.url()}
+		}
+		return src, nil
 	}
 	m1, err := New(Options{Client: http.DefaultClient, Resolve: resolve}, queueFile)
 	if err != nil {
@@ -703,5 +780,107 @@ func TestAFailedMuxKeepsTheHalfProductsWhereTheyAre(t *testing.T) {
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("半成品 %s 不在了：%v", filepath.Base(p), err)
 		}
+	}
+}
+
+// ---- 八、暂停再继续 / 退出重开：这一项还是「视频」 ----
+
+// TestAVideoSurvivesAPauseAndAResume 钉住「暂停一下再继续」之后它还是
+// 视频下载。
+//
+// 这条是被评审第一轮逮出来的（探针叫 `TestProbePauseThenResumeInOneSession`）。
+//
+// 症状：暂停 → 继续 → `download: 音频流：download: 没有能下的地址`，而那一行
+// **再也不动了**——它不是「下得慢」，是再也下不完。
+//
+// 根因在**身份**上：`prepare` 每轮都要做资源身份校验（续传的前提，见
+// `Identity`），校验完把新身份**整份**写回去。而这一项自己带着的
+// 「我是视频」「用户点的是哪一档」不在源告诉我们的那几样里，于是被顺带抹成
+// 零值——下一轮取流看到 `want.Video == false`，就去问了一条音频，
+// 而音频那一侧当然没有伴流可下。
+//
+// ⚠️ 界面上看不出任何异常：状态是「出错」、红字是「没有能下的地址」，而
+// 用户做的事只是「暂停了一下又点了继续」。
+func TestAVideoSurvivesAPauseAndAResume(t *testing.T) {
+	h := newVideoHarness(t, muxtest.VideoSpec(300), muxtest.AudioSpec(10))
+
+	// 把 CDN 关上：请求会发出去、正文一个字节都不到，而队列停在「在下」。
+	h.video.hold()
+	snap, err := h.m.Enqueue(AddRequest{
+		Bvid: bvid, Cid: cid, Title: "测试的 MV", Dir: h.dir, Video: true, VideoQ: 120,
+	})
+	if err != nil {
+		t.Fatalf("入队：%v", err)
+	}
+	waitUntil(t, func() bool { return h.video.waiting() > 0 })
+
+	if err := h.m.Pause(snap.ID); err != nil {
+		t.Fatalf("暂停：%v", err)
+	}
+	h.video.release()
+	paused := h.wait(snap.ID, StatusPaused)
+	if paused.Percent >= 100 {
+		t.Fatalf("暂停时已经下到 %d%%——这一条没走到「下了一半」那个状态", paused.Percent)
+	}
+
+	if err := h.m.Resume(snap.ID); err != nil {
+		t.Fatalf("继续：%v", err)
+	}
+	done := h.wait(snap.ID, StatusDone)
+	if got := filepath.Ext(done.Dest); got != ".mp4" {
+		t.Errorf("暂停再继续之后落的后缀是 %q，要的是 .mp4", got)
+	}
+}
+
+// TestAVideoSurvivesASaveAndRestore 钉住「退出重开之后它还是视频下载」。
+//
+// 同一条根因的另一半（探针 `TestProbeIdentityVideoSurvivesSaveRestore`
+// 量到的是「重开之后身份 Video=false」）。这一条走的是**落盘再读回**那条路，
+// 而那一路上写的是 `Identity` 自己的字段——所以断的是「队列文件里那个
+// 身份还记不记得自己是视频」。
+func TestAVideoSurvivesASaveAndRestore(t *testing.T) {
+	h := newVideoHarness(t, muxtest.VideoSpec(300), muxtest.AudioSpec(10))
+	h.video.hold()
+	snap, err := h.m.Enqueue(AddRequest{
+		Bvid: bvid, Cid: cid, Title: "测试的 MV", Dir: h.dir, Video: true, VideoQ: 120,
+	})
+	if err != nil {
+		t.Fatalf("入队：%v", err)
+	}
+	waitUntil(t, func() bool { return h.video.waiting() > 0 })
+	if err := h.m.Pause(snap.ID); err != nil {
+		t.Fatalf("暂停：%v", err)
+	}
+	h.video.release()
+	h.wait(snap.ID, StatusPaused)
+
+	if err := h.m.Save(h.queueFile); err != nil {
+		t.Fatalf("存队列：%v", err)
+	}
+	h2 := h.reopen()
+
+	got, ok := h2.m.Get(snap.ID)
+	if !ok {
+		t.Fatal("重开之后队列里没有这一项")
+	}
+	if got.Status != StatusPaused {
+		t.Fatalf("重开之后状态是 %q，要的是暂停", got.Status)
+	}
+	if err := h2.m.Resume(snap.ID); err != nil {
+		t.Fatalf("继续：%v", err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if s, _ := h2.m.Get(snap.ID); s.Status == StatusDone || s.Status == StatusError {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	final, _ := h2.m.Get(snap.ID)
+	if final.Status != StatusDone {
+		t.Fatalf("重开再继续之后状态是 %q，%s", final.Status, final.Err)
+	}
+	if got := filepath.Ext(final.Dest); got != ".mp4" {
+		t.Errorf("落的后缀是 %q，要的是 .mp4", got)
 	}
 }

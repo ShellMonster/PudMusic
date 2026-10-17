@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -338,5 +339,80 @@ func patchFragmentBaseFlag(t *testing.T, in, out string, sp streamSpec) {
 			t.Fatalf("写改过的 moof：%v", err)
 		}
 		pos += int64(hdr.size)
+	}
+}
+
+// TestBothTracksStartingBeforeZeroKeepTheirRealGap 钉住「两条轨的首帧都在
+// 媒体时间 0 之前」。
+//
+// 这条是被评审第一轮逮出来的。真触发条件是**两条源流的首个呈现时间都落在
+// 0 之前**——两条流各自的编码器 priming / B 帧重排都会这样，而
+// `muxtest.WithCtsBias` 就是造它的。
+//
+// 症状：第一版那条分支写的是 `delay = -start`（没有减掉 `base`），于是
+// 每一条轨都被挪到电影时间 0——**它们之间真实的先后被抹掉**：
+//
+//	两条差 12 ms  → 出来两条同时出现
+//	差 416.7 ms   → 出来画面比声音早 416.7 ms（约 12.5 帧 @30fps）
+//
+// ⚠️ 它躲过了所有既有用例：「**只有一条**在 0 之前」是常见情形，那时
+// `-start` 恰好等于正确答案，于是另一支永远走不到。
+func TestBothTracksStartingBeforeZeroKeepTheirRealGap(t *testing.T) {
+	// 首帧落在电影时间的哪儿 = 空编辑的长度 + 它自己首帧在媒体时间 0 之前
+	// 的那一段（媒体 m → 电影 `D + m`）。
+	//
+	// ⚠️ **不是**「空编辑的长度」那一样：两条轨的首帧都在 0 之前时，两条
+	// 轨的 `D` **本来就该相等**（都等于 `-base`），而它们首帧的先后是在
+	// `D + firstPTS` 那里分开的。量错了这一样，这一条用例就会在坏的那个
+	// 版本上照样通过。
+	for _, tc := range []struct {
+		name        string
+		videoBias   int32   // 90000 时基
+		audioBias   int32   // 48000 时基
+		wantVideoMS float64 // 视频首帧在电影时间上的位置
+		wantAudioMS float64 // 音频首帧在电影时间上的位置
+	}{
+		{"两条差 12 毫秒", -3000, -1024, 0, 12},
+		{"音频早半秒", -3000, -24000, 466.7, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			spV := muxtest.VideoSpec(120).WithCtsBias(tc.videoBias)
+			spA := muxtest.AudioSpec(4).WithCtsBias(tc.audioBias)
+			video, audio := writePair(t, spV, spA)
+			dst := filepath.Join(dir, "v.mp4")
+
+			if _, err := Mux(context.Background(), video, audio, dst); err != nil {
+				t.Fatalf("交织：%v", err)
+			}
+			out := decodeOut(t, dst)
+			movieTS := out.Moov.Mvhd.Timescale
+
+			first := make(map[string]float64, 2)
+			for _, trak := range out.Moov.Traks {
+				if trak.Edts == nil || len(trak.Edts.Elst) == 0 {
+					t.Fatalf("%s 轨没有编辑列表——首帧在媒体时间 0 之前时"+
+						"必须有一段空编辑", trak.Mdia.Hdlr.HandlerType)
+				}
+				d := trak.Edts.Elst[0].Entries[0].SegmentDuration
+				src := spA
+				if trak.Mdia.Hdlr.HandlerType == "vide" {
+					src = spV
+				}
+				// 媒体 m → 电影 `D + rescale(m)`，m 是这一条的首帧呈现时间。
+				lead := rescale(int64(src.CtsOf(0)), src.Timescale(), movieTS)
+				first[trak.Mdia.Hdlr.HandlerType] =
+					(float64(d) + float64(lead)) / float64(movieTS) * 1000
+			}
+			if math.Abs(first["vide"]-tc.wantVideoMS) > 1 {
+				t.Errorf("视频首帧出现在 %.1f ms，真值是 %.1f ms（got %v）",
+					first["vide"], tc.wantVideoMS, first)
+			}
+			if math.Abs(first["soun"]-tc.wantAudioMS) > 1 {
+				t.Errorf("音频首帧出现在 %.1f ms，真值是 %.1f ms（got %v）"+
+					"——两条轨首帧都在 0 之前时，它们之间真实的先后被抹掉了",
+					first["soun"], tc.wantAudioMS, first)
+			}
+		})
 	}
 }
