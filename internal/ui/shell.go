@@ -100,6 +100,12 @@ type Shell struct {
 	// 新建一个等于每帧回到顶上，「切 Tab 回到原位」这条就永远不成立。
 	home *homePage
 
+	// follow 是「我的关注」那一页的状态：左边那一列分组、右边那个网格、切在
+	// 哪个分组、搜索框里正在敲的字。见 follow.go。
+	//
+	// 同样是建一次存着：网格和分组列各记各的滚动位置，每帧新建等于每帧回到顶上。
+	follow *followPage
+
 	// downloads 是下载记录页自己那一摊状态：那张表格、删除确认弹窗。见
 	// downloadlist.go。
 	//

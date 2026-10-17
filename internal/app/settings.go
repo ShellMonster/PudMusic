@@ -225,15 +225,23 @@ type SideMenuCollectionFolded struct {
 
 // SideMenuCollectionOrder 是侧栏两组收藏的**顺序**：每组一条 ID 序列。
 //
-// ## 这是唯一一个我们加的、Biu 没有的键
+// ## 我们加的、Biu 没有的键（两个地方，原因一样）
 //
-// Biu 把这个顺序单独存在另一个 store 里（zustand persist 的
-// `"favorites-order"`，`{createdOrder, collectedOrder}`，
-// `biu/src/store/favorite.ts:157-163`），不在 app-settings.json 里。
-// 我们放进设置，是因为验收要求「顺序落盘」，而设置存储已经把 schema 版本、
+// `SideMenuCollectionOrder` 和 `Settings.PlayMode` /
+// `Settings.ShouldKeepPagesOrderInRandomPlayMode` 在 Biu 那边**都不在
+// app-settings.json 里**：前者是 zustand persist 的 `"favorites-order"`
+// （`{createdOrder, collectedOrder}`，`biu/src/store/favorite.ts:157-163`），
+// 后两者是 `play-list` store 里的字段（`biu/src/store/play-list.ts:74,86`，
+// 靠它自己的 partialize 落盘）。
+//
+// 键名照抄、位置换了，理由和 Biu 把它们分开存一样：它们是**队列/侧栏的状态**，
+// 不是应用的配置。但我们仍然放进设置，因为设置存储已经把 schema 版本、
 // 原子写、退出前 flush、只读保护这几件都做好了（见 settings.go），
 // 另开一份文件就等于把这些重造一遍——重造出来的那份还少了只读保护：
 // 设置来自更新的版本时，这一格照样会被旧版本按旧语义改写。
+//
+// 「顺序」这一格还多一条理由：验收要求「顺序落盘」，而设置是唯一一个已经
+// 做对了写入那一半的地方。
 //
 // 分工照 Biu：**条目不存，顺序才存**。条目每次从接口拉，存一份本地副本
 // 只会和接口对不上；顺序是用户拖出来的，接口不返回，只能存。
@@ -288,6 +296,25 @@ type Settings struct {
 	SideMenuCollectionOrder  SideMenuCollectionOrder  `json:"sideMenuCollectionOrder"`
 	ReportPlayHistory        bool                     `json:"reportPlayHistory"`
 	LocalMusicDirs           []string                 `json:"localMusicDirs"`
+
+	// PlayMode 是播放模式（顺序 / 循环 / 随机 / 单曲）。键名照 Biu 的
+	// `play-list.ts:74` 那个 zustand 字段，见本类型上面「我们加的键」那一段。
+	PlayMode PlayMode `json:"playMode"`
+	// ShouldKeepPagesOrderInRandomPlayMode 是「随机时保持分集顺序」。键名照 Biu
+	// 的 `play-list.ts:86`，同一段理由。
+	//
+	// ⚠️ **默认值是 true（照 Biu 的 `play-list.ts:373`），而它的零值是 false，
+	// 所以「这份设置里没有这一格」和「用户把它关了」在读回来之后分不开。**
+	// 于是：新装的是开的（走 DefaultSettings），从一份旧设置升上来的是关的。
+	//
+	// 这不是这一格独有的：`ShowSearchHistory` 和 `ReportPlayHistory` 的默认值
+	// 也是 true，缺了它们同样是关的（见 DefaultSettings）。Go 的 bool 表达不了
+	// 「没设过」，要修就得给这几格一起换成 `*bool` 或者涨一次 SchemaVersion 再
+	// 迁移——那是另一票的事，不该混在「加四档播放模式」里顺手做掉。
+	//
+	// 今天没人在意：分集视频的队列（多 P 一起进队列）是 BMG-47 的 A12，还没做，
+	// 而这个开关现在只在**队列里已经有分集**的时候才改变任何事。
+	ShouldKeepPagesOrderInRandomPlayMode bool `json:"shouldKeepPagesOrderInRandomPlayMode"`
 
 	// extra 是这个版本的代码不认识的键，原样带着走。
 	//
@@ -394,6 +421,12 @@ func DefaultSettings(downloadPath string) Settings {
 		},
 		ReportPlayHistory: true,
 		LocalMusicDirs:    []string{},
+
+		// 播放模式的两个默认值都照 Biu 的初始状态（`play-list.ts:370,373`）：
+		// 默认循环播放（不是顺序播放——「放完就停住」正是这一票要治的症状，
+		// 见 PlayMode 的注释），随机时保持分集顺序默认开着。
+		PlayMode:                             DefaultPlayMode,
+		ShouldKeepPagesOrderInRandomPlayMode: true,
 	}
 }
 
@@ -591,6 +624,9 @@ func (s *Settings) normalize() {
 		PageTransitionScale, PageTransitionSlideUp)
 	s.CloseWindowOption = pickEnum(s.CloseWindowOption, CloseWindowHide,
 		CloseWindowHide, CloseWindowExit)
+	// 设置文件里没有 playMode 这一格时它是空串，normalize 会把它变成默认档，
+	// 于是「老版本升上来」和「新装」走的是同一条路。
+	s.PlayMode = pickEnum(s.PlayMode, DefaultPlayMode, PlayModes...)
 	s.ProxySettings.Type = pickEnum(s.ProxySettings.Type, ProxyNone,
 		ProxyNone, ProxyHTTP, ProxyHTTPS, ProxySOCKS4, ProxySOCKS5)
 

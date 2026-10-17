@@ -153,6 +153,13 @@ func openDecoder(r io.ReadSeeker) (mygoaudio.Decoder, string, error) {
 // 解码失败在那边都是 false（见 `decoder.go` 顶上那段）。
 func (p *Player) Err() error { return p.dec.Err() }
 
+// Ended 报这一首的数据是不是已经放到头了。
+//
+// 这是「该自动下一首了」那一档的判据，和 Err 互补（见 decoder.go 的顶上）。
+// 单看它一个不够——暂停、停止、关闭也都停，得配着「本来在放」和「没有报错」
+// 一起看，那三句在 `App.onTrackFinished` 的调用处（app.go 的 tick）。
+func (p *Player) Ended() bool { return p.dec.Ended() }
+
 // owned 把解码器和它依赖的资源绑成一个整体，关的时候一起关。
 //
 // closers 是解码器之外要关的东西（目前是文件），按依赖顺序排：解码器自己

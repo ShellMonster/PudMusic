@@ -2,26 +2,27 @@ package app
 
 import (
 	"fmt"
+	"math/rand"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 )
 
-// 最小播放队列：当前项 + 上一首 + 下一首 + 尾部追加。
+// 最小播放队列：当前项 + 上一首 + 下一首 + 尾部追加，外加**四档播放模式**。
 //
-// 只有这四件事。判重、排序、持久化、播放模式（顺序 / 单曲 / 随机）、跨来源
-// 都留给后面的阶段——但队列本身不能等：上一首/下一首是播放条上现在就有的两个
-// 按钮，界面层已经按「队列存在」的样子写了，先把接口立住，后面接 B 站的
-// 来源时不用动播放条。
+// 判重、跨来源留给后面的阶段——但队列本身不能等：上一首/下一首是播放条上
+// 现在就有的两个按钮，界面层已经按「队列存在」的样子写了，先把接口立住，
+// 后面接 B 站的来源时不用动播放条。播放模式同理，「一首歌放完之后下一首是
+// 谁」是播放条上那个模式按钮背后唯一的一件事。
 //
 // 队列跟着 App 走：App 一开始就是空队列（见 app.go 的 New）。
 
 // Item 是队列里的一项。
 //
 // 身份按 Biu 的判重标识来（`_research/biu/src/store/play-list.ts` 的 isSame）：
-// 本地项按 id（也就是路径），在线的 mv 按 bvid，audio 按 sid。阶段 1 只有
-// 本地项用得上，后四个字段先留好位置——接 B 站时队列的形状不用改。
+// 本地项按 id（也就是路径），在线的 mv 按 bvid，audio 按 sid。
 //
 // 字段名沿用 Biu 的叫法，值也沿用：Source 是 "local" / "online"，
 // Type 是 "local" / "mv" / "audio"。Cover 对应 Biu 那一侧的 `cover`
@@ -43,6 +44,20 @@ type Item struct {
 	// 字段先立着——等 B 站接口把 ownerName 带下来就有值了，
 	// 队列和媒体会话都不用改。
 	Artist string
+
+	// PageIndex / TotalPage 是多 P 视频里的「第几集 / 共几集」，对应 Biu 的
+	// `PlayItem.pageIndex` / `totalPage`。0 表示「不是分集视频」或者「还没接」。
+	//
+	// 它们只被**一个**地方读：「随机时保持分集顺序」那一个开关
+	// （见 Queue.Advance 的随机分支和 nextPage）。别的什么都不看它们，
+	// 所以填错了不会让歌放不出来。
+	//
+	// ⚠️ 但 `Identity` 也**没有**把分集算进去（同一 bvid 的两集在它眼里是
+	// 同一首）。今天不碰它是因为还没有一处会往队列里放分集（分集抽屉是
+	// BMG-47 的 A12，还没做）；等那一票落地时，`Identity` 和抽屉的去重要
+	// 一起把它算进去，否则两集会被并成一行、删一份删掉两集。
+	PageIndex int
+	TotalPage int
 }
 
 // LocalItem 把一个本地音频文件包成一项。
@@ -110,16 +125,45 @@ func (it Item) IsLocal() bool { return it.Source == "local" || it.Type == "local
 // Queue 是播放队列。零值不可用，请用 NewQueue。
 //
 // 末尾的行为照抄 Biu 的 play-list.ts：next 和 prev 都是取模绕回，队列里只有
-// 一首歌时按下一首等于从头再播。随机模式和「多集视频要按分集顺序」那些规则
-// 现在不做，但它们也只是从 Move 里分出去。
+// 一首歌时按下一首等于从头再播。
+//
+// **「一首歌放完之后下一首是谁」不走 Move，走 Advance**：Move 是用户按了
+// 「下一首」（按顺序挪一格、两端绕回，和档位无关），Advance 是**歌自己放完
+// 了**（按当前档位决定，见下面「播放模式」那一节）。分界是 Biu 那边也分开的：
+// `audio.onended` 才看 playMode，手动的 next 按钮不看（`next()` 里三档
+// 共用同一个分支）。
 type Queue struct {
 	mu    sync.Mutex
 	items []Item
 	cur   int // 当前项的下标；-1 是还没开始
+
+	// mode 和 keepPages 归**这把锁**管，不归 App 的 `a.mu` 管：它们是队列的
+	// 形状（下一首是谁要靠它们算），而 `a.mu` 管的是播放器。界面每帧读的
+	// `State` 因此只是多拿一把互不相干的锁，不会把播放器那一趟（它可能正
+	// 卡在一次网络读上）也拖进来。
+	mode PlayMode
+	// keepPages 的默认是 true，照 Biu 的初始值（`play-list.ts:373`）。
+	keepPages bool
+	// rnd 是随机模式挑歌用的随机源。见 RandSource 的注释——为什么不能
+	// 用包级的那个。
+	rnd RandSource
 }
 
-// NewQueue 建一个空队列。
-func NewQueue() *Queue { return &Queue{cur: -1} }
+// NewQueue 建一个空队列，随机源按当前时间播种。
+//
+// 用包级的 `rand` 就不对：全局那个没法在测试里定住，于是「随机」会变成一条
+// 偶尔绿偶尔红的测试。测试和任何想要可复现乱序的调用方走 NewQueueWithRand。
+func NewQueue() *Queue {
+	return NewQueueWithRand(rand.New(rand.NewSource(time.Now().UnixNano())))
+}
+
+// NewQueueWithRand 建一个空队列，随机模式挑歌走给定的随机源。
+//
+// 同一个源必然挑出同一串歌，所以「随机这一档下一首是 c」这种断言才能一次
+// 一次地钉死，而不是偶尔红一次。
+func NewQueueWithRand(r RandSource) *Queue {
+	return &Queue{cur: -1, mode: DefaultPlayMode, keepPages: true, rnd: r}
+}
 
 // Append 往队列尾部追加，不动当前项。
 func (q *Queue) Append(items ...Item) {
@@ -357,6 +401,295 @@ func (q *Queue) selectAt(i int) (Item, bool) {
 	return q.items[i], true
 }
 
+// ---- 播放模式 ----
+//
+// 四档，档位、文案、默认档和切换顺序全部照 Biu 的
+// `_research/biu/src/common/constants/audio.tsx:27-48`（`PlayMode` 枚举 +
+// `getPlayModeList`）：
+//
+//	顺序播放 Sequence → 循环播放 Loop → 随机播放 Random → 单曲播放 Single
+//
+// **「循环」的两种含义在这里是分开的两档，不是同一档的两个开关**：
+//
+//   - 循环播放 = **列表循环**：放完一首往后挪，走到队尾绕回第一首。
+//   - 单曲播放 = **单曲循环**：放完还是同一首，从头再放一遍。
+//
+// 合起来说成「循环」的时候，监听是错的——用户说的「循环」到底指「别停」
+// 还是「别跳」，得他自己选。Biu 分成两档，我们照它分。
+//
+// 逐档抄过来的行为（Biu 的 `audio.onended` + `next()`，都在
+// `src/store/play-list.ts`）：
+//
+//	顺序  cur+1，**走到队尾就停**（不绕回）。队列里只有一首歌也是停。
+//	循环  cur+1，走到队尾绕回第一首。只有一首歌时绕回的还是它，重头再放。
+//	随机  抽。抽之前先问一句「保持分集顺序」要不要听（见 nextPageLocked）。
+//	单曲  不挪，还是这一首，从头再放。
+//
+// 另有两条是 Biu 有、我们**故意不抄**的：
+//
+//   - 单曲那一档在 Biu 是靠 `audio.loop = true` 交给浏览器的（onended 直接
+//     return）。我们不在播放器上开循环：那样「下一首是谁」的决定权就跑到
+//     音频引擎里去了，而这一层的验收是「四档各能说清下一首是哪首」。
+//     单曲在这里是 Advance 给出的一个结论（重放当前这一首），播放器只负责
+//     「从 0 开始放」。
+//   - Biu 的随机是每次 `shuffle(整个列表)` 再找当前那首在洗过之后的位置、
+//     取它后面那一首。它依赖「上一次洗出来的顺序」，所以同一首歌连着两次
+//     放完可能落到同一首上。我们是在**除掉当前首**剩下的歌里直接抽一个
+//     （见 pickOtherLocked），每一首都一样可能被抽中，也不会连着两首。
+
+// PlayMode 是播放模式。
+//
+// Biu 那边的 `PlayMode` 是 1..4 的数字；我们落盘用这四个词，因为设置文件是
+// 用户能直接编辑的（见 settings.go 的文件头）。**档位顺序、文案和默认档照
+// 它**——Biu 的 `play-list.ts:978` 那份持久化里的键名我们原样沿用。
+type PlayMode string
+
+const (
+	PlayModeSequence PlayMode = "sequence"
+	PlayModeLoop     PlayMode = "loop"
+	PlayModeRandom   PlayMode = "random"
+	PlayModeSingle   PlayMode = "single"
+)
+
+// DefaultPlayMode 是刚装上时的档位。Biu 的初始值是 `PlayMode.Loop`
+// （`play-list.ts:370`）。
+//
+// 挑它而不是顺序，是因为「一首歌放完了应用就停住」正是这一票要治的那个症状
+// （对照审计 BMG-47 的 A5）。默认档就该是不用手动点下一首的那一档。
+const DefaultPlayMode = PlayModeLoop
+
+// PlayModes 是四档按切换顺序排的那一条。
+//
+// 播放条上那个按钮每按一次就沿着它往前挪一格，挪到最后回到第一档——Biu 的
+// `togglePlayMode` 就是 `playModeList[(i+1) % length]`。**顺序和这里一致，
+// 界面上按几下能转回同一档才是同一件事。**
+var PlayModes = []PlayMode{PlayModeSequence, PlayModeLoop, PlayModeRandom, PlayModeSingle}
+
+// Desc 是这一档在界面上说的那句完整的话，文案照 Biu 的 `getPlayModeList`。
+//
+// ⚠️ **认不出的档位说默认档那句话，不说空串**。`State` 是界面每一帧现读的
+// 值拷贝，而测试和未来的调用方会手写 `app.State{...}`（那时候没有这一格，
+// 它是零值）——说空串的话播放条上就有一个**没有字的按钮**，而空按钮不报错、
+// 不消失，只是「按下去不知道换成了什么」。
+func (m PlayMode) Desc() string {
+	switch m {
+	case PlayModeSequence:
+		return "顺序播放"
+	case PlayModeLoop:
+		return "循环播放"
+	case PlayModeRandom:
+		return "随机播放"
+	case PlayModeSingle:
+		return "单曲播放"
+	}
+	// 认不出的（空串、手写坏的）说默认档那句话，见上面的说明。
+	return "循环播放"
+}
+
+// Label 是播放条按钮上那两个字（顺序 / 循环 / 随机 / 单曲）。
+//
+// 比 Desc 短是因为播放条右边已经挤不下了（见 playbar.go 里那一段关于
+// 「放不下第四个控件」的说明）：四个汉字的按钮要 64 以上，而歌名在 760 宽
+// 的窗口里只剩 100 出头。**完整的那句在提示和右键那一列里给全**，短标签不
+// 负责把话说圆——它是「这一档是哪一族」，不是这一档的全部。
+func (m PlayMode) Label() string {
+	switch m {
+	case PlayModeSequence:
+		return "顺序"
+	case PlayModeLoop:
+		return "循环"
+	case PlayModeRandom:
+		return "随机"
+	case PlayModeSingle:
+		return "单曲"
+	}
+	// 同上：认不出时说默认档，不说空串（见 Desc 那段）。
+	return "循环"
+}
+
+// Next 是按一下按钮之后的那一档：从最后一档回到第一档。
+//
+// 认不出的档位（设置文件里手写了一个不认识的词，`normalize` 之后不该出现，
+// 但 `SetPlayMode` 谁都能调）落到第一档，而不是停着不动——停着不动的话
+// 按那个按钮看起来就是坏的。
+func (m PlayMode) Next() PlayMode {
+	i := slices.Index(PlayModes, m)
+	return PlayModes[(i+1)%len(PlayModes)]
+}
+
+// RandSource 是随机模式挑歌用的随机源。方法形状照 `math/rand` 的 Rand，
+// 少一个方法就少一份能在测试里替换的接缝。
+type RandSource interface {
+	Intn(n int) int
+}
+
+// AdvanceKind 是一首歌放完之后，队列给出的**结论**那一档。
+type AdvanceKind int
+
+const (
+	// AdvanceStop：停下来，不放下一首（队列是空的、还没开始放、或者顺序播放
+	// 走到了队尾）。
+	AdvanceStop AdvanceKind = iota
+	// AdvancePlay：接着放 Item 那首。
+	AdvancePlay
+	// AdvanceReplay：把当前这一首**从头**再放一遍（单曲播放，或者随机/循环时
+	// 队列里只有这一首）。
+	AdvanceReplay
+)
+
+// Advance 是一次「放完了」的结论。Kind 是 AdvanceStop 时 Item 是零值。
+type Advance struct {
+	Kind AdvanceKind
+	Item Item
+}
+
+// Advance 是「这一首自然放完了，接下来怎么办」，并把当前项挪到该放的那首上。
+//
+// **下一首是哪首，只有这里说了算。** 界面层拿这个结论去放，App 那边也只调
+// 它——谁要是自己按 `cur+1` 算一遍，随机和单曲两档立刻就错，而那两档错的
+// 表现还恰好是最不容易被发现的（放了一首用户以为在听的歌）。
+//
+// 「自然放完」这个前提由上层判定（`App.onTrackFinished`），这里只管
+// 「放完了以后下一首是谁」。
+//
+// 挪 cur 是为了让播放列表抽屉的高亮跟着走：换了下一首却不挪高亮，抽屉上
+// 高亮的是新歌、响着的还是**刚放完的那首**。挪不了（结论是停下或重放）就
+// 一步都不动。放失败要退回原来那首——`App.onTrackFinished` 拿 prev 回滚。
+func (q *Queue) Advance() Advance {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	n := len(q.items)
+	// 队列是空的、或者压根没开始放：没有「下一首」这件事可决定。
+	if n == 0 || q.cur < 0 || q.cur >= n {
+		return Advance{Kind: AdvanceStop}
+	}
+
+	switch q.mode {
+	case PlayModeSequence:
+		// 顺序播放：往后挪一格，**走到队尾就停**。
+		//
+		// ⚠️ 不绕回是这一档和「循环」唯一真能听出来的差别，而 Biu 就是这么
+		// 做的（`audio.onended` 里那句 `playMode === Sequence && currentIndex
+		// === length-1` 就停下并回到开头）。绕回去的话顺序和循环就成了一档，
+		// 而用户点「顺序播放」通常正是为了听完这一串就停。
+		//
+		// 队列里只有一首歌时它就是队尾，所以也是停（和 Biu 一致）。
+		if q.cur == n-1 {
+			return Advance{Kind: AdvanceStop}
+		}
+		q.cur++
+		return Advance{Kind: AdvancePlay, Item: q.items[q.cur]}
+
+	case PlayModeSingle:
+		// 单曲循环：一步都不挪，同一首从头再来。
+		return Advance{Kind: AdvanceReplay, Item: q.items[q.cur]}
+
+	case PlayModeRandom:
+		if next, ok := q.nextPageLocked(); ok {
+			q.cur = next
+			return Advance{Kind: AdvancePlay, Item: q.items[q.cur]}
+		}
+		if n == 1 {
+			return Advance{Kind: AdvanceReplay, Item: q.items[q.cur]}
+		}
+		q.cur = q.pickOtherLocked(q.cur, n)
+		return Advance{Kind: AdvancePlay, Item: q.items[q.cur]}
+
+	default:
+		// 循环播放（列表循环）：往后挪一格，**走到队尾绕回第一首**。
+		next := (q.cur + 1) % n
+		if next == q.cur {
+			// 绕回的还是它（队列里只有一首歌）：这一步没有挪，重头再放。
+			return Advance{Kind: AdvanceReplay, Item: q.items[q.cur]}
+		}
+		q.cur = next
+		return Advance{Kind: AdvancePlay, Item: q.items[q.cur]}
+	}
+}
+
+// nextPageLocked 找「同一个视频的下一分集」在队列里的下标，没有是 false。
+//
+// 这是「随机时保持分集顺序」那一个开关（`keepPages`）做的事，抄的是 Biu
+// `next()` 的随机分支开头那几句：当前这首是多集视频的某一集、而且**不是最后
+// 一集**吗？是的话就去放下一集，**不洗牌**。
+//
+// 为什么这值得单独一个开关：多 P 视频的队列（连播、分集收藏）里同一首会有
+// 好几行，随机一打散它们就彻底没了——用户在听第三集，下一首可能跳到别的
+// 视频的第一集去，而「这是同一个视频的下一集」这件事用户是看得出来的。
+//
+// 三件事都认才算「有下一集」：开着这个开关、当前项带着分集信息、下一集真的
+// 在队列里。少认一件就落回正常的随机——**找不到就随机，而不是停下来**。
+func (q *Queue) nextPageLocked() (int, bool) {
+	if !q.keepPages {
+		return 0, false
+	}
+	cur := q.items[q.cur]
+	// PageIndex 从 1 起：0 是「这不是分集视频 / 还没接分集」。
+	if cur.PageIndex <= 0 || cur.PageIndex >= cur.TotalPage {
+		return 0, false
+	}
+	for i, it := range q.items {
+		if it.Bvid == cur.Bvid && it.PageIndex == cur.PageIndex+1 {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// pickOtherLocked 在 n 首里挑一个不是 cur 的下标。**真的打乱。**
+//
+// 为什么不能图省事写成 `cur + 1 + rnd(n-1)` 再对 n 取模：那样得到的是
+// 「往后随机若干首」，**第一首永远轮不到**（从最后一首往前数，最多只能走回
+// 第一首的位置——而它在 n=2 时能中、在 n=5 时几乎中不了）。用户听得出来：
+// 「随机播了一晚上，一首歌没放过」。
+//
+// 这里是在**除掉当前首**剩下的 n-1 首里均匀抽一个，再把它映回 0..n-1：
+// 每一首（含第一首、含队尾）被抽中的机会一样大。
+func (q *Queue) pickOtherLocked(cur, n int) int {
+	k := q.rnd.Intn(n - 1) // 0..n-2，那 n-1 首里的第几个
+	if k >= cur {
+		k++ // 把当前首那一格跳过去
+	}
+	return k
+}
+
+// PlayMode 是当前档位。
+func (q *Queue) PlayMode() PlayMode {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.mode
+}
+
+// SetPlayMode 换档位。**立刻生效**：下一首是谁是每次 Advance 现算的，没有
+// 「开歌时读一次」的缓存，所以换完档不用重开任何一首歌。
+//
+// 认不出的档位落到默认档（和设置文件里手写错的值一个待遇，见 normalize）：
+// 认不出的档位如果原样留着，随机那一支会掉进 `Advance` 的 default（循环），
+// 界面上却显示着一句空的话——用户看到的是「按钮上是空的，行为是循环」。
+func (q *Queue) SetPlayMode(m PlayMode) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if !slices.Contains(PlayModes, m) {
+		m = DefaultPlayMode
+	}
+	q.mode = m
+}
+
+// KeepPagesOrderInRandom 报「随机时保持分集顺序」是不是开着。
+func (q *Queue) KeepPagesOrderInRandom() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.keepPages
+}
+
+// SetKeepPagesOrderInRandom 设「随机时保持分集顺序」。同样立刻生效。
+func (q *Queue) SetKeepPagesOrderInRandom(v bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.keepPages = v
+}
+
 // ---- App 这一侧的接线 ----
 //
 // 方法都定义在这里而不是 app.go：一组相关的东西放一个文件，是队列的形状和
@@ -569,6 +902,135 @@ func (a *App) step(delta int) {
 	if err := a.play(item); err != nil {
 		a.queue.Move(-delta)
 	}
+}
+
+// ---- 播放模式在 App 上的接线 ----
+//
+// 界面上只做两件事：读 State 画出当前是哪一档、按一下按钮调 CyclePlayMode。
+// **界面层不许自己算下一首**——它连 `Queue` 都拿不到下一首是谁，
+// `Queue.Advance` 是唯一那一条路（见那一节的说明）。
+
+// PlayMode 返回当前档位。
+func (a *App) PlayMode() PlayMode { return a.queue.PlayMode() }
+
+// SetPlayMode 切到某一档，并记进设置。
+//
+// **立刻生效，不用重开歌**：下一首是谁是每次 Advance 现算的，没有「开歌时
+// 读一次」的缓存。用户在第 3 首放完之前换档，第 3 首放完走的就是新档的规则。
+func (a *App) SetPlayMode(m PlayMode) {
+	a.queue.SetPlayMode(m)
+	a.rememberPlayMode()
+	// ⚠️ 这一句不能省：`rememberPlayMode` 走的是 UpdateSettings，而没挂设置
+	// 时它直接就走了（连唤醒都没有）。播放条上那个按钮必须**当场**换掉字，
+	// 不能等下一次别的东西碰巧把界面叫醒。
+	a.invalidate()
+}
+
+// CyclePlayMode 按一下播放条上那个按钮：切到下一档。
+//
+// 档序照 Biu 的 `getPlayModeList`（顺序 → 循环 → 随机 → 单曲 → 回顺序），
+// 所以界面上按几下能转回同一档，和 Biu 是同一件事。
+func (a *App) CyclePlayMode() { a.SetPlayMode(a.queue.PlayMode().Next()) }
+
+// SetKeepPagesOrderInRandom 设「随机时保持分集顺序」，并记进设置。
+func (a *App) SetKeepPagesOrderInRandom(v bool) {
+	a.queue.SetKeepPagesOrderInRandom(v)
+	a.rememberPlayMode()
+	a.invalidate() // 理由同 SetPlayMode：那个开关在浮层里，点完得当场收起来。
+}
+
+// rememberPlayMode 把这两个开关落到设置里，下次启动还是这一档。
+//
+// 存不住不算错，理由和 `rememberAudioQuality` 是同一条：设置层自己有入口能
+// 看到「这次改的设置存不住」（见 App.TakeSettingsError），在这儿拦一次只会
+// 让换模式这件事本身失败——那比不记住更糟。
+func (a *App) rememberPlayMode() {
+	mode, keep := a.queue.PlayMode(), a.queue.KeepPagesOrderInRandom()
+	_, _ = a.UpdateSettings(func(s *Settings) {
+		s.PlayMode = mode
+		s.ShouldKeepPagesOrderInRandomPlayMode = keep
+	})
+}
+
+// onTrackFinished 是「这一首自然放完了」那一条路：按当前的播放模式决定
+// 接着放哪首，还是停下来。
+//
+// ⚠️ **调用它之前必须已经确认「是自然放完」**（见 app.go 的 tick）：
+// 暂停、停止、解码失败、断网在 `Playing()` 眼里全都是「不在放了」。判据是
+// 播放器的字节真的读到了头（`audio.Player.Ended`）而且没有报错——这一条
+// 少一半的后果就是「用户按了暂停，下一首歌自己放了起来」。
+//
+// 三种结论（`Queue.Advance` 给的）分别落在三件事上：
+//
+//   - 放下一个：走 `play`，和 `step` 一样是换播放器。放不开就把队列指针退回
+//     放完那首（随机那一档尤其需要退回：挪回去的路是 `selectAt`，不是
+//     `Move`）。
+//   - 重放当前这首：同一个播放器 `Seek(0)` + `Play`。**不开播放器上的循环**
+//     （见 PlayMode 那节的说明）——决定权在这一层，不在音频引擎里。
+//   - 停下来：`Seek(0)` + `Pause`，停在开头等用户。这抄的是 Biu 的
+//     `audio.currentTime = 0; audio.pause()`。
+func (a *App) onTrackFinished() {
+	a.mu.Lock()
+	p, want := a.player, a.wantPlay
+	a.mu.Unlock()
+	if p == nil || !want {
+		return
+	}
+
+	prev := a.queue.CurrentIndex()
+	switch d := a.queue.Advance(); d.Kind {
+	case AdvanceReplay:
+		// MyGo 的 `Play()` 对一个放完的播放器就是从头开始（它自己会 seek(0)），
+		// 这里再显式 seek 一次：界面上的进度条读的是 `a.position`，不等解码
+		// goroutine 回过劲来的那一帧。
+		p.Seek(0)
+		p.Play()
+		a.mu.Lock()
+		a.position, a.playing, a.wantPlay = 0, true, true
+		a.stopped = false
+		wake := a.wake
+		a.mu.Unlock()
+		if wake != nil {
+			wake()
+		}
+
+	case AdvanceStop:
+		p.Seek(0)
+		p.Pause()
+		a.mu.Lock()
+		// ⚠️ **wantPlay 不动**。它是「用户按过播放」，不是「播放器此刻在响」。
+		// 落成 false 的话两处会跟着坏：
+		//
+		//   - `ScrubEnd`：拖回中间就不再接着播（「往回拖必须能接着播」是验收项
+		//     5，`internal/ui/playbar_test.go` 的 `TestDragToEndDoesNotCrash`
+		//     钉着这一句）；
+		//   - `tick` 的 `live`：位置会被读，可停下来之后位置恒为 0，白读而已。
+		//
+		// 而它该表示的「这一串放完了」由 `a.stopped` 记着，系统那边（锁屏上的
+		// 播放/停止）也已经报成 stopped。
+		a.position, a.playing = 0, false
+		a.stopped = true
+		wake := a.wake
+		a.mu.Unlock()
+		if wake != nil {
+			wake()
+		}
+
+	case AdvancePlay:
+		if d.Item.Path == "" && !d.Item.isOnline() {
+			a.queue.selectAt(prev)
+			a.setErr("这一首还不能放：还没有接来源")
+			return
+		}
+		if err := a.play(d.Item); err != nil {
+			a.queue.selectAt(prev)
+			a.setErr(fmt.Sprintf("接不上下一首：%v", err))
+			return
+		}
+	}
+
+	// 锁屏上的那一首得跟着换（新放的这首、或者这一首从头）。
+	a.publishMedia()
 }
 
 // RemoveAt 把队列里第 i 项删掉。队列里没有这一项时返回错误。

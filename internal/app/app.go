@@ -84,6 +84,16 @@ type State struct {
 	// ⚠️ 它是**偏好**，本地文件播放时也照样有值：徽章只对在线流画，
 	// 而换档这个动作不该要求当前正好在放在线流。
 	QualityPref AudioQuality
+
+	// PlayMode 是当前的播放模式（顺序 / 循环 / 随机 / 单曲）。
+	//
+	// 界面**只读它**、按一下调 `App.CyclePlayMode`，不许自己算下一首：
+	// 「下一首是谁」只有 `Queue.Advance` 说得出来（见 queue.go 那一节）。
+	PlayMode PlayMode
+
+	// KeepPagesOrderInRandom 是「随机时保持分集顺序」。只在随机那一档下有意义，
+	// 别的档位里它是什么都不改变。
+	KeepPagesOrderInRandom bool
 }
 
 // App 是应用的全部状态。
@@ -262,6 +272,12 @@ func (a *App) Snapshot() State {
 		Err:         a.errText,
 		Quality:     a.quality,
 		QualityPref: pref,
+
+		// 播放模式在队列自己的锁里，不在 `a.mu` 里——它是队列的形状，不是
+		// 播放器的状态。顺着一句一句取：`a.mu` 已经拿在手里，而 `a.queue`
+		// 那把锁是**另一把**，两者没有嵌套，不会死锁。
+		PlayMode:               a.queue.PlayMode(),
+		KeepPagesOrderInRandom: a.queue.KeepPagesOrderInRandom(),
 	}
 }
 
@@ -614,10 +630,34 @@ func (a *App) tick() {
 			if live && wake != nil {
 				wake()
 			}
+			// 「自然放完」才按播放模式往下走一档。**只判 ended 不够**：
+			// 暂停、停止、关闭在 `Playing()` 眼里和放完了一样（见下面那句）。
+			//
+			// 补的两句各挡一样：
+			//
+			//   - `Ended()`：这一路的字节真的读到过头了。解码失败/断网时
+			//     播放器也停了，但那是**因为坏了**，不是放完了。
+			//   - `Err() == nil`：和 Ended 互补的那个（见 decoder.go）。这一句
+			//     是显式地把两件事都摆出来，省得读代码的人去推「Ended 为真
+			//     时 Err 是不是一定为 nil」。
+			//
+			// 用户按暂停/停止走不到这里：`Toggle`/`Pause`/`Stop` 都把
+			// wantPlay 落成 false，下一次 tick 的 `live` 已经是 false。
+			//
+			// 放在锁外面调：那两样要拿解码器自己的锁，还可能去碰字节源。
+			if ended && p != nil && p.Ended() && p.Err() == nil {
+				a.onTrackFinished()
+			}
 			// ⚠️ 这一句**不能省**。`Playing() == false` 有五种情况：暂停、
 			// 停止、关闭、播完、解码失败（`mygo/audio/audio.go`）。前四种
 			// 什么都不用做，第五种必须变成播放条上的一句话——不然一次断网
 			// 表现成「歌忽然放完了」，用户以为歌放完了。
+			//
+			// ⚠️ 这句在 onTrackFinished **之后**调：换流重开
+			// （`refreshOnlineNow`）要从当前这首的位置接着放，而那一次
+			// `Ended()` 是 false（换流走的是 seek，不是读到头），所以不会有
+			// 冲突；但顺序摆在这里，「有错就换流接着放」才读在「放完了就下一首」
+			// 后面——反过来会让人以为换流时被跳过一首。
 			//
 			// 放在锁外面调：它自己要拿 `a.mu`，而 `Player.Err()` 可能去碰
 			// 字节源。

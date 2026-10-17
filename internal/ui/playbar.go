@@ -27,6 +27,13 @@ const (
 	playbarPadX   = 16
 	coverSize     = 56
 	coverGap      = 8
+	// playModeBtnW 是播放模式按钮的宽度，和「加歌」一样宽：上面写的是两个
+	// 汉字（顺序 / 循环 / 随机 / 单曲），56 是量出来的下限。
+	//
+	// ⚠️ **不能再宽**：它摆在那儿的账是「中间那一列第二行的富余」，不是无限
+	// 的（见 viewProgress 里那一段）。富余用完了，下一个 12 宽的控件就轮到
+	// 歌名了。
+	playModeBtnW = 56
 )
 
 // viewPlayBar 是底部那条播放条：封面、歌名、上一首/下一首/播放、可拖的进度条、音量。
@@ -60,7 +67,9 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 			// 的歌名挤没了：实测 760 宽时歌名只剩 14.9px（一个字一行）。挤没了之
 			// 后**界面看不出坏了**——字还在那儿，只是一个字一行。
 			// `TestTheErrorSitsUnderTheTitle` 和 `TestTheRateButtonDoesNotSquashTheTitle`
-			// 都在盯这一条，所以那个开关去了顶栏（见 navbar.go 的 viewNav）。
+			// 都在盯这一条，所以那个开关去了顶栏（见 navbar.go 的 viewNav），
+			// 播放模式那个也一样——只是它挤在**中间那一列的第二行**（见
+			// viewProgress），那一行有富余，不用从歌名里借。
 			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 				// 音量条自己带无障碍标签，不用旁边再摆一个「音量」字。
 				vol := st.Volume
@@ -233,6 +242,53 @@ func (s *Shell) viewNextButton(c *ui.Context) {
 	}
 }
 
+// viewPlayMode 是播放条上那个切播放模式的按钮，外加它右键出来的那一列。
+//
+// 照 Biu 的 `src/components/music-play-mode/index.tsx`：按一下在四档里转一格
+// （`togglePlayMode`），档位和文案照 `common/constants/audio.tsx:27-48`。
+//
+// **界面不算下一首**：这一层只调 `App.CyclePlayMode` / `App.SetPlayMode`，
+// 「放完下一首是哪首」是 `app.Queue.Advance` 独家的事（见 queue.go 那一节）。
+// 这里要是自己按 cur+1 算一遍，随机和单曲两档立刻就错。
+//
+// 摆在哪儿：进度那一行的最右边。理由（量出来的账）见 viewProgress 里那段。
+func (s *Shell) viewPlayMode(c *ui.Context, st app.State) {
+	btn := ui.Button(c, st.PlayMode.Label()).
+		Width(playModeBtnW).
+		Label("播放模式").
+		Tooltip(st.PlayMode.Desc() + "（点一下换，右键看全部）")
+
+	// 按一下换到下一档。档序（顺序 → 循环 → 随机 → 单曲 → 回顺序）是 App 那边
+	// 的 `PlayMode.Next`，照 Biu 的 `getPlayModeList` 次序，两边按几下能转回
+	// 同一档才是同一件事。
+	if btn.Clicked() {
+		s.app.CyclePlayMode()
+	}
+
+	// 右键出来的是「全部四档 + 那个开关」。四档摆在一列里，不是让人一格一格按
+	// 过去：「我要随机」和「我要单曲」是两种不同的意图，按三下才到得了，而转
+	// 错了还得再按几下。
+	btn.ContextMenu(func(m *ui.Menu) {
+		// 现读一次 Snapshot 而不是接着用 st：这一列是**弹出那一刻**才建的，
+		// 而外面那一帧的 st 是主帧读的那一份（和 viewRateMenu 同一个理由）。
+		now := s.app.Snapshot()
+		for _, mode := range app.PlayModes {
+			if m.Item(mode.Desc()).Checked(mode == now.PlayMode).Chosen() {
+				s.app.SetPlayMode(mode)
+			}
+		}
+		// 「保持分集顺序」只在随机那一档里摆出来，照 Biu 的那一支
+		// （`music-play-mode/index.tsx:37` 那个 `if (playMode === Random)`）：
+		// 别的档位里它什么都不改变，摆出来只会让人以为它在别的档里也有用。
+		if now.PlayMode == app.PlayModeRandom {
+			m.Separator()
+			if m.Item("保持分集顺序").Checked(now.KeepPagesOrderInRandom).Chosen() {
+				s.app.SetKeepPagesOrderInRandom(!now.KeepPagesOrderInRandom)
+			}
+		}
+	})
+}
+
 // pickAndEnqueue 弹文件框，把选中的歌加到队列尾部。
 //
 // 队列空的时候加歌会直接开始播，所以点一下就能听见声音；之后再加就只是排着。
@@ -293,6 +349,20 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 			total = "--:--"
 		}
 		ui.Text(c, total).FontSize(12).TextColor(c.Theme().TextMuted).Width(48)
+
+		// 播放模式按钮在这一行的**最右边**，而不是右边那一组里。
+		//
+		// ⚠️ **右边那一组放不下第五个控件**，这是量出来的而不是猜的：那一组
+		// 每多一个 56 宽的控件，760（比窗口下限 900 还窄）上的歌名就少 68，
+		// 而歌名一旦窄过一个字宽，它会**连着歌名右边的徽章一起竖排**，整块
+		// 被 88 高的播放条裁掉——而且**界面上看不出坏了**，字还在那儿。
+		// `TestTheErrorSitsUnderTheTitle` 和
+		// `TestTheRateButtonDoesNotSquashTheTitle` 都在盯这一条。
+		//
+		// 这一行是另一个账：它左边的进度条是 `Grow(1)` 的，而中间那一列的宽
+		// 是**上面那行**（上一首/播放/下一首）定下来的。这一行到那之前一直
+		// 有富余，所以按钮挂在这儿是从富余里出的，不从歌名里出。
+		s.viewPlayMode(c, st)
 	})
 }
 
