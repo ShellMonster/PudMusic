@@ -68,11 +68,11 @@ func openSettingsTab(t *testing.T, tt *mygoui.Tester, name string) {
 }
 
 // shellOnSettings 造一个停在设置页上的外壳。
-func shellOnSettings(t *testing.T, s app.Settings) (*mygoui.Tester, *Shell, *app.App, string) {
+func shellOnSettings(t *testing.T, s app.Settings, opts ...shellOpt) (*mygoui.Tester, *Shell, *app.App, string) {
 	t.Helper()
 	// withSettings 走的是「先写盘、再挂上去」那条**生产**路（真程序启动时也是
 	// 先读盘），不是往界面上硬塞一个 Settings 值。
-	b := newTestShell(t, withSettings(s))
+	b := newTestShell(t, append([]shellOpt{withSettings(s)}, opts...)...)
 	tt := b.tt
 	tt.Frame()
 	openSettings(t, tt)

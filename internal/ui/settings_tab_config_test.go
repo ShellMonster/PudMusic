@@ -210,11 +210,10 @@ func TestImportingIntoSettingsFromANewerVersionIsRefusedLoudly(t *testing.T) {
 
 // 界面上「配置」那一段不会把设置页画崩——哪怕迁移报告里有很长的句子。
 func TestTheConfigSectionSurvivesALongMigrationNote(t *testing.T) {
-	withMigration(t, MigrationReport{
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), withStartupMigration(MigrationReport{
 		Upgraded:      "数据已升到 v1（动了：settings.json、shortcuts.json、search-history.json、download-queue.json）",
 		UpgradedFiles: []string{"settings.json", "shortcuts.json"},
-	})
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	}))
 	if tt.HasText("界面出错了") {
 		t.Fatalf("配置段画崩了，文字有 %q", tt.Texts())
 	}
@@ -225,12 +224,11 @@ func TestTheConfigSectionSurvivesALongMigrationNote(t *testing.T) {
 // 用户最怕的是「升级失败之后我的设置没了」。界面上只写一句「升级失败」的话，
 // 他会在还没搞清发生了什么之前先去翻自己的文件。
 func TestAFailedUpgradeSaysTheOldFilesAreStillThere(t *testing.T) {
-	withMigration(t, MigrationReport{
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), withStartupMigration(MigrationReport{
 		Upgraded:   "升级到 v1 失败：这一份读不懂。原来的数据一个字节都没少。",
 		UpgradeErr: os.ErrInvalid,
 		Rollback:   true,
-	})
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	}))
 	if !tt.HasText("原来的数据一个字节都没少") {
 		t.Fatalf("升级失败时没有说原文件还在，文字有 %q", tt.Texts())
 	}
@@ -240,32 +238,14 @@ func TestAFailedUpgradeSaysTheOldFilesAreStillThere(t *testing.T) {
 }
 
 // withMigration 临时换掉最近一次的迁移报告。
-// restoreMigrationAfter 记住**此刻**的迁移报告，测试结束时恢复回去。
+// ⚠️ **包级那个 `migration` 归基座管**（`resetMigrationReport`，见那里）：它在造
+// 外壳之前就被抹成零，测试结束时恢复。以前要靠每一条测试自己记得调
+// `restoreMigrationAfter`，而漏一条的后果是**后面每一个 Shell 第一帧都弹一条
+// toast**，那张卡片的底色正好盖住 `settings_test.go` 的采样点 (700, 430)——
+// 那几条会红成「画面那个点是 {30 215 96}」，就是 `DefaultPrimaryColor` 逐字。
+// 实测：15 次 `go test ./...` 里飘 1 次，而它飘的是**别的文件**的测试。
 //
-// ⚠️ 为什么 `withMigration` 的 cleanup 不够：它只恢复**它自己设进去的那一份**。而
-// 按一下「从 Biu 导入」按钮会走 `rememberImport`，那是**直接把报告写进包级的
-// `migration.r`** 的——不在任何 cleanup 的射程里。
-//
-// 留下的内容会让**后面**每一个新建的 Shell 在第一帧弹一条 toast
-// （`viewMain` → `announceMigration`），而 toast 的卡片底色是**主色**
-// （`viewToast`：Biu 的 `color: "primary"`）。`internal/ui/settings_test.go` 那些
-// 验「窗口底色」的测试取的采样点 `(700, 430)`（900×600 窗口的右下角）**正好落在
-// toast 上**——实测那几条红成「画面那个点是 {30 215 96}」，那个值就是
-// `DefaultPrimaryColor` 逐字。
-//
-// 所以**任何点了导入按钮的测试都要在开头调这个**，而不是指望 `withMigration`。
-func restoreMigrationAfter(t *testing.T) {
-	t.Helper()
-	migration.mu.Lock()
-	before := migration.r
-	migration.mu.Unlock()
-	t.Cleanup(func() {
-		migration.mu.Lock()
-		migration.r = before
-		migration.mu.Unlock()
-	})
-}
-
+// 所以这里只提供「给这个外壳一份报告」这一件事，恢复交给基座。
 func withMigration(t *testing.T, r MigrationReport) {
 	t.Helper()
 	migration.mu.Lock()
@@ -298,7 +278,6 @@ func TestPressingTheBiuImportButtonActuallySwapsTheSettingsIn(t *testing.T) {
 	// **什么都没有**。反过来的话它记下的是刚被 `withMigration` 设进去的那一份
 	// （带 `BiuDirs`），cleanup 恢复成它 —— 于是每一条测试跑完都还留着一份报告，
 	// 后面每一个新建的 Shell 第一帧照样弹 toast，采样点照样被盖。
-	restoreMigrationAfter(t)
 	withMigration(t, MigrationReport{BiuDirs: []string{biu}})
 
 	// 按钮因为找得到 Biu 才摆——这是设置页上的可观察行为。
@@ -311,6 +290,14 @@ func TestPressingTheBiuImportButtonActuallySwapsTheSettingsIn(t *testing.T) {
 	waitFrames(t, tt, "Biu 那份主色写进设置", func() bool {
 		return a.SettingsSnapshot().PrimaryColor == "#17c964"
 	})
+	// ⚠️ **还要等 `rememberImport` 跑完**，光等主色不够。那条后台线里的顺序是
+	// 「reloadSettings → rememberImport → addToast」，而主色是 reloadSettings 改的，
+	// 所以主色对上的时候报告**可能还没写**。测试这时就收工的话，收尾先把包级那份
+	// 恢复成零，紧跟着后台线再写进去——那份报告就漏给了后面每一个测试，于是它们
+	// 第一帧都弹一条主色底色的 toast（见 `resetMigrationReport` 的注释）。
+	//
+	// 症状和这里等的东西隔了三层：本条全绿，红的是别的文件里读像素的那几条。
+	waitFrames(t, tt, "导入结果记进迁移报告", func() bool { return LastMigration().Imported.Any() })
 
 	got := a.SettingsSnapshot()
 	if got.DownloadPath != "/Users/x/Downloads" {
@@ -430,7 +417,7 @@ func rgbaOf(c mygoui.Color) color.RGBA {
 // 界面上写着「见下方清单」而那个清单根本不存在。用户在启动时什么也没点，然后发现
 // 要重新登录，而界面上从头到尾没提过发生过一次导入。
 func TestTheSettingsPageSaysOutWhatDidNotComeOver(t *testing.T) {
-	withMigration(t, MigrationReport{
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), withStartupMigration(MigrationReport{
 		Upgraded: "数据已升到 v1",
 		Imported: app.Imported{
 			Dir:       "/Users/x/Library/Application Support/Biu",
@@ -442,8 +429,7 @@ func TestTheSettingsPageSaysOutWhatDidNotComeOver(t *testing.T) {
 				"Biu 的歌词缓存里有 2 条读不出来，已经跳过。",
 			},
 		},
-	})
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	}))
 
 	// 逐条点名，不只查「有没有提到登录」——那两句是**两件不同的事**。
 	for _, want := range []string{
@@ -464,14 +450,13 @@ func TestTheSettingsPageSaysOutWhatDidNotComeOver(t *testing.T) {
 
 // 启动时的自动导入结果要弹一条 toast 说出来——用户不会主动去设置页。
 func TestTheFirstFrameSaysTheMigrationHappened(t *testing.T) {
-	withMigration(t, MigrationReport{
+	s, tt := newShell(t, withStartupMigration(MigrationReport{
 		Imported: app.Imported{
 			Dir:      "/Users/x/…/Biu",
 			Settings: true,
 			Notes:    []string{"Biu 那边是登录状态……请在这个应用里重新登录一次。"},
 		},
-	})
-	s, tt := newShell(t)
+	}))
 	tt.Frame()
 
 	// ⚠️ 首帧那句**刻意是短的**：toast 的卡片底色是主色（`viewToast`），而它一旦
@@ -497,11 +482,10 @@ func TestTheFirstFrameSaysTheMigrationHappened(t *testing.T) {
 // 用户没要求知道「数据已是最新」；弹一条「已升到 v1」是在打扰他，而且真出事
 // （升级失败）时那条提示就混在一堆无害提示里，不显眼。
 func TestASuccessfulQuietUpgradeSaysNothing(t *testing.T) {
-	withMigration(t, MigrationReport{
+	_, tt := newShell(t, withStartupMigration(MigrationReport{
 		Upgraded:      "数据已升到 v1（动了：settings.json）",
 		UpgradedFiles: []string{"settings.json"},
-	})
-	_, tt := newShell(t)
+	}))
 	tt.Frame()
 
 	if tt.HasText("已升到 v1") {
@@ -511,12 +495,11 @@ func TestASuccessfulQuietUpgradeSaysNothing(t *testing.T) {
 
 // 升级失败要弹，而且那句话必须带着「原文件一个字节都没少」。
 func TestAFailedUpgradeIsAnnouncedOnTheFirstFrameToo(t *testing.T) {
-	withMigration(t, MigrationReport{
+	_, tt := newShell(t, withStartupMigration(MigrationReport{
 		Upgraded:   "升级到 v1 失败：这一份读不懂。原来的数据一个字节都没少。",
 		UpgradeErr: os.ErrInvalid,
 		Rollback:   true,
-	})
-	_, tt := newShell(t)
+	}))
 	tt.Frame()
 
 	if !tt.HasText("数据升级失败") {
@@ -532,12 +515,11 @@ func TestAFailedUpgradeIsAnnouncedOnTheFirstFrameToo(t *testing.T) {
 // 摆在那个位置的话，用户按下去每一样都会被各自的只读判断挡掉，看到的是四句
 // 「没带过来的」，而他刚才明明点了一个看着能用的按钮。
 func TestTheBiuImportButtonIsGoneWhenTheDataComesFromANewerBuild(t *testing.T) {
-	withMigration(t, MigrationReport{
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), withStartupMigration(MigrationReport{
 		ReadOnly: true,
 		Upgraded: "数据目录来自更新的版本，这一版一个字都不会写回去。",
 		BiuDirs:  []string{"/Users/x/…/Biu"},
-	})
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	}))
 
 	if hasExactText(tt, "从 Biu 导入") {
 		t.Errorf("只读目录里还摆着「从 Biu 导入」，文字有 %q", tt.Texts())

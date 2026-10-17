@@ -19,9 +19,9 @@ import (
 
 // newShell 造一个**没挂任何东西**的外壳：没有设置、没有登录、没有 B 站客户端。
 // 收尾（定时器、封面缓存、应用、设置/历史/快捷键的落盘）由基座无条件挂上。
-func newShell(t *testing.T) (*Shell, *mygoui.Tester) {
+func newShell(t *testing.T, opts ...shellOpt) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	b := newTestShell(t)
+	b := newTestShell(t, opts...)
 	return b.s, b.tt
 }
 
