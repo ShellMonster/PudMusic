@@ -11,6 +11,7 @@
 package platform
 
 import (
+	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -82,9 +83,26 @@ func Lock() bool {
 		// 三、它还没就绪（刚起来），或者它已经死了（内核锁被内核放回去了，
 		// 下一轮就能抢到）。两种都再等一会儿重来。
 		if time.Now().After(deadline) {
-			// 兜底：等太久了，别让用户点图标没反应。直接问框架——有人在就递过去，
-			// 没有人就当自己是第一个（这一刻内核锁不在我们手上，属于极窄的降级）。
-			return mygo.App.RequestSingleInstanceLock()
+			// 兜底：等太久了，别让用户点图标没反应。**但绝不能在这里把自己说成
+			// 「第一个」**。
+			//
+			// 🔴 走到这一支的前提是**内核锁在别人手上**（`lockExclusive` 为 false
+			// 才会到这儿），而那个「别人」多半只是还没建好 socket。这时候再问框架
+			// 一次，它同样答不上来，于是两个进程都以为自己是第一个——就是
+			// `TestLockRacesTwoFreshProcesses` 抓的那件事：机器一满载，第一个实例从
+			// flock 到建好 socket 超过 `lockReadyWait`，第二个等不到就抢答，两个应用
+			// 一起起来。
+			//
+			// 「没等到就是没等到」的另一面是要说清楚：**内核锁是这整件事唯一说了算
+			// 的**。它说有人在，那就是有人（`lockExclusive` 返回 false 只可能是
+			// flock 被人拿着）。那个进程活着，它会把命令行接过去；它要是死了，内核锁
+			// 也放回去了，下一轮就能抢到。
+			//
+			// 那句调用还留着：能递到就把命令行（含 biu://）递过去，递不到也只是
+			// 白问一次——返回的是不是「第一个」在这里已经不重要了。
+			mygo.App.RequestSingleInstanceLock()
+			log.Printf("biu: 等了 %v 没等到第一个实例就绪，按「有别人在」处理（内核锁在别人手上）", lockReadyWait)
+			return false
 		}
 		time.Sleep(lockPollEvery)
 	}
@@ -202,6 +220,21 @@ func readReadyFile() (pid int, ready bool) {
 		}
 	}
 	if pid <= 0 {
+		return 0, false
+	}
+	// 🔴 **写这个 ready 的进程必须还在**。
+	//
+	// 上一轮那个第一个实例是被 SIGKILL 掉的，它写下的 ready 就留在文件里了。这一轮
+	// 的两个进程同时起来：拿到内核锁的那个还没走到 `clearLockReady`，另一个就已经
+	// 读到了**上一次**留下的 ready——于是它不等，直接去问框架那把锁。那时候真正
+	// 的第一个可能正在建 socket，连不上；连不上它就把那个 socket 文件删掉自己建，
+	// 而第一个紧接着 Listen 失败、重试时连上了**它**，反过来退出。两个进程于是都
+	// 以为自己拿到了锁（`TestLockRacesTwoFreshProcesses` 第 4 轮往后红的就是这个：
+	// 家目录里那个 `.sock` 一出现，坏的轮次就接着来）。
+	//
+	// 判「主人还在不在」是那个文件本来就记了 pid 却一直没人用的原因（`readReadyFile`
+	// 返回的 pid 到今天为止从没被读过）。
+	if !processAlive(pid) {
 		return 0, false
 	}
 	return pid, ready
