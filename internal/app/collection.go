@@ -218,7 +218,11 @@ func (a *App) MountCollections(refs CollectionRefs) {
 // CollectionsMounted 报告歌单这一摊挂上没有。
 func (a *App) CollectionsMounted() bool { return a.collectionsSnapshot() != nil }
 
-// DownloaderMounted 报告批量下载的服务接上没有（issue #29）。
+// DownloaderMounted 报告批量下载的**接线**通没通。
+//
+// ⚠️ 它读的是 `CollectionRefs.Downloader`，而 `ui.MountCollections` 没传它——
+// 所以真机上它恒为 false。**下载服务本身是有的**（`internal/service/download`，
+// issue #29 已 CLOSED，commit `54596d1`），别把这一条读成「下载还没做」。
 func (a *App) DownloaderMounted() bool {
 	c := a.collectionsSnapshot()
 	return c != nil && c.refs.Downloader != nil
