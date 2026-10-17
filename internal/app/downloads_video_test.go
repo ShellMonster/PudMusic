@@ -144,33 +144,59 @@ func TestAVideoDownloadLandsAnMP4WithBothTracks(t *testing.T) {
 	}
 }
 
-// TestDownloadingAudioAndVideoAreTheSameQueueEntry 钉住「同一首只有一个任务」。
+// TestAudioAndVideoAreTwoDifferentQueueEntries 钉住「音频和视频是两项」。
 //
-// `Task.ID` 是 `<bvid>|<cid>`，与「要音频还是要视频」无关。所以同一首先
-// 点「下载音频」再点「下载视频」，第二次拿到的是**同一项**。
+// ⚠️ 这一条**原来断言的是反的**（我当初写的是「同一首先点音频再点视频，拿到
+// 的是同一项」，并在报告里把它列成「需要人拍板」）。上游后来在
+// `download.TaskID` 里定了：视频那一项的键多一段 `|video`，音频保持
+// `bvid|cid` 不变。
 //
-// 这一条是**已知的行为**，不是理想状态：要让两条各自成一项，得把「要哪
-// 一路」放进键里，而那会破坏「同一首歌重复点两次下载，用户要的是就一个」
-// 那条更重要的性质（见 `download.Task.ID`）。解开它要一个显式的
-// 「换成视频重下」之类的动作，是记录页那一票的事。
-func TestDownloadingAudioAndVideoAreTheSameQueueEntry(t *testing.T) {
+// 原来的那个行为的后果很具体：
+//
+//	先点「下载音频」→ 一项
+//	再点「下载视频」→ **拿到音频那一个**（两次都返回成功，抽屉照样提示
+//	「已加进下载队列」），而用户的下载目录里只有一个 .m4a
+//
+// 所以这条用例现在是**钉住修好的那个行为**：两次入队拿到两个不同的任务。
+// 而「音频那一支保持旧格式」也一起钉住——落盘的队列文件按那个字符串当键，
+// 改了格式的话升级过的用户重启之后整个队列一个都认不出来（看起来像队列空了）。
+func TestAudioAndVideoAreTwoDifferentQueueEntries(t *testing.T) {
 	d := newDashPairFixture(t)
 	a := d.app(t, t.TempDir())
 	item := onlineItem("BV1xx", "c123", "同一首")
 
-	first, err := a.Download(item)
+	audio, err := a.Download(item)
 	if err != nil {
 		t.Fatalf("入队（音频）：%v", err)
 	}
-	second, err := a.DownloadVideo(item, bili.VideoQualityUnknown)
+	video, err := a.DownloadVideo(item, bili.VideoQualityUnknown)
 	if err != nil {
 		t.Fatalf("入队（视频）：%v", err)
 	}
-	if first.ID != second.ID {
-		t.Errorf("两次入队拿到了两个任务：%q 和 %q", first.ID, second.ID)
+
+	// 音频那一支的键**一个字都不能变**——落盘的队列文件按它当键。
+	if audio.ID != "BV1xx|c123" {
+		t.Errorf("音频那一项的键是 %q，要的是 %q（改了格式的话，"+
+			"升级过的用户重启之后整个队列一个都认不出来）", audio.ID, "BV1xx|c123")
 	}
-	if got := len(a.DownloadSnapshots()); got != 1 {
-		t.Errorf("队列里有 %d 项，要的是 1 项", got)
+	if video.ID == audio.ID {
+		t.Errorf("两次入队拿到了同一个任务：%q——于是「先点音频再点视频」"+
+			"会拿到音频那一个，而用户的下载目录里只有一个 .m4a", video.ID)
+	}
+	if got := len(a.DownloadSnapshots()); got != 2 {
+		t.Errorf("队列里有 %d 项，要的是 2（音频一项、视频一项）", got)
+	}
+
+	// 同一件事点两次仍然只拿一个（这一条没变）。
+	again, err := a.DownloadVideo(item, bili.VideoQualityUnknown)
+	if err != nil {
+		t.Fatalf("再入队一次（视频）：%v", err)
+	}
+	if again.ID != video.ID {
+		t.Errorf("同一件事点两次拿到了两个任务：%q 和 %q", again.ID, video.ID)
+	}
+	if got := len(a.DownloadSnapshots()); got != 2 {
+		t.Errorf("点完两次之后队列里有 %d 项，要的是 2", got)
 	}
 }
 

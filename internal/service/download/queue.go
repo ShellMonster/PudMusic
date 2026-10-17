@@ -162,9 +162,10 @@ type AddRequest struct {
 
 // Enqueue 把一首加进队列，返回它的快照。
 //
-// **同一首已经在队列里就返回那一个**，不会新加一个。判重用的是
-// `<bvid>|<cid>`（`Task.ID`）——同一首歌点了两次下载，用户要的是
-// 「就一个」，而不是两个任务抢同一个文件。已经在队列里的那一项：
+// **同一首同一件事已经在队列里就返回那一个**，不会新加一个。判重用的是
+// `Task.ID`（= `<bvid>|<cid>`，视频再多一个 `|video`，见 `TaskID`）——同一首歌点了两次
+// 下载，用户要的是「就一个」，而不是两个任务抢同一个文件；而**音频和视频是两个
+// 文件**，不能认成同一件。已经在队列里的那一项：
 //
 //	下完了   什么都不做，返回它
 //	排着/在下/暂停   什么都不做，返回它
@@ -174,7 +175,7 @@ func (m *Manager) Enqueue(req AddRequest) (Snapshot, error) {
 		// 不是网络错也不是 bug：调用方给错了参数，重试和排队都救不回来。
 		return Snapshot{}, fmt.Errorf("download: 这一首缺稿件 id 或分 P id（bvid=%q cid=%q）", req.Bvid, req.Cid)
 	}
-	id := TaskID(req.Bvid, req.Cid)
+	id := TaskID(req.Bvid, req.Cid, req.Video)
 
 	// ⚠️ 落盘名在**锁里面**算：它要看队列里别的任务认领了谁（`destFor`），
 	// 那张表在锁下才读得到。stat 的那几下一并在锁里——同名避让最多试 1000 次
@@ -468,6 +469,16 @@ func (m *Manager) runOne(id string) {
 	m.mu.Lock()
 	t := m.tasks[id]
 	if t == nil || t.Status != StatusQueued || m.closed {
+		// 🔴 **关着的时候要把这一项标成暂停**，不能原样返回。早退不改状态的话：
+		// loop 的内层 `for` 不认 ctx.Done()，而 `nextQueued()` 只看 Status ——
+		// 于是这一项被无限次捡起来又放下，`Close` 里的 `wg.Wait()` **永远等不到
+		// 后台那条线**，应用退不出去（实测整包卡满 10 分钟超时）。
+		//
+		// 标成暂停也是对的语义：关应用时还排着队的，就是「下次接着下」的那一种
+		// （`persistable()` 对正在下的也是这么记的）。
+		if m.closed && t != nil && t.Status == StatusQueued {
+			t.Status = StatusPaused
+		}
 		m.mu.Unlock()
 		return
 	}

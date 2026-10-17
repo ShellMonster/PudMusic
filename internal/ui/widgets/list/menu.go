@@ -33,21 +33,17 @@ var menuSeparator = menuItem{sep: true}
 // menuItems 是这一行的菜单，项和顺序照 Biu 的
 // `biu/src/pages/music-recommend/menu.tsx`（搜索结果那一套完全一样）。
 //
-// ⚠️ **「在 B 站打开」按这一项有没有来处分**：本地文件没有 bvid，按了只能
-// 打开一个打不开的网页，那不如换成「在访达中显示」。Biu 的本地音乐行就是这么
-// 做的。
+// ⚠️ **「打开来处」按这一项有没有来处分**：本地文件没有 bvid，写「在 B 站打开」
+// 只能打开一个打不开的网页，所以换成「在访达中显示」。那个判断在
+// `actions.go` 的 OpenLabel 里，播放列表抽屉的行菜单也调它。
 //
 // ⚠️ 别看着 Biu 有图标就给每一项补一张图：MenuItem 没有图标字段，补不进去。
 func menuItems(m Music) []menuItem {
-	open := menuItem{key: "open", label: "在 B 站打开"}
-	if m.Item.Source == "local" && m.Item.Path != "" {
-		open = menuItem{key: "open", label: "在访达中显示"}
-	}
 	return []menuItem{
 		{key: "play", label: "播放"},
 		{key: "queue", label: "添加到队列"},
 		menuSeparator,
-		open,
+		{key: "open", label: OpenLabel(m.Item)},
 		menuSeparator,
 		{key: "favorite", label: "收藏"},
 		{key: "download-audio", label: "下载音频"},

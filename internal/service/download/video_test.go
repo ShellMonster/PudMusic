@@ -422,7 +422,7 @@ func TestAVideoDownloadCountsBothStreamsInItsProgress(t *testing.T) {
 				return
 			default:
 			}
-			if s, ok := h.m.Get(TaskID(bvid, cid)); ok {
+			if s, ok := h.m.Get(TaskID(bvid, cid, true)); ok {
 				h.m.mu.Lock()
 				if s.Total > maxSeen {
 					maxSeen = s.Total
@@ -621,7 +621,7 @@ func TestAMuxingTaskSurvivesARestartAndFinishesOnResume(t *testing.T) {
 	write(companionPartPath(dest), audio.body)
 
 	task := &Task{
-		ID:       TaskID(bvid, cid),
+		ID:       TaskID(bvid, cid, true),
 		Title:    "测试的 MV",
 		Identity: Identity{Bvid: bvid, Cid: cid, Quality: 120, Video: true, Length: int64(len(video.body))},
 		Ext:      videoExt,
