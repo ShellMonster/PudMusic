@@ -490,12 +490,18 @@ var Items = []Item{
 		// 另有几条钉的是接线本身：存下来的 accelerator 串认得回来（认不回来的症状
 		// 是设置页一切正常、按下去没反应），以及**正在录的那一格**优先于窗口登记的
 		// 组合键（引擎会先问「有没有人认领这个键」，而录制格靠 HandleInput 吃键）。
+		//
+		// ⚠️ 「让开」必须收得干净，这一条自己有个反面的坑：让开的状态一旦卡住
+		// （录完不清、走开也不清），**六条命令当场全哑而界面上一个字都不提**——
+		// 和 BMG-47 A6 一模一样的症状换了个原因。所以后面两条专门钉它。
 		Spec: "快捷键按下去真的会触发那条命令；焦点在输入框里打字时快捷键让路（SPEC 110、112、114。BMG-47 A6 说的「录进去了什么也不发生」）",
 		Tests: []string{
 			"TestAPressedShortcutRunsItsCommand",
 			"TestAShortcutWithNoModifierRunsWhenNothingElseHasTheFocus",
 			"TestTheSearchBoxGetsTheKeyBeforeAnyShortcut",
 			"TestTheRecorderCellStillGetsAKeyThatIsARegisteredShortcut",
+			"TestTheShortcutsComeBackTheMomentARecordingFinishes",
+			"TestWalkingAwayMidRecordingDoesNotSilenceTheShortcutsForever",
 			"TestEveryRecordedKeyComesBackAsItself",
 			"TestTheShortcutsHandEditedIntoTheFileStillWork",
 			"TestTheSixCommandsCallTheirOwnThing",
@@ -517,13 +523,18 @@ var Items = []Item{
 		// 「注册不上要降级」也是这一条的一半：别的应用先占了那个键、Wayland 上没有
 		// 桌面 portal、Linux 上没有 X11 会话——这些都得只让那一条失效，而不是让整个
 		// 快捷键功能一起瘫掉。
-		Spec: "全局快捷键：按设置登记到系统上、按下来走那一条命令；**系统真的把别的应用里按下的键送过来**这一跳没有量（在框架里，真机人工清单那一半）。注册不上只让那一条失效，不拖累其余，更不拖累应用内那一列（SPEC 111）",
+		//
+		// 「录制期间要从系统上撤下来」是第三半：Carbon 热键到不了焦点上的元素，
+		// 不撤的话那六个默认全局键**在任何一格都录不进去**（真机上量过）。
+		Spec: "全局快捷键：按设置登记到系统上、按下来走那一条命令、录制期间从系统上撤下来；**系统真的把别的应用里按下的键送过来**这一跳没有量（在框架里，真机人工清单那一半）。注册不上只让那一条失效，不拖累其余，更不拖累应用内那一列（SPEC 111）",
 		Tests: []string{
 			"TestTheGlobalColumnIsRegisteredOnStartup",
 			"TestTurningGlobalShortcutsOffUnregistersThem",
 			"TestRecordingAGlobalShortcutRegistersTheNewKey",
 			"TestResettingTheShortcutsRegistersThemAgain",
 			"TestAGlobalShortcutThatIsAlsoAnInAppOneIsNotRegistered",
+			"TestTwoSpellingsOfTheSameKeyAreNotBothRegistered",
+			"TestTheGlobalShortcutsStepAsideWhileRecording",
 			"TestOneGlobalShortcutThatCannotRegisterDoesNotTakeTheRestDown",
 			"TestEveryGlobalShortcutThatFailsStillLetsTheOthersRun",
 			"TestQuittingUnregistersTheGlobalShortcuts",

@@ -245,6 +245,19 @@ type Shell struct {
 	// 的键或者按 Esc 就清掉——红色停在屏幕上不动的话，用户会以为那里出了什么
 	// 错，而它其实只是「刚才那一下没录上」。
 	rejected shortcutSlot
+	// recorderShown 是「上一帧画没画快捷键录制格」，由 viewShortcuts 每帧读一次再
+	// 清掉、由 settingsShortcuts 画到时置回来。
+	//
+	// 它是为了兜住一件必须兜住的事：**`recording` 不能永远成立**。它一成立，
+	// 窗口这一帧一个组合键都不登记（见 viewShortcuts 的注释），而用户是**看不到**
+	// 「为什么现在按什么都不响」的。所以那一页不画了就把它收掉。
+	recorderShown bool
+	// registeredFor 是「上一次把全局快捷键登记到系统上时的录制状态」。它变了就得
+	// 重新登记：录制期间全局那几个组合键必须从系统上撤下来（Carbon 热键到不了
+	// 焦点上的元素，见 shortcut_global.go），退出录制之后又要回来。
+	//
+	// 由 syncGlobalShortcuts 自己写，viewShortcuts 只读。
+	registeredFor shortcutSlot
 
 	// settings 是设置页自己那一摊：切在哪个 Tab。建在 Shell 上而不是每帧新建，
 	// 理由和 home 一模一样：切走再切回来要停在原来那一格上。

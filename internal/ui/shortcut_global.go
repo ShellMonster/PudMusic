@@ -21,6 +21,12 @@
 // 直接 panic。所以同步登记的时机只有两处：`Run` 的 `WhenReady` 和设置页改动之后，
 // 两处都已经在事件循环里。
 //
+// # 正在录的时候一个都不登记
+//
+// 这一条和应用内那一份（`shortcut_dispatch.go` 的 viewShortcuts）是**同一件事的
+// 两半**：用户点中一个录制格、准备按下一个新键时，两个机制都得让开，否则这个键压根
+// 录不进去（详见 syncGlobalShortcuts 里那段）。
+//
 // # 注册不上要降级，不能瘫
 //
 // 全局快捷键是**加分项**：别的应用先占了那个键、Wayland 上没有桌面 portal、
@@ -93,10 +99,25 @@ func (nilGlobalShortcuts) unregisterAll()                {}
 // 的文件）的时候系统上的登记一个字都不该动。漏掉哪一条，用户看到的都是同一个
 // 样子——设置页上写着新键，别的应用里按的还是旧的。
 func (s *Shell) syncGlobalShortcuts() {
+	// 记下「这一份是按什么录制状态登记的」，viewShortcuts 靠它知道要不要再来一次
+	// （见 Shell 上那个字段的注释）。
+	s.registeredFor = s.recording
+
 	s.hotkeys.unregisterAll()
 
 	cur := s.keys.snapshot()
 	if !cur.EnableGlobalShortcuts {
+		return
+	}
+	// ⚠️ **正在录的时候一个都不登记**，理由和文件头那一段是同一件事的一半：
+	// 应用内那一份要撤（引擎的 `rt.claimed` 会让录制格收不到键），而这一份撤的理由
+	// 更硬——**macOS 的 Carbon 热键压根到不了焦点上的元素**。不撤的话，用户在
+	// 「全局快捷键：播放/暂停」那一格里按 ⌘⌥P，跑的是那条命令、不是这一格，
+	// 于是那六个默认全局键**在任何一格都录不进去**（真机上量过：⌥⌘N 录制格收得到，
+	// ⌥⌘K 只看到全局热键触发、录制格一行都没有）。
+	//
+	// 录完/退出录制之后 viewShortcuts 会再来一次同步，它们就回来了。
+	if s.recording != (shortcutSlot{}) {
 		return
 	}
 	var skipped []string
@@ -132,14 +153,25 @@ func (s *Shell) syncGlobalShortcuts() {
 	}
 }
 
-// containsShortcut 报应用内那一列里有没有一模一样的 accelerator。
+// containsShortcut 报应用内那一列里有没有**同一个组合键**（写法可以不一样）。
 //
-// 比的是**串**，不是解析出来的 (修饰键, 键)：串一样才真的会被认成同一个键，
-// 而 `CommandOrControl+P` 和 `Ctrl+P` 在 mac 上不是一回事，拿解析结果去比反而会
-// 把它们错当成同一个。
+// 比的是**解析出来的 (修饰键, 键)**，不是串：同一个键在文件里可以有好几种写法
+// （`CommandOrControl+P`、`Cmd+P`、`commandorcontrol+p` 都是同一个，而它们逐字不相等）。
+// 只比串的话这两种写法会各自登记一遍，于是**两套机制同时认领同一个组合键**——
+// 正好落进这段防护要防的那件事：窗口在前台时它响两次（macOS 的 Carbon 热键吃掉
+// 这一下、X11 的 root 抓键不管焦点在哪都响），而用户完全不知道发生了什么。
+//
+// 拿解析结果比**不会**把 `CommandOrControl+P` 和 `Ctrl+P` 错当成同一个：前者在 mac 上
+// 是 `ui.Super`、在别处是 `ui.Ctrl`（`accelModFromName` 给的是 `ui.Cmd`），后者固定是
+// `ui.Ctrl`——mac 上两者不同、别处相同，而那正是它们实际是不是同一个键。
 func containsShortcut(list []shortcutItem, acc string) bool {
+	mods, key, ok := parseAccel(accelerator(acc))
+	if !ok {
+		return false
+	}
 	for _, it := range list {
-		if strings.TrimSpace(it.Shortcut) == acc {
+		m, k, ok := parseAccel(accelerator(strings.TrimSpace(it.Shortcut)))
+		if ok && m == mods && k == key {
 			return true
 		}
 	}

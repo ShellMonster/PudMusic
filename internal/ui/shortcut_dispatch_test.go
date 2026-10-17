@@ -339,12 +339,160 @@ func TestTheRecorderCellStillGetsAKeyThatIsARegisteredShortcut(t *testing.T) {
 	if got := s.keys.snapshot().GlobalShortcuts[0].Shortcut; got != "CommandOrControl+P" {
 		t.Errorf("全局那一格录成了 %q，want CommandOrControl+P：这一格被窗口登记的 ⌘P 挡住了", got)
 	}
-	// 录制一格的时候，应用内那一条**这一帧不登记**；退出录制之后它照旧回来。
-	// 后半句是钉住「让开的是录制这一格」而不是「让开的是整个快捷键功能」。
-	tt.Key(mygoui.Cmd, mygoui.KeyO)
+	// 录完之后应用内那一条立刻回来。**后半句不是可有可无的**：录完就一直是录制状态的话，
+	// 六条命令会当场全哑而且再也回不来（见
+	// TestTheShortcutsComeBackTheMomentARecordingFinishes，那一条量的是同一条路）。
+	if s.recording != (shortcutSlot{}) {
+		t.Errorf("录完之后还在录 %+v", s.recording)
+	}
+}
+
+// TestTheGlobalShortcutsStepAsideWhileRecording 验**全局那一份**也要让开。
+//
+// 应用内那一份让开是给引擎看的（`rt.claimed`）；全局那一份让开是给**系统**看的：
+// macOS 的 Carbon 热键压根到不了焦点上的元素（真机上量过：⌥⌘N 录制格收得到，
+// ⌥⌘K 只看到全局热键触发、录制格一行都没有）。不撤的话，**那六个默认全局键在任何
+// 一格都录不进去**——而用户看到的是「我明明点了那一格，按了那个键，它却不理我」。
+//
+// 只用应用内那一列测不出来：⌘P 登记在引擎里，⌘⌥P 登记在系统上，两者各管一路。
+func TestTheGlobalShortcutsStepAsideWhileRecording(t *testing.T) {
+	s, tt, hot, _ := shellOnShortcutPage(t)
+	s.syncGlobalShortcuts()
+	if len(hot.registered) != 6 {
+		t.Fatalf("开录之前登记了 %d 条，want 6 条（%q）", len(hot.registered), hot.registered)
+	}
+
+	// 点中一个录制格（还没按任何键）。
+	clickCell(t, tt, "应用内快捷键：播放/暂停")
+	if s.recording == (shortcutSlot{}) {
+		t.Fatal("点了那一格没有进入录制")
+	}
 	tt.Frame()
-	tt.Key(mygoui.Cmd, mygoui.KeyP)
+	if len(hot.registered) != 0 {
+		t.Errorf("正在录的时候系统上还登记着 %q——那几个组合键压根录不进去", hot.registered)
+	}
+
+	// 按 Esc 退出录制：它们要回来。
+	tt.Key(0, mygoui.KeyEscape)
 	tt.Frame()
+	if len(hot.registered) != 6 {
+		t.Errorf("退出录制之后系统上是 %q，want 6 条", hot.registered)
+	}
+}
+
+// TestTheShortcutsComeBackTheMomentARecordingFinishes 验「让开」收得干净。
+//
+// 这一条量的是头一版真实踩到的那件事：`s.recording` 录完之后从没被清过，于是
+// viewShortcuts 从此一帧不登记——**六条命令在本次运行剩下的时间里全部失效，
+// 而界面上一个字都不提**。那一格画着新键、带一圈主色描边，看着一切正常。
+//
+// 走三步：录完立刻按、走回首页按、重新打开设置页按。三步都得响，才说明它不是
+// 「碰巧在某一帧好了」。
+func TestTheShortcutsComeBackTheMomentARecordingFinishes(t *testing.T) {
+	s, tt, _, got := shellOnShortcutPage(t)
+	tt.Frame()
+
+	clickCell(t, tt, "应用内快捷键：播放/暂停")
+	tt.Key(mygoui.Cmd|mygoui.Shift, mygoui.KeyV)
+	tt.Frame()
+	if got := s.keys.snapshot().Shortcuts[0].Shortcut; got != "CommandOrControl+Shift+V" {
+		t.Fatalf("没录进去，存的是 %q", got)
+	}
+
+	// ① 录完立刻按 ⌘M（切换 mini/完整模式）。
+	tt.Key(mygoui.Cmd, mygoui.KeyM)
+	tt.Frame()
+	if len(*got) != 1 || (*got)[0] != "toggleMiniMode" {
+		t.Fatalf("录完立刻按 ⌘M 触发的是 %v，want [toggleMiniMode]——快捷键还是哑的", *got)
+	}
+
+	// ② 走回首页再按。走这一段是因为「那一页不画了」正是最容易卡住录制状态的地方。
+	s.navigate("/")
+	tt.Frame()
+	tt.Key(mygoui.Cmd, mygoui.KeyM)
+	tt.Frame()
+	if len(*got) != 2 {
+		t.Errorf("走回首页之后按 ⌘M 触发的是 %v，want 第二次也响", *got)
+	}
+
+	// ③ 重新打开设置页、停在快捷键那一页再按。
+	s.navigate("/settings")
+	tt.Frame()
+	openSettingsTab(t, tt, "快捷键设置")
+	tt.Key(mygoui.Cmd, mygoui.KeyM)
+	tt.Frame()
+	if len(*got) != 3 {
+		t.Errorf("重新打开快捷键设置之后按 ⌘M 触发的是 %v，want 第三次也响", *got)
+	}
+}
+
+// TestWalkingAwayMidRecordingDoesNotSilenceTheShortcutsForever 验兜底那一条。
+//
+// 用户点中一个录制格，然后**没按任何键就走了**——点侧栏回首页、点别的设置 Tab。
+// 「正在录」只在快捷键设置那一页上才有意义，而 `FocusBind` 并不保证离开时把变量
+// 清零（实测：点一格再点侧栏，它还留着）。留着 = 快捷键整份不响。
+//
+// 这条走的正是 `viewShortcuts` 里「这一帧没画录制格就清掉」那半句。
+func TestWalkingAwayMidRecordingDoesNotSilenceTheShortcutsForever(t *testing.T) {
+	s, tt, _, got := shellOnShortcutPage(t)
+	tt.Frame()
+
+	clickCell(t, tt, "应用内快捷键：播放/暂停")
+	tt.Key(0, mygoui.KeyEscape) // 回到「没在录」，下面要的是「点了就走开」那一条路
+	tt.Frame()
+	clickCell(t, tt, "应用内快捷键：播放/暂停")
+	if s.recording == (shortcutSlot{}) {
+		t.Fatal("点了那一格没有进入录制")
+	}
+
+	// 没按任何键就点侧栏回首页。
+	s.navigate("/")
+	tt.Frame()
+	tt.Frame() // 录制状态的兜底要等到「这一帧没画录制格」才生效，留两帧给它
+
+	tt.Key(mygoui.Cmd, mygoui.KeyM)
+	tt.Frame()
+	if len(*got) != 1 || (*got)[0] != "toggleMiniMode" {
+		t.Errorf("点了一格就走开之后按 ⌘M 触发的是 %v，want [toggleMiniMode]"+
+			"（录制状态卡住了，快捷键整份不响）", *got)
+	}
+}
+
+// TestTwoSpellingsOfTheSameKeyAreNotBothRegistered 验同一个键的两种写法。
+//
+// `CommandOrControl+P` 和 `Cmd+P` 是同一个组合键（`accelModFromName` 把 cmd/
+// command/super/meta/win 都认成 `ui.Cmd`），而它们逐字不相等。只比串的话两套机制
+// 会各自认领同一个组合键——正好落进「窗口在前台时它响两次」那件事。
+//
+// 通过界面录不出这种状态（`accelFromEvent` 总是写 CommandOrControl），只有手改过
+// 设置文件才会，而那正是「从 Biu 那边导一份配置过来」会发生的事。
+func TestTwoSpellingsOfTheSameKeyAreNotBothRegistered(t *testing.T) {
+	s, _, hot, _ := shellWithHotkeys(t)
+	if err := s.keys.set(shortcutSlot{id: "togglePlay"}, "CommandOrControl+P"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.keys.set(shortcutSlot{global: true, id: "togglePlay"}, "Cmd+P"); err != nil {
+		t.Fatal(err)
+	}
+	s.syncGlobalShortcuts()
+
+	if hot.has("Cmd+P") {
+		t.Errorf("Cmd+P 和应用内的 CommandOrControl+P 是同一个键，两套机制都登记了：%q", hot.registered)
+	}
+	// 而另外五条一个都不能少——防的是「认成同一个」把不相干的键也一起吞掉。
+	if len(hot.registered) != 5 {
+		t.Errorf("登记了 %d 条，want 5 条：%q", len(hot.registered), hot.registered)
+	}
+	// 而 CommandOrControl+P 与 Ctrl+P 在 mac 上**不是**同一个键（前者 Super、
+	// 后者 Ctrl），不能被错当成同一个。
+	if err := s.keys.set(shortcutSlot{global: true, id: "togglePlay"}, "Ctrl+P"); err != nil {
+		t.Fatal(err)
+	}
+	s.syncGlobalShortcuts()
+	if !hot.has("Ctrl+P") {
+		t.Errorf("Ctrl+P 和 mac 上的 CommandOrControl+P 不是同一个键，却被当成同一个吞掉了：%q",
+			hot.registered)
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -667,11 +815,15 @@ func TestSyncingTwiceLeavesNoDuplicate(t *testing.T) {
 //
 // 一句已经不做的话留在页面上，比没有更坏：用户按了 ⌘P 发现能用了，而页面上仍然
 // 写着「按下去什么也不会发生」，于是反过来以为应用出了别的毛病。
+//
+// 括号里那个例外也在这一条里：「切换mini/完整模式」切的是这一扇窗里的页面，而这扇
+// 窗在后台——从别的应用按它没有任何可见反应。不说出来的话，那一句「切到别的应用时按
+// 它也有用」对六条里的这一条就是假的。
 func TestTheShortcutPageSaysWhatTheTwoColumnsAreFor(t *testing.T) {
 	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
 	openSettingsTab(t, tt, "快捷键设置")
 
-	for _, want := range []string{"应用内那一列", "全局那一列", "输入框"} {
+	for _, want := range []string{"应用内那一列", "全局那一列", "输入框", "切换mini/完整模式」那一条除外"} {
 		if !tt.HasText(want) {
 			t.Errorf("这一页没在说「%s」是怎么回事，文字有 %q", want, tt.Texts())
 		}
