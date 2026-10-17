@@ -46,6 +46,20 @@ type Shell struct {
 	// 认下的状态才留得住）。
 	searchDraft string
 
+	// laterPage / historyPage 是「稍后再看」和「历史记录」这两页各自的状态
+	// （见 librarypage.go）。挂在壳上而不是页面的局部变量，理由同上。
+	laterPage   libraryPage
+	historyPage libraryPage
+	// searchWatchStop 是那个 500ms 关键词防抖的钟。醒着的时候只有一个，
+	// 两页共用——用户一次只能在一页上敲字。
+	searchWatchStop func()
+
+	// search 是搜索页的状态：三个 Tab 各一份分页列表、各一套排序、各记着各自
+	// 滚到哪儿（见 searchresults.go）。
+	//
+	// 同样是因为即时模式：这些都得跨帧活着，而局部变量下一帧就没了。
+	search searchState
+
 	// notFoundAt 是进 404 的那一刻，notFoundStop 是那个每秒一跳的倒计时。
 	// 两者都只由主线程读写（syncRoute 在主线程），后台那一跳只调
 	// wakeHandle.invalidate，所以不违反铁律一、也没有竞态。
@@ -165,6 +179,17 @@ type Shell struct {
 	// crash 是上一帧 panic 到的东西，非 nil 时这一帧画错误页。
 	crash any
 
+	// upSpaces 存着每个 UP 的空间页状态，键是 mid（见 upspace.go）。
+	//
+	// **只由 view 在主线程上读写**：它是一个普通的 map，没有锁——
+	// 界面状态是主线程单点写入的（铁律一），后台那一条线只往 upSpace.box
+	// 那个**带锁的信箱**里投，不碰这张表。
+	upSpaces map[int64]*upSpace
+
+	// feedPage 是「用户动态」那一页的状态（见 dynamicfeed.go）。只有一个，
+	// 因为这一页没有参数。
+	feedPage *dynamicFeed
+
 	// qrBitmap 是当前那张二维码的位图，qrFor 是它对应的那张二维码。
 	//
 	// **只由 view 读写**（view 永远跑在主线程上），所以没有锁。
@@ -258,6 +283,11 @@ func New(a *app.App) *Shell {
 	s.keys = newShortcutKeys("")
 	s.picker = systemPathPicker{}
 	s.feed = newFeedPoller(dynamicFeedInterval, nil)
+	s.buildLibraryPages()
+	// 搜索页那三个 Tab 各建一份分页列表。建在这里而不是第一次画到搜索页时：
+	// 翻页列表要在**第一帧之前**就建好（它的滚动位置、翻页状态全在里头），
+	// 等到画到那一页再建就是每进一次搜索页从头滚一次。
+	s.search.init(s)
 	// pageBody 是画页面内容的那一支：404 兜底 + 已经有内容的页（设置页）+ 每条
 	// 路由自己的空状态，三样拼在 pageContent 里（router.go）。
 	// sideBody 是侧栏那一支，搬去 sidebar.go 之后从那儿接进来。
@@ -502,6 +532,9 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 就是这一帧真正用的那份，用户选了深色也只在这一帧是对的。
 	s.applyFrameTheme(c)
 	s.reportSettingsError()
+	// 收「那个 500ms 防抖的钟要不要醒着」。**每帧一次**，所以用户切走时它一定
+	// 会跟着停（见 syncSearchWatch）。
+	s.syncSearchWatch()
 
 	st := s.app.Snapshot()
 

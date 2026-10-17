@@ -89,6 +89,10 @@ func Friendly(err error) string {
 
 	// 取流自己的几种。
 	switch {
+	case errors.Is(err, ErrNoPart):
+		// 🔴 **要排在 `ErrNetwork` 前面**：问不出分 P 底下多半真的是网络/风控，可
+		// 用户看到「连不上 B 站」不知道能做什么，而这一条有明确的下一步。
+		return "问不出这一集是哪一集，等网络好一些，或者换个词重新搜一次"
 	case errors.Is(err, ErrStreamExpired):
 		return "播放地址过期了，正在换一条新的"
 	case errors.Is(err, ErrNoLoginForOnline):

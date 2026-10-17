@@ -142,15 +142,22 @@ type playurlData struct {
 
 // PlayURL 问 B 站要一条音频流。
 //
-// pref 是用户选的音质档（`AudioAuto` 是默认）。bvid / cid 指向收藏夹里的
-// 一个条目——**cid 必填**：B 站的多 P 投稿不给 cid 会取到第一集，
-// 表现为「点第三集放出来的是第一集」，且不报错。
+// pref 是用户选的音质档（`AudioAuto` 是默认）。bvid / cid 指向一个条目。
+//
+// 🔴 **cid 必填**（上游 `player-playurl.ts:9` 的 `cid: number | string`，那行没有
+// `?`）。不给 cid，B 站多半按第一集给——多 P 投稿放出来的和用户点的不是一回事，
+// 而本地 fixture 放不放假参数，所以「它会不会老实按第一集给」没人验过：既然上游的
+// 合同写着必填，这里就不去赌它。
+//
+// B 站的搜索结果只给 bvid（见 search.go 的文件头），所以**调用方要先补上 cid**：
+// `app.runOnline` 问一次 `VideoPages`（见 video.go）再调这里。补不上就报错，
+// 不硬着头皮发一个没有 cid 的请求。
 //
 // 返回的 `StreamRef` 里没有任何凭据，**不要**把它写进日志：地址带
 // `upsig` 签名，诊断文件里有它就等于把这条流公开了。
 func (c *Client) PlayURL(ctx context.Context, bvid, cid string, pref AudioQuality) (*StreamRef, error) {
 	if bvid == "" || cid == "" {
-		// 不是 ErrNoStream：调用方给错了参数，换一条流也救不回来。
+		// 不是网络错也不是重试能救的：调用方没给全。重试一万次还是这一句。
 		return nil, fmt.Errorf("%w: 稿件或分 P 不完整（bvid=%q cid=%q）", ErrNoStream, bvid, cid)
 	}
 	// 不带 `qn`：取流接口把所有档都返回来，由 `pickAudio` 按偏好在客户端挑

@@ -95,6 +95,14 @@ func (a *App) DownloadMounted() bool { return a.downloadsSnapshot() != nil }
 //
 // 返回的错误只包含「同步就能看出来」的那几种（条目不完整、没挂下载、
 // 同一首已经在队列里还下完了）。网络上的失败走记录页上那一行的红字。
+//
+// ⚠️ **cid 在这一条路上仍然是同步必填的**（`online.go` 的在线播放已经改成「缺了
+// 就去问一次」，两条路的时序不一样）：`download.Manager.Enqueue` 是**同步**的，而
+// `Download` 跑在界面线程上——在这里问一次分 P 就是一次冻窗口的网络往返。下载队列
+// 的判重（`<bvid>|<cid>`）和落盘名也都靠 cid。
+//
+// 所以搜索结果（只有 bvid）现在**放得了、还下不了**。补下载这一条要动 download 那一
+// 层（问分 P + 展开成几个任务），不是这一处能顺手带上的。
 func (a *App) Download(it Item) (download.Snapshot, error) {
 	return a.download(it, download.AddRequest{})
 }
@@ -124,6 +132,9 @@ func (a *App) DownloadVideo(it Item, qn bili.VideoQuality) (download.Snapshot, e
 func (a *App) download(it Item, req download.AddRequest) (download.Snapshot, error) {
 	if err := playableOnline(it); err != nil {
 		return download.Snapshot{}, err
+	}
+	if it.Cid == "" {
+		return download.Snapshot{}, errors.New("这一首还不能下：还没取到分 P id（下载要按集存文件）")
 	}
 	m := a.downloadsSnapshot()
 	if m == nil {
