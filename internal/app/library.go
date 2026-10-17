@@ -123,7 +123,7 @@ func (l *Library) ToView(ctx context.Context, page int, q LibraryQuery) ([]Libra
 			ViewedAt: it.AddAt,
 			View:     it.View,
 			CanPlay:  !it.IsPGC,
-			Item:     onlineItem(it.Bvid, it.Cid, it.Title, it.Pic),
+			Item:     onlineItem(it.Bvid, it.Cid, it.Title, it.Pic, it.OwnerName, it.OwnerMid),
 		})
 	}
 	return items, pg.Count, nil
@@ -171,7 +171,7 @@ func (l *Library) History(ctx context.Context, page int, q LibraryQuery) ([]Libr
 			// 只有投稿能放：Biu 对 PGC 不给播放入口（history/menu.tsx 的
 			// `canPlay = business === "archive"`）。
 			CanPlay: it.Business == "archive",
-			Item:    onlineItem(it.Bvid, it.Cid, it.Title, it.Cover),
+			Item:    onlineItem(it.Bvid, it.Cid, it.Title, it.Cover, it.AuthorName, it.AuthorMid),
 		})
 	}
 	return items, pg.HasMore, nil
@@ -284,14 +284,20 @@ func historyKidOf(id string) (string, bool) {
 }
 
 // onlineItem 造一个在线队列项。
-func onlineItem(bvid string, cid int64, title, cover string) Item {
+//
+// ownerName / ownerMid 是这一首的 UP 主，播放条上那一句要显示它、点它进他的
+// 空间（见 `Item.Artist`）。**两个都要传**：只给名字的话播放条上那一句点不动，
+// 而调用方手上通常两个都有（B 站这几条接口都带 `upper`/`owner`）。
+func onlineItem(bvid string, cid int64, title, cover, ownerName string, ownerMid int64) Item {
 	return Item{
-		Source: "online",
-		Type:   "mv",
-		Bvid:   bvid,
-		Cid:    strconv.FormatInt(cid, 10),
-		Title:  title,
-		Cover:  cover,
+		Source:    "online",
+		Type:      "mv",
+		Bvid:      bvid,
+		Cid:       strconv.FormatInt(cid, 10),
+		Title:     title,
+		Cover:     cover,
+		Artist:    ownerName,
+		ArtistMid: ownerMid,
 	}
 }
 

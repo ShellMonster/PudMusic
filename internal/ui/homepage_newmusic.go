@@ -427,7 +427,15 @@ func (g *newMusicGrid) viewCard(c *ui.Context, i int, cell float32) {
 		imgcache.View(c, g.cache, m.Cover, cell, newMusicCoverH)
 
 		// ② 歌名 + UP 名。上游两行都是 `line-clamp-1`，这里照它。
-		ui.Text(c, m.Title).FontSize(14).TextColor(t.Text).MaxLines(1).Ellipsis("…")
+		//
+		// ⚠️ **正在放的那一首把歌名染成主色**：这一块和上面三个 Tab 是同一页，
+		// 判据也是同一份（`Actions.IsPlaying`，按 `app.Item.Identity`）。
+		// 同一屏上「正在播放」在两个地方说两套话，用户只能靠猜。
+		titleColor := t.Text
+		if g.acts.IsPlaying != nil && g.acts.IsPlaying(m.Item) {
+			titleColor = t.Accent
+		}
+		ui.Text(c, m.Title).FontSize(14).TextColor(titleColor).MaxLines(1).Ellipsis("…")
 		if m.Owner != "" {
 			ui.Text(c, m.Owner).FontSize(12).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 		}
