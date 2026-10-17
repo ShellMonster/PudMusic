@@ -26,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
@@ -62,16 +63,55 @@ type Downloads struct {
 //
 // 取流零件（`Streaming`）**可以**晚挂：真正要取流是用户点了下载之后，
 // 那时缺零件会给出一句人话而不是开窗就报错。
+//
+// ## 重复挂（导入完重新读队列）时的三步顺序
+//
+// 队列文件会话期间**只在退出时写一次**（`ui.MountDownloads` 挂的那个
+// `OnWillQuit → SaveDownloads`，加上 `App.Close` 那一道），全项目没有第三处。
+// 所以「换掉这个 Manager」这一步必须处理掉内存里那些**还没写进文件**的任务：
+// 用户在这次会话里点了下载，那一首此刻只在内存里，文件里没有。
+//
+// ⚠️ **三步的顺序是有讲究的**（下面的代码就是这个顺序，不要动）：
+//
+//	① 把**旧**的内存队列**并进**文件（不是覆盖）
+//	② 建新的 Manager——它 Restore 的是 ① 之后那份最全的文件
+//	③ 关掉旧的（不落盘）
+//
+// 两条走错都会丢东西：
+//
+//   - **①换成「先建新的」**：`download.New` 一进来就 Restore，而那一刻文件还是
+//     陈旧的，于是新 Manager 不知道本次会话加的那几首。② 之后再合并也来不及了——
+//     它的内存里没有，而退出时落盘的是**它**那份。于是用户点的歌当场消失，并在
+//     退出时从队列文件里被抹掉。
+//   - **①换成「直接落盘」**：`old.Close(path)` 拿内存快照盖住文件，而快照里没有
+//     刚被导入并进来的那几十条，于是**它们**被抹掉。
 func (a *App) MountDownloads(d Downloads) error {
 	if d.Media == nil {
 		return errDownloadsMissing
 	}
+
+	// ① 旧的那份并进文件。没有旧的（第一次挂）时这一步什么都不做。
+	old := a.downloadsSnapshot()
+	if old != nil && d.QueueFile != "" {
+		if err := download.MergeIntoQueue(d.QueueFile, old.Persistable()); err != nil {
+			// 失败只记日志：这一刻旧的那份还在内存里继续用，而新 Manager 会从
+			// 文件 Restore（少的那几条用户按一次「继续」就补上了）。
+			log.Printf("app: 换挂下载前并队列失败，本次会话新加的歌可能没接上：%v", err)
+		}
+	}
+
+	// ② 建新的：它 Restore 的是 ① 之后那份最全的文件。
 	m, err := download.New(download.Options{
 		Client:  d.Media,
 		Resolve: a.resolveDownload,
 	}, d.QueueFile)
 	if err != nil {
 		return err
+	}
+
+	// ③ 关旧的，不落盘（内存已经并进文件了，再落一次会和那份打架）。
+	if old != nil {
+		_ = old.Close("")
 	}
 
 	a.mu.Lock()

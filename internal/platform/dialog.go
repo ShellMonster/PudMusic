@@ -81,3 +81,48 @@ func PickDirectory(parent *mygo.Window) (string, error) {
 	return PickPath(parent, true,
 		"选择音乐文件夹", "选一个文件夹，它的**第一层**里的音频文件会出现在本地音乐里")
 }
+
+// jsonFilters 是配置文件对话框的白名单。
+//
+// 摆「所有文件」是为了不拦路：有人把 Biu 导出的那份改名成了 `biu.json`，或者
+// 从别的机器上拷来的文件名完全没有规律。白名单在这里只是让「配置 JSON」排在
+// 最前面，不是「别的文件不让选」。
+var jsonFilters = []mygo.FileFilter{
+	{Name: "配置文件", Extensions: []string{"json"}},
+	{Name: "所有文件", Extensions: []string{"*"}},
+}
+
+// PickConfigFile 弹系统对话框让用户挑一份配置文件，返回路径。用户取消时返回
+// 空串（不是错误）。
+//
+// ⚠️ 和 PickPath 一样**必须从非主线程调**。
+func PickConfigFile(parent *mygo.Window) (string, error) {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent:  parent,
+		Title:   "选择配置文件",
+		Message: "选一份从 Biu 或别的机器导出的配置 JSON",
+		Filters: jsonFilters,
+	})
+	if err != nil || len(paths) == 0 {
+		return "", err
+	}
+	return paths[0], nil
+}
+
+// SaveConfigAs 弹系统对话框让用户选导出到哪，返回路径。用户取消时返回空串。
+//
+// ⚠️ 和 PickPath 一样**必须从非主线程调**。
+//
+// 用保存对话框而不是「挑个文件夹我们自己起名」：导出文件名里带时间
+// （`app.ExportFileName`），让用户能改这个文件名才是他期待的——同名覆盖时系统
+// 会自己问一句，而我们自己往一个目录里写固定名字的话，那次覆盖是静悄悄的。
+func SaveConfigAs(parent *mygo.Window, defaultName string) (string, error) {
+	return mygo.Dialog.Save(mygo.SaveDialogOptions{
+		Parent:            parent,
+		Title:             "导出配置",
+		Message:           "把设置存成一份 JSON，可以在别的机器上导入",
+		DefaultPath:       defaultName,
+		Filters:           jsonFilters,
+		CreateDirectories: true,
+	})
+}

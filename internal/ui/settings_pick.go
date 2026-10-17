@@ -19,6 +19,10 @@ import (
 // pathPicker 是「挑一条路径」这件事。挑回来的是空串就是用户取消了。
 type pathPicker interface {
 	pick(parent *mygo.Window, dir bool, title, message string) (string, error)
+	// pickConfig 是「挑一份配置文件」（设置页的「导入配置」）。
+	pickConfig(parent *mygo.Window) (string, error)
+	// saveConfig 是「选一个导出到哪」。
+	saveConfig(parent *mygo.Window, defaultName string) (string, error)
 }
 
 // systemPathPicker 是真的那一份，也就是 internal/platform 的 `PickPath`。
@@ -26,6 +30,14 @@ type systemPathPicker struct{}
 
 func (systemPathPicker) pick(parent *mygo.Window, dir bool, title, message string) (string, error) {
 	return platform.PickPath(parent, dir, title, message)
+}
+
+func (systemPathPicker) pickConfig(parent *mygo.Window) (string, error) {
+	return platform.PickConfigFile(parent)
+}
+
+func (systemPathPicker) saveConfig(parent *mygo.Window, defaultName string) (string, error) {
+	return platform.SaveConfigAs(parent, defaultName)
 }
 
 // pathPrompt 是这一处要问用户的那两行字。

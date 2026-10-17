@@ -158,7 +158,11 @@ func (p *updatePrefs) put(f updatePrefsFile) {
 	}
 	b, err := json.MarshalIndent(f, "", "  ")
 	if err == nil {
-		err = writeSettingsAtomic(path, b)
+		// 用这一包**通用**的那一个原子写（`writeFileAtomic`，#81 持久化迁移把它从
+		// 只服务设置的 `writeSettingsAtomic` 改名成了通用名，那一句注释写的就是
+		// 「服务这一包里的任何一份文件」）。自己再写一份临时文件 + rename 的话，
+		// 两条路迟早有一处漏掉 fsync 或者权限那两句。
+		err = writeFileAtomic(path, b)
 	}
 	if err != nil && prev == nil {
 		// 只记第一次：写不出去的时候多半是目录没了或者磁盘满了，每小时记一次

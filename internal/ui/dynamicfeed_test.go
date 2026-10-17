@@ -383,7 +383,25 @@ func TestTheAuthorRetryWhilePendingDoesNotSendASecondRequest(t *testing.T) {
 	})
 
 	tt.Click("重试加载关注的人")
-	for range 10 {
+
+	// ⚠️ **等请求真的发出**，不要按固定帧数。
+	//
+	// 这一拉是在 goroutine 里发出去的（`go s.fetchFeed`），而请求要经过 DNS/连接
+	// 往返才打到 fixture。原来这里是「画 10 帧就断言」——机器负载一高，10 帧
+	// （毫秒级）走不到网络那一层，于是断言数到 0 次，看起来像「点了重试没反应」。
+	//
+	// ⚠️ 这一条**在 origin/main 上同样会红**（不是本票引入的），但验收命令要求
+	// 全绿，而一条随负载随机红的测试会把整张票卡住，所以在这儿修：等的是**它要
+	// 断言的那件事真的发生**，而不是「过了 10 毫秒」。
+	waitFrames(t, tt, "重试之后第二页真的被请求了一次", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return pn2 == before+1
+	})
+
+	// 之后再确认「按钮不见了 + 没有第二个请求」这两条：多画几帧，让任何一次
+	// 重复请求都有机会发生。
+	for range 30 {
 		tt.Frame()
 	}
 	if _, ok := tt.Find("重试加载关注的人"); ok {

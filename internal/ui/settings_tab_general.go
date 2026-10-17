@@ -104,8 +104,17 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 	// （`app-update.json`），从没碰过用户的 `app-settings.json`。让这一格跟着
 	// `ro` 变灰，会在「设置来自更新的版本」这一个场景里，把一个本来完全可用的
 	// 更新入口关掉。
+	//
+	// ⚠️ 顺序：**在**「配置」段（导出 / 导入 / 从 Biu 导入）**之前**。Biu 那边
+	// 导入导出就是长在「关于应用」这一段里的——版本号 + 检查更新那一行之后
+	// 紧接着就是 `<ImportExport />`（`system-settings.tsx:388-402`）。两边各自
+	// 加了一段，谁在前谁在后没人对过，这里按 Biu 定下来。
 	s.settingSectionEnd(c)
 	s.settingsUpdate(c, s.app.UpdateSnapshot())
+
+	s.settingSectionEnd(c)
+	// 「配置」段（导出 / 导入 / 从 Biu 导入），照 Biu 的位置。
+	s.settingsConfig(c)
 }
 
 // pickSwitch 是一个开关行。set 拿到的是这一帧开关上的新值。
