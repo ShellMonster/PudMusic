@@ -2,6 +2,7 @@ package platform
 
 import (
 	"bytes"
+	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -113,7 +114,7 @@ func TestEverySizeInTheSetStillReadsAsAPlayer(t *testing.T) {
 // checkSizeReadsAsAPlayer 是上面那条的一部分，按尺寸跑好让报错直接点名是哪一档。
 func checkSizeReadsAsAPlayer(t *testing.T, size int) {
 	t.Helper()
-	img := AppIcon(size)
+	img := AppIconShared(size)
 	if got := img.Bounds(); got.Dx() != size || got.Dy() != size {
 		t.Fatalf("%d：画出来是 %dx%d", size, got.Dx(), got.Dy())
 	}
@@ -152,7 +153,7 @@ func checkSizeReadsAsAPlayer(t *testing.T, size int) {
 // 颜色**这两类坏图是打包之后才看得出来的，症状是 Dock 上一个空白图标或者一块
 // 纯色方块——没有一处报错。
 func TestTheIconIsNotOneFlatColor(t *testing.T) {
-	img := AppIcon(1024)
+	img := AppIconShared(1024)
 	first := true
 	var firstColor [4]uint8
 	distinct := 0
@@ -178,7 +179,7 @@ func TestTheIconIsNotOneFlatColor(t *testing.T) {
 // macOS 的图标形状**就是那块圆角方块**，不是系统去裁的。角不透明的话，Dock 上
 // 就是一个没有圆角的绿方块（Windows 上反而不难看，macOS 上很显眼）。
 func TestTheCornersAreTransparent(t *testing.T) {
-	img := AppIcon(1024)
+	img := AppIconShared(1024)
 	pts := [][2]int{{0, 0}, {1023, 0}, {0, 1023}, {1023, 1023}}
 	for _, p := range pts {
 		if c := img.NRGBAAt(p[0], p[1]); c.A != 0 {
@@ -200,7 +201,7 @@ func TestTheCornersAreTransparent(t *testing.T) {
 //
 // 判据是左右两半的白像素数：右尖的播放键右侧几乎没有白像素，左半边是整条竖边。
 func TestTheTrianglePointsRight(t *testing.T) {
-	img := AppIcon(512)
+	img := AppIconShared(512)
 	var left, right int
 	for y := range 512 {
 		for x := range 512 {
@@ -224,5 +225,57 @@ func TestTheTrianglePointsRight(t *testing.T) {
 	}
 	if left < right*2 {
 		t.Errorf("左 %d 对右 %d，竖边没占住左半边——三角可能画成了正方形或指向反了", left, right)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 两个入口的契约
+//
+// `AppIcon` 每次新画、`AppIconShared` 给同一张共享的只读图。这两条是**契约**，
+// 不是实现细节：弄反了要么是性能白扔，要么是有人改一张图改掉整个进程。
+// 下面这两条把契约变成会红的东西，而不只是注释里的一句话。
+
+// TestAppIconHandsOutAnIndependentImageEveryTime 钉住 `AppIcon` 每次独立。
+//
+// 它的契约是「返回的图归调用方，随便改」。改过的那张**不能**漏进下一次的结果
+// ——否则第一个拿到图的人（比如想加个角标）会静悄悄地改掉后面所有人拿到的图标，
+// 包括托盘上那一张，而图案形状那几条测试断的是「还认不认得出是播放器」，
+// 改一个像素断不出来。
+func TestAppIconHandsOutAnIndependentImageEveryTime(t *testing.T) {
+	const size = 64
+	mark := color.NRGBA{R: 0xff, G: 0x00, B: 0x00, A: 0xff}
+
+	img := AppIcon(size)
+	if img == AppIcon(size) {
+		t.Fatal("AppIcon 两次调用是同一张——它必须每次新画，否则改一张就改掉全进程")
+	}
+	img.SetNRGBA(0, 0, mark)
+	if c := AppIcon(size).NRGBAAt(0, 0); c == mark {
+		t.Error("改过的 AppIcon 结果漏进了下一次调用")
+	}
+}
+
+// TestAppIconSharedHandsOutTheSameReadOnlyImage 钉住 `AppIconShared` 共享。
+//
+// 共享是它的全部意义（`cmd/genicon` 的尺寸表里 256 和 512 各出现两次，
+// 不共享就把最贵的两张图白画一遍）。缓存没了的话这条立刻红。
+func TestAppIconSharedHandsOutTheSameReadOnlyImage(t *testing.T) {
+	if AppIconShared(64) != AppIconShared(64) {
+		t.Error("AppIconShared 两次调用不是同一张——缓存没了")
+	}
+}
+
+// TestTheSharedIconIsStillUntouched 盯「这一整包跑下来，没人改过共享的那份」。
+//
+// ⚠️ **依赖执行顺序**：它得跑在本文件所有读图测试的**后面**，才看得到「跑完之后」。
+// 这是故意的——共享图被改是**跨测试**才看得出来的破坏：改一个大块，图案形状那几条
+// 会红；改一个像素（比如顺手擦了个高光），它们一条都不红，而托盘图标从那一刻起
+// 在整个进程生命周期里都是错的。`AppIconShared` 的文档说了不能改，这里让它真会红。
+func TestTheSharedIconIsStillUntouched(t *testing.T) {
+	const size = 64
+	if !bytes.Equal(AppIconShared(size).Pix, AppIcon(size).Pix) {
+		t.Error("AppIconShared 给的那张和现画的不是一张——有人改过共享的那份。" +
+			"改一张图会改掉整个进程之后的每一次调用（包括托盘图标），" +
+			"而图案形状那几条测试断不出来。要一张能改的请用 AppIcon")
 	}
 }

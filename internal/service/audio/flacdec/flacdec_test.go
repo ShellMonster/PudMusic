@@ -346,8 +346,8 @@ func TestOpenAtOffset(t *testing.T) {
 	if d.SampleRate() != 44100 || d.Channels() != 2 {
 		t.Fatalf("opened at an offset but read as %d Hz, %d channels", d.SampleRate(), d.Channels())
 	}
-	if n, err := readAllErr(d); err != io.EOF || len(n) == 0 {
-		t.Fatalf("decode from an offset: %d samples, %v", len(n), err)
+	if n, err := readAllErr(d); err != io.EOF || n == 0 {
+		t.Fatalf("decode from an offset: %d frames, %v", n, err)
 	}
 }
 
