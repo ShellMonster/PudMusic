@@ -49,10 +49,11 @@ func (s *Shell) viewNowPlaying(c *ui.Context, _ *ui.Route) {
 
 	// 正在放：歌名 + 歌词区。
 	//
-	// 歌词区吃掉这一列剩下的全部高度（`Grow(1)`）：居中滚动要的是「歌词区有多高」
-	// 这一个数，歌名那几行算进去的话，用户调字号时居中的那条线会跟着往上飘。
+	// ⚠️ 这里画的是**空状态**：歌词区本体在 BMG-65（界面与接线）。底下那层
+	// （`service/lyrics` 的解析与缓存、`app/lyrics` 的切歌先重置 / 偏移字号夹界 /
+	// 防抖落盘）已经落地，界面上能看到歌词是 BMG-65 的事。
 	ui.Column(c).Key("page:mini-player").Grow(1).Padding(28).Gap(12).Children(func() {
 		ui.Text(c, st.Title).FontSize(20).Bold()
-		s.viewLyrics(c, st)
+		s.viewEmpty(c, "page:lyrics", noLyrics)
 	})
 }

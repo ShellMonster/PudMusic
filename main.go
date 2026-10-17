@@ -88,10 +88,6 @@ func main() {
 	// 所以这里拿到的是会话本身，绑窗口那一下交给 ui.Run。
 	sess := ui.MountMedia(a)
 
-	// 歌词缓存同样在开窗口之前挂好：建目录是阻塞 IO，放到第一次点歌时才发现，
-	// 那一次点歌就要替「建目录」买单。
-	ui.MountLyrics(a)
-
 	if err := ui.Run(a, sess); err != nil {
 		log.Fatal(err)
 	}

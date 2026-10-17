@@ -178,47 +178,6 @@ type Shell struct {
 	// hist 是搜索历史。没挂上盘时是内存里的一份（见 searchhistory.go）。
 	hist *searchHistory
 
-	// 歌词这一摊。**只由 view 读写**（view 永远跑在主线程上），不跨 goroutine。
-	//
-	// lyricScroll 是歌词区的滚动位置和那一次「平滑滚到中间」的弹簧都在这里
-	// （`ui.ScrollState`，见 lyrics.go）。
-	lyricScroll ui.ScrollState
-	// lyricKey 是这一帧画的是哪一首歌的歌词。换歌时它变了，滚动位置整个换掉
-	// （新歌上留着上一首的滚动量，歌词一上来就停在歌的中间）。
-	lyricKey string
-	// lyricActive 是上一次**真的发出滚动指令**对应的那一行，-1 是还没有过。
-	lyricActive int
-	// lyricSeen 是这一帧认出的正在唱的那一行。和 lyricActive 分开是因为「目标
-	// 够不着」那条路不会更新 lyricActive，拿它判「换行了」会让那道重试预算失效
-	// ——见 followActiveLyric 里那一段。
-	lyricSeen int
-	// lyricPadH 是上一次跟过去时的居中留白。它变了（换歌、改字号、改窗口宽度）
-	// 就得重新跟——上游那一句的依赖表就是 `[activeIndex, centerPadding]`
-	// （`lyrics/index.tsx:291`）。
-	lyricPadH float32
-	// lyricExpect 是上一次发出去的滚动目标。滚动量停在别的地方就说明有人抢过去了
-	// ——见 followActiveLyric 顶上那段。
-	lyricExpect float32
-	// lyricHeld 是「用户拿滚轮翻过去了，先认了」，唱到下一句才跟回去。
-	lyricHeld bool
-	// lyricStuck 是「连着几帧目标都够不着」的次数，用完就不再要帧了。
-	lyricStuck int
-	// lyricPadForced 让测试把居中留白强行按成某一个值（nil = 用真值）。
-	// 见 internal/ui/lyrics.go 里 lyricPadForced 那段——它为什么必要。
-	lyricPadForced *float32
-	// lyricMaxY 是上一次看到的滚动范围。它变了（内容变高）就重新从头试一遍。
-	lyricMaxY float32
-	// lyricActiveEl 是正在唱的那一行的元素句柄，每一帧重记。它和 lyricBox
-	// 一起用来算「滚到哪儿正好居中」——MyGo 的 `Bounds()` 给的是上一帧的框，
-	// 所以这一帧量到的下一帧才用得上。
-	lyricActiveEl ui.Element
-	lyricBox      ui.Element
-	// lyricBoxX/Y/W/H 是上一帧量到的歌词区那个框，lyricLineH 是上一帧
-	// 量到的那一行的高度。前两个用来算居中留白（见 lyricPad），**也留给测试**：
-	// `ui.Element` 的句柄一帧之后就作废了，测试没法自己去问框架要框在哪。
-	lyricBoxX, lyricBoxY, lyricBoxW, lyricBoxH float32
-	lyricLineH                                 float32
-
 	// collection 是歌单内容页（`/collection/{id}`）此刻的那一份状态。
 	// 换容器就整个换掉，见 `collectionFor`。
 	collection *collectionPage
