@@ -268,7 +268,7 @@ func TestRateSurvivesTrackChanges(t *testing.T) {
 	playing(t, a, "第一首")
 
 	// 先在原速上量一段，确认这台机器放得动实时音频（见 requireRealtime），再量
-	// 倍速。窗口往后挪是因为原速那一段已经占掉了歌的前五秒。
+	// 倍速。窗口往后挪是因为原速那一段已经占掉了歌的前四秒。
 	requireRealtime(t, a, 2*time.Second, 3*time.Second)
 
 	a.SetRate(2)
@@ -335,9 +335,9 @@ func TestOnlineTrackKeepsTheRate(t *testing.T) {
 
 // longWav 造一段二十秒的单声道 WAV。
 //
-// 二十秒：倍率测试要在一首歌上量三个窗口（1x、2x、0.5x），光 0.5 倍速那一个的
-// 过渡就要走掉五六秒歌。那份 4 秒的 FLAC 放不下（中途播完会被误判成
-// 「慢得离谱」）。
+// 二十秒：倍率测试要在一首歌上量三段（1x、2x、0.5x），每段还量两遍取大的那个
+// （见 secPerSong），中间两次换档各要让开两秒歌内的预解缓冲，所以最远走到歌内
+// 第十四秒。那份 4 秒的 FLAC 放不下（中途播完会被误判成「慢得离谱」）。
 //
 // 用 WAV 而不是 FLAC 只是因为它是 16 位 PCM，写起来是一段几十行的字节拼装，
 // 不必为它在 app 这一层也铺一条 FLAC 编码。
