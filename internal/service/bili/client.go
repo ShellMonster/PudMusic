@@ -340,7 +340,14 @@ func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
 	if err != nil {
 		// 包一层而不是原样返回：调用方要能分清「没登录」（该提示重新登录）
 		// 和「网断了」（该提示检查网络）。原始的 *url.Error 不带这个信息。
-		return nil, fmt.Errorf("%w: %s %s: %v", ErrNetwork, method, endpoint.Path, err)
+		//
+		// ⚠️ 末尾那个原始错误用 `%w` 而不是 `%v`：**用户取消也要认得出来**。
+		// 下载队列判「这一项是用户停掉的，不是失败」靠的就是
+		// `errors.Is(err, context.Canceled)`，而 `%v` 拼进去的只是字——于是用户
+		// 在**取流途中**按下的「暂停」会被记成「任务出错」，界面上是一行红字加
+		// 一颗「重试」，而不是「下载暂停」。消息一个字没变（两个动词渲染出来的
+		// 字符串一样），变的是错误链。
+		return nil, fmt.Errorf("%w: %s %s: %w", ErrNetwork, method, endpoint.Path, err)
 	}
 	defer resp.Body.Close()
 

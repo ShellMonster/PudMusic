@@ -437,14 +437,14 @@ func TestASongFinishingReachesTheSystem(t *testing.T) {
 	}
 	s.await(t, 2, "打开一首歌")
 
-	// 等它真的放到头。
-	waitFor(t, 30*time.Second, "歌放到头", func() bool {
-		st := a.Snapshot()
-		return st.HasTrack && st.Duration > 0 && st.Position >= st.Duration
-	})
-	waitFor(t, 5*time.Second, "播放器自己报「不在放」", func() bool {
-		return !a.Snapshot().Playing
-	})
+	// 先等它真的在放，再等它自己停下来。
+	//
+	// ⚠️ **不要**拿 `Position >= Duration` 当「放完了」的判据：解码器最后
+	// 一帧的���置往往**差几毫秒**到不了时长（实测停在 3.9938s / 4s），
+	// 而合并前它又会略微冲过头——同一个判据在两种解码路径上给出的答案相反，
+	// 那种测试换个环境就红。
+	waitFor(t, 15*time.Second, "歌开始放", func() bool { return a.Snapshot().Playing })
+	waitFor(t, 30*time.Second, "歌自己放完", func() bool { return !a.Snapshot().Playing })
 
 	// 再给系统一点时间，然后看它收到的那一份。
 	time.Sleep(300 * time.Millisecond)
