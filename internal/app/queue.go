@@ -33,6 +33,14 @@ type Item struct {
 	Path   string // 本地文件的完整路径
 	Title  string // 显示在播放条上的名字
 	Cover  string // 封面地址，在线的歌才有
+	// Artist 是艺人，在线条目就是 UP 主名（B 站那边叫 ownerName，
+	// Biu 的 `updateMediaSession` 把它当 artist 传给系统媒体会话）。
+	//
+	// **本地文件永远是空的**：读音频内嵌标签那一套没有接，Biu 上游也没有
+	// （见 State.CoverURL 那段）。所以现在这一栏只对在线条目有意义，
+	// 字段先立着——等 B 站接口把 ownerName 带下来就有值了，
+	// 队列和媒体会话都不用改。
+	Artist string
 }
 
 // LocalItem 把一个本地音频文件包成一项。
@@ -213,12 +221,12 @@ func indexOfItem(items []Item, it Item) int {
 	return -1
 }
 
-// play 放队列里的一项：先开，开了成功再把它的封面地址记到状态上。
+// play 放队列里的一项：先开，开了成功再把它的封面地址和艺人记到状态上。
 //
 // 在线条目走 `playOnline`（它自己管代次和后台 goroutine），本地条目还是
 // 原来那条同步开文件的路。
 //
-// 开失败时不动封面：歌没换，还在放上一首，封面也不该跟着换。
+// 开失败时不动封面和艺人：歌没换，还在放上一首，它们也不该跟着换。
 func (a *App) play(item Item) error {
 	var err error
 	if item.isOnline() {
@@ -230,6 +238,7 @@ func (a *App) play(item Item) error {
 		return err
 	}
 	a.setCover(item.Cover)
+	a.setArtist(item.Artist)
 	return nil
 }
 

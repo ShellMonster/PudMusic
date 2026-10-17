@@ -13,9 +13,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/audio/flacdec"
@@ -25,12 +24,18 @@ import (
 	_ "github.com/egoist/mygo/audio/mp3"
 )
 
-// Player 是一首歌的播放链路：解码器 + MyGo 的播放器。
+// Player 是一首歌的播放链路：解码器 + 变速层 + MyGo 的播放器。
 //
 // 一个 Player 只服务一条播放路径——MyGo 用一个 goroutine 驱动一个解码器，
 // 迷你播放器和主播放器要各开一个。
 type Player struct {
-	dec  *errorDecoder
+	dec *errorDecoder
+	// vs 是保调变速层，夹在解码器和 MyGo 之间（见 rate.go）。
+	//
+	// ⚠️ MyGo 那个 `Player.SetSpeed` **不能**用来做倍速：它是重采样，音高会跟
+	// 着一块上去（1.5 倍速的人声是降了半个调的尖嗓）。所以 MyGo 播放器自己的
+	// speed 永远是 1，变速全在这一层里做。
+	vs   *varispeed
 	play *mygoaudio.Player
 	vol  float64
 
@@ -46,23 +51,19 @@ type Player struct {
 
 // Open 打开一个本地音频文件。
 //
-// 按扩展名分流：.flac 走自带的 flacdec（它同时吃裸 FLAC 和 MP4 里的 FLAC），
-// 其余交给 MyGo 已注册的格式（WAV / MP3 / AIFF / AIFC / MP4 家族 / 裸 ADTS）。
+// ⚠️ **不按扩展名分流**：认容器的是 `openDecoder` 那一张注册表，和在线流用的是
+// 同一个函数。曾经这里有一句「扩展名是 .flac 就走 flacdec」，那是**第二套**
+// 认容器的方式，两套迟早漂移——而漂移的那一半正好是在线流（本地放得了、
+// 在线放不了，或者反过来）。按头几个字节认，两条路就没有分别了：
+// 裸 FLAC 认成 FLAC，MP4 里的 FLAC 认成 MP4（交给系统解码器）。
+//
 // 解码器持有的文件句柄挂在 Player 上，Close 会把它关掉。
 func Open(path string) (*Player, error) {
-	if strings.EqualFold(filepath.Ext(path), ".flac") {
-		d, err := flacdec.OpenFile(path)
-		if err != nil {
-			return nil, err
-		}
-		return New(d), nil
-	}
-
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	d, _, err := mygoaudio.NewDecoder(f)
+	d, _, err := openDecoder(f)
 	if err != nil {
 		f.Close()
 		if errors.Is(err, mygoaudio.ErrFormat) {
@@ -75,9 +76,15 @@ func Open(path string) (*Player, error) {
 }
 
 // New 用一个现成的解码器建播放器。解码器归播放器所有，Close 时会被关掉。
+//
+// 变速层是**无条件**套上的，哪怕倍率就是 1。1 倍速下它逐样本透明
+// （`rate_test.go` 的 TestUnityRateIsSampleForSample 钉着这一点），所以这里
+// 没有「要不要绕开它」的第二条路——两条路迟早会漂移，而漂移的那一份正好是
+// 「用户开着 1.5 倍速切回 1 倍速」这条。
 func New(d mygoaudio.Decoder) *Player {
 	ed := &errorDecoder{Decoder: d}
-	return &Player{dec: ed, play: mygoaudio.NewPlayer(ed), vol: 1}
+	vs := newVarispeed(ed)
+	return &Player{dec: ed, vs: vs, play: mygoaudio.NewPlayer(vs), vol: 1}
 }
 
 // CloserReadSeeker 是「既是字节来源、又必须被一起关掉」的那一类东西。
@@ -93,34 +100,48 @@ type CloserReadSeeker interface {
 // OpenStream 打开一条**已经在流动的字节流**并建播放器。
 //
 // 在线流走这条：源是一个 `*StreamSource`（边下边播、可取消），它是
-// `io.ReadSeeker`，所以本地文件那套解码链一个字都不用改——认容器靠的是
-// **头几个字节**（`containers.go` 的 `????ftyp` / `\xff??`），不是后缀。
-//
-// 这也顺带解决了在线流「是什么格式」的问题：B 站的无损流是裸 FLAC，
-// 没有 magic 能注册进 MyGo 的格式表，所以最后再试一次 `flacdec`。
-// 顺序不能反过来：MP4 里的 FLAC 头几个字节是 `ftyp`，应该走 extaf，
-// 交给 flacdec 反而会把它当裸 FLAC 处理。
+// `io.ReadSeeker`，所以本地文件那套解码链一个字都不用改——**用的就是
+// `Open` 那同一个 `openDecoder`**。「本地文件」和「B 站 CDN 的字节」在这一层
+// 没有区别，走的注册表也是同一张。
 func OpenStream(r CloserReadSeeker) (*Player, error) {
-	d, _, err := mygoaudio.NewDecoder(r)
+	d, _, err := openDecoder(r)
 	if err != nil {
-		if !errors.Is(err, mygoaudio.ErrFormat) {
-			return nil, err
-		}
-		// 认不出来。裸 FLAC 走 flacdec（它同时吃裸 FLAC 和 MP4 里的 FLAC）。
-		fd, ferr := flacdec.Open(r)
-		if ferr != nil {
-			// 两个都不认：报告**第一个**错。那是「走完全套格式表都没认出来」，
-			// 比 flacdec 的那句「不像 FLAC」有用得多——后者会让人以为
-			// 文件损坏，而它可能只是一段还没下到的字节。
-			return nil, err
-		}
-		d = fd
+		return nil, err
 	}
 	p := New(owned(d, r))
 	// ⚠️ 见 Player.closers 那段注释：这个必须由 Close 同步做，
 	// 等不到解码 goroutine 醒来（它正阻塞在 r 的 Read 上）。
 	p.closers = []io.Closer{r}
 	return p, nil
+}
+
+// openDecoder 是**唯一**认容器的地方：`Open`（本地文件）和 `OpenStream`
+//（在线流）都调它。返回值第二项是认出来的容器名，只作记录和给测试看。
+//
+// 两步，顺序不能反过来：
+//
+//  1. MyGo 的格式表（`containers.go` 注册的 `????ftyp` / `????styp` / `\xff??`，
+//     加上 MP3 / WAV / AIFF 各自包的注册副作用）。
+//  2. 认不出来就试 `flacdec`——B 站的无损流是**裸 FLAC**，而 MyGo 的表是对
+//     字面量做匹配的，没法给变长的 magic（`fLaC` + STREAMINFO）注册一条。
+//
+// 反过来的话，MP4 里的 FLAC（头几个字节是 `ftyp`）会被 flacdec 当裸 FLAC 处理。
+func openDecoder(r io.ReadSeeker) (mygoaudio.Decoder, string, error) {
+	d, name, err := mygoaudio.NewDecoder(r)
+	if err == nil {
+		return d, name, nil
+	}
+	if !errors.Is(err, mygoaudio.ErrFormat) {
+		return nil, "", err
+	}
+	fd, ferr := flacdec.Open(r)
+	if ferr != nil {
+		// 两个都不认：报告**第一个**错。那是「走完全套格式表都没认出来」，
+		// 比 flacdec 的那句「不像 FLAC」有用得多——后者会让人以为
+		// 文件损坏，而它可能只是一段还没下到的字节。
+		return nil, "", err
+	}
+	return fd, "flac", nil
 }
 
 // Err 返回这一路播放里的第一条错误，播完或只是暂停过的话是 nil。
@@ -172,10 +193,30 @@ func (p *Player) Pause() { p.play.Pause() }
 func (p *Player) Playing() bool { return p.play.Playing() }
 
 // Seek 跳到从头算起的 t。位置会被夹在 [0, Duration] 里，拖到末尾是合法的。
+//
+// t 是**歌里的时间**，和倍率无关：变速层报给上层的帧号就是源帧，所以这一句
+// 在 0.5 倍速和 2 倍速下拖到同一处都是同一处（见 rate.go 的类型注释）。
 func (p *Player) Seek(t time.Duration) { p.play.Seek(t) }
 
-// Position 返回播到哪儿了。
-func (p *Player) Position() time.Duration { return p.play.Position() }
+// Position 返回播到哪儿了——**歌里的时间**。
+//
+// 不能直接用 MyGo 的 `play.Position()`：它数的是变速层吐出去的帧，除以采样率
+// 之后永远是「已经播了多少秒」，跟倍率无关（2 倍速下它会走成原速）。这里换算
+// 回源帧，见 `varispeed.SourceAt`。
+func (p *Player) Position() time.Duration {
+	rate := p.vs.SampleRate()
+	if rate <= 0 {
+		return p.play.Position()
+	}
+	played := p.play.Position()
+	frames := int64(math.Round(played.Seconds() * float64(rate)))
+	return framesToTime(p.vs.SourceAt(frames), rate)
+}
+
+// framesToTime 把帧号写成时长。
+func framesToTime(frames int64, rate int) time.Duration {
+	return time.Duration(float64(frames) / float64(rate) * float64(time.Second))
+}
 
 // Duration 返回这首歌有多长；文件没写时长时是 0。
 func (p *Player) Duration() time.Duration { return p.play.Duration() }
@@ -189,6 +230,21 @@ func (p *Player) SetVolume(v float64) *Player {
 
 // Volume 返回音量增益。
 func (p *Player) Volume() float64 { return p.vol }
+
+// SetRate 设播放倍率，夹在 [MinRate, MaxRate]（0.5~2.0）。1 是原速。
+//
+// **音高不变**：时间轴是在变速层里拉长/压短的（WSOLA），不是重采样。
+// 改的时候不用重开播放器，也不用 seek：变速层接着当前这一跳往下铺，位置不跳。
+//
+// 想让倍率在换歌之后还在，调用方自己存着（见 `App.SetRate`）——这一层只管
+// 手上这一首。
+func (p *Player) SetRate(r float64) *Player {
+	p.vs.setRate(r)
+	return p
+}
+
+// Rate 返回当前倍率。
+func (p *Player) Rate() float64 { return p.vs.rate() }
 
 // Close 停掉并释放解码器、字节源和文件句柄。可以重复调用。
 func (p *Player) Close() {

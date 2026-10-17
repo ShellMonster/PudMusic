@@ -36,6 +36,12 @@ type Route struct {
 var routes = []Route{
 	// 上游：`pages/music-recommend/new-music-top.tsx:213` 的那块用 `暂无数据`，
 	// 推荐页本身落到共享默认。
+	//
+	// ⚠️ 首页已经有自己的内容了（homepage.go 的三个 Tab + 新歌速递），但这一条
+	// 的 `Empty` **不是一句没人会看到的话**：B 站的推荐接口还没接，**每个 Tab 的
+	// 推荐单现在都是空的**，页面在自己的 view 里画的就是这一条（见 `viewHome`）。
+	// 别照着「已经有内容的页不用 Empty」那条把它清掉——清掉之后首页在接口接上之
+	// 前画出来是一片白，而且没有任何测试会红。
 	{Match: "/", Title: "推荐音乐", InMenu: true, Empty: emptyState{
 		Title: "暂无内容",
 		Hint:  "先在顶栏「打开文件」放几首进来，或者搜一首歌",
@@ -186,6 +192,14 @@ func (s *Shell) page(c *ui.Context, r *ui.Route, rt Route) {
 // 「既没内容、Empty 又是空的」路由揪出来）。
 func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
 	switch rt.Match {
+	case homePath:
+		// 首页（homepage.go）：三个 Tab + 新歌速递。
+		//
+		// ⚠️ 这一页的空状态**在它自己里面**画（`viewHome` 里那一支 `viewEmpty`），
+		// 不是走 `pageContent` 的兜底：上面那一排 Tab 要一直在，兜底那一支会把
+		// Tab 一起换掉。所以 `Empty` 留在这儿是有用的，别当成「已经有内容了就该
+		// 清空」——`TestTheHomePageStillSaysWhyItIsEmpty` 钉的就是它。
+		return s.viewHome
 	case settingsPath:
 		return s.viewSettings
 	case searchPath:
@@ -194,6 +208,14 @@ func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
 	case miniPlayerPath:
 		// 正在放什么 + 它的歌词（nowplaying.go）。
 		return s.viewNowPlaying
+	case downloadListPath:
+		// 下载记录（downloadlist.go）：表格 + 三段进度 + 五种操作 + 确认弹窗。
+		//
+		// ⚠️ 它和首页一样，**空状态画在自己里面**（一条记录都没有时画
+		// `routes` 表里 `/download-list` 那一条），所以那条的 `Empty` 仍然
+		// 有用，别当成「已经有内容了就该清掉」——`TestTheEmptyListStillSaysWhyItIsEmpty`
+		// 钉的就是它。
+		return s.viewDownloadList
 	case loginPath:
 		// 扫码登录（login.go）。
 		return s.viewLogin
