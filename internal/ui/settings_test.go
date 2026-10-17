@@ -204,7 +204,11 @@ func TestShellSaysSoWhenSettingsAreBroken(t *testing.T) {
 		t.Fatal("坏掉的设置文件没有报错")
 	}
 
-	tt := mygoui.NewTester(New(a).View, 900, 600)
+	// ⚠️ 拿着壳是为了关掉切页动画，理由见 settings_page_test.go 里同一句的注释：
+	// 动画在无头 Tester 那只不走的钟上永远走不完，每一次 settle 都会跑满 20 帧。
+	s := New(a)
+	s.router.Transition = mygoui.TransitionNone
+	tt := mygoui.NewTester(s.View, 900, 600)
 	tt.Frame() // 这一帧要是 panic 了，测试进程自己就没了
 
 	if !tt.HasText("设置文件已损坏") {
@@ -424,7 +428,11 @@ func TestThemeSwitchSaysWhyItCannotSwitch(t *testing.T) {
 		_ = a.CloseSettings()
 	})
 
-	tt := mygoui.NewTester(New(a).View, 900, 600)
+	// ⚠️ 拿着壳是为了关掉切页动画，理由见 settings_page_test.go 里同一句的注释：
+	// 动画在无头 Tester 那只不走的钟上永远走不完，每一次 settle 都会跑满 20 帧。
+	s := New(a)
+	s.router.Transition = mygoui.TransitionNone
+	tt := mygoui.NewTester(s.View, 900, 600)
 	tt.SetDark(false)
 	tt.Frame()
 	openSettings(t, tt)
@@ -449,7 +457,11 @@ func TestShellSaysSoWhenSettingsCannotBeStored(t *testing.T) {
 		t.Cleanup(a.Close)
 		a.RecordSettingsFailure(errors.New("拿不到应用数据目录，这次的改动关掉应用就没了"))
 
-		tt := mygoui.NewTester(New(a).View, 900, 600)
+		// ⚠️ 拿着壳是为了关掉切页动画，理由见 settings_page_test.go 里同一句的注释：
+		// 动画在无头 Tester 那只不走的钟上永远走不完，每一次 settle 都会跑满 20 帧。
+		s := New(a)
+		s.router.Transition = mygoui.TransitionNone
+		tt := mygoui.NewTester(s.View, 900, 600)
 		tt.Frame()
 		if !tt.HasText("这次的改动关掉应用就没了") {
 			t.Errorf("界面上没有提示设置存不住，文字有 %q", tt.Texts())
@@ -470,7 +482,11 @@ func TestShellSaysSoWhenSettingsCannotBeStored(t *testing.T) {
 			t.Skip("这个环境上 os.UserConfigDir 不靠 HOME/XDG_CONFIG_HOME，跳过")
 		}
 
-		tt := mygoui.NewTester(New(a).View, 900, 600)
+		// ⚠️ 拿着壳是为了关掉切页动画，理由见 settings_page_test.go 里同一句的注释：
+		// 动画在无头 Tester 那只不走的钟上永远走不完，每一次 settle 都会跑满 20 帧。
+		s := New(a)
+		s.router.Transition = mygoui.TransitionNone
+		tt := mygoui.NewTester(s.View, 900, 600)
 		tt.Frame()
 		if !tt.HasText("拿不到应用数据目录") {
 			t.Errorf("拿不到目录这件事界面上没有提示，文字有 %q", tt.Texts())
