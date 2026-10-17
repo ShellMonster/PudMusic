@@ -75,6 +75,19 @@ func open(item app.Item, notify func(string)) {
 	}
 }
 
+// OpenLabel 是菜单上「打开来处」那一项写的字：本地文件写「在访达中显示」，
+// 其余写「在 B 站打开」（Biu 的 `menu.tsx` 就是本地项 hidden 掉这一项，我们
+// 不藏而是换个说法——本地文件也有来处，只是它在访达里）。
+//
+// ⚠️ 内容列表那一套菜单和播放列表抽屉的行菜单用的是**同一个**判断（两边都调
+// 这里）。照着再写一份的话，同一项在两个菜单上会写得出两种字。
+func OpenLabel(item app.Item) string {
+	if item.Source == "local" && item.Path != "" {
+		return "在访达中显示"
+	}
+	return "在 B 站打开"
+}
+
 // BiliLink 是这一项在 B 站上的地址，照 Biu 的 `src/utils/link.ts` 的
 // getBiliVideoLink 拼法：mv 走 video/{bvid}，音频走 audio/au{sid}。
 //
