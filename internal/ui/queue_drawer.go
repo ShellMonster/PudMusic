@@ -1,5 +1,6 @@
-// 播放列表抽屉：Biu 的 `components/music-playlist-drawer` + 顶上那个开抽屉的
-// 按钮（`components/open-playlist-drawer-button`，Biu 把它放在播放条右边）。
+// 播放列表抽屉：Biu 的 `components/music-playlist-drawer` + 开抽屉的那个按钮
+// （`components/open-playlist-drawer-button`，Biu 把它放在播放条右边；我们放顶栏
+// ——播放条右边放不下第四个控件，理由见 navbar.go 里那一句）。
 //
 // 三件事，各对一处上游：
 //
