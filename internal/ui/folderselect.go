@@ -189,10 +189,10 @@ func selectListHint(f *folderSelect) string {
 
 // viewFolderPickRow 是列表里的一行：一个勾 + 名字 + 几个内容。
 //
-// 🔴 **每一行的 key 用收藏夹的 id**，不是序号。默认的元素身份是「父 ID +
-// 兄弟序号」，而「勾上第三个收藏夹」会让列表回到第一页重新拉（见 onList）——
-// 那一次前面多了几行，后面所有行的勾整个串到别的收藏夹上。实测就是
-// 「勾了 A 结果 B 变灰」。
+// ⚠️ **点整行等于点那个勾**（`row.Clicked()`）：Biu 那边整行是一个 `role=button`
+// 的 div，行内才是那个勾，而点行内不会连带外面那一次（外面那一次被 stop 了）。
+// 少一行的话用户得瞄着那个小方框点，而弹窗里一列都是这种行——瞄错的次数
+// 不少，症状是「有时候勾不上」。
 func (s *Shell) viewFolderPickRow(c *ui.Context, f *folderSelect, i int) {
 	t := c.Theme()
 	item := f.list[i]
