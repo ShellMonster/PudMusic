@@ -201,11 +201,27 @@ func (s *Shell) newCollectionPage(ref app.CollectionRef) *collectionPage {
 // 换排序时整个换掉列表而不是换 fetcher，同一个道理（换 fetcher 还是闭包读
 // 字段）。
 func (s *Shell) newCollectionList(p *collectionPage) *list.PagedList {
-	acts := s.listActions()
+	acts := s.collectionActions()
 	ref, sort, media := p.ref, p.sort, &p.media
 	return list.NewPaged(s.images, acts, func(ctx context.Context, pageNo int) (list.Page, error) {
 		return s.fetchCollectionPage(ctx, ref, sort, pageNo, media)
 	})
+}
+
+// collectionActions 是这一页列表的操作，比通用那一份多换了「下载」那一项。
+//
+// 🔴 **换的是 Download**：`list.AppActions` 给的是「同步、不补 cid」的那一条
+// （界面线程上一次网络往返都不许有），而**收藏夹的条目不带 cid**——B 站的内容
+// 列表接口只给 `page` 数，不给分 P id（见 `bili.Media`）。不换的话这一页的
+// 「下载音频」按下去每一首都是「还没取到分 P id」，而批量下载却是能用的
+// （那一路在后台补），同一个页面上两件看起来一样的事一个成一个不成。
+//
+// 搜索结果那一页**不换**，是有意的：它的条目同样只有 bvid，而那一页要如实
+// 拒绝「下不了」（见 `list.AppActions` 的注释）。
+func (s *Shell) collectionActions() list.Actions {
+	acts := s.listActions()
+	acts.Download = func(it app.Item) { s.downloadLater(it, false, "下载音频") }
+	return acts
 }
 
 // fetchCollectionPage 拉一页内容并翻成列表要的形状，顺带把完整信息记进 media。
@@ -240,23 +256,10 @@ func (s *Shell) fetchCollectionPage(ctx context.Context, ref app.CollectionRef, 
 // 音频流，而 `app.playableOnline` 对 Type 空的会回一句「这一首还不能放」，
 // 那句话说的就是事实。给它们编一个 Type 的话错误信息会指向另一个原因
 // （见 `app.playableOnline` 的注释）。
-func onlineItemOf(m bili.Media) app.Item {
-	it := app.Item{
-		Source: "online",
-		Title:  m.Title,
-		Cover:  m.Cover,
-		// Sid 一直带着：Type=12（音频）靠它，Type=2 的条目也指着它
-		// （`list.BiliLink` 有 bvid 时优先用 bvid，所以不会串）。
-		Sid: strconv.FormatInt(m.ID, 10),
-	}
-	switch m.Type {
-	case bili.MediaVideo:
-		it.Type, it.Bvid = "mv", m.Bvid
-	case bili.MediaAudio:
-		it.Type = "audio"
-	}
-	return it
-}
+//
+// 换算本身在 `app.ItemOfMedia`——**全项目只有那一份**，而批量下载那边也要用
+// （`app.EnqueueDownload`）。这里留一个调用是为了那一处调用点不用改。
+func onlineItemOf(m bili.Media) app.Item { return app.ItemOfMedia(m) }
 
 // collectionFor 拿（或建）这个容器此刻的那一份页面状态。
 //
