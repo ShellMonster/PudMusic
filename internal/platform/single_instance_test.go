@@ -309,6 +309,9 @@ func TestLockRacesTwoFreshProcesses(t *testing.T) {
 		// 症状是「前几轮绿、后几轮连着红」：机器一忙，子进程从 Start 到写完
 		// 要几十上百毫秒，而 `waitAnswer` 第一个 5 ms 就去读了。实测全量并行
 		// 跑的时候第 6~10 轮连着红，隔离跑偶尔红——**测的其实不是锁**。
+		//
+		// （main 上是同一个诊断、另一种解法：每轮开始前把上一轮的答案删掉。
+		//  两种等价，这里留的是「路径一轮一个」——它不依赖删除成功。）
 		pa := filepath.Join(dir, fmt.Sprintf("pa-%d", r))
 		pb := filepath.Join(dir, fmt.Sprintf("pb-%d", r))
 		var oa, ob bytes.Buffer
