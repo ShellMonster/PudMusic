@@ -119,13 +119,13 @@ func (a *App) SetAudioQuality(q bili.AudioQuality) {
 	a.streaming.Quality = q
 	a.streamCache = map[string]*bili.StreamRef{}
 	tr := a.online
-	pos, vol, want, gen := a.position, a.volume, a.wantPlay, a.onlineGen
+	pos, want, gen := a.position, a.wantPlay, a.onlineGen
 	wake := a.wake
 	a.mu.Unlock()
 
 	a.rememberAudioQuality(q)
 	if tr != nil {
-		a.restreamOnline(tr, q, pos, vol, want, gen)
+		a.restreamOnline(tr, q, pos, want, gen)
 	}
 	if wake != nil {
 		wake()
@@ -149,7 +149,7 @@ func (a *App) rememberAudioQuality(q bili.AudioQuality) {
 //
 // 换流之后的处理和 `refreshOnlineNow` 一样：跳回原来的**播放位置**，那一步
 // 是「换流后从原进度继续」的全部意义。
-func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Duration, vol float64, want bool, gen int) {
+func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Duration, want bool, gen int) {
 	s := a.streamingSnapshot()
 	if s == nil {
 		a.failOnline(gen, errStreamingMissing)
@@ -166,7 +166,7 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 			// 同一档：换过去听不出区别，不打断。
 			return
 		}
-		src, p, err := a.buildFromRef(context.Background(), s, tr.item, vol, gen, ref)
+		src, p, err := a.buildFromRef(context.Background(), s, tr.item, gen, ref)
 		if err != nil {
 			a.failQualitySwitch(gen, q, err)
 			return
@@ -347,11 +347,8 @@ func (a *App) runOnline(it Item, gen int) {
 		a.failOnline(gen, errStreamingMissing)
 		return
 	}
-	a.mu.Lock()
-	vol := a.volume
-	a.mu.Unlock()
 
-	src, p, ref, err := a.buildOnline(context.Background(), s, it, vol, gen)
+	src, p, ref, err := a.buildOnline(context.Background(), s, it, gen)
 	if err != nil {
 		a.failOnline(gen, err)
 		return
@@ -396,14 +393,18 @@ func (a *App) runOnline(it Item, gen int) {
 //
 // 开新歌和「从播放位置重开」走的是同一条路，所以它们共用这一个函数——
 // 两份实现迟早会漂移，而漂移的那一半正好是「换流后从原位置继续」这条规格。
-func (a *App) buildOnline(ctx context.Context, s *Streaming, it Item, vol float64, gen int) (
+//
+// 音量和倍率是**建好之后现读**的，不跟着调用方一路传下来：建一条在线流要走网络
+// （取流、等首字节），这中间用户完全可能按了音量或者换了倍速。建完才读，读到的
+// 才是当下那个值——传下来的那个反而是几十秒前的。
+func (a *App) buildOnline(ctx context.Context, s *Streaming, it Item, gen int) (
 	*audio.StreamSource, *audio.Player, *bili.StreamRef, error,
 ) {
 	ref, err := a.resolve(ctx, s, it, s.Quality)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	src, p, err := a.buildFromRef(ctx, s, it, vol, gen, ref)
+	src, p, err := a.buildFromRef(ctx, s, it, gen, ref)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -415,7 +416,10 @@ func (a *App) buildOnline(ctx context.Context, s *Streaming, it Item, vol float6
 // 为什么要从 buildOnline 里拆出来：换音质的时候要先看一眼「新取回来的还是
 // 不是同一档」，是同一档就不该打断正在放的歌——那一下判断必须在建播放器
 // 之前，而建播放链路本身要开网络连接（`audio.OpenStream` 会去 CDN 探容器）。
-func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, vol float64, gen int,
+//
+// 音量和倍率在这里**现读**（`buildOnline` 那段注释说了为什么）。三条建播放
+// 链路的路——开新歌、换流重开、换音质——都走这里，所以三处一处都不会漏。
+func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	ref *bili.StreamRef,
 ) (*audio.StreamSource, *audio.Player, error) {
 	src, err := audio.NewStreamSource(audio.StreamSourceOptions{
@@ -437,7 +441,10 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, vol float
 		src.Close()
 		return nil, nil, err
 	}
-	p.SetVolume(vol)
+	a.mu.Lock()
+	vol, rate := a.volume, a.rate
+	a.mu.Unlock()
+	p.SetVolume(vol).SetRate(rate)
 	return src, p, nil
 }
 
@@ -628,7 +635,7 @@ func (a *App) refreshOnlineNow() {
 	}
 	tr.reopening = true
 	gen := a.onlineGen
-	pos, vol, want := a.position, a.volume, a.wantPlay
+	pos, want := a.position, a.wantPlay
 	a.mu.Unlock()
 
 	s := a.streamingSnapshot()
@@ -638,7 +645,7 @@ func (a *App) refreshOnlineNow() {
 	}
 
 	go func() {
-		src, p, ref, err := a.buildOnline(context.Background(), s, tr.item, vol, gen)
+		src, p, ref, err := a.buildOnline(context.Background(), s, tr.item, gen)
 		if err != nil {
 			a.failOnline(gen, err)
 			return

@@ -79,6 +79,12 @@ type Shell struct {
 	// 新建一个等于每帧回到顶上，「切 Tab 回到原位」这条就永远不成立。
 	home *homePage
 
+	// downloads 是下载记录页自己那一摊状态：那张表格、删除确认弹窗。见
+	// downloadlist.go。
+	//
+	// 同样是建一次存着：表格记着滚动位置和行身份，每帧新建等于每帧跳回顶上。
+	downloads *downloadsPage
+
 	// toasts 是右下角那些提示，addToast / clearToasts 是唯一改它的地方。
 	toastMu  sync.Mutex
 	toasts   []toast
@@ -88,6 +94,10 @@ type Shell struct {
 	// 两个都只由 view 读写——view 永远跑在主线程上。
 	scrub float64
 	held  bool
+
+	// rateOpen 是倍率那个浮层开着没有。**只由 view 在主线程上读写**，
+	// 见 playbar_rate.go。
+	rateOpen bool
 
 	// 侧栏这一摊。**只由 view 在主线程上读写**，不跨 goroutine。
 	//
@@ -229,6 +239,9 @@ func New(a *app.App) *Shell {
 	// 首页自己那一摊要在建好之后才有（它要用封面缓存），所以接在 images 后面。
 	// 操作接在应用状态上、提示接自己的 Toast，接法见 widgets/list 的 AppActions。
 	s.home = newHomePage(s.images, list.AppActions(a, s.addToast), s.wake.invalidate)
+	// 下载记录页同理（downloadlist.go）：两个「打开」接系统那一份，它们在无头
+	// Tester 里会 panic，测试建完外壳就换成记动作的桩；记录那一条接应用层。
+	s.downloads = newDownloadsPage(a.DownloadSnapshots, systemOpenDir, mygo.Shell.ShowItemInFolder)
 	s.hist = newSearchHistory("")
 	s.keys = newShortcutKeys("")
 	s.picker = systemPathPicker{}
