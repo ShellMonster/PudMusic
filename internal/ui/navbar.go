@@ -77,6 +77,15 @@ func (s *Shell) viewNav(c *ui.Context) {
 		if ui.Button(c, "打开文件").Clicked() {
 			s.pickAndEnqueue()
 		}
+		// 播放列表抽屉的开关。Biu 把它放在播放条右边
+		//（`layout/playbar/right/index.tsx`），我们放这儿——**播放条右边放不下**：
+		// 那三个键（音量 120 + 倍速 64 + 加歌 56）已经把 88 高的一行占满了，再加
+		// 一个就把歌名挤成一个字一行（见 playbar.go 里那一段的注释）。
+		//
+		// 紧挨着「打开文件」：两个都是「往队列里放东西 / 看队列」这一类。
+		if ui.Button(c, "播放列表").Clicked() {
+			s.drawerOpen = !s.drawerOpen
+		}
 		s.viewDynamicDot(c)
 		s.viewAvatar(c)
 		// 登录 / 退出登录那个入口（login.go 的 viewLoginEntry）。它在 router.go

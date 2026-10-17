@@ -53,6 +53,14 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 			})
 
 			// 右：音量 + 倍速 + 加歌。
+			//
+			// ⚠️ **这一行放不下第四个控件了**。Biu 那边播放列表的开关在播放条右边
+			// （`layout/playbar/right/index.tsx`），但 Biu 那三个键都是图标，我们
+			// 这三个是写死的宽度（音量 120 + 倍速 64 + 加歌 56），再加一个就把左边
+			// 的歌名挤没了：实测 760 宽时歌名只剩 14.9px（一个字一行）。挤没了之
+			// 后**界面看不出坏了**——字还在那儿，只是一个字一行。
+			// `TestTheErrorSitsUnderTheTitle` 和 `TestTheRateButtonDoesNotSquashTheTitle`
+			// 都在盯这一条，所以那个开关去了顶栏（见 navbar.go 的 viewNav）。
 			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 				// 音量条自己带无障碍标签，不用旁边再摆一个「音量」字。
 				vol := st.Volume

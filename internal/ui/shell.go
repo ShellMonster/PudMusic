@@ -144,6 +144,24 @@ type Shell struct {
 	// 两组一份是因为两组各排各的（见 sidebar_favorites.go）。
 	sideLists [favGroups]ui.ListState
 
+	// 播放列表抽屉这一摊。**同样只由 view 在主线程上读写**。
+	//
+	// drawerOpen 是开没开。它不进设置：抽屉是「我现在要看队列」这一下的事，
+	// 关掉窗口就该是关着的（Biu 那边的 modal store 也不持久化它）。
+	drawerOpen bool
+
+	// queueList 是抽屉里那一列的列表状态：滚动位置、行身份、行高。
+	queueList ui.ListState
+
+	// queueScroll 是那一列滚到哪儿了。**和 queueList 分开存**是因为「定位当前
+	// 播放」要的是一段动画：ListState.ScrollTo 是一跳到位（`mygo/ui/list.go`
+	// 的 ScrollTo），ScrollState.ScrollTo 才带 Animation。
+	queueScroll ui.ScrollState
+
+	// queueRows 是这一帧去重之后要画的那几行（连同它们在队列里的下标）。
+	// queueList.Key 每帧都要读它，所以它和 rows 数得对上（见 queue_drawer.go）。
+	queueRows []queueRow
+
 	// 顶栏这一摊。**同样只由 view 在主线程上读写**。
 	//
 	// searchFocused 是搜索框有没有焦点，顶栏用它染边框。浮层**不**靠它开
@@ -533,7 +551,8 @@ func (s *Shell) onPanic(r any) {
 	s.wake.invalidate()
 }
 
-// viewMain 是正常的那一帧：上导航 + 左边栏 + 路由页 + 播放条，右下角浮着提示。
+// viewMain 是正常的那一帧：上导航 + 左边栏 + 路由页 + 播放条，浮层上是播放列表
+// 抽屉（开着的话）和右下角的提示。
 func (s *Shell) viewMain(c *ui.Context) {
 	// 🔴 铁律二：每帧第一件事就是装主题，而且必须在最开头——SetTheme 只影响
 	// 它之后创建的控件。不装的话 MyGo 在帧开头重置好的那份跟随系统的主题
@@ -569,6 +588,11 @@ func (s *Shell) viewMain(c *ui.Context) {
 		s.viewPlayBar(c, st)
 	})
 
+	// 抽屉是浮在侧栏和页面**上面**的一层，不是主布局里的另一块。Biu 那边它是
+	// 右侧浮出来的 Drawer（`music-playlist-drawer/index.tsx` 的
+	// `data-[placement=right]`），底下那一层页面照旧看得见、点得着；塞进上面
+	// 那个 Row 里就成了「窗口窄一块」，页面被挤着走——那不是抽屉。
+	Guard(s.viewQueueDrawer, s.onPanic)(c)
 	s.viewToasts(c)
 }
 

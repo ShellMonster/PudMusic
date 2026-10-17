@@ -124,7 +124,7 @@ func TestStillInFlightTasksBecomePausedOnRestart(t *testing.T) {
 	h := newHarness(t, size, 30280)
 	// 每发只给 1 MB 就掐断：任务会失败，但仍在队列里、仍有 `.part`。
 	h.cdn.set(func(c *cdn) { c.cutAt = 1 << 20 })
-	id := TaskID(bvid, cid)
+	id := TaskID(bvid, cid, false)
 	if _, err := h.m.Enqueue(AddRequest{Bvid: bvid, Cid: cid, Title: "半首", Dir: h.dir}); err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestALongTitleLandsOnDiskWithinTheLimit(t *testing.T) {
 func TestAnOrphanedPartIsRemovedWhenTheExtensionChanges(t *testing.T) {
 	const size = 2 * chunkSize
 	h := newHarness(t, size, 30232) // 上一轮：128K，落盘名 .m4a
-	id := TaskID(bvid, cid)
+	id := TaskID(bvid, cid, false)
 	oldDest := DestFor(h.dir, "换档的歌", ".m4a", id)
 	writePart(t, h.cdn, partPath(oldDest), 0, size)
 	h.saveQueue(t, map[string]*Task{
@@ -295,7 +295,7 @@ func TestTwoSongsWithTheSameNameNeverShareALandingPath(t *testing.T) {
 	t.Cleanup(func() { _ = m.Close("") })
 
 	// ① 第一首：下了一块就退出，盘上留着它的 .part，队列里记着分块 0。
-	idA := TaskID(bvid, "c1")
+	idA := TaskID(bvid, "c1", false)
 	destA := DestFor(dir, "同名", ".m4a", idA)
 	writePart(t, cdnA, partPath(destA), 0, sizeA)
 	seedQueue(t, dir, map[string]*Task{
@@ -384,7 +384,7 @@ func TestTwoQueuedTasksNeverClaimTheSameLandingPath(t *testing.T) {
 	}
 	// 挑名字的纯逻辑也是同一条不变量。
 	claimed := map[string]bool{a.Dest: true}
-	if got := destFor(dir, "同名", ".m4a", "BV3|c3", claimed); got == a.Dest {
+	if got := destFor(dir, "同名", ".m4a", "BV3|c3", false, claimed); got == a.Dest {
 		t.Fatalf("避让没有躲开别人认领的名字：%s", got)
 	}
 }

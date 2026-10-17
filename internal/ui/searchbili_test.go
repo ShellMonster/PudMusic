@@ -59,7 +59,19 @@ type biliFixture struct {
 	// 都没验到。
 	served int
 	media  []byte
+
+	// favoritedIn 是「这一首已经在哪些收藏夹里」；favoriteCalls 记下每一次写。
+	favoritedIn   []int64
+	favoriteCalls []url.Values
 }
+
+// fixture 那一摊收藏用的固定值。
+const (
+	fixtureMid         = 9527
+	fixtureAid         = 4242
+	fixtureFolderID    = 100
+	fixtureFolderTitle = "默认收藏夹"
+)
 
 // newBiliFixture 建一台假 B 站。search 造几页，每页 n 条。
 func newBiliFixture(t *testing.T, n int) *biliFixture {
@@ -81,11 +93,43 @@ func newBiliFixture(t *testing.T, n int) *biliFixture {
 func (f *biliFixture) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/x/web-interface/nav":
+		// ⚠️ `isLogin` / `mid` 是收藏那一路要的（`bili.FavoriteSong` 先问 nav 拿
+		// mid 才挑得了收藏夹）。搜索那一路只要 wbi_img，所以多带两个字段不影响它。
 		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
-			"data": map[string]any{"wbi_img": map[string]string{
-				"img_url": "https://i0.hdslb.com/bfs/wbi/" + wbiImgKey + ".png",
-				"sub_url": "https://i0.hdslb.com/bfs/wbi/" + wbiSubKey + ".png",
+			"data": map[string]any{"isLogin": true, "mid": fixtureMid, "uname": "测试账号",
+				"wbi_img": map[string]string{
+					"img_url": "https://i0.hdslb.com/bfs/wbi/" + wbiImgKey + ".png",
+					"sub_url": "https://i0.hdslb.com/bfs/wbi/" + wbiSubKey + ".png",
+				}}})
+
+	case r.URL.Path == "/x/web-interface/view":
+		// bvid → avid（收藏接口要的是 avid）。
+		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
+			"data": map[string]any{"aid": fixtureAid, "bvid": r.URL.Query().Get("bvid")}})
+
+	case r.URL.Path == "/x/v3/fav/folder/created/list-all":
+		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
+			"data": map[string]any{"count": 2, "list": []any{
+				map[string]any{"id": fixtureFolderID, "title": fixtureFolderTitle, "media_count": 1, "attr": 0},
+				map[string]any{"id": 200, "title": "第二格", "media_count": 0, "attr": 0},
 			}}})
+
+	case r.URL.Path == "/x/v3/fav/resource/ids":
+		// 收的是**收藏夹 id**、返回的是**那一格里的内容**（上游
+		// `fav-resource.ts:127-152`）。每一项是一个对象 `{id, type}`。
+		items := make([]any, 0, len(f.favoritedIn))
+		for _, id := range f.favoritedIn {
+			items = append(items, map[string]any{"id": id, "type": 2, "bvid": "BV1xx", "bv_id": "BV1xx"})
+		}
+		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
+			"data": map[string]any{"ids": items}})
+
+	case r.URL.Path == "/x/v3/fav/resource/deal":
+		_ = r.ParseForm()
+		f.mu.Lock()
+		f.favoriteCalls = append(f.favoriteCalls, r.PostForm)
+		f.mu.Unlock()
+		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1})
 
 	case r.URL.Path == "/x/web-interface/wbi/search/type":
 		f.serveSearch(w, r)

@@ -162,10 +162,14 @@ type audioStream struct {
 
 // dashInfo 是取流返回里 `data.dash` 的那一段。
 //
-// 只声明我们真的要用到的字段。B 站这个对象有几十个字段，
-// `video` 整段我们一条都不看（这个应用只放音频）。
+// 只声明我们真的要用到的字段。B 站这个对象有几十个字段，剩下的不看。
+//
+// `Video` 以前是整段不看的（那时候这个应用只放音频），视频下载那一票
+// 把它接上了——而**接口一直都在返回它**（取流带的 `fnval=4048` 就是
+// 「要全部 DASH 流」，见 `stream.go` 的 `dashAll`）。见 `dash_video.go`。
 type dashInfo struct {
 	Duration float64       `json:"duration"`
+	Video    []dashVideo   `json:"video"`
 	Audio    []audioStream `json:"audio"`
 	Flac     *struct {
 		Display bool         `json:"display"`
