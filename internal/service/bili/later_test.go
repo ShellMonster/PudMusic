@@ -219,33 +219,6 @@ func TestToViewRemovePostsTheAid(t *testing.T) {
 	}
 }
 
-// TestToViewRemoveWatchedIsNotAid 盯「清除已看完」走的是 viewed=true 而不是 aid。
-//
-// 这两个在同一个接口上，写错的表现是「点一下什么都没删」——B 站对缺参数的那次
-// 照样回 code 0。
-func TestToViewRemoveWatchedIsNotAid(t *testing.T) {
-	f := signedFake(t)
-	f.on(toViewDelPath, func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, jsonData(t, 0, "0", nil))
-	})
-	c := f.client(t, Options{})
-
-	if err := c.ToViewRemoveWatched(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	for _, rec := range f.requests() {
-		if rec.Path != toViewDelPath {
-			continue
-		}
-		if !strings.Contains(rec.Body, "viewed=true") {
-			t.Errorf("body 里没有 viewed=true，原文是 %q", rec.Body)
-		}
-		if strings.Contains(rec.Body, "aid=") {
-			t.Error("清除已看完不该带 aid——带了就是删掉那一条")
-		}
-	}
-}
-
 // TestToViewNotLoggedIn 盯 -101 走出去之后还是那个可判的错。
 //
 // 界面上靠 `errors.Is(err, ErrNotLoggedIn)` 说「重新登录」，认不出来就退成

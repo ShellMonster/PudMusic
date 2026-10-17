@@ -194,15 +194,6 @@ func (c *Client) ToViewRemove(ctx context.Context, aid int64) error {
 	return c.postLater(ctx, toViewDelPath, form)
 }
 
-// ToViewRemoveWatched 移除**所有已看完的**（Biu 的「清除已看完」）。
-//
-// `viewed=true` 是 B 站的写法（history-toview-del.ts），不是「删掉 true 的那些」。
-func (c *Client) ToViewRemoveWatched(ctx context.Context) error {
-	form := url.Values{}
-	form.Set("viewed", "true")
-	return c.postLater(ctx, toViewDelPath, form)
-}
-
 // postLater 发一个稍后再看的写请求。
 //
 // ⚠️ CSRF 必带：不带的话一律 -111，而 B 站对同一个 -111 有时给的是「风控」，

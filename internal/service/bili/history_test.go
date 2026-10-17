@@ -15,7 +15,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 )
@@ -205,43 +204,6 @@ func TestHistoryKidIsEmptyWhenNothingIdentifiesIt(t *testing.T) {
 	}
 	if got := pg.Items[0].Kid; got != "" {
 		t.Errorf("kid = %q，want 空串（界面上据此不给「删除」这一项）", got)
-	}
-}
-
-// TestHistoryDeleteAndClear 盯两个写接口：POST、CSRF、body。
-func TestHistoryDeleteAndClear(t *testing.T) {
-	f := newFakeBili(t)
-	f.on(historyDeletePath, func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, jsonData(t, 0, "0", 0))
-	})
-	f.on(historyClearPath, func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, jsonData(t, 0, "0", 0))
-	})
-	c := f.client(t, Options{CSRF: func() string { return "the-jct" }})
-
-	if err := c.HistoryDelete(context.Background(), "archive_170001"); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.HistoryClear(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	// ⚠️ 断言 **body 原文**而不是 `rec.Form`：bili.Client 发表单时不带
-	// Content-Type，假服务器那边的 `ParseForm` 解析不出 body。
-	seen := map[string]string{}
-	for _, rec := range f.requests() {
-		switch rec.Path {
-		case historyDeletePath, historyClearPath:
-			seen[rec.Path] = rec.Body
-			if rec.Header.Get(CSRFHeaderName) != "the-jct" {
-				t.Errorf("%s 没带 CSRF 头，B 站会回 -111", rec.Path)
-			}
-		}
-	}
-	if !strings.Contains(seen[historyDeletePath], "kid=archive_170001") {
-		t.Errorf("删除的 body 里没有 kid，原文是 %q", seen[historyDeletePath])
-	}
-	if _, ok := seen[historyClearPath]; !ok {
-		t.Error("没有发出清空的请求")
 	}
 }
 

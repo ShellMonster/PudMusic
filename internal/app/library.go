@@ -189,16 +189,6 @@ func (l *Library) RemoveLater(ctx context.Context, id string) error {
 	return l.Client.ToViewRemove(ctx, aid)
 }
 
-// ClearWatched 清掉所有看完的稍后再看（Biu 的「清除已看完」）。
-//
-// ⚠️ 不可逆的批量删除，界面必须先弹确认。
-func (l *Library) ClearWatched(ctx context.Context) error {
-	if l == nil || l.Client == nil {
-		return errLibraryMissing
-	}
-	return l.Client.ToViewRemoveWatched(ctx)
-}
-
 // RemoveHistory 删掉一条历史记录。id 是那一行的 `LibraryItem.ID`。
 func (l *Library) RemoveHistory(ctx context.Context, id string) error {
 	if l == nil || l.Client == nil {
@@ -209,14 +199,6 @@ func (l *Library) RemoveHistory(ctx context.Context, id string) error {
 		return fmt.Errorf("app: 「%s」不是一条历史记录，删除不了", id)
 	}
 	return l.Client.HistoryDelete(ctx, kid)
-}
-
-// ClearHistory 清空所有历史记录。⚠️ 不可逆，界面必须先弹确认。
-func (l *Library) ClearHistory(ctx context.Context) error {
-	if l == nil || l.Client == nil {
-		return errLibraryMissing
-	}
-	return l.Client.HistoryClear(ctx)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

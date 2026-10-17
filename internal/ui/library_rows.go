@@ -2,34 +2,25 @@
 //
 // # 为什么不用 `widgets/list` 里的 `list.PagedList`
 //
-// 因为这两页的行比 `list/card.go` 那一行**多两列**：
-//
-//	稍后再看  播放量（Biu 的 music-list-item header 里有这一列）
-//	历史记录  播放进度 + 观看时间（`pages/history/header.tsx`）
-//
-// `list.Music` 上没有这些字段，而这一票明令 `internal/ui/widgets/list/`
-// **只读不改**——所以画法只能自己带一份，行也就只能自己建。这一份是照着
-// `list/paged.go` 的三重保障写的（下面逐条点名），等那个包重新可写的时候，
-// 要么把 `render` 做成它的一个参数、要么把这一份整个挪进去，**别让它长期
-// 和那一份并存**：两套翻页逻辑并排，过两个月就有一半是错的。
+// 这两页的行比 `card.go` 那一行**多两列**：稍后再看有播放量，历史记录有播放进度 +
+// 观看时间。`list.Music` 上没有这些字段，而这一票明令 `widgets/list/` **只读不改**
+// ——所以画法只能自己带一份，行也就只能自己建。这一份是照着 `list/paged.go` 的三重
+// 保障写的，等那个包重新可写时要么把 `render` 做成它的一个参数、要么把这一份整个挪
+// 进去，**别让它长期和那一份并存**：两套翻页逻辑并排，过两个月就有一半是错的。
 //
 // 复用的部分一个没少：行模型嵌入 `list.Music`、操作走 `list.AppActions`、
-// 「在 B 站打开」走 `list.BiliLink`、封面走 `imgcache`、每行的兜底走
-// `guard.Wrap`。
-//
+// 「在 B 站打开」走 `list.BiliLink`、封面走 `imgcache`、每行的兜底走 `guard.Wrap`。
 // 跨 goroutine 的那两小摊（信箱 + 逐窗口唤醒）单独在 `library_wake.go`。
 //
 // # 三重保障（抄 `list/paged.go` 的那三条，理由在那边逐条写着）
 //
-//	① 首帧：内容一换就查一次容器填没填满
-//	② 滚到底：末尾那一行（哨兵）进了画面就拉下一页
-//	③ 拉完之后再查一遍：锁一放就再查
+//	① 首帧就查容器填没填满　② 末尾哨兵进了画面就拉下一页　③ 锁一放再查一遍
 //
-// 最容易漏的是①③合起来那条：**筛选后只剩两页**。用户没滚过，容器没填满，
-// 底下留一大片空白还一直转圈。
+// 最容易漏的是①③合起来那条：**筛选后只剩两页**。用户没滚过，容器没填满，底下留
+// 一大片空白还一直转圈。
 //
-// 🔴 三条铁律在这一层都成立：行身份是 `Music.ID`（铁律四）、后台投递完
-// 逐窗口唤醒（铁律三）、状态只在界面线程上写（铁律一）。
+// 🔴 铁律一（状态只在界面线程写）、三（投递完逐窗口唤醒）、四（行身份是 `Music.ID`）
+// 在这一层都成立。
 package ui
 
 import (
@@ -50,9 +41,8 @@ import (
 
 // libraryRow 是这两页的一行 = `list.Music` 加上那几列它画不出来的。
 //
-// ⚠️ 嵌入而不是另立一个结构体：能共用的那几组（ID / 标题 / 封面 / UP 名 /
-// 时长 / 队列项）就一份定义，页面画行时拿到的是同一个 `list.Music`，不用在
-// 两个类型之间来回翻。
+// ⚠️ 嵌入而不是另立一个结构体：共用���那几组（ID / 标题 / 封面 / UP 名 / 时长 /
+// 队列项）就一份定义，页面画行时拿到的是同一个 `list.Music`。
 type libraryRow struct {
 	list.Music
 
@@ -68,12 +58,12 @@ type libraryRow struct {
 
 // libraryFetcher 拉一页。page 从 1 起。
 //
-// loadedBefore 是**拉这一页之前已经加载了几行**。它作为参数传进来，是因为拉页
-// 跑在后台 goroutine 里，而「已经加载了几行」是界面线程上的状态——自己回去读
-// 就是数据竞争（`-race` 会报），而这一票正因为它要算「还有没有」而必须知道。
+// loadedBefore 是**拉这一页之前已经加载了几行**，用来算「还有没有」。它作为参数
+// 传进来而不是让 fetcher 回去读 `p.rows`：那个字段是界面线程上的状态，后台
+// goroutine 读它就是数据竞争。
 //
-// ⚠️ 它在**后台 goroutine 里**调：里面不许碰界面状态，要通知界面就往返回值里
-// 放。它要是 panic 了，这一页就当失败处理（见 fetchOne）。
+// ⚠️ 它在**后台 goroutine 里**调：里面不许碰界面状态，要通知界面就往返回值里放。
+// 它要是 panic 了，这一页就当失败处理（见 fetchOne）。
 type libraryFetcher func(ctx context.Context, page, loadedBefore int) (rows []libraryRow, hasMore bool, err error)
 
 // maxWakes 是记着的唤醒句柄上限：一个窗口一条，多出来的挤掉最久没画的那个。
@@ -102,15 +92,13 @@ type pagedRows struct {
 	state ui.ListState
 	sel   int
 
-	// render 画这一行并**把它交回来**（菜单要挂在它身上，见 viewRow）。
-	// 收整个 ListRow 而不是光一个下标，是为了让页面能看见 `r.Selected()`
-	// ——选中行的字色和底色是一对，不给它就得自己再问一遍。
-	// menu 建这一行的右键菜单。两者都由页面给：行长什么样是页面的事。
+	// render 画这一行并**把它交回来**（菜单要挂在它身上，见 viewRow）。收整个
+	// ListRow 而不是光一个下标，是为了让页面能看见 `r.Selected()`——选中行的字色
+	// 和底色是一对。menu 是这一行的右键菜单。两者都由页面给。
 	render func(c *ui.Context, r ui.ListRow) ui.Element
 	menu   func(m *ui.Menu, i int)
 
-	// empty 是一行都没有时说的那两句话。由页面在建好之后装上（两页的话不一样，
-	// 而且出处都写在 `routes` 表里那一条上，见 SetEmpty）。
+	// empty 是一行都没有时说的那两句话（见 SetEmpty）。
 	empty emptyState
 
 	fetch libraryFetcher
@@ -120,19 +108,18 @@ type pagedRows struct {
 
 	// rows 是已经拿到的全部行，**追加在尾部**。
 	rows []libraryRow
-	// seen 是 rows 里已有的 ID。翻页重叠是常事（B 站翻页本来可能重复），
-	// 不去重就是两个一样的身份共用一份状态——选中一个另一个也亮。
+	// seen 是 rows 里已有的 ID。翻页重叠是常事（B 站翻页本来可能重复），不去重
+	// 就是两个一样的身份共用一份状态——选中一个另一个也亮。
 	seen map[string]bool
 
 	page    int
 	hasMore bool
 	loading bool
 	err     error
-	// blocked 记着「上一页拉失败了，自动补屏先停在这儿」。没有它就是自己打
-	// 自己的循环：失败 → 解锁 → 下一帧看见容器还是没填满 → 又拉。
+	// blocked 记着「上一页拉失败了，自动补屏先停在这儿」。没有它就是自己打自己
+	// 的循环：失败 → 解锁 → 下一帧看见容器还是没填满 → 又拉。
 	blocked bool
-	// gen 是代次。换查询时 +1：在途请求的结果回来时代次对不上就扔掉
-	// （PLAN 点名的「旧查询结果作废」）。
+	// gen 是代次。换查询时 +1：在途请求的结果回来时代次对不上就扔掉。
 	gen    uint64
 	cancel context.CancelFunc
 	// why 是这一页是被哪一条保障叫起来的，只是为了出错时说得清是哪一条。
@@ -141,14 +128,13 @@ type pagedRows struct {
 	scroll   ui.ScrollState
 	rev      int
 	shownRev int
-	// failed 是画崩了的行（按 ID 记），下一帧不重试：同一行每帧崩一次会
-	// 刷爆日志、拖垮帧率，比「这一行画不出来」糟得多。
+	// failed 是画崩了的行（按 ID 记），下一帧不重试：同一行每帧崩一次会刷爆日志、
+	// 拖垮帧率，比「这一行画不出来」糟得多。
 	failed map[string]bool
 
 	// ── 跨 goroutine 的只有下面这两小摊 ──────────────────────────────────
 
-	// wakes 是**每个画过这个列表的窗口**一条，deliver 全部叫醒：只叫醒主窗口
-	// 的话，迷你窗口停在旧内容。
+	// wakes 是**每个画过这个列表的窗口**一条，deliver 全部叫醒。
 	wakeMu sync.Mutex
 	wakes  []wakeEntry
 	frame  uint64
@@ -160,16 +146,16 @@ type pagedRows struct {
 
 // newPagedRows 建一个会自己翻页的行列表。
 //
-// ⚠️ **不在这里拉第一页**：它可能在界面线程之外被调（页面的状态在构造器里
-// 建），那时候还没有唤醒句柄也没有画面。第一页由第一帧的 view 拉。
+// ⚠️ **不在这里拉第一页**：它可能在界面线程之外被调，那时候还没有唤醒句柄也没有
+// 画面。第一页由第一帧的 view 拉。
 func newPagedRows(render func(*ui.Context, ui.ListRow) ui.Element, menu func(*ui.Menu, int),
 	fetch libraryFetcher, acts list.Actions) *pagedRows {
 	p := &pagedRows{
 		render: render, menu: menu,
 		fetch: fetch, acts: acts,
 		sel: -1,
-		// 「还有没有」要等有人问过才知道，在那之前一律当作还有——不然第一帧
-		// 会以为到底了，连页脚那一行都不画。
+		// 「还有没有」要等有人问过才知道，在那之前一律当作还有——不然第一帧会以为
+		// 到底了，连页脚那一行都不画。
 		hasMore: true,
 		seen:    map[string]bool{},
 	}
@@ -207,9 +193,9 @@ func (p *pagedRows) Status() PagedStatus {
 
 // Reload 换查询：关键词变了、日期范围变了。
 //
-// 停掉在途请求、清空已加载的行、回顶，然后从第 1 页重来。**旧结果作废**靠
-// 这里 bump 的代次——光 cancel 不够，请求已经回来了、正在往信箱里投的时候
-// cancel 拦不住它。
+// 停掉在途请求、清空已加载的行、回顶，然后从第 1 页重来。**旧结果作废**靠这里
+// bump 的代次——光 cancel 不够：请求已经回来了、正在往信箱里投的时候 cancel 拦不
+// 住它。
 //
 // ⚠️ 只能由界面线程调。
 func (p *pagedRows) Reload() {
@@ -223,16 +209,16 @@ func (p *pagedRows) Reload() {
 	p.blocked = false
 	p.rev++
 	p.ScrollTop()
-	// 当场拉第一页，不等下一帧：Reload 有可能是在 view 之外调的（比如背景
-	// 事件），那时候不一定还有下一帧。
+	// 当场拉第一页，不等下一帧：Reload 有可能是在 view 之外调的，那时候不一定还
+	// 有下一帧。
 	p.load(trigFirstRender)
 }
 
 // ScrollTop 回到顶上。切路由和点回顶按钮都走它。
 //
-// 两条都写是有原因的：`scroll` 是这一帧记下的偏移，列表自己按行的身份算
-// 锚点（mygo 的 ListState 注释：「A List keeps its place by its rows
-// instead」），两条都给才不管列表是刚建的还是一直在画的都是顶上。
+// 两条都写是有原因的：`scroll` 是这一帧记下的偏移，列表自己按行的身份算锚点
+// （mygo 的 ListState：「A List keeps its place by its rows instead」），两条都给
+// 才不管列表是刚建的还是一直在画的都是顶上。
 //
 // ⚠️ 只能由界面线程调。
 func (p *pagedRows) ScrollTop() {
@@ -242,24 +228,18 @@ func (p *pagedRows) ScrollTop() {
 
 // SetEmpty 换掉「一行都没有时说的那两句话」。
 //
-// **由页面把 `routes` 表里那一条的 `Empty` 原样递进来**，不在这儿另抄一份：
-// 文案的出处（上游哪个文件）写在路由表里那一条的注释上，抄一份就多一份会对不
-// 上的来源——而这一页的文案对不上时用户看不出任何异样。
-//
-// 两句都画（和别的页一样）：第一句说这里为什么空，第二句给一个**能做的下一步**。
-// 这一页尤其需要第二句——用户常常是筛完了才空的，他要的是「怎么才能不空」，
-// 不是再看一遍「这里什么都没有」。
+// **由页面把 `routes` 表里那一条的 `Empty` 原样递进来**，不在这儿另抄一份：出处
+// （上游哪个文件）写在路由表那一条的注释上，抄一份就多一个会对不上的来源。
 //
 // ⚠️ 只能由界面线程调。
 func (p *pagedRows) SetEmpty(e emptyState) { p.empty = e }
 
 // Drop 丢掉某一行的本地副本（用户在菜单里删掉了一条之后调它）。
 //
-// 只动内存里已经拿到的那些，**不重新拉**——重新拉会把滚动位置、用户刚选的
-// 那一行全冲掉，而删掉的那一条本来就要从屏幕上消失。
+// 只动内存里已经拿到的那些，**不重新拉**——重新拉会把滚动位置、用户刚选的那一行
+// 全冲掉，而删掉的那一条本来就要从屏幕上消失。
 //
-// ⚠️ 只能由界面线程调。找不到就是调用方的错（它传了一个屏幕上没有的 ID），
-// 静默忽略：那不是这一层能替它决定的事。
+// ⚠️ 只能由界面线程调。找不到就静默忽略：那是调用方传了一个屏幕上没有的 ID。
 func (p *pagedRows) Drop(id string) {
 	i := slices.IndexFunc(p.rows, func(r libraryRow) bool { return r.ID == id })
 	if i < 0 {
@@ -277,15 +257,14 @@ func (p *pagedRows) Drop(id string) {
 
 // View 画这一页。页面在每一帧开头调一次，给它一块 Grow(1) 的地方。
 //
-// 🔴 外面包着 recover（`guard.Wrap`，建的时候包一次）：view 里 panic 会一路
-// 穿到 Cocoa 事件循环上去把整个进程带走（框架的 Dispatch 和 drain 都没有
-// recover）。
+// 🔴 外面包着 recover（`guard.Wrap`，建的时候包一次）：view 里 panic 会一路穿到
+// Cocoa 事件循环上去把整个进程带走。
 func (p *pagedRows) View(c *ui.Context) { p.draw(c) }
 
 // onPanic 记一笔并要一帧。
 //
-// 要下一帧是必须的：recover 接住的是 build pass 中间，那一帧剩下的部分没建，
-// 画出来是半张。**这里不换错误页**：坏的是这一个控件，页面上别的东西照常用。
+// 要下一帧是必须的：recover 接住的是 build pass 中间，那一帧剩下的部分没建，画出
+// 来是半张。**这里不换错误页**：坏的是这一个控件，页面上别的东西照常用。
 func (p *pagedRows) onPanic(rec any) {
 	log.Printf("biu: 分页行列表画崩了：%v\n%s", rec, debug.Stack())
 	p.invalidate()
@@ -293,15 +272,15 @@ func (p *pagedRows) onPanic(rec any) {
 
 // view 是真的画法，View 是它外面那道 recover。
 func (p *pagedRows) view(c *ui.Context) {
-	// 🔴 铁律三：把这一帧的窗口登记进去。后台投递完结果要靠它叫醒界面，
-	// 不唤醒就是「结果到了、画面停在旧帧」（实测 0 帧刷新）。
+	// 🔴 铁律三：把这一帧的窗口登记进去。后台投递完结果要靠它叫醒界面，不唤醒就是
+	// 「结果到了、画面停在旧帧」（实测 0 帧刷新）。
 	p.setWake(c.Services())
 
-	// 先收后台投回来的页，再画：这样这一帧画的就是**已经加上**的那几行。
+	// 先收后台投回来的页再画：这样这一帧画的就是**已经加上**的那几行。
 	p.adopt()
 
-	// ① 首帧。**必须在画之前发出去**，不是画完再发：画完再发的话这一帧画出来
-	// 的是「这里还没有内容」，要等这一页回来才换掉，用户第一眼看到的是空的。
+	// ① 首帧。**必须在画之前发出去**：画完再发的话这一帧画出来的是「这里还没有
+	// 内容」，要等这一页回来才换掉，用户第一眼看到的是空的。
 	if p.page == 0 {
 		p.load(trigFirstRender)
 	}
@@ -317,9 +296,8 @@ func (p *pagedRows) view(c *ui.Context) {
 
 // syncState 把这一帧的行身份、名字和选中项装进 ListState。
 //
-// 🔴 铁律四：**Key 每一帧都重装，装的是 Music.ID**。不装的话 MyGo 拿「父 ID +
-// 兄弟序号」当身份，在前面插一行会让后面所有行的状态整体错配——实测：头部
-// 插入后选中项会变成旁边那一首。⚠️ 别改成序号，那正是踩过的坑。
+// 🔴 铁律四：**Key 每一帧都重装，装的是 Music.ID**。不装的话 MyGo 拿「父 ID + 兄弟
+// 序号」当身份，前面插一行会让后面所有行的状态整体错配。⚠️ 别改成序号。
 func (p *pagedRows) syncState() {
 	p.state.Key = func(i int) any {
 		if i >= len(p.rows) {
@@ -342,12 +320,11 @@ type footerIdentity struct{}
 
 // showFooter 报这一帧末尾那个哨兵行在不在。
 //
-// ⚠️ **一行都还没有、第一页还在路上的时候不摆它**——这不是省事，是必需：MyGo 的
-// 列表是**按行记位置**的（`ListState` 注释：「A List keeps its place by its rows
-// instead」）。那一帧画面上只有哨兵这一行，它就成了锚点；第一页回来之后锚点
-// 仍然是它，于是框架把视口挪到它身上——**列表一打开就停在最底下**，用户看见的
-// 是第 30 首而不是第 1 首（实测 40 行时首帧就落在 31..40）。空状态那一帧不摆哨兵，
-// 就没有锚点要记，列表自然从顶上开始。
+// ⚠️ **一行都还没有、第一页还在路上的时候不摆它**——这不是省事，是必需：MyGo 的列表
+// 是**按行记位置**的（`ListState`：「A List keeps its place by its rows instead」）。
+// 那一帧画面上只有哨兵这一行，它就成了锚点；第一页回来之后锚点仍然是它，框架把视口
+// 挪到它身上——**列表一打开就停在最底下**，用户看见的是第 30 首而不是第 1 首（实测
+// 40 行时首帧就落在 31..40）。那一帧不摆哨兵就没有锚点要记，列表自然从顶上开始。
 func (p *pagedRows) showFooter() bool {
 	if len(p.rows) == 0 && p.loading {
 		return false

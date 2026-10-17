@@ -201,14 +201,6 @@ func kidOf(raw any) string {
 	return ""
 }
 
-// HistoryClear 清空所有历史记录（Biu 的「确认删除所有历史记录？」那一条）。
-//
-// ⚠️ 这是一个**不可逆**的批量删除。界面上必须先弹确认（PLAN 的 C-43），这一
-// 层不做那个判断——它只管「调了就是删了」。
-func (c *Client) HistoryClear(ctx context.Context) error {
-	return c.postHistory(ctx, historyClearPath, url.Values{})
-}
-
 // HistoryDelete 删掉一条历史记录（kid 形如 `archive_12345`）。
 func (c *Client) HistoryDelete(ctx context.Context, kid string) error {
 	form := url.Values{}

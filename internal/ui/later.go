@@ -1,27 +1,20 @@
 // 稍后再看：Biu 的 `/later`（`biu/src/pages/later/`）。
 //
-// 这一页摆什么：**标题 + 关键词框 + 日期范围筛选 + 一个会自己翻页的列表**。
-// 翻页、三重保障、回顶、逐窗口唤醒、行身份全在 `library_rows.go` 那一份里
-// （两页共用），这一页只管自己的表头、每一行和右键菜单。
+// 摆的是**标题 + 关键词框 + 日期范围筛选 + 一个会自己翻页的列表**。翻页、三重
+// 保障、回顶、逐窗口唤醒、行身份全在 `library_rows.go` 里（两页共用），这一页只管
+// 自己的表头、每一行和右键菜单。
 //
-// # 表头抄上游 `components/music-list-item/header.tsx`
+// # 两处按自己的判断改了上游
 //
-//	#  标题  播放量  时长
+//   - **表头多一列「加入时间」**（上游 `music-list-item/header.tsx` 是「投稿时间」，
+//     传的是 `item.pubdate`）。**上游自己的日期筛选筛的是 `add_at`**——跟着筛的那
+//     个时间画，用户才看得见「我现在筛的是哪一段」，摆一个筛选没在用的时间是让人
+//     以为筛错了。
+//   - **页头右上角那个「清除已看完」不摆**（上游 `later/index.tsx:221`）。它是
+//     **批量删除**，而确认弹窗是 PLAN 的 C-43，还没做。没有确认就删，点错了没法找回；
+//     不摆用户不会以为它坏了（它压根没在那儿），摆一个一按就真删的会。
 //
-// ⚠️ **「加入时间」这一列是我们加的，不是上游的**：上游那一列是「投稿时间」
-// （`later/list.tsx` 传的是 `item.pubdate`），而**上游自己的日期筛选筛的是
-// `add_at`（加进稍后再看的时间）**。跟着筛的那个时间画，用户才看得见「我现在
-// 筛的是哪一段时间」——摆一个筛选根本没在用的时间，是让人以为筛错了。
-//
-// # 「清除已看完」先不做
-//
-// 上游页头右上角那个按钮（Biu `later/index.tsx:221`）是一个**批量删除**，而
-// 确认弹窗是 PLAN 的 C-43，还没做。没有确认就删，用户点错了就没法找回。宁可
-// 这一票不摆那个按钮（用户不会以为它坏了，因为它压根没在那儿），也不能摆一个
-// 一按就真删的。
-//
-// 🔴 本文件里的 view **不许**调 `c.SetTheme`：主题每帧开头装一次就够
-// （铁律二，见 theme.go）。
+// 🔴 本文件里的 view **不许**调 `c.SetTheme`（铁律二，见 theme.go）。
 package ui
 
 import (
@@ -204,22 +197,16 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 	})
 }
 
-// laterMenu 是这一行的右键菜单。
+// laterMenu 是这一行的右键菜单。上游 `later/menu.tsx` 是六项，这里留三项：
 //
-// 上游 `later/menu.tsx` 是六项：下一首播放 / 添加到播放列表 / 下载音频 /
-// 下载视频 / 在 B 站打开 / 移除。这里留四项，理由逐条写着：
+//   - **下一首播放 / 添加到播放列表**：我们的队列只有「追加到末尾」和「从这一首往后
+//     接」（`app.Queue` 到现在只有 `Append`），没有「插到下一首」。上游那一支在我们
+//     这儿就是「添加到队列」。
+//   - **下载音频 / 下载视频**：要写盘、要选目录，是 PLAN 的 P-26。摆一个按了只说
+//     「还没接」的项不如不摆——那两行和「在 B 站打开」长得一样，用户分不出哪个能用。
 //
-//   - **下一首播放**：我们的队列只有「追加到末尾」和「从这一首往后接」，没有
-//     「插到下一首」（`app.Queue` 到现在只有 `Append`）。摆一个没有的项等于
-//     骗用户。
-//   - **添加到播放列表** = 上游的「下一首播放」那一支在我们这儿就是「添加到
-//     队列」：接在正在放的那首后面，不打断它。
-//   - **下载音频 / 下载视频**：要写盘、要选目录，是 PLAN 的 P-26。摆一个按了
-//     只说「还没接」的项不如不摆——菜单里那两行和「在 B 站打开」长得一样，
-//     用户分不出哪个是能用的。
-//
-// ⚠️ **每一项都要 Item 一遍**：菜单是这趟全部建出来的，只有被 Chosen 的那一项
-// 为 true（`ui/menu.go` 的 buildMenu）。少建一项，那一项就永远点不到。
+// ⚠️ **每一项都要 Item 一遍**：菜单是这趟全部建出来的，只有被 Chosen 的那一项为
+// true（`ui/menu.go` 的 buildMenu）。少建一项，那一项就永远点不到。
 func (s *Shell) laterMenu(m *ui.Menu, i int) {
 	p := &s.laterPage
 	row, ok := p.rows.Row(i)
@@ -231,9 +218,9 @@ func (s *Shell) laterMenu(m *ui.Menu, i int) {
 	switch {
 	case m.Item("播放").Disabled(!row.CanPlay).Chosen():
 		// ⚠️ PGC（番剧 / 纪录片）放不了：取流那一套对 PGC 不通（见
-		// `app.playableOnline`）。上游也是不给这一类「播放」入口
-		//（`later/menu.tsx` 的 `cannotPlay = is_pgc`）。**画成灰的而不是不画**：
-		// 不画的话同一份列表里有的行能播有的不能，用户会以为是坏的。
+		// `app.playableOnline`），上游也是不给这一类入口（`cannotPlay = is_pgc`）。
+		// **画成灰的而不是不画**：不画的话同一份列表里有的行能播有的不能，用户会
+		// 以为是坏的。
 		acts.Play(i)
 	case m.Item("添加到队列").Disabled(!row.CanPlay).Chosen():
 		acts.Add(i)
@@ -244,10 +231,8 @@ func (s *Shell) laterMenu(m *ui.Menu, i int) {
 	}
 }
 
-// countText 是播放量那一列的字。
-//
-// 抄上游的 `Intl.NumberFormat(locale, {notation: "compact"})`：一万以内照原样，
-// 往上折成「1.2万」「1.2亿」。不折的话七位数播放量会把那一列撑到别列头上。
+// countText 是播放量那一列的字，抄上游的 `Intl.NumberFormat` compact：往上折成
+// 「1.2万」「1.2亿」。不折的话七位数播放量会把那一列撑到别列头上。
 func countText(n int64) string {
 	switch {
 	case n <= 0:
@@ -261,8 +246,7 @@ func countText(n int64) string {
 	}
 }
 
-// dayText 是那一天的字（`2026-10-16`），没有就空串。抄上游
-// `formatSecondsToDate` 的 "YYYY-MM-DD"。
+// dayText 是那一天的字（`2026-10-16`），没有就空串（上游 `formatSecondsToDate`）。
 func dayText(t time.Time) string {
 	if t.IsZero() {
 		return ""
@@ -272,11 +256,11 @@ func dayText(t time.Time) string {
 
 // clockText 是时长那一列的字：不足一小时 `mm:ss`，超过一小时 `hh:mm:ss`。
 //
-// ⚠️ 这一列要定宽（`colClock`）且用等宽数字（Biu 的 `tabular-nums`），不然
-// 3:05 和 10:05 两列会左右跳，一屏行看着像在晃。
+// ⚠️ 这一列要定宽（`colClock`）且用等宽数字（Biu 的 `tabular-nums`），不然 3:05 和
+// 10:05 两列会左右跳。
 //
-// 一小时以上**带小时**：写 `mm:ss` 的话一首一小时的歌显示成「61:30」，用户得在
-// 心里换算一次才知道那是多长。
+// 一小时以上**带小时**：写 `mm:ss` 的话一首一小时的歌显示成「61:30」，用户得在心里
+// 换算一次才知道那是多长。
 func clockText(d time.Duration) string {
 	if d <= 0 {
 		return ""

@@ -76,14 +76,15 @@ func TestRefillLoadsTheNextPageWithoutScrolling(t *testing.T) {
 
 // TestAFailingPageOffersARetry 盯「拉失败」不是永远转圈。
 func TestAFailingPageOffersARetry(t *testing.T) {
-	f := newLibFake(t).
-		withLater(1, 60, manyTitles(1, 40)...).
-		withLater(2, 60, manyTitles(2, 20)...)
+	// 第二页装成一次业务错误：B 站的错都在 HTTP 200 里面。
+	f := newLibFake(t).withLater(1, 60, manyTitles(1, 40)...)
+	f.withLater(2, 60, manyTitles(2, 20)...)
+	f.mu.Lock()
+	f.later[2] = refused
+	f.mu.Unlock()
+
 	tt, s := libraryShell(t, f, laterPath)
 	settle(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 40 })
-
-	// 从现在起每一页都失败。翻到第二页时它就该停住并让人点重试。
-	f.failOn(laterPathAPI)
 
 	scrollToBottom(t, tt)
 	settle(t, tt, "页面停在那一个重试按钮上", func() bool { return tt.HasText("加载失败，点此重试") })

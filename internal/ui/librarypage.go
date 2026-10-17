@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
 )
@@ -118,6 +119,65 @@ func (p *libraryPage) viewKeywordBox(c *ui.Context) bool {
 		Label(keywordBoxLabel).
 		Placeholder(keywordBoxLabel)
 	return box.Submitted()
+}
+
+// libraryRowHead 是这两页的**行首**：`#` + 封面 + 标题 + UP 名，剩下右边那几列
+// 由各自的页面接上去。
+//
+// ⚠️ 只抽这一段，不抽整行：两页右边那几列**布局不一样**（稍后再看是播放量 /
+// 加入时间 / 时长，历史记录是播放进度 / 观看时间），整行合起来会变成一串
+// if-else。行首是完全一样的，抽出来两页就不可能画得不一样。
+//
+// ⚠️ 不给这一段设固定高度：歌名折到第二行时整张列表的行高就不一样了，那正是变高
+// 行存在的理由（见 `widgets/list/card.go` 顶上那段）。
+func libraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, cover *imgcache.Cache) ui.Element {
+	t := c.Theme()
+	// 选中那一行的底色由 `ui.List` 自己刷（主色底），字色得跟着换——不换就是主色
+	// 底上的深色字，深色主题下直接看不见。
+	titleColor, ownerColor := t.Text, t.TextMuted
+	if r.Selected() {
+		titleColor, ownerColor = t.AccentText, t.AccentText.Alpha(0.75)
+	}
+	return ui.Row(c).Grow(1).AlignSelf(ui.Stretch).Gap(rowGap).Padding(listPadY, listPadX).
+		Children(func() {
+			ui.Text(c, rowNumber(r.Index)).Width(colIndex).TextAlign(ui.End).
+				FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+			// 封面四态由 imgcache 画（空地址画空框，不画「失败」）。
+			imgcache.View(c, cover, m.Cover, coverSide, coverSide)
+			ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).Children(func() {
+				ui.Text(c, m.Title).FontSize(14).LineHeight(1.5).
+					TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
+				if m.Owner != "" {
+					ui.Text(c, m.Owner).FontSize(12).LineHeight(1).
+						TextColor(ownerColor).MaxLines(1).Ellipsis("…")
+				}
+			})
+		})
+}
+
+// libraryMenuItems 是两页共用的那三项菜单。
+//
+// ⚠️ **每一项都要 Item 一遍**：菜单是这趟全部建出来的，只有被 Chosen 的那一项为
+// true（`ui/menu.go` 的 buildMenu）。少建一项，那一项就永远点不到。
+//
+// 「下一首播放」和「添加到播放列表」**没有**：我们的队列只有「追加到末尾」和「从这
+// 一首往后接」（`app.Queue` 到现在只有 `Append`），摆一个没有的项等于骗用户。
+// 「下载音频 / 下载视频」也没有：要写盘、要选目录，是 PLAN 的 P-26，而摆一个按了
+// 只说「还没接」的项不如不摆——那两行和「在 B 站打开」长得一样。
+func libraryMenuItems(m *ui.Menu, row libraryRow, a RowActions, i int) bool {
+	switch {
+	case m.Item("播放").Disabled(!row.CanPlay).Chosen():
+		// ⚠️ 放不了的那一类**画成灰的而不是不画**：不画的话同一份列表里有的行能播
+		// 有的不能，用户会以为是坏的。PGC / 直播放不了（见 `app.playableOnline`）。
+		a.Play(i)
+	case m.Item("添加到队列").Disabled(!row.CanPlay).Chosen():
+		a.Add(i)
+	case m.Item("在 B 站打开").Chosen():
+		a.Open(i)
+	default:
+		return false
+	}
+	return true
 }
 
 // viewLibraryMissing 是「B 站客户端没挂上」时这两页画的东西。

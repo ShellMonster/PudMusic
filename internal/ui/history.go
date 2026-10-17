@@ -1,31 +1,19 @@
 // 历史记录：Biu 的 `/history`（`biu/src/pages/history/`）。
 //
-// 摆的和「稍后再看」是同一副骨架（关键词框 + 日期范围 + 会自己翻页的列表），
-// 共享的部分在 `librarypage.go` 和 `library_rows.go`。这一页多出来的是**那一列
-// 播放进度**——PLAN.md 的 P-04 里点名要的就是它。
+// 和「稍后再看」是同一副骨架（关键词框 + 日期范围 + 会自己翻页的列表），共享的部
+// 分在 `librarypage.go` 和 `library_rows.go`。这一页多出来的是**那一列播放进度**——
+// PLAN.md 的 P-04 点名要的就是它。
 //
-// # 播放进度那一列抄上游 `pages/history/item.tsx`
+// # 那一列抄上游 `pages/history/item.tsx`
 //
-//	formatProgress(progress, duration) = formatDuration(看过多少) + " / " + formatDuration(总时长)
+//	formatProgress(看过多少, 总时长) = formatDuration(看过多少) + " / " + formatDuration(总时长)
 //
-// **为什么非有这一列不可**：没有它，用户看到的是一列标题，得自己回想看过多少。
-// 「听了一半」这个状态在界面上完全看不出来，于是每一首都得从头听或者拖进度条
-// 试一遍。
+// **非有这一列不可**：没有它用户看到的是一列标题，得自己回想看过多少。「听了一半」
+// 这个状态在界面上完全看不出来，于是每一首都得从头听或者拖进度条试一遍。
 //
-// # 表头抄上游 `pages/history/header.tsx`
-//
-//	#  标题  播放进度  观看时间
-//
-// # 「清空历史记录」先不做
-//
-// 上游页头右上角是一个批量删除（Biu `history/index.tsx:271`），确认弹窗是
-// PLAN 的 C-43，还没做。没有确认就删没法找回，所以这一票不摆那个按钮。
-//
-// # 「记录播放历史」摆上了
-//
-// 上游页头上那个开关改的是设置里的 `reportPlayHistory`（Biu
-// `history/index.tsx:262`），而那个键在设置里已经有了（`app.Settings`）。
-// 开关摆上，用户就能在这个页上把它关掉——不然他要去设置页里找。
+// 另外两处：页头右上角的「清空历史记录」是批量删除、确认弹窗（C-43）还没做，
+// **不摆**；「记录播放历史」那个开关改的是设置里已有的 `reportPlayHistory`
+// （`app.Settings`），摆上用户就不用去设置页里找。
 //
 // 🔴 本文件里的 view **不许**调 `c.SetTheme`（铁律二，见 theme.go）。
 package ui
@@ -51,10 +39,8 @@ const (
 	colViewedAt = 140
 )
 
-// progressText 是「看过多少 / 总共多长」。
-//
-// 没有总时长（直播、专栏那几类 B 站不给 duration）时只写看过多少：写
-// 「0:00 / 0:00」在屏幕上读起来像坏了，而「12:34」是对的。
+// progressText 是「看过多少 / 总共多长」。没有总时长（直播、专栏那几类 B 站不给
+// duration）时只写看过多少：「0:00 / 0:00」在屏幕上读起来像坏了，「12:34」是对的。
 func progressText(progress, total time.Duration) string {
 	p, d := clockText(progress), clockText(total)
 	switch {
@@ -67,9 +53,8 @@ func progressText(progress, total time.Duration) string {
 	}
 }
 
-// viewedAtText 是观看时间那一列的字。抄上游 `moment.unix(view_at).format(
-// "YYYY-MM-DD HH:mm")`——**精确到分**，不是到秒：一屏几十行，秒在那儿没有
-// 任何用处，只会让字变宽。
+// viewedAtText 是观看时间那一列的字（上游的 "YYYY-MM-DD HH:mm"）。**精确到分**：
+// 一屏几十行，秒在那儿没有任何用处，只会让字变宽。
 func viewedAtText(t time.Time) string {
 	if t.IsZero() {
 		return ""
@@ -153,11 +138,10 @@ func (s *Shell) viewHistory(c *ui.Context, _ *ui.Route) {
 		})
 }
 
-// viewReportHistory 是那个「记录播放历史」的开关。
-//
-// 改的是**盘上已经有的键**（`app.Settings.ReportPlayHistory`），不是新造一个。
-// 至于「这个开关改了之后真的少记一条历史吗」——那是播放器上报那一票的活儿，
-// 那一票没做之前它只是一个开关；摆在页面上比藏在设置里好找。
+// viewReportHistory 是那个「记录播放历史」的开关，改的是**盘上已经有的键**
+// （`app.Settings.ReportPlayHistory`）。至于「改了之后真的少记一条历史吗」——那是
+// 播放器上报那一票的活儿；那一票没做之前它只是一个开关，摆在页面上比藏在设置里
+// 好找。
 func (s *Shell) viewReportHistory(c *ui.Context, on, ro bool) {
 	// ⚠️ 这里**不能** .Key()：Switch 的旋钮有动画，动画状态记在控件节点上，
 	// 每帧换一个新节点等于动画每帧从头开始（见 settings_page.go 的 pickAutoStart）。
@@ -211,10 +195,8 @@ func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 	})
 }
 
-// historyMenu 是这一行的右键菜单。
-//
-// 抄上游 `history/menu.tsx` 的顺序：能放的那几项在前，在 B 站打开，然后是
-// 删除（上游把它标成 danger）。理由和 `laterMenu` 那段一样：只摆我们真能做的。
+// historyMenu 是这一行的右键菜单，抄上游 `history/menu.tsx` 的顺序：能放的那几项在
+// 前，在 B 站打开，然后是删除。理由和 `laterMenu` 那段一样：只摆我们真能做的。
 func (s *Shell) historyMenu(m *ui.Menu, i int) {
 	p := &s.historyPage
 	row, ok := p.rows.Row(i)
@@ -224,9 +206,9 @@ func (s *Shell) historyMenu(m *ui.Menu, i int) {
 	acts := p.rows.actions()
 
 	switch {
+	// 直播、专栏那几类在 B 站那边也放不了（上游的 `canPlay = business ===
+	// "archive"`，这里由 app 层判好传下来）。
 	case m.Item("播放").Disabled(!row.CanPlay).Chosen():
-		// 直播、专栏那几类在 B 站那边也放不了（上游的 `canPlay =
-		// business === "archive"`，这里由 app 层判好传下来）。
 		acts.Play(i)
 	case m.Item("添加到队列").Disabled(!row.CanPlay).Chosen():
 		acts.Add(i)
