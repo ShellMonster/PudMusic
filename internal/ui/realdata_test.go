@@ -26,7 +26,9 @@ package ui
 // 两件事，而验收只验了前一件。
 
 import (
+	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -467,4 +469,87 @@ func realDataFrames(tt *mygoui.Tester, n int) {
 	for range n {
 		tt.Frame()
 	}
+}
+
+// TestTheCountsInTheProseMatchTheCountsInTheCode 钉住「说明里的那个数」不是人记得的。
+//
+// # 为什么要有这一条
+//
+// 上一轮把 `/follow` 的画法和接口接上之后，「/follow 还没排票」这句假话**只在台账
+// 和 `evidence.go` 里撤掉了**，`main.go` 的抬头、README、`router.go` 的 `navigate`
+// **还有三处一字不差**地说着它，顺带那个「14 条里 12 条有画法」也该是 13。
+//
+// 而**全仓没有任何一条测试读这三处**——`TestTheRealDataLedgerCoversEveryRoute` 只
+// 遍历 `routes` 表，说服力全在代码里，于是这三句假话不会被任何一遍绿盖住。
+//
+// 这一条就把那个洞补上：数一遍真值，回头核这三处。
+//
+// # 为什么只核这三处、不扫全仓
+//
+// 「还没排票」「连壳子」这些词在**讲规矩**的地方是正当的（`realdata_test.go`
+// 文件头那三条规则举的例子就是），全仓扫会把那些一起判死，测出来的红没有信息。
+// 所以这里核的是**三处会陈述现状的散文**，且只断言三件具体的事：那个数对得上、
+// 没有过期的那句、没有把已经有画法的路由说成没有。
+func TestTheCountsInTheProseMatchTheCountsInTheCode(t *testing.T) {
+	s, _ := newShell(t)
+	withView := 0
+	var withoutView []Route
+	for _, r := range routes {
+		if s.builtPage(r) != nil {
+			withView++
+		} else {
+			withoutView = append(withoutView, r)
+		}
+	}
+	if withView == 0 || len(withoutView) == 0 {
+		t.Fatalf("数出来 %d 条有画法、%d 条没有——这两个数本身就不像话，先修 `builtPage`",
+			withView, len(withoutView))
+	}
+
+	// want 是这三处都要写着的那个数（「N 条有画法/有内容/接上了真数据」）。
+	want := fmt.Sprintf("%d 条", withView)
+	for _, f := range proseAboutRoutes {
+		body := readRepoFile(t, f)
+		if !strings.Contains(body, want) {
+			t.Errorf("%s 没有说「%s」——现在有画法的是 %d 条，"+
+				"而这一句是给读它的人看的（真值见 `routes` + `builtPage`）", f, want, withView)
+		}
+		// ⚠️ 过期的那两句：上一次更新时它们正是漏掉的那部分（说 /follow 没有画法）。
+		//
+		// **不查「12 条」**：那一串在 `router.go` 顶上说的是**上游 Biu** 的
+		// `src/routes.tsx`（「12 条在 Layout 里」），那是**另一件事、而且是真的**，
+		// 和「我们 14 条里有几条有画法」无关。而数字漂移已经被上面那条正向断言
+		// 盖住了——加一页忘了改散文，`%s` 就不在文件里；反之一页没了，`%s` 就不对。
+		for _, stale := range []string{"还没排票", "连壳子"} {
+			if strings.Contains(body, stale) {
+				t.Errorf("%s 里还有「%s」——它说的是 %v 的画法做出来之前的事，"+
+					"现在那几页都有画法了", f, stale, withoutView)
+			}
+		}
+		// 没有画法的那几条必须被点名：只有说得出「哪几条还没有」，那个数才有意义。
+		for _, r := range withoutView {
+			if !strings.Contains(body, r.Match) {
+				t.Errorf("%s 没有点名 %s（%s）——「还有 N 条没做」不说清是哪几条，"+
+					"读的人就得自己回去数", f, r.Match, r.Title)
+			}
+		}
+	}
+}
+
+// proseAboutRoutes 是那三处**陈述现状**的散文。
+//
+// ⚠️ **路径是相对包目录 `internal/ui` 的**（`go test` 把工作目录设成包目录）。
+var proseAboutRoutes = []string{"../../README.md", "../../main.go", "router.go"}
+
+// readRepoFile 读那三处散文之一。读不到就当场红——
+// **「读不到」绝不能当成「那句话不存在」**：那正是这个测试要防的那类错，
+// 而一个悄悄什么都没验的测试比没有更糟（上一轮就是这样：台账撤了，三处散文没撤，
+// 而全仓没有一条测试读它们）。
+func readRepoFile(t *testing.T, rel string) string {
+	t.Helper()
+	b, err := os.ReadFile(rel)
+	if err != nil {
+		t.Fatalf("读不到 %s：%v（路径写错了的话，这个测试就成了一句空话）", rel, err)
+	}
+	return string(b)
 }
