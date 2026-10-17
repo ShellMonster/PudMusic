@@ -1,0 +1,718 @@
+// 播放记录上报这一摊的业务层测试。
+//
+// 这一组钉的是**「什么时候发、发什么、什么时候不许发」**——也就是协议层
+// 管不着的那一半。协议层那边的形状在
+// `internal/service/bili/playreport_test.go`。
+//
+// # 为什么这里不真的放歌
+//
+// 这一组把「在放哪一首、放到哪儿了」当作**输入**摆进去，而不是真的开一条
+// 流：心跳是 30 秒一发的，测试里真等 30 秒既慢又不稳，而这一层的全部判断
+// 就是「这一刻和上一刻差在哪」。真的从播放链路走到这里的那一条，在
+// `playreport_e2e_test.go` 里钉（那边走的是真解码 + 真进度条时钟）。
+//
+// ⚠️ 这里所有请求都打在**本地 fixture** 上，一次都不会碰到真的 B 站：
+// 上报是写操作，它写进用户真实的账号。见任务报告里「需要真网验」那一节。
+
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// fixture：一台只答「上报要用的那几个接口」的假 B 站
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ⚠️ 这两条路径是**字面量**，没有从 `bili` 包里拿常量。
+//
+// 那是故意的：这里量的是「打的是不是 `/x/click-interface/web/heartbeat`」
+// 这件事本身。跟着 `bili` 里的常量走的话，那边写错了这边也跟着错，
+// 一条测试就再也发现不了。
+const (
+	openPathWanted = "/x/click-interface/click/web/h5"
+	beatPathWanted = "/x/click-interface/web/heartbeat"
+)
+
+// reportBili 记下收到的每一次「开一轮」和「心跳」。
+type reportBili struct {
+	*httptest.Server
+
+	mu sync.Mutex
+	// opens / beats 是收到的表单，按到达顺序。
+	opens []url.Values
+	beats []url.Values
+	// viewHits 数「bvid → aid」那一次被问了几次。
+	viewHits int
+	// failBeats 非 0 时心跳那一路一律回这个 code（模拟 B 站不收 / 网抖）。
+	failBeats int
+	// viewFails 让「bvid → aid」那一问失败（模拟这个稿件问不着）。
+	viewFails bool
+	// viewGate 非 nil 时「bvid → aid」那一问先卡在它上面，放开才回。
+	//
+	// 用来把「开一轮的开头还在路上」这件事**稳定地**造出来——那一发是
+	// 网络往返，不卡住它就只能靠运气赶在它前面切歌，那样的测试是 flaky 的。
+	viewGate chan struct{}
+}
+
+func newReportBili(t *testing.T) *reportBili {
+	t.Helper()
+	b := &reportBili{}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/x/web-interface/nav", func(w http.ResponseWriter, r *http.Request) {
+		// WBI 签名要先打 nav 拿两把密钥，拿不到签名那一步就报错，
+		// 连真正的请求都发不出去。
+		writeReportJSON(w, map[string]any{"wbi_img": map[string]string{
+			"img_url": "https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png",
+			"sub_url": "https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png",
+		}})
+	})
+	mux.HandleFunc("/x/web-interface/view", func(w http.ResponseWriter, r *http.Request) {
+		b.mu.Lock()
+		b.viewHits++
+		gate, fails := b.viewGate, b.viewFails
+		b.mu.Unlock()
+		if gate != nil {
+			<-gate
+		}
+		if fails {
+			writeReportCode(w, -404, "没有这个稿件")
+			return
+		}
+		writeReportJSON(w, map[string]any{"aid": 114514})
+	})
+	mux.HandleFunc(openPathWanted, func(w http.ResponseWriter, r *http.Request) {
+		b.mu.Lock()
+		b.opens = append(b.opens, formOf(r))
+		b.mu.Unlock()
+		writeReportJSON(w, map[string]any{})
+	})
+	mux.HandleFunc(beatPathWanted, func(w http.ResponseWriter, r *http.Request) {
+		b.mu.Lock()
+		form := formOf(r)
+		fail := b.failBeats
+		b.beats = append(b.beats, form)
+		b.mu.Unlock()
+		if fail != 0 {
+			writeReportCode(w, fail, "B 站不收")
+			return
+		}
+		writeReportJSON(w, map[string]any{})
+	})
+
+	b.Server = httptest.NewServer(mux)
+	t.Cleanup(b.Close)
+	return b
+}
+
+func writeReportJSON(w http.ResponseWriter, data any) {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		raw = []byte("null")
+	}
+	body, _ := json.Marshal(map[string]any{
+		"code": 0, "message": "0", "ttl": 1, "data": json.RawMessage(raw),
+	})
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
+}
+
+func writeReportCode(w http.ResponseWriter, code int, msg string) {
+	body, _ := json.Marshal(map[string]any{"code": code, "message": msg, "ttl": 1})
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
+}
+
+// formOf 收下那一次的表单。
+func formOf(r *http.Request) url.Values {
+	_ = r.ParseForm()
+	return r.PostForm
+}
+
+func (b *reportBili) beatsOf(action string) []url.Values {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []url.Values
+	for _, f := range b.beats {
+		if f.Get("play_type") == action {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func (b *reportBili) opensCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.opens)
+}
+
+func (b *reportBili) viewCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.viewHits
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// rig：一个挂了登录与在线播放、并且心跳很快的 App
+// ─────────────────────────────────────────────────────────────────────────────
+
+// testMid 是这一组统一的「登录了的那个账号」。
+const testMid = "2333"
+
+// newReportRig 装一个 App：已登录（mid 2333）、已挂在线播放、**心跳 20 ms 一次**。
+//
+// 心跳间隔调小是为了让「多久发一次」这件事在测试里能被看到。正式路径是
+// 30 秒（`reportInterval`），真等 30 秒既慢又不稳。
+func newReportRig(t *testing.T) (*App, *reportBili) {
+	t.Helper()
+	b := newReportBili(t)
+
+	a := New()
+	t.Cleanup(a.Close)
+
+	cli := bili.NewClient(bili.Options{})
+	cli.TestOnlyPointHostsAtFixture(b.URL)
+
+	// 走的是**真的那条路**：先把一份登录态放进后端，再 `MountLogin`——
+	// 和「重启后还是登录」是同一条（`account.go` 的 restore）。
+	store := NewMemoryStore("report-test")
+	if err := store.Save(context.Background(), Session{
+		SESSDATA: "test-sessdata", BiliJCT: "test-jct", DedeUserID: testMid,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a.MountLogin(store, cli)
+	a.MountStreaming(Streaming{Client: cli, Media: b.Client(), TempDir: t.TempDir()})
+
+	if err := a.MountSettings(filepath.Join(t.TempDir(), "settings.json")); err != nil {
+		t.Fatal(err)
+	}
+	a.report.setInterval(20 * time.Millisecond)
+	return a, b
+}
+
+// reportItem 是一条在线投稿。
+func reportItem(bvid, cid string) Item {
+	return Item{Source: "online", Type: "mv", Bvid: bvid, Cid: cid, Title: "一首"}
+}
+
+// putTrack 把「此刻在放什么」摆好（不真的开流）。
+func putTrack(a *App, it Item, pos, dur time.Duration, playing bool) {
+	a.mu.Lock()
+	if it.Bvid == "" {
+		a.online = nil
+	} else {
+		a.online = &onlineTrack{item: it}
+	}
+	a.position, a.duration = pos, dur
+	a.playing = playing
+	a.mu.Unlock()
+}
+
+// play 摆好一首歌并跑一拍（进度条那一拍就是调 `reportTick`）。
+func play(a *App, it Item, pos, dur time.Duration) {
+	putTrack(a, it, pos, dur, true)
+	a.reportTick(true, false)
+}
+
+// pauseBeat 摆好「暂停了」并跑一拍。
+func pauseBeat(a *App, it Item, pos, dur time.Duration) {
+	putTrack(a, it, pos, dur, false)
+	a.reportTick(false, false)
+}
+
+// untilBeats 等到「至少有 n 条指定动作的心跳」为止。
+func untilBeats(t *testing.T, b *reportBili, action string, n int) []url.Values {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got := b.beatsOf(action)
+		if len(got) >= n {
+			return got
+		}
+		if time.Now().After(deadline) {
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			t.Fatalf("等了 5 秒还没有 %d 条 play_type=%s 的心跳，实际收到 %d 条：%v",
+				n, action, len(b.beats), playTypesOf(b.beats))
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func playTypesOf(beats []url.Values) []string {
+	out := make([]string, 0, len(beats))
+	for _, f := range beats {
+		out = append(out, f.Get("play_type"))
+	}
+	return out
+}
+
+// untilOpens 等到「已经开过 n 次头」为止。
+//
+// 🔴 **不能用 `opensCount()` 直接断言**：发送那条 goroutine 是**按顺序**
+// 一条一条发的，所以「上一首的结束那一条到了」只能证明它前面那几条到了，
+// 证明不了**后面**那一轮的头已经发出去。切歌那一拍的顺序恰恰是
+// 「先结束旧的、再开新的」，于是断言必须等到新头真的来了。
+func untilOpens(t *testing.T, b *reportBili, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for b.opensCount() < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("等了 5 秒还是只开了 %d 次头，want %d", b.opensCount(), n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// sessionOf 是那条心跳的会话 id。
+func sessionOf(f url.Values) string { return f.Get("session") }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 一、什么时候发
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestPlayingOpensTheRoundAndSaysItStarted 盯「开始播」。
+//
+// 钉的是那一轮的两发：`click/web/h5` 那一发（开一轮）和心跳上的
+// play_type=1。B 站那边「开始播」是记在心跳的 play_type 上的，只发前面
+// 那一发不算开始。
+//
+// 顺带钉住三样抄来的东西：`aid`（问一次 `/x/web-interface/view` 换来的）、
+// 会话 id 的形状（32 位不带分隔符的小写十六进制）、`fnval`（和取流同值）。
+func TestPlayingOpensTheRoundAndSaysItStarted(t *testing.T) {
+	a, b := newReportRig(t)
+	it := reportItem("BV1start", "101")
+	play(a, it, 0, 900*time.Second)
+
+	got := untilBeats(t, b, "1", 1)[0]
+	if got.Get("bvid") != "BV1start" || got.Get("cid") != "101" {
+		t.Errorf("心跳记的不是这一首：bvid=%q cid=%q", got.Get("bvid"), got.Get("cid"))
+	}
+	if got.Get("aid") != "114514" {
+		t.Errorf("aid = %q，want 114514（从稿件详情换来的）", got.Get("aid"))
+	}
+	if got.Get("mid") != testMid {
+		t.Errorf("mid = %q，want %s", got.Get("mid"), testMid)
+	}
+	if s := sessionOf(got); len(s) != 32 {
+		t.Errorf("会话 id 是 %q，want 32 位不带分隔符的小写十六进制", s)
+	}
+	if got.Get("fnval") != "4048" {
+		t.Errorf("fnval = %q，want 4048（要和取流发的那个一样）", got.Get("fnval"))
+	}
+	if n := b.opensCount(); n != 1 {
+		t.Errorf("开了 %d 次头，want 1", n)
+	}
+	if n := len(b.beatsOf("1")); n != 1 {
+		t.Errorf("play_type=1 的心跳有 %d 条，want 1", n)
+	}
+}
+
+// TestAHeartbeatKeepsGoingWhileItPlays 盯 30 秒心跳。
+//
+// 这一条是这一页存在的理由：不发心跳，B 站那边这一轮从头到尾就没有
+// 「还在听」这件事，历史记录页上的播放进度也就永远是 0。
+func TestAHeartbeatKeepsGoingWhileItPlays(t *testing.T) {
+	a, b := newReportRig(t)
+	it := reportItem("BV1beat", "202")
+
+	// 连着跑 12 拍（心跳间隔 20 ms）。
+	for i := 0; i < 12; i++ {
+		play(a, it, time.Duration(i)*time.Second, 900*time.Second)
+		time.Sleep(25 * time.Millisecond)
+	}
+	got := untilBeats(t, b, "0", 3)
+	if len(got) < 3 {
+		t.Fatalf("只发了 %d 条心跳", len(got))
+	}
+	// 同一轮里的心跳共用一个会话 id——那是 B 站把它们并成「一次观看」的依据。
+	if sessionOf(got[0]) != sessionOf(got[len(got)-1]) {
+		t.Errorf("同一轮里会话 id 变了：%q → %q", sessionOf(got[0]), sessionOf(got[len(got)-1]))
+	}
+	// 进度是真的在往前走，不是原地重复。
+	last := got[len(got)-1]
+	if last.Get("played_time") == "0" {
+		t.Errorf("最后一条心跳的 played_time 还是 0：%v", last)
+	}
+}
+
+// TestPausingAndResumingAreToldApart 盯暂停 / 继续。
+//
+// 🔴 **会话 id 必须还是同一个**：暂停不是「这一轮结束了」，用户过一会儿
+// 按播放要接着听。换成新一轮的话 B 站那边就成了两次独立的观看，历史记录
+// 里那一首会多出一条。
+func TestPausingAndResumingAreToldApart(t *testing.T) {
+	a, b := newReportRig(t)
+	it := reportItem("BV1pause", "303")
+
+	play(a, it, 10*time.Second, 900*time.Second)
+	untilBeats(t, b, "1", 1)
+
+	pauseBeat(a, it, 30*time.Second, 900*time.Second)
+	paused := untilBeats(t, b, "2", 1)[0]
+
+	play(a, it, 35*time.Second, 900*time.Second)
+	resumed := untilBeats(t, b, "3", 1)[0]
+
+	if sessionOf(paused) != sessionOf(resumed) {
+		t.Errorf("暂停和继续不是同一轮：%q vs %q", sessionOf(paused), sessionOf(resumed))
+	}
+	if paused.Get("played_time") != "30" {
+		t.Errorf("暂停那一刻的 played_time = %q，want 30", paused.Get("played_time"))
+	}
+	if n := b.opensCount(); n != 1 {
+		t.Errorf("暂停之后又开了 %d 次头（共 %d），want 1", n-1, n)
+	}
+}
+
+// TestSwitchingEndsTheOldRoundAndOpensANewOne 盯切歌。
+//
+// 上一轮要收到 play_type=4（它不会自己知道歌换没换），新一轮要用**新的**
+// 会话 id——B 站按会话 id 把心跳并成一次观看，混在一个会话里就成了
+// 「一首超长的歌」。
+func TestSwitchingEndsTheOldRoundAndOpensANewOne(t *testing.T) {
+	a, b := newReportRig(t)
+	old := reportItem("BV1old", "404")
+	neu := reportItem("BV1new", "505")
+
+	play(a, old, 100*time.Second, 900*time.Second)
+	first := untilBeats(t, b, "1", 1)[0]
+
+	play(a, neu, 0, 900*time.Second)
+	end := untilBeats(t, b, "4", 1)[0]
+
+	if end.Get("bvid") != "BV1old" {
+		t.Errorf("结束那一条记的是 %q，want BV1old（上一首）", end.Get("bvid"))
+	}
+	if sessionOf(end) != sessionOf(first) {
+		t.Errorf("结束那一条不是上一轮的那一轮")
+	}
+	// 🔴 **结束要报「听到了哪儿」，不是此刻的位置**：切歌这一拍
+	// `App.position` 已经被新歌清成 0 了，照它报就是「从头听就停了」。
+	if end.Get("played_time") != "100" {
+		t.Errorf("结束那一条的 played_time = %q，want 100（上一首听到的地方）", end.Get("played_time"))
+	}
+	untilOpens(t, b, 2)
+	if n := b.opensCount(); n != 2 {
+		t.Errorf("开了 %d 次头，want 2（两首各一次）", n)
+	}
+}
+
+// TestStoppingEndsTheRoundAndDoesNotOpenItAgain 盯「停止」。
+//
+// 🔴 后半句是这里最容易写错的地方：停止之后播放状态是「不在放」，而
+// 「不在放」之后每一拍都还在跑。少了 `playing` 那一条判据，下一拍就会把
+// 刚才关掉的那一轮又开起来——用户明明已经按了停止，应用还在替他记。
+func TestStoppingEndsTheRoundAndDoesNotOpenItAgain(t *testing.T) {
+	a, b := newReportRig(t)
+	it := reportItem("BV1stop", "606")
+
+	play(a, it, 200*time.Second, 900*time.Second)
+	untilBeats(t, b, "1", 1)
+
+	// 用户按停止：位置和时长在清零之前抄下来。
+	a.mu.Lock()
+	at, dur := a.position, a.duration
+	a.playing, a.wantPlay, a.stopped = false, false, true
+	a.position = 0
+	a.mu.Unlock()
+	a.stopTrack(at, dur)
+
+	end := untilBeats(t, b, "4", 1)[0]
+	if end.Get("played_time") != "200" {
+		t.Errorf("停止那一条的 played_time = %q，want 200", end.Get("played_time"))
+	}
+
+	// 停止之后连着跑十拍：用户**没有**再按播放。
+	opensAfterStop := b.opensCount()
+	for i := 0; i < 10; i++ {
+		a.reportTick(false, false)
+		time.Sleep(5 * time.Millisecond)
+	}
+	if n := b.opensCount(); n != opensAfterStop {
+		t.Errorf("停止之后又多开了 %d 次头——用户明明已经停了", n-opensAfterStop)
+	}
+}
+
+// TestFinishingSaysItFinished 盯播完。
+//
+// `played_time = -1` 是 B 站把这一条标成「看完」的唯一依据，历史记录页
+// 就是照它显示的。
+func TestFinishingSaysItFinished(t *testing.T) {
+	a, b := newReportRig(t)
+	it := reportItem("BV1done", "707")
+
+	play(a, it, 899*time.Second, 900*time.Second)
+	untilBeats(t, b, "1", 1)
+
+	putTrack(a, it, 900*time.Second, 900*time.Second, false)
+	a.reportTick(false, true) // 进度条的 tick 说「这一轮真的放完了」
+
+	end := untilBeats(t, b, "4", 1)[0]
+	if end.Get("played_time") != "-1" {
+		t.Errorf("播完那一条的 played_time = %q，want -1（B 站据此标「看完」）", end.Get("played_time"))
+	}
+}
+
+// TestAFailedStreamIsNeverReportedAsFinished 盯「解码失败不许被当成播完」。
+//
+// 🔴 这一条和 `TestACorruptFileNeverLooksLikeItFinished` 是同一条判据的
+// 另一个落点：断流和解码失败都让 `Playing()` 变 false，而拿它去发
+// `played_time = -1` 就是往用户**真实的账号**里写一句「他看完了」。
+// 他没看完——那句话会一直摆在他的历史记录页上。
+func TestAFailedStreamIsNeverReportedAsFinished(t *testing.T) {
+	a, b := newReportRig(t)
+	it := reportItem("BV1dead", "808")
+
+	play(a, it, 120*time.Second, 900*time.Second)
+	untilBeats(t, b, "1", 1)
+
+	// 这一拍是「从在放变成不在放」，但**不是**放完了（`finished=false`，
+	// 那是 `tick` 判过 `p.Err() != nil` 之后的结果）。
+	putTrack(a, it, 120*time.Second, 900*time.Second, false)
+	a.reportTick(false, false)
+	untilBeats(t, b, "2", 1)
+
+	for _, f := range b.beats {
+		if f.Get("played_time") == "-1" {
+			t.Fatalf("断流被报成了播完：play_type=%s", f.Get("play_type"))
+		}
+	}
+	// 而它确实发出去了一条——用户听不下去停在那儿，那 120 秒得记上。
+	if last := b.beats[len(b.beats)-1]; last.Get("played_time") != "120" {
+		t.Errorf("断流那一条的 played_time = %q，want 120（听到哪儿就记到哪儿）",
+			last.Get("played_time"))
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 二、什么不许发
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestLocalFilesAreNeverReported 本地文件在 B 站那边没有对应的东西。
+//
+// 发出去的 aid 是 0、bvid 是空串，B 站会回 0 而什么也不会记——一个
+// 「回成功但没做事」的请求比不发更坏，它让日志看着一切正常。
+func TestLocalFilesAreNeverReported(t *testing.T) {
+	a, b := newReportRig(t)
+
+	putTrack(a, Item{}, 42*time.Second, 900*time.Second, true)
+	for i := 0; i < 10; i++ {
+		a.reportTick(true, false)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if n := len(b.beats); n != 0 {
+		t.Errorf("本地文件也发了 %d 条心跳：%v", n, playTypesOf(b.beats))
+	}
+	if n := b.opensCount(); n != 0 {
+		t.Errorf("本地文件也开了 %d 次头", n)
+	}
+}
+
+// TestTheSwitchOffMeansNothingIsSent 「记录播放历史」那个开关。
+//
+// 它是设置里本来就有的一个键，摆在历史记录那一页的页头（`ui/history.go`）。
+// 这一条钉的是「关掉之后真的少记一条」——那一页开关摆在那儿，用户按了
+// 却不生效的话比没有这个开关更糟。
+func TestTheSwitchOffMeansNothingIsSent(t *testing.T) {
+	a, b := newReportRig(t)
+	if _, err := a.UpdateSettings(func(s *Settings) { s.ReportPlayHistory = false }); err != nil {
+		t.Fatal(err)
+	}
+
+	it := reportItem("BV1quiet", "909")
+	play(a, it, 10*time.Second, 900*time.Second)
+	for i := 0; i < 10; i++ {
+		play(a, it, time.Duration(i+1)*time.Second, 900*time.Second)
+		time.Sleep(25 * time.Millisecond)
+	}
+	if n := len(b.beats); n != 0 {
+		t.Errorf("开关关着还是发了 %d 条心跳", n)
+	}
+	if n := b.opensCount(); n != 0 {
+		t.Errorf("开关关着还是开了 %d 次头", n)
+	}
+}
+
+// TestASessionInFlightDiesWithTheRoundThatStartedIt 代次守卫。
+//
+// 用户连点五首：前四首的「开一轮」还在队列里没发出去（问 aid 那一次是
+// 网络往返），而那时候第五首已经开始了。不带代次的话，前四首的历史记录
+// 会在**第五首**的会话里被开出来——B 站那边看过去是同一首歌被听了五遍。
+func TestASessionInFlightDiesWithTheRoundThatStartedIt(t *testing.T) {
+	a, b := newReportRig(t)
+
+	// 卡住「问 aid」那一道，让第一轮的开头一直在路上。
+	blocked := make(chan struct{})
+	b.mu.Lock()
+	b.viewGate = blocked
+	b.mu.Unlock()
+
+	play(a, reportItem("BV1rushed", "1"), 0, 900*time.Second)
+	play(a, reportItem("BV1rushed2", "2"), 0, 900*time.Second)
+	play(a, reportItem("BV1rushed3", "3"), 0, 900*time.Second)
+
+	// 只放开最后一轮：前两轮的问 aid 一回来就发现代次变了。
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		close(blocked)
+	}()
+	untilBeats(t, b, "1", 1)
+
+	b.mu.Lock()
+	sent := append([]url.Values(nil), b.beats...)
+	b.mu.Unlock()
+	for _, f := range sent {
+		if f.Get("bvid") != "BV1rushed3" {
+			t.Errorf("发出去的心跳记的是 %q，want BV1rushed3（只有最后一轮该活）", f.Get("bvid"))
+		}
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 三、退登
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestLoggingOutStopsTheReporting 盯退登。
+//
+// 🔴 上报是写操作，它写进用户**真实的**账号。不停的话：jar 刚被清空，
+// 那条 goroutine 还在每 30 秒往 B 站打一次心跳；而**换人登录之后**它还在
+// 发——那些进度会被记到新登录的那个人名下，而那是他没听过的歌。
+func TestLoggingOutStopsTheReporting(t *testing.T) {
+	a, b := newReportRig(t)
+	it := reportItem("BV1logout", "111")
+
+	play(a, it, 60*time.Second, 900*time.Second)
+	untilBeats(t, b, "1", 1)
+
+	if err := a.Logout(); err != nil {
+		t.Fatalf("退登失败：%v", err)
+	}
+
+	// 退登之后这一首还在放着（我们不因为退登就停歌），但不该再记了。
+	opensAfter := b.opensCount()
+	beatsAfter := len(b.beats)
+	for i := 0; i < 12; i++ {
+		play(a, it, time.Duration(60+i)*time.Second, 900*time.Second)
+		time.Sleep(25 * time.Millisecond)
+	}
+	if n := b.opensCount(); n != opensAfter {
+		t.Errorf("退登之后又多开了 %d 次头", n-opensAfter)
+	}
+	b.mu.Lock()
+	after := b.beats[beatsAfter:]
+	b.mu.Unlock()
+	if len(after) != 0 {
+		t.Errorf("退登之后还发了 %d 条心跳：%v", len(after), playTypesOf(after))
+	}
+}
+
+// TestTheProgressNeverLandsOnTheNextAccount 盯换人登录。
+//
+// 比的是**账号身份**（DedeUserID）而不是 `Manager.Generation()`：代次每换
+// 一次登录态就涨一，而一次扫码登录（无论成不成功）必然涨一——拿它当判据
+// 的话，用户正听着歌、手指点了一下登录，历史记录就从那一刻起静悄悄地不记了。
+// 而真正要防的那件事是「A 的进度写进 B 的账号」。
+func TestTheProgressNeverLandsOnTheNextAccount(t *testing.T) {
+	a, b := newReportRig(t)
+	it := reportItem("BV1mine", "222")
+
+	play(a, it, 30*time.Second, 900*time.Second)
+	untilBeats(t, b, "1", 1)
+
+	// 退登之后换一个人登录。
+	if err := a.Logout(); err != nil {
+		t.Fatal(err)
+	}
+	a.account.mgr.Adopt(Session{
+		SESSDATA: "other-sessdata", BiliJCT: "other-jct", DedeUserID: "8888",
+	})
+
+	before := len(b.beats)
+	for i := 0; i < 12; i++ {
+		play(a, it, time.Duration(30+i)*time.Second, 900*time.Second)
+		time.Sleep(25 * time.Millisecond)
+	}
+	for _, f := range b.beats[before:] {
+		if f.Get("mid") == "8888" {
+			t.Fatalf("上一个账号的进度被记到了 8888 名下：%v", f)
+		}
+	}
+	// 也不能给新账号**开一轮**：那一轮从头到尾都是 2333 的。
+	if n := b.opensCount(); n != 1 {
+		t.Errorf("换人之后又开了 %d 次头（共 %d），want 1", n-1, n)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 四、失败不许影响播放
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestAFailedReportDoesNotReachTheUser 上报失败什么都不许冒出来。
+//
+// 网络抖一下不该在界面上有一句话，更不该让歌停住。这条钉的是两半：
+// 播放条上没有红字，而上报那一路被 B 站拒了（-101）之后**继续在发**——
+// 不能因为一次失败就再也不记了。
+func TestAFailedReportDoesNotReachTheUser(t *testing.T) {
+	a, b := newReportRig(t)
+	b.mu.Lock()
+	b.failBeats = -101
+	b.mu.Unlock()
+
+	it := reportItem("BV1resilient", "333")
+	play(a, it, 0, 900*time.Second)
+	for i := 0; i < 6; i++ {
+		play(a, it, time.Duration(i)*time.Second, 900*time.Second)
+		time.Sleep(25 * time.Millisecond)
+	}
+	time.Sleep(150 * time.Millisecond)
+
+	if err := a.Snapshot().Err; err != "" {
+		t.Errorf("播放条上冒出了一句：%s", err)
+	}
+	// B 站拒了，但它**一直在拒**——我们这边必须一次都没停过。
+	if n := len(b.beats); n < 5 {
+		t.Errorf("B 站拒了之后我们只发了 %d 次心跳——失败一次就不记了", n)
+	}
+	// 位置还在往前走：上报这条路上没有任何东西能卡住播放。
+	if st := a.Snapshot(); st.Err != "" {
+		t.Errorf("上报失败留在状态里了：%q", st.Err)
+	}
+}
+
+// TestAViewThatFailsIsNotAskedAgainAndAgain 「问不到 aid」不许每拍问一次。
+//
+// 进度条的时钟是 20 拍一秒。问一次失败不记住的话，实测那一秒能发 20 次
+// `/x/web-interface/view`——把一个「这一首不记」的小毛病变成打爆 B 站。
+func TestAViewThatFailsIsNotAskedAgainAndAgain(t *testing.T) {
+	a, b := newReportRig(t)
+	b.mu.Lock()
+	b.viewFails = true
+	b.mu.Unlock()
+
+	it := reportItem("BV1noaid", "444")
+	for i := 0; i < 40; i++ {
+		play(a, it, time.Duration(i)*time.Second, 900*time.Second)
+	}
+	time.Sleep(150 * time.Millisecond)
+
+	if n := b.viewCount(); n > 2 {
+		t.Errorf("问不到 aid 时把稿件详情问了 %d 次——每一拍都在问", n)
+	}
+	if n := b.opensCount(); n != 0 {
+		t.Errorf("问不到 aid 还是开了 %d 次头", n)
+	}
+}

@@ -516,6 +516,59 @@ var Items = []Item{
 	},
 	{
 		Category: Play,
+		// 「往 B 站写播放记录」这一票（BMG-47 审计 A7）。它修的是一个
+		// **壳子做完了、数据源没有**的洞：历史记录页读的是 B 站服务器上的
+		// 历史，而我们以前一次都没往里写——只用我们这个应用的用户，那一页
+		// 永远是空的。
+		//
+		// 逐条钉的是**每一个上报时机**（开始播 / 心跳 / 暂停 / 继续 /
+		// 切歌 / 停止 / 播完），以及三件「错了就伤到用户真实账号」的事：
+		// 退登之后不许再写、换人登录之后上一首的进度不许记到那个人名下、
+		// 解码失败不许报成「看完」。
+		//
+		// ⚠️ **这一票的验收没走真网**：上报是写操作，它写进用户真实的 B 站
+		// 账号，而反复上报会在那个账号里留下一堆垃圾播放记录。所以全部用
+		// HTTP fixture。真接口的兼容性（参数集对不对、B 站收不收）要真机
+		// 回归，那是单独安排的一趟，见任务报告「需要真网验」那一节。
+		//
+		// 这里量到的是**我们这一层**：什么时机发、发什么、代次守不守得住、
+		// 失败会不会影响播放。真 B 站收下之后「历史记录」那一页上出现的是
+		// 不是这一条，量不到。
+		Spec: "播放记录上报 B 站：开始播/30 秒心跳/暂停/继续/切歌/停止/播完各自发的那一下，参数逐个对着上游；退登与换人之后不许再写（进度不许落到另一个账号名下）；解码失败不许报成播完；上报失败不许影响播放（这一票走 HTTP fixture，真接口要真机回归——上报会写进用户真实的 B 站账号）",
+		Tests: []string{
+			// 协议层：发出去的形状。
+			"TestPlayReportOpenSendsEveryParam",
+			"TestPlayReportBeatSendsEveryParam",
+			"TestTheFnvalIsTheOneWeAskStreamsFor",
+			"TestFinishedSendsMinusOne",
+			"TestEveryPlayTypeHasItsOwnNumber",
+			"TestReportingNeedsAVideo",
+			// 业务层：什么时候发。
+			"TestPlayingOpensTheRoundAndSaysItStarted",
+			"TestAHeartbeatKeepsGoingWhileItPlays",
+			"TestPausingAndResumingAreToldApart",
+			"TestSwitchingEndsTheOldRoundAndOpensANewOne",
+			"TestStoppingEndsTheRoundAndDoesNotOpenItAgain",
+			"TestFinishingSaysItFinished",
+			// 什么不许发。
+			"TestAFailedStreamIsNeverReportedAsFinished",
+			"TestLocalFilesAreNeverReported",
+			"TestTheSwitchOffMeansNothingIsSent",
+			// 代次守卫与退登。
+			"TestASessionInFlightDiesWithTheRoundThatStartedIt",
+			"TestLoggingOutStopsTheReporting",
+			"TestTheProgressNeverLandsOnTheNextAccount",
+			// 失败不许影响播放。
+			"TestAFailedReportDoesNotReachTheUser",
+			"TestAViewThatFailsIsNotAskedAgainAndAgain",
+			// 从真的播放链路走到 B 站（真队列 + 真取流 + 真解码 + 真进度条时钟）。
+			"TestPlayingARealStreamReachesBilibili",
+			"TestStoppingARealStreamTellsBilibiliItIsOver",
+			"TestLoggingOutARealStreamStopsTheReporting",
+		},
+	},
+	{
+		Category: Play,
 		// 「判据说可放、实际放不了」——界面上的谎言。`bili.Media.Playable()`
 		// 照抄了 Biu 的 `![2,12].includes(type)`，**判据抄对了**，而我们没实现
 		// 的那一条路（type=12，B 站音乐库）没有被跟上：收藏夹里那条照常画成一

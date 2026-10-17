@@ -200,10 +200,20 @@ func (a *App) Stop() {
 		a.mu.Unlock()
 		return
 	}
+	// 🔴 播放记录要在**清零之前**把位置抄下来（下面那句 `stopTrack` 要用）。
+	// 用清零之后的 0 报上去，B 站那边这一条就成了「从头开始听然后立刻停
+	// 了」，而用户明明听到了 3 分 20 秒。
+	at := a.position
 	a.playing, a.wantPlay, a.stopped = false, false, true
 	a.position = 0
 	wake := a.wake
+	dur := a.duration
 	a.mu.Unlock()
+
+	// 「停止」是**终止**：这一轮到此为止，会话要结掉（见 playreport.go 的
+	// 「一、什么时候发」）。暂停留会话、停止结会话，靠的就是这一句——
+	// 两者的区别只有在这里才知道。
+	a.stopTrack(at, dur)
 
 	p.Pause()
 	p.Seek(0)
