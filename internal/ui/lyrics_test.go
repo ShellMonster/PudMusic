@@ -86,20 +86,30 @@ func (h *lyricsHarness) seek(t *testing.T, fraction float64, withTranslation boo
 	h.tt.Frame()
 }
 
-// untilLaidOut 等到 text 那一行真的被画出来（盒子非零）。
+// untilLaidOut 等到 text 那一行的盒子**稳住**（连续两帧一样高）。
 //
-// 改字号、改偏移之后行高和滚动目标都会变，要一两帧才落定；而落定的标志就是「那一行
-// 有盒子」。只等到它有盒子就停，不等整个滚动收敛——后者在 `-race` 下是几十帧。
+// 改字号、改偏移之后行高和滚动目标都会变，要一两帧才落定。判据是「盒子的高度不再
+// 变」，**不是**「盒子非零」——半行被裁掉时盒子也是非零的，只是很小，等到那一步就收
+// 手会量到一个正在移动的值（实测：字号只调三下时量到 5.3，而调八下量到 40）。
+//
+// 只等这一行稳住，不等整个滚动收敛——后者在 `-race` 下是几十帧。
 func (h *lyricsHarness) untilLaidOut(t *testing.T, text string) {
 	t.Helper()
-	for range 10 {
+	last := float32(-1)
+	for range 12 {
 		h.tt.Advance(100 * time.Millisecond)
 		h.tt.Frame()
-		if r, ok := h.tt.Find(text); ok && r.H > 0 {
+		r, ok := h.tt.Find(text)
+		if !ok || r.H <= 0 {
+			last = -1
+			continue
+		}
+		if r.H == last {
 			return
 		}
+		last = r.H
 	}
-	t.Fatalf("等了 %d 帧，%q 仍然没有盒子", 10, text)
+	t.Fatalf("等了 12 帧，%q 的盒子还没稳住（最后是 %v）", text, last)
 }
 
 // seekSettled 是 seek 再加「等滚动走到位」。
@@ -501,16 +511,15 @@ func TestTheOffsetKnobDrivesTheSungLine(t *testing.T) {
 		t.Errorf("旁边的字没跟着变，文字有 %q", h.tt.Texts())
 	}
 
-	// 步长 50 是死的：再点四下就该是 250，不是别的数。
-	for range 4 {
-		if err := h.tt.Click("Increase"); err != nil {
-			t.Fatal(err)
-		}
+	// 一步就钉住了步长（50 是死的，`offset-control.tsx:20`）。⚠️ **不要多按**：
+	// `Tester.Click` 每点一下都跑一次 settle，而 `-race` 下一帧要重画整个界面；
+	// 一次和五次钉住的是同一件事，代价差五倍。
+	if err := h.tt.Click("Increase"); err != nil {
+		t.Fatal(err)
 	}
-	h.tt.Frame()
-	if got := h.s.app.Lyrics().OffsetMS; got != 5*app.LyricsOffsetStepMS {
-		t.Errorf("一共点五下之后偏移是 %d，want %d（步长抄自上游 offset-control.tsx:20）",
-			got, 5*app.LyricsOffsetStepMS)
+	if got := h.s.app.Lyrics().OffsetMS; got != 2*app.LyricsOffsetStepMS {
+		t.Errorf("一共点两下之后偏移是 %d，want %d（步长抄自上游 offset-control.tsx:20）",
+			got, 2*app.LyricsOffsetStepMS)
 	}
 }
 
@@ -539,22 +548,24 @@ func TestTheFontSizeKnobResizesTheLines(t *testing.T) {
 	if !ok {
 		t.Fatalf("画面上找不到「歌词字号」那个控件，文字有 %q", h.tt.Texts())
 	}
+	// ⚠️ **只按三下，不要按更多**：`Tester.Key` 每按一下都跑一次 settle，而 `-race` 下
+	// 一帧要重画整个界面。三下和二十下钉住的是同一件事（`step = 1`），代价差七倍。
 	h.tt.ClickAt(box.X+12, box.Y+box.H/2)
-	for range 8 { // 8 = 20 → 28，肉眼一眼看得出来
+	for range 3 {
 		h.tt.Key(0, mygoui.KeyUp)
 	}
 	h.tt.Frame()
 
-	// 八下 ↑ 正好 +8：顺带钉住了 `font-size-control.tsx:18` 那个 `step = 1`
-	//（步长改成 5 的话八下是 +40，这条就红）。
-	if got := h.s.app.Lyrics().FontSize; got != 20+8 {
-		t.Fatalf("按了八下 ↑ 之后字号是 %v，want 28（控件没接到 App 上，或步长不是 1？）", got)
+	// 三下 ↑ 正好 +3：顺带钉住了 `font-size-control.tsx:18` 那个 `step = 1`
+	//（步长改成 5 的话三下是 +15，这条就红）。
+	if got := h.s.app.Lyrics().FontSize; got != 20+3 {
+		t.Fatalf("按了三下 ↑ 之后字号是 %v，want 23（控件没接到 App 上，或步长不是 1？）", got)
 	}
 	// 字号一变，行高和滚动目标都跟着变，要一两帧才落定——落定的标志就是这一行有盒子。
 	h.untilLaidOut(t, lineAt(0.5))
 
 	if got := rectOf(t, h, lineAt(0.5)).H; got <= before {
-		t.Errorf("字号从 20 调到 28 之后%s还是高 %v（调之前 %v）——控件没接到 view 上",
+		t.Errorf("字号从 20 调到 23 之后%s还是高 %v（调之前 %v）——控件没接到 view 上",
 			lineAt(0.5), got, before)
 	}
 }
