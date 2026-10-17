@@ -132,40 +132,114 @@ func drain(t *testing.T, d mygoaudio.Decoder, ch int) []float32 {
 
 // dominantFreq 是 out 中间那一段的主频（Hz）。
 //
-// 用 Goertzel 在 [lo, hi] 上一步步扫，不做 FFT：这里要的不是精确的谱，
-// 是「主峰还在不在原地」——差半个八度（1.5 倍速的变调）一扫就分得开。
+// # 要的是「主峰还在不在原地」，不是精确的谱
+//
+// 差半个八度（1.5 倍速的变调）分得开就够了，所以窗长取 16384（分辨力 2.7Hz），
+// 加汉宁窗压旁瓣，然后取 [lo, hi] 里能量最大的那一格。
+//
+// # 为什么是一次 FFT 而不是逐频点扫
+//
+// 这里要的是同一个判据——「功率谱在 [lo, hi] 上的 argmax」——但问法不同：
+// 逐个频点跑一遍 Goertzel 是 (hi−lo+1)×n ≈ 1150 万次乘加，一次 FFT 只要
+// n·log₂n ≈ 23 万次，**差 50 倍**。七档倍率各问一次，那 50 倍就是整条用例的
+// 大头（`-race` 下更明显：race 的开销按内存访问次数走，而扫频正是访问最密的
+// 那一种）。
+//
+// 判据没有因此变松，两边都还是：
+//
+//	同一段信号（正中间 16384 帧）
+//	同一个周期汉宁窗（压旁瓣）
+//	同一个 [lo, hi] 范围（不把窗外的东西挑进来）
+//
+// 而且分辨力还**升**了：原来只在整 Hz 上问，能给出的答案就是整数 Hz；FFT 的
+// 格子是 2.7Hz，落在格子里再抛物线插一下，答案能到亚 Hz。原来分不开的 1Hz
+// 以内的差别，现在分得开。
+//
+// 只取第一声道：源本来就是单声道（`tone(rate, 1, …)`），和 goertzel 那时一样。
 func dominantFreq(out []float32, rate int, ch int, lo, hi float64) float64 {
 	const n = 16384
 	if len(out) < n*ch {
 		return 0
 	}
 	off := ((len(out)/ch - n) / 2) * ch
-	seg := out[off : off+n*ch]
+	pow := hannPowerSpectrum(out[off:off+n*ch], ch, n)
 
-	best, bestMag := lo, 0.0
-	for f := lo; f <= hi; f += 1 {
-		mag := goertzel(seg, ch, rate, f)
-		if mag > bestMag {
-			best, bestMag = f, mag
+	// 格子 k 对应 k·rate/n Hz。区间两端各留一格，好让峰顶的抛物线插值有邻居。
+	k0 := max(int(math.Ceil(lo*float64(n)/float64(rate)))+1, 1)
+	k1 := min(int(math.Floor(hi*float64(n)/float64(rate)))-1, len(pow)-2)
+	if k0 > k1 {
+		return 0
+	}
+	best := k0
+	for k := k0 + 1; k <= k1; k++ {
+		if pow[k] > pow[best] {
+			best = k
 		}
 	}
-	return best
+
+	// 抛物线插值：峰顶多半落在两格之间，直接取格子会把真实的音高量化掉。
+	// 0.5 倍速（220Hz）和 1 倍速（440Hz）这些整数倍的场合无所谓，但上面那条
+	// ±10Hz 的断言量的是「差多少」，把 2.7Hz 的量化误差算进去就少了三成余量。
+	d := pow[best-1] - 2*pow[best] + pow[best+1]
+	shift := 0.0
+	if d != 0 {
+		if s := 0.5 * (pow[best-1] - pow[best+1]) / d; s >= -1 && s <= 1 {
+			shift = s // 跑出邻格说明那不是个峰（多半是噪声），宁可留在格心
+		}
+	}
+	return (float64(best) + shift) * float64(rate) / float64(n)
 }
 
-// goertzel 是单个频点上的能量（已加汉宁窗，抑制旁瓣）。
-func goertzel(seg []float32, ch, rate int, freq float64) float64 {
-	const n = 16384
-	w := 2 * math.Pi * freq / float64(rate)
-	c := 2 * math.Cos(w)
-	var s0, s1, s2, norm float64
+// hannPowerSpectrum 是加汉宁窗之后的功率谱（前 n/2+1 格）。
+//
+// 只看实部信号：功率谱对实信号是对称的，另一半是镜像，留着白占内存。
+func hannPowerSpectrum(seg []float32, ch, n int) []float64 {
+	buf := make([]complex128, n)
 	for i := 0; i < n; i++ {
-		x := float64(seg[i*ch]) * (0.5 - 0.5*math.Cos(2*math.Pi*float64(i)/n))
-		s0 = x + c*s1 - s2
-		s2, s1 = s1, s0
-		norm += x * x
+		w := 0.5 - 0.5*math.Cos(2*math.Pi*float64(i)/float64(n))
+		buf[i] = complex(float64(seg[i*ch])*w, 0)
 	}
-	mag := s1*s1 + s2*s2 - c*s1*s2
-	return mag / (norm + 1e-12)
+	fft(buf)
+
+	pow := make([]float64, n/2+1)
+	for k := range pow {
+		pow[k] = real(buf[k])*real(buf[k]) + imag(buf[k])*imag(buf[k])
+	}
+	return pow
+}
+
+// fft 是就地做的 radix-2 迭代 FFT，长度必须是 2 的幂。
+//
+// 蝶形运算自己写而不用 math/cmplx 那一套：这里每秒要跑几十次，分配越少越好。
+// 每层的旋转因子**整层算一次**而不是逐个递推——递推在 14 层里会攒出可见的
+// 误差，而三角函数一共也才 n−1 次，比它省下来的那点时间划算得多。
+func fft(a []complex128) {
+	n := len(a)
+	// 位反转置换：把输入重排成二进制倒序，之后蝶形才能就地做。
+	for i, j := 1, 0; i < n; i++ {
+		bit := n >> 1
+		for ; j&bit != 0; bit >>= 1 {
+			j ^= bit
+		}
+		j ^= bit
+		if i < j {
+			a[i], a[j] = a[j], a[i]
+		}
+	}
+	for size := 2; size <= n; size <<= 1 {
+		half := size >> 1
+		w := make([]complex128, half)
+		for k := range w {
+			ang := -2 * math.Pi * float64(k) / float64(size)
+			w[k] = complex(math.Cos(ang), math.Sin(ang))
+		}
+		for start := 0; start < n; start += size {
+			for k := 0; k < half; k++ {
+				even, odd := a[start+k], a[start+k+half]*w[k]
+				a[start+k], a[start+k+half] = even+odd, even-odd
+			}
+		}
+	}
 }
 
 // bestOffset 在 src 的 [want-span, want+span] 里找一段和 out 最像的位置。
@@ -192,6 +266,9 @@ func bestOffset(out, src []float32, ch, want, span int) int {
 
 // ── 用例 ──────────────────────────────────────────────────────────────────
 
+// unitySwellSeconds 是上面那条用例的素材长度——半秒。凭什么这么短，见下面。
+const unitySwellSeconds = 0.5
+
 // TestUnityRateIsSampleForSample 盯「1 倍速就是原样」。
 //
 // 这不是洁癖：1 倍速是用户用得最多的那一档，也是从别的倍率切回来的落点。
@@ -199,9 +276,23 @@ func bestOffset(out, src []float32, ch, want, span int) int {
 //
 // 用一段**能量一路递增**的信号：点积式的搜索会挑能量大的那一段，于是起点被拽走，
 // 这一条立刻红。
+//
+// # 为什么半秒的素材就够（实测，别凭感觉调）
+//
+// 把 `aNext` 的余弦相似度故意改回点积，这条用例立刻红——而红的位置是
+// **clean 区开头那二十几个样本**（不到 0.02 跳），0.25 秒和 1.5 秒的素材上都一样。
+// 理由是结构性的：搜索每一跳都做，拽走也就**每一跳**都发生，被拽走之后后面整段
+// 都是错位的。逐样本比对的区只要盖住几跳，就够把这件事钉死。
+//
+// 反而是**越短越灵**：渐强是线性的，搜索窗（±256 帧）里那段能量差与总长成反比，
+// 素材越短、窗内的能量对比越大，点积式选得越离谱（实测第一个不同的样本从 1.5 秒
+// 的第 34 个挪到 0.25 秒的第 14 个）。
+//
+// 半秒是「盖住 17 跳、而实测第一跳之内就红」——给往后的算法改动留了十七倍余量。
+// 再加长不增强任何东西，只是白烧 CPU（这一条 `-race` 下曾是整个包最贵的单点）。
 func TestUnityRateIsSampleForSample(t *testing.T) {
 	const rate = 44100
-	src := swell(rate, 2, 220, 1.5)
+	src := swell(rate, 2, 220, unitySwellSeconds)
 	v := newVarispeed(&memDec{samples: src, ch: 2, rate: rate})
 
 	got := drain(t, v, 2)
@@ -441,9 +532,24 @@ func TestSetRateMidStreamDoesNotJump(t *testing.T) {
 //
 // 走法刻意做成「快→慢」和「慢→快」都试一遍：两个方向的差值符号相反，只试一个
 // 方向会漏掉另一半。
+//
+// # 为什么六秒的素材够（判据是绝对量，所以长度不进判据）
+//
+// 断言是 `at < last - v.search`（**绝对**的 256 帧）和「一路换完还能把剩下的读完，
+// 且不越界」。素材多长都不进这两条，所以长度只需要满足一件事：**七档 × 八次读
+// 之后源还没到头**。
+//
+// 那个下限是**量出来**的，不是估的：每档八次读、每次 2048 帧输出，而源要走
+// 合成跳 × 倍率那么多，于是「快到慢」七档合计要走 2048 × (2+1.75+1.5+1.25+1+0.75+0.5)
+// ≈ 14.3 万帧 ≈ 3.3 秒。实测：3 秒在第五档就报「第 5 档就把源读完了」，4 秒过。
+// 六秒是下限的一倍半。
+//
+// 而且这个下限是**看得见**的：素材短到不够，下面那个「第 %d 档就把源读完了」会当场
+// 把用例打红。所以哪天有人把它调短了，是立刻发现，而不是悄悄地少验了后面几档
+// ——十二秒那会儿是白留了六秒（这一条 `-race` 下曾是整包最贵的单点）。
 func TestChangingRateMidStreamNeverGoesBackwards(t *testing.T) {
 	const rate = 44100
-	src := gritty(tone(rate, 1, 440, 12))
+	src := gritty(tone(rate, 1, 440, 6))
 
 	for _, step := range []struct {
 		name string

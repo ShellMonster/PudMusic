@@ -220,7 +220,7 @@ func TestSeekTableIgnoredIsStillCorrect(t *testing.T) {
 	if err := d.SetPosition(100000); err != nil {
 		t.Errorf("seek to 100000: %v", err)
 	}
-	if n, err := readAllErr(d); errors.Is(err, io.EOF) && len(n) == 0 {
+	if n, err := readAllErr(d); errors.Is(err, io.EOF) && n == 0 {
 		t.Errorf("seek landed on nothing")
 	}
 }
