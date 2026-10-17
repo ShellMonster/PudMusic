@@ -3,7 +3,8 @@
 //
 // 跟 `stream_source.go` 分开是因为那一半讲的是**接口**（能读、能 seek、能
 // 关、能取消），这一半讲的是**网络**（会 403、会卡死、会中途断）。两者的
-// 契约只在 `recover()` 那一个函数上交叉。
+// 契约只在 `recover()` 那一个函数上交叉——而 `recover` 的三级台阶里，
+// 第三级（「等网络」）住在 `stream_source_wait.go`。
 
 package audio
 
@@ -21,9 +22,12 @@ import (
 // pump 是下载 goroutine。
 //
 // 它是整个在线播放里唯一碰网络的地方，从头跑到尾只在三种情况下停：
-// 下载完了（记 io.EOF）、换流也换不动了（记真错）、源被关了（直接返回，
+// 下载完了（记 io.EOF）、连缓冲预算都用光了（记真错）、源被关了（直接返回，
 // 不记错——那样 `Close` 之后的 `Read` 会报 `ErrSourceClosed`，
 // 和「切歌」而不是「出错」对得上）。
+//
+// 「拉不动但还没到头」不在这个列表里——那种情况由 `recover` 变成一段
+// 退避等待，歌停在原地等着网络回来（见 stream_source_wait.go）。
 func (s *StreamSource) pump() {
 	defer s.wg.Done()
 	buf := make([]byte, copyBufSize)
@@ -43,7 +47,7 @@ func (s *StreamSource) pump() {
 			// 已经补下了一段，用旧的 from 会让换流从一个错的位置接上——
 			// 内容能对上（因为是同一段字节），但「从第几个字节接的」
 			// 这个断言会变成一个没有意义的 0。
-			if !s.recover(s.Filled(), err) {
+			if !s.continueAfter(s.Filled(), err) {
 				return
 			}
 			continue
@@ -64,10 +68,25 @@ func (s *StreamSource) pump() {
 		if s.stopped() {
 			return
 		}
-		if !s.recover(s.Filled(), err) {
+		if !s.continueAfter(s.Filled(), err) {
 			return
 		}
 	}
+}
+
+// continueAfter 处理「这一次拉不动」：换备用地址 → 换流 → 等网络。
+//
+// 返回 false 表示「这一遍播放到此为止」，调用方直接退出泵。
+func (s *StreamSource) continueAfter(from int64, cause error) bool {
+	cont, wait := s.recover(from, cause)
+	if !cont {
+		return false
+	}
+	// 退避。`Close` 会立刻把它叫醒，所以切歌不会被 8 秒的等待拖住。
+	if wait > 0 && !s.sleep(wait) {
+		return false
+	}
+	return true
 }
 
 // pour 把一个响应体写进缓存。返回 nil 表示这条流读完了。
@@ -147,6 +166,8 @@ func (s *StreamSource) append(b []byte) error {
 	if s.size >= 0 && s.filled > s.size {
 		s.size = s.filled
 	}
+	// 字节进来了 = 网络（或这条流）又活了：缓冲态到此为止。
+	s.noteProgressLocked()
 	s.cond.Broadcast()
 	s.mu.Unlock()
 	return nil
@@ -191,45 +212,85 @@ var errSourceStopping = errors.New("audio: 字节源正在关闭")
 
 // recover 处理「这条地址读不动了」。
 //
-// 顺序是：**先换备用地址，再换流**。换备用地址只是一次不带签名的普通
-// 请求，换流要调一次带 WBI 签名的接口——后者更贵，能用前者解决就别用。
+// 顺序是三级台阶，**先便宜后贵**：
 //
-// 返回 false 表示「实在没辙了」。**这时候终态错误由 recover 自己记**，
-// 调用方直接返回就行：不同的放弃原因要报不同的话（「换到别的流了」和
-// 「这条流下到一半断了」对用户是两件事），把 cause 原样报出去等于把
-// 这个判断又推回给调用方。
-func (s *StreamSource) recover(from int64, cause error) bool {
+//	① 换备用地址：同一段字节换个 CDN 节点。不带签名、立刻重试、不花预算。
+//	② 换流：      要调一次带 WBI 签名的接口，贵，所以排在后面，有次数上限。
+//	③ 等网络：    上面两级都试过了还不动 —— 进缓冲态，退避后接着试。
+//
+// 返回 `(还要不要接着试, 这一轮先等多久)`，两个都零表示「这一遍到此为止」。
+//
+// ⚠️ **终态错误由 recover 自己记**，调用方直接返回就行：不同的放弃原因
+// 要报不同的话（「换到别的流了」和「这条流下到一半断了」对用户是两件事），
+// 把 cause 原样报出去等于把这个判断又推回给调用方。
+func (s *StreamSource) recover(from int64, cause error) (bool, time.Duration) {
 	s.mu.Lock()
-	if s.refreshes >= s.maxRefr {
+	if s.closed {
 		s.mu.Unlock()
-		s.fail(fmt.Errorf("换了 %d 次流还是下不动：%w", s.maxRefr, cause))
-		return false
+		return false, 0
 	}
-	s.refreshes++
+	// 一拉不动就先亮缓冲态。
+	//
+	// 为什么不是「进 ③ 才亮」：`get` 自己可能要等到传输层超时才回来
+	// （半开的连接、NAT 超时），而那段时间歌已经停在原地了。用户看到的是
+	// 「不动、也没有任何解释」——那正是这个状态最糟的形态。亮早一点最坏
+	// 是闪一下，亮晚一点是最难查的一种「不响」。
+	s.waitErr, s.waiting = cause, true
 
-	// 换备用地址：还有没用过的就换一个，同一条流换个 CDN 节点。
+	// ① 换备用地址：还有没用过的就换一个，同一条流换个 CDN 节点。
 	if s.urlIdx+1 < len(s.urls) {
 		s.urlIdx++
 		s.mu.Unlock()
-		return true
+		return true, 0
 	}
 
 	refetch := s.refetch
-	s.mu.Unlock()
 	if refetch == nil {
+		// ⚠️ 没配换流就直接报错，不进 ③。
+		//
+		// 「等网络」这一级的全部内容就是「过一会儿把同一个请求原样重发」，
+		// 它唯一能改变的是网络自己。而没配 `Refetch` 的调用方要的就是
+		// 「一段字节，读完拉倒」——把它悄悄拖进一个可能等一分钟的状态
+		// 反而不是它要的。生产上 `app.buildOnline` 一定配了 `Refetch`，
+		// 所以这条分支只影响最小用法。
+		s.mu.Unlock()
 		s.fail(cause)
-		return false
+		return false, 0
 	}
+
+	if s.refreshes >= s.maxRefr {
+		s.mu.Unlock()
+		if !recoverable(cause) {
+			// 服务器说了「不行」，或者换到了另一条流——再等下去不会有任何
+			// 不一样的东西。如实说。
+			s.fail(fmt.Errorf("换了 %d 次流还是下不动：%w", s.maxRefr, cause))
+			return false, 0
+		}
+		return s.hold(cause)
+	}
+	s.refreshes++
+	s.mu.Unlock()
+
+	// ② 换流。
 	reply := refetch(s.ctx, from)
-	if reply == nil || len(reply.URLs) == 0 {
-		s.fail(fmt.Errorf("换流没换到新地址：%w", cause))
-		return false
-	}
-	if !s.adopt(reply) {
+	switch {
+	case reply == nil || len(reply.URLs) == 0:
+		// 换不到。多半是网络也断了——那正是 ③ 要处理的事，不该在这里
+		// 就把歌判死。但如果这次的失败**本来就没有转机**（服务器说了
+		// 「不行」，而换流也换不到新的），等下去只有同样的结果。
+		if !recoverable(cause) {
+			s.fail(fmt.Errorf("换了 %d 次流还是下不动：%w", s.maxRefr, cause))
+			return false, 0
+		}
+		return s.hold(cause)
+	case s.adopt(reply):
+		return true, 0
+	default:
+		// 换到了**另一条**流：字节偏移接不上。如实报，由上层重新打开
+		// 解码器并跳回播放位置（那是时间，不是字节）。
 		s.fail(fmt.Errorf("%w（原来那条流的问题是：%v）", ErrStreamChanged, cause))
-		return false
+		return false, 0
 	}
-	return true
 }
 
 // adopt 换上一条新流。
@@ -489,15 +550,54 @@ func (s *StreamSource) checkTotal(total int64) error {
 
 // statusErr 把一个错误的状态码说成人话。
 func statusErr(resp *http.Response) error {
-	switch resp.StatusCode {
+	return &serverErr{err: httpStatusText(resp.StatusCode)}
+}
+
+func httpStatusText(code int) error {
+	switch code {
 	case http.StatusForbidden, http.StatusUnauthorized:
 		// B 站的播放地址过期之后就是这个。不区分 401/403：对我们来说
 		// 都是「这条地址不管用了，换一条」。
-		return fmt.Errorf("audio: 播放地址已经失效（HTTP %d）", resp.StatusCode)
+		return fmt.Errorf("audio: 播放地址已经失效（HTTP %d）", code)
 	case http.StatusNotFound:
 		return errors.New("audio: 播放地址在 CDN 上已经不存在了")
 	case http.StatusTooManyRequests:
 		return errors.New("audio: CDN 说我们请求太快了")
 	}
-	return fmt.Errorf("audio: 在线流返回 HTTP %d", resp.StatusCode)
+	return fmt.Errorf("audio: 在线流返回 HTTP %d", code)
+}
+
+// serverErr 是「服务器明明白白给了答复」的那一类错误。
+//
+// 把它和「连不上」分开，是因为它决定**该等还是该放弃**：
+//
+//	serverErr  403 / 404 / 429…… 服务器说了「不行」。再等一万次结果也一样，
+//	           能变的只有**地址本身**，而换地址已经试过 maxRefr 次了。
+//	别的       连不上、读断了、超时——这些是网络的事，等一等真有可能好。
+//
+// 所以一条 403 的流会**立刻**如实报错，而不是让用户对着「缓冲中……」
+// 看一分钟。那一分钟里程序什么都改变不了。
+type serverErr struct{ err error }
+
+func (e *serverErr) Error() string { return e.err.Error() }
+func (e *serverErr) Unwrap() error { return e.err }
+
+// recoverable 报「再等一会儿还有没有可能」。
+//
+// 进缓冲态的前提是**这次的失败不是一句明确的否定**。两类不是：
+//
+//	ErrStreamChanged  B 站换了另一条流，字节偏移接不上
+//	serverErr         服务器给了答复（403 / 404 / 429…）
+//
+// 这两种里能做别的都已经做过了（换流、换位置重开），做不了的也轮不到
+// 「再等一会儿」来解决。
+func recoverable(cause error) bool {
+	if cause == nil {
+		return false
+	}
+	if errors.Is(cause, ErrStreamChanged) {
+		return false
+	}
+	var se *serverErr
+	return !errors.As(cause, &se)
 }

@@ -19,7 +19,11 @@
 //     就是一条连续的字节流，播放位置一点不动——这是 `spec.md` 里
 //     「换流后从原进度继续」那条的实现。
 //
-//  3. **短读只在文件末尾合法**。`extaf` 的读回调碰到中途短读一律
+//  3. **断网要等得到**。拉不动的时候不能立刻判死：源会退避重试、把缓冲态
+//     报给上层（`Waiting`），网络回来之后从断点接着下。这一级的机制在
+//     `stream_source_wait.go`。
+//
+//  4. **短读只在文件末尾合法**。`extaf` 的读回调碰到中途短读一律
 //     `OSStatus -50`（`verify-streaming.md` §3.3）。所以这里的 `Read`
 //     永远阻塞到凑满 buf 或真的到了末尾，绝不返回半截。
 
@@ -134,6 +138,13 @@ type StreamSourceOptions struct {
 	// CDN 没有任何理由（`spec.md`「网络」一节）。Referer 照给，B 站不给就 403。
 	Client *http.Client
 
+	// Transport 覆盖 `Client` 的底层传输。nil = 用 Client 自己的。
+	//
+	// 存在的理由只有一个：**确定地**造出「连不上」和「连上了但没有字节」。
+	// 真断网要么改路由要么改防火墙，两条都不是测试；而断网是这一层最重要
+	// 的一种输入，不能靠人肉相信它处理对了。
+	Transport http.RoundTripper
+
 	// Now 是时钟。nil 用 time.Now。给假时钟是为了让「卡死判定」能被测。
 	Now func() time.Time
 	// StallTimeout 是卡死判定。零值用 defaultStallTimeout。
@@ -142,6 +153,20 @@ type StreamSourceOptions struct {
 	MaxRefresh int
 	// TempDir 是缓存文件落在哪。空 = 系统临时目录。
 	TempDir string
+
+	// MaxWait 是「缓冲多久之后才放弃」。零值用 defaultMaxWait。
+	//
+	// ⚠️ **别把它设成很大的数**。这是用户等「这歌到底还救不救得回来」的
+	// 时间上限：超过它，源就报终态错误，播放条上出现一句人话。调大它
+	// 等于让「歌不动了」这件事永远没有交代。
+	MaxWait time.Duration
+	// RetryBackoff 是第一次缓冲等多久，之后翻倍到 MaxRetryBackoff。
+	// 零值用 defaultRetryBackoff。
+	//
+	// 给小的值是为了让退避能被测（生产上没有必要调）。
+	RetryBackoff time.Duration
+	// MaxRetryBackoff 是单次缓冲等的上限。零值用 defaultMaxRetryBackoff。
+	MaxRetryBackoff time.Duration
 }
 
 // StreamSource 是一个「能播、能拖、能换流、能取消」的在线字节源。
@@ -187,6 +212,18 @@ type StreamSource struct {
 	maxRefr   int
 	expiresAt time.Time
 
+	// ── 等网络（缓冲）那一摊。机制在 stream_source_wait.go ──
+	//
+	// 这几个字段归 `mu` 管。`waiting` 是这一层给上层的缓冲态信号：
+	// 「正在试着拉回来，还没放弃」，跟 `err`（已经放弃了）不是一件事。
+	waiting  bool          // 现在是不是在等网络
+	waitStep int           // 退避档位，字节进来就归零
+	waited   time.Duration // 累计等过的时长，这一首歌的缓冲预算
+	waitErr  error         // 最近一次拉不动的真实原因（诊断用）
+	backoff  time.Duration // 第一次缓冲等多久
+	maxBack  time.Duration // 单次缓冲等的上限
+	maxWait  time.Duration // 缓冲总预算，超了就报错
+
 	client  *http.Client
 	refetch func(ctx context.Context, from int64) *StreamReply
 	onRefr  func(*StreamReply)
@@ -226,6 +263,14 @@ func NewStreamSource(o StreamSourceOptions) (*StreamSource, error) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	client := o.Client
+	if o.Transport != nil {
+		// 复制一份而不是改 `*o.Client`：那是调用方（`app.Streaming.Media`）
+		// 的东西，而它还要给别的播放链路用。
+		c := *client
+		c.Transport = o.Transport
+		client = &c
+	}
 	s := &StreamSource{
 		file:      f,
 		path:      f.Name(),
@@ -234,11 +279,14 @@ func NewStreamSource(o StreamSourceOptions) (*StreamSource, error) {
 		quality:   "",
 		maxRefr:   orDefaultInt(o.MaxRefresh, defaultMaxRefresh),
 		expiresAt: o.ExpiresAt,
-		client:    o.Client,
+		client:    client,
 		refetch:   o.Refetch,
 		onRefr:    o.OnRefresh,
 		now:       o.Now,
 		stall:     orDefaultDuration(o.StallTimeout, defaultStallTimeout),
+		backoff:   orDefaultDuration(o.RetryBackoff, defaultRetryBackoff),
+		maxBack:   orDefaultDuration(o.MaxRetryBackoff, defaultMaxRetryBackoff),
+		maxWait:   orDefaultDuration(o.MaxWait, defaultMaxWait),
 		ctx:       ctx,
 		cancel:    cancel,
 	}
@@ -436,6 +484,9 @@ func (s *StreamSource) Close() error {
 //
 // 非 EOF 的终态错误都会包一层 `ErrStreamDead`——那是「拉不动了」的标记，
 // 上层靠它把「歌放完了」和「歌断了」分开说（见 ErrStreamDead）。
+//
+// ⚠️ 终态会**顺手把缓冲态关掉**：已经放弃了就不该还亮着「缓冲中……」，
+// 那会让界面上一边说「正在恢复」一边说「打不开」。
 func (s *StreamSource) fail(err error) {
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, ErrStreamDead) {
 		err = fmt.Errorf("%w：%w", ErrStreamDead, err)
@@ -444,6 +495,7 @@ func (s *StreamSource) fail(err error) {
 	if s.err == nil {
 		s.err = err
 	}
+	s.waiting = false
 	s.cond.Broadcast()
 	s.mu.Unlock()
 }
