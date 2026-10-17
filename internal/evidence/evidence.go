@@ -224,14 +224,40 @@ var Items = []Item{
 		Tests:    []string{"TestRealClockEveryFuncWakesAndStops"},
 	},
 	{
-		// SPEC「回归证据」里点名的第三处假时钟（另外两处是歌词的 500ms 防抖和
-		// 点赞的 2500ms 长按）。三条都是「等一会儿」，而真等就是一条测试几秒钟。
+		// SPEC「回归证据」里点名的三处假时钟之一（另外两处是全屏的 3000ms 隐藏和
+		// 歌词的 500ms 防抖）。三处都是「等一会儿」，而真等就是一条测试几秒钟。
 		Category: FakeClock,
 		Spec:     "全屏播放器：指针不动 3000ms 界面自己藏起来，动一下回来",
 		Tests: []string{
 			"TestTheInterfaceHidesAfterThreeSeconds",
 			"TestTheHiddenInterfaceIsReallyGoneFromTheScreen",
 			"TestMovingThePointerBringsTheInterfaceBack",
+		},
+	},
+	{
+		// 第二处：点赞的 2500ms 长按。
+		//
+		// ⚠️ **两个数都要钉**：2500（触发三连）和 500（开始画进度环）不是同一个，
+		// 而环画 2000ms 转满——500+2000 正好是 2500，所以「环转满」和「请求发出去」
+		// 是同一刻。只钉 2500 的话，把环的起点挪到 100ms 那条照样全绿，而用户看到
+		// 的是「按下去立刻开始转圈」。
+		Category: FakeClock,
+		Spec:     "点赞：按住 2500ms 一键三连，500ms 起进度环；提前松手什么也不发生",
+		Tests: []string{
+			"TestTheRingIsFullJustAsTheTripleGoesOut",
+			"TestTheRingStartsAfterHalfASecond",
+			"TestLettingGoEarlyDoesNothing",
+		},
+	},
+	{
+		// 那一票的另一半是**手势**而不是时间：长按之后松手补发的那一次 click 必须
+		// 吞掉，否则用户什么都没点全屏却开了（Biu 那边漏了它是一次多余的赞）。
+		Category: FakeClock,
+		Spec:     "长按三连之后补发的那一次 click 被吞掉，而下一次普通点击照旧生效",
+		Tests: []string{
+			"TestALongPressNeverOpensTheFullScreen",
+			"TestAShortPressStillOpensTheFullScreen",
+			"TestTheLongPressIsOffOnceTheSongIsLiked",
 		},
 	},
 

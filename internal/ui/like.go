@@ -192,7 +192,7 @@ func (s *Shell) viewLikeRing(c *ui.Context, pressed bool) {
 	ring := ui.Box(c).Key("like-ring").
 		Absolute().Left(0).Top(0).Right(0).Bottom(0).
 		PassThrough().
-		Role(ui.RoleImage).Label("点赞进度")
+		Role(ui.RoleProgress).Label("点赞进度")
 	ring.Draw(func(p *ui.Painter, r ui.Rect) {
 		p.StrokePolyline(s.ringPoints(r, progress), likeRingWidth, c.Theme().Accent)
 	})
