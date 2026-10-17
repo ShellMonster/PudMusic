@@ -317,26 +317,54 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 	//
 	// `queue_drawer.go` 的 `viewQueueCover` 就是这个套法（它外面套的是
 	// `Width(queueCoverSize)` 那一层），照抄。
-	ui.Row(c).Key("playbar-cover").Size(coverSize, coverSize).Children(func() {
-		el := imgcache.View(c, s.images, st.CoverURL, coverSize, coverSize).
+	//
+	// 🔴 **可点的是外面这一层 wrapper，不是里面那张图。**
+	//
+	// 命中链是「最上面那个含点的框 + 它**自己的父链**」，**兄弟不在链上**
+	// （`mygo/ui/input.go:131-145` 的 `appendHitChain`）；而 `flagPassThrough` 只
+	// 跳过那一个自己的命中框、子节点照登记（`runtime.go:953`）。于是只要可点的
+	// 是浮层的**兄弟**，浮层里任何一个字都会把它挡住：⤢ 正好落在封面正中，而
+	// 「把鼠标移过去、点一下」点的就是那个正中。
+	//
+	// 症状很有意思：点封面**边角**能开（那儿没有文字），点**正中**什么也不会发生。
+	//
+	// 两条改法都验过（改回去都红）：
+	//
+	//	① 可点的挪到 wrapper 上（本票）。wrapper 是浮层的**父级**，于是浮层里不管
+	//	   画什么，链都走得到它。往浮层里再加东西也吃不掉点击。
+	//	② 给 ⤢ 那个字加 `PassThrough()`（评审给的最小改法）。字不登记了，链落到
+	//	   里面那张图上——也通，但那是**逐个子元素**修的：下一个往浮层里加的东西
+	//	   还得再记着加一次。
+	//
+	// 选了 ①，顺手也给字加了 `PassThrough()`（`toast.go` 那边也是这么写的）——
+	// 那个字自己不该接指针：指针停在一个字上却报成「停在封面旁边的空气上」，
+	// 悬停反馈的位置就不对了。
+	//
+	// `queue_drawer.go` 的 `viewQueueRow` 本来就是这个形状——可点的行是封面的
+	// **祖先**，所以那边浮层里画 ▶ 还是 ⤢ 都吃不掉点击。
+	wrap := ui.Row(c).Key("playbar-cover").Size(coverSize, coverSize)
+	wrap.Children(func() {
+		// 共享元素转场留在里面那张图上（它才是转场的那一半）。
+		imgcache.View(c, s.images, st.CoverURL, coverSize, coverSize).
 			Label("当前封面").
 			Transition(coverTransition(coverIdentity(s, st)))
 
-		if el.Hovered() {
+		if wrap.Hovered() {
 			// Biu 那边是 hover 时浮一层 `bg-[rgba(0,0,0,0.5)]` 加一个向上的箭头
 			// （`layout/playbar/left/index.tsx:38-41`）。没有这一层的话，用户不知道
 			// 那张封面是能点的。
 			//
-			// PassThrough：**不让这一层吃掉点击**（理由同 queue_drawer 的 viewQueueCover）。
+			// PassThrough：浮层这一层和里面那个字都不接点击。
 			ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Radius(c.Theme().Radius).
 				PassThrough().Center().Background(ui.RGBA(0, 0, 0, 0.5)).Children(func() {
-				ui.Text(c, "⤢").FontSize(20).TextColor(ui.RGBA(255, 255, 255, 0.92))
+				ui.Text(c, "⤢").FontSize(20).TextColor(ui.RGBA(255, 255, 255, 0.92)).
+					PassThrough()
 			})
 		}
-		if el.Clicked() {
-			s.openFullPlayer()
-		}
 	})
+	if wrap.Clicked() {
+		s.openFullPlayer()
+	}
 }
 
 // viewStepButtons 是上一首和下一首。

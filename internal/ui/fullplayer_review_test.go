@@ -251,3 +251,59 @@ func changedPixels(a, b *image.RGBA) []image.Point {
 	}
 	return out
 }
+
+// ---- 4. 悬停之后点封面正中要能进去 ----
+
+// TestClickingTheCentreOfTheHoveredCoverOpensTheFullPlayer 钉住**最自然那个手势**。
+//
+// 「把鼠标移过去、点一下」进全屏——而悬停浮层那个 ⤢ 正好就落在封面正中。
+//
+// 机制（`mygo/ui/input.go:131-145` 的 `appendHitChain`）：命中链是「最上面那个
+// 含点的框 + 它**自己的父链**」，**兄弟不在链上**。而 `flagPassThrough` 只跳过
+// 那一个自己的命中框、子节点照登记（`runtime.go:953`）——于是浮层那个 Row 虽然
+// PassThrough 了，它里面的 `⤢` 文字照样登记，而可点的 `imgcache.View` 是浮层的
+// **兄弟**，永远不在链上。表现是：点封面**边角**能开（那儿没有文字），点**正中**
+// 什么也不会发生。
+//
+// 三种点法都验：悬停后点正中（这次修的）、悬停后点边角（本来就对，别弄坏）、
+// 不悬停直接点正中（本来也对）。
+func TestClickingTheCentreOfTheHoveredCoverOpensTheFullPlayer(t *testing.T) {
+	s, tt, _ := fullTester(t)
+
+	cover, ok := tt.Find("当前封面")
+	if !ok {
+		t.Fatalf("找不到封面，文字有 %q", tt.Texts())
+	}
+	mid := [2]float32{cover.X + cover.W/2, cover.Y + cover.H/2}
+
+	// ① 悬停之后点正中 —— ⤢ 就落在这个点上。
+	tt.Move(mid[0], mid[1])
+	tt.Frame()
+	tt.ClickAt(mid[0], mid[1])
+	tt.Frame()
+	if !s.full.open {
+		t.Errorf("悬停之后点封面正中没能进全屏 —— 浮层里那个 ⤢ 把点击吃掉了")
+	}
+
+	// ② 悬停之后点边角（那一带没有文字）。
+	s.closeFullPlayer()
+	tt.Frame()
+	tt.Move(mid[0], mid[1])
+	tt.Frame()
+	tt.ClickAt(cover.X+3, cover.Y+3)
+	tt.Frame()
+	if !s.full.open {
+		t.Errorf("悬停之后点封面边角没能进全屏")
+	}
+
+	// ③ 不悬停直接点正中（压根没有浮层）。
+	s.closeFullPlayer()
+	tt.Frame()
+	tt.Move(cover.X+cover.W-3, cover.Y-20) // 挪到窗口上面去，别悬停在封面上
+	tt.Frame()
+	tt.ClickAt(mid[0], mid[1])
+	tt.Frame()
+	if !s.full.open {
+		t.Errorf("不悬停直接点封面正中没能进全屏")
+	}
+}
