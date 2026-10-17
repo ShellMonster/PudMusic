@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"image/color"
 	"os"
 	"path/filepath"
 	"testing"
@@ -61,27 +62,15 @@ func wantBackground(t *testing.T, a *app.App, systemDark bool) mygoui.Color {
 	return BuildTheme(a.SettingsSnapshot(), systemDark).Background
 }
 
-// assertBackground 断言画面上那个采样点就是主题的底色。
+// assertBackground 断言画面上那个采样点（sampleX / sampleY 在文件头上）就是
+// 主题的底色。
 //
-// **先等它稳定下来再断言**：切路由时那一页是淡入的，刚点完的那一帧
-// 底色还差百分之几（实测 255 里的 251）。那个差值跟主题对不对毫无关系，
-// 但会让这条测试随机红——而它随机红的时刻正好是「别的模块给顶栏多加了一个
-// 控件」，那种改动跟主题一点关系都没有，却会变成一个查不出原因的红。
-//
-// 所以这里多画几帧，直到像素对上为止；对不上就一直对不上，那时候报的
-// 才是真的问题。
+// 等的那一段在基座的 `waitPixel` 里，理由也在那儿：切路由时那一页是淡入的，
+// 刚点完的那一帧底色还差百分之几，那与主题对不对毫无关系。
 func assertBackground(t *testing.T, tt *mygoui.Tester, want mygoui.Color, what string) {
 	t.Helper()
-	var got mygoui.Color
-	for range 20 {
-		c := tt.Image().RGBAAt(sampleX, sampleY)
-		got = mygoui.Color{R: c.R, G: c.G, B: c.B, A: c.A}
-		if got == want {
-			return
-		}
-		tt.Frame()
-	}
-	t.Errorf("%s：画面那个点是 %v，want %v", what, got, want)
+	waitPixel(t, tt, sampleX, sampleY,
+		color.RGBA{R: want.R, G: want.G, B: want.B, A: want.A}, what)
 }
 
 // TestShellPaintsTheThemeThatTheSettingsSay 验「切主题后渲染出来的主题真的

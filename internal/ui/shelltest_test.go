@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"image/color"
 	"path/filepath"
 	"testing"
 	"time"
@@ -310,6 +311,35 @@ func waitFrames(t *testing.T, tt *mygoui.Tester, what string, cond func() bool) 
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
+}
+
+// pixelBudget 是「等像素对上」画多少帧的上限。真的对不上就一直对不上，那时候
+// 报的才是真问题（见 waitPixel）。
+const pixelBudget = 20
+
+// waitPixel 等画面上 (x, y) 那个采样点等于 want，返回它最后读到的颜色。
+//
+// ## 为什么固定像素的断言必须等，而不是画一帧就读
+//
+// 切路由时那一页是淡入的：刚点完的那一帧，底色还差百分之几（实测 255 里的
+// 251）。那个差值跟主题对不对毫无关系，却会让「点一下再读 (700,430) 那个点」
+// 的测试随机红——而且它随机红的时刻正好是「别的模块给顶栏多加了一个控件」那种
+// 改动，跟主题一点关系都没有。
+//
+// ⚠️ **这不是把判据放宽**：条件就是 `want` 本身，一个字节都不差；等的只是「画出
+// 那一帧」。真对不上就还是对不上，报的还是同一个错。
+func waitPixel(t *testing.T, tt *mygoui.Tester, x, y int, want color.RGBA, what string) color.RGBA {
+	t.Helper()
+	var got color.RGBA
+	for range pixelBudget {
+		got = tt.Image().RGBAAt(x, y)
+		if got == want {
+			return got
+		}
+		tt.Frame()
+	}
+	t.Errorf("%s：画面 (%d,%d) 那个点是 %v，want %v", what, x, y, got, want)
+	return got
 }
 
 // waitToastGone 等右下角那些提示**真的**退场了。

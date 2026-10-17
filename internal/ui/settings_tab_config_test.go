@@ -368,7 +368,11 @@ func TestImportingADarkThemeActuallyTurnsTheWholeWindowDark(t *testing.T) {
 	// (600, 300) 就会落到某个控件的颜色上，而那一帧看着像是「主题没换」。
 	const probeX, probeY = 300, 400
 	lightBG := BuildTheme(a.SettingsSnapshot(), false).Background
-	if w := asColor(tt.Image().RGBAAt(probeX, probeY)); w != lightBG {
+	// ⚠️ 每一处读像素都走 `waitPixel`（等它对上），不是「画一帧就读」：切路由是
+	// 淡入的，刚点完那一帧的底色还差百分之几（实测 255 里的 251），那个差跟
+	// 主题对不对毫无关系，却会让这条测试随机红，而它红的时刻正好是「别的模块给
+	// 顶栏多加了一个控件」那种改动。判据没有放宽——条件就是 want 本身。
+	if w := asColor(waitPixel(t, tt, probeX, probeY, rgbaOf(lightBG), "起点")); w != lightBG {
 		t.Fatalf("起点不是浅色（%v），这一条验不出什么：want %v", w, lightBG)
 	}
 
@@ -386,7 +390,7 @@ func TestImportingADarkThemeActuallyTurnsTheWholeWindowDark(t *testing.T) {
 	if want.Dark != true {
 		t.Fatalf("测试本身有问题：设置要深色、系统浅色，却拼出了浅色主题")
 	}
-	w := asColor(tt.Image().RGBAAt(probeX, probeY))
+	w := asColor(waitPixel(t, tt, probeX, probeY, rgbaOf(want.Background), "导入深色主题之后"))
 	if w != want.Background {
 		t.Fatalf("导入深色主题之后画面还是 %v，want %v（这一帧的主题还是系统那份）", w, want.Background)
 	}
@@ -404,7 +408,7 @@ func TestImportingADarkThemeActuallyTurnsTheWholeWindowDark(t *testing.T) {
 	tt.Frame()
 
 	sysBG := BuildTheme(a.SettingsSnapshot(), true).Background
-	if got := asColor(tt.Image().RGBAAt(probeX, probeY)); got != sysBG {
+	if got := asColor(waitPixel(t, tt, probeX, probeY, rgbaOf(sysBG), "「跟随系统」+ 系统深色")); got != sysBG {
 		t.Errorf("「跟随系统」+ 系统深色：画面是 %v，want %v", got, sysBG)
 	}
 }
@@ -412,6 +416,12 @@ func TestImportingADarkThemeActuallyTurnsTheWholeWindowDark(t *testing.T) {
 // asColor 把一个像素换成 ui.Color，好和 `BuildTheme` 的输出直接比。
 func asColor(p color.RGBA) mygoui.Color {
 	return mygoui.Color{R: p.R, G: p.G, B: p.B, A: p.A}
+}
+
+// rgbaOf 是 asColor 的反过来：`BuildTheme` 拼出来的是 ui.Color，而读像素读到的
+// 是 color.RGBA，要拿前者去比后者的读数就得先换过去。
+func rgbaOf(c mygoui.Color) color.RGBA {
+	return color.RGBA{R: c.R, G: c.G, B: c.B, A: c.A}
 }
 
 // 任务书明写「凭据可以不迁，**要提示重新登录**」——那句话必须出现在界面上。
