@@ -118,7 +118,9 @@ func TestTheRowMenuReallyFavoritesTheSong(t *testing.T) {
 func TestTheRowMenuSaysSoWhenTheSongIsAlreadyFavorited(t *testing.T) {
 	f := newBiliFixture(t, 1)
 	f.mu.Lock()
-	f.favoritedIn = []int64{fixtureFolderID} // 已经在默认收藏夹里
+	// 那一格里**已经有这一首**。注意是 avid（fixture 的 view 回 4242），不是
+	// 收藏夹 id——`resource/ids` 收的是夹子、返回的是里面的内容 id。
+	f.favoritedIn = []int64{fixtureAid}
 	f.mu.Unlock()
 
 	a, tt := favTester(t, f)

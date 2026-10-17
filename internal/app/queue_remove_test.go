@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -484,4 +485,85 @@ func pathsOf(items []app.Item) []string {
 		out[i] = it.Path
 	}
 	return out
+}
+
+// TestPlayAtStopsTheOldSongBeforeOpeningAnOnlineOne 钉「换成在线的一首时，旧的
+// 那首不许继续响」。
+//
+// 现象：在放本地 A，抽屉里点在线 B（B 要在后台取流）。抽屉已经按新的当前项把高亮
+// 挪到 B 上，而**真正出声的还是 A**——播放条上写着 A，用户以为在放 B。换来的是
+// 「界面说的和它做的不一致」，而且 B 要是压根建不起来（网络断了、风控了），这个
+// 状态就一直停在那儿。
+//
+// 修法：换成在线的一首之前先 `ClearTrack`（在线流是后台建的，建好之前界面上没有
+// 新歌）。本地项不用这样——`Open` 是同步的。
+func TestPlayAtStopsTheOldSongBeforeOpeningAnOnlineOne(t *testing.T) {
+	f := newStreamFixture(t)
+	dir := t.TempDir()
+	a := newOnlineApp(t, f, dir)
+	if err := a.Enqueue(app.LocalItem(flac(t))); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 30*time.Second, "本地那一首开始播", func() bool { return a.Snapshot().HasTrack })
+	localTitle := a.Snapshot().Title
+
+	// 取流一律回 503：在线那一首建不起来（断网 / 风控），于是它连播放条都上不去。
+	f.on("/x/player/wbi/playurl", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "取流失败", http.StatusServiceUnavailable)
+	})
+	a.Queue().Append(onlineItem("BV1", "c1", "在线那一首"))
+	if err := a.PlayAt(1); err != nil {
+		t.Fatalf("点在线那一首：%v", err)
+	}
+	waitFor(t, 30*time.Second, "在线那条报出失败", func() bool { return a.Snapshot().Err != "" })
+
+	st := a.Snapshot()
+	if st.HasTrack {
+		t.Errorf("换成在线的一首之后本地那首还在放（%q）——播放条和抽屉说的不是同一首", st.Title)
+	}
+	if st.Title == localTitle {
+		t.Errorf("播放条上还是本地那首 %q", st.Title)
+	}
+	if cur, ok := a.Queue().Current(); !ok || cur.Title != "在线那一首" {
+		t.Errorf("队列的当前项是 %+v，want 那一首在线的", cur)
+	}
+}
+
+// TestPlayAtOnTheSameSongSomewhereElseDoesNotRestartIt 钉「点正在放的那一行不会
+// 从头重播」。
+//
+// 队列 `[甲, 甲]`、抽屉去重只画一行（第一份），而**正在放的是第二份**。用户点那一
+// 行，指的就是他正在听的这首——重播一遍是没问过他的（那是播放条上「播放」那个键的
+// 活，Biu 的 `playListItem` 也是 `if (playId === id) return`）。
+//
+// 判据是**位置**：重播的话 Position 会从 2s 跳回 0。
+func TestPlayAtOnTheSameSongSomewhereElseDoesNotRestartIt(t *testing.T) {
+	a := newApp(t)
+	paths := copies(t, 1)
+	dup := app.LocalItem(paths[0])
+	a.Enqueue(app.LocalItem(paths[0]))
+	a.Enqueue(dup)    // 队列 甲,甲
+	a.Queue().Move(1) // 正在放的是**第二份**甲
+	waitFor(t, 10*time.Second, "开始出声", func() bool { return a.Snapshot().HasTrack })
+
+	// 拖到 2s 附近，好在后面量「有没有从头来」。
+	a.ScrubEnd(0.5)
+	waitFor(t, 5*time.Second, "位置往前走", func() bool { return a.Snapshot().Position > 0 })
+	before := a.Snapshot().Position
+	if before <= 0 {
+		t.Fatalf("还没开始走（%v），这条用例量不出重播", before)
+	}
+
+	// 点抽屉里那一行（它在队列里的下标是 0，而正在放的是第 1 首）。
+	if err := a.PlayAt(0); err != nil {
+		t.Fatal(err)
+	}
+	// 队列的当前项挪到那一行（去重之后它就是「这一首」在队列里的代表），
+	// 但**不重播**。
+	if got := a.Queue().CurrentIndex(); got != 0 {
+		t.Errorf("当前项是第 %d 首，want 第 1 首（点的那一行）", got)
+	}
+	if got := a.Snapshot().Position; got < before {
+		t.Errorf("位置从 %v 退回 %v —— 从头重播了", before, got)
+	}
 }

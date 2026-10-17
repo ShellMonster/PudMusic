@@ -145,6 +145,19 @@ func (q *Queue) Current() (Item, bool) {
 	return q.items[q.cur], true
 }
 
+// itemAt 是队列里第 i 项，下标越界时是零值。
+//
+// 「点一行跳过去」要读**目标那项**（和当前项比是不是同一首），所以队列得能按
+// 下标读一项——`Items()` 也能，但那是拷一整列。
+func (q *Queue) itemAt(i int) (Item, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if i < 0 || i >= len(q.items) {
+		return Item{}, false
+	}
+	return q.items[i], true
+}
+
 // CurrentIndex 返回正在放的那一项在队列里的下标，-1 是还没开始。
 //
 // 界面上「定位当前播放」「这一行是不是正在放」都要下标，不要项：项是值拷贝，
@@ -360,16 +373,43 @@ func (a *App) PlayFrom(items ...Item) error {
 // 点**正在放**的那一首什么都不做：Biu 的 `playListItem` 也是开头一句
 // `if (get().playId === id) return`。重头播是播放条上「播放」那个键的活。
 //
-// ⚠️ **判据是「队列的当前项是它」加上「真的有歌在放」，不是光看当前项。**
-// 光看当前项的话，「接歌失败 → 停下来」之后队列的当前项还指着那一首，于是再点它
-// 永远是什么也不做——文件已经补回来了、用户按的也是「播放」，却再也放不出来。
+// ⚠️ 「正在放」有两层，两层都要：
+//
+//  1. **真的���歌在放**（`hasTrack`）。只看队列的当前项的话，「接歌失败 → 停下来」
+//     之后当前项还指着那一首，于是再点它永远是什么也不做——文件补回来了、用户按的
+//     也是「播放」，却再也放不出来。
+//  2. **同一首**（判重标识），不是同一个下标。队列 `[A, A]` 时抽屉去重只画一行
+//     （第一份），而正在放的可能正是**第二份**；按下标认，这一行会被当成「另一首」
+//     而从头重播——用户点的就是他正在听的那一行。
 func (a *App) PlayAt(i int) error {
 	if i < 0 || i >= a.queue.Len() {
 		return fmt.Errorf("队列里没有第 %d 首", i+1)
 	}
+	target, _ := a.queue.itemAt(i)
 	cur := a.queue.CurrentIndex()
-	if cur == i && a.hasTrack() {
-		return nil
+	if a.hasTrack() {
+		playing, ok := a.queue.Current()
+		switch {
+		case cur == i:
+			return nil // 同一项、正在放
+		case ok && sameSong(playing, target):
+			// 同一首的另一份：把队列的当前项指过去，**不重播**。指过去是为了
+			// 「下一首」从这一行后面接着走。
+			a.queue.selectAt(i)
+			return nil
+		}
+		if target.isOnline() {
+			// 换成在线的一首：**先把还在响的那首停掉**。在线流是后台建的（取流要
+			// 几百毫秒的网络往返），开它的那一刻界面上还没有新歌——**还响着的是上
+			// 一首**，而抽屉已经按新的当前项把高亮挪走了。用户看到的是「播放条上是
+			// 旧的那首、抽屉里高亮的是新的那一首」，而真正出声的偏偏还是旧的。
+			//
+			// 下一首打不开时（`failOnline` 只报一句错）也就不会「旧歌继续响」——
+			// 那时候什么都没有在放，抽屉也不高亮任何一行，两边说的是同一件事。
+			//
+			// 本地项不用这样：`Open` 是同步的，换歌和换歌之间没有缝。
+			a.ClearTrack()
+		}
 	}
 	item, _ := a.queue.selectAt(i)
 	if err := a.play(item); err != nil {
@@ -377,6 +417,15 @@ func (a *App) PlayAt(i int) error {
 		return err
 	}
 	return nil
+}
+
+// sameSong 报两项是不是同一首（判重标识相同）。
+//
+// **认不出是哪一首的（标识是空串）一律当不同**：两首都认不出的歌在标识上长得一样，
+// 当成同一首就会把「点一行」变成「什么都不做」。
+func sameSong(x, y Item) bool {
+	id := x.Identity()
+	return id != "" && id == y.Identity()
 }
 
 // hasTrack 报告现在有没有歌在放（「播放器还开着」就是有）。

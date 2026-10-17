@@ -18,6 +18,7 @@ package download
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -386,7 +387,7 @@ func TestAVideoDownloadCountsBothStreamsInItsProgress(t *testing.T) {
 				return
 			default:
 			}
-			if s, ok := h.m.Get(TaskID(bvid, cid)); ok {
+			if s, ok := h.m.Get(TaskID(bvid, cid, false)); ok {
 				h.m.mu.Lock()
 				if s.Total > maxSeen {
 					maxSeen = s.Total
@@ -585,7 +586,7 @@ func TestAMuxingTaskSurvivesARestartAndFinishesOnResume(t *testing.T) {
 	write(companionPartPath(dest), audio.body)
 
 	task := &Task{
-		ID:       TaskID(bvid, cid),
+		ID:       TaskID(bvid, cid, false),
 		Title:    "测试的 MV",
 		Identity: Identity{Bvid: bvid, Cid: cid, Quality: 120, Video: true, Length: int64(len(video.body))},
 		Ext:      videoExt,
@@ -882,5 +883,123 @@ func TestAVideoSurvivesASaveAndRestore(t *testing.T) {
 	}
 	if got := filepath.Ext(final.Dest); got != ".mp4" {
 		t.Errorf("落的后缀是 %q，要的是 .mp4", got)
+	}
+}
+
+// TestAudioAndVideoAreTwoTasks 钉「同一首歌的音频和视频是两个任务」。
+//
+// 🔴 判重键少了「是不是视频」这一位时的症状：先点「下载音频」、再点「下载视频」，
+// 两次都返回成功、ID 一样、落盘名一样（都是 .m4a），队列里只有一个任务——而那个是
+// **音频**。用户看到抽屉提示「已加进下载队列」，下载目录里却只有一个 .m4a。
+func TestAudioAndVideoAreTwoTasks(t *testing.T) {
+	h := newVideoHarness(t, muxtest.VideoSpec(300), muxtest.AudioSpec(10))
+
+	const bvid, cid = "BV1xx", "c123"
+	audio, err := h.m.Enqueue(AddRequest{Bvid: bvid, Cid: cid, Title: "MV", Dir: h.dir})
+	if err != nil {
+		t.Fatalf("入队音频：%v", err)
+	}
+	video, err := h.m.Enqueue(AddRequest{Bvid: bvid, Cid: cid, Title: "MV", Dir: h.dir, Video: true})
+	if err != nil {
+		t.Fatalf("入队视频：%v", err)
+	}
+
+	if audio.ID == video.ID {
+		t.Fatalf("音频和视频的任务 id 一样（%q）——判重键里没有「是不是视频」", audio.ID)
+	}
+	if got := filepath.Ext(audio.Dest); got != ".m4a" {
+		t.Errorf("音频落在 %q，want .m4a", audio.Dest)
+	}
+	if got := filepath.Ext(video.Dest); got != ".mp4" {
+		t.Errorf("视频落在 %q，want .mp4", video.Dest)
+	}
+	if n := len(h.m.Snapshots()); n != 2 {
+		t.Errorf("队列里有 %d 个任务，want 2（音频一个、视频一个）", n)
+	}
+	// 反过来也一样：同一件事点两次仍然只有一个（用户要的是「就一个」）。
+	again, err := h.m.Enqueue(AddRequest{Bvid: bvid, Cid: cid, Title: "MV", Dir: h.dir, Video: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.ID != video.ID {
+		t.Errorf("同一个视频点两次拿到两个任务（%q / %q）", again.ID, video.ID)
+	}
+	if n := len(h.m.Snapshots()); n != 2 {
+		t.Errorf("点第二次之后队列里有 %d 个任务，want 还是 2", n)
+	}
+}
+
+// TestTheVideoFlagSurvivesARestart 身份里必须记着「这是视频」，否则重开应用之后
+// 取流只拿音频，重试之后落盘的是一个 .m4a。
+func TestTheVideoFlagSurvivesARestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), QueueFileName)
+	resolve := func(context.Context, Identity) (*Source, error) {
+		return nil, errors.New("这一份只验落盘，不真的取流")
+	}
+	m, err := New(Options{Client: http.DefaultClient, Resolve: resolve}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Enqueue(AddRequest{Bvid: "BV1", Cid: "c1", Title: "MV", Video: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	m.Close("")
+
+	again, err := New(Options{Client: http.DefaultClient, Resolve: resolve}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Close("")
+	snaps := again.Snapshots()
+	if len(snaps) != 1 {
+		t.Fatalf("重开之后队列里有 %d 个任务，want 1", len(snaps))
+	}
+	if got := filepath.Ext(snaps[0].Dest); got != ".mp4" {
+		t.Errorf("重开之后任务落在 %q，want .mp4（Video 这一位没存住）", got)
+	}
+}
+
+// TestCloseWithAQueuedTaskDoesNotHang 钉「关掉的时候后台那条线会退出」。
+//
+// 🔴 这一条是实测卡住整个包十分钟的那个活锁：队列里还排着一项时调 `Close`，
+// `loop` 的内层循环不认 `ctx.Done()`，而 `runOne` 见到 `m.closed` 就原样返回、**不改
+// 任务状态**——于是 `nextQueued()` 一直返回同一项，`Close` 里的 `wg.Wait()` 永远
+// 等不到它。应用退不出去。
+func TestCloseWithAQueuedTaskDoesNotHang(t *testing.T) {
+	m, err := New(Options{
+		Client: http.DefaultClient,
+		// 一直挂着：模拟「取流那一头还没回来」，也就是最容易和 Close 撞上的时刻。
+		Resolve: func(context.Context, Identity) (*Source, error) {
+			select {} //nolint:staticcheck // 这份就是要卡住，Close 能不能把它拽出来是判据
+		},
+	}, filepath.Join(t.TempDir(), QueueFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Enqueue(AddRequest{Bvid: "BV1", Cid: "c1", Title: "MV"}); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- m.Close("") }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("关掉：%v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close 十分钟没回来——后台那条线还在转")
+	}
+
+	// 关掉之后还排着队的那一项落在「暂停」上（下次接着下），不是「还排着」。
+	snaps := m.Snapshots()
+	if len(snaps) != 1 {
+		t.Fatalf("队列里有 %d 个任务", len(snaps))
+	}
+	if snaps[0].Status != StatusPaused {
+		t.Errorf("关掉之后那一项是 %q，want %q", snaps[0].Status, StatusPaused)
 	}
 }

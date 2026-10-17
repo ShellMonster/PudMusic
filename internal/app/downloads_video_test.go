@@ -133,7 +133,14 @@ func TestAVideoDownloadLandsAnMP4WithBothTracks(t *testing.T) {
 // 一路」放进键里，而那会破坏「同一首歌重复点两次下载，用户要的是就一个」
 // 那条更重要的性质（见 `download.Task.ID`）。解开它要一个显式的
 // 「换成视频重下」之类的动作，是记录页那一票的事。
-func TestDownloadingAudioAndVideoAreTheSameQueueEntry(t *testing.T) {
+// ⚠️ 这一条**原来断言的是「同一首的音频和视频是同一项」**，那是错的（评审第五轮
+// 抓出来的）：那一票的判重键是 `<bvid>|<cid>`，不带「是不是视频」这一位，于是
+// 「先点下载音频、再点下载视频」第二次拿到的是**音频那一个**——两次都返回成功，抽屉
+// 照样提示「已加进下载队列」，而用户的下载目录里只有一个 .m4a。
+//
+// 音频和视频是两个文件、两次下载，所以是两个任务（`download.TaskID` 现在带
+// `|video` 那一位）。同一件事点两次仍然只有一个——那是这一条真正要守的东西。
+func TestDownloadingAudioAndVideoAreTwoQueueEntries(t *testing.T) {
 	d := newDashPairFixture(t)
 	a := d.app(t, t.TempDir())
 	item := onlineItem("BV1xx", "c123", "同一首")
@@ -146,11 +153,23 @@ func TestDownloadingAudioAndVideoAreTheSameQueueEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("入队（视频）：%v", err)
 	}
-	if first.ID != second.ID {
-		t.Errorf("两次入队拿到了两个任务：%q 和 %q", first.ID, second.ID)
+	if first.ID == second.ID {
+		t.Errorf("两次入队拿到了同一个任务（%q）——判重键里没有「是不是视频」", first.ID)
 	}
-	if got := len(a.DownloadSnapshots()); got != 1 {
-		t.Errorf("队列里有 %d 项，要的是 1 项", got)
+	if got := len(a.DownloadSnapshots()); got != 2 {
+		t.Errorf("队列里有 %d 项，要的是 2 项（音频一个、视频一个）", got)
+	}
+
+	// 同一件事点两次：还是一个。
+	again, err := a.DownloadVideo(item, bili.VideoQualityUnknown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.ID != second.ID {
+		t.Errorf("同一个视频点两次拿到了两个任务：%q 和 %q", again.ID, second.ID)
+	}
+	if got := len(a.DownloadSnapshots()); got != 2 {
+		t.Errorf("点第二次之后队列里有 %d 项，要的是还是 2 项", got)
 	}
 }
 

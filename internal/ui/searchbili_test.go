@@ -115,8 +115,14 @@ func (f *biliFixture) serve(w http.ResponseWriter, r *http.Request) {
 			}}})
 
 	case r.URL.Path == "/x/v3/fav/resource/ids":
+		// 收的是**收藏夹 id**、返回的是**那一格里的内容**（上游
+		// `fav-resource.ts:127-152`）。每一项是一个对象 `{id, type}`。
+		items := make([]any, 0, len(f.favoritedIn))
+		for _, id := range f.favoritedIn {
+			items = append(items, map[string]any{"id": id, "type": 2, "bvid": "BV1xx", "bv_id": "BV1xx"})
+		}
 		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
-			"data": map[string]any{"ids": f.favoritedIn}})
+			"data": map[string]any{"ids": items}})
 
 	case r.URL.Path == "/x/v3/fav/resource/deal":
 		_ = r.ParseForm()

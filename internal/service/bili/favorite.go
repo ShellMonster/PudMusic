@@ -4,7 +4,7 @@
 //
 //	/x/web-interface/view?bvid=<bvid>              bvid → aid
 //	/x/v3/fav/folder/created/list-all?up_mid=<mid>  「我创建的」收藏夹
-//	/x/v3/fav/resource/ids?type=&rid=               这一首现在在哪些格子里（去重用）
+//	/x/v3/fav/resource/ids?media_id=                 那一格里现在有哪些内容（去重用）
 //	/x/v3/fav/resource/deal                         往某几格放 / 从某几格拿（POST + CSRF）
 //
 // # 为什么 rid 是 aid 而我们手里是 bvid
@@ -13,6 +13,17 @@
 // 传的就是 avid）。我们这一层存的是 bvid（`Item.Bvid`，取流、搜索、分享都用它），
 // 所以收藏之前要换一次——**换的动作在服务层做完**：界面上不该知道「收藏要的是另一
 // 个 id」，更不该自己拿 bvid 去拼。
+//
+// # 去重那一问的方向
+//
+// `resource/ids` **收的是收藏夹 id、返回的是那一格里的内容**（上游
+// `fav-resource.ts:127-152` 的 `FavResourceIdsRequestParams.media_id` 与
+// `FavResourceId{id,type}`），**不是**「给定一个视频问它在哪些格子里」。第一版
+// 照着「反过来问」写，于是真网上那个 GET 直接回 `-400 请求错误`，收藏在**写之前**
+// 就断了——fixture 照着错的合同造，全绿也证明不了什么。
+//
+// 所以现在问的是「这一格里有没有这一首」：先把格子挑出来，再问那一格的清单
+// （`FavFolderIDs`）。
 //
 // # 「放哪一格」这一层决定
 //
@@ -75,7 +86,7 @@ type FavFolder struct {
 	Title string
 	// MediaCount 是里面已有多少条。**它是 B 站上次统计的数字**，不是实时的——
 	// 这里只用来在报告里说个大概，判断「有没有这一首」不靠它（靠
-	// `FavMediaFolders`）。
+	// `FavFolderIDs`）。
 	MediaCount int
 }
 
@@ -153,32 +164,36 @@ func (c *Client) ArchiveID(ctx context.Context, bvid string) (int64, error) {
 	return d.Aid, nil
 }
 
-// FavMediaFolders 问「这一首现在在哪些收藏夹里」，回收藏夹 id。
+// FavFolderIDs 问「那一格里现在有哪些内容」，回一组 id（投稿的 avid / 音频的 auid）。
 //
-// 收藏之前用它判重复：B 站的 deal 重复放是幂等的（不会多出一条），但对用户来说
-// 「已经收藏过了」和「刚收藏好」是两句话——前者说明刚才那一下没白按。
-func (c *Client) FavMediaFolders(ctx context.Context, rid string, typ int) ([]int64, error) {
-	if rid == "" {
+// ⚠️ **参数是收藏夹 id，不是稿件 id**（见文件头）。第一版把这一问写成了「给定 rid、
+// type 问它在哪些格子里」，真接口回 -400，而 fixture 照着错的合同造、全绿。
+func (c *Client) FavFolderIDs(ctx context.Context, mediaID int64) (map[int64]bool, error) {
+	if mediaID == 0 {
 		return nil, nil
 	}
 	raw, err := c.Do(ctx, Call{
 		Method: "GET",
 		URL:    c.hostAPI + pathFavMediaIDs,
-		Query: url.Values{
-			"type": {strconv.Itoa(typ)},
-			"rid":  {rid},
-		},
+		Query:  url.Values{"media_id": {strconv.FormatInt(mediaID, 10)}},
 	})
 	if err != nil {
 		return nil, err
 	}
 	var d struct {
-		Ids []int64 `json:"ids"`
+		Ids []struct {
+			ID   int64 `json:"id"`
+			Type int   `json:"type"`
+		} `json:"ids"`
 	}
 	if err := json.Unmarshal(raw, &d); err != nil {
-		return nil, fmt.Errorf("bili: 收藏夹 id 列表读不懂: %w", err)
+		return nil, fmt.Errorf("bili: 收藏夹内容列表读不懂: %w", err)
 	}
-	return d.Ids, nil
+	out := make(map[int64]bool, len(d.Ids))
+	for _, it := range d.Ids {
+		out[it.ID] = true
+	}
+	return out, nil
 }
 
 // FavoriteSong 把一首收进用户的收藏夹，返回收进了哪一格。
@@ -212,13 +227,14 @@ func (c *Client) FavoriteSong(ctx context.Context, s FavTarget) (FavFolder, erro
 		folder = folders[0]
 	}
 
-	// 判重复：已经在这一格里就别再写一次。
-	ids, err := c.FavMediaFolders(ctx, rid, typ)
-	if err != nil {
-		return FavFolder{}, err
-	}
-	for _, id := range ids {
-		if id == folder.ID {
+	// 判重复：这一格里已经有它了，就别再写一次（B 站的 deal 重复放是幂等的，
+	// 不会多出一条——但对用户来说「已经收藏过了」和「刚收藏好」是两句话）。
+	//
+	// ⚠️ **这一问失败不拦收藏**：它是一次只读的「有没有」，而写才是用户要的那件事。
+	// 问不出来就当没有，照写（B 站那边重复放是幂等的，结果一样），比因为一次
+	// 读失败让用户收藏不成好。
+	if ids, err := c.FavFolderIDs(ctx, folder.ID); err == nil {
+		if n, _ := strconv.ParseInt(rid, 10, 64); ids[n] {
 			return folder, ErrAlreadyFavorited
 		}
 	}

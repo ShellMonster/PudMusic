@@ -24,7 +24,7 @@ import (
 //
 // mid 是它报的登录用户；folders 是「我创建的」收藏夹；already 是「这一首已经在
 // 哪些格子里」。
-func favFixture(t *testing.T, mid int64, folders []map[string]any, already []int64, aid int64) *fakeBili {
+func favFixture(t *testing.T, mid int64, folders []map[string]any, folderContents []map[string]any, aid int64) *fakeBili {
 	t.Helper()
 	f := newFakeBili(t)
 	f.on(pathNav, func(w http.ResponseWriter, r *http.Request) {
@@ -40,8 +40,11 @@ func favFixture(t *testing.T, mid int64, folders []map[string]any, already []int
 	f.on(pathFavFolders, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, jsonData(t, 0, "0", map[string]any{"count": len(folders), "list": folders}))
 	})
+	// ⚠️ 收的是**收藏夹 id**、返回的是**那一格里的内容**（上游
+	// `fav-resource.ts:127-152`）。第一版的 fixture 照着「给定 rid 问它在哪些格子里」
+	// 造，真接口回 -400，收藏在写之前就断了。
 	f.on(pathFavMediaIDs, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, jsonData(t, 0, "0", map[string]any{"ids": already}))
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{"ids": folderContents}))
 	})
 	f.on(pathFavDeal, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, jsonData(t, 0, "0", nil))
@@ -137,7 +140,7 @@ func TestFavoriteSongGoesIntoTheFolderItWasToldTo(t *testing.T) {
 func TestFavoriteSongSaysSoWhenItIsAlreadyThere(t *testing.T) {
 	f := favFixture(t, 9527,
 		[]map[string]any{favFolderItem(100, "默认收藏夹", 1), favFolderItem(200, "另一格", 0)},
-		[]int64{100}, 4242)
+		[]map[string]any{{"id": 4242, "type": 2}}, 4242)
 	c := favClient(t, f)
 
 	_, err := c.FavoriteSong(context.Background(), FavTarget{Bvid: "BV1xx", Type: "mv"})
@@ -224,38 +227,62 @@ func TestFavFoldersAsksForThatUsersFolders(t *testing.T) {
 	}
 }
 
-// TestFavMediaFoldersAsksWithBothParameters rid 和 type **两个都要**：少了 type
-// B 站不知道问的是投稿还是音频，返回的是另一类东西（而且不报错）。
-func TestFavMediaFoldersAsksWithBothParameters(t *testing.T) {
+// TestFavFolderIDsAsksWithTheFolderID 钉住这一问的**方向**：收的是**收藏夹 id**。
+//
+// 写反了（给定稿件 id、type，问「它在哪些格子里」）真接口回 `-400 请求错误`，收藏
+// 在写之前就断了——而照着错合同造的 fixture 是全绿的。
+func TestFavFolderIDsAsksWithTheFolderID(t *testing.T) {
 	f := newFakeBili(t)
 	f.on(pathFavMediaIDs, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, jsonData(t, 0, "0", map[string]any{"ids": []int64{100, 300}}))
+		if got := r.URL.Query().Get("media_id"); got == "" {
+			t.Errorf("请求里没有 media_id：%v", r.URL.Query())
+		}
+		if r.URL.Query().Get("rid") != "" || r.URL.Query().Get("type") != "" {
+			t.Errorf("请求里带了 rid/type，那不是这个接口的参数：%v", r.URL.Query())
+		}
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{"ids": []any{
+			map[string]any{"id": 111, "type": FavTypeVideo, "bvid": "BVaaa", "bv_id": "BVaaa"},
+			map[string]any{"id": 4242, "type": FavTypeVideo, "bvid": "BV1xx", "bv_id": "BV1xx"},
+		}}))
 	})
-	ids, err := f.client(t, Options{}).FavMediaFolders(context.Background(), "4242", FavTypeVideo)
+	ids, err := f.client(t, Options{}).FavFolderIDs(context.Background(), 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ids) != 2 || ids[0] != 100 || ids[1] != 300 {
+	if !ids[4242] || ids[111] != true {
 		t.Fatalf("问出来的是 %v", ids)
 	}
-	for _, r := range f.requests() {
-		if r.Path != pathFavMediaIDs {
-			continue
-		}
-		if got := r.Query.Get("type"); got != strconv.Itoa(FavTypeVideo) {
-			t.Errorf("请求里的 type 是 %q，want %d", got, FavTypeVideo)
-		}
-		if got := r.Query.Get("rid"); got != "4242" {
-			t.Errorf("请求里的 rid 是 %q，want 4242", got)
-		}
+	if ids[999] {
+		t.Error("多了一个没给过的 id")
 	}
-	// 没有 rid 就不问（省一次往返，也不该问出一个空结果当「没有收藏过」）。
+	// media_id 没有就不问（省一次往返，也不该问出一个空集合当「这一格是空的」）。
 	f2 := newFakeBili(t)
 	f2.on(pathFavMediaIDs, func(w http.ResponseWriter, r *http.Request) {
-		t.Error("没有 rid 还去问了")
+		t.Error("没有收藏夹 id 还去问了")
 	})
-	if ids, err := f2.client(t, Options{}).FavMediaFolders(context.Background(), "", FavTypeVideo); err != nil || ids != nil {
-		t.Errorf("空 rid 的结果是 %v / %v，want nil / nil", ids, err)
+	if ids, err := f2.client(t, Options{}).FavFolderIDs(context.Background(), 0); err != nil || ids != nil {
+		t.Errorf("空 id 的结果是 %v / %v，want nil / nil", ids, err)
+	}
+}
+
+// TestFavoriteSongStillWritesWhenTheDedupeCallFails 去重那一问是**只读**的，它失败
+// 了不该让用户收藏不成：B 站的 deal 重复放是幂等的，写下去结果一样。
+func TestFavoriteSongStillWritesWhenTheDedupeCallFails(t *testing.T) {
+	f := favFixture(t, 9527, []map[string]any{favFolderItem(100, "默认收藏夹", 0)}, nil, 4242)
+	f.on(pathFavMediaIDs, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, -400, "请求错误", nil))
+	})
+	if _, err := favClient(t, f).FavoriteSong(context.Background(), FavTarget{Bvid: "BV1xx", Type: "mv"}); err != nil {
+		t.Fatalf("去重那一问失败就不收藏了：%v", err)
+	}
+	wrote := false
+	for _, r := range f.requests() {
+		if r.Path == pathFavDeal {
+			wrote = true
+		}
+	}
+	if !wrote {
+		t.Error("没有发写请求")
 	}
 }
 
