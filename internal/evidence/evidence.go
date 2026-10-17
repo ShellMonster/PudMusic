@@ -73,6 +73,29 @@ var Items = []Item{
 	},
 	{
 		Category: Play,
+		// 「哪一首正在放」和「下一首放哪首」这两个问题的答法，都不能是**位置**。
+		//
+		// 队列会重排：「下一首播放」插在当前后面、拖拽排序、随机模式，每一个都
+		// 在动当前项的下标；而列表里的行号是另一套。用位置答出来的症状是
+		// 「高亮跳到旁边那一首」「按了下一首播放，正在放的歌换了一首」——
+		// **界面上看不出任何异样**，声音和画面各说各话。
+		//
+		// 判据是 `app.Item.Identity`（本地按路径、mv 按 bvid、音频按 sid），
+		// 也就是 Biu 那个抽屉去重时用的同一把尺子。顺带钉住「认的是**同一首**
+		// 而不是同一份」：同一首歌排了两遍时（内容列表不判重）两行都该亮，
+		// 而认整项的话两行都不亮——用户在**正在放**的那份上看到「哪首都没在放」。
+		Spec: "「正在播放」按歌认（队列重排了也还对，同一首排两遍算一首）；「下一首播放」插在当前项后面而不是队尾",
+		Tests: []string{
+			"TestIsPlayingFindsTheSongWhereverTheQueuePutIt",
+			"TestIsPlayingSurvivesTheQueueBeingRearranged",
+			"TestIsPlayingIsAboutTheSongNotAboutThatCopy",
+			"TestTheSameSongInTwoRowsIsOneHighlight",
+			"TestAppActionsPlayNextLandsRightAfterTheCurrentOne",
+			"TestInsertNextLandsRightAfterTheCurrentOne",
+		},
+	},
+	{
+		Category: Play,
 		Spec:     "取消代次：连点五首，只有最后一首能活",
 		Tests: []string{
 			"TestOnlyTheLastTrackWinsWhenSwitchingFast",
@@ -580,6 +603,70 @@ var Items = []Item{
 		},
 	},
 	{
+		Category: Platform,
+		// 「录进去了，什么也不发生」（BMG-47 §4 A6）——设置页里能录、能存、
+		// 冲突看得出来，而按下去什么也不发生。这比没有更坏：用户以为设上了。
+		//
+		// 钉的是「真的按下去会走那一条命令」和「焦点在输入框里时不抢按键」两半。
+		// 后一半是 SPEC 114 点名的，量法是「焦点在搜索框里按那个键，字进了搜索框、
+		// 那条命令没有触发」——只验前半句的话，一个把所有快捷键都关掉的实现照样通过。
+		//
+		// 另有几条钉的是接线本身：存下来的 accelerator 串认得回来（认不回来的症状
+		// 是设置页一切正常、按下去没反应），以及**正在录的那一格**优先于窗口登记的
+		// 组合键（引擎会先问「有没有人认领这个键」，而录制格靠 HandleInput 吃键）。
+		//
+		// ⚠️ 「让开」必须收得干净，这一条自己有个反面的坑：让开的状态一旦卡住
+		// （录完不清、走开也不清），**六条命令当场全哑而界面上一个字都不提**——
+		// 和 BMG-47 A6 一模一样的症状换了个原因。所以后面两条专门钉它。
+		Spec: "快捷键按下去真的会触发那条命令；焦点在输入框里打字时快捷键让路（SPEC 110、112、114。BMG-47 A6 说的「录进去了什么也不发生」）",
+		Tests: []string{
+			"TestAPressedShortcutRunsItsCommand",
+			"TestAShortcutWithNoModifierRunsWhenNothingElseHasTheFocus",
+			"TestTheSearchBoxGetsTheKeyBeforeAnyShortcut",
+			"TestTheRecorderCellStillGetsAKeyThatIsARegisteredShortcut",
+			"TestTheShortcutsComeBackTheMomentARecordingFinishes",
+			"TestWalkingAwayMidRecordingDoesNotSilenceTheShortcutsForever",
+			"TestEveryRecordedKeyComesBackAsItself",
+			"TestTheShortcutsHandEditedIntoTheFileStillWork",
+			"TestTheSixCommandsCallTheirOwnThing",
+			"TestAShortcutRunsTheSameCommandWhicheverWayItArrives",
+			"TestTheShortcutPageSaysWhatTheTwoColumnsAreFor",
+		},
+	},
+	{
+		Category: Platform,
+		// 全局快捷键（SPEC 111）。量的是**两段**：按设置把那一列登记到系统上
+		// （用存下来的那一串，一个字不翻译）、以及系统的回调真的走到那条命令。
+		//
+		// ⚠️ **没有**量到的是最后一跳：系统（macOS 的 Carbon 热键）到底会不会把
+		// 一个在别的应用里按下的组合键送到本进程。那一下在框架里（`mygo` 的
+		// `internal/darwin/hotkey.go`），我们既没重写也不该重写——重写一遍的结果
+		// 是两条热键链，而只有一条被测过。要验它得切到别的应用按一次，那一半留在
+		// 人工清单里。
+		//
+		// 「注册不上要降级」也是这一条的一半：别的应用先占了那个键、Wayland 上没有
+		// 桌面 portal、Linux 上没有 X11 会话——这些都得只让那一条失效，而不是让整个
+		// 快捷键功能一起瘫掉。
+		//
+		// 「录制期间要从系统上撤下来」是第三半：Carbon 热键到不了焦点上的元素，
+		// 不撤的话那六个默认全局键**在任何一格都录不进去**（真机上量过）。
+		Spec: "全局快捷键：按设置登记到系统上、按下来走那一条命令、录制期间从系统上撤下来；**系统真的把别的应用里按下的键送过来**这一跳没有量（在框架里，真机人工清单那一半）。注册不上只让那一条失效，不拖累其余，更不拖累应用内那一列（SPEC 111）",
+		Tests: []string{
+			"TestTheGlobalColumnIsRegisteredOnStartup",
+			"TestTurningGlobalShortcutsOffUnregistersThem",
+			"TestRecordingAGlobalShortcutRegistersTheNewKey",
+			"TestResettingTheShortcutsRegistersThemAgain",
+			"TestAGlobalShortcutThatIsAlsoAnInAppOneIsNotRegistered",
+			"TestTwoSpellingsOfTheSameKeyAreNotBothRegistered",
+			"TestTheGlobalShortcutsStepAsideWhileRecording",
+			"TestOneGlobalShortcutThatCannotRegisterDoesNotTakeTheRestDown",
+			"TestEveryGlobalShortcutThatFailsStillLetsTheOthersRun",
+			"TestQuittingUnregistersTheGlobalShortcuts",
+			"TestSyncingTwiceLeavesNoDuplicate",
+		},
+		RealOnly: true,
+	},
+	{
 		Category: Paging,
 		// 「页面壳子做完了、数据源没排票，于是交付时一片绿、用户打开是空的」
 		// （BMG-47 §4 查出的模式，七个页面命中）。首页那张票（#13）就是：票面
@@ -621,6 +708,64 @@ var Items = []Item{
 			// 三档各打各的接口，换了档拿到的是另一批。
 			"TestTheHomePagePullsTheTabYouAreLookingAt",
 			"TestEachTabPullsItsOwnList",
+		},
+	},
+	{
+		Category: Play,
+		// 「往 B 站写播放记录」这一票（BMG-47 审计 A7）。它修的是一个
+		// **壳子做完了、数据源没有**的洞：历史记录页读的是 B 站服务器上的
+		// 历史，而我们以前一次都没往里写——只用我们这个应用的用户，那一页
+		// 永远是空的。
+		//
+		// 逐条钉的是**每一个上报时机**（开始播 / 心跳 / 暂停 / 继续 /
+		// 切歌 / 停止 / 播完），以及三件「错了就伤到用户真实账号」的事：
+		// 退登之后不许再写、换人登录之后上一首的进度不许记到那个人名下、
+		// 解码失败不许报成「看完」。
+		//
+		// ⚠️ **这一票的验收没走真网**：上报是写操作，它写进用户真实的 B 站
+		// 账号，而反复上报会在那个账号里留下一堆垃圾播放记录。所以全部用
+		// HTTP fixture。真接口的兼容性（参数集对不对、B 站收不收）要真机
+		// 回归，那是单独安排的一趟，见任务报告「需要真网验」那一节。
+		//
+		// 这里量到的是**我们这一层**：什么时机发、发什么、代次守不守得住、
+		// 失败会不会影响播放。真 B 站收下之后「历史记录」那一页上出现的是
+		// 不是这一条，量不到。
+		Spec: "播放记录上报 B 站：开始播/30 秒心跳/暂停/继续/切歌/停止/播完各自发的那一下，参数逐个对着上游；退登与换人之后不许再写（进度不许落到另一个账号名下）；解码失败不许报成播完；上报失败不许影响播放（这一票走 HTTP fixture，真接口要真机回归——上报会写进用户真实的 B 站账号）",
+		Tests: []string{
+			// 协议层：发出去的形状。
+			"TestPlayReportOpenSendsEveryParam",
+			"TestPlayReportBeatSendsEveryParam",
+			"TestTheFnvalIsTheOneWeAskStreamsFor",
+			"TestFinishedSendsMinusOne",
+			"TestEveryPlayTypeHasItsOwnNumber",
+			"TestReportingNeedsAVideo",
+			// 业务层：什么时候发。
+			"TestPlayingOpensTheRoundAndSaysItStarted",
+			"TestAHeartbeatKeepsGoingWhileItPlays",
+			"TestPausingAndResumingAreToldApart",
+			"TestSwitchingEndsTheOldRoundAndOpensANewOne",
+			"TestTheRoundThatEndsCarriesItsOwnDuration",
+			"TestStoppingEndsTheRoundAndDoesNotOpenItAgain",
+			"TestFinishingSaysItFinished",
+			// 什么不许发。
+			"TestAFailedStreamIsNeverReportedAsFinished",
+			"TestLocalFilesAreNeverReported",
+			"TestTheSwitchOffMeansNothingIsSent",
+			// 代次守卫与退登。
+			"TestASessionInFlightDiesWithTheRoundThatStartedIt",
+			"TestLoggingOutStopsTheReporting",
+			"TestTheProgressNeverLandsOnTheNextAccount",
+			// 失败不许影响播放。
+			"TestAFailedReportDoesNotReachTheUser",
+			"TestAFailedOpenDoesNotSilenceThatVideoForever",
+			"TestAViewThatFailsIsNotAskedAgainAndAgain",
+			// 退出与换客户端：上报那条 goroutine 得收掉。
+			"TestClosingTheAppStopsTheReportingGoroutine",
+			"TestMountingStreamingAgainRetiresTheOldReporter",
+			// 从真的播放链路走到 B 站（真队列 + 真取流 + 真解码 + 真进度条时钟）。
+			"TestPlayingARealStreamReachesBilibili",
+			"TestStoppingARealStreamTellsBilibiliItIsOver",
+			"TestLoggingOutARealStreamStopsTheReporting",
 		},
 	},
 	{

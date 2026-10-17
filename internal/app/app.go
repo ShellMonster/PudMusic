@@ -68,6 +68,19 @@ type State struct {
 	// Err 是最近一次打开文件的失败原因，显示在播放条上，直到下一次打开成功。
 	Err string
 
+	// Artist 是当前这首的 UP 主名，播放条上那一行字点它进 UP 主空间。
+	//
+	// **本地文件永远是空的**：Biu 上游也不读音频内嵌的标签（见 media.go 的
+	// setArtist），所以本地音乐在那边也是没有 UP 名的一行。空串时播放条
+	// 压根不画那一行——摆一句空的地方不如不摆。
+	Artist string
+
+	// ArtistMid 是上面那个 UP 主的 mid，也就是 `/user/{id}` 里那个 id。
+	//
+	// ⚠️ **它可以是 0 而 Artist 不是空串**：有的来源只给名字不给编号（动态流
+	// 那一批）。那种情况下 UP 名照样显示，只是**点不动**（见 `Item.ArtistMid`）。
+	ArtistMid int64
+
 	// Quality 是当前这条流的音质徽章（「无损 FLAC」/「320K」）。
 	//
 	// 空串 = 这一首是本地文件，没有音质这回事（本地文件是什么格式和
@@ -210,9 +223,25 @@ type App struct {
 	// 等待时间变成「网络那一趟」。
 	updates *updater
 
+	// report 是「往 B 站写播放记录」这一摊，见 playreport.go。
+	// 挂上在线播放（`MountStreaming`）之前是 nil。
+	//
+	// ⚠️ **唯一一处两把锁叠着拿的地方，是上报器拿着自己的锁去问
+	// `App.account`**（`reportTick` / `stopTrack` 都是先放掉 `a.mu`、
+	// 再去拿上报器的锁）。所以**永远不要在拿着 `a.mu` 的时候去拿
+	// 上报器的锁**——反过来的顺序凑齐了就是一次死锁，而死锁在这个位置上
+	// 表现为「整个应用冻住」（进度条的时钟每一拍都要过 `a.mu`）。
+	report *playReporter
+
 	// artist 是当前这首的艺人（在线条目的 UP 主名）。本地文件是空的，
-	// 见 media.go 的 setArtist。跟 cover 一样只有媒体会话在用。
+	// 见 media.go 的 setArtist。它有两个用户：系统媒体会话，和界面上播放条
+	// 那一行 UP 名（`State.Artist`）。
 	artist string
+	// artistMid 是那个 UP 主的 mid，播放条上点 UP 名进 `/user/{id}` 用它。
+	//
+	// ⚠️ 它和 artist **一起**换、一起清：只换名字不换编号的话，播放条上的
+	// UP 名会指着**上一个 UP 主**的空间，而界面上看不出任何异样。
+	artistMid int64
 	// stopped 是「用户按了停止」：和暂停分开，因为它让进度条回到开头，
 	// 而系统那边也是两个不同的状态（见 media.go 的 Stop）。
 	stopped bool
@@ -282,6 +311,8 @@ func (a *App) Snapshot() State {
 		Err:         a.errText,
 		Quality:     a.quality,
 		QualityPref: pref,
+		Artist:      a.artist,
+		ArtistMid:   a.artistMid,
 
 		// 播放模式在队列自己的锁里，不在 `a.mu` 里——它是队列的形状，不是
 		// 播放器的状态。顺着一句一句取：`a.mu` 已经拿在手里，而 `a.queue`
@@ -339,6 +370,7 @@ func (a *App) Open(path string) error {
 	// 本地文件没有艺人（Biu 上游也不读内嵌标签，见 media.go 的 setArtist）。
 	// 队列里的项自带的话，App.play 会在开成功之后补上。
 	a.artist = ""
+	a.artistMid = 0
 	a.position = 0
 	a.duration = p.Duration()
 	a.wantPlay, a.playing = true, true
@@ -485,6 +517,10 @@ func (a *App) ScrubEnd(fraction float64) {
 func (a *App) ClearTrack() {
 	a.mu.Lock()
 	p := a.player
+	// 🔴 位置和时长要在**清零之前**抄下来：下面那句 `stopTrack` 要用它们
+	// 去结掉播放记录那一轮，而清零之后再取就只剩 0 了——B 站那边这一条会
+	// 变成「从头开始听就停了」，而用户明明听到了 3 分 20 秒。
+	at := a.position
 	a.player = nil
 	a.playing = false
 	// 「停到开头」这件事也就过去了：没有播放器就是「什么都没有」，不是「停在开头」
@@ -500,11 +536,16 @@ func (a *App) ClearTrack() {
 	a.reportedErr = nil
 	a.title, a.path, a.cover = "", "", ""
 	a.artist = ""
+	a.artistMid = 0
 	a.position, a.duration = 0, 0
 	a.wantPlay = false
 	a.errText = ""
 	wake := a.wake
 	a.mu.Unlock()
+
+	// 「这一首到此为止」也是终止：播放记录那一轮到此结束（见 playreport.go
+	// 的「一、什么时候发」）。它和 `Stop` 是同一件事的两个入口。
+	a.stopTrack(at)
 
 	// 先把状态摘干净，再关解码器：和 Open 换歌同一个道理，关的过程中 tick 拿到
 	// 的不会再是这一个。
@@ -532,9 +573,23 @@ func (a *App) Close() {
 	dl, dlPath := a.downloads, a.downloadQueueFile
 	lib := a.localMusic
 	upd := a.updates
+	rep := a.report
+	a.report = nil
+	at := a.position
 	a.mu.Unlock()
 
 	close(a.done)
+	// 播放记录先结掉这一轮，再关那条 goroutine。
+	//
+	// ⚠️ **顺序不能反**：退出这一刻用户可能刚听到一半，那条 PlayEnd 是这一轮
+	// 最后一次机会，而 `close` 一执行它就不会再发了（历史记录里那一条就停在
+	// 上一个采样点上）。
+	//
+	// ⚠️ 锁外面调：`close` 要等一条 goroutine，而那条 goroutine 每一拍都要拿
+	// `a.mu` 问设置和登录态——锁里面等就是死锁。
+	if rep != nil {
+		rep.finishOnClose(at)
+	}
 	if p != nil {
 		// Player.Close 会把字节源一起关掉（在线流那条路）。
 		p.Close()
@@ -637,6 +692,26 @@ func (a *App) tick() {
 			if publish || ended {
 				a.publishMedia()
 			}
+			// 「往 B 站写播放记录」在这一拍上对一次账（见 playreport.go）。
+			//
+			// ⚠️ **`ended` 不是「放完了」**：解码失败和断流也是「从在放变成不
+			// 在放」。拿它去发 `played_time = -1`（B 站靠它把一条标成「看完」）
+			// 等于往用户的账号里写一句他没做过的事，而那一条会在他的历史记录
+			// 页上一直摆着。真的放完了必须是「不在放了」**且**这一台没有报错。
+			// 那是 `TestACorruptFileNeverLooksLikeItFinished` 那个道理的另外
+			// 一半：那边量「位置到没到头」，这边量「有没有报错」，两半合起来
+			// 才分得出「放完了」和「挂掉了」。
+			//
+			// 这里每一拍都调（哪怕此刻没有歌）：它只读内存、往队列里塞一条，
+			// 没有在报的时候立刻回来，绝不碰网络。
+			//
+			// 多读一次 `p.Err()` 不花钱：解器把它存好了（`decoder.go` 那个
+			// 错误记录器带自己的锁），底下两行的 `checkPlayback` 读的是同一个值。
+			//
+			// 「在不在放」它自己去 `a.playing` 读，不收这里那个局部变量——
+			// 理由见 `reportTick` 那段。
+			a.reportTick(ended && p != nil && p.Err() == nil)
+
 			if live && wake != nil {
 				wake()
 			}

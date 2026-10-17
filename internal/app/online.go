@@ -87,6 +87,10 @@ func (a *App) MountStreaming(s Streaming) {
 	a.streaming = &s
 	a.streamCache = map[string]*bili.StreamRef{}
 	a.mu.Unlock()
+	// 播放记录上报**跟着在线播放起**：只有在线流才有得报（本地文件在 B 站
+	// 那边没有对应的东西），所以它挂在这一摊上而不是挂在登录上——挂登录
+	// 会让「没挂在线播放也照发」那条路变成真的。
+	a.mountPlayReport(s.Client)
 }
 
 // StreamingMounted 报告在线播放挂上没有。
@@ -444,6 +448,7 @@ func (a *App) runOnline(it Item, gen int) {
 	a.path = ""
 	a.cover = it.Cover
 	a.artist = it.Artist
+	a.artistMid = it.ArtistMid
 	a.position = 0
 	a.duration = p.Duration()
 	a.wantPlay, a.playing = true, true

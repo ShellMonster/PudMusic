@@ -412,6 +412,16 @@ func (s *Shell) takeRecordedKey(field ui.Element, slot shortcutSlot) {
 			return true
 		}
 		s.rejected = shortcutSlot{}
+		// 🔴 **录成功也是一个收尾动作**：这一格不再等着录下一个键。
+		//
+		// 和上面那个 × 是同一个道理（见它那里的注释），而漏掉它的后果比 × 大得多：
+		// `s.recording` 非零 = 窗口这一帧一个组合键都不登记（viewShortcuts），于是
+		// **本次运行剩下的时间里六条命令全部失效**，而界面上没有任何一个字说得清
+		// 为什么——那一格画着新键、带一圈主色描边，看着一切正常。
+		//
+		// 实测过的那条路：点「播放/暂停」那一格 → 按 ⌘⇧V → 走回首页 → 按 ⌘M 不响、
+		// 按 ⌘P 不响、点进设置页也不响，要切到「常规设置」才碰运气恢复。
+		s.recording = shortcutSlot{}
 		s.applyShortcut(slot, string(a))
 		return true
 	})
@@ -421,8 +431,13 @@ func (s *Shell) takeRecordedKey(field ui.Element, slot shortcutSlot) {
 //
 // 和 `applySetting` 一个道理：静默丢掉是这一页最坏的失败方式，用户以为改了、
 // 下次打开又变回去，中间屏幕上什么都没发生过。
+//
+// 存住之后重新登记全局那一列：录的正是全局那一格时（`slot.global`）不登记的话，
+// 用户在设置页上录的键在别的应用里压根不响——而录完就退出录制、界面上一切正常。
 func (s *Shell) applyShortcut(slot shortcutSlot, accel string) {
 	if err := s.keys.set(slot, accel); err != nil {
 		s.addToast("快捷键没存上：" + strings.TrimPrefix(err.Error(), "app: "))
+		return
 	}
+	s.syncGlobalShortcuts()
 }

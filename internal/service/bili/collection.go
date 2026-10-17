@@ -277,10 +277,15 @@ type Media struct {
 	// Bvid 是视频稿件的 bvid。音频条目是空串。
 	Bvid string
 	// Page 是分 P 数。
-	Page     int
-	Title    string
-	Cover    string
-	Owner    string
+	Page  int
+	Title string
+	Cover string
+	Owner string
+	// OwnerMid 是那个 UP 主的 mid。播放条上点 UP 名进 `/user/{id}` 用它。
+	//
+	// 0 是「B 站这一次没给」，不是「没有 UP 主」——名字还可能是有的，那一句
+	// 照旧显示，只是点不动（见 `app.Item.ArtistMid`）。
+	OwnerMid int64
 	Duration time.Duration
 
 	// Attr 是有效性：0 正常，1/9 是失效（UP 自己删了、或者换成了别的链接）。
@@ -333,6 +338,7 @@ type resourceListData struct {
 		Bvid     string `json:"bvid"`
 		Upper    struct {
 			Name string `json:"name"`
+			Mid  int64  `json:"mid"`
 		} `json:"upper"`
 	} `json:"medias"`
 }
@@ -386,7 +392,7 @@ func (c *Client) CollectionMedias(ctx context.Context, id int64, sort Collection
 	for _, m := range d.Medias {
 		out = append(out, Media{
 			ID: m.ID, Type: m.Type, Bvid: m.Bvid, Page: m.Page,
-			Title: m.Title, Cover: m.Cover, Owner: m.Upper.Name,
+			Title: m.Title, Cover: m.Cover, Owner: m.Upper.Name, OwnerMid: m.Upper.Mid,
 			// ⚠️ B 站的 duration 是**秒**（浮点）。当毫秒解的话一首三分钟的
 			// 歌会显示成 3 秒，而且界面上没有任何地方会露出错。
 			Duration: time.Duration(float64(m.Duration) * float64(time.Second)),

@@ -91,3 +91,18 @@ func notify(acts Actions, text string) {
 		acts.Notify(text)
 	}
 }
+
+// isPlaying 报这一项是不是正在放的那首。列表的一行和网格的一格都用它。
+//
+// 🔴 **判据在接线里（`Actions.IsPlaying`），不在这里**：本包不许拿行的下标或者
+// `Music.ID` 去认「正在放的那首」——队列会重排（下一首播放、拖拽排序、随机模式
+// 哪一个都在动它），而 `Music.ID` 是**行的**身份（铁律四），不是「是不是同一
+// 首歌」。真的判据是 `app.App.IsPlaying`，按 `app.Item.Identity` 比。
+//
+// 没装判据（测试里那份接线）时一律当不在放。
+func isPlaying(acts Actions, item app.Item) bool {
+	if acts.IsPlaying == nil {
+		return false
+	}
+	return acts.IsPlaying(item)
+}

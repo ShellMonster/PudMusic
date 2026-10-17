@@ -40,10 +40,29 @@ type Item struct {
 	// Biu 的 `updateMediaSession` 把它当 artist 传给系统媒体会话）。
 	//
 	// **本地文件永远是空的**：读音频内嵌标签那一套没有接，Biu 上游也没有
-	// （见 State.CoverURL 那段）。所以现在这一栏只对在线条目有意义，
-	// 字段先立着——等 B 站接口把 ownerName 带下来就有值了，
-	// 队列和媒体会话都不用改。
+	// （见 State.CoverURL 那段）。所以这一栏只对在线条目有意义。
+	//
+	// B 站那几个接口（推荐、稍后再看、历史、收藏夹内容、搜索、动态、UP 空间
+	// 投稿）都带 `owner`，所以在线条目上它是有值的——播放条上那一行 UP 名画的
+	// 就是它（见 `ui.viewArtist`）。
 	Artist string
+
+	// ArtistMid 是 Artist 那一位 UP 主的 mid，也就是播放条上那个 UP 名
+	// 要点的 `/user/{id}`（见 `ui.upPath`）。
+	//
+	// ⚠️ **它和 Artist 分开，而且没有编号时 Artist 照样有值**：B 站有的接口
+	// 逐条只给 `author` 名字不给 mid（`bili.UpVideo` 那一批就是这样，编号要
+	// 由调用方从自己手上那一页的 mid 补）。那种情况下播放条照旧显示 UP 名，
+	// 只是那一句**点不动**——把名字藏起来是另一种撒谎（用户看到的是「这一首
+	// 没有 UP 主」）。
+	//
+	// 0 就是「没有编号」，不是一个 UP 主。
+	//
+	// ⚠️ **每个来源都要往下传它**：推荐 / 稍后再看 / 历史 / 收藏夹内容 / 搜索
+	// 结果 / 动态 / UP 空间投稿，七处都带上了。少一个的症状是**从那一页放的
+	// 歌在播放条上没有 UP 名**——而界面上看不出坏了（按钮和那两行字都还在，
+	// 只是名字那一格空着）。
+	ArtistMid int64
 
 	// PageIndex / TotalPage 是多 P 视频里的「第几集 / 共几集」，对应 Biu 的
 	// `PlayItem.pageIndex` / `totalPage`。0 表示「不是分集视频」或者「还没接」。
@@ -699,6 +718,32 @@ func (q *Queue) SetKeepPagesOrderInRandom(v bool) {
 // 谁）就调它。
 func (a *App) Queue() *Queue { return a.queue }
 
+// PlayingItem 返回正在放的那一项——**带得上 B 站身份的那一份**（bvid / sid）。
+//
+// 播放条上的「收藏」「下载」要的就是它：`State` 那一组只有歌名和封面，
+// 而收藏夹弹窗要 avid、下载要 bvid + cid（`internal/ui/folderselect.go` 的
+// favTarget、`actions.go` 的 Download）。
+//
+// ⚠️ **队列里没有当前项时退回本地路径**：那是直接 `Open` 打开的（导航栏的
+// 「打开文件」、测试里 `app.Open(path)`）——它压根没进队列，可它同样在放。
+// 不退回的话那种情况下播放条上的两个键会静悄悄地消失，而用户刚打开了一首歌。
+//
+// 在线流没有这一支：在线的歌只可能经 `play` 进来（那必然进队列），而 `path`
+// 对在线流是空串（见 `online.go` 的 runOnline）——所以拿 `path` 去兜底不会
+// 兜出一首假的在线歌。
+func (a *App) PlayingItem() (Item, bool) {
+	if it, ok := a.queue.Current(); ok {
+		return it, true
+	}
+	a.mu.Lock()
+	path, playing := a.path, a.player != nil
+	a.mu.Unlock()
+	if !playing || path == "" {
+		return Item{}, false
+	}
+	return LocalItem(path), true
+}
+
 // Enqueue 把几项追加到队列尾部。
 //
 // 队列还是空的时候，追加的第一项直接开始播——用户点了「加歌」，总得听见声音。
@@ -838,6 +883,35 @@ func sameSong(x, y Item) bool {
 	return id != "" && id == y.Identity()
 }
 
+// IsPlaying 报这一项是不是**正在放的那首**。
+//
+// 列表上「正在播放」的高亮认的就是它（见 `widgets/list` 的 Actions.IsPlaying）。
+//
+// 🔴 **按判重标识认，不按下标，也不按 `Music.ID`**：
+//
+//   - **不按下标**：队列会重排——「下一首播放」插在当前后面、拖拽排序、随机模式
+//     哪一个都在动它。当前项的下标跟着重排走，而列表里的下标是另一套，两边
+//     永远不会对上。症状是「高亮的那一行在跳」。
+//   - **不按 `Music.ID`**：那是**行的**身份（铁律四），为了在前面插一行时不串状态
+//     而存在，它和「这是不是同一首歌」是两回事（历史记录里同一首歌看过两次是
+//     两行，`Music.ID` 不同而它们是同一首）。
+//
+// 认不出是哪一首的（`Identity` 是空串）一律当「不在放」：那是「还没接来源的
+// 占位项」，把它当正在放的话界面上会出现一个说不清自己在指哪里的高亮。
+func (a *App) IsPlaying(it Item) bool {
+	id := it.Identity()
+	if id == "" {
+		return false
+	}
+	cur, ok := a.queue.Current()
+	if !ok {
+		return false
+	}
+	// ⚠️ 认不出正在放那首的标识（空串）时不能拿它和 id 比：那样 id 非空、
+	// cur 为空，两边不一样是对的；反过来 id 为空已经在上面挡住了。
+	return cur.Identity() == id
+}
+
 // hasTrack 报告现在有没有歌在放（「播放器还开着」就是有）。
 func (a *App) hasTrack() bool {
 	a.mu.Lock()
@@ -875,7 +949,7 @@ func (a *App) play(item Item) error {
 		return err
 	}
 	a.setCover(item.Cover)
-	a.setArtist(item.Artist)
+	a.setArtist(item.Artist, item.ArtistMid)
 	return nil
 }
 

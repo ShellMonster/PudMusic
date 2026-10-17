@@ -49,11 +49,12 @@ func (s *Shell) viewNowPlaying(c *ui.Context, _ *ui.Route) {
 
 	// 正在放：歌名 + 歌词区。
 	//
-	// ⚠️ 这里画的是**空状态**：歌词区本体在 BMG-65（界面与接线）。底下那层
-	// （`service/lyrics` 的解析与缓存、`app/lyrics` 的切歌先重置 / 偏移字号夹界 /
-	// 防抖落盘）已经落地，界面上能看到歌词是 BMG-65 的事。
+	// 歌词区本体在 lyrics.go：逐行高亮、滚到中间、上下渐隐、译文叠在原词下面，
+	// 右下角浮着偏移与字号两个旋钮。底下那一层（`service/lyrics` 的解析与缓存、
+	// `app/lyrics` 的切歌先重置 / 偏移字号夹界 / 防抖落盘）负责「哪一句正在唱」
+	// 和「那两个旋钮能走到哪儿」，这一层只画。
 	ui.Column(c).Key("page:mini-player").Grow(1).Padding(28).Gap(12).Children(func() {
 		ui.Text(c, st.Title).FontSize(20).Bold()
-		s.viewEmpty(c, "page:lyrics", noLyrics)
+		s.viewLyrics(c, s.app.Lyrics(), st.Position)
 	})
 }

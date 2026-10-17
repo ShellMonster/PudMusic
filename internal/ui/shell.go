@@ -200,6 +200,14 @@ type Shell struct {
 	// 换容器就整个换掉，见 `collectionFor`。
 	collection *collectionPage
 
+	// lyric 是歌词区自己那一摊：滚动位置、上一帧量到的两个框、正在滚向哪一句、
+	// 以及右下角那两个浮层开着没有。见 lyrics.go。
+	//
+	// ⚠️ **逐窗口一份**（同 rateOpen / drawerOpen 的理由）：两个窗口画的是同一
+	// 首歌，但歌词滚到了哪儿是各人各眼的事——迷你播放器窗口停在用户上次看到的那
+	// 一句，主窗口跟着歌往前走，这才是对的。
+	lyric lyricsView
+
 	// folderEdit 是「新建 / 修改收藏夹」那个弹窗（folderedit.go）。
 	// nil 表示从没开过。
 	//
@@ -240,6 +248,18 @@ type Shell struct {
 	// keys 是快捷键。和 hist 一样是单独一份文件（见 shortcuts.go）。没挂上盘时
 	// 是内存里的一份：设置页照常能录，只是关掉之后不记得。
 	keys *shortcutKeys
+	// onShortcut 是「这条命令要做的事」，默认是 runShortcut（见 shortcut_dispatch.go）。
+	//
+	// 做成字段是为了能替掉它：真的那一份要音频设备（`App.Toggle` 在没有播放器时
+	// 什么都不做），而「按了键之后走到哪一条命令」这件事在无头 Tester 里完全量得到
+	// ——测试换成一个记 id 的函数就行。
+	//
+	// ⚠️ 应用内分发（viewShortcuts，帧里）和全局分发（syncGlobalShortcuts 登记的
+	// 回调，主线程上）**走的是同一个它**，所以两条路测到的是同一段代码。
+	onShortcut func(id string)
+	// hotkeys 是「向系统登记一个全局快捷键」的那一半，见 shortcut_global.go。
+	// 做成字段是为了能替掉它（理由和 autostart / pickImage 一样）。
+	hotkeys globalShortcutService
 	// recording 是设置页上**正在录**的那一格，零值表示没有在录。
 	//
 	// 🔴 它同时是「焦点在哪一格」：`FocusBind` 把两者绑成同一件事，所以这一格
@@ -251,6 +271,19 @@ type Shell struct {
 	// 的键或者按 Esc 就清掉——红色停在屏幕上不动的话，用户会以为那里出了什么
 	// 错，而它其实只是「刚才那一下没录上」。
 	rejected shortcutSlot
+	// recorderShown 是「上一帧画没画快捷键录制格」，由 viewShortcuts 每帧读一次再
+	// 清掉、由 settingsShortcuts 画到时置回来。
+	//
+	// 它是为了兜住一件必须兜住的事：**`recording` 不能永远成立**。它一成立，
+	// 窗口这一帧一个组合键都不登记（见 viewShortcuts 的注释），而用户是**看不到**
+	// 「为什么现在按什么都不响」的。所以那一页不画了就把它收掉。
+	recorderShown bool
+	// registeredFor 是「上一次把全局快捷键登记到系统上时的录制状态」。它变了就得
+	// 重新登记：录制期间全局那几个组合键必须从系统上撤下来（Carbon 热键到不了
+	// 焦点上的元素，见 shortcut_global.go），退出录制之后又要回来。
+	//
+	// 由 syncGlobalShortcuts 自己写，viewShortcuts 只读。
+	registeredFor shortcutSlot
 
 	// settings 是设置页自己那一摊：切在哪个 Tab。建在 Shell 上而不是每帧新建，
 	// 理由和 home 一模一样：切走再切回来要停在原来那一格上。
@@ -372,7 +405,11 @@ func New(a *app.App) *Shell {
 		images:    imgcache.New(imgcache.Options{}),
 		autostart: systemAutoStart{},
 		pickImage: pickImageFile,
+		hotkeys:   nilGlobalShortcuts{},
 	}
+	// 快捷键那两条路的动作都落到它。方法值在这儿绑一次就够：runShortcut 只碰
+	// s.app 和 s.router，两个都是建好之后就一直在的。
+	s.onShortcut = s.runShortcut
 	s.images.AddWake(s.wake.invalidate)
 	// 首页自己那一摊要在建好之后才有（它要用封面缓存），所以接在 images 后面。
 	// 操作接在应用状态上、提示接自己的 Toast，接法见 widgets/list 的 AppActions。
@@ -520,6 +557,11 @@ func Run(a *app.App, sess *media.Session) error {
 
 	s := New(a)
 	s.media = sess
+	// 真的那一份全局快捷键**在这里**装上，而不是在 `New` 里：`mygo.GlobalShortcut`
+	// 的两个方法都要走事件循环，而 `New` 的调用方还有一整套测试（无头 Tester 没有
+	// 事件循环，`Register` 在那儿是直接 panic 的）。`Run` 是唯一一个真的有事件循环
+	// 的地方，而它是 main.go 唯一调用的那一个。
+	s.hotkeys = systemGlobalShortcuts{}
 	// 搜索历史读盘是阻塞 IO，放在建窗口之前：早读进来早能用，也省得第一帧
 	// 是在一个空历史上画出来的（那也是 mountSearchHistory 的用途之一）。
 	s.mountSearchHistory()
@@ -542,6 +584,11 @@ func Run(a *app.App, sess *media.Session) error {
 		// 顺序反了的话头几秒点托盘是没有反应的。
 		s.installTray()
 		s.syncAutoStart()
+		// 全局快捷键也在这儿登记，理由和上面两件一样：`mygo.GlobalShortcut.Register`
+		// 头上有 `needsApp`，应用没 ready 时调它直接 panic（`modules.go:540`）。
+		// 排在 `openWindow` 之前：窗口还没建的时候注册失败要弹的那句提示，
+		// 第一帧就能画出来（提示挂在壳上，见 addToast）。
+		s.syncGlobalShortcuts()
 		// 本地音乐目录的文件监听。⚠️ 必须在 `WhenReady` 里：`mygo.WatchFiles`
 		// 在应用还没 ready 的时候调会 panic（框架的 `needsApp`，
 		// `mygo/app.go:128`），而 `Run` 之前是那一刻。
@@ -659,6 +706,12 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 它之后创建的控件。不装的话 MyGo 在帧开头重置好的那份跟随系统的主题
 	// 就是这一帧真正用的那份，用户选了深色也只在这一帧是对的。
 	s.applyFrameTheme(c)
+	// 应用内快捷键：登记这一帧窗口要处理哪些组合键，同时也就知道了这一帧有没有
+	// 键打中（`Context.Shortcut` 命中就是「按了」）。见 shortcut_dispatch.go。
+	//
+	// 排在主题之后、其它每帧钩子之前：它自己不画任何东西，而放在最前面的话
+	// 「按了快捷键 → 顺带这一帧才生效」这件事和主题那条铁律不会互相干扰。
+	s.viewShortcuts(c)
 	s.reportSettingsError()
 	// 收「那个 500ms 防抖的钟要不要醒着」。**每帧一次**，所以用户切走时它一定
 	// 会跟着停（见 syncSearchWatch）。
