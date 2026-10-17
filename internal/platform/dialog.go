@@ -51,28 +51,33 @@ func PickAudioFile(parent *mygo.Window) ([]string, error) {
 	return mygo.Dialog.Open(audioOpenOptions(parent))
 }
 
-// PickPath 弹系统文件框让用户挑一条路径：dir 为 true 是挑文件夹，否则挑文件。
-// 一次只挑一个（设置里的下载目录、FFmpeg 路径都是单值），用户取消时返回空串。
+// PickPath 弹系统对话框让用户挑一条路径：dir 为 true 是挑文件夹，否则挑文件。
+// 返回空串表示用户取消（不是错误——「用户不想选」是正常结果，不是出错）。
 //
-// ⚠️ 同样的理由：必须从非主线程调用。
-func PickPath(parent *mygo.Window, dir bool) (string, error) {
-	opts := mygo.OpenDialogOptions{
+// 两行字由调用方给：同一个系统对话框，问的问题不一样——本地音乐那页问的是
+// 「挑的音频会出现在哪儿」，设置页的下载目录问的是「下载的东西会存到哪儿」。
+// 把它们写死在一个函数里，就有一边在说错的话。
+//
+// ⚠️ 和 PickAudioFile 一样**必须从非主线程调**：MyGo 的对话框把请求 post 到主线程
+// 再等系统回调，主线程自己进去等就是死等，事件循环再也转不起来。
+func PickPath(parent *mygo.Window, dir bool, title, message string) (string, error) {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
 		Parent:    parent,
+		Title:     title,
+		Message:   message,
 		Directory: dir,
-	}
-	opts.Title, opts.Message = pathDialogLabels(dir)
-	paths, err := mygo.Dialog.Open(opts)
+	})
 	if err != nil || len(paths) == 0 {
 		return "", err
 	}
 	return paths[0], nil
 }
 
-// pathDialogLabels 是挑文件夹和挑文件时对话框上的两行字。挑文件夹的时候那个
-// 「新建文件夹」按钮要摆出来——下载目录用户经常要新建一个。
-func pathDialogLabels(dir bool) (title, message string) {
-	if dir {
-		return "选择文件夹", "选一个用来保存下载内容的位置"
-	}
-	return "选择文件", "选一个文件"
+// PickDirectory 弹系统对话框让用户选一个文件夹，返回选中的路径。用户取消时
+// 返回空串（不是错误——「用户不想选」是正常结果，不是出错）。
+//
+// 用于本地音乐页的「添加目录」。parent 非空时对话框挂在那个窗口下面。
+func PickDirectory(parent *mygo.Window) (string, error) {
+	return PickPath(parent, true,
+		"选择音乐文件夹", "选一个文件夹，它的**第一层**里的音频文件会出现在本地音乐里")
 }

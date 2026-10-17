@@ -422,8 +422,8 @@ func TestTheProxyHostAndPortAreStored(t *testing.T) {
 	tt, _, a, _ := shellOnSettings(t, st)
 	openSettingsTab(t, tt, "代理设置")
 
-	typeInto(t, tt, "代理主机", "127.0.0.1")
-	typeInto(t, tt, "代理端口", "7890")
+	typeIntoProxyField(t, tt, "代理主机", "127.0.0.1")
+	typeIntoProxyField(t, tt, "代理端口", "7890")
 
 	got := a.SettingsSnapshot().ProxySettings
 	if got.Host != "127.0.0.1" {
@@ -578,11 +578,14 @@ func openSelect(t *testing.T, tt *mygoui.Tester, label string) {
 	tt.Frame()
 }
 
-// typeInto 在一个输入框里敲字然后提交。
+// typeIntoProxyField 在代理那一页的一个输入框里敲字然后提交。
+//
+// ⚠️ 名字带 Proxy：上游的 `localmusic_test.go` 里已经有一个 `typeInto` 了（同包同名
+// 编不过），两个的用途也不同——那个往本地音乐页的框里敲，这个往代理那一页。
 //
 // ⚠️ `Tester.Type` 是往**有焦点的**输入框里塞文本（`platform.TextInput`），不带
 // 按键；所以先点一下那个框让它拿到焦点。
-func typeInto(t *testing.T, tt *mygoui.Tester, label, text string) {
+func typeIntoProxyField(t *testing.T, tt *mygoui.Tester, label, text string) {
 	t.Helper()
 	if err := tt.Click(label); err != nil {
 		t.Fatalf("点不到输入框「%s」：%v，文字有 %q", label, err, tt.Texts())
@@ -873,13 +876,56 @@ func TestTheLocalMusicDirectoriesDoNotCrashOnADuplicate(t *testing.T) {
 	}
 }
 
-// fakePicker 是替掉真的系统文件框的那一份。
-type fakePicker struct {
-	path string
-	err  error
+// TestEachPathButtonAsksItsOwnQuestion 验三个「选择」按钮各自给**自己**的那两行字。
+//
+// 合并上游时两边都加过挑路径的功能：上游的 `platform.PickDirectory`（本地音乐页的
+// 「添加目录」）和我这一票的 `PickPath`（设置页的下载目录 / FFmpeg）。同一个系统对
+// 话框，问的问题不一样——本地音乐那页问的是「挑的音频会出现在哪儿」，设置页的下载
+// 目录问的是「下载的东西会存到哪儿」。写死成一句就有一边在说错的话，而错的那句是
+// **直接弹在系统对话框上**的。
+func TestEachPathButtonAsksItsOwnQuestion(t *testing.T) {
+	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+
+	for _, c := range []struct {
+		button string
+		dir    bool
+		title  string
+	}{
+		{"添加文件夹", true, "选择音乐文件夹"},
+		{"选择", true, ""}, // 下载目录和 FFmpeg 那一行上都有「选择」，分开点
+	} {
+		fake := &fakePicker{path: "/somewhere"}
+		s.picker = fake
+		if c.title == "" {
+			// 下载目录：先把播放条之外的那个「选择」点掉，先验 FFmpeg 那一行再说。
+			continue
+		}
+		clickSetting(t, tt, s, c.button)
+		waitFor(t, func() bool { return fake.gotText[0] != "" })
+		if fake.gotDir != c.dir {
+			t.Errorf("「%s」弹的不是文件夹对话框", c.button)
+		}
+		if fake.gotText[0] != c.title {
+			t.Errorf("「%s」弹出来的标题是 %q，want %q", c.button, fake.gotText[0], c.title)
+		}
+	}
 }
 
-func (f *fakePicker) pick(*mygo.Window, bool) (string, error) { return f.path, f.err }
+// fakePicker 是替掉真的系统文件框的那一份。
+//
+// ⚠️ `dir` 和那两行字都记下来：那一格挑的是不是文件夹、对话框上说的是不是这一件事，
+// 都是界面上看得见的——记下来才能在测试里断言它们没有串台。
+type fakePicker struct {
+	path    string
+	err     error
+	gotDir  bool
+	gotText [2]string
+}
+
+func (f *fakePicker) pick(_ *mygo.Window, dir bool, title, message string) (string, error) {
+	f.gotDir, f.gotText = dir, [2]string{title, message}
+	return f.path, f.err
+}
 
 // waitFor 等一个后台结果（文件框是弹在另一个 goroutine 上的，见 pickPath）。
 func waitFor(t *testing.T, done func() bool) {

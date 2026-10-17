@@ -18,14 +18,25 @@ import (
 
 // pathPicker 是「挑一条路径」这件事。挑回来的是空串就是用户取消了。
 type pathPicker interface {
-	pick(parent *mygo.Window, dir bool) (string, error)
+	pick(parent *mygo.Window, dir bool, title, message string) (string, error)
 }
 
-// systemPathPicker 是真的那一份，也就是 internal/platform 那两个函数。
+// systemPathPicker 是真的那一份，也就是 internal/platform 的 `PickPath`。
 type systemPathPicker struct{}
 
-func (systemPathPicker) pick(parent *mygo.Window, dir bool) (string, error) {
-	return platform.PickPath(parent, dir)
+func (systemPathPicker) pick(parent *mygo.Window, dir bool, title, message string) (string, error) {
+	return platform.PickPath(parent, dir, title, message)
+}
+
+// pathPrompt 是这一处要问用户的那两行字。
+//
+// ⚠️ 每一个按钮给**自己**的那一份，不共用一句：下载目录问的是「下载的东西存到哪儿」，
+// 本地音乐目录问的是「音乐从哪儿来」，FFmpeg 问的是「那个可执行文件在哪儿」。
+// 共用一句就有一边在说错的话，而错的那句是直接弹在系统对话框上的。
+var pathPrompt = map[string][2]string{
+	"下载目录":      {"选择文件夹", "选一个用来保存下载内容的位置"},
+	"FFmpeg 路径": {"选择文件", "选一个 FFmpeg 可执行文件"},
+	"本地音乐目录":    {"选择音乐文件夹", "选一个文件夹，它的音频文件会出现在本地音乐里"},
 }
 
 // pickPath 弹文件框，把挑回来的路径交给 apply。
@@ -36,8 +47,9 @@ func (systemPathPicker) pick(parent *mygo.Window, dir bool) (string, error) {
 func (s *Shell) pickPath(what string, dir bool, apply func(string)) {
 	parent := s.win
 	picker := s.picker
+	title, message := pathPrompt[what][0], pathPrompt[what][1]
 	go func() {
-		path, err := picker.pick(parent, dir)
+		path, err := picker.pick(parent, dir, title, message)
 		if err != nil {
 			log.Printf("biu: 选%s失败：%v", what, err)
 		}
