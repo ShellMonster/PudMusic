@@ -132,12 +132,22 @@ func TestQuittingWhileTheStreamIsStillDownloading(t *testing.T) {
 // 地铁里发生的是前者，两者走的分支不同。
 func TestScanningSurvivesTheNetworkGoingAway(t *testing.T) {
 	f := newBiliFixture(t)
-	// 前三次轮询连不上，之后恢复成「还没扫」，再扫一下就成功。
+	// 网络好的时候：还没扫 → 还没扫 → 成功。
 	f.onScans(86101, 86101, 0)
 
-	net := newFlakyNet(3, "/qrcode/poll")
+	// ⚠️ 断网**按时间**造，不按次数。
+	//
+	// 按次数（「前三次连不上」）看着更准，实际是个 flaky：测试里的轮询间隔是
+	// 2 ms，三次断网总共六毫秒，而测试每 10 ms 才读一次状态——于是「重试」
+	// 那句提示完全可能在两次轮询之间被「等待扫码」盖过去，测试就红了，
+	// 而且是那种「跑十次红一次、还不知道为什么」的。
+	//
+	// 断 400 ms 就有四十次机会读到它，而这四百毫秒在用户那里是「地铁进隧道」。
+	outage := 400 * time.Millisecond
+	net := newFlakyNet(outage, "/qrcode/poll")
 	net.base = f.Server.Client().Transport
 	a := newTestAppWithBase(t, f, app.NewMemoryStore("test"), net)
+	begin := time.Now()
 	a.BeginLogin()
 
 	// 等二维码出来：申请二维码那一下网络是好的。
@@ -161,8 +171,12 @@ func TestScanningSurvivesTheNetworkGoingAway(t *testing.T) {
 	waitFor(t, 15*time.Second, "网络回来之后登录成功", func() bool {
 		return a.LoginState().Phase == app.LoginDone
 	})
-	if n := net.failed(); n != 3 {
-		t.Errorf("只真的断了 %d 次（want 3）——这一条测的不是「断网」，是一条没断的网", n)
+	// 防自己骗自己：一个一直放行的传输层也能让上面几条全绿。
+	if n := net.failed(); n < 3 {
+		t.Errorf("只真的断了 %d 次（want ≥3）——这一条测的不是「断网」，是一条没断的网", n)
+	}
+	if d := time.Since(begin); d < outage {
+		t.Errorf("整条只跑了 %v，断网那段（%v）根本没发生", d, outage)
 	}
 	if !a.LoggedIn() {
 		t.Error("阶段是登录成功，但拿不到登录态")
@@ -173,7 +187,7 @@ func TestScanningSurvivesTheNetworkGoingAway(t *testing.T) {
 	waitFor(t, 10*time.Second, "下载和看门狗都退出", func() bool { return liveStreamWorkers() == 0 })
 }
 
-// flakyNet 是一个会「断网」的传输层：前 fail 次指定路径的请求直接连不起来，
+// flakyNet 是一个会「断网」的传输层：在 until 之前，指定路径的请求直接连不起来；
 // 之后放行。
 //
 // ⚠️ 造的是 `*net.OpError`（dial 失败），不是返回一个 5xx 响应：地铁里
@@ -182,19 +196,18 @@ type flakyNet struct {
 	base  http.RoundTripper
 	only  string
 	mu    sync.Mutex
-	left  int
+	until time.Time
 	tried int
 }
 
-func newFlakyNet(fail int, pathContains string) *flakyNet {
-	return &flakyNet{only: pathContains, left: fail}
+func newFlakyNet(outage time.Duration, pathContains string) *flakyNet {
+	return &flakyNet{only: pathContains, until: time.Now().Add(outage)}
 }
 
 func (n *flakyNet) RoundTrip(r *http.Request) (*http.Response, error) {
 	if strings.Contains(r.URL.Path, n.only) {
 		n.mu.Lock()
-		if n.left > 0 {
-			n.left--
+		if time.Now().Before(n.until) {
 			n.tried++
 			n.mu.Unlock()
 			return nil, &net.OpError{Op: "dial", Net: "tcp",

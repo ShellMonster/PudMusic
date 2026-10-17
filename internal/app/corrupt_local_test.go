@@ -88,10 +88,14 @@ var corruptCases = []corruptCase{
 		},
 	},
 	{
-		name: "WAV 数据块抹掉", src: "stereo16.wav",
+		name: "WAV 数据块抹掉（短）", src: "stereo16.wav",
 		corrupt: func(t *testing.T, dir, good string) string {
-			b := readFile(t, good)
-			// 头 44 字节是 RIFF/WAVE/fmt/data/data 那几段；从 data 之后全是样本。
+			// 先把样本砍到 0.2 秒——这一条要等它「放完」才判得成（它解出来
+			// 是静音，不报错），素材是四秒的话光这一条就要等四秒，而它对整个
+			// 套件的要求是「别给别的测试添压」（全量并行跑的时候这里是一段
+			// 真实解码 + 真实输出）。
+			b := shortenWAV(t, readFile(t, good), 0.2)
+			// 头 44 字节是 RIFF/WAVE/fmt/data 那几段；从 data 之后全是样本。
 			for i := 44; i < len(b); i++ {
 				b[i] = 0x5A
 			}
@@ -274,4 +278,34 @@ func writeBytes(t *testing.T, dir, name string, b []byte) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// shortenWAV 把一份 WAV 砍到 seconds 秒，**顺手把两处长度改对**。
+//
+// 44 字节的 WAV 头：0-3 RIFF、4-7 总长、8-11 WAVE、12-15 fmt 、
+// 16-35 fmt 段、36-39 data、40-43 data 长度、44 起是样本。
+// 长度不改的话文件会被判成「声明 4 秒、实际 0.2 秒」，于是读到末尾时是一次
+// 截断——那验的是另一件事（截断必须报错），不是这一条要验的「脏样本当成静音放完」。
+func shortenWAV(t *testing.T, wav []byte, seconds float64) []byte {
+	t.Helper()
+	if len(wav) <= 44 {
+		t.Fatalf("这份 WAV 只有 %d 字节，没有样本可砍", len(wav))
+	}
+	byteRate := int(wav[28]) | int(wav[29])<<8 | int(wav[30])<<16 | int(wav[31])<<24
+	if byteRate <= 0 {
+		t.Fatalf("这份 WAV 的字节率是 %d，读不懂", byteRate)
+	}
+	n := byteRate * int(seconds*1000) / 1000
+	n = min(n, len(wav)-44)
+
+	out := append([]byte(nil), wav[:44+n]...)
+	put32 := func(off, v int) {
+		out[off] = byte(v)
+		out[off+1] = byte(v >> 8)
+		out[off+2] = byte(v >> 16)
+		out[off+3] = byte(v >> 24)
+	}
+	put32(40, n)         // data 段长度
+	put32(4, len(out)-8) // RIFF 总长（从第 8 字节算到文件尾）
+	return out
 }
