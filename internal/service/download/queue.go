@@ -144,13 +144,28 @@ type AddRequest struct {
 	// Ext 是扩展名（带点）。空 = 先按 `.m4a` 记一个**临时**名，真正开始
 	// 下之前按取流地址上的后缀重算（那一刻还没有地址，见 `Task.Ext`）。
 	Ext string
+	// Video 报「这一项是视频下载」。
+	//
+	// 它必须是入队时就说的，**不能等取流回来才认**：
+	//	取流是一次几百毫秒的网络往返，而入队是在界面线程上调的
+	//	落盘名（`.mp4` 还是 `.m4a`）和「要不要多留一段半成品的位置」
+	//	都得在**入队那一刻**定下来
+	//
+	// VideoQ 是点名要的那一档视频画质（B 站的 `qn` 号）。0 = 不点名。
+	// 和 `Video` 一样是入队时就定的——理由见 `Identity.VideoQ`。
+	VideoQ int
+	// 一旦定了就**不能改**：`Dest` 变了等于把已经下了一半的字节挪到另一个
+	// 文件名下面，而续传记的是分块下标、不是「文件里的偏移」——换个文件，
+	// 那些下标就全指错了位置（见 `Task.Dest`）。
+	Video bool
 }
 
 // Enqueue 把一首加进队列，返回它的快照。
 //
-// **同一首已经在队列里就返回那一个**，不会新加一个。判重用的是
-// `<bvid>|<cid>`（`Task.ID`）——同一首歌点了两次下载，用户要的是
-// 「就一个」，而不是两个任务抢同一个文件。已经在队列里的那一项：
+// **同一首同一件事已经在队列里就返回那一个**，不会新加一个。判重用的是
+// `Task.ID`（= `<bvid>|<cid>`，视频再多一个 `|video`，见 `TaskID`）——同一首歌点了两次
+// 下载，用户要的是「就一个」，而不是两个任务抢同一个文件；而**音频和视频是两个
+// 文件**，不能认成同一件。已经在队列里的那一项：
 //
 //	下完了   什么都不做，返回它
 //	排着/在下/暂停   什么都不做，返回它
@@ -160,7 +175,7 @@ func (m *Manager) Enqueue(req AddRequest) (Snapshot, error) {
 		// 不是网络错也不是 bug：调用方给错了参数，重试和排队都救不回来。
 		return Snapshot{}, fmt.Errorf("download: 这一首缺稿件 id 或分 P id（bvid=%q cid=%q）", req.Bvid, req.Cid)
 	}
-	id := TaskID(req.Bvid, req.Cid)
+	id := TaskID(req.Bvid, req.Cid, req.Video)
 
 	// ⚠️ 落盘名在**锁里面**算：它要看队列里别的任务认领了谁（`destFor`），
 	// 那张表在锁下才读得到。stat 的那几下一并在锁里——同名避让最多试 1000 次
@@ -189,10 +204,20 @@ func (m *Manager) Enqueue(req AddRequest) (Snapshot, error) {
 		ID:       id,
 		Title:    req.Title,
 		Cover:    req.Cover,
-		Identity: Identity{Bvid: req.Bvid, Cid: req.Cid},
+		Identity: Identity{Bvid: req.Bvid, Cid: req.Cid, Video: req.Video, VideoQ: req.VideoQ},
 		Ext:      ext,
 		Status:   StatusQueued,
 		AddedAt:  m.now(),
+		Video:    req.Video,
+	}
+	if req.Video {
+		// 第二那条流（音频）从零开始：一个字节都没下过。
+		// 建出来而不是等到交织那一刻再建，是因为 `destFor` 要多给它
+		// 留出半成品后缀的位置（见 `destFor` 的 `video`）。
+		t.Companion = &Companion{}
+		if ext == ".m4a" {
+			t.Ext = videoExt
+		}
 	}
 	// 先把自己放进表里再挑名字：`destFor` 认得 id，会跳过自己。
 	m.tasks[id] = t
@@ -282,7 +307,14 @@ func (m *Manager) Remove(id string) error {
 
 	// 半成品删掉。已经下完的（真的那首歌）留着——用户删的是队列里这一
 	// 项，不是硬盘上那首歌。
-	_ = os.Remove(partPath(dest))
+	//
+	// **两个半成品都要删**：视频有两个，只删主那个的话音频那几百 KB
+	// 永远躺在下载目录里，而界面上再没有任何东西指向它（`destFor` 的
+	// 注释里那四步孤儿场景）。
+	video := t.Video
+	for _, p := range partPathsOf(dest, video) {
+		_ = os.Remove(p)
+	}
 	m.notify()
 	return nil
 }
@@ -296,9 +328,11 @@ func (m *Manager) Clear() {
 		cancels = append(cancels, c)
 	}
 	dests := make([]string, 0, len(m.order))
+	videos := make([]bool, 0, len(m.order))
 	for _, id := range ids {
 		if t := m.tasks[id]; t != nil {
 			dests = append(dests, t.Dest)
+			videos = append(videos, t.Video)
 		}
 	}
 	m.mu.Unlock()
@@ -317,8 +351,10 @@ func (m *Manager) Clear() {
 	m.lastAt = map[string]time.Time{}
 	m.mu.Unlock()
 
-	for _, d := range dests {
-		_ = os.Remove(partPath(d))
+	for i, d := range dests {
+		for _, p := range partPathsOf(d, videos[i]) {
+			_ = os.Remove(p)
+		}
 	}
 	m.notify()
 }
@@ -367,10 +403,35 @@ func (m *Manager) Close(path string) error {
 	m.quit()
 	m.wg.Wait()
 
+	// 🔴 后台那条线退出时**可能没走完队列**：`loop` 的外层 select 命中
+	// `ctx.Done()` 就直接 return，还没轮到内层那个 `for`。那些项于是留在「排队中」。
+	//
+	// 而「排队中」是不该被存下去的语义——下次启动会**自动**接着下，用户关应用时
+	// 可没要求过这件事。`runOne` 在关着的时候会把捡到的那一项标成暂停（「下次接着
+	// 下」），但那是捡到才标，捡不到的那些没人管。实测这条竞态占 `go test` 的失败
+	// 率约八成（连跑五次红四次），而它本该是确定的。
+	//
+	// 所以这里补上确定的那一步：`loop` 已经退出，不会再有并发改状态。
+	m.pauseQueued()
+
 	if path == "" {
 		return nil
 	}
 	return m.Save(path)
+}
+
+// pauseQueued 把还在排队的项落到「暂停」。
+//
+// ⚠️ 必须在后台那条线退出之后（`Close` 里 `wg.Wait()` 之后）调：这时才不会有并发
+// 在改同一批状态。
+func (m *Manager) pauseQueued() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, t := range m.tasks {
+		if t != nil && t.Status == StatusQueued {
+			t.Status = StatusPaused
+		}
+	}
 }
 
 // ---- 后台那条线 ----
@@ -433,6 +494,16 @@ func (m *Manager) runOne(id string) {
 	m.mu.Lock()
 	t := m.tasks[id]
 	if t == nil || t.Status != StatusQueued || m.closed {
+		// 🔴 **关着的时候要把这一项标成暂停**，不能原样返回。早退不改状态的话：
+		// loop 的内层 `for` 不认 ctx.Done()，而 `nextQueued()` 只看 Status ——
+		// 于是这一项被无限次捡起来又放下，`Close` 里的 `wg.Wait()` **永远等不到
+		// 后台那条线**，应用退不出去（实测整包卡满 10 分钟超时）。
+		//
+		// 标成暂停也是对的语义：关应用时还排着队的，就是「下次接着下」的那一种
+		// （`persistable()` 对正在下的也是这么记的）。
+		if m.closed && t != nil && t.Status == StatusQueued {
+			t.Status = StatusPaused
+		}
 		m.mu.Unlock()
 		return
 	}
@@ -458,7 +529,12 @@ func (m *Manager) runOne(id string) {
 			t.Err = ""
 		case errors.Is(err, context.Canceled), errors.Is(err, ErrPaused):
 			// 暂停 / 应用退出：这不是失败，用户还要接着下。
-			if t.Status == StatusRunning {
+			//
+			// ⚠️ 判的是 `Running()` 而不是「等于 running」：交织那一下也
+			// 认取消（用户点了暂停 / 应用在退出），那时候状态已经是
+			// `StatusMuxing` 了——只判 `running` 的话那一行会永远停在
+			// 「交织中」，而按钮上的「继续」按下去也不动。
+			if t.Status.Running() {
 				t.Status = StatusPaused
 			}
 		default:
@@ -512,7 +588,7 @@ func (m *Manager) destFor(dir string, t *Task) string {
 		}
 		claimed[other.Dest] = true
 	}
-	return destFor(dir, t.Title, t.Ext, t.ID, claimed)
+	return destFor(dir, t.Title, t.Ext, t.ID, t.Video, claimed)
 }
 
 // identityOf 拿一项的资源身份，取流要用。
@@ -526,19 +602,20 @@ func (m *Manager) identityOf(id string) (Identity, bool) {
 	return t.Identity, true
 }
 
-// pendingChunks 返回还没下完的分块下标。
-func (m *Manager) pendingChunks(id string) []int {
+// pendingChunks 返回指定那条流还没下完的分块下标。
+func (m *Manager) pendingChunks(id string, companion bool) []int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t := m.tasks[id]
 	if t == nil {
 		return nil
 	}
-	done := make(map[int]bool, len(t.Chunks))
-	for _, i := range t.Chunks {
+	chunks := t.streamChunks(companion)
+	done := make(map[int]bool, len(chunks))
+	for _, i := range chunks {
 		done[i] = true
 	}
-	n := t.totalChunks()
+	n := totalChunks(t.streamLen(companion))
 	out := make([]int, 0, n)
 	for i := range n {
 		if !done[i] {
@@ -548,26 +625,33 @@ func (m *Manager) pendingChunks(id string) []int {
 	return out
 }
 
-// chunkBounds 给一块的闭区间。第二个返回值是「这一块现在还算不算数」。
-func (m *Manager) chunkBounds(id string, i int) (int64, int64, bool) {
+// chunkBounds 给指定那条流的一块的闭区间。第二个返回值是「这一块现在
+// 还算不算数」。
+func (m *Manager) chunkBounds(id string, companion bool, i int) (int64, int64, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t := m.tasks[id]
 	if t == nil {
 		return 0, 0, false
 	}
-	return t.chunkRange(i)
+	return chunkRangeOf(t.streamLen(companion), i)
 }
 
-// finishChunk 记下一块下完了，并报一次进度。
-func (m *Manager) finishChunk(id string, i int) {
+// finishChunk 记下指定那条流的一块下完了，并报一次进度。
+func (m *Manager) finishChunk(id string, companion bool, i int) {
 	m.mu.Lock()
 	t := m.tasks[id]
 	if t == nil {
 		m.mu.Unlock()
 		return
 	}
-	t.markChunk(i)
+	if companion {
+		if t.Companion != nil {
+			t.Companion.Chunks, _ = markChunkOf(t.Companion.Chunks, i)
+		}
+	} else {
+		t.markChunk(i)
+	}
 	m.mu.Unlock()
 	m.noteProgress(id)
 }
@@ -608,6 +692,13 @@ func extOr(ext string) string {
 	return ext
 }
 
+// videoExt 是视频下载的落盘扩展名。
+//
+// ⚠️ **不能按取流地址的后缀来**（那是音频那一票的做法，见 `extFor`）：
+// 视频落盘的不是任何一条流，而是**交织出来的那个 MP4**。两条源流都是
+// `.m4s`，而 `歌.m4s` 是一个谁也播不了的壳。
+const videoExt = ".mp4"
+
 // partPath 是半成品的路径。
 //
 // **在最终文件名后面加 `.part`，下完才改名**。理由有两条，缺一条都不够：
@@ -625,6 +716,51 @@ func partPath(dest string) string { return dest + partSuffix }
 // partSuffix 是半成品的后缀。挑落盘名时要给它预留位置（见 `destFor`），
 // 不预留的话长歌名的 `.part` 会顶破文件名上限。
 const partSuffix = ".part"
+
+// companionPartPath 是第二那条流的半成品。
+//
+// 就是主半成品后面再接一段：`<歌>.mp4.part` 和 `<歌>.mp4.part.audio`。
+// 用户在自己的下载目录里一眼能看出这两个是同一条视频的两半，而删的时候
+// 是一并删的（见 `Remove` / `Clear`）。
+//
+// ⚠️ 视频任务的**主**半成品装的是视频流，第二那半装的是音频流。
+// 两者的顺序不能反——它们的名字是这一票定的，而交织那一步是按
+// 「主 = 视频、伴 = 音频」去读这两个文件的（见 `runMux`）。
+func companionPartPath(dest string) string { return partPath(dest) + companionSuffix }
+
+// companionSuffix 是第二那条流那一段的记号。
+const companionSuffix = ".audio"
+
+// mixPartPath 是**交织产物**的临时路径：`<歌>.mp4.part.mix`。
+//
+// # ⚠️ 它必须和那两条源流的半成品**不是一个文件**
+//
+// 交织是「读两条源流 → 写一个产物」。而 mp4ff 那一侧是**边扫源记偏移、
+// 边写产物**，写产物和读源的数据是交错发生的——产物路径一旦等于某条源
+// 流的路径，`os.Create` 就在读之前把那一条**截断了**，读回来的全是刚
+// 写进去的字节。出来的文件**结构完全正常**：两条轨、对的 avcC/esds、
+// 对的采样数，只有画面的内容是乱的。
+//
+// 三条各有各的名字，谁也不会盖到谁。名字总长（`.part.mix` 9 个字符）
+// 也短过 `destFor` 给视频预留的 `.part.audio`（11 个），所以落盘名
+// 的 255 字节预算一个字都不用改。
+func mixPartPath(dest string) string { return partPath(dest) + mixSuffix }
+
+// mixSuffix 是交织产物那一段的记号。
+const mixSuffix = ".mix"
+
+// partPathsOf 是这一项在盘上的全部半成品。
+//
+// 音频任务只有一个。视频有三个：两条源流各一个，加交织的产物。
+// `Remove` / `Clear` 靠它把**每一个**都删掉——少删一个就是一份孤儿
+// （见 `Remove` 里那段四步的场景）。
+func partPathsOf(dest string, video bool) []string {
+	paths := []string{partPath(dest)}
+	if video {
+		paths = append(paths, companionPartPath(dest), mixPartPath(dest))
+	}
+	return paths
+}
 
 // drop 从 ids 里去掉一个。
 func drop(ids []string, id string) []string {

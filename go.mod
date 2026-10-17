@@ -3,6 +3,7 @@ module github.com/ShellMonster/Biu_Go
 go 1.27.1
 
 require (
+	github.com/Eyevinn/mp4ff v0.60.0
 	github.com/ebitengine/purego v0.11.1
 	github.com/egoist/mygo v0.5.5
 	github.com/mewkiz/flac v1.0.14
