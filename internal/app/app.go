@@ -506,9 +506,15 @@ func (a *App) tick() {
 			}
 
 			a.mu.Lock()
+			// ended 是「这一路从在放变成不在放」——绝大多数场合是歌放完了。
+			//
+			// ⚠️ 它要认准「是这一台播放器」：换歌时锁里就把 `a.player` 换成
+			// 新的了，拿旧那台的「不���放」去判新歌放完了，是白报一次。
+			ended := false
 			// 位置和 playing 是**这一台播放器**的：这中间换歌了（换歌在锁里把
 			// `a.player` 换成新的），就不能把旧那台的位置写到新歌头上。
 			if p != nil && live && a.player == p {
+				ended = a.playing && !playing
 				a.position, a.playing = pos, playing
 			}
 			// 锁屏上的进度条是**系统自己外推**出来的（Apple 头文件原话），
@@ -517,13 +523,18 @@ func (a *App) tick() {
 			//
 			// ⚠️ 只在**在放**的时候校正：暂停时系统不外推，而位置一变
 			// publishMedia 那一次就已经报过了。
+			//
+			// ⚠️ 而「歌放完了」只能靠 ended 那一支：结束那一刻恰好既不是
+			// 「语义变化」（歌名时长什么都没变），校正也已经因为不再在放
+			// 而停了。漏了它的症状是锁屏上永远停在「正在播放」——界面这边
+			// 一切正常，只有控制中心和锁屏是错的。
 			publish := a.mediaSink != nil && a.playing && now.Sub(a.mediaAt) >= mediaPublishEvery
 			if publish {
 				a.mediaAt = now
 			}
 			a.mu.Unlock()
 
-			if publish {
+			if publish || ended {
 				a.publishMedia()
 			}
 			if live && wake != nil {
