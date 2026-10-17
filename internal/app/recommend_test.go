@@ -143,12 +143,15 @@ func recommendOn(t *testing.T, b *homeBili) *Recommend {
 }
 
 const (
-	homeRegionFeedPath  = "/x/web-interface/region/feed/rcmd"
-	homeMusicRankPath   = "/x/centralization/interface/music/comprehensive/web/rank"
-	homeNewMusicPath    = "/x/centralization/interface/new/music"
-	homeNewBannerPath   = "/x/centralization/interface/new/music/banner"
-	homeArchivedOneJSON = `{"aid":11,"bvid":"BV1a","cid":5,"title":"一","cover":"https://c/1.jpg","author":{"mid":1,"name":"UP 一"},"stat":{"view":10}}`
-	homeArchivedTwoJSON = `{"aid":22,"bvid":"BV2b","cid":6,"title":"二","cover":"https://c/2.jpg","author":{"mid":2,"name":"UP 二"},"stat":{"view":20}}`
+	homeRegionFeedPath = "/x/web-interface/region/feed/rcmd"
+	homeMusicRankPath  = "/x/centralization/interface/music/comprehensive/web/rank"
+	homeNewMusicPath   = "/x/centralization/interface/new/music"
+	homeNewBannerPath  = "/x/centralization/interface/new/music/banner"
+	// ⚠️ aid / cid **写成字符串**：这一族的接口真会这么发（Biu 上游
+	// `src/service/service.md` 里音乐榜那份真实返回，详见 `bili.flexInt64`）。
+	// 这一组原来全写数字，于是真网上「流行」整档解不出来时，这一组照样全绿。
+	homeArchivedOneJSON = `{"aid":"115182114246511","bvid":"BV1a","cid":"32447137298","title":"一","cover":"https://c/1.jpg","author":{"mid":1,"name":"UP 一"},"stat":{"view":10}}`
+	homeArchivedTwoJSON = `{"aid":"115182114246512","bvid":"BV2b","cid":"32447137299","title":"二","cover":"https://c/2.jpg","author":{"mid":2,"name":"UP 二"},"stat":{"view":20}}`
 )
 
 // archivesBody 造一份分区推荐的 data 段。
@@ -167,8 +170,8 @@ func TestEachTabAsksForItsOwnThing(t *testing.T) {
 		case homeRegionFeedPath:
 			return 0, archivesBody(homeArchivedOneJSON)
 		case homeMusicRankPath:
-			return 0, `{"list":[{"id":7,"music_title":"榜上那首","bvid":"BV1r","aid":7,"cid":7,` +
-				`"related_archive":{"bvid":"BV1ra","cid":9,"title":"榜上那首的稿件",` +
+			return 0, `{"list":[{"id":7,"music_title":"榜上那首","bvid":"BV1r","aid":"115182114246511","cid":"32447137298",` +
+				`"related_archive":{"bvid":"BV1ra","cid":"115219862986158","title":"榜上那首的稿件",` +
 				`"username":"榜作者","uid":3,"vv_count":5,"duration":100}}]}`
 		default:
 			return -404, "没有这个接口"
@@ -256,9 +259,11 @@ func TestWhatCannotBeIdentifiedIsDropped(t *testing.T) {
 	if items[0].ID != "BV1" || items[1].ID != "aid:9" {
 		t.Errorf("身份 = %q / %q", items[0].ID, items[1].ID)
 	}
-	// ⚠️ 拿不出 bvid 的那一行**画得出来、放不了**：界面上据此不给「播放」。
-	if items[1].CanPlay {
-		t.Error("没有 bvid 的那一行被判成能放——用户按下去只会听到一句「还不能放」")
+	// ⚠️ 拿不出 bvid 的那一行**画得出来、放不了**（`RecommendItem.Item` 上写了
+	// 为什么界面上没有把它画灰）。这里钉住的是「它确实没有 bvid」，不是「它被判成
+	// 能放」——那个判据在共用控件里，首页给不了。
+	if items[1].Item.Bvid != "" {
+		t.Errorf("没有身份的那一条却带着 bvid：%+v", items[1].Item)
 	}
 	if items[0].Item.Bvid != "BV1" {
 		t.Errorf("播放项没有带上 bvid：%+v", items[0].Item)
@@ -277,11 +282,12 @@ func TestNewMusicPutsTheBannerFirstAndDropsWhatRepeats(t *testing.T) {
 	f.on(func(path string, _ url.Values) (int, string) {
 		switch path {
 		case homeNewBannerPath:
-			return 0, `{"list":[{"music_id":"m1","archive_title":"头图那首","bvid":"BV1ban","aid":6,"cid":6,"author":"头图作者"}]}`
+			return 0, `{"list":[{"music_id":"m1","archive_title":"头图那首","bvid":"BV1ban","aid":"115219862986158","cid":"115219862986158","author":"头图作者"}]}`
 		case homeNewMusicPath:
 			// 第一条和头图位是同一首（B 站两个接口会给出重叠的那一批）。
-			return 0, `{"list":[{"id":5,"music_title":"列表那首","bvid":"BV1ban","aid":6,"cid":6},` +
-				`{"id":6,"music_title":"第二首","bvid":"BV1new","aid":7,"cid":7}]}`
+			return 0, `{"list":[{"id":5,"music_title":"列表那首","bvid":"BV1ban","aid":"115219862986158","cid":"115219862986158"},` +
+				`{"id":6,"music_title":"第二首","bvid":"BV1new","aid":"115182114246511","cid":"32447137298"}]}`
+
 		default:
 			return -404, "没有这个接口"
 		}

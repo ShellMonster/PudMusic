@@ -74,11 +74,15 @@ type RecommendItem struct {
 	Duration time.Duration
 	// View 是播放量。
 	View int64
-	// CanPlay 报这一条能不能放：没有稿件就没有 bvid，而取流要 bvid
-	// （见 `playableOnline`）。界面上据此不给「播放」，而不是让用户按了
-	// 才听一句「还不能放」。
-	CanPlay bool
 	// Item 是播放和右键菜单真正用的那一项。已是 `Source: "online"`。
+	//
+	// ⚠️ **榜上有些条目没有稿件**（纯音乐条目，`related_archive` 是空的），
+	// 那种行画得出来（身份走榜上那一条的 id）而**放不了**：没有 bvid，取流要
+	// bvid。用户按了「播放」会得到一句「这一首还不能放：缺稿件 id」。
+	//
+	// 界面上**没有**把那一项画灰：`widgets/list` 的行菜单是搜索结果、新歌速递、
+	// 首页共用的一份，它没有「按行置灰」这一档（见 `menuItems`）。要给就得改那个
+	// 共用控件，那是另一件事——上游 Biu 在这一页上同样不给纯音乐条目置灰。
 	Item Item
 }
 
@@ -108,8 +112,7 @@ func recommendItems(in []bili.RecommendItem) (out []RecommendItem, dropped int) 
 			ID: id, Title: it.Title, Cover: it.Cover,
 			Owner: it.Owner, OwnerMid: it.OwnerMid,
 			Duration: it.Duration, View: it.View,
-			CanPlay: it.Bvid != "",
-			Item:    recommendItem(it),
+			Item: recommendItem(it),
 		})
 	}
 	return out, dropped
@@ -142,8 +145,8 @@ func recommendID(it bili.RecommendItem) string {
 // recommendItem 把一条推荐变成能进队列的那一项。
 //
 // 没有 bvid 时给的是 `Source: "online"`、Bvid 空串的项——它进不了队列，
-// 而界面上那一行本来就不给「播放」（`RecommendItem.CanPlay`），所以不会有
-// 用户按到它。
+// 而用户按了播放会得到一句「这一首还不能放：缺稿件 id」（见
+// `RecommendItem.Item` 上那一段）。
 func recommendItem(it bili.RecommendItem) Item {
 	item := onlineItem(it.Bvid, it.Cid, it.Title, it.Cover)
 	item.Artist = it.Owner

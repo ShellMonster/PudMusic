@@ -366,6 +366,55 @@ func TestTheNewMusicBlockFailsOnItsOwn(t *testing.T) {
 	}
 }
 
+// TestThePopTabReadsThePayloadBiliActuallySends 盯**真实形态**的返回能从
+// 「流行」那一档一路走到画面上。
+//
+// ⚠️ 这一条是补一个真出过事的洞：这一族接口的 `aid` / `cid` / `uid` 真会发成
+// **JSON 字符串**（Biu 上游 `src/service/service.md` 里音乐榜那份原样返回的参数），
+// 而服务层最早按 `int64` 解，于是「流行」整档解码失败 → 界面上是「这一块没拉出来
+// / 推荐接口的返回读不懂 / 重试加载流行推荐」。那时候这一包 26 条用例全绿——**它们
+// 喂的全是自己编的数字**。
+//
+// 所以这里不自己编：直接照抄那份真实样件（歌名/UP 名/id 都用它给的）。
+func TestThePopTabReadsThePayloadBiliActuallySends(t *testing.T) {
+	b := newUIExplore(t)
+	homeArchives(b)
+	// 照抄 Biu 上游 `src/service/service.md` 里 `music/comprehensive/web/rank`
+	// 那一份返回（只改了封面地址，免得测试去连真网）。
+	b.on(uiHomeMusicRank, func(w http.ResponseWriter, _ *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{"list": []map[string]any{{
+			"music_title": "I Met A Boy",
+			"music_id":    "MA584087591096195920",
+			"cid":         "32447137298",
+			"aid":         "115182114246511",
+			"bvid":        "BV1DFHdzjEkK",
+			"author":      "Mimi Webb",
+			"cover":       "https://f/rank.jpg",
+			"id":          int64(3593581),
+			"score":       int64(212),
+			"related_archive": map[string]any{
+				"bvid": "BV1Nhp4z4EVa", "cid": "115219862986158", "aid": "115219862986158",
+				"cover": "https://f/arc.jpg", "title": "【MV】「I Met A Boy」",
+				"uid": int64(384580074), "username": "fallinforjulia",
+				"vv_count": int64(75), "duration": int64(179), "fname": "MV",
+			},
+		}}})
+	})
+	_, tt, _ := newHomeShell(t, b)
+
+	clickTab(t, tt, homePopTab)
+	waitFrames(t, tt, "「流行」那一档画出歌来", func() bool {
+		return showsText(tt, "【MV】「I Met A Boy」")
+	})
+	// 失败那一支一个字都不许有：它就是当时看到的那个症状。
+	if showsText(tt, "这一块没拉出来") {
+		t.Errorf("真实形态的返回没能读出来，文字有 %q", tt.Texts())
+	}
+	if !showsText(tt, "fallinforjulia") {
+		t.Errorf("挂着的稿件的 UP 名没画出来，文字有 %q", tt.Texts())
+	}
+}
+
 // TestLoggingInReloadsTheRecommendations 盯换账号重来。
 //
 // ⚠️ 推荐是**按账号**的：B 站拿 mid 算口味。带着没登录时那一批继续给登录后的
