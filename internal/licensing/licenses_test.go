@@ -121,15 +121,23 @@ func TestTheShippedLicenseTextsAreTheRealOnes(t *testing.T) {
 	root := repoRoot(t)
 	licensesDir := filepath.Join(root, filepath.FromSlash(filepath.Dir(NoticesRelPath)))
 
+	// 依赖表**在循环外面**问一次。
+	//
+	// `BuildModules` 跑的是 `go list`，参数每一轮都一样，出来的表也就每一轮都一样
+	// ——原来在循环里问，等于把同一个 `go list` 跑了「清单里有多少个模块」遍。
+	// 那是这个包里最贵的一步（`-race` 下十几秒），而它一次就够。
+	//
+	// 判据一个字没动：每一个模块仍然逐一比对它随包发出的原文和源头那份。
+	mods, err := BuildModules(context.Background(), root, os.Environ(), "darwin", "arm64")
+	if err != nil {
+		t.Fatalf("go list：%v", err)
+	}
+
 	for _, e := range loadManifest(t) {
 		want, err := os.ReadFile(filepath.Join(licensesDir, e.File))
 		if err != nil {
 			t.Errorf("%s 的许可证原文 %s 不在包里：%v", e.Module, e.File, err)
 			continue
-		}
-		mods, err := BuildModules(context.Background(), root, os.Environ(), "darwin", "arm64")
-		if err != nil {
-			t.Fatalf("go list：%v", err)
 		}
 		var dir string
 		for _, m := range mods {

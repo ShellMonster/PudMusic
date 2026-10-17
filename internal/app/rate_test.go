@@ -84,6 +84,45 @@ func near(got, want, tol float64) bool {
 	return r >= 1/tol && r <= tol
 }
 
+// realtimeFloor 是「1 倍速下，歌里的时间至少要走这么快」的下限。
+//
+// # 为什么这一族量倍率之前要先过这一关
+//
+// 下面几条量的是**比值**：同一首歌上量 1 倍速和另一个倍速的两个窗口，比值要是
+// 那个倍率。机器慢会让两个窗口**一起**慢、比值不变——这正是这些断言写成比值
+// 而不是「一秒该走几秒」的原因。
+//
+// 但慢到某个程度就不成立了。播放走系统音频输出，那条回调被操作系统整个饿着的
+// 时候（这台机器上同时跑着好几份 `-race`，负载压到 300 以上），某些窗口拿得到
+// CPU、某些拿不到，**比值就成了噪声**。实测同一轮里 0.5 倍速那个窗口只走到
+// 0.086、原速那个走到 0.331——比值 0.26，既不是 0.5（没套上）也不是别的任何倍率。
+// 那种时候报「倍率没套上」是把机器的事说成代码的事，下一个人会照着去改
+// `App.tick`，改完还是红的。
+//
+// 0.6 是两头量的：1 倍速的定义就是 1.0，掉到 0.6 以下时比值里的机器噪声已经和要
+// 量的东西一样大。真要是**1 倍速本身**走慢了，那该由另一条单独断（它是进度条
+// 时钟的问题，不是倍率的问题）——混在这一族里只会让它既报不出倍率的问题、
+// 又盖住时钟的问题。
+const realtimeFloor = 0.6
+
+// requireRealtime 量一段原速窗口，顺带确认这台机器放得动实时音频。
+//
+// 放不动就**跳过**——跳过说的是「这个环境测不了这条」，不是「这条过了」。
+// 跳过的信息里带着实测值，等负载降下来重跑就行。
+//
+// 返回的是基准值本身，调用方拿它当比值的分母。
+func requireRealtime(t *testing.T, a *app.App, from, to time.Duration) float64 {
+	t.Helper()
+	v := secPerSong(t, a, from, to)
+	if v < realtimeFloor {
+		t.Skipf("这台机器放不动实时音频：1 倍速下歌里的时间只走了每秒 %.3f"+
+			"（下限 %.1f）。倍速这一族量的是两个窗口的比值，音频回调被饿着时比值"+
+			"是噪声，报「倍率没套上」是把机器的事说成代码的事——等负载降下来再跑。",
+			v, realtimeFloor)
+	}
+	return v
+}
+
 // TestSetRateIsSnappedAndClamped 盯倍率落在档位上。
 //
 // 设置和键盘都可能送来 1.13 这种值，而算法只认七档：吸到最近的一档，
@@ -121,8 +160,10 @@ func TestTheClockFollowsTheRate(t *testing.T) {
 	}
 
 	// 基准：原速。等到三秒才开始量——开头那段是输出现开 + 预解缓冲，不算数。
+	// requireRealtime 在这里兼做一次「机器放得动实时音频吗」的自检：它把这个
+	// 基准值原样还回来，下面就拿它当分母。
 	a.SetRate(1)
-	one := secPerSong(t, a, 3*time.Second, 5*time.Second)
+	one := requireRealtime(t, a, 3*time.Second, 5*time.Second)
 
 	a.SetRate(2)
 	// 换档之后要越过那一圈预解缓冲（≈1 秒的输出，仍是旧倍率铺的）才开始量。
@@ -158,6 +199,13 @@ func TestRateIsRememberedBeforeAnyTrackIsOpen(t *testing.T) {
 		t.Fatalf("刚开出来就有歌了（%+v）", st)
 	}
 
+	// 先用第一首量一段原速当基准（见 requireRealtime）。这一步不碰这一条要验的
+	// 东西：此刻倍率还是 1，「先按倍率再开歌」的走法在下面一步才正式开始。
+	if err := a.Open(longWav(t, "量基准的一首.wav")); err != nil {
+		t.Fatal(err)
+	}
+	requireRealtime(t, a, 3*time.Second, 5*time.Second)
+
 	a.SetRate(2)
 	if err := a.Open(longWav(t, "先按后放.wav")); err != nil {
 		t.Fatal(err)
@@ -190,9 +238,13 @@ func TestRateSurvivesTrackChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	playing(t, a, "第一首")
-	a.SetRate(2)
 
-	before := secPerSong(t, a, 3*time.Second, 5*time.Second)
+	// 先在原速上量一段，确认这台机器放得动实时音频（见 requireRealtime），再量
+	// 倍速。窗口往后挪是因为原速那一段已经占掉了歌的前五秒。
+	requireRealtime(t, a, 3*time.Second, 5*time.Second)
+
+	a.SetRate(2)
+	before := secPerSong(t, a, 7*time.Second, 9*time.Second)
 
 	a.Next()
 	playing(t, a, "第二首")
@@ -230,6 +282,15 @@ func TestOnlineTrackKeepsTheRate(t *testing.T) {
 	f.onPlayURL(dashFor(cdnURL(f.URL, "a.wav", 2*time.Hour), int(bili.QualityHigh320), 110836))
 
 	a := newOnlineApp(t, f, t.TempDir())
+
+	// 先在原速上把同一首流放一遍，确认这台机器放得动实时音频（见 requireRealtime）。
+	if err := a.Enqueue(onlineItem("BV1xx", "123", "在线的一首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "在线的一首")
+	requireRealtime(t, a, 3*time.Second, 5*time.Second)
+
+	// 真正要验的那一遍：先按倍率再开这一首。
 	a.SetRate(2)
 	if err := a.Enqueue(onlineItem("BV1xx", "123", "在线的一首")); err != nil {
 		t.Fatal(err)

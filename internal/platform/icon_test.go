@@ -2,9 +2,11 @@ package platform
 
 import (
 	"bytes"
+	"image"
 	"image/png"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -50,6 +52,30 @@ func readIconSource(t *testing.T) []byte {
 		t.Fatalf("读不到 %s：%v", iconSourcePath, err)
 	}
 	return b
+}
+
+// iconCache 按尺寸记住画好的图。
+//
+// # 为什么值得缓存
+//
+// `AppIcon(size)` 是在 size×4 的超采样画布上逐像素画一遍（`iconSupersample`），
+// 1024 那一档就是 4096² ≈ 1670 万个像素，每个像素还走一次 `SetNRGBA`。代价随
+// 边长的**平方**走，所以尺寸集里最贵的那几张占了大头：尺寸表里 256 出现两次、
+// 1024 出现两次，再加后面三条各画一次 1024/512——最贵那张图一轮下来画了四遍。
+//
+// 缓存**不改验的东西**：`AppIcon` 是纯函数（同一个尺寸画出来永远是同一张图，
+// 没有随机也没有外部状态），每一条仍然逐像素检查同一张图，只是这张图不再重画。
+// 尺寸集里该走的每一档一档都还在走。
+var iconCache sync.Map // int → *image.NRGBA
+
+// cachedIcon 是 AppIcon(size)，同一尺寸只画一次。
+func cachedIcon(size int) *image.NRGBA {
+	if v, ok := iconCache.Load(size); ok {
+		return v.(*image.NRGBA)
+	}
+	img := AppIcon(size)
+	iconCache.Store(size, img)
+	return img
 }
 
 // TestTheSourceIconIsBigEnoughForEverySize 钉住「源图至少 1024」。
@@ -113,7 +139,7 @@ func TestEverySizeInTheSetStillReadsAsAPlayer(t *testing.T) {
 // checkSizeReadsAsAPlayer 是上面那条的一部分，按尺寸跑好让报错直接点名是哪一档。
 func checkSizeReadsAsAPlayer(t *testing.T, size int) {
 	t.Helper()
-	img := AppIcon(size)
+	img := cachedIcon(size)
 	if got := img.Bounds(); got.Dx() != size || got.Dy() != size {
 		t.Fatalf("%d：画出来是 %dx%d", size, got.Dx(), got.Dy())
 	}
@@ -152,7 +178,7 @@ func checkSizeReadsAsAPlayer(t *testing.T, size int) {
 // 颜色**这两类坏图是打包之后才看得出来的，症状是 Dock 上一个空白图标或者一块
 // 纯色方块——没有一处报错。
 func TestTheIconIsNotOneFlatColor(t *testing.T) {
-	img := AppIcon(1024)
+	img := cachedIcon(1024)
 	first := true
 	var firstColor [4]uint8
 	distinct := 0
@@ -178,7 +204,7 @@ func TestTheIconIsNotOneFlatColor(t *testing.T) {
 // macOS 的图标形状**就是那块圆角方块**，不是系统去裁的。角不透明的话，Dock 上
 // 就是一个没有圆角的绿方块（Windows 上反而不难看，macOS 上很显眼）。
 func TestTheCornersAreTransparent(t *testing.T) {
-	img := AppIcon(1024)
+	img := cachedIcon(1024)
 	pts := [][2]int{{0, 0}, {1023, 0}, {0, 1023}, {1023, 1023}}
 	for _, p := range pts {
 		if c := img.NRGBAAt(p[0], p[1]); c.A != 0 {
@@ -200,7 +226,7 @@ func TestTheCornersAreTransparent(t *testing.T) {
 //
 // 判据是左右两半的白像素数：右尖的播放键右侧几乎没有白像素，左半边是整条竖边。
 func TestTheTrianglePointsRight(t *testing.T) {
-	img := AppIcon(512)
+	img := cachedIcon(512)
 	var left, right int
 	for y := range 512 {
 		for x := range 512 {
