@@ -92,13 +92,26 @@ func open(t *testing.T, name string) *flacdec.Decoder {
 }
 
 // readAll decodes everything the decoder will give.
+//
+// 这一份**留**下样本：真正逐样本比对解码正确性的用例走它。
 func readAll(t *testing.T, d *flacdec.Decoder) []float32 {
 	t.Helper()
-	out, err := readAllErr(d)
-	if err != io.EOF {
-		t.Fatalf("decode ended with %v, want io.EOF", err)
+	ch := d.Channels()
+	buf := make([]float32, 4096*ch)
+	var out []float32
+	for {
+		n, err := d.Read(buf)
+		out = append(out, buf[:n]...)
+		if err == io.EOF {
+			return out
+		}
+		if err != nil {
+			t.Fatalf("decode ended with %v, want io.EOF", err)
+		}
+		if n == 0 {
+			t.Fatal("decode made no progress")
+		}
 	}
-	return out
 }
 
 // readSome decodes at most frames frames, for the seek tests.
@@ -123,18 +136,29 @@ func readSome(t *testing.T, d *flacdec.Decoder, frames int) []float32 {
 	return out
 }
 
-func readAllErr(d *flacdec.Decoder) ([]float32, error) {
+// readAllErr 把解码器读到完，报读出来的**帧数**和最后一个错误。
+//
+// # 为什么它不留样本
+//
+// 留样本这一族里最贵的是截断那几个用例：同一个 fixture 的**每一个**帧边界都要
+// 新开一个解码器把那个前缀整个解一遍（stereo16 四十三个边界，平均每个解二十来
+// 帧），而它们要的只是「解到底之后是什么错」。照 `readAll` 那样把样本 append
+// 下来，「攒样本」这一件事自己就是 O(n²)：光追加就写掉上百万个 float32，每次
+// 扩容还要把已有的整段拷一遍。`-race` 下这一笔和解码本身一个量级——而它一个字
+// 都验不了。
+//
+// 帧数够那些调用点用：判空（「一帧都没出」）和判错，两样都只需要它。
+func readAllErr(d *flacdec.Decoder) (frames int, err error) {
 	ch := d.Channels()
 	buf := make([]float32, 4096*ch)
-	var out []float32
 	for {
 		n, err := d.Read(buf)
-		out = append(out, buf[:n]...)
+		frames += n / ch
 		if err != nil {
-			return out, err
+			return frames, err
 		}
 		if n == 0 {
-			return out, io.ErrNoProgress
+			return frames, io.ErrNoProgress
 		}
 	}
 }

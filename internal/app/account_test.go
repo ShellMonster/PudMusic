@@ -232,13 +232,26 @@ func writeFixtureJSON(t *testing.T, w http.ResponseWriter, code int, msg string,
 // 用一个裸的 http.Client 就等于把要验的那段绕过去了。
 func newTestApp(t *testing.T, f *biliFixture, store app.Store) *app.App {
 	t.Helper()
+	return newTestAppWithBase(t, f, store, nil)
+}
+
+// newTestAppWithBase 是 newTestApp 加上「能换掉最底下那个传输层」。
+//
+// base 传 nil = 用 fixture 自带的那份（它认识那张自签证书）。要造「断网」
+// 的时候把一个会失败的传输层递进来——白名单、CSRF、cookie jar 这些中间层
+// 一个都不少，断网才断在真的那一层上。
+func newTestAppWithBase(t *testing.T, f *biliFixture, store app.Store, base http.RoundTripper) *app.App {
+	t.Helper()
 	a := app.New()
 	t.Cleanup(a.Close)
 
 	// Base 用 httptest 自带的那份 transport——它认识那张自签证书。
 	// 用默认的话会 TLS 握手失败，而那个失败跟被测的逻辑无关。
+	if base == nil {
+		base = f.Server.Client().Transport
+	}
 	transport := &app.CredentialTransport{
-		Base:   f.Server.Client().Transport,
+		Base:   base,
 		Policy: app.DefaultInjectPolicy(),
 	}
 	// fixture 的请求打在 127.0.0.1 上，而白名单只认 B 站——
