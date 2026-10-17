@@ -1,9 +1,9 @@
 // 设置页的第一个 Tab：常规。照 Biu 的 `src/pages/settings/system-settings.tsx`
 // 逐段抄，顺序也照抄（外观 / 播放 / 下载 / 搜索 / 系统）。
 //
-// 这一份里没有的：Biu 的「关于应用」那一段（版本号 + 检查更新 + 导入导出）。
-// 检查更新是 PLAN 9.9、导入导出是 9.12，都还没做——**摆一个按了只说「还没做」的
-// 按钮比不摆更糟**（用户分不清「还没做」和「按了没用」），所以整段不摆。
+// 这一份里没有的：Biu 的「关于应用」那一段里的**导入导出配置**（PLAN 9.12）。
+// **摆一个按了只说「还没做」的按钮比不摆更糟**（用户分不清「还没做」和「按了没用」）。
+// 那之外的「关于应用」（版本号 + 检查更新 + 更新日志弹窗）在 update_entry.go。
 package ui
 
 import (
@@ -96,6 +96,16 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 	s.pickTrayNote(c)
 	s.settingRow(c, "开机自启", "系统登录后自动启动应用",
 		func() { s.pickAutoStart(c, st, ro) })
+
+	// 「关于应用」摆在最后，照 Biu 的 `system-settings.tsx` 那一段的顺序。
+	//
+	// ⚠️ 它**不是** `settingRow`，也不吃 `ro`：更新那一摊的状态在 `App` 上，不在
+	// 设置文件里，而「只读」保护的是**设置文件**——更新器写的是自己那一份
+	// （`app-update.json`），从没碰过用户的 `app-settings.json`。让这一格跟着
+	// `ro` 变灰，会在「设置来自更新的版本」这一个场景里，把一个本来完全可用的
+	// 更新入口关掉。
+	s.settingSectionEnd(c)
+	s.settingsUpdate(c, s.app.UpdateSnapshot())
 }
 
 // pickSwitch 是一个开关行。set 拿到的是这一帧开关上的新值。

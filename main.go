@@ -33,6 +33,13 @@ func main() {
 	// 文件监听关掉」，而那要走 App.Close（退出流程里跑的）。
 	ui.MountLocalMusic(a)
 
+	// 自动更新也挂在开窗口之前：`mygo.Updater.Enabled()` 要在应用旁边建一个
+	// 临时目录试写，那是阻塞 IO，而它的结果（能不能更新）要在界面第一帧上就
+	// 是对的。真正开始查是 `ui.Run` 的 WhenReady 里（见那里）。
+	if err := ui.MountUpdates(a); err != nil {
+		log.Printf("biu: 挂自动更新失败：%v", err)
+	}
+
 	// 下载也挂在开窗口之前：它要读盘（恢复上次的队列）。取流零件
 	// （`MountStreaming` 那个）可以晚一点挂，缺了也只是点了下载时给一句
 	// 人话，而不会开窗就报错。

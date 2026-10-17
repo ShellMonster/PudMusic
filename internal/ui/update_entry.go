@@ -1,0 +1,161 @@
+// 设置页上的「关于应用」那一段：当前版本、检查更新、以及更新日志弹窗的开关。
+//
+// 照 Biu 的 `src/pages/settings/system-settings.tsx` 最末那一段：标题「关于应用」，
+// 左边「当前版本 x.y.z」（有这个才接一个箭头和新版本号），右边一个按钮。下面
+// 还有「导入导出配置」，那是 9.12，不在这一段里——**摆一个按了只说「还没做」的
+// 按钮比不摆更糟**，用户分不清「还没做」和「按了没用」。
+//
+// 🔴 铁律二照旧：这一份一次都不调 `SetTheme`（主题在每一帧开头由 `viewMain`
+// 装好，放到切换按钮的回调里只调一次会被框架静默丢掉——不报错、不崩溃、不打
+// 日志，就是主题悄悄跳回系统色）。
+
+package ui
+
+import (
+	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/egoist/mygo/ui"
+)
+
+// updateSection 是设置页上那段的标题。Biu 的 `<h2>关于应用</h2>`。
+const updateSection = "关于应用"
+
+// settingsUpdate 是常规那一页末尾的「关于应用」。
+//
+// 它画三样东西：当前版本（有更新时接一个箭头和新版本号）、一句话说明、以及那个
+// 按钮。三样都从 `st` 现读，每帧一次——界面层不缓存更新状态（那是 `App` 的事）。
+func (s *Shell) settingsUpdate(c *ui.Context, st app.UpdateState) {
+	if !s.app.UpdateMounted() {
+		// 没挂上更新（例如 `MountUpdates` 拿不到应用数据目录而提前返回的那种
+		// 情况）就不摆这一段。摆一个永远关着的按钮加一句「不能自动更新」，是在
+		// 告诉用户「这个版本不能更新」——而真相是「这一版没做」，后者用户没法
+		// 自己查出来，前者他会到处问人。
+		return
+	}
+	s.settingSection(c, updateSection)
+	s.settingRowEl(c, func() { s.updateVersionTitle(c, st) }, s.updateHint(st),
+		func() { s.settingsUpdateButton(c, st) })
+	s.viewUpdateDialog(c, st)
+}
+
+// updateVersionTitle 是那一行的标题。
+func (s *Shell) updateVersionTitle(c *ui.Context, st app.UpdateState) {
+	s.versionLine(c, "setting:updateVersion", 14, st)
+}
+
+// versionLine 是「当前版本 x.y.z → a.b.c」那一行，设置页和弹窗共用一份。
+//
+// ⚠️ **必须是同一份**：两处各写一遍的话，有一处改了字号或者箭头方向，用户会在
+// 弹窗里看着一个朝右的箭头、在设置页上看着一个朝左的，而它们说的是同一件事。
+//
+// 照 Biu 的 `system-settings.tsx`：`<span>当前版本 {appVersion}</span>` 后面
+// （有这个才画）`<RiArrowRightLongLine/>` + 主色的新版本号，连「箭头朝右」这个
+// 方向都照抄——Biu 那一段是横排的，箭头朝左会读成「版本往回退」。
+func (s *Shell) versionLine(c *ui.Context, key string, size float32, st app.UpdateState) {
+	t := c.Theme()
+	ui.Row(c).Key(key).Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, "当前版本 "+app.VersionLabel(st.Current)).FontSize(size).Bold()
+		if st.Available() {
+			ui.Text(c, "→").FontSize(size).TextColor(t.TextMuted)
+			ui.Text(c, st.Latest).FontSize(size).Bold().TextColor(t.Accent)
+		}
+	})
+}
+
+// updateHint 是那一行下面那句话：上一次检查是什么时候，或者为什么不能检查。
+//
+// 为什么不能检查的时候把话说全：一个按下去只会说「不能」的按钮，用户除了去问人
+// 没有别的办法知道该怎么办。
+func (s *Shell) updateHint(st app.UpdateState) string {
+	if why := st.UpdateUnavailableReason(); why != "" {
+		return why
+	}
+	switch st.Phase {
+	case app.UpdateDownloading:
+		return "正在下载新版本"
+	case app.UpdateReady:
+		return updateReadyText + "，退出后重新打开就是它"
+	case app.UpdateAvailable:
+		return "点右边看这次的更新日志，想不想下由你定"
+	case app.UpdateFailed:
+		return "上一次没查成：" + st.Err
+	}
+	if st.LastCheck.IsZero() {
+		return "点右边查一下有没有新版本"
+	}
+	return "上次检查：" + updateCheckedOn(st.LastCheck)
+}
+
+// updateCheckedOn 把检查时刻写成一句话。
+//
+// **只到日期，不到时刻**（`2026-10-17`）：这一行回答的是「它到底查没查过」，
+// 而查的间隔是一小时（`updateCheckInterval`）——写上时刻，用户会觉得那串时刻每
+// 小时都在变，而那正是它在做的事，反而让人以为它在不停打扰网络。
+func updateCheckedOn(t time.Time) string {
+	return t.Local().Format("2006-01-02")
+}
+
+// settingsUpdateButton 是那一行右边的按钮。
+//
+// **它只有两个名字**：有更新可看时是「查看更新内容」，没有时是「检查更新」——
+// 和 Biu 那个 `<AsyncButton>` 一字不差（`components/update-check-button`
+// 里的 `isUpdateAvailable ? "查看更新内容" : "检查更新"`），另外两档
+// （正在查 / 正在下）是它的 `isLoading` 那一支。
+//
+// ⚠️ **这一格永远不摆「退出并安装更新」**，那一句话只住在弹窗里。两个理由：
+//
+//  1. 照抄上游的形状：Biu 那个按钮在设置页上只有上面那两个名字，
+//     「退出并安装更新」只在 `ReleaseNoteModal` 里。
+//  2. 更实际的：弹窗开着的时候设置页这一格被背景挡着，点不到——摆上第二个同名
+//     按钮，用户按下去只会发现是背景吃了那一下，而那一格在画面上又和弹窗里
+//     那个一模一样。要重启就从弹窗上那一个走。
+//
+// ⚠️ 「查看更新内容」**不重新去查**：新版本已经查到了，重新查一次是白花一个网络
+// 往返，而且那一趟有可能查到别的版本，于是用户点的和看到的不是一回事。
+func (s *Shell) settingsUpdateButton(c *ui.Context, st app.UpdateState) {
+	label, onClick, busy := s.updateEntryButton(st)
+	if ui.PrimaryButton(c, label).Disabled(busy).Clicked() && onClick != nil {
+		onClick()
+	}
+}
+
+// updateEntryButton 是设置页上那个按钮的三样东西：写什么、按下去做什么、关不关。
+func (s *Shell) updateEntryButton(st app.UpdateState) (label string, onClick func(), busy bool) {
+	switch st.Phase {
+	case app.UpdateDownloading:
+		return updateEntryBusy, nil, true
+	case app.UpdateChecking:
+		return updateCheckingLabel, nil, true
+	case app.UpdateAvailable, app.UpdateReady:
+		// 「装好了」也算「有东西可看」：弹窗里那一句「安装包已下载完成」和那个
+		// 「退出并安装更新」正是这时候要看和要按的。
+		return updateBtnView, s.openUpdateDialog, false
+	}
+	if !st.Enabled {
+		// 不能更新的时候按钮是关的，而**为什么**写在下面那句话里。
+		return updateBtnCheck, nil, true
+	}
+	return updateBtnCheck, s.app.CheckUpdates, false
+}
+
+// openUpdateDialog 只把弹窗打开，不去查。
+//
+// 不调 `CheckUpdates` 是有意的：那会从头再来一趟网络，而弹窗要画的那些内容
+// （更新日志、版本号）已经在状态里了。
+func (s *Shell) openUpdateDialog() { s.update.wanted = true }
+
+// reportUpdateNotice 把更新器留给界面的那一句提示弹成 Toast。**每帧都调**。
+//
+// 去重在 `App.TakeUpdateNotice` 那一头（取过就没了），所以这里每帧问一句是安全
+// 的——屏幕上一直闪着同一句话比更新功能本身出问题还难解释。
+//
+// 它跟着 `reportSettingsError` 放在同一处，是因为它们是同一类东西：状态层在后台
+// 攒了一句话，界面在每帧开头取一次。**不许**改成「查到了才回调」——那要从后台
+// goroutine 直接调 `addToast`，而提示列表归界面所有，跨 goroutine 写它就违反
+// 了铁律一。
+func (s *Shell) reportUpdateNotice() {
+	if note := s.app.TakeUpdateNotice(); note != "" {
+		s.addToast(note)
+	}
+}
