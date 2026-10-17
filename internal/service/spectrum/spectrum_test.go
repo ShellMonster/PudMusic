@@ -211,8 +211,16 @@ func TestStereoIsAveragedDownToOneLane(t *testing.T) {
 // 全都只剩那条 2 像素基线。反过来在第 100 格放满格，最左边那几根就该蹿起来。
 func TestBarsOnlyReadsTheLowSixtyPercent(t *testing.T) {
 	const height = 40.0
+	// 153 及以上的每一格都填满。
+	//
+	// ⚠️ **不能**只填一格（比如第 200 格）：取下标是 `floor(i/barCount*153)`，
+	// 48 根条落在 {0,5,10,16,…} 这一串下标上，第 200 格**一根都碰不到**——
+	// 于是把 LowFraction 从 60% 改成 100% 之后这一条照样绿，而它本该是最直接
+	// 盯着那一个数的那一条。
 	mag := make([]float32, Bins)
-	mag[200] = 1 // 156+ Hz 那一段，满格
+	for i := biuLowBins; i < Bins; i++ {
+		mag[i] = 1
+	}
 
 	bars := Bars(make([]float32, 48), mag, 48, height)
 	for i, v := range bars {

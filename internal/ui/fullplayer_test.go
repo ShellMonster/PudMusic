@@ -341,7 +341,96 @@ func TestTheSpectrumIsOffUntilTheUserTurnsItOn(t *testing.T) {
 	}
 }
 
+// ---- 频谱画出来是什么颜色 ----
+
+// TestTheSpectrumColorFallsBackToTheDefault 断「默认色是 #666」。
+//
+// Biu 的默认值存的是字符串 `"currentColor"`，画的时候再判断一次是不是它、是就
+// 落到 `#666`（`audio-waveform/index.tsx:110`）。我们在读偏好那一步就把那次判断
+// 提前了（见 `app.FullPlayerPrefs`），于是这一层拿到的要么是 `#666`、要么是用户
+// 挑的那个。
+//
+// 认不出来的串也落到 `#666`：照着画的话，界面上是一条**纯黑**的频谱摆在深色
+// 背景上——看着像「没画出来」，而用户是在用着一个自己挑过的颜色。
+func TestTheSpectrumColorFallsBackToTheDefault(t *testing.T) {
+	want := mygoui.Color{R: 0x66, G: 0x66, B: 0x66, A: 255}
+	for _, hex := range []string{"", "#666", "666", "红", "#12345"} {
+		if got := spectrumColorOf(hex); got != want {
+			t.Errorf("颜色 %q 画成了 %v，want #666", hex, got)
+		}
+	}
+	if got := spectrumColorOf("#ff0000"); got != (mygoui.Color{R: 255, A: 255}) {
+		t.Errorf("用户挑的红色没被照用：%v", got)
+	}
+}
+
+// TestTheSpectrumIsActuallyPaintedWithThatColor 是上一条的下半截：断言的是
+// **画面上真的涂了这个颜色**。
+//
+// 走的是真链路：真 FLAC 文件 → 真解码链 → 真挂点 → 真 FFT → 真画。判据是
+// 频谱那条带上有没有接近 #666 的像素。
+func TestTheSpectrumIsActuallyPaintedWithThatColor(t *testing.T) {
+	s, tt, _ := fullTester(t)
+	s.app.SetFullPlayerPrefs(app.FullPlayerPrefs{ShowSpectrum: true})
+	openFull(t, tt)
+
+	// 解码器要真的吐出来几段才有频谱（它跑在自己的 goroutine 上，和 Tester 的
+	// 钟没关系）。
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		tt.Frame()
+		if bars := s.app.SpectrumBars(48, 40); bars[0] > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if bars := s.app.SpectrumBars(48, 40); bars[0] == 0 {
+		t.Fatalf("两秒了还是一条基线：%v", bars[:4])
+	}
+
+	// 只在**频谱自己那个框**里数：整个窗口里别处也有 #666 一族的主题色（按钮
+	// 的边框、滑块的槽），扫全窗口的话这条断言量的是「界面上有没有灰色」，
+	// 把频谱整个涂成别的颜色它照样绿。
+	box, ok := tt.Find("频谱")
+	if !ok {
+		t.Fatalf("画面上找不到频谱那个区域，文字有 %q", tt.Texts())
+	}
+	const want = 500
+	if n := pixelsNear(tt, box, mygoui.Color{R: 0x66, G: 0x66, B: 0x66, A: 255}, 4); n < want {
+		t.Errorf("频谱那个 %vx%v 的框里只有 %d 个接近 #666 的像素，want ≥ %d —— 条子没画出来，或者画的不是那个颜色",
+			box.W, box.H, n, want)
+	}
+	// 光靠上一条不够：把条子涂成白色，抗锯齿的边上照样会路过一圈灰，
+	// 「框里有几个 #666」照样成立（实测：白色条子时那一条照样绿）。
+	if n := pixelsNear(tt, box, mygoui.Color{R: 255, G: 255, B: 255, A: 255}, 4); n != 0 {
+		t.Errorf("频谱那个框里有 %d 个纯白像素 —— 条子画的不是 #666", n)
+	}
+}
+
 // ---- 帮手 ----
+
+// pixelsNear 是 box 里接近 want 的像素个数（tol 是每一通道的余量）。
+func pixelsNear(tt *mygoui.Tester, box mygoui.Rect, want mygoui.Color, tol int) int {
+	img := tt.Image()
+	n := 0
+	for y := max(int(box.Y), img.Rect.Min.Y); y < min(int(box.Y+box.H), img.Rect.Max.Y); y++ {
+		for x := max(int(box.X), img.Rect.Min.X); x < min(int(box.X+box.W), img.Rect.Max.X); x++ {
+			p := img.RGBAAt(x, y)
+			if absDiff(p.R, want.R) <= tol && absDiff(p.G, want.G) <= tol &&
+				absDiff(p.B, want.B) <= tol {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+func absDiff(a, b uint8) int {
+	if a > b {
+		return int(a - b)
+	}
+	return int(b - a)
+}
 
 // openFull 点开全屏（点播放条上那张封面）。
 func openFull(t *testing.T, tt *mygoui.Tester) {
