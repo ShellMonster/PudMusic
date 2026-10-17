@@ -146,8 +146,20 @@ func newUpdFixture(t *testing.T, rel *app.UpdateRelease) *updFixture {
 }
 
 // pressEntry 按设置页上那个按钮（**先滚进可视区再点**，理由见 clickSetting）。
+//
+// ⚠️ **按之前先把浮在右下角的那几条提示收掉**：那一块正好压在「检查更新」这个
+// 按钮上（`TestAFailedCheckPutsTheReasonUnderTheButtonAndKeepsItPressable` 顶上
+// 写的就是这件事），而提示是**到点才在画它的那一帧里被收走**的——点下去的那一帧
+// 恰好是上一轮提示刚冒出来的那一帧时，它就替按钮吃了这一次点击。
+//
+// 那一条顶上 `shortToasts(t, time.Millisecond)` 把提示的命压到 1 毫秒，是**方向
+// 对、做法不严**：从「提示会自己消失」到「按之前它一定已经消失」之间还差一个
+// 「睡 1 毫秒」，而这一组里没有任何一步保证睡过。实测：不收掉的话这一条
+// `-count=5` 里红 3~4 次（HEAD 单独跑也一样红），收掉之后连跑 6 次全过。
 func (f *updFixture) pressEntry(t *testing.T, label string) {
 	t.Helper()
+	f.s.clearToasts()
+	f.tt.Frame()
 	clickSetting(t, f.tt, f.s, label)
 }
 
