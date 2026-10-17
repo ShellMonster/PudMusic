@@ -56,15 +56,27 @@ type libraryRow struct {
 	CanPlay bool
 }
 
+// libraryQuery 是拉一页要用的那一份筛选条件。
+//
+// ⚠️ **它必须是界面线程上取好的一份快照**，不是让 fetcher 回去读界面状态（关键词和
+// 日期范围都在界面上，用户随时改着）。后台 goroutine 去读那些字段就是数据竞争，
+// 而且这种错在界面上几乎看不出来：多半是**某一次筛选的结果配上了另一次的词**。
+type libraryQuery struct {
+	keyword  string
+	from, to time.Time
+	// on 报现在有没有在按日期筛。零值的两端就是「不筛」，服务层那一句 addRange
+	// 会把它们一个都不发。
+	on bool
+}
+
 // libraryFetcher 拉一页。page 从 1 起。
 //
-// loadedBefore 是**拉这一页之前已经加载了几行**，用来算「还有没有」。它作为参数
-// 传进来而不是让 fetcher 回去读 `p.rows`：那个字段是界面线程上的状态，后台
-// goroutine 读它就是数据竞争。
-//
-// ⚠️ 它在**后台 goroutine 里**调：里面不许碰界面状态，要通知界面就往返回值里放。
+// ⚠️ 它在**后台 goroutine 里**调：除了 ctx / page / loadedBefore / q 这四个参数
+// （全是界面线程上取的），它**不许再碰任何界面状态**——要通知界面就往返回值里放。
 // 它要是 panic 了，这一页就当失败处理（见 fetchOne）。
-type libraryFetcher func(ctx context.Context, page, loadedBefore int) (rows []libraryRow, hasMore bool, err error)
+//
+// loadedBefore 是**拉这一页之前已经加载了几行**，用来算「还有没有」。
+type libraryFetcher func(ctx context.Context, page, loadedBefore int, q libraryQuery) (rows []libraryRow, hasMore bool, err error)
 
 // maxWakes 是记着的唤醒句柄上限：一个窗口一条，多出来的挤掉最久没画的那个。
 const maxWakes = 4
@@ -103,6 +115,11 @@ type pagedRows struct {
 
 	fetch libraryFetcher
 	acts  list.Actions
+
+	// query 取「这一页要用什么条件去拉」。**由 load 在界面线程上调**，返回值是
+	// 一份快照（见 libraryQuery）。做成一个回调而不是两个字段，是因为它读的那几样
+	// 东西分散在 `libraryPage` 上（词在那儿、日期在 dateFilter 上）。
+	query func() libraryQuery
 
 	// ── 下面这一摊只由界面线程读写（铁律一）────────────────────────────────
 
@@ -149,10 +166,10 @@ type pagedRows struct {
 // ⚠️ **不在这里拉第一页**：它可能在界面线程之外被调，那时候还没有唤醒句柄也没有
 // 画面。第一页由第一帧的 view 拉。
 func newPagedRows(render func(*ui.Context, ui.ListRow) ui.Element, menu func(*ui.Menu, int),
-	fetch libraryFetcher, acts list.Actions) *pagedRows {
+	fetch libraryFetcher, acts list.Actions, query func() libraryQuery) *pagedRows {
 	p := &pagedRows{
 		render: render, menu: menu,
-		fetch: fetch, acts: acts,
+		fetch: fetch, acts: acts, query: query,
 		sel: -1,
 		// 「还有没有」要等有人问过才知道，在那之前一律当作还有——不然第一帧会以为
 		// 到底了，连页脚那一行都不画。
@@ -595,13 +612,15 @@ func (p *pagedRows) load(why trigger) {
 	next := p.page + 1
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel, p.loading, p.err, p.why = cancel, true, nil, why
-	// 代次和已加载行数**都在界面线程上取一份**再交给后台：它们只由界面线程写，
-	// 后台 goroutine 再去读就是数据竞争。
-	gen, loaded := p.gen, len(p.rows)
+	// 🔴 **代次、已加载行数、筛选条件都在这里（界面线程上）取一份再交给后台**。
+	// 它们全都只由界面线程写（Reload / setPreset / applyKeyword），后台 goroutine
+	// 再去读就是数据竞争——而这种错在界面上几乎看不出来：多半是某一次筛选的结果配
+	// 上了另一次的词，而那在 `-race` 之外永远验不出来。
+	gen, loaded, q := p.gen, len(p.rows), p.snapshot()
 
 	go func() {
 		defer cancel()
-		rows, more, err := p.fetchOne(ctx, next, loaded)
+		rows, more, err := p.fetchOne(ctx, next, loaded, q)
 		p.deliver(libraryResult{gen: gen, page: next, rows: rows, hasMore: more, err: err})
 	}()
 }
@@ -614,14 +633,25 @@ var errFetcherPanic = errors.New("拉页的代码崩了")
 // 🔴 不包这一层就是进程当场没了：fetch 跑在后台 goroutine 里，界面那一层的
 // recover 一个都接不到它。而 fetch 正是「解析接口返回」的那一段，B 站一变就
 // 在这里炸。
-func (p *pagedRows) fetchOne(ctx context.Context, page, loaded int) (rows []libraryRow, more bool, err error) {
+func (p *pagedRows) fetchOne(ctx context.Context, page, loaded int, q libraryQuery) (rows []libraryRow, more bool, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			log.Printf("biu: 第 %d 页的拉页器崩了：%v\n%s", page, rec, debug.Stack())
 			rows, more, err = nil, false, fmt.Errorf("%w：%v", errFetcherPanic, rec)
 		}
 	}()
-	return p.fetch(ctx, page, loaded)
+	return p.fetch(ctx, page, loaded, q)
+}
+
+// snapshot 取一份筛选条件的快照。**只能由界面线程调**（load 里）。
+//
+// 没装 query 回调时给零值（不筛、不带词）——那不是「忘了装」的常态，而是
+// `NewPaged` 那一路（页面还没把筛选接上）本来就没有筛选。
+func (p *pagedRows) snapshot() libraryQuery {
+	if p.query == nil {
+		return libraryQuery{}
+	}
+	return p.query()
 }
 
 // stop 停掉在途的那一页。它只是**不让结果落地**：真正的作废靠 gen。停请求是

@@ -172,6 +172,38 @@ func scrollToBottom(t *testing.T, tt *mygoui.Tester) {
 	}
 }
 
+// TestChangingTheFilterWhilePagesAreFetchingIsNotADataRace 盯快速换条件那条路上的
+// 数据竞争。
+//
+// 🔴 这条**只有 `-race` 才验得出来**：拉页在后台 goroutine 里，而关键词和日期范围
+// 是界面上随时在改的字段。后台去读它们就是竞争，界面上多半是「某一次筛选的结果配上
+// 了另一次的词」——那种错不看 `-race` 永远发现不了，而且不崩不报错。
+//
+// 做法和评审给的那条一样：连着换几百次条件，每一次都走一遍生产的
+// `Reload → load → 后台 fetch` 那条路。
+func TestChangingTheFilterWhilePagesAreFetchingIsNotADataRace(t *testing.T) {
+	for _, path := range []string{laterPath, historyPath} {
+		t.Run(path, func(t *testing.T) {
+			f := newLibFake(t).
+				withLater(1, 40, manyTitles(1, 40)...).
+				withHistory(1, 100, 600, manyTitles(1, 40)...)
+			tt, s := libraryShell(t, f, path)
+			p := s.pageOf(path)
+			settle(t, tt, "把第一页拉回来", func() bool { return rowsShown(p) > 0 })
+
+			// 每一轮都是「换条件 → Reload → 后台 fetch 正在跑 → 再换」。
+			for i := range 200 {
+				p.dates.setPreset(i%4, s.clock.Now())
+				p.draft, p.seenDraft = fmt.Sprintf("词%d", i), ""
+				p.applyKeyword(p.draft)
+				p.apply()
+				tt.Frame()
+			}
+			settle(t, tt, "最后那一页落地", func() bool { return !p.rows.Status().Loading })
+		})
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 窄窗口
 // ─────────────────────────────────────────────────────────────────────────────

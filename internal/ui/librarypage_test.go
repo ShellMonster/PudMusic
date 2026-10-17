@@ -556,6 +556,24 @@ func TestHistoryShowsHowFarYouGot(t *testing.T) {
 	}
 }
 
+// TestAHistoryRowThatWasNeverPlayedShowsZeroProgress 盯「零秒」那一种。
+//
+// 🔴 **零秒要写成「0:00」，不能留空**：留空的话这一行和一行「看完了」在屏幕上写得
+// 一样（都只剩总时长），而这一列存在的全部理由就是让人一眼看出这两个的区别。
+// 上游的 formatProgress 是 `formatDuration(prog > 0 ? prog : 0)`，也就是零秒写 0:00。
+func TestAHistoryRowThatWasNeverPlayedShowsZeroProgress(t *testing.T) {
+	f := newLibFake(t).withHistory(1, 0, 2700, "刚点开就退出的")
+	tt, _ := libraryShell(t, f, historyPath)
+	settle(t, tt, "把历史记录拉回来", func() bool { return tt.HasText("刚点开就退出的") })
+
+	if !tt.HasText("0:00 / 45:00") {
+		t.Errorf("零秒的进度没有写成「0:00 / 45:00」，文字有 %q", tt.Texts())
+	}
+	if tt.HasText("45:00") && !tt.HasText("0:00 / 45:00") {
+		t.Errorf("进度列只剩总时长，看不出有没有听过，文字有 %q", tt.Texts())
+	}
+}
+
 // TestAHistoryRowWithNoLengthShowsOnlyWhatWasWatched 盯「没有总时长」的那一种。
 //
 // 直播、专栏那几类 B 站不给 duration。写「0:00 / 0:00」在屏幕上读起来像坏了。

@@ -39,18 +39,36 @@ const (
 	colViewedAt = 140
 )
 
-// progressText 是「看过多少 / 总共多长」。没有总时长（直播、专栏那几类 B 站不给
-// duration）时只写看过多少：「0:00 / 0:00」在屏幕上读起来像坏了，「12:34」是对的。
+// progressText 是「看过多少 / 总共多长」。
+//
+// ⚠️ **「看过多少」没有时长也要写出来，零秒写「0:00」**：上游的 formatProgress 是
+// `formatDuration(prog > 0 ? prog : 0) + " / " + …`，也就是零秒写「0:00」而不是留
+// 空。只写总时长的话，一行「刚点开就退出的」和一行「看完了」在屏幕上长得一模一样——
+// 而这一列存在的全部理由就是让人一眼看出这两者的区别（计划书的 P-04）。
+//
+// 没有总时长（直播、专栏那几类 B 站不给 duration）时只写看过多少：「12:34 / 0:00」
+// 在屏幕上读起来像坏了，「12:34」是对的。
 func progressText(progress, total time.Duration) string {
-	p, d := clockText(progress), clockText(total)
-	switch {
-	case d == "":
-		return p
-	case p == "":
-		return d
-	default:
-		return p + " / " + d
+	played := playedText(progress)
+	if d := clockText(total); d != "" {
+		return played + " / " + d
 	}
+	return played
+}
+
+// playedText 是「看过多少」那一半，**零秒写「0:00」**。
+//
+// 为什么不用 `clockText`：那个是给「总时长」用的，零值返回空串表示**不知道多长**
+// （B 站不给 duration）；而「看过多少」永远知道——没有就是 0 秒，写空串会让那一行
+// 少一半信息。
+func playedText(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	if d == 0 {
+		return "0:00"
+	}
+	return clockText(d)
 }
 
 // viewedAtText 是观看时间那一列的字（上游的 "YYYY-MM-DD HH:mm"）。**精确到分**：
@@ -63,13 +81,11 @@ func viewedAtText(t time.Time) string {
 }
 
 // fetchHistory 是历史记录那一页的拉页器。跑在后台 goroutine 里（见
-// pagedRows.fetchOne）。
-func (s *Shell) fetchHistory(ctx context.Context, page, _ int) ([]libraryRow, bool, error) {
-	p := &s.historyPage
-	// 没在筛的时候两端都是零值，服务层那一句 addRange 就不发这两个参数。
-	from, to, _ := p.dates.Range()
+// pagedRows.fetchOne），所以它**只认传进来的 `q`**，不回去读界面状态——理由和
+// `fetchLater` 里那段一模一样。
+func (s *Shell) fetchHistory(ctx context.Context, page, _ int, q libraryQuery) ([]libraryRow, bool, error) {
 	items, more, err := s.app.LibraryOf().History(ctx, page, app.LibraryQuery{
-		Keyword: p.applied, From: from, To: to,
+		Keyword: q.keyword, From: q.from, To: q.to,
 	})
 	if err != nil {
 		return nil, false, err

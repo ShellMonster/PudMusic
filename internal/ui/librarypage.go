@@ -75,8 +75,20 @@ func (p *libraryPage) init(now time.Time,
 	render func(*ui.Context, ui.ListRow) ui.Element, menu func(*ui.Menu, int),
 	fetch libraryFetcher, acts list.Actions, empty emptyState) {
 	p.dates = newDateFilter(now)
-	p.rows = newPagedRows(render, menu, fetch, acts)
+	p.rows = newPagedRows(render, menu, fetch, acts, p.query)
 	p.rows.SetEmpty(empty)
+}
+
+// query 报「这一页现在要用什么条件去拉」。
+//
+// 🔴 **它只由界面线程调**（`pagedRows.load` 在起 goroutine 之前调它），而它读的
+// 那几样东西——生效的词、日期区间的两端——用户随时在界面上改着。后台 goroutine 要是
+// 直接去读它们就是数据竞争（`go test -race` 会报，界面上则多半表现为「某一次筛选的
+// 结果配上了另一次的词」）。这里返回的是一份**值拷贝**，后台拿着它就再也不用回头看
+// 界面状态了。
+func (p *libraryPage) query() libraryQuery {
+	from, to, on := p.dates.Range()
+	return libraryQuery{keyword: p.applied, from: from, to: to, on: on}
 }
 
 // apply 换查询：关键词或日期范围变了。清空、回顶、从第 1 页重来。

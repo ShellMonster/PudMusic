@@ -59,17 +59,19 @@ func (s *Shell) buildLibraryPages() {
 	s.historyPage.init(s.clock.Now(), s.drawHistoryRow, s.historyMenu, s.fetchHistory, acts, lookup(historyPath).Empty)
 }
 
-// fetchLater 是稍后再看那一页的拉页器。它在**后台 goroutine 里**跑，所以里面
-// 只读 `p` 上的筛选条件、只往返回值里放东西。
+// fetchLater 是稍后再看那一页的拉页器。
 //
-// ⚠️ 读的是 `p.applied`（已经在生效的那个词），不是 `p.draft`（框里正在敲的
-// 那个）——用户敲到一半发出去的是半截词。
-func (s *Shell) fetchLater(ctx context.Context, page, loaded int) ([]libraryRow, bool, error) {
-	p := &s.laterPage
-	// 没在筛的时候两端都是零值，服务层那一句 addRange 就不发这两个参数。
-	from, to, _ := p.dates.Range()
+// 🔴 **它跑在后台 goroutine 里，只认传进来的 `q`，不许回去读界面上任何东西**：
+// `q` 是 `pagedRows.load` 在界面线程上取好的一份快照（见 libraryQuery）。以前这里
+// 是直接读 `p.applied` 和 `p.dates` 的，而那两样用户随时在改——那就是一处数据竞争
+// （`-race` 会报，界面上多半是「某一次筛选的结果配上了另一次的词」）。
+//
+// ⚠️ `q.keyword` 是**已经在生效的那个词**，不是 `p.draft`（框里正在敲的那个）——
+// 用户敲到一半发出去的是半截词。
+func (s *Shell) fetchLater(ctx context.Context, page, loaded int, q libraryQuery) ([]libraryRow, bool, error) {
+	// 没在筛的时候 q.from / q.to 都是零值，服务层那一句 addRange 就不发这两个参数。
 	items, count, err := s.app.LibraryOf().ToView(ctx, page, app.LibraryQuery{
-		Keyword: p.applied, From: from, To: to,
+		Keyword: q.keyword, From: q.from, To: q.to,
 	})
 	if err != nil {
 		return nil, false, err
@@ -184,7 +186,7 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 			}
 		})
 
-		ui.Text(c, countText(m.View)).Width(colCount).TextAlign(ui.End).
+		ui.Text(c, playCountText(m.View)).Width(colCount).TextAlign(ui.End).
 			FontSize(12).TextColor(t.TextMuted).MaxLines(1)
 		ui.Text(c, dayText(m.ViewedAt)).Width(colDate).TextAlign(ui.End).
 			FontSize(12).TextColor(t.TextMuted).MaxLines(1)
@@ -227,9 +229,13 @@ func (s *Shell) laterMenu(m *ui.Menu, i int) {
 	}
 }
 
-// countText 是播放量那一列的字，抄上游的 `Intl.NumberFormat` compact：往上折成
+// playCountText 是播放量那一列的字，抄上游的 `Intl.NumberFormat` compact：往上折成
 // 「1.2万」「1.2亿」。不折的话七位数播放量会把那一列撑到别列头上。
-func countText(n int64) string {
+//
+// 名字里带 `play` 是因为主干上 `settings_tabs_test.go` 有一个**同名的测试辅助函数**
+// `countText(tt, want)`（数画面上有几个匹配的字）。同一个包里同名就是编译期的
+// 「redeclared」，而那个错和这一票在做的事看起来毫不相干。
+func playCountText(n int64) string {
 	switch {
 	case n <= 0:
 		return ""
