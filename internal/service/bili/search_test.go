@@ -1,12 +1,10 @@
 package bili
 
-// 这一组测的是搜索那一层：请求参数照抄上游的那几个、返回怎么读、B 站那些
-// 「两种形状」的字段怎么认。
+// 这一组测搜索那一层：请求参数照抄上游的那几个、返回怎么读、B 站那些「两种形状」
+// 的字段怎么认。fixture 的形状来自上游 `web-interface-search-type.ts` 里那份
+// `WebSearchTypeData` / `SearchVideoItem` / `SearchUserItem` 类型定义。
 //
-// fixture 的形状来自上游的 `src/service/web-interface-search-type.ts` 里那份
-// `WebSearchTypeData` / `SearchVideoItem` / `SearchUserItem` 的类型定义——
-// 那是上游照着真返回写的。**没有任何一条断言是在证明「B 站现在真这么返回」**，
-// 那要靠真机回归。
+// **没有任何一条断言是在证明「B 站现在真这么返回」**，那要靠真机回归。
 
 import (
 	"context"
@@ -16,10 +14,8 @@ import (
 	"time"
 )
 
-// searchFixture 建一台会回搜索结果的假 B 站，顺手把 WBI 的 key 备好
-// （这个接口要签名，见 search.go 的 SearchVideos）。
-//
-// handler 收到的是录下来的请求，测试在 `seen` 里断言发出去的参数。
+// searchFixture 建一台会回搜索结果的假 B 站，顺手把 WBI 的 key 备好（这个接口要
+// 签名，见 search.go 的 SearchVideos）。第三个返回值是录下来的请求。
 func searchFixture(t *testing.T, data map[string]any) (*fakeBili, *Client, func() []recordedRequest) {
 	t.Helper()
 	f := newFakeBili(t)
@@ -73,11 +69,10 @@ func searchRequest(t *testing.T, seen []recordedRequest) recordedRequest {
 // 请求参数
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestSearchVideosSendsWhatBiuSends 盯住请求参数和上游逐条一样。
-//
-// 上游 `pages/search/video-list/index.tsx:33-41` 发的是：search_type=video、
-// keyword、page、page_size=24、order，外加「仅音乐分区」时的 tids=3。少一个
-// 就是搜出来的东西不一样，而界面上看不出任何异样。
+// TestSearchVideosSendsWhatBiuSends 盯请求参数和上游逐条一样。上游
+// `video-list/index.tsx:33-41` 发的是 search_type=video、keyword、page、
+// page_size=24、order，外加「仅音乐分区」时的 tids=3。少一个就是搜出来的东西不一样，
+// 而界面上看不出任何异样。
 func TestSearchVideosSendsWhatBiuSends(t *testing.T) {
 	_, c, seen := searchFixture(t, map[string]any{"numResults": 1, "numPages": 1,
 		"result": []any{videoItem("BV1", "歌名")}})
@@ -122,11 +117,9 @@ func TestMusicOnlyOffAsksForTheWholeSite(t *testing.T) {
 	}
 }
 
-// TestSearchUsersSendsOrderAndOrderSort 盯用户那一档的两个参数。
-//
-// 用户排序用 B 站的 `order` + `order_sort` 两个参数（上游
-// `pages/search/user-list/utils.ts` 的 `getSortParams`）。只发 order 不发
-// order_sort，「粉丝数由低到高」会变成由高到低——而界面上看不出异样。
+// TestSearchUsersSendsOrderAndOrderSort 盯用户那一档的两个参数（上游
+// `user-list/utils.ts` 的 `getSortParams`）。只发 order 不发 order_sort，
+// 「粉丝数由低到高」会变成由高到低——而界面上看不出异样。
 func TestSearchUsersSendsOrderAndOrderSort(t *testing.T) {
 	_, c, seen := searchFixture(t, map[string]any{"numResults": 1, "numPages": 1,
 		"result": []any{userItem(7, "某人")}})
@@ -156,10 +149,8 @@ func TestSearchUsersSendsOrderAndOrderSort(t *testing.T) {
 	}
 }
 
-// TestUserDefaultSortSendsZeroNotNothing 盯「默认排序」那一档。
-//
-// 上游发的是数字 0（`utils.ts:15`），拼进查询串是 `order=0`。发空串会被
-// B 站当成「没给这个参数」，回值和「给了 0」不是同一件事。
+// TestUserDefaultSortSendsZeroNotNothing 盯「默认排序」那一档：上游发的是数字 0
+// （`utils.ts:15`），拼进查询串是 `order=0`。发空串会被 B 站当成「没给这个参数」。
 func TestUserDefaultSortSendsZeroNotNothing(t *testing.T) {
 	_, c, seen := searchFixture(t, map[string]any{"result": []any{}})
 
@@ -178,10 +169,8 @@ func TestOrderDefaultsToTotalRank(t *testing.T) {
 	}
 }
 
-// TestPageIsClampedToOneWhenItIsZero 盯页码。
-//
-// 零值不是「第一页」而是「没给」——B 站对 page=0 的处理是回一份空结果，
-// 页面上就成了「搜了但什么都没有」，而用户明明什么都没做错。
+// TestPageIsClampedToOneWhenItIsZero 盯页码：零值不是「第一页」而是「没给」——B 站对
+// page=0 回的是一份空结果，页面上就成了「搜了但什么都没有」，而用户明明什么都没做错。
 func TestPageIsClampedToOneWhenItIsZero(t *testing.T) {
 	_, c, seen := searchFixture(t, map[string]any{"result": []any{}})
 
@@ -197,10 +186,8 @@ func TestPageIsClampedToOneWhenItIsZero(t *testing.T) {
 // 读返回
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestSearchVideosReadsTheResult 是「返回读对了」那一条。
-//
-// 三件必须对：标题剥掉 `<em>`（不然界面上是一排尖括号）、封面补上协议
-// （不然是一个永远转圈的方块）、时长认得出「4:20」。
+// TestSearchVideosReadsTheResult 是「返回读对了」那一条：标题剥掉 `<em>`（不然界面上
+// 是一排尖括号）、封面补上协议（不然是永远转圈的方块）、时长认得出「4:20」。
 func TestSearchVideosReadsTheResult(t *testing.T) {
 	_, c, _ := searchFixture(t, map[string]any{"numResults": 1, "numPages": 1,
 		"result": []any{videoItem("BV1MbznYoEk1", "周杰伦<em class=\"keyword\">晴天</em>live")}})
@@ -254,10 +241,9 @@ func TestSearchUsersReadsTheResult(t *testing.T) {
 	}
 }
 
-// TestHitsWithoutAnIdentityAreDropped 盯「没有身份的行不许进列表」。
-//
-// 🔴 铁律四：行身份要**稳定且唯一**。空 bvid / mid=0 落进列表，两行就共用一份
-// 状态——选中一个另一个也亮着，而界面上看不出任何异样。
+// TestHitsWithoutAnIdentityAreDropped 盯「没有身份的行不许进列表」：🔴 铁律四要行身份
+// **稳定且唯一**，空 bvid / mid=0 落进列表就是两行共用一份状态——选中一个另一个也
+// 亮着，而界面上看不出任何异样。
 func TestHitsWithoutAnIdentityAreDropped(t *testing.T) {
 	noBvid := videoItem("BV1", "好的")
 	delete(noBvid, "bvid")
@@ -288,10 +274,9 @@ func TestHitsWithoutAnIdentityAreDropped(t *testing.T) {
 	}
 }
 
-// TestSearchReportsBiliErrorCodes 盯 B 站的业务错误没被吞掉。
-//
-// 风控（-412）这一档必须原样浮上去：`app` 那层靠 `errors.Is(err, ErrRiskControl)`
-// 判断该不该提示用户，吞掉它就变成一句看不懂的「加载失败」。
+// TestSearchReportsBiliErrorCodes 盯 B 站的业务错误没被吞掉。风控（-412）这一档必须
+// 原样浮上去：`app` 那层靠 `errors.Is(err, ErrRiskControl)` 判断该不该提示用户，吞掉
+// 它就变成一句看不懂的「加载失败」。
 func TestSearchReportsBiliErrorCodes(t *testing.T) {
 	f := newFakeBili(t)
 	f.on(searchPath, func(w http.ResponseWriter, r *http.Request) {
@@ -332,10 +317,8 @@ func TestHasMoreStopsAtTheLastPage(t *testing.T) {
 	}
 }
 
-// TestAnEmptyPageAlwaysEndsIt 盯「一页空的还说还有」那一条。
-//
-// B 站在风控边缘偶尔会回 `numResults: 9999` 而 `result` 是空数组。没有这条
-// 判据，自动续拉就会一直拉下去——用户看见的是永远转圈的列表。
+// TestAnEmptyPageAlwaysEndsIt 盯「一页空的还说还有」：B 站在风控边缘偶尔会回
+// `numResults: 9999` 而 `result` 是空数组，没有这条判据就一直拉下去。
 func TestAnEmptyPageAlwaysEndsIt(t *testing.T) {
 	if searchHasMore(1, 0, 9999) {
 		t.Errorf("一页空的还说还有下一页")
@@ -346,10 +329,8 @@ func TestAnEmptyPageAlwaysEndsIt(t *testing.T) {
 // 字段形状
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestStripHTML 盯剥标签。
-//
-// 两种边界各错一次的后果都不小：漏剥一整页标题上都是尖括号；把**不成对**的
-// 「<」也当标签吃掉，「a < b」就变成了「a」。
+// TestStripHTML 盯剥标签。两种边界各错一次的后果都不小：漏剥一整页标题上都是尖括号；
+// 把**不成对**的「<」也当标签吃掉，「a < b」就变成了「a」。
 func TestStripHTML(t *testing.T) {
 	for _, c := range []struct{ in, want string }{
 		{"普通标题", "普通标题"},
@@ -366,9 +347,8 @@ func TestStripHTML(t *testing.T) {
 	}
 }
 
-// TestParseDuration 盯 B 站的两种时长形状。
-//
-// 认不出来时给零值而不是猜：猜出来的时长会跟着播放条一起骗人。
+// TestParseDuration 盯 B 站的两种时长形状。认不出来时给零值而不是猜：猜出来的时长会
+// 跟着播放条一起骗人。
 func TestParseDuration(t *testing.T) {
 	for _, c := range []struct {
 		in   string
@@ -390,9 +370,8 @@ func TestParseDuration(t *testing.T) {
 	}
 }
 
-// TestNormalizeImageURL 盯补协议头。
-//
-// B 站回的是 `//i2.hdslb.com/...`，没有协议。少这一步的表现是封面永远转圈。
+// TestNormalizeImageURL 盯补协议头：B 站回的是 `//i2.hdslb.com/...`，少这一步的表现
+// 是封面永远转圈。
 func TestNormalizeImageURL(t *testing.T) {
 	for _, c := range []struct{ in, want string }{
 		{"//i2.hdslb.com/a.jpg", "https://i2.hdslb.com/a.jpg"},
@@ -407,10 +386,8 @@ func TestNormalizeImageURL(t *testing.T) {
 	}
 }
 
-// TestParseCid 盯那个「大多数情况是空的」的分 P id。
-//
-// 0 必须变成**空串**，不能变成 "0"：传下去的是一个真的分 P id，取回来的是
-// 别人的集，而界面上什么异样都看不出来。
+// TestParseCid 盯那个「大多数情况是空的」分 P id：0 必须变成**空串**而不是 "0"——传
+// 下去的是一个真的分 P id，取回来的是别人的集，而界面上什么异样都看不出来。
 func TestParseCid(t *testing.T) {
 	for _, c := range []struct {
 		in   int64
@@ -422,13 +399,10 @@ func TestParseCid(t *testing.T) {
 	}
 }
 
-// TestSearchVideoHitsCarryNoCidWhenBiliSendsNone 把「搜索结果没有分 P id」
-// 这件事钉在用例里。
-//
-// 它是**已知**的限制：B 站的搜索结果只给 bvid，在线播放要 cid，所以搜出来的
-// 歌现在放不了（`app.playableOnline` 会拒掉并说清为什么）。钉住它是为了以后
-// 有人补上分 P 解析时，这一处从「空」变成「有值」是**有意的改动**，而不是
-// 「B 站突然给了」这种说不清的偶然。
+// TestSearchVideoHitsCarryNoCidWhenBiliSendsNone 把「搜索结果没有分 P id」钉在用例
+// 里。它是**已知**的限制：搜出来的歌现在放不了（`app.playableOnline` 会拒掉并说清为
+// 什么）。钉住它是为了以后有人补上分 P 解析时，这一处从「空」变成「有值」是**有意的
+// 改动**，而不是「B 站突然给了」这种说不清的偶然。
 func TestSearchVideoHitsCarryNoCidWhenBiliSendsNone(t *testing.T) {
 	_, c, _ := searchFixture(t, map[string]any{"numResults": 1,
 		"result": []any{videoItem("BV1", "一首")}})

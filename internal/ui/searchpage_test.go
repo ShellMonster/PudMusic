@@ -1,10 +1,8 @@
 package ui
 
-// 这一组跑的是搜索页那三个反直觉的行为，加上「三种类型各有一套排序」和
-// 「行的身份稳定且唯一」。
-//
-// 全是 headless 的（MyGo 的 Tester + 假拉页器）：真的点 Tab、真的点排序、
-// 真的滚到底翻页、真的按「全部播放」。后台拉页是并发的，断言走「跑到条件
+// 这一组跑搜索页那三个反直觉的行为、「三种类型各有一套排序」和「行的身份稳定
+// 且唯一」。全是 headless 的（MyGo 的 Tester + 假拉页器）：真的点 Tab、真的点
+// 排序、真的滚到底翻页、真的按「全部播放」。后台拉页是并发的，断言走「跑到条件
 // 成立为止」而不是死等——见 settleSearch。
 
 import (
@@ -220,10 +218,10 @@ func queueOneSong(t *testing.T, s *Shell, tt *mygoui.Tester) app.Item {
 // TestPlayAllOnlyAppendsToTheQueue 是验收第 1 条，也是最容易被做反的一条：
 // 「全部播放」**不替换**当前队列。
 //
-// 上游的原话就在那儿（`pages/search/video-list/index.tsx:89-101`）：它把当前
-// 已加载的列表全量映射之后调 `addList`，**不是 `playList`**。做成了
-// `PlayFrom`（换掉整个队列、从第一首起播）的表现是：用户正听着歌，按一下
-// 搜索页上的按钮，正在放的那首立刻被换掉，队列里前面放的那些全没了。
+// 上游的原话就在那儿（`video-list/index.tsx:89-101`）：它把当前已加载的列表全量
+// 映射之后调 `addList`，**不是 `playList`**。做成了 `PlayFrom`（换掉整个队列、
+// 从第一首起播）的表现是：用户正听着歌，按一下按钮，正在放的那首立刻被换掉，
+// 队列里前面放的那些全没了。
 func TestPlayAllOnlyAppendsToTheQueue(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
 	settleText(t, tt, "第 1 页 第 1 首")
@@ -261,10 +259,9 @@ func TestPlayAllOnlyAppendsToTheQueue(t *testing.T) {
 	}
 }
 
-// TestPlayAllIsDisabledWhenThereIsNothingToPlay 盯那个按钮的禁用条件。
-//
-// Biu 是 `isDisabled={initialLoading || list.length === 0}`（同文件 :174）。
-// 一首都没有还让按，用户点完什么反应都没有，还以为搜索坏了。
+// TestPlayAllIsDisabledWhenThereIsNothingToPlay 盯那个按钮的禁用条件：Biu 是
+// `isDisabled={initialLoading || list.length === 0}`（同文件 :174）。一首都没有还
+// 让按，用户点完什么反应都没有，还以为搜索坏了。
 func TestPlayAllIsDisabledWhenThereIsNothingToPlay(t *testing.T) {
 	s, tt := newSearchPage(t, "不存在的歌", newSearchStub(24, 0))
 	settleText(t, tt, noSearchResults.Hint)
@@ -281,14 +278,12 @@ func TestPlayAllIsDisabledWhenThereIsNothingToPlay(t *testing.T) {
 
 // TestChangingTheSortGoesBackToPageOne 是验收第 2 条的前半句：换排序回到第 1 页。
 //
-// 上游是 `fetchPage` 依赖 `[keyword, musicOnly, order]`，任一变化就把 `page`
-// 重置为 1 并重拉（`video-list/index.tsx:32-47` 与 `:85-87`）。不做的话用户点
-// 一下排序，界面停在第 2 页那一带，而新排序的第 1 页根本没见过。
+// 上游是 `fetchPage` 依赖 `[keyword, musicOnly, order]`，任一变化就把 `page` 重置
+// 为 1 并重拉（`video-list/index.tsx:32-47` 与 `:85-87`）。不做的话用户点一下排序，
+// 界面停在第 2 页那一带，而新排序的第 1 页根本没见过。
 //
-// 判据是**请求**（新排序发出去的那一趟是第 1 页）加**画面**（第 2 页那些行不
-// 在屏幕上了）。判据里没有「一共加载了几行」——理由见 searchTab.current 的
-// 注释：换查询那一帧列表是空的，分页列表的「容器没填满自动续拉」有概率顺手再
-// 拉一页，那一页是它那一层的判断，不是这一页的。
+// 判据是**请求**（新排序发出去的那一趟是第 1 页）加**画面**（第 2 页那些行不在屏幕
+// 上了），没有「一共加载了几行」——理由见 searchTab.current 的注释。
 func TestChangingTheSortGoesBackToPageOne(t *testing.T) {
 	st := newSearchStub(24, 72)
 	s, tt := newSearchPage(t, "周杰伦", st)
@@ -321,10 +316,8 @@ func TestChangingTheSortGoesBackToPageOne(t *testing.T) {
 	}
 }
 
-// TestChangingTheKeywordGoesBackToPageOne 是验收第 2 条的后半句。
-//
-// 「任一筛选条件」里的另一个：搜索词变了。走的是同一条路（判据是「画着的
-// 这些结果不是你要的那一批了」，见 searchTab.current）。
+// TestChangingTheKeywordGoesBackToPageOne 是验收第 2 条的后半句：「任一筛选条件」
+// 里的搜索词。走的是同一条路（见 searchTab.current）。
 func TestChangingTheKeywordGoesBackToPageOne(t *testing.T) {
 	st := newSearchStub(24, 72)
 	s, tt := newSearchPage(t, "周杰伦", st)
@@ -351,13 +344,9 @@ func TestChangingTheKeywordGoesBackToPageOne(t *testing.T) {
 
 // TestSwitchingTabsKeepsWhereYouWere 是验收第 3 条：切 Tab **不重置滚动位置**。
 //
-// Biu 那一行的理由写在 `BIU-UI-INVENTORY.md`：「只改条件渲染，外层
-// ScrollContainer 也没传 resetOnChange」。本项目的做法不同但更严：每个 Tab 各
-// 有自己的分页列表，也各自记着滚到哪儿——切走再切回来落回切走前那一行，
-// 而不是「像素没动、内容换了」。
-//
-// 反向验：把 Tab 算进那个「查询变了」的判据里（见 searchSpecKey 的注释），
-// 每次切都重新拉并且回到顶上，这一条立刻红。
+// Biu 那一行的理由写在 `BIU-UI-INVENTORY.md`：「只改条件渲染，外层 ScrollContainer
+// 也没传 resetOnChange」。本项目不同但更严：每个 Tab 记着自己的位置，切走再切回来
+// 落回切走前那一行，而不是「像素没动、内容换了」。
 func TestSwitchingTabsKeepsWhereYouWere(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 72))
 	settleText(t, tt, "第 1 页 第 1 首")
@@ -412,7 +401,7 @@ func tabOf(name string) int {
 // 三个类型、三套排序
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheThreeTypesAndTheirSorts 盯「搜索结果分三种类型，每种都有对应排序」。
+// TestTheThreeTypesAndTheirSorts 盯「分三种类型，每种都有对应排序」。
 func TestTheThreeTypesAndTheirSorts(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
 	settleText(t, tt, "第 1 页 第 1 首")
@@ -451,11 +440,10 @@ func TestTheThreeTypesAndTheirSorts(t *testing.T) {
 	}
 }
 
-// TestEachSortStaysItsOwn 盯「排序是每个 Tab 各自的」。
-//
-// Biu 的两个列表各有一份排序状态（`video-list` 一个 `order`、`user-list` 一个
-// `sortKey`）。做成一个全局值的话，在「用户」里按过排序再切回「视频」，视频
-// 那边的排序被改了——用户回去发现列表顺序变了，而他自己刚点的明明是用户那边。
+// TestEachSortStaysItsOwn 盯「排序是每个 Tab 各自的」。Biu 的两个列表各有一份排序
+// 状态（`video-list` 一个 `order`、`user-list` 一个 `sortKey`）；做成一个全局值的话，
+// 在「用户」里按过排序再切回「视频」，视频那边的排序被改了——而他刚点的明明是用户
+// 那边。
 func TestEachSortStaysItsOwn(t *testing.T) {
 	st := newSearchStub(24, 24)
 	s, tt := newSearchPage(t, "周杰伦", st)
@@ -497,12 +485,9 @@ func TestEachSortStaysItsOwn(t *testing.T) {
 	}
 }
 
-// TestTheSongTabAsksForTheMusicZoneAndTheVideoTabDoesNot 盯「三种类型」里
-// 真正发到 B 站的那一点差别。
-//
-// 上游那个默认开着的「仅音乐分区」开关发的是 `tids=3`（`video-list/index.tsx:40`）。
-// 本项目把它做成第一个 Tab——**Tab 的差别必须真的落到请求上**，不然「歌曲」和
-// 「视频」搜出来是同一份东西，而界面上看不出任何异样。
+// TestTheSongTabAsksForTheMusicZoneAndTheVideoTabDoesNot 盯「三种类型」里真正发到
+// B 站的那一点差别（`tids=3`，`video-list/index.tsx:40`）。**Tab 的差别必须真的落到
+// 请求上**，不然「歌曲」和「视频」搜出来是同一份东西，而界面上看不出任何异样。
 func TestTheSongTabAsksForTheMusicZoneAndTheVideoTabDoesNot(t *testing.T) {
 	q := searchQuerySpec{keyword: "周杰伦", sort: 0}
 	if !searchVideoQueryOf(searchTabSong, q).MusicOnly {
@@ -528,12 +513,10 @@ func TestTheSongTabAsksForTheMusicZoneAndTheVideoTabDoesNot(t *testing.T) {
 // 行的身份
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestARowThatLandsOnTwoPagesIsStillOneRow 盯铁律四那一半：**唯一**。
-//
-// B 站翻页会重叠，同一个 bvid 落进两页里是常事。两个一样的 ID 就是两行共用
-// 一份状态——选中一个另一个也亮着，而界面上看不出任何异样。分页列表自己去重，
-// 这一条钉的是「我们给出去的 ID 确实相同」：去重之后剩几行、选中的还是不是
-// 那一首。
+// TestARowThatLandsOnTwoPagesIsStillOneRow 盯铁律四那一半：**唯一**。B 站翻页会重叠，
+// 同一个 bvid 落进两页里是常事；两个一样的 ID 就是两行共用一份状态——选中一个另一
+// 个也亮着，而界面上看不出任何异样。分页列表自己去重，这一条钉的是「我们给出去的 ID
+// 确实相同」：去重之后剩几行、选中的还是不是那一首。
 func TestARowThatLandsOnTwoPagesIsStillOneRow(t *testing.T) {
 	st := newSearchStub(24, 72)
 	st.overlap = true
@@ -563,10 +546,8 @@ func TestARowThatLandsOnTwoPagesIsStillOneRow(t *testing.T) {
 	}
 }
 
-// TestSearchRowsCarryStableIDs 盯铁律四那一半：**稳定**。
-//
-// 行的身份是 B 站的 bvid / mid 本身，不是序号。B 站认的就是这个，它不随页面
-// 不随排序变——拿序号当身份的话，头部插一行会让后面所有行的状态整体错配。
+// TestSearchRowsCarryStableIDs 盯铁律四那一半：**稳定**。行的身份是 B 站的 bvid /
+// mid 本身，不是序号——拿序号当身份的话，头部插一行会让后面所有行的状态整体错配。
 func TestSearchRowsCarryStableIDs(t *testing.T) {
 	v := searchVideoMusic(bili.VideoHit{Bvid: "BV1MbznYoEk1", Title: "歌名", Owner: "某UP"})
 	if v.ID != "BV1MbznYoEk1" {
@@ -593,10 +574,8 @@ func TestSearchRowsCarryStableIDs(t *testing.T) {
 // 用户 Tab
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestAMenuOnAUserGoesToTheirSpace 盯用户那一行按下去是什么。
-//
-// 用户不是歌：右键菜单里的「播放」是进他的 UP 主空间（上游
-// `user-card.tsx:51` 的 `onPress={() => navigate("/user/" + u.mid)}`）。
+// TestAMenuOnAUserGoesToTheirSpace 盯用户那一行按下去是什么：用户不是歌，右键菜单里
+// 的「播放」是进他的 UP 主空间（上游 `user-card.tsx:51` 的 `navigate("/user/" + mid)`）。
 func TestAMenuOnAUserGoesToTheirSpace(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
 	settleText(t, tt, "第 1 页 第 1 首")
@@ -683,11 +662,9 @@ func TestTheResultRowsArePaintedNotBlank(t *testing.T) {
 // 没接上 / 没有结果
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestNoClientSaysSoInsteadOfPretending 盯「没挂 B 站客户端」别静默。
-//
-// 生产上 `main.go` 一定先挂（`ui.MountLogin`），这一条是给「万一没挂」留的。
-// 表现是「搜了没有结果」那一支 + 一条说清原因的提示，而不是一片空白让人以为
-// 搜过了就是没有。
+// TestNoClientSaysSoInsteadOfPretending 盯「没挂 B 站客户端」别静默。生产上 `main.go`
+// 一定先挂（`ui.MountLogin`），这一条给「万一没挂」留：表现是「搜了没有结果」那一支
+// 加一条说清原因的提示，而不是一片空白。
 func TestNoClientSaysSoInsteadOfPretending(t *testing.T) {
 	s, tt := newShell(t) // 没有换掉 fetch：走真的那一支，而它没有客户端
 	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("周杰伦"))
