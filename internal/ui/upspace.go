@@ -363,7 +363,7 @@ func (s *Shell) viewUpSpace(c *ui.Context, r *ui.Route) {
 	// 界面停在「打不开」上还在刷网络。唯一的出口是用户点「再试一次」。
 	if !h.Loaded && !h.Loading && h.Err == "" {
 		sp.header.Load()
-	} else if h.NeedRelation(s.app.SelfMid()) || h.NeedStat() {
+	} else if h.NeedRelation(s.app.SelfMid()) || h.NeedStat(s.app.SelfMid()) {
 		// 🔴 关注关系和关注数这两样**都要在缺的时候补查**。
 		//
 		// 关注关系那条的理由见下面；关注数那条是同一个病根：它是**按账号**

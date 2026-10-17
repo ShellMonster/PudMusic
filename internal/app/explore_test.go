@@ -62,6 +62,19 @@ func (b *exploreBili) on(path string, h http.HandlerFunc) {
 	b.handlers[path] = h
 }
 
+// countHit 数打到某条路径上的请求有几回。
+func (b *exploreBili) countHit(path string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := 0
+	for _, p := range b.paths {
+		if p == path {
+			n++
+		}
+	}
+	return n
+}
+
 func (b *exploreBili) hit(path string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -598,7 +611,7 @@ func TestAFailedStatIsNotCachedAsZero(t *testing.T) {
 		t.Error("AnyPartFailed 该为 true")
 	}
 	// 防抖：失败之后不自动重试（不然每帧一个请求）。
-	if h.NeedStat() {
+	if h.NeedStat(77) {
 		t.Error("查失败之后 NeedStat 应该是 false（否则每帧一个请求）")
 	}
 
@@ -607,13 +620,64 @@ func TestAFailedStatIsNotCachedAsZero(t *testing.T) {
 		writeExploreJSON(w, 0, map[string]any{"follower": 123456})
 	})
 	sp.RetryRelation()
-	if !sp.Snapshot().NeedStat() {
+	if !sp.Snapshot().NeedStat(77) {
 		t.Fatal("RetryRelation 之后该又能查了")
 	}
 	sp.Load()
 	waitExplore(t, sp)
 	if !sp.Snapshot().StatOK() || sp.Snapshot().Stat.Follower != 123456 {
 		t.Errorf("重试之后没拿到粉丝数：%+v", sp.Snapshot().Stat)
+	}
+}
+
+// TestLoggedOutHeaderDoesNotRefetchForever 是**一条自激循环**的钉子。
+//
+// ⚠️ 这条是评审第三轮抓到的回归，我自己引入的：`StatOK()` 当时是
+// `statKnown && statFor != 0`，而未登录时 `statFor` 就是 0 —— 于是
+// `StatOK` 永远为假、`NeedStat` 永远为真，而 `viewUpSpace` 每帧按它调一次
+// `Load()`。结果：未登录、接口全部成功，**8 次空闲帧发了 10 次请求**，
+// 而且每次结果回来又唤醒界面（铁律三）—— 那个唤醒正是循环的一环。
+//
+// 判据是**请求次数**：不画第二帧之前应该只有 1 次。
+func TestLoggedOutHeaderDoesNotRefetchForever(t *testing.T) {
+	b := newExploreBili(t)
+	b.on("/x/space/wbi/acc/info", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"mid": 42, "name": "n", "level": 3})
+	})
+	b.on("/x/relation/stat", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"follower": 100, "following": 5})
+	})
+	b.on("/x/space/wbi/acc/relation", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, -101, nil)
+	})
+	a := newExploreApp(t, b)
+
+	// 未登录。
+	sp := a.UpSpaceOf(42)
+	sp.Load()
+	waitExplore(t, sp)
+
+	// 空闲八拍：每来一个「结果到了」的唤醒，界面那一帧都会问一次「还要不要再拉」。
+	for range 8 {
+		time.Sleep(time.Millisecond)
+	}
+	if n := b.countHit("/x/space/wbi/acc/info"); n != 1 {
+		t.Errorf("未登录、接口全部成功，acc/info 被请求了 %d 次，want 1"+
+			"（每帧重拉的自激循环：NeedStat 在未登录时必须为 false）", n)
+	}
+	if n := b.countHit("/x/relation/stat"); n != 0 {
+		t.Errorf("未登录还查了 %d 次关注数（界面那一块没登录时不画，查它是白花）", n)
+	}
+	if h := sp.Snapshot(); !h.Loaded || h.Loading {
+		t.Errorf("状态不对：%+v", h)
+	}
+	// 未登录时 `NeedStat` 必须是 false —— 这一句才是循环的那道门。
+	if sp.Snapshot().NeedStat(0) {
+		t.Error("未登录时 NeedStat 是 true —— 这就是每帧重拉的那道门")
+	}
+	// 反过来：登录之后它又该变回 true（登录那一刻才去查）。
+	if !sp.Snapshot().NeedStat(77) {
+		t.Error("登录之后 NeedStat 应该是 true（那一刻才去查关注数）")
 	}
 }
 

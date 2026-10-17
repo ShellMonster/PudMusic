@@ -116,13 +116,15 @@ type SpaceHeader struct {
 	// Err 是上一次加载的错。成功时是空串。
 	Err string
 
-	// statFor / statKnown / statErr 是「关注数/粉丝数」那一组，形状和上面
-	// relation 那一组一样。
+	// statKnown / statErr 是「关注数/粉丝数」那一组。
 	//
 	// ⚠️ 为什么不能像 `Stat` 那样「拿不到就当 0」：**粉丝数 0 会被画成一个
 	// 干干净净的「粉丝数 0」**，而那是个**假数**——真实值可能是十几万。用户会
 	// 相信它。所以查不到就说「没查到」并且给一个重试。
-	statFor   int64
+	//
+	// ⚠️ 这里**没有**「按哪个账号记」那一格（relation 有）。粉丝数是这个 UP 主
+	// 的公开数据，两个账号看到的一样；加上去只会把未登录那一档（mid=0）判成
+	// 「永远没查到」，于是每帧重拉一次。
 	statKnown bool
 	statErr   string
 
@@ -181,17 +183,28 @@ func (h SpaceHeader) Follow(selfMid int64, loggedIn bool) FollowState {
 }
 
 // StatOK 报告「关注数/粉丝数是真的查到了」。
-func (h SpaceHeader) StatOK() bool { return h.statKnown && h.statFor != 0 }
+//
+// ⚠️ **只看 statKnown，不要看「是哪个账号查的」**（那是 `Relation` 才需要的）。
+// 关注数/粉丝数是**这个 UP 主的公开数据**，两个账号看到的��是一样，所以
+// 「按账号记」在这里没有意义；而它有代价：未登录时 `statFor` 是 0，于是
+// `StatOK` 永远为假、`NeedStat` 永远为真 —— 一个**每帧重拉头部**的自激
+// 循环（实测：未登录、接口全部成功，8 次空闲帧就发了 10 次请求）。
+func (h SpaceHeader) StatOK() bool { return h.statKnown }
 
 // StatFailed 报告「关注数/粉丝数没查到，而且可以点重试」。
 func (h SpaceHeader) StatFailed() bool { return h.statErr != "" }
 
-// NeedStat 报「关注数/粉丝数该不该现在去查」。
+// NeedStat 报「关注数/粉丝数该不该现在去查」。selfMid 是当前登录账号（0 = 没登录）。
 //
-// 和 NeedRelation 同一套规矩：登录了、头已经加载过、没在拉、**没失败过**
-// （失败了等人点重试，不然一个稳定失败的接口就是每帧一个请求）。
-func (h SpaceHeader) NeedStat() bool {
-	if !h.Loaded || h.Loading || h.statErr != "" {
+// ⚠️ **第一句必须是「登录了吗」**：这一块界面只在登录后才画，没登录时 `Load`
+// **压根不去查**它（见 Load 里的 `askStat`）。少了这道判断，未登录时
+// `statKnown` 永远是 false → `NeedStat` 永远是 true → 每帧调一次 `Load`，
+// 而每次结果回来又唤醒界面（铁律三）—— 那是一个**自己叫醒自己**的循环。
+//
+// 剩下的和 NeedRelation 一致：头已经加载过、没在拉、**没失败过**（失败了等人
+// 点重试，不然一个稳定失败的接口就是每帧一个请求）。
+func (h SpaceHeader) NeedStat(selfMid int64) bool {
+	if selfMid == 0 || !h.Loaded || h.Loading || h.statErr != "" {
 		return false
 	}
 	return !h.StatOK()
@@ -297,6 +310,10 @@ func (s *UpSpace) Load() {
 	// 里问 `a.LoggedIn()`）：中间可能已经退登了，而查出来的关系是按账号的。
 	selfMid := s.app.SelfMid()
 	askRelation := s.app.LoggedIn()
+	// 关注数/粉丝数**只在登录后才查**：界面那一块也只在登录后才画
+	// （`viewSpaceActions` 里 `if s.app.LoggedIn()`），没登录时查它是白花一次
+	// 请求，而且会让 `NeedStat` 永远为真（见那里的注释）。
+	askStat := selfMid != 0
 
 	s.mu.Lock()
 	if s.running {
@@ -323,10 +340,14 @@ func (s *UpSpace) Load() {
 		)
 		done := make(chan struct{}, 3)
 		go func() { user, _ = cli.SpaceAcc(ctx, mid); done <- struct{}{} }()
-		go func() {
-			defer func() { done <- struct{}{} }()
-			stat, statErr = cli.RelationStatOf(ctx, mid)
-		}()
+		if askStat {
+			go func() {
+				defer func() { done <- struct{}{} }()
+				stat, statErr = cli.RelationStatOf(ctx, mid)
+			}()
+		} else {
+			done <- struct{}{}
+		}
 		if askRelation {
 			go func() {
 				defer func() { done <- struct{}{} }()
@@ -371,9 +392,9 @@ func (s *UpSpace) Load() {
 			// 吞掉的话界面上是一个干干净净的「粉丝数 0」——那是个**假数**，
 			// 用户会相信它（而真实值可能是十几万）。这是这一条最难受的地方：
 			// 它看起来完全正常。
-			s.head.statFor, s.head.statKnown = 0, false
+			s.head.statKnown = false
 			if statErr == nil && stat != nil {
-				s.head.statFor, s.head.statKnown = selfMid, true
+				s.head.statKnown = true
 				s.head.Stat = *stat
 			}
 			if statErr != nil {

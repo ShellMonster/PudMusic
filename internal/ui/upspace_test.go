@@ -63,6 +63,19 @@ func (b *uiExplore) on(path string, h http.HandlerFunc) {
 	b.handlers[path] = h
 }
 
+// countHit 数打到某条路径上的请求有几回。
+func (b *uiExplore) countHit(path string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := 0
+	for _, p := range b.paths {
+		if p == path {
+			n++
+		}
+	}
+	return n
+}
+
 func (b *uiExplore) hit(path string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -848,6 +861,40 @@ func TestADynamicKeepsItsIdentityWhenOneIsInsertedAbove(t *testing.T) {
 				"（框架按 key 对位，key 变了就是状态整体错配）",
 				i, before[i], after[i+1])
 		}
+	}
+}
+
+// TestLoggedOutSpaceDoesNotRefetchTheHeaderOnEveryFrame 钉住「未登录打开空间
+// 不会每帧重拉头部」——**在真的帧上**。
+//
+// ⚠️ 这是评审第三轮抓到的、我自己引入的自激循环。应用层那条
+// （`explore_test.go` 的 `TestLoggedOutHeaderDoesNotRefetchForever`）只能钉住
+// 状态和那次白花的请求；「每帧重拉」这件事**要跑帧才看得见**：
+// `viewUpSpace` 每帧按 `NeedStat()` 问一次「还要不要再拉」，而
+// `NeedStat` 一旦为真、`Load` 的结果又唤醒界面（铁律三）——唤醒正是循环的
+// 那一环。实测未登录、接口全部成功时，8 次空闲帧发了 10 次请求。
+//
+// 判据是**请求次数**：8 帧之后仍然只有 1 次。
+func TestLoggedOutSpaceDoesNotRefetchTheHeaderOnEveryFrame(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "未登录看的 UP", 0, 100)
+	b.on("/x/space/wbi/acc/relation", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, -101, nil) // 没登录：那个接口要 Cookie
+	})
+	s, tt, _ := newSpaceShell(t, b, false, "")
+
+	openSpace(t, s, tt, 42)
+	// 空闲八帧。每一帧都会问一次「还要不要再拉」。
+	for range 8 {
+		tt.Frame()
+	}
+
+	if n := b.countHit("/x/space/wbi/acc/info"); n != 1 {
+		t.Errorf("8 帧之后 acc/info 被请求了 %d 次，want 1 —— `NeedStat` 在未登录时"+
+			"必须是 false，否则每帧重拉（自己叫醒自己）", n)
+	}
+	if n := b.countHit("/x/relation/stat"); n != 0 {
+		t.Errorf("未登录还查了 %d 次关注数（界面那一块没登录时不画，查它是白花）", n)
 	}
 }
 

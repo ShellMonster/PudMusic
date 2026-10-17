@@ -315,20 +315,33 @@ func TestTheAuthorRetryWhilePendingDoesNotSendASecondRequest(t *testing.T) {
 		uiExploreJSON(w, 0, map[string]any{"items": []any{}, "has_more": false})
 	})
 
+	// 作者栏**很短**：第一页给一个人、total 2、后面没有。那样哨兵一落进画面
+	// 就会被自动补屏拉到（见 dynamicfeed.go 里 viewAuthorPane 的两条保障），
+	// 所以第二页一失败界面上立刻就有重试按钮——不用去滚，**不依赖时序**。
+	// （早一版靠「滚到底」去触发，机器一忙就够不到，测试自己 flaky。）
 	var mu sync.Mutex
 	var pn2 int
-	// page1 给一个作者、total 2；page2 一律失败 → 界面上出现重试按钮。
-	b.on("/x/relation/followings", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("pn") != "2" {
-			uiExploreJSON(w, 0, map[string]any{"total": 2, "list": []any{
-				map[string]any{"mid": 11, "uname": "第一个"},
-			}})
-			return
-		}
+	failing := true
+	failPN2 := func(w http.ResponseWriter, _ *http.Request) {
 		mu.Lock()
 		pn2++
 		mu.Unlock()
 		uiExploreJSON(w, -500, nil)
+	}
+	b.on("/x/relation/followings", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("pn") == "2" {
+			if failing {
+				failPN2(w, r)
+			} else {
+				uiExploreJSON(w, 0, map[string]any{"total": 2, "list": []any{
+					map[string]any{"mid": 12, "uname": "第二个"},
+				}})
+			}
+			return
+		}
+		uiExploreJSON(w, 0, map[string]any{"total": 2, "list": []any{
+			map[string]any{"mid": 11, "uname": "第一个"},
+		}})
 	})
 
 	s, tt, _ := newSpaceShell(t, b, true, "77")
@@ -344,22 +357,28 @@ func TestTheAuthorRetryWhilePendingDoesNotSendASecondRequest(t *testing.T) {
 	if _, ok := tt.Find("重试加载关注的人"); !ok {
 		t.Skipf("这一轮没出现重试按钮（err=%v），画面上是 %q", f.auth.err, tt.Texts())
 	}
+	mu.Lock()
+	before := pn2
+	mu.Unlock()
 
-	// ⚠️ 换掉处理器：这一次的第二页会一直悬着，直到测试放它走。
+	// ⚠️ 换成「这一次悬着不回头」，好观察「重试期间」的状态。
 	release := make(chan struct{})
+	mu.Lock()
+	failing = false
+	mu.Unlock()
 	b.on("/x/relation/followings", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("pn") != "2" {
+		if r.URL.Query().Get("pn") == "2" {
+			mu.Lock()
+			pn2++
+			mu.Unlock()
+			<-release
 			uiExploreJSON(w, 0, map[string]any{"total": 2, "list": []any{
-				map[string]any{"mid": 11, "uname": "第一个"},
+				map[string]any{"mid": 12, "uname": "第二个"},
 			}})
 			return
 		}
-		mu.Lock()
-		pn2++
-		mu.Unlock()
-		<-release
 		uiExploreJSON(w, 0, map[string]any{"total": 2, "list": []any{
-			map[string]any{"mid": 12, "uname": "第二个"},
+			map[string]any{"mid": 11, "uname": "第一个"},
 		}})
 	})
 
@@ -372,12 +391,20 @@ func TestTheAuthorRetryWhilePendingDoesNotSendASecondRequest(t *testing.T) {
 			"（`auth := f.auth` 是复制），可以再点一次并发发第二个请求")
 	}
 	mu.Lock()
-	n := pn2
+	during := pn2
 	mu.Unlock()
-	if n != 2 {
-		// 1 次是「失败的那一次」（重试之前），重试再加 1 次。
-		t.Errorf("第二页被请求了 %d 次，want 2（一次失败 + 一次重试）；多了就是并发重复", n)
+	if during != before+1 {
+		t.Errorf("点了重试之后第二页被请求了 %d 次，want %d（一次就够）",
+			during-before, 1)
 	}
+
 	close(release)
 	waitFrames(t, tt, "第二页到了", func() bool { return len(f.authors) == 2 })
+	mu.Lock()
+	after := pn2
+	mu.Unlock()
+	if after != before+1 {
+		t.Errorf("整个过程第二页被请求了 %d 次，want %d —— 重试期间又发起了重复请求",
+			after-before, 1)
+	}
 }
