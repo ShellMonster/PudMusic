@@ -115,16 +115,20 @@ func TestAnOutageShowsBufferingAndResumesFromTheSamePosition(t *testing.T) {
 
 	// ⚠️ 先等播放位置**停稳**再开始量「没有字节就不该往前走」。
 	//
-	// MyGo 的解码器会提前解一秒多的音（`stream` 里那个一秒的环），所以
-	// 缓冲刚开始的那一秒位置本来就在走——那是存货放完，不是 bug。拿它
-	// 当「还在正常播放」的证据会误判。
+	// MyGo 的解码器会提前解一秒多的音（`mygo/audio/source.go` 里那个一秒的
+	// 环），所以缓冲刚开始的那一秒位置本来就在走——那是存货放完，不是 bug。
+	//
+	// 而判「停稳」的窗口**必须比那个环还长**：短于它就会抓到两次补货之间的
+	// 一瞬（环刚好排空、下一批字节还没到），量成「位置又在走了」。
+	// 500ms 的窗口栽过这一下——满负载下跑十次有一次红在
+	// 「1.068s → 1.482s」，差的 414ms 就是环里剩下的存货。
 	var settled time.Duration
-	waitFor(t, 30*time.Second, "缓冲期间播放位置停住", func() bool {
+	waitFor(t, 60*time.Second, "缓冲期间播放位置停稳", func() bool {
 		p1 := a.Snapshot().Position
 		if p1 == 0 {
 			return false
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(1600 * time.Millisecond)
 		if a.Snapshot().Position == p1 {
 			settled = p1
 			return true
@@ -133,10 +137,14 @@ func TestAnOutageShowsBufferingAndResumesFromTheSamePosition(t *testing.T) {
 	})
 
 	// 停稳之后不许再走。没有新字节，解码器就没有新样本。
-	time.Sleep(1500 * time.Millisecond)
-	if got := a.Snapshot().Position; got > settled+400*time.Millisecond {
-		t.Errorf("缓冲期间位置还在走：%v → %v（没有字节进来，不该往前走）",
-			settled.Round(time.Millisecond), got.Round(time.Millisecond))
+	// 连续采两秒：整个窗口里一次都不许动，不给它「动一点点」的机会。
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := a.Snapshot().Position; got != settled {
+			t.Fatalf("缓冲期间位置还在走：%v → %v（没有字节进来，不该往前走）",
+				settled.Round(time.Millisecond), got.Round(time.Millisecond))
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 	if a.Snapshot().Err != "" {
 		t.Errorf("缓冲着就有错误了：%q", a.Snapshot().Err)
