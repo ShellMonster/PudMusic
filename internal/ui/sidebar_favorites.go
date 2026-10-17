@@ -109,9 +109,11 @@ func (s *Shell) viewFavoriteHeader(c *ui.Context, g app.FavoriteGroup, folded bo
 		if fold.Clicked() {
 			s.toggleFavoriteFolded(g, folded)
 		}
-		// ⚠️ **折叠的时候不画**：72 宽的侧栏摆不下两个字，而 Biu 那边这个 +
-		// 是在 `renderFavoriteGroup` 的 titleExtra 里、折叠态同样不画
-		// （`collection/index.tsx:432-434` 那段把 children 一起折了）。
+		// ⚠️ **这一组折叠着的时候不画 +**：Biu 那边这个 + 是
+		// `renderFavoriteGroup` 的 `titleExtra`，而折叠的那一支只画标题，
+		// `titleExtra` 跟着一起折了（`collection/index.tsx:432-434`）。
+		// 侧栏**整体**折叠是更上面那一道（`viewFavoriteGroup` 直接 return），
+		// 和这一个不是同一件事。
 		if g == app.FavoritesCreated && !folded {
 			s.viewNewFavoriteButton(c)
 		}
