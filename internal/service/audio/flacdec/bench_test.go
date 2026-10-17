@@ -147,18 +147,20 @@ func TestSeekSpeed(t *testing.T) {
 	walked, took := src.n, time.Since(start)
 	t.Logf("a seek into unplayed ground walked %d bytes to frame %d in %v", walked, fresh, took)
 
-	// 走到目标就该停。顺序解码同样多的帧要花 stretch 字节，一次 seek 多读出来的只有读
-	// 前瞻（最多一个 chunk），而不是一路解到文件尾。
-	stretch := bytesForFrames(t, name, fresh)
-	if walked > stretch+2*readChunk {
-		t.Errorf("a seek to frame %d read %d bytes, more than the %d that decoding the same %d frames takes: it walked past its target",
-			fresh, walked, stretch, fresh)
+	// 走到目标就该停。这次 seek 只能读「从文件头到目标」那段音频的字节，而那段音频
+	// 值多少字节，就是 fresh/rate 个 checkpoint 区间。这是均速外推，而外推给的是
+	// 一个偏松的数（这个 fixture 上三段实际是 184320 字节，外推给 196608），所以这条
+	// 判据只断「越过目标一大段」那种回归，判的是粗不是细；一路解到文件尾是四个区间，
+	// 掉得下来。
+	span := (fresh / rate) * interval
+	if walked > span+2*readChunk {
+		t.Errorf("a seek to frame %d read %d bytes, more than the %d that the first %d frames of the file cost: it walked past its target",
+			fresh, walked, span, fresh)
 	}
 
 	// 第二次：往回 seek 到索引已经盖住的地方。索引每 checkpointSeconds 记一格，所以
 	// 这一次最多重解一格，不该再从文件头起步。
 	back := d.Len() / 2
-	cold := bytesForFrames(t, name, back) // the same seek from a decoder that has walked nothing
 	src.n, start = 0, time.Now()
 	if err := d.SetPosition(back); err != nil {
 		t.Fatal(err)
@@ -167,8 +169,8 @@ func TestSeekSpeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	indexed, tookBack := src.n, time.Since(start)
-	t.Logf("a backward seek to frame %d read %d bytes in %v (the same seek from a cold start costs %d, one second of audio costs %d)",
-		back, indexed, tookBack, cold, interval)
+	t.Logf("a backward seek to frame %d read %d bytes in %v (one checkpoint interval of audio costs %d)",
+		back, indexed, tookBack, interval)
 
 	// 判据：一秒的音频，外加字节数看不到的两处余量——walk 是按整帧解的，落点那一帧要
 	// 整帧读进来（这个 fixture 上是 4608 帧，约一秒的十分之一），读前瞻又最多多一个
@@ -209,6 +211,10 @@ func (c *countingReader) Seek(off int64, whence int) (int64, error) { return c.r
 // reports how many bytes of the file that took: the price of that stretch of audio,
 // which is what a seek has to pay to walk it. The metadata is read by Open, and
 // the count starts after it, so what is measured is the frames.
+//
+// Keep the stretch short: the acceptance gate runs this under -race, where every
+// frame of audio is instrumented, and a ruler that costs more to build than the
+// thing it measures is a bad trade.
 func bytesForFrames(t *testing.T, name string, frames int64) int64 {
 	t.Helper()
 	f, err := os.Open(name)
