@@ -70,6 +70,9 @@ type dynamicFeed struct {
 	dropped int
 	// started 是右边已经拉过至少一页了。
 	started bool
+	// selfMid 是**这份缓存是为哪个账号拉的**。作者栏和「关注的动态」都是
+	// 按账号的，账号一变这一页整个作废（见 resetIfAccountChanged）。
+	selfMid int64
 
 	// 跨 goroutine 的只有这一小摊信箱。
 	boxMu sync.Mutex
@@ -78,10 +81,15 @@ type dynamicFeed struct {
 
 // feedResult 是后台拉完之后投进信箱的东西。
 type feedResult struct {
-	which   int // feedAuthors / feedItems
+	which int
+	// selfMid 是发这一次时的账号。换账号之后回来的那一页**作废**——
+	// `stop` 能停请求，但停不掉已经在回来的那一页。
+	selfMid int64 // feedAuthors / feedItems
 	dyns    []bili.Dynamic
 	authors []bili.FollowAuthor
 	cursor  string
+	// sent 是 B 站这一页发了几条（过滤之前）。见 upPager.adopt。
+	sent    int
 	hasMore bool
 	dropped int
 	err     error
@@ -99,6 +107,30 @@ func (s *Shell) dynamicFeedOf() *dynamicFeed {
 		s.feedPage = &dynamicFeed{}
 	}
 	return s.feedPage
+}
+
+// resetIfAccountChanged 在**账号变了**时把这一页整个作废。
+//
+// 为什么必须整个作废而不是只清作者栏：左边列的是「我关注的人」，右边
+// `/feed/all` 也是「我关注的人的动态」——两样都是**按账号**的。换账号后
+// 留着上一份的话，用户在新账号下看的是旧账号的内容，而界面上没有任何
+// 东西提示这一点。
+//
+// 顺带把那两条在途请求作废掉（闸门 `stop` 会 cancel + 清掉状态）。
+func (s *Shell) resetIfAccountChanged(f *dynamicFeed) {
+	cur := s.app.SelfMid()
+	if f.selfMid == cur {
+		return
+	}
+	f.selfMid = cur
+	f.auth.stop()
+	f.feed.stop()
+	f.auth = upPager{}
+	f.feed = upPager{}
+	f.authors = nil
+	f.items = nil
+	f.dropped = 0
+	f.started = false
 }
 
 // feedPager 是这一栏的闸门。
@@ -123,10 +155,22 @@ func (s *Shell) viewDynamicFeed(c *ui.Context, _ *ui.Route) {
 
 	// 首屏那两拉，**必须在画之前发出去**。画完再发的话这一帧画出来的是
 	// 「正在加载」，要等这一页回来才换掉——而那一段没有任何东西会叫醒界面。
+	// 🔴 **换账号了就把这一页整个换掉**：作者栏列的是「**我**关注的人」，
+	// 而整个 `dynamicFeed` 是挂在壳上的一份缓存 —— 不换的话退出 A 登录 B，
+	// 左边仍然是 A 关注的人（实测：SelfMid 已经是 88，界面上还是「账号77
+	// 专属作者」，接口一次都没再请求）。
+	s.resetIfAccountChanged(f)
+
+	// ⚠️ **只在「一页都还没拉过」时发**（理由同 `viewSpaceList` 里那一段）：
+	// 这一段每帧都跑，不设这道门就是第一页一落地、下一帧又拉一页，用户
+	// 什么都没滚就把后面的页全拉完了。
+	//
 	// ⚠️ **cursor 和 page 在这里读**（界面线程），不在后台那条线上读：
 	// 闸门是界面线程的状态（铁律一），后台碰它就是数据竞争。
-	if ctx := f.feed.begin(); ctx != nil {
-		go s.fetchFeed(ctx, f, feedItems, f.feed.cursor, f.feed.page)
+	if !f.started && !f.feed.loading {
+		if ctx := f.feed.begin(); ctx != nil {
+			go s.fetchFeed(ctx, f, feedItems, f.feed.cursor, f.feed.page)
+		}
 	}
 	// ⚠️ **作者栏那一拉不在这里发**：它要的是「我关注的人」，没登录时那个接口
 	// 一定回 -101，而 -101 在这一层和「网络断了」长得一模一样。发出去的话
@@ -311,7 +355,13 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 		s.viewEmpty(c, "feed:loading", emptyState{Title: "正在加载动态…"})
 		return
 	}
-	if len(f.items) == 0 {
+	// 🔴 **「一行都没有」也分两种**：没有下一页了 → 画空状态；**还有下一页**
+	// → 继续画哨兵那一行。实测踩过的坑：一页全是画不出来的（全被丢弃）时
+	// 留下 0 行，早一版在这里画空状态并 return，哨兵根本没被画出来，
+	// 「滚到底」和「容器没填满」两条保障一个都问不到 —— 后面的有效动态
+	// 永远不再加载。
+	keepLooking := f.started && feed.hasMore
+	if len(f.items) == 0 && !keepLooking {
 		s.viewEmpty(c, "feed:"+feedEmptyKey(f), feedEmpty(f))
 		return
 	}
@@ -465,16 +515,16 @@ func (s *Shell) fetchFeed(ctx context.Context, f *dynamicFeed, which int, cursor
 		s.wake.invalidate()
 	}()
 
-	r = feedResult{which: which}
+	r = feedResult{which: which, selfMid: s.app.SelfMid()}
 
 	switch which {
 	case feedAuthors:
 		pg, err := s.app.FollowedAuthors(ctx, s.app.SelfMid(), page+1)
-		r.err, r.authors, r.hasMore = err, pg.Authors, pg.HasMore
+		r.err, r.authors, r.hasMore, r.sent = err, pg.Authors, pg.HasMore, len(pg.Authors)
 	default:
 		pg, err := s.app.DynamicFeed(ctx, cursor)
 		r.err, r.dyns, r.hasMore, r.dropped = err, pg.Items, pg.HasMore, pg.Dropped
-		r.cursor = pg.Offset
+		r.cursor, r.sent = pg.Offset, pg.Raw
 	}
 }
 
@@ -489,6 +539,11 @@ func (s *Shell) adoptFeed(f *dynamicFeed) {
 	}
 
 	for _, r := range box {
+		if r.selfMid != f.selfMid {
+			// 换账号之前发出去的那一页。它说的是**上一个账号**的关注的人。
+			f.feedPager(r.which).settle()
+			continue
+		}
 		p := f.feedPager(r.which)
 		// ⚠️ **`settle` 必须先调**：失败、超时、返回不对、拉取的代码崩了，
 		// 全走这一条。漏了它那一格会永远停在「正在加载」。
@@ -508,6 +563,6 @@ func (s *Shell) adoptFeed(f *dynamicFeed) {
 		}
 		// ⚠️ 传的是**这一页**返回了几行，不是累计的：累计的数在「第一页就空」
 		// 和「翻到一半这一页空」上分不出来，而后者恰恰是「到头了」。
-		p.adopt(r.cursor, len(r.dyns)+len(r.authors), r.hasMore)
+		p.adopt(r.cursor, r.sent, r.hasMore)
 	}
 }

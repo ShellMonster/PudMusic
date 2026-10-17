@@ -75,14 +75,23 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	p := sp.pagerOf(tab)
 
-	// ① 首屏那一拉，必须在**画之前**发出去。翻回来的那几张 Tab 已经
-	// `started` 了，`begin` 会返回 nil —— 不会重拉，也不会重复追加。
+	// ① 首屏那一拉，必须在**画之前**发出去。
+	//
+	// ⚠️ **只在「一页都还没拉过」时发**：这一段每帧都跑，而 `begin()` 只看
+	// 「不是在拉、没有错、还有下一页」，于是第一页一落地，下一帧就又发一页
+	// ——**用户什么都没滚，后面的页全被拉完了**（实测：一页 50 条共 4 页，
+	// 不滚一下就请求了 4 次、攒了 200 条；滚动哨兵根本没机会起作用，
+	// 内存和网络都在用户看不见的地方烧掉）。
+	//
+	// 翻回来的那几张 Tab `started` 是真，也不重拉。
 	//
 	// ⚠️ **cursor 和 page 在这里读，不在后台那条线上读**：闸门是界面线程的
 	// 状态（铁律一），后台碰它就是数据竞争。真机上平时看不出来（拉一趟就
 	// 回来了），而在慢帧上那一次读会和这一帧的 `adopt` 写撞上。
-	if ctx := p.begin(); ctx != nil {
-		go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
+	if !p.started && !p.loading {
+		if ctx := p.begin(); ctx != nil {
+			go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
+		}
 	}
 
 	// ⚠️ **「拉失败了」必须排在「空」前面**。反过来的话第一页拉失败时
@@ -103,7 +112,16 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 		s.viewEmpty(c, upEmptyKey(sp, tab), emptyState{Title: "正在加载" + upTabNames[tab] + "…"})
 		return
 	}
-	if upRowCount(sp, tab) == 0 {
+	// 🔴 **「一行都没有」也分两种**：
+	//
+	//   - **而且没有下一页了** → 画空状态（「暂无动态」那一句）。
+	//   - **还有下一页** → 继续画哨兵那一行，**不画空状态**。实测踩过的坑：
+	//     一页里全是转发的动态（全被丢弃）时留下 0 行，早一版在这里直接
+	//     画空状态并 return，于是哨兵那一行**根本没被画出来**，「滚到底」
+	//     和「容器没填满」两条保障一个都问不到 —— 第二页有一条正常的，
+	//     永远不再加载。
+	keepLooking := p.started && p.hasMore
+	if upRowCount(sp, tab) == 0 && !keepLooking {
 		s.viewEmpty(c, upEmptyKey(sp, tab), upTabEmpty(tab, sp.dropped[tab]))
 		return
 	}

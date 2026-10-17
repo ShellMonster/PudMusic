@@ -215,6 +215,10 @@ func uiDynamic(id, text string) map[string]any {
 // uiDynamicArchive 是造一条投稿型动态。
 func uiDynamicArchive(id, bvid string) map[string]any {
 	m := uiDynamic(id, "")
+	// ⚠️ **顶层 `type` 也要设**：真实 B 站的投稿动态就是
+	// `DYNAMIC_TYPE_AV`（`parseDynamic` 拿它当闸门）。早一版这个 fixture 只设了
+	// `major.type`，于是那条动态在新的闸门下被当成「未知的纯文字」丢掉了。
+	m["type"] = "DYNAMIC_TYPE_AV"
 	mods := m["modules"].(map[string]any)
 	mods["module_dynamic"].(map[string]any)["major"] = map[string]any{
 		"type": "MAJOR_TYPE_ARCHIVE",
@@ -238,6 +242,9 @@ func uiDynamicOpus(id, text string, pics ...string) map[string]any {
 	for _, p := range pics {
 		items = append(items, map[string]any{"url_src": p})
 	}
+	// 顶层 `type` 也要设（见 uiDynamicArchive 那一段的注释）：带图动态在
+	// B 站那边是 `DYNAMIC_TYPE_DRAW`。
+	m["type"] = "DYNAMIC_TYPE_DRAW"
 	mods := m["modules"].(map[string]any)
 	mods["module_dynamic"].(map[string]any)["major"] = map[string]any{
 		"type": "MAJOR_TYPE_OPUS",
@@ -250,8 +257,16 @@ func uiDynamicOpus(id, text string, pics ...string) map[string]any {
 }
 
 // uiDynamicUnrenderable 是造一条这一版画不出来的动态（转发/直播/剧集…）。
-func uiDynamicUnrenderable(id, kind string) map[string]any {
+//
+// ⚠️ `withText` 决定它带不带正文——**带正文的那一条才是真考题**：
+// 转发件在 B 站返回里是有 `desc.text` 的，而早一版的 fixture 把所有未知
+// 类型的正文都清空了，于是「未知类型被当成纯文字画出来」那个 bug 恰好
+// 被它遮住了。
+func uiDynamicUnrenderable(id, kind string, withText ...string) map[string]any {
 	m := uiDynamic(id, "")
+	if len(withText) > 0 {
+		m = uiDynamic(id, withText[0])
+	}
 	mods := m["modules"].(map[string]any)
 	dyn := mods["module_dynamic"].(map[string]any)
 	dyn["desc"] = map[string]any{"text": ""}
@@ -890,6 +905,128 @@ func TestSwitchingTabsBackDoesNotDuplicateTheRows(t *testing.T) {
 			t.Errorf("身份 %v 出现了两次——两行共用一份状态（Tester 里会 panic）", k)
 		}
 		seen[k] = true
+	}
+}
+
+// TestAPageOfOnlyUnrenderableOnesStillLoadsTheNextPage 钉住「全被过滤掉的那
+// 一页**不是**到底」。
+//
+// 🔴 实测踩过的坑：一页里全是转发的动态（全被丢弃）时留下 0 条，而闸门拿
+// 「留下几条」当「B 站还有没有发东西」的判据，于是 has_more 被覆盖成 false
+// ——第二页有一条正常的，**永远不再加载**，用户看到的是「这里没有能显示的
+// 动态」而没有任何后续入口。
+//
+// 判据是**第二页那条真的画出来了**，而且 offset 被原样带回去问过一次。
+func TestAPageOfOnlyUnrenderableOnesStillLoadsTheNextPage(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "第一页只发转发的 UP", 0, 1)
+	var asked []string
+	b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.URL.Query().Get("offset"))
+		if r.URL.Query().Get("offset") == "NEXT" {
+			uiExploreJSON(w, 0, map[string]any{
+				"items":  []any{uiDynamic("good", "第二页的有效动态")},
+				"offset": "", "has_more": false,
+			})
+			return
+		}
+		uiExploreJSON(w, 0, map[string]any{
+			"items":  []any{uiDynamicUnrenderable("f1", "forward", "转发正文")},
+			"offset": "NEXT", "has_more": true,
+		})
+	})
+	s, tt, _ := newSpaceShell(t, b, false, "")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+
+	waitFrames(t, tt, "第二页拉到了", func() bool { return len(sp.dynItems) == 1 })
+	tt.Frame()
+
+	if !showsText(tt, "第二页的有效动态") {
+		t.Errorf("第一页全被丢弃之后不该停住，文字有 %q", tt.Texts())
+	}
+	if len(asked) < 2 || asked[1] != "NEXT" {
+		t.Errorf("offset 没被原样带回去问第二页（问过 %v）", asked)
+	}
+}
+
+// TestTheListDoesNotPullEveryPageWithoutScrolling 钉住「滚���哨兵真的限流」。
+//
+// 🔴 实测踩过的坑：首屏那一拉写在 view 的开头、每一帧都跑，而闸门只判
+// 「不是在拉、后面还有」——于是第一页一落地，下一帧就又发一页，**用户什么都
+// 没滚，后面的页全被拉完了**（实测：一页 50 条共 4 页，没滚一下就请求了 4 次、
+// 攒了 200 条；哨兵根本没机会起作用，网络和内存都在用户看不见的地方烧掉）。
+//
+// 判据是**请求次数**：不滚就只能是 1 次。
+func TestTheListDoesNotPullEveryPageWithoutScrolling(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "有很多动态的 UP", 0, 1)
+	var mu sync.Mutex
+	asked := 0
+	b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		asked++
+		mu.Unlock()
+		// **一页 50 条**（评审复现的形状）：一屏装不满，末尾那一行在画面外，
+		// 哨兵问不到 —— 所以「什么都没滚就只有 1 次请求」。
+		page := asked
+		items := make([]any, 0, 50)
+		for i := range 50 {
+			items = append(items, uiDynamic(
+				fmt.Sprintf("d%d-%d", page, i),
+				fmt.Sprintf("第%d页的一条", page)))
+		}
+		uiExploreJSON(w, 0, map[string]any{
+			"items": items, "offset": fmt.Sprintf("O%d", asked), "has_more": true,
+		})
+	})
+	s, tt, _ := newSpaceShell(t, b, false, "")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+
+	waitFrames(t, tt, "第一页到了", func() bool { return len(sp.dynItems) > 0 })
+	// 再画几十帧，**一帧都不滚**。
+	for range 40 {
+		tt.Frame()
+	}
+	mu.Lock()
+	n := asked
+	mu.Unlock()
+	if n > 1 {
+		t.Errorf("什么都没滚就请求了 %d 次动态接口，want 1"+
+			"（首屏那一拉必须在「一页都还没拉过」时才发，哨兵才是唯一的继续入口）", n)
+	}
+	if len(sp.dynItems) != 50 {
+		t.Errorf("画面上有 %d 条，want 50（只有第一页）", len(sp.dynItems))
+	}
+
+	// 滚到底之后哨兵该接着拉下一页 —— 这条是「限流没有把翻页也一起掐死」。
+	//
+	// ⚠️ **dy 是正数往下滚**（`Tester.Scroll` 把它原样送成 SurfaceEvent，
+	// 仓库里 `paged_test.go:153` 的 `scrollToBottom = 100000` 也是正数）。
+	// 写成负数是往回滚，`Visible()` 一动不动，于是这条测试一直是「等不到」。
+	//
+	// ⚠️ **滚到底会一直翻到填满为止**（每页 50 条，一屏装不满），所以断言的是
+	// 「**至少多了一页**」而不是「第 2 页」——早一版写死「第 2 页」，结果滚到
+	// 第 6 页，那一句早就被顶出画面了。
+	for range 10 {
+		tt.Scroll(600, 500, 0, 100000)
+		tt.Frame()
+	}
+	waitFrames(t, tt, "哨兵叫起了下一页", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return asked > 1
+	})
+	tt.Frame()
+	mu.Lock()
+	after := asked
+	mu.Unlock()
+	if after < 2 {
+		t.Errorf("滚到底之后没有加载下一页（总共只请求了 %d 次）", after)
+	}
+	if got := len(sp.dynItems); got <= 50 {
+		t.Errorf("滚到底之后只有 %d 条，want 超过一页（50）——哨兵被限流掐死了", got)
 	}
 }
 

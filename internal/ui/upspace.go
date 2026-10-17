@@ -112,6 +112,8 @@ func parseMid(s string) (int64, bool) {
 // 后台那一条线只做两件事：把结果投进信箱（自己带锁），叫醒界面。
 type upSpace struct {
 	mid int64
+	// notify 说一句话（后台跑完的结果）。nil 时那一句就没了。
+	notify func(string)
 	// tab 是当前停在哪个 Tab。它是 `ui.Tabs` 绑定的那个 int，所以**指针要
 	// 稳定**——每帧传 `&sp.tab` 就够（那是这一个字段的地址）。
 	tab int
@@ -158,7 +160,10 @@ type upResult struct {
 	dyns []bili.Dynamic
 	cols []bili.UpCollection
 	// cursor 是下一页的入口（动态接口给的 offset）。别的 Tab 是空的。
-	cursor  string
+	cursor string
+	// sent 是 B 站这一页发了几条（过滤**之前**）。见 upPager.adopt：
+	// 「这一页全是画不出来的」和「这一页真的没有」靠它分开。
+	sent    int
 	hasMore bool
 	dropped int
 	err     error
@@ -175,7 +180,7 @@ func (s *Shell) upSpaceFor(mid int64) *upSpace {
 	if sp, ok := s.upSpaces[mid]; ok {
 		return sp
 	}
-	sp := &upSpace{mid: mid, header: s.app.UpSpaceOf(mid)}
+	sp := &upSpace{mid: mid, header: s.app.UpSpaceOf(mid), notify: s.addToast}
 	// 拉页器的闭包捕获 mid（不是 sp）：换 UP 主就是换一份 sp，这个闭包里
 	// 拿到的永远是对的 UP。
 	sp.videos = list.NewPaged(s.images, list.AppActions(s.app, s.addToast),
@@ -265,21 +270,36 @@ func (p *upPager) settle() {
 	p.loading = false
 }
 
-// adopt 记一次成功的拉取。got 是**这一页**返回了几行。
+// stop 停掉在途的那一页，并把闸门清成「从没拉过」。
 //
-// ⚠️ **「这一页是空的」一律收口成到底**：接口在骗人（下一页还没生成）或者
-// 已经到头了，再拉就是空转。而空转的代价是界面上永远转圈——
-// `settle` 忘了 `loading = false` 时是同一个失败模式。
+// 只停请求**不作废**已经在回来的那一页 —— 那一页照样会走进 settle 并被
+// 追加进来。所以换查询时**必须连 items 一起清**（见 resetIfAccountChanged）。
+func (p *upPager) stop() {
+	if p.cancel != nil {
+		p.cancel()
+		p.cancel = nil
+	}
+	*p = upPager{}
+}
+
+// adopt 记一次成功的拉取。
 //
-// ⚠️ 判据是**这一页**的几行而不是累计的：累计的数在「第一页就空」和
-// 「翻到一半这一页空」上分不出来，而后者恰恰是「到头了」。
-func (p *upPager) adopt(cursor string, got int, hasMore bool) {
+// sent 是**这一页 B 站发了几条**（过滤**之前**的条数），hasMore 是它说的
+// 「后面还有」。
+//
+// ⚠️ **「这一页是空的」要按 `sent` 判，不能按「留下了几条」判**：实测踩过——
+// 一页里全是转发的动态（全被丢弃）时留下 0 条，拿 0 去判就成了「到底了」，
+// 后面那一页**永远不会加载**（第二页有一条正常的，卡在第一页上不动了）。
+//
+// 用 `sent` 就分开了：`sent == 0` 是真的没有下一页（再拉是空转，界面永远
+// 转圈），`sent > 0` 而留下 0 条是「这一页我们画不出来，去问下一页」。
+func (p *upPager) adopt(cursor string, sent int, hasMore bool) {
 	p.started = true
 	p.page++
 	if cursor != "" {
 		p.cursor = cursor
 	}
-	p.hasMore = hasMore && got > 0
+	p.hasMore = hasMore && sent > 0
 	p.err = nil
 }
 
@@ -334,6 +354,14 @@ func (s *Shell) viewUpSpace(c *ui.Context, r *ui.Route) {
 	// 头图一失败就变成一个每帧发一次的请求（实测 300 毫秒发了 138 次），
 	// 界面停在「打不开」上还在刷网络。唯一的出口是用户点「再试一次」。
 	if !h.Loaded && !h.Loading && h.Err == "" {
+		sp.header.Load()
+	} else if h.NeedRelation(s.app.SelfMid()) {
+		// 🔴 **登录之后要把关注关系补查一次**。
+		//
+		// 头是按 mid 缓存的，而关系是**按账号**的：没登录时进来过一次，
+		// 那次不查关系（那个接口要 Cookie，见 `Load` 里的 askRelation），
+		// 头部却已经 `Loaded` 了——于是登录之后界面一直停在「从没查过」的
+		// 那份上，已关注的 UP 主画出来是「关注」（按下去是一次取关）。
 		sp.header.Load()
 	}
 
@@ -437,23 +465,35 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 // ⚠️ 上游的统计**只有这三个**——没有获赞数、没有播放数（`space-info.tsx:31-45`
 // 的 `stats` 表就三行）。这一版照它，不自己加。
 func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
+	t := c.Theme()
 	isSelf := s.app.SelfMid() == sp.mid
 
 	ui.Row(c).Key("space-actions").Gap(18).AlignItems(ui.Center).Children(func() {
 		// 关注按钮**只在「登录了、且看的不是自己」时画**（上游
 		// `space-info.tsx:100` 的 `Boolean(user?.isLogin) && !isSelf`）。
 		// 看自己的时候画一个「关注自己」是 B 站网页版都不做的事。
-		if s.app.LoggedIn() && !isSelf {
-			followed := h.Relation.Followed()
-			// ⚠️ 关注是**写接口**（要 CSRF、要网络、一个往返）。在界面线程上
-			// 直接调就是每按一次冻一下窗口，所以开后台；`UpSpace.Follow`
-			// 自己会叫醒界面（铁律三）。
-			if spaceFollowButton(c, followed).Clicked() {
-				go func() {
-					if err := sp.header.Follow(context.Background(), !followed); err != nil {
-						s.addToast("关注没改成：" + err.Error())
-					}
-				}()
+		if !isSelf {
+			switch h.Follow(s.app.SelfMid(), s.app.LoggedIn()) {
+			case app.FollowDone:
+				// ⚠️ **关注是写接口**（要 CSRF、要网络、一个往返）。在界面线程
+				// 上直接调就是每按一次冻一下窗口，所以开后台；
+				// `UpSpace.Follow` 自己会叫醒界面（铁律三）。
+				if ui.Button(c, "已关注").Clicked() {
+					sp.follow(false)
+				}
+			case app.FollowAskable:
+				if ui.PrimaryButton(c, "关注").Clicked() {
+					sp.follow(true)
+				}
+			case app.FollowFailed:
+				// 🔴 **没查到就说没查到**。画一个能按的「关注」比不画更糟：
+				// 用户按下去是一次**取关**（B 站对没关注过的人「取关」是成功的），
+				// 于是他更确信自己关注过——而真相是我们压根没读到。
+				ui.Text(c, "关注状态没读到").FontSize(12).TextColor(t.TextMuted)
+				if ui.Button(c, "重试").FontSize(12).Clicked() {
+					sp.header.RetryRelation()
+					sp.header.Load()
+				}
 			}
 		}
 
@@ -474,15 +514,15 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 	})
 }
 
-// spaceFollowButton 是那个关注 / 已关注按钮。
+// follow 关注或取关（后台跑，失败给一句人话）。
 //
-// 已关注时是普通按钮（不是主色）：Biu 那边也是 `color={isFollow ? "success"
-// : "default"}`——「取消关注」不该长得像「关注他」。
-func spaceFollowButton(c *ui.Context, followed bool) ui.Element {
-	if followed {
-		return ui.Button(c, "已关注")
-	}
-	return ui.PrimaryButton(c, "关注")
+// 单独的辅助是为了 `viewSpaceActions` 那两个按钮不各写一遍 goroutine。
+func (sp *upSpace) follow(yes bool) {
+	go func() {
+		if err := sp.header.Follow(context.Background(), yes); err != nil {
+			sp.notify("关注没改成：" + err.Error())
+		}
+	}()
 }
 
 // spaceStat 是一个统计数字（上面是数、下面是名字）。

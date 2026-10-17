@@ -5,6 +5,7 @@ package ui
 
 import (
 	"net/http"
+	"sync"
 	"testing"
 )
 
@@ -66,9 +67,12 @@ func TestTheAuthorListPagesAndEachRowGoesToThatSpace(t *testing.T) {
 	// 于是**一次滚动可能连翻好几页**（实测一帧就从 2 个翻到 5 个）。早一版按
 	// 「翻一页」一步一步等，读 `before` 的那一刻下一页可能已经到了，
 	// 于是永远等不到「比 before 多一个」。
+	// ⚠️ dy 是**正数**往下滚（`paged_test.go` 的 `scrollToBottom = 100000`）。
 	for i := 0; i < 5 && len(f.authors) < 5; i++ {
-		tt.Scroll(60, 400, 0, -2000)
-		tt.Frame()
+		for range 3 {
+			tt.Scroll(60, 400, 0, 100000)
+			tt.Frame()
+		}
 		if f.auth.started && !f.auth.hasMore {
 			break
 		}
@@ -226,5 +230,67 @@ func TestAFailedDynamicFeedSaysItFailedAndOffersARetry(t *testing.T) {
 	tt.Frame()
 	if !showsText(tt, "重试之后拿到了") {
 		t.Errorf("重试之后没画出来，文字有 %q", tt.Texts())
+	}
+}
+
+// TestSwitchingAccountsClearsTheAuthorList 钉住「换账号要把这一页整个换掉」。
+//
+// 🔴 实测踩过的：作者栏列的是「**我**关注的人」，而整个 `dynamicFeed` 是挂在
+// 壳上的一份缓存 —— 退出 A 登录 B 之后，左边仍然是 A 关注的人，接口一次
+// 都没再请求过，界面上没有任何东西提示这一点。
+//
+// 判据是**画出来的名字**换了 + **接口被重新请求**了。
+func TestSwitchingAccountsClearsTheAuthorList(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "我自己", 0, 1)
+	b.on("/x/polymer/web-dynamic/v1/feed/all", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{"items": []any{}, "has_more": false})
+	})
+	var mu sync.Mutex
+	var who string
+	b.on("/x/relation/followings", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		name := who + "专属作者"
+		mu.Unlock()
+		uiExploreJSON(w, 0, map[string]any{"total": 1, "list": []any{
+			map[string]any{"mid": 1, "uname": name},
+		}})
+	})
+	s, tt, a := newSpaceShell(t, b, true, "77")
+	mu.Lock()
+	who = "账号77"
+	mu.Unlock()
+
+	s.navigate(dynamicFeedPath)
+	tt.Frame()
+	f := s.dynamicFeedOf()
+	waitFrames(t, tt, "账号 77 的作者到了", func() bool { return len(f.authors) == 1 })
+	tt.Frame()
+	if !showsText(tt, "账号77专属作者") {
+		t.Fatalf("账号 77 的作者没画出来，文字有 %q", tt.Texts())
+	}
+
+	// 换成另一个账号。
+	a.TestOnlyAdoptLogin("88")
+	mu.Lock()
+	who = "账号88"
+	mu.Unlock()
+	if got := a.SelfMid(); got != 88 {
+		t.Fatalf("SelfMid 是 %d，want 88", got)
+	}
+
+	waitFrames(t, tt, "换账号之后作者栏换成 88 的", func() bool {
+		return showsText(tt, "账号88专属作者")
+	})
+	tt.Frame()
+
+	if showsText(tt, "账号77专属作者") {
+		t.Errorf("换账号之后还留着上一个账号的关注的人，文字有 %q", tt.Texts())
+	}
+	mu.Lock()
+	n := len(f.authors)
+	mu.Unlock()
+	if n != 1 || f.authors[0].Name != "账号88专属作者" {
+		t.Errorf("作者栏现在是 %+v，want 只有账号 88 的那一个", f.authors)
 	}
 }

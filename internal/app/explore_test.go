@@ -403,6 +403,161 @@ func TestTheHeaderWakesTheUIAfterLoading(t *testing.T) {
 	}
 }
 
+// TestTheRelationIsNotAskedAgainWhileLoggedOut 钉住「没登录不查关注关系」。
+//
+// 那个接口要 Cookie，没登录会回 -101，而 -101 在这一层和「网络断了」长得
+// 一模一样。
+func TestTheRelationIsNotAskedAgainWhileLoggedOut(t *testing.T) {
+	b := newExploreBili(t)
+	b.on("/x/space/wbi/acc/info", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"mid": 42, "name": "n"})
+	})
+	b.on("/x/relation/stat", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"follower": 1})
+	})
+	b.on("/x/space/wbi/acc/relation", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, -101, nil)
+	})
+	a := newExploreApp(t, b)
+
+	sp := a.UpSpaceOf(42)
+	sp.Load()
+	waitExplore(t, sp)
+
+	if b.hit("/x/space/wbi/acc/relation") {
+		t.Error("没登录还去查了关注关系")
+	}
+	if got := sp.Snapshot().Follow(77, false); got != FollowHidden {
+		t.Errorf("没登录时关注按钮该不画，got %v", got)
+	}
+}
+
+// TestLoggingInLaterAsksForTheRelation 钉住「登录之后要补查」。
+//
+// 头是按 mid 缓存的，而关系是**按账号**的：没登录时进来过一次，头部已经
+// `Loaded` 了——不补查的话登录之后界面一直停在「从没查过」的那份上，
+// 已关注的 UP 主画出来是「关注」（按下去是一次**取关**）。
+func TestLoggingInLaterAsksForTheRelation(t *testing.T) {
+	b := newExploreBili(t)
+	b.on("/x/space/wbi/acc/info", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"mid": 42, "name": "n"})
+	})
+	b.on("/x/relation/stat", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"follower": 1})
+	})
+	b.on("/x/space/wbi/acc/relation", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"relation": map[string]any{"attribute": 2}})
+	})
+	a := newExploreApp(t, b)
+
+	sp := a.UpSpaceOf(42)
+	sp.Load()
+	waitExplore(t, sp)
+	if !sp.Snapshot().Loaded {
+		t.Fatal("匿名这一次头该加载成功（只是没查关系）")
+	}
+	if !sp.Snapshot().NeedRelation(77) {
+		t.Fatal("登录之后 NeedRelation 应该是 true（关系还没查过）")
+	}
+
+	loginExplore(a, "77")
+	sp.Load()
+	waitExplore(t, sp)
+
+	if !b.hit("/x/space/wbi/acc/relation") {
+		t.Fatal("登录之后没有补查关注关系")
+	}
+	if got := sp.Snapshot().Follow(77, true); got != FollowDone {
+		t.Errorf("登录之后该显示「已关注」，got %v", got)
+	}
+}
+
+// TestAFailedRelationIsNotCachedAsNotFollowed 钉住「查失败不能说成没关注」。
+//
+// 吞掉的话界面上是一个**能按的**「关注」按钮，而它其实没查到任何东西——
+// 用户按下去是一次取关（B 站对没关注过的人「取关」是成功的），于是他更
+// 确信自己关注过，而真相是我们压根没读到。
+func TestAFailedRelationIsNotCachedAsNotFollowed(t *testing.T) {
+	b := newExploreBili(t)
+	b.on("/x/space/wbi/acc/info", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"mid": 42, "name": "n"})
+	})
+	b.on("/x/relation/stat", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"follower": 1})
+	})
+	b.on("/x/space/wbi/acc/relation", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, -412, nil) // 被风控
+	})
+	a := newExploreApp(t, b)
+	loginExplore(a, "77")
+
+	sp := a.UpSpaceOf(42)
+	sp.Load()
+	waitExplore(t, sp)
+
+	h := sp.Snapshot()
+	if !h.Loaded {
+		t.Fatal("头该加载成功（只有关系那一个失败）")
+	}
+	if got := h.Follow(77, true); got != FollowFailed {
+		t.Errorf("关系没查到该是 FollowFailed（界面上说没读到 + 给一个重试），got %v", got)
+	}
+	if h.RelationKnown() {
+		t.Error("关系没查到，relationKnown 不该是 true")
+	}
+	// 防抖：查失败之后**不自动重试**，等用户点。
+	if h.NeedRelation(77) {
+		t.Error("查失败之后 NeedRelation 应该是 false（否则每帧一个请求）")
+	}
+
+	// 人点「重试」之后重来一次，这次成了。
+	b.on("/x/space/wbi/acc/relation", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"relation": map[string]any{"attribute": 2}})
+	})
+	sp.RetryRelation()
+	if !sp.Snapshot().NeedRelation(77) {
+		t.Fatal("RetryRelation 之后该又能查了")
+	}
+	sp.Load()
+	waitExplore(t, sp)
+	if got := sp.Snapshot().Follow(77, true); got != FollowDone {
+		t.Errorf("重试之后该是「已关注」，got %v", got)
+	}
+}
+
+// TestARelationFromAnotherAccountIsNotUsed 钉住「别拿上一个账号的关系画按钮」。
+func TestARelationFromAnotherAccountIsNotUsed(t *testing.T) {
+	b := newExploreBili(t)
+	b.on("/x/space/wbi/acc/info", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"mid": 42, "name": "n"})
+	})
+	b.on("/x/relation/stat", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"follower": 1})
+	})
+	b.on("/x/space/wbi/acc/relation", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"relation": map[string]any{"attribute": 2}})
+	})
+	a := newExploreApp(t, b)
+	loginExplore(a, "77")
+
+	sp := a.UpSpaceOf(42)
+	sp.Load()
+	waitExplore(t, sp)
+	if got := sp.Snapshot().Follow(77, true); got != FollowDone {
+		t.Fatalf("账号 77 该是「已关注」，got %v", got)
+	}
+	// 换成账号 88：那份「已关注」是 77 的。
+	if got := sp.Snapshot().Follow(88, true); got != FollowHidden {
+		t.Errorf("拿账号 77 的关系给 88 画按钮了，got %v（该不画，等补查）", got)
+	}
+	if !sp.Snapshot().NeedRelation(88) {
+		t.Error("换账号之后该重新查关系（账号 88 的那份还没查）")
+	}
+	if sp.Snapshot().NeedRelation(77) {
+		t.Error("账号 77 刚查成功，不该又查一遍")
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 四个 Tab 的接口真的接上了
 // ─────────────────────────────────────────────────────────────────────────────

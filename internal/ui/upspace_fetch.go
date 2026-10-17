@@ -82,15 +82,15 @@ func (s *Shell) fetchUp(ctx context.Context, sp *upSpace, tab int, cursor string
 	case upTabDynamic:
 		pg, err := s.app.UpDynamics(ctx, sp.mid, cursor)
 		r.err, r.dyns, r.hasMore, r.dropped = err, pg.Items, pg.HasMore, pg.Dropped
-		r.cursor = pg.Offset
+		r.cursor, r.sent = pg.Offset, pg.Raw
 	case upTabCollection:
 		// 收藏夹那个接口**一次给全，没有翻页参数**（见 bili.SpaceFavFolders），
 		// 所以它只有第一页：拉过一次就到底。
 		cols, err := s.app.UpCollections(ctx, sp.mid)
-		r.err, r.cols, r.hasMore = err, cols, false
+		r.err, r.cols, r.hasMore, r.sent = err, cols, false, len(cols)
 	case upTabSeries:
 		pg, err := s.app.UpSeries(ctx, sp.mid, page+1, upSeriesPageSize)
-		r.err, r.cols, r.hasMore = err, pg.Collections, pg.HasMore
+		r.err, r.cols, r.hasMore, r.sent = err, pg.Collections, pg.HasMore, len(pg.Collections)
 	}
 }
 
@@ -119,6 +119,6 @@ func (s *Shell) adoptUp(sp *upSpace) {
 		sp.dynItems = append(sp.dynItems, r.dyns...)
 		sp.cols[r.tab] = append(sp.cols[r.tab], r.cols...)
 		sp.dropped[r.tab] = r.dropped
-		p.adopt(r.cursor, len(r.dyns)+len(r.cols), r.hasMore)
+		p.adopt(r.cursor, r.sent, r.hasMore)
 	}
 }

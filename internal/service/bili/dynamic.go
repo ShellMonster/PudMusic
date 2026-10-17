@@ -47,6 +47,15 @@ const (
 	followingsPath = "/x/relation/followings"
 )
 
+// 顶层 `type` 里我们画得出的三种（上游 `DynamicType` 枚举的三个值）。
+//
+// ⚠️ 这是**闸门**，见 parseDynamic 的注释：不在这里的一律丢掉，**哪怕带着正文**。
+const (
+	dynamicTypeWord = "DYNAMIC_TYPE_WORD" // 纯文字
+	dynamicTypeDraw = "DYNAMIC_TYPE_DRAW" // 带图
+	dynamicTypeAv   = "DYNAMIC_TYPE_AV"   // 投稿视频
+)
+
 // dynamicKind 是 B 站 `major.type` 里我们会遇到的三种。
 //
 // 我们按 **major 装了什么**判类型，不按 `major.type` 的字符串判：
@@ -138,6 +147,13 @@ type DynamicPage struct {
 	Offset string
 	// HasMore 后面还有没有。
 	HasMore bool
+	// Raw 是 B 站这一页**发了**几条（过滤之前的条数）。
+	//
+	// ⚠️ **必须留着它**：上层要靠它分「这一页真的没有」和「这一页有，但我们
+	// 全画不出来」。只看 `len(Items)` 的话，一页全是转发的动态会被当成
+	// 「到底了」，于是后面的有效动态**永远不再加载**（实测：第一页一条转发
+	// + has_more=true，第二页有一条正常的，卡在第一页上不再翻）。
+	Raw int
 	// Dropped 是这一页里有几条我们画不出来、丢掉了。
 	//
 	// 它不进界面（用户不需要知道 B 站有多少种动态），但它是「这一页一个格子
@@ -211,7 +227,7 @@ func dynamicPageFrom(raw []byte) (DynamicPage, error) {
 		return DynamicPage{}, fmt.Errorf("bili: 动态流的返回读不懂：%w", err)
 	}
 
-	pg := DynamicPage{Offset: env.Offset, HasMore: env.HasMore}
+	pg := DynamicPage{Offset: env.Offset, HasMore: env.HasMore, Raw: len(env.Items)}
 	for _, item := range env.Items {
 		d, ok := parseDynamic(item)
 		if !ok {
@@ -298,9 +314,19 @@ type rawDynamic struct {
 //
 // # 什么都不画的和画不出来的，都返回 false
 //
-// 三种类型都判完之后，如果正文是空、图是空、视频也是 nil——
-// 那就是一条我们没有对应画法的（比如「他转发了一条我们画不出来的动态」，
-// 转发件里只留了个壳）。返回 false，界面上不占一格。
+// 🔴 **先按 `type` 筛，再按 major 认细节。**
+//
+// 为什么不能「认不出 major 就当纯文字」：实测踩过——**带正文的转发**和
+// **未知类型**（B 站新加的形态）都带 `desc.text`，那一支会把它们画成一张
+// 纯文字卡片，而要求是「其余类型**静默丢弃**」。一张转发被当成他自己发的
+// 一句话，比不画更糟（用户会以为是原创）。
+//
+// 所以 `type` 是**闸门**：只有上游 `DynamicType` 枚举里那三种能过
+// （`DYNAMIC_TYPE_AV` / `DYNAMIC_TYPE_WORD` / `DYNAMIC_TYPE_DRAW`），
+// 其余（FORWARD / PGC / COURSES / LIVE / AD / 未来新增的…）一律丢掉。
+// 过了闸门再用 `major` 认细节——**顶层 `type` 稳，`major.type` 换过名**
+// （同一个图文类型叫过 `MAJOR_TYPE_DRAW` 和 `MAJOR_TYPE_OPUS`），
+// 认错了会分叉成两种卡片。
 func parseDynamic(raw json.RawMessage) (Dynamic, bool) {
 	var r rawDynamic
 	if err := json.Unmarshal(raw, &r); err != nil {
@@ -310,6 +336,16 @@ func parseDynamic(raw json.RawMessage) (Dynamic, bool) {
 	}
 	if r.IDStr == "" {
 		// 没有 id 的行没有身份（铁律四），画出来也点不开。
+		return Dynamic{}, false
+	}
+
+	// 🔴 闸门。**先判 type，再碰别的**。
+	switch r.Type {
+	case dynamicTypeWord, dynamicTypeDraw, dynamicTypeAv:
+		// 三种画得出的，继续往下认细节。
+	default:
+		// 转发 / 剧集 / 课程 / 直播 / 广告 / 未来新增的形态……
+		// 一律丢掉，**哪怕它带着正文**（转发件就有 desc.text）。
 		return Dynamic{}, false
 	}
 
@@ -326,9 +362,12 @@ func parseDynamic(raw json.RawMessage) (Dynamic, bool) {
 
 	major := r.Modules.Dynamic.Major
 
-	// ① 投稿视频。三种里优先级最高：一个动态里同时有图和视频时，
-	// 画视频那一块（它是这条动态真正在推的东西）。
-	if a := major.Archive; a != nil && a.Bvid != "" {
+	// ① 投稿视频（`DYNAMIC_TYPE_AV`）。少了 bvid 就放不出来，丢掉。
+	if r.Type == dynamicTypeAv {
+		a := major.Archive
+		if a == nil || a.Bvid == "" {
+			return Dynamic{}, false
+		}
 		d.Kind = DynamicVideo
 		d.Video = &DynamicArchive{
 			Bvid: a.Bvid, Title: a.Title, Cover: a.Cover,
@@ -340,13 +379,12 @@ func parseDynamic(raw json.RawMessage) (Dynamic, bool) {
 		return d, true
 	}
 
-	// ② 图文。正文**二选一**，不是两段拼起来。
+	// ② 图文（`DYNAMIC_TYPE_DRAW`）。正文**二选一**，不是两段拼起来。
 	//
 	// ⚠️ 这是实测过的：上游两处都是 `desc?.text || opus?.summary?.text`
 	// （`dynamic-feed/item.tsx:33`、`user-profile/dynamic-list/item.tsx:46`），
 	// 而 B 站的正常返回里 `desc.text` 和 `opus.summary.text` 是**同一段话**。
 	// 拼起来（`desc + "\n" + summary`）的结果是界面上同一句话出现两遍。
-	// 只在 `desc` 为空时才去取 summary。
 	if o := major.Opus; o != nil {
 		pics := make([]string, 0, len(o.Pics))
 		for _, p := range o.Pics {
@@ -366,9 +404,9 @@ func parseDynamic(raw json.RawMessage) (Dynamic, bool) {
 		return d, true
 	}
 
-	// ③ 纯文字。没有正文也没有图也没有视频——那就是我们画不出来的那种
-	// （转发件、直播开播、小程序…）。丢掉。
+	// ③ 纯文字（`DYNAMIC_TYPE_WORD`）。
 	if d.Text == "" {
+		// 声明是文字但正文是空的：画出来是一张空卡片，比不画更糟。
 		return Dynamic{}, false
 	}
 	d.Kind = DynamicText

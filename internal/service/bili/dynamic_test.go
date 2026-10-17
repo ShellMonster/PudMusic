@@ -85,6 +85,24 @@ func setEmptyBody() func(map[string]any) {
 	}
 }
 
+// setType 改一条动态的顶层 `type`。
+func setType(typ string) func(map[string]any) {
+	return func(m map[string]any) { m["type"] = typ }
+}
+
+// setText 改一条动态的 `desc.text`。
+func setText(txt string) func(map[string]any) {
+	return func(m map[string]any) {
+		m["modules"].(map[string]any)["module_dynamic"].(map[string]any)["desc"] =
+			map[string]any{"text": txt}
+	}
+}
+
+// setMajor 往 major 里塞一样东西（用来让「未知类型」也有 major）。
+func setMajor(f func(m map[string]any)) func(map[string]any) {
+	return func(m map[string]any) { f(m) }
+}
+
 // dynamicFixture 造一台会回给定 items 的假 B 站。
 func dynamicFixture(t *testing.T, items []any, offset string, hasMore bool) (*fakeBili, *Client) {
 	t.Helper()
@@ -172,6 +190,55 @@ func TestTheThreeTypesAreKeptAndTheRestAreDropped(t *testing.T) {
 	// 就是「静默丢弃而不是报错」的全部内容。
 	if pg.Offset != "OFFSET-2" || !pg.HasMore {
 		t.Errorf("翻页入口丢了：offset=%q hasMore=%v", pg.Offset, pg.HasMore)
+	}
+}
+
+// 🔴 TestUnknownTypesWithTextAreStillDropped 是「静默丢弃」那条验收真正的
+// 考题。
+//
+// 早一版的排除用例**把所有未知类型的正文都清空了**，于是「带正文的转发」和
+// 「B 站新加的形态」这两种输入压根没被喂进去——而它们正是最容易漏的：
+// `parseDynamic` 原来的第三支是「认不出 major 就当纯文字」，只要有
+// `desc.text` 就画出来了。实测过：一条带 `desc.text` 的
+// `DYNAMIC_TYPE_FORWARD` 和一条带 `desc.text` 的 `FUTURE` 都被当成了纯文字，
+// 而一条转发被当成他自己发的话，比不画更糟。
+//
+// 判据是「剩下的**正好是那三种**」和「**一条文字都没漏出来**」。
+func TestUnknownTypesWithTextAreStillDropped(t *testing.T) {
+	const spoken = "转发正文：「他」说了这句话"
+	items := []any{
+		dynItem("word"),
+		dynItem("av", setArchive("BV1aa")),
+		dynItem("draw", setOpus("MAJOR_TYPE_OPUS", "图文正文", "https://f/1.jpg")),
+		// ↓↓↓ 下面四条**都带着正文**，而且都不是那三种
+		dynItem("fwd", setType("DYNAMIC_TYPE_FORWARD"), setText(spoken)),
+		dynItem("future", setType("DYNAMIC_TYPE_FUTURE"), setText(spoken)),
+		dynItem("pgc", setType("DYNAMIC_TYPE_PGC"), setText(spoken),
+			setMajor(func(m map[string]any) { majorOf(m)["pgc"] = map[string]any{"title": "番剧"} })),
+		dynItem("live", setType("DYNAMIC_TYPE_LIVE"), setText(spoken),
+			setMajor(func(m map[string]any) { majorOf(m)["live"] = map[string]any{"title": "开播"} })),
+	}
+	_, cli := dynamicFixture(t, items, "", false)
+
+	pg, err := cli.DynamicFeed(context.Background(), "")
+	if err != nil {
+		t.Fatalf("整页崩了：%v", err)
+	}
+	if len(pg.Items) != 3 {
+		t.Fatalf("留下了 %d 条，want 3（另外四条带正文的不该被当成纯文字）", len(pg.Items))
+	}
+	for _, d := range pg.Items {
+		if d.Text == spoken {
+			t.Errorf("%q 是一条未知类型，却把转发正文当成了它自己的话", d.ID)
+		}
+		switch d.Kind {
+		case DynamicText, DynamicVideo, DynamicOpus:
+		default:
+			t.Errorf("%q 的类型是 %v，不在那三种里", d.ID, d.Kind)
+		}
+	}
+	if pg.Dropped != 4 {
+		t.Errorf("丢了 %d 条，want 4", pg.Dropped)
 	}
 }
 
@@ -405,6 +472,33 @@ func TestSpaceDynamicsIsSignedAndAllIsNot(t *testing.T) {
 	}
 	if signed[dynamicFeedAllPath] {
 		t.Errorf("%s 不该签名（上游没传 useWbi）", dynamicFeedAllPath)
+	}
+}
+
+// TestRawCountsWhatTheServerSentNotWhatWeKept 钉住 `DynamicPage.Raw`。
+//
+// 上层要靠它分「这一页真的没有」和「这一页有、但全是画不出来的」：只看
+// `len(Items)` 的话，一页全是转发的动态会被当成「到底了」，后面那一页
+// 有效动态**永远不再加载**（实测过的卡死）。
+func TestRawCountsWhatTheServerSentNotWhatWeKept(t *testing.T) {
+	items := []any{
+		dynItem("f1", setType("DYNAMIC_TYPE_FORWARD"), setText("转发")),
+		dynItem("f2", setType("DYNAMIC_TYPE_LIVE"), setText("直播")),
+	}
+	_, cli := dynamicFixture(t, items, "NEXT", true)
+
+	pg, err := cli.DynamicFeed(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pg.Raw != 2 {
+		t.Errorf("Raw 是 %d，want 2（B 站发了 2 条）", pg.Raw)
+	}
+	if len(pg.Items) != 0 {
+		t.Errorf("留下了 %d 条，want 0", len(pg.Items))
+	}
+	if !pg.HasMore {
+		t.Error("B 站说有下一页，那就有——上层靠 Raw 区分「没有」和「都画不出来」")
 	}
 }
 

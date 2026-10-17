@@ -115,6 +115,87 @@ type SpaceHeader struct {
 	Stat bili.RelationStat
 	// Err 是上一次加载的错。成功时是空串。
 	Err string
+
+	// relationFor 是**查这个关系时用的账号**（自己的 mid，0 是没登录）。
+	//
+	// ⚠️ 头部是按 mid 缓存的，而「关注关系」是**按账号**的：账号 A 登进来
+	// 缓存了「已关注」，换成账号 B 打开同一个 UP 的空间，那份「已关注」是
+	// **A 的**，画出来就是错的按钮。记下当时是谁，比记一个布尔值有用。
+	relationFor int64
+	// relationKnown 是那次查询**成功了没有**。
+	relationKnown bool
+	// relationErr 是查失败的原因。非空时 relationKnown 是 false，而
+	// Relation 的值没有意义（是零值，界面上不能拿它画按钮）。
+	relationErr string
+}
+
+// FollowState 是「关注按钮此刻该画成什么样」。
+type FollowState int
+
+const (
+	// FollowHidden 不画按钮：没登录、看的是自己、或者正在查。
+	FollowHidden FollowState = iota
+	// FollowAskable 没关注 → 画「关注」。
+	FollowAskable
+	// FollowDone 已关注 → 画「已关注」。
+	FollowDone
+	// FollowFailed 没查到，且**用户可以点重试**。
+	FollowFailed
+)
+
+// Follow 是关注按钮此刻的样子。
+//
+// ⚠️ **不是查过就信**：那次查询可能是另一个账号做的，也可能失败了。
+// 这两种情况下画「关注」比不画更糟——用户按下去是一次**取关**，而
+// 他其实没关注过这个 UP。
+func (h SpaceHeader) Follow(selfMid int64, loggedIn bool) FollowState {
+	if !loggedIn || h.Loading && !h.Loaded {
+		return FollowHidden
+	}
+	if !h.relationKnown {
+		if h.relationErr != "" {
+			return FollowFailed
+		}
+		// 正在查，或者还没轮到查（没登录时）。都不画。
+		return FollowHidden
+	}
+	if h.relationFor != selfMid {
+		// 这是**别的账号**查出来的，不能拿来给这个账号画按钮。
+		// 不画而不是画「关注」——见上面那条。
+		return FollowHidden
+	}
+	if h.Relation.Followed() {
+		return FollowDone
+	}
+	return FollowAskable
+}
+
+// RelationKnown 报告「关注关系是真的查到了」。
+func (h SpaceHeader) RelationKnown() bool { return h.relationKnown }
+
+// RelationFailed 报告「关注关系没查到，而且可以点重试」。
+func (h SpaceHeader) RelationFailed() bool { return h.relationErr != "" }
+
+// RelationErr 是查关注关系失败的原因。
+func (h SpaceHeader) RelationErr() string { return h.relationErr }
+
+// NeedRelation 报「关注关系该不该现在去查」。
+//
+// selfMid 是当前登录账号（**0 就是没登录** —— `SelfMid` 没登录时给 0）。
+//
+// 四个条件同时成立才查：
+//   - 登录了（那个接口要 Cookie，没登录一定 -101）；
+//   - 头部已经加载过（关系是搭在头上的，头没好没意义）；
+//   - **没有正在拉**（防重入）；
+//   - 没有成功查过，或者**查过但不是这个账号查的**。
+//
+// 最后那个「查失败之后不自动重试」也是同一支：`relationErr` 非空时返回
+// false，等人点「重试」。不然一个稳定失败的接口就是每帧一个请求。
+func (h SpaceHeader) NeedRelation(selfMid int64) bool {
+	if selfMid == 0 || !h.Loaded || h.Loading || h.relationErr != "" {
+		return false
+	}
+	return !(h.relationKnown && h.relationFor == selfMid)
 }
 
 // User 是 UP 主本人。B 站那份叫 `bili.User`，这里换个名是为了界面上读起来
@@ -181,6 +262,11 @@ func (s *UpSpace) Load() {
 		return
 	}
 
+	// 要不要顺带查关注关系，**在这一刻定下来**（而不是在后台那个 goroutine
+	// 里问 `a.LoggedIn()`）：中间可能已经退登了，而查出来的关系是按账号的。
+	selfMid := s.app.SelfMid()
+	askRelation := s.app.LoggedIn()
+
 	s.mu.Lock()
 	if s.running {
 		// 已经在拉了。**不排队**：连点三下就是三个在途请求，回来时顺序不保证，
@@ -190,7 +276,6 @@ func (s *UpSpace) Load() {
 	}
 	s.running = true
 	s.head.Loading, s.head.Err = true, ""
-	gen := s.gen
 	s.mu.Unlock()
 	wake := s.app.wakeLocked()
 
@@ -198,15 +283,21 @@ func (s *UpSpace) Load() {
 	go func() {
 		ctx := context.Background()
 		var (
-			user     *bili.User
-			relation bili.Relation
-			stat     *bili.RelationStat
+			user        *bili.User
+			stat        *bili.RelationStat
+			relation    bili.Relation
+			relationOK  bool
+			relationErr error
 		)
 		done := make(chan struct{}, 3)
 		go func() { user, _ = cli.SpaceAcc(ctx, mid); done <- struct{}{} }()
 		go func() { stat, _ = cli.RelationStatOf(ctx, mid); done <- struct{}{} }()
-		if s.app.LoggedIn() {
-			go func() { relation, _ = cli.SpaceRelation(ctx, mid); done <- struct{}{} }()
+		if askRelation {
+			go func() {
+				defer func() { done <- struct{}{} }()
+				relation, relationErr = cli.SpaceRelation(ctx, mid)
+				relationOK = relationErr == nil
+			}()
 		} else {
 			done <- struct{}{}
 		}
@@ -215,10 +306,10 @@ func (s *UpSpace) Load() {
 		<-done
 
 		s.mu.Lock()
-		stale := gen != s.gen
+		stale := !s.running
 		s.running = false
 		if stale {
-			// 换 UP 主之前的那个请求。它说什么都不作数。
+			// 已经有一次在路上跑着了。这一份不管。
 			s.mu.Unlock()
 			return
 		}
@@ -235,6 +326,21 @@ func (s *UpSpace) Load() {
 			if stat != nil {
 				s.head.Stat = *stat
 			}
+			// 🔴 **关注关系查失败要说出来，不能把零值当「没关注」**。
+			//
+			// 吞掉的话界面上会是一个**能按的**「关注」按钮，而它其实没查到
+			// 任何东西——用户按下去是一次取关（B 站对没关注过的人「取关」
+			// 是成功的，于是他更确信自己关注过）。
+			s.head.relationFor, s.head.relationKnown = 0, false
+			if askRelation {
+				s.head.relationFor = selfMid
+				s.head.relationKnown = relationOK
+			}
+			if relationErr != nil {
+				s.head.relationErr = relationErr.Error()
+			} else {
+				s.head.relationErr = ""
+			}
 			s.head.Relation = relation
 		}
 		s.mu.Unlock()
@@ -243,6 +349,19 @@ func (s *UpSpace) Load() {
 			wake()
 		}
 	}()
+}
+
+// RetryRelation 清掉「关注关系没查到」，好让下一次 Load 又去问一次。
+//
+// 只有**人点「重试」**才调它：查失败之后不自动重试（见 NeedRelation 的
+// 防抖那条），而这一页也没有别的入口能让用户重来一次。
+func (s *UpSpace) RetryRelation() {
+	s.mu.Lock()
+	s.head.relationErr = ""
+	s.mu.Unlock()
+	if wake := s.app.wakeLocked(); wake != nil {
+		wake()
+	}
 }
 
 // fail 记一次加载失败并叫醒界面。
@@ -277,6 +396,9 @@ func (s *UpSpace) Follow(ctx context.Context, follow bool) error {
 	s.mu.Lock()
 	was := s.head.Relation
 	s.head.Relation = relationAfter(was, follow)
+	// 按过之后关系是**确定**的，哪怕刚才那次查询是拿另一个账号做的。
+	s.head.relationFor, s.head.relationKnown = selfMidOf(s.app), true
+	s.head.relationErr = ""
 	s.mu.Unlock()
 
 	err := cli.ModifyRelation(ctx, s.mid, act)
@@ -296,6 +418,9 @@ func (s *UpSpace) Follow(ctx context.Context, follow bool) error {
 	}
 	return nil
 }
+
+// selfMidOf 是当前登录账号的 mid，0 是没登录。
+func selfMidOf(a *App) int64 { return a.SelfMid() }
 
 // relationAfter 是「按完这个按钮之后关系该是什么」。
 //
