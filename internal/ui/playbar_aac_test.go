@@ -71,6 +71,18 @@ func TestAACPlaysThroughTheSystemDecoder(t *testing.T) {
 
 // TestDragAACToEnd 盯的是 play-list.ts 那套行为在系统解码器上也成立：
 // 拖到末尾不崩、不假死，往回拖还能接着播。
+//
+// ⚠️ 拖到末尾之后**不再是「停下来」**了：队列里那一首放完，播放模式说「循环」
+// （这是默认档，Biu 的初始值也是它），于是同一首从头再来——Biu 的 `next()`
+// 在队列只有一首时做的正是这件事（`list.length === 1` → `currentTime = 0` +
+// 重放）。这一条原来写的是「等它停下来」，那是**还没有播放模式的时候**的样子：
+// 那一票要治的症状（BMG-47 A5「用户听到一首歌结束就停住，必须手动点下一首」）
+// 就长在那个「停下来」上。
+//
+// 「不崩、不假死」那一半没有丢：下面照旧断**终态**（从头重放、拖回中间能接着
+// 播、界面还点得动），而拖完之后位置是末尾还是开头要**看那一帧和那个 50ms 的
+// tick 谁先**，所以不去断它（理由见 `TestDragToEndDoesNotCrash` 里那段）。顺带另一条（`TestDragToEndDoesNotCrash`）钉的是**队列是空
+// 的**那种情形——那才是真的停下来。
 func TestDragAACToEnd(t *testing.T) {
 	if _, err := exec.LookPath("afconvert"); err != nil {
 		t.Skip("这台机器上没有 afconvert")
@@ -94,15 +106,14 @@ func TestDragAACToEnd(t *testing.T) {
 		h.tt.Frame()
 		return h.app.Snapshot().HasTrack
 	})
-	dur := h.app.Snapshot().Duration
-
 	dragTo(t, h.tt, 1) // 一路拖到最右端
-	if got := h.app.Snapshot().Position; got < dur-30*time.Millisecond {
-		t.Errorf("拖到末尾之后位置是 %v，时长 %v", got, dur)
-	}
-	waitFor(t, 5*time.Second, "拖到末尾后播放器停下来", func() bool {
+
+	// 循环这一档 + 队列里只有这一首 → 同一首从头再放。位置要真的回到开头，
+	// 而且要在放（否则就是「卡在末尾」，也正是这一条要防的假死）。
+	waitFor(t, 5*time.Second, "拖到末尾之后没有从头重放", func() bool {
 		h.tt.Frame()
-		return !h.app.Snapshot().Playing
+		st := h.app.Snapshot()
+		return st.Playing && st.Position < 40*time.Millisecond
 	})
 
 	dragTo(t, h.tt, 0.2) // 往回拖，必须能接着播

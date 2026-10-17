@@ -128,6 +128,7 @@ func (f *fakeBili) client(t *testing.T, o Options) *Client {
 	c.hostAPI = f.URL
 	c.hostPassport = f.URL
 	c.hostMember = f.URL
+	c.hostWWW = f.URL
 	c.sessionBase = f.URL
 	return c
 }

@@ -11,6 +11,8 @@ package app
 // 测试）。
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -188,6 +190,86 @@ func TestDownloadItemRefusesALocalFile(t *testing.T) {
 	}
 	if n := len(a.DownloadSnapshots()); n != 0 {
 		t.Errorf("本地文件也进了下载队列（%d 项）", n)
+	}
+}
+
+// TestDownloadingAMusicLibraryEntrySaysThereIsNoDownloadPath 音乐库那一行按下载。
+//
+// 🔴 **这一条是 BMG-50 带出来的回归**：那一票让 `playableOnline` 放行了 sid 条目
+// （它现在真放得出来），而下载那一路是按**稿件 + 分 P** 取流的，音乐库条目只有
+// auid —— 没有 bvid 也没有 cid。不在这里挡的话它会一路走到 `withCid` 去问一个
+// 空稿件的分 P，问出来的是「问不出这一集是哪一集」，而那句话说的是
+// 「等网络好一些」——**把一件永远不可能成功的事说成网络问题**：用户会去查网、
+// 换网络、等它好，而真正要做的跟网络一点关系都没有。
+//
+// 批量那一早就这么拒了（`downloadableItem`），这里是同一个错在另一个出口。
+// 两条必须说**同一句话**——它们在同一个界面上。
+func TestDownloadingAMusicLibraryEntrySaysThereIsNoDownloadPath(t *testing.T) {
+	for _, c := range []struct {
+		what string
+		run  func(a *App, it Item, done func(error))
+	}{
+		{"下载音频", func(a *App, it Item, done func(error)) { a.DownloadItem(it, done) }},
+		{"下载视频", func(a *App, it Item, done func(error)) { a.DownloadItemVideo(it, done) }},
+	} {
+		f := newCollectionFixture(t)
+		a := downloadApp(t, f)
+
+		// ⚠️ **要等 `done` 被调，不能同步去读那个变量**：`downloadLater` 的活儿在
+		// 后台 goroutine 上（补 cid 要问 B 站），同步读读到的是还没写进去的零值
+		// ——那么这条用例在「闸门被删掉」的时候也会绿（它读到 nil 就当对了）。
+		got := make(chan error, 1)
+		c.run(a, Item{Source: "online", Type: "audio", Sid: "1293494", Title: "音乐库的一首"},
+			func(err error) { got <- err })
+		err := waitOneErr(t, got)
+
+		if !errors.Is(err, ErrNoAudioDownload) {
+			t.Errorf("%s：错是 %v，want ErrNoAudioDownload", c.what, err)
+		}
+		// 一件永远不可能成功的事，**不许说成网络问题**。
+		if msg := bili.Friendly(err); strings.Contains(msg, "网络") || strings.Contains(msg, "问不出") {
+			t.Errorf("%s：给用户的话是 %q，把一件下不了的事说成了网络问题", c.what, msg)
+		}
+		if n := len(a.DownloadSnapshots()); n != 0 {
+			t.Errorf("%s：音乐库条目进了下载队列（%d 项）", c.what, n)
+		}
+	}
+}
+
+// TestBothDownloadLanesSayTheSameThingAboutMusicLibrary 两句话不许分叉。
+//
+// 同一页上两个出口说的是同一件事：一处改了字面量、另一处没改，用户对照着看就会
+// 发现「同一个东西两句话」，而那比两句话都说错更难解释。
+func TestBothDownloadLanesSayTheSameThingAboutMusicLibrary(t *testing.T) {
+	f := newCollectionFixture(t)
+	a := downloadApp(t, f)
+
+	fromSingle := make(chan error, 1)
+	a.DownloadItem(Item{Source: "online", Type: "audio", Sid: "1293494", Title: "音乐库的一首"},
+		func(err error) { fromSingle <- err })
+
+	_, err := a.downloadableItem(context.Background(), bili.Media{ID: 1293494, Type: bili.MediaAudio})
+	single := waitOneErr(t, fromSingle)
+	if !errors.Is(err, ErrNoAudioDownload) {
+		t.Errorf("批量那一路的错是 %v，want ErrNoAudioDownload", err)
+	}
+	if err.Error() != single.Error() {
+		t.Errorf("两句话分叉了：批量 %q / 单首 %q", err.Error(), single.Error())
+	}
+}
+
+// waitOneErr 等下载那一趟把结果交回来。
+//
+// 理由见上面那条的注释：`done` 跑在后台 goroutine 上，同步读读到的是零值——
+// 而「读到零值」在闸门被删掉的时候恰好长得像「对了」。
+func waitOneErr(t *testing.T, ch chan error) error {
+	t.Helper()
+	select {
+	case err := <-ch:
+		return err
+	case <-time.After(10 * time.Second):
+		t.Fatal("等了 10 秒，下载那一趟还没把结果交回来")
+		return nil
 	}
 }
 
