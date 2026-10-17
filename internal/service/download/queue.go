@@ -403,6 +403,28 @@ func (m *Manager) Close(path string) error {
 	m.quit()
 	m.wg.Wait()
 
+	// 关掉时**还排在队上**的那几项，落成「暂停」。
+	//
+	// 🔴 为什么 `loop` 不改它们：`runOne` 只改**它捡起来的那一项**。而 `loop` 可能
+	// 在被 `wakeup` 唤醒之前就收到了 `m.ctx.Done()` 直接返回——那一项就永远停在
+	// `queued` 了。对用户那意味着「关掉时正在下」的东西，下次打开还是 `queued`，
+	// 而 `Restore` 只把 `inflight()` 的改成暂停、`queued` 原样留着，于是它显示成
+	// 「已加入队列」却没人下（`loop` 已经退出）。
+	//
+	// 语义上这也是对的：关应用时还排着队的，就是「下次接着下」的那一种
+	// （`persistable()` 对正在下的也是这么记的）。
+	m.mu.Lock()
+	for _, id := range m.order {
+		if t := m.tasks[id]; t != nil && t.Status == StatusQueued {
+			t.Status = StatusPaused
+		}
+	}
+	wake := m.wake
+	m.mu.Unlock()
+	if wake != nil {
+		wake()
+	}
+
 	if path == "" {
 		return nil
 	}
@@ -492,7 +514,35 @@ func (m *Manager) runOne(id string) {
 		wake()
 	}
 
-	err := m.run(ctx, id)
+	// 🔴 **不能无限等 `run` 返回。**
+	//
+	// `Close` 里的 `wg.Wait()` 等的就是这条后台线，而这条线的 `runOne` 卡在 `run`
+	// 里——`run` 的第一件事是 `m.resolve(ctx, want)`，**取流**。所以只要取流那一方
+	// 不理 ctx，`Close` 就永远返回不了，**应用退不出去**（实测整个测试包卡满
+	// 10 分钟超时）。
+	//
+	// 我们的 `resolveDownload` 走的是 `bili.Client.PlayURL(ctx, …)`，`http` 会尊重
+	// ctx，所以真机上不会挂在这里。但「关掉应用」是一个**必须保证**的动作，不能
+	// 建立在一句「大家都会尊重 ctx」上——`Resolver` 是个函数类型，谁实现它都能不
+	// 理。
+	//
+	// 做法：把 `run` 放出去，用 select 等「它回来了」或者「ctx 取消了」。后者直接
+	// 当这一页放弃，让 `runOne` 走下去把状态改成暂停、让后台线退出去。
+	//
+	// ⚠️ 代价：还在跑的 `run` 被丢在后台，它那个 goroutine 会**泄漏**，而且它可能
+	// 还在往 `.part` 里写（而状态已经被标成暂停了）。这一条只在那条「取流方不理
+	// ctx」的路上发生，而进程正要退出——**退不出去**和**退出时漏一个 goroutine**
+	// 之间，后者明显更好。用户点「暂停」也走这条路，但那时我们的 `resolve` 尊重
+	// ctx，`run` 会立刻自己退出来，select 几乎总是等 `done` 那一支。
+	runDone := make(chan error, 1)
+	go func() { runDone <- m.run(ctx, id) }()
+
+	var err error
+	select {
+	case err = <-runDone:
+	case <-ctx.Done():
+		err = context.Canceled
+	}
 	cancel()
 
 	m.mu.Lock()
