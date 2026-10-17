@@ -169,6 +169,7 @@ func (s *Shell) viewTrackMeta(c *ui.Context, st app.State, t *ui.Theme) {
 		if st.Artist != "" {
 			s.viewArtist(c, st, t)
 		}
+		s.viewLikeStar(c, st)
 		s.viewFavButton(c, st)
 		s.viewDownloadButton(c, st)
 	})
@@ -361,8 +362,20 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 					PassThrough()
 			})
 		}
+
+		// 长按 2.5 秒 = 一键三连（SPEC 需求 69），500ms 起进度环。
+		//
+		// ⚠️ **它在 `Children` 里面**：环画的是「这一帧按了多久」，而那要靠
+		// `wrap.Pressed()` 问出来（见 like.go 的 viewLikeRing）。
+		s.viewLikeRing(c, wrap.Pressed())
 	})
+
 	if wrap.Clicked() {
+		// 🔴 **长按三连之后松手补发的那一次 click 必须吞掉**，否则凭空弹出全屏
+		// 播放器（原因见 like.go 文件头：Biu 那边漏了它是一次多余的赞）。
+		if s.like.swallowClick() {
+			return
+		}
 		s.openFullPlayer()
 	}
 }

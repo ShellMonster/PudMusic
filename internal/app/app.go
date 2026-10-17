@@ -206,6 +206,26 @@ type App struct {
 	// 测试里替成一个假函数，才能量「失败之后到底有没有再问」。
 	partsFetch func(context.Context, string) ([]bili.VideoPart, error)
 
+	// like 是当前这一首的赞 / 藏状态，likeBvid 是它属于哪一个稿件。见 like.go。
+	//
+	// ⚠️ **它自己的锁，不在 `a.mu` 里**：写它的是网络往返回来的那个 goroutine，
+	// 而 `a.mu` 是播放器那一摊的（`Snapshot` 每帧都要它）。把两者放一把锁里的话，
+	// 一次网络回调要去抢每帧都在拿的那把锁。
+	likeMu     sync.Mutex
+	like       bili.ArchiveRelation
+	likeBvid   string
+	likeErr    error
+	likeLoaded bool
+	likeWanted bool
+	// likeTriedAt 是上一次**发起**那一问的时刻，问失败之后拿它算退避
+	// （`likeRetryAfter`）。成功之后用不上——`likeLoaded` 已经挡住了。
+	likeTriedAt time.Time
+	// likeFetch 是问赞藏的那一趟，nil = 走取流零件上的 `bili.Client.ArchiveRelation`。
+	//
+	// 和 `partsFetch` 同一条规矩：**只由界面那一侧读写**（`ensureLike` 在那里就
+	// 把它取出来递给那个 goroutine，goroutine 不碰这个字段）。生产上永远是 nil。
+	likeFetch func(context.Context, string) (bili.ArchiveRelation, error)
+
 	// 本地音乐库，见 localmusic.go。挂上去之前是 nil，界面要判空。
 	localMusic *localLibrary
 

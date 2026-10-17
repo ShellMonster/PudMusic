@@ -142,6 +142,16 @@ type Shell struct {
 	// **只由 view 在主线程上读写**，不跨 goroutine（铁律一）。
 	full fullPlayer
 
+	// like 是长按封面 2.5 秒一键三连那一摊，见 like.go。
+	// **同样只由 view 在主线程上读写**。
+	//
+	// ⚠️ 挂在壳上而不是每帧新建：即时模式下一帧一新建，「按了多久」每次都从
+	// 零开始，那 2.5 秒永远到不了。
+	//
+	// ⚠️ **播放条那张封面和满屏那张封面共用这一份**：开着满屏的时候播放条整个
+	// 不建（见 fullplayer.go 文件头），所以任一帧只有其中一个在喂它。
+	like likeGesture
+
 	// rateOpen 是倍率那个浮层开着没有。**只由 view 在主线程上读写**，
 	// 见 playbar_rate.go。
 	rateOpen bool

@@ -195,7 +195,7 @@ func (s *Shell) viewFullPlayer(c *ui.Context) {
 
 		probe.Children(func() {
 			s.viewFullTopBar(c, st, hidden)
-			s.viewFullCover(c, st)
+			s.viewFullCover(c, st, hidden)
 			s.viewFullSpectrum(c, st, hidden)
 			s.viewFullControls(c, st, hidden)
 			s.viewFullParts(c, hidden)
@@ -387,17 +387,39 @@ func fullTopBarPadLeft(bar ui.TitleBar) float32 { return bar.Left + fullBarPadX 
 //
 // 🔴 这里的 `Match` 就是 SwiftUI `matchedGeometryEffect` 的等价物，见 coverMatch。
 // 它和 `viewCover`（播放条那一张）轮流带同一个 `coverTransition(id)`。
-func (s *Shell) viewFullCover(c *ui.Context, st app.State) {
+//
+// ⚠️ **外面新套的那一层 Box 是长按三连要的**（见 like.go）：进度环要画在封面
+// **外面**一圈，而 `imgcache.View` 自己带 `Clip()`（圆角裁剪），环放进去会被
+// 裁掉。所以：定位和尺寸搬到外面这层 Box 上，里面那张图照旧带着转场。
+//
+// ⚠️ **界面藏起来时光标要跟着没，而这一层得自己说**：框架认光标是从指针底下
+// 最里层那个元素开始往上找的，而**遇到的第一个「接点击的」元素就停**（认成
+// 默认箭头，`runtime.go` 的 `updateCursor`）。这一层为了长按调了 `Pressed()`，
+// 于是它是接点击的那一个——指针落在封面正中时 `CursorNone` 根本轮不到探针。
+// 实测：满屏指针放在封面正中（600,400）推进 3 秒，光标是箭头而不是 none。
+// 照抄探针那一支（`viewFullPlayer` 里 `probe.Cursor(ui.CursorNone)`）就对了。
+func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool) {
 	winW, winH := c.Size()
 	w, h := fullCoverSize(c)
 	// ⚠️ **自己算位置**，不要用 `Absolute().Center()`：那个 `Center` 是「把**子**
 	// 元素沿着主轴居中」（`mygo/ui/api_gen.go:3006`），不是「把这个元素摆到中间」。
 	// 这么写的后果是外层那个 Box 宽高就是封面本身、贴在左边 x=0，
 	// 界面上是「封面靠左」，而转场的终点也跟着错。
-	imgcache.View(c, s.images, st.CoverURL, w, h).
-		Label("当前封面").
-		Absolute().Left((winW - w) / 2).Top((winH - h) / 2).
-		Transition(coverTransition(coverIdentity(s, st)))
+	box := ui.Box(c).Key("full-cover").
+		Absolute().Left((winW-w)/2).Top((winH-h)/2).Size(w, h)
+	if hidden {
+		box = box.Cursor(ui.CursorNone)
+	}
+	box.Children(func() {
+		imgcache.View(c, s.images, st.CoverURL, w, h).
+			Label("当前封面").
+			Transition(coverTransition(coverIdentity(s, st)))
+
+		// 长按 2.5 秒 = 一键三连。满屏上**没有**别的赞入口（照抄 Biu：它那边
+		// 满屏那张封面是 `pointer-events-none`，三连只在播放条上）——我们把这一层
+		// 接进来是因为 SPEC 需求 69 说的是「长按封面」，而满屏上只有这一张封面。
+		s.viewLikeRing(c, box.Pressed())
+	})
 }
 
 // coverIdentity 是共享元素这一次的身份：当前这一首的判重标识。
