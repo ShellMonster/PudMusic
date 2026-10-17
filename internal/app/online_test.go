@@ -1258,47 +1258,6 @@ func TestAMusicPreviewNeverReachesThePlayer(t *testing.T) {
 	}
 }
 
-// TestAMusicStreamThatTurnsOutToBeAnotherSongIsRefused 换流要能认出「不是这一首」。
-//
-// 🔴 音乐库那一路 Bvid / Cid 都是空的，所以只按它们判身份的话**这一路的任何
-// 两条流都会被认成同一首**——而这道闸正是拦「换流之后静默换成另一首歌」的。
-func TestAMusicStreamThatTurnsOutToBeAnotherSongIsRefused(t *testing.T) {
-	f := newMusicFixture(t)
-	// 取流一开始给别的 sid，等地址失效换流时又给这一首。
-	var calls atomic.Int32
-	f.on("/audio/music-service-c/url", func(w http.ResponseWriter, r *http.Request) {
-		sid := 1293494
-		if calls.Add(1) > 1 {
-			sid = 9999999
-		}
-		writeStreamJSON(w, map[string]any{"code": 0, "msg": "success", "ttl": 1,
-			"data": map[string]any{
-				"sid": sid, "type": int(bili.MusicTier192), "timeout": 10800,
-				"cdns":      []string{f.musicCDN},
-				"qualities": []any{map[string]any{"type": 1, "require": 0}},
-			}})
-	})
-	a := newOnlineApp(t, f, t.TempDir())
-	if err := a.Enqueue(musicItem("1293494", "换流不该换歌")); err != nil {
-		t.Fatal(err)
-	}
-	playing(t, a, "换流不该换歌")
-
-	// 把正在放的那条地址作废，逼它走一次换流。
-	f.mu.Lock()
-	f.forbidden["/cdn/song.m4a"] = true
-	f.mu.Unlock()
-
-	// 换流拿回来的那条流属于另一个 sid：源那边拿不到 reply，歌停着，
-	// 而**播放条上不会出现「正在换成别的歌」这种提示**（那不是用户想看的）。
-	waitFor(t, 20*time.Second, "换流停下来", func() bool {
-		return !a.Snapshot().Playing
-	})
-	if got := a.Snapshot().Err; got != "" && strings.Contains(got, "换") {
-		t.Errorf("播放条上写的是 %q，别把这说成「正在换流」", got)
-	}
-}
-
 // TestChangingQualityKeepsAMusicLibraryTrack 换音质在音乐库这一路上也成立。
 //
 // 换回来还是同一档时不该打断正在放的歌（`SameTier`）。这一条盯的是它在
@@ -1360,4 +1319,50 @@ func TestEveryPlayableEntryCanActuallyBeStreamed(t *testing.T) {
 		}
 		playing(t, a, "音乐库")
 	})
+}
+
+// TestAFailedQualitySwitchDoesNotLeaveItsWordsBehind 换档失败的红字不许粘住。
+//
+// 🔴 场景：点「无损」→ 取流失败 → 播放条上写「这一首没有无损」，**歌照常放着**
+// （那一档拿不到，但手上那条是好的）→ 用户改主意点「高音质」→ 拿回来的还是
+// 正在放的那一档，于是**不打断**，直接走人。
+//
+// 走人的那一支原来不清 `errText`，于是那句「这一首没有无损」会一直挂到下一首
+// 歌为止——而歌好好地在放、用户点的档也拿到了。**一句错的红字，比没有更糟**。
+//
+// `failQualitySwitch` 那段注释为失败那一半操过心（迟到的失败不许盖住后一次
+// 成功），这一条是它漏掉的另一半：成功的那一半也可能留下一句旧的。
+func TestAFailedQualitySwitchDoesNotLeaveItsWordsBehind(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = readFlac(t)
+	url := cdnURL(f.URL, "a.flac", 2*time.Hour)
+	// 只有 320K 这一档：**点无损一定拿不到**，而「高音质」拿回来的正是现在这一档。
+	f.onPlayURL(map[string]any{"duration": 1, "audio": []any{map[string]any{
+		"id": int(bili.QualityHigh320), "bandwidth": 110836, "codecs": "flac",
+		"mimeType": "audio/mp4", "baseUrl": url,
+	}}})
+
+	a := newOnlineApp(t, f, t.TempDir())
+	if err := a.Enqueue(onlineItem("BV1", "1", "只有 320K 的一首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "只有 320K 的一首")
+
+	// 点「无损」：拿不到，播放条上如实说，歌照放。
+	a.SetAudioQuality(bili.AudioLossless)
+	waitFor(t, 15*time.Second, "播放条上说清没有无损", func() bool {
+		return a.Snapshot().Err != ""
+	})
+	if got := a.Snapshot().Err; !strings.Contains(got, "无损") {
+		t.Fatalf("播放条上写的是 %q，want 一句说清「没有无损」的话", got)
+	}
+
+	// 改主意点「高音质」：拿回来的就是正在放的那一档 → 不打断。
+	a.SetAudioQuality(bili.AudioHigh)
+	waitFor(t, 15*time.Second, "那句不成立的话被清掉", func() bool {
+		return a.Snapshot().Err == ""
+	})
+	if st := a.Snapshot(); !st.Playing || st.Quality != "320K" {
+		t.Errorf("清掉那句话的时候把歌弄坏了：playing=%v 徽章=%q", st.Playing, st.Quality)
+	}
 }

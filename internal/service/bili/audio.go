@@ -174,11 +174,19 @@ func (c *Client) SongInfo(ctx context.Context, sid string) (*SongInfo, error) {
 // ⚠️ **Type 是这一路唯一要紧的字段**：它是 B 站实际给回来的那一档，
 // 而 -1 是试听片段（见本文件的文件头）。
 //
-// `sid` / `size` / `title` / `cover` / `info` 上游也声明了，这里不收：
-// 这一层只为了拿地址和那一档，把一堆用不上的字段抄进来等于把接口的形状
-// 再抄一遍（同一个道理见 `video.go` 的 `pagelistItem`）。真要用的时候再声明。
+// 🔴 **`sid` 不是可选项**，它是这一路的**身份**：`/audio/music-service-c/url`
+// 是**按 sid 问的**，而返回里带一个 `sid`（文档第 2 节「音频 auid」）。这两个
+// 号码对不上就意味着 B 站给回来的是**另一首**的流——版权曲换了地址（错误码
+// 72010027「版权音乐重定向」）就是这种形态。身份必须从**返回**里读：用请求里
+// 那个 sid 填出来的话，`SameTrack` 在这一路上恒为真，而它守的恰恰是
+// 「换流之后不许静默换成另一首歌」。
+//
+// `size` / `title` / `cover` / `info` 上游也声明了，这里不收：这一层只为了拿
+// 地址、那一档和身份，把一堆用不上的字段抄进来等于把接口的形状再抄一遍
+// （同一个道理见 `video.go` 的 `pagelistItem`）。真要用的时候再声明。
 type songURLData struct {
-	Type      int           `json:"type"`    // 0..3，-1 是试听片段
+	Sid       int64         `json:"sid"` // 音频 auid；换流之后拿它比对
+	Type      int           `json:"type"`
 	Timeout   int           `json:"timeout"` // 有效秒数，一般 10800（三小时）
 	Cdns      []string      `json:"cdns"`    // 主地址在前，备用的在后
 	Qualities []songQuality `json:"qualities"`
@@ -296,9 +304,26 @@ func freeTier(qs []songQuality, want MusicTier) (MusicTier, bool) {
 // 和 dash 那一路的 `refFrom` 分开：两条路的档位编号不一样（`MusicTier` vs
 // `Quality`），合在一起就得在每个字段上判「这一次是哪一路」，而那种判断
 // 迟早会漏一处。
-func (c *Client) refFromSongURL(d *songURLData, sid string) *StreamRef {
+//
+// requested 是**问的时候**那个 sid（拿它兜底，见下面那一句），而 `StreamRef.Sid`
+// 填的是 **B 站回来的那个**。
+//
+// 🔴 **为什么不用请求里那个**：这一路的身份判据全靠 `Sid`（`SameTrack` /
+// `sameItem` 都比它），而它守的是「换流之后不许静默换成另一首歌」。拿请求里
+// 那个填出来的话，判据比的是「我请求的 == 我请求的」——**恒为真**，闸门整个是
+// 死的，而且恰恰是它最该拦的那一种（版权曲换了地址，B 站给回另一首的流）会
+// 一路放过去。
+//
+// 返回里没有 sid（0 / 负数）时退回请求里那个，并**说清这一条**：那样的回答我们
+// 没法核对身份，闸门在这一次上是弱的。让它当场报错更糟——B 站少给一个字段不该
+// 换来一首歌放不出来，而真出现那种形状时 `sid` 那一句注释已经写在这了。
+func (c *Client) refFromSongURL(d *songURLData, requested string) *StreamRef {
 	tier := MusicTier(d.Type)
 	urls := append([]string(nil), d.Cdns...)
+	sid := requested
+	if d.Sid > 0 {
+		sid = strconv.FormatInt(d.Sid, 10)
+	}
 	ref := &StreamRef{
 		URLs:      urls,
 		MusicTier: tier,

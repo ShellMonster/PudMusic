@@ -279,6 +279,57 @@ func TestMusicStreamURLPutsTheBackupAfterTheMainAddress(t *testing.T) {
 	}
 }
 
+// TestTheIdentityComesFromTheAnswerNotFromTheRequest 盯**这一路的根因**。
+//
+// 🔴 `/audio/music-service-c/url` 是**按 sid 问**的，而返回里**也带一个 sid**
+// （文档第 2 节）。两个对不上就意味着 B 站给回来的是**另一首**的流——版权曲换了
+// 地址（72010027「版权音乐重定向」）就是这种形态。
+//
+// 身份**必须**从返回里读。用请求里那个填出来的话，`StreamRef.Sid` 比的是
+// 「我请求的 == 我请求的」——**恒为真**，于是 `SameTrack` / `sameItem` 那两道
+// 「不许静默换成另一首歌」的闸门在音乐库这一路上整个是死的，而它们最该拦的
+// 恰恰就是这一种。
+//
+// ⚠️ 曾经就踩在这里：fixture 把返回的 sid 改掉去造「换成了别的歌」，而代码
+// 读不到那个字段，用例照样绿。
+func TestTheIdentityComesFromTheAnswerNotFromTheRequest(t *testing.T) {
+	// 问的是 1293494，B 站回的是**另一首**。
+	d := songURLDataFor(2, songURL("https://cdn.example", "a.m4a", time.Now()))
+	d["sid"] = 9999999
+	_, c := songURLClient(t, d)
+
+	ref, err := c.AudioStreamURL(context.Background(), testSid, AudioAuto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Sid != "9999999" {
+		t.Errorf("StreamRef.Sid = %q，want 9999999（问的是 %s，回的是另一首）", ref.Sid, testSid)
+	}
+	// 判据必须因此分得开：拿「问的那一条」造出来的流和这一条**不是同一首**。
+	asked := &StreamRef{Sid: testSid, MusicTier: MusicTier320}
+	if ref.SameTrack(asked) {
+		t.Error("两个 sid 被判成同一首：闸门在音乐库这一路上恒为真")
+	}
+}
+
+// TestAnAnswerWithoutASidFallsBackToTheOneWeAsked 认不出身份时别把歌弄放不出来。
+//
+// 返回里没有 sid 时退回**请求里**那个，并让那一票用例把这句弱闸门记下来：
+// B 站少给一个字段不该换来一首歌放不出来。
+func TestAnAnswerWithoutASidFallsBackToTheOneWeAsked(t *testing.T) {
+	d := songURLDataFor(2, songURL("https://cdn.example", "a.m4a", time.Now()))
+	d["sid"] = 0
+	_, c := songURLClient(t, d)
+
+	ref, err := c.AudioStreamURL(context.Background(), testSid, AudioAuto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Sid != testSid {
+		t.Errorf("StreamRef.Sid = %q，want %s（返回里没有 sid，退回请求里那个）", ref.Sid, testSid)
+	}
+}
+
 // TestLosslessIsAskedForAndRefusedLoudly 点名无损就点名要 FLAC。
 func TestLosslessIsAskedForAndRefusedLoudly(t *testing.T) {
 	f, c := songURLClient(t, songURLDataFor(3, songURL("https://cdn.example", "a.flac", time.Now())))

@@ -99,7 +99,12 @@ var Items = []Item{
 	{
 		Category: Play,
 		Spec:     "错误不许粘住：坏文件之后放好文件，那句话要清掉",
-		Tests:    []string{"TestTheErrorDoesNotStickToTheNextSong"},
+		Tests: []string{
+			"TestTheErrorDoesNotStickToTheNextSong",
+			// 同一句话的另一半：换音质失败留下的红字，在随后一次「拿回同一档、
+			// 不该打断」的换档里同样会变成一句错的、且不会自己清掉的话。
+			"TestAFailedQualitySwitchDoesNotLeaveItsWordsBehind",
+		},
 	},
 	{
 		Category: Play,

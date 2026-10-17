@@ -161,6 +161,14 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 		}
 		if ref.SameTier(tr.ref) {
 			// 同一档：换过去听不出区别，不打断。
+			//
+			// 🔴 但**顺手把上一句红字清掉**。上一次换档失败留下的那句话
+			// （「这一首没有无损」）到这一步已经是**错的**：用户点的档拿回来的
+			// 正是现在正在放的那一档，歌好好地在放，而那句话会一直挂到下一首
+			// 歌为止。`failQualitySwitch` 那一大段注释说的就是「一句错的、且
+			// 不会自己清掉的红字」——那是失败的那一半，这一条是成功的那一半，
+			// 当时漏了。
+			a.clearStaleQualityErr(gen, tr)
 			return
 		}
 		src, p, err := a.buildFromRef(context.Background(), s, tr.item, gen, ref)
@@ -213,6 +221,25 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 			wake()
 		}
 	}()
+}
+
+// clearStaleQualityErr 清掉一句已经不成立的换档提示。
+//
+// **只在歌好好地在放的时候清**（播放器还活着、`reportedErr` 是空的）：那时候
+// 挂在播放条上的那句话必定是上一次换档留下的，而它说的已经是上一档的事了。
+//
+// ⚠️ 真出了播放错误（网络断、字节源拉不动）时那句话是**真的**，不许清——
+// 清了就成了「静悄悄地停着」，那比留一句过时的话糟得多。这和成功那一支里
+// `a.errText = ""` 不一样：那一支是先换好了流再清，那一句一定是旧的。
+func (a *App) clearStaleQualityErr(gen int, tr *onlineTrack) {
+	a.mu.Lock()
+	stale := a.onlineGen != gen || a.closed || a.online != tr ||
+		a.reportedErr != nil || a.player == nil || a.errText == ""
+	a.mu.Unlock()
+	if stale {
+		return
+	}
+	a.setErr("")
 }
 
 // failQualitySwitch 报一次换音质的失败，**只在用户要的还是这一档时报**。
