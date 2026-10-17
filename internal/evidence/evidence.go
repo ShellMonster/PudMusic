@@ -15,7 +15,7 @@
 //
 // # 怎么用
 //
-// 往里加一行���需求来自 SPEC 的哪一句、要拿哪几条测试当证据。要是真机上
+// 往里加一行：需求来自 SPEC 的哪一句、要拿哪几条测试当证据。要是真机上
 // 才有意义的（红黄绿、输入法、系统音频），把 RealOnly 标上——
 // 那几条在无头环境里量不到，标出来是为了没人把它们算进「已验完」。
 package evidence
@@ -290,7 +290,7 @@ var Items = []Item{
 		// 而且它**可能整条跳过**：那台机器没有可用的输出时它 `t.Skip`。
 		// 跳过不是通过，这一点在台账里必须写出来，不然读的人会当成绿。
 		//
-		// 「耳朵」那一份在人工清单里（戴耳机听一���），台账里不装。
+		// 「耳朵」那一份在人工清单里（戴耳机听一遍），台账里不装。
 		Spec:     "系统音频**输出被打开、真的有采样流出去**（不等于听得到；没有输出时整条跳过，跳过≠通过。耳朵那一份在人工清单里）",
 		Tests:    []string{"TestSystemAudioOutputOpens"},
 		RealOnly: true,
@@ -508,6 +508,70 @@ var Items = []Item{
 			"TestTheHomePageSaysItIsLoadingUntilTheFirstPageIsBack",
 			"TestNewMusicIsOnlyPulledOnThePopTab",
 			"TestLoggingInReloadsTheRecommendations",
+		},
+	},
+	{
+		Category: Paging,
+		// 「页面壳子做完了、数据源没排票，于是交付时一片绿、用户打开是空的」
+		// （BMG-47 §4 查出的模式，七个页面命中）。首页那张票（#13）就是：票面
+		// 四条全是交互和布局，没有一条要求有数据。
+		//
+		// ⚠️ 「有数据」和「空状态文案对不对」是**两件事**，而当年只验了后一件
+		//（`TestTheHomePageStillSaysWhyItIsEmpty` 验的正是文案，而空状态正是
+		// 当时的真实状态，所以它必然通过）。所以每一页除了真数据要出现在画面上，
+		// 还钉一句「这一页的空状态文案不许同时出现」。
+		//
+		// ⚠️ 「画得出来」和「真去 B 站取回来了」是**两件事**。首页那一行在表上
+		// 走的是一台假 B 站（`newUIExplore` + `homeArchives`）而不是往模型里塞歌，
+		// 而且三档各走一遍——因为 A1 的原教训正是「画得出来」那一半被验了、
+		// 「取数」那一半没人管。这一页钉取数的两条在下面。
+		//
+		// 今天这一条**不是全过**：侧栏第二项「我的关注」**连壳子都没有**（现有的
+		// followings / stat / modify 三个 relation 接口是动态流和 UP 空间在用），
+		// 而且**它连工单都还没有**（BMG-47 §3 A2）。它在
+		// 表上是一条**欠条**：必须点名到编号、写清差什么，并且**当场证明它现在
+		// 真的是空的**——不然欠条会变成万能借口：数据早就接上了它还赖着，谁也
+		// 看不出来。排到票之后把欠条换成真数据即可。
+		Spec: "每一页至少要有一条真数据（假 B 站喂了内容之后，画面上出现的是内容而不是那一页的空状态；还欠着的页面必须点名到编号、写清差什么，并且当场证明它现在真的是空的——「我的关注」是今天唯一欠着的一条，它连工单都还没有）",
+		Tests: []string{
+			"TestEveryRouteShowsARealRowOrSaysWhichTicketIsMissing",
+			"TestTheRealDataLedgerCoversEveryRoute",
+			"TestEveryRouteHasAPageViewOrAnOpenDebt",
+			// 各页从空状态落到真数据的那一步。
+			"TestTheThreeTabsAllSwitch",
+			"TestCollectionShowsTheHeaderAndTheOpsBar",
+			// 首页那一页的**取数**那一半（表上那一行走的就是这条链）：
+			// 三档各打各的接口，换了档拿到的是另一批。
+			"TestTheHomePagePullsTheTabYouAreLookingAt",
+			"TestEachTabPullsItsOwnList",
+		},
+	},
+	{
+		Category: Play,
+		// 「判据说可放、实际放不了」——界面上的谎言。`bili.Media.Playable()`
+		// 照抄了 Biu 的 `![2,12].includes(type)`，**判据抄对了**，而我们没实现
+		// 的那一条路（type=12，B 站音乐库）没有被跟上：收藏夹里那条照常画成一
+		// 行、照常进队列、抽屉里还标着「B 站音乐」，用户按播放才被
+		// `app.playableOnline` 拒绝。判据一路绿，判据的测试也一路绿，只有真的
+		// 按下去那一刻才说话。
+		//
+		// 钉的就是那一刻：**判据说「能放」的行，照界面那条路翻成队列项再按播
+		// 放，同步那一步不许拒绝它**；判据说「放不了」的行不许进队列；判据不
+		// 许自己长（改判据就要改那张表），而每一类内容都必须在表上。
+		//
+		// ⚠️ type=12 今天**欠着**（BMG-47 §3 A31，还没有工单：取流 / 元信息 /
+		// 收藏态三个接口一个都没有）。它写成一条**欠条**而不是一段红的测试，
+		// 理由和上一条一样：一个永远红的 `go test ./...` 没有人再跑它，那比绿
+		// 着更坏。把欠条删掉，这条断言自己就开始要求它真放得了。
+		Spec: "画出来的每一行都放得了：判据与界面那一步必须说同一句话（type=12「B 站音乐库」今天欠着 A31，欠条要点名到编号并钉住那句人话；判据不许自己长，每一类内容都必须在表上）",
+		Tests: []string{
+			"TestEveryRowWeDrawHasAVerdictThatMatchesWhatHappens",
+			"TestEveryContentTypeInTheCodebaseIsOnTheVerdictLedger",
+			"TestEveryListedExtensionIsToldApartFromThePlayableOnes",
+			// 服务层那三条：判据本身，以及「放不了的那一种在界面上必须说清楚」。
+			"TestOnlyVideoAndAudioArePlayable",
+			"TestAnUnplayableFormatIsNamedAsSuch",
+			"TestWMAIsListedButNotPlayable",
 		},
 	},
 }
