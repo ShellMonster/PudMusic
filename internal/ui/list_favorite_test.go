@@ -36,7 +36,12 @@ func favoriteOnAListPage(t *testing.T, f *libFake, path string) (*Shell, *ui.Tes
 func TestFavoritingFromTheLaterListOpensTheDialog(t *testing.T) {
 	f := newLibFake(t).withLater(1, 1, "周杰伦的歌")
 	_, tt := favoriteOnAListPage(t, f, laterPath)
-	settle(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
+	// ⚠️ 等的是**那一行画出来了**，不是「请求发出去了」。
+	// 「发出去」和「回来并画出来」之间隔着一次后台往返和一次排版，机器一忙就错开
+	// ——错开的那一次，下一句 `RightClick` 就找不到「周杰伦的歌」而报
+	// "no element shows …"，而这一页跟它测的那件事（接线换没换）毫无关系。
+	// 本来就是这么写的，等改掉。
+	settle(t, tt, "把第一页拉回来并画出来", func() bool { return tt.HasText("周杰伦的歌") })
 
 	if err := tt.RightClick("周杰伦的歌"); err != nil {
 		t.Fatal(err)
@@ -62,7 +67,8 @@ func TestFavoritingFromTheLaterListOpensTheDialog(t *testing.T) {
 func TestFavoritingFromTheHistoryListOpensTheDialog(t *testing.T) {
 	f := newLibFake(t).withHistory(1, 10, 100, "听过的一首")
 	_, tt := favoriteOnAListPage(t, f, historyPath)
-	settle(t, tt, "把第一页拉回来", func() bool { return f.callsOf(historyPathAPI) == 1 })
+	// 同上：等那一行画出来，不等「请求发出去了」。
+	settle(t, tt, "把第一页拉回来并画出来", func() bool { return tt.HasText("听过的一首") })
 
 	if err := tt.RightClick("听过的一首"); err != nil {
 		t.Fatal(err)
@@ -132,7 +138,6 @@ func lastToast(s *Shell) string {
 	}
 	return s.toasts[len(s.toasts)-1].text
 }
-
 
 // TestFavoritingAnItemWithoutASourceSaysSo 一条 **Source 不是 online** 的项按
 // 「收藏」：**说一句就停**，不许递归。

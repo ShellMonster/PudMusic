@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/app"
+	mygoui "github.com/egoist/mygo/ui"
 )
 
 // Toast 这一组盯的是 Biu 的三条硬要求：右下角、避开 88px 播放条、同时最多 3 条。
@@ -177,6 +180,90 @@ func TestToastDoesNotBlockTheUI(t *testing.T) {
 	if s.app.Snapshot().Playing {
 		t.Error("点播放之后没在播，提示那层把点击吃了")
 	}
+}
+
+// longToastText 是长成好几行的一句提示——真机上弹的就是这种（见
+// syncGlobalShortcuts 那一句）。
+const longToastText = "有几个全局快捷键没登记上：播放/暂停（和应用内那条重了）、上一首（和应用内那条重了）、下一首（和应用内那条重了）、音量加（和应用内那条重了）。应用内那一列照常用。"
+
+// TestTheToastCardItselfDoesNotBlockClicks 验**卡片本身**也不吃点击。
+//
+// 上一条量的是「浮层容器空的地方透传」，而提示抬过播放条之后，卡片压在的**正是**
+// 页面右下角那一块可点的东西。症状是「刚改完一个设置，右下角弹一句，两秒之内那个
+// 按钮点不动」，而提示两秒后自己就没了——于是它看起来像那个按钮偶尔失灵，
+// 最容易被当成界面坏了。
+//
+// 踩出来的经过：快捷键设置页最后那几行的 ×（清空那一格）就在那个位置上，而
+// `syncGlobalShortcuts` 会在改完设置之后弹一句「全局快捷键没登记上」。于是
+// `TestTheClearButtonInEveryRecorderCellActuallyClears` 一旦遇上那句提示就红。
+//
+// ⚠️ **逐格先量「点在不在卡片底下」**：不在的那几格量不到这一半，硬点它们只是白点。
+// 而一格都不在底下的话这条就等于没量——所以那一条是 `t.Fatal` 而不是跳过（跳过的
+// 测试没人会去读）。
+func TestTheToastCardItselfDoesNotBlockClicks(t *testing.T) {
+	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	openSettingsTab(t, tt, "快捷键设置")
+	shortToasts(t, time.Minute)
+
+	// 摆满 `toastLimit` 条，而且**用真的那种长句子**：短句子只占一行，卡片矮，三条
+	// 叠起来还在表格下面——那就量不到任何东西。而真机上弹的那一串折了好几行，
+	// 卡片高到三条叠起来正好压住表格最后那几行（这就是它在真机上出问题的那一档）。
+	for i := range toastLimit {
+		s.addToast(longToastText + strings.Repeat("·", i))
+	}
+	tt.Frame()
+	// `Find` 给的是**文字**那一块的框，而卡片比文字大（上下各 12 的内边距）。所以
+	// 这里拿三条文字的**并集**当「被压住的那一片」，宁可少算几条也别把没被压住的
+	// 那几条算进来——那几条点得动是本来就该有的，不算证据。
+	stack := mygoui.Rect{}
+	for i := range toastLimit {
+		r, found := tt.Find(longToastText + strings.Repeat("·", i))
+		if !found {
+			t.Fatalf("第 %d 条提示没画出来，文字有 %q", i, tt.Texts())
+		}
+		stack = unionRect(stack, r)
+	}
+
+	under := 0
+	for _, item := range defaultShortcutSettings().Shortcuts {
+		label := "清空「" + item.Name + "」的快捷键"
+		r, found := tt.Find(label)
+		if !found {
+			t.Fatalf("没有「%s」那个 ×，文字有 %q", label, tt.Texts())
+		}
+		cx, cy := r.X+r.W/2, r.Y+r.H/2
+		if cx < stack.X || cx > stack.X+stack.W || cy < stack.Y || cy > stack.Y+stack.H {
+			continue // 这一格不在卡片底下
+		}
+		under++
+		tt.ClickAt(cx, cy)
+		tt.Frame()
+		if it, _ := findShortcut(item.ID, s.keys.snapshot().Shortcuts); it.Shortcut != "" {
+			t.Errorf("卡片压着的那一格点不动：%s 还是 %q（卡片把点击吃了）", item.Name, it.Shortcut)
+		}
+		// 摆回默认值，好让下一格有东西可清。
+		if err := s.keys.set(shortcutSlot{id: item.ID}, item.Shortcut); err != nil {
+			t.Fatal(err)
+		}
+		tt.Frame()
+	}
+	if under == 0 {
+		t.Fatalf("卡片底下一个 × 都没有（被压住的那一片在 %v，窗口 1200x800）："+
+			"这一条量的是「卡片压着可点的东西」，一格都不在底下就等于没量", stack)
+	}
+}
+
+// unionRect 把两个框并成一个（零值当空框）。
+func unionRect(a, b mygoui.Rect) mygoui.Rect {
+	if b.W == 0 || b.H == 0 {
+		return a
+	}
+	if a.W == 0 || a.H == 0 {
+		return b
+	}
+	x, y := min(a.X, b.X), min(a.Y, b.Y)
+	r, bo := max(a.X+a.W, b.X+b.W), max(a.Y+a.H, b.Y+b.H)
+	return mygoui.Rect{X: x, Y: y, W: r - x, H: bo - y}
 }
 
 // TestToastTextIsKeptVerbatim 验长一点的文案也不会被截断成认不出的样子。
