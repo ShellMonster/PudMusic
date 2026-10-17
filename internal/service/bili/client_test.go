@@ -47,7 +47,10 @@ type fakeBili struct {
 }
 
 type recordedRequest struct {
-	Path   string
+	Path string
+	// Method 记下 HTTP 方法。之前只能靠 `Form != nil` 猜是不是 POST，而那只对
+	// 带表单的那几个成立——断言「这四个接口全是 GET」需要的就是这一个字段。
+	Method string
 	Query  url.Values
 	Form   url.Values
 	Header http.Header
@@ -59,7 +62,10 @@ func newFakeBili(t *testing.T) *fakeBili {
 	f := &fakeBili{handlers: map[string]http.HandlerFunc{}}
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		rec := recordedRequest{Path: r.URL.Path, Query: r.URL.Query(), Header: r.Header.Clone()}
+		rec := recordedRequest{
+			Path: r.URL.Path, Method: r.Method,
+			Query: r.URL.Query(), Header: r.Header.Clone(),
+		}
 		// ⚠️ **先把 body 读出来，再把它装回去，最后才 ParseForm。**
 		//
 		// 顺序反了的话，所有 POST 表单的 `rec.Body` 都是**空串**：

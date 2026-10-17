@@ -52,9 +52,17 @@ var routes = []Route{
 		Title: "暂无内容",
 		Hint:  "先在顶栏「打开文件」放几首进来，或者搜一首歌",
 	}},
-	// 上游：关注列表只转给 `components/virtual-grid-page-list`，空的时候是它
-	// 的兜底 `暂无内容`（index.tsx:160）。
-	{Match: "/follow", Title: "我的关注", InMenu: true, Empty: emptyState{
+	// ⚠️ 这一条**已经有内容了**（follow.go：左边的分组 Tab + 右边一个虚拟网格 +
+	// 页内搜索，四个 B 站关注接口都接上了），所以下面这句是**页面自己里面**画的：
+	// 「登录了、一格都没有、也没搜」那一支（`followEmpty`）读的就是它。
+	// 出处留着是因为它还是那一句出处——上游 `follow-list/index.tsx` 只把列表转给
+	// `components/virtual-grid-page-list`，空的时候是它的兜底 `暂无内容`
+	//（index.tsx:160），所以 Title 照抄；Hint 是我们写的。
+	//
+	// ⚠️ **「还没登录」不是这一句**，是 follow.go 里的 `followNotLoggedIn`：没登录
+	// 时那个接口一律回 -101，而说成「还没关注任何人」的话用户登录完发现还是空的，
+	// 会以为是登录坏了。两句话必须分开（见 follow.go 文件头）。
+	{Match: followPath, Title: "我的关注", InMenu: true, Empty: emptyState{
 		Title: "暂无内容",
 		Hint:  "登录之后点「关注」关注的 UP 主会出现在这里",
 	}},
@@ -269,6 +277,14 @@ func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
 		// 本地音乐（localmusic.go）：表格 / 列表 / 网格三档 + 每行的
 		// 「打开文件夹」和「删除文件」。
 		return s.viewLocalMusic
+	case followPath:
+		// 我的关注（follow.go）：左边分组 Tab + 右边虚拟网格 + 页内搜索。
+		//
+		// ⚠️ **空状态在它自己里面画，而且分五种**：「没登录」「没关注任何人」
+		// 「搜了没搜到」「这一组还没有人」「这一块拉失败了」（见 follow.go 文件头）。
+		// 所以上面 `routes` 表里那一条的 `Empty` 仍然有用——它就是
+		// 「没关注任何人」那一支，别当成「已经有内容了就该清掉」。
+		return s.viewFollow
 	}
 	return nil
 }
