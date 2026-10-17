@@ -61,8 +61,8 @@ type tap struct {
 	an *spectrum.Analyzer
 	// vol 是音量增益：设置走界面线程、读取走解码 goroutine，所以用 atomic。
 	vol atomic.Uint32
-	// out 是分析器的输出缓冲。**只有解码 goroutine 碰它**，所以不加锁；
-	// 环里每段自己有一份 copy，这个要是也指向环里的某一段就全乱了。
+	// out 是分析器的输出缓冲（FFT 的中间量在 Analyzer 自己那里）。
+	// **只有解码 goroutine 碰它**，所以不加锁。
 	out []float32
 
 	mu sync.Mutex
@@ -73,8 +73,6 @@ type tap struct {
 	blocks []spectrumBlock
 	frames int64
 	cur    int64 // 下一段从第几源帧开始
-	// spare 是刚被裁掉的那一段的 mag 切片，下一段接着用。稳态于是不分配。
-	spare []float32
 }
 
 // newTap 在 d 外面套一层频谱挂点。
@@ -158,13 +156,16 @@ func (t *tap) push(samples []float32, frames int64, channels int) {
 	defer t.mu.Unlock()
 	t.cur = from + frames
 
-	// 目标缓冲优先用刚被裁掉的那一段的：稳态下一段都不分配。
-	dst := t.spare
-	t.spare = nil
-	if cap(dst) < spectrum.Bins {
-		dst = make([]float32, spectrum.Bins)
-	}
-	dst = dst[:spectrum.Bins]
+	// ⚠️ **结果缓冲一段一份，不回收。**
+	//
+	// 回收（把被裁掉那一段的 mag 切片给下一段接着写）在性能上是划算的，但它是
+	// **假的**：界面上 `At(frame)` 拿到的是这个切片，解锁之后才去画，而下一段
+	// 可能正在写它。那是一条真的数据竞争，而且极难复现——两件事隔着一帧的
+	// 几微秒，一秒二十三次里碰上一次就红一次。
+	//
+	// 一段一份的代价是每秒 23 块 1KB（23 KB/s），而真正贵的那些中间量
+	// （FFT 的 re/im/mono、窗）本来就复用着，解码这一侧稳态仍然是零分配。
+	dst := make([]float32, spectrum.Bins)
 	copy(dst, mag)
 
 	t.blocks = append(t.blocks, spectrumBlock{from: from, to: from + frames, mag: dst})
@@ -172,10 +173,9 @@ func (t *tap) push(samples []float32, frames int64, channels int) {
 	for len(t.blocks) > 1 && t.frames > t.maxFrames() {
 		dropped := t.blocks[0]
 		copy(t.blocks, t.blocks[1:])
-		t.blocks[len(t.blocks)-1] = spectrumBlock{}
+		t.blocks[len(t.blocks)-1] = spectrumBlock{} // 放掉引用，让那一块能被回收
 		t.blocks = t.blocks[:len(t.blocks)-1]
 		t.frames -= dropped.to - dropped.from
-		t.spare = dropped.mag
 	}
 }
 
@@ -186,6 +186,9 @@ func (t *tap) push(samples []float32, frames int64, channels int) {
 //
 // 找不到（比留着的最老一段还早、或者刚 seek 完还没解出来）时返回 nil——界面那一帧
 // 画成一条基线，而不是拿一个不知道什么时候的旧频谱顶着。
+//
+// 返回的那一块**之后一个字节都不会再被写**（每段一份，不回收，见 push），
+// 所以调用方拿着它离开锁去画是安全的。
 func (t *tap) At(frame int64) []float32 {
 	t.mu.Lock()
 	defer t.mu.Unlock()

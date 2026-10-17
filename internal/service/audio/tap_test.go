@@ -23,6 +23,7 @@ type fakeDec struct {
 	total      int64
 	pos        int64
 	value      float32
+	reads      int
 	seekedTo   int64
 	seekedOnce int
 }
@@ -47,6 +48,13 @@ func (d *fakeDec) Read(buf []float32) (int, error) {
 	if d.pos >= d.total {
 		return 0, io.EOF
 	}
+	// ⚠️ **每读一段换一个幅度**，于是每一段的谱都不一样。
+	//
+	// 不这么做的话「这一段的内容被后来那一段覆盖了」是**量不到的**：常数信号的
+	// 每一段算出来一模一样，重写了也看不出来（而「复用同一块缓冲」这个坑正是
+	// 内容被改掉）。
+	d.reads++
+	d.value = 0.01 + 0.005*float32(d.reads)
 	n := len(buf)
 	if left := int((d.total - d.pos) * int64(d.ch)); n > left {
 		n = left
@@ -172,6 +180,40 @@ func TestSeekClearsTheHistory(t *testing.T) {
 	}
 	if got := tp.At(0); got != nil {
 		t.Error("seek 之后老位置又能取到东西了")
+	}
+}
+
+// TestADroppedBlocksSpectrumIsNeverOverwritten 断「结果缓冲一段一份，不回收」。
+//
+// 回收在性能上划算，但它是**假的**：界面上 `At(frame)` 拿到的是那个切片，解锁
+// 之后才去画，而下一段可能正在写它。那是一条真的数据竞争，而且极难复现——
+// 两件事隔着一帧的几微秒，一秒二十三次里碰上一次就红一次。
+//
+// 这一条量的就是那件事本身：拿一份引用（界面那一帧正是这么拿着它的），让环
+// 转好几圈把它**裁掉**，再看这份引用里的内容有没有被动过。
+func TestADroppedBlocksSpectrumIsNeverOverwritten(t *testing.T) {
+	d := newFakeDec(48000, 2, 48000*600)
+	tp := newTap(d)
+
+	// 四秒的历史在 48kHz 下是 192000 帧，2048 一段 → 最多 93 段。先喂 90 段
+	// （184320 帧，还没到上限，所以第一段还在），再转五圈把它挤出去。
+	for range 90 {
+		feed(t, tp, 2048)
+	}
+	held := tp.At(0)
+	if held == nil {
+		t.Fatal("填满了环却取不到第一段")
+	}
+	before := append([]float32(nil), held...)
+
+	for range 5 * 94 {
+		feed(t, tp, 2048)
+	}
+
+	for i, v := range held {
+		if v != before[i] {
+			t.Fatalf("第 %d 格被改了：这一段早就被裁掉了，内容却被后面那一段覆盖掉", i)
+		}
 	}
 }
 
