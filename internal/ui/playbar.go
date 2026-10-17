@@ -174,7 +174,11 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 				s.app.Toggle()
 			}
 		} else {
-			if ui.PrimaryButton(c, "播放").Width(76).Disabled(!st.HasTrack).Clicked() {
+			// ⚠️ `st.Opening` 期间这个按钮按下去什么都不会发生——播放器
+			// 还不存在（正在等 CDN 的头几个字节）。按钮亮着而按不动，
+			// 比灰着更让人以为程序卡了。
+			if ui.PrimaryButton(c, "播放").Width(76).
+				Disabled(!st.HasTrack || st.Opening).Clicked() {
 				s.app.Toggle()
 			}
 		}

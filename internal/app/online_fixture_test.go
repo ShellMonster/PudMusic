@@ -77,19 +77,17 @@ type streamFixture struct {
 	// ⚠️ 续传头必须照给：不发 `Content-Range` 的话客户端会看到 200，
 	// 然后按「服务器不认续传」把缓存清空从头下——那就不是「从断点接上」了。
 	dark atomic.Bool
-	// darkGate 是 dark 期间让请求卡住的地方；goUp 时被关掉，卡着的那些
-	// 请求一起死掉（真网络恢复时那些连接也是断的）。
-	darkGate chan struct{}
 }
 
 // setDark 开关「CDN 掉线」。
+//
+// ⚠️ 这里**不需要**放行闸：dark 期间 `serveMedia` 是直接掐连接的（请求收下、
+// 续传的头给上、正文一个字节不发就 `ErrAbortHandler`），没有请求会挂着。
+// 早先这里有一个没人读的 `darkGate`，注释却说它「让请求卡住」——注释与
+// 代码不符，比没有更糟。
 func (f *streamFixture) setDark(dark bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if !dark {
-		close(f.darkGate)
-		f.darkGate = make(chan struct{})
-	}
 	f.dark.Store(dark)
 }
 
@@ -213,7 +211,6 @@ func newStreamFixture(t *testing.T) *streamFixture {
 		overrides: map[string]http.HandlerFunc{},
 		forbidden: map[string]bool{},
 		mediaGate: make(chan struct{}),
-		darkGate:  make(chan struct{}),
 	}
 	f.Server = httptest.NewServer(f)
 	t.Cleanup(func() {
@@ -222,7 +219,6 @@ func newStreamFixture(t *testing.T) *streamFixture {
 		default:
 			close(f.mediaGate)
 		}
-		// 放行还卡在 dark 上的请求，否则 `Close` 会等它们返回而死等。
 		f.setDark(false)
 		f.Close()
 	})
@@ -278,11 +274,16 @@ func readFlac(t *testing.T) []byte {
 }
 
 // playing 盯到 App 真的在放队列里那一条。
+//
+// ⚠️ **必须排除 `Opening`**：用户点一首之后、播放器建好之前，歌名和 `HasTrack`
+// 就已经是对的（`pendingTitle`），而那时一个采样都还没出来。没排除的话
+// `playing` 会在「刚点下去」那一刻就返回，后面所有「它在放」的断言就都跑在
+// 一个还没打开的播放器上了。
 func playing(t *testing.T, a *app.App, title string) {
 	t.Helper()
 	waitFor(t, 30*time.Second, "「"+title+"」开始出声", func() bool {
 		st := a.Snapshot()
-		return st.HasTrack && st.Title == title
+		return st.HasTrack && st.Title == title && !st.Opening
 	})
 }
 

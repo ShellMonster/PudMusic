@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -610,5 +611,126 @@ func TestProgressShortensTheNextWait(t *testing.T) {
 	if after != 0 {
 		t.Errorf("有进展之后退避档位还是 %d，want 0"+
 			"（网络回来一次就该重新从短的开始等）", after)
+	}
+}
+
+// TestAServerThatIsBusyIsWaitedFor 盯「等一等可能会变」的那一类。
+//
+// ⚠️ 5xx 曾经和 403 一样被包成「服务器给了定论」，于是 **503 当场判死**：
+// CDN 负载高时回的就是 503，几秒之后自己就好了，而用户拿到的是一句
+// 「打不开：…HTTP 503」。而等一分钟就能放出来的东西不该被判死。
+//
+// 429 反过来：立刻重试只会延长限流，当场认输反而对。所以这一条同时钉住
+// **两边**——只测 503 的话，把 429 也改成等就是一次悄悄的回归。
+func TestAServerThatIsBusyIsWaitedFor(t *testing.T) {
+	for _, c := range []struct {
+		code int
+		wait bool
+		what string
+	}{
+		{http.StatusServiceUnavailable, true, "503 是 CDN 负载高，等一等自己会好"},
+		{http.StatusInternalServerError, true, "500 同理"},
+		{http.StatusRequestTimeout, true, "408 是「你太慢了」，重发可能就过了"},
+		{http.StatusForbidden, false, "403 是地址过期，等一万次还是过期"},
+		{http.StatusNotFound, false, "404 不会自己长回来"},
+		{http.StatusTooManyRequests, false, "429 立刻重试只会延长限流"},
+	} {
+		t.Run(strconv.Itoa(c.code), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(c.code)
+			}))
+			t.Cleanup(srv.Close)
+
+			s, err := NewStreamSource(StreamSourceOptions{
+				URLs:    []string{srv.URL + "/a.flac"},
+				Client:  srv.Client(),
+				TempDir: t.TempDir(),
+				// 一旦进了缓冲态就等于卡一年，所以「等」与「不等」在这里
+				// 是二值可测的：等 → Err 永远是 nil，不等 → 立刻报错。
+				MaxWait:         time.Hour,
+				RetryBackoff:    time.Hour,
+				MaxRetryBackoff: time.Hour,
+				Refetch: func(context.Context, int64) *StreamReply {
+					return &StreamReply{URLs: []string{srv.URL + "/b.flac"}}
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { s.Close() })
+
+			done := make(chan error, 1)
+			go func() {
+				_, err := io.ReadAll(s)
+				done <- err
+			}()
+
+			if c.wait {
+				waitWaiting(t, s, 10*time.Second)
+				return
+			}
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				t.Fatalf("HTTP %d 等了十秒都没判死——%s", c.code, c.what)
+			}
+		})
+	}
+}
+
+// TestTheWaitBudgetCountsWhatTheUserActuallyWaits 盯预算记的是**墙上的钟**。
+//
+// 曾经只把「退避睡过的那几秒」算进预算，而一次「拉不动」自己花掉的时间
+// 不算：黑洞式网络下每次尝试要等传输层超时，于是用户实际等到的远超过配置。
+// 实测每次尝试 5 秒、预算 1 分钟 → 用户等了两分零六秒。
+//
+// 这里把传输层也做成慢的：每次请求固定睡 250ms，预算 500ms。照旧算法会
+// 睡着 4 次（20+40+80+160+320，全睡完才超预算）≈ 620ms 的睡眠加十几次
+// 尝试；照新算法在第二次尝试之后就超了。
+func TestTheWaitBudgetCountsWhatTheUserActuallyWaits(t *testing.T) {
+	var attempts atomic.Int32
+	s, err := NewStreamSource(StreamSourceOptions{
+		URLs:   []string{"http://127.0.0.1:1/a.flac"},
+		Client: http.DefaultClient,
+		Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			attempts.Add(1)
+			time.Sleep(250 * time.Millisecond) // 传输层很慢的那种「拉不动」
+			return nil, errors.New("dial tcp: network is unreachable")
+		}),
+		TempDir:         t.TempDir(),
+		MaxWait:         500 * time.Millisecond,
+		RetryBackoff:    20 * time.Millisecond,
+		MaxRetryBackoff: 320 * time.Millisecond,
+		Refetch:         func(context.Context, int64) *StreamReply { return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := io.ReadAll(s)
+		done <- err
+	}()
+
+	start := time.Now()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrStreamDead) {
+			t.Errorf("err = %v，want 包着 ErrStreamDead", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("预算用完了还在等")
+	}
+	took := time.Since(start)
+
+	// 预算是 500ms。传输层每次自己就吃 250ms——只算睡眠的话这里能拖到好几秒。
+	if took > 1500*time.Millisecond {
+		t.Errorf("预算 500ms，用户实际等了 %v——记账漏了「这一次拉不动」"+
+			"自己花掉的时间", took.Round(time.Millisecond))
+	}
+	if n := attempts.Load(); n > 6 {
+		t.Errorf("打了 %d 次才放弃，记账还是只算睡眠", n)
 	}
 }

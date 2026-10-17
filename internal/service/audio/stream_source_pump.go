@@ -549,8 +549,23 @@ func (s *StreamSource) checkTotal(total int64) error {
 }
 
 // statusErr 把一个错误的状态码说成人话。
+//
+// ⚠️ **5xx 和 408 不是「服务器说了不行」**：CDN 负载高时回的就是 503，
+// 几秒之后自己就好了。把它当成 403 那样的定论，用户拿到的是一句
+// 「打不开：…HTTP 503」，而等一分钟就能放出来的东西不该被判死。
+//
+// 429 不在这个例外里：立刻重试只会**延长**限流，当场认输反而对。
 func statusErr(resp *http.Response) error {
-	return &serverErr{err: httpStatusText(resp.StatusCode)}
+	err := httpStatusText(resp.StatusCode)
+	if transientStatus(resp.StatusCode) {
+		return err
+	}
+	return &serverErr{err: err}
+}
+
+// transientStatus 报「这个答复等一等可能会变」。
+func transientStatus(code int) bool {
+	return code == http.StatusRequestTimeout || code >= 500
 }
 
 func httpStatusText(code int) error {
@@ -567,13 +582,14 @@ func httpStatusText(code int) error {
 	return fmt.Errorf("audio: 在线流返回 HTTP %d", code)
 }
 
-// serverErr 是「服务器明明白白给了答复」的那一类错误。
+// serverErr 是「服务器明明白白给了定论」的那一类错误。
 //
-// 把它和「连不上」分开，是因为它决定**该等还是该放弃**：
+// 把它和「等一等可能会变」分开，是因为它决定**该等还是该放弃**：
 //
-//	serverErr  403 / 404 / 429…… 服务器说了「不行」。再等一万次结果也一样，
-//	           能变的只有**地址本身**，而换地址已经试过 maxRefr 次了。
-//	别的       连不上、读断了、超时——这些是网络的事，等一等真有可能好。
+//	serverErr  403 / 404 / 429 / 4xx…… 服务器说了「不行」，而且这话
+//	           不会因为等一会儿而变成「行」。能变的只有**地址本身**，
+//	           而换地址已经试过 maxRefr 次了。
+//	别的       连不上、读断了、超时、5xx——这些等一等真有可能好。
 //
 // 所以一条 403 的流会**立刻**如实报错，而不是让用户对着「缓冲中……」
 // 看一分钟。那一分钟里程序什么都改变不了。
@@ -587,10 +603,11 @@ func (e *serverErr) Unwrap() error { return e.err }
 // 进缓冲态的前提是**这次的失败不是一句明确的否定**。两类不是：
 //
 //	ErrStreamChanged  B 站换了另一条流，字节偏移接不上
-//	serverErr         服务器给了答复（403 / 404 / 429…）
+//	serverErr         服务器给了定论（403 / 404 / 429…）
 //
 // 这两种里能做别的都已经做过了（换流、换位置重开），做不了的也轮不到
-// 「再等一会儿」来解决。
+// 「再等一会儿」来解决。**5xx 不在其列**——`statusErr` 不把它包成
+// `serverErr`，理由见那里。
 func recoverable(cause error) bool {
 	if cause == nil {
 		return false

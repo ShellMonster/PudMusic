@@ -33,6 +33,12 @@
 // 而不是在十次断网之后终于拿到一句真话。给这一首歌的缓冲总预算，
 // 断断续续花掉也就花掉了。
 //
+// ⚠️ **记的是用户真的等着的墙���时长**，不是「退避睡过的那几秒之和」。
+// 只记睡眠的话，一次「拉不动」自己花掉的时间不算数：黑洞式网络下每次
+// 尝试要等传输层超时（卡死看门狗 20 秒、换流请求 10 秒），于是用户实际
+// 等到的是 `MaxWait` 的好几倍——实测 5 秒/次的情况下等出了 2 分 6 秒，
+// 而配置写着 1 分钟。**那不是配置说谎，是记账漏了。**
+//
 // 反过来，**退避档位**是会被进展重置的：网络回来了一次就该重新从
 // 500ms 起步，不然一次短暂抖动之后要等 8 秒才敢再试——那不是保守，
 // 那是迟钝。
@@ -102,8 +108,18 @@ func (s *StreamSource) hold(cause error) (bool, time.Duration) {
 		return false, 0
 	}
 	s.waitErr, s.waiting = cause, true
+	now := s.now()
+	// ⚠️ 记**墙上的钟**，不是「这一轮要睡多久」。
+	//
+	// 从上一次记账到现在这一整段——退避睡的、失败的请求自己花掉的、
+	// 换流往返的——全是用户真的在等。只加睡眠的话，黑洞式网络下
+	// 用户等到的会是 `MaxWait` 的好几倍（实测 5 秒/次 → 2 分 6 秒），
+	// 而配置上写着「最多等一分钟」。
+	if !s.waitMark.IsZero() {
+		s.waited += now.Sub(s.waitMark)
+	}
+	s.waitMark = now
 	d := s.backoffLocked()
-	s.waited += d
 	budgetLeft := s.waited <= s.maxWait
 	s.mu.Unlock()
 
@@ -162,4 +178,7 @@ func (s *StreamSource) noteProgressLocked() {
 	s.waiting = false
 	s.waitErr = nil
 	s.waitStep = 0
+	// ⚠️ **`waited` 不清零**（见文件头那段），但**时钟要重置**：不然下一次
+	// 开始等的时候，会把「上一次等完之后到现在的这一段正常播放」也算进预算里。
+	s.waitMark = time.Time{}
 }

@@ -116,3 +116,33 @@ func TestTheBufferingLineSitsUnderTheTitle(t *testing.T) {
 		})
 	}
 }
+
+// TestOpeningShowsTheSameLineAsBuffering 盯「正在打开」也要有话说。
+//
+// 用户点了一首在线流、取流接口回来了、CDN 的字节下不来——这整段里歌没响。
+// 界面上必须有一句话，而且和「播放中断网」是**同一句**：用户看到的现象
+// 一样，说法就该一样，否则他要学两套。
+//
+// ⚠️ 这一段曾经**三样全空**：没有歌名（播放器还没建好）、没有错误（没失败）、
+// 没有缓冲态（`a.online` 还没装上，读不到）。而本票把源的下限从
+// 「换几次流就报错」放宽成「最多等一分钟」，顺手把那段空窗拉成了一分钟。
+func TestOpeningShowsTheSameLineAsBuffering(t *testing.T) {
+	tt := qualityBarTester(t, app.State{
+		HasTrack:  true,
+		Title:     "下不来的那一首",
+		Opening:   true,
+		Buffering: true,
+	})
+	if !tt.HasText(bufferingText) {
+		t.Errorf("正在打开却没有那句话，画面上的字：%q", tt.Texts())
+	}
+	if !tt.HasText("下不来的那一首") {
+		t.Errorf("正在打开时歌名不见了：%q", tt.Texts())
+	}
+	// 歌还没响，所以是「播放」而不是「暂停」——这一刻按下去是空的，
+	// 按钮被 Disabled(Opening) 按灰了（无头 tester 读不到灰不灰，
+	// 但它必须还在画着，不能因为灰了就整个消失）。
+	if !tt.HasText("播放") {
+		t.Errorf("正在打开时播放按钮不见了：%q", tt.Texts())
+	}
+}

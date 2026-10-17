@@ -218,7 +218,8 @@ type StreamSource struct {
 	// 「正在试着拉回来，还没放弃」，跟 `err`（已经放弃了）不是一件事。
 	waiting  bool          // 现在是不是在等网络
 	waitStep int           // 退避档位，字节进来就归零
-	waited   time.Duration // 累计等过的时长，这一首歌的缓冲预算
+	waited   time.Duration // 累计等过的**墙���时长**，这一首歌的缓冲预算
+	waitMark time.Time     // 上一次记账的时刻，用来算「这一段等多久了」
 	waitErr  error         // 最近一次拉不动的真实原因（诊断用）
 	backoff  time.Duration // 第一次缓冲等多久
 	maxBack  time.Duration // 单次缓冲等的上限

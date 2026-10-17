@@ -156,6 +156,8 @@ func (a *App) rememberAudioQuality(q bili.AudioQuality) {
 // 换流之后的处理和 `refreshOnlineNow` 一样：跳回原来的**播放位置**，那一步
 // 是「换流后从原进度继续」的全部意义。
 func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Duration, want bool, gen int) {
+	a.beginOpening(gen, tr.item.Title) // 换档要重建播放链路，那一段也在等字节
+
 	s := a.streamingSnapshot()
 	if s == nil {
 		a.failOnline(gen, errStreamingMissing)
@@ -163,6 +165,9 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 	}
 
 	go func() {
+		// 下面每一条 return 都要把「正在打开」收掉：漏一条的话歌名和
+		// 「缓冲中……」会一直挂在那儿，而这一首其实压根没换。
+		defer a.endOpening(gen, true)
 		ref, err := a.resolve(context.Background(), s, tr.item, q)
 		if err != nil {
 			a.failQualitySwitch(gen, q, err)
@@ -341,7 +346,9 @@ func (a *App) playOnline(it Item) error {
 	gen := a.onlineGen
 	a.errText = ""
 	a.mu.Unlock()
-	a.clearBuffering()
+	// ⚠️ 这一刻就开始亮缓冲态：取流要一次带 WBI 签名的往返，实测 200~400ms，
+	// 那段路上界面同样什么都拿不到（`a.online` 还没装上）。
+	a.beginOpening(gen, it.Title)
 
 	go a.runOnline(it, gen)
 	return nil
@@ -382,7 +389,8 @@ func (a *App) runOnline(it Item, gen int) {
 	a.online = &onlineTrack{item: it, ref: ref, source: src, quality: ref.Label, tier: ref.Quality}
 	a.reportedErr = nil
 	a.errText = ""
-	a.buffering = false // 新源还没开始下，不可能已经在缓冲
+	// 新源刚建好，一个字节都还没下，不可能已经在缓冲。
+	a.opening, a.pendingTitle, a.buffering = false, "", false
 	wake := a.wake
 	a.mu.Unlock()
 
@@ -625,10 +633,14 @@ func (a *App) checkPlayback() {
 //
 // 只在**变了**的时候叫醒界面：每 50 ms 一次的无条件 Invalidate 会在
 // 断网的那一分钟里白白刷掉一千多帧。
+//
+// ⚠️ `Opening` 算在里面：「正在打开这一首」在用户看来和「正在缓冲」是同一个
+// 现象——歌没响。它俩的差别在 `State.Opening` 上单独说，不在这里分。
 func (a *App) syncBuffering(tr *onlineTrack) {
-	want := tr != nil && tr.source != nil && tr.source.Waiting()
+	waiting := tr != nil && tr.source != nil && tr.source.Waiting()
 
 	a.mu.Lock()
+	want := a.opening || waiting
 	if a.buffering == want {
 		a.mu.Unlock()
 		return
@@ -642,19 +654,59 @@ func (a *App) syncBuffering(tr *onlineTrack) {
 	}
 }
 
-// clearBuffering 在换歌、退出这些地方把缓冲态按下去。
+// beginOpening 记「正在打开 `title` 这一首」。
 //
-// ⚠️ 不能只靠 `syncBuffering`：换歌到新歌真的建起来之前，`a.online` 指的还是
-// 上一首，而上一首的字节源可能正亮着缓冲态——那会让新歌一露面就写着
-// 「缓冲中……」，而它其实连流都还没取。
-func (a *App) clearBuffering() {
+// 代次对不上就不动——那已经是下一首歌的事了，把它的「正在打开」亮到新歌
+// 头上，用户点的是一首、看到「缓冲中」的是另一首。
+func (a *App) beginOpening(gen int, title string) {
 	a.mu.Lock()
-	if !a.buffering {
+	if a.onlineGen != gen || a.closed {
 		a.mu.Unlock()
 		return
 	}
-	a.buffering = false
+	changed := !a.opening || a.pendingTitle != title
+	a.opening, a.pendingTitle = true, title
+	a.buffering = true // 不用等下一次 tick：这一段可能一秒都不结束
+	wake := a.wake
 	a.mu.Unlock()
+
+	if changed && wake != nil {
+		wake()
+	}
+}
+
+// endOpening 把「正在打开」按下去。代次对不上就不动（同 beginOpening）。
+//
+// `keepTitle` 是给失败那条路用的：打不开的时候歌名得留着，好让界面上的
+// 错误有个主语（「打不开：在缓冲的那一首」而不是「打不开：」）。
+func (a *App) endOpening(gen int, keepTitle bool) {
+	a.mu.Lock()
+	if a.onlineGen != gen || a.closed {
+		a.mu.Unlock()
+		return
+	}
+	changed := a.opening || a.buffering
+	a.opening = false
+	// 缓冲态**同步**按下去，不等下一次 tick。
+	//
+	// 这条调用几乎都紧跟着 `setErr`：等 tick 的话，界面上会出现几十毫秒
+	// 的「一边报错了、一边还写着正在缓冲」——那正是本票要消灭的那类自相矛盾。
+	// 反方向（刚装上新源、还说不准）留给 tick 去纠正，闪一下无害。
+	a.buffering = false
+	// 待放的歌名**只在它跟手上那首不一样时才有意义**（「换流重开」和
+	// 「换音质」重建的是同一首，那份 pending 是多余的）。这条也让
+	// `restreamOnline` 那条 defer 不必知道自己走的是成功还是失败。
+	if !keepTitle || a.pendingTitle == a.title {
+		a.pendingTitle = ""
+	}
+	// 缓冲态交给下一次 tick 判：这一瞬间字节源可能正在等网络，
+	// 提前按成 false 会闪一下。
+	wake := a.wake
+	a.mu.Unlock()
+
+	if changed && wake != nil {
+		wake()
+	}
 }
 
 // failOnline 报一次在线播放的失败。
@@ -668,6 +720,7 @@ func (a *App) failOnline(gen int, err error) {
 	if stale {
 		return
 	}
+	a.endOpening(gen, true) // 歌名留着：界面上那句错误得有个主语
 	a.setErr(bili.Friendly(err))
 }
 
@@ -689,7 +742,12 @@ func (a *App) refreshOnlineNow() {
 	tr.reopening = true
 	gen := a.onlineGen
 	pos, want := a.position, a.wantPlay
+	title := a.title
 	a.mu.Unlock()
+
+	// 重开同样要等 CDN 的头几个字节（`buildFromRef` 那段），那一段里歌是
+	// 停着的——不亮出来的话用户看到的是「歌忽然不动了，也不说话」。
+	a.beginOpening(gen, title)
 
 	s := a.streamingSnapshot()
 	if s == nil {
@@ -719,7 +777,8 @@ func (a *App) refreshOnlineNow() {
 			tier: ref.Quality, reopening: true}
 		a.reportedErr = nil
 		a.errText = ""
-		a.buffering = false // 同上：刚建好的源还没开始下
+		// 同上：刚建好的源还没开始下。
+		a.opening, a.pendingTitle, a.buffering = false, "", false
 		wake := a.wake
 		a.mu.Unlock()
 

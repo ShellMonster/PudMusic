@@ -85,12 +85,22 @@ type State struct {
 	//	Err == "" && Buffering  正在等网络（用户该知道歌为什么停着）
 	//	Err != ""               放弃了，而且有一条能照着做的话
 	//
+	// 它**包含** `Opening`：还在取流、还在等头 16 个字节的那一段也算缓冲——
+	// 用户看到的是同一个现象（歌没响），就该是同一句话。
+	//
 	// 本地文件永远是 false。
 	//
 	// ⚠️ 它和上面那两个 Quality 是**不同的事**：那两个是音质（用户要什么、
 	// B 站给了什么），这一个���**连通性**（网络还在不在）。合成一个字段就是
 	// 「三种意思共用一个布尔」，到第三种就该拆不开了。
 	Buffering bool
+
+	// Opening 是「正在打开这一首」：取流中，或者在等 CDN 的头几个字节。
+	//
+	// ⚠️ 它和 `Buffering` 分开是因为**后果不一样**：`Buffering` 时歌是响过的，
+	// 暂停键该还能按；`Opening` 时播放器压根还不存在，按下去什么都不会发生。
+	// 合成一个字段的话，播放键要么在缓冲时误报可用，要么在打开时误报不可用。
+	Opening bool
 }
 
 // State 的三个「现在怎么样」字段互相补��，不重叠：
@@ -144,6 +154,22 @@ type App struct {
 	// 它和 `errText` 是两回事：等网络**不是出错**，播放条上的话也不该是
 	// 红字（见 State.Buffering）。
 	buffering bool
+	// opening 是 State.Opening 的存放处：「正在打开这一首」。
+	//
+	// 为什么它必须单独存在（而不能只靠 `buffering`）：`audio.OpenStream`
+	// 会去 CDN 探容器——`mygoaudio.NewDecoder` 的 `io.ReadFull` 等头 16 个
+	// 字节，字节下不来就一直阻塞。而 `a.online` 要等建完才装上，
+	// `syncBuffering` 读的就是它。所以不单独记这一段的话，「点了一首在线流
+	// 而一个字节下不来」在界面上是**三样全空**：没有歌名（还没装上）、
+	// 没有错误（没失败）、没有缓冲态（读不到）。本票把源的下限从
+	// 「换几次流就报错」放宽成「最多等一分钟」，顺手把这一段从几十毫秒的
+	// 空窗拉成了一分钟。
+	opening bool
+	// pendingTitle 是「用户刚点了、还没放出来」的那首歌名。
+	//
+	// 空串 = 没有待放的。**不装上播放器的时候也要有歌名**：界面上一个
+	// 「还没有打开文件」跟着「缓冲中……」，那两句是互相打架的。
+	pendingTitle string
 	// reportedErr 是已经往界面上报过的那一条。解码器的 Err 记的是**第一条**
 	// 错误、不自己清零，所以不比对的话每 50 ms 会重复报一次。
 	reportedErr error
@@ -214,9 +240,18 @@ func (a *App) Snapshot() State {
 	if a.streaming != nil {
 		pref = BiliToPref(a.streaming.Quality)
 	}
+	// ⚠️ **待放的那首也算「有歌」**。
+	//
+	// 用户点了一首、还在等 CDN 的头几个字节，这期间界面上必须有歌名：
+	// 一个「还没有打开文件」跟着「缓冲中……」是互相打架的两句话，而切歌时
+	// 留着上一首的歌名更糟——用户会以为**上一首**在缓冲。
+	title, has := a.title, a.player != nil
+	if a.pendingTitle != "" {
+		title, has = a.pendingTitle, true
+	}
 	return State{
-		HasTrack:    a.player != nil,
-		Title:       a.title,
+		HasTrack:    has,
+		Title:       title,
 		Path:        a.path,
 		CoverURL:    a.cover,
 		Playing:     a.playing,
@@ -228,6 +263,7 @@ func (a *App) Snapshot() State {
 		Quality:     a.quality,
 		QualityPref: pref,
 		Buffering:   a.buffering,
+		Opening:     a.opening,
 	}
 }
 
@@ -271,7 +307,9 @@ func (a *App) Open(path string) error {
 	a.online = nil
 	a.quality = ""
 	a.reportedErr = nil
-	a.buffering = false
+	// 本地文件没有「正在打开」这一说，但上一首在线流的待放歌名得收掉——
+	// 留着的话界面上的歌名会一直是被顶掉的那一首。
+	a.opening, a.pendingTitle, a.buffering = false, "", false
 	a.title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	a.path = path
 	// 手上只有一个本地路径，没有封面地址（见 State.CoverURL）。队列里的项自带
@@ -420,7 +458,7 @@ func (a *App) Close() {
 	p := a.player
 	a.player = nil
 	a.playing = false
-	a.buffering = false
+	a.opening, a.pendingTitle, a.buffering = false, "", false
 	dl, dlPath := a.downloads, a.downloadQueueFile
 	a.mu.Unlock()
 

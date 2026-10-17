@@ -256,3 +256,101 @@ func drain[T any](ch chan T) []T {
 		}
 	}
 }
+
+// TestAStreamThatNeverStartsIsNotASilentPlaybar 盯**取流之后、播放器之前**那一段。
+//
+// # 这个洞是怎么来的
+//
+// `audio.OpenStream` 会去 CDN 探容器：`mygoaudio.NewDecoder` 的 `io.ReadFull`
+// 等头 16 个字节，字节下不来就一直阻塞。而 `a.online` 要等建完才装上，
+// `syncBuffering` 读的就是它——于是那一整段里界面上是**三样全空**：
+// 没有歌名（还没装上）、没有错误（没失败）、没有缓冲态（读不到）。
+//
+// 本票把源的下限从「换几次流就报错」放宽成「最多等一分钟」，顺手把这段
+// 从几十毫秒的空窗拉成了一分钟。评审实测：生产默认下「三者全空」累计 55.5s，
+// 缓冲态一次都没亮过。
+func TestAStreamThatNeverStartsIsNotASilentPlaybar(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = readFlac(t)
+	// 取流接口照常返回，CDN **头给正文掐断**——`OpenStream` 就卡在这儿。
+	f.setDark(true)
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
+
+	a := app.New()
+	t.Cleanup(a.Close)
+	cli := bili.NewClient(bili.Options{})
+	cli.TestOnlyPointHostsAtFixture(f.URL)
+	// 缓冲预算给得短：一分钟是产品决定，测试不该为它等一分钟。
+	a.MountStreaming(app.Streaming{
+		Client: cli, Media: f.Client(), TempDir: t.TempDir(), MaxWait: 4 * time.Second,
+	})
+
+	if err := a.Enqueue(onlineItem("BV1", "1", "下不来的那一首")); err != nil {
+		t.Fatal(err)
+	}
+
+	// ⚠️ 第一段：点了之后**很快**就该有话说。
+	//
+	// 断的是「两秒之内」，不是「有没有」：只有信号通路没有回音的话，
+	// 这个 bug 会在 55 秒之后自己好起来，而那正是要修的东西。
+	waitFor(t, 2*time.Second, "播放条上有话说", func() bool {
+		st := a.Snapshot()
+		return st.Title == "下不来的那一首" && st.Buffering && st.Err == ""
+	})
+
+	// `Opening` 单独看一眼：它是「还在建播放链路」那个**独立**信号——
+	// 界面靠它把播放键按灰（此刻播放器还不存在，按下去什么都不会发生）。
+	if !a.Snapshot().Opening {
+		t.Error("一个采样都还没出来，Opening 却是 false——" +
+			"播放键会亮成「按下去没反应」的样子")
+	}
+
+	// 第二段：缓冲不是失败——预算没用完之前不能冒错误。
+	time.Sleep(2 * time.Second)
+	if st := a.Snapshot(); st.Err != "" {
+		t.Fatalf("缓冲着就有错误了：%q", st.Err)
+	} else if !st.Buffering {
+		t.Fatalf("缓冲态没了（歌名 %q，Opening=%v）", st.Title, st.Opening)
+	}
+
+	// 第三段：预算用完，给一句人话，而且缓冲态要跟着灭。
+	waitFor(t, 20*time.Second, "缓冲预算用完之后给一句人话", func() bool {
+		return a.Snapshot().Err != ""
+	})
+	st := a.Snapshot()
+	if st.Buffering {
+		t.Error("已经报错了缓冲态还亮着——界面上会一边「正在恢复」一边「打不开」")
+	}
+	if st.Title != "下不来的那一首" {
+		t.Errorf("报错之后歌名丢了：%q——那句话会没有主语", st.Title)
+	}
+}
+
+// TestTheTrackYouClickedIsTheOneThatBuffers 盯换歌时**不留上一首的歌名**。
+//
+// 用户在放 A，点了一首在线的 B，而 B 的字节下不来。界面上要是还写着 A
+// 配一句「缓冲中……」，用户会以为**A** 在缓冲——而他明明刚点了 B。
+func TestTheTrackYouClickedIsTheOneThatBuffers(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = readFlac(t)
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
+
+	a := newBufferApp(t, f, t.TempDir())
+	if err := a.Enqueue(onlineItem("BV1", "1", "先在放的一首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "先在放的一首")
+
+	// 现在让 CDN 闭嘴，再点一首别的。
+	f.setDark(true)
+	if err := a.PlayFrom(onlineItem("BV1", "2", "点的那一首")); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFor(t, 10*time.Second, "歌名换成刚点的那一首", func() bool {
+		return a.Snapshot().Title == "点的那一首"
+	})
+	if st := a.Snapshot(); !st.Buffering {
+		t.Errorf("歌名换过来了却没有缓冲态：%+v", st)
+	}
+}
