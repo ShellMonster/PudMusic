@@ -43,6 +43,19 @@ type folderEdit struct {
 	// 但还没上传」不是一回事，后者是 `crop.open`。
 	cover string
 
+	// touched 是「用户碰过名称那一格」。
+	//
+	// ⚠️ **「名称为必填项」只在 touched 之后才画**，照抄 Biu 的
+	// `isInvalid={(touchedFields.title || isSubmitted) && !!fieldState.error}`
+	// （`favorites-edit-modal/index.tsx:215`）。Biu 的提交按钮在表单不合法时是
+	// 禁用的，所以 `isSubmitted` 那一支实际上到不了——真正起作用的是
+	// `touchedFields.title`。
+	//
+	// 为什么非做不可：一个刚打开、用户一个字都还没敲的表单上摆一句红字「名称为
+	// 必填项」，读起来是「**已经**报错了」，而他还没做任何事。第一眼看到的是一句
+	// 指责而不是一句提示，那和「提交被拒了」在用户心里是一回事。
+	touched bool
+
 	// loading 是「正在拉这个收藏夹原来的样子」（只有修改模式会有）。
 	loading bool
 	// submitting 是「这一趟还在飞」。
@@ -100,6 +113,9 @@ func (s *Shell) viewFolderEdit(c *ui.Context) {
 		name := ui.TextInput(c, &e.title).Placeholder("请输入收藏夹名称").
 			Disabled(busy).Width(coverPreviewW + 60)
 		name.Label("名称")
+		if name.Changed() {
+			e.touched = true
+		}
 
 		intro := ui.TextArea(c, &e.intro).Placeholder("可选，简单介绍此收藏夹").
 			Disabled(busy).Width(coverPreviewW + 60).Height(84)
@@ -109,7 +125,8 @@ func (s *Shell) viewFolderEdit(c *ui.Context) {
 		pub := ui.Toggle(c, &e.public, publicLabel(e.public)).Disabled(busy)
 		pub.Label("公开还是私密")
 
-		if !e.valid() && !busy {
+		// ⚠️ **碰过之后才画**（理由见 touched 那个字段）。
+		if !e.valid() && !busy && e.touched {
 			ui.Text(c, "名称为必填项").FontSize(11).TextColor(t.Danger)
 		}
 

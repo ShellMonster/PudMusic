@@ -43,7 +43,10 @@ func TestTheSidebarsNewButtonOpensTheEditDialog(t *testing.T) {
 	wantText(t, tt, "公开")
 	wantText(t, tt, "提交")
 	wantText(t, tt, "取消")
-	wantText(t, tt, "名称为必填项")
+	// ⚠️ **刚打开时不画「名称为必填项」**：照抄 Biu 的
+	// `touchedFields.title || isSubmitted`（`favorites-edit-modal/index.tsx:215`）。
+	// 一个用户一个字都还没敲的表单上摆一句红字，读起来是「已经报错了」。
+	dontWantText(t, tt, "名称为必填项")
 	if s.folderEdit == nil || !s.folderEdit.open {
 		t.Fatal("弹窗没有开")
 	}
@@ -186,6 +189,32 @@ func TestSubmittingCannotBeDismissed(t *testing.T) {
 	if writes[0].get("media_id") != "" {
 		t.Errorf("新建时不该带 media_id，发出去的是 %q", writes[0].get("media_id"))
 	}
+}
+
+// TestTheRequiredHintWaitsUntilTheNameIsTouched 那句红字要等用户碰过名称才画。
+func TestTheRequiredHintWaitsUntilTheNameIsTouched(t *testing.T) {
+	f := newFolderBili(t, nil)
+	s, tt := folderShell(t, f)
+	seedAndSettle(s, tt, 42)
+	if err := tt.Click("新建收藏夹"); err != nil {
+		t.Fatal(err)
+	}
+	settleFrame(tt)
+
+	// 还没碰：提交按钮是禁用的（valid 是判据），红字也不画。
+	dontWantText(t, tt, "名称为必填项")
+	submit, ok := tt.Find("提交")
+	if !ok {
+		t.Fatalf("提交按钮找不到，文字有 %q", tt.Texts())
+	}
+	if tt.Image().RGBAAt(int(submit.X+submit.W/2), int(submit.Y+submit.H/2)) == tt.Image().RGBAAt(4, 4) {
+		t.Error("提交按钮和窗口底色同色，画出来看不见")
+	}
+
+	// 碰过（敲一个字又删掉）之后，名称还是空，红字就画出来了。
+	s.folderEdit.touched = true
+	settleFrame(tt)
+	wantText(t, tt, "名称为必填项")
 }
 
 // openNewFolder 直接往表单里填一个名字（不走打字）。
