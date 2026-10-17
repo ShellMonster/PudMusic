@@ -160,8 +160,12 @@ type Shell struct {
 	// lyricKey 是这一帧画的是哪一首歌的歌词。换歌时它变了，滚动位置整个换掉
 	// （新歌上留着上一首的滚动量，歌词一上来就停在歌的中间）。
 	lyricKey string
-	// lyricActive 是上一次让滚动位置跟过去的那一行，-1 是还没有过。
+	// lyricActive 是上一次**真的发出滚动指令**对应的那一行，-1 是还没有过。
 	lyricActive int
+	// lyricSeen 是这一帧认出的正在唱的那一行。和 lyricActive 分开是因为「目标
+	// 够不着」那条路不会更新 lyricActive，拿它判「换行了」会让那道重试预算失效
+	// ——见 followActiveLyric 里那一段。
+	lyricSeen int
 	// lyricPadH 是上一次跟过去时的居中留白。它变了（换歌、改字号、改窗口宽度）
 	// 就得重新跟——上游那一句的依赖表就是 `[activeIndex, centerPadding]`
 	// （`lyrics/index.tsx:291`）。
@@ -173,6 +177,9 @@ type Shell struct {
 	lyricHeld bool
 	// lyricStuck 是「连着几帧目标都够不着」的次数，用完就不再要帧了。
 	lyricStuck int
+	// lyricPadForced 让测试把居中留白强行按成某一个值（nil = 用真值）。
+	// 见 internal/ui/lyrics.go 里 lyricPadOverride 那段——它为什么必要。
+	lyricPadForced *float32
 	// lyricMaxY 是上一次看到的滚动范围。它变了（内容变高）就重新从头试一遍。
 	lyricMaxY float32
 	// lyricActiveEl 是正在唱的那一行的元素句柄，每一帧重记。它和 lyricBox

@@ -18,8 +18,13 @@ import (
 // 行大了、哪一行在中间、译文在不在原词下面、渐隐盖没盖住。只断 App 上的状态那些全是
 // 「零件对、装上去不一定对」。
 
-// lyricLines 是测试用的歌词一共有几句。比一屏放得下的多，好让「滚到中间」有事可做。
+// lyricLines 是测试用的歌词一共有几句。比一屏放得下的多，好让「滚到中间」有事可做，
+// 也好让最后一句能被滚到**下沿遮罩**那个高度上（居中留白之外，每一句能到的最低
+// 位置都被它自己的位置限死）。
 const lyricLines = 17
+
+// lineLines 是歌词的最后一句。
+const lineLines = lyricLines
 
 // line 是第 n 句的文字（n 从 1 起）。
 func line(n int) string { return fmt.Sprintf("第 %d 句", n) }
@@ -341,74 +346,151 @@ func TestTheLastLineCanAlsoReachTheMiddle(t *testing.T) {
 	}
 }
 
-// TestTheFadeFadesWhatScrollsUnderIt 盯住上下那两条渐隐
+// TestTheFadeFadesWhatScrollsUnderIt 盯住上下那两条渐隐遮罩
 // （上游 index.tsx:357-360 的 maskImage）。
 //
-// 断的是**同一句歌词在四个高度上的墨色**。上游那条 mask 从上到下是
-// 透明 → 0.15 → 0.5 → 不透明（76% 处再镜像回来），盖住的程度是「边上轻、正中间重」
-// 而不是一路递增——四个高度都断就是为了钉住这个形状：
+// ## 它盯的到底是什么
 //
-//	50%（两条都盖不到）满墨
-//	22%（上沿内侧）几乎全被盖住
-//	12%（上沿正中）半蒙
-//	 2%（上沿外侧）只蒙一点点
+// 上游那条 maskImage 的 alpha **0 是「藏起来」、1 是「原样透出来」**，所以它的意思是
+// **紧贴窗口上下边缘的歌词被藏起来，中间那一段原样显示**。本文件画的是一块**盖板**
+// （背景色的渐变条压在歌词上面），于是「盖住的程度」= 1 - mask 的 alpha：
 //
-// 换成**一块不透明的盖板**的话 22% 和 12% 都变成「一个字都不剩」，把渐隐整个拿掉的
-// 话四个高度一样满墨——两种改法各有断言红。
+//	上沿（占歌词区 0%~24%）：盖住 1 → 0.85 → 0.5 → 0
+//	下沿（占歌词区 76%~100%）：盖住 0 → 0.5 → 0.85 → 1
 //
-// ⚠️ 量的是这一句**正中间**那一小条，不是整句：它落在同一个渐隐位置里，整条的墨色
-// 才是同一个数（量整句的话上下半截分处遮罩内外，量出来的是没被盖住的那一半，
-// 实测那样量出来四个高度几乎一样，这条测试是空的）。
+// **写反过一次**：把 mask 的 alpha 当成了盖板的 alpha，于是**紧贴窗口边缘的歌词满色
+// 被硬切、条子内侧反而淡到看不见**（现象是「76% 处消失、99% 处又恢复满色」）。当时
+// 这条测试还只量了上半区、又把倒过来的方向写成了期望值，所以那个倒置它不但抓不到、
+// 还判成对的。现在上下两条都量，方向也摆正了。
 //
-// 滚动位置是直接写 `lyricScroll.Y` 的（这是 `ScrollState` 公开的用法，见
-// `docs/ui/scroll.md`）。写完那一帧跟随逻辑会认出「是用户滚的」而不抢回来
-// （见 followActiveLyric），于是这一句稳稳地停在要量的位置上。
+// ## 七个采样点，三种改法各有断言红
+//
+//	边（0.01 / 0.99）几乎全被盖住   → 拿掉渐隐、或把盖板铺满，两者都红
+//	中（0.12 / 0.88）半蒙           → 换成一块纯色盖板的话这里是 0，红
+//	内（0.23 / 0.77）不盖           → 方向写反的话这里变成「几乎全被盖住」，红
+//
+// 上下用**不同的行**：上沿那三个采样点用正在被唱的那一句（它能滚到最上面），下沿那三个
+// 用最后一句（它能滚到最下面）——居中留白之外，每一句能到的最高/最低位置都被它自己
+// 的位置限死，拿一句量两端是量不到的。
 func TestTheFadeFadesWhatScrollsUnderIt(t *testing.T) {
 	h := newLyricsHarness(t)
 	h.seekSettled(t, 0.5, false)
 	if h.s.lyricBoxH <= 0 {
 		t.Fatal("歌词区没有高度")
 	}
-	const sung = 9 // 0.5 处正在被唱的那一句
 
-	ink := map[float32]float64{}
-	for _, frac := range []float32{0.50, 0.22, 0.12, 0.02} {
-		r, ok := h.tt.Find(fmt.Sprintf("第 %d 句", sung))
-		if !ok {
-			t.Fatalf("画面上找不到第 %d 句，文字有 %q", sung, h.tt.Texts())
-		}
-		// 往下滚 d，正文就往上走 d，所以「把它挪到 want 那个高度」要滚
-		// `现在 - 想要`。挪的是**这一句的中心**：拿它的高度去比的话量出来的那
-		// 一条带会落在遮罩外面，量到的是没被盖住的墨（实测：四个高度全满）。
-		h.s.lyricScroll.Y += r.Y + r.H/2 - (h.s.lyricBoxY + frac*h.s.lyricBoxH)
+	// full 是「一点没被盖住」时一行歌词的墨色，拿紧挨着正在唱那一行的下一句量
+	// （它停在歌词区的中间，上下两条遮罩都盖不到它）。
+	full := inkOf(h.tt.Image(), rectOf(t, h, line(lineIndexAt(0.5)+1)))
+	if full < 0.3 {
+		t.Fatalf("中间那一行几乎没有墨（%.2f），这条测试量不出渐隐", full)
+	}
+
+	ink := map[string]float64{}
+	for _, c := range []struct {
+		label string
+		line  string
+		frac  float32
+	}{
+		{"边·上", lineAt(0.5), 0.01},     // 几乎全被盖住
+		{"中·上", lineAt(0.5), 0.12},     // 半蒙
+		{"内·上", lineAt(0.5), 0.23},     // 不盖
+		{"内·下", line(lineLines), 0.77}, // 不盖
+		{"中·下", line(lineLines), 0.88}, // 半蒙
+		{"边·下", line(lineLines), 0.99}, // 几乎全被盖住
+	} {
+		ink[c.label] = h.measureAt(t, c.line, c.frac)
+	}
+
+	// 边：紧贴窗口边缘的那一头，歌词要**看不见**。
+	if v := ink["边·上"]; v > full*0.15 {
+		t.Errorf("上沿最外侧还有 %.2f 的墨（没被盖住时是 %.2f）——紧贴窗口边缘的歌词应该藏起来", v, full)
+	}
+	if v := ink["边·下"]; v > full*0.15 {
+		t.Errorf("下沿最外侧还有 %.2f 的墨（没被盖住时是 %.2f）——紧贴窗口边缘的歌词应该藏起来", v, full)
+	}
+	// 内：遮罩靠里那一头，歌词要**原样透出来**。
+	if v := ink["内·上"]; v < full*0.85 {
+		t.Errorf("上沿最内侧只剩 %.2f 的墨（没被盖住时是 %.2f）——遮罩盖过头了", v, full)
+	}
+	if v := ink["内·下"]; v < full*0.85 {
+		t.Errorf("下沿最内侧只剩 %.2f 的墨（没被盖住时是 %.2f）——遮罩盖过头了", v, full)
+	}
+	// 中：两头之间是**渐变**的。一块纯色盖板在这里会是 0，而「拿掉渐隐」这里是满的——
+	// 这两条各自抓一种改法。
+	if v := ink["中·上"]; v <= ink["边·上"]*2 || v >= full*0.8 {
+		t.Errorf("上沿正中的墨是 %.2f，要落在边（%.2f）和没被盖住（%.2f）之间才对",
+			v, ink["边·上"], full)
+	}
+	if v := ink["中·下"]; v <= ink["边·下"]*2 || v >= full*0.8 {
+		t.Errorf("下沿正中的墨是 %.2f，要落在边（%.2f）和没被盖住（%.2f）之间才对",
+			v, ink["边·下"], full)
+	}
+}
+
+// measureAt 把 text 那一行挪到歌词区 frac 那个高度上，量它的墨色。
+func (h *lyricsHarness) measureAt(t *testing.T, text string, frac float32) float64 {
+	t.Helper()
+	r, ok := h.tt.Find(text)
+	if !ok || r.H <= 0 {
+		t.Fatalf("画面上找不到 %q（或它还没有盒子），文字有 %q", text, h.tt.Texts())
+	}
+	// 往下滚 d，正文就往上走 d，所以「把它挪到 want 那个高度」要滚 `现在 - 想要`。
+	h.s.lyricScroll.Y += r.Y + r.H/2 - (h.s.lyricBoxY + frac*h.s.lyricBoxH)
+	h.tt.Frame()
+
+	r, ok = h.tt.Find(text)
+	if !ok || r.H <= 0 {
+		t.Fatalf("挪到 %.0f%% 之后 %q 仍然没有盒子", frac*100, text)
+	}
+	// 量这一句**正中间**那一小条：它落在同一个渐变位置里，整条的墨色才是同一个数。
+	// 量整句的话上下半截分处遮罩内外，量出来的是没被盖住的那一半。
+	//
+	// ⚠️ 只量**左边这一段**：右下角浮着偏移和字号两个控件，量到整行的宽度就会把
+	// 控件的边框和字一起算进去，而它们是实心的——下沿那几个采样点正好落在它们上面，
+	// 量出来的「墨」比没被盖住时还多（实测 0.89，而没被盖住是 0.54）。
+	band := mygoui.Rect{X: r.X, Y: r.Y + r.H/2 - 5, W: min(r.W, 400), H: 10}
+	return inkOf(h.tt.Image(), band)
+}
+
+// TestTheRetryBudgetForAnUnreachableTarget 盯住「目标够不着时别把帧率一直拖在 60 上」
+// 那道保险（followActiveLyric 里的 `lyricStuck`）。
+//
+// 怎么把它逼进那个分支：用**三句**歌词（内容比容器矮得多，`MaxY` 是 0），再把
+// `lyricBoxH` / `lyricLineH` 清成 0——居中留白于是永远是 0，三句挤在顶上，正在被
+// 唱的那一句落在容器中心**上方**，要往下滚才回得来，而 `MaxY` 是 0 滚不下去。于是
+// `target = y + off` 恒为负，「够不着」每一帧都成立。
+//
+// 判据是「要了几帧」：够不着的时候**每一帧都该要下一帧**（留白和内容随时可能长出来），
+// 但**最多要 `lyricsStuckTries` 帧**，然后停下来。保险失效的症状是「永远停在 1」——
+// 每帧先被清零再 +1，`c.After` 一直发，而画面上什么都看不出来。
+func TestTheRetryBudgetForAnUnreachableTarget(t *testing.T) {
+	h := newLyricsHarness(t)
+	h.s.app.PutLyrics("[00:00.00]一\n[00:01.00]二\n[00:02.00]三\n", "")
+	h.tt.Frame()
+
+	// 居中留白永远算成 0（`lyricPadForced` 就是干这个的），三句于是挤在顶上，
+	// 正在被唱的那一句落在容器中心上方，要往下滚才回得来，而 `MaxY` 是 0 滚不下去。
+	// `lyricPadH` 也摆成 0，让「留白变了」这个重置条件从第二帧起就是假的——它要真的
+	// 在「够不着」的状态里把预算用完，而不是每帧被清零。
+	zero := float32(0)
+	h.s.lyricPadForced, h.s.lyricPadH = &zero, 0
+
+	for range lyricsStuckTries + 2 {
 		h.tt.Frame()
-
-		r, ok = h.tt.Find(fmt.Sprintf("第 %d 句", sung))
-		if !ok || r.H <= 0 {
-			t.Fatalf("挪到 %.0f%% 之后画面上找不到第 %d 句，文字有 %q", frac*100, sung, h.tt.Texts())
-		}
-		// 只量这一句**正中间**那一小条：它落在同一个渐隐位置里，整条的墨色
-		// 才是同一个数。量整句的话上半截和下半截分处遮罩内外，量出来的是没被
-		// 盖住的那一半（实测：这样量出来三个高度几乎一样，这条测试是空的）。
-		band := mygoui.Rect{X: r.X, Y: r.Y + r.H/2 - 5, W: r.W, H: 10}
-		ink[frac] = inkOf(h.tt.Image(), band)
 	}
-
-	clear, inner, mid, edge := ink[0.50], ink[0.22], ink[0.12], ink[0.02]
-	if clear < 0.7 {
-		t.Fatalf("中间那一头几乎没有墨（%.2f），这条测试量不出渐隐", clear)
+	// 预算要**用满**：用满 = 「这一支真的在数」。保险失效时它每帧被清零再 +1，
+	// 永远停在 1，而 1 < 上限，所以只断「不超过上限」是抓不住它的。
+	if got := h.s.lyricStuck; got != lyricsStuckTries {
+		t.Errorf("目标够不着 %d 帧之后预算停在 %d，want %d——每帧先清零再 +1 的话它会"+
+			"永远停在 1，`c.After` 一直发，帧率一直掉在 60 上而画面上什么都看不出来",
+			lyricsStuckTries, got, lyricsStuckTries)
 	}
-	if inner > clear*0.35 {
-		t.Errorf("上沿内侧（22%%）还有 %.2f 的墨，中间（50%%）是 %.2f——渐隐没盖住", inner, clear)
-	}
-	if mid > clear*0.7 {
-		t.Errorf("上沿正中（12%%）还有 %.2f 的墨，中间是 %.2f——渐隐几乎没起作用", mid, clear)
-	}
-	if mid >= edge {
-		t.Errorf("上沿正中（%.2f）不比上沿外侧（%.2f）暗——遮罩不是从边往里加深的", mid, edge)
-	}
-	if edge >= clear {
-		t.Errorf("上沿外侧（%.2f）已经和中间（%.2f）一样满了——那里压根没遮罩", edge, clear)
+	// 预算用完之后就不再要帧了：再画一帧，计数不会涨。
+	before := h.s.lyricStuck
+	h.tt.Frame()
+	if got := h.s.lyricStuck; got != before {
+		t.Errorf("预算用完之后计数还在涨（%d → %d）——它每帧都在要下一帧", before, got)
 	}
 }
 

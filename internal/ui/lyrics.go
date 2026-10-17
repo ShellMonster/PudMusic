@@ -59,15 +59,35 @@ const (
 	lyricsSettleFrame = 16 * time.Millisecond
 )
 
-// fadeStopAt 是渐隐条上四个色标的位置（占**这一条自己的高度**的几分之几）。
+// 渐隐条上四个色标的位置（占**这一条自己的高度**的几分之几）与**盖住的程度**
+// （0 = 全透，1 = 完全遮住）。
 //
-// 上游一个 maskImage 管上下两头，色标是按整个歌词区的高度给的：
-// 0% 全透明 → 6% 0.15 → 12% 0.5 → 24% 全不透明 → 76% 全不透明 → 88% 0.5 →
-// 94% 0.15 → 100% 全透明。这里上下各切一条 24% 高的条子，于是位置要按条子
-// 自己的高度换算：6/24=0.25、12/24=0.5、24/24=1。上下那两条的透明度是镜像。
+// 上游那一条 maskImage 管上下两头，色标是按整个歌词区的高度给的：
+// 0% 全透明 → 6% 0.15 → 12% 0.5 → 24% 全黑 → 76% 全黑 → 88% 0.5 → 94% 0.15 →
+// 100% 全透明。
+//
+// 🔴 **CSS mask 的 alpha 0 是「藏起来」，alpha 1 是「原样透出来」**——不是反过来。
+// 所以上游那条 mask 的意思是：**紧贴窗口上下边缘的歌词被藏起来，中间那段原样显示**。
+// 而本文件画的是一块**盖板**（背景色的渐变条压在歌词上面），于是盖住的程度 =
+// 1 - mask 的 alpha：
+//
+//	0% → 盖住 1.0（藏）    6% → 0.85    12% → 0.5    24% → 0（透）
+//	76% → 0（透）         88% → 0.5    94% → 0.85  100% → 1.0（藏）
+//
+// **写反过一次**：当初把 mask 的 alpha 直接当成了盖板的 alpha，于是**紧贴窗口边缘的
+// 歌词满色被硬切、条子内侧反而淡到看不见**——现象是「76% 处消失、99% 处又恢复满色」。
+// 也就是说「上下有渐隐遮罩」这一条当时根本没做成，而那条测试还把倒过来的方向写成了
+// 期望值（见 TestTheFadeFadesWhatScrollsUnderIt）。
+//
+// 上下两段的**位置不一样**：上沿的 6%/12% 落在自己那条的 0.25/0.5，下沿的
+// 88%/94% 落在 0.5/0.75。透明度则正好相反——上沿从 1 降到 0，下沿从 0 升到 1，
+// 因为两条的「贴窗口边缘那一头」分别在自己条子的**上**头和**下**头。
 var (
-	lyricsFadeAt    = []float32{0, 0.25, 0.5, 1}
-	lyricsFadeAlpha = []float32{0, 0.15, 0.5, 1}
+	lyricsFadeTopAt    = []float32{0, 0.25, 0.5, 1}
+	lyricsFadeTopAlpha = []float32{1, 0.85, 0.5, 0}
+
+	lyricsFadeBottomAt    = []float32{0, 0.5, 0.75, 1}
+	lyricsFadeBottomAlpha = []float32{0, 0.5, 0.85, 1}
 )
 
 // viewLyrics 是迷你播放器里那一块歌词。
@@ -247,10 +267,16 @@ func (s *Shell) followActiveLyric(c *ui.Context, active int) {
 	// 内容变高（`MaxY` 变了）也要重新试：**够不着**常常只是因为内容还没量出来——
 	// 头几帧的滚动范围比后来小得多，而「滚到那儿去」当时压根不是越界，是量少了。
 	// 不重试的话歌词就停在半路上，而界面上看不出任何异样。
-	if active != s.lyricActive || pad != s.lyricPadH || maxY != s.lyricMaxY {
+	//
+	// ⚠️ 判「换行了」用的是 `lyricSeen` 而**不是** `lyricActive`：后者只在真的发出
+	// ScrollTo 时才更新，而「够不着」那条路压根不会走到那儿。于是拿它判的话，
+	// 那一支每帧都被清零再 +1，预算永远停在 1，`c.After` 每帧都发——**这道保险
+	// 正好在它要防的那个分支上失效**（而失效的表现就是它本来要防的那个：帧率一直
+	// 掉在 60 上，画面上什么都看不出来）。
+	if active != s.lyricSeen || pad != s.lyricPadH || maxY != s.lyricMaxY {
 		s.lyricStuck = 0
 	}
-	s.lyricMaxY = maxY
+	s.lyricSeen, s.lyricMaxY = active, maxY
 	// 用户抢过去了吗。见函数头。弹簧自己在飞的时候不算——那是我们让它去的。
 	if !s.lyricScroll.Scrolling() && y != s.lyricExpect && !atLyricEdge(y, maxY) {
 		s.lyricHeld = true
@@ -313,7 +339,7 @@ func absf(v float32) float32 {
 func (s *Shell) resetLyricFollow(key string) {
 	s.lyricKey = key
 	s.lyricScroll = ui.ScrollState{}
-	s.lyricActive = -1
+	s.lyricActive, s.lyricSeen = -1, -1
 	s.lyricExpect = 0
 	s.lyricHeld, s.lyricStuck = false, 0
 	s.lyricBoxX, s.lyricBoxY, s.lyricBoxW, s.lyricBoxH, s.lyricLineH = 0, 0, 0, 0, 0
@@ -325,10 +351,25 @@ func (s *Shell) resetLyricFollow(key string) {
 // 它没居中」看着就是歌词坏了。算式照上游 `updateCenterPadding`（index.tsx:251）：
 // `(容器高 - 行高) / 2`；容器高和行高都是**上一帧**量到的，第一帧是 0、第二帧就对上
 // 了。
+//
+// ⚠️ `lyricPadForced` 是给测试用的「替掉」入口，见下面那段。它默认是 nil，界面上一帧
+// 都不看它。
 func (s *Shell) lyricPad() float32 {
+	if s.lyricPadForced != nil {
+		return *s.lyricPadForced
+	}
 	return max(0, s.lyricBoxH/2-s.lyricLineH/2)
 }
 
+// lyricPadForced 让测试把居中留白强行按成某一个值。nil = 用真值。
+//
+// 它存在的理由只有一个：把「目标够不着」那个分支**稳定地**逼出来。居中留白平时是拿
+// 上一帧的容器高和行高算的，于是只有第一帧才可能是 0——而那一帧过去就没了。想用界面
+// 驱动去撞「够不着」，得同时猜对窗口尺寸、字号、歌词长度和滚动位置，实测撞不出来
+// （试过 17 句歌词的首句/中段/末句、700x400 / 420x300 / 300x160 / 160x90、字号 12 与
+// 48，全都没逼进去）。而那道「够不着就别一直要帧」的保险正好需要被测到。
+//
+// 和 `Shell.pageBody` / `autostart` / `picker` 是同一个形状：**做成字段是为了能替掉它**。
 // drawLyricsFade 画上下两条渐隐。top 为真画上面那条，为假画下面那条。
 //
 // 上游是在滚动容器上挂一个 CSS mask（index.tsx:357-360），一条 maskImage 管到
@@ -337,14 +378,13 @@ func (s *Shell) lyricPad() float32 {
 // 颜色，那不是渐隐，是盖了一层。
 func (s *Shell) drawLyricsFade(c *ui.Context, top bool) {
 	bg := c.Theme().Background
-	stops := make([]ui.GradientStop, 0, len(lyricsFadeAt))
-	for i, at := range lyricsFadeAt {
-		// 下面那条把透明度倒过来：它是「从完全不透明淡到全透明」。
-		a := lyricsFadeAlpha[i]
-		if !top {
-			a = lyricsFadeAlpha[len(lyricsFadeAlpha)-1-i]
-		}
-		stops = append(stops, ui.GradientStop{Color: bg.Alpha(a), At: at})
+	at, alpha := lyricsFadeBottomAt, lyricsFadeBottomAlpha
+	if top {
+		at, alpha = lyricsFadeTopAt, lyricsFadeTopAlpha
+	}
+	stops := make([]ui.GradientStop, 0, len(at))
+	for i, pos := range at {
+		stops = append(stops, ui.GradientStop{Color: bg.Alpha(alpha[i]), At: pos})
 	}
 
 	bar := ui.Box(c).Absolute().Left(0).Right(0).HeightPercent(lyricsFadePercent).
