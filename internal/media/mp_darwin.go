@@ -48,8 +48,18 @@ const (
 	keyMediaType = "MPNowPlayingInfoPropertyMediaType"
 )
 
-// mediaTypeAudio 是 `MPNowPlayingInfoPropertyMediaType` 的值。音频就是它。
-const mediaTypeAudio = "audio"
+// mediaTypeAudio 是 `MPNowPlayingInfoPropertyMediaType` 的值。
+//
+// ⚠️ **它是 `MPNowPlayingInfoMediaType` 这个枚举，要装进 NSNumber**，不是字符串
+// "audio"。头文件里这个属性声明的是 `MPNowPlayingInfoMediaType`（一个
+// NS_ENUM），所以给它一个 NSString，系统认不出来——而它认不出来的表现是
+// **静默忽略**：歌名、进度、封面全照常显示，只是这一栏不起作用。
+//
+// `MPNowPlayingInfoMediaTypeAudio` = 1（None = 0、Video = 2）。
+const mediaTypeAudio = 1
+
+// warnPushOffThread 保证「写入跑错线程」只说一次，别把日志刷满。
+var warnPushOffThread sync.Once
 
 // mpSession 是 macOS 那一半的实现。
 type mpSession struct {
@@ -70,10 +80,6 @@ type mpSession struct {
 	artworkURL string
 	// fetching 是正在下的那个地址。非空表示有一个下载在飞。
 	fetching string
-
-	// pushMu 串行化「往系统写」这件事。系统那边不是线程安全的，
-	// 而封面下好的那条路是后台协程。
-	pushMu sync.Mutex
 
 	// attached 是已经装上的命令处理器（用来判断要不要重复装）。
 	attached bool
@@ -125,6 +131,13 @@ func newPlatform(opts Options) (platform, error) {
 // ⚠️ `nowPlayingInfo` 是**替换**语义不是合并：每次都要写全量，
 // 只写改了的那个字段的话上一次的内容全丢。
 func (p *mpSession) apply(n NowPlaying) {
+	// 往系统写的那一段排到那条钉住的 Objective-C 线程上（调用方可能是任意
+	// goroutine，而 Objective-C 有每线程的状态）。见 objcthread_darwin.go。
+	onObjCThread(func() { p.applyOnObjCThread(n) })
+}
+
+// applyOnObjCThread 是 apply 的 ObjC 那一半。**只能在钉住的那条线程上跑。**
+func (p *mpSession) applyOnObjCThread(n NowPlaying) {
 	p.mu.Lock()
 	p.last = n
 	p.startFetchLocked(n)
@@ -135,38 +148,94 @@ func (p *mpSession) apply(n NowPlaying) {
 }
 
 // push 是真正往系统写字的那一步。
+//
+// ⚠️ 这里造出来的每个对象都是自己持有的，所以**每一次 `set` 之后都要 release**。
+// 顺序也有讲究：`setNowPlayingInfo:` 会 retain 住字典和它的内容，所以放掉我们这一份
+// 之后，系统手上那份还活着——这正是我们想要的（换歌时它要继续显示旧的那张封面）。
 func (p *mpSession) push(n NowPlaying, art id) {
-	p.pushMu.Lock()
-	defer p.pushMu.Unlock()
-	withPool(func() {
-		if n.State == StateNone {
-			// 清空用 `setNowPlayingInfo: nil`。**没有** `clearNowPlayingInfo`
-			// 这个方法，调它会 unrecognized selector（见
-			// `docs/research/GO-MEDIA-SESSION.md` §2.6）。
-			sendSel(p.center, sel("setNowPlayingInfo:"))
-			sendSel(p.center, sel("setPlaybackState:"), uintptr(playbackStateNumber(StateStopped)))
-			return
-		}
+	// 🔴 **闸门**：不在钉住的那条线程上就**拒写**。
+	//
+	// 原因很具体：一次 push 要发两条系统消息（`setNowPlayingInfo:` 之后
+	// `setPlaybackState:`）。别的写插在这两条之间，就会留下「元数据说暂停、
+	// 状态说在放」这种对不上的组合——而它**不会自己好回来**，因为校正只在
+	// 播放中跑。
+	//
+	// 所以这里宁可这一次什么也不写（下一��� publish 自然会补上），也不要写坏。
+	if !onObjCThreadNow() {
+		warnPushOffThread.Do(func() {
+			log.Printf("biu: 系统媒体会话有一次写入不在它自己那条线程上，已拒掉（" +
+				"否则会出现「进度不动但按钮显示在放」）。这是本票的 bug，请记下来。")
+		})
+		return
+	}
 
-		info := nsMutableDictionary()
-		dictPut(info, keyTitle, nsString(n.Title))
-		dictPut(info, keyArtist, nsString(n.Artist))
-		dictPut(info, keyDuration, nsNumberDouble(seconds(n.Duration)))
-		dictPut(info, keyElapsed, nsNumberDouble(seconds(position(n.Position, n.Duration))))
-		// 播放速率是**必设的**：系统不看我们的音频会话，只看这个数，
-		// 而它同时决定进度条要不要自己往前走。
-		dictPut(info, keyRate, nsNumberDouble(rateOf(n.State)))
-		dictPut(info, keyDefRate, nsNumberDouble(1))
-		dictPut(info, keyMediaType, nsString(mediaTypeAudio))
+	if n.State == StateNone {
+		// 清空用 `setNowPlayingInfo: nil`。**没有** `clearNowPlayingInfo`
+		// 这个方法，调它会 unrecognized selector（见
+		// `docs/research/GO-MEDIA-SESSION.md` §2.6）。
+		sendSel(p.center, sel("setNowPlayingInfo:"))
+		sendSel(p.center, sel("setPlaybackState:"), uintptr(playbackStateNumber(StateStopped)))
+		return
+	}
+
+	info := newMutableDictionary()
+	if info == 0 {
+		return
+	}
+	// 字典建不起来就别往下写了：现在发出去的是一份空的，
+	// 锁屏上会变成「有歌名没进度」那种半吊子状态，比什么都不发更让人困惑。
+	putString(info, keyTitle, n.Title)
+	putString(info, keyArtist, n.Artist)
+	putNumber(info, keyDuration, seconds(n.Duration))
+	putNumber(info, keyElapsed, seconds(position(n.Position, n.Duration)))
+	// 播放速率是**必设的**：系统不看我们的音频会话，只看这个数，
+	// 而它同时决定进度条要不要自己往前走。
+	putNumber(info, keyRate, rateOf(n.State))
+	putNumber(info, keyDefRate, 1)
+	putInt(info, keyMediaType, mediaTypeAudio)
+	if art != 0 {
 		dictPut(info, keyArtwork, art)
-		sendSel(p.center, sel("setNowPlayingInfo:"), uintptr(info))
+	}
 
-		// 🔴 `setPlaybackState:` 是**必设项**，不是可有可无的补充。
-		// Apple 头文件原话：macOS 上 "playback state cannot be determined by
-		// the application's audio session"，不设的话控制中心的状态会错、
-		// 远程控制可能整个失灵。
-		sendSel(p.center, sel("setPlaybackState:"), uintptr(playbackStateNumber(n.State)))
-	})
+	sendSel(p.center, sel("setNowPlayingInfo:"), uintptr(info))
+
+	// 🔴 `setPlaybackState:` 是**必设项**，不是可有可无的补充。
+	// Apple 头文件原话：macOS 上 "playback state cannot be determined by
+	// the application's audio session"，不设的话控制中心的状态会错、
+	// 远程控制可能整个失灵。
+	sendSel(p.center, sel("setPlaybackState:"), uintptr(playbackStateNumber(n.State)))
+
+	release(info)
+}
+
+// putString 往字典里放一个字符串值，放完把自己那一份释放掉。
+func putString(dict id, key, value string) {
+	v := newString(value)
+	if v == 0 {
+		return
+	}
+	defer release(v)
+	dictPut(dict, key, v)
+}
+
+// putInt 往字典里放一个整数盒子，放完释放。
+func putInt(dict id, key string, value int) {
+	v := newNumberInt(value)
+	if v == 0 {
+		return
+	}
+	defer release(v)
+	dictPut(dict, key, v)
+}
+
+// putNumber 往字典里放一个数字值，放完释放。
+func putNumber(dict id, key string, value float64) {
+	v := newNumberDouble(value)
+	if v == 0 {
+		return
+	}
+	defer release(v)
+	dictPut(dict, key, v)
 }
 
 // seconds 把时长换成系统要的那个单位（秒，浮点）。
@@ -244,7 +313,7 @@ func (p *mpSession) fetchArtwork(url string) {
 	}
 
 	var art id
-	withPool(func() { art = newArtwork(nsImageFromBytes(b)) })
+	onObjCThread(func() { art = newArtworkFromBytes(b) })
 	if art == 0 {
 		p.mu.Lock()
 		if p.fetching == url {
@@ -255,23 +324,37 @@ func (p *mpSession) fetchArtwork(url string) {
 		return
 	}
 
-	p.mu.Lock()
-	// 期间用户可能已经切走、或者切到同一首去了。对不上就这张图白下了，
-	// 直接丢掉——留着的话会出现「下一首的进度配上一首的图」。
-	if p.fetching != url || p.last.ArtworkURL != url {
+	// ⚠️ 「校验 + 取快照 + 写系统」必须**在同一步里做完**，而且那一步排在那条
+	// 钉住的线程上。
+	//
+	// 之前是「锁里取一份 n → 解锁 → 排队写 n」。排队和执行之间有空隙：用户在这
+	// 空隙里按了暂停，apply 先跑完（系统已经是暂停），然后补推把**过期的
+	// 「在放」快照**整体写回去——暂停被按掉了。
+	//
+	// 串行化只挡住了「两次 push 各自的两条 setter 互相穿插」，没挡住「旧快照
+	// 晚写」。所以快照必须在**真的要写的那一步里**现取。
+	//
+	// 排到那条线程上之后它和 apply 是同一串：补推先跑就带着暂停后的状态写
+	// （对），apply 先跑补推就取到暂停后的状态再写（也对）。
+	onObjCThread(func() {
+		p.mu.Lock()
+		// 期间用户可能已经切走、或者切到同一首去了。对不上就这张图白下了，
+		// 直接丢掉——留着的话会出现「下一首的进度配上一首的图」。
+		if p.fetching != url || p.last.ArtworkURL != url {
+			p.mu.Unlock()
+			forgetImage(art)
+			return
+		}
+		old := p.artwork
+		p.artwork, p.artworkURL, p.fetching = art, url, ""
+		n := p.last // ← 就在这一刻取：外面可能刚变过
 		p.mu.Unlock()
-		forgetImage(art)
-		return
-	}
-	old := p.artwork
-	p.artwork, p.artworkURL, p.fetching = art, url, ""
-	n := p.last
-	p.mu.Unlock()
 
-	if old != 0 {
-		forgetImage(old)
-	}
-	p.push(n, art)
+		if old != 0 {
+			forgetImage(old)
+		}
+		p.push(n, art)
+	})
 }
 
 // ---- 远程命令：往系统上装、摘下来 ----
@@ -296,6 +379,11 @@ func (p *mpSession) attach(fn func(Command, time.Duration)) {
 	if already {
 		return
 	}
+	onObjCThread(func() { p.addTargetsOnObjCThread() })
+}
+
+// addTargetsOnObjCThread 是 attach 的 ObjC 那一半。**只能在钉住的那条线程上跑。**
+func (p *mpSession) addTargetsOnObjCThread() {
 
 	// ⚠️ 不接的那些命令**默认是开着的**，控制中心会摆出按了没反应的按钮。
 	// 所以每次 attach 都顺手把它们关一遍。
@@ -340,9 +428,11 @@ func (p *mpSession) detach() {
 	p.mu.Unlock()
 
 	setCommandHandler(nil)
-	for _, t := range added {
-		if t.cmd != 0 && t.token != 0 {
-			send(t.cmd, "removeTarget:", uintptr(t.token))
+	onObjCThread(func() {
+		for _, t := range added {
+			if t.cmd != 0 && t.token != 0 {
+				send(t.cmd, "removeTarget:", uintptr(t.token))
+			}
 		}
-	}
+	})
 }

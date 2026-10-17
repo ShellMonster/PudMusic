@@ -15,3 +15,11 @@ Five canonical roles, label string equals role name. See `docs/agents/triage-lab
 ### Domain docs
 
 Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Regression evidence
+
+SPEC's list of evidence every stage must leave behind lives as code in
+`internal/evidence`. Adding or renaming a test that serves one of those
+requirements means updating that ledger too — its own test fails otherwise,
+which is the point.
+
