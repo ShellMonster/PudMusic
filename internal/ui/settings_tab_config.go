@@ -292,40 +292,6 @@ func (s *Shell) reloadDownloads() {
 // 函数，那两个才是被测的。
 var userDataDir = func() (string, error) { return mygo.App.Path(mygo.PathUserData) }
 
-// biuImportToast 把导入结果压成一句给用户看的话。
-//
-// **跳过的项也要说出来**。只报「已导入设置和 30 条下载记录」的话，用户会以为导入
-// 是全的，而下一次他找不到某首歌的歌词时会以为「这个应用没有歌词功能」。
-func biuImportToast(r app.Imported) string {
-	if !r.Any() {
-		return "Biu 那边没有能带过来的数据"
-	}
-	var parts []string
-	if r.Settings {
-		parts = append(parts, "设置")
-	}
-	if r.Shortcuts {
-		parts = append(parts, "快捷键")
-	}
-	if r.Downloads > 0 {
-		parts = append(parts, fmt.Sprintf("%d 条下载记录", r.Downloads))
-	}
-	if r.Lyrics > 0 {
-		parts = append(parts, fmt.Sprintf("%d 首歌词", r.Lyrics))
-	}
-	msg := "已从 Biu 导入：" + joinNames(parts)
-	// 「设置页里有完整的清单」这句话只有在**清单真的在设置页上**时才可以说。
-	// 它现在在了（`settingsConfig` 的 `importNotes`）——之前这里写着「见下方清单」
-	// 而下方什么都没有，而那句「请重新登录」正是用户最需要看到的。
-	if n := len(r.Notes); n > 0 {
-		msg += fmt.Sprintf("。%s", r.Notes[0])
-		if n > 1 {
-			msg += fmt.Sprintf("（设置页「配置」那一段里有全部 %d 条）", n)
-		}
-	}
-	return msg
-}
-
 // migrationNote 把上次启动的升级/导入结果压成一句人话。
 //
 // 没有话说时返回空串（界面上那一行就不画）。**升级失败那一句必须带着「原文件

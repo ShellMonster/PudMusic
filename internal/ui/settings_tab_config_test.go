@@ -274,16 +274,6 @@ func waitForFrames(t *testing.T, tt *mygoui.Tester, done func() bool) {
 	t.Fatal("等了两秒，那个后台结果还没画出来")
 }
 
-// readFile 读一个文件，测试专用。
-func readFile(t *testing.T, path string) string {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("读 %s：%v", path, err)
-	}
-	return string(b)
-}
-
 // 点「从 Biu 导入」：设置真的换成了 Biu 那一份，而且**旧的那份留了备份**。
 //
 // 这是「用户点一下就能导」的正面对照——前面 `TestAFreshInstall…` 测的是启动时

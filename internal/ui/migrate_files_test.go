@@ -371,3 +371,13 @@ func mustSettingsJSON(t *testing.T) string {
 	}
 	return string(raw)
 }
+
+// readFile 读一个文件，测试专用。
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读 %s：%v", path, err)
+	}
+	return string(b)
+}

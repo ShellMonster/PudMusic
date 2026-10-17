@@ -211,17 +211,9 @@ func TestAFreshInstallBringsEverythingOverFromBiu(t *testing.T) {
 func TestAnInstallThatAlreadyHasDataIsNotOverwrittenByAnAutomaticImport(t *testing.T) {
 	biu := biuHomeDir(t)
 	dst := t.TempDir()
-	// 我自己的设置。
-	mine := app.DefaultSettings("/Users/y/Mine")
-	mine.ThemeMode = app.ThemeModeLight
-	if err := app.ExportSettings(app.SettingsPath(dst), mine); err != nil {
-		t.Fatal(err)
-	}
-	// 换成我们自己的信封（ExportSettings 导的是裸的那一份）。
-	if err := os.WriteFile(app.SettingsPath(dst),
-		[]byte(`{"schemaVersion":1,"appSettings":{"themeMode":"light","primaryColor":"#ff0000"}}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// 我自己的设置（已经是当前形状，所以自动导入不该碰它）。
+	mustWriteHere(t, app.SettingsPath(dst),
+		`{"schemaVersion":1,"appSettings":{"themeMode":"light","primaryColor":"#ff0000"}}`)
 
 	r := firstBiuImport(dst, []string{biu}, nil, false)
 	if r.Any() {
