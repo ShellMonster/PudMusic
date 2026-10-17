@@ -247,24 +247,50 @@ var realDataLedger = []realDataPage{
 		Want: []string{"扫码登录"},
 	},
 	{
-		Route: "/follow", Title: "我的关注",
-		// 🔴 BMG-47 §3 A2：这一页**连壳子都没有**，全仓没有一个 viewFollow，
-		// 而 Biu 那边有整整一页（分组 Tab + 虚拟网格 + 搜索 + 关注分组增删改）。
-		// 它**从第一天起就没有工单**——票号是空的那一格，不是忘了写。
+		Route: followPath, Title: "我的关注",
+		// ✅ **BMG-47 §3 A2 的欠条已经还清**（BMG-49）。这一页现在有自己的画法
+		//（`follow.go`：分组 Tab + 虚拟网格 + 页内搜索）和自己的四个接口
+		//（`internal/service/bili/follow.go`），走的是一台**真接口的假 B 站**
+		// 而不是往模型里塞数据——和首页那一行同一个道理（A1 的原教训：画得出来
+		// 那一半被验了、取数那一半没人管）。
 		//
-		// ⚠️ 说清楚「缺的是哪些接口」：仓库里**有**三个 relation 接口
-		//（`/x/relation/followings`、`/x/relation/stat`、`/x/relation/modify`），
-		// 但它们是**别的页面**在用——动态流的作者栏和 UP 空间的关注/取关。关注页
-		// 自己要的那几个（关注分组、设置分组）一个都没有，而缺页面比缺接口更靠前：
-		// 没有 viewFollow，接口拉回来了也没有地方画。
-		//
-		// 这是这张表上唯一一个「欠着、而欠着本身还没有主」的页面。它必须一直
-		// 摆在这张表上、排到票为止：一旦有人给它排了票，把 Debt 换成票号，
-		// 这一行就会开始要求真数据。
-		Debt: "BMG-47 §3 A2（**还没有工单**）：全仓没有一个 viewFollow；关注页自己要的关注分组" +
-			"/设置分组接口一个都没有（现有的 followings / stat / modify 是动态流和 UP 空间在用）",
-		Why:      "侧栏第二项点进去永远是「暂无内容」，登录了也空；而 Biu 那边是一整页功能。",
-		NowEmpty: lookup("/follow").Empty.Title,
+		// ⚠️ **欠条必须撤掉，而且撤掉它本身就是被这两条钉着的**：
+		//   - `TestEveryRouteShowsARealRowOrSaysWhichTicketIsMissing` 的「欠着」
+		//     那一支会要求 `Open == nil`，而数据接上之后 `Open` 非空 → 它自己红；
+		//   - `TestEveryRouteHasAPageViewOrAnOpenDebt` 在 `builtPage != nil` 时会
+		//     `continue`，于是第二道钉子**不响**——所以第三道（这张表自己的规矩
+		//     「已经能打开却有欠条：数据接上了就把欠条撤掉」）是唯一还醒着的那道。
+		//     留着一条过期欠条的后果是：这一行继续走 `realDataShellOnEmpty`，
+		//     而那个空壳画的是「还没接上 B 站接口」那一支，它**顺带**含有
+		//     `NowEmpty` 那一句，于是欠条「当场证明自己还欠着」也照样通过。
+		Open: func(t *testing.T) (*Shell, *mygoui.Tester) {
+			b := newUIExplore(t)
+			b.on("/x/relation/tags", func(w http.ResponseWriter, r *http.Request) {
+				uiExploreJSON(w, 0, []any{
+					map[string]any{"tagid": -10, "name": "特别关注", "count": 0, "tip": ""},
+					map[string]any{"tagid": 0, "name": "默认分组", "count": 1, "tip": ""},
+				})
+			})
+			b.on("/x/relation/followings", func(w http.ResponseWriter, r *http.Request) {
+				uiExploreJSON(w, 0, map[string]any{
+					"total": 1,
+					"list": []any{map[string]any{
+						"mid": 4242, "uname": "关注页那位 UP 主",
+						"sign": "这一位是接口给的", "face": "https://f/a.jpg",
+						"official_verify": map[string]any{"type": 0, "desc": "接口给的认证"},
+					}},
+				})
+			})
+			s, tt, _ := newSpaceShell(t, b, true, "77")
+			s.navigate(followPath)
+			realDataWait(t, tt, "关注的 UP 主画出来了",
+				func() bool { return tt.HasText("关注页那位 UP 主") })
+			return s, tt
+		},
+		// ⚠️ 两条都要：一条是**接口给的真内容**，一条是「全部关注(N)」那个 N——
+		// 后者是 B 站的**总数**画上来的，少了它的话一个「每一格都画了但列表是空的」
+		// 实现照样能过第一条。
+		Want: []string{"关注页那位 UP 主", "接口给的认证", "全部关注(1)", "特别关注"},
 	},
 	{
 		Route: "/empty", Title: "空状态落地页",

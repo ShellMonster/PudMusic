@@ -779,3 +779,209 @@ func TestTheseFourEndpointsMayCarryCredentials(t *testing.T) {
 		}
 	}
 }
+
+// TestAFailedTagListDoesNotRetryItselfForever 钉住左边那一列的**闸门**。
+//
+// 🔴 **这一条是评审抓出来的 critical**：那一段每帧都跑，而失败之后 `tagStarted`
+// 仍是 false、`tagLoading` 也回到 false——于是每一帧都满足条件。真正让它转起来
+// 的是**每一次失败都有 `s.wake.invalidate()`**（铁律三，见 `adoptFollow`）：
+// 请求 → 失败 → 叫醒 → 要一帧 → 下一帧又发。用户什么都不用点。
+//
+// 实测（改之前）：假 B 站一直回 -412，60 帧里 `/x/relation/tags` 被打 186 次。
+// 触发条件全是日常的：SESSDATA 过期（本地看着还登录着，B 站回 -101）、
+// -412/-352 风控、网络抖一下。
+//
+// ⚠️ 右边那一格有同一道闸（`upPager.want()` 里的 `p.err != nil`），所以这一条
+// 量的是**两边必须一样**——一边有闸一边没有，就是一个停不下来的请求循环。
+func TestAFailedTagListDoesNotRetryItselfForever(t *testing.T) {
+	b := newUIExplore(t)
+	uiFollowList(b, 1, []any{uiFollowUser(11, "全部关注里的那个人")})
+	uiFollowSearch(b, "", nil)
+	uiFollowTag(b, 0, []any{})
+	// 分组这一支一直失败。
+	b.on("/x/relation/tags", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, -412, nil)
+	})
+
+	s, tt, _ := newSpaceShell(t, b, true, "77")
+	s.navigate(followPath)
+	tt.Frame()
+	f := s.followPageOf()
+	waitFrames(t, tt, "分组拉失败了", func() bool { return f.tagErr != nil })
+
+	// ⚠️ **再多画几十帧，一个重试都不许有**：唯一的出口是用户点「重试拉分组」。
+	before := b.countHit("/x/relation/tags")
+	for range 60 {
+		tt.Frame()
+	}
+	if after := b.countHit("/x/relation/tags"); after != before {
+		t.Errorf("分组拉失败了之后又自己发了 %d 次（%d → %d）——每一帧都满足"+
+			"「没拉到」，而每次失败都要一帧新画面，于是自己转起来了",
+			after-before, before, after)
+	}
+	// 失败之后要说得清，并且给一条路走。
+	//
+	// ⚠️ **这里要用 `tt.HasText`（子串），不能用 `showsText`（全等）**：那一行是
+	// 「分组没拉出来：<原因>」，原因跟着错走，而全等匹配钉不住一个前缀。
+	if !tt.HasText("分组没拉出来") {
+		t.Errorf("没说清是分组没拉出来，文字有 %q", tt.Texts())
+	}
+	if !showsText(tt, "重试拉分组") {
+		t.Errorf("没给重试，文字有 %q", tt.Texts())
+	}
+}
+
+// TestAFailedTagListCanBeRetriedByHand 钉住「闸门关上之后，人还能再开一次」。
+//
+// 少了这后半句，上一条的修法就有一半可能走偏：把触发条件整个删掉的话失败之后
+// **永远**重试不了了，而 -101（SESSDATA 过期）恰恰是最需要能重试的那一种。
+func TestAFailedTagListCanBeRetriedByHand(t *testing.T) {
+	b := newUIExplore(t)
+	uiFollowList(b, 1, []any{uiFollowUser(11, "全部关注里的那个人")})
+	uiFollowSearch(b, "", nil)
+	uiFollowTag(b, 0, []any{})
+
+	failed := true
+	b.on("/x/relation/tags", func(w http.ResponseWriter, r *http.Request) {
+		if failed {
+			uiExploreJSON(w, -412, nil)
+			return
+		}
+		uiExploreJSON(w, 0, []any{
+			map[string]any{"tagid": 0, "name": "重试之后有了", "count": 1, "tip": ""},
+		})
+	})
+
+	s, tt, _ := newSpaceShell(t, b, true, "77")
+	s.navigate(followPath)
+	tt.Frame()
+	f := s.followPageOf()
+	waitFrames(t, tt, "分组拉失败了", func() bool { return f.tagErr != nil })
+
+	failed = false // B 站这一次肯给了
+	if err := tt.Click("重试拉分组"); err != nil {
+		t.Fatalf("点不到重试：%v，文字有 %q", err, tt.Texts())
+	}
+	waitFrames(t, tt, "重试之后分组到了", func() bool { return f.tagStarted && f.tagErr == nil })
+	tt.Frame()
+	// ⚠️ 同样是子串：那一格的名字后面跟着 `(1)`（B 站的分组成员数）。
+	if !tt.HasText("重试之后有了") {
+		t.Errorf("重试之后分组没画出来，文字有 %q", tt.Texts())
+	}
+}
+
+// TestAFullyOverlappingPageStillLoadsTheNextOne 钉住「整页重叠」不把分页掐死。
+//
+// 🔴 **评审抓出来的 major**：`upPager.adopt(cursor, sent, hasMore)` 里的 `sent`
+// 说的是「B 站发了几个、过滤**之前**」（`upspace.go` 那段注释记着同一个坑：一页
+// 全被丢弃时留下 0 条，拿 0 去判就成了「到底了」）。
+//
+// 传「去重之后新收进来几个」是同一个坑的另一种形状：**B 站翻页整页重叠**时那
+// 20 个人全是上一页那些、去重后一个不留，于是 `hasMore` 被判成「没有了」。
+// 症状：Tab 上写着 (59)、画面上只有 20 张卡，而且**末尾哨兵那一行也不画了**
+// ——于是连手动加载的入口都没有。
+func TestAFullyOverlappingPageStillLoadsTheNextOne(t *testing.T) {
+	b := newUIExplore(t)
+	// 第 2 页**整页**和第 1 页重叠；第 3 页有 19 个新的。总数 59 —— 比三页还多，
+	// 所以它一定还没到头。
+	pages := map[string][]any{
+		"1": uiFollowUserRange(1, 20),
+		"2": uiFollowUserRange(1, 20), // 完全重叠
+		"3": uiFollowUserRange(21, 19),
+	}
+	// 总数照**真实存在的人数**给 39（20 + 20 重叠 + 19 个新的）。写成 59 的话
+	// fixture 自己不自洽：B 站不可能一共 59 个人而只发得出 39 个，于是翻页会
+	// 多拉一个空的第 4 页——而那一条会把「hasMore 该不该是 false」量成别的事。
+	b.on("/x/relation/followings", func(w http.ResponseWriter, r *http.Request) {
+		pn := r.URL.Query().Get("pn")
+		if pages[pn] == nil {
+			pn = ""
+		}
+		uiExploreJSON(w, 0, map[string]any{"total": 39, "list": pages[pn]})
+	})
+	uiFollowTags(b, map[int]any{0: "默认分组"})
+	uiFollowSearch(b, "", nil)
+	uiFollowTag(b, 0, []any{})
+
+	s, tt, _ := newSpaceShell(t, b, true, "77")
+	s.navigate(followPath)
+	tt.Frame()
+	f := s.followPageOf()
+	waitFrames(t, tt, "第一页到了", func() bool { return len(f.users) == 20 })
+	tt.Frame()
+
+	for range 8 {
+		tt.Scroll(600, 400, 0, 100000)
+		tt.Frame()
+	}
+	// ⚠️ **等的条件是「累计 39」**：第二页整页重叠、一个人都添不上，
+	// 而第三页那 19 个必须照样到。
+	waitFrames(t, tt, "整页重叠之后第三页也到了", func() bool { return len(f.users) == 39 })
+	tt.Frame()
+
+	if !showsText(tt, "全部关注(39)") {
+		t.Errorf("Tab 上的总数对不上，文字有 %q", tt.Texts())
+	}
+	// ⚠️ **断的是「末尾」**：滚到底之后画面上是 25..39，所以问的是 UP 39。
+	// （问 UP 21 量到的是「屏幕能显示几行」，不是「分页有没有停」。）
+	if !showsText(tt, "UP 39 的签名") {
+		t.Errorf("整页重叠把分页掐死了：第三页那 19 个人没画出来，文字有 %q", tt.Texts())
+	}
+	// 39 / 39 —— 到头了，而且**是被累计数算出来**的，不是被「这一页一个人都没
+	// 添上」算出来的。
+	if f.pager.hasMore {
+		t.Error("39 / 39 已经到底了，却还说「还有」")
+	}
+}
+
+// TestSwitchingAccountsDoesNotKeepTheOldTotal 钉住「全部关注(N)」跟着账号走。
+//
+// 评审提的 trivial：`resetUsers` 原先不清 `f.total`，于是**新账号的第一页落地
+// 之前**那个数一直挂在 Tab 上；而新账号的第一页要是恰好拉失败，它就一直挂着
+// 上一个账号的关注数，界面上没有任何东西提示这一点。
+func TestSwitchingAccountsDoesNotKeepTheOldTotal(t *testing.T) {
+	b := newUIExplore(t)
+	uiFollowTags(b, map[int]any{0: "默认分组"})
+	uiFollowList(b, 7, []any{uiFollowUser(11, "账号 77 关注的那个人")})
+	uiFollowSearch(b, "", nil)
+	uiFollowTag(b, 0, []any{})
+
+	s, tt, a := newSpaceShell(t, b, true, "77")
+	s.navigate(followPath)
+	tt.Frame()
+	f := s.followPageOf()
+	waitFrames(t, tt, "第一个账号的关注到了", func() bool {
+		return f.selfMid == 77 && f.total == 7
+	})
+	tt.Frame()
+	if !showsText(tt, "全部关注(7)") {
+		t.Fatalf("第一个账号的总数没画出来，文字有 %q", tt.Texts())
+	}
+
+	// 换分组：那个 N **不许动**——它说的是「这个账号关注了多少人」，跟着账号走而
+	// 不跟着「停在哪个分组」走（Biu 那边换组它也还在，见 `index.tsx:224`）。
+	if err := tt.Click("默认分组(1)"); err != nil {
+		t.Fatalf("点不到分组：%v，文字有 %q", err, tt.Texts())
+	}
+	tt.Frame()
+	waitFrames(t, tt, "切到那一组", func() bool { return f.tab == followTagTab(0) })
+	tt.Frame()
+	if f.total != 7 {
+		t.Errorf("换分组之后那个 N 变成了 %d——它跟着账号走，不跟着停在哪个分组走", f.total)
+	}
+
+	// 换账号：那个 N **必须掉下来**。
+	a.TestOnlyAdoptLogin("88")
+	uiFollowList(b, 0, []any{}) // 新账号一个关注都没有
+	tt.Frame()
+	waitFrames(t, tt, "第二个账号的关注到了", func() bool {
+		return f.selfMid == 88 && f.pager.started
+	})
+	tt.Frame()
+	if f.total != 0 {
+		t.Errorf("换账号之后那个 N 仍然是 %d——它是上一个账号的关注数", f.total)
+	}
+	if showsText(tt, "全部关注(7)") {
+		t.Errorf("新账号的 Tab 上还挂着上一个账号的关注数，文字有 %q", tt.Texts())
+	}
+}

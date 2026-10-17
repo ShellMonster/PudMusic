@@ -253,6 +253,13 @@ func (s *Shell) resetFollowIfAccountChanged(f *followPage) {
 	f.tagLoading = false
 	f.tags, f.tagStarted, f.tagErr = nil, false, nil
 	f.resetUsers()
+	// ⚠️ **「全部关注(N)」那个 N 跟着账号走**，所以这里是它该清的地方：换账号
+	// 之后新账号的第一页还没落地，而那一个 N 是**上一个账号**的关注数——新账号的
+	// 第一页要是恰好拉失败，它会一直挂着，而界面上没有任何东西提示这一点。
+	//
+	// （它**不在** `resetUsers` 里：换分组、换词都只换「看哪一批」，不换
+	// 「我关注了多少人」，那两种情况下清掉它反而是白丢信息。）
+	f.total = 0
 	f.gen++
 }
 
@@ -262,6 +269,11 @@ func (s *Shell) resetFollowIfAccountChanged(f *followPage) {
 // 的那一页不落地（`upPager` 那段的注释），已经拿到的行还留在 `users` 里，
 // 于是下一次拉回来的是同一页，被直接追加在后面——两格一模一样的身份，框架按
 // key 对位时它们共用一份状态。
+//
+// ⚠️ **`f.total` 不在这儿清**：「全部关注(N)」那个 N 说的是「**这个账号**关注了
+// 多少人」，它跟着账号走，不跟着「停在哪个分组 / 有没有在搜」走——Biu 那边
+// 换分组、搜词它都还在（`follow-list/index.tsx:224`），所以那两种情况下清掉它
+// 是白丢一个信息。要清的是**换账号**，见 `resetFollowIfAccountChanged`。
 func (f *followPage) resetUsers() {
 	f.pager.stop()
 	f.users = nil
@@ -315,7 +327,18 @@ func (s *Shell) viewFollow(c *ui.Context, _ *ui.Route) {
 	}
 
 	// 分组那一列的第一拉。**必须在画之前发出去**（理由同 viewDynamicFeed）。
-	if !f.tagStarted && !f.tagLoading {
+	//
+	// 🔴 **`f.tagErr == nil` 是必需的一道闸**，和右边那一格的 `upPager.want()`
+	// 里那个 `p.err != nil` 是同一件事（见 `upspace.go` 的 `want`）。漏了它就是
+	// 一个停不下来的循环，而且**不靠用户点就自己转起来**：
+	//
+	// 这一段每帧都跑 → 失败 → 下面每一行都有 `s.wake.invalidate()`（铁律三）→
+	// 要来一帧新画面 → 下一帧又满足条件 → 再发一次。
+	//
+	// 实测：假 B 站一直回 -412，60 帧里这一支被打 **186 次**。
+	// 触发条件全是日常的：SESSDATA 过期（本地看着还登录着，B 站回 -101）、
+	// -412/-352 风控、网络抖一下。所以这一格和右边那一格必须是**同一道**闸。
+	if !f.tagStarted && !f.tagLoading && f.tagErr == nil {
 		f.tagLoading = true
 		go s.fetchFollowTags(context.Background(), f)
 	}
@@ -323,7 +346,7 @@ func (s *Shell) viewFollow(c *ui.Context, _ *ui.Route) {
 	// 每帧都跑，不设这道门就是第一页一落地、下一帧又拉一页。
 	if !f.pager.started && !f.pager.loading {
 		if ctx := f.pager.begin(); ctx != nil {
-			go s.fetchFollowUsers(ctx, f, f.tab, f.applied, f.pager.page, len(f.users), f.tabTotal())
+			go s.fetchFollowUsers(ctx, f, f.gen, f.tab, f.applied, f.pager.page, len(f.users), f.tabTotal())
 		}
 	}
 
@@ -541,7 +564,7 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 		s.viewLoadError(c, "follow-err:users", "重试加载关注的人", f.pager.err, func() {
 			f.pager.err = nil
 			if ctx := f.pager.begin(); ctx != nil {
-				go s.fetchFollowUsers(ctx, f, f.tab, f.applied, f.pager.page, len(f.users), f.tabTotal())
+				go s.fetchFollowUsers(ctx, f, f.gen, f.tab, f.applied, f.pager.page, len(f.users), f.tabTotal())
 			}
 		})
 		return
@@ -613,7 +636,7 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 	if f.pager.want() {
 		if _, last := st.Visible(); last >= n-1 {
 			if ctx := f.pager.begin(); ctx != nil {
-				go s.fetchFollowUsers(ctx, f, f.tab, f.applied, f.pager.page, len(f.users), f.tabTotal())
+				go s.fetchFollowUsers(ctx, f, f.gen, f.tab, f.applied, f.pager.page, len(f.users), f.tabTotal())
 			}
 		}
 	}
@@ -795,7 +818,7 @@ func (s *Shell) viewFollowSentinel(c *ui.Context, f *followPage) {
 			if ui.Button(c, "重试加载关注的人").FontSize(13).Clicked() {
 				f.pager.err = nil
 				if ctx := f.pager.begin(); ctx != nil {
-					go s.fetchFollowUsers(context.Background(), f, f.tab, f.applied,
+					go s.fetchFollowUsers(context.Background(), f, f.gen, f.tab, f.applied,
 						f.pager.page, len(f.users), f.tabTotal())
 				}
 			}
@@ -863,9 +886,14 @@ func (s *Shell) fetchFollowTags(ctx context.Context, f *followPage) {
 
 // fetchFollowUsers 拉右边那一格的一页。
 //
-// ⚠️ **tab / keyword / page / loaded 全都是调用方（界面线程）在开这一拉那一刻
-// 传进来的**，不是这里自己读的：闸门和已加载的那些格都是界面线程的状态，后台碰
-// 它就是数据竞争（铁律一）。
+// ⚠️ **gen / tab / keyword / page / loaded / count 全都是调用方（界面线程）在开
+// 这一拉那一刻传进来的**，不是这里自己读的：闸门、代次和已加载的那些格都是界面
+// 线程的状态，后台碰它就是数据竞争（铁律一）。
+//
+// 🔴 **gen 也在这一份里**——它是「换分组 / 换搜索词时 +1」的那个代次，而下面
+// 拿它填进 `followResult` 就是**读**它。第一版这里是 `gen: int(f.gen)`，直接
+// 在 goroutine 里读界面线程正在写的那个字段：`go test -race` 一抓一个准
+// （Read at follow.go:889 / Previous write at selectFollowTab）。
 //
 // 🔴 **loaded 在这儿是有用的，不是多传**：B 站那三个接口给的是**总数**，而
 // 「还有没有」要拿**累计加载数**去比总数——总数 25、每页 20，第二页发回来 5 个，
@@ -873,7 +901,7 @@ func (s *Shell) fetchFollowTags(ctx context.Context, f *followPage) {
 //
 // 而「累计加载了多少」是界面状态，后台读它就是竞争。所以它在**界面线程上**取一
 // 份带过来（和 `library_rows.go` 的 `load` 传 `loaded` 是同一个做法）。
-func (s *Shell) fetchFollowUsers(ctx context.Context, f *followPage, tab, keyword string, page, loaded, count int) {
+func (s *Shell) fetchFollowUsers(ctx context.Context, f *followPage, gen uint64, tab, keyword string, page, loaded, count int) {
 	var r followResult
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -886,7 +914,7 @@ func (s *Shell) fetchFollowUsers(ctx context.Context, f *followPage, tab, keywor
 		s.wake.invalidate()
 	}()
 
-	r = followResult{which: followUsers, selfMid: s.app.SelfMid(), gen: int(f.gen), tab: tab, keyword: keyword}
+	r = followResult{which: followUsers, selfMid: s.app.SelfMid(), gen: int(gen), tab: tab, keyword: keyword}
 	self := s.app.SelfMid()
 
 	if tagID, ok := tagIDOf(tab); ok {
@@ -983,7 +1011,6 @@ func (s *Shell) adoptFollow(f *followPage) {
 		if f.seen == nil {
 			f.seen = map[string]bool{}
 		}
-		added := 0
 		for _, u := range r.users {
 			k := "follow:" + strconv.FormatInt(u.Mid, 10)
 			if f.seen[k] {
@@ -991,7 +1018,6 @@ func (s *Shell) adoptFollow(f *followPage) {
 			}
 			f.seen[k] = true
 			f.users = append(f.users, u)
-			added++
 		}
 		// ⚠️ **「全部关注(N)」那个 N 只在不搜的时候换**：搜出来的 total 是搜到
 		// 几个，把它挂在「全部关注」旁边就是一句假话。
@@ -1003,6 +1029,15 @@ func (s *Shell) adoptFollow(f *followPage) {
 		//   - 这一页**一个都没发** → 到头了。B 站在页码超了的时候给的是空 list
 		//     而不是报错，而总数不会因此变，于是光比「累计 < 总数」会永远转圈。
 		//   - 累计还没追上总数 → 还有。
-		f.pager.adopt("", added, len(r.users) > 0 && len(f.users) < r.total)
+		//
+		// ⚠️ 第二个参数是 `len(r.users)`，**不是**「去重之后新收进来几个」。
+		// `upPager.adopt` 里那个 `sent` 说的是「B 站发了几个、过滤**之前**」
+		//（见 `upspace.go` 的 `adopt`：一页全是转发的动态、全被丢弃时留下 0 条，
+		// 拿 0 去判就成了「到底了」）。传去重后的个数是同一个坑的另一种形状：
+		// **B 站翻页整页重叠**时那 20 个人全是上一页那些、去重后一个不留，于是
+		// 「还有没有」被判成「没有了」——而第 3 页上还有 19 个新的。
+		// 症状：Tab 上写着 (59)、画面上只有 20 张卡，而且**没有加载更多的入口**
+		// （末尾哨兵那一行也不画了）。
+		f.pager.adopt("", len(r.users), len(r.users) > 0 && len(f.users) < r.total)
 	}
 }
