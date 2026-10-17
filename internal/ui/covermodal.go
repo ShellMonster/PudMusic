@@ -219,7 +219,7 @@ func (s *Shell) viewCropStage(c *ui.Context, crop *cropState) {
 	// 绝对坐标在拖动的全程都是一个意思。拿框自己的坐标会得到一个常数。
 	_, _, held := stage.Dragged()
 	x, y, _ := stage.PointerPosition()
-	s.trackCropDrag(crop, stage, x, y, held, iw, ih)
+	s.trackCropDrag(crop, x, y, held, iw, ih)
 }
 
 // drawCropStage 画台子上的东西。图和框是分开画的：框压在图上面。
@@ -257,7 +257,7 @@ func drawCropStage(p *ui.Painter, r ui.Rect, crop *cropState, iw, ih int32, t *u
 //
 // 按下那一刻记起点，往后每一帧都**从起点重算**（不是「这一帧的框 + 这一帧的
 // 位移」）：后者在指针被夹到台子边缘再回来时会突然跳一大截。
-func (s *Shell) trackCropDrag(crop *cropState, stage ui.Element, x, y float32, held bool, iw, ih int32) {
+func (s *Shell) trackCropDrag(crop *cropState, x, y float32, held bool, iw, ih int32) {
 	if !held {
 		crop.drag = cropDrag{}
 		return

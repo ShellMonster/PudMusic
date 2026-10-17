@@ -472,7 +472,7 @@ func (s *Shell) viewMain(c *ui.Context) {
 // 「提交完了但按钮还在转」，而用户看到的就是「点了没反应」。
 func (s *Shell) viewFolderDialogs(c *ui.Context) {
 	s.flushFolderResults()
-	s.syncFolderDialogs(c)
+	s.syncFolderDialogs()
 
 	s.viewFolderEdit(c)
 	// 裁剪弹窗画在编辑弹窗**外面**（不是里面）：`ui.Modal` 自己带一层遮罩，
@@ -485,7 +485,10 @@ func (s *Shell) viewFolderDialogs(c *ui.Context) {
 }
 
 // syncFolderDialogs 是那些「每一帧都要问一次后台」的地方。
-func (s *Shell) syncFolderDialogs(c *ui.Context) {
+//
+// ⚠️ **在 flushFolderResults 之后调**：列表换掉之后 `flushFolderResults` 才拿得到
+// 刚回来的那一批勾选状态，反过来的话这一帧的勾是按旧列表算的。
+func (s *Shell) syncFolderDialogs() {
 	if f := s.folderSelect; f != nil {
 		s.syncFolderList(f)
 	}

@@ -215,8 +215,17 @@ func (s *Shell) flushFolderResults() {
 
 	if e != nil && e.loading {
 		if draft, ok := s.app.TakeFolderDraft(); ok {
-			e.loading = false
-			e.applyDraft(draft)
+			// ⚠️ **对一下是哪一个收藏夹的**：改 A 的那一趟还在路上时用户改去
+			// 改 B 了，A 的那份回来会盖在 B 的表单上——而 B 明明还在「正在
+			// 拉」。表现是「打开 B，看到的却是 A 的名字」，用户一提交就把 A
+			// 的名字写到了 B 上。
+			//
+			// 不是这一个就**扔掉**（而不是放回去）：它是「取走而不是读」的那一
+			// 槽，留着只会被下一次拉取当成自己的。
+			if draft.ID == e.editID {
+				e.loading = false
+				e.applyDraft(draft)
+			}
 		}
 	}
 
