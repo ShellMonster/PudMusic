@@ -671,3 +671,111 @@ func TestTheMediaTypeIsAnEnumNotAString(t *testing.T) {
 			desc, goString(send(v, "class")))
 	}
 }
+
+// TestTheArtworkRepushCannotResurrectAPause 盯「封面补推不会把暂停按回在放」。
+//
+// 评审第二轮指出的第二个问题：补推原本是「在锁里取一份快照 → 解锁 → 排队写」。
+// 排队和执行之间有���隙，用户在这空隙里按了暂停，apply 先跑完（系统已经是
+// 暂停），补推随后把**过期的「在放」快照**整体写回去——暂停被按掉了。
+//
+// 串行化只挡住了「两次 push 各自的两条 setter 互相穿插」，没挡住「旧快照晚写」。
+// 所以这条用例逼出那个空隙：让 apply（暂停）在封面下好**之前**完成，然后才让
+// 补推执行，最后读回系统那份——状态必须是暂停，不能是又变回在放。
+//
+// 它也顺带钉住「快照在写的那一步现取」这件事：补推写的时候用的是**那一刻**
+// 的状态，而不是几十毫秒之前的那份。
+func TestTheArtworkRepushCannotResurrectAPause(t *testing.T) {
+	p := mpTestPlatform(t)
+
+	fetched := make(chan struct{})
+	release := make(chan struct{})
+	p.fetch = func(string) ([]byte, error) {
+		close(fetched)
+		<-release // 卡住：让「暂停」确定地在封面就绪之前跑完
+		return testPNG(t, 48, 48), nil
+	}
+
+	p.apply(NowPlaying{
+		State:      StatePlaying,
+		Title:      "有封面的一首",
+		Duration:   time.Minute,
+		ArtworkURL: "https://example.invalid/cover.png",
+	})
+	<-fetched // 封面在下了
+
+	// 趁它卡着，用户按了暂停。
+	//
+	// ⚠️ 快照里**必须带着同一个 ArtworkURL**——`App` 交出来的每一份都带着封面
+	// 地址（`mediaSnapshotLocked` 里 `ArtworkURL: a.cover`），暂停只改状态。
+	// 这里抹掉它就等于换了一首没有封面的歌，那条守卫会正确地把封面丢掉，
+	// 断的就不是交错那件事了。
+	p.apply(NowPlaying{
+		State:      StatePaused,
+		Title:      "有封面的一首",
+		Duration:   time.Minute,
+		ArtworkURL: "https://example.invalid/cover.png",
+	})
+	if got := sendInt(nowPlayingCenter(), "playbackState"); got != sysStatePaused {
+		t.Fatalf("暂停没写进去（playbackState=%d），后面那条用例就断不出东西", got)
+	}
+
+	close(release) // 封面下好了，补推该跑了
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if objectForKey(infoValue(nowPlayingCenter()), keyArtwork) != 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	center := nowPlayingCenter()
+	if got := objectForKey(infoValue(center), keyArtwork); got == 0 {
+		t.Fatal("封面没有补推上去")
+	}
+	// 🔴 关键那条：补推不能把暂停按回在放。
+	if got := sendInt(center, "playbackState"); got != sysStatePaused {
+		t.Errorf("封面补推把状态写成了 %d（want %d = paused）——它把过期的「在放」快照写回来了",
+			got, sysStatePaused)
+	}
+	if got := numValue(infoValue(center), keyRate); got != 0 {
+		t.Errorf("封面补推把速率写成了 %v（want 0）——进度条会和「暂停」打架", got)
+	}
+}
+
+// TestTheArtworkRepushDoesNotResurrectAClear 盯「清空之后不会被补推写回」。
+//
+// 清空（没有歌了）比暂停更重：补推若把旧快照写回来，锁屏上会**凭空出现一首
+// 正在播放的歌**——用户明明已经退出了。
+func TestTheArtworkRepushDoesNotResurrectAClear(t *testing.T) {
+	p := mpTestPlatform(t)
+
+	fetched := make(chan struct{})
+	release := make(chan struct{})
+	p.fetch = func(string) ([]byte, error) {
+		close(fetched)
+		<-release
+		return testPNG(t, 48, 48), nil
+	}
+
+	p.apply(NowPlaying{
+		State:      StatePlaying,
+		Title:      "有封面的一首",
+		Duration:   time.Minute,
+		ArtworkURL: "https://example.invalid/cover.png",
+	})
+	<-fetched
+
+	p.apply(NowPlaying{State: StateNone}) // 退出 / 没有歌了
+	if info := infoValue(nowPlayingCenter()); info != 0 {
+		t.Fatalf("清空没生效（nowPlayingInfo 还在），后面那条用例就断不出东西")
+	}
+
+	close(release)
+	time.Sleep(300 * time.Millisecond) // 给补推留足它跑完的时间
+
+	if info := infoValue(nowPlayingCenter()); info != 0 {
+		t.Errorf("封面补推把已经清空的那份写回来了（%s）——锁屏上会凭空多出一首歌",
+			objValue(info, keyTitle))
+	}
+}

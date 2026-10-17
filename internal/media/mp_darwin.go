@@ -324,35 +324,37 @@ func (p *mpSession) fetchArtwork(url string) {
 		return
 	}
 
-	p.mu.Lock()
-	// 期间用户可能已经切走、或者切到同一首去了。对不上就这张图白下了，
-	// 直接丢掉——留着的话会出现「下一首的进度配上一首的图」。
-	if p.fetching != url || p.last.ArtworkURL != url {
+	// ⚠️ 「校验 + 取快照 + 写系统」必须**在同一步里做完**，而且那一步排在那条
+	// 钉住的线程上。
+	//
+	// 之前是「锁里取一份 n → 解锁 → 排队写 n」。排队和执行之间有空隙：用户在这
+	// 空隙里按了暂停，apply 先跑完（系统已经是暂停），然后补推把**过期的
+	// 「在放」快照**整体写回去——暂停被按掉了。
+	//
+	// 串行化只挡住了「两次 push 各自的两条 setter 互相穿插」，没挡住「旧快照
+	// 晚写」。所以快照必须在**真的要写的那一步里**现取。
+	//
+	// 排到那条线程上之后它和 apply 是同一串：补推先跑就带着暂停后的状态写
+	// （对），apply 先跑补推就取到暂停后的状态再写（也对）。
+	onObjCThread(func() {
+		p.mu.Lock()
+		// 期间用户可能已经切走、或者切到同一首去了。对不上就这张图白下了，
+		// 直接丢掉——留着的话会出现「下一首的进度配上一首的图」。
+		if p.fetching != url || p.last.ArtworkURL != url {
+			p.mu.Unlock()
+			forgetImage(art)
+			return
+		}
+		old := p.artwork
+		p.artwork, p.artworkURL, p.fetching = art, url, ""
+		n := p.last // ← 就在这一刻取：外面可能刚变过
 		p.mu.Unlock()
-		forgetImage(art)
-		return
-	}
-	old := p.artwork
-	p.artwork, p.artworkURL, p.fetching = art, url, ""
-	n := p.last
-	p.mu.Unlock()
 
-	if old != 0 {
-		forgetImage(old)
-	}
-	// ⚠️ 这一步**必须**排在钉住的那条线程上，和 apply 走的是同一条路。
-	//
-	// 少了这一步，封面补推就变成**下载协程在写系统**，而 apply（暂停、停止、
-	// 清空）是另一条路在写。`push` 一次要发两条消息（`setNowPlayingInfo:` 之后
-	// `setPlaybackState:`），两次 push 一交错就出这种结果：
-	//
-	//	封面补推 写「在放」的元数据 →
-	//	暂停    写「暂停」的元数据和状态 →
-	//	封面补推 写「在放」的状态
-	//
-	// 最后 rate=0（进度条不动）而 playbackState=playing（按钮显示在放）。
-	// 而暂停之后**没有定期校正**（校正只在播放中跑），所以它不会自己好回来。
-	onObjCThread(func() { p.push(n, art) })
+		if old != 0 {
+			forgetImage(old)
+		}
+		p.push(n, art)
+	})
 }
 
 // ---- 远程命令：往系统上装、摘下来 ----
