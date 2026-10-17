@@ -186,8 +186,8 @@ func (a *App) SetLike(want bool, done func(error)) {
 	//
 	// ⚠️ **只有缓存已经属于这一首时才改**：没问过就改，等于把一个「还没问」写成
 	// 「问过了、没赞」，而下一趟 relation 问回来会把它盖掉——中间那几帧界面上是
-	// 一个我们编出来的答案。没问过的那一种走 `setLikeUnasked`（先写，答案等
-	// 那一趟填）。
+	// 一个我们编出来的答案。没问过的那一种就**不动缓存**：这一帧星标还是暗的，
+	// 而写成功之后 `setAskedLike` 会把它点亮（写还没成功，亮起来是在撒谎）。
 	a.likeMu.Lock()
 	asked := a.likeBvid == bvid
 	prev := a.like

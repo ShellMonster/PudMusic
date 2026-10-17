@@ -122,20 +122,20 @@ func (c *Client) LikeArchive(ctx context.Context, bvid string, like bool) error 
 
 // TripleResult 是「一键三连做完之后，B 站说现在是什么样」。
 //
-// ⚠️ **这三栏是 B 站给的，不是我猜的**：长按那一把做完，界面上的赞、投币、收藏
+// 🔴 **这三栏是 B 站给的，不是我猜的**：长按那一把做完，界面上的赞、投币、收藏
 // 三样都要按它更新（照抄 `music-thumb/index.tsx` 的
 // `setIsThumb(res.data.like); setIsFav(res.data.fav)`）。界面自己把三样都置成
 // 「已做」的话，B 站要是拒绝了投币（硬币不够、投过了）界面上就写着「投了」而用户
-// 手上没有——而用户看得见有没有投出去。
+// 手上没有——而用户看得见有没有花出去那一枚币。
+//
+// 回包里还有一栏 `multiply`（连击数），这里**不读**：界面不用它，而读一个不用
+// 的字段只会让人以为将来一定要用（真要显示「你今天连了几次」时再加，那时才对着
+// 回包抄一次）。
 type TripleResult struct {
 	// Liked / Coined / Favorited 是三连之后这三样的状态。
 	Liked     bool
 	Coined    bool
 	Favorited bool
-	// Multiply 是这一次的连击数（1 是单次三连）。界面不用它，Biu 那边也没用；
-	// 留着是因为它是这一份回包里唯一的数字，真要显示「你今天连了几次」时不必再
-	// 猜协议。
-	Multiply int
 }
 
 // LikeTriple 一键三连：赞 + 投币 + 收藏。**写操作**。
@@ -168,18 +168,12 @@ func (c *Client) LikeTriple(ctx context.Context, bvid string) (TripleResult, err
 		return TripleResult{}, fmt.Errorf("bili: 给投稿 %s 一键三连: %w", bvid, err)
 	}
 	var d struct {
-		Like     bool `json:"like"`
-		Coin     bool `json:"coin"`
-		Fav      bool `json:"fav"`
-		Multiply int  `json:"multiply"`
+		Like bool `json:"like"`
+		Coin bool `json:"coin"`
+		Fav  bool `json:"fav"`
 	}
 	if err := json.Unmarshal(raw, &d); err != nil {
 		return TripleResult{}, fmt.Errorf("bili: 一键三连的返回读不懂: %w", err)
 	}
-	return TripleResult{
-		Liked:     d.Like,
-		Coined:    d.Coin,
-		Favorited: d.Fav,
-		Multiply:  d.Multiply,
-	}, nil
+	return TripleResult{Liked: d.Like, Coined: d.Coin, Favorited: d.Fav}, nil
 }

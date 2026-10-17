@@ -274,9 +274,6 @@ func TestTheTripleCarriesTheFavoriteToo(t *testing.T) {
 	if !res.Liked || !res.Coined || !res.Favorited {
 		t.Errorf("回包是 %+v，want 三样都成了", res)
 	}
-	if res.Multiply != 1 {
-		t.Errorf("连击数是 %d，want 1", res.Multiply)
-	}
 }
 
 // TestTheTripleOnAFailureIsNotAFavorite 钉住「失败时什么都不改」。

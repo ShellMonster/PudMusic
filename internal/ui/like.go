@@ -27,6 +27,7 @@ package ui
 
 import (
 	"math"
+	"strings"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -168,11 +169,46 @@ func (g *likeGesture) swallowClick() bool {
 // ⚠️ 回调跑在后台 goroutine 上（铁律一）。它只做两件事：`addToast`（自己带锁，
 // 安全）和 `App` 那一层已经叫过唤醒。**不许在这里碰 Shell 的字段**。
 func (s *Shell) tripleNow() {
-	s.app.TripleLike(func(_ bili.TripleResult, err error) {
+	s.app.TripleLike(func(res bili.TripleResult, err error) {
 		if err != nil {
 			s.addToast("一键三连没成功：" + err.Error())
+			return
+		}
+		// ⚠️ **三样要分开说**：B 站可能只做成一部分（硬币不够、这一首投过了、
+		// 风控拦了）。一句话「三连成功」会骗用户说「投出去了」——而他手上没有
+		// 那一枚币，那是他花了钱的。
+		if msg := tripleSaysWhatHappened(res); msg != "" {
+			s.addToast(msg)
 		}
 	})
+}
+
+// tripleSaysWhatHappened 是三连做完之后那句话。
+//
+// 三样都成了就**不说话**：星标亮起来、收藏那一键也亮了，那就是答复，Biu 那边
+// 成功时也不弹提示（`music-thumb` 只在失败时 `addToast`）。
+//
+// 差一样就说差的那一样——「赞和收藏成功了，投币没成功」。
+func tripleSaysWhatHappened(res bili.TripleResult) string {
+	yes, no := []string{}, []string{}
+	for _, p := range []struct {
+		name string
+		ok   bool
+	}{{"赞", res.Liked}, {"投币", res.Coined}, {"收藏", res.Favorited}} {
+		if p.ok {
+			yes = append(yes, p.name)
+		} else {
+			no = append(no, p.name)
+		}
+	}
+	if len(no) == 0 {
+		return ""
+	}
+	msg := "三连里" + strings.Join(no, "、") + "没成功"
+	if len(yes) > 0 {
+		msg = strings.Join(yes, "和") + "成功了，" + msg
+	}
+	return msg
 }
 
 // viewLikeRing 画长按进度环，并把这一帧该发的三连发出去。
@@ -247,7 +283,7 @@ func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 	}
 	btn := ui.Button(c, label).Width(metaBtnW).Padding(1, 6).MaxLines(1).
 		TextColor(color).
-		Tooltip(likeStarTooltip(rel.Liked))
+		Tooltip(likeStarTooltip(rel.Liked, s.app.LikeErr() != nil && !s.app.LikeAsked()))
 	if btn.Clicked() {
 		s.app.SetLike(!rel.Liked, func(err error) {
 			if err != nil {
@@ -261,8 +297,15 @@ func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 //
 // 两句话都提「长按封面三连」，因为那是同一个动作的另一个入口——用户盯着这个键
 // 找三连的时候，指针往封面那边挪一下就行，不用知道有个隐藏手势。
-func likeStarTooltip(liked bool) string {
-	if liked {
+//
+// 🔴 **问不出「赞没赞」时要说出来**：那一次问失败之后长按是关着的（`likeArmed`
+// 要 `LikeAsked`），而**关着的时候什么都不说**就是「按住封面两秒半，界面一动
+// 不动」——用户不会知道那是网络的事，以为是自己按错了。
+func likeStarTooltip(liked, askFailed bool) string {
+	switch {
+	case askFailed:
+		return "暂时问不出赞没赞（长按封面三连先关着，赞还是能点）"
+	case liked:
 		return "已经赞过了（取消赞；长按封面可以三连）"
 	}
 	return "给这一首点赞（长按封面 2.5 秒一键三连）"
