@@ -46,16 +46,24 @@ var corruptCases = []corruptCase{
 	{
 		name: "FLAC 拦腰截断", src: "stereo16.flac",
 		corrupt: func(t *testing.T, dir, good string) string {
-			// 留在 60%：一定落在某一帧中间，不是帧边界上。
-			return writeBytes(t, dir, "cut.flac", readFile(t, good)[:sizeOf(t, good)*6/10])
+			// 留在 20%：一定落在某一帧中间，不是帧边界上。
+			//
+			// ⚠️ 为什么是 20% 而不是「一半」：**要听的音频只有那么多**。
+			// 这条用例要等播放走到断点才判得成，而「走到」是要花真时间的——
+			// 普通跑一遍 0.3 秒，`-race` 下实测 **21 秒**（检测器把音频回调
+			// 拖慢了二十倍）。断点留在 60% 时它要放 2.4 秒的音频，机器再忙一点
+			// 就顶到上限红掉；留在 20% 只要 0.8 秒，同一台机器上余量大得多。
+			// 证据一点没少：照样是「解到坏的那一帧才报 unexpected EOF」。
+			return writeBytes(t, dir, "cut.flac", readFile(t, good)[:sizeOf(t, good)*2/10])
 		},
 	},
 	{
 		name: "FLAC 中间填垃圾（长度不变）", src: "stereo16.flac",
 		corrupt: func(t *testing.T, dir, good string) string {
 			b := readFile(t, good)
-			// 从头 1/4 之后铺一段垃圾：FLAC 的帧 CRC 会当场发现。
-			for i := len(b) / 4; i < len(b)/4+64 && i < len(b); i++ {
+			// 从头 1/16 之后铺一段垃圾：FLAC 的帧 CRC 会当场发现。
+			//（同上一条：位置越靠前，要等的音频越少）
+			for i := len(b) / 16; i < len(b)/16+64 && i < len(b); i++ {
 				b[i] ^= 0xA5
 			}
 			return writeBytes(t, dir, "dirty.flac", b)
