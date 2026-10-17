@@ -52,15 +52,20 @@ const (
 	StatusRunning Status = "running"
 	// StatusPaused 用户暂停了，或者应用退出时正在下的那些（见 `Restore`）。
 	StatusPaused Status = "paused"
-	// StatusMuxing 两条流都下完了，正在交织成一个 MP4（视频那一路）。
+	// StatusMuxing 字节全下完了，正在交织成一个能播的文件（视频那一路）。
 	//
 	// ⚠️ 它是**在飞**的一种，不是「下完了」：两条几百 MB 的流要读一遍
 	// 再写一遍，那十几秒里界面上不能显示成完成。而它**不是** running：
-	// 那一刻网络已经空出来了，`Running()` 要说真话。
+	// 那一刻网络已经空出来了，`Running()` 要说真话（这一条是它算在飞
+	// 的理由，见下面）。
+	//
+	// 这个状态位是记录页那一票（#77）先占好的，那一版还没有代码会置它；
+	// 视频下载那一票（#32/#39）接上交织之后它才真的有地方来。
 	//
 	// 重开应用之后不可能「正在交织」——那一轮的进程都没了，所以恢复时
-	// 它一律变成暂停（见 `store.go`）。而「继续」是对的：两条流在盘上，
-	// 分块也是齐的，按「继续」会一路走到交织那一步，几秒钟就出结果。
+	// 它一律变成暂停（见 `store.go` 的 `inflight`）。而「继续」是对的：
+	// 两条流在盘上、分块也是齐的，按「继续」会一路走到交织那一步，
+	// 一条字节都不重下，几秒钟就出结果。
 	StatusMuxing Status = "muxing"
 	// StatusDone 下完了，文件已经在 `Task.Dest` 上。
 	StatusDone Status = "done"
@@ -69,16 +74,29 @@ const (
 )
 
 // CanPause 报告这个状态现在能不能暂停。
+//
+// ⚠️ 交织不算能暂停。**不是**因为停不下来——`mux.Mux` 认 ctx，删掉这一项 /
+// 退出应用都能把它掐掉（`runOne` 那条取消分支就是靠这个把状态收回暂停）。
+// 真正的原因是**暂停对它没有意义**：两条流已经在盘上、分块记账是齐的，
+// 而「暂停」答应用户的是「之后能从断的地方接着来」——交织没有断的地方，
+// 要么做完，要么重来（重来时两条流一条字节都不用重下）。
 func (s Status) CanPause() bool { return s == StatusRunning }
 
 // CanResume 报告这个状态现在能不能继续。
+//
+// 交织中同样不算：字节已经全下完了，「继续」对它没有可继续的东西。真出错了
+// 那一路会落在 `StatusError` 上，由重试从头走（那时交织会重来）。
 func (s Status) CanResume() bool { return s == StatusPaused || s == StatusError }
 
-// Running 报告这个任务此刻是不是在**忙着**。
+// Running 报告这个任务此刻是不是占着资源。
 //
-// 「交织中」也算：那时网络空出来了，但它在读写几百 MB 的盘，而用户看到的
-// 应该是「还在动」而不是「停住了」。
+// 交织算在飞，虽然它不再占着网络：它占着这一项，而且它**正在往盘上写**。判据
+// 是「用户还没法对这一项动手」，不是「有没有 HTTP 请求在飞」。
 func (s Status) Running() bool { return s == StatusRunning || s == StatusMuxing }
+
+// inflight 报告这个状态是不是「在飞的」——退出或重开时它就该变成暂停，因为
+// 那个活儿已经不存在了（进程都没了）。
+func (s Status) inflight() bool { return s == StatusQueued || s.Running() }
 
 // Identity 是「这一段字节属于谁」。
 //

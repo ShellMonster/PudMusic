@@ -137,6 +137,14 @@ func (a *App) download(it Item, req download.AddRequest) (download.Snapshot, err
 	return m.Enqueue(req)
 }
 
+// DownloadDir 是这一首现在会下到哪儿。
+//
+// 界面上那个「打开下载目录」要的就是它：按钮旁边写着的路径、按下去打开的目录、
+// 歌真正落下来的地方，**必须是同一个**。写一个设置里的原始值再按下去的话，
+// 设置还空着时按钮上写的是空串、按下去打开的是别处——用户在自己的下载目录
+// 里找不到刚下的那几首，而界面上每一个字都是真的。
+func (a *App) DownloadDir() string { return a.downloadDir() }
+
 // downloadDir 是这一首该下到哪儿。
 //
 // 设置里的 `DownloadPath` 为空时退回 `FallbackDir`（系统下载目录）——

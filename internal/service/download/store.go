@@ -32,12 +32,20 @@ import (
 // QueueFileName 是队列文件名。
 const QueueFileName = "download-queue.json"
 
-// storeVersion 是这份文件的版本。
+// QueueVersion 是队列文件的版本。
 //
 // 不是凑数的字段：以后换了记账方式（比如改分块大小），旧文件里的分块
 // 下标就对不上新的分块划分了。认版本是为了**拒绝**一份读不懂的记录，
 // 而不是硬读出一个「下到一半」的假象。
-const storeVersion = 1
+//
+// 导出的理由和 `QueueFileName` 一样：这份文件的形状**就是**这一版的对外约定
+// （用户自己会打开它看，别的层要写它、备份它、迁移它），「它第几版」是外面
+// 的代码要问的第一个问题。
+const QueueVersion = 1
+
+// storeVersion 是这一版读的那一版。写代码时用 `QueueVersion`，这里留个别名是
+// 为了让读代码的人一眼看出「读的那一版」和「对外说的那一版」是同一个数。
+const storeVersion = QueueVersion
 
 // queueFile 是落盘的那份 JSON。
 type queueFile struct {
@@ -74,7 +82,7 @@ func (m *Manager) persistable() []*Task {
 			continue
 		}
 		cp := *t
-		if cp.Status.Running() || cp.Status == StatusQueued {
+		if cp.Status.inflight() {
 			cp.Status = StatusPaused
 		}
 		out = append(out, &cp)
@@ -116,8 +124,10 @@ func (m *Manager) Restore(path string) error {
 		}
 		// ⚠️ **只把「在飞的」改成暂停**，不是一律改。
 		//
-		// `running` / `queued` / `muxing`：重启之后那个在飞的动作早就不在
-		// 了，记成它们会让界面上永远转圈。
+		// `running` / `queued`：重启之后那个在飞的请求早就不在了，记成
+		// running 会让界面上永远转圈。交织中（`muxing`）同理——那个交织器
+		// 也随进程没了，而交织的进度这一版根本存不下来（`Snapshot.Percent`
+		// 是字节进度），记成交织中就是**永远转圈且永远停在同一个数**。
 		//
 		// `done`：歌已经在盘上了。改成暂停的话，记录页上每一行都写着
 		//「暂停」，而那一行上唯一能按的「继续」会把**已经下完的整首歌**
@@ -125,7 +135,7 @@ func (m *Manager) Restore(path string) error {
 		// 下完了就是下完了，它不需要「继续」。
 		//
 		// `paused` / `error`：本来就不是在飞的，原样带回来。
-		if t.Status.Running() || t.Status == StatusQueued {
+		if t.Status.inflight() {
 			t.Status = StatusPaused
 		}
 		t.Err = ""
