@@ -693,6 +693,87 @@ func TestAFailedReportDoesNotReachTheUser(t *testing.T) {
 	}
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 五、退出与换客户端
+// ─────────────────────────────────────────────────────────────────────────────
+
+// reporterOf 取 App 上那个上报器。
+func reporterOf(t *testing.T, a *App) *playReporter {
+	t.Helper()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.report == nil {
+		t.Fatal("上报器没装上")
+	}
+	return a.report
+}
+
+// TestClosingTheAppStopsTheReportingGoroutine 盯退出把那条 goroutine 收了。
+//
+// 上报这一摊自己起了一条 goroutine（`run`）。放着不管的话，应用退出去之后它
+// 还在往 B 站打请求——而「退出应用」到「进程真的没了」之间还有一段时间，
+// 那一段时间里用户以为已经退出了，账号里却还在长播放记录。
+//
+// 量的是 `wg` 而不是 `runtime.NumGoroutine`：后者会被解码器、fixture 服务器
+// 那几条一并算进来，说不清是谁没走。
+func TestClosingTheAppStopsTheReportingGoroutine(t *testing.T) {
+	a, _ := newReportRig(t)
+	r := reporterOf(t, a)
+
+	// 🔴 **先 Close 再等**。反过来写的话这条测试量的是「等一条永远不结束的
+	// goroutine」，它在 3 秒后报红，而那和 `Close` 有没有收干净毫无关系。
+	a.Close()
+
+	done := make(chan struct{})
+	go func() {
+		r.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("App.Close 之后上报那条 goroutine 还在跑")
+	}
+
+	// 关掉了之后再 `sync` 一拍：它必须什么都不做，而不是往一条已经没人
+	// 读的队列里塞消息。
+	r.sync(reportItem("BV1after", "1"), time.Second, time.Second, true, false)
+
+	// Close 可以重复调（`App.Close` 自己那道门也会挡一层）。
+	a.Close()
+	a.Close()
+}
+
+// TestMountingStreamingAgainRetiresTheOldReporter 盯换客户端时上一条得走掉。
+//
+// 换了客户端却不关旧的：那条 goroutine 还拿着**旧的** B 站客户端在发，而那个
+// 客户端的 cookie jar 可能已经被换掉了——于是进度发到了一个说不清是谁的会话上。
+func TestMountingStreamingAgainRetiresTheOldReporter(t *testing.T) {
+	a, _ := newReportRig(t)
+	old := reporterOf(t, a)
+
+	// 换一份客户端重挂（生产里 `MountStreaming` 只在开窗口前调一次，
+	// 但「只调一次」不是一条可以被代码依赖的保证）。
+	b := newReportBili(t)
+	cli := bili.NewClient(bili.Options{})
+	cli.TestOnlyPointHostsAtFixture(b.URL)
+	a.MountStreaming(Streaming{Client: cli, Media: b.Client(), TempDir: t.TempDir()})
+
+	done := make(chan struct{})
+	go func() {
+		old.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("重挂在线播放之后，上一个上报器的那条 goroutine 还在跑")
+	}
+	if reporterOf(t, a) == old {
+		t.Fatal("重挂了却还在用旧的上报器")
+	}
+}
+
 // TestAViewThatFailsIsNotAskedAgainAndAgain 「问不到 aid」不许每拍问一次。
 //
 // 进度条的时钟是 20 拍一秒。问一次失败不记住的话，实测那一秒能发 20 次

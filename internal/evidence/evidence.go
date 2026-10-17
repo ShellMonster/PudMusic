@@ -561,6 +561,9 @@ var Items = []Item{
 			// 失败不许影响播放。
 			"TestAFailedReportDoesNotReachTheUser",
 			"TestAViewThatFailsIsNotAskedAgainAndAgain",
+			// 退出与换客户端：上报那条 goroutine 得收掉。
+			"TestClosingTheAppStopsTheReportingGoroutine",
+			"TestMountingStreamingAgainRetiresTheOldReporter",
 			// 从真的播放链路走到 B 站（真队列 + 真取流 + 真解码 + 真进度条时钟）。
 			"TestPlayingARealStreamReachesBilibili",
 			"TestStoppingARealStreamTellsBilibiliItIsOver",
