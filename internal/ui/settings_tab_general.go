@@ -113,7 +113,7 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 func (s *Shell) pickSwitch(c *ui.Context, title, key string, on bool, ro bool, set func(*app.Settings, bool)) {
 	// ⚠️ 和 pickAutoStart 一样不给 Switch 加 Key（见那里的注释：加了 Key 之后
 	// 旋钮动画每帧从头开始，那一页永远停不下来）。
-	if ui.Switch(c, &on).Label("开关：" + title).Disabled(ro).Changed() {
+	if staticSwitch(c, &on).Label("开关：" + title).Disabled(ro).Changed() {
 		s.applySetting(key, func(cur *app.Settings) { set(cur, on) })
 	}
 }

@@ -225,7 +225,11 @@ func (s *Shell) pickAutoStart(c *ui.Context, st app.Settings, ro bool) {
 	// 永远停不下来（实测：加了 Key 之后 `settleSettingsPage` 跑满 60 帧还在滑，
 	// 去掉就好了）。上面那两排按钮能加 Key，是因为 Row 本身没有动画。
 	// ⚠️ 那个 `Label` 不能省，原因见 `pickSwitch`：开关自己一个字都没有。
-	sw := ui.Switch(c, &on).Label("开关：开机自启").Disabled(ro)
+	//
+	// 用 `staticSwitch` 而不是 `ui.Switch`：Biu 那一页每一个开关都写了
+	// `disableAnimation`，而 `ui.Switch` 的 140ms 旋钮动画没有关掉的开关——见
+	// static_switch.go，那一节顺带说明了它为什么还很贵。
+	sw := staticSwitch(c, &on).Label("开关：开机自启").Disabled(ro)
 	if !sw.Changed() {
 		return
 	}

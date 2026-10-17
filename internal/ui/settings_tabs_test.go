@@ -66,8 +66,11 @@ func TestAllFourTabsAreThereAndEachDrawsItsOwnThing(t *testing.T) {
 func TestPickingTheFontChangesWhatTheWholeWindowDrawsIn(t *testing.T) {
 	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
 
-	if got := BuildTheme(s.app.SettingsSnapshot(), false).Font; got != app.DefaultFontFamily {
-		t.Fatalf("起点字体是 %q，want %q", got, app.DefaultFontFamily)
+	// 「系统默认」这一档要**一个字节都不改**主题：`t.Font` 的零值是系统自己的字体，
+	// 而设置里默认是 `"system-ui"`——那是另一个字符串，设上去全应用的字宽都会变
+	// （见 BuildTheme 那里的注释和那条被它弄红的播放条测试）。
+	if got := BuildTheme(s.app.SettingsSnapshot(), false).Font; got != "" {
+		t.Fatalf("选了系统默认之后主题里的字体是 %q，应该是空的（= 系统自己的）", got)
 	}
 
 	openFontMenu(t, tt)

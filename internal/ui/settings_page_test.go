@@ -231,6 +231,12 @@ func TestSettingsPageSaysSoWhenAChangeCannotBeStored(t *testing.T) {
 
 	s := New(a)
 	t.Cleanup(s.images.Close)
+	// ⚠️ **这一句不能删**。切页动画是 250ms，而无头 Tester 的钟**只有 `Advance` 才
+	// 走**——动画在不动的钟上永远走不完，于是紧接着的每一次 `tt.Frame()` / `tt.Click()`
+	// 都把 `settle()` 那 20 帧的上限跑满。单这一条在 `-race` 下是 38 秒，整包
+	// `go test -race ./...` 因此跑到 7 分半（验收命令会超时）。删掉它这一条立刻变成
+	// 2.5 秒。理由和 `newShell` / `shellOnSettings` 里那一句一模一样。
+	s.router.Transition = mygoui.TransitionNone
 	tt := mygoui.NewTester(s.View, 1200, 800)
 	tt.Frame()
 	openSettings(t, tt)
