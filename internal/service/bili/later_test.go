@@ -208,9 +208,13 @@ func TestToViewRemovePostsTheAid(t *testing.T) {
 	if got.Path == "" {
 		t.Fatal("没有发出移除的请求")
 	}
-	// ⚠️ 断言 **body 原文**而不是 `rec.Form`：bili.Client 发表单时不带
-	// Content-Type，假服务器那边的 `ParseForm` 解析不出 body（PostForm 是空的）。
-	// 这是这一包里所有 POST 测试都要注意的一件事。
+	// 断言 **body 原文**。`Client.Do` 现在给表单请求带
+	// `Content-Type: application/x-www-form-urlencoded`（那是对着 B 站 servlet
+	// 修的根因：少了它 B 站不解析请求体，「移除」会**静默失败**），而
+	// `r.ParseForm()` 遇到能解析的表单会把 body 读空 —— 假服务器那一侧
+	// （`client_test.go` 的 `newFakeBili`）因此**先读原文、再装回去、最后
+	// ParseForm**，两样都留得住。所以这里既可以断 `rec.Body` 也可以断
+	// `rec.Form`；断原文是为了顺带钉住「它确实是用表单发出去的」。
 	if !strings.Contains(got.Body, "aid=170001") {
 		t.Errorf("body 里没有 aid=170001，原文是 %q", got.Body)
 	}
