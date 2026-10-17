@@ -124,14 +124,10 @@ func (s *Shell) viewHistory(c *ui.Context, _ *ui.Route) {
 				s.viewReportHistory(c, st.ReportPlayHistory, ro)
 			})
 
-			ui.Row(c).FillWidth().Gap(16).Children(func() {
-				datesChanged := p.dates.view(c, now)
-				submitted := p.viewKeywordBox(c)
-				// 换查询要在**画列表之前**（理由见 later.go 里同一句）。
-				if datesChanged || p.keywordChanged(now, submitted) {
-					p.apply()
-				}
-			})
+			// 换查询要在**画列表之前**（理由见 later.go 里同一句）。
+			if p.viewFilters(c, now) || p.keywordChanged(now, p.submitted) {
+				p.apply()
+			}
 
 			historyHeader(c)
 			p.rows.View(c)
@@ -145,7 +141,16 @@ func (s *Shell) viewHistory(c *ui.Context, _ *ui.Route) {
 func (s *Shell) viewReportHistory(c *ui.Context, on, ro bool) {
 	// ⚠️ 这里**不能** .Key()：Switch 的旋钮有动画，动画状态记在控件节点上，
 	// 每帧换一个新节点等于动画每帧从头开始（见 settings_page.go 的 pickAutoStart）。
-	ui.Switch(c, &on).Label("记录播放历史").Disabled(ro)
+	sw := ui.Switch(c, &on).Label("记录播放历史").Disabled(ro)
+	// 🔴 **按下去要真的写设置**。`on` 是这一帧的局部变量：框架只把用户拨的那一下
+	// 写进它，下一帧 view 又从设置里读一遍填回来。只绑定不写，用户按了开关弹回去，
+	// 而界面上看不出任何异样——这是「按了没反应」里最难查的一种。
+	//
+	// 写不出去（没挂设置、只读）走 `applySetting` 那一句提示，和设置页同一套。
+	if !sw.Changed() {
+		return
+	}
+	s.applySetting("记录播放历史", func(cur *app.Settings) { cur.ReportPlayHistory = on })
 }
 
 // historyHeader 是那一行表头。抄上游 `pages/history/header.tsx`。

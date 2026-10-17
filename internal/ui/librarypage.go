@@ -51,8 +51,18 @@ type libraryPage struct {
 	// 这个混淆）。
 	draft, applied string
 
+	// seenDraft 是上一帧框里的字。**防抖的钟靠它重打**：用户每敲一个字都要重新
+	// 开始等那 500ms（`useDebounceFn` 也就是这么做的）。从第一个字算起的话，
+	// 用户慢慢打的时候会在中途就发出去一个还没输完的词。
+	seenDraft string
+
 	// pendingSince 是「敲下去、还没发出去」的起点。零值 = 没有待发的搜索。
 	pendingSince time.Time
+
+	// submitted 是这一帧搜索框有没有被回车提交。**它必须记在状态上**而不是当成
+	// 一个返回值传下去：`viewFilters` 画完之后还要拿它判要不要换查询，而那一段
+	// 和画筛选器不在同一个闭包里。
+	submitted bool
 }
 
 // init 把这一页接上。
@@ -74,16 +84,20 @@ func (p *libraryPage) apply() { p.rows.Reload() }
 
 // keywordChanged 报这一帧搜索条件变了没，变了就换查询。
 //
-// 它**顺带处理防抖**：框里的字和 applied 不一样时，先记下起点；到了 500ms
-// 才真的换。回车是例外，立刻换（见文件头）。
+// **防抖的钟在用户每敲一个字的时候重新打**：上一次敲的已经过去 400ms、这一下又
+// 敲了一个字，那一下就得从头再等 500ms，而不是把上一个字的 400ms 接着算——否则慢
+// 慢打的时候会在中途发出去一个还没输完的词（上游 `useDebounceFn(wait: 500)` 就是
+// 每个输入都重置那个钟）。回车是例外，立刻换（见文件头）。
 func (p *libraryPage) keywordChanged(now time.Time, submitted bool) bool {
 	draft := strings.TrimSpace(p.draft)
-	if draft != p.applied && p.pendingSince.IsZero() {
-		p.pendingSince = now
-	}
 	switch {
 	case submitted:
+		p.seenDraft = draft
 		return p.applyKeyword(draft)
+	case draft != p.seenDraft:
+		// 用户又敲了一个字：把钟重打，这一帧不搜。
+		p.seenDraft, p.pendingSince = draft, now
+		return false
 	case draft == p.applied:
 		p.pendingSince = time.Time{}
 		return false
@@ -93,9 +107,10 @@ func (p *libraryPage) keywordChanged(now time.Time, submitted bool) bool {
 	return false
 }
 
-// applyKeyword 把生效的词换掉，顺带把「待发」清干净。
+// applyKeyword 把生效的词换掉，顺带把「待发」和「上一次敲的字」都清干净
+// （不清的话下一帧又会认成「用户刚敲的」，于是每帧都判一遍防抖）。
 func (p *libraryPage) applyKeyword(kw string) bool {
-	p.pendingSince = time.Time{}
+	p.pendingSince, p.seenDraft = time.Time{}, kw
 	if kw == p.applied {
 		return false
 	}
@@ -108,9 +123,6 @@ func (p *libraryPage) applyKeyword(kw string) bool {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // viewKeywordBox 画那个搜索框，报「回车了没」。
-//
-// 摆在筛选器左边（Biu 的 `later/search.tsx` 是 `justify-between`：日期在左、
-// 搜索框在右；两页摆的是同一排，我们把搜索框放右边，和上游一致）。
 func (p *libraryPage) viewKeywordBox(c *ui.Context) bool {
 	box := ui.TextInput(c, &p.draft).
 		Width(keywordBoxWidth).
@@ -119,6 +131,33 @@ func (p *libraryPage) viewKeywordBox(c *ui.Context) bool {
 		Label(keywordBoxLabel).
 		Placeholder(keywordBoxLabel)
 	return box.Submitted()
+}
+
+// viewFilters 画「日期范围筛选 + 关键词框」那一块，返回「换条件了没」。
+//
+// ## 为什么搜索框**另起一行**（上游 `later/search.tsx` 是同一排）
+//
+// 上游那一排是 `flex justify-between`：日期选择器在左、输入框在右（`w-64`）。那个
+// 排法在它那边的窗口宽度下摆得下 ours 摆不下：我们的页面区最窄是
+// **900（`WindowOptions.MinWidth`）减掉侧栏和页内边距 ≈ 660**，而日期那一块光两个
+// 输入框加四个预设就已经要 ~577，再加一个 256 的输入框要 849。
+//
+// **后果不是「挤一挤」，是叠在一起**：实测 900 宽时结束日期的框
+// （X=667,W=130）和搜索框（X=700,W=200）重叠，点结束日期点的是搜索框，它的日历
+// 打不开——而用户缩小窗口是为了看东西，不是为了点什么打不开。
+//
+// 也不能靠「窄了就换排法」绕开：宽度要等布局完才知道（`Bounds` 量的是上一帧的
+// 盒子，`c.Size()` 是窗口不是页面区），改窗口大小之后的第一帧照样是错的，而那一帧
+// 就是用户点下去的那一帧。
+//
+// 拆两行是唯一在**每一个**宽度上都对的排法，代价是竖着多一行的位置。
+func (p *libraryPage) viewFilters(c *ui.Context, now time.Time) bool {
+	changed := false
+	ui.Column(c).Key("filter:bar").FillWidth().Gap(8).Children(func() {
+		changed = p.dates.view(c, now)
+		p.submitted = p.viewKeywordBox(c)
+	})
+	return changed
 }
 
 // libraryRowHead 是这两页的**行首**：`#` + 封面 + 标题 + UP 名，剩下右边那几列

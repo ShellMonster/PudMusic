@@ -21,6 +21,10 @@ import (
 
 // historyFixture 造一份历史记录的返回。n 条，每条的 bvid 一样、kid 不一样
 // ——**这正是真实情况**：同一首歌看过两次在 B 站是两条记录。
+//
+// ⚠️ kid 给的是**数字**，不是拼好的串：上游那个类型就是 `kid?: number`，而删除要用
+// 的 `{business}_{kid}` 是调用方自己拼的（`pages/history/index.tsx:223`）。fixture 用
+// 拼好的串会把「前缀漏了」这个错整个盖住。
 func historyFixture(t *testing.T, n int, hasMore bool) string {
 	t.Helper()
 	items := make([]map[string]any, 0, n)
@@ -30,7 +34,7 @@ func historyFixture(t *testing.T, n int, hasMore bool) string {
 			"author_name": "UP " + string(rune('A'+i)), "author_mid": 900 + i,
 			"view_at":  int64(1_700_000_000 + i*3600),
 			"progress": int64(754 + i), "duration": int64(2700),
-			"kid": "archive_" + string(rune('a'+i)),
+			"kid": float64(170001 + i),
 			"history": map[string]any{
 				"bvid": "BV1xx411c7m0B", "cid": 4000 + i, "business": "archive",
 			},
@@ -128,8 +132,11 @@ func TestHistoryPageIsParsed(t *testing.T) {
 	if want := 45 * time.Minute; got.Duration != want {
 		t.Errorf("总时长 %v，want %v", got.Duration, want)
 	}
-	if got.Kid != "archive_a" {
-		t.Errorf("kid = %q，want archive_a", got.Kid)
+	// 🔴 kid 必须带**业务前缀**：B 站的 `kid` 字段给的是光秃秃的目标 id，而删除
+	// 接口要的是 `{business}_{目标}`（上游 `${item.history.business}_${item.kid}`）。
+	// 只发数字过去 B 站认不出是哪一类记录，而它**回 code 0**。
+	if got.Kid != "archive_170001" {
+		t.Errorf("kid = %q，want archive_170001（业务前缀是删除接口的一部分）", got.Kid)
 	}
 	if got.Bvid != "BV1xx411c7m0B" || got.AuthorName != "UP A" {
 		t.Errorf("bvid/UP = %q/%q", got.Bvid, got.AuthorName)
@@ -141,6 +148,8 @@ func TestHistoryPageIsParsed(t *testing.T) {
 	if pg.Items[0].Kid == pg.Items[1].Kid {
 		t.Fatal("两条记录的 kid 一样，测试的 fixture 不对")
 	}
+	// 同一个稿件 id 看两次：前缀一样、后面那一位一样，而**行的身份**不一样
+	//（`app` 层靠观看时刻区分），删的时候说的也是同一条资源。
 }
 
 // TestHistoryKidIsBuiltWhenBiliOmitsIt 盯 kid 缺失时怎么拼。
@@ -153,8 +162,9 @@ func TestHistoryKidIsBuiltWhenBiliOmitsIt(t *testing.T) {
 		raw  any
 		want string
 	}{
-		{"数字", float64(170001), "170001"},
-		{"字符串", "archive_999", "archive_999"},
+		{"数字", float64(170001), "archive_170001"},
+		{"不带前缀的字符串", "170001", "archive_170001"},
+		{"已经带前缀的字符串", "archive_999", "archive_999"},
 		{"没有", nil, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {

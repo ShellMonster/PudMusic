@@ -30,6 +30,7 @@ import (
 	"errors"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -170,7 +171,7 @@ func historyPageOf(d *historySearchData) HistoryPage {
 			Title: it.Title, Cover: it.Cover,
 			Bvid: it.History.Bvid, Cid: it.History.Cid,
 			Business:   business,
-			Kid:        kidOf(it.Kid),
+			Kid:        kidOf(it.Kid, business),
 			AuthorName: it.AuthorN, AuthorMid: it.AuthorM,
 			ViewAt:   unixSeconds(it.ViewAt),
 			Progress: seconds(it.Progress),
@@ -182,23 +183,37 @@ func historyPageOf(d *historySearchData) HistoryPage {
 
 // kidOf 是这一条删除要用的 `{业务类型}_{目标id}`。
 //
-// B 站给 `kid` 的时候有三种样子：数字、字符串、干脆没有（`web-interface-history-
-// search.ts` 里 `kid?: number` 是可选的）。三种都得处理：
+// 🔴 **前缀是接口的一部分，不是装饰**：上游拼的是
+// `${item.history.business}_${item.kid}`（`pages/history/index.tsx:223`），而 B 站的
+// `kid` 字段本身给的是**光秃秃的目标 id**（上游那个类型就是 `kid?: number`）。
+// 只把数字发过去的话 B 站认不出那是哪一类记录——而它**回 code 0**，
+// 用户看着那一行消失了、刷新之后它又回来了。
 //
-//   - 给了就用（它是权威的）。
-//   - 没给就**返回空串**。B 站的 `kid` 是 `archive_{aid}`，要从 bvid 反解出
-//     aid 得抄它那套 58 进制表——抄错一位就是删掉别人的东西，而这种错在界面上
-//     完全看不出来（B 站对错的 kid 一样回 code 0）。
+// B 站给 `kid` 有三种样子：数字、字符串、干脆没有（那个字段是可选的）。三种都处理：
+// 数字和没带前缀的字符串都补上 `{business}_`；已经带了的原样用（别补成
+// `archive_archive_123`）。
 //
-// 空串传到界面上就是「这一条不给『删除』这一项」，这是能说的实话。
-func kidOf(raw any) string {
+// 两者都拿不到就**返回空串**：要从 bvid 反解出 aid 得抄 B 站那套 58 进制表，抄错
+// 一位就是删掉别人的东西，而这种错在界面上完全看不出来。空串传到界面上就是
+// 「这一条不给『删除』这一项」，这是能说的实话。
+func kidOf(raw any, business string) string {
+	if business == "" {
+		return ""
+	}
+	var id string
 	switch v := raw.(type) {
 	case string:
-		return v
+		id = v
 	case float64:
-		return strconv.FormatInt(int64(v), 10)
+		id = strconv.FormatInt(int64(v), 10)
 	}
-	return ""
+	if id == "" {
+		return ""
+	}
+	if strings.HasPrefix(id, business+"_") {
+		return id
+	}
+	return business + "_" + id
 }
 
 // HistoryDelete 删掉一条历史记录（kid 形如 `archive_12345`）。

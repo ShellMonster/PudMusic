@@ -127,16 +127,12 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 		Children(func() {
 			ui.Text(c, "稍后再看").FontSize(22).Bold()
 
-			ui.Row(c).FillWidth().Gap(16).Children(func() {
-				datesChanged := p.dates.view(c, now)
-				submitted := p.viewKeywordBox(c)
-				// 换查询的位置在**画列表之前**：Reload 会把已加载的行清掉，
-				// 放在后面的话这一帧画的是清掉之前的样子，用户会先看到一屏旧
-				// 的、再变成空、再变成新的。
-				if datesChanged || p.keywordChanged(now, submitted) {
-					p.apply()
-				}
-			})
+			// 换查询的位置在**画列表之前**：Reload 会把已加载的行清掉，放在后面
+			// 的话这一帧画的是清掉之前的样子，用户会先看到一屏旧的、再变成空、
+			// 再变成新的。筛选和搜索框为什么分两行，见 `viewFilters`。
+			if p.viewFilters(c, now) || p.keywordChanged(now, p.submitted) {
+				p.apply()
+			}
 
 			laterHeader(c)
 			p.rows.View(c)

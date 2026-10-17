@@ -148,7 +148,8 @@ func historyBody(progress, duration int, titles []string) string {
 			"title": title, "cover": "", "author_name": "UP " + title, "author_mid": 11,
 			"view_at":  now.Add(-time.Duration(i) * time.Hour).Unix(),
 			"progress": progress, "duration": duration,
-			"kid": fmt.Sprintf("archive_%d", 170001+i),
+			// ⚠️ **数字**：上游那个类型是 `kid?: number`，前缀是删除接口自己拼的。
+			"kid": float64(170001 + i),
 			// **每一条的 bvid 一样**：同一首歌看过两次在 B 站就是这样的两条。
 			"history": map[string]any{"bvid": "BVSAME", "cid": 4001 + i, "business": "archive"},
 		})
@@ -172,15 +173,7 @@ func libraryShell(t *testing.T, f *libFake, path string) (*mygoui.Tester, *Shell
 
 	a := app.New()
 	t.Cleanup(a.Close)
-	cli := bili.NewClient(bili.Options{
-		// 用 httptest 自带的那份 transport——它认识那张自签证书。
-		Transport: f.Server.Client().Transport,
-		CSRF:      func() string { return "the-jct" },
-	})
-	// ⚠️ 不指到 fixture 上的话这些用例会打到**真的** B 站：不报错、结果还挺合理，
-	// 于是测试变成「取决于能不能连上 B 站」。
-	cli.TestOnlyPointHostsAtFixture(f.URL)
-	a.MountLibrary(cli)
+	a.MountLibrary(biliForTest(t, f))
 
 	s := New(a)
 	t.Cleanup(s.images.Close)
@@ -204,6 +197,20 @@ func libraryShell(t *testing.T, f *libFake, path string) (*mygoui.Tester, *Shell
 	s.navigate(path)
 	tt.Frame()
 	return tt, s
+}
+
+// biliForTest 造一个指向假 B 站的真客户端。
+func biliForTest(t *testing.T, f *libFake) *bili.Client {
+	t.Helper()
+	cli := bili.NewClient(bili.Options{
+		// 用 httptest 自带的那份 transport——它认识那张自签证书。
+		Transport: f.Server.Client().Transport,
+		CSRF:      func() string { return "the-jct" },
+	})
+	// ⚠️ 不指到 fixture 上的话这些用例会打到**真的** B 站：不报错、结果还挺合理，
+	// 于是测试变成「取决于能不能连上 B 站」。
+	cli.TestOnlyPointHostsAtFixture(f.URL)
+	return cli
 }
 
 // settle 跑到 cond 成立为止。每一轮走一帧，顺带让后台那一支有机会跑。
