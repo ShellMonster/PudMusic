@@ -14,7 +14,17 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
 )
+
+// afterFunc 排一个「过 d 之后再跑 fn」的定时器，返回停掉它的函数。
+//
+// 包一层是为了让 `App.after` 的类型和 `time.AfterFunc` 的**返回值**对得上
+// （后者返回一个 `*time.Timer`，不是函数）。
+func afterFunc(d time.Duration, fn func()) func() {
+	t := time.AfterFunc(d, fn)
+	return func() { t.Stop() }
+}
 
 // tickInterval 是进度条时钟的间隔。每秒 20 次足够让进度条看起来是滑的，
 // 又不至于把 CPU 烧在重绘上（Invalidate 会合并，一帧里叫多少次都只画一次）。
@@ -133,6 +143,35 @@ type App struct {
 	// 错误、不自己清零，所以不比对的话每 50 ms 会重复报一次。
 	reportedErr error
 
+	// 歌词这一摊，见 lyrics.go。挂上缓存之前 lyricCache 是 nil，那时就一直
+	// 「没有歌词」。
+	lyricCache *lyrics.Cache
+	// lyricKey 是当前这首歌的缓存键。**换歌时才变**，界面靠它认出「换歌了」
+	// （同一首换流不重置，见 setLyricTrack）。
+	lyricKey string
+	// lyricGen 是**歌词代次**。每换一次歌或换一次歌词源就加一，迟到的缓存读取
+	// 回来发现代次变了直接走人（见 loadLyrics）。
+	lyricGen int
+	// lyricRows 是已经叠好译文的那一行行。
+	lyricRows []lyrics.Row
+	// lyricOffsetMS / lyricFontSize 是用户调过的值，切歌时同步重置成默认值。
+	lyricOffsetMS int
+	lyricFontSize float32
+	// lyricEntry 是缓存里这一条原文+译文的**内容**（不含偏移和字号那两个
+	// 用户值，那两个在 flushLyrics 里现填）。写盘和换源都靠它。
+	lyricEntry lyrics.Entry
+	// lyricStopTimer 是偏移/字号落盘那个防抖窗口的「停掉它」。每次重新排窗口都会
+	// 先调上一次那个（理由见 armLyricsSaveLocked）。它是**函数**而不是
+	// `*time.Timer`，是为了让测试能换成一个手动推进的假钟。
+	lyricStopTimer func()
+
+	// after 排一个「过 d 之后再跑 fn」的定时器，返回停掉它的函数。New 装成真的。
+	//
+	// 做成字段是为了让**等待**测得到：真等 500ms 的测试要么慢，要么靠
+	// `time.Sleep`——而 `PLAN.md` 的验收项明写「用假钟，不靠 time.Sleep」。
+	// 用得着的只有歌词那 500ms 的防抖窗口（见 lyrics.go）。
+	after func(d time.Duration, fn func()) func()
+
 	// 本地音乐库，见 localmusic.go。挂上去之前是 nil，界面要判空。
 	localMusic *localLibrary
 
@@ -166,7 +205,7 @@ type App struct {
 	// mediaSink 是「该跟系统媒体会话说一声了」的那只手，由界面层装一次。
 	// nil = 没装（这一层不参与，Publish 是空操作）。
 	mediaSink func(media.NowPlaying)
-	// mediaAt 是上一次跟系统说话的��刻。用来限住「多久校正一次进度」。
+	// mediaAt 是上一次跟系统说话的时刻。用来限住「多久校正一次进度」。
 	mediaAt time.Time
 
 	wake   func() // 界面层装：状态写完后叫它要一帧
@@ -177,7 +216,7 @@ type App struct {
 // New 建一个空的应用状态，开后台时钟。
 func New() *App {
 	a := &App{volume: 1, rate: audio.DefaultRate, queue: NewQueue(), done: make(chan struct{}),
-		streamCache: map[string]*bili.StreamRef{}}
+		streamCache: map[string]*bili.StreamRef{}, after: afterFunc}
 	go a.tick()
 	return a
 }
@@ -296,6 +335,8 @@ func (a *App) Open(path string) error {
 	}
 	p.Play()
 	a.publishMedia()
+	// 歌词跟着换歌一起换：先重置成默认值，再从缓存恢复（见 lyrics.go）。
+	a.setLyricTrack(LocalItem(path))
 	if wake != nil {
 		wake()
 	}
@@ -490,6 +531,8 @@ func (a *App) Close() {
 	if a.account != nil {
 		a.account.Close()
 	}
+	// 歌词偏移/字号那一次防抖写可能还欠着，退出前落完。
+	a.closeLyrics()
 	// 下载要**停掉并落盘**。停掉是为了别让在飞的请求在应用退出时还在往盘上
 	// 写；落盘是因为队列文件是「下到哪儿了」的唯一一份，丢了用户重启就得
 	// 从头下。写失败不往上报错：退出路径上没有用户在看。

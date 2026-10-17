@@ -24,9 +24,17 @@ func newShell(t *testing.T) (*Shell, *mygoui.Tester) {
 	t.Cleanup(a.Close)
 	s := New(a)
 	t.Cleanup(s.images.Close)
-	// 搜索历史带着一个后台落盘的 goroutine（见 searchhistory.go）。每个外壳
-	// 一个，测试里建得比真窗口快得多，不收掉就是一堆挂着的 goroutine。
+	// 搜索历史和快捷键各带着一个后台落盘的 goroutine，红点那个定时器也是
+	// 每个外壳一路（见 searchhistory.go / shortcuts.go / navbar_feed.go）。
+	// 每个外壳一个，测试里建得比真窗口快得多，不收掉就是一堆挂着的 goroutine。
+	//
+	// ⚠️ 漏掉它们不只是「慢」：挂着的那几十路定时器会让后面那些**按固定像素
+	// 判主题**的测试（settings_test.go）随机红——它给采样点画 20 帧等着底色出现，
+	// 而机器一忙这 20 帧里该画完的东西没画完（实测：带一批重测试时约三次红一次，
+	// 拿掉就 0/4）。这些是纯测试资源，不收掉没有任何好处。
 	t.Cleanup(func() { _ = s.hist.Close() })
+	t.Cleanup(func() { _ = s.keys.Close() })
+	t.Cleanup(s.feed.disarm)
 
 	// 🔴 关掉切页动画。Tester 一帧画完，250ms 的滑动在里面永远走不完：那一帧
 	// 停在半路，上一页正往左挪、下一页正往右进，中间那道分界线正扫过页面区域。
