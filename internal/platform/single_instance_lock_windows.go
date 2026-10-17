@@ -37,8 +37,10 @@ import (
 
 // kernel32 里那两个函数。
 var (
-	modkernel32    = syscall.NewLazyDLL("kernel32.dll")
-	procLockFileEx = modkernel32.NewProc("LockFileEx")
+	modkernel32     = syscall.NewLazyDLL("kernel32.dll")
+	procLockFileEx  = modkernel32.NewProc("LockFileEx")
+	procOpenProcess = modkernel32.NewProc("OpenProcess")
+	procCloseHandle = modkernel32.NewProc("CloseHandle")
 )
 
 // LockFileEx 的标志位与错误码。
@@ -49,6 +51,24 @@ const (
 	// ERROR_LOCK_VIOLATION：锁被别的进程拿着。
 	errorLockViolation syscall.Errno = 33
 )
+
+// processAlive 报这个 pid 现在还在不在。
+//
+// Windows 上不能用 unix 那套「信号 0」：那边在 Windows 上没有对应物。`OpenProcess`
+// 打不开就是没有（进程已经退了，句柄也就没了），打得开就是还在——这里只需要后者。
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	h, _, _ := procOpenProcess.Call(processQueryLimitedInformation, 0, uintptr(uint32(pid)))
+	if h == 0 {
+		return false
+	}
+	_, _, _ = procCloseHandle.Call(h)
+	return true
+}
+
+const processQueryLimitedInformation = 0x1000
 
 // lockExclusive 拿那把独占锁。拿到返回 true，拿不到（别人拿着）返回 false。
 //
