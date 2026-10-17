@@ -48,8 +48,18 @@ const (
 	keyMediaType = "MPNowPlayingInfoPropertyMediaType"
 )
 
-// mediaTypeAudio 是 `MPNowPlayingInfoPropertyMediaType` 的值。音频就是它。
-const mediaTypeAudio = "audio"
+// mediaTypeAudio 是 `MPNowPlayingInfoPropertyMediaType` 的值。
+//
+// ⚠️ **它是 `MPNowPlayingInfoMediaType` 这个枚举，要装进 NSNumber**，不是字符串
+// "audio"。头文件里这个属性声明的是 `MPNowPlayingInfoMediaType`（一个
+// NS_ENUM），所以给它一个 NSString，系统认不出来——而它认不出来的表现是
+// **静默忽略**：歌名、进度、封面全照常显示，只是这一栏不起作用。
+//
+// `MPNowPlayingInfoMediaTypeAudio` = 1（None = 0、Video = 2）。
+const mediaTypeAudio = 1
+
+// warnPushOffThread 保证「写入跑错线程」只说一次，别把日志刷满。
+var warnPushOffThread sync.Once
 
 // mpSession 是 macOS 那一半的实现。
 type mpSession struct {
@@ -143,6 +153,22 @@ func (p *mpSession) applyOnObjCThread(n NowPlaying) {
 // 顺序也有讲究：`setNowPlayingInfo:` 会 retain 住字典和它的内容，所以放掉我们这一份
 // 之后，系统手上那份还活着——这正是我们想要的（换歌时它要继续显示旧的那张封面）。
 func (p *mpSession) push(n NowPlaying, art id) {
+	// 🔴 **闸门**：不在钉住的那条线程上就**拒写**。
+	//
+	// 原因很具体：一次 push 要发两条系统消息（`setNowPlayingInfo:` 之后
+	// `setPlaybackState:`）。别的写插在这两条之间，就会留下「元数据说暂停、
+	// 状态说在放」这种对不上的组合——而它**不会自己好回来**，因为校正只在
+	// 播放中跑。
+	//
+	// 所以这里宁可这一次什么也不写（下一��� publish 自然会补上），也不要写坏。
+	if !onObjCThreadNow() {
+		warnPushOffThread.Do(func() {
+			log.Printf("biu: 系统媒体会话有一次写入不在它自己那条线程上，已拒掉（" +
+				"否则会出现「进度不动但按钮显示在放」）。这是本票的 bug，请记下来。")
+		})
+		return
+	}
+
 	if n.State == StateNone {
 		// 清空用 `setNowPlayingInfo: nil`。**没有** `clearNowPlayingInfo`
 		// 这个方法，调它会 unrecognized selector（见
@@ -166,7 +192,7 @@ func (p *mpSession) push(n NowPlaying, art id) {
 	// 而它同时决定进度条要不要自己往前走。
 	putNumber(info, keyRate, rateOf(n.State))
 	putNumber(info, keyDefRate, 1)
-	putString(info, keyMediaType, mediaTypeAudio)
+	putInt(info, keyMediaType, mediaTypeAudio)
 	if art != 0 {
 		dictPut(info, keyArtwork, art)
 	}
@@ -185,6 +211,16 @@ func (p *mpSession) push(n NowPlaying, art id) {
 // putString 往字典里放一个字符串值，放完把自己那一份释放掉。
 func putString(dict id, key, value string) {
 	v := newString(value)
+	if v == 0 {
+		return
+	}
+	defer release(v)
+	dictPut(dict, key, v)
+}
+
+// putInt 往字典里放一个整数盒子，放完释放。
+func putInt(dict id, key string, value int) {
+	v := newNumberInt(value)
 	if v == 0 {
 		return
 	}
@@ -304,7 +340,19 @@ func (p *mpSession) fetchArtwork(url string) {
 	if old != 0 {
 		forgetImage(old)
 	}
-	p.push(n, art)
+	// ⚠️ 这一步**必须**排在钉住的那条线程上，和 apply 走的是同一条路。
+	//
+	// 少了这一步，封面补推就变成**下载协程在写系统**，而 apply（暂停、停止、
+	// 清空）是另一条路在写。`push` 一次要发两条消息（`setNowPlayingInfo:` 之后
+	// `setPlaybackState:`），两次 push 一交错就出这种结果：
+	//
+	//	封面补推 写「在放」的元数据 →
+	//	暂停    写「暂停」的元数据和状态 →
+	//	封面补推 写「在放」的状态
+	//
+	// 最后 rate=0（进度条不动）而 playbackState=playing（按钮显示在放）。
+	// 而暂停之后**没有定期校正**（校正只在播放中跑），所以它不会自己好回来。
+	onObjCThread(func() { p.push(n, art) })
 }
 
 // ---- 远程命令：往系统上装、摘下来 ----

@@ -40,6 +40,8 @@ import (
 var (
 	objcOnce sync.Once
 	objcJobs chan func()
+	// objcThread 是钉住那条线程的 pthread id，只给 onObjCThreadNow 用。
+	objcThread uint64
 )
 
 // onObjCThread 把 fn 放到那条钉住的 OS 线程上跑，**等它跑完再回来**。
@@ -69,9 +71,33 @@ func objcStart() {
 			// ⚠️ 这一句是这一层存在的全部理由：不锁，goroutine 会换线程，
 			// 那这一层等于白做。
 			runtime.LockOSThread()
+			objcThread = pthreadSelf()
 			for job := range objcJobs {
 				job()
 			}
 		}()
 	})
+}
+
+// onObjCThreadNow 报「现在这个 goroutine 是不是就在那条钉住的线程上」。
+//
+// 用来给**必须**在那条线程上跑的动作做闸门。`push` 就是：它一次要发两条
+// 系统消息，而两条之间被别的写插进来，元数据和播放状态就会对不上
+// （rate=0 而 playbackState=playing），而那种错**不会自己好回来**——
+// 校正只在播放中跑。
+func onObjCThreadNow() bool {
+	objcStart()
+	return pthreadSelf() == objcThread
+}
+
+// pthreadSelf 是 `pthread_self()`，注册在 init 里（见 objc_darwin.go）。
+//
+// 它只用来**比身份**（是不是那条钉住的线程），所以取不到的时候返回 0 也就
+// 够了——那种情况下 `onObjCThreadNow` 会一路回 false，`push` 宁可拒写也不会
+// 写坏系统的状态（见 mp_darwin.go 里那道闸门）。
+func pthreadSelf() uint64 {
+	if pthreadSelfFn == nil {
+		return 0
+	}
+	return pthreadSelfFn()
 }

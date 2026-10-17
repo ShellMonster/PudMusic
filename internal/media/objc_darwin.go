@@ -61,9 +61,11 @@ var (
 	// double 走的是浮点寄存器那一组，按整数传过去的话参数会被解释成
 	// 一个恰好落在浮点寄存器里的垃圾位。
 	msgDouble func(obj id, sel objc.SEL) float64
-	// msgInitDouble 是「接收一个 double、返回一个对象」的那一类消息。
-	// `newNumberDouble` 要用它——见那里为什么**不能**用 `+numberWithDouble:`。
+	// msgInitDouble / msgInitInt 是「接收一个数、返回一个对象」的那一类消息。
+	// `newNumberDouble` / `newNumberInt` 要用它们——见那里为什么**不能**用
+	// `+numberWithDouble:` / `+numberWithInt:`（工厂方法是 autorelease 的）。
 	msgInitDouble func(obj id, sel objc.SEL, v float64) id
+	msgInitInt    func(obj id, sel objc.SEL, v int) id
 	// msgRequestImage 是 `-[MPMediaItemArtwork requestImageWithSize:completionHandler:]`
 	// 的**入向**声明（返回值是 void，所以只有参数）。
 	//
@@ -77,6 +79,8 @@ var (
 	// `objc_msgSend` 按它自己那份类型编码传参，我们的实现按两个 double 收，
 	// 拿到的是同一对寄存器。
 	msgRequestImage func(obj id, sel objc.SEL, w, h float64, completion objc.Block)
+	// pthreadSelfFn 是 `pthread_self()`，用来认出「是不是那条钉住的线程」。
+	pthreadSelfFn func() uint64
 	// msgNSSize 是返回 NSSize 的那种。返回值能封送（纯 Go 那边是照着
 	// 结果缓冲写回去的），所以这里老老实实声明成结构。
 	msgNSSize func(obj id, sel objc.SEL) nsSize
@@ -130,8 +134,29 @@ func loadObjC() {
 		}
 	}
 
+	// pthread_self：libobjc 自己链着 libSystem，所以先问 libobjc 的句柄
+	// （dlsym 会顺着依赖链找），不行再直接问 libSystem。
+	for _, lib := range []uintptr{h, 0} {
+		if lib == 0 {
+			l, err := purego.Dlopen("/usr/lib/libSystem.B.dylib", purego.RTLD_GLOBAL|purego.RTLD_NOW)
+			if err != nil {
+				break
+			}
+			lib = l
+		}
+		if a, err := purego.Dlsym(lib, "pthread_self"); err == nil {
+			purego.RegisterFunc(&pthreadSelfFn, a)
+			break
+		}
+	}
+	if pthreadSelfFn == nil {
+		loadErr = fmt.Errorf("media: 取不到 pthread_self，没法确认写系统时在那条线程上")
+		return
+	}
+
 	purego.RegisterFunc(&msgDouble, msgSend)
 	purego.RegisterFunc(&msgInitDouble, msgSend)
+	purego.RegisterFunc(&msgInitInt, msgSend)
 	purego.RegisterFunc(&msgRequestImage, msgSend)
 	purego.RegisterFunc(&msgNSSize, msgSend)
 }
@@ -301,6 +326,18 @@ func newNumberDouble(v float64) id {
 		return 0
 	}
 	return msgInitDouble(n, sel("initWithDouble:"), v)
+}
+
+// newNumberInt 造一个 **+1 的** NSInteger 盒子。
+//
+// 和 `newNumberDouble` 同理：不能用 `+[NSNumber numberWithInt:]`（工厂方法，
+// 交回来的是 autorelease 过的），要 `[[NSNumber alloc] initWithInt:]`。
+func newNumberInt(v int) id {
+	n := send(id(class("NSNumber")), "alloc")
+	if n == 0 {
+		return 0
+	}
+	return msgInitInt(n, sel("initWithInt:"), v)
 }
 
 // newData 造一个 **+1 的** NSData，拷走 b 的内容。

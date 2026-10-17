@@ -140,13 +140,13 @@ func TestNowPlayingInfoRoundTrip(t *testing.T) {
 	p := mpTestPlatform(t)
 	center := nowPlayingCenter()
 
-	p.push(NowPlaying{
+	p.apply(NowPlaying{
 		State:    StatePlaying,
 		Title:    "一首歌",
 		Artist:   "某某",
 		Duration: 3*time.Minute + 30*time.Second,
 		Position: 90 * time.Second,
-	}, 0)
+	})
 
 	info := infoValue(center)
 	if info == 0 {
@@ -170,7 +170,7 @@ func TestNowPlayingInfoRoundTrip(t *testing.T) {
 	}
 
 	// 收尾：这一份是进程全局的，别留给别的用例看。
-	p.push(NowPlaying{State: StateNone}, 0)
+	p.apply(NowPlaying{State: StateNone})
 }
 
 // TestThePlaybackRateFollowsTheState 盯速率跟着状态走。
@@ -189,7 +189,7 @@ func TestThePlaybackRateFollowsTheState(t *testing.T) {
 		{StatePaused, 0},
 		{StateStopped, 0},
 	} {
-		p.push(NowPlaying{State: c.state, Title: "一首歌", Duration: time.Minute}, 0)
+		p.apply(NowPlaying{State: c.state, Title: "一首歌", Duration: time.Minute})
 		info := infoValue(center)
 		if info == 0 {
 			t.Fatalf("状态 %v 之后 nowPlayingInfo 是空的", c.state)
@@ -199,7 +199,7 @@ func TestThePlaybackRateFollowsTheState(t *testing.T) {
 			t.Errorf("状态 %v 时速率是 %v，want %v", c.state, got, c.want)
 		}
 	}
-	p.push(NowPlaying{State: StateNone}, 0)
+	p.apply(NowPlaying{State: StateNone})
 }
 
 // TestPlaybackStateIsAlwaysSet 盯 setPlaybackState: 真的被调了。
@@ -221,7 +221,7 @@ func TestPlaybackStateIsAlwaysSet(t *testing.T) {
 		{StatePaused, sysStatePaused},
 		{StateStopped, sysStateStopped},
 	} {
-		p.push(NowPlaying{State: c.state, Title: "一首歌", Duration: time.Minute}, 0)
+		p.apply(NowPlaying{State: c.state, Title: "一首歌", Duration: time.Minute})
 		if got := sendInt(center, "playbackState"); got != c.want {
 			t.Errorf("状态 %v 之后系统那边是 %d，want %d", c.state, got, c.want)
 		}
@@ -229,7 +229,7 @@ func TestPlaybackStateIsAlwaysSet(t *testing.T) {
 
 	// 没有歌的时候系统那边应该是「停了」，不是「不知道」——
 	// unknown 在控制中心上留着一个不知道该显示什么的按钮。
-	p.push(NowPlaying{State: StateNone}, 0)
+	p.apply(NowPlaying{State: StateNone})
 	if got := sendInt(center, "playbackState"); got != sysStateStopped {
 		t.Errorf("清空之后系统那边是 %d，want %d（stopped）", got, sysStateStopped)
 	}
@@ -243,11 +243,11 @@ func TestClearingRemovesTheNowPlayingInfo(t *testing.T) {
 	p := mpTestPlatform(t)
 	center := nowPlayingCenter()
 
-	p.push(NowPlaying{State: StatePlaying, Title: "一首歌", Duration: time.Minute}, 0)
+	p.apply(NowPlaying{State: StatePlaying, Title: "一首歌", Duration: time.Minute})
 	if infoValue(center) == 0 {
 		t.Fatal("前面的写入没生效，后面的清空就断不出东西")
 	}
-	p.push(NowPlaying{State: StateNone}, 0)
+	p.apply(NowPlaying{State: StateNone})
 	if info := infoValue(center); info != 0 {
 		t.Errorf("清空之后 nowPlayingInfo 还在（%s）", goString(send(info, "description")))
 	}
@@ -587,5 +587,87 @@ func TestEveryOwnedHelperSurvivesAnAutoreleasePoolPop(t *testing.T) {
 	center := nowPlayingCenter()
 	if got := objValue(infoValue(center), keyTitle); got != "一首歌" {
 		t.Errorf("pop 之后系统那份的歌名是 %q", got)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 评审第二轮指出来的两处，各配一条用例
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestAWriteFromTheWrongThreadIsRefused 盯「写系统只能在那条线程上」。
+//
+// 评审指出：封面补推原本在**下载协程**上直接调 `push`，而 apply（暂停、停止、
+// 清空）在另一条路。`push` 一次发两条系统消息，两次 push 一交错就留下
+// 「元数据说暂停、状态说在放」——而校正只在播放中跑，这种错**不会自己好回来**。
+//
+// 修法是补推也走 `onObjCThread`，再在 `push` 顶上加一道闸门：不在那条线程上
+// 就**拒写**。这条用例断的就是那道闸门——从测试协程（不是那条线程）直接调
+// `push`，系统那边必须什么都没变。
+//
+// 拒写而不是硬写，是故意的：一次不写只是这一帧没更新，下一次 publish 自然
+// 补上；写坏了却是「进度不动但按钮显示在放」，而且没人会发现。
+func TestAWriteFromTheWrongThreadIsRefused(t *testing.T) {
+	p := mpTestPlatform(t)
+	onObjCThread(func() {
+		p.applyOnObjCThread(NowPlaying{State: StatePlaying, Title: "先写进去的一首", Duration: time.Minute})
+	})
+	before := objValue(infoValue(nowPlayingCenter()), keyTitle)
+
+	// 测试协程不是钉住的那条线程。
+	p.push(NowPlaying{State: StatePaused, Title: "从错的线程写进来的", Duration: time.Minute}, 0)
+
+	if got := objValue(infoValue(nowPlayingCenter()), keyTitle); got != before {
+		t.Errorf("从错的线程写进去了：歌名变成了 %q（want %q）", got, before)
+	}
+	if got := objValue(infoValue(nowPlayingCenter()), keyTitle); got == "从错的线程写进来的" {
+		t.Error("从错的线程进来的那一份被写进去了")
+	}
+}
+
+// TestTheArtworkRepushRunsOnTheSameThreadAsEverythingElse 盯封面补推也在那条线程上。
+//
+// 这条断的是**修复本身**而不是闸门：闸门只保证「不在那条线程上就不写」，
+// 不保证「封面到货时一定会写」。如果补推被拒了，锁屏上的封面就永远停在
+// 上一首——而界面上已经是新歌了。
+//
+// 所以这里放一张真的封面进去，然后等它出现在系统那份里。
+func TestTheArtworkRepushRunsOnTheSameThreadAsEverythingElse(t *testing.T) {
+	p := mpTestPlatform(t)
+	p.fetch = func(string) ([]byte, error) { return testPNG(t, 64, 64), nil }
+
+	p.apply(NowPlaying{
+		State:      StatePlaying,
+		Title:      "有封面的一首",
+		Duration:   time.Minute,
+		ArtworkURL: "https://example.invalid/cover.png",
+	})
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if objectForKey(infoValue(nowPlayingCenter()), keyArtwork) != 0 {
+			return // 到了：补推真的写进去了
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Error("封面下好了，但补推没有写进系统——补推多半被线程那道闸门拒掉了")
+}
+
+// TestTheMediaTypeIsAnEnumNotAString 盯 `MPNowPlayingInfoPropertyMediaType`
+// 装的是枚举（NSNumber），不是字符串。
+//
+// 头文件里这个属性声明的是 `MPNowPlayingInfoMediaType`（NS_ENUM）。给它一个
+// NSString，系统**认不出来**——而认不出来的表现是静默忽略：歌名、进度、封面
+// 全照常显示，只是这一栏不起作用。
+func TestTheMediaTypeIsAnEnumNotAString(t *testing.T) {
+	p := mpTestPlatform(t)
+	p.apply(NowPlaying{State: StatePlaying, Title: "一首歌", Duration: time.Minute})
+
+	v := objectForKey(infoValue(nowPlayingCenter()), keyMediaType)
+	if v == 0 {
+		t.Fatal("系统那份里没有 mediaType")
+	}
+	if desc := goString(send(v, "description")); desc != "1" {
+		t.Errorf("mediaType 的值是 %q（%s），want 1（MPNowPlayingInfoMediaTypeAudio）",
+			desc, goString(send(v, "class")))
 	}
 }
