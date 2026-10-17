@@ -420,6 +420,18 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool) {
 		// 接进来是因为 SPEC 需求 69 说的是「长按封面」，而满屏上只有这一张封面。
 		s.viewLikeRing(c, box.Pressed())
 	})
+
+	// 🔴 **每个长按目标都要在这里问一句 `swallowClick`**（播放条那一张在
+	// `viewCover` 里问，问完还要看返回值决定要不要做自己的事；这儿没有自己的事，
+	// 只是把长按之后松手补发的那一次 click 消费掉）。
+	//
+	// 第一版这里**漏了**，后果是：满屏上长按三连之后那一次 click 落在这一层而没人
+	// 问，于是标记一路活到播放条，把用户接下来的第一次点击吃掉——关掉满屏点封面要点
+	// 第二下才开全屏。它自己永远好不了：三连成功之后 `Liked` 变真、`likeArmed` 变
+	// false，清标记的那一支再也进不去（`trackLike` 那段有完整的一段）。
+	if box.Clicked() {
+		s.like.swallowClick()
+	}
 }
 
 // coverIdentity 是共享元素这一次的身份：当前这一首的判重标识。

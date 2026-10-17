@@ -99,10 +99,10 @@ func likeArmed(a *app.App) bool {
 
 // trackLike 把「这一帧按着没有」喂进状态机，认出进度环走到哪，走到点就发三连。
 //
-// 🔴 **armed（`likeArmed`）是 false 时整个不喂**——Biu 那边是
-// `handleMouseDown` 的 `if (isThumb) return`：连计时都不开始，于是既没有进度环
-// 也没有三连，而那一次 click 仍然是普通的 click（封面照旧开全屏）。照抄的
-// 就是这个，不是「照旧三连但换个颜色」。
+// 🔴 **armed（`likeArmed`）是 false 时不计时**——Biu 那边是 `handleMouseDown` 的
+// `if (isThumb) return`：连计时都不开始，于是既没有进度环也没有三连，而那一次
+// click 仍然是普通的 click（封面照旧开全屏）。照抄的就是这个，不是「照旧三连但
+// 换个颜色」。
 //
 // ⚠️ **每帧只喂一次**，而且喂的就是**长按目标自己**报的那个 `Pressed()`。
 // 喂两次（一次 true 一次 false）会把这一按立刻取消掉：这一帧末尾那个 false
@@ -111,11 +111,23 @@ func (s *Shell) trackLike(c *ui.Context, pressed, armed bool) float32 {
 	g := &s.like
 	now := s.clock.Now()
 
-	switch {
-	case armed && pressed && !g.held:
-		// 按下去了。从这一刻起计时。
+	// 这一次按下开始了：从这一刻起计时。
+	//
+	// 🔴 **清掉 `swallow` 不看 armed**：那个标记是**某一个长按目标**三连时置上的，
+	// 而只要有一个目标忘了在松手那一帧问一句 `swallowClick`，它就一路活到下一次
+	// 按下——**把用户接下来的第一次正常点击吃掉**（第一版的满屏那一张就是这样：
+	// 关掉满屏之后点封面要点第二下才开全屏，而它自己永远好不了，因为三连成功之后
+	// `Liked` 变真、`likeArmed` 变 false，清标记的那一支再也进不去）。
+	//
+	// 所以每个长按目标**都要**在松手那一帧消费它自己那一次（见 `viewFullCover`），
+	// 而这里再兜一层：漏掉一个消费者的后果最多是「标记到下一次按下就被清掉」，
+	// 而不是用户看到的多点一下。
+	if pressed && !g.held {
 		g.held, g.start, g.fired, g.swallow = true, now, false, false
-	case g.held:
+	}
+
+	g.progress = 0
+	if g.held && armed {
 		held := now.Sub(g.start)
 		if !g.fired && held >= likeLongPress {
 			// 到点了。Biu 那边这一帧把进度环收掉（`setIsProgressing(false)`）
@@ -129,13 +141,11 @@ func (s *Shell) trackLike(c *ui.Context, pressed, armed bool) float32 {
 		// `setIsProgressing(false)`。环留着不动会让人以为「还没触发」。
 		if !g.fired && held > likeRingDelay {
 			g.progress = min(float32(held-likeRingDelay)/float32(likeRingSpan), 1)
-		} else {
-			g.progress = 0
 		}
 	}
 
 	if !pressed {
-		g.held, g.progress = false, 0
+		g.held = false
 	}
 
 	// ⚠️ **按住的时候必须一直要帧**：指针不动时框架不会自己出帧，于是进度环

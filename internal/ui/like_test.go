@@ -254,6 +254,113 @@ func TestTheFullScreenCoverTakesTheLongPressToo(t *testing.T) {
 	settleSearch(t, e.tt, "满屏上的长按三连发出去了", func() bool { return e.f.triplePostCount() > 0 })
 }
 
+// ---- 满屏三连之后的那一次点击 ----
+
+// openFullAndTriple 开满屏、在满屏那张封面上按住 2.7 秒，把三连真的发出去，
+// **不松手**。调用方接着决定松手还是先关掉满屏。
+//
+// ⚠️ 返回的 `big` 是松手要用的那个坐标，而**松手那一帧之后必须让共享元素转场
+// 落回播放条那一张**（BMG-34 那一票留下的）：关掉满屏的那一帧播放条上的封面是
+// 「新出现」的，于是它从满屏那个框长回来——刚转场那一帧它还画在窗口正中，而标签
+// 量的是**画出来的**框。不等它落下来就按位置点，点的是空气（实测点完满屏没开）。
+func openFullAndTriple(t *testing.T, e *likeEnv) mygoui.Rect {
+	t.Helper()
+	row := coverAt(t, e.tt)
+	e.tt.ClickAt(row.X+row.W/2, row.Y+row.H/2)
+	if !e.tt.HasText("关闭全屏") {
+		t.Fatalf("满屏没开，文字有 %q", e.tt.Texts())
+	}
+	e.tt.Frame()
+
+	big := fullCoverRect(t, e.tt)
+	e.tt.Press(big.X+big.W/2, big.Y+big.H/2)
+	advanceLike(e, biuLikeLongPressMS*time.Millisecond+200*time.Millisecond)
+	settleSearch(t, e.tt, "三连发出去了", func() bool { return e.f.triplePostCount() > 0 })
+	// ⚠️ **等的是 App 那一栏，不是「已赞」那个字**：满屏开着的时候播放条压根没建
+	// （BMG-34 的设计），星标根本不在画面上。要等的是「B 站的答案落地了、
+	// likeArmed 因此变成 false」——那正是让清标记那一支再也进不去的状态。
+	settleSearch(t, e.tt, "三连的答案落地了", func() bool {
+		return e.s.app.LikeState().Liked && !likeArmed(e.s.app)
+	})
+	return big
+}
+
+// closeFull 按 Esc 关掉满屏并等转场落回播放条。
+func closeFull(t *testing.T, e *likeEnv) {
+	t.Helper()
+	e.tt.Key(0, mygoui.KeyEscape)
+	e.tt.Frame()
+	if e.tt.HasText("关闭全屏") {
+		t.Fatal("Esc 没关掉满屏")
+	}
+	advanceLike(e, 2*time.Second)
+	e.tt.Frame()
+}
+
+// TestTheFullScreenTripleDoesNotEatTheNextClickOnThePlaybar 钉住
+// 「长按三连之后，用户接下来的第一次点击还是他自己的」。
+//
+// 🔴 这是评审抓到的一条 critical：满屏那张封面只调了 `Pressed()`，**松手补发的那
+// 一次 click 落在它上面而没有人问**，于是 `swallow` 那个标记一路活到播放条，把
+// 用户接下来第一次点封面的那一下吃掉——**封面要点第二下才开全屏**。
+//
+// 而它自己不会好：三连成功之后 `Liked` 变真 → `likeArmed` 为 false → 清标记的
+// 那一支（`case armed && pressed && !g.held`）永远进不去。
+//
+// 走的是评审给的那条路径：开满屏 → 长按 2.7 秒 → 三连成功 → 关掉满屏 → 点封面。
+func TestTheFullScreenTripleDoesNotEatTheNextClickOnThePlaybar(t *testing.T) {
+	e := newLikeEnv(t, false, false, true)
+	big := openFullAndTriple(t, e)
+
+	e.tt.Release(big.X+big.W/2, big.Y+big.H/2)
+	e.tt.Frame()
+	// 这一句单独钉住「满屏那一张消费了自己的那一次」——少了它，下面那句「点一次
+	// 就开」还能靠下一次按下时的兜底蒙混过关（而那正是第一版的病根）。
+	if e.s.like.swallow {
+		t.Error("满屏那一张松手之后没有消费掉补发 click 的标记")
+	}
+
+	closeFull(t, e)
+
+	// 用户接下来的第一次点击：必须**一次**就开全屏。
+	again := coverAt(t, e.tt)
+	e.tt.ClickAt(again.X+again.W/2, again.Y+again.H/2)
+	if !e.tt.HasText("关闭全屏") {
+		t.Errorf("满屏三连之后第一次点封面没开全屏（要点第二下）—— " +
+			"补发 click 的标记没人消费，它一路活到了这里")
+	}
+}
+
+// TestATripleLeftHoldingDoesNotStrandTheFlag 钉住那条兜底。
+//
+// 上一条里标记在松手那一帧就被消费掉了；这一条是**它没机会被消费**的那种：用户
+// 按着封面等三连、等出来了直接按 Esc（手指还按着），然后才松手、再点封面。
+//
+// 那种情况下松手落下来的时候满屏早就不画了，于是没有任何长按目标会问那句
+// `swallowClick`。**清标记的那一支也进不去**（三连成功之后 `likeArmed` 为 false）。
+// 唯一挡住「吃掉用户下一次点击」的就是 `trackLike` 里「下一次按下先清标记」那一行——
+// 它不看 armed，所以哪怕这一首已经赞过了也照清。
+func TestATripleLeftHoldingDoesNotStrandTheFlag(t *testing.T) {
+	e := newLikeEnv(t, false, false, true)
+	big := openFullAndTriple(t, e)
+
+	// 手指还按着就关掉满屏：松手落在一块谁也不是的地方。
+	e.s.closeFullPlayer()
+	e.tt.Frame()
+	e.tt.Release(big.X+big.W/2, big.Y+big.H/2)
+	e.tt.Frame()
+	if !e.s.like.swallow {
+		return // 标记已经被清掉了（某个长按目标问了）——那也满足这一条
+	}
+	closeFull(t, e)
+
+	again := coverAt(t, e.tt)
+	e.tt.ClickAt(again.X+again.W/2, again.Y+again.H/2)
+	if !e.tt.HasText("关闭全屏") {
+		t.Error("三连之后没被消费的那个标记，把用户接下来第一次点封面吃掉了")
+	}
+}
+
 // ---- 小工具 ----
 
 // ringBuilt 问「那个叫「点赞进度」的盒子建出来没有」。
