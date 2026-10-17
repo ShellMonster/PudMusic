@@ -143,10 +143,21 @@ func TestSeekIsExact(t *testing.T) {
 // `verify-streaming.md` §1.1 记的是「macOS 这条路打不开裸 ADTS」，但那次用的是
 // ExtAudioFileOpenURL。这条走的是 AudioFileOpenWithCallbacks，门槛不一样，
 // 所以这里实测一次，把结论钉住——不管能开还是不能开，都要明确。
+//
+// # 为什么只转六秒
+//
+// 这一条要的是「这条打开路径通不通」，不是「解出来的数字对不对」——数字由上面
+// 那条拿 60 秒素材对着 `verify-streaming.md` 的黄金值断。六秒是 26 万多帧，
+// 「能不能打开并解出帧」这件事到这里已经看得很清楚了，而 `ffmpeg` 转 60 秒加
+// 解码 60 秒是这一整个包里最贵的一笔（实测十几秒，`-race` 下更贵）。
+//
+// 顺带还多走了一条路：`-t` 切在编码器的 priming 之后，末帧多半是不完整的，
+// 所以「碰到半个帧不能崩」也被顺带验了。
 func TestRawADTS(t *testing.T) {
 	wav := testLongWAV(t)
 	src := filepath.Join(filepath.Dir(wav), "raw.aac")
-	if err := run("ffmpeg", "-v", "error", "-y", "-i", wav, "-c:a", "aac", "-b:a", "192k", "-f", "adts", src); err != nil {
+	if err := run("ffmpeg", "-v", "error", "-y", "-i", wav, "-t", "6",
+		"-c:a", "aac", "-b:a", "192k", "-f", "adts", src); err != nil {
 		if errors.Is(err, errNoTool) {
 			t.Skipf("造不出裸 ADTS 素材（需要 ffmpeg）: %v", err)
 		}

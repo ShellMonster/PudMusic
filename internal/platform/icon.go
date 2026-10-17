@@ -74,11 +74,40 @@ func AppIconPNG(size int) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// iconCache 是画好的成品图，键是边长。
+//
+// # 为什么缓存
+//
+// `AppIcon` 是**纯函数**：同一个边长画出来永远是同一张图，没有随机、没有外部状态、
+// 读的是代码里的常量（`iconGreen` / `iconWhite` 和那几个比例）。而它不便宜——1024
+// 那一档是在 4096² 的超采样画布上逐像素画的，一千六百多万次几何判定。
+//
+// 重复问同一档的地方是现成的：`cmd/genicon` 的尺寸表里 256 和 512 各出现两次
+// （`.icns` 和 `.ico` 各要一档），于是每次生成图标都把最贵的两张图白画一遍。
+//
+// # 为什么不是「按尺寸攒满一整套」
+//
+// 缓存是懒的：谁问谁填。而**产品运行时要的只有 32 那一档**（`TrayIconPNG`），
+// 平时就一直只驻留这一张小图（4 KB）。整套尺寸表加起来有五兆多，只有 `genicon`
+// 那种一次性跑完就退出的工具才会把它填满——对那种进程，五兆无关紧要。
+//
+// # 共享的那张图只能读
+//
+// 返回的是缓存里那一份。本仓库里没有任何地方改画完的图（往画布上写的只有
+// `fillIcon` / `downsample`，它们写的是各自新建的那张）。这条约束写在这里，是
+// 为了下一个想改这张图的人别就地改。
+var iconCache sync.Map // int → *image.NRGBA
+
 // AppIcon 画应用图标，返回 size×size 的图（已经是缩好的最终尺寸）。
 //
 // 超采样在内部完成，调用方拿到的是干净的边。返回 `*image.NRGBA`：PNG 要的是
 // 非预乘的 alpha，`image.NRGBA` 直接就是。
+//
+// 同一尺寸画多次给的是**同一张**（见 `iconCache`）——调用方只能读它。
 func AppIcon(size int) *image.NRGBA {
+	if v, ok := iconCache.Load(size); ok {
+		return v.(*image.NRGBA)
+	}
 	big := size * iconSupersample
 	src := image.NewNRGBA(image.Rect(0, 0, big, big))
 	fillIcon(src)
@@ -86,6 +115,7 @@ func AppIcon(size int) *image.NRGBA {
 	// 面积平均缩回来。框不满就留透明，不补边——canvas 永远是 size×size。
 	dst := image.NewNRGBA(image.Rect(0, 0, size, size))
 	downsample(src, dst)
+	iconCache.Store(size, dst)
 	return dst
 }
 

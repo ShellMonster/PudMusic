@@ -66,9 +66,34 @@ func reach(t *testing.T, a *app.App, target time.Duration) time.Time {
 // ⚠️ 只在**同一轮里比两个窗口**时才准，见文件头那段。要看的从来不是它等于几，
 // 而是它和同一轮另一个窗口比是大还是小。
 //
-// from/to 之间的歌内时间就是窗口。窗口越短越容易被两端的采样误差吃掉：位置每
-// 50ms 才写回一次（app.go 的 tickInterval），所以一秒的窗口两端各能差 50ms。
+// # 它量**两段**同长的窗口，取大的那个
+//
+// 机器慢会让所有窗口**一起**慢，比值不变——比值这个写法就是为那种慢准备的。
+// 但还有另一种慢：**调度抖动**。播放走系统音频输出，回调被操作系统抢走的那些
+// 窗口会明显偏小，而同一轮里没被抢的那些是准的。实测同一轮里原速窗口走到
+// 0.975、紧跟着的 0.5 倍速窗口只走到 0.228——比值 0.23，既不是 0.5（没套上）
+// 也不是别的任何倍率。那种时候红起来是报告了一台机器的调度，不是报告了代码。
+//
+// 取大的那个，等于「按这台机器能达到的**最好**情况判」。而它在**两个方向上**
+// 都比原来严：
+//
+//	2 倍速没套上（走成原速）：两段都只有原速那么快，取大还是原速 → 红
+//	套上了、有一段被抢了 CPU：一段被抢一段没被，取大那段没被 → 绿
+//
+// 这和 flacdec 的 `TestDecodeSpeed`「五轮取最快」是同一个手法，也是那个仓库早就
+// 验证过的：它治的正是「解码器变慢」和「旁边有人在抢 CPU」分不出来这件事。
+//
+// ⚠️ 窗口只有一秒。位置每 50ms 才写回一次（app.go 的 tickInterval），所以窗口两端
+// 各能差 50ms，也就是 5% 的采样误差。容差 1.8 倍，5% 淹在里面。之所以敢从两秒
+// 缩到一秒：量两段的总时间没变，而短的窗口被整段抢走的概率小一半。
 func secPerSong(t *testing.T, a *app.App, from, to time.Duration) float64 {
+	t.Helper()
+	span := to - from
+	return max(window(t, a, from, to), window(t, a, to, to+span))
+}
+
+// window 量一段窗口的 secPerSong。
+func window(t *testing.T, a *app.App, from, to time.Duration) float64 {
 	t.Helper()
 	at0 := reach(t, a, from)
 	at1 := reach(t, a, to)
@@ -159,18 +184,21 @@ func TestTheClockFollowsTheRate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 基准：原速。等到三秒才开始量——开头那段是输出现开 + 预解缓冲，不算数。
+	// 基准：原速。等到两秒才开始量——开头那段是输出现开 + 预解缓冲，不算数。
 	// requireRealtime 在这里兼做一次「机器放得动实时音频吗」的自检：它把这个
 	// 基准值原样还回来，下面就拿它当分母。
+	//
+	// 三段的起点都要让开**上一段的位置 + 预解缓冲**：换档之后约有一秒的输出仍是按
+	// 旧倍率铺的（见 secPerSong 的注释）。一秒输出在 2 倍速下是两秒歌内、在 0.5
+	// 倍速下也是两秒歌内，所以每次换档往后让两秒歌内。
 	a.SetRate(1)
-	one := requireRealtime(t, a, 3*time.Second, 5*time.Second)
+	one := requireRealtime(t, a, 2*time.Second, 3*time.Second)
 
 	a.SetRate(2)
-	// 换档之后要越过那一圈预解缓冲（≈1 秒的输出，仍是旧倍率铺的）才开始量。
-	two := secPerSong(t, a, 9*time.Second, 11*time.Second)
+	two := secPerSong(t, a, 7*time.Second, 8*time.Second)
 
 	a.SetRate(0.5)
-	half := secPerSong(t, a, 15*time.Second, 17*time.Second)
+	half := secPerSong(t, a, 12*time.Second, 13*time.Second)
 
 	// 容差 1.8 倍：`-race` 下音频回调被抢会让所有窗口一起变小，而比值不变；
 	// 真正的错（没套上 = 1.0、反过来 = 0.5）都掉在这个范围之外。
@@ -204,7 +232,7 @@ func TestRateIsRememberedBeforeAnyTrackIsOpen(t *testing.T) {
 	if err := a.Open(longWav(t, "量基准的一首.wav")); err != nil {
 		t.Fatal(err)
 	}
-	requireRealtime(t, a, 3*time.Second, 5*time.Second)
+	requireRealtime(t, a, 2*time.Second, 3*time.Second)
 
 	a.SetRate(2)
 	if err := a.Open(longWav(t, "先按后放.wav")); err != nil {
@@ -213,7 +241,7 @@ func TestRateIsRememberedBeforeAnyTrackIsOpen(t *testing.T) {
 	if got := a.Snapshot().Rate; got != 2 {
 		t.Fatalf("开歌之后倍率变成了 %v，want 2", got)
 	}
-	if got := secPerSong(t, a, 3*time.Second, 5*time.Second); got < 1.3 {
+	if got := secPerSong(t, a, 3*time.Second, 4*time.Second); got < 1.3 {
 		t.Errorf("先按的 2 倍速没套到新歌上：原速该是 1，实测 %.2f", got)
 	}
 }
@@ -241,10 +269,10 @@ func TestRateSurvivesTrackChanges(t *testing.T) {
 
 	// 先在原速上量一段，确认这台机器放得动实时音频（见 requireRealtime），再量
 	// 倍速。窗口往后挪是因为原速那一段已经占掉了歌的前五秒。
-	requireRealtime(t, a, 3*time.Second, 5*time.Second)
+	requireRealtime(t, a, 2*time.Second, 3*time.Second)
 
 	a.SetRate(2)
-	before := secPerSong(t, a, 7*time.Second, 9*time.Second)
+	before := secPerSong(t, a, 7*time.Second, 8*time.Second)
 
 	a.Next()
 	playing(t, a, "第二首")
@@ -254,7 +282,7 @@ func TestRateSurvivesTrackChanges(t *testing.T) {
 	if pos := a.Snapshot().Position; pos > 2*time.Second {
 		t.Errorf("第二首一上来位置就在 %v——上一首的进度接着数了", pos)
 	}
-	after := secPerSong(t, a, 3*time.Second, 5*time.Second)
+	after := secPerSong(t, a, 2*time.Second, 3*time.Second)
 
 	if before < 1.3 {
 		t.Errorf("切歌之前就走得不够快：%.2f（原速是 1）", before)
@@ -288,7 +316,7 @@ func TestOnlineTrackKeepsTheRate(t *testing.T) {
 		t.Fatal(err)
 	}
 	playing(t, a, "在线的一首")
-	requireRealtime(t, a, 3*time.Second, 5*time.Second)
+	requireRealtime(t, a, 2*time.Second, 3*time.Second)
 
 	// 真正要验的那一遍：先按倍率再开这一首。
 	a.SetRate(2)
@@ -300,7 +328,7 @@ func TestOnlineTrackKeepsTheRate(t *testing.T) {
 	if got := a.Snapshot().Rate; got != 2 {
 		t.Fatalf("在线歌的倍率是 %v，want 2", got)
 	}
-	if got := secPerSong(t, a, 3*time.Second, 5*time.Second); got < 1.3 {
+	if got := secPerSong(t, a, 3*time.Second, 4*time.Second); got < 1.3 {
 		t.Errorf("在线歌没套上 2 倍速：原速该是 1，实测 %.2f", got)
 	}
 }
