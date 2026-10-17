@@ -3,6 +3,8 @@ package ui
 import (
 	"image"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -263,35 +265,63 @@ func TestTheGeneralTabStoresEachOfItsChoices(t *testing.T) {
 	}
 }
 
-// TestTheProxyTabTakesAllFourProtocols 验四种协议都存得住。
+// TestTheProxyTabTakesAllFourProtocols 验**任务明写的那四种协议都摆出来、也选得进**。
 //
-// 逐一格点是因为「下拉里选不了 SOCKS4」这种失败最安静：下拉照样能打开、别的档位
-// 照样能选，只有那一档是死的。
+// ⚠️ 原来这条把「不使用代理」当成了第四项——那一档是**关掉**，不是一种协议。于是真正
+// 要求的 HTTPS 从头到尾没在界面上出现过，而这条测试一直是绿的。
+//
+// 所以这一条分成两半：
+//
+//  1. 下拉摆开时，五档**逐字**在画面上（少一档、顺序错、名字改，都会红）；
+//  2. 四种协议挨个点一遍，每点一次都真的存进了设置，且主机/端口那一整块跟着出现。
+//
+// 见 `app.ProxyType` 那里为什么比 Biu 多一个 HTTPS。
 func TestTheProxyTabTakesAllFourProtocols(t *testing.T) {
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	openSettingsTab(t, tt, "代理设置")
+
+	// 1. 下拉里摆着的是哪五档。
+	openSelect(t, tt, "选择代理类型")
+	want := []string{"不使用代理", "HTTP 代理", "HTTPS 代理", "SOCKS4 代理", "SOCKS5 代理"}
+	for _, label := range want {
+		if !tt.HasText(label) {
+			t.Errorf("代理类型下拉里没有 %q，文字有 %q", label, tt.Texts())
+		}
+	}
+	// 多一档要在这一条里红掉。判据是「**以「 代理」结尾**的那些」——这一页自己也有
+	// 「代理设置」「代理类型」「选择代理类型」和一句含「代理」的提示语，把它们一并
+	// 数进来就永远对不上。少一档由上面那五条 `HasText` 管。
+	if got := proxyOptionLabels(tt); len(got) != len(want) {
+		t.Errorf("代理类型下拉里有 %d 档：%q，want %d 档 %q", len(got), got, len(want), want)
+	}
+	tt.Key(0, mygoui.KeyEscape)
+	tt.Frame()
+
+	// 2. 四种协议挨个点。
 	for _, c := range []struct {
 		label string
 		want  app.ProxyType
 	}{
 		{"HTTP 代理", app.ProxyHTTP},
+		{"HTTPS 代理", app.ProxyHTTPS},
 		{"SOCKS4 代理", app.ProxySOCKS4},
 		{"SOCKS5 代理", app.ProxySOCKS5},
 		{"不使用代理", app.ProxyNone},
 	} {
-		tt, s, a, _ := shellOnSettings(t, app.DefaultSettings(""))
-		openSettingsTab(t, tt, "代理设置")
+		tt2, s, a, _ := shellOnSettings(t, app.DefaultSettings(""))
+		openSettingsTab(t, tt2, "代理设置")
 
-		openSelect(t, tt, "选择代理类型")
-		if err := tt.Click(c.label); err != nil {
-			t.Fatalf("下拉里点不到「%s」：%v，文字有 %q", c.label, err, tt.Texts())
+		openSelect(t, tt2, "选择代理类型")
+		if err := tt2.Click(c.label); err != nil {
+			t.Fatalf("下拉里点不到「%s」：%v，文字有 %q", c.label, err, tt2.Texts())
 		}
-		tt.Frame()
+		tt2.Frame()
 		if got := a.SettingsSnapshot().ProxySettings.Type; got != c.want {
-			t.Errorf("选了「%s」之后类型是 %q", c.label, got)
+			t.Errorf("选了「%s」之后类型是 %q，want %q", c.label, got, c.want)
 		}
 		// 「不使用代理」时主机/端口那一整块不该画；选了别的就该画。
-		hasHost := tt.HasText("代理主机")
-		if want := c.want != app.ProxyNone; hasHost != want {
-			t.Errorf("选了「%s」之后主机那一格 %v，want %v", c.label, hasHost, want)
+		if hasHost := tt2.HasText("代理主机"); hasHost != (c.want != app.ProxyNone) {
+			t.Errorf("选了「%s」之后主机那一格 %v", c.label, hasHost)
 		}
 		s.keys.Close()
 	}
@@ -304,7 +334,7 @@ func TestTheProxyTabTakesAllFourProtocols(t *testing.T) {
 // 这一段，填了也没有地方去，摆出来只是让人以为填了有用。
 func TestTheProxyPasswordOnlyShowsWhereItMeansSomething(t *testing.T) {
 	want := map[app.ProxyType]bool{
-		app.ProxyHTTP: true, app.ProxySOCKS5: true,
+		app.ProxyHTTP: true, app.ProxyHTTPS: true, app.ProxySOCKS5: true,
 		app.ProxySOCKS4: false, app.ProxyNone: false,
 	}
 	for p, has := range want {
@@ -319,6 +349,66 @@ func TestTheProxyPasswordOnlyShowsWhereItMeansSomething(t *testing.T) {
 			t.Errorf("类型是 %q 时连用户名那一格都没画", p)
 		}
 		s.keys.Close()
+	}
+}
+
+// TestTheColorPickerKeepsTheTransparency 验取色板调出来的**透明度存得住**。
+//
+// ⚠️ 这一条是被一条真 bug 逼出来的：`toHex` 只写 RGB，取色板上那条 **Opacity** 滑块
+// 拖出来的 alpha 被**悄悄丢掉**——界面上是半透明的，存下去是全不透明，下一帧跳回去。
+//
+// 拖法照审阅给的复现：点滑块中点 → 推几帧 → 看存下来的值。
+func TestTheColorPickerKeepsTheTransparency(t *testing.T) {
+	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	openColorPicker(t, tt, "主色")
+	if err := tt.Click("Red"); err != nil {
+		t.Fatalf("取色板里点不到红色：%v", err)
+	}
+	tt.Frame()
+	if got := s.app.SettingsSnapshot().PrimaryColor; got != "#ef4444" {
+		t.Fatalf("先选个不透明的，存下来是 %q，want #ef4444", got)
+	}
+
+	// 拖 Opacity 滑块到中间。不透明 → 大约一半。
+	dragSliderTo(t, tt, "Opacity", 0.5)
+	tt.Frame()
+
+	got := s.app.SettingsSnapshot().PrimaryColor
+	if len(got) != 9 || !strings.HasPrefix(got, "#ef4444") {
+		t.Fatalf("拖了透明度之后存下来的是 %q，want #ef4444xx（8 位，带 alpha）", got)
+	}
+	alpha, err := strconv.ParseUint(got[7:9], 16, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alpha < 100 || alpha > 155 {
+		t.Errorf("透明度是 %d（0x%02x），want 大约 128（滑块拖到中间）", alpha, alpha)
+	}
+	if a := BuildTheme(s.app.SettingsSnapshot(), false).Accent.A; a != uint8(alpha) {
+		t.Errorf("主题的强调色 alpha 是 %d，存的是 %d", a, alpha)
+	}
+}
+
+// dragSliderTo 把一条滑块拖到它自己的几分之几（0..1）。
+//
+// ⚠️ 必须在 `Advance` 之后再 `Frame`：MyGo 的动画状态挂在控件的节点上，而无头 Tester
+// 的钟**只有 `Advance(d)` 才走**。不推进钟的话「按住 → 移动 → 松手」三步会落在同
+// 一次 settle 里，看不出拖没拖动。
+func dragSliderTo(t *testing.T, tt *mygoui.Tester, label string, frac float32) {
+	t.Helper()
+	r, ok := tt.Find(label)
+	if !ok {
+		t.Fatalf("找不到滑块「%s」，文字有 %q", label, tt.Texts())
+	}
+	x := r.X + r.W*frac
+	y := r.Y + r.H/2
+	tt.Press(x, y)
+	tt.Advance(16 * time.Millisecond)
+	tt.Frame()
+	tt.Release(x, y)
+	for range 3 {
+		tt.Advance(50 * time.Millisecond)
+		tt.Frame()
 	}
 }
 
@@ -544,6 +634,20 @@ func clickCell(t *testing.T, tt *mygoui.Tester, label string) {
 // `Tester.HasText` 是子串匹配（testing.md 里写着的），所以「在侧栏里显示「稍后再
 // 看」」里也有「稍后再看」——用它验「某个词不见了」永远是绿的。
 func hasExactText(tt *mygoui.Tester, want string) bool { return countText(tt, want) > 0 }
+
+// proxyOptionLabels 是画面上那些**看起来像代理类型档位**的文字：以「 代理」结尾，
+// 或者就是「不使用代理」。
+func proxyOptionLabels(tt *mygoui.Tester) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, txt := range tt.Texts() {
+		if (strings.HasSuffix(txt, " 代理") || txt == "不使用代理") && !seen[txt] {
+			seen[txt] = true
+			out = append(out, txt)
+		}
+	}
+	return out
+}
 
 // countText 数画面上有几处**一字不差**的那一条。
 func countText(tt *mygoui.Tester, want string) int {

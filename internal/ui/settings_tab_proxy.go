@@ -8,10 +8,11 @@
 // （见 `internal/app/settings.go` 的文件头）。HTTPS 走的是 HTTP 那一档：Go 的
 // 代理拨号对 `http://` 和 `https://` 的处理本来就是同一条路。
 //
-// ## 密码只有两档才有
+// ## 密码只有三档才有
 //
-// 照 Biu 的 `showPassword = type === "http" || type === "socks5"`（`:39`）——
-// SOCKS4 和 SOCKS 协议里本来就没有「用户名密码」这一段，填了也没有地方去。
+// 照 Biu 的 `showPassword = type === "http" || type === "socks5"`（`:39`），
+// 外加新加的 HTTPS——三者都带用户名密码那一段。SOCKS4 和 SOCKS 协议里本来就没有
+// 「用户名密码」这一段，填了也没有地方去。
 package ui
 
 import (
@@ -22,13 +23,17 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// proxyTypeOptions 是类型那一栏的四档，顺序就是下拉里从上到下的顺序。
+// proxyTypeOptions 是类型那一栏的五档，顺序就是下拉里从上到下的顺序。
+//
+// 前五档里的四种协议是任务明写的那四种：HTTP / HTTPS / SOCKS5 / SOCKS4；「不使用代理」
+// 是关掉的那一档，不算协议。见 `app.ProxyType` 那里为什么比 Biu 多一个 HTTPS。
 var proxyTypeOptions = []struct {
 	value app.ProxyType
 	label string
 }{
 	{app.ProxyNone, "不使用代理"},
 	{app.ProxyHTTP, "HTTP 代理"},
+	{app.ProxyHTTPS, "HTTPS 代理"},
 	{app.ProxySOCKS4, "SOCKS4 代理"},
 	{app.ProxySOCKS5, "SOCKS5 代理"},
 }
@@ -96,7 +101,7 @@ func (s *Shell) settingsProxy(c *ui.Context, st app.Settings, ro bool) {
 		// 用户名 / 密码。
 		user := cur.Username
 		pass := cur.Password
-		showPass := cur.Type == app.ProxyHTTP || cur.Type == app.ProxySOCKS5
+		showPass := cur.Type == app.ProxyHTTP || cur.Type == app.ProxyHTTPS || cur.Type == app.ProxySOCKS5
 		ui.Column(c).FillWidth().Gap(6).Children(func() {
 			ui.Row(c).FillWidth().Gap(8).Children(func() {
 				ui.Text(c, "用户名").FontSize(12).Grow(1)

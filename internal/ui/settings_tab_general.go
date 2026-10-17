@@ -294,14 +294,29 @@ func themeBackground(dark bool) string {
 	return "#ffffff"
 }
 
-// toHex 把一个颜色写成 #rrggbb。
+// toHex 把一个颜色写成设置里存的那个串。
+//
+// 🔴 **不透明的时候才写 6 位；半透明写 8 位**（`#rrggbbaa`）。只写 RGB 的话，取色板
+// 上那条 **Opacity** 滑块调出来的透明度会被**悄悄丢掉**：用户拖到一半，界面上是半透明
+// 的，存下去却是全不透明，下一帧又跳回去（实测：拖到中点保存下来还是 `#ef4444`，
+// `BuildTheme().Accent.A` 是 255 而不是 ~128）。
+//
+// 8 位写法设置那边认得：`internal/app/settings.go` 的 `hexColor` 收 3/4/6/8 位，
+// `theme.go` 的 `parseHexColor` 也解 8 位——所以这不是新格式，是那个格式本来就有、
+// 一直没人写。
 func toHex(col ui.Color) string {
 	const hex = "0123456789abcdef"
-	return "#" + string([]byte{
+	out := "#" + string([]byte{
 		hex[col.R>>4], hex[col.R&0xf],
 		hex[col.G>>4], hex[col.G&0xf],
 		hex[col.B>>4], hex[col.B&0xf],
 	})
+	// 全不透明时仍然写 6 位：Biu 的默认色是 `#1ed760` 这种 6 位的，多两位会让
+	// 「和 Biu 存的那份一模一样」这件事变得比必要的更难。
+	if col.A == 255 {
+		return out
+	}
+	return out + string([]byte{hex[col.A>>4], hex[col.A&0xf]})
 }
 
 // pick 是「三样里挑一样」的那个小工具，Go 没有内建的三元。
