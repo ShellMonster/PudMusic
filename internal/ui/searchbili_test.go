@@ -52,6 +52,8 @@ type biliFixture struct {
 	searchCids []string
 	// searched 记被叫过的搜索请求的关键词（按顺序）。
 	searched []string
+	// pagelistCalls 数分 P 列表被叫了几次——「放歌之前有没有问过」就看你叫没叫。
+	pagelistCalls int
 	// served 数**已经回了**的搜索响应。放行一个卡住的响应之后靠它知道「旧的回去
 	// 了」——不等它的话，断言可能在那一趟还在网络上时就跑完了，看着全绿其实什么
 	// 都没验到。
@@ -89,11 +91,7 @@ func (f *biliFixture) serve(w http.ResponseWriter, r *http.Request) {
 		f.serveSearch(w, r)
 
 	case r.URL.Path == "/x/player/pagelist":
-		// 只给 bvid 的条目放歌时要靠这一趟补 cid。
-		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
-			"data": map[string]any{"pages": []any{
-				map[string]any{"cid": 777, "page": 1, "part": "第一集"},
-			}}})
+		f.serveVideoPages(w, r)
 
 	case r.URL.Path == "/x/player/wbi/playurl":
 		f.servePlayURL(w, r)
@@ -140,6 +138,29 @@ func (f *biliFixture) serveSearch(w http.ResponseWriter, r *http.Request) {
 				"duration": "4:20",
 			}},
 		},
+	})
+}
+
+// serveVideoPages 是分 P 列表。
+//
+// 🔴 **`data` 是数组**（上游 `_research/biu/src/service/player-pagelist.ts:18`：
+// `data: PlayerPagelistItem[]`）。这里第一版造的是 `data: {pages: [...]}`，而实现
+// 也照着那个错形状写，于是端到端那条用例全绿；真接口回数组时补 cid 静默失败，
+// 「全部播放」点下去歌放不出来。评审抓到的那条就是这个——**fixture 的形状必须照
+// 着真接口抄**。
+func (f *biliFixture) serveVideoPages(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	f.pagelistCalls++
+	f.mu.Unlock()
+
+	writeBiliJSON(w, map[string]any{
+		"code": 0, "message": "0", "ttl": 1,
+		"data": []any{map[string]any{
+			"cid": 777, "page": 1, "part": "第一集", "duration": 260,
+			"from": "vupload", "vid": "", "weblink": "",
+			"dimension":   map[string]any{"width": 1920, "height": 1080, "rotate": 0},
+			"first_frame": "//i0.hdslb.com/bfs/storyff/n10500.jpg",
+		}},
 	})
 }
 
@@ -217,6 +238,13 @@ func (f *biliFixture) releaseAll() {
 	for _, ch := range chans {
 		close(ch)
 	}
+}
+
+// pagelists 是分 P 列表被叫过几次。
+func (f *biliFixture) pagelists() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pagelistCalls
 }
 
 // servedCount 是已经回了多少个搜索响应。
@@ -301,13 +329,16 @@ func TestASearchResultActuallyStartsPlaying(t *testing.T) {
 	}
 }
 
-// TestASearchResultPlaysWhenThereIsNoClientForPages 盯「补 cid 那一趟问不到也不是
-// 放不了」。
+// TestASearchResultSaysWhyWhenThePartCannotBeAsked 盯「补 cid 那一趟问不到就说清楚」。
 //
-// 问分 P 本身就是一次网络往返：它被风控挡了、断了、改了——那时候报「不能放」，
-// 等于为一个拿不到手的 id 把用户的手堵死。B 站的取流接口不带 cid 时按第一集返回，
-// 那��路照样通。
-func TestASearchResultPlaysWhenThereIsNoClientForPages(t *testing.T) {
+// 🔴 这一条是第一版那个错的方向：问不到分 P 的时候**照样发一个没有 cid 的取流请求**，
+// 赌「B 站会按第一集给」。那个赌没人验过——上游 `player-playurl.ts:9` 把 cid 写成
+// 必填，而本地 fixture 放不放假参数，所以「它会不会老实按第一集给」根本没人知道。
+// 真接口要是回一段不知道是哪一集的音频，用户会听到一首不是他点的歌，而且界面上什么都
+// 看不出来。
+//
+// 所以现在的约定是：**问不出来就不取流**，播放条上说明白是「问不出这一集是哪一集」。
+func TestASearchResultSaysWhyWhenThePartCannotBeAsked(t *testing.T) {
 	f := newBiliFixture(t, 1)
 	// 分 P 列表这一段直接顶掉：挡掉它（和真被风控一样）。
 	f.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -328,13 +359,18 @@ func TestASearchResultPlaysWhenThereIsNoClientForPages(t *testing.T) {
 	if err := tt.Click("全部播放"); err != nil {
 		t.Fatalf("点不到「全部播放」：%v，文字有 %q", err, tt.Texts())
 	}
-	settleSearch(t, tt, "照样出声", func() bool { return s.app.Snapshot().HasTrack })
 
-	// 补不到的时候**不许编一个 cid 出来**：传下去的是别人的集。
+	// 播放条上要说明白是「问不出这一集」，而不是一句看不懂的「取不到流」。
+	settleSearch(t, tt, "播放条上说明白原因", func() bool { return s.app.Snapshot().Err != "" })
+	if got := s.app.Snapshot().Err; !strings.Contains(got, "问不出") {
+		t.Errorf("播放条上写的是 %q，要说清是「问不出这一集是哪一集」", got)
+	}
+	if s.app.Snapshot().HasTrack {
+		t.Errorf("问不出分 P 还照样出声了")
+	}
+	// 🔴 **一个没有 cid 的取流请求都不该发**。
 	for i, c := range f.cids() {
-		if c != "" {
-			t.Errorf("第 %d 次取流带上了 cid=%q，want 空（问不到就不该编）", i+1, c)
-		}
+		t.Errorf("第 %d 次取流还是发出去了，cid=%q —— 问不出来就不该取流", i+1, c)
 	}
 }
 

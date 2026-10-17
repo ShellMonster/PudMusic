@@ -7,12 +7,18 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
 
 // videoFixture 建一台会答分 P 列表的假 B 站。
-func videoFixture(t *testing.T, data map[string]any, code int) (*Client, *fakeBili) {
+//
+// ⚠️ `data` 必须是**数组**（上游 `player-pagelist.ts:18` 的
+// `data: PlayerPagelistItem[]`）。第一版这里造的是 `data: {pages: [...]}`，而实现
+// 也照着那个错形状写，于是全绿；真接口回数组时补 cid 静默失败，歌照样放不出来。
+// 评审抓到的那条就是这个——**fixture 的形状必须照着真接口抄**。
+func videoFixture(t *testing.T, data []map[string]any, code int) (*Client, *fakeBili) {
 	t.Helper()
 	f := newFakeBili(t)
 	f.on(videoPagesPath, func(w http.ResponseWriter, r *http.Request) {
@@ -21,14 +27,22 @@ func videoFixture(t *testing.T, data map[string]any, code int) (*Client, *fakeBi
 	return f.client(t, Options{Now: func() time.Time { return time.Unix(1702204169, 0) }}), f
 }
 
-// TestVideoPagesReadsThePages 是「列表读对了」那一条。
-func TestVideoPagesReadsThePages(t *testing.T) {
-	c, f := videoFixture(t, map[string]any{
-		"pages": []any{
-			map[string]any{"cid": 777, "page": 1, "part": "第一集"},
-			map[string]any{"cid": 778, "page": 2, "part": "第二集"},
-			map[string]any{"cid": 0, "page": 3, "part": "没给 cid 的那一项"},
-		},
+// partItem 造一个分 P 项，字段照上游的 `PlayerPagelistItem`。
+func partItem(cid, page int, part string) map[string]any {
+	return map[string]any{
+		"cid": cid, "page": page, "part": part, "duration": 260,
+		"from": "vupload", "vid": "", "weblink": "",
+		"dimension":   map[string]any{"width": 1920, "height": 1080, "rotate": 0},
+		"first_frame": "//i0.hdslb.com/bfs/storyff/n10500.jpg",
+	}
+}
+
+// TestVideoPagesReadsTheArrayContract 是「列表读对了」那一条，**数组形状**。
+func TestVideoPagesReadsTheArrayContract(t *testing.T) {
+	c, f := videoFixture(t, []map[string]any{
+		partItem(777, 1, "第一集"),
+		partItem(778, 2, "第二集"),
+		partItem(0, 3, "没给 cid 的那一项"),
 	}, 0)
 
 	pages, err := c.VideoPages(context.Background(), "BV1MbznYoEk1")
@@ -44,17 +58,37 @@ func TestVideoPagesReadsThePages(t *testing.T) {
 	if pages[1].Page != 2 || pages[1].Part != "第二集" {
 		t.Errorf("第几集 / 标题读错了：%+v", pages[1])
 	}
+	if pages[0].Duration != 260*time.Second {
+		t.Errorf("时长 %v，want 260s", pages[0].Duration)
+	}
 	if got := f.requests()[0].Query.Get("bvid"); got != "BV1MbznYoEk1" {
 		t.Errorf("请求带的 bvid 是 %q", got)
 	}
 }
 
-// TestVideoPagesReadsTheFlatShape 盯「只有一个分 P 时 B 站把信息平铺在 data 上」那一支。
+// TestVideoPagesRefusesTheWrongShape 钉住「形状不对要报错，不许悄悄当成空」。
 //
-// 不认它的话，单 P 的稿件（大多数）会被当成「没有分 P」，于是每一首单 P 的歌都要
-// 多问一次、还要么报错要么退到别处去。
-func TestVideoPagesReadsTheFlatShape(t *testing.T) {
-	c, _ := videoFixture(t, map[string]any{"cid": 999, "page": 1, "part": "整首"}, 0)
+// 这条正对着第一版的病：真接口回数组、代码按对象读，报的是
+// `cannot unmarshal array into Go value of type ...`。要是那一层再把这个错吞掉、
+// 当成「没有分 P」往下走，补 cid 就静默失败了——歌放不出来，而日志上什么都看不见。
+func TestVideoPagesRefusesTheWrongShape(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(videoPagesPath, func(w http.ResponseWriter, r *http.Request) {
+		// 故意回对象（第一版实现认的那个形状）。
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{"pages": []any{partItem(777, 1, "x")}}))
+	})
+	c := f.client(t, Options{Now: func() time.Time { return time.Unix(1702204169, 0) }})
+
+	if _, err := c.VideoPages(context.Background(), "BV1"); err == nil {
+		t.Fatalf("形状不对却读成了，没报错")
+	} else if !strings.Contains(err.Error(), "数组") {
+		t.Errorf("err = %v，报错里要写明「data 是数组」（那是真接口的形状）", err)
+	}
+}
+
+// TestVideoPagesOnASinglePartVideo 盯「只有一个分 P 的稿件」（大多数）也是数组。
+func TestVideoPagesOnASinglePartVideo(t *testing.T) {
+	c, _ := videoFixture(t, []map[string]any{partItem(999, 1, "整首")}, 0)
 
 	pages, err := c.VideoPages(context.Background(), "BV1")
 	if err != nil {
@@ -74,25 +108,28 @@ func TestVideoPagesSaysNoVideo(t *testing.T) {
 	if _, err := c.VideoPages(context.Background(), "BV1"); !errors.Is(err, ErrNoVideo) {
 		t.Errorf("err = %v，want 一个认得出「没有这个稿件」的错", err)
 	}
-	// 列表是空的也算同一类。
-	c2, _ := videoFixture(t, map[string]any{"pages": []any{}}, 0)
+	// 空数组也算同一类。
+	c2, _ := videoFixture(t, []map[string]any{}, 0)
 	if _, err := c2.VideoPages(context.Background(), "BV1"); !errors.Is(err, ErrNoVideo) {
 		t.Errorf("空列表 err = %v，want ErrNoVideo", err)
 	}
+	// 全都没有 cid 的也算——那种列表取回来用不了。
+	c3, _ := videoFixture(t, []map[string]any{partItem(0, 1, "没有 cid")}, 0)
+	if _, err := c3.VideoPages(context.Background(), "BV1"); !errors.Is(err, ErrNoVideo) {
+		t.Errorf("全是没 cid 的那一项，err = %v，want ErrNoVideo", err)
+	}
 	// bvid 是空的：调用方给错了参数，同样不是网络错。
-	c3, _ := videoFixture(t, nil, 0)
-	if _, err := c3.VideoPages(context.Background(), ""); !errors.Is(err, ErrNoVideo) {
+	c4, _ := videoFixture(t, nil, 0)
+	if _, err := c4.VideoPages(context.Background(), ""); !errors.Is(err, ErrNoVideo) {
 		t.Errorf("空 bvid err = %v，want ErrNoVideo", err)
 	}
 }
 
 // TestFirstVideoCid 是「压根没给 cid 时该用的那一集」。
 func TestFirstVideoCid(t *testing.T) {
-	c, _ := videoFixture(t, map[string]any{
-		"pages": []any{
-			map[string]any{"cid": 777, "page": 1, "part": "第一集"},
-			map[string]any{"cid": 778, "page": 2, "part": "第二集"},
-		},
+	c, _ := videoFixture(t, []map[string]any{
+		partItem(777, 1, "第一集"),
+		partItem(778, 2, "第二集"),
 	}, 0)
 
 	got, err := c.FirstVideoCid(context.Background(), "BV1")
@@ -104,12 +141,13 @@ func TestFirstVideoCid(t *testing.T) {
 	}
 }
 
-// TestPlayURLWithoutCidOmitsTheParameter 盯「cid 为空时**不发** cid 参数」。
+// TestPlayURLRefusesAMissingCid 盯 cid 仍然是必填。
 //
-// 发空串和不发是两件事：B 站看到 `cid=` 可能当 0 处理，那取回来的是**别的稿件**的
-// 音频——放出来是一首能出声、但完全不是用户点的歌。宁可让它按第一集给（那是这个稿件
-// 自己的内容），也不要一个指到别处的 id。
-func TestPlayURLWithoutCidOmitsTheParameter(t *testing.T) {
+// 第一版为了「搜出来的歌放得起来」把 cid 改成可选、空的时候不发那个参数——那是拿
+// 一个**没验过**的假设换功能：上游 `player-playurl.ts:9` 把 cid 写成必填，而本地
+// fixture 放不放假参数，所以「B 站会不会老实按第一集给」根本没人验过。真接口回一
+// 段不知道是哪一集的音频时，能出声，但可能不是用户点的那个。宁可问不出来就说清楚。
+func TestPlayURLRefusesAMissingCid(t *testing.T) {
 	f := newFakeBili(t)
 	f.on(pathNav, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, jsonData(t, 0, "0", map[string]any{
@@ -119,38 +157,15 @@ func TestPlayURLWithoutCidOmitsTheParameter(t *testing.T) {
 			},
 		}))
 	})
-	f.on(playurlPath, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, `{"code":0,"message":"0","ttl":1,"data":{"timelength":1000,
-			"dash":{"duration":1,"audio":[{"id":30280,"bandwidth":110836,"codecs":"mp4a.40.2",
-			"mimeType":"audio/mp4","baseUrl":"https://cdn.example/a.flac"}]}}}`)
-	})
 	c := f.client(t, Options{Now: func() time.Time { return time.Unix(1702204169, 0) }})
 
-	ref, err := c.PlayURL(context.Background(), "BV1", "", AudioAuto)
-	if err != nil {
-		t.Fatalf("cid 为空时取流失败了：%v", err)
+	if _, err := c.PlayURL(context.Background(), "BV1", "", AudioAuto); !errors.Is(err, ErrNoStream) {
+		t.Errorf("没有 cid 也放行了，err = %v", err)
 	}
-	if ref.Bvid != "BV1" {
-		t.Errorf("ref.Bvid = %q", ref.Bvid)
-	}
+	// 而且**一个请求都不该发**：参数不全时发出去也是白费一次带签名的往返。
 	for _, r := range f.requests() {
-		if r.Path != playurlPath {
-			continue
+		if r.Path == playurlPath {
+			t.Errorf("参数不全还发了取流请求（cid=%q）", r.Query.Get("cid"))
 		}
-		if _, has := r.Query["cid"]; has {
-			t.Errorf("请求里带着 cid=%q，want 整个参数都不发", r.Query.Get("cid"))
-		}
-	}
-}
-
-// TestPlayURLStillRefusesAnEmptyBvid 盯「连稿件都没有」仍然是当场拒。
-//
-// cid 放宽了，bvid 没有跟着放宽：没有 bvid 就不知道去问哪个稿件，那是真给错了参数，
-// 换成「退到第一集」只会放出一首不相干的歌。
-func TestPlayURLStillRefusesAnEmptyBvid(t *testing.T) {
-	f := newFakeBili(t)
-	c := f.client(t, Options{})
-	if _, err := c.PlayURL(context.Background(), "", "777", AudioAuto); err == nil {
-		t.Errorf("没有 bvid 也放行了")
 	}
 }

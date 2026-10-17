@@ -137,26 +137,26 @@ type playurlData struct {
 //
 // pref 是用户选的音质档（`AudioAuto` 是默认）。bvid / cid 指向一个条目。
 //
-// ⚠️ **cid 可以是空的**：B 站的搜索结果只给 bvid，而调用方拿到的条目多半还没有分 P
-// id（见 search.go 的文件头）。空的时候**不发 cid 参数**，B 站按**第一集**返回。
-// 那和多 P 投稿「放错了那一集」是同一件事，所以调用方要尽量先把 cid 补上——
-// `app.runOnline` 就是先问一次 `VideoPages`（见 video.go）再调这里，补不上才退到
-// 这一条。
+// 🔴 **cid 必填**（上游 `player-playurl.ts:9` 的 `cid: number | string`，那行没有
+// `?`）。不给 cid，B 站多半按第一集给——多 P 投稿放出来的和用户点的不是一回事，
+// 而本地 fixture 放不放假参数，所以「它会不会老实按第一集给」没人验过：既然上游的
+// 合同写着必填，这里就不去赌它。
 //
-// bvid 是**必填**的：没有它就不知道去问哪个稿件，那是真的给错了参数。
+// B 站的搜索结果只给 bvid（见 search.go 的文件头），所以**调用方要先补上 cid**：
+// `app.runOnline` 问一次 `VideoPages`（见 video.go）再调这里。补不上就报错，
+// 不硬着头皮发一个没有 cid 的请求。
 //
 // 返回的 `StreamRef` 里没有任何凭据，**不要**把它写进日志：地址带
 // `upsig` 签名，诊断文件里有它就等于把这条流公开了。
 func (c *Client) PlayURL(ctx context.Context, bvid, cid string, pref AudioQuality) (*StreamRef, error) {
-	if bvid == "" {
-		return nil, fmt.Errorf("%w: 没有稿件 id", ErrNoStream)
+	if bvid == "" || cid == "" {
+		// 不是网络错也不是重试能救的：调用方没给全。重试一万次还是这一句。
+		return nil, fmt.Errorf("%w: 稿件或分 P 不完整（bvid=%q cid=%q）", ErrNoStream, bvid, cid)
 	}
 
 	q := url.Values{}
 	q.Set("bvid", bvid)
-	if cid != "" {
-		q.Set("cid", cid)
-	}
+	q.Set("cid", cid)
 	q.Set("fnval", fmt.Sprint(dashAll))
 	q.Set("fnver", "0")
 	q.Set("fourk", "1")

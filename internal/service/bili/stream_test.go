@@ -426,16 +426,19 @@ func TestSameTrackStopsTheWrongSong(t *testing.T) {
 	}
 }
 
-// TestPlayURLNeedsABvid 盯 bvid 必填。
+// TestPlayURLNeedsBothBvidAndCid 盯 bvid 和 cid 都必填。
 //
-// ⚠️ **cid 不再是必填的**（原来这条钉的是「bvid 和 cid 都得有」）：B 站的搜索结果
-// 只给 bvid，而搜出来的歌要能放（`video.go`）。cid 为空时这一层**不发 cid 参数**，
-// B 站按第一集给；调用方要的是哪一集得自己先问一次（`app.runOnline` 的 `withCid`）。
-// 那条「别发空串」的理由仍然成立——见 `TestPlayURLWithoutCidOmitsTheParameter`。
-func TestPlayURLNeedsABvid(t *testing.T) {
+// 给 cid 时 B 站取到的是**哪一集**；不给 cid 它多半按第一集给，不报错——
+// 表现是「点第三集放出来的是第一集」，而且没有任何提示。上游也把 cid 写成必填
+// （`player-playurl.ts:9`）。
+//
+// 搜出来的歌只有 bvid，那不是这一层的事：`app.runOnline` 先问一次 `VideoPages`
+// （`video.go`）把 cid 补上，问不出来就报错。**这一层不替它猜**——本地 fixture
+// 放不放假参数，拿「反正会按第一集给」当依据是不成立的。
+func TestPlayURLNeedsBothBvidAndCid(t *testing.T) {
 	f, c := playurlClient(t, map[string]any{"duration": 1})
 	for _, tc := range []struct{ bvid, cid string }{
-		{"", testCid}, {"", ""},
+		{"", testCid}, {testBvid, ""}, {"", ""},
 	} {
 		if _, err := c.PlayURL(context.Background(), tc.bvid, tc.cid, AudioAuto); !errors.Is(err, ErrNoStream) {
 			t.Errorf("bvid=%q cid=%q：err = %v，want ErrNoStream", tc.bvid, tc.cid, err)

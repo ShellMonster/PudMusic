@@ -649,10 +649,10 @@ func TestMissingCidIsResolvedBeforePlaying(t *testing.T) {
 	var asked sync.Map // bvid → struct{}
 	f.on("/x/player/pagelist", func(w http.ResponseWriter, r *http.Request) {
 		asked.Store(r.URL.Query().Get("bvid"), struct{}{})
+		// 🔴 `data` 是**数组**（上游 `player-pagelist.ts:18`）。写成对象的话补 cid
+		// 静默失败，歌放不出来，而这一层把错吞掉就什么都看不见了。
 		writeStreamJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
-			"data": map[string]any{"pages": []any{
-				map[string]any{"cid": 777, "page": 1, "part": "第一集"},
-			}}})
+			"data": []any{map[string]any{"cid": 777, "page": 1, "part": "第一集", "duration": 260}}})
 	})
 
 	a := newOnlineApp(t, f, t.TempDir())
@@ -670,12 +670,13 @@ func TestMissingCidIsResolvedBeforePlaying(t *testing.T) {
 	}
 }
 
-// TestMissingCidStillPlaysWhenPagesCannotBeAsked 盯「问不到分 P id 也不是放不了」。
+// TestMissingCidSaysWhyWhenThePartCannotBeAsked 盯「问不出分 P 就说清楚，不硬发」。
 //
-// 问分 P 那一次本身就是一次网络往返：它断了、被风控挡了、接口改了——那时候报
-// 「这一首不能放」，等于为一个拿不到手的 id 把用户的手堵死。B 站的取流接口不带 cid
-// 时按第一集返回，那一路照样通，于是这里**照样往下走**，只记一条日志。
-func TestMissingCidStillPlaysWhenPagesCannotBeAsked(t *testing.T) {
+// 🔴 这一条盯的是**不**去赌：第一版在这里问不到分 P 就照样发一个没有 cid 的取流请求，
+// 赌「B 站会按第一集给」。那个赌没人验过（上游 `player-playurl.ts:9` 把 cid 写成
+// 必填，而本地 fixture 放不放假参数），真接口回一段不知道是哪一集的音频时，用户听到
+// 的是一首不是他点的歌，而界面上什么都看不出来。
+func TestMissingCidSaysWhyWhenThePartCannotBeAsked(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
 	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
@@ -684,28 +685,47 @@ func TestMissingCidStillPlaysWhenPagesCannotBeAsked(t *testing.T) {
 	})
 
 	a := newOnlineApp(t, f, t.TempDir())
+	// 入队**不报错**：缺 cid 不是同步能判出来的「不能放」，是「要去问一次」。
 	if err := a.Enqueue(app.Item{Source: "online", Type: "mv", Bvid: "BVonly", Title: "问不到分 P"}); err != nil {
-		t.Fatalf("问不到分 P 就被当场拒了：%v", err)
+		t.Fatalf("只给 bvid 的一条被当场拒了：%v", err)
 	}
-	playing(t, a, "问不到分 P")
-	if got := lastPlayURLCid(f); got != "" {
-		t.Errorf("取流请求带上了 cid=%q，want 空（问不到就不该编一个）", got)
+
+	waitFor(t, 15*time.Second, "播放条上说明白原因", func() bool {
+		return a.Snapshot().Err != ""
+	})
+	if a.Snapshot().HasTrack {
+		t.Errorf("问不出分 P 还照样出声了")
+	}
+	if got := a.Snapshot().Err; !strings.Contains(got, "问不出") {
+		t.Errorf("播放条上写的是 %q，要说清是「问不出这一集」", got)
+	}
+	// 一个没有 cid 的取流请求都不该发。
+	for i, c := range lastPlayURLCids(f) {
+		t.Errorf("第 %d 次取流还是发出去了，cid=%q", i, c)
 	}
 }
 
 // lastPlayURLCid 是最近一次取流请求带的 cid。取流是异步发的，所以带一个重试。
 func lastPlayURLCid(f *streamFixture) string {
-	var cid string
 	waitFor(f.t, 10*time.Second, "取流接口出请求", func() bool {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		if len(f.playQueries) == 0 {
-			return false
-		}
-		cid = f.playQueries[len(f.playQueries)-1].Get("cid")
-		return true
+		return len(f.playQueries) > 0
 	})
-	return cid
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.playQueries[len(f.playQueries)-1].Get("cid")
+}
+
+// lastPlayURLCids 是录到的每一次取流请求带的 cid（问不出分 P 时应该一个都没有）。
+func lastPlayURLCids(f *streamFixture) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.playQueries))
+	for _, q := range f.playQueries {
+		out = append(out, q.Get("cid"))
+	}
+	return out
 }
 
 // TestUnplayableOnlineItemsAreRefusedSynchronously 盯「参数不全当场拒」。
