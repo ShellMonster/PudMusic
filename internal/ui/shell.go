@@ -46,6 +46,14 @@ type Shell struct {
 	// 认下的状态才留得住）。
 	searchDraft string
 
+	// laterPage / historyPage 是「稍后再看」和「历史记录」这两页各自的状态
+	// （见 librarypage.go）。挂在壳上而不是页面的局部变量，理由同上。
+	laterPage   libraryPage
+	historyPage libraryPage
+	// searchWatchStop 是那个 500ms 关键词防抖的钟。醒着的时候只有一个，
+	// 两页共用——用户一次只能在一页上敲字。
+	searchWatchStop func()
+
 	// search 是搜索页的状态：三个 Tab 各一份分页列表、各一套排序、各记着各自
 	// 滚到哪儿（见 searchresults.go）。
 	//
@@ -264,6 +272,7 @@ func New(a *app.App) *Shell {
 	s.keys = newShortcutKeys("")
 	s.picker = systemPathPicker{}
 	s.feed = newFeedPoller(dynamicFeedInterval, nil)
+	s.buildLibraryPages()
 	// 搜索页那三个 Tab 各建一份分页列表。建在这里而不是第一次画到搜索页时：
 	// 翻页列表要在**第一帧之前**就建好（它的滚动位置、翻页状态全在里头），
 	// 等到画到那一页再建就是每进一次搜索页从头滚一次。
@@ -512,6 +521,9 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 就是这一帧真正用的那份，用户选了深色也只在这一帧是对的。
 	s.applyFrameTheme(c)
 	s.reportSettingsError()
+	// 收「那个 500ms 防抖的钟要不要醒着」。**每帧一次**，所以用户切走时它一定
+	// 会跟着停（见 syncSearchWatch）。
+	s.syncSearchWatch()
 
 	st := s.app.Snapshot()
 
