@@ -103,6 +103,17 @@ func setMajor(f func(m map[string]any)) func(map[string]any) {
 	return func(m map[string]any) { f(m) }
 }
 
+// dynamicPageOf 让一条动态走一遍**真的解析路径**（`Client.DynamicFeed` →
+// `dynamicPageFrom` → `parseDynamic`），而不直接调 `parseDynamic`。
+//
+// 走整条路而不是直接调解析器，是因为评审抓到的那两个 bug（`major.draw`
+// 没解析、类型闸门）都是在**模型层**发现的，测试也应该钉在这一层。
+func dynamicPageOf(t *testing.T, item map[string]any) (DynamicPage, error) {
+	t.Helper()
+	_, cli := dynamicFixture(t, []any{item}, "", false)
+	return cli.DynamicFeed(context.Background(), "")
+}
+
 // dynamicFixture 造一台会回给定 items 的假 B 站。
 func dynamicFixture(t *testing.T, items []any, offset string, hasMore bool) (*fakeBili, *Client) {
 	t.Helper()
@@ -342,6 +353,56 @@ func TestTheOldPictureFieldNameStillReads(t *testing.T) {
 	if len(pics) != 2 || pics[0] != "https://f/old1.jpg" || pics[1] != "https://f/new1.jpg" {
 		t.Errorf("图认成了 %v（老字段名 src 没认出来？）", pics)
 	}
+}
+
+// TestTheLegacyDrawFormatStillShowsItsImages 钉住**旧格式**的图文。
+//
+// ⚠️ B 站把这个类型从 `major.draw` 改名成了 `major.opus`，而**老动态的返回里
+// 仍然是 `draw`**（`web-dynamic.ts:207-216` 的 `major.draw.items[].src`）。
+//
+// 认不出来的症状不是「少一张图」，而是**整条消失**：旧格式的图文常常没有
+// `desc.text`（正文就在图里），于是 `pics` 空 + `Text` 空 → `dropped` ——
+// 明明有九张图，界面上一个格子都没有。
+func TestTheLegacyDrawFormatStillShowsItsImages(t *testing.T) {
+	t.Run("有正文", func(t *testing.T) {
+		m := dynItem("draw-with-text", func(m map[string]any) {
+			majorOf(m)["type"] = "MAJOR_TYPE_DRAW"
+			majorOf(m)["draw"] = map[string]any{"id": 7, "items": []any{
+				map[string]any{"src": "https://f/old1.jpg", "width": 100, "height": 100},
+				map[string]any{"src": "https://f/old2.jpg", "width": 100, "height": 100},
+			}}
+		})
+		pg, err := dynamicPageOf(t, m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(pg.Items) != 1 || pg.Items[0].Kind != DynamicOpus {
+			t.Fatalf("旧格式的图文没被当成图文：%+v（dropped=%d）", pg.Items, pg.Dropped)
+		}
+		if len(pg.Items[0].Pics) != 2 {
+			t.Errorf("拿到 %d 张图，want 2（`major.draw.items[].src` 没解析）", len(pg.Items[0].Pics))
+		}
+	})
+
+	t.Run("没正文", func(t *testing.T) {
+		// 这一支才是真会「整条消失」的：没有 desc.text，只剩图。
+		m := dynItem("draw-bare", setEmptyBody(), func(m map[string]any) {
+			majorOf(m)["type"] = "MAJOR_TYPE_DRAW"
+			majorOf(m)["draw"] = map[string]any{"id": 8, "items": []any{
+				map[string]any{"src": "https://f/only.jpg", "width": 100, "height": 100},
+			}}
+		})
+		pg, err := dynamicPageOf(t, m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(pg.Items) != 1 {
+			t.Fatalf("旧格式的图文（只有图、没有正文）被整条丢掉了：dropped=%d", pg.Dropped)
+		}
+		if len(pg.Items[0].Pics) != 1 || pg.Items[0].Pics[0] != "https://f/only.jpg" {
+			t.Errorf("拿到 %v，want 那一张图", pg.Items[0].Pics)
+		}
+	})
 }
 
 // TestAGraphicalPostWithNeitherTextNorPicsIsDropped 钉住「声明是图文但既没

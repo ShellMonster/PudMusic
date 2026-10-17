@@ -244,6 +244,25 @@ func dynamicPageFrom(raw []byte) (DynamicPage, error) {
 	return pg, nil
 }
 
+// rawOpus 是**新格式**的图文（`MAJOR_TYPE_OPUS`）。
+type rawOpus struct {
+	Summary struct {
+		Text string `json:"text"`
+	} `json:"summary"`
+	Pics []rawPic `json:"pics"`
+}
+
+// rawDraw 是**旧格式**的图文（`MAJOR_TYPE_DRAW` 时代）：图在 `items` 里，
+// 正文**没有单独一个字段**（就在图里，或者干脆只有图）。
+//
+// ⚠️ **两种都要认**：B 站把这个类型从 `draw` 改名成了 `opus`，而**老动态的
+// 返回里仍然是 `draw`**。只认 opus 的症状不是「少一张图」而是**整条消失**：
+// 旧格式的图文常常没有 `desc.text`（正文在图里），认不出来就成了 `dropped`
+// ——明明有九张图，界面上一个格子都没有。
+type rawDraw struct {
+	Items []rawPic `json:"items"`
+}
+
 // rawPic 是图文里的一张图。
 //
 // ⚠️ **B 站对同一批图给过两个字段名**：老的那套（`MAJOR_TYPE_DRAW` 时代）
@@ -297,12 +316,9 @@ type rawDynamic struct {
 						Play string `json:"play"`
 					} `json:"stat"`
 				} `json:"archive"`
-				Opus *struct {
-					Summary struct {
-						Text string `json:"text"`
-					} `json:"summary"`
-					Pics []rawPic `json:"pics"`
-				} `json:"opus"`
+				Opus *rawOpus `json:"opus"`
+				// Draw 是**旧格式**的图文（`MAJOR_TYPE_DRAW` 时代），见 rawDraw。
+				Draw *rawDraw `json:"draw"`
 			} `json:"major"`
 		} `json:"module_dynamic"`
 	} `json:"modules"`
@@ -390,23 +406,20 @@ func parseDynamic(raw json.RawMessage) (Dynamic, bool) {
 	// （`dynamic-feed/item.tsx:33`、`user-profile/dynamic-list/item.tsx:46`），
 	// 而 B 站的正常返回里 `desc.text` 和 `opus.summary.text` 是**同一段话**。
 	// 拼起来（`desc + "\n" + summary`）的结果是界面上同一句话出现两遍。
-	if o := major.Opus; o != nil {
-		pics := make([]string, 0, len(o.Pics))
-		for _, p := range o.Pics {
-			if u := p.URL(); u != "" {
-				pics = append(pics, u)
+	{
+		pics, summary := picsOf(major.Opus, major.Draw)
+		if len(pics) > 0 || summary != "" {
+			if d.Text == "" {
+				d.Text = summary
 			}
+			if len(pics) == 0 && d.Text == "" {
+				// 声明是图文但既没图也没字：画出来是一个空卡片，比不画更糟。
+				return Dynamic{}, false
+			}
+			d.Kind = DynamicOpus
+			d.Pics = pics
+			return d, true
 		}
-		if d.Text == "" {
-			d.Text = strings.TrimSpace(o.Summary.Text)
-		}
-		if len(pics) == 0 && d.Text == "" {
-			// 声明是图文但既没图也没字：画出来是一个空卡片，比不画更糟。
-			return Dynamic{}, false
-		}
-		d.Kind = DynamicOpus
-		d.Pics = pics
-		return d, true
 	}
 
 	// ③ 纯文字（`DYNAMIC_TYPE_WORD`）。
@@ -416,6 +429,34 @@ func parseDynamic(raw json.RawMessage) (Dynamic, bool) {
 	}
 	d.Kind = DynamicText
 	return d, true
+}
+
+// picsOf 取图文的图和摘要，**新旧两种格式都认**。
+//
+//	新（`MAJOR_TYPE_OPUS`）：`major.opus.pics[]`，图地址是 `url_src` 或 `src`
+//	旧（`MAJOR_TYPE_DRAW`）：`major.draw.items[]`，图地址是 `src`
+//
+// 两者取到都算数：新格式优先（它同时带 summary），旧格式兜底。
+// ⚠️ 少认一种的症状不是「少一张图」，而是**整条消失**：旧格式的图文常常
+// 没有 `desc.text`（正文在图里），认不出来就变成 `dropped`。
+func picsOf(opus *rawOpus, draw *rawDraw) ([]string, string) {
+	var (
+		items []rawPic
+		text  string
+	)
+	if opus != nil {
+		items, text = opus.Pics, opus.Summary.Text
+	}
+	if len(items) == 0 && draw != nil {
+		items = draw.Items
+	}
+	pics := make([]string, 0, len(items))
+	for _, p := range items {
+		if u := p.URL(); u != "" {
+			pics = append(pics, u)
+		}
+	}
+	return pics, strings.TrimSpace(text)
 }
 
 // dynamicTime 是发布时间。

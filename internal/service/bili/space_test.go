@@ -383,31 +383,77 @@ func TestSpaceSeriesJoinsBothLists(t *testing.T) {
 	}
 }
 
-// TestSpaceFavFoldersIsOneShot 钉住「收藏夹一次给全，没有翻页参数」。
+// TestFavFoldersArePaged 钉住「收藏夹那个接口**是分页的**」。
 //
-// 返回里没有 HasMore 这一栏就是这一层的约定：调用方别给它加一页「还在加载」。
-func TestSpaceFavFoldersIsOneShot(t *testing.T) {
+// ⚠️ 早一版这里写的是「一次给全，没有翻页参数」——**那是错的**。B 站给的是
+// `pn`/`ps`（默认 20、上限 50），返回里带 `count` 和 `has_more`（上游
+// `fav-folder-created-list.ts` 的参数与响应类型，`user-profile/favorites`
+// 那个页面实际就在翻它）。
+//
+// 错判的代价很具体：**第 21 个收藏夹永远看不到** —— 界面显示「已加载 20、
+// 没有更多」，而那个 UP 明明有 21 个。
+func TestFavFoldersArePaged(t *testing.T) {
 	f := spaceClient(t)
+	var asked []string
 	f.on(spaceFavPath, func(w http.ResponseWriter, r *http.Request) {
+		pn := r.URL.Query().Get("pn")
+		asked = append(asked, pn)
+		list := []any{}
+		if pn == "1" {
+			for i := 0; i < 20; i++ {
+				list = append(list, map[string]any{"id": i + 1, "title": "收藏夹", "media_count": 1})
+			}
+		} else {
+			list = append(list, map[string]any{"id": 21, "title": "第 21 个", "media_count": 1})
+		}
 		writeJSON(w, jsonData(t, 0, "0", map[string]any{
-			"list": []any{
-				map[string]any{"id": 100, "title": "第一个收藏夹", "media_count": 12},
-				map[string]any{"id": 0, "title": "没有 id 的"},
-			},
+			"count": 21, "list": list, "has_more": pn != "2",
 		}))
 	})
-	cols, err := f.client(t, Options{}).SpaceFavFolders(context.Background(), 5)
+
+	cli := f.client(t, Options{})
+	p1, err := cli.SpaceFavFolders(context.Background(), 5, 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cols) != 1 {
-		t.Fatalf("拿到 %d 个，want 1（id 为 0 的那条被丢掉）", len(cols))
+	if len(p1.Folders) != 20 || p1.Count != 21 || !p1.HasMore {
+		t.Fatalf("第一页是 %d 个 / count=%d / hasMore=%v，want 20/21/true",
+			len(p1.Folders), p1.Count, p1.HasMore)
 	}
-	if cols[0].ID != 100 || cols[0].Title != "第一个收藏夹" || cols[0].Count != 12 {
-		t.Errorf("读出来是 %+v", cols[0])
+
+	p2, err := cli.SpaceFavFolders(context.Background(), 5, 2, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if cols[0].Type != collectionTypeFav {
-		t.Errorf("收藏夹的 type 是 %d，want %d", cols[0].Type, collectionTypeFav)
+	if len(p2.Folders) != 1 || p2.HasMore {
+		t.Fatalf("第二页是 %d 个 / hasMore=%v，want 1/false", len(p2.Folders), p2.HasMore)
+	}
+	if len(asked) != 2 || asked[1] != "2" {
+		t.Errorf("页码没传回去（问过 %v）", asked)
+	}
+	// 第 20 个之后那一个就是第 21 个 —— 它必须能被问出来。
+	if p2.Folders[0].ID != 21 {
+		t.Errorf("第二页第一条的 id 是 %d，want 21", p2.Folders[0].ID)
+	}
+}
+
+// TestFavFoldersFallBackToCountWhenHasMoreIsMissing 钉住「`has_more` 有时候
+// 不给」。老接口就是那样，而少这一道判据的话「到底了」会判早。
+func TestFavFoldersFallBackToCountWhenHasMoreIsMissing(t *testing.T) {
+	f := spaceClient(t)
+	f.on(spaceFavPath, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			"count": 21,
+			"list":  []any{map[string]any{"id": 1, "title": "只有一个"}},
+			// has_more 不给
+		}))
+	})
+	pg, err := f.client(t, Options{}).SpaceFavFolders(context.Background(), 5, 1, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pg.HasMore {
+		t.Error("has_more 没给，但 count=21 而这一页只有 1 个 —— 后面还有")
 	}
 }
 
@@ -428,7 +474,7 @@ func TestSpaceEndpointsRefuseAnImpossibleMid(t *testing.T) {
 	if _, err := c.SpaceSeries(ctx, 0, 1, 20); err == nil {
 		t.Error("mid=0 不该发出去")
 	}
-	if _, err := c.SpaceFavFolders(ctx, 0); err == nil {
+	if _, err := c.SpaceFavFolders(ctx, 0, 1, 0); err == nil {
 		t.Error("mid=0 不该发出去")
 	}
 	if _, err := c.SpaceVideos(ctx, UpVideoQuery{Mid: 0}); err == nil {

@@ -84,10 +84,9 @@ func (s *Shell) fetchUp(ctx context.Context, sp *upSpace, tab int, cursor string
 		r.err, r.dyns, r.hasMore, r.dropped = err, pg.Items, pg.HasMore, pg.Dropped
 		r.cursor, r.sent = pg.Offset, pg.Raw
 	case upTabCollection:
-		// 收藏夹那个接口**一次给全，没有翻页参数**（见 bili.SpaceFavFolders），
-		// 所以它只有第一页：拉过一次就到底。
-		cols, err := s.app.UpCollections(ctx, sp.mid)
-		r.err, r.cols, r.hasMore, r.sent = err, cols, false, len(cols)
+		// 收藏夹那个接口是**分页**的（pn/ps，默认 20；见 bili.SpaceFavFolders）。
+		pg, err := s.app.UpCollections(ctx, sp.mid, page+1)
+		r.err, r.cols, r.hasMore, r.sent = err, pg.Folders, pg.HasMore, len(pg.Folders)
 	case upTabSeries:
 		pg, err := s.app.UpSeries(ctx, sp.mid, page+1, upSeriesPageSize)
 		r.err, r.cols, r.hasMore, r.sent = err, pg.Collections, pg.HasMore, len(pg.Collections)
@@ -116,8 +115,28 @@ func (s *Shell) adoptUp(sp *upSpace) {
 		}
 		// 🔴 铁律四：追加是**尾部**（重查才是头部），尾部追加不动已有行的
 		// 位置，所以「正在看的那一条」翻完页还是它。
-		sp.dynItems = append(sp.dynItems, r.dyns...)
-		sp.cols[r.tab] = append(sp.cols[r.tab], r.cols...)
+		//
+		// ⚠️ **重了的在这里丢掉**：B 站翻页会重叠（同一页的东西挪了名次就会在
+		// 两页里各出现一次）。两个一模一样的行身份会让那几行共用一份状态
+		// ——Tester 里当场 panic，真窗口里选中一个另一个也亮。
+		if sp.seen == nil {
+			sp.seen = map[string]bool{}
+		}
+		for _, d := range r.dyns {
+			if sp.seen["dyn:"+d.ID] {
+				continue
+			}
+			sp.seen["dyn:"+d.ID] = true
+			sp.dynItems = append(sp.dynItems, d)
+		}
+		for _, col := range r.cols {
+			k := fmt.Sprintf("coll:%d:%d", col.Type, col.ID)
+			if sp.seen[k] {
+				continue
+			}
+			sp.seen[k] = true
+			sp.cols[r.tab] = append(sp.cols[r.tab], col)
+		}
 		sp.dropped[r.tab] = r.dropped
 		p.adopt(r.cursor, r.sent, r.hasMore)
 	}

@@ -116,6 +116,16 @@ type SpaceHeader struct {
 	// Err 是上一次加载的错。成功时是空串。
 	Err string
 
+	// statFor / statKnown / statErr 是「关注数/粉丝数」那一组，形状和上面
+	// relation 那一组一样。
+	//
+	// ⚠️ 为什么不能像 `Stat` 那样「拿不到就当 0」：**粉丝数 0 会被画成一个
+	// 干干净净的「粉丝数 0」**，而那是个**假数**——真实值可能是十几万。用户会
+	// 相信它。所以查不到就说「没查到」并且给一个重试。
+	statFor   int64
+	statKnown bool
+	statErr   string
+
 	// relationFor 是**查这个关系时用的账号**（自己的 mid，0 是没登录）。
 	//
 	// ⚠️ 头部是按 mid 缓存的，而「关注关系」是**按账号**的：账号 A 登进来
@@ -169,6 +179,27 @@ func (h SpaceHeader) Follow(selfMid int64, loggedIn bool) FollowState {
 	}
 	return FollowAskable
 }
+
+// StatOK 报告「关注数/粉丝数是真的查到了」。
+func (h SpaceHeader) StatOK() bool { return h.statKnown && h.statFor != 0 }
+
+// StatFailed 报告「关注数/粉丝数没查到，而且可以点重试」。
+func (h SpaceHeader) StatFailed() bool { return h.statErr != "" }
+
+// NeedStat 报「关注数/粉丝数该不该现在去查」。
+//
+// 和 NeedRelation 同一套规矩：登录了、头已经加载过、没在拉、**没失败过**
+// （失败了等人点重试，不然一个稳定失败的接口就是每帧一个请求）。
+func (h SpaceHeader) NeedStat() bool {
+	if !h.Loaded || h.Loading || h.statErr != "" {
+		return false
+	}
+	return !h.StatOK()
+}
+
+// AnyPartFailed 报告「关注关系或关注数那两样里有没查到的」，界面据此给一个
+// 重试入口。
+func (h SpaceHeader) AnyPartFailed() bool { return h.relationErr != "" || h.statErr != "" }
 
 // RelationKnown 报告「关注关系是真的查到了」。
 func (h SpaceHeader) RelationKnown() bool { return h.relationKnown }
@@ -285,13 +316,17 @@ func (s *UpSpace) Load() {
 		var (
 			user        *bili.User
 			stat        *bili.RelationStat
+			statErr     error
 			relation    bili.Relation
 			relationOK  bool
 			relationErr error
 		)
 		done := make(chan struct{}, 3)
 		go func() { user, _ = cli.SpaceAcc(ctx, mid); done <- struct{}{} }()
-		go func() { stat, _ = cli.RelationStatOf(ctx, mid); done <- struct{}{} }()
+		go func() {
+			defer func() { done <- struct{}{} }()
+			stat, statErr = cli.RelationStatOf(ctx, mid)
+		}()
 		if askRelation {
 			go func() {
 				defer func() { done <- struct{}{} }()
@@ -331,6 +366,22 @@ func (s *UpSpace) Load() {
 			// 吞掉的话界面上会是一个**能按的**「关注」按钮，而它其实没查到
 			// 任何东西——用户按下去是一次取关（B 站对没关注过的人「取关」
 			// 是成功的，于是他更确信自己关注过）。
+			// 🔴 **关注数/粉丝数查失败也要说出来，不能把零值当「0 个粉丝」**。
+			//
+			// 吞掉的话界面上是一个干干净净的「粉丝数 0」——那是个**假数**，
+			// 用户会相信它（而真实值可能是十几万）。这是这一条最难受的地方：
+			// 它看起来完全正常。
+			s.head.statFor, s.head.statKnown = 0, false
+			if statErr == nil && stat != nil {
+				s.head.statFor, s.head.statKnown = selfMid, true
+				s.head.Stat = *stat
+			}
+			if statErr != nil {
+				s.head.statErr = statErr.Error()
+			} else {
+				s.head.statErr = ""
+			}
+
 			s.head.relationFor, s.head.relationKnown = 0, false
 			if askRelation {
 				s.head.relationFor = selfMid
@@ -351,13 +402,17 @@ func (s *UpSpace) Load() {
 	}()
 }
 
-// RetryRelation 清掉「关注关系没查到」，好让下一次 Load 又去问一次。
+// RetryRelation 清掉「关注关系 / 关注数没查到」，好让下一次 Load 又去问一次。
+//
+// 两样一起清：它们来自**不同的接口**，而界面上是同一个「重试」按钮
+// （`SpaceHeader.AnyPartFailed`）——只清一样的话，另一个还得再点一次。
 //
 // 只有**人点「重试」**才调它：查失败之后不自动重试（见 NeedRelation 的
 // 防抖那条），而这一页也没有别的入口能让用户重来一次。
 func (s *UpSpace) RetryRelation() {
 	s.mu.Lock()
 	s.head.relationErr = ""
+	s.head.statErr = ""
 	s.mu.Unlock()
 	if wake := s.app.wakeLocked(); wake != nil {
 		wake()
@@ -457,13 +512,16 @@ func (a *App) UpVideos(ctx context.Context, q bili.UpVideoQuery) (bili.UpVideoPa
 	return cli.SpaceVideos(ctx, q)
 }
 
-// UpCollections 拉「收藏夹」Tab。B  站那个接口一次给全，没有翻页。
-func (a *App) UpCollections(ctx context.Context, mid int64) ([]bili.UpCollection, error) {
+// UpCollections 拉「收藏夹」Tab 的一页。
+//
+// ⚠️ **分页**：B 站那个接口带 pn/ps（默认 20、上限 50），返回里带 count 和
+// has_more。不翻页的话超过 20 个收藏夹的 UP 主，第 21 个永远看不到。
+func (a *App) UpCollections(ctx context.Context, mid int64, page int) (bili.FavFolderPage, error) {
 	cli := a.explore()
 	if cli == nil {
-		return nil, errExploreMissing
+		return bili.FavFolderPage{}, errExploreMissing
 	}
-	return cli.SpaceFavFolders(ctx, mid)
+	return cli.SpaceFavFolders(ctx, mid, page, 0)
 }
 
 // UpSeries 拉「合集」Tab 的一页。

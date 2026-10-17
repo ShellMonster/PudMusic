@@ -601,43 +601,76 @@ func (c *Client) SpaceSeries(ctx context.Context, mid int64, page, size int) (Sp
 	return out, nil
 }
 
-// SpaceFavFolders 拉一个 UP 主**自己创建的**收藏夹。
+// FavFolderPage 是「收藏夹」Tab 的一页。
+type FavFolderPage struct {
+	Folders []UpCollection
+	// Count 是这个 UP 一共创建了多少个收藏夹（B 站给的）。
+	Count int
+	// HasMore 后面还有没有。
+	HasMore bool
+}
+
+// favFolderDefaultSize 是一页几个收藏夹。
 //
-// ⚠️ 这个接口**一次给全，没有翻页参数**——所以返回里没有 HasMore 这回事，
-// 调用方别给它加一页「还在加载」。（上游 `favorites/index.tsx:30` 也只调一次。）
+// 20 是 B 站的默认值（上游 `fav-folder-created-list.ts` 的参数注释
+// 「每页数量，默认 20，最大 50」），上限是 50。
+const favFolderDefaultSize = 20
+
+// SpaceFavFolders 拉一个 UP 主**自己创建的**收藏夹（一页）。
+//
+// ⚠️ **这个接口是分页的**，页码从 1 起，`ps` 默认 20、上限 50，返回里带
+// `count` 和 `has_more`（上游 `fav-folder-created-list.ts` 的参数与响应
+// 类型，和 `user-profile/favorites` 那个页面实际在用的翻页）。
+//
+// 早一版这里写的是「一次给全，没有翻页参数」——那**是错的**，于是超过 20 个
+// 收藏夹的 UP 主，第 21 个**永远看不到**：界面显示「已加载 20、没有更多」。
 //
 // ⚠️ 未登录调用会回 -101。别人空间的收藏夹要对方自己开了「公开」才有内容，
 // B 站在这种情况下给的是**空列表而不是错**——所以界面上要能说清
 // 「他没公开收藏夹」和「加载失败」的区别。
-func (c *Client) SpaceFavFolders(ctx context.Context, mid int64) ([]UpCollection, error) {
+func (c *Client) SpaceFavFolders(ctx context.Context, mid int64, page, size int) (FavFolderPage, error) {
 	if mid <= 0 {
-		return nil, fmt.Errorf("bili: 空间 id 不对（mid=%d）", mid)
+		return FavFolderPage{}, fmt.Errorf("bili: 空间 id 不对（mid=%d）", mid)
+	}
+	if page < 1 {
+		page = 1
+	}
+	if size <= 0 || size > 50 {
+		size = favFolderDefaultSize
 	}
 	params := url.Values{}
 	params.Set("up_mid", strconv.FormatInt(mid, 10))
+	params.Set("pn", strconv.Itoa(page))
+	params.Set("ps", strconv.Itoa(size))
 
 	raw, err := c.Do(ctx, Call{Method: "GET", URL: c.hostAPI + spaceFavPath, Query: params})
 	if err != nil {
-		return nil, err
+		return FavFolderPage{}, err
 	}
 	var d struct {
-		List []struct {
+		Count int `json:"count"`
+		List  []struct {
 			ID    int64  `json:"id"`
 			Title string `json:"title"`
+			Cover string `json:"cover"`
 			Media int    `json:"media_count"`
 		} `json:"list"`
+		HasMore bool `json:"has_more"`
 	}
 	if err := json.Unmarshal(raw, &d); err != nil {
-		return nil, fmt.Errorf("bili: 收藏夹列表的返回读不懂：%w", err)
+		return FavFolderPage{}, fmt.Errorf("bili: 收藏夹列表的返回读不懂：%w", err)
 	}
-	out := make([]UpCollection, 0, len(d.List))
+	out := FavFolderPage{Count: d.Count}
 	for _, f := range d.List {
 		if f.ID == 0 {
 			continue
 		}
-		out = append(out, UpCollection{
-			ID: f.ID, Title: f.Title, Count: f.Media, Type: collectionTypeFav,
+		out.Folders = append(out.Folders, UpCollection{
+			ID: f.ID, Title: f.Title, Cover: f.Cover, Count: f.Media, Type: collectionTypeFav,
 		})
 	}
+	// ⚠️ B 站的 `has_more` 有时候不给（老接口），所以「拿够了没有」也算一道。
+	// 少一个这一条就把「到底了」判早，第 21 个收藏夹看不到（实测）。
+	out.HasMore = d.HasMore || len(out.Folders) > 0 && page*size < d.Count
 	return out, nil
 }

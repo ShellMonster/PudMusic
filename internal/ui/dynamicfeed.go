@@ -65,6 +65,9 @@ type dynamicFeed struct {
 	feed upPager
 	auth upPager
 
+	// seen 是**已经收进来的身份**，挡翻页重叠（和 `upSpace.seen` 同一个理由：
+	// 两个一模一样的行身份会让那几行共用一份状态）。
+	seen map[string]bool
 	// dropped 是右边丢掉的动态条数。不画在界面上，只用来让「一个格子都没有」
 	// 能说清是「真的没有」还是「他发的那些我们画不出来」。
 	dropped int
@@ -131,6 +134,7 @@ func (s *Shell) resetIfAccountChanged(f *dynamicFeed) {
 	f.items = nil
 	f.dropped = 0
 	f.started = false
+	f.seen = nil
 }
 
 // feedPager 是这一栏的闸门。
@@ -288,8 +292,13 @@ func (s *Shell) viewAuthorRow(c *ui.Context, f *dynamicFeed, i int) {
 	t := c.Theme()
 
 	if i >= len(f.authors)+1 {
-		s.viewFeedSentinel(c, f.feedPager(feedAuthors), "继续往下滚，加载更多关注的人", "重试加载关注的人", func() {
-			auth := f.auth
+		// ⚠️ **`auth := f.auth` 是复制，不是指针**（早一版就这么写的）：
+		// 复制品上的 `err = nil` / `begin()` 全都写在副本上，真实的闸门
+		// `loading` 仍是 false、`err` 仍非 nil —— 于是界面上那句失败一直挂着、
+		// 按钮一直可点，而每点一次就**并发发出一个重复的 pn 请求**
+		//（两次请求的回来顺序不保证，后到的把先到的结果盖掉）。
+		auth := f.feedPager(feedAuthors)
+		s.viewFeedSentinel(c, auth, "继续往下滚，加载更多关注的人", "重试加载关注的人", func() {
 			auth.err = nil
 			if ctx := auth.begin(); ctx != nil {
 				go s.fetchFeed(ctx, f, feedAuthors, auth.cursor, auth.page)
@@ -555,8 +564,24 @@ func (s *Shell) adoptFeed(f *dynamicFeed) {
 		}
 		// 🔴 铁律四：追加是**尾部**，不动已有行的位置，所以「正在看的那
 		// 一条」翻完页还是它。
-		f.items = append(f.items, r.dyns...)
-		f.authors = append(f.authors, r.authors...)
+		if f.seen == nil {
+			f.seen = map[string]bool{}
+		}
+		for _, d := range r.dyns {
+			if f.seen["dyn:"+d.ID] {
+				continue
+			}
+			f.seen["dyn:"+d.ID] = true
+			f.items = append(f.items, d)
+		}
+		for _, a := range r.authors {
+			k := "auth:" + strconv.FormatInt(a.Mid, 10)
+			if f.seen[k] {
+				continue
+			}
+			f.seen[k] = true
+			f.authors = append(f.authors, a)
+		}
 		if r.which == feedItems {
 			f.dropped = r.dropped
 			f.started = true

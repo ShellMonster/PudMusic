@@ -851,6 +851,50 @@ func TestADynamicKeepsItsIdentityWhenOneIsInsertedAbove(t *testing.T) {
 	}
 }
 
+// TestTheFavoritesTabReachesTheSecondPage 钉住「收藏夹能翻到第二页」。
+//
+// ⚠️ 早一版把这个接口当成「一次给全」的（那**是错的**），于是超过 20 个
+// 收藏夹的 UP 主，**第 21 个永远看不到** —— 界面上是「已加载 20、没有更多」。
+func TestTheFavoritesTabReachesTheSecondPage(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "有 21 个收藏夹的 UP", 0, 1)
+	b.on("/x/v3/fav/folder/created/list", func(w http.ResponseWriter, r *http.Request) {
+		pn := r.URL.Query().Get("pn")
+		list := []any{}
+		switch pn {
+		case "1":
+			for i := range 20 {
+				list = append(list, map[string]any{"id": i + 1, "title": "收藏夹", "media_count": 1})
+			}
+		case "2":
+			list = append(list, map[string]any{"id": 21, "title": "第 21 个收藏夹", "media_count": 1})
+		default:
+			// 后面没有页了
+		}
+		uiExploreJSON(w, 0, map[string]any{"count": 21, "list": list, "has_more": pn == "1"})
+	})
+	s, tt, _ := newSpaceShell(t, b, false, "")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+	sp.tab = upTabCollection
+	tt.Frame()
+	waitFrames(t, tt, "第一页收藏夹到了", func() bool { return len(sp.cols[upTabCollection]) == 20 })
+	tt.Frame()
+
+	// 滚到底 → 哨兵 → 第二页。
+	for range 10 {
+		tt.Scroll(600, 500, 0, 100000)
+		tt.Frame()
+	}
+	waitFrames(t, tt, "第二页收藏夹到了", func() bool {
+		return len(sp.cols[upTabCollection]) == 21
+	})
+	tt.Frame()
+	if !showsText(tt, "第 21 个收藏夹") {
+		t.Errorf("第 21 个收藏夹看不到（界面显示 %d 个）", len(sp.cols[upTabCollection]))
+	}
+}
+
 // TestSwitchingTabsBackDoesNotDuplicateTheRows 钉住「切 Tab 不重拉」。
 //
 // ⚠️ 这一条是一个**真踩过的坑**：切 Tab 时把闸门 reload 掉（回到「第一页」）

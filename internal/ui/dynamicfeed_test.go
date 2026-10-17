@@ -294,3 +294,90 @@ func TestSwitchingAccountsClearsTheAuthorList(t *testing.T) {
 		t.Errorf("作者栏现在是 %+v，want 只有账号 88 的那一个", f.authors)
 	}
 }
+
+// TestTheAuthorRetryWhilePendingDoesNotSendASecondRequest 钉住「点了重试之后
+// 不再能点、也不再并发发第二个请求」。
+//
+// ⚠️ 这一条抓的是一个**真的 bug**：重试那一支写的是 `auth := f.auth` ——
+// **复制，不是指针**。于是「清掉 err」和「begin() 打上 loading」全都写在
+// 副本上，真实的闸门 `loading` 仍是 false、`err` 仍非 nil：
+//
+//   - 界面上那句失败一直挂着、按钮一直可点；
+//   - 每点一次就**并发发出一个重复的 pn 请求**，两次的回来顺序不保证，
+//     后到的把先到的结果盖掉。
+//
+// 判据是两件事：重试之后按钮**找不到了**（换成「正在加载…」），而且
+// 接口只被请求了**一次**。
+func TestTheAuthorRetryWhilePendingDoesNotSendASecondRequest(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "我自己", 0, 1)
+	b.on("/x/polymer/web-dynamic/v1/feed/all", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{"items": []any{}, "has_more": false})
+	})
+
+	var mu sync.Mutex
+	var pn2 int
+	// page1 给一个作者、total 2；page2 一律失败 → 界面上出现重试按钮。
+	b.on("/x/relation/followings", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("pn") != "2" {
+			uiExploreJSON(w, 0, map[string]any{"total": 2, "list": []any{
+				map[string]any{"mid": 11, "uname": "第一个"},
+			}})
+			return
+		}
+		mu.Lock()
+		pn2++
+		mu.Unlock()
+		uiExploreJSON(w, -500, nil)
+	})
+
+	s, tt, _ := newSpaceShell(t, b, true, "77")
+	s.navigate(dynamicFeedPath)
+	tt.Frame()
+	f := s.dynamicFeedOf()
+	waitFrames(t, tt, "第二页失败", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(f.authors) == 1 && f.auth.err != nil
+	})
+	tt.Frame()
+	if _, ok := tt.Find("重试加载关注的人"); !ok {
+		t.Skipf("这一轮没出现重试按钮（err=%v），画面上是 %q", f.auth.err, tt.Texts())
+	}
+
+	// ⚠️ 换掉处理器：这一次的第二页会一直悬着，直到测试放它走。
+	release := make(chan struct{})
+	b.on("/x/relation/followings", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("pn") != "2" {
+			uiExploreJSON(w, 0, map[string]any{"total": 2, "list": []any{
+				map[string]any{"mid": 11, "uname": "第一个"},
+			}})
+			return
+		}
+		mu.Lock()
+		pn2++
+		mu.Unlock()
+		<-release
+		uiExploreJSON(w, 0, map[string]any{"total": 2, "list": []any{
+			map[string]any{"mid": 12, "uname": "第二个"},
+		}})
+	})
+
+	tt.Click("重试加载关注的人")
+	for range 10 {
+		tt.Frame()
+	}
+	if _, ok := tt.Find("重试加载关注的人"); ok {
+		t.Errorf("重试之后按钮还在 —— 闸门的 loading 没写回真实的那一份" +
+			"（`auth := f.auth` 是复制），可以再点一次并发发第二个请求")
+	}
+	mu.Lock()
+	n := pn2
+	mu.Unlock()
+	if n != 2 {
+		// 1 次是「失败的那一次」（重试之前），重试再加 1 次。
+		t.Errorf("第二页被请求了 %d 次，want 2（一次失败 + 一次重试）；多了就是并发重复", n)
+	}
+	close(release)
+	waitFrames(t, tt, "第二页到了", func() bool { return len(f.authors) == 2 })
+}

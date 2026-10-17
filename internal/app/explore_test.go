@@ -124,7 +124,7 @@ func TestExploreIsMissingIsAnIdentifiableError(t *testing.T) {
 	if _, err := a.UpVideos(ctx, bili.UpVideoQuery{Mid: 1}); err != errExploreMissing {
 		t.Errorf("投稿：%v，want errExploreMissing", err)
 	}
-	if _, err := a.UpCollections(ctx, 1); err != errExploreMissing {
+	if _, err := a.UpCollections(ctx, 1, 1); err != errExploreMissing {
 		t.Errorf("收藏夹：%v，want errExploreMissing", err)
 	}
 	if _, err := a.UpSeries(ctx, 1, 1, 20); err != errExploreMissing {
@@ -558,6 +558,65 @@ func TestARelationFromAnotherAccountIsNotUsed(t *testing.T) {
 	}
 }
 
+// TestAFailedStatIsNotCachedAsZero 钉住「粉丝数查失败不能说成 0」。
+//
+// ⚠️ 这一条比关注关系那条更难受：粉丝数 0 会被画成一个**干干净净的「粉丝数
+// 0」**，而那是个**假数**（真实值可能是十几万）。它看起来完全正常，用户会
+// 相信它 —— 而我们一个错都没报。
+func TestAFailedStatIsNotCachedAsZero(t *testing.T) {
+	b := newExploreBili(t)
+	b.on("/x/space/wbi/acc/info", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"mid": 42, "name": "n"})
+	})
+	b.on("/x/space/wbi/acc/relation", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"relation": map[string]any{"attribute": 0}})
+	})
+	b.on("/x/relation/stat", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, -500, nil)
+	})
+	a := newExploreApp(t, b)
+	loginExplore(a, "77")
+
+	sp := a.UpSpaceOf(42)
+	sp.Load()
+	waitExplore(t, sp)
+
+	h := sp.Snapshot()
+	if !h.Loaded {
+		t.Fatal("资料查到了，头该算加载过")
+	}
+	if h.StatOK() {
+		t.Error("粉丝数没查到，StatOK 不该是 true")
+	}
+	if h.Stat.Follower != 0 {
+		t.Errorf("粉丝数是 %d —— 查失败时它是零值，界面上会是一个**假数**", h.Stat.Follower)
+	}
+	if !h.StatFailed() {
+		t.Error("查失败了，StatFailed 该是 true（界面据此给一个重试）")
+	}
+	if !h.AnyPartFailed() {
+		t.Error("AnyPartFailed 该为 true")
+	}
+	// 防抖：失败之后不自动重试（不然每帧一个请求）。
+	if h.NeedStat() {
+		t.Error("查失败之后 NeedStat 应该是 false（否则每帧一个请求）")
+	}
+
+	// 人点「重试」，接口这回好了。
+	b.on("/x/relation/stat", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"follower": 123456})
+	})
+	sp.RetryRelation()
+	if !sp.Snapshot().NeedStat() {
+		t.Fatal("RetryRelation 之后该又能查了")
+	}
+	sp.Load()
+	waitExplore(t, sp)
+	if !sp.Snapshot().StatOK() || sp.Snapshot().Stat.Follower != 123456 {
+		t.Errorf("重试之后没拿到粉丝数：%+v", sp.Snapshot().Stat)
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 四个 Tab 的接口真的接上了
 // ─────────────────────────────────────────────────────────────────────────────
@@ -579,7 +638,7 @@ func TestEachTabHitsItsOwnEndpoint(t *testing.T) {
 	if _, err := a.UpVideos(ctx, bili.UpVideoQuery{Mid: 42, Page: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.UpCollections(ctx, 42); err != nil {
+	if _, err := a.UpCollections(ctx, 42, 1); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.UpSeries(ctx, 42, 1, 20); err != nil {

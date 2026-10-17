@@ -135,6 +135,14 @@ type upSpace struct {
 	dynItems []bili.Dynamic
 	// cols 是「收藏夹」和「合集」两张 Tab 的行。其余 Tab 那一格是空的。
 	cols [upTabCount][]bili.UpCollection
+	// seen 是**已经收进上面两份的行身份**，用来挡翻页重叠。
+	//
+	// ⚠️ 必须有：B 站翻页是会重叠的（同一页的东西挪了名次就会在两页里各出现
+	// 一次），而**两个一模一样的行身份**会让框架按 key 对位时那几行共用一份
+	// 状态 —— Tester 里当场 panic，真窗口里选中一个另一个也亮，而界面上看不出
+	// 任何异样。`list.PagedList` 早就为此维护了一张 `seen`（`paged.go`），
+	// 这一层原来没有，是这次评审的 fixture 撞出来的。
+	seen map[string]bool
 
 	// state 是一张 Tab 一份的列表状态。**不能共用**：MyGo 会在
 	// 「同一个 ListState 被两个 List 显示」时 panic（`ui/list.go` 的
@@ -355,8 +363,11 @@ func (s *Shell) viewUpSpace(c *ui.Context, r *ui.Route) {
 	// 界面停在「打不开」上还在刷网络。唯一的出口是用户点「再试一次」。
 	if !h.Loaded && !h.Loading && h.Err == "" {
 		sp.header.Load()
-	} else if h.NeedRelation(s.app.SelfMid()) {
-		// 🔴 **登录之后要把关注关系补查一次**。
+	} else if h.NeedRelation(s.app.SelfMid()) || h.NeedStat() {
+		// 🔴 关注关系和关注数这两样**都要在缺的时候补查**。
+		//
+		// 关注关系那条的理由见下面；关注数那条是同一个病根：它是**按账号**
+		// 的，而且没查到的时候界面上不能画「0」。
 		//
 		// 头是按 mid 缓存的，而关系是**按账号**的：没登录时进来过一次，
 		// 那次不查关系（那个接口要 Cookie，见 `Load` 里的 askRelation），
@@ -505,9 +516,20 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 		// 干干净净的「粉丝数 0」——用户会以为他真的一个粉丝都没有。等级也是
 		// 一块（上游把它算在 `stats` 里），跟着一起藏。
 		if s.app.LoggedIn() {
-			spaceStat(c, "粉丝数", formatCount(h.Stat.Follower))
-			if isSelf {
-				spaceStat(c, "关注数", formatCount(h.Stat.Following))
+			// 🔴 **没查到就画「没查到」，不画 0**。粉丝数 0 是一个**假数**
+			// （真实值可能是十几万），而它看起来完全正常——这是这一块最难受
+			// 的失败方式。等级来自 acc/info、登录就能读到，所以照画。
+			if h.StatOK() {
+				spaceStat(c, "粉丝数", formatCount(h.Stat.Follower))
+				if isSelf {
+					spaceStat(c, "关注数", formatCount(h.Stat.Following))
+				}
+			} else if h.StatFailed() {
+				ui.Text(c, "粉丝数没读到").FontSize(12).TextColor(t.TextMuted)
+				if ui.Button(c, "重试").FontSize(12).Clicked() {
+					sp.header.RetryRelation()
+					sp.header.Load()
+				}
 			}
 			spaceStat(c, "等级", fmt.Sprintf("Lv%d", h.User.Level))
 		}
