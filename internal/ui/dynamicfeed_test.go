@@ -382,10 +382,17 @@ func TestTheAuthorRetryWhilePendingDoesNotSendASecondRequest(t *testing.T) {
 		}})
 	})
 
-	tt.Click("重试加载关注的人")
-	for range 10 {
-		tt.Frame()
+	if err := tt.Click("重试加载关注的人"); err != nil {
+		t.Fatal(err)
 	}
+	// ⚠️ **等它真的发出去再数**。早一版画完 10 帧就数，那 10 帧里
+	// goroutine 未必已经把请求交到假服务器上 —— 于是报「0 次，want 1」，
+	// 而重试其实完全正常（实测 10 次里飘 2 次）。
+	waitFrames(t, tt, "重试把第二页又请求了一次", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return pn2 > before
+	})
 	if _, ok := tt.Find("重试加载关注的人"); ok {
 		t.Errorf("重试之后按钮还在 —— 闸门的 loading 没写回真实的那一份" +
 			"（`auth := f.auth` 是复制），可以再点一次并发发第二个请求")
@@ -396,6 +403,17 @@ func TestTheAuthorRetryWhilePendingDoesNotSendASecondRequest(t *testing.T) {
 	if during != before+1 {
 		t.Errorf("点了重试之后第二页被请求了 %d 次，want %d（一次就够）",
 			during-before, 1)
+	}
+	// 再画三十帧：**不能再多**。这一段是「重试期间按钮已经不可点」的那个证据
+	// —— loading 没写回真实的那一份时，这里会一直发下去。
+	for range 30 {
+		tt.Frame()
+	}
+	mu.Lock()
+	extra := pn2
+	mu.Unlock()
+	if extra != during {
+		t.Errorf("重试之后又多发了 %d 个请求 —— 按钮没被换掉，等于可以连点", extra-during)
 	}
 
 	close(release)
