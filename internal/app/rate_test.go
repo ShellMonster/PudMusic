@@ -1,13 +1,12 @@
 package app_test
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -96,14 +95,32 @@ const winSpan = 2 * time.Second
 // 这和 flacdec 的 `TestDecodeSpeed`「五轮取最快」是同一个手法，也是那个仓库早就
 // 验证过的：它治的正是「解码器变慢」和「旁边有人在抢 CPU」分不出来这件事。
 //
-// 第二个返回值是**抖动**：两遍之间差多少倍。它比「测出来的值是多少」更能说明
-// 这一轮能不能拿来判——机器稳定地慢（两遍接近）时那个值是可用的，机器在抖
-// （两遍差得远）时那个值什么也不是。见 measurable。
+// 第二个返回值是**抖动**（见 `jitterOf`）。它比「测出来的值是多少」更能说明这一轮
+// 能不能拿来判：机器稳定地慢（两遍接近）时那个值是可用的，机器在抖（两遍差得远）
+// 时那个值什么也不是。
 func secPerSong(t *testing.T, a *app.App, from, to time.Duration) (best, jitter float64) {
 	t.Helper()
 	span := to - from
-	lo, hi := window(t, a, from, to), window(t, a, to, to+span)
-	return max(lo, hi), hi / lo
+	x, y := window(t, a, from, to), window(t, a, to, to+span)
+	return max(x, y), jitterOf(x, y)
+}
+
+// jitterOf 是两遍测量之间差多少倍：大的除以小的。
+//
+// # ⚠️ 必须**双向**（`max/min`，不是 `lo/hi` 或 `hi/lo`）
+//
+// 哪一遍慢是**随机的**——机器什么时候被抢说不准，同一段的两次测量，先后顺序没有
+// 任何规律。所以这个数不能带方向：`hi/lo` 在「第一遍慢」时给一个大于 1 的数、在
+// 「第二遍慢」时给另一个，而这两个数说的是**同一份抖动**。用有方向的比值会让完全
+// 等量的抖动因为出现在哪一遍而得到相反的结论。
+//
+// 例子：两遍量出 1.0 和 0.5。无论哪个是「第一遍」，抖动都是 2 倍。
+func jitterOf(x, y float64) float64 {
+	lo, hi := min(x, y), max(x, y)
+	if lo <= 0 {
+		return math.Inf(1)
+	}
+	return hi / lo
 }
 
 // window 量一段窗口的 secPerSong。
@@ -140,69 +157,19 @@ const healthyUnity = 0.75
 // 1.3 留了余量——宁可多判成稳一点（那会照红），也别把一次真验跳过去。
 const jitteryJitter = 1.3
 
-// measurable 断「这一轮的数能不能拿来判倍率」。
+// distrust 返回一句说明「这一轮可能量不准」的话；量得准就返回空串。
 //
-// # 慢有两种，只有一种会让比值失效
-//
-// **慢而均匀**：所有窗口一起慢。实测原速 0.825 时，2 倍速窗口也是 0.825 的两倍——
-// 比值照样是 2，**这一族照样测得出结果**。这种情况**不许判成测不了**，跳过一次
-// 就是少验一遍。
-//
-// **慢到供不上**：机器每秒钟只能供出 0.375 秒的音频。这时 2 倍速套上了也是 0.375、
-// 没套上也是 0.375（没套上时供的是 1.0，也一样供不上），**两者在这台机器上完全
-// 无法区分**。这不是判据松紧的问题，是物理上没有信号可测。
-//
-// # 所以判据是**两段测量的抖动**，不是「测出来的值多小」
-//
-// 早先那版看的是「原速基准低于 0.85 就跳过」，那把**慢而均匀**的机器也跳过了：
-// 实测到过原速 0.588、而同一个 2 倍速窗口走到了 2.141——机器明明供得上 2 倍速，
-// 只是那一段原速窗口撞上了忙，于是比值成了 3.6，于是被当成「测不了」。那是白丢
-// 一次验证，而且丢的那一次里代码其实是对的。
-//
-// 抖动直接回答「这两个数可不可信」：两遍接近 = 稳定，那个值就是可用的（哪怕它
-// 整体偏小）；两遍差得远 = 机器在抖，那个值什么也不是。
-//
-// 四种情形各有归属：
-//
-//	比值对                          → 量到了，让它过
-//	比值不对、抖得厉害              → 测不了，跳过（报出去）
-//	比值不对、稳定、机器跟得上实时  → 真的错了，照红
-//	比值不对、稳定、机器供不上      → 测不了，跳过（报出去）
-func measurable(unity, got, target, jitter float64) bool {
-	if jitter > jitteryJitter {
-		// 机器在抖：基准和窗口这两个数**都**不是它们的值，比值对不对都不算数。
-		return false
+// 它**不改变**断言的结果——只挂在错误信息后面，让人知道红的是不是代码的锅。
+func distrust(unity, jitter float64) string {
+	switch {
+	case jitter > jitteryJitter:
+		return fmt.Sprintf("⚠️ 这一次多半不是代码的问题：同一段量两遍差 %.2f 倍，"+
+			"机器当时在抖，上面的数是机器的数。机器闲下来重跑一次就能确认。", jitter)
+	case unity < healthyUnity:
+		return fmt.Sprintf("⚠️ 这一次多半不是代码的问题：原速只走到每秒 %.3f 秒歌，"+
+			"这台机器跟不上实时播放，上面的数可能是机器的数。机器闲下来重跑一次就能确认。", unity)
 	}
-	return near(got, unity*target, rateTol) || unity >= healthyUnity
-}
-
-// requireMeasurable 在「这一轮根本判不了」的时候跳过，跳之前先打一行出来。
-//
-// # 为什么跳过时必须打一行
-//
-// `t.Skip` 在 `go test` **不带 `-v`** 时和通过一样只报 `ok`——也就是「静默地不测」。
-// 那正是这一族最不该有的结果：一个人 review 看到 ok 会以为验过了。测试进程的 stderr
-// 总是会被 `go test` 原样转发，不带 `-v` 也看得见，所以这里先往 stderr 打一行。
-//
-// 这一族本来就要求机器跟得上实时播放（它量的就是「走得比实时快多少倍」），所以这
-// 个跳过**不是新增的逃逸口**：改动前这里没有任何跳过路径，重负载下只会红成
-// 「倍率没套上」——那是把机器的事说成代码的事，比不测更坏。
-func requireMeasurable(t *testing.T, unity, got, target, jitter float64) {
-	t.Helper()
-	if measurable(unity, got, target, jitter) {
-		return
-	}
-	why := "机器跟不上实时播放，原速只走到 " + fmt.Sprintf("%.3f", unity)
-	if jitter > jitteryJitter {
-		why = fmt.Sprintf("机器在抖（同一段量两遍差 %.2f 倍）", jitter)
-	}
-	fmt.Fprintf(os.Stderr,
-		"BMG-44: %s 测不了——%s，%v 倍速窗口只走到 %.3f。"+
-			"这种时候「套上了」和「没套上」量出来的数没法区分（要么都没供上，要么"+
-			"两遍量出来根本不是一回事），物理上没有信号可测，所以跳过而不是报红。"+
-			"等负载降下来重跑。\n",
-		t.Name(), why, target, got)
-	t.Skipf("这台机器量不准（%s；%v 倍速窗口 %.3f），倍率在这一刻判不了", why, target, got)
+	return ""
 }
 
 // rateGap 是「换完倍率之后要让开多少歌内时间才开始量」。
@@ -284,10 +251,10 @@ func TestTheClockFollowsTheRate(t *testing.T) {
 	a.SetRate(2)
 	two, jTwo := secPerSong(t, a, 3*time.Second, 3*time.Second+winSpan)
 	one, jOne := unityBaseline(t, a, 9*time.Second)
-	requireMeasurable(t, one, two, 2, max(jTwo, jOne))
 	if !near(two, 2*one, rateTol) {
 		t.Errorf("2 倍速走 %.3f，原速走 %.3f——比值 %.2f，want 2"+
-			"（进度条和耳朵对不上）", two, one, two/one)
+			"（进度条和耳朵对不上）%s", two, one, two/one,
+			distrust(one, max(jTwo, jOne)))
 	}
 
 	// 0.5 倍速：同一套。
@@ -295,13 +262,12 @@ func TestTheClockFollowsTheRate(t *testing.T) {
 	// 0.5 倍速的预解缓冲最长（rateGap(0.5) 是两秒歌内），加一秒余量让开三秒。
 	half, jHalf := secPerSong(t, a, 16*time.Second, 16*time.Second+winSpan)
 	one2, jOne2 := unityBaseline(t, a, 27*time.Second)
-	requireMeasurable(t, max(one, one2), half, 0.5, max(jHalf, jOne2))
 	// 分母取两段原速里**大的**那个：机器慢的时候多给一次机会，别因为其中一段
 	// 慢就把比值压到容差外。
 	base := max(one, one2)
 	if !near(half, 0.5*base, rateTol) {
-		t.Errorf("0.5 倍速走 %.3f，原速走 %.3f——比值 %.2f，want 0.5",
-			half, base, half/base)
+		t.Errorf("0.5 倍速走 %.3f，原速走 %.3f——比值 %.2f，want 0.5%s",
+			half, base, half/base, distrust(base, max(jHalf, jOne2)))
 	}
 }
 
@@ -334,17 +300,15 @@ func TestRateIsRememberedBeforeAnyTrackIsOpen(t *testing.T) {
 	// 「新歌一上来就是 2 倍速」——必须量**开歌后的第一段**，中间不能有别的操作。
 	two, jTwo := secPerSong(t, a, 3*time.Second, 3*time.Second+winSpan)
 	one, jOne := unityBaseline(t, a, 9*time.Second)
-	requireMeasurable(t, one, two, 2, max(jTwo, jOne))
 	if !near(two, 2*one, rateTol) {
-		t.Errorf("先按的 2 倍速没套到新歌上：原速走 %.3f，2 倍速走 %.3f——比值 %.2f，want 2",
-			one, two, two/one)
+		t.Errorf("先按的 2 倍速没套到新歌上：原速走 %.3f，2 倍速走 %.3f——比值 %.2f，want 2%s",
+			one, two, two/one, distrust(one, max(jTwo, jOne)))
 	}
 	// 拨回 2 倍速之后仍然是 2 倍速——量基准那一拨没有把倍率留在 1。
 	again, jAgain := secPerSong(t, a, 15*time.Second, 15*time.Second+winSpan)
-	requireMeasurable(t, one, again, 2, max(jAgain, jOne))
 	if !near(again, 2*one, rateTol) {
-		t.Errorf("量完基准再拨回 2 倍速，只走到 %.3f（原速 %.3f）——倍率被量基准那次留下了",
-			again, one)
+		t.Errorf("量完基准再拨回 2 倍速，只走到 %.3f（原速 %.3f）——倍率被量基准那次留下了%s",
+			again, one, distrust(one, max(jAgain, jOne)))
 	}
 }
 
@@ -385,9 +349,19 @@ func TestRateSurvivesTrackChanges(t *testing.T) {
 	if pos := a.Snapshot().Position; pos > 2*time.Second {
 		t.Errorf("第二首一上来位置就在 %v——上一首的进度接着数了", pos)
 	}
-	// 第二首上也量一段原速（unityBaseline 会量完拨回 2 倍速），紧挨着 after。
-	unity2, j2 := unityBaseline(t, a, 2*time.Second)
-	after, jA := secPerSong(t, a, 8*time.Second, 8*time.Second+winSpan)
+	// ⚠️ `after` 必须在**任何 SetRate 之前**量——它是「切歌之后的第一段」。
+	//
+	// 早先那版为了拿基准，在量 `after` **之前**先调了 `unityBaseline`，而那个 helper
+	// 会 `SetRate(1)` 量完再 `SetRate(2)` 拨回来。于是「新播放器忘了继承倍率」这个
+	// 回归被**量基准那一下顺手补上了**：`Open` 只在初次打开时设倍率、换播放器时漏掉
+	// 的话，`after` 本该掉到原速（比值 1）而变红，可它已经被补回 2 了，照样绿。
+	// `Snapshot().Rate` 读的是 `App.rate`（App 自己记的那个数），不是播放器实际的
+	// 倍率，所以上面那句 `Rate != 2` 的检查也拦不住。
+	//
+	// 判据在前面、基准在后面：先量完 `after` 再去动倍率，这个用例才问的是它要问的
+	// 「切到下一首之后，新播放器自己有没有带上倍率」。
+	after, jA := secPerSong(t, a, 2*time.Second, 2*time.Second+winSpan)
+	unity2, j2 := unityBaseline(t, a, 8*time.Second)
 
 	// ⚠️ 两个倍速窗口**各自除以自己的原速基准**之后再比，不直接比绝对值。
 	//
@@ -397,15 +371,14 @@ func TestRateSurvivesTrackChanges(t *testing.T) {
 	// 相对速度和切歌后走的相对速度一样吗」，那才是这一条要问的。
 	rBefore, rAfter := before/unity1, after/unity2
 
-	requireMeasurable(t, unity1, before, 2, max(j1, jB))
-	requireMeasurable(t, unity2, after, 2, max(j2, jA))
 	if !near(rBefore, 2, rateTol) {
-		t.Errorf("切歌之前就不对：原速走 %.3f，2 倍速走 %.3f——比值 %.2f，want 2",
-			unity1, before, rBefore)
+		t.Errorf("切歌之前就不对：原速走 %.3f，2 倍速走 %.3f——比值 %.2f，want 2%s",
+			unity1, before, rBefore, distrust(unity1, max(j1, jB)))
 	}
 	if !near(rAfter, rBefore, rateTol) {
 		t.Errorf("切歌之后从 %.2f 掉到 %.2f（各自的原速基准分别是 %.3f 和 %.3f）"+
-			"——新播放器没套上倍率", rBefore, rAfter, unity1, unity2)
+			"——新播放器没套上倍率%s", rBefore, rAfter, unity1, unity2,
+			distrust(unity2, max(j2, jA)))
 	}
 }
 
@@ -438,10 +411,9 @@ func TestOnlineTrackKeepsTheRate(t *testing.T) {
 	}
 	two, jTwo := secPerSong(t, a, 3*time.Second, 3*time.Second+winSpan)
 	one, jOne := unityBaseline(t, a, 9*time.Second)
-	requireMeasurable(t, one, two, 2, max(jTwo, jOne))
 	if !near(two, 2*one, rateTol) {
-		t.Errorf("在线歌没套上 2 倍速：原速走 %.3f，2 倍速走 %.3f——比值 %.2f，want 2",
-			one, two, two/one)
+		t.Errorf("在线歌没套上 2 倍速：原速走 %.3f，2 倍速走 %.3f——比值 %.2f，want 2%s",
+			one, two, two/one, distrust(one, max(jTwo, jOne)))
 	}
 }
 
@@ -502,83 +474,65 @@ func appendU32(b []byte, v uint32) []byte {
 
 func appendU16(b []byte, v uint16) []byte { return append(b, byte(v), byte(v>>8)) }
 
-// TestOnlyThePhysicallyUntestableCaseIsSkipped 钉住 skip 的判据本身。
+// TestJitterDoesNotDependOnWhichPassWasSlow 钉住 `jitterOf` 是双向的。
 //
-// 这一族跳过与否决定「这一次有没有真的验倍率」，所以判据必须写成能测的、
-// 而且**只有物理上测不了**的那一种情况才放过。下面每一条的数字都是在这台机器上
-// 真实见过的（`-race` + 满载，`go test` 跑整包时采集）。
-//
-// ⚠️ 最要紧的是中间那三条「机器健康却比值不对」：**必须**照红不误。放过它们等于
-// 把真 bug 一起放过——那才是真的减少判别力。而「慢而均匀」（0.825、0.761 那两组）
-// 同样不许放过：机器慢不等于测不了，比值照样成立。
-func TestOnlyThePhysicallyUntestableCaseIsSkipped(t *testing.T) {
+// 哪一遍慢是随机的（机器什么时候被抢说不准），所以同一份抖动不能因为它出现在
+// 「第一遍」还是「第二遍」而给出相反的结论。用 `hi/lo` 或 `lo/hi` 那种有方向的
+// 比值就会这样：同样量出 1.0 和 0.5，换个顺序结论就反过来了，而那份抖动一模一样。
+func TestJitterDoesNotDependOnWhichPassWasSlow(t *testing.T) {
 	for _, c := range []struct {
-		name             string
-		unity, got, want float64
-		jitter           float64
-		wantSkip         bool
+		name string
+		x, y float64
+		want float64
 	}{
-		// 慢而均匀：比值对得上，测得出结果——不许跳过。
-		{"慢而均匀的 2 倍速", 0.825, 1.65, 2, 1.05, false},
-		{"慢而均匀的 0.5 倍速", 0.761, 0.381, 0.5, 1.05, false},
-		// 机器健康但比值不对：是代码的错——照红，不许跳过。
-		{"机器健康，倍率刚好没套上", 1.0, 1.0, 2, 1.05, false},
-		{"机器健康，倍率反了", 1.0, 0.5, 2, 1.05, false},
-		{"机器健康，比值差得远", 0.95, 1.1, 2, 1.05, false},
-		// 实测踩到的：2 倍速窗口走到了 2.1（机器供得上），只有原速那段撞上了忙。
-		// 这是「机器在抖」，不是「机器供不上」——抖得厉害就该判成测不了。
-		{"基准撞上忙，抖动大", 0.588, 2.141, 2, 2.4, true},
-		// 供不上：物理上没有信号可测，这是另一种该跳过的。
-		{"供不上，套没套上都一样", 0.375, 0.375, 2, 1.05, true},
-		{"供不上，但这一轮恰好比值对上了", 0.375, 0.75, 2, 1.05, false},
+		{"第一遍慢", 0.5, 1.0, 2},
+		{"第二遍慢", 1.0, 0.5, 2},
+		{"一样", 1.0, 1.0, 1},
+		{"差得远", 0.4, 1.6, 4},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			skip := !measurable(c.unity, c.got, c.want, c.jitter)
-			if skip != c.wantSkip {
-				why := "判成测不了，会把一次真验跳过去"
-				if c.wantSkip {
-					why = "判成可测，机器测不准时会把噪声报成「倍率没套上」"
-				}
-				t.Errorf("unity=%v got=%v want=%v jitter=%v：%s（跳过了=%v，want %v）",
-					c.unity, c.got, c.want, c.jitter, why, skip, c.wantSkip)
+			if got := jitterOf(c.x, c.y); got != c.want {
+				t.Errorf("jitterOf(%v, %v) = %v，want %v", c.x, c.y, got, c.want)
+			}
+			// 换个顺序必须给同一个数——这一条才是它存在的理由。
+			if got := jitterOf(c.y, c.x); got != c.want {
+				t.Errorf("jitterOf(%v, %v) = %v，want %v（换个顺序结论就变了，说明"+
+					"这个数带方向：同一份抖动会因为出现在哪一遍而被不对称地对待）",
+					c.y, c.x, got, c.want)
 			}
 		})
 	}
 }
 
-// TestTheSkipIsNeverSilent 钉住「跳过时必须先打一行到 stderr」。
+// TestDistrustNamesTheReasonItself 钉住「量不准的时候，红里会写清楚是谁的锅」。
 //
-// `t.Skip` 在 `go test` **不带 `-v`** 时和通过一样只报 `ok`——一个人 review 看到
-// ok 会以为这一族验过了。所以 `requireMeasurable` 跳过之前先往 stderr 打一行
-// （测试进程的 stderr 总是被 `go test` 原样转发）。这行字是「不静默」的唯一保证，
-// 它要是哪天被删了，这里立刻红。
-func TestTheSkipIsNeverSilent(t *testing.T) {
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	old := os.Stderr
-	os.Stderr = w
-
-	skipped := t.Run("机器测不准的那一轮", func(t *testing.T) {
-		defer func() { os.Stderr = old }() // Skip 走的是 Goexit，defer 照样跑
-		requireMeasurable(t, 0.375, 0.375, 2, 1.05)
-		t.Error("这一轮该跳过（机器供不上，套没套上量出来一样），却没有跳")
-	})
-	os.Stderr = old
-	_ = w.Close()
-
-	if !skipped {
-		t.Error("子测试没有以跳过结束")
-	}
-	line, _ := io.ReadAll(r)
-	if len(bytes.TrimSpace(line)) == 0 {
-		t.Error("跳过了，但 stderr 上一行字也没有——`go test` 不带 -v 时这就等于静默不测")
-	}
-	// 这行字要能让人自己判断：带实测值，也带「为什么」。
-	for _, want := range []string{"0.375", "2 倍速", "测不了"} {
-		if !bytes.Contains(line, []byte(want)) {
-			t.Errorf("stderr 那行里没有 %q，拿不到实测值：%q", want, bytes.TrimSpace(line))
-		}
+// 这一族没有跳过路径（理由见 distrust 那段），所以红是唯一会被看到的东西。
+// 于是**红里必须带一句「这一次可能不是代码的问题」**，并且在机器健康时不许出现
+// 那句话——否则真 bug 会被一句免责声明盖过去。
+func TestDistrustNamesTheReasonItself(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		unity    float64
+		jitter   float64
+		wantWord string
+	}{
+		{"机器在抖", 1.0, 2.0, "抖"},
+		{"跟不上实时", 0.4, 1.0, "跟不上实时"},
+		{"机器健康", 1.0, 1.0, ""},
+		{"临界不算抖", 1.0, jitteryJitter, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := distrust(c.unity, c.jitter)
+			if c.wantWord == "" {
+				if got != "" {
+					t.Errorf("机器健康时不该有免责说明，却得到 %q——"+
+						"那会让真 bug 被一句话盖过去", got)
+				}
+				return
+			}
+			if !strings.Contains(got, c.wantWord) {
+				t.Errorf("免责说明里没有 %q，看不出是谁的锅：%q", c.wantWord, got)
+			}
+		})
 	}
 }
