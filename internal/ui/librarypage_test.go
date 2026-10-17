@@ -185,6 +185,15 @@ func libraryShell(t *testing.T, f *libFake, path string) (*mygoui.Tester, *Shell
 	s := New(a)
 	t.Cleanup(s.images.Close)
 	t.Cleanup(func() { _ = s.hist.Close() })
+	// 收掉关键词防抖那个钟：`TestTheSearchWatchStopsWhenThePageIsLeft` 敲完字就
+	// 切走，收在那里的定时器就没人停了——每条这样的测试留一个每秒醒四次的 goroutine
+	// 到测试进程退出为止。
+	t.Cleanup(func() {
+		if s.searchWatchStop != nil {
+			s.searchWatchStop()
+			s.searchWatchStop = nil
+		}
+	})
 	// 理由同 newShell：切页动画在 Tester 里永远走不完，留着它只会让「读到的是哪
 	// 一帧」变成随机的。
 	s.router.Transition = mygoui.TransitionNone
