@@ -47,6 +47,11 @@ func (s *Shell) installLifecycle() {
 	// 所以这里记下的 quitting 到窗口的 OnClose 跑的时候一定已经是 true。
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { s.quitting = true })
 
+	// 退进程时把登记在系统上的全局快捷键撤掉。**不是**关窗口时撤：关窗口选「隐藏」
+	// 时应用还活着、音乐还在放，这时候撤了等于「按 ⌘⌥P 在别的应用里没反应，
+	// 而本应用的窗口明明还开着」——托盘那套（#28）要的正是关窗之后仍然可用。
+	mygo.App.OnWillQuit(func(*mygo.QuitEvent) { s.uninstallGlobalShortcuts() })
+
 	// 装了 OnWindowAllClosed 就等于告诉框架「窗口全关也别退出」——这正是
 	// macOS 上要的：窗口收起、应用还在。
 	//
