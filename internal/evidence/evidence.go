@@ -489,8 +489,14 @@ var Items = []Item{
 		// 当时的真实状态，所以它必然通过）。所以每一页除了真数据要出现在画面上，
 		// 还钉一句「这一页的空状态文案不许同时出现」。
 		//
-		// 今天这一条**不是全过**：侧栏第二项「我的关注」**连壳子都没有**，四个
-		// relation 接口一个都没有，而且**它连工单都还没有**（BMG-47 §3 A2）。它在
+		// ⚠️ 「画得出来」和「真去 B 站取回来了」是**两件事**。首页那一行在表上
+		// 走的是一台假 B 站（`newUIExplore` + `homeArchives`）而不是往模型里塞歌，
+		// 而且三档各走一遍——因为 A1 的原教训正是「画得出来」那一半被验了、
+		// 「取数」那一半没人管。这一页钉取数的两条在下面。
+		//
+		// 今天这一条**不是全过**：侧栏第二项「我的关注」**连壳子都没有**（现有的
+		// followings / stat / modify 三个 relation 接口是动态流和 UP 空间在用），
+		// 而且**它连工单都还没有**（BMG-47 §3 A2）。它在
 		// 表上是一条**欠条**：必须点名到编号、写清差什么，并且**当场证明它现在
 		// 真的是空的**——不然欠条会变成万能借口：数据早就接上了它还赖着，谁也
 		// 看不出来。排到票之后把欠条换成真数据即可。
@@ -499,9 +505,13 @@ var Items = []Item{
 			"TestEveryRouteShowsARealRowOrSaysWhichTicketIsMissing",
 			"TestTheRealDataLedgerCoversEveryRoute",
 			"TestEveryRouteHasAPageViewOrAnOpenDebt",
-			// 三条各自的一页：从空状态落到真数据的那一步。
+			// 各页从空状态落到真数据的那一步。
 			"TestTheThreeTabsAllSwitch",
 			"TestCollectionShowsTheHeaderAndTheOpsBar",
+			// 首页那一页的**取数**那一半（表上那一行走的就是这条链）：
+			// 三档各打各的接口，换了档拿到的是另一批。
+			"TestTheHomePagePullsTheTabYouAreLookingAt",
+			"TestEachTabPullsItsOwnList",
 		},
 	},
 	{

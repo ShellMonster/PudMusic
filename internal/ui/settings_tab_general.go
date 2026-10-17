@@ -2,10 +2,10 @@
 // 逐段抄，顺序也照抄（外观 / 播放 / 下载 / 搜索 / 系统）。
 //
 // ⚠️ 这一段曾经写着「这一份里没有导入导出配置（PLAN 9.12）」——那句话在说它
-// 做的**那一天**就是错的：`settingsConfig` 就在**同一个文件下面**（`settingsConfig`
-// 这个方法，以及它那一段「配置」，见 `settings_tab_config.go`），版本号与检查
-// 更新也早就搬进 `update_entry.go` 了（自动更新，commit `8c936d4`）。PLAN 9.12 是
-// 「持久化迁移」，跟导入导出配置无关，那个编号也是照错的。
+// 做的**那一天**就是错的。`settingsConfig`（导出 / 导入 / 从 Biu 导入）在
+// **`settings_tab_config.go`**，由本文件末尾的 `settingsGeneral` 调它摆出来；
+// 版本号与检查更新也早就在 `update_entry.go` 里了（自动更新，commit `8c936d4`）。
+// PLAN 9.12 是「持久化迁移」，跟导入导出配置无关，那个编号也是照错的。
 //
 // 现在的分工照着读：**外观 / 播放 / 下载 / 搜索 / 系统**在这一份；「关于应用」
 // （版本号 + 检查更新 + 更新日志）在 `update_entry.go`；「配置」（导出 / 导入 /
@@ -13,7 +13,8 @@
 //
 // 顺带记一句为什么它们要拆开：Biu 那边是长在同一段里的，我们拆开是因为改的不是
 // 同一样东西——更新器的状态在 `App` 上，用户设置的状态在设置文件里，而只读保护
-// 护的是后者（见下面 `settingsUpdate` 和 `settingsConfig` 各自的注释）。
+// 护的是后者（见 `settingsUpdate`（`update_entry.go`）和 `settingsConfig`
+// （`settings_tab_config.go`）各自的注释）。
 package ui
 
 import (

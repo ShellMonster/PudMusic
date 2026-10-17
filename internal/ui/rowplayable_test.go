@@ -138,9 +138,16 @@ func TestEveryRowWeDrawHasAVerdictThatMatchesWhatHappens(t *testing.T) {
 			}
 			// 欠着的那一类：拒是应该的，但必须拒得**指名道姓**，而且欠条必须
 			// 写清楚差什么（否则这一行就成了万能借口）。
+			//
+			// 🔴 这里必须**红**，不能只 `t.Logf`。写欠条的那一半（真的放不了）
+			// 是本票加的，而它自己得能被证伪：给一行**真放得了**的内容伪造一张
+			// 欠条，正是「欠条赖着不走」那种形态——数据早就在那儿了，表上还写着
+			// 「差三个接口」，而 `go test ./...` 一片绿。`t.Logf` 在普通的一跑里
+			// 根本看不见，那时这张欠条和没写一样。`pageDebt`（realdata_test.go）
+			// 的 `NowEmpty` 是同一个道理，两边都得能红。
 			if err == nil {
-				t.Logf("%s 的欠条 %s 现在看起来已经不用了——删掉 Debt 就能钉住它", r.What, r.Debt)
-				return
+				t.Fatalf("%s：欠条 %s 写着「这一行现在还放不了」，可它按下去根本没被拒——"+
+					"欠条已经过期了，撤掉 Debt（撤掉之后这一行就会被钉成「真放得了」）", r.What, r.Debt)
 			}
 			if !strings.Contains(err.Error(), r.Refuses) {
 				t.Errorf("%s：拒它的理由是 %q，want 含 %q（那句人话不该悄悄变）", r.What, err, r.Refuses)

@@ -70,11 +70,35 @@ type realDataPage struct {
 var realDataLedger = []realDataPage{
 	{
 		Route: homePath, Title: "推荐音乐",
+		// 🔴 全表**只有这一行**必须走真接口，理由就是审计 A1 / #13 的原教训：
+		// 「画得出来」和「真去 B 站取回来了」是两件事，而当年只钉了前一件
+		//（`homePage.SetSongs` 一路绿，`SetSongs` 的调用者一个也没有）。所以这一
+		// 行不塞歌，而是拿一台假 B 站 + `homeArchives` 的真接口跑一遍，并且把三档
+		// 各走一遍——每一档都必须**从 B 站拿到它自己那一批**，而不是换了档还是那一批。
 		Open: func(t *testing.T) (*Shell, *mygoui.Tester) {
-			s, tt := newHome(t, fullSongs())
+			b := newUIExplore(t)
+			homeArchives(b)
+			s, tt, _ := newHomeShell(t, b)
+
+			// 先停在第一档：那是用户落地看到的那一屏，也是 Want 断言的那一屏。
+			realDataWait(t, tt, "第一档的推荐拉回来了", func() bool { return tt.HasText("音乐 推的第一首") })
+
+			clickTab(t, tt, 1)
+			realDataWait(t, tt, "鬼畜那一档拉回来了", func() bool { return tt.HasText("鬼畜 推的第一首") })
+			clickTab(t, tt, 2)
+			realDataWait(t, tt, "流行那一档（榜 + 新歌速递）拉回来了", func() bool {
+				return tt.HasText("流行 榜上的歌") && tt.HasText("新歌速递里那首")
+			})
+			// 「流行」走的是音乐榜而不是第三个分区——那一档拿别的档的歌来顶，
+			// 界面上看着有内容，而这一条断言的是「它打的是哪个接口」。
+			if !b.hit(uiHomeMusicRank) {
+				t.Fatal("「流行」那一档没有打音乐榜那个接口（它拿的是别的那一批）")
+			}
+			clickTab(t, tt, 0)
+			realDataWait(t, tt, "切回第一档", func() bool { return tt.HasText("音乐 推的第一首") })
 			return s, tt
 		},
-		Want: []string{songName(homeTabs[0], 1), songName(homeTabs[0], 2)},
+		Want: []string{"音乐 推的第一首"},
 	},
 	{
 		Route: laterPath, Title: "稍后再看",
@@ -225,13 +249,20 @@ var realDataLedger = []realDataPage{
 	{
 		Route: "/follow", Title: "我的关注",
 		// 🔴 BMG-47 §3 A2：这一页**连壳子都没有**，全仓没有一个 viewFollow，
-		// 而 Biu 那边有整整一页（分组 Tab + 虚拟网格 + 搜索 + 四个 relation
-		// 接口）。它**从第一天起就没有工单**——票号是空的那一格，不是忘了写。
+		// 而 Biu 那边有整整一页（分组 Tab + 虚拟网格 + 搜索 + 关注分组增删改）。
+		// 它**从第一天起就没有工单**——票号是空的那一格，不是忘了写。
+		//
+		// ⚠️ 说清楚「缺的是哪些接口」：仓库里**有**三个 relation 接口
+		//（`/x/relation/followings`、`/x/relation/stat`、`/x/relation/modify`），
+		// 但它们是**别的页面**在用——动态流的作者栏和 UP 空间的关注/取关。关注页
+		// 自己要的那几个（关注分组、设置分组）一个都没有，而缺页面比缺接口更靠前：
+		// 没有 viewFollow，接口拉回来了也没有地方画。
 		//
 		// 这是这张表上唯一一个「欠着、而欠着本身还没有主」的页面。它必须一直
 		// 摆在这张表上、排到票为止：一旦有人给它排了票，把 Debt 换成票号，
 		// 这一行就会开始要求真数据。
-		Debt:     "BMG-47 §3 A2（**还没有工单**）：四个 relation 接口一个都没有，全仓没有一个 viewFollow",
+		Debt: "BMG-47 §3 A2（**还没有工单**）：全仓没有一个 viewFollow；关注页自己要的关注分组" +
+			"/设置分组接口一个都没有（现有的 followings / stat / modify 是动态流和 UP 空间在用）",
 		Why:      "侧栏第二项点进去永远是「暂无内容」，登录了也空；而 Biu 那边是一整页功能。",
 		NowEmpty: lookup("/follow").Empty.Title,
 	},
