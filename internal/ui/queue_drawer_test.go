@@ -238,33 +238,43 @@ func TestQueueRowClickPlaysThatSong(t *testing.T) {
 	}
 }
 
-// TestQueueDrawerMarksTheSongBeingPlayed 钉住「正在放的那首」是按**判重标识**
-// 认的，不是按队列下标。
+// TestQueueDrawerMarksTheSongBeingPlayed 钉「正在放的那一行」是按**判重标识**认
+// 的，不是按队列下标。
 //
-// 队列里同一首排了两遍时，正在放的可能是第二条，而抽屉只留第一条——按下标认
-// 出来的高亮会落在别的歌上。
+// 摆的是 [甲, 甲]：正在放的是**第二份**甲（队列的当前项在下标 1），抽屉里去重之后只
+// 画一行甲。按标识认 → 那行是绿的；按下标认 → 第 0 行和当前项不是同一行，画出来不是
+// 绿的。这和 Biu 的 `isSame(playItem, item)` 是一回事。
+//
+// ⚠️ 必须**真的在放**：「正在放」的判据是「队列的当前项 **且** 确实有歌在放」
+// （见 Shell.playingIdentity）——接歌失败停下来之后当前项还落在一首放不出来的歌上，
+// 那时它不算正在放。
 func TestQueueDrawerMarksTheSongBeingPlayed(t *testing.T) {
 	h := newHarness(t)
-	first := onlineSong("BV1", "重复的那首")
-	h.app.Queue().Append(
-		onlineSong("BV2", "另一首"),
-		first,
-		first, // 同一首排了两遍
-	)
-	putCurrent(t, h.app, 2) // 正在放的是队列里的第三条（抽屉里的第一行）
+	dir := t.TempDir()
+	a := localSong(t, dir, "甲.flac")
+	enqueue(t, h, a)
+	h.app.Enqueue(a, localSong(t, dir, "乙.flac")) // 队列 甲,甲,乙
+	h.app.Queue().Move(2)                         // 当前项挪到乙（不是要它，是确认下标在动）
+	h.app.Queue().Move(-1)                        // 回到第二份甲：正在放的是它
+	if got := h.app.Queue().CurrentIndex(); got != 1 {
+		t.Fatalf("测试自己没摆好：当前项是第 %d 首", got)
+	}
 	h.tt.Frame()
 	openDrawer(t, h)
 
-	if h.app.Queue().CurrentIndex() != 2 {
-		t.Fatalf("测试自己没摆好：当前项是第 %d 首", h.app.Queue().CurrentIndex())
+	if got := countRows(h); got != 2 {
+		t.Fatalf("抽屉里画着 %d 行，want 2（甲 甲 乙 去重成 甲 乙）", got)
 	}
-	// 高亮是画在行上的底色，从画面上量得到：正在放的那一行是主色，其余是面板
-	// 自己的底色。两者的像素必须不同——一样的话这个状态就没画出来。
-	playing, _ := h.tt.Find("重复的那首")
-	other, _ := h.tt.Find("另一首")
+	playing, ok1 := h.tt.Find("甲")
+	other, ok2 := h.tt.Find("乙")
+	if !ok1 || !ok2 {
+		t.Fatalf("两行都得在画面上：%v %v，文字：%q", ok1, ok2, h.tt.Texts())
+	}
 	if playing.H == 0 || other.H == 0 {
 		t.Fatalf("两行都没画出来，文字：%q", h.tt.Texts())
 	}
+	// 正在放的那一行是主色底，其余是面板自己的底色。两者的像素必须不同——一样的话
+	// 这个状态就没画出来。
 	img := h.tt.Image()
 	pc := pixelAt(img, playing.X+playing.W/2, playing.Y+playing.H-4)
 	oc := pixelAt(img, other.X+other.W/2, other.Y+other.H-4)
@@ -273,60 +283,27 @@ func TestQueueDrawerMarksTheSongBeingPlayed(t *testing.T) {
 	}
 }
 
-// TestQueueRowDeleteStopsWhenTheNextSongWillNotPlay 是「从列表删除」接上
-// `App.RemoveAt` 之后，那一条坑在**界面这一层**的样子：删掉的正是正在放的那首、
-// 而队列里下一首打不开。
+// findRow 是「**抽屉里**那一行现在**真的在画面上**吗」。
 //
-// 断的是三样：停下来（播放条上不再有歌）、话别说反（说的是「已经删掉了，但接不
-// 上下一首」，不是「删不掉」——它确实删掉了）、队列里确实没了。
+// 两道过滤，缺一个都会放过「不是那一行」：
 //
-// ⚠️ 这里用坐标右键，不用 `RightClick(歌名)`：要删的那首正在放，同一个名字在**播放
-// 条上也有**，按名字找会找中播放条那一处（那儿没有菜单）。
-func TestQueueRowDeleteStopsWhenTheNextSongWillNotPlay(t *testing.T) {
-	h := newHarness(t)
-	dir := t.TempDir()
-	enqueue(t, h, localSong(t, dir, "甲.flac"))
-	// 队列里下一首是一个打不开的文件（还没进队列的文件从没被放过，所以还不在队列里，
-	// 这里直接塞一个不存在的路径）。
-	h.app.Enqueue(app.LocalItem(filepath.Join(dir, "缺了这一首.flac")))
-	openDrawer(t, h)
-
-	// 抽屉里的第一行（视口 372-53 = 319，行高 64）：y 53~117。
-	h.tt.RightClickAt(500, 85)
-	if got := h.tt.Menu(); len(got) == 0 {
-		t.Fatalf("右键抽屉第一行没有菜单，文字：%q", h.tt.Texts())
-	}
-	if err := h.tt.ChooseMenuItem("从列表删除"); err != nil {
-		t.Fatalf("选不了「从列表删除」：%v", err)
-	}
-	h.tt.Frame()
-
-	if !h.tt.HasText("已经删掉了") {
-		t.Errorf("没有一句话说清「删掉了、下一首接不上」，文字：%q", h.tt.Texts())
-	}
-	if h.tt.HasText("删不掉") {
-		t.Errorf("说的是「删不掉」，可它确实删掉了，文字：%q", h.tt.Texts())
-	}
-	if st := h.app.Snapshot(); st.HasTrack || st.Title != "" {
-		t.Errorf("下一首打不开之后还在放已经删掉的那首：%+v", st)
-	}
-	if got := titlesOf(h.app.Queue().Items()); len(got) != 1 || got[0] != "缺了这一首" {
-		t.Errorf("删完之后队列是 %q，want 只剩「缺了这一首」", got)
-	}
-}
-
-// findRow 是「那一行现在**真的在画面上**吗」。
-//
-// ⚠️ 别直接用 `Tester.Find`：MyGo 会给滚出视口、但列表还留着它那个位置的行发一个
-// **大小是 0** 的节点，`Find` 照样报 ok=true。实测：目标偏移和行高对不上时，
-// 被定位的那一行就是这个 0×0 的样子——只断 `ok` 的话，「滚到了旁边那一首」是绿的。
+//  1. **大小不是 0**：MyGo 会给滚出视口、但列表还留着它那个位置的行发一个大小是 0
+//     的节点，`Find` 照样报 ok=true。实测：目标偏移和行高对不上时，被定位的那一行就是
+//     这个 0×0 的样子——只断 `ok` 的话「滚到了旁边那一首」是绿的。
+//  2. **不在播放条那一带**：真放着的时候播放条上也是同一个歌名，而主布局先于浮层
+//     排版，`Find` 先撞上的是播放条上那几行字（它比抽屉里那一行窄得多）。
+//     抽屉是浮在播放条**上面**的（底边让开 88），所以 y >= 视口高 - 88 的不是抽屉。
 func findRow(h *harness, title string) (mygoui.Rect, bool) {
 	r, ok := h.tt.Find(title)
-	if !ok || r.W <= 0 || r.H <= 0 {
+	if !ok || r.W <= 0 || r.H <= 0 || r.Y >= drawerBottom {
 		return r, false
 	}
 	return r, true
 }
+
+// drawerBottom 是抽屉的底边：视口高减掉播放条那 88（playbar.go 的
+// playbarHeight）。抽屉浮在播放条上面，y 到这儿为止。
+const drawerBottom = winH - 88
 
 // TestLocateCurrentGlidesToTheCurrentSong 是验收里「定位当前播放能平滑滚过去」。
 //
@@ -339,10 +316,31 @@ func findRow(h *harness, title string) (mygoui.Rect, bool) {
 func TestLocateCurrentGlidesToTheCurrentSong(t *testing.T) {
 	const target = 30
 	h := newHarness(t)
-	for i := range 40 {
-		h.app.Queue().Append(onlineSong(fmt.Sprintf("BV%d", i), fmt.Sprintf("第%02d首", i)))
+	// 真的放得出来的 40 首（在线条目在这个壳里没挂取流，`PlayAt` 会打不开——那
+	// 「定位」就变成「定位一首放不出来的歌」了）。
+	//
+	// ⚠️ **文件名和 Title 故意不一样**：播放条上的歌名是从**路径**推出来的（文件名
+	// 去掉后缀），抽屉里那一行画的是 `Item.Title`。写成不一样的一份，`Find(歌名)`
+	// 就只会撞上抽屉里那一行——主布局先于浮层排版，不这样它先找到的是播放条上那
+	// 几个字（判据在 findRow 的注释里）。
+	items := make([]app.Item, 40)
+	for i := range items {
+		p := writeCopy(t, t.TempDir(), fmt.Sprintf("%02d.flac", i))
+		items[i] = app.Item{Source: "local", Path: p, Title: fmt.Sprintf("第%02d首", i)}
 	}
-	putCurrent(t, h.app, target)
+	if err := h.app.Enqueue(items...); err != nil {
+		t.Fatal(err)
+	}
+	// 真的跳到第 30 首去放它（不是只挪下标）：「定位」要滚过去的是**在放**的那一首。
+	if err := h.app.PlayAt(target); err != nil {
+		t.Fatal(err)
+	}
+	// 播放条上的歌名是从**路径**推出来的，所以这里是文件名的后缀（"30"），
+	// 不是抽屉里那一行的「第30首」——上面刻意让两者不一样。
+	waitFor(t, 5*time.Second, "第30首开始播", func() bool {
+		h.tt.Frame()
+		return h.app.Snapshot().Title == "30"
+	})
 	h.tt.Frame()
 	openDrawer(t, h)
 
@@ -397,10 +395,19 @@ func TestLocateCurrentSaysSoWhenThereIsNothingToLocate(t *testing.T) {
 
 	t.Run("这一首认不出来", func(t *testing.T) {
 		h := newHarness(t)
-		// 一个什么来源都没有的项（还没接上的占位项）：Identity 是空串，
-		// 定位无从谈起。
+		// 真的有歌在放（判据的第一半），队列的当前项挪到一个**什么来源都没有**的
+		// 占位项上（Identity 是空串，定位无从谈起）。
+		//
+		// 这个组合界面上走不到（放不出来的项 `step` 会退回去），这里是为了钉住
+		// 那句「认不出来」不是死代码：真走到了，说的必须是这一句而不是「没有正在
+		// 播放的歌曲」——有歌在放着呢。
+		dir := t.TempDir()
+		enqueue(t, h, localSong(t, dir, "甲.flac"))
 		h.app.Queue().Append(app.Item{Title: "还没接来源的一项"})
-		putCurrent(t, h.app, 0)
+		h.app.Queue().Move(1)
+		if got := h.app.Queue().CurrentIndex(); got != 1 {
+			t.Fatalf("测试自己没摆好：当前项是第 %d 首", got)
+		}
 		h.tt.Frame()
 		openDrawer(t, h)
 

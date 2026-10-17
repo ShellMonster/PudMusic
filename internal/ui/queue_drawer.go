@@ -173,7 +173,7 @@ func (s *Shell) viewQueueBody(c *ui.Context, t *ui.Theme) {
 // 「定位当前播放」滚到的 `targetIndex * 64` 靠的就是这个定值。
 func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme) {
 	rows := s.queueRows
-	playing := playingIdentity(s.app.Queue().Current())
+	playing := s.playingIdentity()
 	// 「正在放的那一行」在**建列表之前**找出来，不要在每一行的回调里找：那是一帧
 	// 里 len(rows) 次全表扫，队列长一点就是几万次判重标识的比较，而每帧都来一遍。
 	cur := currentRow(rows, playing)
@@ -209,11 +209,23 @@ func currentRow(rows []queueRow, playing string) int {
 	return -1
 }
 
-// playingIdentity 是正在放的那一首的判重标识，没有在放（或认不出）是空串。
+// playingIdentity 是「正在放的那一首」的判重标识。没有歌在放、或者认不出是哪一首
+// 时都是空串——这两个情形必须一样：认不出的项之间身份都是空串，拿它去比会让抽屉
+// 一开就有一行莫名高亮。
 //
-// **空串必须和「没有在放」是一回事**：认不出的项之间身份都是空串，拿它去比会让
-// 抽屉一开就有一行莫名高亮。
-func playingIdentity(cur app.Item, ok bool) string {
+// ⚠️ 判据是**队列的当前项 **加**「确实有歌在放」**（`Snapshot().HasTrack`），
+// 不是光看队列的当前项。光看当前项的话：删掉正在放的那首、而下一首打不开时
+// （`App.playNextAfterCurrent` 会停掉播放，但队列的当前项已经落到下一首了），抽屉
+// 会把**一首放不出来、也没在放**的歌涂成正在放，播放条上却是空的——界面说的和它做
+// 的不一致，「定位当前播放」还会把用户滚到那一行中间。
+//
+// 队列的**下标**不动是有意的：停在那儿之后按「下一首」能从它后面接着走，点那一行
+// 也能重试（`App.PlayAt`）。丢的是「它在放」这件事，不是「我们走到哪儿了」。
+func (s *Shell) playingIdentity() string {
+	if !s.app.Snapshot().HasTrack {
+		return ""
+	}
+	cur, ok := s.app.Queue().Current()
 	if !ok {
 		return ""
 	}
@@ -341,6 +353,13 @@ func itemSubtitle(item app.Item) string {
 // 两种「滚不了」都要说话（Biu 的两个 addToast）：默默不动的话，用户分不清是按钮
 // 坏了还是自己记错了。
 func (s *Shell) locateCurrent() {
+	// ⚠️ **先看有没有歌在放，再看队列的当前项**（理由同 playingIdentity）：只有队列
+	// 那一项的话，接歌失败停下来之后它还指着下一首，按这一下会把用户滚到一首
+	// 放不出来、也没在放的歌上面去——而屏幕上播放条是空的。
+	if !s.app.Snapshot().HasTrack {
+		s.addToast("当前没有正在播放的歌曲")
+		return
+	}
 	cur, ok := s.app.Queue().Current()
 	if !ok {
 		s.addToast("当前没有正在播放的歌曲")
