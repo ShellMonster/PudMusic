@@ -171,21 +171,20 @@ func TestNothingWakesAWindowAfterCloseReturns(t *testing.T) {
 		urls[i] = fmt.Sprintf("%s/%d.png", srv.URL, i)
 		c.Get(urls[i])
 	}
-	// 真的解出来一张：不然「解码队列」这件事压根没发生。
-	waitFor(t, 10*time.Second, "至少一张真的解码完了", func() bool { return woke.Load() > 0 })
 
-	// 🔴 **关掉之前队列里必须还压着活**，否则这条验的是「关掉一件已经没在做的事」。
-	// 这一句是该用例非空过的保证：去掉它，下面那条断言在「全都解完了」的情况下
-	// 也照样为真（实测：图只有 8×8 时，去掉 Close 里的 decodeWG.Wait() 它仍绿）。
-	ready := 0
-	for _, u := range urls {
-		if c.Get(u).Ready() {
-			ready++
-		}
-	}
-	if ready >= imgs {
-		t.Fatalf("Close 之前 %d 张全解完了，队列是空的——这条测的不是「关掉时还在解码」", ready)
-	}
+	// 🔴 **前置条件必须成立，否则这条就是空过的。**
+	//
+	// ⚠️ 判据**不是**「还有图没 Ready」——`entry.state()` 里没 Ready 的条目
+	// 既可能正在下载，也可能已经下完正排队等解码（`fetch` 取消时会直接返回，
+	// **不进解码队列**，见 cache.go 的 fetch）。用「没 Ready」当下限时，
+	// 存在一条执行路径：24 张全都还在下载，一个都没进解码队列，于是
+	// 「Close 不等解码 worker」也能过——验的就不是「等解码退出」了。
+	//
+	// 这里直接看**解码队列的深度**：这个测试和 cache.go 同包，能读 `decodeCh`。
+	// 它非空 = 此刻确实有活压着，等 Close 的 `decodeWG.Wait()` 去收。
+	waitFor(t, 20*time.Second, "解码队列里确实压着活（否则这条测不到「等解码退出」）", func() bool {
+		return len(c.decodeCh) > 0
+	})
 
 	c.Close()
 	// ⚠️ 基线取在 **Close 之后**，不是之前：Close 等的就是那些还在解码的，
