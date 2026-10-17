@@ -53,6 +53,14 @@ func MergeIntoQueue(path string, extra []*Task) error {
 	}
 
 	tasks := []*Task{}
+	// 读出来的那一份**先走一遍迁移链**，和 `Restore`（`store.go`）、`MigrateFile`
+	// （`migrate.go`）是同一条路。
+	//
+	// ⚠️ 不走的后果今天看不出来（`queueMigrations[0]` 是空函数），但那正是
+	// `migrate.go` 注释里写的那个失败模式：「链断一环的后果是认不出的文件被按旧
+	// 语义重写一遍」——反过来也成立：**一份 v0 的内容被盖上 v1 的版本号，然后永远
+	// 不再被迁**。等有人往那张表里加了真的 v0 迁移，这一条路就会是唯一绕过它的
+	// 那条。
 	if b, err := os.ReadFile(path); err == nil {
 		var f queueFile
 		if err := json.Unmarshal(b, &f); err != nil {
@@ -61,6 +69,9 @@ func MergeIntoQueue(path string, extra []*Task) error {
 		if f.Version > storeVersion {
 			return fmt.Errorf("%w：文件是第 %d 版的，我们只到第 %d 版，没有动它",
 				ErrQueueFromNewer, f.Version, storeVersion)
+		}
+		if err := runQueueMigrations(&f, f.Version); err != nil {
+			return fmt.Errorf("%w：%s 没有动它", err, filepath.Base(path))
 		}
 		tasks = f.Tasks
 	} else if !errors.Is(err, os.ErrNotExist) {

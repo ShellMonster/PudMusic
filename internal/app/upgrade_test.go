@@ -425,12 +425,16 @@ func TestADataDirectoryFromANewerVersionIsNotTouchedAtAll(t *testing.T) {
 	}
 }
 
-// 标记说是最新、但有一份文件自己写着更高的 schema：这一轮升级要停下来，
-// 而且要把已经改过的恢复回去。
+// 一份文件自称比当前版本新时，`MigrateSettingsFile` 报 `ErrSettingsFromNewer`
+// 且一个字节都不动。
 //
-// 这一条防的是「总标记和各文件各说各话」。宁可停下报错，也不能按旧语义重写
-// 一份我们读不懂的文件。
-func TestAFileClaimingANewerSchemaStopsTheWholeRound(t *testing.T) {
+// ⚠️ 这一条**只管迁移这一层**。「总标记说是最新版、但有一份文件说更新」那个情形
+// 由**生产入口** `runUpgrade` 判（它得先知道有这一份，才能不 Stage 它），测试在
+// `internal/ui` 那边的 `TestAMarkerSaysUpToDateButOneFileSaysNewer`——它造的目录
+// 标记是 `version:1`（**最新版**），所以会走进 `runUpgrade` 那条早退以前的那段。
+// 原来这里那条同名测试用的标记是 `version:0`、而且直接调 `BeginUpgrade`+`Stage`
+// 绕开了生产入口，看着覆盖了这个情形，其实没有。
+func TestMigrateSettingsRefusesAFileThatClaimsANewerSchema(t *testing.T) {
 	dir, settingsPath := upgradeDir(t, `{"appSettings":{}}`)
 	mustWrite(t, filepath.Join(dir, UpgradeFileName), `{"version":0}`)
 	// 一份未来的设置文件。

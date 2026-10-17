@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/service/download"
 )
 
 // 快捷键和搜索历史的迁移入口，以及启动时把它们和设置、队列一起升的那一轮。
@@ -228,27 +228,37 @@ func TestTheStartupUpgradeMovesAllFourFilesOrNone(t *testing.T) {
 	}
 }
 
-// 队列文件版本对不上：整轮回滚，四份文件原样。
-func TestTheStartupUpgradeRollsEverythingBackWhenOneFileIsFromTheFuture(t *testing.T) {
+// 一份文件**坏掉**时：整轮回滚，已改过的全部原样回来。
+//
+// 🔴 触发条件换过了。原来这条用「队列是 v99」触发——那是**一份来自更新版本**的文件，
+// 而那种情形现在**跳过它、其余照迁**（见下面 `TestOneNewerFileDoesNotBlock…`）：
+// 一份只读的文件不该把设置、快捷键、搜索历史三份**本来能升的**一起卡住，用户
+// 每次启动都看到「升级失败」。
+//
+// 回滚这条路的触发条件是「迁移**真的失败了**」，而这里最容易造出来的一种失败是
+// **文件不是 JSON**：那既不是「来自更新版本」（该跳过），也不是「链断了」（会回滚），
+// 就是「用户的数据坏了」——升级必须停下来并把已经改过的全部还原。
+func TestTheStartupUpgradeRollsEverythingBackWhenOneFileIsBroken(t *testing.T) {
 	dir := t.TempDir()
 	settings := app.SettingsPath(dir)
 	queue := filepath.Join(dir, "download-queue.json")
+	mustWriteHere(t, queue, `{ 这不是 JSON`)
 
 	settingsBefore := `{"appSettings":{"primaryColor":"#17c964"}}`
-	queueBefore := `{"version":99,"tasks":[]}`
-	writeFile(t, settings, settingsBefore)
-	writeFile(t, queue, queueBefore)
+	mustWriteHere(t, settings, settingsBefore)
+	mustWriteHere(t, shortcutPath(dir), mustShortcutsJSON(t))
+	mustWriteHere(t, searchHistoryPath(dir), `{"schemaVersion":1,"items":[]}`)
 
 	var rep MigrationReport
 	err := runUpgrade(dir, &rep)
 	if err == nil {
-		t.Fatal("一份 v99 的队列没有被拦下")
+		t.Fatal("一份坏掉的文件没有让升级停下来")
 	}
 	if got := readFile(t, settings); got != settingsBefore {
 		t.Fatalf("设置没有被恢复：\n改前 %s\n改后 %s", settingsBefore, got)
 	}
-	if got := readFile(t, queue); got != queueBefore {
-		t.Fatalf("队列被改写了：\n改前 %s\n改后 %s", queueBefore, got)
+	if got := readFile(t, queue); got != `{ 这不是 JSON` {
+		t.Fatalf("那份坏文件被改了：%s", got)
 	}
 	if !rep.Rollback {
 		t.Errorf("报告里没有说「回滚了」：%+v", rep)
@@ -258,47 +268,55 @@ func TestTheStartupUpgradeRollsEverythingBackWhenOneFileIsFromTheFuture(t *testi
 	}
 	// 备份也不能留在用户目录里当垃圾。
 	for _, p := range []string{settings, queue} {
-		if migratingLeft(t, dir, p) {
+		if _, err := os.Stat(filepath.Join(filepath.Dir(p), "."+filepath.Base(p)+".migrating")); err == nil {
 			t.Errorf("%s 旁边还留着迁移备份", filepath.Base(p))
 		}
 	}
 }
 
-// 已经是最新的一轮：不写任何东西，也不留标记。
+// 一份来自更新版本的文件**不该**把其余三份本来能升的也卡住。
 //
-// 每次启动都重写一遍文件的话，用户目录的 mtime 全在变，而有些备份工具按 mtime
-// 判断「改过了」——用户会收到一堆「你的设置变了」的提示，而什么也没变。
-func TestASecondLaunchWithNothingToDoWritesNothing(t *testing.T) {
+// 「一份只读所以整轮都不迁」会让一个无关的文件（比如下载队列是未来的版本）把
+// 设置、快捷键、搜索历史一起卡住，用户每次启动都看到「升级失败」。
+func TestOneNewerFileDoesNotBlockTheOtherThreeFromBeingUpgraded(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, app.SettingsPath(dir), mustSettingsJSON(t))
-	writeFile(t, shortcutPath(dir), mustShortcutsJSON(t))
+	mustWriteHere(t, filepath.Join(dir, download.QueueFileName),
+		`{"version":99,"tasks":[]}`) // 队列来自未来
+	mustWriteHere(t, app.SettingsPath(dir), `{"appSettings":{"primaryColor":"#17c964"}}`)
+	mustWriteHere(t, shortcutPath(dir), mustShortcutsJSON(t))
+	mustWriteHere(t, searchHistoryPath(dir), `{"items":[]}`) // v0 形状，要走迁移
 
-	// 第一轮把标记立起来。
-	var first MigrationReport
-	if err := runUpgrade(dir, &first); err != nil {
-		t.Fatal(err)
+	var rep MigrationReport
+	if err := runUpgrade(dir, &rep); err != nil {
+		t.Fatalf("升级报错：%v", err)
 	}
-	before := statModTime(t, app.SettingsPath(dir))
-
-	var second MigrationReport
-	if err := runUpgrade(dir, &second); err != nil {
-		t.Fatal(err)
+	if !rep.ReadOnly {
+		t.Errorf("没有报只读：%+v", rep)
 	}
-	if second.Upgraded != "" {
-		t.Errorf("没有要升的，却说 %q", second.Upgraded)
+	// 队列一个字节都没动。
+	if got := readFile(t, filepath.Join(dir, download.QueueFileName)); !strings.Contains(got, `"version":99`) {
+		t.Errorf("那份队列被写了：%s", got)
 	}
-	if len(second.UpgradedFiles) != 0 {
-		t.Errorf("没有要升的，却说动了 %v", second.UpgradedFiles)
+	// 而其余三份**真的升了**：设置拿到信封、搜索历史拿到 schemaVersion。
+	if got := readFile(t, searchHistoryPath(dir)); !strings.Contains(got, `"schemaVersion"`) {
+		t.Errorf("搜索历史没有跟着升：%s", got)
 	}
-	if got := statModTime(t, app.SettingsPath(dir)); !got.Equal(before) {
-		t.Errorf("没有要升的，设置文件却被重写了：%v → %v", before, got)
+	if got := readFile(t, app.SettingsPath(dir)); !strings.Contains(got, `"schemaVersion"`) {
+		t.Errorf("设置没有跟着升：%s", got)
 	}
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 小工具
-// ─────────────────────────────────────────────────────────────────────────────
+// readFile 读一个文件，测试专用。
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读 %s：%v", path, err)
+	}
+	return string(b)
+}
 
+// writeFile 写一个文件（建好父目录），测试专用。
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -309,37 +327,7 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-func statModTime(t *testing.T, path string) time.Time {
-	t.Helper()
-	st, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return st.ModTime()
-}
-
-func markerVersion(t *testing.T, dir string) int {
-	t.Helper()
-	b, err := os.ReadFile(filepath.Join(dir, app.UpgradeFileName))
-	if err != nil {
-		t.Fatalf("读总控标记：%v", err)
-	}
-	var m struct {
-		Version int `json:"version"`
-	}
-	if err := json.Unmarshal(b, &m); err != nil {
-		t.Fatalf("总控标记读不懂：%v", err)
-	}
-	return m.Version
-}
-
-func migratingLeft(t *testing.T, dir, file string) bool {
-	t.Helper()
-	p := filepath.Join(filepath.Dir(file), "."+filepath.Base(file)+".migrating")
-	_, err := os.Stat(p)
-	return err == nil
-}
-
+// keysOfRaw 列出一份 JSON 的顶层键。
 func keysOfRaw(m map[string]json.RawMessage) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
@@ -359,25 +347,25 @@ func mustShortcutsJSON(t *testing.T) string {
 	return string(b)
 }
 
-// mustSettingsJSON 造一份「当前版本」的设置文件。
-func mustSettingsJSON(t *testing.T) string {
+// migratingLeft 报那一份文件旁边还留着迁移备份没有。
+func migratingLeft(t *testing.T, dir, file string) bool {
 	t.Helper()
-	raw, err := json.Marshal(map[string]any{
-		"schemaVersion": app.SchemaVersion,
-		"appSettings":   app.DefaultSettings(""),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(raw)
+	_, err := os.Stat(filepath.Join(filepath.Dir(file), "."+filepath.Base(file)+".migrating"))
+	return err == nil
 }
 
-// readFile 读一个文件，测试专用。
-func readFile(t *testing.T, path string) string {
+// markerVersion 读总标记说数据迁到了第几版。
+func markerVersion(t *testing.T, dir string) int {
 	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("读 %s：%v", path, err)
+	var m struct {
+		Version int `json:"version"`
 	}
-	return string(b)
+	raw, err := os.ReadFile(filepath.Join(dir, app.UpgradeFileName))
+	if err != nil {
+		t.Fatalf("读总控标记：%v", err)
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("总控标记读不懂：%v", err)
+	}
+	return m.Version
 }
