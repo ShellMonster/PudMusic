@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -59,10 +60,6 @@ func newFakeBili(t *testing.T) *fakeBili {
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		rec := recordedRequest{Path: r.URL.Path, Query: r.URL.Query(), Header: r.Header.Clone()}
-		if r.Method == http.MethodPost {
-			_ = r.ParseForm()
-			rec.Form = r.PostForm
-		}
 		var sb strings.Builder
 		buf := make([]byte, 4096)
 		for {
@@ -73,6 +70,19 @@ func newFakeBili(t *testing.T) *fakeBili {
 			}
 		}
 		rec.Body = sb.String()
+		if r.Method == http.MethodPost {
+			// ⚠️ **先把 body 读出来、放回去，再 ParseForm**：反过来的话
+			// `ParseForm` 会把 body 吃掉，`rec.Body` 变成空串——而有一批用例正是
+			// 断 body 原文的（`later_test.go` 那一组）。
+			//
+			// 之所以现在才会撞上：`Client.Do` 以前发表单不带 Content-Type，
+			// `ParseForm` 解析不出 body、也就没读它，于是「先 ParseForm 后读」
+			// 看起来一直是对的。Content-Type 补上之后（`favorite.go` 要真发表单）
+			// 顺序就露出来了。
+			r.Body = io.NopCloser(strings.NewReader(rec.Body))
+			_ = r.ParseForm()
+			rec.Form = r.PostForm
+		}
 		f.seen = append(f.seen, rec)
 		h, ok := f.handlers[r.URL.Path]
 		f.mu.Unlock()
