@@ -67,10 +67,14 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 	})
 }
 
-// viewTrackText 是封面右边那几行字：歌名，出错时下面补一句原因。
+// viewTrackText 是封面右边那几行字：歌名，下面补一句「现在怎么样」。
 //
 // 第二行的位置是 Biu 的副标题（本地音乐 / UP 主名）。我们没有那些信息，
-// 只在真出错时说一句——88 高的播放条里塞不下第三行，错误总得有个地方说。
+// 只在**有话要说**的时候说一句——88 高的播放条里塞不下第三行，
+// 状态总得有个地方说。
+//
+// 第二行只有两种内容，**先说错误再说缓冲**：错误是终态、缓冲是过程，
+// 两者同时成立时用户该先看到「已经打不开了」。
 //
 // ⚠️ **外面必须是 Column**。这里曾经为了塞下音质徽章把 Column 拆成了一个裸
 // Row（歌名和徽章并排），结果错误文字变成了这一层的**兄弟**——它落到了
@@ -78,7 +82,7 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 // 而「出错时播放条上有一句人话」正是这一票要保证的东西，结构不能为它让路。
 //
 // 徽章是**在 Column 里面**跟歌名并排的：外层永远是竖着堆的两行（歌名行、
-// 错误行），徽章只占第一行里的右边一小块。
+// 第二行），徽章只占第一行里的右边一小块。
 func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 	title := st.Title
 	if !st.HasTrack {
@@ -91,11 +95,24 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 				TextColor(textColor(t, st.HasTrack))
 			s.viewQualityBadge(c, st, t)
 		})
-		if st.Err != "" {
+		switch {
+		case st.Err != "":
 			ui.Text(c, "打不开："+st.Err).FontSize(12).TextColor(t.Danger)
+		case st.Buffering:
+			// ⚠️ 缓冲**不是错误**：它是「正在等网络，还没放弃」。用红的 Danger
+			// 会把一个正在恢复的状态说成失败，而用户看到红色第一反应是
+			// 「歌坏了」——于是去清缓存重下，而正确反应是等一等或者换网。
+			ui.Text(c, bufferingText).FontSize(12).TextColor(t.TextMuted)
 		}
 	})
 }
+
+// bufferingText 是缓冲时第二行那句话。
+//
+// 为什么是「缓冲中」而不是「网络断了」：源在等网络有多种原因（地址要换、
+// B 站那边慢、真的断网），界面这一层只知道「它在等」。说得越具体，
+// 说得越容易是假话。
+const bufferingText = "缓冲中……网络恢复后会接着放"
 
 // viewQualityBadge 是歌名右边那个音质徽章（「无损 FLAC」/「320K」）。
 //
