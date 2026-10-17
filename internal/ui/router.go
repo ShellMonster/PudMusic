@@ -96,8 +96,14 @@ var routes = []Route{
 		Title: "暂无动态",
 		Hint:  "回首页听歌，或者换一个 UP 主的空间看看",
 	}},
-	// 「没有收藏夹」，文案在 empty.go 的 noFavorites（上游出处也写在那儿）。
-	{Match: "/collection/{id}", Title: "收藏夹 / 合集 / 系列", Empty: noFavorites},
+	// 收藏夹 / 合集 / 系列**现在有内容了**（collectionpage.go：头图区 +
+	// 列表 + 批量操作条），所以这一条**不填 Empty**：填了就是一句没人会看到的
+	// 话——这一页走不到空状态那一支（`pageContent` 里 builtPage 先命中）。
+	//
+	// 「没有收藏夹」那句并没有因此作废，它现在画在**这一页自己里面**：
+	// 容器拉回来了、里面一条都没有的时候（见 viewCollection 里那一支），
+	// 文案还是 `empty.go` 的 noFavorites，上游出处也在那儿。
+	{Match: collectionMatch, Title: "收藏夹 / 合集 / 系列"},
 	// 空状态落地页（P-29）。上游 `pages/empty/index.tsx:6` 画的就是一个
 	// `<Empty />`——这一页整个的用处就是「让人看见空状态长什么样」，上游没给
 	// title，所以落回共享默认的「暂无内容」。照抄。
@@ -219,6 +225,9 @@ func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
 	case loginPath:
 		// 扫码登录（login.go）。
 		return s.viewLogin
+	case collectionMatch:
+		// 歌单内容页：收藏夹 / 合集 / 系列（collectionpage.go）。
+		return s.viewCollection
 	}
 	return nil
 }

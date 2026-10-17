@@ -393,6 +393,21 @@ func (c *Client) setHeaders(req *http.Request, csrf string) {
 	if csrf != "" {
 		req.Header.Set(CSRFHeaderName, csrf)
 	}
+	// ⚠️ **带表单体的那几个写接口必须有这一行**。Go 的客户端不会自己补它
+	// （`http.NewRequest` 对 `*strings.Reader` 只认长度不认类型），而服务端
+	// 看到没有 Content-Type 的请求体**当它是空的**——于是 csrf、media_id、
+	// resources 全部收不到，答案是一句 -101 或 -400，谁都看不出是哪一步丢的。
+	//
+	// Biu 上游发的是 multipart（`request-interceptors.ts` 的 `useFormData`），
+	// 那一路自带 Content-Type；我们是 urlencoded，得自己写上。
+	//
+	// ⚠️ **只在真的发了表单体时才设**：GET 请求带一个
+	// `Content-Type: application/x-www-form-urlencoded` 不会出事，但会让
+	// `OnRequest` 记下来的每一个地址都多一样不必要的东西，而排障时那些
+	// 记录是要人一条一条看的。
+	if req.Body != nil && req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
 }
 
 // CSRFHeaderName 是写接口的 CSRF 头名。
