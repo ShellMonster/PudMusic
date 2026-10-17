@@ -153,6 +153,30 @@ func (f *Favorites) Reorder(g FavoriteGroup, id, before int64) ([]int64, bool) {
 	return orderOf(next), true
 }
 
+// Upsert 把 item 加进这一组，或者在它已经在的时候换成新的。
+//
+// 已经有：在**原来的位置**上换掉（不挪位置、不改顺序）。没有：接在最后面。
+//
+// 为什么是「在原位换掉」而不是删掉再加：侧栏顺序是用户拖出来的（落盘在
+// `Settings.SideMenuCollectionOrder`），改一次收藏夹的名字就把它的位置
+// 冲掉的话，用户下一次打开侧栏会发现刚整理好的顺序白整理了。
+//
+// 走这一条的是**建完之后 / 改完之后**那一下：接口告诉了我们新收藏夹是什么，
+// 但拉全量是另一趟往返（见 app 层的 `LoadCreatedFolders`），而「新建完
+// 侧栏里立刻出现它」比「顺序正确」更要紧。
+func (f *Favorites) Upsert(g FavoriteGroup, item Favorite) {
+	if !g.Valid() || item.ID == 0 {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if i := slices.IndexFunc(f.groups[g], func(x Favorite) bool { return x.ID == item.ID }); i >= 0 {
+		f.groups[g][i] = item
+		return
+	}
+	f.groups[g] = append(f.groups[g], item)
+}
+
 // IDs 是这一组当前的 ID 顺序，落盘用。
 func (f *Favorites) IDs(g FavoriteGroup) []int64 {
 	if !g.Valid() {

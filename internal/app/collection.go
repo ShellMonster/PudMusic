@@ -195,6 +195,13 @@ type collections struct {
 	refs   CollectionRefs
 	cache  collectionCache
 	notice collectionNotice
+
+	// 下面三个是「收藏夹管理」那一摊挂过来的，同一个客户端（理由见
+	// foldermanage.go 的包注释）。各自带锁：写它们的是后台 goroutine，
+	// 读它们的是界面线程。
+	folderChoices folderChoices
+	folderResult  folderResult
+	coverURL      coverURL
 }
 
 // MountCollections 把歌单内容页要用的零件挂上。**在开窗口之前调**。
