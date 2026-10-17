@@ -220,6 +220,17 @@ type Shell struct {
 	// crash 是上一帧 panic 到的东西，非 nil 时这一帧画错误页。
 	crash any
 
+	// upSpaces 存着每个 UP 的空间页状态，键是 mid（见 upspace.go）。
+	//
+	// **只由 view 在主线程上读写**：它是一个普通的 map，没有锁——
+	// 界面状态是主线程单点写入的（铁律一），后台那一条线只往 upSpace.box
+	// 那个**带锁的信箱**里投，不碰这张表。
+	upSpaces map[int64]*upSpace
+
+	// feedPage 是「用户动态」那一页的状态（见 dynamicfeed.go）。只有一个，
+	// 因为这一页没有参数。
+	feedPage *dynamicFeed
+
 	// qrBitmap 是当前那张二维码的位图，qrFor 是它对应的那张二维码。
 	//
 	// **只由 view 读写**（view 永远跑在主线程上），所以没有锁。
