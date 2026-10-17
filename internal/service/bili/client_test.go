@@ -60,26 +60,24 @@ func newFakeBili(t *testing.T) *fakeBili {
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		rec := recordedRequest{Path: r.URL.Path, Query: r.URL.Query(), Header: r.Header.Clone()}
+		// ⚠️ **先把 body 读出来，再把它装回去，最后才 ParseForm。**
+		//
+		// 顺序反了的话，所有 POST 表单的 `rec.Body` 都是**空串**：
+		// `Client.Do` 现在给带表单的请求发
+		// `Content-Type: application/x-www-form-urlencoded`（那是对着 B 站的
+		// servlet 修的根因——少了它 B 站不解析请求体，关注会**静默失败**），
+		// 而 `r.ParseForm()` 遇到能解析的表单会把 `r.Body` **读空**（读完不还）。
+		// 于是「原文」和「解析出来的表单」只能留一个，而这一份假服务器要
+		// **两个都给**：`rec.Form` 给那些断言表单字段的用例，`rec.Body` 给
+		// 那些断言「发出去的原文是什么」的用例。
 		var sb strings.Builder
-		buf := make([]byte, 4096)
-		for {
-			n, err := r.Body.Read(buf)
-			sb.Write(buf[:n])
-			if err != nil {
-				break
-			}
+		if r.Body != nil {
+			_, _ = io.Copy(&sb, r.Body)
+			_ = r.Body.Close()
+			r.Body = io.NopCloser(strings.NewReader(sb.String()))
 		}
 		rec.Body = sb.String()
 		if r.Method == http.MethodPost {
-			// ⚠️ **先把 body 读出来、放回去，再 ParseForm**：反过来的话
-			// `ParseForm` 会把 body 吃掉，`rec.Body` 变成空串——而有一批用例正是
-			// 断 body 原文的（`later_test.go` 那一组）。
-			//
-			// 之所以现在才会撞上：`Client.Do` 以前发表单不带 Content-Type，
-			// `ParseForm` 解析不出 body、也就没读它，于是「先 ParseForm 后读」
-			// 看起来一直是对的。Content-Type 补上之后（`favorite.go` 要真发表单）
-			// 顺序就露出来了。
-			r.Body = io.NopCloser(strings.NewReader(rec.Body))
 			_ = r.ParseForm()
 			rec.Form = r.PostForm
 		}
