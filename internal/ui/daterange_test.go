@@ -16,57 +16,37 @@ import (
 	mygoui "github.com/egoist/mygo/ui"
 )
 
-// TestTheDayEdgesAreLocalTime 钉住一天的两头。
-func TestTheDayEdgesAreLocalTime(t *testing.T) {
-	// 深夜十一点半：本地时区上这是「今天」的末尾，不该因为换算成别的时间基准
-	// 变成明天或者昨天。
-	late := time.Date(2026, 10, 16, 23, 30, 0, 0, time.Local)
-
-	start := startOfDay(late)
-	if start.Hour() != 0 || start.Minute() != 0 || start.Second() != 0 {
-		t.Errorf("一天的开头是 %v，want 00:00:00", start)
-	}
-	if y, m, d := start.Date(); y != 2026 || m != time.October || d != 16 {
-		t.Errorf("一天的开头是 %v，want 2026-10-16", start)
-	}
-
-	// ⚠️ 结尾是 **23:59:59**，不是「第二天 00:00:00」。接口收的是闭区间，第二天
-	// 零点会把「今天 23:59:59 刚听的那一条」漏掉——而那正是用户刚听完、正要加进
-	// 稍后再看的那一条。
-	end := endOfDay(late)
-	if end.Hour() != 23 || end.Minute() != 59 || end.Second() != 59 {
-		t.Errorf("一天的结尾是 %v，want 23:59:59", end)
-	}
-	if !end.After(start) {
-		t.Errorf("结尾 %v 不在开头 %v 之后", end, start)
-	}
-	// 结尾和开头是**同一天**：跨到第二天去就成闭区间之外了。
-	if y, m, d := end.Date(); y != 2026 || m != time.October || d != 16 {
-		t.Errorf("一天的结尾是 %v，want 2026-10-16 23:59:59", end)
-	}
-}
-
-// TestTheDayEdgesAreLocalTimeNotUTC 单独把时区这一条拎出来。
+// TestTheDayEdgesAreTheLocalDay 钉住一天的两头是**本地时区**的 00:00:00 和 23:59:59。
 //
-// 这一条在 UTC 的机器上永远绿、在东八区的机器上才红——所以它在测试里必须**显式**
-// 换一个非零时区再验一遍，否则它只是一句在 CI 上通过的装饰。
-func TestTheDayEdgesAreLocalTimeNotUTC(t *testing.T) {
+// 用 UTC 换算的话，东八区的用户凌晨看到的「今天」是昨天，而筛出来的是昨天的东西。
+// 下面那个用例显式换了一个非零时区再验一遍——在 UTC 的机器上只跑第一个的话，它只
+// 是一句在 CI 上通过的装饰。
+func TestTheDayEdgesAreTheLocalDay(t *testing.T) {
 	zone := time.FixedZone("东八区", 8*3600)
-	// 东八区的 2026-10-16 23:30，换成 UTC 是 10-16 15:30；反过来，如果代码用 UTC
-	// 算一天的开头，东八区的人在晚上看到的就会是 10-16 00:00 UTC = 10-16 08:08
-	// 本地——那还算对；真正错的是**凌晨**：10-17 00:30 本地 = 10-16 16:30 UTC。
+	// 东八区的 2026-10-17 00:30，换成 UTC 是 10-16 16:30：用 UTC 算的话这一天会
+	// 被算成 10-16。
 	early := time.Date(2026, 10, 17, 0, 30, 0, 0, zone)
 
 	start := startOfDay(early)
-	y, m, d := start.Date()
-	if y != 2026 || m != time.October || d != 17 {
+	if y, m, d := start.Date(); y != 2026 || m != time.October || d != 17 {
 		t.Errorf("一天的开头算成了 %v，want 2026-10-17（本地时区）", start)
+	}
+	if start.Hour() != 0 || start.Minute() != 0 || start.Second() != 0 {
+		t.Errorf("一天的开头是 %v，want 00:00:00", start)
 	}
 	if start.Location() != zone {
 		t.Errorf("算出来落在 %v 上，不是用户的时区", start.Location())
 	}
-	if got := start.Hour(); got != 0 {
-		t.Errorf("一天的开头是 %02d 点，want 00", got)
+
+	// ⚠️ 结尾是 **23:59:59**，不是「第二天 00:00:00」。接口收的是闭区间，第二天零点
+	// 会把「今天 23:59:59 刚听的那一条」漏掉——而那正是用户刚听完、正要加进稍后再看
+	// 的那一条。
+	end := endOfDay(early)
+	if end.Hour() != 23 || end.Minute() != 59 || end.Second() != 59 {
+		t.Errorf("一天的结尾是 %v，want 23:59:59", end)
+	}
+	if y, m, d := end.Date(); y != 2026 || m != time.October || d != 17 {
+		t.Errorf("一天的结尾算成了 %v，want 2026-10-17 23:59:59（跨到第二天就漏掉最后那一秒）", end)
 	}
 }
 
