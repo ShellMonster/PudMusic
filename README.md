@@ -108,8 +108,13 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 >
 > Biu 用自研的 `glassmorphism.ts`：封面取主色 → 32×32 均值 → 按
 > `deviceMemory`/`hardwareConcurrency` 降模糊 → 三层 `radial-gradient`。
-> 本项目直接用 MyGo 的 `plugins/glass`（Liquid Glass，三端 shader + CPU 等价实现），
-> **不自绘等效效果**——这是用户 2026-10-15 拍板的取舍。
+>
+> **这一版还没有毛玻璃。** 满屏播放器的背景现在是「封面铺满整窗 + 一层 55%
+> 的纯黑压暗」（`internal/ui/fullplayer.go` 的 `fullScrim`）——那层压暗是必需的，
+> 因为满屏的控件和字全是白的，Biu 那边靠三层渐变挡着，我们这边靠它。
+>
+> 毛玻璃本身（MyGo 的 `plugins/glass`，Liquid Glass，三端 shader + CPU 等价实现）
+> 是用户 2026-10-15 拍板的取舍，**还没落地**；落地时同样**不自绘等效效果**。
 >
 > 所以**构图与质感必然不同**：MyGo 只有线性渐变，没有 `mix-blend-mode`。
 > 按低端机分级降模糊那一套也不做（MyGo 没有对应的 API），用固定效果。

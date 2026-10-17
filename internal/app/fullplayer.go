@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 )
@@ -72,6 +73,23 @@ func (a *App) CurrentItem() (Item, bool) {
 	return a.queue.Current()
 }
 
+// partsRetryAfter 是分集问失败之后隔多久再问一次。
+//
+// 15 秒是「网络抖动能缓过来、而用户还在盯着这个窗口」的量级：界面每一帧都调
+// `Parts()`，所以这个数同时也是**重试的上限频率**。
+const partsRetryAfter = 15 * time.Second
+
+// PartsWorthAsking 报「当前这一首有没有分集可问」。
+//
+// 判据是「这是一个 B 站的 mv」，**不是**「已经问到多于一条」：Biu 那边
+// `playItem.hasMultiPart` 是播放项自带的字段，我们没有——要问一次才知道。
+// 所以在问到之前（正在问 / 问失败）把手也得摆着，否则那句「问不出分集：…」
+// 在真机上永远没有机会显示（面板从哪儿进去？）。
+func (a *App) PartsWorthAsking() bool {
+	it, ok := a.CurrentItem()
+	return ok && it.isOnline() && it.Bvid != ""
+}
+
 // partsSnapshot 返回分集列表的一份拷贝。
 func (a *App) partsSnapshot() []bili.VideoPart {
 	a.partsMu.Lock()
@@ -89,42 +107,71 @@ func (a *App) PartsErr() error {
 	return a.partsErr
 }
 
-// ensureParts 保证正在问/已经问过 bvid 的分集，**同一趟只发一次**。
+// ensureParts 保证正在问/已经问过 bvid 的分集。
 //
 // 换稿就重置：`partsBvid` 是这份缓存属于谁，歌换了就得从头问。迟到的结果回来
 // 发现 bvid 对不上直接丢（和在线流那边的代次是同一个道理）。
+//
+// 🔴 **失败之后要能再问**。原来失败和成功一样把 `partsLoaded` 置成 true，于是
+// 一次 403 风控 / 一次网络抖动之后，这一首在本次播放期间**再也不会出现分集
+// 入口**——而界面上还没有任何地方能说出「问不出分集」（那个把手只在
+// `len(parts) > 1` 时才摆，面板进不去）。
+//
+// 现在：成功才 `partsLoaded`；失败只记下原因，`partsWanted` 放下，于是隔
+// `partsRetryAfter` 之后界面下一帧调 `Parts()` 时会重新问一次。
+// 界面上那一帧的差别是「问不出分集：…」和「正在问」，用户看得见自己可以再等。
 func (a *App) ensureParts(bvid string) {
 	a.partsMu.Lock()
 	if a.partsBvid != bvid {
 		a.partsBvid, a.parts, a.partsLoaded, a.partsWanted = bvid, nil, false, false
+		a.partsErr, a.partsTriedAt = nil, time.Time{}
 	}
 	if a.partsLoaded || a.partsWanted {
 		a.partsMu.Unlock()
 		return
 	}
-	a.partsWanted = true
-	a.partsMu.Unlock()
-
-	// 后台那一趟。取流零件没挂上就当问过了——挂了之后界面自己会再问一次
-	// （`ensureParts` 只在 `partsLoaded == false && partsWanted == false` 时才发）。
-	s := a.streamingSnapshot()
-	if s == nil || s.Client == nil {
-		a.finishParts(bvid, nil, errStreamingMissing)
+	// 退避：每一帧都调 `Parts()`，不等一下的话失败一次就是每秒一发。
+	if !a.partsTriedAt.IsZero() && time.Since(a.partsTriedAt) < partsRetryAfter {
+		a.partsMu.Unlock()
 		return
 	}
-	client := s.Client
+	a.partsWanted = true
+	a.partsTriedAt = time.Now()
+	// 清掉上一次的失败原因：这一趟正在问，界面上那句「问不出分集：…」就该换成
+	// 「正在问」。问成功了自然什么都没有，问失败了下一次 finishParts 又写回来。
+	a.partsErr = nil
+	a.partsMu.Unlock()
+
+	// 后台那一趟。取流零件没挂上（`MountStreaming` 还没跑）也算失败：照样记下
+	// 原因、照样隔一会儿再问一次，而不是「当问过了」——那样挂着零件之后界面
+	// 再也不问，用户等一辈子也等不到分集。
+	//
+	// `partsFetch` 是那一趟。生产上永远是 nil（走取流零件），测试里替成一个
+	// 假函数——**只由界面那一侧读写**（`ensureParts` 在这里就把函数取出来递给
+	// 那个 goroutine，goroutine 不碰这个字段），所以不需要锁。
+	fetch := a.partsFetch
+	if fetch == nil {
+		s := a.streamingSnapshot()
+		if s == nil || s.Client == nil {
+			a.finishParts(bvid, nil, errStreamingMissing)
+			return
+		}
+		fetch = s.Client.VideoPages
+	}
 	go func() {
-		items, err := client.VideoPages(context.Background(), bvid)
+		items, err := fetch(context.Background(), bvid)
 		a.finishParts(bvid, items, err)
 	}()
 }
 
 // finishParts 记下一次取分集的结果并叫醒界面。
+//
+// ⚠️ **只有成功才 `partsLoaded = true`**（理由见 ensureParts）。
 func (a *App) finishParts(bvid string, items []bili.VideoPart, err error) {
 	a.partsMu.Lock()
 	if a.partsBvid == bvid {
 		a.parts, a.partsErr = items, err
-		a.partsLoaded, a.partsWanted = true, false
+		a.partsLoaded, a.partsWanted = err == nil, false
 	}
 	a.partsMu.Unlock()
 

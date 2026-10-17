@@ -144,15 +144,30 @@ type partRow struct {
 }
 
 // viewFullPlayer 画全屏播放器。没开就一个字都不建。
-//
-// ⚠️ 歌没了就顺手关掉：留着就是一屏看不见底的黑，而用户已经听不到了。
 func (s *Shell) viewFullPlayer(c *ui.Context) {
 	if !s.full.open {
 		return
 	}
 	st := s.app.Snapshot()
 	if !st.HasTrack {
-		s.closeFullPlayer()
+		// 🔴 **不能在这里关掉自己**。
+		//
+		// `HasTrack` 为 false 有两种情形，而第一种非常常见：
+		//
+		//	换歌的**那一瞬**  在线流是后台 goroutine 取流（`App.playOnline`），
+		//	                  这几百毫秒里 `HasTrack` 恒为 false
+		//	真的没歌了        用户按了停止、或者换歌换失败了
+		//
+		// 分集面板换集（`App.PlayPart`）、`App.PlayAt` 换另一首在线歌、
+		// `playNextAfterCurrent` 放完自动接下一首——这三条都先 `ClearTrack()`
+		// 再异步开流。第一版在这里 `closeFullPlayer()`，于是**每一次换歌都会把满屏
+		// 关掉**：用户点一下分集面板就被踢回普通窗口，而这一票分集面板的全部用处
+		// 正好没了一半。
+		//
+		// Biu 那边也是这么处理的：`isOpen` 和 `playItem` 是两件事，内容那一支是
+		// `{!playItem ? <Empty/> : <DrawerBody …>}`（`index.tsx:214`）——**开着就
+		// 开着**，只是内容换成空状态。我们照抄。
+		s.viewFullEmpty(c)
 		return
 	}
 
@@ -184,6 +199,43 @@ func (s *Shell) viewFullPlayer(c *ui.Context) {
 			s.viewFullSpectrum(c, st, hidden)
 			s.viewFullControls(c, st, hidden)
 			s.viewFullParts(c, hidden)
+		})
+
+		if probe.OverlayShortcut(0, ui.KeyEscape) {
+			s.closeFullPlayer()
+		}
+	})
+}
+
+// viewFullEmpty 是「满屏开着、此刻没有歌」的那一屏。
+//
+// 三样都留着：背景、顶栏（关掉的那一条）、指针那三秒。少任何一样，用户就是被
+// 关在一屏没法操作的东西里——而**换歌的那几百毫秒正好会走到这里**。
+//
+// 空状态的话照 `nowplaying.go` 那一份复用（同一句话，同一个出处）。
+func (s *Shell) viewFullEmpty(c *ui.Context) {
+	ui.Overlay(c, func() {
+		s.viewFullBackdrop(c, "")
+
+		probe := ui.Box(c).Key("full-probe").
+			Absolute().Left(0).Top(0).Right(0).Bottom(0).
+			Modal()
+
+		s.syncFullPointer(probe)
+
+		hidden := s.fullHidden()
+		if hidden {
+			probe = probe.Cursor(ui.CursorNone)
+		}
+
+		probe.Children(func() {
+			s.viewFullTopBar(c, app.State{}, hidden)
+			ui.Column(c).Key("full-empty").
+				Absolute().Left(0).Top(0).Right(0).Bottom(0).
+				Center().Gap(6).Children(func() {
+				ui.Text(c, nothingPlaying.Title).FontSize(15).TextColor(fullOnColor)
+				ui.Text(c, nothingPlaying.Hint).FontSize(12).TextColor(fullDimColor)
+			})
 		})
 
 		if probe.OverlayShortcut(0, ui.KeyEscape) {
@@ -242,11 +294,31 @@ func (s *Shell) viewFullBackdrop(c *ui.Context, url string) {
 // viewFullTopBar 是顶上那一条：关闭、歌名、偏好面板。
 //
 // 排列照 Biu（`index.tsx:291-325`）：左上角收起、旁边是歌名、再旁边是设置。
+//
+// 🔴 **左边必须让开红黄绿**：隐藏标题栏的窗口里系统控件是叠在内容**上面**的，
+// 而满屏把普通顶栏整条盖住了——于是「关闭全屏」的前两个字正好被黄灯和绿灯压住
+// （实测按钮框 x∈[39,91]，红黄绿整簇 x∈[14,66]）。做法照 navbar.go 那一处：
+// `c.TitleBar()` 给的 `bar.Left` 就是左边让出的量。
+//
+// ⚠️ 同一条顶栏还要能拖窗口：浮层盖住整窗，普通顶栏上那两处 `DragWindow`
+// （navbar.go）够不着了。
 func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
+	titleBar := c.TitleBar()
+
+	shown := fullShown(hidden)
 	bar := ui.Row(c).Key("full-top").
-		Absolute().Left(0).Right(0).Top(0).Height(fullBarHeight).
-		Padding(fullBarPadY, fullBarPadX).Gap(12).AlignItems(ui.Center)
-	bar = bar.Opacity(bar.AnimateTo("full-top:o", fullShown(hidden), ui.Smooth))
+		Absolute().Left(0).Right(0).Top(0).Height(max(titleBar.Height, fullBarHeight)).
+		Padding(fullBarPadY, fullBarPadX, fullBarPadY, fullTopBarPadLeft(titleBar)).
+		Gap(12).AlignItems(ui.Center).DragWindow()
+	bar = bar.Opacity(bar.AnimateTo("full-top:o", shown, ui.Smooth))
+	// ⚠️ 藏起来的时候要**移出窗口**，不只是 Opacity(0)。不移的话那两个看不见的
+	// 按钮仍然接点击：停在窗口顶部点一下，满屏就被关掉；点右上角会把偏好面板
+	// 凭空开出来。底下那一条 controls 用 `Translate` 推出去了，顶栏原来没做。
+	//
+	// ⚠️ **方向和底下那一条相反**：controls 在底部，「滑出去」是往下（正的 Y）；
+	// 顶栏在顶部，「滑出去」是往上（负的 Y）。写正了的话它滑到 y=56——还在窗口
+	// 里，按钮照样点得动。
+	bar = bar.Translate(0, -(1-shown)*(titleBar.Height+fullBarHeight))
 
 	// ⚠️ 这一帧**进来时**面板是开着没有：`ui.Popover` 处理「点外面 / 按 Esc 关掉」
 	// 是在它自己那一趟里做的，进函数时读到的还是上一帧的值。要判断「刚刚被关掉」
@@ -285,6 +357,17 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 		s.armFullHide()
 	}
 }
+
+// fullTopBarPadLeft 是满屏顶栏左边让出多少。
+//
+// `TitleBar().Left` 是系统控件在左边占掉的宽度（macOS 的红黄绿那一簇）。满屏把
+// 普通顶栏整条盖住了，所以这一条**必须自己让**：不写死 `fullBarPadX` 的话，
+// 「关闭全屏」的前两个字正好压在黄灯和绿灯底下（实测按钮 x∈[39,91]，红黄绿
+// x∈[14,66]）。
+//
+// 单独拎成一个函数是为了能测：无头 Tester 里 `bar.Left` 恒为 0（那里没有标题栏），
+// 量真实窗口那一半得开真窗口，而这一个函数把「跟着 TitleBar 走」这件事钉住了。
+func fullTopBarPadLeft(bar ui.TitleBar) float32 { return bar.Left + fullBarPadX }
 
 // ---- 封面（共享元素） ----
 
@@ -453,8 +536,17 @@ func fullShown(hidden bool) float32 {
 
 // viewFullParts 是右边那个把手和它开出来的分集面板。
 //
-// 入口的可见条件照 Biu（`index.tsx:404`）：`isUiVisible && playItem.hasMultiPart &&
-// !isPageListOpen`——界面藏起来的时候把手也藏起来，面板开着的时候把手让位。
+// 界面藏起来的时候把手也藏起来，面板开着的时候把手让位。
+//
+// 🔴 **把手在「还没问到」和「问失败」时也得摆着。**
+//
+// Biu 的条件是 `playItem.hasMultiPart`（`index.tsx:404`），而那是播放项自带的
+// 字段——我们没有，得问一次才知道。所以第一版照抄成 `len(parts) > 1`，后果是：
+// 一次 403 之后列表空 → 把手不摆 → 面板进不去 → 那句「问不出分集：…」
+// **在真机上是死的**（只有测试里直接写 `s.full.partsOpen = true` 才看得到）。
+//
+// 现在：`问到多于一条`、或者`一条都还没问到`（正在问 / 问失败）时都摆。
+// 只在**确知只有一条**的时候收起来——那时候确实没有「选」的意思。
 func (s *Shell) viewFullParts(c *ui.Context, hidden bool) {
 	parts := s.app.Parts()
 	cur, _ := s.app.CurrentItem()
@@ -467,9 +559,7 @@ func (s *Shell) viewFullParts(c *ui.Context, hidden bool) {
 		s.viewFullPartsPanel(c)
 		return
 	}
-	// 只有一个分 P 的时候没有「选」的意思：Biu 那边是 `hasMultiPart` 才摆把手，
-	// 而只有一个分 P 的稿子 `hasMultiPart` 是假的。
-	if len(parts) > 1 {
+	if len(parts) > 1 || (len(parts) == 0 && s.app.PartsWorthAsking()) {
 		_, winH := c.Size()
 		tab := ui.Button(c, "显示分集列表").FontSize(11).
 			Absolute().Right(0).Top(winH/2 - fullPartsTabH/2).

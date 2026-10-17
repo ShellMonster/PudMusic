@@ -82,11 +82,13 @@ func TestThePartsEntryOpensAndSwitchesTheEpisode(t *testing.T) {
 	s, tt := onlineTester(t, multiPages(), false)
 
 	// 面板的数据是**每一帧**问 App 要的，而问 App 会触发第一次取分集。
+	// 把手在**还没问到**的时候就摆着（见 viewFullParts 那段），所以这里要等到
+	// 三条真的到齐了再点进去——不然点开的是「正在问这一首有哪几集」。
 	s.openFullPlayer()
-	settleSearch(t, tt, "分集入口出来", func() bool {
-		_, ok := tt.Find("显示分集列表")
-		return ok
-	})
+	settleSearch(t, tt, "分集问回来了", func() bool { return len(s.app.Parts()) == 3 })
+	if _, ok := tt.Find("显示分集列表"); !ok {
+		t.Fatalf("问回来了把手还没摆，文字有 %q", tt.Texts())
+	}
 
 	if err := tt.Click("显示分集列表"); err != nil {
 		t.Fatalf("点不了分集入口：%v（文字：%q）", err, tt.Texts())
@@ -143,17 +145,26 @@ func TestThereIsNoPartsEntryForASinglePartVideo(t *testing.T) {
 // 一片空白的列表在界面上和「这一首没有分集」长得一模一样；而实际上分集是问 B 站
 // 问来的，问不到是网络/风控的事，不是这首没有分集。
 //
-// 入口这会儿不摆（一集都问不到，谈不上「多 P」），所以直接把面板打开来看那句话。
+// 🔴 **这一条是从把手点进去的**，不是直接写 `s.full.partsOpen = true`。第一版
+// 就是直接写的，于是那句话在真机上是**死的**：把手只在 `len(parts) > 1` 时才摆，
+// 一条都问不到的时候面板从哪儿也进不去，只有测试里进得去。
 func TestThePartsPanelSaysWhyWhenTheyCannotBeAsked(t *testing.T) {
 	s, tt := onlineTester(t, nil, true)
 
 	s.openFullPlayer()
-	s.full.partsOpen = true
-	settleSearch(t, tt, "面板说出问不到", func() bool {
-		return tt.HasText("问不出分集")
-	})
-	if s.app.PartsErr() == nil {
-		t.Error("面板上说了问不到，App 那边却没有记下原因")
+	settleSearch(t, tt, "问失败", func() bool { return s.app.PartsErr() != nil })
+	tt.Frame()
+
+	// 问不到的时候把手也得摆着，否则那句人话没地方显示。
+	if _, ok := tt.Find("显示分集列表"); !ok {
+		t.Fatalf("一条分集都没问到，把手却没摆，文字有 %q", tt.Texts())
+	}
+	if err := tt.Click("显示分集列表"); err != nil {
+		t.Fatalf("点不了分集入口：%v（文字：%q）", err, tt.Texts())
+	}
+	tt.Frame()
+	if !tt.HasText("问不出分集") {
+		t.Errorf("面板上没有说为什么，文字有 %q", tt.Texts())
 	}
 }
 
@@ -184,5 +195,103 @@ func TestPartRowsAreKeyedByTheirCid(t *testing.T) {
 	if shorter[0].key != rows[0].key || shorter[1].key != rows[1].key {
 		t.Errorf("删掉最后一行之后前面两行的身份变了：%q/%q → %q/%q",
 			rows[0].key, rows[1].key, shorter[0].key, shorter[1].key)
+	}
+}
+
+// TestSwitchingEpisodesDoesNotCloseTheFullPlayer 是第一轮评审的 critical。
+//
+// `App.PlayPart` 换集是 `ClearTrack()` + 异步取流：这两步之间（几百毫秒）
+// `HasTrack` 恒为 false。而 `viewFullPlayer` 原来在这里 `closeFullPlayer()`，
+// 于是**每一次换集都会把满屏关掉**——用户点一下分集面板就被踢回普通窗口，
+// 而分集面板这一票的全部用处正好没了一半。
+//
+// 判据是满屏自己还在（`full.open`）而且界面上那些字还在（真的画出来了）。
+func TestSwitchingEpisodesDoesNotCloseTheFullPlayer(t *testing.T) {
+	s, tt := onlineTester(t, multiPages(), false)
+	s.openFullPlayer()
+	settleSearch(t, tt, "分集问回来了", func() bool { return len(s.app.Parts()) == 3 })
+
+	if err := tt.Click("显示分集列表"); err != nil {
+		t.Fatalf("点不了分集入口：%v（文字：%q）", err, tt.Texts())
+	}
+	tt.Frame()
+	if err := tt.Click("第 3 集"); err != nil {
+		t.Fatalf("点不了第三集：%v（文字：%q）", err, tt.Texts())
+	}
+
+	// 一帧一帧地看：**换集的那一瞬**也不能关。
+	for i := range 20 {
+		tt.Frame()
+		if !s.full.open {
+			t.Fatalf("第 %d 帧满屏自己关上了（HasTrack=%v）——换集时它不该关",
+				i, s.app.Snapshot().HasTrack)
+		}
+		if !tt.HasText("关闭全屏") {
+			t.Fatalf("第 %d 帧满屏的顶栏不见了，文字有 %q", i, tt.Texts())
+		}
+	}
+	// 新歌接上之后满屏还在放新歌（不是卡在空状态上）。
+	settleSearch(t, tt, "换到第三集", func() bool {
+		it, ok := s.app.CurrentItem()
+		return ok && it.Cid == "779" && s.app.Snapshot().HasTrack
+	})
+	if !s.full.open {
+		t.Error("换完之后满屏自己关上了")
+	}
+}
+
+// TestSwitchingToAnotherOnlineSongDoesNotCloseTheFullPlayer 是同一条的另一半：
+// `App.PlayAt` 换另一首在线歌也是 ClearTrack + 异步 play，放完自动连播走的也是
+// 这一条路——而那正是这个应用的主场景。
+func TestSwitchingToAnotherOnlineSongDoesNotCloseTheFullPlayer(t *testing.T) {
+	s, tt := onlineTester(t, multiPages(), false)
+	s.openFullPlayer()
+
+	if err := s.app.Enqueue(app.Item{
+		Source: "online", Type: "mv", Bvid: "BVsecond", Cid: "1", Title: "另一首",
+	}); err != nil {
+		t.Fatalf("加第二首：%v", err)
+	}
+	if err := s.app.PlayAt(s.app.Queue().Len() - 1); err != nil {
+		t.Fatalf("换到第二首：%v", err)
+	}
+
+	for i := range 20 {
+		tt.Frame()
+		if !s.full.open {
+			t.Fatalf("第 %d 帧满屏自己关上了（HasTrack=%v）——换在线歌时它不该关",
+				i, s.app.Snapshot().HasTrack)
+		}
+		if !tt.HasText("关闭全屏") {
+			t.Fatalf("第 %d 帧满屏的顶栏不见了，文字有 %q", i, tt.Texts())
+		}
+	}
+}
+
+// TestAFullPlayerWithNoTrackShowsAnEmptyStateInsteadOfVanishing 断那一屏长什么样。
+//
+// 「没有歌」不是「关掉」——Biu 那边是 `{!playItem ? <Empty/> : …}`（index.tsx:214）。
+// 这里量的是：满屏还开着、顶栏还在（关掉的那一条在）、中间是那句空状态。
+func TestAFullPlayerWithNoTrackShowsAnEmptyStateInsteadOfVanishing(t *testing.T) {
+	s, tt, _ := fullTester(t)
+	openFull(t, tt)
+
+	s.app.ClearTrack()
+	tt.Frame()
+
+	if !s.full.open {
+		t.Fatal("清掉播放器之后满屏自己关上了")
+	}
+	if !tt.HasText(nothingPlaying.Title) {
+		t.Errorf("没有歌的那一屏没有说「暂无播放内容」，文字有 %q", tt.Texts())
+	}
+	if !tt.HasText("关闭全屏") {
+		t.Errorf("没有歌的那一屏连关掉的那一条都没了，文字有 %q", tt.Texts())
+	}
+	// 还能关：Esc 仍然管用。
+	tt.Key(0, mygoui.KeyEscape)
+	tt.Frame()
+	if s.full.open {
+		t.Error("空状态那一屏按 Esc 关不掉")
 	}
 }

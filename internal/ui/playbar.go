@@ -195,25 +195,33 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 // 框架只认这一帧装的那个）。而框架只留一帧的记录（`rec.frame+1 < rt.frame` 就
 // 删），所以漏一帧就等于转场没了。
 func (s *Shell) viewCover(c *ui.Context, st app.State) {
-	el := imgcache.View(c, s.images, st.CoverURL, coverSize, coverSize).
-		Label("当前封面").
-		Transition(coverTransition(coverIdentity(s, st)))
+	// 🔴 外面这一层 `Size(56,56)` 不是多余的：**`Absolute()` 是相对父容器摆的**，
+	// 而这一行的父容器是上面那个「封面 + 歌名」的 `Grow(1)` Row。不套这一层的话
+	// 悬停浮层盖住的是**整块左半边播放条**——实测那块黑从 x≈8 铺到 x≈1048，歌名
+	// `stereo16` 被压在底下，⤢ 落在整块的中心 x≈540 而不是落在 56×56 的封面上。
+	//
+	// `queue_drawer.go` 的 `viewQueueCover` 就是这个套法（它外面套的是
+	// `Width(queueCoverSize)` 那一层），照抄。
+	ui.Row(c).Key("playbar-cover").Size(coverSize, coverSize).Children(func() {
+		el := imgcache.View(c, s.images, st.CoverURL, coverSize, coverSize).
+			Label("当前封面").
+			Transition(coverTransition(coverIdentity(s, st)))
 
-	hovered := el.Hovered()
-	if hovered {
-		// Biu 那边是 hover 时浮一层 `bg-[rgba(0,0,0,0.5)]` 加一个向上的箭头
-		// （`layout/playbar/left/index.tsx:38-41`）。没有这一层的话，用户不知道
-		// 那张封面是能点的。
-		//
-		// PassThrough：**不让这一层吃掉点击**（理由同 queue_drawer 的 viewQueueCover）。
-		ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Radius(c.Theme().Radius).
-			PassThrough().Center().Background(ui.RGBA(0, 0, 0, 0.5)).Children(func() {
-			ui.Text(c, "⤢").FontSize(20).TextColor(ui.RGBA(255, 255, 255, 0.92))
-		})
-	}
-	if el.Clicked() {
-		s.openFullPlayer()
-	}
+		if el.Hovered() {
+			// Biu 那边是 hover 时浮一层 `bg-[rgba(0,0,0,0.5)]` 加一个向上的箭头
+			// （`layout/playbar/left/index.tsx:38-41`）。没有这一层的话，用户不知道
+			// 那张封面是能点的。
+			//
+			// PassThrough：**不让这一层吃掉点击**（理由同 queue_drawer 的 viewQueueCover）。
+			ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Radius(c.Theme().Radius).
+				PassThrough().Center().Background(ui.RGBA(0, 0, 0, 0.5)).Children(func() {
+				ui.Text(c, "⤢").FontSize(20).TextColor(ui.RGBA(255, 255, 255, 0.92))
+			})
+		}
+		if el.Clicked() {
+			s.openFullPlayer()
+		}
+	})
 }
 
 // viewStepButtons 是上一首和下一首。

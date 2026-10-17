@@ -5,6 +5,7 @@
 package app
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -182,6 +183,15 @@ type App struct {
 	partsErr    error
 	partsLoaded bool
 	partsWanted bool
+	// partsTriedAt 是上一次**发起**那一问的时刻，问失败之后拿它算退避
+	// （`partsRetryAfter`）。成功之后用不上——`partsLoaded` 已经挡住了。
+	partsTriedAt time.Time
+	// partsFetch 是问分集的那一趟，nil = 走取流零件上的 `bili.Client.VideoPages`。
+	//
+	// **只由界面那一侧读写**：`ensureParts` 在那里把它取出来递给后台那个
+	// goroutine，goroutine 不碰这个字段。生产上永远是 nil（所以不需要锁）；
+	// 测试里替成一个假函数，才能量「失败之后到底有没有再问」。
+	partsFetch func(context.Context, string) ([]bili.VideoPart, error)
 
 	// 本地音乐库，见 localmusic.go。挂上去之前是 nil，界面要判空。
 	localMusic *localLibrary

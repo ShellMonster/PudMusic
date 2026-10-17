@@ -1,10 +1,14 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 )
@@ -357,5 +361,158 @@ func TestPartsStartOverOnAnotherVideo(t *testing.T) {
 	a.queue.selectAt(0)
 	if got := a.Parts(); got != nil {
 		t.Errorf("换了一个稿却还拿着上一个的分集（%d 条）", len(got))
+	}
+}
+
+// fetchCalls 数那个替身被叫了几趟。用 atomic 而不是普通 int：它是后台那个
+// goroutine 写的、测试这一侧读的，`-race` 会报。
+type fetchCalls struct{ n atomic.Int32 }
+
+// wait 轮询到至少 n 趟。
+func (c *fetchCalls) wait(t *testing.T, n int32, what string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if c.n.Load() >= n {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("等了 %d 趟，want ≥ %d（%s）", c.n.Load(), n, what)
+}
+
+func (c *fetchCalls) got() int32 { return c.n.Load() }
+
+// TestPartsAreAskedAgainAfterAFailure 是第一轮评审的 major。
+//
+// 原来失败和成功一样把 `partsLoaded` 置成 true，于是一次 403 风控 / 一次网络抖动
+// 之后，这一首在本次播放期间**再也不会出现分集入口**——而界面上还没有任何地方
+// 能说出「问不出分集」（那个把手只在 `len(parts) > 1` 时才摆，面板进不去）。
+//
+// 这一条把「上一次发起」的时刻拨到退避窗口之前，然后确认**真的又发了一趟**。
+func TestPartsAreAskedAgainAfterAFailure(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	calls := &fetchCalls{}
+	a.partsFetch = func(_ context.Context, _ string) ([]bili.VideoPart, error) {
+		calls.n.Add(1)
+		return nil, errors.New("风控")
+	}
+	a.Queue().Append(Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "1"})
+	a.queue.selectAt(0)
+
+	// 第一趟：失败。
+	if got := a.Parts(); got != nil {
+		t.Fatalf("第一次就问出了 %d 集", len(got))
+	}
+	calls.wait(t, 1, "第一次那一趟")
+	if a.PartsErr() == nil {
+		t.Fatal("问失败了却没有记下原因")
+	}
+
+	// 退避之内再问：不发。
+	for range 5 {
+		a.Parts()
+	}
+	if got := calls.got(); got != 1 {
+		t.Fatalf("退避之内又发了 %d 趟，want 还是 1", got)
+	}
+
+	// 把「上一次发起」的时刻拨到退避窗口之前：下一趟之后界面会再问一次。
+	a.partsMu.Lock()
+	a.partsTriedAt = a.partsTriedAt.Add(-2 * partsRetryAfter)
+	a.partsMu.Unlock()
+
+	if got := a.Parts(); got != nil {
+		t.Fatalf("第二趟还是问出了 %d 集", len(got))
+	}
+	calls.wait(t, 2, "退避之后那一趟")
+	if got := calls.got(); got != 2 {
+		t.Fatalf("过了退避窗口发了 %d 趟，want 2 —— 失败之后就再也不问了", got)
+	}
+
+	// 第三趟换成成功：这次就记住，不再问第四回。
+	ok := &fetchCalls{}
+	a.partsFetch = func(_ context.Context, _ string) ([]bili.VideoPart, error) {
+		ok.n.Add(1)
+		return []bili.VideoPart{{Cid: "1", Page: 1}, {Cid: "2", Page: 2}}, nil
+	}
+	a.partsMu.Lock()
+	a.partsTriedAt = a.partsTriedAt.Add(-2 * partsRetryAfter)
+	a.partsMu.Unlock()
+
+	_ = a.Parts() // 触发第三趟（退避窗口已经被拨过去了）
+	ok.wait(t, 1, "成功那一趟")
+	waitParts(t, a, 2, "成功那一趟的结果")
+	for range 10 {
+		a.Parts()
+	}
+	if got := ok.got(); got != 1 {
+		t.Errorf("成功之后又问了 %d 趟，want 1", got)
+	}
+	if a.PartsErr() != nil {
+		t.Errorf("成功之后还留着上一次失败的原因：%v", a.PartsErr())
+	}
+}
+
+// waitParts 轮询到问到了 want 条分集。
+func waitParts(t *testing.T, a *App, want int, what string) []bili.VideoPart {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := a.Parts(); len(got) == want {
+			return got
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("等了 %d 集，want %d（%s）", len(a.Parts()), want, what)
+	return nil
+}
+
+// TestPartsAreNotAskedAgainAfterANewerFailure 断「重试本身也有退避」。
+//
+// 界面每一帧都调 `Parts()`，没有退避就是失败一次发一趟、每秒一趟。
+func TestPartsAreNotAskedAgainAfterANewerFailure(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	calls := &fetchCalls{}
+	a.partsFetch = func(_ context.Context, _ string) ([]bili.VideoPart, error) {
+		calls.n.Add(1)
+		return nil, errors.New("风控")
+	}
+	a.Queue().Append(Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "1"})
+	a.queue.selectAt(0)
+
+	for range 50 {
+		a.Parts()
+	}
+	calls.wait(t, 1, "第一趟")
+	for range 50 {
+		a.Parts()
+	}
+	if got := calls.got(); got != 1 {
+		t.Errorf("连着问 50 次发了 %d 趟，want 1", got)
+	}
+}
+
+// TestPartsWorthAsking 只对 B 站的 mv 为真。
+func TestPartsWorthAsking(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	if a.PartsWorthAsking() {
+		t.Error("队列空着却说有分集可问")
+	}
+	a.Queue().Append(LocalItem("/tmp/x.mp3"))
+	a.queue.selectAt(0)
+	if a.PartsWorthAsking() {
+		t.Error("本地音乐却有分集可问")
+	}
+	a.Queue().Reset(Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "1"})
+	a.queue.selectAt(0)
+	if !a.PartsWorthAsking() {
+		t.Error("B 站的 mv 却没有分集可问")
 	}
 }
