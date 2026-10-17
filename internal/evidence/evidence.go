@@ -106,21 +106,10 @@ var Items = []Item{
 		Spec:     "系统媒体状态映射（暂停/停止/播完/解码失败不是同一个数）",
 		Tests:    []string{"TestPlaybackStateMapping", "TestSmtcStatusIsNotTheMacNumber"},
 	},
-	{
-		Category: Play,
-		// 🔴 这一条是被一次对照审计逼进来的：判据抄对了（「可放」的那几种
-		// 类型），被判为可放的那条取流路径没跟上，于是「可放」成了界面上的
-		// 谎言——条目照常画、照常进队列，按播放才报错，而且一路绿过所有测试。
-		//
-		// 前一条钉的是「界面上摆出来的那一项播放器认不认」，后一条钉的是
-		// 「它真的取得到流」。**少任何一条，那种错都能悄悄回来**：只钉判据的
-		// 话，接线断了照样绿。
-		Spec: "**界面上标成「可放」的条目真的放得出来**（判据不许撒谎）",
-		Tests: []string{
-			"TestEveryPlayableCollectionEntryIsAcceptedByThePlayer",
-			"TestEveryPlayableEntryCanActuallyBeStreamed",
-		},
-	},
+
+	// ⚠️ 「界面上标成可放的条目真的放得出来」那一格在下面「画出来的每一行都放得了」
+	// 那一条里（`Play` 组，靠后）——它连着那张表一起钉，而那才是它该在的地方。
+	// 别在这里再抄一份：台账里有两条说同一句话的，读的人得自己猜哪条才是活的。
 
 	// ── 假时钟 ─────────────────────────────────────────────────────────────
 	{
@@ -549,8 +538,8 @@ var Items = []Item{
 	{
 		Category: Play,
 		// 「判据说可放、实际放不了」——界面上的谎言。`bili.Media.Playable()`
-		// 照抄了 Biu 的 `![2,12].includes(type)`，**判据抄对了**，而我们没实现
-		// 的那一条路（type=12，B 站音乐库）没有被跟上：收藏夹里那条照常画成一
+		// 照抄了 Biu 的 `![2,12].includes(type)`，**判据抄对了**，而那时我们没实
+		// 现的那一条路（type=12，B 站音乐库）没有被跟上：收藏夹里那条照常画成一
 		// 行、照常进队列、抽屉里还标着「B 站音乐」，用户按播放才被
 		// `app.playableOnline` 拒绝。判据一路绿，判据的测试也一路绿，只有真的
 		// 按下去那一刻才说话。
@@ -559,15 +548,19 @@ var Items = []Item{
 		// 放，同步那一步不许拒绝它**；判据说「放不了」的行不许进队列；判据不
 		// 许自己长（改判据就要改那张表），而每一类内容都必须在表上。
 		//
-		// ⚠️ type=12 今天**欠着**（BMG-47 §3 A31，还没有工单：取流 / 元信息 /
-		// 收藏态三个接口一个都没有）。它写成一条**欠条**而不是一段红的测试，
-		// 理由和上一条一样：一个永远红的 `go test ./...` 没有人再跑它，那比绿
-		// 着更坏。把欠条删掉，这条断言自己就开始要求它真放得了。
-		Spec: "画出来的每一行都放得了：判据与界面那一步必须说同一句话（type=12「B 站音乐库」今天欠着 A31，欠条要点名到编号并钉住那句人话；判据不许自己长，每一类内容都必须在表上）",
+		// ⚠️ type=12 那一行**欠过**（BMG-47 §3 A31 → BMG-50），当时写成一条
+		// **欠条**而不是一段红的测试，理由和上一条一样：一个永远红的
+		// `go test ./...` 没有人再跑它，那比绿着更坏。把欠条删掉之后，这条断言
+		// 自己就开始要求它真放得了——而**下面那两条就是它转正之后的样子**：一条
+		// 钉判据与播放器认不认（`internal/ui`），一条钉真的取得到流（`internal/app`）。
+		// 只钉判据不够，接线断了照样绿，那正是当初漏掉的那一半。
+		Spec: "画出来的每一行都放得了：判据与界面那一步必须说同一句话（type=12「B 站音乐库」欠过 A31，BMG-50 已交付，欠条撤掉，断言转为要求它真放得了；判据不许自己长，每一类内容都必须在表上）",
 		Tests: []string{
 			"TestEveryRowWeDrawHasAVerdictThatMatchesWhatHappens",
 			"TestEveryContentTypeInTheCodebaseIsOnTheVerdictLedger",
 			"TestEveryListedExtensionIsToldApartFromThePlayableOnes",
+			"TestEveryPlayableCollectionEntryIsAcceptedByThePlayer",
+			"TestEveryPlayableEntryCanActuallyBeStreamed",
 			// 服务层那三条：判据本身，以及「放不了的那一种在界面上必须说清楚」。
 			"TestOnlyVideoAndAudioArePlayable",
 			"TestAnUnplayableFormatIsNamedAsSuch",
