@@ -387,7 +387,12 @@ func (s *Shell) drawLyricsFade(c *ui.Context, top bool) {
 		stops = append(stops, ui.GradientStop{Color: bg.Alpha(alpha[i]), At: pos})
 	}
 
+	// 🔴 **必须 `PassThrough`**：即时模式的命中链是按画出来的顺序排的，这两条盖板
+	// 画在滚动区**之后**，于是它们排在命中链的前面——歌词区上下各 24%（合计约一半
+	// 面积）拿滚轮翻不动，只有中间那条有反应（实测：分界线正好落在 0.24 和 0.76）。
+	// 自动跟随不受影响（那是程序自己调 ScrollTo），受影响的是用户手动翻歌词找词。
 	bar := ui.Box(c).Absolute().Left(0).Right(0).HeightPercent(lyricsFadePercent).
+		PassThrough().
 		LinearGradient(ui.LinearGradient{Angle: 180, Stops: stops})
 	if top {
 		bar = bar.Top(0)

@@ -196,7 +196,7 @@ type Shell struct {
 	// lyricStuck 是「连着几帧目标都够不着」的次数，用完就不再要帧了。
 	lyricStuck int
 	// lyricPadForced 让测试把居中留白强行按成某一个值（nil = 用真值）。
-	// 见 internal/ui/lyrics.go 里 lyricPadOverride 那段——它为什么必要。
+	// 见 internal/ui/lyrics.go 里 lyricPadForced 那段——它为什么必要。
 	lyricPadForced *float32
 	// lyricMaxY 是上一次看到的滚动范围。它变了（内容变高）就重新从头试一遍。
 	lyricMaxY float32

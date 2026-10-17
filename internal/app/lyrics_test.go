@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -91,6 +92,50 @@ func TestSwitchingSongsResetsTheOffsetBeforeRestoringIt(t *testing.T) {
 	}
 	if ls.Rows[0].Text != "乙" {
 		t.Errorf("歌词是 %q，want 乙（读到的是甲的缓存？）", ls.Rows[0].Text)
+	}
+}
+
+// TestPutLyricsRacesTheDebouncedSave 钉住那条数据竞争：`PutLyrics` 在**锁外**读
+// `a.lyricEntry`，而防抖落盘跑在 `time.AfterFunc` 自己的 goroutine 上、它在**锁里**写
+// 同一个字段。`lyrics.Entry` 里装的是 `string`，撕裂读出来就是一个野指针。
+//
+// 复现它要真的把那个 500ms 的定时器排上（所以这里不换假钟）——竞态窗口很窄，
+// 去掉修复之后 `-race -count=5` 能抓到一次（`-count=50` 必抓）。
+func TestPutLyricsRacesTheDebouncedSave(t *testing.T) {
+	a, _ := lyricsApp(t)
+	a.setLyricTrack(onlineSong("BV1", "1"))
+	a.PutLyrics("[00:01.00]词", "")
+	a.SetLyricsOffset(-1000) // ← 排上**真的** 500ms 定时器
+
+	// 这边连着换歌词，那边 500ms 后准时来落盘。
+	go func() {
+		for i := range 50 {
+			a.PutLyrics(fmt.Sprintf("[00:0%d.00]换了第 %d 遍", i%9+1, i), "")
+		}
+	}()
+	time.Sleep(lyricsSaveDelay + 200*time.Millisecond)
+}
+
+// TestAnAdjustmentIsNotLostWhenTheSongChangesMidDebounce 盯住「防抖窗口内换歌」。
+//
+// 那道窗口是 500ms，用户在这半秒里换歌的话，窗口到期时读到的是**新歌**那条（歌词还
+// 空着），上一首的那一次调整就被静默丢掉——界面上看不出任何异样：拖完偏移、换歌、
+// 回头再放上一首，偏移是 0。上游不是这样（`debounce` 把 playItem 当参数传进去）。
+func TestAnAdjustmentIsNotLostWhenTheSongChangesMidDebounce(t *testing.T) {
+	a, c, clock := lyricsAppOnFakeClock(t)
+	first := onlineSong("BV1", "1")
+	a.setLyricTrack(first)
+	a.PutLyrics("[00:01.00]第一首的词", "")
+
+	a.SetLyricsOffset(-1000)
+	clock.advance(lyricsSaveDelay / 3) // 窗口只走了三分之一
+
+	a.setLyricTrack(onlineSong("BV2", "2")) // 就在这半秒里换歌
+	clock.advance(lyricsSaveDelay)          // 让原来的窗口到期
+
+	if got, _ := c.Load(lyricKeyOf(first)); got.OffsetMS != -1000 {
+		t.Errorf("上一首的偏移落盘成了 %d，want -1000——那一次调整被换歌吞掉了",
+			got.OffsetMS)
 	}
 }
 

@@ -453,6 +453,32 @@ func (h *lyricsHarness) measureAt(t *testing.T, text string, frac float32) float
 	return inkOf(h.tt.Image(), band)
 }
 
+// TestTheFadeDoesNotSwallowTheWheel 盯住上下那两条盖板**不吃滚轮**。
+//
+// 即时模式的命中链按画出来的顺序排，而那两条盖板画在滚动区**之后**，于是它们排在
+// 命中链前面：歌词区上下各 24%（合计约一半面积）拿滚轮翻不动，只有中间那条有反应。
+// 自动跟随不受影响（那是程序自己调 ScrollTo），受影响的是**用户手动翻歌词找词**——
+// 而那正是渐隐要服务的场景。
+func TestTheFadeDoesNotSwallowTheWheel(t *testing.T) {
+	h := newLyricsHarness(t)
+	h.seekSettled(t, 0.5, false)
+	if h.s.lyricBoxH <= 0 {
+		t.Fatal("歌词区没有高度")
+	}
+	mid := h.s.lyricBoxX + h.s.lyricBoxW/2
+
+	// 上沿那条盖板里面、里面那条（本来就该动）、下沿那条盖板里面。
+	for _, frac := range []float32{0.12, 0.5, 0.88} {
+		before := h.s.lyricScroll.Y
+		h.tt.Scroll(mid, h.s.lyricBoxY+frac*h.s.lyricBoxH, 0, -120)
+		h.tt.Frame()
+		if got := h.s.lyricScroll.Y; got == before {
+			t.Errorf("在歌词区 %.0f%% 高度上滚滚轮没动（滚动量还是 %v）——"+
+				"上面那两条渐隐盖板把滚轮吃了", frac*100, got)
+		}
+	}
+}
+
 // TestTheRetryBudgetForAnUnreachableTarget 盯住「目标够不着时别把帧率一直拖在 60 上」
 // 那道保险（followActiveLyric 里的 `lyricStuck`）。
 //

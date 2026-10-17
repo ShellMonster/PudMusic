@@ -184,10 +184,24 @@ func (a *App) setLyricTrack(it Item) {
 	key := lyricKeyOf(it)
 
 	a.mu.Lock()
-	if a.lyricKey == key {
-		a.mu.Unlock()
+	same := a.lyricKey == key
+	a.mu.Unlock()
+	if same {
 		return
 	}
+
+	// 🔴 换歌之前先把**上一首**欠着的那一次落盘做掉。
+	//
+	// 那道防抖窗口是 500ms，用户在这半秒里换歌的话，窗口到期时 `flushLyrics`
+	// 读到的是**新歌**那条（歌词还空着），于是上一首的那一次调整被静默丢掉——
+	// 界面上看不出任何异样：拖完偏移、换歌、回头再放上一首，偏移是 0。
+	//
+	// 上游不是这样：`debounce` 的那次调用把 playItem 当参数传进去（`index.tsx:191`），
+	// 落盘仍然写换歌前那一首。这里在换状态**之前**落盘，效果一样。
+	a.flushLyrics()
+	a.stopLyricsSave()
+
+	a.mu.Lock()
 	a.lyricKey = key
 	a.lyricGen++
 	gen := a.lyricGen
@@ -267,20 +281,25 @@ func (a *App) PutLyrics(lrc, translated string) {
 	a.lyricGen++
 	// 偏移和字号是**用户调的值**，换一份歌词不该把它们带走（上游换源只换
 	// `setLyrics`/`setTranslatedLyrics`，不动这两个，见 `index.tsx:269-278`）。
-	a.lyricEntry = lyrics.Entry{
+	entry := lyrics.Entry{
 		Lyrics:   lrc,
 		TLyrics:  translated,
 		OffsetMS: a.lyricOffsetMS,
 		FontSize: a.lyricFontSize,
 	}
+	a.lyricEntry = entry
 	a.lyricRows = lyrics.Rows(lrc, translated)
 	key := a.lyricKey
 	c := a.lyricCache
 	wake := a.wake
 	a.mu.Unlock()
 
+	// ⚠️ 用**锁里做出来的那一份** `entry`，不要回去读 `a.lyricEntry`。
+	// 防抖落盘跑在 `time.AfterFunc` 自己的 goroutine 上（见 flushLyrics），它会在
+	// 锁里写 `a.lyricEntry`；而 `lyrics.Entry` 里装的是 `string` 字段，撕裂读出来
+	// 就是一个野指针——`-race` 抓得到，产线上是随机崩。
 	if c != nil {
-		if err := c.Save(key, a.lyricEntry); err != nil {
+		if err := c.Save(key, entry); err != nil {
 			log.Printf("biu: 歌词缓存写不下去：%v", err)
 		}
 	}
@@ -335,6 +354,12 @@ func (a *App) flushLyrics() {
 // 仿设置那边的做法（`settings_mount.go` 的 OnWillQuit + Flush）：后台写是防抖
 // 合并的，最后一下有可能还等在窗口里，用户改完直接退出就丢了。
 func (a *App) closeLyrics() {
+	a.stopLyricsSave()
+	a.flushLyrics()
+}
+
+// stopLyricsSave 停掉那个还在等的防抖窗口。
+func (a *App) stopLyricsSave() {
 	a.mu.Lock()
 	stop := a.lyricStopTimer
 	a.lyricStopTimer = nil
@@ -342,5 +367,4 @@ func (a *App) closeLyrics() {
 	if stop != nil {
 		stop()
 	}
-	a.flushLyrics()
 }
