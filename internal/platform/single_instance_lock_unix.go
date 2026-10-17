@@ -17,6 +17,21 @@ import (
 	"syscall"
 )
 
+// processAlive 报这个 pid 现在还在不在（unix 上是信号 0 的老办法）。
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	// 信号 0 不真的发信号，只问内核「这个进程还在吗」。EPERM 也算在（进程在，
+	// 只是我们没权限发信号给它）。
+	err = p.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
 // lockExclusive 拿那把独占锁。拿到返回 true，拿不到（别人拿着）返回 false。
 //
 // **文件句柄必须留着**：flock 记在打开的那个文件描述符上，进程退出时内核把它
