@@ -84,31 +84,61 @@ func (h *lyricsHarness) seek(t *testing.T, fraction float64, withTranslation boo
 	}
 	h.s.app.PutLyrics(lrc.String(), tLrc.String())
 	h.tt.Frame()
+}
+
+// untilLaidOut 等到 text 那一行真的被画出来（盒子非零）。
+//
+// 改字号、改偏移之后行高和滚动目标都会变，要一两帧才落定；而落定的标志就是「那一行
+// 有盒子」。只等到它有盒子就停，不等整个滚动收敛——后者在 `-race` 下是几十帧。
+func (h *lyricsHarness) untilLaidOut(t *testing.T, text string) {
+	t.Helper()
+	for range 10 {
+		h.tt.Advance(100 * time.Millisecond)
+		h.tt.Frame()
+		if r, ok := h.tt.Find(text); ok && r.H > 0 {
+			return
+		}
+	}
+	t.Fatalf("等了 %d 帧，%q 仍然没有盒子", 10, text)
+}
+
+// seekSettled 是 seek 再加「等滚动走到位」。
+//
+// ⚠️ **只有量「滚到中间」的那几条才需要它**。其余的断言量的是行高、墨色和两个盒子的
+// 相对位置——那些跟滚动到哪儿没关系，而这一等在 `-race` 下是几十帧（每帧要重画整个
+// 界面），乘以十几条用例就是好几分钟。
+func (h *lyricsHarness) seekSettled(t *testing.T, fraction float64, withTranslation bool) {
+	t.Helper()
+	h.seek(t, fraction, withTranslation)
 	h.settleLyrics()
 }
 
-// settle 推 Tester 的钟走 d，让动画走完，再画一帧。
-//
-// ⚠️ v0.5.5 的 Tester 有一只**站着不动的钟**（只有 `Advance(d)` 才推进它）。
-// 不推的话钟冻着、页面永远不动——而那句话会骗人，让人以为动画停了、于是在
-// 动画中途就放行，量了个半路的位置。所以凡是等动画的地方都显式 Advance。
-func (h *lyricsHarness) settle(d time.Duration) {
-	h.tt.Advance(d)
-	h.tt.Frame()
-}
-
-// settleLyrics 推钟直到歌词区不再要帧为止。
+// settleLyrics 推钟直到歌词区不再动为止。
 //
 // 这一块是靠 `c.After` 自己一帧一帧要下去的（见 followActiveLyric），而「滚到正在唱
 // 的那一行」要跨好几跳：量出来 → 算出来 → 滚过去 → 居中留白长出来 → 再滚。一次推进
 // 不一定够，不够的时候失败的样子是「歌词停在半路」而不是「没滚」，看着像别的 bug
 // （实测：整包一起跑会红，单跑不会）。
 //
-// 多转几轮不花钱：`Advance` 只在真的还有帧要跑时才动。
+// ⚠️ **连续两轮没动就停**，不跑满预算。这一条是为了 `-race` 下的耗时：`-race` 里一帧
+// 要重画整个界面（顶栏、侧栏、十几行歌词、播放条），一个弹簧 500ms 就是三十帧。跑满
+// 8×500ms 等于白烧两百多帧 CPU，而收敛真正需要的只有几十帧——`-race` 下整包多花四分钟。
+// 两轮而不是一轮：滚动量「停一下」再「又动一下」是常态（居中留白长出来那一拍就是这样），
+// 一轮就收手会在半路上停住。
 func (h *lyricsHarness) settleLyrics() {
-	for range 8 {
-		h.tt.Advance(500 * time.Millisecond)
+	quiet := 0
+	for range 16 {
+		before := h.s.lyricScroll.Y
+		h.tt.Advance(200 * time.Millisecond)
 		h.tt.Frame()
+		switch {
+		case h.s.lyricScroll.Scrolling(), h.s.lyricScroll.Y != before:
+			quiet = 0
+		default:
+			if quiet++; quiet >= 2 {
+				return
+			}
+		}
 	}
 }
 
@@ -165,7 +195,9 @@ func TestTheLineBeingSungIsBigger(t *testing.T) {
 // `lyricsIdleOpacity` 这个常量算出来的：拿常量核对常量，常量一改它跟着改，永远绿。
 func TestTheIdleLinesAreDimmed(t *testing.T) {
 	h := newLyricsHarness(t)
-	h.seek(t, 0.5, false)
+	// 这一条要**滚动落到位**：墨色是量出来的，而量到之前它头顶/脚底那两条渐隐还压在
+	// 那一行上（实测没落位时第 10 句只有 0.16 的墨——量到的全是渐隐，不是那 0.6）。
+	h.seekSettled(t, 0.5, false)
 
 	// 紧挨着正在唱那一行的上下两句：它们在渐隐条之外（渐隐只占上下各 24%），
 	// 量到的就是纯粹的 0.6。
@@ -208,8 +240,7 @@ func TestTheLineBeingSungFollowsTheSong(t *testing.T) {
 
 	// 拖回开头：第一句该被唱到了，原来那一句该缩回去。
 	h.s.app.ScrubEnd(0)
-	h.tt.Frame()
-	h.settleLyrics()
+	h.tt.Frame() // 只看行高，不用等滚动走到位
 
 	first, wasSung := rectOf(t, h, lineAt(0)).H, rectOf(t, h, lineAt(0.5)).H
 	if first <= wasSung {
@@ -249,7 +280,7 @@ func TestTheTranslationSitsUnderItsLine(t *testing.T) {
 // 滚动」：歌词只要有滚动条就说明它在滚，可滚到哪儿全凭这一条。
 func TestTheSungLineScrollsToTheMiddle(t *testing.T) {
 	h := newLyricsHarness(t)
-	h.seek(t, 0.5, false)
+	h.seekSettled(t, 0.5, false)
 
 	if h.s.lyricBoxH <= 0 {
 		t.Fatal("歌词区没有高度，量不了中间")
@@ -274,7 +305,7 @@ func TestTheSungLineScrollsToTheMiddle(t *testing.T) {
 // 那一行和别的行长得一模一样，只是它没跟着走。
 func TestTheFirstLineCanAlsoReachTheMiddle(t *testing.T) {
 	h := newLyricsHarness(t)
-	h.seek(t, 0, false)
+	h.seekSettled(t, 0, false)
 
 	if h.s.lyricScroll.MaxY <= 0 {
 		t.Fatalf("内容没有比容器高（MaxY=%v），第一句滚不到中间", h.s.lyricScroll.MaxY)
@@ -291,7 +322,7 @@ func TestTheFirstLineCanAlsoReachTheMiddle(t *testing.T) {
 func TestTheLastLineCanAlsoReachTheMiddle(t *testing.T) {
 	h := newLyricsHarness(t)
 	// 时长打满，最后一句正在被唱。
-	h.seek(t, 1, false)
+	h.seekSettled(t, 1, false)
 
 	r := rectOf(t, h, line(lyricLines))
 	if d := r.Y + r.H/2 - h.boxMid(); absf(d) > h.s.lyricBoxH*0.02 {
@@ -324,7 +355,7 @@ func TestTheLastLineCanAlsoReachTheMiddle(t *testing.T) {
 // （见 followActiveLyric），于是这一句稳稳地停在要量的位置上。
 func TestTheFadeFadesWhatScrollsUnderIt(t *testing.T) {
 	h := newLyricsHarness(t)
-	h.seek(t, 0.5, false)
+	h.seekSettled(t, 0.5, false)
 	if h.s.lyricBoxH <= 0 {
 		t.Fatal("歌词区没有高度")
 	}
@@ -490,16 +521,41 @@ func TestTheFontSizeKnobResizesTheLines(t *testing.T) {
 	h := newLyricsHarness(t)
 	h.seek(t, 0.5, false)
 	before := rectOf(t, h, lineAt(0.5)).H
+	// ⚠️ 先确认量到的**不是 0**。`seek` 不等滚动落位，那一句有可能还没被画出来
+	// （盒子是 0），而「0 <= 0」是假——后面那条「有没有变大」就永远绿了（实测：
+	// 把字号从 App 接到 view 那一行断掉，这条照样绿）。
+	if before <= 0 {
+		t.Fatalf("改之前 %s 就没有盒子（高 %v），后面没法比", lineAt(0.5), before)
+	}
 
-	h.s.app.SetLyricsFontSize(app.MaxLyricsFontSize)
+	// ⚠️ **点那个控件，不直接调 App**。直接调 App 的话，把 view 里那一行
+	// `s.app.SetLyricsFontSize(...)` 删掉这条照样绿——「控件摆在那儿、点了没反应」
+	// 就是这么漏出去的（实测：删掉之后这条还是绿的）。
+	//
+	// 点的是数字框本身再按 ↑（`ui/number.go:56` 的 `in.Shortcut(0, KeyUp)` 走的是
+	// 焦点在那个输入框上时的按键）。不用点旁边的「+」按钮：两个 NumberInput 都有，
+	// 按钮的无障碍名字都叫 `Increase`，而 `Tester.Find` 只给第一个。
+	box, ok := h.tt.Find("歌词字号")
+	if !ok {
+		t.Fatalf("画面上找不到「歌词字号」那个控件，文字有 %q", h.tt.Texts())
+	}
+	h.tt.ClickAt(box.X+12, box.Y+box.H/2)
+	for range 8 { // 8 = 20 → 28，肉眼一眼看得出来
+		h.tt.Key(0, mygoui.KeyUp)
+	}
 	h.tt.Frame()
-	// 字号一大，行的位置、容器内容的高、居中留白全都跟着变，而每一项都是拿
-	// **上一帧**的量算的，所以要多推几帧才落定。
-	h.settleLyrics()
+
+	// 八下 ↑ 正好 +8：顺带钉住了 `font-size-control.tsx:18` 那个 `step = 1`
+	//（步长改成 5 的话八下是 +40，这条就红）。
+	if got := h.s.app.Lyrics().FontSize; got != 20+8 {
+		t.Fatalf("按了八下 ↑ 之后字号是 %v，want 28（控件没接到 App 上，或步长不是 1？）", got)
+	}
+	// 字号一变，行高和滚动目标都跟着变，要一两帧才落定——落定的标志就是这一行有盒子。
+	h.untilLaidOut(t, lineAt(0.5))
 
 	if got := rectOf(t, h, lineAt(0.5)).H; got <= before {
-		t.Errorf("字号调到 %v 之后%s还是高 %v（调之前 %v）——控件没接到 view 上",
-			app.MaxLyricsFontSize, lineAt(0.5), got, before)
+		t.Errorf("字号从 20 调到 28 之后%s还是高 %v（调之前 %v）——控件没接到 view 上",
+			lineAt(0.5), got, before)
 	}
 }
 
@@ -515,8 +571,8 @@ func TestTheOffsetMovesTheSungLine(t *testing.T) {
 	// 纳秒去填会被 ±5000 那道夹子夹成 -5000ms——于是「往前挪一句」变成「往前挪
 	// 十句」，第一句都滚出去了，断言看着像偏移没生效，其实是自己算错了单位。
 	h.s.app.SetLyricsOffset(-int(h.s.app.Snapshot().Duration/time.Millisecond) / (lyricLines - 1))
-	h.tt.Frame()
-	h.settleLyrics()
+	// 高亮换到了上一句，滚动也跟着往回走，等那一行有盒子。
+	h.untilLaidOut(t, line(lineIndexAt(0.5)-1))
 
 	back, was := line(lineIndexAt(0.5)-1), lineAt(0.5)
 	if rectOf(t, h, back).H <= rectOf(t, h, was).H {
