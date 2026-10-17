@@ -9,7 +9,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 )
 
-// `App.Stop` 的代次那道守卫：停掉之后，在途的在线流**不许**再把歌装回来。
+// `App.ClearTrack` 的代次那道守卫：停掉之后，在途的在线流**不许**再把歌装回来。
 //
 // 症状很好认：用户在抽屉里删掉了正在放的那一首、或者按了「清空」，队列空了、
 // 播放条空了，然后过一会儿**那首歌自己又放起来了**——而它已经不在队列里了。
@@ -72,18 +72,18 @@ func TestStopDiscardsAnOnlineLoadStillInFlight(t *testing.T) {
 	}
 }
 
-// TestStopOnAnIdleAppIsHarmless 钉「没在放的时候连着停几次也没事」。
+// TestClearTrackOnAnIdleAppIsHarmless 钉「没在放的时候连着清几次也没事」。
 //
-// 「清空」「从列表删除」「直接 Stop」是三条会落到 Stop 上的路，用户连点几下
+// 「清空」「从列表删除」「直接 ClearTrack」是三条会落到 Stop 上的路，用户连点几下
 // 或者代码两条路都走一遍都很平常。它不许报错，也不许凭空改出什么状态。
-func TestStopOnAnIdleAppIsHarmless(t *testing.T) {
+func TestClearTrackOnAnIdleAppIsHarmless(t *testing.T) {
 	f := newStreamFixture(t)
 	a := newOnlineApp(t, f, t.TempDir())
 
 	a.ClearQueue()
-	a.Stop()
+	a.ClearTrack()
 	a.ClearQueue()
-	a.Stop()
+	a.ClearTrack()
 
 	if st := a.Snapshot(); st.HasTrack || st.Err != "" {
 		t.Errorf("什么都没放的时候连着停，状态变了：%+v", st)

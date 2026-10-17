@@ -222,7 +222,7 @@ func TestRemoveAtTheLastSongStops(t *testing.T) {
 //
 // 这里只有一个「不留在原地继续响」的选择：那首已经从队列里删掉了，让它继续响就是
 // 队列和播放器说的不是同一首歌——播放条上还是它的名字，抽屉却把下一首高亮成
-// 正在放，正是 `App.Stop` 要避免的那种不一致。
+// 正在放，正是 `App.ClearTrack` 要避免的那种不一致。
 //
 // 断的是**停下来**（HasTrack 变 false、状态清干净）加上**话别说反**：返回的
 // 错误说的是「已经删掉了，但接不上下一首」，不是「删不掉」——删是真的删掉了。
@@ -342,9 +342,9 @@ func TestClearQueueEmptiesAndStops(t *testing.T) {
 	}
 }
 
-// TestStopOnAnIdleAppDoesNothing 是「没在放的时候点清空」：不许凭空报错，
+// TestClearQueueOnAnIdleAppDoesNothing 是「没在放的时候点清空」：不许凭空报错，
 // 也不许凭空改状态。
-func TestStopOnAnIdleAppDoesNothing(t *testing.T) {
+func TestClearQueueOnAnIdleAppDoesNothing(t *testing.T) {
 	a := newApp(t)
 	a.ClearQueue()
 	if st := a.Snapshot(); st.HasTrack || st.Err != "" {

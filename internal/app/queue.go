@@ -35,6 +35,14 @@ type Item struct {
 	Path   string // 本地文件的完整路径
 	Title  string // 显示在播放条上的名字
 	Cover  string // 封面地址，在线的歌才有
+	// Artist 是艺人，在线条目就是 UP 主名（B 站那边叫 ownerName，
+	// Biu 的 `updateMediaSession` 把它当 artist 传给系统媒体会话）。
+	//
+	// **本地文件永远是空的**：读音频内嵌标签那一套没有接，Biu 上游也没有
+	// （见 State.CoverURL 那段）。所以现在这一栏只对在线条目有意义，
+	// 字段先立着——等 B 站接口把 ownerName 带下来就有值了，
+	// 队列和媒体会话都不用改。
+	Artist string
 }
 
 // LocalItem 把一个本地音频文件包成一项。
@@ -378,12 +386,12 @@ func indexOfItem(items []Item, it Item) int {
 	return -1
 }
 
-// play 放队列里的一项：先开，开了成功再把它的封面地址记到状态上。
+// play 放队列里的一项：先开，开了成功再把它的封面地址和艺人记到状态上。
 //
 // 在线条目走 `playOnline`（它自己管代次和后台 goroutine），本地条目还是
 // 原来那条同步开文件的路。
 //
-// 开失败时不动封面：歌没换，还在放上一首，封面也不该跟着换。
+// 开失败时不动封面和艺人：歌没换，还在放上一首，它们也不该跟着换。
 func (a *App) play(item Item) error {
 	var err error
 	if item.isOnline() {
@@ -395,6 +403,7 @@ func (a *App) play(item Item) error {
 		return err
 	}
 	a.setCover(item.Cover)
+	a.setArtist(item.Artist)
 	return nil
 }
 
@@ -430,7 +439,7 @@ func (a *App) step(delta int) {
 //
 // 接着放的那首**打不开**时停下来，并且返回一句说清了的错误。停下来不是认输，是
 // 别无选择：让刚才那首继续响的话，队列里已经没有它、播放条上还写着它的名字、
-// 抽屉把下一首高亮成正在放——三处各说各话，正是 App.Stop 要避免的那种不一致。
+// 抽屉把下一首高亮成正在放——三处各说各话，正是 App.ClearTrack 要避免的那种不一致。
 // 错误里带上「已经删掉了」是为了让调用方别再说「删不掉」：删是真的删掉了，
 // 说它没删是另一回事。
 func (a *App) RemoveAt(i int) error {
@@ -444,11 +453,11 @@ func (a *App) RemoveAt(i int) error {
 	item, ok := a.queue.Current()
 	if !ok {
 		// 一首都不剩了。
-		a.Stop()
+		a.ClearTrack()
 		return nil
 	}
 	if err := a.play(item); err != nil {
-		a.Stop()
+		a.ClearTrack()
 		return fmt.Errorf("已经删掉了，但接不上下一首：%w", err)
 	}
 	return nil
@@ -479,11 +488,11 @@ func (a *App) MoveToNext(i int) error {
 
 // ClearQueue 清空队列并停下来。
 //
-// 停了还得把当前曲目清干净（见 Stop）：只停声的话，播放条上还是那首歌的名字，
+// 停了还得把当前曲目清干净（见 ClearTrack）：只停声的话，播放条上还是那首歌的名字，
 // 队列里已经空了。
 func (a *App) ClearQueue() {
 	a.queue.Reset()
-	a.Stop()
+	a.ClearTrack()
 }
 
 // setErr 在播放条上显示一条错误，直到下一次打开成功。
