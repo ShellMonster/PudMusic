@@ -177,11 +177,11 @@ func TestFavoriteSongNeedsALoginAndAFolder(t *testing.T) {
 			t.Fatalf("没有 bvid 回的是 %v，want ErrNoVideo", err)
 		}
 	})
-	t.Run("音乐库那一路还没接", func(t *testing.T) {
+	t.Run("缺音频 id", func(t *testing.T) {
 		f := favFixture(t, 9527, []map[string]any{favFolderItem(100, "x", 0)}, nil, 4242)
 		_, err := favClient(t, f).FavoriteSong(context.Background(), FavTarget{Type: "audio"})
-		if !errors.Is(err, ErrMusicLibraryUnsupported) {
-			t.Fatalf("音乐库回的是 %v，want ErrMusicLibraryUnsupported", err)
+		if !errors.Is(err, ErrNoAudio) {
+			t.Fatalf("音乐库回的是 %v，want ErrNoAudio", err)
 		}
 	})
 }

@@ -173,8 +173,13 @@ func TestTheOwnerIsNeverSqueezedOutOfExistence(t *testing.T) {
 	const owner = "一个非常非常非常非常非常非常长的 UP 主名字"
 	for _, width := range []int{760, 900, 1000, 1200, 1280} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			// ⚠️ `PlayMode` 要给：那个键（#104）摆在**中间那一列的第二行**，
+			// 而中间那一列是从左边那块**借**宽度的（`Row.Fill` 里 `Grow(1)`
+			// 的是左边）。不摆它，这一条量的是「没有别的控件抢地方」的那种播放条，
+			// 而真窗口上它一直摆着——UP 名那一行被挤没了正是从这里来的。
 			tt, _ := metaBarTester(t, app.State{
 				HasTrack: true, Title: "一首歌", Artist: owner, ArtistMid: 12345,
+				PlayMode: app.PlayModeSequence,
 			}, width)
 
 			r, ok := tt.Find(owner)
@@ -199,10 +204,13 @@ func TestTheOwnerIsNeverSqueezedOutOfExistence(t *testing.T) {
 func TestTheMetaRowDoesNotSquashTheTitle(t *testing.T) {
 	for _, width := range []int{760, 900, 1000, 1200, 1280} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			// ⚠️ `PlayMode` 同样要给：见上面那条的注释（#104 那个键和这一行
+			// 抢的是同一块宽度）。
 			tt, _ := metaBarTester(t, app.State{
 				HasTrack: true, Title: "一首歌的名字很长很长很长很长",
 				Artist: "一个名字很长的 UP 主名字", ArtistMid: 12345,
 				Err: "连不上 B 站这条音频流了", Rate: 1,
+				PlayMode: app.PlayModeSequence,
 			}, width)
 
 			title, ok := tt.Find("一首歌的名字很长很长很长很长")

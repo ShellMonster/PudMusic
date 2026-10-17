@@ -60,6 +60,16 @@ func (a *App) MountSettings(path string) error {
 	store, err := OpenSettingsStore(path)
 	mountedSettings.Store(a, &settingsSlot{store: store, loadErr: err})
 
+	// 播放模式是**队列**的形状，队列不走挂载表（它跟着 App 走，见 app.go），
+	// 所以得在这里把它从设置搬过去。不搬的话用户设过的档每次启动都被
+	// NewQueue 的默认值盖掉——界面上写着「随机」，放完却按循环走。
+	//
+	// 认不出的档位 `SetPlayMode` 会落成默认档，所以这一句对一份手写坏了的
+	// 设置文件也安全。
+	s := store.Snapshot()
+	a.queue.SetPlayMode(s.PlayMode)
+	a.queue.SetKeepPagesOrderInRandom(s.ShouldKeepPagesOrderInRandomPlayMode)
+
 	// 落盘完成了要叫醒界面：不唤醒的话，界面会一直停在「还没存」的那一帧
 	//（和播放进度走的是同一条路，见 App.SetWake 的注释）。
 	store.SetWake(a.invalidate)

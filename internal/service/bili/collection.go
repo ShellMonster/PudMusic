@@ -309,6 +309,17 @@ const (
 // 合集（21）和电影（24）也在收藏夹里，它们没有音频流。照 Biu 的做法
 // （`canNotPlay = ![2, 12].includes(type)`）把它们排除在批量操作之外，
 // 而不是放进去再报错。
+//
+// 🔴 **判据和「我们真能放」必须一致**。这一条说能放的，界面上就会照着画、
+// 照着进队列——而真去播的时候只有 `app.streamFor` 那两条路能放：
+//
+//	MediaVideo → /x/player/wbi/playurl
+//	MediaAudio → /audio/music-service-c/url
+//
+// 以前抄了 Biu 的判据却只接了第一条，于是 type=12 一路绿过所有测试，
+// 按播放必然报错（「判据抄对了，但那一路没跟上——可放就成了界面上的谎言」）。
+// 要往这里加一种类型，就得在 `app.streamFor` 里同时加一条取流路径；
+// `TestEveryPlayableEntryCanActuallyBeStreamed` 盯着这件事。
 func (m Media) Playable() bool { return m.Type == MediaVideo || m.Type == MediaAudio }
 
 // resourceListData 是内容列表接口的 `data` 段。
