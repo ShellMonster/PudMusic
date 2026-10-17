@@ -403,10 +403,35 @@ func (m *Manager) Close(path string) error {
 	m.quit()
 	m.wg.Wait()
 
+	// 🔴 后台那条线退出时**可能没走完队列**：`loop` 的外层 select 命中
+	// `ctx.Done()` 就直接 return，还没轮到内层那个 `for`。那些项于是留在「排队中」。
+	//
+	// 而「排队中」是不该被存下去的语义——下次启动会**自动**接着下，用户关应用时
+	// 可没要求过这件事。`runOne` 在关着的时候会把捡到的那一项标成暂停（「下次接着
+	// 下」），但那是捡到才标，捡不到的那些没人管。实测这条竞态占 `go test` 的失败
+	// 率约八成（连跑五次红四次），而它本该是确定的。
+	//
+	// 所以这里补上确定的那一步：`loop` 已经退出，不会再有并发改状态。
+	m.pauseQueued()
+
 	if path == "" {
 		return nil
 	}
 	return m.Save(path)
+}
+
+// pauseQueued 把还在排队的项落到「暂停」。
+//
+// ⚠️ 必须在后台那条线退出之后（`Close` 里 `wg.Wait()` 之后）调：这时才不会有并发
+// 在改同一批状态。
+func (m *Manager) pauseQueued() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, t := range m.tasks {
+		if t != nil && t.Status == StatusQueued {
+			t.Status = StatusPaused
+		}
+	}
 }
 
 // ---- 后台那条线 ----
