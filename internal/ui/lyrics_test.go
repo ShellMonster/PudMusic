@@ -57,6 +57,34 @@ func lyricsOfN(n int) string {
 // 断言量的是中间那句在哪儿，绿得像模像样。
 func lyricCN(i int) string { return strconv.Itoa(i) }
 
+// lyricsWrappingN 是同一首歌的另一个版本：句数、时刻都一样，**句子长得多**。
+//
+// 20px 的中文字约 20px 宽，所以歌词区 896 宽时一行放得下 44 个字，644 宽时只
+// 放得下 32 个——60 个字在两种宽度下分别是两行和三行。于是**同一份歌词、同一个
+// 窗口，改一次窗口宽窄就会改变每一行的高度**，而句号、句数、字号一个都没变。
+func lyricsWrappingN(n int) string {
+	var b strings.Builder
+	for i := range n {
+		fmt.Fprintf(&b, "[%02d:%05.2f]第%d句%s\n",
+			0, float64(i)*lyricStepMS/1000, i, lyricLongTail)
+	}
+	return b.String()
+}
+
+// lyricLongTail 是折行那一份素材每句后面接的那一长串。
+//
+// ⚠️ 要**真的折行，而且要折得够多**：歌词区 896 宽、内容框 872，而 20px 的中文
+// 一行放得下 43 个字；缩到 900 宽的窗口时内容框只剩 644，一行放得下 32 个。
+// 这条 121 个字，于是 872 宽时折成三行、644 宽时折成四行。
+//
+// 写成三十几个字的话它一行就放得下：整份素材和短句那一份量起来**一模一样**，
+// 于是「换一份歌词」和「改窗口宽窄」这两条断言全都成了空转——它们量不到任何
+// 高度的变化，而高度不变就没有东西会偏出去。（这一条就是这么被自己抓到的：
+// 头一版 38 个字，四条断言全绿，而它们什么也没量到。）
+const lyricLongTail = "这一句歌词写得很长很长长到一定要折行才放得下否则就量不到窗口宽窄对它的高度" +
+	"所以换一份歌词源的时候它的高度就变了于是正在被唱的那一句会被顶到下面去而句子还是那一句" +
+	"这里再补一句把它凑到一百二十一个字上下好让折行这件事在两个宽度下真的发生"
+
 // lyricStepMS 是假 LRC 里两句相隔多少毫秒。
 const lyricStepMS = 200
 
@@ -105,32 +133,67 @@ func putLyrics(s *Shell, lrc, translated string) {
 func seekTo(t *testing.T, s *Shell, tt *mygoui.Tester, i int) {
 	t.Helper()
 	s.app.SeekTo(time.Duration(i) * lyricStepMS * time.Millisecond)
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 }
 
-// settleLyrics 跑几帧、推几段时间，让「滚到中间」那支弹簧走完。
+// settleLyrics 跑几帧、推几段时间，直到「滚到中间」那支弹簧**真的停手**。
 //
-// ⚠️ 四轮 × 200ms = 800ms，比那支弹簧的 500ms 长（`lyricsScrollAnim`），所以走完
-// 之后它已经贴着目标停住了。四轮而不是一轮：弹簧到位之后这一层还会再对一次
-// 目标（见 `lyricsView.centre` 里 MaxY 那一段），一轮只够走到那儿。
-func settleLyrics(tt *mygoui.Tester) {
-	for range 4 {
-		tt.Advance(200 * time.Millisecond)
+// ⚠️ **不能只跑固定几帧。** 每一帧这一层都会把目标重新对一次（见
+// `lyricsView.centre`），而目标本身是拿**上一帧**量到的框算的——于是弹簧到位之后
+// 还要再花两三帧才真的落定，固定四帧跑完它常常还在飞。弹簧还在飞的时候
+// `Scrolling()` 是 true，于是「依据变了没有」这件事被盖住了：换一份歌词、拖一下
+// 字号都会顺带再对一次目标，而那条断言量到的是那一下，不是触发它的那个依据。
+//
+// 所以这里推到 `Scrolling()` 变 false 为止（最多 20 帧，2 秒）。
+func settleLyrics(t *testing.T, s *Shell, tt *mygoui.Tester) {
+	t.Helper()
+	// ⚠️ **要连续三帧都停着才走**。只等「这一帧停着」不够：某一帧如果刚好重新对
+	// 了一个目标，而那个目标就是当前位置，弹簧当场就收手、`Scrolling()` 变 false，
+	// 于是在**下一帧按新几何重新对一次**之前就被当成了「落定了」——而那一帧正是
+	// 内容刚变、框还量着旧的。
+	//
+	// 换个说法：这一层是对着**上一帧**的框算目标的，所以任何一次改动都要再花一
+	// 两帧才对得准。停三帧就是给那两三帧留的。
+	calm := 0
+	for range 40 {
+		tt.Advance(100 * time.Millisecond)
 		tt.Frame()
+		if s.lyric.scroll.Scrolling() {
+			calm = 0
+			continue
+		}
+		if calm++; calm >= 3 {
+			return
+		}
 	}
+	t.Fatalf("40 帧（4 秒）之后画面还没落定")
 }
 
 // boxOf 是歌词容器那个框（界面上量到的）。它是「上一帧」那份，见 lyrics.go。
 func boxOf(s *Shell) mygoui.Rect { return s.lyric.box }
 
-// lyricRowAt 找出第 i 句在画面上的框。
+// lyricRowAt 找出第 i 句在画面上的框（短句那一份素材）。
 func lyricRowAt(t *testing.T, tt *mygoui.Tester, i int) mygoui.Rect {
 	t.Helper()
-	r, ok := tt.Find(lyricLineText(i))
+	return lyricRowAtText(t, tt, lyricLineText(i))
+}
+
+// lyricRowAtText 按**整句**文字找它在画面上的框。
+//
+// ⚠️ 必须是整句：`Tester.Find` 比的是相等而不是包含（`mygo/ui/headless.go`），
+// 而折行那一份素材的每句后面还带着一长串，只找「第8句」找不到。
+func lyricRowAtText(t *testing.T, tt *mygoui.Tester, text string) mygoui.Rect {
+	t.Helper()
+	r, ok := tt.Find(text)
 	if !ok {
-		t.Fatalf("第 %d 句不在画面上，文字有 %q", i, tt.Texts())
+		t.Fatalf("「%s」不在画面上，文字有 %q", text, tt.Texts())
 	}
 	return r
+}
+
+// lyricWrappingText 是折行那一份素材里第 i 句的整句。
+func lyricWrappingText(i int) string {
+	return fmt.Sprintf("第%d句%s", i, lyricLongTail)
 }
 
 // lyricLineText 是第 i 句在歌词里的那句话。
@@ -280,7 +343,7 @@ func bgOf(img *image.RGBA, box mygoui.Rect) [3]int {
 func TestEveryLyricLineIsOnScreen(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 
 	for i := range 20 {
 		if !tt.HasText(lyricLineText(i)) {
@@ -301,7 +364,7 @@ func TestEveryLyricLineIsOnScreen(t *testing.T) {
 func TestTheSungLineIsHalfAgainAsBig(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	seekTo(t, s, tt, 8)
 
 	active := lyricRowAt(t, tt, 8)
@@ -311,10 +374,14 @@ func TestTheSungLineIsHalfAgainAsBig(t *testing.T) {
 	}
 	// 1.5 倍不是「差不多 1.5 倍」。行高 = 字号 × 1.375，两行同一条基线，
 	// 所以比值就是 1.5。
-	wantRatio := float64(lyricsActiveScale)
+	//
+	// ⚠️ **期望值写死成 1.5，不写 `lyricsActiveScale`**：拿生产代码的常量当尺子
+	// 量生产代码画出来的东西，常量一改两边一起动，这条断言照样绿——那正是本文件
+	// 顶上明令禁止的写法。「放大倍数这个数本身对不对」由
+	// TestTheUpstreamNumbersAreTheOnesWeUse 管，那一条的期望值同样写死。
 	gotRatio := float64(active.H) / float64(quiet.H)
-	if math.Abs(gotRatio-wantRatio) > 0.02 {
-		t.Errorf("放大后和旁边的比是 %.3f，want %.3f（lyricsActiveScale）", gotRatio, wantRatio)
+	if math.Abs(gotRatio-1.5) > 0.02 {
+		t.Errorf("放大后和旁边的比是 %.3f，want 1.5（上游 index.tsx:335 的 fontSize * 1.5）", gotRatio)
 	}
 }
 
@@ -327,7 +394,7 @@ func TestTheSungLineIsHalfAgainAsBig(t *testing.T) {
 func TestTheSungLineIsBlackerThanTheOthers(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	seekTo(t, s, tt, 8)
 
 	box := boxOf(s)
@@ -363,7 +430,7 @@ func TestTheSungLineIsBlackerThanTheOthers(t *testing.T) {
 func TestTheSungLineScrollsToTheMiddle(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 
 	for _, i := range []int{0, 8, 19} {
 		seekTo(t, s, tt, i)
@@ -378,6 +445,137 @@ func TestTheSungLineScrollsToTheMiddle(t *testing.T) {
 	}
 }
 
+// TestTheSungLineStaysCentredAfterTheFontKnob 拖完字号滑块，它还在中间。
+//
+// 🔴 这是真踩过的坑：滚动指令**只在「句号变了」或「上一次那一下还在飞」时才发**
+// （`lyricsView.centre`）。而拖字号旋钮这两样都不成立——句号没变，也不产生任何
+// 动画——可是内容高度与那份居中留白（`box.H/2 − 该句高/2`）已经整个变了。症状是
+// 正在唱的那一句被甩出歌词区：48px 时偏 400 多像素、整句在可视区之外，要等换到
+// 下一句才回来，而旋钮上明明白白写着 48px。
+//
+// 上游不会这样，是**因为 `centerPadding` 进了那个滚动 effect 的依赖表**
+// （`index.tsx:316` 的 `[activeIndex, centerPadding]`），它一变就自动补上那一下。
+// 这一层没有 useEffect，得自己把「依据」凑齐（见 `lyricAim`）。
+//
+// ⚠️ 这一条走**真界面那条路**：点开浮层、拖滑块——绕开界面直接
+// `SetLyricsFontSize` 也测得到（下面那条），但走界面才能顺带验到「点得开浮层、
+// 拖得动滑块、旋钮上的数跟着变」。
+func TestTheSungLineStaysCentredAfterTheFontKnob(t *testing.T) {
+	s, tt := lyricShell(t)
+	putLyrics(s, lyricsOfN(20), "")
+	settleLyrics(t, s, tt)
+	seekTo(t, s, tt, 8)
+
+	openLyricPopover(t, s, tt, lyricFontKnobName)
+	for _, px := range []float32{app.MaxLyricsFontSize, app.MinLyricsFontSize,
+		app.DefaultLyricsFontSize, 40} {
+		dragLyricSliderTo(t, tt, lyricFontSliderKey, px)
+		settleLyrics(t, s, tt)
+
+		if got := s.app.Lyrics().FontSize; got != px {
+			t.Fatalf("拖到 %v：字号是 %v —— 滑块那一段没验到", px, got)
+		}
+		box, row := boxOf(s), lyricRowAt(t, tt, 8)
+		off := math.Abs(float64(row.Y + row.H/2 - (box.Y + box.H/2)))
+		if off > 1 {
+			t.Errorf("字号 %v：第 8 句的中心偏了 %.1fpx（离容器中心 %.1f）——"+
+				"整句还看得见吗：%v", px, off, row.Y+row.H/2,
+				row.Y >= box.Y && row.Y+row.H <= box.Y+box.H)
+		}
+	}
+	// 旋钮上写的那个数要跟着一起变——不然这一条就只是在验「旋钮没断电」。
+	if !tt.HasText(lyricFontLabel(40)) {
+		t.Errorf("旋钮上没有 %q，文字有 %q", lyricFontLabel(40), tt.Texts())
+	}
+}
+
+// TestTheSungLineStaysCentredAtEveryFontSizeEveryFontIsNotJustTheOneTheUser
+// Asked 遍一遍 12~48：任何一个字号都不能把正在唱的那一句甩出可视区。
+//
+// 上面那条量的是「中间」这一处；这一条量的是**整句看得见**——48px 时整句偏出
+// 可视区，是先前那条断言量不到的（它量的是中心点离容器中心多远，而整句在屏幕
+// 之外时中心点也在屏幕之外，两头一起偏、差值反而看着不大）。
+func TestTheSungLineStaysCentredAtEveryFontSize(t *testing.T) {
+	s, tt := lyricShell(t)
+	putLyrics(s, lyricsOfN(20), "")
+	settleLyrics(t, s, tt)
+	seekTo(t, s, tt, 8)
+	openLyricPopover(t, s, tt, lyricFontKnobName)
+
+	for px := float32(app.MinLyricsFontSize); px <= app.MaxLyricsFontSize; px++ {
+		dragLyricSliderTo(t, tt, lyricFontSliderKey, px)
+		settleLyrics(t, s, tt)
+
+		box, row := boxOf(s), lyricRowAt(t, tt, 8)
+		if off := math.Abs(float64(row.Y + row.H/2 - (box.Y + box.H/2))); off > 1 {
+			t.Errorf("字号 %v：第 8 句的中心偏了 %.1fpx（离容器中心 %.1f）", px, off, row.Y+row.H/2)
+		}
+		// ⚠️ 「整句看得见」是**另一条**：中心点离容器中心多远，和整句在不在屏幕
+		// 里，是两件事——整句甩到屏幕外时它的中心点也在屏幕外，两头一起偏，看
+		// 「偏了多少」是量不出来的（实测：偏 276px 时中心点还在区内，而那一票的
+		// 现象是整句不见）。
+		if row.Y < box.Y || row.Y+row.H > box.Y+box.H {
+			t.Errorf("字号 %v：第 8 句在 %.2f…%.2f，歌词区是 %.2f…%.2f —— 整句不在可视区里",
+				px, row.Y, row.Y+row.H, box.Y, box.Y+box.H)
+		}
+	}
+}
+
+// TestTheSungLineStaysCentredWhenTheWindowResizes 改窗口大小之后它还在中间。
+//
+// 和拖字号是同一类：容器变了，句号没变，也不产生动画。上游靠 `resize` 监听
+// 重新量那份居中留白（`index.tsx:300-304`），而留白一变，滚动那个 effect 就跟着
+// 重跑（它的依赖表里有 `centerPadding`）。
+func TestTheSungLineStaysCentredWhenTheWindowResizes(t *testing.T) {
+	s, tt := lyricShell(t)
+	// ⚠️ **必须用会折行的长句**。三个字一句的歌词在 644 宽和 896 宽下都是一行，
+	// 改窗口宽窄不改变任何一行的高度，于是这一条量的是「容器高度变了」——而
+	// 那一件是**自己会对齐的**（那份居中留白是按容器高算的，容器矮一半、留白
+	// 也矮一半，两者一起动，句子的位置对着容器中心不动）。真正会偏的是**宽度**
+	// 变了、于是句子折行数变了的那一种，也就是长句。
+	putLyrics(s, lyricsWrappingN(20), "")
+	settleLyrics(t, s, tt)
+	seekTo(t, s, tt, 8)
+
+	for _, size := range [][2]int{{900, 800}, {1200, 800}, {960, 560}} {
+		tt.SetSize(size[0], size[1])
+		settleLyrics(t, s, tt)
+		box, row := boxOf(s), lyricRowAtText(t, tt, lyricWrappingText(8))
+		if off := math.Abs(float64(row.Y + row.H/2 - (box.Y + box.H/2))); off > 1 {
+			t.Errorf("窗口 %dx%d（歌词区 %.2f 宽 %.1f 高）：第 8 句的中心偏了 %.1fpx",
+				size[0], size[1], box.W, box.H, off)
+		}
+	}
+}
+
+// TestTheSungLineStaysCentredAfterSwappingTheLyrics 换一份歌词源之后它还在中间。
+//
+// #21 的「找到了歌词」走的就是 `App.PutLyrics`：同一首歌，句数可以一样、句子可以
+// 长短不同，而**句子长短就是那一行的高度**。于是正在唱的那一句被顶到下面去了，
+// 而句号、句数、字号、容器一个都没变——上游那份依赖表
+// （`[activeIndex, centerPadding]`）没有这一项，它那边同样会偏出去。
+func TestTheSungLineStaysCentredAfterSwappingTheLyrics(t *testing.T) {
+	s, tt := lyricShell(t)
+	putLyrics(s, lyricsOfN(20), "")
+	settleLyrics(t, s, tt)
+	seekTo(t, s, tt, 8)
+	putLyrics(s, lyricsWrappingN(20), "")
+	settleLyrics(t, s, tt)
+
+	box, row := boxOf(s), lyricRowAtText(t, tt, lyricWrappingText(8))
+	if off := math.Abs(float64(row.Y + row.H/2 - (box.Y + box.H/2))); off > 1 {
+		t.Errorf("换了一份更长的歌词之后，第 8 句的中心偏了 %.1fpx", off)
+	}
+
+	// 句数也换（#21 找到的另一份是另一个版本的歌词）。
+	putLyrics(s, lyricsOfN(40), "")
+	settleLyrics(t, s, tt)
+	box, row = boxOf(s), lyricRowAt(t, tt, 8)
+	if off := math.Abs(float64(row.Y + row.H/2 - (box.Y + box.H/2))); off > 1 {
+		t.Errorf("换成四十句的那一份之后，第 8 句的中心偏了 %.1fpx", off)
+	}
+}
+
 // TestTheFirstLineAlsoReachesTheMiddle 第一句也能滚到中间。
 //
 // 这是上下那两份居中留白存在的**唯一**理由（上游 `index.tsx:369-372` 的
@@ -386,7 +584,7 @@ func TestTheSungLineScrollsToTheMiddle(t *testing.T) {
 func TestTheFirstLineAlsoReachesTheMiddle(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	seekTo(t, s, tt, 0)
 
 	box := boxOf(s)
@@ -409,7 +607,7 @@ func TestTheFirstLineAlsoReachesTheMiddle(t *testing.T) {
 func TestTheLyricsAreaNeverGrowsTallerThanItsPage(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	seekTo(t, s, tt, 8)
 
 	box := boxOf(s)
@@ -439,7 +637,7 @@ func TestTheLyricsAreaNeverGrowsTallerThanItsPage(t *testing.T) {
 func TestTheTranslationSitsUnderItsLine(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), lyricsOfNWithTranslation(20))
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	seekTo(t, s, tt, 8)
 
 	original := lyricRowAt(t, tt, 8)
@@ -461,7 +659,7 @@ func TestTheTranslationSitsUnderItsLine(t *testing.T) {
 func TestTheTranslationKeepsItsOwnSize(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), lyricsOfNWithTranslation(20))
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	seekTo(t, s, tt, 8)
 
 	quietOriginal := lyricRowAt(t, tt, 9) // 20px
@@ -507,7 +705,7 @@ func TestTheTranslationKeepsItsOwnSize(t *testing.T) {
 func TestTheTopAndTheBottomBothFadeOut(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	seekTo(t, s, tt, 8)
 
 	box := boxOf(s)
@@ -576,7 +774,7 @@ func TestTheTopAndTheBottomBothFadeOut(t *testing.T) {
 func TestTheFadeBandsEndWhereUpstreamSays(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	seekTo(t, s, tt, 8)
 
 	box := boxOf(s)
@@ -616,14 +814,14 @@ func TestTheFadeBandsEndWhereUpstreamSays(t *testing.T) {
 func TestSwitchingSongsLeavesNothingOfTheLastOne(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	seekTo(t, s, tt, 8)
 	if s.lyric.scroll.Y <= 0 {
 		t.Fatalf("没滚下去过（Y=%.2f），后面那一步就验不到残留", s.lyric.scroll.Y)
 	}
 
 	openAnotherTrack(t, s)
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 
 	for i := range 20 {
 		if tt.HasText(lyricLineText(i)) {
@@ -635,7 +833,7 @@ func TestSwitchingSongsLeavesNothingOfTheLastOne(t *testing.T) {
 	}
 	// 新歌的歌词一上来，从头开始。
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	seekTo(t, s, tt, 0)
 	if s.lyric.scroll.Y != 0 {
 		t.Errorf("新歌第一句时滚动量是 %.2f，want 0", s.lyric.scroll.Y)
@@ -655,10 +853,10 @@ func TestTheSongBeforeTheOneYouGoBackTo(t *testing.T) {
 	s, tt := lyricShell(t)
 	s.app.MountLyrics(lyrics.NewCache(t.TempDir()))
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	s.app.SetLyricsOffset(app.LyricsOffsetStepMS * 4) // +200ms
 	s.app.SetLyricsFontSize(33)
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	// ⚠️ 再装一次歌词，把那两个值**立刻**落盘（`PutLyrics` 是同步写的）。
 	// 不这么做就得等 500ms 的防抖窗口真到期，而那是真钟——这一包测试里不靠
 	// `time.Sleep` 等时间（理由见 internal/app/lyrics_test.go 那一份）。
@@ -672,7 +870,7 @@ func TestTheSongBeforeTheOneYouGoBackTo(t *testing.T) {
 
 	// 换到第二首：没有缓存，于是两个旋钮都回到默认值。
 	openAnotherTrack(t, s)
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	if got := s.app.Lyrics().OffsetMS; got != 0 {
 		t.Errorf("换歌之后偏移是 %d，want 0（没有缓存就该是默认值）", got)
 	}
@@ -741,7 +939,7 @@ func TestTheTwoKnobsAreThereOnlyWithLyrics(t *testing.T) {
 	}
 
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	if _, ok := tt.Find(lyricFontKnobName); !ok {
 		t.Errorf("有歌词却没有字号旋钮，文字有 %q", tt.Texts())
 	}
@@ -754,7 +952,7 @@ func TestTheTwoKnobsAreThereOnlyWithLyrics(t *testing.T) {
 func TestTheKnobShowsTheCurrentValue(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 
 	if !tt.HasText(lyricFontLabel(app.DefaultLyricsFontSize)) {
 		t.Errorf("字号旋钮上没有 %q，文字有 %q",
@@ -773,7 +971,7 @@ func TestTheKnobShowsTheCurrentValue(t *testing.T) {
 func TestTheFontKnobGoesFromTwelveToFortyEight(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	openLyricPopover(t, s, tt, lyricFontKnobName)
 
 	dragLyricSlider(t, tt, lyricFontSliderKey, 0)
@@ -794,7 +992,7 @@ func TestTheFontKnobGoesFromTwelveToFortyEight(t *testing.T) {
 func TestTheOffsetKnobGoesFromMinusFiveThousandToFiveThousand(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	openLyricPopover(t, s, tt, lyricOffsetKnobName)
 
 	dragLyricSlider(t, tt, lyricOffsetSliderKey, 0)
@@ -826,7 +1024,7 @@ func TestTheOffsetKnobGoesFromMinusFiveThousandToFiveThousand(t *testing.T) {
 func TestTheOffsetMovesWhichLineIsSung(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	seekTo(t, s, tt, 8)
 
 	big := lyricRowAt(t, tt, 8)
@@ -836,7 +1034,7 @@ func TestTheOffsetMovesWhichLineIsSung(t *testing.T) {
 
 	// 往后挪 400ms = 两句：同一个位置落回第 6 句。
 	s.app.SetLyricsOffset(-2 * lyricStepMS)
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 
 	box := boxOf(s)
 	row := lyricRowAt(t, tt, 6)
@@ -856,7 +1054,7 @@ func openLyricPopover(t *testing.T, s *Shell, tt *mygoui.Tester, knob string) {
 	if err := tt.Click(knob); err != nil {
 		t.Fatalf("点不开 %q：%v（文字有 %q）", knob, err, tt.Texts())
 	}
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 }
 
 // dragSliderTo 把那条滑块拖到 0（底）或 1（顶）或者中间某个比例。
@@ -866,12 +1064,48 @@ func dragLyricSlider(t *testing.T, tt *mygoui.Tester, slider string, f float32) 
 	if !ok {
 		t.Fatalf("那条滑块 %q 不在画面上", slider)
 	}
-	x := r.X + r.W/2
 	// f 是「从底边往上」的比例：0 是底（最小值）、1 是顶（最大值）。
 	// ⚠️ 上下各留半个钮（`.PaddingY(thumb/2)`），所以内容框比整块矮一个钮。
 	y := r.Y + r.H - float32(lyricSliderThumb)/2 - (r.H-float32(lyricSliderThumb))*f
+	dragLyricSliderAt(t, tt, r, y)
+}
+
+// dragLyricSliderTo 把那条滑块拖到**某一个具体的值**上。
+//
+// ⚠️ 不能拿比例代替：字号 12~48 与偏移 ±5000 是两套范围，同一个比例落到两边是
+// 两个完全不同的数，而「字号 12 到 48 走一遍」这条要的就是那几个确切的数。
+func dragLyricSliderTo(t *testing.T, tt *mygoui.Tester, slider string, want float32) {
+	t.Helper()
+	r, ok := tt.Find(slider)
+	if !ok {
+		t.Fatalf("那条滑块 %q 不在画面上", slider)
+	}
+	var lo, hi float32
+	switch slider {
+	case lyricFontSliderKey:
+		lo, hi = app.MinLyricsFontSize, app.MaxLyricsFontSize
+	case lyricOffsetSliderKey:
+		lo, hi = float32(app.MinLyricsOffsetMS), float32(app.MaxLyricsOffsetMS)
+	default:
+		t.Fatalf("不认识的那条滑块 %q", slider)
+	}
+	at := (want - lo) / (hi - lo)
+	y := r.Y + r.H - float32(lyricSliderThumb)/2 - (r.H-float32(lyricSliderThumb))*at
+	dragLyricSliderAt(t, tt, r, y)
+}
+
+// dragLyricSliderAt 在滑块里按下、松手，y 是按住的那个高度。
+//
+// ⚠️ 按下和松手之间要 `Advance`：MyGo 的动画状态挂在控件的节点上，而无头 Tester
+// 的钟**只有 `Advance(d)` 才走**（同 settings_tabs_test.go 里那一份的注释）。
+func dragLyricSliderAt(t *testing.T, tt *mygoui.Tester, r mygoui.Rect, y float32) {
+	t.Helper()
+	x := r.X + r.W/2
 	tt.Press(x, y)
+	tt.Advance(16 * time.Millisecond)
+	tt.Frame()
 	tt.Release(x, y)
+	tt.Advance(16 * time.Millisecond)
 	tt.Frame()
 }
 
@@ -933,7 +1167,7 @@ func TestTheUpstreamNumbersAreTheOnesWeUse(t *testing.T) {
 func TestTheRangesComeFromTheStateLayer(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 
 	openLyricPopover(t, s, tt, lyricFontKnobName)
 	dragLyricSlider(t, tt, lyricFontSliderKey, 0)
@@ -968,12 +1202,12 @@ func TestTheRangesComeFromTheStateLayer(t *testing.T) {
 func TestHandScrollingIsNotFought(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	seekTo(t, s, tt, 8)
 
 	box := boxOf(s)
 	tt.Scroll(box.X+box.W/2, box.Y+box.H/2, 0, -300)
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 
 	mine := s.lyric.scroll.Y
 	t.Logf("用户翻到 %.2f", mine)
@@ -1004,20 +1238,20 @@ func TestHandScrollingIsNotFought(t *testing.T) {
 func TestTheLyricsStopAskingForFrames(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 
 	// 没有歌词的那一支：那里压根不画歌词区，不许要帧。
 	putLyrics(s, "", "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	if tt.FramePending() {
 		t.Errorf("没有歌词的时候还在要帧，pend=%d", s.lyric.pend)
 	}
 
 	// 离页走一趟再回来，确认「不在这一页上」也不会一直要帧。
 	putLyrics(s, lyricsOfN(20), "")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	s.navigate("/")
-	settleLyrics(tt)
+	settleLyrics(t, s, tt)
 	if tt.FramePending() {
 		t.Errorf("不在歌词页上的时候还在要帧，pend=%d", s.lyric.pend)
 	}
@@ -1038,7 +1272,7 @@ func TestTheMeasureBudgetIsBounded(t *testing.T) {
 	frames := 0
 	tt := mygoui.NewTester(func(c *mygoui.Context) {
 		frames++
-		lv.centre(c, 0)
+		lv.centre(c, 0, 0, app.DefaultLyricsFontSize)
 	}, 100, 100)
 
 	// 一共 lyricMeasureFrames+1 帧：pend 从 0 数起，头一帧（pend=0）本身就在预算

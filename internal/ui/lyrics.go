@@ -169,6 +169,70 @@ var lyricFadeBottomStops = []lyricFadeStop{
 	{0, 0}, {0.5, 0.5}, {0.75, 0.85}, {1, 1},
 }
 
+// lyricAim 是「滚到哪儿」这件事的**全部依据**：上一次我们让容器滚向的那个位置，
+// 是由这几样一起定下来的。
+//
+// 🔴 **一样都不能少，而且少了哪一样都看不出来。** 只认 `active`（当前唱到第几句）
+// 是不够的：用户拖一下字号滑块，句号没变、也不产生任何动画，于是这一层根本不发
+// 指令，而内容高度与那份居中留白（`box.H/2 − 该句高/2`）已经整个变了——正在唱的
+// 那一句被甩出歌词区，48px 时偏四百多像素、整句看不见，要等换到下一句才回来。
+//
+//	active   当前唱到第几句
+//	content  这一份歌词的形状指纹（见 `lyricShapeOf`）
+//	font     用户调过的字号
+//	w        歌词容器有多宽
+//
+// 前两样加上 `font`、`w` 就是上游那个滚动 effect 的依赖表
+// （`index.tsx:316` 的 `[activeIndex, centerPadding]`，而那份居中留白由
+// `index.tsx:289` 的 `updateCenterPadding` 按字号、句数与窗口算出）。第五样
+// `content` 是这一票自己加的：换一份歌词源可以**句数一样、句子长短不一样**
+// （#21 的 `App.PutLyrics`），而句子长短就是那一行的高度。
+//
+// ⚠️ **容器高 `box.H` 不在里面，这是算出来的，不是漏的**：这一句的中心离容器
+// 顶边是 `pad + Σ(前面各行) + 该行一半`，而 `pad = box.H/2 − 该行一半`，两处
+// 抵消掉之后剩下 `box.H/2 + Σ` —— 那一项正好就是**容器自己的中心**。所以容器
+// 变矮变矮都不改变「这一句偏不偏」，变的是 `MaxY` 能滚到哪儿，而那是框架自己在
+// 夹（`mygo/ui/scroll.go:129`）。宽度不一样：它决定句子折几行，而折几行决定
+// `Σ`，也就决定偏不偏。
+type lyricAim struct {
+	active  int
+	content uint32
+	font    int32
+	w       int32
+}
+
+// aimOf 把这一帧的「该滚向哪儿」凑成一份。容器和字号取整再比：
+//
+// ⚠️ 取整是为了**不因为一根头发丝的抖动就每帧重发一次指令**。而不每帧重发是
+// 「用户翻了歌词不会被拽回去」那一条的前提（见 `lyricsView.centre`）。
+// 布局是确定的，同一个窗口大小下 `box.W` 每一帧同一个数——取整只是保险。
+func (lv *lyricsView) aimOf(active int, content uint32, fontSize float32) lyricAim {
+	return lyricAim{
+		active:  active,
+		content: content,
+		font:    int32(math.Round(float64(fontSize))),
+		w:       int32(math.Round(float64(lv.box.W))),
+	}
+}
+
+// lyricShapeOf 是这一份歌词的「形状指纹」：每句多长、有没有译文、什么时候唱。
+//
+// 变了就说明**内容的高度**变了，目标就得重算——哪怕句号、句数、字号都没变。
+// 换一份歌词源正是这一种：同一首歌，二十句还是二十句，可新那份的句子更长，
+// 于是每一行都更高，正在唱的那一句被顶到了下面去。
+//
+// 代价是一首歌几百行、每行五个字的常数时间（`len` 是 O(1)），而它换来的是
+// 「换了源之后正在唱的那一句还在中间」。
+func lyricShapeOf(rows []lyrics.Row) uint32 {
+	fp := uint32(2166136261) // FNV-1a 的起始值
+	for _, r := range rows {
+		fp = (fp ^ uint32(len(r.Text))) * 16777619
+		fp = (fp ^ uint32(len(r.Translation))) * 16777619
+		fp = (fp ^ uint32(r.At/time.Millisecond)) * 16777619
+	}
+	return fp
+}
+
 // lyricsView 是歌词区跨帧活着的那一摊。
 //
 // ⚠️ **只由 view 在主线程上读写**（铁律一）：下面那几样都不是锁保护的，因为
@@ -189,8 +253,12 @@ type lyricsView struct {
 	// key 是上面那两个框是给**哪一首歌**量的。换歌就整份作废（见 onSong）。
 	key string
 
-	// want 是上一次我们让它滚向的是第几句。
-	want int
+	// aim 是上一次我们让它滚向哪儿的那一组依据，见 `lyricAim`。
+	aim lyricAim
+
+	// aiming 是「刚刚因为依据变了要对一次，那一次的目标是拿旧框算的，还在等几何
+	// 跟上」。**只用来补一下**（见 `lyricsView.centre` 里那一支），补完就清掉。
+	aiming bool
 
 	// pend 是「量不到、再要一帧」连着问了几次（见 lyricMeasureFrames）。
 	pend int
@@ -223,7 +291,9 @@ func (lv *lyricsView) onSong(key string) {
 // 快照读的（残留不了），而**滚动到了哪儿**是要自己记着的。
 func (lv *lyricsView) forget() {
 	lv.box, lv.line = ui.Rect{}, ui.Rect{}
-	lv.want, lv.pend = noLyric, 0
+	// `active: noLyric`（-1）永远不等于任何一次真的瞄过的依据，于是新的一首歌
+	// 一画出来就会重新对一次目标。
+	lv.aim, lv.aiming, lv.pend = lyricAim{active: noLyric}, false, 0
 }
 
 // centerPad 是内容上下那一份留白：半个歌词区减去正在唱那一句的一半高。
@@ -248,7 +318,7 @@ func (lv *lyricsView) ready() bool { return lv.box.H > 0 && lv.line.H > 0 }
 // 往下滚是内容往上走：这一句现在在中间偏**下**，就要往下滚那么多，把它带上来。
 // 写成减号的话目标越算越靠上、越算越够不着，最后被夹在 `MaxY` 那个端点上不动
 // ——而放大、渐隐、翻译全对，只有「没滚到中间」那一样看不出来。
-func (lv *lyricsView) centre(c *ui.Context, active int) {
+func (lv *lyricsView) centre(c *ui.Context, active int, content uint32, fontSize float32) {
 	if !lv.ready() {
 		// 头一帧还没有框可量。这一帧不滚，但要一帧再来量。
 		//
@@ -265,23 +335,51 @@ func (lv *lyricsView) centre(c *ui.Context, active int) {
 	// 这一句离容器顶边多远（上一帧量到的），减去它该待的位置（容器高减去它自己
 	// 那一半，上下各让一半），就是要多滚的那一截。
 	off := (lv.line.Y - lv.box.Y) - (lv.box.H-lv.line.H)/2
+	aim := lv.aimOf(active, content, fontSize)
 
-	// ⚠️ **只在换了一句、或者上一次那一下还在飞的时候才发指令。** 每帧都发的话，
-	// 用户拿滚轮翻了歌词，下一帧就被拽回中间——歌词就翻不动了，而那一眼看过去
-	// 像是「滚不动」。
-	//
-	// 用户一滚轮，框架就把那个弹簧收走了（`mygo/ui/input.go:490` 的
-	// `s.track.glide = nil // the user takes over from ScrollTo`），
-	// `Scrolling()` 跟着变 false，于是这里自动停手——不用自己再记一份
-	// 「用户是不是翻过了」。
-	//
-	// 弹簧还在飞的时候再对一次，是修 MaxY 那一帧的滞后：`ScrollTo` 拿
-	// **上一帧**的 `MaxY` 夹目标（`mygo/ui/scroll.go:129`），刚换歌那一刻内容
-	// 还没撑开，夹出来的目标会短一截。每帧对一次，两帧之内就到了。
-	if active == lv.want && !lv.scroll.Scrolling() {
+	switch {
+	case lv.scroll.Scrolling():
+		// 弹簧还在飞：每一帧按**当下**的几何重新对一次。
+		//
+		// 这一支修两件都慢一帧的事：`ScrollTo` 拿**上一帧**的 `MaxY` 夹目标
+		// （`mygo/ui/scroll.go:129`），刚换歌那一刻内容还没撑开，夹出来的目标会
+		// 短一截；那份居中留白也是按上一帧的框算的。
+
+	case aim != lv.aim:
+		// 依据变了：换了一句、拖了字号、换了歌词源、或者改了窗口大小。
+		//
+		// ⚠️ **只认句号是不够的**，而且不够到看不出来：拖一下字号滑块既不改句号、
+		// 也不产生任何动画，于是这一支压根不会走，而内容高度与那份居中留白已经
+		// 整个变了——正在唱的那一句被甩出歌词区，48px 时偏四百多像素、整句看不见，
+		// 要等换到下一句才回来。依据是哪几样，见 `lyricAim`。
+		lv.aiming = true
+
+	case lv.aiming:
+		// 上一支刚因为依据变了动过，可那一下的 `off` 是拿**上一帧**的框算的——
+		// 改动要再过一帧才反映到框上。于是补这一下：对完就不再追了。
+		//
+		// ⚠️ **必须是补一下而不是一直追**，两件事：
+		//
+		//  1. 补的那一下常常是个**空操作**（目标就等于当前位置），弹簧当场收手、
+		//     `Scrolling()` 跟着变 false。不补这一下的话就没有「弹簧在飞」这一支
+		//     可走，而几何还在慢一帧——于是拖完字号，正在唱的那一句就停在偏出去
+		//     四百多像素的地方，直到换句。
+		//  2. 只补一下，于是「用户翻了歌词会不会被拽回去」那一问的代价只有一帧。
+		//     一直追的话，用户在拖完旋钮的那一两帧里滑一下滚轮，又会被拽回去。
+		lv.aiming = false
+
+	default:
+		// 落定了，而且没有人在动它——什么都不做。
+		//
+		// ⚠️ **用户拿滚轮翻歌词走的也是这一支**：翻的时候依据一个字都没变，于是
+		// 这里返回，歌词就停在用户翻到的地方。框架那边一收到滚轮就把弹簧收走
+		// （`mygo/ui/input.go:490` 的 `s.track.glide = nil // the user takes over
+		// from ScrollTo`），`Scrolling()` 跟着变 false，不用自己再记一份
+		// 「用户是不是翻过了」。
 		return
 	}
-	lv.want = active
+
+	lv.aim = aim
 	lv.scroll.ScrollTo(0, lv.scroll.Y+off, lyricScrollAnim)
 }
 
@@ -368,7 +466,7 @@ func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Dura
 		})
 
 	// ⚠️ 放在整棵树建完之后：它要用容器和正在唱那一句的框，而那两个是上面读到的。
-	lv.centre(c, active)
+	lv.centre(c, active, lyricShapeOf(snap.Rows), snap.FontSize)
 }
 
 // lyricLine 画一句歌词，和叠在它下面的那句翻译。
