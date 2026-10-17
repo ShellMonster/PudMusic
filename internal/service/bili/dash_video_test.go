@@ -23,8 +23,13 @@ import (
 	"time"
 )
 
-// videoItem 造一条 `dash.video[]` 项。
-func videoItem(id, bandwidth, w, h int, url string) map[string]any {
+// dashVideoItem 造一条 `dash.video[]` 项。
+//
+// ⚠️ 叫 `dashVideoItem` 而不是 `videoItem`：搜索那条路上（`search_test.go`）
+// 也有一个 `videoItem`，那是**一条视频搜索结果**（bvid + 标题），形状完全不同。
+// 同名会直接编译不过——而两个函数一个造搜索结果、一个造 dash 流，混在一起看
+// 只会更糊涂。
+func dashVideoItem(id, bandwidth, w, h int, url string) map[string]any {
 	return map[string]any{
 		"id": id, "bandwidth": bandwidth, "codecs": "avc1.640028",
 		"mimeType": "video/mp4", "width": w, "height": h,
@@ -54,8 +59,8 @@ func dashClient(t *testing.T, dash map[string]any) *Client {
 func TestPlayDashPicksTheVideoAndKeepsItsIdentity(t *testing.T) {
 	exp := time.Now().Add(time.Hour)
 	c := dashClient(t, dashWithVideo(
-		videoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-v80.m4s")),
-		videoItem(16, 300_000, 640, 360, streamURL(exp, "-v16.m4s")),
+		dashVideoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-v80.m4s")),
+		dashVideoItem(16, 300_000, 640, 360, streamURL(exp, "-v16.m4s")),
 	))
 
 	pair, err := c.PlayDash(context.Background(), testBvid, testCid, VideoQualityUnknown, AudioAuto)
@@ -122,8 +127,8 @@ func TestPlayDashSaysSoWhenThereIsNoVideo(t *testing.T) {
 func TestPlayDashSkipsAVideoEntryWithNoAddress(t *testing.T) {
 	exp := time.Now().Add(time.Hour)
 	c := dashClient(t, dashWithVideo(
-		videoItem(120, 9_000_000, 3840, 2160, ""), // 条目在，地址是空的
-		videoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-v80.m4s")),
+		dashVideoItem(120, 9_000_000, 3840, 2160, ""), // 条目在，地址是空的
+		dashVideoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-v80.m4s")),
 	))
 	pair, err := c.PlayDash(context.Background(), testBvid, testCid, VideoQualityUnknown, AudioAuto)
 	if err != nil {
@@ -140,7 +145,7 @@ func TestPlayDashSkipsAVideoEntryWithNoAddress(t *testing.T) {
 // 「备用的没被抄下来」表现为「视频下载总是 403」，而真因是少了一段。
 func TestPlayDashKeepsTheBackupURLs(t *testing.T) {
 	exp := time.Now().Add(time.Hour)
-	v := videoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-v80.m4s"))
+	v := dashVideoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-v80.m4s"))
 	v["backupUrl"] = []any{
 		streamURL(exp, "-v80-b1.m4s"),
 		streamURL(exp, "-v80-b2.m4s"),
@@ -161,7 +166,7 @@ func TestPlayDashKeepsTheBackupURLs(t *testing.T) {
 // 视频有、音频没有：也要说清楚是哪一条缺。
 func TestPlayDashSaysSoWhenThereIsNoAudio(t *testing.T) {
 	exp := time.Now().Add(time.Hour)
-	d := dashWithVideo(videoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-v80.m4s")))
+	d := dashWithVideo(dashVideoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-v80.m4s")))
 	d["audio"] = []any{}
 	c := dashClient(t, d)
 	_, err := c.PlayDash(context.Background(), testBvid, testCid, VideoQualityUnknown, AudioAuto)
@@ -184,7 +189,7 @@ func TestPlayDashSaysSoWhenThereIsNoAudio(t *testing.T) {
 // （请求照样发出去、照样下到东西，只是画质不是用户要的那一档）。
 func TestPlayDashSendsTheQualityOnlyWhenAsked(t *testing.T) {
 	exp := time.Now().Add(time.Hour)
-	dash := dashWithVideo(videoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-v80.m4s")))
+	dash := dashWithVideo(dashVideoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-v80.m4s")))
 	f, c := playurlClient(t, dash)
 
 	var mu sync.Mutex
@@ -258,10 +263,10 @@ func TestPlayDashRespectsTheQualityTheUserPicked(t *testing.T) {
 	exp := time.Now().Add(time.Hour)
 	// 响应里有 4K、1080P、720P、360P 四档（B 站带 `fourk=1` 时就是全给）。
 	dash := dashWithVideo(
-		videoItem(120, 9_000_000, 3840, 2160, streamURL(exp, "-v120.m4s")),
-		videoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-v80.m4s")),
-		videoItem(64, 900_000, 1280, 720, streamURL(exp, "-v64.m4s")),
-		videoItem(16, 300_000, 640, 360, streamURL(exp, "-v16.m4s")),
+		dashVideoItem(120, 9_000_000, 3840, 2160, streamURL(exp, "-v120.m4s")),
+		dashVideoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-v80.m4s")),
+		dashVideoItem(64, 900_000, 1280, 720, streamURL(exp, "-v64.m4s")),
+		dashVideoItem(16, 300_000, 640, 360, streamURL(exp, "-v16.m4s")),
 	)
 	c := dashClient(t, dash)
 
@@ -305,10 +310,10 @@ func TestPlayDashTakesTheLeastBadWhenNoneIsLowEnough(t *testing.T) {
 	exp := time.Now().Add(time.Hour)
 	// 点名 360P；稿件只给 480P / 720P / 1080P，一档都不满足。
 	c := dashClient(t, dashWithVideo(
-		videoItem(16, 300_000, 640, 360, ""), // 有一档没地址，挡掉
-		videoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-v80.m4s")),
-		videoItem(64, 900_000, 1280, 720, streamURL(exp, "-v64.m4s")),
-		videoItem(32, 500_000, 854, 480, streamURL(exp, "-v32.m4s")),
+		dashVideoItem(16, 300_000, 640, 360, ""), // 有一档没地址，挡掉
+		dashVideoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-v80.m4s")),
+		dashVideoItem(64, 900_000, 1280, 720, streamURL(exp, "-v64.m4s")),
+		dashVideoItem(32, 500_000, 854, 480, streamURL(exp, "-v32.m4s")),
 	))
 	pair, err := c.PlayDash(context.Background(), testBvid, testCid, VideoQuality360, AudioAuto)
 	if err != nil {

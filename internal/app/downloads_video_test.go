@@ -19,7 +19,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -194,14 +193,6 @@ func TestTheVideoDownloadAsksForNoQualityByDefault(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := newDashPairFixture(t)
-			// 记下取流请求里的 qn。挂在 playURL 那条路上，所以它一定
-			// 是在**取流真的发生**的时候被记下来的（不会读到还没发的）。
-			var seen sync.Map
-			d.f.on("/x/player/wbi/playurl", func(w http.ResponseWriter, r *http.Request) {
-				seen.Store(r.URL.Query().Get("qn"), true)
-				d.f.servePlayURL(w)
-			})
-
 			a := d.app(t, t.TempDir())
 			snap, err := a.DownloadVideo(onlineItem("BV1xx", "c123", "MV"), tc.qn)
 			if err != nil {
@@ -209,23 +200,30 @@ func TestTheVideoDownloadAsksForNoQualityByDefault(t *testing.T) {
 			}
 			waitDownloadSettled(t, a, snap.ID)
 
-			if _, ok := seen.Load(tc.want); !ok {
-				t.Errorf("取流请求里的 qn 里没有 %q（实际记到的是 %v）",
-					tc.want, seenKeys(&seen))
+			// 取流请求里的 qn 由 `streamFixture` 自己录（`playQueries`），
+			// 那条路上一早就录着每一次调用的查询串了——自己再录一遍只会多
+			// 一份要同步的。
+			got := qnsSeen(d.f)
+			if len(got) == 0 {
+				t.Fatal("一次取流请求都没发出去")
 			}
-			if tc.want == "" && len(seenKeys(&seen)) != 1 {
-				t.Errorf("默认那次只该有一次取流，实际记到 %v", seenKeys(&seen))
+			for i, q := range got {
+				if q != tc.want {
+					t.Errorf("第 %d 次取流带的 qn 是 %q，要的是 %q", i+1, q, tc.want)
+				}
 			}
 		})
 	}
 }
 
-func seenKeys(m *sync.Map) []string {
-	var out []string
-	m.Range(func(k, _ any) bool {
-		out = append(out, fmt.Sprint(k))
-		return true
-	})
+// qnsSeen 读 fixture 录到的每一次取流请求带的 `qn`。
+func qnsSeen(f *streamFixture) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.playQueries))
+	for _, q := range f.playQueries {
+		out = append(out, q.Get("qn"))
+	}
 	return out
 }
 
