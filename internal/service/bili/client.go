@@ -107,9 +107,24 @@ func (e *APIError) Is(target error) bool {
 // B 站各接口共用的响应外壳。data 的形状每个接口都不一样，所以留成
 // json.RawMessage 交给各方法的解码器。
 type envelope struct {
-	Code    int             `json:"code"`
-	Message string          `json:"message"`
-	Data    json.RawMessage `json:"data"`
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	// Msg 是**音乐库那几个接口**用的字段名（`audio/music-service-c/url` 和
+	// `/web/song/info` 回的是 `msg`，不是 `message`）。
+	//
+	// 不认它的话 code≠0 时 `Message` 是空串，于是 `Friendly` 拿到的
+	// `cleanMessage("")` 返回空、最后落到「B 站返回了一个看不懂的错误（7201006）」
+	// ——而 B 站明明在 `msg` 里写了中文原因（见 `Friendly` 的兜底那一段）。
+	Msg  string          `json:"msg"`
+	Data json.RawMessage `json:"data"`
+}
+
+// message 是这一次的错误说明，两个字段名里挑有值的那个。
+func (e envelope) message() string {
+	if e.Message != "" {
+		return e.Message
+	}
+	return e.Msg
 }
 
 // Options 是建客户端要的零件。零值能用，但那时没有凭据边界也没有 jar。
@@ -183,11 +198,11 @@ type Client struct {
 	// jars 是 cookie jar 的可换壳，见 session.go。
 	jars *jarHolder
 
-	// 三个主机名做成字段而不是常量，是为了测试能指到 fixture 上。
+	// 四个主机名做成字段而不是常量，是为了测试能指到 fixture 上。
 	//
 	// ⚠️ 只有包内的测试能改（它们在同一个包里），对外没有任何入口
 	// 能改——生产代码没有办法把请求发到别处去。
-	hostAPI, hostPassport, hostMember string
+	hostAPI, hostPassport, hostMember, hostWWW string
 
 	// sessionBase 是读写登录 cookie 时用的那个地址。
 	//
@@ -230,6 +245,7 @@ func (c *Client) TestOnlyPointHostsAtFixture(base string) {
 	c.hostAPI = base
 	c.hostPassport = base
 	c.hostMember = base
+	c.hostWWW = base
 	c.sessionBase = base
 	// 已经取过的 WBI key 是从旧主机来的，换了主机就不能再用。
 	c.wbiState.mu.Lock()
@@ -260,6 +276,7 @@ func NewClient(o Options) *Client {
 		hostAPI:      HostAPI,
 		hostPassport: HostPassport,
 		hostMember:   HostMember,
+		hostWWW:      HostWWW,
 		sessionBase:  "https://www.bilibili.com/",
 	}
 	if c.now == nil {
@@ -407,7 +424,7 @@ func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
 	if env.Code != 0 {
 		return nil, &APIError{
 			Code:     env.Code,
-			Message:  env.Message,
+			Message:  env.message(),
 			Endpoint: endpoint.Path,
 			Data:     env.Data,
 		}
@@ -457,6 +474,10 @@ const (
 	HostPassport = "https://passport.bilibili.com"
 	// HostMember 是会员相关接口。
 	HostMember = "https://member.bilibili.com"
+	// HostWWW 是 www.bilibili.com。**少数接口在它上面而不是 api 上面**——
+	// 音乐库的元信息 `/audio/music-service-c/web/song/info` 就是（见 audio.go）。
+	// 凭据边界照样认它（白名单按 `.bilibili.com` 后缀，见 `app.InjectPolicy`）。
+	HostWWW = "https://www.bilibili.com"
 )
 
 func orDefault(v, fallback string) string {

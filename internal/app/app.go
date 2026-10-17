@@ -14,7 +14,17 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
 )
+
+// afterFunc 排一个「过 d 之后再跑 fn」的定时器，返回停掉它的函数。
+//
+// 包一层是为了让 `App.after` 的类型和 `time.AfterFunc` 的**返回值**对得上
+// （后者返回一个 `*time.Timer`，不是函数）。
+func afterFunc(d time.Duration, fn func()) func() {
+	t := time.AfterFunc(d, fn)
+	return func() { t.Stop() }
+}
 
 // tickInterval 是进度条时钟的间隔。每秒 20 次足够让进度条看起来是滑的，
 // 又不至于把 CPU 烧在重绘上（Invalidate 会合并，一帧里叫多少次都只画一次）。
@@ -74,6 +84,16 @@ type State struct {
 	// ⚠️ 它是**偏好**，本地文件播放时也照样有值：徽章只对在线流画，
 	// 而换档这个动作不该要求当前正好在放在线流。
 	QualityPref AudioQuality
+
+	// PlayMode 是当前的播放模式（顺序 / 循环 / 随机 / 单曲）。
+	//
+	// 界面**只读它**、按一下调 `App.CyclePlayMode`，不许自己算下一首：
+	// 「下一首是谁」只有 `Queue.Advance` 说得出来（见 queue.go 那一节）。
+	PlayMode PlayMode
+
+	// KeepPagesOrderInRandom 是「随机时保持分集顺序」。只在随机那一档下有意义，
+	// 别的档位里它是什么都不改变。
+	KeepPagesOrderInRandom bool
 }
 
 // App 是应用的全部状态。
@@ -120,6 +140,35 @@ type App struct {
 	// 错误、不自己清零，所以不比对的话每 50 ms 会重复报一次。
 	reportedErr error
 
+	// 歌词这一摊，见 lyrics.go。挂上缓存之前 lyricCache 是 nil，那时就一直
+	// 「没有歌词」。
+	lyricCache *lyrics.Cache
+	// lyricKey 是当前这首歌的缓存键。**换歌时才变**，界面靠它认出「换歌了」
+	// （同一首换流不重置，见 setLyricTrack）。
+	lyricKey string
+	// lyricGen 是**歌词代次**。每换一次歌或换一次歌词源就加一，迟到的缓存读取
+	// 回来发现代次变了直接走人（见 loadLyrics）。
+	lyricGen int
+	// lyricRows 是已经叠好译文的那一行行。
+	lyricRows []lyrics.Row
+	// lyricOffsetMS / lyricFontSize 是用户调过的值，切歌时同步重置成默认值。
+	lyricOffsetMS int
+	lyricFontSize float32
+	// lyricEntry 是缓存里这一条原文+译文的**内容**（不含偏移和字号那两个
+	// 用户值，那两个在 flushLyrics 里现填）。写盘和换源都靠它。
+	lyricEntry lyrics.Entry
+	// lyricStopTimer 是偏移/字号落盘那个防抖窗口的「停掉它」。每次重新排窗口都会
+	// 先调上一次那个（理由见 armLyricsSaveLocked）。它是**函数**而不是
+	// `*time.Timer`，是为了让测试能换成一个手动推进的假钟。
+	lyricStopTimer func()
+
+	// after 排一个「过 d 之后再跑 fn」的定时器，返回停掉它的函数。New 装成真的。
+	//
+	// 做成字段是为了让**等待**测得到：真等 500ms 的测试要么慢，要么靠
+	// `time.Sleep`——而 `PLAN.md` 的验收项明写「用假钟，不靠 time.Sleep」。
+	// 用得着的只有歌词那 500ms 的防抖窗口（见 lyrics.go）。
+	after func(d time.Duration, fn func()) func()
+
 	// 本地音乐库，见 localmusic.go。挂上去之前是 nil，界面要判空。
 	localMusic *localLibrary
 
@@ -157,7 +206,7 @@ type App struct {
 	// mediaSink 是「该跟系统媒体会话说一声了」的那只手，由界面层装一次。
 	// nil = 没装（这一层不参与，Publish 是空操作）。
 	mediaSink func(media.NowPlaying)
-	// mediaAt 是上一次跟系统说话的��刻。用来限住「多久校正一次进度」。
+	// mediaAt 是上一次跟系统说话的时刻。用来限住「多久校正一次进度」。
 	mediaAt time.Time
 
 	wake   func() // 界面层装：状态写完后叫它要一帧
@@ -168,7 +217,7 @@ type App struct {
 // New 建一个空的应用状态，开后台时钟。
 func New() *App {
 	a := &App{volume: 1, rate: audio.DefaultRate, queue: NewQueue(), done: make(chan struct{}),
-		streamCache: map[string]*bili.StreamRef{}}
+		streamCache: map[string]*bili.StreamRef{}, after: afterFunc}
 	go a.tick()
 	return a
 }
@@ -219,6 +268,12 @@ func (a *App) Snapshot() State {
 		Err:         a.errText,
 		Quality:     a.quality,
 		QualityPref: pref,
+
+		// 播放模式在队列自己的锁里，不在 `a.mu` 里——它是队列的形状，不是
+		// 播放器的状态。顺着一句一句取：`a.mu` 已经拿在手里，而 `a.queue`
+		// 那把锁是**另一把**，两者没有嵌套，不会死锁。
+		PlayMode:               a.queue.PlayMode(),
+		KeepPagesOrderInRandom: a.queue.KeepPagesOrderInRandom(),
 	}
 }
 
@@ -284,6 +339,8 @@ func (a *App) Open(path string) error {
 	}
 	p.Play()
 	a.publishMedia()
+	// 歌词跟着换歌一起换：先重置成默认值，再从缓存恢复（见 lyrics.go）。
+	a.setLyricTrack(LocalItem(path))
 	if wake != nil {
 		wake()
 	}
@@ -499,6 +556,8 @@ func (a *App) Close() {
 	if a.account != nil {
 		a.account.Close()
 	}
+	// 歌词偏移/字号那一次防抖写可能还欠着，退出前落完。
+	a.closeLyrics()
 	// 下载要**停掉并落盘**。停掉是为了别让在飞的请求在应用退出时还在往盘上
 	// 写；落盘是因为队列文件是「下到哪儿了」的唯一一份，丢了用户重启就得
 	// 从头下。写失败不往上报错：退出路径上没有用户在看。
@@ -609,10 +668,34 @@ func (a *App) tick() {
 			if live && wake != nil {
 				wake()
 			}
+			// 「自然放完」才按播放模式往下走一档。**只判 ended 不够**：
+			// 暂停、停止、关闭在 `Playing()` 眼里和放完了一样（见下面那句）。
+			//
+			// 补的两句各挡一样：
+			//
+			//   - `Ended()`：这一路的字节真的读到过头了。解码失败/断网时
+			//     播放器也停了，但那是**因为坏了**，不是放完了。
+			//   - `Err() == nil`：和 Ended 互补的那个（见 decoder.go）。这一句
+			//     是显式地把两件事都摆出来，省得读代码的人去推「Ended 为真
+			//     时 Err 是不是一定为 nil」。
+			//
+			// 用户按暂停/停止走不到这里：`Toggle`/`Pause`/`Stop` 都把
+			// wantPlay 落成 false，下一次 tick 的 `live` 已经是 false。
+			//
+			// 放在锁外面调：那两样要拿解码器自己的锁，还可能去碰字节源。
+			if ended && p != nil && p.Ended() && p.Err() == nil {
+				a.onTrackFinished()
+			}
 			// ⚠️ 这一句**不能省**。`Playing() == false` 有五种情况：暂停、
 			// 停止、关闭、播完、解码失败（`mygo/audio/audio.go`）。前四种
 			// 什么都不用做，第五种必须变成播放条上的一句话——不然一次断网
 			// 表现成「歌忽然放完了」，用户以为歌放完了。
+			//
+			// ⚠️ 这句在 onTrackFinished **之后**调：换流重开
+			// （`refreshOnlineNow`）要从当前这首的位置接着放，而那一次
+			// `Ended()` 是 false（换流走的是 seek，不是读到头），所以不会有
+			// 冲突；但顺序摆在这里，「有错就换流接着放」才读在「放完了就下一首」
+			// 后面——反过来会让人以为换流时被跳过一首。
 			//
 			// 放在锁外面调：它自己要拿 `a.mu`，而 `Player.Err()` 可能去碰
 			// 字节源。
