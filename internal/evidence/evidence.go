@@ -106,6 +106,57 @@ var Items = []Item{
 		Spec:     "系统媒体状态映射（暂停/停止/播完/解码失败不是同一个数）",
 		Tests:    []string{"TestPlaybackStateMapping", "TestSmtcStatusIsNotTheMacNumber"},
 	},
+	{
+		Category: Play,
+		// 播放模式四档（顺序/循环/随机/单曲，BMG-47 A5）。「放完下一首是哪首」
+		// 这一句是**四档各有一条**——顺序停在队尾、循环绕回队尾、随机真的打乱、
+		// 单曲一步都不挪，缺一档就有一档没人管，而缺了的那一档在界面上和别的
+		// 档**长得一模一样**（都是一个会往下走的按钮）。
+		//
+		// 队列那一层（纯数据，不碰播放器，所以能逐个钉死）和 App 那一层（真的
+		// 放完一首歌看接的是谁）分开量：只写队列那一层，接线漏了也是绿的——
+		// 「状态机写得对但没接上播放器」正是这一票原来的样子。
+		Spec: "播放模式四档：一首歌放完之后下一首是哪首（顺序到队尾停 / 循环绕回 / 随机真打乱 / 单曲不挪），随机时保持分集顺序，换档立刻生效、模式落盘",
+		Tests: []string{
+			// 四档各一条「放完下一首是谁」。
+			"TestSequenceWalksTheListAndStopsAtTheEnd",
+			"TestLoopWrapsFromTheLastBackToTheFirst",
+			"TestRandomReallyShuffles",
+			"TestSingleReplaysTheSameSongAndNeverMoves",
+			// 「真的打乱」的两条边界：只有一首歌时重放而不是抽自己。
+			"TestLoopWithOneSongReplaysIt",
+			"TestRandomWithOneSongReplaysIt",
+			// 随机时保持分集顺序（开着/关着/已经是最后一集）。
+			"TestRandomKeepsThePageOrderWhenAskedTo",
+			// 四档的档序、文案、以及认不出的档位不许变成空按钮。
+			"TestTheFourModesAreInBiuOrder",
+			"TestAnUnknownModeFallsBackInsteadOfSayingNothing",
+			// 换档立刻生效，不用重开歌。
+			"TestSwitchingTheModeTakesEffectAtOnce",
+			"TestChangingTheModeTakesEffectWithoutRestartingTheSong",
+			// 接线：真的放完一首歌会自己往下走；按了暂停不会。
+			"TestASongThatFinishesMovesOnByItself",
+			"TestAPausedSongDoesNotMoveOn",
+			"TestSequenceStopsAfterTheLastSong",
+			"TestSingleReplaysWithoutMovingOn",
+			// 「读到头了」和「读坏了」分得清（判据在音频层）。
+			"TestEndedAndErrAreComplementary",
+			"TestSeekClearsTheEndedLatch",
+			// 落盘 + 默认档。
+			"TestThePlayModeSurvivesARestart",
+			"TestAFreshInstallGetsBiuDefaultMode",
+			// 界面：按钮按一下换一格、右键四档齐、保持分集顺序的开关、没挤坏歌名。
+			"TestThePlayModeButtonSaysWhichModeItIs",
+			"TestClickingThePlayModeButtonWalksTheFourModes",
+			"TestThePlayModeMenuListsEveryMode",
+			"TestChoosingAModeFromTheMenuTakesIt",
+			"TestTheKeepPagesOrderSwitchOnlyShowsUpWhileShuffling",
+			"TestThePlayModeButtonDoesNotSquashTheTitle",
+			// 拖到末尾的两种结局：队列空的停下来、循环里单曲从头再放。
+			"TestDragToEndDoesNotCrash",
+			"TestDragAACToEnd",
+		},
+	},
 
 	// ── 假时钟 ─────────────────────────────────────────────────────────────
 	{

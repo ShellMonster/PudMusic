@@ -126,7 +126,12 @@ func TestSwitchingToATierThatIsAlreadyPlayingChangesNothing(t *testing.T) {
 	waitFor(t, 30*time.Second, "字节源开始下载", func() bool {
 		return f.mediaHits.Load() >= 1 && a.Snapshot().Position > 0
 	})
-	time.Sleep(1500 * time.Millisecond)
+	// ⚠️ **下面两段等待的预算要算**：素材是四秒（`stereo16.flac`），而一首歌放
+	// 完之后播放模式会接管（队列里只有这一首，默认档是循环 → 同一首从头再来）。
+	// 所以这一条必须在**四秒之内**跑完，否则位置断言量到的是「歌放完了从头来」
+	// 而不是「换档把位置弄丢了」——两者的样子一样，报出来的错却指向完全不同的
+	// 地方。现在这一条总共约两秒出头，留着两秒多的余量。
+	time.Sleep(700 * time.Millisecond)
 	hits := f.mediaHits.Load()
 	pos := a.Snapshot().Position
 
@@ -134,7 +139,7 @@ func TestSwitchingToATierThatIsAlreadyPlayingChangesNothing(t *testing.T) {
 	waitFor(t, 15*time.Second, "偏好已经改了", func() bool {
 		return a.AudioQuality() == bili.AudioHigh
 	})
-	time.Sleep(2 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	if now := f.mediaHits.Load(); now > hits {
 		t.Errorf("同一档却重建了播放链路：CDN 被多打了 %d 次", now-hits)
