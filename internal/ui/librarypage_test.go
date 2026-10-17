@@ -65,9 +65,9 @@ func newLibFake(t *testing.T) *libFake {
 		var body string
 		switch r.URL.Path {
 		case laterPathAPI:
-			body = f.later[pageOf(r.URL.Query())]
+			body = f.later[pageOfQuery(r.URL.Query())]
 		case historyPathAPI:
-			body = f.history[pageOf(r.URL.Query())]
+			body = f.history[pageOfQuery(r.URL.Query())]
 		case "/x/web-interface/nav":
 			body = navBody
 		}
@@ -85,7 +85,10 @@ func newLibFake(t *testing.T) *libFake {
 	return f
 }
 
-func pageOf(q url.Values) int {
+// 名字叫 pageOfQuery 而不是 pageOf：主干上的 `searchpage_test.go` 有一个**同名**
+// 的测试辅助函数 `pageOf(*Shell, int)`。同一个包里同名就是编译期的 redeclared，
+// 而那个错和这一票在做的事看起来毫不相干。
+func pageOfQuery(q url.Values) int {
 	n, _ := strconv.Atoi(q.Get("pn"))
 	return n
 }

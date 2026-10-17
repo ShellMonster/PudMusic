@@ -41,6 +41,33 @@ func newShell(t *testing.T) (*Shell, *mygoui.Tester) {
 	return s, mygoui.NewTester(s.View, 1200, 800)
 }
 
+// settleText 跑到画面上出现 want 为止，最多两秒。
+//
+// # 为什么搜索页的那几条要它
+//
+// 搜索页的结果是**异步**回来的：第一页在后台 goroutine 里拉，回来之后还要
+// `Invalidate` 唤醒才进下一帧（铁律三）。而「画不画『没有结果』那一支」这个
+// 判断读的是**上一帧**的状态（`PagedList.Paged` 是在 `List.View` 收结果之前
+// 读的，见 searchpage.go 的 viewSearchResultsBody）。于是：切过去那一帧画的是
+// 转圈，结果落地那一帧画的是列表，**再下一帧**才是空状态。
+//
+// 这里不去数「等几帧就够」——后台那一趟快慢跟机器负载有关，数帧的写法在满载
+// 的 CI 上会偶发红，而它红的时候和被测的逻辑一点关系都没有。
+func settleText(t *testing.T, tt *mygoui.Tester, want string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		tt.Frame()
+		if tt.HasText(want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("等了两秒画面上还是没有 %q，文字有 %q", want, tt.Texts())
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // TestFourteenRoutes 盯住「Biu 那 14 条」这个数：少一条是漏了，多一条是编的。
 //
 // **扫码登录不在这 14 条里**——它是本项目自己加的第 15 条（对应 Biu
