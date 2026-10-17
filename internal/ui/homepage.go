@@ -157,26 +157,26 @@ func (s *Shell) viewHome(c *ui.Context, _ *ui.Route) {
 func (h *homePage) view(c *ui.Context, s *Shell) {
 	ui.Column(c).Key("page:" + homePath).Grow(1).Padding(20).Gap(12).
 		AlignItems(ui.Stretch).Children(func() {
-			h.viewTabs(c)
+		h.viewTabs(c)
 
-			// 新歌速递只画在「流行」这一屏的顶部，别的地方一律不画（上游
-			// index.tsx:295）。
-			if h.tab == homePopTab {
-				h.newGrid.View(c)
-			}
+		// 新歌速递只画在「流行」这一屏的顶部，别的地方一律不画（上游
+		// index.tsx:295）。
+		if h.tab == homePopTab {
+			h.newGrid.View(c)
+		}
 
-			// 选中那一屏的内容。一行歌都没有时是**这一页**的空状态。
-			//
-			// ⚠️ 走 `viewEmpty`（`routes` 表里 `/` 那一条，出处和其余 13 条写在
-			// 一起），不是让 `list.List` 说它自己那句「这里还没有歌」：那句只说
-			// 这一屏是空的，那一页的两句话连着说了「为什么空」和「怎么才能不空」。
-			// 接口接上之后这一支自然走不到，页面结构一个字都不用改。
-			if len(h.songs.tabs[h.tab]) == 0 {
-				s.viewEmpty(c, "home:empty", lookup(homePath).Empty)
-				return
-			}
-			h.lists[h.tab].View(c)
-		})
+		// 选中那一屏的内容。一行歌都没有时是**这一页**的空状态。
+		//
+		// ⚠️ 走 `viewEmpty`（`routes` 表里 `/` 那一条，出处和其余 13 条写在
+		// 一起），不是让 `list.List` 说它自己那句「这里还没有歌」：那句只说
+		// 这一屏是空的，那一页的两句话连着说了「为什么空」和「怎么才能不空」。
+		// 接口接上之后这一支自然走不到，页面结构一个字都不用改。
+		if len(h.songs.tabs[h.tab]) == 0 {
+			s.viewEmpty(c, "home:empty", lookup(homePath).Empty)
+			return
+		}
+		h.lists[h.tab].View(c)
+	})
 }
 
 // viewTabs 画那三个 Tab。
@@ -226,4 +226,3 @@ func (h *homePage) viewTabs(c *ui.Context) {
 // **那一个**列表上挂 `ScrollState`，不是拿来当三个 Tab 的位置备份——那两件事的
 // 区别在 widgets/list 的 PagedList 里就是同一个 `scroll`：它给的是当前这一屏的
 // 那一个列表，而「切 Tab 的位置」在那边是三个 `ListState`。
-

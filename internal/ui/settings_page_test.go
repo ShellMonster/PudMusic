@@ -18,6 +18,55 @@ import (
 // 不断言「调了哪个函数」——那只能证明状态层有那个方法，证明不了界面上真有一个
 // 入口。三档按钮摆在文件里没人调用过，就是这么漏过去的。
 
+// 1200x800 的窗口里，设置页能点的那一条带。上下两个数字是顶栏（`navMinHeight`
+// = 32）和播放条（`playbarHeight` = 88）让出来的。
+const (
+	pageTop    = 40
+	pageBottom = 700
+)
+
+// clickSetting 点设置页上的一个东西，**先把它滚进可视区再点**。
+//
+// ⚠️ 这一步不能省：设置页现在外面套了一层 `Scroll`（四个 Tab 的内容加起来比
+// 窗口高），而 `tt.Click` 只按标签找元素、**不检查它是不是被滚出可视区**——
+// 找到就点，点在窗外的地方，于是「点了没反应」，而测试自己看不出哪里不对。
+// 现象和「控件坏了」一模一样，最容易把人带进一条查不到头的路。
+func clickSetting(t *testing.T, tt *mygoui.Tester, s *Shell, label string) {
+	t.Helper()
+	r := settingRect(t, tt, s, label)
+	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+}
+
+// settingRect 把设置页滚到 label 那一处在可视区里为止，返回它那一格的框。
+//
+// 单独拎出来是因为设置页上有几个控件**没有可点的字**（开关只有一个旋钮、颜色只有
+// 一块色块），它们只能靠自己的 Label 找，而找出来之后仍然要滚进来才点得到。
+func settingRect(t *testing.T, tt *mygoui.Tester, s *Shell, label string) mygoui.Rect {
+	t.Helper()
+	for range 24 {
+		if r, ok := tt.Find(label); ok && r.H > 0 && r.Y >= pageTop && r.Y+r.H <= pageBottom {
+			return r
+		}
+		before := s.settings.scroll.Y
+		s.settings.scroll.Y = before + 60
+		tt.Frame()
+		if s.settings.scroll.Y == before {
+			break // 已经到底了，再滚也不动
+		}
+	}
+	t.Fatalf("设置页上滚不到 %q，文字有 %q", label, tt.Texts())
+	return mygoui.Rect{}
+}
+
+// openSettingsTab 切到设置页上的某一个 Tab。Tab 那一行永远在可视区顶部，不滚。
+func openSettingsTab(t *testing.T, tt *mygoui.Tester, name string) {
+	t.Helper()
+	if err := tt.Click(name); err != nil {
+		t.Fatalf("点不到设置页的 Tab %q：%v，文字有 %q", name, err, tt.Texts())
+	}
+	tt.Frame()
+}
+
 // shellOnSettings 造一个停在设置页上的外壳。
 func shellOnSettings(t *testing.T, s app.Settings) (*mygoui.Tester, *Shell, *app.App, string) {
 	t.Helper()
@@ -103,15 +152,13 @@ func TestTheSettingsPageIsReachableFromTheMenu(t *testing.T) {
 func TestChoosingTheCloseWindowOptionIsStored(t *testing.T) {
 	want := app.DefaultSettings("")
 	want.CloseWindowOption = app.CloseWindowHide // Biu 的默认值
-	tt, _, a, path := shellOnSettings(t, want)
+	tt, s, a, path := shellOnSettings(t, want)
 
 	if got := a.SettingsSnapshot().CloseWindowOption; got != app.CloseWindowHide {
 		t.Fatalf("起点是 %q", got)
 	}
 
-	if err := tt.Click("直接退出"); err != nil {
-		t.Fatal(err)
-	}
+	clickSetting(t, tt, s, "直接退出")
 	tt.Frame()
 
 	if got := a.SettingsSnapshot().CloseWindowOption; got != app.CloseWindowExit {
@@ -129,9 +176,7 @@ func TestChoosingTheCloseWindowOptionIsStored(t *testing.T) {
 	}
 
 	// 换回去也要行：这是一对能来回切的选项，不是一个只写一次的开关。
-	if err := tt.Click("隐藏到托盘"); err != nil {
-		t.Fatal(err)
-	}
+	clickSetting(t, tt, s, "隐藏到托盘")
 	tt.Frame()
 	if got := a.SettingsSnapshot().CloseWindowOption; got != app.CloseWindowHide {
 		t.Errorf("点回「隐藏到托盘」之后设置是 %q", got)
@@ -186,6 +231,12 @@ func TestSettingsPageSaysSoWhenAChangeCannotBeStored(t *testing.T) {
 
 	s := New(a)
 	t.Cleanup(s.images.Close)
+	// ⚠️ **这一句不能删**。切页动画是 250ms，而无头 Tester 的钟**只有 `Advance` 才
+	// 走**——动画在不动的钟上永远走不完，于是紧接着的每一次 `tt.Frame()` / `tt.Click()`
+	// 都把 `settle()` 那 20 帧的上限跑满。单这一条在 `-race` 下是 38 秒，整包
+	// `go test -race ./...` 因此跑到 7 分半（验收命令会超时）。删掉它这一条立刻变成
+	// 2.5 秒。理由和 `newShell` / `shellOnSettings` 里那一句一模一样。
+	s.router.Transition = mygoui.TransitionNone
 	tt := mygoui.NewTester(s.View, 1200, 800)
 	tt.Frame()
 	openSettings(t, tt)
@@ -227,6 +278,7 @@ func TestSettingsPageRefusesToWriteAFileFromANewerVersion(t *testing.T) {
 
 	s := New(a)
 	t.Cleanup(s.images.Close)
+	s.router.Transition = mygoui.TransitionNone
 	tt := mygoui.NewTester(s.View, 1200, 800)
 	tt.Frame()
 	openSettings(t, tt)
@@ -235,9 +287,7 @@ func TestSettingsPageRefusesToWriteAFileFromANewerVersion(t *testing.T) {
 		t.Errorf("设置页上没有说清为什么改不了，文字有 %q", tt.Texts())
 	}
 	for _, label := range []string{"浅色", "直接退出"} {
-		if err := tt.Click(label); err != nil {
-			t.Fatalf("只读时点不到「%s」：%v", label, err)
-		}
+		clickSetting(t, tt, s, label)
 		tt.Frame()
 	}
 
@@ -299,18 +349,15 @@ func pageChildRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New(a)
+	s.router.Transition = mygoui.TransitionNone
 	tt := mygoui.NewTester(s.View, 1200, 800)
 	tt.Frame()
 
 	if mode == "write" {
 		openSettings(t, tt)
-		if err := tt.Click("深色"); err != nil {
-			t.Fatal(err)
-		}
+		clickSetting(t, tt, s, "深色")
 		tt.Frame()
-		if err := tt.Click("直接退出"); err != nil {
-			t.Fatal(err)
-		}
+		clickSetting(t, tt, s, "直接退出")
 		tt.Frame()
 	}
 
