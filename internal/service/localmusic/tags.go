@@ -52,6 +52,8 @@ func Title(path string) string {
 		return mp4Title(path)
 	case ".flac":
 		return flacTitle(readHeadOrNil(path))
+	case ".ogg", ".oga":
+		return oggTitle(readHeadOrNil(path))
 	case ".wav":
 		return riffTitle(path, false)
 	case ".aiff", ".aif", ".aifc":
@@ -124,11 +126,15 @@ func id3v2Title(b []byte) string {
 	// v2.2 的帧号是 3 字节，帧大小 3 字节；v2.3 是 4+4；v2.4 的帧大小
 	// 变回同步安全整数。
 	idLen, sizeLen := 4, 4
+	// ⚠️ **v2.2 的帧后面没有标志字节**（标志是 v2.3 才加的），帧头是
+	// 3 字节帧号 + 3 字节长度，不多不少。按 v2.3 的走法多跳 2 字节的话，
+	// `TT2` 的正文就从中间被切掉 2 字节开读了——合法的 v2.2 标题一律读不到。
+	flagLen := 2
 	if major == 2 {
-		idLen, sizeLen = 3, 3
+		idLen, sizeLen, flagLen = 3, 3, 0
 	}
 
-	for p := start; p+idLen+sizeLen <= end; {
+	for p := start; p+idLen+sizeLen+flagLen <= end; {
 		id := string(b[p : p+idLen])
 		var fsize int
 		if major >= 4 {
@@ -136,7 +142,7 @@ func id3v2Title(b []byte) string {
 		} else {
 			fsize = int(bigEndian(b[p+idLen:p+idLen+sizeLen], sizeLen))
 		}
-		p += idLen + sizeLen + 2 // 帧标志两字节
+		p += idLen + sizeLen + flagLen
 		if fsize <= 0 || p+fsize > end {
 			break // 尺寸不合理：从这里往后都是不可信的，停下来
 		}
@@ -357,6 +363,94 @@ func vorbisTitle(b []byte) string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Ogg：第二个包里的 Vorbis 注释
+// ─────────────────────────────────────────────────────────────────────────────
+
+// oggTitle 从 Ogg 流的第二个包里取 Vorbis 注释里的 `TITLE=`。
+//
+// # Ogg 的结构（够用就好）
+//
+// 文件是一串**页**（page），每页开头是：
+//
+//	"OggS" + 版本(1) + 头类型(1) + granule(8) + 序列号(4) + 页序号(4)
+//	       + 校验和(4) + 段数(1) + 分段表(段数) + 数据
+//
+// 分段表里每一字节是「lacing 值」：255 表示这个包还没完（下一个段接上），
+// 小于 255 表示到这儿这个包结束。**包是由分段表拼出来的**，不是页的天然单位。
+//
+// 一个 Vorbis 流的包是固定的三段：
+//
+//	0  识别头      \x01vorbis + …
+//	1  注释头      \x03vorbis + <Vorbis 注释> + 1 字节 framing
+//	2 音频数据    （从 0.0 秒开始）
+//
+// 注释头那一包和 FLAC 里的 `VORBIS_COMMENT` 块是**同一个结构**，所以
+// 底下那个 `vorbisTitle` 直接拿来用（FLAC 的块前面多一个 4 字节版本，
+// 这里把它切掉）。
+//
+// ⚠️ 真实的 Ogg 标签（TITLE=Artist 那种）经常**跨一页**，而我们只读了
+// 头部 4 MiB——读不到就返回空串退回文件名，不猜。
+func oggTitle(b []byte) string {
+	pk := oggPackets(b, 2)
+	if len(pk) < 2 {
+		return ""
+	}
+	// 注释头：`\x03vorbis` + <注释> + 一字节 framing 位。
+	const want = "\x03vorbis"
+	got := pk[1]
+	if len(got) <= len(want) || string(got[:len(want)]) != want {
+		return ""
+	}
+	body := got[len(want):]
+	if len(body) > 0 {
+		body = body[:len(body)-1] // 末尾那一个字节是 framing 位
+	}
+	return vorbisTitle(body)
+}
+
+// oggPackets 取开头那几页里的**完整**数据包，最多 maxPackets 个。
+//
+// 跨页的包**不拼**：真实的 Ogg 标签经常一个大包顶一页，而这���只读了文件
+// 开头那一段（`headRead`），拼不出来就如实返回「没有」，由调用方退回文件名。
+func oggPackets(b []byte, maxPackets int) [][]byte {
+	var out [][]byte
+	var cur []byte
+	p := 0
+	for p+27 <= len(b) {
+		if string(b[p:p+4]) != "OggS" {
+			return out
+		}
+		segs := int(b[p+26])
+		table, data := p+27, p+27+segs
+		if data > len(b) {
+			return out // 分段表本身就截断了
+		}
+		// ⚠️ **一页里有几个包**，不是一页一个：分段表是「若干段」的序列，
+		// 每遇到一个 lacing < 255 的段就结束一个包。按「一页一个包」写的话，
+		// 第一个包之后剩下的段全被跳过，而注释头往往正是同一页里的第二个包
+		// ——表现就是「读不到标题」。
+		for range segs {
+			lacing := int(b[table])
+			table++
+			if data+lacing > len(b) {
+				return out
+			}
+			cur = append(cur, b[data:data+lacing]...)
+			data += lacing
+			if lacing < 255 {
+				out = append(out, cur)
+				cur = nil
+				if len(out) >= maxPackets {
+					return out
+				}
+			}
+		}
+		p = data // 这一页的段用完了，接着是下一页
+	}
+	return out
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // WAV / AIFF：块列表里的 NAME / INAM
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -369,6 +463,13 @@ func vorbisTitle(b []byte) string {
 func riffTitle(path string, bigEndian bool) string {
 	b, err := readHead(path)
 	if err != nil {
+		return ""
+	}
+	// ⚠️ **先量够 12 字节再切**：`RIFF` 后面是 4 字节总长、再 4 字节才是
+	// `WAVE`。一个只有 4 字节的半截文件上写 `b[8:]` 会
+	// `slice bounds out of range [8:4]` ——而这一段跑在**后台扫描的
+	// goroutine** 里，panic 会直接带走整个应用（不是这一页）。
+	if len(b) < 12 {
 		return ""
 	}
 	if bigEndian {
@@ -392,7 +493,9 @@ func riffTitle(path string, bigEndian bool) string {
 		}
 		switch {
 		case !bigEndian && typ == "LIST":
-			if cut(b[body:], 4) != "INFO" {
+			// ⚠️ `size` 小于 4 时这个块装不下 `INFO` 这四个字母，
+			// `b[body+4:body+size]` 会把上界切到下界之前。
+			if size < 4 || cut(b[body:body+4], 4) != "INFO" {
 				break
 			}
 			// INFO 里面又是一份块列表，从 body+4 起。

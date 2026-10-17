@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -530,4 +531,143 @@ func utf16LE(s string) []byte {
 		units = append(units, byte(hi), byte(hi>>8), byte(lo), byte(lo>>8))
 	}
 	return units
+}
+
+// TestOggTitleComesFromTheFile 钉住 Ogg 的标题标签。
+//
+// ⚠️ 这一条来自评审：白名单里有 `.ogg`（照抄 Biu），而我们原来在 `Title`
+// 里**没有这一支**——带真标题的 Ogg 显示的是文件名。那是「元信息从文件
+// 读」这条要求上一个明明白白的缺口，Biu 那边用 music-metadata 是读了的。
+//
+// Ogg 的注释头和 FLAC 的 `VORBIS_COMMENT` 是同一个结构，所以底下那个
+// `vorbisTitle` 两边共用。
+func TestOggTitleComesFromTheFile(t *testing.T) {
+	root := t.TempDir()
+	oggWith(t, filepath.Join(root, "name-only.ogg"), "Embedded Ogg Title")
+
+	res := Scan([]string{root}, nil)
+	if len(res.Tracks) != 1 {
+		t.Fatalf("扫到 %d 首", len(res.Tracks))
+	}
+	if got := res.Tracks[0].Title; got != "Embedded Ogg Title" {
+		t.Errorf("标题是 %q（= 文件名），want 从 Ogg 注释里读出来的标题", got)
+	}
+	if !res.Tracks[0].Playable() {
+		t.Error("Ogg 是放得出的（audio/vorbis 已注册），Playable 却是 false")
+	}
+}
+
+// TestOggSurvivesTruncatedFiles 钉住「读不出来就当没有，而且不许崩」。
+//
+// 音乐目录里放着拷到一半的 Ogg 是常事。解析器必须**不 panic**——它在后台扫描
+// 的 goroutine 上跑，崩了就是整个应用没了。
+//
+// ⚠️ 这里**不断言「截断了就读不到标题」**：注释头那一包只要还完整，截断的
+// 文件读出标题是**对的**（第 63 字节那一份就还能读出整条注释）。要断的是
+// 「不许崩」这一条。
+func TestOggSurvivesTruncatedFiles(t *testing.T) {
+	root := t.TempDir()
+	full, err := os.ReadFile(oggWith(t, filepath.Join(root, "完整.ogg"), "T"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 上界含 `len(full)` 本身。
+	for n := 1; n <= len(full); n++ {
+		p := put(t, filepath.Join(root, "截断"+strconv.Itoa(n)+".ogg"), full[:n])
+		_ = Title(p) // 不许崩
+	}
+}
+
+// TestID3v22Title 钉住 v2.2 的帧头只有「3 字节帧号 + 3 字节长度」。
+//
+// ⚠️ 这一条来自评审：**帧标志是 v2.3 才加的**，v2.2 没有。按 v2.3 的走法
+// 无条件多跳 2 字节，`TT2` 的正文就从中间被切掉 2 字节开读，**合法的 v2.2
+// 标题一律读不到**（返回空串，然后界面上退回文件名——看不出是标签坏了）。
+//
+// 拿掉修复的方式：把 `flagLen` 恒定回 2。
+func TestID3v22Title(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "老标签.mp3")
+
+	// 一个**没有帧标志**的 v2.2 标签（v2.3 的 TT2 之前会多两字节 0）。
+	put(t, path, id3v22Tag("Tagged title"))
+	if got := Title(path); got != "Tagged title" {
+		t.Errorf("v2.2 的标签解成了 %q，want %q", got, "Tagged title")
+	}
+}
+
+// id3v22Tag 造一个 v2.2 的 ID3 标签：一个 `TT2` 帧，**帧后面没有标志字节**。
+func id3v22Tag(title string) []byte {
+	body := append([]byte{3}, []byte(title)...) // 编码 3 = UTF-8
+	frame := append([]byte("TT2"),
+		byte(len(body)>>16), byte(len(body)>>8), byte(len(body))) // 3 字节长度
+	frame = append(frame, body...)
+
+	tag := append([]byte("ID3"), 2, 0, 0)
+	tag = append(tag, syncsafeBytes(len(frame))...)
+	return append(tag, frame...)
+}
+
+// TestTruncatedAudioFilesNeverPanic 钉住「畸形文件不许把应用带走」。
+//
+// ⚠️ 这一条来自评审，而且它当时的后果**不是某一页画不出来，是整个进程退出
+// （退出码 2）**：解析器在一个四字节的 `RIFF` 上 `b[8:]` 越界，而这一段跑在
+// **后台扫描的 goroutine** 上——界面层的 `Guard`、行级的 recover、
+// `widgets/list` 那个 `fetchOne` 的 recover，一个都接不住它。
+//
+// 这里逐字节截断四种真格式（每一刀都切在某个结构的中途），要求**一个都不
+// panic**。音乐目录里放着拷到一半的文件是常事。
+//
+// 拿掉修复的方式：把 `riffTitle` 里那句 `if len(b) < 12` 去掉。
+func TestTruncatedAudioFilesNeverPanic(t *testing.T) {
+	root := t.TempDir()
+	full := map[string]string{
+		"完整.wav":    wavPath(t, root, "完整.wav", "WAV 的标题"),
+		"完整.flac":   flacPath(t, root, "完整.flac", "FLAC 的标题"),
+		"完整.ogg":    oggPath(t, root, "完整.ogg", "Ogg 的标题"),
+		"完整.aiff":   aiffPath(t, root, "完整.aiff", "AIFF 的标题"),
+		"完整.m4a":    m4aPath(t, root, "完整.m4a", 0),
+		"只有四字节.wav": put(t, filepath.Join(root, "只有四字节.wav"), []byte("RIFF")),
+	}
+	for name, path := range full {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// ⚠️ **上界要含 `len(b)` 本身**（少一刀就正好漏掉「四字节 `RIFF`」
+		// 那个会越界的形状——它需要**恰好 4 字节**，不是「不足 4 字节」）。
+		//
+		// ⚠️ 文件名里**必须保住原扩展名**：`Title` 是按扩展名派发的，
+		// 写成「截断_完整.wav_4」的话后缀是 `.wav_4`，解析器**根本没被调到**，
+		// 这一条就白跑了。
+		ext := filepath.Ext(name)
+		for n := 1; n <= len(b); n++ {
+			p := put(t, filepath.Join(root,
+				"截断_"+strconv.Itoa(n)+ext), b[:n])
+			// 只要求「不 panic」。标题读不读得出来随长度变。
+			_ = Title(p)
+		}
+	}
+}
+
+// wavPath / flacPath / oggPath / aiffPath / m4aPath 是「造一个带标题的文件、
+// 再把它的内容读回来」的小工具（`TestTruncatedAudioFilesNeverPanic` 用）。
+func wavPath(t *testing.T, root, name, title string) string {
+	return wavWith(t, filepath.Join(root, name), title)
+}
+
+func flacPath(t *testing.T, root, name, title string) string {
+	return flacWith(t, filepath.Join(root, name), title)
+}
+
+func oggPath(t *testing.T, root, name, title string) string {
+	return oggWith(t, filepath.Join(root, name), title)
+}
+
+func aiffPath(t *testing.T, root, name, title string) string {
+	return aiffWith(t, filepath.Join(root, name), title)
+}
+
+func m4aPath(t *testing.T, root, name string, _ int) string {
+	return m4aWith(t, filepath.Join(root, name), "M4A 的标题", 64)
 }

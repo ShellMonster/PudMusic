@@ -127,7 +127,7 @@ func m4aWith(t *testing.T, path, title string, padding int) string {
 func flacWith(t *testing.T, path, title string) string {
 	field := []byte("TITLE=" + title)
 	var comment []byte
-	comment = append(comment, leBytes(0)...) // 厂商串长度 0
+	comment = leBytes(0)                     // 厂商串长度 0
 	comment = append(comment, leBytes(1)...) // 一条注释
 	comment = append(comment, leBytes(uint32(len(field)))...)
 	comment = append(comment, field...)
@@ -206,4 +206,47 @@ func pathsOf(ts []Track) []string {
 		out[i] = t.Path
 	}
 	return out
+}
+
+// ── Ogg ────────────────────────────────────────────────────────────────────
+
+// oggWith 造一个带 Vorbis 注释标题的 .ogg。
+//
+// 手拼的是一个**真的** Ogg 页：27 字节页头 + 分段表 + 数据。页头里的校验和
+// 我们不算（读取那一侧也不验它），其余每���字段都按规范摆。
+func oggWith(t *testing.T, path, title string) string {
+	// 包 0：识别头 \x01vorbis。
+	id := append([]byte{1}, []byte("vorbis")...)
+	// 包 1：注释头 \x03vorbis + 注释 + framing 位。
+	field := []byte("TITLE=" + title)
+	comment := leBytes(0)                    // 厂商串长度 0
+	comment = append(comment, leBytes(1)...) // 一条注释
+	comment = append(comment, leBytes(uint32(len(field)))...)
+	comment = append(comment, field...)
+	pkt1 := append([]byte("\x03vorbis"), comment...)
+	pkt1 = append(pkt1, 1) // framing 位
+
+	// 分段表：每段最多 255 字节，满 255 表示「这个包还没完」。
+	var table, data []byte
+	for _, pkt := range [][]byte{id, pkt1} {
+		n := len(pkt)
+		for n >= 255 {
+			table = append(table, 255)
+			n -= 255
+		}
+		table = append(table, byte(n))
+		data = append(data, pkt...)
+	}
+
+	hdr := []byte("OggS")
+	hdr = append(hdr, 0)                  // 版本
+	hdr = append(hdr, 2)                  // 头类型：BOS（这一页是流的开头）
+	hdr = append(hdr, make([]byte, 8)...) // granule
+	hdr = append(hdr, make([]byte, 4)...) // 序列号
+	hdr = append(hdr, make([]byte, 4)...) // 页序号
+	hdr = append(hdr, make([]byte, 4)...) // 校验和
+	hdr = append(hdr, byte(len(table)))
+	hdr = append(hdr, table...)
+
+	return put(t, path, append(hdr, data...))
 }
