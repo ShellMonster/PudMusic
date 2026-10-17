@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/spectrum"
 	mygoaudio "github.com/egoist/mygo/audio"
@@ -233,14 +234,31 @@ func TestThePlayerAsksTheTapForTheAudibleFrame(t *testing.T) {
 		t.Fatalf("变速层底下不是频谱挂点，是 %T —— 挂点得在**变速之前**（tap.go 的顶上）",
 			p.vs.inner)
 	}
-	// 没放音的时候取到的是一排 0，而不是空切片：画出来是一条基线。
+	if bars := p.Bars(0, 48, 40, make([]float32, 48)); len(bars) != 48 {
+		t.Fatalf("Bars 给了 %d 根，want 48", len(bars))
+	}
+}
+
+// TestBarsWithNothingDecodedYetAreZero 断「还没解出那一段时给的是一排 0」。
+//
+// 和「解出来是静音」**不一样**：静音要留那条 2 像素的底排（Biu 那句
+// 「show a base row like PotPlayer」），什么数据都还没有时给 0——那时连
+// 「这有多高」都说不出来。
+//
+// ⚠️ 这里手搓一个 Player 而不是调 `New`：`New` 会起一条解码 goroutine，它会去读
+// 整条链，而这一条要断的正是「链上一个数据都还没有」——那个状态只在**没人读**
+// 的时候存在。
+func TestBarsWithNothingDecodedYetAreZero(t *testing.T) {
+	tp := newTap(newFakeDec(48000, 2, 4800))
+	p := &Player{tap: tp}
+
 	bars := p.Bars(0, 48, 40, make([]float32, 48))
 	if len(bars) != 48 {
 		t.Fatalf("Bars 给了 %d 根，want 48", len(bars))
 	}
 	for i, v := range bars {
 		if v != 0 {
-			t.Fatalf("没在放的时候第 %d 根是 %v，want 0", i, v)
+			t.Fatalf("一个数据都还没有，第 %d 根却是 %v（want 0，不是那条 2 像素的底排）", i, v)
 		}
 	}
 }
@@ -249,15 +267,27 @@ func TestThePlayerAsksTheTapForTheAudibleFrame(t *testing.T) {
 //
 // 底层解码器给的是一段满格常数信号，音量 0：所有格都是 0，于是每一根条只剩
 // 那条 2 像素的底排。
+//
+// ⚠️ **不要在这一侧自己 feed**：这一条用 `New` 建了播放器，而播放器自己有一条
+// 解码 goroutine 在读同一条链。挂点**不是**并发安全的（一个解码 goroutine 一个
+// 挂点，这是它能免锁的前提），两处一起读就是 `-race` 直接报——而且报的栈指向
+// `tap_test.go` 自己的 `feed`，看起来像生产代码有问题。
 func TestTheBarsAreTwoPixelsTallWhenSilent(t *testing.T) {
-	d := newFakeDec(48000, 2, 48000*3)
-	p := New(d)
+	p := New(newFakeDec(48000, 2, 48000*3))
 	t.Cleanup(p.Close)
 	p.SetVolume(0)
 
-	// 直接把 tap 喂满，让挂点里有几段。
-	p.tap.SetVolume(0)
-	feed(t, p.tap, 2048)
+	// 等**它自己**解出来。
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if p.tap.At(0) != nil {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if p.tap.At(0) == nil {
+		t.Fatal("两秒了挂点上一段都没有 —— 这一条量不到「解出来了但是静音」")
+	}
 
 	const height, n = float32(40), 48
 	bars := p.Bars(0, n, height, make([]float32, n))

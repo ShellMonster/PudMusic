@@ -175,7 +175,7 @@ func (s *Shell) viewFullPlayer(c *ui.Context) {
 		if hidden {
 			// 界藏起来了，光标也不留
 			// （Biu 的 `cursor: isUiVisible ? "auto" : "none"`，index.tsx:209）。
-			probe.Cursor(ui.CursorNone)
+			probe = probe.Cursor(ui.CursorNone)
 		}
 
 		probe.Children(func() {
@@ -248,6 +248,11 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 		Padding(fullBarPadY, fullBarPadX).Gap(12).AlignItems(ui.Center)
 	bar = bar.Opacity(bar.AnimateTo("full-top:o", fullShown(hidden), ui.Smooth))
 
+	// ⚠️ 这一帧**进来时**面板是开着没有：`ui.Popover` 处理「点外面 / 按 Esc 关掉」
+	// 是在它自己那一趟里做的，进函数时读到的还是上一帧的值。要判断「刚刚被关掉」
+	// 就得先把进来时的值记下来（理由同 shell.go 的 syncRoute）。
+	wasOpen := s.full.settings
+
 	bar.Children(func() {
 		if ui.Button(c, "关闭全屏").FontSize(13).Clicked() {
 			s.closeFullPlayer()
@@ -269,6 +274,16 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 			s.viewFullSettings(c)
 		})
 	})
+
+	// 关掉的那一下要把三秒重新算起。
+	//
+	// ⚠️ 不重排的话症状是「面板一关，界面瞬间就没了」：开着设置时那个钟被拆掉
+	// 了（`armFullHide` 排的），而 `lastMove` 还停在面板打开之前——于是
+	// `fullHidden` 立刻算出「已经三秒没动」，面板还在的那最后半秒里界面先没了。
+	// 而 Biu 那边是「关掉设置面板之后用户还能看着界面调频谱」，不是「一松手就黑」。
+	if wasOpen && !s.full.settings {
+		s.armFullHide()
+	}
 }
 
 // ---- 封面（共享元素） ----

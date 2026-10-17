@@ -109,6 +109,11 @@ func (s *Shell) viewFullSpectrum(c *ui.Context, st app.State, hidden bool) {
 //
 // 三步都照框架 `docs/ui/chart.md`「Live data」那一段：
 // `MinMax` 降采样 → 比例换算成框里的点 → `StrokePolyline`。
+//
+// ⚠️ **那 2 像素的底排已经算在 `bars` 里了**（`spectrum.Bars` 把
+// `2 / heightDip` 换成了比例）。所以 `viewFullSpectrum` 必须把**这一块的真实
+// 高度**传下去 —— 传错了那底排就不是 2 像素（框高 40 时传成 80，底排就只剩
+// 1 像素，静的时候画出来的是一条贴着边的线而不是一条看得见的排）。
 func (s *Shell) paintSpectrum(p *ui.Painter, r ui.Rect, bars []float32, color ui.Color) {
 	buf := &s.full.spec
 	n := len(bars)
@@ -123,8 +128,6 @@ func (s *Shell) paintSpectrum(p *ui.Painter, r ui.Rect, bars []float32, color ui
 		buf.ys[i] = v
 	}
 
-	// 底排那条 2 像素的线是 MinMax 之后再算的：MinMax 会把一段里最低的采样丢掉
-	// 之外的点，而那 2 像素是每一根条都要有的（见 spectrum.BaseDip）。
 	buf.bx, buf.by = chart.MinMax(buf.bx, buf.by, buf.xs, buf.ys,
 		int(math.Ceil(float64(r.W*p.Scale()))))
 
@@ -143,13 +146,15 @@ func (s *Shell) paintSpectrum(p *ui.Painter, r ui.Rect, bars []float32, color ui
 // 一条纯黑的频谱摆在深色背景上——看着像「没画出来」，而用户是在用着一个自己
 // 挑过的颜色。
 func spectrumColorOf(hex string) ui.Color {
-	if hex == "" {
-		hex = spectrumDefaultColor
+	if hex != "" {
+		if col, ok := parseHexColor(hex); ok {
+			return col
+		}
 	}
-	if col, ok := parseHexColor(hex); ok {
-		return col
-	}
-	return ui.Color{R: 0x66, G: 0x66, B: 0x66, A: 255}
+	// 兜底走**常量**，不是再写一遍 #666：两处各写一份，改了一处另一处不跟着改，
+	// 而这一票的全部意义就是「那四个数照抄」。
+	col, _ := parseHexColor(spectrumDefaultColor)
+	return col
 }
 
 // growFloats 把 s 弄到至少 n 长。

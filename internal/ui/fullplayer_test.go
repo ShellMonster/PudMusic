@@ -291,7 +291,26 @@ func TestTheSettingsPanelKeepsTheInterfaceUp(t *testing.T) {
 
 	advanceFull(s, tt, fc, biuHideSeconds*time.Second+time.Second)
 	if s.fullHidden() {
-		t.Error("偏好面板开着，界面却藏起来了")
+		t.Fatal("偏好面板开着，界面却藏起来了")
+	}
+
+	// 关掉面板之后，三秒要**重新算起**。
+	//
+	// ⚠️ 不重新排的症状是「面板一关，界面瞬间就没了」：开着设置时那个钟被拆掉了，
+	// 而 `lastMove` 还停在面板打开之前，`fullHidden` 于是立刻算出「已经三秒没动」。
+	// Biu 那边是关掉设置面板之后还能看着界面继续调，不是「一松手就黑」。
+	tt.Key(0, mygoui.KeyEscape)
+	tt.Frame()
+	tt.Frame()
+	if tt.HasText("显示频谱图") {
+		t.Fatalf("Esc 没关掉偏好面板，文字有 %q", tt.Texts())
+	}
+	if s.fullHidden() {
+		t.Error("刚关掉面板界面就藏起来了")
+	}
+	advanceFull(s, tt, fc, biuHideSeconds*time.Second+time.Second)
+	if !s.fullHidden() {
+		t.Error("关掉面板之后三秒到了界面还是亮着 —— 那个钟没有重新排上")
 	}
 }
 
