@@ -106,12 +106,12 @@ func doAction(item menuItem, i int, song Music, acts Actions, playFrom func(int)
 			acts.Open(song.Item)
 		}
 	case "favorite":
-		if acts.Favorite == nil {
+		if acts.FavSelect == nil {
 			// 说清楚比按了没反应好（见 download-audio 那一支的注释）。
 			notify(acts, "「"+item.label+"」还没接 B 站接口")
 			return
 		}
-		acts.Favorite(song.Item)
+		acts.FavSelect(song.Item)
 	case "download-audio":
 		// ⚠️ 下载服务还没接上（issue #29 已并进来的是下载记录页，批量下载的
 		// 队列入口还没有）。话里带上用户按的那个字：菜单有五项，只说「还没接」

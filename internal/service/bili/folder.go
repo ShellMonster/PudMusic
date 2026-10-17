@@ -225,7 +225,14 @@ func (c *Client) UploadCover(ctx context.Context, cover string) (string, error) 
 	return d.URL, nil
 }
 
-// DealFolderMedias 往收藏夹里放几个内容、从里面拿出几个。
+// DealFolderMedias 往收藏夹里放几个内容、从里面拿到几个。
+//
+// ⚠️ **这是「改收藏夹里的内容」那一个接口，本项目只有这一份。** BMG-25（播放
+// 列表抽屉）那张票要实现「把这一首收藏起来」这个动作，它要的**就是这一个调用**
+// （Biu 的抽屉也是调 `postFavFolderDeal`，`music-playlist-drawer` 的
+// `onOpenFavSelectModal` 之后走的就是它）。**别再写一份**——那个接口的四个
+// 平台字段（`platform` / `ga` / `gaia_source`）少给不报错也不生效，抄漏了
+// 表现是「收藏了但条目数不涨」，而那要翻很久才知道是哪个字段。
 //
 // ⚠️ **两个都空是 no-op**：Biu 的前端会发一个两个字段都空的请求过去
 // （`handleConfirm` 的 join 结果都是空串），而 B 站对那种请求回 -400。

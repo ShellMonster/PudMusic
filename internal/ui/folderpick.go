@@ -109,6 +109,6 @@ func readFileLimited(path string, limit int64) ([]byte, error) {
 // `list.Actions` 那几个字段。
 func (s *Shell) listActions() list.Actions {
 	acts := list.AppActions(s.app, s.addToast)
-	acts.Favorite = s.openFolderSelect
+	acts.FavSelect = s.openFolderSelect
 	return acts
 }
