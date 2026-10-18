@@ -34,7 +34,12 @@ const (
 
 // shellWithSettings 造一个「真 App + 盘上真有那份设置 + 真 Shell」，返回设置
 // 文件的路径（持久化那几条断言要看它）。
-func shellWithSettings(t *testing.T, mode app.ThemeMode, systemDark bool) (*mygoui.Tester, *Shell, *app.App, string) {
+//
+// opts 往上传给基座，默认一个都不给。**只有真的要摆登录态的那些才传**
+// （`loggedInWith`）：那三个入口未登录时不摆，而这一族测试要点的侧栏入口大多
+// 挑的是不挑登录态的那几个（理由见 navbar 的 TestSuggestCollapsesOnBlur）。
+func shellWithSettings(t *testing.T, mode app.ThemeMode, systemDark bool,
+	opts ...shellOpt) (*mygoui.Tester, *Shell, *app.App, string) {
 	t.Helper()
 	// ⚠️ **窗口是 900×600**：采样点 (700,430) 落在页面区域里。换尺寸就得换
 	// 采样点（sampleX / sampleY 在文件头上），不然那一行读的是别的东西。
@@ -44,14 +49,18 @@ func shellWithSettings(t *testing.T, mode app.ThemeMode, systemDark bool) (*mygo
 	// 半路——上一页正往左挪、下一页正往右进，中间那道竖直的分界线正好扫过页面区域。
 	// 于是「点一下再读 (700,430) 那个点」这一次读到底色、下一次读到分界线。
 	// 这个文件验的是主题，不是切页动画，动画在这里只会添乱。
-	b := newTestShell(t,
+	//
+	// ⚠️ opts **排在最后**：基座里设置先挂、`Mount*` 再挂、最后才是 Tester，
+	// 顺序不能乱（见 shelltest_test.go 的 newTestShell）。
+	b := newTestShell(t, append([]shellOpt{
 		withSettings(func() app.Settings {
 			st := app.DefaultSettings("")
 			st.ThemeMode = mode
 			return st
 		}()),
 		at(900, 600),
-		systemIsDark(systemDark))
+		systemIsDark(systemDark),
+	}, opts...)...)
 	b.tt.Frame()
 	return b.tt, b.s, b.a, b.settingsPath
 }
@@ -112,7 +121,9 @@ func TestShellPaintsTheThemeThatTheSettingsSay(t *testing.T) {
 // 被消费时还会再多一遍。只在「档位变了」的那一遍里 SetTheme 的写法，第一遍
 // 画对了，第二遍就被悄悄打回系统色——不报错、不崩溃、屏幕上一闪而过。
 func TestShellKeepsTheThemeAfterClickingAround(t *testing.T) {
-	tt, _, a, _ := shellWithSettings(t, app.ThemeModeLight, true)
+	// ⚠️ **登录过的**：它要点侧栏的「稍后再看」，而那三个入口未登录时不摆
+	// （`Route.NeedsLogin`，见 sidebar.go）。
+	tt, _, a, _ := shellWithSettings(t, app.ThemeModeLight, true, loggedInWith("7"))
 	if BuildTheme(a.SettingsSnapshot(), true).Dark {
 		t.Fatal("起点就不对：设置是浅色，却拼出了深色主题")
 	}

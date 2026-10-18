@@ -91,8 +91,12 @@ func TestParamRoutesMatch(t *testing.T) {
 //
 // 「切得动」和「画的是什么」分开验：已经有内容的页（设置页）画的是它自己，
 // 别的页画的是这一页的空状态（routes 表里每一条都带的那句）。
+//
+// ⚠️ 外壳是**登录过的**：它要点侧栏上的每一项，而「我的关注」「稍后再看」
+// 「历史记录」未登录时不摆（`Route.NeedsLogin`）。这一条问的是「菜单项本身
+// 通不通」，所以挂着那份登录态，而不是把 login 时的菜单当成七项来数。
 func TestMenuItemsAllSwitch(t *testing.T) {
-	s, tt := newShell(t)
+	s, tt := newLoggedInShell(t, "7")
 
 	menu := 0
 	for _, rt := range routes {
@@ -221,7 +225,10 @@ func TestToastDoesNotSurviveNavigation(t *testing.T) {
 		t.Fatalf("提示没画出来，文字有 %q", tt.Texts())
 	}
 
-	if err := tt.Click("历史记录"); err != nil {
+	// 落点挑一个不挑登录态的侧栏入口：这一条钉的是「切页时清提示」，钉的是
+	// 「随便切一页」，不该顺带把登录态也钉进去（见 navbar 的
+	// TestSuggestCollapsesOnBlur 里那一段）。
+	if err := tt.Click("本地音乐"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -379,8 +386,12 @@ func TestNavigateResetsTheCrash(t *testing.T) {
 }
 
 // TestBackReturnsToThePreviousPage 验历史能退回去，退回去时提示也不残留。
+//
+// ⚠️ 外壳是**登录过的**：它要点侧栏的「稍后再看」，而那三个入口未登录时不摆
+// （`Route.NeedsLogin`，见 sidebar.go）。这一条要的就是「切到某个具体页面之后
+// 退得回去」，所以挂着那份登录态，而不是改点一个别的页面。
 func TestBackReturnsToThePreviousPage(t *testing.T) {
-	s, tt := newShell(t)
+	s, tt := newLoggedInShell(t, "7")
 
 	if err := tt.Click("稍后再看"); err != nil {
 		t.Fatal(err)
@@ -426,7 +437,10 @@ func TestRenderShots(t *testing.T) {
 	if dir == "" {
 		t.Skip("设 BIU_SHOT_DIR 才会存图")
 	}
-	s, tt := newShell(t)
+	// ⚠️ **登录过的**：存图那一族要点侧栏的「我的关注」，而那三个入口未登录时
+	// 不摆（`Route.NeedsLogin`）。存出来的图于是是「用户在正常使用」的那一份，
+	// 而不是「刚装上、还没扫码」的那一份——后者另有前面几张空状态图。
+	s, tt := newLoggedInShell(t, "7")
 
 	// 不做切页动画：Tester 一帧就画完，250ms 的滑动停在半路，存出来的图上
 	// 上一页的文字还压在左边（看着像渲染错了，其实是动画没走完）。

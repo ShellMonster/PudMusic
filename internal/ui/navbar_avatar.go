@@ -23,6 +23,10 @@
 //   - Biu 那一套「按登录态隐藏」的另一面是：显示出来的那些项点了都有反应。
 //     这里六项都按得动，做不到的那几项把**为什么**说出来。
 //
+// 六项里「刷新数据」现在是真的做那件事（重新拉一次侧栏的收藏夹，见
+// `app/favorites_refresh.go`）；它拒绝的时候也说话，而那几句话是在应用层说的
+// （那一层才知道有没有登录、收藏夹那一摊挂上没有），这一层不另写一份。
+//
 // 「登录」那一项在已登录时也还是进扫码登录页：那一页底下有「已登录（UID …）」
 // 和退登按钮（见 login.go 的 viewAccountFooter），所以它也是一个说得清
 // 「你现在是什么状态」的地方。
@@ -85,9 +89,17 @@ var avatarMenuItems = []avatarMenuItem{
 	{label: "个人资料", run: func(s *Shell, _ *ui.Context) { s.goProfile() }},
 	{label: "设置", run: func(s *Shell, _ *ui.Context) { s.navigate(settingsPath) }},
 	{label: "刷新数据", run: func(s *Shell, _ *ui.Context) {
-		// 收藏夹、关注那些都还没有本地副本，「刷新」没有东西可刷。
-		// 说清楚比按了没反应好——后者用户只会当成应用卡了。
-		s.addToast("刷新数据：还没联过 B 站接口，没有数据可刷新")
+		// 真的是重新拉一次侧栏那些收藏夹（`app/favorites_refresh.go`）。
+		// 之前这一项只弹一句「还没有数据可刷新」，而接口是有的——用户改了收藏夹
+		// 切回来看不到，说的却是「这里没有数据」。
+		//
+		// ⚠️ **这里只发起，不等**：网络那一趟在后台，而这一项的菜单**选完就关**，
+		// 没有任何地方可以转圈。进行中状态是侧栏那一行「正在刷新收藏夹…」
+		// （见 sidebar_favorites.go），跑完的那句话走 `reportFavoritesRefresh`。
+		//
+		// 已经有一趟在飞时应用层会挡下来，并把「正在刷新收藏夹…」说给用户听——
+		// 连点两下只发一次请求，而第二下不至于毫无动静。
+		s.app.RefreshFavorites()
 	}},
 	{label: "问题反馈", run: func(_ *Shell, c *ui.Context) {
 		// 用 `Context.OpenURL` 而不是 `Window.Open`：后者收到 nil 会直接
