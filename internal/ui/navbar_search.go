@@ -59,6 +59,11 @@ const (
 	// searchHeight 是搜索框多高。Biu 那边是 `h-10`（40），顶栏只让出 32~38，
 	// 这里取 28 上下正好放下放大镜、一行字和清空按钮。
 	searchHeight = 28
+
+	// 那个叉：图标边长和点击区。Biu 的 `isClearable` 是一个 16 的叉，
+	// 这里的叉小一点（12）——搜索框只有 28 高，16 的叉 + 内边距就把它撑满了。
+	iconCloseGlyph = 12
+	iconCloseHit   = 26
 )
 
 // 搜索页那条路由是 `searchPath`（在 searchpage.go 里），这里直接用它，不另立一份
@@ -81,7 +86,10 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 	ui.Row(c).Key("search").Width(searchWidth).Height(searchHeight).
 		Radius(t.Radius).Background(t.Surface).Border(1, border).
 		Padding(0, 8).Gap(6).AlignItems(ui.Center).Children(func() {
-		drawMagnifier(c, t.TextMuted)
+		// 放大镜是**装饰**：它不可点，而输入框自己就带「搜索」这个无障碍名字
+		//（`searchLabel`），所以这里不加 Label——加了就是两个同名的，
+		// 而 `Tester.Find` 只会认到先画的那个。
+		ui.Icon(c, icon(iconSearch)).FontSize(iconMd).TextColor(t.TextMuted)
 
 		// ⚠️ **不许给输入框加 Key**：Key 只能挂在「创建时没有处理输入」的控件上，
 		// 挂上去直接 panic（`ui/element.go:537`）。外面这一格有 Key 就够了。
@@ -303,25 +311,16 @@ func (s *Shell) submitSearch(keyword string) {
 // viewSearchClear 是搜索框右边那个清空按钮（Biu 的 `isClearable`）。
 //
 // 它在浮层**外面**，所以点它落不到面板里的任何东西上。
+//
+// ⚠️ 画面上是那个叉，**无障碍名字仍然是「清空」**：叉对读屏软件念出来是「乘号」，
+// 用户听不出它在清什么（同一个道理见 viewHistoryChip 里那个「删除「…」」）。
 func (s *Shell) viewSearchClear(c *ui.Context) {
-	if ui.Button(c, "清空").FontSize(11).TextColor(c.Theme().TextMuted).Clicked() {
+	if iconButton(c, iconClose, "清空", iconCloseGlyph).
+		Size(iconCloseHit, iconCloseHit).Padding(0, 7).
+		TextColor(c.Theme().TextMuted).
+		Tooltip("清空搜索框").Clicked() {
 		s.searchKeyword = ""
 	}
-}
-
-// drawMagnifier 是搜索框左边那个放大镜。
-//
-// Biu 用 `<RiSearchLine size={16}/>`，本项目还没有图标资源。照 MyGo 自己那个
-// 放大镜的画法（`ui/combobox.go:459` 的 magnifier）画一个，省掉一整个图标资源
-// 目录，也不用为一个圆圈加一条依赖。
-func drawMagnifier(c *ui.Context, color ui.Color) {
-	const size = 14
-	ui.Box(c).Size(size, size).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
-		var ring ui.Path
-		ring.Circle(r.X+r.W*0.4, r.Y+r.H*0.4, r.W*0.28)
-		p.StrokePath(&ring, 1.4, color)
-		p.Line(r.X+r.W*0.64, r.Y+r.H*0.64, r.X+r.W*0.9, r.Y+r.H*0.9, 1.4, color)
-	})
 }
 
 // suggestShadow 是浮层那圈影子的颜色。Biu 是 `shadow-2xl`，跟着主题分深浅。

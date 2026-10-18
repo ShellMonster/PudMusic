@@ -79,6 +79,17 @@ func run() error {
 	}
 	files = append(files, Package{Path: licensing.BiuLicenseRelPath, Content: biu})
 
+	// 资源的许可证（图标那一批）：它们不是构建依赖，所以不在上面那张表里，
+	// 但同样要随包发出去。**必须排进 files**——否则 prune 会把它们当过期文件
+	// 删掉，而删掉一份资源的许可证不会让任何构建失败。
+	for _, rel := range licensing.AssetLicenseRelPaths {
+		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			return fmt.Errorf("读 %s（资源的许可证原文）：%w", rel, err)
+		}
+		files = append(files, Package{Path: rel, Content: b})
+	}
+
 	// 先写完再删多余的：中途失败不会留下一个空目录假装「生成过了」。
 	licensesDir := filepath.Join(root, filepath.FromSlash(filepath.Dir(licensing.NoticesRelPath)))
 	for _, f := range files {

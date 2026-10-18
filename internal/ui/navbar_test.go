@@ -98,7 +98,7 @@ func TestNavBarSpansTheTopOfTheWindow(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
 
-	back, ok := tt.Find("Back")
+	back, ok := tt.Find(navBackLabel)
 	if !ok {
 		t.Fatalf("顶栏上没有后退，文字有 %q", tt.Texts())
 	}
@@ -150,7 +150,7 @@ func TestNavBarControlsStillWorkInsideTheDragArea(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
 
-	if err := tt.Click("Back"); err != nil {
+	if err := tt.Click(navBackLabel); err != nil {
 		t.Fatalf("顶栏上点不到后退：%v，文字有 %q", err, tt.Texts())
 	}
 	if err := tt.Click("动态"); err != nil {
@@ -745,7 +745,7 @@ func TestLeavingTheSearchPageMidTransitionDoesNotCrashTheWindow(t *testing.T) {
 	}
 
 	// 返回按钮：走的是「回到上一页」那条路。
-	back, ok := tt.Find("Back")
+	back, ok := tt.Find(navBackLabel)
 	if !ok {
 		t.Fatalf("没有后退，文字有 %q", tt.Texts())
 	}

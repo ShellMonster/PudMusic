@@ -404,7 +404,7 @@ func TestBackReturnsToThePreviousPage(t *testing.T) {
 		t.Fatalf("没切到稍后再看，文字有 %q", tt.Texts())
 	}
 
-	back, ok := tt.Find("Back")
+	back, ok := tt.Find(navBackLabel)
 	if !ok {
 		t.Fatalf("导航栏上没有后退，文字有 %q", tt.Texts())
 	}

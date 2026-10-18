@@ -285,13 +285,19 @@ func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 	label := "赞"
 	color := c.Theme().TextMuted
 	if rel.Liked {
-		// Biu 那边是 `<RiThumbUpFill className="text-primary">`——**实心 + 主色**。
-		// 我们这两个键都是字（`收藏` / `下载`），所以实心那一半是「换个词」：
-		// 「赞」和「已赞」在读屏里是两句不同的话，而只换颜色对读屏是**没有**的。
+		// 主色是染出来的，和收藏那一键同一种做法。
+		//
+		// ⚠️ **名字那一半一个字不能少**：实心/空心是画面上的事，读屏软件看不见，
+		// 所以「赞」和「已赞」这两句得留在无障碍名字里。
 		label = "已赞"
 		color = c.Theme().Accent
 	}
-	btn := ui.Button(c, label).Width(metaBtnW).Padding(1, 6).MaxLines(1).
+	// ⚠️ **图标只有 `likeIcon` 这一个出口**（不是这里 `if` 一下）——理由见
+	// icons.go 那四个函数的头一段：调用点一旦自己也能决定画哪张，「哪一档配哪
+	// 一张」就没有钉住的地方了。
+	name := likeIcon(rel.Liked)
+	btn := iconButton(c, name, label, iconSm).
+		Size(iconHit, iconHit).Padding(0, 7).
 		TextColor(color).
 		Tooltip(likeStarTooltip(rel.Liked, s.app.LikeErr() != nil && !s.app.LikeAsked()))
 	if btn.Clicked() {

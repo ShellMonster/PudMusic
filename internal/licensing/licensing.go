@@ -45,6 +45,31 @@ const NoticesRelPath = "resources/licenses/THIRD-PARTY-NOTICES.txt"
 // 这份条款」，所以它必须随包发出去。
 const BiuLicenseRelPath = "resources/licenses/BIU-LICENSE.txt"
 
+// IconLicenseRelPath 是图标资源那一份许可证原文（Remix Icon），随包发出去。
+//
+// ⚠️ **它不进 `go list -deps` 的结果**，所以清单那张表里没有它——图标是编进
+// 二进制的**资源**，不是链接进来的代码模块。后果是：
+//
+//   - `TestTheInventoryListsExactlyWhatGetsCompiled` 看不见它少了（那张表只会
+//     因为「少一个依赖」红，看不见「少一份资源许可证」）；
+//   - `gen-notices` 的 prune 会把它当「过期文件」删掉。
+//
+// 所以它被单独排进 `AssetLicenseRelPaths`，由 `TestTheShippedAssetLicensesExist`
+// 盯着在不在。
+//
+// 原文是上游那份的**逐字副本**（Remix Icon License v1.0，Copyright (c) 2017–2026
+// Remix Design）。取它的命令见本票的报告；换上游版本时连同这一份一起换。
+const IconLicenseRelPath = "resources/licenses/remixicon-LICENSE.txt"
+
+// AssetLicenseRelPaths 是**不是构建依赖、但同样要随包发出去**的许可证原文。
+//
+// 每一份都得排进 `gen-notices` 的输出列表，否则 prune 会把它删掉——而删掉一个
+// 依赖的许可证是「清单说没有它、目录里却还有」，删掉一份**资源的**许可证则是
+// 「包照发、DMG 照做，只是法律上已经不合规」，两边都不会有构建失败来提醒。
+var AssetLicenseRelPaths = []string{
+	IconLicenseRelPath,
+}
+
 // BiuRequiredNotice 是 PolyForm 要求**逐字**保留的那一行。
 //
 // 「逐字」不是客气话：这行是 PolyForm 的 Notices 一节点名要的，删掉它等于
@@ -82,6 +107,22 @@ const noticesHeader = `# Biu MyGo 第三方许可清单
 #
 # ⚠️ 本项目**不含任何 LGPL 代码**（Plan §4 R13）。purego 是 Apache-2.0，不是 MIT；
 # go-mp3 是 Apache-2.0，也不是 MIT。两处都曾经被写错过。
+#
+# ── 不是 Go 模块的那几样 ─────────────────────────────────────────────────────
+#
+# 上面那张表只列**编进可执行文件的 Go 模块**（go list -deps 数得出来的那些）。
+# 这个目录里还有两份**不是模块**的，同样随包发出去：
+#
+# BIU-LICENSE.txt          Biu 本体（PolyForm Noncommercial 1.0.0）。Biu 不是构建
+#                          依赖，它是这个项目的**上游**；PolyForm 的 Notices 一节
+#                          点名要逐字保留它，由 TestBiuNoticeShipsVerbatim 守着。
+# remixicon-LICENSE.txt     界面上那一批图标（Remix Icon，Remix Icon License v1.0）。
+#                          它们是编进二进制的**资源**，不是链接进来的代码，所以
+#                          go list -deps 看不见它们——而那张表只会因为「少一个
+#                          依赖」红，看不见「少一份资源许可证」。
+#                          该许可证 §2.3 明确允许把图标当作产品里的功能组件使用、
+#                          §3.1 禁止把它们**单独当图标包卖**；本项目是前者：图标
+#                          随应用分发，不作为图标库单独提供。
 
 `
 
