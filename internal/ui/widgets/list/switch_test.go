@@ -11,6 +11,7 @@
 package list
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -112,14 +113,10 @@ func TestEveryViewKeepsTheRowsAndThePagingWorking(t *testing.T) {
 
 // TestTheGridCountsTheSentinelAsARow 钉住「网格把哨兵算成了一行」。
 //
-// 网格那一档原本**没有哨兵**：末尾没有那一行，于是分页列表的「滚到底就拉下一页」
-// 永远触发不了——症状是「切到网格之后翻不了页」，一个只有开了这个设置才会撞上的
-// 坏，而且不会让任何别的测试变红。
-//
 // ⚠️ 这里量的是**行数**而不是「哨兵那一格画在屏幕上」：`ui.List` 是虚拟的，只建
 // 看得见的那几行（`mygo/ui/list.go` 的 listOverscan），四十首歌在网格里是二十几行、
 // 一屏放不下，于是哨兵压根没被建过——「屏幕上没有哨兵」是真的，但和「哨兵不存在」
-// 是两件事。行数是确定的量，而行为（真的翻到了第二页）由下一条钉。
+// 是两件事。
 func TestTheGridCountsTheSentinelAsARow(t *testing.T) {
 	g := NewGrid(newCache(t), Actions{})
 	g.SetSongs([]Music{{ID: "g1"}, {ID: "g2"}, {ID: "g3"}, {ID: "g4"}})
@@ -132,15 +129,22 @@ func TestTheGridCountsTheSentinelAsARow(t *testing.T) {
 	tt.Frame()
 
 	if got := g.rows(); got != before+1 {
-		t.Errorf("装上哨兵之后网格的行数是 %d，之前是 %d——哨兵没有占一行，"+
-			"滚到底就拉不到下一页", got, before)
+		t.Errorf("装上哨兵之后网格的行数是 %d，之前是 %d——哨兵没有占一行",
+			got, before)
 	}
 }
 
-// TestTheGridKeepsPagingWorking 是上面那一条的后果：真的翻到了第二页。
+// TestTheGridKeepsPagingWorking 钉住「切到网格之后照样翻得了页」。
 //
-// ⚠️ 判据是**行为**不是「哨兵在不在」：哨兵占了行、而三重保障问的又是**网格的行数**
-// （一行几首，是拿列数除出来的），任何一处算错，翻页都不动。
+// ## 这一条**不是**靠哨兵成立的（这一点量过，别写成靠它）
+//
+// 翻页的触发判据是 `afterFrame` 里那句「末尾那一行进没进画面」（`last < n-1` 就
+// 什么都不做）。网格里**最后一行本身就是歌的行**，滚到底照样命中——把网格的哨兵
+// 拿掉（`SwitchView.SetFooter` 只装列表那半边），这一条和整页那一层
+// （`TestTheGridStillPagesOnARealPage`）都照样绿。所以哨兵**不是**翻页的前提，
+// 早先那句「没有哨兵就永远翻不了页」是错的。
+//
+// 哨兵真正负责的是下一条（失败之后的那条出路）和「正在加载…」那一句。
 func TestTheGridKeepsPagingWorking(t *testing.T) {
 	st := newStub().with(1, 40, true).with(2, 20, false)
 	p, tt := newSwitch(t, st.fetch, ViewCard)
@@ -151,6 +155,56 @@ func TestTheGridKeepsPagingWorking(t *testing.T) {
 	pump(t, tt, "第二页落地", func() bool {
 		return p.Paged().Loaded == 60 && !p.Paged().Loading
 	})
+}
+
+// TestTheGridOffersTheRetryThatTheListOffers 是网格哨兵**真正的**用处。
+//
+// ## 为什么这一条是网格那半边必须有自己的哨兵
+//
+// 翻页失败时 `apply` 会把 `blocked` 闩上，**闩住的是自动重试**（理由是「失败 →
+// 解锁 → 下一帧看见容器还没填满 → 又拉 → 又失败」那个死循环）。闩上之后能解开它
+// 的地方**只有哨兵上那个「点此重试」按钮**（`footerView` 的 `trigRetry`）。
+//
+// 所以网格那半边没有哨兵时：**翻页还是能翻**，但一旦某一页失败就**卡住不动**了——
+// 没有转圈、没有重试按钮、连「已加载多少」都不会再变，用户能做的只有切路由或者把
+// 视图切回列表。而症状是静默的：歌还在、封面还在、点得动，只是**再也翻不动了**。
+//
+// 这一条正是把哨兵从网格上拿掉之后会红的那一条（上面那两条不会）。
+func TestTheGridOffersTheRetryThatTheListOffers(t *testing.T) {
+	boom := errors.New("网络炸了")
+	st := newStub().with(1, 40, true).fails(2, boom).with(3, 10, false)
+	p, tt := newSwitch(t, st.fetch, ViewCard)
+
+	pump(t, tt, "第一页落地", func() bool { return p.Paged().Loaded == 40 })
+	tt.Scroll(testerW/2, testerH/2, 0, scrollToBottom)
+	pump(t, tt, "第 2 页失败", func() bool { return p.Paged().Err != nil })
+
+	if p.Paged().Loading {
+		t.Fatalf("失败之后还在 Loading，界面会永远转圈")
+	}
+	if !tt.HasText("加载失败，点此重试") {
+		t.Fatalf("网格那一档失败了却没给人一条重试的路——`blocked` 闩住的是自动重试，"+
+			"而解开它的只有哨兵上这个按钮。文字有 %q", tt.Texts())
+	}
+
+	// 自动补屏就此打住（那是列表那一档也有的规矩，三档一致）。
+	frame(tt)
+	frame(tt)
+	if c := st.callsOf(); len(c) != 2 {
+		t.Errorf("失败之后又自己拉了（叫了 %v），want 停在 [1 2]", c)
+	}
+
+	// 用户点一下就继续。
+	st.serve(2, Page{Songs: pageSongs(2, 10), HasMore: true}, nil)
+	if err := tt.Click("加载失败，点此重试"); err != nil {
+		t.Fatalf("点不到重试：%v", err)
+	}
+	pump(t, tt, "重试之后第二页落地", func() bool {
+		return p.Paged().Loaded == 50 && !p.Paged().Loading
+	})
+	if p.Paged().Err != nil {
+		t.Errorf("重试成功了 Err 还没清掉：%v", p.Paged().Err)
+	}
 }
 
 // TestSwitchingViewsKeepsTheSongs 是 `SwitchView` 存在的那条理由。

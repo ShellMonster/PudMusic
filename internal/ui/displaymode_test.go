@@ -704,3 +704,65 @@ const (
 	minWindowW = 900
 	minWindowH = 560
 )
+
+// TestTheBatchOpsStillWorkInEveryView 钉住「多选在每一档都点得到」。
+//
+// 这是「数据显示样式」新打开的一条路：切到网格之后画的是**另一半控件**，而多选
+// 接线装在列表那半边——格子上一格勾选框都没有，于是**逐首勾完全做不到**，只剩全选
+// / 不选。
+//
+// ⚠️ **那个症状特别难自己发现**：全选 / 不选走的是 `Len()` / `At()`，不经过画法，
+// 所以它在网格那一档照样能用；批量操作条上「已选 0 首」会跟着变，用户点几下
+// 「全选 → 批量删除」一切正常。而「一格一格地勾」这件事在网格里没有入口——
+// 也就是九成用法没了。
+//
+// 三档各点一次：每一档都要有 6 个勾选框、逐首点得动、点完「已选 N 首」跟着变。
+func TestTheBatchOpsStillWorkInEveryView(t *testing.T) {
+	medias := make([]map[string]any, 0, len(displayTitles))
+	for i, title := range displayTitles {
+		medias = append(medias, mediaOf(900+i, title))
+	}
+
+	for _, m := range []app.DisplayMode{
+		app.DisplayModeList, app.DisplayModeCard, app.DisplayModeCompact,
+	} {
+		t.Run(string(m), func(t *testing.T) {
+			_, s, tt := collectionShell(t, "77", medias...)
+			mountDisplay(t, s.app)
+			wideEnough(tt)
+			waitSongs(t, tt, s, len(displayTitles))
+			setDisplay(t, s.app, tt, m)
+
+			if err := tt.Click("多选"); err != nil {
+				t.Fatalf("点不到「多选」：%v，文字有 %q", err, tt.Texts())
+			}
+			for range 3 {
+				tt.Frame()
+			}
+
+			// 每一首都要有勾选框。名字是「选择 <歌名>」（`viewCheckbox` /
+			//			// `viewCellCheckbox` 都用同一个），无头 Tester 的 `Click` 按它找。
+			for i, title := range displayTitles {
+				box := "选择 " + title
+				if _, ok := tt.Find(box); !ok {
+					t.Fatalf("%s 那一档下 %q 那个勾选框没画出来（共 %d 首）",
+						m, box, len(displayTitles))
+				}
+				// 只点第一首和第三首：点完要看到「已选 2 首」。
+				if i != 0 && i != 2 {
+					continue
+				}
+				if err := tt.Click(box); err != nil {
+					t.Fatalf("%s 那一档下点不动 %q：%v，文字有 %q", m, box, err, tt.Texts())
+				}
+				for range 3 {
+					tt.Frame()
+				}
+			}
+			if !tt.HasText("已选 2 首") {
+				t.Errorf("%s 那一档下逐首勾完显示的是 %q，want「已选 2 首」",
+					m, tt.Texts())
+			}
+		})
+	}
+}

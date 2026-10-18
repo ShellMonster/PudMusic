@@ -214,6 +214,19 @@ func NewPaged(cache *imgcache.Cache, acts Actions, fetch Fetcher) *PagedList {
 // 知道此刻画的是哪一档。
 func (p *PagedList) List() *List { return p.surf.List() }
 
+// SetSelection 装多选那一摊接线（`Selection`），传零值去掉。
+//
+// ⚠️ **别用 `p.List().SetSelection(...)`**：那只装到了列表那半边，而网格那一档
+// 画的是 `Grid`——格子上的勾选框是 `Grid.sel2` 画的（`grid.go` 的
+// `viewCellCheckbox`）。漏了网格这半边的症状是「切到网格之后一格勾选框都没有，
+// 逐首勾完全做不到，只剩全选 / 不选」——而全选走的是 `Len()` / `At()`，不经过
+// 画法，所以它照样能用，于是界面上看着「多选还是好的」，只是九成用法没了。
+//
+// 这一条是 `attachSelection`（`internal/ui/collectionbatch.go`）唯一的正确出口。
+//
+// ⚠️ 只能由界面线程调。
+func (p *PagedList) SetSelection(sel Selection) { p.surf.SetSelection(sel) }
+
 // Selected 返回正在画的那一份里选中的那首。没有选中是 ok=false。
 //
 // ⚠️ 认的是**正在画的那一份**：用户能看见的光标在它上面（理由见

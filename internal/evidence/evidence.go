@@ -381,21 +381,32 @@ var Items = []Item{
 	},
 	{
 		Category: Paging,
-		// 「数据显示样式」要三件事同时成立，缺一件就退化成「这个设置没用」或者
+		// 「数据显示样式」要几件事同时成立，缺一件就退化成「这个设置没用」或者
 		// 「改了只有一页变了」：
 		//
 		//  1. **每一页**都跟着变（逐页一条子测试，少接一页就少一条）
 		//  2. **紧凑真的更矮**（量的是画出来的那一块，不是某个变量）
-		//  3. **网格那一档还能翻页**——末尾哨兵是网格这一档新加的，少了它页面
-		//     看上去完全正常，只是永远翻不到第二页
-		Spec: "「数据显示样式」在三档之间换：每一页都跟着换、紧凑行高真的更矮、网格那一档照样翻页",
+		//  3. **网格那一档照样翻得了页**
+		//  4. **网格那一档翻页失败之后还能重试**——这一条才是网格那半边必须有哨兵
+		//     的理由（`blocked` 闩住的是自动重试，解开它的只有哨兵上那个按钮）。
+		//     少了它症状是静默的：歌还在、能点，只是某一页失败之后再也不动了
+		//
+		// ⚠️ 第 3 条和第 4 条**是两件事**，别合成一句「网格没哨兵就翻不了页」——那句话
+		// 是错的（翻页的判据是「末尾那一行进没进画面」，而网格里最后一行就是歌的行）。
+		// 把网格的哨兵拿掉，第 3 条那两条照样绿，只有第 4 条会红。
+		Spec: "「数据显示样式」在三档之间换：每一页都跟着换、紧凑行高真的更矮、网格那一档照样翻页，翻页失败了也还有重试",
 		Tests: []string{
 			"TestEveryPageFollowsTheDisplayStyleSetting",
 			"TestTheCompactRowsAreShorterThanTheNormalOnes",
 			"TestTheGridCountsTheSentinelAsARow",
 			"TestTheGridKeepsPagingWorking",
+			"TestTheGridOffersTheRetryThatTheListOffers",
 			"TestTheGridStillPagesOnARealPage",
 			"TestSwitchingViewsKeepsTheSongs",
+			// 多选接线要装到**两份**控件上：只装列表那半边的话网格那一档一格勾选框都
+			// 没有，而全选走 `Len()` / `At()` 不经过画法、照样能用——症状是「九成
+			// 用法没了，界面上看着多选还是好的」。
+			"TestTheBatchOpsStillWorkInEveryView",
 		},
 	},
 	{

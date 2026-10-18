@@ -80,8 +80,15 @@ func (s *SwitchView) SetEmpty(text string) {
 	s.grid.SetEmpty(text)
 }
 
-// SetFooter 装末尾哨兵的画法，两份都装。理由见 `Grid.footer` 那一段（没有哨兵的话
-// 网格里的翻页永远触发不了）。
+// SetFooter 装末尾哨兵的画法，两份都装。理由见 `Grid.footer` 那一段——**两份都要装**
+// 是因为网格那半边没有哨兵就没有失败之后的重试按钮（`blocked` 闩住的是自动重试）。
+//
+// ⚠️ 别把理由写成「网格没有哨兵就翻不了页」：翻页的判据是「末尾那一行进没进画面」，
+// 而网格里最后一行就是歌的行。那句话说错了半年，是靠把 `SetFooter` 改成只装列表
+// 那半边、发现上面那几条测试照样绿才查出来的。
+//
+// ⚠️ 只装一半的另一个后果：`TestTheGridCountsTheSentinelAsARow` 直接对 `*Grid`
+// 调 SetFooter，**绕过了这一层**，所以它抓不到这一种漏。
 func (s *SwitchView) SetFooter(fn func(c *ui.Context)) {
 	s.list.SetFooter(fn)
 	s.grid.SetFooter(fn)
