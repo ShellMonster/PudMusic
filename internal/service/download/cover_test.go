@@ -453,9 +453,10 @@ func TestACoverHostThatNeverAnswersDoesNotStallTheQueue(t *testing.T) {
 	if _, err := os.Stat(s2.Dest); err != nil {
 		t.Errorf("第二首没落盘：%v", err)
 	}
-	if hanging.hitCount() == 0 {
-		t.Error("图床一次都没被要——那这一条量的是「压根没存封面」，不是「存了、但没挡住队列」")
-	}
+	// ⚠️ **等它被要过**，不要立刻读：那条线是后台的，而计数是它写的。
+	// 立刻读的话满载时会读到 0，于是这一条变成「压根没存封面」那一种——
+	// 量不到「存了、但没挡住队列」，而那正是它要量的。
+	waitUntil(t, func() bool { return hanging.hitCount() == 1 })
 }
 
 // TestClosingTheAppDoesNotWaitOnAHangingCover 断**退得出**。
@@ -599,6 +600,10 @@ func TestAFailedCoverSaveLeavesNothingBehindThatWouldBlockEveryRetry(t *testing.
 	dir := t.TempDir()
 	m := coverManager(t, cdn, dir)
 
+	// ⚠️ **先让图床坏掉再入队**：存封面是在后台的（`startCoverSave` 立刻返回），
+	// 先入队后调用 `fail()` 的话，那条线有可能已经把一次 200 拿到手了——于是这一
+	// 条量的是「存成功了」，而它要量的是「存失败了之后留下了什么」。
+	cover.fail()
 	snap, err := m.Enqueue(AddRequest{
 		Bvid: bvid, Cid: cid, Title: "先失败的歌", Cover: cover.url(), Dir: dir,
 	})
@@ -606,10 +611,14 @@ func TestAFailedCoverSaveLeavesNothingBehindThatWouldBlockEveryRetry(t *testing.
 		t.Fatal(err)
 	}
 	waitStatus(t, m, snap.ID, StatusDone)
-
-	// 第一次：图床 404。
-	cover.fail()
 	waitUntil(t, func() bool { return cover.hitCount() == 1 })
+
+	// 第一次失败之后：最终那个名字上**什么都没有**（半张图是最坏的一种），临时
+	// 文件也没有（它是被 defer 收掉的）。
+	if names := namesIn(t, dir); len(names) != 1 {
+		t.Errorf("失败之后目录里有 %v，want 只有音频那一个——"+
+			"留下的东西（半张图 / 临时文件）会把之后每一次重试都挡掉", names)
+	}
 
 	// 第二次（换一首，触发一次新的存）：图床好了，这一次必须存得上。
 	cover.heal()
