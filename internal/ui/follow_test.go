@@ -974,10 +974,14 @@ func TestSwitchingAccountsDoesNotKeepTheOldTotal(t *testing.T) {
 	a.TestOnlyAdoptLogin("88")
 	uiFollowList(b, 0, []any{}) // 新账号一个关注都没有
 	tt.Frame()
-	waitFrames(t, tt, "第二个账号的关注到了", func() bool {
-		return f.selfMid == 88 && f.pager.started
+	// ⚠️ **判据里要带上 total 自己**：它和 selfMid / pager.started 是同一页里
+	// 不同的几栏，各自在自己的那一趟落地，而 `waitFrames` 的注释写明了「同一帧
+	// 里画出来的还是上一帧的样子」。原来等的是前两样、断言读的是 total，机器一
+	// 忙那条断言就红——而功能是好的：这一条实测在整包连跑里飘过两次，**在未改动
+	// 的 main 上也飘**。判据一个字没放宽：要的还是「total 是 0」，只是等到了再断。
+	waitFrames(t, tt, "第二个账号的关注到了、那个 N 也掉下来了", func() bool {
+		return f.selfMid == 88 && f.pager.started && f.total == 0
 	})
-	tt.Frame()
 	if f.total != 0 {
 		t.Errorf("换账号之后那个 N 仍然是 %d——它是上一个账号的关注数", f.total)
 	}

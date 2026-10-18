@@ -340,6 +340,12 @@ func TestAnEmptyRecommendListIsNotAFailure(t *testing.T) {
 // ⚠️ 新歌速递是**另一块**（另一对接口）。它挂了的时候下面那个列表照常显示，
 // 而那一块自己说「没拉出来」+ 给一个重试。合成一句「这一页拉不到」的话，
 // 用户会以为三档的推荐全没了。
+//
+// ⚠️ **判据要等这三件本身，而不是只等第一件**：「新歌速递没拉出来」和下面那一档
+// 是**两个请求、两个时间点**落地的（而 `waitFrames` 的注释写明了「同一帧里画
+// 出来的还是上一帧的样子」）。只等第一件就断言第二件，机器一忙那条断言就红——
+// 而功能是好的：这一条实测在整包连跑里飘过两次，**在未改动的 main 上也飘**。
+// 判据放宽了吗？没有——三件都要求成立，一件不少，只是**等到了再断言**。
 func TestTheNewMusicBlockFailsOnItsOwn(t *testing.T) {
 	b := newUIExplore(t)
 	homeArchives(b)
@@ -352,8 +358,10 @@ func TestTheNewMusicBlockFailsOnItsOwn(t *testing.T) {
 	_, tt, _ := newHomeShell(t, b)
 
 	clickTab(t, tt, homePopTab)
-	waitFrames(t, tt, "新歌速递拉失败", func() bool {
-		return showsText(tt, "新歌速递没拉出来")
+	waitFrames(t, tt, "新歌速递挂了、下面那一档照画", func() bool {
+		_, retry := tt.Find("重试加载新歌速递")
+		return showsText(tt, "新歌速递没拉出来") &&
+			showsText(tt, "流行 榜上的歌") && retry
 	})
 	// 下面那一档的推荐照画。
 	if !showsText(tt, "流行 榜上的歌") {
