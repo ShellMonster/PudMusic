@@ -204,7 +204,7 @@ func (s *Shell) pickAudioQuality(c *ui.Context, st app.Settings, ro bool) {
 func (s *Shell) pickDownloadPath(c *ui.Context, st app.Settings, ro bool) {
 	ui.Row(c).Key("setting:downloadPath").Width(radiusWidth).Gap(8).Children(func() {
 		s.pathField(c, st.DownloadPath, "下载目录", ro)
-		if ui.Button(c, "选择").Width(64).Disabled(ro).Clicked() {
+		if flatButton(c, "选择").Width(64).Disabled(ro).Clicked() {
 			s.pickPath("下载目录", true, func(path string) {
 				s.applySetting("下载目录", func(cur *app.Settings) { cur.DownloadPath = path })
 			})
@@ -216,7 +216,7 @@ func (s *Shell) pickDownloadPath(c *ui.Context, st app.Settings, ro bool) {
 func (s *Shell) pickFFmpegPath(c *ui.Context, st app.Settings, ro bool) {
 	ui.Row(c).Key("setting:ffmpegPath").Width(radiusWidth).Gap(8).Children(func() {
 		s.pathField(c, st.FFmpegPath, "FFmpeg 路径", ro)
-		if ui.Button(c, "选择").Width(64).Disabled(ro).Clicked() {
+		if flatButton(c, "选择").Width(64).Disabled(ro).Clicked() {
 			s.pickPath("FFmpeg 路径", false, func(path string) {
 				s.applySetting("FFmpeg 路径", func(cur *app.Settings) { cur.FFmpegPath = path })
 			})
@@ -299,7 +299,7 @@ func (s *Shell) colorItem(c *ui.Context, label, hex string, ro, overridden bool,
 		})
 		ui.Text(c, label).FontSize(12).TextColor(t.TextMuted).Center()
 		if overridden && !ro {
-			if ui.Button(c, "用默认").FontSize(11).TextColor(t.TextMuted).Clicked() {
+			if flatButton(c, "用默认").FontSize(11).TextColor(t.TextMuted).Clicked() {
 				reset()
 			}
 		}

@@ -245,7 +245,10 @@ func (s *Shell) viewArtist(c *ui.Context, st app.State, t *ui.Theme) {
 			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 		return
 	}
-	if ui.Button(c, st.Artist).Grow(1).MinWidth(artistMinW).FontSize(12).
+	// 扁平按钮：UP 名这一格是**播放条上一枚按钮**，而调研点名的描边药丸里就有它
+	//（报告 §1.1 的 F1 证据：播放条上每一枚带描边的键）。它上面是 12px 的弱化
+	// 灰字，本来就不该配一块描边底。
+	if flatButton(c, st.Artist).Grow(1).MinWidth(artistMinW).FontSize(12).
 		Padding(0, 2).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").
 		Tooltip("打开 " + st.Artist + " 的空间").Clicked() {
 		s.navigate(upPathPrefix + strconv.FormatInt(st.ArtistMid, 10))
