@@ -5,9 +5,10 @@
 // 删除 / 取消收藏）在 `app/sidebar_folders.go` 里——那一层认识 B 站，这一层
 // 不认识。
 //
-// ⚠️ **两组还没有从 B 站拉全量**：条目由谁调 `SetFavorites` 谁负责，而拉全量
-// 那一趟还没接（见 `app/favorites.go` 的包注释）。所以空的时候两组照画标题和
-// 折叠开关，里面一行「还没有收藏夹」，不假装有内容——而「新建收藏夹」建出来
+// ⚠️ **只有「我创建的」那一组有数据源**：它由头像下拉里「刷新数据」真的从
+// B 站拉下来（见 `app/favorites_refresh.go`）。「我收藏的」那一组本项目还没接
+// 那个接口，条目由谁调 `SetFavorites` 谁负责——所以它空的时候两组照画标题和
+// 折叠开关，里面一行「还没有收藏夹」，不假装有内容；而「新建收藏夹」建出来
 // 的那一行是立刻进侧栏的（`app.CreateFolder` 会 `Upsert`），所以菜单里那几件
 // 事并不是只有测试走得到。
 package ui
@@ -55,11 +56,36 @@ func favMenuItems(g app.FavoriteGroup) []favMenuAction {
 
 // viewFavorites 是两组收藏夹，按「我创建的」在上、「我收藏的」在下排
 // （Biu 的 `collection/index.tsx:545-549`）。
+//
+// 顶上那一行「正在刷新收藏夹…」是头像下拉里「刷新数据」那一项的在飞状态
+// （见 viewFavoritesRefreshing）。它排在两组**外面**而不是某一组底下：刷的是
+// 这一片，不是其中一组——摆在某一组底下的话，另一组会像是也在动。
 func (s *Shell) viewFavorites(c *ui.Context, st app.Settings) {
 	hidden := hiddenMenuKeys(st)
+	s.viewFavoritesRefreshing(c, st)
 	for g := range favGroups {
 		s.viewFavoriteGroup(c, st, app.FavoriteGroup(g), hidden)
 	}
+}
+
+// refreshLine 是「正在刷」那一行的字。
+//
+// ⚠️ 界面上**不许**把这句话当成唯一的在飞证据：它会随侧栏的折叠 / 展开出现又
+// 消失。真正的闸门在应用层（`app.RefreshFavorites` 的 busy），这一行只是让用户
+// 看得见——「按下去没反应」是这一项最容易出的那种错。
+const refreshLine = "正在刷新收藏夹…"
+
+// viewFavoritesRefreshing 是那一行。
+//
+// 折叠态不画，理由同 viewLoggedOutHint：72 宽摆不下，而且整个收藏夹那一块
+// 在折叠态压根不画（`viewFavoriteGroup` 第一行就 return 了）——单独留一句悬在
+// 空侧栏里，用户会以为收藏夹跑到别处去了。
+func (s *Shell) viewFavoritesRefreshing(c *ui.Context, st app.Settings) {
+	if st.SideMenuCollapsed || !s.app.FavoritesRefreshing() {
+		return
+	}
+	ui.Text(c, refreshLine).FontSize(12).
+		TextColor(c.Theme().TextMuted).Padding(4, 8)
 }
 
 // viewFavoriteGroup 是一组：折叠标题 + （展开时的）那一列。
@@ -366,6 +392,19 @@ func (s *Shell) viewFavoriteDelete(c *ui.Context) {
 func (s *Shell) sayFolderDone(msg string) {
 	s.addToast(msg)
 	s.wake.invalidate()
+}
+
+// reportFavoritesRefresh 把「刷新数据」那一趟回来的话弹出来。
+//
+// **每帧开头调一次**，和 `reportUpdateNotice` 同一排：后台把话攒进信箱，而界面
+// 每一帧去取一次。取走而不是读（同 `TakeFolderResult` 的理由）——
+//
+// ⚠️ 它和侧栏那一行「正在刷新收藏夹…」是**两件事**，别合成一个判据：在飞的时候
+// 只有那一行在（话还没攒下），跑完之后话先弹出来、下一帧那一行才收掉。
+func (s *Shell) reportFavoritesRefresh() {
+	if msg, ok := s.app.TakeFavoritesRefresh(); ok {
+		s.addToast(msg)
+	}
 }
 
 // hiddenMenuKeys 是被藏起来的那些 ID。Biu 存的是十进制字符串
