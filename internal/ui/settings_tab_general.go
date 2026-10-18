@@ -62,8 +62,10 @@ var audioQualityHint = map[app.AudioQuality]string{
 // settingsGeneral 是常规那一页。
 func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 	s.settingSection(c, "外观")
+	// ⚠️ 这一格走 `viewDisplayMode`（切换 + 预览），不是光 `pickDisplayMode`：预览
+	// 是这一格的一部分，理由见 displaymode.go 的文件头。
 	s.settingRow(c, "数据显示样式", "内容页排成列表、网格还是紧凑",
-		func() { s.pickDisplayMode(c, st, ro) })
+		func() { s.viewDisplayMode(c, st, ro) })
 	s.settingRow(c, "主题", "选择浅色或深色主题",
 		func() { s.pickTheme(c, st, ro) })
 	s.settingRow(c, "颜色", "背景色和主色，点色块挑颜色",

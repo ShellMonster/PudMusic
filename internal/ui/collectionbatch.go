@@ -196,7 +196,7 @@ func (s *Shell) toggleCollectionMulti(p *collectionPage) {
 	p.multi = !p.multi
 	if !p.multi {
 		clear(p.picked)
-		p.list.List().SetSelection(list.Selection{})
+		p.list.SetSelection(list.Selection{})
 		return
 	}
 	s.attachSelection(p)
@@ -204,11 +204,18 @@ func (s *Shell) toggleCollectionMulti(p *collectionPage) {
 
 // attachSelection 把多选那一摊接线装到当前列表上。
 //
-// 每次**换列表**都要重装（`list.Selection` 装在 `List` 上，而换排序 / 刷新
-// 会整个换掉那个 `List`）——漏了这一次的后果是「刚换了排序，多选态的勾全没了
-// 而且点勾没反应」，而界面上看不出哪里错了。
+// 每次**换列表**都要重装（`list.Selection` 装在底下那一对控件上，而换排序 /
+// 刷新会整个换掉那个 `PagedList`）——漏了这一次的后果是「刚换了排序，多选态的勾
+// 全没了而且点勾没反应」，而界面上看不出哪里错了。
+//
+// 🔴 而且**两份控件都要装**：设置的「数据显示样式」切到网格之后画的是另一半，
+// 只装列表那半边的话网格里一格勾选框都没有（`PagedList.SetSelection` 的注释）。
 func (s *Shell) attachSelection(p *collectionPage) {
-	p.list.List().SetSelection(list.Selection{
+	// ⚠️ 走 `PagedList.SetSelection` 而不是 `p.list.List().SetSelection`：后者只装到
+	// 列表那半边，而用户可能正开着「数据显示样式 = 网格」，那半边压根不画。漏了它
+	// 的症状是「切到网格之后一格勾选框都没有，逐首勾完全做不到」——而全选走
+	// `Len()` / `At()` 不经过画法，照样能用，于是界面上看着「多选还是好的」。
+	p.list.SetSelection(list.Selection{
 		On:     func(i int) bool { return p.pickedAt(i) },
 		Toggle: func(i int) { s.pickRow(p, i) },
 	})

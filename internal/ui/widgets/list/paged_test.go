@@ -653,7 +653,7 @@ func TestAppendingPagesKeepsTheChosenSong(t *testing.T) {
 	if err := tt.Click("第 1 页 歌 5"); err != nil {
 		t.Fatalf("点不到第 5 行：%v", err)
 	}
-	if m, ok := p.list.Selected(); !ok || m.ID != "p1-4" {
+	if m, ok := p.Selected(); !ok || m.ID != "p1-4" {
 		t.Fatalf("选中的是 %v，want p1-4", m.ID)
 	}
 
@@ -661,7 +661,7 @@ func TestAppendingPagesKeepsTheChosenSong(t *testing.T) {
 	tt.Scroll(testerW/2, testerH/2, 0, scrollToBottom)
 	pump(t, tt, "第二页落地", func() bool { return p.Paged().Loaded == 400 && !p.Paged().Loading })
 
-	m, ok := p.list.Selected()
+	m, ok := p.Selected()
 	if !ok {
 		t.Fatalf("翻完页选中没了")
 	}

@@ -145,12 +145,30 @@ type downloadsPage struct {
 	// state 是那张表格的状态：滚动位置、行身份、无障碍名字。
 	state ui.ListState
 
-	// rows 是这一帧要画的任务。**每一帧从应用状态重读一遍**（`sync`），
-	// 不缓存：下载进度是后台线程一直在改的，缓存下来的那份一定过期，而这一页
-	// 上每一个数都是用户拿来判断「下完了没有」的。
+	// filter 是那一排「全部 / 音频 / 视频」现在选的是哪一档。见 downloadFilter。
 	//
-	// ⚠️ 它跟着 `state.Key` / `state.Label` 一起用，所以刷新要发生在建表格
-	// **之前**：闭包读的是这个切片。
+	// ⚠️ 它长在这个对象上，而 `Shell.downloads` 是建一次、跨路由不换的
+	// （`Shell.New`）——所以「切走再切回来，选中的还是原来那一档」是白捡的，
+	// 而验收项点名要它。别把它挪进 view 的局部变量：即时模式每一帧都重画，
+	// 局部变量下一帧就没了（和 `confirmAsk` 同一个理由）。
+	filter downloadFilter
+
+	// all 是这一帧队列里的**全部**记录（`rowsFn` 给的那一份），`rows` 是它
+	// 筛完之后的那一份，画表格用的是 `rows`。
+	//
+	// ⚠️ 两个都留着，是因为有一处必须按**全部**来算：「清空记录」清的是整个
+	// 队列（`App.ClearDownloads`），它那颗按钮灰不灰、确认弹窗里报几条，用
+	// 的是 `len(all)` 而不是 `len(rows)`。按筛完的那份报的话，用户在「视频」
+	// 那一档看到「确认清空这 1 条」，点下去删掉的是 21 条——那一句话是在骗
+	// 用户，而它骗掉的正是不可撤销的那部分（还在下的半成品会被删掉）。
+	//
+	// 进度那边要每帧重读（见下面 `rows` 的注释），而筛选是纯内存的一遍循环，
+	// 它的开销和页面读一次队列快照没法比。
+	//
+	// ⚠️ 「全部」那一档上这两个**是同一份切片**（`filterDownloads` 原样返回）。
+	// 两边都不改，所以眼下没有事；而真要有一天在 `rows` 上动手脚，记得那是
+	// `rowsFn()` 下一帧就要换掉的一份拷贝，不是跨帧活着的状态。
+	all  []download.Snapshot
 	rows []download.Snapshot
 
 	// rowsFn 是 `rows` 的来源。`Shell.New` 里接的是 `app.DownloadSnapshots`。
@@ -189,8 +207,34 @@ func newDownloadsPage(rows func() []download.Snapshot, openDir func(string) erro
 	return &downloadsPage{rowsFn: rows, openDir: openDir, reveal: reveal}
 }
 
-// sync 把这一帧要画的行换掉。
-func (d *downloadsPage) sync(rows []download.Snapshot) { d.rows = rows }
+// sync 把这一帧要画的行换掉（顺便筛一遍）。
+func (d *downloadsPage) sync(all []download.Snapshot) {
+	d.all = all
+	d.rows = filterDownloads(all, d.filter)
+}
+
+// filterDownloads 按 f 筛出这一帧要画的那些行。
+//
+// ⚠️ 它**什么都不碰**：不发请求、不动队列、不写设置。数据早就在内存里了
+// （`app.DownloadSnapshots` 就是队列快照），所以这一档换一次就是切一个切片。
+// 判据是 `download.Snapshot.Video`——不是 `ID` 的 `|video` 后缀、也不是
+// `Dest` 的扩展名（那两条的理由写在 `Snapshot.Video` 上）。
+func filterDownloads(all []download.Snapshot, f downloadFilter) []download.Snapshot {
+	// 「全部」和任何认不出的档位都**原样返回**：队列快照本身就是这一档要的那一份，
+	// 一个字节都不用复制。认不出就当不筛——宁可多画几行，也不要给用户一个空表格
+	// 外加一句「这一档没有记录」，而他刚才点的根本不是那一档。
+	if f != dlFilterAudio && f != dlFilterVideo {
+		return all
+	}
+	want := f == dlFilterVideo
+	out := make([]download.Snapshot, 0, len(all))
+	for _, r := range all {
+		if r.Video == want {
+			out = append(out, r)
+		}
+	}
+	return out
+}
 
 // viewDownloadList 画下载记录页。
 //
@@ -207,6 +251,13 @@ func (s *Shell) viewDownloadList(c *ui.Context, _ *ui.Route) {
 		AlignItems(ui.Stretch).Children(func() {
 		d.viewToolbar(c, s)
 
+		// 筛选那一排。⚠️ **整个队列都是空的时候不摆**：那时候它只能筛出一个空
+		// 列表，而下面那句话（`noDownloads`）已经说清了「怎么才能不空」——
+		// 在一排开关前面加一句「这排开关什么也筛不出来」是白占一行。
+		if len(d.all) > 0 {
+			d.viewFilter(c)
+		}
+
 		// 一条记录都没有时画的是**这一页**的空状态（routes 表里
 		// `/download-list` 那一条，出处和其余 13 条写在一起）。不用表格自己的
 		// 空行：那一行只有一句「暂无内容」，说不了「怎么才能不空」。
@@ -214,7 +265,7 @@ func (s *Shell) viewDownloadList(c *ui.Context, _ *ui.Route) {
 		// ⚠️ 这一支是 return，不是少画表格：`ui.Table` 哪怕 n=0 也会画表头，
 		// 于是空着的时候页面上还杵着五个列名 —— 比空状态更让人以为这一页坏了。
 		if len(d.rows) == 0 {
-			s.viewEmpty(c, "downloads:empty", lookup(downloadListPath).Empty)
+			s.viewEmpty(c, "downloads:empty", d.emptyState())
 			return
 		}
 		d.viewTable(c, s)
@@ -223,6 +274,21 @@ func (s *Shell) viewDownloadList(c *ui.Context, _ *ui.Route) {
 	// 弹窗画在这一列**外面**：它盖的是整个窗口，一个 `Grow(1)` 的页面列里
 	// 放它的话面板会跟着页面走位。
 	d.viewConfirm(c, s)
+}
+
+// emptyState 是这一页空着的时候说的那两句话。
+//
+// **两句话必须分得开**：真的没下载是「怎么才能不空」（`noDownloads`），筛完了
+// 没有是「你在看哪一档、换一档看看」（`dlEmptyAfterFilter`）。混成一句的话，用户
+// 在「视频」那一档看到「暂无内容」，会以为自己一首歌都没下过——而盘上明明躺着
+// 一整列表的音频。验收项点名要的就是这个分别。
+func (d *downloadsPage) emptyState() emptyState {
+	// 「全部」那一档空 = 真的没下载；队列整个是空的也是同一句（那时候筛选那一排
+	// 压根没摆，用户手上没有第三档可选，说「换一档看看」是骗他）。
+	if d.filter == dlFilterAll || len(d.all) == 0 {
+		return lookup(downloadListPath).Empty
+	}
+	return dlEmptyAfterFilter(d.filter)
 }
 
 // viewTable 画那张表格。

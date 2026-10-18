@@ -85,6 +85,21 @@ type Manager struct {
 	wakeup chan struct{}
 	wg     sync.WaitGroup
 
+	// coverWG 数着「后台存封面」那些线（`startCoverSave`）。
+	//
+	// 🔴 **它和 `wg` 是两把锁，不是一把**：存封面**不在**队列那条串行的路上
+	// （那正是它要摆脱的东西——见 cover.go 的文件头），所以 `loop` 不等它们，
+	// 队列才不会被一张图卡住。
+	//
+	// 而 `Close` 要等它们：`m.quit()` 会取消 `m.ctx`，请求立刻断，所以这一步
+	// 不会把退出拖慢，而它保证的是「Close 返回之后没有一条线还在往用户的下载
+	// 目录里写东西」。
+	//
+	// ⚠️ `Add` 和这里的 `Wait` 不会撞上（`WaitGroup` 复用踩过这个坑）：只有
+	// `loop` 会 `Add`，而 `Close` 是**先等 `loop` 退出**（`m.wg.Wait()`）
+	// **之后**才等这一组。
+	coverWG sync.WaitGroup
+
 	closed bool
 }
 
@@ -402,6 +417,11 @@ func (m *Manager) Close(path string) error {
 
 	m.quit()
 	m.wg.Wait()
+
+	// 🔴 存封面那些线也要收（`m.quit()` 已经把它们的请求掐断了，所以这一步不会
+	// 拖慢退出）。顺序**不能换**：`Add` 只来自 `loop`，而 `m.wg.Wait()` 保证
+	// `loop` 已经退出，所以到这里已经不会再有新的 `Add`（见 `Manager.coverWG`）。
+	m.coverWG.Wait()
 
 	// 🔴 后台那条线退出时**可能没走完队列**：`loop` 的外层 select 命中
 	// `ctx.Done()` 就直接 return，还没轮到内层那个 `for`。那些项于是留在「排队中」。

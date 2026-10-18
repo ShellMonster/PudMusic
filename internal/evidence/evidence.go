@@ -439,6 +439,58 @@ var Items = []Item{
 		Spec:     "404 三秒自动回首页，离开就不倒计时",
 		Tests:    []string{"TestNotFoundRedirectsHomeAfterThreeSeconds", "TestLeavingThe404PageCancelsTheRedirect"},
 	},
+	{
+		Category: Paging,
+		// 「数据显示样式」要几件事同时成立，缺一件就退化成「这个设置没用」或者
+		// 「改了只有一页变了」：
+		//
+		//  1. **每一页**都跟着变（逐页一条子测试，少接一页就少一条）
+		//  2. **紧凑真的更矮**（量的是画出来的那一块，不是某个变量）
+		//  3. **网格那一档照样翻得了页**
+		//  4. **网格那一档翻页失败之后还能重试**——这一条才是网格那半边必须有哨兵
+		//     的理由（`blocked` 闩住的是自动重试，解开它的只有哨兵上那个按钮）。
+		//     少了它症状是静默的：歌还在、能点，只是某一页失败之后再也不动了
+		//  5. **哨兵落在某一行的中间格时也画得出来**（歌数除不尽列数就是这种情况）
+		//     ——只判「整行从哨兵开始」那一支的话，网格里看不见它
+		//
+		// ⚠️ 第 3 条和第 4 条**是两件事**，别合成一句「网格没哨兵就翻不了页」——那句话
+		// 是错的（翻页的判据是「末尾那一行进没进画面」，而网格里最后一行就是歌的行）。
+		// 把网格的哨兵拿掉，第 3 条那两条照样绿，只有第 4 条会红（外加
+		// `TestEveryViewShowsTheSentinelWhileThereIsMore`——它钉的是 `SetFooter`
+		// 扇出到两份那一处，其余那些要么只量列表那半边、要么直接对 `*Grid` 调
+		// `SetFooter` 绕过了这一层）。
+		Spec: "「数据显示样式」在三档之间换：每一页都跟着换、紧凑行高真的更矮、网格那一档照样翻页，翻页失败了也还有重试（哨兵落在行中间时同样画得出来）",
+		Tests: []string{
+			"TestEveryPageFollowsTheDisplayStyleSetting",
+			"TestTheCompactRowsAreShorterThanTheNormalOnes",
+			"TestTheGridCountsTheSentinelAsARow",
+			"TestTheGridKeepsPagingWorking",
+			"TestTheGridOffersTheRetryThatTheListOffers",
+			"TestTheGridStillOffersARetryOnARealPage",
+			"TestEveryViewShowsTheSentinelWhileThereIsMore",
+			"TestTheSentinelShowsEvenWhenItLandsMidRow",
+			// 上面那条引出来的另一半：最后一行没排满时，那几格必须空着而不是去越界
+			// 取 `songs[i]`。
+			"TestAnUnfilledLastCellStaysEmpty",
+			"TestTheGridStillPagesOnARealPage",
+			"TestSwitchingViewsKeepsTheSongs",
+			// 多选接线要装到**两份**控件上：只装列表那半边的话网格那一档一格勾选框都
+			// 没有，而全选走 `Len()` / `At()` 不经过画法、照样能用——症状是「九成
+			// 用法没了，界面上看着多选还是好的」。
+			"TestTheBatchOpsStillWorkInEveryView",
+		},
+	},
+	{
+		Category: Paging,
+		// 设置那一格旁边的预览：三张缩略图各画各的形状，选中的那一张用主色描边。
+		// 判据是「描边里离主色更近」而不是「有几个主色像素」——边框是圆角加抗锯齿
+		// 画出来的，逐字比颜色永远是 0 个（见那条测试的注释）。
+		Spec: "「数据显示样式」旁边有预览：选哪一档一眼看得出来",
+		Tests: []string{
+			"TestTheDisplayStyleSettingShowsAPreviewOfEachStyle",
+			"TestThePreviewHighlightsTheChosenStyle",
+		},
+	},
 
 	// ── 双平台 ─────────────────────────────────────────────────────────────
 	{
@@ -1195,6 +1247,86 @@ var Items = []Item{
 			"TestTheHistoryKeysStillHaveAGlyphAndAHitArea",
 			// 资源里不许画透明边撑点击区（换尺寸就错位，且界面上看不出坏了）。
 			"TestTheResourceFilesCarryNoTransparentMargin",
+		},
+	},
+	{
+		Category: Paging,
+		// 下载记录页那一排「全部 / 音频 / 视频」（#99 / SPEC 的 A26，#91 的用户
+		// 故事 21~23）。音频和视频**本来就是同一张表**里的两类行，下了一堆 MV
+		// 之后用户要在一列表的歌里翻才找得到。
+		//
+		// ⚠️ **「筛出来的是哪几个」才是判据，「剩下几个」不是**：一个把两档都
+		// 认成同一类的实现，剩下来的**行数**照样对得上，而屏幕上摆着一支 MV。
+		// 反过来那一半同样要钉：那一位是从**真队列**（队列文件读回来的任务）
+		// 里读出来的——只喂快照的话，「`Snapshot.Video` 谁填谁自便」的接线
+		// 照样绿，而读错了的症状是屏幕上多出一列一模一样的歌行，看不出任何异样。
+		//
+		// ⚠️ **筛出来的空和真的没下载必须是两句话**：混成一句的话，用户在「视频」
+		// 那一档看到「暂无内容」，会以为自己白下了几十首——而那些歌就在下面一档
+		// 里躺着。这两支还要分开钉「那一排摆不摆」：真的没下载不摆（没得可回），
+		// 筛出来的空要摆（用户得回得去），只钉一支的话「一空就收起来」过一半。
+		//
+		// ⚠️ **纯前端**：判据是那台记请求的 http.Client 上仍然是零**加上**队列
+		// 前后一模一样，而不只是「界面上那几行变了」——后者一个「每帧重拉一次
+		// 队列」的写法照样绿，而那个写法的症状是切一次档就被叫一次网络。
+		//
+		// ⚠️ 顺带钉一条**界面上的话不许说谎**：「清空记录」清的是整个队列，所以
+		// 筛着的时候弹窗里报的必须是整个队列的条数。按屏幕上那几行报的话，用户
+		// 看到「确认清空这 1 条」而点下去删掉的是 4 条——不可撤销。
+		Spec: "下载记录页「全部 / 音频 / 视频」三档筛选：各档留下的是**该留的那些行**（判据是真队列里的那一类，不是快照）；纯前端（不发请求、不动队列）；切路由再回来保留；筛出来的空和真的没下载说的不是同一句话，而且那一排在筛空的界面上还回得去；筛着点「清空记录」报的是整个队列的条数",
+		Tests: []string{
+			"TestTheThreeFiltersAreOnScreenAndDefaultToEverything",
+			"TestEachFilterShowsOnlyThatKind",
+			"TestTheFilterReadsTheKindOutOfTheRealQueue",
+			"TestTheFilterSurvivesLeavingAndComingBack",
+			"TestTheEmptyCopyAfterFilteringIsNotTheCopyForNoDownloads",
+			"TestTheEmptyPageHasNoFilterToPoke",
+			"TestTheFilterIsStillThereAfterFilteringEverythingOut",
+			"TestChangingTheFilterSendsNoRequest",
+			"TestClearingWhileFilteredStillCountsTheWholeQueue",
+		},
+	},
+	{
+		Category: Negative,
+		// 下完一首歌之后在它旁边存一份封面（#99 / #91 的用户故事 6）。存这一份是
+		// 为以后的本地音乐库备料，而音乐库读的是歌——**视频那一路不存**：B 站
+		// 给的是稿件的封面，和交织出来的那一帧画面不是一回事。
+		//
+		// 🔴 **文件名必须从落盘的音频名推出来**，不能从歌名重新算一遍：
+		// 同名避让（`歌名 (1).m4a`）会让两边算出两个不同的名字，而用户看到的是
+		// 两个文件、一首歌。而入队时给的扩展名只是个临时值（`prepare` 会按取流
+		// 地址上的真后缀重算），所以「用入队时那个名字」也不对——这一条单独钉。
+		//
+		// ⚠️ **失败不许牵连这一首**：歌已经在 `Dest` 上了，把它标成「出错」是拿
+		// 一整首歌去换一个几百 KB 的图，而界面上那一行的红字只有这一件事可说。
+		// 「已经有了一份就不重下」也是——判据是**图床被要了几次**，不是「文件还
+		// 在」：重下一遍内容一样时这两者长得完全一样，而覆盖会删掉用户自己换上
+		// 去的那张。
+		//
+		// 🔴 **两条「不许」是这个引擎里最贵的两条，都要钉**：存封面**不许**挡住队列
+		// （`loop` 一次下一首，而 `Options.Client` 没有 `Timeout`、图床接了连接不
+		// 回包时那个挂住不会自己解开 —— 后面排着的歌一个字节都下不了），也**不许**
+		// 让一个失败的写留下「下一次会被当成已经有了」的东西（那会让这一首从此没有
+		// 封面，而界面上那一行还写着「下载完成」）。所以落盘走「临时文件 → rename」
+		// （和队列文件同一条约定，`store.go` 顶上写着理由），而「已经有一份」那个
+		// 判据必须是「是个非空的**普通文件**」而不是 `exists()`——同名处是一个目录时
+		// `exists()` 一样为真。
+		Spec: "下载歌曲时封面单独存一份：文件名就是音频名换个后缀（同名避让和落盘时的后缀重算都要跟上）、盘上已有就不再下一次也不覆盖、拿不到不把这一首算成失败、视频那一路不存；存封面不许挡住队列或退出（后台走 + 自带超时 + Close 收得掉）、不许让失败的写留下挡掉之后每一次重试的东西（临时文件 → rename，且「已有」只认非空的普通文件）",
+		Tests: []string{
+			"TestTheCoverLandsNextToTheSongAndSharesItsName",
+			"TestTwoSongsWithTheSameNameGetTheirOwnCover",
+			"TestTheCoverNameFollowsTheNameThatActuallyLanded",
+			"TestACoverAlreadyOnDiskIsNotFetchedAgain",
+			"TestACoverThatCannotBeFetchedDoesNotFailTheSong",
+			"TestAVideoDoesNotGetACoverThatIsNotItsCover",
+			// 不许挡住队列 / 不许挡住退出。
+			"TestACoverHostThatNeverAnswersDoesNotStallTheQueue",
+			"TestClosingTheAppDoesNotWaitOnAHangingCover",
+			// 不许留下挡掉之后每一次重试的东西。
+			"TestTheCoverIsWrittenThroughATemporaryFile",
+			"TestTheFinalNameOnlyEverAppearsWhole",
+			"TestAFailedCoverSaveLeavesNothingBehindThatWouldBlockEveryRetry",
+			"TestADirectoryInTheCoversPlaceIsNotMistakenForACover",
 		},
 	},
 	{

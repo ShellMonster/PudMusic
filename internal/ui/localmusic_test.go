@@ -199,11 +199,16 @@ func TestTheLocalMusicPageShowsItsColumns(t *testing.T) {
 	}
 }
 
-// TestTheThreeDisplayStylesAreThereAndSwitch 钉住「展示样式切换」。
+// TestTheTableAndSongSlotsSwitch 钉住这一页自己的那一排切换。
 //
-// 三档都要真的画出来不一样的东西：三档只切一个变量而内容一样的话，
-// 用户按了按钮看不到任何变化，而且没有任何测试会红。
-func TestTheThreeDisplayStylesAreThereAndSwitch(t *testing.T) {
+// ⚠️ **这一页的开关现在是两档（表格 / 歌曲），不是三档**：这一页原来自己管着
+// 「表格 / 列表 / 网格」，而设置里的「数据显示样式」管的是同一件事——两个控件抢一件
+// 事，用户改了设置却看见这一页没反应，还不知道该看谁。分工见 localmusic.go 文件头
+// 那一段：这一页的开关管「表格还是歌曲」，摆成什么样由设置说了算。
+//
+// 「歌曲」那一档跟着设置换视图，由 `TestEveryPageFollowsTheDisplayStyleSetting`
+// 那一组里本地音乐那一条钉住（它量的正是行高 / 列数变了）。
+func TestTheTableAndSongSlotsSwitch(t *testing.T) {
 	root := t.TempDir()
 	libSong(t, root, "第一首.mp3")
 	libSong(t, root, "第二首.mp3")
@@ -220,25 +225,28 @@ func TestTheThreeDisplayStylesAreThereAndSwitch(t *testing.T) {
 		}
 	}
 
-	// 切到列表：列头没有了（那是表格才有的），卡片那一档在画。
-	if err := tt.Click(localStyles[localStyleList]); err != nil {
+	// 切到歌曲：列头没有了（那是表格才有的），卡片那一档在画。
+	if err := tt.Click(localStyles[localStyleSong]); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 	if tt.HasText("创建时间") {
-		t.Errorf("切到列表之后列头还在，样式没切过去：%q", tt.Texts())
+		t.Errorf("切到歌曲之后列头还在，样式没切过去：%q", tt.Texts())
 	}
 	if !tt.HasText("第一首") {
-		t.Errorf("切到列表之后歌没了：%q", tt.Texts())
+		t.Errorf("切到歌曲之后歌没了：%q", tt.Texts())
 	}
 
-	// 切到网格。
-	if err := tt.Click(localStyles[localStyleGrid]); err != nil {
+	// 切回表格：列头回来。
+	if err := tt.Click(localStyles[localStyleTable]); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
+	if !tt.HasText("创建时间") {
+		t.Errorf("切回表格之后列头没回来：%q", tt.Texts())
+	}
 	if !tt.HasText("第二首") {
-		t.Errorf("切到网格之后歌没了：%q", tt.Texts())
+		t.Errorf("切回表格之后歌没了：%q", tt.Texts())
 	}
 }
 

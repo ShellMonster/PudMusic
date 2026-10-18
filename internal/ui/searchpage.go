@@ -172,6 +172,9 @@ func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int) {
 		s.viewEmpty(c, "search:no-results:"+strconv.Itoa(tab), noSearchResults)
 		return
 	}
+	// 🔴 设置里的「数据显示样式」在这一帧生效（`s.displayView` 的注释写了为什么
+	// 每帧都要调）。三个 Tab 各调各的：三份列表各记着自己停在哪，切 Tab 不重置。
+	t.list.SetView(s.displayView())
 	t.list.View(c)
 }
 
