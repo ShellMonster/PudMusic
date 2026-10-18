@@ -379,6 +379,44 @@ type Shell struct {
 	// bindMedia 判的就是这个——挂不上系统会话不该拦住开窗口，而 bindMedia
 	// 在 `ensureWindow` 里，那个位置**不能**因为一个加分项开天窗。
 	media *media.Session
+
+	// mini 是迷你播放器那个窗口的外壳，nil = 没开。见 miniplayer.go。
+	//
+	// ⚠️ **只有主窗口的外壳有它**：两个窗口是互斥的（Biu 就是主窗口 hide() +
+	// 开 mini），所以迷你窗口自己不会再开第二个。而迷你窗口那一侧靠 `main`
+	// 指回来，关掉自己之后把主窗口的 `mini` 清成 nil。
+	mini *Shell
+
+	// main 是「我是被主窗口开出来的那个」这条边，只在迷你窗口那一侧有值。
+	// 见 `attachMiniWindow`。
+	main *Shell
+
+	// wakeRemove 是摘掉这一条唤醒句柄的动作（`App.AddWake` 给的）。
+	//
+	// 🔴 窗口真关掉时必须调：`App` 那边挨个叫醒，而摘掉的那一条调了是 no-op
+	// （`wakeHandle` 内部是窗口的弱引用），不摘不致命，但「进迷你 / 退出迷你」
+	// 来回十次之后那个列表就有十条，每改一次状态就多走十趟空转。
+	wakeRemove func()
+
+	// toggleMini 是迷你窗口上那个「退出」键要调的东西（= 主窗口的
+	// `toggleMiniPlayer`）。做成字段是为了能替掉它：无头 Tester 里没有事件循环，
+	// 真窗口在测试里也建不出来，所以「点那个键之后两个窗口会不会换」只能靠它
+	// 量（和 autostart / pickImage 同一个道理）。
+	toggleMini func()
+
+	// miniScrub / miniHeld 是迷你窗口上那条进度条自己的一份。
+	//
+	// ⚠️ 它和上面那 `scrub` / `held` **不是同一扇窗的**：`scrub` 挂在主窗口那个
+	// 外壳上，迷你窗口是**另一个外壳**（另一个 `Shell` 实例），天然各有一份，
+	// 两个窗口的拖动不可能串到对方。所以这一对不是「防串」，而是和
+	// `fullScrub` / `fullHeld` 同一个理由：一条进度条的值和「按住没有」是**它自己
+	// 的**状态，写在别的名字底下，下一个人读 `scrub` 会以为那是唯一的那个。
+	//
+	// 真正会串的是应用层那一个：`ScrubStart`/`ScrubEnd` 是 `App` 上的全局方法，
+	// 谁按都调它那一个（见 `viewMiniProgress` 那句「按住的时候值归用户，松手才
+	// seek」——那一半就靠这对标记守住）。
+	miniScrub float64
+	miniHeld  bool
 }
 
 // bindMedia 把系统媒体会话接到这个窗口上。
@@ -461,9 +499,14 @@ func New(a *app.App) *Shell {
 	s.sideBody = s.viewSide
 	s.navBody = s.viewNav
 	s.draw = Guard(s.viewMain, s.onPanic)
-	// 本地音乐这一摊建好之后才能装唤醒回调（`SetLocalWake` 要一个能叫醒
+	// 本地音乐这一摊建好之后才能装唤醒回调（`AddLocalWake` 要一个能叫醒
 	// **所有**画过这一页的窗口的函数，而那正是 `s.local.invalidate`）。
-	a.SetLocalWake(s.local.invalidate)
+	//
+	// ⚠️ **每个窗口建外壳都要登记一次**（`AddLocalWake` 是追加不是替换），
+	// 而这一句在 `New` 里——所以迷你窗口建外壳时也会登记它那一条（它不画这一页，
+	// 那一条是空转）。写成替换的话第二个外壳会把主窗口那条顶掉，症状是
+	// 「后台扫完本地库之后主窗口再也不刷新」，而界面上看不出任何异样。
+	a.AddLocalWake(s.local.invalidate)
 	return s
 }
 
@@ -488,12 +531,18 @@ func (s *Shell) viewLocalMusic(c *ui.Context, _ *ui.Route) {
 
 // Attach 把外壳接到窗口上：装唤醒回调，装关闭策略，窗口真关掉时收尾。
 //
+// ⚠️ **这一整套只给主窗口用**。迷你播放器窗口走 `attachMiniWindow`：它**不**能
+// 装下面那个 `OnClosed`（那是「整个应用收尾」——停播放、关设置、存盘），套上去
+// 的话关掉迷你窗口会把正在放的歌停掉，而主窗口明明还开着。
+//
 // 一个窗口上的生命周期回调全在这儿，以后新增的（显示/隐藏、拖拽文件…）也挂这里：
 // 分成两处的话，总有一个回调会在换窗口的时候漏装，而漏装之后的症状
 // （「窗口没关干净」「图下完了界面不动」）都跟漏装的那一行毫无关系，极难查。
 func (s *Shell) Attach(w *mygo.Window) {
 	s.win = w
-	s.app.SetWake(s.wake.invalidate)
+	// 🔴 铁律三：**逐窗口**登记，App 那边挨个叫醒。只叫醒主窗口的话迷你窗口停在
+	// 旧内容（实测：只投递不唤醒两个窗口各 +0 帧；只唤醒主窗口则迷你窗口停在旧内容）。
+	s.wakeRemove = s.app.AddWake(s.wake.invalidate)
 
 	w.OnClose(func(e *mygo.CloseEvent) {
 		opt := s.app.SettingsSnapshot().CloseWindowOption
@@ -513,6 +562,12 @@ func (s *Shell) Attach(w *mygo.Window) {
 	w.OnClosed(func() {
 		if s.win == w {
 			s.win = nil
+		}
+		// 摘掉这一条唤醒句柄（铁律三那个列表）。摘掉之后调它是 no-op，不摘不致命，
+		// 但主窗口关掉再开一次就多一条，而那个列表每一次状态变化都要走一遍。
+		if s.wakeRemove != nil {
+			s.wakeRemove()
+			s.wakeRemove = nil
 		}
 		// 收掉红点那个每五分钟一跳的定时器（navbar_feed.go 的 arm）。和 404
 		// 那个一样：窗口真关了之后 Invalidate 对它是 no-op，留着不致命，但它会

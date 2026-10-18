@@ -112,7 +112,18 @@ func (s *Shell) installLifecycle() {
 // 栈顶是 `NewWindow ← openWindow ← OnSecondInstance`。改用 WhenReady 之后，
 // 应用没 ready 它就排进队列等 ready，ready 之后立刻建——没有窗口可开的时段
 // 也就没有了。
+//
+// ⚠️ **迷你播放器开着的时候被叫回来的应该是那一扇**：主窗口是「进迷你」那一步
+// 收起来的（`miniplayer.go` 的 `openMiniPlayer`），而两个窗口是互斥的。照常把主
+// 窗口 Show 出来的症状是「点了程序坞图标，主窗口和迷你播放器一起冒出来」——
+// 用户刚缩小的那个窗口又全屏回来了，而迷你那一扇还在。
 func (s *Shell) openWindow() {
+	// 迷你窗口优先。`openMiniPlayer` 里主窗口已经被收起来了，所以这一支要先把
+	// 迷你那一扇叫到前面来。
+	if s.mini != nil && s.mini.win != nil && !s.mini.win.IsDestroyed() {
+		platform.RestoreFromBackground(s.mini.win)
+		return
+	}
 	if s.win != nil && !s.win.IsDestroyed() {
 		platform.RestoreFromBackground(s.win)
 		return

@@ -229,6 +229,12 @@ internal/platform/cmd/, internal/licensing/cmd/   → 生成用的命令行，�
 
 `main.go` 只做一件事：建状态、建窗口、把两者接上。
 
+窗口有**两扇**：主窗口（1200×800）和迷你播放器（320×100 的透明置顶小窗，
+`internal/ui/miniplayer.go`）。它们各有各的 `Shell`（一个外壳对一个窗口），
+但**播放状态是同一份 `app.App`**——所以界面上不会显示不同，前提是改完状态之后
+挨着两扇窗都唤醒（见下面第 2 条）。迷你播放器开着的时候主窗口是收起来的，两个
+窗口互斥（Biu 也是这么干的）。
+
 ## 踩过坑的规矩
 
 写在代码里，也写在这里，因为它们都不是从代码本身能看出来的：
@@ -237,6 +243,9 @@ internal/platform/cmd/, internal/licensing/cmd/   → 生成用的命令行，�
    只刷画面用 `Invalidate()`。
 2. **后台投递完状态必须叫醒界面。** 只投递不唤醒，界面永远停在旧帧。
    走 `ui.Services.Invalidate()`（见 `internal/ui/wake.go`）。
+   **而且要挨着每一扇窗叫醒**：现在有主窗口和迷你播放器两扇窗（都共用同一个
+   `app.App`），所以走的是 `App.AddWake` 那一份挨个叫醒的列表，而每扇窗建外壳
+   时登记自己那一条。只叫醒主窗口的话，迷你窗口停在旧内容（实测）。
 3. **每个 view 外面包一层 `Guard`（recover）。** MyGo 的 `Dispatch`/`drain` 都没有
    recover，view 里 panic 会穿透 Cocoa 事件循环杀掉整个进程。
 4. **单实例锁和退出回调都在 `mygo.App.Run()` 之前装。** 锁晚一步就是两个实例

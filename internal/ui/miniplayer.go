@@ -1,0 +1,504 @@
+// 迷你播放器窗口（SPEC 需求 43~46）：320×100 的透明置顶小窗，贴边悬浮。
+//
+// # 和 `/mini-player` 那一条路由是两件事
+//
+// `nowplaying.go` 的 `viewNowPlaying` 是**主窗口里的一页**（歌名 + 歌词），
+// 它在路由表里占一条（`router.go` 的第 13 条）。这一票要的是 Biu 的
+// `electron/mini-player.ts`：**另一个窗口**——320×100、无边框、透明、置顶，
+// 停在屏幕一角，音乐还在放，界面上还控制得了。
+//
+// Biu 的切法是「主窗口 hide() + 开一个 mini 窗口」，两个窗口互斥
+// （`electron/ipc/window.ts:41-47`），所以同一个按钮既是「进迷你」也是「回主窗口」。
+//
+// # 状态是同一份，窗口是两份
+//
+// 两个窗口各有各的 `Shell`（一个外壳对一个窗口，`Shell.win`），但**播放状态是
+// 同一个 `internal/app.App`**。于是「两个界面上显示不同」这件事要靠两样东西挡住：
+//
+//  1. 读的是同一个 `App.Snapshot()`，界面层**不缓存**播放状态；
+//  2. 改完状态之后**逐窗口**唤醒（铁律三）：`App.AddWake` / `App.AddLocalWake`
+//     是挨个叫醒的，`Attach` / `attachMiniWindow` 每个窗口登记一次。
+//
+// 只叫醒主窗口的话，迷你窗口停在旧内容（实测：只投递不唤醒两个窗口各 +0 帧；
+// 只唤醒主窗口则迷你窗口停在旧内容）。
+//
+// # 三样必须自己做、MyGo 不替我们做的事
+//
+//  1. **背景**：窗口是 `Transparent: true`，框架会把帧清成透明
+//     （`mygo/window.go:433`「Backends keep transparent windows clear」），
+//     主题背景**不填**。不自己画一块不透明底的话，这个窗口在桌面上是隐形的
+//     ——而「窗口开着却看不见」是最难查的一种错。
+//  2. **主题**：铁律二，每一帧第一件事（`applyFrameTheme`）。
+//  3. **recover**：view 里 panic 会穿透 Cocoa 事件循环杀掉整个进程，所以
+//     `NewMini` 外面包一层 `Guard`。
+package ui
+
+import (
+	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/platform"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
+)
+
+// 迷你播放器窗口的尺寸，照 Biu 的 `electron/mini-player.ts:16-17`：
+//
+//	width: 320, height: 100
+//
+// ⚠️ **不许放大**：它要的是「不占屏幕但还能控制播放」（SPEC 需求 43），而 320
+// 正是 Biu 把封面和右边那一列塞下之后仍然不显挤的宽度。
+const (
+	miniWidth  = 320
+	miniHeight = 100
+
+	// miniPad 是外圈留白。Biu 那边留白来自圆角那一圈，这里留 6：让圆角那半圈
+	// 透明边看得出来（否则「窗口是透明的」这件事在画面上一点都看不出来）。
+	miniPad = 6
+
+	// miniCoverCol 是封面那一列的宽。Biu 那边是 100（`CoverView` 的 `w-[100px]`），
+	// 右边只剩 220 —— 因为它那三个键全是图标。我们这边要用中文，100 宽的封面
+	// 右边只剩 208，放不下「上一首」那三个字（账在 `viewMiniTransport`）。
+	miniCoverCol = 64
+	// miniCover 是封面本身的边长 = miniCoverCol - 左右各一个 miniPad
+	//（封面那一列的内边距是 `Padding(miniPad, 0, miniPad, miniPad)`）。
+	miniCover = miniCoverCol - 2*miniPad
+
+	// miniTitleMinW 是歌名那一格最少留多宽。
+	//
+	// ⚠️ **没有它，歌名会被挤成 0 宽**：右边那一列的宽是 320 - 64（封面）-
+	// 12（列的内边距）= 244，扣掉音量 80、那个 44 的键和两道 6 的缝之后剩 108。
+	// 够画七八个字，而**界面上看不出坏了**（字还在那儿，只是没了）。60 是「还
+	// 认得出是哪首」的下限。
+	miniTitleMinW = 60
+
+	// miniVolumeW 是音量条的宽度。拿 80 是「还能看出音量是一到几成」的下限。
+	miniVolumeW = 80
+
+	// miniBackBtnW 是「回到主窗口」那个键的宽。两个汉字 + 两边 6 的内边距 = 38，
+	// 给 44 留一点余量（和 `playbar.metaBtnW` 同一个道理）。
+	miniBackBtnW = 44
+
+	// miniStepW 是上一首 / 下一首的宽。三个汉字 39（13 号字）+ 两边 6 的内边距
+	// = 51，给 64。
+	//
+	// ⚠️ **窄一个字节它们就画成「上一…」**——而**无头 Tester 读的是控件的文本**，
+	// 被截的只是画出来的那几个字，所以所有断言照样是绿的（这一条教训在
+	// `playbar_rate.go` 的 TestRateMenuLabelsAreNotTruncated 那里已经吃过一次，
+	// 所以这里配了一条同样量「画出来的字」的测试）。
+	miniStepW = 64
+
+	// miniPlayW 是播放 / 暂停那个键的宽。Biu 那边是一个 28 的图标，我们写的是
+	// 「播放」/「暂停」两个汉字，所以给 72，让它在那一行里当视觉重心。
+	miniPlayW = 72
+)
+
+// MiniWindowOptions 是迷你播放器窗口的样子。view 是这个窗口每帧要画的界面。
+//
+// ⚠️ **`Frameless: true` 在这里是想要的**，和主窗口正相反：主窗口要的是
+// 「红黄绿留着」（`window.go` 里 `hiddenTitleBar = !Frameless && …` 的那道
+// 判断），而 Biu 的迷你窗口 `frame: false`，压根没有系统控件——它自己画一整块。
+// 这里走真无边框。
+func MiniWindowOptions(view func(*ui.Context)) mygo.WindowOptions {
+	return mygo.WindowOptions{
+		Title:  "Biu 迷你播放器",
+		Width:  miniWidth,
+		Height: miniHeight,
+		// 🔴 `Transparent` 必须配着自己画的背景，理由见文件头那一条。
+		// 单开这一个开关而忘了画底，窗口在桌面上是隐形的。
+		Transparent: true,
+		// Biu：`alwaysOnTop: true, skipTaskbar: true, resizable: false`。
+		// 「置顶」是它作为悬浮控件的本体；「不进任务栏 / 程序坞」是为了不跟
+		// 主窗口抢同一个格子。
+		AlwaysOnTop:       true,
+		SkipTaskbar:       true,
+		Frameless:         true,
+		DisableResize:     true,
+		DisableMinimize:   true,
+		DisableMaximize:   true,
+		DisableFullScreen: true,
+		// 停在用户上次关掉它的地方（和主窗口那个 `StateKey: "main"` 同一套机制）。
+		StateKey: "mini-player",
+		Content:  ui.View(view),
+	}
+}
+
+// miniCorner 是迷你窗口**第一次**出现时停在屏幕的哪个角。
+//
+// ⚠️ 它只管第一次：窗口建过之后 `StateKey` 记住了位置，用户拖到哪儿就停到
+// 哪儿（`mygo/window.go` 的 WindowState 那一段会盖掉 X/Y）。
+//
+// 右上角 + 12 的边距：那一块是「工作区里最不挡事」的位置——左上角被菜单栏占着、
+// 底部被程序坞占着。Biu 那边是居中（`center: true`），那一版是给「缩小成一个
+// 控件继续干活」用的；贴边更贴合「不占屏幕」这一条。
+//
+// work 是主显示器的工作区（`mygo.Screen.PrimaryDisplay().WorkArea`）。传零值就
+// 退回 (0,0)，让框架去居中——单元测试里没有真显示器，走的就是这一支。
+func miniCorner(work mygo.Rectangle) (x, y int) {
+	const margin = 12
+	if work.Width <= 0 || work.Height <= 0 {
+		return 0, 0
+	}
+	return work.X + work.Width - miniWidth - margin, work.Y + margin
+}
+
+// NewMini 建迷你播放器那个外壳。**状态和主窗口共用同一个 App。**
+//
+// 和 `New` 的差别只有两处，都是「这个窗口画的东西不一样」带来的：`draw` 换成
+// 迷你那一帧、`toggleMini` 接上主窗口那个开关。其余（唤醒句柄、封面缓存、主题、
+// 错误页、护栏）全部共用同一套接线——两处各写一份的话，下一条新增的每帧钩子
+// 只会装在主窗口上，而漏装的那一处**在迷你窗口上照样静默失效**。
+func NewMini(a *app.App, toggle func()) *Shell {
+	s := New(a)
+	s.draw = Guard(s.viewMini, s.onPanic)
+	s.toggleMini = toggle
+	return s
+}
+
+// openMiniPlayer 开出迷你播放器那个窗口，并把主窗口收起来。
+//
+// 收主窗口不是可有可无的：Biu 就是这么干的（`electron/ipc/window.ts:43`）。两个
+// 都开着的话用户看到的是「同一个应用两个窗口」，而单实例的意义（见 `openWindow`
+// 的注释）就是「从程序坞再点一下图标只弹一个窗口」。
+func (s *Shell) openMiniPlayer() {
+	if s.mini == nil {
+		s.newMiniShell()
+		s.ensureMiniWindow()
+	}
+	if w := s.win; w != nil && !w.IsDestroyed() {
+		platform.HideToBackground(w)
+	}
+}
+
+// newMiniShell 建出迷你那个外壳，并和主窗口接上（`s.mini` 指过去、反向指回来）。
+// **不建窗口**——建窗口要事件循环，那一半在 `ensureMiniWindow`。
+//
+// ⚠️ **已经有一个就原样还回去，绝不再建一个**：连按两下「迷你」会开出两个迷你
+// 窗口，而两个迷你窗口各放一首歌是比「两个主窗口」更难解释的一种错。
+//
+// 拆出来是为了能测：「两扇窗共享同一份状态」是这一票最要紧的一条（铁律三），
+// 而它必须能**不靠真窗口**摆出来——`mygo.NewWindow` 在应用没 ready 时直接 panic。
+func (s *Shell) newMiniShell() *Shell {
+	if s.mini != nil {
+		return s.mini
+	}
+	mini := NewMini(s.app, s.toggleMiniPlayer)
+	// 迷你窗口关掉之后主窗口得知道它没了，否则下一次按「迷你」什么也不发生。
+	mini.main = s
+	s.mini = mini
+	mini.bindMiniWindow()
+	return mini
+}
+
+// closeMiniPlayer 关掉迷你播放器，把主窗口叫回来。
+func (s *Shell) closeMiniPlayer() {
+	if s.dropMini() {
+		s.restoreMainWindow()
+	}
+}
+
+// dropMini 关掉迷你播放器那个窗口（真的 Close），返回「刚才确实开着」。
+//
+// 「把主窗口叫回来」那一步没有算在这里：它要走系统（`RestoreFromBackground`，
+// 或者压根没有窗口时的 `openWindow`），而单元测试里没有事件循环，调不了也量不到。
+// 剩下的一半是纯逻辑——关窗、主窗口那一侧知不知道它没了——所以留在这一半里测。
+func (s *Shell) dropMini() bool {
+	mini := s.mini
+	if mini == nil {
+		return false
+	}
+	s.mini = nil
+	mini.main = nil
+	if w := mini.win; w != nil && !w.IsDestroyed() {
+		w.Close()
+	}
+	return true
+}
+
+// restoreMainWindow 把主窗口叫回来（迷你期间它是收起来的）。
+func (s *Shell) restoreMainWindow() {
+	if s.win != nil && !s.win.IsDestroyed() {
+		platform.RestoreFromBackground(s.win)
+		return
+	}
+	// 迷你开着的时候主窗口也可能被用户从程序坞叫走又关掉了，那就没有窗口可叫。
+	s.openWindow()
+}
+
+// ensureMiniWindow 真的把迷你窗口开出来。**只能在应用 ready 之后调**
+// （`openMiniPlayer` 排的那条 `WhenReady` 就是为这个，见 `ensureWindow` 的注释：
+// `mygo.NewWindow` 在还没 ready 时是直接 panic 的，`mygo/window.go:374`）。
+func (s *Shell) ensureMiniWindow() {
+	mygo.App.WhenReady(func() {
+		// 排队的这段时间里它可能已经被人关掉了（快捷键连按两下）。
+		mini := s.mini
+		if mini == nil {
+			return
+		}
+		opts := MiniWindowOptions(mini.View)
+		// `mygo.Screen` 头上有 `needsApp`，所以位置只能在 ready 之后取。
+		opts.X, opts.Y = miniCorner(mygo.Screen.PrimaryDisplay().WorkArea)
+		mini.attachMiniWindow(mygo.NewWindow(opts))
+	})
+}
+
+// bindMiniWindow 是「这个外壳现在代表一扇画着迷你播放器的窗口」那一半：
+// 登记自己那条唤醒句柄（铁律三）。
+//
+// 和窗口本身拆开，是因为**这一半才是两扇窗口共一份状态的那根线**，而它测得到
+// （`miniplayer_test.go` 里两个 Tester 走的就是它）；另一半要事件循环。
+//
+// ⚠️ **重复调是空操作**：生产里它被调两次——建外壳时一次（`newMiniShell`，那时
+// 窗口还没建，而唤醒句柄要早点接上），窗口真建出来时再一次（`attachMiniWindow`）。
+// 不判一下的话 `App` 那个列表里就有两条同一个外壳的，而摘的时候只摘掉后一条，
+// 前一条留到进程退出——每改一次状态就多走一趟空转。
+func (s *Shell) bindMiniWindow() {
+	if s.wakeRemove != nil {
+		return
+	}
+	s.wakeRemove = s.app.AddWake(s.wake.invalidate)
+}
+
+// attachMiniWindow 把迷你窗口接到它的外壳上。
+//
+// 🔴 **这里一个字都不复用 `Shell.Attach` 那套**，而且是有原因的：主窗口的
+// `OnClosed` 是「整个应用收尾」——停播放、关设置、存搜索历史和快捷键（见
+// `Attach`）。迷你窗口套上那一套的话，**关掉迷你窗口会把正在放的歌停掉**，
+// 而主窗口明明还开着。症状是「从迷你切回来，音乐没了」，和真因隔得很远。
+//
+// 迷你窗口的 `OnClosed` 因此只做它自己的三件事：摘掉那条唤醒、收掉它自己那几摊
+// **逐窗口**的资源（`New` 给每个外壳都建了一份，见 `releaseMini`）、以及告诉主窗口。
+func (s *Shell) attachMiniWindow(w *mygo.Window) {
+	s.win = w
+	s.bindMiniWindow()
+
+	w.OnClosed(func() {
+		if s.win == w {
+			s.win = nil
+		}
+		// 摘掉这一条：窗口没了之后句柄内部是弱引用、调它是 no-op，留着不致命，
+		// 但「进迷你 / 退出迷你」来回十次之后那个列表就有十条，每改一次状态就
+		// 多走十趟空转。
+		if s.wakeRemove != nil {
+			s.wakeRemove()
+			s.wakeRemove = nil
+		}
+		s.releaseMini()
+		// ⚠️ **主窗口要叫回来**。它是「进迷你」那一步收起来的（`openMiniPlayer`），
+		// 而这一条除了点「退出」之外还有别的路会走到：macOS 上的 ⌘W、Windows 上
+		// 的 Alt+F4。用户从那些路把迷你窗口关掉之后，主窗口还收着——应用还活着、
+		// 音乐还在放，而屏幕上什么都没有了（连 Dock 上的窗口列表都是空的）。
+		//
+		// 退出流程里**不叫**：那时候正在挨个关窗口，再把主窗口 Show 出来是反着的
+		// （`Shell.quitting`，见 `Attach` 里同一句的注释）。
+		if s.main != nil && s.main.mini == s {
+			s.main.mini = nil
+			if !s.main.quitting {
+				s.main.restoreMainWindow()
+			}
+		}
+	})
+}
+
+// releaseMini 收掉迷你那个外壳自己那几摊**逐窗口**的资源。
+//
+// ⚠️ `New` 是给**每个**外壳都建了一份的：封面缓存（它起解码 goroutine）、内存里的
+// 搜索历史和快捷键（各有一个后台写盘的 goroutine）、红点那个定时器。迷你窗口压根不
+// 画那些页面，而它们要是不收，「进迷你 / 退出迷你」来回十次之后就是十份挂着的
+// goroutine 到进程退出为止。
+//
+// 主窗口那份由 `Attach` 的 `OnClosed` 收（那里连设置和 App 一起收），两处不重复。
+func (s *Shell) releaseMini() {
+	s.images.Close()
+	s.feed.disarm()
+	// 存盘失败不往上报错：关一个已经关掉的窗口，没有人在看。
+	_ = s.hist.Close()
+	_ = s.keys.Close()
+}
+
+// viewMini 是迷你播放器那一帧。
+//
+// 结构照 Biu 的 `pages/mini-player/index.tsx:119-217`：封面在左，右边竖着摆
+// 三行——标题、进度、控制。多的两样是 Biu 没有而这一票要求的：**音量**和**回到
+// 主窗口**（Biu 那个 ⤢ 就是回到主窗口，这里换成一个中文键，省得那个字形在
+// 没有它的机器上画成方框）。
+//
+// 🔴 铁律二：第一件事装主题，而且必须在最开头（`SetTheme` 只影响它之后创建的
+// 控件，而 MyGo 每帧开头把主题重置成跟随系统那份，见 theme.go）。
+func (s *Shell) viewMini(c *ui.Context) {
+	s.applyFrameTheme(c)
+
+	st := s.app.Snapshot()
+	t := c.Theme()
+
+	// ⚠️ **底下这一层背景不是装饰**：窗口是透明的（`MiniWindowOptions`），框架
+	// 把帧清成透明，所以这一块不透明底是我们**唯一**的底。不画的话这个窗口在
+	// 桌面上是隐形的。
+	//
+	// 它同时是**拖动区**：这一层上挂了 `DragWindow`，指针落在控件之外的任何
+	// 地方都是在拖窗口（Biu 那边的 `window-drag` / `window-no-drag` 两种 class，
+	// 在 MyGo 里就是这一条命中链的差别，见 `navbar.go` 文件头那一段）。
+	// 底用 `Surface` 而不是 `Background`：这个窗口要的就是「一张卡片浮在桌面上」，
+	// 和主窗口里播放条（`playbar.go` 那个 `Background(t.Surface)`）同一族。圆角
+	// 跟着主题走，用户在设置页调圆角时这一块跟着变，和别处一致。
+	ui.Row(c).Key("mini").Fill().Radius(t.Radius).
+		Background(t.Surface).DragWindow().Children(func() {
+		// 里面照样逐块包一层 Guard（铁律四）：崩掉封面那一块不该把控制键一起带走。
+		Guard(func(c *ui.Context) { s.viewMiniCover(c, st) }, s.onPanic)(c)
+		Guard(func(c *ui.Context) { s.viewMiniControls(c, st, t) }, s.onPanic)(c)
+	})
+}
+
+// viewMiniCover 是左边那一列封面。
+//
+// Biu 那边那一列是 `h-full w-[100px]`，封面**顶到窗口上下边**（`pages/mini-player/
+// index.tsx:28`）。这里是同样的形状——列占满整窗高——但封面本身是 52×52 的方图，
+// 在列里垂直居中：320 宽放不下 100 宽的封面而右边还塞得下三个中文键（账在
+// `miniCoverCol`）。
+//
+// ⚠️ 有封面才画。没歌时 Biu 那边是 `if (!cover) return null`——右边那一列铺满
+// 整窗。一个空框在那儿比没有更让人以为图加载坏了。
+func (s *Shell) viewMiniCover(c *ui.Context, st app.State) {
+	if st.CoverURL == "" {
+		return
+	}
+	ui.Row(c).Key("mini-cover-col").Width(miniCoverCol).Height(miniHeight).
+		Padding(miniPad, 0, miniPad, miniPad).AlignItems(ui.Center).Children(func() {
+		imgcache.View(c, s.images, st.CoverURL, miniCover, miniCover)
+	})
+}
+
+// viewMiniControls 是封面右边那一列：标题 + 音量 + 退出、进度、控制键。
+//
+// ⚠️ **每一行、每一个键都给了 `Key`**（铁律四）。默认的元素身份是「父 ID +
+// 兄弟序号」，而这一列的形状**会变**：播放和暂停是两个不同的按钮（`st.Playing`
+// 分支），歌从没有变成有的时候整列换一遍，Biu 那边那个 ⤢ 我们换成了一个固定
+// 位置的「退出」。没有 key 的话这些换位会让后面每个控件的状态整体错配一格
+// ——而**界面上看不出坏了**：按钮都还在那儿，只是按「上一首」按到了「下一首」。
+func (s *Shell) viewMiniControls(c *ui.Context, st app.State, t *ui.Theme) {
+	// ⚠️ **垂直居中**而不是顶对齐：三行的内容一共 78 高，而这一列有 88（100 减去
+	// 上下各 6）。顶对齐的话底下空 16、上面空 6，整块看上去是往下坠的——而它贴在
+	// 屏幕边上，那 16 像素的空白会显得像没画完。
+	ui.Column(c).Key("mini-controls").Grow(1).
+		Padding(miniPad, miniPad, miniPad, miniPad).Justify(ui.Center).
+		Gap(4).Children(func() {
+		s.viewMiniTitleRow(c, st, t)
+		s.viewMiniProgress(c, st)
+		s.viewMiniTransport(c, st)
+	})
+}
+
+// viewMiniTitleRow 是第一行：歌名、音量、回到主窗口。
+func (s *Shell) viewMiniTitleRow(c *ui.Context, st app.State, t *ui.Theme) {
+	ui.Row(c).Key("mini-title-row").FillWidth().Gap(6).AlignItems(ui.Center).
+		Children(func() {
+			title := st.Title
+			if !st.HasTrack {
+				// 抄 Biu 的 `暂无播放内容`（`pages/mini-player/index.tsx:128`）。
+				title = nothingPlaying.Title
+			}
+			ui.Text(c, title).Key("mini-title").Grow(1).MinWidth(miniTitleMinW).
+				FontSize(13).Bold().MaxLines(1).Ellipsis("…").
+				TextColor(textColor(t, st.HasTrack))
+
+			// 音量在这一行而不是控制那一行：Biu 那边没有音量，而控制那一行的宽被
+			// 三个中文键占满了（账在 `viewMiniTransport`）。
+			// ⚠️ **key 装在 `c` 上、不是装在 `Slider` 返回的那个元素上**：滑块建出来
+			// 的那一刻它的状态就初始化了，而 `Element.Key` 只认「还没初始化状态」的
+			// 元素（`mygo/ui/element.go:611` 直接 panic）。`Context.Key` 是为这类复合
+			// 控件准备的：它在控件被建出来**之前**把身份交给下一个。
+			vol := st.Volume
+			if ui.Slider(c.Key("mini-volume"), &vol, 0, 1).Width(miniVolumeW).
+				Height(16).Label("音量").Changed() {
+				s.app.SetVolume(vol)
+			}
+
+			if ui.Button(c, "退出").Key("mini-back").Width(miniBackBtnW).
+				FontSize(13).Padding(2, 6).MaxLines(1).
+				Tooltip("关掉迷你播放器，回到主窗口").Clicked() {
+				if s.toggleMini != nil {
+					s.toggleMini()
+				}
+			}
+		})
+}
+
+// viewMiniProgress 是第二行：那条进度条。
+//
+// 拖动的分工和播放条一样（`playbar.go` 的 `viewProgress`）：按住的时候值归
+// 用户，松手才 seek。不这么分的话后台那个每 50ms 写回一次位置的时钟会和拖动
+// 打架，症状是拖不动，或者松手又弹回去。
+//
+// ⚠️ 按住看的是 `Pressed()`，不是 `Dragging()`：后者报的是 Drag / Draggable
+// 两套机制，普通 Slider 对它永远是 false（实测：按下滑块移动 200 DIP，
+// Dragging 仍为 false，Pressed 为 true）。理由见 `viewProgress`。
+func (s *Shell) viewMiniProgress(c *ui.Context, st app.State) {
+	known := st.Duration > 0
+
+	// key 装在 `c` 上：滑块的状态是建出来那一刻就初始化的（见上面那一条）。
+	sl := ui.Slider(c.Key("mini-progress"), &s.miniScrub, 0, 1).Grow(1).
+		Height(16).Label("播放进度").Disabled(!known)
+	switch held := sl.Pressed(); {
+	case held && !s.miniHeld:
+		s.miniHeld = true
+		s.app.ScrubStart()
+	case !held && s.miniHeld:
+		s.miniHeld = false
+		s.app.ScrubEnd(s.miniScrub)
+	case !s.miniHeld && known:
+		s.miniScrub = float64(st.Position) / float64(st.Duration)
+	}
+}
+
+// viewMiniTransport 是第三行：上一首、播放/暂停、下一首。
+//
+// ⚠️ **这一行是 320 宽那一笔账的全部**：三个键 64 + 72 + 64 = 200，两道 6 的
+// 缝 12，一共 212，而右边那一列的宽是 320 - 64（封面列）- 12（列的内边距）
+// = 244。余量 32。
+//
+// ⚠️ 余量用完就有一个键被画成「上一…」，而**无头 Tester 读的是控件的文本**，
+// 被截的只是画出来的那几个字——所有断言照样全绿。
+// `TestTheMiniLabelsAreNotTruncated` 量的是画出来的那几个字。
+func (s *Shell) viewMiniTransport(c *ui.Context, st app.State) {
+	ui.Row(c).Key("mini-transport").FillWidth().Gap(6).AlignItems(ui.Center).
+		Children(func() {
+			// 能不能按看的是队列，和播放条上那两个键是同一个判据（`viewStepButtons`）。
+			if ui.Button(c, "上一首").Key("mini-prev").Width(miniStepW).
+				FontSize(13).Padding(2, 6).MaxLines(1).
+				Disabled(!s.app.CanPrev()).Clicked() {
+				s.app.Prev()
+			}
+			s.viewMiniPlay(c, st)
+			if ui.Button(c, "下一首").Key("mini-next").Width(miniStepW).
+				FontSize(13).Padding(2, 6).MaxLines(1).
+				Disabled(!s.app.CanNext()).Clicked() {
+				s.app.Next()
+			}
+		})
+}
+
+// viewMiniPlay 是播放 / 暂停。
+//
+// ⚠️ **key 按角色给（`mini-play`），不按按钮上的字**。字在「播放」和「暂停」之间
+// 换来换去，而 key 若跟着字变，这个按钮每换一次字就换一个新身份，它的按下/悬停
+// 状态跟着重来一次——**界面上看不出坏了**，只是按下去偶尔要按两下。
+//
+// Biu 那边是同一个键换图标（`RiPauseCircleFill` / `RiPlayCircleFill`，
+// `pages/mini-player/index.tsx:187`），我们换的是字，是同一件事。
+func (s *Shell) viewMiniPlay(c *ui.Context, st app.State) {
+	const style = miniPlayW
+
+	if st.Playing {
+		if ui.Button(c, "暂停").Key("mini-play").Width(style).
+			FontSize(13).Padding(2, 6).MaxLines(1).Clicked() {
+			s.app.Toggle()
+		}
+		return
+	}
+	// 没歌时「播放」是灰的：Biu 那边是 `isDisabled={!title}`
+	// （`pages/mini-player/index.tsx:139`）。一个亮着而按了没反应的键比一个灰的
+	// 键更容易让人以为坏了。
+	if ui.PrimaryButton(c, "播放").Key("mini-play").Width(style).
+		FontSize(13).Padding(2, 6).MaxLines(1).Disabled(!st.HasTrack).Clicked() {
+		s.app.Toggle()
+	}
+}

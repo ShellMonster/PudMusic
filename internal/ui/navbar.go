@@ -86,6 +86,16 @@ func (s *Shell) viewNav(c *ui.Context) {
 		if ui.Button(c, "播放列表").Clicked() {
 			s.drawerOpen = !s.drawerOpen
 		}
+		// 迷你播放器的开关。Biu 那边在窗口按钮那一排里（`components/window-action/
+		// index.tsx:46` 的 PictureInPicture 图标），而我们那条顶栏是自己画的，
+		// 所以摆在右边这一列末尾——和「窗口变小了」这件事一样是窗口级动作。
+		//
+		// ⚠️ **顶栏是拖动区**（`nav.DragWindow()`），而这一句在它的 Children
+		// 里，所以按它就是按它、不会变成拖窗口（见本文件文件头那一段）。
+		if ui.Button(c, "迷你").Tooltip("缩成 320×100 的小窗贴边悬浮，音乐不停").
+			Clicked() {
+			s.toggleMiniPlayer()
+		}
 		s.viewDynamicDot(c)
 		s.viewAvatar(c)
 		// 登录 / 退出登录那个入口（login.go 的 viewLoginEntry）。它在 router.go
