@@ -202,12 +202,62 @@ func iconButtonPrimary(c *ui.Context, name, label string, font float32) ui.Eleme
 	return btn
 }
 
+// 下面这四个是「哪个状态配哪一张」的唯一出口。
+//
+// ## 为什么不让调用点自己 `if`
+//
+// 评审踩到过一个真盲区：这些图标最初的测试断的是「几张图形两两不同」，于是
+// **把空心和实心对调**之后全部照样绿——它们确实还是两两不同，而用户看到的是
+// 画到了反的那一张（未赞时显示成灰色实心拇指，和 Biu 相反）。
+//
+// 「两两不同」断的是**忘了换**，「对调之后照样不同」断不了的是**换反了**。所以
+// 现在每一档都收敛到一个函数：调用点不再有第二个决定它画哪张图的地方，而
+// `icons_test.go` 用一张**抄自 Biu 源码**的表逐项钉住这几个函数（那张表里写的是
+// 上游的字面文件名，不是这里的常量——改常量而不改那张表，立刻红）。
+
+// likeIcon 是「赞没赞」该配哪一张。
+//
+// Biu 的 `components/music-thumb/index.tsx`：`isThumb ? <RiThumbUpFill …/> :
+// <RiThumbUpLine …/>` —— 空心是还没赞，实心是赞过了。
+func likeIcon(liked bool) string {
+	if liked {
+		return iconLikeFilled
+	}
+	return iconLike
+}
+
+// favIcon 是「收藏没收藏」该配哪一张。Biu 的 `music-fav-button` 同一种做法。
+func favIcon(faved bool) string {
+	if faved {
+		return iconStarFilled
+	}
+	return iconStar
+}
+
+// transportIcon 是「在放不在放」该配哪一张。Biu 的 `music-play-control/index.tsx`：
+// `isPlaying ? <RiPauseCircleFill/> : <RiPlayCircleFill/>`。
+func transportIcon(playing bool) string {
+	if playing {
+		return iconPause
+	}
+	return iconPlay
+}
+
+// transportLabel 是播放/暂停那一枚的无障碍名字。
+func transportLabel(playing bool) string {
+	if playing {
+		return "暂停"
+	}
+	return "播放"
+}
+
 // playModeIcon 是某一档播放模式该画哪个图标。
 //
-// 界面层这一处**只管画哪个图标**；换档仍然是 `App.CyclePlayMode` / `SetPlayMode`
-// 的事，「放完下一首是谁」是 `app.Queue.Advance` 独家的事（见 queue.go）。
-// 认不出来的档位返回空串——那是 `app` 加了新档而这里没跟上，摆在按钮上的是
-// 一格空白而不是别的意思，`TestEveryPlayModeHasItsIcon` 盯着它。
+// 逐个照 Biu 的 `getPlayModeList`（`src/common/constants/audio.tsx:27-48`）：
+// 顺序 order-play、列表循环 repeat-2、随机 shuffle、单曲 repeat-one。
+//
+// 认不出来的档位返回空串——那是 `app` 加了新档而这里没跟上，摆在按钮上的会
+// 是一格空白而不是别的意思。
 func playModeIcon(m app.PlayMode) string {
 	switch m {
 	case app.PlayModeSequence:

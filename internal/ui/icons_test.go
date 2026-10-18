@@ -130,6 +130,234 @@ func TestEveryPlayModeHasItsIcon(t *testing.T) {
 	}
 }
 
+// TestTheHistoryKeysStillHaveAGlyphAndAHitArea 钉住后退 / 前进那一格。
+//
+// ⚠️ **它是这一票唯一没换成图标资源的一处**（issue 93 的验收点名了它们）：框架的
+// `ui.BackButton` / `ui.ForwardButton` 除 `r.Go(±1)` 还挂着**右键的「去过那些
+// 页」**列表，而那一列要读历史的路径和标题——`Router` 的 `entries` / `at` 是
+// **私有**的，自己重画一个按钮只能把那份列表丢掉。理由写在 navbar.go 的
+// `viewNavBack` 里。
+//
+// 所以那个箭头是框架用 `Draw` 画的一段 path，不是 SVG。它仍然要满足验收的实质
+// 那几条，而这一条把它们钉住，免得哪天框架换了画法或者我们改坏了 padding：
+//
+//	有图形（那一块不是一个纯色）
+//	图形是竖的箭头、不是横的字（和 `TestTheFullPlayerControlsAreAllIcons`
+//	  同一个判据）
+//	按钮框明显大于图形框（实测 34×30 的框里画着 11×18 的箭头）
+//
+// ⚠️ **这里只断「框比图形大」，不断每边留白够不够**：那一格的 padding 是框架写死
+// 的（`Padding(t.Space(1.5), t.Space(2))`），而 `scanGlyph` 量出来的图形包围盒是
+// **外扩过**的，拿它算边距差出来的数有正有负（实测上边距 8、下边距 4，而那个 4
+// 里含着 4 像素的外扩）。每边留白够不够，由播放条上那几枚自己的图标
+// （`TestTheHitAreaIsBiggerThanTheGlyph`，那个 padding 是我们自己的）断。
+func TestTheHistoryKeysStillHaveAGlyphAndAHitArea(t *testing.T) {
+	tt := navBarTester(t, false)
+	for _, label := range []string{navBackLabel, navForwardLabel} {
+		r, ok := tt.Find(label)
+		if !ok {
+			t.Fatalf("顶栏上没有 %q：%q", label, tt.Texts())
+		}
+		g := scanGlyph(tt, label)
+		if g.ink == "" {
+			t.Errorf("%q 那一块是空的（%.1f,%.1f %.1fx%.1f）", label, r.X, r.Y, r.W, r.H)
+			continue
+		}
+		if g.box.W > g.box.H*1.6 {
+			t.Errorf("%q 画出来是 %.1f×%.1f 的横条——那是字，不是箭头",
+				label, g.box.W, g.box.H)
+		}
+		if g.box.W >= r.W || g.box.H >= r.H {
+			t.Errorf("%q 的图形 %.1fx%.1f 并不小于它的框 %.1fx%.1f——"+
+				"按这一格要瞄得准", label, g.box.W, g.box.H, r.W, r.H)
+		}
+	}
+}
+
+// 下面这张表是「哪个状态该配哪一张图标」的**外部依据**：逐条抄自 Biu 的源码，
+// 而且写的是**上游的字面文件名**，不是 icons.go 里的常量。
+//
+// ⚠️ **为什么不直接断那四个函数返回哪个常量**：那样改常量的人顺手把测试也改了，
+// 一点也红不了——这就是评审踩到的那个盲区（原来的测试断「几张图形两两不同」，
+// 实心空心对调之后它们照样两两不同，4000 多行测试全绿，而用户看到的是反的那
+// 一张）。这里钉的是**字面文件名**：改了 `iconLike` 指向的资源而没改这一行，立刻
+// 红；要改这一行，就得对着 Biu 源码看一眼——那正是我们要的。
+//
+// 「两两不同」那条（`TestEveryIcon…`）也留着：它断的是**忘了换**（两个状态画
+// 同一张），这一条断的是**换反了**。两条缺一条就有一类坏没人管。
+var buiIcons = []struct {
+	// state 是这个图标对应的界面状态，说给人听。
+	state string
+	// name 是上游那个文件的「分类/文件名」，逐字照抄 Biu 引的那个图标名换过来的。
+	name string
+	// got 是生产代码在那一个状态上返回的东西。
+	got string
+}{
+	// Biu `components/music-play-control/index.tsx`：
+	//   isPlaying ? <RiPauseCircleFill size={48}/> : <RiPlayCircleFill size={48}/>
+	{"播放中（该画暂停）", "Media/pause-circle-fill.svg", transportIcon(true)},
+	{"停着（该画播放）", "Media/play-circle-fill.svg", transportIcon(false)},
+
+	// Biu `components/music-thumb/index.tsx`：
+	//   isThumb ? <RiThumbUpFill className="text-primary"/> : <RiThumbUpLine size={18}/>
+	{"赞过了", "System/thumb-up-fill.svg", likeIcon(true)},
+	{"还没赞", "System/thumb-up-line.svg", likeIcon(false)},
+
+	// Biu `components/music-fav-button`（`playbar/left`）：收藏了画实心，没收藏画空心。
+	{"收藏过了", "System/star-fill.svg", favIcon(true)},
+	{"还没收藏", "System/star-line.svg", favIcon(false)},
+
+	// Biu `src/common/constants/audio.tsx:27-48` 的 `getPlayModeList`：
+	//   顺序 <RiOrderPlayLine/>  列表循环 <RiRepeat2Line/>
+	//   随机 <RiShuffleLine/>    单曲     <RiRepeatOneLine/>
+	{"顺序播放", "Media/order-play-line.svg", playModeIcon(app.PlayModeSequence)},
+	{"列表循环", "Media/repeat-2-line.svg", playModeIcon(app.PlayModeLoop)},
+	{"随机", "Media/shuffle-line.svg", playModeIcon(app.PlayModeRandom)},
+	{"单曲循环", "Media/repeat-one-line.svg", playModeIcon(app.PlayModeSingle)},
+}
+
+// TestWhichStateGetsWhichIcon 钉住「哪个状态配哪一张图标」。
+//
+// 🔴 **这一条是被评审逼出来的**：原来的 13 条图标测试断的是「几张图形两两不同」，
+// 于是把空心和实心**对调**之后整个 internal/ui（4000 多行测试）照样全绿——
+// 它们确实还是两两不同，而用户看到的是**反的那一张**（未赞时显示成灰色实心拇指，
+// 和 Biu 相反）。「两两不同」断的是**忘了换**，断不了**换反了**。
+//
+// 现在三层同时钉着：
+//
+//  1. 这一条：那张抄自 Biu 源码的表，逐项对上生产代码的返回值。
+//  2. 调用点只剩**一个出口**（`likeIcon` / `favIcon` / `transportIcon` /
+//     `playModeIcon`），没有第二个地方能决定画哪一张。
+//  3. 画面上「还没赞」和「已赞」画出来确实不一样（`TestTheLikeKeyDrawsItsOwnIcon`、
+//     `TestThePlayAndPauseKeysSwapGlyphs`）——防的是「忘了换」。
+//
+// ⚠️ 表里写的是**上游的字面文件名**，不是 icons.go 的常量：改了常量而不改这一
+// 行，红；要改这一行，得对着 Bui 源码看一眼。
+func TestWhichStateGetsWhichIcon(t *testing.T) {
+	for _, c := range buiIcons {
+		if c.got != c.name {
+			t.Errorf("「%s」该画的是 %s（照 Biu 的源码），生产代码给的是 %s——"+
+				"界面上画出来的是**反过来那一张**", c.state, c.name, c.got)
+		}
+	}
+	// 认不出来的档位不许变成「随便挑一张」：那是四档之外又多一个意思。
+	if got := playModeIcon(app.PlayMode("不存在的一档")); got != "" {
+		t.Errorf("认不出来的档位返回了 %q，want 空串（空按钮比画错一张诚实）", got)
+	}
+}
+
+// stateIcons 是**状态驱动**的那几枚图标：画哪一张取决于界面处在什么状态，
+// 而不是取决于这个按钮是哪一个。
+//
+// 🔴 **它们只准出现在 icons.go 的那四个函数里**（likeIcon / favIcon /
+// transportIcon / playModeIcon / volumeIcon），别处一律不许直接摆。
+//
+// 理由是评审踩到的那个盲区：原来那 13 条测试断的是「几张图形两两不同」，于是把
+// 空心和实心**对调**之后 4000 多行测试照样全绿。上面那条
+// `TestWhichStateGetsWhichIcon` 钉住了那几个**函数返回什么**——但只要调用点能
+// 自己再决定一次（view 里一个 `if liked { name = iconLikeFilled }`），它就管不
+// 到画面上了。这一条把那条路堵死：想在 view 里直接摆这几枚图标，立刻报错。
+var stateIcons = []string{
+	"iconLike", "iconLikeFilled",
+	"iconStar", "iconStarFilled",
+	"iconPlay", "iconPause",
+	"iconModeOrder", "iconModeLoop", "iconModeRandom", "iconModeOne",
+	"iconVolumeUp", "iconVolumeMid", "iconVolumeMute",
+}
+
+// TestTheStateIconsOnlyReachTheScreenThroughTheirFunction 钉住「唯一出口」。
+func TestTheStateIconsOnlyReachTheScreenThroughTheirFunction(t *testing.T) {
+	state := make(map[string]bool, len(stateIcons))
+	for _, n := range stateIcons {
+		state[n] = true
+	}
+
+	fset := token.NewFileSet()
+	matches, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// icons.go 里 return 过的那些（每一个都要在名单上，漏一个就是这张表过期了）
+	returned := map[string]string{}
+
+	for _, name := range matches {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("解析 %s 失败，这一就没法查了：%v", name, err)
+		}
+		// icons.go 本身不管：它就是那四个函数的家。
+		if name == "icons.go" {
+			ast.Inspect(f, func(n ast.Node) bool {
+				r, ok := n.(*ast.ReturnStmt)
+				if !ok || len(r.Results) != 1 {
+					return true
+				}
+				if id, ok := r.Results[0].(*ast.Ident); ok && state[id.Name] {
+					returned[id.Name] = name
+				}
+				return true
+			})
+			continue
+		}
+		// 两种写法都要抓：裸标识符（`name := iconLike`）和带包名的
+		// （`ui.Icon(c, ui.iconLike)`，虽然本包不会这么写，但下一个包会）。
+		//
+		// ⚠️ 第一版只扫了 `SelectorExpr`，于是 `name := iconLikeFilled` 那种
+		// **最常见的**绕过写法整个漏过去——实测：改完之后这一条照样全绿。
+		check := func(line int, ident string) {
+			if state[ident] {
+				t.Errorf("%s:%d 直接摆了状态图标 %s——绕过 %s 了，那上面 "+
+					"TestWhichStateGetsWhichIcon 管不到画面上。哪一档配哪一张由那个"+
+					"函数说了算，这里只管调它",
+					name, line, ident, fnFor(ident))
+			}
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch v := n.(type) {
+			case *ast.SelectorExpr:
+				if v.Sel != nil {
+					check(fset.Position(v.Pos()).Line, v.Sel.Name)
+				}
+			case *ast.Ident:
+				check(fset.Position(v.Pos()).Line, v.Name)
+			}
+			return true
+		})
+	}
+
+	// 反查：上面那几个函数 return 过的每一枚都要在这张表上。往后加一张状态图标而
+	// 没往这儿加，那张图标就能被 view 直接摆，这条守卫对它就不管事了。
+	for n, where := range returned {
+		if !state[n] {
+			t.Errorf("icons.go:%s 的某个 return 用了 %s，可它不在 stateIcons 里——"+
+				"view 可以绕过那个函数直接摆它", where, n)
+		}
+	}
+	if len(returned) == 0 {
+		t.Fatal("一个状态图标都没扫到——这条测试已经不管事了")
+	}
+}
+
+// fnFor 说某个状态图标归哪个函数管（报错用，答不上来就说「状态驱动的那几个之一」）。
+func fnFor(icon string) string {
+	switch {
+	case icon == "iconLike" || icon == "iconLikeFilled":
+		return "likeIcon"
+	case icon == "iconStar" || icon == "iconStarFilled":
+		return "favIcon"
+	case icon == "iconPlay" || icon == "iconPause":
+		return "transportIcon"
+	case len(icon) > 8 && icon[:8] == "iconMode_":
+		return "playModeIcon"
+	case len(icon) > 10 && icon[:10] == "iconVolume":
+		return "volumeIcon"
+	}
+	return "状态驱动的那几个函数"
+}
+
 // TestEveryVolumeLevelHasItsIcon 钉住音量那三档图标两两不同。
 //
 // 和播放模式同一个理由：这个图标旁边**没有字**，静音和小声在画面上是两个

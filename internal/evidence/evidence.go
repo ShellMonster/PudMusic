@@ -1184,6 +1184,15 @@ var Items = []Item{
 			"TestTheLikeKeyDrawsItsOwnIcon",
 			"TestEveryPlayModeHasItsIcon",
 			"TestEveryVolumeLevelHasItsIcon",
+			// 「**哪一档配哪一张**」——上面那几条断的是「两张不一样」，断不了
+			// 「对调」（对调之后照样两两不同，而用户看到的是反的那一张）。这一条
+			// 拿一张抄自 Biu 源码的表逐项钉住，那一条堵死「在 view 里绕过」。
+			"TestWhichStateGetsWhichIcon",
+			"TestTheStateIconsOnlyReachTheScreenThroughTheirFunction",
+			// 满屏那一行三枚都是图标（以前是「图标 — 文字 — 图标」半新半旧）。
+			"TestTheFullPlayerControlsAreAllIcons",
+			// 唯一没换成图标资源的那两枚（框架那一支）也仍然有图形、点击区更大。
+			"TestTheHistoryKeysStillHaveAGlyphAndAHitArea",
 			// 资源里不许画透明边撑点击区（换尺寸就错位，且界面上看不出坏了）。
 			"TestTheResourceFilesCarryNoTransparentMargin",
 		},

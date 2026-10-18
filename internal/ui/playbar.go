@@ -33,14 +33,14 @@ const (
 
 	// artistMinW 是 UP 名那一段最少留多宽。
 	//
-	// ⚠️ **没有它，UP 名会被挤成 0 宽**：窗口窄的时候左边那一块只剩 110，
-	// 而两个键加两道缝要 112——UP 名一个像素都分不到，而**界面上看不出坏了**
-	// （按钮和那句话都还在，只有名字没了）。留 60 是「还能认出是哪个 UP」的
-	// 下限，再窄就只剩两个偏旁。
+	// ⚠️ **没有它，UP 名会被挤成 0 宽**：`Grow(1)` 的 UP 名在小到只剩一点的时候
+	// 一个像素都分不到，而**界面上看不出坏了**（按钮和那句话都还在，只有名字没了）。
+	// 留 60 是「还能认出是哪个 UP」的下限，再窄就只剩两个偏旁。
 	//
-	// 那三个键现在是图标（`iconHit` = 28），所以 760 那一档它们要 28×3 + 8×3
-	// = 108，比原来那三个 44 的文字键（132 + 24）宽出 48——**上限比原来松**，
-	// 而这个下限还在。
+	// 第二行现在是**三个**图标键（赞 / 收藏 / 下载），每个 `iconHit` = 28、三道
+	// `metaGap` = 8，所以它们要 28×3 + 8×3 = **108**。
+	// 图标化之前它们是三个 44 宽的文字键加三道缝，要 44×3 + 8×3 = **156**——
+	// 也就是说第二行比原来**窄了 48**，这一档的上限松了，而这个下限没动。
 	//
 	// 本应用的窗口最小宽是 900（`WindowOptions` 的 `MinWidth`），那儿它是完整
 	// 的；760 是测试里的窄窗口，这一档是给它的。
@@ -227,11 +227,8 @@ func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
 	faved := s.app.LikeState().Favorited
 	// 空心 = 还没收藏，实心 = 已经收藏。图标认的是「有没有」，和原来那个
 	// 靠主色染出来的「收藏」两个字说的是同一件事。
-	name := iconStar
-	if faved {
-		name = iconStarFilled
-	}
-	btn := iconButton(c, name, "收藏", iconSm).
+	// 哪一档配哪一张只有 `favIcon` 说了算（理由见 icons.go 那几个函数的头一段）。
+	btn := iconButton(c, favIcon(faved), "收藏", iconSm).
 		Size(iconHit, iconHit).Padding(0, 7).
 		Tooltip(favTooltip(faved))
 	if faved {
@@ -338,13 +335,13 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 		s.viewStepButtons(c)
 
 		if st.Playing {
-			if iconButtonPrimary(c, iconPause, "暂停", iconPlayBtn).
+			if iconButtonPrimary(c, transportIcon(true), "暂停", iconPlayBtn).
 				Size(iconHitPlay, iconHitPlay).Padding(0, 5).
 				Tooltip("暂停").Clicked() {
 				s.app.Toggle()
 			}
 		} else {
-			if iconButtonPrimary(c, iconPlay, "播放", iconPlayBtn).
+			if iconButtonPrimary(c, transportIcon(false), "播放", iconPlayBtn).
 				Size(iconHitPlay, iconHitPlay).Padding(0, 5).
 				Tooltip("播放").Disabled(!st.HasTrack).Clicked() {
 				s.app.Toggle()

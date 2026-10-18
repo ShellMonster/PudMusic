@@ -72,6 +72,61 @@ func advanceFull(s *Shell, tt *mygoui.Tester, fc *fakeClock, d time.Duration) {
 
 // ---- 共享元素转场 ----
 
+// TestTheFullPlayerControlsAreAllIcons 钉住满屏那一行**三枚都是图标**。
+//
+// 🔴 **这一条是被评审指出来的**：满屏那一行原来是「图标 — 文字 — 图标」半新半旧
+// ——两边的上一首/下一首复用了播放条那几个（图标化之后成了图标），中间那个播放/
+// 暂停还是 `ui.PrimaryButton(c, "暂停").Width(96)` 的文字按钮。满屏是用户盯着看得最
+// 久的一屏，中间夹一个绿色文字块和两个灰色箭头，怎么看都不像一套。
+//
+// # 判据是「图形是方的」，不是「那一块有两种颜色」
+//
+// 「有两种颜色」断不出来：主色按钮的底是主色、字是白的，本来就是两种颜色，
+// 而图标是白的、底也是主色——**两种颜色和文字按钮一模一样**。
+//
+// 能分开的是**图形的宽高比**：一个 34 见方的图标在 46 的点击区里，包围盒接近
+// 正方；「暂停」两个字是 26×15 的横条，宽明显大于高。
+//
+// 另外钉住两件小事：三枚**中心在同一行**（绝对 y 不是判据——那一行是 `Absolute`
+// 贴在底部的，它的 y 是「窗口高 − 80」），以及从左到右是「上一首 · 播放 · 下一首」。
+func TestTheFullPlayerControlsAreAllIcons(t *testing.T) {
+	s, tt, fc := fullTester(t)
+	s.openFullPlayer()
+	tt.Frame()
+	if !tt.HasText("关闭全屏") {
+		t.Fatalf("满屏没开，文字有 %q", tt.Texts())
+	}
+	advanceFull(s, tt, fc, 400*time.Millisecond) // 过渡走完，那一行的不透明度才是 1
+	tt.Frame()
+
+	middle := transportLabel(s.app.Snapshot().Playing)
+	want := []string{"上一首", middle, "下一首"}
+
+	var lastX float32
+	for i, label := range want {
+		r, ok := tt.Find(label)
+		if !ok {
+			t.Fatalf("满屏那一行没有 %q，文字有 %q", label, tt.Texts())
+		}
+		g := scanGlyph(tt, label)
+		if g.ink == "" {
+			t.Errorf("%q 那一块没画东西（%.1f,%.1f %.1fx%.1f）", label, r.X, r.Y, r.W, r.H)
+			continue
+		}
+		// 方的是图标，横的是字。
+		if g.box.W > g.box.H*1.3 {
+			t.Errorf("%q 画出来是 %.1f×%.1f 的**横条**（宽明显大于高）——"+
+				"那还是文字按钮，满屏这一行成了「图标 — 文字 — 图标」",
+				label, g.box.W, g.box.H)
+		}
+		if i > 0 && r.X <= lastX {
+			t.Errorf("%q 的左边缘 %.1f 不在 %q（%.1f）右边——顺序反了",
+				label, r.X, want[i-1], lastX)
+		}
+		lastX = r.X
+	}
+}
+
 // TestTheCoverOpensTheFullScreenPlayer 钉住入口：点播放条上那张封面，全屏开。
 //
 // 也钉住反过来的那半句：没歌的时候点封面不开全屏（而是说一句人话）。
