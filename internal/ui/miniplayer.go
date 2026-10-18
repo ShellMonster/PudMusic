@@ -191,15 +191,47 @@ func miniCorner(work mygo.Rectangle) (x, y int) {
 
 // NewMini 建迷你播放器那个外壳。**状态和主窗口共用同一个 App。**
 //
-// 和 `New` 的差别只有两处，都是「这个窗口画的东西不一样」带来的：`draw` 换成
-// 迷你那一帧、`toggleMini` 接上主窗口那个开关。其余（唤醒句柄、封面缓存、主题、
-// 错误页、护栏）全部共用同一套接线——两处各写一份的话，下一条新增的每帧钩子
-// 只会装在主窗口上，而漏装的那一处**在迷你窗口上照样静默失效**。
-func NewMini(a *app.App, toggle func()) *Shell {
+// 和 `New` 的差别有三处，都是「这个窗口画的东西不一样 / 不是自己的东西」带来的：
+// `draw` 换成迷你那一帧、`toggleMini` 接上主窗口那个开关、以及**快捷键和搜索历史
+// 接成主窗口那一份**。
+//
+// ⚠️ **main 是必填的，不是可选的。** 快捷键和搜索历史是「整进程一份」的东西：同一
+// 份设置、同一个后台写盘循环。而 `New` 建出来的是 `newShortcutKeys("")`——**出厂
+// 默认值**，读不到盘（`shortcuts.go` 里 `path == ""` 就直接用 `defaultShortcutSettings`），
+// 而 `mountShortcuts` 只在主窗口的 `Run` 里调过一次。
+//
+// 于是曾经有一个真缺陷：迷你窗口每帧登记的是**出厂默认**的那几条，用户在设置页
+// 配的和删掉的完全不生效——他删掉的默认键在小窗里照响，他真配的键小窗不认。
+// 真机量过：把音量加减改成 ⌘⇧↑/⌘⇧↓ 之后，主窗口认 ⌘⇧↓、小窗认 ⌘↓。
+//
+// 所以这里接的是主窗口**那一个实例**（不是再读一遍盘）：设置页改了它立刻就见效，
+// 而 `closePerWindow` 也不会因为小窗关掉而停掉主窗口那份的写盘（见 `shared`）。
+func NewMini(a *app.App, main *Shell, toggle func()) *Shell {
 	s := New(a)
+	if main != nil {
+		s.adoptShared(main)
+	}
 	s.draw = Guard(s.viewMini, s.onPanic)
 	s.toggleMini = toggle
 	return s
+}
+
+// adoptShared 把「整进程只有一份」的那几样接到另一个外壳上，并把自己开的那几份收掉。
+//
+// ⚠️ **`New` 刚建出来的那两份要真的收掉**：`newShortcutKeys` 和 `newSearchHistory`
+// 各自起了一个后台写盘 goroutine，不收就一直跑到进程退出（而这一份从此没人用）。
+func (s *Shell) adoptShared(main *Shell) {
+	if main.keys != nil && main.keys != s.keys {
+		// 收掉 `New` 刚建的那一份（不报���：这一份从没被用过，也就没有要落盘的东西）。
+		_ = s.keys.Close()
+		s.keys = main.keys
+		s.shared = true
+	}
+	if main.hist != nil && main.hist != s.hist {
+		_ = s.hist.Close()
+		s.hist = main.hist
+		s.shared = true
+	}
 }
 
 // openMiniPlayer 开出迷你播放器那个窗口，并把主窗口收起来。
@@ -229,7 +261,7 @@ func (s *Shell) newMiniShell() *Shell {
 	if s.mini != nil {
 		return s.mini
 	}
-	mini := NewMini(s.app, s.toggleMiniPlayer)
+	mini := NewMini(s.app, s, s.toggleMiniPlayer)
 	// 迷你窗口关掉之后主窗口得知道它没了，否则下一次按「迷你」什么也不发生。
 	mini.main = s
 	s.mini = mini

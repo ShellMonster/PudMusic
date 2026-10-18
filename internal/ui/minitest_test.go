@@ -30,11 +30,16 @@ func newMiniShell(t *testing.T, toggle func()) (*Shell, *app.App) {
 	t.Helper()
 	a := app.New()
 	t.Cleanup(a.Close)
-	s := NewMini(a, toggle)
-	t.Cleanup(s.images.Close)
-	t.Cleanup(func() { _ = s.hist.Close() })
-	t.Cleanup(func() { _ = s.keys.Close() })
-	t.Cleanup(s.feed.disarm)
+	// ⚠️ **要先有一个主窗口的外壳**：`NewMini` 的第二个参数就是它——快捷键和搜索
+	// 历史接的是**它那一份**（`adoptShared`）。而主窗口那个外壳自己开的快捷键要
+	// 挂上盘，否则这一组测的就不是「用户配过的那一份」而是出厂默认值了
+	// （`TestTheMiniWindowUsesTheUsersShortcuts` 正是靠这一点才抓得住那个缺陷）。
+	// 走主干的 `newTestShell`：收尾无条件挂在 `Shell.Close` 上，直接 `New(a)` 会被
+	// `shelltest_test.go` 那一条揪出来。
+	main := newTestShell(t, onApp(a)).s
+
+	s := NewMini(a, main, toggle)
+	t.Cleanup(s.closePerWindow)
 	s.router.Transition = mygoui.TransitionNone
 	return s, a
 }

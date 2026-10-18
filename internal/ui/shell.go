@@ -417,6 +417,21 @@ type Shell struct {
 	// 见 `attachMiniWindow`。
 	main *Shell
 
+	// shared 记着「快捷键和搜索历史是**主窗口那一份**」，不是自己开的。
+	//
+	// ⚠️ 它管的是**收尾**：那两个各自有一个后台写盘循环，而它们此刻**属于另一个
+	// 外壳**——迷你窗口关掉时把主窗口那份 `Close()` 了，主窗口后面在设置页改快捷键
+	// 就再也落不了盘（症状是「设���页改了，重启之后没记住」，而界面上看不出异样）。
+	// 详见 `adoptShared`。
+	shared bool
+
+	// localWakeRemove 是摘掉那一条「本地库变了」唤醒的动作（`App.AddLocalWake` 给的）。
+	//
+	// 🔴 **必须摘**：`New` 每建一个外壳就登记一条，而迷你窗口是「进/退迷你来回新建
+	// 外壳」——不摘的话那个列表单调增长，每扫一遍本地库就多走一趟空转。
+	// 只由 `App.Close()`（进程退出）才清空，那时已经太晚了。
+	localWakeRemove func()
+
 	// wakeRemove 是摘掉这一条唤醒句柄的动作（`App.AddWake` 给的）。
 	//
 	// 🔴 窗口真关掉时必须调：`App` 那边挨个叫醒，而摘掉的那一条调了是 no-op
@@ -558,8 +573,23 @@ func (s *Shell) closePerWindow() {
 
 	// 封面缓存：关掉之后在途的下载和解码 worker 都会停。
 	s.images.Close()
+
+	// 🔴 摘掉「本地库变了」这一条（`New` 里登记的）。不摘的话「进迷你 / 退出迷你」
+	// 来回十次之后那个列表就有十条，每扫一遍库就多走一趟空转——而这一条属于**已经
+	// 收掉的**那个外壳。
+	if s.localWakeRemove != nil {
+		s.localWakeRemove()
+		s.localWakeRemove = nil
+	}
+
 	// 搜索历史与快捷键：写盘是后台合并的，最后一下有可能还等在退避窗口里。
-	// 存盘失败不往上报错：关一个已经关掉的窗口，没有人在看。
+	//
+	// ⚠️ **借来的那一份不能收**（`shared`）：它们此刻属于另一个外壳，而后台写盘
+	// 循环停掉之后，主窗口在设置页改的快捷键就再也落不了盘。这里收的只是**自己开的**
+	// 那两份。
+	if s.shared {
+		return
+	}
 	_ = s.hist.Close()
 	_ = s.keys.Close()
 }
@@ -651,7 +681,10 @@ func New(a *app.App) *Shell {
 	// 而这一句在 `New` 里——所以迷你窗口建外壳时也会登记它那一条（它不画这一页，
 	// 那一条是空转）。写成替换的话第二个外壳会把主窗口那条顶掉，症状是
 	// 「后台扫完本地库之后主窗口再也不刷新」，而界面上看不出任何异样。
-	a.AddLocalWake(s.local.invalidate)
+	//
+	// 摘掉它的那一支存在 `localWakeRemove` 上，由 `closePerWindow` 调——迷你窗口
+	// 「进/退」每回来回新建一个外壳，不摘的话那个列表单调增长。
+	s.localWakeRemove = a.AddLocalWake(s.local.invalidate)
 	return s
 }
 

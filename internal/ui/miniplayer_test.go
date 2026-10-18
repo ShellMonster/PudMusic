@@ -200,8 +200,12 @@ func TestTheMiniFramesCarryTheChosenTheme(t *testing.T) {
 	}
 	t.Cleanup(func() { a.Close(); _ = a.CloseSettings() })
 
-	s := NewMini(a, nil)
-	t.Cleanup(s.images.Close)
+	// ⚠️ **挂设置的是这个 App**（上面 `MountSettings` 装在它上面），所以迷你那个
+	// 外壳也得是同一个 App 上的——`NewMini` 的第二个参数（主窗口的外壳）同样挂
+	// 在它上面，于是两扇窗读的是同一份设置。
+	main := newTestShell(t, onApp(a)).s
+	s := NewMini(a, main, nil)
+	t.Cleanup(s.closePerWindow)
 	tt := miniTester(s)
 	// 系统此刻是浅色（Tester 的默认），设置默认也是「跟随系统」：起点是浅的。
 	tt.SetDark(false)
@@ -524,6 +528,72 @@ func TestTheMiniWindowRegistersTheInAppShortcuts(t *testing.T) {
 	}
 }
 
+// TestTheMiniWindowUsesTheUsersShortcuts 盯**用户配的那一份**，不是出厂默认。
+//
+// 🔴 这是一个真缺陷，本票第一版就有，评审在真机上逮到的：
+// `New` 建出来的是 `newShortcutKeys("")`——**读不到盘**，摆的是
+// `defaultShortcutSettings()`；而 `mountShortcuts()` 只在主窗口的 `Run` 里调过一次。
+// 于是迷你窗口每帧登记的全是**出厂默认**：
+//
+//   - 用户在设置页**删掉**的默认键，在小窗里照响（他明明已经让它失效了）；
+//   - 用户**真配**的那条，小窗不认（他在小窗里按自己配的键，什么也不发生）。
+//
+// 真机量过（隔离 HOME + 死代理）：shortcuts.json 里把音量加减改成 ⌘⇧↑/⌘⇧↓，
+// 主窗口认 ⌘⇧↓，小窗认 ⌘↓。而当时本票那两条测试**都抓不到**：一条按的正是默认值
+// ⌘↑，另一条直接调 `runShortcut` 绕开了按键分发。
+//
+// 所以这一条**改用户的那一份配置再按**，而且断两面：配的那条要认，删掉的那条要不认。
+func TestTheMiniWindowUsesTheUsersShortcuts(t *testing.T) {
+	a := app.New()
+	t.Cleanup(a.Close)
+
+	// ⚠️ **改的是主窗口那一份**。用户是在主窗口的设置页里改的（`settings_page`
+	// 那一页只存在于主窗口），而迷你窗口压根不画设置页。改迷你自己那份的话，
+	// 两条断法都会绿——第一版就是栽在这儿。
+	main := newTestShell(t, onApp(a)).s
+	mini := NewMini(a, main, nil)
+	t.Cleanup(mini.closePerWindow)
+
+	// 「共用同一份」这件事本身：不是「读到同一份文件」，而是**同一个实例**。
+	// 是同一个实例才顺带对两件事——用户改完立刻生效（不用重读盘），
+	// 而迷你窗口关掉时不会停掉主窗口那份的后台写盘循环。
+	if mini.keys != main.keys {
+		t.Fatalf("迷你窗口用的是自己那一份快捷键（%p），不是主窗口那份（%p）："+
+			"它读不到盘，摆的是出厂默认值——用户删掉的默认键在小窗里照响、"+
+			"用户真配的键小窗不认", mini.keys, main.keys)
+	}
+
+	if err := enqueueTwo(a, t); err != nil {
+		t.Fatal(err)
+	}
+	a.Toggle() // 暂停，免得播放器的时钟改状态
+
+	// 用户在主窗口的设置页里把「音量加」从 ⌘↑ 改成 ⌘⇧↑。
+	if err := main.keys.set(shortcutSlot{id: "volumeUp"}, "cmd+shift+up"); err != nil {
+		t.Fatal(err)
+	}
+
+	tt := miniTester(mini)
+	a.SetVolume(0.5)
+
+	// ① 用户真配的那条：小窗得认。
+	tt.Key(mygoui.Cmd|mygoui.Shift, mygoui.KeyUp)
+	tt.Frame()
+	if got := a.Snapshot().Volume; got < 0.54 {
+		t.Errorf("在迷你窗口里按了用户配的 ⌘⇧↑ 之后音量是 %.2f，want 0.55："+
+			"这一扇登记的不是用户那一份", got)
+	}
+
+	// ② 用户已经换掉的那条（默认的 ⌘↑）：小窗**不该**再认。
+	a.SetVolume(0.5)
+	tt.Key(mygoui.Cmd, mygoui.KeyUp)
+	tt.Frame()
+	if got := a.Snapshot().Volume; got > 0.51 {
+		t.Errorf("用户已经把「音量加」从 ⌘↑ 换成 ⌘⇧↑ 了，小窗里按 ⌘↑ 音量还是 %.2f："+
+			"这一扇登记的是出厂默认值", got)
+	}
+}
+
 // TestTheMiniShortcutDoesNotOpenASecondMiniWindow 盯「在小窗里按 ⌘M 是关掉，不是再开一个」。
 //
 // ⚠️ 登记了应用内快捷键之后这一条才成立，而且它是个**真会发生的**错：迷你窗口那一侧
@@ -538,7 +608,7 @@ func TestTheMiniShortcutDoesNotOpenASecondMiniWindow(t *testing.T) {
 
 	back := 0
 	main := newTestShell(t, onApp(a)).s
-	mini := NewMini(a, func() { back++ })
+	mini := NewMini(a, main, func() { back++ })
 	t.Cleanup(mini.releaseMini)
 	mini.main = main
 	main.mini = mini
@@ -607,8 +677,7 @@ func TestTheMiniBackButtonGoesBackToTheMainWindow(t *testing.T) {
 	t.Cleanup(a.Close)
 
 	back := 0
-	mini := NewMini(a, func() { back++ })
-	t.Cleanup(mini.images.Close)
+	mini, _ := newMiniShell(t, func() { back++ })
 	tt := miniTester(mini)
 
 	if err := tt.Click("退出"); err != nil {

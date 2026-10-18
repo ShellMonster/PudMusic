@@ -547,11 +547,12 @@ var Items = []Item{
 		Category: Platform,
 		Spec:     "迷你播放器：320×100 的透明置顶小窗（43）",
 		Tests: []string{
+			// 窗口那几个开关，含「不许装回 `DisableResize`」——`isMaximized` 恒为真
+			// 的话 `StateKey` 一条都存不下来，用户拖到哪都不会被记住。
+			// ⚠️ 这一条证的是**开关摆对了**，不是「真存下来了」：真落盘要真窗口
+			// （见本节末尾「真机才量得到」那条）。
 			"TestTheMiniWindowIsAtBiuNumbers",
 			"TestTheMiniWindowParksInTheTopRightCorner",
-			// 拖到哪就记到哪：`DisableResize` 会让 `isZoomed` 恒为真，于是
-			// `StateKey` 一条都存不下来（实测表在 `MiniWindowOptions` 的注释里）。
-			"TestADeepLinkMakesRoomForTheMainWindow",
 			// 透明窗口自己给了不透明底——不画的话它在桌面上是隐形的。
 			"TestTheMiniCardCoversTheWindow",
 			// 第二扇窗上铁律二（每帧开头装主题）和铁律四（view 包 Guard）也成立。
@@ -566,10 +567,16 @@ var Items = []Item{
 			"TestTheMiniWindowStepsThroughTheQueue",
 			"TestDraggingTheMiniProgressSeeksOnlyOnRelease",
 			"TestTheMiniVolumeSliderSetsTheVolume",
-			// 小窗里也认应用内快捷键（设置页写着「窗口在前台时按它就有用」），以及
-			// 在小窗里按「切换mini/完整模式」是关掉而不是再开一个。
+			// 小窗里认的是**用户配的那一份**而不是出厂默认值；以及在小窗里按
+			//「切换mini/完整模式」是关掉而不是再开一个。
+			// （设置页写着「窗口在前台时按它就有用」，而小窗是最常停在前面的那一扇。）
 			"TestTheMiniWindowRegistersTheInAppShortcuts",
+			"TestTheMiniWindowUsesTheUsersShortcuts",
 			"TestTheMiniShortcutDoesNotOpenASecondMiniWindow",
+			// 迷你开着时来 biu:// 链接：先让开迷你再跳路由（路由表是主窗口的）。
+			"TestADeepLinkMakesRoomForTheMainWindow",
+			// 关掉迷你只关一扇窗（收尾走共用那一段而不是 `Shell.Close`）。
+			"TestTheMiniShellTeardownIsTheSharedOne",
 		},
 	},
 	{

@@ -118,11 +118,27 @@ func TestTheLocalLibraryWakesEveryWindowThatRegistered(t *testing.T) {
 
 	var main, mini atomic.Int32
 	a.AddLocalWake(func() { main.Add(1) })
-	a.AddLocalWake(func() { mini.Add(1) })
+	removeMini := a.AddLocalWake(func() { mini.Add(1) })
 
 	a.RescanLocalMusic()
 	waitWakes(t, "主窗口", &main)
 	waitWakes(t, "迷你窗口", &mini)
+
+	// 迷你窗口关掉了：它那一条必须**摘掉**。
+	//
+	// 🔴 这一条曾经写的是「只增不减是刻意的，一个进程最多两个外壳」——那个理由是
+	// 假的：迷你窗口是**进/退来回新建外壳**的（界面层的 `newMiniShell`），而这一层
+	// 原来只 append 不摘，于是每进退一次就多留一条**属于已经收掉的**外壳的唤醒，
+	// 扫一遍库就多走一趟空转。只有进程退出时 `App.Close` 才清空，那时已经太晚。
+	removeMini()
+	removeMini() // 再调一次必须是空操作（关窗流程走了两遍）
+
+	before := mini.Load()
+	a.RescanLocalMusic()
+	waitWakes(t, "主窗口", &main)
+	if got := mini.Load(); got != before {
+		t.Errorf("已经摘掉的那一条又被叫醒了 %d 次（want %d，只有第一次那一次）", got, before)
+	}
 }
 
 // waitWakes 等那一扇窗被叫醒（后台扫描是异步的，只能等）。

@@ -135,7 +135,7 @@ func (a *App) MountLocalMusic(l LocalMusic) {
 	a.mu.Unlock()
 
 	if wake != nil {
-		lib.addWake(wake)
+		_ = lib.addWake(wake)
 	}
 }
 
@@ -270,10 +270,14 @@ func (a *App) SetLocalRoots(roots []string) {
 // 传进来的回调自己也是「挨个叫醒」的（`internal/ui/localmusic.go` 的
 // `localPage.invalidate` 记着每一个画过这一页的窗口），这一层照样挨个调，
 // 两边是同一件事的两半。
-func (a *App) AddLocalWake(fn func()) {
-	if lib := a.localMusicSnapshot(); lib != nil {
-		lib.addWake(fn)
+func (a *App) AddLocalWake(fn func()) (remove func()) {
+	lib := a.localMusicSnapshot()
+	if lib == nil {
+		// 本地音乐还没挂上（`MountLocalMusic` 排在 `New` 之前，正常不会这样）。
+		// 给一个空操作而不是 nil：调用方无条件地摘一次。
+		return func() {}
 	}
+	return lib.addWake(fn)
 }
 
 // StartLocalMusicWatch 装上文件监听。**必须在事件循环起来之后调。**
@@ -299,20 +303,32 @@ func (a *App) localMusicSnapshot() *localLibrary {
 // localLibrary
 // ─────────────────────────────────────────────────────────────────────────────
 
-// addWake 登记一个「库变了，要一帧」的回调。
+// addWake 登记一个「库变了，要一帧」的回调，返回摘掉它的那一个。
 //
 // ⚠️ 是**追加**不是替换：一个进程有不止一个窗口（迷你播放器），每个窗口建外壳
 // 时都来登记一次。替换的话第二个窗口建好之后，第一个窗口就再也听不到「库变了」
 // ——本地音乐扫完它在主窗口上不刷新，而界面上看不出任何异样。
 //
-// 条数只增不减是刻意的：一个进程最多两个外壳，而多出来的那一条要么是空转
-// （迷你窗口压根不画这一页，它的 `localPage.invalidate` 叫不醒任何人），要么
-// 摘哪一条都不影响结果。为了一个不会发生的「摘掉它」去给函数值配一把能比它的
-// 钥匙（函数值不能比，只能和 nil 比）不值得。
-func (l *localLibrary) addWake(fn func()) {
+// 🔴 **能摘是必须的**，不是「可选的优化」：迷你窗口是**进/退来回新建外壳**的
+// （界面层的 `newMiniShell`），只登记不摘的话这个列表随开关次数单调增长——每扫一遍
+// 库就多走一趟空转，而多出来的那几条属于**已经收掉的**外壳。
+//
+// 函数值不能比（只能和 nil 比），所以「摘掉自己那一条」靠**下标**：登记时就记下了
+// 它在哪一位，而这一段里只有这一处在改 `wakes`。
+func (l *localLibrary) addWake(fn func()) (remove func()) {
 	l.mu.Lock()
 	l.wakes = append(l.wakes, fn)
+	i := len(l.wakes) - 1
 	l.mu.Unlock()
+
+	// 可以调任意次：摘掉之后再调是空操作（关窗流程走了两遍不是什么怪事）。
+	return func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		if i < len(l.wakes) {
+			l.wakes = append(l.wakes[:i], l.wakes[i+1:]...)
+		}
+	}
 }
 
 // scan 起一遍扫描，在飞的那一遍没回来之前不重复起。
