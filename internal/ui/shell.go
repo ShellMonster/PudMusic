@@ -86,6 +86,12 @@ type Shell struct {
 	// images 是网络封面缓存。整个窗口共用一个。
 	images *imgcache.Cache
 
+	// avatar 是顶栏右上角那一格的状态（见 navbar_avatar.go）。
+	//
+	// 建在 Shell 上而不是每帧新建：那一格跨帧要记「已经问过了没有」，每帧
+	// 新建等于每帧都当成没问过——那是一帧一个请求。
+	avatar avatarState
+
 	// local 是本地音乐那一页自己的一摊状态：表格 / 列表 / 网格三档的控件、
 	// 筛选条件、两道确认弹窗、以及**逐窗口**的唤醒句柄表。见 localmusic.go。
 	//
