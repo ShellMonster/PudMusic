@@ -177,6 +177,23 @@ type App struct {
 	// `*time.Timer`，是为了让测试能换成一个手动推进的假钟。
 	lyricStopTimer func()
 
+	// lyricSearch 是「歌词搜索」那一摊，lyricPreview 是「歌词预览」那一摊，
+	// 见 lyrics_search.go。挂上歌词源之前 sources 是空的，界面上的搜索入口
+	// 摆不出来。
+	lyricSearch  lyricSearchState
+	lyricPreview lyricPreviewState
+
+	// hookBetweenAdoptStateAndSave 是**测试专用**的替掉入口：采用歌词时，在「状态
+	// 已经装上」和「往盘上写」之间调它。生产里永远是 nil。
+	//
+	// 为什么需要它：那个窗口只有几十纳秒，靠循环撞是撞不出来的（实测写过一次，跑
+	// 一整天没碰上）。而它护着的是**持久数据**——撑开那一格往里塞一次换歌，就把
+	// 「验键和取键不在同一个临界区」这件事变成一次必现的失败。
+	//
+	// 和 `Shell.pageBody` / `autostart` / `picker` 是同一个形状：一个只给测试用的
+	// 接缝，挂在生产二进制里没有害（只是多一个永远为 nil 的字段）。
+	hookBetweenAdoptStateAndSave func()
+
 	// after 排一个「过 d 之后再跑 fn」的定时器，返回停掉它的函数。New 装成真的。
 	//
 	// 做成字段是为了让**等待**测得到：真等 500ms 的测试要么慢，要么靠

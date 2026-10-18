@@ -218,6 +218,13 @@ type Shell struct {
 	// 一句，主窗口跟着歌往前走，这才是对的。
 	lyric lyricsView
 
+	// lyricSearch 是「搜索歌词」和「歌词预览」那两个弹窗自己那一摊：搜索框里
+	// 正在敲的字、待发的那一次搜索、切在哪个源、候选表。见 lyricssearch.go。
+	//
+	// ⚠️ **逐窗口一份**（同 rateOpen / drawerOpen 的理由）：两个窗口画的是同一首
+	// 歌，可「正在敲的是哪个词、切在哪个源」是各人各眼的事。
+	lyricSearch lyricSearchUI
+
 	// folderEdit 是「新建 / 修改收藏夹」那个弹窗（folderedit.go）。
 	// nil 表示从没开过。
 	//
@@ -830,6 +837,12 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 全屏播放器排在收藏夹弹窗**之后**、Toast **之前**：它盖住整个窗口，
 	// 而提示要浮在最上面（右下角那句话在满屏里也得看得见）。
 	Guard(s.viewFullPlayer, s.onPanic)(c)
+
+	// 歌词搜索与预览那两个弹窗（lyricssearch.go）。**排在满屏之后**：它们是模态
+	// 的、要盖住整页，而满屏盖住的是整个窗口——次序反过来的话用户在满屏里按到
+	// 那个旋钮会看见弹窗开在满屏底下。Toast 仍然在最上面（采用歌词之后那句
+	// 「已经换上这一版」要从预览弹窗上浮过去）。
+	Guard(s.viewLyricDialogs, s.onPanic)(c)
 
 	s.viewToasts(c)
 }

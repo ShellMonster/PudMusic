@@ -405,6 +405,11 @@ func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Dura
 	if active < 0 {
 		lv.forget()
 		s.viewEmpty(c, lyricsEmptyKey, noLyrics)
+		// ⚠️ **「找歌词」那个旋钮这一支也要画**：上游那三个旋钮不受「有没有歌词」
+		// 影响（`index.tsx:380-398` 在歌词区的外层），而用户点它的时机恰恰是
+		// **没有歌词**的时候。少画它的话 `noLyrics.Hint` 那句「在歌词搜索里换个源
+		// 再找一次」就又变回一句兑现不了的承诺——而这一支正是它兑现的地方。
+		s.viewLyricKnobColumn(c, snap, false)
 		return
 	}
 
@@ -456,14 +461,11 @@ func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Dura
 			})
 		})
 
-	// 右下角浮着的两个旋钮。**画在没有歌词的时候不画**（`viewLyrics` 上面那一支
-	// 直接 return 了）：没有歌词时偏移和字号无处可附，落盘那边也不写（见
-	// `app.flushLyrics`），摆着两个按下去什么都不发生的旋钮比不摆更糟。
-	ui.Column(c).Absolute().Right(lyricKnobInset).Bottom(lyricKnobInset).
-		Gap(lyricKnobGap).AlignItems(ui.End).
-		Children(func() {
-			s.viewLyricKnobs(c, snap)
-		})
+	// 右下角浮着的那一列旋钮。⚠️ **偏移与字号画在没有歌词的时候不画**（传下去的
+	// 那个 `false`）：没有歌词时它们无处可附，落盘那边也不写（见
+	// `app.flushLyrics`），摆着两个按下去什么都不发生的旋钮比不摆更糟。而「找
+	// 歌词」那一个两种时候都画（见 `viewLyricKnobColumn`）。
+	s.viewLyricKnobColumn(c, snap, true)
 
 	// ⚠️ 放在整棵树建完之后：它要用容器和正在唱那一句的框，而那两个是上面读到的。
 	lv.centre(c, active, lyricShapeOf(snap.Rows), snap.FontSize)
