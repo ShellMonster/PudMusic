@@ -326,9 +326,15 @@ func TestChangingTheSortGoesBackToPageOne(t *testing.T) {
 		t.Errorf("换排序之后发出去的第一趟是第 %d 页，want 第 1 页", got.page)
 	}
 	// 画面回到了那一页的头：第 1 页的第 1 首重新在屏幕上。
-	if _, ok := tt.Find("第 1 页 第 1 首"); !ok {
-		t.Errorf("换排序之后没有回到第 1 页的头，文字有 %q", tt.Texts())
-	}
+	//
+	// ⚠️ **等这一句画出来，不要画完就读**。上面等的是「**请求**发出去了」（后台记下
+	// 那一趟），而这一句断的是「**画面上**有了」——两者之间隔着响应 → 解码 → 投递
+	// 状态 → 唤醒 → 排版 → 画帧，满载的机器上那几帧要花的时间和空闲时不是一个量级。
+	// 原来读完请求就断言画面，于是满载时偶发红（实测负载 25–40 时十次里碰到一次）。
+	waitFrames(t, tt, "画面回到第 1 页的头", func() bool {
+		_, ok := tt.Find("第 1 页 第 1 首")
+		return ok
+	})
 }
 
 // TestChangingTheKeywordGoesBackToPageOne 是验收第 2 条的后半句：「任一筛选条件」
