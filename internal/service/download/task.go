@@ -432,6 +432,16 @@ type Snapshot struct {
 	Done    int64
 	Total   int64
 	AddedAt int64
+	// Video 报这一项下的是视频。记录页那一排「全部 / 音频 / 视频」筛的就是它
+	// （见 `ui.downloadsPage.viewFilter`）。
+	//
+	// ⚠️ **这里有一份，不许让界面从 `ID` 的 `|video` 后缀去猜**：那个后缀是队列
+	// 文件的**落盘格式**（`TaskID` 为了兼容老队列，让音频那一支逐字保持
+	// `bvid|cid` 不变）。拿它当业务判据的话，哪天有人为了整齐给两边都补上后缀，
+	// 这一排筛选就会静默地把两类都认成「视频」——而界面上一个错都看不出来。
+	// 也不许从 `Dest` 的扩展名猜：`.mp4` 现在只来自视频那一路，可那是一条
+	// 巧合而不是约定，而巧合迟早会被人「顺手统一」掉。
+	Video bool
 	// Percent 是 0~100 的整数进度。总长还不知道时是 -1，界面据此显示
 	// 「准备中」而不是一个假的 0%。
 	Percent int
@@ -442,7 +452,7 @@ func SnapshotOf(t *Task) Snapshot {
 	s := Snapshot{
 		ID: t.ID, Title: t.Title, Cover: t.Cover, Label: t.Label,
 		Dest: t.Dest, Status: t.Status, Err: t.Err, AddedAt: t.AddedAt,
-		Total: t.Total(), Percent: -1,
+		Video: t.Video, Total: t.Total(), Percent: -1,
 	}
 	s.Done = t.Done()
 	if s.Total > 0 {

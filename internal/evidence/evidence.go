@@ -1209,6 +1209,86 @@ var Items = []Item{
 		},
 	},
 	{
+		Category: Paging,
+		// 下载记录页那一排「全部 / 音频 / 视频」（#99 / SPEC 的 A26，#91 的用户
+		// 故事 21~23）。音频和视频**本来就是同一张表**里的两类行，下了一堆 MV
+		// 之后用户要在一列表的歌里翻才找得到。
+		//
+		// ⚠️ **「筛出来的是哪几个」才是判据，「剩下几个」不是**：一个把两档都
+		// 认成同一类的实现，剩下来的**行数**照样对得上，而屏幕上摆着一支 MV。
+		// 反过来那一半同样要钉：那一位是从**真队列**（队列文件读回来的任务）
+		// 里读出来的——只喂快照的话，「`Snapshot.Video` 谁填谁自便」的接线
+		// 照样绿，而读错了的症状是屏幕上多出一列一模一样的歌行，看不出任何异样。
+		//
+		// ⚠️ **筛出来的空和真的没下载必须是两句话**：混成一句的话，用户在「视频」
+		// 那一档看到「暂无内容」，会以为自己白下了几十首——而那些歌就在下面一档
+		// 里躺着。这两支还要分开钉「那一排摆不摆」：真的没下载不摆（没得可回），
+		// 筛出来的空要摆（用户得回得去），只钉一支的话「一空就收起来」过一半。
+		//
+		// ⚠️ **纯前端**：判据是那台记请求的 http.Client 上仍然是零**加上**队列
+		// 前后一模一样，而不只是「界面上那几行变了」——后者一个「每帧重拉一次
+		// 队列」的写法照样绿，而那个写法的症状是切一次档就被叫一次网络。
+		//
+		// ⚠️ 顺带钉一条**界面上的话不许说谎**：「清空记录」清的是整个队列，所以
+		// 筛着的时候弹窗里报的必须是整个队列的条数。按屏幕上那几行报的话，用户
+		// 看到「确认清空这 1 条」而点下去删掉的是 4 条——不可撤销。
+		Spec: "下载记录页「全部 / 音频 / 视频」三档筛选：各档留下的是**该留的那些行**（判据是真队列里的那一类，不是快照）；纯前端（不发请求、不动队列）；切路由再回来保留；筛出来的空和真的没下载说的不是同一句话，而且那一排在筛空的界面上还回得去；筛着点「清空记录」报的是整个队列的条数",
+		Tests: []string{
+			"TestTheThreeFiltersAreOnScreenAndDefaultToEverything",
+			"TestEachFilterShowsOnlyThatKind",
+			"TestTheFilterReadsTheKindOutOfTheRealQueue",
+			"TestTheFilterSurvivesLeavingAndComingBack",
+			"TestTheEmptyCopyAfterFilteringIsNotTheCopyForNoDownloads",
+			"TestTheEmptyPageHasNoFilterToPoke",
+			"TestTheFilterIsStillThereAfterFilteringEverythingOut",
+			"TestChangingTheFilterSendsNoRequest",
+			"TestClearingWhileFilteredStillCountsTheWholeQueue",
+		},
+	},
+	{
+		Category: Negative,
+		// 下完一首歌之后在它旁边存一份封面（#99 / #91 的用户故事 6）。存这一份是
+		// 为以后的本地音乐库备料，而音乐库读的是歌——**视频那一路不存**：B 站
+		// 给的是稿件的封面，和交织出来的那一帧画面不是一回事。
+		//
+		// 🔴 **文件名必须从落盘的音频名推出来**，不能从歌名重新算一遍：
+		// 同名避让（`歌名 (1).m4a`）会让两边算出两个不同的名字，而用户看到的是
+		// 两个文件、一首歌。而入队时给的扩展名只是个临时值（`prepare` 会按取流
+		// 地址上的真后缀重算），所以「用入队时那个名字」也不对——这一条单独钉。
+		//
+		// ⚠️ **失败不许牵连这一首**：歌已经在 `Dest` 上了，把它标成「出错」是拿
+		// 一整首歌去换一个几百 KB 的图，而界面上那一行的红字只有这一件事可说。
+		// 「已经有了一份就不重下」也是——判据是**图床被要了几次**，不是「文件还
+		// 在」：重下一遍内容一样时这两者长得完全一样，而覆盖会删掉用户自己换上
+		// 去的那张。
+		//
+		// 🔴 **两条「不许」是这个引擎里最贵的两条，都要钉**：存封面**不许**挡住队列
+		// （`loop` 一次下一首，而 `Options.Client` 没有 `Timeout`、图床接了连接不
+		// 回包时那个挂住不会自己解开 —— 后面排着的歌一个字节都下不了），也**不许**
+		// 让一个失败的写留下「下一次会被当成已经有了」的东西（那会让这一首从此没有
+		// 封面，而界面上那一行还写着「下载完成」）。所以落盘走「临时文件 → rename」
+		// （和队列文件同一条约定，`store.go` 顶上写着理由），而「已经有一份」那个
+		// 判据必须是「是个非空的**普通文件**」而不是 `exists()`——同名处是一个目录时
+		// `exists()` 一样为真。
+		Spec: "下载歌曲时封面单独存一份：文件名就是音频名换个后缀（同名避让和落盘时的后缀重算都要跟上）、盘上已有就不再下一次也不覆盖、拿不到不把这一首算成失败、视频那一路不存；存封面不许挡住队列或退出（后台走 + 自带超时 + Close 收得掉）、不许让失败的写留下挡掉之后每一次重试的东西（临时文件 → rename，且「已有」只认非空的普通文件）",
+		Tests: []string{
+			"TestTheCoverLandsNextToTheSongAndSharesItsName",
+			"TestTwoSongsWithTheSameNameGetTheirOwnCover",
+			"TestTheCoverNameFollowsTheNameThatActuallyLanded",
+			"TestACoverAlreadyOnDiskIsNotFetchedAgain",
+			"TestACoverThatCannotBeFetchedDoesNotFailTheSong",
+			"TestAVideoDoesNotGetACoverThatIsNotItsCover",
+			// 不许挡住队列 / 不许挡住退出。
+			"TestACoverHostThatNeverAnswersDoesNotStallTheQueue",
+			"TestClosingTheAppDoesNotWaitOnAHangingCover",
+			// 不许留下挡掉之后每一次重试的东西。
+			"TestTheCoverIsWrittenThroughATemporaryFile",
+			"TestTheFinalNameOnlyEverAppearsWhole",
+			"TestAFailedCoverSaveLeavesNothingBehindThatWouldBlockEveryRetry",
+			"TestADirectoryInTheCoversPlaceIsNotMistakenForACover",
+		},
+	},
+	{
 		Category: HTTP,
 		// 收藏夹 ⋯ 菜单里「清除失效内容」和「删除收藏夹」这两个项**早就在位**、
 		// 文案也写好了，而按下去只弹一句「还没接上」。这一条钉的是它们变成真
