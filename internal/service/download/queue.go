@@ -550,6 +550,22 @@ func (m *Manager) runOne(id string) {
 	case err = <-runDone:
 	case <-ctx.Done():
 		err = context.Canceled
+		// ⚠️ **两个 case 都 ready 时 Go 是随机挑的**，而这一支挑错的后果是
+		// 「一首已经下完的歌被记成暂停」：用户按「继续」会走一遍 `prepare`，
+		// 而半成品已经被改名成最终文件了 → `os.Stat` 不到 → 清空分块记账
+		// → **几百兆从零重下**。
+		//
+		// 落盘之后到这一行之间原本只有几微秒（一个 `os.Rename`），所以这个洞
+		// 几乎撞不上；存封面（`saveCover`）在那之后还要走一次网络往返，把窗口
+		// 拉到了几百毫秒——而用户完全可能正好在这几百毫秒里按下暂停。
+		// 所以收了之后再看一眼后台那条线：它回来了就用它那个结果。
+		//
+		// 非阻塞是必须的：那个「取流方不理 ctx」的 goroutine 可能永远不会回来
+		// （见上面那段注释），这里等它就等于把「退不出去」那个 bug 请回来。
+		select {
+		case err = <-runDone:
+		default:
+		}
 	}
 	cancel()
 

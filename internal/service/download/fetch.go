@@ -150,23 +150,46 @@ func (m *Manager) run(ctx context.Context, id string) error {
 		// 只有一条流：下完就是它。半成品留在 `.part` 上，用户在下载
 		// 目录里看到的就永远是完整的一首，不会有一首「打不开的歌」
 		// 混在里面。
-		return m.land(id, part)
+		if err := m.land(id, part); err != nil {
+			return err
+		}
+	} else {
+		// 第二那条流（音频）。**它和主那条流各自算进度、各自续传**——
+		// 混在一起记的话「下了一半」这句话就没意义了（见 `Companion`）。
+		clen, err := m.probeURLs(ctx, src.CompanionURLs)
+		if err != nil {
+			return fmt.Errorf("download: 音频流：%w", err)
+		}
+		cpart, err := m.prepareCompanion(id, src, clen)
+		if err != nil {
+			return err
+		}
+		if err := m.pullStream(ctx, id, true, cpart, src.CompanionURLs); err != nil {
+			return err
+		}
+		if err := m.runMux(ctx, id, part, cpart); err != nil {
+			return err
+		}
 	}
 
-	// 第二那条流（音频）。**它和主那条流各自算进度、各自续传**——
-	// 混在一起记的话「下了一半」这句话就没意义了（见 `Companion`）。
-	clen, err := m.probeURLs(ctx, src.CompanionURLs)
-	if err != nil {
-		return fmt.Errorf("download: 音频流：%w", err)
+	// 封面跟着这一首存一份（`saveCover`）。**错只记日志、不往上交**：这一段
+	// 跑的时候歌已经在 `Dest` 上了，把它算成「这一首下不了」是拿一整首歌去换一个
+	// 几百 KB 的图，而界面上那一行的红字只有这一件事可说（见 cover.go）。
+	//
+	// ⚠️ **两条流都走到这里，而不是塞进上面那一个分支里**：视频那一路现在带
+	// 第二条流（`Enqueue` 一定会给它建 `Companion`），所以「只在音频那一支
+	// 存」的实现里那句「视频不存」就是一句没人会走到的空话——而哪天有人把
+	// `Companion` 改成有伴流才建，MV 就开始存封面了，**没有任何测试会红**。
+	// 放在这里，那道判断就真的在挡东西（`coverOf` 里），也有测试盯着它。
+	//
+	// ⚠️ 它在**落盘之后**、状态落成「完成」之前，所以用户看到「下载完成」的
+	// 时候封面已经在那儿了——那正是存它要的（本地音乐库扫目录的那一刻）。
+	// 代价是落盘到完成之间多了一次网络往返，所以 `runOne` 那个 `select` 必须
+	// 偏向「后台已经回来了」那一支（见那里的注释）。
+	if err := m.saveCover(ctx, id); err != nil {
+		logCoverErr(id, err)
 	}
-	cpart, err := m.prepareCompanion(id, src, clen)
-	if err != nil {
-		return err
-	}
-	if err := m.pullStream(ctx, id, true, cpart, src.CompanionURLs); err != nil {
-		return err
-	}
-	return m.runMux(ctx, id, part, cpart)
+	return nil
 }
 
 // hasCompanion 报这一项有没有第二那条流。**必须在锁下调**。
