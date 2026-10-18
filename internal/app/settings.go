@@ -312,8 +312,10 @@ type Settings struct {
 	// 「没设过」，要修就得给这几格一起换成 `*bool` 或者涨一次 SchemaVersion 再
 	// 迁移——那是另一票的事，不该混在「加四档播放模式」里顺手做掉。
 	//
-	// 今天没人在意：分集视频的队列（多 P 一起进队列）是 BMG-47 的 A12，还没做，
-	// 而这个开关现在只在**队列里已经有分集**的时候才改变任何事。
+	// 今天没人在意：这个开关只在**队列里已经有分集**的时候才改变任何事，而
+	// 队列里现在**没有**分集——分集抽屉（BMG-47 的 A12）是换集时**就地改队列里
+	// 那一项的 Cid**，不插新的项（见 `App.PlayPart` 与 `Item.PageIndex` 那段
+	// 注释）。要让这个开关真的有话可说，得让每一集各占一项，那是另一件事。
 	ShouldKeepPagesOrderInRandomPlayMode bool `json:"shouldKeepPagesOrderInRandomPlayMode"`
 
 	// extra 是这个版本的代码不认识的键，原样带着走。
