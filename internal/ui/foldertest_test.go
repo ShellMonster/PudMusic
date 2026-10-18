@@ -47,6 +47,13 @@ type folderBili struct {
 	pages [][]map[string]any
 	// ps / pn 记下每一次列表请求的步长和页码。
 	ps, pn []string
+	// arrived 是 created/list **收到了几个请求**，记在闸门**之前**。
+	//
+	// ⚠️ 为什么不能拿 `pn` 顶这一份：`pn` 是在取锁之后记的，而 `listGate` 卡的
+	// 就是取锁之前那一段——被卡住的那一趟在闸门放走之前一条都记不上，而
+	// 「它到了没有」恰恰是刷新那条测试要等的第一个信号（等它到了才点第二下，
+	// 才真的构成「连点」）。
+	arrived int
 	// info 是 folder/info 的固定回答。
 	info map[string]any
 	// askedInfo 记下 folder/info 被问了几次、问的是哪个 id。
@@ -65,6 +72,14 @@ type folderBili struct {
 	// 圈」「弹窗没关」那两个中间态**观察不到**，测试只能靠碰运气（本地跑绿、
 	// CI 上偶尔红）。卡住那一趟，中间态就是确定的。
 	gate <-chan struct{}
+
+	// listGate 让 **created/list**（拉「我创建的」收藏夹列表）那一趟卡住。
+	// nil = 不卡。
+	//
+	// ⚠️ **单独一个而不是复用 `gate`**：那个是给写接口用的，而收藏夹列表是**读**
+	// 接口——把它卡住的话，收藏夹选择弹窗自己就拉不出列表，`folderShell` 那一族
+	// 测试会跟着挂住。要验「刷新」那条路上那个在飞状态，就得只卡这一个读接口。
+	listGate <-chan struct{}
 }
 
 // urlValues 是录下来的一张表单。
@@ -90,6 +105,18 @@ func newFolderBili(t *testing.T, gate <-chan struct{}) *folderBili {
 		//
 		// 卡在**取锁之前**：卡着的时候还要能把已经收到的请求读出来（测试要
 		// 断言「发出去的那份对不对」），握着锁卡住会把两边都锁死。
+		//
+		// `listGate` 同理，而且它更得在锁前面：卡着的正是一个**读**请求，
+		// 而测试要读的恰恰是「它收到没有」——所以收到的那一刻先记一下
+		// `arrived`（见那个字段的注释）。
+		if r.URL.Path == "/x/v3/fav/folder/created/list" {
+			f.mu.Lock()
+			f.arrived++
+			f.mu.Unlock()
+			if f.listGate != nil {
+				<-f.listGate
+			}
+		}
 		if f.gate != nil && isFolderWrite(r.URL.Path) {
 			<-f.gate
 		}
@@ -192,6 +219,13 @@ func (f *folderBili) asked() []string {
 	return append([]string(nil), f.askedInfo...)
 }
 
+// arrivals 是 created/list 到过几个请求（含还卡在闸门上的那些）。
+func (f *folderBili) arrivals() int {
+	f.lock()
+	defer f.unlock()
+	return f.arrived
+}
+
 func (f *folderBili) writes() []urlValues {
 	f.lock()
 	defer f.unlock()
@@ -223,6 +257,17 @@ func folderShell(t *testing.T, f *folderBili) (*Shell, *mygoui.Tester) {
 	s, tt := newShell(t)
 	s.app.SetWake(s.wake.invalidate)
 
+	s.app.MountCollections(app.CollectionRefs{Client: fixtureClient(t, f), Settle: 0})
+	return s, tt
+}
+
+// fixtureClient 造一个**指着那台假 B 站**的客户端。
+//
+// 三样缺一样都不行：主机要指过去（否则真发到 B 站去）、传输层要带凭据白名单
+// （否则 SESSDATA 压根不会出现在请求里，而那一层是这一组测试要守的边界之一）、
+// jar 里要有 DedeUserID（「我创建了哪些收藏夹」那个接口问的是 up_mid）。
+func fixtureClient(t *testing.T, f *folderBili) *bili.Client {
+	t.Helper()
 	transport := &app.CredentialTransport{
 		Base:   f.Server.Client().Transport,
 		Policy: app.DefaultInjectPolicy().AllowBiliHost(hostOfFixture(f.URL)),
@@ -232,8 +277,7 @@ func folderShell(t *testing.T, f *folderBili) (*Shell, *mygoui.Tester) {
 	if err := cli.SeedCookies([]*http.Cookie{{Name: "DedeUserID", Value: "7", Path: "/"}}); err != nil {
 		t.Fatal(err)
 	}
-	s.app.MountCollections(app.CollectionRefs{Client: cli, Settle: 0})
-	return s, tt
+	return cli
 }
 
 // stubPicker 让「弹文件框选一张图」返回那张图。
