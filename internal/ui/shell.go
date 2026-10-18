@@ -252,6 +252,14 @@ type Shell struct {
 	// 零值是「没在问」。和 folderEdit 一样只能由界面线程读写（铁律一）。
 	folderDelete favoriteDeleteAsk
 
+	// leave 是「刚被删掉的那个容器，等下一帧在界面线程上走开」那一个交接槽。
+	//
+	// ⚠️ **它带锁，是因为写它的是后台 goroutine**：删收藏夹那一趟跑在那边
+	// （`app.DeleteCollectionFolder` 立刻返回），而 `navigate` 和
+	// `s.collection = nil` 都只能由界面线程动（铁律一）。直接在回调里调，
+	// `-race` 会报，而真机上的症状是「点删除有时候跳、有时候不跳」。
+	leave pendingLeave
+
 	// dynLikes 是动态卡片上「赞」的那一份状态（dynamiccard.go）。挂在壳上
 	// 而不是页面状态里：动态流和 UP 空间是两个页面，但同一条动态在两边是同一
 	// 个赞——放两份的话，用户在动态流赞完、切到那个 UP 的空间里看到的是没赞。

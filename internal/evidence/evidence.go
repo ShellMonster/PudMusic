@@ -1208,4 +1208,59 @@ var Items = []Item{
 			"TestNoSourcesMeansTheSearchDialogNeverOpens",
 		},
 	},
+	{
+		Category: HTTP,
+		// 收藏夹 ⋯ 菜单里「清除失效内容」和「删除收藏夹」这两个项**早就在位**、
+		// 文案也写好了，而按下去只弹一句「还没接上」。这一条钉的是它们变成真
+		// 动作之后的几件事——每一样都是「做了一半比不做更糟」的那一种：
+		//
+		//   - **清除失效内容是服务端的一个动作**，不是本地按 attr 筛一遍再删。
+		//     筛的那条路在三个地方各自会漏（`Attr` 认不全 / 翻页期间列表在变 /
+		//     几千首要几十趟请求），而三个症状长得一模一样：清完还剩几个。
+		//   - **清完之后**列表才重来。点完立刻刷的话刷回来的是还带着失效条目的
+		//     列表——刷新确实发生了，只是发生得太早，症状是「按完什么都没变」。
+		//   - **只有自己创建的收藏夹**摆得出删除（别人建的 B 站没这个接口、
+		//     默认收藏夹删不掉、没登录时 `0 == 0` 会误判通过）。三个少一个都是
+		//     让用户按出一个注定失败的按钮。
+		//   - **「删 B 站上那个」和「只删本地记录」是两个选项、两套措辞**：前者
+		//     点名收藏夹、点名里面几首、说撤不回来；后者明确说 B 站上的还在，
+		//     而它**一个请求都不发**。
+		//
+		// ⚠️ **这一票没走真网**：两个都是写操作，写的是用户真实的收藏夹，而
+		// 「删 B 站上那个」不可逆。所以全部用 HTTP fixture。真接口的兼容性
+		// （参数集对不对、B 站收不收）要真机回归，见任务报告「需要真网验」。
+		Spec: "收藏夹 ⋯ 菜单的「清除失效内容」和「删除收藏夹」：清除是服务端的一个动作（本地不筛）、清完之后列表才重来、只有自己建的收藏夹摆得出删除、取消则一个请求都不发；「删 B 站上那个」和「只删本地记录」分成两个选项且措辞不同，后者一个字节都不往 B 站发（这一票走 HTTP fixture，两个都是会动用户真实收藏夹的写操作）",
+		Tests: []string{
+			// 服务层：发出去的形状。少一个字段 B 站不报错，只是清不干净。
+			"TestCleanSendsOnlyTheFolderID",
+			"TestCleanRefusesNobody",
+			"TestCleanSaysWhichFolderItWas",
+			// 业务层：谁有资格删。
+			"TestOnlyYourOwnFolderOffersDeletion",
+			"TestTheHeaderInfoCarriesWhatDeletionJudgesOn",
+			// 业务层：清完之后界面才知道该重来。
+			"TestClearingInvalidAsksTheServerToDoIt",
+			"TestAFinishedClearTellsTheListToRedraw",
+			"TestAFailedClearDoesNotTellTheListToRedraw",
+			// 业务层：两个删除共用一条路 / 本地那个不发请求。
+			"TestDeletingFromThePageGoesThroughTheSameCallAsTheSidebar",
+			"TestForgettingAFolderNeverTouchesBilibili",
+			// 界面层：摆得出来的项、确认框、取消、刷新、走开。
+			"TestOnlyTheOwnerGetsTheOwnerActions",
+			"TestNoTwoMenuItemsShareAKeyOrALabel",
+			"TestClearingTheInvalidContentAsksFirst",
+			"TestCancellingAnyOfTheThreeSendsNothing",
+			"TestACleanedFolderRedrawsItsList",
+			"TestDeletingAFolderSaysWhichOneAndLeavesThePage",
+			"TestDeletingFromThePageIsTheSameCallTheSidebarMakes",
+			"TestTheTwoDeletionsDoNotReadTheSame",
+			"TestForgettingTheFolderNeverTouchesBilibili",
+			"TestAFolderNobodyOwnsCanStillBeForgotten",
+			// 失败路径：删不掉时不许把用户踢走，更不许把失败原因一起擦掉。
+			"TestAFolderThatWontBeDeletedKeepsTheUserWhereTheyAre",
+			// 「从侧栏移除」要清的是**它所在的那一组**（否则提示就是谎话）。
+			"TestForgettingClearsTheRowOutOfWhicheverGroupItIsIn",
+			"TestForgettingTakesTheRowOutOfBothGroups",
+		},
+	},
 }

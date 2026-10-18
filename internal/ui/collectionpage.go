@@ -69,6 +69,12 @@ const (
 	confirmDelete
 	// confirmDownload 是批量下载。
 	confirmDownload
+	// confirmClearInvalid 是「清除失效内容」。
+	confirmClearInvalid
+	// confirmDeleteFolder 是「把 B 站上这个收藏夹删掉」。
+	confirmDeleteFolder
+	// confirmForgetFolder 是「只从本地记录里拿掉这一行」。
+	confirmForgetFolder
 )
 
 // confirmRequest 是「要不要用户点一下确认」。
@@ -81,6 +87,12 @@ type confirmRequest struct {
 	// only 是「只作用在勾上的那些」（true）还是「当前已经加载出来的全部」
 	// （false，⋯ 菜单的「下载全部」走那条）。
 	only bool
+	// name 是「动的是哪一个收藏夹」。**批量那两种是空的**——它们说的不是容器。
+	//
+	// 🔴 它必须进标题：删整个收藏夹和删一批歌是两件事，而同一个词（「删掉」）
+	// 配一个「吗」是最容易让人按错确认的那种框。规格点名了这一条
+	// （issue #100：「删除的确认弹窗说清删的是哪一个收藏夹」）。
+	name string
 }
 
 // collectionMenuItem 是 ⋯ 菜单里的一项。
@@ -284,6 +296,15 @@ func (s *Shell) collectionFor(ref app.CollectionRef) *collectionPage {
 func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 	s.applyFrameTheme(c)
 
+	// 「刚才那个收藏夹真的删掉了，所以该走开了」——**消费在界面线程的这一帧**。
+	//
+	// ⚠️ 排在主题之后、这一页别的逻辑之前：它会 `navigate`，而那一帧画出来的
+	// 还是当前这一页（`Router` 下一帧才切），所以用户看不出多了一帧。
+	//
+	// ⚠️ **为什么不是直接在后台回调里 navigate**：那一趟跑在 goroutine 里，而
+	// `navigate` 和 `s.collection = nil` 都是界面状态（铁律一）。见 `takeLeave`。
+	s.takeLeave()
+
 	ref := collectionRefOf(r)
 	if !s.app.CollectionsMounted() {
 		// 没挂接口时画得出来（头图区是空的、列表一直转圈），但要告诉用户
@@ -334,9 +355,18 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 //
 // **每帧开头调一次，而且取走**：取过就不会再说第二遍，不取的话同一句会在
 // 每一帧都冒一次 Toast（见 `app.CollectionNotice`）。
+//
+// ⚠️ `NoticeCollectionChanged` 的那一条还要顺手把列表重来一遍——**而且只能
+// 在这里**（界面线程）。别改成在动作那一侧 reload：那一次拉回的是还没改完
+// 的数据（理由见那个常量）。
 func (s *Shell) flushCollectionNotice(p *collectionPage) {
-	if n, ok := s.app.TakeCollectionNotice(p.ref); ok {
-		s.addToast(n.Text)
+	n, ok := s.app.TakeCollectionNotice(p.ref)
+	if !ok {
+		return
+	}
+	s.addToast(n.Text)
+	if n.Kind == app.NoticeCollectionChanged {
+		s.reloadCollection(p)
 	}
 }
 
@@ -495,9 +525,15 @@ func (s *Shell) viewCollectionStar(c *ui.Context, p *collectionPage) {
 // 项照 Biu 的 `operation/menu.tsx:37-100`：下载全部音频 / 下载全部视频 /
 // 清除失效内容 / 删除。「下载」两条走的是同一个接口（B 站给的是同一条音频
 // 流，「音频 / 视频」是**下载器**那边的分别），所以现在它们是同一条路。
+//
+// ⚠️ **「删除」改成了「删除收藏夹」，而且旁边多了一项「从侧栏移除」**——
+// 上游那两项都没有。理由是规格点名要「删 B 站那边的」和「只删本地记录」摆成
+// **两个选项**（issue #100，父规格 #91 的第 28 条）：只摆一个「删除」的话，
+// 用户按之前分不清那一下到底是 B 站上的收藏夹没了，还是只是这一侧不显示了。
 func (s *Shell) viewCollectionMore(c *ui.Context, p *collectionPage) {
+	items := s.collectionMoreItemsFor(p)
 	ui.MenuButton(c, "更多", func(m *ui.Menu) {
-		for _, item := range collectionMoreItems {
+		for _, item := range items {
 			if m.Item(item.label).Chosen() {
 				s.collectionMoreAction(p, item)
 				return
@@ -506,15 +542,57 @@ func (s *Shell) viewCollectionMore(c *ui.Context, p *collectionPage) {
 	}).Label("更多操作")
 }
 
-// collectionMoreItems 是 ⋯ 菜单里的项。文案照 Biu。
-var collectionMoreItems = []collectionMenuItem{
+// collectionMoreBaseItems 是 ⋯ 菜单里**每一页都有**的那几项。文案照 Biu。
+var collectionMoreBaseItems = []collectionMenuItem{
 	{key: "download-audio", label: "下载全部音频"},
 	{key: "download-video", label: "下载全部视频"},
+}
+
+// collectionMoreOwnerItems 是**自己创建的收藏夹**才摆的那几项。
+//
+// ⚠️ **判断的依据是「能不能删」**（`app.CanDeleteCollection`），不是「这是不是
+// 收藏夹」。照上游 `menu.tsx` 的 `show: isCreatedBySelf && !isDefaultFav(attr)`：
+// 别人建的收藏夹摆不出删除（B 站不给这个接口），B 站发下来的那个默认收藏夹
+// 也摆不出（它同样删不掉）。
+var collectionMoreOwnerItems = []collectionMenuItem{
 	{key: "clear-invalid", label: "清除失效内容"},
-	{key: "delete", label: "删除"},
+	{key: "delete-folder", label: "删除收藏夹"},
+}
+
+// collectionMoreForgetItem 是「只删本地记录」那一项。
+//
+// ⚠️ **它对每一页都摆得出来**，不限于自己创建的：对别人的收藏夹，它恰恰是
+// 唯一能整掉它的办法（一个字节都不往 B 站发）。Biu 上游没有这一项——上游
+// 侧栏那个「隐藏」作用一样，但没有和「删除」并排摆出来过。
+var collectionMoreForgetItem = collectionMenuItem{key: "forget-folder", label: "从侧栏移除"}
+
+// collectionMoreItemsFor 是 ⋯ 菜单此刻摆得出来的那些项，**按显示顺序**。
+//
+// ⚠️ **每次返回一份新的**：往那张包级切片上 append，就是让「多开一次菜单」
+// 变成一个跨帧的副作用，而那种错没有一处测试会红。
+//
+// ⚠️ **元信息还没回来时，下面三项一个都摆不出来**：它们全都要收藏夹的名字，
+// 而名字在那之前是「正在加载…」。把那句话念进一个不可撤销的确认框里是最糟的
+// 一种——用户读到「删掉「正在加载…」吗」只会点确定。留两个下载项（B 站那边
+// 的歌还没到，点了也只能下载到零首，那条路径自己会说清楚）。
+func (s *Shell) collectionMoreItemsFor(p *collectionPage) []collectionMenuItem {
+	info := s.app.Collection(p.ref)
+	items := make([]collectionMenuItem, 0, len(collectionMoreBaseItems)+len(collectionMoreOwnerItems)+1)
+	items = append(items, collectionMoreBaseItems...)
+	if !info.Loaded {
+		return items
+	}
+	if s.app.CanDeleteCollection(p.ref) {
+		items = append(items, collectionMoreOwnerItems...)
+	}
+	return append(items, collectionMoreForgetItem)
 }
 
 // collectionMoreAction 是 ⋯ 菜单里那一项被选中之后做的事。
+//
+// 🔴 **这一层一个都不动手**：真正那一下都在 `viewCollectionConfirm` 里——确认框
+// 是系统模态，在它上面点任何别的控件都不该生效（理由同 `askConfirm`）。
+// 三件新接上的动作全部走同一道门，理由是它们全部是不可撤销的写操作。
 func (s *Shell) collectionMoreAction(p *collectionPage, item collectionMenuItem) {
 	switch item.key {
 	case "download-audio", "download-video":
@@ -522,11 +600,11 @@ func (s *Shell) collectionMoreAction(p *collectionPage, item collectionMenuItem)
 		// 按错一次就是几百兆白下。
 		s.askConfirm(p, confirmDownload, p.list.List().Len(), false)
 	case "clear-invalid":
-		// ⚠️ 真做这一条要靠 attr 认出「失效」，而 attr 在 `bili.Media` 里有
-		// （Attr 字段）。这里没接是因为它还要一次「拉全量再逐个删」——
-		// 半做（只删掉已经加载出来的那几条失效的）比不做更糟：用户会以为
-		// 收藏夹干净了，而翻到没加载的那几页还有一堆。
-		s.addToast("「清除失效内容」还没接收藏夹接口")
+		s.askConfirmAbout(p, confirmClearInvalid, 0, false, collectionTitleText(s.app.Collection(p.ref)))
+	case "delete-folder":
+		s.askConfirmAbout(p, confirmDeleteFolder, 0, false, collectionTitleText(s.app.Collection(p.ref)))
+	case "forget-folder":
+		s.askConfirmAbout(p, confirmForgetFolder, 0, false, collectionTitleText(s.app.Collection(p.ref)))
 	default:
 		s.addToast("「" + item.label + "」还没接收藏夹接口")
 	}
