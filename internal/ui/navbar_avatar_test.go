@@ -167,7 +167,17 @@ var avatarImageColor = color.RGBA{R: 255, G: 0, B: 255, A: 255}
 // mid 空串 = 没登录。
 func newAvatarShell(t *testing.T, f *avatarFixture, mid string) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	b := newTestShell(t, mounted(func(_ *testing.T, a *app.App) {
+	return newAvatarShellIn(t, f, mid, false)
+}
+
+// newAvatarShellIn 换得了系统外观那一份。
+//
+// 深浅两套都要跑一遍的理由：墨色和底色的**差值**是这一组判据的根，而它跟着
+// 主题变。浅色下「人形 vs 字母」分得开、深色下合拢的话，那一条测试只跑浅色
+// 就是绿的——而深色才是大部分人用的那一套。
+func newAvatarShellIn(t *testing.T, f *avatarFixture, mid string, systemDark bool) (*Shell, *mygoui.Tester) {
+	t.Helper()
+	b := newTestShell(t, systemIsDark(systemDark), mounted(func(_ *testing.T, a *app.App) {
 		transport := &app.CredentialTransport{
 			Base:   f.Server.Client().Transport,
 			Policy: app.DefaultInjectPolicy(),
@@ -211,26 +221,107 @@ func avatarShowsThePicture(tt *mygoui.Tester) bool {
 	return countColorIn(tt.Image(), r, avatarImageColor)*4 > int(r.W*r.H)
 }
 
-// avatarHasInk 报「那一格不是一整块底色」——**画了点东西上去**。
+// avatarFigure 量出「那一格里画出来的那个东西」的形状。
 //
-// 它是「不是空白」那条验收的判据。只比「颜色不等于底色」是不够的：边框、
-// 圆角裁剪、主题高亮都可能让某一个点对不上，而这一条问的是整格。
-func avatarHasInk(tt *mygoui.Tester) bool {
+// 返回**最长的一段连续的墨**（几个像素宽）和**整格一共多少个墨点**。
+//
+// ## 为什么不能只问「不是一整块底色」
+//
+// 这么问过一次，钉不住任何东西——实测两种改法都照样全绿：
+//
+//   - 把那个人形换成恒定的字母「B」（issue #95 明令不许的那一格）：绿。
+//   - 那一格**什么都不画**，连底色和那句交代都去掉：还是绿。
+//
+// 原因是边框 + 圆角裁剪本来就让那一格不是纯色。**问错了问题，回答对了也没有用。**
+//
+// ## 这两个数各自量的是什么
+//
+//   - **最长的连段**量的是**横向铺开多少**：人形的肩膀是 `side*0.6` 宽
+//     （实测 17 px / 28），而 12 号粗体「B」最宽的那一横只有 7 px。一个字母
+//     再大也铺不满一格的六成——这是「不是字母」最直接的一条。
+//   - **墨点总数**量的是**画了多少**：人形是 211 点，字母是 50 点。防备的是
+//     「一条又宽又细的线」那种改法——连段过了、总量不够。
+//
+// ## 「墨」是怎么认出来的
+//
+// **底色取那一格的众数颜色**（实测浅色 `{244 244 245}`、深色 `{39 39 42}`），
+// 而不是去问主题的 `Surface`——那样每一套主题都要把值抄一份，而抄错的症状是
+// **这一条在某个主题里永远是空的**。
+//
+// 「墨」是和底色**三个通道里差得最多的那个超过 40**。这个数是量出来的：
+// 边框离底色只有 15（所以**边框不算墨**——它围着整格，不算的话连段永远是 28），
+// 而人形是 122（浅色 `{113 113 122}`）和 122（深色 `{161 161 170}`）。
+// 深浅两套主题量出来的数字**一模一样**：17/211 和 7/50。
+const (
+	// avatarInkDelta 是「这个点算不算墨」的界。理由见上。
+	avatarInkDelta = 40
+	// avatarFigureMinRun / avatarFigureMinInk 是「画出来的是人形」的界。
+	//
+	// 实测：人形 17 / 211，12 号粗体「B」7 / 50，**什么都不画 0 / 0**。
+	// 两个数都取在正中间，两边各留 5 px / 70 点的余量。
+	avatarFigureMinRun = 12
+	avatarFigureMinInk = 120
+)
+
+func avatarFigure(tt *mygoui.Tester) (widestRun, inkPixels int) {
 	r, ok := avatarBox(tt)
 	if !ok {
-		return false
+		return 0, 0
 	}
 	img := tt.Image()
 	x0, y0, x1, y1 := pixelsOf(r)
-	first := img.RGBAAt(x0, y0)
+
+	// 底色 = 那一格里出现次数最多的那个颜色。**一趟数完**，不是每个点重新数一遍。
+	hist := map[color.RGBA]int{}
 	for y := y0; y <= y1; y++ {
 		for x := x0; x <= x1; x++ {
-			if img.RGBAAt(x, y) != first {
-				return true
-			}
+			hist[img.RGBAAt(x, y)]++
 		}
 	}
-	return false
+	bg, most := color.RGBA{}, -1
+	for c, n := range hist {
+		if n > most {
+			bg, most = c, n
+		}
+	}
+
+	run := 0
+	for y := y0; y <= y1; y++ {
+		for x := x0; x <= x1; x++ {
+			if isInk(img.RGBAAt(x, y), bg) {
+				run++
+				inkPixels++
+				continue
+			}
+			widestRun = max(widestRun, run)
+			run = 0
+		}
+		widestRun = max(widestRun, run)
+	}
+	return widestRun, inkPixels
+}
+
+// isInk 报这个点算不算「画上去的东西」。
+//
+// ⚠️ **三个通道的差要先各自取绝对值，再取最大的那个。** 写成「先取最大、再取
+// 绝对值」的话，墨色比底色**深**的那一档（告警红 `{220 38 38}` 压在浅粉
+// `{249 216 216}` 上）差值全是负数，取最大得到的是「最不明显的那个通道的差」
+// ——实测那条「图没下来」的一档因此一个墨点都数不出来，而这一条是绿的。
+//
+// 这个坑是量出来的：未登录那一档数得出 17/211 是**碰巧**——浅色下
+// `TextMuted` 比底色深、深色下比底色浅，而底色一个在 244 一个在 39，两次都
+// 让三个差值同号，所以看不出来。它一换到底色偏上就翻了。
+func isInk(c, bg color.RGBA) bool {
+	d := max3(absDiff(c.R, bg.R), absDiff(c.G, bg.G), absDiff(c.B, bg.B))
+	return d > avatarInkDelta
+}
+
+func max3(a, b, c int) int { return max(a, max(b, c)) }
+
+// avatarHasFigure 报「那一格里画出了一个撑得开的图形」（见 avatarFigure）。
+func avatarHasFigure(tt *mygoui.Tester) bool {
+	run, ink := avatarFigure(tt)
+	return run >= avatarFigureMinRun && ink >= avatarFigureMinInk
 }
 
 // avatarHasColor 数一数那一格里有多少个点是 want 这个颜色。
@@ -347,15 +438,56 @@ func TestTheAvatarSaysNobodyIsLoggedIn(t *testing.T) {
 	}
 }
 
-// TestTheAvatarIsNotBlankWhenNobodyIsLoggedIn 验未登录那一格**画了东西**。
+// TestTheAvatarShowsAPersonAndNotALetterWhenNobodyIsLoggedIn 钉住 issue #95
+// 那条「**不是字母占位符**」。
 //
-// 「不是字母占位符」还不够：摆一个空框同样不是字母，而它在顶栏上是一个看不出
-// 是什么的洞（这正是老注释里拒绝空框的理由）。这一条钉住画的是那个**人形**。
-func TestTheAvatarIsNotBlankWhenNobodyIsLoggedIn(t *testing.T) {
-	f := newAvatarFixture(t)
-	_, tt := newAvatarShell(t, f, "")
+// ## 这一条是复审补上的：原来那条钉不住
+//
+// 原来写的是「那一格不是一整块底色」（`avatarHasInk`）。复审把两种改法各试了
+// 一遍，**整包全绿**：
+//
+//   - 把人形换回恒定的字母「B」——**正是 issue #95 明令不许的那一格**；
+//   - 那一格**什么都不画**。
+//
+// 原因是问错了问题：边框 + 圆角裁剪本来就让那一格不是纯色。而那条用例的注释
+// 写着「这一条钉住画的是那个**人形**」，它做不到——注释说的和它量的不是一回事。
+//
+// ## 现在量的是**形状**
+//
+// 人形的肩膀横着铺开 `side*0.6`（实测 **17 px / 28**），12 号粗体「B」最宽的
+// 那一横只有 **7 px**。所以「最长的那一段连续墨有多长」直接分开这两者，而墨点
+// 总量（**211** 对 **50**）再补一刀，防的是「又宽又细」那种改法。
+//
+// 深浅两套主题各跑一遍：数字量出来一模一样（17/211 与 7/50），而只跑浅色的话
+// 有人改了深色的那套颜色，这一���还是绿的。
+func TestTheAvatarShowsAPersonAndNotALetterWhenNobodyIsLoggedIn(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newAvatarFixture(t)
+			_, tt := newAvatarShellIn(t, f, "", dark)
 
-	waitFrames(t, tt, "那一格画出人形", func() bool { return avatarHasInk(tt) })
+			// 未登录那一格是**同步**画出来的（没有后台那一趟），所以等的是那句话，
+			// 而不是 `avatarHasFigure`——等它的话，这一格要是真坏了，报出来的是一句
+			// 「等了 10 秒」，而这一条要说的事是「它长成了什么样」。
+			waitFrames(t, tt, "那一格摆成未登录", func() bool {
+				_, ok := tt.Find(avatarNoteGuest)
+				return ok
+			})
+
+			run, ink := avatarFigure(tt)
+			if run < avatarFigureMinRun || ink < avatarFigureMinInk {
+				t.Errorf("那一格画出来的是「最长的一段墨 %d px、整格 %d 个墨点」，"+
+					"而人形是 %d px / %d 个——**一个字母撑不开一格**"+
+					"（12 号粗体「B」实测 7 px / 50 点，**什么都不画 0 / 0**），"+
+					"issue #95 明令不许字母占位符",
+					run, ink, avatarFigureMinRun, avatarFigureMinInk)
+			}
+		})
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -379,12 +511,79 @@ func TestTheAvatarSaysSomethingWhenThePictureDoesNotComeBack(t *testing.T) {
 		_, ok := tt.Find(avatarNoteNoPicture)
 		return ok
 	})
-	if !avatarHasInk(tt) {
+	if !avatarHasFigure(tt) {
 		t.Error("加载失败那一档是一格空白——在顶栏上那是一个看不出是什么的洞")
 	}
 	if avatarShowsThePicture(tt) {
 		t.Error("压根没下下来却画上了那张图")
 	}
+}
+
+// TestAFaceThatComesBackForTheWrongAccountNeverLands 钉住「退登那一刻在途的那一趟
+// 要作废」这道 `gen` 守卫。
+//
+// ## 它钉的那个后果
+//
+// 用户点「退出登录」时，**头像那一趟可能正在飞**。它回来的时候带着的是上一个
+// 账号的头像地址，而用户已经退登了——写进去的话，顶栏上又出现了一个人的脸，
+// 而界面上**没有任何一个地方**会说「刚才那趟是退登之前的」。症状是退登之后
+// 头像过一会儿自己又变了。
+//
+// ## 为什么**直接调** `fetchAvatarFace`，而不是造一个真的在途请求
+//
+// 造真的在途请求要卡住那台 fake 的 nav 那一支、放行、再赌它什么时候落地——
+// 而「什么时候落地」没有任何东西会通知界面（那一趟落地时如果代次对不上，
+// **连 `wake.invalidate` 都不调**，见 `fetchAvatarFace` 的注释）。
+//
+// 直接调它就没了这个赌：`**此刻没登录**，所以 `AccountNav` 立刻回零值、
+// 一个请求都不发**，那一趟是**同步**走完的。断的是「代次对不上时能不能写」，
+// 不是「网络什么时候回来」。
+//
+// ## 变异验过
+//
+// 把 `fetchAvatarFace` 里那道 `if a.gen != gen` 短路掉（退登之后在途的那一趟
+// 照样把上一个账号的结果写回来），这一条立刻红。
+func TestAFaceThatComesBackForTheWrongAccountNeverLands(t *testing.T) {
+	f := newAvatarFixture(t)
+	f.withALoginIn()
+	s, tt := newAvatarShell(t, f, "2")
+	tt.SetFocused(true)
+
+	// 先让这一格真的问过一次、代次真的涨上去。
+	waitFrames(t, tt, "头像画出来", func() bool { return avatarShowsThePicture(tt) })
+	if err := s.app.Logout(); err != nil {
+		t.Fatalf("退登失败：%v", err)
+	}
+	// 退登之后画一帧：`avatarSync` 看到登录态没了，收回未登录，代次也 +1。
+	waitFrames(t, tt, "收回未登录", func() bool {
+		_, ok := tt.Find(avatarNoteGuest)
+		return ok
+	})
+
+	// 那一趟带着**上一个账号**的结果回来。`staleGen` 是退登前那一代的代次。
+	s.fetchAvatarFace(staleAvatarGen(t, s))
+	tt.Frame()
+
+	if avatarShowsThePicture(tt) {
+		t.Error("一个作废的结果把上一个账号的头像画回来了——退登之后顶栏上还有一个人的脸")
+	}
+	if _, ok := tt.Find(avatarNoteGuest); !ok {
+		t.Error("一个作废的结果把那一格改成了别的样子，文字有：", tt.Texts())
+	}
+}
+
+// staleAvatarGen 读出「当前代次减一」——也就是刚刚作废的那一代。
+//
+// 直接读字段：**同一个包里这么读不用给生产代码加一个只有测试用的出口**。
+func staleAvatarGen(t *testing.T, s *Shell) uint64 {
+	t.Helper()
+	s.avatar.mu.Lock()
+	g := s.avatar.gen
+	s.avatar.mu.Unlock()
+	if g == 0 {
+		t.Fatalf("代次是 0，这一格压根没问过——起点就不对")
+	}
+	return g - 1
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -423,12 +622,12 @@ func TestTheAvatarNeverLooksTheSameTwoWays(t *testing.T) {
 	// 未登录。
 	guest := newAvatarFixture(t)
 	_, guestTT := newAvatarShell(t, guest, "")
-	waitFrames(t, guestTT, "未登录那一格", func() bool { return avatarHasInk(guestTT) })
+	waitFrames(t, guestTT, "未登录那一格", func() bool { return avatarHasFigure(guestTT) })
 	guestShot := avatarShot(t, guestTT)
 
 	// 已登录，图下不下来：出了毛病的那一档。
 	//
-	// ⚠️ **等的是那句话，不是「那一格有东西」**：`avatarHasInk` 在「图还在路上」
+	// ⚠️ **等的是那句话，不是「那一格有东西」**：`avatarHasFigure` 在「图还在路上」
 	// 那一档也成立（那也是个人形），所以拿它当条件会**拍到还没出毛病的那一帧**，
 	// 于是这一条比的是「加载中」和「未登录」——两个本来就该长得一样的东西，
 	// 然后报一句「两种形态被合并了」。实测踩过。
@@ -438,7 +637,7 @@ func TestTheAvatarNeverLooksTheSameTwoWays(t *testing.T) {
 	_, brokenTT := newAvatarShell(t, broken, "2")
 	waitFrames(t, brokenTT, "加载失败那一格", func() bool {
 		_, said := brokenTT.Find(avatarNoteNoPicture)
-		return said && avatarHasInk(brokenTT)
+		return said && avatarHasFigure(brokenTT)
 	})
 	brokenShot := avatarShot(t, brokenTT)
 
