@@ -317,6 +317,23 @@ var Items = []Item{
 			"TestAPaidSongFallsBackToAFreeTier",
 		},
 	},
+	{
+		Category: HTTP,
+		// 「刷新数据」那一项以前按下去只弹一句「还没有数据可刷新」——而接口一直
+		// 都在（`created/list`，收藏夹的新建 / 修改 / 拉全量都靠它）。这一条钉的是
+		// 「按下去真的重新拉一次」：喂一个**会变**的假服务器，点了之后画面上那一列
+		// 换了内容，而旧的消失。
+		//
+		// 后两条是它的另一半：未登录时**不许发请求**（发了只会换来一片 -101，而
+		// 界面上看不出异样），以及在飞的时候连点不重复发。
+		Spec: "「刷新数据」真的重新拉一次收藏夹；在飞时连点不重复发；未登录不发请求",
+		Tests: []string{
+			"TestRefreshingReallyPullsTheFoldersAgain",
+			"TestRefreshingTwiceSendsOneRequestAndSaysItIsBusy",
+			"TestRefreshingWithoutALoginSaysSoAndSendsNothing",
+			"TestRefreshingWithoutTheFoldersMountedSaysSo",
+		},
+	},
 
 	// ── PCM ────────────────────────────────────────────────────────────────
 	{
