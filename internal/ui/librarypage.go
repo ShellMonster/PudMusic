@@ -32,6 +32,13 @@ import (
 )
 
 // searchDebounce 是关键词的防抖。500ms 是 Biu 上游那个 `wait`。
+//
+// ⚠️ **歌词搜索弹窗的防抖也用这一个，不要另起一个常量**（BMG-66）。界面上凡是「等
+// 用户把词敲完再动」的地方都用它——两处各自写一个 500 的话，改一个忘了另一个，
+// 而它们的行为不一致这件事界面上一点也看不出来。
+//
+// ⚠️ 别拿 `app.lyricsSaveDelay`（也在 500ms）当同一件事：那个是**调完偏移/字号到
+// 写盘之间**的防抖，和「敲字」是两回事，只是碰巧同一个数。
 const searchDebounce = 500 * time.Millisecond
 
 // libraryPage 是这两页共用的那一摊状态。
@@ -277,10 +284,18 @@ const keywordBoxLabel = "搜索标题/UP主名称"
 // **每帧调一次**（在 `viewMain` 里），所以不管用户什么时候切走切回，醒着的
 // 定时器一定会跟着停。漏了这一处就是一个每 125ms 醒一次、醒到进程退出的
 // goroutine——用户看不出任何异样，只是这个应用再没省过电。
+//
+// 🔴 **歌词搜索弹窗共用这一个钟**（`lyricsSearching`，见 `lyricssearch.go`）：
+// 用户一次只能在一处敲字，两个钟各自醒着就是两个定时器，而哪一个先停都不对。
+// 另起一个的代价还不止是那一个 goroutine——它会让「防抖 500ms」这件事在代码里
+// 出现两个出处，改一个忘了另一个时界面上一点也看不出来。
 func (s *Shell) syncSearchWatch() {
 	want := false
 	if p := s.libraryPageAt(s.router.Path()); p != nil {
 		want = !p.pendingSince.IsZero()
+	}
+	if s.lyricsSearching() {
+		want = true
 	}
 	switch {
 	case want && s.searchWatchStop == nil:
