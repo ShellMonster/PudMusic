@@ -548,8 +548,12 @@ func TestOneBrokenCellDoesNotBlankOutThePage(t *testing.T) {
 	// 而那上面没有缓存（widgets/list 的 `New` 顶上那一段记着这一条）——于是
 	// **有封面的那一格**崩，别的格子照画。
 	//
-	// ⚠️ 清理是安全的：`t.Cleanup(s.images.Close)` 在建外壳时就把接收者定住
-	// 了（方法值在那儿就绑好了），这里把字段换成 nil 不会连累收尾。
+	// ⚠️ 摘掉之后**要还回去**：收尾走的是 `Shell.Close`，它在**调用那一刻**才读
+	// `s.images` 这个字段（不像早先的 `t.Cleanup(s.images.Close)`——方法值在登记
+	// 那一刻就把接收者绑死了，换字段连累不到它）。所以这一句得排在基座挂的那次
+	// 收尾**前面**跑：`t.Cleanup` 是后挂的先跑。
+	keepImages := s.images
+	t.Cleanup(func() { s.images = keepImages })
 	s.images = nil
 	dlFrame(tt)
 

@@ -60,6 +60,35 @@ const (
 	ownerLeading = 1
 )
 
+// 「紧凑」那一档的尺寸。和上面那一组**分开写**而不是给上面那几个加上「按档位取
+// 值」的参数：普通那一行是十几条测试量着的对象，给它套一层按档位分支的取值之后，
+// 改坏紧凑那档可能连累普通那档的断言，而症状（行高差了七八像素）在屏幕上像「排版
+// 有点挤」——极难往回追。
+const (
+	// compactCoverSize 是紧凑档的封面边长。48 → 32 是这一档省下来的高度里最大
+	// 的一块（Biu 的紧凑视图也是把封面缩到 `w-8` 一路）。
+	compactCoverSize = 32
+
+	// compactPadY / compactPadX 是紧凑档的内边距。上下 8 → 4，一行省 8 像素。
+	compactPadY = 4
+	compactPadX = 6
+
+	// compactGap 是紧凑档行里几块之间的间距。
+	compactGap = 6
+
+	// compactIndexWidth 是紧凑档序号那一列的宽。「9999 首」的歌单用 40 太宽，
+	// 而这一档省的就是横向空间。
+	compactIndexWidth = 32
+
+	// compactDurationWidth 是紧凑档时长那一列的宽。Biu 那边用 `tabular-nums`，
+	// 宽度定住上下两行才对得齐。
+	compactDurationWidth = 40
+
+	// compactTitleLines 是紧凑档歌名最多几行。**1**——这是「紧凑」和「普通」在
+	// 行高上拉开距离的主要一条：歌名再长也只占一行。
+	compactTitleLines = 1
+)
+
 // PlayingMark 是「这一行正在放」那个标记。Biu 那一行画的是一段跳动的波形，
 // 这里写死成一句字：⚠️ **它不跳**——跳要一帧一变，而快速切歌时帧率本来就紧，
 // 而帧率一掉「正在放」就跟着糊掉。认出来靠的是「只有一行是这个颜色 + 只有
@@ -70,6 +99,25 @@ const (
 // 里两套列表写着两种说法，用户会以为是两个意思。
 const PlayingMark = "正在播放"
 
+// rowColors 是这一行文字该用的两个颜色。
+//
+// 「选中」和「正在放」是**两件事**，所以是两档而不是一种底色（理由见下面那个
+// switch）：选中跟着光标走（点哪行亮哪行），正在放跟着声音走（声音从哪来亮哪行）。
+// 滚歌单的时候光标停在上头、正在放的往往在屏幕中间——不分开的话用户得靠播放条
+// 才知道放的是哪首。
+func rowColors(t *ui.Theme, selected, playing bool) (title, owner ui.Color) {
+	switch {
+	case selected:
+		// 主色底上的字。UP 名那一行压到 0.75，主色底太亮时它比正文色更
+		// 站得住，也还是「次要信息」的样子。
+		return t.AccentText, t.AccentText.Alpha(0.75)
+	case playing:
+		return t.Accent, t.TextMuted
+	default:
+		return t.Text, t.TextMuted
+	}
+}
+
 // viewCard 画一行：Biu 的 music-list-item 在 MyGo 里的样子。
 //
 // ⚠️ 选中那一行的底色和字色由 `ui.List` 自己刷（主色底 + 主色上的反色字，
@@ -77,23 +125,17 @@ const PlayingMark = "正在播放"
 // 盖掉它，选中行会变成主色底上的深色字，深色主题下直接看不见。所以正文色是
 // 跟着选中与否给的。
 func (l *List) viewCard(r ui.ListRow) {
+	if l.view == ViewCompact {
+		l.viewCompactCard(r)
+		return
+	}
+
 	c, i := r.Context, r.Index
 	t := c.Theme()
 	m := l.songs[i]
 	playing := l.isPlaying(m)
 
-	titleColor, ownerColor := t.Text, t.TextMuted
-	switch {
-	case r.Selected():
-		// 主色底上的字。UP 名那一行压到 0.75，主色底太亮时它比正文色更
-		// 站得住，也还是「次要信息」的样子。
-		titleColor, ownerColor = t.AccentText, t.AccentText.Alpha(0.75)
-	case playing:
-		// 「正在放」和「选中」是**两件事**：选中跟着光标走（点哪行亮哪行），
-		// 正在放跟着声音走（声音从哪来亮哪行）。滚歌单的时候光标停在上头，
-		// 正在放的往往在屏幕中间——不分开的话用户得靠播放条才知道放的是哪首。
-		titleColor = t.Accent
-	}
+	titleColor, ownerColor := rowColors(t, r.Selected(), playing)
 
 	// ⚠️ **hover 必须在 Children 之前问**：`Hovered` 报的是**这一帧**指针在不在
 	// 上面，而「按下去出现这个按钮」这件事本身要等 Children 建它。MyGo 自己
@@ -149,6 +191,79 @@ func (l *List) viewCard(r ui.ListRow) {
 				FontSize(11).TextColor(t.Accent).MaxLines(1)
 		}
 	})
+}
+
+// viewCompactCard 画「紧凑」那一档的一行。
+//
+// ## 和普通那一行差在哪
+//
+// 四处，**一处都不碰语义**：封面 48 → 32、上下内边距 8 → 4、行内间距 8 → 6、
+// 歌名最多两行 → 一行。选中 / 正在放 / 右键菜单 / 勾选框 / 序号 hover 出来的
+// 「播放」按钮，这些**一个不少**——紧凑是「同一种行排得更密」，不是「另一种行」。
+// 少一样就变成两个控件，而不是同一个控件的两档，用户会以为是两个功能。
+//
+// ⚠️ **字号只降了歌名那一处**（14 → 13）。UP 名和时长还是 12：它们本来就比正文小，
+// 再降一档在 12pt 的基础上会糊，而这一档省的是高度不是宽度。
+func (l *List) viewCompactCard(r ui.ListRow) {
+	c, i := r.Context, r.Index
+	t := c.Theme()
+	m := l.songs[i]
+	playing := l.isPlaying(m)
+
+	titleColor, ownerColor := rowColors(t, r.Selected(), playing)
+
+	row := ui.Row(c).AlignSelf(ui.Stretch).Gap(compactGap).Padding(compactPadY, compactPadX).
+		// 右键菜单挂在**这一行**上，和普通那一行同一个理由（见 View 里的注释）。
+		ContextMenu(func(m *ui.Menu) { l.buildMenu(m, i) })
+	hover := row.Hovered()
+
+	row.Children(func() {
+		l.viewCheckbox(c, i, m.Title)
+		l.viewCompactIndex(c, i, hover && !playing)
+
+		// 封面四态由 imgcache.View 画（空地址画空框，不画「失败」）。
+		imgcache.View(c, l.cache, m.Cover, compactCoverSize, compactCoverSize)
+
+		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(2).Children(func() {
+			ui.Text(c, m.Title).FontSize(13).LineHeight(1.2).
+				TextColor(titleColor).MaxLines(compactTitleLines).Ellipsis("…")
+			if m.Owner != "" {
+				ui.Text(c, m.Owner).FontSize(12).LineHeight(ownerLeading).
+					TextColor(ownerColor).MaxLines(1).Ellipsis("…")
+			}
+		})
+
+		if s := formatDuration(m.Duration); s != "" {
+			ui.Text(c, s).Width(compactDurationWidth).TextAlign(ui.End).
+				FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+		}
+
+		// 「正在播放」这一句紧凑档**仍然摆**：它是「哪一首在放」唯一的行内标记，
+		// 而紧凑档一屏有几十行——正是最需要它的那一档（标签带歌名的理由见上面）。
+		if playing {
+			ui.Text(c, PlayingMark).Label(m.Title + " " + PlayingMark).
+				FontSize(11).TextColor(t.Accent).MaxLines(1)
+		}
+	})
+}
+
+// viewCompactIndex 是紧凑档那一行最左边：平时是序号，指针移上来时是「播放」按钮。
+//
+// 和 `viewIndex` 是同一件事，只有宽度和字号不同——**内边距那一处照抄**普通档的 4：
+// MyGo 的按钮左右各留 14，「播放」两个字约 26，而 `compactIndexWidth` 只有 32。
+// 忘了收的话按钮被挤成 10 宽的一个「播」字，**界面上看得出坏了，而无头 Tester
+// 读的是控件的文本**，于是断言全绿（`TestTheHoverButtonIsNotTruncated` 量的是
+// 画出来的那几个字）。
+func (l *List) viewCompactIndex(c *ui.Context, i int, hover bool) {
+	if !hover {
+		ui.Text(c, indexText(i)).Width(compactIndexWidth).TextAlign(ui.End).
+			FontSize(11).TextColor(c.Theme().TextMuted).MaxLines(1)
+		return
+	}
+	if ui.Button(c, "播放").Width(compactIndexWidth).Padding(1, 2).MaxLines(1).
+		FontSize(11).Tooltip("从这一首往后听").Clicked() {
+		l.playFrom(i)
+	}
 }
 
 // isPlaying 报这一首是不是正在放的那首。判据和理由见 shared.go 的同名函数。

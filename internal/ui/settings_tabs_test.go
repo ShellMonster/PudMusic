@@ -439,32 +439,37 @@ func TestTheProxyHostAndPortAreStored(t *testing.T) {
 // 这是这一票里最容易「摆了个开关、按了没反应」的一格：侧栏那一列是
 // `sidebar.go` 的 `viewSideMenu`，菜单那一页改的是设置里的 `hiddenMenuKeys`。
 // 两处没接上的话，勾选框照样跳，设置也照样存住，而侧栏上那一条还在。
+//
+// ⚠️ 拿**「本地音乐」**当例子而不是「稍后再看」：这一条钉的是
+// `hiddenMenuKeys` 通不通，而那三个入口未登录时压根不摆（`Route.NeedsLogin`），
+// 拿它们当例子的话这条测试还会顺带把登录态也钉进去——把 `NeedsLogin` 去掉，
+// 它照样绿，而它本来就不该管那件事。
 func TestTheMenuTabHidesAnItemFromTheSidebar(t *testing.T) {
 	tt, _, a, _ := shellOnSettings(t, app.DefaultSettings(""))
 
-	if !tt.HasText("稍后再看") {
-		t.Fatalf("侧栏上起点就没有「稍后再看」，文字有 %q", tt.Texts())
+	if !tt.HasText("本地音乐") {
+		t.Fatalf("侧栏上起点就没有「本地音乐」，文字有 %q", tt.Texts())
 	}
 	openSettingsTab(t, tt, "菜单设置")
-	clickCheckbox(t, tt, "在侧栏里显示「稍后再看」")
-	if got := a.SettingsSnapshot().HiddenMenuKeys; len(got) != 1 || got[0] != "/later" {
-		t.Fatalf("设置里藏起来的是 %q，want [/later]", got)
+	clickCheckbox(t, tt, "在侧栏里显示「本地音乐」")
+	if got := a.SettingsSnapshot().HiddenMenuKeys; len(got) != 1 || got[0] != localMusicPath {
+		t.Fatalf("设置里藏起来的是 %q，want [%s]", got, localMusicPath)
 	}
 	// ⚠️ 这里必须**数个数**，不能只问「有没有」：菜单那一页上那个复选框摆的字也是
-	// 「稍后再看」，它的无障碍名字更是「在侧栏里显示「稍后再看」」。用子串匹配的
+	// 「本地音乐」，它的无障碍名字更是「在侧栏里显示「本地音乐」」。用子串匹配的
 	// `HasText` 永远是绿的；用全等匹配也仍然是绿的（复选框那个字一模一样）。
 	// 「侧栏上那一项不见了」的正确判据是**从两处变成一处**。
-	if got := countText(tt, "稍后再看"); got != 1 {
-		t.Errorf("勾掉了之后画面上有 %d 处「稍后再看」，want 1（只剩菜单那一页的复选框）", got)
+	if got := countText(tt, "本地音乐"); got != 1 {
+		t.Errorf("勾掉了之后画面上有 %d 处「本地音乐」，want 1（只剩菜单那一页的复选框）", got)
 	}
 
 	// 勾回来。
-	clickCheckbox(t, tt, "在侧栏里显示「稍后再看」")
+	clickCheckbox(t, tt, "在侧栏里显示「本地音乐」")
 	if got := a.SettingsSnapshot().HiddenMenuKeys; len(got) != 0 {
 		t.Errorf("勾回来之后还藏着 %q", got)
 	}
-	if got := countText(tt, "稍后再看"); got != 2 {
-		t.Errorf("勾回来之后画面上有 %d 处「稍后再看」，want 2（侧栏 + 菜单那一页）", got)
+	if got := countText(tt, "本地音乐"); got != 2 {
+		t.Errorf("勾回来之后画面上有 %d 处「本地音乐」，want 2（侧栏 + 菜单那一页）", got)
 	}
 }
 
@@ -821,12 +826,12 @@ func TestTheLocalMusicDirectoriesAreEditable(t *testing.T) {
 	fake := &fakePicker{path: "/music/classic"}
 	s.picker = fake
 	clickSetting(t, tt, s, "添加文件夹")
-	waitFor(t, func() bool { return len(a.SettingsSnapshot().LocalMusicDirs) == 3 })
+	waitFor(t, "第三个本地音乐目录写进设置", func() bool { return len(a.SettingsSnapshot().LocalMusicDirs) == 3 })
 
 	// 再加一次同一个：不该出现两遍。
 	fake.path = "/music/classic"
 	clickSetting(t, tt, s, "添加文件夹")
-	waitFor(t, func() bool { return len(a.SettingsSnapshot().LocalMusicDirs) >= 3 })
+	waitFor(t, "本地音乐目录写进设置", func() bool { return len(a.SettingsSnapshot().LocalMusicDirs) >= 3 })
 	tt.Frame()
 	if got := a.SettingsSnapshot().LocalMusicDirs; len(got) != 3 {
 		t.Errorf("同一个目录加了两次之后是 %q，want 三条", got)
@@ -901,7 +906,7 @@ func TestEachPathButtonAsksItsOwnQuestion(t *testing.T) {
 			continue
 		}
 		clickSetting(t, tt, s, c.button)
-		waitFor(t, func() bool { return fake.gotText[0] != "" })
+		waitFor(t, "文件框弹出来", func() bool { return fake.gotText[0] != "" })
 		if fake.gotDir != c.dir {
 			t.Errorf("「%s」弹的不是文件夹对话框", c.button)
 		}
@@ -944,17 +949,4 @@ func (f *fakePicker) pickConfig(_ *mygo.Window) (string, error) {
 func (f *fakePicker) saveConfig(_ *mygo.Window, defaultName string) (string, error) {
 	f.savedName = defaultName
 	return f.savedAs, f.saveErr
-}
-
-// waitFor 等一个后台结果（文件框是弹在另一个 goroutine 上的，见 pickPath）。
-func waitFor(t *testing.T, done func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if done() {
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	t.Fatal("等了两秒，那个后台结果还没到")
 }

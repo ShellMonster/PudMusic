@@ -29,7 +29,7 @@ func TestBothLibraryPagesOfferPlayNextInTheRowMenu(t *testing.T) {
 				withLater(1, 2, "甲", "乙").
 				withHistory(1, 10, 200, "甲", "乙")
 			tt, s := libraryShell(t, f, c.path)
-			settle(t, tt, "把内容拉回来", func() bool { return rowsShown(s.pageOf(c.path)) == 2 })
+			waitFrames(t, tt, "把内容拉回来", func() bool { return rowsShown(s.pageOf(c.path)) == 2 })
 
 			if err := tt.RightClick("甲"); err != nil {
 				t.Fatalf("右键那一行开不出菜单：%v，文字有 %q", err, tt.Texts())
@@ -60,7 +60,7 @@ func TestChoosingPlayNextPutsItRightAfterTheCurrentOne(t *testing.T) {
 		withLater(1, 2, "甲", "乙").
 		withHistory(1, 10, 200, "甲", "乙")
 	tt, s := libraryShell(t, f, laterPath)
-	settle(t, tt, "把内容拉回来", func() bool { return rowsShown(s.pageOf(laterPath)) == 2 })
+	waitFrames(t, tt, "把内容拉回来", func() bool { return rowsShown(s.pageOf(laterPath)) == 2 })
 
 	if _, ok := s.app.Queue().Reset(
 		app.LocalItem("/听着的.flac"), app.LocalItem("/后面的.flac"),
@@ -127,7 +127,7 @@ func TestBothLibraryPagesMarkThePlayingRow(t *testing.T) {
 				withLater(1, 2, "甲", "乙").
 				withHistory(1, 10, 200, "甲", "乙")
 			tt, s := libraryShell(t, f, c.path)
-			settle(t, tt, "把内容拉回来", func() bool { return rowsShown(s.pageOf(c.path)) == 2 })
+			waitFrames(t, tt, "把内容拉回来", func() bool { return rowsShown(s.pageOf(c.path)) == 2 })
 
 			rows := s.pageOf(c.path).rows
 			items := rows.Rows()

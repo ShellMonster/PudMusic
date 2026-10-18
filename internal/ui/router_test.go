@@ -11,45 +11,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
 // 路由这一组测试跑的是 MyGo 的 Tester：和真窗口一模一样的 layout 与绘制，
 // 只是画到内存里。点得到、找得到文字，所以「切得动」这件事能自动验。
 
-func newShell(t *testing.T) (*Shell, *mygoui.Tester) {
+// newShell 造一个**没挂任何东西**的外壳：没有设置、没有登录、没有 B 站客户端。
+// 收尾（定时器、封面缓存、应用、设置/历史/快捷键的落盘）由基座无条件挂上。
+func newShell(t *testing.T, opts ...shellOpt) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	// 搜索历史和快捷键各带着一个后台落盘的 goroutine，红点那个定时器也是
-	// 每个外壳一路（见 searchhistory.go / shortcuts.go / navbar_feed.go）。
-	// 每个外壳一个，测试里建得比真窗口快得多，不收掉就是一堆挂着的 goroutine。
-	//
-	// ⚠️ 漏掉它们不只是「慢」：挂着的那几十路定时器会让后面那些**按固定像素
-	// 判主题**的测试（settings_test.go）随机红——它给采样点画 20 帧等着底色出现，
-	// 而机器一忙这 20 帧里该画完的东西没画完（实测：带一批重测试时约三次红一次，
-	// 拿掉就 0/4）。这些是纯测试资源，不收掉没有任何好处。
-	t.Cleanup(func() { _ = s.hist.Close() })
-	t.Cleanup(func() { _ = s.keys.Close() })
-	t.Cleanup(s.feed.disarm)
-
-	// 🔴 关掉切页动画。Tester 一帧画完，250ms 的滑动在里面永远走不完：那一帧
-	// 停在半路，上一页正往左挪、下一页正往右进，中间那道分界线正扫过页面区域。
-	// 于是「点一下再读某个点」这一次读到窗口底色、下次读到分界线，同一条测试
-	// 时而红时而绿（实测八次里挂两次）。
-	//
-	// 造外壳的三个函数（这里、shellWithSettings、shellOnSettings）都关，是为了
-	// 同一个理由：屏幕上的任何一个采样点都要是确定的。设置页那几条另有
-	// settleSettingsPage 兜底，万一哪个外壳忘了关还能等它停下来。
-	s.router.Transition = mygoui.TransitionNone
-
-	return s, mygoui.NewTester(s.View, 1200, 800)
+	b := newTestShell(t, opts...)
+	return b.s, b.tt
 }
 
-// settleText 跑到画面上出现 want 为止，最多两秒。
+// settleText 跑到画面上出现 want 为止。
 //
 // # 为什么搜索页的那几条要它
 //
@@ -63,17 +39,7 @@ func newShell(t *testing.T) (*Shell, *mygoui.Tester) {
 // 的 CI 上会偶发红，而它红的时候和被测的逻辑一点关系都没有。
 func settleText(t *testing.T, tt *mygoui.Tester, want string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		tt.Frame()
-		if tt.HasText(want) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("等了两秒画面上还是没有 %q，文字有 %q", want, tt.Texts())
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitFrames(t, tt, "画面上出现 "+want, func() bool { return tt.HasText(want) })
 }
 
 // TestFourteenRoutes 盯住「Biu 那 14 条」这个数：少一条是漏了，多一条是编的。
@@ -125,8 +91,12 @@ func TestParamRoutesMatch(t *testing.T) {
 //
 // 「切得动」和「画的是什么」分开验：已经有内容的页（设置页）画的是它自己，
 // 别的页画的是这一页的空状态（routes 表里每一条都带的那句）。
+//
+// ⚠️ 外壳是**登录过的**：它要点侧栏上的每一项，而「我的关注」「稍后再看」
+// 「历史记录」未登录时不摆（`Route.NeedsLogin`）。这一条问的是「菜单项本身
+// 通不通」，所以挂着那份登录态，而不是把 login 时的菜单当成七项来数。
 func TestMenuItemsAllSwitch(t *testing.T) {
-	s, tt := newShell(t)
+	s, tt := newLoggedInShell(t, "7")
 
 	menu := 0
 	for _, rt := range routes {
@@ -255,7 +225,10 @@ func TestToastDoesNotSurviveNavigation(t *testing.T) {
 		t.Fatalf("提示没画出来，文字有 %q", tt.Texts())
 	}
 
-	if err := tt.Click("历史记录"); err != nil {
+	// 落点挑一个不挑登录态的侧栏入口：这一条钉的是「切页时清提示」，钉的是
+	// 「随便切一页」，不该顺带把登录态也钉进去（见 navbar 的
+	// TestSuggestCollapsesOnBlur 里那一段）。
+	if err := tt.Click("本地音乐"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -413,8 +386,12 @@ func TestNavigateResetsTheCrash(t *testing.T) {
 }
 
 // TestBackReturnsToThePreviousPage 验历史能退回去，退回去时提示也不残留。
+//
+// ⚠️ 外壳是**登录过的**：它要点侧栏的「稍后再看」，而那三个入口未登录时不摆
+// （`Route.NeedsLogin`，见 sidebar.go）。这一条要的就是「切到某个具体页面之后
+// 退得回去」，所以挂着那份登录态，而不是改点一个别的页面。
 func TestBackReturnsToThePreviousPage(t *testing.T) {
-	s, tt := newShell(t)
+	s, tt := newLoggedInShell(t, "7")
 
 	if err := tt.Click("稍后再看"); err != nil {
 		t.Fatal(err)
@@ -427,7 +404,7 @@ func TestBackReturnsToThePreviousPage(t *testing.T) {
 		t.Fatalf("没切到稍后再看，文字有 %q", tt.Texts())
 	}
 
-	back, ok := tt.Find("Back")
+	back, ok := tt.Find(navBackLabel)
 	if !ok {
 		t.Fatalf("导航栏上没有后退，文字有 %q", tt.Texts())
 	}
@@ -460,7 +437,10 @@ func TestRenderShots(t *testing.T) {
 	if dir == "" {
 		t.Skip("设 BIU_SHOT_DIR 才会存图")
 	}
-	s, tt := newShell(t)
+	// ⚠️ **登录过的**：存图那一族要点侧栏的「我的关注」，而那三个入口未登录时
+	// 不摆（`Route.NeedsLogin`）。存出来的图于是是「用户在正常使用」的那一份，
+	// 而不是「刚装上、还没扫码」的那一份——后者另有前面几张空状态图。
+	s, tt := newLoggedInShell(t, "7")
 
 	// 不做切页动画：Tester 一帧就画完，250ms 的滑动停在半路，存出来的图上
 	// 上一页的文字还压在左边（看着像渲染错了，其实是动画没走完）。

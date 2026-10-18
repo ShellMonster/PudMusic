@@ -30,6 +30,16 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+// navBackLabel / navForwardLabel 是那两个箭头的无障碍名字。
+//
+// ⚠️ **中文**：框架自带的 `ui.BackButton` / `ui.ForwardButton` 给的是 "Back" /
+// "Forward"，中文界面里读屏念出来是英文。这两个名字同时也是无头 Tester 认得
+// 它们的凭据（顶栏那几个测试 `Find(navBackLabel)`）。
+const (
+	navBackLabel    = "后退"
+	navForwardLabel = "前进"
+)
+
 // navMinHeight 是顶栏多高。Biu 的导航栏是 64px（`h-full`，由外层给），
 // MyGo 的隐藏标题栏只让出 `bar.Height` 那一条；32 是 MyGo 自己的例子里的下限
 // （`ui/context.go:334`），矮了字会被切。
@@ -58,12 +68,8 @@ func (s *Shell) viewNav(c *ui.Context) {
 	}
 
 	nav.Children(func() {
-		if ui.BackButton(c, s.router).Clicked() {
-			back()
-		}
-		if ui.ForwardButton(c, s.router).Clicked() {
-			back()
-		}
+		s.viewNavBack(c, back)
+		s.viewNavForward(c, back)
 		// 页名。Biu 的顶栏没有这一行（那儿是侧栏高亮当前项），这是骨架里
 		// 留下来的：切路由时它是最省事的一处「我在哪」。
 		ui.Text(c, lookup(s.router.Path()).Title).FontSize(15).Bold()
@@ -74,16 +80,21 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// 阶段 1 唯一的入口：选一个本地文件。Biu 里对应侧栏的「本地音乐」。
 		// 走的是播放条「加歌」那一条路：多选的文件全都进队列，用它打开的歌
 		// 上一首/下一首才是亮的（直接调 app.Open 就进不了队列，见 pickAndEnqueue）。
-		if ui.Button(c, "打开文件").Clicked() {
+		if iconButton(c, iconFolder, "打开文件", iconMd).
+			Size(iconHitMd, iconHitMd).Padding(0, 5).
+			Tooltip("打开本地音频文件").Clicked() {
 			s.pickAndEnqueue()
 		}
 		// 播放列表抽屉的开关。Biu 把它放在播放条右边
-		//（`layout/playbar/right/index.tsx`），我们放这儿——**播放条右边放不下**：
-		// 那三个键（音量 120 + 倍速 64 + 加歌 56）已经把 88 高的一行占满了，再加
-		// 一个就把歌名挤成一个字一行（见 playbar.go 里那一段的注释）。
+		//（`layout/playbar/right/index.tsx`），我们放这儿——当初是因为右边那一组
+		// 挤不下了（见 playbar.go 里那一段的账）。图标化之后那边**又腾出 40
+		// 像素**，搬回去是可行的，但 issue 93 的边界是「换图标、不重排界面」，
+		// 所以这一票只让它有个图标，位置不动。
 		//
 		// 紧挨着「打开文件」：两个都是「往队列里放东西 / 看队列」这一类。
-		if ui.Button(c, "播放列表").Clicked() {
+		if iconButton(c, iconQueue, "播放列表", iconMd).
+			Size(iconHitMd, iconHitMd).Padding(0, 5).
+			Tooltip(drawerTip(s.drawerOpen)).Clicked() {
 			s.drawerOpen = !s.drawerOpen
 		}
 		// 迷你播放器的开关。Biu 那边在窗口按钮那一排里（`components/window-action/
@@ -92,9 +103,24 @@ func (s *Shell) viewNav(c *ui.Context) {
 		//
 		// ⚠️ **顶栏是拖动区**（`nav.DragWindow()`），而这一句在它的 Children
 		// 里，所以按它就是按它、不会变成拖窗口（见本文件文件头那一段）。
+		//
+		// ⚠️ **它还留着文字键，没跟着图标化**。图标化那一票的边界是「换图标、不重排
+		// 界面」，而这一格是**新加的键**；而 `icons.go` 那份图标集是按票挑的（每个
+		// 常量都要有一份 SVG，`icons_test.go` 逐个过 embed），里面没有画中画 / 小窗
+		// 这一类。往那份清单里塞一个资源是另一样活（谁维护谁说了算），所以这里先
+		// 用文字键——和左边那几个图标键并排，样子不齐但每个都点得着、都说得出是啥。
 		if ui.Button(c, "迷你").Tooltip("缩成 320×100 的小窗贴边悬浮，音乐不停").
 			Clicked() {
 			s.toggleMiniPlayer()
+		}
+		// 设置。Biu 的设置在侧栏菜单和头像下拉里（`layout/side/index.tsx`、
+		// `navbar/user/index.tsx`），顶栏没有。我们顶栏本来就收着「播放条放不下
+		// 的控件」（播放列表开关就在这儿），而设置是用户改任何东西都要走一遍的
+		// 那个入口——藏在头像下拉第三项里是两级。
+		if iconButton(c, iconSettings, "设置", iconMd).
+			Size(iconHitMd, iconHitMd).Padding(0, 5).
+			Tooltip("设置").Clicked() {
+			s.navigate(settingsPath)
 		}
 		s.viewDynamicDot(c)
 		s.viewAvatar(c)
@@ -104,4 +130,40 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// 按下是弹菜单不是切路由（见 navbar_avatar.go）。
 		s.viewLoginEntry(c)
 	})
+}
+
+// viewNavBack / viewNavForward 是顶栏左边那两个箭头。
+//
+// ⚠️ **留着 `ui.BackButton` / `ui.ForwardButton`，不换成图标按钮**——这不是省事，
+// 是换不了：框架那一支按下去除了 `r.Go(±1)`，还挂着**右键的「去过那些页」**列表
+// （`mygo/ui/router.go:799-808`，照 Biu 浏览器工具栏那样）。而那一列要读历史的
+// 路径和标题，`Router` 的 `entries` / `at` 是**私有**的（`Router` 上只有
+// `CanGoBack` / `Go` / `Path`），所以自己重画一个按钮只能把那份列表丢掉。
+//
+// **拿功能去换图标样式是反的**（issue 93 的约束：不弄坏已经能用的东西）。所以
+// 这里是这一票里**唯一没换成图标资源**的一处：那个箭头是框架用 `Draw` 画的
+// 一段 path，不是 SVG。它满足验收的实质那几条——单色、按文字色走（`t.Text` /
+// `t.TextMuted`）、`Padding(Space(1.5), Space(2))` 撑着比图形大的点击区。
+//
+// 这里改的只有**名字**：框架给的是英文的 "Back" / "Forward"，中文界面里读屏
+// 念出来是英文。
+func (s *Shell) viewNavBack(c *ui.Context, back func()) {
+	if ui.BackButton(c, s.router).Label(navBackLabel).Tooltip(navBackLabel).Clicked() {
+		back()
+	}
+}
+
+func (s *Shell) viewNavForward(c *ui.Context, back func()) {
+	if ui.ForwardButton(c, s.router).Label(navForwardLabel).Tooltip(navForwardLabel).Clicked() {
+		back()
+	}
+}
+
+// drawerTip 是播放列表开关悬停时那句话：这个键是**开关**，所以说的话得说清
+// 按下去会开还是会关——不然用户得先按一下才知道自己按的是什么。
+func drawerTip(open bool) string {
+	if open {
+		return "收起播放列表"
+	}
+	return "打开播放列表"
 }

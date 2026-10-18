@@ -323,13 +323,7 @@ func (s *Shell) attachMiniWindow(w *mygo.Window) {
 		if s.win == w {
 			s.win = nil
 		}
-		// 摘掉这一条：窗口没了之后句柄内部是弱引用、调它是 no-op，留着不致命，
-		// 但「进迷你 / 退出迷你」来回十次之后那个列表就有十条，每改一次状态就
-		// 多走十趟空转。
-		if s.wakeRemove != nil {
-			s.wakeRemove()
-			s.wakeRemove = nil
-		}
+		// 唤醒句柄的摘除在 `closePerWindow` 里（`releaseMini` 走的就是它）。
 		s.releaseMini()
 		// ⚠️ **主窗口要叫回来**。它是「进迷你」那一步收起来的（`openMiniPlayer`），
 		// 而这一条除了点「退出」之外还有别的路会走到：macOS 上的 ⌘W、Windows 上
@@ -349,18 +343,16 @@ func (s *Shell) attachMiniWindow(w *mygo.Window) {
 
 // releaseMini 收掉迷你那个外壳自己那几摊**逐窗口**的资源。
 //
-// ⚠️ `New` 是给**每个**外壳都建了一份的：封面缓存（它起解码 goroutine）、内存里的
-// 搜索历史和快捷键（各有一个后台写盘的 goroutine）、红点那个定时器。迷你窗口压根不
-// 画那些页面，而它们要是不收，「进迷你 / 退出迷你」来回十次之后就是十份挂着的
-// goroutine 到进程退出为止。
+// ⚠️ 它**不能**调 `Close`：那是整个应用的收尾（会 `s.app.Close()` 把正在放的歌停
+// 掉、关设置），而迷你窗口只是另一扇窗——关掉它而主窗口还开着，音乐不该停。
+// 它走的是 `closePerWindow`（主窗口那一侧的 `Close` 收完它之后才收应用层那几样）。
 //
-// 主窗口那份由 `Attach` 的 `OnClosed` 收（那里连设置和 App 一起收），两处不重复。
+// 为什么需要收：`New` 给**每个**外壳都建了一份封面缓存（它起解码 goroutine）、内存里
+// 的搜索历史和快捷键（各有一个后台写盘的 goroutine）、红点那个定时器。迷你窗口压根
+// 不画那些页面，而它们要是不收，「进迷你 / 退出迷你」来回十次之后就是十份挂着的
+// goroutine 到进程退出为止。
 func (s *Shell) releaseMini() {
-	s.images.Close()
-	s.feed.disarm()
-	// 存盘失败不往上报错：关一个已经关掉的窗口，没有人在看。
-	_ = s.hist.Close()
-	_ = s.keys.Close()
+	s.closePerWindow()
 }
 
 // viewMini 是迷你播放器那一帧。

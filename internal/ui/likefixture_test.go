@@ -219,13 +219,13 @@ func playTheLikeSong(t *testing.T, f *biliFixture, width int, waitAsked bool) *l
 	if err := s.app.Enqueue(likeItem()); err != nil {
 		t.Fatalf("把在线的那首放进队列：%v", err)
 	}
-	settleSearch(t, tt, "在线那首开始播", func() bool { return s.app.Snapshot().HasTrack })
+	waitFrames(t, tt, "在线那首开始播", func() bool { return s.app.Snapshot().HasTrack })
 
 	// 赞没赞是**每一帧**问 App 要的，而问 App 会触发那一趟。等到问回来为止：
 	// 没问回来之前长按是关着的（likeArmed，见 like.go），用例在那一段量到的
 	// 东西没有意义。
 	if waitAsked {
-		settleSearch(t, tt, "赞没赞问回来了", func() bool { return s.app.LikeAsked() })
+		waitFrames(t, tt, "赞没赞问回来了", func() bool { return s.app.LikeAsked() })
 	} else if s.app.LikeAsked() {
 		t.Fatal("赞没赞问回来了 —— 这一条要的是「一直没问回来」那一段")
 	}
@@ -246,20 +246,13 @@ func likeItem() app.Item {
 
 // newShellWidth 建一个给定宽度的整窗外壳（和 `newShell` 一样，只是宽窄可变）。
 //
-// 为什么不来一个 `newShellAt(t, w, h)`：那一处的三行收尾（历史、快捷键、红点那个
-// 定时器）漏掉就是一堆挂着的 goroutine，而它们会让后面那些按固定像素判主题的
-// 测试随机红（`newShell` 的注释里有详细说明）。
+// 宽度这个参数基座的 `at(w, h)` 就给了，不必再自己开一份「按尺寸造外壳」的入口——
+// 那种入口每多一个，就多一处要记得抄收尾的地方（抄漏了就是一堆挂着的 goroutine，
+// 而它们会让后面那些按固定像素判主题的测试随机红，见 shelltest_test.go 的文件头）。
 func newShellWidth(t *testing.T, w int) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	t.Cleanup(func() { _ = s.hist.Close() })
-	t.Cleanup(func() { _ = s.keys.Close() })
-	t.Cleanup(s.feed.disarm)
-	s.router.Transition = mygoui.TransitionNone
-	return s, mygoui.NewTester(s.View, w, likeWinH)
+	b := newTestShell(t, at(w, likeWinH))
+	return b.s, b.tt
 }
 
 // advanceLike 把两个钟都往前推（同 advanceFull）。

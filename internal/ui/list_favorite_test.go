@@ -40,9 +40,8 @@ func TestFavoritingFromTheLaterListOpensTheDialog(t *testing.T) {
 	// 解码 → 投递状态 → 唤醒 → 画一帧，机器一忙就赶不上——而下一步
 	// `RightClick` 要的正是那一行。原来的判据是 `callsOf(...) == 1`（请求记上了），
 	// 它比这一步需要的东西早，于是整包并行跑时偶发地红（症状是
-	// `ui: no element shows "…"`）。见 `librarypage_test.go` 里 `settle` 顶上
-	// 那一段：判据一律是结果。
-	settle(t, tt, "第一页的条目画出来", func() bool { return tt.HasText("周杰伦的歌") })
+	// `ui: no element shows "…"`）。判据一律是结果，见基座那两条等法（shelltest_test.go）。
+	waitFrames(t, tt, "第一页的条目画出来", func() bool { return tt.HasText("周杰伦的歌") })
 
 	if err := tt.RightClick("周杰伦的歌"); err != nil {
 		t.Fatal(err)
@@ -53,7 +52,7 @@ func TestFavoritingFromTheLaterListOpensTheDialog(t *testing.T) {
 	// ⚠️ **要等**：这些页面的条目只有 bvid，而弹窗要 avid，所以按下去之后
 	// 还要在后台问一次 B 站才开（`app.ResolveFavoriteID`）。只跑一帧的话读到的
 	// 是「还没开」。
-	settle(t, tt, "收藏夹选择弹窗开出来", func() bool { return tt.HasText("放到收藏夹") })
+	waitFrames(t, tt, "收藏夹选择弹窗开出来", func() bool { return tt.HasText("放到收藏夹") })
 
 	if tt.HasText("还没接 B 站接口") {
 		t.Errorf("按了「收藏」说的是「还没接」，文字有 %q", tt.Texts())
@@ -72,9 +71,8 @@ func TestFavoritingFromTheHistoryListOpensTheDialog(t *testing.T) {
 	// 解码 → 投递状态 → 唤醒 → 画一帧，机器一忙就赶不上——而下一步
 	// `RightClick` 要的正是那一行。原来的判据是 `callsOf(...) == 1`（请求记上了），
 	// 它比这一步需要的东西早，于是整包并行跑时偶发地红（症状是
-	// `ui: no element shows "…"`）。见 `librarypage_test.go` 里 `settle` 顶上
-	// 那一段：判据一律是结果。
-	settle(t, tt, "第一页的条目画出来", func() bool { return tt.HasText("听过的一首") })
+	// `ui: no element shows "…"`）。判据一律是结果，见基座那两条等法（shelltest_test.go）。
+	waitFrames(t, tt, "第一页的条目画出来", func() bool { return tt.HasText("听过的一首") })
 
 	if err := tt.RightClick("听过的一首"); err != nil {
 		t.Fatal(err)
@@ -84,7 +82,7 @@ func TestFavoritingFromTheHistoryListOpensTheDialog(t *testing.T) {
 	}
 	// 要等：这些页面的条目只有 bvid，开弹窗前要在后台问一次稿件 id
 	// （见上面那一条的注释）。
-	settle(t, tt, "收藏夹选择弹窗开出来", func() bool { return tt.HasText("放到收藏夹") })
+	waitFrames(t, tt, "收藏夹选择弹窗开出来", func() bool { return tt.HasText("放到收藏夹") })
 }
 
 // TestFavoritingFromTheSearchListOpensTheDialog 搜索结果那一页。
@@ -100,7 +98,7 @@ func TestFavoritingFromTheSearchListOpensTheDialog(t *testing.T) {
 	s.app.MountCollections(app.CollectionRefs{Client: collectionClient(t, b), Settle: 0})
 
 	// 同样等「行画出来了」而不是「这一页 Loaded 了」——理由见上面那一条。
-	settleSearch(t, tt, "结果的行画出来", func() bool { return tt.HasText("第 1 页 第 1 首") })
+	waitFrames(t, tt, "结果的行画出来", func() bool { return tt.HasText("第 1 页 第 1 首") })
 
 	if err := tt.RightClick("第 1 页 第 1 首"); err != nil {
 		t.Fatal(err)
@@ -110,7 +108,7 @@ func TestFavoritingFromTheSearchListOpensTheDialog(t *testing.T) {
 	}
 	// 要等：搜索结果的条目只有 bvid（`bili.VideoHit` 不给 avid），开弹窗前
 	// 要在后台问一次稿件 id。
-	settleSearch(t, tt, "收藏夹选择弹窗开出来", func() bool { return tt.HasText("放到收藏夹") })
+	waitFrames(t, tt, "收藏夹选择弹窗开出来", func() bool { return tt.HasText("放到收藏夹") })
 	if tt.HasText("还没接 B 站接口") {
 		t.Errorf("按了「收藏」说的是「还没接」，文字有 %q", tt.Texts())
 	}

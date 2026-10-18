@@ -66,7 +66,13 @@ type queuedTask struct {
 		Bvid   string `json:"bvid"`
 		Cid    string `json:"cid"`
 		Length int64  `json:"length"`
+		Video  bool   `json:"video,omitempty"`
 	} `json:"identity"`
+	// Video 是视频任务那一位（对着 `service/download` 的 `Task` 的 json tag）。
+	//
+	// ⚠️ 它**不在** `Identity` 里面：`Task.Video` 和 `Task.Identity.Video` 是两处
+	// 各自独立的字段（后者是续传的资源身份），而记录页那一排筛选读的是前者。
+	Video   bool   `json:"video,omitempty"`
 	Chunks  []int  `json:"chunks,omitempty"`
 	Status  string `json:"status"`
 	Err     string `json:"err,omitempty"`
@@ -169,54 +175,34 @@ const dlWide = 1200
 // 设置先写到盘上再挂：那是「启动时读盘」那条路，和真窗口一样。
 func newRowsOnSide(t *testing.T, w int, side float64, rows ...download.Snapshot) *ui.Tester {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), app.SettingsFileName)
-	st, err := app.OpenSettingsStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.Update(func(cur *app.Settings) {
-		*cur = app.DefaultSettings("")
-		cur.SideMenuWidth = side
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	a := app.New()
-	if err := a.MountSettings(path); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		a.Close()
-		_ = a.CloseSettings()
-	})
-
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	t.Cleanup(func() { _ = s.hist.Close() })
-	s.router.Transition = ui.TransitionNone
-	s.downloads.rowsFn = func() []download.Snapshot { return rows }
-
-	tt := ui.NewTester(s.View, w, 800)
+	b := newTestShell(t,
+		withSettings(func() app.Settings {
+			st := app.DefaultSettings("")
+			st.SideMenuWidth = side
+			return st
+		}()),
+		at(w, 800),
+		stubbed(func(_ *testing.T, s *Shell) {
+			s.downloads.rowsFn = func() []download.Snapshot { return rows }
+		}))
+	s := b.s
 	s.navigate(downloadListPath)
-	dlFrame(tt)
-	return tt
+	dlFrame(b.tt)
+	return b.tt
 }
 
 // newDownloadShell 建外壳、把两个「打开」换成记动作的桩。
 func newDownloadShell(t *testing.T, a *app.App) *Shell {
 	t.Helper()
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	t.Cleanup(func() { _ = s.hist.Close() })
-	s.router.Transition = ui.TransitionNone
-	// 关掉切页动画，和 newShell 同一个理由（router_test.go 顶上那一段）。
-	dlOpened, dlRevealed = nil, nil
-	s.downloads.openDir = func(path string) error { dlOpened = append(dlOpened, path); return nil }
-	s.downloads.reveal = func(path string) { dlRevealed = append(dlRevealed, path) }
-	return s
+	// 这个外壳挂在**外面那个** a 上（那些测试要拿同一个 App 验别的东西），所以
+	// 造外壳的地方给的是 `onApp`：收尾只停外壳自己占的那些东西，不碰那个 a。
+	b := newTestShell(t, onApp(a),
+		stubbed(func(_ *testing.T, s *Shell) {
+			dlOpened, dlRevealed = nil, nil
+			s.downloads.openDir = func(path string) error { dlOpened = append(dlOpened, path); return nil }
+			s.downloads.reveal = func(path string) { dlRevealed = append(dlRevealed, path) }
+		}))
+	return b.s
 }
 
 // dlOpened / dlRevealed 记下两个「打开」各自打开了什么。
@@ -419,6 +405,17 @@ func TestTheStatusColumnShowsTheThreeParts(t *testing.T) {
 }
 
 // progressWidth 是画面上那一条进度条涂了主色的宽度。
+//
+// 🔴 **只量「状态」那一列里那一段**（横向窗口是从百分比那一格的右边缘往左
+// `dlStatusW`），不是扫整张图。早先这里是整幅宽度扫，于是「侧栏里当前页那一项
+// 用主色垫底」也会被量进来——而侧栏那一项的高度和这一页的状态列**没有任何
+// 关系**，它落没落进这几行像素全看侧栏上排了几项：未登录时那三个入口不摆
+// （`Route.NeedsLogin`），当前页那一项往上挪了三行，正好掉进
+// `txt.Y-4` 那一行，于是量到的恒是侧栏那一项左右两段空白里较长的一段
+// （实测 74），50% 和 90% 一样宽。
+//
+// 这和 BMG-56 量行高时踩的是同一个坑：**量一件东西，要先把范围限在这一件东西
+// 里面**，否则量到的是碰巧和它同一行的别的东西。
 func progressWidth(t *testing.T, tt *ui.Tester, pct string) float32 {
 	t.Helper()
 	txt, ok := tt.Find(pct)
@@ -429,12 +426,17 @@ func progressWidth(t *testing.T, tt *ui.Tester, pct string) float32 {
 	// 而 Tester 默认不深色，所以浅色那份的 Accent 正是条上涂的那个颜色。
 	accent := BuildTheme(app.DefaultSettings(""), false).Accent
 
+	// 百分比是那一格里**定宽靠右**的一段（`dlPctW`），它的右边缘就是状态列的
+	// 右边缘；条是同一格里 `FillWidth` 的，所以右边缘也是那儿。
+	right := int(txt.X + txt.W)
+	left := right - dlStatusW
+
 	// 条在百分比那一行**上面**：从文字的上边界往上扫，找主色。
 	img := tt.Image()
 	y := int(txt.Y) - 4
 	for y > int(txt.Y)-24 {
 		run, best := 0, 0
-		for x := range img.Bounds().Dx() {
+		for x := max(left, 0); x < right; x++ {
 			c := img.RGBAAt(x, y)
 			if c.R == accent.R && c.G == accent.G && c.B == accent.B && c.A > 0 {
 				if run++; run > best {
@@ -561,6 +563,34 @@ func dlSnapshot(title string, st download.Status, total, done int64) download.Sn
 		s.Err = dlErrText
 	}
 	return s
+}
+
+// dlVideoSnapshot 是 `dlSnapshot` 的视频那一版。
+//
+// ⚠️ 它只翻 `Video` 那一一位，别的全和音频一样（进度、日期、大小）——
+// 这样「筛完之后剩下的是不是那一类」才是判据，而不会混进「视频行的画法不一样」
+// 这件无关的事。
+func dlVideoSnapshot(title string, st download.Status, total, done int64) download.Snapshot {
+	s := dlSnapshot(title, st, total, done)
+	s.Video = true
+	s.Dest = filepath.Join(dlDir, title+".mp4")
+	return s
+}
+
+// newVideoTask 是 `newTask` 的视频那一版，喂的是**队列文件**（真引擎那条路）。
+//
+// ⚠️ 三样都要改，而它们是三件不同的事：ID 带 `|video`（`download.TaskID` 的视频
+// 那一支，判重键）、`Video` 那一位（业务上的「这一项是视频」，记录页那一排筛的
+// 就是它）、落盘名 `.mp4`（交织出来的产物）。只改 ID 的话 `Snapshot.Video` 是假值，
+// 而只改 `Video` 的话真引擎那一路认不出这是视频。
+func newVideoTask(title string, st download.Status, total int64, percent int) queuedTask {
+	task := newTask(title, st, total, percent)
+	task.ID += "|video"
+	task.Video = true
+	task.Identity.Video = true
+	task.Dest = filepath.Join(dlDir, title+".mp4")
+	task.Ext = ".mp4"
+	return task
 }
 
 // dlTitles 是给报错用的一行摘要。

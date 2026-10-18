@@ -1,4 +1,4 @@
-package ui_test
+package ui
 
 import (
 	"fmt"
@@ -169,7 +169,7 @@ func TestQueueDrawerLeavesThePlaybarUsable(t *testing.T) {
 	if err := h.tt.Click("下一首"); err != nil {
 		t.Fatalf("抽屉开着的时候点不了「下一首」：%v", err)
 	}
-	waitFor(t, 2*time.Second, "下一首", func() bool {
+	waitFor(t, "下一首", func() bool {
 		h.tt.Frame()
 		return h.app.Snapshot().Title == "b"
 	})
@@ -229,7 +229,7 @@ func TestQueueRowClickPlaysThatSong(t *testing.T) {
 	if err := h.tt.Click("c"); err != nil {
 		t.Fatalf("点不了第三行：%v（文字：%q）", err, h.tt.Texts())
 	}
-	waitFor(t, 2*time.Second, "跳到第三首", func() bool {
+	waitFor(t, "跳到第三首", func() bool {
 		h.tt.Frame()
 		return h.app.Snapshot().Title == "c"
 	})
@@ -337,7 +337,7 @@ func TestLocateCurrentGlidesToTheCurrentSong(t *testing.T) {
 	}
 	// 播放条上的歌名是从**路径**推出来的，所以这里是文件名的后缀（"30"），
 	// 不是抽屉里那一行的「第30首」——上面刻意让两者不一样。
-	waitFor(t, 5*time.Second, "第30首开始播", func() bool {
+	waitFor(t, "第30首开始播", func() bool {
 		h.tt.Frame()
 		return h.app.Snapshot().Title == "30"
 	})
@@ -593,7 +593,7 @@ func TestDeletingADedupedRowTakesEveryCopyOut(t *testing.T) {
 		t.Errorf("抽屉里画着 %d 行，want 1", got)
 	}
 	// 删掉的里面有正在放的那首 → 接着放乙。
-	waitFor(t, 2*time.Second, "接着放乙", func() bool {
+	waitFor(t, "接着放乙", func() bool {
 		h.tt.Frame()
 		return h.app.Snapshot().Title == "乙"
 	})
@@ -615,7 +615,7 @@ func TestQueueRowClickUsesItsQueuePositionNotItsRowNumber(t *testing.T) {
 	if err := h.tt.Click("乙"); err != nil {
 		t.Fatalf("点不了第二行：%v", err)
 	}
-	waitFor(t, 2*time.Second, "跳到乙", func() bool {
+	waitFor(t, "跳到乙", func() bool {
 		h.tt.Frame()
 		return h.app.Snapshot().Title == "乙"
 	})

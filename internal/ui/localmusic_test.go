@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
@@ -29,39 +28,19 @@ import (
 func shellOnLocalMusic(t *testing.T, dirs ...string) (*mygoui.Tester, *Shell, *app.App, *dirPicker) {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), app.SettingsFileName)
-	st, err := app.OpenSettingsStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.Update(func(cur *app.Settings) { cur.LocalMusicDirs = dirs }); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	a := app.New()
-	if err := a.MountSettings(path); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		a.Close()
-		_ = a.CloseSettings()
-	})
+	pick := &dirPicker{}
 	// ⚠️ **不挂文件监听**：测试里换掉 `s.local.pickDir` 和 wake 都很方便，
 	// 而真监听要系统事件循环（`WhenReady`），无头环境里根本起不来。
 	// 监听那一半由 app 层的桩验（`internal/app/localmusic_test.go`）。
-	a.MountLocalMusic(app.LocalMusic{})
-
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	t.Cleanup(func() { _ = s.hist.Close() })
-	s.router.Transition = mygoui.TransitionNone
-
-	pick := &dirPicker{}
-	s.local.pickDir = pick.pick
-	tt := mygoui.NewTester(s.View, 1200, 800)
+	b := newTestShell(t,
+		withSettings(func() app.Settings {
+			st := app.DefaultSettings("")
+			st.LocalMusicDirs = dirs
+			return st
+		}()),
+		mounted(func(_ *testing.T, a *app.App) { a.MountLocalMusic(app.LocalMusic{}) }),
+		stubbed(func(_ *testing.T, s *Shell) { s.local.pickDir = pick.pick }))
+	a, s, tt := b.a, b.s, b.tt
 	openLocal(t, tt)
 	settleLocal(t, a, tt)
 	return tt, s, a, pick
@@ -110,43 +89,15 @@ func openLocal(t *testing.T, tt *mygoui.Tester) {
 // 时候还没扫完，画出来的还是「正在扫描…」。等 `Scanning` 变 false 才画下一帧。
 func settleLocal(t *testing.T, a *app.App, tt *mygoui.Tester) {
 	t.Helper()
-	waitForScan(t, a, tt)
+	waitFrames(t, tt, "本地音乐那一遍扫描落地", func() bool { return !a.LocalMusicState().Scanning })
 	tt.Frame()
 }
 
-// waitForScan 一遍一遍地**画帧**、每帧之后看一眼扫描状态，直到它落地。
-//
-// ⚠️ 每一遍都要画帧，这不是多余的：状态变更（比如「设置里加了一个目录」）
-// 要等页面的下一帧跑过 `begin` 才被应用状态看见——`begin` 里对着设置核一遍
-// 根，对不上才 `SetLocalRoots` 并重扫。只在循环里等而不画帧，那个条件永远
-// 等不到，于是断言在扫描**还没开始**的时候就跑完了。
+// 每一遍都要画帧，这不是多余的：状态变更（比如「设置里加了一个目录」）要等页面
+// 的下一帧跑过 `begin` 才被应用状态看见——`begin` 里对着设置核一遍根，对不上才
+// `SetLocalRoots` 并重扫。只在循环里等而不画帧，那个条件永远等不到，于是断言在
+// 扫描**还没开始**的时候就跑完了。
 // （`TestAddingADirectoryStoresItAndScans` 原来就是这么随机红的。）
-func waitForScan(t *testing.T, a *app.App, tt *mygoui.Tester) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		tt.Frame()
-		if !a.LocalMusicState().Scanning {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("等了 10 秒本地音乐那一遍扫描还没完")
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-}
-
-// waitUntil 等 cond 成立，最多等 timeout。
-func waitUntil(t *testing.T, cond func() bool, msg string) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatal(msg)
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-}
 
 // libSong 在 dir 里造一个内容随便的 .mp3。
 func libSong(t *testing.T, dir, name string) string {
@@ -248,11 +199,16 @@ func TestTheLocalMusicPageShowsItsColumns(t *testing.T) {
 	}
 }
 
-// TestTheThreeDisplayStylesAreThereAndSwitch 钉住「展示样式切换」。
+// TestTheTableAndSongSlotsSwitch 钉住这一页自己的那一排切换。
 //
-// 三档都要真的画出来不一样的东西：三档只切一个变量而内容一样的话，
-// 用户按了按钮看不到任何变化，而且没有任何测试会红。
-func TestTheThreeDisplayStylesAreThereAndSwitch(t *testing.T) {
+// ⚠️ **这一页的开关现在是两档（表格 / 歌曲），不是三档**：这一页原来自己管着
+// 「表格 / 列表 / 网格」，而设置里的「数据显示样式」管的是同一件事——两个控件抢一件
+// 事，用户改了设置却看见这一页没反应，还不知道该看谁。分工见 localmusic.go 文件头
+// 那一段：这一页的开关管「表格还是歌曲」，摆成什么样由设置说了算。
+//
+// 「歌曲」那一档跟着设置换视图，由 `TestEveryPageFollowsTheDisplayStyleSetting`
+// 那一组里本地音乐那一条钉住（它量的正是行高 / 列数变了）。
+func TestTheTableAndSongSlotsSwitch(t *testing.T) {
 	root := t.TempDir()
 	libSong(t, root, "第一首.mp3")
 	libSong(t, root, "第二首.mp3")
@@ -269,25 +225,28 @@ func TestTheThreeDisplayStylesAreThereAndSwitch(t *testing.T) {
 		}
 	}
 
-	// 切到列表：列头没有了（那是表格才有的），卡片那一档在画。
-	if err := tt.Click(localStyles[localStyleList]); err != nil {
+	// 切到歌曲：列头没有了（那是表格才有的），卡片那一档在画。
+	if err := tt.Click(localStyles[localStyleSong]); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 	if tt.HasText("创建时间") {
-		t.Errorf("切到列表之后列头还在，样式没切过去：%q", tt.Texts())
+		t.Errorf("切到歌曲之后列头还在，样式没切过去：%q", tt.Texts())
 	}
 	if !tt.HasText("第一首") {
-		t.Errorf("切到列表之后歌没了：%q", tt.Texts())
+		t.Errorf("切到歌曲之后歌没了：%q", tt.Texts())
 	}
 
-	// 切到网格。
-	if err := tt.Click(localStyles[localStyleGrid]); err != nil {
+	// 切回表格：列头回来。
+	if err := tt.Click(localStyles[localStyleTable]); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
+	if !tt.HasText("创建时间") {
+		t.Errorf("切回表格之后列头没回来：%q", tt.Texts())
+	}
 	if !tt.HasText("第二首") {
-		t.Errorf("切到网格之后歌没了：%q", tt.Texts())
+		t.Errorf("切回表格之后歌没了：%q", tt.Texts())
 	}
 }
 
@@ -331,24 +290,14 @@ func TestTheFirstFrameDoesNotClaimThereIsNoMusic(t *testing.T) {
 	for i := range 50 {
 		libSong(t, root, string(rune('a'+i%26))+string(rune('a'+i/26))+".mp3")
 	}
-	path := filepath.Join(t.TempDir(), app.SettingsFileName)
-	a := app.New()
-	t.Cleanup(func() { a.Close(); _ = a.CloseSettings() })
-	if err := a.MountSettings(path); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := a.UpdateSettings(func(s *app.Settings) {
-		s.LocalMusicDirs = []string{root}
-	}); err != nil {
-		t.Fatal(err)
-	}
-	a.MountLocalMusic(app.LocalMusic{})
-
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	t.Cleanup(func() { _ = s.hist.Close() })
-	s.router.Transition = mygoui.TransitionNone
-	tt := mygoui.NewTester(s.View, 1200, 800)
+	b := newTestShell(t,
+		withSettings(func() app.Settings {
+			st := app.DefaultSettings("")
+			st.LocalMusicDirs = []string{root}
+			return st
+		}()),
+		mounted(func(_ *testing.T, a *app.App) { a.MountLocalMusic(app.LocalMusic{}) }))
+	s, a, tt := b.s, b.a, b.tt
 	s.navigate(localMusicPath)
 	tt.Frame()
 

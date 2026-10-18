@@ -249,7 +249,7 @@ func TestTheSearchDialogListsBothSourcesAndStartsFromTheSongOnScreen(t *testing.
 		t.Errorf("框里是 %q，want 屏幕上那一首 %q", got, want)
 	}
 	// 而且**立刻**按它搜了一次（上游那个 useEffect([isOpen]) → handleSubmit）。
-	settle(t, tt, "把开机那一次搜索发出去", func() bool { return netease.calls() == 1 })
+	waitFrames(t, tt, "把开机那一次搜索发出去", func() bool { return netease.calls() == 1 })
 	if got := netease.searched(); got[0] != want {
 		t.Errorf("第一次搜的是 %q，want 屏幕上那一首 %q", got[0], want)
 	}
@@ -266,13 +266,13 @@ func TestSwitchingTheTabSearchesThatSourceOnItsOwn(t *testing.T) {
 	_, tt := lyricSearchShell(t, netease, lrclib)
 
 	openTheSearchDialog(t, tt)
-	settle(t, tt, "第一个源搜完", func() bool { return netease.calls() == 1 })
+	waitFrames(t, tt, "第一个源搜完", func() bool { return netease.calls() == 1 })
 	before := lrclib.calls()
 
 	if err := tt.Click("LrcLib"); err != nil {
 		t.Fatalf("切不到 LrcLib 那个 Tab：%v（文字有 %q）", err, tt.Texts())
 	}
-	settle(t, tt, "第二个源自己搜一遍", func() bool { return lrclib.calls() == before+1 })
+	waitFrames(t, tt, "第二个源自己搜一遍", func() bool { return lrclib.calls() == before+1 })
 
 	if got := lrclib.searched(); got[len(got)-1] != netease.searched()[0] {
 		t.Errorf("切过去搜的是 %q，want 框里那个词 %q", got[len(got)-1], netease.searched()[0])
@@ -301,13 +301,13 @@ func TestPreviewThenAdoptPutsTheLyricsOnScreen(t *testing.T) {
 	s, tt := lyricSearchShell(t, netease)
 
 	openTheSearchDialog(t, tt)
-	settle(t, tt, "把候选搜出来", func() bool { return tt.HasText("候选甲") })
+	waitFrames(t, tt, "把候选搜出来", func() bool { return tt.HasText("候选甲") })
 
 	// 点一条候选 → 预览弹窗，看得到完整歌词。
 	if err := tt.Click("候选甲"); err != nil {
 		t.Fatalf("点不到那一条候选：%v（文字有 %q）", err, tt.Texts())
 	}
-	settle(t, tt, "把这一条的歌词拉到预览里", func() bool {
+	waitFrames(t, tt, "把这一条的歌词拉到预览里", func() bool {
 		return tt.HasText("第一句") && tt.HasText("第二句")
 	})
 	if netease.previewsOf() != 1 {
@@ -322,7 +322,7 @@ func TestPreviewThenAdoptPutsTheLyricsOnScreen(t *testing.T) {
 	if err := tt.Click(lyricPreviewAdopt); err != nil {
 		t.Fatalf("点不到 %q：%v（文字有 %q）", lyricPreviewAdopt, err, tt.Texts())
 	}
-	settle(t, tt, "两个弹窗一起关掉", func() bool {
+	waitFrames(t, tt, "两个弹窗一起关掉", func() bool {
 		return !tt.HasText(lyricSearchHeading) && !tt.HasText("候选甲")
 	})
 
@@ -346,32 +346,53 @@ func TestPreviewThenAdoptPutsTheLyricsOnScreen(t *testing.T) {
 // TestTheKeywordIsDebouncedBy500ms 钉住「别在输入时每一笔都发」。
 //
 // ⚠️ 判据是**源被叫了几次**：防抖开着和关着，界面上那句话一个像素都不差。
-// 而且用户每敲一个字都要**重新起算**那 500ms（上游 `useDebounceFn(wait: 500)`
-// 就是每个输入都重置那个钟）——从第一个字算起的话，用户慢慢打的时候会在中途
-// 就发出去一个还没输完的词。
+//
+// ## 两个字之间**必须隔开时间**，否则这一条验不到它要验的那件事
+//
+// 它要钉的是「每敲一个字都**重新起算**那 500ms」（上游 `useDebounceFn(wait: 500)`
+// 就是每个输入都重置那个钟）。而「从第一个字算起」和「从第二个字算起」**只有在
+// 两个字之间过了时间时才分得开**：紧挨着敲两下的时候，两种钟都在同一刻起算，
+// 后面量到的 400ms / 600ms 对它们一模一样——一个不重新起算的实现也照样绿。
+//
+// 从第一个字算起的症状正是这一条要挡的那一个：用户慢慢打的时候，会在**中途**就
+// 发出去一个还没输完的词。所以下面是 300ms → 敲 → 300ms → 200ms 这个排法：
+// 第二次量的时候离**第一个**字已经 600ms（早就该发了），离**第二个**字才 300ms。
+//
+// ⚠️ **正的等、负的也等，但等的是两样不同的东西**（理由在 `callsStayAt` 上）：
+// 这一发是后台 goroutine 发的，而一帧画完不等于那一趟已经跑到 `src.Search`。
+// 正的用 `waitFor`（赌「还没跑到」），负的用 `callsStayAt` 给一个真实的窗口
+// （赌「来不及发」）。两处都写成「画完那一帧立刻读」的话，这一条既会在满载的
+// 机器上偶发红，**又**在防抖真的坏掉时照样绿——而后者是更要紧的那一半。
 func TestTheKeywordIsDebouncedBy500ms(t *testing.T) {
 	netease := neteaseSource()
 	s, tt := lyricSearchShell(t, netease)
 	openTheSearchDialog(t, tt)
-	settle(t, tt, "把开机那一次搜索发出去", func() bool { return netease.calls() == 1 })
+	waitFrames(t, tt, "把开机那一次搜索发出去", func() bool { return netease.calls() == 1 })
 
+	// 第一个字起算。300ms 之内不许发。
 	typeLyricKeyword(t, tt, "周")
 	if n := netease.calls(); n != 1 {
 		t.Fatalf("敲完第一个字就发了（共 %d 次）", n)
 	}
-	// 敲第二个字：**重新起算**。
+	advance(s, 300*time.Millisecond)
+	tt.Frame()
+	callsStayAt(t, netease, 1, lyricSettle)
+
+	// 第二个字：**重新起算**。从这一刻起 300ms 之内仍然不许发——而从第一个字算
+	// 起的话，此刻已经过去 600ms，那一趟早该发出去了。
 	tt.Type("杰")
 	tt.Frame()
-	advance(s, 400*time.Millisecond)
+	advance(s, 300*time.Millisecond)
 	tt.Frame()
-	if n := netease.calls(); n != 1 {
-		t.Fatalf("敲第二个字之后 400ms 就发了（共 %d 次）——防抖没有重新起算", n)
-	}
+	// ⚠️ 这一步是整条测试的**判据本体**，所以不能只是「读一眼没变」：提前发的那
+	// 一趟是后台发出去的，机器一忙它就还没被调度，于是读出来还是 1，防抖坏没坏
+	// 根本判不出来。见 `callsStayAt`。
+	callsStayAt(t, netease, 1, lyricSettle)
+
+	// 离第二个字满 500ms 了，它**必须**已经发出去。
 	advance(s, 200*time.Millisecond)
 	tt.Frame()
-	if n := netease.calls(); n != 2 {
-		t.Fatalf("敲完 600ms 还没发（共 %d 次）", n)
-	}
+	waitFor(t, "离第二个字满 500ms 真的发了那一次", func() bool { return netease.calls() == 2 })
 	// 框里此刻是「屏幕上的那首歌 + 周杰」（开弹窗时框里已经填了那首歌），所以
 	// 判据是**后缀**：这一条验的是「重新起算」，不是搜的是哪几个字。
 	if got := netease.searched()[1]; !strings.HasSuffix(got, "周杰") {
@@ -379,22 +400,70 @@ func TestTheKeywordIsDebouncedBy500ms(t *testing.T) {
 	}
 }
 
+// lyricSettle 是「等一个后台 goroutine 跑一下」的窗口。
+//
+// ⚠️ 它**只用在负的断言上**（「这 N 毫秒之内不许发生」），而那一类断言越慢的
+// 机器越准——所以它在满载的 CI 上不会引入新的红。方向和基座禁掉的那一类正相反：
+// 那一类赌的是「N 毫秒之内**必须**发生」，慢机器必红。
+//
+// 100ms 足够一次 goroutine 被调度 + 走到 `src.Search`（那之后就只差一次加锁）。
+const lyricSettle = 100 * time.Millisecond
+
+// callsStayAt 等一小段真实时间，确认源**没有**被多叫。
+//
+// # 为什么负的断言要等，而正的断言用 `waitFor`
+//
+// 请求是**后台 goroutine** 发的（`app.SearchLyrics` 立刻返回，见
+// `applyLyricsSearch` 的注释），而一帧画完不等于那一趟已经跑到 `src.Search`。
+// 于是两种「立刻读」各自错在一边，而且**都是往「绿」那边错**：
+//
+//	「必须已经发了」  立刻读 = 赌调度已经跑到了。满载时那一趟还在排队，于是红成
+//	                「防抖没生效」，而防抖好好的（这是偶发红的那一半）
+//	「还不许发」     立刻读 = 赌它**来不及**发。真提前发了而那一趟还没被调度，
+//	                这一条照样绿 —— 判据是空的，防抖坏掉根本测不出来（这是
+//	                「测了等于没测」的那一半，比偶发红更坏）
+//
+// 所以：正的用基座的 `waitFor`（它等的就是「后台 goroutine 直接写的状态」），
+// 负的在这里给一个真实的窗口。真没发的话多等一会儿还是没有；发过了就一定被看见。
+func callsStayAt(t *testing.T, src *fakeLyricSource, want int, window time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(window)
+	for {
+		if got := src.calls(); got != want {
+			t.Fatalf("这 %v 之内源被叫了 %d 次，want %d", window, got, want)
+		}
+		if time.Now().After(deadline) {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // TestEnterDoesNotWaitForTheDebounce 钉住「回车不等那 500ms」。
 //
 // 上游也是 `onKeyDown Enter` 直接调 `handleSubmit`：用户按下回车就是想现在搜，
 // 让他等半秒是另一回事。
+//
+// ⚠️ **判据是「这一次搜索真的发出去了」，不是「按回车之后跑一帧」**：请求是
+// 后台发的（铁律三），而 `waitFrames` 的注释写明了「同一帧里画出来的还是上一帧
+// 的样子」。原来那一句 `tt.Frame()` + 立刻断言，在机器一满载时搜索请求还在路上，
+// 测试就红——而功能是好的：这一条实测在整包连跑里飘过一次，**在未改动的 main
+// 上也飘**。判据一个字没放宽：要的还是「第二次搜索发出去了」，只是等到了再断。
 func TestEnterDoesNotWaitForTheDebounce(t *testing.T) {
 	netease := neteaseSource()
 	_, tt := lyricSearchShell(t, netease)
 	openTheSearchDialog(t, tt)
-	settle(t, tt, "把开机那一次搜索发出去", func() bool { return netease.calls() == 1 })
+	waitFrames(t, tt, "把开机那一次搜索发出去", func() bool { return netease.calls() == 1 })
 
 	typeLyricKeyword(t, tt, "林俊杰")
 	tt.TypeKey(0, mygoui.KeyEnter, "\r")
-	tt.Frame()
-	if n := netease.calls(); n != 2 {
-		t.Fatalf("回车之后还只有 %d 次（want 2）——回车等了那个防抖", n)
-	}
+	// ⚠️ 取 main 那一份（`waitFrames`），不是本票写的 `waitFor`：两边等的是**同一个
+	// 条件**（第二次搜索发出去了），而上游已经因为同一个原因改过这一条了
+	//（`app.SearchLyrics` 立刻返回，请求是后台发的，而画完那一帧不等于它已经到源那儿）。
+	// 留上游那一份，将来上游再动这个文件时这里不会又撞一次。
+	waitFrames(t, tt, "回车之后不等防抖就发出去了", func() bool {
+		return netease.calls() == 2
+	})
 	if got := netease.searched()[1]; !strings.HasSuffix(got, "林俊杰") {
 		t.Errorf("回车之后发出去的是 %q，want 以「林俊杰」结尾", got)
 	}
@@ -424,7 +493,7 @@ func TestSubmittingTheSameWordAgainWhileItIsStillRunningStillShowsTheCandidates(
 
 	// 弹窗一打开就自动按屏幕上那首歌搜一次（上游 `useEffect([isOpen])`）。
 	openTheSearchDialog(t, tt)
-	settle(t, tt, "把开机那一次搜索发出去", func() bool { return netease.calls() == 1 })
+	waitFrames(t, tt, "把开机那一次搜索发出去", func() bool { return netease.calls() == 1 })
 
 	// 慢网络下用户「再按一下试试」：框里一个字没改，提交的还是同一个词、同一个源。
 	focusLyricKeyword(t, tt)
@@ -435,7 +504,7 @@ func TestSubmittingTheSameWordAgainWhileItIsStillRunningStillShowsTheCandidates(
 	}
 
 	// 等那一趟回来，**再多走十帧**——卡住的话这一段就是它露馅的地方。
-	settle(t, tt, "这一趟落地", func() bool { return !s.app.LyricSearch().Loading })
+	waitFrames(t, tt, "这一趟落地", func() bool { return !s.app.LyricSearch().Loading })
 	for range 10 {
 		tt.Frame()
 	}
@@ -464,7 +533,7 @@ func TestAFailedSearchSaysItIsAFailureAndDoesNotFireAgain(t *testing.T) {
 	s, tt := lyricSearchShell(t, netease)
 
 	openTheSearchDialog(t, tt)
-	settle(t, tt, "把那次搜索发出去并看到失败", func() bool {
+	waitFrames(t, tt, "把那次搜索发出去并看到失败", func() bool {
 		return s.app.LyricSearch().Err != ""
 	})
 
@@ -492,7 +561,7 @@ func TestAFailedSearchOffersARetryAndSaysItIsAFailure(t *testing.T) {
 	s, tt := lyricSearchShell(t, netease)
 
 	openTheSearchDialog(t, tt)
-	settle(t, tt, "看到那一次失败", func() bool { return s.app.LyricSearch().Err != "" })
+	waitFrames(t, tt, "看到那一次失败", func() bool { return s.app.LyricSearch().Err != "" })
 
 	if _, ok := tt.Find(lyricSearchRetryLabel); !ok {
 		t.Fatalf("失败之后没有 %q 那个按钮，文字有 %q", lyricSearchRetryLabel, tt.Texts())
@@ -523,13 +592,13 @@ func TestTheRetryButtonSearchesThatWordAgain(t *testing.T) {
 	s, tt := lyricSearchShell(t, netease)
 
 	openTheSearchDialog(t, tt)
-	settle(t, tt, "看到那一次失败", func() bool { return s.app.LyricSearch().Err != "" })
+	waitFrames(t, tt, "看到那一次失败", func() bool { return s.app.LyricSearch().Err != "" })
 	want := s.app.LyricSearch().Query
 
 	if err := tt.Click(lyricSearchRetryLabel); err != nil {
 		t.Fatalf("点不到 %q：%v（文字有 %q）", lyricSearchRetryLabel, err, tt.Texts())
 	}
-	settle(t, tt, "重试真的又发了一次", func() bool { return netease.calls() == 2 })
+	waitFrames(t, tt, "重试真的又发了一次", func() bool { return netease.calls() == 2 })
 	if got := netease.searched()[1]; got != want {
 		t.Errorf("重试搜的是 %q，want 刚才失败的那个词 %q", got, want)
 	}
@@ -546,11 +615,11 @@ func TestThePreviewSaysItIsNotAFetchFailure(t *testing.T) {
 	s, tt := lyricSearchShell(t, netease)
 
 	openTheSearchDialog(t, tt)
-	settle(t, tt, "把候选搜出来", func() bool { return tt.HasText("候选甲") })
+	waitFrames(t, tt, "把候选搜出来", func() bool { return tt.HasText("候选甲") })
 	if err := tt.Click("候选甲"); err != nil {
 		t.Fatalf("点不到那一条候选：%v", err)
 	}
-	settle(t, tt, "看到预览里那一句", func() bool { return s.app.LyricPreview().Err != "" })
+	waitFrames(t, tt, "看到预览里那一句", func() bool { return s.app.LyricPreview().Err != "" })
 
 	if !tt.HasText("未找到歌词内容") {
 		t.Errorf("预览里没有「未找到歌词内容」，文字有 %q", tt.Texts())
@@ -579,11 +648,11 @@ func TestAdoptingSaysSoWhenTheSongChanged(t *testing.T) {
 	s, tt := lyricSearchShell(t, netease)
 
 	openTheSearchDialog(t, tt)
-	settle(t, tt, "把候选搜出来", func() bool { return tt.HasText("候选甲") })
+	waitFrames(t, tt, "把候选搜出来", func() bool { return tt.HasText("候选甲") })
 	if err := tt.Click("候选甲"); err != nil {
 		t.Fatalf("点不到那一条候选：%v", err)
 	}
-	settle(t, tt, "把预览拉出来", func() bool { return s.app.LyricPreview().Adoptable })
+	waitFrames(t, tt, "把预览拉出来", func() bool { return s.app.LyricPreview().Adoptable })
 
 	// 换歌（底下那一层按缓存键挡着，采用会被拒）。
 	openAnotherTrack(t, s)
@@ -612,11 +681,11 @@ func TestClosingTheSearchDialogTakesThePreviewWithIt(t *testing.T) {
 	s, tt := lyricSearchShell(t, netease)
 
 	openTheSearchDialog(t, tt)
-	settle(t, tt, "把候选搜出来", func() bool { return tt.HasText("候选甲") })
+	waitFrames(t, tt, "把候选搜出来", func() bool { return tt.HasText("候选甲") })
 	if err := tt.Click("候选甲"); err != nil {
 		t.Fatalf("点不到那一条候选：%v", err)
 	}
-	settle(t, tt, "把预览拉出来", func() bool { return s.app.LyricPreview().Open })
+	waitFrames(t, tt, "把预览拉出来", func() bool { return s.app.LyricPreview().Open })
 
 	// Esc 关掉最上面那个（预览）。
 	tt.Key(0, mygoui.KeyEscape)
@@ -658,7 +727,7 @@ func TestTheRowKeyFollowsTheSongAndNotItsPlace(t *testing.T) {
 	s, tt := lyricSearchShell(t, netease)
 
 	openTheSearchDialog(t, tt)
-	settle(t, tt, "把第一批候选搜出来", func() bool { return tt.HasText("候选丙") })
+	waitFrames(t, tt, "把第一批候选搜出来", func() bool { return tt.HasText("候选丙") })
 
 	key := s.lyricSearch.ls.Key
 	if key == nil {
@@ -684,7 +753,7 @@ func TestTheRowKeyFollowsTheSongAndNotItsPlace(t *testing.T) {
 	// 换一批位置（同一个源、换一个词 → 缓存不命中，真发一次请求）。
 	netease.setCands(shuffled)
 	s.applyLyricsSearch("另一首")
-	settle(t, tt, "把打乱之后的那一批搜出来", func() bool {
+	waitFrames(t, tt, "把打乱之后的那一批搜出来", func() bool {
 		return len(s.app.LyricSearch().Candidates) == 3 && !s.app.LyricSearch().Loading
 	})
 
@@ -739,7 +808,7 @@ func TestTheSearchBoxSaysThreeDifferentThings(t *testing.T) {
 	netease.mu.Lock()
 	netease.hold, netease.searchErr = 0, nil
 	netease.mu.Unlock()
-	settle(t, tt, "把这一次搜完", func() bool { return !s.app.LyricSearch().Loading })
+	waitFrames(t, tt, "把这一次搜完", func() bool { return !s.app.LyricSearch().Loading })
 	if !tt.HasText(lyricSearchEmpty) {
 		t.Fatalf("搜到了空的没有说 %q，文字有 %q", lyricSearchEmpty, tt.Texts())
 	}

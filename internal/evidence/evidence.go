@@ -317,6 +317,66 @@ var Items = []Item{
 			"TestAPaidSongFallsBackToAFreeTier",
 		},
 	},
+	{
+		Category: HTTP,
+		// 顶栏右上角那个头像：**登录了画我自己的，未登录画「没有人」**。
+		//
+		// 三样东西各钉一件事，合起来才是一个完整的交代：
+		//
+		//   1. **形状**：地址在服务层就补好了协议、拼好了裁剪参数。照原样透传
+		//      的话，28 见方的一格会去下几百 KB 的正方形原图——不报错、不变慢。
+		//   2. **闸门**：未登录**一个请求都不发**。这一格是整个应用重画最勤的
+		//      一处，而凭据过期之后每一条都是 -101——所以判据是「那台假 B 站
+		//      收到了几个请求」，不是「回来的答案是什么」：那台 fake 明确回了
+		//      「登录了、头像在这儿」，偷偷发出去的话回来的是一个**看起来能用**
+		//      的答案。
+		//   3. **形态不许合并**：合并之后未登录的用户在顶栏上看见别人的脸，而
+		//      上面那几条**一条都不会红**。所以另有一条量「三档任意两档画出来
+		//      差得够多」。
+		//   4. **它画的是人，不是字母**：「不是一整块底色」这种问法钉不住——
+		//      边框和圆角裁剪本来就让它不是纯色，实测把人形换成恒定的字母「B」
+		//      或者干脆什么都不画，那一条都照样绿。所以量的是**形状**：最长的
+		//      那一段墨（人形 17 px，字母 7 px）。
+		//   5. **作废的那一趟不许落地**：退登时在途的那一趟带着上一个账号的头像
+		//      回来，写进去的话退登之后顶栏上又出现一个人的脸。
+		//
+		// ⚠️ 第 3 条的判据是「不一样的比例」而不是「逐像素不相等」：那两格不在
+		// 同一个位置（「登录」和「退出登录」宽度不同），而同一个形状落在不同的小数
+		// 位置上，圆边抗锯齿的颜色就不一样——实测两种形态明明是同一张，逐像素比有
+		// 44/784 个点不同。理由见 `internal/ui/navbar_avatar_test.go`。
+		Spec: "头像：登录画真头像（走封面缓存），未登录画「没有人」而不是字母占位符，图下不来有交代；未登录一个请求都不发",
+		Tests: []string{
+			"TestNavCarriesMyOwnFace",
+			"TestNavWithoutAFaceGivesNothingToShow",
+			"TestNobodyLoggedInAsksNobodyAnything",
+			"TestARealAccountGetsItsOwnFace",
+			"TestADeadSessionIsNotTheSameAsNobodyBeingLoggedIn",
+			"TestTheAvatarShowsMyOwnPictureOnceLoggedIn",
+			"TestTheAvatarOnlyAsksOnceEvenThoughEveryFrameAsks",
+			"TestTheAvatarSaysNobodyIsLoggedIn",
+			"TestTheAvatarShowsAPersonAndNotALetterWhenNobodyIsLoggedIn",
+			"TestTheAvatarSaysSomethingWhenThePictureDoesNotComeBack",
+			"TestAFaceThatComesBackForTheWrongAccountNeverLands",
+			"TestTheAvatarNeverLooksTheSameTwoWays",
+		},
+	},
+	{
+		Category: HTTP,
+		// 「刷新数据」那一项以前按下去只弹一句「还没有数据可刷新」——而接口一直
+		// 都在（`created/list`，收藏夹的新建 / 修改 / 拉全量都靠它）。这一条钉的是
+		// 「按下去真的重新拉一次」：喂一个**会变**的假服务器，点了之后画面上那一列
+		// 换了内容，而旧的消失。
+		//
+		// 后两条是它的另一半：未登录时**不许发请求**（发了只会换来一片 -101，而
+		// 界面上看不出异样），以及在飞的时候连点不重复发。
+		Spec: "「刷新数据」真的重新拉一次收藏夹；在飞时连点不重复发；未登录不发请求",
+		Tests: []string{
+			"TestRefreshingReallyPullsTheFoldersAgain",
+			"TestRefreshingTwiceSendsOneRequestAndSaysItIsBusy",
+			"TestRefreshingWithoutALoginSaysSoAndSendsNothing",
+			"TestRefreshingWithoutTheFoldersMountedSaysSo",
+		},
+	},
 
 	// ── PCM ────────────────────────────────────────────────────────────────
 	{
@@ -378,6 +438,58 @@ var Items = []Item{
 		Category: Paging,
 		Spec:     "404 三秒自动回首页，离开就不倒计时",
 		Tests:    []string{"TestNotFoundRedirectsHomeAfterThreeSeconds", "TestLeavingThe404PageCancelsTheRedirect"},
+	},
+	{
+		Category: Paging,
+		// 「数据显示样式」要几件事同时成立，缺一件就退化成「这个设置没用」或者
+		// 「改了只有一页变了」：
+		//
+		//  1. **每一页**都跟着变（逐页一条子测试，少接一页就少一条）
+		//  2. **紧凑真的更矮**（量的是画出来的那一块，不是某个变量）
+		//  3. **网格那一档照样翻得了页**
+		//  4. **网格那一档翻页失败之后还能重试**——这一条才是网格那半边必须有哨兵
+		//     的理由（`blocked` 闩住的是自动重试，解开它的只有哨兵上那个按钮）。
+		//     少了它症状是静默的：歌还在、能点，只是某一页失败之后再也不动了
+		//  5. **哨兵落在某一行的中间格时也画得出来**（歌数除不尽列数就是这种情况）
+		//     ——只判「整行从哨兵开始」那一支的话，网格里看不见它
+		//
+		// ⚠️ 第 3 条和第 4 条**是两件事**，别合成一句「网格没哨兵就翻不了页」——那句话
+		// 是错的（翻页的判据是「末尾那一行进没进画面」，而网格里最后一行就是歌的行）。
+		// 把网格的哨兵拿掉，第 3 条那两条照样绿，只有第 4 条会红（外加
+		// `TestEveryViewShowsTheSentinelWhileThereIsMore`——它钉的是 `SetFooter`
+		// 扇出到两份那一处，其余那些要么只量列表那半边、要么直接对 `*Grid` 调
+		// `SetFooter` 绕过了这一层）。
+		Spec: "「数据显示样式」在三档之间换：每一页都跟着换、紧凑行高真的更矮、网格那一档照样翻页，翻页失败了也还有重试（哨兵落在行中间时同样画得出来）",
+		Tests: []string{
+			"TestEveryPageFollowsTheDisplayStyleSetting",
+			"TestTheCompactRowsAreShorterThanTheNormalOnes",
+			"TestTheGridCountsTheSentinelAsARow",
+			"TestTheGridKeepsPagingWorking",
+			"TestTheGridOffersTheRetryThatTheListOffers",
+			"TestTheGridStillOffersARetryOnARealPage",
+			"TestEveryViewShowsTheSentinelWhileThereIsMore",
+			"TestTheSentinelShowsEvenWhenItLandsMidRow",
+			// 上面那条引出来的另一半：最后一行没排满时，那几格必须空着而不是去越界
+			// 取 `songs[i]`。
+			"TestAnUnfilledLastCellStaysEmpty",
+			"TestTheGridStillPagesOnARealPage",
+			"TestSwitchingViewsKeepsTheSongs",
+			// 多选接线要装到**两份**控件上：只装列表那半边的话网格那一档一格勾选框都
+			// 没有，而全选走 `Len()` / `At()` 不经过画法、照样能用——症状是「九成
+			// 用法没了，界面上看着多选还是好的」。
+			"TestTheBatchOpsStillWorkInEveryView",
+		},
+	},
+	{
+		Category: Paging,
+		// 设置那一格旁边的预览：三张缩略图各画各的形状，选中的那一张用主色描边。
+		// 判据是「描边里离主色更近」而不是「有几个主色像素」——边框是圆角加抗锯齿
+		// 画出来的，逐字比颜色永远是 0 个（见那条测试的注释）。
+		Spec: "「数据显示样式」旁边有预览：选哪一档一眼看得出来",
+		Tests: []string{
+			"TestTheDisplayStyleSettingShowsAPreviewOfEachStyle",
+			"TestThePreviewHighlightsTheChosenStyle",
+		},
 	},
 
 	// ── 双平台 ─────────────────────────────────────────────────────────────
@@ -1028,6 +1140,117 @@ var Items = []Item{
 		},
 	},
 	{
+		Category: FakeClock,
+		// 搜索联想词（#97 A25）那 500ms。⚠️ **和界面上另外两处「等用户把词敲完」用的是
+		// 同一个常量**（`ui.searchDebounce`：稍后再看 / 历史记录的搜索框、歌词搜索、
+		// 这一档），所以这里量的是「一个钟、三个地方用」的那一个。
+		//
+		// 「收掉浮层之后那个钟跟着停」也单列：它是**每帧**在 `syncSearchWatch` 里
+		// 收的，而醒着的定时器醒到进程退出——用户看不出任何异样，只是这个应用从那
+		// 以后再没省过电。
+		Spec: "搜索联想词 500ms 防抖：假时钟推、不真等；每敲一个字重新起算；浮层收掉之后那个钟跟着停",
+		Tests: []string{
+			"TestTheSuggestKeywordIsDebouncedBy500ms",
+			"TestTheSuggestDebounceRestartsOnEveryKeystroke",
+			"TestTheSearchWatchStopsWhenTheOverlayGoesAway",
+		},
+	},
+	{
+		Category: HTTP,
+		// 联想词那个接口（Biu 的 `getSearchSuggestMain`）。**参数逐个对着上游抄**，
+		// 少一个的症状在界面上像「联想词永远是空的那一档」，而那和「拉不到」长得
+		// 一模一样。
+		//
+		// 🔴 **「发去哪一台」单列两条，因为它靠 fixture 量不出来**：假 B 站把**每一个**
+		// 主机都指到同一个本地 URL（那正是 `TestOnlyPointHostsAtFixture` 干的事），
+		// 所以「打到了 `/main/suggest`」这一句对 `api.bilibili.com` 和
+		// `s.search.bilibili.com` 一样成立——把 `hostSearch` 写成 `hostAPI`，整包
+		// 测试照样全绿（评审实测）。所以那两条**不走 fixture**：一层只记 `URL.Host`
+		// 的网络，量的是请求真正的那个 host；另一条量的是常量本身不许和 `HostAPI`
+		// 一样。
+		//
+		// ⚠️ **签名（不发 w_rid、不先跑一趟 nav）是另一条**：WBI 是 `api` 那台的规矩，
+		// 这一台不认，多带只是**赌**它不介意。
+		//
+		// 「两套字」（`term` 干净、`name` 带标签）是界面上最要紧的一半：拿 `name`
+		// 显示是一排尖括号，拿它去搜是把标签当关键词发出去。
+		//
+		// ⚠️ **这一票没有走真网**：接口的地址、参数和回包形状都要真机回归，那是另
+		// 一次安排；这里量到的是**我们这一层**（发出去的是什么、回来的怎么认、
+		// 失败有没有被当成「一个都没有」）。
+		Spec: "搜索联想词的接口：发去搜索站那一台（s.search.bilibili.com，不许打成 api 那台——fixture 量不出来，所以用一层记 host 的网络钉）、只发 term 且不带 WBI 签名；回包里 term/name 两套字分开认；空的和重复的丢掉、顶上那 10 条（两件事各一条，混在一起时上限会把重复的那条切掉）；拉不到要报错而不是回一个空列表",
+		Tests: []string{
+			// 地址：这两条不过 fixture，量的是请求真正的 host。
+			"TestSearchSuggestGoesToTheSearchHostNotTheApiOne",
+			"TestTheSuggestHostIsNotTheApiHost",
+			// 参数与签名。
+			"TestSearchSuggestSendsTheWordOnTheSearchHost",
+			"TestSearchSuggestGivesBackThePlainWords",
+			"TestSearchSuggestDropsTheOnesThatAreNotWords",
+			"TestSearchSuggestKeepsOnlyTheFirstFew",
+			"TestSearchSuggestFallsBackToTheNameWhenThereIsNoTerm",
+			"TestSearchSuggestAsksForNothingWithoutAWord",
+			"TestSearchSuggestSaysSoWhenItCannotAsk",
+			"TestSearchSuggestSaysSoWhenTheAnswerIsUnreadable",
+		},
+	},
+	{
+		Category: Platform,
+		// 规格的四条验收（#97）。逐条钉：
+		//
+		//   - 输入时浮层里多一档「联想词」（**浮层里的另一档，不是另一个浮层**——
+		//     两套浮层的关闭时机不一样，并排会出现「关了一个另一个还在」，所以
+		//     Esc 那一条钉的是两档一起收）；
+		//   - 和历史建议在界面上区分得开（判据是**画出来的像素**：chip 有底色，
+		//     联想那一行没有；另外还有「清除全部」只清历史那一档这个行为上的后果）；
+		//   - 选中一条等于选中那次的搜索（页面上、URL 上、**框里**都是那一个词）；
+		//   - 请求失败时静默（浮层保持只有历史那一档，一个错字都没有、提示条也不弹）。
+		//
+		// ⚠️ 「设置里的『显示搜索历史』不许把联想词一起关掉」也单列：那个设置管的
+		// 是「我不想看见我搜过什么」，而联想词是 B 站这次给的。
+		Spec: "搜索浮层里多一档「联想词」：输入时出来、和搜索历史在界面上分得开、选中等于选中那次的搜索、拉不到时静默（浮层保持只有历史那一档）、和历史在同一个浮层里（Esc 一起收）、设置里的「显示搜索历史」不管它；两档都摆满时（最小窗口 + 10 条长历史）最下面那几条也在屏幕里、滚得动、点得中",
+		Tests: []string{
+			"TestTypingBringsUpTheSuggestTerms",
+			"TestTheTwoSectionsAreToldApart",
+			"TestChoosingOneSearchesThatWord",
+			"TestAFailedSuggestLeavesOnlyTheHistory",
+			"TestEscapeTakesBothSectionsAway",
+			"TestTheHistorySettingDoesNotTakeTheSuggestWithIt",
+			// 框里一个字都没有时一个请求都不发（点开搜索框是在翻历史，不是在要联想）。
+			"TestNoWordMeansNoRequest",
+			// 联想词那一档没有 ×：那是 B 站这次给的，删不掉。
+			"TestTheSuggestTermsCannotBeDeleted",
+			// 两档都摆满时（最小窗口 + 10 条长历史 + 10 条联想）最下面那几条**点得着**：
+			// 面板能滚、高度上限跟着窗口走（评审钉过：没有滚动容器时最后一条被排在
+			// y=735，而屏幕只有 560 高——看不见、点不着、也滚不到）。
+			"TestThePanelFitsInASmallWindowAndScrolls",
+			"TestReopeningTheOverlayStartsAtTheTop",
+		},
+	},
+	{
+		Category: Negative,
+		// 联想词那一摊的边界。
+		//
+		// 🔴 **失败之后不许每帧重发**是这一条里最要紧的：业务层失败时仍然记着那个
+		// 词，界面上「已经问过了」那一支才成立；少了它就是自己养自己的循环（生产里
+		// 每次投递都叫醒界面），于是浮层底下一直刷网络而用户只看到搜索框卡一下。
+		//
+		// 迟到的结果不许盖掉新的（代次守卫）、退出了不许再往状态上写、框里空了上一
+		// 批要收掉（它属于上一个问题）、没挂上 B 站客户端也要安静。
+		Spec: "联想词的边界：失败之后静默且不每帧重发、重敲同一个词还能再问一次（失败是静默的，界面上用户唯一能做的就是再敲一遍）、空框不许自己养自己（每一帧都请求下一帧 = 窗口永远停不下来）、迟到的结果不盖掉新的、退出之后不写回来、框空了收掉上一批、同一个词不搜第二遍、没挂客户端时不吵",
+		Tests: []string{
+			"TestAFailedSuggestSaysNothingAndDoesNotFireAgain",
+			"TestTypingTheSameWordAgainAsksAgain",
+			"TestAnEmptySearchBoxDoesNotKeepTheWindowRedrawing",
+			"TestAStaleSuggestNeverLands",
+			"TestClosingTheAppStopsTheSuggestFromComingBack",
+			"TestEmptyingTheBoxTakesTheSuggestListAway",
+			"TestTheSameWordIsNotAskedForSuggestTwice",
+			"TestAskingForSuggestWithoutABiliClientIsQuiet",
+			"TestAskingForSuggestGivesBackWhatBilibiliSaid",
+		},
+	},
+	{
 		Category: Play,
 		// #21 的界面那一半（BMG-66）走通一遍：两个源都摆着、**从屏幕上那首歌开始**、
 		// 切 Tab 立刻用同一个词重搜那个源、预览里看得到完整歌词再采用、采用之后
@@ -1039,6 +1262,182 @@ var Items = []Item{
 			"TestSwitchingTheTabSearchesThatSourceOnItsOwn",
 			"TestPreviewThenAdoptPutsTheLyricsOnScreen",
 			"TestNoSourcesMeansTheSearchDialogNeverOpens",
+		},
+	},
+	{
+		Category: Play,
+		// issue 93：播放条和顶栏上的按钮从文字变成图标。
+		//
+		// 🔴 **判据全是像素，不是「调了 SetIcon」**。MyGo 的 `ui.Icon` 没有元素树
+		// 可以查，无头 Tester 的 `Find` 只认画出来的文字和 `Label` 起的名字——而
+		// 图标两样都没有。所以「图标画出来了没有」是从那一块的像素上看的。
+		//
+		// 深浅两套主题都要验：跟着主题走这件事，浅色下画得出来、深色下糊在背景
+		// 里是两种完全不同的坏，只验一套等于没验。
+		Spec: "播放条和顶栏的按钮都有图标：单色跟着主题走、深浅两套都不糊在背景里、点击区比图形大、每一处都有无障碍标签",
+		Tests: []string{
+			// 资源本身：名字都在、都解析得出、都有尺寸、都没有写死颜色。
+			"TestEveryIconWeNamedIsThereAndItParses",
+			"TestTheIconResourcesAreAllMonochrome",
+			// 画面：播放条 / 顶栏上每一个动作那一块都画出了东西，深浅各一次。
+			"TestThePlayBarDrawsAnIconForEveryAction",
+			"TestTheNavBarDrawsAnIconForEveryAction",
+			// 「跟着主题走」的那一半：不糊在背景里（亮度差要够）。
+			"TestTheGlyphsAreNotSwallowedByTheBackground",
+			// 「不用瞄得准」的那一半：点击区比图形大，而且留出来的那一圈按得中。
+			"TestTheHitAreaIsBiggerThanTheGlyph",
+			"TestTheRoundKeyKeepsItsEdge",
+			// 状态变了图要跟着换：播放/暂停、赞没赞、播放模式四档各画各的。
+			"TestThePlayAndPauseKeysSwapGlyphs",
+			"TestTheLikeKeyDrawsItsOwnIcon",
+			"TestEveryPlayModeHasItsIcon",
+			"TestEveryVolumeLevelHasItsIcon",
+			// 「**哪一档配哪一张**」——上面那几条断的是「两张不一样」，断不了
+			// 「对调」（对调之后照样两两不同，而用户看到的是反的那一张）。这一条
+			// 拿一张抄自 Biu 源码的表逐项钉住，那一条堵死「在 view 里绕过」。
+			"TestWhichStateGetsWhichIcon",
+			"TestTheStateIconsOnlyReachTheScreenThroughTheirFunction",
+			// 满屏那一行三枚都是图标（以前是「图标 — 文字 — 图标」半新半旧）。
+			"TestTheFullPlayerControlsAreAllIcons",
+			// 唯一没换成图标资源的那两枚（框架那一支）也仍然有图形、点击区更大。
+			"TestTheHistoryKeysStillHaveAGlyphAndAHitArea",
+			// 资源里不许画透明边撑点击区（换尺寸就错位，且界面上看不出坏了）。
+			"TestTheResourceFilesCarryNoTransparentMargin",
+		},
+	},
+	{
+		Category: Paging,
+		// 下载记录页那一排「全部 / 音频 / 视频」（#99 / SPEC 的 A26，#91 的用户
+		// 故事 21~23）。音频和视频**本来就是同一张表**里的两类行，下了一堆 MV
+		// 之后用户要在一列表的歌里翻才找得到。
+		//
+		// ⚠️ **「筛出来的是哪几个」才是判据，「剩下几个」不是**：一个把两档都
+		// 认成同一类的实现，剩下来的**行数**照样对得上，而屏幕上摆着一支 MV。
+		// 反过来那一半同样要钉：那一位是从**真队列**（队列文件读回来的任务）
+		// 里读出来的——只喂快照的话，「`Snapshot.Video` 谁填谁自便」的接线
+		// 照样绿，而读错了的症状是屏幕上多出一列一模一样的歌行，看不出任何异样。
+		//
+		// ⚠️ **筛出来的空和真的没下载必须是两句话**：混成一句的话，用户在「视频」
+		// 那一档看到「暂无内容」，会以为自己白下了几十首——而那些歌就在下面一档
+		// 里躺着。这两支还要分开钉「那一排摆不摆」：真的没下载不摆（没得可回），
+		// 筛出来的空要摆（用户得回得去），只钉一支的话「一空就收起来」过一半。
+		//
+		// ⚠️ **纯前端**：判据是那台记请求的 http.Client 上仍然是零**加上**队列
+		// 前后一模一样，而不只是「界面上那几行变了」——后者一个「每帧重拉一次
+		// 队列」的写法照样绿，而那个写法的症状是切一次档就被叫一次网络。
+		//
+		// ⚠️ 顺带钉一条**界面上的话不许说谎**：「清空记录」清的是整个队列，所以
+		// 筛着的时候弹窗里报的必须是整个队列的条数。按屏幕上那几行报的话，用户
+		// 看到「确认清空这 1 条」而点下去删掉的是 4 条——不可撤销。
+		Spec: "下载记录页「全部 / 音频 / 视频」三档筛选：各档留下的是**该留的那些行**（判据是真队列里的那一类，不是快照）；纯前端（不发请求、不动队列）；切路由再回来保留；筛出来的空和真的没下载说的不是同一句话，而且那一排在筛空的界面上还回得去；筛着点「清空记录」报的是整个队列的条数",
+		Tests: []string{
+			"TestTheThreeFiltersAreOnScreenAndDefaultToEverything",
+			"TestEachFilterShowsOnlyThatKind",
+			"TestTheFilterReadsTheKindOutOfTheRealQueue",
+			"TestTheFilterSurvivesLeavingAndComingBack",
+			"TestTheEmptyCopyAfterFilteringIsNotTheCopyForNoDownloads",
+			"TestTheEmptyPageHasNoFilterToPoke",
+			"TestTheFilterIsStillThereAfterFilteringEverythingOut",
+			"TestChangingTheFilterSendsNoRequest",
+			"TestClearingWhileFilteredStillCountsTheWholeQueue",
+		},
+	},
+	{
+		Category: Negative,
+		// 下完一首歌之后在它旁边存一份封面（#99 / #91 的用户故事 6）。存这一份是
+		// 为以后的本地音乐库备料，而音乐库读的是歌——**视频那一路不存**：B 站
+		// 给的是稿件的封面，和交织出来的那一帧画面不是一回事。
+		//
+		// 🔴 **文件名必须从落盘的音频名推出来**，不能从歌名重新算一遍：
+		// 同名避让（`歌名 (1).m4a`）会让两边算出两个不同的名字，而用户看到的是
+		// 两个文件、一首歌。而入队时给的扩展名只是个临时值（`prepare` 会按取流
+		// 地址上的真后缀重算），所以「用入队时那个名字」也不对——这一条单独钉。
+		//
+		// ⚠️ **失败不许牵连这一首**：歌已经在 `Dest` 上了，把它标成「出错」是拿
+		// 一整首歌去换一个几百 KB 的图，而界面上那一行的红字只有这一件事可说。
+		// 「已经有了一份就不重下」也是——判据是**图床被要了几次**，不是「文件还
+		// 在」：重下一遍内容一样时这两者长得完全一样，而覆盖会删掉用户自己换上
+		// 去的那张。
+		//
+		// 🔴 **两条「不许」是这个引擎里最贵的两条，都要钉**：存封面**不许**挡住队列
+		// （`loop` 一次下一首，而 `Options.Client` 没有 `Timeout`、图床接了连接不
+		// 回包时那个挂住不会自己解开 —— 后面排着的歌一个字节都下不了），也**不许**
+		// 让一个失败的写留下「下一次会被当成已经有了」的东西（那会让这一首从此没有
+		// 封面，而界面上那一行还写着「下载完成」）。所以落盘走「临时文件 → rename」
+		// （和队列文件同一条约定，`store.go` 顶上写着理由），而「已经有一份」那个
+		// 判据必须是「是个非空的**普通文件**」而不是 `exists()`——同名处是一个目录时
+		// `exists()` 一样为真。
+		Spec: "下载歌曲时封面单独存一份：文件名就是音频名换个后缀（同名避让和落盘时的后缀重算都要跟上）、盘上已有就不再下一次也不覆盖、拿不到不把这一首算成失败、视频那一路不存；存封面不许挡住队列或退出（后台走 + 自带超时 + Close 收得掉）、不许让失败的写留下挡掉之后每一次重试的东西（临时文件 → rename，且「已有」只认非空的普通文件）",
+		Tests: []string{
+			"TestTheCoverLandsNextToTheSongAndSharesItsName",
+			"TestTwoSongsWithTheSameNameGetTheirOwnCover",
+			"TestTheCoverNameFollowsTheNameThatActuallyLanded",
+			"TestACoverAlreadyOnDiskIsNotFetchedAgain",
+			"TestACoverThatCannotBeFetchedDoesNotFailTheSong",
+			"TestAVideoDoesNotGetACoverThatIsNotItsCover",
+			// 不许挡住队列 / 不许挡住退出。
+			"TestACoverHostThatNeverAnswersDoesNotStallTheQueue",
+			"TestClosingTheAppDoesNotWaitOnAHangingCover",
+			// 不许留下挡掉之后每一次重试的东西。
+			"TestTheCoverIsWrittenThroughATemporaryFile",
+			"TestTheFinalNameOnlyEverAppearsWhole",
+			"TestAFailedCoverSaveLeavesNothingBehindThatWouldBlockEveryRetry",
+			"TestADirectoryInTheCoversPlaceIsNotMistakenForACover",
+		},
+	},
+	{
+		Category: HTTP,
+		// 收藏夹 ⋯ 菜单里「清除失效内容」和「删除收藏夹」这两个项**早就在位**、
+		// 文案也写好了，而按下去只弹一句「还没接上」。这一条钉的是它们变成真
+		// 动作之后的几件事——每一样都是「做了一半比不做更糟」的那一种：
+		//
+		//   - **清除失效内容是服务端的一个动作**，不是本地按 attr 筛一遍再删。
+		//     筛的那条路在三个地方各自会漏（`Attr` 认不全 / 翻页期间列表在变 /
+		//     几千首要几十趟请求），而三个症状长得一模一样：清完还剩几个。
+		//   - **清完之后**列表才重来。点完立刻刷的话刷回来的是还带着失效条目的
+		//     列表——刷新确实发生了，只是发生得太早，症状是「按完什么都没变」。
+		//   - **只有自己创建的收藏夹**摆得出删除（别人建的 B 站没这个接口、
+		//     默认收藏夹删不掉、没登录时 `0 == 0` 会误判通过）。三个少一个都是
+		//     让用户按出一个注定失败的按钮。
+		//   - **「删 B 站上那个」和「只删本地记录」是两个选项、两套措辞**：前者
+		//     点名收藏夹、点名里面几首、说撤不回来；后者明确说 B 站上的还在，
+		//     而它**一个请求都不发**。
+		//
+		// ⚠️ **这一票没走真网**：两个都是写操作，写的是用户真实的收藏夹，而
+		// 「删 B 站上那个」不可逆。所以全部用 HTTP fixture。真接口的兼容性
+		// （参数集对不对、B 站收不收）要真机回归，见任务报告「需要真网验」。
+		Spec: "收藏夹 ⋯ 菜单的「清除失效内容」和「删除收藏夹」：清除是服务端的一个动作（本地不筛）、清完之后列表才重来、只有自己建的收藏夹摆得出删除、取消则一个请求都不发；「删 B 站上那个」和「只删本地记录」分成两个选项且措辞不同，后者一个字节都不往 B 站发（这一票走 HTTP fixture，两个都是会动用户真实收藏夹的写操作）",
+		Tests: []string{
+			// 服务层：发出去的形状。少一个字段 B 站不报错，只是清不干净。
+			"TestCleanSendsOnlyTheFolderID",
+			"TestCleanRefusesNobody",
+			"TestCleanSaysWhichFolderItWas",
+			// 业务层：谁有资格删。
+			"TestOnlyYourOwnFolderOffersDeletion",
+			"TestTheHeaderInfoCarriesWhatDeletionJudgesOn",
+			// 业务层：清完之后界面才知道该重来。
+			"TestClearingInvalidAsksTheServerToDoIt",
+			"TestAFinishedClearTellsTheListToRedraw",
+			"TestAFailedClearDoesNotTellTheListToRedraw",
+			// 业务层：两个删除共用一条路 / 本地那个不发请求。
+			"TestDeletingFromThePageGoesThroughTheSameCallAsTheSidebar",
+			"TestForgettingAFolderNeverTouchesBilibili",
+			// 界面层：摆得出来的项、确认框、取消、刷新、走开。
+			"TestOnlyTheOwnerGetsTheOwnerActions",
+			"TestNoTwoMenuItemsShareAKeyOrALabel",
+			"TestClearingTheInvalidContentAsksFirst",
+			"TestCancellingAnyOfTheThreeSendsNothing",
+			"TestACleanedFolderRedrawsItsList",
+			"TestDeletingAFolderSaysWhichOneAndLeavesThePage",
+			"TestDeletingFromThePageIsTheSameCallTheSidebarMakes",
+			"TestTheTwoDeletionsDoNotReadTheSame",
+			"TestForgettingTheFolderNeverTouchesBilibili",
+			"TestAFolderNobodyOwnsCanStillBeForgotten",
+			// 失败路径：删不掉时不许把用户踢走，更不许把失败原因一起擦掉。
+			"TestAFolderThatWontBeDeletedKeepsTheUserWhereTheyAre",
+			// 「从侧栏移除」要清的是**它所在的那一组**（否则提示就是谎话）。
+			"TestForgettingClearsTheRowOutOfWhicheverGroupItIsIn",
+			"TestForgettingTakesTheRowOutOfBothGroups",
 		},
 	},
 }

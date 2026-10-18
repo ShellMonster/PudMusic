@@ -16,7 +16,6 @@ import (
 	"strconv"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
@@ -45,8 +44,13 @@ type favBili struct {
 	faved bool
 	// removed 记下每一次 batch-del 的 resources。
 	removed []string
-	// deleted 记下每一次 folder/del 的 media_ids（侧栏「删除」那一项用）。
+	// deleted 记下每一次 folder/del 的 media_ids（「删除收藏夹」和侧栏
+	// 「删除」共用它）。
 	deleted []string
+	// cleaned 记下每一次 resource/clean 的 media_id（「清除失效内容」那一项）。
+	cleaned []string
+	// rejectDel 为真时 folder/del 回 -400（B 站拒绝删）。见 rejectFolderDelete。
+	rejectDel bool
 	// paths 记下每一次请求打到了哪条路径（发没发请求本身就是一条断言：
 	// 「为了一个认不出的项去问 B 站」是白跑的一趟）。
 	paths []string
@@ -97,6 +101,14 @@ func newCollectionBili(t *testing.T) *favBili {
 		case "/x/v3/fav/folder/del":
 			_ = r.ParseForm()
 			b.deleted = append(b.deleted, r.PostForm.Get("media_ids"))
+			if b.rejectDel {
+				writeCollectionJSON(t, w, -400, "请求错误", nil)
+				return
+			}
+			writeCollectionJSON(t, w, 0, "0", 0)
+		case "/x/v3/fav/resource/clean":
+			_ = r.ParseForm()
+			b.cleaned = append(b.cleaned, r.PostForm.Get("media_id"))
 			writeCollectionJSON(t, w, 0, "0", 0)
 		case "/x/web-interface/view":
 			// bvid → avid。列表页的条目大多只有 bvid，而收藏夹那个弹窗要的是
@@ -137,6 +149,41 @@ func mediaOf(id int, title string) map[string]any {
 		"cover": "", "duration": 185, "attr": 0, "page": 1,
 		"upper": map[string]any{"name": "UP " + strconv.Itoa(id)},
 	}
+}
+
+// setOwnerMid 换掉容器的创建者。
+//
+// 「这个收藏夹是不是我自己建的」是 ⋯ 菜单里那两个破坏性项的显示条件（见
+// `app.CanDeleteCollection`），而它读的是元信息里的 `upper.mid`——所以要把
+// 「别人建的」那一支演出来，只能改这里。
+func (b *favBili) setOwnerMid(mid int64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.infos["upper"] = map[string]any{"mid": mid, "name": "UP 小明"}
+}
+
+// setAttr 换掉容器的 attr。0 是「公开、且是 B 站发下来的默认收藏夹」。
+func (b *favBili) setAttr(attr int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.infos["attr"] = attr
+}
+
+// cleanedFolders 是被清过失效内容的那些收藏夹 id。
+func (b *favBili) cleanedFolders() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.cleaned...)
+}
+
+// rejectFolderDelete 让这一台假 B 站**拒绝删收藏夹**（回 -400）。
+//
+// 为什么需要它：B 站拒绝是这条路上最要紧的一种结果——收藏夹还在、而界面已经按
+// 「它没了」在处理了（把用户踢走、把状态扔掉）。只有真的发一个 -400 才走得到。
+func (b *favBili) rejectFolderDelete() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.rejectDel = true
 }
 
 func (b *favBili) seenOrders() []string {
@@ -200,9 +247,28 @@ func writeCollectionJSON(t *testing.T, w http.ResponseWriter, code int, msg stri
 // 缓存着的，列表也不会自己重拉）。要换内容就重新建一个外壳。
 func collectionShell(t *testing.T, id string, medias ...map[string]any) (*favBili, *Shell, *ui.Tester) {
 	t.Helper()
+	return collectionShellAs(t, "", id, medias...)
+}
+
+// collectionShellAs 是上面那一个，额外**登录成 mid**（空串 = 不登录）。
+//
+// ⚠️ **登录是这一票的必需品**：⋯ 菜单里「清除失效内容」「删除收藏夹」只在
+// 「这个收藏夹是自己建的」时才摆得出来，而那个判断的第一位是 `SelfMid()`
+// ——不登录它恒为 0，于是这两个菜单项**永远摆不出来**，这一票就在界面层
+// 验不到任何东西。
+//
+// `MountLogin` 用内存 Store（不碰钥匙串，见 homepage_feed_test.go 的同一条
+// 规矩），随后直接装一份登录态进去。store 读回来是「没登录过」，那是正常的
+// 起点——真正装上去的是后面那一句。
+func collectionShellAs(t *testing.T, mid string, id string, medias ...map[string]any) (*favBili, *Shell, *ui.Tester) {
+	t.Helper()
 	b := newCollectionBili(t)
 	b.setMedias(medias...)
-	s, tt := newShell(t)
+	// ⚠️ **挂一份真设置**（临时目录）：侧栏那一行是从 `SettingsSnapshot` 读
+	// 顺序的，而「删收藏夹」「从侧栏移除」收尾时要写回那个顺序（`forgetFavorite`）。
+	// 不挂的话那一步回 `ErrSettingsNotMounted`，日志里多一行「顺序存不住」——
+	// 而这条页面**在真机上顺序是存得住的**，让测试跑在一个假故障上没意思。
+	s, tt := newShell(t, withSettings(app.DefaultSettings("")))
 	// ⚠️ 装上唤醒：后台那一趟（拉元信息、收藏之后刷新）跑完之后要能叫醒界面，
 	// 而真窗口里这一句是在 `Shell.Attach` 里装的。测试不走 Attach，得自己装，
 	// 否则「后台改完状态界面不动」这一类在测试里根本走不到。
@@ -218,9 +284,14 @@ func collectionShell(t *testing.T, id string, medias ...map[string]any) (*favBil
 	// 测试钉它），这一组要的是「点了之后画出来变成什么样」，不是等多久。
 	s.app.MountCollections(app.CollectionRefs{Client: cli, Settle: 0})
 
+	if mid != "" {
+		s.app.MountLogin(app.NewMemoryStore("collection-test"), cli)
+		s.app.TestOnlyAdoptLogin(mid)
+	}
+
 	s.navigate("/collection/" + id)
 	// 等容器拉回来（头图区第一帧是「正在加载…」）。
-	waitFrameFor(t, tt, "容器元信息加载完", func() bool {
+	waitFrames(t, tt, "容器元信息加载完", func() bool {
 		return s.collection != nil && s.app.Collection(s.collection.ref).Loaded
 	})
 	return b, s, tt
@@ -230,7 +301,11 @@ func collectionShell(t *testing.T, id string, medias ...map[string]any) (*favBil
 //
 // ⚠️ **它不等后台**。后台那一趟（拉元信息、拉内容页）跑在 goroutine 里，
 // 而 Tester 的 `Frame()` 一帧只要几十微秒——跑八帧后台多半还没回来。
-// 「等后台」用 `waitFor`，它的判据是**结果**，不是帧数。
+// 「等后台」用 `waitFrames`，它的判据是**结果**，不是帧数。
+//
+// ⚠️ 这里数帧是有理由的：它等的不是任何后台结果，而是「MyGo 一遍 `Frame()` 会跑
+// 两遍 view、点击被消费时再多一遍」这件事——要等的是**那个固定的遍数走完**，而
+// 它和机器负载无关。凡是等后台结果的地方都不许用它，改 `waitFrames` 加条件。
 func settleFrame(tt *ui.Tester) {
 	for range 3 {
 		tt.Frame()
@@ -247,27 +322,10 @@ func settleFrame(tt *ui.Tester) {
 // 不跑帧就看不见——而「跑够几帧」当判据在慢机器上会偶发地红，所以判据一律是
 // 这里传进来的 cond（结果），帧只是让它有机会被看见。
 //
-// ⚠️ 它原来叫 `waitFor`，和 `settings_tabs_test.go` 里那个（#73 带来的）
-// 同名同包。合并时 Git 看不出来（不同的文件），编译才报。
-func waitFrameFor(t *testing.T, tt *ui.Tester, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		tt.Frame()
-		if cond() {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("等了 2s，%s 还没发生，文字有 %q", what, tt.Texts())
-		}
-		time.Sleep(time.Millisecond)
-	}
-}
-
 // waitSongs 等这一页已经拉到了 n 首歌。
 func waitSongs(t *testing.T, tt *ui.Tester, s *Shell, n int) {
 	t.Helper()
-	waitFrameFor(t, tt, strconv.Itoa(n)+" 首歌加载完", func() bool {
+	waitFrames(t, tt, strconv.Itoa(n)+" 首歌加载完", func() bool {
 		return s.collection != nil && s.collection.list.Paged().Loaded == n
 	})
 }
@@ -356,7 +414,7 @@ func TestPrivateFoldersSaySo(t *testing.T) {
 	s.app.LoadCollection(s.collection.ref)
 	// ⚠️ 判据是**画面上那句话**而不是「缓存里那个字段变了」：缓存改完到下一帧
 	// 画出来之间还有一步，只查缓存的话断言会在那一步之前就通过。
-	waitFrameFor(t, tt, "新的元信息画出来", func() bool {
+	waitFrames(t, tt, "新的元信息画出来", func() bool {
 		return tt.HasText("私密收藏夹 • 1 条视频")
 	})
 	wantText(t, tt, "私密收藏夹 • 1 条视频")
@@ -389,7 +447,7 @@ func TestAllThreeSortsReachTheInterface(t *testing.T) {
 		// 换档会重建整个分页列表，而那一页是后台拉回来的——查得早了会看到
 		// 上一次的 order，于是这条用例变成按运气过的。
 		n := i + 2
-		waitFrameFor(t, tt, "第 "+strconv.Itoa(n)+" 次内容请求带着 order="+want[i+1], func() bool {
+		waitFrames(t, tt, "第 "+strconv.Itoa(n)+" 次内容请求带着 order="+want[i+1], func() bool {
 			got := b.seenOrders()
 			return len(got) >= n && got[n-1] == want[i+1]
 		})

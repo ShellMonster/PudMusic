@@ -24,17 +24,16 @@ import (
 // 组合都能摆出来——真放的话本地文件压根没有 UP 名。
 func metaBarTester(t *testing.T, st app.State, width int) (*mygoui.Tester, *Shell) {
 	t.Helper()
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
-
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.wake.set(c)
-		s.viewPlayBar(c, st)
-	}, width, coverWinH)
+	var b *testShell
+	b = newTestShell(t, at(width, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			s.viewPlayBar(c, st)
+		}
+	}))
+	tt := b.tt
 	tt.Frame()
-	return tt, s
+	return tt, b.s
 }
 
 // TestThePlayBarShowsTheOwner 盯 UP 名摆出来了。
@@ -122,32 +121,37 @@ func TestNoFavoriteOrDownloadWithoutATrack(t *testing.T) {
 	}
 }
 
-// TestTheMetaLabelsAreNotTruncated 量「画出来」的那几个字，而不是控件的文本。
+// TestTheMetaKeysDrawTheirOwnGlyphs 盯那两个键上画的是各自的图形。
 //
-// ⚠️ `HasText` 读的是控件的**文本**，被截的只是画出来的那几个字——所以这一条
-// 断言会一直绿，哪怕屏幕上写着「收…」。断法是量宽度：和同一串字在一根不设限的
-// 行里的自然宽度比（`textWidths`）。这一条教训在
-// `playbar_rate_test.go` 的 TestRateMenuLabelsAreNotTruncated 那里已经吃过一次。
-func TestTheMetaLabelsAreNotTruncated(t *testing.T) {
-	labels := []string{"收藏", "下载"}
-	natural := naturalButtonTextWidths(t, labels)
-
-	// 两个键都在，同时还有 UP 名（最长的一档）：挤得最狠的情形。
+// ⚠️ **这一条是被图标化顶掉的，原来叫 `TestTheMetaLabelsAreNotTruncated`**：它量
+// 「收藏」「下载」那两个字有没有被截短，而**图标没有字可截**——图标版的对应
+// 问题是「两枚图标认不认得出」，所以判据换成了「两枚的图形两两不同」。
+//
+// 为什么原来那条在图标化之后**变成恒真**、必须换掉而不是留着：它拿按钮框的
+// 宽（28）去比那两个词在**另一个按钮**里的自然宽度（约 26），而 28 > 26 恒成立
+// ——它还在绿，可它量的已经不是「有没有被截」这件事了。留着一条恒真的测试，
+// 比没有这一条更坏（`TestTheMetaLabelsAreNotTruncated` 那段注释里写的正是这个：
+// 无头 Tester 读的是控件的文本，被截的只是画出来的那几个字，所有断言照样绿）。
+//
+// 另一半（「图形真的画出来了」）在 `icons_test.go` 的
+// `TestThePlayBarDrawsAnIconForEveryAction` 里——那边深浅两套主题都量，而这里
+// 只管「两枚不一样」。
+func TestTheMetaKeysDrawTheirOwnGlyphs(t *testing.T) {
 	tt, _ := metaBarTester(t, app.State{
 		HasTrack: true, Title: "一首歌的名字很长很长很长很长",
 		Artist: "一个名字很长的 UP 主名字", ArtistMid: 12345,
 	}, 900)
 
-	for _, label := range labels {
-		rect, ok := tt.Find(label)
-		if !ok {
-			t.Fatalf("播放条上没有 %q：%q", label, tt.Texts())
+	seen := map[string]string{}
+	for _, label := range []string{"收藏", "下载"} {
+		ink := glyphIn(tt, label)
+		if ink == "" {
+			t.Fatalf("播放条上 %q 那一块没画东西：%q", label, tt.Texts())
 		}
-		if rect.W+0.5 < natural[label] {
-			t.Errorf("%q 只画出了 %.1f 宽，它本来要 %.1f——被截了"+
-				"（用户在这两个键上认的是「收藏」「下载」，缺字就只能靠猜）",
-				label, rect.W, natural[label])
+		if prev, dup := seen[ink]; dup {
+			t.Errorf("%q 和 %q 画出来是同一个图形——它们是一枚图标，不是一对文字", label, prev)
 		}
+		seen[ink] = label
 	}
 }
 
@@ -290,34 +294,4 @@ func TestThePlayBarButtonsSaySoWhenNothingIsPlaying(t *testing.T) {
 		t.Errorf("两个键按下去只说了 %d 句，want 2 句（%q）——"+
 			"一个画在那儿、按下去一声不吭的键比不摆更坏", len(got), toastTexts(got))
 	}
-}
-
-// naturalButtonTextWidths 量几串字在**按钮里**各占多宽，也就是它们不设限时的
-// 自然宽度。
-//
-// ⚠️ 为什么不用 `textWidths`（那把量的是裸 `ui.Text`）：MyGo 的按钮标签**不吃
-// 元素上的 `FontSize`**，它是另一个字号。第一版拿裸文字当基准，于是「收藏」
-// 在按钮里 23.8、在裸文字里 25.8，差的那 2 像素被当成「被截了」——而它压根
-// 没被截（按钮给它的格子是 32）。基准必须是**同一种控件**，否则量的是字号
-// 差异，不是截断。
-func naturalButtonTextWidths(t *testing.T, ss []string) map[string]float32 {
-	t.Helper()
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		mygoui.Row(c).Width(1200).Children(func() {
-			for _, s := range ss {
-				mygoui.Button(c, s)
-			}
-		})
-	}, 1200, 100)
-	tt.Frame()
-
-	out := make(map[string]float32, len(ss))
-	for _, s := range ss {
-		r, ok := tt.Find(s)
-		if !ok {
-			t.Fatalf("连不设限的一行都量不出 %q 的宽度", s)
-		}
-		out[s] = r.W
-	}
-	return out
 }

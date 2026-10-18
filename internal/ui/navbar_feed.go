@@ -135,7 +135,16 @@ func (s *Shell) viewDynamicDot(c *ui.Context) {
 	count := s.feed.tick(s.clock)
 	// ⚠️ 这一句是「窗口静止时也会轮询」的全部保证：光靠上面那一行，静止的窗口
 	// 永远没人问。到点的那一趟把界面叫醒，下一帧上面就会问。
-	s.feed.arm(s.clock, s.wake.invalidate)
+	//
+	// ⚠️ **关了之后不许再装**（`s.closed`）。`Close` 收掉的是一个具体装上的
+	// 定时器，而这一句是**每帧**都会到的——所以只要关掉之后还有一帧画到顶栏
+	// （无头 Tester 里 `Close` 之后再 `Frame()` 就会，见
+	// `close_while_loading_test.go`），它就会在这儿再装一个，而 `Close` 已经走过
+	// 一趟、不会再走。那一个就挂到测试进程结束（真窗口里 OnClosed 之后不会再有帧，
+	// 可这条不该靠「恰好不会」来对）。
+	if !s.closed {
+		s.feed.arm(s.clock, s.wake.invalidate)
+	}
 
 	// Biu 只在登录后摆这一格（`navbar/index.tsx:38` 的 `{Boolean(user?.isLogin) && ...}`）。
 	// 这里**没按登录态隐藏**——和头像下拉那六项同一个理由（见 navbar_avatar.go
@@ -145,7 +154,9 @@ func (s *Shell) viewDynamicDot(c *ui.Context) {
 	// 代价说清楚：登录之后这一格还在，而 Biu 那时候已经把它藏了。
 	ui.Row(c).Key("nav-feed").Gap(4).AlignItems(ui.Start).Children(func() {
 		ui.Column(c).Key("nav-feed-btn").Children(func() {
-			if ui.Button(c, "动态").FontSize(13).Clicked() {
+			if iconButton(c, iconFeed, "动态", iconMd).
+				Size(iconHitMd, iconHitMd).Padding(0, 5).
+				Tooltip("动态").Clicked() {
 				// Biu 的 handleOpen：清掉红点，再去看动态。
 				s.feed.clear()
 				s.navigate(dynamicFeedPath)

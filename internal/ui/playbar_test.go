@@ -1,14 +1,11 @@
-package ui_test
+package ui
 
 import (
-	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/ui"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -36,12 +33,15 @@ type harness struct {
 	tt  *mygoui.Tester
 }
 
+// 走基座（`newTestShell`），所以收尾是无条件挂上的。`New(a)` 会起
+// `searchHistory.loop` 和 `shortcutKeys.loop` 两个后台写循环，首帧还会经
+// `feed.arm` 装一个每五分钟一跳的定时器——只 `t.Cleanup(a.Close)` 收不掉它们
+// （`App.Close` 不管 Shell 的资源），几百条测试就是几百个挂到测试二进制结束的
+// goroutine。
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := ui.New(a)
-	return &harness{app: a, tt: mygoui.NewTester(s.View, winW, winH)}
+	b := newTestShell(t, at(winW, winH))
+	return &harness{app: b.a, tt: b.tt}
 }
 
 func (h *harness) open(t *testing.T) {
@@ -52,25 +52,18 @@ func (h *harness) open(t *testing.T) {
 	h.tt.Frame()
 }
 
-// waitFor 轮询到 cond 成立。异步的东西（播放器、解码 goroutine）只能这样等。
-func waitFor(t *testing.T, d time.Duration, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(d)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("等了 %v，%s 还没发生", d, what)
-}
-
 // dragTo 把进度条从一端拖到另一端（0..1 的位置），按下、移动、松手一步做完。
 func dragTo(t *testing.T, tt *mygoui.Tester, to float64) {
 	t.Helper()
 	bar, ok := tt.Find("播放进度")
 	if !ok {
 		t.Fatalf("画面上找不到进度条，文字有 %q", tt.Texts())
+	}
+	// ⚠️ **量不出大小就直说**（`settings_page_test.go` 的 `clickSetting` 是同一个形状）。
+	// 少这一句的话，按在一个还没排好版的框上什么也不会发生，而症状报在两三步之后
+	// 「位置没变」——离真因隔了三层。
+	if bar.W <= 0 || bar.H <= 0 {
+		t.Fatalf("进度条没量出大小（%v），按不中：文字有 %q", bar, tt.Texts())
 	}
 	x := bar.X + bar.W*float32(to)
 	y := bar.Y + bar.H/2
@@ -175,11 +168,46 @@ func TestProgressBarDrags(t *testing.T) {
 func TestDragToEndDoesNotCrash(t *testing.T) {
 	h := newHarness(t)
 	h.open(t)
+	// ⚠️ **先把前提摆回去：拖的那一刻这一首得真的在放。**
+	//
+	// 素材只有 4 秒，而 `dragTo` 要画 7 帧（每帧都是**整窗**：顶栏 + 侧栏 + 页面 +
+	// 播放条 + 抽屉）。满载的机器上这 7 帧本身就能把一首 4 秒的歌放完——放完之后
+	// `playing` 变 false，于是下面「拖完就停」证明不了任何事：**歌自己放完也是停**。
+	//
+	// 差的就是「这 7 帧要花多久」：实测整包跑 10 次挂 3 次，单独跑 0 次（单独跑没有
+	// 整包那些堆和 GC 压力）。所以这里显式检查并复位，而不是指望它还在放。
+	if !h.app.Snapshot().Playing {
+		h.app.SeekTo(0)
+		h.app.Play()
+		waitFor(t, "这一首回到开头重新放上了", func() bool {
+			return h.app.Snapshot().Playing
+		})
+	}
 
 	dragTo(t, h.tt, 1) // 一路拖到最右端
 
+	// ⚠️ **不要断「位置到了末尾」——量出来那不是一个状态。**
+	//
+	// `ScrubEnd` 确实**同步**把位置写成末尾（松手那一帧读就是 4s），但**播放器不接**
+	// 「seek 到自己末尾」那一下——就是函数头上说的 t-0017 那个边界。50ms 之后后台那个
+	// 时钟（`App.tick`）用播放器的**真实**位置覆盖回来，读到的是 0s，从此不动。
+	//
+	// 同一轮量到的对照，四行连起来才是结论：
+	//
+	//	A 拖完立刻         位置=4s    playing=true    ← 拖动确实生效，ScrubEnd 写进去了
+	//	B 50ms 之后        位置=0s    playing=false   ← 时钟覆盖回播放器的真实位置
+	//	C 手动 seek 到 2s  位置=2.14s playing=true    ← seek 本身正常
+	//	D 手动 seek 到末尾  位置=0s    playing=false   ← 只有「跳到末尾」这一下不接
+	//
+	// 也就是说「位置 == 时长」这个状态**这个播放器从来不到**。写它进去只能得到一个
+	// 靠运气的东西：读到 4s 还是 0s，取决于读取落在那 50ms 窗口的哪一边（两边都实测
+	// 出现过：31.995464ms 和 4s）。
+	//
+	// 要断的是下一句：「拖到末尾之后播放器停了」。前提上面刚摆好（这一首在放），所以
+	// 它停下来就只可能是这次拖动把 seek 送到了末尾——**这才是验收项 5 要的东西**。
+	//
 	// 队列是空的 → 没有下一首可放 → 停下来。不是卡住。
-	waitFor(t, 5*time.Second, "拖到末尾后播放器停下来", func() bool {
+	waitFor(t, "拖到末尾后播放器停下来", func() bool {
 		h.tt.Frame()
 		return !h.app.Snapshot().Playing
 	})
@@ -195,12 +223,14 @@ func TestDragToEndDoesNotCrash(t *testing.T) {
 	}
 }
 
-// TestRenderShots 把画面存成 PNG，留给人眼对照。它跑的是 MyGo 的 Tester，
+// TestRenderPlayBarShots 把播放条那几个状态存成 PNG（01–05），留给人眼对照。
+// 和 `router_test.go` 的 TestRenderShots（10–18，整窗走一遍）是同一套图的两半。
+// 它跑的是 MyGo 的 Tester，
 // 走的是和真窗口一模一样的 layout + paint，只是画到内存里而不是屏幕上。
 //
-//	go test ./internal/ui/ -run TestRenderShots
-//	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderShots
-func TestRenderShots(t *testing.T) {
+//	go test ./internal/ui/ -run TestRenderPlayBarShots
+//	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderPlayBarShots
+func TestRenderPlayBarShots(t *testing.T) {
 	dir := os.Getenv("BIU_SHOT_DIR")
 	if dir == "" {
 		t.Skip("设 BIU_SHOT_DIR 才会存图")
@@ -224,21 +254,6 @@ func TestRenderShots(t *testing.T) {
 	save(t, dir, "05-error.png", h.tt)
 }
 
-func save(t *testing.T, dir, name string, tt *mygoui.Tester) {
-	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	f, err := os.Create(filepath.Join(dir, name))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	if err := png.Encode(f, tt.Image()); err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("存了 %s", filepath.Join(dir, name))
-}
 func TestVolumeSliderDrivesTheApp(t *testing.T) {
 	h := newHarness(t)
 	h.open(t)

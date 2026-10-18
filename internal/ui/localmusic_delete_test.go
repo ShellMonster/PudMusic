@@ -174,10 +174,10 @@ func TestAddingADirectoryStoresItAndScans(t *testing.T) {
 		t.Fatalf("点不到「添加目录」：%v，文字有 %q", err, tt.Texts())
 	}
 	// 弹框那一支跑在后台 goroutine 上（`mygo.Dialog.Open` 必须从非主线程调）。
-	waitUntil(t, func() bool { return pick.callCount() > 0 }, "「添加目录」没有真的去弹框")
-	waitUntil(t, func() bool {
+	waitFor(t, "「添加目录」没有真的去弹框", func() bool { return pick.callCount() > 0 })
+	waitFor(t, "选完目录之后设置里没有它", func() bool {
 		return len(a.SettingsSnapshot().LocalMusicDirs) == 1
-	}, "选完目录之后设置里没有它")
+	})
 	settleLocal(t, a, tt)
 
 	// ⚠️ 断的是**列表里真的有那首歌**，不是「扫描报完了」。设置写进去和
@@ -209,7 +209,7 @@ func TestAddingTheSameDirectoryTwiceSaysSo(t *testing.T) {
 	if err := tt.Click("添加目录"); err != nil {
 		t.Fatal(err)
 	}
-	waitUntil(t, func() bool { return pick.callCount() > 0 }, "没有去弹框")
+	waitFor(t, "没有去弹框", func() bool { return pick.callCount() > 0 })
 	settleLocal(t, a, tt)
 
 	if got := len(a.SettingsSnapshot().LocalMusicDirs); got != 1 {
@@ -307,7 +307,7 @@ func TestInsertingARowKeepsTheChosenSong(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	waitForScan(t, a, tt)
+	waitFrames(t, tt, "本地音乐那一遍扫描落地", func() bool { return !a.LocalMusicState().Scanning })
 	tt.Frame()
 
 	if !tt.HasText("插到最前面") {
@@ -377,9 +377,9 @@ func TestABackgroundScanWakesEveryWindowThatDrewIt(t *testing.T) {
 	beforeFirst, beforeSecond := first.get(), second.get()
 	a.RescanLocalMusic()
 
-	waitUntil(t, func() bool { return first.get() > beforeFirst }, "主窗口没被叫醒")
-	waitUntil(t, func() bool { return second.get() > beforeSecond },
-		"第二个窗口没被叫醒——后台投递完只唤醒了一个窗口，另一个停在旧内容")
+	waitFor(t, "主窗口没被叫醒", func() bool { return first.get() > beforeFirst })
+	waitFor(t, "第二个窗口被叫醒（后台投递完只唤醒了一个窗口，另一个停在旧内容）",
+		func() bool { return second.get() > beforeSecond })
 
 	// 两个都醒了之后，帧也画得出来。
 	tt.Frame()

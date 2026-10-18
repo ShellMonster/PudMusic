@@ -81,6 +81,14 @@ type libraryFetcher func(ctx context.Context, page, loadedBefore int, q libraryQ
 // maxWakes 是记着的唤醒句柄上限：一个窗口一条，多出来的挤掉最久没画的那个。
 const maxWakes = 4
 
+// gridGap 是网格那一档格子之间的间距。
+//
+// ⚠️ **取 `list.GridGap` 而不是另写一个数**：Biu 那个网格组件在同一个窗口宽度下
+// 摆出来的格子宽度是唯一的，而这一份和 `widgets/list` 的 `Grid`（收藏夹 / 搜索
+// 那一堆页面的网格那一档）在同一个应用里摆的是同一批歌——间距差几个像素，用户
+// 看到的就是「这两个页面对不上」。
+const gridGap = list.GridGap
+
 // backTopPx 是滚过多少像素才出现回顶按钮。**400 是死数，照抄**
 // Biu `src/components/scroll-container/index.tsx`。
 const backTopPx = 400
@@ -109,6 +117,26 @@ type pagedRows struct {
 	// 和底色是一对。menu 是这一行的右键菜单。两者都由页面给。
 	render func(c *ui.Context, r ui.ListRow) ui.Element
 	menu   func(m *ui.Menu, i int)
+
+	// renderCell 画网格那一档的**一格**（不是一行），给页面用。
+	//
+	// ⚠️ **为 nil 时那一档退回列表**（见 SetView）：这一份翻页列表是照着
+	// `list/paged.go` 另写的，而网格那一档要页面自己画一格——没给就不画，
+	// 画一个空框等于告诉用户「这里什么都没有」。
+	renderCell func(c *ui.Context, i int, cell float32, selected bool) ui.Element
+
+	// layout 是设置里的「数据显示样式」那一档，见 SetView。零值是列表。
+	//
+	// 名字用 layout 而不是 view：这一份已经有一个 `view` 方法（真的画法）和一个
+	// `View` 方法（外面那道 recover），字段再叫 view 就三个同名的东西了。
+	layout list.View
+
+	// width / cols 是网格那一档算列数用的两个数：width 是**上一帧**量出来的容器
+	// 宽（`Bounds` 量的是上一帧的盒子，见 `widgets/list/grid.go` 的同一句），
+	// cols 是上一帧的列数。行数要靠它算（`rowCount`），而行数在画之前就得给
+	// `ui.List`，所以晚一帧只能晚一帧。
+	width float32
+	cols  int
 
 	// empty 是一行都没有时说的那两句话（见 SetEmpty）。
 	empty emptyState
@@ -243,6 +271,30 @@ func (p *pagedRows) ScrollTop() {
 	p.state.ScrollTo(0, ui.Start)
 }
 
+// SetView 换摆法（设置里的「数据显示样式」）。**每一帧都要调**。
+//
+// 三档：列表 / 紧凑 / 网格。前两档走 `render`（紧凑只是行内尺寸变矮，见
+// `metricsOf`），网格那一档走 `renderCell`。**没给 `renderCell` 就退回列表**——
+// 见那个字段的注释。
+func (p *pagedRows) SetView(v list.View) {
+	if v == list.ViewCard && p.renderCell == nil {
+		v = list.ViewList
+	}
+	p.layout = v
+}
+
+// Layout 返回此刻的摆法。页面画表头时照它决定要不要摆（网格里没有表头，见
+// `laterHeader` 那一处）。
+func (p *pagedRows) Layout() list.View { return p.layout }
+
+// SetCell 装网格那一档的画法（页面在 init 里给）。
+func (p *pagedRows) SetCell(fn func(c *ui.Context, i int, cell float32, selected bool) ui.Element) {
+	p.renderCell = fn
+}
+
+// isGrid 报此刻是不是网格那一档。
+func (p *pagedRows) isGrid() bool { return p.layout == list.ViewCard }
+
 // SetEmpty 换掉「一行都没有时说的那两句话」。
 //
 // **由页面把 `routes` 表里那一条的 `Empty` 原样递进来**，不在这儿另抄一份：出处
@@ -302,8 +354,11 @@ func (p *pagedRows) view(c *ui.Context) {
 		p.load(trigFirstRender)
 	}
 
-	p.syncState()
-	p.drawList(c)
+	if p.isGrid() {
+		p.drawGrid(c)
+	} else {
+		p.drawList(c)
+	}
 
 	// ②③ 在这里跑（必须排在画完之后：`Visible` 报的是**上一帧**的行，
 	// mygo 的 ListState.Visible 注释：「the row the list showed in the last frame」）。
@@ -315,20 +370,42 @@ func (p *pagedRows) view(c *ui.Context) {
 //
 // 🔴 铁律四：**Key 每一帧都重装，装的是 Music.ID**。不装的话 MyGo 拿「父 ID + 兄弟
 // 序号」当身份，前面插一行会让后面所有行的状态整体错配。⚠️ 别改成序号。
-func (p *pagedRows) syncState() {
+func (p *pagedRows) syncState(cols int) {
+	// ⚠️ 网格那一档 `i` 是**行号**不是行的下标，所以行的身份取「这一行第一首的
+	// ID」而不是 `p.rows[i].ID`（理由同 `widgets/list` 的 Grid.State.Key）。
+	first := func(i int) int { return i }
+	if p.isGrid() {
+		first = func(i int) int { return i * cols }
+	}
 	p.state.Key = func(i int) any {
-		if i >= len(p.rows) {
+		j := first(i)
+		if j >= len(p.rows) {
 			return footerIdentity{}
 		}
-		return p.rows[i].ID
+		return p.rows[j].ID
 	}
 	p.state.Label = func(i int) string {
-		if i >= len(p.rows) {
+		j := first(i)
+		if j >= len(p.rows) {
 			return "加载更多"
 		}
-		return p.rows[i].Title
+		return p.rows[j].Title
 	}
-	p.state.Selected = &p.sel
+
+	// 🔴 **网格那一档不装行选中**。`state.Selected` 收的是**行下标**，而这一份的
+	// `sel` 记的是**第几首歌**（格子才是用户点的东西，`widgets/list` 的 Grid 也是
+	// 自己管选中的）。两套下标塞进同一个 int 的后果有两个，而且都很难查：
+	//
+	//   - 点在格子之间的空地上时框架写进来一个**行号**，于是「选中的那一首」变成
+	//     另一首；
+	//   - 整行铺主色底，于是网格里「选中了一格」看起来像「选中了一行」。
+	//
+	// 选中由每一格自己画（`viewCellGuarded` 的 OnClick + 页面那一层的主色底），
+	// 和 `widgets/list` 的 Grid 同一个做法。
+	p.state.Selected = nil
+	if !p.isGrid() {
+		p.state.Selected = &p.sel
+	}
 }
 
 // footerIdentity 是末尾那一行的身份。它**不是字符串**：行的 ID 是 B 站给的
@@ -349,41 +426,196 @@ func (p *pagedRows) showFooter() bool {
 	return p.hasMore || p.blocked
 }
 
-// drawList 画那个虚拟列表。
-func (p *pagedRows) drawList(c *ui.Context) {
-	t := c.Theme()
-	n := p.listRows()
-
-	empty := ""
+// emptyText 是这一帧列表里那句空状态，空串是「什么都不说」。
+//
+// 列表和网格**共用这一段**：两个控件的空状态长得不一样的话，用户切一下设置就会
+// 看到「同一个空列表，换了个说法」——而那不是两件事。
+func (p *pagedRows) emptyText(t *ui.Theme) string {
 	switch {
 	case len(p.rows) == 0 && p.loading:
 		// 一行都还没有：第一页在途。这时候「正在加载…」就是列表全部的内容，
 		// 哨兵先收起来——同一句摆两遍（空状态一句 + 页脚一句）是噪音。
-		empty = "正在加载…"
+		return "正在加载…"
 	case len(p.rows) == 0 && p.blocked:
 		// 一行都没有还失败了：页面上就留那一个重试按钮，一句话都不多说。
+		return ""
 	case len(p.rows) == 0:
-		empty = p.empty.Title
+		return p.empty.Title
 	}
+	return ""
+}
+
+// viewEmptyState 画那句空状态和它下面那句提示。列表和网格共用。
+func (p *pagedRows) viewEmptyState(c *ui.Context, t *ui.Theme) {
+	empty := p.emptyText(t)
+	if empty == "" {
+		return
+	}
+	ui.Column(c).Grow(1).Center().Gap(6).Padding(16).Children(func() {
+		ui.Text(c, empty).FontSize(15).TextColor(t.Text)
+		if p.empty.Hint != "" {
+			ui.Text(c, p.empty.Hint).FontSize(12).TextColor(t.TextMuted)
+		}
+	})
+}
+
+// drawList 画那个虚拟列表（列表和紧凑两档）。
+func (p *pagedRows) drawList(c *ui.Context) {
+	t := c.Theme()
+	n := p.listRows()
+
+	p.syncState(1)
 
 	ui.List(c, &p.state, n).
 		Grow(1).
 		FillWidth().
 		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击）。
 		OnSubmit(func() { p.playFrom(p.sel) }).
-		Children(func() {
-			if empty == "" {
-				return
-			}
-			ui.Column(c).Grow(1).Center().Gap(6).Padding(16).Children(func() {
-				ui.Text(c, empty).FontSize(15).TextColor(t.Text)
-				if p.empty.Hint != "" {
-					ui.Text(c, p.empty.Hint).FontSize(12).TextColor(t.TextMuted)
-				}
-			})
-		}).
+		Children(func() { p.viewEmptyState(c, t) }).
 		Rows(func(r ui.ListRow) { p.viewRow(r) }).
 		TrackScroll(&p.scroll)
+}
+
+// drawGrid 画网格那一档：一行几首。
+//
+// ## 列数按**容器**的宽分档，不按窗口的
+//
+// 理由和 `widgets/list/grid.go` 那一句完全一样：页面左边还有侧栏和页内边距，窗口
+// 宽不等于列表宽。用窗口宽算的话用户在同一窗口宽度下会在两页看到两种列数。
+//
+// ## 和 `widgets/list` 的 `Grid` 为什么是两份
+//
+// 这一份翻页列表整个是照着 `list/paged.go` 另写的（文件头写明了为什么），而行是
+// 页面自己画的（多两列，见 `libraryRow`）。把网格接进 `list.PagedList` 就得先把它
+// 那几列搬进 `list.Music`——那是更大的改动，不在这一票里。
+func (p *pagedRows) drawGrid(c *ui.Context) {
+	t := c.Theme()
+	cols := p.columns(c)
+	items := p.listRows()
+	rows := (items + cols - 1) / cols
+
+	p.syncState(cols)
+
+	// 列数先记下来再画：`rowCount`（三重保障那一支）和下一帧的 `columns` 都要用它。
+	p.cols = cols
+
+	e := ui.List(c, &p.state, rows).
+		Grow(1).
+		FillWidth().
+		// 双击一格 = 从那一首往后播（列表那一行是同一个意思，Biu 的
+		// `onDoubleClick`）。网格里没有「双击哪一格」的问题——双击的那一格就是
+		// 选中的那一格。
+		OnSubmit(func() { p.playFrom(p.sel) }).
+		Children(func() { p.viewEmptyState(c, t) }).
+		Rows(func(r ui.ListRow) { p.viewGridRow(r, cols) }).
+		TrackScroll(&p.scroll)
+
+	// 量这一帧的容器宽，下一帧用。`Bounds` 读的是**上一帧**量好的盒子
+	//（`ui/api_gen.go` 里 Bounds 的注释原话），所以窗口改宽之后列数晚一帧换。
+	if bw := e.Bounds().W; bw > 0 {
+		p.width = bw
+	}
+}
+
+// columns 是这一帧排几列。头一帧还没量到容器时先拿**列表那一块**的宽（`c.Size`
+// 是窗口，比容器宽，估出来偏大）——宁可宽一帧也不要窄一帧，反过来会先闪一下两列。
+func (p *pagedRows) columns(c *ui.Context) int {
+	w := p.width
+	if w <= 0 {
+		w, _ = c.Size()
+	}
+	return list.GridColumnsFor(w)
+}
+
+// viewGridRow 画网格的一行：cols 首歌。
+//
+// 🔴 行里 panic 会一路穿出 Cocoa 事件循环把整个进程带走，所以整行兜一层
+// （理由同 `viewRow`）。和列表那一行不同，网格这一行的兜法记在 `failedRow`：
+// 键是这一行**第一首**的 ID。
+func (p *pagedRows) viewGridRow(r ui.ListRow, cols int) {
+	c, first := r.Context, r.Index*cols
+
+	// 哨兵**独占一行**时（`len(p.rows)` 正好是列数的整数倍）：这一行里没有歌。
+	if first >= len(p.rows) {
+		ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(gridGap).Children(func() {
+			ui.Box(c).Grow(1).AlignSelf(ui.Start).Children(func() { p.viewFooter(c) })
+		})
+		return
+	}
+	m := p.rows[first]
+	if p.failed[m.ID] {
+		ui.Text(c, "这一行画不出来").FontSize(13).TextColor(c.Theme().TextMuted).
+			Padding(8).MaxLines(1)
+		return
+	}
+	// ⚠️ **格子宽度要算出来交给页面**：封面按格子宽画（`widgets/list` 的
+	// `viewCell` 就是这么做的），而页面自己不知道容器有多宽。写死一个数的话，
+	// 窗口一窄封面就顶出格子——界面上看得出坏了，而量宽度的断言全绿。
+	cell := list.CellWidth(p.width, cols)
+	guard.Wrap(func(c *ui.Context) {
+		// ⚠️ Stretch：格子要撑满这一行的高，选中那一格的底色才是一整块
+		//（`widgets/list/grid.go` 的 viewRow 里同一句）。
+		ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(gridGap).Children(func() {
+			for k := range cols {
+				i := first + k
+				// 越过最后一格，或者这一格是「行画完了、又没装哨兵」的那一格：空着。
+				// ⚠️ 第二个条件不能省，理由逐字见 `widgets/list/grid.go` 的 `viewRow`
+				// 里那一段（不挡会越界取 `p.rows[i]`，崩在画这一行上）。
+				if i > len(p.rows) || (i == len(p.rows) && !p.showFooter()) {
+					return
+				}
+				// 🔴 **哨兵落在这一行的第 k 格**（不是第 0 格时），理由和
+				// `widgets/list/grid.go` 的 `viewRow` 里那一支逐字一样：行是按列数
+				// 切出来的，`len % cols` 不为 0 时哨兵就在某一行的中间，只判「整行从
+				// 哨兵开始」会**看不见它**——症状是翻页失败之后页面上什么都不剩，
+				// 而 `blocked` 闩住的是自动重试。
+				if i == len(p.rows) {
+					p.viewFooterCell(c)
+					continue
+				}
+				p.viewCellGuarded(c, i, cell)
+			}
+		})
+	}, func(any) { p.markFailed(m.ID) })(c)
+}
+
+// viewFooterCell 画末尾哨兵的那一格。
+//
+// ⚠️ 宽度 `Grow(1)` 而不是算出来的格子宽：这一格是**塞进一行里的**，而这一行的宽度
+// 是那一行的歌决定的；写死一个宽会和旁边的格子对不上（这是 BMG-56 那条
+// 「别量时长」的同一个坑——被推走的是左边，右边几列的 x 一个像素没变）。
+func (p *pagedRows) viewFooterCell(c *ui.Context) {
+	ui.Box(c).Grow(1).AlignSelf(ui.Start).Children(func() { p.viewFooter(c) })
+}
+
+// viewCellGuarded 画一格，画崩了只废掉那一格。
+//
+// ⚠️ **按格兜而不是按行兜**：一行有六格，一张坏封面要带走五首好的——这句话是
+// `widgets/list` 里已经付过账的结论，这里照抄。
+func (p *pagedRows) viewCellGuarded(c *ui.Context, i int, cell float32) {
+	m := p.rows[i]
+	if p.failed[m.ID] {
+		ui.Text(c, "这一格画不出来").FontSize(13).TextColor(c.Theme().TextMuted).
+			Padding(8).MaxLines(1)
+		return
+	}
+	guard.Wrap(func(c *ui.Context) {
+		// ⚠️ 菜单挂在**这一格**上（和列表挂在行上是同一件事）。
+		//
+		// ⚠️ i 在这一帧是**真的**：菜单被点中的那一帧框架会用新的一帧重跑每一格
+		// 的回调，闭包里的 i 因此总是用户按下去那一格的下标（理由同 `viewRow`）。
+		// `renderCell` 已经把那一格建出来了（和 `render` 同一个约定：收的是已经
+		// 建好的元素），所以菜单和点击都挂在**建好的那一格**上，而不是外面再套一层
+		// ——套一层的话菜单会被最里层那个带菜单的元素接管（`ui/menu.go` 的
+		// menuTarget），而点击区会多出一圈空白。
+		// 这一串只是往建好的那一格上挂菜单和点击，返回的元素没人要——和 `viewRow`
+		// 里 `p.render(c, r).ContextMenu(...)` 同一个写法。
+		p.renderCell(c, i, cell, p.sel == i).
+			ContextMenu(func(m *ui.Menu) { p.menu(m, i) }).
+			// 点一下选中这一首。**单击只选中不放**——理由和列表那一行一样（桌面端
+			// 单击就换队列太容易误触，播放走双击和右键菜单）。
+			OnClick(func() { p.sel = i })
+	}, func(any) { p.markFailed(m.ID) })(c)
 }
 
 // viewRow 画一行。
@@ -655,7 +887,7 @@ func (p *pagedRows) afterFrame() {
 		return
 	}
 	first, last := p.state.Visible()
-	switch n := p.listRows(); {
+	switch n := p.rowCount(); {
 	case last < n-1:
 		// 末尾还在画面外。什么都不做，等用户滚过去。
 	case first > 0:
@@ -666,6 +898,24 @@ func (p *pagedRows) afterFrame() {
 		// **这一支就是「筛选后只剩两页」的救命的那一支。**
 		p.load(trigRefill)
 	}
+}
+
+// rowCount 是这一帧**画出来的行数**（不是歌数）：网格那一档一行几首，所以行数
+// 是拿列数除出来的。
+//
+// ⚠️ 用 `p.cols`（网格那一档**上一帧**的列数）而不是这一帧的：三重保障跑在画完
+// 之后，而 `Visible()` 报的本就是**上一帧**画出来的行（`ui.ListState.Visible` 的
+// 注释原话）。拿上一帧的列数除，行数和那些行才是同一帧的那一份。
+func (p *pagedRows) rowCount() int {
+	if !p.isGrid() {
+		return p.listRows()
+	}
+	cols := p.cols
+	if cols <= 0 {
+		cols = 2 // 还没画过一帧，最窄那档（和 `widgets/list` 同一个兜底）
+	}
+	n := p.listRows()
+	return (n + cols - 1) / cols
 }
 
 // listRows 是这一帧有几行，含末尾哨兵。行数只有一个算法（就是这里）。

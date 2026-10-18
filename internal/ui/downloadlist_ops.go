@@ -68,7 +68,10 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 		if dir != "" && ui.Button(c, "打开文件夹").Width(dlOpenDirW).Clicked() {
 			d.openDownloadDir(dir, s)
 		}
-		if ui.Button(c, "清空记录").Width(dlClearW).Disabled(len(d.rows) == 0).Clicked() {
+		// ⚠️ 灰不灰看的是**整个队列**（`d.all`），不是筛完屏幕上那几行：
+		// 这一颗清的是整个队列，而在「视频」那一档筛出空来的时候它还摆得动，
+		// 就该还能按——否则用户看着一排有记录的表格之外的地方，想清却没得清。
+		if ui.Button(c, "清空记录").Width(dlClearW).Disabled(len(d.all) == 0).Clicked() {
 			d.askClear(s)
 		}
 	})
@@ -184,13 +187,18 @@ func (d *downloadsPage) deleteOne(r download.Snapshot, s *Shell) {
 //
 // 「删一行」和「清空」是同一类动作（都不可恢复），所以走同一道弹窗，不另写一
 // 个。一条记录都没有时按钮是灰的，这一支走不到。
+//
+// ⚠️ **报的是整个队列的条数，不是筛选之后屏幕上那几行**（用的是 `d.all`）。
+// `App.ClearDownloads` 清的是整个队列：用户在「视频」那一档上看到「确认清空这
+// 1 条」而点下去删掉 21 条，那一句是在骗用户，而且骗掉的正是不可撤销的那部分
+// （还在下的半成品会被删掉，见上面那段）。
 func (d *downloadsPage) askClear(s *Shell) {
-	if len(d.rows) == 0 {
+	if len(d.all) == 0 {
 		return
 	}
-	n := len(d.rows)
+	n := len(d.all)
 	half := 0
-	for _, r := range d.rows {
+	for _, r := range d.all {
 		if r.Status != download.StatusDone {
 			half++
 		}

@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
@@ -160,4 +161,26 @@ func miniNaturalWidths(t *testing.T, labels []string) map[string]float32 {
 		out[l] = r.W
 	}
 	return out
+}
+
+// settleMini 跑到 cond 成立为止。每一轮走一帧，顺带让后台那一支有机会跑。
+//
+// ⚠️ 不能只 `tt.Frame()` 一次：播放器的时长和解码都在后台 goroutine 里，结果要靠
+// 唤醒才进下一帧。
+//
+// 名字带 `Mini` 是因为包级那个通用的 `settle` 已经被主干收走了（`4f86d76` 那一票
+// 整理过测试套件），而各页各有各的 `settleXxx`——这一份是迷你这一组自己的。
+func settleMini(t *testing.T, tt *mygoui.Tester, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		tt.Frame()
+		if cond() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("等了五秒还没%s，文字有 %q", what, tt.Texts())
+		}
+		time.Sleep(time.Millisecond)
+	}
 }

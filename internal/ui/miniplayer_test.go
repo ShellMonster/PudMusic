@@ -291,8 +291,7 @@ func TestTheMiniWindowIsWokenWhenTheStateChanges(t *testing.T) {
 	a := app.New()
 	t.Cleanup(a.Close)
 
-	main := New(a)
-	t.Cleanup(main.images.Close)
+	main := newTestShell(t, onApp(a)).s
 	mini := main.newMiniShell()
 	// 没有真窗口就不会走 `attachMiniWindow` 的 `OnClosed`，所以那几摊逐窗口的
 	// 资源（封面缓存、两个后台写盘的 goroutine）测试里得自己收。
@@ -343,8 +342,7 @@ func TestTheMiniWindowShowsWhatTheMainWindowShows(t *testing.T) {
 	a := app.New()
 	t.Cleanup(a.Close)
 
-	main := New(a)
-	t.Cleanup(main.images.Close)
+	main := newTestShell(t, onApp(a)).s
 	mini := main.newMiniShell()
 	t.Cleanup(mini.releaseMini)
 
@@ -396,8 +394,7 @@ func TestClosingTheMiniWindowLeavesTheAppPlaying(t *testing.T) {
 	a := app.New()
 	t.Cleanup(a.Close)
 
-	main := New(a)
-	t.Cleanup(main.images.Close)
+	main := newTestShell(t, onApp(a)).s
 	removeMain := a.AddWake(main.wake.invalidate)
 	t.Cleanup(removeMain)
 	mini := main.newMiniShell()
@@ -435,6 +432,46 @@ func TestClosingTheMiniWindowLeavesTheAppPlaying(t *testing.T) {
 	}
 	if !mainTT.HasText(flacBaseName) {
 		t.Errorf("主窗口上已经没有那首歌了，文字有 %q", mainTT.Texts())
+	}
+}
+
+// TestTheMiniShellTeardownIsTheSharedOne 盯迷你那个外壳的收尾**走的是共用那一段**。
+//
+// ⚠️ 主干这一轮把收尾从「挂在窗口回调里的一大段」收成了 `Shell.Close`（收整个
+// 应用），于是「只收这一扇窗的那几样」需要一个单独的入口——`closePerWindow`。
+// 迷你窗口走的就是它：它**不能**走 `Close`，那个会 `s.app.Close()` 把正在放的歌停
+// 掉，而主窗口明明还开着。
+//
+// 断两样：共用那一段**真的被调到了**（拿 `closed` 这道闸门量——它只有走过
+// `closePerWindow` 才会置上，而三个「装定时器」的地方都看它），以及迷你那个外壳
+// **没有**把整个应用收掉（App 还在，歌还在）。
+//
+// 这条也是回归防护：哪天有人图省事把 `releaseMini` 改成调 `Close()`，这里立刻红
+// （歌没了）。
+func TestTheMiniShellTeardownIsTheSharedOne(t *testing.T) {
+	a := app.New()
+	t.Cleanup(a.Close)
+
+	main := newTestShell(t, onApp(a)).s
+	mini := main.newMiniShell()
+	if err := enqueueTwo(a, t); err != nil {
+		t.Fatal(err)
+	}
+	a.Toggle() // 暂停
+	_ = miniTester(mini)
+
+	if mini.closed {
+		t.Fatal("起点就不对：还没收就已经是收过的了")
+	}
+	mini.releaseMini()
+
+	if !mini.closed {
+		t.Error("releaseMini 走完之后 `closed` 还是假：三个「装定时器」的地方不看它，" +
+			"于是关掉之后还有一帧画到就会再装一个（`closePerWindow` 没被调到）")
+	}
+	if st := a.Snapshot(); !st.HasTrack {
+		t.Error("收迷你那个外壳把歌停了：它是另一扇窗，关窗不是退出应用——" +
+			"（`releaseMini` 若误调 `Close()`，`s.app.Close()` 就是这么停掉它的）")
 	}
 }
 
@@ -500,8 +537,7 @@ func TestTheMiniShortcutDoesNotOpenASecondMiniWindow(t *testing.T) {
 	t.Cleanup(a.Close)
 
 	back := 0
-	main := New(a)
-	t.Cleanup(main.images.Close)
+	main := newTestShell(t, onApp(a)).s
 	mini := NewMini(a, func() { back++ })
 	t.Cleanup(mini.releaseMini)
 	mini.main = main
@@ -530,8 +566,7 @@ func TestADeepLinkMakesRoomForTheMainWindow(t *testing.T) {
 	a := app.New()
 	t.Cleanup(a.Close)
 
-	main := New(a)
-	t.Cleanup(main.images.Close)
+	main := newTestShell(t, onApp(a)).s
 	mini := main.newMiniShell()
 	t.Cleanup(mini.releaseMini)
 	if err := enqueueTwo(a, t); err != nil {
@@ -710,7 +745,7 @@ func TestDraggingTheMiniProgressSeeksOnlyOnRelease(t *testing.T) {
 	}
 
 	tt := miniTester(s)
-	settle(t, tt, "时长读回来了", func() bool { return a.Snapshot().Duration > 0 })
+	settleMini(t, tt, "时长读回来了", func() bool { return a.Snapshot().Duration > 0 })
 
 	bar := progressRect(t, tt)
 	y := bar.Y + bar.H/2

@@ -183,6 +183,10 @@ type App struct {
 	lyricSearch  lyricSearchState
 	lyricPreview lyricPreviewState
 
+	// suggest 是搜索浮层里「联想词」那一摊，见 searchsuggest.go。零值能用
+	// （没问过就是「一个都没有」）。
+	suggest suggestState
+
 	// hookBetweenAdoptStateAndSave 是**测试专用**的替掉入口：采用歌词时，在「状态
 	// 已经装上」和「往盘上写」之间调它。生产里永远是 nil。
 	//

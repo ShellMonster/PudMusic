@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -42,12 +41,11 @@ func TestGuardKeepsPanicOutOfTheProcess(t *testing.T) {
 
 // TestShellFallsBackToTheErrorPage 验错误页本身画得出来、也点得动。
 func TestShellFallsBackToTheErrorPage(t *testing.T) {
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	s.crash = "坏掉了"
-
-	tt := mygoui.NewTester(s.View, 700, 400)
+	// ⚠️ `crash` 必须在**第一帧之前**设上，而 `mygo.NewTester` 造完就画了一帧——
+	// 所以这件事得走 `stubbed`（它在造 Tester 之前跑），不能建完外壳再赋值。
+	b := newTestShell(t, at(700, 400),
+		stubbed(func(_ *testing.T, s *Shell) { s.crash = "坏掉了" }))
+	s, tt := b.s, b.tt
 	if !tt.HasText("界面出错了") {
 		t.Fatalf("没有画错误页，文字有 %q", tt.Texts())
 	}
@@ -73,9 +71,7 @@ func TestShellFallsBackToTheErrorPage(t *testing.T) {
 // TestViewSurvivesAPanicInTheRealShell 用真实的 Shell 走一遍：让 viewMain
 // panic 之后，Shell 自己要切到错误页，并且下一帧恢复正常画面。
 func TestViewSurvivesAPanicInTheRealShell(t *testing.T) {
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
+	s := newTestShell(t, at(700, 400)).s
 	// 换成一支一画就炸的 view，走的还是 New 里那条 Guard + onPanic 的路。
 	s.draw = Guard(func(c *mygoui.Context) { panic("画播放条的时候炸了") }, s.onPanic)
 

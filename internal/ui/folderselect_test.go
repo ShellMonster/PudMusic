@@ -44,7 +44,7 @@ func TestTheSelectDialogLoadsEveryFolderOneHundredAtATime(t *testing.T) {
 	openSelectFromMenu(t, tt)
 	settleFrame(tt)
 
-	waitFrameFor(t, tt, "两页都翻完", func() bool {
+	waitFrames(t, tt, "两页都翻完", func() bool {
 		return s.folderSelect != nil && s.folderSelect.loaded && len(s.folderSelect.list) == bili.CreatedFolderPageSize+3
 	})
 
@@ -153,7 +153,7 @@ func TestTheSelectDialogSubmitIsAsync(t *testing.T) {
 	}
 
 	release()
-	waitFrameFor(t, tt, "提交结果回来之后弹窗关掉", func() bool {
+	waitFrames(t, tt, "提交结果回来之后弹窗关掉", func() bool {
 		return s.folderSelect == nil || !s.folderSelect.open
 	})
 	deals := f.deals()
@@ -202,7 +202,7 @@ func TestTheSelectDialogSendsOnlyTheDifference(t *testing.T) {
 	if err := tt.Click("确认"); err != nil {
 		t.Fatal(err)
 	}
-	waitFrameFor(t, tt, "提交结果回来", func() bool { return len(f.deals()) == 1 })
+	waitFrames(t, tt, "提交结果回来", func() bool { return len(f.deals()) == 1 })
 
 	deals := f.deals()
 	if got := deals[0].get("add_media_ids"); got != "1" {
@@ -235,7 +235,7 @@ func TestTheSelectDialogRefusesLocalFiles(t *testing.T) {
 // waitFolders 等选择弹窗的列表拉回来。
 func waitFolders(t *testing.T, tt *mygoui.Tester, s *Shell, n int) {
 	t.Helper()
-	waitFrameFor(t, tt, strconv.Itoa(n)+" 个收藏夹加载完", func() bool {
+	waitFrames(t, tt, strconv.Itoa(n)+" 个收藏夹加载完", func() bool {
 		return s.folderSelect != nil && s.folderSelect.loaded && len(s.folderSelect.list) == n
 	})
 }

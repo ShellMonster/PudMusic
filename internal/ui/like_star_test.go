@@ -42,7 +42,7 @@ func TestClickingTheStarLikesTheSong(t *testing.T) {
 		t.Fatalf("点不了星标：%v（文字：%q）", err, e.tt.Texts())
 	}
 
-	settleSearch(t, e.tt, "赞发出去了", func() bool { return e.f.likePostsCount() > 0 })
+	waitFrames(t, e.tt, "赞发出去了", func() bool { return e.f.likePostsCount() > 0 })
 	if got := e.f.lastLikeUp(); got != "1" {
 		t.Errorf("发出去的 up 是 %q，want 1（1 是赞，2 是取消赞）", got)
 	}
@@ -138,7 +138,7 @@ func TestTheTripleLightsTheStarAndTheFavorite(t *testing.T) {
 	advanceLike(e, biuLikeLongPressMS*time.Millisecond+200*time.Millisecond)
 	e.tt.Release(pt[0], pt[1])
 
-	settleSearch(t, e.tt, "星标亮了", func() bool {
+	waitFrames(t, e.tt, "星标亮了", func() bool {
 		e.tt.Frame()
 		_, ok := e.tt.Find("已赞")
 		return ok
@@ -165,7 +165,7 @@ func TestAPartialTripleSaysWhichHalfFailed(t *testing.T) {
 	advanceLike(e, biuLikeLongPressMS*time.Millisecond+200*time.Millisecond)
 	e.tt.Release(pt[0], pt[1])
 
-	settleSearch(t, e.tt, "那句话弹出来了", func() bool {
+	waitFrames(t, e.tt, "那句话弹出来了", func() bool {
 		e.tt.Frame()
 		return e.tt.HasText("投币")
 	})
@@ -183,7 +183,7 @@ func TestTheWholeTripleIsSilent(t *testing.T) {
 	advanceLike(e, biuLikeLongPressMS*time.Millisecond+200*time.Millisecond)
 	e.tt.Release(pt[0], pt[1])
 
-	settleSearch(t, e.tt, "星标亮了", func() bool {
+	waitFrames(t, e.tt, "星标亮了", func() bool {
 		e.tt.Frame()
 		_, ok := e.tt.Find("已赞")
 		return ok
@@ -208,7 +208,7 @@ func TestAFailedTripleLeavesEverythingAlone(t *testing.T) {
 	advanceLike(e, biuLikeLongPressMS*time.Millisecond+200*time.Millisecond)
 	e.tt.Release(x, y)
 
-	settleSearch(t, e.tt, "三连失败那句话弹出来了", func() bool {
+	waitFrames(t, e.tt, "三连失败那句话弹出来了", func() bool {
 		e.tt.Frame()
 		return e.tt.HasText("一键三连没成功")
 	})

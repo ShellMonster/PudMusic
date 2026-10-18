@@ -61,6 +61,11 @@ func (s *Shell) syncRoute() {
 // 那一跳回调是 `s.wake.invalidate`——只叫醒，不改任何状态。要真等到 3 秒、
 // 要算还剩几秒，都是下一帧的 syncRoute / viewNotFound 在主线程上拿时钟现算。
 func (s *Shell) armNotFound() {
+	// ⚠️ 关掉之后不许再装（理由见 navbar_feed.go 里 `s.feed.arm` 那一句）：这一句
+	// 是「画到 404 那一页」就会到的，而 `Close` 收掉的是**一个**已经装上的定时器。
+	if s.closed {
+		return
+	}
 	s.disarmNotFound()
 	s.notFoundAt = s.clock.Now()
 	s.notFoundStop = s.clock.EveryFunc(notFoundTick, s.wake.invalidate)

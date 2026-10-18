@@ -47,7 +47,14 @@ func TestClosingTheWindowWhileTheCoverIsLoading(t *testing.T) {
 	})
 
 	a := app.New()
-	s := New(a)
+	b := newTestShell(t, onApp(a), at(760, coverWinH),
+		withView(func(s *Shell) func(*mygoui.Context) {
+			return func(c *mygoui.Context) {
+				s.wake.set(c) // 和 Shell.View 每帧开头做的事一样
+				s.View(c)
+			}
+		}))
+	s, tt := b.s, b.tt
 	if err := a.Enqueue(app.Item{
 		Source: "local", Type: "local", Path: flacPath(t),
 		Title: "封面正下着的一首", Cover: srv.URL + "/cover.png",
@@ -55,11 +62,10 @@ func TestClosingTheWindowWhileTheCoverIsLoading(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.Toggle() // 暂停：不让播放器那个 50ms 的时钟来搅局
-
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.wake.set(c) // 和 Shell.View 每帧开头做的事一样
-		s.View(c)
-	}, 760, coverWinH)
+	// ⚠️ 必须画一帧，封面请求才发得出去：封面缓存是**被 view 要**的时候才开下载
+	// 的（`imgcache.View` 拿着地址去 `Get`，那儿 LoadOrStore 之后起后台线）。
+	// `mygo.NewTester` 造完画的那一帧那时候还没这首歌，所以这一帧是补上的。
+	tt.Frame()
 
 	select {
 	case <-arrived:
@@ -67,11 +73,12 @@ func TestClosingTheWindowWhileTheCoverIsLoading(t *testing.T) {
 		t.Fatal("封面请求一直没发出去，这条测的不是「下着的时候关窗口」")
 	}
 
-	// 收尾三步，顺序照 shell.go 的 OnClosed 抄的：先缓存、再 App、最后设置。
+	// 走**真窗口关掉时的那一份收尾**（`Shell.Close`，窗口的 OnClosed 调的就是
+	// 它）。这一条以前是照着 OnClosed 抄的三步，所以 OnClosed 改了它不会红——
+	// 现在直接调同一份，OnClosed 改了这里就会红。
 	done := make(chan struct{})
 	go func() {
-		s.images.Close()
-		a.Close()
+		s.Close()
 		close(done)
 	}()
 	select {

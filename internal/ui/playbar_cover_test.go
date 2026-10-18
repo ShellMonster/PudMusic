@@ -101,7 +101,7 @@ func TestPlayBarCoverWhileLoadingShowsThePlaceholder(t *testing.T) {
 		t.Fatalf("还没下完就画了失败态，文字有 %q", tt.Texts())
 	}
 
-	waitCover(t, 5*time.Second, "封面请求发出去了", func() bool { return g.hits.Load() > 0 })
+	waitFor(t, "封面请求发出去了", func() bool { return g.hits.Load() > 0 })
 
 	// 一直卡着就一直停在占位——这一条同时钉住「占位不是失败」。
 	tt.Frame()
@@ -120,7 +120,7 @@ func TestPlayBarCoverShowsTheImageWhenItIsReady(t *testing.T) {
 	_, tt := coverBarTester(t, app.State{HasTrack: true, Title: "在线的一首歌", CoverURL: g.url()})
 
 	g.open() // 放行，图马上就能到
-	waitCover(t, 5*time.Second, "画面上换成图", func() bool {
+	waitFor(t, "画面上换成图", func() bool {
 		tt.Frame()
 		return !tt.HasText("载入中")
 	})
@@ -150,7 +150,7 @@ func TestPlayBarCoverFailedShowsTheFailedState(t *testing.T) {
 
 	_, tt := coverBarTester(t, app.State{HasTrack: true, Title: "在线的一首歌", CoverURL: srv.URL + "/404.png"})
 
-	waitCover(t, 5*time.Second, "画面上画出失败态", func() bool {
+	waitFor(t, "画面上画出失败态", func() bool {
 		tt.Frame()
 		return tt.HasText("封面加载失败")
 	})
@@ -183,9 +183,8 @@ func TestPlayBarCoverWakeRedrawsTheWindow(t *testing.T) {
 	g := newGatedCover(t)
 
 	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a) // ← 生产接线就在这里
-	t.Cleanup(s.images.Close)
+	// ← 生产接线就在这里：封面缓存的唤醒是在 `New` 里装的（见它的注释）。
+	s := newTestShell(t, onApp(a)).s
 
 	url := g.url()
 	// 走真实的那条路：一个能放的文件 + 一个有地址的封面。
@@ -258,14 +257,12 @@ func TestPlayBarCoverGoesThroughTheRealShell(t *testing.T) {
 	defer srv.Close()
 
 	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
+	b := newTestShell(t, onApp(a), at(760, coverWinH))
+	tt := b.tt
 
 	if err := a.Open(flacPath(t)); err != nil {
 		t.Fatal(err)
 	}
-	tt := mygoui.NewTester(s.View, 760, coverWinH)
 	tt.Frame()
 
 	if got := a.Snapshot().CoverURL; got != "" {
@@ -291,16 +288,15 @@ func TestPlayBarCoverGoesThroughTheRealShell(t *testing.T) {
 // 得自己递状态进去。走的是 viewPlayBar，和 viewMain 调的是同一个函数。
 func coverBarTester(t *testing.T, st app.State) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
+	// 只画播放条那一块，不走整窗：`withView` 就是为「绕过整窗、单独画一块」留的。
+	b := newTestShell(t, at(760, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c) // 和 Shell.View 每帧开头做的事一样，唤醒要用它
+			s.viewPlayBar(c, st)
 
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.wake.set(c) // 和 Shell.View 每帧开头做的事一样，唤醒要用它
-		s.viewPlayBar(c, st)
-	}, 760, coverWinH)
-	return s, tt
+		}
+	}))
+	return b.s, b.tt
 }
 
 // assertCoverGeometry 量封面在整张画面上的位置。
@@ -415,17 +411,4 @@ func sameColor(got, want color.RGBA) bool {
 		return int(b - a)
 	}
 	return d(got.R, want.R) <= slack && d(got.G, want.G) <= slack && d(got.B, want.B) <= slack
-}
-
-// waitCover 轮询到 cond 成立。异步的东西（下载、解码）只能这样等。
-func waitCover(t *testing.T, d time.Duration, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(d)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("等了 %v，%s 还没发生", d, what)
 }

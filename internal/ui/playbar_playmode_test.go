@@ -28,14 +28,14 @@ import (
 func modeBarTester(t *testing.T, width int) (*mygoui.Tester, *app.App) {
 	t.Helper()
 	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
-
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.wake.set(c)
-		s.viewPlayBar(c, a.Snapshot())
-	}, width, coverWinH)
+	var b *testShell
+	b = newTestShell(t, onApp(a), at(width, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			s.viewPlayBar(c, a.Snapshot())
+		}
+	}))
+	tt := b.tt
 	tt.Frame()
 	return tt, a
 }
@@ -47,33 +47,54 @@ func modeBarTester(t *testing.T, width int) (*mygoui.Tester, *app.App) {
 // 那一半。行为那一组必须走 modeBarTester 现读。
 func modeBarTesterWithState(t *testing.T, width int, st app.State) (*mygoui.Tester, *app.App) {
 	t.Helper()
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
-
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.wake.set(c)
-		s.viewPlayBar(c, st)
-	}, width, coverWinH)
+	var b *testShell
+	b = newTestShell(t, at(width, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			s.viewPlayBar(c, st)
+		}
+	}))
+	tt := b.tt
 	tt.Frame()
-	return tt, a
+	return tt, b.a
 }
 
-// TestThePlayModeButtonSaysWhichModeItIs 盯按钮上的字就是当前那一档。
+// TestThePlayModeButtonSaysWhichModeItIs 盯按钮上画的是当前那一档的图形。
 //
-// 断「画面上那个短标签」而不是 App 里的枚举：枚举对了而按钮不认它，用户看到的
-// 是**一个没有字的按钮**——空按钮不报错、不消失，按下去也不知道换成了什么。
+// 断的是**画面**而不是 App 里的枚举：枚举对了而按钮不认它，用户看到的是**一个
+// 不换的图形**——不报错、不消失，按下去也不知道换成了什么。
+//
+// ⚠️ 这一条跟着 issue 93 改过一次判据：按钮原来是四档各写一个词（顺序 / 循环 /
+// 随机 / 单曲），断的是「按钮上有这一档的**字**」；现在按钮上只有图标，**字留在
+// 悬停提示和右键那一列里**（Biu 就是这么摆的：`getPlayModeList` 每档带一个
+// `icon`，档位那句话在 Tooltip 上）。所以断的换成**四档画出来四个不同的图形**——
+// 那才是「这一格在不在说谎」。
 func TestThePlayModeButtonSaysWhichModeItIs(t *testing.T) {
 	tt, a := modeBarTester(t, 760)
+
+	seen := map[string]app.PlayMode{}
 	for _, m := range app.PlayModes {
 		a.SetPlayMode(m)
 		tt.Frame()
-		if !tt.HasText(m.Label()) {
-			t.Errorf("档位是 %q，按钮上却没有 %q：%q", m, m.Label(), tt.Texts())
+
+		ink := glyphIn(tt, "播放模式")
+		if ink == "" {
+			t.Fatalf("档位是 %q，按钮上一块图形也没画出来：%q", m, tt.Texts())
 		}
+		if prev, dup := seen[ink]; dup {
+			t.Errorf("档位 %q 和 %q 画出来是同一个图形", m, prev)
+		}
+		seen[ink] = m
+
 		if got := a.Snapshot().PlayMode; got != m {
 			t.Errorf("设了 %q，状态里读到的是 %q", m, got)
+		}
+	}
+	// 档位那句话没跟着消失：它搬到了悬停提示上，而提示不进画面，所以这一条
+	// 只能断它没有从**代码**里被删掉（`viewPlayMode` 的 Tooltip 那一行）。
+	for _, m := range app.PlayModes {
+		if m.Label() == "" || m.Desc() == "" {
+			t.Errorf("档位 %q 的名字或说明空了——它现在只出现在悬停提示和右键那一列上", m)
 		}
 	}
 }
@@ -93,6 +114,7 @@ func TestClickingThePlayModeButtonWalksTheFourModes(t *testing.T) {
 	tt.Frame()
 
 	seen := []app.PlayMode{}
+	last := ""
 	for range len(app.PlayModes) {
 		if err := tt.Click("播放模式"); err != nil {
 			t.Fatalf("点不到播放模式按钮：%v（画面：%q）", err, tt.Texts())
@@ -100,9 +122,17 @@ func TestClickingThePlayModeButtonWalksTheFourModes(t *testing.T) {
 		tt.Frame()
 		cur := a.Snapshot().PlayMode
 		seen = append(seen, cur)
-		if !tt.HasText(cur.Label()) {
-			t.Errorf("换到 %q，按钮上却是 %q 那一档的字：%q", cur, cur.Label(), tt.Texts())
+		// 按钮只有图标，所以断的是「换了档之后画出来换了一张」。
+		// （和 `TestThePlayModeButtonSaysWhichModeItIs` 同一件事的另一半：
+		// 那一条断四档互不相同，这一条断「按下去真的会换」。）
+		ink := glyphIn(tt, "播放模式")
+		if ink == "" {
+			t.Fatalf("换到 %q，按钮上一块图形也没画出来：%q", cur, tt.Texts())
 		}
+		if ink == last {
+			t.Errorf("换到 %q，画出来和上一档一模一样：%q", cur, tt.Texts())
+		}
+		last = ink
 	}
 	want := []app.PlayMode{app.PlayModeLoop, app.PlayModeRandom, app.PlayModeSingle, app.PlayModeSequence}
 	for i := range want {
@@ -148,6 +178,7 @@ func TestChoosingAModeFromTheMenuTakesIt(t *testing.T) {
 	a.SetPlayMode(app.PlayModeLoop)
 	tt.Frame()
 
+	last := ""
 	for _, m := range []app.PlayMode{app.PlayModeSingle, app.PlayModeRandom, app.PlayModeSequence} {
 		if err := tt.RightClick("播放模式"); err != nil {
 			t.Fatalf("右键打不开播放模式那一列：%v", err)
@@ -159,8 +190,10 @@ func TestChoosingAModeFromTheMenuTakesIt(t *testing.T) {
 		if got := a.Snapshot().PlayMode; got != m {
 			t.Fatalf("选了 %q，档位却是 %q", m, got)
 		}
-		if !tt.HasText(m.Label()) {
-			t.Errorf("选了 %q，按钮上不是 %q 那一档的字：%q", m, m.Label(), tt.Texts())
+		if ink := glyphIn(tt, "播放模式"); ink == "" || ink == last {
+			t.Errorf("选了 %q，按钮上画出来的图形和上一档一样（%q）：%q", m, ink, tt.Texts())
+		} else {
+			last = ink
 		}
 	}
 }
@@ -242,7 +275,7 @@ func TestThePlayModeButtonDoesNotSquashTheTitle(t *testing.T) {
 			}
 			// 按钮自己也要**整个在画面上**：挤没了的那一半会像歌名一样不出错，
 			// 只是不见了。
-			btn, ok := tt.Find("随机")
+			btn, ok := tt.Find("播放模式")
 			if !ok {
 				t.Fatalf("宽度 %d：模式按钮不见了：%q", width, tt.Texts())
 			}

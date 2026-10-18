@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
@@ -215,7 +214,7 @@ func TestDeletingAsksFirst(t *testing.T) {
 	// 而 Tester 三帧只要几十微秒——按帧数等就是按运气等，慢机器上会偶发地红。
 	// 上面那句「取消了还是删了 N 批」也是靠这一条才有意义：真删了的话它会在
 	// 这一段等待里出现。
-	waitUntilTrue(t, "删除那一批发出去", func() bool { return len(b.removedBatches()) == 1 })
+	waitFor(t, "删除那一批发出去", func() bool { return len(b.removedBatches()) == 1 })
 
 	got := b.removedBatches()
 	// 一条都不能少，而且 id 和 type 要成对（只给 id 的话 B 站删不掉任何东西
@@ -257,7 +256,7 @@ func TestDeletingSaysWhenItCannotFindAllOfThem(t *testing.T) {
 	if err := tt.Click("删除"); err != nil {
 		t.Fatal(err)
 	}
-	waitFrameFor(t, tt, "那句话说出来", func() bool {
+	waitFrames(t, tt, "那句话说出来", func() bool {
 		return tt.HasText("有 2 首查不到完整信息，这次先删其余的")
 	})
 	// 一条都找不齐时不发请求——**也不说「先勾几首再删」**：用户明明勾了，
@@ -393,7 +392,7 @@ func TestTheDownloadInterfaceIsWiredOnceImplemented(t *testing.T) {
 	}
 	settleFrame(tt)
 
-	waitUntilTrue(t, "下载那一批交过去", func() bool { return len(d.got) == 2 })
+	waitFor(t, "下载那一批交过去", func() bool { return len(d.got) == 2 })
 	if d.got[0].ID != 1 || d.got[1].ID != 3 {
 		t.Errorf("交过去的是 %v，want id 1 和 3", d.got)
 	}
@@ -414,23 +413,6 @@ func (d *recordingDownloader) EnqueueDownload(_ context.Context, folder app.Coll
 	defer d.mu.Unlock()
 	d.got, d.folder = medias, folder
 	return nil
-}
-
-// ⚠️ **名字里带着「True」不是啰嗦**：这一组测试里另有三个轮询到条件为真的辅助
-// 函数，它们来自不同的票、签名还不一样（`waitUntilTrue(t, what, cond)` 不带
-// Tester，`waitFrameFor(t, tt, what, cond)` 边等边跑帧，app 包那个
-// `waitUntil(t, what, d, cond)` 还要带一个时长）。同包重名编译不过，
-// 合并时 Git 看不出来（不同的文件），所以名字必须各自说清自己是哪一个。
-func waitUntilTrue(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("等了 2s，%s 还没发生", what)
 }
 
 func collectionClient(t *testing.T, b *favBili) *bili.Client {
@@ -471,17 +453,17 @@ func TestTheStarToggles(t *testing.T) {
 	if err := tt.Click("收藏这个收藏夹"); err != nil {
 		t.Fatalf("点星标：%v", err)
 	}
-	waitUntilTrue(t, "收藏请求到了 B 站", b.isFaved)
+	waitFor(t, "收藏请求到了 B 站", b.isFaved)
 	// ⚠️ **这里用的是真正的 500 毫秒**（界面上没有把 Settle 调小）。故意的：
 	// 别的用例等的是「画出来变成什么样」，这一条顺带把「等够 500ms 才刷新」
 	// 在界面上也走通一遍——app 层钉的是顺序和那个常数本身。
 	//
 	// ⚠️ **判据里带着那句话**，不能只等 `Faved`：app 那边是**先** `cache.put(info)`
 	// （Faved 变 true）**再** `notice.add(...)`（那句话进界面），两句之间有一个
-	// 窗口；而 `waitFrameFor` 是「画一帧 → 再问判据」，所以判据一旦为真就立刻返回，
+	// 窗口；而 `waitFrames` 是「画一帧 → 再问判据」，所以判据一旦为真就立刻返回，
 	// 读到的却是**上一帧**——那一句还没画上去。满载时那个窗口足够宽到偶发红
 	// （症状是「收藏成功了，可画面上只有『正在收藏…』」）。
-	waitFrameFor(t, tt, "收藏状态刷新回界面", func() bool {
+	waitFrames(t, tt, "收藏状态刷新回界面", func() bool {
 		return s.app.Collection(s.collection.ref).Faved && tt.HasText("已收藏这个收藏夹")
 	})
 	wantText(t, tt, "已收藏这个收藏夹")

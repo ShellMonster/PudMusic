@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"image/color"
 	"os"
 	"path/filepath"
 	"testing"
@@ -33,45 +34,35 @@ const (
 
 // shellWithSettings 造一个「真 App + 盘上真有那份设置 + 真 Shell」，返回设置
 // 文件的路径（持久化那几条断言要看它）。
-func shellWithSettings(t *testing.T, mode app.ThemeMode, systemDark bool) (*mygoui.Tester, *Shell, *app.App, string) {
+//
+// opts 往上传给基座，默认一个都不给。**只有真的要摆登录态的那些才传**
+// （`loggedInWith`）：那三个入口未登录时不摆，而这一族测试要点的侧栏入口大多
+// 挑的是不挑登录态的那几个（理由见 navbar 的 TestSuggestCollapsesOnBlur）。
+func shellWithSettings(t *testing.T, mode app.ThemeMode, systemDark bool,
+	opts ...shellOpt) (*mygoui.Tester, *Shell, *app.App, string) {
 	t.Helper()
-
-	// 先把设置写到盘上，再挂上去——走的是「启动时读盘」那条路。
-	path := filepath.Join(t.TempDir(), app.SettingsFileName)
-	st, err := app.OpenSettingsStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.Update(func(s *app.Settings) { s.ThemeMode = mode }); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	a := app.New()
-	if err := a.MountSettings(path); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		a.Close()
-		_ = a.CloseSettings()
-	})
-
-	s := New(a)
-	// 🔴 关掉切页动画，否则这个文件里的像素断言是随机的。
+	// ⚠️ **窗口是 900×600**：采样点 (700,430) 落在页面区域里。换尺寸就得换
+	// 采样点（sampleX / sampleY 在文件头上），不然那一行读的是别的东西。
 	//
-	// Router 默认 TransitionAuto：切页是 250ms 的滑动，而 Tester 一帧就画完，
-	// 那一帧永远停在半路——上一页正往左挪、下一页正往右进，中间那道竖直的
-	// 分界线正好扫过页面区域。于是「点一下再读 (700,430) 那个点」这一次读到
-	// 底色、下一次读到分界线，实测八次里挂两次。
-	//
+	// 🔴 切页动画由基座默认关掉，否则这个文件里的像素断言是随机的：Router 默认
+	// TransitionAuto，切页是 250ms 的滑动，而 Tester 一帧就画完，那一帧永远停在
+	// 半路——上一页正往左挪、下一页正往右进，中间那道竖直的分界线正好扫过页面区域。
+	// 于是「点一下再读 (700,430) 那个点」这一次读到底色、下一次读到分界线。
 	// 这个文件验的是主题，不是切页动画，动画在这里只会添乱。
-	s.router.Transition = mygoui.TransitionNone
-	tt := mygoui.NewTester(s.View, 900, 600)
-	tt.SetDark(systemDark)
-	tt.Frame()
-	return tt, s, a, path
+	//
+	// ⚠️ opts **排在最后**：基座里设置先挂、`Mount*` 再挂、最后才是 Tester，
+	// 顺序不能乱（见 shelltest_test.go 的 newTestShell）。
+	b := newTestShell(t, append([]shellOpt{
+		withSettings(func() app.Settings {
+			st := app.DefaultSettings("")
+			st.ThemeMode = mode
+			return st
+		}()),
+		at(900, 600),
+		systemIsDark(systemDark),
+	}, opts...)...)
+	b.tt.Frame()
+	return b.tt, b.s, b.a, b.settingsPath
 }
 
 // wantBackground 是「设置 + 系统外观」这一对该画出来的窗口底色。
@@ -80,27 +71,15 @@ func wantBackground(t *testing.T, a *app.App, systemDark bool) mygoui.Color {
 	return BuildTheme(a.SettingsSnapshot(), systemDark).Background
 }
 
-// assertBackground 断言画面上那个采样点就是主题的底色。
+// assertBackground 断言画面上那个采样点（sampleX / sampleY 在文件头上）就是
+// 主题的底色。
 //
-// **先等它稳定下来再断言**：切路由时那一页是淡入的，刚点完的那一帧
-// 底色还差百分之几（实测 255 里的 251）。那个差值跟主题对不对毫无关系，
-// 但会让这条测试随机红——而它随机红的时刻正好是「别的模块给顶栏多加了一个
-// 控件」，那种改动跟主题一点关系都没有，却会变成一个查不出原因的红。
-//
-// 所以这里多画几帧，直到像素对上为止；对不上就一直对不上，那时候报的
-// 才是真的问题。
+// 等的那一段在基座的 `waitPixel` 里，理由也在那儿：切路由时那一页是淡入的，
+// 刚点完的那一帧底色还差百分之几，那与主题对不对毫无关系。
 func assertBackground(t *testing.T, tt *mygoui.Tester, want mygoui.Color, what string) {
 	t.Helper()
-	var got mygoui.Color
-	for range 20 {
-		c := tt.Image().RGBAAt(sampleX, sampleY)
-		got = mygoui.Color{R: c.R, G: c.G, B: c.B, A: c.A}
-		if got == want {
-			return
-		}
-		tt.Frame()
-	}
-	t.Errorf("%s：画面那个点是 %v，want %v", what, got, want)
+	waitPixel(t, tt, sampleX, sampleY,
+		color.RGBA{R: want.R, G: want.G, B: want.B, A: want.A}, what)
 }
 
 // TestShellPaintsTheThemeThatTheSettingsSay 验「切主题后渲染出来的主题真的
@@ -142,7 +121,9 @@ func TestShellPaintsTheThemeThatTheSettingsSay(t *testing.T) {
 // 被消费时还会再多一遍。只在「档位变了」的那一遍里 SetTheme 的写法，第一遍
 // 画对了，第二遍就被悄悄打回系统色——不报错、不崩溃、屏幕上一闪而过。
 func TestShellKeepsTheThemeAfterClickingAround(t *testing.T) {
-	tt, _, a, _ := shellWithSettings(t, app.ThemeModeLight, true)
+	// ⚠️ **登录过的**：它要点侧栏的「稍后再看」，而那三个入口未登录时不摆
+	// （`Route.NeedsLogin`，见 sidebar.go）。
+	tt, _, a, _ := shellWithSettings(t, app.ThemeModeLight, true, loggedInWith("7"))
 	if BuildTheme(a.SettingsSnapshot(), true).Dark {
 		t.Fatal("起点就不对：设置是浅色，却拼出了深色主题")
 	}
@@ -204,11 +185,8 @@ func TestShellSaysSoWhenSettingsAreBroken(t *testing.T) {
 		t.Fatal("坏掉的设置文件没有报错")
 	}
 
-	// ⚠️ 拿着壳是为了关掉切页动画，理由见 settings_page_test.go 里同一句的注释：
-	// 动画在无头 Tester 那只不走的钟上永远走不完，每一次 settle 都会跑满 20 帧。
-	s := New(a)
-	s.router.Transition = mygoui.TransitionNone
-	tt := mygoui.NewTester(s.View, 900, 600)
+	b := newTestShell(t, onApp(a), at(900, 600))
+	tt := b.tt
 	tt.Frame() // 这一帧要是 panic 了，测试进程自己就没了
 
 	if !tt.HasText("设置文件已损坏") {
@@ -428,12 +406,8 @@ func TestThemeSwitchSaysWhyItCannotSwitch(t *testing.T) {
 		_ = a.CloseSettings()
 	})
 
-	// ⚠️ 拿着壳是为了关掉切页动画，理由见 settings_page_test.go 里同一句的注释：
-	// 动画在无头 Tester 那只不走的钟上永远走不完，每一次 settle 都会跑满 20 帧。
-	s := New(a)
-	s.router.Transition = mygoui.TransitionNone
-	tt := mygoui.NewTester(s.View, 900, 600)
-	tt.SetDark(false)
+	b := newTestShell(t, onApp(a), at(900, 600), systemIsDark(false))
+	tt := b.tt
 	tt.Frame()
 	openSettings(t, tt)
 
@@ -454,14 +428,9 @@ func TestThemeSwitchSaysWhyItCannotSwitch(t *testing.T) {
 func TestShellSaysSoWhenSettingsCannotBeStored(t *testing.T) {
 	t.Run("记下失败之后界面有提示", func(t *testing.T) {
 		a := app.New()
-		t.Cleanup(a.Close)
 		a.RecordSettingsFailure(errors.New("拿不到应用数据目录，这次的改动关掉应用就没了"))
 
-		// ⚠️ 拿着壳是为了关掉切页动画，理由见 settings_page_test.go 里同一句的注释：
-		// 动画在无头 Tester 那只不走的钟上永远走不完，每一次 settle 都会跑满 20 帧。
-		s := New(a)
-		s.router.Transition = mygoui.TransitionNone
-		tt := mygoui.NewTester(s.View, 900, 600)
+		tt := newTestShell(t, onApp(a), at(900, 600)).tt
 		tt.Frame()
 		if !tt.HasText("这次的改动关掉应用就没了") {
 			t.Errorf("界面上没有提示设置存不住，文字有 %q", tt.Texts())
@@ -482,11 +451,7 @@ func TestShellSaysSoWhenSettingsCannotBeStored(t *testing.T) {
 			t.Skip("这个环境上 os.UserConfigDir 不靠 HOME/XDG_CONFIG_HOME，跳过")
 		}
 
-		// ⚠️ 拿着壳是为了关掉切页动画，理由见 settings_page_test.go 里同一句的注释：
-		// 动画在无头 Tester 那只不走的钟上永远走不完，每一次 settle 都会跑满 20 帧。
-		s := New(a)
-		s.router.Transition = mygoui.TransitionNone
-		tt := mygoui.NewTester(s.View, 900, 600)
+		tt := newTestShell(t, onApp(a), at(900, 600)).tt
 		tt.Frame()
 		if !tt.HasText("拿不到应用数据目录") {
 			t.Errorf("拿不到目录这件事界面上没有提示，文字有 %q", tt.Texts())
