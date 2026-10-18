@@ -511,12 +511,13 @@ func TestTheGridIsAVirtualGrid(t *testing.T) {
 		t.Fatalf("第二页还没滚到就已经画出来了——那说明不是虚拟的，文字有 %q", tt.Texts())
 	}
 
-	// ⚠️ 滚到底：dy 是**正数**往下滚（`paged_test.go` 的 scrollToBottom = 100000）。
-	for range 8 {
-		tt.Scroll(600, 400, 0, 100000)
-		tt.Frame()
-	}
+	// ⚠️ 滚到底这件事**分两步**，而且两步都得等条件：先把哨兵滚进画面（第二页就是
+	// 这么叫起来的），等第二页真的到了，**再滚一次**——行数翻倍之后滚动位置不会自己
+	// 跟过去（`ScrollState` 记的是偏移量，不是「我盯着最后一行」）。合成一个固定的
+	// 「滚 8 下」就是在赌第二页在那 8 下之内回来了，理由见 `scrollToEnd`。
+	scrollFollowToEnd(t, tt, f)
 	waitFrames(t, tt, "滚到底之后第二页也拉到了", func() bool { return len(f.users) == 40 })
+	scrollFollowToEnd(t, tt, f)
 	tt.Frame()
 
 	// ⚠️ 断的是**末尾**：最后一屏是 33..40，所以问的是 UP 40（不是 UP 21——
@@ -547,6 +548,24 @@ func uiFollowUserRange(from, count int) []any {
 		out = append(out, uiFollowUserWithFace(int64(from+i), "UP "+strconv.Itoa(from+i), sharedFace))
 	}
 	return out
+}
+
+// 滚轮落在关注网格上的那一点（页面右边那一格）。落偏了滚的是侧栏或者顶栏。
+const followScrollX, followScrollY float32 = 600, 400
+
+// scrollFollowToEnd 滚到关注网格的末尾，**等末尾那一行真的在画面上**。
+//
+// ⚠️ 判据是 `f.state.AtEnd()`——框架自己判「这一帧露出了末尾」用的那一个
+// （`mygo/ui/list.go`：`hi == n-1 && end()-glide <= H+0.5`）。这一组用例断的正是
+// 末尾那几张（`UP 40` / `UP 25` / `UP 39`），而末尾那一行露没露出来就是这些断言成立
+// 的前提——把它当条件等，判据一个字没放宽。
+//
+// ⚠️ **下一次翻页到了之后要再调一次**：行数翻倍之后滚动位置停在旧的高度上，
+// 末尾那几张还在画面下面。合成一个固定的「滚 8 下」是在赌第二页在那 8 下之内回来，
+// 理由见 `scrollToEnd`。
+func scrollFollowToEnd(t *testing.T, tt *mygoui.Tester, f *followPage) {
+	t.Helper()
+	scrollToEnd(t, tt, followScrollX, followScrollY, "关注网格的末尾", f.state.AtEnd)
 }
 
 // TestTheRowsAreKeyedByWhoNotByNumber 钉住铁律四。
@@ -686,12 +705,13 @@ func TestTheLastPartialPageEndsThePaging(t *testing.T) {
 	waitFrames(t, tt, "第一页到了", func() bool { return len(f.users) == 20 })
 	tt.Frame()
 
-	for range 8 {
-		tt.Scroll(600, 400, 0, 100000)
-		tt.Frame()
-	}
+	// ⚠️ 和 `TestTheGridIsAVirtualGrid` 同一个形状：滚到底这一步只能等条件。
+	// 这一条比那一条多一层——最后一页只有 5 个人，而断的又是末尾（`UP 25`），
+	// 所以第二页到了之后必须**再滚一次**才看得见它。
+	scrollFollowToEnd(t, tt, f)
 	waitFrames(t, tt, "最后一页也到了", func() bool { return len(f.users) == 25 })
 	tt.Frame()
+	scrollFollowToEnd(t, tt, f)
 
 	if f.pager.hasMore {
 		t.Error("25 个人 / 每页 20 = 到了底，却还说「还有」——下一帧又去拉一个空页")
@@ -910,14 +930,14 @@ func TestAFullyOverlappingPageStillLoadsTheNextOne(t *testing.T) {
 	waitFrames(t, tt, "第一页到了", func() bool { return len(f.users) == 20 })
 	tt.Frame()
 
-	for range 8 {
-		tt.Scroll(600, 400, 0, 100000)
-		tt.Frame()
-	}
+	// ⚠️ 这一条要滚**两次**：第二页整页重叠（一个人都添不上，行数不变），
+	// 第三页那 19 个到了之后行数才第二次翻倍，于是末尾要再滚一次才看得见。
+	scrollFollowToEnd(t, tt, f)
 	// ⚠️ **等的条件是「累计 39」**：第二页整页重叠、一个人都添不上，
 	// 而第三页那 19 个必须照样到。
 	waitFrames(t, tt, "整页重叠之后第三页也到了", func() bool { return len(f.users) == 39 })
 	tt.Frame()
+	scrollFollowToEnd(t, tt, f)
 
 	if !showsText(tt, "全部关注(39)") {
 		t.Errorf("Tab 上的总数对不上，文字有 %q", tt.Texts())

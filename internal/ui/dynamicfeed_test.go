@@ -67,20 +67,19 @@ func TestTheAuthorListPagesAndEachRowGoesToThatSpace(t *testing.T) {
 	// 于是**一次滚动可能连翻好几页**（实测一帧就从 2 个翻到 5 个）。早一版按
 	// 「翻一页」一步一步等，读 `before` 的那一刻下一页可能已经到了，
 	// 于是永远等不到「比 before 多一个」。
-	// ⚠️ dy 是**正数**往下滚（`paged_test.go` 的 `scrollToBottom = 100000`）。
-	for i := 0; i < 5 && len(f.authors) < 5; i++ {
-		for range 3 {
-			tt.Scroll(60, 400, 0, 100000)
-			tt.Frame()
-		}
-		if f.auth.started && !f.auth.hasMore {
-			break
-		}
-	}
+	//
+	// ⚠️ **滚到末尾只能等条件**（见 `scrollToEnd`）。早一版是「外层 5 轮、内层
+	// 每轮滚 3 下」，而那两层数的是次数：判据落在外层的条件上，可内层那 3 下
+	// 滚没滚到末尾没人管——作者栏那一列是 `5 个人 + 1 个哨兵`，第五个人是哪一趟
+	// 回来的就停在哪，于是断的 `第五页的一个`（末尾那一个）有时在画面上有时没有。
+	//
+	// ⚠️ 判据是**作者栏那一份**状态（`authState`），不是右边动态那一份。
+	scrollToEnd(t, tt, 60, 400, "作者栏的末尾", f.authState.AtEnd)
 	waitFrames(t, tt, "作者栏翻到底", func() bool {
 		return len(f.authors) == 5 || (f.auth.started && !f.auth.hasMore)
 	})
 	tt.Frame()
+	scrollToEnd(t, tt, 60, 400, "作者栏的末尾", f.authState.AtEnd)
 	if len(f.authors) != 5 {
 		t.Fatalf("翻了之后作者栏有 %d 个人，want 5（total 就是 5）", len(f.authors))
 	}

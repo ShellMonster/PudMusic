@@ -4,6 +4,7 @@ import (
 	"image/color"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -446,24 +447,28 @@ func TestRedrawingAfterCloseDoesNotRearmAnyTimer(t *testing.T) {
 	}
 }
 
-// TestTheTestSuiteDoesNotGrowASecondWayToDoEitherThing 钉住本票的两条约定。
+// TestTheTestSuiteDoesNotGrowASecondWayToDoEitherThing 钉住本包的三条约定。
 //
 // ## 为什么需要一条测试来钉「约定」
 //
-// 两条约定都已经因为「漏一条」各付过一次账：
+// 三条约定都已经因为「漏一条」各付过账：
 //
 //   - **造外壳**：漏收 `shortcutKeys` 的后台写循环和几个定时器，于是同包几百个
 //     外壳把它们留到测试二进制退出。量过：改之前建 40 个外壳残留 86 个 goroutine。
 //   - **等条件**：墙钟预算扛不住同包的负载，满载时偶发红。
+//   - **滚到尽头**：数「滚了几下」赌的是「滚完那几下的时候下一页回来了」，而那是
+//     后台一趟 HTTP。实测满载时关注网格那条 `TestTheGridIsAVirtualGrid` 飘红，
+//     症状是「滚到底之后末尾那几张没画出来」——离真因隔着三层，读报错的人只会
+//     去查虚拟网格（见 `scrollToEnd` 那段注释）。
 //
-// 而这两条约定**已经在三次合并里各被重新违反过三次**：`#84` 的 `newHomeShell`、
+// 而头两条约定**已经在三次合并里各被重新违反过三次**：`#84` 的 `newHomeShell`、
 // `#85` 的 `realdata_test.go` / `rowplayable_test.go`、这一次的
 // `dynamiccard_test.go` / `list_favorite_test.go` / `sidebar_favorites_actions_test.go`
 // ——每一次都是新写的测试顺手用回老写法（不是谁忘了，是那套写法在这个包里本来就
 // 存在、读起来也通顺）。每一次都要等合并时才在编译器报错或者在跑出来时飘。
 //
-// 所以把「只有这两种等法、只有一个造外壳的地方」写成断言：新写的测试再犯，本地
-// 立刻红，而不是等到合并或者到板上才发现。
+// 所以把「只有这两种等法、只有一个造外壳的地方、滚到尽头只有一个写法」写成断言：
+// 新写的测试再犯，本地立刻红，而不是等到合并或者到板上才发现。
 //
 // ⚠️ `package ui_test` 的文件**不再是例外**：那四个（`playbar_*` / `queue_drawer_test.go`）
 // 已经搬进 `package ui`，因为它们是这个包里唯一收不掉 `New(a)` 起的两个后台写循环和
@@ -526,7 +531,48 @@ func TestTheTestSuiteDoesNotGrowASecondWayToDoEitherThing(t *testing.T) {
 					name, i+1)
 			}
 		}
+		// 「滚固定几下」也是「按次数等」的一种：见 scrollToEnd 那段注释。
+		for _, at := range scrollsInsideFixedLoops(src) {
+			t.Errorf("%s:%d 在一个跑固定遍数的 for 里滚轮——滚到尽头只能等"+
+				"「尽头真的在画面上」（scrollToEnd），数次数赌的是「滚完那几下的时候"+
+				"下一页已经回来了」，而那是后台一趟 HTTP，满载时回来不了那么快",
+				name, at+1)
+		}
 	}
+}
+
+// boundedFor 认的是「跑固定遍数的 for」：`for range N` 和三子句那种（`for i := 0;
+// i < N; i++` / `for i := 0; i < N {`）。
+//
+// ⚠️ 只认**循环头里有计数**的：`for st.AtEnd() { … }` 那种本来就是等条件，
+// 不该被算进来。
+var boundedFor = regexp.MustCompile(`^\s*for\s+(range\s+\d+\s*\{|\w+\s*:=\s*[^;{]*;\s*\w+\s*<\s*)`)
+
+// scrollsInsideFixedLoops 报出「在一个跑固定遍数的 for 里滚轮」的那些行号。
+//
+// 为什么要机器查而不是靠自觉：这一条已经被新写的测试犯过四次（关注网格 ×3、
+// 用户动态的作者栏 ×1），而它红起来的样子是「末尾那几张没画出来」——离真因隔着
+// 三层（后台那一趟 → 行数翻倍 → 偏移停在旧高度），读报错的人只会去查虚拟网格。
+func scrollsInsideFixedLoops(src string) []int {
+	var at []int
+	lines := strings.Split(src, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if strings.HasPrefix(strings.TrimSpace(line), "//") || !boundedFor.MatchString(line) {
+			continue
+		}
+		depth := strings.Count(line, "{") - strings.Count(line, "}")
+		if depth <= 0 {
+			continue // 单行的 for，本包里没有
+		}
+		for j := i + 1; j < len(lines) && depth > 0; j++ {
+			depth += strings.Count(lines[j], "{") - strings.Count(lines[j], "}")
+			if depth > 0 && strings.Contains(lines[j], ".Scroll(") {
+				at = append(at, j)
+			}
+		}
+	}
+	return at
 }
 
 // pkgClause 取一个 Go 源文件的包子句（第一行非空、非注释的那一行）。
@@ -608,6 +654,56 @@ func waitFrames(t *testing.T, tt *mygoui.Tester, what string, cond func() bool) 
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("等了 %v，画了多少帧都还没：%s，文字有 %q", waitBudget, what, tt.Texts())
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// scrollFar 一次滚到头的距离。
+//
+// ⚠️ **正的 DY 是往下滚**（`platform/surface.go` 的 PointerScroll 注释）。
+// 写负数是往回滚，`Visible()` 一动不动，于是测试会一直是「等不到」。
+//
+// 这个数远大于任何一屏：它落到列表给的 MaxY 上就停，滚几下都一样。
+const scrollFar = 100000
+
+// scrollToEnd 滚到尽头，**等尽头真的在画面上**为止。
+//
+// x, y 是滚轮落在哪一点——**要落在那一块内容里面**，窗口左边有侧栏、下面有播放条，
+// 滚到别处滚的是别的东西。cond 报「已经在尽头了」：虚拟列表给它的
+// `ListState.AtEnd()`（框架自己判「这一帧露出了末尾」用的那一个），普通滚动
+// 容器给「偏移已经落到 MaxY 上」。
+//
+// ## 为什么滚到尽头只能等，不能数次数
+//
+// 「滚 8 下」赌的是**滚完那 8 下的时候下一页已经回来了**。而下一页是后台 goroutine
+// 里的一趟 HTTP，什么时候回来跟机器负载有关：空载时它早就回来了（那 8 下的末尾
+// 已经越过第二页），满载时它回来得晚，于是滚动位置**停在第一页末尾的高度**上——
+// 第二页到了、行数翻倍，可偏移不会自己跟过去（`ScrollState` 记的是偏移量，不是
+// 「我盯着最后一行」），末尾那几张还在画面下面。
+//
+// 实测（`follow_test.go` 的虚拟网格，探针逐帧量的）：第二页在**第 2 下**落地时，
+// 第 2 下之后画面还是 `[4..7]`（14 行里的中段），要第 3 下才真的到底。8 下够不够
+// 完全取决于后台那一趟什么时候回来——同一个提交、同一份代码，慢一点就红。
+//
+// ⚠️ 这里**不是在放宽判据**：cond 就是「尽头已经露出来」本身，成立不了就一直
+// 滚到保险丝（10 秒），报的仍然是同一句话。
+//
+// ⚠️ **cond 只对「有尽头」的列表成立**：B 站那种翻页永远翻不完的列表
+// （fixture 给 `has_more` 恒为 true）根本没有末尾——哨兵每次被滚进画面就再拉一页，
+// 而 `scrollToEnd` 会一直滚下去（实测一次滚到了第 2087 页还在拉），那个条件永远
+// 不成立。这一类要等的是「哨兵被叫起来过一次」，写一步滚动 + 一个等条件就行。
+func scrollToEnd(t *testing.T, tt *mygoui.Tester, x, y float32, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(waitBudget)
+	for {
+		tt.Scroll(x, y, 0, scrollFar)
+		tt.Frame()
+		if cond() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("等了 %v，一直滚也滚不到尽头：%s，文字有 %q", waitBudget, what, tt.Texts())
 		}
 		time.Sleep(2 * time.Millisecond)
 	}

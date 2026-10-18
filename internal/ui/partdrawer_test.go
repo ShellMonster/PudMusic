@@ -34,8 +34,23 @@ import (
 // 那时候量到的是一个空的播放条，不是坏了。
 func partsReady(t *testing.T, s *Shell, tt *ui.Tester, want int) {
 	t.Helper()
+	// ⚠️ **判据里要带上画面**：App 的状态是后台那一趟写回来的，而播放条上那个
+	// 「分集」键是**逐帧问 App** 才摆的（`viewPartButton`）——而
+	// `partsWorthEntry` 在「还没问到（`len(parts)==0`）而这一首问得出」时是
+	// **摆**这个键的（键上的提示是「正在问这一首有哪几集」）。
+	//
+	// `waitFrames` 是「画一帧 → 再问判据」，所以判据一旦为真就立刻返回，读到的却是
+	// **上一帧**画出来的东西：单 P 那一条于是读到还没收掉的那个键，红的时候症状是
+	// 「只有一个分 P 却摆了分集入口」，而功能是好的（和
+	// `collectionbatch_test.go` 的 `TestTheStarToggles` 是同一件事）。
+	//
+	// 画面该是什么样不是新定的规矩，就是产品自己那一句：问到多于一条才摆。
 	waitFrames(t, tt, fmt.Sprintf("这一首放起来而且分集问回来了（要 %d 集）", want), func() bool {
-		return s.app.Snapshot().HasTrack && len(s.app.Parts()) == want
+		if !s.app.Snapshot().HasTrack || len(s.app.Parts()) != want {
+			return false
+		}
+		_, onScreen := tt.Find("分集")
+		return onScreen == (want > 1)
 	})
 }
 

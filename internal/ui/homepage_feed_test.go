@@ -156,7 +156,6 @@ func TestTheHomePagePullsTheTabYouAreLookingAt(t *testing.T) {
 	}
 }
 
-// TestEachTabPullsItsOwnList 盯三档各走各的那一套（界面上那一半）。
 // TestEachTabPullsItsOwnList 每一档拉的是**自己的**那一份请求。
 //
 // ⚠️ **判据要等被断的那两样本身，而不是等「画面上出现了某句话」**：`from_region`
@@ -164,18 +163,25 @@ func TestTheHomePagePullsTheTabYouAreLookingAt(t *testing.T) {
 // **之后**画的；而 `waitFrames` 的注释写明了「同一帧里画出来的还是上一帧的样子」。
 // 只等画面就断请求，机器一忙（或者上一次那一档的请求还在路上）那条断言就红——
 // 而功能是好的：这一条在**未改动的 main 上单跑 30 次就红过**。
+//
+// ⚠️ **断的是「点了这一档之后打出去的那一趟」，不是「最后一次」**：两档的请求同时
+// 在路上，而 fixture 记的是**到达**先后——满载时上一档那一趟可能后到（探针量过：
+// 同一个进程塞满 CPU 跑 200 轮，5 轮读到的是上一档的 region）。问「最后一次」
+// 的话那个条件永远不成立，10 秒之后保险丝断掉，症状是「等了 10s」，离真因隔着
+// 三层。理由见 `askedRegionAfter`。
 func TestEachTabPullsItsOwnList(t *testing.T) {
 	b := newUIExplore(t)
 	homeArchives(b)
 	_, tt, _ := newHomeShell(t, b)
 
+	before := b.countHit(uiHomeRegionFeed)
 	clickTab(t, tt, 1)
 	waitFrames(t, tt, "鬼畜那一档拉的是自己那份", func() bool {
 		return showsText(tt, "鬼畜 推的第一首") &&
-			b.lastQueryOf(uiHomeRegionFeed).Get("from_region") == "1007"
+			b.askedRegionAfter(uiHomeRegionFeed, before, "1007")
 	})
-	if got := b.lastQueryOf(uiHomeRegionFeed).Get("from_region"); got != "1007" {
-		t.Errorf("鬼畜那一档的 from_region = %q，want 1007", got)
+	if !b.askedRegionAfter(uiHomeRegionFeed, before, "1007") {
+		t.Errorf("鬼畜那一档没有用 from_region=1007 拉过，区域 %v", b.lastQueryOf(uiHomeRegionFeed))
 	}
 
 	clickTab(t, tt, 2)
