@@ -62,7 +62,12 @@ const (
 func (s *Shell) buildLibraryPages() {
 	acts := s.listActions()
 	s.laterPage.init(s.clock.Now(), s.drawLaterRow, s.laterMenu, s.fetchLater, acts, lookup(laterPath).Empty)
+	// 🔴 网格那一档的画法（设置里的「数据显示样式」）也在这儿装上。**没装的话那一档
+	// 退回列表**（见 `pagedRows.SetView` 的注释），而症状是「改了设置、这一页没变」。
+	s.laterPage.rows.SetCell(s.drawLaterCell)
 	s.historyPage.init(s.clock.Now(), s.drawHistoryRow, s.historyMenu, s.fetchHistory, acts, lookup(historyPath).Empty)
+	// 网格那一档的画法（理由同上面那一处）。
+	s.historyPage.rows.SetCell(s.drawHistoryCell)
 }
 
 // fetchLater 是稍后再看那一页的拉页器。
@@ -142,7 +147,14 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 				p.apply()
 			}
 
-			laterHeader(c)
+			// 表头**只在列表 / 紧凑两档**摆：网格里一格是一首歌，表头上那几列
+			//（「# / 标题 / 播放量 / 加入时间 / 时长」）和格子对不上号，而对不上的表头
+			// 在界面上不像坏了（和 `widgets/list` 里那个「正在播放」不新开一列是同一
+			// 个理由，见 BMG-56 的收尾说明）。
+			p.rows.SetView(s.displayView())
+			if !p.rows.isGrid() {
+				laterHeader(c)
+			}
 			p.rows.View(c)
 		})
 }
@@ -169,6 +181,8 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 	rows := s.laterPage.rows
 	m := rows.Rows()[r.Index]
 	playing := rows.isPlaying(m)
+	// 紧凑档只是这一行的几处尺寸变矮（设置里的「数据显示样式」）。
+	mt := metricsOf(rows.Layout())
 
 	// 选中那一行的底色由 `ui.List` 自己刷（主色底），字色得跟着换——不换就是
 	// 主色底上的深色字，深色主题下直接看不见。
@@ -184,17 +198,17 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 		titleColor = t.Accent
 	}
 
-	return ui.Row(c).Key("later-row:"+m.ID).AlignSelf(ui.Stretch).Gap(rowGap).
-		Padding(listPadY, listPadX).Children(func() {
-		ui.Text(c, fmt.Sprint(r.Index+1)).Width(colIndex).TextAlign(ui.End).
+	return ui.Row(c).Key("later-row:"+m.ID).AlignSelf(ui.Stretch).Gap(mt.gap).
+		Padding(mt.padY, mt.padX).Children(func() {
+		ui.Text(c, fmt.Sprint(r.Index+1)).Width(mt.index).TextAlign(ui.End).
 			FontSize(12).TextColor(t.TextMuted).MaxLines(1)
 
 		// 封面四态由 imgcache 画（空地址画空框，不画「失败」）。
-		imgcache.View(c, s.images, m.Cover, coverSide, coverSide)
+		imgcache.View(c, s.images, m.Cover, mt.cover, mt.cover)
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).Children(func() {
-			ui.Text(c, m.Title).FontSize(14).LineHeight(1.5).
-				TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
+			ui.Text(c, m.Title).FontSize(mt.titleSize).LineHeight(1.5).
+				TextColor(titleColor).MaxLines(mt.titleLines).Ellipsis("…")
 			if m.Owner != "" {
 				ui.Text(c, m.Owner).FontSize(12).LineHeight(1).
 					TextColor(ownerColor).MaxLines(1).Ellipsis("…")
@@ -204,14 +218,83 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 			}
 		})
 
-		ui.Text(c, playCountText(m.View)).Width(colCount).TextAlign(ui.End).
+		ui.Text(c, playCountText(m.View)).Width(mt.count).TextAlign(ui.End).
 			FontSize(12).TextColor(t.TextMuted).MaxLines(1)
-		ui.Text(c, dayText(m.ViewedAt)).Width(colDate).TextAlign(ui.End).
+		ui.Text(c, dayText(m.ViewedAt)).Width(mt.date).TextAlign(ui.End).
 			FontSize(12).TextColor(t.TextMuted).MaxLines(1)
-		ui.Text(c, clockText(m.Duration)).Width(colClock).TextAlign(ui.End).
+		ui.Text(c, clockText(m.Duration)).Width(mt.clock).TextAlign(ui.End).
 			FontSize(12).TextColor(t.TextMuted).MaxLines(1)
 	})
 }
+
+// drawLaterCell 画网格那一档的**一格**（设置里的「数据显示样式」选了「网格」时）。
+//
+// 结构照 `widgets/list` 的音乐网格（`grid.go` 的 viewCell）：封面 → 歌名 → 副标题
+// 那一行。**右边那几列没有丢**：播放量 / 加入时间 / 时长挤到歌名下面那一行的两端
+// ——丢掉的不是「排版」，是用户要看的数，而网格档照样得看得见。
+func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool) ui.Element {
+	t := c.Theme()
+	rows := s.laterPage.rows
+	m, ok := rows.Row(i)
+	if !ok {
+		return ui.Box(c).Grow(1)
+	}
+	playing := rows.isPlaying(m)
+	titleColor, metaColor := t.Text, t.TextMuted
+	switch {
+	case selected:
+		titleColor, metaColor = t.AccentText, t.AccentText.Alpha(0.75)
+	case playing:
+		titleColor = t.Accent
+	}
+
+	box := ui.Column(c).Key("later-cell:" + m.ID).Radius(t.Radius).
+		AlignSelf(ui.Stretch).Grow(1)
+	if selected {
+		// 选中那一格铺主色底——和列表选中行、网格选中格同一套（`ui/table.go` 的
+		// node.Selected）。
+		box = box.Background(t.Accent)
+	}
+
+	return box.Children(func() {
+		// 封面按**格子宽**画，不写死：`list.CellWidth` 给的就是这一格实际拿到的
+		// 宽（`widgets/list` 的网格卡片同一个做法）。写死 160 的话，窗口一窄到
+		// 两列，封面就顶出格子外面去了。
+		imgcache.View(c, s.images, m.Cover, cell, laterCellCoverH)
+
+		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).PaddingY(cardGapForCell).Children(func() {
+			ui.Text(c, m.Title).FontSize(14).LineHeight(1.5).
+				TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
+			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+				if m.Owner != "" {
+					ui.Text(c, m.Owner).Grow(1).FontSize(12).LineHeight(1).
+						TextColor(metaColor).MaxLines(1).Ellipsis("…")
+				}
+				// 「正在放」占时长那一格：两样都画必然把时长挤成「0:」，而用户读的
+				// 是「正在放」（理由见 `widgets/list/grid.go` 那一处）。
+				if playing {
+					viewPlayingMark(c, t, m.Title)
+					return
+				}
+				ui.Text(c, clockText(m.Duration)).FontSize(12).
+					TextColor(metaColor).MaxLines(1)
+			})
+			// 播放量 / 加入时间：列表里是右边两列，格子里放到最下面那一行。
+			ui.Row(c).Gap(6).FontSize(11).Children(func() {
+				ui.Text(c, playCountText(m.View)).Grow(1).TextColor(metaColor).MaxLines(1)
+				ui.Text(c, dayText(m.ViewedAt)).TextColor(metaColor).MaxLines(1)
+			})
+		})
+	})
+}
+
+// 网格那一档里一格的样子。**只定高**：封面高 140 和 `widgets/list` 的网格一致
+// （Biu 的 music-card 就是这个高），而宽是按列数算出来的（`list.CellWidth`）——
+// 写死一个宽的话窗口一窄封面就顶出格子。
+const (
+	laterCellCoverH = 140
+	cardGapForCell  = 8
+)
 
 // laterMenu 是这一行的右键菜单，七项：播放 / 下一首播放 / 添加到队列 /
 // 在 B 站打开 / 收藏 / 下载音频 / 移除。

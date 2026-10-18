@@ -62,20 +62,44 @@ const localMusicPath = "/local-music"
 // （`local-music.ts:28`，`useState<string>("all")`），这里照它。
 const allDirs = "全部目录"
 
+// # 这一页自己的档和设置里的「数据显示样式」怎么共存
+//
+// 这一页原来自己有三档（表格 / 列表 / 网格）。设置里那个「数据显示样式」管的也是
+// 「一行一首还是一行几首」——**两个控件抢同一件事，就是「别打架」要防的那种**：
+// 用户在设置里选了「网格」、这一页还停在「列表」，他不知道自己该看谁，于是两个都
+// 像是坏了的。
+//
+// 分工改成一条线：
+//
+//	这一页的开关管「表格还是歌曲」——表格那一档画的是**文件**（大小 / 格式 / 创建
+//	时间），它和「一行一首还是一行几首」根本不是一件事，全局设置对它没有话说；
+//	设置里的「数据显示样式」管「歌曲摆成什么样」——列表 / 紧凑 / 网格。
+//
+// 所以这一页的开关从三档改成两档，而**选了「歌曲」之后摆成什么样完全由全局设置
+// 说了算**（`p.viewStyle()`，它转手问 `Shell.displayView`）。这不是把一档功能删掉：
+// 列表 / 网格 / 紧凑三样一个不少，只是「在哪选」从这一页挪到了设置里——而那一处
+// 本来就是它们的家。
+//
+// ⚠️ **表格那一档仍然不听紧凑**：它一行里是文件大小、格式、创建时间，没有封面也
+// 没有 UP 名，「紧凑」对它没有可说的事。
+
 // localStyleCount 是展示样式有几档。
 //
 // ⚠️ 用它定数组长度、给 `ui.Segmented` 的标签表也是同一份长度，不是两处各
 // 写一个数：少写一档而 switch 还按三档走，缺的那一屏画的是零值。
-const localStyleCount = 3
+const localStyleCount = 2
 
-// localStyles 是那三档的名字，从左到右。
-var localStyles = [localStyleCount]string{"表格", "列表", "网格"}
+// localStyles 是那两档的名字，从左到右。
+var localStyles = [localStyleCount]string{"表格", "歌曲"}
 
-// 三档的下标。**表格是默认那一档**，因为它是 Biu 那一页的本体。
+// 两档的下标。**表格是默认那一档**，因为它是 Biu 那一页的本体。
+//
+// ⚠️ 第二档叫「歌曲」而不是「列表」：它画的是全局设置选中的那一种，摆成网格也
+// 叫「歌曲」。叫「列表」的话用户切到网格那一档之后，界面上写着「列表」而画面是
+// 网格——两个控件说两件事，正是这一段开头要防的那种打架。
 const (
 	localStyleTable = iota
-	localStyleList
-	localStyleGrid
+	localStyleSong
 )
 
 // searchLocalLabel 是这一页搜索框的名字，兼做它空着时画的那几个字。
@@ -184,10 +208,16 @@ type localPage struct {
 	// sel 是表格里选中的那一行，-1 是没选。框架把点中的下标写进来。
 	sel int
 
-	// cards 和 gridView 是另外两档的控件（`widgets/list` 里那两个）。
-	// 它们自己记着滚动位置，所以同样建一次存着。
-	cards    *list.List
-	gridView *list.Grid
+	// cards 是「歌曲」那一档的控件（`widgets/list` 的 `SwitchView`：列表 / 紧凑 /
+	// 网格三个摆法在它里面分发，见文件头那一段）。它自己记着滚动位置，所以建一次
+	// 存着。
+	cards *list.SwitchView
+
+	// displayView 报「这一帧歌曲该摆成什么样」。**由 Shell 传进来**而不是这一页
+	// 自己去问设置：这一页只有 `*app.App`（它看得到设置），而 `displayView` 是
+	// 界面层那个「唯一一处把设置翻译成画法」的地方（`displaymode.go`）——从这一页
+	// 再写一份就是第二处。
+	displayView func() list.View
 
 	// style 是当前展示样式，下标对着 localStyles。
 	style int
@@ -241,15 +271,16 @@ const maxLocalWakes = 4
 // ⚠️ 五样都要传：卡片那两档要走封面缓存和操作，「删掉了/放不了」这些话只有
 // 一个出口（Toast），而「添加目录」没有它就进不去任何一个目录。
 func newLocalPage(a *app.App, cache *imgcache.Cache, acts list.Actions,
-	notify func(string), pickDir func() (string, error)) *localPage {
+	notify func(string), pickDir func() (string, error), displayView func() list.View) *localPage {
 	p := &localPage{
 		app: a, cache: cache, acts: acts, notify: notify, pickDir: pickDir,
-		sel: -1, dirLabel: allDirs,
+		displayView: displayView,
+		sel:         -1, dirLabel: allDirs,
 	}
-	// 两个控件建一次、记着自己的滚动位置（见 struct 上那段）。
-	p.cards = list.New(cache, acts)
+	// 这一份建一次、记着自己的滚动位置（见 struct 上那段）。它内部是一对控件
+	//（列表 / 紧凑 / 网格），摆法由设置决定，见文件头那一段。
+	p.cards = list.NewSwitchView(cache, acts)
 	p.cards.SetEmpty("") // 空状态由这一页自己说，见 viewEmpty
-	p.gridView = list.NewGrid(cache, acts)
 	// 外面包一层 recover：view 里 panic 会一路穿出 Cocoa 事件循环把整个
 	// 进程带走。建的时候包一次就够（每帧包一次是白花开闭包）。
 	p.paint = p.view
@@ -379,18 +410,27 @@ func (p *localPage) viewBody(c *ui.Context, t *ui.Theme, st app.LocalMusicState)
 		ui.Text(c, "正在扫描…").FontSize(13).TextColor(t.TextMuted).Padding(16)
 	case len(p.rows) == 0:
 		p.viewEmpty(c, t, st)
+	case p.style == localStyleTable:
+		p.viewTable(c, t)
 	default:
-		switch p.style {
-		case localStyleList:
-			p.cards.SetSongs(p.cardsOf())
-			p.cards.View(c)
-		case localStyleGrid:
-			p.gridView.SetSongs(p.cardsOf())
-			p.gridView.View(c)
-		default:
-			p.viewTable(c, t)
-		}
+		// 🔴 设置里的「数据显示样式」在这一帧生效（`displaymode.go` 里
+		// `displayView` 的注释写了为什么每帧都要调）。这一页的卡片控件是**一对**，
+		// 网格 / 紧凑 / 列表在它里面分发（`widgets/list/switch.go`）。
+		p.cards.SetView(p.viewStyle())
+		p.cards.SetSongs(p.cardsOf())
+		p.cards.View(c)
 	}
+}
+
+// viewStyle 是这一帧「歌曲」那一档该摆成什么样。
+//
+// ⚠️ 没装接线时退回列表（`list.ViewOf` 那一支的零值）：这一页有一处测试是直接
+// `newLocalPage` 造出来的，没给接线——那时候摆成网格会让那一批断言读到另一个布局。
+func (p *localPage) viewStyle() list.View {
+	if p.displayView == nil {
+		return list.ViewList
+	}
+	return p.displayView()
 }
 
 // viewEmpty 是筛选之后一首都没有时说的那句话。
