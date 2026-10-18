@@ -4,6 +4,14 @@
 // 预览放到后台去发，把迟到的结果按代次丢掉，再加一层**结果缓存**。请求长什么样是
 // `service/lyrics`（search.go）的事——界面层连「网易云要多发一次请求」都不用知道。
 //
+// # 下面这七个导出方法在界面上还没有调用点，那不是死代码
+//
+// 界面上调它们的是拆出去的**下一票 BMG-66**「歌词搜索与缓存：搜索与预览两个
+// 弹窗」（`internal/ui/lyricssearch.go` + 它那两个弹窗）。这一票只交到应用层，
+// 所以它们现在的调用点全在测试里。**看到「没有生产调用点」别当成没用的删掉**——
+// BMG-66 接的就是这七个：`LyricSources` / `LyricSearch` / `SearchLyrics` /
+// `OpenLyricPreview` / `LyricPreview` / `CloseLyricPreview` / `AdoptLyricPreview`。
+//
 // # 结果缓存：同一个词不搜第二遍
 //
 // 「搜索结果 500 毫秒防抖写缓存，避免重复请求」的后半句在这儿（前半句那 500ms 防抖
