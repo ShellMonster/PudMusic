@@ -62,6 +62,15 @@ const (
 	iconLike       = "System/thumb-up-line.svg"     // 赞（还没赞）
 	iconLikeFilled = "System/thumb-up-fill.svg"     // 赞（已经赞了）
 
+	// iconPageList 是播放条上那个分集抽屉的入口。
+	//
+	// ⚠️ **它和 `iconQueue` 是同一张图，这不是笔误**：Biu 那边播放列表的开关
+	// （`layout/playbar/right/index.tsx` 的 `OpenPlaylistDrawerButton`）和分集的
+	// 入口（`layout/playbar/left/page-list.tsx:25`）用的都是 `<RiListRadio size={18}/>`。
+	// 两个按钮不是一回事（一个开队列、一个开分集），所以这里给**两个名字**——
+	// 名字得跟着那个按钮的用处走，`iconQueue` 的注释才不至于替分集按钮说它不是队列。
+	iconPageList = "Editor/list-radio.svg"
+
 	// ── 播放模式四档 ──
 	// 逐个照 Biu 的 `getPlayModeList`（`src/common/constants/audio.tsx:27-48`）：
 	// 顺序 order-play、列表循环 repeat-2、随机 shuffle、单曲 repeat-one。
@@ -101,7 +110,7 @@ var iconNames = []string{
 	iconPlay, iconPause, iconPrev, iconNext,
 	iconStar, iconStarFilled, iconDownload,
 	iconVolumeUp, iconVolumeMid, iconVolumeMute,
-	iconEnqueue, iconFullscreen, iconLike, iconLikeFilled,
+	iconEnqueue, iconFullscreen, iconLike, iconLikeFilled, iconPageList,
 	iconModeOrder, iconModeLoop, iconModeRandom, iconModeOne,
 	iconSettings, iconFolder, iconQueue,
 	iconSearch, iconClose, iconFeed, iconLogin, iconLogout,

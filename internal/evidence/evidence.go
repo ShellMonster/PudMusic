@@ -1447,4 +1447,36 @@ var Items = []Item{
 			"TestForgettingTakesTheRowOutOfBothGroups",
 		},
 	},
+	{
+		Category: Play,
+		// 「多 P 的投稿只能播第一集」（BMG-47 的 A12）那一张票的界面那一半：
+		// 播放条上有分集入口 → 打开是浮层列表、每一集有编号和标题 → 标出正在播的
+		// 那一集 → 点一集就切过去 → **单 P 不摆这个入口**。
+		//
+		// 逐条钉的是**六个容易被做成「界面上看不出坏了」的点**，而它们合起来才是
+		// 「功能接上了」：
+		//
+		//   · 编号是**画出来的字**——量的是 `Texts()` 里有一条逐字等于 "1"/"2"/"3"，
+		//     不是字段里有 page（`partRowsFor` 填对了而 view 没画，别条照样绿）。
+		//   · 正在放那一集**整行染主色**，而没在放的不许染——两半都钉，染了这一半
+		//     而不钉另一半的话，「标出来」就只是「有一行不一样」。
+		//   · **单 P 不摆入口**：摆一个点了没反应的键，用户会以为应用坏了。
+		//   · 问不到时说「问不出分集」而不是留一片空白——空白在界面上和「这一首
+		//     没有分集」一模一样，而空列表**进都进不去**（入口在「没问到」时也得
+		//     摆着，那句人话才有地方显示）。
+		//   · 摆在哪一行是**量出来的**：单 P 与多 P 两档量同一块播放条，歌名和进度条
+		//     必须一样宽（UP 名让位是它该做的，它是那一行里唯一 `Grow(1)` 的）。
+		Spec: "分集抽屉：播放条上有入口、多 P 才摆、浮层里每集有编号和标题、标出正在播的那一集、点一集就切过去并收起、问不到时说得出为什么、摆这个键不花掉歌名和进度条的宽度",
+		Tests: []string{
+			"TestThePlayBarOpensTheEpisodesAndSwitchesToOne",
+			"TestEveryEpisodeRowCarriesItsNumber",
+			"TestTheDrawerMarksTheEpisodeThatIsPlaying",
+			"TestThereIsNoPartsKeyForASinglePartVideo",
+			"TestTheDrawerSaysWhyWhenTheyCannotBeAsked",
+			"TestPickingTheEpisodeAlreadyPlayingStillClosesTheDrawer",
+			"TestOpeningTheFullPlayerClosesThePartsDrawer",
+			"TestTheDrawerDoesNotComeBackOnItsOwn",
+			"TestThePartsKeyCostsNothingElseOnThePlayBar",
+		},
+	},
 }

@@ -43,7 +43,10 @@ func multiParts() []bili.VideoPart {
 // blockPages 是「让分集问不到」（顶掉 pagelist）。⚠️ 队列里那一项**自带 cid**，
 // 于是放歌那一步的 `withCid` 压根不问分 P（见 online.go），被顶掉的只有
 // `App.Parts` 那一问——正好造出「歌放得起来、可是分集问不到」这个状态。
-func onlineTester(t *testing.T, pages []any, blockPages bool) (*Shell, *mygoui.Tester) {
+//
+// opts 往后传给基座（`partdrawer_test.go` 用它换窗口尺寸）。前面三个参数不动，
+// 是为了让满屏那几条用例一行都不用改。
+func onlineTester(t *testing.T, pages []any, blockPages bool, opts ...shellOpt) (*Shell, *mygoui.Tester) {
 	t.Helper()
 	f := newBiliFixture(t, 1)
 	f.setVideoPages(pages)
@@ -58,7 +61,7 @@ func onlineTester(t *testing.T, pages []any, blockPages bool) (*Shell, *mygoui.T
 		})
 	}
 
-	s, tt := newShell(t)
+	s, tt := newShell(t, opts...)
 	tt.SetDark(true)
 	s.app.MountStreaming(app.Streaming{
 		Client: f.client(), Media: f.Client(), TempDir: t.TempDir(),
@@ -66,7 +69,11 @@ func onlineTester(t *testing.T, pages []any, blockPages bool) (*Shell, *mygoui.T
 
 	if err := s.app.Enqueue(app.Item{
 		Source: "online", Type: "mv", Bvid: "BVmultiPart",
-		Cid: "777", Title: "多 P 的那一首",
+		// ⚠️ 标题给的是一条**长**的：播放条那一行的宽度账全靠它才量得出来
+		// （见 `partdrawer_test.go` 的 `TestThePartsKeyDoesNotBreakThePlayBar`）。
+		// 满屏那几条不关心标题，所以换成长的那条对它们没有影响。
+		Cid: "777", Title: "一首歌的名字很长很长很长很长",
+		Artist: "一个非常非常非常非常非常非常长的 UP 主名字", ArtistMid: 12345,
 	}); err != nil {
 		t.Fatalf("把在线的那首放进队列：%v", err)
 	}

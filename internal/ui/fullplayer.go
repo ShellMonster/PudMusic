@@ -148,10 +148,17 @@ type fullPlayer struct {
 	spec spectrumBuffers
 }
 
-// partRow 是分集面板里的一行。
+// partRow 是分集列表里的一行。
+//
+// 这一份是**两个入口共用**的行模型：满屏里那个分集面板（`viewFullPartsList`）
+// 和播放条上的分集抽屉（`partdrawer.go`）。共用是为了「正在放的那一集」只有一处
+// 认——认两处的话，迟早有一处认错，而那正是用户在找的那一句。
 type partRow struct {
-	key    string
-	cid    string
+	key string
+	cid string
+	// page 是第几集。播放条那个抽屉画它（见 partdrawer.go），满屏那个面板不画
+	// （照 Biu 那一支，见 `viewFullPartsList` 的注释）。
+	page   int
 	title  string
 	active bool
 }
@@ -293,6 +300,11 @@ func (s *Shell) openFullPlayer() {
 	s.full.open = true
 	s.full.settings = false
 	s.full.partsOpen = false
+	// ⚠️ **播放条上那个分集抽屉也得收掉**：满屏开着的时候播放条**根本不画**
+	//（`viewMain` 里 `if !s.full.open`），于是那个键不在、浮层也不建，而
+	// `partOpen` 还留着 true。用户从满屏退回普通窗口的那一刻，这一列会自己弹出来
+	// ——他什么都没按。
+	s.partOpen = false
 	s.armFullHide()
 }
 
@@ -630,17 +642,22 @@ func (s *Shell) viewFullParts(c *ui.Context, hidden bool) {
 	}
 }
 
-// partRowsFor 是分集面板这一帧要画的那几行。
+// partRowsFor 是分集列表这一帧要画的那几行。
 //
 // ⚠️ 铁律四：行的 key 是**这一集的 cid**，不是行号（见 queue_drawer.go 的
 // queueRowKey）。同一个 cid 只会有一行，所以它足够唯一；而拿行号当身份的话，
 // 往前插一行会让后面所有行的「正在放」整体错配。
+//
+// 前缀是 `part:` 而不是 `full-part:`：两个入口在**不同的父容器**里（满屏面板和
+// 播放条浮层），key 本来就不会撞，而名字得跟着现在真正的用处走（issue #91 的
+// 用户故事 37）。
 func partRowsFor(parts []bili.VideoPart, cur app.Item) []partRow {
 	rows := make([]partRow, 0, len(parts))
 	for _, p := range parts {
 		rows = append(rows, partRow{
-			key:    "full-part:" + p.Cid,
+			key:    "part:" + p.Cid,
 			cid:    p.Cid,
+			page:   p.Page,
 			title:  partTitle(p),
 			active: p.Cid == cur.Cid,
 		})
