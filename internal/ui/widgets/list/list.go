@@ -130,6 +130,13 @@ type List struct {
 	empty    string
 	emptySet bool
 
+	// view 是这一份歌此刻摆成什么样，见 SetView。
+	//
+	// 🔴 **只有列表和紧凑两档真的走这里**：网格那一档不走 `List`，走
+	// `SwitchView` 里的另一个控件（`grid.go`）。`List` 看见 `ViewCard` 时的行为
+	// 是**退回列表**而不是画半张网格——理由见 SetView 的注释。
+	view View
+
 	// failed 是画崩了的行（按 ID 记），下一帧不重试。
 	//
 	// 为什么要记：MyGo 的事件循环没有 recover，行里一个 panic 会一路穿出去
@@ -178,6 +185,30 @@ func (l *List) SetFooter(fn func(c *ui.Context)) { l.footer = fn }
 //
 // ⚠️ 只能由界面线程调，同 SetSongs。
 func (l *List) SetEmpty(text string) { l.empty, l.emptySet = text, true }
+
+// SetView 换这一份歌的摆法（设置里的「数据显示样式」）。
+//
+// **只认两档**：列表和紧凑。收到 `ViewCard` 时**按列表画**——网格那一档走的是
+// `Grid`（`SwitchView` 在两者之间分发），而一个 `List` 硬画网格的话得自己算列数
+// 自己守滚动锚点，而那套东西已经在 `grid.go` 里了（`keepAnchor`）。在这里退回列表
+// 而不是画半张，是为了让「忘了分发」这件事的后果是**看得见的旧样子**而不是一张
+// 排坏的网格。
+//
+// ⚠️ **每帧调**：设置随时会变，而这一份状态是界面线程的（铁律一）。
+//
+// ⚠️ **换档不动滚动位置**。紧凑和列表的行高差得很远，同一个行号落在屏幕上的位置
+// 不一样——用户改完设置看到「自己盯着的那首跳到别处」比看到「行变矮了」更火大。
+// 而框架的 `ListState` 记的是「第几行 + 那一行离顶多远」（`mygo/ui/list.go`），
+// 行的身份又是 ID（铁律四），所以那一首**自己会回到它在屏幕上的位置**。
+func (l *List) SetView(v View) {
+	if v == ViewCard {
+		v = ViewList
+	}
+	l.view = v
+}
+
+// Layout 返回这一份歌此刻的摆法。页面和测试都要读它（见 SwitchView）。
+func (l *List) Layout() View { return l.view }
 
 // SetScroll 让这个列表把滚动位置写进 s（每帧写一次），调用方读它就知道滚到
 // 哪儿了，也能靠改它把列表滚到某处。传 nil 就断开。
@@ -275,6 +306,11 @@ func (l *List) rows() int {
 // ⚠️ 只能由界面线程调（就是跑 view 的那个线程），并且**要连着几帧**看效果：
 // 列表是在布局时才滚过去的，而行高是量出来的，量完才知道那一条落在哪儿。
 func (l *List) ScrollTo(row int, align ui.Align) { l.state.ScrollTo(row, align) }
+
+// ScrollTop 回到顶上。切路由、点回顶按钮、以及 `SwitchView` 换摆法时都走它。
+//
+// ⚠️ 只能由界面线程调，同 ScrollTo。
+func (l *List) ScrollTop() { l.state.ScrollTo(0, ui.Start) }
 
 // Selected 返回选中的那首，没有选中是 ok=false。
 //

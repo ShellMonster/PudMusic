@@ -66,6 +66,10 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 		})
 		return
 	}
+	// 🔴 设置里的「数据显示样式」在这一帧生效（理由同搜索页那一处）。只有投稿
+	// 这一张 Tab 是歌的列表——动态 / 收藏夹 / 合集那三张画的是卡片和数字，网格那一
+	// 档对它们没有意义（见 upspace_tabs.go 的文件头）。
+	sp.videos.SetView(s.displayView())
 	sp.videos.View(c)
 }
 

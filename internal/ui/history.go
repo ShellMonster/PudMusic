@@ -147,7 +147,11 @@ func (s *Shell) viewHistory(c *ui.Context, _ *ui.Route) {
 				p.apply()
 			}
 
-			historyHeader(c)
+			// 表头**只在列表 / 紧凑两档**摆，理由见 later.go 那一处。
+			p.rows.SetView(s.displayView())
+			if !p.rows.isGrid() {
+				historyHeader(c)
+			}
 			p.rows.View(c)
 		})
 }
@@ -191,6 +195,8 @@ func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 	rows := s.historyPage.rows
 	m := rows.Rows()[r.Index]
 	playing := rows.isPlaying(m)
+	// 紧凑档只是这一行的几处尺寸变矮（设置里的「数据显示样式」）。
+	mt := metricsOf(rows.Layout())
 
 	// 「正在放」和「选中」分成两档，理由见 `drawLaterRow` 里那一段
 	// （这一页和稍后再看是同一副骨架）。
@@ -202,16 +208,16 @@ func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 		titleColor = t.Accent
 	}
 
-	return ui.Row(c).Key("history-row:"+m.ID).AlignSelf(ui.Stretch).Gap(rowGap).
-		Padding(listPadY, listPadX).Children(func() {
-		ui.Text(c, rowNumber(r.Index)).Width(colIndex).TextAlign(ui.End).
+	return ui.Row(c).Key("history-row:"+m.ID).AlignSelf(ui.Stretch).Gap(mt.gap).
+		Padding(mt.padY, mt.padX).Children(func() {
+		ui.Text(c, rowNumber(r.Index)).Width(mt.index).TextAlign(ui.End).
 			FontSize(12).TextColor(t.TextMuted).MaxLines(1)
 
-		imgcache.View(c, s.images, m.Cover, coverSide, coverSide)
+		imgcache.View(c, s.images, m.Cover, mt.cover, mt.cover)
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).Children(func() {
-			ui.Text(c, m.Title).FontSize(14).LineHeight(1.5).
-				TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
+			ui.Text(c, m.Title).FontSize(mt.titleSize).LineHeight(1.5).
+				TextColor(titleColor).MaxLines(mt.titleLines).Ellipsis("…")
 			if m.Owner != "" {
 				ui.Text(c, m.Owner).FontSize(12).LineHeight(1).
 					TextColor(ownerColor).MaxLines(1).Ellipsis("…")
@@ -221,10 +227,64 @@ func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 			}
 		})
 
-		ui.Text(c, progressText(m.Progress, m.Duration)).Width(colProgress).
+		ui.Text(c, progressText(m.Progress, m.Duration)).Width(mt.progress).
 			TextAlign(ui.End).FontSize(12).TextColor(t.TextMuted).MaxLines(1)
-		ui.Text(c, viewedAtText(m.ViewedAt)).Width(colViewedAt).
+		ui.Text(c, viewedAtText(m.ViewedAt)).Width(mt.viewedAt).
 			TextAlign(ui.End).FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+	})
+}
+
+// drawHistoryCell 画网格那一档的**一格**（设置里的「数据显示样式」选了「网格」时）。
+//
+// 结构和 `drawLaterCell` 同一个形状，差的是下面那两行：历史记录没有播放量，
+// 有的是「看过多少 / 多久」和观看时间（理由见 `drawLaterCell` 的注释：右边那几列
+// 挪到歌名下面，不是丢掉）。
+func (s *Shell) drawHistoryCell(c *ui.Context, i int, selected bool) ui.Element {
+	t := c.Theme()
+	rows := s.historyPage.rows
+	m, ok := rows.Row(i)
+	if !ok {
+		return ui.Box(c).Grow(1)
+	}
+	playing := rows.isPlaying(m)
+	titleColor, metaColor := t.Text, t.TextMuted
+	switch {
+	case selected:
+		titleColor, metaColor = t.AccentText, t.AccentText.Alpha(0.75)
+	case playing:
+		titleColor = t.Accent
+	}
+
+	box := ui.Column(c).Key("history-cell:" + m.ID).Radius(t.Radius).
+		AlignSelf(ui.Stretch).Grow(1)
+	if selected {
+		box = box.Background(t.Accent)
+	}
+
+	return box.Children(func() {
+		imgcache.View(c, s.images, m.Cover, laterCellCoverW, laterCellCoverH)
+
+		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).PaddingY(cardGapForCell).Children(func() {
+			ui.Text(c, m.Title).FontSize(14).LineHeight(1.5).
+				TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
+			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+				if m.Owner != "" {
+					ui.Text(c, m.Owner).Grow(1).FontSize(12).LineHeight(1).
+						TextColor(metaColor).MaxLines(1).Ellipsis("…")
+				}
+				if playing {
+					viewPlayingMark(c, t, m.Title)
+					return
+				}
+				ui.Text(c, clockText(m.Duration)).FontSize(12).
+					TextColor(metaColor).MaxLines(1)
+			})
+			ui.Row(c).Gap(6).FontSize(11).Children(func() {
+				ui.Text(c, progressText(m.Progress, m.Duration)).Grow(1).
+					TextColor(metaColor).MaxLines(1)
+				ui.Text(c, viewedAtText(m.ViewedAt)).TextColor(metaColor).MaxLines(1)
+			})
+		})
 	})
 }
 
