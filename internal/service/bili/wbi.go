@@ -178,6 +178,9 @@ type navData struct {
 	IsLogin bool   `json:"isLogin"`
 	Mid     int64  `json:"mid"`
 	Uname   string `json:"uname"`
+	// Face 是头像地址。和其余几个接口一样在下面过一遍 `avatarURL`（补协议、
+	// 拼裁剪参数），所以结构体这一层存的是**原样**。
+	Face string `json:"face"`
 }
 
 // Nav 是 nav 接口的结果，登录判定的唯一依据。
@@ -188,6 +191,13 @@ type Nav struct {
 	Mid int64
 	// Uname 是昵称。
 	Uname string
+	// Face 是**我自己的**头像地址，已经补好协议、拼好裁剪参数（`avatarURL`，
+	// 和 `FollowUser.Face` 同一份做法，理由见 follow.go 的文件头）。
+	//
+	// 空串有两种来路，B 站那边分不出来：没登录（`LoggedIn` 是 false），或者
+	// 这个账号压根没设过头像。**调用方分辨不了就别硬分**——`LoggedIn` 才是
+	// 那一位判据。
+	Face string
 	// WBIKey 是这次顺带拿到的混合密钥。空串表示没拿到。
 	WBIKey string
 }
@@ -213,6 +223,7 @@ func (c *Client) Nav(ctx context.Context) (Nav, error) {
 		LoggedIn: raw.IsLogin,
 		Mid:      raw.Mid,
 		Uname:    raw.Uname,
+		Face:     avatarURL(raw.Face),
 		WBIKey:   mixinKey(wbiKeyFromURL(raw.WbiImg.ImgURL), wbiKeyFromURL(raw.WbiImg.SubURL)),
 	}, nil
 }
