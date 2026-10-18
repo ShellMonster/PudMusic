@@ -4,7 +4,7 @@ package ui
 //
 // 为什么单独一个文件：版面那两条测试（`minilayout_test.go`）和窗口 / 状态同步
 // 那些（`miniplayer_test.go`）都要用同一批，而同包的两个测试文件必须一起编译
-// 得过——所以这些helper 落在第三个文件里，好让提交能按「先工具、再一边」拆开。
+// 得过——所以这些 helper 落在第三个文件里，好让提交能按「先工具、再一边」拆开。
 //
 // ⚠️ 这些函数全部在**界面线程**上跑（`NewTester` 的 view 只跑在主线程），除了
 // `enqueueTwo` 里的 `a.Enqueue` 会同步开一次播放器。
@@ -19,8 +19,6 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
 )
-
-// ── 小工具 ───────────────────────────────────────────────────────────────────
 
 // newMiniShell 建一扇迷你播放器的外壳，挂在它自己的 App 上。
 //
@@ -95,7 +93,7 @@ func progressRect(t *testing.T, tt *mygoui.Tester) mygoui.Rect {
 	return r
 }
 
-// flacBaseName / monoBaseName 是那两首在界面上各自显示的歌名（文件��去掉后缀）。
+// flacBaseName / monoBaseName 是那两首在界面上各自显示的歌名（文件名去掉后缀）。
 // 写在测试里而不是现算，是为了让「断的是哪一个名字」一眼能对上。
 const (
 	flacBaseName = "stereo16"

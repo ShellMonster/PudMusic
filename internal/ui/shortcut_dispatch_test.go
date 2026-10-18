@@ -505,7 +505,8 @@ func TestTwoSpellingsOfTheSameKeyAreNotBothRegistered(t *testing.T) {
 // 都没有，而用户只会得出「这应用的快捷键是坏的」这个结论。
 //
 // 用真的那一份 `runShortcut`：音量读得到（`App.SetVolume` 不需要播放器），
-// 迷你播放器是一条路由（看 `Router.Path` 就够）。播放/暂停、上一首、下一首三条
+// 迷你播放器是**另一个窗口**（看主窗口的外壳上有没有挂上那个迷你外壳就够了——
+// 建窗口要事件循环，那一步在 `ensureMiniWindow`）。播放/暂停、上一首、下一首三条
 // 要播放器，没有歌时它们什么都不做——那正是「队列是空的按了也不出错」。
 func TestTheSixCommandsCallTheirOwnThing(t *testing.T) {
 	s, tt := newShell(t)
@@ -535,15 +536,21 @@ func TestTheSixCommandsCallTheirOwnThing(t *testing.T) {
 		t.Errorf("一直按音量减之后是 %v，want 0（钳住）", got)
 	}
 
-	// 迷你播放器：进去，再退回来。
+	// 迷你播放器：开出来，再关掉。
+	//
+	// ⚠️ 断的是「主窗口的外壳上有没有挂着那个迷你外壳」，不是路由——迷你播放器现在
+	// 是**另一个窗口**（见 `miniplayer.go`），和 `/mini-player` 那一条主窗口里的
+	// 页面是两件事。而真窗口建不出来（`mygo.NewWindow` 要应用 ready），所以这一条
+	// 走的是 `newMiniShell`/`dropMini` 那两半——它们就是 `openMiniPlayer` /
+	// `closeMiniPlayer` 的内容。
 	s.runShortcut("toggleMiniMode")
-	if got := s.router.Path(); got != miniPlayerPath {
-		t.Fatalf("按了切换 mini 之后停在 %q，want %q", got, miniPlayerPath)
+	if s.mini == nil {
+		t.Fatal("按了切换 mini 之后没有迷你播放器那个外壳")
 	}
 	tt.Frame()
 	s.runShortcut("toggleMiniMode")
-	if got := s.router.Path(); got == miniPlayerPath {
-		t.Errorf("再按一次切换 mini 之后还停在迷你播放器上——这个键切不回去")
+	if s.mini != nil {
+		t.Error("再按一次切换 mini 之后它还挂着——这个键切不回来")
 	}
 	tt.Frame()
 
@@ -816,14 +823,15 @@ func TestSyncingTwiceLeavesNoDuplicate(t *testing.T) {
 // 一句已经不做的话留在页面上，比没有更坏：用户按了 ⌘P 发现能用了，而页面上仍然
 // 写着「按下去什么也不会发生」，于是反过来以为应用出了别的毛病。
 //
-// 括号里那个例外也在这一条里：「切换mini/完整模式」切的是这一扇窗里的页面，而这扇
-// 窗在后台——从别的应用按它没有任何可见反应。不说出来的话，那一句「切到别的应用时按
-// 它也有用」对六条里的这一条就是假的。
+// 「切换mini/完整模式」那一行也在这一条里：它切的是**两个窗口**（主窗口收起来 +
+// 开一个 320×100 的小窗），所以从别的应用按它同样有用——而别的五条只是往这个进程
+// 的状态里写一笔，界面上看不出变化。不说出来的话，读者会以为那一列的六条是一个
+// 意思。
 func TestTheShortcutPageSaysWhatTheTwoColumnsAreFor(t *testing.T) {
 	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
 	openSettingsTab(t, tt, "快捷键设置")
 
-	for _, want := range []string{"应用内那一列", "全局那一列", "输入框", "切换mini/完整模式」那一条除外"} {
+	for _, want := range []string{"应用内那一列", "全局那一列", "输入框", "切换mini/完整模式」那一条切的是窗口"} {
 		if !tt.HasText(want) {
 			t.Errorf("这一页没在说「%s」是怎么回事，文字有 %q", want, tt.Texts())
 		}

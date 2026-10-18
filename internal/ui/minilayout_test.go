@@ -56,7 +56,7 @@ func TestTheMiniCardFitsInThreeHundredAndTwentyByOneHundred(t *testing.T) {
 
 	// 账一：控制那一行。三个键 + 两道缝。
 	transport := 2*miniStepW + miniPlayW + 2*gap
-	// 账二：标题那一行。歌名有下限（`MinWidth`，再窄就一个��都不剩）、音量、退出。
+	// 账二：标题那一行。歌名有下限（`MinWidth`，再窄就一个字都不剩）、音量、退出。
 	titleRow := miniTitleMinW + miniVolumeW + miniBackBtnW + 2*gap
 	for _, b := range []struct {
 		what string
@@ -140,7 +140,7 @@ func TestTheMiniLabelsAreNotTruncated(t *testing.T) {
 //
 // 默认的元素身份是「父 ID + 兄弟序号」，而迷你窗口上**播放和暂停是两个不同的按钮**
 // （`st.Playing` 分支）：字在两个字之间换来换去，元素也跟着换一个。没有稳定 key 的
-// ���，这个键每换一次字就换一个新身份，它的按下/悬停状态跟着重来一次——**界面上看
+// 情况下，这个键每换一次字就换一个新身份，它的按下/悬停状态跟着重来一次——**界面上看
 // 不出坏了**，只是按下去偶尔要按两下。
 //
 // ⚠️ **key 必须按角色给（`mini-play`），不能按按钮上的字给**：按字给的话每换一次
