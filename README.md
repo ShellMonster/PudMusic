@@ -9,10 +9,11 @@
 本地解码播放（FLAC / MP3 / WAV / AIFF / AAC / M4A）、B 站在线取流播放与在线音质覆盖、
 自动更新、托盘与单实例与开机自启、系统媒体会话、网络封面缓存。
 
-**页面不是空壳**：登记表里的 14 条路由中 12 条有自己那一页的内容，另外两条走的是
-这一页自己的空状态——`/follow`（我的关注，还没排票）和 `/empty`（空状态落地页，
-按设计就该是空的）。哪一页有没有接上真数据由 `internal/ui/realdata_test.go` 钉着，
-不是靠谁记得。
+**页面不是空壳**：登记表里的 14 条路由中 13 条有自己那一页的内容，剩下那一条走的是
+这一页自己的空状态——`/empty`（空状态落地页，按设计就该是空的）。哪一页有没有接上
+真数据由 `internal/ui/realdata_test.go` 钉着，不是靠谁记得；而本文这一句里的那个
+13 也由 `TestTheCountsInTheProseMatchTheCountsInTheCode` 回头核着——加了一页却忘了
+改这三处说明，`go test` 会当场红。
 
 排期与「明确不做」的完整清单在 `docs/research/PLAN.md`。⚠️ 那个目录被 `.gitignore`
 排除在外，所以在本仓库里打不开——它是维护者本地的规划文档，不是随代码发的东西。
@@ -107,8 +108,13 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 >
 > Biu 用自研的 `glassmorphism.ts`：封面取主色 → 32×32 均值 → 按
 > `deviceMemory`/`hardwareConcurrency` 降模糊 → 三层 `radial-gradient`。
-> 本项目直接用 MyGo 的 `plugins/glass`（Liquid Glass，三端 shader + CPU 等价实现），
-> **不自绘等效效果**——这是用户 2026-10-15 拍板的取舍。
+>
+> **这一版还没有毛玻璃。** 满屏播放器的背景现在是「封面铺满整窗 + 一层 55%
+> 的纯黑压暗」（`internal/ui/fullplayer.go` 的 `fullScrim`）——那层压暗是必需的，
+> 因为满屏的控件和字全是白的，Biu 那边靠三层渐变挡着，我们这边靠它。
+>
+> 毛玻璃本身（MyGo 的 `plugins/glass`，Liquid Glass，三端 shader + CPU 等价实现）
+> 是用户 2026-10-15 拍板的取舍，**还没落地**；落地时同样**不自绘等效效果**。
 >
 > 所以**构图与质感必然不同**：MyGo 只有线性渐变，没有 `mix-blend-mode`。
 > 按低端机分级降模糊那一套也不做（MyGo 没有对应的 API），用固定效果。

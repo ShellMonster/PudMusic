@@ -57,6 +57,28 @@ var gridBreakpoints = []breakpoint{
 // gridMinCols 是最窄那一档的列数，也是宽度还没量出来时用的那个。
 const gridMinCols = 2
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 出口：给「格子不是一首歌」的网格用
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GridGap 是格子之间的间距。**格子画的不是歌的那一派网格也要用这一个**。
+//
+// 为什么不写死在自己的文件里：Biu 那个 `virtual-grid-page-list` 是**同一个**
+// 组件换了个 `renderItem`（关注页塞的是用户卡），所以两边的格子间距在同一个
+// 窗口宽度下必须是同一个数。这里写死一份的话，首页的 6 列和关注页的 6 列
+// 摆出来的宽度会差 `cols-1` 个缝——差几像素，而那正是「两个页面对不上」的第一眼。
+const GridGap = gridGap
+
+// GridColumnsFor 是容器有 w 那么宽时排几列。
+//
+// ⚠️ **判据是容器的宽，不是窗口的**——页面左边还有侧栏，窗口宽不等于网格宽。
+// 用它的页面要量自己那个列表元素的盒子（`Element.Bounds()` 量的是**上一帧**
+// 的盒子，和 `Grid.View` 末尾那一句同一个节奏）。
+//
+// 用途是给 `Grid` 之外的网格用（关注页的用户卡，见 `internal/ui/follow.go`）。
+// 两者必须用同一个函数，否则用户在同一窗口宽度下会看到两种列数。
+func GridColumnsFor(w float32) int { return columnsFor(w) }
+
 // columnsFor 是容器有 w 那么宽时排几列。
 //
 // 判据是**容器**的宽，不是窗口的：Biu 量的是网格自己那个 wrapper
@@ -380,13 +402,21 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 	t := c.Theme()
 	m := g.songs[i]
 	chosen := i == g.sel
+	playing := isPlaying(g.acts, m.Item)
 
 	// 选中那一格：主色底 + 主色上的反色字，和列表选中行是同一套颜色
 	//（`ui/table.go` 的 node.Selected 就是这么画的）。深色主题下换成别的
 	// 颜色会看不清。
+	//
+	// ⚠️ 「正在放」是**第二档**、不是并进去的第二种底色：它只把歌名染成主色
+	// 并挂一句「正在播放」。换底色就和「选中」分不出来了——而这两个问的是两件
+	// 不同的事（见 card.go 里同一段）。
 	titleColor, metaColor := t.Text, t.TextMuted
-	if chosen {
+	switch {
+	case chosen:
 		titleColor, metaColor = t.AccentText, t.AccentText.Alpha(0.75)
+	case playing:
+		titleColor = t.Accent
 	}
 
 	box := ui.Column(c).Radius(t.Radius).
@@ -430,6 +460,16 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 					if m.Owner != "" {
 						ui.Text(c, m.Owner).Grow(1).FontSize(12).LineHeight(ownerLeading).
 							TextColor(metaColor).MaxLines(1).Ellipsis("…")
+					}
+					// 正在放的那一格：时长换成一句「正在播放」。
+					//
+					// ⚠️ **换掉时长而不是加在后面**：一格就那么宽，两样都画必然把
+					// 时长挤成「0:」——而用户读的是「正在放」不是那半截时长。
+					if playing {
+						// 标签带上歌名，理由见 card.go 那一处。
+						ui.Text(c, PlayingMark).Label(m.Title + " " + PlayingMark).
+							FontSize(11).TextColor(t.Accent).MaxLines(1)
+						return
 					}
 					// 时长没有就不画（Biu 的 `durationText` 为空时那一块
 					// 整个不渲染）。

@@ -411,3 +411,69 @@ func TestSortingReloadsFromTheFirstPage(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 「可放」不许是界面上的谎言
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestEveryPlayableCollectionEntryIsAcceptedByThePlayer 钉住「可放 == 能放」。
+//
+// `bili.Media.Playable` 说能放的那些，界面就会照着画、照着进队列
+// （`itemsOfMedias` 是唯一的筛子）。所以它和「播放器认不认这一项」必须**一致**：
+//
+//	Playable() == true  → 翻出来的 Item 一定要能被播放那一层接受
+//	Playable() == false → 一定要被挡住（合集 / 电影放进去就是一条打不开的条目）
+//
+// 🔴 这一条是被一次审计逼出来的：判据照抄了 Biu 的 `[2, 12]`，而 sid 那一路
+// （`/audio/music-service-c/url`）没接——于是 type=12 一路绿过所有测试，
+// 照常画、照常进队列，抽屉里还标着「B 站音乐」，按播放才报错。
+//
+// 往 `Playable` 里加一种类型的人，不接上取流路径就会在这里红。
+func TestEveryPlayableCollectionEntryIsAcceptedByThePlayer(t *testing.T) {
+	for _, typ := range []int{
+		bili.MediaVideo, bili.MediaAudio, // 这两种说能放
+		21, 24, 99, // 合集 / 电影 / 将来冒出来的：说不能放
+	} {
+		m := bili.Media{ID: 1293494, Type: typ, Bvid: "BV1xx", Title: "一条"}
+
+		items := itemsOfMedias([]bili.Media{m})
+		ready := len(items) > 0 && items[0].OnlineReady()
+
+		if ready != m.Playable() {
+			t.Errorf("type=%d：Playable=%v 而界面上那条 OnlineReady=%v——"+
+				"「可放」和「能放」必须一致", typ, m.Playable(), ready)
+		}
+	}
+}
+
+// TestAMusicLibraryEntryCarriesItsIdentity 盯 sid 这一路该带的都带了。
+//
+// 少了 Sid，取流那一层就没有身份（`app.streamFor` 只认 sid），而症状是
+// 「界面上一条条都对，一去播就报错」。
+func TestAMusicLibraryEntryCarriesItsIdentity(t *testing.T) {
+	it := onlineItemOf(bili.Media{
+		ID: 1293494, Type: bili.MediaAudio,
+		Title: "月光", Cover: "https://i0.hdslb.com/c.jpg", Owner: "某某音乐台",
+	})
+	if it.Type != "audio" || it.Sid != "1293494" {
+		t.Errorf("翻出来的项是 %+v，want Type=audio Sid=1293494", it)
+	}
+	if it.Artist != "某某音乐台" {
+		t.Errorf("艺人 = %q，want 某某音乐台（收藏夹已经给了，犯不上再问一次）", it.Artist)
+	}
+	if !it.OnlineReady() {
+		t.Error("音乐库条目翻出来却放不了")
+	}
+}
+
+// TestCollectionEntriesFeedTheMediaSession 收藏夹那一行不再让艺人名空着。
+//
+// 收藏夹接口本来就给 UP 主名，而这一栏之前一直空着——于是锁屏上的「艺人」
+// 永远是空的。Biu 那边占 `ownerName` 的也是这一栏（`store/play-list.ts:157`）。
+func TestCollectionEntriesFeedTheMediaSession(t *testing.T) {
+	for _, typ := range []int{bili.MediaVideo, bili.MediaAudio} {
+		if got := onlineItemOf(bili.Media{ID: 1, Type: typ, Owner: "某某 UP"}).Artist; got != "某某 UP" {
+			t.Errorf("type=%d 的艺人 = %q，want 某某 UP", typ, got)
+		}
+	}
+}

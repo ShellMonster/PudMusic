@@ -149,6 +149,85 @@ func (q Quality) IsLossless() bool {
 	return q == QualityFLAC || q == QualityFLACHR || q == QualityFLACSurround
 }
 
+// MusicTier 是**B 站音乐库**的音质档，和 `Quality` 是**第三套**编号。
+//
+// 这一套是 `/audio/music-service-c/url` 的 `quality` 请求参数，返回的
+// `data.type` 用的也是它。它和投稿那套 dash id（30216 / 30280 那种）没有任何
+// 关系：两个 `3` 不是一个东西，一个是杜比全景声、一个是 FLAC。所以不并进
+// `Quality`——这正是本文件顶上「两套编号，别混」那条规矩，多一套也一样。
+//
+// Biu 上游同样分开处理：`getDashUrl` 用 dash 的 id，`getAudioUrl` 只判
+// `data.type === 3` 是不是无损（`common/utils/audio.ts`）。
+type MusicTier int
+
+const (
+	// MusicTierPreview 是**试听片段**：会员曲在没有权限时给的就是它。
+	//
+	// 🔴 它**不是错误也不是空**，是一条能下、能播的正常字节流，只有开头几十秒。
+	// 所以任何不认它的地方，症状都是「歌播到一半静默停住」而界面上一个错都
+	// 没有。见 `audio.go` 的文件头。
+	MusicTierPreview MusicTier = -1
+
+	// MusicTier128 是 128 Kbps。
+	MusicTier128 MusicTier = 0
+	// MusicTier192 是 192 Kbps。**只有音乐库给得出这一档**，投稿的 dash 流里
+	// 没有对应的 id（那边最低就是 64K，接着跳到 128K）。
+	MusicTier192 MusicTier = 1
+	// MusicTier320 是 320 Kbps。
+	MusicTier320 MusicTier = 2
+	// MusicTierFLAC 是无损 FLAC，要会员。
+	MusicTierFLAC MusicTier = 3
+)
+
+// Label 是这一档在播放条上写的字。
+//
+// 认不出来的（将来 B 站加新编号）给空串，**不拿 `qualities[].bps` 之类去补**：
+// 播放条的徽章只有一个来源（`StreamRef.Label`），两处各说一半会让同一个意思
+// 在徽章上飘。宁可空着——空徽章是不说话，错的徽章是在撒谎。
+func (t MusicTier) Label() string {
+	switch t {
+	case MusicTierFLAC:
+		return "无损 FLAC"
+	case MusicTier320:
+		return "320K"
+	case MusicTier192:
+		return "192K"
+	case MusicTier128:
+		return "128K"
+	}
+	return ""
+}
+
+// MusicTierFor 把用户选的那一档偏好翻译成**要向 B 站要**的那一档。
+//
+// 退的规矩和 `pickAudio` 一样（点名的档没有就退到不高于它的那一档里最好的），
+// 只是**这里退不了**——这是一个请求参数，退不动。所以退不动的那一档由
+// `audio.go` 在**拿到 `qualities` 之后**再问一次（见 `ErrPreviewOnly`）。
+func MusicTierFor(pref AudioQuality) MusicTier {
+	switch pref {
+	case AudioLossless:
+		return MusicTierFLAC
+	case AudioHigh:
+		return MusicTier320
+	case AudioMedium, AudioLow:
+		// 音乐库最低的一档就是 128K（它没有 64K），所以「标准」和「省流量」
+		// 在这一路上落在同一档。**不给「省流量」发更高的那一档**：用户为了
+		// 少流量点的它，拿到 192K 就是多给了流量——这正是 `pickAudio` 末尾
+		// 那段注释说的反例。
+		return MusicTier128
+	}
+	// 自动档要 **320K，不冒然要无损**。
+	//
+	// B 站对「没权限的那一档」不报错，回的是试听片段（`MusicTierPreview`），
+	// 而这一层拿不到「这个号有没有会员」——所以自动档不去赌那一档，否则
+	// 每一个没会员的号每放一首都要多问一次。会员想听无损请显式选「无损」：
+	// 那一档拿到了就是 FLAC，拿不到会如实报错而不是给一段试听。
+	//
+	// 上游 Biu 是同一个取舍，只是它那边知道有没有会员
+	// （`common/utils/audio.ts` 的 `vipStatus ? 3 : 2`）。
+	return MusicTier320
+}
+
 // audioStream 是 `dash.audio[]` / `dash.flac.audio` / `dash.dolby.audio[]`
 // 里的一项。三种容器形状的字段名一样，只是位置不同。
 type audioStream struct {

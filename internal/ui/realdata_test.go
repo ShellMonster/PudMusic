@@ -26,7 +26,9 @@ package ui
 // 两件事，而验收只验了前一件。
 
 import (
+	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -247,24 +249,50 @@ var realDataLedger = []realDataPage{
 		Want: []string{"扫码登录"},
 	},
 	{
-		Route: "/follow", Title: "我的关注",
-		// 🔴 BMG-47 §3 A2：这一页**连壳子都没有**，全仓没有一个 viewFollow，
-		// 而 Biu 那边有整整一页（分组 Tab + 虚拟网格 + 搜索 + 关注分组增删改）。
-		// 它**从第一天起就没有工单**——票号是空的那一格，不是忘了写。
+		Route: followPath, Title: "我的关注",
+		// ✅ **BMG-47 §3 A2 的欠条已经还清**（BMG-49）。这一页现在有自己的画法
+		//（`follow.go`：分组 Tab + 虚拟网格 + 页内搜索）和自己的四个接口
+		//（`internal/service/bili/follow.go`），走的是一台**真接口的假 B 站**
+		// 而不是往模型里塞数据——和首页那一行同一个道理（A1 的原教训：画得出来
+		// 那一半被验了、取数那一半没人管）。
 		//
-		// ⚠️ 说清楚「缺的是哪些接口」：仓库里**有**三个 relation 接口
-		//（`/x/relation/followings`、`/x/relation/stat`、`/x/relation/modify`），
-		// 但它们是**别的页面**在用——动态流的作者栏和 UP 空间的关注/取关。关注页
-		// 自己要的那几个（关注分组、设置分组）一个都没有，而缺页面比缺接口更靠前：
-		// 没有 viewFollow，接口拉回来了也没有地方画。
-		//
-		// 这是这张表上唯一一个「欠着、而欠着本身还没有主」的页面。它必须一直
-		// 摆在这张表上、排到票为止：一旦有人给它排了票，把 Debt 换成票号，
-		// 这一行就会开始要求真数据。
-		Debt: "BMG-47 §3 A2（**还没有工单**）：全仓没有一个 viewFollow；关注页自己要的关注分组" +
-			"/设置分组接口一个都没有（现有的 followings / stat / modify 是动态流和 UP 空间在用）",
-		Why:      "侧栏第二项点进去永远是「暂无内容」，登录了也空；而 Biu 那边是一整页功能。",
-		NowEmpty: lookup("/follow").Empty.Title,
+		// ⚠️ **欠条必须撤掉，而且撤掉它本身就是被这两条钉着的**：
+		//   - `TestEveryRouteShowsARealRowOrSaysWhichTicketIsMissing` 的「欠着」
+		//     那一支会要求 `Open == nil`，而数据接上之后 `Open` 非空 → 它自己红；
+		//   - `TestEveryRouteHasAPageViewOrAnOpenDebt` 在 `builtPage != nil` 时会
+		//     `continue`，于是第二道钉子**不响**——所以第三道（这张表自己的规矩
+		//     「已经能打开却有欠条：数据接上了就把欠条撤掉」）是唯一还醒着的那道。
+		//     留着一条过期欠条的后果是：这一行继续走 `realDataShellOnEmpty`，
+		//     而那个空壳画的是「还没接上 B 站接口」那一支，它**顺带**含有
+		//     `NowEmpty` 那一句，于是欠条「当场证明自己还欠着」也照样通过。
+		Open: func(t *testing.T) (*Shell, *mygoui.Tester) {
+			b := newUIExplore(t)
+			b.on("/x/relation/tags", func(w http.ResponseWriter, r *http.Request) {
+				uiExploreJSON(w, 0, []any{
+					map[string]any{"tagid": -10, "name": "特别关注", "count": 0, "tip": ""},
+					map[string]any{"tagid": 0, "name": "默认分组", "count": 1, "tip": ""},
+				})
+			})
+			b.on("/x/relation/followings", func(w http.ResponseWriter, r *http.Request) {
+				uiExploreJSON(w, 0, map[string]any{
+					"total": 1,
+					"list": []any{map[string]any{
+						"mid": 4242, "uname": "关注页那位 UP 主",
+						"sign": "这一位是接口给的", "face": "https://f/a.jpg",
+						"official_verify": map[string]any{"type": 0, "desc": "接口给的认证"},
+					}},
+				})
+			})
+			s, tt, _ := newSpaceShell(t, b, true, "77")
+			s.navigate(followPath)
+			realDataWait(t, tt, "关注的 UP 主画出来了",
+				func() bool { return tt.HasText("关注页那位 UP 主") })
+			return s, tt
+		},
+		// ⚠️ 两条都要：一条是**接口给的真内容**，一条是「全部关注(N)」那个 N——
+		// 后者是 B 站的**总数**画上来的，少了它的话一个「每一格都画了但列表是空的」
+		// 实现照样能过第一条。
+		Want: []string{"关注页那位 UP 主", "接口给的认证", "全部关注(1)", "特别关注"},
 	},
 	{
 		Route: "/empty", Title: "空状态落地页",
@@ -441,4 +469,87 @@ func realDataFrames(tt *mygoui.Tester, n int) {
 	for range n {
 		tt.Frame()
 	}
+}
+
+// TestTheCountsInTheProseMatchTheCountsInTheCode 钉住「说明里的那个数」不是人记得的。
+//
+// # 为什么要有这一条
+//
+// 上一轮把 `/follow` 的画法和接口接上之后，「/follow 还没排票」这句假话**只在台账
+// 和 `evidence.go` 里撤掉了**，`main.go` 的抬头、README、`router.go` 的 `navigate`
+// **还有三处一字不差**地说着它，顺带那个「14 条里 12 条有画法」也该是 13。
+//
+// 而**全仓没有任何一条测试读这三处**——`TestTheRealDataLedgerCoversEveryRoute` 只
+// 遍历 `routes` 表，说服力全在代码里，于是这三句假话不会被任何一遍绿盖住。
+//
+// 这一条就把那个洞补上：数一遍真值，回头核这三处。
+//
+// # 为什么只核这三处、不扫全仓
+//
+// 「还没排票」「连壳子」这些词在**讲规矩**的地方是正当的（`realdata_test.go`
+// 文件头那三条规则举的例子就是），全仓扫会把那些一起判死，测出来的红没有信息。
+// 所以这里核的是**三处会陈述现状的散文**，且只断言三件具体的事：那个数对得上、
+// 没有过期的那句、没有把已经有画法的路由说成没有。
+func TestTheCountsInTheProseMatchTheCountsInTheCode(t *testing.T) {
+	s, _ := newShell(t)
+	withView := 0
+	var withoutView []Route
+	for _, r := range routes {
+		if s.builtPage(r) != nil {
+			withView++
+		} else {
+			withoutView = append(withoutView, r)
+		}
+	}
+	if withView == 0 || len(withoutView) == 0 {
+		t.Fatalf("数出来 %d 条有画法、%d 条没有——这两个数本身就不像话，先修 `builtPage`",
+			withView, len(withoutView))
+	}
+
+	// want 是这三处都要写着的那个数（「N 条有画法/有内容/接上了真数据」）。
+	want := fmt.Sprintf("%d 条", withView)
+	for _, f := range proseAboutRoutes {
+		body := readRepoFile(t, f)
+		if !strings.Contains(body, want) {
+			t.Errorf("%s 没有说「%s」——现在有画法的是 %d 条，"+
+				"而这一句是给读它的人看的（真值见 `routes` + `builtPage`）", f, want, withView)
+		}
+		// ⚠️ 过期的那两句：上一次更新时它们正是漏掉的那部分（说 /follow 没有画法）。
+		//
+		// **不查「12 条」**：那一串在 `router.go` 顶上说的是**上游 Biu** 的
+		// `src/routes.tsx`（「12 条在 Layout 里」），那是**另一件事、而且是真的**，
+		// 和「我们 14 条里有几条有画法」无关。而数字漂移已经被上面那条正向断言
+		// 盖住了——加一页忘了改散文，`%s` 就不在文件里；反之一页没了，`%s` 就不对。
+		for _, stale := range []string{"还没排票", "连壳子"} {
+			if strings.Contains(body, stale) {
+				t.Errorf("%s 里还有「%s」——它说的是 %v 的画法做出来之前的事，"+
+					"现在那几页都有画法了", f, stale, withoutView)
+			}
+		}
+		// 没有画法的那几条必须被点名：只有说得出「哪几条还没有」，那个数才有意义。
+		for _, r := range withoutView {
+			if !strings.Contains(body, r.Match) {
+				t.Errorf("%s 没有点名 %s（%s）——「还有 N 条没做」不说清是哪几条，"+
+					"读的人就得自己回去数", f, r.Match, r.Title)
+			}
+		}
+	}
+}
+
+// proseAboutRoutes 是那三处**陈述现状**的散文。
+//
+// ⚠️ **路径是相对包目录 `internal/ui` 的**（`go test` 把工作目录设成包目录）。
+var proseAboutRoutes = []string{"../../README.md", "../../main.go", "router.go"}
+
+// readRepoFile 读那三处散文之一。读不到就当场红——
+// **「读不到」绝不能当成「那句话不存在」**：那正是这个测试要防的那类错，
+// 而一个悄悄什么都没验的测试比没有更糟（上一轮就是这样：台账撤了，三处散文没撤，
+// 而全仓没有一条测试读它们）。
+func readRepoFile(t *testing.T, rel string) string {
+	t.Helper()
+	b, err := os.ReadFile(rel)
+	if err != nil {
+		t.Fatalf("读不到 %s：%v（路径写错了的话，这个测试就成了一句空话）", rel, err)
+	}
+	return string(b)
 }

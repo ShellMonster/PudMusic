@@ -36,7 +36,12 @@ func favoriteOnAListPage(t *testing.T, f *libFake, path string) (*Shell, *ui.Tes
 func TestFavoritingFromTheLaterListOpensTheDialog(t *testing.T) {
 	f := newLibFake(t).withLater(1, 1, "周杰伦的歌")
 	_, tt := favoriteOnAListPage(t, f, laterPath)
-	waitFrames(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
+	// ⚠️ **等的是「行画出来了」，不是「请求发出去了」**。两者之间隔着响应 →
+	// 解码 → 投递状态 → 唤醒 → 画一帧，机器一忙就赶不上——而下一步
+	// `RightClick` 要的正是那一行。原来的判据是 `callsOf(...) == 1`（请求记上了），
+	// 它比这一步需要的东西早，于是整包并行跑时偶发地红（症状是
+	// `ui: no element shows "…"`）。判据一律是结果，见基座那两条等法（shelltest_test.go）。
+	waitFrames(t, tt, "第一页的条目画出来", func() bool { return tt.HasText("周杰伦的歌") })
 
 	if err := tt.RightClick("周杰伦的歌"); err != nil {
 		t.Fatal(err)
@@ -62,7 +67,12 @@ func TestFavoritingFromTheLaterListOpensTheDialog(t *testing.T) {
 func TestFavoritingFromTheHistoryListOpensTheDialog(t *testing.T) {
 	f := newLibFake(t).withHistory(1, 10, 100, "听过的一首")
 	_, tt := favoriteOnAListPage(t, f, historyPath)
-	waitFrames(t, tt, "把第一页拉回来", func() bool { return f.callsOf(historyPathAPI) == 1 })
+	// ⚠️ **等的是「行画出来了」，不是「请求发出去了」**。两者之间隔着响应 →
+	// 解码 → 投递状态 → 唤醒 → 画一帧，机器一忙就赶不上——而下一步
+	// `RightClick` 要的正是那一行。原来的判据是 `callsOf(...) == 1`（请求记上了），
+	// 它比这一步需要的东西早，于是整包并行跑时偶发地红（症状是
+	// `ui: no element shows "…"`）。判据一律是结果，见基座那两条等法（shelltest_test.go）。
+	waitFrames(t, tt, "第一页的条目画出来", func() bool { return tt.HasText("听过的一首") })
 
 	if err := tt.RightClick("听过的一首"); err != nil {
 		t.Fatal(err)
@@ -87,7 +97,8 @@ func TestFavoritingFromTheSearchListOpensTheDialog(t *testing.T) {
 	b := newCollectionBili(t)
 	s.app.MountCollections(app.CollectionRefs{Client: collectionClient(t, b), Settle: 0})
 
-	waitFrames(t, tt, "结果回来", func() bool { return pageOf(s, searchTabSong).Loaded > 0 })
+	// 同样等「行画出来了」而不是「这一页 Loaded 了」——理由见上面那一条。
+	waitFrames(t, tt, "结果的行画出来", func() bool { return tt.HasText("第 1 页 第 1 首") })
 
 	if err := tt.RightClick("第 1 页 第 1 首"); err != nil {
 		t.Fatal(err)

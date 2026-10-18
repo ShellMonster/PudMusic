@@ -35,6 +35,10 @@ func (s *Shell) settingsShortcuts(c *ui.Context) {
 	cur := s.keys.snapshot()
 	ro := s.keys.readOnly()
 
+	// 这一帧画到了录制格——viewShortcuts 靠它判断「正在录」还有没有意义
+	//（这一页不画了，录制状态就该收掉，理由见那里）。
+	s.recorderShown = true
+
 	ui.Column(c).FillWidth().Gap(12).Children(func() {
 		// 顶上那一行：Biu 的 `<h2>快捷键设置</h2>` 和右边的「恢复默认」。
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
@@ -48,10 +52,18 @@ func (s *Shell) settingsShortcuts(c *ui.Context) {
 			ui.Text(c, "快捷键只读：这份文件来自更新的版本，这一版一个字都不会写回去。").
 				FontSize(12).TextColor(t.Danger)
 		}
-		// 这一票只做录下来，不做生效。摆一句在这儿，好过用户录完发现按 ⌘P
-		// 没反应，以为是坏了。
-		ui.Text(c, "这一版先把键录下来存住；按下去真的会做什么还没接上"+
-			"（应用内分发和全局注册是另一张票的事）。").
+		// 这一页两列分别管两件事，写出来，不然用户会以为「全局」那一列只是应用内
+		// 那一列的备份。挂掉的时候另有提示（syncGlobalShortcuts 弹的那一句），
+		// 写在这一页的是常态。
+		//
+		// ⚠️ 「切换mini/完整模式」那一条要在括号里说清楚：它切的是**这一扇窗里的
+		// 页面**，而这一扇窗在后台，所以从别的应用按它没有任何可见反应。Biu 那边
+		// mini 模式是「主窗口收起来 + 开一个 mini 窗口」，那是另一个窗口才做得成的事
+		//（见 shortcut_dispatch.go 里 toggleMiniPlayer 的注释）。
+		ui.Text(c, "应用内那一列：窗口在前台时按它就有用。全局那一列：切到别的"+
+			"应用时按它也有用（底下那个开关关掉就一个都不登记；「切换mini/完整模式」"+
+			"那一条除外，它切的是这一扇窗里的页面）。焦点在搜索框这类输入框里时"+
+			"快捷键让路，打的字照常进去。").
 			FontSize(12).TextColor(t.TextMuted)
 
 		// 三列的表头。Biu 的 `grid grid-cols-[1fr_200px_200px]`（`:102`）。
@@ -139,8 +151,13 @@ func conflictText(other shortcutItem, ok bool) string {
 //
 // 和 `applySetting` 同一个道理：静默丢掉是这一页最坏的失败方式——用户以为改了，
 // 下次打开又变回去，中间屏幕上什么也没发生过。
+//
+// 存住之后要把全局那一列重新登记一遍（`syncGlobalShortcuts`）：不改的话用户在
+// 这一页录了 ⌘⌥K，切到别的应用按 ⌘⌥K 还是上一条——而界面上明明白白写着新键。
 func (s *Shell) applyShortcutChange(what string, fn func() error) {
 	if err := fn(); err != nil {
 		s.addToast(what + "没存上：" + err.Error())
+		return
 	}
+	s.syncGlobalShortcuts()
 }

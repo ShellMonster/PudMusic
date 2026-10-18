@@ -66,6 +66,25 @@ type streamFixture struct {
 	// 真的带上）。
 	playQueries []url.Values
 
+	// musicTier 是音乐库取流接口会给回来的那一档（0..3，**-1 是试听片段**）。
+	//
+	// 🔴 -1 那一条是这一组最要紧的用例：B 站对没权限的那一档不报错，回的是一段
+	// 试听——地址能下、字节能播、播放器能出声，然后在用户以为歌还没放完的地方
+	// 停住，界面上一个错都没有。
+	musicTier int
+	// musicCDN 是那条流指向的地址。
+	musicCDN string
+	// musicGated 为真时这台假服务器模拟**会员曲**：要 320K 或无损会拿回**试听
+	// 片段**，要 192K / 128K 才给整首。`serveSongURL` 里的 `qualities` 表和它
+	// 一致——表是退档退到哪一档的唯一依据，两边不对上就等于拿假参数在赌。
+	musicGated bool
+	// songCalls 数音乐库取流接口被打了多少次（退档会打第二次）。
+	songCalls atomic.Int32
+	// songInfoCalls 数元信息接口被打了多少次。
+	songInfoCalls atomic.Int32
+	// songInfoFails 为真时元信息那一趟回 500（元信息是锦上添花，问不到不该拦住播放）。
+	songInfoFails bool
+
 	// media 是 CDN 上那份字节。
 	media []byte
 	// mediaHits 数 CDN 被打了多少次。
@@ -112,12 +131,68 @@ func (f *streamFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/x/player/wbi/playurl":
 		f.servePlayURL(w, r.URL.Query())
 
+	case r.URL.Path == "/audio/music-service-c/url":
+		f.serveSongURL(w, r.URL.Query())
+
+	case r.URL.Path == "/audio/music-service-c/web/song/info":
+		f.serveSongInfo(w)
+
 	case strings.HasPrefix(r.URL.Path, "/cdn/"):
 		f.serveMedia(w, r)
 
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// serveSongURL 回音乐库的取流。
+//
+// ⚠️ **外壳用 `msg` 不是 `message`**：真接口（`audio/music-service-c/url`）回的是
+// `msg`。照着投稿那条造的话「错的那一句中文原因」永远测不到。
+func (f *streamFixture) serveSongURL(w http.ResponseWriter, q url.Values) {
+	f.songCalls.Add(1)
+	tier := f.musicTier
+	if f.musicGated {
+		switch q.Get("quality") {
+		case "2", "3":
+			// 🔴 B 站对「没权限的那一档」**不报错**，回的是试听片段。
+			tier = int(bili.MusicTierPreview)
+		}
+	}
+	writeStreamJSON(w, map[string]any{"code": 0, "msg": "success", "ttl": 1,
+		"data": map[string]any{
+			"sid":     1293494,
+			"type":    tier,
+			"timeout": 10800,
+			"size":    12345678,
+			"cdns":    []string{f.musicCDN},
+			"title":   "月光",
+			"cover":   "",
+			"qualities": []any{
+				// ⚠️ **320K 和无损都要会员**：这样「退到不高于用户要的那一档、
+				// 又不用会员的最好那一档」才有得算，而它该退到 192K。
+				// 普通歌的表在 bili 包自己的用例里。
+				map[string]any{"type": 3, "require": 1},
+				map[string]any{"type": 2, "require": 1},
+				map[string]any{"type": 1, "require": 0},
+				map[string]any{"type": 0, "require": 0},
+			},
+		}})
+}
+
+// serveSongInfo 回音乐库的元信息。
+func (f *streamFixture) serveSongInfo(w http.ResponseWriter) {
+	f.songInfoCalls.Add(1)
+	if f.songInfoFails {
+		http.Error(w, "这一趟挂了", http.StatusBadGateway)
+		return
+	}
+	writeStreamJSON(w, map[string]any{"code": 0, "msg": "success", "ttl": 1,
+		"data": map[string]any{
+			"id": 1293494, "uid": 900, "uname": "某某音乐台",
+			"author": "夜灯", "title": "月光", "cover": "https://i0.hdslb.com/c.jpg",
+			"duration": 214, "bvid": "", "cid": 0, "collectIds": []int{},
+		}})
 }
 
 func (f *streamFixture) servePlayURL(w http.ResponseWriter, q url.Values) {
@@ -739,20 +814,27 @@ func lastPlayURLCids(f *streamFixture) []string {
 // `TestMissingCidIsResolvedBeforePlaying` 里。把它留在这儿的话，用户搜出来的歌
 // 一首都放不了，播放条上红字写「缺稿件 id 或分 P id」——说他缺一个他压根拿不到的
 // 东西，那句话是错的。
+//
+// ⚠️ 同样不在这一列里的还有**带 sid 的音乐库条目**：以前它在，是因为那一路
+// （`/audio/music-service-c/url`）没接上，于是判据 `bili.Media.Playable` 照抄了
+// Biu 的 `[2, 12]` 却只实现了 2——「可放」在界面上成了一句谎话。现在那一路接上了，
+// 带 sid 的条目真的放得出来（`TestAMusicLibraryEntryActuallyPlays`），
+// **判据和实际能放的一致了**。少 sid 的还在这一列里。
 func TestUnplayableOnlineItemsAreRefusedSynchronously(t *testing.T) {
 	a := app.New()
 	t.Cleanup(a.Close)
 
 	for _, it := range []app.Item{
 		{Source: "online", Type: "mv", Cid: "1", Title: "缺 bvid"},
-		{Source: "online", Type: "audio", Sid: "42", Title: "音乐库那条"},
+		{Source: "online", Type: "audio", Title: "缺音频 id"},
+		{Source: "online", Type: "", Title: "认不出来的类型"},
 	} {
 		err := a.PlayFrom(it)
 		if err == nil {
 			t.Errorf("%s 居然放进去了", it.Title)
 			continue
 		}
-		if !strings.Contains(err.Error(), "还没接") && !strings.Contains(err.Error(), "缺") {
+		if !strings.Contains(err.Error(), "缺") {
 			t.Errorf("%s 的错没说要紧：%v", it.Title, err)
 		}
 		if a.Queue().Len() != 0 {
@@ -1037,4 +1119,267 @@ func liveStreamWorkers() int {
 	dump := string(buf[:n])
 	return strings.Count(dump, "audio.(*StreamSource).pump") +
 		strings.Count(dump, "audio.(*StreamSource).watchdog")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B 站音乐库（sid）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// musicItem 是收藏夹里的一条音乐库条目（type=12）。
+func musicItem(sid, title string) app.Item {
+	return app.Item{Source: "online", Type: "audio", Sid: sid, Title: title}
+}
+
+// newMusicFixture 备好一台会放音乐库的「B 站」。
+//
+// ⚠️ 默认模拟的是**会员曲**：自动档要 320K，拿回来的是试听片段，然后退到 192K。
+// 让「退档」那条路默认就走到了——它是最容易写错的一段（退错了用户就听到一档
+// 自己没点的音质，而界面上看不出），而 fixture 不这么设的话那条路一次都不跑。
+func newMusicFixture(t *testing.T) *streamFixture {
+	t.Helper()
+	f := newStreamFixture(t)
+	f.media = readFlac(t)
+	f.musicCDN = cdnURL(f.URL, "song.m4a", 2*time.Hour)
+	f.musicTier = int(bili.MusicTier192)
+	f.musicGated = true
+	return f
+}
+
+// TestAMusicLibraryEntryActuallyPlays 是这一票的主线用例。
+//
+// 收藏夹里 `type=12` 的条目以前照常画、照常进队列，按播放必然报错。现在整条链
+// 走通了：队列 → 元信息 → 音乐库取流 → CDN → 字节源 → flacdec → 播放器。
+//
+// ⚠️ 断言的是解码器真出了样本（位置在走），不是「没报错」。
+func TestAMusicLibraryEntryActuallyPlays(t *testing.T) {
+	f := newMusicFixture(t)
+	a := newOnlineApp(t, f, t.TempDir())
+
+	if err := a.Enqueue(musicItem("1293494", "音乐库的一首")); err != nil {
+		t.Fatalf("音乐库条目被当场拒了：%v", err)
+	}
+	playing(t, a, "音乐库的一首")
+
+	waitFor(t, 15*time.Second, "进度条往前走", func() bool {
+		return a.Snapshot().Position > 0
+	})
+
+	st := a.Snapshot()
+	if st.Err != "" {
+		t.Errorf("播放条上有错：%s", st.Err)
+	}
+	// 退到 192K 之后徽章要跟着改。写死的话界面上显示的是用户**没点的那一档**。
+	if st.Quality != "192K" {
+		t.Errorf("音质徽章 = %q，want 192K", st.Quality)
+	}
+	if n := f.playCalls.Load(); n != 0 {
+		t.Errorf("投稿那条取流接口被打了 %d 次，want 0（音乐库不走它）", n)
+	}
+	if n := f.songInfoCalls.Load(); n != 1 {
+		t.Errorf("元信息接口被打了 %d 次，want 1（放歌之前问一次）", n)
+	}
+	// 一次要 + 一次退档。
+	if n := f.songCalls.Load(); n != 2 {
+		t.Errorf("音乐库取流接口被打了 %d 次，want 2（一次要 320K、一次退到 192K）", n)
+	}
+}
+
+// TestAMusicLibraryEntryFillsInTheAuthor 盯「问一次元信息」是真的补上了东西。
+//
+// 播放条的艺人名和系统媒体会话的艺人字段都吃它，而收藏夹那一行给不出
+// 作者名（`Media` 里只有 UP 名）。
+func TestAMusicLibraryEntryFillsInTheAuthor(t *testing.T) {
+	f := newMusicFixture(t)
+	a := newOnlineApp(t, f, t.TempDir())
+	s := newSpy()
+	a.SetMediaSink(s.publish)
+
+	// 这一条**故意不带标题和作者**：它们得靠元信息补。
+	if err := a.Enqueue(musicItem("1293494", "")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "月光")
+
+	// 艺人名一路走到系统媒体会话（锁屏上那一栏）。
+	waitFor(t, 15*time.Second, "艺人名送到媒体会话", func() bool {
+		return s.last().Artist == "夜灯"
+	})
+	if got := s.last().Artist; got != "夜灯" {
+		t.Errorf("艺人 = %q，want 夜灯（song/info 的 author）", got)
+	}
+}
+
+// TestAMusicLibraryEntryStillPlaysWhenSongInfoFails 元信息是锦上添花。
+//
+// 🔴 **问不到不许拦住播放**：取流只要 sid，元信息不是它的前提。把它变成硬依赖
+// 的后果是「网络抖一下就放不出歌」，而那时候歌其实取得到——少一个作者名
+// （播放条上那一句空着）比放不出歌好得多。
+func TestAMusicLibraryEntryStillPlaysWhenSongInfoFails(t *testing.T) {
+	f := newMusicFixture(t)
+	f.songInfoFails = true
+	a := newOnlineApp(t, f, t.TempDir())
+
+	if err := a.Enqueue(musicItem("1293494", "标题本来就有")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "标题本来就有")
+
+	if st := a.Snapshot(); st.Err != "" {
+		t.Errorf("元信息问不到就不放了，播放条上写着：%s", st.Err)
+	}
+}
+
+// TestAMusicPreviewNeverReachesThePlayer 这一路最要紧的一条。
+//
+// B 站对「没权限的那一档」不报错，回的是一段试听片段：地址能下、字节能播、
+// 播放器能出声，然后在用户以为歌还没放完的地方停住。放它过去，「放不了」就
+// 换成了一个更难解释的样子——界面上一个错都没有。
+func TestAMusicPreviewNeverReachesThePlayer(t *testing.T) {
+	f := newMusicFixture(t)
+	f.musicTier = int(bili.MusicTierPreview)
+	a := newOnlineApp(t, f, t.TempDir())
+
+	if err := a.Enqueue(musicItem("1293494", "会员曲")); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFor(t, 15*time.Second, "播放条上说明白原因", func() bool {
+		return a.Snapshot().Err != ""
+	})
+	if a.Snapshot().HasTrack {
+		t.Error("只拿得到试听片段，却照样出声了")
+	}
+	got := a.Snapshot().Err
+	if !strings.Contains(got, "会员") {
+		t.Errorf("播放条上写的是 %q，要说清差在哪（会员）", got)
+	}
+	if !strings.Contains(got, "试听") {
+		t.Errorf("播放条上写的是 %q，要说清拿到的是试听片段而不是整首", got)
+	}
+}
+
+// TestChangingQualityKeepsAMusicLibraryTrack 换音质在音乐库这一路上**整条跑得通**。
+//
+// 换回来还是同一档时不该打断正在放的歌（`SameTier`），而这一条盯的是那一整条路
+// 在音乐库条目上没被弄坏：换了档、没报错、歌还在放、徽章没变、位置没退。
+//
+// ⚠️ **它不钉 `SameTier` 的对错**：真让 `SameTier` 恒假（等于每次点音质都重开
+// 播放器），这一条仍然是绿的——重开那一步会把歌**从原位置接着放**，界面上看得出
+// 的只有一瞬间的接缝，无头环境量不到。钉那个逻辑的是
+// `bili.TestSameTierComparesBothNumberings`（把 `SameTier` 改成恒假就红）。
+// 这一条钉的是它的**四周**：接线、缓存、徽章、位置。
+func TestChangingQualityKeepsAMusicLibraryTrack(t *testing.T) {
+	f := newMusicFixture(t)
+	a := newOnlineApp(t, f, t.TempDir())
+	if err := a.Enqueue(musicItem("1293494", "换音质")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "换音质")
+	waitFor(t, 15*time.Second, "先走起来", func() bool { return a.Snapshot().Position > 0 })
+
+	before := a.Snapshot().Position
+	// 点「省流量」：这台假服务器上要到的 128K 会退到 192K——和现在这一档一样。
+	//
+	// ⚠️ **判据一律是结果，不是睡固定时长**（同一个道理见 `collectionpage_test.go`
+	// 的 `waitFrameFor` 顶上那段）：这一趟走完了 = 取流接口又被打了一次。原来
+	// 这里睡两秒，慢机器上要么白等、要么不够；而这一组整体还要跑十几分钟，
+	// 白等两秒是实打实的账。
+	wantCalls := f.songCalls.Load() + 1
+	a.SetAudioQuality(bili.AudioLow)
+	waitFor(t, 15*time.Second, "换音质那一趟走完", func() bool {
+		return f.songCalls.Load() >= wantCalls
+	})
+	// 而它**没有打断歌**：位置还在往前走。真被打断的话 `Playing` 会变 false
+	// 并且不会自己回来，这一等就会超时——这比「睡完再看一眼」可靠，而且顺带
+	// 给了那条 goroutine 跑完的时间（不然会偶发地红）。
+	waitFor(t, 15*time.Second, "歌没被打断（位置还在往前走）", func() bool {
+		st := a.Snapshot()
+		return st.Playing && st.Position > before
+	})
+
+	st := a.Snapshot()
+	if st.Err != "" {
+		t.Errorf("换音质失败：%s", st.Err)
+	}
+	if st.Quality != "192K" {
+		t.Errorf("徽章 = %q，want 192K", st.Quality)
+	}
+	if st.Position < before {
+		t.Errorf("播放位置从 %v 退到了 %v：换同一档不该动位置", before, st.Position)
+	}
+}
+
+// TestEveryPlayableEntryCanActuallyBeStreamed 是这一票的**不变量**。
+//
+// `bili.Media.Playable` 说什么能放，界面上就照着画、照着进队列——所以它判「能放」
+// 的那几种，**取流那一层必须真的放得出来**。当初 sid 那一路没接时判据抄对了、
+// 那一路没跟上，于是「可放」成了一句界面上的谎话，一路绿过所有测试，直到真去播。
+//
+// 这里把两种身份都真放一遍：走的接口不一样，漏掉哪一个都会回到当初那个形状。
+func TestEveryPlayableEntryCanActuallyBeStreamed(t *testing.T) {
+	t.Run("投稿", func(t *testing.T) {
+		f := newStreamFixture(t)
+		f.media = readFlac(t)
+		f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
+		a := newOnlineApp(t, f, t.TempDir())
+		if err := a.Enqueue(onlineItem("BV1xx", "123", "投稿")); err != nil {
+			t.Fatal(err)
+		}
+		playing(t, a, "投稿")
+	})
+
+	t.Run("音乐库", func(t *testing.T) {
+		f := newMusicFixture(t)
+		a := newOnlineApp(t, f, t.TempDir())
+		if err := a.Enqueue(musicItem("1293494", "音乐库")); err != nil {
+			t.Fatal(err)
+		}
+		playing(t, a, "音乐库")
+	})
+}
+
+// TestAFailedQualitySwitchDoesNotLeaveItsWordsBehind 换档失败的红字不许粘住。
+//
+// 🔴 场景：点「无损」→ 取流失败 → 播放条上写「这一首没有无损」，**歌照常放着**
+// （那一档拿不到，但手上那条是好的）→ 用户改主意点「高音质」→ 拿回来的还是
+// 正在放的那一档，于是**不打断**，直接走人。
+//
+// 走人的那一支原来不清 `errText`，于是那句「这一首没有无损」会一直挂到下一首
+// 歌为止——而歌好好地在放、用户点的档也拿到了。**一句错的红字，比没有更糟**。
+//
+// `failQualitySwitch` 那段注释为失败那一半操过心（迟到的失败不许盖住后一次
+// 成功），这一条是它漏掉的另一半：成功的那一半也可能留下一句旧的。
+func TestAFailedQualitySwitchDoesNotLeaveItsWordsBehind(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = readFlac(t)
+	url := cdnURL(f.URL, "a.flac", 2*time.Hour)
+	// 只有 320K 这一档：**点无损一定拿不到**，而「高音质」拿回来的正是现在这一档。
+	f.onPlayURL(map[string]any{"duration": 1, "audio": []any{map[string]any{
+		"id": int(bili.QualityHigh320), "bandwidth": 110836, "codecs": "flac",
+		"mimeType": "audio/mp4", "baseUrl": url,
+	}}})
+
+	a := newOnlineApp(t, f, t.TempDir())
+	if err := a.Enqueue(onlineItem("BV1", "1", "只有 320K 的一首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "只有 320K 的一首")
+
+	// 点「无损」：拿不到，播放条上如实说，歌照放。
+	a.SetAudioQuality(bili.AudioLossless)
+	waitFor(t, 15*time.Second, "播放条上说清没有无损", func() bool {
+		return a.Snapshot().Err != ""
+	})
+	if got := a.Snapshot().Err; !strings.Contains(got, "无损") {
+		t.Fatalf("播放条上写的是 %q，want 一句说清「没有无损」的话", got)
+	}
+
+	// 改主意点「高音质」：拿回来的就是正在放的那一档 → 不打断。
+	a.SetAudioQuality(bili.AudioHigh)
+	waitFor(t, 15*time.Second, "那句不成立的话被清掉", func() bool {
+		return a.Snapshot().Err == ""
+	})
+	if st := a.Snapshot(); !st.Playing || st.Quality != "320K" {
+		t.Errorf("清掉那句话的时候把歌弄坏了：playing=%v 徽章=%q", st.Playing, st.Quality)
+	}
 }

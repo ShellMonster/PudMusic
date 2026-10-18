@@ -20,16 +20,18 @@ import (
 type recorded struct {
 	played  [][]app.Item // 每次「播放」收到的队列
 	added   [][]app.Item // 每次「添加到队列」收到的
+	nexted  []app.Item   // 每次「下一首播放」收到的
 	opened  []app.Item   // 每次「在…打开」收到的
 	notices []string     // 说过的话
 }
 
 func (r *recorded) actions() Actions {
 	return Actions{
-		Play:   func(items []app.Item) { r.played = append(r.played, items) },
-		Add:    func(items []app.Item) { r.added = append(r.added, items) },
-		Open:   func(item app.Item) { r.opened = append(r.opened, item) },
-		Notify: func(text string) { r.notices = append(r.notices, text) },
+		Play:     func(items []app.Item) { r.played = append(r.played, items) },
+		Add:      func(items []app.Item) { r.added = append(r.added, items) },
+		PlayNext: func(item app.Item) { r.nexted = append(r.nexted, item) },
+		Open:     func(item app.Item) { r.opened = append(r.opened, item) },
+		Notify:   func(text string) { r.notices = append(r.notices, text) },
 	}
 }
 
@@ -59,7 +61,7 @@ func TestRightClickOpensTheBiuMenu(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := tt.Menu()
-	want := []string{"播放", "添加到队列", "-", "在 B 站打开", "-", "收藏", "下载音频"}
+	want := []string{"播放", "下一首播放", "添加到队列", "-", "在 B 站打开", "-", "收藏", "下载音频"}
 	if !slices.Equal(got, want) {
 		t.Errorf("菜单上有 %q，want %q", got, want)
 	}
@@ -94,6 +96,60 @@ func TestChoosingPlayQueuesThisSongAndTheRestAfterIt(t *testing.T) {
 		if got[i].Bvid != want {
 			t.Errorf("队列第 %d 首是 %q，want %q", i+1, got[i].Bvid, want)
 		}
+	}
+}
+
+// TestChoosingPlayNextHandsOverJustThatSong 钉住「下一首播放」的**那一句字**
+// 说的是什么：插到正在放的那首后面。
+//
+// ⚠️ 它和「添加到队列」差在**插在哪**，而插在哪只有队列那边认得：这一层只
+// 负责把**这一首**交过去，一个都不用带。带着整段过去的（也就是照着「播放」
+// 抄一遍）的话，用户的队列会从当前这首起整个换一遍——症状是「按了下一首
+// 播放，正在放的歌跳了」。
+//
+// 真的落位在 `internal/app` 的 `TestInsertNextLandsRightAfterTheCurrentOne`。
+func TestChoosingPlayNextHandsOverJustThatSong(t *testing.T) {
+	rec := &recorded{}
+	_, tt := newList(t, rec.actions(), onlineSongs(5))
+
+	if err := tt.RightClick("在线的歌 C"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("下一首播放"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(rec.nexted) != 1 {
+		t.Fatalf("收到 %d 次「下一首播放」，want 1 次", len(rec.nexted))
+	}
+	if got := rec.nexted[0].Bvid; got != "BV3" {
+		t.Errorf("排进下一首的是 %q，want BV3", got)
+	}
+	// **不能顺手换成队列**：这一下只动一首，用户正在听的歌不该被换掉。
+	if len(rec.played) != 0 {
+		t.Errorf("「下一首播放」顺手换了一次队列：%v", rec.played)
+	}
+	if len(rec.added) != 0 {
+		t.Errorf("「下一首播放」顺手接了一次队尾：%v", rec.added)
+	}
+}
+
+// TestPlayNextSaysSoWhenNothingIsWired 钉住没接线时它**说一句**，不是按了没反应。
+//
+// 「按了没反应比还没接更难解释」——用户分不清是这一项坏了还是整个应用坏了。
+func TestPlayNextSaysSoWhenNothingIsWired(t *testing.T) {
+	rec := &recorded{}
+	// 只留 Notify：`PlayNext` 缺席就是「那一层没接线」的样子。
+	_, tt := newList(t, Actions{Notify: func(s string) { rec.notices = append(rec.notices, s) }}, onlineSongs(3))
+
+	if err := tt.RightClick("在线的歌 B"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("下一首播放"); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.notices) == 0 {
+		t.Errorf("没接线的「下一首播放」按下去一声不吭：%v", rec.notices)
 	}
 }
 

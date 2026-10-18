@@ -131,7 +131,11 @@ func mediasFixture(n int) []map[string]any {
 			"id": 1000 + i, "type": 2, "title": "歌 " + strconv.Itoa(i+1),
 			"cover": "c.jpg", "duration": 185, "attr": 0, "page": 1,
 			"pubtime": 1700000000,
-			"bvid":    "BV1xx411c7mD", "upper": map[string]any{"name": "UP " + strconv.Itoa(i)},
+			"bvid":    "BV1xx411c7mD",
+			// ⚠️ `mid` 要在：B 站逐条给了 `upper.mid`，而播放条上那一行 UP 名
+			// 要靠它拼 `/user/{id}`。少解析它的话从收藏夹放的歌在播放条上**点
+			// 不动**——而名字还在，看上去像好的。
+			"upper": map[string]any{"name": "UP " + strconv.Itoa(i), "mid": 900 + i},
 		})
 	}
 	return out
@@ -490,5 +494,35 @@ func TestInvalidContentsStillComeBack(t *testing.T) {
 	}
 	if pg.Medias[1].Attr == 0 {
 		t.Error("失效那条的 Attr 没读出来")
+	}
+}
+
+// TestACollectionMediaCarriesTheOwnerID 钉住 `upper.mid` 真的被解析下来。
+//
+// 播放条上那一行 UP 名要靠它拼 `/user/{id}`（`app.Item.ArtistMid`）。少了它
+// 症状是**半个功能**：名字照旧显示、点下去没反应——而界面上看不出坏了。
+func TestACollectionMediaCarriesTheOwnerID(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(pathResourceList, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			"medias": mediasFixture(2), "has_more": false,
+		}))
+	})
+
+	pg, err := f.client(t, Options{}).CollectionMedias(context.Background(), 7, SortByFavTime, 1, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pg.Medias) != 2 {
+		t.Fatalf("拿到 %d 条内容，want 2 条", len(pg.Medias))
+	}
+	for i, m := range pg.Medias {
+		if m.Owner != "UP "+strconv.Itoa(i) {
+			t.Errorf("第 %d 条的 UP 名是 %q，want %q", i, m.Owner, "UP "+strconv.Itoa(i))
+		}
+		if m.OwnerMid != int64(900+i) {
+			t.Errorf("第 %d 条的 UP 编号是 %d，want %d——播放条上那一句点不动",
+				i, m.OwnerMid, 900+i)
+		}
 	}
 }

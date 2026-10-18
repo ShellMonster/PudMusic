@@ -97,6 +97,10 @@ func Friendly(err error) string {
 		return "播放地址过期了，正在换一条新的"
 	case errors.Is(err, ErrNoLoginForOnline):
 		return "在线播放要先登录 B 站账号"
+	case errors.Is(err, ErrPreviewOnly):
+		// 试听片段要说清「为什么只有这么一点」和「怎么办」。不说的话用户听到
+		// 半首歌停住，只会觉得是应用坏了。
+		return "这一首要会员才有完整版，现在只有试听片段"
 	}
 
 	// 字节源拉不动了。**先说「不是歌坏了」**——这一条很容易被误读成
