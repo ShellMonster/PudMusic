@@ -198,11 +198,11 @@ type Client struct {
 	// jars 是 cookie jar 的可换壳，见 session.go。
 	jars *jarHolder
 
-	// 四个主机名做成字段而不是常量，是为了测试能指到 fixture 上。
+	// 五个主机名做成字段而不是常量，是为了测试能指到 fixture 上。
 	//
 	// ⚠️ 只有包内的测试能改（它们在同一个包里），对外没有任何入口
 	// 能改——生产代码没有办法把请求发到别处去。
-	hostAPI, hostPassport, hostMember, hostWWW string
+	hostAPI, hostPassport, hostMember, hostWWW, hostSearch string
 
 	// sessionBase 是读写登录 cookie 时用的那个地址。
 	//
@@ -223,7 +223,7 @@ func (c *Client) cookieURL() *url.URL {
 	return u
 }
 
-// TestOnlyPointHostsAtFixture 把三个主机和 cookie 地址全都指到一台
+// TestOnlyPointHostsAtFixture 把**每一个**主机和 cookie 地址全都指到一台
 // 本地服务器上。
 //
 // # 为什么需要它
@@ -246,6 +246,7 @@ func (c *Client) TestOnlyPointHostsAtFixture(base string) {
 	c.hostPassport = base
 	c.hostMember = base
 	c.hostWWW = base
+	c.hostSearch = base
 	c.sessionBase = base
 	// 已经取过的 WBI key 是从旧主机来的，换了主机就不能再用。
 	c.wbiState.mu.Lock()
@@ -277,6 +278,7 @@ func NewClient(o Options) *Client {
 		hostPassport: HostPassport,
 		hostMember:   HostMember,
 		hostWWW:      HostWWW,
+		hostSearch:   HostSearch,
 		sessionBase:  "https://www.bilibili.com/",
 	}
 	if c.now == nil {
@@ -478,6 +480,9 @@ const (
 	// 音乐库的元信息 `/audio/music-service-c/web/song/info` 就是（见 audio.go）。
 	// 凭据边界照样认它（白名单按 `.bilibili.com` 后缀，见 `app.InjectPolicy`）。
 	HostWWW = "https://www.bilibili.com"
+	// HostSearch 是**搜索站**那一台。搜索联想词（`/main/suggest`）在它上面而不在
+	// api 上面（见 suggest.go）。凭据边界照样认它（同一个 `.bilibili.com` 后缀）。
+	HostSearch = "https://s.search.bilibili.com"
 )
 
 func orDefault(v, fallback string) string {

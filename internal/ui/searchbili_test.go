@@ -54,6 +54,16 @@ type biliFixture struct {
 	searched []string
 	// pagelistCalls 数分 P 列表被叫了几次——「放歌之前有没有问过」就看你叫没叫。
 	pagelistCalls int
+
+	// suggestTerms 是每个词该回的那批联想词；suggestAsked 记被问过的词（按顺序）；
+	// suggestFail 非 0 时这一路一律回这个业务 code（造「拉不到」）。
+	//
+	// 三样都是**按词**记的：防抖那一组要量的是「同一个词有没有被问第二遍」，而那
+	// 需要把每一次请求分别记下来。
+	suggestTerms map[string][]string
+	suggestAsked []string
+	suggestServe int
+	suggestFail  int
 	// videoPages 顶掉分 P 列表的回包。nil 是默认那**一集**。
 	videoPages []any
 	// served 数**已经回了**的搜索响应。放行一个卡住的响应之后靠它知道「旧的回去
@@ -88,7 +98,7 @@ const (
 // newBiliFixture 建一台假 B 站。search 造几页，每页 n 条。
 func newBiliFixture(t *testing.T, n int) *biliFixture {
 	t.Helper()
-	f := &biliFixture{gates: map[string]chan struct{}{}}
+	f := &biliFixture{gates: map[string]chan struct{}{}, suggestTerms: map[string][]string{}}
 
 	f.media, _ = os.ReadFile(flacAssetPath(t))
 	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
@@ -155,6 +165,9 @@ func (f *biliFixture) serve(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/x/web-interface/wbi/search/type":
 		f.serveSearch(w, r)
 
+	case r.URL.Path == "/main/suggest":
+		f.serveSuggest(w, r)
+
 	case r.URL.Path == "/x/player/pagelist":
 		f.serveVideoPages(w, r)
 
@@ -204,6 +217,69 @@ func (f *biliFixture) serveSearch(w http.ResponseWriter, r *http.Request) {
 			}},
 		},
 	})
+}
+
+// serveSuggest 是搜索联想词（搜索站那台，`#97`）。
+//
+// ⚠️ **回包形状照着真接口抄**：`data` 是一个对象，里面 `tag` 是那一列词；每一项
+// 一个干净的 `term`、一个把命中的部分包进 `<em class="keyword">` 的 `name`。
+// 少一层或者多一层的话，那边解析出来的就是空的，而界面上的症状是「浮层里只有历史
+// 那一档」——和「真的拉不到」长得一模一样。
+func (f *biliFixture) serveSuggest(w http.ResponseWriter, r *http.Request) {
+	kw := r.URL.Query().Get("term")
+
+	f.mu.Lock()
+	f.suggestAsked = append(f.suggestAsked, kw)
+	terms, code := f.suggestTerms[kw], f.suggestFail
+	f.suggestServe++
+	f.mu.Unlock()
+
+	if code != 0 {
+		writeBiliJSON(w, map[string]any{"code": code, "message": "请求过于频繁", "ttl": 1})
+		return
+	}
+	tag := make([]any, 0, len(terms))
+	for _, term := range terms {
+		tag = append(tag, map[string]any{
+			"term": term, "name": term, "type": "huashu", "ref": "", "mid": 0,
+		})
+	}
+	writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
+		"data": map[string]any{"tag": tag}})
+}
+
+// setSuggestTerms 改某一词该回的那批联想词。
+//
+// ⚠️ **带着锁改**：handler 在锁里读这张表，测试在锁外写的话，一趟还在路上的响应
+// 就可能和这一写撞上（`go test -race` 报出来的那种）。
+func (f *biliFixture) setSuggestTerms(kw string, terms ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.suggestTerms[kw] = terms
+}
+
+// setSuggestFail 改这一路要回的业务 code（0 = 正常）。
+func (f *biliFixture) setSuggestFail(code int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.suggestFail = code
+}
+
+// suggestCalls 记下这一路上被问过的词（按顺序）。
+func (f *biliFixture) suggestCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.suggestAsked...)
+}
+
+// suggestServed 数这一路上**已经回了**几次（不是「发了几次」）。
+//
+// 两个数的差就是还在路上的那些。判「那一次问完了」要的是它：只等「发了」的话，
+// 界面上的状态还停在请求发出去的那一刻，验的是中间态。
+func (f *biliFixture) suggestServed() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.suggestServe
 }
 
 // serveVideoPages 是分 P 列表。

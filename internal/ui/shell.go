@@ -86,6 +86,12 @@ type Shell struct {
 	// images 是网络封面缓存。整个窗口共用一个。
 	images *imgcache.Cache
 
+	// avatar 是顶栏右上角那一格的状态（见 navbar_avatar.go）。
+	//
+	// 建在 Shell 上而不是每帧新建：那一格跨帧要记「已经问过了没有」，每帧
+	// 新建等于每帧都当成没问过——那是一帧一个请求。
+	avatar avatarState
+
 	// local 是本地音乐那一页自己的一摊状态：表格 / 列表 / 网格三档的控件、
 	// 筛选条件、两道确认弹窗、以及**逐窗口**的唤醒句柄表。见 localmusic.go。
 	//
@@ -201,6 +207,11 @@ type Shell struct {
 	searchKeyword string
 	searchSuggest bool
 	searchFocused bool
+	// terms 是浮层里「联想词」那一档的防抖状态，见 navbar_suggest.go。
+	//
+	// 挂在壳上而不是局部变量：即时模式每一帧都重画，「敲到哪儿了、从哪天起等的
+	// 那 500ms」下一帧就得还在。
+	terms suggestTerms
 	// feed 是「动态更新红点」的 5 分钟节奏。假时钟在 navbar_feed.go。
 	feed *feedPoller
 	// hist 是搜索历史。没挂上盘时是内存里的一份（见 searchhistory.go）。

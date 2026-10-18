@@ -69,10 +69,38 @@ type biliFixture struct {
 	seen []string
 	// exits 是收到过几次「让 B 站作废这个会话」的请求。
 	exits int
+	// nav 是 nav 接口那一支回的 data。nil = 回一个空对象（B 站说「没登录」
+	// 时的形状，见 `bili.Nav`）。
+	nav map[string]any
+}
+
+// onNav 装好 nav 接口回什么。
+func (f *biliFixture) onNav(data map[string]any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nav = data
+}
+
+// hits 数打到某条路径上的请求有几回。
+func (f *biliFixture) hits(path string) int {
+	n := 0
+	for _, p := range f.requests() {
+		if p == path {
+			n++
+		}
+	}
+	return n
 }
 
 // pathExit 是「让 B 站作废这个会话」的接口。
 const pathExit = "/x/passport-login/exit"
+
+// pathNav 是「当前登录的是谁、我的头像在哪」那个接口（`bili/wbi.go`）。
+//
+// ⚠️ 之前这个 fake 对它是一律 404 的，而那**恰好让闸门看起来是对的**：没登录时
+// 不发请求、发的话会 404——两个都测不出区别。加进来之后，「未登录时压根没发」
+// 才是一条真的能红的断言（见 `accountnav_test.go`）。
+const pathNav = "/x/web-interface/nav"
 
 func newBiliFixture(t *testing.T) *biliFixture {
 	t.Helper()
@@ -161,6 +189,11 @@ func newBiliFixture(t *testing.T) *biliFixture {
 			})
 		case pathExit:
 			writeFixtureJSON(t, w, 0, "0", nil)
+		case pathNav:
+			f.mu.Lock()
+			nav := f.nav
+			f.mu.Unlock()
+			writeFixtureJSON(t, w, 0, "0", nav)
 		default:
 			http.NotFound(w, r)
 		}

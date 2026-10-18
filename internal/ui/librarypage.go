@@ -346,12 +346,16 @@ const keywordBoxLabel = "搜索标题/UP主名称"
 // 用户一次只能在一处敲字，两个钟各自醒着就是两个定时器，而哪一个先停都不对。
 // 另起一个的代价还不止是那一个 goroutine——它会让「防抖 500ms」这件事在代码里
 // 出现两个出处，改一个忘了另一个时界面上一点也看不出来。
+//
+// 🔴 **搜索框的联想词那一档也共用它**（`suggestSearching`，见
+// `navbar_suggest.go`）：理由一模一样——同一个搜索框上的同一个「等用户把词敲完」，
+// 而且它那个钟不该在浮层收掉之后还醒着。
 func (s *Shell) syncSearchWatch() {
 	want := false
 	if p := s.libraryPageAt(s.router.Path()); p != nil {
 		want = !p.pendingSince.IsZero()
 	}
-	if s.lyricsSearching() {
+	if s.lyricsSearching() || s.suggestSearching() {
 		want = true
 	}
 	switch {
