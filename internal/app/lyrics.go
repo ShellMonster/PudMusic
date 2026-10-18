@@ -266,18 +266,34 @@ func (a *App) loadLyrics(key string, gen int) {
 }
 
 // PutLyrics 把一份歌词写进缓存，并立刻显示出来。这是给「找到了歌词」那一条路用的
-// （`AdoptLyricPreview` 调它，见 lyrics_search.go），缓存键取当前这一首。
+// （`AdoptLyricPreview` 走的是 `putLyricsLocked`，见 lyrics_search.go），缓存键取
+// 当前这一首。
 //
 // ⚠️ 译文**整个换掉**：旧源那份得跟着走，否则界面上叠着新原文和旧译文——两行对不上
 // 的字，比没有译文更难懂。
 func (a *App) PutLyrics(lrc, translated string) {
 	a.mu.Lock()
-	if a.lyricKey == "" {
+	key := a.lyricKey
+	if key == "" {
 		a.mu.Unlock()
 		return
 	}
-	// 代次加一：正在回来的那次后台读盘（见 loadLyrics 的注释）到这时候已经
-	// 过时了，它要是回来就会把刚换的这一份盖掉。
+	entry, c := a.putLyricsLocked(key, lrc, translated)
+	wake := a.wake
+	a.mu.Unlock()
+	a.saveLyrics(c, key, entry, wake)
+}
+
+// putLyricsLocked 把一份歌词装进状态，返回要落盘的那一份和缓存。**必须拿着 a.mu 调**；
+// **落盘不在这里做**（见 `saveLyrics`）。
+//
+// 🔴 **key 是调用方给的，不是这里现读的**。原因在 `AdoptLyricPreview`：它要先验
+// 「当前那首歌就是预览的那首」再落盘，而那次验和这次读**必须落在同一个临界区**里
+// ——分两次取锁，中间落一次换歌，就会把甲的歌词写进乙的缓存文件，而且函数还返回
+// 空串（成功）。写成「验一次、放锁、再调一个现读 key 的函数」正好就是那个窗口。
+func (a *App) putLyricsLocked(key, lrc, translated string) (lyrics.Entry, *lyrics.Cache) {
+	// 代次加一：正在回来的那次后台读盘（见 loadLyrics 的注释）到这时候已经过时了，
+	// 它要是回来就会把刚换的这一份盖掉。
 	a.lyricGen++
 	// 偏移和字号是**用户调的值**，换一份歌词不该把它们带走（上游换源只换
 	// `setLyrics`/`setTranslatedLyrics`，不动这两个，见 `index.tsx:269-278`）。
@@ -289,15 +305,16 @@ func (a *App) PutLyrics(lrc, translated string) {
 	}
 	a.lyricEntry = entry
 	a.lyricRows = lyrics.Rows(lrc, translated)
-	key := a.lyricKey
-	c := a.lyricCache
-	wake := a.wake
-	a.mu.Unlock()
+	return entry, a.lyricCache
+}
 
-	// ⚠️ 用**锁里做出来的那一份** `entry`，不要回去读 `a.lyricEntry`。
-	// 防抖落盘跑在 `time.AfterFunc` 自己的 goroutine 上（见 flushLyrics），它会在
-	// 锁里写 `a.lyricEntry`；而 `lyrics.Entry` 里装的是 `string` 字段，撕裂读出来
-	// 就是一个野指针——`-race` 抓得到，产线上是随机崩。
+// saveLyrics 把 entry 写到 key 那一条上，然后叫醒界面。**锁外调**。
+//
+// ⚠️ 用**传进来的 entry**，不要回去读 `a.lyricEntry`：防抖落盘跑在
+// `time.AfterFunc` 自己的 goroutine 上（见 flushLyrics），它会在锁里写
+// `a.lyricEntry`；而 `lyrics.Entry` 里装的是 `string` 字段，撕裂读出来就是一个野
+// 指针——`-race` 抓得到，产线上是随机崩。
+func (a *App) saveLyrics(c *lyrics.Cache, key string, entry lyrics.Entry, wake func()) {
 	if c != nil {
 		if err := c.Save(key, entry); err != nil {
 			log.Printf("biu: 歌词缓存写不下去：%v", err)

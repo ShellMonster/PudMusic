@@ -53,18 +53,40 @@ const lyricsDirName = "lyrics"
 // 不如一开始就一个都不给）。
 //
 // ⚠️ **拿不到应用数据目录的时候，两个源照挂**：缓存不落盘只是关掉之后不记得，而
-// 那两个源压根不要目录。所以这里**不能像原来那样 early return**——返回了就等于把
-// 「去找一份歌词」这件事整个关掉了，而界面上那个空状态恰恰在劝用户去找。
+// 那两个源压根不要目录。所以这里**不能 early return**——返回了就等于把「去找一份
+// 歌词」这件事整个关掉了，而界面上那个空状态恰恰在劝用户去找。
 func MountLyrics(a *app.App) {
-	dir, err := mygo.App.Path(mygo.PathUserData)
-	if err != nil {
-		log.Printf("biu: 拿不到应用数据目录，这次的歌词关掉就没了：%v", err)
-	}
-	// 拿不到目录时 `dir` 是空串，缓存那一层对空目录是**只读不写**。
-	a.MountLyrics(lyrics.NewCache(filepath.Join(dir, lyricsDirName)))
-
+	a.MountLyrics(lyrics.NewCache(lyricsCacheDir(appDataDir())))
 	a.MountLyricSources(
 		lyrics.NewNetease(newCredentialTransport().Client(nil)),
 		lyrics.NewLRCLib(newCredentialTransport().Client(nil)),
 	)
+}
+
+// appDataDir 是应用数据目录，拿不到时记一条日志并返回空串。
+//
+// 拿不到不算错误：和搜索历史、快捷键同一套规矩（见文件头「拿不到目录不算错误」）。
+func appDataDir() string {
+	dir, err := mygo.App.Path(mygo.PathUserData)
+	if err != nil {
+		log.Printf("biu: 拿不到应用数据目录，这次的歌词关掉就没了：%v", err)
+		return ""
+	}
+	return dir
+}
+
+// lyricsCacheDir 是歌词缓存落在哪儿。**空目录进、空目录出**。
+//
+// 🔴 **不能写成 `filepath.Join(dir, lyricsDirName)` 了事**：空目录时 `Join` 返回的是
+// **相对路径** `"lyrics"`（不是空串！），而 `lyrics.NewCache` 只把**空串**当成
+// 「不落盘」。于是「拿不到数据目录」这一种情况下，缓存会在**进程的当前工作目录**
+// 里建出 `lyrics/` 并真的写盘——应用数据没拿到，却往用户碰巧启动它的那个目录里
+// 写了一堆缓存文件。
+//
+// 所以这里显式判空：空就是空，`NewCache("")` 只读不写（见 `lyrics.Cache.Path`）。
+func lyricsCacheDir(userDataDir string) string {
+	if userDataDir == "" {
+		return ""
+	}
+	return filepath.Join(userDataDir, lyricsDirName)
 }

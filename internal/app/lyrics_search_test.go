@@ -6,6 +6,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -404,5 +405,91 @@ func TestTheLyricSourcesNeverSeeBiliCredentials(t *testing.T) {
 		if strings.Contains(c, "not-yours") {
 			t.Errorf("第 %d 个请求带着一枚不属于它的 cookie：%q", i, c)
 		}
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestAdoptingNeverWritesToAnotherSongsCache 钉住「验键和取键必须在同一个临界区」。
+//
+// 🔴 早一版是「在 AdoptLyricPreview 里验 `a.lyricKey == p.key` → 放锁 → 调
+// `PutLyrics`（它自己再取一次锁、再读一次 key）」。两次取锁之间落一次换歌，甲的歌词
+// 就写进了乙的缓存文件，而函数**还返回空串（成功）**。
+//
+// 窗口只有几十纳秒，靠循环撞是撞不出来的。而它护着的是**持久数据**：界面上歌名配得
+// 上、歌词字全对不上，正是代码注释里标 🔴 说绝不能发生的那一种。
+//
+// 所以这里用 `hookBetweenAdoptStateAndSave` 把那道缝**撑开**：它跑在「状态已经装上、
+// 还没往盘上写」的那一刻（见 App 里那个字段的注释）。
+func TestAdoptingNeverWritesToAnotherSongsCache(t *testing.T) {
+	src := sourceOf("netease")
+	src.doc = lyrics.Doc{LRC: "[00:01.00]甲的词"}
+	a, c := searchApp(t, src)
+	first := onlineSong("BV1", "1")
+	a.setLyricTrack(first)
+
+	a.OpenLyricPreview(0, lyrics.Candidate{ID: "11"})
+	waitSearch(t, 2*time.Second, "预览拉回来", func() bool { return a.LyricPreview().LRC != "" })
+
+	a.hookBetweenAdoptStateAndSave = func() { a.setLyricTrack(onlineSong("BV2", "2")) }
+	if msg := a.AdoptLyricPreview(); msg != "" {
+		t.Fatalf("采用返回了 %q，want 空串（点上它的那一刻在放的就是甲）", msg)
+	}
+
+	if got, ok := c.Load(lyricKeyOf(onlineSong("BV2", "2"))); ok {
+		t.Errorf("乙的缓存里被写进了甲的词：%+v", got)
+	}
+	if got, ok := c.Load(lyricKeyOf(first)); !ok || got.Lyrics != "[00:01.00]甲的词" {
+		t.Errorf("甲自己的缓存里没有它：%+v（有没有=%v）", got, ok)
+	}
+}
+
+// TestTheOldestEntryEvictedIsNotTheOneJustSearched 钉住淘汰顺序和它自己写的理由
+// 对得上。
+//
+// 理由写的是「新搜的留着、先搜的丢」，而命中缓存时那条键在 `memoOrder` 里一直停在它
+// **第一次**被记下的位置——于是「刚搜过又搜一遍」的那个词恰恰最容易被当成最老的丢掉，
+// 而它正是用户还记得要的那一个。
+func TestTheOldestEntryEvictedIsNotTheOneJustSearched(t *testing.T) {
+	src := sourceOf("netease")
+	a, _ := searchApp(t, src)
+
+	// 先把缓存塞到**上限**。塞到上限 - 1 的话后面那次淘汰压根不会发生，而这一条恰恰
+	// 是靠淘汰事件才看得出顺序对不对。
+	for i := range lyricSearchMemoMax {
+		q := "词" + strconv.Itoa(i)
+		a.SearchLyrics(0, q)
+		// ⚠️ 等的是**它真的落地了**，不是 `Query` 变了：`Query` 是 `SearchLyrics` 同步
+		// 写进去的，早于后台那一趟；而代次守卫会把上一趟的结果整个丢掉，所以照着
+		// `Query` 等的话缓存到最后几乎是空的，那条测试就变成了验别的东西。
+		waitSearch(t, 2*time.Second, "第 "+q, func() bool {
+			st := a.LyricSearch()
+			return st.Query == q && !st.Loading
+		})
+	}
+	// 再搜一遍**最早**的那个词——命中缓存，顺序上它该变成最新的那一个。
+	before, _ := src.count()
+	a.SearchLyrics(0, "词0")
+	if got, _ := src.count(); got != before {
+		t.Fatalf("重搜第一个词发了请求（%d → %d）", before, got)
+	}
+	// 再塞一条新的把最老的挤掉。重排之后最老的是「词1」。
+	const last = "最后那个词"
+	a.SearchLyrics(0, last)
+	waitSearch(t, 2*time.Second, last, func() bool {
+		st := a.LyricSearch()
+		return st.Query == last && !st.Loading
+	})
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if _, still := a.lyricSearch.memo[searchKey("netease", "词1")]; still {
+		t.Error("「词1」没有被挤掉——被挤掉的是「词0」，而它刚被搜过一遍，不该是最老的那个")
+	}
+	if _, gone := a.lyricSearch.memo[searchKey("netease", "词0")]; !gone {
+		t.Error("重搜过的「词0」不在缓存里了——它恰恰是最该留下的那一条")
+	}
+	if _, gone := a.lyricSearch.memo[searchKey("netease", last)]; !gone {
+		t.Error("刚搜的那一条被挤掉了")
 	}
 }

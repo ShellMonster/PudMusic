@@ -188,8 +188,10 @@ func (a *App) SearchLyrics(tab int, query string) {
 		a.mu.Unlock()
 		return
 	}
-	if cands, ok := s.memo[searchKey(src.ID(), query)]; ok {
+	key := searchKey(src.ID(), query)
+	if cands, ok := s.memo[key]; ok {
 		// 命中缓存。代次照样在开头加过了——上一次还在路上的那趟回来时不该盖掉它。
+		s.touchLocked(key)
 		s.query, s.results, s.err, s.loading, s.searched = query, cands, "", false, true
 		a.mu.Unlock()
 		a.wakeLyrics()
@@ -206,7 +208,6 @@ func (a *App) SearchLyrics(tab int, query string) {
 	// 摆上「正在搜」并要一帧：不然界面上停在上一批候选，用户看着像按了没反应。
 	a.wakeLyrics()
 
-	key := searchKey(src.ID(), query)
 	go func() {
 		cands, err := src.Search(context.Background(), query)
 
@@ -243,22 +244,37 @@ func (s *lyricSearchState) failLocked(msg string) {
 	s.results, s.err, s.loading = nil, msg, false
 }
 
-// rememberSearchLocked 把搜到的东西记进结果缓存。**必须拿着 a.mu 调**。超上限时从
-// **最老的**开始丢：新搜的留着、先搜的丢（丢的是哪一条从界面上看不出来，而用户
-// 刚搜的那一个是他唯一还记得要的那一个）。
+// rememberSearchLocked 把搜到的东西记进结果缓存。**必须拿着 a.mu 调**。
 func (a *App) rememberSearchLocked(key string, cands []lyrics.Candidate) {
 	if a.lyricSearch.memo == nil {
 		a.lyricSearch.memo = map[string][]lyrics.Candidate{}
 	}
-	if _, dup := a.lyricSearch.memo[key]; dup {
+	if _, dup := a.lyricSearch.memo[key]; !dup {
+		a.lyricSearch.memo[key] = cands
+	}
+	a.lyricSearch.touchLocked(key)
+}
+
+// touchLocked 把 key 挪到 `memoOrder` 的**最新**那一头。**必须拿着 a.mu 调**。
+//
+// ⚠️ **命中缓存时也要挪**：不挪的话「刚搜过又搜一遍」的那个词在淘汰顺序里一直停在
+// 它第一次被记下的位置，于是它恰好是最容易被当成最老的丢掉的那一条——而丢的规则
+// 写的是「新搜的留着、先搜的丢」。两句话对不上，于是被丢的偏偏是用户还记得要的那一个。
+func (s *lyricSearchState) touchLocked(key string) {
+	if _, ok := s.memo[key]; !ok {
 		return
 	}
-	a.lyricSearch.memo[key] = cands
-	a.lyricSearch.memoOrder = append(a.lyricSearch.memoOrder, key)
-	for len(a.lyricSearch.memoOrder) > lyricSearchMemoMax {
-		oldest := a.lyricSearch.memoOrder[0]
-		a.lyricSearch.memoOrder = a.lyricSearch.memoOrder[1:]
-		delete(a.lyricSearch.memo, oldest)
+	for i, k := range s.memoOrder {
+		if k == key {
+			s.memoOrder = append(append(make([]string, 0, len(s.memoOrder)), s.memoOrder[:i]...), s.memoOrder[i+1:]...)
+			break
+		}
+	}
+	s.memoOrder = append(s.memoOrder, key)
+	for len(s.memoOrder) > lyricSearchMemoMax {
+		oldest := s.memoOrder[0]
+		s.memoOrder = s.memoOrder[1:]
+		delete(s.memo, oldest)
 	}
 }
 
@@ -409,17 +425,33 @@ func (a *App) AdoptLyricPreview() string {
 		a.mu.Unlock()
 		return "这一条没有歌词"
 	}
-	// ⚠️ **在锁里把这两份拷出来**：锁外读 `p.lrc` 是数据竞争（防抖落盘那个 goroutine
-	// 在写同一份状态），撕裂读出来是一个野指针，`-race` 抓得到、产线上是随机崩。
+	// 🔴 **验和取键必须在同一个临界区里**：上面刚比过 `a.lyricKey == p.key`，这里
+	// 就把它取出来交给 `putLyricsLocked`——中间**不放开锁**。
+	//
+	// 早一版是「在这里验 → 放锁 → 调 `PutLyrics`（它自己再取一次锁、再读一次
+	// key）」。两次取锁之间落一次换歌，甲的歌词就写进乙的缓存文件，而函数还返回
+	// 空串（成功）——落盘的是持久数据，界面上歌名配得上、歌词字全对不上，正是上面
+	// 那条 🔴 说绝不能发生的那一种。
+	key := a.lyricKey
+	// ⚠️ 在锁里把这两份拷出来：锁外读 `p.lrc` 是数据竞争（防抖落盘那个 goroutine 在
+	// 写同一份状态），撕裂读出来是一个野指针，`-race` 抓得到、产线上是随机崩。
 	lrc, translated := p.lrc, p.translated
 	a.lyricPreview.gen++
 	a.lyricPreview.open = false
 	a.lyricPreview.lrc = ""
 	a.lyricPreview.translated = ""
+	entry, c := a.putLyricsLocked(key, lrc, translated)
+	wake := a.wake
+	hook := a.hookBetweenAdoptStateAndSave
 	a.mu.Unlock()
 
-	// PutLyrics 自己写缓存、自己叫醒界面（见 lyrics.go）。
-	a.PutLyrics(lrc, translated)
+	if hook != nil {
+		hook() // 只给测试用（见 App.hookBetweenAdoptStateAndSave 的注释）
+	}
+
+	// 落盘用**上面那个验过的 key**。这一趟之后就算用户切了歌也不影响它写对地方：
+	// 那份歌词本来就是这一首的（用户点「采用」的那一刻在放的就是它）。
+	a.saveLyrics(c, key, entry, wake)
 	return ""
 }
 
