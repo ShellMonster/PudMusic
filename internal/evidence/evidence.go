@@ -319,6 +319,49 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// 顶栏右上角那个头像：**登录了画我自己的，未登录画「没有人」**。
+		//
+		// 三样东西各钉一件事，合起来才是一个完整的交代：
+		//
+		//   1. **形状**：地址在服务层就补好了协议、拼好了裁剪参数。照原样透传
+		//      的话，28 见方的一格会去下几百 KB 的正方形原图——不报错、不变慢。
+		//   2. **闸门**：未登录**一个请求都不发**。这一格是整个应用重画最勤的
+		//      一处，而凭据过期之后每一条都是 -101——所以判据是「那台假 B 站
+		//      收到了几个请求」，不是「回来的答案是什么」：那台 fake 明确回了
+		//      「登录了、头像在这儿」，偷偷发出去的话回来的是一个**看起来能用**
+		//      的答案。
+		//   3. **形态不许合并**：合并之后未登录的用户在顶栏上看见别人的脸，而
+		//      上面那几条**一条都不会红**。所以另有一条量「三档任意两档画出来
+		//      差得够多」。
+		//   4. **它画的是人，不是字母**：「不是一整块底色」这种问法钉不住——
+		//      边框和圆角裁剪本来就让它不是纯色，实测把人形换成恒定的字母「B」
+		//      或者干脆什么都不画，那一条都照样绿。所以量的是**形状**：最长的
+		//      那一段墨（人形 17 px，字母 7 px）。
+		//   5. **作废的那一趟不许落地**：退登时在途的那一趟带着上一个账号的头像
+		//      回来，写进去的话退登之后顶栏上又出现一个人的脸。
+		//
+		// ⚠️ 第 3 条的判据是「不一样的比例」而不是「逐像素不相等」：那两格不在
+		// 同一个位置（「登录」和「退出登录」宽度不同），而同一个形状落在不同的小数
+		// 位置上，圆边抗锯齿的颜色就不一样——实测两种形态明明是同一张，逐像素比有
+		// 44/784 个点不同。理由见 `internal/ui/navbar_avatar_test.go`。
+		Spec: "头像：登录画真头像（走封面缓存），未登录画「没有人」而不是字母占位符，图下不来有交代；未登录一个请求都不发",
+		Tests: []string{
+			"TestNavCarriesMyOwnFace",
+			"TestNavWithoutAFaceGivesNothingToShow",
+			"TestNobodyLoggedInAsksNobodyAnything",
+			"TestARealAccountGetsItsOwnFace",
+			"TestADeadSessionIsNotTheSameAsNobodyBeingLoggedIn",
+			"TestTheAvatarShowsMyOwnPictureOnceLoggedIn",
+			"TestTheAvatarOnlyAsksOnceEvenThoughEveryFrameAsks",
+			"TestTheAvatarSaysNobodyIsLoggedIn",
+			"TestTheAvatarShowsAPersonAndNotALetterWhenNobodyIsLoggedIn",
+			"TestTheAvatarSaysSomethingWhenThePictureDoesNotComeBack",
+			"TestAFaceThatComesBackForTheWrongAccountNeverLands",
+			"TestTheAvatarNeverLooksTheSameTwoWays",
+		},
+	},
+	{
+		Category: HTTP,
 		// 「刷新数据」那一项以前按下去只弹一句「还没有数据可刷新」——而接口一直
 		// 都在（`created/list`，收藏夹的新建 / 修改 / 拉全量都靠它）。这一条钉的是
 		// 「按下去真的重新拉一次」：喂一个**会变**的假服务器，点了之后画面上那一列

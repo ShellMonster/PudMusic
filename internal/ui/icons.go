@@ -79,10 +79,20 @@ const (
 	iconQueue    = "Editor/list-radio.svg"         // 播放列表
 	iconSearch   = "System/search-line.svg"        // 搜索
 	iconClose    = "System/close-line.svg"         // 清空
-	iconUser     = "User & Faces/user-line.svg"    // 头像（占位）
 	iconFeed     = "User & Faces/team-line.svg"    // 动态
 	iconLogin    = "System/login-circle-line.svg"  // 登录
 	iconLogout   = "System/logout-circle-line.svg" // 退出登录
+
+	// ⚠️ **头像那一格故意不在这一列。** #115（真实头像与未登录形态）把它整个
+	// 重做成了三档——真图 / 出问题的人形 / 等着的人形——而那个人形是
+	// `navbar_avatar.go` 的 `avatarPerson` 按 `avatarSize` 的分数倍画出来的
+	// （圆脑袋 + 一块肩膀，两块都要跟着尺寸等比缩放）。
+	//
+	// 图标化那一票原本在这一格摆一个 `User & Faces/user-line.svg`（就是
+	// 「未登录时别显示首字母 B，显示一个人」），**被 #115 取代了**，那个资源
+	// 随之删掉。取 #115 的理由：它给每一档都配了不同的无障碍名和悬停说明
+	// （「这儿没有人」/「正在取」/「这个账号没有头像」），而那一档一档都要分得
+	// 开是那张票的验收；一个图标只给得出一个样子。理由见 `avatarPerson`。
 )
 
 // iconNames 是这一份要备齐的图标。一个常量一个名字，漏一个立刻红
@@ -94,7 +104,7 @@ var iconNames = []string{
 	iconEnqueue, iconFullscreen, iconLike, iconLikeFilled,
 	iconModeOrder, iconModeLoop, iconModeRandom, iconModeOne,
 	iconSettings, iconFolder, iconQueue,
-	iconSearch, iconClose, iconUser, iconFeed, iconLogin, iconLogout,
+	iconSearch, iconClose, iconFeed, iconLogin, iconLogout,
 }
 
 // icons 是上面那批图标**启动时一次解析好**的结果。

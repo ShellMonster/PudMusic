@@ -646,6 +646,49 @@ func TestNavNotLoggedInIsNotAnError(t *testing.T) {
 	}
 }
 
+// TestNavCarriesMyOwnFace 验 nav 顺带把我自己的头像带回来（issue #95）。
+//
+// ⚠️ **钉的是「已经拼好了」而不是「原样透传」**：B 站给的是协议相对的原图，
+// 补协议和拼裁剪参数是这一层的活（和 `FollowUser.Face` 同一份做法，见
+// follow.go 的文件头）。写成「拿到什么给什么」的话，界面那层就得抄一遍这段，
+// 而漏掉裁剪参数的后果是**顶栏那个 28 见方的一格去下几百 KB 的正方形原图**——
+// 不报错、不变慢、只是每次都下。
+func TestNavCarriesMyOwnFace(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(pathNav, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			"isLogin": true, "mid": 2, "face": "//i0.hdslb.com/bfs/face/mine.jpg",
+		}))
+	})
+	nav, err := f.client(t, Options{}).Nav(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://i0.hdslb.com/bfs/face/mine.jpg@" + avatarSize + ".webp"
+	if nav.Face != want {
+		t.Errorf("头像地址是 %q，want %q（协议没补或裁剪参数没拼）", nav.Face, want)
+	}
+}
+
+// TestNavWithoutAFaceGivesNothingToShow 验 B 站没给地址时是空串，而不是半个地址。
+//
+// 「补协议」那一支最危险的是给空串补协议：结果是 `https:`，那是个能过
+// `strings.HasPrefix(s, "http")` 的假地址，缓存会拿它去下、下不来、
+// 于是界面上是一个永远转圈的头像。
+func TestNavWithoutAFaceGivesNothingToShow(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(pathNav, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{"isLogin": true, "mid": 2}))
+	})
+	nav, err := f.client(t, Options{}).Nav(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nav.Face != "" {
+		t.Errorf("B 站没给头像却解出 %q", nav.Face)
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 超时与取消
 // ─────────────────────────────────────────────────────────────────────────────
