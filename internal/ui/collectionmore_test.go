@@ -169,7 +169,15 @@ func TestClearingTheInvalidContentAsksFirst(t *testing.T) {
 	if got := b.cleanedFolders(); got[0] != "12345" {
 		t.Errorf("clean 的 media_id = %v，want [12345]", got)
 	}
-	wantSaid(t, tt, "失效内容已清除")
+
+	// ⚠️ **这句话必须等，不能 `waitFor` 完了直接读**：`waitFor` 不画帧（理由见
+	// `waitFrames` 的注释），而「请求到了 B 站」到「那句话画出来」中间隔着
+	// notice 投递 → wake → 下一帧 flush → 再下一帧才画出来。满载时这个窗口
+	// 足够宽到必红，而它红的时候和被测的逻辑一点关系都没有——画面上只有那句
+	// 「正在清除…」，功能其实是对的。
+	waitFrames(t, tt, "清除的那句话说出来", func() bool {
+		return screenHasText(tt, "失效内容已清除")
+	})
 }
 
 // TestCancellingAnyOfTheThreeSendsNothing 三个确认框的「取消」一个都不许发东西。
@@ -278,11 +286,29 @@ func TestDeletingFromThePageIsTheSameCallTheSidebarMakes(t *testing.T) {
 
 	// 先走侧栏那一遍（它要那一行在侧栏里）。
 	s.app.SetFavorites(app.FavoritesCreated, []app.Favorite{{ID: 12345, Title: "通勤路上"}})
-	var said string
-	s.app.DeleteFavoriteFolder(app.Favorite{ID: 12345, Title: "通勤路上"}, func(msg string) { said = msg })
+	// ⚠️ **那句回调来的话必须走 channel 等，不能用普通变量**：`DeleteFavoriteFolder`
+	// 在后台 goroutine 里调它，而测试线程在 `waitFor` 的闭包里读同一个变量——
+	// 那是一个真数据竞争（`-race` 会报），而且更实际的问题是**读不到**：
+	// fixture 记下 `folder/del` 的那一刻，goroutine 才刚从 `DeleteFolder` 返回，
+	// 它还得做完 `forgetFavorite`（写设置文件）才轮到 `sayFolder`。
+	said := make(chan string, 1)
+	s.app.DeleteFavoriteFolder(app.Favorite{ID: 12345, Title: "通勤路上"},
+		func(msg string) { said <- msg })
 	waitFor(t, "侧栏那一遍删完", func() bool { return len(b.deletedFolders()) == 1 })
-	if said == "" {
-		t.Error("侧栏那一遍删完一句话都没有——用户按下去像是什么也没发生")
+	// 收进 `waitFor` 而不是自己 `select` + `time.After`：等条件只有那两条
+	// （守卫 `TestTheTestSuiteDoesNotGrowASecondWay…` 盯着这件事），而超时的
+	// 报错也该和包内其它测试说同一句话。
+	var saidMsg string
+	waitFor(t, "侧栏那一遍说完话", func() bool {
+		select {
+		case saidMsg = <-said:
+			return true
+		default:
+			return false
+		}
+	})
+	if saidMsg == "" {
+		t.Error("侧栏那一遍删完说了一句空话——用户按下去像是什么也没发生")
 	}
 
 	// 再走页面上那一遍。
