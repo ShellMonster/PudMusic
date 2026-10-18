@@ -30,16 +30,16 @@ import (
 func rateBarTester(t *testing.T, width int) (*mygoui.Tester, *app.App, *Shell) {
 	t.Helper()
 	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
+	b := newTestShell(t, onApp(a), at(width, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			s.viewPlayBar(c, a.Snapshot())
 
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.wake.set(c)
-		s.viewPlayBar(c, a.Snapshot())
-	}, width, coverWinH)
+		}
+	}))
+	tt := b.tt
 	tt.Frame()
-	return tt, a, s
+	return tt, a, b.s
 }
 
 // TestRateButtonShowsTheCurrentRate 盯按钮上的字就是当前倍率。
@@ -67,16 +67,15 @@ func TestRateButtonShowsTheCurrentRate(t *testing.T) {
 // 做法和 `TestQualityBadgeFollowsTheRefresh` 一样：直接喂 State，只改闭包里
 // 那个变量，别的一律不动——这一条验的正是「喂进来的东西一变，画面就跟着变」。
 func TestRateIsReadEveryFrame(t *testing.T) {
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
-
 	st := app.State{HasTrack: true, Title: "一首歌", Rate: 1}
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.wake.set(c)
-		s.viewPlayBar(c, st) // ← 闭包读的是外面那个变量
-	}, 760, coverWinH)
+	b := newTestShell(t, at(760, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			s.viewPlayBar(c, st) // ← 闭包读的是外面那个变量
+
+		}
+	}))
+	tt := b.tt
 
 	tt.Frame()
 	if !tt.HasText("1x") {
@@ -164,18 +163,17 @@ func TestClickingAStepSetsTheRate(t *testing.T) {
 func TestTheRateButtonDoesNotSquashTheTitle(t *testing.T) {
 	for _, width := range []int{760, 900, 1000, 1200, 1280} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
-			a := app.New()
-			t.Cleanup(a.Close)
-			s := New(a)
-			t.Cleanup(s.images.Close)
-
 			// 这里要的是一根很长的歌名，喂 State 比真开一首文件省事得多
 			// （真开的话标题是文件名，短得挤不出问题）。
 			st := app.State{HasTrack: true, Title: "一首歌的名字很长很长很长很长", Rate: 1}
-			tt := mygoui.NewTester(func(c *mygoui.Context) {
-				s.wake.set(c)
-				s.viewPlayBar(c, st)
-			}, width, coverWinH)
+			b := newTestShell(t, at(width, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
+				return func(c *mygoui.Context) {
+					s.wake.set(c)
+					s.viewPlayBar(c, st)
+
+				}
+			}))
+			tt := b.tt
 			tt.Frame()
 
 			title, ok := tt.Find("一首歌的名字很长很长很长很长")
@@ -217,16 +215,15 @@ func TestRateMenuLabelsAreNotTruncated(t *testing.T) {
 	}
 	natural := textWidths(t, labels)
 
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	s.rateOpen = true
+	b := newTestShell(t, at(760, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			s.viewRate(c, app.State{HasTrack: true, Title: "一首歌", Rate: 1.1})
 
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.wake.set(c)
-		s.viewRate(c, app.State{HasTrack: true, Title: "一首歌", Rate: 1.1})
-	}, 760, coverWinH)
+		}
+	}))
+	b.s.rateOpen = true
+	tt := b.tt
 	tt.Frame()
 
 	for _, label := range labels {

@@ -24,17 +24,16 @@ import (
 // 组合都能摆出来——真放的话本地文件压根没有 UP 名。
 func metaBarTester(t *testing.T, st app.State, width int) (*mygoui.Tester, *Shell) {
 	t.Helper()
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
-
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.wake.set(c)
-		s.viewPlayBar(c, st)
-	}, width, coverWinH)
+	var b *testShell
+	b = newTestShell(t, at(width, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			s.viewPlayBar(c, st)
+		}
+	}))
+	tt := b.tt
 	tt.Frame()
-	return tt, s
+	return tt, b.s
 }
 
 // TestThePlayBarShowsTheOwner 盯 UP 名摆出来了。

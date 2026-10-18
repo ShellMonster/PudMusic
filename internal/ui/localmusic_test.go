@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
@@ -29,39 +28,19 @@ import (
 func shellOnLocalMusic(t *testing.T, dirs ...string) (*mygoui.Tester, *Shell, *app.App, *dirPicker) {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), app.SettingsFileName)
-	st, err := app.OpenSettingsStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.Update(func(cur *app.Settings) { cur.LocalMusicDirs = dirs }); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	a := app.New()
-	if err := a.MountSettings(path); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		a.Close()
-		_ = a.CloseSettings()
-	})
+	pick := &dirPicker{}
 	// ⚠️ **不挂文件监听**：测试里换掉 `s.local.pickDir` 和 wake 都很方便，
 	// 而真监听要系统事件循环（`WhenReady`），无头环境里根本起不来。
 	// 监听那一半由 app 层的桩验（`internal/app/localmusic_test.go`）。
-	a.MountLocalMusic(app.LocalMusic{})
-
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	t.Cleanup(func() { _ = s.hist.Close() })
-	s.router.Transition = mygoui.TransitionNone
-
-	pick := &dirPicker{}
-	s.local.pickDir = pick.pick
-	tt := mygoui.NewTester(s.View, 1200, 800)
+	b := newTestShell(t,
+		withSettings(func() app.Settings {
+			st := app.DefaultSettings("")
+			st.LocalMusicDirs = dirs
+			return st
+		}()),
+		mounted(func(_ *testing.T, a *app.App) { a.MountLocalMusic(app.LocalMusic{}) }),
+		stubbed(func(_ *testing.T, s *Shell) { s.local.pickDir = pick.pick }))
+	a, s, tt := b.a, b.s, b.tt
 	openLocal(t, tt)
 	settleLocal(t, a, tt)
 	return tt, s, a, pick
@@ -110,43 +89,15 @@ func openLocal(t *testing.T, tt *mygoui.Tester) {
 // 时候还没扫完，画出来的还是「正在扫描…」。等 `Scanning` 变 false 才画下一帧。
 func settleLocal(t *testing.T, a *app.App, tt *mygoui.Tester) {
 	t.Helper()
-	waitForScan(t, a, tt)
+	waitFrames(t, tt, "本地音乐那一遍扫描落地", func() bool { return !a.LocalMusicState().Scanning })
 	tt.Frame()
 }
 
-// waitForScan 一遍一遍地**画帧**、每帧之后看一眼扫描状态，直到它落地。
-//
-// ⚠️ 每一遍都要画帧，这不是多余的：状态变更（比如「设置里加了一个目录」）
-// 要等页面的下一帧跑过 `begin` 才被应用状态看见——`begin` 里对着设置核一遍
-// 根，对不上才 `SetLocalRoots` 并重扫。只在循环里等而不画帧，那个条件永远
-// 等不到，于是断言在扫描**还没开始**的时候就跑完了。
+// 每一遍都要画帧，这不是多余的：状态变更（比如「设置里加了一个目录」）要等页面
+// 的下一帧跑过 `begin` 才被应用状态看见——`begin` 里对着设置核一遍根，对不上才
+// `SetLocalRoots` 并重扫。只在循环里等而不画帧，那个条件永远等不到，于是断言在
+// 扫描**还没开始**的时候就跑完了。
 // （`TestAddingADirectoryStoresItAndScans` 原来就是这么随机红的。）
-func waitForScan(t *testing.T, a *app.App, tt *mygoui.Tester) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		tt.Frame()
-		if !a.LocalMusicState().Scanning {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("等了 10 秒本地音乐那一遍扫描还没完")
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-}
-
-// waitUntil 等 cond 成立，最多等 timeout。
-func waitUntil(t *testing.T, cond func() bool, msg string) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatal(msg)
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-}
 
 // libSong 在 dir 里造一个内容随便的 .mp3。
 func libSong(t *testing.T, dir, name string) string {
@@ -331,24 +282,14 @@ func TestTheFirstFrameDoesNotClaimThereIsNoMusic(t *testing.T) {
 	for i := range 50 {
 		libSong(t, root, string(rune('a'+i%26))+string(rune('a'+i/26))+".mp3")
 	}
-	path := filepath.Join(t.TempDir(), app.SettingsFileName)
-	a := app.New()
-	t.Cleanup(func() { a.Close(); _ = a.CloseSettings() })
-	if err := a.MountSettings(path); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := a.UpdateSettings(func(s *app.Settings) {
-		s.LocalMusicDirs = []string{root}
-	}); err != nil {
-		t.Fatal(err)
-	}
-	a.MountLocalMusic(app.LocalMusic{})
-
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	t.Cleanup(func() { _ = s.hist.Close() })
-	s.router.Transition = mygoui.TransitionNone
-	tt := mygoui.NewTester(s.View, 1200, 800)
+	b := newTestShell(t,
+		withSettings(func() app.Settings {
+			st := app.DefaultSettings("")
+			st.LocalMusicDirs = []string{root}
+			return st
+		}()),
+		mounted(func(_ *testing.T, a *app.App) { a.MountLocalMusic(app.LocalMusic{}) }))
+	s, a, tt := b.s, b.a, b.tt
 	s.navigate(localMusicPath)
 	tt.Frame()
 

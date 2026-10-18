@@ -28,14 +28,14 @@ import (
 func modeBarTester(t *testing.T, width int) (*mygoui.Tester, *app.App) {
 	t.Helper()
 	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
-
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.wake.set(c)
-		s.viewPlayBar(c, a.Snapshot())
-	}, width, coverWinH)
+	var b *testShell
+	b = newTestShell(t, onApp(a), at(width, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			s.viewPlayBar(c, a.Snapshot())
+		}
+	}))
+	tt := b.tt
 	tt.Frame()
 	return tt, a
 }
@@ -47,17 +47,16 @@ func modeBarTester(t *testing.T, width int) (*mygoui.Tester, *app.App) {
 // 那一半。行为那一组必须走 modeBarTester 现读。
 func modeBarTesterWithState(t *testing.T, width int, st app.State) (*mygoui.Tester, *app.App) {
 	t.Helper()
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
-
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		s.wake.set(c)
-		s.viewPlayBar(c, st)
-	}, width, coverWinH)
+	var b *testShell
+	b = newTestShell(t, at(width, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			s.viewPlayBar(c, st)
+		}
+	}))
+	tt := b.tt
 	tt.Frame()
-	return tt, a
+	return tt, b.a
 }
 
 // TestThePlayModeButtonSaysWhichModeItIs 盯按钮上的字就是当前那一档。

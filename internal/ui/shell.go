@@ -386,6 +386,95 @@ type Shell struct {
 	// bindMedia 判的就是这个——挂不上系统会话不该拦住开窗口，而 bindMedia
 	// 在 `ensureWindow` 里，那个位置**不能**因为一个加分项开天窗。
 	media *media.Session
+
+	// closed 记着这个外壳收过尾了。它是**「关掉之后不许再装定时器」那道闸门**，
+	// 不是「收尾只走一遍」——`Close` 可以重复调，而底下每一项各自幂等。
+	//
+	// 为什么要有这道闸门：三个装定时器的地方（`feed.arm`、`armNotFound`、
+	// `syncSearchWatch`）都是**每帧**都会到的，而 `Close` 收掉的是**某一个**已经
+	// 装上的定时器。关掉之后只要还有一帧画到（无头 Tester 里 `Close` 之后再
+	// `Frame()` 就会），它们就会再装一个，而那一个没人收。真窗口里 OnClosed 之后
+	// 不再有帧，可这条不该靠「恰好不会」来对。
+	//
+	// 只由 `Close` 写。不用锁：它只在主线程上被读（view 跑在主线程），而
+	// `Close` 也在主线程（窗口的 OnClosed、测试的 t.Cleanup）。
+	closed bool
+}
+
+// Close 收掉这个外壳占着的一切：四个定时器、封面缓存、应用状态，以及设置 /
+// 搜索历史 / 快捷键的落盘收尾。**可以重复调。**
+//
+// ## 为什么它得是一个方法，而不是一段挂在窗口回调里的代码
+//
+// 这一段收尾以前只长在 `Attach` 的 `OnClosed` 上，而 `OnClosed` 只在「挂着的那个
+// 窗口真的关掉了」的时候才跑。于是**持有这些资源的其实不是窗口、是外壳**，而外壳
+// 却只有一条能收尾的路：
+//
+//   - 快捷键的后台写循环（`shortcutKeys.loop`）、红点那个每五分钟一跳的定时器、
+//     404 那个每一秒一跳的定时器、搜索防抖那个钟——一律没人收。
+//   - 每一处都是**一个外壳一份**，而这条路上一个都不会走到。
+//
+// 真进程退出时这不算什么（进程一死它们跟着死）。真正付账的是**不退出进程的那些
+// 路**：无头测试里一个外壳就是一个 `Tester`，几百条测试建几百个外壳，每一个都带
+// 一个写循环和两个定时器跑到测试二进制结束；而「建了外壳但窗口最终没建出来」的那
+// 些启动路径（`openWindow` 排在 `WhenReady` 队列里，ready 之前就返回）也是同一
+// 个形状。
+//
+// 收尾因此挂在**外壳**上而不是窗口上：窗口关了就调它（`Attach` 的 `OnClosed`），
+// 没建出窗口的那条路也调它，测试的 `t.Cleanup` 还是调它——三处走的是同一份代码，
+// 不会再有「窗口的回调忘了谁」这种事。
+func (s *Shell) Close() {
+	// ⚠️ **这里不提前 return**。底下每一项各自都是幂等的（定时器那几个是
+	// 「判 nil → 调 → 置 nil」，`images.Close` / `app.Close` / `hist.Close` /
+	// `keys.Close` 各自都有 `closed` 判断），所以再走一遍既无害、又是必须的：
+	// 万一关掉之后还有一帧画到了顶栏（无头 Tester 里 `Close` 之后再 `Frame()`
+	// 就会，见 `close_while_loading_test.go`），那三个「装定时器」的地方要看
+	// `s.closed` 才肯装——但路径上还有别的呢，「再走一遍」就是最后一道网。
+	//
+	// 早先这里写的是「`closed` 就 return」，而它挡住的正是这件事：`Close` 走过一趟
+	// 之后装的定时器，第二次 `Close` 收不掉（`feed.arm` 那一处在关掉后仍会被每帧触
+	// 发），于是它一路挂到测试进程结束。
+	s.closed = true
+
+	s.win = nil
+
+	// 四个定时器。全是「窗口没了之后唤醒对它是 no-op，留着不致命，但会一直醒到
+	// 进程退出」那一类，所以第一件事就是收掉。
+	//
+	// ⚠️ 搜索防抖那个钟**不在** viewMain 的 syncSearchWatch 管辖范围内：
+	// 那一句只保证「用户切走时它会停」，而「外壳没了」它管不着。
+	if s.searchWatchStop != nil {
+		s.searchWatchStop()
+		s.searchWatchStop = nil
+	}
+	s.feed.disarm()    // 红点，每五分钟一跳（navbar_feed.go）
+	s.disarmNotFound() // 404 倒计时，每一秒一跳（notfound.go）
+
+	// 封面缓存：关掉之后在途的下载和解码 worker 都会停。
+	s.images.Close()
+	// 停播放、关解码器和文件句柄、停后台时钟。
+	s.app.Close()
+
+	// 关窗就收尾设置：停掉后台写盘，并把还欠着的改动同步落完。
+	//
+	// MountSettings 里那个 OnWillQuit 的 Flush 兜的是「退进程」这条路；
+	// 这一句兜的是「关窗口」——托盘早就在了（issue #28 已 CLOSED：
+	// `tray.go` / `single_instance.go` / 开机自启），所以「关窗口」早就
+	// 不等于「退进程」了，那条 OnWillQuit 并不保证会跑，两句要一起看。
+	//
+	// `CloseSettings` 可以重复调（内部先 LoadAndDelete），所以窗口关了之后
+	// 进程再退、再调一次都不会出错。
+	if err := s.app.CloseSettings(); err != nil {
+		log.Printf("biu: 关窗时保存设置失败：%v", err)
+	}
+	// 搜索历史同理：写盘是后台合并的，最后一下有可能还等在退避窗口里。
+	if err := s.hist.Close(); err != nil {
+		log.Printf("biu: 关窗时保存搜索历史失败：%v", err)
+	}
+	// 快捷键同理。
+	if err := s.keys.Close(); err != nil {
+		log.Printf("biu: 关窗时保存快捷键失败：%v", err)
+	}
 }
 
 // bindMedia 把系统媒体会话接到这个窗口上。
@@ -517,43 +606,19 @@ func (s *Shell) Attach(w *mygo.Window) {
 	// ⚠️ 下面这条是**真的关掉窗口**才跑的收尾：关封面缓存、停播放、关 App。
 	// 「收起来」被上面拦在 OnClose 里了，压根到不了这里——所以关窗口时选
 	// 「隐藏」，播放不会停、应用不会死。这是两条不同的路，别混。
+	//
+	// 收尾本身是 `Shell.Close`（见它的注释：以前这一段只长在这儿，于是没挂到
+	// 窗口上的外壳永远收不掉那几个定时器）。
+	//
+	// ⚠️ 所以这个回调**不在 OnClose** 里：选「隐藏到托盘」时 OnClosed 压根不跑
+	// （窗口只是收起来了，应用还活着），那时候红点和 404 的倒计时都该继续走
+	// ——用户把窗口叫回来时本来就该看到已经回首页的样子，不是还停在一个正在
+	// 倒计时的 404 上。
 	w.OnClosed(func() {
 		if s.win == w {
 			s.win = nil
 		}
-		// 收掉红点那个每五分钟一跳的定时器（navbar_feed.go 的 arm）。和 404
-		// 那个一样：窗口真关了之后 Invalidate 对它是 no-op，留着不致命，但它会
-		// 一直醒到进程退出。
-		s.feed.disarm()
-		// 收掉 404 那个每秒一跳的定时器。窗口真关了之后 `Invalidate` 对它是
-		// no-op，留着不致命，但它会一直每秒钟醒一次到进程退出。
-		//
-		// ⚠️ 放这儿而不是 OnClose：选「隐藏到托盘」时 OnClosed 压根不跑（窗口
-		// 只是收起来了，应用还活着），那时候倒计时该继续走——用户把窗口叫回来
-		// 时本来就该看到已经回首页的样子，不是还停在一个倒计时的 404 上。
-		s.disarmNotFound()
-		s.images.Close()
-		s.app.Close()
-		// 关窗就收尾设置：停掉后台写盘，并把还欠着的改动同步落完。
-		//
-		// MountSettings 里那个 OnWillQuit 的 Flush 兜的是「退进程」这条路；
-		// 这一句兜的是「关窗口」——托盘早就在了（issue #28 已 CLOSED：
-		// `tray.go` / `single_instance.go` / 开机自启），所以「关窗口」早就
-		// 不等于「退进程」了，那条 OnWillQuit 并不保证会跑，两句要一起看。
-		//
-		// `CloseSettings` 可以重复调（内部先 LoadAndDelete），所以窗口关了之后
-		// 进程再退、再调一次都不会出错。
-		if err := s.app.CloseSettings(); err != nil {
-			log.Printf("biu: 关窗时保存设置失败：%v", err)
-		}
-		// 搜索历史同理：写盘是后台合并的，最后一下有可能还等在退避窗口里。
-		if err := s.hist.Close(); err != nil {
-			log.Printf("biu: 关窗时保存搜索历史失败：%v", err)
-		}
-		// 快捷键同理。
-		if err := s.keys.Close(); err != nil {
-			log.Printf("biu: 关窗时保存快捷键失败：%v", err)
-		}
+		s.Close()
 	})
 }
 

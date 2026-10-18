@@ -11,45 +11,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
 // 路由这一组测试跑的是 MyGo 的 Tester：和真窗口一模一样的 layout 与绘制，
 // 只是画到内存里。点得到、找得到文字，所以「切得动」这件事能自动验。
 
-func newShell(t *testing.T) (*Shell, *mygoui.Tester) {
+// newShell 造一个**没挂任何东西**的外壳：没有设置、没有登录、没有 B 站客户端。
+// 收尾（定时器、封面缓存、应用、设置/历史/快捷键的落盘）由基座无条件挂上。
+func newShell(t *testing.T, opts ...shellOpt) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	// 搜索历史和快捷键各带着一个后台落盘的 goroutine，红点那个定时器也是
-	// 每个外壳一路（见 searchhistory.go / shortcuts.go / navbar_feed.go）。
-	// 每个外壳一个，测试里建得比真窗口快得多，不收掉就是一堆挂着的 goroutine。
-	//
-	// ⚠️ 漏掉它们不只是「慢」：挂着的那几十路定时器会让后面那些**按固定像素
-	// 判主题**的测试（settings_test.go）随机红——它给采样点画 20 帧等着底色出现，
-	// 而机器一忙这 20 帧里该画完的东西没画完（实测：带一批重测试时约三次红一次，
-	// 拿掉就 0/4）。这些是纯测试资源，不收掉没有任何好处。
-	t.Cleanup(func() { _ = s.hist.Close() })
-	t.Cleanup(func() { _ = s.keys.Close() })
-	t.Cleanup(s.feed.disarm)
-
-	// 🔴 关掉切页动画。Tester 一帧画完，250ms 的滑动在里面永远走不完：那一帧
-	// 停在半路，上一页正往左挪、下一页正往右进，中间那道分界线正扫过页面区域。
-	// 于是「点一下再读某个点」这一次读到窗口底色、下次读到分界线，同一条测试
-	// 时而红时而绿（实测八次里挂两次）。
-	//
-	// 造外壳的三个函数（这里、shellWithSettings、shellOnSettings）都关，是为了
-	// 同一个理由：屏幕上的任何一个采样点都要是确定的。设置页那几条另有
-	// settleSettingsPage 兜底，万一哪个外壳忘了关还能等它停下来。
-	s.router.Transition = mygoui.TransitionNone
-
-	return s, mygoui.NewTester(s.View, 1200, 800)
+	b := newTestShell(t, opts...)
+	return b.s, b.tt
 }
 
-// settleText 跑到画面上出现 want 为止，最多两秒。
+// settleText 跑到画面上出现 want 为止。
 //
 // # 为什么搜索页的那几条要它
 //
@@ -63,17 +39,7 @@ func newShell(t *testing.T) (*Shell, *mygoui.Tester) {
 // 的 CI 上会偶发红，而它红的时候和被测的逻辑一点关系都没有。
 func settleText(t *testing.T, tt *mygoui.Tester, want string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		tt.Frame()
-		if tt.HasText(want) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("等了两秒画面上还是没有 %q，文字有 %q", want, tt.Texts())
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitFrames(t, tt, "画面上出现 "+want, func() bool { return tt.HasText(want) })
 }
 
 // TestFourteenRoutes 盯住「Biu 那 14 条」这个数：少一条是漏了，多一条是编的。

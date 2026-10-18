@@ -114,35 +114,19 @@ type updFixture struct {
 
 func newUpdFixture(t *testing.T, rel *app.UpdateRelease) *updFixture {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), app.SettingsFileName)
-	st, err := app.OpenSettingsStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.Update(func(cur *app.Settings) { *cur = app.DefaultSettings("") }); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	a := app.New()
-	if err := a.MountSettings(path); err != nil {
-		t.Fatal(err)
-	}
 	be := newFakeUpdate("0.1.0", rel)
-	a.MountUpdates(be, filepath.Join(t.TempDir(), "app-update.json"))
-	t.Cleanup(func() {
-		a.Close()
-		_ = a.CloseSettings()
-	})
-
-	s := New(a)
-	s.router.Transition = mygoui.TransitionNone
-	tt := mygoui.NewTester(s.View, 1200, 800)
+	updatesFile := filepath.Join(t.TempDir(), "app-update.json")
+	// 更新源必须在**建外壳之前**挂上：设置页每一帧都要问它「这个构建能不能自动
+	// 更新」，而 MountUpdates 换了之后要重新问（见 app.MountUpdates 的注释）。
+	b := newTestShell(t,
+		withSettings(app.DefaultSettings("")),
+		mounted(func(_ *testing.T, a *app.App) {
+			a.MountUpdates(be, updatesFile)
+		}))
+	tt := b.tt
 	tt.Frame()
 	openSettings(t, tt)
-	return &updFixture{t: t, tt: tt, s: s, a: a, be: be}
+	return &updFixture{t: t, tt: tt, s: b.s, a: b.a, be: be}
 }
 
 // pressEntry 按设置页上那个按钮（**先滚进可视区再点**，理由见 clickSetting）。
@@ -172,8 +156,8 @@ func (f *updFixture) checkUpdate(t *testing.T) {
 	t.Helper()
 	before := f.be.checksDone()
 	f.pressEntry(t, "检查更新")
-	waitFor(t, func() bool { return f.be.checksDone() > before })
-	waitFor(t, func() bool { return f.a.UpdateSnapshot().Phase != app.UpdateChecking })
+	waitFor(t, "真的去查了一次更新", func() bool { return f.be.checksDone() > before })
+	waitFor(t, "查完（相位不再是 Checking）", func() bool { return f.a.UpdateSnapshot().Phase != app.UpdateChecking })
 	f.tt.Frame()
 }
 
@@ -295,8 +279,8 @@ func TestTheDialogShowsSpeedTransferredTotalAndPercentWithTwoDecimals(t *testing
 	f.be.mu.Unlock()
 
 	pressDialog(f.tt, "下载更新")
-	waitFor(t, func() bool { return f.a.UpdateSnapshot().Phase == app.UpdateDownloading })
-	waitFor(t, func() bool { return f.a.UpdateSnapshot().Transferred == transferred })
+	waitFor(t, "更新进入下载中", func() bool { return f.a.UpdateSnapshot().Phase == app.UpdateDownloading })
+	waitFor(t, "已传字节数报上来", func() bool { return f.a.UpdateSnapshot().Transferred == transferred })
 	f.tt.Frame()
 
 	// 已传 / 总量。Biu 那边是 `filesize(transferred)/filesize(total)`，中间没有空格。
@@ -362,7 +346,7 @@ func TestTheDialogSaysSoWhenTheDeltaIsNotUsable(t *testing.T) {
 	f.be.mu.Unlock()
 
 	pressDialog(f.tt, "下载更新")
-	waitFor(t, func() bool { return f.a.UpdateSnapshot().FellBack })
+	waitFor(t, "回退到上一版记下来了", func() bool { return f.a.UpdateSnapshot().FellBack })
 	f.tt.Frame()
 
 	if !f.tt.HasText("增量更新没拼出来") {
@@ -393,7 +377,7 @@ func TestTheDialogDoesNotBlameTheDeltaOnANormalDownload(t *testing.T) {
 	f.be.mu.Unlock()
 
 	pressDialog(f.tt, "下载更新")
-	waitFor(t, func() bool { return f.a.UpdateSnapshot().Transferred == 32<<20 })
+	waitFor(t, "已传字节数到 32MB", func() bool { return f.a.UpdateSnapshot().Transferred == 32<<20 })
 	f.tt.Frame()
 
 	if f.tt.HasText("增量更新没拼出来") {
@@ -420,7 +404,7 @@ func TestTheDialogCannotGoAwayWhileTheUpdateIsDownloading(t *testing.T) {
 	f.be.mu.Unlock()
 
 	pressDialog(f.tt, "下载更新")
-	waitFor(t, func() bool { return f.a.UpdateSnapshot().Phase == app.UpdateDownloading })
+	waitFor(t, "更新进入下载中", func() bool { return f.a.UpdateSnapshot().Phase == app.UpdateDownloading })
 	f.tt.Frame()
 
 	f.tt.Key(0, mygoui.KeyEscape)
@@ -489,7 +473,7 @@ func TestTheReadyDialogOffersToQuitAndInstall(t *testing.T) {
 	if err := pressDialog(f.tt, "退出并安装更新"); err != nil {
 		t.Fatalf("点不到「退出并安装更新」：%v，文字有 %q", err, f.tt.Texts())
 	}
-	waitFor(t, func() bool { return f.be.relaunched() == 1 })
+	waitFor(t, "装完真的重启了一次", func() bool { return f.be.relaunched() == 1 })
 	// 装的时候要的那一版，正是界面上摆着的那一版。
 	f.be.mu.Lock()
 	wants := append([]string(nil), f.be.wantVer...)
@@ -550,16 +534,23 @@ func TestAFailedInstallPutsTheReasonInTheDialogAndOffersARetry(t *testing.T) {
 // 是留给「已经知道有新版本了」的画面的——查失败的时候弹窗里能画什么？一个空框。
 // 所以原因摆在设置页那一行上，那个位置本来就在那儿，而且它就在按钮正下方。
 func TestAFailedCheckPutsTheReasonUnderTheButtonAndKeepsItPressable(t *testing.T) {
-	// 提示只活 1ms：它是浮在右下角的，会盖住「检查更新」那一个按钮（这一行的按钮
-	// 滚进可视区之后正好落在右下角那一块）。这不是要改的行为——提示本来就该浮在
-	// 上面——但测试要按第二次，就不能让上一条提示还杵在那儿。
+	// 提示要**短**，但不能靠「短到 1ms 然后赌它已经过期」：它浮在右下角，正
+	// 好盖住「检查更新」那一个按钮（这一行的按钮滚进可视区之后落在右下角那一块），
+	// 于是那一下要么点在按钮上、要么被提示卡片吃掉。这一条原来就是赌的——实测
+	// 单独跑 30 次挂 28 次（快的机器上，从「画完那一帧」到「按第二次按钮」不到
+	// 1ms，提示还在屏幕上），而在整套里跑时好时坏，因为整套慢一点、1ms 反而
+	// 过去了。症状报在两秒之后（"等了两秒，那个后台结果还没到"），离真因隔了三层。
+	//
+	// 现在是：提示活 1ms（快），而**按之前 `pressEntry` 会先把提示收掉**（准）。
+	// 那一处收尾在 `pressEntry` 里——它是这一组所有「按设置页上的按钮」的共同
+	// 入口，收在那里比在这里收一次更不容易漏。
 	shortToasts(t, time.Millisecond)
 
 	f := newUpdFixture(t, nil)
 	f.be.setErr(errors.New("dial tcp: lookup updates.example.com: no such host"))
 
 	f.pressEntry(t, "检查更新")
-	waitFor(t, func() bool { return f.a.UpdateSnapshot().Phase == app.UpdateFailed })
+	waitFor(t, "查失败落到 UpdateFailed", func() bool { return f.a.UpdateSnapshot().Phase == app.UpdateFailed })
 	f.tt.Frame()
 
 	if !f.tt.HasText("no such host") {
@@ -580,6 +571,9 @@ func TestAFailedCheckPutsTheReasonUnderTheButtonAndKeepsItPressable(t *testing.T
 	if !f.tt.HasText("检查更新") {
 		t.Errorf("按钮没留在「检查更新」，文字有 %q", f.tt.Texts())
 	}
+	// ⚠️ **按第二次**：`checkUpdate` → `pressEntry`，而 `pressEntry` 会先把右下角
+	// 那几条提示收掉再点（理由见 `pressEntry` 的注释）。少了那一步，那一下会被
+	// 提示卡片吃掉，于是这里的 `waitFor` 等的是一个永远不会发生的检查。
 	f.be.setErr(nil)
 	f.checkUpdate(t)
 	if got := f.a.UpdateSnapshot().Phase; got != app.UpdateIdle {
@@ -635,7 +629,7 @@ func TestABackgroundCheckShowsAToastInsteadOfOpeningTheDialog(t *testing.T) {
 
 	stop := f.a.StartAutoChecks() // 自动那一次：立刻查一遍
 	defer stop()
-	waitFor(t, func() bool { return f.a.UpdateSnapshot().Available() })
+	waitFor(t, "后台那一次查到了新版本", func() bool { return f.a.UpdateSnapshot().Available() })
 	f.tt.Frame()
 
 	if f.s.update.wanted {

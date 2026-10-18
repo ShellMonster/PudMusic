@@ -107,7 +107,7 @@ var realDataLedger = []realDataPage{
 		Open: func(t *testing.T) (*Shell, *mygoui.Tester) {
 			f := newLibFake(t).withLater(1, 1, "真数据一首")
 			tt, s := libraryShell(t, f, laterPath)
-			settle(t, tt, "那一首拉回来了", func() bool { return rowsShown(&s.laterPage) == 1 })
+			waitFrames(t, tt, "那一首拉回来了", func() bool { return rowsShown(&s.laterPage) == 1 })
 			return s, tt
 		},
 		Want: []string{"真数据一首"},
@@ -117,7 +117,7 @@ var realDataLedger = []realDataPage{
 		Open: func(t *testing.T) (*Shell, *mygoui.Tester) {
 			f := newLibFake(t).withHistory(1, 30, 200, "真数据一首")
 			tt, s := libraryShell(t, f, historyPath)
-			settle(t, tt, "那一首拉回来了", func() bool { return rowsShown(&s.historyPage) == 1 })
+			waitFrames(t, tt, "那一首拉回来了", func() bool { return rowsShown(&s.historyPage) == 1 })
 			return s, tt
 		},
 		Want: []string{"真数据一首"},
@@ -164,7 +164,7 @@ var realDataLedger = []realDataPage{
 		Route: searchPath, Title: "搜索",
 		Open: func(t *testing.T) (*Shell, *mygoui.Tester) {
 			s, tt := newSearchPage(t, "真数据", newSearchStub(24, 24))
-			settleSearch(t, tt, "结果拉回来了", loadedTo(s, 0, 1))
+			waitFrames(t, tt, "结果拉回来了", loadedTo(s, 0, 1))
 			realDataFrames(tt, 2)
 			return s, tt
 		},

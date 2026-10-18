@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
@@ -180,22 +179,6 @@ func newSearchPage(t *testing.T, keyword string, st *searchStub) (*Shell, *mygou
 	return s, tt
 }
 
-// settleSearch 跑到 cond 成立为止。每一轮走一帧，顺带让后台那一支有机会跑。
-func settleSearch(t *testing.T, tt *mygoui.Tester, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		tt.Frame()
-		if cond() {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("等了两秒还没%s，文字有 %q", what, tt.Texts())
-		}
-		time.Sleep(time.Millisecond)
-	}
-}
-
 // loadedTo 是「某一 Tab 加载到了第 n 页、并且那一页进来了」。
 //
 // ⚠️ **只看「≥ n 页」会误判**：换查询之后 `Reload` 要先把页码清 0 再拉，
@@ -239,7 +222,7 @@ func queueOneSong(t *testing.T, s *Shell, tt *mygoui.Tester) app.Item {
 	if err := s.app.Enqueue(app.LocalItem(dst)); err != nil {
 		t.Fatal(err)
 	}
-	settleSearch(t, tt, "第一首开始播", func() bool { return s.app.Snapshot().HasTrack })
+	waitFrames(t, tt, "第一首开始播", func() bool { return s.app.Snapshot().HasTrack })
 	return s.app.Queue().Items()[0]
 }
 
@@ -322,7 +305,7 @@ func TestChangingTheSortGoesBackToPageOne(t *testing.T) {
 	settleText(t, tt, "第 1 页 第 1 首")
 
 	scrollSearchList(tt)
-	settleSearch(t, tt, "第 2 页 加载进来", loadedTo(s, searchTabSong, 2))
+	waitFrames(t, tt, "第 2 页 加载进来", loadedTo(s, searchTabSong, 2))
 	tt.Frame()
 	if _, ok := tt.Find("第 1 页 第 1 首"); ok {
 		t.Fatalf("测试自己出了问题：明明滚到第 2 页了，第 1 页的第 1 首还在屏幕上")
@@ -332,7 +315,7 @@ func TestChangingTheSortGoesBackToPageOne(t *testing.T) {
 	if err := tt.Click("最多播放"); err != nil {
 		t.Fatalf("点不到「最多播放」：%v，文字有 %q", err, tt.Texts())
 	}
-	settleSearch(t, tt, "新排序发出去的那一趟", func() bool {
+	waitFrames(t, tt, "新排序发出去的那一趟", func() bool {
 		c := st.callsOf(searchTabSong)
 		return len(c) > before && c[len(c)-1].sort == 1
 	})
@@ -343,9 +326,15 @@ func TestChangingTheSortGoesBackToPageOne(t *testing.T) {
 		t.Errorf("换排序之后发出去的第一趟是第 %d 页，want 第 1 页", got.page)
 	}
 	// 画面回到了那一页的头：第 1 页的第 1 首重新在屏幕上。
-	if _, ok := tt.Find("第 1 页 第 1 首"); !ok {
-		t.Errorf("换排序之后没有回到第 1 页的头，文字有 %q", tt.Texts())
-	}
+	//
+	// ⚠️ **等这一句画出来，不要画完就读**。上面等的是「**请求**发出去了」（后台记下
+	// 那一趟），而这一句断的是「**画面上**有了」——两者之间隔着响应 → 解码 → 投递
+	// 状态 → 唤醒 → 排版 → 画帧，满载的机器上那几帧要花的时间和空闲时不是一个量级。
+	// 原来读完请求就断言画面，于是满载时偶发红（实测负载 25–40 时十次里碰到一次）。
+	waitFrames(t, tt, "画面回到第 1 页的头", func() bool {
+		_, ok := tt.Find("第 1 页 第 1 首")
+		return ok
+	})
 }
 
 // TestChangingTheKeywordGoesBackToPageOne 是验收第 2 条的后半句：「任一筛选条件」
@@ -356,11 +345,11 @@ func TestChangingTheKeywordGoesBackToPageOne(t *testing.T) {
 	settleText(t, tt, "第 1 页 第 1 首")
 
 	scrollSearchList(tt)
-	settleSearch(t, tt, "第 2 页 加载进来", loadedTo(s, searchTabSong, 2))
+	waitFrames(t, tt, "第 2 页 加载进来", loadedTo(s, searchTabSong, 2))
 	before := len(st.callsOf(searchTabSong))
 
 	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("林俊杰"))
-	settleSearch(t, tt, "新词发出去的那一趟", func() bool {
+	waitFrames(t, tt, "新词发出去的那一趟", func() bool {
 		c := st.callsOf(searchTabSong)
 		return len(c) > before && c[len(c)-1].keyword == "林俊杰"
 	})
@@ -385,7 +374,7 @@ func TestSwitchingTabsKeepsWhereYouWere(t *testing.T) {
 
 	// 在「歌曲」Tab 上翻到第 2 页并滚下去。
 	scrollSearchList(tt)
-	settleSearch(t, tt, "第 2 页 加载进来", loadedTo(s, searchTabSong, 2))
+	waitFrames(t, tt, "第 2 页 加载进来", loadedTo(s, searchTabSong, 2))
 	tt.Frame()
 
 	// 记下这一刻「第 2 页 第 1 首」在画面上的位置。
@@ -400,7 +389,7 @@ func TestSwitchingTabsKeepsWhereYouWere(t *testing.T) {
 		if err := tt.Click(tab); err != nil {
 			t.Fatalf("点不到 %q 那个 Tab：%v，文字有 %q", tab, err, tt.Texts())
 		}
-		settleSearch(t, tt, tab+" 那一页画出来", func() bool {
+		waitFrames(t, tt, tab+" 那一页画出来", func() bool {
 			return s.search.tab == tabOf(tab) && !pageOf(s, tabOf(tab)).Loading
 		})
 	}
@@ -454,7 +443,7 @@ func TestTheThreeTypesAndTheirSorts(t *testing.T) {
 	if err := tt.Click("用户"); err != nil {
 		t.Fatalf("点不到「用户」那个 Tab：%v，文字有 %q", err, tt.Texts())
 	}
-	settleSearch(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
+	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
 
 	for _, o := range searchUserSorts {
 		if !tt.HasText(o.Label) {
@@ -484,7 +473,7 @@ func TestEachSortStaysItsOwn(t *testing.T) {
 	if err := tt.Click("最新发布"); err != nil {
 		t.Fatalf("点不到「最新发布」：%v，文字有 %q", err, tt.Texts())
 	}
-	settleSearch(t, tt, "「歌曲」那一档换了排序", func() bool {
+	waitFrames(t, tt, "「歌曲」那一档换了排序", func() bool {
 		c := st.callsOf(searchTabSong)
 		return len(c) >= 2 && c[len(c)-1].sort == 2
 	})
@@ -492,11 +481,11 @@ func TestEachSortStaysItsOwn(t *testing.T) {
 	if err := tt.Click("用户"); err != nil {
 		t.Fatalf("点不到「用户」那个 Tab：%v", err)
 	}
-	settleSearch(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
+	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
 	if err := tt.Click("Lv等级由高到低"); err != nil {
 		t.Fatalf("点不到「Lv等级由高到低」：%v，文字有 %q", err, tt.Texts())
 	}
-	settleSearch(t, tt, "用户那一档换了排序", func() bool {
+	waitFrames(t, tt, "用户那一档换了排序", func() bool {
 		c := st.callsOf(searchTabUser)
 		return len(c) >= 2 && c[len(c)-1].sort == 3
 	})
@@ -562,7 +551,7 @@ func TestARowThatLandsOnTwoPagesIsStillOneRow(t *testing.T) {
 	tt.Frame()
 
 	scrollSearchList(tt)
-	settleSearch(t, tt, "第 2 页 加载进来", loadedTo(s, searchTabSong, 2))
+	waitFrames(t, tt, "第 2 页 加载进来", loadedTo(s, searchTabSong, 2))
 
 	// 第 2 页 24 条里有一条和第 1 页重复 → 只该有 47 行。
 	if got := pageOf(s, searchTabSong).Loaded; got != 47 {
@@ -615,7 +604,7 @@ func TestAMenuOnAUserGoesToTheirSpace(t *testing.T) {
 	if err := tt.Click("用户"); err != nil {
 		t.Fatalf("点不到「用户」那个 Tab：%v，文字有 %q", err, tt.Texts())
 	}
-	settleSearch(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
+	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
 
 	if err := tt.RightClick("第 1 页 第 2 首"); err != nil {
 		t.Fatalf("右键点不到那一行：%v，文字有 %q", err, tt.Texts())
@@ -640,7 +629,7 @@ func TestAddingAUserToTheQueueSaysWhyNot(t *testing.T) {
 	if err := tt.Click("用户"); err != nil {
 		t.Fatalf("点不到「用户」那个 Tab：%v", err)
 	}
-	settleSearch(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
+	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
 
 	if err := tt.RightClick("第 1 页 第 2 首"); err != nil {
 		t.Fatalf("右键点不到那一行：%v", err)
@@ -707,11 +696,11 @@ func TestStaleResponseDoesNotReachPlayAll(t *testing.T) {
 	st := newSearchStub(1, 1)
 	st.hold("旧词", 1) // 旧查询的第一页卡住，不落地
 	s, tt := newSearchPage(t, "旧词", st)
-	settleSearch(t, tt, "旧查询发出去", func() bool { return len(st.callsOf(searchTabSong)) == 1 })
+	waitFrames(t, tt, "旧查询发出去", func() bool { return len(st.callsOf(searchTabSong)) == 1 })
 
 	// 换词：新查询立刻回来。
 	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("新词"))
-	settleSearch(t, tt, "新查询落地", loadedTo(s, searchTabSong, 1))
+	waitFrames(t, tt, "新查询落地", loadedTo(s, searchTabSong, 1))
 
 	// 现在放行旧的那一趟——它回来得比新结果晚，正是 cancel 拦不住的那一种。
 	st.release("旧词", 1)

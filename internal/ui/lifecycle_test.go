@@ -2,7 +2,6 @@ package ui
 
 import (
 	"errors"
-	"path/filepath"
 	"runtime"
 	"testing"
 
@@ -177,18 +176,11 @@ func TestSyncAutoStartOnlyFillsTheGap(t *testing.T) {
 // 并把系统那一份换成假的。
 func newShellForAutoStart(t *testing.T) (*Shell, *fakeAutoStart) {
 	t.Helper()
-	a := app.New()
-	t.Cleanup(a.Close)
-	dir := t.TempDir()
-	if err := a.MountSettings(filepath.Join(dir, app.SettingsFileName)); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = a.CloseSettings() })
-
-	s := New(a)
 	fake := &fakeAutoStart{}
-	s.autostart = fake
-	return s, fake
+	b := newTestShell(t,
+		withSettings(app.DefaultSettings("")),
+		stubbed(func(_ *testing.T, s *Shell) { s.autostart = fake }))
+	return b.s, fake
 }
 
 // TestCloseSettingsDoesNotMakeTheExitOptionDisappear 钉住「选直接退出、点关闭、
@@ -201,14 +193,8 @@ func newShellForAutoStart(t *testing.T) (*Shell, *fakeAutoStart) {
 //
 // 真机上验证过：打包的 .app，选直接退出，点关闭，窗口消失、5 秒后进程还在。
 func TestCloseSettingsDoesNotMakeTheExitOptionDisappear(t *testing.T) {
-	a := app.New()
-	t.Cleanup(a.Close)
-	if err := a.MountSettings(filepath.Join(t.TempDir(), app.SettingsFileName)); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = a.CloseSettings() })
-
-	s := New(a)
+	b := newTestShell(t, withSettings(app.DefaultSettings("")), withoutTester())
+	a, s := b.a, b.s
 	s.installLifecycle()
 
 	// 用户选「直接退出」，然后点关闭。OnClose 会把设置读进缓存。

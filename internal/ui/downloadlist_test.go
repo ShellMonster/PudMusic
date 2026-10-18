@@ -169,54 +169,34 @@ const dlWide = 1200
 // 设置先写到盘上再挂：那是「启动时读盘」那条路，和真窗口一样。
 func newRowsOnSide(t *testing.T, w int, side float64, rows ...download.Snapshot) *ui.Tester {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), app.SettingsFileName)
-	st, err := app.OpenSettingsStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.Update(func(cur *app.Settings) {
-		*cur = app.DefaultSettings("")
-		cur.SideMenuWidth = side
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	a := app.New()
-	if err := a.MountSettings(path); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		a.Close()
-		_ = a.CloseSettings()
-	})
-
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	t.Cleanup(func() { _ = s.hist.Close() })
-	s.router.Transition = ui.TransitionNone
-	s.downloads.rowsFn = func() []download.Snapshot { return rows }
-
-	tt := ui.NewTester(s.View, w, 800)
+	b := newTestShell(t,
+		withSettings(func() app.Settings {
+			st := app.DefaultSettings("")
+			st.SideMenuWidth = side
+			return st
+		}()),
+		at(w, 800),
+		stubbed(func(_ *testing.T, s *Shell) {
+			s.downloads.rowsFn = func() []download.Snapshot { return rows }
+		}))
+	s := b.s
 	s.navigate(downloadListPath)
-	dlFrame(tt)
-	return tt
+	dlFrame(b.tt)
+	return b.tt
 }
 
 // newDownloadShell 建外壳、把两个「打开」换成记动作的桩。
 func newDownloadShell(t *testing.T, a *app.App) *Shell {
 	t.Helper()
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	t.Cleanup(func() { _ = s.hist.Close() })
-	s.router.Transition = ui.TransitionNone
-	// 关掉切页动画，和 newShell 同一个理由（router_test.go 顶上那一段）。
-	dlOpened, dlRevealed = nil, nil
-	s.downloads.openDir = func(path string) error { dlOpened = append(dlOpened, path); return nil }
-	s.downloads.reveal = func(path string) { dlRevealed = append(dlRevealed, path) }
-	return s
+	// 这个外壳挂在**外面那个** a 上（那些测试要拿同一个 App 验别的东西），所以
+	// 造外壳的地方给的是 `onApp`：收尾只停外壳自己占的那些东西，不碰那个 a。
+	b := newTestShell(t, onApp(a),
+		stubbed(func(_ *testing.T, s *Shell) {
+			dlOpened, dlRevealed = nil, nil
+			s.downloads.openDir = func(path string) error { dlOpened = append(dlOpened, path); return nil }
+			s.downloads.reveal = func(path string) { dlRevealed = append(dlRevealed, path) }
+		}))
+	return b.s
 }
 
 // dlOpened / dlRevealed 记下两个「打开」各自打开了什么。

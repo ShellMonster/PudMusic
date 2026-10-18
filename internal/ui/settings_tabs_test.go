@@ -821,12 +821,12 @@ func TestTheLocalMusicDirectoriesAreEditable(t *testing.T) {
 	fake := &fakePicker{path: "/music/classic"}
 	s.picker = fake
 	clickSetting(t, tt, s, "添加文件夹")
-	waitFor(t, func() bool { return len(a.SettingsSnapshot().LocalMusicDirs) == 3 })
+	waitFor(t, "第三个本地音乐目录写进设置", func() bool { return len(a.SettingsSnapshot().LocalMusicDirs) == 3 })
 
 	// 再加一次同一个：不该出现两遍。
 	fake.path = "/music/classic"
 	clickSetting(t, tt, s, "添加文件夹")
-	waitFor(t, func() bool { return len(a.SettingsSnapshot().LocalMusicDirs) >= 3 })
+	waitFor(t, "本地音乐目录写进设置", func() bool { return len(a.SettingsSnapshot().LocalMusicDirs) >= 3 })
 	tt.Frame()
 	if got := a.SettingsSnapshot().LocalMusicDirs; len(got) != 3 {
 		t.Errorf("同一个目录加了两次之后是 %q，want 三条", got)
@@ -901,7 +901,7 @@ func TestEachPathButtonAsksItsOwnQuestion(t *testing.T) {
 			continue
 		}
 		clickSetting(t, tt, s, c.button)
-		waitFor(t, func() bool { return fake.gotText[0] != "" })
+		waitFor(t, "文件框弹出来", func() bool { return fake.gotText[0] != "" })
 		if fake.gotDir != c.dir {
 			t.Errorf("「%s」弹的不是文件夹对话框", c.button)
 		}
@@ -944,17 +944,4 @@ func (f *fakePicker) pickConfig(_ *mygo.Window) (string, error) {
 func (f *fakePicker) saveConfig(_ *mygo.Window, defaultName string) (string, error) {
 	f.savedName = defaultName
 	return f.savedAs, f.saveErr
-}
-
-// waitFor 等一个后台结果（文件框是弹在另一个 goroutine 上的，见 pickPath）。
-func waitFor(t *testing.T, done func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if done() {
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	t.Fatal("等了两秒，那个后台结果还没到")
 }

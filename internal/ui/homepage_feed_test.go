@@ -42,20 +42,18 @@ const (
 // 份，而症状是「首页一直 -101」——那句话读起来像是「你没权限看推荐」。
 func newHomeShell(t *testing.T, b *uiExplore) (*Shell, *mygoui.Tester, *app.App) {
 	t.Helper()
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	t.Cleanup(func() { _ = s.hist.Close() })
-	s.router.Transition = mygoui.TransitionNone
-
-	transport := &app.CredentialTransport{Base: b.Server.Client().Transport, Policy: app.DefaultInjectPolicy()}
-	cli := bili.NewClient(bili.Options{Transport: transport})
-	cli.TestOnlyPointHostsAtFixture(b.URL)
-	a.MountLogin(app.NewMemoryStore("home-test"), cli)
-	a.MountRecommend(cli)
-	a.MountStreaming(app.Streaming{Client: cli, Media: b.Server.Client()})
-	return s, mygoui.NewTester(s.View, homeW, homeH), a
+	// ⚠️ 和 `newSpaceShell` 同一个形状，所以也走同一个基座：Mount* 都要在建外壳
+	// **之前**挂上，而收尾（四个定时器、封面缓存、应用、设置/历史/快捷键的落盘）
+	// 由 `newTestShell` 无条件挂上。少挂一次就是一组挂到测试二进制结束的 goroutine。
+	sh := newTestShell(t, at(homeW, homeH), mounted(func(_ *testing.T, a *app.App) {
+		transport := &app.CredentialTransport{Base: b.Server.Client().Transport, Policy: app.DefaultInjectPolicy()}
+		cli := bili.NewClient(bili.Options{Transport: transport})
+		cli.TestOnlyPointHostsAtFixture(b.URL)
+		a.MountLogin(app.NewMemoryStore("home-test"), cli)
+		a.MountRecommend(cli)
+		a.MountStreaming(app.Streaming{Client: cli, Media: b.Server.Client()})
+	}))
+	return sh.s, sh.tt, sh.a
 }
 
 // homeArchiveData 造一份分区推荐的 data 段。region 是「音乐」还是「鬼畜」。

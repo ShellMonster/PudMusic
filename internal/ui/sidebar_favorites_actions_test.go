@@ -37,7 +37,7 @@ func favWireShell(t *testing.T, created, collected int) (*Shell, *app.App, *ui.T
 // waitQueue 跑到队列里有 n 项为止。
 func waitQueue(t *testing.T, a *app.App, n int) {
 	t.Helper()
-	waitUntilTrue(t, "队列里有歌", func() bool { return a.Queue().Len() == n })
+	waitFor(t, "队列里有歌", func() bool { return a.Queue().Len() == n })
 }
 
 // TestPlayingAFavoriteFromTheSidebarReallyPutsItInTheQueue 「播放」这一项
@@ -110,14 +110,14 @@ func TestDeletingAFavoriteAsksFirst(t *testing.T) {
 	if err := tt.Click("删除"); err != nil {
 		t.Fatal(err)
 	}
-	waitUntilTrue(t, "删除请求到了 B 站", func() bool {
+	waitFor(t, "删除请求到了 B 站", func() bool {
 		return len(b.deletedFolders()) == 1
 	})
 	if got := b.deletedFolders(); got[0] != "2" {
 		t.Errorf("删掉的是 %q，want 2（行上的那个 id）", got[0])
 	}
 	// 侧栏上那一行跟着没了。
-	waitFrameFor(t, tt, "侧栏上那一行没了", func() bool {
+	waitFrames(t, tt, "侧栏上那一行没了", func() bool {
 		_, ok := tt.Find("我建的 2")
 		return !ok
 	})
@@ -169,8 +169,8 @@ func TestUnfavoritingDoesNotAsk(t *testing.T) {
 	if n := len(b.deletedFolders()); n != 0 {
 		t.Errorf("取消收藏却发了删除请求（%d 次）", n)
 	}
-	waitUntilTrue(t, "取消收藏的请求到了 B 站", func() bool { return b.isFaved() == false })
-	waitUntilTrue(t, "那一行从侧栏上没了", func() bool {
+	waitFor(t, "取消收藏的请求到了 B 站", func() bool { return b.isFaved() == false })
+	waitFor(t, "那一行从侧栏上没了", func() bool {
 		return len(a.SideFavorites(app.FavoritesCollected)) == 1
 	})
 	// 落盘的顺序里也不能再有它，否则下次拉全量它自己长回来

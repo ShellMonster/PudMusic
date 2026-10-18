@@ -70,7 +70,7 @@ func onlineTester(t *testing.T, pages []any, blockPages bool) (*Shell, *mygoui.T
 	}); err != nil {
 		t.Fatalf("把在线的那首放进队列：%v", err)
 	}
-	settleSearch(t, tt, "在线那首开始播", func() bool { return s.app.Snapshot().HasTrack })
+	waitFrames(t, tt, "在线那首开始播", func() bool { return s.app.Snapshot().HasTrack })
 	return s, tt
 }
 
@@ -85,7 +85,7 @@ func TestThePartsEntryOpensAndSwitchesTheEpisode(t *testing.T) {
 	// 把手在**还没问到**的时候就摆着（见 viewFullParts 那段），所以这里要等到
 	// 三条真的到齐了再点进去——不然点开的是「正在问这一首有哪几集」。
 	s.openFullPlayer()
-	settleSearch(t, tt, "分集问回来了", func() bool { return len(s.app.Parts()) == 3 })
+	waitFrames(t, tt, "分集问回来了", func() bool { return len(s.app.Parts()) == 3 })
 	if _, ok := tt.Find("显示分集列表"); !ok {
 		t.Fatalf("问回来了把手还没摆，文字有 %q", tt.Texts())
 	}
@@ -105,7 +105,7 @@ func TestThePartsEntryOpensAndSwitchesTheEpisode(t *testing.T) {
 	if err := tt.Click("第 3 集"); err != nil {
 		t.Fatalf("点不了第三集：%v（文字：%q）", err, tt.Texts())
 	}
-	settleSearch(t, tt, "换到第三集", func() bool {
+	waitFrames(t, tt, "换到第三集", func() bool {
 		it, ok := s.app.CurrentItem()
 		return ok && it.Cid == "779"
 	})
@@ -129,7 +129,7 @@ func TestThereIsNoPartsEntryForASinglePartVideo(t *testing.T) {
 	s, tt := onlineTester(t, nil, false) // 默认那一份：一集
 
 	s.openFullPlayer()
-	settleSearch(t, tt, "分集问回来了", func() bool { return len(s.app.Parts()) > 0 })
+	waitFrames(t, tt, "分集问回来了", func() bool { return len(s.app.Parts()) > 0 })
 	tt.Frame()
 
 	if n := len(s.app.Parts()); n != 1 {
@@ -152,7 +152,7 @@ func TestThePartsPanelSaysWhyWhenTheyCannotBeAsked(t *testing.T) {
 	s, tt := onlineTester(t, nil, true)
 
 	s.openFullPlayer()
-	settleSearch(t, tt, "问失败", func() bool { return s.app.PartsErr() != nil })
+	waitFrames(t, tt, "问失败", func() bool { return s.app.PartsErr() != nil })
 	tt.Frame()
 
 	// 问不到的时候把手也得摆着，否则那句人话没地方显示。
@@ -209,7 +209,7 @@ func TestPartRowsAreKeyedByTheirCid(t *testing.T) {
 func TestSwitchingEpisodesDoesNotCloseTheFullPlayer(t *testing.T) {
 	s, tt := onlineTester(t, multiPages(), false)
 	s.openFullPlayer()
-	settleSearch(t, tt, "分集问回来了", func() bool { return len(s.app.Parts()) == 3 })
+	waitFrames(t, tt, "分集问回来了", func() bool { return len(s.app.Parts()) == 3 })
 
 	if err := tt.Click("显示分集列表"); err != nil {
 		t.Fatalf("点不了分集入口：%v（文字：%q）", err, tt.Texts())
@@ -231,7 +231,7 @@ func TestSwitchingEpisodesDoesNotCloseTheFullPlayer(t *testing.T) {
 		}
 	}
 	// 新歌接上之后满屏还在放新歌（不是卡在空状态上）。
-	settleSearch(t, tt, "换到第三集", func() bool {
+	waitFrames(t, tt, "换到第三集", func() bool {
 		it, ok := s.app.CurrentItem()
 		return ok && it.Cid == "779" && s.app.Snapshot().HasTrack
 	})

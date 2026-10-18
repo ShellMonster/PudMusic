@@ -16,7 +16,6 @@ import (
 	"net/url"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/egoist/mygo/ui"
@@ -26,30 +25,30 @@ import (
 func favTester(t *testing.T, f *biliFixture) (*app.App, *ui.Tester) {
 	t.Helper()
 	a := app.New()
-	t.Cleanup(a.Close)
-	a.MountStreaming(app.Streaming{
-		Client:  f.client(),
-		Media:   f.Client(),
-		TempDir: t.TempDir(),
-	})
-	dir := t.TempDir()
-	if err := a.MountDownloads(app.Downloads{
-		Media:       f.Client(),
-		QueueFile:   filepath.Join(dir, "queue.json"),
-		FallbackDir: dir,
-	}); err != nil {
-		t.Fatalf("挂下载：%v", err)
-	}
 	// ⚠️ 下载队列要在 App 关掉之前清空：`download` 的后台线在队列里还排着队时关
 	// 应用会卡住（活锁，见 `internal/service/download` 的 loop）。这一组用例每次都
 	// 清一次。
+	//
+	// `t.Cleanup` 是后挂的先跑，所以这一句排在基座挂的那次收尾**前面**。
 	t.Cleanup(a.ClearDownloads)
 
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	tt := ui.NewTester(s.View, 760, 460)
-	tt.Frame()
-	return a, tt
+	dir := t.TempDir()
+	b := newTestShell(t, onApp(a), at(760, 460), mounted(func(t *testing.T, a *app.App) {
+		a.MountStreaming(app.Streaming{
+			Client:  f.client(),
+			Media:   f.Client(),
+			TempDir: t.TempDir(),
+		})
+		if err := a.MountDownloads(app.Downloads{
+			Media:       f.Client(),
+			QueueFile:   filepath.Join(dir, "queue.json"),
+			FallbackDir: dir,
+		}); err != nil {
+			t.Fatalf("挂下载：%v", err)
+		}
+	}))
+	b.tt.Frame()
+	return a, b.tt
 }
 
 // openQueueWithOneSong 摆一个只有一首在线歌的队列，并把抽屉拉出来。
@@ -93,7 +92,7 @@ func TestTheRowMenuReallyFavoritesTheSong(t *testing.T) {
 	pickMenu(t, tt, "在线那一首", "收藏")
 
 	// 收藏是后台做的（要问 B 站四到五次），所以要等它落地。
-	waitUI(t, tt, "画面上说收藏成功了", func() bool { return tt.HasText("已收藏到「默认收藏夹」") })
+	waitFrames(t, tt, "画面上说收藏成功了", func() bool { return tt.HasText("已收藏到「默认收藏夹」") })
 
 	f.mu.Lock()
 	calls := append([]url.Values(nil), f.favoriteCalls...)
@@ -127,7 +126,7 @@ func TestTheRowMenuSaysSoWhenTheSongIsAlreadyFavorited(t *testing.T) {
 	openQueueWithOneSong(t, a, tt)
 
 	pickMenu(t, tt, "在线那一首", "收藏")
-	waitUI(t, tt, "画面上说了已经收藏过", func() bool { return tt.HasText("已经收藏过了") })
+	waitFrames(t, tt, "画面上说了已经收藏过", func() bool { return tt.HasText("已经收藏过了") })
 
 	f.mu.Lock()
 	n := len(f.favoriteCalls)
@@ -155,18 +154,4 @@ func TestTheRowMenuReallyDownloadsTheVideo(t *testing.T) {
 	if got := filepath.Ext(snaps[0].Dest); got != ".mp4" {
 		t.Errorf("任务落在 %q，want .mp4 —— 接的是音频那一路", snaps[0].Dest)
 	}
-}
-
-// waitUI 轮询到 cond 成立（后台那一层要一会儿）。
-func waitUI(t *testing.T, tt *ui.Tester, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		tt.Frame()
-		if cond() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("等了 10s，%s 还没发生（画面：%q）", what, tt.Texts())
 }

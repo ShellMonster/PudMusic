@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
@@ -56,7 +55,7 @@ func TestExportingWritesAFileWithNoCredentialAndSaysSo(t *testing.T) {
 	s.picker = fake
 
 	clickSetting(t, tt, s, "导出配置")
-	waitFor(t, func() bool { _, err := os.Stat(target); return err == nil })
+	waitFor(t, "代理配置写到盘上", func() bool { _, err := os.Stat(target); return err == nil })
 
 	body, err := os.ReadFile(target)
 	if err != nil {
@@ -105,7 +104,7 @@ func TestImportingAConfigChangesOnlyWhatThatFileMentions(t *testing.T) {
 	s.picker = &fakePicker{configPath: patch}
 
 	clickSetting(t, tt, s, "导入配置")
-	waitFor(t, func() bool { return a.SettingsSnapshot().ThemeMode == app.ThemeModeDark })
+	waitFor(t, "设置落成深色", func() bool { return a.SettingsSnapshot().ThemeMode == app.ThemeModeDark })
 
 	got := a.SettingsSnapshot()
 	if got.BorderRadius != 20 {
@@ -138,7 +137,7 @@ func TestImportingAConfigActuallyReachesTheDisk(t *testing.T) {
 	s.picker = &fakePicker{configPath: patch}
 
 	clickSetting(t, tt, s, "导入配置")
-	waitFor(t, func() bool {
+	waitFor(t, "字号写进配置文件", func() bool {
 		b, err := os.ReadFile(path)
 		return err == nil && strings.Contains(string(b), "21")
 	})
@@ -158,7 +157,7 @@ func TestImportingAFileWeCannotReadSaysSo(t *testing.T) {
 
 	before := a.SettingsSnapshot().BorderRadius
 	clickSetting(t, tt, s, "导入配置")
-	waitForFrames(t, tt, func() bool { return tt.HasText("导入配置失败") })
+	waitFrames(t, tt, "画面上出现「导入配置失败」", func() bool { return tt.HasText("导入配置失败") })
 
 	if got := a.SettingsSnapshot().BorderRadius; got != before {
 		t.Errorf("一份坏掉的文件把设置改了：%v → %v", before, got)
@@ -186,9 +185,8 @@ func TestImportingIntoSettingsFromANewerVersionIsRefusedLoudly(t *testing.T) {
 		a.Close()
 		_ = a.CloseSettings()
 	})
-	s := New(a)
-	s.router.Transition = mygoui.TransitionNone
-	tt := mygoui.NewTester(s.View, 1200, 800)
+	b := newTestShell(t, onApp(a))
+	s, tt := b.s, b.tt
 	tt.Frame()
 	openSettings(t, tt)
 
@@ -203,7 +201,7 @@ func TestImportingIntoSettingsFromANewerVersionIsRefusedLoudly(t *testing.T) {
 	s.picker = &fakePicker{configPath: patch}
 
 	clickSetting(t, tt, s, "导入配置")
-	waitForFrames(t, tt, func() bool { return tt.HasText("导入配置失败") })
+	waitFrames(t, tt, "画面上出现「导入配置失败」", func() bool { return tt.HasText("导入配置失败") })
 	// 那份文件一个字节都没动。
 	if got := readFile(t, path); got != body {
 		t.Fatalf("一份未来的设置文件被改写了：\n改前 %s\n改后 %s", body, got)
@@ -212,11 +210,10 @@ func TestImportingIntoSettingsFromANewerVersionIsRefusedLoudly(t *testing.T) {
 
 // 界面上「配置」那一段不会把设置页画崩——哪怕迁移报告里有很长的句子。
 func TestTheConfigSectionSurvivesALongMigrationNote(t *testing.T) {
-	withMigration(t, MigrationReport{
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), withStartupMigration(MigrationReport{
 		Upgraded:      "数据已升到 v1（动了：settings.json、shortcuts.json、search-history.json、download-queue.json）",
 		UpgradedFiles: []string{"settings.json", "shortcuts.json"},
-	})
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	}))
 	if tt.HasText("界面出错了") {
 		t.Fatalf("配置段画崩了，文字有 %q", tt.Texts())
 	}
@@ -227,12 +224,11 @@ func TestTheConfigSectionSurvivesALongMigrationNote(t *testing.T) {
 // 用户最怕的是「升级失败之后我的设置没了」。界面上只写一句「升级失败」的话，
 // 他会在还没搞清发生了什么之前先去翻自己的文件。
 func TestAFailedUpgradeSaysTheOldFilesAreStillThere(t *testing.T) {
-	withMigration(t, MigrationReport{
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), withStartupMigration(MigrationReport{
 		Upgraded:   "升级到 v1 失败：这一份读不懂。原来的数据一个字节都没少。",
 		UpgradeErr: os.ErrInvalid,
 		Rollback:   true,
-	})
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	}))
 	if !tt.HasText("原来的数据一个字节都没少") {
 		t.Fatalf("升级失败时没有说原文件还在，文字有 %q", tt.Texts())
 	}
@@ -242,32 +238,14 @@ func TestAFailedUpgradeSaysTheOldFilesAreStillThere(t *testing.T) {
 }
 
 // withMigration 临时换掉最近一次的迁移报告。
-// restoreMigrationAfter 记住**此刻**的迁移报告，测试结束时恢复回去。
+// ⚠️ **包级那个 `migration` 归基座管**（`resetMigrationReport`，见那里）：它在造
+// 外壳之前就被抹成零，测试结束时恢复。以前要靠每一条测试自己记得调
+// `restoreMigrationAfter`，而漏一条的后果是**后面每一个 Shell 第一帧都弹一条
+// toast**，那张卡片的底色正好盖住 `settings_test.go` 的采样点 (700, 430)——
+// 那几条会红成「画面那个点是 {30 215 96}」，就是 `DefaultPrimaryColor` 逐字。
+// 实测：15 次 `go test ./...` 里飘 1 次，而它飘的是**别的文件**的测试。
 //
-// ⚠️ 为什么 `withMigration` 的 cleanup 不够：它只恢复**它自己设进去的那一份**。而
-// 按一下「从 Biu 导入」按钮会走 `rememberImport`，那是**直接把报告写进包级的
-// `migration.r`** 的——不在任何 cleanup 的射程里。
-//
-// 留下的内容会让**后面**每一个新建的 Shell 在第一帧弹一条 toast
-// （`viewMain` → `announceMigration`），而 toast 的卡片底色是**主色**
-// （`viewToast`：Biu 的 `color: "primary"`）。`internal/ui/settings_test.go` 那些
-// 验「窗口底色」的测试取的采样点 `(700, 430)`（900×600 窗口的右下角）**正好落在
-// toast 上**——实测那几条红成「画面那个点是 {30 215 96}」，那个值就是
-// `DefaultPrimaryColor` 逐字。
-//
-// 所以**任何点了导入按钮的测试都要在开头调这个**，而不是指望 `withMigration`。
-func restoreMigrationAfter(t *testing.T) {
-	t.Helper()
-	migration.mu.Lock()
-	before := migration.r
-	migration.mu.Unlock()
-	t.Cleanup(func() {
-		migration.mu.Lock()
-		migration.r = before
-		migration.mu.Unlock()
-	})
-}
-
+// 所以这里只提供「给这个外壳一份报告」这一件事，恢复交给基座。
 func withMigration(t *testing.T, r MigrationReport) {
 	t.Helper()
 	migration.mu.Lock()
@@ -279,25 +257,6 @@ func withMigration(t *testing.T, r MigrationReport) {
 		migration.r = before
 		migration.mu.Unlock()
 	})
-}
-
-// waitForFrames 等一个后台结果，**每轮都重画一帧**。
-//
-// 和 `waitFor` 的区别：结果可能是**画在屏幕上的一行字**（一条提示）。画面是
-// 上一帧的产物，不 `Frame()` 就永远读不到那一帧——而提示是在后台 goroutine 里
-// 投的，那个 goroutine 调的 `invalidate` 对无头 Tester 是不起作用的。
-func waitForFrames(t *testing.T, tt *mygoui.Tester, done func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		tt.Frame()
-		if done() {
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	tt.Frame()
-	t.Fatal("等了两秒，那个后台结果还没画出来")
 }
 
 // 点「从 Biu 导入」：设置真的换成了 Biu 那一份，而且**旧的那份留了备份**。
@@ -319,7 +278,6 @@ func TestPressingTheBiuImportButtonActuallySwapsTheSettingsIn(t *testing.T) {
 	// **什么都没有**。反过来的话它记下的是刚被 `withMigration` 设进去的那一份
 	// （带 `BiuDirs`），cleanup 恢复成它 —— 于是每一条测试跑完都还留着一份报告，
 	// 后面每一个新建的 Shell 第一帧照样弹 toast，采样点照样被盖。
-	restoreMigrationAfter(t)
 	withMigration(t, MigrationReport{BiuDirs: []string{biu}})
 
 	// 按钮因为找得到 Biu 才摆——这是设置页上的可观察行为。
@@ -329,7 +287,7 @@ func TestPressingTheBiuImportButtonActuallySwapsTheSettingsIn(t *testing.T) {
 	}
 
 	clickSetting(t, tt, s, "从 Biu 导入")
-	waitForFrames(t, tt, func() bool {
+	waitFrames(t, tt, "Biu 那份主色写进设置", func() bool {
 		return a.SettingsSnapshot().PrimaryColor == "#17c964"
 	})
 	// ⚠️ **还要等那一趟整个跑完**，不能停在「设置换掉了」这里。
@@ -337,16 +295,16 @@ func TestPressingTheBiuImportButtonActuallySwapsTheSettingsIn(t *testing.T) {
 	// 「从 Biu 导入」是**后台 goroutine**（`settings_tab_config.go` 的那个
 	// `go func`），而它写包级 `migration.r` 的那一句 `rememberImport(r)` 排在
 	// `reloadSettings()` **之后**：设置一换掉，上面那个等待当场就成立，于是这个
-	// 测试可能在 cleanup 已经把 `migration.r` 恢复回去之后，那一趟才把它写回
-	// 来。留下的报告会让**后面每一个新建的 Shell** 在第一帧弹一条 toast
+	// 测试可能在收尾已经把 `migration.r` 抹回零之后，那一趟才把它写回来。
+	// 留下的报告会让**后面每一个新建的 Shell** 在第一帧弹一条 toast
 	// （`viewMain` → `announceMigration`），而 toast 的卡片底色是主色、正好
 	// 盖住 `settings_test.go` 那些验窗口底色的采样点 (700,430)——症状就长那样：
 	// 「画面那个点是 {30 215 96}」，那个数是 `DefaultPrimaryColor` 逐字。
 	//
-	// `restoreMigrationAfter` 的注释已经写着「任何点了导入按钮的测试都要在开头
-	// 调这个」，但那一句管的是**开头**；这一处管的是**结尾**：等它真的写完了，
-	// cleanup 的恢复才落在这趟后面。
-	waitForFrames(t, tt, func() bool { return LastMigration().Imported.Any() })
+	// 包级那份报告现在归**基座**管了（`resetMigrationReport`：造外壳之前抹成零、
+	// 收尾时恢复，见那里），所以这一句等的是「基座那次恢复落在这一趟后面」——
+	// 等它真的写完了，恢复才盖得住。
+	waitFrames(t, tt, "导入结果记进迁移报告", func() bool { return LastMigration().Imported.Any() })
 
 	got := a.SettingsSnapshot()
 	if got.DownloadPath != "/Users/x/Downloads" {
@@ -404,7 +362,11 @@ func TestImportingADarkThemeActuallyTurnsTheWholeWindowDark(t *testing.T) {
 	// (600, 300) 就会落到某个控件的颜色上，而那一帧看着像是「主题没换」。
 	const probeX, probeY = 300, 400
 	lightBG := BuildTheme(a.SettingsSnapshot(), false).Background
-	if w := asColor(tt.Image().RGBAAt(probeX, probeY)); w != lightBG {
+	// ⚠️ 每一处读像素都走 `waitPixel`（等它对上），不是「画一帧就读」：切路由是
+	// 淡入的，刚点完那一帧的底色还差百分之几（实测 255 里的 251），那个差跟
+	// 主题对不对毫无关系，却会让这条测试随机红，而它红的时刻正好是「别的模块给
+	// 顶栏多加了一个控件」那种改动。判据没有放宽——条件就是 want 本身。
+	if w := asColor(waitPixel(t, tt, probeX, probeY, rgbaOf(lightBG), "起点")); w != lightBG {
 		t.Fatalf("起点不是浅色（%v），这一条验不出什么：want %v", w, lightBG)
 	}
 
@@ -415,14 +377,14 @@ func TestImportingADarkThemeActuallyTurnsTheWholeWindowDark(t *testing.T) {
 	s.picker = &fakePicker{configPath: patch}
 
 	clickSetting(t, tt, s, "导入配置")
-	waitFor(t, func() bool { return a.SettingsSnapshot().ThemeMode == app.ThemeModeDark })
+	waitFor(t, "设置落成深色", func() bool { return a.SettingsSnapshot().ThemeMode == app.ThemeModeDark })
 	tt.Frame()
 
 	want := BuildTheme(a.SettingsSnapshot(), false) // 系统仍然是浅色
 	if want.Dark != true {
 		t.Fatalf("测试本身有问题：设置要深色、系统浅色，却拼出了浅色主题")
 	}
-	w := asColor(tt.Image().RGBAAt(probeX, probeY))
+	w := asColor(waitPixel(t, tt, probeX, probeY, rgbaOf(want.Background), "导入深色主题之后"))
 	if w != want.Background {
 		t.Fatalf("导入深色主题之后画面还是 %v，want %v（这一帧的主题还是系统那份）", w, want.Background)
 	}
@@ -435,12 +397,12 @@ func TestImportingADarkThemeActuallyTurnsTheWholeWindowDark(t *testing.T) {
 	}
 	s.picker = &fakePicker{configPath: follow}
 	clickSetting(t, tt, s, "导入配置")
-	waitFor(t, func() bool { return a.SettingsSnapshot().ThemeMode == app.ThemeModeSystem })
+	waitFor(t, "设置落成跟随系统", func() bool { return a.SettingsSnapshot().ThemeMode == app.ThemeModeSystem })
 	tt.SetDark(true)
 	tt.Frame()
 
 	sysBG := BuildTheme(a.SettingsSnapshot(), true).Background
-	if got := asColor(tt.Image().RGBAAt(probeX, probeY)); got != sysBG {
+	if got := asColor(waitPixel(t, tt, probeX, probeY, rgbaOf(sysBG), "「跟随系统」+ 系统深色")); got != sysBG {
 		t.Errorf("「跟随系统」+ 系统深色：画面是 %v，want %v", got, sysBG)
 	}
 }
@@ -450,13 +412,19 @@ func asColor(p color.RGBA) mygoui.Color {
 	return mygoui.Color{R: p.R, G: p.G, B: p.B, A: p.A}
 }
 
+// rgbaOf 是 asColor 的反过来：`BuildTheme` 拼出来的是 ui.Color，而读像素读到的
+// 是 color.RGBA，要拿前者去比后者的读数就得先换过去。
+func rgbaOf(c mygoui.Color) color.RGBA {
+	return color.RGBA{R: c.R, G: c.G, B: c.B, A: c.A}
+}
+
 // 任务书明写「凭据可以不迁，**要提示重新登录**」——那句话必须出现在界面上。
 //
 // 这一条是被探针抓出来的：`Imported.Notes` 在设置页和 toast 上**一次都没被读过**，
 // 界面上写着「见下方清单」而那个清单根本不存在。用户在启动时什么也没点，然后发现
 // 要重新登录，而界面上从头到尾没提过发生过一次导入。
 func TestTheSettingsPageSaysOutWhatDidNotComeOver(t *testing.T) {
-	withMigration(t, MigrationReport{
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), withStartupMigration(MigrationReport{
 		Upgraded: "数据已升到 v1",
 		Imported: app.Imported{
 			Dir:       "/Users/x/Library/Application Support/Biu",
@@ -468,8 +436,7 @@ func TestTheSettingsPageSaysOutWhatDidNotComeOver(t *testing.T) {
 				"Biu 的歌词缓存里有 2 条读不出来，已经跳过。",
 			},
 		},
-	})
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	}))
 
 	// 逐条点名，不只查「有没有提到登录」——那两句是**两件不同的事**。
 	for _, want := range []string{
@@ -490,14 +457,13 @@ func TestTheSettingsPageSaysOutWhatDidNotComeOver(t *testing.T) {
 
 // 启动时的自动导入结果要弹一条 toast 说出来——用户不会主动去设置页。
 func TestTheFirstFrameSaysTheMigrationHappened(t *testing.T) {
-	withMigration(t, MigrationReport{
+	s, tt := newShell(t, withStartupMigration(MigrationReport{
 		Imported: app.Imported{
 			Dir:      "/Users/x/…/Biu",
 			Settings: true,
 			Notes:    []string{"Biu 那边是登录状态……请在这个应用里重新登录一次。"},
 		},
-	})
-	s, tt := newShell(t)
+	}))
 	tt.Frame()
 
 	// ⚠️ 首帧那句**刻意是短的**：toast 的卡片底色是主色（`viewToast`），而它一旦
@@ -523,11 +489,10 @@ func TestTheFirstFrameSaysTheMigrationHappened(t *testing.T) {
 // 用户没要求知道「数据已是最新」；弹一条「已升到 v1」是在打扰他，而且真出事
 // （升级失败）时那条提示就混在一堆无害提示里，不显眼。
 func TestASuccessfulQuietUpgradeSaysNothing(t *testing.T) {
-	withMigration(t, MigrationReport{
+	_, tt := newShell(t, withStartupMigration(MigrationReport{
 		Upgraded:      "数据已升到 v1（动了：settings.json）",
 		UpgradedFiles: []string{"settings.json"},
-	})
-	_, tt := newShell(t)
+	}))
 	tt.Frame()
 
 	if tt.HasText("已升到 v1") {
@@ -537,12 +502,11 @@ func TestASuccessfulQuietUpgradeSaysNothing(t *testing.T) {
 
 // 升级失败要弹，而且那句话必须带着「原文件一个字节都没少」。
 func TestAFailedUpgradeIsAnnouncedOnTheFirstFrameToo(t *testing.T) {
-	withMigration(t, MigrationReport{
+	_, tt := newShell(t, withStartupMigration(MigrationReport{
 		Upgraded:   "升级到 v1 失败：这一份读不懂。原来的数据一个字节都没少。",
 		UpgradeErr: os.ErrInvalid,
 		Rollback:   true,
-	})
-	_, tt := newShell(t)
+	}))
 	tt.Frame()
 
 	if !tt.HasText("数据升级失败") {
@@ -558,12 +522,11 @@ func TestAFailedUpgradeIsAnnouncedOnTheFirstFrameToo(t *testing.T) {
 // 摆在那个位置的话，用户按下去每一样都会被各自的只读判断挡掉，看到的是四句
 // 「没带过来的」，而他刚才明明点了一个看着能用的按钮。
 func TestTheBiuImportButtonIsGoneWhenTheDataComesFromANewerBuild(t *testing.T) {
-	withMigration(t, MigrationReport{
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), withStartupMigration(MigrationReport{
 		ReadOnly: true,
 		Upgraded: "数据目录来自更新的版本，这一版一个字都不会写回去。",
 		BiuDirs:  []string{"/Users/x/…/Biu"},
-	})
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	}))
 
 	if hasExactText(tt, "从 Biu 导入") {
 		t.Errorf("只读目录里还摆着「从 Biu 导入」，文字有 %q", tt.Texts())

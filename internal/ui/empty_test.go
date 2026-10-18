@@ -279,31 +279,12 @@ func TestApplyThemeRepeatedlyStillFollowsTheSystem(t *testing.T) {
 // 接线，就得先把那份设置真的写上盘再挂上。
 func shellOn(t *testing.T, mode app.ThemeMode) *Shell {
 	t.Helper()
-
-	path := filepath.Join(t.TempDir(), app.SettingsFileName)
-	st, err := app.OpenSettingsStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.Update(func(s *app.Settings) { s.ThemeMode = mode }); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	a := app.New()
-	if err := a.MountSettings(path); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		a.Close()
-		_ = a.CloseSettings()
-	})
-
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	return s
+	b := newTestShell(t, withSettings(func() app.Settings {
+		st := app.DefaultSettings("")
+		st.ThemeMode = mode
+		return st
+	}()), withoutTester())
+	return b.s
 }
 
 // actionCues 是「怎么才能不空」这一句里必须出现的动作词。

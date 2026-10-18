@@ -68,39 +68,15 @@ func openSettingsTab(t *testing.T, tt *mygoui.Tester, name string) {
 }
 
 // shellOnSettings 造一个停在设置页上的外壳。
-func shellOnSettings(t *testing.T, s app.Settings) (*mygoui.Tester, *Shell, *app.App, string) {
+func shellOnSettings(t *testing.T, s app.Settings, opts ...shellOpt) (*mygoui.Tester, *Shell, *app.App, string) {
 	t.Helper()
-
-	// 先把这份设置写到盘上，再挂上去——走的是「启动时读盘」那条路。
-	path := filepath.Join(t.TempDir(), app.SettingsFileName)
-	st, err := app.OpenSettingsStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.Update(func(cur *app.Settings) { *cur = s }); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	a := app.New()
-	if err := a.MountSettings(path); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		a.Close()
-		_ = a.CloseSettings()
-	})
-
-	s2 := New(a)
-	// 关掉切页动画：Tester 一帧画完，250ms 的动画在里面永远走不完，留着它只会
-	// 让「读到的是哪一帧」变成随机的。理由和 newShell 里那一句一样。
-	s2.router.Transition = mygoui.TransitionNone
-	tt := mygoui.NewTester(s2.View, 1200, 800)
+	// withSettings 走的是「先写盘、再挂上去」那条**生产**路（真程序启动时也是
+	// 先读盘），不是往界面上硬塞一个 Settings 值。
+	b := newTestShell(t, append([]shellOpt{withSettings(s)}, opts...)...)
+	tt := b.tt
 	tt.Frame()
 	openSettings(t, tt)
-	return tt, s2, a, path
+	return tt, b.s, b.a, b.settingsPath
 }
 
 // TestSettingsPageShowsItsContent 验切过去看到的是设置页，不是占位页。
@@ -226,18 +202,10 @@ func TestDraggingTheRadiusSliderChangesTheSetting(t *testing.T) {
 // `TestShellSaysSoWhenSettingsAreBroken` 盯。
 func TestSettingsPageSaysSoWhenAChangeCannotBeStored(t *testing.T) {
 	a := app.New()
-	t.Cleanup(a.Close)
 	a.RecordSettingsFailure(os.ErrNotExist)
 
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	// ⚠️ **这一句不能删**。切页动画是 250ms，而无头 Tester 的钟**只有 `Advance` 才
-	// 走**——动画在不动的钟上永远走不完，于是紧接着的每一次 `tt.Frame()` / `tt.Click()`
-	// 都把 `settle()` 那 20 帧的上限跑满。单这一条在 `-race` 下是 38 秒，整包
-	// `go test -race ./...` 因此跑到 7 分半（验收命令会超时）。删掉它这一条立刻变成
-	// 2.5 秒。理由和 `newShell` / `shellOnSettings` 里那一句一模一样。
-	s.router.Transition = mygoui.TransitionNone
-	tt := mygoui.NewTester(s.View, 1200, 800)
+	b := newTestShell(t, onApp(a))
+	tt := b.tt
 	tt.Frame()
 	openSettings(t, tt)
 
@@ -276,10 +244,8 @@ func TestSettingsPageRefusesToWriteAFileFromANewerVersion(t *testing.T) {
 		_ = a.CloseSettings()
 	})
 
-	s := New(a)
-	t.Cleanup(s.images.Close)
-	s.router.Transition = mygoui.TransitionNone
-	tt := mygoui.NewTester(s.View, 1200, 800)
+	b := newTestShell(t, onApp(a))
+	s, tt := b.s, b.tt
 	tt.Frame()
 	openSettings(t, tt)
 
@@ -348,9 +314,8 @@ func pageChildRoundTrip(t *testing.T) {
 	if err := a.MountSettings(path); err != nil {
 		t.Fatal(err)
 	}
-	s := New(a)
-	s.router.Transition = mygoui.TransitionNone
-	tt := mygoui.NewTester(s.View, 1200, 800)
+	b := newTestShell(t, onApp(a))
+	s, tt := b.s, b.tt
 	tt.Frame()
 
 	if mode == "write" {

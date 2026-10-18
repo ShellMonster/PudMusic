@@ -71,7 +71,7 @@ func TestTheRingIsFullJustAsTheTripleGoesOut(t *testing.T) {
 
 	// 再过 2 毫秒：满了，而且**同时**三连已经发出去了。
 	advanceLike(e, 2*time.Millisecond)
-	settleSearch(t, e.tt, "三连发出去了", func() bool { return e.f.triplePostCount() > 0 })
+	waitFrames(t, e.tt, "三连发出去了", func() bool { return e.f.triplePostCount() > 0 })
 	e.tt.Frame()
 	if ringBuilt(e.tt) {
 		t.Error("三连都发出去了环还在 —— Biu 那边是同一句 setIsProgressing(false)")
@@ -148,7 +148,7 @@ func TestALongPressNeverOpensTheFullScreen(t *testing.T) {
 	e.tt.Release(coverPoint(t, e.tt))
 	e.tt.Frame()
 
-	settleSearch(t, e.tt, "三连发出去了", func() bool { return e.f.triplePostCount() > 0 })
+	waitFrames(t, e.tt, "三连发出去了", func() bool { return e.f.triplePostCount() > 0 })
 	if e.tt.HasText("关闭全屏") {
 		t.Error("长按三连完，全屏播放器自己弹出来了 —— 补发的那一次 click 没吞掉")
 	}
@@ -251,7 +251,7 @@ func TestTheFullScreenCoverTakesTheLongPressToo(t *testing.T) {
 	e.tt.Press(big.X+big.W/2, big.Y+big.H/2)
 	advanceLike(e, biuLikeLongPressMS*time.Millisecond+200*time.Millisecond)
 
-	settleSearch(t, e.tt, "满屏上的长按三连发出去了", func() bool { return e.f.triplePostCount() > 0 })
+	waitFrames(t, e.tt, "满屏上的长按三连发出去了", func() bool { return e.f.triplePostCount() > 0 })
 }
 
 // ---- 满屏三连之后的那一次点击 ----
@@ -275,11 +275,11 @@ func openFullAndTriple(t *testing.T, e *likeEnv) mygoui.Rect {
 	big := fullCoverRect(t, e.tt)
 	e.tt.Press(big.X+big.W/2, big.Y+big.H/2)
 	advanceLike(e, biuLikeLongPressMS*time.Millisecond+200*time.Millisecond)
-	settleSearch(t, e.tt, "三连发出去了", func() bool { return e.f.triplePostCount() > 0 })
+	waitFrames(t, e.tt, "三连发出去了", func() bool { return e.f.triplePostCount() > 0 })
 	// ⚠️ **等的是 App 那一栏，不是「已赞」那个字**：满屏开着的时候播放条压根没建
 	// （BMG-34 的设计），星标根本不在画面上。要等的是「B 站的答案落地了、
 	// likeArmed 因此变成 false」——那正是让清标记那一支再也进不去的状态。
-	settleSearch(t, e.tt, "三连的答案落地了", func() bool {
+	waitFrames(t, e.tt, "三连的答案落地了", func() bool {
 		return e.s.app.LikeState().Liked && !likeArmed(e.s.app)
 	})
 	return big

@@ -402,7 +402,7 @@ func TestLikingADynamicReallyReachesBili(t *testing.T) {
 	if !tt.HasText("赞 13") {
 		t.Errorf("按了之后赞数没变，文字有 %q", tt.Texts())
 	}
-	waitUntilTrue(t, "点赞请求到了 B 站", func() bool { return len(thumbs()) == 1 })
+	waitFor(t, "点赞请求到了 B 站", func() bool { return len(thumbs()) == 1 })
 	if got := thumbs()[0]; got.id != "v1" || !got.like {
 		t.Errorf("发出去的是 %+v，want id=v1 且是点赞", got)
 	}
@@ -424,7 +424,7 @@ func TestUnlikingTakesTheCountBackDown(t *testing.T) {
 	if !tt.HasText("赞 11") {
 		t.Errorf("取消赞之后数字没减，文字有 %q", tt.Texts())
 	}
-	waitUntilTrue(t, "取消赞的请求到了 B 站", func() bool { return len(thumbs()) == 1 })
+	waitFor(t, "取消赞的请求到了 B 站", func() bool { return len(thumbs()) == 1 })
 	if got := thumbs()[0]; got.like {
 		t.Errorf("发出去的是赞，不是取消赞：%+v", got)
 	}
@@ -499,7 +499,7 @@ func TestDownloadingFromADynamicReallyReachesTheQueue(t *testing.T) {
 	if err := tt.Click("下载音频"); err != nil {
 		t.Fatal(err)
 	}
-	waitUntilTrue(t, "下载进了队列", func() bool { return len(a.DownloadSnapshots()) == 1 })
+	waitFor(t, "下载进了队列", func() bool { return len(a.DownloadSnapshots()) == 1 })
 	if got := a.DownloadSnapshots()[0].ID; got != "BV1play|555" {
 		t.Errorf("队列里那一项是 %q，want BV1play|555（cid 是它自己问来的）", got)
 	}

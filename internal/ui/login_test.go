@@ -2,6 +2,7 @@ package ui
 
 import (
 	"encoding/json"
+	"fmt"
 	"image"
 	"net/http"
 	"net/http/httptest"
@@ -139,40 +140,31 @@ func newLoginApp(t *testing.T, b *uiBili) *app.App {
 }
 
 // loginTester 是一个停在登录页的 Tester。
-func loginTester(a *app.App) (*mygoui.Tester, *Shell) {
-	s := New(a)
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		ApplyTheme(c, app.DefaultSettings(""), c.Theme().Dark)
-		s.router.Push("/login")
-		s.View(c)
-	}, 900, 600)
-	return tt, s
+func loginTester(t *testing.T, a *app.App) (*mygoui.Tester, *Shell) {
+	t.Helper()
+	// 这一支是「停在登录页」：造 Tester 之前先 Push 好路由，于是 Tester 的第一帧
+	// 画的就是登录页，不用先画整窗再切过去。
+	b := newTestShell(t, onApp(a), at(900, 600), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			ApplyTheme(c, app.DefaultSettings(""), c.Theme().Dark)
+			s.router.Push("/login")
+			s.View(c)
+
+		}
+	}))
+	return b.tt, b.s
 }
 
-// waitLogin 等登录状态变成想要的那个。
 // waitQRCode 等二维码画出来。
 func waitQRCode(t *testing.T, a *app.App) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if a.LoginState().QR != nil {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatal("等了 5 秒二维码还没出来")
+	waitFor(t, "二维码出来", func() bool { return a.LoginState().QR != nil })
 }
 
+// waitLogin 等登录状态变成想要的那个。
 func waitLogin(t *testing.T, a *app.App, want app.LoginPhase) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if a.LoginState().Phase == want {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("等了 5 秒还是 %v，want %v", a.LoginState().Phase, want)
+	waitFor(t, fmt.Sprintf("登录相位到 %v", want), func() bool { return a.LoginState().Phase == want })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -223,7 +215,7 @@ func TestLoginPageShowsTheThreeStatesEachWithItsOwnWords(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			b := newUIBili(t, c.sticky, c.scans...)
 			a := newLoginApp(t, b)
-			tt, _ := loginTester(a)
+			tt, _ := loginTester(t, a)
 			tt.Frame()
 
 			a.BeginLogin()
@@ -254,7 +246,7 @@ func TestLoginPageShowsTheThreeStatesEachWithItsOwnWords(t *testing.T) {
 func TestLoginPageOffersRefreshOnlyWhenExpired(t *testing.T) {
 	b := newUIBili(t, 86101)
 	a := newLoginApp(t, b)
-	tt, _ := loginTester(a)
+	tt, _ := loginTester(t, a)
 	tt.Frame()
 
 	a.BeginLogin()
@@ -266,7 +258,7 @@ func TestLoginPageOffersRefreshOnlyWhenExpired(t *testing.T) {
 
 	b2 := newUIBili(t, 86038, 86038)
 	a2 := newLoginApp(t, b2)
-	tt2, _ := loginTester(a2)
+	tt2, _ := loginTester(t, a2)
 	tt2.Frame()
 	a2.BeginLogin()
 	waitQRCode(t, a2)
@@ -286,7 +278,7 @@ func TestLoginPageOffersRefreshOnlyWhenExpired(t *testing.T) {
 func TestExpiredQRCodeCanBeRefreshedFromTheUI(t *testing.T) {
 	b := newUIBili(t, 86101, 86038)
 	a := newLoginApp(t, b)
-	tt, s := loginTester(a)
+	tt, s := loginTester(t, a)
 	tt.Frame()
 
 	a.BeginLogin()
@@ -311,7 +303,7 @@ func TestExpiredQRCodeCanBeRefreshedFromTheUI(t *testing.T) {
 func TestCancelStopsTheQRCodeFromTheUI(t *testing.T) {
 	b := newUIBili(t, 86101)
 	a := newLoginApp(t, b)
-	tt, _ := loginTester(a)
+	tt, _ := loginTester(t, a)
 	tt.Frame()
 
 	a.BeginLogin()
@@ -337,7 +329,7 @@ func TestCancelStopsTheQRCodeFromTheUI(t *testing.T) {
 func TestLoginSuccessShowsLoggedInAndLogout(t *testing.T) {
 	b := newUIBili(t, 0)
 	a := newLoginApp(t, b)
-	tt, _ := loginTester(a)
+	tt, _ := loginTester(t, a)
 	tt.Frame()
 
 	a.BeginLogin()
@@ -360,7 +352,7 @@ func TestLoginSuccessShowsLoggedInAndLogout(t *testing.T) {
 func TestLogoutFromTheUILetsYouLogInAgain(t *testing.T) {
 	b := newUIBili(t, 0)
 	a := newLoginApp(t, b)
-	tt, _ := loginTester(a)
+	tt, _ := loginTester(t, a)
 	tt.Frame()
 
 	a.BeginLogin()
@@ -402,7 +394,7 @@ func TestLogoutFromTheUILetsYouLogInAgain(t *testing.T) {
 func TestQRCodeReachesThePixels(t *testing.T) {
 	b := newUIBili(t, 86101)
 	a := newLoginApp(t, b)
-	tt, sh := loginTester(a)
+	tt, sh := loginTester(t, a)
 	_ = sh
 	tt.SetDark(true) // 深色主题
 	tt.Frame()
@@ -535,7 +527,7 @@ func longestWhiteRun(img *image.RGBA, minLen int) (x0, y0, length int) {
 func TestQRCodeBitmapIsReusedAcrossFrames(t *testing.T) {
 	b := newUIBili(t, 86101)
 	a := newLoginApp(t, b)
-	tt, s := loginTester(a)
+	tt, s := loginTester(t, a)
 	tt.Frame()
 
 	a.BeginLogin()
@@ -585,9 +577,7 @@ func TestLoginRouteIsNotInTheSidebar(t *testing.T) {
 // TestNavHasALoginEntry 验顶栏上找得到登录的入口。
 func TestNavHasALoginEntry(t *testing.T) {
 	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-
+	s := newTestShell(t, onApp(a)).s
 	tt := mygoui.NewTester(func(c *mygoui.Context) {
 		ApplyTheme(c, app.DefaultSettings(""), c.Theme().Dark)
 		s.View(c)
@@ -643,7 +633,7 @@ func TestLoginPageSaysTheCredentialsCannotBeKept(t *testing.T) {
 	a.MountLogin(nil, cli)
 	a.SetLoginPollInterval(2 * time.Millisecond)
 
-	tt, _ := loginTester(a)
+	tt, _ := loginTester(t, a)
 	tt.Frame()
 
 	a.BeginLogin()
