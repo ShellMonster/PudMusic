@@ -1,25 +1,170 @@
 # AGENTS.md
 
-Guidance for AI agents working in this repo.
+给在这个仓库里干活的 AI agent 的规矩。
 
-## Agent skills
+这不是 README：README 讲这是什么、怎么跑、支持什么；这份只讲**在这里干活要
+注意什么**，而且只写**从代码里看不出来、踩过才知道**的东西。目录结构、函数签名、
+依赖列表一律去读代码，不在这里复述。
 
-### Issue tracker
+`CLAUDE.md` 是本文件的软链接（一份源，多个入口：Claude Code、Codex、pi 都读它）。
+**改内容只改这个文件**，别去改那个链接。
 
-Issues and specs live in GitHub Issues, operated via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+---
 
-### Triage labels
+## 1. 验收命令
 
-Five canonical roles, label string equals role name. See `docs/agents/triage-labels.md`.
+```sh
+go build ./... && go vet ./... && go test ./...
+```
 
-### Domain docs
+**不带 `-race`。** 全量 `-race` 在这台 10 核机器上要十几到二十分钟（长板是
+`internal/service/audio`、`internal/service/audio/flacdec`、`internal/platform`），
+放进验收命令会让**每一张票**的评审都跑到超时。曾经有一批票的验收行写着带
+`-race`，agent 照着跑，评审全被拖死。**票面写什么就照什么改，不要照抄旧行。**
+真要查并发就单独挑那几个包跑 `-race`，不要整包。
 
-Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+`internal/ui` 是唯一一个「编译得过、绝大部分测试也过、但行为已经变了」的包——
+它验的是界面行为，而框架改界面行为**不改任何签名**。别只看最后一行有没有
+FAIL，逐个包看 `ok`。
 
-### Regression evidence
+## 2. 测试结果只在机器不忙的时候算数
 
-SPEC's list of evidence every stage must leave behind lives as code in
-`internal/evidence`. Adding or renaming a test that serves one of those
-requirements means updating that ledger too — its own test fails otherwise,
-which is the point.
+- **不要用固定帧数 / 固定毫秒当判据。** 机器慢一点就飘，而飘的时候和被测的逻辑
+  一点关系都没有——分不出来的那一次会被当成回归去查半天。等条件用现成的两个
+  （`internal/ui/shelltest_test.go`）：`waitFor` 等后台写进状态的条件，`waitFrames`
+  等 view 把它收进画面的条件。两者都循环到条件成立为止，里面的 deadline 只是
+  「永远等不到」的保险，不是时间预算。
+- **要等动画走完就推钟**：`tt.Advance(d)` 配 `tt.FramePending()`，不要循环
+  `tt.Frame()` 数帧。框架的钟站着不动（README「版本」一节有实测记录），
+  数帧那种等法会**静默失效**：不报错、不超时，直接放行，于是后面每一次点击都
+  按在旧坐标上。症状是「点了没反应」，不是「等不到」。
+- **低负载下绿不算修好。** 这套测试在 load 9~10 时会飘，load 8 以下连续 10 次全绿。
+  判「飘红是不是真 bug」之前先看一眼机器负载。
 
+## 3. 票面是 agent 和评审共同的唯一事实来源
+
+改了对一件事的裁决——尤其**拆票、不做、改成另一条路**——**一定要同步改 GitHub
+issue 的验收标准**（`gh issue edit`，见 `docs/agents/issue-tracker.md`）。
+
+理由很实在：你在对话里判的事只有你知道，评审不知道，所以评审说的永远「对」。
+今天栽过两次——一次拆票没改票面，评审连着六轮提同一条；一次「实现到别的票去」
+没写进票面，评审判「那部分没落地」。
+
+## 4. 静默出错的几条铁律
+
+框架文档一条都不写，全是踩出来的。踩中任何一条的**症状都是静默的**：不报错、
+不崩溃、不打日志，界面上只是悄悄不对——所以全靠下面这些约定兜着，而不是靠
+测试告诉你。
+
+### 界面层
+
+1. **`SetTheme` 必须每帧在 view 最开头调。** 框架每帧开头把主题重置成跟随系统
+   那一份，放到切换按钮的回调里只调一次会被**静默丢掉**——主题悄悄跳回系统色。
+   入口是 `internal/ui/theme.go` 的 `ApplyTheme`；**别的地方不许直接调
+   `c.SetTheme`**。
+2. **view 里 panic 会穿透事件循环杀掉整个进程**（框架的 `Dispatch`/`drain` 都
+   没有 recover）。每个页面 view 外面包一层 `ui.Guard`，底层是
+   `internal/ui/guard.Wrap`。行级的和页级的**两道不重复**，别包两次。
+3. **后台投递完状态必须叫醒界面。** 即时模式是按需绘制，只投递不唤醒，界面永远
+   停在旧帧。走 `ui.Services.Invalidate()`（`internal/ui/wake.go`），**而且要挨着
+   每一扇窗叫醒**——只叫醒主窗口的话，迷你播放器停在旧内容（实测）。改状态用
+   `Window.Update(func)`，只刷画面用 `Invalidate()`；`Window.Update(nil)` 会
+   SIGSEGV。
+4. **动态列表的行必须给稳定且唯一的 key。** 默认身份是「父 ID + 兄弟序号」，
+   在前面插入一行会让后面所有行的状态整体错配——症状是「选中的那一首变成了
+   旁边另一首」，而每一行的字都是对的。
+
+**拖动状态用 `Pressed()`，不要用 `Dragging()`。** `Dragging()` 报的是
+`Drag`/`Draggable` 两套机制，普通控件对它**永远是 false**——MyGo 自带的
+`examples/timeline` 那一处判断就是失效的，别照抄。另一头：`Pressed()` 还要求
+「指针仍在控件框内」，所以一条 8 像素宽的拖拽把手用它只能拖 16 像素就卡住，
+那种把手要用 `Dragged()` 判按着没有、再用 `PointerPosition()` 取绝对位置。
+两个坑的完整说明见 `internal/ui/sidebar.go` 和 `internal/ui/playbar.go`。
+
+### 启动与生成物
+
+5. **建窗口只能走 `App.WhenReady`，不能在回调里直接 `NewWindow`。** `App.Run()`
+   先把事件循环转起来，`applicationDidFinishLaunching` 才把 ready 置上；这两件事
+   之间主线程上 `NewWindow` 是**直接 panic**。第二个实例正好落在这一段里，症状是
+   「图标连点两下，应用当场崩」。
+6. **单实例锁和退出回调都必须在 `mygo.App.Run()` 之前装。** 锁晚一步就是两个实例
+   同时起来的竞态；回调晚一步，启动命令行里的 `biu://…` 会在它装好之前被交付掉，
+   点链接唤起应用什么都不会发生。
+7. **`RequestSingleInstanceLock()` 挡不住同时启动的两个实例**（实测 20 轮有 17 轮
+   两个都拿到锁：都 Dial 失败 → 都删掉对方的 socket 文件 → 都 Listen 成功）。所以
+   `internal/platform` 在它之上还压了一把内核独占锁（`single_instance.go`）。
+8. **图标和第三方许可清单是生成物。** 图案在 `platform.AppIcon` 里、清单从
+   `go list -deps` 生成。改了图案或依赖却忘了重新生成，仓库里躺着的是旧文件，
+   而**没有任何一处会报错**。改完跑
+   `go generate ./internal/platform/ ./internal/licensing/`；`scripts/build.sh`
+   每次打包前都会跑一遍并检查 `git diff`。
+
+## 5. 不可协商的项目不变量
+
+- **不引入 LGPL / GPL 系代码。** 整条音频栈目前一行 copyleft 都没用上，
+  `internal/licensing` 的 `TestNoDependencyIsCopyleft` 盯着这件事。
+- **不打包 ffmpeg，整个应用也不用 webview。** 整条音频栈只增加 1.98 MB，而 ffmpeg
+  每平台 2~3 MB 且要管子进程；原生 UI 也不为验证码开 webview 口子。
+  ⚠️ **但设置里有一格活着的「FFmpeg 路径」，那是 Biu 兼容字段**：它只存、只落盘，
+  **没有任何代码消费它**——理由见 `internal/app/settings.go` 顶上那一段（为了让
+  用户在 Biu 和 MyGo 之间来回切不丢字段，键名原样沿用，包括这一阶段不用的那几个）。
+  **别把它当成越界代码删掉**，也别以为用户设了它就真的会走 ffmpeg。
+- **FLAC 解码器是逐样本验证过的资产**，别碰它的解码路径。改之前先读
+  `internal/service/audio/flacdec` 自己的测试注释——那里记着为什么每个判据
+  是那个数。
+- **动 macOS 那条音频路径之前，先读 `internal/service/audio/extaf/` 的注释。**
+  纯 Go 绑 AudioToolbox，坑全在「哪个参数是哪个四字符码、哪一版签名不一样」
+  这一层，踩过一次就写在那儿了。
+
+## 6. 别打真 B 站
+
+钥匙串（macOS Keychain / Windows DPAPI）里是**用户真实的登录态**。收藏、
+点赞、播放记录上报都是**写操作**，写的是那个账号。
+
+- 验收和测试**一律走 HTTP fixture**（假 B 站），不要连真网。这一条不是洁癖：
+  封号代价远高于少验几条，而 fixture 式的失败**只是测试红**，真网的失败是账号
+  上的垃圾数据。
+- 真接口的兼容性（参数集对不对、B 站收不收）**单独立项做真机回归**，别塞进
+  功能票里顺手做。
+
+## 7. 注释说谎比没有注释更坏
+
+审计查出过至少五条注释与代码不符——写着「还没接（issue #29）」，而 #29 早就完成
+了。**注释里不要写「还没做」，写你当时在做什么。**「还没做」这个状态会过期，
+而过期的注释会让下一个人以为那个功能不做，或者照着一条已经不成立的注释去改
+代码。
+
+改动涉及某个功能的现状时，**顺手把相关注释改对**。
+
+## 8. 提交信息
+
+照 `git log` 现在的写法：**中文一句话 + 票号**，例如
+
+```
+分集抽屉 (#116)
+修网格虚拟滚动的飘红测试 (#121)
+```
+
+（`feat:` / `fix:` 那套前缀只在最早的十几个脚手架提交里出现过，后来不再用了。）
+分支和 PR 由工作板管，agent 不要自己 push 或往别的分支合。
+
+## 9. 技能文档与两份不在仓库里的东西
+
+- **Issue tracker**：票和规格都在 GitHub Issues，走 `gh` CLI。见
+  `docs/agents/issue-tracker.md`。
+- **Triage labels**：五个角色，标签字符串等于角色名。见
+  `docs/agents/triage-labels.md`。
+- **领域文档**：`GLOSSARY.md` 和 `docs/adr/` **目前不存在**，这个仓库还没有
+  统一术语和决策记录。**别去找、别因为找不到就停下来**——`docs/agents/domain.md`
+  说得很清楚：这两个文件在术语或决策真的被敲定之前不存在，届时才由
+  `/domain-modeling` 那条路懒创建。要造新的领域概念时，顺手留意有没有一个词
+  已经在这个仓库里被用成了别的意思。
+- **回归证据**：SPEC 那张「每个阶段要留下什么证据」的清单是**代码**，不是文档——
+  它在 `internal/evidence`。加一条证据、加一个测试或者给测试改名，都意味着要
+  同步改那张表；不改的话它自己那条测试会红，**那正是它该做的**。
+- **规格与实施计划**（`docs/research/SPEC.md`、`docs/research/PLAN.md`）是维护者
+  本机的工作文档，**不进版本库**——`.gitignore` 第 6 行那条 `docs/research/` 兜着
+  它们。在仓库里、在别的克隆里、在 worktree 里都找不到它们是正常的；别把「找不到
+  规格」当成可以自行发挥的理由。⚠️ 那条规则**只认 `docs/research/` 这一个路径**，
+  所以别把 SPEC.md / PLAN.md 挪到别处再提交——换个位置就不再被忽略了，`git add`
+  会照常把它列成待提交。
