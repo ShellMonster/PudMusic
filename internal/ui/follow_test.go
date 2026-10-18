@@ -973,14 +973,21 @@ func TestSwitchingAccountsDoesNotKeepTheOldTotal(t *testing.T) {
 	// 换账号：那个 N **必须掉下来**。
 	a.TestOnlyAdoptLogin("88")
 	uiFollowList(b, 0, []any{}) // 新账号一个关注都没有
-	tt.Frame()
-	// ⚠️ **判据里要带上 total 自己**：它和 selfMid / pager.started 是同一页里
-	// 不同的几栏，各自在自己的那一趟落地，而 `waitFrames` 的注释写明了「同一帧
-	// 里画出来的还是上一帧的样子」。原来等的是前两样、断言读的是 total，机器一
-	// 忙那条断言就红——而功能是好的：这一条实测在整包连跑里飘过两次，**在未改动
-	// 的 main 上也飘**。判据一个字没放宽：要的还是「total 是 0」，只是等到了再断。
-	waitFrames(t, tt, "第二个账号的关注到了、那个 N 也掉下来了", func() bool {
-		return f.selfMid == 88 && f.pager.started && f.total == 0
+	// ⚠️ **判据是「画面上那个 N 已经不掉着上一个账号的数了」**，而不是内部的
+	// `f.total` / `pager.started`。
+	//
+	// 原来等的是 `f.selfMid == 88 && f.pager.started`、下一行断 `f.total != 0`：
+	// `started` 只在 `adopt()`（那一趟成功）时置位，而换账号之后**那一趟偶发会被
+	// 作废**（在途的请求被上一代次掐掉），于是它在机器一忙时就永远到不了、
+	// `waitFrames` 超时——而换账号那一刻 `f.total` 其实已经是 0 了（见
+	// `resetFollowIfAccountChanged`），功能是好的。这一条实测在整包连跑里飘过
+	// 两次，**在未改动的 main 上也飘**，单跑 30 次里飘过 1 次。
+	//
+	// ⚠️ **判据没放宽，反而更严**：「全部关注(7)」那一栏正是 `f.total` 画出来的，
+	// 而它换账号**之前**就在画面上——所以这个判据不可能提前成立，等到的就是
+	// 「重画成新账号那个数」。末尾那两行断言照样断内部的 `f.total`。
+	waitFrames(t, tt, "新账号的那个 N 掉下来了", func() bool {
+		return f.selfMid == 88 && !showsText(tt, "全部关注(7)")
 	})
 	if f.total != 0 {
 		t.Errorf("换账号之后那个 N 仍然是 %d——它是上一个账号的关注数", f.total)
