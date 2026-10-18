@@ -162,6 +162,12 @@ type App struct {
 	// `*time.Timer`，是为了让测试能换成一个手动推进的假钟。
 	lyricStopTimer func()
 
+	// lyricSearch 是「歌词搜索」那一摊，lyricPreview 是「歌词预览」那一摊，
+	// 见 lyrics_search.go。挂上歌词源之前 sources 是空的，界面上的搜索入口
+	// 摆不出来。
+	lyricSearch  lyricSearchState
+	lyricPreview lyricPreviewState
+
 	// after 排一个「过 d 之后再跑 fn」的定时器，返回停掉它的函数。New 装成真的。
 	//
 	// 做成字段是为了让**等待**测得到：真等 500ms 的测试要么慢，要么靠
