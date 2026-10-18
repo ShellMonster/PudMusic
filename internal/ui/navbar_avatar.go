@@ -47,14 +47,15 @@ const (
 	// `Find` 找的是「显示着这个字或者标着这个名字」的元素。
 	avatarLabel = "用户头像"
 
-	// avatarInitial 是头像里那个字。
+	// avatarInitial 是头像里那个字，**只用在取失败那一支**（红底 + 它）。
 	//
 	// ⚠️ **恒是「B」**（应用自己的名字）：Biu 那个首字母来自用户昵称，而昵称和
 	// 头像地址都在 B 站的用户资料接口里，那一票还没接。登录态里现在只有
 	// SESSDATA / bili_jct / DedeUserID 那几样（见 `app.Session`），拿 UID 的
 	// 头一个字当头像是在**编**一个用户从没见过的东西，不干。
 	//
-	// 摆一个空框更糟：头像那一格在顶栏上就是个看不出是什么的洞。
+	// 「还没地址」那一支画的是 `iconUser`（一个「人」），不是它（见
+	// viewAvatarFace）。
 	avatarInitial = "B"
 
 	// feedbackURL 是「问题反馈」打开的地址。
@@ -139,16 +140,20 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 
 // viewAvatarFace 是头像那一格里的图。
 //
-// 走 imgcache 的四态：好了画图，载入中和失败都画首字母（空地址是第四态）——
-// Biu 那个 `<Avatar showFallback>` 就是这个意思（`user/index.tsx:166-173`）。
+// 走 imgcache 的四态：好了画图；**失败画首字母 + 红底**；其余（空地址、还在下）
+// 画一个「人」的图标。
 //
 // ⚠️ **地址这一版恒为空串**：头像地址在 B 站的用户资料接口里，那一票还没接。
 // 缓存这一层**已经接好**：地址一有值，四态自己就生效，下面几行一个字都不用动。
 //
+// ⚠️ 空地址那一支画的是图标**不是首字母**（issue 93 的验收：头像格要有图标）。
+// 首字母留给了「取失败」那一支：红底 + 一个字母是「这里出了点事」，而一个
+// 灰底上的人形是「这里还没有」——两件事给两种样子，用户不会把出错的当成空的。
+//
 // ⚠️ 这里读的是 `imgcache.Cache` 而不是直接调 `imgcache.View`：那个 View 的两种
 // 失败态画的是「载入中」「封面加载失败」两行字（见 imgcache/view.go 的
 // drawCover），那是给**封面**那个尺寸用的。头像只有 28 宽，那两行字塞进去会被
-// 裁成一团看不出是什么的色块——比一个首字母糟糕得多。缓存本身（下载、去重、
+// 裁成一团看不出是什么的色块——比一个人形糟糕得多。缓存本身（下载、去重、
 // 解码、唤醒）还是共享的那一份。
 func (s *Shell) viewAvatarFace(c *ui.Context) {
 	t := c.Theme()
@@ -161,11 +166,16 @@ func (s *Shell) viewAvatarFace(c *ui.Context) {
 	}
 	// 失败和「还没下好」要分得开：混成一个色，用户只会以为这个头像本来就是空的，
 	// 等网络好了也不会再看它一眼（imgcache 那边也是这么分的，见 drawCover）。
-	bg := t.Surface
 	if st.Err != nil {
-		bg = t.Danger.Alpha(0.18)
+		ui.Column(c).Size(size, size).Center().
+			Background(t.Danger.Alpha(0.18)).Children(func() {
+			ui.Text(c, avatarInitial).FontSize(12).Bold().TextColor(t.Text)
+		})
+		return
 	}
-	ui.Column(c).Size(size, size).Center().Background(bg).Children(func() {
-		ui.Text(c, avatarInitial).FontSize(12).Bold().TextColor(t.Text)
+	ui.Column(c).Size(size, size).Center().Background(t.Surface).Children(func() {
+		// 装饰：它不可点也不可读——点的是外面那个头像（它有 `avatarLabel`）。
+		// 名字在那一格上就够了，这里再加一个就成了两句话说同一件事。
+		ui.Icon(c, icon(iconUser)).FontSize(16).TextColor(t.TextMuted)
 	})
 }

@@ -39,3 +39,21 @@ go test ./internal/licensing/ 会在清单和实际依赖对不上时失败。
 
   - github.com/ebitengine/purego 是 **Apache-2.0**，不是 MIT
   - github.com/hajimehoshi/go-mp3 是 **Apache-2.0**，不是 MIT
+
+图标
+----
+
+界面上那一批图标取自 **Remix Icon**（Remix Design，
+<https://github.com/Remix-Design/RemixIcon>），受 **Remix Icon License v1.0**
+约束，Copyright (c) 2017–2026 Remix Design。原文逐字副本在
+resources/licenses/remixicon-LICENSE.txt，同样随包发出去。
+
+这份许可**不是** Apache-2.0，也**不是** MIT，所以它不在上面那张模块清单里——
+图标是 //go:embed 进二进制的资源，不是链接进来的代码模块，`go list -deps`
+看不见它。它被单独排进 internal/licensing 的 AssetLicenseRelPaths，由
+TestTheShippedAssetLicensesExist 盯着在不在。
+
+按该许可，本项目做的是它 §2.3 说的那一种：把图标当作应用界面的功能组件随产品
+分发。它 §3.1 禁止把图标**单独打包成图标库出售**、§3.2 禁止拿它造一套有竞争的
+图标库——本应用不提供图标集下载，也不对外发布图标库；internal/ui/icons/ 里的
+文件是应用的一部分，不是一个独立产品。

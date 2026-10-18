@@ -154,7 +154,9 @@ func (s *Shell) viewDynamicDot(c *ui.Context) {
 	// 代价说清楚：登录之后这一格还在，而 Biu 那时候已经把它藏了。
 	ui.Row(c).Key("nav-feed").Gap(4).AlignItems(ui.Start).Children(func() {
 		ui.Column(c).Key("nav-feed-btn").Children(func() {
-			if ui.Button(c, "动态").FontSize(13).Clicked() {
+			if iconButton(c, iconFeed, "动态", iconMd).
+				Size(iconHitMd, iconHitMd).Padding(0, 5).
+				Tooltip("动态").Clicked() {
 				// Biu 的 handleOpen：清掉红点，再去看动态。
 				s.feed.clear()
 				s.navigate(dynamicFeedPath)

@@ -985,4 +985,36 @@ var Items = []Item{
 			"TestNoSourcesMeansTheSearchDialogNeverOpens",
 		},
 	},
+	{
+		Category: Play,
+		// issue 93：播放条和顶栏上的按钮从文字变成图标。
+		//
+		// 🔴 **判据全是像素，不是「调了 SetIcon」**。MyGo 的 `ui.Icon` 没有元素树
+		// 可以查，无头 Tester 的 `Find` 只认画出来的文字和 `Label` 起的名字——而
+		// 图标两样都没有。所以「图标画出来了没有」是从那一块的像素上看的。
+		//
+		// 深浅两套主题都要验：跟着主题走这件事，浅色下画得出来、深色下糊在背景
+		// 里是两种完全不同的坏，只验一套等于没验。
+		Spec: "播放条和顶栏的按钮都有图标：单色跟着主题走、深浅两套都不糊在背景里、点击区比图形大、每一处都有无障碍标签",
+		Tests: []string{
+			// 资源本身：名字都在、都解析得出、都有尺寸、都没有写死颜色。
+			"TestEveryIconWeNamedIsThereAndItParses",
+			"TestTheIconResourcesAreAllMonochrome",
+			// 画面：播放条 / 顶栏上每一个动作那一块都画出了东西，深浅各一次。
+			"TestThePlayBarDrawsAnIconForEveryAction",
+			"TestTheNavBarDrawsAnIconForEveryAction",
+			// 「跟着主题走」的那一半：不糊在背景里（亮度差要够）。
+			"TestTheGlyphsAreNotSwallowedByTheBackground",
+			// 「不用瞄得准」的那一半：点击区比图形大，而且留出来的那一圈按得中。
+			"TestTheHitAreaIsBiggerThanTheGlyph",
+			"TestTheRoundKeyKeepsItsEdge",
+			// 状态变了图要跟着换：播放/暂停、赞没赞、播放模式四档各画各的。
+			"TestThePlayAndPauseKeysSwapGlyphs",
+			"TestTheLikeKeyDrawsItsOwnIcon",
+			"TestEveryPlayModeHasItsIcon",
+			"TestEveryVolumeLevelHasItsIcon",
+			// 资源里不许画透明边撑点击区（换尺寸就错位，且界面上看不出坏了）。
+			"TestTheResourceFilesCarryNoTransparentMargin",
+		},
+	},
 }
