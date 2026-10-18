@@ -157,19 +157,31 @@ func TestTheHomePagePullsTheTabYouAreLookingAt(t *testing.T) {
 }
 
 // TestEachTabPullsItsOwnList 盯三档各走各的那一套（界面上那一半）。
+// TestEachTabPullsItsOwnList 每一档拉的是**自己的**那一份请求。
+//
+// ⚠️ **判据要等被断的那两样本身，而不是等「画面上出现了某句话」**：`from_region`
+// 和「打没打音乐榜那个接口」都是 fixture 那边记的**请求**，而画面是这些请求回来
+// **之后**画的；而 `waitFrames` 的注释写明了「同一帧里画出来的还是上一帧的样子」。
+// 只等画面就断请求，机器一忙（或者上一次那一档的请求还在路上）那条断言就红——
+// 而功能是好的：这一条在**未改动的 main 上单跑 30 次就红过**。
 func TestEachTabPullsItsOwnList(t *testing.T) {
 	b := newUIExplore(t)
 	homeArchives(b)
 	_, tt, _ := newHomeShell(t, b)
 
 	clickTab(t, tt, 1)
-	waitFrames(t, tt, "鬼畜那一档", func() bool { return showsText(tt, "鬼畜 推的第一首") })
+	waitFrames(t, tt, "鬼畜那一档拉的是自己那份", func() bool {
+		return showsText(tt, "鬼畜 推的第一首") &&
+			b.lastQueryOf(uiHomeRegionFeed).Get("from_region") == "1007"
+	})
 	if got := b.lastQueryOf(uiHomeRegionFeed).Get("from_region"); got != "1007" {
 		t.Errorf("鬼畜那一档的 from_region = %q，want 1007", got)
 	}
 
 	clickTab(t, tt, 2)
-	waitFrames(t, tt, "流行那一档", func() bool { return showsText(tt, "流行 榜上的歌") })
+	waitFrames(t, tt, "流行那一档打的是音乐榜那个接口", func() bool {
+		return showsText(tt, "流行 榜上的歌") && b.hit(uiHomeMusicRank)
+	})
 	if !b.hit(uiHomeMusicRank) {
 		t.Error("「流行」那一档没有打音乐榜那个接口")
 	}
