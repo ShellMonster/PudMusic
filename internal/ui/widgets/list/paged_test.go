@@ -304,6 +304,25 @@ func TestTheThreeGuardsDoNotSendThreeRequestsForOnePage(t *testing.T) {
 	tt.Scroll(testerW/2, testerH/2, 0, scrollToBottom)
 	pump(t, tt, "第 2 页发出去", func() bool { return p.Paged().Loading })
 
+	// 🔴 **还要等第 2 页真的进了 fetch**（issue 57 的验收里撞出来的）。
+	//
+	// `Loading` 是**界面线程**设的（`paged.go` 的 `load`：`p.loading = true` 之后
+	// 才 `go func()`），而 `stub.calls` 是**那个后台 goroutine** 记的
+	// （`paged.go` 的 `fetchOne` → `s.fetch` → `s.calls = append(...)`）。
+	// 两个数之间隔着一道 Go 的调度延迟。
+	//
+	// 而下面那 15 帧在无头 Tester 里跑完只要几十微秒——机器上有别的包在抢 CPU
+	// （`go test ./...` 是全并行）时，几十微秒完全够不到那个刚起来的 goroutine，
+	// 于是量到 `called [1]`：请求一个都没多发，测试却红了。
+	// 实测：连跑 300 遍红 2 次（**未改动的 main 上同样红 2 次**，所以不是谁改坏的）。
+	//
+	// ⚠️ **判据一个字没动**：下面那 15 帧和 `len(c) != 2` 原封不动，这一条只是把
+	// 「第 2 页已经发出去了」这件事**等完整**。三重保障真的发了三个请求的话，
+	// `len(c)` 是 3 或 4，`!= 2` 照样红。
+	pump(t, tt, "第 2 页真的进了 fetch", func() bool {
+		return len(st.callsOf()) >= 2
+	})
+
 	// 现在第 2 页在途。跑它十几帧，每一帧三重保障都重新问一遍。
 	for range 15 {
 		frame(tt)
