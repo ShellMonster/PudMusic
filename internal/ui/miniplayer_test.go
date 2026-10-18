@@ -26,8 +26,10 @@ import (
 // TestTheMiniWindowIsAtBiuNumbers 盯窗口那几个开关。
 //
 // 数字和出处抄 Biu 的 `electron/mini-player.ts:12-27`：`width: 320, height: 100`、
-// `transparent: true`、`alwaysOnTop: true`、`skipTaskbar: true`、`resizable: false`、
-// `frame: false`。
+// `transparent: true`、`alwaysOnTop: true`、`skipTaskbar: true`、`frame: false`。
+//
+// ⚠️ **Biu 那一行 `resizable: false` 我们故意没抄**，而这一条正是钉住那个改动的
+// 后果——见下面 `DisableResize` 那段断言的注释。
 //
 // 🔴 **`Transparent` 和「自己画不透明底」是同一件事的两半**（这里量开关那一半，
 // 画出来那一半在 `TestTheMiniCardIsVisibleOnATransparentWindow`）。只开
@@ -56,14 +58,36 @@ func TestTheMiniWindowIsAtBiuNumbers(t *testing.T) {
 	if !opts.SkipTaskbar {
 		t.Error("窗口没跳过任务栏/程序坞：会和主窗口抢同一个格子")
 	}
-	if !opts.DisableResize {
-		t.Error("窗口可缩放：Biu 是 resizable: false，而且这一版只有 320×100 摆得下")
+	// 🔴 **这里断言的不是「不可缩放」，是「缩不到比设计尺寸更小」**。
+	//
+	// Biu 那边是 `resizable: false`，而照抄它会让 `StateKey` 整个失效：
+	// `DisableResize` 去掉窗口的 resizable 位 → Cocoa 的 `isZoomed` 恒为真 →
+	// `captureState` 的 `!Maximized` 那道判断不成立 → `window-state.json` 里连
+	// `"mini-player"` 这个键都不会有，**每次开都回到右上角**（真机实测过）。
+	// 完整的链路和四个变体的实测表在 `MiniWindowOptions` 的注释里。
+	//
+	// 「不能缩」改由 MinWidth/MinHeight 兜：用户拖不到比 320×100 更小，那三行控件
+	// 就永远不会被裁掉。往大拖没有后果（右边那一列是 `Grow(1)`）。
+	//
+	// 所以断的是**下限**，而 `DisableResize` 一旦回来就会红——它正是那条让下限失效
+	// 的路（顺带把上限也拿走了，那一条同样量不到：上限是 Cocoa 的行为，无头环境
+	// 里没有真窗）。
+	if opts.MinWidth != biuWidth || opts.MinHeight != biuHeight {
+		t.Errorf("最小尺寸是 %d×%d，want %d×%d：用户能把这个窗口拖到比设计尺寸更小，"+
+			"而那三行控件会被裁掉（`DisableResize` 那条路走不得，见上面那段注释）",
+			opts.MinWidth, opts.MinHeight, biuWidth, biuHeight)
+	}
+	if opts.DisableResize {
+		t.Error("又装回 DisableResize 了：那样 `isZoomed` 恒为真，`StateKey` 一条都存不下来，" +
+			"用户拖到哪都不会被记住（`MiniWindowOptions` 的注释里有实测表）")
 	}
 	if !opts.Frameless {
 		t.Error("没有 Frameless：Biu 那边 frame: false，迷你窗口自己画一整块")
 	}
 	if opts.StateKey == "" {
-		// 没有它每次启动都回到同一个位置，用户拖到顺手的地方就白拖了。
+		// 没有它每次启动都回到同一个位置，用户拖到顺手的地方就白拖了——而下面那个
+		// `DisableResize` 的断言断了「StateKey 存不存得下来」的那一半，两条合起来
+		// 才是「拖到哪就记到哪」。
 		t.Error("没有 StateKey：窗口每次启动都回到同一个位置，用户拖过的地方不记得")
 	}
 	if opts.StateKey == "main" {
@@ -436,6 +460,105 @@ func TestOnlyOneMiniWindowIsEverBuilt(t *testing.T) {
 	}
 }
 
+// TestTheMiniWindowRegistersTheInAppShortcuts 盯迷你窗口**也**登记应用内快捷键。
+//
+// ⚠️ 不登记的后果不是「少几个键」，而是**设置页上那句话变成假的**：那一页写着
+// 「应用内那一列：窗口在前台时按它就有用」，而迷你窗口恰恰是用户缩小之后最常停在
+// 前面的那一扇。少了这一句，⌘P / ⌘← / ⌘→ / ⌘↑ / ⌘↓ 在小窗在前台时一条都不响，
+// 而界面上一个字都不提（这一票刚把那句话从「切换mini/完整模式那一条除外」改成
+// 现在的说法）。
+//
+// 断法：真的按 ⌘↑（音量加），断 **App 里的音量变了**——而不是断「有没有登记」。
+func TestTheMiniWindowRegistersTheInAppShortcuts(t *testing.T) {
+	s, a := newMiniShell(t, nil)
+	if err := enqueueTwo(a, t); err != nil {
+		t.Fatal(err)
+	}
+	a.Toggle() // 暂停，免得播放器的时钟改状态
+	tt := miniTester(s)
+	a.SetVolume(0.5)
+
+	tt.Key(mygoui.Cmd, mygoui.KeyUp) // ⌘↑ = 音量加（+0.05）
+	tt.Frame()
+	if got := a.Snapshot().Volume; got < 0.54 {
+		t.Errorf("在迷你窗口里按了 ⌘↑ 之后音量是 %.2f，want 0.55：这一扇没登记应用内"+
+			"快捷键（`viewMini` 里那一行 `viewShortcuts`），而设置页写着「窗口在前台时"+
+			"按它就有用」", got)
+	}
+}
+
+// TestTheMiniShortcutDoesNotOpenASecondMiniWindow 盯「在小窗里按 ⌘M 是关掉，不是再开一个」。
+//
+// ⚠️ 登记了应用内快捷键之后这一条才成立，而且它是个**真会发生的**错：迷你窗口那一侧
+// 的 `s.mini` 是 nil（它不会开着第二个自己），而 `toggleMiniPlayer` 照常走下去就是
+// `openMiniPlayer()` 建在**迷你外壳**上——两个迷你窗口各放一首歌。
+//
+// 断法是走真的一条命令（`runShortcut`，和 `viewShortcuts` 里那一句同一个），
+// 看主窗口那一侧的 `mini` 有没有变 nil。
+func TestTheMiniShortcutDoesNotOpenASecondMiniWindow(t *testing.T) {
+	a := app.New()
+	t.Cleanup(a.Close)
+
+	back := 0
+	main := New(a)
+	t.Cleanup(main.images.Close)
+	mini := NewMini(a, func() { back++ })
+	t.Cleanup(mini.releaseMini)
+	mini.main = main
+	main.mini = mini
+
+	// 从**迷你窗口那一侧**发那条命令——这正是「小窗在前台时按 ⌘M」走的那条路。
+	mini.runShortcut("toggleMiniMode")
+
+	if back != 1 {
+		t.Errorf("迷你窗口那一侧的开关被调了 %d 次，want 1：没有绕回主窗口", back)
+	}
+	if mini.mini != nil {
+		t.Errorf("迷你外壳上多了一个迷你：%p", mini.mini)
+	}
+}
+
+// TestADeepLinkMakesRoomForTheMainWindow 盯「迷你开着时来 biu:// 链接」。
+//
+// ⚠️ `navigate` 改的是**主窗口**那一侧的路由（路由表是主窗口的），而主窗口在迷你期
+// 间是收着的。不让开的话，按一个链接的结果是「窗口弹出来了，还是迷你那一扇，页面上
+// 什么都没有」——`openWindow` 那一支优先叫回迷你窗就直接 return，连主窗口都不弹。
+//
+// 断两样纯逻辑：迷你被让开了、路由换到了。而「叫回窗口那一步」要过系统
+// （`RestoreFromBackground`），无头环境里调不到——它就在 `OnOpenURL` 里挨着的那一行。
+func TestADeepLinkMakesRoomForTheMainWindow(t *testing.T) {
+	a := app.New()
+	t.Cleanup(a.Close)
+
+	main := New(a)
+	t.Cleanup(main.images.Close)
+	mini := main.newMiniShell()
+	t.Cleanup(mini.releaseMini)
+	if err := enqueueTwo(a, t); err != nil {
+		t.Fatal(err)
+	}
+	a.Toggle() // 暂停，免得播放器的时钟改状态
+	_ = miniTester(mini)
+
+	if main.mini == nil {
+		t.Fatal("起点就不对：迷你窗口没开着")
+	}
+
+	main.handleDeepLink("/settings")
+
+	if main.mini != nil {
+		t.Error("链接过来了而迷你还开着：路由换的是主窗口那一侧，主窗口收着，" +
+			"用户看见的还是迷你那一扇、页面上什么都没有")
+	}
+	if got := main.router.Path(); got != "/settings" {
+		t.Errorf("路由停在 %q，want /settings", got)
+	}
+	// 音乐不受影响：让开一扇窗不是退出应用。
+	if st := a.Snapshot(); !st.HasTrack {
+		t.Error("让开迷你把歌停了")
+	}
+}
+
 // TestTheMiniBackButtonGoesBackToTheMainWindow 盯那个「退出」键接的真是那个开关。
 //
 // 接错了的话迷你窗口就成了一个只能进不能出的窗口：用户缩进来之后唯一一条回去的
@@ -573,9 +696,21 @@ func TestDraggingTheMiniProgressSeeksOnlyOnRelease(t *testing.T) {
 	if err := enqueueTwo(a, t); err != nil {
 		t.Fatal(err)
 	}
+	// ⚠️ **先暂停再量**。`enqueueTwo` 是让第一首开始放的，而放着的时候播放器那个
+	// 每 50ms 一拍的钟会把当前位置写回 `App`（`app.go` 的 tick）——于是拿
+	// `a.Snapshot().Position` 做「按住前后比较」是在和那条 goroutine 赛跑：
+	// 不带 `-race` 九次全绿，带 `-race` 十二次红五次（失败全是「位置被改成
+	// 0.01~0.05 秒」）。产品代码没有问题，是这条断言自己踩了那条钟。
+	//
+	// 暂停之后 `tick` 的 `live` 是假，位置不再自己走，于是后面那个「松手落在
+	// 拖到的那一格」的断言是确定的。
+	a.Toggle()
+	if st := a.Snapshot(); st.Playing {
+		t.Fatalf("起点就不对：暂停之后还在放，位置会自己走，量不到东西")
+	}
+
 	tt := miniTester(s)
 	settle(t, tt, "时长读回来了", func() bool { return a.Snapshot().Duration > 0 })
-	before := a.Snapshot().Position
 
 	bar := progressRect(t, tt)
 	y := bar.Y + bar.H/2
@@ -586,20 +721,28 @@ func TestDraggingTheMiniProgressSeeksOnlyOnRelease(t *testing.T) {
 		t.Fatal("按住的时候 miniHeld 是假：ScrubStart 没调过，播放器那边不知道" +
 			"「用户开始拖了」")
 	}
-	if got := a.Snapshot().Position; got != before {
-		t.Errorf("按住的时候位置已经被改成 %.2f 秒（松手之前是 %.2f 秒）：值没归用户，"+
-			"后台那个每 50ms 写回一次的时钟会和拖动打架，症状是**拖不动**——"+
-			"按住往右拖，一松劲就弹回去", got.Seconds(), before.Seconds())
-	}
+	// ⚠️ **「按住的时候值归用户」这一条是由下面那个断言量的，不在这里另量一次。**
+	//
+	// 原来这里是「按住期间 `App` 里的位置一个字节都没变」——那条**测错了东西**：
+	// `viewMiniProgress` 的第三支（`case !s.miniHeld && known: s.miniScrub = …`）
+	// 写的是**滑块自己的值**，从头到尾不碰 `App` 的位置，所以位置变没变跟它无关。
+	// 而它偏偏又是唯一和那条 50ms 的钟赛跑的一行。
+	//
+	// 真正要断的是「**拖到哪儿，松手就 seek 到哪儿**」：把那个 `!s.miniHeld` 守卫
+	// 去掉（`case known:`），按住期间滑块每帧都被 App 的位置覆盖、弹回起点，
+	// 松手那次 `ScrubEnd` 于是落在起点而不是拖到的那一格——下面那条立刻红。
 
 	tt.Release(bar.X+bar.W*0.8, y)
 	tt.Frame()
 	if s.miniHeld {
-		t.Error("松手之后 miniHeld 还是真")
+		t.Error("松手之后 miniHeld 还是真：ScrubEnd 没调过，于是下一次按下去" +
+			"不会重新 ScrubStart")
 	}
 	dur := a.Snapshot().Duration
 	if got, want := a.Snapshot().Position, dur*8/10; got < want-dur/10 {
-		t.Errorf("松手之后位置是 %.2f 秒，而拖到了 %d 的八成（%.2f 秒）：没有 seek",
+		t.Errorf("松手之后位置是 %.2f 秒，而拖到了 %d 的八成（%.2f 秒）：seek 落在了"+
+			"别的地方——按住的时候值没归用户，被 App 每 50ms 写回的位置覆盖了，"+
+			"症状是**拖不动**（按住往右拖，一松劲就弹回去）",
 			got.Seconds(), dur, want.Seconds())
 	}
 }

@@ -152,6 +152,19 @@ func (s *Shell) nudgeVolume(delta float64) {
 // ⚠️ **判据是「迷你窗口开着没有」，不是「当前路由是不是 `/mini-player`」**：
 // 迷你窗口是另一个进程里的另一个窗口，主窗口的路由停在哪儿和它没关系。
 func (s *Shell) toggleMiniPlayer() {
+	// ⚠️ **迷你窗口那一侧要绕回主窗口。** 那一侧的 `s.mini` 是 nil（迷你窗口不会
+	// 开着第二个自己），照常走下去就是 `openMiniPlayer()` 建在**迷你外壳**上——
+	// 于是按一次「切换mini/完整模式」开出两扇迷你窗口，各放一首歌。
+	//
+	// 这个坑是登记应用内快捷键那一手带进来的（⌘M 在小窗里也归这一扇管，见
+	// `viewMini` 里那句 `viewShortcuts`）。绕法是现成的：`toggleMini` 接的就是
+	// 主窗口的 `toggleMiniPlayer`。
+	if s.main != nil {
+		if s.toggleMini != nil {
+			s.toggleMini()
+		}
+		return
+	}
 	if s.mini != nil {
 		s.closeMiniPlayer()
 		return

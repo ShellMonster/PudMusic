@@ -77,13 +77,16 @@ func (s *Shell) installLifecycle() {
 	mygo.App.OnSecondInstance(func([]string, string) { s.openWindow() })
 
 	// biu://… 到了就跳到它指的那一页。
+	//
+	// ⚠️ **迷你开着的时候由 `handleDeepLink` 先把它关掉**，理由在那边。
+	// `openWindow` 排在这一步之后：迷你已经被让开了，它叫回来的才是主窗口。
 	mygo.App.OnOpenURL(func(u string) {
 		route, ok := platform.RouteFromURL(u)
 		if !ok {
 			return
 		}
+		s.handleDeepLink(route)
 		s.openWindow()
-		s.navigate(route)
 	})
 
 	// macOS：点程序坞里的图标把窗口叫回来。设成「关闭窗口时隐藏」之后，
@@ -94,6 +97,24 @@ func (s *Shell) installLifecycle() {
 	// DidBecomeActive——所以这里不会因为 RestoreFromBackground 里的
 	// App.Focus 又绕回来。
 	mygo.App.OnActivate(func(bool) { s.openWindow() })
+}
+
+// handleDeepLink 是「biu://… 指到了 route」那一半：让开迷你，跳到那一页。
+//
+// ⚠️ **先让开迷你**。`navigate` 改的是**主窗口**那一侧的路由（路由表是主窗口的），
+// 而主窗口在迷你期间是收着的。不让开的话，按一个链接的结果是「窗口弹出来了，还是
+// 迷你那一扇，页面上什么都没有」——`openWindow` 那一支优先叫回迷你窗就直接 return，
+// 连主窗口都不弹。
+//
+// 让开是有意的那一半：链接指的是主窗口里的一页，而两个窗口互斥（见 `openWindow`），
+// 所以「去那一页」只能是把迷你让开。
+//
+// 叫回窗口那一步**不在这里**：`openWindow` 要走系统（`RestoreFromBackground`，或者
+// 压根没有窗口时的 `WhenReady`），在无头 Tester 里调不到也量不到。而「迷你被关掉」
+// 和「路由换了」这两样都是纯逻辑，留在这一半里测。
+func (s *Shell) handleDeepLink(route string) {
+	s.dropMini()
+	s.navigate(route)
 }
 
 // openWindow 把主窗口叫回来；没有窗口就开一个。**绝不开第二个。**

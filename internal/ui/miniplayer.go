@@ -98,6 +98,42 @@ const (
 // 「红黄绿留着」（`window.go` 里 `hiddenTitleBar = !Frameless && …` 的那道
 // 判断），而 Biu 的迷你窗口 `frame: false`，压根没有系统控件——它自己画一整块。
 // 这里走真无边框。
+//
+// # ⚠️ 为什么**没有** `DisableResize`（Biu 那边有）
+//
+// 这不是抄漏了，是照抄会让 `StateKey` 整个失效。实测出来的链路，三步：
+//
+//  1. `DisableResize` 在 macOS 上就是从 `styleMask` 里去掉 `NSWindowStyleMask-
+//     Resizable`（`mygo/internal/darwin/window.go:123`）。
+//
+//  2. 一个没有 resizable 位的窗口**没有「标准框」可言**，`isZoomed` 恒为真
+//     （`mygo/internal/darwin/window.go:779` 那句 `sendBool(w.win, "isZoomed")`）。
+//
+//  3. `StateKey` 存不存位置，判的是 `!Maximized`
+//     （`mygo/window_state.go:188` 的 `captureState`）：
+//
+//     if !st.Maximized && !st.FullScreen && !n.IsMinimized() { 记下 X/Y/W/H }
+//     if st.Width <= 0 || st.Height <= 0 { return }               // 新键直接不存
+//
+// 于是那个窗口**一条都存不下来**：`window-state.json` 里连 `"mini-player"` 这个
+// 键都不会有，下次开还是走 `X/Y` 的默认值，也就是每次都回到 `miniCorner()` 算出来
+// 的右上角——而注释还在说「记住了」。
+//
+// 四个变体各建一扇**真窗**问 `IsMaximized()`（本机实测，`HOME` 重定向 + 死代理，
+// 不打任何真接口）：
+//
+//	Frameless + DisableResize        IsMaximized=true    ← 存不下来
+//	Frameless + 去掉 DisableResize   IsMaximized=false   ← 存得下来
+//	不 Frameless + DisableResize     IsMaximized=true    ← 与无边框无关
+//	min==max==320×100（钉死大小）     IsMaximized=true    ← 也钉不住
+//
+// 另外两条试过也没用：`w.Unmaximize()` 对不可缩放的窗口是空操作；建完再
+// `SetResizable(true) → Unmaximize() → SetResizable(false)`，改回去的那一下
+// `isZoomed` 又变回真。
+//
+// 代价：用户能把这个窗口**往大拖**。而那没有后果——右边那一列是 `Grow(1)`，
+// 宽出来的部分全给歌名；**缩不到更小**由 `MinWidth/MinHeight` 兜住，三行控件
+// 不会被裁掉。
 func MiniWindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 	return mygo.WindowOptions{
 		Title:  "Biu 迷你播放器",
@@ -106,17 +142,25 @@ func MiniWindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 		// 🔴 `Transparent` 必须配着自己画的背景，理由见文件头那一条。
 		// 单开这一个开关而忘了画底，窗口在桌面上是隐形的。
 		Transparent: true,
-		// Biu：`alwaysOnTop: true, skipTaskbar: true, resizable: false`。
+		// Biu：`alwaysOnTop: true, skipTaskbar: true`。
 		// 「置顶」是它作为悬浮控件的本体；「不进任务栏 / 程序坞」是为了不跟
 		// 主窗口抢同一个格子。
 		AlwaysOnTop:       true,
 		SkipTaskbar:       true,
 		Frameless:         true,
-		DisableResize:     true,
 		DisableMinimize:   true,
 		DisableMaximize:   true,
 		DisableFullScreen: true,
+		// ⚠️ **这里故意不给 `DisableResize`，而 Biu 那边是 `resizable: false`
+		// ——照抄它会让「拖到哪就记到哪」整个失效。** 机制见函数上面那一段。
+		//
+		// 「不能缩」改用 **MinWidth/MinHeight** 保证：用户永远缩不到比 320×100
+		// 更小，那三行控件也就永远不会被裁掉。能往大拖——那没有后果，右边那一列
+		// 是 `Grow(1)`，宽出来的部分全给歌名。
+		MinWidth:  miniWidth,
+		MinHeight: miniHeight,
 		// 停在用户上次关掉它的地方（和主窗口那个 `StateKey: "main"` 同一套机制）。
+		// **靠上面那个 `MinWidth` 才成立**，理由见函数上面那一段。
 		StateKey: "mini-player",
 		Content:  ui.View(view),
 	}
@@ -127,9 +171,13 @@ func MiniWindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 // ⚠️ 它只管第一次：窗口建过之后 `StateKey` 记住了位置，用户拖到哪儿就停到
 // 哪儿（`mygo/window.go` 的 WindowState 那一段会盖掉 X/Y）。
 //
+// ⚠️ **这一句依赖 `MiniWindowOptions` 里那个「不给 `DisableResize`」**——给了它
+// `StateKey` 一条都存不下来（`isZoomed` 恒为真，见那个函数的实测表），于是每次都
+// 回到这个角落，而这一段还在说「记住了」。改那一个开关之前先看那段。
+//
 // 右上角 + 12 的边距：那一块是「工作区里最不挡事」的位置——左上角被菜单栏占着、
-// 底部被程序坞占着。Biu 那边是居中（`center: true`），那一版是给「缩小成一个
-// 控件继续干活」用的；贴边更贴合「不占屏幕」这一条。
+// 底部被程序坞占着。Biu 那边是居中（`center: true`）**而且不记位置**（一个普通
+// BrowserWindow 没有位置持久化），我们两条都要：第一次贴边，之后跟着用户走。
 //
 // work 是主显示器的工作区（`mygo.Screen.PrimaryDisplay().WorkArea`）。传零值就
 // 退回 (0,0)，让框架去居中——单元测试里没有真显示器，走的就是这一支。
@@ -326,6 +374,14 @@ func (s *Shell) releaseMini() {
 // 控件，而 MyGo 每帧开头把主题重置成跟随系统那份，见 theme.go）。
 func (s *Shell) viewMini(c *ui.Context) {
 	s.applyFrameTheme(c)
+	// 应用内快捷键：**和主窗口走同一条**（`viewShortcuts`），次序也一样（主题之后、
+	// 其它每帧钩子之前）。
+	//
+	// ⚠️ 不登记的后果不是「少几个键」，而是**设置页上那句话变成假的**：那一页写着
+	// 「应用内那一列：窗口在前台时按它就有用」，而迷你窗口是用户缩小之后最常停在
+	// 前面的那一扇。少了这一句，⌘P / ⌘← / ⌘→ / ⌘↑ / ⌘↓ 在小窗在前台时一条都不响，
+	// 而界面上一个字都不提。
+	s.viewShortcuts(c)
 
 	st := s.app.Snapshot()
 	t := c.Theme()

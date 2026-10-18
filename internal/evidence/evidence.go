@@ -437,6 +437,9 @@ var Items = []Item{
 		Tests: []string{
 			"TestTheMiniWindowIsAtBiuNumbers",
 			"TestTheMiniWindowParksInTheTopRightCorner",
+			// 拖到哪就记到哪：`DisableResize` 会让 `isZoomed` 恒为真，于是
+			// `StateKey` 一条都存不下来（实测表在 `MiniWindowOptions` 的注释里）。
+			"TestADeepLinkMakesRoomForTheMainWindow",
 			// 透明窗口自己给了不透明底——不画的话它在桌面上是隐形的。
 			"TestTheMiniCardCoversTheWindow",
 			// 第二扇窗上铁律二（每帧开头装主题）和铁律四（view 包 Guard）也成立。
@@ -451,6 +454,10 @@ var Items = []Item{
 			"TestTheMiniWindowStepsThroughTheQueue",
 			"TestDraggingTheMiniProgressSeeksOnlyOnRelease",
 			"TestTheMiniVolumeSliderSetsTheVolume",
+			// 小窗里也认应用内快捷键（设置页写着「窗口在前台时按它就有用」），以及
+			// 在小窗里按「切换mini/完整模式」是关掉而不是再开一个。
+			"TestTheMiniWindowRegistersTheInAppShortcuts",
+			"TestTheMiniShortcutDoesNotOpenASecondMiniWindow",
 		},
 	},
 	{
