@@ -10,8 +10,11 @@ package bili
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
-	"slices"
+	"net/url"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -72,6 +75,88 @@ func TestSearchSuggestSendsTheWordOnTheSearchHost(t *testing.T) {
 	}
 }
 
+// hostRecorder 是一层「记下每个请求发去了哪台机器」的网络。
+type hostRecorder struct {
+	// hosts / paths 按到达顺序记下来（一个请求一条）。
+	hosts, paths []string
+	// body 是答给每一个请求的那一段。
+	body string
+}
+
+func (h *hostRecorder) RoundTrip(r *http.Request) (*http.Response, error) {
+	h.hosts = append(h.hosts, r.URL.Host)
+	h.paths = append(h.paths, r.URL.Path)
+	return &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(h.body)),
+		Request:    r,
+	}, nil
+}
+
+// TestSearchSuggestGoesToTheSearchHostNotTheApiOne 钉住**发去哪一台**。
+//
+// ⚠️ 这一条是本票最要紧、又最验不出来的一环，而「最验不出来」正是本票自己的报告
+// 承认的：fixture 那台假 B 站把**每一个**主机都指到同一个本地 URL（那正是
+// `TestOnlyPointHostsAtFixture` 干的事），所以「请求打到了 `/main/suggest`」这一句
+// 对 `api.bilibili.com` 和 `s.search.bilibili.com` **一样成立**——把 `hostSearch`
+// 写成 `hostAPI`，整包测试照样全绿。
+//
+// 而地址错了的**症状在界面上和「拉不到」一模一样**：联想词那一档永远是空的。
+// 于是判据必须是**请求真正的那个 host**，而不是路径。
+func TestSearchSuggestGoesToTheSearchHostNotTheApiOne(t *testing.T) {
+	rec := &hostRecorder{body: jsonData(t, 0, "0", map[string]any{"tag": []any{suggestTag("甲", "甲")}})}
+
+	// 生产上那一份客户端（默认主机，一个都没指到 fixture 上）——这一层要量的正是
+	// **默认值**，因为 fixture 一指就把主机换掉了。
+	c := NewClient(Options{Transport: rec})
+	if _, err := c.SearchSuggest(context.Background(), "周杰伦"); err != nil {
+		t.Fatalf("SearchSuggest: %v", err)
+	}
+
+	if len(rec.hosts) != 1 {
+		t.Fatalf("发了 %d 个请求（%v），want 一个", len(rec.hosts), rec.hosts)
+	}
+	if got := rec.hosts[0]; got != mustHost(HostSearch) {
+		t.Errorf("请求发去了 %q，want 搜索站那一台（%q）——"+
+			"打成 api 那一台的话症状是「联想词永远是空的」，和真的拉不到一模一样", got, HostSearch)
+	}
+	if got := rec.paths[0]; got != searchSuggestPath {
+		t.Errorf("打的是 %q，want %q", got, searchSuggestPath)
+	}
+	// 而「没有 w_rid / 不先跑一趟 nav」是**另一条**（那条 fixture 版的量的是
+	// 参数和请求个数），所以这里顺手钉住一件这里才看得见的事：它**只发一个请求**。
+	if len(rec.hosts) != 1 {
+		t.Errorf("为了一个不签名的请求跑了 %v", rec.hosts)
+	}
+}
+
+// TestTheSuggestHostIsNotTheApiHost 把「两个常量不许是同一个」写成断言。
+//
+// 上一条量的是「请求发去了哪台」，那靠的是 `hostSearch` 这个字段；这一条量的是
+// **常量本身**——有人把 `HostSearch` 的值抄成 `HostAPI`（两行挨着，一个域名改
+// 错了肉眼扫不出来）的话，上一条会跟着一起红，而这里会先说清是哪一处抄错了。
+func TestTheSuggestHostIsNotTheApiHost(t *testing.T) {
+	if mustHost(HostSearch) == mustHost(HostAPI) {
+		t.Errorf("HostSearch 和 HostAPI 是同一台（%q）——联想词那个接口不在 api 那台上", HostAPI)
+	}
+	if !strings.HasPrefix(HostSearch, "https://") {
+		t.Errorf("HostSearch 是 %q，链接要用 https", HostSearch)
+	}
+	if mustHost(HostSearch) != "s.search.bilibili.com" {
+		t.Errorf("HostSearch 是 %q，want s.search.bilibili.com（搜索站那一台）", HostSearch)
+	}
+}
+
+// mustHost 剥掉一个主机常量前面那段 `https://`（拿 URL 的 host 比，少一层改错的机会）。
+func mustHost(base string) string {
+	u, err := url.Parse(base)
+	if err != nil {
+		return base
+	}
+	return u.Host
+}
+
 // TestSearchSuggestGivesBackThePlainWords 钉住「摆上去的和搜下去的是同一个词」。
 //
 // B 站两套字：`term` 是干净的，`name` 里把命中的部分包进了
@@ -98,38 +183,88 @@ func TestSearchSuggestGivesBackThePlainWords(t *testing.T) {
 	}
 }
 
-// TestSearchSuggestSkipsTheOnesThatAreNotWords 钉住两件事：空的丢掉、重复的只留
-// 一个、顶上限。
+// TestSearchSuggestDropsTheOnesThatAreNotWords 钉住两件事：空的丢掉、重复的只留
+// 一个。
+//
+// ⚠️ **重复的那一条排在最前面，后面不再垫东西**：早先这一条把「甲」放在第 4 位、
+// 后面补了 20 条，于是结果被 `suggestLimit`(10) 切掉时，重复的那一条**根本进不了
+// 结果**——把去重判据整个删掉，那条用例照样绿（评审实测：*** SURVIVED ***）。
+// 判据因此改成**数出现次数**（「甲」只该有一个），它和「上限在哪」互不相干。
 //
 // B 站偶尔给两遍同一个词（`term` 和 `name` 不同的那种）。浮层上摆两行一样的字，
-// 用户会以为点错了；而超上限的那些留在文件里也没人看。
-func TestSearchSuggestSkipsTheOnesThatAreNotWords(t *testing.T) {
-	tags := []any{
-		suggestTag("", ""),      // 空的：用户看见的是一排点不动的行
-		suggestTag("甲", "甲"),    //
-		suggestTag("乙", "乙"),    //
-		suggestTag("甲", "另一个甲"), // 和上面那个重复
-		suggestTag("  ", "空格的"), //
-	}
-	for i := range 20 {
-		tags = append(tags, suggestTag(string(rune('a'+i)), "补的"))
-	}
-	_, c, _ := suggestFixture(t, map[string]any{"tag": tags})
+// 用户会以为点错了。
+func TestSearchSuggestDropsTheOnesThatAreNotWords(t *testing.T) {
+	_, c, _ := suggestFixture(t, map[string]any{"tag": []any{
+		suggestTag("甲", "甲"),
+		suggestTag("乙", "乙"),
+		suggestTag("甲", "另一个甲"), // 和第一条重复
+		suggestTag("丙", "丙"),
+		// 下面这四条 `term` 和 `name` 都认不出来一个字——摆出去是浮层上一行
+		// 点不动的空气（其中两条是纯空白：早先 `name` 顶上来的那一条没掐头尾空白，
+		// 「   」就这么摆出去了）。
+		suggestTag("", ""),
+		suggestTag("  ", "   "),
+		suggestTag("", "   "),
+		suggestTag(" ", " "),
+	}})
 
 	got, err := c.SearchSuggest(context.Background(), "甲")
 	if err != nil {
 		t.Fatalf("SearchSuggest: %v", err)
 	}
-	if len(got) != suggestLimit {
-		t.Errorf("拿到 %d 条，want 顶上那 %d 条", len(got), suggestLimit)
+	want := []string{"甲", "乙", "丙"}
+	if len(got) != len(want) {
+		t.Fatalf("拿到 %q，want %q", got, want)
 	}
-	for _, want := range []string{"甲", "乙"} {
-		if !slices.Contains(got, want) {
-			t.Errorf("结果里没有 %q：%q", want, got)
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("第 %d 条是 %q，want %q（去掉脏的那几条不许把好的也一起去掉）",
+				i, got[i], want[i])
 		}
 	}
-	if slices.Contains(got, "  ") || slices.Contains(got, "") {
-		t.Errorf("空的那几条没被丢掉：%q", got)
+	// 去重单独钉一次「数出现次数」：上面那条整体比较已经盖住了它，而这一句让
+	// 「去重判据没了」时的失败信息直接指着这一件事。
+	if n := count(got, "甲"); n != 1 {
+		t.Errorf("结果里「甲」有 %d 个，want 1：%q", n, got)
+	}
+}
+
+// count 数一个词在结果里出现了几次。
+func count(list []string, want string) int {
+	n := 0
+	for _, v := range list {
+		if v == want {
+			n++
+		}
+	}
+	return n
+}
+
+// TestSearchSuggestKeepsOnlyTheFirstFew 钉住上限。
+//
+// 单独一条而不是和去重混在一起：混在一起时**上限会把重复的那一条切掉**，于是去重
+// 那一半验不到（见上一条的注释）。上限也有它自己的坏法（省掉了最后几条用户真正
+// 想要的），所以它得单独被钉一次。
+func TestSearchSuggestKeepsOnlyTheFirstFew(t *testing.T) {
+	tags := make([]any, 0, suggestLimit+5)
+	for i := range suggestLimit + 5 {
+		tags = append(tags, suggestTag(strconv.Itoa(i), "第"+strconv.Itoa(i)))
+	}
+	_, c, _ := suggestFixture(t, map[string]any{"tag": tags})
+
+	got, err := c.SearchSuggest(context.Background(), "0")
+	if err != nil {
+		t.Fatalf("SearchSuggest: %v", err)
+	}
+	if len(got) != suggestLimit {
+		t.Fatalf("拿到 %d 条，want 顶上那 %d 条：%q", len(got), suggestLimit, got)
+	}
+	for i := range suggestLimit {
+		want := strconv.Itoa(i)
+		if got[i] != want {
+			t.Errorf("第 %d 条是 %q，want %q（要的是**前** %d 条，顺序也不许变）",
+				i, got[i], want, suggestLimit)
+		}
 	}
 }
 

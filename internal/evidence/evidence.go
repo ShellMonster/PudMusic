@@ -993,9 +993,16 @@ var Items = []Item{
 		// 少一个的症状在界面上像「联想词永远是空的那一档」，而那和「拉不到」长得
 		// 一模一样。
 		//
-		// ⚠️ **地址和签名都在这一条里**：它在 `s.search.bilibili.com` 而不是
-		// `api` 那台，而 WBI 是 `api` 那台的规矩——多带一个它不认的签名参数是**赌**
-		// 那个接口不介意，所以这里钉住「没有 w_rid、也没有先跑一趟 nav」。
+		// 🔴 **「发去哪一台」单列两条，因为它靠 fixture 量不出来**：假 B 站把**每一个**
+		// 主机都指到同一个本地 URL（那正是 `TestOnlyPointHostsAtFixture` 干的事），
+		// 所以「打到了 `/main/suggest`」这一句对 `api.bilibili.com` 和
+		// `s.search.bilibili.com` 一样成立——把 `hostSearch` 写成 `hostAPI`，整包
+		// 测试照样全绿（评审实测）。所以那两条**不走 fixture**：一层只记 `URL.Host`
+		// 的网络，量的是请求真正的那个 host；另一条量的是常量本身不许和 `HostAPI`
+		// 一样。
+		//
+		// ⚠️ **签名（不发 w_rid、不先跑一趟 nav）是另一条**：WBI 是 `api` 那台的规矩，
+		// 这一台不认，多带只是**赌**它不介意。
 		//
 		// 「两套字」（`term` 干净、`name` 带标签）是界面上最要紧的一半：拿 `name`
 		// 显示是一排尖括号，拿它去搜是把标签当关键词发出去。
@@ -1003,11 +1010,16 @@ var Items = []Item{
 		// ⚠️ **这一票没有走真网**：接口的地址、参数和回包形状都要真机回归，那是另
 		// 一次安排；这里量到的是**我们这一层**（发出去的是什么、回来的怎么认、
 		// 失败有没有被当成「一个都没有」）。
-		Spec: "搜索联想词的接口：走搜索站那台（s.search.bilibili.com）、只发 term 且不带 WBI 签名；回包里 term/name 两套字分开认；空的和重复的丢掉、顶上那 10 条；拉不到要报错而不是回一个空列表",
+		Spec: "搜索联想词的接口：发去搜索站那一台（s.search.bilibili.com，不许打成 api 那台——fixture 量不出来，所以用一层记 host 的网络钉）、只发 term 且不带 WBI 签名；回包里 term/name 两套字分开认；空的和重复的丢掉、顶上那 10 条（两件事各一条，混在一起时上限会把重复的那条切掉）；拉不到要报错而不是回一个空列表",
 		Tests: []string{
+			// 地址：这两条不过 fixture，量的是请求真正的 host。
+			"TestSearchSuggestGoesToTheSearchHostNotTheApiOne",
+			"TestTheSuggestHostIsNotTheApiHost",
+			// 参数与签名。
 			"TestSearchSuggestSendsTheWordOnTheSearchHost",
 			"TestSearchSuggestGivesBackThePlainWords",
-			"TestSearchSuggestSkipsTheOnesThatAreNotWords",
+			"TestSearchSuggestDropsTheOnesThatAreNotWords",
+			"TestSearchSuggestKeepsOnlyTheFirstFew",
 			"TestSearchSuggestFallsBackToTheNameWhenThereIsNoTerm",
 			"TestSearchSuggestAsksForNothingWithoutAWord",
 			"TestSearchSuggestSaysSoWhenItCannotAsk",
@@ -1028,7 +1040,7 @@ var Items = []Item{
 		//
 		// ⚠️ 「设置里的『显示搜索历史』不许把联想词一起关掉」也单列：那个设置管的
 		// 是「我不想看见我搜过什么」，而联想词是 B 站这次给的。
-		Spec: "搜索浮层里多一档「联想词」：输入时出来、和搜索历史在界面上分得开、选中等于选中那次的搜索、拉不到时静默（浮层保持只有历史那一档）、和历史在同一个浮层里（Esc 一起收）、设置里的「显示搜索历史」不管它",
+		Spec: "搜索浮层里多一档「联想词」：输入时出来、和搜索历史在界面上分得开、选中等于选中那次的搜索、拉不到时静默（浮层保持只有历史那一档）、和历史在同一个浮层里（Esc 一起收）、设置里的「显示搜索历史」不管它；两档都摆满时（最小窗口 + 10 条长历史）最下面那几条也在屏幕里、滚得动、点得中",
 		Tests: []string{
 			"TestTypingBringsUpTheSuggestTerms",
 			"TestTheTwoSectionsAreToldApart",
@@ -1040,6 +1052,11 @@ var Items = []Item{
 			"TestNoWordMeansNoRequest",
 			// 联想词那一档没有 ×：那是 B 站这次给的，删不掉。
 			"TestTheSuggestTermsCannotBeDeleted",
+			// 两档都摆满时（最小窗口 + 10 条长历史 + 10 条联想）最下面那几条**点得着**：
+			// 面板能滚、高度上限跟着窗口走（评审钉过：没有滚动容器时最后一条被排在
+			// y=735，而屏幕只有 560 高——看不见、点不着、也滚不到）。
+			"TestThePanelFitsInASmallWindowAndScrolls",
+			"TestReopeningTheOverlayStartsAtTheTop",
 		},
 	},
 	{

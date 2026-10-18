@@ -157,6 +157,14 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 //
 // ⚠️ **两档都没有时不摆面板**：用户看见的是一块突然出现的白板，而不是「最近搜过
 // 这些」。
+//
+// 🔴 **面板里的内容必须能滚，而且高度上限跟着窗口走**（评审在这一条上钉过一次）。
+//
+// 两档加起来能有多高：历史最多 `searchHistoryShown`(10) 条，联想最多
+// `suggestLimit`(10) 条，而历史那几条是**折行**的（长的词条一个 chip 就占掉一行
+// 的一半）。实测在应用允许的最小窗口（900×560）上灌满两边之后，最后一条联想被排到
+// y=735 —— 而屏幕只有 560 高：它**画在屏幕底下，点不着，也滚不到**（面板原本不是
+// 一个滚动容器）。
 func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 	if !s.searchSuggest {
 		return
@@ -168,6 +176,7 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 		return
 	}
 	t := c.Theme()
+	_, winH := c.Size()
 
 	ui.PopoverBase(c, field, &s.searchSuggest, func(panel ui.Element) {
 		// KeepFocus 的理由见文件头。少这一句，浮层里的条目点不到。
@@ -176,25 +185,48 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 			Background(t.Background).Border(1, t.Border).
 			Shadow(0, 6, 20, 0, suggestShadow(t)).
 			Padding(8).Children(func() {
-			// 历史在上、联想在下（Biu 的 topContent 在结果列表上面，见
-			// `search/index.tsx:121-146`）。中间那一道空隙是「这是两档」最直接的一句
-			// 提示：没有它时两栏连着排，看起来像一栏里混着两批词。
-			if showHistory {
-				s.viewSuggestHeader(c)
-				ui.Row(c).Key("suggest-history").Wrap().Gap(6).Children(func() {
-					for _, item := range history {
-						s.viewHistoryChip(c, item)
+			// 🔴 **这一层 `Scroll` 是「最下面那几条点得着」的全部**：MaxHeight 把它
+			// 压在屏幕之内，超出去的部分靠滚。没有它，少掉的是「词看得见」——而用户
+			// 看到的是一个**列表突然断在屏幕边上**，既不知道下面还有，也不知道能滚。
+			ui.Scroll(c).Key(suggestScrollKey).FillWidth().
+				MaxHeight(suggestPanelMaxH(winH)).
+				TrackScroll(&s.terms.scroll).
+				Children(func() {
+					// 历史在上、联想在下（Biu 的 topContent 在结果列表上面，见
+					// `search/index.tsx:121-146`）。中间那一道空隙是「这是两档」最直接的
+					// 一句提示：没有它时两栏连着排，看起来像一栏里混着两批词。
+					if showHistory {
+						s.viewSuggestHeader(c)
+						ui.Row(c).Key("suggest-history").Wrap().Gap(6).Children(func() {
+							for _, item := range history {
+								s.viewHistoryChip(c, item)
+							}
+						})
+					}
+					if len(terms) > 0 {
+						if showHistory {
+							ui.Box(c).FillWidth().Height(suggestTermsGap)
+						}
+						s.viewSuggestTerms(c)
 					}
 				})
-			}
-			if len(terms) > 0 {
-				if showHistory {
-					ui.Box(c).FillWidth().Height(suggestTermsGap)
-				}
-				s.viewSuggestTerms(c)
-			}
 		})
 	})
+}
+
+// suggestPanelMaxH 是这个面板最多能有多高（滚动容器的上限）。
+//
+// ⚠️ **跟着窗口高走，而不是写死一个数**：写死的话有两种坏法——窗口更矮时还是溢出，
+// 窗口更高时白白少摆几条。真窗口改大小之后的第一帧就是按这个算的，所以它和实际
+// 摆出来的高度是一致的（`c.Size()` 是窗口尺寸，见 fullplayer.go 的用法）。
+func suggestPanelMaxH(winH float32) float32 {
+	h := winH - suggestPanelTop - suggestPanelMargin
+	// 窗口极矮时也不能矮到只剩三四行：那样「翻得动」变成「翻得累」，而联想词这一档
+	// 十有八九是要被翻过去的。
+	if h < suggestPanelFloor {
+		return suggestPanelFloor
+	}
+	return h
 }
 
 // viewSuggestHeader 是浮层顶上那一行：「搜索历史」和「清除全部」。

@@ -33,6 +33,9 @@ type suggestBili struct {
 	mu sync.Mutex
 	// asked 记被问过的词，按到达顺序。
 	asked []string
+	// served 数**已经回了**几次（不是「发了几次」）。两者之差就是还在路上的那些：
+	// 判「那一次问完了」要的是它，只等「发了」的话验的还是请求还没回的中间态。
+	served int
 	// terms 是每个词该回的那批。
 	terms map[string][]string
 	// gate 非 nil 时响应卡在它上面，放开才回（造「旧的那一趟迟到」）。
@@ -65,6 +68,7 @@ func (b *suggestBili) serve(w http.ResponseWriter, r *http.Request) {
 
 	b.mu.Lock()
 	b.asked = append(b.asked, kw)
+	b.served++
 	ch := b.gate[kw]
 	terms, code, broken := b.terms[kw], b.failWith, b.broken
 	b.mu.Unlock()
@@ -172,6 +176,27 @@ func sameWords(got, want []string) bool {
 	return true
 }
 
+// waitServed 等假 B 站**回了** n 次（请求真的走完了一趟）。
+func waitServed(t *testing.T, b *suggestBili, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		b.mu.Lock()
+		got := b.served
+		b.mu.Unlock()
+		if got >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("等了 5 秒，回了 %d 次，want %d", got, n)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// idle 报「业务层此刻不在飞」（那一趟已经回来并装上状态了）。
+func idle(a *App) bool { return !a.SuggestState().Loading }
+
 // waitCalls 等假 B 站被问过 n 次。
 func waitCalls(t *testing.T, b *suggestBili, n int) {
 	t.Helper()
@@ -203,23 +228,42 @@ func TestAskingForSuggestGivesBackWhatBilibiliSaid(t *testing.T) {
 	}
 }
 
-// TestTheSameWordIsNotAskedTwice 钉住「同一个词不许问第二遍」。
+// TestTheSameWordIsNotAskedForSuggestTwice 钉住「同一个词不许问第二遍」。
 //
 // 防抖那一层也有这道闸门，而这里是兜底：它挡住的是「界面上那一支的判据写错」
 // 那种一帧一发的自激循环（下面那条钉的就是它的后果）。
+//
+// ⚠️ **判据排在「第一趟真的回来」之后**（评审钉过这一条）：早先这条是
+// `waitCalls(1)` 一数到 1 就返回，可多出来的那一趟是从 goroutine 里发出去的，那
+// 时候还没打到 fixture 上——于是用例有时红、有时绿（12 次连跑全绿，而请求数确实从 1
+// 变成了 2）。所以先等**回包**（`waitServed` + 业务层不在飞），再敲第二遍，然后给
+// 那趟在途的请求留一段安静时间，最后才数。
 func TestTheSameWordIsNotAskedForSuggestTwice(t *testing.T) {
 	a, b := newSuggestRig(t)
 	b.terms["周杰伦"] = []string{"周杰伦 晴天"}
 
 	a.SearchSuggest("周杰伦")
-	waitSuggest(t, a, "周杰伦 晴天")
+	waitServed(t, b, 1)
+	waitUntil(t, "第一趟问完", 5*time.Second, func() bool { return idle(a) })
+	if got := b.calls(); len(got) != 1 {
+		t.Fatalf("第一趟还没问完就数了一次：%v", got)
+	}
+
+	// 用户在慢网络下「再按一下试试」：同一个词，同一个源。
 	for range 5 {
 		a.SearchSuggest("周杰伦")
 	}
-	waitCalls(t, b, 1)
+	// 留一段安静时间：那几趟（如果发了）现在一定已经打到 fixture 上了。
+	time.Sleep(300 * time.Millisecond)
 
-	if got := len(b.calls()); got != 1 {
-		t.Errorf("同一个词问了 %d 次，want 1", got)
+	if got := b.calls(); len(got) != 1 {
+		t.Errorf("同一个词问了 %d 次（%v），want 1——每次都去问一趟就是白花往返，"+
+			"而 B 站那边会开始限速", len(got), got)
+	}
+	// 而那一档的结果还在（早先那条的另一个坑：这一支顺手把代次作废掉的话，
+	// `loading` 再没有人翻回来）。
+	if got := a.SuggestState().Items; len(got) != 1 || got[0] != "周杰伦 晴天" {
+		t.Errorf("重复提交之后结果成了 %q，want [周杰伦 晴天]", got)
 	}
 }
 

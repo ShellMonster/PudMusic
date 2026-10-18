@@ -214,6 +214,145 @@ func TestAnEmptySearchBoxDoesNotKeepTheWindowRedrawing(t *testing.T) {
 	}
 }
 
+// overflowLongHistory 是十条**长**的历史词条。
+//
+// 长度是照评审复现的那一批量的：一条就占掉小半行，十条折成四行——而联想那一档
+// 十行，全摆出来就是这个尺寸下撑爆屏幕的那一档场景。
+var overflowLongHistory = []string{
+	"林俊杰 江南 林俊杰 超大型精选集 全集",
+	"周杰伦 跨时代演唱会精选集 全场慢速",
+	"薛之谦 天外来物 现场版 高清完整版",
+	"邓丽君 绝代佳人  remastered 合集",
+	"陈奕迅 演唱会精选 十年精选 全纪录",
+	"张学友 醒着做梦 演唱会 高清修复",
+	"王菲 红豆 专辑 精选 全碟版",
+	"李宗盛 山丘 live 演唱会实录",
+	"赵雷 成都 民谣现场 完整版 合集",
+	"朴树 那些花儿 现场版 修复 高清",
+}
+
+// overflowTerms 是联想那一档摆满的十条。
+var overflowTerms = []string{
+	"周杰伦 晴天", "周杰伦 以父之名", "周杰伦 彩虹", "周杰伦 稻香",
+	"周杰伦 夜曲", "周杰伦 简单爱", "周杰伦 青花瓷", "周杰伦 发如雪",
+	"周杰伦 双截棍", "周杰伦 东风破",
+}
+
+// overflowPanel 建一个「最小窗口 + 满两档」的外壳，回到刚画完一帧的样子。
+//
+// ⚠️ **最小窗口**：900×560 是 `WindowOptions` 的 MinWidth/MinHeight（shell.go），
+// 也是用户把窗口缩到最小的样子。这一组量的就是**这一个尺寸**下会发生什么——
+// 默认的 1200×800 什么都装得下。
+func overflowPanel(t *testing.T, history []string, terms []string) (*Shell, *mygoui.Tester) {
+	t.Helper()
+	f := newBiliFixture(t, 1)
+	f.setSuggestTerms("周", terms...)
+	b := newTestShell(t,
+		at(900, 560),
+		withClock(newFakeClock(fakeClockStart)),
+		mounted(func(t *testing.T, a *app.App) {
+			a.MountLogin(app.NewMemoryStore("suggest-test"), f.client())
+		}),
+	)
+	s, tt := b.s, b.tt
+	s.app.SetWake(s.wake.invalidate)
+	s.feed.next = time.Time{}
+	tt.SetFocused(true)
+	for _, w := range history {
+		s.hist.add(w)
+	}
+	tt.Frame()
+	return s, tt
+}
+
+// TestThePanelFitsInASmallWindowAndScrolls 钉住「最下面那几条点得着」。
+//
+// 🔴 评审在这一点过本票：在应用允许的**最小**窗口（900×560，`WindowOptions` 的
+// MinWidth/MinHeight）上灌满两档——历史 10 条**长**词条（折行，一行放不下两条）
+// 加联想 10 条——最后一条联想被排到 y=735，而屏幕只有 560 高：它画在屏幕底下，
+// **看不见、点不着，也滚不到**（面板原本不是滚动容器）。默认的 1200×800 不溢出，
+// 所以只有小窗口会踩到——而那正是用户把窗口缩到最小的时候。
+//
+// 判据是**滚到底之后它整个在屏幕里**，不是一个写死的 y 值：面板挂在搜索框下面，
+// 顶边的确切位置随框架的浮层排布走，写死数值的话改一次布局就红，而红的原因和
+// 「点得着」无关。
+func TestThePanelFitsInASmallWindowAndScrolls(t *testing.T) {
+	// 历史那几条照评审用的长度来：够长到一条就占掉半行，十条折成四行。
+	long := []string{
+		"林俊杰 江南 林俊杰 超大型精选集 全集",
+		"周杰伦 跨时代演唱会精选集 全场慢速",
+		"薛之谦 天外来物 现场版 高清完整版",
+		"邓丽君 绝代佳人  remastered 合集",
+		"陈奕迅 演唱会精选 十年精选 全纪录",
+		"张学友 醒着做梦 演唱会 高清修复",
+		"王菲 红豆 专辑 精选 全碟版",
+		"李宗盛 山丘 live 演唱会实录",
+		"赵雷 成都 民谣现场 完整版 合集",
+		"朴树 那些花儿 现场版 修复 高清",
+	}
+	terms := []string{
+		"周杰伦 晴天", "周杰伦 以父之名", "周杰伦 彩虹", "周杰伦 稻香",
+		"周杰伦 夜曲", "周杰伦 简单爱", "周杰伦 青花瓷", "周杰伦 发如雪",
+		"周杰伦 双截棍", "周杰伦 东风破",
+	}
+	s, tt := overflowPanel(t, long, terms)
+
+	typeInSearch(t, tt, "周")
+	settleSuggestDebounce(s, tt)
+	waitFrames(t, tt, "两档都画出来", func() bool { return tt.HasText(terms[9]) })
+
+	// 前提本身要钉住：这一档在这个尺寸下**真的是撑爆了的**。不钉的话，哪天历史
+	// 那几条变短了，那条断言就变成在验「本来就装得下」——而它本来该防的是溢出。
+	if r, ok := tt.Find(terms[9]); ok && r.Y+r.H <= 560 {
+		t.Fatalf("最后一条联想 %q 在 %v，屏幕 560 高装得下——"+
+			"这一条量不到溢出了（历史那几条变短了？），换一个更长的", terms[9], r)
+	}
+
+	// 滚到底之后它整个在屏幕里。
+	for range 6 {
+		tt.Scroll(450, 300, 0, 600)
+		tt.Frame()
+	}
+	r, ok := tt.Find(terms[9])
+	if !ok {
+		t.Fatalf("滚到底之后画面上没有 %q，文字有 %q", terms[9], tt.Texts())
+	}
+	if r.Y+r.H > 560 || r.Y < 0 {
+		t.Errorf("滚到底之后 %q 在 %v，屏幕高 560——它还是有一部分在屏幕外", terms[9], r)
+	}
+	// 而且点得中：滚到底之后按它，走的是搜索那条路。
+	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+	if got := s.router.Path(); got != searchPath {
+		t.Errorf("点滚到底之后的那一条没有选中（在 %q，文字有 %q）", got, tt.Texts())
+	}
+}
+
+// TestReopeningTheOverlayStartsAtTheTop 钉住「浮层收掉时滚动位置归零」。
+//
+// 不归零的话：用户翻到第十条、按 Esc、再点开同一个框，看到的还是第十条起——而
+// 那一框里的词多半已经换了一个问题。
+func TestReopeningTheOverlayStartsAtTheTop(t *testing.T) {
+	s, tt := overflowPanel(t, overflowLongHistory, overflowTerms)
+
+	typeInSearch(t, tt, "周")
+	settleSuggestDebounce(s, tt)
+	waitFrames(t, tt, "两档都画出来", func() bool { return tt.HasText(overflowTerms[9]) })
+
+	for range 4 {
+		tt.Scroll(450, 300, 0, 600)
+		tt.Frame()
+	}
+	if s.terms.scroll.Y == 0 {
+		t.Fatal("滚了半天位置还是 0——这一条没量到东西（或者面板根本不滚）")
+	}
+
+	tt.Key(0, mygoui.KeyEscape)
+	tt.Frame()
+	if got := s.terms.scroll.Y; got != 0 {
+		t.Errorf("浮层收掉之后滚动位置还停在 %v", got)
+	}
+}
+
 // TestAFailedSuggestLeavesOnlyTheHistory 钉住规格第四条：请求失败时静默。
 //
 // 判据是三样：浮层上**还有**历史那一档、**没有**联想词那一档、**没有**任何一句

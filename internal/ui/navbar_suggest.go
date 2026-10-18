@@ -66,6 +66,20 @@ const (
 	// ⚠️ **只在一档都没少的时候才有**：没有历史可摆时凭空留一道，浮层顶上就是一条
 	// 空边，看着像被切掉了一块。
 	suggestTermsGap = 8
+
+	// suggestScrollKey 是面板里那个滚动容器的键（铁律四）。
+	suggestScrollKey = "suggest-scroll"
+
+	// suggestPanelTop 是面板顶边离窗口顶边多远。它挂在搜索框下面（搜索框在顶栏里，
+	// 顶栏是 `navMinHeight` 那一高），这里多留几像素给那一小段间隙。
+	suggestPanelTop = navMinHeight + 8
+
+	// suggestPanelMargin 是面板底边离屏幕底边留的空白。贴着屏幕底边看起来像被切掉
+	// 了半截。
+	suggestPanelMargin = 12
+
+	// suggestPanelFloor 是面板的最小高度：窗口再矮也不能矮成三四行。
+	suggestPanelFloor = 160
 )
 
 // suggestTerms 是这一档跨帧要活着的状态。**只由界面线程读写**（铁律一）。
@@ -81,6 +95,12 @@ type suggestTerms struct {
 	// pendingSince 是「敲下去、还没问出去」的起点。零值 = 没有待问的那一次，而
 	// `syncSearchWatch` 那个钟认的就是它。
 	pendingSince time.Time
+	// scroll 是面板里那个滚动容器滚到哪儿了。**建一次存着**：它是跨帧的状态，
+	// 每帧新建等于每帧回到顶上（用户往下翻两屏就白翻了）。
+	//
+	// ⚠️ 浮层收掉时清零（见 `syncSuggest`）：下一次点开那个框看到的是**顶上**那几
+	// 条，而那一框里的词多半已经和上一次不是同一个问题了。
+	scroll ui.ScrollState
 }
 
 // syncSuggest 收「这一帧要不要问 B 站要联想词」。**每帧调一次**（`viewSearchBox` 里）。
@@ -103,6 +123,9 @@ func (s *Shell) syncSuggest(now time.Time) {
 	switch {
 	case !s.searchSuggest || q == "":
 		s.terms.seen, s.terms.pendingSince = "", time.Time{}
+		// 面板每帧都在建，滚动位置每帧都重写（`TrackScroll` 的常态），而面板
+		// **不画**的时候那一帧没人写它——所以这里把位置收掉，重新点开时才是顶上。
+		s.terms.scroll = ui.ScrollState{}
 		s.app.SearchSuggest("")
 	case q != s.terms.seen:
 		// 用户又敲了一个字：把钟重打，这一帧不问。

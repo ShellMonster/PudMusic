@@ -95,8 +95,11 @@ func (c *Client) SearchSuggest(ctx context.Context, keyword string) ([]string, e
 		// ⚠️ **term 认不出来就用剥过标签的 name 顶上**，不是跳过这一条：B 站的
 		// 回包偶尔只有 name（而它是能搜的）。跳过去的话用户看到的是「B 站明明给了
 		// 联想，浮层上却只有历史那一档」，而界面上没有任何地方能让他知道少了什么。
+		//
+		// ⚠️ **顶上来的那个也要 TrimSpace**：`name` 是纯空白时剥完还是空白，而空白
+		// 不是词——摆出去是浮层上一行点不动的空气。
 		if term == "" {
-			term = stripHTML(tag.Name)
+			term = strings.TrimSpace(stripHTML(tag.Name))
 		}
 		// 去重：B 站偶尔把同一个词给两遍（`term` 和 `name` 不同的那种），浮层上
 		// 摆两行一样的字，用户会以为点错了。
