@@ -1055,7 +1055,16 @@ var Items = []Item{
 		// 「已经有了一份就不重下」也是——判据是**图床被要了几次**，不是「文件还
 		// 在」：重下一遍内容一样时这两者长得完全一样，而覆盖会删掉用户自己换上
 		// 去的那张。
-		Spec: "下载歌曲时封面单独存一份：文件名就是音频名换个后缀（同名避让和落盘时的后缀重算都要跟上）、盘上已有就不再下一次也不覆盖、拿不到不把这一首算成失败、视频那一路不存",
+		//
+		// 🔴 **两条「不许」是这个引擎里最贵的两条，都要钉**：存封面**不许**挡住队列
+		// （`loop` 一次下一首，而 `Options.Client` 没有 `Timeout`、图床接了连接不
+		// 回包时那个挂住不会自己解开 —— 后面排着的歌一个字节都下不了），也**不许**
+		// 让一个失败的写留下「下一次会被当成已经有了」的东西（那会让这一首从此没有
+		// 封面，而界面上那一行还写着「下载完成」）。所以落盘走「临时文件 → rename」
+		// （和队列文件同一条约定，`store.go` 顶上写着理由），而「已经有一份」那个
+		// 判据必须是「是个非空的**普通文件**」而不是 `exists()`——同名处是一个目录时
+		// `exists()` 一样为真。
+		Spec: "下载歌曲时封面单独存一份：文件名就是音频名换个后缀（同名避让和落盘时的后缀重算都要跟上）、盘上已有就不再下一次也不覆盖、拿不到不把这一首算成失败、视频那一路不存；存封面不许挡住队列或退出（后台走 + 自带超时 + Close 收得掉）、不许让失败的写留下挡掉之后每一次重试的东西（临时文件 → rename，且「已有」只认非空的普通文件）",
 		Tests: []string{
 			"TestTheCoverLandsNextToTheSongAndSharesItsName",
 			"TestTwoSongsWithTheSameNameGetTheirOwnCover",
@@ -1063,6 +1072,14 @@ var Items = []Item{
 			"TestACoverAlreadyOnDiskIsNotFetchedAgain",
 			"TestACoverThatCannotBeFetchedDoesNotFailTheSong",
 			"TestAVideoDoesNotGetACoverThatIsNotItsCover",
+			// 不许挡住队列 / 不许挡住退出。
+			"TestACoverHostThatNeverAnswersDoesNotStallTheQueue",
+			"TestClosingTheAppDoesNotWaitOnAHangingCover",
+			// 不许留下挡掉之后每一次重试的东西。
+			"TestTheCoverIsWrittenThroughATemporaryFile",
+			"TestTheFinalNameOnlyEverAppearsWhole",
+			"TestAFailedCoverSaveLeavesNothingBehindThatWouldBlockEveryRetry",
+			"TestADirectoryInTheCoversPlaceIsNotMistakenForACover",
 		},
 	},
 }

@@ -6,10 +6,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/mux/muxtest"
 )
@@ -78,6 +80,13 @@ func (c *coverServer) fail() {
 	c.status, c.body = http.StatusNotFound, []byte("no such cover")
 }
 
+// heal 让它重新好好给。
+func (c *coverServer) heal() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.status, c.body = http.StatusOK, fakeJPEG
+}
+
 // coverManager 建一个真下载、真落盘的队列，音频从 cdn 下、封面从 cover 下。
 //
 // audioExt 是音频落盘的扩展名（照 B 站给的那个后缀走，见 `extFor`），所以测试
@@ -103,6 +112,27 @@ func coverManager(t *testing.T, cdn *cdn, dir string) *Manager {
 // audioExt 是这一组里音频落盘的扩展名。假 CDN 照着地址上的后缀给（`extFor` 的
 // 顺序是「地址 > 来源说的 > 入队时的临时值」），而 B 站绝大多数是 AAC-in-MP4。
 const audioExt = ".m4a"
+
+// waitCoverFile 等后台那一步把封面落下来。
+//
+// ⚠️ **必须等**：存封面**不在**队列那条串行的路上（`startCoverSave` 立刻返回），
+// 而这一组盯的正是「它存对了没有」。`StatusDone` 只说明**歌**下完了，而封面比它
+// 晚那么一小会儿——测的是封面，就等封面。
+//
+// 用自己的循环而不是本包那个 `waitUntil`，只为让等不到时那句话里有**哪一个文件**。
+func waitCoverFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("等了 10s，%s 还是没有：存封面那一步没走完", path)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
 
 // readFile 读一个文件，缺了就报出来是哪一步缺的。
 func readFile(t *testing.T, path string) []byte {
@@ -142,6 +172,7 @@ func TestTheCoverLandsNextToTheSongAndSharesItsName(t *testing.T) {
 	if got := CoverPathFor(done.Dest); got != wantCover {
 		t.Fatalf("CoverPathFor(%q) = %q，want %q", done.Dest, got, wantCover)
 	}
+	waitCoverFile(t, wantCover)
 	if got := readFile(t, wantCover); string(got) != string(fakeJPEG) {
 		t.Errorf("封面内容是 %d 字节，want 图床给的那 %d 字节逐字相同"+
 			"（存成别的图——多半是错误页——时长度照样「像是」一张）", len(got), len(fakeJPEG))
@@ -183,6 +214,7 @@ func TestTwoSongsWithTheSameNameGetTheirOwnCover(t *testing.T) {
 			"这一条验的就是这一种", s.Dest)
 	}
 	for _, snap := range []Snapshot{f, s} {
+		waitCoverFile(t, CoverPathFor(snap.Dest))
 		if got := readFile(t, CoverPathFor(snap.Dest)); string(got) != string(fakeJPEG) {
 			t.Errorf("%s 旁边的封面内容不对（%d 字节）", snap.Dest, len(got))
 		}
@@ -216,6 +248,9 @@ func TestACoverThatCannotBeFetchedDoesNotFailTheSong(t *testing.T) {
 	if err != nil || st.Size() == 0 {
 		t.Errorf("歌没落盘（%v）：封面失败不许牵连它", err)
 	}
+	// 等它**试过**（`hitCount` 是那条线数的），否则这一条量的是一个还没开始的
+	// 动作 —— 那时盘上当然还没有封面，量不出任何东西。
+	waitUntil(t, func() bool { return cover.hitCount() == 1 })
 	if _, err := os.Stat(CoverPathFor(done.Dest)); err == nil {
 		t.Error("图床说了 404，硬盘上却多出一张封面")
 	}
@@ -286,6 +321,7 @@ func TestTheCoverNameFollowsTheNameThatActuallyLanded(t *testing.T) {
 		t.Fatalf("CoverPathFor 对入队时那个名字和对落盘那个名字给的是同一个 %q——"+
 			"这一条验的就是它俩不一样", got)
 	}
+	waitCoverFile(t, CoverPathFor(done.Dest))
 	if got := readFile(t, CoverPathFor(done.Dest)); string(got) != string(fakeJPEG) {
 		t.Errorf("落盘名旁边没有封面（内容 %d 字节）", len(got))
 	}
@@ -328,4 +364,320 @@ func TestAVideoDoesNotGetACoverThatIsNotItsCover(t *testing.T) {
 		}
 		t.Errorf("MV 下完之后下载目录里有 %v，want 只有那一个 .mp4", names)
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔴 存封面不许挡着队列
+//
+// 这一组是评审的 [major]：原来存封面是 `run` 末尾一句**同步**的调用，而在
+// `runOne` 把状态落成 `StatusDone` **之前**。于是一台「接了连接不回包」的图床就
+// 能把整条队列卡住。
+// ─────────────────────────────────────────────────────────────────────────────
+
+// hangingCoverServer 是一台**接了连接、一个字都不回**的假图床。
+//
+// ⚠️ 收尾要先把 `done` 关掉再 `Close()`：`httptest.Server.Close` 会等所有在飞的
+// 请求返回，而这些 handler 都堵在 `done` 上。顺序反了就是测试自己把自己挂死。
+type hangingCoverServer struct {
+	srv *httptest.Server
+
+	mu   sync.Mutex
+	hits int
+}
+
+func newHangingCoverServer(t *testing.T) *hangingCoverServer {
+	t.Helper()
+	c := &hangingCoverServer{}
+	done := make(chan struct{})
+	c.srv = httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		c.mu.Lock()
+		c.hits++
+		c.mu.Unlock()
+		<-done
+	}))
+	t.Cleanup(func() {
+		close(done)
+		c.srv.Close()
+	})
+	return c
+}
+
+func (c *hangingCoverServer) url() string { return c.srv.URL + "/cover.jpg" }
+
+func (c *hangingCoverServer) hitCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.hits
+}
+
+// TestACoverHostThatNeverAnswersDoesNotStallTheQueue 钉住评审的 [major]。
+//
+// 判据是**第二首真的下完了**，而它只可能在第一首的封面还在挂着的时候成立。
+//
+// ⚠️ 挂着的那个挂法是「接了连接不回包」：`Options.Client` 没有设 `Timeout`
+// （`app.CredentialTransport.Client(nil)`），而 `DefaultTransport` 的
+// `ResponseHeaderTimeout` 是 0——所以**只有用户自己按暂停 / 退出才解得开**。
+// 换成「连不上」或「回 404」都不算数：那两种会立刻返回，卡不住任何东西。
+//
+// 这一条在同步那一版上会红成什么：5 秒后第一首的 1024 字节已经完完整整在盘上，
+// 而 `Status` 还是 `running`（界面上画出来是「下载中」+ 100% 的条）；再排第二首
+// 进去，20 秒后它仍是 `queued`、一个字节没下——因为 `loop` 是 `m.runOne(id)` 同步
+// 跑完一首才下一首。
+func TestACoverHostThatNeverAnswersDoesNotStallTheQueue(t *testing.T) {
+	hanging := newHangingCoverServer(t)
+	cdn := newCDN(t, 1024)
+	dir := t.TempDir()
+	m := coverManager(t, cdn, dir)
+
+	first, err := m.Enqueue(AddRequest{
+		Bvid: bvid, Cid: "c1", Title: "第一首", Cover: hanging.url(), Dir: dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 图床此刻正挂着，而这一首**照样**变成「下完」——歌在盘上了，封面是装饰。
+	first0 := waitStatus(t, m, first.ID, StatusDone)
+	if _, err := os.Stat(first0.Dest); err != nil {
+		t.Fatalf("歌没落盘：%v", err)
+	}
+
+	// 🔴 **下面这一条才是判据本体**：队列是串行的（`loop` 一次下一首），
+	// 而第一首的封面还挂着。第一首下不完，第二首就一个字节都下不了。
+	second, err := m.Enqueue(AddRequest{
+		Bvid: bvid, Cid: "c2", Title: "第二首", Dir: dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2 := waitStatus(t, m, second.ID, StatusDone)
+	if _, err := os.Stat(s2.Dest); err != nil {
+		t.Errorf("第二首没落盘：%v", err)
+	}
+	if hanging.hitCount() == 0 {
+		t.Error("图床一次都没被要——那这一条量的是「压根没存封面」，不是「存了、但没挡住队列」")
+	}
+}
+
+// TestClosingTheAppDoesNotWaitOnAHangingCover 断**退得出**。
+//
+// 上一条是「下载不被挡住」，这一条是「退出不被挡住」——那是同一件事的另外半边：
+// 存封面的线跟着 `m.ctx` 走，而 `Close` 先 `m.quit()`（取消它）**之后**才
+// `m.coverWG.Wait()`。所以退出不会去等一个不会回来的图床。
+//
+// ⚠️ 判据是 **`Close` 自己回来了**，而不是「那条线退了」：后者要数 goroutine，
+// 而本包的 fixture 每台 `httptest` 服务器自己就留着连接 goroutine（`internal/app`
+// 的 `online_test.go:1114` 记着同一个坑）。
+func TestClosingTheAppDoesNotWaitOnAHangingCover(t *testing.T) {
+	hanging := newHangingCoverServer(t)
+	cdn := newCDN(t, 1024)
+	dir := t.TempDir()
+	m := coverManager(t, cdn, dir)
+
+	snap, err := m.Enqueue(AddRequest{
+		Bvid: bvid, Cid: cid, Title: "挂着的那首", Cover: hanging.url(), Dir: dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, m, snap.ID, StatusDone)
+	// 图床已经被要了、那条线正挂着。
+	waitUntil(t, func() bool { return hanging.hitCount() == 1 })
+
+	done := make(chan error, 1)
+	go func() { done <- m.Close("") }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Close 报错：%v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("关掉应用没有退出来——它在等一个不会回话的图床")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 落盘要原子
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheCoverIsWrittenThroughATemporaryFile 钉住「临时文件 → rename」。
+//
+// 🔴 直接写最终名的坏处是：`exists()` 只看「有没有」，所以**写到一半断电 / 磁盘满**
+// 会在盘上留一份半张图，而之后**每一次重试都被它挡掉**——那一首从此没有封面，
+// 界面上那一行还写着「下载完成」，而用户自己看不出来。
+//
+// 判据是「存完之后的目录里只有该有的那两个文件」：一个直接写最终名的实现在这里
+// 照样绿（它不留临时文件），所以**还要看下一条**。
+func TestTheCoverIsWrittenThroughATemporaryFile(t *testing.T) {
+	cdn, cover := newCDN(t, 1024), newCoverServer(t)
+	dir := t.TempDir()
+	m := coverManager(t, cdn, dir)
+
+	snap, err := m.Enqueue(AddRequest{
+		Bvid: bvid, Cid: cid, Title: "走临时的歌", Cover: cover.url(), Dir: dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, m, snap.ID, StatusDone)
+	waitCoverFile(t, filepath.Join(dir, "走临时的歌.jpg"))
+
+	// 存完之后目录里只有音频和封面：临时文件已经被 rename 掉了。
+	if got := namesIn(t, dir); !slices.Equal(got, []string{"走临时的歌.jpg", "走临时的歌" + audioExt}) {
+		t.Errorf("存完之后目录里有 %v，want 只有音频和封面两个"+
+			"（多出来的那个是 rename 没走干净的临时文件）", got)
+	}
+}
+
+// TestTheFinalNameOnlyEverAppearsWhole 断「最终那个名字**只可能整个出现**」。
+//
+// ⚠️ 上面那条（存完之后目录里只有两个文件）**抓不住**这一半：一个直接
+// `os.WriteFile(path, …)` 的实现同样不留临时文件，同样绿。可坏就坏在它写的
+// 那一瞬间——写到一半崩溃 / 磁盘满，盘上就是一份半张图，而 `hasCover` 说「有了」，
+// 之后每一次重试都被挡掉。
+//
+// 所以这一条**在看它写的过程中**：临时文件是看得见的（它就在同一个目录里），
+// 而最终那个名字在 rename 之前**根本不该存在**。
+//
+// ⚠️ 「看得见」要一份**够慢**的正文：64 MB 写一次要几十到几百毫秒，而一个
+// 几十 KB 的封面写得比一次轮询还快，那就量不出任何东西了。正文多大只影响这条的
+// 观察窗口，不影响被测代码——它拿到的是一个 `[]byte`。
+func TestTheFinalNameOnlyEverAppearsWhole(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "大正文"+coverExt)
+	data := make([]byte, 64<<20)
+
+	go func() { _ = writeCoverAtomically(path, data) }()
+
+	sawTmp := false
+	for range 20000 { // 最多看两秒（每次 100µs）
+		names := namesIn(t, dir)
+		for _, n := range names {
+			if strings.HasPrefix(n, coverTmpPrefix) {
+				sawTmp = true
+			}
+		}
+		if _, err := os.Stat(path); err == nil && !sawTmp {
+			// 最终名字在**还没见到临时文件**时就出现了：那就是直接写过去的。
+			// 再等一拍，确认它不是在同一瞬间被 rename 出来的。
+			if !sawTmp && coversWhole(path, len(data)) {
+				t.Errorf("最终那个名字 %s 在写完之前就出现了：这是直接写过去的"+
+					"（写到一半断电就留下一份半张图）", path)
+				return
+			}
+		}
+		if sawTmp {
+			break
+		}
+		time.Sleep(100 * time.Microsecond)
+	}
+	if !sawTmp {
+		t.Fatalf("两秒里一次都没看到 %s 开头的临时文件——量不出来"+
+			"（正文 %d 字节可能写得太快），这一条在当前机器上无效", coverTmpPrefix, len(data))
+	}
+	// 看到过临时文件之后，它必须被 rename 走：一个半张图被留在盘上比没有更糟。
+	waitUntil(t, func() bool { _, err := os.Stat(path); return err == nil })
+	if got := namesIn(t, dir); !slices.Equal(got, []string{"大正文" + coverExt}) {
+		t.Errorf("落定之后目录里有 %v，want 只有最终那个封面"+
+			"（临时文件没被 rename 走 = 一份半张图留在用户的下载目录里）", got)
+	}
+}
+
+// coversWhole 报 path 上那个文件是不是已经有 want 个字节了（还可能在写）。
+func coversWhole(path string, want int) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.Size() == int64(want)
+}
+
+// TestAFailedCoverSaveLeavesNothingBehindThatWouldBlockEveryRetry 断「失败不许
+// 留下一个会把之后每一次重试都挡掉的东西」。
+//
+// ⚠️ 判据不是「盘上有没有封面」——那个在失败时本来就该没有。判据是**重来一遍能存
+// 得上**：一个「写了一半的最终名」的实现在这里绿（它的第一次确实失败了），而它留下
+// 的那份会让第二次也失败——而**那才是伤到用户的那一半**。
+func TestAFailedCoverSaveLeavesNothingBehindThatWouldBlockEveryRetry(t *testing.T) {
+	cdn, cover := newCDN(t, 1024), newCoverServer(t)
+	dir := t.TempDir()
+	m := coverManager(t, cdn, dir)
+
+	snap, err := m.Enqueue(AddRequest{
+		Bvid: bvid, Cid: cid, Title: "先失败的歌", Cover: cover.url(), Dir: dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, m, snap.ID, StatusDone)
+
+	// 第一次：图床 404。
+	cover.fail()
+	waitUntil(t, func() bool { return cover.hitCount() == 1 })
+
+	// 第二次（换一首，触发一次新的存）：图床好了，这一次必须存得上。
+	cover.heal()
+	again, err := m.Enqueue(AddRequest{
+		Bvid: bvid, Cid: "c2", Title: "先失败的歌", Cover: cover.url(), Dir: dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, m, again.ID, StatusDone)
+	waitCoverFile(t, CoverPathFor(again.Dest))
+
+	if got := readFile(t, CoverPathFor(again.Dest)); string(got) != string(fakeJPEG) {
+		t.Errorf("重来一遍存上的封面不对（%d 字节）——上一次失败留下了什么，"+
+			"把这一次挡掉了", len(got))
+	}
+}
+
+// TestADirectoryInTheCoversPlaceIsNotMistakenForACover 断「同名处是一个**目录**
+// 时，不许把它当成现成的封面」。
+//
+// ⚠️ `os.Stat` 对目录一样返回成功，而直接 `os.WriteFile` 到那个名字会
+// `is a directory` 失败。两个后果都坏：
+//
+//	当「已经有了」  用户自己建了个同名文件夹（`歌名.jpg/`），于是这一首**永远**
+//	                没有封面，而 `startCoverSave` 连图床都不问
+//	当「没有」      `hasCover` 判它不是普通文件，于是真去存 —— 而 rename 到一个
+//	                目录上会失败。那就报错，**不覆盖那个目录**
+func TestADirectoryInTheCoversPlaceIsNotMistakenForACover(t *testing.T) {
+	cdn, cover := newCDN(t, 1024), newCoverServer(t)
+	dir := t.TempDir()
+	// 用户自己在那个名字上放了个目录。
+	if err := os.Mkdir(filepath.Join(dir, "有目录的歌"+coverExt), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := coverManager(t, cdn, dir)
+
+	snap, err := m.Enqueue(AddRequest{
+		Bvid: bvid, Cid: cid, Title: "有目录的歌", Cover: cover.url(), Dir: dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, m, snap.ID, StatusDone)
+	// 判据是**图床被问过**：一个「目录 = 已经有封面」的实现一次都不会问，
+	// 而那正是这一条要挡的那一种。
+	waitUntil(t, func() bool { return cover.hitCount() == 1 })
+
+	// 而那个目录还在：rename 到目录上失败时，我们报错，不去动它。
+	st, err := os.Stat(filepath.Join(dir, "有目录的歌"+coverExt))
+	if err != nil || !st.IsDir() {
+		t.Errorf("用户自己建的那个目录被动了（%v）——它不是我们的东西", err)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+// namesIn 列出一个目录里的文件名（不含临时目录本身）。
+func namesIn(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, e := range entries {
+		out = append(out, e.Name())
+	}
+	slices.Sort(out)
+	return out
 }

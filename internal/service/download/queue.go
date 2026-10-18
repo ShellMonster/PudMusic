@@ -85,6 +85,21 @@ type Manager struct {
 	wakeup chan struct{}
 	wg     sync.WaitGroup
 
+	// coverWG 数着「后台存封面」那些线（`startCoverSave`）。
+	//
+	// 🔴 **它和 `wg` 是两把锁，不是一把**：存封面**不在**队列那条串行的路上
+	// （那正是它要摆脱的东西——见 cover.go 的文件头），所以 `loop` 不等它们，
+	// 队列才不会被一张图卡住。
+	//
+	// 而 `Close` 要等它们：`m.quit()` 会取消 `m.ctx`，请求立刻断，所以这一步
+	// 不会把退出拖慢，而它保证的是「Close 返回之后没有一条线还在往用户的下载
+	// 目录里写东西」。
+	//
+	// ⚠️ `Add` 和这里的 `Wait` 不会撞上（`WaitGroup` 复用踩过这个坑）：只有
+	// `loop` 会 `Add`，而 `Close` 是**先等 `loop` 退出**（`m.wg.Wait()`）
+	// **之后**才等这一组。
+	coverWG sync.WaitGroup
+
 	closed bool
 }
 
@@ -403,6 +418,11 @@ func (m *Manager) Close(path string) error {
 	m.quit()
 	m.wg.Wait()
 
+	// 🔴 存封面那些线也要收（`m.quit()` 已经把它们的请求掐断了，所以这一步不会
+	// 拖慢退出）。顺序**不能换**：`Add` 只来自 `loop`，而 `m.wg.Wait()` 保证
+	// `loop` 已经退出，所以到这里已经不会再有新的 `Add`（见 `Manager.coverWG`）。
+	m.coverWG.Wait()
+
 	// 🔴 后台那条线退出时**可能没走完队列**：`loop` 的外层 select 命中
 	// `ctx.Done()` 就直接 return，还没轮到内层那个 `for`。那些项于是留在「排队中」。
 	//
@@ -550,22 +570,6 @@ func (m *Manager) runOne(id string) {
 	case err = <-runDone:
 	case <-ctx.Done():
 		err = context.Canceled
-		// ⚠️ **两个 case 都 ready 时 Go 是随机挑的**，而这一支挑错的后果是
-		// 「一首已经下完的歌被记成暂停」：用户按「继续」会走一遍 `prepare`，
-		// 而半成品已经被改名成最终文件了 → `os.Stat` 不到 → 清空分块记账
-		// → **几百兆从零重下**。
-		//
-		// 落盘之后到这一行之间原本只有几微秒（一个 `os.Rename`），所以这个洞
-		// 几乎撞不上；存封面（`saveCover`）在那之后还要走一次网络往返，把窗口
-		// 拉到了几百毫秒——而用户完全可能正好在这几百毫秒里按下暂停。
-		// 所以收了之后再看一眼后台那条线：它回来了就用它那个结果。
-		//
-		// 非阻塞是必须的：那个「取流方不理 ctx」的 goroutine 可能永远不会回来
-		// （见上面那段注释），这里等它就等于把「退不出去」那个 bug 请回来。
-		select {
-		case err = <-runDone:
-		default:
-		}
 	}
 	cancel()
 
