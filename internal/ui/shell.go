@@ -806,6 +806,9 @@ func (s *Shell) viewMain(c *ui.Context) {
 	s.syncSearchWatch()
 	// 更新器留给界面的那一句提示（后台查到了新版本之类），取走就没了。
 	s.reportUpdateNotice()
+	// 「刷新数据」那一趟回来的话（成了几个 / 为什么没成 / 已经在刷了）。
+	// 同样每帧取一次，取走就没了——理由见 reportFavoritesRefresh。
+	s.reportFavoritesRefresh()
 	// 启动时自动导入的结果，第一帧弹一条 toast 说一声。
 	//
 	// 为什么非弹不可：任务要求「凭据可以不迁，**要提示重新登录**」。那句提示只在

@@ -164,6 +164,11 @@ var avatarImageColor = color.RGBA{R: 255, G: 0, B: 255, A: 255}
 // 而挂了探索之后动态流/首页那些也可能是往 nav 上问的（WBI 密钥就取自那儿），
 // 那样这条断言量的就是「这一轮有没有别的功能在跑」，不是「头像有没有乱问」。
 //
+// ⚠️ **不是 `navbar_test.go` 里那个 `loggedInWith`**：那一个给的是
+// `bili.NewClient(bili.Options{})`——**一个压根不通到任何地方的客户端**，
+// 适合只验「菜单项接到了哪」的那一组。这一组要的是**指着这台假 B 站的**
+// 客户端（头像地址就是从那儿拿的），所以两个都得有。
+//
 // mid 空串 = 没登录。
 func newAvatarShell(t *testing.T, f *avatarFixture, mid string) (*Shell, *mygoui.Tester) {
 	t.Helper()
