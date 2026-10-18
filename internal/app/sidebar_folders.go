@@ -1,5 +1,9 @@
 // 侧栏收藏夹右键菜单里的那四件事：播放、添加到播放列表、删除、取消收藏。
 //
+// 歌单内容页 ⋯ 菜单里的「删除收藏夹」和「从侧栏移除」也在这儿（见
+// `DeleteCollectionFolder` / `ForgetCollectionFolder`）——它们动的是同一份
+// 用户真实的数据，所以和侧栏那一处共用同一个实现。
+//
 // # 为什么放在这一层，而不是界面层
 //
 // 「播放整个收藏夹」和「把整个收藏夹加进队列」都要**先把里面的内容拉回来**
@@ -164,22 +168,86 @@ func playableItems(medias []bili.Media) []Item {
 // ⚠️ **只对「我创建的」那一组有意义**：删除别人的收藏夹是 B 站不允许的，
 // 而菜单上「删除」这一项本来就只出现在我创建的那一组（见 `favMenuItems`）。
 func (a *App) DeleteFavoriteFolder(f Favorite, done func(string)) {
+	a.deleteCreatedFolder(f.ID, f.Title, func(msg string, _ bool) { done(msg) })
+}
+
+// DeleteCollectionFolder 从歌单内容页删掉这个容器（连同里面的内容）。
+// **立刻返回**。
+//
+// 🔴 **和 `DeleteFavoriteFolder` 是同一件写操作，只差入口**——发出去的都是
+// `folder/del`，成功后都从侧栏拿掉那一行。所以底下是同一个函数
+// （`deleteCreatedFolder`）：两个入口各写一遍的话，「侧栏删得掉、页面上删不掉」
+// 或者反过来，是最容易查也最难查的那一类。
+//
+// 🔴 **回调带「成没成」，而侧栏那一侧不用**：歌单页删完之后当前就停在**这个已经
+// 没有了的容器**上，界面得自己走开——而 B 站拒绝的时候它还在，于是**必须留在
+// 原地**（跳走的话用户看到的是一个空页面加一句「删不掉」，而收藏夹好好地在那儿）。
+// 不带成败的话回调分不出这两种，「失败也跳走」是唯一可能的行为。
+func (a *App) DeleteCollectionFolder(ref CollectionRef, title string, done func(text string, ok bool)) {
+	a.deleteCreatedFolder(ref.ID, title, done)
+}
+
+// deleteCreatedFolder 是上面两个背后那一个。
+func (a *App) deleteCreatedFolder(id int64, title string, done func(text string, ok bool)) {
 	c := a.collectionsSnapshot()
 	if c == nil {
-		sayFolder(done, "删不掉这个收藏夹：歌单接口还没挂上")
+		sayFolderDone(done, "删不掉这个收藏夹：歌单接口还没挂上", false)
 		return
 	}
 	go func() {
-		if err := c.refs.Client.DeleteFolder(context.Background(), f.ID); err != nil {
-			log.Printf("biu: 删收藏夹 %d 失败：%v", f.ID, err)
-			sayFolder(done, "删不掉这个收藏夹："+bili.Friendly(err))
+		if err := c.refs.Client.DeleteFolder(context.Background(), id); err != nil {
+			log.Printf("biu: 删收藏夹 %d 失败：%v", id, err)
+			sayFolderDone(done, "删不掉这个收藏夹："+bili.Friendly(err), false)
 			a.wakeUI()
 			return
 		}
-		a.forgetFavorite(FavoritesCreated, f.ID)
-		sayFolder(done, "已删掉「"+f.Title+"」")
+		a.forgetFavorite(FavoritesCreated, id)
+		sayFolderDone(done, "已删掉「"+title+"」", true)
 		a.wakeUI()
 	}()
+}
+
+// ForgetCollectionFolder **只**把这一行从本地记录里拿掉，B 站上那个收藏夹原样
+// 留着。**立刻返回**。
+//
+// # 为什么它和 `DeleteCollectionFolder` 是两件事
+//
+// 删 B 站上那个是**不可逆**的（里面的歌一起没了），而这一条一个字节都不往
+// B 站发——用户在 B 站网页上还看得到它、点进去还是那些歌。所以界面那边给
+// 它们的措辞和确认框必须不一样（规格里点名了这一点），否则用户按错一次就
+// 没法挽回。
+//
+// ⚠️ **没有网络往返，所以不在后台 goroutine 里**：`forgetFavorite` 改的是内存
+// 里的那一行加一次 `UpdateSettings`，而落盘本来就在后台合并写（见
+// `UpdateSettings` 的注释）——塞进 goroutine 只会让「侧栏那一行还没消失」
+// 这件事变成看运气。
+func (a *App) ForgetCollectionFolder(ref CollectionRef, title string, done func(string)) {
+	if a.collectionsSnapshot() == nil {
+		sayFolder(done, "移不了这个收藏夹：歌单接口还没挂上")
+		return
+	}
+	a.forgetFavoriteGroup(ref.ID)
+	sayFolder(done, "已从侧栏移除「"+title+"」，B 站上的那个还在")
+}
+
+// forgetFavoriteGroup 把这一行从**它所在的那一组**里拿掉。
+//
+// 🔴 **不能写死 FavoritesCreated**：⋯ 菜单里「从侧栏移除」对**每一页**都摆得出来
+// （别人建的收藏夹删不掉 B 站上那个，而这一项恰恰是唯一能整掉它的办法），而一个
+// **别人建的**收藏夹在侧栏上是「我收藏的」那一组里的。写死「我创建的」的话，那
+// 一行原封不动留在侧栏上，而提示却说「已从侧栏移除」——**那是一句谎话**，而谎话
+// 是这一层最不该留的东西。
+//
+// **两组都清**，而不是「找到在哪一组就清那一组」：同一个 id 完全可能同时在两
+// 组里（`favRowKey` 的注释写过），而用户按下这一项的理由是「我不想在侧栏看到
+// 它」——只清一组的话它还在另一组里冒出来。`forgetFavorite` 内部的
+// `Favorites.Remove` 对不在这一组的 id 是 no-op，所以多清一组没有副作用。
+func (a *App) forgetFavoriteGroup(id int64) {
+	for g := FavoriteGroup(0); g < favoriteGroupCount; g++ {
+		if g.Valid() {
+			a.forgetFavorite(g, id)
+		}
+	}
 }
 
 // UnfavoriteFolder 取消收藏这个收藏夹（**别人的**）。**立刻返回**。
@@ -211,6 +279,9 @@ func (a *App) UnfavoriteFolder(f Favorite, done func(string)) {
 // ⚠️ **两样都要**：只从内存里拿掉的话，`SideMenuCollectionOrder` 里还留着
 // 那个 id，下次拉全量（`Replace` → `applySavedOrder`）它又会冒回原位——
 // 用户刚删掉的东西自己长回来了。
+//
+// 它有两个调用方：B 站上真的删掉了（`deleteCreatedFolder`），以及用户只要求
+// 「本地不看了」（`ForgetCollectionFolder`）。后者不发任何请求。
 func (a *App) forgetFavorite(g FavoriteGroup, id int64) {
 	a.FavoritesOf().Remove(g, id)
 	if _, err := a.UpdateSettings(func(s *Settings) {
@@ -239,5 +310,15 @@ func folderRef(f Favorite) CollectionRef {
 func sayFolder(done func(string), msg string) {
 	if done != nil {
 		done(msg)
+	}
+}
+
+// sayFolderDone 是「带成败」那一份回调的出口。
+//
+// ⚠️ **成没成是回调的一个参数，不靠那句话的字**：失败时界面要**留在原地**
+// （收藏夹还在 B 站上），而成功时它得走开——只给一句话的话，界面只能一律走开。
+func sayFolderDone(done func(text string, ok bool), msg string, ok bool) {
+	if done != nil {
+		done(msg, ok)
 	}
 }

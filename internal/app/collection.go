@@ -110,10 +110,38 @@ type CollectionInfo struct {
 	Cover      string
 	MediaCount int
 	OwnerName  string
-	Private    bool
-	Faved      bool
+	// OwnerMid 是创建者的 mid。界面靠它认出「这个容器是不是我自己建的」
+	// ——见 `App.CanDeleteCollection`。
+	OwnerMid int64
+	Private  bool
+	// Default 是「B 站发下来的那个默认收藏夹」。它删不掉（B 站那边没有这个
+	// 动作），所以界面在画「删除」之前要先问这一位。
+	Default bool
+	Faved   bool
 
 	Loaded bool
+}
+
+// CanDeleteCollection 报这个容器**能不能删**（删的是 B 站上那个，连同里面的歌）。
+//
+// 三个条件缺一不可，理由逐条：
+//
+//   - **自己创建的**。B 站不给删别人收藏夹的接口——而照单全收把那个选项摆出来
+//     的后果是「按下去得到一句『权限不足』」，用户还以为是自己账号出问题了。
+//     这一条照上游 `operation/menu.tsx` 的 `show: isCreatedBySelf`。
+//   - **不是默认收藏夹**。B 站每个账号都有那一个，它删不掉（同上，`!isDefaultFav`）。
+//   - **有创建者**。OwnerMid 为 0 是「这一次没给」，而 `0 == SelfMid()` 在
+//     **没登录**时也成立——于是没登录的路径会判出「可以删」，而实际一点就报错。
+//     `SelfMid() > 0` 那道就是拦这个的。
+//
+// ⚠️ **合集 / 系列不在这里挡**：它们要是 UP 主建的（B 站那边的合集就是），
+// 这一条本来就判 false；而「UP 主恰好是我自己」时它会判 true，然后 B 站会
+// 回一句它的错，界面原样说给用户。项目里别处也是这个取舍（见
+// `bili.DeleteFolder` 的注释）：类型这一层判断不了「B 站给不给这个动作」。
+func (a *App) CanDeleteCollection(ref CollectionRef) bool {
+	info := a.Collection(ref)
+	self := a.SelfMid()
+	return self > 0 && info.OwnerMid == self && !info.Default
 }
 
 // collectionCache 是容器元信息的一份缓存，按容器分格。
@@ -168,12 +196,35 @@ func (n *collectionNotice) take(key string) (CollectionNotice, bool) {
 // ⚠️ **同一条内容说第二遍时 ID 一定要变**：界面是「取到新的一条才发 Toast」
 // 的，拿 ID 判重、而 ID 不变的话，第二遍就不会说了——「已收藏」只出现一次，
 // 用户会以为第二次点击没生效。
-func (n *collectionNotice) add(ref CollectionRef, text string) {
+func (n *collectionNotice) add(ref CollectionRef, text string, kind CollectionNoticeKind) {
 	n.mu.Lock()
 	n.nextID++
-	n.unread = append(n.unread, CollectionNotice{ID: n.nextID, Ref: ref, Text: text})
+	n.unread = append(n.unread, CollectionNotice{ID: n.nextID, Ref: ref, Text: text, Kind: kind})
 	n.mu.Unlock()
 }
+
+// CollectionNoticeKind 是后台递回来那句话属于哪一类。
+type CollectionNoticeKind uint8
+
+const (
+	// NoticePlain 就是一句话。界面发个 Toast 就完事。
+	//
+	// 🔴 它是**零值**：后台那些「说一句话就结束了」的动作（收藏成功、失败）
+	// 什么都不用改，而漏写 `kind` 会是编译错误而不是一个悄悄错的行为。
+	NoticePlain CollectionNoticeKind = iota
+	// NoticeCollectionChanged 是「这个容器里的东西变了」：界面除了发 Toast，
+	// 还得把列表从第一页重来一遍。
+	//
+	// # 为什么不能由界面自己决定什么时候刷新
+	//
+	// 写操作跑在后台，而列表是界面线程的控件（铁律一）。界面能在后台那一趟
+	// **开始**时刷新，那一趟拉回的还是**改之前**的数据——而症状不是「慢」，
+	// 是「点完删除，刷新之后那几首还在」：刷新确实发生了，只是发生得太早。
+	//
+	// 所以刷新得由**做完的那一趟**发信号，界面在收到信号的那一帧 reload。
+	// 这也是这一类存在的全部理由，别把它当成「顺便也刷新一下」的糖。
+	NoticeCollectionChanged
+)
 
 // CollectionNotice 是后台操作完了之后要跟用户说的一句话。
 type CollectionNotice struct {
@@ -181,6 +232,8 @@ type CollectionNotice struct {
 	ID   uint64
 	Ref  CollectionRef
 	Text string
+	// Kind 是这句话属于哪一类。界面按它决定除了 Toast 还要不要做点什么。
+	Kind CollectionNoticeKind
 }
 
 // errCollectionsMissing 是「歌单这一摊没挂上」。
@@ -293,7 +346,7 @@ func (a *App) LoadCollection(ref CollectionRef) {
 		info, err := a.fetchCollection(ref)
 		if err != nil {
 			log.Printf("biu: 拉收藏夹 %s 的信息失败：%v", ref.Key(), err)
-			c.notice.add(ref, "打不开这个收藏夹："+bili.Friendly(err))
+			c.notice.add(ref, "打不开这个收藏夹："+bili.Friendly(err), NoticePlain)
 			a.wakeUI()
 			return
 		}
@@ -319,7 +372,9 @@ func (a *App) fetchCollection(ref CollectionRef) (CollectionInfo, error) {
 		Cover:      raw.Cover,
 		MediaCount: raw.MediaCount,
 		OwnerName:  raw.Owner.Name,
+		OwnerMid:   raw.Owner.Mid,
 		Private:    raw.Private,
+		Default:    raw.Default,
 		Faved:      raw.Faved,
 		Loaded:     true,
 	}, nil
@@ -350,7 +405,7 @@ func (a *App) SetFavorite(ref CollectionRef, fav bool) {
 		}
 		if err != nil {
 			log.Printf("biu: 收藏夹 %s 收藏状态改成 %v 失败：%v", ref.Key(), fav, err)
-			c.notice.add(ref, favoriteFailText(fav, err))
+			c.notice.add(ref, favoriteFailText(fav, err), NoticePlain)
 			a.wakeUI()
 			return
 		}
@@ -364,15 +419,15 @@ func (a *App) SetFavorite(ref CollectionRef, fav bool) {
 		info, err := a.fetchCollection(ref)
 		if err != nil {
 			log.Printf("biu: 收藏之后刷新收藏夹 %s 的信息失败：%v", ref.Key(), err)
-			c.notice.add(ref, favoriteFailText(fav, err))
+			c.notice.add(ref, favoriteFailText(fav, err), NoticePlain)
 			a.wakeUI()
 			return
 		}
 		c.cache.put(info)
 		if fav {
-			c.notice.add(ref, "已收藏这个收藏夹")
+			c.notice.add(ref, "已收藏这个收藏夹", NoticePlain)
 		} else {
-			c.notice.add(ref, "已取消收藏")
+			c.notice.add(ref, "已取消收藏", NoticePlain)
 		}
 		a.wakeUI()
 	}()
@@ -405,6 +460,40 @@ func (a *App) RemoveMedias(ctx context.Context, ref CollectionRef, medias []bili
 	// 列表由界面收到通知之后重新拉，这里只负责把元信息拉回来。
 	go a.LoadCollection(ref)
 	return nil
+}
+
+// ClearInvalidMedias 让 B 站把这个容器里**失效**的条目全清掉。**立刻返回**，
+// 网络往返在后台。
+//
+// ⚠️ **成功之后只能说「已清除」，说不出「清掉了几个」**：B 站这一个接口的
+// `data` 固定是 0（照上游 `FavResourceCleanResponse`），不回数量。所以那句
+// 话没撒谎也没有多说——真的判据是**清完之后列表里那些灰掉的条目不见了**
+// （失效的条目本来照样画在列表上，见 `bili.Media.Attr` 的注释），那是用户
+// 唯一看得到的证据。
+//
+// 完了之后重新拉一次元信息：头图区写着「N 条视频」，而那正是变了的那一个数
+// （理由同 `RemoveMedias`）。**列表由界面收到通知之后自己重来**，这一层不碰。
+func (a *App) ClearInvalidMedias(ref CollectionRef) {
+	c := a.collectionsSnapshot()
+	if c == nil {
+		a.sayCollectionsMissing()
+		return
+	}
+	go func() {
+		if err := c.refs.Client.CleanInvalidResources(context.Background(), ref.ID); err != nil {
+			log.Printf("biu: 清收藏夹 %s 的失效内容失败：%v", ref.Key(), err)
+			c.notice.add(ref, "清不掉失效内容："+bili.Friendly(err), NoticePlain)
+			a.wakeUI()
+			return
+		}
+		// 成功也要说：用户按下去之后什么都没发生是最难解释的一种。
+		//
+		// ⚠️ Kind 是 `NoticeCollectionChanged`：界面拿到这一条时除了发 Toast
+		// 还要把列表从第一页重来。刷新的时机由这一趟说了算（理由见那个常量）。
+		c.notice.add(ref, "失效内容已清除", NoticeCollectionChanged)
+		go a.LoadCollection(ref)
+		a.wakeUI()
+	}()
 }
 
 // DownloadMedias 把这些条目排进下载队列。**同步**（调用方在后台 goroutine 里）。
@@ -508,7 +597,7 @@ func (a *App) LoadCollectionPage(ctx context.Context, ref CollectionRef, sort bi
 // 所以这句话只在用户真的点了什么的时候才说。
 func (a *App) sayCollectionsMissing() {
 	if c := a.collectionsSnapshot(); c != nil {
-		c.notice.add(CollectionRef{}, "歌单接口还没挂上")
+		c.notice.add(CollectionRef{}, "歌单接口还没挂上", NoticePlain)
 	}
 	a.wakeUI()
 }
