@@ -688,6 +688,11 @@ const scrollFar = 100000
 //
 // ⚠️ 这里**不是在放宽判据**：cond 就是「尽头已经露出来」本身，成立不了就一直
 // 滚到保险丝（10 秒），报的仍然是同一句话。
+//
+// ⚠️ **cond 只对「有尽头」的列表成立**：B 站那种翻页永远翻不完的列表
+// （fixture 给 `has_more` 恒为 true）根本没有末尾——哨兵每次被滚进画面就再拉一页，
+// 而 `scrollToEnd` 会一直滚下去（实测一次滚到了第 2087 页还在拉），那个条件永远
+// 不成立。这一类要等的是「哨兵被叫起来过一次」，写一步滚动 + 一个等条件就行。
 func scrollToEnd(t *testing.T, tt *mygoui.Tester, x, y float32, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(waitBudget)
