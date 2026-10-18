@@ -97,6 +97,22 @@ func (s *Shell) viewNav(c *ui.Context) {
 			Tooltip(drawerTip(s.drawerOpen)).Clicked() {
 			s.drawerOpen = !s.drawerOpen
 		}
+		// 迷你播放器的开关。Biu 那边在窗口按钮那一排里（`components/window-action/
+		// index.tsx:46` 的 PictureInPicture 图标），而我们那条顶栏是自己画的，
+		// 所以摆在右边这一列末尾——和「窗口变小了」这件事一样是窗口级动作。
+		//
+		// ⚠️ **顶栏是拖动区**（`nav.DragWindow()`），而这一句在它的 Children
+		// 里，所以按它就是按它、不会变成拖窗口（见本文件文件头那一段）。
+		//
+		// ⚠️ **它还留着文字键，没跟着图标化**。图标化那一票的边界是「换图标、不重排
+		// 界面」，而这一格是**新加的键**；而 `icons.go` 那份图标集是按票挑的（每个
+		// 常量都要有一份 SVG，`icons_test.go` 逐个过 embed），里面没有画中画 / 小窗
+		// 这一类。往那份清单里塞一个资源是另一样活（谁维护谁说了算），所以这里先
+		// 用文字键——和左边那几个图标键并排，样子不齐但每个都点得着、都说得出是啥。
+		if ui.Button(c, "迷你").Tooltip("缩成 320×100 的小窗贴边悬浮，音乐不停").
+			Clicked() {
+			s.toggleMiniPlayer()
+		}
 		// 设置。Biu 的设置在侧栏菜单和头像下拉里（`layout/side/index.tsx`、
 		// `navbar/user/index.tsx`），顶栏没有。我们顶栏本来就收着「播放条放不下
 		// 的控件」（播放列表开关就在这儿），而设置是用户改任何东西都要走一遍的

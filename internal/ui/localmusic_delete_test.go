@@ -373,7 +373,7 @@ func TestABackgroundScanWakesEveryWindowThatDrewIt(t *testing.T) {
 
 	// 装上这一页的唤醒（生产里 `New` 就装好了，这里是让测试能观察它），
 	// 然后发起一遍扫描。
-	a.SetLocalWake(s.local.invalidate)
+	a.AddLocalWake(s.local.invalidate)
 	beforeFirst, beforeSecond := first.get(), second.get()
 	a.RescanLocalMusic()
 

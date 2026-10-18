@@ -7,6 +7,7 @@ package app
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -293,9 +294,28 @@ type App struct {
 	// mediaAt 是上一次跟系统说话的时刻。用来限住「多久校正一次进度」。
 	mediaAt time.Time
 
-	wake   func() // 界面层装：状态写完后叫它要一帧
+	wake   func() // 界面层装：状态写完后叫它要一帧。装了就等于 `wakeAll`
 	done   chan struct{}
 	closed bool
+
+	// wakes 是**逐窗口**的那一份唤醒句柄，见 AddWake。
+	//
+	// ⚠️ **它有自己的锁，不在 `a.mu` 里**：`wake` 在二十几处被调用，而其中有些
+	// 是**拿着别的锁**取的（`updater.wake()` 就明确要求「拿着 u.mu 时可以调」）。
+	// 共用 `a.mu` 就得逐处证明没有嵌套，漏一处是当场死锁——而死锁在这里的表现是
+	// 「整个应用冻住」，和真因隔得十万八千里。分一把锁就永远凑不出那个环。
+	wakeMu  sync.Mutex
+	wakes   []wakeEntry
+	wakeSeq uint64
+}
+
+// wakeEntry 是一个窗口的唤醒句柄，外加一个用来摘掉它的号。
+//
+// 号是必要的：函数值不能比（只能和 nil 比），所以「关窗时摘掉自己那一条」
+// 只能靠一个能比较的东西认。
+type wakeEntry struct {
+	tok uint64
+	fn  func()
 }
 
 // New 建一个空的应用状态，开后台时钟。
@@ -312,9 +332,80 @@ func New() *App {
 // 界面不会自己重画——不叫醒它，界面就永远停在旧帧（实测：只投递不唤醒 = +0 帧）。
 //
 // ⚠️ 这个回调必须是合并安全的（ui.Services.Invalidate 就是），并且能跨 goroutine 调用。
+//
+// ⚠️ **它是「装一个」，不是「再加一个」**：登记第二个窗口用 `AddWake`。绝大多数
+// 调用方（全部测试）一辈子只有一个窗口，两个函数在那儿是同一件事，所以没有把
+// `SetWake` 删掉。
 func (a *App) SetWake(fn func()) {
+	a.wakeMu.Lock()
+	a.wakes = []wakeEntry{{fn: fn}}
+	a.wakeMu.Unlock()
+	a.publishWake(1)
+}
+
+// AddWake **再**登记一个窗口的唤醒句柄，返回摘掉它的那一个（窗口真关掉时调）。
+//
+// # 为什么一个进程要登记好几个
+//
+// 迷你播放器是第二个窗口（`internal/ui/miniplayer.go`），两个窗口共用同一个 App。
+// 而铁律三要的是**逐窗口**通知：只叫醒主窗口，迷你窗口停在旧内容（实测：只投递
+// 不唤醒两个窗口各 +0 帧；只唤醒主窗口则迷你窗口停在旧内容）。所以「叫醒界面」
+// 这一支必须是挨个叫醒的，而不是某一个窗口的那一支。
+//
+// 有两个入口通往后台：应用状态本身（这里）和本地音乐库（`AddLocalWake`）。两处
+// 都是同一个道理，所以都收成「挨个叫醒」。
+func (a *App) AddWake(fn func()) (remove func()) {
+	a.wakeMu.Lock()
+	a.wakeSeq++
+	tok := a.wakeSeq
+	a.wakes = append(a.wakes, wakeEntry{tok: tok, fn: fn})
+	n := len(a.wakes)
+	a.wakeMu.Unlock()
+	a.publishWake(n)
+
+	// 返回的这一支可以调任意次：摘掉之后再调是空操作（那是「关窗流程走了两遍」）。
+	return func() {
+		a.wakeMu.Lock()
+		for i, w := range a.wakes {
+			if w.tok != tok {
+				continue
+			}
+			a.wakes = append(a.wakes[:i], a.wakes[i+1:]...)
+			break
+		}
+		n := len(a.wakes)
+		a.wakeMu.Unlock()
+		a.publishWake(n)
+	}
+}
+
+// wakeAll 挨个叫醒登记过的每一个窗口。
+//
+// 🔴 铁律三：后台改了状态必须唤醒**每一个**画着这份状态的窗口，否则那一个停在
+// 旧帧。它在 `SetWake` 装过之后一直就是 `a.wake` 的值，所以那二十几处调用点
+// 一个字都没改。
+func (a *App) wakeAll() {
+	a.wakeMu.Lock()
+	all := slices.Clone(a.wakes)
+	a.wakeMu.Unlock()
+	for _, w := range all {
+		if w.fn != nil {
+			w.fn()
+		}
+	}
+}
+
+// publishWake 把「叫醒界面」这一支重新装上，并把同一支递给登录和下载那两摊。
+//
+// n 是登记完之后的条数，由调用方在**还拿着 wakeMu** 的时候数出来——在这里重数
+// 一次就得再拿一次那把锁，而那把锁和 `a.mu` 是分开的（见 App 里的注释）。
+func (a *App) publishWake(n int) {
 	a.mu.Lock()
-	a.wake = fn
+	if n == 0 {
+		a.wake = nil
+	} else {
+		a.wake = a.wakeAll
+	}
 	acct := a.account
 	dl := a.downloads
 	a.mu.Unlock()
@@ -322,10 +413,10 @@ func (a *App) SetWake(fn func()) {
 	// 这里还是 nil。顺手补一次，否则后台改了登录状态没有一帧会被叫醒，
 	// 界面会一直停在旧提示上。下载那一摊同理（`MountDownloads` 也读盘）。
 	if acct != nil {
-		acct.setWake(fn)
+		acct.setWake(a.wakeAll)
 	}
 	if dl != nil {
-		dl.SetWake(fn)
+		dl.SetWake(a.wakeAll)
 	}
 }
 
