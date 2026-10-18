@@ -61,10 +61,10 @@ func (s *Shell) settingsConfig(c *ui.Context) {
 
 	ui.Column(c).FillWidth().Gap(8).Children(func() {
 		ui.Row(c).FillWidth().Gap(8).Children(func() {
-			if ui.Button(c, "导出配置").FontSize(13).Clicked() {
+			if flatButton(c, "导出配置").FontSize(13).Clicked() {
 				s.exportConfig()
 			}
-			if ui.Button(c, "导入配置").FontSize(13).Clicked() {
+			if flatButton(c, "导入配置").FontSize(13).Clicked() {
 				s.importConfig()
 			}
 		})
@@ -79,7 +79,7 @@ func (s *Shell) settingsConfig(c *ui.Context) {
 			// 「从 Biu 导入」只在**找得到** Biu 的数据目录时才摆。摆一个点了必然说
 			// 「没找到 Biu」的按钮，等于让用户自己判断这台机器上有没有装过 Biu。
 			ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-				if ui.Button(c, "从 Biu 导入").FontSize(13).Clicked() {
+				if flatButton(c, "从 Biu 导入").FontSize(13).Clicked() {
 					s.importFromBiu(dirs)
 				}
 				ui.Text(c, "从 "+shortDir(dirs[0])+" 导入设置、快捷键、下载记录和歌词").

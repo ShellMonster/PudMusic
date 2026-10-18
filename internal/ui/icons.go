@@ -92,6 +92,12 @@ const (
 	iconLogin    = "System/login-circle-line.svg"  // 登录
 	iconLogout   = "System/logout-circle-line.svg" // 退出登录
 
+	// ── 队列抽屉头 ──
+	// 逐字照 Biu 的 `components/music-playlist-drawer/index.tsx:137-141`：
+	// `RiFocus3Line`（定位当前播放）/ `RiDeleteBinLine`（清空播放列表）。
+	iconLocate = "Design/focus-3-line.svg"   // 定位当前播放
+	iconDelete = "System/delete-bin-line.svg" // 清空队列
+
 	// ⚠️ **头像那一格故意不在这一列。** #115（真实头像与未登录形态）把它整个
 	// 重做成了三档——真图 / 出问题的人形 / 等着的人形——而那个人形是
 	// `navbar_avatar.go` 的 `avatarPerson` 按 `avatarSize` 的分数倍画出来的
@@ -114,6 +120,7 @@ var iconNames = []string{
 	iconModeOrder, iconModeLoop, iconModeRandom, iconModeOne,
 	iconSettings, iconFolder, iconQueue,
 	iconSearch, iconClose, iconFeed, iconLogin, iconLogout,
+	iconLocate, iconDelete,
 }
 
 // icons 是上面那批图标**启动时一次解析好**的结果。
@@ -185,19 +192,22 @@ const (
 	iconHitPlay = 40
 )
 
-// iconButton 造一个**只画一个图标**的普通按钮。
+// iconButton 造一个**只画一个图标**的扁平按钮。
 //
 // name 是图标名，label 是无障碍名字，font 是图标边长。点击区由调用方的
 // `Padding` / `Size` 撑——这里给的是「一个画着图标的按钮」，不是「多大一个」。
+//
+// ⚠️ **它是扁平的**（无描边、无常驻底色，见 flatbutton.go）：顶栏那几枚、播放条
+// 上那一排、队列抽屉头那两枚都是它，而调研点名的那圈 1px 描边正是 `ui.Button`
+// 的默认样式给的（报告 §1.1 的 F1）。这一改之后**所有图标键一处都不漏**——
+// 它们全从这里出。
 //
 // 🔴 **label 不许省**。图标对辅助技术是不可见的（`mygo/ui/svg.go` 的 Icon 文档：
 // "Icons are decorations that assistive technology does not see, unless Label
 // names them"），而这个按钮**再没有字可念**了——用户从一个只有图标的按钮面前
 // 什么也听不到。同时它也是无头 Tester 认得这个按钮的唯一凭据。
 func iconButton(c *ui.Context, name, label string, font float32) ui.Element {
-	btn := ui.Button(c, "").Label(label)
-	btn.Children(func() { ui.Icon(c, icon(name)).FontSize(font) })
-	return btn
+	return flatIconButton(c, name, label, font)
 }
 
 // iconButtonPrimary 是播放/暂停那一枚：主色按钮。
@@ -205,6 +215,13 @@ func iconButton(c *ui.Context, name, label string, font float32) ui.Element {
 // 和 iconButton 只差一个「底色是主色」——两者的形状、图标、点击区完全一样，
 // 写成两个是为了不去改 MyGo 建出来的按钮样式（`ui.PrimaryButton` 是建的时候
 // 选的，建完再改底色要连 hover / pressed 两个色一起改）。
+//
+// ⚠️ **这一枚故意不跟着扁平化走**：调研点名的「多了一圈 1px 描边和一块底色」
+// （报告 §1.1 的 F1）说的是那圈 `t.Border` 和 `t.Surface` 那种**控件底色**，
+// 而这一枚的实心主色是**强调色**，是「这里是主操作」的唯一视觉标记。上游那边
+// （`components/music-play-control/index.tsx:23-24`）同样是一枚强调色的播放键，
+// 只是它靠的是 `RiPlayCircleFill` 那张实心图形而不是一块底。换成扁平之后两边的
+// 形状不一样（我们是一块圆底，他们是一枚圆图形），**主操作的重量必须留着**。
 func iconButtonPrimary(c *ui.Context, name, label string, font float32) ui.Element {
 	btn := ui.PrimaryButton(c, "").Label(label)
 	btn.Children(func() { ui.Icon(c, icon(name)).FontSize(font) })

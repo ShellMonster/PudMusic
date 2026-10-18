@@ -147,10 +147,19 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 		}
 		ui.Text(c, "("+strconv.Itoa(len(rows))+")").FontSize(12).TextColor(t.TextMuted)
 
-		if ui.Button(c, "定位当前播放").FontSize(12).Clicked() {
+		// 逐字照 Biu 那一段（`components/music-playlist-drawer/index.tsx:137-141`）：
+		// 两个 16px 的 `IconButton`（`RiFocus3Line` / `RiDeleteBinLine`）各带
+		// tooltip。**无障碍名字一个字没少**——原来那两个文字键念出来是「定位当前
+		// 播放」「清空」，换成图标之后靠 `Label` 念的还是这两句，而它们同时也是
+		// 无头 Tester 认这两个按钮的唯一凭据（`queue_drawer_test.go` 靠它点）。
+		if iconButton(c, iconLocate, "定位当前播放", iconSm).
+			Size(iconHit, iconHit).Padding(0, 7).
+			Tooltip("把队列滚到正在放的那一首").Clicked() {
 			s.locateCurrent()
 		}
-		if ui.Button(c, "清空").FontSize(12).Clicked() {
+		if iconButton(c, iconDelete, "清空", iconSm).
+			Size(iconHit, iconHit).Padding(0, 7).
+			Tooltip("清空播放列表").Clicked() {
 			s.app.ClearQueue()
 		}
 	})
@@ -266,7 +275,11 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 			// Biu 的那一颗「⋯」是个 DropdownTrigger。这里给它挂系统的菜单
 			// （Element.Menu），点它和右键这一行是同一份菜单——`queueMenu` 只
 			// 写一遍，两条路不可能点出不同的东西来。
-			ui.Button(c, "⋯").FontSize(13).
+			//
+			// 扁平：调研点名的描边药丸里就有这一颗（报告 §1.1 的 F1，证据那一段
+			// 点名的是 `queue_drawer.go` 里「行尾的 ⋯」）。旁边的行本身没有边框，
+			// 唯独行尾飘一个描边药丸，混在一列无边框的行里更显眼。
+			flatButton(c, "⋯").FontSize(13).
 				Menu(func(m *ui.Menu) { s.queueMenu(m, row) })
 		})
 	})

@@ -232,7 +232,7 @@ func (s *Shell) pickLocalMusicDirs(c *ui.Context, st app.Settings, ro bool) {
 			ui.Text(c, "本地音乐目录").FontSize(14).Bold()
 			ui.Text(c, "从这些文件夹里读取本地音乐").FontSize(12).TextColor(t.TextMuted).Wrap()
 		})
-		if ui.Button(c, "添加文件夹").Width(96).Disabled(ro).Clicked() {
+		if flatButton(c, "添加文件夹").Width(96).Disabled(ro).Clicked() {
 			s.pickPath("本地音乐目录", true, func(path string) {
 				s.applySetting("本地音乐目录", func(cur *app.Settings) {
 					// 不加重复的：同一个目录摆两遍，音乐列表里也会出现两遍。
@@ -267,7 +267,7 @@ func (s *Shell) pickLocalMusicDirs(c *ui.Context, st app.Settings, ro bool) {
 				// 那一条之后序号会整体前移一格，按序号排的身份就落到旁边那条上
 				// 了，而 × 删掉的是它自己那一格还是隔壁那一格，从画面上看不出来。
 				ui.Text(c, dir).FontSize(13).Grow(1).SingleLine()
-				if ui.Button(c, "×").Label("移除目录「" + dir + "」").
+				if flatButton(c, "×").Label("移除目录「" + dir + "」").
 					FontSize(13).TextColor(t.TextMuted).Disabled(ro).Clicked() {
 					s.removeLocalMusicDir(i)
 				}

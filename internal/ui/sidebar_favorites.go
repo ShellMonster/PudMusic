@@ -136,8 +136,13 @@ func (s *Shell) viewFavoriteHeader(c *ui.Context, g app.FavoriteGroup, folded bo
 	// 也不写 `Grow(1)`：Column 默认就把子元素拉满宽（`docs/ui/layout.md`），
 	// 而 Grow 是纵向的「吃掉剩下的空间」——写在这里，它在折叠的那一组里
 	// 会把下面的东西顶没了。
+	//
+	// ⚠️ **灰字**：上游的分组标题是弱化的（`layout/side/collection/index.tsx:425`
+	// 一带的次级文字），而菜单项和收藏夹名才是 `t.Text`。这一层要是和下面那些
+	// 一样黑，六个分组标题就会比六个名字还抢眼。
 	ui.Row(c).Gap(2).Center().Children(func() {
-		fold := ui.Button(c, arrow+" "+g.String()).Grow(1)
+		fold := flatButton(c, arrow+" "+g.String()).Grow(1).
+			TextColor(c.Theme().TextMuted)
 		if fold.Clicked() {
 			s.toggleFavoriteFolded(g, folded)
 		}
@@ -158,7 +163,7 @@ func (s *Shell) viewFavoriteHeader(c *ui.Context, g app.FavoriteGroup, folded bo
 // 接图标资源，而字形它自带。`Label` 补上「新建收藏夹」是为了读屏和 Tooltip——
 // 画面上只有一个 +，光看不知道是什么。
 func (s *Shell) viewNewFavoriteButton(c *ui.Context) {
-	if ui.Button(c, "+").Tooltip("新建收藏夹").Label("新建收藏夹").Clicked() {
+	if flatButton(c, "+").Tooltip("新建收藏夹").Label("新建收藏夹").Clicked() {
 		s.openFolderEdit(0)
 	}
 }

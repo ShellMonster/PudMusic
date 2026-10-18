@@ -109,7 +109,7 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// 常量都要有一份 SVG，`icons_test.go` 逐个过 embed），里面没有画中画 / 小窗
 		// 这一类。往那份清单里塞一个资源是另一样活（谁维护谁说了算），所以这里先
 		// 用文字键——和左边那几个图标键并排，样子不齐但每个都点得着、都说得出是啥。
-		if ui.Button(c, "迷你").Tooltip("缩成 320×100 的小窗贴边悬浮，音乐不停").
+		if flatButton(c, "迷你").Tooltip("缩成 320×100 的小窗贴边悬浮，音乐不停").
 			Clicked() {
 			s.toggleMiniPlayer()
 		}

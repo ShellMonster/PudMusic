@@ -208,7 +208,10 @@ func (s *Shell) viewSideCollapse(c *ui.Context, st app.Settings) {
 
 	// 固定高度，**不写 Grow(1)**：Grow 是「吃掉这一列剩下的空间」，
 	// 折叠按钮一长就把上面那块滚动区挤成 0 高，菜单全点不动。
-	if ui.Button(c, label).Label(tip).Height(sideCollapseHeight).Clicked() {
+	//
+	// `Label` 留着：画面上只有 «/» 这一个符号，念不出是什么，而 tooltip 只是
+	// 给鼠标看的（无头 Tester 认按钮也靠它）。
+	if flatButton(c, label).Label(tip).Height(sideCollapseHeight).Clicked() {
 		if _, err := s.app.UpdateSettings(func(cur *app.Settings) {
 			cur.SideMenuCollapsed = !collapsed
 		}); err != nil {
@@ -233,7 +236,6 @@ func (s *Shell) viewSideCollapse(c *ui.Context, st app.Settings) {
 // 就成了一句永远不成立的话，而它正是这一条验收的全部（判据是画面上**找不到**
 // 那三个词，而提示和它们在同一个侧栏里）。
 func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
-	t := c.Theme()
 	cur := s.router.Path()
 	collapsed := st.SideMenuCollapsed
 	loggedIn := s.app.LoggedIn()
@@ -263,9 +265,13 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 			// ⚠️ 别给 Button 再补一个 `Label(rt.Title)`：可见的字就是名字，
 			// 补上去会多出一个同样文字的无障碍节点，画面上出现两份。
 			ui.Column(c).Key("side-item:" + rt.Match).Children(func() {
-				item := ui.Button(c, label).Grow(1)
+				item := flatButton(c, label).Grow(1)
+				// 选中那一层照上游 HeroUI 的 `variant="flat"` + `color="primary"`
+				// （`components/menu/menu-item.tsx:83-84`）：主色很淡的一层底 +
+				// 主色的字。**不是实心主色**——原来那一版 `Background(t.Accent)`
+				// 就是调研点名的「选中整条刷实心绿」（报告 §2 基线 B 标注 3）。
 				if rt.Match == cur {
-					item = item.Background(t.Accent)
+					item = flatCurrent(c, item)
 				}
 				if item.Clicked() {
 					s.navigate(rt.Match)

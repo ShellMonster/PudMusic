@@ -43,7 +43,7 @@ func (s *Shell) settingsShortcuts(c *ui.Context) {
 		// 顶上那一行：Biu 的 `<h2>快捷键设置</h2>` 和右边的「恢复默认」。
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "快捷键设置").FontSize(16).Bold().Grow(1)
-			if ui.Button(c, "恢复默认").FontSize(12).Disabled(ro).Clicked() {
+			if flatButton(c, "恢复默认").FontSize(12).Disabled(ro).Clicked() {
 				s.applyShortcutChange("快捷键", s.keys.reset)
 			}
 		})

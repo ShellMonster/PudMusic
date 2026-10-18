@@ -35,7 +35,10 @@ const rateBtnW = 64
 // 在 App 上，新歌开好时套上去）。缓存住的话，切完歌按钮上会回到 1x，而声音
 // 其实是 1.5 倍——界面上唯一能看见倍速的地方说错了话。
 func (s *Shell) viewRate(c *ui.Context, st app.State) {
-	btn := ui.Button(c, rateLabel(st.Rate)).Width(rateBtnW).Label("播放速率")
+	// 扁平按钮：上游这一枚是无边框的 `IconButton`
+	//（`components/music-rate/index.tsx:49`，`min-w-fit text-[16px]`），
+	// 调研把它算进 F1 的「倍速键」（报告 §1.1 的 C3）。
+	btn := flatButton(c, rateLabel(st.Rate)).Width(rateBtnW).Label("播放速率")
 	if btn.Clicked() {
 		s.rateOpen = !s.rateOpen
 	}
@@ -55,15 +58,16 @@ func (s *Shell) viewRate(c *ui.Context, st app.State) {
 // 自己现读一次 Snapshot 而不是接着传 st：外面那一帧的 st 是**主帧**读的那一份，
 // 而浮层什么时候开、关掉之前用户又按了什么，它自己不知道。宁可多读一次。
 func (s *Shell) viewRateMenu(c *ui.Context) {
-	t := c.Theme()
 	st := s.app.Snapshot()
 
 	ui.Column(c).Key("playbar:rate").Padding(4).Gap(2).Children(func() {
 		for _, r := range app.RateSteps {
-			b := ui.Button(c, rateLabel(r)).Width(rateBtnW).Radius(4).
+			b := flatButton(c, rateLabel(r)).Width(rateBtnW).Radius(4).
 				Label("播放速率 " + rateLabel(r))
+			// 选中那一档是主色的淡底 + 主色的字（`flatCurrent`），不是实心主色
+			// ——和侧栏菜单那一处是同一条理由（报告 §1.1 的 F1）。
 			if r == st.Rate {
-				b = b.Background(t.Accent).TextColor(t.AccentText)
+				b = flatCurrent(c, b)
 			}
 			if b.Clicked() {
 				// 选完就收起来：Biu 那边也是选完即关（`setRate` 之后浮层消失）。
