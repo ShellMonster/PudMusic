@@ -201,6 +201,11 @@ type Shell struct {
 	searchKeyword string
 	searchSuggest bool
 	searchFocused bool
+	// terms 是浮层里「联想词」那一档的防抖状态，见 navbar_suggest.go。
+	//
+	// 挂在壳上而不是局部变量：即时模式每一帧都重画，「敲到哪儿了、从哪天起等的
+	// 那 500ms」下一帧就得还在。
+	terms suggestTerms
 	// feed 是「动态更新红点」的 5 分钟节奏。假时钟在 navbar_feed.go。
 	feed *feedPoller
 	// hist 是搜索历史。没挂上盘时是内存里的一份（见 searchhistory.go）。

@@ -27,12 +27,12 @@
 //   - 自己画板子的样子：Popover 用主题那套（`ui/widgets.go:611`），我们要的是
 //     Biu 的 `bg-content2 rounded-medium shadow-2xl`，而 PopoverBase 正好留了这道口子。
 //
-// ## 300ms 防抖在哪儿
+// ## 浮层里有两档
 //
-// Biu 的 `debounceWait: 300`（`search/index.tsx:49`）是加在**远端搜索建议**上的
-// （`getSearchSuggestMain`）。这一版还没有搜索接口，浮层里摆的只有本地的历史
-// 条目——本地数据不需要防抖，装一个防抖只是让界面慢半拍。所以这一处**故意没有**
-// 防抖，接上接口时再加（它属于搜索接口那张卡片）。
+// 这一档面板里摆的是「**搜索历史**」（本地，Biu 的 `topContent`）加上「**联想词**」
+// （远端，Biu 的 `getSearchSuggestMain`）——**两档在同一个面板里**，不是一个浮层
+// 套另一个浮层（理由见 `navbar_suggest.go` 的文件头）。远端那一档的防抖、请求、
+// 画法都在那一边的文件里。
 package ui
 
 import (
@@ -136,6 +136,10 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 			s.submitSearch(s.searchKeyword)
 		}
 
+		// 联想词那一档的防抖。**排在 `searchSuggest` 定下来之后**——它认的就是这一位
+		// （浮层没开就不问，见 `syncSuggest`）。
+		s.syncSuggest(s.clock.Now())
+
 		if s.searchKeyword != "" {
 			s.viewSearchClear(c)
 		}
@@ -143,20 +147,24 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 	})
 }
 
-// viewSuggest 是搜索建议浮层：设置里开着、并且有历史，才摆。
+// viewSuggest 是搜索建议浮层。**两档都在这个面板里**：搜索历史 + 联想词。
 //
-// Biu 的 topContent 是 `showSearchHistory && items.length > 0`
-// （`search/index.tsx:121-124`）——**设置只管显不显示，不管存不存**。
+// ⚠️ **设置只管历史那一档，不管联想词**。Biu 的 topContent 是
+// `showSearchHistory && items.length > 0`（`search/index.tsx:121-124`）——那个设置
+// 管的是「我不想看见我搜过什么」，而联想词是 B 站这次给的、跟设置无关；把它一起
+// 关掉的话，用户在一个只想关掉历史的人那儿连联想都看不到，而界面上没有任何地方
+// 能让他知道还有这一档。
+//
+// ⚠️ **两档都没有时不摆面板**：用户看见的是一块突然出现的白板，而不是「最近搜过
+// 这些」。
 func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 	if !s.searchSuggest {
 		return
 	}
 	history := s.hist.list()
-	if !s.app.SettingsSnapshot().ShowSearchHistory || len(history) == 0 {
-		// 一个都没有还摆一块空板子没有意义：用户看见的是一块突然出现的白板，
-		// 而不是「最近搜过这些」。
-		//
-		// 真接上搜索接口之后，这里摆 Biu 的 emptyContent「暂无搜索建议」。
+	showHistory := s.app.SettingsSnapshot().ShowSearchHistory && len(history) > 0
+	terms := s.app.SuggestState().Items
+	if !showHistory && len(terms) == 0 {
 		return
 	}
 	t := c.Theme()
@@ -168,12 +176,23 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 			Background(t.Background).Border(1, t.Border).
 			Shadow(0, 6, 20, 0, suggestShadow(t)).
 			Padding(8).Children(func() {
-			s.viewSuggestHeader(c)
-			ui.Row(c).Key("suggest-history").Wrap().Gap(6).Children(func() {
-				for _, item := range history {
-					s.viewHistoryChip(c, item)
+			// 历史在上、联想在下（Biu 的 topContent 在结果列表上面，见
+			// `search/index.tsx:121-146`）。中间那一道空隙是「这是两档」最直接的一句
+			// 提示：没有它时两栏连着排，看起来像一栏里混着两批词。
+			if showHistory {
+				s.viewSuggestHeader(c)
+				ui.Row(c).Key("suggest-history").Wrap().Gap(6).Children(func() {
+					for _, item := range history {
+						s.viewHistoryChip(c, item)
+					}
+				})
+			}
+			if len(terms) > 0 {
+				if showHistory {
+					ui.Box(c).FillWidth().Height(suggestTermsGap)
 				}
-			})
+				s.viewSuggestTerms(c)
+			}
 		})
 	})
 }

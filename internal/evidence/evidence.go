@@ -972,6 +972,100 @@ var Items = []Item{
 		},
 	},
 	{
+		Category: FakeClock,
+		// 搜索联想词（#97 A25）那 500ms。⚠️ **和界面上另外两处「等用户把词敲完」用的是
+		// 同一个常量**（`ui.searchDebounce`：稍后再看 / 历史记录的搜索框、歌词搜索、
+		// 这一档），所以这里量的是「一个钟、三个地方用」的那一个。
+		//
+		// 「收掉浮层之后那个钟跟着停」也单列：它是**每帧**在 `syncSearchWatch` 里
+		// 收的，而醒着的定时器醒到进程退出——用户看不出任何异样，只是这个应用从那
+		// 以后再没省过电。
+		Spec: "搜索联想词 500ms 防抖：假时钟推、不真等；每敲一个字重新起算；浮层收掉之后那个钟跟着停",
+		Tests: []string{
+			"TestTheSuggestKeywordIsDebouncedBy500ms",
+			"TestTheSuggestDebounceRestartsOnEveryKeystroke",
+			"TestTheSearchWatchStopsWhenTheOverlayGoesAway",
+		},
+	},
+	{
+		Category: HTTP,
+		// 联想词那个接口（Biu 的 `getSearchSuggestMain`）。**参数逐个对着上游抄**，
+		// 少一个的症状在界面上像「联想词永远是空的那一档」，而那和「拉不到」长得
+		// 一模一样。
+		//
+		// ⚠️ **地址和签名都在这一条里**：它在 `s.search.bilibili.com` 而不是
+		// `api` 那台，而 WBI 是 `api` 那台的规矩——多带一个它不认的签名参数是**赌**
+		// 那个接口不介意，所以这里钉住「没有 w_rid、也没有先跑一趟 nav」。
+		//
+		// 「两套字」（`term` 干净、`name` 带标签）是界面上最要紧的一半：拿 `name`
+		// 显示是一排尖括号，拿它去搜是把标签当关键词发出去。
+		//
+		// ⚠️ **这一票没有走真网**：接口的地址、参数和回包形状都要真机回归，那是另
+		// 一次安排；这里量到的是**我们这一层**（发出去的是什么、回来的怎么认、
+		// 失败有没有被当成「一个都没有」）。
+		Spec: "搜索联想词的接口：走搜索站那台（s.search.bilibili.com）、只发 term 且不带 WBI 签名；回包里 term/name 两套字分开认；空的和重复的丢掉、顶上那 10 条；拉不到要报错而不是回一个空列表",
+		Tests: []string{
+			"TestSearchSuggestSendsTheWordOnTheSearchHost",
+			"TestSearchSuggestGivesBackThePlainWords",
+			"TestSearchSuggestSkipsTheOnesThatAreNotWords",
+			"TestSearchSuggestFallsBackToTheNameWhenThereIsNoTerm",
+			"TestSearchSuggestAsksForNothingWithoutAWord",
+			"TestSearchSuggestSaysSoWhenItCannotAsk",
+			"TestSearchSuggestSaysSoWhenTheAnswerIsUnreadable",
+		},
+	},
+	{
+		Category: Platform,
+		// 规格的四条验收（#97）。逐条钉：
+		//
+		//   - 输入时浮层里多一档「联想词」（**浮层里的另一档，不是另一个浮层**——
+		//     两套浮层的关闭时机不一样，并排会出现「关了一个另一个还在」，所以
+		//     Esc 那一条钉的是两档一起收）；
+		//   - 和历史建议在界面上区分得开（判据是**画出来的像素**：chip 有底色，
+		//     联想那一行没有；另外还有「清除全部」只清历史那一档这个行为上的后果）；
+		//   - 选中一条等于选中那次的搜索（页面上、URL 上、**框里**都是那一个词）；
+		//   - 请求失败时静默（浮层保持只有历史那一档，一个错字都没有、提示条也不弹）。
+		//
+		// ⚠️ 「设置里的『显示搜索历史』不许把联想词一起关掉」也单列：那个设置管的
+		// 是「我不想看见我搜过什么」，而联想词是 B 站这次给的。
+		Spec: "搜索浮层里多一档「联想词」：输入时出来、和搜索历史在界面上分得开、选中等于选中那次的搜索、拉不到时静默（浮层保持只有历史那一档）、和历史在同一个浮层里（Esc 一起收）、设置里的「显示搜索历史」不管它",
+		Tests: []string{
+			"TestTypingBringsUpTheSuggestTerms",
+			"TestTheTwoSectionsAreToldApart",
+			"TestChoosingOneSearchesThatWord",
+			"TestAFailedSuggestLeavesOnlyTheHistory",
+			"TestEscapeTakesBothSectionsAway",
+			"TestTheHistorySettingDoesNotTakeTheSuggestWithIt",
+			// 框里一个字都没有时一个请求都不发（点开搜索框是在翻历史，不是在要联想）。
+			"TestNoWordMeansNoRequest",
+			// 联想词那一档没有 ×：那是 B 站这次给的，删不掉。
+			"TestTheSuggestTermsCannotBeDeleted",
+		},
+	},
+	{
+		Category: Negative,
+		// 联想词那一摊的边界。
+		//
+		// 🔴 **失败之后不许每帧重发**是这一条里最要紧的：业务层失败时仍然记着那个
+		// 词，界面上「已经问过了」那一支才成立；少了它就是自己养自己的循环（生产里
+		// 每次投递都叫醒界面），于是浮层底下一直刷网络而用户只看到搜索框卡一下。
+		//
+		// 迟到的结果不许盖掉新的（代次守卫）、退出了不许再往状态上写、框里空了上一
+		// 批要收掉（它属于上一个问题）、没挂上 B 站客户端也要安静。
+		Spec: "联想词的边界：失败之后静默且不每帧重发、重敲同一个词还能再问一次（失败是静默的，界面上用户唯一能做的就是再敲一遍）、空框不许自己养自己（每一帧都请求下一帧 = 窗口永远停不下来）、迟到的结果不盖掉新的、退出之后不写回来、框空了收掉上一批、同一个词不搜第二遍、没挂客户端时不吵",
+		Tests: []string{
+			"TestAFailedSuggestSaysNothingAndDoesNotFireAgain",
+			"TestTypingTheSameWordAgainAsksAgain",
+			"TestAnEmptySearchBoxDoesNotKeepTheWindowRedrawing",
+			"TestAStaleSuggestNeverLands",
+			"TestClosingTheAppStopsTheSuggestFromComingBack",
+			"TestEmptyingTheBoxTakesTheSuggestListAway",
+			"TestTheSameWordIsNotAskedForSuggestTwice",
+			"TestAskingForSuggestWithoutABiliClientIsQuiet",
+			"TestAskingForSuggestGivesBackWhatBilibiliSaid",
+		},
+	},
+	{
 		Category: Play,
 		// #21 的界面那一半（BMG-66）走通一遍：两个源都摆着、**从屏幕上那首歌开始**、
 		// 切 Tab 立刻用同一个词重搜那个源、预览里看得到完整歌词再采用、采用之后
