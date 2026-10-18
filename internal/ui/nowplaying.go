@@ -15,13 +15,16 @@
 // 两个状态都从真实的播放状态推出来，不是无条件画出来的：
 //
 //	没有歌在放   上游 pages/mini-player/index.tsx:128 的「暂无播放内容」
-//	有歌在放     歌名 + 歌词区。这一版歌词**只从缓存来**（`app/lyrics.go`），缓存里
-//	             没有就是那一句「暂无歌词」——照实说，不画一个转圈（SPEC 的四条铁律
-//	             之外那条：空状态不能拿「加载中」搪塞）
+//	有歌在放     歌名 + 歌词区（lyrics.go）。
 //
-//	「去找一份歌词」的那一条路（两个弹窗）是另一票：歌词搜索的**服务层和应用层**
-//	已经接上（`service/lyrics/search.go`、`app/lyrics_search.go`，两个源和结果缓存
-//	都在），缺的是界面上那一个入口。
+// 歌词区**只从缓存来**（`app/lyrics.go`）：缓存里没有就是那一句「暂无歌词」
+// ——照实说，不画一个转圈（SPEC 的四条铁律之外那条：空状态不能拿「加载中」搪塞）。
+//
+// 「去找一份歌词」的那一条路（两个搜索/预览弹窗）是拆出去的下一票：歌词搜索的
+// **服务层和应用层**已经接上（`service/lyrics/search.go`、`app/lyrics_search.go`，
+// 两个源和结果缓存都在，`lyrics_mount.go` 把源挂上了），缺的是界面上那一个入口。
+// ⚠️ 在它落地之前 `noLyrics.Hint` 那句「在歌词搜索里换个源再找一次」是一句兑现
+// 不了的承诺（那是人的判断，见这一票的收尾说明，没有替它改）。
 //
 // 🔴 本文件里的 view **不许**调 `c.SetTheme`：主题每帧开头装一次就够（铁律二，
 // 见 theme.go）。
@@ -53,11 +56,12 @@ func (s *Shell) viewNowPlaying(c *ui.Context, _ *ui.Route) {
 
 	// 正在放：歌名 + 歌词区。
 	//
-	// ⚠️ 这里画的是**空状态**：歌词区本体在 BMG-65（界面与接线）。底下那层
-	// （`service/lyrics` 的解析与缓存、`app/lyrics` 的切歌先重置 / 偏移字号夹界 /
-	// 防抖落盘）已经落地，界面上能看到歌词是 BMG-65 的事。
+	// 歌词区本体在 lyrics.go：逐行高亮、滚到中间、上下渐隐、译文叠在原词下面，
+	// 右下角浮着偏移与字号两个旋钮。底下那一层（`service/lyrics` 的解析与缓存、
+	// `app/lyrics` 的切歌先重置 / 偏移字号夹界 / 防抖落盘）负责「哪一句正在唱」
+	// 和「那两个旋钮能走到哪儿」，这一层只画。
 	ui.Column(c).Key("page:mini-player").Grow(1).Padding(28).Gap(12).Children(func() {
 		ui.Text(c, st.Title).FontSize(20).Bold()
-		s.viewEmpty(c, "page:lyrics", noLyrics)
+		s.viewLyrics(c, s.app.Lyrics(), st.Position)
 	})
 }

@@ -53,9 +53,11 @@ func ItemOfMedia(m bili.Media) Item {
 		Source: "online",
 		Title:  m.Title,
 		Cover:  m.Cover,
-		// 收藏夹接口已经给了 UP 主名，而这一栏之前一直空着——于是系统媒体
-		// 控制中心上的「艺人」永远是空的（见 `Item.Artist` 的注释）。
-		Artist: m.Owner,
+		// 收藏夹接口给了 UP 主名（之前这一栏一直空着，系统媒体控制中心上的
+		// 「艺人」永远是空的），播放条上那一行还要靠它的编号拼 `/user/{id}`
+		//（见 `Item.Artist` / `Item.ArtistMid`）。
+		Artist:    m.Owner,
+		ArtistMid: m.OwnerMid,
 		// Sid 一直带着：Type=12（音频）靠它，Type=2 的条目也指着它
 		// （`list.BiliLink` 有 bvid 时优先用 bvid，所以不会串）。
 		Sid: strconv.FormatInt(m.ID, 10),

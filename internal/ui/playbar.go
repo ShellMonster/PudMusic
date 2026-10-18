@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -27,6 +28,29 @@ const (
 	playbarPadX   = 16
 	coverSize     = 56
 	coverGap      = 8
+	// metaGap 是第二行那几样（UP 名 / 收藏 / 下载）之间的间距。
+	metaGap = 8
+	// metaBtnW 是「收藏」「下载」那两个键的宽度。
+	//
+	// ⚠️ **它不是随手挑的**：MyGo 的按钮左右各留 `Space(3.5)`（14），两个汉字
+	// 约 26，加上就是 54——放不下。把内边距收成 6（见那两个键）之后自然宽度是 38，
+	// 这里给 44 留一点余量。再小就把「收藏」画成「收…」——而**无头 Tester 读的
+	// 是控件的文本，被截的只是画出来的那几个字**：所有断言照样是绿的
+	// （这一条教训在 `playbar_rate_test.go` 的 TestRateMenuLabelsAreNotTruncated
+	// 那里已经吃过一次，所以这里配了一条同样量「画出来的宽度」的测试）。
+	metaBtnW = 44
+
+	// artistMinW 是 UP 名那一段最少留多宽。
+	//
+	// ⚠️ **没有它，UP 名会被挤成 0 宽**：窗口窄的时候左边那一块只剩 110，
+	// 而两个键加两道缝要 112——UP 名一个像素都分不到，而**界面上看不出坏了**
+	// （按钮和那句话都还在，只有名字没了）。留 60 是「还能认出是哪个 UP」的
+	// 下限，再窄就只剩两个偏旁。
+	//
+	// 本应用的窗口最小宽是 900（`WindowOptions` 的 `MinWidth`），那儿它是完整
+	// 的；760 是测试里的窄窗口，这一档是给它的。
+	artistMinW = 60
+
 	// playModeBtnW 是播放模式按钮的宽度，和「加歌」一样宽：上面写的是两个
 	// 汉字（顺序 / 循环 / 随机 / 单曲），56 是量出来的下限。
 	//
@@ -69,7 +93,9 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 			// `TestTheErrorSitsUnderTheTitle` 和 `TestTheRateButtonDoesNotSquashTheTitle`
 			// 都在盯这一条，所以那个开关去了顶栏（见 navbar.go 的 viewNav），
 			// 播放模式那个也一样——只是它挤在**中间那一列的第二行**（见
-			// viewProgress），那一行有富余，不用从歌名里借。
+			// viewProgress），那一行有富余，不用从歌名里借。而 A23 要的
+			// 收藏/下载**更没有加在这儿**：它们去了左边那一块的第二行（见
+			// viewTrackMeta），那一行的固定宽度不吃歌名的宽度。
 			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 				// 音量条自己带无障碍标签，不用旁边再摆一个「音量」字。
 				vol := st.Volume
@@ -88,18 +114,26 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 	})
 }
 
-// viewTrackText 是封面右边那几行字：歌名，出错时下面补一句原因。
+// viewTrackText 是封面右边那几行字：歌名、UP 名（可点）+ 收藏 + 下载，
+// 出错时再补一句原因。
 //
-// 第二行的位置是 Biu 的副标题（本地音乐 / UP 主名）。我们没有那些信息，
-// 只在真出错时说一句——88 高的播放条里塞不下第三行，错误总得有个地方说。
+// 三行竖着堆，行数由**有没有那一句**决定：平时两行（歌名 / UP 名那一行），
+// 出错时三行。三行实测占 51（歌名 17.7 + 两行各 14 + 两道 4 的缝），在 88 高的
+// 播放条里上下各留 18——而横向仍然是 `Grow(1)` 那一块的整条宽：**下面两行的
+// 固定宽度不吃歌名的宽度**（这一条是「为什么第二行不挤歌名」的答案，
+// `TestTheMetaRowDoesNotSquashTheTitle` 盯着它）。
 //
 // ⚠️ **外面必须是 Column**。这里曾经为了塞下音质徽章把 Column 拆成了一个裸
 // Row（歌名和徽章并排），结果错误文字变成了这一层的**兄弟**——它落到了
 // 歌名右边的外层行上，把歌名挤成 20px 宽、88px 高的竖条并被裁掉。
 // 而「出错时播放条上有一句人话」正是这一票要保证的东西，结构不能为它让路。
 //
-// 徽章是**在 Column 里面**跟歌名并排的：外层永远是竖着堆的两行（歌名行、
-// 错误行），徽章只占第一行里的右边一小块。
+// ⚠️ **UP 名那一行是后来才有的**（A23），错误那一行是从第二行掉到第三行的。
+// 掉下来之后 `TestTheErrorSitsUnderTheTitle` 仍然成立——它断的是「错误在歌名
+// 的下面」，不是「错误紧贴着歌名」。
+//
+// 徽章是**在 Column 里面**跟歌名并排的：外层永远是竖着堆的行，徽章只占第一行
+// 里的右边一小块。
 func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 	title := st.Title
 	if !st.HasTrack {
@@ -112,10 +146,115 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 				TextColor(textColor(t, st.HasTrack))
 			s.viewQualityBadge(c, st, t)
 		})
+		s.viewTrackMeta(c, st, t)
 		if st.Err != "" {
 			ui.Text(c, "打不开："+st.Err).FontSize(12).TextColor(t.Danger)
 		}
 	})
+}
+
+// viewTrackMeta 是歌名下面那一行：UP 名（点它进他的空间）、收藏、下载。
+//
+// **摆在这里而不是右边那一排**：右边已经放不下第四个控件了（见 `viewPlayBar`
+// 里那段注释——760 宽时歌名只剩一个字一行，而**挤没了之后界面看不出坏了**）。
+// 第二行是空的，歌名那一行的宽度也不被它吃（上面那段）。
+//
+// 没有歌时这一行一格都不画：给一个空的播放条摆两个点不动的键，比不摆更让人
+// 以为它们坏了。
+func (s *Shell) viewTrackMeta(c *ui.Context, st app.State, t *ui.Theme) {
+	if !st.HasTrack {
+		return
+	}
+	ui.Row(c).Gap(metaGap).AlignItems(ui.Center).Children(func() {
+		if st.Artist != "" {
+			s.viewArtist(c, st, t)
+		}
+		s.viewLikeStar(c, st)
+		s.viewFavButton(c, st)
+		s.viewDownloadButton(c, st)
+	})
+}
+
+// viewArtist 是那一行里的 UP 名。**点它进 `/user/{id}`**（Biu 的播放条上就是
+// 这么摆的：`playbar/left/index.tsx` 的 ownerName 是个链接）。
+//
+// ⚠️ **有名字、没有编号时照样显示，只是点不动**：B 站有的接口只给名字不给
+// mid（见 `app.Item.ArtistMid`）。把名字藏起来是另一种撒谎——用户看到的是
+// 「这一首没有 UP 主」。
+//
+// ⚠️ 走的是 `upPathPrefix` 而不是写死 `"/user/"`：路由表里那一条改了的话
+// 这里跟着错，而且错得很安静（空间页退回占位页，没人看得出来）。
+func (s *Shell) viewArtist(c *ui.Context, st app.State, t *ui.Theme) {
+	if st.ArtistMid <= 0 {
+		ui.Text(c, st.Artist).Grow(1).MinWidth(artistMinW).FontSize(12).
+			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
+		return
+	}
+	if ui.Button(c, st.Artist).Grow(1).MinWidth(artistMinW).FontSize(12).
+		Padding(0, 2).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").
+		Tooltip("打开 " + st.Artist + " 的空间").Clicked() {
+		s.navigate(upPathPrefix + strconv.FormatInt(st.ArtistMid, 10))
+	}
+}
+
+// viewFavButton 是「收藏」那个键：开「把这一首放进哪些收藏夹」那个弹窗。
+//
+// ⚠️ **身份是按下去那一刻才去取的**（`App.PlayingItem`），而不是建按钮之前。
+// `State` 那一组里没有 B 站的稿件 id，而收藏夹弹窗要 avid（`favTarget`）——
+// 真拿到按钮却拿不到身份的话，用户点的是一个画在那儿的东西。
+// 取不到就**说一句**，不静悄悄地走人。
+//
+// 🔴 **已经收藏过的那一首，这个键是亮的**（主色，和赞过的星标一样，见 like.go）。
+// 它认的是 `App.LikeState().Favorited`，而那一栏有两个来源：换歌时问一次
+// `archive/relation`，以及**长按三连那一次的回包**（B 站顺手收藏了这一首，
+// 那是 `bili.TripleResult.Favorited`）。
+//
+// 为什么必须有这一栏：三连是一次「用户没按收藏键、却被收藏了」的操作。不显示它，
+// 用户在三连之后完全看不出收藏夹里多了一首——而他去一看真的有。
+func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
+	faved := s.app.LikeState().Favorited
+	btn := ui.Button(c, "收藏").Width(metaBtnW).Padding(1, 6).MaxLines(1).
+		Tooltip(favTooltip(faved))
+	if faved {
+		// ⚠️ **只在这一支设颜色**：没收藏的那一支一个字都不改，好让「默认那个颜色」
+		// 继续由按钮自己决定（BMG-103 量过这个键的宽度和截断）。
+		btn = btn.TextColor(c.Theme().Accent)
+	}
+	if btn.Clicked() {
+		it, ok := s.app.PlayingItem()
+		if !ok {
+			s.addToast("这一首还没有取回来，收藏不了")
+			return
+		}
+		s.openFolderSelect(it)
+	}
+}
+
+// favTooltip 是收藏键悬停时那句话。
+func favTooltip(faved bool) string {
+	if faved {
+		return "这一首已经收藏过了（点一下看收在哪一格）"
+	}
+	return "把这一首放进收藏夹"
+}
+
+// viewDownloadButton 是「下载」那个键。
+//
+// ⚠️ **走 `downloadLater`（后台补 cid），不走 `app.Download`**：队列里那一份
+// 是从列表翻出来的，而 B 站的几个列表接口都不给 cid（搜索结果、历史、动态都
+// 是），下载按分 P 存文件。缺 cid 时 `Download` 会**如实拒绝**而不是下错一集
+// ——可播放条上这一格是「把正在放的这首存下来」，用户要的是那首，补出来的
+// 第一集不是。理由和 `dynamiccard.go` 的「下载音频」是同一条。
+func (s *Shell) viewDownloadButton(c *ui.Context, st app.State) {
+	if ui.Button(c, "下载").Width(metaBtnW).Padding(1, 6).MaxLines(1).
+		Tooltip("把正在放的这首下载到本地").Clicked() {
+		it, ok := s.app.PlayingItem()
+		if !ok {
+			s.addToast("这一首还没有取回来，下载不了")
+			return
+		}
+		s.downloadLater(it, false, "下载音频")
+	}
 }
 
 // viewQualityBadge 是歌名右边那个音质徽章（「无损 FLAC」/「320K」）。
@@ -181,12 +320,87 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 	})
 }
 
-// viewCover 是播放条左边那张封面。
+// viewCover 是播放条左边那张封面。**点它开全屏播放器**。
 //
 // 四种状态（没有地址 / 载入中 / 就绪 / 加载失败）都由 imgcache.View 画，
 // 这里不重复它的判断，也不替它决定长什么样——以后缓存换画法只改那一处。
+//
+// 🔴 它带着 `coverTransition(identity)`，而满屏上那一张带的是同一个——这就是
+// 「封面从列表行放大成全屏背景」那一段，等价于 SwiftUI 的 `matchedGeometryEffect`
+// （理由见 fullplayer.go 的 coverMatch）。**这一层是转场的另一半**：少了它，
+// 满屏的封面找不到「上一个」，就只是「啪」地一下就位。
+//
+// ⚠️ 它在**每一帧**都要重新装一遍 Match（`ElementTransition` 是每帧重新登记的，
+// 框架只认这一帧装的那个）。而框架只留一帧的记录（`rec.frame+1 < rt.frame` 就
+// 删），所以漏一帧就等于转场没了。
 func (s *Shell) viewCover(c *ui.Context, st app.State) {
-	imgcache.View(c, s.images, st.CoverURL, coverSize, coverSize)
+	// 🔴 外面这一层 `Size(56,56)` 不是多余的：**`Absolute()` 是相对父容器摆的**，
+	// 而这一行的父容器是上面那个「封面 + 歌名」的 `Grow(1)` Row。不套这一层的话
+	// 悬停浮层盖住的是**整块左半边播放条**——实测那块黑从 x≈8 铺到 x≈1048，歌名
+	// `stereo16` 被压在底下，⤢ 落在整块的中心 x≈540 而不是落在 56×56 的封面上。
+	//
+	// `queue_drawer.go` 的 `viewQueueCover` 就是这个套法（它外面套的是
+	// `Width(queueCoverSize)` 那一层），照抄。
+	//
+	// 🔴 **可点的是外面这一层 wrapper，不是里面那张图。**
+	//
+	// 命中链是「最上面那个含点的框 + 它**自己的父链**」，**兄弟不在链上**
+	// （`mygo/ui/input.go:131-145` 的 `appendHitChain`）；而 `flagPassThrough` 只
+	// 跳过那一个自己的命中框、子节点照登记（`runtime.go:953`）。于是只要可点的
+	// 是浮层的**兄弟**，浮层里任何一个字都会把它挡住：⤢ 正好落在封面正中，而
+	// 「把鼠标移过去、点一下」点的就是那个正中。
+	//
+	// 症状很有意思：点封面**边角**能开（那儿没有文字），点**正中**什么也不会发生。
+	//
+	// 两条改法都验过（改回去都红）：
+	//
+	//	① 可点的挪到 wrapper 上（本票）。wrapper 是浮层的**父级**，于是浮层里不管
+	//	   画什么，链都走得到它。往浮层里再加东西也吃不掉点击。
+	//	② 给 ⤢ 那个字加 `PassThrough()`（评审给的最小改法）。字不登记了，链落到
+	//	   里面那张图上——也通，但那是**逐个子元素**修的：下一个往浮层里加的东西
+	//	   还得再记着加一次。
+	//
+	// 选了 ①，顺手也给字加了 `PassThrough()`（`toast.go` 那边也是这么写的）——
+	// 那个字自己不该接指针：指针停在一个字上却报成「停在封面旁边的空气上」，
+	// 悬停反馈的位置就不对了。
+	//
+	// `queue_drawer.go` 的 `viewQueueRow` 本来就是这个形状——可点的行是封面的
+	// **祖先**，所以那边浮层里画 ▶ 还是 ⤢ 都吃不掉点击。
+	wrap := ui.Row(c).Key("playbar-cover").Size(coverSize, coverSize)
+	wrap.Children(func() {
+		// 共享元素转场留在里面那张图上（它才是转场的那一半）。
+		imgcache.View(c, s.images, st.CoverURL, coverSize, coverSize).
+			Label("当前封面").
+			Transition(coverTransition(coverIdentity(s, st)))
+
+		if wrap.Hovered() {
+			// Biu 那边是 hover 时浮一层 `bg-[rgba(0,0,0,0.5)]` 加一个向上的箭头
+			// （`layout/playbar/left/index.tsx:38-41`）。没有这一层的话，用户不知道
+			// 那张封面是能点的。
+			//
+			// PassThrough：浮层这一层和里面那个字都不接点击。
+			ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Radius(c.Theme().Radius).
+				PassThrough().Center().Background(ui.RGBA(0, 0, 0, 0.5)).Children(func() {
+				ui.Text(c, "⤢").FontSize(20).TextColor(ui.RGBA(255, 255, 255, 0.92)).
+					PassThrough()
+			})
+		}
+
+		// 长按 2.5 秒 = 一键三连（SPEC 需求 69），500ms 起进度环。
+		//
+		// ⚠️ **它在 `Children` 里面**：环画的是「这一帧按了多久」，而那要靠
+		// `wrap.Pressed()` 问出来（见 like.go 的 viewLikeRing）。
+		s.viewLikeRing(c, wrap.Pressed())
+	})
+
+	if wrap.Clicked() {
+		// 🔴 **长按三连之后松手补发的那一次 click 必须吞掉**，否则凭空弹出全屏
+		// 播放器（原因见 like.go 文件头：Biu 那边漏了它是一次多余的赞）。
+		if s.like.swallowClick() {
+			return
+		}
+		s.openFullPlayer()
+	}
 }
 
 // viewStepButtons 是上一首和下一首。
@@ -195,10 +409,21 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 // 队列里只有一首歌时按钮仍然是亮的——按下去听到的是同一首从头来，
 // 表现成按了没反应更让人困惑。
 func (s *Shell) viewStepButtons(c *ui.Context) {
-	// 宽度要放得下三个汉字：按 64 画出来是「上...」「下...」，看着像坏了。
+	s.viewPrevButton(c)
+	s.viewNextButton(c)
+}
+
+// viewPrevButton / viewNextButton 是那两首键。分成两个是为了全屏播放器能把它们
+// 摆到播放键**两边**（Biu 的 `MusicPlayControl` 就是 上一首 · 播放 · 下一首）。
+//
+// 宽度要放得下三个汉字：按 64 画出来是「上...」「下...」，看着像坏了。
+func (s *Shell) viewPrevButton(c *ui.Context) {
 	if ui.Button(c, "上一首").Width(88).Disabled(!s.app.CanPrev()).Clicked() {
 		s.app.Prev()
 	}
+}
+
+func (s *Shell) viewNextButton(c *ui.Context) {
 	if ui.Button(c, "下一首").Width(88).Disabled(!s.app.CanNext()).Clicked() {
 		s.app.Next()
 	}

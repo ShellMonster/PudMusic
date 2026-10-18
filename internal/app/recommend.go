@@ -148,9 +148,7 @@ func recommendID(it bili.RecommendItem) string {
 // 而用户按了播放会得到一句「这一首还不能放：缺稿件 id」（见
 // `RecommendItem.Item` 上那一段）。
 func recommendItem(it bili.RecommendItem) Item {
-	item := onlineItem(it.Bvid, it.Cid, it.Title, it.Cover)
-	item.Artist = it.Owner
-	return item
+	return onlineItem(it.Bvid, it.Cid, it.Title, it.Cover, it.Owner, it.OwnerMid)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -30,6 +30,8 @@ import (
 // 迷你播放器和主播放器要各开一个。
 type Player struct {
 	dec *errorDecoder
+	// tap 是频谱挂点，夹在解码器和变速层之间（见 tap.go）。它只看不改。
+	tap *tap
 	// vs 是保调变速层，夹在解码器和 MyGo 之间（见 rate.go）。
 	//
 	// ⚠️ MyGo 那个 `Player.SetSpeed` **不能**用来做倍速：它是重采样，音高会跟
@@ -83,8 +85,9 @@ func Open(path string) (*Player, error) {
 // 「用户开着 1.5 倍速切回 1 倍速」这条。
 func New(d mygoaudio.Decoder) *Player {
 	ed := &errorDecoder{Decoder: d}
-	vs := newVarispeed(ed)
-	return &Player{dec: ed, vs: vs, play: mygoaudio.NewPlayer(vs), vol: 1}
+	tp := newTap(ed)
+	vs := newVarispeed(tp)
+	return &Player{dec: ed, tap: tp, vs: vs, play: mygoaudio.NewPlayer(vs), vol: 1}
 }
 
 // CloserReadSeeker 是「既是字节来源、又必须被一起关掉」的那一类东西。
@@ -231,6 +234,8 @@ func (p *Player) Duration() time.Duration { return p.play.Duration() }
 // SetVolume 设音量增益，1 是解码出来的原样，0 静音。改动会自己淡入淡出，不咔哒。
 func (p *Player) SetVolume(v float64) *Player {
 	p.vol = v
+	// 频谱挂点也拿一份：它挂在解码器上，看不见播放器这一层的音量（见 tap.go）。
+	p.tap.SetVolume(float32(v))
 	p.play.SetVolume(v)
 	return p
 }
