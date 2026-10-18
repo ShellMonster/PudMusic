@@ -631,4 +631,71 @@ var Items = []Item{
 			"TestWMAIsListedButNotPlayable",
 		},
 	},
+	{
+		Category: HTTP,
+		// 歌词搜索那两个源（Biu 的 `lyrics-search-modal/`）。**参数逐个对着上游抄**：
+		// 少一个的症状在界面上像「这个源没有翻译」或「这个源搜不出来」，而那两样都
+		// 不是参数写错造成的。
+		//
+		// ⚠️ 凭据边界钉的是**端到端**那半：`DefaultInjectPolicy` 把两个源列在
+		// referer 档那张表本身在 `credentials_test.go` 里；这里验的是新建的那两个客户端
+		// 真的走了那一层（忘了递 transport，白名单就完全不起作用，而症状是「歌词源那边
+		// 收到了不属于它的 cookie」，没有报错）。
+		Spec: "歌词两个源各自的接口与参数：网易云搜（s/type=1/limit=20/offset=0）与取词（那五个 -1 加 _nmclfl）、LRCLib 搜（q）；LRCLib 的预览一个请求都不发；两个源都不带 B 站凭据",
+		Tests: []string{
+			"TestBothSourcesCanSearch",
+			"TestNeteasePreviewSendsThoseFiveParams",
+			"TestNeteaseFallsBackToTheKaraokeLyric",
+			"TestLRCLibPreviewIssuesNoRequest",
+			"TestAnEmptyWordSendsNothing",
+			"TestTheLyricSourcesNeverSeeBiliCredentials",
+		},
+	},
+	{
+		Category: Negative,
+		// 「避免重复请求」那半句的结果缓存。判据是「第二次搜的时候那个源一次都没被叫
+		// 到」——只判「界面上出现了一样的候选」抓不住它，缓存和源返回同一样东西时两者
+		// 长得完全一样。
+		Spec: "歌词搜索结果写进缓存：同一个词不搜第二遍、两个源各一份、换词换源不撞键、失败不缓存（不然按重试弹的还是上一次那句拉不到）",
+		Tests: []string{
+			"TestTheSameWordIsNotSearchedTwice",
+			"TestTheCacheIsKeyedBySourceAndByWord",
+			"TestAFailedSearchIsNotRemembered",
+			"TestEmptyingTheBoxClearsTheList",
+		},
+	},
+	{
+		Category: Negative,
+		// 搜/预览都在后台，而用户在那几百毫秒里会切源、关弹窗、换歌。少了代次守卫的症状
+		// 是「我搜的是乙，弹出来的是甲的歌」，而按多少次搜索都一样。
+		//
+		// ⚠️ 「换歌之后不许采用」单独钉：照着当前这一首写下去的话，画面上换到的是**歌名
+		// A 配词 B**，而界面上从歌词到播放条每一个字都对得上。
+		Spec: "歌词搜索与预览的迟到结果：搜索/预览各有代次守卫；换歌之后不许采用；采用落在正在放的那一首歌的缓存上，且不带走用户调过的偏移和字号",
+		Tests: []string{
+			"TestAStaleSearchNeverLands",
+			"TestAdoptingRefusesAfterTheSongChanged",
+			"TestAdoptingLandsOnTheSongThatIsPlaying",
+			"TestAcandidateThatCarriesItsLyricsIsPreviewedWithoutAnyRequest",
+			"TestAdoptingIsRefusedWhileThePreviewIsStillLoading",
+			"TestNoLyricsSourcesMeansNoSearch",
+		},
+	},
+	{
+		Category: Negative,
+		// 「这一条没有歌词」和「拉不到」必须分开说：混成一句的话，用户读到「网络不通」
+		// 会去反复重试，而这一条重试一万次也不会有歌词——那一版在源上就是没有。
+		// 而「源返回了成功而正文是空的」是**第三种**，不能摆一个空弹窗搪塞。
+		Spec: "歌词来源分得清三种：拉不到 / 这一条没有歌词 / 成功但正文是空的（判据是哨兵错误 errors.Is(err, ErrNoLyrics)，不是「err != nil」）",
+		Tests: []string{
+			"TestAFailedSearchIsAnErrorAndNotAnEmptyList",
+			"TestAPreviewThatHasNoLyricsSaysSo",
+		},
+	},
 }
+
+// ⚠️ 歌词搜索的**界面**那五条证据（500ms 防抖走假时钟、铁律四的行键、失败之后不许
+// 每帧重发 + 重试按钮真的再发一次、预览里没有歌词时说的是「未找到歌词内容」、以及
+// 走通一遍的流程）跟着**那两个弹窗**一起走，不在这一票里——它们钉的是 `internal/ui`
+// 那一半的行为，而那一半是拆出去的下一票。台账要求每一条写出来的测试真的存在，
+// 所以它们不能先写在这儿等（`TestEveryPieceOfEvidenceReallyExists` 会红）。

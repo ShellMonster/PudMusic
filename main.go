@@ -75,6 +75,10 @@ func main() {
 	// 见 `internal/app/recommend.go`）。
 	a.MountRecommend(cli)
 
+	// 歌词也挂在开窗口之前：缓存那半边要建目录（阻塞 IO），搜索那半边不发请求、
+	// 只是「零件齐了」看得见一点。排在本地音乐之后是随意的——两个都不占界面线程。
+	ui.MountLyrics(a)
+
 	// 本地音乐也挂在开窗口之前：它不读盘，真正要等的是「退出时把那几摊
 	// 文件监听关掉」，而那要走 App.Close（退出流程里跑的）。
 	ui.MountLocalMusic(a)

@@ -266,7 +266,7 @@ func (a *App) loadLyrics(key string, gen int) {
 }
 
 // PutLyrics 把一份歌词写进缓存，并立刻显示出来。这是给「找到了歌词」那一条路用的
-// （#21 接上歌词源之后调它），缓存键取当前这一首。
+// （`AdoptLyricPreview` 调它，见 lyrics_search.go），缓存键取当前这一首。
 //
 // ⚠️ 译文**整个换掉**：旧源那份得跟着走，否则界面上叠着新原文和旧译文——两行对不上
 // 的字，比没有译文更难懂。
@@ -342,7 +342,7 @@ func (a *App) flushLyrics() {
 		return
 	}
 	if err := c.Save(key, entry); err != nil {
-		// 写失败只记日志不弹提示：这一版的歌词是从别的源拿的（#21），
+		// 写失败只记日志不弹提示：歌词是从别的源拿的（见 `OpenLyricPreview`），
 		// 缓存写不下去不影响这一次听歌，而一个「歌词保存失败」的提示会让
 		// 用户以为歌词没找到。
 		log.Printf("biu: 歌词偏移/字号写不进缓存：%v", err)
