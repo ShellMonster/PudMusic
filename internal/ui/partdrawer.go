@@ -51,9 +51,11 @@ const (
 	partRowHeight = 40
 	// partNumW 是编号那一列的宽。「100」在 12 号字下不到 24，28 是给三位数留的。
 	partNumW = 28
-	// partListMaxHeight 是下面那一列的最高高度。60vh 是 Biu 那个浮层的
+	// partListMaxHeight 是下面那一列的**上限**。60vh 是 Biu 那个浮层的
 	// `h-[60vh]`，420 是封顶（Biu 那边没有封顶，它靠窗口高度）。
 	partListMaxHeight = 420
+	// partDividerH 是顶上那条分隔线。
+	partDividerH = 1
 )
 
 // viewPartButton 是播放条上那个「分集」键，加上它弹出来的那一列。
@@ -93,7 +95,7 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 	// 「点击区比图形大」）。
 	btn := iconButton(c, iconPageList, "分集", iconSm).
 		Size(iconHit, iconHit).Padding(0, 7).
-		Tooltip(partEntryTooltip(parts, cur))
+		Tooltip(partEntryTooltip(parts, cur, s.app.PartsWorthAsking(), s.app.PartsErr()))
 	if btn.Clicked() {
 		s.partOpen = !s.partOpen
 	}
@@ -119,24 +121,78 @@ func partsWorthEntry(parts []bili.VideoPart, worthAsking bool) bool {
 	return len(parts) > 1 || (len(parts) == 0 && worthAsking)
 }
 
+// partsHowItIs 说「这一首的分集问到哪儿了」，**只有一个出口**。
+//
+// 返回空串 = 问到了，那一句话交给调用方自己说（有几集、第几集是另一回事）。
+// 返回别的那三句里的一句 = 还没问到，而三句要分清，因为它们对用户的下一步不一样：
+//
+//	这一首没有分集    换到本地文件 / 音乐库了，不是没问到
+//	问不出分集：…     问了，B 站没给（网络 / 风控）；`App` 隔 15 秒会再问一次
+//	正在问这一首有哪几集 还没回来
+//
+// ⚠️ **键上的悬停提示和抽屉里那一行字都调它**。这两处说的是同一件事，而同一时刻说
+// 两种说法就等于在界面上撒两个矛盾的谎——评审抓到过一次：把 pagelist 顶成 403 之后，
+// 悬停提示还在说「正在问这一首有哪几集」，而抽屉里说的是「问不出分集：HTTP 403」。
+// 而 `App` 失败之后 15 秒内不会再问（`partsRetryAfter`），那句「正在问」会挂很久。
+//
+// ⚠️ **收的是「几集」而不是那份列表**：两个调用点手上一个有 `[]bili.VideoPart`
+// 一个只有 `[]partRow`，而「有没有问到」两边都只是长度——`partRowsFor` 是一集一行。
+func partsHowItIs(n int, worthAsking bool, err error) string {
+	switch {
+	case !worthAsking:
+		return "这一首没有分集"
+	case err != nil:
+		return "问不出分集：" + err.Error()
+	case n == 0:
+		return "正在问这一首有哪几集"
+	}
+	return ""
+}
+
 // partEntryTooltip 是那个键悬停时的一句话。
 //
-// 有几集说几集、正好在第几集，用户在**不点开**的时候就知道自己在一个多长的
-// 列表的第几格——分集多的稿子（第 100 集那种）光靠点进去数是数不出来的。
-func partEntryTooltip(parts []bili.VideoPart, cur app.Item) string {
-	switch {
-	case len(parts) == 0:
-		return "正在问这一首有哪几集（点一下看）"
-	default:
-		at := "还没开始放其中一集"
-		for i, p := range parts {
-			if p.Cid == cur.Cid {
-				at = "正在放第 " + strconv.Itoa(i+1) + " 集"
-				break
-			}
-		}
-		return "共 " + strconv.Itoa(len(parts)) + " 集，" + at + "（点一下看全部）"
+// 有几集说几集、正好在第几集，用户在**不点开**的时候就知道自己在一个多长的列表的
+// 第几格——分集多的稿子（第 100 集那种）光靠点进去数是数不出来的。
+//
+// 还没问到的那三档走 `partsHowItIs`（和抽屉里那一行字同一句），末尾多一句「点一下
+// 看」——因为那句话本身就是这个键的用处：它说清现在是什么状态，而点开才看得到详情。
+func partEntryTooltip(parts []bili.VideoPart, cur app.Item, worthAsking bool, err error) string {
+	if how := partsHowItIs(len(parts), worthAsking, err); how != "" {
+		return how + "（点一下看）"
 	}
+	at := "还没开始放其中一集"
+	for i, p := range parts {
+		if p.Cid == cur.Cid {
+			at = "正在放第 " + strconv.Itoa(i+1) + " 集"
+			break
+		}
+	}
+	return "共 " + strconv.Itoa(len(parts)) + " 集，" + at + "（点一下看全部）"
+}
+
+// partDrawerHeight 是这一块该有多高：**按内容算**，不是一块固定高的死面板。
+//
+// ⚠️ **为什么不能照抄一个固定高度**：这个上限（`partListMaxHeight`）是照 Biu 那个
+// 浮层的 `h-[60vh]` 抄的，而 Biu 那一列**每行带一张 48×48 的封面**、行高 64——三集就
+// 占 192，一块 420 高的面板正好装得下。这一票**不画封面**（`bili.VideoPart` 没有每集的
+// 首帧图，见文件头），行只有 40 高：于是三集的时候固定高度会在下面**空出 259 像素
+// （一屏的 62%）**，而那块空白在界面上和「这个面板下面还有东西没画出来」长得一模一样。
+//
+// 集数多的时候封顶在 `min(winH*0.6, partListMaxHeight)`，那一列照旧滚动（`ui.List`）。
+//
+// `n` 是这一帧要画的几行；空状态那一句话也算一行的位置（它是一行 12 号字带 12 的
+// 内边距），所以这里按**至少一行**算——否则那句「问不出分集」会被挤到面板外面。
+func partDrawerHeight(n int, winH float32) float32 {
+	head := float32(partHeaderHeight + partDividerH)
+	cap := min(winH*0.6, partListMaxHeight)
+	if cap <= head {
+		return cap
+	}
+	// 一屏放得下几行。
+	if fits := int((cap - head) / partRowHeight); n > fits {
+		n = fits
+	}
+	return head + float32(max(n, 1))*partRowHeight
 }
 
 // viewPartDrawer 是浮层里的那一列。
@@ -149,36 +205,32 @@ func (s *Shell) viewPartDrawer(c *ui.Context) {
 	_, winH := c.Size()
 
 	ui.Column(c).Key("part-drawer").Width(partDrawerWidth).
-		Height(min(winH*0.6, partListMaxHeight)).Children(func() {
-		s.viewPartDrawerHeader(c, t)
+		Height(partDrawerHeight(len(s.partRows), winH)).
+		// ⚠️ 这一对**不许省**：它是无头 Tester 量这一块高度的**唯一凭据**
+		// （`Tester.Find` 认的是文字和 `Label`，不认 `Key`），而 `TestTheDrawerIsOnly
+		// AsTallAsItsContent` 量的就是它。它本身也该有——`queue_drawer.go` 那个抽屉
+		// 同样挂着 `Role(ui.RoleDialog).Label(...)`，读屏软件据此知道这块是一个弹层。
+		Role(ui.RoleDialog).Label("分集列表").
+		Children(func() {
+			s.viewPartDrawerHeader(c, t)
 
-		switch {
-		case len(s.partRows) == 0:
-			// 一片空白在界面上和「这一首没有分集」长得一模一样。而分集是问 B 站
-			// 问来的，问不到是网络/风控的事，不是这一首没有分集——三句话说开。
-			ui.Text(c, s.partDrawerWhy()).FontSize(12).
-				TextColor(t.TextMuted).Padding(12)
-		default:
-			s.viewPartDrawerList(c, t)
-		}
-	})
+			switch {
+			case len(s.partRows) == 0:
+				// 一片空白在界面上和「这一首没有分集」长得一模一样。而分集是问 B 站
+				// 问来的，问不到是网络/风控的事，不是这一首没有分集——三句话说开。
+				ui.Text(c, s.partDrawerWhy()).FontSize(12).
+					TextColor(t.TextMuted).Padding(12)
+			default:
+				s.viewPartDrawerList(c, t)
+			}
+		})
 }
 
-// partDrawerWhy 是问不到时说的那一句。
+// partDrawerWhy 是空状态那一行说的话（问到了就不画它）。
 //
-// 三个「没有」要分成三句：这一首真的没有分集 / 问了但没问到 / 还在问。
-// 混成一句的话，用户会对着一首永远问不出分集的歌反复重试。
+// 走的是 `partsHowItIs`——和键上那个悬停提示同一个出口，理由见那一条。
 func (s *Shell) partDrawerWhy() string {
-	switch {
-	case !s.app.PartsWorthAsking():
-		// 换歌换到本地文件或音乐库了（入口本来就是从那一首的键进来的，
-		// 而这一列还开着——见 `viewPartButton` 里收口的那一句）。
-		return "这一首没有分集"
-	case s.app.PartsErr() != nil:
-		return "问不出分集：" + s.app.PartsErr().Error()
-	default:
-		return "正在问这一首有哪几集"
-	}
+	return partsHowItIs(len(s.partRows), s.app.PartsWorthAsking(), s.app.PartsErr())
 }
 
 // viewPartDrawerHeader 是顶上那一条：「分集」和共几集。

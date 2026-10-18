@@ -10,13 +10,16 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -265,6 +268,74 @@ func TestTheDrawerSaysWhyWhenTheyCannotBeAsked(t *testing.T) {
 	}
 }
 
+// TestThePartsKeySaysTheSameThingAsTheDrawer 断键上的悬停提示和抽屉里那一行字
+// **说的是同一件事**。
+//
+// ⚠️ **这条钉的是评审抓到的那一处**：问失败之后悬停提示还在说「正在问这一首有哪几集」
+// 而抽屉里说的是「问不出分集：HTTP 403」——同一时刻两句话打架。而它更难受的地方是
+// `App` 问失败之后 **15 秒内不会再问**（`partsRetryAfter`），那句「正在问」于是挂在
+// 键上 15 秒，长到用户以为它在慢慢加载。
+//
+// 两处现在走 `partsHowItIs` 这**一个出口**，所以这里把两边的输出摆在一起逐档比。
+// 额外断一句「问不出的时候不许出现『暂时问不到』」——那是 `likeStarTooltip` 对赞用的
+// 那句话（网络抖动的常态），拿它来说分集会把常态说成故障。
+//
+// ⚠️ 断的是**这个纯函数**而不是悬停那一下的像素：悬停要指针停够 0.6 秒才出
+// （`TooltipBase` 的规矩），把它和「那句话对不对」搅在一起，飘的是指针时机而症状报在
+// 错的原因上。悬停本身画得出来由 `TestThePartsKeySaysWhyItIsThere` 断。
+func TestThePartsKeySaysTheSameThingAsTheDrawer(t *testing.T) {
+	cur := app.Item{Cid: "777"}
+	for _, c := range []struct {
+		name         string
+		parts        []bili.VideoPart
+		worthAsking  bool
+		err          error
+		wantTip      string // 提示里必须有的那一段
+		sameAsDrawer bool   // 提示和抽屉是不是同一句话（同一个出口 → 一样）
+	}{
+		{
+			name: "问到了：说几集、第几集", parts: multiParts(), worthAsking: true,
+			wantTip: "共 3 集，正在放第 1 集", sameAsDrawer: false,
+		},
+		{
+			name: "还在问", worthAsking: true,
+			wantTip: "正在问这一首有哪几集", sameAsDrawer: true,
+		},
+		{
+			// 🔴 评审抓到的那一档。
+			name: "问失败：不能还在说「正在问」", worthAsking: true,
+			err:          errors.New("bili: 网络没通: HTTP 403"),
+			wantTip:      "问不出分集：bili: 网络没通: HTTP 403",
+			sameAsDrawer: true,
+		},
+		{
+			name: "这一首压根没有分集（本地文件 / 音乐库）", worthAsking: false,
+			wantTip: "这一首没有分集", sameAsDrawer: true,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tip := partEntryTooltip(c.parts, cur, c.worthAsking, c.err)
+			if !strings.Contains(tip, c.wantTip) {
+				t.Errorf("悬停提示是 %q，里面没有 %q", tip, c.wantTip)
+			}
+			if c.sameAsDrawer {
+				want := partsHowItIs(len(c.parts), c.worthAsking, c.err)
+				if !strings.Contains(tip, want) {
+					t.Errorf("悬停提示是 %q，抽屉里那一行说的是 %q——两处说的是同一件事，"+
+						"说法不一样就等于在界面上撒两个矛盾的谎", tip, want)
+				}
+			}
+			if c.err != nil && strings.Contains(tip, "正在问") {
+				t.Errorf("问失败了，提示里却还有「正在问」：%q", tip)
+			}
+			if c.err != nil && strings.Contains(tip, "暂时问不到") {
+				t.Errorf("问失败了，提示却说的是「暂时问不到」——那是赞那一键的说法，"+
+					"用在分集上会把网络抖动的常态说成故障：%q", tip)
+			}
+		})
+	}
+}
+
 // TestOpeningTheFullPlayerClosesThePartsDrawer 断「浮层状态不会漏到下一个界面」。
 //
 // 满屏开着的时候播放条**根本不画**（`viewMain` 里 `if !s.full.open`），那个键不在、
@@ -349,7 +420,7 @@ func TestThePartsKeyDoesNotBreakThePlayBar(t *testing.T) {
 				t.Errorf("宽度 %d：进度条只剩 %.1f 宽（下限 %d）——拖一个位置要点半天，"+
 					"那不是不好用，是用不了", width, sb.W, partsScrubMinW)
 			}
-			assertIconNotText(t, tt, "分集")
+			assertIconKey(t, tt, "分集")
 		})
 	}
 }
@@ -464,43 +535,136 @@ func TestThePartsKeyCostsNothingElseOnThePlayBar(t *testing.T) {
 	}
 }
 
-// assertIconNotText 断 label 那一块上画的是**一枚图标**，按钮上**没有字**。
+// TestThePartsKeySharesTheMetaRowWithTheOtherKeys 钉「这个键在歌名下面**那一行**」。
 //
-// # 为什么「有东西画着」不够
+// ⚠️ **这一条是给本票吃过的两次亏写的**：第一版写了一段 19 行的注释宣称分集键挂在
+// 中间那一列的第二行（`viewProgress`），而代码里那个键在 `viewTrackMeta`——注释描述
+// 了一段不存在的代码，评审打回来的时候它还在那儿。注释和代码对不上，编译器不管，
+// 也没有任何一条测试管。
 //
-// `assertGlyphPainted`（icons_test.go 的那个）判的是「那一块不是空的」——而**一个
-// 写着「分集」两个字的普通按钮照样不是空的**，它照样通过。图标化之后（#118）这一格
-// 再没有字，而字是用户一眼认得出它是什么的**唯一**东西，所以这句话得真的量出来。
+// 所以这里直接量**位置**：分集键的垂直中心要和赞 / 收藏 / 下载那三个键**在同一条
+// 水平线上**（差不超过 2 像素）。把键挪到中间那一列的第二行（挨着播放模式）——
+// 那个位置上它挨的是进度条和播放模式，不是这三个键——这一条立刻红。
 //
-// # 量法：数那个字在画面上出现了几次
-//
-// 无头 Tester 把**画出来的文字**和 `Label` 起的无障碍名字都放进 `Texts()`，而两者
-// 在里面长得一模一样——量不出来「哪一处是字」。但**可以数**：
-//
-//	图标键（`iconButton(c, iconPageList, "分集", iconSm)`）  → 「分集」出现 **1** 次
-//	                                                             （只有 Label 那一处）
-//	文字键（`ui.Button(c, "分集").Label("分集")`）           → 出现 **2** 次
-//	                                                             （Label + 字）
-//
-// 旁边那三个键（赞 / 收藏 / 下载）量的都是 1 次——所以「1」是这个包里图标键的常态，
-// 不是这一枚的特殊。
-//
-// 前半句（真的画了图形）交给 `assertGlyphPainted`；两半合起来才是「图标键」：
-// **画着图形，而按钮上没有字**。
-func assertIconNotText(t *testing.T, tt *ui.Tester, label string) {
-	t.Helper()
-	assertGlyphPainted(t, tt, label)
+// ⚠️ **别拿宽度当判据**：图标化之后两种摆位的代价几乎一样（都只让 UP 名让出 36 上下的
+// 宽度，歌名和进度条两档一模一样，见 `viewTrackMeta` 那段注释），所以
+// `TestThePartsKeyCostsNothingElseOnThePlayBar` 分不出这两处——它量的是「不花掉别人
+// 的钱」，而这个键摆在哪儿都不是在花别人的钱。**位置要单独钉。**
+func TestThePartsKeySharesTheMetaRowWithTheOtherKeys(t *testing.T) {
+	s, tt := onlineTester(t, multiPages(), false, at(900, 460))
+	partsReady(t, s, tt, 3)
 
-	n := 0
-	for _, text := range tt.Texts() {
-		if text == label {
-			n++
+	part, ok := tt.Find("分集")
+	if !ok {
+		t.Fatalf("画面上找不到分集入口，文字有 %q", tt.Texts())
+	}
+	const sameLine = 2
+	// 收藏 / 下载是两个字的文字键，它们的框是照着字长出来的；分集是 28×28 的图标
+	// 键。所以比的是**垂直中心**，不是框的上下边。
+	for _, other := range []string{"赞", "收藏", "下载"} {
+		r, ok := tt.Find(other)
+		if !ok {
+			t.Fatalf("画面上找不到 %q，文字有 %q", other, tt.Texts())
+		}
+		mid := part.Y + part.H/2
+		otherMid := r.Y + r.H/2
+		if widthGap(mid-otherMid) > sameLine {
+			t.Errorf("分集那一格的垂直中心在 y=%.1f，而 %q 那一格在 y=%.1f（差 %.1f）——"+
+				"它们不在同一条水平线上：分集键不在歌名下面那一行（挨着赞/收藏/下载），"+
+				"而在中间那一列的第二行（挨着进度条和播放模式）",
+				mid, other, otherMid, widthGap(mid-otherMid))
 		}
 	}
-	if n != 1 {
-		t.Errorf("画面上 %q 出现了 %d 次，want 1——它只该是那个键的**无障碍名字**"+
-			"（`Label`）。出现两次说明按钮上还有字（一次字、一次 Label）：图标化之后这一格"+
-			"本来是没有字的，用户认它全靠那一枚图标", label, n)
+}
+
+// TestTheDrawerIsOnlyAsTallAsItsContent 断「面板不是一块固定高的死面板」。
+//
+// ⚠️ **判据是量出来的高度差**：三集的时候这一块该是 `头(45) + 3×40 = 165`，而照抄
+// Biu 那个浮层的 `h-[60vh]` 封顶会画成 420——**下面空出 259 像素（一屏的 62%）**，
+// 而那块空白在界面上和「这个面板下面还有东西没画出来」长得一模一样。
+//
+// 顺带把封顶那一档也钉住：集数多到一屏放不下时，高度**停在上限**上（那一列靠
+// `ui.List` 自己滚），而不是跟着集数一路长下去盖住半个窗口。
+func TestTheDrawerIsOnlyAsTallAsItsContent(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		parts int
+		// want 是这一块该有多高（封顶那一档写上限）。
+		want float32
+	}{
+		{"三集", 3, partHeaderHeight + partDividerH + 3*partRowHeight},
+		{"一集", 1, partHeaderHeight + partDividerH + partRowHeight},
+		// 一屏（winH 460）上限 276，减掉头 45 剩 231，只放得下 5 行（**整行取整**，
+		// 不切半行）；24 集超出，所以停在 45 + 5×40 = 245，而不是撑到 276。
+		{"集多到封顶", 24, partHeaderHeight + partDividerH + 5*partRowHeight},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			// 这一条断的是纯计算那一层，所以直接喂行数：真去造 24 集要一份 24 项的
+			// 回包，而「高度算得对不对」跟那一集是不是真的存在没有关系。
+			if got := partDrawerHeight(c.parts, 460); got != c.want {
+				t.Errorf("%d 集的时候这一块是 %.0f 高，want %.0f", c.parts, got, c.want)
+			}
+		})
+	}
+
+	// 画出来的那一块：真的按行数收高，而不是一块固定高的面板。
+	s, tt := onlineTester(t, multiPages(), false, at(900, 460))
+	partsReady(t, s, tt, 3)
+	openPartsDrawer(t, tt)
+
+	// 量的是**面板自己**的框（靠那个 `Label("分集列表")` 找得到），不是某一行的 y。
+	panel, ok := tt.Find("分集列表")
+	if !ok {
+		t.Fatalf("画面上找不到「分集列表」这一块，文字有 %q", tt.Texts())
+	}
+	want := float32(partHeaderHeight + partDividerH + 3*partRowHeight)
+	// 面板内还有框架那 8 的内边距（`stylePanel` 的 `t.Space(1)` 上下各 4）。
+	if got := panel.H - 8; got > want {
+		t.Errorf("三集的时候这块是 %.0f 高（去掉 8 的内边距是 %.0f），want ≤ %.0f——"+
+			"面板在最后一行下面空出了一大片（照 Biu 的 h-[60vh] 封顶的话是 420）",
+			panel.H, got, want)
+	}
+}
+
+// assertIconKey 断 label 那一格是**一个图标键**（`iconButton` + `Size(iconHit,
+// iconHit)`），而不是一个文字键。
+//
+// # 判据一：那一格的**点击区是正方的**
+//
+// 旁边赞 / 收藏 / 下载三个键量的都是 **28.00×28.00**（`iconHit`），而一个文字键的框
+// 是**照着字长出来**的——实测 `ui.Button(c, "分集")` 是 **25.80×15.31**，宽高差
+// 10.49。所以「宽和高差不超过 2」这一条，图标键过、文字键不过。
+//
+// 这条判据量的还是**用户看得见的东西**：三个正方的键中间夹一个长条，界面上就是
+// 「这个键没跟上图标化」。
+//
+// # 判据二：框里真的画着图形
+//
+// `assertGlyphPainted`（icons_test.go 的那个）只判「那一块不是空的」——所以它单用
+// 抓不住文字键，只能配着上面那一条。
+//
+// # ⚠️ 一条走过的弯路：**不要用「那个字在 Texts() 里出现几次」**
+//
+// 想法是「图标键只有无障碍名那一处、文字键有 Label 和字两处」，量出来图标键 1 次、
+// 带 `.Label()` 的文字键 2 次，看着分得开。**评审用单参数文字键打穿过一次**：
+// `ui.Button(c, "分集")`（也就是 #118 之前赞/收藏/下载三个键的写法）的**文字本身
+// 就是它的无障碍名**，于是它也只出现 **1** 次，和图标键一模一样。根子在这儿：
+// `Texts()` 分不出「哪一处是 Label、哪一处是字」，所以计数在这个形状上根本不成立。
+func assertIconKey(t *testing.T, tt *ui.Tester, label string) {
+	t.Helper()
+	r, ok := tt.Find(label)
+	if !ok {
+		t.Fatalf("画面上找不到 %q：%q", label, tt.Texts())
+	}
+	assertGlyphPainted(t, tt, label)
+
+	const squareTolerance = 2
+	if widthGap(r.W-r.H) > squareTolerance {
+		t.Errorf("%q 那一格是 %.2f×%.2f（宽高差 %.2f），不是方的——旁边赞/收藏/下载那三个键"+
+			"量的都是 28.00×28.00。一个文字键的框是照着字长出来的，所以这一格画的是"+
+			"「分集」两个字而不是一枚图标（图标化之后这一格再没有字，而字是用户一眼"+
+			"认出它是什么的唯一东西）",
+			label, r.W, r.H, widthGap(r.W-r.H))
 	}
 }
 
