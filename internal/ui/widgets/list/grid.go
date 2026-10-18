@@ -502,13 +502,9 @@ func (g *Grid) keepAnchor(cols int) {
 func (g *Grid) viewRow(r ui.ListRow, cols int, cell float32) {
 	c, first := r.Context, r.Index*cols
 
-	// 末尾哨兵那一行：这一行里没有歌，只有最后那一格是「正在加载 / 重试」。
-	//
-	// ⚠️ 判据是「第一格的下标越过了全部的歌」而不是「这是最后一行」：后者在网格
-	// 里没法写（网格的末行和别的行长得一样），而前者恰好等价——哨兵排在
-	// `len(g.songs)` 那一位，它那一行的第一格必然越界。
+	// 哨兵**独占一行**时（`len(g.songs)` 正好是列数的整数倍）：这一行里没有歌。
 	if first >= len(g.songs) {
-		g.viewFooter(c, cols, cell)
+		g.viewFooterRow(c, cols, cell)
 		return
 	}
 	m := g.songs[first]
@@ -531,10 +527,29 @@ func (g *Grid) viewRow(r ui.ListRow, cols int, cell float32) {
 		ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(gridGap).Children(func() {
 			for k := range cols {
 				i := first + k
-				if i >= len(g.songs) {
-					// 最后一行不满：剩下的格子空着（CSS grid 也是这么摆的，
-					// 空格子不占位也不画边框）。
+				// 越过最后一格，或者这一格是「歌画完了、又没装哨兵」的那一格：
+				// 空着（CSS grid 也是这么摆的，空格子不占位也不画边框）。
+				//
+				// ⚠️ **第二个条件不能省**：最后一行没排满时 `i == len(g.songs)` 也会
+				// 走到这里，而那时根本没有哨兵（`rows()` 不把哨兵算成一行，
+				// `PagedList.syncList` 早就 `SetFooter(nil)` 了）。不挡的话它会落到
+				// 下面那一支去**越界取 `g.songs[i]`**，当场崩在画这一行上，屏幕上留下
+				// 「这一行画不出来」——`TestEveryViewSurvivesTheNarrowestWindow`
+				// 量到的就是它（奇数首歌 + 网格，最窄窗口）。
+				if i > len(g.songs) || (i == len(g.songs) && g.footer == nil) {
 					return
+				}
+				// 🔴 **哨兵落在这一行的第 k 格**（不是第 0 格时）。哨兵排在
+				// `len(g.songs)` 那一位，而行是按列数切出来的——`len % cols` 不是 0
+				// 时它就在某一行的中间。第一版只判了「整行从哨兵开始」那一支
+				// （`first >= len`），中间那一支漏了，于是**歌数除不尽列数时网格里
+				// 看不见「正在加载 / 点此重试」**——翻页失败之后页面上什么都不剩，
+				// 而 `blocked` 闩住的是自动重试。
+				// `TestTheGridStillOffersARetryOnARealPage` 钉的就是这一条
+				// （40 首、3 列、哨兵落在第 2 格）。
+				if i == len(g.songs) {
+					g.viewFooterCell(c, cell)
+					continue
 				}
 				g.viewCellGuarded(c, i, cell)
 			}
@@ -542,22 +557,31 @@ func (g *Grid) viewRow(r ui.ListRow, cols int, cell float32) {
 	})
 }
 
-// viewFooter 画末尾哨兵那一行。哨兵在**第一格**，其余格子空着。
+// viewFooterRow 画哨兵**独占一行**时的那一行：哨兵在第一格，其余格子空着。
 //
 // ⚠️ 画在第一格而不是居中：Biu 的网格页脚是 `justify-center` 的一行，而把它摆在
 // 网格里的话，「转圈」会跟着列数在屏幕上左右跳——拖一次窗口边就换一个位置，而它
 // 是「这里正在加载」唯一的视觉标记。钉在左边至少是不动的。
-//
-// 同样兜一层：哨兵那一格画崩了只废掉那一格（理由同 viewRow 的两层兜法）。
-func (g *Grid) viewFooter(c *ui.Context, cols int, cell float32) {
+func (g *Grid) viewFooterRow(c *ui.Context, cols int, cell float32) {
+	ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(gridGap).Children(func() {
+		for k := range cols {
+			if k > 0 {
+				return
+			}
+			g.viewFooterCell(c, cell)
+		}
+	})
+}
+
+// viewFooterCell 画末尾哨兵的那一格，画崩了只废掉那一格（理由同 viewRow 的两层
+// 兜法）。
+func (g *Grid) viewFooterCell(c *ui.Context, cell float32) {
 	if g.failed[footerFailed] {
 		g.failedCellText(c)
 		return
 	}
 	guardFailed(&g.failed, "网格末尾那一格", footerFailed, func() {
-		ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(gridGap).Children(func() {
-			ui.Box(c).Width(cell).AlignSelf(ui.Start).Children(func() { g.footer(c) })
-		})
+		ui.Box(c).Width(cell).AlignSelf(ui.Start).Children(func() { g.footer(c) })
 	})
 }
 

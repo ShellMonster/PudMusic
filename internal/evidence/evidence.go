@@ -450,6 +450,8 @@ var Items = []Item{
 		//  4. **网格那一档翻页失败之后还能重试**——这一条才是网格那半边必须有哨兵
 		//     的理由（`blocked` 闩住的是自动重试，解开它的只有哨兵上那个按钮）。
 		//     少了它症状是静默的：歌还在、能点，只是某一页失败之后再也不动了
+		//  5. **哨兵落在某一行的中间格时也画得出来**（歌数除不尽列数就是这种情况）
+		//     ——只判「整行从哨兵开始」那一支的话，网格里看不见它
 		//
 		// ⚠️ 第 3 条和第 4 条**是两件事**，别合成一句「网格没哨兵就翻不了页」——那句话
 		// 是错的（翻页的判据是「末尾那一行进没进画面」，而网格里最后一行就是歌的行）。
@@ -457,14 +459,19 @@ var Items = []Item{
 		// `TestEveryViewShowsTheSentinelWhileThereIsMore`——它钉的是 `SetFooter`
 		// 扇出到两份那一处，其余那些要么只量列表那半边、要么直接对 `*Grid` 调
 		// `SetFooter` 绕过了这一层）。
-		Spec: "「数据显示样式」在三档之间换：每一页都跟着换、紧凑行高真的更矮、网格那一档照样翻页，翻页失败了也还有重试",
+		Spec: "「数据显示样式」在三档之间换：每一页都跟着换、紧凑行高真的更矮、网格那一档照样翻页，翻页失败了也还有重试（哨兵落在行中间时同样画得出来）",
 		Tests: []string{
 			"TestEveryPageFollowsTheDisplayStyleSetting",
 			"TestTheCompactRowsAreShorterThanTheNormalOnes",
 			"TestTheGridCountsTheSentinelAsARow",
 			"TestTheGridKeepsPagingWorking",
 			"TestTheGridOffersTheRetryThatTheListOffers",
+			"TestTheGridStillOffersARetryOnARealPage",
 			"TestEveryViewShowsTheSentinelWhileThereIsMore",
+			"TestTheSentinelShowsEvenWhenItLandsMidRow",
+			// 上面那条引出来的另一半：最后一行没排满时，那几格必须空着而不是去越界
+			// 取 `songs[i]`。
+			"TestAnUnfilledLastCellStaysEmpty",
 			"TestTheGridStillPagesOnARealPage",
 			"TestSwitchingViewsKeepsTheSongs",
 			// 多选接线要装到**两份**控件上：只装列表那半边的话网格那一档一格勾选框都

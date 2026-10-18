@@ -618,13 +618,26 @@ func abs(v int) int {
 	return v
 }
 
-// TestTheGridStillPagesOnARealPage 钉住「切到网格之后还翻得了页」。
+// TestTheGridStillPagesOnARealPage 钉住「切到网格之后翻页链路整条是通的」。
 //
-// 这一条是网格那一档**唯一容易整条丢掉**的功能：`ui.List` 是虚拟的，翻页靠末尾
-// 那个哨兵（滚到它就拉下一页），而网格那一档是另一个控件——它没有哨兵的时候，
-// 页面看上去完全正常：歌都在、封面都在、点得动、双击能播，**只是永远翻不到第二页**。
+// 这一条量的是**整页那一层**：切档 → 收页 → 画出来 → 滚到底 → 续拉。网格是另一个
+// 控件，而 `PagedList` 的行数、可见行、三重保障全都要按摆法换算法——任何一处没换，
+// 症状就是「切到网格之后停在第一页」。
 //
-// ⚠️ 判据是**真的加载到第二页**，不是「哨兵画在屏幕上」。
+// ## ⚠️ 这一条**不是**靠末尾哨兵成立的（这句话我写错过一次）
+//
+// 翻页的触发判据是 `PagedList.afterFrame` 里那句「末尾那一行进没进画面」（`last < n-1`
+// 就什么都不做），而网格里**最后一行本身就是歌的行**，滚到底照样命中——把网格那半边
+// 的哨兵拿掉（`SwitchView.SetFooter` 只装列表那半边），**这一条照样绿**。变异的证据：
+// 拿掉哨兵后 `internal/ui` 整包 ok，只有 `widgets/list` 里那两条红。
+//
+// 哨兵真正负责的是「还有就拉时的那一句」和**失败之后的「点此重试」按钮**（`blocked`
+// 闩住的是自动重试，解开它的只有那个按钮）——钉住的是
+// `TestTheGridOffersTheRetryThatTheListOffers` 和同一层的
+// `TestTheGridStillOffersARetryOnARealPage`。**把「翻得动」和「失败之后还有出路」
+// 合成一句话，就会又写错一次。**
+//
+// 判据是**真的加载到第二页**，不是「哨兵画在屏幕上」。
 func TestTheGridStillPagesOnARealPage(t *testing.T) {
 	s, tt := newShell(t)
 	// ⚠️ **一页要够高**（40 首 ≈ 2560 像素 > 900 的窗口）：一屏摆得下时三重保障的
@@ -764,5 +777,39 @@ func TestTheBatchOpsStillWorkInEveryView(t *testing.T) {
 					m, tt.Texts())
 			}
 		})
+	}
+}
+
+// TestTheGridStillOffersARetryOnARealPage 是 `TestTheGridStillPagesOnARealPage` 的
+// 另一半，也是它真正该在的那个地方。
+//
+// ## 为什么要有这一条
+//
+// 把网格那半边的哨兵拿掉之后，`internal/ui` 整包是绿的——上一条的翻页照样翻得了，
+// 而 `widgets/list` 里钉「重试」的那两条在另一个包里。**整页这一层当时没有任何一条
+// 会红**，于是「网格那一档翻页失败之后卡死」这件事在页面这一层是没有证据的。
+//
+// 这一条把它补上：第二页装成一次业务错误（B 站的错都在 HTTP 200 里面，`refused`），
+// 切到网格，滚到底，然后要那个「点此重试」**出现在画面上**。拿掉哨兵之后这一条立刻
+// 红——症状是页面上什么都不剩，而 `blocked` 闩住的是自动重试，用户能做的只有切路由
+// 或者把视图切回列表。
+func TestTheGridStillOffersARetryOnARealPage(t *testing.T) {
+	f := newLibFake(t).withLater(1, 60, manyTitles(1, 40)...)
+	f.withLater(2, 60, manyTitles(2, 20)...)
+	f.mu.Lock()
+	f.later[2] = refused
+	f.mu.Unlock()
+
+	tt, s := libraryShell(t, f, laterPath)
+	mountDisplay(t, s.app)
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 40 })
+
+	setDisplay(t, s.app, tt, app.DisplayModeCard)
+	scrollToBottom(t, tt)
+	waitFrames(t, tt, "页面停在那一个重试按钮上", func() bool {
+		return tt.HasText("加载失败，点此重试")
+	})
+	if s.laterPage.rows.Status().Loading {
+		t.Error("失败之后还在转圈")
 	}
 }

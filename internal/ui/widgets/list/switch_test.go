@@ -12,6 +12,7 @@ package list
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -197,6 +198,83 @@ func TestTheGridKeepsPagingWorking(t *testing.T) {
 		return p.Paged().Loaded == 60 && !p.Paged().Loading
 	})
 }
+
+// TestTheSentinelShowsEvenWhenItLandsMidRow 钉住「哨兵落在某一行的中间格时也画」。
+//
+// 哨兵排在第 `len(songs)` 位，而行是按列数切出来的——**歌数除不尽列数时哨兵就在某一
+// 行的中间格**，不是第一格。第一版只判了「整行从哨兵开始」那一支，中间那一支漏了，
+// 于是网格里看不见「正在加载 / 点此重试」：翻页失败之后页面上什么都不剩，而 `blocked`
+// 闩住的是自动重试。
+//
+// ⚠️ **两首都量**：520 宽是**两列**，奇数首歌的哨兵落在最后一行的第 2 格（这一支），
+// 偶数首歌的哨兵独占一行（另一支）。少量一首的话最后一行就没排满，而那一行**后面还
+// 有格子**——那一格还必须空着，见下面 `TestAnUnfilledLastCellStaysEmpty`。
+func TestTheSentinelShowsEvenWhenItLandsMidRow(t *testing.T) {
+	for _, n := range []int{1, 2, 5} {
+		songs := pageSongs(1, n)
+		for _, v := range []View{ViewList, ViewCard} {
+			t.Run(fmt.Sprintf("%d首-%s", n, v), func(t *testing.T) {
+				sv := NewSwitchView(newCache(t), Actions{})
+				sv.SetView(v)
+				sv.SetSongs(songs)
+				sv.SetFooter(func(c *ui.Context) { ui.Text(c, sentinelMarker) })
+
+				tt := ui.NewTester(sv.View, testerW, testerH)
+				tt.Frame()
+				for range 3 {
+					tt.Frame()
+				}
+
+				if _, ok := spotOf(tt, sentinelMarker); !ok {
+					t.Errorf("%d 首歌、%s 那一档看不见哨兵——它落在最后一行的中间格，"+
+						"而那一支没画。文字有 %q", n, v, tt.Texts())
+				}
+			})
+		}
+	}
+}
+
+// TestAnUnfilledLastCellStaysEmpty 钉住「最后一行没排满的那几格是空的」。
+//
+// ⚠️ 这是上一条的**另一半**，而且是它引出来的：哨兵那一格判在「下标 == 歌数」上，
+// 而最后一行没排满时**后面还有格子**也是同一个下标——那时候根本没有哨兵（`rows()`
+// 不把它算成一行，`PagedList.syncList` 早就 `SetFooter(nil)` 了）。不挡的话它会去越界
+// 取 `songs[i]`，当场崩在画这一行上，屏幕上留下「这一行画不出来」。
+//
+// 判据是**没有崩溃**（`TestEveryViewSurvivesTheNarrowestWindow` 在整页那一层量的是
+// 同一件事），加上最后那首歌**画出来了**——崩了的话那一格会被换成占位。
+func TestAnUnfilledLastCellStaysEmpty(t *testing.T) {
+	// 三首歌、两列 → 最后一行有一格是空的（没有哨兵那一档）。
+	for _, v := range []View{ViewList, ViewCard} {
+		t.Run(v.String(), func(t *testing.T) {
+			songs := pageSongs(1, 3)
+			sv := NewSwitchView(newCache(t), Actions{})
+			sv.SetView(v)
+			sv.SetSongs(songs)
+
+			tt := ui.NewTester(sv.View, testerW, testerH)
+			tt.Frame()
+			for range 3 {
+				tt.Frame()
+			}
+
+			for i, s := range songs {
+				if _, ok := spotOf(tt, s.Title); !ok {
+					t.Errorf("第 %d 首没画出来：%q", i+1, tt.Texts())
+				}
+			}
+			if tt.HasText("画不出来") {
+				t.Errorf("有一格画崩了：%q", tt.Texts())
+			}
+		})
+	}
+}
+
+// sentinelMarker 是上面那几条自己画的哨兵上的字。
+//
+// 用它而不是 `footerLabel`：那个是 `PagedList` 自己的哨兵（转圈那一句）上的标签，
+// 而这两条量的是「哨兵画不画得出来」本身，值写死一个更好认。
+const sentinelMarker = "这一格是哨兵"
 
 // TestTheGridOffersTheRetryThatTheListOffers 是网格哨兵**真正的**用处。
 //

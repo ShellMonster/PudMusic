@@ -535,8 +535,7 @@ func (p *pagedRows) columns(c *ui.Context) int {
 func (p *pagedRows) viewGridRow(r ui.ListRow, cols int) {
 	c, first := r.Context, r.Index*cols
 
-	// 末尾哨兵那一行：这一行里没有歌，只有第一格是转圈 / 重试。判据和
-	// `widgets/list` 的 Grid 那一处完全一样（第一格的下标越过了全部的歌）。
+	// 哨兵**独占一行**时（`len(p.rows)` 正好是列数的整数倍）：这一行里没有歌。
 	if first >= len(p.rows) {
 		ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(gridGap).Children(func() {
 			ui.Box(c).Grow(1).AlignSelf(ui.Start).Children(func() { p.viewFooter(c) })
@@ -559,13 +558,34 @@ func (p *pagedRows) viewGridRow(r ui.ListRow, cols int) {
 		ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(gridGap).Children(func() {
 			for k := range cols {
 				i := first + k
-				if i >= len(p.rows) {
-					return // 最后一行不满：剩下的格子空着（CSS grid 也是这么摆的）
+				// 越过最后一格，或者这一格是「行画完了、又没装哨兵」的那一格：空着。
+				// ⚠️ 第二个条件不能省，理由逐字见 `widgets/list/grid.go` 的 `viewRow`
+				// 里那一段（不挡会越界取 `p.rows[i]`，崩在画这一行上）。
+				if i > len(p.rows) || (i == len(p.rows) && !p.showFooter()) {
+					return
+				}
+				// 🔴 **哨兵落在这一行的第 k 格**（不是第 0 格时），理由和
+				// `widgets/list/grid.go` 的 `viewRow` 里那一支逐字一样：行是按列数
+				// 切出来的，`len % cols` 不为 0 时哨兵就在某一行的中间，只判「整行从
+				// 哨兵开始」会**看不见它**——症状是翻页失败之后页面上什么都不剩，
+				// 而 `blocked` 闩住的是自动重试。
+				if i == len(p.rows) {
+					p.viewFooterCell(c)
+					continue
 				}
 				p.viewCellGuarded(c, i, cell)
 			}
 		})
 	}, func(any) { p.markFailed(m.ID) })(c)
+}
+
+// viewFooterCell 画末尾哨兵的那一格。
+//
+// ⚠️ 宽度 `Grow(1)` 而不是算出来的格子宽：这一格是**塞进一行里的**，而这一行的宽度
+// 是那一行的歌决定的；写死一个宽会和旁边的格子对不上（这是 BMG-56 那条
+// 「别量时长」的同一个坑——被推走的是左边，右边几列的 x 一个像素没变）。
+func (p *pagedRows) viewFooterCell(c *ui.Context) {
+	ui.Box(c).Grow(1).AlignSelf(ui.Start).Children(func() { p.viewFooter(c) })
 }
 
 // viewCellGuarded 画一格，画崩了只废掉那一格。
