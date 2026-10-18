@@ -749,14 +749,16 @@ func TestDeletingFromThePageGoesThroughTheSameCallAsTheSidebar(t *testing.T) {
 	a := folderAppWithSettings(t, f)
 	a.TestOnlyAdoptLogin("7")
 
-	var said string
-	done := make(chan string, 1)
-	a.DeleteCollectionFolder(testRef, "通勤路上", func(msg string) {
-		said = msg
-		done <- msg
+	said := make(chan string, 1)
+	wasOK := make(chan bool, 1)
+	a.DeleteCollectionFolder(testRef, "通勤路上", func(msg string, ok bool) {
+		said <- msg
+		wasOK <- ok
 	})
+
+	var gotMsg string
 	select {
-	case <-done:
+	case gotMsg = <-said:
 	case <-time.After(3 * time.Second):
 		t.Fatal("删收藏夹那一趟没回来")
 	}
@@ -767,8 +769,14 @@ func TestDeletingFromThePageGoesThroughTheSameCallAsTheSidebar(t *testing.T) {
 	if len(got) != 1 || got[0] != "42" {
 		t.Errorf("folder/del 的 media_ids = %v，want [42]", got)
 	}
-	if !strings.Contains(said, "通勤路上") {
-		t.Errorf("说完的那句 = %q，没说清删的是哪一个", said)
+	// 🔴 **成功必须是 ok=true**：界面靠这一位决定「要不要离开这一页」，而它判断
+	// 错了的后果是「B 站拒绝删除，用户却被踢到一个空页面上」（见
+	// `TestAFailedDeleteSaysSoAndLeavesTheRowThere`）。
+	if !<-wasOK {
+		t.Error("删成功了却报成失败")
+	}
+	if !strings.Contains(gotMsg, "通勤路上") {
+		t.Errorf("说完的那句 = %q，没说清删的是哪一个", gotMsg)
 	}
 	// 成功之后那一行要从侧栏里拿掉——B 站上已经没有了，侧栏还列着就是错的。
 	if n := len(a.SideFavorites(FavoritesCreated)); n != 0 {
@@ -805,5 +813,93 @@ func TestForgettingAFolderNeverTouchesBilibili(t *testing.T) {
 	}
 	if n := len(a.SideFavorites(FavoritesCreated)); n != 0 {
 		t.Errorf("侧栏里还剩 %d 行，want 0", n)
+	}
+}
+
+// TestAFailedDeleteSaysSoAndLeavesTheRowThere 删不掉：**说清**、报成失败、
+// 侧栏那一行原样留着。
+//
+// 🔴 这一条钉的是失败路径，因为它的后果是**界面骗人**：歌单页删完之后当前就停在
+// 这个容器上，所以界面拿到 `ok=false` 就会留在原地；而一旦这一位判断错了，用户
+// 看到的是**一个空页面**——收藏夹在 B 站上好好地还在、侧栏里也还在。
+//
+// ⚠️ **`folder/del` 成功时那一行要被拿掉、失败时不许动**：拿错了的话下一次拉全量
+// 时它（已经不存在的那个）又冒回原位。
+func TestAFailedDeleteSaysSoAndLeavesTheRowThere(t *testing.T) {
+	f := newCollectionFixture(t)
+	f.overrides["/x/v3/fav/folder/del"] = func(w http.ResponseWriter, r *http.Request) {
+		writeCollectionJSON(t, w, -400, "请求错误", nil)
+	}
+	a := folderAppWithSettings(t, f)
+	a.SetFavorites(FavoritesCreated, []Favorite{{ID: 42, Title: "通勤路上"}})
+
+	said := make(chan string, 1)
+	wasOK := make(chan bool, 1)
+	a.DeleteCollectionFolder(testRef, "通勤路上", func(msg string, ok bool) {
+		said <- msg
+		wasOK <- ok
+	})
+
+	var msg string
+	select {
+	case msg = <-said:
+	case <-time.After(3 * time.Second):
+		t.Fatal("那一趟没回来")
+	}
+	if ok := <-wasOK; ok {
+		t.Error("B 站拒绝了却报成成功——界面会以为收藏夹没了，把用户踢走")
+	}
+	if !strings.Contains(msg, "删不掉") {
+		t.Errorf("失败那一句 = %q，want 一句说清「删不掉」的", msg)
+	}
+	if n := len(a.SideFavorites(FavoritesCreated)); n != 1 {
+		t.Errorf("侧栏里还剩 %d 行，want 1（它没删掉，那一行就该留着）", n)
+	}
+}
+
+// TestForgettingClearsTheRowOutOfWhicheverGroupItIsIn 「从侧栏移除」把那一行从
+// **它所在的那一组**里拿掉。
+//
+// 🔴 这一条是被一条真缺陷逼出来的：那一项 ⋯ 菜单对**每一页**都摆得出来，而一个
+// **别人建的**收藏夹在侧栏上是「我收藏的」那一组里的。写死「我创建的」的话，提示
+// 说「已从侧栏移除」而那一行原封不动留在侧栏上——**那是一句谎话**，而谎话是这一层
+// 最不该留的东西。
+func TestForgettingClearsTheRowOutOfWhicheverGroupItIsIn(t *testing.T) {
+	for _, g := range []FavoriteGroup{FavoritesCreated, FavoritesCollected} {
+		t.Run(g.String(), func(t *testing.T) {
+			f := newCollectionFixture(t)
+			a := folderAppWithSettings(t, f)
+			a.SetFavorites(g, []Favorite{{ID: 42, Title: "通勤路上", Type: 11}})
+
+			var said string
+			a.ForgetCollectionFolder(testRef, "通勤路上", func(msg string) { said = msg })
+
+			if n := len(a.SideFavorites(g)); n != 0 {
+				t.Errorf("「%s」那一组里还剩 %d 行，want 0（说了已移除却还在）", g, n)
+			}
+			if said == "" {
+				t.Error("一句话都没说——用户按下去像是什么也没发生")
+			}
+		})
+	}
+}
+
+// TestForgettingTakesTheRowOutOfBothGroups 同一个 id 两组里都有时，**两组都拿掉**。
+//
+// 同一个 id 同时出现在两组，意味着那是他自己建的、而他也收藏了自己建的收藏夹。
+// 用户按下这一项的理由是「我不想在侧栏看到它」——只清一组的话它会在另一组里接着
+// 冒出来，而提示已经说了「已从侧栏移除」。
+func TestForgettingTakesTheRowOutOfBothGroups(t *testing.T) {
+	f := newCollectionFixture(t)
+	a := folderAppWithSettings(t, f)
+	a.SetFavorites(FavoritesCreated, []Favorite{{ID: 42, Title: "通勤路上", Type: 11}})
+	a.SetFavorites(FavoritesCollected, []Favorite{{ID: 42, Title: "通勤路上", Type: 11}})
+
+	a.ForgetCollectionFolder(testRef, "通勤路上", func(string) {})
+
+	for _, g := range []FavoriteGroup{FavoritesCreated, FavoritesCollected} {
+		if n := len(a.SideFavorites(g)); n != 0 {
+			t.Errorf("「%s」那一组里还剩 %d 行，want 0", g, n)
+		}
 	}
 }

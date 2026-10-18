@@ -1050,6 +1050,11 @@ var Items = []Item{
 			"TestTheTwoDeletionsDoNotReadTheSame",
 			"TestForgettingTheFolderNeverTouchesBilibili",
 			"TestAFolderNobodyOwnsCanStillBeForgotten",
+			// 失败路径：删不掉时不许把用户踢走，更不许把失败原因一起擦掉。
+			"TestAFolderThatWontBeDeletedKeepsTheUserWhereTheyAre",
+			// 「从侧栏移除」要清的是**它所在的那一组**（否则提示就是谎话）。
+			"TestForgettingClearsTheRowOutOfWhicheverGroupItIsIn",
+			"TestForgettingTakesTheRowOutOfBothGroups",
 		},
 	},
 }

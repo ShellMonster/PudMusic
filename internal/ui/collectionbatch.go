@@ -24,6 +24,7 @@ import (
 	"context"
 	"log"
 	"strconv"
+	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
@@ -150,10 +151,17 @@ func (s *Shell) viewCollectionConfirm(c *ui.Context, p *collectionPage) {
 		// 不。**两个来源都要在这儿**：点「取消」按钮（`AlertDialog` 返回它的下标
 		// 0）和按 Esc（返回 `AlertDismissed`）——后者才是原来那一支。
 		//
-		// ⚠️ 漏掉「取消」按钮那一个是安静的错：框确实不再画了（`AlertDialog`
-		// 自己把 `open` 关掉了），而 `kind` 还挂着。于是这一页的每一帧都白跑一次
-		// `confirmText` 加一次立刻返回的 `AlertDialog`；更要紧的是「有一件事等着
-		// 确认」这个状态还留在这一页上，而下一次有人碰它就会连着把那件事做了。
+		// ⚠️ 别把这一行说成「修了一个 bug」。**两个后果都验过，它都不成立**：
+		// 框不会重画（`coreAlertDialog` 在 `*open` 为 false 时第一句就 return -1，
+		// 而「取消」按下去的时候 `open` 已经被 `AlertDialog` 自己关掉了）；而残留
+		// 的 `kind` 也不会连着把事情做掉——`askConfirm` / `askConfirmAbout` 是
+		// **整份替换** `confirmRequest`，下一次有人按菜单时它早就被覆盖了
+		// （评审的变异验证也确认了这一点：拿掉 `case 0` 之后全部测试照样绿）。
+		//
+		// 它真正值着的只有一件小事：**清掉状态是本分**。不唯一的代价是这一页
+		// 每一帧白跑一次 `confirmText` 加一次立刻返回 -1 的 `AlertDialog`——
+		// 便宜，但不该白花，而且「这一页没在等任何确认」和「它在等一个没人看得见
+		// 的确认」在以后加新动作时会长出不一样的行为。
 		p.confirm.kind = confirmNone
 	}
 }
@@ -353,17 +361,22 @@ func (s *Shell) startCollectionClearInvalid(p *collectionPage) {
 
 // startCollectionDeleteFolder 把 B 站上这个收藏夹删掉（连同里面的歌）。
 //
-// ⚠️ **成功了要离开这一页**：当前就停在这个已经没有了的容器上，而再点一次
-// 刷新只会得到一句「打不开这个收藏夹」。目标页是 Biu 上游删完之后去的那一个
-// （`menu.tsx` 的 `navigate("/empty")`）。
+// 🔴 **只有成功了才离开这一页**：B 站拒绝的时候收藏夹还在那儿、侧栏里也还在，
+// 而跳走的后果是用户停在**一个空页面**上、那句「删不掉」也被 `navigate` 的
+// `clearToasts` 一起擦掉——零提示加一个空页面，而东西好好地在那儿。
+//
+// ⚠️ **走开这件事过了一手**（`leave` 那儿）：那一趟跑在后台 goroutine 里，而
+// `navigate` 和 `s.collection = nil` 都是界面状态（铁律一）。直接在回调里调，
+// `-race` 会报，而真机上的症状是「有时候跳、有时候不跳」。
 func (s *Shell) startCollectionDeleteFolder(p *collectionPage) {
 	ref, title := p.ref, collectionTitleText(s.app.Collection(p.ref))
-	// 先把这一页的状态扔掉：删完之后侧栏那一行也没了，留着一份只会让
-	// `collectionFor` 在用户从历史里回去时拿回一个已经不存在的容器。
-	s.collection = nil
-	s.app.DeleteCollectionFolder(ref, title, func(msg string) {
+	s.app.DeleteCollectionFolder(ref, title, func(msg string, ok bool) {
 		s.sayFolderDone(msg)
-		s.leaveCollection(ref)
+		if !ok {
+			return // 收藏夹还在，这一页留着，提示也留着
+		}
+		s.leave.put(ref)
+		s.wake.invalidate()
 	})
 }
 
@@ -378,11 +391,49 @@ func (s *Shell) startCollectionForgetFolder(p *collectionPage) {
 	s.app.ForgetCollectionFolder(p.ref, collectionTitleText(s.app.Collection(p.ref)), s.sayFolderDone)
 }
 
-// leaveCollection 在当前页面就是被删掉的那个容器时离开这一页。
+// pendingLeave 是「刚被删掉的那个容器，等下一帧走开」那个交接槽。
 //
-// ⚠️ **判的是「当前停在这一页上」**：确认框开着的时候用户可能已经切走了，
-// 而那时候再把人家从别的页面踢走，是这一层最不该干的那种事。
-func (s *Shell) leaveCollection(gone app.CollectionRef) {
+// ⚠️ **带锁**：写它的是后台 goroutine（删收藏夹那一趟），读它的是界面线程
+// （`takeLeave`），而中间没有别的同步——`-race` 会报，真机上是「有时候跳、有时候
+// 不跳」。这一小摊的形状同 `coverURL` / `followPage.box`。
+type pendingLeave struct {
+	mu   sync.Mutex
+	ref  app.CollectionRef
+	have bool
+}
+
+// put 记下「该走开了」。同一时刻只有一个（收藏夹页一次只处理一个确认框）。
+func (l *pendingLeave) put(ref app.CollectionRef) {
+	l.mu.Lock()
+	l.ref, l.have = ref, true
+	l.mu.Unlock()
+}
+
+// take 取走。取过就没有了——不走第二遍（理由同 `collectionNotice`）。
+func (l *pendingLeave) take() (app.CollectionRef, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	ref, have := l.ref, l.have
+	l.have = false
+	return ref, have
+}
+
+// takeLeave 是「刚被删掉的那个容器，该走开了」那一趟的出口。
+//
+// **每帧开头调一次，而且取走**：取过就不会再说第二遍（理由同
+// `flushCollectionNotice`）。
+func (s *Shell) takeLeave() {
+	gone, ok := s.leave.take()
+	if !ok {
+		return
+	}
+	// 这一页的状态整个换掉：容器已经不存在了，留着一份只会让 `collectionFor`
+	// 在用户从历史里回去时拿回一个打不开的东西。
+	if s.collection != nil && s.collection.ref == gone {
+		s.collection = nil
+	}
+	// ⚠️ **判的是「当前停在这一页上」**：确认框开着的时候用户可能已经切走了，
+	// 而那时候再把人家从别的页面踢走，是这一层最不该干的那种事。
 	if s.router.Path() == collectionPath(gone.ID) {
 		s.navigate("/empty")
 	}

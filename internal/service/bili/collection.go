@@ -483,8 +483,13 @@ func (c *Client) RemoveCollectionMedias(ctx context.Context, id int64, medias []
 // 的 `postFavResourceClean`，`service/fav-resource-clean.ts`）。它认得的比我们多。
 //
 // ⚠️ **只对收藏夹有效**：和 `RemoveCollectionMedias` 同一个道理，合集 / 系列是
-// 建在稿件上的，B 站没有这个动作。界面那边只在「自己创建的收藏夹」上摆这一项
-// （照上游 `operation/menu.tsx` 的 `isCreatedBySelf`），别指望这一层判断类型。
+// 建在稿件上的，B 站没有这个动作。
+//
+// **界面那边只判所有权、不判容器类型**（见 `app.CanDeleteCollection` 的注释，
+// 以及 `DeleteFolder` 上「界面上不做类型判断」那段）：自己建的合集 / 系列上，
+// 这一项照样摆得出来，而 B 站会回一句它不认识。合集 / 系列在 URL 上是
+// `/collection/{id}?type=21`，而今天界面上没有任何地方拼出那个查询串——要手敲
+// URL 才碰得到，所以这一条现在只是**注释里的话必须是真的**，不是一个活着的缺陷。
 func (c *Client) CleanInvalidResources(ctx context.Context, id int64) error {
 	if id <= 0 {
 		return fmt.Errorf("bili: 收藏夹 id 不对（%d）", id)

@@ -296,6 +296,15 @@ func (s *Shell) collectionFor(ref app.CollectionRef) *collectionPage {
 func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 	s.applyFrameTheme(c)
 
+	// 「刚才那个收藏夹真的删掉了，所以该走开了」——**消费在界面线程的这一帧**。
+	//
+	// ⚠️ 排在主题之后、这一页别的逻辑之前：它会 `navigate`，而那一帧画出来的
+	// 还是当前这一页（`Router` 下一帧才切），所以用户看不出多了一帧。
+	//
+	// ⚠️ **为什么不是直接在后台回调里 navigate**：那一趟跑在 goroutine 里，而
+	// `navigate` 和 `s.collection = nil` 都是界面状态（铁律一）。见 `takeLeave`。
+	s.takeLeave()
+
 	ref := collectionRefOf(r)
 	if !s.app.CollectionsMounted() {
 		// 没挂接口时画得出来（头图区是空的、列表一直转圈），但要告诉用户

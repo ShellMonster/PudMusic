@@ -477,6 +477,11 @@ func TestForgettingTheFolderNeverTouchesBilibili(t *testing.T) {
 
 // TestAFolderNobodyOwnsCanStillBeForgotten 别人的收藏夹摆不出删除，但「从侧栏
 // 移除」摆得出来——它是唯一能整掉它的办法。
+//
+// 🔴 **判据是「那一行真的没了」**：这一条以前只断了「没发 `folder/del`」和「那句话
+// 出来了」，而**说「已移除」而那一行原封不动留在侧栏上，正是它名义上要挡的那个**。
+// 一个别的收藏夹在侧栏上是「我收藏的」那一组里的，而「从侧栏移除」写死了只从「我
+// 创建的」那一组里拿——于是提示是谎话。
 func TestAFolderNobodyOwnsCanStillBeForgotten(t *testing.T) {
 	b, s, tt := collectionShellAs(t, "1", "12345", mediaOf(1, "歌 一"))
 	b.setOwnerMid(900)
@@ -495,10 +500,52 @@ func TestAFolderNobodyOwnsCanStillBeForgotten(t *testing.T) {
 	if err := tt.Click("移除"); err != nil {
 		t.Fatal(err)
 	}
-	waitFrames(t, tt, "移除的那句话说出来", func() bool {
-		return screenHasText(tt, "B 站上的那个还在")
+	// 判据带上**侧栏那一行**：提示和移除是同一次调用里的两半，等到了提示不等
+	// 那一行的话，这一挡就挡不住它名义上要挡的东西。
+	waitFrames(t, tt, "侧栏上那一行没了", func() bool {
+		return screenHasText(tt, "B 站上的那个还在") &&
+			len(s.app.SideFavorites(app.FavoritesCollected)) == 0
 	})
 	if n := b.hitsOf("/x/v3/fav/folder/del"); n != 0 {
 		t.Errorf("往 B 站发了 %d 次删除", n)
 	}
+}
+
+// TestAFolderThatWontBeDeletedKeepsTheUserWhereTheyAre B 站拒绝删除时：**留在
+// 这一页**，而且那句「删不掉」留在画面上。
+//
+// 🔴 **两个症状同一个原因**：歌单页删完之后当前就停在这个容器上，所以界面拿到失败
+// 就会离开那一页；而 `navigate` 第一句就是 `clearToasts()`，于是**连失败原因都被
+// 一起擦掉**。用户看到的是：一个空页面、零提示——而收藏夹在 B 站上好好地还在、
+// 侧栏里也还在。
+func TestAFolderThatWontBeDeletedKeepsTheUserWhereTheyAre(t *testing.T) {
+	b, s, tt := collectionShellAs(t, "1", "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
+	waitSongs(t, tt, s, 2)
+	b.rejectFolderDelete()
+	s.app.SetFavorites(app.FavoritesCreated, []app.Favorite{{ID: 12345, Title: "通勤路上", Type: 11}})
+
+	if err := chooseMore(t, tt, "删除收藏夹"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("删除"); err != nil {
+		t.Fatal(err)
+	}
+
+	// 判据是**失败那句话还在画面上**（而不是「页面上没有空状态」）：那句话是
+	// 唯一能证明「用户还停在他刚才那一页、而且知道为什么没删掉」的东西。
+	waitFrames(t, tt, "「删不掉」那句话说出来", func() bool {
+		return screenHasText(tt, "删不掉")
+	})
+	if got := s.router.Path(); got != "/collection/12345" {
+		t.Errorf("B 站拒绝了却把用户踢到了 %q，want 留在这一页", got)
+	}
+	// ⚠️ **侧栏那一行也还在**：删不掉的是「B 站上那个收藏夹」，而它是成功的——所以
+	// 这一行必须留着，留着才是真的。
+	if n := len(s.app.SideFavorites(app.FavoritesCreated)); n != 1 {
+		t.Errorf("侧栏里还剩 %d 行，want 1（没删掉就不该少）", n)
+	}
+	// 而这一页的内容也还在——用户还在看它。
+	waitFrames(t, tt, "这一页的内容还在", func() bool {
+		return s.collection != nil && s.collection.list.Paged().Loaded == 2
+	})
 }

@@ -49,6 +49,8 @@ type favBili struct {
 	deleted []string
 	// cleaned 记下每一次 resource/clean 的 media_id（「清除失效内容」那一项）。
 	cleaned []string
+	// rejectDel 为真时 folder/del 回 -400（B 站拒绝删）。见 rejectFolderDelete。
+	rejectDel bool
 	// paths 记下每一次请求打到了哪条路径（发没发请求本身就是一条断言：
 	// 「为了一个认不出的项去问 B 站」是白跑的一趟）。
 	paths []string
@@ -99,6 +101,10 @@ func newCollectionBili(t *testing.T) *favBili {
 		case "/x/v3/fav/folder/del":
 			_ = r.ParseForm()
 			b.deleted = append(b.deleted, r.PostForm.Get("media_ids"))
+			if b.rejectDel {
+				writeCollectionJSON(t, w, -400, "请求错误", nil)
+				return
+			}
 			writeCollectionJSON(t, w, 0, "0", 0)
 		case "/x/v3/fav/resource/clean":
 			_ = r.ParseForm()
@@ -168,6 +174,16 @@ func (b *favBili) cleanedFolders() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]string(nil), b.cleaned...)
+}
+
+// rejectFolderDelete 让这一台假 B 站**拒绝删收藏夹**（回 -400）。
+//
+// 为什么需要它：B 站拒绝是这条路上最要紧的一种结果——收藏夹还在、而界面已经按
+// 「它没了」在处理了（把用户踢走、把状态扔掉）。只有真的发一个 -400 才走得到。
+func (b *favBili) rejectFolderDelete() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.rejectDel = true
 }
 
 func (b *favBili) seenOrders() []string {
