@@ -890,6 +890,29 @@ var Items = []Item{
 		},
 	},
 	{
+		Category: Negative,
+		// **同一个词还在转的时候再提交一次**（搜索框里再按一次回车、或者点一下
+		// 「搜索」按钮——上游那两处都直接调 `handleSubmit`）。
+		//
+		// 🔴 这一条钉的是**根因那一半**：`SearchLyrics` 里「已经转着就别再发一遍」
+		// 那个早退排在 `s.gen++` 之后的话，那一次重复提交会把**正在飞的那一趟**作废掉
+		// （它回来时发现代次变了，直接走人、**不置 `loading = false`**），而早退自己
+		// 又不发新的——于是 `loading` 从此再没有人翻回来。界面上是「正在搜…」停到进程
+		// 退出：一条候选、一个错误、一个重试按钮都没有，用户唯一能做的就是关掉弹窗
+		// 重开一次（而重开时网络还慢的话就再卡一次）。
+		//
+		// 而代次是**作废**用的不是**撤销**用的：每一次 `s.gen++` 都必须紧跟着一次
+		// 「新的那趟会负责把它该做的事做完」，中间插一个不发新的早退就不成立。
+		//
+		// 后一条（界面那一条）钉的是同一件事的另外一半：根因改没改、界面上坏成
+		// 什么样，两边都要能验。
+		Spec: "同一个词还在搜索中时再提交一次：是一次纯粹的空操作——不重复发请求，也不许作废在飞的那一趟（否则 loading 再没有人翻回来，界面永远停在「正在搜…」）",
+		Tests: []string{
+			"TestSubmittingTheSameWordAgainWhileItIsStillRunningDoesNotStrandIt",
+			"TestSubmittingTheSameWordAgainWhileItIsStillRunningStillShowsTheCandidates",
+		},
+	},
+	{
 		Category: FakeClock,
 		// SPEC 点名的「搜索结果 500 毫秒防抖写缓存，避免重复请求」里的**前半句**：
 		// 那 500ms 在界面上（`ui/lyricssearch.go` 的 `lyricsQueryChanged`），后半句

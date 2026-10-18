@@ -214,6 +214,55 @@ func TestAStaleSearchNeverLands(t *testing.T) {
 	}
 }
 
+// TestSubmittingTheSameWordAgainWhileItIsStillRunningDoesNotStrandIt 是
+// `SearchLyrics` 里那个「已经转着就别再发一遍」的回归测试。
+//
+// 时序：搜「晴天」（慢）→ **同一个词、同一个源，再提交一次** → 晴天回来。
+//
+// 🔴 少了一行顺序，那一次重复提交会变成**永久卡住**：早退排在 `s.gen++` 之后，
+// 于是它作废了正在飞的那一趟（那一趟回来时发现代次变了，直接走人、**不置
+// `loading = false`**），自己又不发新的——`loading` 从此再没有人翻回来。界面上是
+// 「正在搜…」停到进程退出：一条候选、一个错误、一个重试按钮都没有，用户唯一能
+// 做的就是关掉弹窗再打开一次。
+//
+// 界面上天天会走到这一支：上游那个搜索框里回车和「搜索」按钮都直接调
+// `handleSubmit`，慢网络下用户「再按一下试试」就是第二次 `SearchLyrics`。
+func TestSubmittingTheSameWordAgainWhileItIsStillRunningDoesNotStrandIt(t *testing.T) {
+	src := sourceOf("netease", lyrics.Candidate{ID: "1", Title: "晴天"})
+	src.hold = 200 * time.Millisecond
+	a, _ := searchApp(t, src)
+
+	a.SearchLyrics(0, "晴天")
+	// 等它**真的发出去了**（`Loading` 是 `SearchLyrics` 同步写上去的，拿它当
+	// 「已经发出去了」的判据等于什么都没等）。
+	waitSearch(t, 2*time.Second, "这一次真的发出去", func() bool {
+		n, _ := src.count()
+		return n == 1
+	})
+
+	// 慢网络下用户「再按一下试试」。
+	a.SearchLyrics(0, "晴天")
+	if n, _ := src.count(); n != 1 {
+		t.Fatalf("同一个词重复提交发了 %d 次请求（want 1）——「别再发一遍」没了", n)
+	}
+
+	// 等这一趟回来。**卡住的话这里就是它失败的地方**（`loading` 永远翻不回来）。
+	waitSearch(t, 3*time.Second, "这一趟落地", func() bool { return !a.LyricSearch().Loading })
+	st := a.LyricSearch()
+	if len(st.Candidates) != 1 {
+		t.Errorf("重复提交之后候选是 %+v，want 那一批", st.Candidates)
+	}
+	if st.Err != "" {
+		t.Errorf("重复提交之后多了一条错误：%q", st.Err)
+	}
+
+	// 再提交一次（那时候已经落地、缓存里有了）：命中缓存，一个请求都不发。
+	a.SearchLyrics(0, "晴天")
+	if n, _ := src.count(); n != 1 {
+		t.Errorf("落地之后再提交同一个词发了请求（共 %d 次）", n)
+	}
+}
+
 // TestEmptyingTheBoxClearsTheList 抄上游 `if (query === "") return` 的**界面上那一半**。
 //
 // 把框清空就是这一支：留着上一批候选的话，用户看着自己删干净的那一框下面还挂着

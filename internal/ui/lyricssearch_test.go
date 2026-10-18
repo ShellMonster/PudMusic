@@ -170,8 +170,11 @@ func openTheSearchDialog(t *testing.T, tt *mygoui.Tester) {
 	tt.Frame()
 }
 
-// typeLyricKeyword 在搜索弹窗的关键词框里敲字（走真实的点击 + 真实输入）。
-func typeLyricKeyword(t *testing.T, tt *mygoui.Tester, text string) {
+// focusLyricKeyword 点一下搜索框把它放到焦点上（不敲字）。
+//
+// ⚠️ 回车/提交只发给**有焦点**的那个输入框，所以「按一下回车提交」那几条必须先
+// 点一下它——`Tester.TypeKey` 不挑接收方。
+func focusLyricKeyword(t *testing.T, tt *mygoui.Tester) {
 	t.Helper()
 	box, ok := tt.Find(lyricSearchBoxLabel)
 	if !ok {
@@ -179,6 +182,12 @@ func typeLyricKeyword(t *testing.T, tt *mygoui.Tester, text string) {
 	}
 	tt.ClickAt(box.X+box.W/2, box.Y+box.H/2)
 	tt.Frame()
+}
+
+// typeLyricKeyword 在搜索弹窗的关键词框里敲字（走真实的点击 + 真实输入）。
+func typeLyricKeyword(t *testing.T, tt *mygoui.Tester, text string) {
+	t.Helper()
+	focusLyricKeyword(t, tt)
 	tt.Type(text)
 	tt.Frame()
 }
@@ -395,6 +404,54 @@ func TestEnterDoesNotWaitForTheDebounce(t *testing.T) {
 // 负路径：失败不许静默，也不许每帧重发
 // ─────────────────────────────────────────────────────────────────────────────
 
+// TestSubmittingTheSameWordAgainWhileItIsStillRunningStillShowsTheCandidates 是
+// 「慢网络下用户再按一下试试」那一条的界面那一半。
+//
+// 🔴 少了它，界面上那个症状是**无解**的：一条候选、一个错误、一个重试按钮都没有，
+// 用户能做的只有关掉弹窗重开一次（而重开时如果网络还慢，就再卡一次）。
+//
+// 根因在 `app.SearchLyrics`（`TestSubmittingTheSameWordAgainWhileItIsStillRunningDoesNotStrandIt`
+// 钉的是那一条），这一条钉的是「界面上不会卡成那样」——两半都要有：只有那一条，
+// 界面上坏成什么样没人知道；只有这一条，根因改了没有也说不清。
+//
+// ⚠️ 按的是**回车**。那一条走的是 `lyricsQueryChanged(now, true)`；「搜索」按钮是
+// 同一个入口（`lyricsQueryChanged(now, true)` 里 `submitted` 的另一个来源），所以
+// 两条路共用同一个根因。
+func TestSubmittingTheSameWordAgainWhileItIsStillRunningStillShowsTheCandidates(t *testing.T) {
+	netease := neteaseSource(cand("1", "候选甲"))
+	netease.hold = 600 * time.Millisecond
+	s, tt := lyricSearchShell(t, netease)
+
+	// 弹窗一打开就自动按屏幕上那首歌搜一次（上游 `useEffect([isOpen])`）。
+	openTheSearchDialog(t, tt)
+	settle(t, tt, "把开机那一次搜索发出去", func() bool { return netease.calls() == 1 })
+
+	// 慢网络下用户「再按一下试试」：框里一个字没改，提交的还是同一个词、同一个源。
+	focusLyricKeyword(t, tt)
+	tt.TypeKey(0, mygoui.KeyEnter, "\r")
+	tt.Frame()
+	if n := netease.calls(); n != 1 {
+		t.Fatalf("同一个词重复提交发了 %d 次请求（want 1）", n)
+	}
+
+	// 等那一趟回来，**再多走十帧**——卡住的话这一段就是它露馅的地方。
+	settle(t, tt, "这一趟落地", func() bool { return !s.app.LyricSearch().Loading })
+	for range 10 {
+		tt.Frame()
+	}
+
+	if s.app.LyricSearch().Loading {
+		t.Fatalf("又按了一次回车之后卡在「正在搜…」：%+v，文字有 %q",
+			s.app.LyricSearch(), tt.Texts())
+	}
+	if !tt.HasText("候选甲") {
+		t.Errorf("候选没有出来，文字有 %q", tt.Texts())
+	}
+	if tt.HasText("正在搜") {
+		t.Errorf("状态行还停在「正在搜…」，文字有 %q", tt.Texts())
+	}
+}
+
 // TestAFailedSearchSaysItIsAFailureAndDoesNotFireAgain 是这一票最容易踩的一个坑。
 //
 // `app.failLocked` 失败时**留着** `Query`，界面这边的 `draft == applied` 那一支
@@ -444,6 +501,15 @@ func TestAFailedSearchOffersARetryAndSaysItIsAFailure(t *testing.T) {
 	// 该换哪一个再试。
 	if !tt.HasText("网易云") {
 		t.Errorf("失败那句话没有点名是哪个源，文字有 %q", tt.Texts())
+	}
+	// 🔴 **状态行不许说「没搜到这一首」**：那件事要用户换个词或者换个源，而这一件要他
+	// 再试一次。两句话挨在屏幕上互相打架，用户读到的是界面自己前后不一致。
+	if tt.HasText("没搜到这一首") {
+		t.Errorf("失败时候选区顶上说的是「没搜到这一首」，和下面那句「网络不通」打架：文字有 %q",
+			tt.Texts())
+	}
+	if !tt.HasText("结果拉不到") {
+		t.Errorf("失败时状态行没有说「结果拉不到」，文字有 %q", tt.Texts())
 	}
 }
 

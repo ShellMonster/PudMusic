@@ -436,12 +436,20 @@ func (s *Shell) viewLyricCandidates(c *ui.Context, srcs []app.LyricSource, st ap
 //
 // ⚠️ **它也是「正在搜」那句话唯一出现的地方**：内容区那一支在搜索中是空的，
 // 同一句话说两遍的事这一层不写（理由见 `viewLyricCandidates` 顶上）。
+//
+// 🔴 **失败要单独一支，不许掉进「没搜到」那一支**：失败时 `Searched` 仍然是真、
+// `Candidates` 已经被 `app.failLocked` 清空了，于是它俩长得和「真的一个候选都
+// 没有」一模一样。那两件事要用户做的事完全相反——「没搜到」要他换个词或者换个源，
+// 「拉不到」要他再试一次。状态行先说了「没搜到这一首」、下面又红字写着「网络不通」，
+// 用户读到的是界面自己前后打架。
 func lyricSourceLine(srcs []app.LyricSource, st app.LyricSearchState) string {
 	name := lyricSourceLabel(srcs, st.Tab)
 	if name == "" {
 		return ""
 	}
 	switch {
+	case st.Err != "":
+		return "「" + name + "」· 结果拉不到"
 	case !st.Searched && st.Query == "":
 		return "「" + name + "」· 还没搜过"
 	case st.Loading:

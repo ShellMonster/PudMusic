@@ -4,13 +4,18 @@
 // 预览放到后台去发，把迟到的结果按代次丢掉，再加一层**结果缓存**。请求长什么样是
 // `service/lyrics`（search.go）的事——界面层连「网易云要多发一次请求」都不用知道。
 //
-// # 下面这七个导出方法在界面上还没有调用点，那不是死代码
+// # 下面这七个导出方法是界面上那两个弹窗的全部接口
 //
-// 界面上调它们的是拆出去的**下一票 BMG-66**「歌词搜索与缓存：搜索与预览两个
-// 弹窗」（`internal/ui/lyricssearch.go` + 它那两个弹窗）。这一票只交到应用层，
-// 所以它们现在的调用点全在测试里。**看到「没有生产调用点」别当成没用的删掉**——
-// BMG-66 接的就是这七个：`LyricSources` / `LyricSearch` / `SearchLyrics` /
-// `OpenLyricPreview` / `LyricPreview` / `CloseLyricPreview` / `AdoptLyricPreview`。
+// `LyricSources` / `LyricSearch` / `SearchLyrics` / `OpenLyricPreview` /
+// `LyricPreview` / `CloseLyricPreview` / `AdoptLyricPreview`——调它们的是
+// `internal/ui/lyricssearch.go`（拆票出去的 BMG-66「歌词搜索与缓存：搜索与预览两个
+// 弹窗」，BMG-33 只交到这一层）。
+//
+// ⚠️ **这一层的「重复提交」语义是界面天天在用的**：搜索框里回车和「搜索」按钮都直接
+// 调 `SearchLyrics`，慢网络下用户「再按一下试试」就是同一个词、同一个源连着调两次。
+// 那一次必须是一次**纯粹的空操作**——连代次都不许碰。碰了就把在飞的那一趟作废掉
+// （它回来时不置 `loading = false`），而这一支自己又不发新的，于是界面上永远停在
+// 「正在搜…」。见 `SearchLyrics` 里那一支和它的回归测试。
 //
 // # 结果缓存：同一个词不搜第二遍
 //
@@ -25,6 +30,10 @@
 // 和 `lyrics.go` 里的 `lyricGen` 是同一回事：搜索和预览都在后台，而用户等的那几百
 // 毫秒里会切源、关弹窗、换歌。少了它就是「我搜的是乙，弹出来的是甲的歌」，而按
 // 多少次搜索都一样。
+//
+// ⚠️ 代次是**作废**用的，不是**撤销**用的：被作废的那一趟回来时只走人、不改任何
+// 状态，所以每一次 `s.gen++` 都必须紧跟着一次「新的那趟会负责把它该做的事做完」。
+// 中间插一个早退而那一支不发新的，那一趟就永远没人负责了。
 package app
 
 import (
@@ -38,9 +47,15 @@ import (
 
 // lyricSearchMemoMax 是结果缓存留多少条。
 //
-// 20 = 网易云 / LRCLib 各搜十次。够一个人连着试十首歌，界面上一个词的候选最多
-// 20 条，**再往上留就是几十 MB 的字符串常驻内存**。超了从最老的开始丢（见
-// `rememberSearch`）。
+// 40 = 网易云 / LRCLib 各搜二十次。够一个人连着试二十首歌，界面上一个词的候选最多
+// 20 条（两个源各自的 `limit`），所以常驻的大头是 **LRCLib 那些自带整首歌词的候选**。
+// 超了从最老的开始丢（见 `rememberSearchLocked`）。
+//
+// ⚠️ **注释里的数必须跟着常量一起改**：这一条原来写着「20」、函数名也写成了
+// `rememberSearch`（真名带 `Locked` 后缀），而值是 40。读者照着 20 去算内存占用，
+// 算出来的是实际的一半——而按这两种算法都得不出一个具体的字节数，说明这句话本来
+// 就该被删掉而不是被修正：真要盯着内存，那就先量一次 40 条实际占多少，再把量出来
+// 的那个数写在这里。
 const lyricSearchMemoMax = 40
 
 // LyricSource 是「歌词源」在界面上的那一份：机器名 + Tab 上的字。
@@ -179,6 +194,25 @@ func (a *App) SearchLyrics(tab int, query string) {
 	// ⚠️ 上一轮生效的那一次**在覆盖之前**留一份：下面那个「已经转着就别再发一遍」
 	// 的判据认的是它，而 `s.tab`/`s.query` 下一行就被这次覆盖了。
 	prevQuery, prevTab := s.query, s.tab
+
+	// 🔴 **「同一个词还转着呢」要在代次加一之前判。**
+	//
+	// 排在后面的话，这次调用的唯一副作用就只剩 `s.gen++`，而那一行把**正在飞的那
+	// 一趟**作废了：它回来时发现代次变了就直接走人，**不置 `loading = false`**。而
+	// 这一支自己又不发新的，于是 `loading` 从此再没有人翻回来——界面上是「正在搜…」
+	// 停到进程退出：一条候选、一个错误、一个重试按钮都没有，用户唯一能做的就是关掉
+	// 弹窗再打开一次。再按一次仍然命中同一个早退，永久卡住。
+	//
+	// （界面上天天会走到这一支：上游那个搜索框里回车和「搜索」按钮都直接调
+	// `handleSubmit`，慢网络下用户「再按一下试试」就是第二次 `SearchLyrics`。界面层
+	// 挡不住也不该挡——它要的是「这一次搜索是我要的」，而这一层要回答的是「它是不是
+	// 已经在转了」。）
+	if query != "" && prevQuery == query && prevTab == tab && s.loading {
+		// 生效的那一次就是这一次，还转着呢：别再发一遍，也**别碰代次**。
+		a.mu.Unlock()
+		return
+	}
+
 	s.gen++
 	gen := s.gen
 	s.tab = tab
@@ -203,11 +237,6 @@ func (a *App) SearchLyrics(tab int, query string) {
 		s.query, s.results, s.err, s.loading, s.searched = query, cands, "", false, true
 		a.mu.Unlock()
 		a.wakeLyrics()
-		return
-	}
-	if prevQuery == query && prevTab == tab && s.loading {
-		// 生效的那一次就是这一次，还转着呢：别再发一遍。
-		a.mu.Unlock()
 		return
 	}
 	s.query, s.results, s.err, s.searched = query, nil, "", true
