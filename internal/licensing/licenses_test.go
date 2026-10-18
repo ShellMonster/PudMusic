@@ -112,6 +112,34 @@ func TestTheInventoryListsExactlyWhatGetsCompiled(t *testing.T) {
 	}
 }
 
+// TestTheShippedAssetLicensesExist 钉住「资源的许可证也随包发出去」。
+//
+// 🔴 **这一条补的是 `TestTheInventoryListsExactlyWhatGetsCompiled` 的一个盲区**：
+// 那条只认 `go list -deps` 数出来的**模块**。图标是 `//go:embed` 进二进制的
+// 资源，不是链接进来的代码——它少一份许可证，上面那些断言**一条都不会红**，
+// 而包照发、DMG 照做，只是法律上已经不合规了（Apache §4(a) / 各类 CC 的
+// 「随附声明」义务都是这一类）。
+//
+// 顺带断一件更靠前的事：**图标在不在**。删掉 `internal/ui/icons/` 里的文件，
+// `go build` 会立刻红（`//go:embed` 找不到目录），所以真正会「安静不合规」的
+// 只有许可证那一份——两条一起看才不会漏。
+func TestTheShippedAssetLicensesExist(t *testing.T) {
+	root := repoRoot(t)
+	for _, rel := range AssetLicenseRelPaths {
+		full := filepath.Join(root, filepath.FromSlash(rel))
+		b, err := os.ReadFile(full)
+		if err != nil {
+			t.Errorf("%s 不在包里：%v\n"+
+				"它不是构建依赖，`go list -deps` 看不见它，而 gen-notices 的 prune "+
+				"会把它删掉——排进 AssetLicenseRelPaths 之后它才留得住", rel, err)
+			continue
+		}
+		if len(b) == 0 {
+			t.Errorf("%s 是空的", rel)
+		}
+	}
+}
+
 // TestTheShippedLicenseTextsAreTheRealOnes 钉住「发出去的原文和模块里那份一字不差」。
 //
 // Apache-2.0 §4(a) 给用户的承诺是「本许可证的副本」。手抄一遍抄错一个字（少一个

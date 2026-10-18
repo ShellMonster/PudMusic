@@ -423,6 +423,79 @@ func TestRemoveStopsAtTheFirstFailure(t *testing.T) {
 	}
 }
 
+// ── 清除失效内容 ───────────────────────────────────────────────────────────
+
+// TestCleanSendsOnlyTheFolderID 清除失效内容是**服务端的一个动作**。
+//
+// 🔴 这一条钉的是「**不发 resources**」：最容易走偏的实现是照着
+// `RemoveCollectionMedias` 写一遍——先在本地按 `Attr` 筛出失效的，再发一批
+// `resources`。那一条路在几个地方都会静默出错（`Attr` 认不全、翻页期间列表
+// 会变、一个几千首的收藏夹要几十趟请求），而症状都是同一个：清完还剩几个。
+//
+// 所以这里断言的是「**一个 media_id 就够了**」——多发的每一个字段都是本地
+// 推断出来的、而 B 站自己知道得更准。多给了不会报错，所以这个错不会自己暴露。
+func TestCleanSendsOnlyTheFolderID(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(pathResourceClean, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.PostForm.Get("media_id"); got != "12345" {
+			t.Errorf("media_id = %q，want 12345", got)
+		}
+		if v := r.PostForm.Get("resources"); v != "" {
+			t.Errorf("发了 resources = %q——清除失效内容该由 B 站自己认，本地筛一遍必然漏", v)
+		}
+		writeJSON(w, jsonData(t, 0, "0", 0))
+	})
+
+	c := f.client(t, Options{CSRF: func() string { return "jct-fixture" }})
+	if err := c.CleanInvalidResources(context.Background(), 12345); err != nil {
+		t.Fatal(err)
+	}
+	reqs := f.requests()
+	if len(reqs) != 1 {
+		t.Fatalf("发了 %d 个请求，want 1", len(reqs))
+	}
+	if reqs[0].Method != http.MethodPost {
+		t.Errorf("用的是 %s，want POST", reqs[0].Method)
+	}
+	// ⚠️ 这里验的是「**它走的是 `writeCall`**」而不是 CSRF 机制本身（机制有
+	// `TestCSRFGoesIntoTheFormBodyToo` 钉着）：自己拼一个 `Call` 出来的话，
+	// 少一处 csrf 是 B 站回 -111 而不是本地报错——而真机上一半会被报成
+	// 「风控」，排障方向从一开始就错了。
+	if got := reqs[0].Form.Get("csrf"); got != "jct-fixture" {
+		t.Errorf("表单体里没有 csrf（没走 writeCall？）= %q", got)
+	}
+}
+
+// TestCleanRefusesNobody 收藏夹 id 不对就报错，不发请求。
+func TestCleanRefusesNobody(t *testing.T) {
+	f := newFakeBili(t)
+	if err := f.client(t, Options{}).CleanInvalidResources(context.Background(), 0); err == nil {
+		t.Fatal("media_id=0 也发出去了，应该报错")
+	}
+	if n := len(f.requests()); n != 0 {
+		t.Errorf("发出了 %d 个请求，want 0", n)
+	}
+}
+
+// TestCleanSaysWhichFolderItWas 清失败时那句话里要带着收藏夹 id。
+//
+// 用户点的是「清除失效内容」这一项，而收藏夹可能有几十个——一句「清不掉」
+// 不够他去 B 站那边确认是哪一个出了问题。
+func TestCleanSaysWhichFolderItWas(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(pathResourceClean, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, -400, "请求错误", nil))
+	})
+
+	err := f.client(t, Options{}).CleanInvalidResources(context.Background(), 12345)
+	if err == nil {
+		t.Fatal("B 站回错了还报成功")
+	}
+	if !strings.Contains(err.Error(), "12345") {
+		t.Errorf("错里没说是哪个收藏夹：%v", err)
+	}
+}
+
 // ── 类型与文案 ─────────────────────────────────────────────────────────────
 
 // TestCollectionTypeLabelsAreBiuS 三个类型的名字是头图区第三行要写的那几个字。

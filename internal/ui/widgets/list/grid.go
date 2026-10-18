@@ -69,6 +69,15 @@ const gridMinCols = 2
 // 摆出来的宽度会差 `cols-1` 个缝——差几像素，而那正是「两个页面对不上」的第一眼。
 const GridGap = gridGap
 
+// CellWidth 是容器有 w 那么宽、排 cols 列时**一列有多宽**。
+//
+// ⚠️ 和 `GridColumnsFor` 是同一件事的两个半：自己按 `repeat(n, minmax(0, 1fr))`
+// 再算一遍的话，某一页算出来的封面宽度会和其余页面差半个像素，而「两个页面对不上」
+// 的第一眼往往就是那半个像素。
+//
+// 用途：给 `Grid` 之外的网格画格子（`internal/ui` 的稍后再看 / 历史记录那一档）。
+func CellWidth(w float32, cols int) float32 { return cellWidth(w, cols) }
+
 // GridColumnsFor 是容器有 w 那么宽时排几列。
 //
 // ⚠️ **判据是容器的宽，不是窗口的**——页面左边还有侧栏，窗口宽不等于网格宽。
@@ -142,6 +151,38 @@ type Grid struct {
 	// 出画面了（实测拖 1600→500 漂 6 首，一步跳到同一个宽度则漂 0 首）。
 	anchorID string
 
+	// footer 是末尾多出来的那一格的画法（转圈 / 重试），为 nil 时没有。
+	//
+	// 它和 `List.footer` 是同一件东西：翻页的哨兵。网格里它占**最后一行的第一格**
+	// ——「一行几首」时把哨兵铺满一整行会占掉好几个格子的位置，而哨兵只需要一个
+	// 能被看见、能被点的地方。
+	//
+	// 🔴 **它不是「翻页触发器」**（这一点量过，写错过一次）：翻页的判据是
+	// `PagedList.afterFrame` 里那句「末尾那一行进没进画面」（`last < n-1` 就不动作），
+	// 而网格里**最后一行本身就是歌的行**，滚到底照样命中——把网格这半边的哨兵拿掉，
+	// `TestTheGridKeepsPagingWorking` 和整页那一层都照样绿。
+	//
+	// ⚠️ 它真正负责的是**翻页失败之后的那条出路**：失败时 `apply` 把 `blocked` 闩上，
+	// 而闩住的是自动重试（不然就是「失败 → 解锁 → 下一帧看见容器没填满 → 又拉 →
+	// 又失败」那个死循环），**解开它的只有哨兵上那个「点此重试」按钮**。所以网格
+	// 这半边没有哨兵时：翻页照样能翻，但某一页一失败就**卡住不动**——没有转圈、
+	// 没有重试、已加载的行数也不再变，而歌还在、封面还在、点得动，症状是静默的。
+	// 钉住这一条的是 `TestTheGridOffersTheRetryThatTheListOffers`。
+	footer func(c *ui.Context)
+
+	// scroll 是这个网格把滚动位置写回来的那个句柄，为 nil 时不写。理由同
+	// `List.scroll`：MyGo 的列表不往外说自己滚到哪儿了（回顶按钮和三重保障都要它）。
+	scroll *ui.ScrollState
+
+	// sel2 是「多选」那一摊接线，为零值时网格里一格勾选框都不画。理由和字段名
+	// 全部照 `List.sel2`：改漏一边的后果是「列表里能批量删、网格里不能」。
+	sel2 Selection
+
+	// empty 是一行歌都没有时说的话，和 `List.empty` 同一个约定：空串是不画，
+	// 没调过 SetEmpty 用默认那句。
+	empty    string
+	emptySet bool
+
 	// width 是这个网格**上一帧**量出来的容器宽，用来判断点。
 	width float32
 
@@ -174,14 +215,23 @@ func NewGrid(cache *imgcache.Cache, acts Actions) *Grid {
 //
 // ⚠️ 只能由界面线程调（就是跑 view 的那个线程）：它改的正是 view 每帧读的
 // 那份状态。
-func (g *Grid) SetSongs(songs []Music) {
+func (g *Grid) SetSongs(songs []Music) { g.setSongs(songs, true) }
+
+// setSongs 是 SetSongs 的内里，warn 说要不要再查一遍重复 ID。
+//
+// ⚠️ **warn 只在真正被 `SetSongs` 调到的那一份上查**：`SwitchView` 两份拿的是同
+// 一个切片，让它查两遍就是同一个问题一帧打两行一样的日志（见 switch.go 的
+// SetSongs）。
+func (g *Grid) setSongs(songs []Music, warn bool) {
 	// ⚠️ 先记下**旧的那一份**里选中的是哪一首，再换。顺序反了的话
 	// selectedID() 读的是新切片同一个下标上的歌（插在头上时它是另一首），
 	// 重新对位就对到错的歌上去了。
 	was := g.selectedID()
 	g.songs = songs
 	g.sel = indexOfID(songs, was)
-	warnDuplicateIDs(songs)
+	if warn {
+		warnDuplicateIDs(songs)
+	}
 }
 
 // selectedID 是此刻选中的那一首的 ID，没选中是空串。
@@ -190,6 +240,78 @@ func (g *Grid) selectedID() string {
 		return ""
 	}
 	return g.songs[g.sel].ID
+}
+
+// SetEmpty 换掉「没有歌时说的那句话」。空串是不画（网格就是空的）。
+//
+// ⚠️ 网格的默认那句**和列表一样**（「这里还没有歌」），不抄第二份：同一个应用里两种
+// 列表写着两种说法，用户会以为是两个意思。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (g *Grid) SetEmpty(text string) { g.empty, g.emptySet = text, true }
+
+// SetFooter 装末尾那一格的画法（转圈 / 重试），传 nil 去掉。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (g *Grid) SetFooter(fn func(c *ui.Context)) { g.footer = fn }
+
+// SetScroll 让这个网格把滚动位置写进 s（每帧写一次）。理由见那个字段的注释。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (g *Grid) SetScroll(s *ui.ScrollState) { g.scroll = s }
+
+// SetSelection 装多选那一摊接线，传零值去掉。理由见 `List.SetSelection`。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (g *Grid) SetSelection(s Selection) { g.sel2 = s }
+
+// Len 是这个网格有几**首**歌（末尾那一格哨兵不算）。和 `List.Len` 一个意思：
+// 调用方要问的是「这些歌里有哪些」，不是「屏幕上摆了几格」。
+func (g *Grid) Len() int { return len(g.songs) }
+
+// At 返回第 i 首那一首，没有是 ok=false。收的是**歌的下标**不是格子序号——
+// 格子是布局，列数一变同一首歌就换了格子（和 `List.At` 一个道理）。
+func (g *Grid) At(i int) (Music, bool) {
+	if i < 0 || i >= len(g.songs) {
+		return Music{}, false
+	}
+	return g.songs[i], true
+}
+
+// rows 是这个网格此刻有几**行**，含末尾那一格哨兵。
+//
+// ⚠️ 列数取的是 `g.cols`，而 `View` 是在**算出这一帧的列数之后、算行数之前**把它
+// 换掉的（见那里）——所以这里拿到的就是这一帧真正在画的那一档列数。
+func (g *Grid) rows() int {
+	cols := g.cols
+	if cols <= 0 {
+		cols = gridMinCols
+	}
+	n := len(g.songs)
+	if g.footer != nil {
+		n++
+	}
+	return (n + cols - 1) / cols
+}
+
+// scrollTop 回到顶上。切路由和点回顶按钮都走它。
+//
+// ⚠️ 只能由界面线程调。
+func (g *Grid) scrollTop() {
+	g.state.ScrollTo(0, ui.Start)
+}
+
+// visible 是**上一帧**画出来的那几行。`PagedList` 的三重保障问「末尾那行进没进
+// 画面」，网格里问的是同一个问题的网格版。
+func (g *Grid) visible() (first, last int) { return g.state.Visible() }
+
+// emptyText 是这一帧该说的那句空状态，空串是「什么都不说」。和 `List.emptyText`
+// 同一个约定，连默认那句都是同一个（不抄第二份）。
+func (g *Grid) emptyText() string {
+	if !g.emptySet {
+		return defaultEmpty
+	}
+	return g.empty
 }
 
 // indexOfID 是 songs 里 ID 为 id 的那一首的下标，没有是 -1。
@@ -260,30 +382,61 @@ func (g *Grid) View(c *ui.Context) {
 	// （旧的列数）换算的。
 	g.keepAnchor(cols)
 
-	rows := (len(g.songs) + cols - 1) / cols
-
 	// 🔴 铁律四：行身份是这一行**第一首的 ID**，不是行号。
 	//
 	// 换列数是布局变了、数据没变（铁律四的另一面）：换完之后同一个行号装的是
 	// 别的歌，用行号当身份，选中状态和滚动位置就会整体错配。行身份跟着这一行
 	// 里的歌走，框架按 ID 重新对位。
-	g.state.Key = func(row int) any { return g.songs[row*cols].ID }
-	g.state.Label = func(row int) string { return g.songs[row*cols].Title }
+	//
+	// ⚠️ **末尾哨兵那一行给的是 `footerKey{}`**：它那一行里没有歌（哨兵占的是
+	// 最后一格，排在 len(songs) 那一位），照旧写 `g.songs[row*cols].ID` 会越界
+	// ——越界是当场 panic（`ui/diagnostics.go`），而它只在「翻页列表切成了网格」
+	// 之后才到得了，也就是只有开了这个设置的用户会撞上。
+	first := func(row int) int { return row * cols }
+	g.state.Key = func(row int) any {
+		i := first(row)
+		if i >= len(g.songs) {
+			return footerKey{}
+		}
+		return g.songs[i].ID
+	}
+	g.state.Label = func(row int) string {
+		i := first(row)
+		if i >= len(g.songs) {
+			return footerLabel
+		}
+		return g.songs[i].Title
+	}
 
+	// 行数走 `rows()`：它算的是**上一帧的列数**（见那个方法的注释），而上面那个
+	// `cols` 是这一帧算出来的。两者只差一帧的宽度变化，不差哨兵——哨兵是同一个
+	// 字段算的。
 	cell := cellWidth(w, cols)
-	e := ui.List(c, &g.state, rows).
+	// ⚠️ **`g.cols` 必须在算行数之前换成这一帧的**：行数是拿它去除的，而 `viewRow`
+	// 收的也是这一帧的 `cols`。晚一步的话（第一帧 `g.cols` 还是 0，按最窄那档 2
+	// 列算）行数会比这一帧真正画得下的多，多出来那几行里没有歌，于是走末尾哨兵
+	// 那一支——而哨兵压根没装（`g.footer` 是 nil），当场空指针崩在画页脚那里。
+	g.cols, g.started = cols, true
+
+	e := ui.List(c, &g.state, g.rows()).
 		Grow(1).
 		FillWidth().
 		// 没有歌时网格是空的，Children 里那一支就是它的空状态。
 		Children(func() {
 			if len(g.songs) == 0 {
-				ui.Text(c, "这里还没有歌").FontSize(13).
-					TextColor(c.Theme().TextMuted).Padding(16)
+				if txt := g.emptyText(); txt != "" {
+					ui.Text(c, txt).FontSize(13).
+						TextColor(c.Theme().TextMuted).Padding(16)
+				}
 			}
 		}).
 		Rows(func(r ui.ListRow) { g.viewRow(r, cols, cell) })
 
-	g.cols, g.started = cols, true
+	// 滚动位置写回调用方的句柄（理由同 `List.scroll`）。**只给正在画的网格**：
+	// 切视图时另一个网格也还挂着一个句柄，两边都写就是两个控件抢同一个数。
+	if g.scroll != nil {
+		e.TrackScroll(g.scroll)
+	}
 
 	// 量这一帧的容器宽，下一帧用。`Bounds` 读的是**上一帧**量好的盒子
 	//（`ui/api_gen.go` 里 Bounds 的注释原话），所以窗口改宽之后列数晚一帧换
@@ -348,6 +501,12 @@ func (g *Grid) keepAnchor(cols int) {
 // 两层都是 shared.go 的 guardFailed，崩过的按 ID 记下来，下一帧不再重试。
 func (g *Grid) viewRow(r ui.ListRow, cols int, cell float32) {
 	c, first := r.Context, r.Index*cols
+
+	// 哨兵**独占一行**时（`len(g.songs)` 正好是列数的整数倍）：这一行里没有歌。
+	if first >= len(g.songs) {
+		g.viewFooterRow(c, cols, cell)
+		return
+	}
 	m := g.songs[first]
 
 	// 崩过的那一行**不再画**（和 List.viewRow 一个写法）：不然它每一帧崩一次、
@@ -368,10 +527,29 @@ func (g *Grid) viewRow(r ui.ListRow, cols int, cell float32) {
 		ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(gridGap).Children(func() {
 			for k := range cols {
 				i := first + k
-				if i >= len(g.songs) {
-					// 最后一行不满：剩下的格子空着（CSS grid 也是这么摆的，
-					// 空格子不占位也不画边框）。
+				// 越过最后一格，或者这一格是「歌画完了、又没装哨兵」的那一格：
+				// 空着（CSS grid 也是这么摆的，空格子不占位也不画边框）。
+				//
+				// ⚠️ **第二个条件不能省**：最后一行没排满时 `i == len(g.songs)` 也会
+				// 走到这里，而那时根本没有哨兵（`rows()` 不把哨兵算成一行，
+				// `PagedList.syncList` 早就 `SetFooter(nil)` 了）。不挡的话它会落到
+				// 下面那一支去**越界取 `g.songs[i]`**，当场崩在画这一行上，屏幕上留下
+				// 「这一行画不出来」——`TestEveryViewSurvivesTheNarrowestWindow`
+				// 量到的就是它（奇数首歌 + 网格，最窄窗口）。
+				if i > len(g.songs) || (i == len(g.songs) && g.footer == nil) {
 					return
+				}
+				// 🔴 **哨兵落在这一行的第 k 格**（不是第 0 格时）。哨兵排在
+				// `len(g.songs)` 那一位，而行是按列数切出来的——`len % cols` 不是 0
+				// 时它就在某一行的中间。第一版只判了「整行从哨兵开始」那一支
+				// （`first >= len`），中间那一支漏了，于是**歌数除不尽列数时网格里
+				// 看不见「正在加载 / 点此重试」**——翻页失败之后页面上什么都不剩，
+				// 而 `blocked` 闩住的是自动重试。
+				// `TestTheGridStillOffersARetryOnARealPage` 钉的就是这一条
+				// （40 首、3 列、哨兵落在第 2 格）。
+				if i == len(g.songs) {
+					g.viewFooterCell(c, cell)
+					continue
 				}
 				g.viewCellGuarded(c, i, cell)
 			}
@@ -379,12 +557,65 @@ func (g *Grid) viewRow(r ui.ListRow, cols int, cell float32) {
 	})
 }
 
+// viewFooterRow 画哨兵**独占一行**时的那一行：哨兵在第一格，其余格子空着。
+//
+// ⚠️ 画在第一格而不是居中：Biu 的网格页脚是 `justify-center` 的一行，而把它摆在
+// 网格里的话，「转圈」会跟着列数在屏幕上左右跳——拖一次窗口边就换一个位置，而它
+// 是「这里正在加载」唯一的视觉标记。钉在左边至少是不动的。
+func (g *Grid) viewFooterRow(c *ui.Context, cols int, cell float32) {
+	ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(gridGap).Children(func() {
+		for k := range cols {
+			if k > 0 {
+				return
+			}
+			g.viewFooterCell(c, cell)
+		}
+	})
+}
+
+// viewFooterCell 画末尾哨兵的那一格，画崩了只废掉那一格（理由同 viewRow 的两层
+// 兜法）。
+func (g *Grid) viewFooterCell(c *ui.Context, cell float32) {
+	if g.failed[footerFailed] {
+		g.failedCellText(c)
+		return
+	}
+	guardFailed(&g.failed, "网格末尾那一格", footerFailed, func() {
+		ui.Box(c).Width(cell).AlignSelf(ui.Start).Children(func() { g.footer(c) })
+	})
+}
+
+// viewCellCheckbox 画这一格最上面那个勾选框，没装多选就什么都不画。
+//
+// ⚠️ 收的是**第几首**而不是第几格（理由同 `List.sel2`：`On` / `Toggle` 收的都是
+// 歌的下标，而格子是布局）。接线和值都照 `List.viewCheckbox` 那一处——两个视图的
+// 多选必须说同一件事，否则「在列表里勾了、切成网格就没了」是同一个功能的两种答案。
+func (g *Grid) viewCellCheckbox(c *ui.Context, i int, title string) {
+	if g.sel2.On == nil {
+		return
+	}
+	checked := g.sel2.On(i)
+	box := ui.Checkbox(c, &checked, "")
+	if box.Changed() && g.sel2.Toggle != nil {
+		g.sel2.Toggle(i)
+	}
+	box.Label("选择 " + title)
+}
+
+// failedCellText 是「这一格画不出来」那一块的占位（哨兵那一格也用它）。
+//
+// ⚠️ 和画崩了的那**一行**（「这一行画不出来」）说的不是同一件事：前者是一首歌的
+// 封面坏了，后者是这一行的布局坏了。两句分开是照着 `List` 那边已有的两句来的。
+func (g *Grid) failedCellText(c *ui.Context) {
+	ui.Text(c, "这一格画不出来").FontSize(13).TextColor(c.Theme().TextMuted).
+		Padding(cardPadY, cardPadX).MaxLines(1)
+}
+
 // viewCellGuarded 画一格，画崩了只废掉这一格。
 func (g *Grid) viewCellGuarded(c *ui.Context, i int, cell float32) {
 	m := g.songs[i]
 	if g.failed[m.ID] {
-		ui.Text(c, "这一格画不出来").FontSize(13).TextColor(c.Theme().TextMuted).
-			Padding(cardPadY, cardPadX).MaxLines(1)
+		g.failedCellText(c)
 		return
 	}
 	guardFailed(&g.failed, "网格格", m.ID, func() { g.viewCell(c, i, cell) })
@@ -444,6 +675,9 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 	}
 
 	box.Children(func() {
+		// ⓪ 多选态：这一格最上面的勾选框。没装多选就一格都不画。
+		g.viewCellCheckbox(c, i, m.Title)
+
 		// ① 封面。四态由 imgcache.View 画（空地址画空框，不画「失败」）。
 		imgcache.View(c, g.cache, m.Cover, cell, gridCoverH)
 

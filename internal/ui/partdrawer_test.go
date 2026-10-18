@@ -192,9 +192,10 @@ func TestTheDrawerMarksTheEpisodeThatIsPlaying(t *testing.T) {
 			t.Errorf("「%s」那一行只有 %.0f%% 是主色（{30 215 96} 那一种），want 一半以上——"+
 				"正在放的那一集没标出来，用户分不清自己在哪一集", c.title, share*100)
 		}
-		if !c.want && share > 0 {
-			t.Errorf("「%s」那一行有 %.0f%% 是主色，want 一点都没有——"+
-				"没在放的那一行也被染上了主色，标出来的那一集就没有意义了", c.title, share*100)
+		if !c.want && share >= inactiveRowShareLimit {
+			t.Errorf("「%s」那一行有 %.0f%% 是主色（阈值 %.0f%%）——"+
+				"没在放的那一行也被染上了主色，标出来的那一集就没有意义了",
+				c.title, share*100, inactiveRowShareLimit*100)
 		}
 	}
 }
@@ -348,14 +349,7 @@ func TestThePartsKeyDoesNotBreakThePlayBar(t *testing.T) {
 				t.Errorf("宽度 %d：进度条只剩 %.1f 宽（下限 %d）——拖一个位置要点半天，"+
 					"那不是不好用，是用不了", width, sb.W, partsScrubMinW)
 			}
-			// 键本身没被挤成「分…」：无头 Tester 读的是**控件的文本**，被截的只是
-			// 画出来的那几个字，所以这里量画出来的宽度（和
-			// `TestTheMetaLabelsAreNotTruncated` 同一个道理）。
-			pb, _ := tt.Find("分集")
-			if natural := naturalButtonTextWidths(t, []string{"分集"})["分集"]; pb.W+0.5 < natural {
-				t.Errorf("宽度 %d：那个键只画出了 %.1f 宽，它本来要 %.1f——被截了（用户在"+
-					"这一个键上认的是「分集」两个字，缺字就只能靠猜）", width, pb.W, natural)
-			}
+			assertIconNotText(t, tt, "分集")
 		})
 	}
 }
@@ -417,14 +411,18 @@ func TestTheDrawerDoesNotComeBackOnItsOwn(t *testing.T) {
 // 的钱」于是变成一条不用猜的断言：搬错了地方，多出来的那份宽度总得从**某一样**上
 // 出，而那一栏立刻对不上。
 //
-// ⚠️ **UP 名不在这个「不许花」的单子里**，量出来它确实会让出 24（900 上 78 → 54）：
-// 那一行里它是**唯一一个该让位的**——`Grow(1)` + `MinWidth` + `Ellipsis("…")`，
-// 让位就是它存在的理由（见 `viewArtist`）。它只要还认得出是哪个 UP 就够了，那条由
+// ⚠️ **UP 名不在这个「不许花」的单子里**，量出来它确实会让出这个键自己的 36
+// （`iconHit` 28 + 一道 `metaGap` 8；900 上 166 → 130）：那一行里它是**唯一一个该
+// 让位的**——`Grow(1)` + `MinWidth` + `Ellipsis("…")`，让位就是它存在的理由
+// （见 `viewArtist`）。它只要还认得出是哪个 UP 就够了，那条由
 // `TestThePartsKeyDoesNotBreakThePlayBar` 的 `ownerNameMinW` 守着。
 //
-// ⚠️ 这张单子**量出来过一次相反的结论**：第一版把键摆在中间那一列的第二行（挨着
-// 播放模式），看上去那一行有富余，而一量歌名从 208 掉到 182、进度条从 94 掉到 80。
-// 摆在歌名下面这一行两样都不掉——**富余是算出来的，宽度是量出来的**。
+// ⚠️ **另一个候选位置也量过**：中间那一列的第二行（挨着播放模式）——摆在那儿**一样**
+// 只让 UP 名让出 38，歌名和进度条同样不丢。两处几乎等价，所以摆在歌名下面这一行
+// 是**照 Biu 挑的**，不是算出来的。`partdrawer_test.go` 的这段注释在 #118 把这一行
+// 图标化之前写的版本是「摆在中间列第二行要拿歌名和进度条的钱」（208→182、94→80）——
+// 那时赞/收藏/下载是三个 44 宽的文字键，这一行挤到了边缘；图标化之后腾出 48，两处
+// 就平了。**注释里的数是量出来的，所以量变了就得改它**。
 //
 // ⚠️ **两档必须是同一首歌**：用的是同一份 fixture 的同一首（bvid、标题、UP 名都
 // 一样），只有「B 站回几集」不同，差别只有那一个键。
@@ -450,10 +448,10 @@ func TestThePartsKeyCostsNothingElseOnThePlayBar(t *testing.T) {
 					t.Fatalf("宽度 %d：%q 有一档量不到（单 P %.0f / 多 P %.0f）——"+
 						"量的是「它有多宽」，量不到就没法比", width, what, without[what], with[what])
 				}
-				if abs(without[what]-with[what]) > partsWidthSlack {
+				if widthGap(without[what]-with[what]) > partsWidthSlack {
 					t.Errorf("宽度 %d：「%s」单 P %.1f / 多 P %.1f（差 %.1f）——"+
 						"摆这个键花掉了别的东西的宽度", width, what, without[what], with[what],
-						abs(without[what]-with[what]))
+						widthGap(without[what]-with[what]))
 				}
 			}
 			// UP 名是唯一让位的（见上面那段），但要让得认得出是哪个 UP。
@@ -464,6 +462,54 @@ func TestThePartsKeyCostsNothingElseOnThePlayBar(t *testing.T) {
 			}
 		})
 	}
+}
+
+// assertIconNotText 断 label 那一块上画的是**一枚图标**，按钮上**没有字**。
+//
+// # 为什么「有东西画着」不够
+//
+// `assertGlyphPainted`（icons_test.go 的那个）判的是「那一块不是空的」——而**一个
+// 写着「分集」两个字的普通按钮照样不是空的**，它照样通过。图标化之后（#118）这一格
+// 再没有字，而字是用户一眼认得出它是什么的**唯一**东西，所以这句话得真的量出来。
+//
+// # 量法：数那个字在画面上出现了几次
+//
+// 无头 Tester 把**画出来的文字**和 `Label` 起的无障碍名字都放进 `Texts()`，而两者
+// 在里面长得一模一样——量不出来「哪一处是字」。但**可以数**：
+//
+//	图标键（`iconButton(c, iconPageList, "分集", iconSm)`）  → 「分集」出现 **1** 次
+//	                                                             （只有 Label 那一处）
+//	文字键（`ui.Button(c, "分集").Label("分集")`）           → 出现 **2** 次
+//	                                                             （Label + 字）
+//
+// 旁边那三个键（赞 / 收藏 / 下载）量的都是 1 次——所以「1」是这个包里图标键的常态，
+// 不是这一枚的特殊。
+//
+// 前半句（真的画了图形）交给 `assertGlyphPainted`；两半合起来才是「图标键」：
+// **画着图形，而按钮上没有字**。
+func assertIconNotText(t *testing.T, tt *ui.Tester, label string) {
+	t.Helper()
+	assertGlyphPainted(t, tt, label)
+
+	n := 0
+	for _, text := range tt.Texts() {
+		if text == label {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("画面上 %q 出现了 %d 次，want 1——它只该是那个键的**无障碍名字**"+
+			"（`Label`）。出现两次说明按钮上还有字（一次字、一次 Label）：图标化之后这一格"+
+			"本来是没有字的，用户认它全靠那一枚图标", label, n)
+	}
+}
+
+// widthGap 是两个宽度之差的绝对值。
+func widthGap(f float32) float32 {
+	if f < 0 {
+		return -f
+	}
+	return f
 }
 
 // partsWidthSlack 是上面那条比宽度的容差。
@@ -503,12 +549,18 @@ func lenOf(pages []any) int {
 	return len(pages)
 }
 
-func abs(f float32) float32 {
-	if f < 0 {
-		return -f
-	}
-	return f
-}
+// inactiveRowShareLimit 是「没在放的那一行算不算被标上了」的阈值。
+//
+// ⚠️ **不是 0，因为相邻两行的边界上会漏一像素**：这一列的行是 40 高、首尾紧挨着
+// （实测第一集 y=367..407、第二集 407..447），而上面那一行整行是主色，取整时它的
+// 填充会漏进下面那一行的第一个像素行——量下来「第二集」有 2.5%，而**全部集中在
+// 最上面那一行像素上**（y=0），其余全是底色。
+//
+// 这不是标记，是子像素取整：#118 把播放条图标化之后浮层落在了不同的亚像素位置，
+// 边界那一行的取整就变了。**真的被标上的那一行是 96%**，而阈值取 10%——两边差一个
+// 数量级，所以「每一行都被染上了」那种坏照样被抓住（变异验过：每一行都标 → 96% →
+// 红）。
+const inactiveRowShareLimit = 0.10
 
 // accentGreenGap 是「一个像素算不算主色」的门槛：绿通道要比红通道高出这么多。
 //

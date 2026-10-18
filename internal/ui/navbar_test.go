@@ -28,21 +28,33 @@ func newShellWithSettings(t *testing.T) (*Shell, *mygoui.Tester) {
 	return b.s, b.tt
 }
 
-// newLoggedInShell 建一个**已经登录**的外壳：先往凭据后端里存一份登录态，
-// 再 MountLogin——`MountLogin` 会把它读回来，所以走的是生产那条路，
-// 不是往界面上硬塞一个「已登录」标志。
+// loggedInWith 是「造外壳之前先挂一份登录态」这一个选项。
+//
+// 先往凭据后端里存一份登录态，再 MountLogin——`MountLogin` 会把它读回来，所以走
+// 的是生产那条路，不是往界面上硬塞一个「已登录」标志。
 //
 // 凭据后端用内存那一份（不碰真的钥匙串）；B 站客户端给一个空的：这一组只验
 // 「菜单项接到了哪」，不联网，而 `SeedCookies` 只动 jar，不发请求。
-func newLoggedInShell(t *testing.T, mid string) (*Shell, *mygoui.Tester) {
-	t.Helper()
-	b := newTestShell(t, mounted(func(t *testing.T, a *app.App) {
+//
+// ⚠️ **要摆侧栏那三个入口的测试都得挂它**：「我的关注」「稍后再看」「历史记录」
+// 要登录才摆（见 `Route.NeedsLogin`），没挂这一份的外壳上那三行压根不在
+// （`TestTheSidebarHidesTheLoginOnlyEntriesUntilYouLogIn` 钉的就是那件事）。
+// 那些测试只是**恰好**要用一个侧栏入口的话，换成不挑登录态的那几个更好——
+// 它们钉的是别的东西，不该顺带把登录态也钉进去。
+func loggedInWith(mid string) shellOpt {
+	return mounted(func(t *testing.T, a *app.App) {
 		store := app.NewMemoryStore("test")
 		if err := store.Save(context.Background(), app.Session{SESSDATA: "sess", DedeUserID: mid}); err != nil {
 			t.Fatal(err)
 		}
 		a.MountLogin(store, bili.NewClient(bili.Options{}))
-	}))
+	})
+}
+
+// newLoggedInShell 建一个**已经登录**的外壳。
+func newLoggedInShell(t *testing.T, mid string) (*Shell, *mygoui.Tester) {
+	t.Helper()
+	b := newTestShell(t, loggedInWith(mid))
 	return b.s, b.tt
 }
 
@@ -86,7 +98,7 @@ func TestNavBarSpansTheTopOfTheWindow(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
 
-	back, ok := tt.Find("Back")
+	back, ok := tt.Find(navBackLabel)
 	if !ok {
 		t.Fatalf("顶栏上没有后退，文字有 %q", tt.Texts())
 	}
@@ -138,7 +150,7 @@ func TestNavBarControlsStillWorkInsideTheDragArea(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
 
-	if err := tt.Click("Back"); err != nil {
+	if err := tt.Click(navBackLabel); err != nil {
 		t.Fatalf("顶栏上点不到后退：%v，文字有 %q", err, tt.Texts())
 	}
 	if err := tt.Click("动态"); err != nil {
@@ -248,10 +260,14 @@ func TestSuggestCollapsesOnBlur(t *testing.T) {
 
 	// 点到窗口里的别处去：焦点离开搜索框，浮层跟着收。
 	//
-	// 点侧栏的「我的关注」：那是侧栏里**独一份**的文字（顶栏的页名上也有一个
+	// 点侧栏的「本地音乐」：那是侧栏里**独一份**的文字（顶栏的页名上也有一个
 	// 「推荐音乐」，`Find` 只会认到先画的那一个）。别点「打开文件」——它会拉
 	// 系统文件框。
-	if err := tt.Click("我的关注"); err != nil {
+	//
+	// ⚠️ 刻意挑一个**不挑登录态**的入口：这一条钉的是「点别处会失焦」，而
+	// 「我的关注」「稍后再看」「历史记录」未登录时不摆（`Route.NeedsLogin`），
+	// 拿它们当失焦的落点的话，这条测试还会顺带把登录态也钉进去。
+	if err := tt.Click("本地音乐"); err != nil {
 		t.Fatalf("点不到侧栏：%v，文字有 %q", err, tt.Texts())
 	}
 
@@ -729,7 +745,7 @@ func TestLeavingTheSearchPageMidTransitionDoesNotCrashTheWindow(t *testing.T) {
 	}
 
 	// 返回按钮：走的是「回到上一页」那条路。
-	back, ok := tt.Find("Back")
+	back, ok := tt.Find(navBackLabel)
 	if !ok {
 		t.Fatalf("没有后退，文字有 %q", tt.Texts())
 	}
@@ -747,14 +763,15 @@ func TestLeavingTheSearchPageMidTransitionDoesNotCrashTheWindow(t *testing.T) {
 	}
 	tt.Type("林俊杰")
 	tt.Key(0, mygoui.KeyEnter)
-	if err := tt.Click("我的关注"); err != nil {
+	// 落点挑的是不挑登录态的那一项，理由见 TestSuggestCollapsesOnBlur。
+	if err := tt.Click("本地音乐"); err != nil {
 		t.Fatalf("点不到侧栏：%v，文字有 %q", err, tt.Texts())
 	}
 	if s.crash != nil {
 		t.Errorf("点侧栏之后崩了：%v", s.crash)
 	}
-	if got := s.router.Path(); got != "/follow" {
-		t.Errorf("点侧栏之后在 %q，want /follow", got)
+	if got := s.router.Path(); got != localMusicPath {
+		t.Errorf("点侧栏之后在 %q，want %q", got, localMusicPath)
 	}
 }
 

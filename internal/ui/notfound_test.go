@@ -105,7 +105,7 @@ func TestBackFromNotFoundDoesNotRedirect(t *testing.T) {
 	s.navigate("/根本没有这一页")
 	tt.Frame()
 
-	back, ok := tt.Find("Back")
+	back, ok := tt.Find(navBackLabel)
 	if !ok {
 		t.Fatalf("导航栏上没有后退，文字有 %q", tt.Texts())
 	}

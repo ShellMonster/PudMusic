@@ -27,12 +27,12 @@
 //   - 自己画板子的样子：Popover 用主题那套（`ui/widgets.go:611`），我们要的是
 //     Biu 的 `bg-content2 rounded-medium shadow-2xl`，而 PopoverBase 正好留了这道口子。
 //
-// ## 300ms 防抖在哪儿
+// ## 浮层里有两档
 //
-// Biu 的 `debounceWait: 300`（`search/index.tsx:49`）是加在**远端搜索建议**上的
-// （`getSearchSuggestMain`）。这一版还没有搜索接口，浮层里摆的只有本地的历史
-// 条目——本地数据不需要防抖，装一个防抖只是让界面慢半拍。所以这一处**故意没有**
-// 防抖，接上接口时再加（它属于搜索接口那张卡片）。
+// 这一档面板里摆的是「**搜索历史**」（本地，Biu 的 `topContent`）加上「**联想词**」
+// （远端，Biu 的 `getSearchSuggestMain`）——**两档在同一个面板里**，不是一个浮层
+// 套另一个浮层（理由见 `navbar_suggest.go` 的文件头）。远端那一档的防抖、请求、
+// 画法都在那一边的文件里。
 package ui
 
 import (
@@ -59,6 +59,11 @@ const (
 	// searchHeight 是搜索框多高。Biu 那边是 `h-10`（40），顶栏只让出 32~38，
 	// 这里取 28 上下正好放下放大镜、一行字和清空按钮。
 	searchHeight = 28
+
+	// 那个叉：图标边长和点击区。Biu 的 `isClearable` 是一个 16 的叉，
+	// 这里的叉小一点（12）——搜索框只有 28 高，16 的叉 + 内边距就把它撑满了。
+	iconCloseGlyph = 12
+	iconCloseHit   = 26
 )
 
 // 搜索页那条路由是 `searchPath`（在 searchpage.go 里），这里直接用它，不另立一份
@@ -81,7 +86,10 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 	ui.Row(c).Key("search").Width(searchWidth).Height(searchHeight).
 		Radius(t.Radius).Background(t.Surface).Border(1, border).
 		Padding(0, 8).Gap(6).AlignItems(ui.Center).Children(func() {
-		drawMagnifier(c, t.TextMuted)
+		// 放大镜是**装饰**：它不可点，而输入框自己就带「搜索」这个无障碍名字
+		//（`searchLabel`），所以这里不加 Label——加了就是两个同名的，
+		// 而 `Tester.Find` 只会认到先画的那个。
+		ui.Icon(c, icon(iconSearch)).FontSize(iconMd).TextColor(t.TextMuted)
 
 		// ⚠️ **不许给输入框加 Key**：Key 只能挂在「创建时没有处理输入」的控件上，
 		// 挂上去直接 panic（`ui/element.go:537`）。外面这一格有 Key 就够了。
@@ -136,6 +144,10 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 			s.submitSearch(s.searchKeyword)
 		}
 
+		// 联想词那一档的防抖。**排在 `searchSuggest` 定下来之后**——它认的就是这一位
+		// （浮层没开就不问，见 `syncSuggest`）。
+		s.syncSuggest(s.clock.Now())
+
 		if s.searchKeyword != "" {
 			s.viewSearchClear(c)
 		}
@@ -143,23 +155,36 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 	})
 }
 
-// viewSuggest 是搜索建议浮层：设置里开着、并且有历史，才摆。
+// viewSuggest 是搜索建议浮层。**两档都在这个面板里**：搜索历史 + 联想词。
 //
-// Biu 的 topContent 是 `showSearchHistory && items.length > 0`
-// （`search/index.tsx:121-124`）——**设置只管显不显示，不管存不存**。
+// ⚠️ **设置只管历史那一档，不管联想词**。Biu 的 topContent 是
+// `showSearchHistory && items.length > 0`（`search/index.tsx:121-124`）——那个设置
+// 管的是「我不想看见我搜过什么」，而联想词是 B 站这次给的、跟设置无关；把它一起
+// 关掉的话，用户在一个只想关掉历史的人那儿连联想都看不到，而界面上没有任何地方
+// 能让他知道还有这一档。
+//
+// ⚠️ **两档都没有时不摆面板**：用户看见的是一块突然出现的白板，而不是「最近搜过
+// 这些」。
+//
+// 🔴 **面板里的内容必须能滚，而且高度上限跟着窗口走**（评审在这一条上钉过一次）。
+//
+// 两档加起来能有多高：历史最多 `searchHistoryShown`(10) 条，联想最多
+// `suggestLimit`(10) 条，而历史那几条是**折行**的（长的词条一个 chip 就占掉一行
+// 的一半）。实测在应用允许的最小窗口（900×560）上灌满两边之后，最后一条联想被排到
+// y=735 —— 而屏幕只有 560 高：它**画在屏幕底下，点不着，也滚不到**（面板原本不是
+// 一个滚动容器）。
 func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 	if !s.searchSuggest {
 		return
 	}
 	history := s.hist.list()
-	if !s.app.SettingsSnapshot().ShowSearchHistory || len(history) == 0 {
-		// 一个都没有还摆一块空板子没有意义：用户看见的是一块突然出现的白板，
-		// 而不是「最近搜过这些」。
-		//
-		// 真接上搜索接口之后，这里摆 Biu 的 emptyContent「暂无搜索建议」。
+	showHistory := s.app.SettingsSnapshot().ShowSearchHistory && len(history) > 0
+	terms := s.app.SuggestState().Items
+	if !showHistory && len(terms) == 0 {
 		return
 	}
 	t := c.Theme()
+	_, winH := c.Size()
 
 	ui.PopoverBase(c, field, &s.searchSuggest, func(panel ui.Element) {
 		// KeepFocus 的理由见文件头。少这一句，浮层里的条目点不到。
@@ -168,14 +193,48 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 			Background(t.Background).Border(1, t.Border).
 			Shadow(0, 6, 20, 0, suggestShadow(t)).
 			Padding(8).Children(func() {
-			s.viewSuggestHeader(c)
-			ui.Row(c).Key("suggest-history").Wrap().Gap(6).Children(func() {
-				for _, item := range history {
-					s.viewHistoryChip(c, item)
-				}
-			})
+			// 🔴 **这一层 `Scroll` 是「最下面那几条点得着」的全部**：MaxHeight 把它
+			// 压在屏幕之内，超出去的部分靠滚。没有它，少掉的是「词看得见」——而用户
+			// 看到的是一个**列表突然断在屏幕边上**，既不知道下面还有，也不知道能滚。
+			ui.Scroll(c).Key(suggestScrollKey).FillWidth().
+				MaxHeight(suggestPanelMaxH(winH)).
+				TrackScroll(&s.terms.scroll).
+				Children(func() {
+					// 历史在上、联想在下（Biu 的 topContent 在结果列表上面，见
+					// `search/index.tsx:121-146`）。中间那一道空隙是「这是两档」最直接的
+					// 一句提示：没有它时两栏连着排，看起来像一栏里混着两批词。
+					if showHistory {
+						s.viewSuggestHeader(c)
+						ui.Row(c).Key("suggest-history").Wrap().Gap(6).Children(func() {
+							for _, item := range history {
+								s.viewHistoryChip(c, item)
+							}
+						})
+					}
+					if len(terms) > 0 {
+						if showHistory {
+							ui.Box(c).FillWidth().Height(suggestTermsGap)
+						}
+						s.viewSuggestTerms(c)
+					}
+				})
 		})
 	})
+}
+
+// suggestPanelMaxH 是这个面板最多能有多高（滚动容器的上限）。
+//
+// ⚠️ **跟着窗口高走，而不是写死一个数**：写死的话有两种坏法——窗口更矮时还是溢出，
+// 窗口更高时白白少摆几条。真窗口改大小之后的第一帧就是按这个算的，所以它和实际
+// 摆出来的高度是一致的（`c.Size()` 是窗口尺寸，见 fullplayer.go 的用法）。
+func suggestPanelMaxH(winH float32) float32 {
+	h := winH - suggestPanelTop - suggestPanelMargin
+	// 窗口极矮时也不能矮到只剩三四行：那样「翻得动」变成「翻得累」，而联想词这一档
+	// 十有八九是要被翻过去的。
+	if h < suggestPanelFloor {
+		return suggestPanelFloor
+	}
+	return h
 }
 
 // viewSuggestHeader 是浮层顶上那一行：「搜索历史」和「清除全部」。
@@ -252,25 +311,16 @@ func (s *Shell) submitSearch(keyword string) {
 // viewSearchClear 是搜索框右边那个清空按钮（Biu 的 `isClearable`）。
 //
 // 它在浮层**外面**，所以点它落不到面板里的任何东西上。
+//
+// ⚠️ 画面上是那个叉，**无障碍名字仍然是「清空」**：叉对读屏软件念出来是「乘号」，
+// 用户听不出它在清什么（同一个道理见 viewHistoryChip 里那个「删除「…」」）。
 func (s *Shell) viewSearchClear(c *ui.Context) {
-	if ui.Button(c, "清空").FontSize(11).TextColor(c.Theme().TextMuted).Clicked() {
+	if iconButton(c, iconClose, "清空", iconCloseGlyph).
+		Size(iconCloseHit, iconCloseHit).Padding(0, 7).
+		TextColor(c.Theme().TextMuted).
+		Tooltip("清空搜索框").Clicked() {
 		s.searchKeyword = ""
 	}
-}
-
-// drawMagnifier 是搜索框左边那个放大镜。
-//
-// Biu 用 `<RiSearchLine size={16}/>`，本项目还没有图标资源。照 MyGo 自己那个
-// 放大镜的画法（`ui/combobox.go:459` 的 magnifier）画一个，省掉一整个图标资源
-// 目录，也不用为一个圆圈加一条依赖。
-func drawMagnifier(c *ui.Context, color ui.Color) {
-	const size = 14
-	ui.Box(c).Size(size, size).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
-		var ring ui.Path
-		ring.Circle(r.X+r.W*0.4, r.Y+r.H*0.4, r.W*0.28)
-		p.StrokePath(&ring, 1.4, color)
-		p.Line(r.X+r.W*0.64, r.Y+r.H*0.64, r.X+r.W*0.9, r.Y+r.H*0.9, 1.4, color)
-	})
 }
 
 // suggestShadow 是浮层那圈影子的颜色。Biu 是 `shadow-2xl`，跟着主题分深浅。

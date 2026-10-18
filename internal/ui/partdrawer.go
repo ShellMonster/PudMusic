@@ -84,7 +84,15 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 		return
 	}
 
-	btn := ui.Button(c, "分集").Width(metaBtnW).Padding(1, 6).MaxLines(1).
+	// ⚠️ **图标不是装饰，是它唯一能被认出来的东西**：`ui.Icon` 对辅助技术是不可见
+	// 的（`mygo/ui/svg.go`），所以 `Label("分集")` 不许省——它既是无障碍名字，也是
+	// 无头 Tester 认得这个按钮的唯一凭据（`Find` 按 label 找）。
+	//
+	// 尺寸照另外三个键（赞 / 收藏 / 下载）：`iconSm` 的图标 + `iconHit` 的点击区 +
+	// 每边 7 的内边距（那一圈留白就是 `TestTheHitAreaIsBiggerThanTheGlyph` 断的
+	// 「点击区比图形大」）。
+	btn := iconButton(c, iconPageList, "分集", iconSm).
+		Size(iconHit, iconHit).Padding(0, 7).
 		Tooltip(partEntryTooltip(parts, cur))
 	if btn.Clicked() {
 		s.partOpen = !s.partOpen

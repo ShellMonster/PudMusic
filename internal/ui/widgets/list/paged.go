@@ -105,7 +105,12 @@ type PagedList struct {
 	// 白花开闭包）。
 	draw func(*ui.Context)
 
-	list  *List
+	// surf 是底下那一对控件：设置里的「数据显示样式」三档由 `SwitchView` 分发
+	// （见 view.go）。所以这一层**不问**
+	// 「现在画的是哪一个」，问的都是「末尾那行进没进画面」这种和摆法无关的事。
+	//
+	// 名字用 surf（surface，「面」）而不是 view：这一层已经有 `view` 那个方法了。
+	surf  *SwitchView
 	fetch Fetcher
 
 	// ── 下面这一摊只由界面线程读写（铁律一）────────────────────────────────
@@ -191,7 +196,7 @@ type pageResult struct {
 // 构造器里建），那时候还没有唤醒句柄也没有画面。第一页由第一帧的 view 拉。
 func NewPaged(cache *imgcache.Cache, acts Actions, fetch Fetcher) *PagedList {
 	p := &PagedList{
-		list:  New(cache, acts),
+		surf:  NewSwitchView(cache, acts),
 		fetch: fetch,
 		// 「还有没有」要等有人问过才知道。在那之前一律当作还有——不然第一帧
 		// 会以为到底了，连页脚那一行都不画。
@@ -202,8 +207,38 @@ func NewPaged(cache *imgcache.Cache, acts Actions, fetch Fetcher) *PagedList {
 	return p
 }
 
-// List 是底下那个列表。页面要选中项、要滚到某一行时用它。
-func (p *PagedList) List() *List { return p.list }
+// List 是底下那个列表。页面要选中项、要滚到某一行、要接多选时用它。
+//
+// ⚠️ **网格那一档画的时候它照样有歌**（见 `SwitchView` 的文件头），所以 `At` /
+// `Len` 两档都对：收藏夹那一页的多选 / 全选 / 批量删除走的正是这条，而那些代码不
+// 知道此刻画的是哪一档。
+func (p *PagedList) List() *List { return p.surf.List() }
+
+// SetSelection 装多选那一摊接线（`Selection`），传零值去掉。
+//
+// ⚠️ **别用 `p.List().SetSelection(...)`**：那只装到了列表那半边，而网格那一档
+// 画的是 `Grid`——格子上的勾选框是 `Grid.sel2` 画的（`grid.go` 的
+// `viewCellCheckbox`）。漏了网格这半边的症状是「切到网格之后一格勾选框都没有，
+// 逐首勾完全做不到，只剩全选 / 不选」——而全选走的是 `Len()` / `At()`，不经过
+// 画法，所以它照样能用，于是界面上看着「多选还是好的」，只是九成用法没了。
+//
+// 这一条是 `attachSelection`（`internal/ui/collectionbatch.go`）唯一的正确出口。
+//
+// ⚠️ 只能由界面线程调。
+func (p *PagedList) SetSelection(sel Selection) { p.surf.SetSelection(sel) }
+
+// Selected 返回正在画的那一份里选中的那首。没有选中是 ok=false。
+//
+// ⚠️ 认的是**正在画的那一份**：用户能看见的光标在它上面（理由见
+// `SwitchView.Selected`）。
+func (p *PagedList) Selected() (Music, bool) { return p.surf.Selected() }
+
+// SetView 换摆法。**每一帧都要调**：设置随时会变，而忘了调的后果是「改了设置
+// 这一页没变」——正是本票要消灭的那一种。
+func (p *PagedList) SetView(v View) { p.surf.SetView(v) }
+
+// Layout 返回此刻的摆法。测试照它断言「这一页真的换了视图」。
+func (p *PagedList) Layout() View { return p.surf.Layout() }
 
 // Paged 返回这一页分页列表此刻的状态。
 func (p *PagedList) Paged() Paged {
@@ -252,7 +287,7 @@ func (p *PagedList) Reload() {
 // ⚠️ 只能由界面线程调。
 func (p *PagedList) ScrollTop() {
 	p.scroll.Y = 0
-	p.list.ScrollTo(0, ui.Start)
+	p.surf.scrollTop()
 }
 
 // View 画这一页。页面在每一帧开头调一次，装好 Grow(1) 的位置（同 List.View）。
@@ -295,7 +330,7 @@ func (p *PagedList) view(c *ui.Context) {
 	}
 
 	p.syncList()
-	p.list.View(c)
+	p.surf.View(c)
 
 	// ②③ 在这里跑（必须排在 List.View 之后：Visible 报的是**上一帧**的行，
 	// mygo 的 ListState.Visible 注释：「the row the list showed in the last frame」）。
@@ -303,10 +338,10 @@ func (p *PagedList) view(c *ui.Context) {
 	p.viewBackToTop(c)
 }
 
-// syncList 把这一帧该给 List 的东西给过去。只在真变了的时候才 SetSongs。
+// syncList 把这一帧该给底下那一对控件的东西给过去。只在真变了的时候才 SetSongs。
 func (p *PagedList) syncList() {
 	if p.rev != p.shownRev {
-		p.list.SetSongs(p.items)
+		p.surf.SetSongs(p.items)
 		p.shownRev = p.rev
 	}
 
@@ -314,26 +349,26 @@ func (p *PagedList) syncList() {
 	case len(p.items) == 0 && p.loading:
 		// 一行都还没有：第一页在途。这时候列表里那一句就是它全部的内容，
 		// 页脚先收起来——同一句摆两遍（空状态一句 + 页脚一句）是噪音。
-		p.list.SetEmpty("正在加载…")
-		p.list.SetFooter(nil)
+		p.surf.SetEmpty("正在加载…")
+		p.surf.SetFooter(nil)
 	case len(p.items) == 0 && p.blocked:
 		// 一行都没有还失败了：页面上就留那一个重试按钮，一句话都不多说。
-		p.list.SetEmpty("")
-		p.list.SetFooter(p.footerView)
+		p.surf.SetEmpty("")
+		p.surf.SetFooter(p.footerView)
 	default:
-		p.list.SetEmpty("")
+		p.surf.SetEmpty("")
 		// 末尾那一行**只在还有下一页（或刚失败要人重试）时才有**（Biu 的
 		// `count = hasMore ? items.length + 1 : items.length`）：拉到底之后它
 		// 就不该再占一行空白。
 		if p.hasMore || p.blocked {
-			p.list.SetFooter(p.footerView)
+			p.surf.SetFooter(p.footerView)
 		} else {
-			p.list.SetFooter(nil)
+			p.surf.SetFooter(nil)
 		}
 	}
 
 	// 滚动位置要写回来：回顶按钮靠它，三重保障里「在不在顶上」也靠它。
-	p.list.SetScroll(&p.scroll)
+	p.surf.SetScroll(&p.scroll)
 }
 
 // adopt 取走信箱里的结果，一条一条落到界面的状态上。只能由界面线程调。
@@ -369,7 +404,7 @@ func (p *PagedList) apply(r pageResult) {
 		p.err = r.err
 		p.blocked = true
 		log.Printf("biu: 第 %d 页拉失败（%s）：%v", r.page, p.why, r.err)
-		notify(p.list.acts, "加载更多失败："+r.err.Error())
+		notify(p.surf.List().acts, "加载更多失败："+r.err.Error())
 		return
 	}
 
@@ -437,8 +472,8 @@ func (p *PagedList) afterFrame() {
 		return
 	}
 
-	first, last := p.list.state.Visible()
-	n := p.list.rows()
+	first, last := p.surf.visible()
+	n := p.surf.rows()
 	switch {
 	case last < n-1:
 		// 末尾还在画面外。什么都不做，等用户滚过去。

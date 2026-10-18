@@ -66,7 +66,13 @@ type queuedTask struct {
 		Bvid   string `json:"bvid"`
 		Cid    string `json:"cid"`
 		Length int64  `json:"length"`
+		Video  bool   `json:"video,omitempty"`
 	} `json:"identity"`
+	// Video 是视频任务那一位（对着 `service/download` 的 `Task` 的 json tag）。
+	//
+	// ⚠️ 它**不在** `Identity` 里面：`Task.Video` 和 `Task.Identity.Video` 是两处
+	// 各自独立的字段（后者是续传的资源身份），而记录页那一排筛选读的是前者。
+	Video   bool   `json:"video,omitempty"`
 	Chunks  []int  `json:"chunks,omitempty"`
 	Status  string `json:"status"`
 	Err     string `json:"err,omitempty"`
@@ -399,6 +405,17 @@ func TestTheStatusColumnShowsTheThreeParts(t *testing.T) {
 }
 
 // progressWidth 是画面上那一条进度条涂了主色的宽度。
+//
+// 🔴 **只量「状态」那一列里那一段**（横向窗口是从百分比那一格的右边缘往左
+// `dlStatusW`），不是扫整张图。早先这里是整幅宽度扫，于是「侧栏里当前页那一项
+// 用主色垫底」也会被量进来——而侧栏那一项的高度和这一页的状态列**没有任何
+// 关系**，它落没落进这几行像素全看侧栏上排了几项：未登录时那三个入口不摆
+// （`Route.NeedsLogin`），当前页那一项往上挪了三行，正好掉进
+// `txt.Y-4` 那一行，于是量到的恒是侧栏那一项左右两段空白里较长的一段
+// （实测 74），50% 和 90% 一样宽。
+//
+// 这和 BMG-56 量行高时踩的是同一个坑：**量一件东西，要先把范围限在这一件东西
+// 里面**，否则量到的是碰巧和它同一行的别的东西。
 func progressWidth(t *testing.T, tt *ui.Tester, pct string) float32 {
 	t.Helper()
 	txt, ok := tt.Find(pct)
@@ -409,12 +426,17 @@ func progressWidth(t *testing.T, tt *ui.Tester, pct string) float32 {
 	// 而 Tester 默认不深色，所以浅色那份的 Accent 正是条上涂的那个颜色。
 	accent := BuildTheme(app.DefaultSettings(""), false).Accent
 
+	// 百分比是那一格里**定宽靠右**的一段（`dlPctW`），它的右边缘就是状态列的
+	// 右边缘；条是同一格里 `FillWidth` 的，所以右边缘也是那儿。
+	right := int(txt.X + txt.W)
+	left := right - dlStatusW
+
 	// 条在百分比那一行**上面**：从文字的上边界往上扫，找主色。
 	img := tt.Image()
 	y := int(txt.Y) - 4
 	for y > int(txt.Y)-24 {
 		run, best := 0, 0
-		for x := range img.Bounds().Dx() {
+		for x := max(left, 0); x < right; x++ {
 			c := img.RGBAAt(x, y)
 			if c.R == accent.R && c.G == accent.G && c.B == accent.B && c.A > 0 {
 				if run++; run > best {
@@ -541,6 +563,34 @@ func dlSnapshot(title string, st download.Status, total, done int64) download.Sn
 		s.Err = dlErrText
 	}
 	return s
+}
+
+// dlVideoSnapshot 是 `dlSnapshot` 的视频那一版。
+//
+// ⚠️ 它只翻 `Video` 那一一位，别的全和音频一样（进度、日期、大小）——
+// 这样「筛完之后剩下的是不是那一类」才是判据，而不会混进「视频行的画法不一样」
+// 这件无关的事。
+func dlVideoSnapshot(title string, st download.Status, total, done int64) download.Snapshot {
+	s := dlSnapshot(title, st, total, done)
+	s.Video = true
+	s.Dest = filepath.Join(dlDir, title+".mp4")
+	return s
+}
+
+// newVideoTask 是 `newTask` 的视频那一版，喂的是**队列文件**（真引擎那条路）。
+//
+// ⚠️ 三样都要改，而它们是三件不同的事：ID 带 `|video`（`download.TaskID` 的视频
+// 那一支，判重键）、`Video` 那一位（业务上的「这一项是视频」，记录页那一排筛的
+// 就是它）、落盘名 `.mp4`（交织出来的产物）。只改 ID 的话 `Snapshot.Video` 是假值，
+// 而只改 `Video` 的话真引擎那一路认不出这是视频。
+func newVideoTask(title string, st download.Status, total int64, percent int) queuedTask {
+	task := newTask(title, st, total, percent)
+	task.ID += "|video"
+	task.Video = true
+	task.Identity.Video = true
+	task.Dest = filepath.Join(dlDir, title+".mp4")
+	task.Ext = ".mp4"
+	return task
 }
 
 // dlTitles 是给报错用的一行摘要。

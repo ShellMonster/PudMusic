@@ -303,6 +303,35 @@ func TestTheThreeGuardsDoNotSendThreeRequestsForOnePage(t *testing.T) {
 	pump(t, tt, "第一页落地", func() bool { return p.Paged().Loaded == 200 })
 	tt.Scroll(testerW/2, testerH/2, 0, scrollToBottom)
 	pump(t, tt, "第 2 页发出去", func() bool { return p.Paged().Loading })
+	// 🔴 **等第 2 页那一趟真的记到账上**（评审在满载的整包跑里撞到过这一条，见下面）。
+	//
+	// `Loading` 是**主线程**上那一格，而把调用记进 `calls` 的是拉页那个**后台
+	// goroutine**——两者之间没有先后保证。第 1 页落地的那一帧，③「容器没填满」
+	// 就已经把第 2 页叫起来了（`afterFrame` 排在 `List.View` 之后，读的是**上一帧**
+	// 量到的可见行），所以滚到底那一下常常什么也没做，而 `Loading` 从那时起就是
+	// true。于是「跑十几帧之后数一数」数到的是**调度快慢**：机器一忙，那十几帧
+	// （纯 CPU，几毫秒）跑完了而那个 goroutine 一次都没被调度，账上就还是只有第 1 页
+	// ——用例于是报「第 2 页在途时又发了 0 个请求」，而它其实一次都没验到。
+	pumpCalls(t, st, 2)
+
+	// 🔴 **还要等第 2 页真的进了 fetch**（issue 57 的验收里撞出来的）。
+	//
+	// `Loading` 是**界面线程**设的（`paged.go` 的 `load`：`p.loading = true` 之后
+	// 才 `go func()`），而 `stub.calls` 是**那个后台 goroutine** 记的
+	// （`paged.go` 的 `fetchOne` → `s.fetch` → `s.calls = append(...)`）。
+	// 两个数之间隔着一道 Go 的调度延迟。
+	//
+	// 而下面那 15 帧在无头 Tester 里跑完只要几十微秒——机器上有别的包在抢 CPU
+	// （`go test ./...` 是全并行）时，几十微秒完全够不到那个刚起来的 goroutine，
+	// 于是量到 `called [1]`：请求一个都没多发，测试却红了。
+	// 实测：连跑 300 遍红 2 次（**未改动的 main 上同样红 2 次**，所以不是谁改坏的）。
+	//
+	// ⚠️ **判据一个字没动**：下面那 15 帧和 `len(c) != 2` 原封不动，这一条只是把
+	// 「第 2 页已经发出去了」这件事**等完整**。三重保障真的发了三个请求的话，
+	// `len(c)` 是 3 或 4，`!= 2` 照样红。
+	pump(t, tt, "第 2 页真的进了 fetch", func() bool {
+		return len(st.callsOf()) >= 2
+	})
 
 	// 现在第 2 页在途。跑它十几帧，每一帧三重保障都重新问一遍。
 	for range 15 {
@@ -314,6 +343,27 @@ func TestTheThreeGuardsDoNotSendThreeRequestsForOnePage(t *testing.T) {
 
 	st.release(2)
 	pump(t, tt, "第 2 页落地", func() bool { return p.Paged().Loaded == 400 && !p.Paged().Loading })
+}
+
+// pumpCalls 等到**后台那个拉页的 goroutine**把第 n 次调用记到账上。
+//
+// 与 `pump` 的区别是它等的是后台那一支：`pump` 走一帧就问一次，而这里数的是
+// stub 里的账——那几行是拉页的 goroutine 写的，它什么时候跑起来和主线程画第几帧
+// 没有关系。**在满载的整包跑里量过**：不等它的话，那条用例会在「账上只有第 1 页」
+// 的时刻就去数（十几帧纯 CPU 只要几毫秒，而 goroutine 可能一次都没被调度）。
+func pumpCalls(t *testing.T, st *stubFetcher, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if len(st.callsOf()) >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("等了两秒，后台只记了 %d 次调用（%v），want %d 次",
+				len(st.callsOf()), st.callsOf(), n)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // TestAnEmptyPageWithMoreIsTheEnd 是防空转：一页空的还说「还有」，接口在骗人。
@@ -603,7 +653,7 @@ func TestAppendingPagesKeepsTheChosenSong(t *testing.T) {
 	if err := tt.Click("第 1 页 歌 5"); err != nil {
 		t.Fatalf("点不到第 5 行：%v", err)
 	}
-	if m, ok := p.list.Selected(); !ok || m.ID != "p1-4" {
+	if m, ok := p.Selected(); !ok || m.ID != "p1-4" {
 		t.Fatalf("选中的是 %v，want p1-4", m.ID)
 	}
 
@@ -611,7 +661,7 @@ func TestAppendingPagesKeepsTheChosenSong(t *testing.T) {
 	tt.Scroll(testerW/2, testerH/2, 0, scrollToBottom)
 	pump(t, tt, "第二页落地", func() bool { return p.Paged().Loaded == 400 && !p.Paged().Loading })
 
-	m, ok := p.list.Selected()
+	m, ok := p.Selected()
 	if !ok {
 		t.Fatalf("翻完页选中没了")
 	}

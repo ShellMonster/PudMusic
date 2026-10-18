@@ -26,6 +26,7 @@
 //	/x/v3/fav/folder/fav           收藏这个容器
 //	/x/v3/fav/folder/unfav         取消收藏这个容器
 //	/x/v3/fav/resource/batch-del   从容器里删掉几个条目（批量）
+//	/x/v3/fav/resource/clean       清掉容器里所有失效的条目
 package bili
 
 import (
@@ -45,6 +46,7 @@ const (
 	pathFolderFav        = "/x/v3/fav/folder/fav"
 	pathFolderUnfav      = "/x/v3/fav/folder/unfav"
 	pathResourceBatchDel = "/x/v3/fav/resource/batch-del"
+	pathResourceClean    = "/x/v3/fav/resource/clean"
 )
 
 // platformWeb 是这几个接口要的 `platform` 值。
@@ -460,6 +462,44 @@ func (c *Client) RemoveCollectionMedias(ctx context.Context, id int64, medias []
 		if err != nil {
 			return fmt.Errorf("bili: 从收藏夹 %d 里删内容（第 %d 条起）: %w", id, start+1, err)
 		}
+	}
+	return nil
+}
+
+// CleanInvalidResources 让 B 站把这个收藏夹里**已经失效**的条目清掉。
+//
+// # 为什么不在本地筛一遍再删
+//
+// 最直观的写法是「拉全量 → 按 `Media.Attr` 挑出失效的 → `RemoveCollectionMedias`」，
+// 而那个写法有**三个各自都会出错的地方**：
+//
+//  1. `Attr` 认得的只有 0 / 1 / 9。B 站后来又加过别的失效标记，照 `Attr` 挑会
+//     漏掉一批——表现是「点完还有几个灰的」，而用户以为已经清干净了。
+//  2. 要翻完所有页。一个几千首的收藏夹是几十趟请求（20 一页），这一趟跑几十秒。
+//  3. 翻页期间**列表会变**（用户自己在删、或者 B 站那边过期），于是翻到的不是
+//     全量——漏掉的那几条和第 1 条叠在一起，症状一样。
+//
+// 服务端这一个动作只带一个 `media_id`，B 站自己认得哪几条失效了（照 Biu 上游
+// 的 `postFavResourceClean`，`service/fav-resource-clean.ts`）。它认得的比我们多。
+//
+// ⚠️ **只对收藏夹有效**：和 `RemoveCollectionMedias` 同一个道理，合集 / 系列是
+// 建在稿件上的，B 站没有这个动作。
+//
+// **界面那边只判所有权、不判容器类型**（见 `app.CanDeleteCollection` 的注释，
+// 以及 `DeleteFolder` 上「界面上不做类型判断」那段）：自己建的合集 / 系列上，
+// 这一项照样摆得出来，而 B 站会回一句它不认识。合集 / 系列在 URL 上是
+// `/collection/{id}?type=21`，而今天界面上没有任何地方拼出那个查询串——要手敲
+// URL 才碰得到，所以这一条现在只是**注释里的话必须是真的**，不是一个活着的缺陷。
+func (c *Client) CleanInvalidResources(ctx context.Context, id int64) error {
+	if id <= 0 {
+		return fmt.Errorf("bili: 收藏夹 id 不对（%d）", id)
+	}
+	// ⚠️ **不带 platform**：上游这一个也没带（B 站不认它），多给不报错但那
+	// 一次请求的报文就和上游的不一样了，而两个一漂就得分不清是谁的问题。
+	if _, err := c.Do(ctx, c.writeCall(c.hostAPI+pathResourceClean, url.Values{
+		"media_id": {strconv.FormatInt(id, 10)},
+	})); err != nil {
+		return fmt.Errorf("bili: %s %d: %w", pathResourceClean, id, err)
 	}
 	return nil
 }

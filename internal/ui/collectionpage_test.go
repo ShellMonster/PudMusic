@@ -44,8 +44,13 @@ type favBili struct {
 	faved bool
 	// removed 记下每一次 batch-del 的 resources。
 	removed []string
-	// deleted 记下每一次 folder/del 的 media_ids（侧栏「删除」那一项用）。
+	// deleted 记下每一次 folder/del 的 media_ids（「删除收藏夹」和侧栏
+	// 「删除」共用它）。
 	deleted []string
+	// cleaned 记下每一次 resource/clean 的 media_id（「清除失效内容」那一项）。
+	cleaned []string
+	// rejectDel 为真时 folder/del 回 -400（B 站拒绝删）。见 rejectFolderDelete。
+	rejectDel bool
 	// paths 记下每一次请求打到了哪条路径（发没发请求本身就是一条断言：
 	// 「为了一个认不出的项去问 B 站」是白跑的一趟）。
 	paths []string
@@ -96,6 +101,14 @@ func newCollectionBili(t *testing.T) *favBili {
 		case "/x/v3/fav/folder/del":
 			_ = r.ParseForm()
 			b.deleted = append(b.deleted, r.PostForm.Get("media_ids"))
+			if b.rejectDel {
+				writeCollectionJSON(t, w, -400, "请求错误", nil)
+				return
+			}
+			writeCollectionJSON(t, w, 0, "0", 0)
+		case "/x/v3/fav/resource/clean":
+			_ = r.ParseForm()
+			b.cleaned = append(b.cleaned, r.PostForm.Get("media_id"))
 			writeCollectionJSON(t, w, 0, "0", 0)
 		case "/x/web-interface/view":
 			// bvid → avid。列表页的条目大多只有 bvid，而收藏夹那个弹窗要的是
@@ -136,6 +149,41 @@ func mediaOf(id int, title string) map[string]any {
 		"cover": "", "duration": 185, "attr": 0, "page": 1,
 		"upper": map[string]any{"name": "UP " + strconv.Itoa(id)},
 	}
+}
+
+// setOwnerMid 换掉容器的创建者。
+//
+// 「这个收藏夹是不是我自己建的」是 ⋯ 菜单里那两个破坏性项的显示条件（见
+// `app.CanDeleteCollection`），而它读的是元信息里的 `upper.mid`——所以要把
+// 「别人建的」那一支演出来，只能改这里。
+func (b *favBili) setOwnerMid(mid int64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.infos["upper"] = map[string]any{"mid": mid, "name": "UP 小明"}
+}
+
+// setAttr 换掉容器的 attr。0 是「公开、且是 B 站发下来的默认收藏夹」。
+func (b *favBili) setAttr(attr int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.infos["attr"] = attr
+}
+
+// cleanedFolders 是被清过失效内容的那些收藏夹 id。
+func (b *favBili) cleanedFolders() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.cleaned...)
+}
+
+// rejectFolderDelete 让这一台假 B 站**拒绝删收藏夹**（回 -400）。
+//
+// 为什么需要它：B 站拒绝是这条路上最要紧的一种结果——收藏夹还在、而界面已经按
+// 「它没了」在处理了（把用户踢走、把状态扔掉）。只有真的发一个 -400 才走得到。
+func (b *favBili) rejectFolderDelete() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.rejectDel = true
 }
 
 func (b *favBili) seenOrders() []string {
@@ -199,9 +247,28 @@ func writeCollectionJSON(t *testing.T, w http.ResponseWriter, code int, msg stri
 // 缓存着的，列表也不会自己重拉）。要换内容就重新建一个外壳。
 func collectionShell(t *testing.T, id string, medias ...map[string]any) (*favBili, *Shell, *ui.Tester) {
 	t.Helper()
+	return collectionShellAs(t, "", id, medias...)
+}
+
+// collectionShellAs 是上面那一个，额外**登录成 mid**（空串 = 不登录）。
+//
+// ⚠️ **登录是这一票的必需品**：⋯ 菜单里「清除失效内容」「删除收藏夹」只在
+// 「这个收藏夹是自己建的」时才摆得出来，而那个判断的第一位是 `SelfMid()`
+// ——不登录它恒为 0，于是这两个菜单项**永远摆不出来**，这一票就在界面层
+// 验不到任何东西。
+//
+// `MountLogin` 用内存 Store（不碰钥匙串，见 homepage_feed_test.go 的同一条
+// 规矩），随后直接装一份登录态进去。store 读回来是「没登录过」，那是正常的
+// 起点——真正装上去的是后面那一句。
+func collectionShellAs(t *testing.T, mid string, id string, medias ...map[string]any) (*favBili, *Shell, *ui.Tester) {
+	t.Helper()
 	b := newCollectionBili(t)
 	b.setMedias(medias...)
-	s, tt := newShell(t)
+	// ⚠️ **挂一份真设置**（临时目录）：侧栏那一行是从 `SettingsSnapshot` 读
+	// 顺序的，而「删收藏夹」「从侧栏移除」收尾时要写回那个顺序（`forgetFavorite`）。
+	// 不挂的话那一步回 `ErrSettingsNotMounted`，日志里多一行「顺序存不住」——
+	// 而这条页面**在真机上顺序是存得住的**，让测试跑在一个假故障上没意思。
+	s, tt := newShell(t, withSettings(app.DefaultSettings("")))
 	// ⚠️ 装上唤醒：后台那一趟（拉元信息、收藏之后刷新）跑完之后要能叫醒界面，
 	// 而真窗口里这一句是在 `Shell.Attach` 里装的。测试不走 Attach，得自己装，
 	// 否则「后台改完状态界面不动」这一类在测试里根本走不到。
@@ -216,6 +283,11 @@ func collectionShell(t *testing.T, id string, medias ...map[string]any) (*favBil
 	// settle 调到 0：真值 500ms 是「等 B 站改完」那一条（app 那边有专门的
 	// 测试钉它），这一组要的是「点了之后画出来变成什么样」，不是等多久。
 	s.app.MountCollections(app.CollectionRefs{Client: cli, Settle: 0})
+
+	if mid != "" {
+		s.app.MountLogin(app.NewMemoryStore("collection-test"), cli)
+		s.app.TestOnlyAdoptLogin(mid)
+	}
 
 	s.navigate("/collection/" + id)
 	// 等容器拉回来（头图区第一帧是「正在加载…」）。

@@ -83,7 +83,12 @@ type homePage struct {
 
 	// lists 是三个 Tab 各自的列表。**滚动位置就跟着这三个对象走**，见文件头
 	// 下面「切 Tab 的滚动位置」那一段。
-	lists [homeTabCount]*list.List
+	//
+	// ⚠️ 是 `SwitchView` 而不是 `list.List`：设置里的「数据显示样式」要能在
+	// 网格 / 紧凑 / 列表之间换，而网格那一档是另一个控件（`widgets/list/switch.go`
+	// 顶上写明了为什么不是让 `List` 自己画）。三个 Tab 各有一份，切档时
+	// **每个 Tab 各自记着自己停在哪**。
+	lists [homeTabCount]*list.SwitchView
 
 	// newGrid 是新歌速递那一块横向网格，见 homepage_newmusic.go。
 	newGrid *newMusicGrid
@@ -120,7 +125,7 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 	// 而重试要能重新拉那一摊。
 	h.newGrid.SetRetry(func() { h.retryNew() })
 	for i := range h.lists {
-		l := list.New(cache, acts)
+		l := list.NewSwitchView(cache, acts)
 		// 空状态**不在这里说**：一句都没接上时是**这一页**的空状态（routes 表里
 		// `/` 那一条，见 viewHome）。让三个列表都说一遍自己那句「这里还没有歌」，
 		// 叠在那一页的空状态上就是两句话在讲同一件事。
@@ -179,6 +184,14 @@ func (s *Shell) viewHome(c *ui.Context, _ *ui.Route) {
 func (h *homePage) view(c *ui.Context, s *Shell) {
 	h.adopt()
 	h.pull()
+
+	// 🔴 设置里的「数据显示样式」在**画之前**装给这一屏的三个列表：忘了这一句的
+	// 症状是「设置改了、首页没变」——而首页是用户打开应用看到的第一页，最先发现
+	// 「这个设置没用」的就是这儿。
+	view := s.displayView()
+	for _, l := range h.lists {
+		l.SetView(view)
+	}
 
 	ui.Column(c).Key("page:" + homePath).Grow(1).Padding(20).Gap(12).
 		AlignItems(ui.Stretch).Children(func() {

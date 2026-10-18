@@ -66,14 +66,27 @@ const (
 	fullSpectrumGapY   = 12
 	fullSpectrumEdge   = 24
 	fullControlsHeight = 80
-	fullBarHeight      = 56
-	fullBarPadX        = 24
-	fullBarPadY        = 12
-	fullPartsWidth     = 280
-	fullPartsHeight    = 420
-	fullPartsTabW      = 26
-	fullPartsTabH      = 96
-	fullPartRowHeight  = 32
+
+	// 满屏上播放/暂停那一枚的图标边长与点击区。
+	//
+	// ⚠️ 它比播放条上那一枚（`iconPlayBtn` 30 / `iconHitPlay` 40）大一号，因为
+	// 满屏这一行本来就以它为主角；而 `fullControlsHeight` 只有 80，再大就被切。
+	// 46 + 上下各 12 的内边距 = 70，落在 80 里还留 10。
+	//
+	// 🔴 **以前这里是 `ui.PrimaryButton(c, "暂停").Width(96)`** —— 一个文字按钮，
+	// 而两边的上一首/下一首共用播放条那几个（已经是图标了）。那一行于是变成
+	// 「图标 — 文字 — 图标」**半新半旧**：满屏是用户盯着看最久的一屏，中间夹一个
+	// 绿色文字块和两个灰色箭头，怎么看都不像一套。
+	fullPlayGlyph     = 34
+	fullPlayHit       = 46
+	fullBarHeight     = 56
+	fullBarPadX       = 24
+	fullBarPadY       = 12
+	fullPartsWidth    = 280
+	fullPartsHeight   = 420
+	fullPartsTabW     = 26
+	fullPartsTabH     = 96
+	fullPartRowHeight = 32
 )
 
 // fullScrim 是背景上那层压暗。
@@ -495,13 +508,14 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 				//   播放列表抽屉  抽屉画在**主布局**里（queue_drawer.go），而主布局在
 				//                满屏浮层**底下**——摆一个「播放列表」按钮，用户按了
 				//                什么也不会发生，而界面上看不出坏了
+				// 三枚都是图标（和播放条上共用同一批，见 icons.go）。哪一档配哪一张
+				// 由 `transportIcon` 说了算——这一行不自己决定（守卫盯着）。
 				s.viewPrevButton(c)
-				if st.Playing {
-					if ui.PrimaryButton(c, "暂停").Width(96).Clicked() {
-						s.app.Toggle()
-					}
-				} else if ui.PrimaryButton(c, "播放").Width(96).
-					Disabled(!st.HasTrack).Clicked() {
+				if iconButtonPrimary(c, transportIcon(st.Playing),
+					transportLabel(st.Playing), fullPlayGlyph).
+					Size(fullPlayHit, fullPlayHit).Padding(0, 6).
+					Tooltip(transportLabel(st.Playing)).
+					Disabled(!st.Playing && !st.HasTrack).Clicked() {
 					s.app.Toggle()
 				}
 				s.viewNextButton(c)

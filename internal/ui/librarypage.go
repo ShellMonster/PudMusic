@@ -179,6 +179,63 @@ func (p *libraryPage) viewFilters(c *ui.Context, now time.Time) bool {
 	return changed
 }
 
+// listMetrics 是这两页一行里的内边距、间距和那几列的宽度。
+//
+// 两种：普通和紧凑（设置里的「数据显示样式」）。**做成一份而不是在画行的地方散落
+// 几个 if**：一行的左右内边距和列宽是对齐的——序号那一列宽一点、封面大一点，
+// 右边三列就会错位，而错位在界面上只是「有点挤」，没人往设置那档上想。
+type listMetrics struct {
+	padY, padX, gap float32
+	cover           float32
+	index           float32
+	count, date     float32
+	clock           float32
+	progress        float32
+	viewedAt        float32
+	titleLines      int
+	titleSize       float32
+}
+
+// metricsOf 是「这一档该用哪一份尺寸」。
+//
+// ⚠️ 网格那一档**不查这张表**：格子是另画的（`drawLaterCell`），而那份的列宽是按
+// 格子宽算的。这里只管列表和紧凑两档。
+func metricsOf(v list.View) listMetrics {
+	if v != list.ViewCompact {
+		return listMetrics{
+			padY: listPadY, padX: listPadX, gap: rowGap, cover: coverSide,
+			index: colIndex, count: colCount, date: colDate, clock: colClock,
+			progress: colProgress, viewedAt: colViewedAt,
+			titleLines: titleLines, titleSize: 14,
+		}
+	}
+	// 紧凑：封面 48 → 32、上下内边距 8 → 4、间距 8 → 6、歌名两行 → 一行。
+	// 几个数字比 `widgets/list` 的紧凑那一份略宽一点点——这两页右边多两列，收得太
+	// 狠的话歌名只剩几十像素（实测 900 宽的页面区下）。
+	return listMetrics{
+		padY: compactListPadY, padX: compactListPadX, gap: compactRowGap,
+		cover: compactCoverSide, index: compactColIndex,
+		count: compactColCount, date: compactColDate, clock: compactColClock,
+		progress: compactColProgress, viewedAt: compactColViewedAt,
+		titleLines: 1, titleSize: 13,
+	}
+}
+
+// 紧凑那一档的行内尺寸。数在 `widgets/list/card.go` 那一组旁边，两个地方摆着同一个
+// 概念的两套数——那是因为这两页的行**多两列**（播放量 / 观看时间），列宽算得不一样。
+const (
+	compactListPadY    = 4
+	compactListPadX    = 6
+	compactRowGap      = 6
+	compactCoverSide   = 32
+	compactColIndex    = 32
+	compactColCount    = 74
+	compactColDate     = 92
+	compactColClock    = 50
+	compactColProgress = 110
+	compactColViewedAt = 118
+)
+
 // libraryRowHead 是这两页的**行首**：`#` + 封面 + 标题 + UP 名，剩下右边那几列
 // 由各自的页面接上去。
 //
@@ -289,12 +346,16 @@ const keywordBoxLabel = "搜索标题/UP主名称"
 // 用户一次只能在一处敲字，两个钟各自醒着就是两个定时器，而哪一个先停都不对。
 // 另起一个的代价还不止是那一个 goroutine——它会让「防抖 500ms」这件事在代码里
 // 出现两个出处，改一个忘了另一个时界面上一点也看不出来。
+//
+// 🔴 **搜索框的联想词那一档也共用它**（`suggestSearching`，见
+// `navbar_suggest.go`）：理由一模一样——同一个搜索框上的同一个「等用户把词敲完」，
+// 而且它那个钟不该在浮层收掉之后还醒着。
 func (s *Shell) syncSearchWatch() {
 	want := false
 	if p := s.libraryPageAt(s.router.Path()); p != nil {
 		want = !p.pendingSince.IsZero()
 	}
-	if s.lyricsSearching() {
+	if s.lyricsSearching() || s.suggestSearching() {
 		want = true
 	}
 	switch {
