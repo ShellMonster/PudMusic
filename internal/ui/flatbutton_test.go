@@ -3,7 +3,11 @@ package ui
 import (
 	"image"
 	"image/color"
+	"math"
 	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -236,6 +240,71 @@ func sideScans(img *image.RGBA) (bg color.RGBA, runs []sideRun) {
 	return bg, runs
 }
 
+// TestTheFlatAreasNeverReachForTheStockButton 钉住「票面点名的五处里不许再出现
+// `ui.Button`」。
+//
+// # 为什么断源码而不是画面
+//
+// 评审查出来过一次：设置页有**六枚**描边药丸漏了（`settings_tab_config.go` 的
+// 导出 / 导入 / 从 Biu 导入、`settings_tab_menu.go` 的「添加文件夹」和「×」、
+// `settings_tab_shortcut.go` 的「恢复默认」），而代码和**全部测试都绿**——
+// `ui.Button(c, "导出配置")` 和 `flatButton(c, "导出配置")` 签名一模一样、事件照旧
+// 触发，只有画面上多了一圈线。
+//
+// 而逐处配画面探针做不到：纯文字按钮**没有一个能直接用的探针**（`Tester.Find`
+// 给的是那行字的框，见 `TestTheIconButtonsAreTransparentAndUnbordered` 顶上那一段），
+// 这也是当初那六枚漏掉还没人发现的同一个原因。
+//
+// 覆盖面用**文件名前缀**而不是逐个列文件：以后新加一个 `sidebar_xxx.go` 自动在里
+// 头，不用回来改这张单子。
+func TestTheFlatAreasNeverReachForTheStockButton(t *testing.T) {
+	// 票面点名的五处 + 它们的附属文件。
+	prefixes := []string{"sidebar", "navbar", "playbar", "settings", "queue_drawer", "partdrawer"}
+	// 这几个是**故意**留着 `ui.Button` 的，每一条都有理由；新加例外必须先在这里
+	// 写一行，评审才看得见。
+	allowed := map[string]string{
+		"ui.Toolbar": "框架自己的横向工具栏，它本来就是无描边那一支" +
+			"（`styleButton` 的 toolbarButtons），不是描边药丸",
+	}
+
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var checked int
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		if !slices.ContainsFunc(prefixes, func(p string) bool {
+			return name == p+".go" || strings.HasPrefix(name, p+"_")
+		}) {
+			continue
+		}
+		checked++
+		src, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(src), "\n") {
+			code, _, _ := strings.Cut(line, "//")
+			if !strings.Contains(code, "ui.Button(") {
+				continue
+			}
+			why, ok := allowed[code]
+			if !ok {
+				why = "这一处不在例外名单里——要么换成 flatButton，要么在 allowed 里写一行理由"
+			}
+			t.Errorf("%s:%d 还在用 ui.Button：%s\n	%s", name, i+1,
+				strings.TrimSpace(code), why)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("一个文件都没查到——前缀写错了，这条测试会一直绿着")
+	}
+}
+
 // TestTheSidebarRowsHaveNoBorderAndNoFill 断**侧栏那一列纯文字按钮**。
 //
 // 换了个探针：`Tester.Find` 在纯文字按钮上给的是**那行字的框**（见上面那一条），
@@ -266,21 +335,30 @@ func TestTheSidebarRowsHaveNoBorderAndNoFill(t *testing.T) {
 	}
 }
 
-// TestThePlayBarAndRateKeysAreFlatAndNotDead 是播放条那一半：换上去的同时，
+// TestThePlayBarKeysAreFlatAndKeepTheirHover 是播放条那一半：换上去的同时，
 // **悬停反馈还在**。
 //
-// 三条判据互相兜着：
+// 四条判据互相兜着：
 //
 //  1. 平时和框外同一块颜色（没有描边、没有常驻底色）。
-//  2. 指针落上去**颜色要变**——扁平不等于没反馈，而「没反馈」是不报错的坏。
+//  2. **能按的**键指针落上去颜色要变——扁平不等于没反馈，而「没反馈」是不报错的坏。
 //  3. 变的那点**要淡**：通道差落在 6~64 之间。下限是「变了」，上限是「变的是一层
 //     很薄的底，而不是换成了另一块实色」。
+//  4. 指针挪走要真的撤回去。
+//
+// ⚠️ **「播放 / 暂停」也不在**：那一枚走 `iconButtonPrimary`，是**实心主色**
+// （理由见 `icons.go` 里那个函数的抬头：实心主色是强调色，不是那圈控件描边）。
+// **「上一首 / 下一首」同样不在**：它们此刻是**禁用的**
+// （`CanPrev` 要 `player != nil`，无头外壳里没有播放器，`app/queue.go:1210`），
+// 而禁用键本来就不该有悬停反馈——那是 `TestADisabledFlatButtonDoesNotLightUpOnHover`
+// 的事。拿它们去断「悬停要亮」只会逼着代码给禁用的键也铺一层底，
+// **等于告诉用户这里点得动**（这正是评审查出来的那一条）。
 //
 // ⚠️ 只画播放条（`playBarTester`）而不是整窗：整窗里这一格背后是播放条自己的
 // `t.Surface`，而外侧那一圈要采到**播放条之内**才算是同一个参照。整窗的写法会在
 // 播放条的最外沿（加歌那一枚）采到窗外，报出来的是「框外是窗口底色」——离真因
 // 隔了两层。
-func TestThePlayBarAndRateKeysAreFlatAndNotDead(t *testing.T) {
+func TestThePlayBarKeysAreFlatAndKeepTheirHover(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
 		if dark {
@@ -291,7 +369,7 @@ func TestThePlayBarAndRateKeysAreFlatAndNotDead(t *testing.T) {
 			tt.Move(600, 20) // 播放条之外，窗口顶上那条空地
 			tt.Frame()
 
-			for _, what := range []string{"上一首", "下一首", "播放模式", "播放速率", "加歌"} {
+			for _, what := range []string{"播放模式", "播放速率", "加歌"} {
 				r, ok := tt.Find(what)
 				if !ok {
 					t.Fatalf("播放条上找不到 %q，文字有 %q", what, tt.Texts())
@@ -322,6 +400,192 @@ func TestThePlayBarAndRateKeysAreFlatAndNotDead(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestADisabledFlatButtonDoesNotLightUpOnHover 钉住「禁用键不许亮」。
+//
+// 这是评审查出来的第二条：`flatFeel` 原先在**建元素时**问 `IsDisabled()`，而调用方
+// 是在 `flatButton` 返回**之后**才 `.Disabled(...)` 的——那一刻问出来恒是 false，
+// 于是只读设置里的禁用按钮，指针落上去照样铺一层悬停底（实测那层底是正常键的一半
+// 深，通道差 9，正常键 18）。**等于告诉用户这里点得动。**
+//
+// 两条判据缺一不可：
+//
+//  1. **同一屏上能写的那一档，指针落上去要亮**——不然这一条会因为「根本没反馈」
+//     而白白地绿。
+//  2. **只读设置里的每一档，指针落上去一个像素都不能变**。
+//
+// ⚠️ 判据用**同一格**的「指针在外 / 指针在内」两个采样点，不拿别的控件当参照：
+// 别的控件换了主题、换了位置，差值就不是同一个数了。
+func TestADisabledFlatButtonDoesNotLightUpOnHover(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			// ① 能写的那一版：同样的按钮，指针落上去要亮。
+			tt := openSettingsFor(t, dark, false)
+			if d := hoverDelta(t, tt, "浅色"); d < 6 {
+				t.Fatalf("能写的那一档指针落上去只变了 %d（< 6）——"+
+					"下面「禁用键不亮」那条就没有对照，会白白地绿", d)
+			}
+
+			// ② 只读的那一版（设置来自更新的版本）：每一档都得一点不变。
+			ro := openSettingsFor(t, dark, true)
+			if !ro.HasText("设置只读") {
+				t.Fatalf("没有进只读那一版，文字有 %q", ro.Texts())
+			}
+			for _, label := range []string{"浅色", "直接退出"} {
+				if d := hoverDelta(t, ro, label); d > probeTolerance {
+					t.Errorf("只读设置里的「%s」指针落上去变了 %d（> %d）——"+
+						"禁用键亮了，等于告诉用户这里点得动", label, d, probeTolerance)
+				}
+			}
+		})
+	}
+}
+
+// openSettingsFor 开设置页；readOnly 为真时挂一份来自更新版本的设置（只读）。
+//
+// 只读那一档靠的是「文件里的 schemaVersion 比我们高」
+//（`TestSettingsPageRefusesToWriteAFileFromANewerVersion` 用的同一条路）。
+func openSettingsFor(t *testing.T, dark, readOnly bool) *mygoui.Tester {
+	t.Helper()
+	if !readOnly {
+		b := newTestShell(t, systemIsDark(dark))
+		b.s.navigate(settingsPath)
+		b.tt.Frame()
+		return b.tt
+	}
+	path := filepath.Join(t.TempDir(), app.SettingsFileName)
+	if err := os.WriteFile(path, []byte(`{"schemaVersion": 99, "appSettings": {}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := app.New()
+	if err := a.MountSettings(path); err == nil {
+		t.Fatal("来自更新版本的设置文件没有报错")
+	}
+	t.Cleanup(func() {
+		a.Close()
+		_ = a.CloseSettings()
+	})
+	b := newTestShell(t, onApp(a))
+	b.s.navigate(settingsPath)
+	b.tt.Frame()
+	return b.tt
+}
+
+// hoverDelta 是「指针落在这一格上」减「指针在别处」时，这一格的底色变了多少。
+//
+// ⚠️ 指针先挪到**同一格**的外面再取第一个采样点：同一个按钮、同一个背景、同一帧
+// 的主题，三个条件只差「指针在不在框里」。
+func hoverDelta(t *testing.T, tt *mygoui.Tester, label string) int {
+	t.Helper()
+	r, ok := tt.Find(label)
+	if !ok {
+		t.Fatalf("画面上找不到 %q，文字有 %q", label, tt.Texts())
+	}
+	away := [2]float32{600, 20}
+	tt.Move(away[0], away[1])
+	tt.Frame()
+	before := tt.Image()
+	idle := probeFill(before, r)
+
+	tt.Move(r.X+r.W/2, r.Y+r.H/2)
+	tt.Frame()
+	return maxDiff(probeFill(tt.Image(), r), idle)
+}
+
+// TestTheSelectedRowKeepsItsContrast 钉住「选中那一行的字读得出来」。
+//
+// 这是评审查出来的第一条：选中态把底从实心主色换成淡底的同时**把字也染成主色**，
+// 浅色默认主题下那一行从 **9.2:1 掉到 1.55:1**——低于 WCAG AA 的 4.5:1。
+// 绿字压绿底是同一支颜色压自己。
+//
+// 判据是**画面上那一格的两个色**：底取众数、字取离底最远的那一个（落在实心笔画上），
+// 再算 WCAG 2.x 的对比度。深浅两套主题都跑——深色那一档本来就过，而浅色那一档
+// 曾经不���。
+//
+// 4.5 是 WCAG AA 对**普通正文**的门槛（侧栏菜单项是 13px 的正文，不是大字）。
+func TestTheSelectedRowKeepsItsContrast(t *testing.T) {
+	const wantAA = 4.5
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			b := newTestShell(t, systemIsDark(dark), loggedInWith("7"))
+			s, tt := b.s, b.tt
+			s.navigate("/local-music")
+			tt.Frame()
+			tt.Move(600, 780)
+			tt.Frame()
+
+			img := tt.Image()
+			_, runs := sideScans(img)
+			if len(runs) != 1 {
+				t.Fatalf("侧栏那一列上有 %d 段和底色不同的像素（%v）——"+
+					"选出当前那一行要靠「只有一段」", len(runs), runs)
+			}
+			bg, ink := rowInk(img, runs[0])
+			got := wcagContrast(bg, ink)
+			t.Logf("%s：选中那一行 底 %v / 字 %v = %.2f:1", name, bg, ink, got)
+			if got < wantAA {
+				t.Errorf("选中的那一行对比度只有 %.2f:1（< %.1f:1）——底 %v、字 %v。",
+					got, wantAA, bg, ink)
+			}
+		})
+	}
+}
+
+// rowInk 是一行里「底色」和「字色」：底取那一段的众数，字取离底最远的那一个像素。
+//
+// ⚠️ **字取的是最远的那一个、不是平均**：字是抗锯齿画的，一行里大部分是过渡色，
+// 平均出来是一个两边都不是的中间值，拿它算对比度既不像底也不像字。落在实心笔画
+// 上的那些像素才是字本身的颜色。
+func rowInk(img *image.RGBA, r sideRun) (bg, ink color.RGBA) {
+	var px []color.RGBA
+	for y := r.y0; y <= r.y1; y++ {
+		for x := sideScanX; x < sideScanX+probeFillW; x++ {
+			px = append(px, img.RGBAAt(clampX(img, x), clampY(img, y)))
+		}
+	}
+	bg = modeOf(px)
+	worst := probeTolerance
+	for _, p := range px {
+		if d := maxDiff(p, bg); d > worst {
+			worst, ink = d, p
+		}
+	}
+	return bg, ink
+}
+
+// probeFillW 是 rowInk 横向取多宽：从侧栏左缘那一列往右，够盖住那几个字就行。
+const probeFillW = 120
+
+// wcagContrast 是 WCAG 2.x 的对比度：(L1+0.05)/(L2+0.05)，L1 取亮的那一份。
+//
+// 相对亮度按 sRGB 官方那一段：先把每个通道线性化（c≤0.04045 就直接除 12.92，
+// 否则 ((c+0.055)/1.055)^2.4），再按 0.2126 / 0.7152 / 0.0722 加权。
+func wcagContrast(a, b color.RGBA) float64 {
+	la, lb := wcagLum(a), wcagLum(b)
+	if lb > la {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
+func wcagLum(c color.RGBA) float64 {
+	lin := func(v uint8) float64 {
+		s := float64(v) / 255
+		if s <= 0.04045 {
+			return s / 12.92
+		}
+		return math.Pow((s+0.055)/1.055, 2.4)
+	}
+	return 0.2126*lin(c.R) + 0.7152*lin(c.G) + 0.0722*lin(c.B)
 }
 
 // TestTheCurrentRowIsAFaintTintNotASolidBlock 钉住选中态。

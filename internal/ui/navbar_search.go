@@ -245,7 +245,7 @@ func (s *Shell) viewSuggestHeader(c *ui.Context) {
 	ui.Row(c).Key("suggest-header").FillWidth().Gap(8).
 		AlignItems(ui.Center).Padding(2, 4, 6, 4).Children(func() {
 		ui.Text(c, "搜索历史").FontSize(13).Bold().Grow(1)
-		if ui.Button(c, "清除全部").FontSize(12).TextColor(t.TextMuted).Clicked() {
+		if flatButton(c, "清除全部").FontSize(12).TextColor(t.TextMuted).Clicked() {
 			s.hist.clear()
 		}
 	})
@@ -255,6 +255,11 @@ func (s *Shell) viewSuggestHeader(c *ui.Context) {
 //
 // Biu 那一排是可关的 Chip（`isCloseable`，`:142-166`）：点它去搜这条，点它右边
 // 的 × 只删这一条。这里同样拆成两个按钮，中间那个标签才是去搜的那一个。
+//
+// ⚠️ **chip 外面那一圈描边留着，里面两个按钮换成扁平的**：上游那枚是 HeroUI 的
+// `Chip`（有描边、无底色），而框里装的是**字**和一个**无边框的关闭图标键**，
+// 不是两枚描边药丸。改成扁平之后这枚 chip 从「描边药丸里再套两枚描边药丸」变回
+// 「一枚 chip」，而点击区与内边距一个数都没动（`flatButton` 照抄 `styleButton`）。
 func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 	t := c.Theme()
 	label := searchHistorySummary(item.Value)
@@ -262,7 +267,7 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 	ui.Row(c).Key("history:"+item.Value).Radius(t.Radius).
 		Background(t.Surface).Border(1, t.Border).
 		Padding(2, 4, 2, 8).Gap(4).AlignItems(ui.Center).Children(func() {
-		if ui.Button(c, label).FontSize(12).Clicked() {
+		if flatButton(c, label).FontSize(12).Clicked() {
 			// ⚠️ **先把词填回框里**（Biu 的 `setValue(item.value)`，
 			// `search/index.tsx:154`）。不填的话用户点完历史，框里还是原来敲的
 			// 半截字，而页面那边搜的是这一条——两处对不上，按返回再回来还会
@@ -274,7 +279,7 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 		//
 		// ⚠️ 无障碍名字写全，别只留一个「×」：读屏软件念出来就是「乘号」，用户
 		// 根本不知道它在删哪一条。画面上还是那个叉。
-		if ui.Button(c, "×").Label("删除「" + label + "」").
+		if flatButton(c, "×").Label("删除「" + label + "」").
 			FontSize(12).TextColor(t.TextMuted).Clicked() {
 			s.hist.remove(item.Value)
 		}
