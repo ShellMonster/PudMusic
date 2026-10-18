@@ -222,10 +222,22 @@ func (s *Shell) viewSideCollapse(c *ui.Context, st app.Settings) {
 // 折叠后只摆每个标题的第一个字：Biu 折叠态摆的是图标
 // （`default-menu/index.tsx` 的 `collapsed`），本项目还没有图标资源，
 // 摆全名会被裁成半个字，比一个字更认不出来。
+//
+// ## 未登录时那三个入口不摆，摆一句「登录后可见」
+//
+// 「我的关注」「稍后再看」「历史记录」的内容全都要登录才有（`Route.NeedsLogin`）。
+// 未登录时照样摆着它们，点了进去是空的——用户会以为是应用坏了，而实际上他只是
+// 没登录。所以这里**不摆**，改在原位摆一句提示（见 viewLoggedOutHint）。
+//
+// ⚠️ **那句提示不许写出那三个名字**：写出来的话「未登录时侧栏里没有这三个词」
+// 就成了一句永远不成立的话，而它正是这一条验收的全部（判据是画面上**找不到**
+// 那三个词，而提示和它们在同一个侧栏里）。
 func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 	t := c.Theme()
 	cur := s.router.Path()
 	collapsed := st.SideMenuCollapsed
+	loggedIn := s.app.LoggedIn()
+	hidden := 0
 
 	// ⚠️ Key 给的是包在外面的这一格，不是 Button 本身：`Key` 挂在「创建时
 	// 就处理了输入」的控件上会 panic（`ui/element.go:537`），要给就包一层。
@@ -234,6 +246,11 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 			// 设置页「菜单设置」里藏起来的那几项（`hiddenMenuKeys`）不摆。
 			// 这是 Biu 的 `DefaultMenus` 那一支（`side/index.tsx` 的 filter）。
 			if !rt.InMenu || slices.Contains(st.HiddenMenuKeys, rt.Match) {
+				continue
+			}
+			// 未登录时那几项不摆（理由见这一段的抬头）。
+			if rt.NeedsLogin && !loggedIn {
+				hidden++
 				continue
 			}
 			label := rt.Title
@@ -255,6 +272,39 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 				}
 			})
 		}
+		// 一项都没藏起来就不摆这句：用户自己在设置里把那几项藏了，这时再说
+		// 「登录后可见」是拿一句不成立的话去填空白。
+		if hidden > 0 && !collapsed {
+			s.viewLoggedOutHint(c, hidden)
+		}
+	})
+}
+
+// loggedOutHint 是那一句话的正文。
+//
+// ⚠️ **一个「我的关注」「稍后再看」「历史记录」都不许出现在里面**（理由见
+// viewSideMenu 的抬头）。写出来的后果是那一票的验收自己就废了：判据是「画面上
+// 找不到这三个词」，而提示和它们摆在同一个侧栏里。
+//
+// 靠**数字**告诉用户有几个被藏起来了——那一档不必说出是哪几个（说了就犯规），
+// 而用户从「侧栏上少了几行」对得上。
+func loggedOutHint(hidden int) string {
+	return "还有 " + strconv.Itoa(hidden) + " 个入口，登录后可见"
+}
+
+// viewLoggedOutHint 是那一行提示。
+//
+// 折叠态不画：72 宽摆不下这一句，而裁成半个字的那一句比没有更让人以为坏了。
+// 展开之后它就在那儿——提示是给「侧栏里少了几项」这件事一个解释，不是必须
+// 在任何宽度下都占一格的东西。
+//
+// ⚠️ **`Wrap()` 不能省**：侧栏拖到最窄是 160，而这一句在 12px 下差不多就要
+// 160——不换行的话它会被裁掉半句，而半句「还有 3 个入口，登录后可」比不摆更让人
+// 以为侧栏坏了。
+func (s *Shell) viewLoggedOutHint(c *ui.Context, hidden int) {
+	ui.Column(c).Key("side-logged-out").Children(func() {
+		ui.Text(c, loggedOutHint(hidden)).FontSize(12).Wrap().
+			TextColor(c.Theme().TextMuted).Padding(4, 8)
 	})
 }
 
