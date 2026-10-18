@@ -412,9 +412,9 @@ func (p *localPage) viewBody(c *ui.Context, t *ui.Theme, st app.LocalMusicState)
 	case p.style == localStyleTable:
 		p.viewTable(c, t)
 	default:
-		// 🔴 设置里的「数据显示样式」在这一帧生效（`s.displayView` 的注释写了
-		// 为什么每帧都要调）。这一页的卡片控件是**一对**，网格 / 紧凑 / 列表在它
-		// 里面分发（`widgets/list/switch.go`）。
+		// 🔴 设置里的「数据显示样式」在这一帧生效（`displaymode.go` 里
+		// `displayView` 的注释写了为什么每帧都要调）。这一页的卡片控件是**一对**，
+		// 网格 / 紧凑 / 列表在它里面分发（`widgets/list/switch.go`）。
 		p.cards.SetView(p.viewStyle())
 		p.cards.SetSongs(p.cardsOf())
 		p.cards.View(c)

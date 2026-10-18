@@ -142,8 +142,11 @@ func (s *SwitchView) visible() (first, last int) {
 	return s.list.state.Visible()
 }
 
-// scrollTop 回到顶上。**两份都回**：切档之后回到顶上比「停在网格里那个不知道多深
-// 的位置」好解释——用户看见的是「换了视图，从头看起」。
+// scrollTop 回到顶上。**两份都回**：它们各有各的 `ui.ListState`，只回一份的话，
+// 另一份下次被画出来时还停在上次那个位置，而用户以为「回顶」是回到整页的顶上。
+//
+// ⚠️ **换档本身不回顶**（`SetView` 不调它）：两份各自记着自己停在哪，切回去时回到
+// 原处——和同一个 Tab 切走再切回来是同一条规矩。
 func (s *SwitchView) scrollTop() {
 	s.list.ScrollTop()
 	s.grid.scrollTop()

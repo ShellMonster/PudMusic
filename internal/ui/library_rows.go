@@ -391,7 +391,21 @@ func (p *pagedRows) syncState(cols int) {
 		}
 		return p.rows[j].Title
 	}
-	p.state.Selected = &p.sel
+
+	// 🔴 **网格那一档不装行选中**。`state.Selected` 收的是**行下标**，而这一份的
+	// `sel` 记的是**第几首歌**（格子才是用户点的东西，`widgets/list` 的 Grid 也是
+	// 自己管选中的）。两套下标塞进同一个 int 的后果有两个，而且都很难查：
+	//
+	//   - 点在格子之间的空地上时框架写进来一个**行号**，于是「选中的那一首」变成
+	//     另一首；
+	//   - 整行铺主色底，于是网格里「选中了一格」看起来像「选中了一行」。
+	//
+	// 选中由每一格自己画（`viewCellGuarded` 的 OnClick + 页面那一层的主色底），
+	// 和 `widgets/list` 的 Grid 同一个做法。
+	p.state.Selected = nil
+	if !p.isGrid() {
+		p.state.Selected = &p.sel
+	}
 }
 
 // footerIdentity 是末尾那一行的身份。它**不是字符串**：行的 ID 是 B 站给的
@@ -562,7 +576,6 @@ func (p *pagedRows) viewCellGuarded(c *ui.Context, i int) {
 		return
 	}
 	guard.Wrap(func(c *ui.Context) {
-		i := i
 		// ⚠️ 菜单挂在**这一格**上（和列表挂在行上是同一件事）。
 		//
 		// ⚠️ i 在这一帧是**真的**：菜单被点中的那一帧框架会用新的一帧重跑每一格

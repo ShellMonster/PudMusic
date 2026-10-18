@@ -379,6 +379,36 @@ var Items = []Item{
 		Spec:     "404 三秒自动回首页，离开就不倒计时",
 		Tests:    []string{"TestNotFoundRedirectsHomeAfterThreeSeconds", "TestLeavingThe404PageCancelsTheRedirect"},
 	},
+	{
+		Category: Paging,
+		// 「数据显示样式」要三件事同时成立，缺一件就退化成「这个设置没用」或者
+		// 「改了只有一页变了」：
+		//
+		//  1. **每一页**都跟着变（逐页一条子测试，少接一页就少一条）
+		//  2. **紧凑真的更矮**（量的是画出来的那一块，不是某个变量）
+		//  3. **网格那一档还能翻页**——末尾哨兵是网格这一档新加的，少了它页面
+		//     看上去完全正常，只是永远翻不到第二页
+		Spec: "「数据显示样式」在三档之间换：每一页都跟着换、紧凑行高真的更矮、网格那一档照样翻页",
+		Tests: []string{
+			"TestEveryPageFollowsTheDisplayStyleSetting",
+			"TestTheCompactRowsAreShorterThanTheNormalOnes",
+			"TestTheGridCountsTheSentinelAsARow",
+			"TestTheGridKeepsPagingWorking",
+			"TestTheGridStillPagesOnARealPage",
+			"TestSwitchingViewsKeepsTheSongs",
+		},
+	},
+	{
+		Category: Paging,
+		// 设置那一格旁边的预览：三张缩略图各画各的形状，选中的那一张用主色描边。
+		// 判据是「描边里离主色更近」而不是「有几个主色像素」——边框是圆角加抗锯齿
+		// 画出来的，逐字比颜色永远是 0 个（见那条测试的注释）。
+		Spec: "「数据显示样式」旁边有预览：选哪一档一眼看得出来",
+		Tests: []string{
+			"TestTheDisplayStyleSettingShowsAPreviewOfEachStyle",
+			"TestThePreviewHighlightsTheChosenStyle",
+		},
+	},
 
 	// ── 双平台 ─────────────────────────────────────────────────────────────
 	{
