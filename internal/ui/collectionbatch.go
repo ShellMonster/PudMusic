@@ -82,10 +82,48 @@ func (s *Shell) viewCollectionBatchBar(c *ui.Context, p *collectionPage) {
 // ⚠️ **这里只记，不做**。真正那一下在 `viewCollectionConfirm` 里——确认框是
 // 系统模态，在它上面点任何别的控件都不该生效，所以两步必须分开。
 func (s *Shell) askConfirm(p *collectionPage, kind confirmKind, count int, only bool) {
-	p.confirm = confirmRequest{kind: kind, count: count, only: only, open: true}
+	s.askConfirmAbout(p, kind, count, only, "")
 }
 
-// viewCollectionConfirm 是批量删除 / 批量下载的二次确认。
+// askConfirmAbout 是上面那一个，额外带一句「动的是哪一个收藏夹」。
+func (s *Shell) askConfirmAbout(p *collectionPage, kind confirmKind, count int, only bool, name string) {
+	p.confirm = confirmRequest{kind: kind, count: count, only: only, open: true, name: name}
+}
+
+// confirmText 是一个确认框的三样字：标题、正文、确认按钮上写的那两个字。
+//
+// 🔴 **三个都按「这一下有多不可逆」分档**，而分档的规矩是规格点名的（issue
+// #100）：「删 B 站那边的」和「只删本地记录」必须让用户一眼分得出来。靠一个
+// 共用的动词（「删掉」）加一个「吗」是分不出来的——两个框长得一模一样，而
+// 按错的那一个撤不回来。
+//
+//   - **删 B 站上的收藏夹**：最重。正文要点名它是 B 站上那个、要点名里面
+//     有多少首、要说撤不回来。三样缺一样，用户会以为和下面那个一样轻。
+//   - **只从本地记录里拿掉**：明确说 **B 站上的那个还在**。这一条一个字节都
+//     不发过去，而用户正是靠这句话才知道自己没做不可逆的事。
+func confirmText(req confirmRequest, mediaCount int) (title, what, button string) {
+	switch req.kind {
+	case confirmDownload:
+		return "确认下载选中的 " + strconv.Itoa(req.count) + " 首吗？",
+			"下载会占用磁盘和带宽。", "下载"
+	case confirmDelete:
+		return "确认删除选中的 " + strconv.Itoa(req.count) + " 首吗？",
+			"这一下撤不回来。", "删除"
+	case confirmClearInvalid:
+		return "清掉「" + req.name + "」里的失效内容吗？",
+			"已经失效的条目会从这个收藏夹里删掉，撤不回来。", "清除"
+	case confirmDeleteFolder:
+		return "删掉「" + req.name + "」吗？",
+			"B 站上的这个收藏夹和里面的 " + strconv.Itoa(mediaCount) + " 首都会没，撤不回来。",
+			"删除"
+	case confirmForgetFolder:
+		return "从侧栏移除「" + req.name + "」吗？",
+			"B 站上的这个收藏夹不会动，只是在这儿不再显示它了。", "移除"
+	}
+	return "确认吗？", "", "确定"
+}
+
+// viewCollectionConfirm 是批量删除 / 批量下载、以及 ⋯ 菜单里那三件的二次确认。
 //
 // 用 MyGo 的 `AlertDialog`（系统原生确认框）而不是自绘浮层：Biu 那边的
 // `components/confirm-modal` 就是模态框，而系统这一份免费给到「点外面不关」
@@ -98,27 +136,45 @@ func (s *Shell) viewCollectionConfirm(c *ui.Context, p *collectionPage) {
 	if p.confirm.kind == confirmNone {
 		return
 	}
-	verb, what := "删除", "这一下撤不回来。"
-	if p.confirm.kind == confirmDownload {
-		verb, what = "下载", "下载会占用磁盘和带宽。"
-	}
-	title := "确认" + verb + "选中的 " + strconv.Itoa(p.confirm.count) + " 首吗？"
-	switch ui.AlertDialog(c, &p.confirm.open, title, what, "取消", verb) {
+	title, what, button := confirmText(p.confirm, s.app.Collection(p.ref).MediaCount)
+	switch ui.AlertDialog(c, &p.confirm.open, title, what, "取消", button) {
 	case 1:
-		kind, only := p.confirm.kind, p.confirm.only
-		// ⚠️ 先清掉 kind 再干活：干活的过程中列表可能整个换掉（删除会），
+		// ⚠️ 先把整份抄下来再干活：干活的过程中 `p.confirm` 会被重画的那一帧
+		// 改掉，而旧的那一份才是「用户在确认的是哪一件事」。
+		req := p.confirm
+		// ⚠️ 再清掉 kind：干活的过程中列表可能整个换掉（删除会），
 		// 而 `p.confirm` 挂在旧的那一份状态上——不清的话它会被带进新列表。
 		p.confirm.kind = confirmNone
-		switch kind {
-		case confirmDelete:
-			s.startCollectionDelete(p)
-		case confirmDownload:
-			s.startCollectionDownload(p, only)
-		}
-	case ui.AlertDismissed:
-		// Esc = 取消。**要把 kind 清掉**：不清的话下一帧还会把同一个确认框
-		// 画出来，而用户已经明确说了「不」。
+		s.runConfirmed(p, req)
+	case 0, ui.AlertDismissed:
+		// 不。**两个来源都要在这儿**：点「取消」按钮（`AlertDialog` 返回它的下标
+		// 0）和按 Esc（返回 `AlertDismissed`）——后者才是原来那一支。
+		//
+		// ⚠️ 漏掉「取消」按钮那一个是安静的错：框确实不再画了（`AlertDialog`
+		// 自己把 `open` 关掉了），而 `kind` 还挂着。于是这一页的每一帧都白跑一次
+		// `confirmText` 加一次立刻返回的 `AlertDialog`；更要紧的是「有一件事等着
+		// 确认」这个状态还留在这一页上，而下一次有人碰它就会连着把那件事做了。
 		p.confirm.kind = confirmNone
+	}
+}
+
+// runConfirmed 是用户在确认框上点了那一下之后做的事。
+//
+// ⚠️ **取消不落到这里**（`AlertDismissed` 那一支），而这一层**一个网络请求
+// 都不发**：所有写操作都在后面的后台 goroutine 里。点错一次的代价就是白发一
+// 次请求，而白发一次「删收藏夹」在 B 站那边是删掉了——所以这里必须真的什么都不做。
+func (s *Shell) runConfirmed(p *collectionPage, req confirmRequest) {
+	switch req.kind {
+	case confirmDelete:
+		s.startCollectionDelete(p)
+	case confirmDownload:
+		s.startCollectionDownload(p, req.only)
+	case confirmClearInvalid:
+		s.startCollectionClearInvalid(p)
+	case confirmDeleteFolder:
+		s.startCollectionDeleteFolder(p)
+	case confirmForgetFolder:
+		s.startCollectionForgetFolder(p)
 	}
 }
 
@@ -278,6 +334,58 @@ func (s *Shell) startCollectionDelete(p *collectionPage) {
 			s.wake.invalidate()
 		}
 	}()
+}
+
+// startCollectionClearInvalid 让 B 站把这个收藏夹里失效的条目清掉。
+//
+// ⚠️ **这里不调 `reloadCollection`**：清还没做完，而 `Reload` 发出去的那一趟
+// 会拉回**还带着失效条目**的列表——刷新确实发生了，只是发生得太早，症状是
+// 「点完什么都没变」。真正那一次刷新由 `app.ClearInvalidMedias` 做完之后
+// 递一个 `NoticeCollectionChanged` 回来，`flushCollectionNotice` 在界面线程
+// 那一帧 reload（理由见那个常量）。
+//
+// 一句「正在清除…」是给用户的进度：清一个几千首的收藏夹要走完一整个请求，
+// 十几秒里界面毫无动静的话多数人会再按一次。
+func (s *Shell) startCollectionClearInvalid(p *collectionPage) {
+	s.addToast("正在清除…")
+	s.app.ClearInvalidMedias(p.ref)
+}
+
+// startCollectionDeleteFolder 把 B 站上这个收藏夹删掉（连同里面的歌）。
+//
+// ⚠️ **成功了要离开这一页**：当前就停在这个已经没有了的容器上，而再点一次
+// 刷新只会得到一句「打不开这个收藏夹」。目标页是 Biu 上游删完之后去的那一个
+// （`menu.tsx` 的 `navigate("/empty")`）。
+func (s *Shell) startCollectionDeleteFolder(p *collectionPage) {
+	ref, title := p.ref, collectionTitleText(s.app.Collection(p.ref))
+	// 先把这一页的状态扔掉：删完之后侧栏那一行也没了，留着一份只会让
+	// `collectionFor` 在用户从历史里回去时拿回一个已经不存在的容器。
+	s.collection = nil
+	s.app.DeleteCollectionFolder(ref, title, func(msg string) {
+		s.sayFolderDone(msg)
+		s.leaveCollection(ref)
+	})
+}
+
+// startCollectionForgetFolder 只把这一行从本地记录里拿掉。
+//
+// 🔴 **一个字节都不往 B 站发**（`app.ForgetCollectionFolder` 不碰网络），
+// 所以这里既没有失败也没有「正在…」——说完那句话事情就结束了。
+//
+// ⚠️ 但**这一页还留着**：收藏夹在 B 站上还在、刚才的内容也还在，只是侧栏
+// 不再列它了。页面继续停着是对的，用户刚才看的东西还在。
+func (s *Shell) startCollectionForgetFolder(p *collectionPage) {
+	s.app.ForgetCollectionFolder(p.ref, collectionTitleText(s.app.Collection(p.ref)), s.sayFolderDone)
+}
+
+// leaveCollection 在当前页面就是被删掉的那个容器时离开这一页。
+//
+// ⚠️ **判的是「当前停在这一页上」**：确认框开着的时候用户可能已经切走了，
+// 而那时候再把人家从别的页面踢走，是这一层最不该干的那种事。
+func (s *Shell) leaveCollection(gone app.CollectionRef) {
+	if s.router.Path() == collectionPath(gone.ID) {
+		s.navigate("/empty")
+	}
 }
 
 // startCollectionDownload 批量下载。
