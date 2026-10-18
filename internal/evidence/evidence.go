@@ -881,36 +881,85 @@ var Items = []Item{
 		// 「这一条没有歌词」和「拉不到」必须分开说：混成一句的话，用户读到「网络不通」
 		// 会去反复重试，而这一条重试一万次也不会有歌词——那一版在源上就是没有。
 		// 而「源返回了成功而正文是空的」是**第三种**，不能摆一个空弹窗搪塞。
+		//
+		// 这一条的下半段（预览弹窗里那第三种）跟着**界面**走，在下面那条里。
 		Spec: "歌词来源分得清三种：拉不到 / 这一条没有歌词 / 成功但正文是空的（判据是哨兵错误 errors.Is(err, ErrNoLyrics)，不是「err != nil」）",
 		Tests: []string{
 			"TestAFailedSearchIsAnErrorAndNotAnEmptyList",
 			"TestAPreviewThatHasNoLyricsSaysSo",
 		},
 	},
+	{
+		Category: FakeClock,
+		// SPEC 点名的「搜索结果 500 毫秒防抖写缓存，避免重复请求」里的**前半句**：
+		// 那 500ms 在界面上（`ui/lyricssearch.go` 的 `lyricsQueryChanged`），后半句
+		// 的缓存是 `app.SearchLyrics` 那一半。
+		//
+		// ⚠️ **回车不等那 500ms**是单列的一条（上游 `onKeyDown Enter` 直接调
+		// `handleSubmit`）：用户按下回车就是想现在搜，让他等半秒是另一回事。
+		Spec: "歌词搜索的关键词 500ms 防抖：假时钟推、不真等；每敲一个字重新起算；回车不等",
+		Tests: []string{
+			"TestTheKeywordIsDebouncedBy500ms",
+			"TestEnterDoesNotWaitForTheDebounce",
+		},
+	},
+	{
+		Category: Negative,
+		// 「不许静默」和「不许每帧重发」是同一支的两半。
+		//
+		// 🔴 后者是自己养自己的循环：`app.failLocked` 失败时**留着** `Query`，界面
+		// 这边 `draft == applied` 每一帧都判它「已经搜过了」。少了它，`now - 零值`
+		// 恒大于防抖窗口，于是下一帧立刻又发一次、再失败、再发——而生产里每次投递
+		// 都叫醒下一帧（实测 20 帧打了 22 次）。
+		Spec: "歌词搜索失败之后：界面上有一句交代加一个重试按钮、重试真的再发一次那个词、之后不许每帧重发",
+		Tests: []string{
+			"TestAFailedSearchSaysItIsAFailureAndDoesNotFireAgain",
+			"TestAFailedSearchOffersARetryAndSaysItIsAFailure",
+			"TestTheRetryButtonSearchesThatWordAgain",
+			// 搜到了但一个候选都没有：说的必须是「没搜到」加一句「怎么才能不空」，
+			// 不能是一片空白。
+			"TestTheSearchBoxSaysThreeDifferentThings",
+			// 关掉搜索弹窗时预览要一起收：预览开着这件事住在应用层，而界面上已经
+			// 没有一个弹窗罩着它了——下一次打开就会看到上一次那一份没看完的歌词。
+			"TestClosingTheSearchDialogTakesThePreviewWithIt",
+		},
+	},
+	{
+		Category: Negative,
+		// 预览弹窗里那**第三种**「没有」，在界面上不能变成「网络不通」，也不能是空白。
+		// 混成前者用户会去反复重试（这一条重试一万次也不会有歌词），混成后者那句话
+		// 和「加载中」一样是在搪塞。而「采用歌词」得是禁着的——按下去不会有任何事
+		// 发生，而那种按钮在界面上和坏了的按钮长得一模一样。
+		Spec: "预览里没有歌词时说的是「未找到歌词内容」而不是「网络不通」或一片空白，「采用歌词」禁着；换歌之后按采用有一句交代",
+		Tests: []string{
+			"TestThePreviewSaysItIsNotAFetchFailure",
+			"TestAdoptingSaysSoWhenTheSongChanged",
+		},
+	},
+	{
+		Category: Negative,
+		// 铁律四：候选表的行键是**候选自己的 ID**。
+		//
+		// 🔴 这一条在界面上**看不出任何异样**（每一行的字都是对的），所以判据只能
+		// 是「把同一批候选打乱之后重新搜，某首的行键还是它自己那一个」——按下标
+		// 认的话，它换了位置行键就跟着换。
+		Spec: "铁律四：候选表的行键是候选的 ID、不是下标",
+		Tests: []string{
+			"TestTheRowKeyFollowsTheSongAndNotItsPlace",
+		},
+	},
+	{
+		Category: Play,
+		// #21 的界面那一半（BMG-66）走通一遍：两个源都摆着、**从屏幕上那首歌开始**、
+		// 切 Tab 立刻用同一个词重搜那个源、预览里看得到完整歌词再采用、采用之后
+		// 两个弹窗一起关；一个源都没挂时弹窗压根不开（开着的弹窗里用户输完词按下
+		// 搜索，看到的会是一句「没有歌词源」——而那不是他做了什么导致的）。
+		Spec: "歌词搜索弹窗：两个源分别标明、从正在放的那首开始、切 Tab 立刻重搜、预览里看完整歌词再采用、采用之后两个弹窗一起关；一个源都没挂时不开弹窗",
+		Tests: []string{
+			"TestTheSearchDialogListsBothSourcesAndStartsFromTheSongOnScreen",
+			"TestSwitchingTheTabSearchesThatSourceOnItsOwn",
+			"TestPreviewThenAdoptPutsTheLyricsOnScreen",
+			"TestNoSourcesMeansTheSearchDialogNeverOpens",
+		},
+	},
 }
-
-// ⚠️ **歌词搜索的界面不在这一票里，它在 BMG-66。**
-//
-// 这一票按人批准的拆法只交付**服务层 + 应用层**（`service/lyrics/search.go`、
-// `app/lyrics_search.go`、挂载、台账四条）；界面上那两个弹窗
-// （`internal/ui/lyricssearch.go` + 它的测试）是拆出去的**下一票 BMG-66**
-//「歌词搜索与缓存：搜索与预览两个弹窗」，排在 #BMG-33 之后。
-//
-// 所以下面这五条证据跟着界面走，**不在这一票里**：
-//
-//	假时钟  500ms 防抖：假钟推、不真等；每敲一个字重新起算；回车不等
-//	        （TestTheKeywordIsDebouncedBy500ms、TestEnterDoesNotWaitForTheDebounce）
-//	负路径  失败之后不许每帧重发、重试按钮真的再发一次请求、空列表说的是「没搜到」
-//	        （TestAFailedSearchSaysItIsAFailureAndDoesNotFireAgain、
-//	          TestTheRetryButtonSearchesThatWordAgain、
-//	          TestAFailedSearchOffersARetryAndSaysItIsAFailure）
-//	负路径  预览里没有歌词时说的是「未找到歌词内容」而不是「网络不通」或一片空白，
-//	        「采用歌词」禁着（TestThePreviewSaysItIsNotAFetchFailure）
-//	负路径  铁律四：候选表的行键是候选的 ID、不是下标
-//	        （TestTheRowKeyFollowsTheSongAndNotItsPlace）
-//	播放    走通一遍（TestTheSearchDialogListsBothSourcesAndStartsFromTheSongOnScreen、
-//	        TestSwitchingTheTabSearchesThatSourceOnItsOwn、
-//	        TestPreviewThenAdoptPutsTheLyricsOnScreen、TestNoSourcesMeansTheSearchDialogNeverOpens）
-//
-// 台账要求每一条写出来的测试**真的存在**，所以它们不能先写在这儿等
-//（`TestEveryPieceOfEvidenceReallyExists` 会红）。BMG-66 落地时照着这份名单加回去。
