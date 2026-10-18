@@ -1,4 +1,4 @@
-package ui_test
+package ui
 
 import (
 	"os"
@@ -40,7 +40,7 @@ func enqueue(t *testing.T, h *harness, items ...app.Item) {
 	if err := h.app.Enqueue(items...); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 2*time.Second, "队列里的歌开始播", func() bool {
+	waitFor(t, "队列里的歌开始播", func() bool {
 		h.tt.Frame()
 		return h.app.Snapshot().HasTrack
 	})
@@ -57,7 +57,7 @@ func TestStepButtonsWalkTheQueue(t *testing.T) {
 		if err := h.tt.Click("下一首"); err != nil {
 			t.Fatalf("点不了「下一首」：%v", err)
 		}
-		waitFor(t, 2*time.Second, "下一首", func() bool {
+		waitFor(t, "下一首", func() bool {
 			h.tt.Frame()
 			return h.app.Snapshot().Title == want
 		})
@@ -69,7 +69,7 @@ func TestStepButtonsWalkTheQueue(t *testing.T) {
 		if err := h.tt.Click("上一首"); err != nil {
 			t.Fatalf("点不了「上一首」：%v", err)
 		}
-		waitFor(t, 2*time.Second, "上一首", func() bool {
+		waitFor(t, "上一首", func() bool {
 			h.tt.Frame()
 			return h.app.Snapshot().Title == want
 		})

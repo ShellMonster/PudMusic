@@ -298,6 +298,12 @@ func (s *Shell) syncSearchWatch() {
 		want = true
 	}
 	switch {
+	case s.closed:
+		// 关掉之后不许再装（理由见 navbar_feed.go 里 `s.feed.arm` 那一句）。
+		if s.searchWatchStop != nil {
+			s.searchWatchStop()
+			s.searchWatchStop = nil
+		}
 	case want && s.searchWatchStop == nil:
 		// 醒得比防抖短一半：宁可多醒一次，不要到点了才醒（那会让搜索慢半拍）。
 		s.searchWatchStop = s.clock.EveryFunc(searchDebounce/4, s.wake.invalidate)

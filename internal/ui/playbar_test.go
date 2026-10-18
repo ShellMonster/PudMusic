@@ -1,14 +1,11 @@
-package ui_test
+package ui
 
 import (
-	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/ui"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -36,12 +33,15 @@ type harness struct {
 	tt  *mygoui.Tester
 }
 
+// 走基座（`newTestShell`），所以收尾是无条件挂上的。`New(a)` 会起
+// `searchHistory.loop` 和 `shortcutKeys.loop` 两个后台写循环，首帧还会经
+// `feed.arm` 装一个每五分钟一跳的定时器——只 `t.Cleanup(a.Close)` 收不掉它们
+// （`App.Close` 不管 Shell 的资源），几百条测试就是几百个挂到测试二进制结束的
+// goroutine。
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := ui.New(a)
-	return &harness{app: a, tt: mygoui.NewTester(s.View, winW, winH)}
+	b := newTestShell(t, at(winW, winH))
+	return &harness{app: b.a, tt: b.tt}
 }
 
 func (h *harness) open(t *testing.T) {
@@ -50,19 +50,6 @@ func (h *harness) open(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.tt.Frame()
-}
-
-// waitFor 轮询到 cond 成立。异步的东西（播放器、解码 goroutine）只能这样等。
-func waitFor(t *testing.T, d time.Duration, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(d)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("等了 %v，%s 还没发生", d, what)
 }
 
 // dragTo 把进度条从一端拖到另一端（0..1 的位置），按下、移动、松手一步做完。
@@ -192,7 +179,7 @@ func TestDragToEndDoesNotCrash(t *testing.T) {
 	if !h.app.Snapshot().Playing {
 		h.app.SeekTo(0)
 		h.app.Play()
-		waitFor(t, 5*time.Second, "这一首回到开头重新放上了", func() bool {
+		waitFor(t, "这一首回到开头重新放上了", func() bool {
 			return h.app.Snapshot().Playing
 		})
 	}
@@ -220,7 +207,7 @@ func TestDragToEndDoesNotCrash(t *testing.T) {
 	// 它停下来就只可能是这次拖动把 seek 送到了末尾——**这才是验收项 5 要的东西**。
 	//
 	// 队列是空的 → 没有下一首可放 → 停下来。不是卡住。
-	waitFor(t, 5*time.Second, "拖到末尾后播放器停下来", func() bool {
+	waitFor(t, "拖到末尾后播放器停下来", func() bool {
 		h.tt.Frame()
 		return !h.app.Snapshot().Playing
 	})
@@ -236,12 +223,14 @@ func TestDragToEndDoesNotCrash(t *testing.T) {
 	}
 }
 
-// TestRenderShots 把画面存成 PNG，留给人眼对照。它跑的是 MyGo 的 Tester，
+// TestRenderPlayBarShots 把播放条那几个状态存成 PNG（01–05），留给人眼对照。
+// 和 `router_test.go` 的 TestRenderShots（10–18，整窗走一遍）是同一套图的两半。
+// 它跑的是 MyGo 的 Tester，
 // 走的是和真窗口一模一样的 layout + paint，只是画到内存里而不是屏幕上。
 //
-//	go test ./internal/ui/ -run TestRenderShots
-//	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderShots
-func TestRenderShots(t *testing.T) {
+//	go test ./internal/ui/ -run TestRenderPlayBarShots
+//	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderPlayBarShots
+func TestRenderPlayBarShots(t *testing.T) {
 	dir := os.Getenv("BIU_SHOT_DIR")
 	if dir == "" {
 		t.Skip("设 BIU_SHOT_DIR 才会存图")
@@ -265,21 +254,6 @@ func TestRenderShots(t *testing.T) {
 	save(t, dir, "05-error.png", h.tt)
 }
 
-func save(t *testing.T, dir, name string, tt *mygoui.Tester) {
-	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	f, err := os.Create(filepath.Join(dir, name))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	if err := png.Encode(f, tt.Image()); err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("存了 %s", filepath.Join(dir, name))
-}
 func TestVolumeSliderDrivesTheApp(t *testing.T) {
 	h := newHarness(t)
 	h.open(t)

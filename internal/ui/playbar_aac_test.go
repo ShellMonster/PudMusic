@@ -1,4 +1,4 @@
-package ui_test
+package ui
 
 import (
 	"os"
@@ -34,7 +34,7 @@ func TestAACPlaysThroughTheSystemDecoder(t *testing.T) {
 	if err := h.app.Enqueue(app.LocalItem(m4a)); err != nil {
 		t.Fatalf("加进队列：%v", err)
 	}
-	waitFor(t, 2*time.Second, "AAC 开始播", func() bool {
+	waitFor(t, "AAC 开始播", func() bool {
 		h.tt.Frame()
 		return h.app.Snapshot().HasTrack
 	})
@@ -63,7 +63,7 @@ func TestAACPlaysThroughTheSystemDecoder(t *testing.T) {
 
 	// 进度真的在走：等一会儿看位置有没有往前。
 	before := h.app.Snapshot().Position
-	waitFor(t, 3*time.Second, "AAC 的播放位置往前走", func() bool {
+	waitFor(t, "AAC 的播放位置往前走", func() bool {
 		h.tt.Frame()
 		return h.app.Snapshot().Position > before
 	})
@@ -102,7 +102,7 @@ func TestDragAACToEnd(t *testing.T) {
 	if err := h.app.Enqueue(app.LocalItem(m4a)); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 2*time.Second, "AAC 开始播", func() bool {
+	waitFor(t, "AAC 开始播", func() bool {
 		h.tt.Frame()
 		return h.app.Snapshot().HasTrack
 	})
@@ -110,7 +110,7 @@ func TestDragAACToEnd(t *testing.T) {
 
 	// 循环这一档 + 队列里只有这一首 → 同一首从头再放。位置要真的回到开头，
 	// 而且要在放（否则就是「卡在末尾」，也正是这一条要防的假死）。
-	waitFor(t, 5*time.Second, "拖到末尾之后没有从头重放", func() bool {
+	waitFor(t, "拖到末尾之后没有从头重放", func() bool {
 		h.tt.Frame()
 		st := h.app.Snapshot()
 		return st.Playing && st.Position < 40*time.Millisecond
@@ -157,14 +157,14 @@ func TestScreenshotsWithAAC(t *testing.T) {
 	if err := h.app.Enqueue(items...); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 2*time.Second, "AAC 开始播", func() bool {
+	waitFor(t, "AAC 开始播", func() bool {
 		h.tt.Frame()
 		return h.app.Snapshot().HasTrack
 	})
 	if err := h.tt.Click("下一首"); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 2*time.Second, "切到第二首", func() bool {
+	waitFor(t, "切到第二首", func() bool {
 		h.tt.Frame()
 		return h.app.Snapshot().Title == "第二首"
 	})

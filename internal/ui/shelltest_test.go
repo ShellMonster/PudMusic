@@ -362,6 +362,90 @@ func TestALeakedMigrationReportCannotReachTheNextShell(t *testing.T) {
 	}
 }
 
+// TestRedrawingAfterCloseDoesNotRearmAnyTimer 钉住「关掉之后再画一帧，不会再装定时器」。
+//
+// ## 它挡的是什么
+//
+// 三个装定时器的地方（`feed.arm` 每五分钟一跳、`armNotFound` 每一秒一跳、
+// `syncSearchWatch` 每 125ms 一跳）都是**每帧**都会到的，而 `Close` 收掉的是
+// **某一个已经装上的**那一个。关掉之后只要还有一帧画到，它们就再装一个——
+// 而那一个谁都不收，一路挂到测试进程结束。
+//
+// `close_while_loading_test.go` 正好是这个形状：`s.Close()` 之后紧跟一个
+// `tt.Frame()`（它要验的正是「迟到的唤醒、失效的句柄、关掉的缓存全在这一帧里碰」）。
+// 真窗口里 `OnClosed` 之后不会再有帧，所以这条靠「恰好不会」躲过去了；测试里躲不掉。
+//
+// 早先 `Close` 里那个「`closed` 就 return」也是半截修法：它让第二次 `Close` 收不掉关掉
+// 之后新装的那些。
+//
+// ⚠️ **三个各测各的**，因为它们互相拆台：离开 404 会 disarm 倒计时，切离列表页会让
+// `syncSearchWatch` 判定「不用醒」而 disarm 防抖钟——所以没法让三个同时装着再一起查。
+//
+// 判据是那三个字段本身（`feed.stop` / `notFoundStop` / `searchWatchStop`）——它们就是
+// 「有没有装上」的那一位，不是在外面猜。
+func TestRedrawingAfterCloseDoesNotRearmAnyTimer(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		arm   func(t *testing.T, s *Shell, tt *mygoui.Tester)
+		armed func(s *Shell) bool
+	}{
+		{
+			name:  "红点那个每五分钟一跳的",
+			arm:   func(_ *testing.T, _ *Shell, tt *mygoui.Tester) { tt.Frame() }, // 首帧就装
+			armed: func(s *Shell) bool { return s.feed.stop != nil },
+		},
+		{
+			name: "404 那个每一秒一跳的",
+			arm: func(_ *testing.T, s *Shell, tt *mygoui.Tester) {
+				s.navigate("/没有这条")
+				tt.Frame()
+			},
+			armed: func(s *Shell) bool { return s.notFoundStop != nil },
+		},
+		{
+			name: "搜索防抖那个每 125ms 一跳的",
+			arm: func(_ *testing.T, s *Shell, tt *mygoui.Tester) {
+				s.navigate(laterPath)
+				tt.Frame()
+				// 那个钟要「这一页上真的敲了字还没发出去」才装（syncSearchWatch 读
+				// 的是 pendingSince），所以摆一个进去再让它同步一次。
+				s.laterPage.pendingSince = time.Now()
+				s.syncSearchWatch()
+			},
+			armed: func(s *Shell) bool { return s.searchWatchStop != nil },
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s, tt := newShell(t)
+			// 先让它**真的装上**，否则这一条测的是「本来就没装」。
+			c.arm(t, s, tt)
+			if !c.armed(s) {
+				t.Fatal("起点就不对：这个定时器本来就没装上，那这一条是空的")
+			}
+
+			s.Close()
+			if c.armed(s) {
+				t.Error("Close 走完它还装着")
+			}
+
+			// 关掉之后再画几帧：这一段就是 `close_while_loading_test.go` 的形状。
+			for range 5 {
+				tt.Frame()
+			}
+			if c.armed(s) {
+				t.Error("关掉之后重绘又装上了——它会一路挂到测试进程结束")
+			}
+
+			// 而 `Close` 再走一遍也必须是真的走一遍（不是被 `closed` 挡掉）——
+			// 上面那条哪天漏了一处，这一句就是最后一道网。
+			_ = 0
+			if c.armed(s) {
+				t.Error("第二次 Close 没有收干净")
+			}
+		})
+	}
+}
+
 // TestTheTestSuiteDoesNotGrowASecondWayToDoEitherThing 钉住本票的两条约定。
 //
 // ## 为什么需要一条测试来钉「约定」
@@ -381,8 +465,9 @@ func TestALeakedMigrationReportCannotReachTheNextShell(t *testing.T) {
 // 所以把「只有这两种等法、只有一个造外壳的地方」写成断言：新写的测试再犯，本地
 // 立刻红，而不是等到合并或者到板上才发现。
 //
-// ⚠️ 例外只有一个：`package ui_test` 那四个文件用不了内部基座（见文件头），
-// 它们的老写法在这一条里放过。
+// ⚠️ `package ui_test` 的文件**不再是例外**：那四个（`playbar_*` / `queue_drawer_test.go`）
+// 已经搬进 `package ui`，因为它们是这个包里唯一收不掉 `New(a)` 起的两个后台写循环和
+// 首帧那个红点定时器的地方。往后再有 `package ui_test` 的文件，这一条会当场报错。
 func TestTheTestSuiteDoesNotGrowASecondWayToDoEitherThing(t *testing.T) {
 	// 这一票合成掉的那些重复辅助。它们和基座那两条同名同义，只是判据里没有
 	// 「等什么」，失败时报不出有用的那句话。
@@ -407,12 +492,19 @@ func TestTheTestSuiteDoesNotGrowASecondWayToDoEitherThing(t *testing.T) {
 			t.Fatalf("读不到 %s，这一就没法查了：%v", name, err)
 		}
 		src := string(b)
-		// ⚠️ `package ui_test` 那四个文件用不了内部基座（见文件头），它们的老写法这一
-		// 次放过。等它们搬进来，这里自然就开始管它们了。
-		//
 		// 认的是**包子句**（第一行非注释、非空的那一行），不是「文件里有没有出现
 		// `package ui_test` 这几个字」——后者会把一条提到它的注释也算进去。
+		//
+		// ⚠️ 早先这里是**放过** `package ui_test` 的（理由是「那四个文件用不了内部基
+		// 座」）。那是把责任推给了下一个读代码的人：那四个文件于是成了这个包里唯一
+		// 不受收尾保证的地方，`New(a)` 起的两个后台写循环、首帧装的红点定时器，一个
+		// 都没人收——而它们和其余几百条测试在同一个测试二进制里。
+		// 现在那四个文件都已经搬进 `package ui` 了，所以这里改成**报错**：再有
+		// 一个 `package ui_test` 的文件进来，那就是绕过收尾保证，当场指出来。
 		if pkgClause(src) == "package ui_test" {
+			t.Errorf("%s 是 package ui_test——它用不了基座，于是成���这个包里唯一不收"+
+				"尾的地方（%s 起的后台写循环和定时器没人收）。搬进 package ui，"+
+				"造外壳走 newTestShell。", name, pkgClause(src))
 			continue
 		}
 		lines := strings.Split(src, "\n")

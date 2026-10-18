@@ -387,13 +387,17 @@ type Shell struct {
 	// 在 `ensureWindow` 里，那个位置**不能**因为一个加分项开天窗。
 	media *media.Session
 
-	// closed 记着 `Close` 已经走过一趟了。`Close` 可以重复调，而底下每一个
-	// 停法各自也是幂等的（app.Close、images.Close、hist.Close、keys.Close
-	// 都先判自己关没关），这一位是为了让**定时器**那一组也只停一次。
+	// closed 记着这个外壳收过尾了。它是**「关掉之后不许再装定时器」那道闸门**，
+	// 不是「收尾只走一遍」——`Close` 可以重复调，而底下每一项各自幂等。
 	//
-	// 只由 `Close` 写。不用锁：它防的是同一条收尾路径走两遍，而那条路径上自始
-	// 至终只有主线程（窗口的 OnClosed、测试的 t.Cleanup），后台那三个定时器压根
-	// 不碰它。
+	// 为什么要有这道闸门：三个装定时器的地方（`feed.arm`、`armNotFound`、
+	// `syncSearchWatch`）都是**每帧**都会到的，而 `Close` 收掉的是**某一个**已经
+	// 装上的定时器。关掉之后只要还有一帧画到（无头 Tester 里 `Close` 之后再
+	// `Frame()` 就会），它们就会再装一个，而那一个没人收。真窗口里 OnClosed 之后
+	// 不再有帧，可这条不该靠「恰好不会」来对。
+	//
+	// 只由 `Close` 写。不用锁：它只在主线程上被读（view 跑在主线程），而
+	// `Close` 也在主线程（窗口的 OnClosed、测试的 t.Cleanup）。
 	closed bool
 }
 
@@ -420,9 +424,16 @@ type Shell struct {
 // 没建出窗口的那条路也调它，测试的 `t.Cleanup` 还是调它——三处走的是同一份代码，
 // 不会再有「窗口的回调忘了谁」这种事。
 func (s *Shell) Close() {
-	if s.closed {
-		return
-	}
+	// ⚠️ **这里不提前 return**。底下每一项各自都是幂等的（定时器那几个是
+	// 「判 nil → 调 → 置 nil」，`images.Close` / `app.Close` / `hist.Close` /
+	// `keys.Close` 各自都有 `closed` 判断），所以再走一遍既无害、又是必须的：
+	// 万一关掉之后还有一帧画到了顶栏（无头 Tester 里 `Close` 之后再 `Frame()`
+	// 就会，见 `close_while_loading_test.go`），那三个「装定时器」的地方要看
+	// `s.closed` 才肯装——但路径上还有别的呢，「再走一遍」就是最后一道网。
+	//
+	// 早先这里写的是「`closed` 就 return」，而它挡住的正是这件事：`Close` 走过一趟
+	// 之后装的定时器，第二次 `Close` 收不掉（`feed.arm` 那一处在关掉后仍会被每帧触
+	// 发），于是它一路挂到测试进程结束。
 	s.closed = true
 
 	s.win = nil
