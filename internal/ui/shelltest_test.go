@@ -400,39 +400,56 @@ func TestTheTestSuiteDoesNotGrowASecondWayToDoEitherThing(t *testing.T) {
 		if name == "shelltest_test.go" {
 			continue
 		}
-		src := readFileOrFail(t, name)
-		// ⚠️ `package ui_test` 那四个文件用不了内部基座（见文件头），它们的老写法
-		// 这一次放过。等它们搬进来，这里自然就开始管它们了。
-		if strings.HasPrefix(src, "package ui_test") ||
-			strings.Contains(src[:min(len(src), 400)], "package ui_test") {
+		// 读不到就报错，不能当成「干净」：读不到的那份等于没查，而这一条的全部
+		// 价值就在于「每个文件都查了」。
+		b, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("读不到 %s，这一就没法查了：%v", name, err)
+		}
+		src := string(b)
+		// ⚠️ `package ui_test` 那四个文件用不了内部基座（见文件头），它们的老写法这一
+		// 次放过。等它们搬进来，这里自然就开始管它们了。
+		//
+		// 认的是**包子句**（第一行非注释、非空的那一行），不是「文件里有没有出现
+		// `package ui_test` 这几个字」——后者会把一条提到它的注释也算进去。
+		if pkgClause(src) == "package ui_test" {
 			continue
 		}
-		for _, call := range retired {
-			// 只看调用点，跳过注释里提到它们的地方（注释可以解释为什么没有了）。
-			for i, line := range strings.Split(src, "\n") {
-				if !strings.Contains(line, call) {
-					continue
+		lines := strings.Split(src, "\n")
+		for i, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "//") {
+				continue // 注释里提到它们是正常的（解释为什么没有了）
+			}
+			for _, call := range retired {
+				if strings.Contains(line, call) {
+					t.Errorf("%s:%d 用了已经合成掉的 %q——这个包里等条件只有基座那两条"+
+						"（waitFor / waitFrames），见本文件头", name, i+1, call)
 				}
-				if strings.HasPrefix(strings.TrimSpace(line), "//") {
-					continue
-				}
-				t.Errorf("%s:%d 用了已经合成掉的 %q——这个包里等条件只有基座那两条"+
-					"（waitFor / waitFrames），见本文件头", name, i+1, call)
 			}
-		}
-		// 造外壳：出现 `New(a)` 就是绕过了基座（基座自己在 shelltest_test.go 里调）。
-		for i, line := range strings.Split(src, "\n") {
-			if !strings.Contains(line, "New(a)") {
-				continue
+			// 造外壳：出现 `New(a)` 就是绕过了基座（基座自己在 shelltest_test.go 里调）。
+			if strings.Contains(line, "New(a)") {
+				t.Errorf("%s:%d 直接 New(a) 造外壳——走 `newTestShell`（本文件），"+
+					"收尾是无条件挂上的，漏一次就是一组挂到测试二进制结束的 goroutine",
+					name, i+1)
 			}
-			if strings.HasPrefix(strings.TrimSpace(line), "//") {
-				continue
-			}
-			t.Errorf("%s:%d 直接 New(a) 造外壳——走 `newTestShell`（本文件），"+
-				"收尾是无条件挂上的，漏一次就是一组挂到测试二进制结束的 goroutine",
-				name, i+1)
 		}
 	}
+}
+
+// pkgClause 取一个 Go 源文件的包子句（第一行非空、非注释的那一行）。
+//
+// 为什么不用「文件里有没有 `package ui_test` 这几个字」：那个查法会把**提到**它的
+// 注释也算进去——比如某条注释正因为在解释「为什么放过外部包」才写了它。
+func pkgClause(src string) string {
+	for _, line := range strings.Split(src, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		return trimmed
+	}
+	return ""
 }
 
 // filesInThisPackage 列出这个包里所有非外部（`package ui`）的测试文件。
@@ -444,16 +461,6 @@ func filesInThisPackage(t *testing.T) []string {
 		t.Fatal(err)
 	}
 	return matches
-}
-
-// readFileOrFail 读一个测试文件。读不到就当它不存在（不该发生，但别把整个套件带崩）。
-func readFileOrFail(t *testing.T, name string) string {
-	t.Helper()
-	b, err := os.ReadFile(name)
-	if err != nil {
-		return ""
-	}
-	return string(b)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
