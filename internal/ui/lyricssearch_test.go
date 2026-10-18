@@ -443,6 +443,12 @@ func callsStayAt(t *testing.T, src *fakeLyricSource, want int, window time.Durat
 //
 // 上游也是 `onKeyDown Enter` 直接调 `handleSubmit`：用户按下回车就是想现在搜，
 // 让他等半秒是另一回事。
+//
+// ⚠️ **判据是「这一次搜索真的发出去了」，不是「按回车之后跑一帧」**：请求是
+// 后台发的（铁律三），而 `waitFrames` 的注释写明了「同一帧里画出来的还是上一帧
+// 的样子」。原来那一句 `tt.Frame()` + 立刻断言，在机器一满载时搜索请求还在路上，
+// 测试就红——而功能是好的：这一条实测在整包连跑里飘过一次，**在未改动的 main
+// 上也飘**。判据一个字没放宽：要的还是「第二次搜索发出去了」，只是等到了再断。
 func TestEnterDoesNotWaitForTheDebounce(t *testing.T) {
 	netease := neteaseSource()
 	_, tt := lyricSearchShell(t, netease)
@@ -451,9 +457,13 @@ func TestEnterDoesNotWaitForTheDebounce(t *testing.T) {
 
 	typeLyricKeyword(t, tt, "林俊杰")
 	tt.TypeKey(0, mygoui.KeyEnter, "\r")
-	tt.Frame()
-	// 同上：这一发是后台发的，画完那一帧不等于它已经到源那儿了。
-	waitFor(t, "回车之后那一次真的发出去（没有等那个防抖）", func() bool { return netease.calls() == 2 })
+	// ⚠️ 取 main 那一份（`waitFrames`），不是本票写的 `waitFor`：两边等的是**同一个
+	// 条件**（第二次搜索发出去了），而上游已经因为同一个原因改过这一条了
+	//（`app.SearchLyrics` 立刻返回，请求是后台发的，而画完那一帧不等于它已经到源那儿）。
+	// 留上游那一份，将来上游再动这个文件时这里不会又撞一次。
+	waitFrames(t, tt, "回车之后不等防抖就发出去了", func() bool {
+		return netease.calls() == 2
+	})
 	if got := netease.searched()[1]; !strings.HasSuffix(got, "林俊杰") {
 		t.Errorf("回车之后发出去的是 %q，want 以「林俊杰」结尾", got)
 	}

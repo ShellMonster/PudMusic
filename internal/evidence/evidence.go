@@ -319,6 +319,49 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// 顶栏右上角那个头像：**登录了画我自己的，未登录画「没有人」**。
+		//
+		// 三样东西各钉一件事，合起来才是一个完整的交代：
+		//
+		//   1. **形状**：地址在服务层就补好了协议、拼好了裁剪参数。照原样透传
+		//      的话，28 见方的一格会去下几百 KB 的正方形原图——不报错、不变慢。
+		//   2. **闸门**：未登录**一个请求都不发**。这一格是整个应用重画最勤的
+		//      一处，而凭据过期之后每一条都是 -101——所以判据是「那台假 B 站
+		//      收到了几个请求」，不是「回来的答案是什么」：那台 fake 明确回了
+		//      「登录了、头像在这儿」，偷偷发出去的话回来的是一个**看起来能用**
+		//      的答案。
+		//   3. **形态不许合并**：合并之后未登录的用户在顶栏上看见别人的脸，而
+		//      上面那几条**一条都不会红**。所以另有一条量「三档任意两档画出来
+		//      差得够多」。
+		//   4. **它画的是人，不是字母**：「不是一整块底色」这种问法钉不住——
+		//      边框和圆角裁剪本来就让它不是纯色，实测把人形换成恒定的字母「B」
+		//      或者干脆什么都不画，那一条都照样绿。所以量的是**形状**：最长的
+		//      那一段墨（人形 17 px，字母 7 px）。
+		//   5. **作废的那一趟不许落地**：退登时在途的那一趟带着上一个账号的头像
+		//      回来，写进去的话退登之后顶栏上又出现一个人的脸。
+		//
+		// ⚠️ 第 3 条的判据是「不一样的比例」而不是「逐像素不相等」：那两格不在
+		// 同一个位置（「登录」和「退出登录」宽度不同），而同一个形状落在不同的小数
+		// 位置上，圆边抗锯齿的颜色就不一样——实测两种形态明明是同一张，逐像素比有
+		// 44/784 个点不同。理由见 `internal/ui/navbar_avatar_test.go`。
+		Spec: "头像：登录画真头像（走封面缓存），未登录画「没有人」而不是字母占位符，图下不来有交代；未登录一个请求都不发",
+		Tests: []string{
+			"TestNavCarriesMyOwnFace",
+			"TestNavWithoutAFaceGivesNothingToShow",
+			"TestNobodyLoggedInAsksNobodyAnything",
+			"TestARealAccountGetsItsOwnFace",
+			"TestADeadSessionIsNotTheSameAsNobodyBeingLoggedIn",
+			"TestTheAvatarShowsMyOwnPictureOnceLoggedIn",
+			"TestTheAvatarOnlyAsksOnceEvenThoughEveryFrameAsks",
+			"TestTheAvatarSaysNobodyIsLoggedIn",
+			"TestTheAvatarShowsAPersonAndNotALetterWhenNobodyIsLoggedIn",
+			"TestTheAvatarSaysSomethingWhenThePictureDoesNotComeBack",
+			"TestAFaceThatComesBackForTheWrongAccountNeverLands",
+			"TestTheAvatarNeverLooksTheSameTwoWays",
+		},
+	},
+	{
+		Category: HTTP,
 		// 「刷新数据」那一项以前按下去只弹一句「还没有数据可刷新」——而接口一直
 		// 都在（`created/list`，收藏夹的新建 / 修改 / 拉全量都靠它）。这一条钉的是
 		// 「按下去真的重新拉一次」：喂一个**会变**的假服务器，点了之后画面上那一列
@@ -989,6 +1032,117 @@ var Items = []Item{
 		},
 	},
 	{
+		Category: FakeClock,
+		// 搜索联想词（#97 A25）那 500ms。⚠️ **和界面上另外两处「等用户把词敲完」用的是
+		// 同一个常量**（`ui.searchDebounce`：稍后再看 / 历史记录的搜索框、歌词搜索、
+		// 这一档），所以这里量的是「一个钟、三个地方用」的那一个。
+		//
+		// 「收掉浮层之后那个钟跟着停」也单列：它是**每帧**在 `syncSearchWatch` 里
+		// 收的，而醒着的定时器醒到进程退出——用户看不出任何异样，只是这个应用从那
+		// 以后再没省过电。
+		Spec: "搜索联想词 500ms 防抖：假时钟推、不真等；每敲一个字重新起算；浮层收掉之后那个钟跟着停",
+		Tests: []string{
+			"TestTheSuggestKeywordIsDebouncedBy500ms",
+			"TestTheSuggestDebounceRestartsOnEveryKeystroke",
+			"TestTheSearchWatchStopsWhenTheOverlayGoesAway",
+		},
+	},
+	{
+		Category: HTTP,
+		// 联想词那个接口（Biu 的 `getSearchSuggestMain`）。**参数逐个对着上游抄**，
+		// 少一个的症状在界面上像「联想词永远是空的那一档」，而那和「拉不到」长得
+		// 一模一样。
+		//
+		// 🔴 **「发去哪一台」单列两条，因为它靠 fixture 量不出来**：假 B 站把**每一个**
+		// 主机都指到同一个本地 URL（那正是 `TestOnlyPointHostsAtFixture` 干的事），
+		// 所以「打到了 `/main/suggest`」这一句对 `api.bilibili.com` 和
+		// `s.search.bilibili.com` 一样成立——把 `hostSearch` 写成 `hostAPI`，整包
+		// 测试照样全绿（评审实测）。所以那两条**不走 fixture**：一层只记 `URL.Host`
+		// 的网络，量的是请求真正的那个 host；另一条量的是常量本身不许和 `HostAPI`
+		// 一样。
+		//
+		// ⚠️ **签名（不发 w_rid、不先跑一趟 nav）是另一条**：WBI 是 `api` 那台的规矩，
+		// 这一台不认，多带只是**赌**它不介意。
+		//
+		// 「两套字」（`term` 干净、`name` 带标签）是界面上最要紧的一半：拿 `name`
+		// 显示是一排尖括号，拿它去搜是把标签当关键词发出去。
+		//
+		// ⚠️ **这一票没有走真网**：接口的地址、参数和回包形状都要真机回归，那是另
+		// 一次安排；这里量到的是**我们这一层**（发出去的是什么、回来的怎么认、
+		// 失败有没有被当成「一个都没有」）。
+		Spec: "搜索联想词的接口：发去搜索站那一台（s.search.bilibili.com，不许打成 api 那台——fixture 量不出来，所以用一层记 host 的网络钉）、只发 term 且不带 WBI 签名；回包里 term/name 两套字分开认；空的和重复的丢掉、顶上那 10 条（两件事各一条，混在一起时上限会把重复的那条切掉）；拉不到要报错而不是回一个空列表",
+		Tests: []string{
+			// 地址：这两条不过 fixture，量的是请求真正的 host。
+			"TestSearchSuggestGoesToTheSearchHostNotTheApiOne",
+			"TestTheSuggestHostIsNotTheApiHost",
+			// 参数与签名。
+			"TestSearchSuggestSendsTheWordOnTheSearchHost",
+			"TestSearchSuggestGivesBackThePlainWords",
+			"TestSearchSuggestDropsTheOnesThatAreNotWords",
+			"TestSearchSuggestKeepsOnlyTheFirstFew",
+			"TestSearchSuggestFallsBackToTheNameWhenThereIsNoTerm",
+			"TestSearchSuggestAsksForNothingWithoutAWord",
+			"TestSearchSuggestSaysSoWhenItCannotAsk",
+			"TestSearchSuggestSaysSoWhenTheAnswerIsUnreadable",
+		},
+	},
+	{
+		Category: Platform,
+		// 规格的四条验收（#97）。逐条钉：
+		//
+		//   - 输入时浮层里多一档「联想词」（**浮层里的另一档，不是另一个浮层**——
+		//     两套浮层的关闭时机不一样，并排会出现「关了一个另一个还在」，所以
+		//     Esc 那一条钉的是两档一起收）；
+		//   - 和历史建议在界面上区分得开（判据是**画出来的像素**：chip 有底色，
+		//     联想那一行没有；另外还有「清除全部」只清历史那一档这个行为上的后果）；
+		//   - 选中一条等于选中那次的搜索（页面上、URL 上、**框里**都是那一个词）；
+		//   - 请求失败时静默（浮层保持只有历史那一档，一个错字都没有、提示条也不弹）。
+		//
+		// ⚠️ 「设置里的『显示搜索历史』不许把联想词一起关掉」也单列：那个设置管的
+		// 是「我不想看见我搜过什么」，而联想词是 B 站这次给的。
+		Spec: "搜索浮层里多一档「联想词」：输入时出来、和搜索历史在界面上分得开、选中等于选中那次的搜索、拉不到时静默（浮层保持只有历史那一档）、和历史在同一个浮层里（Esc 一起收）、设置里的「显示搜索历史」不管它；两档都摆满时（最小窗口 + 10 条长历史）最下面那几条也在屏幕里、滚得动、点得中",
+		Tests: []string{
+			"TestTypingBringsUpTheSuggestTerms",
+			"TestTheTwoSectionsAreToldApart",
+			"TestChoosingOneSearchesThatWord",
+			"TestAFailedSuggestLeavesOnlyTheHistory",
+			"TestEscapeTakesBothSectionsAway",
+			"TestTheHistorySettingDoesNotTakeTheSuggestWithIt",
+			// 框里一个字都没有时一个请求都不发（点开搜索框是在翻历史，不是在要联想）。
+			"TestNoWordMeansNoRequest",
+			// 联想词那一档没有 ×：那是 B 站这次给的，删不掉。
+			"TestTheSuggestTermsCannotBeDeleted",
+			// 两档都摆满时（最小窗口 + 10 条长历史 + 10 条联想）最下面那几条**点得着**：
+			// 面板能滚、高度上限跟着窗口走（评审钉过：没有滚动容器时最后一条被排在
+			// y=735，而屏幕只有 560 高——看不见、点不着、也滚不到）。
+			"TestThePanelFitsInASmallWindowAndScrolls",
+			"TestReopeningTheOverlayStartsAtTheTop",
+		},
+	},
+	{
+		Category: Negative,
+		// 联想词那一摊的边界。
+		//
+		// 🔴 **失败之后不许每帧重发**是这一条里最要紧的：业务层失败时仍然记着那个
+		// 词，界面上「已经问过了」那一支才成立；少了它就是自己养自己的循环（生产里
+		// 每次投递都叫醒界面），于是浮层底下一直刷网络而用户只看到搜索框卡一下。
+		//
+		// 迟到的结果不许盖掉新的（代次守卫）、退出了不许再往状态上写、框里空了上一
+		// 批要收掉（它属于上一个问题）、没挂上 B 站客户端也要安静。
+		Spec: "联想词的边界：失败之后静默且不每帧重发、重敲同一个词还能再问一次（失败是静默的，界面上用户唯一能做的就是再敲一遍）、空框不许自己养自己（每一帧都请求下一帧 = 窗口永远停不下来）、迟到的结果不盖掉新的、退出之后不写回来、框空了收掉上一批、同一个词不搜第二遍、没挂客户端时不吵",
+		Tests: []string{
+			"TestAFailedSuggestSaysNothingAndDoesNotFireAgain",
+			"TestTypingTheSameWordAgainAsksAgain",
+			"TestAnEmptySearchBoxDoesNotKeepTheWindowRedrawing",
+			"TestAStaleSuggestNeverLands",
+			"TestClosingTheAppStopsTheSuggestFromComingBack",
+			"TestEmptyingTheBoxTakesTheSuggestListAway",
+			"TestTheSameWordIsNotAskedForSuggestTwice",
+			"TestAskingForSuggestWithoutABiliClientIsQuiet",
+			"TestAskingForSuggestGivesBackWhatBilibiliSaid",
+		},
+	},
+	{
 		Category: Play,
 		// #21 的界面那一半（BMG-66）走通一遍：两个源都摆着、**从屏幕上那首歌开始**、
 		// 切 Tab 立刻用同一个词重搜那个源、预览里看得到完整歌词再采用、采用之后
@@ -1080,6 +1234,61 @@ var Items = []Item{
 			"TestTheFinalNameOnlyEverAppearsWhole",
 			"TestAFailedCoverSaveLeavesNothingBehindThatWouldBlockEveryRetry",
 			"TestADirectoryInTheCoversPlaceIsNotMistakenForACover",
+		},
+	},
+	{
+		Category: HTTP,
+		// 收藏夹 ⋯ 菜单里「清除失效内容」和「删除收藏夹」这两个项**早就在位**、
+		// 文案也写好了，而按下去只弹一句「还没接上」。这一条钉的是它们变成真
+		// 动作之后的几件事——每一样都是「做了一半比不做更糟」的那一种：
+		//
+		//   - **清除失效内容是服务端的一个动作**，不是本地按 attr 筛一遍再删。
+		//     筛的那条路在三个地方各自会漏（`Attr` 认不全 / 翻页期间列表在变 /
+		//     几千首要几十趟请求），而三个症状长得一模一样：清完还剩几个。
+		//   - **清完之后**列表才重来。点完立刻刷的话刷回来的是还带着失效条目的
+		//     列表——刷新确实发生了，只是发生得太早，症状是「按完什么都没变」。
+		//   - **只有自己创建的收藏夹**摆得出删除（别人建的 B 站没这个接口、
+		//     默认收藏夹删不掉、没登录时 `0 == 0` 会误判通过）。三个少一个都是
+		//     让用户按出一个注定失败的按钮。
+		//   - **「删 B 站上那个」和「只删本地记录」是两个选项、两套措辞**：前者
+		//     点名收藏夹、点名里面几首、说撤不回来；后者明确说 B 站上的还在，
+		//     而它**一个请求都不发**。
+		//
+		// ⚠️ **这一票没走真网**：两个都是写操作，写的是用户真实的收藏夹，而
+		// 「删 B 站上那个」不可逆。所以全部用 HTTP fixture。真接口的兼容性
+		// （参数集对不对、B 站收不收）要真机回归，见任务报告「需要真网验」。
+		Spec: "收藏夹 ⋯ 菜单的「清除失效内容」和「删除收藏夹」：清除是服务端的一个动作（本地不筛）、清完之后列表才重来、只有自己建的收藏夹摆得出删除、取消则一个请求都不发；「删 B 站上那个」和「只删本地记录」分成两个选项且措辞不同，后者一个字节都不往 B 站发（这一票走 HTTP fixture，两个都是会动用户真实收藏夹的写操作）",
+		Tests: []string{
+			// 服务层：发出去的形状。少一个字段 B 站不报错，只是清不干净。
+			"TestCleanSendsOnlyTheFolderID",
+			"TestCleanRefusesNobody",
+			"TestCleanSaysWhichFolderItWas",
+			// 业务层：谁有资格删。
+			"TestOnlyYourOwnFolderOffersDeletion",
+			"TestTheHeaderInfoCarriesWhatDeletionJudgesOn",
+			// 业务层：清完之后界面才知道该重来。
+			"TestClearingInvalidAsksTheServerToDoIt",
+			"TestAFinishedClearTellsTheListToRedraw",
+			"TestAFailedClearDoesNotTellTheListToRedraw",
+			// 业务层：两个删除共用一条路 / 本地那个不发请求。
+			"TestDeletingFromThePageGoesThroughTheSameCallAsTheSidebar",
+			"TestForgettingAFolderNeverTouchesBilibili",
+			// 界面层：摆得出来的项、确认框、取消、刷新、走开。
+			"TestOnlyTheOwnerGetsTheOwnerActions",
+			"TestNoTwoMenuItemsShareAKeyOrALabel",
+			"TestClearingTheInvalidContentAsksFirst",
+			"TestCancellingAnyOfTheThreeSendsNothing",
+			"TestACleanedFolderRedrawsItsList",
+			"TestDeletingAFolderSaysWhichOneAndLeavesThePage",
+			"TestDeletingFromThePageIsTheSameCallTheSidebarMakes",
+			"TestTheTwoDeletionsDoNotReadTheSame",
+			"TestForgettingTheFolderNeverTouchesBilibili",
+			"TestAFolderNobodyOwnsCanStillBeForgotten",
+			// 失败路径：删不掉时不许把用户踢走，更不许把失败原因一起擦掉。
+			"TestAFolderThatWontBeDeletedKeepsTheUserWhereTheyAre",
+			// 「从侧栏移除」要清的是**它所在的那一组**（否则提示就是谎话）。
+			"TestForgettingClearsTheRowOutOfWhicheverGroupItIsIn",
+			"TestForgettingTakesTheRowOutOfBothGroups",
 		},
 	},
 }
