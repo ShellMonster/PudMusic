@@ -232,7 +232,7 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 // 结构照 `widgets/list` 的音乐网格（`grid.go` 的 viewCell）：封面 → 歌名 → 副标题
 // 那一行。**右边那几列没有丢**：播放量 / 加入时间 / 时长挤到歌名下面那一行的两端
 // ——丢掉的不是「排版」，是用户要看的数，而网格档照样得看得见。
-func (s *Shell) drawLaterCell(c *ui.Context, i int, selected bool) ui.Element {
+func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool) ui.Element {
 	t := c.Theme()
 	rows := s.laterPage.rows
 	m, ok := rows.Row(i)
@@ -257,7 +257,10 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, selected bool) ui.Element {
 	}
 
 	return box.Children(func() {
-		imgcache.View(c, s.images, m.Cover, laterCellCoverW, laterCellCoverH)
+		// 封面按**格子宽**画，不写死：`list.CellWidth` 给的就是这一格实际拿到的
+		// 宽（`widgets/list` 的网格卡片同一个做法）。写死 160 的话，窗口一窄到
+		// 两列，封面就顶出格子外面去了。
+		imgcache.View(c, s.images, m.Cover, cell, laterCellCoverH)
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).PaddingY(cardGapForCell).Children(func() {
 			ui.Text(c, m.Title).FontSize(14).LineHeight(1.5).
@@ -285,10 +288,10 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, selected bool) ui.Element {
 	})
 }
 
-// 网格那一档里一格的大小。封面高 140 和 `widgets/list` 的网格一致（Biu 的
-// music-card 就是这个高），宽由 `ui.Grid` 均分，所以不写死。
+// 网格那一档里一格的样子。**只定高**：封面高 140 和 `widgets/list` 的网格一致
+// （Biu 的 music-card 就是这个高），而宽是按列数算出来的（`list.CellWidth`）——
+// 写死一个宽的话窗口一窄封面就顶出格子。
 const (
-	laterCellCoverW = 160
 	laterCellCoverH = 140
 	cardGapForCell  = 8
 )

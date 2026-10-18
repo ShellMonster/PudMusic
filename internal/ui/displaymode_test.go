@@ -235,6 +235,104 @@ func spotted(tt *mygoui.Tester, titles [3]string) string {
 	return b.String()
 }
 
+// TestThePagesThatDeliberatelyDoNotFollowIt 钉住「哪些页故意不跟」。
+//
+// 上面那张表是覆盖面清单，而**没在表上的页**同样要有一份说清楚为什么的清单：不然
+// 下一个人读代码时，「这一页没接」和「这一页不该接」长得一模一样，而分不清就会去
+// 「补上」——把一个不该动的控件改了（比如那个行高定死、因为「定位当前播放」按行号
+// 乘 64 的抽屉）。
+//
+// 判据是**这些页真的画着它们自己的那种东西**（抽屉里有一行队列、动态那一页有动态、
+// 关注那一页有用户卡）：页还在，才谈得上「它为什么不跟」。
+func TestThePagesThatDeliberatelyDoNotFollowIt(t *testing.T) {
+	for _, c := range []struct {
+		what string
+		// 摆到那一页，判据是画面上有一句只有那一页才有的字。
+		open    func(t *testing.T) (*mygoui.Tester, *Shell)
+		why     string
+		witness string
+	}{
+		{
+			what: "播放队列抽屉",
+			open: func(t *testing.T) (*mygoui.Tester, *Shell) {
+				s, tt := newShell(t)
+				s.drawerOpen = true
+				for range 3 {
+					tt.Frame()
+				}
+				return tt, s
+			},
+			why:     "它不是一页，是播放时拉出来的一个抽屉；而且它的**行高定死在 64**（Biu 的 RowHeight）——「定位当前播放」是 `targetIndex*64`，改了行高那个按钮每次都停在差几像素的地方",
+			witness: "队列",
+		},
+		{
+			what: "用户动态",
+			open: func(t *testing.T) (*mygoui.Tester, *Shell) {
+				s, tt := newShell(t)
+				s.navigate(dynamicFeedPath)
+				for range 3 {
+					tt.Frame()
+				}
+				return tt, s
+			},
+			why:     "那一页画的是**动态卡片**（一段文字 + 视频缩略图），不是歌的列表——网格 / 紧凑那三档说的全是「一行几首歌」",
+			witness: "用户动态",
+		},
+		{
+			what: "我的关注",
+			open: func(t *testing.T) (*mygoui.Tester, *Shell) {
+				s, tt := newShell(t)
+				s.navigate(followPath)
+				for range 3 {
+					tt.Frame()
+				}
+				return tt, s
+			},
+			why:     "那一页画的是**用户卡**（头像 + 昵称 + 关注按钮），上游从一开始就只有网格一种摆法（`follow-list/index.tsx` 把它整个转给 `virtual-grid-page-list`）",
+			witness: "我的关注",
+		},
+		{
+			what: "下载记录",
+			open: func(t *testing.T) (*mygoui.Tester, *Shell) {
+				s, tt := newShell(t)
+				s.navigate("/download-list")
+				for range 3 {
+					tt.Frame()
+				}
+				return tt, s
+			},
+			why:     "它是**下载任务表**（三段进度 + 每条五种操作），没有封面也没有「正在放」——它不是内容页",
+			witness: "下载记录",
+		},
+		{
+			what: "首页的新歌速递",
+			open: func(t *testing.T) (*mygoui.Tester, *Shell) {
+				s, tt := newShell(t)
+				s.home.SetSongs(homeSongs{new: homeSongsOf("新歌", 12)})
+				s.home.tab = homePopTab
+				for range 3 {
+					tt.Frame()
+				}
+				return tt, s
+			},
+			why:     "它是首页顶部的一块**横向推荐位**，行数是按窗口高算出来的（`newMusicRowsAt`），翻页是「上一批 / 下一批」两个按钮——它有自己的几何，跟「一屏能看到更多歌」没关系",
+			witness: "新歌",
+		},
+	} {
+		t.Run(c.what, func(t *testing.T) {
+			tt, s := c.open(t)
+			_ = s
+			if !tt.HasText(c.witness) {
+				t.Errorf("这一页没画出来（找 %q），那「它为什么不跟这个设置」就成了"+
+					"一句没人核对过的话。文字有 %q", c.witness, tt.Texts())
+			}
+			if c.why == "" {
+				t.Error("没写为什么——那一条就只剩一个名字")
+			}
+		})
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 每一页怎么打开
 // ─────────────────────────────────────────────────────────────────────────────
@@ -554,3 +652,55 @@ func TestTheGridStillPagesOnARealPage(t *testing.T) {
 		return pageOf(s, searchTabSong).Loaded == 80
 	})
 }
+
+// TestEveryViewSurvivesTheNarrowestWindow 钉住「三档在最窄窗口下都画得出来」。
+//
+// ⚠️ **为什么单独一条**：`displayPages` 那一组量的是宽窗口（宽到网格有五列），而
+// 窗口能拖到 900（`WindowOptions.MinWidth`）——那时候网格只剩两列，封面按格子宽
+// 画（`list.CellWidth`），而格子里的歌名 / UP 名 / 时长要挤进剩下那点宽度。
+// 「挤坏了」和「画崩了」在这里是两种病，而它们在同一个开关后面。
+//
+// 判据有两条：**头两首还在画面上** + **画面上没有「画不出来」**。
+//
+// ⚠️ **只要求头两首，不是三首**：`ui.List` 是虚拟的，只建看得见的那几行，而网格在
+// 最窄窗口是**两列**——三首歌占两行，第二行在 560 高的窗口外面。三首里少一首是
+// 对的，不是坏了。
+//
+// ⚠️ 「画不出来」那一句是**兜住 panic 的占位**（`widgets/list` 的 `guardFailed`）：
+// 一格画崩了就是它。不崩就没有那一句——所以它是「没崩」的直接判据，比「有几首可见」
+// 灵敏得多。
+func TestEveryViewSurvivesTheNarrowestWindow(t *testing.T) {
+	for _, p := range displayPages {
+		t.Run(p.name, func(t *testing.T) {
+			s, tt, titles := p.open(t)
+			tt.SetSize(minWindowW, minWindowH)
+			for range 3 {
+				tt.Frame()
+			}
+			for _, m := range []app.DisplayMode{
+				app.DisplayModeCompact, app.DisplayModeCard, app.DisplayModeList,
+			} {
+				setDisplay(t, s.app, tt, m)
+				if tt.HasText("画不出来") {
+					t.Errorf("%s 那一档下画面上有「画不出来」：%q", m, tt.Texts())
+				}
+				for _, n := range titles[:2] {
+					if r, ok := tt.Find(n); !ok || r.W <= 0 || r.H <= 0 {
+						t.Errorf("%s 那一档下 %q 不在画面上（%v）", m, n, r)
+						break
+					}
+				}
+			}
+		})
+	}
+}
+
+// minWindowW / minWindowH 是窗口能拖到的最小尺寸，**照抄** `WindowOptions` 里那
+// 两个（`shell.go`：`MinWidth: 900` / `MinHeight: 560`）。
+//
+// ⚠️ **别改小、也别改大**：这一组量的是「挤到最窄时有没有崩、有没有整行消失」。
+// 改小是在量一个用户到不了的尺寸，改大就永远量不到最窄那一档。
+const (
+	minWindowW = 900
+	minWindowH = 560
+)

@@ -123,7 +123,7 @@ type pagedRows struct {
 	// ⚠️ **为 nil 时那一档退回列表**（见 SetView）：这一份翻页列表是照着
 	// `list/paged.go` 另写的，而网格那一档要页面自己画一格——没给就不画，
 	// 画一个空框等于告诉用户「这里什么都没有」。
-	renderCell func(c *ui.Context, i int, selected bool) ui.Element
+	renderCell func(c *ui.Context, i int, cell float32, selected bool) ui.Element
 
 	// layout 是设置里的「数据显示样式」那一档，见 SetView。零值是列表。
 	//
@@ -288,7 +288,7 @@ func (p *pagedRows) SetView(v list.View) {
 func (p *pagedRows) Layout() list.View { return p.layout }
 
 // SetCell 装网格那一档的画法（页面在 init 里给）。
-func (p *pagedRows) SetCell(fn func(c *ui.Context, i int, selected bool) ui.Element) {
+func (p *pagedRows) SetCell(fn func(c *ui.Context, i int, cell float32, selected bool) ui.Element) {
 	p.renderCell = fn
 }
 
@@ -549,6 +549,10 @@ func (p *pagedRows) viewGridRow(r ui.ListRow, cols int) {
 			Padding(8).MaxLines(1)
 		return
 	}
+	// ⚠️ **格子宽度要算出来交给页面**：封面按格子宽画（`widgets/list` 的
+	// `viewCell` 就是这么做的），而页面自己不知道容器有多宽。写死一个数的话，
+	// 窗口一窄封面就顶出格子——界面上看得出坏了，而量宽度的断言全绿。
+	cell := list.CellWidth(p.width, cols)
 	guard.Wrap(func(c *ui.Context) {
 		// ⚠️ Stretch：格子要撑满这一行的高，选中那一格的底色才是一整块
 		//（`widgets/list/grid.go` 的 viewRow 里同一句）。
@@ -558,7 +562,7 @@ func (p *pagedRows) viewGridRow(r ui.ListRow, cols int) {
 				if i >= len(p.rows) {
 					return // 最后一行不满：剩下的格子空着（CSS grid 也是这么摆的）
 				}
-				p.viewCellGuarded(c, i)
+				p.viewCellGuarded(c, i, cell)
 			}
 		})
 	}, func(any) { p.markFailed(m.ID) })(c)
@@ -568,7 +572,7 @@ func (p *pagedRows) viewGridRow(r ui.ListRow, cols int) {
 //
 // ⚠️ **按格兜而不是按行兜**：一行有六格，一张坏封面要带走五首好的——这句话是
 // `widgets/list` 里已经付过账的结论，这里照抄。
-func (p *pagedRows) viewCellGuarded(c *ui.Context, i int) {
+func (p *pagedRows) viewCellGuarded(c *ui.Context, i int, cell float32) {
 	m := p.rows[i]
 	if p.failed[m.ID] {
 		ui.Text(c, "这一格画不出来").FontSize(13).TextColor(c.Theme().TextMuted).
@@ -586,7 +590,7 @@ func (p *pagedRows) viewCellGuarded(c *ui.Context, i int) {
 		// menuTarget），而点击区会多出一圈空白。
 		// 这一串只是往建好的那一格上挂菜单和点击，返回的元素没人要——和 `viewRow`
 		// 里 `p.render(c, r).ContextMenu(...)` 同一个写法。
-		p.renderCell(c, i, p.sel == i).
+		p.renderCell(c, i, cell, p.sel == i).
 			ContextMenu(func(m *ui.Menu) { p.menu(m, i) }).
 			// 点一下选中这一首。**单击只选中不放**——理由和列表那一行一样（桌面端
 			// 单击就换队列太容易误触，播放走双击和右键菜单）。

@@ -69,6 +69,15 @@ const gridMinCols = 2
 // 摆出来的宽度会差 `cols-1` 个缝——差几像素，而那正是「两个页面对不上」的第一眼。
 const GridGap = gridGap
 
+// CellWidth 是容器有 w 那么宽、排 cols 列时**一列有多宽**。
+//
+// ⚠️ 和 `GridColumnsFor` 是同一件事的两个半：自己按 `repeat(n, minmax(0, 1fr))`
+// 再算一遍的话，某一页算出来的封面宽度会和其余页面差半个像素，而「两个页面对不上」
+// 的第一眼往往就是那半个像素。
+//
+// 用途：给 `Grid` 之外的网格画格子（`internal/ui` 的稍后再看 / 历史记录那一档）。
+func CellWidth(w float32, cols int) float32 { return cellWidth(w, cols) }
+
 // GridColumnsFor 是容器有 w 那么宽时排几列。
 //
 // ⚠️ **判据是容器的宽，不是窗口的**——页面左边还有侧栏，窗口宽不等于网格宽。

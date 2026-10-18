@@ -48,7 +48,7 @@ func (s *Shell) displayView() list.View {
 func (s *Shell) viewDisplayMode(c *ui.Context, st app.Settings, ro bool) {
 	ui.Column(c).Key("setting:displayMode").Width(segWidth).Gap(8).Children(func() {
 		s.pickDisplayMode(c, st, ro)
-		viewDisplayModePreview(c, list.ViewOf(st.DisplayMode), ro)
+		viewDisplayModePreview(c, list.ViewOf(st.DisplayMode))
 	})
 }
 
@@ -77,30 +77,28 @@ const (
 
 // viewDisplayModePreview 画那三张缩略图，选中的那张描一圈主色。
 //
-// ⚠️ **不可点**。它是预览，不是第二个入口：摆一个能点的，用户会问「点它和点上面
-// 那个有什么区别」，而答案是「没有区别」——同一件事两个控件，坏了一个另一个还
-// 在，用户会以为另一个也坏了。
-func viewDisplayModePreview(c *ui.Context, chosen list.View, ro bool) {
+// ⚠️ **不可点，也不可灰**。它是预览，不是第二个入口：摆一个能点的，用户会问「点它
+// 和点上面那个有什么区别」，而答案是「没有区别」——同一件事两个控件，坏了一个另一
+// 个还在，用户会以为另一个也坏了。而只读保护（`ro`）灰的是**改不了的东西**：设置
+// 来自更新的版本时这一格动不了，预览照样看得见（它一个字都没改）。
+func viewDisplayModePreview(c *ui.Context, chosen list.View) {
 	t := c.Theme()
 	ui.Row(c).Key("setting:displayModePreview").Width(segWidth).
 		Gap(previewGap).AlignItems(ui.Start).Children(func() {
 		for v := list.View(0); v < list.ViewCount; v++ {
-			previewOne(c, t, v, v == chosen, ro)
+			previewOne(c, t, v, v == chosen)
 		}
 	})
 }
 
 // previewOne 画一张缩略图。
-func previewOne(c *ui.Context, t *ui.Theme, v list.View, chosen, ro bool) {
+func previewOne(c *ui.Context, t *ui.Theme, v list.View, chosen bool) {
 	border := t.Border
 	if chosen {
 		// 选中的那一张描主色，和设置里其它「当前是这一档」的画法一样
 		//（`pickTheme` 给选中的按钮铺主色底）。
 		border = t.Accent
 	}
-	// ⚠️ 这一格**不 Disabled**：只读保护（`ro`）管的是能不能改设置，而预览改不了
-	// 任何东西，灰掉它只会让人以为这一张不可用。理由见上面「不可点」那一段。
-	_ = ro
 
 	ui.Column(c).Label("预览："+v.String()).
 		Width(previewW).Height(previewH).Radius(t.Radius).

@@ -239,7 +239,7 @@ func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 // 结构和 `drawLaterCell` 同一个形状，差的是下面那两行：历史记录没有播放量，
 // 有的是「看过多少 / 多久」和观看时间（理由见 `drawLaterCell` 的注释：右边那几列
 // 挪到歌名下面，不是丢掉）。
-func (s *Shell) drawHistoryCell(c *ui.Context, i int, selected bool) ui.Element {
+func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected bool) ui.Element {
 	t := c.Theme()
 	rows := s.historyPage.rows
 	m, ok := rows.Row(i)
@@ -262,7 +262,7 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, selected bool) ui.Element 
 	}
 
 	return box.Children(func() {
-		imgcache.View(c, s.images, m.Cover, laterCellCoverW, laterCellCoverH)
+		imgcache.View(c, s.images, m.Cover, cell, laterCellCoverH)
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).PaddingY(cardGapForCell).Children(func() {
 			ui.Text(c, m.Title).FontSize(14).LineHeight(1.5).
