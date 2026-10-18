@@ -421,7 +421,56 @@ var Items = []Item{
 	{
 		Category: Platform,
 		Spec:     "异步结果**逐窗口**唤醒（只叫醒主窗口的话迷你窗口停在旧内容）",
-		Tests:    []string{"TestEveryWindowThatDrewItGetsWoken", "TestEveryWindowGetsWoken"},
+		Tests: []string{
+			"TestEveryWindowThatDrewItGetsWoken", "TestEveryWindowGetsWoken",
+			// 「改一次状态叫醒**所有**窗口」那一半（`App.AddWake` / `AddLocalWake`
+			// 是挨个叫醒的）。
+			"TestEveryRegisteredWindowIsWokenWhenTheStateChanges",
+			"TestTheLocalLibraryWakesEveryWindowThatRegistered",
+			// 「迷你窗口真的接上了自己那一条」那一半。
+			"TestTheMiniWindowIsWokenWhenTheStateChanges",
+		},
+	},
+	{
+		Category: Platform,
+		Spec:     "迷你播放器：320×100 的透明置顶小窗（43）",
+		Tests: []string{
+			"TestTheMiniWindowIsAtBiuNumbers",
+			"TestTheMiniWindowParksInTheTopRightCorner",
+			// 透明窗口自己给了不透明底——不画的话它在桌面上是隐形的。
+			"TestTheMiniCardCoversTheWindow",
+			// 第二扇窗上铁律二（每帧开头装主题）和铁律四（view 包 Guard）也成立。
+			"TestTheMiniFramesCarryTheChosenTheme",
+			"TestAPanicInsideTheMiniViewLeavesTheProcessAlive",
+		},
+	},
+	{
+		Category: Platform,
+		Spec:     "迷你播放器里能换歌、上下一首（44）、拖进度条（45）、调音量",
+		Tests: []string{
+			"TestTheMiniWindowStepsThroughTheQueue",
+			"TestDraggingTheMiniProgressSeeksOnlyOnRelease",
+			"TestTheMiniVolumeSliderSetsTheVolume",
+		},
+	},
+	{
+		Category: Platform,
+		Spec:     "迷你播放器和主窗口显示同一份播放状态（46），关掉它只关一扇窗",
+		Tests: []string{
+			"TestTheMiniWindowShowsWhatTheMainWindowShows",
+			"TestClosingTheMiniWindowLeavesTheAppPlaying",
+			"TestOnlyOneMiniWindowIsEverBuilt",
+			"TestTheMiniBackButtonGoesBackToTheMainWindow",
+		},
+	},
+	{
+		Category: Platform,
+		Spec:     "迷你播放器这一块本身：装得下 320×100、字没被截、控件身份稳（铁律四）",
+		Tests: []string{
+			"TestTheMiniCardFitsInThreeHundredAndTwentyByOneHundred",
+			"TestTheMiniLabelsAreNotTruncated",
+			"TestTheMiniControlsKeepTheirIdentityWhenTheLabelChanges",
+		},
 	},
 	{
 		Category: Platform,
