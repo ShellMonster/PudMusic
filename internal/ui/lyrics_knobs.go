@@ -1,12 +1,15 @@
-// 右下角浮着的两个旋钮：歌词偏移和字号（上游 `index.tsx:380-398` 那三个图标
-// 里的头两个）。
+// 右下角浮着的那一列旋钮：歌词偏移、字号，和「找歌词」（上游 `index.tsx:380-398`
+// 那三个图标）。
 //
-// # 第三个旋钮（搜歌词）不在这一票
+// # 第三个旋钮（找歌词）是 BMG-66 加进来的
 //
 // 上游那儿的第三个是一个放大镜，按下去开「歌词搜索弹窗」（`index.tsx:389-397`）。
-// 那是**歌词从哪儿来**那条线（#21）的活儿，而这一票的歌词只从缓存来
-// （`app.loadLyrics`）。摆一个按下去什么也不发生的按钮，比不摆更糟——所以
-// 这两个调得动的在，找歌词的那个不在。
+// 它那一票（#21 的界面那一半）拆成了 BMG-66，两个弹窗在 `lyricssearch.go`。
+// 这一票之前它是**故意不摆**的（歌词只从缓存来，按下去什么也不会发生）——现在
+// 它有地方可去了。
+//
+// ⚠️ **它和上面那两个的可见条件不一样**：那两个画在没有歌词的时候不摆（无处可
+// 附），它两种时候都摆——用户点它的时机恰恰是**没有歌词**的时候。
 //
 // # 夹界一个都不在这里
 //
@@ -81,14 +84,37 @@ const (
 const (
 	lyricFontSliderKey   = "lyrics:knob:font"
 	lyricOffsetSliderKey = "lyrics:knob:offset"
+	// lyricKnobColumnKey 是右下角那一列的键（铁律四）。
+	//
+	// ⚠️ **两条路上都要有**：有歌词时这一列摆三个旋钮、没有歌词时只摆一个，
+	// 身份跟着换会让它「换了一列」而不是「少了一个旋钮」。
+	lyricKnobColumnKey = "lyrics:knob:column"
 )
 
-// viewLyricKnobs 画右下角浮着的字号与偏移两个旋钮。
+// viewLyricKnobColumn 画右下角浮着的那一列旋钮。
 //
 // ⚠️ 它们是**绝对定位**的兄弟元素，不是 `ui.Overlay`：要贴着的是**歌词区**的
 // 右下角，不是窗口的右下角——迷你播放器那一页底下还压着播放条，按窗口摆的话
-// 两个旋钮会掉进播放条里。摆它们的那个壳在 `viewLyrics` 里（同一个 Column 的
+// 旋钮会掉进播放条里。摆它们的那个壳在 `viewLyrics` 里（同一个 Column 的
 // 绝对定位孩子）。
+//
+// adjustable 只管**上面那两个**（字号与偏移）。「找歌词」那一个两种时候都画：
+// 用户点它的时机恰恰是**没有歌词**的时候，而没有歌词时那两个旋钮无处可附
+// （见 lyrics.go 上面那一支）。
+func (s *Shell) viewLyricKnobColumn(c *ui.Context, snap app.LyricsSnapshot, adjustable bool) {
+	ui.Column(c).Key(lyricKnobColumnKey).Absolute().Right(lyricKnobInset).
+		Bottom(lyricKnobInset).Gap(lyricKnobGap).AlignItems(ui.End).
+		Children(func() {
+			if adjustable {
+				s.viewLyricKnobs(c, snap)
+			}
+			if ui.Button(c, lyricSearchKnobLabel).Clicked() {
+				s.openLyricSearch()
+			}
+		})
+}
+
+// viewLyricKnobs 画右下角浮着的字号与偏移两个旋钮。
 func (s *Shell) viewLyricKnobs(c *ui.Context, snap app.LyricsSnapshot) {
 	lv := &s.lyric
 
