@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"log"
 	"runtime/debug"
+	"slices"
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
@@ -88,7 +89,9 @@ type localLibrary struct {
 	// 这一遍的结果是按老根算的，得再扫一次。
 	again bool
 
-	wake func()
+	// wakes 是**逐窗口**的那一份（见 `App.AddLocalWake`）：一个窗口一条，
+	// 扫完了挨个叫醒。只叫醒主窗口的话，迷你播放器那个窗口不会重画。
+	wakes []func()
 
 	watch DirWatch
 	// stops 是每个根一个停掉动作，换根时挨个调。
@@ -132,7 +135,7 @@ func (a *App) MountLocalMusic(l LocalMusic) {
 	a.mu.Unlock()
 
 	if wake != nil {
-		lib.setWake(wake)
+		_ = lib.addWake(wake)
 	}
 }
 
@@ -221,11 +224,13 @@ func (a *App) DeleteLocalTrack(id string) error {
 		log.Printf("biu: 本地音乐 %s 已经不在盘上了，把它从列表里拿掉", track.Path)
 		err = nil
 	}
-	wake := lib.wake
+	wakes := slices.Clone(lib.wakes)
 	lib.mu.Unlock()
 
-	if wake != nil {
-		wake()
+	for _, wake := range wakes {
+		if wake != nil {
+			wake()
+		}
 	}
 	return err
 }
@@ -255,16 +260,24 @@ func (a *App) SetLocalRoots(roots []string) {
 	lib.setRoots(cleanRoots(roots))
 }
 
-// SetLocalWake 装「库变了，要一帧」的回调。
+// AddLocalWake **再**登记一个「库变了，要一帧」的回调。
 //
-// ⚠️ 这一条对**每个窗口**都要装一次，而这一层只存**一个**：所以界面层传
-// 进来的那个回调必须是「叫醒所有画过这一页的窗口」，不能只是主窗口那个。
-// 迷你窗口不画这一页的时候没关系，但它一旦画了（同一个 Shell 画两条路由）
-// 就得一起醒。实现见 `internal/ui/localmusic.go` 的 `localPage.invalidate`。
-func (a *App) SetLocalWake(fn func()) {
-	if lib := a.localMusicSnapshot(); lib != nil {
-		lib.setWake(fn)
+// ⚠️ 界面层**每个窗口建外壳时都要登记一次**（`Shell.New`）。原来这里是
+// `SetLocalWake`（只存一个），而迷你播放器是第二个窗口——它建外壳时会把主窗口
+// 那一条顶掉，于是**后台扫完本地库之后主窗口再也不刷新**：歌单那儿停在「扫
+// 描中」，而界面上看不出任何异样。
+//
+// 传进来的回调自己也是「挨个叫醒」的（`internal/ui/localmusic.go` 的
+// `localPage.invalidate` 记着每一个画过这一页的窗口），这一层照样挨个调，
+// 两边是同一件事的两半。
+func (a *App) AddLocalWake(fn func()) (remove func()) {
+	lib := a.localMusicSnapshot()
+	if lib == nil {
+		// 本地音乐还没挂上（`MountLocalMusic` 排在 `New` 之前，正常不会这样）。
+		// 给一个空操作而不是 nil：调用方无条件地摘一次。
+		return func() {}
 	}
+	return lib.addWake(fn)
 }
 
 // StartLocalMusicWatch 装上文件监听。**必须在事件循环起来之后调。**
@@ -290,10 +303,32 @@ func (a *App) localMusicSnapshot() *localLibrary {
 // localLibrary
 // ─────────────────────────────────────────────────────────────────────────────
 
-func (l *localLibrary) setWake(fn func()) {
+// addWake 登记一个「库变了，要一帧」的回调，返回摘掉它的那一个。
+//
+// ⚠️ 是**追加**不是替换：一个进程有不止一个窗口（迷你播放器），每个窗口建外壳
+// 时都来登记一次。替换的话第二个窗口建好之后，第一个窗口就再也听不到「库变了」
+// ——本地音乐扫完它在主窗口上不刷新，而界面上看不出任何异样。
+//
+// 🔴 **能摘是必须的**，不是「可选的优化」：迷你窗口是**进/退来回新建外壳**的
+// （界面层的 `newMiniShell`），只登记不摘的话这个列表随开关次数单调增长——每扫一遍
+// 库就多走一趟空转，而多出来的那几条属于**已经收掉的**外壳。
+//
+// 函数值不能比（只能和 nil 比），所以「摘掉自己那一条」靠**下标**：登记时就记下了
+// 它在哪一位，而这一段里只有这一处在改 `wakes`。
+func (l *localLibrary) addWake(fn func()) (remove func()) {
 	l.mu.Lock()
-	l.wake = fn
+	l.wakes = append(l.wakes, fn)
+	i := len(l.wakes) - 1
 	l.mu.Unlock()
+
+	// 可以调任意次：摘掉之后再调是空操作（关窗流程走了两遍不是什么怪事）。
+	return func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		if i < len(l.wakes) {
+			l.wakes = append(l.wakes[:i], l.wakes[i+1:]...)
+		}
+	}
 }
 
 // scan 起一遍扫描，在飞的那一遍没回来之前不重复起。
@@ -395,11 +430,13 @@ func (l *localLibrary) land(res localmusic.Result, gen uint64) {
 	if l.closed || (!void && !again) {
 		l.scanning = false
 	}
-	wake := l.wake
+	wakes := slices.Clone(l.wakes)
 	l.mu.Unlock()
 
-	if wake != nil {
-		wake()
+	for _, wake := range wakes {
+		if wake != nil {
+			wake()
+		}
 	}
 	// ⚠️ **作废的那一支也得看 `again`**：换根会把还在飞的那一遍作废，而正是
 	// 换根把 `again` 置上的。在作废那一支直接 return 的话，`again` 就再也没人
@@ -514,7 +551,7 @@ func (l *localLibrary) drop(id string) {
 func (l *localLibrary) close() {
 	l.mu.Lock()
 	l.closed = true
-	l.wake = nil
+	l.wakes = nil
 	l.mu.Unlock()
 
 	l.stopWatches()

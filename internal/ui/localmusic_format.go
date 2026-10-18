@@ -233,7 +233,7 @@ func (p *localPage) setWake(svc ui.Services) {
 //
 // 🔴 铁律三：投递完必须唤醒，不唤醒就是「结果到了、画面停在旧帧」（实测 0 帧
 // 刷新）；**只唤醒一个窗口就是另一个窗口停在旧帧**，所以是逐窗口通知。
-// 这就是 `app.SetLocalWake` 的注释里说的那个「必须传进来的那个回调」。
+// 这就是 `app.AddLocalWake` 的注释里说的那个「必须传进来的那个回调」。
 func (p *localPage) invalidate() {
 	p.wakeMu.Lock()
 	wakes := slices.Clone(p.wakes)

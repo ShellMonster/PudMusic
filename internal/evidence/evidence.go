@@ -533,7 +533,70 @@ var Items = []Item{
 	{
 		Category: Platform,
 		Spec:     "异步结果**逐窗口**唤醒（只叫醒主窗口的话迷你窗口停在旧内容）",
-		Tests:    []string{"TestEveryWindowThatDrewItGetsWoken", "TestEveryWindowGetsWoken"},
+		Tests: []string{
+			"TestEveryWindowThatDrewItGetsWoken", "TestEveryWindowGetsWoken",
+			// 「改一次状态叫醒**所有**窗口」那一半（`App.AddWake` / `AddLocalWake`
+			// 是挨个叫醒的）。
+			"TestEveryRegisteredWindowIsWokenWhenTheStateChanges",
+			"TestTheLocalLibraryWakesEveryWindowThatRegistered",
+			// 「迷你窗口真的接上了自己那一条」那一半。
+			"TestTheMiniWindowIsWokenWhenTheStateChanges",
+		},
+	},
+	{
+		Category: Platform,
+		Spec:     "迷你播放器：320×100 的透明置顶小窗（43）",
+		Tests: []string{
+			// 窗口那几个开关，含「不许装回 `DisableResize`」——`isMaximized` 恒为真
+			// 的话 `StateKey` 一条都存不下来，用户拖到哪都不会被记住。
+			// ⚠️ 这一条证的是**开关摆对了**，不是「真存下来了」：真落盘要真窗口
+			// （见本节末尾「真机才量得到」那条）。
+			"TestTheMiniWindowIsAtBiuNumbers",
+			"TestTheMiniWindowParksInTheTopRightCorner",
+			// 透明窗口自己给了不透明底——不画的话它在桌面上是隐形的。
+			"TestTheMiniCardCoversTheWindow",
+			// 第二扇窗上铁律二（每帧开头装主题）和铁律四（view 包 Guard）也成立。
+			"TestTheMiniFramesCarryTheChosenTheme",
+			"TestAPanicInsideTheMiniViewLeavesTheProcessAlive",
+		},
+	},
+	{
+		Category: Platform,
+		Spec:     "迷你播放器里能换歌、上下一首（44）、拖进度条（45）、调音量",
+		Tests: []string{
+			"TestTheMiniWindowStepsThroughTheQueue",
+			"TestDraggingTheMiniProgressSeeksOnlyOnRelease",
+			"TestTheMiniVolumeSliderSetsTheVolume",
+			// 小窗里认的是**用户配的那一份**而不是出厂默认值；以及在小窗里按
+			//「切换mini/完整模式」是关掉而不是再开一个。
+			// （设置页写着「窗口在前台时按它就有用」，而小窗是最常停在前面的那一扇。）
+			"TestTheMiniWindowRegistersTheInAppShortcuts",
+			"TestTheMiniWindowUsesTheUsersShortcuts",
+			"TestTheMiniShortcutDoesNotOpenASecondMiniWindow",
+			// 迷你开着时来 biu:// 链接：先让开迷你再跳路由（路由表是主窗口的）。
+			"TestADeepLinkMakesRoomForTheMainWindow",
+			// 关掉迷你只关一扇窗（收尾走共用那一段而不是 `Shell.Close`）。
+			"TestTheMiniShellTeardownIsTheSharedOne",
+		},
+	},
+	{
+		Category: Platform,
+		Spec:     "迷你播放器和主窗口显示同一份播放状态（46），关掉它只关一扇窗",
+		Tests: []string{
+			"TestTheMiniWindowShowsWhatTheMainWindowShows",
+			"TestClosingTheMiniWindowLeavesTheAppPlaying",
+			"TestOnlyOneMiniWindowIsEverBuilt",
+			"TestTheMiniBackButtonGoesBackToTheMainWindow",
+		},
+	},
+	{
+		Category: Platform,
+		Spec:     "迷你播放器这一块本身：装得下 320×100、字没被截、控件身份稳（铁律四）",
+		Tests: []string{
+			"TestTheMiniCardFitsInThreeHundredAndTwentyByOneHundred",
+			"TestTheMiniLabelsAreNotTruncated",
+			"TestTheMiniControlsKeepTheirIdentityWhenTheLabelChanges",
+		},
 	},
 	{
 		Category: Platform,
