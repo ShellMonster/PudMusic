@@ -309,10 +309,15 @@ func TestThePanelFitsInASmallWindowAndScrolls(t *testing.T) {
 	}
 
 	// 滚到底之后它整个在屏幕里。
-	for range 6 {
-		tt.Scroll(450, 300, 0, 600)
-		tt.Frame()
-	}
+	//
+	// ⚠️ **滚到尽头只能等条件**（见 `scrollToEnd`）：判据就是下面那两条断言本身
+	// ——最后一条联想整个落在屏幕里。早一版是「滚 6 下 × 每下 600」，而面板能滚
+	// 多远取决于它有多高（历史那几条折成几行、联想几条），换个 fixture 那个数就
+	// 不够了，于是这一条变成在验「碰巧够」。
+	scrollToEnd(t, tt, 450, 300, "联想面板的末尾", func() bool {
+		r, ok := tt.Find(terms[9])
+		return ok && r.Y >= 0 && r.Y+r.H <= 560
+	})
 	r, ok := tt.Find(terms[9])
 	if !ok {
 		t.Fatalf("滚到底之后画面上没有 %q，文字有 %q", terms[9], tt.Texts())
@@ -338,12 +343,13 @@ func TestReopeningTheOverlayStartsAtTheTop(t *testing.T) {
 	settleSuggestDebounce(s, tt)
 	waitFrames(t, tt, "两档都画出来", func() bool { return tt.HasText(overflowTerms[9]) })
 
-	for range 4 {
-		tt.Scroll(450, 300, 0, 600)
-		tt.Frame()
-	}
+	// ⚠️ **一下就够**：这一条要证明的是「浮层收掉之后位置归零」，滚多重不重要，
+	// 而「位置确实动过」才是它的前提。早一版滚 4 下 × 每下 600，换一个矮一点的
+	// 面板就可能一步滚到底、把「归零」这件事变得量不出来。
+	tt.Scroll(450, 300, 0, 600)
+	tt.Frame()
 	if s.terms.scroll.Y == 0 {
-		t.Fatal("滚了半天位置还是 0——这一条没量到东西（或者面板根本不滚）")
+		t.Fatal("滚了一下位置还是 0——这一条没量到东西（或者面板根本不滚）")
 	}
 
 	tt.Key(0, mygoui.KeyEscape)

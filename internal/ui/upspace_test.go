@@ -105,6 +105,33 @@ func (b *uiExplore) hit(path string) bool {
 	return false
 }
 
+// askedRegionAfter 断的是「**点了那一档之后**打出去的那一趟里，有一趟带着 region」。
+// since 是数到这一条路径上的第几次（`countHit` 那个口径）。
+//
+// ⚠️ **为什么不能问「最后一次」**（`lastQueryOf`）：两档的请求是**同时**在路上的
+// （点下一档的时候上一档那一趟还没回来），而 fixture 记的是**到达**的先后——
+// 那不是发出去的先后，满载时两趟谁先到看调度。实测（探针，同一个进程里塞满 CPU
+// 跑了 200 轮）有 5 轮读到的是**上一档**的 region，于是「等最后一次是 1007」那个
+// 条件永远不成立，10 秒之后保险丝断掉——功能是好的，测试挂在「哪一趟先到」上面。
+func (b *uiExplore) askedRegionAfter(path string, since int, region string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := 0
+	for i, p := range b.paths {
+		if p != path {
+			continue
+		}
+		if n < since {
+			n++
+			continue
+		}
+		if b.queries[i].Get("from_region") == region {
+			return true
+		}
+	}
+	return false
+}
+
 func uiExploreJSON(w http.ResponseWriter, code int, data any) {
 	body := map[string]any{"code": code, "message": "0", "ttl": 1, "data": data}
 	raw, _ := json.Marshal(body)
@@ -904,18 +931,32 @@ func TestTheFavoritesTabReachesTheSecondPage(t *testing.T) {
 	waitFrames(t, tt, "第一页收藏夹到了", func() bool { return len(sp.cols[upTabCollection]) == 20 })
 	tt.Frame()
 
-	// 滚到底 → 哨兵 → 第二页。
-	for range 10 {
-		tt.Scroll(600, 500, 0, 100000)
-		tt.Frame()
-	}
+	// 滚到底 → 哨兵 → 第二页 → **再滚一次**。
+	//
+	// ⚠️ 第二次滚不是多余的：第二页只有 1 个收藏夹，而断的正是**末尾**那一个。
+	// 行数一变，滚动位置就停在旧的高度上，末尾那一个还在画面下面——合成一个
+	// 固定的「滚 10 下」就是在赌第二页在那 10 下之内回来（理由见 `scrollToEnd`）。
+	scrollUpTabToEnd(t, tt, sp, upTabCollection)
 	waitFrames(t, tt, "第二页收藏夹到了", func() bool {
 		return len(sp.cols[upTabCollection]) == 21
 	})
 	tt.Frame()
+	scrollUpTabToEnd(t, tt, sp, upTabCollection)
 	if !showsText(tt, "第 21 个收藏夹") {
 		t.Errorf("第 21 个收藏夹看不到（界面显示 %d 个）", len(sp.cols[upTabCollection]))
 	}
+}
+
+// 滚轮落在 UP 空间那一格上的那一点。
+const upSpaceScrollX, upSpaceScrollY float32 = 600, 500
+
+// scrollUpTabToEnd 滚到 UP 空间某一张 Tab 的列表末尾，**等末尾真的在画面上**。
+//
+// 判据是 `ListState.AtEnd()`——框架自己判「这一帧露出了末尾」用的那一个。
+func scrollUpTabToEnd(t *testing.T, tt *mygoui.Tester, sp *upSpace, tab int) {
+	t.Helper()
+	scrollToEnd(t, tt, upSpaceScrollX, upSpaceScrollY, "这一档列表的末尾",
+		sp.state[tab].AtEnd)
 }
 
 // TestSwitchingTabsBackDoesNotDuplicateTheRows 钉住「切 Tab 不重拉」。
@@ -1069,22 +1110,19 @@ func TestTheListDoesNotPullEveryPageWithoutScrolling(t *testing.T) {
 
 	// 滚到底之后哨兵该接着拉下一页 —— 这条是「限流没有把翻页也一起掐死」。
 	//
-	// ⚠️ **dy 是正数往下滚**（`Tester.Scroll` 把它原样送成 SurfaceEvent，
-	// 仓库里 `paged_test.go:153` 的 `scrollToBottom = 100000` 也是正数）。
-	// 写成负数是往回滚，`Visible()` 一动不动，于是这条测试一直是「等不到」。
+	// ⚠️ **滚到底要等条件**（见 `scrollToEnd`）：数「滚了 10 下」赌的是那 10 下
+	// 之内哨兵已经进画面，而哨兵那一帧进没进画面取决于**行高量出来了没有**。
+	scrollUpTabToEnd(t, tt, sp, upTabDynamic)
+	//
+	// ⚠️ **等的是「第二页回来了」而不是「第二页发出去了」**：`asked` 记的是**请求**
+	// （假 B 站那边记的），而断的 `len(sp.dynItems)` 是**响应**——中间隔着后台那一
+	// 趟 goroutine。只等请求、画一帧就断响应，满载时那一帧走不到网络那一层，于是
+	// 「限流把翻页掐死了」这个结论是假的（`waitFrames` 那段注释写的是同一件事）。
 	//
 	// ⚠️ **滚到底会一直翻到填满为止**（每页 50 条，一屏装不满），所以断言的是
 	// 「**至少多了一页**」而不是「第 2 页」——早一版写死「第 2 页」，结果滚到
 	// 第 6 页，那一句早就被顶出画面了。
-	for range 10 {
-		tt.Scroll(600, 500, 0, 100000)
-		tt.Frame()
-	}
-	waitFrames(t, tt, "哨兵叫起了下一页", func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return asked > 1
-	})
+	waitFrames(t, tt, "哨兵叫起的下一页回来了", func() bool { return len(sp.dynItems) > 50 })
 	tt.Frame()
 	mu.Lock()
 	after := asked

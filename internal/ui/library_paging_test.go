@@ -39,7 +39,7 @@ func TestScrollingToTheEndLoadsTheNextPage(t *testing.T) {
 		t.Fatalf("第一页还没滚到底就发了 %d 次请求——那是③，不是我要验的那条", got)
 	}
 
-	scrollToBottom(t, tt)
+	scrollLibraryToEnd(t, tt, &s.laterPage)
 	waitFrames(t, tt, "滚到底之后自动续拉", func() bool { return rowsShown(&s.laterPage) == 60 })
 	if got := f.callsOf(laterPathAPI); got != 2 {
 		t.Errorf("一共发了 %d 次请求，want 2", got)
@@ -47,7 +47,7 @@ func TestScrollingToTheEndLoadsTheNextPage(t *testing.T) {
 	// 第二页接在第一页**后面**（铁律四：尾部追加），所以滚到底看见的是第二页的
 	// 最后一条。断言「第一页的第一首还在」用不着——虚拟列表只建看得见的几行，
 	// 滚到底之后第一页的行压根不在画面上，拿它当判据会永远红。
-	scrollToBottom(t, tt)
+	scrollLibraryToEnd(t, tt, &s.laterPage)
 	if !tt.HasText("第2页的第20首") {
 		t.Errorf("滚到底没看见第二页的最后一条，文字有 %q", tt.Texts())
 	}
@@ -87,7 +87,7 @@ func TestAFailingPageOffersARetry(t *testing.T) {
 	tt, s := libraryShell(t, f, laterPath)
 	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 40 })
 
-	scrollToBottom(t, tt)
+	scrollLibraryToEnd(t, tt, &s.laterPage)
 	waitFrames(t, tt, "页面停在那一个重试按钮上", func() bool { return tt.HasText("加载失败，点此重试") })
 	if s.laterPage.rows.Status().Loading {
 		t.Error("失败之后还在转圈")
@@ -162,13 +162,18 @@ func TestTheSearchWatchStopsWhenThePageIsLeft(t *testing.T) {
 	}
 }
 
-// scrollToBottom 是「一次滚到底」。
-func scrollToBottom(t *testing.T, tt *mygoui.Tester) {
+// scrollLibraryToEnd 滚到这一页列表的末尾，**等末尾真的在画面上**。
+//
+// ⚠️ 判据是 `rows.state.AtEnd()`——框架自己判「这一帧露出了末尾」用的那一个
+// （`mygo/ui/list.go`），而末尾那一行（含哨兵或页脚那一个）露出来正是下面那些
+// 断言成立的前提。
+//
+// ⚠️ **翻页到了之后要再调一次**：行数变多之后滚动位置停在旧的高度上。早一版是
+// 「滚 4 下」，而那 4 下滚到的是**当时**那份内容的末尾——第二页回来得慢的时候它
+// 就滚了个寂寞（理由见 `scrollToEnd`）。
+func scrollLibraryToEnd(t *testing.T, tt *mygoui.Tester, p *libraryPage) {
 	t.Helper()
-	for range 4 {
-		tt.Scroll(600, 400, 0, 100000)
-		tt.Frame()
-	}
+	scrollToEnd(t, tt, 600, 400, "列表的末尾", p.rows.state.AtEnd)
 }
 
 // TestChangingTheFilterWhilePagesAreFetchingIsNotADataRace 盯快速换条件那条路上的

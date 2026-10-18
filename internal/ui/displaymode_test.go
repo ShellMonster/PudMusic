@@ -805,7 +805,7 @@ func TestTheGridStillOffersARetryOnARealPage(t *testing.T) {
 	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 40 })
 
 	setDisplay(t, s.app, tt, app.DisplayModeCard)
-	scrollToBottom(t, tt)
+	scrollLibraryToEnd(t, tt, &s.laterPage)
 	waitFrames(t, tt, "页面停在那一个重试按钮上", func() bool {
 		return tt.HasText("加载失败，点此重试")
 	})
