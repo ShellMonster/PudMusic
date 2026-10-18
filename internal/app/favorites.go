@@ -12,12 +12,17 @@
 // 落盘走 SettingsStore，所以 schema 版本、原子写、退出前 flush、只读保护
 // 都不用在这里重造（见 settings.go 与 SideMenuCollectionOrder 的注释）。
 //
-// ## 现在还没有接口
+// ## 数据从哪儿来
 //
-// B 站接口在阶段 3 的另一张票里。所以这里给的是**模型和接线**，不是数据：
-// 界面侧栏照画两组、折叠、右键菜单、拖拽排序，条目由谁调 `SetFavorites`
-// 谁负责——服务层接上接口之后调它，测试调它。空列表时两组只画标题和一行
-// 「还没有收藏夹」，不会假装有内容。
+// **「我创建的」那一组现在是真的从 B 站拉的**：头像下拉里「刷新数据」那一项
+// 调的就是 `App.RefreshFavorites`（见 favorites_refresh.go），它翻完
+// `created/list` 之后过 `SetFavorites`。
+//
+// **「我收藏的」那一组仍然没有数据源**——B 站「我收藏了别人的哪些收藏夹」那个
+// 接口本项目还没接，填它的只有测试。那一组的几件事（播放整个收藏夹、取消收藏、
+// 拖拽排序）动的是内存里已经在的那一份，照常能用。
+//
+// 空列表时两组只画标题和一行「还没有收藏夹」，不会假装有内容。
 package app
 
 import (
@@ -74,6 +79,11 @@ type Favorite struct {
 type Favorites struct {
 	mu     sync.Mutex
 	groups [favoriteGroupCount][]Favorite
+
+	// refresh 是「正在重新拉一次」那一趟的状态，跑完攒下的话也算在里面。
+	// 见 favorites_refresh.go——和上面那两组是同一份侧栏收藏夹的两种状态，
+	// 所以它们共用这一把锁，不另起一张包级的表。
+	refresh favRefresh
 }
 
 // Snapshot 返回这一组当前的全部条目，按当前顺序。返回的是拷贝。
