@@ -86,8 +86,18 @@ func TestTheCompactRowsAreShorterThanTheNormalOnes(t *testing.T) {
 
 // TestEveryViewKeepsTheRowsAndThePagingWorking 钉住「换视图不丢东西」。
 //
-// 三档都要有行；**哨兵三档都要在**（末尾那一格 / 那一行是「滚到底就拉下一页」那个
-// 触发器，没有它分页列表永远翻不了页）。
+// 三档都要把六首歌画出来；**拉到底之后哨兵要收起来**（那是 `PagedList.syncList` 的
+// 规矩：留着就是一行空白）。
+//
+// ⚠️ 这里曾经写着「哨兵是『滚到底就拉下一页』那个触发器，没有它分页列表永远翻不了
+// 页」——**那句话是错的**（`afterFrame` 判的是「末尾那一行进没进画面」，而网格里最后
+// 一行本身就是歌的行，滚到底照样命中）。哨兵真正负责的是「还有就拉时的那一句」和
+// **失败之后那个「点此重试」按钮**（`blocked` 闩住的是自动重试，解开它的只有这个
+// 按钮），钉住的是 `TestTheGridOffersTheRetryThatTheListOffers`。
+//
+// ⚠️ 而且这条的哨兵那一半**曾经是空判**：哨兵压根没画过时它也绿。另一条
+// （`TestEveryViewShowsTheSentinelWhileThereIsMore`）钉的是反方向——哨兵**该**在的
+// 时候三档都在。
 func TestEveryViewKeepsTheRowsAndThePagingWorking(t *testing.T) {
 	for _, v := range []View{ViewList, ViewCard, ViewCompact} {
 		t.Run(v.String(), func(t *testing.T) {
@@ -106,6 +116,37 @@ func TestEveryViewKeepsTheRowsAndThePagingWorking(t *testing.T) {
 			// `syncList` 的规矩，留着就是一行空白。
 			if _, ok := spotOf(tt, footerLabel); ok {
 				t.Errorf("拉到底之后末尾哨兵还在：%q", tt.Texts())
+			}
+		})
+	}
+}
+
+// TestEveryViewShowsTheSentinelWhileThereIsMore 钉住「哨兵该在的时候三档都在」。
+//
+// `SwitchView.SetFooter` 是**扇出到两份**的那一处，漏了哪一半只有这一条抓得到：
+// 下面那些要么只量列表那半边（`PagedList` 的三重保障问的行数是按摆法算的，哨兵在
+// 不在都翻得了），要么直接对 `*Grid` 调 `SetFooter` 绕过了这一层。
+//
+// ⚠️ 这是评审那一轮查出来的：**把 `SetFooter` 改成只装列表那半边，整包 18 个包全
+// 绿**——多选（`TestTheBatchOpsStillWorkInEveryView` 走的是另一条出口）没红，翻页
+// 没红，重试那条红的是 `Grid` 那半边而不是这里。
+func TestEveryViewShowsTheSentinelWhileThereIsMore(t *testing.T) {
+	const marker = "还有更多"
+	for _, v := range []View{ViewList, ViewCard, ViewCompact} {
+		t.Run(v.String(), func(t *testing.T) {
+			sv := NewSwitchView(newCache(t), Actions{})
+			sv.SetView(v)
+			sv.SetSongs(pageSongs(1, 4))
+			// 直接装一个自己的哨兵，绕开 `PagedList.syncList` 的「还有没有」——这一条
+			// 量的是**扇出**（三档是不是都收到了），不是翻页列表的规矩。
+			sv.SetFooter(func(c *ui.Context) { ui.Text(c, marker) })
+
+			tt := ui.NewTester(sv.View, testerW, testerH)
+			tt.Frame()
+
+			if _, ok := spotOf(tt, marker); !ok {
+				t.Errorf("%s 那一档看不见哨兵（%q）——`SwitchView.SetFooter` 没有扇出到"+
+					"这一半。文字有 %q", v, marker, tt.Texts())
 			}
 		})
 	}

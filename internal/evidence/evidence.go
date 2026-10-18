@@ -410,7 +410,10 @@ var Items = []Item{
 		//
 		// ⚠️ 第 3 条和第 4 条**是两件事**，别合成一句「网格没哨兵就翻不了页」——那句话
 		// 是错的（翻页的判据是「末尾那一行进没进画面」，而网格里最后一行就是歌的行）。
-		// 把网格的哨兵拿掉，第 3 条那两条照样绿，只有第 4 条会红。
+		// 把网格的哨兵拿掉，第 3 条那两条照样绿，只有第 4 条会红（外加
+		// `TestEveryViewShowsTheSentinelWhileThereIsMore`——它钉的是 `SetFooter`
+		// 扇出到两份那一处，其余那些要么只量列表那半边、要么直接对 `*Grid` 调
+		// `SetFooter` 绕过了这一层）。
 		Spec: "「数据显示样式」在三档之间换：每一页都跟着换、紧凑行高真的更矮、网格那一档照样翻页，翻页失败了也还有重试",
 		Tests: []string{
 			"TestEveryPageFollowsTheDisplayStyleSetting",
@@ -418,6 +421,7 @@ var Items = []Item{
 			"TestTheGridCountsTheSentinelAsARow",
 			"TestTheGridKeepsPagingWorking",
 			"TestTheGridOffersTheRetryThatTheListOffers",
+			"TestEveryViewShowsTheSentinelWhileThereIsMore",
 			"TestTheGridStillPagesOnARealPage",
 			"TestSwitchingViewsKeepsTheSongs",
 			// 多选接线要装到**两份**控件上：只装列表那半边的话网格那一档一格勾选框都
