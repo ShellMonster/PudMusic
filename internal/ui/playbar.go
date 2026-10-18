@@ -153,22 +153,44 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 	})
 }
 
-// viewTrackMeta 是歌名下面那一行：UP 名（点它进他的空间）、收藏、下载。
+// viewTrackMeta 是歌名下面那一行：UP 名（点它进他的空间）、分集、赞、收藏、下载。
 //
 // **摆在这里而不是右边那一排**：右边已经放不下第四个控件了（见 `viewPlayBar`
 // 里那段注释——760 宽时歌名只剩一个字一行，而**挤没了之后界面看不出坏了**）。
 // 第二行是空的，歌名那一行的宽度也不被它吃（上面那段）。
 //
+// 「分集」摆在赞/收藏/下载**前面**，照的是 Biu 播放条上的次序
+// （`playbar/left/index.tsx` 的 `{hasMultiPart && <PageListDrawer/>}` 紧跟着
+// `MusicFavButton` / `MusicThumb`）。
+//
+// ⚠️ **这一行是播放条上唯一还放得下一个键的地方，而这一条是量出来的、不是推的**：
+// 先试过摆在中间那一列的第二行（挨着播放模式，见 `viewProgress`），量下来它要拿
+// 歌名和进度条的钱——在窗口下限 900 上歌名从 208 掉到 182、进度条从 94 掉到 80，
+// 而摆在这儿两样一分不丢（`partdrawer_test.go` 的
+// `TestThePartsKeyCostsNothingElseOnThePlayBar` 把这个量钉成断言：同一首歌、同一
+// 块屏幕，单 P 和多 P 两档的播放条量出来**一样宽**）。
+//
+// ⚠️ **分集那个键是逐帧问出来的**（`viewPartButton`），单 P 的稿子不摆——所以这一行
+// 的宽度是变的，而上面那几段注释里量出来的富余是按**摆满了**算的。
+//
 // 没有歌时这一行一格都不画：给一个空的播放条摆两个点不动的键，比不摆更让人
 // 以为它们坏了。
 func (s *Shell) viewTrackMeta(c *ui.Context, st app.State, t *ui.Theme) {
 	if !st.HasTrack {
+		// ⚠️ **开着的分集浮层要收掉**：这一行的其余部分一格都不画，而
+		// `viewPartButton`（连同它开头那句「没有歌就收掉」）在这一行里面——不在这儿
+		// 也收一遍的话，「歌放完了 / 用户按了停止」之后 `partOpen` 一直留着 true，
+		// 等下一首多 P 的歌放起来，浮层**自己弹出来**（用户什么都没按）。
+		// 用户动作和 A12 那条不是一回事：换歌时 `viewPartButton` 每一帧都在跑，
+		// 收得住；**没有歌**的那一段它压根没被调到。
+		s.partOpen = false
 		return
 	}
 	ui.Row(c).Gap(metaGap).AlignItems(ui.Center).Children(func() {
 		if st.Artist != "" {
 			s.viewArtist(c, st, t)
 		}
+		s.viewPartButton(c, st)
 		s.viewLikeStar(c, st)
 		s.viewFavButton(c, st)
 		s.viewDownloadButton(c, st)
@@ -550,6 +572,26 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 		// 是**上面那行**（上一首/播放/下一首）定下来的。这一行到那之前一直
 		// 有富余，所以按钮挂在这儿是从富余里出的，不从歌名里出。
 		s.viewPlayMode(c, st)
+
+		// 「分集」那个键也挂在这儿，挨着播放模式。**摆在这一行而不是歌名下面
+		// 那一行，是量出来的**，不是挑的：
+		//
+		// 歌名下面那一行（`viewTrackMeta`）在窗口最小宽（`WindowOptions` 的
+		// `MinWidth` 是 900）上**已经排满了**：UP 名 + 赞 + 收藏 + 下载四个键的
+		// 最后一个实测到 x=329，而左边那一块的右边界在 320（中间列从 332 起）——
+		// 它已经溢出 9。再加一个 44 宽的键（加一道 8 的缝是 52），那一个就压到
+		// 中间列第二行**左边那个位置时间**上（实测它在 x=332..380），而这一行和
+		// 中间列第二行**是同一个高度带**（y 417..432 对 425..439）——于是两个控件
+		// 叠在一起。那是看得见的坏，而这一行的富余按 `Grow` 只够让出 9。
+		//
+		// 这一行不一样：中间列的宽是上面那行定死的（276），这一行到那之前有 94
+		// 的富余。加一个 44 的键（连缝 54）之后**进度条从 94 变成 40**——只动一个
+		// `Grow(1)` 的东西，不叠、不溢出、不动歌名。
+		//
+		// 摆在这儿也和 Biu 那一排对得上：它的中间列是
+		// `MusicPlayMode + MusicPlayControl + OpenPlaylistDrawerButton`
+		//（`index.tsx:396-399`，见 fullplayer.go 里那段注释），两个都是「这一排上的
+		// 一个控件」。
 	})
 }
 

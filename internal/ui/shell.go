@@ -190,6 +190,17 @@ type Shell struct {
 	// queueList.Key 每帧都要读它，所以它和 rows 数得对上（见 queue_drawer.go）。
 	queueRows []queueRow
 
+	// 播放条上那个分集抽屉的一摊。**同样只由 view 在主线程上读写**。
+	//
+	// partOpen 不进设置，理由和 drawerOpen 一样：抽屉是「我现在要看分集」这一下
+	// 的事（而 Biu 那边是 Popover 的 `isOpen`，也不持久化）。
+	partOpen bool
+	// partList 是浮层里那一列的列表状态，partRows 是这一帧要画的那几行。
+	// 两个字段和 `s.full` 那一组（fullplayer.go）同义不同份——两处是两个浮层，
+	// 各自记着自己滚到哪儿；行的**内容**是同一份（partRowsFor）。
+	partList ui.ListState
+	partRows []partRow
+
 	// 顶栏这一摊。**同样只由 view 在主线程上读写**。
 	//
 	// searchFocused 是搜索框有没有焦点，顶栏用它染边框。浮层**不**靠它开
