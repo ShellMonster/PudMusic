@@ -889,8 +889,28 @@ var Items = []Item{
 	},
 }
 
-// ⚠️ 歌词搜索的**界面**那五条证据（500ms 防抖走假时钟、铁律四的行键、失败之后不许
-// 每帧重发 + 重试按钮真的再发一次、预览里没有歌词时说的是「未找到歌词内容」、以及
-// 走通一遍的流程）跟着**那两个弹窗**一起走，不在这一票里——它们钉的是 `internal/ui`
-// 那一半的行为，而那一半是拆出去的下一票。台账要求每一条写出来的测试真的存在，
-// 所以它们不能先写在这儿等（`TestEveryPieceOfEvidenceReallyExists` 会红）。
+// ⚠️ **歌词搜索的界面不在这一票里，它在 BMG-66。**
+//
+// 这一票按人批准的拆法只交付**服务层 + 应用层**（`service/lyrics/search.go`、
+// `app/lyrics_search.go`、挂载、台账四条）；界面上那两个弹窗
+// （`internal/ui/lyricssearch.go` + 它的测试）是拆出去的**下一票 BMG-66**
+//「歌词搜索与缓存：搜索与预览两个弹窗」，排在 #BMG-33 之后。
+//
+// 所以下面这五条证据跟着界面走，**不在这一票里**：
+//
+//	假时钟  500ms 防抖：假钟推、不真等；每敲一个字重新起算；回车不等
+//	        （TestTheKeywordIsDebouncedBy500ms、TestEnterDoesNotWaitForTheDebounce）
+//	负路径  失败之后不许每帧重发、重试按钮真的再发一次请求、空列表说的是「没搜到」
+//	        （TestAFailedSearchSaysItIsAFailureAndDoesNotFireAgain、
+//	          TestTheRetryButtonSearchesThatWordAgain、
+//	          TestAFailedSearchOffersARetryAndSaysItIsAFailure）
+//	负路径  预览里没有歌词时说的是「未找到歌词内容」而不是「网络不通」或一片空白，
+//	        「采用歌词」禁着（TestThePreviewSaysItIsNotAFetchFailure）
+//	负路径  铁律四：候选表的行键是候选的 ID、不是下标
+//	        （TestTheRowKeyFollowsTheSongAndNotItsPlace）
+//	播放    走通一遍（TestTheSearchDialogListsBothSourcesAndStartsFromTheSongOnScreen、
+//	        TestSwitchingTheTabSearchesThatSourceOnItsOwn、
+//	        TestPreviewThenAdoptPutsTheLyricsOnScreen、TestNoSourcesMeansTheSearchDialogNeverOpens）
+//
+// 台账要求每一条写出来的测试**真的存在**，所以它们不能先写在这儿等
+//（`TestEveryPieceOfEvidenceReallyExists` 会红）。BMG-66 落地时照着这份名单加回去。
