@@ -6,7 +6,13 @@ _research/
 docs/research/
 .claude/
 
-# 更新签名私钥。**它正常住在 ~/.config/biu-mygo/，不在仓库里**（见 scripts/release.sh），
-# 但 `mygo keygen` 忘了给 -o 就会写在当前目录——一行在这儿兜着，因为私钥一旦进了
-# 历史就等于必须轮换密钥，而轮换会让已经装出去的老版本验不过之后的每一个版本。
+# 更新签名私钥。
+#
+# 它**正常不住在仓库里**：`mygo keygen` 的 -o 默认值是用户配置目录下的
+# mygo/update-keys，本项目实际用的是 ~/.config/biu-mygo/（见 scripts/release.sh）。
+# 这一行是**兜底**，管的是那两种把私钥弄进来的操作：在仓库里跑 `mygo keygen -o .`，
+# 或者手动把 mygo-update.key 拷进来。
+#
+# 为什么值得留着：私钥一旦进了 git 历史就等于必须轮换密钥，而轮换会让已经装出去的
+# 老版本验不过之后的每一个版本——那时只能让所有人重新下载安装。
 mygo-update.key

@@ -195,7 +195,10 @@ notes="$(changelog_section "$version")"
 
 # 1.4 标签。**已经发过的版本不要重发**：装出去的老版本会以为有更新，清单里的
 # 签名和文件却还是上一次那套。已经推到远端且**指向 HEAD** 的标签放行——那是上
-# 一次跑到一半留下的，重跑要能接着走完。
+# 一次跑到一半留下的。
+#
+# 「接着走完」这一半在第 5 步：那里的标签推得出去、也有删草稿重挂的续跑路径。
+# 这里只管住一件事——**别把标签打在和已有标签不同的提交上**，那是重发。
 head_sha="$(git rev-parse HEAD)"
 if tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null)"; then
   [ "$tag_sha" = "$head_sha" ] ||
@@ -339,6 +342,31 @@ else
   git tag "$tag" HEAD
 fi
 git push origin "$tag"
+
+# 重跑要先清掉上一次留下的草稿：`gh release create` 在同一个 tag 上已有 release 时
+# 直接失败（没有 --clobber，那是 gh release upload 的选项），而标签在上面已经推上去了
+# ——于是第 1.4 步说的「重跑要能接着走完」在 release 这一半原本是假的。
+#
+# 只删**草稿**：已发布的 release 是发出去过的东西，删它等于撤一次发版，那不是
+# 「重跑」而是另一个决定，脚本没有资格替人做。
+existing_is_draft() { gh release view "$tag" --repo "$publish_repo" --json isDraft -q .isDraft 2>/dev/null; }
+
+if state="$(existing_is_draft)"; then
+  case "$state" in
+    true)
+      say "删掉上一次留下的草稿 Release $tag，重挂一遍"
+      gh release delete "$tag" --repo "$publish_repo" --yes
+      ;;
+    false)
+      die "$tag 的 Release 已经**发布**了，不再重挂。
+  这一版已经发出去过，重挂会让装着的用户拿到一份对不上的更新。
+  要改这一版就把 mygo.json 的 version 升到下一个版本。"
+      ;;
+    *)
+      die "查不到 $tag 的 Release 状态（gh 报的是 $state）。"
+      ;;
+  esac
+fi
 
 # --verify-tag：标签已经推上去了，别让 gh 再建一个。
 # --draft：**不正式发布**。草稿里的资产匿名取不到，应用看不到新版本——这是有意的，

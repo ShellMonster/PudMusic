@@ -53,8 +53,9 @@
 ### 播放
 
 - **B 站在线取流播放**，音质可选：自动 / 无损 / 320K / 128K / 64K。
-- **本地解码播放**：FLAC、MP3、WAV、AIFF、AAC、M4A（Windows 上解不了后面三个，
-  见 README）。
+- **本地解码播放**：FLAC、MP3、WAV、AIFF、AAC、M4A。其中 **AAC 与 M4A 在 Windows 上
+  解不了**（还有 ALAC / M4S，README「已知边界」一节逐条写着；Windows 版目前能播的是
+  无损 FLAC、MP3、WAV、AIFF）。
 - **保调倍速**：改速度不改音高。
 - 播放模式四档：顺序 / 循环 / 随机 / 单曲。
 - 满屏播放器，带**频谱**（radix-2 FFT，挂在变速层之前取源帧）。
