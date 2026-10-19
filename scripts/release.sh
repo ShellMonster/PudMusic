@@ -150,8 +150,10 @@ visibility="$(gh repo view "$publish_repo" --json visibility -q .visibility 2>/d
 case "$visibility" in
   PUBLIC) ;;
   "") die "取不到仓库 $publish_repo 的可见性——仓库名写错了，或者 gh 没权限。" ;;
-  *) die "$publish_repo 是$visibility仓库，release 资产匿名取不到。
+  PRIVATE|INTERNAL)
+    die "$publish_repo 是私有仓库，release 资产匿名取不到。
   更新源要放在**公开**仓库里（源码可以继续私有，那是常见做法）。" ;;
+  *) die "$publish_repo 的可见性是 $visibility，认不出来。GitHub 改了取值？" ;;
 esac
 
 gh auth status >/dev/null 2>&1 || die "gh 没登录，跑一次 gh auth login。"
@@ -170,7 +172,7 @@ notes="$(changelog_section "$version")"
 head_sha="$(git rev-parse HEAD)"
 if tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null)"; then
   [ "$tag_sha" = "$head_sha" ] ||
-    die "本地标签 $tag 指向 $tag_sha，不是 HEAD（$head_sha）。
+    die "本地标签 $tag 指向 ${tag_sha}，不是 HEAD（${head_sha}）。
   发版标签要打在发出去的那一份代码上。git tag -f $tag $head_sha 之后再跑。"
 else
   if remote_sha="$(git ls-remote --tags origin "refs/tags/$tag" 2>/dev/null | head -1 | cut -f1)"; then
@@ -178,7 +180,7 @@ else
   fi
   if [ -n "$remote_sha" ]; then
     [ "$remote_sha" = "$head_sha" ] ||
-      die "远端已经有标签 $tag，它指向 $remote_sha，不是 HEAD（$head_sha）。
+      die "远端已经有标签 ${tag}，它指向 ${remote_sha}，不是 HEAD（${head_sha}）。
   这一版看起来已经发过了，而代码又动了。要么回到标签那一个提交，要么把
   mygo.json 的 version 升到下一个版本。"
     git fetch --tags --quiet
@@ -249,7 +251,7 @@ assets=()
 for t in "${targets[@]}"; do
   target="${t/\//-}"
   dir="build/$target"
-  [ -d "$dir" ] || die "没有产物目录 $dir——第 4 步说它打完了，这个目录却没有。"
+  [ -d "$dir" ] || die "没有产物目录 ${dir}——第 4 步说它打完了，这个目录却没有。"
 
   manifest="$dir/update-$target.json"
   [ -f "$manifest" ] || die "$target 没有 update-$target.json——更新包没打出来。
@@ -263,7 +265,7 @@ for t in "${targets[@]}"; do
   别把这种包发出去：应用会装一个校验不过的更新。"
   manifest_version="$(json_file_get "$manifest" version)"
   [ "$manifest_version" = "$version" ] ||
-    die "$target 的清单里版本是 $manifest_version，不是 $version。"
+    die "$target 的清单里版本是 ${manifest_version}，不是 ${version}。"
 
   while IFS= read -r f; do
     [ -n "$f" ] && assets+=("$f")
