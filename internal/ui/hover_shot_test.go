@@ -88,6 +88,13 @@ func TestRenderHoverShots(t *testing.T) {
 			homeFrame(tt)
 			hoverRow(t, tt, songName(homeTabs[0], 3))
 			save(t, dir, "34-"+name+"-紧凑-行hover.png", tt)
+
+			// ── 稍后再看：另一套行（自己画的，多两列）和另一套表头 ────────────
+			//
+			// ⚠️ **这一页必须单独存**：首页那一族走的是 `widgets/list` 的卡片，而这一页的
+			// 行是页面自己画的（多播放量 / 加入时间两列），表头也是另一份规格——存图存的
+			// 正是「另一套接上了没有」，而那种错在看首页那张图时一点也看不出来。
+			shotLaterPage(t, dir, name, dark)
 		})
 	}
 }
@@ -113,4 +120,28 @@ func hoverRow(t *testing.T, tt *ui.Tester, title string) {
 	tt.Frame()
 	tt.Advance(hover.Fade)
 	tt.Frame()
+}
+
+// shotLaterPage 存「稍后再看」那一页的两张：平时（看表头那五列）和 hover 一行。
+//
+// 用的夹具是 `libFake`（内存假 B 站），一个真接口都没打。
+func shotLaterPage(t *testing.T, dir, name string, dark bool) {
+	t.Helper()
+	f := newLibFake(t).withLater(1, 6, "甲曲", "乙曲", "丙曲", "丁曲", "戊曲", "己曲")
+	b := newTestShell(t,
+		systemIsDark(dark),
+		mounted(func(_ *testing.T, a *app.App) { a.MountLibrary(biliForTest(t, f)) }),
+		withClock(newFakeClock(now)))
+	s, tt := b.s, b.tt
+	s.navigate(laterPath)
+	waitFrames(t, tt, "稍后再看第一页", func() bool {
+		return rowsShown(&s.laterPage) == 6
+	})
+
+	tt.Move(1180, 770)
+	homeFrame(tt)
+	save(t, dir, "35-"+name+"-稍后再看-表头.png", tt)
+
+	hoverRow(t, tt, "丙曲")
+	save(t, dir, "36-"+name+"-稍后再看-行hover.png", tt)
 }
