@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -175,7 +176,31 @@ func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int) {
 	// 🔴 设置里的「数据显示样式」在这一帧生效（`s.displayView` 的注释写了为什么
 	// 每帧都要调）。三个 Tab 各调各的：三份列表各记着自己停在哪，切 Tab 不重置。
 	t.list.SetView(s.displayView())
+	// ⚠️ **表头在列表外面**（`rowheader.go` 文件头）：它是 `View` 的兄弟，所以列表往
+	// 下滚它不动，宽屏下滚到右边列名也还在。
+	//
+	// 这一处自己给规格而不用 `PagedList.Header`：「用户」那一档的行没有时长那一列
+	// （理由见 `searchHeaderSpec`）。
+	if v := t.list.Layout(); v != list.ViewCard {
+		list.Header(c, searchHeaderSpec(tab, v,
+			t.list.List().HasSelection(), "search:header:"+strconv.Itoa(tab)))
+	}
 	t.list.View(c)
+}
+
+// searchHeaderSpec 是这一档 Tab 的表头。
+//
+// ⚠️ **「用户」那一档没有「时长」**：那一档的行是「序号 / 头像 / 昵称 / 个性签名」
+// （见 `searchUserMusic` 的注释），`list.Music.Duration` 是零值，于是行里那一列**根
+// 本不画**——表头上还写着「时长」的话，用户读到的是一列空的表头，而空表头比没有表头更
+// 难解释（看不出那是没数据还是坏了）。
+func searchHeaderSpec(tab int, v list.View, check bool, key string) list.HeaderSpec {
+	spec := list.CardHeaderSpec(v, check, key)
+	if tab == searchTabUser {
+		// 去掉最后那一列（「时长」）——`CardHeaderSpec` 的顺序是固定的，见它自己。
+		spec.Cols = spec.Cols[:len(spec.Cols)-1]
+	}
+	return spec
 }
 
 // searchSortLabels 是 tab 那一档的排序标签，按 Biu 的顺序。

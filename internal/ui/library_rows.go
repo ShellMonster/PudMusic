@@ -283,8 +283,8 @@ func (p *pagedRows) SetView(v list.View) {
 	p.layout = v
 }
 
-// Layout 返回此刻的摆法。页面画表头时照它决定要不要摆（网格里没有表头，见
-// `laterHeader` 那一处）。
+// Layout 返回此刻的摆法。页面画表头时照它决定要不要摆（网格里没有表头，理由见
+// `rowheader.go` 文件头）。
 func (p *pagedRows) Layout() list.View { return p.layout }
 
 // SetCell 装网格那一档的画法（页面在 init 里给）。
@@ -710,11 +710,13 @@ func (p *pagedRows) isPlaying(m libraryRow) bool {
 	return p.acts.IsPlaying(m.Item)
 }
 
-// viewPlayingMark 是「这一行正在放」那个标记，画在标题那一列的最下面。
+// viewPlayingMark 是「这一格正在放」那个标记，画在副标题那一行的最下面。
 //
-// ⚠️ **画在 Grow 那一列里，而不是当成新的一列**：这两页有表头，而表头上
-// 只有「# 标题 播放量 加入时间 时长」——多一格内容表头就对不上，而对不上的
-// 表头在界面上不像坏了。
+// ⚠️ **列表那一档已经不用它了**：序号位置换成了跳动的波形（上游
+// `music-list-item` 那一套，见 `rowheader.go` 的 `viewRowIndex`），而**网格那一档
+// 还留着**——格子里没有序号那一列，副标题那一行本来就是「UP 名 + 时长」，把时长换成
+// 「正在放」正好是同一件事（换掉而不是加在后面，理由见 `widgets/list/grid.go`）。
+// 两种说法不是两种意思：网格那一句和波形认的是同一个 `hover.PlayingMark`。
 //
 // ⚠️ **无障碍标签带上了歌名**：读屏软件读的是标签而不是画出来的字，光说
 // 「正在播放」的话用户听到的是一句没头没尾的话。顺带它让这一行在 Tester 里

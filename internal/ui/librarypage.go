@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
@@ -236,38 +237,66 @@ const (
 	compactColViewedAt = 118
 )
 
-// libraryRowHead 是这两页的**行首**：`#` + 封面 + 标题 + UP 名，剩下右边那几列
-// 由各自的页面接上去。
+// rowFace 是这一行字该用的两个颜色 + 「正在放」那一档。两页共用（理由见
+// `widgets/list/card.go` 的 `rowColors`）：选中跟着光标走、正在放跟着声音走，是两件
+// 不同的事，分成两档而不是一种底色。
+type rowFace struct {
+	playing    bool
+	title, own ui.Color
+}
+
+// libraryRowFace 算这一档。两页和它们的网格格子都走这一个。
+func libraryRowFace(t *ui.Theme, selected, playing bool) rowFace {
+	switch {
+	case selected:
+		// 主色底上的字。UP 名那一块压到 0.75：主色底太亮时它比正文色更站得住，也还是
+		// 「次要信息」的样子。
+		return rowFace{title: t.AccentText, own: t.AccentText.Alpha(0.75)}
+	case playing:
+		return rowFace{playing: true, title: t.Accent, own: t.TextMuted}
+	default:
+		return rowFace{title: t.Text, own: t.TextMuted}
+	}
+}
+
+// viewLibraryRowHead 画这两页**行首**那几块：序号（正在放的那一行是跳动的波形）、
+// 封面（上面压着 hover 反馈）、标题 + UP 名。剩下右边那几列由各自的页面接上去。
+//
+// ⚠️ **它只画那几块、不建盒子**：调用方那一行已经有 `Gap` / `Padding` 了，这里再套一
+// 层会把内边距算两遍（实测序号那一列整整右移 8，而两边都「看起来对」）。
 //
 // ⚠️ 只抽这一段，不抽整行：两页右边那几列**布局不一样**（稍后再看是播放量 /
-// 加入时间 / 时长，历史记录是播放进度 / 观看时间），整行合起来会变成一串
-// if-else。行首是完全一样的，抽出来两页就不可能画得不一样。
+// 加入时间 / 时长，历史记录是播放进度 / 观看时间），整行合起来会变成一串 if-else。
+// 行首是完全一样的，抽出来两页就不可能画得不一样。
 //
-// ⚠️ 不给这一段设固定高度：歌名折到第二行时整张列表的行高就不一样了，那正是变高
-// 行存在的理由（见 `widgets/list/card.go` 顶上那段）。
-func libraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, cover *imgcache.Cache) ui.Element {
-	t := c.Theme()
-	// 选中那一行的底色由 `ui.List` 自己刷（主色底），字色得跟着换——不换就是主色
-	// 底上的深色字，深色主题下直接看不见。
-	titleColor, ownerColor := t.Text, t.TextMuted
-	if r.Selected() {
-		titleColor, ownerColor = t.AccentText, t.AccentText.Alpha(0.75)
-	}
-	return ui.Row(c).Grow(1).AlignSelf(ui.Stretch).Gap(rowGap).Padding(listPadY, listPadX).
-		Children(func() {
-			ui.Text(c, rowNumber(r.Index)).Width(colIndex).TextAlign(ui.End).
-				FontSize(12).TextColor(t.TextMuted).MaxLines(1)
-			// 封面四态由 imgcache 画（空地址画空框，不画「失败」）。
-			imgcache.View(c, cover, m.Cover, coverSide, coverSide)
-			ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).Children(func() {
-				ui.Text(c, m.Title).FontSize(14).LineHeight(1.5).
-					TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
-				if m.Owner != "" {
-					ui.Text(c, m.Owner).FontSize(12).LineHeight(1).
-						TextColor(ownerColor).MaxLines(1).Ellipsis("…")
-				}
-			})
-		})
+// ⚠️ **mt / face / onRow / play 都是外面给进来的**，这一段自己不问：
+//
+//   - mt 是那一档的行内尺寸（`metricsOf`）——和行右边那几列必须是同一份；
+//   - face 是按「选中 / 正在放」判好的颜色（`libraryRowFace`）；
+//   - onRow 是**指针在不在这行上**，而它问的是**外层那个 `ui.Row`**（这一段画在它
+//     里面），在这里问自己只会得到 false（同 `widgets/list/card.go` 里「`Hovered` 要在
+//     `Children` 之前问」那一段）；
+//   - play 是按封面上那个三角做的事。
+//
+// ⚠️ 不给歌名那块设固定高度：它折到第二行时整张列表的行高就不一样了，那正是变高行
+// 存在的理由（见 `widgets/list/card.go` 顶上那段）。
+func viewLibraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, cover *imgcache.Cache,
+	mt listMetrics, face rowFace, onRow bool, play func()) {
+	// 序号；正在放的那一行换成一段跳动的波形（上游 `music-list-item`）。
+	viewRowIndex(c, r.Index, face.playing, face.title, m.ID, m.Title, mt.index)
+
+	// 封面，四态由 imgcache 画（空地址画空框，不画「失败」），上面压着 hover 反馈：
+	// 压暗 + 一个 20px 的白色播放三角。
+	hover.RowCover(c, cover, m.Cover, mt.cover, onRow, m.Title, play)
+
+	ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).Children(func() {
+		ui.Text(c, m.Title).FontSize(mt.titleSize).LineHeight(1.5).
+			TextColor(face.title).MaxLines(mt.titleLines).Ellipsis("…")
+		if m.Owner != "" {
+			ui.Text(c, m.Owner).FontSize(12).LineHeight(1).
+				TextColor(face.own).MaxLines(1).Ellipsis("…")
+		}
+	})
 }
 
 // libraryMenuItems 是两页共用的那三项菜单。

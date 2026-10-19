@@ -418,6 +418,12 @@ func (p *localPage) viewBody(c *ui.Context, t *ui.Theme, st app.LocalMusicState)
 		// 网格 / 紧凑 / 列表在它里面分发（`widgets/list/switch.go`）。
 		p.cards.SetView(p.viewStyle())
 		p.cards.SetSongs(p.cardsOf())
+		// ⚠️ **表头在列表外面**（`rowheader.go` 文件头）：它是 `View` 的兄弟，所以列表
+		// 往下滚它不动。网格那一档不摆（判断在 `list.SwitchView.Header` 里）。
+		//
+		// 表格那一档走的是上面那个 `case`（`ui.Table` 自带表头，`localColumns`），所以
+		// 走不到这里来。
+		p.cards.Header(c, "localmusic:header")
 		p.cards.View(c)
 	}
 }
@@ -528,6 +534,9 @@ func (p *localPage) cardsOf() []list.Music {
 			Title:    tr.Title,
 			Duration: tr.Duration,
 			Item:     app.LocalItem(tr.Path),
+			// ⚠️ **没有 View，而且永远不会有**：文件没有播放量。B 站那份数说的是
+			// 「多少人在 B 站听过」，给本地文件挂上等于编一个数。所以网格卡片封面
+			// 底部那一条渐变上**左半边不画**（理由见 `list.Music.View`）。
 		}
 		if !tr.Playable() {
 			m.Owner = "这个格式我们放不了"

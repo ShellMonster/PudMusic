@@ -47,7 +47,9 @@ func (s *Shell) fetchVideos(ctx context.Context, mid int64, page int) (list.Page
 			Title:    v.Title,
 			Cover:    v.Cover,
 			Duration: parseDurationText(v.Duration),
-			Item:     spaceVideoItem(v, mid),
+			// 播放量：网格卡片封面底部那一条渐变上画的是它（`Music.View`）。
+			View: v.Play,
+			Item: spaceVideoItem(v, mid),
 		})
 	}
 	return list.Page{Songs: songs, HasMore: pg.HasMore}, nil

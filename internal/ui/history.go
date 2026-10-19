@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
 )
@@ -108,7 +108,10 @@ func historyRowOf(it app.LibraryItem) libraryRow {
 			Cover:    it.Cover,
 			Owner:    it.Owner,
 			Duration: it.Duration,
-			Item:     it.Item,
+			// ⚠️ **没有 View**：历史记录那个接口不给播放量（`app.LibraryItem.View`
+			// 的注释写着「只有稍后再看有」）。所以网格卡片封面底部那一条渐变上
+			// **左半边不画**——而这不是「忘了填」，是这个接口没有。
+			Item: it.Item,
 		},
 		Progress: it.Progress,
 		ViewedAt: it.ViewedAt,
@@ -149,9 +152,7 @@ func (s *Shell) viewHistory(c *ui.Context, _ *ui.Route) {
 
 			// 表头**只在列表 / 紧凑两档**摆，理由见 later.go 那一处。
 			p.rows.SetView(s.displayView())
-			if !p.rows.isGrid() {
-				historyHeader(c)
-			}
+			viewLibraryHeader(c, p.rows, historyHeaderSpec, historyHeaderKey)
 			p.rows.View(c)
 		})
 }
@@ -175,57 +176,24 @@ func (s *Shell) viewReportHistory(c *ui.Context, on, ro bool) {
 	s.applySetting("记录播放历史", func(cur *app.Settings) { cur.ReportPlayHistory = on })
 }
 
-// historyHeader 是那一行表头。抄上游 `pages/history/header.tsx`。
-func historyHeader(c *ui.Context) {
-	t := c.Theme()
-	ui.Row(c).Key("history:header").FillWidth().Gap(rowGap).Padding(listPadY, listPadX).
-		Children(func() {
-			ui.Text(c, "#").Width(colIndex).TextAlign(ui.End).FontSize(12).TextColor(t.TextMuted)
-			ui.Text(c, "标题").Grow(1).FontSize(12).TextColor(t.TextMuted)
-			ui.Text(c, "播放进度").Width(colProgress).TextAlign(ui.End).
-				FontSize(12).TextColor(t.TextMuted)
-			ui.Text(c, "观看时间").Width(colViewedAt).TextAlign(ui.End).
-				FontSize(12).TextColor(t.TextMuted)
-		})
-}
-
-// drawHistoryRow 画第 r 行。结构和稍后再看那一行一样，多出来的两列在右边。
+// drawHistoryRow 画第 r 行。行首和稍后再看共用（`libraryRowHead`），右边那两列
+// 不同：播放进度 / 观看时间。
 func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 	t := c.Theme()
 	rows := s.historyPage.rows
 	m := rows.Rows()[r.Index]
 	playing := rows.isPlaying(m)
-	// 紧凑档只是这一行的几处尺寸变矮（设置里的「数据显示样式」）。
 	mt := metricsOf(rows.Layout())
+	face := libraryRowFace(t, r.Selected(), playing)
 
-	// 「正在放」和「选中」分成两档，理由见 `drawLaterRow` 里那一段
-	// （这一页和稍后再看是同一副骨架）。
-	titleColor, ownerColor := t.Text, t.TextMuted
-	switch {
-	case r.Selected():
-		titleColor, ownerColor = t.AccentText, t.AccentText.Alpha(0.75)
-	case playing:
-		titleColor = t.Accent
-	}
+	// ⚠️ **hover 要在 Children 之前问**（同 `widgets/list/card.go` 里那一处）。
+	row := ui.Row(c).Key("history-row:"+m.ID).AlignSelf(ui.Stretch).Gap(mt.gap).
+		Padding(mt.padY, mt.padX)
+	onRow := row.Hovered()
 
-	return ui.Row(c).Key("history-row:"+m.ID).AlignSelf(ui.Stretch).Gap(mt.gap).
-		Padding(mt.padY, mt.padX).Children(func() {
-		ui.Text(c, rowNumber(r.Index)).Width(mt.index).TextAlign(ui.End).
-			FontSize(12).TextColor(t.TextMuted).MaxLines(1)
-
-		imgcache.View(c, s.images, m.Cover, mt.cover, mt.cover)
-
-		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).Children(func() {
-			ui.Text(c, m.Title).FontSize(mt.titleSize).LineHeight(1.5).
-				TextColor(titleColor).MaxLines(mt.titleLines).Ellipsis("…")
-			if m.Owner != "" {
-				ui.Text(c, m.Owner).FontSize(12).LineHeight(1).
-					TextColor(ownerColor).MaxLines(1).Ellipsis("…")
-			}
-			if playing {
-				viewPlayingMark(c, t, m.Title)
-			}
-		})
+	return row.Children(func() {
+		viewLibraryRowHead(c, r, m, s.images, mt, face, onRow,
+			func() { rows.playFrom(r.Index) })
 
 		ui.Text(c, progressText(m.Progress, m.Duration)).Width(mt.progress).
 			TextAlign(ui.End).FontSize(12).TextColor(t.TextMuted).MaxLines(1)
@@ -260,9 +228,15 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected boo
 	if selected {
 		box = box.Background(t.Accent)
 	}
+	// ⚠️ **hover 要在 Children 之前问**（同 `widgets/list/grid.go` 里那一处）。
+	onCell := box.Hovered()
 
 	return box.Children(func() {
-		imgcache.View(c, s.images, m.Cover, cell, laterCellCoverH)
+		// 封面 + 它上面那圈 hover 反馈：右下角一个 40 的主色圆播放钮，封面底部一条
+		// black/90 的渐变。**左边那一半空着**：历史记录的接口不给播放量（见
+		// `libraryRow.View` 的注释），画一列空白比不画更难看。
+		hover.CardCover(c, s.images, m.Cover, cell, laterCellCoverH, onCell,
+			"", clockText(m.Duration), m.Title, func() { rows.playFrom(i) })
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).PaddingY(cardGapForCell).Children(func() {
 			ui.Text(c, m.Title).FontSize(14).LineHeight(1.5).

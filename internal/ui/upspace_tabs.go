@@ -70,7 +70,17 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 	// 这一张 Tab 是歌的列表——动态 / 收藏夹 / 合集那三张画的是卡片和数字，网格那一
 	// 档对它们没有意义（见 upspace_tabs.go 的文件头）。
 	sp.videos.SetView(s.displayView())
-	sp.videos.View(c)
+	// ⚠️ **外面这一层 Column 是必需的**：这一页的内容是摆在一个 `ui.Row` 里
+	// （`viewUpSpace` 的 `space-body`），而表头那一行是 `FillWidth` 的——直接当兄弟
+	// 摆进去的话它把整行的宽都吃掉了，列表被挤成 0 宽，于是**一首歌都看不见**（实测
+	// 最小窗口下 `Find` 给回 `{900 … 0 0}` 那个盒子）。裹一层 Column，表头在上面、
+	// 列表在下面，两边都在同一列里。
+	ui.Column(c).Grow(1).FillHeight().Children(func() {
+		// 表头**在列表外面**（`rowheader.go` 文件头）：列表往下滚它不动，宽屏下滚到
+		// 右边列名也还在。
+		sp.videos.Header(c, "upspace:header")
+		sp.videos.View(c)
+	})
 }
 
 // viewSpaceList 画「动态 / 收藏夹 / 合集」这三张之一。

@@ -330,6 +330,8 @@ func searchVideoMusic(hit bili.VideoHit) list.Music {
 		Cover:    hit.Cover,
 		Owner:    hit.Owner,
 		Duration: hit.Duration,
+		// 播放量：网格卡片封面底部那一条渐变上画的是它（`Music.View`）。
+		View: hit.Play,
 		// ⚠️ Cid 大多数情况是空的（B 站的搜索结果不给分 P id，见
 		// `service/bili/search.go` 文件头）。空着的时候在线播放会按「缺稿件 id
 		// 或分 P id」拒掉并说清为什么，那条限制不许为了「搜出来的歌能放」而放松。
@@ -373,6 +375,9 @@ func searchUserMusic(hit bili.UserHit) list.Music {
 		Cover: hit.Avatar,
 		// 个性签名摆在 UP 名那一列（Biu 的音乐卡片那里放的就是 UP 名）。
 		Owner: hit.Sign,
+		// ⚠️ **没有 View，而且本来也不会有**：用户不是视频，没有播放量（播放量在
+		// `VideoHit.Play` 上，见上面那个 `searchVideoMusic`）。所以网格卡片封面
+		// 底部那一条渐变上**左半边不画**（理由见 `list.Music.View`）。
 		Item: app.Item{
 			Source: "online",
 			Type:   searchUserItemType,

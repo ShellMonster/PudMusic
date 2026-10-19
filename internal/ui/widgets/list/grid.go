@@ -20,6 +20,7 @@
 package list
 
 import (
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/egoist/mygo/ui"
 )
@@ -627,8 +628,9 @@ func (g *Grid) viewCellGuarded(c *ui.Context, i int, cell float32) {
 // 结构照 Biu 的 `components/music-card/index.tsx`：封面一块，下面 `mt-2` 是
 // 歌名，再下面一行是 UP 名（左边）和时长（右边）。
 //
-// ⚠️ **没有播放量**：Biu 的封面右下角那一条渐变上写着播放量，那个数要 B 站
-// 接口才有（本地音乐没有）。等接了 B 站再加，别提前画一列空白。
+// ⚠️ **封面底下渐变条的左边是播放量**（上游 `music-card/index.tsx:50-55`）：填的是
+// `Music.View`。**没有这个数的那几页（本地音乐）那一半不画**——画一列空白比不画更难看，
+// 而用户看见半行字会以为这一格「数据不全」（理由见 `Music.View`）。
 func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 	t := c.Theme()
 	m := g.songs[i]
@@ -662,6 +664,10 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 		box = box.Background(t.Accent)
 	}
 
+	// ⚠️ **hover 要在 `Children` 之前问**（同 `card.go` 里那一处）：它报的是这一帧指针
+	// 在不在这一格上，而封面上面那圈反馈要等 Children 才建得出来。
+	onCell := box.Hovered()
+
 	// 双击这一格 = 从这一首往后播，和列表双击那一行是一个意思
 	//（Biu 的 `onDoubleClick`）。两个视图别一个能双击播放一个不能。
 	//
@@ -678,8 +684,11 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 		// ⓪ 多选态：这一格最上面的勾选框。没装多选就一格都不画。
 		g.viewCellCheckbox(c, i, m.Title)
 
-		// ① 封面。四态由 imgcache.View 画（空地址画空框，不画「失败」）。
-		imgcache.View(c, g.cache, m.Cover, cell, gridCoverH)
+		// ① 封面 + 它上面那圈 hover 反馈：右下角一个 40 的主色圆播放钮，封面底部
+		// 一条 black/90 的渐变（左播放量 / 右时长），都 200ms 淡入。
+		hover.CardCover(c, g.cache, m.Cover, cell, gridCoverH, onCell,
+			PlayCountText(m.View), formatDuration(m.Duration), m.Title,
+			func() { g.playFrom(i) })
 
 		// ② 歌名 + UP 名/时长。
 		//

@@ -257,6 +257,12 @@ func (s *Shell) fetchCollectionPage(ctx context.Context, ref app.CollectionRef, 
 			Owner:    m.Owner,
 			Duration: m.Duration,
 			Item:     onlineItemOf(m),
+			// ⚠️ **没有 View**：收藏夹那个接口的返回里播放量在 `cnt_info.play`，
+			// 而 `bili.Media` 这一层压根没解析它（`collection.go` 的
+			// `resourceListData` 里没有这一列）。所以这里是零值，网格卡片封面
+			// 底部那一条渐变上**左半边不画**——而这不是「忘了填」，是上游那份
+			// 还没解析。补它要改的是 `internal/service/bili`（加字段 + 解析），
+			// 而验收不许打真 B 站接口去核那个字段名，所以那一格留给接线那一票。
 		})
 	}
 	return list.Page{Songs: songs, HasMore: hasMore}, nil
@@ -340,6 +346,10 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 			// ⚠️ 它**换不掉**多选接线（`attachSelection` 装的那一份挂在两份控件上，
 			// 见 `widgets/list/switch.go`），所以网格那一档点勾照样能批量删。
 			p.list.SetView(s.displayView())
+			// ⚠️ **表头在列表外面**（`rowheader.go` 文件头）：它是 `View` 的兄弟，所以
+			// 列表往下滚它不动。它自己会判多选态要不要给勾选框让位置（`HeaderSpec` 的
+			// Lead），所以这一处不用管多选。
+			p.list.Header(c, "collection:header")
 			// 列表自己占了 Grow(1)（见 `list.List.View`），所以多选态下面那条
 			// 批量操作条自然被它顶到最下面。
 			p.list.View(c)

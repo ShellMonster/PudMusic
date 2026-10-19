@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
 )
@@ -48,6 +48,13 @@ const (
 	listPadY   = 8
 	rowGap     = 8
 	titleLines = 2
+)
+
+// laterHeaderKey / historyHeaderKey 是这两行表头的身份。⚠️ **两个都要不一样**：同一个
+// 父下面给两份一样的 Key 会被框架当错（无头 Tester 当场 panic 并报出代码行号）。
+const (
+	laterHeaderKey   = "later:header"
+	historyHeaderKey = "history:header"
 )
 
 // buildLibraryPages 把「稍后再看」和「历史记录」两页接上。**在 New 里调一次**。
@@ -109,7 +116,9 @@ func laterRowOf(it app.LibraryItem) libraryRow {
 			Cover:    it.Cover,
 			Owner:    it.Owner,
 			Duration: it.Duration,
-			Item:     it.Item,
+			// 播放量：列表那一列和网格卡片封面底部那一条都是它（`Music.View`）。
+			View: it.View,
+			Item: it.Item,
 		},
 		Progress: it.Progress,
 		ViewedAt: it.ViewedAt,
@@ -148,27 +157,10 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 			}
 
 			// 表头**只在列表 / 紧凑两档**摆：网格里一格是一首歌，表头上那几列
-			//（「# / 标题 / 播放量 / 加入时间 / 时长」）和格子对不上号，而对不上的表头
-			// 在界面上不像坏了（和 `widgets/list` 里那个「正在播放」不新开一列是同一
-			// 个理由，见 BMG-56 的收尾说明）。
+			// 和格子对不上号（理由见 `rowheader.go` 文件头）。
 			p.rows.SetView(s.displayView())
-			if !p.rows.isGrid() {
-				laterHeader(c)
-			}
+			viewLibraryHeader(c, p.rows, laterHeaderSpec, laterHeaderKey)
 			p.rows.View(c)
-		})
-}
-
-// laterHeader 是那一行表头。抄上游 `music-list-item/header.tsx`（见文件头）。
-func laterHeader(c *ui.Context) {
-	t := c.Theme()
-	ui.Row(c).Key("later:header").FillWidth().Gap(rowGap).Padding(listPadY, listPadX).
-		Children(func() {
-			ui.Text(c, "#").Width(colIndex).TextAlign(ui.End).FontSize(12).TextColor(t.TextMuted)
-			ui.Text(c, "标题").Grow(1).FontSize(12).TextColor(t.TextMuted)
-			ui.Text(c, "播放量").Width(colCount).TextAlign(ui.End).FontSize(12).TextColor(t.TextMuted)
-			ui.Text(c, "加入时间").Width(colDate).TextAlign(ui.End).FontSize(12).TextColor(t.TextMuted)
-			ui.Text(c, "时长").Width(colClock).TextAlign(ui.End).FontSize(12).TextColor(t.TextMuted)
 		})
 }
 
@@ -183,40 +175,17 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 	playing := rows.isPlaying(m)
 	// 紧凑档只是这一行的几处尺寸变矮（设置里的「数据显示样式」）。
 	mt := metricsOf(rows.Layout())
+	face := libraryRowFace(t, r.Selected(), playing)
 
-	// 选中那一行的底色由 `ui.List` 自己刷（主色底），字色得跟着换——不换就是
-	// 主色底上的深色字，深色主题下直接看不见。
-	//
-	// ⚠️ 「正在放」是**第二档**而不是并进去的第二种底色：它只把歌名染成主色、
-	// 在下面挂一句「正在播放」。换成主色底就和「选中」分不出来了，而这两个问的
-	// 是两件不同的事（见 `widgets/list` 的 card.go 里同一段）。
-	titleColor, ownerColor := t.Text, t.TextMuted
-	switch {
-	case r.Selected():
-		titleColor, ownerColor = t.AccentText, t.AccentText.Alpha(0.75)
-	case playing:
-		titleColor = t.Accent
-	}
+	// ⚠️ **hover 要在 Children 之前问**（同 `widgets/list/card.go` 里那一处）：它报的
+	// 是这一帧指针在不在这一行上，而封面上那圈反馈要等 Children 才建得出来。
+	row := ui.Row(c).Key("later-row:"+m.ID).AlignSelf(ui.Stretch).Gap(mt.gap).
+		Padding(mt.padY, mt.padX)
+	onRow := row.Hovered()
 
-	return ui.Row(c).Key("later-row:"+m.ID).AlignSelf(ui.Stretch).Gap(mt.gap).
-		Padding(mt.padY, mt.padX).Children(func() {
-		ui.Text(c, fmt.Sprint(r.Index+1)).Width(mt.index).TextAlign(ui.End).
-			FontSize(12).TextColor(t.TextMuted).MaxLines(1)
-
-		// 封面四态由 imgcache 画（空地址画空框，不画「失败」）。
-		imgcache.View(c, s.images, m.Cover, mt.cover, mt.cover)
-
-		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).Children(func() {
-			ui.Text(c, m.Title).FontSize(mt.titleSize).LineHeight(1.5).
-				TextColor(titleColor).MaxLines(mt.titleLines).Ellipsis("…")
-			if m.Owner != "" {
-				ui.Text(c, m.Owner).FontSize(12).LineHeight(1).
-					TextColor(ownerColor).MaxLines(1).Ellipsis("…")
-			}
-			if playing {
-				viewPlayingMark(c, t, m.Title)
-			}
-		})
+	return row.Children(func() {
+		viewLibraryRowHead(c, r, m, s.images, mt, face, onRow,
+			func() { rows.playFrom(r.Index) })
 
 		ui.Text(c, playCountText(m.View)).Width(mt.count).TextAlign(ui.End).
 			FontSize(12).TextColor(t.TextMuted).MaxLines(1)
@@ -255,12 +224,20 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 		// node.Selected）。
 		box = box.Background(t.Accent)
 	}
+	// ⚠️ **hover 要在 Children 之前问**（同 `widgets/list/grid.go` 里那一处）。
+	onCell := box.Hovered()
 
 	return box.Children(func() {
 		// 封面按**格子宽**画，不写死：`list.CellWidth` 给的就是这一格实际拿到的
 		// 宽（`widgets/list` 的网格卡片同一个做法）。写死 160 的话，窗口一窄到
 		// 两列，封面就顶出格子外面去了。
-		imgcache.View(c, s.images, m.Cover, cell, laterCellCoverH)
+		//
+		// 上面那圈 hover 反馈：右下角一个 40 的主色圆播放钮，封面底部一条 black/90
+		// 的渐变（**左边播放量右边时长**——这一页的播放量是有的，见 `libraryRow.View`，
+		// 而 `widgets/list` 那一派本地音乐没有，所以那边那一半空着）。
+		hover.CardCover(c, s.images, m.Cover, cell, laterCellCoverH, onCell,
+			playCountText(m.View), clockText(m.Duration), m.Title,
+			func() { rows.playFrom(i) })
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).PaddingY(cardGapForCell).Children(func() {
 			ui.Text(c, m.Title).FontSize(14).LineHeight(1.5).
@@ -337,24 +314,13 @@ func (s *Shell) laterMenu(m *ui.Menu, i int) {
 	}
 }
 
-// playCountText 是播放量那一列的字，抄上游的 `Intl.NumberFormat` compact：往上折成
-// 「1.2万」「1.2亿」。不折的话七位数播放量会把那一列撑到别列头上。
+// playCountText 是播放量那一列的字。**折法的出处只有一处**：`list.PlayCountText`
+// （网格卡片封面底部那一条渐变上画的是同一个数，而本包依赖那一层，反过来会循环依赖）。
 //
 // 名字里带 `play` 是因为主干上 `settings_tabs_test.go` 有一个**同名的测试辅助函数**
 // `countText(tt, want)`（数画面上有几个匹配的字）。同一个包里同名就是编译期的
 // 「redeclared」，而那个错和这一票在做的事看起来毫不相干。
-func playCountText(n int64) string {
-	switch {
-	case n <= 0:
-		return ""
-	case n >= 100_000_000:
-		return fmt.Sprintf("%.1f亿", float64(n)/1e8)
-	case n >= 10_000:
-		return fmt.Sprintf("%.1f万", float64(n)/1e4)
-	default:
-		return fmt.Sprint(n)
-	}
-}
+func playCountText(n int64) string { return list.PlayCountText(n) }
 
 // dayText 是那一天的字（`2026-10-16`），没有就空串（上游 `formatSecondsToDate`）。
 func dayText(t time.Time) string {

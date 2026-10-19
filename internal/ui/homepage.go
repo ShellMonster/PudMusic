@@ -26,6 +26,8 @@
 package ui
 
 import (
+	"strconv"
+
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
@@ -245,6 +247,9 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell) {
 		// 这一屏是空的，那一页的两句话连着说了「为什么空」和「怎么才能不空」。
 		s.viewEmpty(c, "home:empty", lookup(homePath).Empty)
 	default:
+		// ⚠️ **表头在列表外面**（`rowheader.go` 文件头）：它是 `View` 的兄弟，所以列表往
+		// 下滚它不动，宽屏下滚到右边列名也还在。
+		h.lists[h.tab].Header(c, "home:header:"+strconv.Itoa(h.tab))
 		h.lists[h.tab].View(c)
 	}
 }
