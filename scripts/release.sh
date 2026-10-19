@@ -44,6 +44,25 @@ need go "装 Go 1.27 或更新版本。"
 need git "装 git。"
 need gh "装 GitHub CLI（brew install gh）并登录：gh auth login"
 
+# ------------------------------------------------- 自检：别带着已知的解析坑去发版
+#
+# **`${变量}` 后面紧跟一个非 ASCII 字符，会让 bash 3.2（本机唯一的 bash，/usr/bin/env
+# bash 就是它）把那个字符的头一个字节并进变量名**——`$变量` + 全角逗号会解析成
+# 一个不存在的 `变量…`，`set -u` 下当场崩在那一行。
+#
+# 危险的不是崩，是**崩在哪**：第 5 步崩之前已经把标签推出去了，于是留下一个
+# 「有标签、没有 release」的半截发版，而 `bash -n` 查不出来（语法是对的）。
+#
+# 所以动手之前先扫一遍自己。不用 `grep -P`（BSD grep 未必有），用 LC_ALL=C 下的
+# `[^ -~]`：它只看字节，落在可打印 ASCII 之外就算，正好是「非 ASCII」。
+if bad_lines="$(LC_ALL=C grep -n '\$[A-Za-z_][A-Za-z_0-9_]*[^ -~]' "$0")" && [ -n "$bad_lines" ]; then
+  printf '\033[31m错误：脚本自己有一处 bash 3.2 解析不了的变量：\033[0m\n%s\n' "$bad_lines" >&2
+  die '把上面几行的变量加上花括号：变量名后面紧跟中文时，bash 3.2 会把那个字的第一个
+  字节并进变量名，set -u 下当场崩——而且可能崩在标签已经推出去之后。
+  最小复现：bash -c '"'"'set -u; tag=v; echo "$tag 的"'"'"' 正常；把 tag 后面那个空格
+  换成全角逗号，就变成 bash: tag…: unbound variable。'
+fi
+
 # ---------------------------------------------------------------- 读 mygo.json
 # jq 有就用 jq，没有就退到 python3。两个都是现成的，没有第三个选择——而 JSON 里
 # 有密码学材料和仓库名，用正则去抠字符串就是给自己埋一个静默的坑。
@@ -180,7 +199,7 @@ case "$visibility" in
       这也是为什么第 5 步挂的是草稿：先别发布。
 EOF
     ;;
-  *) die "$publish_repo 的可见性是 $visibility，认不出来。GitHub 改了取值？" ;;
+  *) die "$publish_repo 的可见性是 ${visibility}，认不出来。GitHub 改了取值？" ;;
 esac
 
 gh auth status >/dev/null 2>&1 || die "gh 没登录，跑一次 gh auth login。"
@@ -354,7 +373,7 @@ existing_is_draft() { gh release view "$tag" --repo "$publish_repo" --json isDra
 if state="$(existing_is_draft)"; then
   case "$state" in
     true)
-      say "删掉上一次留下的草稿 Release $tag，重挂一遍"
+      say "删掉上一次留下的草稿 Release ${tag}，重挂一遍"
       gh release delete "$tag" --repo "$publish_repo" --yes
       ;;
     false)
@@ -363,7 +382,7 @@ if state="$(existing_is_draft)"; then
   要改这一版就把 mygo.json 的 version 升到下一个版本。"
       ;;
     *)
-      die "查不到 $tag 的 Release 状态（gh 报的是 $state）。"
+      die "查不到 $tag 的 Release 状态（gh 报的是 ${state}）。"
       ;;
   esac
 fi
