@@ -452,7 +452,7 @@ func TestShellFramesCarryTheTheme(t *testing.T) {
 	}
 
 	// 崩过一次之后：错误页也是一帧。
-	s.crash = "坏掉了"
+	s.crash = s.newCrashInfo("测试", "坏掉了")
 	tt.Frame()
 	if !got.dark {
 		t.Error("错误页没有带上设置里的深色主题")

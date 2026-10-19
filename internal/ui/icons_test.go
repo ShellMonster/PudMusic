@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -40,7 +41,7 @@ import (
 // 返回 0×0，而那画出来是一格**空白**——和「根本没画」在画面上长得一模一样。
 func TestEveryIconWeNamedIsThereAndItParses(t *testing.T) {
 	for _, name := range iconNames {
-		b, err := iconFiles.ReadFile("icons/" + name)
+		b, err := iconset.Source(name)
 		if err != nil {
 			t.Errorf("图标 %q 不在 icons/ 里：%v", name, err)
 			continue
@@ -67,7 +68,7 @@ func TestEveryIconWeNamedIsThereAndItParses(t *testing.T) {
 // 合法的那一份是 `fill="currentColor"`：那正是「跟着文字色」的意思。
 func TestTheIconResourcesAreAllMonochrome(t *testing.T) {
 	for _, name := range iconNames {
-		b, err := iconFiles.ReadFile("icons/" + name)
+		b, err := iconset.Source(name)
 		if err != nil {
 			t.Errorf("图标 %q 读不到：%v", name, err)
 			continue

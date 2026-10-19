@@ -4,6 +4,7 @@
 package ui
 
 import (
+	"embed"
 	"log"
 	"runtime/debug"
 	"sync"
@@ -19,6 +20,16 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 )
+
+// artFile 是插画那一小份 embed（错误页那张 `error.svg`）。
+//
+// ⚠️ **它和图标那一份分开**：图标全是单色的遮罩、走 `ui.Icon`，插画有自己
+// 的灰度层次、走 `ui.Image`。合成一份 embed 的话，`iconset` 就得替插画也
+// 实现一套「解析成 *ui.SVG 再交给调用方」的东西，而它对图标那套是对的、对
+// 插画是多余的。
+//
+//go:embed art
+var artFile embed.FS
 
 // Shell 是一个窗口的全部东西：状态、画法、唤醒句柄。
 type Shell struct {
@@ -362,7 +373,14 @@ type Shell struct {
 	picker pathPicker
 
 	// crash 是上一帧 panic 到的东西，非 nil 时这一帧画错误页。
-	crash any
+	//
+	// ⚠️ 它记的**不只是 panic 的值**：还有崩在界面的哪一块（`where`）和当时
+	// 在看哪一页。用户要拿这句话去跟开发者说，而「界面出错了」这句话谁也复现
+	// 不出来——「崩在侧栏」和「崩在这一页的列表」是两件完全不同的事。见 crashInfo。
+	crash *crashInfo
+
+	// lastFeedbackURL 是上一次点「反馈」要去的地方。见 openFeedback 的注释。
+	lastFeedbackURL string
 
 	// upSpaces 存着每个 UP 的空间页状态，键是 mid（见 upspace.go）。
 	//
@@ -684,7 +702,7 @@ func New(a *app.App) *Shell {
 	s.pageBody = s.pageContent
 	s.sideBody = s.viewSide
 	s.navBody = s.viewNav
-	s.draw = Guard(s.viewMain, s.onPanic)
+	s.draw = s.guardAt("整帧", s.viewMain)
 	// 本地音乐这一摊建好之后才能装唤醒回调（`AddLocalWake` 要一个能叫醒
 	// **所有**画过这一页的窗口的函数，而那正是 `s.local.invalidate`）。
 	//
@@ -910,6 +928,32 @@ func Guard(draw func(*ui.Context), onPanic func(any)) func(*ui.Context) {
 	return guard.Wrap(draw, onPanic)
 }
 
+// crashInfo 是一次崩溃的**完整**现场。
+//
+// # 为什么要三个字段，而不只是崩掉的那个值
+//
+// 改之前错误页上只有一句 `%v`（panic 的值）。而 panic 的值大多长这样：
+// `runtime error: index out of range [5] with length 3`——这句话说明了**是什么**，
+// 一点也没说**在哪儿**。用户能做的只有把这句发给开发者，而开发者拿着它既复现
+// 不出来，也定位不到（同一个越界能发生在七个不同的地方）。
+//
+// 两条「在哪儿」各有各的来源，缺一条就退化成原来那句：
+//
+//   - where 是**界面的哪一块**：由包住那一块的 `guardAt` 写上去。崩在侧栏和崩在
+//     队列抽屉，用户看到的是完全不同的两种现象（一个是一大片空白，一个是抽屉
+//     关不上）。
+//   - path/title 是**当时在看哪一页**：从 `s.router` 上读，不用谁记得报上来。
+type crashInfo struct {
+	// where 是崩在界面的哪一块，由 `guardAt` 的调用点给。
+	where string
+	// path 是崩的时候正在看的那条路径（`s.router.Location()`）。
+	path string
+	// title 是那一页的名字（`routes` 表里的 `Title`）。
+	title string
+	// got 是 panic 到的东西。
+	got any
+}
+
 // View 画一帧，MyGo 在需要新画面的时候调它。
 func (s *Shell) View(c *ui.Context) {
 	// 每帧重新登记：句柄内部是窗口的弱引用，窗口关了自动失效，关掉重开也不用管。
@@ -922,14 +966,48 @@ func (s *Shell) View(c *ui.Context) {
 	s.draw(c)
 }
 
+// guardAt 给一层 view 包 Guard，并记住**它是界面的哪一块**。
+//
+// 界面上的每一道 Guard 都走它（`Guard` 那个自由函数留给不需要记位置的地方，
+// 比如控件层自己包的那一道）。为什么每一处都要写一句「这一块是什么」：那是错误
+// 页上「出错在哪一步」那一句的全部来源，而这正是这一票要的（issue 126：「出错时
+// 能看到出错在哪一步」）。
+//
+// ⚠️ **写「是什么」而不是「在哪儿崩的」**：调用点在崩之前执行，它知道自己在
+// 画哪一块 whereas 崩在它内部的第几行它不知道——那要等栈，而栈在错误页上对
+// 用户没有意义（几百行 Go 调用，用户看不懂也用不上；它已经在日志里了）。
+func (s *Shell) guardAt(where string, draw func(*ui.Context)) func(*ui.Context) {
+	return guard.Wrap(draw, func(r any) { s.onPanicAt(where, r) })
+}
+
 // onPanic 记下崩掉的东西并要一帧，下一帧画错误页。
 //
 // ⚠️ 这里补的 Invalidate 不是多余的：recover 是在 build pass **中间**接住的，
 // 那一帧剩下的部分没建，画出来是半张。要下一帧才完整（实测，文档没写）。
-func (s *Shell) onPanic(r any) {
-	s.crash = r
-	log.Printf("biu: 界面崩溃，已切到错误页\n%v\n%s", r, debug.Stack())
+func (s *Shell) onPanic(r any) { s.onPanicAt("界面", r) }
+
+// onPanicAt 是 `onPanic` 加上「崩在哪一块」。
+func (s *Shell) onPanicAt(where string, r any) {
+	s.crash = s.newCrashInfo(where, r)
+	log.Printf("biu: 界面崩溃（%s / %s），已切到错误页\n%v\n%s",
+		s.crash.where, s.crash.title, r, debug.Stack())
 	s.wake.invalidate()
+}
+
+// newCrashInfo 收一次崩溃的现场。
+//
+// ⚠️ **在哪一页从 `router` 上读，而不是让调用点报上来**：崩的那一帧 `router`
+// 上就是当时在看的页，而每一处调用点各自报一遍的话，早晚会有一处忘了报——而
+// 「忘了报」在界面上看起来和「崩在首页」一模一样。
+func (s *Shell) newCrashInfo(where string, r any) *crashInfo {
+	path := s.router.Location()
+	rt := lookup(path)
+	return &crashInfo{
+		where: where,
+		path:  path,
+		title: rt.Title,
+		got:   r,
+	}
 }
 
 // viewMain 是正常的那一帧：上导航 + 左边栏 + 路由页 + 播放条，浮层上是播放列表
@@ -970,11 +1048,11 @@ func (s *Shell) viewMain(c *ui.Context) {
 	ui.Column(c).Fill().Children(func() {
 		// 顶栏同样外面包一层 Guard（铁律三）：它坏了坏掉的是整条顶栏，
 		// 用户连窗口都拖不动了，而出错的地方不在页面上。
-		Guard(s.navBody, s.onPanic)(c)
+		s.guardAt("顶栏", s.navBody)(c)
 		ui.Row(c).Grow(1).Children(func() {
 			// 侧栏是**一整块** view，外面包一层 Guard（铁律三）。它坏了的
 			// 表现是整个窗口空一大块，连报错的地方都没有。
-			Guard(s.sideBody, s.onPanic)(c)
+			s.guardAt("侧栏", s.sideBody)(c)
 			s.viewRoutes(c)
 		})
 		// ⚠️ **全屏开着的时候不建播放条**。理由见 fullplayer.go 顶上那一段：
@@ -990,23 +1068,23 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 右侧浮出来的 Drawer（`music-playlist-drawer/index.tsx` 的
 	// `data-[placement=right]`），底下那一层页面照旧看得见、点得着；塞进上面
 	// 那个 Row 里就成了「窗口窄一块」，页面被挤着走——那不是抽屉。
-	Guard(s.viewQueueDrawer, s.onPanic)(c)
+	s.guardAt("播放列表抽屉", s.viewQueueDrawer)(c)
 
 	// 收藏夹管理那几个弹窗（新建 / 修改 / 选封面 / 裁剪 / 选收藏夹）。
 	//
 	// ⚠️ 排在**最后**：它们是模态的，要盖住整页；而外面这一层 Guard 不可省
 	//（铁律四）——view 里 panic 会穿透 Cocoa 事件循环杀掉整个进程。
-	Guard(s.viewFolderDialogs, s.onPanic)(c)
+	s.guardAt("收藏夹弹窗", s.viewFolderDialogs)(c)
 
 	// 全屏播放器排在收藏夹弹窗**之后**、Toast **之前**：它盖住整个窗口，
 	// 而提示要浮在最上面（右下角那句话在满屏里也得看得见）。
-	Guard(s.viewFullPlayer, s.onPanic)(c)
+	s.guardAt("全屏播放器", s.viewFullPlayer)(c)
 
 	// 歌词搜索与预览那两个弹窗（lyricssearch.go）。**排在满屏之后**：它们是模态
 	// 的、要盖住整页，而满屏盖住的是整个窗口——次序反过来的话用户在满屏里按到
 	// 那个旋钮会看见弹窗开在满屏底下。Toast 仍然在最上面（采用歌词之后那句
 	// 「已经换上这一版」要从预览弹窗上浮过去）。
-	Guard(s.viewLyricDialogs, s.onPanic)(c)
+	s.guardAt("歌词弹窗", s.viewLyricDialogs)(c)
 
 	s.viewToasts(c)
 }
@@ -1046,27 +1124,115 @@ func (s *Shell) syncFolderDialogs() {
 
 // viewCrash 是崩溃后那一帧。Biu 原来的 ErrorBoundary 也是这么做的：程序活着，
 // 出事的那块换一张说明页。
+//
+// # 这一页要说的三件事，少一件都不算「能看的错误页」
+//
+//  1. **出在哪儿**：哪一块（侧栏 / 队列抽屉 / 页面「下载记录」）和当时在看哪一页。
+//     这一句是用户拿去跟开发者说的第一句，也是这一票要的（issue 126：「出错时
+//     能看到出错在哪一步」）。它下面那一行原始错误是第二句。
+//  2. **插画**：上游那一页中间摆一张 480 宽的 `error.svg`
+//     （`components/error-fallback/index.tsx:11-27`），而我们原来只有两行字。
+//     「一片白」和「一张说明页」在用户那边差得远——他说不清出事了，而这里
+//     一眼就看得出来。
+//  3. **走得出去**：重新载入（回同一页）、回到首页、以及**反馈**——上游那枚
+//     描边按钮把用户带到 GitHub issues。没有反馈的话用户只能重启然后在心里
+//     骂一句。
+//
+// ⚠️ **不装主题的深色下会亮成一张白纸**（和错误页同一段：它是崩溃后那一帧，
+// 而 `View` 在崩着的时候不会先走 `viewMain`，那个开头装主题的一步没跑过）。
 func (s *Shell) viewCrash(c *ui.Context) {
-	// 错误页也是一帧。不装主题的话它会用系统色画出来：用户选深色时崩了，
-	// 看到的却是一张亮色的错误页，像换了个应用。
 	s.applyFrameTheme(c)
 
 	t := c.Theme()
+	cr := s.crash
 	ui.Column(c).Fill().Center().Gap(10).Padding(24).Children(func() {
+		// 上游那张 480 宽的插画。它是 `currentColor` 的（见 art/error.svg
+		// 顶上那一段），所以深浅两套主题里它各自是「在这套底色上看得清」的
+		// 那个色——不给它定死颜色是既定行为，和图标那一批同一条理由。
+		if v := errorArt; v != nil {
+			ui.Image(c, v).Height(errorArtHeight)
+		}
 		ui.Text(c, "界面出错了，播放器已经停在这一页").FontSize(18).Bold()
-		ui.Textf(c, "%v", s.crash).FontSize(12).TextColor(t.TextMuted)
+
+		// 「出错在哪一步」这一块：三行，各自说清一件事。
+		ui.Column(c).Key("crash-where").Gap(2).Children(func() {
+			ui.Text(c, "出错的地方："+cr.where).FontSize(13).TextColor(t.Text)
+			// 路径和页面名分开两行：用户在地址里看到的是路径，而跟开发者
+			// 说的时候说的是页面名（「下载记录那一页」）。只给一个的话，另一
+			// 边的人听不懂。
+			// ⚠️ **路径空着的时候整句不画**：路由器上还没有路径（测试里
+			// 手摆的崩溃现场就是这样），而「当时在看的路径：」这一句后面
+			// 空着，比不说更让人以为程序自己也不知道自己在哪儿。
+			switch {
+			case cr.path == "":
+			case cr.title == "" || cr.title == notFound.Title:
+				// 404 那一页没有「页面名」可言（`notFound` 的 Title 是兜底
+				// 的），只说路径。
+				ui.Text(c, "当时在看的路径："+cr.path).FontSize(12).TextColor(t.TextMuted)
+			default:
+				ui.Text(c, "当时在看的页面："+cr.title+"（"+cr.path+"）").
+					FontSize(12).TextColor(t.TextMuted)
+			}
+		})
+
+		ui.Textf(c, "%v", cr.got).FontSize(12).TextColor(t.TextMuted).MaxLines(3)
 		ui.Text(c, "细节已经写进日志。点下面的按钮再试一次。").FontSize(12).TextColor(t.TextMuted)
 		ui.Row(c).Gap(10).Justify(ui.Center).Children(func() {
-			if ui.PrimaryButton(c, "重新载入").Clicked() {
-				s.crash = nil
+			// 反馈是**描边**的那一枚、主操作是实心的那一枚：抄上游的
+			// `components/error-fallback/index.tsx:11-27`（「反馈」描边去
+			// GitHub issues、「回到首页」主色）。
+			if ui.Button(c, "反馈").Clicked() {
+				s.openFeedback(c)
+			}
+			if ui.PrimaryButton(c, "回到首页").Clicked() {
+				s.navigate("/")
 			}
 			// 崩的是某一页，不一定是首页。得给一条走得出去的路，
 			// 不然错误页里连侧栏都点不到，只能干看着。
-			if ui.Button(c, "回到首页").Clicked() {
-				s.navigate("/")
+			if ui.Button(c, "重新载入这一页").Clicked() {
+				s.crash = nil
 			}
 		})
 	})
+}
+
+// errorArt 是错误页中间那张插画。
+//
+// 它和图标那一批**不是一回事**：图标走 `ui.Icon`（画成当前文字色的遮罩），
+// 而这张是一张有自己灰度层次的插画，所以走 `ui.Image` 画它自己的颜色。
+// 它照样**不写死颜色**——`art/error.svg` 用的是 `currentColor` 加几档透明度，
+// 于是它跟着主题走（`drawSVG` 的 current 参数就是祖先的文字色）。
+var errorArt = func() *ui.SVG {
+	b, err := artFile.ReadFile("art/error.svg")
+	if err != nil {
+		// 编译进去的文件读不到 = 有人在重构里挪了目录，而那要在第一次启动
+		// 就炸出来，而不是画出一张空白的错误页。
+		panic("ui: 错误页那张插画读不到（art/error.svg）：" + err.Error())
+	}
+	return ui.MustParseSVG(b)
+}()
+
+// errorArtHeight 是那张插画在错误页上的高度。
+//
+// ⚠️ **按高度不按宽度**：上游那张是 480 宽，而窗口宽度是变的（900 ~ 1440），
+// 按宽度摆的话窄窗口上那张插画会把三行字挤到屏幕外面去。按高度摆它在任何
+// 窗口宽度上都占同样的一行，而它的宽高比（480:220）自己会把宽度收在 187 左右
+// ——那正是「一张插画」该有的尺寸。
+const errorArtHeight = 96
+
+// openFeedback 把用户送到 issue 区——和头像下拉里那个「问题反馈」是同一个地址
+// （`navbar_avatar.go` 的 `feedbackURL`）。
+//
+// ⚠️ **用 `c.OpenURL` 而不是 `Window.Open`**：后者收到 nil 会直接把进程带走
+// （见 navbar_avatar.go 那一段注释），而这一页是在崩溃之后画出来的，那一刻
+// 什么都是不可信的。
+//
+// ⚠️ 它**同时记一笔**（`lastFeedbackURL`）：无头 Tester 里 `OpenURL` 走不了事件
+// 循环，于是「点得动」这件事除了「按钮在」之外一句都验不到。记一笔是给测试的
+// 那一件证据，生产上多写一个字段的代价可以忽略。
+func (s *Shell) openFeedback(c *ui.Context) {
+	s.lastFeedbackURL = feedbackURL
+	c.OpenURL(feedbackURL)
 }
 
 // enqueuePicked 把文件框选回来的每一条路径都排进队列。

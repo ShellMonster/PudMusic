@@ -426,37 +426,45 @@ func (p *pagedRows) showFooter() bool {
 	return p.hasMore || p.blocked
 }
 
-// emptyText 是这一帧列表里那句空状态，空串是「什么都不说」。
+// emptyStateFor 是这一帧列表里那一格空状态，nil 是「什么都不说」。
 //
 // 列表和网格**共用这一段**：两个控件的空状态长得不一样的话，用户切一下设置就会
 // 看到「同一个空列表，换了个说法」——而那不是两件事。
-func (p *pagedRows) emptyText(t *ui.Theme) string {
+//
+// ⚠️ **返回的是整条 `emptyState` 而不是一句字**：插画位也是这一格的一部分，
+// 而页面上不只有「一行都没有」这一种空——筛选完是空的（`downloadlist`）、一页
+// 刚发出去还没回来（`loading`）都是，而它们说的话和画的东西不一样。
+func (p *pagedRows) emptyStateFor(t *ui.Theme) *emptyState {
 	switch {
 	case len(p.rows) == 0 && p.loading:
 		// 一行都还没有：第一页在途。这时候「正在加载…」就是列表全部的内容，
 		// 哨兵先收起来——同一句摆两遍（空状态一句 + 页脚一句）是噪音。
-		return "正在加载…"
+		//
+		// ⚠️ **不摆插画**：这一格说的是「还没好」，摆一枚「这里什么都没有」的
+		// 图形等于说反了（见 `emptyState.Icon`）。
+		return &emptyState{Title: "正在加载…"}
 	case len(p.rows) == 0 && p.blocked:
 		// 一行都没有还失败了：页面上就留那一个重试按钮，一句话都不多说。
-		return ""
+		return nil
 	case len(p.rows) == 0:
-		return p.empty.Title
+		return &p.empty
 	}
-	return ""
+	return nil
 }
 
 // viewEmptyState 画那句空状态和它下面那句提示。列表和网格共用。
+//
+// ⚠️ **走的是 `drawEmpty` 那一个出口**，不是自己再写一遍：这一格和整页那一格
+// （`viewEmpty`）摆在一起是同一件事，字体、间距、主次色、插画位都得一样；各写
+// 一份的话，改一次留白两处就会漂开。
+//
+// ⚠️ **它不装主题**：这一格画在页面里面，而页面那一层已经装过了（铁律二）。
 func (p *pagedRows) viewEmptyState(c *ui.Context, t *ui.Theme) {
-	empty := p.emptyText(t)
-	if empty == "" {
+	e := p.emptyStateFor(t)
+	if e == nil {
 		return
 	}
-	ui.Column(c).Grow(1).Center().Gap(6).Padding(16).Children(func() {
-		ui.Text(c, empty).FontSize(15).TextColor(t.Text)
-		if p.empty.Hint != "" {
-			ui.Text(c, p.empty.Hint).FontSize(12).TextColor(t.TextMuted)
-		}
-	})
+	drawEmpty(c, "", *e, emptyRowPad)
 }
 
 // drawList 画那个虚拟列表（列表和紧凑两档）。

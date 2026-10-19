@@ -318,6 +318,9 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 		s.viewEmpty(c, "collection:not-mounted", emptyState{
 			Title: "暂时打不开收藏夹",
 			Hint:  "这一页要 B 站接口，它还没挂上",
+			// ⚠️ 走的是「拉不出来」那一支的插画（警告），不是空状态那一枚
+			// 收藏夹——接口没挂上是失败，不是「那个夹子本来就是空的」。
+			Icon: iconFailed,
 		})
 		return
 	}

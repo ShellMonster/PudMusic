@@ -369,7 +369,7 @@ func TestPanicDoesNotBlockNavigation(t *testing.T) {
 // 整个窗口都出不来。
 func TestNavigateResetsTheCrash(t *testing.T) {
 	s, tt := newShell(t)
-	s.crash = "之前崩过"
+	s.crash = s.newCrashInfo("测试", "之前崩过")
 
 	s.navigate("/download-list")
 	tt.Frame()
@@ -459,7 +459,7 @@ func TestRenderShots(t *testing.T) {
 	save(t, dir, "12-切路由清掉上一页提示.png", tt)
 
 	// 一页崩了之后的样子：程序活着，出事的那块换一张说明页。
-	s.crash = "这一页画崩了"
+	s.crash = s.newCrashInfo("测试", "这一页画崩了")
 	tt.Frame()
 	save(t, dir, "13-错误页.png", tt)
 

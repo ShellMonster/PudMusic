@@ -237,6 +237,7 @@ func (s *Shell) viewFullPlayer(c *ui.Context) {
 var fullNothing = emptyState{
 	Title: "暂无播放内容",
 	Hint:  "按 Esc 退回去，在主窗口里放几首歌进来",
+	Icon:  iconEmptyMusic,
 }
 
 // viewFullEmpty 是「满屏开着、此刻没有歌」的那一屏。

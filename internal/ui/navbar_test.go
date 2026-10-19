@@ -798,6 +798,11 @@ func TestTheNavBarPanicIsCaught(t *testing.T) {
 	if !strings.Contains(errString(s.crash), "顶栏画崩了") {
 		t.Errorf("记住的 panic 是 %v", s.crash)
 	}
+	// ⚠️ **崩在界面的哪一块也要记住**（这一票要的「出错在哪一步」）：光记住
+	// 「顶栏画崩了」分不出是顶栏坏了还是别处坏了把顶栏带崩的。
+	if s.crash.where != "顶栏" {
+		t.Errorf("记住的崩溃现场是 %q，want「顶栏」", s.crash.where)
+	}
 	if !tt.HasText("界面出错了") {
 		t.Errorf("没有切到错误页，文字有 %q", tt.Texts())
 	}

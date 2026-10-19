@@ -1,14 +1,18 @@
-// 图标资源：播放条和顶栏上那些「只有图标」的按钮从哪儿来。
+// 图标资源：界面上那些「只有图标」的按钮、空状态里的插画位从哪儿来。
 //
 // # 图标集是 RemixIcon，目录结构照它上游
 //
 // Biu 的界面图标全来自 `@remixicon/react`，所以这一批取的是同一套（Remix Design
 // 的 Remix Icon，Apache 之外的自有许可 Remix Icon License v1.0，见 NOTICE）。
-// 目录**照上游那样按分类分开**（`Media/`、`Arrows/`、`System/`、`Editor/`、
-// `Document/`、`User & Faces/`），而不是拍平了扔进一个目录：上游那 2800 个图标
+// 目录**照上游那样按分类分开**（`icons/Media/`、`Arrows/`、`System/`、`Editor/`、
+// `Document/`、`Design/`、`Business/`、`Device/`、`Others/`、`Communication/`、
+// `User & Faces/`、`Weather/`），而不是拍平了扔进一个目录：上游那 2892 个图标
 // 就是这么分的，拍平之后既认不出某个图标属于哪一类，加图标时也没法照着上游
 // 的目录找。**加新图标就照着这个办法往对应的分类目录里放**，名字逐字照上游
 // （`gh api repos/Remix-Design/RemixIcon/contents/icons/<分类>/<文件名>`）。
+//
+// embed 在叶子包 `internal/ui/iconset`（为了给 `widgets/imgcache` 也共用这一份，
+// 理由见那边文件头）；这里只管**名字**和**哪个意思配哪一张**。
 //
 // # 图标名 = 上游的「分类/文件名」，不是随手起的别名
 //
@@ -27,19 +31,21 @@
 // 而 MyGo 的按钮给的是 `t.Text`（深色模式下是亮色）。于是深浅两套主题下
 // 图标各自是「在这套背景上看得清」的那个色，**不给它定死颜色**是既定行为：
 // 逐个定死的话，换主题色那一处就得再改一遍这里。
+//
+// # 「量」这件事的现状，别信注释里的旧数
+//
+// 视觉调研记的是「图标资源 26 : 105」——上游用了约 105 个 remixicon，我们当时
+// 只有 26 个。这一票把资源补到 `iconNames` 那张表（**数表，别数注释**）的规模。
+// 表里每一组都标着它是给哪一处用的；界面上还没用上的那一部分留着，是因为
+// 「备齐」和「接上去」是两件事，而接上去归各自那张票（播放条控件排列是 #127，
+// 顶栏与设置页也是）。
 package ui
 
 import (
-	"embed"
-	"fmt"
-	"path"
-
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
 	"github.com/egoist/mygo/ui"
 )
-
-//go:embed icons
-var iconFiles embed.FS
 
 // 图标名。逐字照上游的「分类/文件名」（理由见文件头）。
 //
@@ -95,7 +101,7 @@ const (
 	// ── 队列抽屉头 ──
 	// 逐字照 Biu 的 `components/music-playlist-drawer/index.tsx:137-141`：
 	// `RiFocus3Line`（定位当前播放）/ `RiDeleteBinLine`（清空播放列表）。
-	iconLocate = "Design/focus-3-line.svg"   // 定位当前播放
+	iconLocate = "Design/focus-3-line.svg"    // 定位当前播放
 	iconDelete = "System/delete-bin-line.svg" // 清空队列
 
 	// ⚠️ **头像那一格故意不在这一列。** #115（真实头像与未登录形态）把它整个
@@ -104,23 +110,181 @@ const (
 	// （圆脑袋 + 一块肩膀，两块都要跟着尺寸等比缩放）。
 	//
 	// 图标化那一票原本在这一格摆一个 `User & Faces/user-line.svg`（就是
-	// 「未登录时别显示首字母 B，显示一个人」），**被 #115 取代了**，那个资源
-	// 随之删掉。取 #115 的理由：它给每一档都配了不同的无障碍名和悬停说明
-	// （「这儿没有人」/「正在取」/「这个账号没有头像」），而那一档一档都要分得
-	// 开是那张票的验收；一个图标只给得出一个样子。理由见 `avatarPerson`。
+	// 「未登录时别显示首字母 B，显示一个人」），**被 #115 取代了**。取 #115 的
+	// 理由：它给每一档都配了不同的无障碍名和悬停说明（「这儿没有人」/「正在取」/
+	// 「这个账号没有头像」），而那一档一档都要分得开是那张票的验收；一个图标
+	// 只给得出一个样子。理由见 `avatarPerson`。
+	//
+	// ⚠️ 那一票删掉的是**头像那一格用的那一张**，`User & Faces/user-line.svg`
+	// 这个**资源**这一票又补回来了——它现在给「UP 主空间」的空状态当插画。
+	// 资源在不在和用在哪一处是两件事。
+
+	// ── 空状态那一格插画位 ──────────────────────────────────────────────
+	//
+	// ⚠️ **上游所有页面的空状态共用同一枚 `RiCloseCircleLine`**（`components/
+	// empty/index.tsx:16`，32px）。我们这里给每一页各配一枚，是这一票要的
+	// （issue 126：「每个页面的空状态有自己的样子而不是共用一张」）——一屏里同时
+	// 只看得到一个空状态，而那一格要能一眼说清「是哪个页面空的」。
+	//
+	// `iconEmptyDefault` 保留上游那一枚：没有更贴切那一枚的页（`/empty` 落地页
+	// 本身）用它，**不是**自己编一枚。
+	iconEmptyDefault  = "System/close-circle-line.svg"         // 空状态（上游那张）
+	iconEmptyMusic    = "Media/music-2-line.svg"               // 首页推荐：一格一首歌
+	iconEmptyGroup    = "User & Faces/group-line.svg"          // 我的关注：一组人
+	iconEmptyLater    = "System/time-line.svg"                 // 稍后再看：一个钟
+	iconEmptyHistory  = "System/history-line.svg"              // 历史记录：一圈回头
+	iconEmptyDisk     = "Device/hard-drive-2-line.svg"         // 本地音乐：硬盘上的
+	iconEmptyFolder   = "Document/folder-line.svg"             // 收藏夹：一个空夹子
+	iconEmptyUser     = "User & Faces/user-line.svg"           // UP 主空间：一个人
+	iconEmptyLyrics   = "Media/mic-line.svg"                   // 歌词：一只麦克风
+	iconEmptyLogin    = "User & Faces/account-circle-line.svg" // 没登录：一个头像位
+	iconEmptySearch   = "System/search-line.svg"               // 搜索：一只放大镜
+	iconEmptyFeed     = "User & Faces/team-line.svg"           // 动态：一群人在说话
+	iconEmptyDownload = "System/download-2-fill.svg"           // 下载记录：一只下箭头
+
+	// iconFailed 是「这一块拉失败了」那一支的插画位。
+	//
+	// 它和上面那一批**分开**：失败不是空（理由写在 `viewLoadError` 顶上），
+	// 界面上必须一眼分得出「本来就没有」和「没拉出来」。
+	iconFailed = "System/error-warning-line.svg"
+
+	// iconCoverPlaceholder 是封面加载不出来时那一格里的图片图标（40% 大小，
+	// 理由见 `widgets/imgcache/view.go`）。
+	//
+	// ⚠️ 它住在 `widgets/imgcache`——封面的唯一画法在那边，而那个包拿不到这里
+	// 的常量（反过来 import 是个环，见 `iconset` 文件头）。所以**这里的名字和
+	// 那边引的是同一个文件**，不是两张图。
+	iconCoverPlaceholder = "Media/image-line.svg"
+
+	// ── 调研点名「常缺」的那一批（报告 §C12）─────────────────────────────
+	//
+	// 上游点名的缺口逐条对上：更多、网格 / 列表视图、文件夹+、编辑、删除、日历、
+	// 展开 / 全屏、画中画、刷新、外链、眼睛、感叹号、问号、导入 / 导出、用户组、
+	// 关注 / 取关、月亮 / 太阳、磁盘。
+	iconMore        = "System/more-2-line.svg"              // 每一行的操作（⋮）
+	iconMoreFilled  = "System/more-fill.svg"                // 操作（实心那一档）
+	iconMoreFilled2 = "System/more-2-fill.svg"              // 操作（实心，另一版）
+	iconViewGrid    = "Design/layout-grid-line.svg"         // 网格档
+	iconViewList    = "Editor/list-check-2.svg"             // 列表档
+	iconGrid        = "Design/grid-line.svg"                // 网格
+	iconFolderAdd   = "Document/folder-add-line.svg"        // 新建收藏夹
+	iconEdit        = "Design/edit-line.svg"                // 编辑
+	iconEditBox     = "Design/edit-box-line.svg"            // 编辑（框起来那一版）
+	iconCalendar    = "Business/calendar-line.svg"          // 日期 / 日期范围
+	iconExpand      = "Arrows/expand-diagonal-line.svg"     // 放大
+	iconShrinkBack  = "Arrows/expand-diagonal-2-line.svg"   // 还原
+	iconPiP         = "Media/picture-in-picture-2-line.svg" // 画中画
+	iconRefresh     = "System/refresh-line.svg"             // 刷新
+	iconExternal    = "Arrows/arrow-right-up-line.svg"      // 外链（在 B 站打开）
+	iconEye         = "System/eye-line.svg"                 // 显示
+	iconEyeOff      = "System/eye-off-line.svg"             // 隐藏
+	iconWarning     = "System/error-warning-line.svg"       // 感叹号 / 警告
+	iconQuestion    = "System/question-line.svg"            // 问号（帮助）
+	iconImport      = "System/import-line.svg"              // 导入
+	iconExport      = "System/export-line.svg"              // 导出
+	iconFollowAdd   = "System/add-line.svg"                 // 关注（还没关注）
+	iconFollowDone  = "System/check-line.svg"               // 已关注
+	iconMoon        = "Weather/moon-line.svg"               // 深色
+	iconSun         = "Weather/sun-line.svg"                // 浅色
+	iconDisk        = "Device/hard-drive-2-line.svg"        // 磁盘
+	iconDeleteBin5  = "System/delete-bin-5-line.svg"        // 删除（另一版）
+	iconBookmark    = "Business/bookmark-line.svg"          // 书签
+	iconInbox       = "Business/inbox-line.svg"             // 收件箱
+	iconChart       = "Business/bar-chart-2-line.svg"       // 统计
+
+	// ── 导航、方向、展开收起 ────────────────────────────────────────────
+	iconPrevEpisode    = "Arrows/arrow-left-line.svg"       // 上一集
+	iconNextEpisode    = "Arrows/arrow-right-line.svg"      // 下一集
+	iconGoBack         = "Arrows/arrow-go-back-line.svg"    // 后退
+	iconGoForward      = "Arrows/arrow-go-forward-line.svg" // 前进
+	iconSideCollapse   = "Arrows/arrow-left-s-line.svg"     // 侧栏收起
+	iconSideExpand     = "Arrows/arrow-right-s-line.svg"    // 侧栏展开
+	iconChevronDown    = "Arrows/arrow-down-s-line.svg"     // 向下展开
+	iconChevronUp      = "Arrows/arrow-up-s-line.svg"       // 向上收起
+	iconDropDown       = "Arrows/arrow-drop-down-line.svg"  // 下拉
+	iconDropUp         = "Arrows/arrow-drop-up-line.svg"    // 上拉
+	iconDownloadArrow  = "Arrows/arrow-right-down-line.svg" // 下载（带箭头那一版）
+	iconToTop          = "Arrows/arrow-up-line.svg"         // 回到顶部
+	iconToTopLeft      = "Arrows/arrow-left-up-line.svg"    // 左上
+	iconToBottomLeft   = "Arrows/arrow-left-down-line.svg"  // 左下
+	iconDrag           = "Arrows/drag-move-2-line.svg"      // 拖动
+	iconFullscreenLine = "Media/fullscreen-line.svg"        // 全屏
+
+	// ── 文件、媒体、其余 ────────────────────────────────────────────────
+	iconImageAdd      = "Media/image-add-line.svg"              // 添加封面
+	iconVideo         = "Media/video-line.svg"                  // 视频
+	iconHeadphone     = "Media/headphone-line.svg"              // 耳机
+	iconMovie         = "Media/movie-line.svg"                  // 影片
+	iconEqualizer     = "Media/equalizer-line.svg"              // 正在放（跳动的波形）
+	iconStop          = "Media/stop-circle-line.svg"            // 停止
+	iconBell          = "Media/notification-line.svg"           // 通知
+	iconFileMusic     = "Document/file-music-line.svg"          // 音乐文件
+	iconFileList      = "Document/file-list-2-line.svg"         // 文件清单
+	iconFileAdd       = "Document/file-add-line.svg"            // 添加文件
+	iconFileSheet     = "Document/file-excel-2-line.svg"        // 清单表
+	iconDraft         = "Document/draft-line.svg"               // 草稿
+	iconDownloadLine  = "System/download-line.svg"              // 下载（线）
+	iconDownloadCloud = "System/download-cloud-line.svg"        // 云端目录
+	iconShield        = "System/shield-check-line.svg"          // 校验
+	iconChecked       = "System/checkbox-circle-line.svg"       // 已选
+	iconUnchecked     = "System/checkbox-blank-circle-line.svg" // 未选
+	iconZoomIn        = "System/zoom-in-line.svg"               // 放大
+	iconZoomOut       = "System/zoom-out-line.svg"              // 缩小
+	iconInfo          = "System/information-line.svg"           // 信息
+	iconCloseFilled   = "System/close-circle-fill.svg"          // 关闭（实心）
+	iconTip           = "Others/lightbulb-line.svg"             // 提示
+	iconUser          = "User & Faces/user-line.svg"            // 用户
+	iconUserAdd       = "User & Faces/user-add-line.svg"        // 加关注的人
+	iconFeedback      = "Communication/feedback-line.svg"       // 反馈
 )
 
 // iconNames 是这一份要备齐的图标。一个常量一个名字，漏一个立刻红
 // （`TestEveryIconWeNamedIsThereAndItParses`）。
+//
+// ⚠️ **数表，别数注释**：视觉调研记的是上游用了「约 105 个 remixicon」，而我们
+// 这一票补到与它相当（`TestTheIconSetIsNotSlimmerThanBiu` 钉的就是「不小于 105
+// 个**文件**」这一位）。注释里曾经写着 26，那是补之前的数。
 var iconNames = []string{
+	// 播放条
 	iconPlay, iconPause, iconPrev, iconNext,
 	iconStar, iconStarFilled, iconDownload,
 	iconVolumeUp, iconVolumeMid, iconVolumeMute,
 	iconEnqueue, iconFullscreen, iconLike, iconLikeFilled, iconPageList,
 	iconModeOrder, iconModeLoop, iconModeRandom, iconModeOne,
+	// 顶栏
 	iconSettings, iconFolder, iconQueue,
 	iconSearch, iconClose, iconFeed, iconLogin, iconLogout,
+	// 队列抽屉头
 	iconLocate, iconDelete,
+
+	// 空状态插画位
+	iconEmptyDefault, iconEmptyMusic, iconEmptyGroup, iconEmptyLater,
+	iconEmptyHistory, iconEmptyDisk, iconEmptyFolder, iconEmptyUser,
+	iconEmptyLyrics, iconEmptyLogin, iconEmptySearch, iconEmptyFeed,
+	iconEmptyDownload, iconFailed, iconCoverPlaceholder,
+
+	// 调研点名的缺口
+	iconMore, iconMoreFilled, iconMoreFilled2,
+	iconViewGrid, iconViewList, iconGrid,
+	iconFolderAdd, iconEdit, iconEditBox, iconCalendar,
+	iconExpand, iconShrinkBack, iconPiP, iconRefresh, iconExternal,
+	iconEye, iconEyeOff, iconWarning, iconQuestion,
+	iconImport, iconExport, iconFollowAdd, iconFollowDone,
+	iconMoon, iconSun, iconDisk, iconDeleteBin5,
+	iconBookmark, iconInbox, iconChart,
+
+	// 导航、方向、展开收起
+	iconPrevEpisode, iconNextEpisode, iconGoBack, iconGoForward,
+	iconSideCollapse, iconSideExpand, iconChevronDown, iconChevronUp,
+	iconDropDown, iconDropUp, iconDownloadArrow,
+	iconToTop, iconToTopLeft, iconToBottomLeft, iconDrag, iconFullscreenLine,
+
+	// 文件、媒体、其余
+	iconImageAdd, iconVideo, iconHeadphone, iconMovie, iconEqualizer,
+	iconStop, iconBell, iconFileMusic, iconFileList, iconFileAdd,
+	iconFileSheet, iconDraft, iconDownloadLine, iconDownloadCloud,
+	iconShield, iconChecked, iconUnchecked, iconZoomIn, iconZoomOut,
+	iconInfo, iconCloseFilled, iconTip, iconUser, iconUserAdd, iconFeedback,
 }
 
 // icons 是上面那批图标**启动时一次解析好**的结果。
@@ -135,23 +299,14 @@ var iconNames = []string{
 var icons = mustParseIcons(iconNames)
 
 // mustParseIcons 把一份图标名解析成 `*ui.SVG`，成一个也解析不了就当场 panic。
+//
+// 解析和缓存都在 `iconset` 里（那边有 embed，也有给 `widgets/imgcache` 用的一
+// 份缓存），这里只是**启动期**把它整批过一遍：解析不了当场炸，而不用等第一次
+// 画到那一枚。
 func mustParseIcons(names []string) map[string]*ui.SVG {
 	m := make(map[string]*ui.SVG, len(names))
 	for _, name := range names {
-		b, err := iconFiles.ReadFile(path.Join("icons", name))
-		if err != nil {
-			panic(fmt.Sprintf("ui: 图标 %q 读不到（icons/%s）：%v", name, name, err))
-		}
-		s, err := ui.ParseSVG(b)
-		if err != nil {
-			panic(fmt.Sprintf("ui: 图标 %q 解析不了（icons/%s）：%v", name, name, err))
-		}
-		// 解析成功但没有尺寸的话画出来是一格空白，而那和「没画出来」在画面上
-		// 长得一模一样——趁还在启动期就拒了。
-		if w, h := s.Size(); w <= 0 || h <= 0 {
-			panic(fmt.Sprintf("ui: 图标 %q 没有尺寸（icons/%s 是不是空的）", name, name))
-		}
-		m[name] = s
+		m[name] = iconset.Must(name)
 	}
 	return m
 }

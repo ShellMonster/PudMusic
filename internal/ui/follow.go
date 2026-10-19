@@ -109,6 +109,7 @@ func tagIDOf(tab string) (int, bool) {
 var followNotLoggedIn = emptyState{
 	Title: "还没登录",
 	Hint:  "关注列表是跟着账号走的——先扫码登录，登录之后你关注的 UP 主会出现在这里",
+	Icon:  iconEmptyLogin,
 }
 
 // followNoSearchResult 是「**搜了，没搜到**」。
@@ -119,6 +120,7 @@ var followNotLoggedIn = emptyState{
 var followNoSearchResult = emptyState{
 	Title: "没搜到",
 	Hint:  "换个词再搜一次，或者清空搜索框看全部关注",
+	Icon:  iconEmptyGroup,
 }
 
 // followEmptyTag 是「**这一组还没有人**」。
@@ -128,6 +130,7 @@ var followNoSearchResult = emptyState{
 var followEmptyTag = emptyState{
 	Title: "这个分组还没有人",
 	Hint:  "在 UP 主空间里点「关注」，关注过的人会出现在「全部关注」那一格",
+	Icon:  iconEmptyGroup,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -561,7 +564,7 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 	// 人」——一句话都不提失败，而 `started` 仍是 false、`err` 非 nil，切走再切回来
 	// 也不会重拉，用户看到的是「我真的一个 UP 主都没关注」。
 	if !f.pager.started && f.pager.err != nil {
-		s.viewLoadError(c, "follow-err:users", "重试加载关注的人", f.pager.err, func() {
+		s.viewLoadError(c, "follow-err:users", "关注的 UP 主", "重试加载关注的人", f.pager.err, func() {
 			f.pager.err = nil
 			if ctx := f.pager.begin(); ctx != nil {
 				go s.fetchFollowUsers(ctx, f, f.gen, f.tab, f.applied, f.pager.page, len(f.users), f.tabTotal())

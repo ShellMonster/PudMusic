@@ -26,6 +26,21 @@ import (
 // coverColor 是测出来的封面用的颜色：画面上别处不会出现，一扫就能找到它画在哪。
 var coverColor = color.RGBA{R: 255, G: 0, B: 128, A: 255}
 
+// coverHex 是 coverColor 在画面上的样子（那一块的纯色封面只有一种颜色）。
+const coverHex = "#ff0080"
+
+// hexOf 把一个像素写成一个能进失败信息的短字符串（8 位那一档精度：抗锯齿边上
+// 的每一个像素满 16 位都是独一无二的，会把颜色集合撑成噪声）。
+func hexOf(c color.Color) string {
+	const digits = "0123456789abcdef"
+	r, g, b, _ := c.RGBA()
+	return "#" + string([]byte{
+		digits[(r>>12)&0xf], digits[(r>>8)&0xf],
+		digits[(g>>12)&0xf], digits[(g>>8)&0xf],
+		digits[(b>>12)&0xf], digits[(b>>8)&0xf],
+	})
+}
+
 // Biu 的那几个数，**在这里写死字面量**，不去用 playbar.go 里的同名常量。
 //
 // 为什么不用那边的常量：布局和期望都用它的话，常量一改，两边一起跟着变，
@@ -88,25 +103,27 @@ func TestPlayBarCoverWithNoURLIsABlankBox(t *testing.T) {
 	}
 }
 
-// TestPlayBarCoverWhileLoadingShowsThePlaceholder 是载入中：占位。
+// TestPlayBarCoverWhileLoadingShowsThePlaceholder 是载入中：骨架屏。
+//
+// ⚠️ **断的是画面，不是「载入中」那三个字**：按上游 `components/image/
+// index.tsx:22-32`，那一格**一个字都不写**。骨架屏的形状是「一块纯色、没有
+// 边框、没有图形」——而这三条只有像素能断。
 func TestPlayBarCoverWhileLoadingShowsThePlaceholder(t *testing.T) {
 	g := newGatedCover(t)
 	_, tt := coverBarTester(t, app.State{HasTrack: true, Title: "在线的一首歌", CoverURL: g.url()})
 
-	// 服务端卡着不回，第一帧一定是占位。
-	if !tt.HasText("载入中") {
-		t.Fatalf("图没来之前应该画占位，文字有 %q", tt.Texts())
-	}
-	if tt.HasText("封面加载失败") {
-		t.Fatalf("还没下完就画了失败态，文字有 %q", tt.Texts())
+	// 服务端卡着不回，第一帧一定是骨架屏：一整块纯色。
+	// 往里收 4 像素，免得把边框那一圈和它的抗锯齿边算进来。
+	if got := coverColors(t, tt, 4); len(got) != 1 {
+		t.Fatalf("图没来之前那一格不是一块纯色（%v）——占位上多画了东西（边框？图标？）", got)
 	}
 
 	waitFor(t, "封面请求发出去了", func() bool { return g.hits.Load() > 0 })
 
-	// 一直卡着就一直停在占位——这一条同时钉住「占位不是失败」。
+	// 一直卡着就一直停在骨架屏——这一条同时钉住「骨架屏不是失败」。
 	tt.Frame()
-	if !tt.HasText("载入中") {
-		t.Errorf("图还没来，占位没了，文字有 %q", tt.Texts())
+	if got := coverColors(t, tt, 4); len(got) != 1 {
+		t.Errorf("图还没来，骨架屏没了（%v）", got)
 	}
 }
 
@@ -120,13 +137,13 @@ func TestPlayBarCoverShowsTheImageWhenItIsReady(t *testing.T) {
 	_, tt := coverBarTester(t, app.State{HasTrack: true, Title: "在线的一首歌", CoverURL: g.url()})
 
 	g.open() // 放行，图马上就能到
+	// ⚠️ 判据是**那一块变成了夹具那张图的颜色**（封面夹具是纯色
+	// `coverColor`），不是「和之前不一样」——「不一样」的话，骨架屏被换成
+	// 失败态也照样过，而那正是这一族要防的。
 	waitFor(t, "画面上换成图", func() bool {
 		tt.Frame()
-		return !tt.HasText("载入中")
+		return equalStrings(coverColors(t, tt, 4), []string{coverHex})
 	})
-	if tt.HasText("封面加载失败") {
-		t.Fatalf("图下完了却画了失败态，文字有 %q", tt.Texts())
-	}
 
 	// 只画播放条时它贴在画面顶上：封面该落在 y=16..72，上下各 16。
 	assertCoverGeometry(t, tt, 0)
@@ -141,22 +158,43 @@ func TestPlayBarCoverShowsTheImageWhenItIsReady(t *testing.T) {
 	}
 }
 
-// TestPlayBarCoverFailedShowsTheFailedState 是失败：有地址但取不回来。
+// TestPlayBarCoverFailedShowsTheFailedState 是失败：**描边框 + 一枚图片图标**。
+//
+// ⚠️ 断的是那一格**画了不止一种颜色**（边框和图标）且**边框那一圈在**：一个
+// 只有一种颜色的方块是骨架屏，而「还没加载」和「加载失败」在界面上必须分得开
+// （这一票的核心）。
 func TestPlayBarCoverFailedShowsTheFailedState(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "没了", http.StatusNotFound)
 	}))
 	defer srv.Close()
-
 	_, tt := coverBarTester(t, app.State{HasTrack: true, Title: "在线的一首歌", CoverURL: srv.URL + "/404.png"})
 
-	waitFor(t, "画面上画出失败态", func() bool {
+	// ⚠️ **等的是「边框 + 图标同时在画面上」，不是「颜色不止一种」**：请求刚
+	// 发出、缓存还没标上「在途」的那一两帧里，`drawCover` 走的是 `default`
+	// 那一支，画的也是描边框 + 图标；条件只看颜色的话它立刻返回，而返回之后
+	// 那一格已经变成骨架屏了（骨架屏没有边框），于是「没有描边框」这条会在
+	// 大约三次里红一次——它量的是**竞态**，不是那一格画错了。
+	var got []string
+	waitFor(t, "画面上画出失败态（描边框 + 图片图标）", func() bool {
 		tt.Frame()
-		return tt.HasText("封面加载失败")
+		got = coverColors(t, tt, 0)
+		return len(got) > 1 && hasCoverBorder(tt)
 	})
-	if tt.HasText("载入中") {
-		t.Errorf("已经失败了还在占位，文字有 %q", tt.Texts())
-	}
+}
+
+// hasCoverBorder 报封面那一圈描边框在不在。
+//
+// 判据是**最上面那一行和它下面一行不同**：有边框时上边是那条线、往下一行是
+// 底色；没有边框时两行是同一块底色——而没有边框正是「正在加载」那一档。
+//
+// ⚠️ 取的是**顶边中点**：那一格跟着主题圆角（imgcache 的 `View` 的 `Radius`
+// + `Clip`），四角那一圈被圆角啃掉了，在那儿量量到的是圆角。
+func hasCoverBorder(tt *mygoui.Tester) bool {
+	mid := (biuPlaybarHeight - biuCoverSize) / 2
+	x := biuPlaybarPadX + biuCoverSize/2
+	img := tt.Image()
+	return img.At(x, mid) != img.At(x, mid+1)
 }
 
 // ---- 唤醒 ----
@@ -297,6 +335,47 @@ func coverBarTester(t *testing.T, st app.State) (*Shell, *mygoui.Tester) {
 		}
 	}))
 	return b.s, b.tt
+}
+
+// coverColors 报封面那一块里出现了哪几种颜色（去重、不计次序）。
+//
+// ⚠️ **往里收 inset 像素**：边框那一圈和它的抗锯齿边会让「一块纯色」变成好几种
+// 近色，而判据要问的正是「里面画了什么」。
+//
+// 位置是**算出来的**（`biuPlaybarPadX`、封面在 88 高的播放条里垂直居中），
+// 不是扫出来的：扫出来的话封面挪到别处那一格照样量得到一块。
+func coverColors(t *testing.T, tt *mygoui.Tester, inset int) []string {
+	t.Helper()
+	mid := (biuPlaybarHeight - biuCoverSize) / 2
+	x0, y0 := biuPlaybarPadX+inset, mid+inset
+	w, h := biuCoverSize-2*inset, biuCoverSize-2*inset
+	img := tt.Image()
+	seen := map[string]bool{}
+	var out []string
+	for y := range h {
+		for x := range w {
+			k := hexOf(img.At(x0+x, y0+y))
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// equalStrings 比两个字符串切片（次序有关）。
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // assertCoverGeometry 量封面在整张画面上的位置。
