@@ -177,10 +177,15 @@ func TestTheOwnerIsNeverSqueezedOutOfExistence(t *testing.T) {
 	const owner = "一个非常非常非常非常非常非常长的 UP 主名字"
 	for _, width := range []int{760, 900, 1000, 1200, 1280} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
-			// ⚠️ `PlayMode` 要给：那个键（#104）摆在**中间那一列的第二行**，
-			// 而中间那一列是从左边那块**借**宽度的（`Row.Fill` 里 `Grow(1)`
-			// 的是左边）。不摆它，这一条量的是「没有别的控件抢地方」的那种播放条，
-			// 而真窗口上它一直摆着——UP 名那一行被挤没了正是从这里来的。
+			// ⚠️ `PlayMode` 要给：那个键（#104）现在摆在**播放条右边那一组**的头
+			// 一个（票 #127 把它从进度那一行搬过去的）。
+			// ⚠️ **这一段原来写的是「它摆在中间那一列的第二行，而中间那一列是从
+			// 左边那块借宽度的」**——那句话连机制带位置一起过期了：它现在在右边
+			// 那一组，而那一组是**写死的**（不 `Grow`），所以它不借谁的宽度。
+			// **但「要给它」这件事本身还得留着**：右边那一组多了三枚键之后，
+			// 左边那一块就窄了，UP 名被挤没正是从这里来的——不摆它（也就是
+			// `State` 里不给 `PlayMode`），这一条量的是「没有别的控件抢地方」的
+			// 那种播放条，而真窗口上它一直摆着。
 			tt, _ := metaBarTester(t, app.State{
 				HasTrack: true, Title: "一首歌", Artist: owner, ArtistMid: 12345,
 				PlayMode: app.PlayModeSequence,
@@ -208,8 +213,8 @@ func TestTheOwnerIsNeverSqueezedOutOfExistence(t *testing.T) {
 func TestTheMetaRowDoesNotSquashTheTitle(t *testing.T) {
 	for _, width := range []int{760, 900, 1000, 1200, 1280} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
-			// ⚠️ `PlayMode` 同样要给：见上面那条的注释（#104 那个键和这一行
-			// 抢的是同一块宽度）。
+			// ⚠️ `PlayMode` 同样要给：见上面那条的注释（#104 那个键在右边那一组，
+			// 而右边多了三枚键之后左边那一块就窄了）。
 			tt, _ := metaBarTester(t, app.State{
 				HasTrack: true, Title: "一首歌的名字很长很长很长很长",
 				Artist: "一个名字很长的 UP 主名字", ArtistMid: 12345,

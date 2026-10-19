@@ -90,9 +90,13 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 	// 的（`mygo/ui/svg.go`），所以 `Label("分集")` 不许省——它既是无障碍名字，也是
 	// 无头 Tester 认得这个按钮的唯一凭据（`Find` 按 label 找）。
 	//
-	// 尺寸照另外三个键（赞 / 收藏 / 下载）：`iconSm` 的图标 + `iconHit` 的点击区 +
+	// 尺寸照这一行上另外两枚（赞 / 收藏）：`iconSm` 的图标 + `iconHit` 的点击区 +
 	// 每边 7 的内边距（那一圈留白就是 `TestTheHitAreaIsBiggerThanTheGlyph` 断的
 	// 「点击区比图形大」）。
+	//
+	// ⚠️ **这一段原来写的是「另外三个键（赞 / 收藏 / 下载）」**——票 #127 把
+	// 「下载」搬到了播放条右边那一组，而它跟着那一组换了尺寸（`iconMd`），
+	// 所以「照另外三个键」这句话连数量都不对了。
 	btn := iconButton(c, iconPageList, "分集", iconSm).
 		Size(iconHit, iconHit).Padding(0, 7).
 		Tooltip(partEntryTooltip(parts, cur, s.app.PartsWorthAsking(), s.app.PartsErr()))

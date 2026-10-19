@@ -124,9 +124,12 @@ func (s *Shell) viewNav(c *ui.Context) {
 			s.toggleMiniPlayer()
 		}
 		// 设置。Biu 的设置在侧栏菜单和头像下拉里（`layout/side/index.tsx`、
-		// `navbar/user/index.tsx`），顶栏没有。我们顶栏本来就收着「播放条放不下
-		// 的控件」（播放列表开关就在这儿），而设置是用户改任何东西都要走一遍的
-		// 那个入口——藏在头像下拉第三项里是两级。
+		// `navbar/user/index.tsx`），顶栏没有。⚠️ **这一段原来拿「顶栏收着播放条
+		// 放不下的控件（播放列表开关就在这儿）」当理由**——票 #127 把那个开关搬回
+		// 播放条之后，这一条论证就落空了，而它说的话**本身仍然成立**：设置是用户
+		// 改任何东西都要走一遍的那个入口，藏在头像下拉第三项里是两级。
+		// 侧栏里也有一条「设置」（那是我们自己多摆的，见 routes 表），顶栏这一枚
+		// 是给已经在别的页上、不想先回侧栏的人用的。
 		if iconButton(c, iconSettings, "设置", iconMd).
 			Size(iconHitMd, iconHitMd).Padding(0, 5).
 			Tooltip("设置").Clicked() {
