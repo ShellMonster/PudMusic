@@ -572,6 +572,41 @@ func TestTheCardGradientBarSaysTheDuration(t *testing.T) {
 	}
 }
 
+// TestTheCardGradientBarSaysThePlayCount 钉住封面底部那一条渐变**左半边是播放量**。
+//
+// 上游 `music-card/index.tsx:50-55` 的那一条上是「左播放量、右时长」。播放量来自
+// `Music.View`（见它那几段注释：有它的是首页 / 搜索歌曲视频 / UP 空间投稿 / 稍后再看）。
+//
+// ⚠️ **它必须在左边**：那一条只有 22 高，播放量和时长挤在两头，而这一条量的是播放量
+// 的右边缘紧跟着时长的左边——放反了就是两串字贴在一起。
+func TestTheCardGradientBarSaysThePlayCount(t *testing.T) {
+	songs := onlineSongs(8)
+	songs[2].Duration = 185 * time.Second
+	songs[2].View = 123_400 // →「12.3万」
+	_, tt := newGrid(t, (&recorded{}).actions(), songs, 1100, gridH)
+
+	hoverOn(t, tt, songs[2].Title)
+	settleFade(t, tt)
+
+	count, ok := tt.Find(PlayCountText(songs[2].View))
+	if !ok {
+		t.Fatalf("封面底下那一条上没有播放量 %q，画面上有 %q",
+			PlayCountText(songs[2].View), tt.Texts())
+	}
+	clock, ok := tt.Find(formatDuration(songs[2].Duration))
+	if !ok {
+		t.Fatalf("封面底下那一条上没有时长，文字有 %q", tt.Texts())
+	}
+	if count.X >= clock.X {
+		t.Errorf("播放量在 x=%.1f、时长在 x=%.1f——上游那一条是**左播放量、右时长**",
+			count.X, clock.X)
+	}
+	// 别的格没有播放量（夹具里就是没有），所以那一半不画。
+	if _, ok := tt.Find(PlayCountText(songs[3].View)); ok {
+		t.Errorf("没有播放量的那一格上也有字：%q", tt.Texts())
+	}
+}
+
 // TestTheCardPlayButtonPlaysThatCardAndTheRestAfterIt 钉住网格那个圆播放钮的**语义**
 // 和双击那一格一样：从这一首往后接。
 func TestTheCardPlayButtonPlaysThatCardAndTheRestAfterIt(t *testing.T) {

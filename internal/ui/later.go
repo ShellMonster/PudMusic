@@ -116,7 +116,9 @@ func laterRowOf(it app.LibraryItem) libraryRow {
 			Cover:    it.Cover,
 			Owner:    it.Owner,
 			Duration: it.Duration,
-			Item:     it.Item,
+			// 播放量：列表那一列和网格卡片封面底部那一条都是它（`Music.View`）。
+			View: it.View,
+			Item: it.Item,
 		},
 		Progress: it.Progress,
 		ViewedAt: it.ViewedAt,
@@ -312,24 +314,13 @@ func (s *Shell) laterMenu(m *ui.Menu, i int) {
 	}
 }
 
-// playCountText 是播放量那一列的字，抄上游的 `Intl.NumberFormat` compact：往上折成
-// 「1.2万」「1.2亿」。不折的话七位数播放量会把那一列撑到别列头上。
+// playCountText 是播放量那一列的字。**折法的出处只有一处**：`list.PlayCountText`
+// （网格卡片封面底部那一条渐变上画的是同一个数，而本包依赖那一层，反过来会循环依赖）。
 //
 // 名字里带 `play` 是因为主干上 `settings_tabs_test.go` 有一个**同名的测试辅助函数**
 // `countText(tt, want)`（数画面上有几个匹配的字）。同一个包里同名就是编译期的
 // 「redeclared」，而那个错和这一票在做的事看起来毫不相干。
-func playCountText(n int64) string {
-	switch {
-	case n <= 0:
-		return ""
-	case n >= 100_000_000:
-		return fmt.Sprintf("%.1f亿", float64(n)/1e8)
-	case n >= 10_000:
-		return fmt.Sprintf("%.1f万", float64(n)/1e4)
-	default:
-		return fmt.Sprint(n)
-	}
-}
+func playCountText(n int64) string { return list.PlayCountText(n) }
 
 // dayText 是那一天的字（`2026-10-16`），没有就空串（上游 `formatSecondsToDate`）。
 func dayText(t time.Time) string {

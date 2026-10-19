@@ -534,6 +534,9 @@ func (p *localPage) cardsOf() []list.Music {
 			Title:    tr.Title,
 			Duration: tr.Duration,
 			Item:     app.LocalItem(tr.Path),
+			// ⚠️ **没有 View，而且永远不会有**：文件没有播放量。B 站那份数说的是
+			// 「多少人在 B 站听过」，给本地文件挂上等于编一个数。所以网格卡片封面
+			// 底部那一条渐变上**左半边不画**（理由见 `list.Music.View`）。
 		}
 		if !tr.Playable() {
 			m.Owner = "这个格式我们放不了"

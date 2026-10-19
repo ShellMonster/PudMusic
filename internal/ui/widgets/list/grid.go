@@ -628,10 +628,9 @@ func (g *Grid) viewCellGuarded(c *ui.Context, i int, cell float32) {
 // 结构照 Biu 的 `components/music-card/index.tsx`：封面一块，下面 `mt-2` 是
 // 歌名，再下面一行是 UP 名（左边）和时长（右边）。
 //
-// ⚠️ **封面底下渐变条的左边空着**（那就是播放量）：上游 `music-card/index.tsx:50-55`
-// 的那一条上写着播放量，而那个数要 B 站接口才有（本地音乐没有，`list.Music` 上也就没
-// 这一列）。等接了接口再填——`hover.CardCover` 收一个空串就是不画那半边，画一列空白
-// 比不画更难看，而用户看见半行字会以为这一格「数据不全」。
+// ⚠️ **封面底下渐变条的左边是播放量**（上游 `music-card/index.tsx:50-55`）：填的是
+// `Music.View`。**没有这个数的那几页（本地音乐）那一半不画**——画一列空白比不画更难看，
+// 而用户看见半行字会以为这一格「数据不全」（理由见 `Music.View`）。
 func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 	t := c.Theme()
 	m := g.songs[i]
@@ -688,7 +687,8 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 		// ① 封面 + 它上面那圈 hover 反馈：右下角一个 40 的主色圆播放钮，封面底部
 		// 一条 black/90 的渐变（左播放量 / 右时长），都 200ms 淡入。
 		hover.CardCover(c, g.cache, m.Cover, cell, gridCoverH, onCell,
-			"", formatDuration(m.Duration), m.Title, func() { g.playFrom(i) })
+			PlayCountText(m.View), formatDuration(m.Duration), m.Title,
+			func() { g.playFrom(i) })
 
 		// ② 歌名 + UP 名/时长。
 		//

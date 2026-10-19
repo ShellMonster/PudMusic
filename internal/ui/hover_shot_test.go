@@ -45,14 +45,15 @@ func TestRenderHoverShots(t *testing.T) {
 			// 照 `flatbutton_test.go` 那一族写。
 			b := newTestShell(t, systemIsDark(dark))
 			s, tt := b.s, b.tt
-			// ⚠️ **歌名后面要带时长**：`homeSongsOf` 不给时长，而封面底部那条渐变上写着
-			// 时长——没有它的话渐变是空的一条（左边那个播放量我们压根没有，见
-			// `widgets/list/grid.go`），存出来的图上根本看不出那条渐变在。
+			// ⚠️ **时长和播放量都要给**：封面底部那条渐变上左边是播放量、右边是时长，
+			// 两样都缺的话存出来的图上是一条**空的**黑条——看不出它是渐变、也看不出
+			// 播放量那一半有没有接上。而这一页的接口明明两个都给（`homeMusicOf` 照翻）。
 			songs := fullSongs()
 			for i := range songs.tabs {
 				for k := range songs.tabs[i] {
 					songs.tabs[i][k].Duration = time.Duration(3+i)*time.Minute +
 						time.Duration(5+10*k)*time.Second
+					songs.tabs[i][k].View = int64(1200 + 137_000*i + 9_100*k)
 				}
 			}
 			s.home.SetSongs(songs)

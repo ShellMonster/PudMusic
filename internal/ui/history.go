@@ -108,7 +108,10 @@ func historyRowOf(it app.LibraryItem) libraryRow {
 			Cover:    it.Cover,
 			Owner:    it.Owner,
 			Duration: it.Duration,
-			Item:     it.Item,
+			// ⚠️ **没有 View**：历史记录那个接口不给播放量（`app.LibraryItem.View`
+			// 的注释写着「只有稍后再看有」）。所以网格卡片封面底部那一条渐变上
+			// **左半边不画**——而这不是「忘了填」，是这个接口没有。
+			Item: it.Item,
 		},
 		Progress: it.Progress,
 		ViewedAt: it.ViewedAt,

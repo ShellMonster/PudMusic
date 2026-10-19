@@ -321,8 +321,10 @@ type UpVideo struct {
 	// Duration 是时长。B 站给的是已经写好的字符串（`"3:20"`），
 	// 这里原样留着——自己从秒数再拼一遍只会拼出跟 B 站不一样的那一种。
 	Duration string
-	// Play 是播放数的文字（`"1.2万"`），B 站已经格式化好了。
-	Play string
+	// Play 是播放量。⚠️ **原子的那个接口给的是整数**（`play`），这里原样留着——
+	// 自己再折成「1.2万」的话，折法和界面那一处（`list.PlayCountText`）就分叉了，
+	// 同一首歌在两个页面上会显示成两个数。
+	Play int64
 	// Description 是简介。
 	Description string
 	// Author 是 UP 名（B 站那个接口给的 `author` 字段）。
@@ -452,7 +454,7 @@ func upVideoPageFrom(raw []byte, q UpVideoQuery) (UpVideoPage, error) {
 			Title:       v.Title,
 			Cover:       v.Pic,
 			Duration:    upVideoDuration(v.Length),
-			Play:        strconv.Itoa(v.Play),
+			Play:        int64(v.Play),
 			Description: v.Description,
 			Author:      v.Author,
 			Cid:         upVideoCid(v.Cid),

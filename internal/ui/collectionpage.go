@@ -257,6 +257,12 @@ func (s *Shell) fetchCollectionPage(ctx context.Context, ref app.CollectionRef, 
 			Owner:    m.Owner,
 			Duration: m.Duration,
 			Item:     onlineItemOf(m),
+			// ⚠️ **没有 View**：收藏夹那个接口的返回里播放量在 `cnt_info.play`，
+			// 而 `bili.Media` 这一层压根没解析它（`collection.go` 的
+			// `resourceListData` 里没有这一列）。所以这里是零值，网格卡片封面
+			// 底部那一条渐变上**左半边不画**——而这不是「忘了填」，是上游那份
+			// 还没解析。补它要改的是 `internal/service/bili`（加字段 + 解析），
+			// 而验收不许打真 B 站接口去核那个字段名，所以那一格留给接线那一票。
 		})
 	}
 	return list.Page{Songs: songs, HasMore: hasMore}, nil
