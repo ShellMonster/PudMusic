@@ -74,6 +74,10 @@ func (s *Shell) updateHint(st app.UpdateState) string {
 		return why
 	}
 	switch st.Phase {
+	case app.UpdateChecking:
+		// ⚠️ 这一档原来没有，于是「正在查」的时候下面那句话还是「点右边查一下有
+		// 没有新版本」——按钮已经按下去了，那句话却还在教用户怎么按。
+		return "正在问更新源有没有新版本"
 	case app.UpdateDownloading:
 		return "正在下载新版本"
 	case app.UpdateReady:
@@ -130,12 +134,39 @@ func updateCheckedOn(t time.Time) string {
 // 往返，而且那一趟有可能查到别的版本，于是用户点的和看到的不是一回事。
 func (s *Shell) settingsUpdateButton(c *ui.Context, st app.UpdateState) {
 	label, onClick, busy := s.updateEntryButton(st)
-	if ui.PrimaryButton(c, label).Disabled(busy).Clicked() && onClick != nil {
-		onClick()
+	switch {
+	case busy:
+		// 正在查 / 正在下：按钮**灰**着，里面**转**着一枚指示器。
+		//
+		// ⚠️ 原来只有「灰着」和「字换成『正在检查…』」，**没有转的那一下**：用户按
+		// 下去之后看到的是一枚和平时一样绿（只是淡了一半）的按钮，而 Biu 那个
+		// `<AsyncButton isLoading>` 画的是一枚**转圈**的按钮——「在忙」这件事于是
+		// 只靠字说，没有一个能一眼看出来的样子。
+		//
+		// 指示器是框架现成的 `ui.Spinner`（转动的辐条，和 AppKit 那个一样），不
+		// 另起一套动画。按钮上那一句没丢：它是这个按钮的**无障碍名字**
+		// （`Label`），读屏的人听到的还是「正在检查…」。
+		ui.PrimaryButton(c, "").Disabled(true).Label(label).Children(func() {
+			ui.Spinner(c).Size(14, 14).TextColor(c.Theme().AccentText)
+		})
+	case onClick == nil:
+		// 这一版不能自动更新：按钮关着，**字留着**（为什么不能，下面那句话说了）。
+		//
+		// ⚠️ 它和「在忙」是两件事：忙着的时候按钮该转圈，不能更新的时候它只是
+		// 关着——转圈会让用户以为还在查。
+		ui.PrimaryButton(c, label).Disabled(true)
+	default:
+		if ui.PrimaryButton(c, label).Clicked() {
+			onClick()
+		}
 	}
 }
 
-// updateEntryButton 是设置页上那个按钮的三样东西：写什么、按下去做什么、关不关。
+// updateEntryButton 是设置页上那个按钮的三样东西：写什么、按下去做什么、在不在忙。
+//
+// ⚠️ **「在忙」只认真的在忙的那两档**（正在查、正在下）。「这一版不能自动更新」
+// 那一档按钮也是关着的，但它**不是在忙**——它上面不该转圈（转圈会让用户以为还
+// 在查），只是关着，而**为什么**写在下面那句话里。
 func (s *Shell) updateEntryButton(st app.UpdateState) (label string, onClick func(), busy bool) {
 	switch st.Phase {
 	case app.UpdateDownloading:
@@ -148,8 +179,9 @@ func (s *Shell) updateEntryButton(st app.UpdateState) (label string, onClick fun
 		return updateBtnView, s.openUpdateDialog, false
 	}
 	if !st.Enabled {
-		// 不能更新的时候按钮是关的，而**为什么**写在下面那句话里。
-		return updateBtnCheck, nil, true
+		// 不能更新的时候按下去什么也不发生（onClick 是 nil），而**为什么**写在
+		// 下面那句话里。
+		return updateBtnCheck, nil, false
 	}
 	return updateBtnCheck, s.app.CheckUpdates, false
 }

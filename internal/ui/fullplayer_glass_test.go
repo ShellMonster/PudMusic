@@ -1,0 +1,556 @@
+// 全屏播放器这一票的验收：毛玻璃在、底下的内容看得清、点得动，底部控制条和顶栏
+// 一样地淡入，外加那三个「状态缺口」。
+//
+// 这一族走的是仓库现成的接缝：外壳与测试器基座（shelltest_test.go）、假时钟
+// （clock.go）、`BIU_SHOT_DIR` 出图、逐像素采样。
+//
+// ⚠️ **断言的是「那一层是毛玻璃」和「糊开了」，不是和 Biu 的截图逐像素对齐**：
+// 框架的毛玻璃只有两档、也没有按设备分级那套入口（票面写明「不做」），所以
+// 逐像素对齐本来就不是这一票的判据。
+package ui
+
+import (
+	"bytes"
+	"image"
+	"image/color"
+	"image/png"
+	"math"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/egoist/mygo/plugins/glass"
+	mygoui "github.com/egoist/mygo/ui"
+)
+
+// ---- 毛玻璃 ----
+
+// TestTheFullPlayerBackdropIsTheFrameworksOwnGlass 断「背景那一层是毛玻璃材质」。
+//
+// 判据是**材质本身**，不是画面上的像素：那一层填的必须是**框架自带**的那一份
+// （`plugins/glass`：Metal / HLSL / GLSL 三套着色器 + CPU 等价实现，三端一致），
+// 而不是我们自己画的等效效果。
+//
+// ⚠️ 为什么读得到：框架的 `Element.Material` 只往节点上设、没有读回来的办法
+// （`mygo/ui/frame.go:144`），所以这一层把「背景那一层填的是什么」收在一个地方
+// （`fullBackdropMaterial`），这里读的就是它。换回一层纯色、或者换成自绘的
+// 等效效果，这一条立刻红。
+func TestTheFullPlayerBackdropIsTheFrameworksOwnGlass(t *testing.T) {
+	switch fullBackdropMaterial().(type) {
+	case glass.Blur, glass.Glass:
+		// 就是框架那一份。
+	default:
+		t.Fatalf("背景那一层填的是 %T，不是框架自带的毛玻璃（glass.Blur / glass.Glass）",
+			fullBackdropMaterial())
+	}
+	// 而它得真的是**糊**的：半径不能是 0（0 等于没糊）。
+	if b, ok := fullBackdropMaterial().(glass.Blur); ok && b.Radius <= 0 {
+		t.Errorf("背景那一层的模糊半径是 %g——那等于没糊", b.Radius)
+	}
+}
+
+// TestTheFullPlayerBackdropIsActuallyBlurred 断「那一层真的把封面糊开了」。
+//
+// 判据是**能量**：封面中间有一条硬边（黑 | 白），糊开之后那条线上不该再有硬跳。
+// 不糊的话相邻两像素差一百多（白的那半压完 55% 的黑是 115），糊开之后是几个。
+//
+// ⚠️ **先断「封面真的在画面上」**：不然「没有边可糊」也会绿（封面没下回来的时候
+// 背景是一片平色，最大跳变是 0）。两半的明暗差就是「封面在」的证据。
+func TestTheFullPlayerBackdropIsActuallyBlurred(t *testing.T) {
+	s, tt := fullTesterWithCover(t)
+	waitFrames(t, tt, "封面下回来了", func() bool {
+		return s.images.Get(s.app.Snapshot().CoverURL).Ready()
+	})
+	openFull(t, tt)
+
+	// 等的是「糊开了」这个**状态**，不是「第一帧」：毛玻璃读的是「它之前画过
+	// 的东西」，而底（封面）刚画上去的那一帧，渲染器未必已经把它糊开。
+	//
+	// ⚠️ 这个等法也是断言：糊一辈子不糊开的话，10 秒之后这条会红（红的还是
+	// 「封面糊开了」这一句）。
+	waitFrames(t, tt, "封面糊开了", func() bool { return coverEdgeIsSoft(tt) })
+
+	img := tt.Image()
+	const (
+		edgeX = fullWinW / 2 // 封面左右对半的那条竖线落在窗口正中
+		row   = fullWinH / 2
+	)
+	// 左半暗、右半亮：封面确实铺在画面上。
+	left := img.RGBAAt(edgeX-200, row)
+	right := img.RGBAAt(edgeX+200, row)
+	if int(right.R)-int(left.R) < 40 {
+		t.Fatalf("封面没铺满画面（左 %v、右 %v）——这一条量的是「有没有糊」，"+
+			"封面不在就无从谈起", left, right)
+	}
+	// 那条竖边糊开了没有：相邻两像素的差不该再是硬的。
+	if worst := coverEdgeJump(tt); worst > 30 {
+		t.Errorf("封面中间那条竖边还是硬的（相邻两像素最大差 %d）——背景那一层没有糊", worst)
+	}
+}
+
+// coverEdgeJump 是封面中间那条竖边上，相邻两像素的最大差。
+//
+// 不糊的话是一百多（白的那半压完 55% 的黑是 115，黑的那半是 0）；糊开之后
+// 是一条几十像素宽的渐变，每一步只有几个。
+func coverEdgeJump(tt *mygoui.Tester) int {
+	img := tt.Image()
+	const (
+		edgeX = fullWinW / 2
+		row   = fullWinH / 2
+	)
+	worst := 0
+	for x := edgeX - 60; x < edgeX+60; x++ {
+		a := img.RGBAAt(x, row)
+		b := img.RGBAAt(x+1, row)
+		if d := absDiff(a.R, b.R); d > worst {
+			worst = d
+		}
+	}
+	return worst
+}
+
+// coverEdgeIsSoft 是那条竖边糊开了没有。
+func coverEdgeIsSoft(tt *mygoui.Tester) bool { return coverEdgeJump(tt) <= 30 }
+
+// TestTheFullPlayerContentIsStillClickableThroughTheGlass 断「糊了之后点得动」。
+//
+// 毛玻璃那一层是**满窗大小**的：它要是吃掉了点击，满屏就成了一个点不动的屏。
+// 判据是走真的那一下点击（点「关闭全屏」，满屏真的关掉）。
+func TestTheFullPlayerContentIsStillClickableThroughTheGlass(t *testing.T) {
+	s, tt, _ := fullTester(t)
+	openFull(t, tt)
+
+	if err := tt.Click("关闭全屏"); err != nil {
+		t.Fatalf("点不了「关闭全屏」：%v（文字：%q）", err, tt.Texts())
+	}
+	tt.Frame()
+	if s.full.open {
+		t.Error("满屏里那一层毛玻璃把点击吃了——「关闭全屏」按下去满屏还在")
+	}
+}
+
+// TestTheTextOverTheBlurredBackgroundIsStillReadable 断「底下的字看得清」。
+//
+// 满屏上的字全是白的（`fullOnColor` / `fullDimColor`），底下是糊过的封面加一层
+// 55% 的黑。判据是**画出来的对比度**：字最亮的那一个像素，和它背后底色的那一个
+// 像素，算 WCAG 的对比度。
+//
+// ⚠️ **测的是最坏的一档**：封面是**纯白**的时候，底色最亮（白压完 55% 的黑是
+// 115），白字是 244 —— 对比度 4.3:1。大字（这里那首 18px 粗体的歌名）按 WCAG AA
+// 的大字一档（3:1）算，够。
+//
+// ⚠️ **毛玻璃没有改这个数**：`glass.Blur` 是「没有色调、没有描边、没有影子」的
+// 背景模糊（框架 `plugins/glass` 的文档），它只把底下那张图糊开，不动亮度——
+// 所以糊之前和糊之后，底色是同一个数。
+//
+// ⚠️ 满屏里**还没有歌词**（歌词开关是 BMG-65 的活），所以这一条量的是满屏里
+// 现有的那些字；歌词那一档将来加上时用的是同一套底色，同一个判据。
+func TestTheTextOverTheBlurredBackgroundIsStillReadable(t *testing.T) {
+	// 纯白的封面：底色最亮的那一档。
+	s, tt := fullTesterWithCoverPNG(t, whitePNG(t, 1200, 1200))
+	waitFrames(t, tt, "封面下回来了", func() bool {
+		return s.images.Get(s.app.Snapshot().CoverURL).Ready()
+	})
+	openFull(t, tt)
+	tt.Frame()
+
+	title := s.app.Snapshot().Title
+	box, ok := tt.Find(title)
+	if !ok {
+		t.Fatalf("画面上找不到歌名 %q，文字有 %q", title, tt.Texts())
+	}
+	// 等封面**画上来**：封面没画上来的时候底下是主题的深色底，那样的对比度
+	// 好看得多——量的是一个不存在的情形。
+	//
+	// 白封面压完 55% 的黑是 115（255 × 0.45），所以底色到 100 以上就说明封面
+	// 已经铺上来了。
+	waitFrames(t, tt, "封面画上来了", func() bool {
+		p := tt.Image().RGBAAt(int(box.X)-10, int(box.Y+box.H/2))
+		return int(p.R) > 100
+	})
+	img := tt.Image()
+	// 字最亮的那一个像素（抗锯齿的边不算，要字的核心）。
+	best := color.RGBA{}
+	for y := int(box.Y); y < int(box.Y+box.H); y++ {
+		for x := int(box.X); x < int(box.X+box.W); x++ {
+			if p := img.RGBAAt(x, y); int(p.R) > int(best.R) {
+				best = p
+			}
+		}
+	}
+	// 底色：字框左边十像素那一块里**最亮**的那几个（底越亮越难读，取最坏的一档）。
+	bg := color.RGBA{}
+	for y := int(box.Y); y < int(box.Y+box.H); y++ {
+		if p := img.RGBAAt(int(box.X)-10, y); int(p.R) > int(bg.R) {
+			bg = p
+		}
+	}
+	ratio := contrastRatio(best, bg)
+	t.Logf("歌名 %v、它背后的底色 %v，对比度 %.2f:1", best, bg, ratio)
+	if ratio < 3 {
+		t.Errorf("歌名和它背后的底色对比度只有 %.2f:1（字 %v、底 %v）——糊过的背景"+
+			"太亮，白字读不出来", ratio, best, bg)
+	}
+}
+
+// ---- 底部控制条的淡入 ----
+
+// TestTheBottomControlsComeBackTheSameWayTheTopBarDoes 断「底下那一条和顶栏
+// 一样的出现方式」。
+//
+// 判据是**同一帧里两者的对比**：界面藏了三秒之后指针一动，顶栏是慢慢淡回来的
+// （`Opacity(AnimateTo(…))`），底下那一条原来写的是 `Opacity(shown)`——那是
+// 「啪」地一下出现的。于是同一帧里：顶栏还看不见，底下那一条已经全亮了。
+//
+// 一个界面里两种响应，用户看得见：手一回来，底下那一条先「啪」地一下弹出来，
+// 顶栏才慢慢淡回来。
+func TestTheBottomControlsComeBackTheSameWayTheTopBarDoes(t *testing.T) {
+	s, tt, fc := fullTester(t)
+	openFull(t, tt)
+	tt.Move(600, 400)
+	tt.Frame()
+	settleFull(t, tt)
+
+	// 底下那一条和顶栏各占窗口的一条横带。
+	topStrip := mygoui.Rect{X: 0, Y: 0, W: fullWinW, H: fullBarHeight}
+	bottomStrip := mygoui.Rect{X: 0, Y: fullWinH - fullControlsHeight, W: fullWinW, H: fullControlsHeight}
+	// 两条各自「全亮」的时候有多亮（当基准）。
+	topShown := maxBright(tt.Image(), topStrip)
+	bottomShown := maxBright(tt.Image(), bottomStrip)
+	if topShown < 100 || bottomShown < 100 {
+		t.Fatalf("两条全亮时不够亮（顶栏 %d、底下 %d）——这一条量的是「淡入的那一帧", topShown, bottomShown)
+	}
+
+	// 三秒到点 + 淡出走完（两个钟都要推，见 advanceFull）。
+	advanceFull(s, tt, fc, biuHideSeconds*time.Second+time.Second)
+
+	// 指针一动，界面回来。这一帧是**淡入刚开始**的那一帧。
+	tt.Move(604, 404)
+	tt.Frame()
+
+	// 顶栏：还在淡入（不透明度是 0，整个元素一个像素都不画）。
+	if got := maxBright(tt.Image(), topStrip); got > topShown/2 {
+		t.Fatalf("顶栏在淡入的第一帧就亮到了 %d（全亮是 %d）——它不是慢慢淡回来的", got, topShown)
+	}
+	// 底下那一条：**必须一样**。原来它是 `Opacity(shown)`——一下子就是 1，
+	// 于是这一帧它已经全亮了（244），而顶栏还在黑着：同一个界面里两种响应。
+	if got := maxBright(tt.Image(), bottomStrip); got > bottomShown/2 {
+		t.Errorf("底下那一条在淡入的第一帧就亮到了 %d（全亮是 %d）——它是「啪」地一下"+
+			"出现的，和顶栏不是一回事", got, bottomShown)
+	}
+
+	// 走完动画之后它得回来（这一半是「淡入」的另一半：不是永远不出现）。
+	settleFull(t, tt)
+	if got := maxBright(tt.Image(), bottomStrip); got < bottomShown/2 {
+		t.Errorf("淡入走完之后底下那一条只有 %d（全亮是 %d）——它没有回来", got, bottomShown)
+	}
+}
+
+// ---- 状态缺口 ----
+
+// TestTheProgressKnobStaysVisibleWhileDragging 断「拖进度条时旋钮不响应」。
+//
+// 框架那一颗旋钮被按住的时候会变成一片透镜：白面整个褪掉，只留一圈黑边
+// （`mygo/ui/widgets.go` 的 `paintKnob`）。满屏的底永远是深的，那圈黑边落在上面
+// 几乎看不见——用户按住旋钮拖，旋钮反而不见了。
+//
+// 判据是**画面上那一块还有没有亮的东西**：按住的时候旋钮得还在，而且旋钮得跟着
+// 拖动走。
+func TestTheProgressKnobStaysVisibleWhileDragging(t *testing.T) {
+	_, tt, _ := fullTester(t)
+	openFull(t, tt)
+
+	box, ok := tt.Find("全屏播放进度")
+	if !ok {
+		t.Fatalf("找不到满屏那条进度，文字有 %q", tt.Texts())
+	}
+	at := float32(0.25)
+	x := box.X + box.W*at
+	y := box.Y + box.H/2
+	knob := mygoui.Rect{X: x - 16, Y: box.Y, W: 32, H: box.H}
+
+	tt.Press(x, y)
+	settleFull(t, tt)
+
+	if n := brightIn(tt.Image(), knob); n == 0 {
+		t.Errorf("按住进度条的时候旋钮不见了（那一块 %v 一个亮像素都没有）——"+
+			"框架那一颗按住会褪成黑边透镜，深色底上等于没有", knob)
+	}
+
+	// 旋钮得跟着拖动走。
+	tt.Move(box.X+box.W*0.6, y)
+	settleFull(t, tt)
+	moved := mygoui.Rect{X: box.X + box.W*0.6 - 16, Y: box.Y, W: 32, H: box.H}
+	if n := brightIn(tt.Image(), moved); n == 0 {
+		t.Errorf("拖到 60%% 之后旋钮不在那儿了（%v 一个亮像素都没有）", moved)
+	}
+	tt.Release(box.X+box.W*0.6, y)
+	settleFull(t, tt)
+}
+
+// TestTheSpectrumSwitchMovesItsKnobAtOnce 断「开关按下去，旋钮立刻就过去」。
+//
+// 判据是**旋钮在哪半边**：开关是 36×20 的一颗，旋钮是一颗白圆，关着的时候在左
+// 半边、开着的时候在右半边。
+//
+// ⚠️ 原来用 `ui.Switch`：它的旋钮是**滑过去**的（`mygo/ui/widgets.go` 的
+// `coreSwitch`：`sw.Animate("knob", …, 140*time.Millisecond)`），而滑动的起点是
+// **按下之前**那个位置——于是按下去的那一帧旋钮一动不动，要等 140ms 之后才开始
+// 滑。而无头 Tester 的钟**站着不动**，那 140ms 永远走不完：实测按下去之后开关
+// 那一块**一个像素都没变**。
+//
+// 这一层用的是本包自己的 `staticSwitch`（见 static_switch.go）：旋钮直接跳到新的
+// 位置。
+func TestTheSpectrumSwitchMovesItsKnobAtOnce(t *testing.T) {
+	_, tt, _ := fullTester(t)
+	openFull(t, tt)
+	if err := tt.Click("全屏设置"); err != nil {
+		t.Fatalf("点不了偏好面板：%v（文字：%q）", err, tt.Texts())
+	}
+	tt.Frame()
+	if tt.HasText("频谱图颜色") {
+		t.Fatal("频谱还关着，颜色那一行已经在了")
+	}
+
+	sw, ok := tt.Find("显示频谱图")
+	if !ok {
+		t.Fatalf("找不到那个开关，文字有 %q", tt.Texts())
+	}
+	// 关着的时候旋钮在左半边。
+	if left, right := knobHalves(tt.Image(), sw); left == 0 || right != 0 {
+		t.Fatalf("开关关着的时候旋钮不在左半边（左 %d、右 %d）", left, right)
+	}
+
+	tt.ClickAt(sw.X+sw.W/2, sw.Y+sw.H/2)
+	// ⚠️ **不推钟**：这一帧就该是新的样子。
+	tt.Frame()
+
+	if left, right := knobHalves(tt.Image(), sw); right == 0 || left != 0 {
+		t.Errorf("按下去之后旋钮没有到右半边（左 %d、右 %d）——它是滑过去的，"+
+			"而那 140ms 要等钟走", left, right)
+	}
+	// 底下那一行跟着开关走（这一条不区分修没修，是顺带钉住的行为）。
+	if !tt.HasText("频谱图颜色") {
+		t.Errorf("开关开了，颜色那一行没有出现，文字有 %q", tt.Texts())
+	}
+}
+
+// ---- 出图 ----
+
+// TestRenderFullPlayerShots 存图：满屏播放器，深浅各一套。
+//
+//	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderFullPlayerShots
+//
+// ⚠️ **深浅两套都要出**：满屏的控件和字全是白的（`fullOnColor`），而背景是糊过
+// 的封面——浅色封面和深色封面糊出来是两回事，只出一套等于没验。
+func TestRenderFullPlayerShots(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	body := splitCoverPNG(t, 1200, 1200)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			// ⚠️ **假时钟**：满屏那个「三秒藏界面」的钟用真时钟的话，每三秒会叫醒
+			// 界面一次——那一下落在「等动画走完」的当口，动画就永远走不完
+			// （实测机器一忙就飘：推了 1.28s 的钟还在要帧）。
+			b := newTestShell(t, at(fullWinW, fullWinH), systemIsDark(dark),
+				withClock(newFakeClock(time.Unix(1_700_000_000, 0))))
+			item := app.LocalItem(flacPath(t))
+			item.Cover = srv.URL + "/cover.png"
+			if err := b.a.Enqueue(item); err != nil {
+				t.Fatalf("把歌放进队列：%v", err)
+			}
+			waitFrames(t, b.tt, "歌开起来了", func() bool {
+				return b.a.Snapshot().HasTrack
+			})
+			waitFrames(t, b.tt, "封面下回来了", func() bool {
+				return b.s.images.Get(item.Cover).Ready()
+			})
+			b.s.openFullPlayer()
+			waitFrames(t, b.tt, "满屏开出来了", func() bool {
+				return b.tt.HasText("关闭全屏")
+			})
+			settleFull(t, b.tt)
+			save(t, dir, "60-全屏播放器-毛玻璃-"+name+".png", b.tt)
+			b.Close()
+		})
+	}
+}
+
+// ---- 帮手 ----
+
+// splitCoverPNG 编一张左右对半（黑 | 白）的 PNG，当封面用。
+//
+// 为什么是**硬边**：毛玻璃糊的就是边，而硬边糊开之后那一段是渐变的——「有没有
+// 糊」于是有一个能量的判据（相邻两像素的差）。
+func splitCoverPNG(t *testing.T, w, h int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := range h {
+		for x := range w {
+			if x < w/2 {
+				img.Set(x, y, color.RGBA{A: 255})
+			} else {
+				img.Set(x, y, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+			}
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// whitePNG 编一张纯白的 PNG，当封面用（底色最亮的那一档）。
+func whitePNG(t *testing.T, w, h int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := range h {
+		for x := range w {
+			img.Set(x, y, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// fullTesterWithCover 造一个开着歌、而且那首歌**有封面**的界面。
+//
+// 和 fullTester 的差别只有封面那一个字段——而没有封面的话背景是一片平色，
+// 「糊没糊」就无从量起（没有边可糊）。
+func fullTesterWithCover(t *testing.T) (*Shell, *mygoui.Tester) {
+	t.Helper()
+	return fullTesterWithCoverPNG(t, splitCoverPNG(t, 1200, 1200))
+}
+
+// fullTesterWithCoverPNG 是上面那一个，封面由调用方给。
+func fullTesterWithCoverPNG(t *testing.T, body []byte) (*Shell, *mygoui.Tester) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+
+	s, tt := newShell(t)
+	fc := newFakeClock(time.Unix(1_700_000_000, 0))
+	s.clock = fc
+	tt.SetDark(true)
+
+	item := app.LocalItem(flacPath(t))
+	item.Cover = srv.URL + "/cover.png"
+	if err := s.app.Enqueue(item); err != nil {
+		t.Fatalf("把歌放进队列：%v", err)
+	}
+	tt.Frame()
+	if !s.app.Snapshot().HasTrack {
+		t.Fatalf("歌没开起来：%q", s.app.Snapshot().Err)
+	}
+	return s, tt
+}
+
+// brightIn 是 box 里接近白的像素个数（深色主题下界面自己画的东西）。
+func brightIn(img *image.RGBA, box mygoui.Rect) int {
+	n := 0
+	for y := max(int(box.Y), img.Rect.Min.Y); y < min(int(box.Y+box.H), img.Rect.Max.Y); y++ {
+		for x := max(int(box.X), img.Rect.Min.X); x < min(int(box.X+box.W), img.Rect.Max.X); x++ {
+			p := img.RGBAAt(x, y)
+			if p.R > 190 && p.G > 190 && p.B > 190 {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// knobHalves 数开关那一个框的左右两半里各有多少个亮像素（旋钮是白的）。
+func knobHalves(img *image.RGBA, box mygoui.Rect) (left, right int) {
+	mid := box.X + box.W/2
+	for y := max(int(box.Y), img.Rect.Min.Y); y < min(int(box.Y+box.H), img.Rect.Max.Y); y++ {
+		for x := max(int(box.X), img.Rect.Min.X); x < min(int(box.X+box.W), img.Rect.Max.X); x++ {
+			p := img.RGBAAt(x, y)
+			if p.R < 190 || p.G < 190 || p.B < 190 {
+				continue
+			}
+			if float32(x) < mid {
+				left++
+			} else {
+				right++
+			}
+		}
+	}
+	return left, right
+}
+
+// maxBright 是 box 里最亮的那一个像素的 R 通道。
+//
+// 为什么用「最亮」而不是「够亮的个数」：淡入是**不透明度**在动，而一个半透明的
+// 白字（0.5 → 122）够不到「接近白」那个门槛——数个数的话，动画中途看起来跟
+// 「一个都没画」一模一样。最亮的那一个像素是**连续**的，门槛定在「全亮的一半」
+// 上，两种状态就分得开了。
+func maxBright(img *image.RGBA, box mygoui.Rect) int {
+	best := 0
+	for y := max(int(box.Y), img.Rect.Min.Y); y < min(int(box.Y+box.H), img.Rect.Max.Y); y++ {
+		for x := max(int(box.X), img.Rect.Min.X); x < min(int(box.X+box.W), img.Rect.Max.X); x++ {
+			if p := img.RGBAAt(x, y); int(p.R) > best {
+				best = int(p.R)
+			}
+		}
+	}
+	return best
+}
+
+// contrastRatio 是 a 和 b 的 WCAG 对比度。
+func contrastRatio(a, b color.RGBA) float64 {
+	la, lb := relLuminance(a), relLuminance(b)
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
+// relLuminance 是 WCAG 那个相对亮度。
+func relLuminance(c color.RGBA) float64 {
+	f := func(v uint8) float64 {
+		s := float64(v) / 255
+		if s <= 0.03928 {
+			return s / 12.92
+		}
+		return math.Pow((s+0.055)/1.055, 2.4)
+	}
+	return 0.2126*f(c.R) + 0.7152*f(c.G) + 0.0722*f(c.B)
+}
+
+// settleFull 推钟直到框架不再要帧（动画走完了）。
+//
+// 用的是仓库自己的写法（见 settings_test.go 的 settleSettingsPage）：
+// **`tt.Advance(d)` 配 `tt.FramePending()`**，不数帧。Tester 的钟站着不动，
+// 数帧那种等法会静默失效（CLAUDE.md §2）。
+func settleFull(t *testing.T, tt *mygoui.Tester) {
+	t.Helper()
+	const step = 16 * time.Millisecond
+	for range 80 {
+		tt.Advance(step)
+		tt.Frame()
+		if !tt.FramePending() {
+			return
+		}
+	}
+	t.Fatal("推了 1.28s 的钟，界面还在要帧——动画停不下来")
+}

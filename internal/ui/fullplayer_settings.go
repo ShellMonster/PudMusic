@@ -50,16 +50,38 @@ func (s *Shell) viewFullSettings(c *ui.Context) {
 
 	ui.Column(c).Width(280).Padding(14).Gap(12).Children(func() {
 		show := prefs.ShowSpectrum
-		if ui.Switch(c, &show).Label("显示频谱图").Changed() {
+		// ⚠️ **用 `staticSwitch`，不是 `ui.Switch`**。
+		//
+		// 框架那一颗的旋钮是**滑过去**的（`mygo/ui/widgets.go` 的 `coreSwitch`：
+		// `sw.Animate("knob", …, 140*time.Millisecond)`），而滑动的起点是**按下
+		// 之前**那个位置——于是按下去的那一帧旋钮**一动不动**，它要等 140ms 才挪
+		// 到位。
+		//
+		// 而在**钟站着不动**的地方（无头 Tester），那 140ms 永远走不完：实测点
+		// 下去之后开关那一块**一个像素都没变**（旋钮还在原来那半边）。
+		//
+		// 这一层用的 `staticSwitch` 是本包自己的那一个（`static_switch.go`，
+		// 设置页上每一个开关都用它）：旋钮**直接跳**到新的位置。
+		if staticSwitch(c, &show).Label("显示频谱图").Changed() {
 			s.app.SetFullPlayerPrefs(app.FullPlayerPrefs{
 				ShowSpectrum:  show,
 				SpectrumColor: prefs.SpectrumColor,
 			})
 		}
 
+		// ⚠️ **判的是 `show`，不是 `prefs.ShowSpectrum`**。
+		//
+		// `prefs` 是这一帧**开头**拍的那一份快照，而用户刚刚按下的那一下改的是
+		// `show`（框架的开关把新值写进它绑着的那个局部，见 `mygo/ui/value_input.go`
+		// 的 `toggleInput`）。判快照的话，这一行得等**下一帧**才跟上。
+		//
+		// ⚠️ 现在**看不出来**：框架一遍 `Frame()` 跑两遍 view，第二遍读到的是刚
+		// 存进去的偏好。但那是框架的巧合，不是这一层的保证——判 `show` 才是
+		// 「这一行跟着开关走」这件事本身。
+		//
 		// 频谱关着的时候不摆颜色：Biu 那边是 `{values?.showSpectrum && …}`，
 		// 关着的时候调了颜色界面上什么也不会变，留着那一行只会让人白调一次。
-		if !prefs.ShowSpectrum {
+		if !show {
 			return
 		}
 		s.viewSpectrumColor(c, prefs.SpectrumColor)

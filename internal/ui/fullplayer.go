@@ -33,6 +33,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -92,13 +93,36 @@ const (
 // fullScrim 是背景上那层压暗。
 //
 // Biu 那边是「模糊过的封面 + 三层 radial-gradient」（`glassmorphism.ts`），而
-// PLAN §4 R24 已经定了用 `plugins/glass`、接受视觉差异。**这一票不引那个插件**：
-// 频谱和共享元素转场才是这一票的活，毛玻璃是另一笔账（见收尾报告的「没做的」）。
-//
-// 为什么一定要压这一层：满屏的控件和字全是**白**的（Biu 那边
+// 毛玻璃那一层已经在了（见 fullBackdropMaterial）。压暗这一层留着，因为它管的
+// 是**另一件事**：满屏的控件和字全是**白**的（Biu 那边
 // `dark: showBlurredBackground || appTheme === "dark"` 强制深色前景）。不压暗的
 // 话，一张浅色的歌封面会把白字吃掉——而 Biu 那边靠三层渐变挡着，我们这边靠这一层。
+//
+// ⚠️ 它压在毛玻璃**上面**（不是下面）：它要压的是糊完的那一层。
 var fullScrim = ui.RGBA(0, 0, 0, 0.55)
+
+// fullBackdropBlur 是背景那一层糊掉多少（DIP，标准差，和 CSS 的 blur() 一样）。
+//
+// Biu 那边是「同一张图放大四到五倍并且明显模糊」（`glassmorphism.ts`），而框架的
+// 毛玻璃只有两档、也没有按设备分级那套入口（票面写明「不做」），所以这里是**一个
+// 固定的、够糊的值**：满窗 1200×800 上 σ=32 之后，封面上任何细节都读不出来，
+// 界面上那些白字底下只剩一层底色。
+//
+// ⚠️ 这是**毛玻璃自己的模糊半径**，不是我们画的等效效果——真正画上去的是框架
+// `plugins/glass` 那一份。
+const fullBackdropBlur = 32
+
+// fullBackdropMaterial 是满屏背景那一层填的材质。
+//
+// ⚠️ **它是包级的一个函数，不是常量**：框架的 `Element.Material` 只往节点上设、
+// 没有读回来的办法（`mygo/ui/frame.go:144`），而这一票的验收口径是「背景那一层
+// 是毛玻璃材质」——「那一层」总得有个能读的地方。测试读的就是这个函数，所以把
+// 它换回一层纯色、或者换成我们自己画的等效效果，那条断言会红。
+//
+// 里面装的是**框架自带的那一份**：`glass.Blur` 是三端一致的背景模糊（Metal /
+// HLSL / GLSL 三套着色器 + CPU 等价实现），不是自绘的等效效果，也不是新增依赖
+// （和框架同一个模块，许可清单不变）。
+func fullBackdropMaterial() ui.Material { return glass.Blur{Radius: fullBackdropBlur} }
 
 // fullOnColor / fullDimColor 是压在背景上的两级前景色（白 / 白一点七折）。
 var (
@@ -316,10 +340,19 @@ func (s *Shell) openFullPlayer() {
 
 // ---- 背景 ----
 
-// viewFullBackdrop 是满屏背景：封面铺满整窗 + 一层压暗。
+// viewFullBackdrop 是满屏背景：封面铺满整窗 + 一层毛玻璃 + 一层压暗。
 //
 // 封面取不到（本地音乐没有封面地址，见 `app.State.CoverURL`）时铺主题的底色，
 // 不是一片黑——那是「没有这一张图」，不是「加载失败」。
+//
+// ## 三层的顺序是**要紧**的
+//
+// 毛玻璃读的是「**它之前画过的东西**」（框架 `plugins/glass` 的文档：what shows
+// through is what was painted under it in the same window），所以它必须画在封面
+// **之后**；而压暗那一层要盖在毛玻璃**上面**——它压的是糊完的那一层，白字才有底。
+//
+// ⚠️ 顺序反了的话，糊的是**主布局**（浮层底下那一层）而不是封面，界面上是
+// 「封面还是清晰的，只有底下在动」。
 func (s *Shell) viewFullBackdrop(c *ui.Context, url string) {
 	ui.Box(c).Key("full-backdrop").
 		Absolute().Left(0).Top(0).Right(0).Bottom(0).
@@ -328,6 +361,13 @@ func (s *Shell) viewFullBackdrop(c *ui.Context, url string) {
 			if st := s.images.Get(url); st.Ready() {
 				ui.Image(c, st.Bitmap).Fill().Fit(ui.Cover)
 			}
+			// 毛玻璃那一层：满窗大小，糊的是底下那张封面。
+			//
+			// ⚠️ 它**不接管点击**：这一层在 `probe` 底下，而 `probe` 是那个铺满整窗
+			// 的 `Modal` 盒子，点击先撞上它（见 viewFullPlayer 的注释）。
+			ui.Box(c).Key("full-glass").
+				Absolute().Left(0).Top(0).Right(0).Bottom(0).
+				Material(fullBackdropMaterial())
 			ui.Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Background(fullScrim)
 		})
 }
@@ -496,12 +536,22 @@ func fullCoverSize(c *ui.Context) (float32, float32) {
 //
 // 藏起来的时候整条**滑出去**（Biu 的 `translate-y-full opacity-0`），频谱跟着它
 // 走（`index.tsx:370` 的 `bottom: isUiVisible ? controlsHeight + 12 : 24`）。
+//
+// ## 淡入要和顶栏**一模一样**
+//
+// 顶栏是 `Opacity(bar.AnimateTo("full-top:o", shown, ui.Smooth))`——不透明度是
+// **动画**出来的。这一条原来写的是 `Opacity(shown)`，那是**一下子**变 0 或 1 的。
+// 于是界面藏了三秒、指针一动之后：顶栏慢慢淡回来，底下这一整条「啪」地一下出现
+// ——同一个界面里两种响应。框架现成的动画写法照抄顶栏那一行就行。
 func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 	shown := fullShown(hidden)
 	bar := ui.Row(c).Key("full-controls").
 		Absolute().Left(0).Right(0).Bottom(0).Height(fullControlsHeight).
-		PaddingY(12).PaddingX(24).Justify(ui.Center).AlignItems(ui.Center).
-		Opacity(shown).Translate(0, (1-shown)*fullControlsHeight)
+		PaddingY(12).PaddingX(24).Justify(ui.Center).AlignItems(ui.Center)
+	bar = bar.Opacity(bar.AnimateTo("full-controls:o", shown, ui.Smooth))
+	// ⚠️ 位移**不跟着淡入一起动**（顶栏也是这么写的）：藏起来的时候这一条要真的
+	// 移出窗口，不然停在窗口底下那 80 像素里的控件仍然接得到点击。
+	bar = bar.Translate(0, (1-shown)*fullControlsHeight)
 
 	bar.Children(func() {
 		ui.Column(c).FillWidth().Grow(1).Gap(6).Children(func() {
@@ -535,11 +585,15 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 // ⚠️ 用的还是 `Pressed()` 而不是 `Dragging()`（理由见 playbar.go 的 viewProgress）。
 // 这一条另有一份自己的进度句柄（`fullScrub`），不能和播放条上那条共用——两处会
 // 各自按住、各自 seek，拖一条的时候另一条跟着跳。
+//
+// ⚠️ 滑块**不是** `ui.Slider`，是 `knobSlider`（见 knobslider.go）：框架那一颗
+// 旋钮被按住时会褪成一片黑边透镜，在满屏这种永远深着的底上等于消失——用户
+// 按住旋钮拖，旋钮反而不见了。
 func (s *Shell) viewFullProgress(c *ui.Context, st app.State) {
 	known := st.Duration > 0
 	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, clock(st.Position)).FontSize(12).TextColor(fullDimColor).Width(48)
-		sl := ui.Slider(c, &s.fullScrub, 0, 1).Grow(1).Label("全屏播放进度").Disabled(!known)
+		sl := knobSlider(c, &s.fullScrub, 0, 1).Grow(1).Label("全屏播放进度").Disabled(!known)
 		switch held := sl.Pressed(); {
 		case held && !s.fullHeld:
 			s.fullHeld = true
