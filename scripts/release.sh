@@ -144,15 +144,42 @@ fi
 [ -n "$publish_repo" ] || die "mygo.json 用的是 updates.url，而这个脚本只走 GitHub 那一路
 （第 5 步是 gh release create）。要发到自己的服务器或 S3，得另写一条上传链路。"
 
-# ⚠️ **公开**仓库是硬要求，不是建议：release 资产是给所有人匿名下载的，私有
-# 仓库的资产匿名取不到——应用会一直查不到更新，而哪一处都不会报错。
+# 公开性：MyGo 的更新源要求**公开**仓库——release 资产是给所有人匿名下载的，私有
+# 仓库的资产匿名取不到，而**哪一处都不会报错**：应用只是一直查不到更新。
+#
+# ⚠️ 所以这里是**警告不是拦住**：源码仓库 Biu_Go 现在还是私有，用户已定「就用它
+# 本身，以后转公开」。在那之前发出去的版本拿不到更新（见警告里那几行）；转公开
+# 之后同一条配置自动就通了，**不用改任何配置**。所以拦下来只会让人以为这条路断了，
+# 而它只是还没到通的时候。
+#
+# 设 MYGO_RELEASE_ALLOW_PRIVATE=1 才走这一步——不是怕误操作，是让「我知道这条路
+# 还没通，仍然要发」这个决定落在纸上，而不是落在某次心照不宣的放行里。
 visibility="$(gh repo view "$publish_repo" --json visibility -q .visibility 2>/dev/null || true)"
 case "$visibility" in
   PUBLIC) ;;
   "") die "取不到仓库 $publish_repo 的可见性——仓库名写错了，或者 gh 没权限。" ;;
   PRIVATE|INTERNAL)
-    die "$publish_repo 是私有仓库，release 资产匿名取不到。
-  更新源要放在**公开**仓库里（源码可以继续私有，那是常见做法）。" ;;
+    if [ "${MYGO_RELEASE_ALLOW_PRIVATE:-}" != "1" ]; then
+      die "$publish_repo 是私有仓库，release 资产匿名取不到——应用查更新走的是匿名
+  HTTPS 请求（https://github.com/$publish_repo/releases/latest/download/…），
+  私有仓库拿不到，而不会报任何错。
+
+  确实要发（源码仓库反正会转公开，先把包打出来放着）就加一句：
+    MYGO_RELEASE_ALLOW_PRIVATE=1 scripts/release.sh
+
+  仓库转公开之后什么都不用改，同一条配置自己就通了。"
+    fi
+    printf '\n\033[33m⚠️  %s 还是私有仓库，这次发出去的版本**别人拿不到更新**。\033[0m\n' "$publish_repo"
+    cat <<EOF
+      release 资产是匿名下载的，私有仓库的取不到：应用查更新走的是
+      https://github.com/$publish_repo/releases/latest/download/update-<平台>.json
+      这条匿名请求，它会一直拿到 404——而应用和日志都不会报错。
+
+      仓库转公开之后同一条配置自动就通了，**不用改任何配置**，也不用重发。
+
+      这也是为什么第 5 步挂的是草稿：先别发布。
+EOF
+    ;;
   *) die "$publish_repo 的可见性是 $visibility，认不出来。GitHub 改了取值？" ;;
 esac
 
