@@ -1,7 +1,7 @@
-Biu MyGo
-========
+BiuGo
+=====
 
-Biu MyGo 是用 MyGo 框架（https://github.com/egoist/mygo）重写的 Biu 音乐播放器。
+BiuGo 是用 MyGo 框架（https://github.com/egoist/mygo）重写的 Biu 音乐播放器。
 界面是 MyGo 自己画的原生 UI（即时模式，没有 webview），音频在 Go 里解码。
 它**不是** Biu 的分支，也**不是** Biu 打包产物的重新分发：代码是重写的。
 

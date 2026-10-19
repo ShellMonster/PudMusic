@@ -75,7 +75,7 @@ func (s *Shell) viewSide(c *ui.Context) {
 			// 应用名贴在折叠按钮上面。折叠态摆不下（72 宽），Biu 那边也没有
 			// 这一行——这里留着是为了窗口标题和侧栏对得上。
 			if !st.SideMenuCollapsed {
-				ui.Text(c, "Biu MyGo").FontSize(11).
+				ui.Text(c, "BiuGo").FontSize(11).
 					TextColor(c.Theme().TextMuted).Padding(0, 8, 4, 8)
 			}
 		})

@@ -26,5 +26,5 @@ func TraySupported() bool { return runtime.GOOS != "darwin" }
 // **必须在 mygo.App.WhenReady 之后调**：框架建托盘要过事件循环，没 ready 就调
 // 是直接 panic 的（`mygo/modules.go` 的 NewTray）。
 func NewTray(icon []byte, menu *mygo.Menu) (*mygo.Tray, error) {
-	return mygo.NewTray(mygo.TrayOptions{Icon: icon, ToolTip: "Biu MyGo", Menu: menu})
+	return mygo.NewTray(mygo.TrayOptions{Icon: icon, ToolTip: "BiuGo", Menu: menu})
 }
