@@ -171,6 +171,17 @@ func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 	})
 }
 
+// drawerTip 是播放列表开关悬停时那句话：这个键是**开关**，所以说的话得说清
+// 按下去会开还是会关——不然用户得先按一下才知道自己按的是什么。
+//
+// 它原来在 `navbar.go`：那一票之前这个开关在顶栏上（票 #127 把它搬到了这里）。
+func drawerTip(open bool) string {
+	if open {
+		return "收起播放列表"
+	}
+	return "打开播放列表"
+}
+
 // viewTrackText 是封面右边那几行字：歌名、UP 名（可点）+ 赞 + 收藏，
 // 出错时再补一句原因。
 //

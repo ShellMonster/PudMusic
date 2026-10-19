@@ -168,12 +168,3 @@ func (s *Shell) viewNavForward(c *ui.Context, back func()) {
 		back()
 	}
 }
-
-// drawerTip 是播放列表开关悬停时那句话：这个键是**开关**，所以说的话得说清
-// 按下去会开还是会关——不然用户得先按一下才知道自己按的是什么。
-func drawerTip(open bool) string {
-	if open {
-		return "收起播放列表"
-	}
-	return "打开播放列表"
-}
