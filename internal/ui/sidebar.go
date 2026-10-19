@@ -34,6 +34,15 @@ const (
 	// sideCollapseHeight 是底下那个折叠按钮多高。Biu 是 `py-1`（8+8 加一行
 	// 字），这里取 28。
 	sideCollapseHeight = 28
+
+	// sideDividerW / sideDividerA 是右缘那条分隔线的宽度和浓度。
+	//
+	// 照 Biu 的 `border-divider/30 border-r-1`（`side/index.tsx:151-152`）：
+	// 1 像素、透明度 30%。**不能照抄 `t.Border` 原色**——深色下 `#3f3f46`
+	// 压在 `#17181a` 上是一道亮线，比上游那道明显得多（flatbutton.go 的文件头
+	// 记的就是这件事：同一个色在深浅两套里的观感完全不同）。
+	sideDividerW = 1
+	sideDividerA = 0.3
 )
 
 // viewSide 是左侧栏。
@@ -58,30 +67,44 @@ func (s *Shell) viewSide(c *ui.Context) {
 		w = side.AnimateTo(sideWidthKey, float32(target), ui.Animation{Duration: sideWidthTransition})
 	}
 
-	side.Width(w).AlignSelf(ui.Stretch).Background(c.Theme().Surface).Children(func() {
-		// ⚠️ FillHeight 不能省：Row 是把子元素**垂直居中**摆的（MyGo 的
-		// `docs/ui/layout.md`：「Row places them from left to right and
-		// centers them vertically」），不拉满高这一栏就按内容高度浮在中间，
-		// 底下空出一大块，滚动区也就没高度了。
-		ui.Column(c).Key("side-body").Grow(1).FillHeight().Children(func() {
-			s.viewSideBrand(c, st)
-			// 菜单和收藏夹一起滚。Biu 也是这么分的（ScrollContainer 包住
-			// DefaultMenus + Collection），侧栏窄的时候不至于把折叠按钮顶出去。
-			ui.Scroll(c).Key("side-scroll").Grow(1).FillWidth().Children(func() {
-				s.viewSideMenu(c, st)
-				s.viewFavorites(c, st)
+	// 🔴 底色取 **`Background` 而不是 `Surface`**，右缘一条 1px 的分隔线。
+	//
+	// Biu 的侧栏**没有背景类**（`biu/src/layout/side/index.tsx:150-155` 只有
+	// `border-divider/30 … border-r-1`），底色和内容区同源，靠**那条线**分界。
+	// 我们原来取 `Surface`：浅色下只差 `#f4f4f5` / `#ffffff` 一档，看不出来；
+	// **深色下差的是 `#27272a` / `#18181b`**——深浅两个通道各自跳一级，
+	// 于是侧栏、内容区、播放条在深色下裂成**三条带**（票 #127 的头一条）。
+	//
+	// 三处底色统一到 `t.Background` 之后，这一栏的边界就全靠这条线了——
+	// 去掉它，侧栏和内容区在浅色下会**完全一样**（两个都是 `#ffffff`），
+	// 于是「统一底色」就变成了「抹掉层次」，那正是这一票要避开的反面。
+	side.Width(w).AlignSelf(ui.Stretch).Background(c.Theme().Background).
+		BorderWidth(0, sideDividerW, 0, 0).
+		BorderColor(c.Theme().Border.Alpha(sideDividerA)).
+		Children(func() {
+			// ⚠️ FillHeight 不能省：Row 是把子元素**垂直居中**摆的（MyGo 的
+			// `docs/ui/layout.md`：「Row places them from left to right and
+			// centers them vertically」），不拉满高这一栏就按内容高度浮在中间，
+			// 底下空出一大块，滚动区也就没高度了。
+			ui.Column(c).Key("side-body").Grow(1).FillHeight().Children(func() {
+				s.viewSideBrand(c, st)
+				// 菜单和收藏夹一起滚。Biu 也是这么分的（ScrollContainer 包住
+				// DefaultMenus + Collection），侧栏窄的时候不至于把折叠按钮顶出去。
+				ui.Scroll(c).Key("side-scroll").Grow(1).FillWidth().Children(func() {
+					s.viewSideMenu(c, st)
+					s.viewFavorites(c, st)
+				})
+				s.viewSideCollapse(c, st)
+				// 完整应用名在折叠按钮下面那一条。见 `viewSideFoot`。
+				s.viewSideFoot(c, st)
 			})
-			s.viewSideCollapse(c, st)
-			// 完整应用名在折叠按钮下面那一条。见 `viewSideFoot`。
-			s.viewSideFoot(c, st)
+
+			grip := ui.Column(c).Key("side-grip").FillHeight().Width(sideGrip).
+				Cursor(ui.CursorResizeEW)
+
+			// 读拖动要在 Children 之后：元素建好了，它的盒子才有意义。
+			s.sideTrackDrag(side, grip, target)
 		})
-
-		grip := ui.Column(c).Key("side-grip").FillHeight().Width(sideGrip).
-			Cursor(ui.CursorResizeEW)
-
-		// 读拖动要在 Children 之后：元素建好了，它的盒子才有意义。
-		s.sideTrackDrag(side, grip, target)
-	})
 }
 
 // sideTargetWidth 是设置里那个宽度这一帧该画多宽。
@@ -236,6 +259,14 @@ func (s *Shell) viewSideCollapse(c *ui.Context, st app.Settings) {
 	//
 	// `Label` 留着：画面上只有 «/» 这一个符号，念不出是什么，而 tooltip 只是
 	// 给鼠标看的（无头 Tester 认按钮也靠它）。
+	//
+	// ⚠️ **这里不许给描边**。Biu 的折叠键是 `border-y`（`side/index.tsx:167`），
+	// 抄过来看着更像——而 `flatButton` 那一条不变量（`flatbutton_test.go` 的
+	// `TestTheSidebarRowsHaveNoBorderAndNoFill`）量的是**侧栏最左边那一列**
+	// 上有几段不是底色的像素，一道横贯整栏的线在那一列上就是两段，于是它读成
+	// 「菜单行还有一圈描边」。给这一枚开特例要改的是那条不变量，而它守的是
+	// #123 那票的核心结论（侧栏菜单不该有描边药丸）——为了一枚按钮的两条线去
+	// 放宽它，代价大于收益。分界靠上面那条右缘的竖线和它自己的 hover。
 	if flatButton(c, label).Label(tip).Height(sideCollapseHeight).Clicked() {
 		if _, err := s.app.UpdateSettings(func(cur *app.Settings) {
 			cur.SideMenuCollapsed = !collapsed

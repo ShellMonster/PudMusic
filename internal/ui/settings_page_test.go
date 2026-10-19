@@ -398,3 +398,96 @@ func TestTogglingAutoStartGoesThroughTheSystem(t *testing.T) {
 		t.Error("设置里没存上开机自启")
 	}
 }
+
+// TestTheSettingsContentIsCappedAndCentered 钉住设置的内容收在中间一段宽度里。
+//
+// Biu 那一页是 `m-auto mb-6 max-w-[900px] px-8 py-4`
+// （`biu/src/pages/settings/index.tsx:117`）。我们原来没有这一层：内容
+// `FillWidth()` 之后一路铺到窗口右边缘，窗口一宽整页设置就跟着拉宽——右下角
+// 那个代理主机输入框能到 410 像素。
+//
+// ⚠️ **量的是内容那一段的左右两端，不是某一个控件**：左端取「外观」那个小标题
+// （它是内容那一列最左边的东西），右端取圆角那一行的读数「8px」（`settingRowEl`
+// 把控件钉在行尾，所以它那一格的右沿就是内容那一段的右沿）。两者之间的宽度
+// **加上左右各一份内边距**才是内容那一段的宽。
+//
+// ⚠️ **两档窗口都要量**：宽过 900 的那一档验「封顶」，窄的那一档验「不封成
+// 一个死数」——`MaxWidth` 是上限，可视区多窄它就多窄，最小窗口（900 - 侧栏
+// 200 = 700）上照抄一个固定 900 会把右边推出去。
+func TestTheSettingsContentIsCappedAndCentered(t *testing.T) {
+	const sideW = 200 // 默认侧栏宽（app.DefaultSideMenuWidth）
+
+	for _, winW := range []int{1200, 1400, 1000} {
+		tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), at(winW, 800))
+		homeFrame(tt)
+
+		left, okL := tt.Find("外观")
+		if !okL {
+			t.Fatalf("窗口 %d：设置页上没有「外观」那个小标题，文字有 %q", winW, tt.Texts())
+		}
+		right, okR := tt.Find("8px")
+		if !okR {
+			t.Fatalf("窗口 %d：设置页上没有圆角那一行的读数，文字有 %q", winW, tt.Texts())
+		}
+
+		// 内容那一段：左右各留一份内边距（settingsContentPad）。
+		blockLeft := left.X - settingsContentPad
+		blockRight := right.X + right.W + settingsContentPad
+		avail := float32(winW - sideW)
+
+		want := float32(settingsContentMaxW)
+		if avail < want {
+			want = avail
+		}
+		if got := blockRight - blockLeft; got != want {
+			t.Errorf("窗口 %d：设置的内容那一段是 %.1f 宽，want %.1f"+
+				"（可视区 %.1f，上限 %d）——要么铺满了窗口右边缘，要么被钉死在 %d 上",
+				winW, got, want, avail, settingsContentMaxW, settingsContentMaxW)
+		}
+
+		// 居中：左右留白一样多。
+		gotLeft := blockLeft - float32(sideW)
+		if want < avail {
+			wantPad := (avail - want) / 2
+			if gotLeft != wantPad {
+				t.Errorf("窗口 %d：内容那一段左边留了 %.1f，右边留了 %.1f——没居中",
+					winW, gotLeft, avail-want-gotLeft)
+			}
+		}
+	}
+}
+
+// TestTheSettingsInputsAreNotFullRowWide 钉住输入框不横跨整行。
+//
+// 那一格原来写的是 `Grow(1)`，而它所在那一行的左边（标题 + 说明）也是 `Grow(1)`
+// ——两边平分那一行，于是「系统默认」四个字摆在一个 410 宽的框里，而它右边什么
+// 都没有。那不是「点哪儿都行」的好心：用户要按准那个框的右下角才能展开它。
+//
+// 抄的是 Biu 的 `w-[180px]`（`system-settings.tsx:164`），也就是这一页其余
+// 下拉（音频品质 180、代理类型 240）是同一个数。
+//
+// ⚠️ **断的是控件自己的宽**：一个 410 宽的框里那四个字仍然是「点得准」的
+// （点框的哪儿都算点中），所以判据是**它有多宽**，不是「点一下有没有反应」。
+func TestTheSettingsInputsAreNotFullRowWide(t *testing.T) {
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), at(1400, 800))
+	homeFrame(tt)
+
+	for _, c := range []struct {
+		label string
+		want  float32
+	}{
+		{"选择字体", selectWidth}, // 180（Biu 的 w-[180px]）
+		{"全局圆角", radiusWidth}, // 360（Biu 的 w-[360px]）
+		{"选择音质偏好", selectWidth},
+	} {
+		r, ok := tt.Find(c.label)
+		if !ok {
+			t.Errorf("设置页上没有 %q，文字有 %q", c.label, tt.Texts())
+			continue
+		}
+		if r.W > c.want {
+			t.Errorf("%q 是 %.0f 宽，want ≤ %.0f——设置项不该横跨整行，"+
+				"用户得瞄准那个框才能点中", c.label, r.W, c.want)
+		}
+	}
+}

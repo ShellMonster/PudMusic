@@ -175,12 +175,19 @@ func TestTheIconButtonsAreTransparentAndUnbordered(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			_, tt := flatSideShell(t, dark)
-			for _, what := range []string{"打开文件", "播放列表", "设置"} {
-				r, ok := tt.Find(what)
+			// ⚠️ **「播放列表」从顶栏搬到了播放条右边那一组**（票 #127，照 Biu
+			// 的 `playbar/right/index.tsx:13`），所以下面那一句「哪一格」得跟着
+			// 变——写成「顶栏」会让人以为它在顶栏上，而它不在了。
+			for _, what := range []struct{ label, where string }{
+				{"打开文件", "顶栏"},
+				{"设置", "顶栏"},
+				{"播放列表", "播放条右边"},
+			} {
+				r, ok := tt.Find(what.label)
 				if !ok {
-					t.Fatalf("顶栏上找不到 %q，文字有 %q", what, tt.Texts())
+					t.Fatalf("%s上找不到 %q，文字有 %q", what.where, what.label, tt.Texts())
 				}
-				assertFlat(t, tt.Image(), r, "顶栏 "+what)
+				assertFlat(t, tt.Image(), r, what.where+" "+what.label)
 			}
 		})
 	}
@@ -449,7 +456,7 @@ func TestADisabledFlatButtonDoesNotLightUpOnHover(t *testing.T) {
 // openSettingsFor 开设置页；readOnly 为真时挂一份来自更新版本的设置（只读）。
 //
 // 只读那一档靠的是「文件里的 schemaVersion 比我们高」
-//（`TestSettingsPageRefusesToWriteAFileFromANewerVersion` 用的同一条路）。
+// （`TestSettingsPageRefusesToWriteAFileFromANewerVersion` 用的同一条路）。
 func openSettingsFor(t *testing.T, dark, readOnly bool) *mygoui.Tester {
 	t.Helper()
 	if !readOnly {

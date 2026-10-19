@@ -546,7 +546,13 @@ func TestTheLikeKeyDrawsItsOwnIcon(t *testing.T) {
 // TestTheNavBarDrawsAnIconForEveryAction 钉住顶栏上每个动作都有图形。
 //
 // 同样深浅两套主题。这里列的是 issue 93 点名的那几个，加上这一票顺带换掉的
-// 动态、播放列表和登录（它们原本也是文字按钮，留着会让顶栏一半图标一半字）。
+// 动态和登录（它们原本也是文字按钮，留着会让顶栏一半图标一半字）。
+//
+// ⚠️ **「播放列表」不在这一列里**：上游的顶栏压根没有这个开关，它在播放条右边
+// 那一组（`biu/src/layout/playbar/right/index.tsx:13`）。我们当初是因为右边
+// 摆不下才把它挪到顶栏的，票 #127 把它搬回去了——顶栏留着两处开关就是同一个
+// 动作两个入口，而它们会不一致。搬回去之后由
+// `TestThePlaylistKeySitsOnThePlayBarNotTheTopBar` 钉住它在新位置上。
 func TestTheNavBarDrawsAnIconForEveryAction(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -555,7 +561,7 @@ func TestTheNavBarDrawsAnIconForEveryAction(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			tt := navBarTester(t, dark)
-			for _, label := range []string{"后退", "前进", "打开文件", "播放列表", "设置", "动态", "登录"} {
+			for _, label := range []string{"后退", "前进", "打开文件", "设置", "动态", "登录"} {
 				assertGlyphPainted(t, tt, label)
 			}
 		})
@@ -677,7 +683,9 @@ func TestTheHitAreaIsBiggerThanTheGlyph(t *testing.T) {
 		{"播放模式", iconMd, iconHitMd},
 		{"加歌", iconMd, iconHitMd},
 		{"收藏", iconSm, iconHit},
-		{"下载", iconSm, iconHit},
+		// 「下载」票 #127 之后摆在播放条**右边**那一组，尺寸跟着那一组走
+		// （`viewPlayBarRight`），不再是左边第二行里的一枚小键。
+		{"下载", iconMd, iconHitMd},
 	}
 
 	for _, k := range keys {

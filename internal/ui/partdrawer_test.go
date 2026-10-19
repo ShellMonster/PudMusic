@@ -498,17 +498,20 @@ func TestTheDrawerDoesNotComeBackOnItsOwn(t *testing.T) {
 // 出，而那一栏立刻对不上。
 //
 // ⚠️ **UP 名不在这个「不许花」的单子里**，量出来它确实会让出这个键自己的 36
-// （`iconHit` 28 + 一道 `metaGap` 8；900 上 166 → 130）：那一行里它是**唯一一个该
-// 让位的**——`Grow(1)` + `MinWidth` + `Ellipsis("…")`，让位就是它存在的理由
-// （见 `viewArtist`）。它只要还认得出是哪个 UP 就够了，那条由
-// `TestThePartsKeyDoesNotBreakThePlayBar` 的 `ownerNameMinW` 守着。
+// （`iconHit` 28 + 一道 `metaGap` 8；900 上 146 → 110、1000 上 246 → 210、1100
+// 以上让位 0）：那一行里它是**唯一一个该让位的**——`Grow(1)` + `MinWidth` +
+// `Ellipsis("…")`，让位就是它存在的理由（见 `viewArtist`）。它只要还认得出是
+// 哪个 UP 就够了，那条由 `TestThePartsKeyDoesNotBreakThePlayBar` 的
+// `ownerNameMinW` 守着。
 //
-// ⚠️ **另一个候选位置也量过**：中间那一列的第二行（挨着播放模式）——摆在那儿**一样**
-// 只让 UP 名让出 38，歌名和进度条同样不丢。两处几乎等价，所以摆在歌名下面这一行
-// 是**照 Biu 挑的**，不是算出来的。`partdrawer_test.go` 的这段注释在 #118 把这一行
-// 图标化之前写的版本是「摆在中间列第二行要拿歌名和进度条的钱」（208→182、94→80）——
-// 那时赞/收藏/下载是三个 44 宽的文字键，这一行挤到了边缘；图标化之后腾出 48，两处
-// 就平了。**注释里的数是量出来的，所以量变了就得改它**。
+// ⚠️ **另一个候选位置也量过**：中间那一列的第二行——摆在那儿**一样**只让 UP 名
+// 让出 38 上下，歌名和进度条同样不丢。两处几乎等价，所以摆在歌名下面这一行是
+// **照 Biu 挑的**，不是算出来的。
+//
+// ⚠️ **上面那几个数是 2026-10（票 #127 把下载和播放模式搬去右边那一组之后）量的**：
+// 那一组多了三枚键，左边那一块就窄了，UP 名在 1000 上从「让位 19.7」变成
+// 「让位 36」。注释里的数是量出来的，所以量变了就得改它——`viewTrackMeta` 顶上
+// 那张表是同一批数，两处要一起改。
 //
 // ⚠️ **两档必须是同一首歌**：用的是同一份 fixture 的同一首（bvid、标题、UP 名都
 // 一样），只有「B 站回几集」不同，差别只有那一个键。
@@ -574,9 +577,11 @@ func TestThePartsKeySharesTheMetaRowWithTheOtherKeys(t *testing.T) {
 		t.Fatalf("画面上找不到分集入口，文字有 %q", tt.Texts())
 	}
 	const sameLine = 2
-	// 收藏 / 下载是两个字的文字键，它们的框是照着字长出来的；分集是 28×28 的图标
-	// 键。所以比的是**垂直中心**，不是框的上下边。
-	for _, other := range []string{"赞", "收藏", "下载"} {
+	// 赞 / 收藏都是这一行上的图标键。**「下载」不在这一列里**——票 #127 把它从
+	// 左边第二行搬到了播放条右边那一组（照 Biu 的 `playbar/right/index.tsx:12`），
+	// 而那一行在播放条的正中，比这一行低半条播放条，拿它当参照量出来的差永远是
+	// 几十像素，那不是「分集键摆错行了」。
+	for _, other := range []string{"赞", "收藏"} {
 		r, ok := tt.Find(other)
 		if !ok {
 			t.Fatalf("画面上找不到 %q，文字有 %q", other, tt.Texts())
@@ -585,8 +590,8 @@ func TestThePartsKeySharesTheMetaRowWithTheOtherKeys(t *testing.T) {
 		otherMid := r.Y + r.H/2
 		if widthGap(mid-otherMid) > sameLine {
 			t.Errorf("分集那一格的垂直中心在 y=%.1f，而 %q 那一格在 y=%.1f（差 %.1f）——"+
-				"它们不在同一条水平线上：分集键不在歌名下面那一行（挨着赞/收藏/下载），"+
-				"而在中间那一列的第二行（挨着进度条和播放模式）",
+				"它们不在同一条水平线上：分集键不在歌名下面那一行（挨着赞/收藏），"+
+				"而在中间那一列的第二行（挨着进度条）",
 				mid, other, otherMid, widthGap(mid-otherMid))
 		}
 	}

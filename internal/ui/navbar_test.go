@@ -810,3 +810,119 @@ func TestTheNavBarPanicIsCaught(t *testing.T) {
 		t.Errorf("错误页上没有崩掉的原因，文字有 %q", tt.Texts())
 	}
 }
+
+// TestTheTopBarIsBiuHeight 钉住顶栏是 Biu 那个高度。
+//
+// Biu 的顶栏那一格是 `h-16 flex-none`（`biu/src/layout/index.tsx:32`），也就是
+// 64。我们原来是 32（MyGo 例子里的下限，`ui/context.go:334`）。
+//
+// ⚠️ **为什么这条不只是「好看一点」**：顶栏是**内容区上面那一行**，它矮 32，内容区
+// 就少 32——而设置页那一族测试量得着的可视区上下两个数（`settings_page_test.go`
+// 的 `pageTop` / `pageBottom`）就是从它推出来的。所以拿 `navMinHeight` 当判据是
+// 循环的（常量一改断言跟着改，等于没断言），这里断的是**画面上的高度**。
+func TestTheTopBarIsBiuHeight(t *testing.T) {
+	tt := navBarTester(t, false)
+	// 后退按钮在顶栏最左边，它和右边登录入口之间就是顶栏本身那一行。
+	back, ok := tt.Find(navBackLabel)
+	if !ok {
+		t.Fatalf("顶栏上没有后退，文字有 %q", tt.Texts())
+	}
+	login, ok := tt.Find("登录")
+	if !ok {
+		t.Fatalf("顶栏上没有登录入口，文字有 %q", tt.Texts())
+	}
+	// 无头 Tester 里 `c.TitleBar()` 是零（`ui/headless.go:44` 那张表默认没填），
+	// 所以这一帧顶栏画的就是 `navMinHeight` 本身。64 是量出来的，见 navMinHeight。
+	const want = 64
+	if navMinHeight != want {
+		t.Errorf("navMinHeight 是 %d，want %d（Biu 的 h-16）", navMinHeight, want)
+	}
+	for _, e := range []struct {
+		what string
+		r    mygoui.Rect
+	}{{"后退", back}, {"登录入口", login}} {
+		if e.r.Y < 0 || e.r.Y+e.r.H > navMinHeight {
+			t.Errorf("%s在 %v，不在顶上那 %d 高里", e.what, e.r, navMinHeight)
+		}
+	}
+	// 那一行要真的占满：登录入口贴着窗口右边。
+	if right := login.X + login.W; float32(1200)-right > 32 {
+		t.Errorf("登录入口右边缘 %v，离窗口右边还有 %v——顶栏没顶满", right, float32(1200)-right)
+	}
+}
+
+// TestTheTopBarShowsNoPageTitle 钉住页名不出现两次。
+//
+// 每一页自己都写着标题（设置 / 下载记录 / 历史记录…），顶栏再写一遍就是同一个
+// 词在屏幕上出现两次。上游的顶栏压根没有这一行（`layout/navbar/index.tsx:26-42`
+// 的左边只有 `Navigation` + `Search`）——「我在哪」是侧栏高亮那一项的事。
+//
+// ⚠️ **用 `navBarTester` 而不是整窗**：它 `withView` 只画顶栏那一块，所以
+// `Texts()` 里**只有**顶栏上的字。整窗上量的话，侧栏菜单项和页面自己的标题都
+// 混在里面，「顶栏有没有」这件事就量不出来了。
+func TestTheTopBarShowsNoPageTitle(t *testing.T) {
+	// ⚠️ **设置页和搜索页不在这一列里**：顶栏上本来就有一个「设置」键和一个
+	// 「搜索」框，它们的无障碍名字和那两页的页名**一模一样**——判据
+	// 「顶栏上没有这个名字」在它们身上恒假，于是只能靠人肉分辨「那个是键、
+	// 那个是页名」，而那正是这条断言不该干的事。其余的几条都和顶栏上任何一个
+	// 键的名字不重名。
+	//
+	// 另外刻意收了「用户动态」那一页：它的页名**既不在侧栏菜单里、也不在顶栏
+	// 任何一个键上**（`Route.InMenu` 是 false），所以改动之前它在顶栏上只有
+	// 那一处——它变没变是单值的。
+	paths := []string{downloadListPath, historyPath, laterPath, followPath, dynamicFeedPath, collectionMatch}
+
+	b := newTestShell(t, withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			s.viewNav(c)
+		}
+	}))
+	tt := b.tt
+	tt.SetFocused(true)
+
+	for _, p := range paths {
+		title := lookup(p).Title
+		b.s.navigate(p)
+		tt.Frame()
+		if tt.HasText(title) {
+			t.Errorf("切到 %q 之后顶栏上写着页名 %q——顶栏的文字是 %q。"+
+				"页名由那一页自己写，顶栏再写一遍就是屏幕上同一个词出现两次",
+				p, title, tt.Texts())
+		}
+	}
+}
+
+// TestThePageStillShowsItsOwnTitle 钉住去掉顶栏那一处之后，标题还在页面上。
+//
+// 这是上一条**互为反面**的那一半。只断「顶栏上没有」的话，最省事的实现是「谁都
+// 别画标题」——上一条会全绿，而用户进到「下载记录」看到的是一片没有名字的页面，
+// 和他刚从侧栏点过来的那一项对不上。
+//
+// ⚠️ **分开画两次，各数一次**：`withView` 把整窗换成只画顶栏 / 只画内容区，
+// 于是两边的文字互不掺。「只出现一次」这件事就是这么断的：**顶栏那一侧是 0，
+// 内容区那一侧至少是 1**——重复只可能来自顶栏，它归零了，页面上剩下的那份就
+// 是唯一的一份。
+//
+// 侧栏的菜单项**不在这两条数里**，所以「用户动态」那一页也算数：它的页名既不在
+// 侧栏菜单里（`InMenu` 是 false），也不和顶栏任何一个键重名。
+func TestThePageStillShowsItsOwnTitle(t *testing.T) {
+	paths := []string{settingsPath, downloadListPath, historyPath, laterPath, dynamicFeedPath}
+
+	b := newTestShell(t, withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			s.viewRoutes(c)
+		}
+	}))
+	tt := b.tt
+
+	for _, p := range paths {
+		title := lookup(p).Title
+		b.s.navigate(p)
+		waitFrames(t, tt, p+" 的内容画出来了", func() bool { return b.s.router.Path() == p })
+		if !tt.HasText(title) {
+			t.Errorf("%q 这一页的内容区里没有页名 %q，文字有 %q", p, title, tt.Texts())
+		}
+	}
+}

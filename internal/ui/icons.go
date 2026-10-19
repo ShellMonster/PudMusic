@@ -91,12 +91,16 @@ const (
 	// `Router` 的私有字段（见 navbar.go 的 viewNavBack）。
 	iconSettings = "System/settings-3-line.svg"    // 设置
 	iconFolder   = "Document/folder-open-line.svg" // 打开文件
-	iconQueue    = "Editor/list-radio.svg"         // 播放列表
 	iconSearch   = "System/search-line.svg"        // 搜索
 	iconClose    = "System/close-line.svg"         // 清空
 	iconFeed     = "User & Faces/team-line.svg"    // 动态
 	iconLogin    = "System/login-circle-line.svg"  // 登录
 	iconLogout   = "System/logout-circle-line.svg" // 退出登录
+
+	// ── 播放条右边那一组 ──
+	// ⚠️ 「播放列表」原来在顶栏那一列里，票 #127 跟着上游搬到了播放条
+	//（`layout/playbar/right/index.tsx:13`），所以它归在这一列而不是顶栏那一列。
+	iconQueue = "Editor/list-radio.svg" // 播放列表（抽屉的开关）
 
 	// ── 队列抽屉头 ──
 	// 逐字照 Biu 的 `components/music-playlist-drawer/index.tsx:137-141`：
