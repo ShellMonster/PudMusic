@@ -130,7 +130,7 @@ func (s *Shell) viewUpdateDialog(c *ui.Context, st app.UpdateState) {
 	// 外面包一层 Guard（铁律三）：这一段里有一个第三方渲染器（markdown.View）在
 	// 解析**发布者写的**内容，那是最容易崩的一块；而它崩掉的表现会是整个设置
 	// 页半截不画（弹窗是它的最后一段）。
-	Guard(func(cc *ui.Context) { s.drawUpdateDialog(cc, st) }, s.onPanic)(c)
+	s.guardAt("更新弹窗", func(cc *ui.Context) { s.drawUpdateDialog(cc, st) })(c)
 }
 
 // updateOpen 报弹窗这一刻该不该开着。
