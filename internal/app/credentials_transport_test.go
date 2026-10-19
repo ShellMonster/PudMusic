@@ -557,7 +557,7 @@ func TestDiagnosticsExportCarriesNoCredential(t *testing.T) {
 	t.Cleanup(a.Close)
 	a.MountLogin(app.NewMemoryStore("test"), nil)
 
-	d := app.NewDiagnostics("Biu MyGo 测试版")
+	d := app.NewDiagnostics("BiuGo 测试版")
 	d.Attach(a)
 	blob, err := d.JSON(app.Session{
 		SESSDATA:     "sessdata-secret-0123456789",

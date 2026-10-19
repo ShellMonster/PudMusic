@@ -1,4 +1,4 @@
-# Biu MyGo
+# BiuGo
 
 用 [MyGo](https://github.com/egoist/mygo) 框架重写的 [Biu](https://github.com/wood3n/biu)
 音乐播放器。界面是 MyGo 自己画的原生 UI（即时模式，**没有 webview**），音频在 Go 里解码。
@@ -24,21 +24,21 @@
 
 ### macOS：拖进「应用程序」
 
-下载 `Biu MyGo <版本>.dmg`，把 Biu MyGo 拖到 Applications。
+下载 `BiuGo <版本>.dmg`，把 BiuGo 拖到 Applications。
 
 > **这个 dmg 没有公证（notarization）。**
 > 首次打开时 Gatekeeper 会说「无法验证开发者」。**这是预期的，不是应用坏了**，两条路都行：
 >
 > - 右键点图标 → **打开** → 在弹窗里再点一次「打开」；或者
-> - 命令行：`xattr -dr com.apple.quarantine "/Applications/Biu MyGo.app"`
+> - 命令行：`xattr -dr com.apple.quarantine "/Applications/BiuGo.app"`
 >
 > 之后这台机器不会再拦。要彻底消除它需要 Apple 开发者计划的 Developer ID 并走公证流程，
 > 本项目**明确不做**（用户已定，见 `PLAN.md` §5.1 第 4 条）。
 
 ### Windows：跑安装包
 
-下载 `Biu MyGo Setup <版本> amd64.exe`（或 `arm64`）并运行。它把应用装进
-`%LOCALAPPDATA%\Programs\Biu MyGo`——**不需要管理员权限**，并加上开始菜单快捷方式、
+下载 `BiuGo Setup <版本> amd64.exe`（或 `arm64`）并运行。它把应用装进
+`%LOCALAPPDATA%\Programs\BiuGo`——**不需要管理员权限**，并加上开始菜单快捷方式、
 「设置 → 应用」里能看到的卸载项，以及 `biu://` 链接的注册。
 
 > **这个安装包没有代码签名。** SmartScreen 会说「Windows 已保护你的电脑」。
@@ -177,17 +177,28 @@ FLAC 解码器是 t-0017 验证过的实现，本仓库里带着它的 64 项测
 
 ## 图标
 
-源图是 `resources/icon.png`（1024×1024，**由代码画出来**：`go generate ./internal/platform/`）。
-`mygo build` 从它渲出完整尺寸集：
+图案是 `internal/platform/icon-source.png`（1024×1024，一张挑定的满幅方图），
+`resources/icon.png` 是它经 `platform.AppIcon` 缩放并切形之后的产物
+（`go generate ./internal/platform/`）。`mygo build` 从后者渲出完整尺寸集：
 
 | 平台 | 尺寸 | 档数 |
 |---|---|---|
 | macOS `.icns` | 32 / 64 / 128 / 256 / 256 / 512 / 512 / 1024 | 8 |
 | Windows `.ico` | 16 / 24 / 32 / 48 / 64 / 128 / 256 | 7 |
 
-⚠️ **源图不能缩到 512。** 下采样是从源图做的，源图 512 的话 1024 那档就是插值出来的
+⚠️ **图源不能缩到 512。** 下采样是从图源做的，图源 512 的话 1024 那档就是插值出来的
 模糊图——Biu 自己的 `electron/icons/logo.png` 就只有 512×512，这是它的缺陷，不要照抄。
-`internal/platform/icon_test.go` 的 `TestTheSourceIconIsBigEnoughForEverySize` 守着下限。
+`internal/platform/icon_test.go` 的 `TestTheArtworkIsBigEnoughForEverySize` 守着下限。
+
+⚠️ **macOS 不会替你切圆角。** Big Sur 改的是 Apple 自家那一批图标，而那道圆角是
+**画进 .icns 里**的；第三方应用的图标形状完全由素材决定，MyGo 的 `pngToICNS` 也只
+缩放、一个像素都不动。所以留白和圆角是 `fillIcon` 切的——macOS 图标网格那一格
+（图案占 0.824，圆角半径 0.2237×图案边长）。图源因此必须是一张**铺到四个角**的
+方图，`TestTheArtworkIsFullBleed` 钉着这一条。
+
+⚠️ **托盘和应用是同一张图**（`TrayIconPNG` 就是 `AppIconPNG(32)`）。两份各画各的
+必然漂移，而症状是「Dock 上是新图标、通知区域还是旧图案」——那种错只有用户看得见，
+而没有任何一处会报错。
 
 ## 在线音质
 
@@ -259,10 +270,19 @@ internal/platform/cmd/, internal/licensing/cmd/   → 生成用的命令行，�
    20 轮 17 轮两个都拿到锁：两个都 Dial 失败 → 都删掉对方的 socket 文件 → 都
    Listen 成功）。所以 `internal/platform` 在它之上还压了一把 flock，见
    `single_instance.go` 的注释。
-7. **提交进仓库的图标和许可清单都是生成物。** 图案在 `platform.AppIcon` 里、
-   清单在 `go list -deps` 的结果里。改了图案或依赖忘了重新生成，仓库里躺着的是
-   旧文件，而**没有任何一处会报错**。`go generate ./internal/platform/ ./internal/licensing/`，
+7. **提交进仓库的图标和许可清单都是生成物。** 图标图案在 `platform.AppIcon` 里
+   （图源是它 `go:embed` 的 `internal/platform/icon-source.png`），清单在
+   `go list -deps` 的结果里。换了图案或依赖忘了重新生成，仓库里躺着的是旧文件，
+   而**没有任何一处会报错**。`go generate ./internal/platform/ ./internal/licensing/`，
    `scripts/build.sh` 每次打包前都会跑一遍并检查 `git diff`。
+8. **应用数据目录的名字不跟显示名走。** 应用 2026-10 从 `Biu MyGo` 改名成
+   `BiuGo`，而 `mygo.App.Path(mygo.PathUserData)` 默认是 `os.UserConfigDir()`
+   拼**应用名**——跟着改名走的话，老用户升级之后设置、搜索历史、快捷键、歌词缓存、
+   下载记录和界面状态会一起「消失」（数据没坏，只是不再有人去那个目录找，而症状
+   是静默的）。所以 `internal/platform/datadir.go` 把目录**钉死**在旧名字上，
+   `main()` 的第一句就调它。取舍与「什么时候该真搬」见那个文件顶上那一节。
+   连带的后果：macOS 上用户数据仍然住在
+   `~/Library/Application Support/Biu MyGo`，而应用叫 BiuGo。
 
 还有两条是 MyGo 文档里没写的，都跟「正在被拖」有关，用错了都不报错、只是拖不动：
 

@@ -72,13 +72,10 @@ func (s *Shell) viewSide(c *ui.Context) {
 				s.viewFavorites(c, st)
 			})
 			s.viewSideCollapse(c, st)
-			// 应用名贴在折叠按钮上面。折叠态摆不下（72 宽），Biu 那边也没有
-			// 这一行——这里留着是为了窗口标题和侧栏对得上。
-			if !st.SideMenuCollapsed {
-				ui.Text(c, "Biu MyGo").FontSize(11).
-					TextColor(c.Theme().TextMuted).Padding(0, 8, 4, 8)
-			}
+			// 完整应用名在折叠按钮下面那一条。见 `viewSideFoot`。
+			s.viewSideFoot(c, st)
 		})
+
 		grip := ui.Column(c).Key("side-grip").FillHeight().Width(sideGrip).
 			Cursor(ui.CursorResizeEW)
 
@@ -182,18 +179,46 @@ func (s *Shell) commitSideWidth() {
 	}
 }
 
-// viewSideBrand 是顶上那一条品牌。Biu 的 SD-03。
+// viewSideBrand 是顶上那一条品牌：一个字母的标记。
+//
+// ⚠️ **这里摆的是字母，不是应用名。** 完整名字在侧栏最下面那一行
+// （`viewSideFoot`）。两处别搞混，也别只改一处——2026-10 从 `Biu MyGo` 改名成
+// `BiuGo` 时就是只改了下面那行，于是展开的侧栏上方一个 18pt 的「Biu」、下面一个
+// 11pt 的「BiuGo」，**同一栏里两个产品名**，而两行都是正常的 Text，没有任何一处
+// 会报错。`sidebar_test.go` 的 `TestTheSidebarShowsTheAppNameExactlyOnce` 钉住它。
+//
+// ⚠️ **为什么摆不下整行应用名**：折叠后的侧栏是 72 像素（`app.CollapsedSideMenuWidth`），
+// 而「拖窄到 160 以下自动折叠」这件事要求侧栏**能缩到 72**——内容最小宽度比 72 大
+// 的话，它会被顶在 75.4，`TestDraggingTheGripBelowTheMinWidthCollapsesTheSidebar`
+// 当场红（实测：顶上换成 18pt 的「BiuGo」就是这个数）。18pt 的「BiuGo」光文字就
+// 约 55 宽，加上内边距过不了 72。所以顶上只摆标记——这和折叠态一直以来的做法
+// 是同一件事，顺带还保住了 72 这个宽度。
 //
 // 红绿灯的位置不用让：顶栏已经把 `bar.Left` 让出来了，侧栏从它下面开始。
 func (s *Shell) viewSideBrand(c *ui.Context, st app.Settings) {
 	if st.SideMenuCollapsed {
-		// 折叠后 72 宽，「Biu」摆得下但和一个菜单项分不出来，退成一个字母，
-		// 和下面那一列单字对齐。
+		// 折叠态只 72 宽：标记大一号、贴左边，紧挨着下面那一列单字。
 		ui.Text(c, "B").FontSize(20).Bold().TextColor(c.Theme().Text).
 			Padding(6, 0, 12, 0)
 		return
 	}
-	ui.Text(c, "Biu").FontSize(18).Bold().Padding(8, 8, 12, 8)
+	ui.Text(c, "B").FontSize(18).Bold().Padding(8, 8, 12, 8)
+}
+
+// viewSideFoot 是折叠按钮**下面**那一行完整应用名。
+//
+// （原来那行代码上方写着「应用名贴在折叠按钮上面」，而它其实画在按钮下面——
+// 注释与代码不符，这次一并改对。）
+//
+// 它是侧栏里**唯一**写着应用名的地方，写的就是窗口标题（`shell.go` 的
+// `WindowOptions.Title`）那个名字：展开时从上往下扫一眼，名字在最下面，
+// 和窗口标题对得上。折叠态不画：72 宽摆不下（Biu 那边也没有这一行）。
+func (s *Shell) viewSideFoot(c *ui.Context, st app.Settings) {
+	if st.SideMenuCollapsed {
+		return
+	}
+	ui.Text(c, "BiuGo").FontSize(11).
+		TextColor(c.Theme().TextMuted).Padding(0, 8, 4, 8)
 }
 
 // viewSideCollapse 是底下那个折叠开关。Biu 的 `RiArrowLeftDoubleLine` /

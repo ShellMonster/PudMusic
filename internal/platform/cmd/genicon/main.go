@@ -1,11 +1,13 @@
-// genicon 画出 `resources/icon.png`（应用图标的源图）。
+// genicon 画出 `resources/icon.png`（MyGo 打包用的应用图标源图）。
 //
 //	go generate ./internal/platform/
 //
-// 为什么不把 PNG 直接手绘出来提交：图案是代码（`platform.AppIcon`），手绘一次
-// 之后代码和图就会分家，而分家这件事没有任何测试会发现——PNG 照样能解码，
-// MyGo 照样能渲出全部尺寸，只是图案已经不是代码里那个了。这个命令让图**永远**
-// 是代码画的那一张。
+// 图案本身是 `internal/platform/icon-source.png`（人工挑定的那张）加上
+// `platform.AppIcon` 里的缩放与切形；这个命令只是把它落到 `resources/` 下——
+// 而 `resources/icon.png` 必须是**精确的 1024×1024**，因为 MyGo 的 `mygo build`
+// 从它出发渲 `.icns`（最大一档 1024）与 `.ico`（最大一档 256）。手绘提交的那一张
+// 会和代码里的图案分家，而分家这件事没有任何构建会报错：PNG 照样能解码，
+// MyGo 照样能渲出全部尺寸，只是图案已经不是代码里那个了。
 //
 // `platform/icon_test.go` 的 `TestTheShippedIconIsTheOneTheCodeDraws` 双向钉住它。
 package main

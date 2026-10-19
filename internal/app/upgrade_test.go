@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/ShellMonster/Biu_Go/internal/platform"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -531,10 +533,32 @@ func TestTheSnapshotDirectoryExplainsItself(t *testing.T) {
 		"换回了旧版",         // 同上
 		"拷回",            // 怎么做
 		"settings.json", // 拿哪一份
+		// 那条给用户敲的路径。它得是**真实存在的那个数据目录**，也就是
+		// `platform.LegacyUserDataDirName` ——见下面那条专门的测试。
+		platform.LegacyUserDataDirName,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("说明里没有 %q：\n%s", want, body)
 		}
+	}
+}
+
+// TestTheSnapshotReadmePointsAtTheDirectoryThatExists 钉住「回滚说明里那条路径是
+// 真的那个数据目录」。
+//
+// 这条最容易在**改名**那一票里悄悄坏掉：说明里那句 `D="$HOME/Library/
+// Application Support/Biu MyGo"` 是照着当时的目录名写的，而应用显示名改成了
+// BiuGo。谁在改名时「顺手」把它一起改掉，用户照着敲就得到一句
+// `cp: …: No such file or directory`——**而他真正要回滚的东西一个字节都没少**。
+// 那句话读起来像数据没了，实际是路径写错了，是最难查的一类问题。
+//
+// 所以这里断的是「说明里的目录名 == 应用实际在用的目录名」，而不是某个字面量：
+// 哪天真的搬了目录（理由见 `internal/platform/datadir.go` 顶上那一节），这条会红，
+// 而它红得正是时候。
+func TestTheSnapshotReadmePointsAtTheDirectoryThatExists(t *testing.T) {
+	if !strings.Contains(SnapshotReadme, platform.LegacyUserDataDirName) {
+		t.Errorf("回滚说明里的路径没有用应用真正在用的目录名 %q：\n%s",
+			platform.LegacyUserDataDirName, SnapshotReadme)
 	}
 }
 

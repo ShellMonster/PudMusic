@@ -642,6 +642,32 @@ func TestTheRowKeysAreUniqueAcrossTheTwoGroups(t *testing.T) {
 	}
 }
 
+// TestTheSidebarShowsTheAppNameExactlyOnce 钉住「侧栏上只有一个应用名」。
+//
+// 2026-10 应用从 `Biu MyGo` 改名成 `BiuGo` 时，折叠按钮上方那行 11pt 的小字跟着
+// 改了，**顶上那条 18pt 的品牌字没跟着改**——展开的侧栏上方一个「Biu」、下方一个
+// 「BiuGo」，同一栏里两个产品名。两行都是正常的 Text，所以**没有任何一处会报错**，
+// 只有人看得出不对劲。
+//
+// 修法是把应用名挪到顶上那一处、删掉下面的小字（`viewSideBrand`）。这一条钉住
+// 修完的样子：整个界面上应用名只出现一次，而旧的「Biu」整行不许再回来。
+func TestTheSidebarShowsTheAppNameExactlyOnce(t *testing.T) {
+	_, _, tt, _ := sideShell(t)
+
+	var names []string
+	for _, s := range tt.Texts() {
+		if s == "Biu" {
+			t.Errorf("界面上还有一行整字「Biu」——那是被改名前的旧品牌字：%q", tt.Texts())
+		}
+		if strings.Contains(s, "BiuGo") {
+			names = append(names, s)
+		}
+	}
+	if len(names) != 1 {
+		t.Errorf("界面上有 %d 处应用名（%q），want 1 处", len(names), names)
+	}
+}
+
 // TestTheSidebarPanicIsCaught 验侧栏画崩了，**程序不崩**，而且切到错误页。
 //
 // ⚠️ 这条证明不了「是侧栏自己那层 Guard 接住的」。`New()` 里 viewMain 外面
@@ -655,7 +681,7 @@ func TestTheRowKeysAreUniqueAcrossTheTwoGroups(t *testing.T) {
 func TestTheSidebarPanicIsCaught(t *testing.T) {
 	s, _, tt, _ := sideShell(t)
 
-	if !tt.HasText("Biu") {
+	if !tt.HasText("BiuGo") {
 		t.Fatalf("侧栏没画出来，文字有 %q", tt.Texts())
 	}
 	s.sideBody = func(*mygoui.Context) { panic("侧栏画崩了") }

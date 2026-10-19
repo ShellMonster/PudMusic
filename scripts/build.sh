@@ -95,7 +95,7 @@ done
 say "装之前请读 README 的「已知边界」一节"
 cat <<'EOF'
   - macOS 的 dmg **没有公证**：首次打开 Gatekeeper 会拦，右键点图标选「打开」，
-    或者 `xattr -dr com.apple.quarantine "/Applications/Biu MyGo.app"`。
+    或者 `xattr -dr com.apple.quarantine "/Applications/BiuGo.app"`。
   - Windows 的安装包**没有签名**：SmartScreen 会警告「Windows 已保护你的电脑」。
   - Windows 版**暂时解不了 AAC / M4A / M4S**（B 站的有损音质就是这一档）。
     这是一条待决的路线选择，不是没排期；见 README 与 Plan §6.1。
