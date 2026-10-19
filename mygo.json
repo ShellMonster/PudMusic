@@ -10,5 +10,9 @@
     "infoPlist": {
       "LSApplicationCategoryType": "public.app-category.music"
     }
+  },
+  "updates": {
+    "publicKey": "oJyYKaPIGn5RA8yPM/I395n6D+wn/PdaZv58jqBDrO0=",
+    "github": "ShellMonster/Biu_Go"
   }
 }
