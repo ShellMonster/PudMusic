@@ -176,7 +176,7 @@ func TestTheIconButtonsAreTransparentAndUnbordered(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, tt := flatSideShell(t, dark)
 			// ⚠️ **「播放列表」从顶栏搬到了播放条右边那一组**（票 #127，照 Biu
-			// 的 `playbar/right/index.tsx:13`），所以下面那一句「哪一格」得跟着
+			// 的 `playbar/right/index.tsx:16`），所以下面那一句「哪一格」得跟着
 			// 变——写成「顶栏」会让人以为它在顶栏上，而它不在了。
 			for _, what := range []struct{ label, where string }{
 				{"打开文件", "顶栏"},
@@ -361,10 +361,10 @@ func TestTheSidebarRowsHaveNoBorderAndNoFill(t *testing.T) {
 // 的事。拿它们去断「悬停要亮」只会逼着代码给禁用的键也铺一层底，
 // **等于告诉用户这里点得动**（这正是评审查出来的那一条）。
 //
-// ⚠️ 只画播放条（`playBarTester`）而不是整窗：整窗里这一格背后是播放条自己的
-// `t.Surface`，而外侧那一圈要采到**播放条之内**才算是同一个参照。整窗的写法会在
-// 播放条的最外沿（加歌那一枚）采到窗外，报出来的是「框外是窗口底色」——离真因
-// 隔了两层。
+// ⚠️ 只画播放条（`playBarTester`）而不是整窗：整窗里这一格背后是**内容区**的底色
+// （票 #127 之后播放条和内容区同源，都是 `t.Background`），而外侧那一圈要采到
+// **播放条之内**才算是同一个参照。整窗的写法会在播放条的最外沿（加歌那一枚）
+// 采到窗外，报出来的是「框外是窗口底色」——离真因隔了两层。
 func TestThePlayBarKeysAreFlatAndKeepTheirHover(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"

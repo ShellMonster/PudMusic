@@ -97,7 +97,7 @@ var closeWindowOptions = []struct {
 // settingsContentMaxW 是设置的内容收在多宽里。
 //
 // 🔴 **900 是量出来的**：Biu 那一页是 `m-auto mb-6 max-w-[900px] px-8 py-4`
-// （`biu/src/pages/settings/index.tsx:117`）。我们原来没有这一层：内容
+// （`biu/src/pages/settings/index.tsx:121`）。我们原来没有这一层：内容
 // `FillWidth()` 之后一路铺到窗口右边缘，于是窗口一宽，整页设置就跟着拉宽——
 // 右下角那个代理主机输入框能到 470 像素，而 Biu 那一档是两个 410 的格子。
 //

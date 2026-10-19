@@ -583,7 +583,7 @@ func TestThePartsKeySharesTheMetaRowWithTheOtherKeys(t *testing.T) {
 	}
 	const sameLine = 2
 	// 赞 / 收藏都是这一行上的图标键。**「下载」不在这一列里**——票 #127 把它从
-	// 左边第二行搬到了播放条右边那一组（照 Biu 的 `playbar/right/index.tsx:12`），
+	// 左边第二行搬到了播放条右边那一组（照 Biu 的 `playbar/right/index.tsx:15`），
 	// 而那一行在播放条的正中，比这一行低半条播放条，拿它当参照量出来的差永远是
 	// 几十像素，那不是「分集键摆错行了」。
 	for _, other := range []string{"赞", "收藏"} {

@@ -408,7 +408,7 @@ func TestTogglingAutoStartGoesThroughTheSystem(t *testing.T) {
 // TestTheSettingsContentIsCappedAndCentered 钉住设置的内容收在中间一段宽度里。
 //
 // Biu 那一页是 `m-auto mb-6 max-w-[900px] px-8 py-4`
-// （`biu/src/pages/settings/index.tsx:117`）。我们原来没有这一层：内容
+// （`biu/src/pages/settings/index.tsx:121`）。我们原来没有这一层：内容
 // `FillWidth()` 之后一路铺到窗口右边缘，窗口一宽整页设置就跟着拉宽——右下角
 // 那个代理主机输入框能到 410 像素。
 //

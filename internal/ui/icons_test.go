@@ -550,7 +550,7 @@ func TestTheLikeKeyDrawsItsOwnIcon(t *testing.T) {
 // 动态和登录（它们原本也是文字按钮，留着会让顶栏一半图标一半字）。
 //
 // ⚠️ **「播放列表」不在这一列里**：上游的顶栏压根没有这个开关，它在播放条右边
-// 那一组（`biu/src/layout/playbar/right/index.tsx:13`）。我们当初是因为右边
+// 那一组（`biu/src/layout/playbar/right/index.tsx:16`）。我们当初是因为右边
 // 摆不下才把它挪到顶栏的，票 #127 把它搬回去了——顶栏留着两处开关就是同一个
 // 动作两个入口，而它们会不一致。搬回去之后由
 // `TestThePlaylistKeySitsOnThePlayBarNotTheTopBar` 钉住它在新位置上。

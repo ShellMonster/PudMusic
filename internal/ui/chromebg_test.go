@@ -94,8 +94,8 @@ func TestTheChromeSharesOneBackground(t *testing.T) {
 // ——浅色下尤其致命：两个都是 `#ffffff`。
 //
 // Biu 靠的就是这两样，底色同源、分界另有办法：侧栏是 `border-divider/30 border-r-1`
-// （`layout/side/index.tsx:151-152`），播放条是外层那个 `shadow-2xl`
-// （`layout/index.tsx:47`）。
+// （`layout/side/index.tsx:145`），播放条是外层那个 `shadow-2xl`
+// （`layout/index.tsx:48`）。
 func TestTheChromeStillHasASeparationFromTheBackground(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"

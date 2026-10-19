@@ -43,7 +43,7 @@ const (
 // navMinHeight 是顶栏多高。
 //
 // 🔴 **64 是照 Biu 量出来的**：它的顶栏那一格是 `h-16 flex-none`
-// （`biu/src/layout/index.tsx:32`），而那一格里的 navbar 写的是 `h-full`——
+// （`biu/src/layout/index.tsx:40`），而那一格里的 navbar 写的是 `h-full`——
 // 也就是「有多高就是多高」，而外面钉死的就是 64。我们原来是 32（MyGo 自己
 // 例子里的下限，`ui/context.go:334` 的 `max(bar.Height, 32)`），矮了整整一半。
 //
@@ -58,7 +58,7 @@ const navMinHeight = 64
 // viewNav 是顶部导航栏：后退/前进 + 搜索框 + 打开文件 + 迷你 + 设置 + 动态红点 + 头像。
 //
 // ⚠️ **这里没有页名**（票 #127）。每一页自己写着标题，顶栏再写一遍就是同一个词在
-// 屏幕上出现两次；上游的顶栏也没有（`layout/navbar/index.tsx:26-42`）。
+// 屏幕上出现两次；上游的顶栏也没有（`layout/navbar/index.tsx:31-34`）。
 // ⚠️ **这里也没有播放列表开关**：它在播放条右边那一组（`playbar.go` 的
 // `viewPlayBarRight`）。理由见 Children 里那两条注释。
 func (s *Shell) viewNav(c *ui.Context) {
@@ -102,9 +102,9 @@ func (s *Shell) viewNav(c *ui.Context) {
 		//
 		//   - **页名**：每一页自己都写着标题（设置 / 下载记录 / 历史记录…），
 		//     顶栏再写一遍就是同一个词在屏幕上出现两次。上游的顶栏压根没有
-		//     这一行（`layout/navbar/index.tsx:26-42`：左边只有
+		//     这一行（`layout/navbar/index.tsx:31-34`：左边只有
 		//     `Navigation` + `Search`）——「我在哪」是侧栏高亮那一项的事。
-		//   - **播放列表开关**：上游在播放条右边那一组（`playbar/right/index.tsx:13`），
+		//   - **播放列表开关**：上游在播放条右边那一组（`playbar/right/index.tsx:16`），
 		//     它当初在这儿是因为右边挤不下。两处都留着就是同一个开关两个位置，
 		//     而它们会不一致（顶栏那枚在播放条被满屏盖住时还点得到）。
 		// 迷你播放器的开关。Biu 那边在窗口按钮那一排里（`components/window-action/

@@ -816,7 +816,7 @@ func TestTheNavBarPanicIsCaught(t *testing.T) {
 
 // TestTheTopBarIsBiuHeight 钉住顶栏是 Biu 那个高度。
 //
-// Biu 的顶栏那一格是 `h-16 flex-none`（`biu/src/layout/index.tsx:32`），也就是
+// Biu 的顶栏那一格是 `h-16 flex-none`（`biu/src/layout/index.tsx:40`），也就是
 // 64。我们原来是 32（MyGo 例子里的下限，`ui/context.go:334`）。
 //
 // ⚠️ **为什么这条不只是「好看一点」**：顶栏是**内容区上面那一行**，它矮 32，内容区
@@ -857,7 +857,7 @@ func TestTheTopBarIsBiuHeight(t *testing.T) {
 // TestTheTopBarShowsNoPageTitle 钉住页名不出现两次。
 //
 // 每一页自己都写着标题（设置 / 下载记录 / 历史记录…），顶栏再写一遍就是同一个
-// 词在屏幕上出现两次。上游的顶栏压根没有这一行（`layout/navbar/index.tsx:26-42`
+// 词在屏幕上出现两次。上游的顶栏压根没有这一行（`layout/navbar/index.tsx:31-34`
 // 的左边只有 `Navigation` + `Search`）——「我在哪」是侧栏高亮那一项的事。
 //
 // ⚠️ **用 `navBarTester` 而不是整窗**：它 `withView` 只画顶栏那一块，所以
@@ -898,34 +898,87 @@ func TestTheTopBarShowsNoPageTitle(t *testing.T) {
 
 // TestThePageStillShowsItsOwnTitle 钉住去掉顶栏那一处之后，标题还在页面上。
 //
-// 这是上一条**互为反面**的那一半。只断「顶栏上没有」的话，最省事的实现是「谁都
-// 别画标题」——上一条会全绿，而用户进到「下载记录」看到的是一片没有名字的页面，
-// 和他刚从侧栏点过来的那一项对不上。
+// # 为什么这条必须**绕开 router**
 //
-// ⚠️ **分开画两次，各数一次**：`withView` 把整窗换成只画顶栏 / 只画内容区，
-// 于是两边的文字互不掺。「只出现一次」这件事就是这么断的：**顶栏那一侧是 0，
-// 内容区那一侧至少是 1**——重复只可能来自顶栏，它归零了，页面上剩下的那份就
-// 是唯一的一份。
+// ⚠️ **走整窗的话这条断言恒绿**——`Router.View` 结尾有一句 `pg.Label(e.title)`
+// （`mygo/ui/router.go:693`）：路由容器的**无障碍名字**就是页名，而
+// `Tester.HasText` 认的正是「画着这句字**或者**标着这个名字」的元素。于是那一页
+// 哪怕一个字都没画，`HasText("设置")` 也是真的。
 //
-// 侧栏的菜单项**不在这两条数里**，所以「用户动态」那一页也算数：它的页名既不在
-// 侧栏菜单里（`InMenu` 是 false），也不和顶栏任何一个键重名。
+// 实测（把 `settings_page.go` 里那个 `ui.Text(c, "设置")` 删掉再跑这一条）：
+// **照样 PASS**。而首页的 `Find("推荐音乐")` 给回来的是 `{0 0 1200 800}`——
+// **整个路由容器**，而首页画面上一个「推荐音乐」都没有。
+//
+// 所以这里**直接调那一页的 view**，绕开 router 那个容器。绕开之后画面上出现
+// 这个名字，就只能是那一页自己画的。
+//
+// # 为什么用 `Find`（逐字相等）而不用 `HasText`（是子串）
+//
+// 设置页那四个 Tab 叫「常规设置」「菜单设置」……`HasText("设置")` 认的是子串，
+// 删掉页面上那个「设置」它照样是真的——那样这条又是空的。
+//
+// # 为什么还要断一次高度
+//
+// 页标题是一行 22px 的字（实测高 24~26），而路由容器是整块内容区（高 648）。
+// 这一句让「量到的是标题而不是容器」成为断言的一部分，而不是靠「我绕开了
+// router」这个前提。
+//
+// # 断言的到底是哪一个「名字」
+//
+// 每一页都**自己**把名字画在屏幕上：设置 / 下载记录 / 本地音乐 / 扫码登录是
+// 那一行页标题；历史记录 / 稍后再看在没有挂上 B 站接口时画的是「还没接上」那一支
+// （`viewLibraryMissing`），而那一支**也写着这一页的名字**。两种都算数——
+// 这一条断的是「**这一页在屏幕上有没有名字**」，不是「页标题那一行在不在」。
+// 两种都**不是**路由容器那个无障碍标签：那个已经绕开了。
 func TestThePageStillShowsItsOwnTitle(t *testing.T) {
-	paths := []string{settingsPath, downloadListPath, historyPath, laterPath, dynamicFeedPath}
+	// 每一页自己的画法。**直接调 view，不走 `viewRoutes`**——理由见文件头那一段。
+	//
+	// ⚠️ **「搜索」不在这一列**：它要从路由上读查询串（`viewSearch` 里的
+	// `r.Query(searchQuery)`），而路由那一格正是这里要绕开的东西。
+	pages := []struct {
+		title string
+		draw  func(*Shell) func(*mygoui.Context)
+	}{
+		{"设置", func(s *Shell) func(*mygoui.Context) {
+			return func(c *mygoui.Context) { s.wake.set(c); s.viewSettings(c, nil) }
+		}},
+		{"下载记录", func(s *Shell) func(*mygoui.Context) {
+			return func(c *mygoui.Context) { s.wake.set(c); s.viewDownloadList(c, nil) }
+		}},
+		{"历史记录", func(s *Shell) func(*mygoui.Context) {
+			return func(c *mygoui.Context) { s.wake.set(c); s.viewHistory(c, nil) }
+		}},
+		{"稍后再看", func(s *Shell) func(*mygoui.Context) {
+			return func(c *mygoui.Context) { s.wake.set(c); s.viewLater(c, nil) }
+		}},
+		{"本地音乐", func(s *Shell) func(*mygoui.Context) {
+			return func(c *mygoui.Context) { s.wake.set(c); s.viewLocalMusic(c, nil) }
+		}},
+		{"扫码登录", func(s *Shell) func(*mygoui.Context) {
+			return func(c *mygoui.Context) { s.wake.set(c); s.viewLogin(c, nil) }
+		}},
+	}
 
-	b := newTestShell(t, withView(func(s *Shell) func(*mygoui.Context) {
-		return func(c *mygoui.Context) {
-			s.wake.set(c)
-			s.viewRoutes(c)
-		}
-	}))
-	tt := b.tt
+	// 一行标题的高度上限。22px 的字实测 24~26 高（见上面那一段），
+	// 而整块内容区是几百高——60 把这两者分得很开。
+	const titleLineMaxH = 60
 
-	for _, p := range paths {
-		title := lookup(p).Title
-		b.s.navigate(p)
-		waitFrames(t, tt, p+" 的内容画出来了", func() bool { return b.s.router.Path() == p })
-		if !tt.HasText(title) {
-			t.Errorf("%q 这一页的内容区里没有页名 %q，文字有 %q", p, title, tt.Texts())
-		}
+	for _, p := range pages {
+		t.Run(p.title, func(t *testing.T) {
+			b := newTestShell(t, withView(p.draw))
+			tt := b.tt
+			tt.Frame()
+			homeFrame(tt)
+
+			r, ok := tt.Find(p.title)
+			if !ok {
+				t.Fatalf("%q 这一页上没有页名 %q（画面上的字：%q）——顶栏那一处去掉之后，"+
+					"这一页在屏幕上就没有名字了", p.title, p.title, tt.Texts())
+			}
+			if r.H > titleLineMaxH {
+				t.Errorf("%q 这一页上的 %q 是 %.0f 高（y=%.0f）——那不是一行标题，"+
+					"是装页面的容器；量到的不是页名", p.title, p.title, r.H, r.Y)
+			}
+		})
 	}
 }

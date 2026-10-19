@@ -99,7 +99,7 @@ const (
 
 	// ── 播放条右边那一组 ──
 	// ⚠️ 「播放列表」原来在顶栏那一列里，票 #127 跟着上游搬到了播放条
-	//（`layout/playbar/right/index.tsx:13`），所以它归在这一列而不是顶栏那一列。
+	//（`layout/playbar/right/index.tsx:16`），所以它归在这一列而不是顶栏那一列。
 	iconQueue = "Editor/list-radio.svg" // 播放列表（抽屉的开关）
 
 	// ── 队列抽屉头 ──

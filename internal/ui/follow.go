@@ -293,6 +293,14 @@ func (f *followPage) resetUsers() {
 //
 // ⚠️ **外面已经包了一层 recover**（`router.go` 的 `Shell.page`）。
 // ⚠️ **问 `r` 不要问 `c.Router()`**（理由同 `upspace.go`）。
+//
+// ⚠️ **这一页没有页标题，而名字是有的**（票 #127）：它写在**左边那一列顶上**
+// ——`followPaneTitle` 给出「全部关注」/ 那一组的名字 / 「我的关注」
+// （理由见那个函数）。上游那一页的 `<h1>` 给的也是同一句话
+// （`src/pages/follow-list/index.tsx:206`：`全部关注` / 分组名 / `我的关注`），
+// 只是上游把它摆在右上角、我们摆在左边那一列的头顶上——那一列本来就是分组
+// 列表，「现在是哪一组」和「哪一列」是同一件事。
+// 顶栏那一处页名票 #127 去掉之后，这一页的名字就只剩这一处，**不重复**。
 func (s *Shell) viewFollow(c *ui.Context, _ *ui.Route) {
 	// 🔴 铁律二：每帧第一件事就是装主题，而且必须在最开头。
 	s.applyFrameTheme(c)

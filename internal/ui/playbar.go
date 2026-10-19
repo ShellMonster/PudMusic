@@ -32,13 +32,13 @@ const (
 	metaGap = 8
 
 	// playbarRightGap 是右边那一组里键与键之间的缝。Biu 那一行是
-	// `space-x-2`（`playbar/right/index.tsx:8`），不是外面那一行的 12。
+	// `space-x-2`（`playbar/right/index.tsx:13`），不是外面那一行的 12。
 	playbarRightGap = 8
 
 	// playbarShadowY / playbarShadowBlur / playbarShadowA 是播放条上缘那道阴影。
 	//
-	// Biu 那一层靠 `shadow-2xl`（`layout/index.tsx:47`）和 Card 上那层 `sm`
-	// 浮起来，而**底色和内容区是同一个**（`playbar/index.tsx:18` 的
+	// Biu 那一层靠 `shadow-2xl`（`layout/index.tsx:48`）和 Card 上那层 `sm`
+	// 浮起来，而**底色和内容区是同一个**（`playbar/index.tsx:26` 的
 	// `bg-background`）。统一底色之后那道阴影就是这一条唯一的分界，去掉它
 	// 播放条会和内容区糊成一片（浅色下尤其明显：两边都是 `#ffffff`）。
 	//
@@ -74,9 +74,9 @@ const (
 //
 // 🔴 **底色取 `Background`（和内容区同一个来源），靠一条阴影和侧栏分开**。
 //
-// Biu 的播放条是 `bg-background`（`layout/playbar/index.tsx:18` 的 `Card`），
+// Biu 的播放条是 `bg-background`（`layout/playbar/index.tsx:26` 的 `Card`），
 // 底色和内容区一样，分界靠的是外层那个 `shadow-2xl`
-// （`layout/index.tsx:47`）。我们原来取 `Surface`：**浅色下只差一档，
+// （`layout/index.tsx:48`）。我们原来取 `Surface`：**浅色下只差一档，
 // 深色下差一整级**（`#27272a` / `#18181b`），于是深色下界面裂成三条带
 // （票 #127 的头一条）。三处统一之后层次没丢：上面那条线在、卡片和弹窗仍然
 // 取 `Surface`，比底色亮一档。
@@ -107,7 +107,7 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 }
 
 // viewPlayBarRight 是播放条右边那一组。**次序照 Biu 的 `playbar/right`**：
-// 模式 / 下载 / 队列 / 音量 / 倍速（`layout/playbar/right/index.tsx:10-14`）。
+// 模式 / 下载 / 队列 / 音量 / 倍速（`layout/playbar/right/index.tsx:14-18`）。
 //
 // ⚠️ **那一行还多一个「加歌」，是本应用自己的**：Biu 的右边没有它——上游把
 // 「选一个本地音乐」放在侧栏菜单的「本地音乐」那一项里，而我们的
@@ -115,29 +115,40 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 // 摆在**最后一格**：前五格的次序是肌肉记忆，加东西不该插在中间。
 //
 // ⚠️ **「下载」是从左边第二行搬过来的，不是新加的一枚**：Biu 的播放条左边
-// 只有分集 / 收藏 / 赞三枚（`playbar/left/index.tsx:67-76`），下载在右边
-// （`playbar/right/index.tsx:12`）。两处各摆一枚就是「同一个动作两个入口」，
+// 只有分集 / 收藏 / 赞三枚（`playbar/left/index.tsx:86-90`），下载在右边
+// （`playbar/right/index.tsx:15`）。两处各摆一枚就是「同一个动作两个入口」，
 // 而它们会不一致——左边那枚走 `downloadLater` 补 cid，右边这枚也一样，
 // 但用户看到的是两枚一样的图标，那是在问「哪一个是真的」。
 //
-// 键与键之间的缝是 8（`space-x-2`，`playbar/right/index.tsx:8`），不是外面
+// 键与键之间的缝是 8（`space-x-2`，`playbar/right/index.tsx:13`），不是外面
 // 那一行的 12：这一行最挤，8 是上游量出来摆得下五枚的那一档。
 func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 	ui.Row(c).Key("playbar-right").Gap(playbarRightGap).AlignItems(ui.Center).Children(func() {
 		// 播放模式。**原来它摆在进度那一行的最右边**，而上游摆在右边这一组
-		// 的头一个（`playbar/right/index.tsx:11`）。搬回来之后中间那一列还
+		// 的头一个（`playbar/right/index.tsx:14`）。搬回来之后中间那一列还
 		// 腾出 38（一个 28 的键加一道 10 的缝），而右边这一组多花同样的数。
 		s.viewPlayMode(c, st)
 
-		// 下载。没有歌时不摆：Biu 那边是
+		// 下载。**没有歌时不摆**——Biu 那一支的条件是
 		// `{Boolean(playId) && getPlayItem()?.source !== "local" && …}`
-		// （`playbar/right/index.tsx:12`），而本地文件压根没有 cid 可下。
+		// （`playbar/right/index.tsx:15`）。
+		//
+		// ⚠️ **我们只实现了前半截（`playId`），后半截（`source !== "local"`）
+		// 没实现**：本地文件照样摆着这一枚。**这是改之前就有的行为**——那一枚原来
+		// 在左边第二行（`viewTrackMeta`），同样只判「有没有歌」。
+		//
+		// 为什么没顺手补上：那一支要的是「当前这一首是不是本地文件」，而
+		// `app.State`（这一行读的那一份快照）**没有来源这一栏**——`Item.Source`
+		// 在队列那一层（`app/queue.go:31`），不在快照里。补它要么给 `State` 加
+		// 一栏（动应用层），要么在 view 里每帧去问一次 `App.PlayingItem()`
+		//（那会绕过快照，而这一层是**每帧现读快照**的）。两样都超出这一票
+		// 「重排控件」的范围，所以这一票只把话说准。
 		if st.HasTrack {
 			s.viewDownloadButton(c, st)
 		}
 
 		// 播放列表抽屉的开关（原来在顶栏，见 navbar.go）。上游它就在右边这一组
-		// 的第三个（`playbar/right/index.tsx:13`），而顶栏那一枚是当初右边摆不下
+		// 的第三个（`playbar/right/index.tsx:16`），而顶栏那一枚是当初右边摆不下
 		// 时挪过去的——现在右边腾得开，两处只能留一个，留两个就会不一致。
 		if iconButton(c, iconQueue, "播放列表", iconMd).
 			Size(iconHitMd, iconHitMd).Padding(0, 5).
@@ -239,7 +250,7 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 //
 // **摆在这里而不是右边那一排**：右边那一组的次序是照 Biu 定的（见
 // `viewPlayBarRight`），而这一行摆的是**上游左边那一块**里的三枚
-// （`playbar/left/index.tsx:67-76`：分集 / 收藏 / 赞）。第二行是空的，
+// （`playbar/left/index.tsx:86-90`：分集 / 收藏 / 赞）。第二行是空的，
 // 歌名那一行的宽度也不被它吃（下面那段）。
 //
 // 「分集」摆在赞/收藏**前面**，照的是 Biu 播放条上的次序
@@ -600,7 +611,7 @@ func (s *Shell) viewNextButton(c *ui.Context) {
 // 这里要是自己按 cur+1 算一遍，随机和单曲两档立刻就错。
 //
 // 摆在哪儿：右边那一组的**头一个**（`viewPlayBarRight`，照
-// `playbar/right/index.tsx:11`）。原来它摆在进度那一行的最右边，那是右边摆不下
+// `playbar/right/index.tsx:14`）。原来它摆在进度那一行的最右边，那是右边摆不下
 // 时借中间那一列的富余（票 #104）；上游本来就在右边这一组。
 func (s *Shell) viewPlayMode(c *ui.Context, st app.State) {
 	// 四档各配一个图标（Biu 的 `getPlayModeList`，逐个照它的 `icon` 那一项），

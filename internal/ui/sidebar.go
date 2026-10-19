@@ -37,7 +37,7 @@ const (
 
 	// sideDividerW / sideDividerA 是右缘那条分隔线的宽度和浓度。
 	//
-	// 照 Biu 的 `border-divider/30 border-r-1`（`side/index.tsx:151-152`）：
+	// 照 Biu 的 `border-divider/30 border-r-1`（`side/index.tsx:145`）：
 	// 1 像素、透明度 30%。**不能照抄 `t.Border` 原色**——深色下 `#3f3f46`
 	// 压在 `#17181a` 上是一道亮线，比上游那道明显得多（flatbutton.go 的文件头
 	// 记的就是这件事：同一个色在深浅两套里的观感完全不同）。
@@ -69,7 +69,7 @@ func (s *Shell) viewSide(c *ui.Context) {
 
 	// 🔴 底色取 **`Background` 而不是 `Surface`**，右缘一条 1px 的分隔线。
 	//
-	// Biu 的侧栏**没有背景类**（`biu/src/layout/side/index.tsx:150-155` 只有
+	// Biu 的侧栏**没有背景类**（`biu/src/layout/side/index.tsx:144-145` 只有
 	// `border-divider/30 … border-r-1`），底色和内容区同源，靠**那条线**分界。
 	// 我们原来取 `Surface`：浅色下只差 `#f4f4f5` / `#ffffff` 一档，看不出来；
 	// **深色下差的是 `#27272a` / `#18181b`**——深浅两个通道各自跳一级，
@@ -260,7 +260,7 @@ func (s *Shell) viewSideCollapse(c *ui.Context, st app.Settings) {
 	// `Label` 留着：画面上只有 «/» 这一个符号，念不出是什么，而 tooltip 只是
 	// 给鼠标看的（无头 Tester 认按钮也靠它）。
 	//
-	// ⚠️ **这里不许给描边**。Biu 的折叠键是 `border-y`（`side/index.tsx:167`），
+	// ⚠️ **这里不许给描边**。Biu 的折叠键是 `border-y`（`side/index.tsx:171`），
 	// 抄过来看着更像——而 `flatButton` 那一条不变量（`flatbutton_test.go` 的
 	// `TestTheSidebarRowsHaveNoBorderAndNoFill`）量的是**侧栏最左边那一列**
 	// 上有几段不是底色的像素，一道横贯整栏的线在那一列上就是两段，于是它读成
