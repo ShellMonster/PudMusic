@@ -49,7 +49,7 @@ func (s *Shell) viewRate(c *ui.Context, st app.State) {
 	// 的是「点开倍率什么都没出来」），而报错的地方在播放条上——两者对不上，
 	// 极难查。
 	ui.Popover(c, btn, &s.rateOpen, func() {
-		Guard(s.viewRateMenu, s.onPanic)(c)
+		s.guardAt("倍速菜单", s.viewRateMenu)(c)
 	})
 }
 

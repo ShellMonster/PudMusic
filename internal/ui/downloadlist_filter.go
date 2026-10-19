@@ -70,6 +70,7 @@ func dlEmptyAfterFilter(f downloadFilter) emptyState {
 	return emptyState{
 		Title: "这一档没有记录",
 		Hint:  "你在看「" + f.label() + "」这一档，换一档看看",
+		Icon:  iconEmptyDownload,
 	}
 }
 

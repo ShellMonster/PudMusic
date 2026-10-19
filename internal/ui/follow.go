@@ -109,6 +109,7 @@ func tagIDOf(tab string) (int, bool) {
 var followNotLoggedIn = emptyState{
 	Title: "还没登录",
 	Hint:  "关注列表是跟着账号走的——先扫码登录，登录之后你关注的 UP 主会出现在这里",
+	Icon:  iconEmptyLogin,
 }
 
 // followNoSearchResult 是「**搜了，没搜到**」。
@@ -119,6 +120,7 @@ var followNotLoggedIn = emptyState{
 var followNoSearchResult = emptyState{
 	Title: "没搜到",
 	Hint:  "换个词再搜一次，或者清空搜索框看全部关注",
+	Icon:  iconEmptyGroup,
 }
 
 // followEmptyTag 是「**这一组还没有人**」。
@@ -128,6 +130,7 @@ var followNoSearchResult = emptyState{
 var followEmptyTag = emptyState{
 	Title: "这个分组还没有人",
 	Hint:  "在 UP 主空间里点「关注」，关注过的人会出现在「全部关注」那一格",
+	Icon:  iconEmptyGroup,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -306,15 +309,7 @@ func (s *Shell) viewFollow(c *ui.Context, _ *ui.Route) {
 	// 这一次特别的原因——从别的页面切过来的那条路按 `lookup(path).Empty.Title`
 	// 认「切过去了」，少画那一句就断了。
 	if !s.app.ExploreMounted() {
-		e := lookup(followPath).Empty
-		ui.Column(c).Key("page:" + followPath).Grow(1).Center().Gap(8).Padding(24).
-			Children(func() {
-				ui.Text(c, "我的关注").FontSize(22).Bold()
-				ui.Text(c, e.Title).FontSize(15)
-				ui.Text(c, e.Hint).FontSize(12).TextColor(c.Theme().TextMuted)
-				ui.Text(c, "还没接上 B 站接口，这一页暂时拉不了内容。").FontSize(12).
-					TextColor(c.Theme().Danger)
-			})
+		s.viewPageEmptyWithReason(c, "page:"+followPath, "我的关注", lookup(followPath).Empty)
 		return
 	}
 
@@ -561,7 +556,7 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 	// 人」——一句话都不提失败，而 `started` 仍是 false、`err` 非 nil，切走再切回来
 	// 也不会重拉，用户看到的是「我真的一个 UP 主都没关注」。
 	if !f.pager.started && f.pager.err != nil {
-		s.viewLoadError(c, "follow-err:users", "重试加载关注的人", f.pager.err, func() {
+		s.viewLoadError(c, "follow-err:users", "关注的 UP 主", "重试加载关注的人", f.pager.err, func() {
 			f.pager.err = nil
 			if ctx := f.pager.begin(); ctx != nil {
 				go s.fetchFollowUsers(ctx, f, f.gen, f.tab, f.applied, f.pager.page, len(f.users), f.tabTotal())
@@ -767,10 +762,10 @@ func (s *Shell) viewFollowCardGuarded(c *ui.Context, f *followPage, i int) {
 // （`line-clamp-2`）。**整张卡点一下 = 跳进那个 UP 的空间**（上游 `onPress`
 // 就是 `navigate(/user/${u.mid})`）。
 //
-// ⚠️ **认证那一块画成一行字而不是头像右下角那枚闪电**：上游那枚是 Remix 图标
-// 字体里的图标，而 MyGo 没有图标字体（`empty.go` 那枚关闭图标也是这么不画的）。
-// 画一个不像的图标比不画更糟，而 `official_verify.desc` 我们已经解出来了
-// （`bili/follow.go`），摆一行字是最诚实的画法。
+// ⚠️ **认证那一块画成一行字而不是头像右下角那枚闪电**：上游那一枚是
+// `RiVerifiedFill`，而我们的图标资源里**没有那一枚**（这一票补的是界面上一处一处
+// 用得上的那一批，不是一个分类整个搬进来）。`official_verify.desc` 我们已经解出来
+// 了（`bili/follow.go`），摆一行字是最诚实的画法。
 func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser) {
 	t := c.Theme()
 	name := u.Name

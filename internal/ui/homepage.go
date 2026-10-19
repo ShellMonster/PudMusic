@@ -235,7 +235,7 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell) {
 		// 用共用的 `viewLoadError`（不是 `viewEmpty` 的一个空状态），理由在
 		// empty.go 那一段：失败必须有重试按钮，而且不能被「暂无内容」盖住。
 		tab := h.tab
-		s.viewLoadError(c, "home:fail:"+homeTabs[tab], "重试加载"+homeTabs[tab]+"推荐",
+		s.viewLoadError(c, "home:fail:"+homeTabs[tab], homeTabs[tab]+"推荐", "重试加载"+homeTabs[tab]+"推荐",
 			err, func() { h.retryTab(tab) })
 	case err == nil && h.feed.loadingOf(h.tab) && len(songs) == 0:
 		ui.Column(c).Key("home:loading").Grow(1).Center().Children(func() {

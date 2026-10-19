@@ -189,7 +189,7 @@ func TestSearchSuggestsHistoryAfterTyping(t *testing.T) {
 //
 // 少了它，点历史那一条会先把焦点抢到那个按钮上，「失焦就收」在按下那一帧就成立，
 // 浮层在 Children 之前就没了，那一条根本点不到——实测下来「选中」变成了「停在
-// 首页」。摘掉 KeepFocus，这一��立刻红。
+// 首页」。摘掉 KeepFocus，这一条立刻红。
 func TestSuggestCollapsesWhenSelectingOne(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
@@ -797,6 +797,11 @@ func TestTheNavBarPanicIsCaught(t *testing.T) {
 	}
 	if !strings.Contains(errString(s.crash), "顶栏画崩了") {
 		t.Errorf("记住的 panic 是 %v", s.crash)
+	}
+	// ⚠️ **崩在界面的哪一块也要记住**（这一票要的「出错在哪一步」）：光记住
+	// 「顶栏画崩了」分不出是顶栏坏了还是别处坏了把顶栏带崩的。
+	if s.crash.where != "顶栏" {
+		t.Errorf("记住的崩溃现场是 %q，want「顶栏」", s.crash.where)
 	}
 	if !tt.HasText("界面出错了") {
 		t.Errorf("没有切到错误页，文字有 %q", tt.Texts())

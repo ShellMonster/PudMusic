@@ -211,7 +211,7 @@ func NewMini(a *app.App, main *Shell, toggle func()) *Shell {
 	if main != nil {
 		s.adoptShared(main)
 	}
-	s.draw = Guard(s.viewMini, s.onPanic)
+	s.draw = s.guardAt("迷你播放器", s.viewMini)
 	s.toggleMini = toggle
 	return s
 }
@@ -222,7 +222,7 @@ func NewMini(a *app.App, main *Shell, toggle func()) *Shell {
 // 各自起了一个后台写盘 goroutine，不收就一直跑到进程退出（而这一份从此没人用）。
 func (s *Shell) adoptShared(main *Shell) {
 	if main.keys != nil && main.keys != s.keys {
-		// 收掉 `New` 刚建的那一份（不报���：这一份从没被用过，也就没有要落盘的东西）。
+		// 收掉 `New` 刚建的那一份（不报错：这一份从没被用过，也就没有要落盘的东西）。
 		_ = s.keys.Close()
 		s.keys = main.keys
 		s.shared = true
@@ -423,8 +423,8 @@ func (s *Shell) viewMini(c *ui.Context) {
 	ui.Row(c).Key("mini").Fill().Radius(t.Radius).
 		Background(t.Surface).DragWindow().Children(func() {
 		// 里面照样逐块包一层 Guard（铁律四）：崩掉封面那一块不该把控制键一起带走。
-		Guard(func(c *ui.Context) { s.viewMiniCover(c, st) }, s.onPanic)(c)
-		Guard(func(c *ui.Context) { s.viewMiniControls(c, st, t) }, s.onPanic)(c)
+		s.guardAt("迷你播放器封面", func(c *ui.Context) { s.viewMiniCover(c, st) })(c)
+		s.guardAt("迷你播放器控制键", func(c *ui.Context) { s.viewMiniControls(c, st, t) })(c)
 	})
 }
 

@@ -113,7 +113,7 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	// 而 `started` 仍是 false、`err` 非 nil，切走再切回来也不会重拉，
 	// 用户看到的是「他真的什么都没有」。
 	if !p.started && p.err != nil {
-		s.viewLoadError(c, upLoadErrorKey(sp, tab), "重试加载"+upTabNames[tab], p.err, func() {
+		s.viewLoadError(c, upLoadErrorKey(sp, tab), "这个 UP 主的"+upTabNames[tab], "重试加载"+upTabNames[tab], p.err, func() {
 			p.err = nil
 			if ctx := p.begin(); ctx != nil {
 				go s.fetchUp(ctx, sp, tab, p.cursor, p.page)

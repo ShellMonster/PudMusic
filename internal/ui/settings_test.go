@@ -157,7 +157,7 @@ func TestShellCrashPageCarriesTheTheme(t *testing.T) {
 	tt, s, a, _ := shellWithSettings(t, app.ThemeModeLight, true)
 	assertBackground(t, tt, wantBackground(t, a, true), "正常页")
 
-	s.crash = "坏掉了"
+	s.crash = s.newCrashInfo("测试", "坏掉了")
 	tt.Frame()
 	if !tt.HasText("界面出错了") {
 		t.Fatalf("没有画错误页，文字有 %q", tt.Texts())

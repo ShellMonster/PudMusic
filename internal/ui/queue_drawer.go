@@ -170,9 +170,10 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 // Biu 的 `{list.length ? <VirtualList/> : <Empty/>}`）。
 func (s *Shell) viewQueueBody(c *ui.Context, t *ui.Theme) {
 	if len(s.queueRows) == 0 {
+		// ⚠️ 那两行走 `emptyCopy`（empty.go），和七个页面的空状态同一份字号、
+		// 同一份主次色。原先这里自己抄了一份 15 / 12——而抄一份就会漂开。
 		ui.Column(c).Key("queue-empty").Grow(1).Center().Padding(20, 16).Children(func() {
-			ui.Text(c, queueEmpty.Title).FontSize(15).TextColor(t.Text)
-			ui.Text(c, queueEmpty.Hint).FontSize(12).TextColor(t.TextMuted)
+			emptyCopy(c, queueEmpty)
 		})
 		return
 	}
@@ -279,7 +280,11 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 			// 扁平：调研点名的描边药丸里就有这一颗（报告 §1.1 的 F1，证据那一段
 			// 点名的是 `queue_drawer.go` 里「行尾的 ⋯」）。旁边的行本身没有边框，
 			// 唯独行尾飘一个描边药丸，混在一列无边框的行里更显眼。
-			flatButton(c, "⋯").FontSize(13).
+			//
+			// 图标是上游那一枚（`music-list-item/operation.tsx:22` 的
+			// `RiMore2Line`，16px）：这一颗画出来就是三个点，而「⋯」那几个
+			// 字符跟着系统字体走——同一个意思在两台机器上是两个不同的宽高。
+			flatIconButton(c, iconMore, "这一首的操作", 16).
 				Menu(func(m *ui.Menu) { s.queueMenu(m, row) })
 		})
 	})

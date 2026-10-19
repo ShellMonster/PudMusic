@@ -6,11 +6,23 @@
 // 那句的意思。上游没有专属文案、只落到共享默认 `暂无内容` 的页，这里也照抄
 // `暂无内容`：编一句更好听的，等于让这一页和 Biu 对不上，而对不上正是这个
 // 项目要避免的。
+//
+// # 一套绘制入口，七个页面各画各的
+//
+// **画法只有一个**（`drawEmpty`），而「哪个页面」体现在每一条 `emptyState` 自
+// 己带的那张插画上。上游所有页面共用同一枚 `RiCloseCircleLine`，于是十三条路由
+// 的空状态一模一样——用户看到「暂无内容」既不知道是哪一页，也无法把这一格和
+// 别的空状态区分开。这一票给每一页配一枚说得清「这一页是干什么的」的图标，
+// 而画法（居中、留白、字号、主次色）仍然是共享的那一份：改一次留白，七个页面
+// 一起变，而不是七个页面各改一次然后慢慢漂。
+//
+// 接入点只有两个：`viewEmpty`（页面级）和 `pagedRows.viewEmptyState`（列表 /
+// 网格那一块里的），两个都调 `drawEmpty`。
 package ui
 
 import "github.com/egoist/mygo/ui"
 
-// emptyState 是一页空着时说的两句话。
+// emptyState 是一页空着时说的两句话，外加那一格插画位上的图标。
 type emptyState struct {
 	// Title 是上游那句：这里为什么空。
 	Title string
@@ -24,35 +36,141 @@ type emptyState struct {
 	// 空串就只画上面那一句（上游没有第二行）。判据在测试里：
 	// `TestEmptyStateCopySaysWhyAndHow` 要求每一句都带一个动作词。
 	Hint string
+	// Icon 是插画位上那一枚图标（上游的「分类/文件名」，见 icons.go）。
+	//
+	// ⚠️ **给的是「这一页是干什么的」，不是随便一枚好看的**：首页推荐配音乐、
+	// 稍后再看配钟、UP 主空间配一个人，而**不是**七页都配上游那一枚
+	// `close-circle-line`——那正是「七个页面共用一张」这个差评的由来。
+	//
+	// 空串就**不画图标**（那一格只剩两行字）。这是「正在加载…」那一支的形状
+	// （见 dynamicfeed.go / follow.go），那一支说的是「还没好」而不是「没有」，
+	// 摆一枚插画反而像在说「这里什么都没有」。
+	Icon string
+}
+
+// 空状态那一格插画的大小。抄上游 `components/empty/index.tsx:16` 的 `size={32}`。
+//
+// 为什么固定成 32 而不跟主题字号：图标的大小要和**别的**图标（播放条那批 14 / 18）
+// 分得开——同一个数在两处含义不同，一处跟着主题走、一处写死，测试才量得出
+// 「换主题之后它没变」。
+const emptyIconSize = 32
+
+// emptyGap 是图标、标题、提示三样之间的间距。上游是 `space-y-2`（8），
+// 这里多一样东西（上游只有两样），照抄 8 的话三样会挤成一团。
+const emptyGap = 8
+
+// drawEmpty 是**唯一**的空状态画法。页面级（`viewEmpty`）和列表 / 网格那一块
+// （`pagedRows.viewEmptyState`）都走它——七页共用一套绘制入口就是指这个。
+//
+// 它是**一个自由函数**而不是 `Shell` 的方法：这一格也会被列表 / 网格画
+// （`pagedRows` 那一支），而 `pagedRows` 身上没有 `Shell`——硬挂一个字段进去
+// 只为了让一个不碰外壳的画法能写成 `s.` 而已。
+//
+// key 给这一块（空串 = 不给，那一格不是动态列表里的行，不受铁律四约束）。
+// pad 是上下留白（上游 `py-20` 的意思）。列表里那一块比整页矮，留白要小一档，
+// 否则上下那两行字在列表里飘在半空；所以它是参数而不是写死的数。
+func drawEmpty(c *ui.Context, key string, e emptyState, pad float32) {
+	col := ui.Column(c)
+	if key != "" {
+		// ⚠️ Key 写在构造**之前**（铁律四的坑）：构造之后再 Key 等于没给。
+		col = col.Key(key)
+	}
+	col.Grow(1).Center().Gap(emptyGap).Padding(pad, 28).Children(func() {
+		emptyContent(c, e)
+	})
+}
+
+// emptyContent 把「一枚插画 + 标题 + 提示」这三样画进**当前这一个容器**。
+//
+// 它是 `drawEmpty` 的内层，拆成三样是因为有一处要在它们**中间**插一句别的：
+// `viewLibraryMissing`（插画 / 页面名 / 那一页的空文案 / 「没接上接口」的原因）。
+// 那三样各自是 `emptyArt` / 一句自定义 / `emptyCopy`，而字号和主次色只有这一份。
+//
+// ⚠️ **写新的一处空状态时也要走这几个函数**，别把 `FontSize(15)` / `FontSize(12)`
+// 抄一遍过去：抄一遍就会漂开（改一次字号只改一处，另一处不动），而界面上看不出来。
+func emptyContent(c *ui.Context, e emptyState) {
+	emptyArt(c, e.Icon)
+	emptyCopy(c, e)
+}
+
+// emptyArt 画插画位上那一枚图标。空名就不画。
+//
+// 次要色：图标是修饰，不是这一页要说的那句话。上游那枚也是 `text-default-400`
+// （`index.tsx:16` 整个空状态一个色）。
+func emptyArt(c *ui.Context, name string) {
+	if name == "" {
+		return
+	}
+	ui.Icon(c, icon(name)).FontSize(emptyIconSize).TextColor(c.Theme().TextMuted)
+}
+
+// emptyCopy 画「这里为什么空」和「怎么才能不空」那两行。
+func emptyCopy(c *ui.Context, e emptyState) {
+	t := c.Theme()
+	ui.Text(c, e.Title).FontSize(15).TextColor(t.Text)
+	if e.Hint != "" {
+		ui.Text(c, e.Hint).FontSize(12).TextColor(t.TextMuted)
+	}
 }
 
 // viewEmpty 画一页的空状态。key 给这一页的根元素（铁律四）。
 //
 // 照 Biu 的 `src/components/empty/index.tsx`：整体居中（`items-center
-// justify-center`）、上下留白（`py-20`）。上游那枚 `<RiCloseCircleLine
-// size={32}/>` 是 Remix 图标字体里的图标，MyGo 没有图标字体，这里不画——
-// 少一个图标好过画一个不像的。
+// justify-center`）、上下留白（`py-20`）、一枚 32px 的图标在上。
 //
 // 颜色上上游两行都是 `text-default-400`（同一个灰），这里分成主次两档：标题
 // 用正文色，第二句用次要色。15px 的浅灰在浅色底上已经偏淡，两行一起淡就分不
 // 出主次，而这一页要说的恰恰是「标题是结论、第二句是办法」。
-//
-// ⚠️ Key 写在构造之前（铁律四的坑）：构造之后再 Key 等于没给。
 func (s *Shell) viewEmpty(c *ui.Context, key string, e emptyState) {
 	// 🔴 铁律二：页面 view 的头一件正事就是装主题。SetTheme 只影响它之后
 	// 创建的控件，不装的话这里会用 MyGo 在帧开头重置好的系统色画出来，跟旁边
 	// 的界面对不上。多调一次没有副作用——applyFrameTheme 认得出「这一帧已经
 	// 装过了」，见它上面的注释。
 	s.applyFrameTheme(c)
+	drawEmpty(c, key, e, emptyPagePad)
+}
 
+// biliNotMounted 是「B 站客户端没挂上」这一次的特别原因，那三页共用同一句。
+//
+// 抽成常量是因为**它原来在三个文件里各写一遍**（`librarypage.go` 和 `follow.go`
+// 各一处），而三处迟早会有一处忘了改——而那一处界面上和另两处对不上，看不出来。
+const biliNotMounted = "还没接上 B 站接口，这一页暂时拉不了内容。"
+
+// viewPageEmptyWithReason 画「这一页平常空着的样子 + 这一次特别的原因」。
+//
+// 三页共用：稍后再看、历史记录、我的关注——它们在「B 站客户端没挂上」时画的都是
+// 这四样（插画 / 页面名 / 那一页在 `routes` 里的空文案 / 这一句原因）。
+//
+// 走共享出口 `emptyArt` / `emptyCopy` 是这一票明确要的（七页共用一套绘制入口）。
+// 而「插画 + 文案 + 原因」这个**顺序**也是：插画说的是「这一页是什么」，最后那句
+// 说的是「这一次怎么了」——把原因摆在中间会让人以为它在解释插画。
+func (s *Shell) viewPageEmptyWithReason(c *ui.Context, key, title string, e emptyState) {
 	t := c.Theme()
-	ui.Column(c).Key(key).Grow(1).Center().Gap(6).Padding(20, 28).Children(func() {
-		ui.Text(c, e.Title).FontSize(15).TextColor(t.Text)
-		if e.Hint != "" {
-			ui.Text(c, e.Hint).FontSize(12).TextColor(t.TextMuted)
+	ui.Column(c).Key(key).Grow(1).Center().Gap(emptyGap).Padding(emptyPagePad, 28).Children(func() {
+		emptyArt(c, e.Icon)
+		ui.Text(c, title).FontSize(emptyPageTitle).Bold()
+		if e.Title != "" {
+			emptyCopy(c, e)
+			ui.Text(c, biliNotMounted).FontSize(12).TextColor(t.TextMuted)
 		}
 	})
 }
+
+// emptyPageTitle 是上面那一页**页面名**的字号。
+//
+// 它比 `emptyCopy` 的标题大一号，因为它是**这一页叫什么**（一直都在），而
+// `emptyCopy` 那一句是**这里为什么空**（只在空着的时候有）。两句混成一个字号的话，
+// 用户分不出哪一句是导航、哪一句是状态。
+const emptyPageTitle = 20
+
+// emptyPagePad 是整页那一支的上下留白。20 ≈ 上游 `py-20` 的一半（上游那个
+// Tailwind 类是 5rem = 80，这里是紧凑桌面应用的窗口，取 20 上下留白就够了，
+// 再多就只把两行字推离窗口中心）。
+const emptyPagePad = 20
+
+// emptyRowPad 是列表 / 网格那一块里的上下留白。比整页小一档：整页上下有筛选
+// 条和播放条，中间本来就空；列表里那一块四周全是行，留白大了就只剩字飘在当中。
+const emptyRowPad = 12
 
 // SPEC 点名的四个空状态场景（PLAN.md 的 C-02 / S-01）。四条各有各的一句上游
 // 文案和一句「怎么才能不空」，`TestSpecEmptyStates` 逐条渲染出来验。
@@ -80,6 +198,7 @@ func (s *Shell) viewEmpty(c *ui.Context, key string, e emptyState) {
 var noFavorites = emptyState{
 	Title: "暂无内容",
 	Hint:  "在歌上点星标，挑一个收藏夹存进去，就能在这里看到",
+	Icon:  iconEmptyFolder,
 }
 
 // noSearchResults 是「搜了，但没有结果」。
@@ -94,6 +213,7 @@ var noFavorites = emptyState{
 var noSearchResults = emptyState{
 	Title: "暂无内容",
 	Hint:  "换个词再搜一次，或者把关键词缩短一点",
+	Icon:  iconEmptySearch,
 }
 
 // noDownloads 是「没有下载记录」。
@@ -102,6 +222,7 @@ var noSearchResults = emptyState{
 var noDownloads = emptyState{
 	Title: "暂无内容",
 	Hint:  "搜一首歌，在它旁边点「下载」，下完的会出现在这里",
+	Icon:  iconEmptyDownload,
 }
 
 // noLyrics 是「没有歌词」。
@@ -116,6 +237,7 @@ var noDownloads = emptyState{
 var noLyrics = emptyState{
 	Title: "暂无歌词",
 	Hint:  "在歌词搜索里换个源（网易云 / LRCLIB）再找一次",
+	Icon:  iconEmptyLyrics,
 }
 
 // viewLoadError 是「这一块拉失败了」的提示 + 一个重试按钮。
@@ -139,13 +261,27 @@ var noLyrics = emptyState{
 // 动态流那一页同时有两块会失败（左边的关注的人、右边的动态），两个同名
 // 按钮摆在一起，用户分不清按的是哪个——按错了的那一块没反应，另一块还在
 // 转圈，看起来就像「点了没用」。
-func (s *Shell) viewLoadError(c *ui.Context, key, retryLabel string, err error, retry func()) {
+//
+// ⚠️ **where 是「哪一趟请求」**，而 `err.Error()` 往往只说得清「失败了」说
+// 不清「哪一趟」：B 站返回 -101 和网络超时在界面上都是一句 `-101` 或者一句
+// `context deadline exceeded`，而用户要给开发者复现时需要的是「关注的人那一
+// 趟」还是「动态那一趟」。所以每一处调用方都要写清楚是哪一趟，界面上单独一行
+// 摆在错误上面——这是「出错在哪一步」在请求这一层的落法（页面那一层是 `viewCrash`）。
+func (s *Shell) viewLoadError(c *ui.Context, key, where, retryLabel string, err error, retry func()) {
 	// 🔴 铁律二：和 viewEmpty 一样，每一帧开头装主题。
 	s.applyFrameTheme(c)
 
 	t := c.Theme()
-	ui.Column(c).Key(key).Grow(1).Center().Gap(8).Padding(20, 28).Children(func() {
+	ui.Column(c).Key(key).Grow(1).Center().Gap(emptyGap).Padding(emptyPagePad, 28).Children(func() {
+		// 插画用警告那一枚而**不是**空状态那一批：这一格说的是「没拉出来」，
+		// 不是「本来就没有」。
+		ui.Icon(c, icon(iconFailed)).FontSize(emptyIconSize).TextColor(t.Warning)
 		ui.Text(c, "这一块没拉出来").FontSize(15).TextColor(t.Text)
+		if where != "" {
+			// 主次和错误本身再分一档：这一行是给用户复现用的（说给开发者听），
+			// 而下面那行是原始错误。两者都别比标题更抢眼。
+			ui.Text(c, "没拉出来的是："+where).FontSize(12).TextColor(t.TextMuted)
+		}
 		ui.Text(c, err.Error()).FontSize(12).TextColor(t.TextMuted).MaxLines(3)
 		if retry != nil && ui.Button(c, retryLabel).Clicked() {
 			retry()

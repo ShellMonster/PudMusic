@@ -248,7 +248,10 @@ func (s *Shell) viewSideCollapse(c *ui.Context, st app.Settings) {
 // viewSideMenu 是默认菜单那一组（Biu 的 SD-04）。
 //
 // 折叠后只摆每个标题的第一个字：Biu 折叠态摆的是图标
-// （`default-menu/index.tsx` 的 `collapsed`），本项目还没有图标资源，
+// （`default-menu/index.tsx` 的 `collapsed`）。⚠️ **那一档还没换**：图标资源里
+// 已经有清单 / 网格 / 本地音乐 / 下载记录 / 设置那几枚（见 `icons.go`），而
+// **每一项该配哪一枚要对着 Biu 逐条抄**——七项抄错一处，折叠态就会有一项
+// 配错意思，而那个 72 宽的方块里只有一枚图标，没有字可以让用户对照着认出来。
 // 摆全名会被裁成半个字，比一个字更认不出来。
 //
 // ## 未登录时那三个入口不摆，摆一句「登录后可见」

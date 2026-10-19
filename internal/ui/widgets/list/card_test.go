@@ -2,6 +2,7 @@ package list
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -9,6 +10,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo/ui"
 )
 
 // 这一组验的是**卡片画出来的东西**：封面、标题、UP 名。
@@ -68,7 +71,11 @@ func TestASongWithoutAnOwnerDoesNotDrawOne(t *testing.T) {
 }
 
 // TestTheCoverGoesThroughImgcache 验封面走的是已经建好的那套缓存：图还没来时
-// 显示「载入中」，来了自己换上去，中间这一行始终摆在那儿。
+// 是那一格占位，来了自己换上去，中间这一行始终摆在那儿。
+//
+// ⚠️ **断的是画面不是那一格上的字**：改之前占位上写着「载入中」，而现在按上游
+// `components/image/index.tsx:22-32` **一个字都不写**（骨架屏 / 描边框 + 图片
+// 图标）。所以唯一能断「画出来的是哪一档」的只有那一块 48×48 的像素。
 func TestTheCoverGoesThroughImgcache(t *testing.T) {
 	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -81,21 +88,21 @@ func TestTheCoverGoesThroughImgcache(t *testing.T) {
 		{ID: "a", Title: "有封面的歌", Owner: "UP 甲", Cover: srv.URL + "/cover.png"},
 	})
 
-	if !tt.HasText("载入中") {
-		t.Errorf("第一帧没有占位，文字有 %q", tt.Texts())
+	bx, by, bw, bh := coverBox(t, tt, "有封面的歌")
+	// 第一帧是骨架屏：一整块**纯色**（没有边框、没有图形、没有字）。
+	loading := distinctIn(tt, bx, by, bw, bh)
+	if len(loading) != 1 {
+		t.Errorf("正在加载那一格不是一块纯色（%v）——占位上多画了东西", loading)
 	}
-	if tt.HasText("封面加载失败") {
-		t.Errorf("还没下完就画了失败态，文字有 %q", tt.Texts())
-	}
-	close(release)
 
+	close(release)
+	// 判据是**那一块变成了夹具那张图的颜色**，而不是「和之前不一样」：
+	// 这一族的 `pngBytes` 造的是**一整块纯色**（200,40,120），所以「有几种颜色」
+	// 换成 1 —— 断「有几种颜色」的话，等来的那一天是换上了图、而那一天照样红。
 	waitFor(t, 5*time.Second, "封面换成了图", func() bool {
 		tt.Frame()
-		return !tt.HasText("载入中")
+		return equalStrings(distinctIn(tt, bx, by, bw, bh), []string{"#c82878"})
 	})
-	if tt.HasText("封面加载失败") {
-		t.Errorf("下完了却画了失败态，文字有 %q", tt.Texts())
-	}
 	// 换封面不能把这一行弄没。
 	if !tt.HasText("有封面的歌") || !tt.HasText("UP 甲") {
 		t.Errorf("封面换完之后这一行不见了，文字有 %q", tt.Texts())
@@ -105,15 +112,79 @@ func TestTheCoverGoesThroughImgcache(t *testing.T) {
 // TestALocalSongHasAnEmptyCoverNotAFailedOne 验本地文件那一行画的是空封面。
 //
 // 本地文件的封面永远是空的，而且是照抄 Biu 的行为（上游也不读音频里内嵌的图）。
-// 空和「加载失败」在 imgcache 的 drawCover 里是分开的两支：画错了，用户看到
-// 一行「封面加载失败」，会以为歌坏了。
+// 空和「加载失败」在 imgcache 的 drawCover 里是分开的两支：画错了，用户会在那一
+// 格上看到一圈描边框 + 一枚图片图标，而那说的是「没拉下来」，不是「本来就没有」。
 func TestALocalSongHasAnEmptyCoverNotAFailedOne(t *testing.T) {
 	_, tt := newList(t, Actions{}, []Music{
 		{ID: "a", Title: "本地的一首", Owner: ""},
 	})
-	if tt.HasText("封面加载失败") || tt.HasText("载入中") {
-		t.Errorf("空封面不该画成失败或载入中，文字有 %q", tt.Texts())
+	bx, by, bw, bh := coverBox(t, tt, "本地的一首")
+	// 「本来都没有」那一格画的是**描边框 + 一枚图标**，所以有不止一种颜色；
+	// 而骨架屏（正在加载）是一块纯色。只断「非空」的话，那一格画成骨架屏也过。
+	if got := distinctIn(tt, bx, by, bw, bh); len(got) < 2 {
+		t.Errorf("空封面那一格只有一种颜色（%v）——画的是「正在加载」那一档，"+
+			"而本地文件是**本来就没有**，该是描边框加一枚图片图标", got)
 	}
+}
+
+// coverBox 报封面那一块在画面上的位置。
+//
+// ⚠️ **必须用歌名去 `Find`，不能用 UP 名**：`Find` 认的是**画着这句话的那一块**
+// ——用歌名查它给的是**整行**（`{0, 0, 520, 64}`，歌名在行里是撑满的那一块），
+// 用 UP 名查它给的是 UP 名那 14 像素高的文字块。第一版拿 UP 名算，于是
+// `y = 文字顶 + (文字高 − 封面) / 2` 算出一个负数，量到窗口外面全是白，
+// 「有几种颜色」于是恒为三，于是每一条断言都变成恒真。
+//
+// 横坐标是**算出来的**（`cardPadX + indexWidth + cardGap`）：行是变高的
+// （`card.go` 顶上明确不许钉死行高），所以纵坐标只能从整行那一块推。
+func coverBox(t *testing.T, tt *ui.Tester, title string) (x, y, w, h int) {
+	t.Helper()
+	row, ok := tt.Find(title)
+	if !ok {
+		t.Fatalf("歌名 %q 没画出来，文字有 %q", title, tt.Texts())
+	}
+	if row.H < coverSize {
+		t.Fatalf("查到的那一块只有 %v 高，不是整行（封面是 %d）——"+
+			"拿它推纵向位置会推到窗口外面去", row.H, coverSize)
+	}
+	x = cardPadX + indexWidth + cardGap
+	y = int(row.Y) + (int(row.H)-coverSize)/2
+	// 往里收 6 像素：边框那一圈和它的抗锯齿边不算「这一格画了什么」，而
+	// 「正在加载」那一档是**纯色**——不收边的话边缘的抗锯齿会把它变成六种白。
+	return x + 6, y + 6, coverSize - 12, coverSize - 12
+}
+
+// distinctIn 报那一块里出现了哪几种颜色（去重、不计次序）。
+func distinctIn(tt *ui.Tester, x, y, w, h int) []string {
+	img := tt.Image()
+	seen := map[string]bool{}
+	var out []string
+	for dy := range h {
+		for dx := range w {
+			c := img.At(x+dx, y+dy)
+			r, g, b, _ := c.RGBA()
+			k := fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// equalStrings 比两个字符串切片（次序有关）。这里比的是「就那一种颜色」。
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // TestTheCoverSitsNextToTheTitle 验封面和文字是并排的一行，不是上下堆着。

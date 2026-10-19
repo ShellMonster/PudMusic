@@ -39,9 +39,17 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
+	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/egoist/mygo/ui"
 )
+
+// backToTopIcon 是回顶那一枚里的向上箭头（上游 `RiArrowUpLine`）。
+//
+// ⚠️ 它从 `iconset` 取而**不是**从界面层拿常量：这个包在界面层**下面**，
+// 反过来 import 是个环（见 `iconset` 文件头）。同一个文件在界面层的常量叫
+// `iconToTop`。
+var backToTopIcon = iconset.Must("Arrows/arrow-up-line.svg")
 
 // backTopPx 是滚过多少像素才出现回顶按钮。
 //
@@ -631,7 +639,14 @@ func (p *PagedList) viewBackToTop(c *ui.Context) {
 	// Overlay 把按钮浮在整窗之上（不占布局），Biu 的 `fixed` 就是这个意思。
 	// Radius 给一个大数就是 Biu 的 `radius="full"`（药丸形）。
 	ui.Overlay(c, func() {
-		if ui.Button(c, "返回顶部").Absolute().
+		//
+		// 药丸形留着（Biu 的 `ScrollContainer` 那一枚就是 `rounded-full`），
+		// 里面换成一枚向上箭头（上游 `RiArrowUpLine`）。`Label` 仍是「返回顶部」
+		// ——图标对辅助技术是不可见的，而它同时也是无头 Tester 认得这一枚的
+		// 唯一凭据。
+		btn := ui.Button(c, "").Label("返回顶部")
+		btn.Children(func() { ui.Icon(c, backToTopIcon).FontSize(16).TextColor(t.Text) })
+		if btn.Absolute().
 			Right(backTopRight).Bottom(backTopUp).
 			Radius(backTopRadius).Background(t.SurfaceHover).Clicked() {
 			p.ScrollTop()

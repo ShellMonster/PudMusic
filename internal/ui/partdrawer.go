@@ -106,7 +106,7 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 	// 单独建的，它一崩坏掉的是整块浮层，而报错的地方在播放条上——两者对不上，
 	// 极难查。
 	ui.Popover(c, btn, &s.partOpen, func() {
-		Guard(s.viewPartDrawer, s.onPanic)(c)
+		s.guardAt("分集抽屉", s.viewPartDrawer)(c)
 	})
 }
 

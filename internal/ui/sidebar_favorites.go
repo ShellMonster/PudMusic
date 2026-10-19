@@ -95,9 +95,11 @@ func (s *Shell) viewFavoritesRefreshing(c *ui.Context, st app.Settings) {
 // 不需要另写一条分支（SD-09 要的就是这个结果）。
 func (s *Shell) viewFavoriteGroup(c *ui.Context, st app.Settings, g app.FavoriteGroup, hidden map[string]bool) {
 	if st.SideMenuCollapsed {
-		// 折叠态是 72 宽，只摆得下图标。Biu 摆的是图标，本项目还没有图标
-		// 资源，摆一列字会被裁成半个字。这里干脆不画：拖拽在折叠态本来
-		// 就是禁用的（SD-09），摆出来也点不出一件有用的事。
+		// 折叠态是 72 宽，只摆得下图标。Biu 摆的是图标，而**这一档还没换**：
+		// 收藏夹有几组、每组画哪一枚要对着 Biu 逐条抄，抄错一处那一格就
+		// 配错意思（72 宽里只有一枚图标，没有字可以对照着认）。摆一列字会被
+		// 裁成半个字。这里干脆不画：拖拽在折叠态本来就是禁用的（SD-09），
+		// 摆出来也点不出一件有用的事。
 		return
 	}
 
@@ -157,13 +159,14 @@ func (s *Shell) viewFavoriteHeader(c *ui.Context, g app.FavoriteGroup, folded bo
 	})
 }
 
-// viewNewFavoriteButton 是「我创建的」那一组标题右边那个 +。
+// viewNewFavoriteButton 是「我创建的」那一组标题右边那个「加」。
 //
-// ⚠️ **图标用「+」**：Biu 那个是 `RiAddLine`（remixicon 的图标），本项目还没
-// 接图标资源，而字形它自带。`Label` 补上「新建收藏夹」是为了读屏和 Tooltip——
-// 画面上只有一个 +，光看不知道是什么。
+// 图标是 `iconAdd`（上游 `RiAddLine`，逐字取的同一个文件）。`Label` 是「新建
+// 收藏夹」：图标对辅助技术是不可见的（`mygo/ui/svg.go` 的 Icon 文档），而这一
+// 颗画出来只有一个加号，光看不知道是什么。
 func (s *Shell) viewNewFavoriteButton(c *ui.Context) {
-	if flatButton(c, "+").Tooltip("新建收藏夹").Label("新建收藏夹").Clicked() {
+	if flatIconButton(c, iconAdd, "新建收藏夹", iconSm).
+		Tooltip("新建收藏夹").Clicked() {
 		s.openFolderEdit(0)
 	}
 }

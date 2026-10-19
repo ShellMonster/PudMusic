@@ -27,6 +27,16 @@ func TestTheSidebarsNewButtonOpensTheEditDialog(t *testing.T) {
 	s, tt := folderShell(t, f)
 	seedAndSettle(s, tt, 42)
 
+	// ⚠️ **先数、后点**：那一颗的 `Label` 是「新建收藏夹」，而弹窗的标题也是
+	// 这同一句话——弹窗开着的时候数它，弹窗标题和侧栏那颗数在一起，分不出是
+	// 「多了一组也摆着新建」还是「只是弹窗开了」。
+	//
+	// 判据也变了：侧栏那颗从字形「+」换成了真图标（上游那个 `RiAddLine`），
+	// 画面上不再有「+」这个字，所以数的是**名字**而不是字形。
+	if got := countLabels(tt.Texts(), "新建收藏夹"); got != 1 {
+		t.Errorf("侧栏上「新建收藏夹」出现了 %d 次，want 1（只有「我创建的」那组该有）", got)
+	}
+
 	if err := tt.Click("新建收藏夹"); err != nil {
 		t.Fatalf("侧栏上没有「新建收藏夹」那个按钮：%v（画面上 %q）", err, tt.Texts())
 	}
@@ -53,11 +63,10 @@ func TestTheSidebarsNewButtonOpensTheEditDialog(t *testing.T) {
 	if s.folderEdit.editID != 0 {
 		t.Errorf("「新建」的 editID = %d，want 0", s.folderEdit.editID)
 	}
-	// 「我收藏的」那一组**不该**有那个 +（Biu 的 `titleExtra` 只给 created，
-	// `collection/index.tsx:486`）。数 + 而不是数「新建收藏夹」：后者在弹窗
-	// 打开之后标题上也是同一句话，会把这条断言数成两次。
-	if got := countLabels(tt.Texts(), "+"); got != 1 {
-		t.Errorf("那个 + 出现了 %d 次，want 1（只有「我创建的」那组该有）", got)
+	// 弹窗开着的时候，侧栏上**仍然只有一个**「新建收藏夹」（多出来的那一个是
+	// 弹窗的标题）。
+	if got := countLabels(tt.Texts(), "新建收藏夹"); got != 2 {
+		t.Errorf("弹窗开着的时候「新建收藏夹」出现了 %d 次，want 2（侧栏那一颗 + 弹窗标题）", got)
 	}
 }
 

@@ -336,20 +336,9 @@ func libraryMenuItems(m *ui.Menu, row libraryRow, a RowActions, i int) bool {
 // 两句话换来换去。少画那一句的话，从别的页面切过来的那条路（`homepage_test.go`
 // 和 `settings_test.go` 都按 `lookup(path).Empty.Title` 认「切过去了」）就断了。
 func (s *Shell) viewLibraryMissing(c *ui.Context, key, title string) {
-	t := c.Theme()
-	e := lookup(s.router.Path()).Empty
-	ui.Column(c).Key(key).Grow(1).Center().Gap(8).Padding(24).
-		Children(func() {
-			ui.Text(c, title).FontSize(22).Bold()
-			if e.Title != "" {
-				ui.Text(c, e.Title).FontSize(15)
-			}
-			if e.Hint != "" {
-				ui.Text(c, e.Hint).FontSize(12).TextColor(t.TextMuted)
-			}
-			ui.Text(c, "还没接上 B 站接口，这一页暂时拉不了内容。").FontSize(12).
-				TextColor(t.Danger)
-		})
+	// ⚠️ 画法整个在 `viewPageEmptyWithReason`（empty.go）：我的关注那一页也是这
+	// 四样，原来两页各写一遍——而那正是这一票要消掉的「各画各的」。
+	s.viewPageEmptyWithReason(c, key, title, lookup(s.router.Path()).Empty)
 }
 
 // keywordBoxWidth 是搜索框的宽度。Biu 是 `w-64`（later）/`max-w-50`（history），

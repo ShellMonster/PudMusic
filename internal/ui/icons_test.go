@@ -21,12 +21,14 @@ import (
 	"go/token"
 	"image"
 	"image/color"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -40,7 +42,7 @@ import (
 // 返回 0×0，而那画出来是一格**空白**——和「根本没画」在画面上长得一模一样。
 func TestEveryIconWeNamedIsThereAndItParses(t *testing.T) {
 	for _, name := range iconNames {
-		b, err := iconFiles.ReadFile("icons/" + name)
+		b, err := iconset.Source(name)
 		if err != nil {
 			t.Errorf("图标 %q 不在 icons/ 里：%v", name, err)
 			continue
@@ -57,6 +59,61 @@ func TestEveryIconWeNamedIsThereAndItParses(t *testing.T) {
 	}
 }
 
+// TestEveryIconOnDiskHasAName 钉住「盘上每一张图标都有人叫得出名字」。
+//
+// 🔴 这一条挡的是**孤儿资源**：这一票按上游清单补了几十张图，而清单是照上游
+// 逐个名字抄下来的——抄漏一个（或改分类时搬了家），那张图就躺在 `icons/` 里
+// 没人用。界面上看不出任何异样（它从来没被画过），而目录里的图标数一条不少，
+// 看着像补齐了。
+//
+// 所以这里把两个方向都对上：
+//
+//   - 盘上有、表里没有 → **孤儿**（这一条要抓的）
+//   - 表里有、盘上没有 → 启动时就 panic（`mustParseIcons`），由上面那条管
+//
+// ⚠️ 「同一个文件两个名字」是**允许**的（`iconPageList` 和 `iconQueue` 指的
+// 都是 `Editor/list-radio.svg`——上游那两个按钮确实用同一枚图标），所以这里比
+// 的是集合而不是个数。
+func TestEveryIconOnDiskHasAName(t *testing.T) {
+	dir := filepath.Join("iconset", "icons")
+	var onDisk []string
+	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		// ⚠️ 出错时 `d` 是 nil，直接问它就是空指针崩在测试里（第一版就是这么
+		// 写的）。而崩在这里看起来像「这一条坏了」，跟目录里那张图没关系。
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".svg") {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return err
+		}
+		onDisk = append(onDisk, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("走一遍 %s 失败，这条就没法查了：%v", dir, err)
+	}
+
+	named := make(map[string]bool, len(iconNames))
+	for _, n := range iconNames {
+		named[n] = true
+	}
+	for _, f := range onDisk {
+		if !named[f] {
+			t.Errorf("icons/%s 是孤儿——`iconNames` 里没有这个名字，"+
+				"所以界面上从没有人画过它（补图标时要连名字一起补）", f)
+		}
+	}
+	// 反向：表里有的每一个，盘上都得有。这一条 `TestEveryIconWeNamedIsThere-
+	// AndItParses` 已经断过（它还断了解析得出来），这里只报个数好对照。
+	if len(onDisk) < len(named) {
+		t.Errorf("表上有 %d 个名字，盘上只有 %d 张图", len(named), len(onDisk))
+	}
+}
+
 // TestTheIconResourcesAreAllMonochrome 钉住「图标是单色的，跟着主题走」。
 //
 // MyGo 的 `ui.Icon` 画的是**形状本身**、颜色从祖先的文字色继承（`mygo/ui/svg.go`
@@ -67,7 +124,7 @@ func TestEveryIconWeNamedIsThereAndItParses(t *testing.T) {
 // 合法的那一份是 `fill="currentColor"`：那正是「跟着文字色」的意思。
 func TestTheIconResourcesAreAllMonochrome(t *testing.T) {
 	for _, name := range iconNames {
-		b, err := iconFiles.ReadFile("icons/" + name)
+		b, err := iconset.Source(name)
 		if err != nil {
 			t.Errorf("图标 %q 读不到：%v", name, err)
 			continue

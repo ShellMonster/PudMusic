@@ -44,7 +44,7 @@ func TestShellFallsBackToTheErrorPage(t *testing.T) {
 	// ⚠️ `crash` 必须在**第一帧之前**设上，而 `mygo.NewTester` 造完就画了一帧——
 	// 所以这件事得走 `stubbed`（它在造 Tester 之前跑），不能建完外壳再赋值。
 	b := newTestShell(t, at(700, 400),
-		stubbed(func(_ *testing.T, s *Shell) { s.crash = "坏掉了" }))
+		stubbed(func(_ *testing.T, s *Shell) { s.crash = s.newCrashInfo("测试", "坏掉了") }))
 	s, tt := b.s, b.tt
 	if !tt.HasText("界面出错了") {
 		t.Fatalf("没有画错误页，文字有 %q", tt.Texts())
@@ -52,11 +52,19 @@ func TestShellFallsBackToTheErrorPage(t *testing.T) {
 	if !tt.HasText("坏掉了") {
 		t.Errorf("错误页上没有崩掉的原因，文字有 %q", tt.Texts())
 	}
-	if _, ok := tt.Find("重新载入"); !ok {
-		t.Errorf("错误页上没有「重新载入」，文字有 %q", tt.Texts())
+	if _, ok := tt.Find("重新载入这一页"); !ok {
+		t.Errorf("错误页上没有「重新载入这一页」，文字有 %q", tt.Texts())
+	}
+	// ⚠️ **「出错在哪一步」那一句**（这一票要的）：崩在界面的哪一块、当时在看
+	// 哪一页，两件都得在画面上——用户要拿这句话去跟开发者说。
+	if !tt.HasText("出错的地方：测试") {
+		t.Errorf("错误页上没有说崩在哪一块，文字有 %q", tt.Texts())
+	}
+	if !tt.HasText("当时在看的页面：推荐音乐") {
+		t.Errorf("错误页上没有说当时在看哪一页，文字有 %q", tt.Texts())
 	}
 
-	if err := tt.Click("重新载入"); err != nil {
+	if err := tt.Click("重新载入这一页"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -73,7 +81,7 @@ func TestShellFallsBackToTheErrorPage(t *testing.T) {
 func TestViewSurvivesAPanicInTheRealShell(t *testing.T) {
 	s := newTestShell(t, at(700, 400)).s
 	// 换成一支一画就炸的 view，走的还是 New 里那条 Guard + onPanic 的路。
-	s.draw = Guard(func(c *mygoui.Context) { panic("画播放条的时候炸了") }, s.onPanic)
+	s.draw = s.guardAt("播放条", func(c *mygoui.Context) { panic("画播放条的时候炸了") })
 
 	tt := mygoui.NewTester(s.View, 700, 400)
 	if s.crash == nil {
@@ -89,8 +97,13 @@ func TestViewSurvivesAPanicInTheRealShell(t *testing.T) {
 	}
 }
 
-func errString(v any) string {
-	if s, ok := v.(string); ok {
+// errString 从一次崩溃的现场里取出崩掉的那个值。
+//
+// ⚠️ 它读的是 `crashInfo.got` 而不是整个 `crashInfo`：整个结构体带上了「崩在哪
+// 一块 / 当时在看哪一页」，`%v` 打出来是 `&{顶栏 / 推荐音乐 顶栏画崩了}`——里面
+// 混着路径和页面名，断「有没有记住崩掉的那句话」就成了断一整串。
+func errString(v *crashInfo) string {
+	if s, ok := v.got.(string); ok {
 		return s
 	}
 	return ""
