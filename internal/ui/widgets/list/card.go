@@ -16,7 +16,7 @@
 package list
 
 import (
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -89,15 +89,12 @@ const (
 	compactTitleLines = 1
 )
 
-// PlayingMark 是「这一行正在放」那个标记。Biu 那一行画的是一段跳动的波形，
-// 这里写死成一句字：⚠️ **它不跳**——跳要一帧一变，而快速切歌时帧率本来就紧，
-// 而帧率一掉「正在放」就跟着糊掉。认出来靠的是「只有一行是这个颜色 + 只有
-// 这一行有这句字」，不靠动。
+// PlayingMark 是「这一行正在放」那个标记。
 //
-// ⚠️ **导出是为了外面那一套自己画的行也用它**（`ui` 里「稍后再看」「历史记录」
-// 两页的行不走本包，见 `ui/library_rows.go` 的 `viewPlayingMark`）。同一个应用
-// 里两套列表写着两种说法，用户会以为是两个意思。
-const PlayingMark = "正在播放"
+// ⚠️ **它的出处只有一处**：`hover.PlayingMark`。这里和 `internal/ui` 那个都指回来，
+// 因为同一个应用里两套列表写着两种说法的话，用户会以为是两个意思（BMG-56 已经付过
+// 账的一个结论）。
+const PlayingMark = hover.PlayingMark
 
 // rowColors 是这一行文字该用的两个颜色。
 //
@@ -138,24 +135,30 @@ func (l *List) viewCard(r ui.ListRow) {
 	titleColor, ownerColor := rowColors(t, r.Selected(), playing)
 
 	// ⚠️ **hover 必须在 Children 之前问**：`Hovered` 报的是**这一帧**指针在不在
-	// 上面，而「按下去出现这个按钮」这件事本身要等 Children 建它。MyGo 自己
-	// 的例子也是这个写法（`ui/ui_test.go` 的 TestHoverWhilePressed）。
+	// 上面，而「按下去有反应」这件事本身要等 Children 建它。MyGo 自己的例子
+	// 也是这个写法（`ui/ui_test.go` 的 TestHoverWhilePressed）。
+	//
+	// ⚠️ 局部变量叫 `onRow` 而不是 `hover`：`hover` 是**包名**，在这里把它当变量
+	// 用的话，这一行以下所有用到那个包的地方都得绕开（编译器会让 `hover.RowCover`
+	// 报「hover 是个 float32」）。
 	row := ui.Row(c).AlignSelf(ui.Stretch).Gap(cardGap).Padding(cardPadY, cardPadX).
 		// 右键菜单挂在**这一行**上：MyGo 取的是最里层那个带菜单的元素
 		//（`ui/menu.go` 的 menuTarget），挂到列表外面的话整列共用一份菜单。
 		ContextMenu(func(m *ui.Menu) { l.buildMenu(m, i) })
-	hover := row.Hovered()
+	onRow := row.Hovered()
 
 	row.Children(func() {
 		// ⓪ 多选态：这一行最左边的勾选框。没装多选就一格都不画
 		//（见 SetSelection）。
 		l.viewCheckbox(c, i, m.Title)
 
-		// ① 序号，或者（指针在这一行上时）那个「播放」按钮。见 viewIndex。
-		l.viewIndex(c, i, hover && !playing)
+		// ① 序号；正在放的那一行换成一段跳动的波形。见 viewIndex。
+		l.viewIndex(c, i, playing, titleColor, m.Title, indexWidth, 12)
 
-		// ② 封面。四态由 imgcache.View 画（空地址画空框，不画「失败」）。
-		imgcache.View(c, l.cache, m.Cover, coverSize, coverSize)
+		// ② 封面，四态由 imgcache 画（空地址画空框，不画「失败」），上面压着
+		// hover 反馈：压暗 + 播放三角。上游 `music-list-item/index.tsx:100-107`。
+		hover.RowCover(c, l.cache, m.Cover, coverSize, onRow, m.Title,
+			func() { l.playFrom(i) })
 
 		// ③ 标题 + UP 名。这一列 Grow(1)，把剩下的宽度都吃掉。
 		//
@@ -175,21 +178,6 @@ func (l *List) viewCard(r ui.ListRow) {
 			ui.Text(c, s).Width(durationWidth).TextAlign(ui.End).
 				FontSize(12).TextColor(t.TextMuted).MaxLines(1)
 		}
-
-		// ⑤ 正在放的那一行在末尾挂一句「正在播放」。
-		//
-		// ⚠️ 它认的是**歌**不是行（`isPlaying` 按判重标识，见 Actions.IsPlaying）：
-		// 换歌之后它跟着换，而正在放的歌在别的一行时这一行就退回一个普通的
-		// 时长。用行的序号认的话，「下一首播放」一插队它就会钉在错的那一行上。
-		//
-		// ⚠️ **无障碍标签带上了歌名**（读屏软件读的是标签，不是画出来的那几个
-		// 字）：光说「正在播放」的话，用户听到的是列表里突然冒出来的一句没头没尾
-		// 的话，他得自己猜是哪一首。顺带它也让这一行在 Tester 里可认——
-		// 同一首歌排了两行时，两个标签各不相同（铁律四保证 ID 不同）。
-		if playing {
-			ui.Text(c, PlayingMark).Label(m.Title + " " + PlayingMark).
-				FontSize(11).TextColor(t.Accent).MaxLines(1)
-		}
 	})
 }
 
@@ -198,9 +186,9 @@ func (l *List) viewCard(r ui.ListRow) {
 // ## 和普通那一行差在哪
 //
 // 四处，**一处都不碰语义**：封面 48 → 32、上下内边距 8 → 4、行内间距 8 → 6、
-// 歌名最多两行 → 一行。选中 / 正在放 / 右键菜单 / 勾选框 / 序号 hover 出来的
-// 「播放」按钮，这些**一个不少**——紧凑是「同一种行排得更密」，不是「另一种行」。
-// 少一样就变成两个控件，而不是同一个控件的两档，用户会以为是两个功能。
+// 歌名最多两行 → 一行。选中 / 正在放 / 右键菜单 / 勾选框 / 封面上的 hover 反馈，
+// 这些**一个不少**——紧凑是「同一种行排得更密」，不是「另一种行」。少一样就变成
+// 两个控件，而不是同一个控件的两档，用户会以为是两个功能。
 //
 // ⚠️ **字号只降了歌名那一处**（14 → 13）。UP 名和时长还是 12：它们本来就比正文小，
 // 再降一档在 12pt 的基础上会糊，而这一档省的是高度不是宽度。
@@ -215,14 +203,15 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 	row := ui.Row(c).AlignSelf(ui.Stretch).Gap(compactGap).Padding(compactPadY, compactPadX).
 		// 右键菜单挂在**这一行**上，和普通那一行同一个理由（见 View 里的注释）。
 		ContextMenu(func(m *ui.Menu) { l.buildMenu(m, i) })
-	hover := row.Hovered()
+	onRow := row.Hovered()
 
 	row.Children(func() {
 		l.viewCheckbox(c, i, m.Title)
-		l.viewCompactIndex(c, i, hover && !playing)
+		l.viewIndex(c, i, playing, titleColor, m.Title, compactIndexWidth, 11)
 
-		// 封面四态由 imgcache.View 画（空地址画空框，不画「失败」）。
-		imgcache.View(c, l.cache, m.Cover, compactCoverSize, compactCoverSize)
+		// 封面 + 它上面那圈 hover 反馈，理由同普通那一行。
+		hover.RowCover(c, l.cache, m.Cover, compactCoverSize, onRow, m.Title,
+			func() { l.playFrom(i) })
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(2).Children(func() {
 			ui.Text(c, m.Title).FontSize(13).LineHeight(1.2).
@@ -237,64 +226,35 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 			ui.Text(c, s).Width(compactDurationWidth).TextAlign(ui.End).
 				FontSize(12).TextColor(t.TextMuted).MaxLines(1)
 		}
-
-		// 「正在播放」这一句紧凑档**仍然摆**：它是「哪一首在放」唯一的行内标记，
-		// 而紧凑档一屏有几十行——正是最需要它的那一档（标签带歌名的理由见上面）。
-		if playing {
-			ui.Text(c, PlayingMark).Label(m.Title + " " + PlayingMark).
-				FontSize(11).TextColor(t.Accent).MaxLines(1)
-		}
 	})
-}
-
-// viewCompactIndex 是紧凑档那一行最左边：平时是序号，指针移上来时是「播放」按钮。
-//
-// 和 `viewIndex` 是同一件事，只有宽度和字号不同——**内边距那一处照抄**普通档的 4：
-// MyGo 的按钮左右各留 14，「播放」两个字约 26，而 `compactIndexWidth` 只有 32。
-// 忘了收的话按钮被挤成 10 宽的一个「播」字，**界面上看得出坏了，而无头 Tester
-// 读的是控件的文本**，于是断言全绿（`TestTheHoverButtonIsNotTruncated` 量的是
-// 画出来的那几个字）。
-func (l *List) viewCompactIndex(c *ui.Context, i int, hover bool) {
-	if !hover {
-		ui.Text(c, indexText(i)).Width(compactIndexWidth).TextAlign(ui.End).
-			FontSize(11).TextColor(c.Theme().TextMuted).MaxLines(1)
-		return
-	}
-	if ui.Button(c, "播放").Width(compactIndexWidth).Padding(1, 2).MaxLines(1).
-		FontSize(11).Tooltip("从这一首往后听").Clicked() {
-		l.playFrom(i)
-	}
 }
 
 // isPlaying 报这一首是不是正在放的那首。判据和理由见 shared.go 的同名函数。
 func (l *List) isPlaying(m Music) bool { return isPlaying(l.acts, m.Item) }
 
-// viewIndex 是那一行最左边：平时是序号，指针移上来时是「播放」按钮。
+// viewIndex 是那一行最左边：平时是序号，**正在放的那一行换成一段跳动的波形**。
 //
-// **按了就是从这一首往后接进队列并开始播**——和双击同一件事（见 `View` 的
-// `OnSubmit`）。hover 出来的按钮跟双击说的不是一回事的话，用户第一次按就会
-// 拿到一个自己没点过的动作。
+// ## 波形摆在序号那一格，而不是行尾那句「正在播放」
 //
-// ⚠️ **正在放的那一行不摆它**：按下去是同一首从头重播（见 `App.PlayAt`
-// 开头那一支，它开头就 return 了）。摆一个「按了等于没换歌」的按钮不如摆序号。
+// 上游 `music-list-item/index.tsx` 是后者：序号那一格在放的时候被一段波形占住，而
+// 「行尾挂一句『正在播放』」是这一版早先的做法。两者的差别不是好不好看——是**视线**：
+// 序号那一列是所有行都对齐的一列，波形出现在那里时眼睛是竖着扫下去的，一眼就知道是
+// 哪一行；挂在行尾的话每一行的那句话位置都不一样，得一列一列对过去。
 //
-// 用序号那一列的 `indexWidth`，所以按钮出现时那一行不会横向跳一下。
+// ⚠️ **color 由调用方给**（就是这一行歌名的那个颜色）：波形摆的那一格在选中时是**主色
+// 底**，主色底上画一条主色波形等于没画，所以它跟着歌名走。
 //
-// ⚠️ **内边距收到 4**：MyGo 的按钮左右各留 `Space(3.5)`（14），「播放」两个
-// 汉字约 26——加起来 54，而 `indexWidth` 只有 40。第一版没收，画出来的是
-// **10px 宽的一个「播」字**，而**无头 Tester 读的是控件的文本**：所有断言一律
-// 是绿的，「播放」两个字在屏幕上只剩一个（`TestTheHoverButtonIsNotTruncated`
-// 量的是画出来的那几个字，见那里）。
-func (l *List) viewIndex(c *ui.Context, i int, hover bool) {
-	if !hover {
-		ui.Text(c, indexText(i)).Width(indexWidth).TextAlign(ui.End).
-			FontSize(12).TextColor(c.Theme().TextMuted).MaxLines(1)
+// ⚠️ **认的是「歌」不是「行」**（`isPlaying` 按判重标识，见 `Actions.IsPlaying`）：换歌
+// 之后波形跟着换，而正在放的歌在别的一行时这一行退回一个普通的序号。用行的序号认的
+// 话，「下一首播放」一插队它就会钉在错的那一行上。
+func (l *List) viewIndex(c *ui.Context, i int, playing bool, color ui.Color, title string, width, font float32) {
+	t := c.Theme()
+	if playing {
+		hover.Wave(c, "wave:"+l.songs[i].ID, width, color, title)
 		return
 	}
-	if ui.Button(c, "播放").Width(indexWidth).Padding(1, 4).MaxLines(1).
-		Tooltip("从这一首往后听").Clicked() {
-		l.playFrom(i)
-	}
+	ui.Text(c, indexText(i)).Width(width).TextAlign(ui.End).
+		FontSize(font).TextColor(t.TextMuted).MaxLines(1)
 }
 
 // viewCheckbox 画这一行最左边那个勾选框，没装多选就什么都不画。
@@ -306,12 +266,17 @@ func (l *List) viewIndex(c *ui.Context, i int, hover bool) {
 //
 // `Label` 要给：勾选框本身没有可见文字，没有名字的话读屏软件只会念一句
 // 「复选框」，Tester 也没法 `Click` 它。
+//
+// ⚠️ **`Width(CheckColWidth)` 不能省**：表头那一行照着同一个数给它留了位置（见
+// `header.go` 的 LeadCol），这一边不写死的话两边就差着一个数——而那种差在画面上是
+// 「多选一开，右边几列歪了」。今天是同一个数（空标签的 `ui.Checkbox` 就是
+// `t.Space(4)` 见方），写死是为了主题的间距一改两边还能一起走。
 func (l *List) viewCheckbox(c *ui.Context, i int, title string) {
 	if l.sel2.On == nil {
 		return
 	}
 	checked := l.sel2.On(i)
-	box := ui.Checkbox(c, &checked, "")
+	box := ui.Checkbox(c, &checked, "").Width(CheckColWidth(c))
 	if box.Changed() && l.sel2.Toggle != nil {
 		l.sel2.Toggle(i)
 	}

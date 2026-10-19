@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
 )
@@ -149,9 +149,7 @@ func (s *Shell) viewHistory(c *ui.Context, _ *ui.Route) {
 
 			// 表头**只在列表 / 紧凑两档**摆，理由见 later.go 那一处。
 			p.rows.SetView(s.displayView())
-			if !p.rows.isGrid() {
-				historyHeader(c)
-			}
+			viewLibraryHeader(c, p.rows, historyHeaderSpec, historyHeaderKey)
 			p.rows.View(c)
 		})
 }
@@ -175,20 +173,6 @@ func (s *Shell) viewReportHistory(c *ui.Context, on, ro bool) {
 	s.applySetting("记录播放历史", func(cur *app.Settings) { cur.ReportPlayHistory = on })
 }
 
-// historyHeader 是那一行表头。抄上游 `pages/history/header.tsx`。
-func historyHeader(c *ui.Context) {
-	t := c.Theme()
-	ui.Row(c).Key("history:header").FillWidth().Gap(rowGap).Padding(listPadY, listPadX).
-		Children(func() {
-			ui.Text(c, "#").Width(colIndex).TextAlign(ui.End).FontSize(12).TextColor(t.TextMuted)
-			ui.Text(c, "标题").Grow(1).FontSize(12).TextColor(t.TextMuted)
-			ui.Text(c, "播放进度").Width(colProgress).TextAlign(ui.End).
-				FontSize(12).TextColor(t.TextMuted)
-			ui.Text(c, "观看时间").Width(colViewedAt).TextAlign(ui.End).
-				FontSize(12).TextColor(t.TextMuted)
-		})
-}
-
 // drawHistoryRow 画第 r 行。结构和稍后再看那一行一样，多出来的两列在右边。
 func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 	t := c.Theme()
@@ -208,12 +192,19 @@ func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 		titleColor = t.Accent
 	}
 
-	return ui.Row(c).Key("history-row:"+m.ID).AlignSelf(ui.Stretch).Gap(mt.gap).
-		Padding(mt.padY, mt.padX).Children(func() {
-		ui.Text(c, rowNumber(r.Index)).Width(mt.index).TextAlign(ui.End).
-			FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+	// ⚠️ **hover 要在 Children 之前问**（同 `widgets/list/card.go` 里那一处）：它报的
+	// 是这一帧指针在不在这一行上，而封面上那圈反馈要等 Children 才建得出来。
+	row := ui.Row(c).Key("history-row:"+m.ID).AlignSelf(ui.Stretch).Gap(mt.gap).
+		Padding(mt.padY, mt.padX)
+	onRow := row.Hovered()
 
-		imgcache.View(c, s.images, m.Cover, mt.cover, mt.cover)
+	return row.Children(func() {
+		// 序号；正在放的那一行换成一段跳动的波形（上游 `music-list-item`）。
+		viewRowIndex(c, r.Index, playing, titleColor, m.ID, m.Title, mt.index)
+
+		// 封面 + 它上面那圈 hover 反馈：压暗 + 一个 20px 的白色播放三角。
+		hover.RowCover(c, s.images, m.Cover, mt.cover, onRow, m.Title,
+			func() { rows.playFrom(r.Index) })
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).Children(func() {
 			ui.Text(c, m.Title).FontSize(mt.titleSize).LineHeight(1.5).
@@ -221,9 +212,6 @@ func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 			if m.Owner != "" {
 				ui.Text(c, m.Owner).FontSize(12).LineHeight(1).
 					TextColor(ownerColor).MaxLines(1).Ellipsis("…")
-			}
-			if playing {
-				viewPlayingMark(c, t, m.Title)
 			}
 		})
 
@@ -260,9 +248,15 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected boo
 	if selected {
 		box = box.Background(t.Accent)
 	}
+	// ⚠️ **hover 要在 Children 之前问**（同 `widgets/list/grid.go` 里那一处）。
+	onCell := box.Hovered()
 
 	return box.Children(func() {
-		imgcache.View(c, s.images, m.Cover, cell, laterCellCoverH)
+		// 封面 + 它上面那圈 hover 反馈：右下角一个 40 的主色圆播放钮，封面底部一条
+		// black/90 的渐变。**左边那一半空着**：历史记录的接口不给播放量（见
+		// `libraryRow.View` 的注释），画一列空白比不画更难看。
+		hover.CardCover(c, s.images, m.Cover, cell, laterCellCoverH, onCell,
+			"", clockText(m.Duration), m.Title, func() { rows.playFrom(i) })
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).PaddingY(cardGapForCell).Children(func() {
 			ui.Text(c, m.Title).FontSize(14).LineHeight(1.5).

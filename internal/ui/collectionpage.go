@@ -340,6 +340,10 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 			// ⚠️ 它**换不掉**多选接线（`attachSelection` 装的那一份挂在两份控件上，
 			// 见 `widgets/list/switch.go`），所以网格那一档点勾照样能批量删。
 			p.list.SetView(s.displayView())
+			// ⚠️ **表头在列表外面**（`rowheader.go` 文件头）：它是 `View` 的兄弟，所以
+			// 列表往下滚它不动。它自己会判多选态要不要给勾选框让位置（`HeaderSpec` 的
+			// Lead），所以这一处不用管多选。
+			p.list.Header(c, "collection:header")
 			// 列表自己占了 Grow(1)（见 `list.List.View`），所以多选态下面那条
 			// 批量操作条自然被它顶到最下面。
 			p.list.View(c)

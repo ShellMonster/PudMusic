@@ -112,9 +112,10 @@ func queueTitles(items []app.Item) []string {
 // TestBothLibraryPagesMarkThePlayingRow 盯稍后再看 / 历史记录这两页也标出
 // 正在放的那一行。
 //
-// ⚠️ 这两页**不走** `widgets/list` 的卡片：它们的行多两到三列，表头是另外画的
-// （`laterHeader` / `historyHeader`），所以卡片上那个标记不会自动出现在这儿。
-// 只补了菜单没补高亮的话，同一个应用里两套列表对「正在放」的说法不一致。
+// ⚠️ 这两页**不走** `widgets/list` 的卡片：它们的行多两到三列，表头是另外给的规格
+// （`rowheader.go` 的 `laterHeaderSpec` / `historyHeaderSpec`），所以卡片上那个标记
+// 不会自动出现在这儿。只补了菜单没补高亮的话，同一个应用里两套列表对「正在放」的说法
+// 不一致。
 //
 // 断的是**那一行的下边沿**：只断「画面上有这几个字」的话，标错了行也照样通过。
 func TestBothLibraryPagesMarkThePlayingRow(t *testing.T) {
