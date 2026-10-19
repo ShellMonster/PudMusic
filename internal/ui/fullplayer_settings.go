@@ -57,11 +57,12 @@ func (s *Shell) viewFullSettings(c *ui.Context) {
 		// 之前**那个位置——于是按下去的那一帧旋钮**一动不动**，它要等 140ms 才挪
 		// 到位。
 		//
-		// 而在**钟站着不动**的地方（无头 Tester），那 140ms 永远走不完：实测点
-		// 下去之后开关那一块**一个像素都没变**（旋钮还在原来那半边）。
-		//
-		// 这一层用的 `staticSwitch` 是本包自己的那一个（`static_switch.go`，
-		// 设置页上每一个开关都用它）：旋钮**直接跳**到新的位置。
+		// ⚠️ **真机上有钟，180ms 内就有反馈**——所以这**不是**用户能看见的缺口。
+		// 真正走不完的是**无头 Tester**：它的钟站着不动，那 140ms 永远到不了，
+		// 实测点下去之后开关那一块**一个像素都没变**（旋钮还在原来那半边）。
+		// 所以这一处是「和无头 Tester 保持一致」的顺手改：外观逐字一样
+		// （`static_switch.go` 照 `coreSwitch` 抄的），而它让那一条回归测试有个
+		// 能断的东西。设置页上每一个开关用的也正是它。
 		if staticSwitch(c, &show).Label("显示频谱图").Changed() {
 			s.app.SetFullPlayerPrefs(app.FullPlayerPrefs{
 				ShowSpectrum:  show,

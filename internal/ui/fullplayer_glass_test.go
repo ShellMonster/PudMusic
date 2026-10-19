@@ -30,25 +30,61 @@ import (
 
 // TestTheFullPlayerBackdropIsTheFrameworksOwnGlass 断「背景那一层是毛玻璃材质」。
 //
-// 判据是**材质本身**，不是画面上的像素：那一层填的必须是**框架自带**的那一份
+// 判据是**材质本身**，不是画面上的像素：那一层糊的必须是**框架自带**的那一份
 // （`plugins/glass`：Metal / HLSL / GLSL 三套着色器 + CPU 等价实现，三端一致），
 // 而不是我们自己画的等效效果。
 //
 // ⚠️ 为什么读得到：框架的 `Element.Material` 只往节点上设、没有读回来的办法
-// （`mygo/ui/frame.go:144`），所以这一层把「背景那一层填的是什么」收在一个地方
+// （`mygo/ui/frame.go:144`），所以这一层把「背景那一层糊的是什么」收在一个地方
 // （`fullBackdropMaterial`），这里读的就是它。换回一层纯色、或者换成自绘的
 // 等效效果，这一条立刻红。
 func TestTheFullPlayerBackdropIsTheFrameworksOwnGlass(t *testing.T) {
-	switch fullBackdropMaterial().(type) {
+	switch fullBackdropMaterial(fullBackdropBlur).(type) {
 	case glass.Blur, glass.Glass:
 		// 就是框架那一份。
 	default:
-		t.Fatalf("背景那一层填的是 %T，不是框架自带的毛玻璃（glass.Blur / glass.Glass）",
-			fullBackdropMaterial())
+		t.Fatalf("背景那一层糊的是 %T，不是框架自带的毛玻璃（glass.Blur / glass.Glass）",
+			fullBackdropMaterial(fullBackdropBlur))
 	}
 	// 而它得真的是**糊**的：半径不能是 0（0 等于没糊）。
-	if b, ok := fullBackdropMaterial().(glass.Blur); ok && b.Radius <= 0 {
+	if b, ok := fullBackdropMaterial(fullBackdropBlur).(glass.Blur); ok && b.Radius <= 0 {
 		t.Errorf("背景那一层的模糊半径是 %g——那等于没糊", b.Radius)
+	}
+	// 而画布上的那个半径要换算过：画布是窗口的 1/4，屏幕上的糊的程度仍然是 σ=32
+	// DIP（窗口多大、屏幕多密都一样）。
+	if got, want := fullBackdropSigma(300, 1200), float32(8); got != want {
+		t.Errorf("300 宽的画布上的半径是 %g，want %g（画布是窗口的 1/4，"+
+			"屏幕上的模糊强度要一样）", got, want)
+	}
+}
+
+// TestTheBackdropIsBlurredOnceAndThenShownAsAPicture 断「毛玻璃不是每帧重渲一遍」。
+//
+// ## 为什么要有这一条
+//
+// 毛玻璃是**画的时候才生效**的（框架的 `Material`）：满窗 1200×800 上 σ=32，
+// **软件渲染**（框架的回退路）每一帧要多花 **80~100 毫秒**——满屏会掉到
+// 8~12 帧/秒（GPU 上没有这个代价，报告里有实测）。
+//
+// 所以背景那一层是**一张画布**：封面变了或者窗口改了尺寸才重画一次（那一次才
+// 糊），稳态下每一帧只是把那张画布当图贴。
+//
+// 判据是**画布被重画了几次**：画十帧，它只该重画一次。
+func TestTheBackdropIsBlurredOnceAndThenShownAsAPicture(t *testing.T) {
+	s, tt := fullTesterWithCover(t)
+	waitFrames(t, tt, "封面下回来了", func() bool {
+		return s.images.Get(s.app.Snapshot().CoverURL).Ready()
+	})
+	openFull(t, tt)
+	waitFrames(t, tt, "背景糊好了", func() bool { return s.full.bgDraws > 0 })
+
+	before := s.full.bgDraws
+	for range 10 {
+		tt.Frame()
+	}
+	if got := s.full.bgDraws - before; got != 0 {
+		t.Errorf("画了十帧，那张画布被重画了 %d 次——毛玻璃于是每帧重渲一遍"+
+			"（软件渲染上那是 80~100 毫秒一帧）", got)
 	}
 }
 
@@ -135,16 +171,16 @@ func TestTheFullPlayerContentIsStillClickableThroughTheGlass(t *testing.T) {
 // TestTheTextOverTheBlurredBackgroundIsStillReadable 断「底下的字看得清」。
 //
 // 满屏上的字全是白的（`fullOnColor` / `fullDimColor`），底下是糊过的封面加一层
-// 55% 的黑。判据是**画出来的对比度**：字最亮的那一个像素，和它背后底色的那一个
-// 像素，算 WCAG 的对比度。
+// 60% 的黑（`fullScrim`）。判据是**画出来的对比度**：字最亮的那一个像素，和它
+// 背后底色的那一个像素，算 WCAG 的对比度。
 //
-// ⚠️ **测的是最坏的一档**：封面是**纯白**的时候，底色最亮（白压完 55% 的黑是
-// 115），白字是 244 —— 对比度 4.3:1。大字（这里那首 18px 粗体的歌名）按 WCAG AA
-// 的大字一档（3:1）算，够。
+// ⚠️ **门槛是 4.5:1，不是 3:1**：WCAG AA 对普通文字是 4.5:1，而「大字」那一档
+// （3:1）要 **14pt 粗体 = 18.67px 粗体**——这里量的是 18px 粗体的歌名，**仍算
+// 普通文字**。实测最坏的一档（**纯白**封面）是 **5.17:1**。
 //
-// ⚠️ **毛玻璃没有改这个数**：`glass.Blur` 是「没有色调、没有描边、没有影子」的
-// 背景模糊（框架 `plugins/glass` 的文档），它只把底下那张图糊开，不动亮度——
-// 所以糊之前和糊之后，底色是同一个数。
+// ⚠️ **压暗那一层为什么是 0.60**：0.55 的时候是 4.31:1，差 0.19（而这一层是
+// 改动前就有的，糊玻璃没有动它——`glass.Blur` 是「没有色调、没有描边、没有影子」
+// 的背景模糊，框架 `plugins/glass` 的文档，糊之前和糊之后底色是同一个数）。
 //
 // ⚠️ 满屏里**还没有歌词**（歌词开关是 BMG-65 的活），所以这一条量的是满屏里
 // 现有的那些字；歌词那一档将来加上时用的是同一套底色，同一个判据。
@@ -165,11 +201,12 @@ func TestTheTextOverTheBlurredBackgroundIsStillReadable(t *testing.T) {
 	// 等封面**画上来**：封面没画上来的时候底下是主题的深色底，那样的对比度
 	// 好看得多——量的是一个不存在的情形。
 	//
-	// 白封面压完 55% 的黑是 115（255 × 0.45），所以底色到 100 以上就说明封面
-	// 已经铺上来了。
+	// 白封面压完 60% 的黑是 102（255 × 0.40），而没有封面时底下是主题的深色底
+	// （十几）。所以底色到 80 以上就说明封面已经铺上来了（门槛取在两者中间，
+	// 离两头都远）。
 	waitFrames(t, tt, "封面画上来了", func() bool {
 		p := tt.Image().RGBAAt(int(box.X)-10, int(box.Y+box.H/2))
-		return int(p.R) > 100
+		return int(p.R) > 80
 	})
 	img := tt.Image()
 	// 字最亮的那一个像素（抗锯齿的边不算，要字的核心）。
@@ -190,9 +227,11 @@ func TestTheTextOverTheBlurredBackgroundIsStillReadable(t *testing.T) {
 	}
 	ratio := contrastRatio(best, bg)
 	t.Logf("歌名 %v、它背后的底色 %v，对比度 %.2f:1", best, bg, ratio)
-	if ratio < 3 {
-		t.Errorf("歌名和它背后的底色对比度只有 %.2f:1（字 %v、底 %v）——糊过的背景"+
-			"太亮，白字读不出来", ratio, best, bg)
+	// 门槛 4.5:1：18px 粗体仍算 WCAG AA 的普通文字（见这条的注释）。
+	if ratio < 4.5 {
+		t.Errorf("歌名和它背后的底色对比度只有 %.2f:1（字 %v、底 %v）——"+
+			"糊过的背景太亮，白字读不出来（WCAG AA 的普通文字要 4.5:1）",
+			ratio, best, bg)
 	}
 }
 

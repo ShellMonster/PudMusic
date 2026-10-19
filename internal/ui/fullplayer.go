@@ -27,6 +27,7 @@
 package ui
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 
@@ -99,20 +100,45 @@ const (
 // 话，一张浅色的歌封面会把白字吃掉——而 Biu 那边靠三层渐变挡着，我们这边靠这一层。
 //
 // ⚠️ 它压在毛玻璃**上面**（不是下面）：它要压的是糊完的那一层。
-var fullScrim = ui.RGBA(0, 0, 0, 0.55)
+//
+// ⚠️ **0.60 不是随手挑的**：最坏的一档（封面是纯白）底色是 255×0.40 = 102，
+// 而 18px 粗体的歌名（白 92%）压在它上面是 **5.17:1**——WCAG AA 对普通文字的
+// 门槛是 4.5:1（18px 粗体仍算普通文字：大字那一档要 14pt = 18.67px 粗体）。
+// 0.55 的时候是 4.31:1，差 0.19。
+var fullScrim = ui.RGBA(0, 0, 0, 0.60)
+
+// fullBackdropScale 是背景那一层的画布缩到窗口的几分之一。
+//
+// 画布是**像素**：窗口 1200×800 的话画布是 300×200，画上去再放大四倍铺满整窗。
+// 四倍这个数不是随便挑的——Biu 那边就是「同一张图放大四到五倍并且明显模糊」
+// （`glassmorphism.ts`），而放大之后那些细节本来也读不出来。
+//
+// ⚠️ **画面上的模糊强度和它无关**：画布上的半径按画布与窗口的比例换算（见
+// fullBackdropSigma），所以窗口多大、屏幕多密，糊的程度都是 σ=32 DIP。
+const fullBackdropScale = 4
 
 // fullBackdropBlur 是背景那一层糊掉多少（DIP，标准差，和 CSS 的 blur() 一样）。
 //
-// Biu 那边是「同一张图放大四到五倍并且明显模糊」（`glassmorphism.ts`），而框架的
-// 毛玻璃只有两档、也没有按设备分级那套入口（票面写明「不做」），所以这里是**一个
-// 固定的、够糊的值**：满窗 1200×800 上 σ=32 之后，封面上任何细节都读不出来，
-// 界面上那些白字底下只剩一层底色。
+// Biu 那边是「同一张图放大四到五倍并且明显模糊」，而框架的毛玻璃没有按设备分级
+// 那套入口（票面写明「不做」），所以这里是**一个固定的、够糊的值**：σ=32 之后
+// 封面上任何细节都读不出来，界面上那些白字底下只剩一层底色。
 //
 // ⚠️ 这是**毛玻璃自己的模糊半径**，不是我们画的等效效果——真正画上去的是框架
 // `plugins/glass` 那一份。
 const fullBackdropBlur = 32
 
-// fullBackdropMaterial 是满屏背景那一层填的材质。
+// fullBackdropSigma 是画布上的模糊半径（画布像素）。
+//
+// 画布是窗口的 1/4，所以画布上的 σ=8 放到屏幕上正好是 32 DIP——**和画布多大
+// 无关**（窗口改了尺寸，画布跟着改，这个数跟着换算）。
+func fullBackdropSigma(canvasW, winW float32) float32 {
+	if winW <= 0 {
+		return fullBackdropBlur
+	}
+	return fullBackdropBlur * canvasW / winW
+}
+
+// fullBackdropMaterial 是背景那一层糊的那一份材质。
 //
 // ⚠️ **它是包级的一个函数，不是常量**：框架的 `Element.Material` 只往节点上设、
 // 没有读回来的办法（`mygo/ui/frame.go:144`），而这一票的验收口径是「背景那一层
@@ -122,7 +148,9 @@ const fullBackdropBlur = 32
 // 里面装的是**框架自带的那一份**：`glass.Blur` 是三端一致的背景模糊（Metal /
 // HLSL / GLSL 三套着色器 + CPU 等价实现），不是自绘的等效效果，也不是新增依赖
 // （和框架同一个模块，许可清单不变）。
-func fullBackdropMaterial() ui.Material { return glass.Blur{Radius: fullBackdropBlur} }
+//
+// ⚠️ sigma 是**画布上的**半径（见 fullBackdropSigma）。
+func fullBackdropMaterial(sigma float32) ui.Material { return glass.Blur{Radius: sigma} }
 
 // fullOnColor / fullDimColor 是压在背景上的两级前景色（白 / 白一点七折）。
 var (
@@ -167,6 +195,19 @@ type fullPlayer struct {
 	// partsRows 是这一帧要画的那几行，partsList 是它们的列表状态。
 	partsRows []partRow
 	partsList ui.ListState
+
+	// bg 是背景那一层的画布：封面糊过一次画进去，稳态下每一帧只是一张图
+	// （见 viewFullBackdropCanvas 为什么是画布而不是一层材质）。
+	bg *ui.Canvas
+	// bgW/bgH 是这张画布的尺寸（窗口改了尺寸要重建）。
+	bgW, bgH int
+	// bgKey 是这张画布画的是哪一张封面（地址 + 位图 + 尺寸）。变了才重画。
+	bgKey string
+	// bgDirty 是「画布要重画」那一下（画它要一个 Painter，只有画的时候有）。
+	bgDirty bool
+	// bgDraws 是这张画布被重画了几次。**给测试看的**：毛玻璃每帧重渲一遍就是
+	// 这里在涨（那在软件渲染上是 80~100 毫秒一帧）。
+	bgDraws int
 
 	// spec 是频谱那一块复用的中间量（见 fullplayer_spectrum.go）。
 	spec spectrumBuffers
@@ -340,36 +381,90 @@ func (s *Shell) openFullPlayer() {
 
 // ---- 背景 ----
 
-// viewFullBackdrop 是满屏背景：封面铺满整窗 + 一层毛玻璃 + 一层压暗。
+// viewFullBackdrop 是满屏背景：封面糊过一次铺满整窗 + 一层压暗。
 //
 // 封面取不到（本地音乐没有封面地址，见 `app.State.CoverURL`）时铺主题的底色，
 // 不是一片黑——那是「没有这一张图」，不是「加载失败」。
 //
-// ## 三层的顺序是**要紧**的
+// ## 两层的顺序是**要紧**的
 //
-// 毛玻璃读的是「**它之前画过的东西**」（框架 `plugins/glass` 的文档：what shows
-// through is what was painted under it in the same window），所以它必须画在封面
-// **之后**；而压暗那一层要盖在毛玻璃**上面**——它压的是糊完的那一层，白字才有底。
-//
-// ⚠️ 顺序反了的话，糊的是**主布局**（浮层底下那一层）而不是封面，界面上是
-// 「封面还是清晰的，只有底下在动」。
+// 压暗那一层压在糊完的那一层**上面**——它压的是糊完的，白字才有底。反了的话
+// 压的是没糊的那一张，底色会亮一档。
 func (s *Shell) viewFullBackdrop(c *ui.Context, url string) {
 	ui.Box(c).Key("full-backdrop").
 		Absolute().Left(0).Top(0).Right(0).Bottom(0).
 		Background(c.Theme().Background).
 		Children(func() {
-			if st := s.images.Get(url); st.Ready() {
-				ui.Image(c, st.Bitmap).Fill().Fit(ui.Cover)
-			}
-			// 毛玻璃那一层：满窗大小，糊的是底下那张封面。
+			// 背景那一层：封面糊过一次，画在一张画布里（见 viewFullBackdropCanvas）。
 			//
 			// ⚠️ 它**不接管点击**：这一层在 `probe` 底下，而 `probe` 是那个铺满整窗
 			// 的 `Modal` 盒子，点击先撞上它（见 viewFullPlayer 的注释）。
-			ui.Box(c).Key("full-glass").
-				Absolute().Left(0).Top(0).Right(0).Bottom(0).
-				Material(fullBackdropMaterial())
+			s.viewFullBackdropCanvas(c, url)
 			ui.Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Background(fullScrim)
 		})
+}
+
+// viewFullBackdropCanvas 是背景那一层：封面糊过一次画进一张画布，之后每一帧
+// 只是把那张画布放大铺上去。
+//
+// ## 为什么不直接用一层材质
+//
+// 毛玻璃是**每帧重渲一遍**的（框架的 `Material` 是画的时候才生效）。满窗
+// 1200×800 上 σ=32：
+//
+//   - **GPU**（真程序走的那条：Metal / D3D11 / GL）：几遍小 pass，测不出帧率上的
+//     代价（见报告的「帧率」一节）。
+//   - **软件渲染**（框架的回退路：`MYGO_GPU=0`、拿不到原生 surface、`metal.New`
+//     失败、GPU 掉线后的降级）：每一帧要多花 **80~100 毫秒**，满屏会掉到
+//     8~12 帧/秒。
+//
+// 画布是框架给「画一次、每一帧当图贴」准备的那个口（`mygo/ui/canvas.go`）：封面
+// 变了或者窗口改了尺寸才重画一次（**那一次才糊**），稳态下每一帧只是一张图。
+// 票面留的那个决策点（「要不要把背景层的结果缓存成位图」）到这里落了地。
+//
+// ## 糊还是**框架的糊**
+//
+// `glass.Blur` 的材质原样画进画布（`PaintMaterial`），不是我们自己糊的——
+// 「不自绘等效效果」那一条仍然守得住。
+func (s *Shell) viewFullBackdropCanvas(c *ui.Context, url string) {
+	winW, winH := c.Size()
+	st := s.images.Get(url)
+	if !st.Ready() {
+		// 封面还没来：底下是主题的底色（外头那一层），画布先不动。
+		return
+	}
+	cw := max(int(winW/fullBackdropScale), 1)
+	ch := max(int(winH/fullBackdropScale), 1)
+	// 换了封面、换了位图、或者窗口改了尺寸（画布的大小跟着变），才重画。
+	key := fmt.Sprintf("%s|%p|%dx%d", url, st.Bitmap, cw, ch)
+	if s.full.bgKey != key {
+		if s.full.bg == nil || s.full.bgW != cw || s.full.bgH != ch {
+			s.full.bg = ui.NewCanvas(cw, ch)
+			s.full.bgW, s.full.bgH = cw, ch
+		}
+		s.full.bgKey, s.full.bgDirty = key, true
+	}
+	if s.full.bg == nil {
+		return
+	}
+	// 画布的内容要一个 Painter，只有画的时候有：放在 Draw 回调里。
+	ui.Box(c).Key("full-backdrop-canvas").
+		Absolute().Left(0).Top(0).Right(0).Bottom(0).
+		Draw(func(p *ui.Painter, r ui.Rect) {
+			if !s.full.bgDirty {
+				return
+			}
+			s.full.bgDirty = false
+			s.full.bgDraws++
+			box := ui.Rect{W: float32(cw), H: float32(ch)}
+			s.full.bg.Draw(p, func(cp *ui.Painter) {
+				cp.Image(st.Bitmap, box, ui.Cover)
+				fullBackdropMaterial(fullBackdropSigma(float32(cw), winW)).
+					PaintMaterial(cp, box, [4]float32{})
+			})
+		})
+	// 把它放大四倍铺满整窗。
+	ui.Image(c, s.full.bg.Bitmap()).Fill().Fit(ui.FillBox)
 }
 
 // ---- 顶上那一条 ----
