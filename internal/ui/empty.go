@@ -62,7 +62,6 @@ const emptyGap = 8
 // drawEmpty 是**唯一**的空状态画法。页面级（`viewEmpty`）和列表 / 网格那一块
 // （`pagedRows.viewEmptyState`）都走它——七页共用一套绘制入口就是指这个。
 //
-//
 // 它是**一个自由函数**而不是 `Shell` 的方法：这一格也会被列表 / 网格画
 // （`pagedRows` 那一支），而 `pagedRows` 身上没有 `Shell`——硬挂一个字段进去
 // 只为了让一个不碰外壳的画法能写成 `s.` 而已。
@@ -71,23 +70,33 @@ const emptyGap = 8
 // pad 是上下留白（上游 `py-20` 的意思）。列表里那一块比整页矮，留白要小一档，
 // 否则上下那两行字在列表里飘在半空；所以它是参数而不是写死的数。
 func drawEmpty(c *ui.Context, key string, e emptyState, pad float32) {
-	t := c.Theme()
 	col := ui.Column(c)
 	if key != "" {
 		// ⚠️ Key 写在构造**之前**（铁律四的坑）：构造之后再 Key 等于没给。
 		col = col.Key(key)
 	}
 	col.Grow(1).Center().Gap(emptyGap).Padding(pad, 28).Children(func() {
-		if e.Icon != "" {
-			// 次要色：图标是修饰，不是这一页要说的那句话。上游那枚也是
-			// `text-default-400`（`index.tsx:16` 整个空状态一个色）。
-			ui.Icon(c, icon(e.Icon)).FontSize(emptyIconSize).TextColor(t.TextMuted)
-		}
-		ui.Text(c, e.Title).FontSize(15).TextColor(t.Text)
-		if e.Hint != "" {
-			ui.Text(c, e.Hint).FontSize(12).TextColor(t.TextMuted)
-		}
+		emptyContent(c, e)
 	})
+}
+
+// emptyContent 把「一枚插画 + 标题 + 提示」这三样画进**当前这一个容器**。
+//
+// 它是 `drawEmpty` 的内层，单独拎出来是因为有一处要在这三样**下面**再摆一句
+// 别的：`viewLibraryMissing`（「还没接上 B 站接口」这一句）。那一处要的是同一
+// 枚插画、同两行字，而外层还要自己加一句——所以拆成「内容」和「外壳」两层，
+// 免得那一处把三样的字号和主次色再抄一遍（抄一遍就是会漂开的那份）。
+func emptyContent(c *ui.Context, e emptyState) {
+	t := c.Theme()
+	if e.Icon != "" {
+		// 次要色：图标是修饰，不是这一页要说的那句话。上游那枚也是
+		// `text-default-400`（`index.tsx:16` 整个空状态一个色）。
+		ui.Icon(c, icon(e.Icon)).FontSize(emptyIconSize).TextColor(t.TextMuted)
+	}
+	ui.Text(c, e.Title).FontSize(15).TextColor(t.Text)
+	if e.Hint != "" {
+		ui.Text(c, e.Hint).FontSize(12).TextColor(t.TextMuted)
+	}
 }
 
 // viewEmpty 画一页的空状态。key 给这一页的根元素（铁律四）。

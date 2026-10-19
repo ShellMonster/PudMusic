@@ -770,10 +770,10 @@ func (s *Shell) viewFollowCardGuarded(c *ui.Context, f *followPage, i int) {
 // （`line-clamp-2`）。**整张卡点一下 = 跳进那个 UP 的空间**（上游 `onPress`
 // 就是 `navigate(/user/${u.mid})`）。
 //
-// ⚠️ **认证那一块画成一行字而不是头像右下角那枚闪电**：上游那枚是 Remix 图标
-// 字体里的图标，而 MyGo 没有图标字体（`empty.go` 那枚关闭图标也是这么不画的）。
-// 画一个不像的图标比不画更糟，而 `official_verify.desc` 我们已经解出来了
-// （`bili/follow.go`），摆一行字是最诚实的画法。
+// ⚠️ **认证那一块画成一行字而不是头像右下角那枚闪电**：上游那一枚是
+// `RiVerifiedFill`，而我们的图标资源里**没有那一枚**（这一票补的是界面上一处一处
+// 用得上的那一批，不是一个分类整个搬进来）。`official_verify.desc` 我们已经解出来
+// 了（`bili/follow.go`），摆一行字是最诚实的画法。
 func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser) {
 	t := c.Theme()
 	name := u.Name

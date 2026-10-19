@@ -116,10 +116,10 @@ func drawPlaceholder(c *ui.Context, w, h, mix float32) {
 		// 圆角和外面那个 Clip 对上：外层已经按主题圆角裁过一次，这里再来一圈，
 		// 那一圈描边才落在圆角上而不是先被裁成直角。
 		Radius(t.Radius).Center().Children(func() {
-			// 次要色：它在说「这儿没有图」，不是「这里有话要说」——和空状态
-			// 那一格里的插画同一档。
-			ui.Icon(c, placeholderIcon).FontSize(size).TextColor(t.TextMuted)
-		})
+		// 次要色：它在说「这儿没有图」，不是「这里有话要说」——和空状态
+		// 那一格里的插画同一档。
+		ui.Icon(c, placeholderIcon).FontSize(size).TextColor(t.TextMuted)
+	})
 }
 
 // min32 取两个里小的那个。

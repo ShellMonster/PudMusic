@@ -1155,7 +1155,7 @@ func (s *Shell) viewCrash(c *ui.Context) {
 		ui.Text(c, "界面出错了，播放器已经停在这一页").FontSize(18).Bold()
 
 		// 「出错在哪一步」这一块：三行，各自说清一件事。
-		ui.Column(c).Key("crash-where").Gap(2).Children(func() {
+		ui.Column(c).Key("crash-where").Gap(2).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "出错的地方："+cr.where).FontSize(13).TextColor(t.Text)
 			// 路径和页面名分开两行：用户在地址里看到的是路径，而跟开发者
 			// 说的时候说的是页面名（「下载记录那一页」）。只给一个的话，另一

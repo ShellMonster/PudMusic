@@ -45,6 +45,7 @@ const searchQuery = "q"
 var searchIdle = emptyState{
 	Title: "暂无内容",
 	Hint:  "在上面的搜索框里输入歌名或 UP 主",
+	Icon:  iconEmptySearch,
 }
 
 // searchPageMaxWidth 是搜索框的宽度。Biu 搜索页的内容区是 `max-w-3xl`，这里

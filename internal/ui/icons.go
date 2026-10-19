@@ -182,15 +182,18 @@ const (
 	iconQuestion    = "System/question-line.svg"            // 问号（帮助）
 	iconImport      = "System/import-line.svg"              // 导入
 	iconExport      = "System/export-line.svg"              // 导出
-	iconFollowAdd   = "System/add-line.svg"                 // 关注（还没关注）
-	iconFollowDone  = "System/check-line.svg"               // 已关注
-	iconMoon        = "Weather/moon-line.svg"               // 深色
-	iconSun         = "Weather/sun-line.svg"                // 浅色
-	iconDisk        = "Device/hard-drive-2-line.svg"        // 磁盘
-	iconDeleteBin5  = "System/delete-bin-5-line.svg"        // 删除（另一版）
-	iconBookmark    = "Business/bookmark-line.svg"          // 书签
-	iconInbox       = "Business/inbox-line.svg"             // 收件箱
-	iconChart       = "Business/bar-chart-2-line.svg"       // 统计
+	// iconAdd 既是「关注」也是「新建收藏夹」那枚加号——上游两处用的是同一个
+	// `RiAddLine`（`music-list-item` 和 `side/collection`），而 `icons.go` 一个
+	// 文件一个名字，所以只留一个。
+	iconAdd        = "System/add-line.svg"           // 加（关注 / 新建收藏夹）
+	iconFollowDone = "System/check-line.svg"         // 已关注
+	iconMoon       = "Weather/moon-line.svg"         // 深色
+	iconSun        = "Weather/sun-line.svg"          // 浅色
+	iconDisk       = "Device/hard-drive-2-line.svg"  // 磁盘
+	iconDeleteBin5 = "System/delete-bin-5-line.svg"  // 删除（另一版）
+	iconBookmark   = "Business/bookmark-line.svg"    // 书签
+	iconInbox      = "Business/inbox-line.svg"       // 收件箱
+	iconChart      = "Business/bar-chart-2-line.svg" // 统计
 
 	// ── 导航、方向、展开收起 ────────────────────────────────────────────
 	iconPrevEpisode    = "Arrows/arrow-left-line.svg"       // 上一集
@@ -269,7 +272,7 @@ var iconNames = []string{
 	iconFolderAdd, iconEdit, iconEditBox, iconCalendar,
 	iconExpand, iconShrinkBack, iconPiP, iconRefresh, iconExternal,
 	iconEye, iconEyeOff, iconWarning, iconQuestion,
-	iconImport, iconExport, iconFollowAdd, iconFollowDone,
+	iconImport, iconExport, iconAdd, iconFollowDone,
 	iconMoon, iconSun, iconDisk, iconDeleteBin5,
 	iconBookmark, iconInbox, iconChart,
 

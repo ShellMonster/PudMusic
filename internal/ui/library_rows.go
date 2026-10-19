@@ -682,6 +682,9 @@ func (p *pagedRows) viewFooter(c *ui.Context) {
 		})
 }
 
+// backToTopIcon 是回顶那一枚里的向上箭头（上游 `RiArrowUpLine`）。
+var backToTopIcon = icon(iconToTop)
+
 // viewBackToTop 画回顶按钮：滚过 400 像素才出现。
 func (p *pagedRows) viewBackToTop(c *ui.Context) {
 	// MaxY 是这一帧量出来的最大滚动量：0 就是内容还没列表高，压根滚不动。
@@ -692,7 +695,14 @@ func (p *pagedRows) viewBackToTop(c *ui.Context) {
 	// Overlay 把按钮浮在整窗之上（不占布局），Biu 的 `fixed` 就是这个意思。
 	// Radius 给一个大数就是 Biu 的 `radius="full"`（药丸形）。
 	ui.Overlay(c, func() {
-		if ui.Button(c, "返回顶部").Absolute().
+		//
+		// 药丸形留着（Biu 的 `ScrollContainer` 那一枚就是 `rounded-full`），
+		// 里面换成一枚向上箭头（上游 `RiArrowUpLine`）。`Label` 仍是「返回顶部」
+		// ——图标对辅助技术是不可见的，而它同时也是无头 Tester 认得这一枚的
+		// 唯一凭据。
+		btn := ui.Button(c, "").Label("返回顶部")
+		btn.Children(func() { ui.Icon(c, backToTopIcon).FontSize(16).TextColor(t.Text) })
+		if btn.Absolute().
 			Right(backTopRight).Bottom(backTopBottom).
 			Radius(backTopRadius).Background(t.SurfaceHover).Clicked() {
 			p.ScrollTop()

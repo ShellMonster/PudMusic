@@ -338,18 +338,27 @@ func libraryMenuItems(m *ui.Menu, row libraryRow, a RowActions, i int) bool {
 func (s *Shell) viewLibraryMissing(c *ui.Context, key, title string) {
 	t := c.Theme()
 	e := lookup(s.router.Path()).Empty
-	ui.Column(c).Key(key).Grow(1).Center().Gap(8).Padding(24).
-		Children(func() {
-			ui.Text(c, title).FontSize(22).Bold()
-			if e.Title != "" {
-				ui.Text(c, e.Title).FontSize(15)
-			}
+	ui.Column(c).Key(key).Grow(1).Center().Gap(emptyGap).Padding(emptyPagePad, 28).Children(func() {
+		// 插画是**这一页**的（`e.Icon`，和正常空着的那一支同一枚）：用户看到的
+		// 是「稍后再看空着」，不是「有一个说不清是什么的东西不见了」。
+		if e.Icon != "" {
+			ui.Icon(c, icon(e.Icon)).FontSize(emptyIconSize).TextColor(t.TextMuted)
+		}
+		ui.Text(c, title).FontSize(20).Bold()
+		// 那两行字**走共享那一个出口**（`emptyContent`，和正常空着的那一支同一
+		// 份字号、同一份主次色）。这一页平时空着的时候画的就是那一支，所以两者
+		// 必须长得一样——抄一遍就是会漂开的那份。
+		if e.Title != "" {
+			ui.Text(c, e.Title).FontSize(15).TextColor(t.Text)
 			if e.Hint != "" {
 				ui.Text(c, e.Hint).FontSize(12).TextColor(t.TextMuted)
 			}
-			ui.Text(c, "还没接上 B 站接口，这一页暂时拉不了内容。").FontSize(12).
-				TextColor(t.Danger)
-		})
+			// 「没接上接口」是**这一次**特别的原因，单独说一句。它在最下面：
+			// 上面那几句说的是「这一页是什么」，只有这一句说的是「这一次怎么了」。
+			ui.Text(c, "还没接上 B 站接口，这一页暂时拉不了内容。").
+				FontSize(12).TextColor(t.TextMuted)
+		}
+	})
 }
 
 // keywordBoxWidth 是搜索框的宽度。Biu 是 `w-64`（later）/`max-w-50`（history），

@@ -24,8 +24,11 @@ import (
 
 // displayModes 是「数据显示样式」那三档，顺序就是从左到右的顺序。
 //
-// Biu 那一格是三个带图标的 Tab（列表 / 网格 / 紧凑，`system-settings.tsx:65-101`），
-// 本项目还没有图标资源：用同一个控件摆三个字，值和顺序一字不差。
+// Biu 那一格是三个带图标的 Tab（列表 / 网格 / 紧凑，`system-settings.tsx:65-101`）。
+// ⚠️ **这一格还没换成图标**：图标资源里列表 / 网格那两枚已经备齐（`iconViewList` /
+// `iconViewGrid`，见 `icons.go`），而**紧凑那一档上游用的是哪一枚还没抄**——三档
+// 各配一枚，配错了用户切档时看到的是同一张图。用同一个控件摆三个字的话，值和
+// 顺序一字不差。
 var displayModes = []struct {
 	mode  app.DisplayMode
 	label string
