@@ -214,6 +214,24 @@ else
   fi
 fi
 
+# 1.4b HEAD 在默认分支上吗。**不在就提醒，不拦**——从发布分支发版是有人会做的事。
+#
+# 之所以值得提醒：这个仓库是 **squash 合并**（PR 的合并提交就是压过的那一个），
+# 所以在功能分支上打的标签，合并之后**永远不在 main 上**——标签指向一份 main 里
+# 根本不存在的代码。症状是发布出去的产物和 main 对不上，而哪一处都不报错。
+if ! git merge-base --is-ancestor "$head_sha" origin/main 2>/dev/null; then
+  printf '\n\033[33m⚠️  HEAD 不在 origin/main 上，标签会指向 main 里没有的提交。\033[0m\n'
+  cat <<EOF
+    标签 $tag 会打在 ${head_sha}，而它不是 origin/main 的祖先。
+    本仓库是 squash 合并，所以合完之后 main 会有另一个提交 SHA，而标签还指着这里。
+
+    要发布的是 main 上那一份，就切到 main 再跑一次 scripts/release.sh；
+    已经打过标签的话，先把它挪走：
+      git tag -f $tag origin/main && git push -f origin $tag
+      gh release edit $tag --repo $publish_repo --target main
+EOF
+fi
+
 # 1.5 签名私钥。**它不在仓库里**，所以每次发版都要现读；读不到就停，不要打出
 # 一个没有签名的更新包——那种包用户装不上，而且要等下一次有人报「更新失败」。
 key_file="${MYGO_UPDATE_KEY_FILE:-$HOME/.config/biu-mygo/mygo-update.key}"
