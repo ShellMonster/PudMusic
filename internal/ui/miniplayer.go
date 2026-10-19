@@ -222,7 +222,7 @@ func NewMini(a *app.App, main *Shell, toggle func()) *Shell {
 // 各自起了一个后台写盘 goroutine，不收就一直跑到进程退出（而这一份从此没人用）。
 func (s *Shell) adoptShared(main *Shell) {
 	if main.keys != nil && main.keys != s.keys {
-		// 收掉 `New` 刚建的那一份（不报���：这一份从没被用过，也就没有要落盘的东西）。
+		// 收掉 `New` 刚建的那一份（不报错：这一份从没被用过，也就没有要落盘的东西）。
 		_ = s.keys.Close()
 		s.keys = main.keys
 		s.shared = true

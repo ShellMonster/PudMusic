@@ -98,7 +98,7 @@ func TestTheCoverGoesThroughImgcache(t *testing.T) {
 	close(release)
 	// 判据是**那一块变成了夹具那张图的颜色**，而不是「和之前不一样」：
 	// 这一族的 `pngBytes` 造的是**一整块纯色**（200,40,120），所以「有几种颜色」
-	// 换成 1 —— 断「有几���颜色」的话，等来的那一天是换上了图、而那一天照样红。
+	// 换成 1 —— 断「有几种颜色」的话，等来的那一天是换上了图、而那一天照样红。
 	waitFor(t, 5*time.Second, "封面换成了图", func() bool {
 		tt.Frame()
 		return equalStrings(distinctIn(tt, bx, by, bw, bh), []string{"#c82878"})
@@ -133,7 +133,7 @@ func TestALocalSongHasAnEmptyCoverNotAFailedOne(t *testing.T) {
 // ——用歌名查它给的是**整行**（`{0, 0, 520, 64}`，歌名在行里是撑满的那一块），
 // 用 UP 名查它给的是 UP 名那 14 像素高的文字块。第一版拿 UP 名算，于是
 // `y = 文字顶 + (文字高 − 封面) / 2` 算出一个负数，量到窗口外面全是白，
-// 「有几���颜色」于是恒为三，于是每一条断言都变成恒真。
+// 「有几种颜色」于是恒为三，于是每一条断言都变成恒真。
 //
 // 横坐标是**算出来的**（`cardPadX + indexWidth + cardGap`）：行是变高的
 // （`card.go` 顶上明确不许钉死行高），所以纵坐标只能从整行那一块推。

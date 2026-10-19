@@ -32,8 +32,11 @@ func View(c *ui.Context, cache *Cache, url string, w, h float32) ui.Element {
 // 现在按上游 `components/image/index.tsx:22-32` 分成三样：
 //
 //	正在加载    骨架屏：一块浅色，**没有边框、没有图形、没有字**
-//	没有地址    描边框 + 40% 大小的图片图标
-//	拉失败了    同上，底色深一档
+//	拉失败了    描边框 + 40% 大小的图片图标，底色是 Surface 原色（较深）
+//	没有地址    同上，底色浅一档（更靠背景色）
+//
+// 那一档底色的深浅是这么定的：**「本该有而没拿到」比「本来就没有」更该显眼**
+// ——后者压根没人期待，描边框和那枚图标够了，底色再抢眼就是白抢。
 //
 // 描边框是上游那个 `border-content2`，图标是上游那个 40%：
 //
@@ -62,7 +65,8 @@ const placeholderIconRatio = 0.4
 // 没有边框也没有图形的方块上是看不出来的，骨架屏靠的是「不是白的」这一层。
 const skeletonMix = 0.5
 
-// emptyMix 是「压根没有地址」那一格的底色：比失败那一档再深一点。
+// emptyMix 是「压根没有地址」那一格的底色：比失败那一档**浅**一点（往背景色
+// 那边挪）。
 //
 // 两个都是「拿不到」，可一个是**本来就没有**（这一页压根不给封面）、一个是
 // **本该有**（B 站给了地址，没拉到）。分得开的**主要**是边框和图标，底色这一
@@ -79,7 +83,8 @@ var placeholderIcon = iconset.Must("Media/image-line.svg")
 // drawCover 是 View 里面的那一支，分成四种情形。
 func drawCover(c *ui.Context, cache *Cache, url string, w, h float32) {
 	// 没有地址：压根没有东西可显示，不是「加载失败」——两者画同一张（上游也是
-	// 同一个分支），但底色深一档，扫一眼就知道这一格是空的而不是坏的。
+	// 同一个分支），但底色浅一档（`emptyMix` 往背景色那边挪），扫一眼就知道
+	// 这一格是空的而不是坏的。
 	if url == "" {
 		drawPlaceholder(c, w, h, emptyMix)
 		return

@@ -223,7 +223,7 @@ func TestTheErrorPageSaysWhereItBroke(t *testing.T) {
 // TestTheErrorPageHasAnIllustration 断「错误页不是一片白」。
 //
 // ⚠️ **判据是像素**：光断言「有文字」的话，那张插画被撤掉之后这一条照样绿——
-// 而「界面出错了」四行字摆在正中，用户看到的就是「一片白上面有��行字」。
+// 而「界面出错了」四行字摆在正中，用户看到的就是「一片白上面有几行字」。
 // 断言的是插画那一块**和它上下的背景不是一个颜色**。
 func TestTheErrorPageHasAnIllustration(t *testing.T) {
 	for _, dark := range []bool{false, true} {

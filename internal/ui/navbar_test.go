@@ -189,7 +189,7 @@ func TestSearchSuggestsHistoryAfterTyping(t *testing.T) {
 //
 // 少了它，点历史那一条会先把焦点抢到那个按钮上，「失焦就收」在按下那一帧就成立，
 // 浮层在 Children 之前就没了，那一条根本点不到——实测下来「选中」变成了「停在
-// 首页」。摘掉 KeepFocus，这一��立刻红。
+// 首页」。摘掉 KeepFocus，这一条立刻红。
 func TestSuggestCollapsesWhenSelectingOne(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
