@@ -136,7 +136,7 @@ const (
 // 不会被裁掉。
 func MiniWindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 	return mygo.WindowOptions{
-		Title:  "Biu 迷你播放器",
+		Title:  "BiuGo 迷你播放器",
 		Width:  miniWidth,
 		Height: miniHeight,
 		// 🔴 `Transparent` 必须配着自己画的背景，理由见文件头那一条。

@@ -93,14 +93,32 @@ issue 的验收标准**（`gh issue edit`，见 `docs/agents/issue-tracker.md`�
 7. **`RequestSingleInstanceLock()` 挡不住同时启动的两个实例**（实测 20 轮有 17 轮
    两个都拿到锁：都 Dial 失败 → 都删掉对方的 socket 文件 → 都 Listen 成功）。所以
    `internal/platform` 在它之上还压了一把内核独占锁（`single_instance.go`）。
-8. **图标和第三方许可清单是生成物。** 图案在 `platform.AppIcon` 里、清单从
-   `go list -deps` 生成。改了图案或依赖却忘了重新生成，仓库里躺着的是旧文件，
-   而**没有任何一处会报错**。改完跑
+8. **图标和第三方许可清单是生成物。** 图标图案在 `platform.AppIcon` 里——图源是
+   它 `go:embed` 的 `internal/platform/icon-source.png`（人工挑定、满幅方图），
+   留白与圆角由代码切；清单从 `go list -deps` 生成。换了图案或依赖却忘了重新
+   生成，仓库里躺着的是旧文件，而**没有任何一处会报错**。改完跑
    `go generate ./internal/platform/ ./internal/licensing/`；`scripts/build.sh`
    每次打包前都会跑一遍并检查 `git diff`。
+9. **用户数据目录的名字不跟显示名走。** 应用 2026-10 从 `Biu MyGo` 改名成
+   `BiuGo`，而 `mygo.App.Path(mygo.PathUserData)` 默认是 `os.UserConfigDir()`
+   **拼应用名**（`mygo@v0.5.5/paths.go:90-93`）。所以 `internal/platform/datadir.go`
+   的 `PinUserDataDir()` 把目录**钉死**在旧名字上，`main()` 的第一句就调它——
+   必须排在所有 `Mount*` 之前，因为「读不到设置」的默认处理是**安静地按第一次运行
+   开起来**，晚一步的症状是「设置一直存不住」而不是任何一句报错。
+
+   ⚠️ **别「顺手」把它改成和应用名一致**：那一下的代价是老用户升级之后设置、
+   搜索历史、快捷键、歌词缓存、下载记录和界面状态一起「消失」——数据一个字节没坏，
+   只是没人再去那个目录找，而症状是静默的。取舍与「什么时候该真搬」写在那个文件
+   顶上那一节。`internal/app/upgrade.go` 的 `SnapshotReadme` 里那条教用户敲的
+   回滚路径因此仍然是 `…/Application Support/Biu MyGo`。
 
 ## 5. 不可协商的项目不变量
 
+- **显示名、bundle id、钥匙串服务名、用户数据目录名是四件互不相干的事。**
+  2026-10 只改了第一件：`mygo.json` 的 `name` 从 `Biu MyGo` 改成 `BiuGo`，
+  `identifier`（`io.github.shellmonster.biu`）**不动**（bundle id 变了会影响钥匙串
+  访问和 macOS 的隐私授权），钥匙串服务名 `com.biu-go.biu-mygo.login` **不动**
+  （动了老用户要重新登录），用户数据目录名 `Biu MyGo` **不动**（理由见 §4 第 9 条）。
 - **不引入 LGPL / GPL 系代码。** 整条音频栈目前一行 copyleft 都没用上，
   `internal/licensing` 的 `TestNoDependencyIsCopyleft` 盯着这件事。
 - **不打包 ffmpeg，整个应用也不用 webview。** 整条音频栈只增加 1.98 MB，而 ffmpeg

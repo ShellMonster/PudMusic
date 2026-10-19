@@ -1,4 +1,4 @@
-// Biu MyGo 是用 MyGo 框架重写的 Biu 音乐播放器。
+// BiuGo 是用 MyGo 框架重写的 Biu 音乐播放器。
 //
 // 界面是 MyGo 自己画的原生 UI（即时模式，没有 webview），音频在 Go 里解码。
 // 当前阶段：`internal/ui/router.go` 登记的 14 条路由里**已经有 13 条接上了真数据**
@@ -28,10 +28,24 @@ import (
 	"log"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/ui"
 )
 
 func main() {
+	// **整个程序的第一件事**：把应用数据目录钉在老名字上。应用显示名是 BiuGo，
+	// 而框架的 `PathUserData` 默认是 `os.UserConfigDir()` 拼**应用名**——跟着改名
+	// 走的话，老用户升级之后设置、搜索历史、快捷键、歌词缓存、下载记录和界面
+	// 状态会一起「消失」（数据没坏，只是不再有人去那个目录找）。理由与取舍见
+	// `internal/platform/datadir.go` 顶上那一节。
+	//
+	// 排在 `app.New()` 和所有 `Mount*` 之前是必须的：读盘的那几个都要目录，而
+	// 「读不到设置」的默认处理是**安静地按第一次运行开起来**——晚一步的症状是
+	// 「设置一直存不住」，而不是任何一句报错。
+	if err := platform.PinUserDataDir(); err != nil {
+		log.Printf("biu: 钉不住应用数据目录，这次的设置可能存不住：%v", err)
+	}
+
 	a := app.New()
 	// 数据升级与「从 Biu 首次导入」排在**所有挂载之前**。顺序反了的话，备份里
 	// 存到的是「已经被挂载动过的」内容，回滚回不去；而且只读判断也会晚一步，

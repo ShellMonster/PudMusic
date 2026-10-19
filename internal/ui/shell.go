@@ -896,7 +896,7 @@ func (s *Shell) mountShortcuts() {
 // `TitleBarHiddenInset` 只是把控件再往里缩一点，Biu 没做这个差别。
 func WindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 	return mygo.WindowOptions{
-		Title:     "Biu MyGo",
+		Title:     "BiuGo",
 		Width:     1200,
 		Height:    800,
 		MinWidth:  900,

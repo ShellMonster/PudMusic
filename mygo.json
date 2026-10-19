@@ -1,14 +1,18 @@
 {
-  "name": "Biu MyGo",
+  "name": "BiuGo",
   "identifier": "io.github.shellmonster.biu",
   "version": "0.1.0",
   "out": "build",
   "urlSchemes": ["biu"],
   "copyright": "Copyright © 2026 ShellMonster. Based on Biu, Copyright © 2022–2025 wood3n. PolyForm Noncommercial 1.0.0 — see the licenses folder shipped with this app.",
   "macos": {
-    "dmgTitle": "安装 Biu MyGo",
+    "dmgTitle": "安装 BiuGo",
     "infoPlist": {
       "LSApplicationCategoryType": "public.app-category.music"
     }
+  },
+  "updates": {
+    "publicKey": "oJyYKaPIGn5RA8yPM/I395n6D+wn/PdaZv58jqBDrO0=",
+    "github": "ShellMonster/Biu_Go"
   }
 }

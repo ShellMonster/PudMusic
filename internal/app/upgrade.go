@@ -451,6 +451,14 @@ const SnapshotReadmeName = "怎么用.txt"
 //
 // 一句话说明，比「以后再说文档」有用得多：真正会用它的场景是用户降级之后发现
 // 「我刚在 Biu 里设的那些东西怎么没了」，那时候他在翻这个目录。
+//
+// ⚠️ 里面那条 `D="$HOME/Library/Application Support/Biu MyGo"` **要跟着
+// `platform.LegacyUserDataDirName` 走，不能跟着显示名走**。它是教用户敲的：
+// 敲进去的那条路径得是**真实存在**的那个目录，否则他照着做时 `cp` 报的是
+// 「No such file」，而他真正要回滚的东西一个字节都没少。应用显示名是 BiuGo 而
+// 数据目录仍然叫 `Biu MyGo`，就是 `internal/platform/datadir.go` 顶上那一节定的
+// 那一件事（老用户升级之后数据目录不能被搬走）。`TestTheSnapshotReadmePointsAt
+// TheDirectoryThatExists` 钉住它。
 const SnapshotReadme = `这是「上一版」的用户数据备份。
 
 应用每次升级之前会把设置、快捷键、搜索历史和下载队列各存一份在这里，
