@@ -173,20 +173,7 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 	playing := rows.isPlaying(m)
 	// 紧凑档只是这一行的几处尺寸变矮（设置里的「数据显示样式」）。
 	mt := metricsOf(rows.Layout())
-
-	// 选中那一行的底色由 `ui.List` 自己刷（主色底），字色得跟着换——不换就是
-	// 主色底上的深色字，深色主题下直接看不见。
-	//
-	// ⚠️ 「正在放」是**第二档**而不是并进去的第二种底色：它只把歌名染成主色、
-	// 把序号换成一段跳动的波形。换成主色底就和「选中」分不出来了，而这两个问的
-	// 是两件不同的事（见 `widgets/list` 的 card.go 里同一段）。
-	titleColor, ownerColor := t.Text, t.TextMuted
-	switch {
-	case r.Selected():
-		titleColor, ownerColor = t.AccentText, t.AccentText.Alpha(0.75)
-	case playing:
-		titleColor = t.Accent
-	}
+	face := libraryRowFace(t, r.Selected(), playing)
 
 	// ⚠️ **hover 要在 Children 之前问**（同 `widgets/list/card.go` 里那一处）：它报的
 	// 是这一帧指针在不在这一行上，而封面上那圈反馈要等 Children 才建得出来。
@@ -195,22 +182,8 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 	onRow := row.Hovered()
 
 	return row.Children(func() {
-		// 序号；正在放的那一行换成一段跳动的波形（上游 `music-list-item`）。
-		viewRowIndex(c, r.Index, playing, titleColor, m.ID, m.Title, mt.index)
-
-		// 封面，四态由 imgcache 画（空地址画空框，不画「失败」），上面压着 hover 反馈：
-		// 压暗 + 一个 20px 的白色播放三角，按下去从这一首往后接进队列。
-		hover.RowCover(c, s.images, m.Cover, mt.cover, onRow, m.Title,
+		viewLibraryRowHead(c, r, m, s.images, mt, face, onRow,
 			func() { rows.playFrom(r.Index) })
-
-		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).Children(func() {
-			ui.Text(c, m.Title).FontSize(mt.titleSize).LineHeight(1.5).
-				TextColor(titleColor).MaxLines(mt.titleLines).Ellipsis("…")
-			if m.Owner != "" {
-				ui.Text(c, m.Owner).FontSize(12).LineHeight(1).
-					TextColor(ownerColor).MaxLines(1).Ellipsis("…")
-			}
-		})
 
 		ui.Text(c, playCountText(m.View)).Width(mt.count).TextAlign(ui.End).
 			FontSize(12).TextColor(t.TextMuted).MaxLines(1)

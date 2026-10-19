@@ -248,13 +248,12 @@ func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock, title s
 	a := fade(bar, key+":fade", on)
 
 	show(bar, a).Children(func() {
-		// ⚠️ **右边留出 `barTextInset`**：那个播放钮就浮在右下角，字贴着它底下过去
-		// 的话有一半压在按钮底下——用户读到的是「播放量 1.2 万」和一个「时长没画完
-		// 的 3:0」。左侧不内缩：播放量贴着左边正是上游的样子。
-		// ⚠️ **`Padding` 的四个值是 上 / 右 / 下 / 左**（CSS 那一套）：这一层左边留
-		// 8（`btnInset`，播放量贴着封面左边正是上游的样子）、右边留 48
-		//（`barTextInset` = 播放钮 40 + 8）。左右写反的话时长压在播放钮底下，而那种
-		// 错在画面上只是「时长看着偏了一点」。
+		// ⚠️ **`Padding` 的四个值是 上 / 右 / 下 / 左**（CSS 那一套）：这一层**右边**
+		// 留 56（`barTextInset`）——那个播放钮就浮在右下角（按钮宽 40 + 离右边 8），
+		// 字让得不够就有一半压在按钮底下，用户读到的是「播放量 1.2 万」和一个「时长
+		// 没画完的 3:0」；**左边**留 8，播放量贴着封面左边正是上游的样子。
+		//
+		// 左右写反的话时长压在播放钮底下，而那种错在画面上只是「时长看着偏了一点」。
 		ui.Row(c).FillWidth().FillHeight().
 			Padding(0, barTextInset, 0, btnInset).Children(func() {
 			// ⚠️ **时长那一块是 Grow + 右对齐，播放量不是**：Row 默认把子元素**从左边一
