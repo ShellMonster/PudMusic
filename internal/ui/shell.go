@@ -924,6 +924,10 @@ func WindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 //
 // 实现本身在 `internal/ui/guard`：控件层（widgets/list）也要给自己的 view 包
 // 一层，放这里的话它就得反过来 import 界面层，那是个环。
+//
+// ⚠️ **界面上的每一处都该走 `guardAt` 而不是它**，因为只有前者记得「崩在界面的
+// 哪一块」，而那是错误页上「出错在哪一步」那一句的全部来源（见 `crashInfo`）。
+// 这一个留给**拿不到 Shell 的调用方**——控件层，以及测试里单独验 Guard 本身。
 func Guard(draw func(*ui.Context), onPanic func(any)) func(*ui.Context) {
 	return guard.Wrap(draw, onPanic)
 }
