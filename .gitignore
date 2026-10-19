@@ -5,3 +5,8 @@ mygo_windows_*.syso
 _research/
 docs/research/
 .claude/
+
+# 更新签名私钥。**它正常住在 ~/.config/biu-mygo/，不在仓库里**（见 scripts/release.sh），
+# 但 `mygo keygen` 忘了给 -o 就会写在当前目录——一行在这儿兜着，因为私钥一旦进了
+# 历史就等于必须轮换密钥，而轮换会让已经装出去的老版本验不过之后的每一个版本。
+mygo-update.key
