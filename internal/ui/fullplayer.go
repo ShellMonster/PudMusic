@@ -101,10 +101,15 @@ const (
 //
 // ⚠️ 它压在毛玻璃**上面**（不是下面）：它要压的是糊完的那一层。
 //
-// ⚠️ **0.60 不是随手挑的**：最坏的一档（封面是纯白）底色是 255×0.40 = 102，
-// 而 18px 粗体的歌名（白 92%）压在它上面是 **5.17:1**——WCAG AA 对普通文字的
-// 门槛是 4.5:1（18px 粗体仍算普通文字：大字那一档要 14pt = 18.67px 粗体）。
+// ⚠️ **0.60 不是随手挑的**：最坏的一档（封面是纯白）底色是 255×0.40 = 102。
+// 20px 粗体的歌名（白 92%）压在它上面是 **5.17:1**——WCAG AA 对普通文字的门槛是
+// 4.5:1（20px 粗体算「大字」，那一档只要 3:1，这里取的是更严的那一档）。
 // 0.55 的时候是 4.31:1，差 0.19。
+//
+// ⚠️ 那些 12px 的小字（时间标签，白 62%）是 3.32:1（0.55 的时候 2.85:1）——它们
+// 是**次要**的字，本来就比歌名淡一档；要让它们也到 4.5:1，压暗得加到 0.72，而
+// 那会让背景暗到看不出毛玻璃。那是**可及性**那一票的事（issue #139「接上系统的高
+// 对比度」：系统在「增加对比度」下另算一套颜色）。
 var fullScrim = ui.RGBA(0, 0, 0, 0.60)
 
 // fullBackdropScale 是背景那一层的画布缩到窗口的几分之一。
@@ -415,8 +420,8 @@ func (s *Shell) viewFullBackdrop(c *ui.Context, url string) {
 //   - **GPU**（真程序走的那条：Metal / D3D11 / GL）：几遍小 pass，测不出帧率上的
 //     代价（见报告的「帧率」一节）。
 //   - **软件渲染**（框架的回退路：`MYGO_GPU=0`、拿不到原生 surface、`metal.New`
-//     失败、GPU 掉线后的降级）：每一帧要多花 **80~100 毫秒**，满屏会掉到
-//     8~12 帧/秒。
+//     失败、GPU 掉线后的降级）：每一帧要多花 **80~140 毫秒**，满屏掉到个位数
+//     帧/秒（实测 5.7 帧/秒）。
 //
 // 画布是框架给「画一次、每一帧当图贴」准备的那个口（`mygo/ui/canvas.go`）：封面
 // 变了或者窗口改了尺寸才重画一次（**那一次才糊**），稳态下每一帧只是一张图。
@@ -463,7 +468,7 @@ func (s *Shell) viewFullBackdropCanvas(c *ui.Context, url string) {
 					PaintMaterial(cp, box, [4]float32{})
 			})
 		})
-	// 把它放大四倍铺满整窗。
+	// 把它放大铺满整窗（放大倍数是 fullBackdropScale）。
 	ui.Image(c, s.full.bg.Bitmap()).Fill().Fit(ui.FillBox)
 }
 
@@ -507,8 +512,12 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 		if ui.Button(c, "关闭全屏").FontSize(13).Clicked() {
 			s.closeFullPlayer()
 		}
-		ui.Text(c, st.Title).FontSize(18).Bold().TextColor(fullOnColor).
-			Grow(1).SingleLine()
+		// 歌名：上游是 `text-xl`（20 像素），而且限了宽度（最多占五分之二）。
+		//
+		// ⚠️ 18 → 20 **差两号**：18 那个是 `text-lg`。宽度那条也照抄（见
+		// fullTitleMaxWidth）。
+		ui.Text(c, st.Title).FontSize(20).Bold().TextColor(fullOnColor).
+			Grow(1).MaxWidth(fullTitleMaxWidth(c)).SingleLine()
 
 		gear := ui.Button(c, "全屏设置").FontSize(13)
 		if gear.Clicked() {
@@ -546,6 +555,15 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 // 单独拎成一个函数是为了能测：无头 Tester 里 `bar.Left` 恒为 0（那里没有标题栏），
 // 量真实窗口那一半得开真窗口，而这一个函数把「跟着 TitleBar 走」这件事钉住了。
 func fullTopBarPadLeft(bar ui.TitleBar) float32 { return bar.Left + fullBarPadX }
+
+// fullTitleMaxWidth 是满屏那个歌名最多能有多宽。
+//
+// 上游限了「标题最多占五分之二」（`max-w-2/5`），照抄。窗口越宽，标题能占的
+// 绝对宽度就越大，但**比例**是死的（2/5）。
+func fullTitleMaxWidth(c *ui.Context) float32 {
+	winW, _ := c.Size()
+	return winW * 0.4
+}
 
 // ---- 封面（共享元素） ----
 
@@ -833,17 +851,30 @@ func partTitle(p bili.VideoPart) string {
 
 // viewFullPartsPanel 是开出来的分集面板。
 func (s *Shell) viewFullPartsPanel(c *ui.Context) {
+	t := c.Theme()
 	_, winH := c.Size()
 	h := min(winH*0.6, fullPartsHeight)
 	panel := ui.Column(c).Key("full-parts-panel").
-		Absolute().Right(0).Top(winH/2 - h/2).
+		Absolute().Right(0).Top(winH/2-h/2).
 		Width(fullPartsWidth).Height(h).
-		Radius(12).Background(ui.RGBA(255, 255, 255, 0.12)).
-		Role(ui.RoleDialog).Label("分集列表")
+		Radius(12).Role(ui.RoleDialog).Label("分集列表").
+		// 玻璃那一层：**票面「毛玻璃的 Tint 配方」那四样**，一样都不少。
+		//
+		// ⚠️ 原来这一格是 `ui.RGBA(255, 255, 255, 0.12)`——一层十二个百分点的白，
+		// 压在糊过的封面上，**白字读不出来**（封面一亮，字就没了）。
+		//
+		// 那四样各管一件事：`Tint` 管「字读不读得清」（掺 96% 背景色，底下透出
+		// 的是模糊的轮廓，不是内容的细节），`TextColor` 管「文字跟不跟主题走」，
+		// `Border` 管「玻璃的边在浅底上有没有」，`Shadow` 管「它浮不浮得起来」。
+		Material(glass.Glass{Tint: t.Background.Alpha(0.96)}).
+		TextColor(t.Text).
+		Border(1, t.Background.Mix(t.Text, 0.25)).
+		Shadow(0, t.Space(2), t.Space(6), 0, ui.RGBA(0, 0, 0, 0.12))
 
 	panel.Children(func() {
 		ui.Row(c).FillWidth().Padding(10, 12).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "分集").FontSize(14).Bold().TextColor(fullOnColor).Grow(1)
+			// 字色跟着面板走（`TextColor(t.Text)`），这里不再自己定。
+			ui.Text(c, "分集").FontSize(14).Bold().Grow(1)
 			if ui.Button(c, "收起分集").FontSize(11).Clicked() {
 				s.full.partsOpen = false
 			}
@@ -855,7 +886,7 @@ func (s *Shell) viewFullPartsPanel(c *ui.Context) {
 			if err := s.app.PartsErr(); err != nil {
 				why = "问不出分集：" + err.Error()
 			}
-			ui.Text(c, why).FontSize(12).TextColor(fullDimColor).Padding(12)
+			ui.Text(c, why).FontSize(12).TextColor(t.TextMuted).Padding(12)
 		default:
 			s.viewFullPartsList(c)
 		}
@@ -864,6 +895,7 @@ func (s *Shell) viewFullPartsPanel(c *ui.Context) {
 
 // viewFullPartsList 是面板里那一列。
 func (s *Shell) viewFullPartsList(c *ui.Context) {
+	t := c.Theme()
 	rows := s.full.partsRows
 	s.full.partsList.Key = func(i int) any { return rows[i].key }
 	s.full.partsList.Label = func(i int) string { return rows[i].title }
@@ -875,12 +907,16 @@ func (s *Shell) viewFullPartsList(c *ui.Context) {
 		switch {
 		case r.active:
 			// Biu 的 `data-[active=true]:bg-primary/20`。
-			row = row.Background(ui.RGBA(255, 255, 255, 0.22))
+			//
+			// ⚠️ 底色跟着**主题的字色**走（不是写死白）：面板那一层是玻璃，玻璃
+			// 在深浅两套下是不同的底，白底和黑底要反过来。
+			row = row.Background(t.Text.Alpha(0.22))
 		case row.Hovered():
-			row = row.Background(ui.RGBA(255, 255, 255, 0.10))
+			row = row.Background(t.Text.Alpha(0.10))
 		}
 		row.Children(func() {
-			ui.Text(c, r.title).FontSize(13).TextColor(fullOnColor).SingleLine()
+			// 字色跟着面板走（`TextColor(t.Text)`），这里不再自己定。
+			ui.Text(c, r.title).FontSize(13).SingleLine()
 		})
 		if row.Clicked() {
 			// 选完就收：Biu 的 PageList `onPressItem={onClose}`。

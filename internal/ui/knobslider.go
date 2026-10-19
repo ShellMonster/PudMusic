@@ -6,7 +6,7 @@
 // （`mygo/ui/widgets.go` 的 `paintKnob`：`if held < 1 { … p.Fill(k, face…) }`
 // ——按住之后那一支不走了；深色主题下那圈边还是黑的，`RGBA(0,0,0,0.7)`）。
 //
-// 深色底上那颗黑边透镜**几乎看不见**。实测满屏里（底永远是深的：封面压着 55%
+// 深色底上那颗黑边透镜**几乎看不见**。实测满屏里（底永远是深的：封面压着 60%
 // 的黑）：松手时旋钮是一块 14×16 的白胶囊，按住之后只剩一圈 12×6 的暗环——
 // 用户按住旋钮拖，旋钮反而不见了。那就是「拖进度条时旋钮不响应」。
 //
@@ -25,14 +25,25 @@
 // 轨道粗 `Space(1.5)`、填过的那一段是主色；旋钮是一颗带两道影子的白胶囊
 // （深色下是 `RGB(224,225,225)`，和 `coreSlider`/`coreSwitch` 一样）。
 //
-// ⚠️ **按住的时候只长大，不褪色**：褪成透镜是框架那一颗的做法（macOS 上也是
-// 那样），而那颗黑边透镜在深色底上等于没有。
+// ## 按住的时候：**交叉淡入**到一片玻璃
+//
+// 玻璃垫在底下（`held>0` 才画），不透明的面浮在上面（`held<1` 才画，不透明度是
+// `1-held`），两样一起淡。
+//
+// ⚠️ **少了这个交叉，按住的那一帧旋钮会「闪一下消失」**：不透明的面没了，而玻璃
+// 在满屏这种永远深着的底上是暗的——那正是「拖进度条时旋钮不响应」的症状。
+//
+// 玻璃那一层**掺了旋钮自己的颜色**（`glass.Glass` 的 `Tint` 那一档管的就是「看不
+// 看得清」）：纯玻璃在深色底上是看不见的。
 //
 // ⚠️ **不处理「从右到左」**：那是框架的 `Direction`，本项目不摆那种布局
 // （理由同 `static_switch.go`），所以这一支照 `coreSlider` 的默认分支抄。
 package ui
 
 import (
+	"time"
+
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -60,7 +71,14 @@ func knobSlider(c *ui.Context, value *float64, lo, hi float64) ui.Element {
 		frac = float32((*value - lo) / (hi - lo))
 	}
 	frac = min(max(frac, 0), 1)
-	held := sl.Pressed()
+	// 「按住」的量是 0~1 的**动画**值（框架的滑块也是这么做的，`coreSlider` 的
+	// `s.Animate("held", …, 150*time.Millisecond)`）——下面那处交叉淡入要的是
+	// 它，不是一个开关。
+	heldTarget := float32(0)
+	if sl.Pressed() {
+		heldTarget = 1
+	}
+	held := sl.Animate("held", heldTarget, 150*time.Millisecond)
 	focus := sl.FocusVisible()
 
 	sl.Draw(func(p *ui.Painter, r ui.Rect) {
@@ -73,22 +91,35 @@ func knobSlider(c *ui.Context, value *float64, lo, hi float64) ui.Element {
 		p.Fill(track, t.Border, th/2)
 		p.Fill(ui.Rect{X: track.X, Y: track.Y, W: x - track.X, H: th}, t.Accent, th/2)
 
-		g := float32(1)
-		if held {
-			g = 1.35
-		}
+		// 按住的时候旋钮长大一点（和框架那一颗一样）。
+		g := 1 + 0.35*held
 		knob := ui.Rect{X: x - kw*g/2, Y: cy - kh*g/2, W: kw * g, H: kh * g}
 		rad := knob.H / 2
-		// 两道影子：紧的那道描边，软的那道把旋钮托起来（照 `coreSlider` 的
-		// `paintKnob`）。框架那一颗按住时会把影子一起淡掉（因为它同时褪成
-		// 透镜），我们这一颗不褪，影子就留着。
-		p.Shadow(knob, rad, 0, 0.5, 1, 0, ui.RGBA(0, 0, 0, 0.08))
-		p.Shadow(knob, rad, 0, 1.5, 7, 0, ui.RGBA(0, 0, 0, 0.1))
 		face := ui.RGB(255, 255, 255)
 		if t.Dark {
 			face = ui.RGB(224, 225, 225)
 		}
-		p.Fill(knob, face, rad)
+		// 两道影子：紧的那道描边，软的那道把旋钮托起来（照 `coreSlider` 的
+		// `paintKnob`）。按住的时候影子跟着淡（那时候旋钮是一片玻璃）。
+		shade := 1 - held
+		p.Shadow(knob, rad, 0, 0.5, 1, 0, ui.RGBA(0, 0, 0, 0.08*shade))
+		p.Shadow(knob, rad, 0, 1.5, 7, 0, ui.RGBA(0, 0, 0, 0.1*shade))
+
+		// 旋钮按住的时候，从「不透明的面」**交叉淡入**到「一片玻璃」。
+		//
+		// ⚠️ **交叉是关键**：只画玻璃的话，按住的那一帧不透明的面没了，而玻璃在
+		// 满屏这种永远深着的底上是暗的——旋钮「闪一下消失」，那正是「拖进度条时
+		// 旋钮不响应」的症状。所以玻璃垫在底下（held>0 才画），不透明的面浮在
+		// 上面（held<1 才画，不透明度是 1-held），两样一起淡。
+		//
+		// 玻璃那一层**掺了旋钮自己的颜色**（`glass.Glass` 的 `Tint` 那一档管的
+		// 就是「看不看得清」）：纯玻璃在深色底上是看不见的。
+		if held > 0 {
+			glass.Paint(p, knob, rad, glass.Glass{Tint: face})
+		}
+		if held < 1 {
+			p.Fill(knob, face.Alpha(1-held), rad)
+		}
 		if focus {
 			p.FocusRing(knob, [4]float32{rad, rad, rad, rad})
 		}

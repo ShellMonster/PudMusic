@@ -1,5 +1,5 @@
 // 全屏播放器这一票的验收：毛玻璃在、底下的内容看得清、点得动，底部控制条和顶栏
-// 一样地淡入，外加那三个「状态缺口」。
+// 一样地淡入，旋钮和分集面板那两处玻璃，外加歌名的字号和宽度。
 //
 // 这一族走的是仓库现成的接缝：外壳与测试器基座（shelltest_test.go）、假时钟
 // （clock.go）、`BIU_SHOT_DIR` 出图、逐像素采样。
@@ -174,9 +174,10 @@ func TestTheFullPlayerContentIsStillClickableThroughTheGlass(t *testing.T) {
 // 60% 的黑（`fullScrim`）。判据是**画出来的对比度**：字最亮的那一个像素，和它
 // 背后底色的那一个像素，算 WCAG 的对比度。
 //
-// ⚠️ **门槛是 4.5:1，不是 3:1**：WCAG AA 对普通文字是 4.5:1，而「大字」那一档
-// （3:1）要 **14pt 粗体 = 18.67px 粗体**——这里量的是 18px 粗体的歌名，**仍算
-// 普通文字**。实测最坏的一档（**纯白**封面）是 **5.17:1**。
+// ⚠️ **门槛取 4.5:1（普通文字那一档）**：那个歌名现在是 20px 粗体，按 WCAG 算
+// 「大字」（要 14pt = 18.67px 粗体），门槛是 3:1——而这里取的是**更严**的那一档，
+// 顺带把满屏里那些 12px 的小字（时间标签）也管上。实测最坏的一档（**纯白**封面）
+// 是 **5.17:1**。
 //
 // ⚠️ **压暗那一层为什么是 0.60**：0.55 的时候是 4.31:1，差 0.19（而这一层是
 // 改动前就有的，糊玻璃没有动它——`glass.Blur` 是「没有色调、没有描边、没有影子」
@@ -377,6 +378,118 @@ func TestTheSpectrumSwitchMovesItsKnobAtOnce(t *testing.T) {
 	}
 }
 
+// TestTheFullPlayerTitleIsTwentyPixelsAndAtMostTwoFifths 断「歌名的字号和宽度」。
+//
+// 上游是 `text-xl`（**20 像素**）而且限了宽度（标题最多占**五分之二**），我们是
+// 18 像素、不限宽度——差两号。
+//
+// 判据：
+//
+//   - **行高**：20px 的字行高 23.5 上下（18px 的是 21 上下）——差两号在行高上
+//     看得出来。
+//   - **宽度**：那个框最多是窗口的五分之二。不限的话它 `Grow(1)` 会把顶栏剩下
+//     的空全占了（实测约 960），限了就是 480。
+func TestTheFullPlayerTitleIsTwentyPixelsAndAtMostTwoFifths(t *testing.T) {
+	_, tt, _ := fullTester(t)
+	openFull(t, tt)
+
+	title := fullTestTitle
+	box, ok := tt.Find(title)
+	if !ok {
+		t.Fatalf("画面上找不到歌名 %q，文字有 %q", title, tt.Texts())
+	}
+	if box.H < 22.5 {
+		t.Errorf("歌名的行高是 %v——20px 的字该有 23.5 上下（18px 只有 21 上下）", box.H)
+	}
+	if max := float32(fullWinW) * 0.4; box.W > max+1 {
+		t.Errorf("歌名的框 %v 宽，超过了窗口的五分之二（%v）——上游限着「标题最多占五分之二」", box.W, max)
+	}
+}
+
+// fullTestTitle 是这一条用的那个歌名（本地文件的歌名是文件名，见 app.Open）。
+const fullTestTitle = "stereo16"
+
+// TestThePartsPanelIsAGlassPanelWhoseTextIsReadable 断「分集面板是那一块玻璃，
+// 而且上面的字读得清」。
+//
+// 原来那一格是 `ui.RGBA(255, 255, 255, 0.12)`——一层十二个百分点的白，压在糊过
+// 的封面上，**白字读不出来**（封面一亮，字就没了）。
+//
+// 现在它是**票面「毛玻璃的 Tint 配方」那四样**：`Material(glass.Glass{Tint:
+// 背景色的 96%})` + `TextColor` + `Border` + `Shadow`。
+//
+// 判据是**画面上的对比度**：面板上那个「分集」的字，和它背后那一块面板的底色。
+// 底色掺了背景色（深色主题下是深色），字是主题的字色 → 对比度够。
+func TestThePartsPanelIsAGlassPanelWhoseTextIsReadable(t *testing.T) {
+	s, tt := onlineTester(t, nil, true)
+	s.openFullPlayer()
+	waitFrames(t, tt, "问失败", func() bool { return s.app.PartsErr() != nil })
+	tt.Frame()
+	if err := tt.Click("显示分集列表"); err != nil {
+		t.Fatalf("点不了分集入口：%v（文字：%q）", err, tt.Texts())
+	}
+	tt.Frame()
+
+	word, ok := tt.Find("分集")
+	if !ok {
+		t.Fatalf("面板上没有「分集」那两个字，文字有 %q", tt.Texts())
+	}
+	img := tt.Image()
+	// 字最亮的那一个像素（字的核心，不是抗锯齿的边）。
+	best := color.RGBA{}
+	for y := int(word.Y); y < int(word.Y+word.H); y++ {
+		for x := int(word.X); x < int(word.X+word.W); x++ {
+			if p := img.RGBAAt(x, y); int(p.R) > int(best.R) {
+				best = p
+			}
+		}
+	}
+	// 面板的底色：那个字**下面**那一行（字框的下沿 + 2 像素）。
+	floor := int(word.Y+word.H) + 2
+	if floor >= img.Rect.Max.Y {
+		floor = img.Rect.Max.Y - 1
+	}
+	bg := img.RGBAAt(int(word.X), floor)
+	ratio := contrastRatio(best, bg)
+	t.Logf("「分集」的字 %v、面板的底色 %v，对比度 %.2f:1", best, bg, ratio)
+	if ratio < 4.5 {
+		t.Errorf("面板上的字和它背后的底色对比度只有 %.2f:1（字 %v、底 %v）——"+
+			"玻璃得掺上背景色，字才读得清", ratio, best, bg)
+	}
+}
+
+// TestTheKnobStaysVisibleAllThroughTheDrag 断「拖的整个过程里旋钮都在」。
+//
+// 交叉淡入的关键：不透明的面和玻璃**一起**淡，中间没有哪一帧是空的。
+//
+// 判据是**每一帧**：按住之后推着钟走八步，每一步旋钮那一块都得有亮的像素。
+// 只画玻璃的话，中间那几帧（面已经淡完、玻璃还没上来）旋钮是看不见的。
+func TestTheKnobStaysVisibleAllThroughTheDrag(t *testing.T) {
+	_, tt, _ := fullTester(t)
+	openFull(t, tt)
+
+	box, ok := tt.Find("全屏播放进度")
+	if !ok {
+		t.Fatalf("找不到满屏那条进度，文字有 %q", tt.Texts())
+	}
+	x := box.X + box.W*0.25
+	y := box.Y + box.H/2
+	knob := mygoui.Rect{X: x - 16, Y: box.Y, W: 32, H: box.H}
+
+	tt.Press(x, y)
+	for i := range 8 {
+		tt.Advance(30 * time.Millisecond)
+		tt.Frame()
+		if n := brightIn(tt.Image(), knob); n == 0 {
+			t.Errorf("按住 %dms 的时候旋钮不见了（那一块 %v 一个亮像素都没有）——"+
+				"交叉淡入的中间不能是空的", (i+1)*30, knob)
+		}
+	}
+	tt.Release(x, y)
+	tt.Advance(300 * time.Millisecond)
+	tt.Frame()
+}
+
 // ---- 出图 ----
 
 // TestRenderFullPlayerShots 存图：满屏播放器，深浅各一套。
@@ -427,6 +540,29 @@ func TestRenderFullPlayerShots(t *testing.T) {
 			b.Close()
 		})
 	}
+}
+
+// TestRenderFullPlayerPartsPanelShot 存图：满屏里那个**分集面板**（那一块玻璃）。
+//
+//	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderFullPlayerPartsPanelShot
+//
+// 为什么要单独存一张：面板是**浮在背景上面**的一块玻璃，它的边、它的影、它和
+// 背后那层糊过的封面分不分得开，只看满屏那一张看不出来。
+func TestRenderFullPlayerPartsPanelShot(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	s, tt := onlineTester(t, nil, true)
+	s.openFullPlayer()
+	waitFrames(t, tt, "问失败", func() bool { return s.app.PartsErr() != nil })
+	tt.Frame()
+	if err := tt.Click("显示分集列表"); err != nil {
+		t.Fatalf("点不了分集入口：%v（文字：%q）", err, tt.Texts())
+	}
+	tt.Frame()
+	settleFull(t, tt)
+	save(t, dir, "61-全屏播放器-分集面板-玻璃.png", tt)
 }
 
 // ---- 帮手 ----
