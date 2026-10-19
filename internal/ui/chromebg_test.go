@@ -33,9 +33,9 @@ const (
 	// 好几个坐标是从它推出来的，写死一遍就有一处要改。
 	shotWinW, shotWinH = 1200, 800
 
-	sideProbeX, sideProbeY  = 100, 500
-	contentProbeX, contentY = 1160, 400
-	playbarProbeX, playbarY = 600, 780
+	sideProbeX, sideProbeY       = 100, 500
+	contentProbeX, contentProbeY = 1160, 400
+	playbarProbeX, playbarY      = 600, 780
 
 	// drawerProbe 是播放列表抽屉面板上的一个空白处：面板从
 	// 窗口右缘往左 384（`queueDrawerWidth`），所以 x=1160 在里面。
@@ -47,10 +47,14 @@ func probeColor(tt *ui.Tester, x, y int) color.RGBA { return tt.Image().RGBAAt(x
 
 // TestTheChromeSharesOneBackground 钉住侧栏、内容区、播放条是同一个底色。
 //
-// ⚠️ **深浅两套都要跑，而且值是从当前主题算出来的**——不这么做的话，「统一了」
-// 这件事在深色下照样能悄悄回退：把侧栏那一行改回 `t.Surface`，浅色那一档仍然
-// 全绿（`#f4f4f5` 和 `#ffffff` 差 11，肉眼都未必看得出，而断言是逐字节相等的
-// ——那正是它会红的地方）。深色下那两个色差 15 个通道，是这一族存在的理由。
+// ⚠️ **深浅两套都要跑，而且 want 从当前主题现算**，不写死一个十六进制值。
+// 写死的话改一次主题引擎就得回来改这一条，而「忘了改」的那一次是**恒绿**。
+//
+// 两套都跑不是为了「浅色那一套更严」——**浅色也抓得住**：断言是逐字节相等，
+// `#f4f4f5` 和 `#ffffff` 差 11 也照样红（实测：把侧栏改回 `t.Surface`，浅色和
+// 深色两个子测试各报一次）。两套都跑是为了**不让这一族自己只盯着深色**：这一票的
+// 症状在深色下才明显（三个通道各跳一级，肉眼一眼是三条带），浅色下差 11、肉眼
+// 未必看得出——而「靠肉眼看不看得出」正是这一族要换成读像素的理由。
 func TestTheChromeSharesOneBackground(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -68,7 +72,7 @@ func TestTheChromeSharesOneBackground(t *testing.T) {
 				x, y int
 			}{
 				{"侧栏", sideProbeX, sideProbeY},
-				{"内容区", contentProbeX, contentY},
+				{"内容区", contentProbeX, contentProbeY},
 				{"播放条", playbarProbeX, playbarY},
 			}
 			for _, p := range probes {
