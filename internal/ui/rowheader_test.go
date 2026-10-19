@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -236,4 +237,31 @@ func uiShows(tt *ui.Tester, s string) bool {
 		}
 	}
 	return false
+}
+
+// TestTheSearchUserTabHeaderHasNoClock 钉住「用户」那一档的表头**没有「时长」**。
+//
+// 那一档的行是「序号 / 头像 / 昵称 / 个性签名」（`searchUserMusic` 的注释），
+// `list.Music.Duration` 是零值，于是行里那一列**根本不画**——表头上还写着「时长」的
+// 的话，用户读到的是一列空的表头。
+//
+// ⚠️ 断的是**规格里有没有那一列**而不是画面上有没有那个字：`CardHeaderSpec` 摆的是
+// 列定义，画面上的字是它画出来的，两者对不上这件事只有前者能说清。
+func TestTheSearchUserTabHeaderHasNoClock(t *testing.T) {
+	video := searchHeaderSpec(0, list.ViewList, false, "k")
+	user := searchHeaderSpec(searchTabUser, list.ViewList, false, "k")
+
+	if last := video.Cols[len(video.Cols)-1]; last.Title != "时长" {
+		t.Errorf("歌曲那一档的表头最后一列是「%s」，want 「时长」", last.Title)
+	}
+	for _, col := range user.Cols {
+		if col.Title == "时长" {
+			t.Errorf("「用户」那一档的表头上还摆着「时长」，而那一档的行里没有那一列")
+		}
+	}
+	// 别的几列一个都不能少（封面那一列的空位也算）。
+	if len(user.Cols) != len(video.Cols)-1 {
+		t.Errorf("「用户」那一档的表头有 %d 列，want %d（只少「时长」那一列）",
+			len(user.Cols), len(video.Cols)-1)
+	}
 }
