@@ -266,6 +266,11 @@ func (s *Shell) viewFullEmpty(c *ui.Context) {
 			ui.Column(c).Key("full-empty").
 				Absolute().Left(0).Top(0).Right(0).Bottom(0).
 				Center().Gap(6).Children(func() {
+				// ⚠️ **这两行是故意的例外，不走 `emptyCopy`**：满屏这一屏压在
+				// 一块有底色的背板上，所以主次色是那块背板的 on / dim
+				// （`fullOnColor` / `fullDimColor`），而不是主题的 Text /
+				// TextMuted——用主题那两档的话，在浅色封面铺满的屏上这两行
+				// 会糊进去。字号仍然是 15 / 12，和别处一样。
 				ui.Text(c, fullNothing.Title).FontSize(15).TextColor(fullOnColor)
 				ui.Text(c, fullNothing.Hint).FontSize(12).TextColor(fullDimColor)
 			})

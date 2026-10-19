@@ -309,15 +309,7 @@ func (s *Shell) viewFollow(c *ui.Context, _ *ui.Route) {
 	// 这一次特别的原因——从别的页面切过来的那条路按 `lookup(path).Empty.Title`
 	// 认「切过去了」，少画那一句就断了。
 	if !s.app.ExploreMounted() {
-		e := lookup(followPath).Empty
-		ui.Column(c).Key("page:" + followPath).Grow(1).Center().Gap(8).Padding(24).
-			Children(func() {
-				ui.Text(c, "我的关注").FontSize(22).Bold()
-				ui.Text(c, e.Title).FontSize(15)
-				ui.Text(c, e.Hint).FontSize(12).TextColor(c.Theme().TextMuted)
-				ui.Text(c, "还没接上 B 站接口，这一页暂时拉不了内容。").FontSize(12).
-					TextColor(c.Theme().Danger)
-			})
+		s.viewPageEmptyWithReason(c, "page:"+followPath, "我的关注", lookup(followPath).Empty)
 		return
 	}
 

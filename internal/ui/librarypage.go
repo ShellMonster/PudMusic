@@ -336,29 +336,9 @@ func libraryMenuItems(m *ui.Menu, row libraryRow, a RowActions, i int) bool {
 // 两句话换来换去。少画那一句的话，从别的页面切过来的那条路（`homepage_test.go`
 // 和 `settings_test.go` 都按 `lookup(path).Empty.Title` 认「切过去了」）就断了。
 func (s *Shell) viewLibraryMissing(c *ui.Context, key, title string) {
-	t := c.Theme()
-	e := lookup(s.router.Path()).Empty
-	ui.Column(c).Key(key).Grow(1).Center().Gap(emptyGap).Padding(emptyPagePad, 28).Children(func() {
-		// 插画是**这一页**的（`e.Icon`，和正常空着的那一支同一枚）：用户看到的
-		// 是「稍后再看空着」，不是「有一个说不清是什么的东西不见了」。
-		if e.Icon != "" {
-			ui.Icon(c, icon(e.Icon)).FontSize(emptyIconSize).TextColor(t.TextMuted)
-		}
-		ui.Text(c, title).FontSize(20).Bold()
-		// 那两行字**走共享那一个出口**（`emptyContent`，和正常空着的那一支同一
-		// 份字号、同一份主次色）。这一页平时空着的时候画的就是那一支，所以两者
-		// 必须长得一样——抄一遍就是会漂开的那份。
-		if e.Title != "" {
-			ui.Text(c, e.Title).FontSize(15).TextColor(t.Text)
-			if e.Hint != "" {
-				ui.Text(c, e.Hint).FontSize(12).TextColor(t.TextMuted)
-			}
-			// 「没接上接口」是**这一次**特别的原因，单独说一句。它在最下面：
-			// 上面那几句说的是「这一页是什么」，只有这一句说的是「这一次怎么了」。
-			ui.Text(c, "还没接上 B 站接口，这一页暂时拉不了内容。").
-				FontSize(12).TextColor(t.TextMuted)
-		}
-	})
+	// ⚠️ 画法整个在 `viewPageEmptyWithReason`（empty.go）：我的关注那一页也是这
+	// 四样，原来两页各写一遍——而那正是这一票要消掉的「各画各的」。
+	s.viewPageEmptyWithReason(c, key, title, lookup(s.router.Path()).Empty)
 }
 
 // keywordBoxWidth 是搜索框的宽度。Biu 是 `w-64`（later）/`max-w-50`（history），

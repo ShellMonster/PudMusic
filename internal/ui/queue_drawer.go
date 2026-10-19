@@ -170,9 +170,10 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 // Biu 的 `{list.length ? <VirtualList/> : <Empty/>}`）。
 func (s *Shell) viewQueueBody(c *ui.Context, t *ui.Theme) {
 	if len(s.queueRows) == 0 {
+		// ⚠️ 那两行走 `emptyCopy`（empty.go），和七个页面的空状态同一份字号、
+		// 同一份主次色。原先这里自己抄了一份 15 / 12——而抄一份就会漂开。
 		ui.Column(c).Key("queue-empty").Grow(1).Center().Padding(20, 16).Children(func() {
-			ui.Text(c, queueEmpty.Title).FontSize(15).TextColor(t.Text)
-			ui.Text(c, queueEmpty.Hint).FontSize(12).TextColor(t.TextMuted)
+			emptyCopy(c, queueEmpty)
 		})
 		return
 	}

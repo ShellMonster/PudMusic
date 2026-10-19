@@ -1,8 +1,12 @@
 package ui
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"image"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -143,39 +147,222 @@ func TestTheIllustrationIsFollowedByTheCopy(t *testing.T) {
 	}
 }
 
-// TestTheSharedDrawingEntryIsTheOnlyOne 钉住「**一套**绘制入口」。
+// emptyStateVars 列出这个包里所有**包级** `emptyState` 变量的名字。
 //
-// 🔴 机械查，不靠自觉：空状态这一族有几十条调用点，每一处自己写一遍
-// `ui.Column(...).Center().Gap(6).Padding(20, 28)` 的话，七页的留白和间距就会
-// 慢慢漂开——而每一次都是无意的（抄一下上一处的），也看不出来。
-//
-// 判据：除了 `empty.go` 那个文件，**没有任何文件**自己建一个空状态的那一列。
-// 宁可误伤也不放过：`ui.Column` 在这个包里到处都是，所以断的是「那一列旁边
-// 同时出现了 `emptyIconSize` 或者 `FontSize(15)` 这两个空状态独有的数」——
-// 两个一起出现才是「有人在重写一遍」。
-func TestTheSharedDrawingEntryIsTheOnlyOne(t *testing.T) {
-	for _, name := range filesInThisPackage(t) {
-		// 这一条自己得放过：它上面就写着 `emptyIconSize` 那个名字（判据就是
-		// 它），而放过的理由是「文件里没有那一列」而不是「文件里没有那个数」。
-		if name == "empty.go" || name == "emptyicon_test.go" {
+// 为什么先要这张名单：判据是「有人自己画了某一条空状态的那两行」，而「某一条」
+// 在 AST 上唯一能认出来的就是**这个变量是 `emptyState`**。只按 `.Title` /
+// `.Hint` 认会误伤一大片（歌名的 `m.Title`、下载那一行的 `r.Title`、满屏歌名的
+// `st.Title`……它们和空状态一点关系都没有）。
+func emptyStateVars(t *testing.T) map[string]bool {
+	t.Helper()
+	matches, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	out := map[string]bool{}
+	for _, name := range matches {
+		if strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		b, err := readFileOf(t, name)
+		f, err := parser.ParseFile(fset, name, nil, 0)
 		if err != nil {
-			t.Fatalf("读不到 %s，这条就没法查了：%v", name, err)
+			t.Fatalf("解析 %s 失败，这一就没法查了：%v", name, err)
 		}
-		src := string(b)
-		for i, line := range strings.Split(src, "\n") {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "//") {
-				continue // 注释里提到它们是正常的（解释为什么没有了）
+		for _, d := range f.Decls {
+			gd, ok := d.(*ast.GenDecl)
+			if !ok || gd.Tok != token.VAR {
+				continue
 			}
-			if strings.Contains(line, "emptyIconSize") && strings.Contains(line, "ui.Column") {
-				t.Errorf("%s:%d 自己建了空状态的那一列——共用 `drawEmpty` "+
-					"（empty.go）那一个出口，七页各写一份的话改一次留白就会漂开",
-					name, i+1)
+			for _, spec := range gd.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok || !isEmptyStateValue(vs.Type, vs.Values) {
+					continue
+				}
+				for _, n := range vs.Names {
+					out[n.Name] = true
+				}
 			}
 		}
+	}
+	if len(out) == 0 {
+		t.Fatal("一个包级 emptyState 变量都没找到——这一条的判据整个失效了")
+	}
+	return out
+}
+
+// localEmptyStateVars 找出「局部的那一条空状态」——`e := lookup(path).Empty`。
+//
+// ⚠️ **为什么单独一条**：局部变量的类型是推断出来的，AST 里看不到它是
+// `emptyState`，所以上面那张包级名单里没有它。而这个包里取路由那一条空状态
+// **只有这一个写法**（`routes` 表的 `Empty` 字段），而它恰好是漂开过两次的
+// 那一处（`librarypage.go` 和 `follow.go` 各抄过一份 15 / 12）。
+//
+// 局限性说在前面：这不是类型检查。`e := 随便什么表达式` 只要结果碰巧是
+// `emptyState` 就认不出来——而这个包里没有那种写法。
+func localEmptyStateVars(t *testing.T) map[string]bool {
+	t.Helper()
+	matches, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	out := map[string]bool{}
+	for _, name := range matches {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			as, ok := n.(*ast.AssignStmt)
+			if !ok || as.Tok != token.DEFINE || len(as.Rhs) == 0 {
+				return true
+			}
+			sel, ok := as.Rhs[0].(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "Empty" {
+				return true
+			}
+			if _, ok := sel.X.(*ast.CallExpr); !ok { // lookup(path).Empty
+				return true
+			}
+			for _, lhs := range as.Lhs {
+				if id, ok := lhs.(*ast.Ident); ok {
+					out[id.Name] = true
+				}
+			}
+			return true
+		})
+	}
+	return out
+}
+
+// isEmptyStateValue 报这一个声明是不是一个 `emptyState`。
+//
+// 认两种写法：`var x emptyState`（有类型）和 `var x = emptyState{…}`（没类型、
+// 值是复合字面量）——这个包里两种都有。
+func isEmptyStateValue(typ ast.Expr, values []ast.Expr) bool {
+	if id, ok := typ.(*ast.Ident); ok && id.Name == "emptyState" {
+		return true
+	}
+	if len(values) == 0 {
+		return false
+	}
+	cl, ok := values[0].(*ast.CompositeLit)
+	if !ok {
+		return false
+	}
+	if t, ok := cl.Type.(*ast.Ident); ok {
+		return t.Name == "emptyState"
+	}
+	// `emptyState{…}` 省略类型时是 `[]T{…}` 那一类的 SelectorExpr/ArrayType
+	return false
+}
+
+// TestTheSharedDrawingEntryIsTheOnlyOne 钉住「**一套**绘制入口」。
+//
+// 🔴 机械查 AST，不靠自觉：空状态这一族有十几处调用点，每一处自己写一遍
+// `FontSize(15)` + `FontSize(12)` 的话，七页的字号和主次色就会慢慢漂开——而
+// 每一次都是无意的（抄一下上一处的），也看不出来。
+//
+// ## 判据为什么是 AST，以及走过两次弯路
+//
+// 第一版查「同一行里同时出现 `FontSize(15)` 和 `FontSize(12)`」，而它**第一次
+// 跑就被 `gofmt` 打败**：变异写成一行，`gofmt` 把它拆成两行，判据失效。
+//
+// 第二版查 AST 找「`ui.Text(…, X.Title)`」，而它**误伤一大片**：歌名的
+// `m.Title`、下载那一行的 `r.Title`、满屏歌名的 `st.Title` 都叫 `.Title`，
+// 和空状态一点关系都没有。
+//
+// 现在这一版先把**包级 `emptyState` 变量**的名字收成一张名单（`emptyStateVars`），
+// 再找「谁在画名单上某个变量的 `.Title` / `.Hint`」——那是「把空文案抄了一份」
+// 的确切形状。
+//
+// ⚠️ **必须真的解析生产文件**：第一版用的是 `filesInThisPackage`，而它只 glob
+// `*_test.go`——于是这一条解析的全是测试文件，恒绿，还绿得很有自信（两次变异
+// 都从它底下过去了）。
+//
+// allowlist 上那两处都不是「抄了一份」，形状本来就和共享入口不同：满屏那一屏在
+// 有底色的背板上（主次色是背板的 on / dim），而「还没登录」那一支的 `Title` 是
+// 一句 22px 的标题、下面还跟着一枚按钮。理由都写在 allowlist 那一行上。
+func TestTheSharedDrawingEntryIsTheOnlyOne(t *testing.T) {
+	vars := emptyStateVars(t)
+	// 局部的那一条（`e := lookup(path).Empty`）也进来，见 localEmptyStateVars。
+	for k, v := range localEmptyStateVars(t) {
+		vars[k] = v
+	}
+	allow := map[string]bool{
+		// 满屏那一屏压在**有底色的背板**上，主次色是背板的 on / dim 而不是
+		// 主题的 Text / TextMuted（浅色封面铺满时主题那两档会糊进去），
+		// 而且它还要在下面挂一枚「去登录」。见 fullplayer.go 那一处的注释。
+		"viewFullEmpty": true,
+		// 「还没登录」那一支：它的 `Title` 是一句 **22px 加粗的标题**
+		// （不是共享入口里那个 15px 的「这里为什么空」），下面还跟着一个
+		// 「去登录」按钮。形状不同就是另一支，不是抄了一份。
+		"viewFollowNotLoggedIn": true,
+	}
+
+	matches, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	for _, name := range matches {
+		// `empty.go` 就是那一份本身，放过；测试文件里出现 `.Title` 是断言。
+		if name == "empty.go" || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("解析 %s 失败，这一就没法查了：%v", name, err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			fn, ok := n.(*ast.FuncDecl)
+			if !ok || allow[fn.Name.Name] || fn.Body == nil {
+				return true
+			}
+			ast.Inspect(fn.Body, func(m ast.Node) bool {
+				call, ok := m.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				// ⚠️ 两层类型断言都要先判 `ok` 再往下走：第一层失败时 `sel`
+				// 是 nil，接着问 `sel.X` 就是当场空指针——而崩在测试里看起来
+				// 像「这一条坏了」，和它要查的那件事一点关系都没有。
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok || sel.Sel.Name != "Text" {
+					return true
+				}
+				pkg, ok := sel.X.(*ast.Ident)
+				if !ok || (pkg.Name != "ui" && pkg.Name != "mygoui") {
+					return true
+				}
+				for _, arg := range call.Args {
+					as, ok := arg.(*ast.SelectorExpr)
+					if !ok {
+						continue
+					}
+					// ⚠️ 接收者**不一定是变量**：`lookup(followPath).Empty.Title`
+					// 的接收者是一个调用。这里必须先判再取，否则当场类型断言
+					// 崩——而崩在测试里看起来像「这一条坏了」。
+					id, ok := as.X.(*ast.Ident)
+					if !ok || !vars[id.Name] {
+						continue
+					}
+					if as.Sel.Name == "Title" || as.Sel.Name == "Hint" {
+						t.Errorf("%s:%d 的 %s 自己画了 %s.%s——空文案走 `emptyCopy`"+
+							"（empty.go），抄一份改一次字号只改一处、另一处不动"+
+							"（真要例外的话，加进这一条的 allowlist 并写明理由）",
+							name, fset.Position(call.Pos()).Line, fn.Name.Name,
+							id.Name, as.Sel.Name)
+					}
+				}
+				return true
+			})
+			return true
+		})
 	}
 }
 

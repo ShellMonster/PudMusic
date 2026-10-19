@@ -82,17 +82,31 @@ func drawEmpty(c *ui.Context, key string, e emptyState, pad float32) {
 
 // emptyContent 把「一枚插画 + 标题 + 提示」这三样画进**当前这一个容器**。
 //
-// 它是 `drawEmpty` 的内层，单独拎出来是因为有一处要在这三样**下面**再摆一句
-// 别的：`viewLibraryMissing`（「还没接上 B 站接口」这一句）。那一处要的是同一
-// 枚插画、同两行字，而外层还要自己加一句——所以拆成「内容」和「外壳」两层，
-// 免得那一处把三样的字号和主次色再抄一遍（抄一遍就是会漂开的那份）。
+// 它是 `drawEmpty` 的内层，拆成三样是因为有一处要在它们**中间**插一句别的：
+// `viewLibraryMissing`（插画 / 页面名 / 那一页的空文案 / 「没接上接口」的原因）。
+// 那三样各自是 `emptyArt` / 一句自定义 / `emptyCopy`，而字号和主次色只有这一份。
+//
+// ⚠️ **写新的一处空状态时也要走这几个函数**，别把 `FontSize(15)` / `FontSize(12)`
+// 抄一遍过去：抄一遍就会漂开（改一次字号只改一处，另一处不动），而界面上看不出来。
 func emptyContent(c *ui.Context, e emptyState) {
-	t := c.Theme()
-	if e.Icon != "" {
-		// 次要色：图标是修饰，不是这一页要说的那句话。上游那枚也是
-		// `text-default-400`（`index.tsx:16` 整个空状态一个色）。
-		ui.Icon(c, icon(e.Icon)).FontSize(emptyIconSize).TextColor(t.TextMuted)
+	emptyArt(c, e.Icon)
+	emptyCopy(c, e)
+}
+
+// emptyArt 画插画位上那一枚图标。空名就不画。
+//
+// 次要色：图标是修饰，不是这一页要说的那句话。上游那枚也是 `text-default-400`
+// （`index.tsx:16` 整个空状态一个色）。
+func emptyArt(c *ui.Context, name string) {
+	if name == "" {
+		return
 	}
+	ui.Icon(c, icon(name)).FontSize(emptyIconSize).TextColor(c.Theme().TextMuted)
+}
+
+// emptyCopy 画「这里为什么空」和「怎么才能不空」那两行。
+func emptyCopy(c *ui.Context, e emptyState) {
+	t := c.Theme()
 	ui.Text(c, e.Title).FontSize(15).TextColor(t.Text)
 	if e.Hint != "" {
 		ui.Text(c, e.Hint).FontSize(12).TextColor(t.TextMuted)
@@ -115,6 +129,39 @@ func (s *Shell) viewEmpty(c *ui.Context, key string, e emptyState) {
 	s.applyFrameTheme(c)
 	drawEmpty(c, key, e, emptyPagePad)
 }
+
+// biliNotMounted 是「B 站客户端没挂上」这一次的特别原因，那三页共用同一句。
+//
+// 抽成常量是因为**它原来在三个文件里各写一遍**（`librarypage.go` 和 `follow.go`
+// 各一处），而三处迟早会有一处忘了改——而那一处界面上和另两处对不上，看不出来。
+const biliNotMounted = "还没接上 B 站接口，这一页暂时拉不了内容。"
+
+// viewPageEmptyWithReason 画「这一页平常空着的样子 + 这一次特别的原因」。
+//
+// 三页共用：稍后再看、历史记录、我的关注——它们在「B 站客户端没挂上」时画的都是
+// 这四样（插画 / 页面名 / 那一页在 `routes` 里的空文案 / 这一句原因）。
+//
+// 走共享出口 `emptyArt` / `emptyCopy` 是这一票明确要的（七页共用一套绘制入口）。
+// 而「插画 + 文案 + 原因」这个**顺序**也是：插画说的是「这一页是什么」，最后那句
+// 说的是「这一次怎么了」——把原因摆在中间会让人以为它在解释插画。
+func (s *Shell) viewPageEmptyWithReason(c *ui.Context, key, title string, e emptyState) {
+	t := c.Theme()
+	ui.Column(c).Key(key).Grow(1).Center().Gap(emptyGap).Padding(emptyPagePad, 28).Children(func() {
+		emptyArt(c, e.Icon)
+		ui.Text(c, title).FontSize(emptyPageTitle).Bold()
+		if e.Title != "" {
+			emptyCopy(c, e)
+			ui.Text(c, biliNotMounted).FontSize(12).TextColor(t.TextMuted)
+		}
+	})
+}
+
+// emptyPageTitle 是上面那一页**页面名**的字号。
+//
+// 它比 `emptyCopy` 的标题大一号，因为它是**这一页叫什么**（一直都在），而
+// `emptyCopy` 那一句是**这里为什么空**（只在空着的时候有）。两句混成一个字号的话，
+// 用户分不出哪一句是导航、哪一句是状态。
+const emptyPageTitle = 20
 
 // emptyPagePad 是整页那一支的上下留白。20 ≈ 上游 `py-20` 的一半（上游那个
 // Tailwind 类是 5rem = 80，这里是紧凑桌面应用的窗口，取 20 上下留白就够了，
