@@ -267,8 +267,40 @@ func newHarness(t *testing.T, size int64, quality int) *harness {
 		t.Fatalf("建队列：%v", err)
 	}
 	h.m = m
-	t.Cleanup(func() { _ = m.Close("") })
+	t.Cleanup(func() { closeManager(t, m, dir) })
 	return h
+}
+
+// closeManager 关掉队列管理器，并且把下载目录**自己**删掉（dir 是空串就不删）。
+//
+// ## 为什么目录要自己删
+//
+// `t.TempDir()` 的清理（`RemoveAll`）是在**别的清理都跑完之后**才做的，而在那
+// 之前 `Manager.Close` 已经把还在跑的 `run` **丢在后台**了——那是故意的：取流方
+// 不理 ctx 的话，「关掉应用」就退不出去了（见 queue.go 的 `runOne` 里那段「不能
+// 无限等 `run` 返回」）。那个被丢下的 goroutine **可能还在往 `.part` 里写**，于是
+// `RemoveAll` 删到一半、目录里又多了东西——症状是
+// 「TempDir RemoveAll cleanup: directory not empty」，而**它和被测的逻辑毫无
+// 关系**（实测连跑 300 次红 3 次）。
+//
+// 自己删就躲开了那一下：删不掉（目录不空）就等一会儿再删，直到删干净；删掉之后
+// `t.TempDir()` 的清理再跑一遍 `RemoveAll`——路径已经没了，它什么也不做，也不
+// 会报错。
+func closeManager(t *testing.T, m *Manager, dir string) {
+	t.Helper()
+	_ = m.Close("")
+	if dir == "" {
+		return
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		err := os.RemoveAll(dir)
+		if err == nil || time.Now().After(deadline) {
+			return
+		}
+		// 那个被丢下的 goroutine 还在写：等它收尾。
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 // enqueue 入队一首并等它落到 want 这个状态。
@@ -498,7 +530,7 @@ func TestTwoSongsWithTheSameNameBothSurvive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = m.Close("") })
+	t.Cleanup(func() { closeManager(t, m, dir) })
 
 	a, err := m.Enqueue(AddRequest{Bvid: bvid, Cid: "c1", Title: "同名", Dir: dir, Ext: ".m4a"})
 	if err != nil {
@@ -716,7 +748,7 @@ func (h *harness) reopen() *harness {
 	h2.cdn.mu.Lock()
 	h2.cdn.chunkReqs = nil // 上一轮的发数不算这一轮的
 	h2.cdn.mu.Unlock()
-	h.t.Cleanup(func() { _ = m.Close("") })
+	h.t.Cleanup(func() { closeManager(h.t, m, h.dir) })
 	return h2
 }
 

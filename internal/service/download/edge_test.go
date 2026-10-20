@@ -292,7 +292,7 @@ func TestTwoSongsWithTheSameNameNeverShareALandingPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = m.Close("") })
+	t.Cleanup(func() { closeManager(t, m, dir) })
 
 	// ① 第一首：下了一块就退出，盘上留着它的 .part，队列里记着分块 0。
 	idA := TaskID(bvid, "c1", false)
@@ -355,6 +355,7 @@ func TestTwoSongsWithTheSameNameNeverShareALandingPath(t *testing.T) {
 // 这里让两首都**立刻失败**（取流直接报错），于是它们各自认领了名字却什么
 // 都没下——正是那个窗口，而且不依赖任何时序。
 func TestTwoQueuedTasksNeverClaimTheSameLandingPath(t *testing.T) {
+	dir := t.TempDir()
 	m, err := New(Options{
 		Client: http.DefaultClient,
 		Resolve: func(context.Context, Identity) (*Source, error) {
@@ -364,9 +365,8 @@ func TestTwoQueuedTasksNeverClaimTheSameLandingPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = m.Close("") })
+	t.Cleanup(func() { closeManager(t, m, dir) })
 
-	dir := t.TempDir()
 	a, err := m.Enqueue(AddRequest{Bvid: bvid, Cid: "c1", Title: "同名", Dir: dir})
 	if err != nil {
 		t.Fatal(err)
