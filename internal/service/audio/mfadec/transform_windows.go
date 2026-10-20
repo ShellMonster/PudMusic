@@ -185,11 +185,6 @@ func (c *Codec) open(rate, chans int, asc []byte, payloadType uint32) error {
 	return nil
 }
 
-// buildInputType 造输入媒体类型。
-func (c *Codec) buildInputType(rate, chans int, asc []byte, payloadType uint32) (uintptr, error) {
-	return c.buildInputTypeWith(rate, chans, asc, payloadType, len(asc) > 0)
-}
-
 // buildInputTypeWith 造输入媒体类型，withUserData 决定要不要带
 // `MF_MT_USER_DATA`。
 //
