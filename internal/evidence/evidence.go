@@ -1516,6 +1516,41 @@ var Items = []Item{
 		},
 	},
 	{
+		// 归「双平台」那一组，和上面 issue 127 那一条是同一件事的两半：那一票动的是
+		// 外壳（侧栏 / 顶栏 / 播放条），这一票动的是**内容那一块**（列表与网格）。
+		Category: Platform,
+		// issue 134 的第二单元（列表与网格）：表头、列表行、回顶。
+		//
+		// 🔴 **判据全是画面上的像素、位置和真的菜单**：这一票的四个症状**全都是
+		// 静默的**——表头底下没有线、列名比次要文字还弱、行里没有「⋯」、页面滚到
+		// 底没有回顶，这四样没有一样会报错，界面只是「不太对」。
+		//
+		// 「⋯」那一条钉的是**两条路给的是同一批动作**（行内的和右键的）：写两份菜单
+		// 的话，两边迟早会对不上，而那种错在界面上看不出来（两边都能点，只是点的
+		// 不是同一件事）。
+		Spec: "列表与网格：表头底下有一条线且列名的字号比行里的次要文字大；每一行末尾有一枚「⋯」，点开它和右键给出的是同一批动作；列表行的歌名只占一行、行高是定死的一个值；每一页滚到底都有「回到顶部」",
+		Tests: []string{
+			// 表头：底下那条线（**逐像素采样**）+ 列名的字号。
+			"TestTheHeaderHasALineUnderIt",
+			"TestTheHeaderColumnNamesAreBiggerThanTheRowsSecondaryText",
+			// 行内那枚「⋯」：两条路同一批动作、做的是**它那一行**的事、每一行都有。
+			"TestTheOperationButtonOpensTheSameMenuAsTheRightClick",
+			"TestTheOperationButtonActsOnTheSongItSitsOn",
+			"TestEveryRowHasAnOperationButton",
+			// 行高定死：歌名长也不变高（列表那一档 + 稍后再看/历史记录那两页）。
+			"TestEveryRowIsTheSameHeightNoMatterHowLongTheTitle",
+			"TestTheLibraryRowsAreTheSameHeightNoMatterHowLongTheTitle",
+			// 回顶：首页 / 本地音乐 / 我的关注 / 下载记录 / 设置。
+			"TestTheHomePageHasABackToTop",
+			"TestTheLocalMusicPageHasABackToTop",
+			"TestTheFollowPageHasABackToTop",
+			"TestTheDownloadListHasABackToTop",
+			"TestTheSettingsPageHasABackToTop",
+			// 那两张表格的行高（回顶按钮换算像素时用的两个数）。
+			"TestTheTableRowHeightsAreWhatTheOffsetsAssume",
+		},
+	},
+	{
 		// 归「双平台」那一组：侧栏是**窗口的骨架**（理由同 issue 127 那一条）。
 		Category: Platform,
 		// issue 137（#134 的第三单元）那一票：折叠态的侧栏 + 收藏夹名。

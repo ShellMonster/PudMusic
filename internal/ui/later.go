@@ -39,15 +39,21 @@ const laterPath = "/later"
 // 列宽。Biu 那一行是 `grid-cols-[40px_1fr_150px_150px_150px_40px]`，取同样的
 // 量级。定死是为了让这几列上下对齐（Biu 用 `tabular-nums`）。
 const (
-	colIndex   = 40
-	colCount   = 90
-	colDate    = 110
-	colClock   = 60
-	coverSide  = 48
-	listPadX   = 8
-	listPadY   = 8
-	rowGap     = 8
+	colIndex  = 40
+	colCount  = 90
+	colDate   = 110
+	colClock  = 60
+	coverSide = 48
+	listPadX  = 8
+	listPadY  = 8
+	rowGap    = 8
+	// titleLines 是**网格那一档**一格歌名最多几行。2 是 Biu 的 `line-clamp-2`
+	// （上游的 music-card 就是两行）。
 	titleLines = 2
+	// listTitleLines 是**列表那一行**歌名最多几行。**1**——上游那一行是
+	// `truncate`（`music-list-item/index.tsx:112`），多了就省略号；折成两行的话
+	// 整张列表的行高就跟着歌名长短跳（理由见 `widgets/list/card.go` 的文件头）。
+	listTitleLines = 1
 )
 
 // laterHeaderKey / historyHeaderKey 是这两行表头的身份。⚠️ **两个都要不一样**：同一个
@@ -166,8 +172,9 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 
 // drawLaterRow 画第 r 行。
 //
-// ⚠️ 不给这一行设固定高度（见 `list/card.go` 顶上那段）：歌名折到第二行时整张
-// 列表的行高就不一样了，那正是变高行存在的理由。
+// ⚠️ **这一行的行高是定死的**（`mt.height`，理由在下面那条注释里）：歌名只占一行
+// （上游那一行是 `truncate`），这一行由 48 的封面撑着。折行的话整张列表的行高就
+// 跟着歌名长短跳，一屏能看几首歌会变来变去。
 func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 	t := c.Theme()
 	rows := s.laterPage.rows
@@ -179,8 +186,12 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 
 	// ⚠️ **hover 要在 Children 之前问**（同 `widgets/list/card.go` 里那一处）：它报的
 	// 是这一帧指针在不在这一行上，而封面上那圈反馈要等 Children 才建得出来。
+	//
+	// ⚠️ **行高定死**（`mt.height`）：歌名只占一行（上游那一行是 `truncate`），
+	// 这一行由 48 的封面撑着——写死是为了让这个数**保证**是它，而不是「碰巧量出来
+	// 是它」（理由同 `widgets/list/card.go` 的文件头）。
 	row := ui.Row(c).Key("later-row:"+m.ID).AlignSelf(ui.Stretch).Gap(mt.gap).
-		Padding(mt.padY, mt.padX)
+		Padding(mt.padY, mt.padX).Height(mt.height)
 	onRow := row.Hovered()
 
 	return row.Children(func() {
@@ -193,6 +204,16 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 			FontSize(12).TextColor(t.TextMuted).MaxLines(1)
 		ui.Text(c, clockText(m.Duration)).Width(mt.clock).TextAlign(ui.End).
 			FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+
+		// 行尾那枚「⋯」。点开的是**这一行的菜单**，和右键同一份（`rows.menu`
+		// 就是右键那一条挂上去的那个函数）。
+		//
+		// ⚠️ **表头照它留了同样宽的空位**（`widgets/list` 的 `Header` 末尾那一个），
+		// 两边一样宽表头和行才对得上。
+		ui.Box(c).Width(list.OperationColWidth).Children(func() {
+			list.Operation(c, list.OperationLabel(m.Title), face.title,
+				func(m *ui.Menu) { rows.menu(m, r.Index) })
+		})
 	})
 }
 
@@ -228,6 +249,12 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 	onCell := box.Hovered()
 
 	return box.Children(func() {
+		// 格子右上角那枚「⋯」。点开的是**这一格的菜单**，和右键同一份
+		//（理由见 `widgets/list` 的 `operation.go`）。
+		list.OperationCorner(c, list.OperationLabel(m.Title), func(m *ui.Menu) {
+			rows.menu(m, i)
+		})
+
 		// 封面按**格子宽**画，不写死：`list.CellWidth` 给的就是这一格实际拿到的
 		// 宽（`widgets/list` 的网格卡片同一个做法）。写死 160 的话，窗口一窄到
 		// 两列，封面就顶出格子外面去了。

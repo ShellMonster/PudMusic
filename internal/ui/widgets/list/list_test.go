@@ -15,11 +15,11 @@ import (
 )
 
 // 这一组跑的是 MyGo 的 Tester：和真窗口一模一样的布局、点击、滚动和系统菜单，
-// 只是画到内存里。所以「几千行只建看得见的那些」「行高按内容量」「插一行之后
+// 只是画到内存里。所以「几千行只建看得见的那些」「行高定死」「插一行之后
 // 选中的还是那一首」都能自动验，不需要人守在窗口前面拖。
 
-// testerW / testerH 是无头窗口的大小。宽度要够宽，行才有地方折行（变高行的
-// 场景）；高度要够高，摆得下十几行。
+// testerW / testerH 是无头窗口的大小。宽度要够宽，序号 / 封面 / 时长那几列才
+// 摆得下；高度要够高，摆得下十几行。
 const (
 	testerW = 520
 	testerH = 700
@@ -37,8 +37,8 @@ func newCache(t *testing.T) *imgcache.Cache {
 
 // newList 造一个列表并把歌给它，返回列表和画着它的 Tester。
 //
-// ⚠️ Tester 的尺寸固定：虚拟滚动和变高行都靠「一屏摆得下几行」这个数判断，
-// 换了尺寸上面那两条的判据就得跟着改。
+// ⚠️ Tester 的尺寸固定：虚拟滚动靠「一屏摆得下几行」这个数判断，换了尺寸上面
+// 那几条的判据就得跟着改。
 func newList(t *testing.T, acts Actions, songs []Music) (*List, *ui.Tester) {
 	t.Helper()
 	l := New(newCache(t), acts)
@@ -157,23 +157,22 @@ func TestThousandsOfSongsOnlyBuildTheOnesInView(t *testing.T) {
 	}
 }
 
-// TestLongListWithMixedRowHeightsLandsOnTheRightRow 是变高行那条验收的**长列表**
-// 那一半：行高参差不齐时，滚到半路仍然落在该落的那一行。
+// TestALongListScrollsToTheRightRowEvenWithVeryLongTitles 是「滚到半路仍然落在
+// 该落的那一行」那条验收的长列表那一半。
 //
-// ⚠️ 这一条和 `TestRowsTakeTheHeightOfWhatIsInThem` 不是同一件事：那条只比两行
-// 的高低，这条走的是「没量过的行按量过的平均值估」那条路——滚到第 2501 行的时候
-// 它还没被量过，位置是估的，估错了要靠量出来的那一批把它推回去。歌名一样长的
-// 列表走不到这一步（每行都一样高，估得准不准没区别）。
+// ⚠️ 这一条和 `TestEveryRowIsTheSameHeightNoMatterHowLongTheTitle` 不是同一件事：
+// 那条只比两行的高低，这条走的是**几千行里滚到中间**那条路——滚到第 2501 首的
+// 时候，后面的行都还没被量过，位置是估的，估错了要靠量出来的那一批把它推回去。
 //
-// 判据是**画面上的位置**：顶上的那一行就该是第 2501 首（歌名长、那一行高 76），
-// 紧跟它的那行就要按**这一行量出来的高度**摆下去（差值约 76），不是按平均值。
-func TestLongListWithMixedRowHeightsLandsOnTheRightRow(t *testing.T) {
+// 判据是**画面上的位置**：顶上的那一行就该是第 2501 首，紧跟它的那行按**行高**
+// 摆下去（差值 64），不是按平均值。
+func TestALongListScrollsToTheRightRowEvenWithVeryLongTitles(t *testing.T) {
 	const n = 5000
 	long := strings.Repeat("很长的歌名", 10)
 	songs := make([]Music, n)
 	for i := range songs {
 		title := "歌 " + strconv.Itoa(i+1)
-		if i%2 == 0 { // 偶数行折成两行，高一些
+		if i%2 == 0 { // 偶数行的歌名长到要截断
 			title = long + strconv.Itoa(i+1)
 		}
 		songs[i] = song("id-"+strconv.Itoa(i), title, "某个 UP 主")
@@ -198,9 +197,9 @@ func TestLongListWithMixedRowHeightsLandsOnTheRightRow(t *testing.T) {
 	if !ok {
 		t.Fatalf("紧跟的那一行没在画面上，文字有 %q", tt.Texts())
 	}
-	// 差值要是**这一行自己的**高（两行歌名 ≈ 76），而不是全表的平均值。
-	if got := next.Y - top.Y; got < 60 || got > 96 {
-		t.Errorf("第一行到第二行隔了 %v，want 约 76（两行歌名那一行自己的高）", got)
+	// 差值是**行高**（64），不是全表的平均值——歌名再长也不改这一条。
+	if got := next.Y - top.Y; got < 63 || got > 65 {
+		t.Errorf("第一行到第二行隔了 %v，want 64（行高是定死的一个值）", got)
 	}
 	if onScreen(tt, "歌 1") {
 		t.Error("滚到第 2501 首，第一行还画在画面上")
@@ -216,52 +215,77 @@ func TestAnEmptyListSaysSo(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 变高行
+// 行高
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestRowsTakeTheHeightOfWhatIsInThem 是验收第 2 条：行高按需测量。
+// TestEveryRowIsTheSameHeightNoMatterHowLongTheTitle 钉住「**行高是定死的一个
+// 值**，歌名长也不变高」。
 //
-// 判据是**画面上相邻两行隔多远**（渲染位置），不是「行高字段是多少」：
-// 量出来的行高如果没被真正用来摆行，两行的 y 就还是一样远，钉不住。
+// 判据是**画面上相邻两行隔多远**（渲染位置）和**每一行自己有多高**，不是「行高
+// 字段是多少」：写死了没真的用上，两行的 y 就还是不对。
 //
-// 这一组刻意不设固定行高（card.go 里写明了为什么）：歌名折到第二行、又多一行
-// UP 名的那一行，比歌名一行摆完、没有 UP 名的那一行高。
-func TestRowsTakeTheHeightOfWhatIsInThem(t *testing.T) {
-	// 够长，一行摆不下，会折成两行。三首各带一个不一样的字：`tt.Find` 找的是
-	// 第一次出现的那个，三首歌名一样的话第二、三行量到的还是第一行的位置。
-	tall1 := strings.Repeat("很长很长的歌名", 6) + "甲"
-	tall2 := strings.Repeat("很长很长的歌名", 6) + "乙"
-	tall3 := strings.Repeat("很长很长的歌名", 6) + "丙"
+// ⚠️ 这一条曾经是**反的**：原来歌名折到第二行、整行就高一截（64 对 76），一屏能
+// 看几首歌会随着歌名长短变来变去。上游那一行的歌名是 `truncate`（一行），网格
+// 卡片那一格才是两行——见 `card.go` 的文件头。
+//
+// ⚠️ **还要断「歌名真的只占一行」**：行高写死之后，歌名折成两行只会把第二行挤掉
+// （看不见，但确实在那儿）。所以断的是**UP 名在行内的位置**：歌名折行的话 UP 名
+// 会被往下推那么一行。
+func TestEveryRowIsTheSameHeightNoMatterHowLongTheTitle(t *testing.T) {
+	// 够长，一行摆不下。三首各带一个不一样的字：`tt.Find` 找的是第一次出现的
+	// 那个，三首歌名一样的话第二、三行量到的还是第一行的位置。
+	long := strings.Repeat("很长很长的歌名", 6)
 
-	// 矮的：短歌名、没有 UP 名 → 封面（48）比文字块高，行就由封面定高。
-	_, ttShort := newList(t, Actions{}, []Music{
-		song("s1", "歌 1", ""),
-		song("s2", "歌 2", ""),
-		song("s3", "歌 3", ""),
-	})
-	// 高的：两行歌名 + 一行 UP 名 → 文字块比封面高，行就由文字块定高。
-	_, ttTall := newList(t, Actions{}, []Music{
-		song("t1", tall1, "某个 UP 主"),
-		song("t2", tall2, "某个 UP 主"),
-		song("t3", tall3, "某个 UP 主"),
+	_, tt := newList(t, Actions{}, []Music{
+		song("s1", "歌 1", "UP 甲"),
+		song("s2", long+"乙", "UP 乙"),
+		song("s3", "歌 3", "UP 丙"),
 	})
 
-	shortPitch := pitch(t, ttShort, "歌 1", "歌 2")
-	tallPitch := pitch(t, ttTall, tall1, tall2)
-	if tallPitch <= shortPitch {
-		t.Errorf("两行歌名 + UP 名的那一组行距 %v，短的那一组 %v，want 高的明显更高"+
-			"（行高没按内容量量）", tallPitch, shortPitch)
+	// ① 三行一样高，而且就是 64。
+	for _, title := range []string{"歌 1", long + "乙", "歌 3"} {
+		r, ok := tt.Find(title)
+		if !ok {
+			t.Fatalf("画面上找不到 %q，文字有 %q", title, tt.Texts())
+		}
+		if r.H != listRowHeight {
+			t.Errorf("「%s」那一行高 %v，want %v（行高是定死的一个值）",
+				title, r.H, listRowHeight)
+		}
 	}
 
-	// 换过行高之后，后面的行照样一行接一行，不重叠也不脱节。
+	// ② 相邻两行隔的也是行高。
 	//
-	// ⚠️ 留 0.5 的余量：量出来的行高是浮点排版的结果，逐位相等不是「对齐」的
+	// ⚠️ 留 0.5 的余量：量出来的位置是浮点排版的结果，逐位相等不是「对齐」的
 	// 证据（同一屏里两次排版的末位可能差一丁点）。这里要证的是「没脱节」。
-	if got := pitch(t, ttTall, tall2, tall3); got <= 0 || abs32(got-tallPitch) > 0.5 {
-		t.Errorf("第二行到第三行的行距 %v，第一行到第二行 %v，want 基本一样（行与行脱节了）", got, tallPitch)
+	if got := pitch(t, tt, "歌 1", long+"乙"); got < listRowHeight-0.5 || got > listRowHeight+0.5 {
+		t.Errorf("第一行到第二行隔了 %v，want %v（行高是定死的一个值）", got, listRowHeight)
 	}
-	if _, ok := ttTall.Find("某个 UP 主"); !ok {
-		t.Error("UP 名那一行没画出来")
+
+	// ③ 歌名只占一行：UP 名在行内的位置和短歌名那一行一样。
+	//
+	// ⚠️ 量的是**UP 名那一块**（不是行）：歌名要是折了行，UP 名就被推下去了。
+	shortRow, ok := tt.Find("歌 1")
+	if !ok {
+		t.Fatalf("画面上找不到「歌 1」，文字有 %q", tt.Texts())
+	}
+	shortOwner, ok := tt.Find("UP 甲")
+	if !ok {
+		t.Fatalf("画面上找不到「UP 甲」，文字有 %q", tt.Texts())
+	}
+	longRow, ok := tt.Find(long + "乙")
+	if !ok {
+		t.Fatalf("画面上找不到长歌名那一行，文字有 %q", tt.Texts())
+	}
+	longOwner, ok := tt.Find("UP 乙")
+	if !ok {
+		t.Fatalf("画面上找不到「UP 乙」，文字有 %q", tt.Texts())
+	}
+	shortOff := shortOwner.Y - shortRow.Y
+	longOff := longOwner.Y - longRow.Y
+	if abs32(shortOff-longOff) > 0.5 {
+		t.Errorf("长歌名那一行的 UP 名比短歌名那一行低了 %v——歌名折了行（want 一样）",
+			longOff-shortOff)
 	}
 }
 
@@ -509,7 +533,7 @@ func TestARowThatCannotBeDrawnDoesNotTakeTheRestDown(t *testing.T) {
 // 跑一个大歌单基准」——框架官方那个「一百万行每帧 14.5 µs」是 CPU 渲染后端 +
 // Tester + GOMAXPROCS=1 测的，而且没有一个 fixture 是真的界面。
 //
-// 这个是**无头**的，比真窗口乐观，所以只用来盯数量级：变高行的测量要是哪天
+// 这个是**无头**的，比真窗口乐观，所以只用来盯数量级：行高的测量要是哪天
 // 变成了「每一帧把所有行重新量一遍」，这里会从微秒级掉到毫秒级。
 // 跑：go test -bench=. -benchtime=20x ./internal/ui/widgets/list/
 func BenchmarkRedrawAListOfFiveThousand(b *testing.B) {

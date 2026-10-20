@@ -4,7 +4,7 @@
 //
 //	头图区     封面、标题、简介、类型 + 条目数、创建者
 //	操作条     播放全部 / 添加到播放列表 / 收藏星标 / ⋯ 菜单 / 排序下拉 / 多选开关
-//	列表       `widgets/list` 的 PagedList（虚拟滚动 + 变高行 + 行身份）
+//	列表       `widgets/list` 的 PagedList（虚拟滚动 + 定高的行 + 行身份）
 //	批量操作条 多选态才出现（`collectionbatch.go`）
 //
 // 结构照 Biu 的 `src/pages/video-collection/favorites/index.tsx` 的

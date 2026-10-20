@@ -174,6 +174,13 @@ type followPage struct {
 	state     ui.ListState
 	paneState ui.ListState
 
+	// scroll 是右边那一格（那些用户卡片）滚到哪儿了。
+	//
+	// ⚠️ **它只是给「回到顶部」那一枚用的**：这一格自己滚（卡片是方的，行高跟着
+	// 内容走），而那一枚要的是**像素**（上游的阈值是 400 像素），所以位置得由
+	// 框架写回来。
+	scroll ui.ScrollState
+
 	// width 是这一帧量出来的**容器**宽，cols 是按它算出来的列数。
 	//
 	// ⚠️ 判据是容器不是窗口（页面左边有侧栏，差一档就是差一列，理由同
@@ -361,6 +368,23 @@ func (s *Shell) viewFollow(c *ui.Context, _ *ui.Route) {
 			s.viewFollowGrid(c, f)
 		})
 	})
+
+	// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见 `widgets/list` 的
+	// `BackToTop`）。
+	//
+	// ⚠️ **这一页右边那一格自己滚**（那些用户卡片是方的，行高跟着内容走），所以
+	// 位置是像素而不是行数——挂一个 `ScrollState` 上去，让框架把偏移写回来。
+	list.BackToTop(c, f.scroll.Y, f.scrollTop)
+}
+
+// scrollTop 回到顶上。
+//
+// ⚠️ **两样都要归零**：那一份 `ScrollState`（像素）和列表自己的行锚点。少了前者
+// 按钮按下去像是没反应，少了后者列表还停在原来那一行（见 `widgets/list` 的
+// `PagedList.ScrollTop`，那一条也是两样都写）。
+func (f *followPage) scrollTop() {
+	f.scroll.Y = 0
+	f.state.ScrollTo(0, ui.Start)
 }
 
 // viewFollowNotLoggedIn 是「还没登录」那一支。**不发任何请求**。
@@ -625,6 +649,11 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 	// ⚠️ Key 挂在外面的 Column 上，理由见 `dynamicfeed.go`。
 	ui.Column(c).Key("follow-grid").Grow(1).FillHeight().FillWidth().Children(func() {
 		e := ui.List(c, st, n).Grow(1).FillWidth().
+			// ⚠️ **挂上 `ScrollState`**：这一格自己滚（那些卡片是方的，行高跟着内容
+			// 走），而「回到顶部」那一枚要的是**像素**（上游的阈值是 400 像素）。
+			// 这一页**没有 Tab**，列表不会被换掉，所以挂着它不会和行锚点打架
+			//（理由见 `homepage.go` 里「切 Tab 的滚动位置」那一段）。
+			TrackScroll(&f.scroll).
 			Rows(func(r ui.ListRow) { s.viewFollowRow(r.Context, f, r.Index, cols) })
 		// 量这一帧的容器宽，下一帧用。`Bounds` 报的是**上一帧**的盒子。
 		if bw := e.Bounds().W; bw > 0 {

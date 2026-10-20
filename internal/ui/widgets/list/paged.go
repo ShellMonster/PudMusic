@@ -39,32 +39,8 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
-	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/egoist/mygo/ui"
-)
-
-// backToTopIcon 是回顶那一枚里的向上箭头（上游 `RiArrowUpLine`）。
-//
-// ⚠️ 它从 `iconset` 取而**不是**从界面层拿常量：这个包在界面层**下面**，
-// 反过来 import 是个环（见 `iconset` 文件头）。同一个文件在界面层的常量叫
-// `iconToTop`。
-var backToTopIcon = iconset.Must("Arrows/arrow-up-line.svg")
-
-// backTopPx 是滚过多少像素才出现回顶按钮。
-//
-// **400 是死数，照抄** Biu `src/components/scroll-container/index.tsx` 的
-// `setShowBackToTop((viewport?.scrollTop ?? 0) > 400)`。
-const backTopPx = 400
-
-// 回顶按钮摆在哪儿。Biu 是 `fixed right-10 bottom-[120px]`：右边 40（`right-10`
-// 是 2.5rem），离底 120（躲开播放条）。我们照抄这两个数。
-const (
-	backTopRight = 40
-	backTopUp    = 120
-	// backTopRadius 是按钮的圆角：Biu 的 `radius="full"` 是药丸形，圆角给到
-	// 比按钮高度大就等于它。
-	backTopRadius = 999
 )
 
 // maxWakes 是记着的唤醒句柄上限：一个窗口一条，多出来的挤掉最久没画的那个
@@ -630,26 +606,14 @@ func (p *PagedList) footerView(c *ui.Context) {
 }
 
 // viewBackToTop 画回顶按钮：滚过 400 像素才出现。
+//
+// ⚠️ **画法在 `backtotop.go` 那一个出口**：这一枚原先在两个地方各写了一份（本包
+// 这一份，和界面层那两页自己的分页列表），两份的数一样、代码不一样——改一份就有
+// 一页对不上。
 func (p *PagedList) viewBackToTop(c *ui.Context) {
 	// MaxY 是这一帧量出来的最大滚动量：0 就是内容还没列表高，压根滚不动。
-	if p.scroll.Y <= backTopPx || p.scroll.MaxY <= 0 {
+	if p.scroll.MaxY <= 0 {
 		return
 	}
-	t := c.Theme()
-	// Overlay 把按钮浮在整窗之上（不占布局），Biu 的 `fixed` 就是这个意思。
-	// Radius 给一个大数就是 Biu 的 `radius="full"`（药丸形）。
-	ui.Overlay(c, func() {
-		//
-		// 药丸形留着（Biu 的 `ScrollContainer` 那一枚就是 `rounded-full`），
-		// 里面换成一枚向上箭头（上游 `RiArrowUpLine`）。`Label` 仍是「返回顶部」
-		// ——图标对辅助技术是不可见的，而它同时也是无头 Tester 认得这一枚的
-		// 唯一凭据。
-		btn := ui.Button(c, "").Label("返回顶部")
-		btn.Children(func() { ui.Icon(c, backToTopIcon).FontSize(16).TextColor(t.Text) })
-		if btn.Absolute().
-			Right(backTopRight).Bottom(backTopUp).
-			Radius(backTopRadius).Background(t.SurfaceHover).Clicked() {
-			p.ScrollTop()
-		}
-	})
+	BackToTop(c, p.scroll.Y, p.ScrollTop)
 }

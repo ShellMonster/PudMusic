@@ -27,6 +27,12 @@
 // 以列表上下滚它不动；横向没有滚动区（Biu 那一行的列宽是定死的，`1fr` 那一列吃掉剩下的
 // 宽），于是「滚到右边列名还在」这一条天然成立。
 //
+// # 表头**自己**带一条底下的分隔线
+//
+// 上游那一行是 `border-divider ... border-b`：线在表头自己身上，而不是行内的
+// 什么东西。线要说的是「上面这一行是表头」，所以它画在表头这一层里面
+// （见 `Header` 那一段）。
+//
 // # ⚠️ **网格那一档不画表头**
 //
 // 一格是一首歌，表头上那几列和格子对不上号，而对不上的表头在界面上不像坏了（`later.go`
@@ -37,9 +43,17 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// headerFont 是表头上那几个字的字号。12 是 `later.go` / `history.go` 原来那两份用的数，
-// 也是 Biu 那一行表头的数（`text-xs`）。
-const headerFont = 12
+// headerFont 是表头上那几个字的字号。**14** 是上游那一行表头的数
+// （`music-list-item/header.tsx:22` 的 `text-sm`）。
+//
+// ⚠️ 原来是 12：那是行里**次要文字**（UP 名 / 时长 / 播放量）的号。列名用着和
+// 次要文字一样的号、一样的灰，竖着扫下去时它比下面那一列数字还弱——而数字列本来
+// 就是靠表头才对得齐的。上游那边列名 14、次要文字 14、播放量 / 时长 12，列名站在
+// 它们上面。
+const headerFont = 14
+
+// headerLineH 是表头底下那条分隔线的高。上游是 `border-b`（1px）。
+const headerLineH = 1
 
 // CardMetrics 是一行（列表 / 紧凑两档）里的那些尺寸。**表头照它摆。**
 //
@@ -140,33 +154,56 @@ func CardHeaderSpec(v View, check bool, key string) HeaderSpec {
 }
 
 // Header 画那一行表头。**七个页面共用它**，每一页给一份 `HeaderSpec`。
+//
+// # ⚠️ **表头和下面那个列表是兄弟，不是父子**
+//
+// 分隔线画在**表头自己这一层**里面（这一层是「列名那一行 + 底下那条线」两层），
+// 不是塞进行内的 Padding——塞进行内的话那条线会跟着每一行走，而它要说的是
+// 「上面这一行是表头」。
+//
+// 上游那份是 `music-list-item/header.tsx:20-25`：一个 `div` 上带
+// `border-divider mb-2 grid ... border-b text-sm`，也就是**线在表头自己身上**、
+// 下面留 8 的空当。
 func Header(c *ui.Context, spec HeaderSpec) {
 	t := c.Theme()
-	ui.Row(c).Key(spec.Key).FillWidth().Gap(spec.Gap).Padding(spec.PadY, spec.PadX).
-		Children(func() {
-			// ⚠️ 下面这些**只占位不画字**的东西（勾选框那一列、封面那一列）存在的全部
-			// 理由就是让后面的列对得上。给它们塞一个空字符串会让 Tester 的 `Texts()` 里多出
-			// 一堆空串，而「表头对不对得上」这件事是靠 `Find` 拿每一列的盒子量出来的。
-			for range spec.Lead {
-				ui.Box(c).Width(CheckColWidth(c)).Height(0)
-			}
-			for _, col := range spec.Cols {
-				if col.Title == "" {
-					ui.Box(c).Width(col.Width).Height(0)
-					continue
+	ui.Column(c).Key(spec.Key).FillWidth().Children(func() {
+		ui.Row(c).FillWidth().Gap(spec.Gap).Padding(spec.PadY, spec.PadX).
+			Children(func() {
+				// ⚠️ 下面这些**只占位不画字**的东西（勾选框那一列、封面那一列）存在的全部
+				// 理由就是让后面的列对得上。给它们塞一个空字符串会让 Tester 的 `Texts()` 里多出
+				// 一堆空串，而「表头对不对得上」这件事是靠 `Find` 拿每一列的盒子量出来的。
+				for range spec.Lead {
+					ui.Box(c).Width(CheckColWidth(c)).Height(0)
 				}
-				e := ui.Text(c, col.Title).FontSize(headerFont).
-					TextColor(t.TextMuted).MaxLines(1)
-				if col.Width > 0 {
-					e = e.Width(col.Width)
-				} else {
-					e = e.Grow(1)
+				for _, col := range spec.Cols {
+					if col.Title == "" {
+						ui.Box(c).Width(col.Width).Height(0)
+						continue
+					}
+					e := ui.Text(c, col.Title).FontSize(headerFont).
+						TextColor(t.TextMuted).MaxLines(1)
+					if col.Width > 0 {
+						e = e.Width(col.Width)
+					} else {
+						e = e.Grow(1)
+					}
+					if col.End {
+						e = e.TextAlign(ui.End)
+					}
 				}
-				if col.End {
-					e = e.TextAlign(ui.End)
-				}
-			}
-		})
+				// 行尾那枚「⋯」的位置：表头留一个和它一样宽的空位。
+				//
+				// ⚠️ **上游就是这么留的**（`music-list-item/header.tsx:34` 的
+				// `<div className="w-8" />`）：那一列摆的是行尾那枚操作键。留不出这个
+				// 位置的话，表头的最后一列和行里那一枚「⋯」就对不上——而表头和行差
+				// 几像素在画面上只是「表头歪了一点」。
+				ui.Box(c).Width(OperationColWidth).Height(0)
+			})
+
+		// 分隔线。**它是表头的一部分**，所以画在这一层里面，而不是塞进行内的
+		// Padding。
+		ui.Box(c).FillWidth().Height(headerLineH).Background(t.Border)
+	})
 }
 
 // Header 画这个列表顶上那一行表头。

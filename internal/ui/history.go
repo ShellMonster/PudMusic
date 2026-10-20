@@ -187,8 +187,10 @@ func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 	face := libraryRowFace(t, r.Selected(), playing)
 
 	// ⚠️ **hover 要在 Children 之前问**（同 `widgets/list/card.go` 里那一处）。
+	//
+	// ⚠️ **行高定死**（`mt.height`）：理由同 `drawLaterRow` 里那一处。
 	row := ui.Row(c).Key("history-row:"+m.ID).AlignSelf(ui.Stretch).Gap(mt.gap).
-		Padding(mt.padY, mt.padX)
+		Padding(mt.padY, mt.padX).Height(mt.height)
 	onRow := row.Hovered()
 
 	return row.Children(func() {
@@ -199,6 +201,13 @@ func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 			TextAlign(ui.End).FontSize(12).TextColor(t.TextMuted).MaxLines(1)
 		ui.Text(c, viewedAtText(m.ViewedAt)).Width(mt.viewedAt).
 			TextAlign(ui.End).FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+
+		// 行尾那枚「⋯」。点开的是**这一行的菜单**，和右键同一份（理由同
+		// `drawLaterRow` 里那一处）。
+		ui.Box(c).Width(list.OperationColWidth).Children(func() {
+			list.Operation(c, list.OperationLabel(m.Title), face.title,
+				func(m *ui.Menu) { rows.menu(m, r.Index) })
+		})
 	})
 }
 
@@ -232,6 +241,12 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected boo
 	onCell := box.Hovered()
 
 	return box.Children(func() {
+		// 格子右上角那枚「⋯」。点开的是**这一格的菜单**，和右键同一份
+		//（理由见 `drawLaterCell` 里那一处）。
+		list.OperationCorner(c, list.OperationLabel(m.Title), func(m *ui.Menu) {
+			rows.menu(m, i)
+		})
+
 		// 封面 + 它上面那圈 hover 反馈：右下角一个 40 的主色圆播放钮，封面底部一条
 		// black/90 的渐变。**左边那一半空着**：历史记录的接口不给播放量（见
 		// `libraryRow.View` 的注释），画一列空白比不画更难看。
