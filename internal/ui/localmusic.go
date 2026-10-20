@@ -343,7 +343,42 @@ func (p *localPage) view(c *ui.Context) {
 	// 但放最后能保证这一帧的内容已经建完了。
 	p.viewDeleteDialog(c)
 	p.viewRemoveDirDialog(c)
+
+	// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见 `widgets/list` 的
+	// `BackToTop`）。
+	//
+	// ⚠️ **这一页有两档**：卡片那一档（列表 / 紧凑 / 网格）走的是
+	// `ScrollOffset`（行高定死，算得准）；表格那一档自己滚，而它内部那个滚动
+	// 容器的像素偏移拿不到，所以那一档按行换算（见 `localTableOffset`）。
+	if p.style == localStyleTable {
+		list.BackToTop(c, p.localTableOffset(), p.localTableTop)
+	} else {
+		list.BackToTop(c, p.cards.ScrollOffset(), p.cardsTop)
+	}
 }
+
+// localTableRowPx 是本地音乐那一档表格里一行的高：操作那一列那枚键（28）+ `ui.Table`
+// 给每一行的上下内边距（6+6）。
+//
+// ⚠️ **它只用来把「顶上那一行是第几行」换算成像素**（回顶按钮的阈值是 400
+// 像素）。这一页的表格自己滚，而它内部那个滚动容器的像素偏移拿不到。
+//
+// ⚠️ **它是量出来的那一个数**（`TestTheTableRowHeightsAreWhatTheOffsetsAssume`
+// 钉着）：那一行的高由最高的格子决定（操作那一列的键），改了那一列的字号就得
+// 跟着改它。
+const localTableRowPx = 40
+
+// localTableOffset 是表格那一档滚过了多少像素。
+func (p *localPage) localTableOffset() float32 {
+	first, _ := p.table.Visible()
+	return float32(first) * localTableRowPx
+}
+
+// localTableTop 表格那一档回到顶上。
+func (p *localPage) localTableTop() { p.table.ScrollTo(0, ui.Start) }
+
+// cardsTop 卡片那一档回到顶上。
+func (p *localPage) cardsTop() { p.cards.ScrollTo(0, ui.Start) }
 
 // viewHead 是标题那一行：标题、展示样式切换、添加目录。
 func (p *localPage) viewHead(c *ui.Context) {

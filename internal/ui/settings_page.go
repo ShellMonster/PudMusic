@@ -23,6 +23,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -175,6 +176,13 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 				})
 			})
 		})
+
+	// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见 `widgets/list` 的
+	// `BackToTop`）。
+	//
+	// ⚠️ **这一页滚的是整页**（外面那个 `ui.Scroll`），不是某一栏——所以位置就是
+	// 那一个 `ScrollState`。
+	list.BackToTop(c, s.settings.scroll.Y, func() { s.settings.scroll.Y = 0 })
 }
 
 // settingSection 是一组设置上面的那个标题。Biu 用的是 `<h2>`（system-settings.tsx

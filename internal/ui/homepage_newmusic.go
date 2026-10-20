@@ -400,8 +400,8 @@ func (g *newMusicGrid) viewHeader(c *ui.Context, total int) {
 // 所以只有 UP 名）。
 //
 // ⚠️ 歌名和 UP 名都是 `MaxLines(1)`（上游两行都是 `line-clamp-1`），所以这一块
-// **没有变高行**：卡片的高就是「封面 + 两行字 + 两道缝」，每一格都一样。widgets/list
-// 里「别钉死行高」那条规矩管的是虚拟列表的行（行高要按内容量），和这里不是一回事
+// **每一格都一样高**：卡片的高就是「封面 + 两行字 + 两道缝」。widgets/list 的
+// 列表行现在也是**定死行高**的（`card.go` 的文件头），而这一块是它自己的一档
 // ——别顺手把 MaxLines 去掉，那一格会比旁边的高，整块网格的边就对不齐了。
 func (g *newMusicGrid) viewCard(c *ui.Context, i int, cell float32) {
 	m := g.songs[i]

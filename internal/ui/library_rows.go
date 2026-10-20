@@ -89,18 +89,6 @@ const maxWakes = 4
 // 看到的就是「这两个页面对不上」。
 const gridGap = list.GridGap
 
-// backTopPx 是滚过多少像素才出现回顶按钮。**400 是死数，照抄**
-// Biu `src/components/scroll-container/index.tsx`。
-const backTopPx = 400
-
-// 回顶按钮摆在哪儿。Biu 是 `fixed right-10 bottom-[120px]`（躲开播放条）。
-const (
-	backTopRight  = 40
-	backTopBottom = 120
-	// backTopRadius 是药丸形（Biu 的 `radius="full"`）。
-	backTopRadius = 999
-)
-
 // pagedRows 是一个会自己往下翻页的行列表。
 //
 // 建一次，存进页面自己的状态里，每一帧调 View。
@@ -682,32 +670,18 @@ func (p *pagedRows) viewFooter(c *ui.Context) {
 		})
 }
 
-// backToTopIcon 是回顶那一枚里的向上箭头（上游 `RiArrowUpLine`）。
-var backToTopIcon = icon(iconToTop)
-
 // viewBackToTop 画回顶按钮：滚过 400 像素才出现。
+//
+// ⚠️ **画法在 `widgets/list` 的 `BackToTop` 那一个出口**：这一枚原先在这个文件和
+// `widgets/list/paged.go` 里各写了一份，两份的数一样、代码不一样——改一份就有
+// 一页对不上。那四个数（阈值 400、距右 40、距下 120、圆角全圆）是照上游抄的，
+// 理由写在那一个出口的文件头上。
 func (p *pagedRows) viewBackToTop(c *ui.Context) {
 	// MaxY 是这一帧量出来的最大滚动量：0 就是内容还没列表高，压根滚不动。
-	if p.scroll.Y <= backTopPx || p.scroll.MaxY <= 0 {
+	if p.scroll.MaxY <= 0 {
 		return
 	}
-	t := c.Theme()
-	// Overlay 把按钮浮在整窗之上（不占布局），Biu 的 `fixed` 就是这个意思。
-	// Radius 给一个大数就是 Biu 的 `radius="full"`（药丸形）。
-	ui.Overlay(c, func() {
-		//
-		// 药丸形留着（Biu 的 `ScrollContainer` 那一枚就是 `rounded-full`），
-		// 里面换成一枚向上箭头（上游 `RiArrowUpLine`）。`Label` 仍是「返回顶部」
-		// ——图标对辅助技术是不可见的，而它同时也是无头 Tester 认得这一枚的
-		// 唯一凭据。
-		btn := ui.Button(c, "").Label("返回顶部")
-		btn.Children(func() { ui.Icon(c, backToTopIcon).FontSize(16).TextColor(t.Text) })
-		if btn.Absolute().
-			Right(backTopRight).Bottom(backTopBottom).
-			Radius(backTopRadius).Background(t.SurfaceHover).Clicked() {
-			p.ScrollTop()
-		}
-	})
+	list.BackToTop(c, p.scroll.Y, p.ScrollTop)
 }
 
 // playingMark 是「这一行正在放」那个标记。

@@ -52,6 +52,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -274,6 +275,39 @@ func (s *Shell) viewDownloadList(c *ui.Context, _ *ui.Route) {
 	// 弹窗画在这一列**外面**：它盖的是整个窗口，一个 `Grow(1)` 的页面列里
 	// 放它的话面板会跟着页面走位。
 	d.viewConfirm(c, s)
+
+	// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见 `widgets/list` 的
+	// `BackToTop`）。
+	//
+	// ⚠️ **这一页的表格自己滚**，而它内部那个滚动容器的像素偏移**拿不到**
+	//（`ui.Table` 没把它露出来），所以这里的「滚过了多少」是从**顶上那一行是第
+	// 几行**换算的（`dlRowPx` 是这一行的高：封面 48 + 表格那一行的上下内边距
+	// 6+6）。
+	list.BackToTop(c, d.tableOffset(), d.scrollTop)
+}
+
+// dlRowPx 是下载记录那一行的高：封面 `dlCover`（48）+ `ui.Table` 给每一行的上下
+// 内边距（6+6）。
+//
+// ⚠️ **它只用来把「顶上那一行是第几行」换算成像素**（回顶按钮的阈值是 400 像素）。
+// 改了 `dlCover` 就要跟着改它——差几像素的话按钮早一点或晚一点出现。
+const dlRowPx = dlCover + 12
+
+// tableOffset 是这一屏滚过了多少像素。
+//
+// ⚠️ **它是换算出来的**（见 `dlRowPx`）：这一页的表格自己滚，而它内部那个滚动
+// 容器的像素偏移拿不到。
+func (d *downloadsPage) tableOffset() float32 {
+	first, _ := d.state.Visible()
+	return float32(first) * dlRowPx
+}
+
+// scrollTop 回到顶上。
+//
+// ⚠️ **回的是表格自己的行锚点**（`ListState.ScrollTo`）：这一页滚的是表格内部的
+// 那个列表，别处没有第二份位置要归零。
+func (d *downloadsPage) scrollTop() {
+	d.state.ScrollTo(0, ui.Start)
 }
 
 // emptyState 是这一页空着的时候说的那两句话。
