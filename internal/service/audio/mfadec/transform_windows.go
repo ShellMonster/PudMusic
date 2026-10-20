@@ -89,27 +89,21 @@ type inputVariant struct {
 // 能推出来的——SDK 的文档只写了「`MFAudioFormat_AAC` 认裸 AAC 和 ADTS」，
 // 但**带不带 `MF_MT_USER_DATA`**（也就是 AudioSpecificConfig）文档没写死。
 //
-// 所以这里把两种 payload × 两种 user data 的组合都试一遍，**用第一个被
-// 认的**。认了哪一个，spike 会打出来（`TestSpikeWhichInputTypesTheDecoder
-// Accepts`），产品那一票照着它接就行。
-func inputVariants(rate, chans int, asc []byte) []inputVariant {
-	both := []uint32{aacPayloadRaw, aacPayloadADTS}
-	out := make([]inputVariant, 0, 4)
-	for _, pt := range both {
-		for _, ud := range []bool{true, false} {
-			name := "裸 AAC"
-			if pt == aacPayloadADTS {
-				name = "ADTS"
-			}
-			if ud {
-				name += " + MF_MT_USER_DATA（AudioSpecificConfig）"
-			} else {
-				name += "，不带 MF_MT_USER_DATA"
-			}
-			out = append(out, inputVariant{name: name, payloadType: pt, userData: ud})
-		}
+// ⚠️ **payloadType 是调用方定的，不能换**：调用方手里是裸 AAC 帧还是带 ADTS
+// 头的帧，是**它自己的事**——换一种喂法，喂进去的字节就对不上了。所以这里
+// 只在**同一个 payload type** 上换 user data 这一位。
+//
+// 认了哪一个，spike 会打出来（`TestSpikeWhichInputTypesTheDecoderAccepts`
+// 那边把四种组合都试一遍），产品那一票照着它接就行。
+func inputVariants(payloadType uint32) []inputVariant {
+	name := "裸 AAC"
+	if payloadType == aacPayloadADTS {
+		name = "ADTS"
 	}
-	return out
+	return []inputVariant{
+		{name: name + " + MF_MT_USER_DATA（AudioSpecificConfig）", payloadType: payloadType, userData: true},
+		{name: name + "，不带 MF_MT_USER_DATA", payloadType: payloadType, userData: false},
+	}
 }
 
 // open 是真正建 MFT 的那部分，跑在 COM 线程上。
@@ -125,7 +119,7 @@ func (c *Codec) open(rate, chans int, asc []byte, payloadType uint32) error {
 	// ⚠️ 首选是「调用方要的那一种」（payloadType 参数指定的），试不通再换。
 	var lastErr error
 	accepted := ""
-	for _, v := range inputVariants(rate, chans, asc) {
+	for _, v := range inputVariants(payloadType) {
 		input, err := c.buildInputTypeWith(rate, chans, asc, v.payloadType, v.userData)
 		if err != nil {
 			lastErr = err
