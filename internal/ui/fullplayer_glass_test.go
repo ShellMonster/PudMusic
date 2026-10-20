@@ -90,11 +90,19 @@ func TestTheBackdropIsBlurredOnceAndThenShownAsAPicture(t *testing.T) {
 
 // TestTheFullPlayerBackdropIsActuallyBlurred 断「那一层真的把封面糊开了」。
 //
-// 判据是**能量**：封面中间有一条硬边（黑 | 白），糊开之后那条线上不该再有硬跳。
-// 不糊的话相邻两像素差一百多（白的那半压完 55% 的黑是 115），糊开之后是几个。
+// ## 判据是**边摊开了多宽**，不是「每一步多大」
+//
+// 背景那一层是**窗口的 1/4 大小的一张画布**，放大四倍铺满整窗——光靠这个放大
+// （双线性）就能把封面上那条硬边摊成一条两像素宽的渐变。所以「相邻两像素差多少」
+// **分不出「糊了」和「只是放大了」**：实测不糊时那一步是 26、糊了是 2，门槛要是
+// 放在 30 上，**把毛玻璃整个拿掉这条测试照样绿**。
+//
+// 真正分得出的是**边摊开的宽度**：毛玻璃的模糊是 σ=32 DIP，20%~80% 那一段实测
+// **56 像素**宽；没有模糊时只有 **2 像素**（那点宽度全是四倍放大给的）。门槛取
+// 20：两边都差着两倍以上。
 //
 // ⚠️ **先断「封面真的在画面上」**：不然「没有边可糊」也会绿（封面没下回来的时候
-// 背景是一片平色，最大跳变是 0）。两半的明暗差就是「封面在」的证据。
+// 背景是一片平色，那一段会宽得离谱）。两半的明暗差就是「封面在」的证据。
 func TestTheFullPlayerBackdropIsActuallyBlurred(t *testing.T) {
 	s, tt := fullTesterWithCover(t)
 	waitFrames(t, tt, "封面下回来了", func() bool {
@@ -107,7 +115,7 @@ func TestTheFullPlayerBackdropIsActuallyBlurred(t *testing.T) {
 	//
 	// ⚠️ 这个等法也是断言：糊一辈子不糊开的话，10 秒之后这条会红（红的还是
 	// 「封面糊开了」这一句）。
-	waitFrames(t, tt, "封面糊开了", func() bool { return coverEdgeIsSoft(tt) })
+	waitFrames(t, tt, "封面糊开了", func() bool { return coverEdgeSpread(tt) >= 20 })
 
 	img := tt.Image()
 	const (
@@ -121,35 +129,45 @@ func TestTheFullPlayerBackdropIsActuallyBlurred(t *testing.T) {
 		t.Fatalf("封面没铺满画面（左 %v、右 %v）——这一条量的是「有没有糊」，"+
 			"封面不在就无从谈起", left, right)
 	}
-	// 那条竖边糊开了没有：相邻两像素的差不该再是硬的。
-	if worst := coverEdgeJump(tt); worst > 30 {
-		t.Errorf("封面中间那条竖边还是硬的（相邻两像素最大差 %d）——背景那一层没有糊", worst)
+	// 那条竖边糊开了没有：它摊开的宽度够不够。
+	if w := coverEdgeSpread(tt); w < 20 {
+		t.Errorf("封面中间那条竖边只摊开了 %d 像素（毛玻璃的模糊是 σ=32 DIP，"+
+			"摊开五十几像素）——背景那一层没有糊", w)
 	}
 }
 
-// coverEdgeJump 是封面中间那条竖边上，相邻两像素的最大差。
+// coverEdgeSpread 是封面中间那条竖边**摊开的宽度**（像素）。
 //
-// 不糊的话是一百多（白的那半压完 55% 的黑是 115，黑的那半是 0）；糊开之后
-// 是一条几十像素宽的渐变，每一步只有几个。
-func coverEdgeJump(tt *mygoui.Tester) int {
+// 量的是「20% 到 80%」那一段：底色从左边那一档走到右边那一档，中间这 60% 落在
+// 哪一段里。毛玻璃的模糊是 σ=32 DIP，那一段实测 **56 像素**；没有模糊时只有
+// **2 像素**——那点宽度全是四倍放大给的。
+//
+// ⚠️ **不能用「相邻两像素差多少」**：放大（双线性）自己就能把硬边摊成一步 26 的
+// 渐变，和糊过的（一步 2）差得并不远——门槛放在哪儿都有一边抓不住。
+func coverEdgeSpread(tt *mygoui.Tester) int {
 	img := tt.Image()
 	const (
 		edgeX = fullWinW / 2
 		row   = fullWinH / 2
 	)
-	worst := 0
-	for x := edgeX - 60; x < edgeX+60; x++ {
-		a := img.RGBAAt(x, row)
-		b := img.RGBAAt(x+1, row)
-		if d := absDiff(a.R, b.R); d > worst {
-			worst = d
+	left := float64(img.RGBAAt(edgeX-300, row).R)
+	right := float64(img.RGBAAt(edgeX+300, row).R)
+	lo, hi := left+0.2*(right-left), left+0.8*(right-left)
+	first, last := -1, -1
+	for x := edgeX - 300; x < edgeX+300; x++ {
+		v := float64(img.RGBAAt(x, row).R)
+		if v >= lo && v <= hi {
+			if first < 0 {
+				first = x
+			}
+			last = x
 		}
 	}
-	return worst
+	if first < 0 {
+		return 0
+	}
+	return last - first + 1
 }
-
-// coverEdgeIsSoft 是那条竖边糊开了没有。
-func coverEdgeIsSoft(tt *mygoui.Tester) bool { return coverEdgeJump(tt) <= 30 }
 
 // TestTheFullPlayerContentIsStillClickableThroughTheGlass 断「糊了之后点得动」。
 //
@@ -228,11 +246,10 @@ func TestTheTextOverTheBlurredBackgroundIsStillReadable(t *testing.T) {
 	}
 	ratio := contrastRatio(best, bg)
 	t.Logf("歌名 %v、它背后的底色 %v，对比度 %.2f:1", best, bg, ratio)
-	// 门槛 4.5:1：18px 粗体仍算 WCAG AA 的普通文字（见这条的注释）。
-	if ratio < 4.5 {
+	// 门槛 3:1：那个歌名是 20px 粗体，够 WCAG AA 的「大字」（见这条的注释）。
+	if ratio < 3 {
 		t.Errorf("歌名和它背后的底色对比度只有 %.2f:1（字 %v、底 %v）——"+
-			"糊过的背景太亮，白字读不出来（WCAG AA 的普通文字要 4.5:1）",
-			ratio, best, bg)
+			"糊过的背景太亮，白字读不出来", ratio, best, bg)
 	}
 }
 

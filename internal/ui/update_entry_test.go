@@ -99,6 +99,43 @@ func TestTheCheckUpdateButtonTurnsAndGreysOut(t *testing.T) {
 	waitFor(t, "查完", func() bool { return b.a.UpdateSnapshot().Phase != app.UpdateChecking })
 }
 
+// TestTheBusyUpdateButtonKeepsItsText 断「忙的时候按钮保留着字」。
+//
+// ⚠️ **不能把字换成转圈**：换掉之后按钮从「带字的那一枚」缩成一枚 42 像素宽的
+// 小方块（实测 {x=1130, y=663, w=42, h=26}），状态一变宽度就跳一下——而旧写法
+// 是**保留文字**换成「正在检查…」。转圈的那一枚是**加**上去的，不是替掉字的。
+//
+// 判据是**那一枚有多宽**：字在（白 92% 的「正在检查…」有 60 上下）就够，转圈独占
+// 的话只有十几像素那么宽。
+func TestTheBusyUpdateButtonKeepsItsText(t *testing.T) {
+	gu := &gatedUpdate{gate: make(chan struct{})}
+	gu.enabled = true
+	gu.version = "0.1.0"
+	b := newTestShell(t,
+		withSettings(app.DefaultSettings("")),
+		mounted(func(_ *testing.T, a *app.App) {
+			a.MountUpdates(gu, filepath.Join(t.TempDir(), "app-update.json"))
+		}))
+	tt := b.tt
+	tt.Frame()
+	openSettings(t, tt)
+
+	f := &updFixture{t: t, tt: tt, s: b.s, a: b.a, be: &gu.fakeUpdate}
+	f.pressEntry(t, "检查更新")
+	waitFor(t, "查起来了", func() bool { return b.a.UpdateSnapshot().Phase == app.UpdateChecking })
+	tt.Frame()
+
+	box, ok := tt.Find("正在检查…")
+	if !ok {
+		t.Fatalf("忙的时候按钮上没有「正在检查…」那一句，文字有 %q", tt.Texts())
+	}
+	if box.W < 50 {
+		t.Errorf("忙的时候按钮只有 %v 宽——字被转圈替掉了（那是 42 像素的小方块，"+
+			"状态一变宽度就跳一下）", box)
+	}
+	close(gu.gate)
+}
+
 // changedIn 是两帧之间在 box 里变了的像素个数。
 func changedIn(a, b *image.RGBA, box mygoui.Rect) bool {
 	for y := max(int(box.Y), a.Rect.Min.Y); y < min(int(box.Y+box.H), a.Rect.Max.Y); y++ {

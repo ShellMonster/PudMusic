@@ -144,10 +144,20 @@ func (s *Shell) settingsUpdateButton(c *ui.Context, st app.UpdateState) {
 		// 只靠字说，没有一个能一眼看出来的样子。
 		//
 		// 指示器是框架现成的 `ui.Spinner`（转动的辐条，和 AppKit 那个一样），不
-		// 另起一套动画。按钮上那一句没丢：它是这个按钮的**无障碍名字**
-		// （`Label`），读屏的人听到的还是「正在检查…」。
+		// 另起一套动画。
+		//
+		// ⚠️ **字不能拿掉**：拿掉之后按钮从「带字的那一枚」缩成一枚 42 像素宽的
+		// 小方块（实测 {x=1130, y=663, w=42, h=26}），状态一变宽度就跳一下——
+		// 而旧写法是**保留文字**换成「正在检查…」。转圈的那一枚是**加**上去的，
+		// 不是替掉字的。
+		//
+		// 按钮上那一句也仍然是这个按钮的**无障碍名字**（`Label`），读屏的人听到
+		// 的还是「正在检查…」。
 		ui.PrimaryButton(c, "").Disabled(true).Label(label).Children(func() {
-			ui.Spinner(c).Size(14, 14).TextColor(c.Theme().AccentText)
+			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+				ui.Spinner(c).Size(14, 14).TextColor(c.Theme().AccentText)
+				ui.Text(c, label).FontSize(c.Theme().FontSize)
+			})
 		})
 	case onClick == nil:
 		// 这一版不能自动更新：按钮关着，**字留着**（为什么不能，下面那句话说了）。
