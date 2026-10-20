@@ -310,12 +310,16 @@ func TestTheVtableSlotsAreWhereTheSDKPutsThem(t *testing.T) {
 		}
 	})
 
-	t.Run("IMFSample：前面 38 个槽位是祖先的", func(t *testing.T) {
-		// 3（IUnknown）+ 30（IMFAttributes）+ 5（IMFMediaType）= 38。
-		const ancestors = 3 + attributesMethodsAfterIUnknown + mediaTypeMethodsAfterIUnknown
-		if ancestors != mediaTypeTotalSlotsIncludingIUnk {
-			t.Fatalf("祖先占了 %d 个槽位，IMFMediaType 算下来是 %d 个，和 SDK 对不上",
-				ancestors, mediaTypeTotalSlotsIncludingIUnk)
+	t.Run("IMFSample：前面 33 个槽位是祖先的", func(t *testing.T) {
+		// 3（IUnknown）+ 30（IMFAttributes）= 33。
+		//
+		// ⚠️ **IMFSample 继承的是 IMFAttributes，不是 IMFMediaType**——
+		// 微软的 IMFSample 文档和 SDK 的 `IMFSampleVtbl` 都这么写。
+		// 按「38 个祖先槽位」算出来的下标（AddBuffer=47 那一组）是错的，
+		// 而错成 47 的后果是**读越过那张只有 47 格的虚表**。
+		const ancestors = 3 + attributesMethodsAfterIUnknown
+		if ancestors != 33 {
+			t.Fatalf("祖先占了 %d 个槽位，和 SDK 对不上", ancestors)
 		}
 		// 本接口 14 个方法：GetSampleFlags、SetSampleFlags、GetSampleTime、
 		// SetSampleTime、GetSampleDuration、SetSampleDuration、GetBufferCount、
@@ -347,6 +351,22 @@ func TestTheVtableSlotsAreWhereTheSDKPutsThem(t *testing.T) {
 		if want := ancestors + sampleMethodsAfterIUnknown - 1; vtblSampleGetTotalLength+1 != want {
 			t.Errorf("最后一个方法（CopyToBuffer）该落在 %d", want)
 		}
+		// 整张虚表 47 格：读第 47 格就是越过末尾——所以任何下标都不得 >= 47。
+		if sampleTotalSlotsIncludingIUnk != 47 {
+			t.Errorf("IMFSample 的虚表一共 %d 格，SDK 里是 47 格", sampleTotalSlotsIncludingIUnk)
+		}
+		for name, slot := range map[string]int{
+			"GetBufferCount":            vtblSampleGetBufferCount,
+			"GetBufferByIndex":          vtblSampleGetBufferByIndex,
+			"ConvertToContiguousBuffer": vtblSampleConvertToContig,
+			"AddBuffer":                 vtblSampleAddBuffer,
+			"GetTotalLength":            vtblSampleGetTotalLength,
+		} {
+			if slot >= sampleTotalSlotsIncludingIUnk {
+				t.Errorf("%s 的槽位 %d 越过了那张只有 %d 格的虚表",
+					name, slot, sampleTotalSlotsIncludingIUnk)
+			}
+		}
 	})
 
 	t.Run("IMFMediaType：自己的 5 个方法排在 IMFAttributes 之后", func(t *testing.T) {
@@ -356,6 +376,9 @@ func TestTheVtableSlotsAreWhereTheSDKPutsThem(t *testing.T) {
 		}
 		if mediaTypeMethodsAfterIUnknown != 5 {
 			t.Errorf("IMFMediaType 一共 %d 个方法，SDK 里是 5 个", mediaTypeMethodsAfterIUnknown)
+		}
+		if mediaTypeTotalSlotsIncludingIUnk != 38 {
+			t.Errorf("IMFMediaType 的虚表一共 %d 格，SDK 里是 38 格", mediaTypeTotalSlotsIncludingIUnk)
 		}
 	})
 

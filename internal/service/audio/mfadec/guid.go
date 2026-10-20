@@ -316,26 +316,45 @@ const (
 )
 
 // IMFMediaType（um/mfobjects.h）：它**继承** IMFAttributes，所以前面那 33 个
-// （3 + 30）是祖先的，一个都不能跳。本接口自己 5 个。
+// （3 + 30）是祖先的，一个都不能跳。本接口自己 5 个——所以它的虚表一共
+// 38 格。
 //
-// 本包用不到 IMFMediaType 自己的方法（`GetMajorType` 那些），
-// 但继承关系得记在这儿——它决定了 IMFMediaType 的总槽位数是 38，
-// 而 IMFSample 正是从 38 开始的。
+// 本包用不到 IMFMediaType 自己的方法（`GetMajorType` 那些），但槽位数得
+// 记在这儿。
 const (
 	vtblMediaTypeGetMajorType        = 33
 	mediaTypeMethodsAfterIUnknown    = 5
 	mediaTypeTotalSlotsIncludingIUnk = 38
 )
 
-// IMFSample（um/mfobjects.h）：它**继承** IMFMediaType，所以前面那 38 个
-// （3 + 30 + 5）是祖先的，一个都不能跳。本接口自己 14 个。
+// IMFSample（um/mfobjects.h）：它**继承** IMFAttributes——**不是** IMFMediaType。
+// 所以前面那 33 个（3 + 30）是祖先的，一个都不能跳，本接口自己 14 个，
+// 虚表一共 47 格。
+//
+// ⚠️⚠️ **这里写错过一次（BMG-68 传下来的），而且它自己的测试是绿的。**
+// 原来以为 IMFSample 继承 IMFMediaType，按「38 个祖先槽位」算，得出
+// AddBuffer = 47、GetBufferByIndex = 45。
+//
+// **真相**：微软的 `IMFSample` 文档白纸黑字写着「The IMFSample interface
+// inherits from IMFAttributes」，SDK 的 `IMFSampleVtbl` 结构体也数得清清楚楚：
+// 47 格，33~46 是它自己的 14 个方法。
+//
+// 错成 47 的后果**不是报错，是崩**：那张虚表只有 47 格（0~46），
+// 读第 47 格是**越过数组末尾**，拿到的是一串垃圾，当函数指针调下去就是崩。
+// 错成 45 的更阴：`GetBufferByIndex` 那一格其实是 `GetTotalLength`——
+// 返回一个 DWORD，被当指针用。
+//
+// 教训：**「测过了」和「测对了」是两件事**。断言值和被测值来自同一个错误
+// 假设的时候，测试一定是绿的——所以下标要对**头文件里的虚表结构体**核，
+// 而不是对着「继承链」推。
 const (
-	vtblSampleGetBufferCount   = 44
-	vtblSampleGetBufferByIndex = 45
-	vtblSampleConvertToContig  = 46
-	vtblSampleAddBuffer        = 47
-	vtblSampleGetTotalLength   = 50
-	sampleMethodsAfterIUnknown = 14
+	vtblSampleGetBufferCount      = 39
+	vtblSampleGetBufferByIndex    = 40
+	vtblSampleConvertToContig     = 41
+	vtblSampleAddBuffer           = 42
+	vtblSampleGetTotalLength      = 45
+	sampleMethodsAfterIUnknown    = 14
+	sampleTotalSlotsIncludingIUnk = 47
 )
 
 // IMFMediaBuffer（um/mfobjects.h）：前 3 个是 IUnknown 的，本接口 5 个。
