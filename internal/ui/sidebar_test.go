@@ -675,6 +675,133 @@ func TestTheSidebarShowsTheAppNameExactlyOnce(t *testing.T) {
 	}
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 折叠态的悬停提示、收藏夹名的截断
+// ─────────────────────────────────────────────────────────────────────────────
+
+// collapsedShell 造一个**折叠着**的侧栏。
+//
+// ⚠️ 折叠后的宽度过渡是 200ms 的动画，无头 Tester 一帧最多 settle 20 帧，
+// 走不完——所以开了 ReduceMotion，动画直接落到终点（理由同 `sideShell`）。
+func collapsedShell(t *testing.T) (*Shell, *app.App, *mygoui.Tester) {
+	t.Helper()
+	st := app.DefaultSettings("")
+	st.SideMenuCollapsed = true
+	s, tt := newShell(t, withSettings(st),
+		withPrefs(mygoui.Preferences{ReduceMotion: true, TextScale: 1}))
+	tt.Frame()
+	return s, s.app, tt
+}
+
+// TestTheCollapsedSidebarItemSaysItsName 钉住验收第 1 条：
+// 折叠后每一项在悬停时给出名称提示。
+//
+// 折叠态那一格只有一个字（上游摆的是图标，而那一档还没换），没有字可以让用户
+// 对照着认——这一格完全靠记忆。
+//
+// ⚠️ **悬停提示要指针停够 0.6 秒才出**（`mygo/ui/tooltip.go` 的 tooltipDelay），
+// 所以是 Move + Advance + Frame，不是 Move + Frame。
+//
+// ⚠️ **认的是「下载记录」而不是「推荐音乐」**：后者是当前那一页的**路由容器**
+// 的无障碍名字（`mygo/ui/router.go` 给路由容器 `Label(e.title)`），它本来就
+// 在画面上——拿它当判据的话，这条测试折不折叠都通过，等于空跑。
+func TestTheCollapsedSidebarItemSaysItsName(t *testing.T) {
+	_, _, tt := collapsedShell(t)
+
+	// 折叠态那一列摆的是每个标题的第一个字。
+	r, ok := tt.Find("下")
+	if !ok {
+		t.Fatalf("折叠态的侧栏上没有「下载记录」那一个字，文字有 %q", tt.Texts())
+	}
+	if tt.HasText("下载记录") {
+		t.Fatalf("还没悬停就把名字说出来了，文字有 %q", tt.Texts())
+	}
+
+	tt.Move(r.X+r.W/2, r.Y+r.H/2)
+	tt.Advance(700 * time.Millisecond)
+	tt.Frame()
+
+	if !tt.HasText("下载记录") {
+		t.Errorf("悬停的时候没有说出这一项是什么，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheCollapsedSidebarTipSitsToTheRightOfTheItem 钉住提示的**位置**。
+//
+// 上游折叠态那一项的提示是 `placement="right"`
+// （`biu/src/components/menu/menu-item.tsx:98-99`）——贴在那一项的右边。
+// 摆在上面的话提示会盖住上面那几项（侧栏只有 72 宽，摆不下别的东西），
+// 而摆在左边会被窗口边钳住。
+func TestTheCollapsedSidebarTipSitsToTheRightOfTheItem(t *testing.T) {
+	_, _, tt := collapsedShell(t)
+
+	r, ok := tt.Find("下")
+	if !ok {
+		t.Fatalf("折叠态的侧栏上没有「下载记录」那一个字，文字有 %q", tt.Texts())
+	}
+	tt.Move(r.X+r.W/2, r.Y+r.H/2)
+	tt.Advance(700 * time.Millisecond)
+	tt.Frame()
+
+	tip, ok := tt.Find("下载记录")
+	if !ok {
+		t.Fatalf("悬停的时候没有说出这一项是什么，文字有 %q", tt.Texts())
+	}
+	// 侧栏折叠后是 72 宽（`app.CollapsedSideMenuWidth`），提示得在它右边。
+	if tip.X < app.CollapsedSideMenuWidth {
+		t.Errorf("提示摆在侧栏里面（x=%.1f < %.0f），文字有 %q",
+			tip.X, app.CollapsedSideMenuWidth, tt.Texts())
+	}
+}
+
+// TestALongFavoriteNameDoesNotMakeTheRowTaller 钉住验收第 2 条：
+// 长收藏夹名**不换行**（断高度不变）。
+//
+// 收藏夹名一长（比如「【长期主义】2026 年度歌单合集·最终版」），侧栏那一行
+// 会长高一截，把下面的收藏夹整体顶下去，侧栏跟着抖。侧栏只有 160~480 宽，
+// 超过约 20 个汉字就换行。
+//
+// ⚠️ **断的是高度，不是「有没有省略号」**：画面上那行字被截断了没有，画面上
+// 看不出来（省略号是画出来的，而截断的字和没截断的字**一样高**）——
+// 能分出来的只有「这一行有没有变高」。
+func TestALongFavoriteNameDoesNotMakeTheRowTaller(t *testing.T) {
+	_, a, tt, _ := favShell(t, 0, 0)
+
+	const longName = "【长期主义】2026 年度歌单合集·最终版"
+	a.SetFavorites(app.FavoritesCreated, []app.Favorite{
+		{ID: 1, Title: "短名字", Mid: 42, Type: 2},
+		{ID: 2, Title: longName, Mid: 42, Type: 2},
+		{ID: 3, Title: "第三首", Mid: 42, Type: 2},
+	})
+	tt.Frame()
+
+	first, ok := tt.Find("短名字")
+	if !ok {
+		t.Fatalf("侧栏上没有第一条收藏夹，文字有 %q", tt.Texts())
+	}
+	middle, ok := tt.Find(longName)
+	if !ok {
+		t.Fatalf("侧栏上没有那条长名字的收藏夹，文字有 %q", tt.Texts())
+	}
+	last, ok := tt.Find("第三首")
+	if !ok {
+		t.Fatalf("侧栏上没有第三条收藏夹，文字有 %q", tt.Texts())
+	}
+
+	// ① 长名字那一行**一样高**：换行的话它会是两行。
+	if middle.H != first.H {
+		t.Errorf("长名字那一行是 %v 高，短的是 %v 高——它换行了",
+			middle.H, first.H)
+	}
+	// ② 它**没有把下面那一行顶下去**：两条间距一样。
+	gapBefore := middle.Y - first.Y
+	gapAfter := last.Y - middle.Y
+	if gapBefore != gapAfter {
+		t.Errorf("长名字那一行前后两条的间距是 %v 和 %v——它把下面的顶下去了",
+			gapBefore, gapAfter)
+	}
+}
+
 // TestTheSidebarPanicIsCaught 验侧栏画崩了，**程序不崩**，而且切到错误页。
 //
 // ⚠️ 这条证明不了「是侧栏自己那层 Guard 接住的」。`New()` 里 viewMain 外面
