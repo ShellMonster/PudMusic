@@ -1,0 +1,26 @@
+ok  	github.com/ShellMonster/Biu_Go	(cached)
+ok  	github.com/ShellMonster/Biu_Go/internal/app	129.495s
+ok  	github.com/ShellMonster/Biu_Go/internal/evidence	0.824s
+ok  	github.com/ShellMonster/Biu_Go/internal/licensing	13.338s
+?   	github.com/ShellMonster/Biu_Go/internal/licensing/cmd/gen-notices	[no test files]
+ok  	github.com/ShellMonster/Biu_Go/internal/media	(cached)
+ok  	github.com/ShellMonster/Biu_Go/internal/platform	(cached)
+?   	github.com/ShellMonster/Biu_Go/internal/platform/cmd/genicon	[no test files]
+ok  	github.com/ShellMonster/Biu_Go/internal/service/audio	29.608s
+ok  	github.com/ShellMonster/Biu_Go/internal/service/audio/extaf	16.808s
+ok  	github.com/ShellMonster/Biu_Go/internal/service/audio/flacdec	(cached)
+?   	github.com/ShellMonster/Biu_Go/internal/service/audio/flacdec/mygoflac	[no test files]
+ok  	github.com/ShellMonster/Biu_Go/internal/service/audio/mfadec	(cached)
+ok  	github.com/ShellMonster/Biu_Go/internal/service/bili	(cached)
+ok  	github.com/ShellMonster/Biu_Go/internal/service/download	(cached)
+ok  	github.com/ShellMonster/Biu_Go/internal/service/localmusic	(cached)
+ok  	github.com/ShellMonster/Biu_Go/internal/service/lyrics	(cached)
+ok  	github.com/ShellMonster/Biu_Go/internal/service/mux	(cached)
+?   	github.com/ShellMonster/Biu_Go/internal/service/mux/muxtest	[no test files]
+ok  	github.com/ShellMonster/Biu_Go/internal/service/spectrum	(cached)
+ok  	github.com/ShellMonster/Biu_Go/internal/ui	244.783s
+ok  	github.com/ShellMonster/Biu_Go/internal/ui/guard	(cached)
+ok  	github.com/ShellMonster/Biu_Go/internal/ui/iconset	(cached)
+ok  	github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover	(cached)
+ok  	github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache	(cached)
+ok  	github.com/ShellMonster/Biu_Go/internal/ui/widgets/list	(cached)
