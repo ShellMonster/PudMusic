@@ -42,7 +42,6 @@ package mfadec
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -384,6 +383,7 @@ func TestSpikeTheCOMApartmentSurvivesLoad(t *testing.T) {
 					return
 				}
 				localSwitches += codec.ThreadSwitches()
+				localWorks += codec.Works()
 				codec.Close()
 			}
 			switches <- localSwitches
@@ -436,28 +436,12 @@ func TestSpikeWhichInputTypesTheDecoderAccepts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	codec, err := OpenAACCodec(src.rate, src.chans, src.asc, src.payloadType)
-	if err != nil {
-		t.Fatalf("开解码器：%v", err)
-	}
-	defer codec.Close()
-
-	for _, c := range []struct {
-		name        string
-		payloadType uint32
-		userData    bool
-	}{
-		{"裸 AAC + MF_MT_USER_DATA（AudioSpecificConfig）", aacPayloadRaw, true},
-		{"裸 AAC，不带 MF_MT_USER_DATA", aacPayloadRaw, false},
-		{"ADTS + MF_MT_USER_DATA", aacPayloadADTS, true},
-		{"ADTS，不带 MF_MT_USER_DATA", aacPayloadADTS, false},
-	} {
-		err := codec.TryInputType(src.rate, src.chans, src.asc, c.payloadType, c.userData)
-		if err != nil {
-			t.Logf("❌ %s：%v", c.name, err)
+	for _, p := range ProbeInputTypes(src.rate, src.chans, src.asc) {
+		if p.Err != nil {
+			t.Logf("❌ %s：%v", p.Name, p.Err)
 			continue
 		}
-		t.Logf("✅ %s：MFT 认", c.name)
+		t.Logf("✅ %s：MFT 认", p.Name)
 	}
 }
 
@@ -483,6 +467,10 @@ func openFixture(name string) (*frameSource, error) {
 }
 
 // decodeAll 解到源读完，返回帧数、交织样本和耗时。
+//
+// ⚠️ **最后一定要 Drain**：AAC 解码器有 MDCT 的重叠状态，最后一帧是
+// 「和前一帧重叠着」的——不 drain 的话它一直不发，帧数会少一帧
+// （172 而不是 173），而判据的下界是 176400 帧（= AudioToolbox 的帧数）。
 func decodeAll(t *testing.T, c *Codec, src *frameSource) (int64, []float32, time.Duration) {
 	t.Helper()
 	started := time.Now()
@@ -505,11 +493,15 @@ func decodeAll(t *testing.T, c *Codec, src *frameSource) (int64, []float32, time
 		// ⚠️ **某一帧没有输出是正常的**：MFT 会自己攒着，某一帧喂进去不一定
 		// 马上有 PCM 出来。真出了问题（解不出任何东西）由下面「一帧都没解
 		// 出来」那条兜住——不是由这一帧的空输出兜住。
-		for i := 0; i+1 < len(out); i += 2 {
-			all = append(all, float32(int16(binary.LittleEndian.Uint16(out[i:i+2])))/32768.0)
-		}
-		frames += int64(len(out) / 2 / c.Channels())
+		all = append(all, out...)
+		frames += int64(len(out) / c.Channels())
 	}
+	tail, err := c.Drain()
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	all = append(all, tail...)
+	frames += int64(len(tail) / c.Channels())
 	return frames, all, time.Since(started)
 }
 

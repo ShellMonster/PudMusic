@@ -189,7 +189,10 @@ func comCall(obj uintptr, i int, args ...uintptr) uintptr {
 	// uintptr：直接拿它做指针运算要先过一遍 `native`。
 	vtbl := *(*uintptr)(native(obj))
 	fn := *(*uintptr)(native(vtbl + uintptr(i*ptrSize)))
-	var a [8]uintptr
+	// ⚠️ 19 格：`syscall.SyscallN` 在 Windows 上支持到 18 个参数（外加 this）。
+	// 原来这里是 8 格，超出的参数会被 `copy` **静默丢掉**——那不是「少传一个
+	// 参数」，是「传了一个错的参数」，而且不报错。
+	var a [19]uintptr
 	a[0] = obj
 	n := copy(a[1:], args)
 	r, _, _ := syscall.SyscallN(fn, a[:n+1]...)
@@ -238,8 +241,13 @@ func release(obj uintptr) {
 // CI 上那条「在负载下反复跑」的验收看的就是这个数。
 type comThread struct {
 	jobs chan func()
-	quit chan struct{}
-	done chan struct{}
+	// closed 一关，worker 就收摊，而 `do` 也不再往里投活。
+	//
+	// ⚠️ 原来这里是「`quit` 一关就返回」，而 `do` 是**无条件**往 `jobs` 里投：
+	// worker 的 select 可能挑了 `quit` 那一支，于是投活的那一方**永远等不到
+	// 回音**——`do` 死等，调用方跟着挂住。
+	closed chan struct{}
+	done   chan struct{}
 
 	// threadID 是初始化时那条线程的 ID。
 	threadID uint32
@@ -252,9 +260,9 @@ type comThread struct {
 // newComThread 起一条专给 COM 用的线程。
 func newComThread() (*comThread, error) {
 	t := &comThread{
-		jobs: make(chan func()),
-		quit: make(chan struct{}),
-		done: make(chan struct{}),
+		jobs:   make(chan func()),
+		closed: make(chan struct{}),
+		done:   make(chan struct{}),
 	}
 	ready := make(chan error, 1)
 	go func() {
@@ -300,14 +308,14 @@ func newComThread() (*comThread, error) {
 				}
 				t.works.Add(1)
 				job()
-			case <-t.quit:
+			case <-t.closed:
 				return
 			}
 		}
 	}()
 
 	if err := <-ready; err != nil {
-		close(t.quit)
+		close(t.closed)
 		<-t.done
 		return nil, err
 	}
@@ -318,21 +326,31 @@ func newComThread() (*comThread, error) {
 const coinitMultiThreaded = 0x2
 
 // do 把一段代码放到那条 COM 线程上跑，等它跑完。
+//
+// 线程已经收摊的话，这一趟**什么也不做**就返回（不报错）——调用方拿到的
+// 是「没做」而不是「做了一半」。
 func (t *comThread) do(fn func()) {
 	done := make(chan struct{})
-	t.jobs <- func() {
+	job := func() {
 		defer close(done)
 		fn()
 	}
-	<-done
+	select {
+	case t.jobs <- job:
+		<-done
+	case <-t.closed:
+		// 线程没了，这一趟没做。
+	}
 }
 
 // workCount 是这个线程一共做了多少件事（诊断用）。
 func (t *comThread) workCount() int64 { return t.works.Load() }
 
 // close 把那条线程收掉。
+//
+// **只能调一次**——再调一次就是 `close of closed channel` 的 panic。
 func (t *comThread) close() {
-	close(t.quit)
+	close(t.closed)
 	<-t.done
 }
 

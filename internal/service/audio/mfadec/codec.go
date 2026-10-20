@@ -21,16 +21,16 @@ const (
 	aacPayloadADTS = 1
 )
 
-// heaacUserData 造 `MF_MT_USER_DATA` 的内容。
+// heaacTail 是 `HEAACWAVEINFO` 去掉 `WAVEFORMATEX` 之后的那 12 字节，
+// 紧跟着 AudioSpecificConfig()。
 //
 // SDK 的 `um/mmreg.h` 里 `HEAACWAVEINFO` 是 `WAVEFORMATEX`（18 字节）加上
 // 12 字节：wPayloadType、wAudioProfileLevelIndication、wStructType、
-// wReserved1、dwReserved2。而 `MF_MT_USER_DATA` 要的是**去掉
-// WAVEFORMATEX 之后的那 12 字节**，紧跟着 AudioSpecificConfig()。
+// wReserved1、dwReserved2。
 //
 // ⚠️ 那 12 个字节的排布是 SDK 头文件里写死的，抄错了解码器不认这个媒体类型，
 // 而症状是「说不清的 E_INVALIDARG」。
-func heaacUserData(payloadType uint32, asc []byte) []byte {
+func heaacTail(payloadType uint32, asc []byte) []byte {
 	out := make([]byte, 0, 12+len(asc))
 	// wPayloadType
 	out = binary.LittleEndian.AppendUint16(out, uint16(payloadType))
@@ -44,6 +44,29 @@ func heaacUserData(payloadType uint32, asc []byte) []byte {
 	out = binary.LittleEndian.AppendUint32(out, 0)
 	return append(out, asc...)
 }
+
+// heaacFormatBlock 是**整个** `HEAACWAVEFORMAT`：`WAVEFORMATEX`（18 字节）
+// + 那 12 字节 + AudioSpecificConfig()。
+//
+// `um/mmreg.h` 描述的「格式块」是这一种，而解码器是靠 `wfx.cbSize` 找到
+// ASC 的位置的（`dwASCLen = cbSize - sizeof(HEAACWAVEINFO) +
+// sizeof(WAVEFORMATEX)`）——`cbSize` 就在 `WAVEFORMATEX` 里面。
+func heaacFormatBlock(rate, chans int, payloadType uint32, asc []byte) []byte {
+	out := make([]byte, 0, 18+12+len(asc))
+	// WAVEFORMATEX：
+	out = binary.LittleEndian.AppendUint16(out, waveFormatMPEGHEAAC) // wFormatTag
+	out = binary.LittleEndian.AppendUint16(out, uint16(chans))       // nChannels
+	out = binary.LittleEndian.AppendUint32(out, uint32(rate))        // nSamplesPerSec
+	out = binary.LittleEndian.AppendUint32(out, 0)                   // nAvgBytesPerSec
+	out = binary.LittleEndian.AppendUint16(out, 1)                   // nBlockAlign
+	out = binary.LittleEndian.AppendUint16(out, 0)                   // wBitsPerSample
+	out = binary.LittleEndian.AppendUint16(out, uint16(12+len(asc))) // cbSize
+	// 后面是 HEAACWAVEINFO 的那 12 字节 + ASC。
+	return append(out, heaacTail(payloadType, asc)...)
+}
+
+// waveFormatMPEGHEAAC 是 `WAVE_FORMAT_MPEG_HEAAC`（`um/mmreg.h`）。
+const waveFormatMPEGHEAAC = 0x1610
 
 // ascFromADTS 从 ADTS 头里拼出一个 AudioSpecificConfig。
 //
@@ -87,22 +110,82 @@ type frameSource struct {
 	next func() ([]byte, error)
 }
 
+// inputVariant 是一种输入配置。
+type inputVariant struct {
+	name string
+	// payloadType 是 `MF_MT_AAC_PAYLOAD_TYPE`。
+	payloadType uint32
+	// userData 是 `MF_MT_USER_DATA` 用哪一种形状（见 userDataForm）。
+	userData userDataForm
+}
+
+// userDataForm 是 `MF_MT_USER_DATA` 的三种形状。
+type userDataForm int
+
+const (
+	// userDataNone 不带 `MF_MT_USER_DATA`。
+	userDataNone userDataForm = iota
+	// userDataTail 是 `HEAACWAVEINFO` 去掉 `WAVEFORMATEX` 之后的那 12 字节，
+	// 紧跟着 AudioSpecificConfig。
+	//
+	// 微软那篇「AAC Decoder」的文档写的就是这一种：
+	// 「MF_MT_USER_DATA: MFAudioFormat_AAC — Contains the portion of the
+	// HEAACWAVEINFO structure that appears **after the WAVEFORMATEX**
+	// structure (that is, after the wfx member). This is followed by the
+	// AudioSpecificConfig() data.」
+	userDataTail
+	// userDataFull 是**整个** `HEAACWAVEFORMAT`：`HEAACWAVEINFO`（=
+	// `WAVEFORMATEX` 18 字节 + 那 12 字节）紧跟着 AudioSpecificConfig。
+	//
+	// `um/mmreg.h` 描述的「格式块」是这一种，而解码器是靠 `wfx.cbSize`
+	// 找到 ASC 的位置的（`dwASCLen = cbSize - sizeof(HEAACWAVEINFO) +
+	// sizeof(WAVEFORMATEX)`）——`cbSize` 就在 `WAVEFORMATEX` 里面。
+	userDataFull
+)
+
+// userDataBlob 造 `MF_MT_USER_DATA` 的内容（按要试的那一种形状）。
+//
+// ⚠️ **两种形状都在试**：微软的「AAC Decoder」文档说这一栏是
+// `HEAACWAVEINFO` **去掉 WAVEFORMATEX 之后**的那 12 字节 + ASC；而
+// `um/mmreg.h` 描述的格式块是**整个** `HEAACWAVEFORMAT`（WAVEFORMATEX 也
+// 在里面），因为解码器是靠 `wfx.cbSize` 找 ASC 的。
+//
+// 两处对不上，而**哪一处对是这台机器上的事实**——所以两种都试。
+func userDataBlob(rate, chans int, v inputVariant, asc []byte) []byte {
+	if len(asc) == 0 {
+		return nil
+	}
+	switch v.userData {
+	case userDataTail:
+		return heaacTail(v.payloadType, asc)
+	case userDataFull:
+		return heaacFormatBlock(rate, chans, v.payloadType, asc)
+	default:
+		return nil
+	}
+}
+
 // aacDecoder 是解码器要提供的那一点。
 //
 // 这一层（容器、码流）是平台无关的，而解码器本身只在 Windows 上有——
 // 所以这里用接口而不是具体类型，`codec.go` 才能在没有 Windows 的机器上编译。
 type aacDecoder interface {
 	// Feed 喂一帧 AAC，返回这一次解出来的 PCM。
-	Feed(frame []byte) ([]byte, error)
+	Feed(frame []byte) ([]float32, error)
+	// Drain 告诉解码器流结束了。
+	Drain() ([]float32, error)
 }
 
-// ReadAll 解到源读完，返回交织的 16 位 PCM。
-func (s *frameSource) ReadAll(c aacDecoder) ([]byte, error) {
-	var pcm []byte
+// ReadAll 解到源读完，返回交织的 PCM（[-1,1] 的 float32）。
+//
+// ⚠️ **最后一定要 Drain**：AAC 解码器有 MDCT 的重叠状态，最后一帧是
+// 「和前一帧重叠着」的——不 drain 的话它就一直不发，帧数会少一帧。
+func (s *frameSource) ReadAll(c aacDecoder) ([]float32, error) {
+	var pcm []float32
 	for {
 		frame, err := s.next()
 		if err == io.EOF {
-			return pcm, nil
+			break
 		}
 		if err != nil {
 			return pcm, err
@@ -116,4 +199,9 @@ func (s *frameSource) ReadAll(c aacDecoder) ([]byte, error) {
 		}
 		pcm = append(pcm, out...)
 	}
+	tail, err := c.Drain()
+	if err != nil {
+		return pcm, err
+	}
+	return append(pcm, tail...), nil
 }

@@ -110,16 +110,17 @@ func TestAscFromADTSMatchesTheFixture(t *testing.T) {
 	}
 }
 
-// TestHeaacUserDataIsTheTwelveBytesAfterWAVEFORMATEX 断 `MF_MT_USER_DATA`。
+// TestHeaacUserDataIsTheTwelveBytesAfterWAVEFORMATEX 断 `MF_MT_USER_DATA`
+// 的**第一种**形状：去掉 WAVEFORMATEX 之后的那 12 字节 + ASC。
 //
 // SDK 的 `um/mmreg.h` 里 `HEAACWAVEINFO` 是 `WAVEFORMATEX`（18 字节）加上
-// 12 字节，而 `MF_MT_USER_DATA` 要的是**去掉 WAVEFORMATEX 之后的那 12 字节**，
-// 紧跟着 AudioSpecificConfig()。
+// 12 字节，而微软的「AAC Decoder」页面说 `MF_MT_USER_DATA` 这一栏是
+// **去掉 WAVEFORMATEX 之后**的那 12 字节，紧跟着 AudioSpecificConfig()。
 //
 // 抄错的症状是「解码器不认这个媒体类型」——一个说不清的 E_INVALIDARG。
 func TestHeaacUserDataIsTheTwelveBytesAfterWAVEFORMATEX(t *testing.T) {
 	asc := []byte{0x11, 0x90}
-	got := heaacUserData(aacPayloadRaw, asc)
+	got := heaacTail(aacPayloadRaw, asc)
 	if len(got) != 12+len(asc) {
 		t.Fatalf("MF_MT_USER_DATA %d 字节，应该是 12 + ASC(%d)", len(got), len(asc))
 	}
@@ -144,6 +145,46 @@ func TestHeaacUserDataIsTheTwelveBytesAfterWAVEFORMATEX(t *testing.T) {
 	// 紧跟着的是 ASC。
 	if !bytes.Equal(got[12:], asc) {
 		t.Errorf("ASC 部分 = %x，want %x", got[12:], asc)
+	}
+}
+
+// TestHeaacFormatBlockIsTheWholeWAVEFORMAT 断 `MF_MT_USER_DATA` 的**第二种**
+// 形状：整个 `HEAACWAVEFORMAT`（WAVEFORMATEX + 那 12 字节 + ASC）。
+//
+// `um/mmreg.h` 描述的格式块是这一种，而解码器是靠 `wfx.cbSize` 找 ASC 的
+// 位置的（`dwASCLen = cbSize - sizeof(HEAACWAVEINFO) + sizeof(WAVEFORMATEX)`）——
+// `cbSize` 就在 `WAVEFORMATEX` 里面。
+//
+// ⚠️ **两处对不上**：微软的 AAC Decoder 页面说这一栏是「去掉 WAVEFORMATEX 的
+// 那一段」，`um/mmreg.h` 说的是整个格式块。哪一处对是**这台机器上的事实**，
+// 所以两种都试（`inputVariants`），这里只把两种形状各自的字节钉住。
+func TestHeaacFormatBlockIsTheWholeWAVEFORMAT(t *testing.T) {
+	asc := []byte{0x11, 0x90}
+	got := heaacFormatBlock(44100, 2, aacPayloadRaw, asc)
+	if len(got) != 18+12+len(asc) {
+		t.Fatalf("HEAACWAVEFORMAT %d 字节，应该是 18 + 12 + ASC(%d)", len(got), len(asc))
+	}
+	// WAVEFORMATEX：
+	if v := uint16(got[0]) | uint16(got[1])<<8; v != waveFormatMPEGHEAAC {
+		t.Errorf("wFormatTag = %#x，want %#x", v, waveFormatMPEGHEAAC)
+	}
+	if v := uint16(got[2]) | uint16(got[3])<<8; v != 2 {
+		t.Errorf("nChannels = %d，want 2", v)
+	}
+	if v := uint32(got[4]) | uint32(got[5])<<8 | uint32(got[6])<<16 | uint32(got[7])<<24; v != 44100 {
+		t.Errorf("nSamplesPerSec = %d，want 44100", v)
+	}
+	// nBlockAlign = 1，wBitsPerSample = 0（SDK 头文件里写死的）。
+	if v := uint16(got[12]) | uint16(got[13])<<8; v != 1 {
+		t.Errorf("nBlockAlign = %d，want 1", v)
+	}
+	// cbSize = 12 + ASC 的长度。
+	if v := uint16(got[16]) | uint16(got[17])<<8; int(v) != 12+len(asc) {
+		t.Errorf("cbSize = %d，want %d", v, 12+len(asc))
+	}
+	// 后面是那 12 字节 + ASC。
+	if !bytes.Equal(got[18:], heaacTail(aacPayloadRaw, asc)) {
+		t.Errorf("后面那截不是 HEAACWAVEINFO 的尾巴 + ASC")
 	}
 }
 
