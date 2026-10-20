@@ -23,7 +23,7 @@ import (
 // LGPL 代码」那句话已经在报告和 NOTICE 里发出去了。
 //
 // 所以这里直接问那个包：「你到底 import 了什么？」并且把答案**写死**成
-// purego + MyGo 两个。将来想加第三个，这里会红，而且红的地方写清楚了原因。
+// go-m4a 一个。将来想加第二个，这里会红，而且红的地方写清楚了原因。
 //
 // # 这条为什么是「加依赖」这件事的第一道闸
 //
@@ -49,7 +49,7 @@ var windowsAudioAllowlist = []string{
 	"github.com/tphakala/go-m4a",
 }
 
-// TestWindowsAudioPullsInNothingNew 断 Windows 音频那一包只依赖上面那两个。
+// TestWindowsAudioPullsInNothingNew 断 Windows 音频那一包只依赖上面那个。
 func TestWindowsAudioPullsInNothingNew(t *testing.T) {
 	root := repoRoot(t)
 	pkg := filepath.Join(root, "internal", "service", "audio", "mfadec")
