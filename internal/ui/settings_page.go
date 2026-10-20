@@ -152,7 +152,7 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 			ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
 				ui.Column(c).FillWidth().MaxWidth(settingsContentMaxW).
 					Padding(settingsContentPad).Gap(16).Children(func() {
-					ui.Text(c, "设置").FontSize(22).Bold()
+					ui.Text(c, "设置").FontSize(pageTitleSize).Bold()
 
 					if ro {
 						ui.Text(c, "设置只读：这份设置来自更新的版本，这一版一个字都不会写回去。").

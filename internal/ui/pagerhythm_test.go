@@ -305,8 +305,13 @@ func libraryPageOpts(t *testing.T) []shellOpt {
 // ⚠️ **别把 `FontSize(22)` 抄回去**：那正是这一票要消掉的东西（22 不在
 // Tailwind 的刻度上，是某一页自己起的数，七页里六页抄了它）。
 func TestEveryPageTitleUsesTheSharedSize(t *testing.T) {
-	// 这几行字就是七页的页标题（首页没有页标题，理由见 `homepage.go`）。
-	titles := []string{"稍后再看", "历史记录", "本地音乐", "下载记录", "搜索"}
+	// 这几行字就是各页的页标题（首页没有页标题，理由见 `homepage.go`；收藏夹
+	// 那一页的大标题是 30，不走这个数）。
+	//
+	// ⚠️ **设置页和登录页也在名单里**：它们的**边距**归 #127（设置页要收进居中
+	// 那一栏），而**字号**是这一票的事——从设置页翻到下载记录，标题小两号正是
+	// 这一票要消掉的那一种。
+	titles := []string{"稍后再看", "历史记录", "本地音乐", "下载记录", "搜索", "设置", "扫码登录"}
 	for _, title := range titles {
 		if !titleUsesSharedSize(t, title) {
 			t.Errorf("页标题 %q 没有用 `FontSize(pageTitleSize)`——页标题的字号必须"+
