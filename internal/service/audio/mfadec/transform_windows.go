@@ -159,6 +159,39 @@ func (c *Codec) open(rate, chans int, asc []byte, payloadType uint32) error {
 	return fmt.Errorf("mfadec: 建不起一个能用的解码器（试了 %d 种组合，最后一次是）：%w", tries, lastErr)
 }
 
+// # COM 的参数：接口指针 vs 指针的指针
+//
+// ⚠️⚠️ **这一层踩过坑，而且坑的是「指针层级」**——COM 的方法有两种参数：
+//
+//   - **接口指针**（`IMFMediaBuffer *pBuffer`、`IMFMediaType *pType`、
+//     `IMFSample *pSample`）：传**那个对象本身**的值。
+//   - **指针的指针**（`IMFMediaBuffer **ppBuffer`、`IMFMediaType **ppType`、
+//     `UINT32 *pValue`）：传**指向那个变量的地址**。
+//
+// 写反了（给接口指针的参数传了 `&obj`）的后果**不是报错**：COM 那边会把
+// 「一个指向栈上变量的指针」当成对象来解引用，然后去调它的虚表——
+// 读到的是一串栈上的字节当函数指针，跳进去就崩。症状是「一调就死」，而且
+// 死在哪一行很难看出来。
+//
+// 本包用到的每一处，和它的 SDK 签名：
+//
+//	IMFSample::AddBuffer            (IMFMediaBuffer *pBuffer)          → 传对象
+//	IMFSample::GetBufferCount       (UINT32 *pcbBuffers)               → 传地址
+//	IMFSample::GetBufferByIndex     (DWORD, IMFMediaBuffer **ppBuffer)  → 传地址
+//	IMFSample::ConvertToContiguousBuffer (IMFMediaBuffer **ppBuffer)    → 传地址
+//	IMFMediaBuffer::Lock            (BYTE **, DWORD *, DWORD *, DWORD) → 传地址
+//	IMFMediaBuffer::SetCurrentLength(DWORD cbCurrentLength)            → 传值
+//	IMFTransform::SetInputType      (DWORD, IMFMediaType *pType, DWORD)→ 传对象
+//	IMFTransform::SetOutputType     (DWORD, IMFMediaType *pType, DWORD)→ 传对象
+//	IMFTransform::GetOutputCurrentType (DWORD, IMFMediaType **ppType)   → 传地址
+//	IMFTransform::GetOutputStreamInfo (DWORD, MFT_OUTPUT_STREAM_INFO *) → 传地址
+//	IMFTransform::ProcessInput      (DWORD, IMFSample *pSample, DWORD) → 传对象
+//	IMFTransform::ProcessOutput     (DWORD, DWORD, MFT_OUTPUT_DATA_BUFFER *, DWORD *) → 传地址
+//	IMFTransform::ProcessMessage    (MFT_MESSAGE_TYPE, ULONG_PTR)      → 传值
+//
+// `verifySampleVTable()`（开解码器的时候跑）就是**在真机上**验这一层：
+// 加一个缓冲，数一遍——下标错或者层级错，数的就不是 1。
+
 // createMFT 建一个 AAC 解码 MFT。
 func (c *Codec) createMFT() (uintptr, error) {
 	clsid := guidCLSIDCMSAACDecMFT
@@ -212,8 +245,7 @@ func verifySampleVTable() error {
 	// 一个专门的 8 字节局部变量：万一 `AddBuffer` 那一格其实是
 	// `GetSampleDuration`，它会往这里写 8 字节——不能让它踩到别的东西。
 	var slot uintptr
-	if hr := comHR(comCall(sample, vtblSampleAddBuffer,
-		uintptr(unsafe.Pointer(&buf)))); hr < 0 {
+	if hr := comHR(comCall(sample, vtblSampleAddBuffer, buf)); hr < 0 {
 		return hresultError("IMFSample::AddBuffer", hr)
 	}
 	_ = slot
@@ -428,8 +460,7 @@ func (c *Codec) buildOutputType(rate, chans int) (uintptr, error) {
 //
 //go:uintptrescapes
 func setInputType(mft uintptr, mt uintptr) hresult {
-	return comHR(comCall(mft, vtblTransformSetInputType, 0,
-		uintptr(unsafe.Pointer(&mt)), 0))
+	return comHR(comCall(mft, vtblTransformSetInputType, 0, mt, 0))
 }
 
 // setOutputType 设输出媒体类型。
@@ -442,11 +473,7 @@ func setInputType(mft uintptr, mt uintptr) hresult {
 //
 //go:uintptrescapes
 func setOutputType(mft uintptr, mt uintptr) hresult {
-	var arg uintptr
-	if mt != 0 {
-		arg = uintptr(unsafe.Pointer(&mt))
-	}
-	return comHR(comCall(mft, vtblTransformSetOutputType, 0, arg, 0))
+	return comHR(comCall(mft, vtblTransformSetOutputType, 0, mt, 0))
 }
 
 // outputCurrentType 问 MFT 当前用的输出媒体类型。
@@ -568,16 +595,14 @@ func (c *Codec) feed(frame []byte) ([]float32, error) {
 	defer release(sample)
 	defer release(buf)
 
-	hr := comHR(comCall(c.mft, vtblTransformProcessInput, 0,
-		uintptr(unsafe.Pointer(&sample)), 0))
+	hr := comHR(comCall(c.mft, vtblTransformProcessInput, 0, sample, 0))
 	if hr < 0 {
 		if uint32(hr) == hrMFNotAccepting {
 			// 「现在不收输入」——先把已有的输出取干净，再重试一次。
 			if _, err := c.pullOutput(); err != nil {
 				return nil, err
 			}
-			hr = comHR(comCall(c.mft, vtblTransformProcessInput, 0,
-				uintptr(unsafe.Pointer(&sample)), 0))
+			hr = comHR(comCall(c.mft, vtblTransformProcessInput, 0, sample, 0))
 		}
 		if hr < 0 {
 			return nil, hresultError("ProcessInput", hr)
@@ -765,7 +790,7 @@ func (c *Codec) makeSample(frame []byte) (uintptr, uintptr, error) {
 		release(buf)
 		return 0, 0, hresultError("MFCreateSample", hr)
 	}
-	hr = comHR(comCall(sample, vtblSampleAddBuffer, uintptr(unsafe.Pointer(&buf))))
+	hr = comHR(comCall(sample, vtblSampleAddBuffer, buf))
 	if hr < 0 {
 		release(sample)
 		release(buf)
@@ -790,7 +815,7 @@ func (c *Codec) makeEmptySample(size int) (uintptr, uintptr, error) {
 		release(buf)
 		return 0, 0, hresultError("MFCreateSample", hr)
 	}
-	hr := comHR(comCall(sample, vtblSampleAddBuffer, uintptr(unsafe.Pointer(&buf))))
+	hr := comHR(comCall(sample, vtblSampleAddBuffer, buf))
 	if hr < 0 {
 		release(sample)
 		release(buf)

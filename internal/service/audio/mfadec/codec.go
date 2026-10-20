@@ -7,6 +7,7 @@ package mfadec
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -184,7 +185,11 @@ func (s *frameSource) ReadAll(c aacDecoder) ([]float32, error) {
 	var pcm []float32
 	for {
 		frame, err := s.next()
-		if err == io.EOF {
+		// ⚠️ **用 `errors.Is` 而不是 `==`**：ADTS 那一路会把「读完了」包一层
+		// 再交出来（见 `source.go` 的 `readADTSFrame`），`==` 认不出来，
+		// 于是「正常读完」被当成出错，下面那次 `Drain()` 执行不到——
+		// MFT 手里攒着的最后一帧（MDCT 重叠的那一帧）就丢了。
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

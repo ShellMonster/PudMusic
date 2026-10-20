@@ -10,6 +10,7 @@ package mfadec
 // AudioSpecificConfig。B 站下发的音频有的叫 .m4a 有的叫 .m4s，内容却一样。
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
@@ -87,6 +88,15 @@ func openADTS(r io.Reader) (*frameSource, error) {
 func readADTSFrame(r io.Reader) ([]byte, ADTSInfo, error) {
 	head := make([]byte, 7)
 	if _, err := io.ReadFull(r, head); err != nil {
+		// ⚠️ **干净的末尾要原样返回 `io.EOF`**，不能包一层。
+		//
+		// 包了之后 `err == io.EOF` 就不成立了（`errors.Is` 才成立），而调用方
+		// `ReadAll` 认的是 `==`——于是「文件正常读完」被当成「读出错」，
+		// 下面那次 `Drain()`（把 MFT 手里攒着的最后一帧放出来）**执行不到**，
+		// 解出来的 PCM 少最后一帧。
+		if errors.Is(err, io.EOF) {
+			return nil, ADTSInfo{}, io.EOF
+		}
 		return nil, ADTSInfo{}, fmt.Errorf("mfadec: 读 ADTS 头：%w", err)
 	}
 	info, err := ParseADTS(head)

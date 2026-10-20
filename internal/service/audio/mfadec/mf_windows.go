@@ -30,28 +30,6 @@ type hresult = int32
 
 const sOK hresult = 0
 
-// HRESULT 常量。全部按 `unsigned int` 写，因为失败的 HRESULT 在 int32 里是负数，
-// 直接和常量比会编译不过（`0x8000...` 装不进 int32）。
-const (
-	hrEInvalidArg       = uint32(0x80070057)
-	hrEOutOfMemory      = uint32(0x8007000E)
-	hrENotImpl          = uint32(0x80004001)
-	hrEUnexpected       = uint32(0x8000FFFF)
-	hrEAccessDenied     = uint32(0x80070005)
-	hrENotInitialized   = uint32(0x800401F0) // CO_E_NOTINITIALIZED
-	hrChangedMode       = uint32(0x80010106) // RPC_E_CHANGED_MODE
-	hrMFEndOfStream     = uint32(0x80000027)
-	hrMFNotAccepting    = uint32(0x8000000E)
-	hrMFInvalidRequest  = uint32(0x80000011)
-	hrMFUnsupportedType = uint32(0x8000C000)
-	// MF_E_TRANSFORM_NEED_MORE_INPUT：这一趟没有输出，得多喂点。
-	hrTransformNeedMoreInput = uint32(0x800C0007)
-	// MF_E_TRANSFORM_STREAM_CHANGE：输出流变了，要重新问一次媒体类型。
-	hrTransformStreamChange = uint32(0x800C0003)
-	// MF_E_TRANSFORM_TYPE_NOT_SET：媒体类型还没设。
-	hrTransformTypeNotSet = uint32(0x800C0002)
-)
-
 // mfHResultName 是上面那几个码对应的名字。
 //
 // 解成名字而不是只打十进制/十六进制：MF 的失败原因**绝大多数**是「这台
@@ -272,9 +250,12 @@ func newComThread() (*comThread, error) {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 
-		// COINIT_MULTITHREADED = 0x2。用 MTA 而不是 STA：MFT 内部有工作线程，
-		// STA 会把它们泵到自己队列上，而在没有消息循环的解码线程上那些消息
-		// 没人泵——表现是 `ProcessOutput` 永远不返回。
+		// 用 MTA 而不是 STA：MFT 内部有工作线程，STA 会把它们泵到自己队列上，
+		// 而在没有消息循环的解码线程上那些消息没人泵——表现是
+		// `ProcessOutput` 永远不返回。
+		//
+		// ⚠️ **MTA 是 0x0，STA 是 0x2**（`um/objbase.h` 的 `tagCOINIT`）——
+		// 这两个千万别记反，记反了这条线程其实是 STA，而 STA 正是要避开的那个。
 		hr := coInitializeEx(0, coinitMultiThreaded)
 		switch {
 		case hr >= 0:
@@ -321,9 +302,6 @@ func newComThread() (*comThread, error) {
 	}
 	return t, nil
 }
-
-// COINIT_MULTITHREADED。
-const coinitMultiThreaded = 0x2
 
 // do 把一段代码放到那条 COM 线程上跑，等它跑完。
 //

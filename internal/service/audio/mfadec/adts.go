@@ -18,7 +18,7 @@ import (
 //
 //	byte 0: 同步字[11:4]（8 bit）
 //	byte 1: 同步字[3:0]（4 bit）| MPEG 版本（1）| 层（2）| 无保护（1）
-//	byte 2: profile（2）| 采样率下标（4）| 私有位（1）| 声道配置[2]（1）
+//	byte 2: profile（2，**object type 减一**）| 采样率下标（4）| 私有位（1）| 声道配置[2]（1）
 //	byte 3: 声道配置[1:0]（2）| 原创（1）| 首页（1）
 //	        | copyright 标识位（1）| copyright 起始位（1）| 帧长[12:11]（2）
 //	byte 4: 帧长[10:3]（8 bit）
@@ -55,7 +55,22 @@ var adtsSampleRates = [16]int{
 // 所以两者都给 0，让调用方明确看到「这个头没说清是几声道」。
 var adtsChannelCounts = [8]int{0, 1, 2, 3, 4, 5, 6, 0}
 
-// ADTSProfile 是 ADTS 头里那个 2 bit 的 profile 字段。
+// ADTSProfile 是 ADTS 头里那个 2 bit 的 profile 字段**解出来的 object type**。
+//
+// ⚠️⚠️ **头里那两位是 `objectType - 1`，不是 object type 本身。**
+//
+// ISO/IEC 13818-7 的 `adts_fixed_header()` 里那个 `profile` 字段，存的是
+// 「MPEG-4 Audio Object Type 减一」；ffmpeg 的 `adts_header()` 也是这么解的
+// （`object_type = get_bits(gb, 2) + 1`）。所以：
+//
+//	头里的位  0 → object type 1 → AAC Main
+//	头里的位  1 → object type 2 → AAC LC
+//	头里的位  2 → object type 3 → AAC SSR
+//	头里的位  3 → object type 4 → AAC LTP
+//
+// ⚠️ **这里原来少加了一**，把素材（头里的位是 1，真的 AAC-LC）报成了
+// **Main**——而「ffmpeg 的 ADTS muxer 没把 profile 写对」那个结论也是**错的**：
+// ffprobe 说这份素材是 LC，ffmpeg 写的也是 LC，**是这一层的解析错位了**。
 //
 // ⚠️ **它说的是「头里写了什么」，不是「码流是什么」。** 实测：本仓库里
 // ffmpeg 用 `-profile:a aac_low` 造出来的那份素材，ffprobe 说 profile=LC，
@@ -128,7 +143,8 @@ func ParseADTS(b []byte) (ADTSInfo, error) {
 
 	hasCRC := b[1]&0x01 == 0
 	info := ADTSInfo{
-		Profile:    ADTSProfile((b[2] >> 6) & 0x03),
+		// 头里那两位是 object type **减一**（见 ADTSProfile 顶上那段）。
+		Profile:    ADTSProfile(int((b[2]>>6)&0x03) + 1),
 		SampleRate: adtsSampleRates[(b[2]>>2)&0x0F],
 		Channels:   adtsChannelCounts[((b[2]&0x01)<<2)|((b[3]>>6)&0x03)],
 		// 帧长那 13 bit 横跨 byte 3/4/5，而且**不连续**。

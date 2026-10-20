@@ -223,3 +223,45 @@ func framesOfADTS(t *testing.T, name string) [][]byte {
 	}
 	return out
 }
+
+// countingDecoder 记下「喂了几帧」和「drain 过没有」。
+type countingDecoder struct {
+	feeds  int
+	drains int
+}
+
+func (d *countingDecoder) Feed(frame []byte) ([]float32, error) {
+	d.feeds++
+	return nil, nil
+}
+
+func (d *countingDecoder) Drain() ([]float32, error) {
+	d.drains++
+	return nil, nil
+}
+
+// TestReadAllDrainsAtTheEndOfTheFile 断「读到文件末尾之后会去 drain」。
+//
+// ⚠️ **这一条曾经是坏的**：ADTS 那一路把「读完了」包了一层
+// （`fmt.Errorf("...: %w", io.EOF)`），而 `ReadAll` 认的是 `err == io.EOF`——
+// 认不出来，于是「正常读完」被当成出错，`Drain()` **执行不到**。
+//
+// 而 `Drain()` 是**必须**的：AAC 解码器有 MDCT 的重叠状态，最后一帧是
+// 「和前一帧重叠着」的，不 drain 它就一直不发——解出来的 PCM 少最后一帧。
+func TestReadAllDrainsAtTheEndOfTheFile(t *testing.T) {
+	src, err := openADTS(bytes.NewReader(readFixture(t, "aaclc-stereo.aac")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &countingDecoder{}
+	if _, err := src.ReadAll(d); err != nil {
+		t.Fatalf("ReadAll：%v", err)
+	}
+	if d.feeds == 0 {
+		t.Fatal("一帧都没喂进去")
+	}
+	if d.drains != 1 {
+		t.Errorf("drain 了 %d 次，want 1（读到末尾必须 drain 一次，否则最后一帧丢了）", d.drains)
+	}
+	t.Logf("喂了 %d 帧，drain 了 %d 次", d.feeds, d.drains)
+}

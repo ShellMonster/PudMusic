@@ -81,34 +81,38 @@ func TestTheCommittedFixturesSayWhatTheyAre(t *testing.T) {
 	}
 }
 
-// TestTheADTSProfileFieldIsNotTheTruth 把一个**实测到的坑**钉在仓库里。
+// TestTheADTSProfileFieldIsTheObjectTypeMinusOne 钉住 ADTS 头里 profile 那两位的
+// 含义。
 //
-// 素材是 `ffmpeg -profile:a aac_low -f adts` 造出来的，`ffprobe` 说它的
-// profile 是 LC（真的就是 AAC-LC，B 站下发给普通用户的那一档）。但**同一个
-// 文件的 ADTS 头里，profile 字段写的是 Main**：
+// ⚠️⚠️ **这一条原来是反的，而它自己还是绿的。**
 //
-//	ffprobe -show_streams aaclc-stereo.aac → profile=LC
-//	ParseADTS(aaclc-stereo.aac).Profile   → AAC Main
+// 原来这里断言「这份素材的 ADTS 头写的是 Main，可 ffprobe 说它是 LC」，并把结论
+// 写成「ffmpeg 的 ADTS muxer 没把 profile 落到那两个 bit 上，所以不能信头里的
+// profile」。
 //
-// 也就是说 ffmpeg 的 ADTS muxer 没把 `AVCodecContext.profile` 落到那两个
-// bit 上。对我们的后果很具体：**「从 ADTS 头读 profile」不能当作 profile
-// 判据**。一个「头里说是 Main，试试能不能解 Main」的写法，遇到这份素材会
-// 走错分支，而 B 站真正发过来的 ADTS 流又可能两种都有。
+// **那个结论是错的。** ISO/IEC 13818-7 的 `adts_fixed_header()` 里那个
+// `profile` 字段存的是「**MPEG-4 Audio Object Type 减一**」，ffmpeg 的
+// `adts_header()` 也是这么解的（`object_type = get_bits(gb, 2) + 1`）。
 //
-// 这条测试的作用是：**万一哪天 ffmpeg 把这个 bug 修了，这条会红**，那时候
-// 再决定要不要相信头里的字段。在那之前，报告里「profile 是怎么认出来的」
-// 必须写明用的是 ffprobe 那个真实码流属性，而不是头里那两个 bit。
-func TestTheADTSProfileFieldIsNotTheTruth(t *testing.T) {
+// 所以素材的头是 `ff f1 50 80 …`：byte 2 的头两位是 `01` → object type
+// **2** → **AAC-LC**——和 ffprobe 说的**完全一致**。是**这一层的解析少加了一**，
+// 才把 AAC-LC 报成 Main，而那个「ffmpeg 没写对」的结论是照着错答案编出来的。
+//
+// 素材是 `ffmpeg -profile:a aac_low -f adts` 造出来的，ffprobe 说它的 profile
+// 是 LC（真的就是 AAC-LC，B 站下发给普通用户的那一档）。
+//
+// 这条测试现在的作用是：**「头里的 profile」和「ffprobe 说的 profile」必须
+// 一致**——不一致的话就是解析又错位了。
+func TestTheADTSProfileFieldIsTheObjectTypeMinusOne(t *testing.T) {
 	info, err := ParseADTS(readFile(t, "aaclc-stereo.aac"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Profile != ProfileMain {
-		t.Skipf("这份素材的 ADTS 头现在写的是 %v——ffmpeg 好像修了它。"+
-			"先确认 ffprobe 还说它是 LC，再决定要不要改信这个字段", info.Profile)
+	if info.Profile != ProfileLC {
+		t.Errorf("这份素材的 ADTS 头解出 %v，want %v（ffprobe 说它是 LC）",
+			info.Profile, ProfileLC)
 	}
-	t.Log("这份素材真的是 AAC-LC（ffprobe profile=LC），但 ADTS 头写的是 Main；" +
-		"profile 判据不能用头里那两个 bit")
+	t.Logf("ADTS 头里那两位是 object type 减一：解出来是 %v，和 ffprobe 的 profile=LC 一致", info.Profile)
 }
 
 // TestTheCommittedReferenceIsWhatItClaims 断参考 PCM 的那几个数。
