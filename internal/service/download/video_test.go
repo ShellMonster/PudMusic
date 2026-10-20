@@ -237,7 +237,7 @@ func newVideoHarness(t *testing.T, spVideo, spAudio muxtest.Spec) *videoHarness 
 		t.Fatalf("建队列：%v", err)
 	}
 	h.m = m
-	t.Cleanup(func() { _ = m.Close("") })
+	t.Cleanup(func() { closeManager(t, m, dir) })
 	return h
 }
 
@@ -251,7 +251,7 @@ func (h *videoHarness) reopen() *videoHarness {
 	if err != nil {
 		h.t.Fatalf("重开：%v", err)
 	}
-	h.t.Cleanup(func() { _ = m.Close("") })
+	h.t.Cleanup(func() { closeManager(h.t, m, h.dir) })
 	h2 := &videoHarness{t: h.t, m: m, dir: h.dir, queueFile: h.queueFile,
 		video: h.video, audio: h.audio}
 	return h2
