@@ -199,7 +199,7 @@ func TestCollectionsUnmountedIsNormal(t *testing.T) {
 	if _, ok := a.TakeCollectionNotice(testRef); ok {
 		t.Error("没挂的时候竟然取得到一句要显示的话")
 	}
-	if _, _, err := a.LoadCollectionPage(t.Context(), testRef, bili.SortByFavTime, 1); err == nil {
+	if _, _, err := a.LoadCollectionPage(t.Context(), testRef, bili.SortByFavTime, "", 1); err == nil {
 		t.Error("没挂的时候拉内容页报成功")
 	}
 }
@@ -395,7 +395,7 @@ func TestLoadCollectionPagePassesTheSortThrough(t *testing.T) {
 	withFixture(t, a, f, 0)
 
 	for _, sort := range bili.CollectionSorts {
-		medias, hasMore, err := a.LoadCollectionPage(t.Context(), testRef, sort, 1)
+		medias, hasMore, err := a.LoadCollectionPage(t.Context(), testRef, sort, "", 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -425,7 +425,7 @@ func TestDurationComesBackInSeconds(t *testing.T) {
 	t.Cleanup(a.Close)
 	withFixture(t, a, f, 0)
 
-	medias, _, err := a.LoadCollectionPage(t.Context(), testRef, bili.SortByFavTime, 1)
+	medias, _, err := a.LoadCollectionPage(t.Context(), testRef, bili.SortByFavTime, "", 1)
 	if err != nil {
 		t.Fatal(err)
 	}

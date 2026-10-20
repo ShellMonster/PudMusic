@@ -357,7 +357,19 @@ type CollectionPage struct {
 //
 // ps 是要几条，传 0 用默认的 20。**大于 20 的部分会被 B 站默默截掉**，
 // 所以这里夹一道（见 pageSizeLimit）。
-func (c *Client) CollectionMedias(ctx context.Context, id int64, sort CollectionSort, page, ps int) (*CollectionPage, error) {
+//
+// keyword 是按歌名找的那个词，空串就是不过滤。
+//
+// # 为什么按歌名找是**接口**筛的，不是本地筛
+//
+// 收藏夹一页只有 20 条（见 pageSizeLimit），而一个收藏夹能有几百上千首。
+// 本地筛只能筛**已经拉下来的那几页**——用户在一个 800 首歌的收藏夹里搜
+// 「告白气球」，本地筛的结果是「前 20 首里没有」，而真相是它在第 300 首。
+// 症状是「搜了没反应」，而界面上没有任何地方说得出为什么。
+//
+// B 站这个接口自己就支持 `keyword`（上游 `service/fav-resource.ts:9` 的
+// `FavResourceListRequestParams`），所以词直接发给它。
+func (c *Client) CollectionMedias(ctx context.Context, id int64, sort CollectionSort, keyword string, page, ps int) (*CollectionPage, error) {
 	if id <= 0 {
 		return nil, fmt.Errorf("bili: 收藏夹 id 不对（%d）", id)
 	}
@@ -379,6 +391,12 @@ func (c *Client) CollectionMedias(ctx context.Context, id int64, sort Collection
 		"type": {"0"},
 		// 排序是接口排的，见 CollectionSort 的注释。
 		"order": {sort.order()},
+	}
+	// ⚠️ **空词不发这个参数**（上游 `service/fav-resource.ts` 的
+	// `keyword: keywordValue || undefined` 是同一个意思）：发一个空的
+	// `keyword=` 和不发它**不一定是一回事**，而多带一个参数没有好处。
+	if keyword != "" {
+		q.Set("keyword", keyword)
 	}
 	raw, err := c.Do(ctx, Call{Method: "GET", URL: c.hostAPI + pathResourceList, Query: q})
 	if err != nil {

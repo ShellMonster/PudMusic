@@ -321,10 +321,29 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 			// 顺序是 Biu 的 SD-04 定的，所以行 key 用路由而不是序号：
 			// 以后菜单项按 hiddenMenuKeys 过滤、顺序会变，序号就不再稳定了。
 			//
-			// ⚠️ 别给 Button 再补一个 `Label(rt.Title)`：可见的字就是名字，
+			// ⚠️ **展开态别给 Button 补 `Label(rt.Title)`**：可见的字就是名字，
 			// 补上去会多出一个同样文字的无障碍节点，画面上出现两份。
 			ui.Column(c).Key("side-item:" + rt.Match).Children(func() {
 				item := flatButton(c, label).Grow(1)
+				// 折叠态只有一个字，鼠标停在上面要说清它是什么（见 sideItemTip）。
+				//
+				// ⚠️ **只在折叠态给**：展开时名字本来就画在那儿，再来一句提示
+				// 是把用户已经读到的东西又说一遍。
+				//
+				// 🔴 **折叠态还必须给一个无障碍的名字**：可见的字只有「下」「本」
+				// 「推」「设」一个字，读屏软件念出来就是那一个字——这一格等于
+				// 完全没有名字。`Label` 补上的是**名字**（`Element.Label`），
+				// **画面上不多画一个字**（折叠态画面上本来就没有那个全名）。
+				//
+				// `Description` 也补上：框架的 `Element.Tooltip` 会写它
+				// （`mygo/ui/tooltip.go` 的 `if e.description == "" {…}`），
+				// 而 `ui.TooltipBase` 不写——而框架的文档明说「assistive
+				// technology sees it as a tooltip, **which it does not read**」，
+				// 所以提示里那句话得由名字 / 描述带到读屏软件那儿。
+				if collapsed {
+					item = item.Label(rt.Title).Description(rt.Title)
+					sideItemTip(c, item, rt.Title)
+				}
 				// 选中那一层照上游 HeroUI 的 `variant="flat"` + `color="primary"`
 				// （`components/menu/menu-item.tsx:83-84`）：主色很淡的一层底 +
 				// 主色的字。**不是实心主色**——原来那一版 `Background(t.Accent)`
@@ -342,6 +361,43 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 		if hidden > 0 && !collapsed {
 			s.viewLoggedOutHint(c, hidden)
 		}
+	})
+}
+
+// sideItemTip 是折叠态侧栏那一项的悬停提示。
+//
+// # 位置照上游：贴在那一项的**右边**
+//
+// 上游折叠态那一项外面套的是 `<Tooltip content={title} placement="right">`
+// （`biu/src/components/menu/menu-item.tsx:78`）。框架自带的
+// `Element.Tooltip` 把提示摆在**上面**，而折叠态的侧栏贴着窗口左边——
+// 摆在上面的话提示会盖住上面那几项，摆在左边又被窗口边钳住。
+//
+// # 为什么要自己写而不用 `Element.Tooltip`
+//
+// `Element.Tooltip` 的位置是写死的（`mygo/ui/tooltip.go:111` 的
+// `AttachTo(e, AnchorTop, AnchorBottom)`），而 `ui.TooltipBase` 让我们自己
+// 摆位置。外观照框架那一套抄：反色底 + 反色字 + 一层阴影。
+//
+// ⚠️ **反色那一对要自己兜底**：框架的 `Theme.inverse()` 是未导出的，而
+// `Inverse` / `InverseText` 留空时那一层是透明的（`mygo/ui/theme.go:70-77`）。
+// 照抄它的兜底（`Inverse` 空就用 `Text`，`InverseText` 空就用 `Background`），
+// 否则提示会是一块看不见底的字。
+func sideItemTip(c *ui.Context, anchor ui.Element, text string) {
+	t := c.Theme()
+	fill, fg := t.Inverse, t.InverseText
+	if fill == ui.Transparent {
+		fill = t.Text
+	}
+	if fg == ui.Transparent {
+		fg = t.Background
+	}
+	ui.TooltipBase(c, anchor, func(tip ui.Element) {
+		tip.AttachTo(anchor, ui.AnchorRight, ui.AnchorLeft).MarginStart(6).
+			Padding(t.Space(1.25), t.Space(2)).Radius(t.Space(1.25)).
+			Background(fill).TextColor(fg).FontSize(t.FontSize-1).
+			Shadow(0, 2, 8, 0, ui.RGBA(0, 0, 0, 0.2))
+		tip.Children(func() { ui.Text(c, text) })
 	})
 }
 
