@@ -184,7 +184,17 @@ func selfSlider(c *ui.Context, value *float64, lo, hi float64, look sliderLook) 
 		if look.vertical {
 			// 竖着：值从下往上（框架的映射：`1-(y-cy)/ch`，见 value_input.go）。
 			cx = r.X + r.W/2
-			cy = r.Y + r.H*(1-frac)
+			// 🔴 **旋钮的中心要走内容框的算法**，和横着那一支同一个式子：
+			// **半个旋钮留在轨道里**（那个 `PaddingY` 就是为它留的）。
+			//
+			// ⚠️ **为什么不能直接用 `r`**：框架的竖直映射是
+			// `1-(y-st.cy)/st.ch`，那个 `st.cy`/`st.ch` 是**内容框**的
+			// （`mygo/ui/runtime.go:934`），而 `Draw` 回调拿到的 `r` 是**边框框**
+			// （含内边距）。两者差着 `knobH/2`：值 0 时旋钮的中心该在内容框的
+			// **底**（`r.Y + r.H - knobH/2`），照 `r` 算会落在边框框的底上——
+			// **探出内容框 7 像素**，而框架的命中映射也在那儿取值，于是
+			// 「旋钮画的地方」和「按下去算出来的值」对不上（评审指出来的）。
+			cy = r.Y + look.knobH/2 + (r.H-look.knobH)*(1-frac)
 			track = ui.Rect{X: cx - look.trackW/2, Y: r.Y, W: look.trackW, H: r.H}
 			p.Fill(track, t.Border, look.trackW/2)
 			// 🔴 **填过的那一段是从旋钮往下到轨道底**：值 0 时旋钮压在底上，
@@ -205,7 +215,12 @@ func selfSlider(c *ui.Context, value *float64, lo, hi float64, look sliderLook) 
 				t.Accent, look.trackW/2)
 		}
 
-		if !look.knobWhenIdle && !knobWanted(sl, held) {
+		// 🔴 **键盘焦点也要画旋钮**（评审指出来的）：框架那一颗旋钮是**一直**画着的，
+		// 焦点圈画在它上面。而这一票把播放条那根改成「只在悬停或按下时画」——
+		// 于是 **Tab 过去的时候旋钮和焦点圈一起没了**，焦点在哪完全看不出来。
+		// 框架的 `coreSlider` 明确画焦点圈（`mygo/ui/widgets.go:455`），
+		// 焦点圈跟旋钮是一起的，所以旋钮也得画。
+		if !look.knobWhenIdle && !knobWanted(sl, held) && !focus {
 			return
 		}
 
@@ -250,19 +265,41 @@ func knobWanted(sl ui.Element, held float32) bool {
 // 那几层影子也跟着 `held` 走（松手时一层很淡的、按下时一层更深的），旋钮才有
 // 「被按下去」的实感。
 func paintKnob(p *ui.Painter, t *ui.Theme, knob ui.Rect, rad float32, face ui.Color, held float32, focus bool) {
-	// 两道影子：紧的那道描边，软的那道把旋钮托起来（照 `coreSlider` 的
-	// `paintKnob`）。按住的时候影子跟着淡（那时候旋钮是一片玻璃）。
-	shade := 1 - held
-	p.Shadow(knob, rad, 0, 0.5, 1, 0, ui.RGBA(0, 0, 0, 0.08*shade))
-	p.Shadow(knob, rad, 0, 1.5, 7, 0, ui.RGBA(0, 0, 0, 0.1*shade))
-
-	// 玻璃那一层**掺了旋钮自己的颜色**（`glass.Glass` 的 `Tint` 那一档管的就是
-	// 「看不看得清」）：纯玻璃在深色底上是看不见的。
+	// ⚠️ **三层影子**（照框架 `coreSlider` 的 `paintKnob`，
+	// `mygo/ui/widgets.go:435`）：
+	//
+	//	held > 0  一层**更深的**（`drop.Alpha(held)`）——票面原话：「松手时一层很淡的、
+	//	         按下时一层更深的」。**少了它，按下去旋钮不但没有更深的影子，
+	//	         反而一层都不剩**，观感是「变平了」而不是「被按下去」。
+	//	held < 1  紧的那道描边 + 软的那道托起来（这两层随 held 淡掉）
+	//
+	// ⚠️ 原来这里两层都乘 `1-held`，按住到 held=1 时浓度归 0 —— 影子全没了 ✗。
+	drop := ui.RGBA(0, 0, 0, 0.14)
+	rim := ui.RGBA(0, 0, 0, 0.22)
+	if t.Dark {
+		drop, rim = ui.RGBA(0, 0, 0, 0.3), ui.RGBA(0, 0, 0, 0.7)
+	}
 	if held > 0 {
+		// 按住时**更深的那层影子**。
+		p.Shadow(knob, rad, 0, 8, 14, -3, drop.Alpha(held))
+		// 玻璃那一层**垫在底下**：它**掺了旋钮自己的颜色**（`glass.Glass` 的 `Tint`
+		// 那一档管的就是「看不看得清」）——纯玻璃在深色底上是看不见的。
 		glass.Paint(p, knob, rad, glass.Glass{Tint: face})
 	}
 	if held < 1 {
+		// 两道影子：紧的那道描边，软的那道把旋钮托起来。
+		shade := 1 - held
+		p.Shadow(knob, rad, 0, 0.5, 1, 0, ui.RGBA(0, 0, 0, 0.08*shade))
+		p.Shadow(knob, rad, 0, 1.5, 7, 0, ui.RGBA(0, 0, 0, 0.1*shade))
+		// 不透明的那一面浮在玻璃**上面**：松手时它就是旋钮的全部，按住时它淡掉、
+		// 玻璃从底下浮上来——**交叉淡入**，少了交叉按住的瞬间旋钮会闪一下消失。
 		p.Fill(knob, face.Alpha(1-held), rad)
+	}
+	if held > 0 {
+		// 透镜的边：从里面透出来的一圈亮边（框架那一颗也有）。
+		p.Stroke(knob, rim.Alpha(held), rad, 1)
+		p.Stroke(ui.Rect{X: knob.X + 1, Y: knob.Y + 1, W: knob.W - 2, H: knob.H - 2},
+			ui.RGBA(255, 255, 255, 0.25*held), rad-1, 1)
 	}
 	if focus {
 		p.FocusRing(knob, [4]float32{rad, rad, rad, rad})

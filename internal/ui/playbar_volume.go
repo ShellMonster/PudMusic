@@ -67,6 +67,13 @@ const (
 	// 那一枚，于是内容区里闪一下一个竖滑块。
 	volHoverDelay = 300 * time.Millisecond
 
+	// volPanelW 是音量浮层里那一列的宽度。
+	//
+	// ⚠️ **定宽是必须的**：列宽若由最宽的那一行（百分比）撑着，而滑块是**居中**的，
+	// 数字从「0%」变成「100%」时列宽变了，**滑块就在指针底下横向挪**（评审指出来的）。
+	// 36 装得下「100%」那三个字（11px 的字约 26 宽）。
+	volPanelW = 36
+
 	// volDefaultUnmute 是「压根没静音过（音量本来就是 0）」时取消静音放回去的值。
 	//
 	// 0.5 是一半——用户按了「取消静音」，听到的应该是一半声音，不是 0。
@@ -151,7 +158,6 @@ func (s *Shell) viewVolumeButton(c *ui.Context, st app.State) {
 	if btn.Hovered() {
 		hoverTarget = 1
 	}
-	s.volIconHovered = hoverTarget > 0
 	if btn.Animate(volHoverKey, hoverTarget, volHoverDelay) >= 1 {
 		s.volOpen = true
 	}
@@ -205,13 +211,21 @@ func (s *Shell) viewVolumePanel(c *ui.Context, st app.State) {
 	t := c.Theme()
 	vol := st.Volume
 
-	col := ui.Column(c).Key("playbar:volume").Padding(4).Gap(2).AlignItems(ui.Center)
+	// 🔴 **这一列定宽**（`volPanelW`）：不定宽的话，列宽由**最宽的那一行**撑着
+	// （百分比那行），而滑块是**居中**的——于是数字从「0%」变成「100%」时列宽变了
+	// 4.7 像素，**滑块就在指针底下横向挪**（评审指出来的）。
+	//
+	// 定宽之后列宽恒定，居中的滑块也就恒定 ✓。上游那边也是这么做的：那个百分比
+	// 是个 `w-8`（32 像素）的定宽格子（`music-volume` 的 `endContent`）。
+	col := ui.Column(c).Key("playbar:volume").Padding(4).Gap(2).AlignItems(ui.Center).
+		Width(volPanelW)
 	col.Children(func() {
 		sl := volumeSlider(c, &vol, 0, 1).Label("音量")
 		if sl.Changed() {
 			s.setVolume(vol)
 		}
-		ui.Text(c, volPercent(vol)).FontSize(11).TextColor(t.TextMuted)
+		// 百分比也定宽：不然它自己在那一格里靠左，字数一变位置就变。
+		ui.Text(c, volPercent(vol)).FontSize(11).TextColor(t.TextMuted).Width(volPanelW)
 	})
 
 	// 记下「指针在浮层里」，给下一帧的收放判断用（见 `syncVolIdle`）。

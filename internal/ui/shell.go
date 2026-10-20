@@ -177,9 +177,6 @@ type Shell struct {
 	//
 	// volOpen 是那个浮层开着没有（悬停图标就开，指针走远了就收）。
 	volOpen bool
-	// volIconHovered 是**这一帧**指针在不在音量图标上。它和 volOpen 分开是
-	// 因为浮层开着的时候指针可能在浮层上而不在图标上——那一下不能把浮层收掉。
-	volIconHovered bool
 	// volIdleSince 是「指针既不在图标上、也不在浮层里」的那一刻。零值表示此刻
 	// 指针还在其中之一上面。
 	volIdleSince time.Time
@@ -618,7 +615,6 @@ func (s *Shell) closePerWindow() {
 	}
 	s.feed.disarm()    // 红点，每五分钟一跳（navbar_feed.go）
 	s.disarmNotFound() // 404 倒计时，每一秒一跳（notfound.go）
-	s.disarmVolIdle()  // 音量浮层那个到点叫醒界面的钟（playbar_volume.go）
 	s.disarmVolIdle()  // 音量浮层那个到点叫醒界面的钟（playbar_volume.go）
 
 	// 🔴 摘掉这一条唤醒句柄（铁律三那个逐窗口的列表）。摘掉之后调它是 no-op，
