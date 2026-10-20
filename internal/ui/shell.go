@@ -183,6 +183,16 @@ type Shell struct {
 	// volIdleSince 是「指针既不在图标上、也不在浮层里」的那一刻。零值表示此刻
 	// 指针还在其中之一上面。
 	volIdleSince time.Time
+	// volPanelHovered 是**上一帧**指针在不在浮层里。
+	//
+	// ⚠️ **只能记上一帧的**：浮层在**覆盖层**里建，而覆盖层是主树**之后**才建的
+	// ——主树里问不到「浮层这一帧的悬停」。
+	volPanelHovered bool
+	// volIdleStop 是那个「到点叫醒界面」的钟（见 `armVolIdle`）。
+	//
+	// ⚠️ **没有它浮层永远不会自己收掉**：不播放的时候没有任何东西在要帧，
+	// 「指针离开了」只在那一帧被算一次，浮层于是永远留在画面上。
+	volIdleStop func()
 	// volBeforeMute 是**最后一个不是 0 的音量**——取消静音的时候放回去的就是它。
 	//
 	// ⚠️ **它不跟着设置走**：音量是「这一刻的听感」，存进设置就意味着「这台机器
@@ -608,6 +618,8 @@ func (s *Shell) closePerWindow() {
 	}
 	s.feed.disarm()    // 红点，每五分钟一跳（navbar_feed.go）
 	s.disarmNotFound() // 404 倒计时，每一秒一跳（notfound.go）
+	s.disarmVolIdle()  // 音量浮层那个到点叫醒界面的钟（playbar_volume.go）
+	s.disarmVolIdle()  // 音量浮层那个到点叫醒界面的钟（playbar_volume.go）
 
 	// 🔴 摘掉这一条唤醒句柄（铁律三那个逐窗口的列表）。摘掉之后调它是 no-op，
 	// 而不摘不致命——但「进迷你 / 退出迷你」来回十次之后那个列表就有十条，

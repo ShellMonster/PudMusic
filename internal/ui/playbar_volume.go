@@ -156,6 +156,17 @@ func (s *Shell) viewVolumeButton(c *ui.Context, st app.State) {
 		s.volOpen = true
 	}
 
+	// 浮层**自己**收掉：指针既不在图标上、也不在浮层里，隔过一段宽限之后。
+	//
+	// 🔴 **这一段必须排一个「到点叫醒界面」的钟**（评审指出来的）：原来它只读
+	// `s.clock.Now()`，于是「指针离开了」这件事**只在那一帧**被算一次——而
+	// **不播放的时候没有任何东西在要帧**，浮层于是永远留在画面上，遮住内容区
+	//（症状：把鼠标移开，浮层还在那儿）。
+	//
+	// ⚠️ **浮层那一条的悬停是上一帧的**：浮层在**覆盖层**里建，而覆盖层是主树
+	// **之后**才建的——这一帧里它还没建出来，问不到它的悬停。
+	s.syncVolIdle(btn.Hovered(), s.volPanelHovered)
+
 	// 滚轮：±0.05（上游 `onWheel`）。
 	//
 	// ⚠️ **它吃掉了这个滚轮事件**（返回 true）：不吃掉的话，滚轮会继续往下传给
@@ -203,23 +214,68 @@ func (s *Shell) viewVolumePanel(c *ui.Context, st app.State) {
 		ui.Text(c, volPercent(vol)).FontSize(11).TextColor(t.TextMuted)
 	})
 
-	// 收不收浮层：指针在图标上、或者在浮层里，就留着；两边都不在，隔过一段
-	// 宽限之后收掉。
+	// 记下「指针在浮层里」，给下一帧的收放判断用（见 `syncVolIdle`）。
 	//
 	// ⚠️ **判的是这一列而不是浮层本身**：框架的 `ui.Popover` 不把浮层那一块交给
 	// 调用方（`PopoverBase` 才给），而这一列是**浮层里所有东西的爹**——指针在
 	// 滑块上、在百分比上，它都在这一列的命中链里。
-	onPanel := col.Hovered()
+	s.volPanelHovered = col.Hovered()
+}
+
+// syncVolIdle 收放那个浮层：指针在图标上、或者在浮层里，就留着；两边都不在，
+// 隔过一段宽限之后收掉。
+//
+// 🔴 **它排了一个「到点叫醒界面」的钟**（`armVolIdle`）：没有它，「指针离开了」
+// 这件事**只在那一帧**被算一次——而**不播放的时候没有任何东西在要帧**，浮层于是
+// 永远留在画面上，遮住内容区（症状：把鼠标移开，浮层还在那儿）。
+//
+// ⚠️ **收掉的判断放在这里（主树里）而不是浮层里**：浮层在**覆盖层**里建，而覆盖层
+// 是主树**之后**才建的——在浮层里把 `volOpen` 设成 false，这一帧它照样画着，
+// 要**下一帧**才消失。
+//
+// ⚠️ **浮层那一条的悬停是上一帧的**（`onPanel` 是上一帧记下的）：浮层还没建出来
+// 的那一帧问不到它的悬停。
+func (s *Shell) syncVolIdle(onIcon, onPanel bool) {
 	switch {
-	case s.volIconHovered || onPanel:
+	case onIcon || onPanel:
+		// 指针还在上面：清掉「离开的时刻」，那个钟也收掉。
 		s.volIdleSince = time.Time{}
-	default:
+		s.disarmVolIdle()
+	case s.volOpen:
+		// 指针不在了：记下这一刻，并排一个到点叫醒界面的钟。
 		if s.volIdleSince.IsZero() {
 			s.volIdleSince = s.clock.Now()
-		} else if s.clock.Now().Sub(s.volIdleSince) > volCloseGrace {
+			s.armVolIdle()
+		} else if s.clock.Now().Sub(s.volIdleSince) >= volCloseGrace {
 			s.volOpen = false
 			s.volIdleSince = time.Time{}
+			s.disarmVolIdle()
 		}
+	default:
+		// 浮层已经没了（点外面关掉的）：那个钟也收掉，别一直醒着。
+		s.disarmVolIdle()
+	}
+}
+
+// armVolIdle 排一个「到点叫醒界面」的钟。
+//
+// ⚠️ **回调里只调 `wake.invalidate`**：它跑在后台 goroutine（真时钟）或测试
+// goroutine（假时钟）上，而界面状态是主线程单点写入的（铁律一）——到没到点由
+// `syncVolIdle` 现算。
+//
+// 周期就是那一段宽限：第一次醒的时候刚好到期，那一帧就把浮层收掉。
+func (s *Shell) armVolIdle() {
+	if s.volIdleStop != nil {
+		return
+	}
+	s.volIdleStop = s.clock.EveryFunc(volCloseGrace, s.wake.invalidate)
+}
+
+// disarmVolIdle 停掉那个钟。
+func (s *Shell) disarmVolIdle() {
+	if s.volIdleStop != nil {
+		s.volIdleStop()
+		s.volIdleStop = nil
 	}
 }
 

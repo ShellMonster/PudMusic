@@ -187,8 +187,12 @@ func selfSlider(c *ui.Context, value *float64, lo, hi float64, look sliderLook) 
 			cy = r.Y + r.H*(1-frac)
 			track = ui.Rect{X: cx - look.trackW/2, Y: r.Y, W: look.trackW, H: r.H}
 			p.Fill(track, t.Border, look.trackW/2)
-			// 填过的那一段：从旋钮的中心往上到轨道的顶。
-			p.Fill(ui.Rect{X: track.X, Y: track.Y, W: look.trackW, H: cy - track.Y},
+			// 🔴 **填过的那一段是从旋钮往下到轨道底**：值 0 时旋钮压在底上，
+			// 填过的那一段是**空的**；值 1 时旋钮在顶上，那一段是**满的**。
+			//
+			// ⚠️ 原来这里是**从顶上往下填到旋钮**——填成了**剩下的**那一段，
+			// 于是 0% 显示满格、100% 显示空格（评审指出来的）。
+			p.Fill(ui.Rect{X: track.X, Y: cy, W: look.trackW, H: track.Y + track.H - cy},
 				t.Accent, look.trackW/2)
 		} else {
 			cy = r.Y + r.H/2

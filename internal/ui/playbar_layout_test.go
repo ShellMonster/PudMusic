@@ -489,3 +489,89 @@ func hoverVolumeKey(t *testing.T, tt *mygoui.Tester) {
 	tt.Advance(volHoverDelay)
 	tt.Frame()
 }
+
+// TestTheVolumeTrackIsFilledFromTheBottom 钉「轨道填的是**已经调上去的那一段**」。
+//
+// ⚠️ **这一条是被评审指出来的**：竖着的那一根原来是从**顶**往下填到旋钮的，
+// 填成了**剩下的**那一段——于是 0% 显示满格、100% 显示空格。
+//
+// 判据：轨道**上半段**（离 0% 时旋钮最远的那一头）在 100% 时是主色、在 0% 时不是。
+// 那一段两头都离旋钮远（旋钮 100% 时在顶上、0% 时在底下），所以影子和旋钮都
+// 够不着它。
+func TestTheVolumeTrackIsFilledFromTheBottom(t *testing.T) {
+	for _, c := range []struct {
+		vol    float64
+		filled bool
+	}{{0, false}, {1, true}} {
+		t.Run(fmt.Sprint(c.vol), func(t *testing.T) {
+			st := barState()
+			st.Volume = c.vol
+			tt, s := bottomBarTester(t, st, 1200, 320, false)
+			hoverVolumeKey(t, tt)
+
+			sl, ok := tt.Find("音量")
+			if !ok {
+				t.Fatalf("悬停之后浮层里没有那根音量滑块，文字有 %q", tt.Texts())
+			}
+			box := mygoui.Rect{
+				X: sl.X + sl.W/2 - 2,
+				Y: sl.Y + 30,
+				W: 4, H: 20,
+			}
+			a := BuildTheme(s.app.SettingsSnapshot(), false).Accent
+			accent := color.RGBA{R: a.R, G: a.G, B: a.B, A: a.A}
+			n := nearPixels(tt.Image(), box, accent)
+			switch {
+			case c.filled && n == 0:
+				t.Errorf("音量 100%%，轨道上半段 %v 却一个主色像素都没有——它没有填满", box)
+			case !c.filled && n != 0:
+				t.Errorf("音量 0%%，轨道上半段 %v 却有 %d 个主色像素——"+
+					"它填反了（填的是**剩下**的那一段）", box, n)
+			}
+		})
+	}
+}
+
+// TestTheVolumePopoverClosesOnItsOwn 钉「浮层会自己收掉」。
+//
+// ⚠️ **这一条是被评审指出来的**：原来那段只读 `s.clock.Now()`，**没有排任何到点
+// 的唤醒**——于是「指针离开了」这件事**只在那一帧**被算一次，而不播放的时候
+// **没有任何东西在要帧**：浮层于是永远留在画面上，遮住内容区。
+//
+// 判据是**画面上那个浮层没了**（那根滑块不在了），不是某个布尔。
+func TestTheVolumePopoverClosesOnItsOwn(t *testing.T) {
+	tt, s := bottomBarTester(t, barState(), 1200, 320, false)
+	// 假时钟：这一条要等 400 毫秒，不真等（`clock.go` 那一层）。
+	fc := newFakeClock(time.Unix(1_700_000_000, 0))
+	s.clock = fc
+
+	// 悬停 → 浮层出来。
+	hoverVolumeKey(t, tt)
+	if _, ok := tt.Find("音量"); !ok {
+		t.Fatalf("悬停之后浮层里没有那根音量滑块，文字有 %q", tt.Texts())
+	}
+
+	// 指针移到空白处：既不在图标上，也不在浮层里。
+	tt.Move(200, 60)
+	// 🔴 **先让悬停那个动画走完**：走完之后**没有任何东西在要帧**了——
+	// 「浮层自己收掉」真正要考的就是这一段（不播放的时候没有人要帧，
+	// 原来那一版于是永远停在画面上）。
+	tt.Advance(volHoverDelay + 50*time.Millisecond)
+	tt.Frame()
+	if _, ok := tt.Find("音量"); !ok {
+		t.Fatalf("指针刚离开浮层它就没了，文字有 %q——它不该这么急", tt.Texts())
+	}
+
+	// 推**应用**那个钟：到点了就该**有一帧被要**（那一段排了到点的唤醒）。
+	fc.Advance(volCloseGrace * 2)
+	if !tt.FramePending() {
+		t.Fatalf("过了宽限没有一帧被要（文字有 %q）——"+
+			"那一段必须自己排一个到点的唤醒：不播放的时候没有任何东西在要帧，"+
+			"而它只在**那一帧**算过一次「指针离开了」", tt.Texts())
+	}
+	tt.Frame()
+
+	if _, ok := tt.Find("音量"); ok {
+		t.Errorf("过了宽限浮层还开着（文字有 %q）——它得自己收掉", tt.Texts())
+	}
+}
