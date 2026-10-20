@@ -321,7 +321,7 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 			// 顺序是 Biu 的 SD-04 定的，所以行 key 用路由而不是序号：
 			// 以后菜单项按 hiddenMenuKeys 过滤、顺序会变，序号就不再稳定了。
 			//
-			// ⚠️ 别给 Button 再补一个 `Label(rt.Title)`：可见的字就是名字，
+			// ⚠️ **展开态别给 Button 补 `Label(rt.Title)`**：可见的字就是名字，
 			// 补上去会多出一个同样文字的无障碍节点，画面上出现两份。
 			ui.Column(c).Key("side-item:" + rt.Match).Children(func() {
 				item := flatButton(c, label).Grow(1)
@@ -329,7 +329,19 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 				//
 				// ⚠️ **只在折叠态给**：展开时名字本来就画在那儿，再来一句提示
 				// 是把用户已经读到的东西又说一遍。
+				//
+				// 🔴 **折叠态还必须给一个无障碍的名字**：可见的字只有「下」「本」
+				// 「推」「设」一个字，读屏软件念出来就是那一个字——这一格等于
+				// 完全没有名字。`Label` 补上的是**名字**（`Element.Label`），
+				// **画面上不多画一个字**（折叠态画面上本来就没有那个全名）。
+				//
+				// `Description` 也补上：框架的 `Element.Tooltip` 会写它
+				// （`mygo/ui/tooltip.go` 的 `if e.description == "" {…}`），
+				// 而 `ui.TooltipBase` 不写——而框架的文档明说「assistive
+				// technology sees it as a tooltip, **which it does not read**」，
+				// 所以提示里那句话得由名字 / 描述带到读屏软件那儿。
 				if collapsed {
+					item = item.Label(rt.Title).Description(rt.Title)
 					sideItemTip(c, item, rt.Title)
 				}
 				// 选中那一层照上游 HeroUI 的 `variant="flat"` + `color="primary"`

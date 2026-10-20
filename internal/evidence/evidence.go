@@ -1523,9 +1523,10 @@ var Items = []Item{
 		// 🔴 **判据全是画面上的东西**：提示那一格要**悬停 0.6 秒**才出，
 		// 收藏夹名那一格要**量高度**。两者都是静默的——名字换成单字不会报错，
 		// 名字换行也不会报错，只有提示和高度分得出来。
-		Spec: "侧栏折叠后每一项悬停说出自己是什么（提示贴在那一项右边）；收藏夹名单行 + 省略号，长名字不换行也不把下面那一行顶下去",
+		Spec: "侧栏折叠后每一项悬停说出自己是什么（提示贴在那一项右边）且有可及的名字；收藏夹名单行 + 省略号，长名字不换行也不把下面那一行顶下去",
 		Tests: []string{
 			"TestTheCollapsedSidebarItemSaysItsName",
+			"TestTheCollapsedSidebarItemHasItsFullName",
 			"TestTheCollapsedSidebarTipSitsToTheRightOfTheItem",
 			"TestALongFavoriteNameDoesNotMakeTheRowTaller",
 		},
@@ -1539,12 +1540,13 @@ var Items = []Item{
 		// ⚠️ **请求和画面各断一半**：请求带了词而界面没变，是界面没做；
 		// 界面变了而请求没带词，是这一层没做。合成一条的话，两种坏里坏一种
 		// 也能过。
-		Spec: "收藏夹页有一个按歌名找的输入框，和排序并排；输入能筛出歌（筛是接口筛的，回车立刻搜、否则防抖 500ms）；最小窗口下这一排仍摆得下，排序下拉不被挤扁",
+		Spec: "收藏夹页有一个按歌名找的输入框，和排序并排；输入能筛出歌（筛是接口筛的，回车立刻搜、否则防抖 500ms）；最小窗口下每一个侧栏宽度上排序下拉都是完整的、且不出窗口",
 		Tests: []string{
 			"TestTheCollectionPageHasASearchBox",
 			"TestTheCollectionSearchFiltersTheSongs",
 			"TestTheCollectionSearchReachesTheInterface",
 			"TestTheCollectionSearchGoesOutOnEnter",
+			"TestTheCollectionSearchSurvivesLeavingThePage",
 			"TestTheCollectionOpsRowStillFitsAtTheMinWindow",
 		},
 	},

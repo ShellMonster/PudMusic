@@ -636,39 +636,90 @@ func TestTheCollectionSearchSurvivesLeavingThePage(t *testing.T) {
 	})
 }
 
-// TestTheCollectionOpsRowStillFitsAtTheMinWindow 钉住操作条在**最小窗口**
-// 下还摆得下。
+// TestTheCollectionOpsRowStillFitsAtTheMinWindow 钉住「按歌名找 + 排序」那一行
+// 在**最小窗口**下、**每一个侧栏宽度**上都还摆得下。
 //
-// 这一排右边多了那个输入框之后，最小窗口（900）加默认侧栏（200）那一档就
-// 紧了：排不下的时候框架缩的是**排序下拉**（它自己的最小宽是那两个字），
-// 而被裁掉的「最近收藏」在下拉里是用户唯一能看见的说明。
+// # 这一条曾经只量了默认侧栏 200，而那一档是最好过的
 //
-// 判据是**画面上的盒子**：排序下拉的自然宽是 83（右缘落在页边距 876 上），
-// 而这一栏的右缘就是 900 减页边距 24。
+// 上一版把那个输入框放在操作条那一排里（和四个动作 + 多选 + 排序挤在一行），
+// 宽度取 140 ——它在默认侧栏 200 那一档刚好摆得下，**而侧栏 240~360 那一段就
+// 坏了**：排不下的时候框架缩的是**排序下拉**（实测被压到 29 宽，右缘跑到
+// 910~950，**已经出窗口了**），而那一格是用户唯一看得见的说明。
 //
-// ⚠️ 这一条和「输入框有多宽」那一条是**同一件事的两头**：宽度写大了这里就红，
-// 这里红了宽度就得改小——而改小的理由写在 `collectionSearchWidth` 的注释里。
+// 侧栏宽度是 **160~480**（`app.ClampSideMenuWidth`），而**导入 Biu 的设置之后
+// 侧栏就是 280**（`internal/app/first_import_test.go:110`），窗口又能拖到
+// **900 最小**——那一档是用户真真实实会撞上的。
+//
+// # 判据是**画面上的盒子**
+//
+//   - 排序下拉的自然宽是 83（「最近收藏 ▾」加内边距和描边）：被压扁就是坏了。
+//   - 它的右缘要落在**页边距**里面（900 减 24 = 876）。
+//   - 那个输入框也要是它自己的宽（180）：被压成 0 就是「这一行挤没了」。
+//
+// # ⚠️ **侧栏 480 那一档，基线本来就是坏的**
+//
+// 内容区只剩 900 - 480 - 48 = **372**，而封面自己就 200 ——那一档连头图区都摆不
+// 完（基线的操作条那一排 484 宽，在 372 里同样挤不下，排序下拉被压成 0 宽、
+// 右缘跑到 979，**出窗口**）。所以那一档只要求「**不出窗口**」，而现在的样子
+// （排序 52 宽、右缘 900）比基线好。
 func TestTheCollectionOpsRowStillFitsAtTheMinWindow(t *testing.T) {
-	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
-	waitSongs(t, tt, s, 2)
+	for _, side := range []float64{160, 200, 240, 280, 320, 360, 480} {
+		t.Run(strconv.FormatInt(int64(side), 10), func(t *testing.T) {
+			st := app.DefaultSettings("")
+			st.SideMenuWidth = side
+			// ⚠️ **ReduceMotion 是必须的**：侧栏的宽度过渡是 200ms 的动画，而
+			// 无头 Tester 的钟站着不动——不关掉动画的话，这一档量到的其实是
+			// **还没走到位的那个宽**（第一次量出来六个侧栏宽度量出来的是同一个
+			// 位置，就是这个原因）。
+			_, s, tt := collectionShellOpts(t,
+				[]shellOpt{withSettings(st), at(minWindowW, minWindowH),
+					withPrefs(ui.Preferences{ReduceMotion: true, TextScale: 1})},
+				"", "12345",
+				mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
+			waitSongs(t, tt, s, 2)
 
-	tt.SetSize(minWindowW, minWindowH)
-	tt.Frame()
+			sort, ok := tt.Find("排序：最近收藏")
+			if !ok {
+				t.Fatalf("侧栏 %.0f：画面上找不到排序下拉，文字有 %q", side, tt.Texts())
+			}
+			box, ok := tt.Find(collectionSearchLabel)
+			if !ok {
+				t.Fatalf("侧栏 %.0f：画面上找不到那个输入框，文字有 %q", side, tt.Texts())
+			}
 
-	sort, ok := tt.Find("排序：最近收藏")
-	if !ok {
-		t.Fatalf("画面上找不到排序下拉，文字有 %q", tt.Texts())
-	}
-	// 页边距 24（`viewCollectionOps` 的 `Padding(0, 24, 12)`）：这一栏的右缘
-	// 应该是 900 - 24 = 876。
-	const wantRight = float32(minWindowW - 24)
-	if right := sort.X + sort.W; right > wantRight {
-		t.Errorf("排序下拉的右缘是 %.1f，越过了页边距（want ≤ %.0f）——"+
-			"输入框（%d 宽）把这一行挤出去了", right, wantRight, collectionSearchWidth)
-	}
-	// 排序下拉自己的自然宽：83 上下（「最近收藏 ▾」加内边距和描边）。
-	if sort.W < 80 {
-		t.Errorf("排序下拉被压到 %.1f 宽了——「最近收藏」那一行被裁掉了", sort.W)
+			// 页边距 24（`viewCollectionHeader` 的 `Padding(20, 24, 8)`）：这一列
+			// 的右缘应该是 900 - 24 = 876。
+			//
+			// ⚠️ **那 4 个像素的余量**：排序下拉那个触发器的**盒子**比它的布局
+			// 基线宽 3.2（描边那一圈），所以它的右缘会比基线的右缘多出那么一点。
+			// 量的是盒子，就得多留那 3.2。
+			const wantRight = float32(minWindowW - 24 + 4)
+			if side <= 360 {
+				if right := sort.X + sort.W; right > wantRight {
+					t.Errorf("侧栏 %.0f：排序下拉的右缘是 %.1f，越过了页边距（want ≤ %.0f）",
+						side, right, wantRight)
+				}
+			}
+			// 输入框也要是它自己的宽：被压扁就是「这一行挤没了」。
+			if box.W < collectionSearchWidth-2 {
+				t.Errorf("侧栏 %.0f：那个输入框被压到 %.1f 宽了（want %d）",
+					side, box.W, collectionSearchWidth)
+			}
+			// 都不许跑出窗口。
+			if right := box.X + box.W; right > minWindowW {
+				t.Errorf("侧栏 %.0f：输入框的右缘是 %.1f，跑出窗口了（want ≤ %d）",
+					side, right, minWindowW)
+			}
+			if right := sort.X + sort.W; right > minWindowW {
+				t.Errorf("侧栏 %.0f：排序下拉的右缘是 %.1f，跑出窗口了（want ≤ %d）",
+					side, right, minWindowW)
+			}
+			// 侧栏 ≤ 360 那一段基线是好的：排序下拉必须**完整**（不是被压扁的）。
+			if side <= 360 && sort.W < 80 {
+				t.Errorf("侧栏 %.0f：排序下拉被压到 %.1f 宽了——「最近收藏」那一行被裁掉了",
+					side, sort.W)
+			}
+		})
 	}
 }
 

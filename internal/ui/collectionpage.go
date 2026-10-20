@@ -437,7 +437,8 @@ const (
 	collectionCoverH = 168
 )
 
-// viewCollectionHeader 是顶部头图区：封面 + 标题 + 简介 + 类型和条数 + 创建者。
+// viewCollectionHeader 是顶部头图区：封面 + 标题 + 简介 + 类型和条数 + 创建者，
+// **外加右边那一行「按歌名找 + 排序」**（理由见 `viewCollectionOps` 顶上那一段）。
 //
 // 文案和排列照抄 `src/pages/video-collection/header/index.tsx:53-113`。
 func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
@@ -473,6 +474,32 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 					ui.Text(c, info.OwnerName).FontSize(12).TextColor(t.TextMuted).
 						MaxLines(1).Ellipsis("…")
 				}
+
+				// ⑤ 「按歌名找 + 排序」，靠右。
+				//
+				// 🔴 **它为什么在这儿，而不在下面那一排**（详见
+				// `viewCollectionOps` 顶上那一段）：那一排左边五件自己就要 484 宽，
+				// 而内容区在最小窗口（900）加侧栏 360 那一档只剩 492——**塞不下
+				// 第三件**。挤不下的时候框架缩的是**排序下拉**（实测被压到 29 宽、
+				// 右缘跑到 910~950，**已经出窗口了**）。
+				//
+				// 而**头图区有竖着的空**：封面 168 高，而左边那一列字只有 90 高
+				// ——多出来的 78 像素正好放得下这一行（实测这一行 29 高），
+				// **头图区的高度一个字都不涨**（列表那一块还是那么大）。
+				//
+				// 靠右是 `AlignSelf(Stretch)` + `Spacer` 做的：这一行铺满那一列，
+				// 内容被 `Spacer` 推到右缘，而那一列的右缘是**页边距**
+				// （900 减 24 = 876）——和下面那一排的右缘是同一条线。
+				// ⚠️ **AlignSelf(Stretch) 不能省**：这一列是 `AlignItems(Start)`
+				// 的（那几行字要靠左），而 `Grow(1)` 在一列里长的是**竖着**的
+				// 方向——不写这一句，这一行就按内容宽摆着，排序下拉落在整页的
+				// **中间**而不是右缘。
+				ui.Row(c).Key("collection-filters").AlignSelf(ui.Stretch).Gap(8).Center().
+					Children(func() {
+						ui.Spacer(c)
+						s.viewCollectionSearch(c, p)
+						s.viewCollectionSort(c, p)
+					})
 			})
 		})
 }
@@ -507,12 +534,30 @@ func collectionKindText(typ bili.CollectionType, private bool) string {
 
 // ── 操作条 ─────────────────────────────────────────────────────────────────
 
-// viewCollectionOps 是头图区下面那一排：左边四个动作，右边多选开关 + 搜索框 +
-// 排序。
+// viewCollectionOps 是头图区下面那一排：左边四个动作，右边多选开关。
 //
-// 项和顺序照 Biu 的 `src/pages/video-collection/operation/index.tsx:33-56`，
-// **外加那个搜索框**（上游那一排的右边是 `SearchWithSort`，而我们之前只抄了
-// 它里面的排序那一半——见 `viewCollectionSearch`）。
+// 项和顺序照 Biu 的 `src/pages/video-collection/operation/index.tsx:33-56`。
+//
+// # 🔴 **「按歌名找 + 排序」为什么不在这一排，而在头图区里**
+//
+// 上游把它们放在**这一排**的右边（`SearchWithSort` 就是一排）。我们这一排的
+// **左边比上游宽得多**：上游是「播放全部 + 两枚图标键」，我们是「播放全部 +
+// 添加到播放列表 + ☆ / ⋯ + 多选」五件，五件自己就要 **484** 宽。
+//
+// 而侧栏宽度是 **160~480**（`app.ClampSideMenuWidth`），窗口最窄是 **900**
+// （`shell.go` 的 `MinWidth`）。侧栏 360 那一档的内容区只剩 **492**——**塞不下
+// 第三件**。挤不下的时候框架缩的是**排序下拉**（它的最小宽就是那两个字），
+// 实测被压到 **29** 宽、右缘跑到 **910~950**（**已经出窗口了**）——而那一格
+// 是用户唯一看得见的说明，裁掉之后它就变成一个认不出的方块。
+//
+// 而**头图区有竖着的空**：封面 168 高，左边那一列字只有 90 高——多出来的
+// 78 像素放得下那一行（29 高），**头图区的高度一个字都不涨**（下面那一块
+// 列表还是那么大）。所以「按歌名找 + 排序」搬到头图区里，靠右，右缘还是
+// 同一条页边距。
+//
+// ⚠️ **别为了「和上游一样」把它们塞回这一排**：
+// `TestTheCollectionOpsRowStillFitsAtTheMinWindow` 钉着这一段（它量的是**每个
+// 侧栏宽度**下排序下拉的盒子）。
 func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 	t := c.Theme()
 
@@ -537,13 +582,6 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 			if multi.Clicked() {
 				s.toggleCollectionMulti(p)
 			}
-
-			// ⚠️ **搜索框在排序的左边**（上游 `SearchWithSort` 的次序：
-			// `components/search-with-sort/index.tsx:15-17` 先搜索后排序）——
-			// 两个「缩小范围」的手段挨在一起，用户一眼就知道它们是一伙的。
-			s.viewCollectionSearch(c, p)
-
-			s.viewCollectionSort(c, p)
 		})
 }
 
@@ -708,35 +746,23 @@ func (s *Shell) setCollectionSort(p *collectionPage) {
 
 // collectionSearchWidth 是那个输入框的宽度。
 //
-// # 参照物：同一栏里现成的那个同类输入框
+// # 参照物：仓库里现成的那个同类输入框
 //
 // `localmusic.go` 的本地音乐工具条上那个搜索框是 **180**
-// （`ui.TextInput(c, &p.search)…Width(180)`），而它和这一栏的排法**一模一样**：
-// 一个输入框挨着一个下拉（那边是「目录」，这边是「排序」）。所以 180 是首选。
-//
-// # 为什么这里取 140 而不是 180
-//
-// **这一栏的左边比那一栏宽**：本地音乐那一排是「播放全部 / 全部加入队列」两枚
-// 键，而这一排是「播放全部 / 添加到播放列表 / ☆ / ⋯ / 多选」五件。
-//
-// 实测（无头 Tester 量盒子，最小窗口 900 + 默认侧栏 200；页边距 24，所以这一
-// 行的右缘是 876）：
-//
-//	输入框 180 → 排序下拉被压到 69 宽（自然宽 83，「最近收藏」被裁成「最近收…」），
-//	              整行的右缘跑到 900（**压到了窗口边**，页边距没了）
-//	输入框 160 → 排序下拉回到 83，但整行的右缘是 893.8（**越过了页边距 17.8**）
-//	输入框 140 → 排序下拉 83，右缘 876——**和加这个框之前一模一样**
-//
-// 而一个输入框**不能靠 `Grow` 缩下去**：框架给它的最小宽就是它自己那个宽
-// （`mygo/ui/layout.go` 的 `minMain`），那一栏挤不下的时候缩的是**排序下拉**。
-//
-// 140 是**还摆得下排序下拉自然宽、又不越过页边距**的最大整数。
-// `TestTheCollectionOpsRowStillFitsAtTheMinWindow` 钉着这个数。
+// （`ui.TextInput(c, &p.search)…Width(180)`），而它和这一处的排法**一模一样**：
+// 一个输入框挨着一个下拉（那边是「目录」，这边是「排序」）。所以照它抄 **180**。
 //
 // ⚠️ 别拿 `keywordBoxWidth`（256）来：那是「稍后再看 / 历史记录」那一页的
 // 搜索框，那一页的内容区更宽、而且搜索框**另起一行**（见 `librarypage.go`
-// 的 `viewFilters` 注释）。放在这一栏里 256 会把排序整个挤出窗外。
-const collectionSearchWidth = 140
+// 的 `viewFilters` 注释）。
+//
+// # 180 在这里摆得下，是因为那一行**不在操作条那一排**（理由见
+// `viewCollectionOps` 顶上那一段）
+//
+// 头图区右边那一列在最小窗口（900）加侧栏 360 那一档还有 276 宽，放得下
+// 180 + 8 + 83 = 271；而操作条那一排在同一档只剩 492，而它左边五件自己就要 484——
+// **塞不下第三件**（挤不下的时候被缩的是**排序下拉**，不是输入框）。
+const collectionSearchWidth = 180
 
 // collectionSearchLabel 是那个输入框的名字，兼做它空着时画的那几个字。
 //

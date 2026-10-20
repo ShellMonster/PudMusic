@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"os"
 	"path/filepath"
 	"slices"
@@ -702,9 +703,10 @@ func collapsedShell(t *testing.T) (*Shell, *app.App, *mygoui.Tester) {
 // ⚠️ **悬停提示要指针停够 0.6 秒才出**（`mygo/ui/tooltip.go` 的 tooltipDelay），
 // 所以是 Move + Advance + Frame，不是 Move + Frame。
 //
-// ⚠️ **认的是「下载记录」而不是「推荐音乐」**：后者是当前那一页的**路由容器**
-// 的无障碍名字（`mygo/ui/router.go` 给路由容器 `Label(e.title)`），它本来就
-// 在画面上——拿它当判据的话，这条测试折不折叠都通过，等于空跑。
+// ⚠️ **断的是「多了一个」而不是「有没有」**：折叠态那一项的**无障碍名字**就是
+// 「下载记录」（见 `TestTheCollapsedSidebarItemHasItsFullName`），而提示是
+// 浮层里的**另一个**元素——所以判据是**同一个字出现了两次**（名字 + 提示），
+// 不是「画面上有这句话」。
 func TestTheCollapsedSidebarItemSaysItsName(t *testing.T) {
 	_, _, tt := collapsedShell(t)
 
@@ -713,44 +715,104 @@ func TestTheCollapsedSidebarItemSaysItsName(t *testing.T) {
 	if !ok {
 		t.Fatalf("折叠态的侧栏上没有「下载记录」那一个字，文字有 %q", tt.Texts())
 	}
-	if tt.HasText("下载记录") {
-		t.Fatalf("还没悬停就把名字说出来了，文字有 %q", tt.Texts())
+	before := countText(tt, "下载记录")
+	if before != 1 {
+		t.Fatalf("悬停之前「下载记录」出现了 %d 次，want 1（那一项的无障碍名字），文字有 %q",
+			before, tt.Texts())
 	}
 
 	tt.Move(r.X+r.W/2, r.Y+r.H/2)
 	tt.Advance(700 * time.Millisecond)
 	tt.Frame()
 
-	if !tt.HasText("下载记录") {
-		t.Errorf("悬停的时候没有说出这一项是什么，文字有 %q", tt.Texts())
+	if got := countText(tt, "下载记录"); got != before+1 {
+		t.Errorf("悬停的时候没有多出一个「下载记录」（提示），出现了 %d 次，want %d，文字有 %q",
+			got, before+1, tt.Texts())
+	}
+}
+
+// TestTheCollapsedSidebarItemHasItsFullName 钉住折叠态那一项的**无障碍名字**。
+//
+// 折叠态可见的字只有一个字（「下」「本」「推」「设」），读屏软件念出来就是那一个
+// 字——这一格等于**完全没有名字**。所以那一项要带一个 `Label`（全名）。
+//
+// ⚠️ **Label 不在画面上多画一个字**：折叠态画面上本来就没有那个全名（展开态
+// 才有，而展开态**不**给 Label——那一档可见的字就是名字，见 `sidebar.go` 的
+// 注释）。
+func TestTheCollapsedSidebarItemHasItsFullName(t *testing.T) {
+	_, _, tt := collapsedShell(t)
+
+	for _, name := range []string{"推荐音乐", "本地音乐", "下载记录", "设置"} {
+		if !tt.HasText(name) {
+			t.Errorf("折叠态那一项没有全名 %q，文字有 %q", name, tt.Texts())
+		}
+	}
+	// 全名在，**那个字**也得在（折叠态画的是单字，不是全名）。
+	if _, ok := tt.Find("下"); !ok {
+		t.Errorf("折叠态那一列画的不是单字，文字有 %q", tt.Texts())
 	}
 }
 
 // TestTheCollapsedSidebarTipSitsToTheRightOfTheItem 钉住提示的**位置**。
 //
 // 上游折叠态那一项的提示是 `placement="right"`
-// （`biu/src/components/menu/menu-item.tsx:98-99`）——贴在那一项的右边。
+// （`biu/src/components/menu/menu-item.tsx:78`）——贴在那一项的右边。
 // 摆在上面的话提示会盖住上面那几项（侧栏只有 72 宽，摆不下别的东西），
 // 而摆在左边会被窗口边钳住。
+//
+// # ⚠️ **为什么断的是像素而不是那个元素的盒子**
+//
+// 折叠态那一项的**无障碍名字**也是「下载记录」（见
+// `TestTheCollapsedSidebarItemHasItsFullName`），而 `Tester.Find` 找的是**第一个**
+// 同样的字——那是那一项自己，**不是提示**。所以提示在哪儿只能看**画面**：
+// 提示的底色是**反色**（浅色下是深色，深色下是比背景略亮的 Surface），
+// 而侧栏那一列的底色是 `t.Background`。
+//
+// 深浅两套都量：浅色下反色是**深**色（和底色差得开），深色下反色是**略亮**的
+// Surface（只差一级），而那一格到底是不是提示，只有量了才知道。
 func TestTheCollapsedSidebarTipSitsToTheRightOfTheItem(t *testing.T) {
-	_, _, tt := collapsedShell(t)
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			st := app.DefaultSettings("")
+			st.SideMenuCollapsed = true
+			s, tt := newShell(t, systemIsDark(dark), withSettings(st),
+				withPrefs(mygoui.Preferences{ReduceMotion: true, TextScale: 1}))
+			tt.Frame()
+			theme := BuildTheme(s.app.SettingsSnapshot(), dark)
 
-	r, ok := tt.Find("下")
-	if !ok {
-		t.Fatalf("折叠态的侧栏上没有「下载记录」那一个字，文字有 %q", tt.Texts())
-	}
-	tt.Move(r.X+r.W/2, r.Y+r.H/2)
-	tt.Advance(700 * time.Millisecond)
-	tt.Frame()
+			r, ok := tt.Find("下")
+			if !ok {
+				t.Fatalf("折叠态的侧栏上没有「下载记录」那一个字，文字有 %q", tt.Texts())
+			}
+			// 上面那一个字（「本」）——提示摆在**上面**的话它会被盖住。
+			above, ok := tt.Find("本")
+			if !ok {
+				t.Fatalf("折叠态的侧栏上没有「本地音乐」那一个字，文字有 %q", tt.Texts())
+			}
 
-	tip, ok := tt.Find("下载记录")
-	if !ok {
-		t.Fatalf("悬停的时候没有说出这一项是什么，文字有 %q", tt.Texts())
-	}
-	// 侧栏折叠后是 72 宽（`app.CollapsedSideMenuWidth`），提示得在它右边。
-	if tip.X < app.CollapsedSideMenuWidth {
-		t.Errorf("提示摆在侧栏里面（x=%.1f < %.0f），文字有 %q",
-			tip.X, app.CollapsedSideMenuWidth, tt.Texts())
+			tt.Move(r.X+r.W/2, r.Y+r.H/2)
+			tt.Advance(700 * time.Millisecond)
+			tt.Frame()
+
+			inverse := color.RGBA{R: theme.Inverse.R, G: theme.Inverse.G,
+				B: theme.Inverse.B, A: theme.Inverse.A}
+			img := tt.Image()
+			// ① 侧栏右边那一格是提示的底色 → 提示贴在那一项的右边。
+			at := img.RGBAAt(int(app.CollapsedSideMenuWidth)+4, int(r.Y+r.H/2))
+			if at != inverse {
+				t.Errorf("侧栏右边那一格是 %v，want %v（提示的底色）——"+
+					"提示没有贴在那一项的右边", at, inverse)
+			}
+			// ② 上面那一个字没有被盖住 → 提示不在上面。
+			over := img.RGBAAt(int(above.X+above.W/2), int(above.Y+above.H/2))
+			if over == inverse {
+				t.Errorf("上面那一个字被提示盖住了（%v）——提示摆在上面了", over)
+			}
+		})
 	}
 }
 
