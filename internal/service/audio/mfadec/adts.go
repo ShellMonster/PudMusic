@@ -72,14 +72,19 @@ var adtsChannelCounts = [8]int{0, 1, 2, 3, 4, 5, 6, 0}
 // **Main**——而「ffmpeg 的 ADTS muxer 没把 profile 写对」那个结论也是**错的**：
 // ffprobe 说这份素材是 LC，ffmpeg 写的也是 LC，**是这一层的解析错位了**。
 //
-// ⚠️ **它说的是「头里写了什么」，不是「码流是什么」。** 实测：本仓库里
-// ffmpeg 用 `-profile:a aac_low` 造出来的那份素材，ffprobe 说 profile=LC，
-// 头里写的却是 Main（`fixture_test.go` 的 `TestTheADTSProfileFieldIsNotTheTruth`
-// 钉着这条）。拿这个字段去决定「这个 AAC 是 LC 还是别的」会得出错的答案。
+// ⚠️ **它说的是「头里写了什么」，不是「码流是什么」。**
 //
-// 它仍然有用：采样率、声道数、帧长那三个字段是可信的，而判断「这份字节
-// 是不是裸 ADTS」只需要同步字。所以这一层的定位是**读容器头**，
-// 不是给码流做分类。
+// 头里那两位是 object type 减一（见上），而 object type 说的是**码流**用的
+// profile——所以这一次它和 ffprobe 是**一致**的：本仓库里 ffmpeg 用
+// `-profile:a aac_low` 造出来的那份素材，ffprobe 说 profile=LC，头里解出来
+// 也是 **AAC-LC**（`fixture_test.go` 的
+// `TestTheADTSProfileFieldIsTheObjectTypeMinusOne` 钉着这一条）。
+//
+// ⚠️ 但**别把它当码流的判据**：头里写的是**声明**，码流实际用没用那个 profile
+// 要解出来才知道（profile 和实际用的编码器可以不一致）。这一层只**读容器头**。
+//
+// 采样率、声道数、帧长那三个字段是可信的，而判断「这份字节是不是裸 ADTS」
+// 只需要同步字。
 type ADTSProfile int
 
 const (

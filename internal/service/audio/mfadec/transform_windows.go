@@ -522,23 +522,32 @@ func ProbeInputTypes(rate, chans int, asc []byte) []InputProbe {
 		c := &Codec{th: th}
 		for _, v := range inputVariants(aacPayloadRaw) {
 			p := InputProbe{Name: v.name}
-			mft, err := c.createMFT()
-			if err != nil {
-				p.Err = err
-				probes = append(probes, p)
-				continue
-			}
-			// 两种顺序都试：先输入后输出，和先输出后输入。
+			// ⚠️ **每一种顺序都建一个全新的 MFT**。
+			//
+			// 微软的 AAC Decoder 页面明写「the AAC decoder does not handle
+			// dynamic format changes, and must be flushed or drained before a
+			// new input media type is set」——所以**同一个 MFT 上换一次输入媒体
+			// 类型，第二次可能被拒**。而在同一个 MFT 上连试两种顺序，正好会
+			// 撞上这个限制：第一遍若在 `SetOutputType` 处失败，输入类型**已经
+			// 设进去了**，第二遍再设一次就没有 flush，于是可能把一种其实能认
+			// 的配置报成「不认」。
+			//
+			// `open()` 那条路本来就是每次循环都 `createMFT()`，这里跟它一致。
 			var last error
 			for _, inputFirst := range []bool{true, false} {
-				if err := c.tryOpen(mft, rate, chans, asc, v, inputFirst); err != nil {
+				mft, err := c.createMFT()
+				if err != nil {
 					last = err
 					continue
 				}
-				last = nil
-				break
+				err = c.tryOpen(mft, rate, chans, asc, v, inputFirst)
+				release(mft)
+				if err == nil {
+					last = nil
+					break
+				}
+				last = err
 			}
-			release(mft)
 			p.Err = last
 			probes = append(probes, p)
 		}
