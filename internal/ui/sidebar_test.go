@@ -59,20 +59,27 @@ func dragFrom(tt *mygoui.Tester, x, y, tx, ty float32) {
 //
 // 把手是侧栏那一行的最后一个子元素，宽 sideGrip，贴右边。侧栏宽多少这里
 // 传多少——测试里那几个宽度都是我们自己给的确定值。
-func gripX(sidebarWidth float32) float32 { return sidebarWidth - sideGrip/2 }
+// gripX 是把手中心那一列的横坐标。
+//
+// ⚠️ **那条 1 像素的分隔线（`sideDividerW`）在里面**：它画在侧栏框的**内侧**
+// （MyGo 的 `Border` 文档：「draws a border of width DIPs inside the element's
+// edges … the padding and the children are inside it」），所以把手整个落在
+// 分隔线左边一格。少减这 1 的话，按下去的点落在分隔线上而不是把手上——而
+// 按在分隔线上的症状是「拖不动」，不会报「差了一个像素」。
+func gripX(sidebarWidth float32) float32 { return sidebarWidth - sideDividerW - sideGrip/2 }
 
 // sideWidthOnScreen 是这一帧画面上侧栏实际有多宽。
 //
 // 折叠按钮铺满侧栏正文（Column 把子元素拉满宽），所以它的宽度加回右边那条
-// 把手就是侧栏的宽。找的是按钮的**无障碍名字**而不是那个「«」的字形——
-// 找字形拿到的是文字那一小块的盒子（8 宽），不是按钮的。
+// 把手和那条分隔线就是侧栏的宽。找的是按钮的**无障碍名字**而不是那个「«」的
+// 字形——找字形拿到的是文字那一小块的盒子（8 宽），不是按钮的。
 //
 // 取的是**画面上的盒子**，不是设置里的数：设置对了但画出来不对，同样是没做。
 func sideWidthOnScreen(t *testing.T, tt *mygoui.Tester) float32 {
 	t.Helper()
 	for _, name := range []string{"折叠侧栏", "展开侧栏"} {
 		if r, ok := tt.Find(name); ok {
-			return r.W + sideGrip
+			return r.W + sideGrip + sideDividerW
 		}
 	}
 	t.Fatalf("画面上找不到折叠按钮，文字有 %q", tt.Texts())
@@ -158,7 +165,7 @@ func TestDraggingBackOutExpandsTheSidebar(t *testing.T) {
 	}
 
 	// 从 72 拖到 172：+100 > 160，展开。
-	dragFrom(tt, gripX(app.CollapsedSideMenuWidth), 400, 68+100, 400)
+	dragFrom(tt, gripX(app.CollapsedSideMenuWidth), 400, gripX(app.CollapsedSideMenuWidth)+100, 400)
 
 	st := a.SettingsSnapshot()
 	if st.SideMenuCollapsed {
@@ -204,7 +211,7 @@ func TestDraggingTheGripBeyondItsOwnBoxKeepsWidening(t *testing.T) {
 func TestDraggingWiderIsCappedAt480(t *testing.T) {
 	_, a, tt, _ := sideShell(t)
 
-	dragFrom(tt, gripX(app.DefaultSideMenuWidth), 400, 196+400, 400)
+	dragFrom(tt, gripX(app.DefaultSideMenuWidth), 400, gripX(app.DefaultSideMenuWidth)+400, 400)
 
 	if got := a.SettingsSnapshot().SideMenuWidth; got != app.MaxSideMenuWidth {
 		t.Errorf("拖到 600 存下去的是 %v，want %v", got, app.MaxSideMenuWidth)
@@ -220,7 +227,7 @@ func TestDraggingWiderIsCappedAt480(t *testing.T) {
 func TestTheSidebarWidthSurvivesARestart(t *testing.T) {
 	_, a, tt, path := sideShell(t)
 
-	dragFrom(tt, gripX(app.DefaultSideMenuWidth), 400, 196+120, 400)
+	dragFrom(tt, gripX(app.DefaultSideMenuWidth), 400, gripX(app.DefaultSideMenuWidth)+120, 400)
 	if err := a.FlushSettings(); err != nil {
 		t.Fatal(err)
 	}

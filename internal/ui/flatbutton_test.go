@@ -175,12 +175,19 @@ func TestTheIconButtonsAreTransparentAndUnbordered(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			_, tt := flatSideShell(t, dark)
-			for _, what := range []string{"打开文件", "播放列表", "设置"} {
-				r, ok := tt.Find(what)
+			// ⚠️ **「播放列表」从顶栏搬到了播放条右边那一组**（票 #127，照 Biu
+			// 的 `playbar/right/index.tsx:16`），所以下面那一句「哪一格」得跟着
+			// 变——写成「顶栏」会让人以为它在顶栏上，而它不在了。
+			for _, what := range []struct{ label, where string }{
+				{"打开文件", "顶栏"},
+				{"设置", "顶栏"},
+				{"播放列表", "播放条右边"},
+			} {
+				r, ok := tt.Find(what.label)
 				if !ok {
-					t.Fatalf("顶栏上找不到 %q，文字有 %q", what, tt.Texts())
+					t.Fatalf("%s上找不到 %q，文字有 %q", what.where, what.label, tt.Texts())
 				}
-				assertFlat(t, tt.Image(), r, "顶栏 "+what)
+				assertFlat(t, tt.Image(), r, what.where+" "+what.label)
 			}
 		})
 	}
@@ -354,10 +361,10 @@ func TestTheSidebarRowsHaveNoBorderAndNoFill(t *testing.T) {
 // 的事。拿它们去断「悬停要亮」只会逼着代码给禁用的键也铺一层底，
 // **等于告诉用户这里点得动**（这正是评审查出来的那一条）。
 //
-// ⚠️ 只画播放条（`playBarTester`）而不是整窗：整窗里这一格背后是播放条自己的
-// `t.Surface`，而外侧那一圈要采到**播放条之内**才算是同一个参照。整窗的写法会在
-// 播放条的最外沿（加歌那一枚）采到窗外，报出来的是「框外是窗口底色」——离真因
-// 隔了两层。
+// ⚠️ 只画播放条（`playBarTester`）而不是整窗：整窗里这一格背后是**内容区**的底色
+// （票 #127 之后播放条和内容区同源，都是 `t.Background`），而外侧那一圈要采到
+// **播放条之内**才算是同一个参照。整窗的写法会在播放条的最外沿（加歌那一枚）
+// 采到窗外，报出来的是「框外是窗口底色」——离真因隔了两层。
 func TestThePlayBarKeysAreFlatAndKeepTheirHover(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -449,7 +456,7 @@ func TestADisabledFlatButtonDoesNotLightUpOnHover(t *testing.T) {
 // openSettingsFor 开设置页；readOnly 为真时挂一份来自更新版本的设置（只读）。
 //
 // 只读那一档靠的是「文件里的 schemaVersion 比我们高」
-//（`TestSettingsPageRefusesToWriteAFileFromANewerVersion` 用的同一条路）。
+// （`TestSettingsPageRefusesToWriteAFileFromANewerVersion` 用的同一条路）。
 func openSettingsFor(t *testing.T, dark, readOnly bool) *mygoui.Tester {
 	t.Helper()
 	if !readOnly {

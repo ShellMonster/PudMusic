@@ -68,6 +68,13 @@ const (
 	radiusReadoutW = 48
 )
 
+// settingsContentPad 是设置的内容那一段四边的内边距。
+//
+// 28 不是 Biu 的数（那是 `px-8 py-4` = 32 / 16），是**内容区页边距**那个已经
+// 批准的决定（比上游大 4px，调研判「很小」，见票 #124 的「不要动」那一节）。
+// 设置页是内容区里的一页，跟着走同一个数才不会在页面之间跳。
+const settingsContentPad = 28
+
 // selectWidth 是下拉框多宽。Biu 是 `w-[180px]`（`system-settings.tsx:164`），
 // 代理那一页是 `w-[240px]`（`proxy-settings.tsx:43`）。
 const selectWidth = 180
@@ -87,6 +94,21 @@ var closeWindowOptions = []struct {
 	{app.CloseWindowExit, "直接退出"},
 }
 
+// settingsContentMaxW 是设置的内容收在多宽里。
+//
+// 🔴 **900 是量出来的**：Biu 那一页是 `m-auto mb-6 max-w-[900px] px-8 py-4`
+// （`biu/src/pages/settings/index.tsx:121`）。我们原来没有这一层：内容
+// `FillWidth()` 之后一路铺到窗口右边缘，于是窗口一宽，整页设置就跟着拉宽——
+// 右下角那个代理主机输入框能到 470 像素，而 Biu 那一档是两个 410 的格子。
+//
+// 「满宽拉到右边缘」在设置这一页上比在别的页上更糟，理由不是审美：那一行是
+// 「左边标题 + 右边控件」，控件那一头钉在屏幕边上之后，眼睛从标题扫到控件要
+// 横穿整块屏——而设置页是最需要逐行读的一页。
+//
+// ⚠️ 窄窗口上它**不会**顶到 900：`MaxWidth` 是上限不是定值，可视区多宽它就
+// 多宽（最小窗口 900 - 侧栏 200 = 700，两边还各留 28 的内边距）。
+const settingsContentMaxW = 900
+
 // viewSettings 是设置页本身：标题 + 只读提示 + 四个 Tab。
 //
 // ⚠️ 外面这一层是 `Scroll`，里面那一层 `Column` 必须 `FillWidth()`。
@@ -94,11 +116,20 @@ var closeWindowOptions = []struct {
 // **不约束子元素的宽度**——子元素按内容算宽。右边那些固定宽度的控件会被整排顶到
 // 窗口外面去，「深色」「直接退出」点不到，用户看见的是一片空白加半个按钮。
 // `FillWidth()` 才是把里面那一格钉到可视区宽度上的那一句。
+//
+// ⚠️ **收在中间靠的是外面那一层 `Center` + 里面那一层 `MaxWidth`**，不是给
+// 内边距加数：加内边距只是把内容往里推，右边缘仍然是窗口边缘，而设置页要收的
+// 是**内容那一段的宽度**（照 Biu 的 `m-auto`）。
 func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 	t := c.Theme()
 	st := s.app.SettingsSnapshot()
 	// 设置来自更新的版本时一个字都不许写回去。与其让用户按了没反应，不如把
-	// 控件全关掉，并说清为什么——跟顶栏那三个按钮一个道理。
+	// 控件全关掉，并说清为什么——跟这一页自己下面那三档主题按钮一个道理
+	// （`pickTheme`）。
+	//
+	// ⚠️ **这一句原来写的是「跟顶栏那三个按钮一个道理」**——顶栏从来没有过
+	// 主题按钮组，主题那三档就在这一页自己这儿（`pickTheme`，`app/settings.go`
+	// 那边也这么写）。它是在说「别让控件看起来还能按」这件事，而举的例子举错了。
 	ro := s.app.SettingsReadOnly()
 
 	// 切走就停录：`FocusBind` 的「焦点在哪一格」在控件没建出来时会一直等下去，
@@ -115,27 +146,32 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 
 	ui.Scroll(c).Key("settings-scroll").Grow(1).TrackScroll(&s.settings.scroll).
 		Children(func() {
-			ui.Column(c).FillWidth().Padding(28).Gap(16).Children(func() {
-				ui.Text(c, "设置").FontSize(22).Bold()
+			// 这一层是 `m-auto`：Column 的横向对齐（跨轴），所以内容那一段在
+			// 可视区里居中，而可视区不满 900 时它就是满的（`MaxWidth` 是上限）。
+			ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
+				ui.Column(c).FillWidth().MaxWidth(settingsContentMaxW).
+					Padding(settingsContentPad).Gap(16).Children(func() {
+					ui.Text(c, "设置").FontSize(22).Bold()
 
-				if ro {
-					ui.Text(c, "设置只读：这份设置来自更新的版本，这一版一个字都不会写回去。").
-						FontSize(12).TextColor(t.Danger)
-				}
-
-				ui.Tabs(c, &s.settings.tab, settingsTabNames...)
-
-				ui.Column(c).FillWidth().Gap(18).Children(func() {
-					switch s.settings.tab {
-					case settingsTabGeneral:
-						s.settingsGeneral(c, st, ro)
-					case settingsTabMenu:
-						s.settingsMenu(c, st, ro)
-					case settingsTabShortcut:
-						s.settingsShortcuts(c)
-					case settingsTabProxy:
-						s.settingsProxy(c, st, ro)
+					if ro {
+						ui.Text(c, "设置只读：这份设置来自更新的版本，这一版一个字都不会写回去。").
+							FontSize(12).TextColor(t.Danger)
 					}
+
+					ui.Tabs(c, &s.settings.tab, settingsTabNames...)
+
+					ui.Column(c).FillWidth().Gap(18).Children(func() {
+						switch s.settings.tab {
+						case settingsTabGeneral:
+							s.settingsGeneral(c, st, ro)
+						case settingsTabMenu:
+							s.settingsMenu(c, st, ro)
+						case settingsTabShortcut:
+							s.settingsShortcuts(c)
+						case settingsTabProxy:
+							s.settingsProxy(c, st, ro)
+						}
+					})
 				})
 			})
 		})

@@ -270,3 +270,95 @@ func TestVolumeSliderDrivesTheApp(t *testing.T) {
 		t.Errorf("把音量条拉到最左，音量却是 %v", got)
 	}
 }
+
+// TestThePlayBarRightRowFollowsBiuOrder 钉住右边那一组的次序。
+//
+// 票 #127 的验收原话：「右侧控件顺序照 Biu：**模式 / 下载 / 队列 / 音量 / 倍速**」。
+// 抄的是 `biu/src/layout/playbar/right/index.tsx:14-18` 那一行的顺序。
+//
+// ⚠️ **断的是横向位置，不是「这几个键都在」**：五个键都在而次序不对，这条会全绿
+// ——而「次序」恰恰是这一票要的东西（用户按的是肌肉记忆，不是读出来的清单）。
+// 所以逐对比的是「右边那个的左边沿 > 左边那个的右边沿」。
+//
+// ⚠️ **「加歌」不算在内**：它是本应用多出来的一枚（上游把选本地音乐放在侧栏菜单
+// 里），摆在最后一格。把它也算进次序的话，这条就在给一个上游没有的东西定规矩。
+func TestThePlayBarRightRowFollowsBiuOrder(t *testing.T) {
+	// 有歌时才全：Biu 那一行是 `{Boolean(playId) && … && <MusicDownloadButton />}`
+	// （`playbar/right/index.tsx:15`），没歌的时候不摆下载。
+	want := []string{"播放模式", "下载", "播放列表", "音量", "播放速率"}
+
+	tt, _ := metaBarTester(t, fullBarState(), 1200)
+	for i, label := range want {
+		r, ok := tt.Find(label)
+		if !ok {
+			t.Fatalf("播放条右边那一组里没有 %q，文字有 %q", label, tt.Texts())
+		}
+		if r.X < 0 || r.X+r.W > 1200 {
+			t.Errorf("%q 在 %v，有一半在窗口外面", label, r)
+		}
+		if i == 0 {
+			continue
+		}
+		prev, _ := tt.Find(want[i-1])
+		if r.X <= prev.X {
+			t.Errorf("%q（x=%.1f）排在 %q（x=%.1f）**前面**了——"+
+				"次序要和 Biu 一致：%v", label, r.X, want[i-1], prev.X, want)
+		}
+	}
+
+	// 加歌在最后：它在整组里最靠右。
+	enq, ok := tt.Find("加歌")
+	if !ok {
+		t.Fatalf("播放条上没有「加歌」，文字有 %q", tt.Texts())
+	}
+	rate, _ := tt.Find("播放速率")
+	if enq.X <= rate.X {
+		t.Errorf("「加歌」（x=%.1f）不在最后——它在「播放速率」（x=%.1f）前面", enq.X, rate.X)
+	}
+}
+
+// TestTheDownloadKeyIsOnlyThereWhenThereIsATrack 钉住没歌时不摆下载键。
+//
+// 照 Biu：`{Boolean(playId) && getPlayItem()?.source !== "local" && <MusicDownloadButton />}`
+// （`playbar/right/index.tsx:15`）。本地文件压根没有 cid 可下，给一个按下去只会
+// 报错的键，不如不摆。
+func TestTheDownloadKeyIsOnlyThereWhenThereIsATrack(t *testing.T) {
+	tt, _ := metaBarTester(t, app.State{Rate: 1, Volume: 0.8}, 1200)
+	if tt.HasText("下载") {
+		t.Errorf("没有歌的时候播放条上画出了「下载」，文字有 %q", tt.Texts())
+	}
+	// 有歌的时候它在——不然上面那一条次序测试会量出一个空的洞。
+	withTrack, _ := metaBarTester(t, app.State{HasTrack: true, Title: "一首歌", Rate: 1, Volume: 0.8}, 1200)
+	if !withTrack.HasText("下载") {
+		t.Errorf("有歌的时候播放条上没有「下载」，文字有 %q", withTrack.Texts())
+	}
+}
+
+// TestThePlaylistKeySitsOnThePlayBarNotTheTopBar 钉住队列开关只在播放条上。
+//
+// 它当初在顶栏是因为右边那一组摆不下；票 #127 右边腾得开了，于是搬回去（照
+// `playbar/right/index.tsx:16`）。**两处都留着就是同一个动作两个入口**，而它们
+// 会不一致——顶栏那枚在满屏播放器盖住播放条时还点得到，而那一枚的 Tooltip 说
+// 的也是「打开播放列表」。
+//
+// 两半都要断：顶栏上**没有**（`navBarTester` 只画顶栏那一块，所以那是全部文字，
+// 不是「在整窗里找」）＋ 播放条上按它真的能开抽屉。
+func TestThePlaylistKeySitsOnThePlayBarNotTheTopBar(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			if navBarTester(t, dark).HasText("播放列表") {
+				t.Error("顶栏上还有「播放列表」——它搬到播放条右边那一组了，" +
+					"两处都留着就是同一个动作两个入口")
+			}
+			h := newHarness(t)
+			if !h.tt.HasText("播放列表") {
+				t.Fatalf("播放条上没有「播放列表」，文字有 %q", h.tt.Texts())
+			}
+			openDrawer(t, h) // 按一下，抽屉要真的开
+		})
+	}
+}

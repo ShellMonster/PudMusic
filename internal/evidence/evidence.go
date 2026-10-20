@@ -1479,4 +1479,40 @@ var Items = []Item{
 			"TestThePartsKeyCostsNothingElseOnThePlayBar",
 		},
 	},
+	{
+		// 归「双平台」那一组：这一票动的三块（顶栏 / 侧栏 / 内容区）都是**窗口
+		// 的骨架**，而播放条那一半在下面「播放」那组里另有一条（issue 93 的图标
+		// 化、issue 93 的边界）。一处规格两个入口会让台账读起来像两件事。
+		Category: Platform,
+		// issue 127（SPEC 需求 19~26）那一票：界面骨架和上游对上的那几条。
+		//
+		// 🔴 **判据全是画面上的像素和横向位置**，没有一条是「调了某个函数」。
+		// 这一票的三个症状**全都是静默的**：三处底色各自合法，页标题重复两遍也
+		// 每一遍都对，五枚键都在而次序不对也点得动——只有读像素和量左右沿
+		// 才分得出来。
+		//
+		// 深浅两套都要量这一条的理由写在测试里：浅色下 `#f4f4f5` 和 `#ffffff`
+		// 只差 11，而深色下 `#27272a` 和 `#18181b` 各跳一级，**三带只有深色下
+		// 才裂得开**。
+		Spec: "界面骨架：侧栏/内容区/播放条三处底色同源且仍分得开（卡片弹窗仍是 Surface）；设置内容收在中间一段宽度、输入框不横跨整行；页标题只出现一次；顶栏是上游那个高度；播放条右边那一组次序照上游（模式/下载/队列/音量/倍速），队列开关只在播放条上",
+		Tests: []string{
+			// 三处底色同源 + 分界仍在 + 卡片弹窗仍浮起来（**互为反面，缺一不可**：
+			// 只钉第一条的话，「把整窗刷成一个颜色」会全绿，而浅色下侧栏和
+			// 内容区会完全一样）。
+			"TestTheChromeSharesOneBackground",
+			"TestTheChromeStillHasASeparationFromTheBackground",
+			"TestCardsAndDialogsStillStandOffTheBackground",
+			// 设置页：封顶 900 + 居中（两档窗口都量），控件不横跨整行。
+			"TestTheSettingsContentIsCappedAndCentered",
+			"TestTheSettingsInputsAreNotFullRowWide",
+			// 顶栏：高度照上游、上面没有页名，而页面自己那一份还在。
+			"TestTheTopBarIsBiuHeight",
+			"TestTheTopBarShowsNoPageTitle",
+			"TestThePageStillShowsItsOwnTitle",
+			// 播放条右边那一组：次序、没歌时不摆下载、队列开关只在播放条上。
+			"TestThePlayBarRightRowFollowsBiuOrder",
+			"TestTheDownloadKeyIsOnlyThereWhenThereIsATrack",
+			"TestThePlaylistKeySitsOnThePlayBarNotTheTopBar",
+		},
+	},
 }

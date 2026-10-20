@@ -246,9 +246,11 @@ func TestTheKeepPagesOrderSwitchOnlyShowsUpWhileShuffling(t *testing.T) {
 // 坏了**：字还在那儿，只是一个字一行、或者被 88 高的播放条裁掉半个。
 //
 // 它把 760 也算进来——比窗口下限（`WindowOptions` 里的 `MinWidth: 900`）还窄。
-// 那一档是这个播放条最紧的状态：右边那一行（音量 120 + 倍速 64 + 加歌 56 +
-// 三个 12 的缝）已经满座，中间那一列的富余就靠「按钮摆在哪一行」挣出来
-// （见 playbar.go 里 viewProgress 那段）。
+// 那一档是这个播放条最紧的状态。⚠️ **这里曾经写着右边那一行只有「音量 120 +
+// 倍速 64 + 加歌 56 + 三个 12 的缝」**——票 #127 把那一组重排成 Biu 的次序
+// （模式 / 下载 / 队列 / 音量 / 倍速，见 `viewPlayBarRight`），它现在是 362 宽、
+// 六个 8 的缝；而「模式」从进度那一行搬出来，中间那一列同时腾出 38。
+// 那一组仍然满座——所以这条断言现在守的是「三枚新键挤进来了，歌名还在」。
 func TestThePlayModeButtonDoesNotSquashTheTitle(t *testing.T) {
 	for _, width := range []int{760, 900, 1000, 1200, 1280} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {

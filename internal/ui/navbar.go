@@ -40,12 +40,27 @@ const (
 	navForwardLabel = "前进"
 )
 
-// navMinHeight 是顶栏多高。Biu 的导航栏是 64px（`h-full`，由外层给），
-// MyGo 的隐藏标题栏只让出 `bar.Height` 那一条；32 是 MyGo 自己的例子里的下限
-// （`ui/context.go:334`），矮了字会被切。
-const navMinHeight = 32
+// navMinHeight 是顶栏多高。
+//
+// 🔴 **64 是照 Biu 量出来的**：它的顶栏那一格是 `h-16 flex-none`
+// （`biu/src/layout/index.tsx:40`），而那一格里的 navbar 写的是 `h-full`——
+// 也就是「有多高就是多高」，而外面钉死的就是 64。我们原来是 32（MyGo 自己
+// 例子里的下限，`ui/context.go:334` 的 `max(bar.Height, 32)`），矮了整整一半。
+//
+// 这一条不只是「好看一点」：顶栏是**内容区上面那一行**，它矮 32，内容区就
+// 少 32 ——而 `settings_page_test.go` 里量得着的可视区上下两个数
+// （`pageTop` / `pageBottom`）就是从它推出来的。
+//
+// 仍然取 `max(bar.Height, …)`：macOS 上红黄绿是浮在内容上的（`TitleBarHidden`），
+// 那一块系统自己留的高度比 64 大的话，得让开它，不然字会压在红黄绿底下。
+const navMinHeight = 64
 
-// viewNav 是顶部导航栏：后退/前进 + 页名 + 搜索框 + 打开文件 + 动态红点 + 头像。
+// viewNav 是顶部导航栏：后退/前进 + 搜索框 + 打开文件 + 迷你 + 设置 + 动态红点 + 头像。
+//
+// ⚠️ **这里没有页名**（票 #127）。每一页自己写着标题，顶栏再写一遍就是同一个词在
+// 屏幕上出现两次；上游的顶栏也没有（`layout/navbar/index.tsx:31-34`）。
+// ⚠️ **这里也没有播放列表开关**：它在播放条右边那一组（`playbar.go` 的
+// `viewPlayBarRight`）。理由见 Children 里那两条注释。
 func (s *Shell) viewNav(c *ui.Context) {
 	// 后退/前进也是换页：上一页的提示同样不该留着，崩过的状态同样该复位。
 	back := func() { s.clearToasts(); s.crash = nil }
@@ -70,9 +85,6 @@ func (s *Shell) viewNav(c *ui.Context) {
 	nav.Children(func() {
 		s.viewNavBack(c, back)
 		s.viewNavForward(c, back)
-		// 页名。Biu 的顶栏没有这一行（那儿是侧栏高亮当前项），这是骨架里
-		// 留下来的：切路由时它是最省事的一处「我在哪」。
-		ui.Text(c, lookup(s.router.Path()).Title).FontSize(15).Bold()
 		s.viewSearchBox(c)
 		// 中间那一段空处也是拖动区：这一列把搜索框和右边那几个按钮推开，
 		// 指针落在这里时命中的就是它和外层 Row。
@@ -85,18 +97,16 @@ func (s *Shell) viewNav(c *ui.Context) {
 			Tooltip("打开本地音频文件").Clicked() {
 			s.pickAndEnqueue()
 		}
-		// 播放列表抽屉的开关。Biu 把它放在播放条右边
-		//（`layout/playbar/right/index.tsx`），我们放这儿——当初是因为右边那一组
-		// 挤不下了（见 playbar.go 里那一段的账）。图标化之后那边**又腾出 40
-		// 像素**，搬回去是可行的，但 issue 93 的边界是「换图标、不重排界面」，
-		// 所以这一票只让它有个图标，位置不动。
 		//
-		// 紧挨着「打开文件」：两个都是「往队列里放东西 / 看队列」这一类。
-		if iconButton(c, iconQueue, "播放列表", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5).
-			Tooltip(drawerTip(s.drawerOpen)).Clicked() {
-			s.drawerOpen = !s.drawerOpen
-		}
+		// ⚠️ **这里原来还有两样，都搬走了**（票 #127）：
+		//
+		//   - **页名**：每一页自己都写着标题（设置 / 下载记录 / 历史记录…），
+		//     顶栏再写一遍就是同一个词在屏幕上出现两次。上游的顶栏压根没有
+		//     这一行（`layout/navbar/index.tsx:31-34`：左边只有
+		//     `Navigation` + `Search`）——「我在哪」是侧栏高亮那一项的事。
+		//   - **播放列表开关**：上游在播放条右边那一组（`playbar/right/index.tsx:16`），
+		//     它当初在这儿是因为右边挤不下。两处都留着就是同一个开关两个位置，
+		//     而它们会不一致（顶栏那枚在播放条被满屏盖住时还点得到）。
 		// 迷你播放器的开关。Biu 那边在窗口按钮那一排里（`components/window-action/
 		// index.tsx:46` 的 PictureInPicture 图标），而我们那条顶栏是自己画的，
 		// 所以摆在右边这一列末尾——和「窗口变小了」这件事一样是窗口级动作。
@@ -114,9 +124,12 @@ func (s *Shell) viewNav(c *ui.Context) {
 			s.toggleMiniPlayer()
 		}
 		// 设置。Biu 的设置在侧栏菜单和头像下拉里（`layout/side/index.tsx`、
-		// `navbar/user/index.tsx`），顶栏没有。我们顶栏本来就收着「播放条放不下
-		// 的控件」（播放列表开关就在这儿），而设置是用户改任何东西都要走一遍的
-		// 那个入口——藏在头像下拉第三项里是两级。
+		// `navbar/user/index.tsx`），顶栏没有。⚠️ **这一段原来拿「顶栏收着播放条
+		// 放不下的控件（播放列表开关就在这儿）」当理由**——票 #127 把那个开关搬回
+		// 播放条之后，这一条论证就落空了，而它说的话**本身仍然成立**：设置是用户
+		// 改任何东西都要走一遍的那个入口，藏在头像下拉第三项里是两级。
+		// 侧栏里也有一条「设置」（那是我们自己多摆的，见 routes 表），顶栏这一枚
+		// 是给已经在别的页上、不想先回侧栏的人用的。
 		if iconButton(c, iconSettings, "设置", iconMd).
 			Size(iconHitMd, iconHitMd).Padding(0, 5).
 			Tooltip("设置").Clicked() {
@@ -157,13 +170,4 @@ func (s *Shell) viewNavForward(c *ui.Context, back func()) {
 	if ui.ForwardButton(c, s.router).Label(navForwardLabel).Tooltip(navForwardLabel).Clicked() {
 		back()
 	}
-}
-
-// drawerTip 是播放列表开关悬停时那句话：这个键是**开关**，所以说的话得说清
-// 按下去会开还是会关——不然用户得先按一下才知道自己按的是什么。
-func drawerTip(open bool) string {
-	if open {
-		return "收起播放列表"
-	}
-	return "打开播放列表"
 }

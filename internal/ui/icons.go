@@ -91,12 +91,16 @@ const (
 	// `Router` 的私有字段（见 navbar.go 的 viewNavBack）。
 	iconSettings = "System/settings-3-line.svg"    // 设置
 	iconFolder   = "Document/folder-open-line.svg" // 打开文件
-	iconQueue    = "Editor/list-radio.svg"         // 播放列表
 	iconSearch   = "System/search-line.svg"        // 搜索
 	iconClose    = "System/close-line.svg"         // 清空
 	iconFeed     = "User & Faces/team-line.svg"    // 动态
 	iconLogin    = "System/login-circle-line.svg"  // 登录
 	iconLogout   = "System/logout-circle-line.svg" // 退出登录
+
+	// ── 播放条右边那一组 ──
+	// ⚠️ 「播放列表」原来在顶栏那一列里，票 #127 跟着上游搬到了播放条
+	//（`layout/playbar/right/index.tsx:16`），所以它归在这一列而不是顶栏那一列。
+	iconQueue = "Editor/list-radio.svg" // 播放列表（抽屉的开关）
 
 	// ── 队列抽屉头 ──
 	// 逐字照 Biu 的 `components/music-playlist-drawer/index.tsx:137-141`：
@@ -323,12 +327,15 @@ func icon(name string) *ui.SVG { return icons[name] }
 // ⚠️ **不许在资源里画透明边来撑点击区**（issue 93 的约束）：换一个尺寸就错位，
 // 而且界面上看不出坏了。所以这三个数是「画出来多大」，不是「点得到多大」。
 const (
-	// iconSm 是播放条第二行那三枚小键（赞 / 收藏 / 下载）的图标边长。
-	// Biu 的 `music-thumb` 用的是 18，我们那三枚挤在 88 高播放条的第二行，
+	// iconSm 是播放条**左边第二行**那几枚小键（分集 / 赞 / 收藏）的图标边长。
+	// Biu 的 `music-thumb` 用的是 18，我们那几枚挤在 88 高播放条的第二行，
 	// 留给它们 14 才是完整的一圈（28 的点击区里每边 7 的空白）。
+	//
+	// ⚠️ **「下载」不在这一档**：票 #127 把它搬到了播放条右边那一组，尺寸跟着
+	// 那一组走（`iconMd` / `iconHitMd`）。
 	iconSm = 14
-	// iconMd 是上一首 / 下一首 / 播放模式 / 加歌这四枚，加上顶栏上多数按钮。
-	// Biu 那边是 18~22。
+	// iconMd 是播放条上那些大一点的键（上一首 / 下一首 / 播放 / 播放模式 /
+	// 下载 / 播放列表 / 加歌），加上顶栏上多数按钮。Biu 那边是 18~22。
 	iconMd = 18
 	// iconPlayBtn 是播放/暂停那一枚。Biu 是 48，而这里的播放条只有 88 高，
 	// 中间那一列还压着进度条；48 会把那一列撑到别处借宽度（见 playbar.go 的账）。

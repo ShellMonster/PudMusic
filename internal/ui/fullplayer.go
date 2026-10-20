@@ -673,10 +673,16 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 				// Biu 那一排是 `MusicPlayMode + MusicPlayControl + OpenPlaylistDrawerButton`
 				//（`index.tsx:396-399`）。两个我们没摆：
 				//
-				//   播放模式      队列那边只做了顺序，别的模式还没做
+				//   播放模式      满屏这一行放不下它，而播放条右边那一组已经摆着同一枚
+				//                （`viewPlayBarRight` 的头一个）——两处摆同一个功能
+				//                只会让用户以为它们不一样
 				//   播放列表抽屉  抽屉画在**主布局**里（queue_drawer.go），而主布局在
 				//                满屏浮层**底下**——摆一个「播放列表」按钮，用户按了
 				//                什么也不会发生，而界面上看不出坏了
+				//
+				// ⚠️ **「播放模式」那一行原来写的是「队列那边只做了顺序，别的模式还没做」**
+				//——那句话早就不成立了：四档都实现了（`viewPlayMode` 的图标、右键那一列、
+				// `app.PlayModes`），CHANGELOG 里也已经写了「播放模式四档」。
 				// 三枚都是图标（和播放条上共用同一批，见 icons.go）。哪一档配哪一张
 				// 由 `transportIcon` 说了算——这一行不自己决定（守卫盯着）。
 				s.viewPrevButton(c)

@@ -418,8 +418,10 @@ func (s *Shell) viewMini(c *ui.Context) {
 	// 地方都是在拖窗口（Biu 那边的 `window-drag` / `window-no-drag` 两种 class，
 	// 在 MyGo 里就是这一条命中链的差别，见 `navbar.go` 文件头那一段）。
 	// 底用 `Surface` 而不是 `Background`：这个窗口要的就是「一张卡片浮在桌面上」，
-	// 和主窗口里播放条（`playbar.go` 那个 `Background(t.Surface)`）同一族。圆角
-	// 跟着主题走，用户在设置页调圆角时这一块跟着变，和别处一致。
+	// 而主窗口里播放条那一块**现在取的是 `Background`**（票 #127 之后它和内容区
+	// 同源）——所以这两块**不再同一族**了，而且它们本来就不该是：主窗口的播放条
+	// 是窗口骨架的一部分，而这个迷你窗整个就是一张卡片。
+	// 圆角跟着主题走，用户在设置页调圆角时这一块跟着变，和别处一致。
 	ui.Row(c).Key("mini").Fill().Radius(t.Radius).
 		Background(t.Surface).DragWindow().Children(func() {
 		// 里面照样逐块包一层 Guard（铁律四）：崩掉封面那一块不该把控制键一起带走。

@@ -260,9 +260,12 @@ func TestSuggestCollapsesOnBlur(t *testing.T) {
 
 	// 点到窗口里的别处去：焦点离开搜索框，浮层跟着收。
 	//
-	// 点侧栏的「本地音乐」：那是侧栏里**独一份**的文字（顶栏的页名上也有一个
-	// 「推荐音乐」，`Find` 只会认到先画的那一个）。别点「打开文件」——它会拉
-	// 系统文件框。
+	// 点侧栏的「本地音乐」：那是侧栏里**独一份**的文字（`Find` 只会认到先画
+	// 的那一个）。别点「打开文件」——它会拉系统文件框。
+	//
+	// ⚠️ **这一段原来写着「顶栏的页名上也有一个『推荐音乐』」**——票 #127 把
+	// 顶栏那一处页名去掉之后，理由跟着换了，而「挑一个不挑登录态的入口」那一条
+	// 仍然是这一段真正要说的。
 	//
 	// ⚠️ 刻意挑一个**不挑登录态**的入口：这一条钉的是「点别处会失焦」，而
 	// 「我的关注」「稍后再看」「历史记录」未登录时不摆（`Route.NeedsLogin`），
@@ -808,5 +811,174 @@ func TestTheNavBarPanicIsCaught(t *testing.T) {
 	}
 	if !tt.HasText("顶栏画崩了") {
 		t.Errorf("错误页上没有崩掉的原因，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheTopBarIsBiuHeight 钉住顶栏是 Biu 那个高度。
+//
+// Biu 的顶栏那一格是 `h-16 flex-none`（`biu/src/layout/index.tsx:40`），也就是
+// 64。我们原来是 32（MyGo 例子里的下限，`ui/context.go:334`）。
+//
+// ⚠️ **为什么这条不只是「好看一点」**：顶栏是**内容区上面那一行**，它矮 32，内容区
+// 就少 32——而设置页那一族测试量得着的可视区上下两个数（`settings_page_test.go`
+// 的 `pageTop` / `pageBottom`）就是从它推出来的。所以拿 `navMinHeight` 当判据是
+// 循环的（常量一改断言跟着改，等于没断言），这里断的是**画面上的高度**。
+func TestTheTopBarIsBiuHeight(t *testing.T) {
+	tt := navBarTester(t, false)
+	// 后退按钮在顶栏最左边，它和右边登录入口之间就是顶栏本身那一行。
+	back, ok := tt.Find(navBackLabel)
+	if !ok {
+		t.Fatalf("顶栏上没有后退，文字有 %q", tt.Texts())
+	}
+	login, ok := tt.Find("登录")
+	if !ok {
+		t.Fatalf("顶栏上没有登录入口，文字有 %q", tt.Texts())
+	}
+	// 无头 Tester 里 `c.TitleBar()` 是零（`ui/headless.go:44` 那张表默认没填），
+	// 所以这一帧顶栏画的就是 `navMinHeight` 本身。64 是量出来的，见 navMinHeight。
+	const want = 64
+	if navMinHeight != want {
+		t.Errorf("navMinHeight 是 %d，want %d（Biu 的 h-16）", navMinHeight, want)
+	}
+	for _, e := range []struct {
+		what string
+		r    mygoui.Rect
+	}{{"后退", back}, {"登录入口", login}} {
+		if e.r.Y < 0 || e.r.Y+e.r.H > navMinHeight {
+			t.Errorf("%s在 %v，不在顶上那 %d 高里", e.what, e.r, navMinHeight)
+		}
+	}
+	// 那一行要真的占满：登录入口贴着窗口右边。
+	if right := login.X + login.W; float32(1200)-right > 32 {
+		t.Errorf("登录入口右边缘 %v，离窗口右边还有 %v——顶栏没顶满", right, float32(1200)-right)
+	}
+}
+
+// TestTheTopBarShowsNoPageTitle 钉住页名不出现两次。
+//
+// 每一页自己都写着标题（设置 / 下载记录 / 历史记录…），顶栏再写一遍就是同一个
+// 词在屏幕上出现两次。上游的顶栏压根没有这一行（`layout/navbar/index.tsx:31-34`
+// 的左边只有 `Navigation` + `Search`）——「我在哪」是侧栏高亮那一项的事。
+//
+// ⚠️ **用 `navBarTester` 而不是整窗**：它 `withView` 只画顶栏那一块，所以
+// `Texts()` 里**只有**顶栏上的字。整窗上量的话，侧栏菜单项和页面自己的标题都
+// 混在里面，「顶栏有没有」这件事就量不出来了。
+func TestTheTopBarShowsNoPageTitle(t *testing.T) {
+	// ⚠️ **设置页和搜索页不在这一列里**：顶栏上本来就有一个「设置」键和一个
+	// 「搜索」框，它们的无障碍名字和那两页的页名**一模一样**——判据
+	// 「顶栏上没有这个名字」在它们身上恒假，于是只能靠人肉分辨「那个是键、
+	// 那个是页名」，而那正是这条断言不该干的事。其余的几条都和顶栏上任何一个
+	// 键的名字不重名。
+	//
+	// 另外刻意收了「用户动态」那一页：它的页名**既不在侧栏菜单里、也不在顶栏
+	// 任何一个键上**（`Route.InMenu` 是 false），所以改动之前它在顶栏上只有
+	// 那一处——它变没变是单值的。
+	paths := []string{downloadListPath, historyPath, laterPath, followPath, dynamicFeedPath, collectionMatch}
+
+	b := newTestShell(t, withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			s.viewNav(c)
+		}
+	}))
+	tt := b.tt
+	tt.SetFocused(true)
+
+	for _, p := range paths {
+		title := lookup(p).Title
+		b.s.navigate(p)
+		tt.Frame()
+		if tt.HasText(title) {
+			t.Errorf("切到 %q 之后顶栏上写着页名 %q——顶栏的文字是 %q。"+
+				"页名由那一页自己写，顶栏再写一遍就是屏幕上同一个词出现两次",
+				p, title, tt.Texts())
+		}
+	}
+}
+
+// TestThePageStillShowsItsOwnTitle 钉住去掉顶栏那一处之后，标题还在页面上。
+//
+// # 为什么这条必须**绕开 router**
+//
+// ⚠️ **走整窗的话这条断言恒绿**——`Router.View` 结尾有一句 `pg.Label(e.title)`
+// （`mygo/ui/router.go:693`）：路由容器的**无障碍名字**就是页名，而
+// `Tester.HasText` 认的正是「画着这句字**或者**标着这个名字」的元素。于是那一页
+// 哪怕一个字都没画，`HasText("设置")` 也是真的。
+//
+// 实测（把 `settings_page.go` 里那个 `ui.Text(c, "设置")` 删掉再跑这一条）：
+// **照样 PASS**。而首页的 `Find("推荐音乐")` 给回来的是 `{0 0 1200 800}`——
+// **整个路由容器**，而首页画面上一个「推荐音乐」都没有。
+//
+// 所以这里**直接调那一页的 view**，绕开 router 那个容器。绕开之后画面上出现
+// 这个名字，就只能是那一页自己画的。
+//
+// # 为什么用 `Find`（逐字相等）而不用 `HasText`（是子串）
+//
+// 设置页那四个 Tab 叫「常规设置」「菜单设置」……`HasText("设置")` 认的是子串，
+// 删掉页面上那个「设置」它照样是真的——那样这条又是空的。
+//
+// # 为什么还要断一次高度
+//
+// 页标题是一行 22px 的字（实测高 24~26），而路由容器是整块内容区（高 648）。
+// 这一句让「量到的是标题而不是容器」成为断言的一部分，而不是靠「我绕开了
+// router」这个前提。
+//
+// # 断言的到底是哪一个「名字」
+//
+// 每一页都**自己**把名字画在屏幕上：设置 / 下载记录 / 本地音乐 / 扫码登录是
+// 那一行页标题；历史记录 / 稍后再看在没有挂上 B 站接口时画的是「还没接上」那一支
+// （`viewLibraryMissing`），而那一支**也写着这一页的名字**。两种都算数——
+// 这一条断的是「**这一页在屏幕上有没有名字**」，不是「页标题那一行在不在」。
+// 两种都**不是**路由容器那个无障碍标签：那个已经绕开了。
+func TestThePageStillShowsItsOwnTitle(t *testing.T) {
+	// 每一页自己的画法。**直接调 view，不走 `viewRoutes`**——理由见文件头那一段。
+	//
+	// ⚠️ **「搜索」不在这一列**：它要从路由上读查询串（`viewSearch` 里的
+	// `r.Query(searchQuery)`），而路由那一格正是这里要绕开的东西。
+	pages := []struct {
+		title string
+		draw  func(*Shell) func(*mygoui.Context)
+	}{
+		{"设置", func(s *Shell) func(*mygoui.Context) {
+			return func(c *mygoui.Context) { s.wake.set(c); s.viewSettings(c, nil) }
+		}},
+		{"下载记录", func(s *Shell) func(*mygoui.Context) {
+			return func(c *mygoui.Context) { s.wake.set(c); s.viewDownloadList(c, nil) }
+		}},
+		{"历史记录", func(s *Shell) func(*mygoui.Context) {
+			return func(c *mygoui.Context) { s.wake.set(c); s.viewHistory(c, nil) }
+		}},
+		{"稍后再看", func(s *Shell) func(*mygoui.Context) {
+			return func(c *mygoui.Context) { s.wake.set(c); s.viewLater(c, nil) }
+		}},
+		{"本地音乐", func(s *Shell) func(*mygoui.Context) {
+			return func(c *mygoui.Context) { s.wake.set(c); s.viewLocalMusic(c, nil) }
+		}},
+		{"扫码登录", func(s *Shell) func(*mygoui.Context) {
+			return func(c *mygoui.Context) { s.wake.set(c); s.viewLogin(c, nil) }
+		}},
+	}
+
+	// 一行标题的高度上限。22px 的字实测 24~26 高（见上面那一段），
+	// 而整块内容区是几百高——60 把这两者分得很开。
+	const titleLineMaxH = 60
+
+	for _, p := range pages {
+		t.Run(p.title, func(t *testing.T) {
+			b := newTestShell(t, withView(p.draw))
+			tt := b.tt
+			tt.Frame()
+			homeFrame(tt)
+
+			r, ok := tt.Find(p.title)
+			if !ok {
+				t.Fatalf("%q 这一页上没有页名 %q（画面上的字：%q）——顶栏那一处去掉之后，"+
+					"这一页在屏幕上就没有名字了", p.title, p.title, tt.Texts())
+			}
+			if r.H > titleLineMaxH {
+				t.Errorf("%q 这一页上的 %q 是 %.0f 高（y=%.0f）——那不是一行标题，"+
+					"是装页面的容器；量到的不是页名", p.title, p.title, r.H, r.Y)
+			}
+		})
 	}
 }
