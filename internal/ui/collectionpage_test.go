@@ -636,15 +636,58 @@ func TestTheCollectionSearchSurvivesLeavingThePage(t *testing.T) {
 	})
 }
 
+// TestTheCollectionSearchSaysWhenThereIsNoResult 断「搜了没有」那一支。
+//
+// 搜不出东西的时候列表那一块**整块空白、没有任何交代**——用户会以为搜索框
+// 坏了。搜索页早就有那一句（「暂无内容 / 换个词再搜一次，或者把关键词缩短一点」，
+// `empty.go` 的 `noSearchResults`），这一页用的是**同一句**。
+//
+// ⚠️ 判据是**画面上那句话**，不是「列表空了」：换词的那一瞬间列表本来就是空的
+// （还在拉），那时候说「换个词再搜一次」是骗人——用户刚敲完词。
+func TestTheCollectionSearchSaysWhenThereIsNoResult(t *testing.T) {
+	clock := newFakeClock(time.Unix(2026, 0))
+	_, s, tt := collectionShellOpts(t, []shellOpt{withClock(clock)}, "", "12345",
+		mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
+	waitSongs(t, tt, s, 3)
+
+	typeInto(t, tt, collectionSearchLabel, "查无此歌")
+	tt.Frame()
+	tt.Frame()
+	clock.Advance(searchDebounce + time.Millisecond)
+	tt.Frame()
+
+	waitFrames(t, tt, "「换个词再搜一次」出现了", func() bool {
+		return tt.HasText("换个词再搜一次")
+	})
+	// ⚠️ **别拿「还没有收藏夹」当反面**：那是**侧栏**里那两组的空状态（这一页
+	// 的侧栏本来就没有收藏夹），它跟这一页的列表没关系。反面要拿**这一页**的
+	// 那个空状态（「在歌上点星标…」= 这个收藏夹是空的）。
+	if tt.HasText("在歌上点星标") {
+		t.Errorf("搜不出东西的时候画成了「这个收藏夹是空的」，文字有 %q", tt.Texts())
+	}
+}
+
 // TestTheCollectionOpsRowStillFitsAtTheMinWindow 钉住「按歌名找 + 排序」那一行
-// 在**最小窗口**下、**每一个侧栏宽度**上都还摆得下。
+// 在**最小窗口**下、**每一个侧栏宽度（160~480）**上都还摆得下，而且**排序下拉
+// 是完整的**。
 //
-// # 这一条曾经只量了默认侧栏 200，而那一档是最好过的
+// # 这一条改过两轮，两轮都是「判据缩窄了」
 //
-// 上一版把那个输入框放在操作条那一排里（和四个动作 + 多选 + 排序挤在一行），
-// 宽度取 140 ——它在默认侧栏 200 那一档刚好摆得下，**而侧栏 240~360 那一段就
-// 坏了**：排不下的时候框架缩的是**排序下拉**（实测被压到 29 宽，右缘跑到
-// 910~950，**已经出窗口了**），而那一格是用户唯一看得见的说明。
+// **第一轮**（输入框放在操作条那一排里，宽度 140）：它在默认侧栏 200 那一档刚好
+// 摆得下，**而侧栏 240~360 那一段坏了**——排不下的时候框架缩的是**排序下拉**
+// （实测被压到 29 宽，右缘跑到 910~950，**已经出窗口了**）。
+//
+// **第二轮**（挪进头图区，输入框固定 180）：侧栏 200~360 好了，**而 400 / 480
+// 那一段仍然是裁的**（400 只剩 64 宽、那个「▾」被裁没了；480 字被裁成「最近收」）。
+// 那一版把「完整」的判据缩到了**侧栏 ≤ 360**，而票面写着 160~480——**票面、测试、
+// 台账三处对不上**。
+//
+// **现在**：输入框自己让位（`Width(64).Grow(1).MaxWidth(180)`），**排序下拉在
+// 每一个侧栏宽度上都是完整的 83.2**（实测 160~480 全是 83.2、右缘 876）。
+// 让位的是输入框：它平时长到 180，挤的时候缩到 64。
+//
+// 基线（`6247a3d`）在侧栏 400 是 57 宽、480 是 **0 宽**（右缘 922，**出窗口**）
+// ——**这一票在每一档都比它好**。
 //
 // 侧栏宽度是 **160~480**（`app.ClampSideMenuWidth`），而**导入 Biu 的设置之后
 // 侧栏就是 280**（`internal/app/first_import_test.go:110`），窗口又能拖到
@@ -652,18 +695,11 @@ func TestTheCollectionSearchSurvivesLeavingThePage(t *testing.T) {
 //
 // # 判据是**画面上的盒子**
 //
-//   - 排序下拉的自然宽是 83（「最近收藏 ▾」加内边距和描边）：被压扁就是坏了。
+//   - 排序下拉的自然宽是 83.2（「最近收藏 ▾」加内边距和描边）：被压扁就是坏了。
 //   - 它的右缘要落在**页边距**里面（900 减 24 = 876）。
-//   - 那个输入框也要是它自己的宽（180）：被压成 0 就是「这一行挤没了」。
-//
-// # ⚠️ **侧栏 480 那一档，基线本来就是坏的**
-//
-// 内容区只剩 900 - 480 - 48 = **372**，而封面自己就 200 ——那一档连头图区都摆不
-// 完（基线的操作条那一排 484 宽，在 372 里同样挤不下，排序下拉被压成 0 宽、
-// 右缘跑到 979，**出窗口**）。所以那一档只要求「**不出窗口**」，而现在的样子
-// （排序 52 宽、右缘 900）比基线好。
+//   - 那个输入框不许被压到比它的下限（64）更窄。
 func TestTheCollectionOpsRowStillFitsAtTheMinWindow(t *testing.T) {
-	for _, side := range []float64{160, 200, 240, 280, 320, 360, 480} {
+	for _, side := range []float64{160, 200, 240, 280, 320, 360, 400, 480} {
 		t.Run(strconv.FormatInt(int64(side), 10), func(t *testing.T) {
 			st := app.DefaultSettings("")
 			st.SideMenuWidth = side
@@ -694,16 +730,19 @@ func TestTheCollectionOpsRowStillFitsAtTheMinWindow(t *testing.T) {
 			// 基线宽 3.2（描边那一圈），所以它的右缘会比基线的右缘多出那么一点。
 			// 量的是盒子，就得多留那 3.2。
 			const wantRight = float32(minWindowW - 24 + 4)
-			if side <= 360 {
-				if right := sort.X + sort.W; right > wantRight {
-					t.Errorf("侧栏 %.0f：排序下拉的右缘是 %.1f，越过了页边距（want ≤ %.0f）",
-						side, right, wantRight)
-				}
+			if right := sort.X + sort.W; right > wantRight {
+				t.Errorf("侧栏 %.0f：排序下拉的右缘是 %.1f，越过了页边距（want ≤ %.0f）",
+					side, right, wantRight)
 			}
-			// 输入框也要是它自己的宽：被压扁就是「这一行挤没了」。
-			if box.W < collectionSearchWidth-2 {
-				t.Errorf("侧栏 %.0f：那个输入框被压到 %.1f 宽了（want %d）",
-					side, box.W, collectionSearchWidth)
+			// **排序下拉必须完整**——「最近收藏 ▾」那一个字都不能少。
+			if sort.W < 83 {
+				t.Errorf("侧栏 %.0f：排序下拉被压到 %.1f 宽了——「最近收藏 ▾」被裁掉了",
+					side, sort.W)
+			}
+			// 输入框是那个让位的：它可以窄，但不许窄过自己的下限。
+			if box.W < collectionSearchMinWidth {
+				t.Errorf("侧栏 %.0f：那个输入框被压到 %.1f 宽了（want ≥ %d）",
+					side, box.W, collectionSearchMinWidth)
 			}
 			// 都不许跑出窗口。
 			if right := box.X + box.W; right > minWindowW {
@@ -713,11 +752,6 @@ func TestTheCollectionOpsRowStillFitsAtTheMinWindow(t *testing.T) {
 			if right := sort.X + sort.W; right > minWindowW {
 				t.Errorf("侧栏 %.0f：排序下拉的右缘是 %.1f，跑出窗口了（want ≤ %d）",
 					side, right, minWindowW)
-			}
-			// 侧栏 ≤ 360 那一段基线是好的：排序下拉必须**完整**（不是被压扁的）。
-			if side <= 360 && sort.W < 80 {
-				t.Errorf("侧栏 %.0f：排序下拉被压到 %.1f 宽了——「最近收藏」那一行被裁掉了",
-					side, sort.W)
 			}
 		})
 	}

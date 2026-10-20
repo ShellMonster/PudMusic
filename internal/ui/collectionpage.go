@@ -369,6 +369,17 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 		switch {
 		case info.Loaded && info.MediaCount == 0:
 			s.viewEmpty(c, "collection:empty", noFavorites)
+		case p.keyword != "" && p.list.Paged().Loaded == 0 && !p.list.Paged().Loading:
+			// 搜了，**一条都没有**：说清楚，而不是留一块空白。
+			//
+			// ⚠️ 判据是「**词已经发出去了**」而不是「列表此刻一行都没有」：
+			// 换词的这一瞬间列表是空的（还在拉），那时候画「换个词再搜一次」
+			// 是骗人——用户刚敲完词。
+			//
+			// 用的就是搜索页那一句（`searchpage.go` 的 `viewSearchResultsBody`）：
+			// 「暂无内容 / 换个词再搜一次，或者把关键词缩短一点」——同一件事，
+			// 同一句话。
+			s.viewEmpty(c, "collection:no-results", noSearchResults)
 		default:
 			// 🔴 设置里的「数据显示样式」在这一帧生效（理由同搜索页那一处）。
 			//
@@ -487,16 +498,20 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 				// ——多出来的 78 像素正好放得下这一行（实测这一行 29 高），
 				// **头图区的高度一个字都不涨**（列表那一块还是那么大）。
 				//
-				// 靠右是 `AlignSelf(Stretch)` + `Spacer` 做的：这一行铺满那一列，
-				// 内容被 `Spacer` 推到右缘，而那一列的右缘是**页边距**
+				// 靠右是 `AlignSelf(Stretch)` + `Justify(End)` 做的：这一行铺满
+				// 那一列，内容被推到右缘，而那一列的右缘是**页边距**
 				// （900 减 24 = 876）——和下面那一排的右缘是同一条线。
 				// ⚠️ **AlignSelf(Stretch) 不能省**：这一列是 `AlignItems(Start)`
 				// 的（那几行字要靠左），而 `Grow(1)` 在一列里长的是**竖着**的
 				// 方向——不写这一句，这一行就按内容宽摆着，排序下拉落在整页的
 				// **中间**而不是右缘。
+				//
+				// ⚠️ **别加 Spacer**：加了它就会和输入框抢那点空隙（两个
+				// `Grow(1)` 按比例分），而**输入框是那个该让位的**——见
+				// `collectionSearchMinWidth` 的注释。
 				ui.Row(c).Key("collection-filters").AlignSelf(ui.Stretch).Gap(8).Center().
+					Justify(ui.End).
 					Children(func() {
-						ui.Spacer(c)
 						s.viewCollectionSearch(c, p)
 						s.viewCollectionSort(c, p)
 					})
@@ -744,7 +759,7 @@ func (s *Shell) setCollectionSort(p *collectionPage) {
 
 // ── 按歌名找 ────────────────────────────────────────────────────────────────
 
-// collectionSearchWidth 是那个输入框的宽度。
+// collectionSearchWidth 是那个输入框的**常态**宽。
 //
 // # 参照物：仓库里现成的那个同类输入框
 //
@@ -756,13 +771,28 @@ func (s *Shell) setCollectionSort(p *collectionPage) {
 // 搜索框，那一页的内容区更宽、而且搜索框**另起一行**（见 `librarypage.go`
 // 的 `viewFilters` 注释）。
 //
-// # 180 在这里摆得下，是因为那一行**不在操作条那一排**（理由见
-// `viewCollectionOps` 顶上那一段）
-//
-// 头图区右边那一列在最小窗口（900）加侧栏 360 那一档还有 276 宽，放得下
-// 180 + 8 + 83 = 271；而操作条那一排在同一档只剩 492，而它左边五件自己就要 484——
-// **塞不下第三件**（挤不下的时候被缩的是**排序下拉**，不是输入框）。
+// ⚠️ **它不是那个框的下限**——下限是 `collectionSearchMinWidth`。宽裕的时候
+// 长到 180，挤的时候自己缩，**排序下拉永远是完整的**。
 const collectionSearchWidth = 180
+
+// collectionSearchMinWidth 是那个输入框的**最小**宽。
+//
+// # 它是这么算出来的
+//
+// 最小窗口（900）加最宽侧栏（480）那一档，内容区只剩 **372**；头图区左边是
+// 200 宽的封面加 16 的间距，于是右边那一列只有 **156**。而排序下拉自己就要
+// **83.2**（还带一个 8 的间距）——所以留给输入框的下限是
+// 156 − 83.2 − 8 = **64.8**，取 **64**。
+//
+// # ⚠️ **别把它调大**
+//
+// 调大了就是**排序下拉被裁**：180 那一版（输入框固定 180）在侧栏 400 就只剩
+// 64 宽、那个「▾」被裁没了，480 那一档字被裁成「最近收」——而那一格是用户
+// 唯一看得见的说明（裁掉之后它就变成一个认不出的方块）。
+//
+// 基线（`6247a3d`）在同样两档也是裁的（400 是 57 宽、480 是 0 宽、右缘跑到
+// 922 **出窗口**）——**这一票让它们都完整**。
+const collectionSearchMinWidth = 64
 
 // collectionSearchLabel 是那个输入框的名字，兼做它空着时画的那几个字。
 //
@@ -785,7 +815,16 @@ const collectionSearchLabel = "搜索歌名"
 // 的 `searchDebounce`）。回车不等那 500ms——用户按下回车就是想现在搜。
 func (s *Shell) viewCollectionSearch(c *ui.Context, p *collectionPage) {
 	box := ui.TextInput(c, &p.draft).
-		Width(collectionSearchWidth).
+		// ⚠️ **三件事一起写**：下限 64（`collectionSearchMinWidth` 的注释）、
+		// 常态 180、`Grow(1)` 让它把空出来的地都占了（上限还是 180）。
+		//
+		// **那个下限就是「排序下拉不动」的保证**：框架挤不下的时候缩的是**最小
+		// 宽最小**的那一个，而排序下拉的最小宽是它自己的自然宽（83.2）。
+		// 输入框让到 64 就停手，排序下拉就一直是完整的（实测侧栏 160~480
+		// 全是 83.2 宽）。
+		Width(collectionSearchMinWidth).
+		Grow(1).
+		MaxWidth(collectionSearchWidth).
 		Label(collectionSearchLabel).
 		Placeholder(collectionSearchLabel)
 	p.submitted = box.Submitted()

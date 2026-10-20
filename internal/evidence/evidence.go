@@ -1575,13 +1575,14 @@ var Items = []Item{
 		// ⚠️ **请求和画面各断一半**：请求带了词而界面没变，是界面没做；
 		// 界面变了而请求没带词，是这一层没做。合成一条的话，两种坏里坏一种
 		// 也能过。
-		Spec: "收藏夹页有一个按歌名找的输入框，和排序并排；输入能筛出歌（筛是接口筛的，回车立刻搜、否则防抖 500ms）；最小窗口下每一个侧栏宽度上排序下拉都是完整的、且不出窗口",
+		Spec: "收藏夹页有一个按歌名找的输入框，和排序并排；输入能筛出歌（筛是接口筛的，回车立刻搜、否则防抖 500ms），搜不出东西时有「换个词再搜一次」而不是一块空白；最小窗口下**每一个侧栏宽度（160~480）**上排序下拉都是完整的、且不出窗口（挤不下的时候让位的是输入框）",
 		Tests: []string{
 			"TestTheCollectionPageHasASearchBox",
 			"TestTheCollectionSearchFiltersTheSongs",
 			"TestTheCollectionSearchReachesTheInterface",
 			"TestTheCollectionSearchGoesOutOnEnter",
 			"TestTheCollectionSearchSurvivesLeavingThePage",
+			"TestTheCollectionSearchSaysWhenThereIsNoResult",
 			"TestTheCollectionOpsRowStillFitsAtTheMinWindow",
 		},
 	},
