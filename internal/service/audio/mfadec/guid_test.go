@@ -2,6 +2,7 @@ package mfadec
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -310,62 +311,86 @@ func TestTheVtableSlotsAreWhereTheSDKPutsThem(t *testing.T) {
 		}
 	})
 
-	t.Run("IMFSample：前面 33 个槽位是祖先的", func(t *testing.T) {
-		// 3（IUnknown）+ 30（IMFAttributes）= 33。
+	t.Run("IMFSample：整张 47 格的虚表按名字钉住", func(t *testing.T) {
+		// ⚠️ **这一段是照着 SDK 的 `IMFSampleVtbl` 结构体一个一个数出来的**，
+		// 不是推的。
 		//
-		// ⚠️ **IMFSample 继承的是 IMFAttributes，不是 IMFMediaType**——
-		// 微软的 IMFSample 文档和 SDK 的 `IMFSampleVtbl` 都这么写。
-		// 按「38 个祖先槽位」算出来的下标（AddBuffer=47 那一组）是错的，
-		// 而错成 47 的后果是**读越过那张只有 47 格的虚表**。
+		// 头文件里那张结构体是 MIDL 生成的，**它就是那张虚表**（C 客户端就是
+		// 照它 `lpVtbl->AddBuffer(...)` 调用的）。所以「结构体里有几个成员、
+		// 第几个是哪个方法」= 「虚表里有几格、第几格是哪个方法」。
+		//
+		// ⚠️⚠️ **别对着「继承链」推**。`IMFSample` 的类声明写着
+		// 「继承 `IMFAttributes`」——祖先 33 格（3 + 30），所以
+		// `AddBuffer` 在第 **42** 格。而「继承 `IMFMediaType`」的印象会让祖先
+		// 变成 38 格，`AddBuffer` 落到第 **47** 格——**那张虚表只有 47 格
+		// （0~46）**，读第 47 格是越过数组末尾，拿到的是一串垃圾，调下去就崩。
+		//
+		// ⚠️ **BMG-68 那边（#128 这张票的分支）的 `IMFSample` 下标正好是
+		// 46/50，那一套是「38 祖先」推出来的**，它自己的测试还是绿的
+		// （断言值和被测值同源）——**不能拿它当依据**。
+		//
+		// 真机上还有一道自检：`transform_windows.go` 的 `verifySampleVTable()`
+		// 在开解码器的时候真的加一个缓冲、真的数一遍。头文件和机器说的话要
+		// 一致才算数。
+		full := []string{
+			"QueryInterface", "AddRef", "Release",
+			"GetItem", "GetItemType", "CompareItem", "Compare",
+			"GetUINT32", "GetUINT64", "GetDouble", "GetGUID",
+			"GetStringLength", "GetString", "GetAllocatedString",
+			"GetBlobSize", "GetBlob", "GetAllocatedBlob", "GetUnknown",
+			"SetItem", "DeleteItem", "DeleteAllItems",
+			"SetUINT32", "SetUINT64", "SetDouble", "SetGUID",
+			"SetString", "SetBlob", "SetUnknown",
+			"LockStore", "UnlockStore", "GetCount", "GetItemByIndex", "CopyAllItems",
+			"GetSampleFlags", "SetSampleFlags", "GetSampleTime", "SetSampleTime",
+			"GetSampleDuration", "SetSampleDuration",
+			"GetBufferCount", "GetBufferByIndex", "ConvertToContiguousBuffer",
+			"AddBuffer", "RemoveBufferByIndex", "RemoveAllBuffers",
+			"GetTotalLength", "CopyToBuffer",
+		}
+		if len(full) != 47 {
+			t.Fatalf("方法名单 %d 个，SDK 的 IMFSampleVtbl 是 47 格", len(full))
+		}
+		// 祖先：3（IUnknown）+ 30（IMFAttributes）= 33。
 		const ancestors = 3 + attributesMethodsAfterIUnknown
 		if ancestors != 33 {
 			t.Fatalf("祖先占了 %d 个槽位，和 SDK 对不上", ancestors)
 		}
-		// 本接口 14 个方法：GetSampleFlags、SetSampleFlags、GetSampleTime、
-		// SetSampleTime、GetSampleDuration、SetSampleDuration、GetBufferCount、
-		// GetBufferByIndex、ConvertToContiguousBuffer、AddBuffer、
-		// RemoveBufferByIndex、RemoveAllBuffers、GetTotalLength、CopyToBuffer。
-		if want := ancestors + 9 - 1; vtblSampleConvertToContig != want {
-			t.Errorf("ConvertToContiguousBuffer = %d，本接口第 9 个方法，该落在 %d",
-				vtblSampleConvertToContig, want)
+		// IMFSample 自己的 14 个方法，从第 33 格起。
+		own := full[ancestors:]
+		if len(own) != sampleMethodsAfterIUnknown {
+			t.Fatalf("IMFSample 自己的方法 %d 个，SDK 里是 %d 个", len(own), sampleMethodsAfterIUnknown)
 		}
-		// AddBuffer 是第 10 个。
-		if want := ancestors + 10 - 1; vtblSampleAddBuffer != want {
-			t.Errorf("AddBuffer = %d，本接口第 10 个方法，该落在 %d",
-				vtblSampleAddBuffer, want)
-		}
-		// GetBufferCount 是第 7 个，GetBufferByIndex 是第 8 个。
-		if want := ancestors + 7 - 1; vtblSampleGetBufferCount != want {
-			t.Errorf("GetBufferCount = %d，本接口第 7 个方法，该落在 %d",
-				vtblSampleGetBufferCount, want)
-		}
-		if want := ancestors + 8 - 1; vtblSampleGetBufferByIndex != want {
-			t.Errorf("GetBufferByIndex = %d，本接口第 8 个方法，该落在 %d",
-				vtblSampleGetBufferByIndex, want)
-		}
-		if want := ancestors + 13 - 1; vtblSampleGetTotalLength != want {
-			t.Errorf("GetTotalLength = %d，本接口第 13 个方法，该落在 %d",
-				vtblSampleGetTotalLength, want)
-		}
-		// CopyToBuffer 是第 14 个，也就是最后一个。
-		if want := ancestors + sampleMethodsAfterIUnknown - 1; vtblSampleGetTotalLength+1 != want {
-			t.Errorf("最后一个方法（CopyToBuffer）该落在 %d", want)
-		}
-		// 整张虚表 47 格：读第 47 格就是越过末尾——所以任何下标都不得 >= 47。
-		if sampleTotalSlotsIncludingIUnk != 47 {
-			t.Errorf("IMFSample 的虚表一共 %d 格，SDK 里是 47 格", sampleTotalSlotsIncludingIUnk)
-		}
-		for name, slot := range map[string]int{
+		// 本包真正用到的那几个，逐个钉住下标。
+		got := map[string]int{
 			"GetBufferCount":            vtblSampleGetBufferCount,
 			"GetBufferByIndex":          vtblSampleGetBufferByIndex,
 			"ConvertToContiguousBuffer": vtblSampleConvertToContig,
 			"AddBuffer":                 vtblSampleAddBuffer,
 			"GetTotalLength":            vtblSampleGetTotalLength,
-		} {
+		}
+		for name, slot := range got {
+			idx := slices.Index(full, name)
+			if idx < 0 {
+				t.Fatalf("名单里没有 %s", name)
+			}
+			if slot != idx {
+				t.Errorf("%s = %d，头文件里它是第 %d 格", name, slot, idx)
+			}
+		}
+		// 整张表一共 47 格：读第 47 格就是越过末尾——任何下标都不得 >= 47。
+		if sampleTotalSlotsIncludingIUnk != 47 {
+			t.Errorf("IMFSample 的虚表一共 %d 格，SDK 里是 47 格", sampleTotalSlotsIncludingIUnk)
+		}
+		for name, slot := range got {
 			if slot >= sampleTotalSlotsIncludingIUnk {
 				t.Errorf("%s 的槽位 %d 越过了那张只有 %d 格的虚表",
 					name, slot, sampleTotalSlotsIncludingIUnk)
 			}
+		}
+		// 最后一个方法是 CopyToBuffer（第 46 格）。
+		if full[len(full)-1] != "CopyToBuffer" {
+			t.Errorf("最后一格是 %s，SDK 里是 CopyToBuffer", full[len(full)-1])
 		}
 	})
 

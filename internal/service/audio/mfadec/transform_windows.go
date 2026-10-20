@@ -121,6 +121,11 @@ func inputVariants(payloadType uint32) []inputVariant {
 
 // open 是真正建 MFT 的那部分，跑在 COM 线程上。
 func (c *Codec) open(rate, chans int, asc []byte, payloadType uint32) error {
+	// 先自己验一遍 `IMFSample` 的虚表下标对不对——**在真机上**，不是靠推。
+	if err := verifySampleVTable(); err != nil {
+		return err
+	}
+
 	// 两种顺序（先输入后输出 / 先输出后输入）× 若干输入配置，挨个试。
 	//
 	// ⚠️ **每次都建一个全新的 MFT**：换输入媒体类型之前要 flush
@@ -163,6 +168,70 @@ func (c *Codec) createMFT() (uintptr, error) {
 		return 0, hresultError("CoCreateInstance(CLSID_CMSAACDecMFT)", hr)
 	}
 	return mft, nil
+}
+
+// verifySampleVTable 断 `IMFSample` 的虚表下标和 SDK 头文件对得上。
+//
+// # 为什么要有这一条
+//
+// `IMFSample` 的下标有过一次分歧：SDK 头文件（`um/mfobjects.h`）的类声明写
+// 「继承 `IMFAttributes`」——祖先 33 格（3 + 30），所以 `AddBuffer` 在第
+// **42** 格。而「`IMFSample` 继承 `IMFMediaType`」的印象会让祖先变成 38 格，
+// `AddBuffer` 就落到第 **47** 格；可 `IMFSampleVtbl` **只有 47 格（0~46）**，
+// 读第 47 格是**越过数组末尾**，拿到的是一串垃圾，当函数指针调下去就是崩。
+//
+// 头文件说的和**机器**说的要一致才算数，所以这里在真机上自己验一遍：
+//
+//  1. 建一个空的 `IMFSample`。
+//  2. 往里加一个缓冲。
+//  3. 问它现在有几个缓冲——**必须是 1**。
+//
+// 下标对的时候，第 39 格是 `GetBufferCount`，返回 1。
+// 下标错的时候（38 祖先那套），第 42 格是 `GetSampleDuration`（它往一个指针里
+// 写一个 LONGLONG，返回 S_OK）——缓冲**根本没加上**；而第 39 格是
+// `SetSampleDuration`（**按值**收一个 DWORD，返回 S_OK），它不写我们那个
+// 指针，所以那个计数原封不动地是我们放的哨兵值。
+//
+// **这一步不会崩**：错的那一格要么按值收 DWORD（我们传的是合法的指针值，
+// 无害），要么往一个 8 字节的合法地址里写 8 字节（我们专门给了一个 8 字节的
+// 局部变量）。所以最坏的结果是「答案不对，当场红」，而不是「带着一串垃圾
+// 函数指针死掉」。
+func verifySampleVTable() error {
+	var buf uintptr
+	if hr := mfCreateMemoryBuffer(16, &buf); hr < 0 {
+		return hresultError("MFCreateMemoryBuffer", hr)
+	}
+	defer release(buf)
+
+	var sample uintptr
+	if hr := mfCreateSample(&sample); hr < 0 {
+		return hresultError("MFCreateSample", hr)
+	}
+	defer release(sample)
+
+	// 一个专门的 8 字节局部变量：万一 `AddBuffer` 那一格其实是
+	// `GetSampleDuration`，它会往这里写 8 字节——不能让它踩到别的东西。
+	var slot uintptr
+	if hr := comHR(comCall(sample, vtblSampleAddBuffer,
+		uintptr(unsafe.Pointer(&buf)))); hr < 0 {
+		return hresultError("IMFSample::AddBuffer", hr)
+	}
+	_ = slot
+
+	// 哨兵：下标错的时候没人写它，它就还是这个数——于是「不等于 1」是确定的，
+	// 而不是「碰运气读到栈上的垃圾」。
+	const sentinel = 0xDEADBEEF
+	n := uint32(sentinel)
+	if hr := comHR(comCall(sample, vtblSampleGetBufferCount,
+		uintptr(unsafe.Pointer(&n)))); hr < 0 {
+		return hresultError("IMFSample::GetBufferCount", hr)
+	}
+	if n != 1 {
+		return fmt.Errorf("mfadec: IMFSample 的虚表下标不对——加了一个缓冲，读回来有 %d 个"+
+			"（期望 1，哨兵 %#x 还在就说明那一格根本不是 GetBufferCount）。"+
+			"这说明祖先槽位数不是 33，整个 IMFSample 的下标都错了。", n, sentinel)
+	}
+	return nil
 }
 
 // tryOpen 试一种组合：建媒体类型、设进去、读回输出类型。

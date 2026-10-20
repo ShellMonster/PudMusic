@@ -422,7 +422,45 @@ func TestSpikeTheCOMApartmentSurvivesLoad(t *testing.T) {
 	}
 }
 
-// ── 6. MFT 到底认哪几种输入配置 ────────────────────────────────────────────
+// ── 6. IMFSample 的虚表下标：真机上自己验一遍 ───────────────────────────────
+
+// TestSpikeTheSampleVTableIsWhatWeThink 是**在真机上自证**虚表下标。
+//
+// # 为什么要有这一条
+//
+// `IMFSample` 的下标有过一次分歧：SDK 头文件（`um/mfobjects.h`）的类声明写
+// 「继承 `IMFAttributes`」——祖先 33 格，`AddBuffer` 在第 **42** 格；而
+// 「继承 `IMFMediaType`」的印象会让祖先变成 38 格，`AddBuffer` 落到第 **47**
+// 格——可 `IMFSampleVtbl` **只有 47 格（0~46）**，读第 47 格是越过数组末尾，
+// 拿到的是一串垃圾，调下去就是崩。
+//
+// 头文件说的和**机器**说的要一致才算数，所以这里在真机上真的走一遍：
+// 建一个空的 `IMFSample` → 加一个缓冲 → 数一遍。**必须是 1。**
+//
+// 下标错的时候这一步**不会崩**（错的那一格按值收 DWORD，或者往一个合法的
+// 8 字节地址里写 8 字节），只是答案不对——当场红，而不是死掉。
+func TestSpikeTheSampleVTableIsWhatWeThink(t *testing.T) {
+	if err := bindingsError(); err != nil {
+		t.Fatalf("系统函数没绑上：%v", err)
+	}
+	th, err := newComThread()
+	if err != nil {
+		t.Fatalf("起 COM 线程：%v", err)
+	}
+	defer th.close()
+
+	var err2 error
+	th.do(func() { err2 = verifySampleVTable() })
+	if err2 != nil {
+		t.Fatalf("IMFSample 的虚表下标自检没过：%v", err2)
+	}
+	t.Logf("IMFSample 虚表自检：加了一个缓冲，读回来 1 个 → 下标对（AddBuffer=%d，GetBufferCount=%d，"+
+		"整张表 %d 格，合法下标 0~%d）",
+		vtblSampleAddBuffer, vtblSampleGetBufferCount,
+		sampleTotalSlotsIncludingIUnk, sampleTotalSlotsIncludingIUnk-1)
+}
+
+// ── 7. MFT 到底认哪几种输入配置 ────────────────────────────────────────────
 
 // TestSpikeWhichInputTypesTheDecoderAccepts 把「MFT 认哪一种输入配置」问出来。
 //
