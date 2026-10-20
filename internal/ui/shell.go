@@ -173,6 +173,23 @@ type Shell struct {
 	// 见 playbar_rate.go。
 	rateOpen bool
 
+	// 音量浮层那一摊。**只由 view 在主线程上读写**，见 playbar_volume.go。
+	//
+	// volOpen 是那个浮层开着没有（悬停图标就开，指针走远了就收）。
+	volOpen bool
+	// volIconHovered 是**这一帧**指针在不在音量图标上。它和 volOpen 分开是
+	// 因为浮层开着的时候指针可能在浮层上而不在图标上——那一下不能把浮层收掉。
+	volIconHovered bool
+	// volIdleSince 是「指针既不在图标上、也不在浮层里」的那一刻。零值表示此刻
+	// 指针还在其中之一上面。
+	volIdleSince time.Time
+	// volBeforeMute 是**最后一个不是 0 的音量**——取消静音的时候放回去的就是它。
+	//
+	// ⚠️ **它不跟着设置走**：音量是「这一刻的听感」，存进设置就意味着「这台机器
+	// 上静音过」会跨到另一台机器上去。设置里**没有**音量这一栏（音量只在应用
+	// 内存里，`app.App.volume`），所以这一份也是跟着窗口走的。
+	volBeforeMute float64
+
 	// 侧栏这一摊。**只由 view 在主线程上读写**，不跨 goroutine。
 	//
 	// sideWidth 是这一帧画出来的宽度：拖动中它跟着指针走（可能小于 160，

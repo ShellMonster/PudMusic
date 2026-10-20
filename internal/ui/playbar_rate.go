@@ -16,16 +16,18 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// rateBtnW 是倍率按钮的宽度，浮层里那七行也用同一个数。
+// rateBtnW 是**浮层里那七行**的宽度。
 //
-// 64 是量出来的：「0.75x」五个字符，按钮自己还要留内边距（比 56 宽的那一头是
-// 「加歌」，两个并排时窄的那个会先被压出省略号）。
+// 64 是量出来的：「0.75x」五个字符，按钮自己还要留内边距。
 //
 // ⚠️ 浮层里那七行**不能比这个窄**。窄一点点，「0.75x」就变成「0.…」、
 // 「1.25x」变成「1.…」——而那一列是用户挑倍速的全部依据，看不全就只能靠猜。
 // 实测 56 就是这么被截的，而且弹出浮层之前没人看得出来：按钮上只有一档，
 // 而无头 Tester 读的是控件的文本，被截的只是画出来的那几个字（见
 // TestRateMenuLabelsAreNotTruncated）。
+//
+// ⚠️ **播放条上那一枚按钮不用这个数**（它贴字宽，见 `viewRate`）：那一枚摆的是
+// 当前这一档的字（「1x」两个字符），给它留 64 就是空着 20 多像素。
 const rateBtnW = 64
 
 // viewRate 是播放条右边的倍率按钮加上它弹出来的那一列档位。
@@ -38,7 +40,17 @@ func (s *Shell) viewRate(c *ui.Context, st app.State) {
 	// 扁平按钮：上游这一枚是无边框的 `IconButton`
 	//（`components/music-rate/index.tsx:49`，`min-w-fit text-[16px]`），
 	// 调研把它算进 F1 的「倍速键」（报告 §1.1 的 C3）。
-	btn := flatButton(c, rateLabel(st.Rate)).Width(rateBtnW).Label("播放速率")
+	//
+	// 🔴 **宽度贴着那几个字**，不写死：上游是 `min-w-fit`（就那么宽），
+	// 而我们原来恒定 64——「1x」两个字摆在一个 64 宽的按钮里，两边空着二十几
+	// 像素，而右边那一组（模式/下载/队列/音量/倍速/加歌）每一枚都紧挨着，
+	// 只有它是鼓出来的。
+	//
+	// ⚠️ **`Shrink(0)` 是必需的**：框架的 flex 默认 `shrink = 1`
+	//（`mygo/ui/context.go:87`），窗口一窄这一枚会被压扁，而它压扁的方式是
+	// **把字截掉**——「1.25x」变成「1.…」。而这一枚上的字是**当前是多少倍**，
+	// 看不全的那一半等于没说。
+	btn := flatButton(c, rateLabel(st.Rate)).Shrink(0).Label("播放速率")
 	if btn.Clicked() {
 		s.rateOpen = !s.rateOpen
 	}

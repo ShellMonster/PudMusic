@@ -792,11 +792,16 @@ func TestTheRoundKeyKeepsItsEdge(t *testing.T) {
 	}
 
 	// 边中点：左右取垂直中点，上下取水平中点。
+	//
+	// ⚠️ **四舍五入，不截断**（和上面 `scanGlyph` 同一个理由）：`Tester` 给的框是
+	// 小数，而这一枚的按钮在 309.65 —— `int()` 截下来落在按钮**外面**一像素，
+	// 取到的是身后那一层（播放条的底色），于是报出来的是「图形顶到边了」，
+	// 而图形其实好好地待在离边五像素的地方。
 	edges := map[string][2]int{
-		"左边": {int(btn.X), int(btn.Y + btn.H/2)},
-		"右边": {int(btn.X+btn.W) - 1, int(btn.Y + btn.H/2)},
-		"上边": {int(btn.X + btn.W/2), int(btn.Y)},
-		"下边": {int(btn.X + btn.W/2), int(btn.Y+btn.H) - 1},
+		"左边": {round32(btn.X), int(btn.Y + btn.H/2)},
+		"右边": {round32(btn.X+btn.W) - 1, int(btn.Y + btn.H/2)},
+		"上边": {int(btn.X + btn.W/2), round32(btn.Y)},
+		"下边": {int(btn.X + btn.W/2), round32(btn.Y+btn.H) - 1},
 	}
 	img := h.tt.Image()
 	for _, side := range []string{"左边", "右边", "上边", "下边"} {
