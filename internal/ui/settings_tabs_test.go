@@ -441,8 +441,8 @@ func TestTheProxyHostAndPortAreStored(t *testing.T) {
 // 两处没接上的话，勾选框照样跳，设置也照样存住，而侧栏上那一条还在。
 //
 // ⚠️ 拿**「本地音乐」**当例子而不是「稍后再看」：这一条钉的是
-// `hiddenMenuKeys` 通不通，而那三个入口未登录时压根不摆（`Route.NeedsLogin`），
-// 拿它们当例子的话这条测试还会顺带把登录态也钉进去——把 `NeedsLogin` 去掉，
+// `hiddenMenuKeys` 通不通，而那三个入口未登录时压根不摆（`Route.HideInMenuWhenLoggedOut`），
+// 拿它们当例子的话这条测试还会顺带把登录态也钉进去——把 `HideInMenuWhenLoggedOut` 去掉，
 // 它照样绿，而它本来就不该管那件事。
 func TestTheMenuTabHidesAnItemFromTheSidebar(t *testing.T) {
 	tt, _, a, _ := shellOnSettings(t, app.DefaultSettings(""))

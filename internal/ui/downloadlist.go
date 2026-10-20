@@ -248,7 +248,8 @@ func (s *Shell) viewDownloadList(c *ui.Context, _ *ui.Route) {
 	d := s.downloads
 	d.sync(d.rowsFn())
 
-	ui.Column(c).Key("page:" + downloadListPath).Grow(1).Padding(20).Gap(12).
+	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
+	ui.Column(c).Key("page:"+downloadListPath).Grow(1).Padding(20, pagePadX).Gap(12).
 		AlignItems(ui.Stretch).Children(func() {
 		d.viewToolbar(c, s)
 

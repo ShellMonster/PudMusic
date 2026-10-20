@@ -80,6 +80,15 @@ func (s *SwitchView) SetEmpty(text string) {
 	s.grid.SetEmpty(text)
 }
 
+// SetEmptyView 换掉「没有歌时**那一格**」的画法，两份都换。理由见
+// `List.SetEmptyView`。
+//
+// ⚠️ **传 nil 是退回那句话**（`SetEmpty` 那一句，或默认那句）。
+func (s *SwitchView) SetEmptyView(fn func(c *ui.Context)) {
+	s.list.SetEmptyView(fn)
+	s.grid.SetEmptyView(fn)
+}
+
 // SetFooter 装末尾哨兵的画法，两份都装。理由见 `Grid.footer` 那一段——**两份都要装**
 // 是因为网格那半边没有哨兵就没有失败之后的重试按钮（`blocked` 闩住的是自动重试）。
 //

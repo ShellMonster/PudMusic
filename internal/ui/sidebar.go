@@ -287,7 +287,7 @@ func (s *Shell) viewSideCollapse(c *ui.Context, st app.Settings) {
 //
 // ## 未登录时那三个入口不摆，摆一句「登录后可见」
 //
-// 「我的关注」「稍后再看」「历史记录」的内容全都要登录才有（`Route.NeedsLogin`）。
+// 「我的关注」「稍后再看」「历史记录」的内容全都要登录才有（`Route.HideInMenuWhenLoggedOut`）。
 // 未登录时照样摆着它们，点了进去是空的——用户会以为是应用坏了，而实际上他只是
 // 没登录。所以这里**不摆**，改在原位摆一句提示（见 viewLoggedOutHint）。
 //
@@ -310,7 +310,7 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 				continue
 			}
 			// 未登录时那几项不摆（理由见这一段的抬头）。
-			if rt.NeedsLogin && !loggedIn {
+			if rt.HideInMenuWhenLoggedOut && !loggedIn {
 				hidden++
 				continue
 			}

@@ -122,7 +122,7 @@ func TestShellPaintsTheThemeThatTheSettingsSay(t *testing.T) {
 // 画对了，第二遍就被悄悄打回系统色——不报错、不崩溃、屏幕上一闪而过。
 func TestShellKeepsTheThemeAfterClickingAround(t *testing.T) {
 	// ⚠️ **登录过的**：它要点侧栏的「稍后再看」，而那三个入口未登录时不摆
-	// （`Route.NeedsLogin`，见 sidebar.go）。
+	// （`Route.HideInMenuWhenLoggedOut`，见 sidebar.go）。
 	tt, _, a, _ := shellWithSettings(t, app.ThemeModeLight, true, loggedInWith("7"))
 	if BuildTheme(a.SettingsSnapshot(), true).Dark {
 		t.Fatal("起点就不对：设置是浅色，却拼出了深色主题")

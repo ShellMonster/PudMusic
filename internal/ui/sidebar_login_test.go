@@ -13,11 +13,11 @@ import (
 // loginOnlyTitles 是「要登录才有内容」的那几页的名字。
 //
 // **从 routes 表里数，不另写一份**：写死三个名字的话，哪天给路由加了
-// `NeedsLogin` 而忘了改这里，这条测试就只验了三个里的两个而全绿。
+// `HideInMenuWhenLoggedOut` 而忘了改这里，这条测试就只验了三个里的两个而全绿。
 func loginOnlyTitles() []string {
 	var out []string
 	for _, rt := range routes {
-		if rt.NeedsLogin {
+		if rt.HideInMenuWhenLoggedOut {
 			out = append(out, rt.Title)
 		}
 	}
@@ -28,7 +28,7 @@ func loginOnlyTitles() []string {
 func loginOnlyMatches() []string {
 	var out []string
 	for _, rt := range routes {
-		if rt.NeedsLogin {
+		if rt.HideInMenuWhenLoggedOut {
 			out = append(out, rt.Match)
 		}
 	}
@@ -50,7 +50,7 @@ func loginOnlyMatches() []string {
 func TestTheSidebarHidesTheLoginOnlyEntriesUntilYouLogIn(t *testing.T) {
 	names := loginOnlyTitles()
 	if len(names) != 3 {
-		t.Fatalf("标了 NeedsLogin 的路由是 %d 条 %q，want 3（关注 / 稍后再看 / 历史记录）",
+		t.Fatalf("标了 HideInMenuWhenLoggedOut 的路由是 %d 条 %q，want 3（关注 / 稍后再看 / 历史记录）",
 			len(names), names)
 	}
 
