@@ -31,6 +31,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
@@ -174,6 +175,25 @@ type collectionPage struct {
 	sort     bili.CollectionSort
 	listSort bili.CollectionSort
 
+	// draft 是搜索框里正在敲的字，keyword 是**已经在筛**的那个词。
+	//
+	// 分成两个是因为即时模式每一帧都重画：直接拿框里的字去筛，用户每敲一个
+	// 字就重拉一次（防抖解决的是频率，解决不了「框里的字和生效的词是同一个」
+	// 这个混淆）。理由和 `libraryPage` 的那一份一字不差（见 librarypage.go）。
+	draft, keyword string
+
+	// seenDraft 是上一帧框里的字，pendingSince 是「敲下去、还没发出去」的起点。
+	//
+	// 零值 = 没有待发的搜索。防抖的钟靠 `seenDraft` 重打：用户每敲一个字都要
+	// 重新开始等那 500ms（上游 `useDebounceFn` 也就是这么做的）。
+	seenDraft    string
+	pendingSince time.Time
+
+	// submitted 是这一帧搜索框有没有被回车提交。**它必须记在状态上**而不是当成
+	// 一个返回值传下去：画完之后还要拿它判要不要换查询，而那一段和画输入框
+	// 不在同一个闭包里。
+	submitted bool
+
 	// media 是行身份 → 那一条完整信息。见 mediaIndex。
 	media mediaIndex
 
@@ -210,13 +230,16 @@ func (s *Shell) newCollectionPage(ref app.CollectionRef) *collectionPage {
 // 线程的字段：`-race` 直接报，而真机上的表现是「偶尔选了『最多播放』却拉回
 // 『最近收藏』的内容」。
 //
+// **搜索词也是这么拷的**（同一个道理）：词一换，整个列表换掉，而列表是拿建它
+// 当时那个词建的。
+//
 // 换排序时整个换掉列表而不是换 fetcher，同一个道理（换 fetcher 还是闭包读
 // 字段）。
 func (s *Shell) newCollectionList(p *collectionPage) *list.PagedList {
 	acts := s.collectionActions()
-	ref, sort, media := p.ref, p.sort, &p.media
+	ref, sort, keyword, media := p.ref, p.sort, p.keyword, &p.media
 	return list.NewPaged(s.images, acts, func(ctx context.Context, pageNo int) (list.Page, error) {
-		return s.fetchCollectionPage(ctx, ref, sort, pageNo, media)
+		return s.fetchCollectionPage(ctx, ref, sort, keyword, pageNo, media)
 	})
 }
 
@@ -240,8 +263,11 @@ func (s *Shell) collectionActions() list.Actions {
 //
 // ⚠️ **跑在后台 goroutine 里**（`list.PagedList` 的 Fetcher），所以它不许碰
 // 界面状态：这里唯一写的东西是 `media`，而它自己带锁（见 mediaIndex）。
-func (s *Shell) fetchCollectionPage(ctx context.Context, ref app.CollectionRef, sort bili.CollectionSort, pageNo int, media *mediaIndex) (list.Page, error) {
-	medias, hasMore, err := s.app.LoadCollectionPage(ctx, ref, sort, pageNo)
+//
+// keyword 是建这个列表时那个词（见 newCollectionList 的注释）：它是**值**，
+// 不是界面字段，所以后台读它不犯铁律一。
+func (s *Shell) fetchCollectionPage(ctx context.Context, ref app.CollectionRef, sort bili.CollectionSort, keyword string, pageNo int, media *mediaIndex) (list.Page, error) {
+	medias, hasMore, err := s.app.LoadCollectionPage(ctx, ref, sort, keyword, pageNo)
 	if err != nil {
 		return list.Page{}, err
 	}
@@ -481,9 +507,12 @@ func collectionKindText(typ bili.CollectionType, private bool) string {
 
 // ── 操作条 ─────────────────────────────────────────────────────────────────
 
-// viewCollectionOps 是头图区下面那一排：左边四个动作，右边多选开关 + 排序。
+// viewCollectionOps 是头图区下面那一排：左边四个动作，右边多选开关 + 搜索框 +
+// 排序。
 //
-// 项和顺序照 Biu 的 `src/pages/video-collection/operation/index.tsx:33-56`。
+// 项和顺序照 Biu 的 `src/pages/video-collection/operation/index.tsx:33-56`，
+// **外加那个搜索框**（上游那一排的右边是 `SearchWithSort`，而我们之前只抄了
+// 它里面的排序那一半——见 `viewCollectionSearch`）。
 func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 	t := c.Theme()
 
@@ -508,6 +537,11 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 			if multi.Clicked() {
 				s.toggleCollectionMulti(p)
 			}
+
+			// ⚠️ **搜索框在排序的左边**（上游 `SearchWithSort` 的次序：
+			// `components/search-with-sort/index.tsx:15-17` 先搜索后排序）——
+			// 两个「缩小范围」的手段挨在一起，用户一眼就知道它们是一伙的。
+			s.viewCollectionSearch(c, p)
 
 			s.viewCollectionSort(c, p)
 		})
@@ -668,4 +702,132 @@ func (s *Shell) viewCollectionSort(c *ui.Context, p *collectionPage) {
 func (s *Shell) setCollectionSort(p *collectionPage) {
 	p.listSort = p.sort
 	s.reloadCollection(p)
+}
+
+// ── 按歌名找 ────────────────────────────────────────────────────────────────
+
+// collectionSearchWidth 是那个输入框的宽度。
+//
+// # 参照物：同一栏里现成的那个同类输入框
+//
+// `localmusic.go` 的本地音乐工具条上那个搜索框是 **180**
+// （`ui.TextInput(c, &p.search)…Width(180)`），而它和这一栏的排法**一模一样**：
+// 一个输入框挨着一个下拉（那边是「目录」，这边是「排序」）。所以 180 是首选。
+//
+// # 为什么这里取 140 而不是 180
+//
+// **这一栏的左边比那一栏宽**：本地音乐那一排是「播放全部 / 全部加入队列」两枚
+// 键，而这一排是「播放全部 / 添加到播放列表 / ☆ / ⋯ / 多选」五件。
+//
+// 实测（无头 Tester 量盒子，最小窗口 900 + 默认侧栏 200；页边距 24，所以这一
+// 行的右缘是 876）：
+//
+//	输入框 180 → 排序下拉被压到 69 宽（自然宽 83，「最近收藏」被裁成「最近收…」），
+//	              整行的右缘跑到 900（**压到了窗口边**，页边距没了）
+//	输入框 160 → 排序下拉回到 83，但整行的右缘是 893.8（**越过了页边距 17.8**）
+//	输入框 140 → 排序下拉 83，右缘 876——**和加这个框之前一模一样**
+//
+// 而一个输入框**不能靠 `Grow` 缩下去**：框架给它的最小宽就是它自己那个宽
+// （`mygo/ui/layout.go` 的 `minMain`），那一栏挤不下的时候缩的是**排序下拉**。
+//
+// 140 是**还摆得下排序下拉自然宽、又不越过页边距**的最大整数。
+// `TestTheCollectionOpsRowStillFitsAtTheMinWindow` 钉着这个数。
+//
+// ⚠️ 别拿 `keywordBoxWidth`（256）来：那是「稍后再看 / 历史记录」那一页的
+// 搜索框，那一页的内容区更宽、而且搜索框**另起一行**（见 `librarypage.go`
+// 的 `viewFilters` 注释）。放在这一栏里 256 会把排序整个挤出窗外。
+const collectionSearchWidth = 140
+
+// collectionSearchLabel 是那个输入框的名字，兼做它空着时画的那几个字。
+//
+// ⚠️ **Label 不能省**：它不只是给测试用的——没有它读屏软件读不出这是一个搜
+// 歌名的输入框（占位文字不是标签），无头 Tester 也只认 label / text。
+const collectionSearchLabel = "搜索歌名"
+
+// viewCollectionSearch 是那个按歌名找的输入框。
+//
+// 上游那一排的右边是 `SearchWithSort`（`components/search-with-sort/index.tsx`），
+// 里面是「搜索 + 排序」两样；我们之前只抄了排序那一半，于是这一页**只能缩小
+// 到「哪一档排序」，缩不到「某几首」**——一个 800 首歌的收藏夹里，用户只能靠
+// 滚和看。
+//
+// ⚠️ **筛是接口筛的**（`bili.CollectionMedias` 顶上那一段）：本地筛只能筛已经
+// 拉下来的那 20 首，搜「告白气球」在第 300 首的话，界面上的表现是「搜了没反应」。
+//
+// ⚠️ **回车立刻搜，防抖 500ms**：抄上游（`components/search-button/index.tsx`
+// 的 `useDebounceFn(..., { wait: 500 })`），也和这一页的邻居一致（`librarypage.go`
+// 的 `searchDebounce`）。回车不等那 500ms——用户按下回车就是想现在搜。
+func (s *Shell) viewCollectionSearch(c *ui.Context, p *collectionPage) {
+	box := ui.TextInput(c, &p.draft).
+		Width(collectionSearchWidth).
+		Label(collectionSearchLabel).
+		Placeholder(collectionSearchLabel)
+	p.submitted = box.Submitted()
+
+	// 判据和排序那一处一个写法：这一帧条件变了就换查询。
+	if s.collectionSearchChanged(p) {
+		s.reloadCollection(p)
+	}
+}
+
+// collectionSearchChanged 报这一帧搜索条件变了没，变了就换查询。
+//
+// **防抖的钟在用户每敲一个字的时候重新打**：上一次敲的已经过去 400ms、这一下又
+// 敲了一个字，那一下就得从头再等 500ms，而不是把上一个字的 400ms 接着算——
+// 否则慢慢打的时候会在中途就发出去一个还没输完的词（上游 `useDebounceFn` 就是
+// 每个输入都重置那个钟）。回车是例外，立刻换。
+//
+// 这一段和 `libraryPage.keywordChanged` 是同一套（理由见 librarypage.go 的文件头）。
+func (s *Shell) collectionSearchChanged(p *collectionPage) bool {
+	now := s.clock.Now()
+	draft := strings.TrimSpace(p.draft)
+	switch {
+	case p.submitted:
+		p.seenDraft = draft
+		return s.applyCollectionKeyword(p, draft)
+	case draft != p.seenDraft:
+		// 用户又敲了一个字：把钟重打，这一帧不搜。
+		p.seenDraft, p.pendingSince = draft, now
+		return false
+	case p.pendingSince.IsZero():
+		return false
+	case now.Sub(p.pendingSince) >= searchDebounce:
+		return s.applyCollectionKeyword(p, draft)
+	}
+	return false
+}
+
+// applyCollectionKeyword 把生效的词换掉。
+//
+// **同一个词不重拉**：回车搜了「告白气球」再回车一次，B 站会给一模一样的
+// 20 条，而界面上那一瞬间是空的 + 清掉选中项。
+func (s *Shell) applyCollectionKeyword(p *collectionPage, kw string) bool {
+	p.pendingSince = time.Time{}
+	if kw == p.keyword {
+		return false
+	}
+	p.keyword = kw
+	return true
+}
+
+// collectionSearching 报「收藏夹页那个 500ms 的钟要不要醒着」。
+//
+// 它是 `syncSearchWatch` 的一个 `want`（理由见 librarypage.go 里那一个）：
+// **不许为这一档再排一个定时器**——同一个「等用户把词敲完」在代码里出现两个
+// 出处，改一个忘了另一个时界面上一点也看不出来。
+//
+// ⚠️ **离开这一页只是不醒那个钟，不是把那个「还没发出去的搜索」丢掉**：
+// 框里还摆着用户敲的那个词，而列表还没筛——回来的时候那一帧它就发出去了
+// （那一帧 `now - pendingSince` 早过了 500ms）。**清掉它的话，框里那个词就
+// 成了界面上的假话**：用户看见自己搜过，而列表是全的。同一栏的邻居
+// （`libraryPage`）也是这么做的。
+func (s *Shell) collectionSearching() bool {
+	p := s.collection
+	if p == nil {
+		return false
+	}
+	if !strings.HasPrefix(s.router.Path(), collectionPathPrefix) {
+		return false
+	}
+	return !p.pendingSince.IsZero()
 }

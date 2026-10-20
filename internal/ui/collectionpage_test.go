@@ -14,8 +14,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
@@ -40,6 +42,8 @@ type favBili struct {
 	medias []map[string]any
 	// orders 记下每一次内容列表请求带的 order，按顺序。
 	orders []string
+	// keywords 记下每一次内容列表请求带的 keyword，按顺序。
+	keywords []string
 	// faved 是此刻收藏了没有（folder/info 就照它回）。
 	faved bool
 	// removed 记下每一次 batch-del 的 resources。
@@ -87,8 +91,10 @@ func newCollectionBili(t *testing.T) *favBili {
 			})
 		case "/x/v3/fav/resource/list":
 			b.orders = append(b.orders, r.URL.Query().Get("order"))
+			kw := r.URL.Query().Get("keyword")
+			b.keywords = append(b.keywords, kw)
 			writeCollectionJSON(t, w, 0, "0", map[string]any{
-				"medias": b.medias, "has_more": false,
+				"medias": b.filterByKeyword(kw), "has_more": false,
 			})
 		case "/x/v3/fav/folder/fav", "/x/v3/fav/folder/unfav":
 			_ = r.ParseForm()
@@ -140,6 +146,37 @@ func (b *favBili) setMedias(in ...map[string]any) {
 	defer b.mu.Unlock()
 	b.medias = in
 	b.infos["media_count"] = len(in)
+}
+
+// filterByKeyword 按歌名筛那些条目——**真 B 站那个接口就是这么筛的**
+// （`/x/v3/fav/resource/list` 收一个 `keyword`，见
+// `internal/service/bili/collection.go`）。
+//
+// ⚠️ 这一台假 B 站**必须**照它筛：不筛的话「输入能筛出歌」那条根本走不到
+// ——界面把词发出去了，而假服务器照旧把全部条目端回来，于是界面上那三首
+// 一首也没少，症状是「搜索框不干活」。
+//
+// ⚠️ **调用方已经拿着锁**（它在那个 http.HandlerFunc 里，而那把锁是 handler
+// 一进来就拿的），所以这里绝不能再锁一道。
+func (b *favBili) filterByKeyword(kw string) []map[string]any {
+	if kw == "" {
+		return b.medias
+	}
+	out := make([]map[string]any, 0, len(b.medias))
+	for _, m := range b.medias {
+		title, _ := m["title"].(string)
+		if strings.Contains(title, kw) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// seenKeywords 是每一次内容列表请求带的 keyword，按顺序。
+func (b *favBili) seenKeywords() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.keywords...)
 }
 
 // mediaOf 造一条内容。id 决定身份，title 是界面上能看见的那一行。
@@ -262,13 +299,22 @@ func collectionShell(t *testing.T, id string, medias ...map[string]any) (*favBil
 // 起点——真正装上去的是后面那一句。
 func collectionShellAs(t *testing.T, mid string, id string, medias ...map[string]any) (*favBili, *Shell, *ui.Tester) {
 	t.Helper()
+	return collectionShellOpts(t, nil, mid, id, medias...)
+}
+
+// collectionShellOpts 是 collectionShellAs 加一批外壳选项的那一版。
+//
+// ⚠️ **选项排在 medias 前面**是因为 medias 已经是可变参数了，而 Go 不让一个
+// 函数有两个可变参数。
+func collectionShellOpts(t *testing.T, opts []shellOpt, mid string, id string, medias ...map[string]any) (*favBili, *Shell, *ui.Tester) {
+	t.Helper()
 	b := newCollectionBili(t)
 	b.setMedias(medias...)
 	// ⚠️ **挂一份真设置**（临时目录）：侧栏那一行是从 `SettingsSnapshot` 读
 	// 顺序的，而「删收藏夹」「从侧栏移除」收尾时要写回那个顺序（`forgetFavorite`）。
 	// 不挂的话那一步回 `ErrSettingsNotMounted`，日志里多一行「顺序存不住」——
 	// 而这条页面**在真机上顺序是存得住的**，让测试跑在一个假故障上没意思。
-	s, tt := newShell(t, withSettings(app.DefaultSettings("")))
+	s, tt := newShell(t, append([]shellOpt{withSettings(app.DefaultSettings(""))}, opts...)...)
 	// ⚠️ 装上唤醒：后台那一趟（拉元信息、收藏之后刷新）跑完之后要能叫醒界面，
 	// 而真窗口里这一句是在 `Shell.Attach` 里装的。测试不走 Attach，得自己装，
 	// 否则「后台改完状态界面不动」这一类在测试里根本走不到。
@@ -458,6 +504,200 @@ func TestAllThreeSortsReachTheInterface(t *testing.T) {
 func collectionSortLabel(t *testing.T, i int) string {
 	t.Helper()
 	return bili.CollectionSorts[i].Label()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 按歌名找
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheCollectionPageHasASearchBox 钉住验收第 3 条的前一半：
+// 收藏夹页**有一个输入框**。
+//
+// 之前这一页只有排序——能缩小到「哪一档排序」，缩不到「某几首」。上游那一排
+// 的右边是 `SearchWithSort`（搜索 + 排序），我们之前只抄了排序那一半。
+func TestTheCollectionPageHasASearchBox(t *testing.T) {
+	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"))
+	waitSongs(t, tt, s, 1)
+
+	if _, ok := tt.Find(collectionSearchLabel); !ok {
+		t.Errorf("收藏夹页上没有那个输入框，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheCollectionSearchFiltersTheSongs 钉住验收第 3 条的后一半：
+// **输入能筛出歌**。
+//
+// ⚠️ **判据是画面上剩下哪几首**，不是「发出去的请求带没带 keyword」——
+// 请求带了词而界面没变，那也是没做（症状是「搜索框不干活」）。而请求那一层
+// 由 `TestTheCollectionSearchReachesTheInterface` 单独断。
+//
+// ⚠️ **防抖是 500ms**（抄上游 `useDebounceFn(..., { wait: 500 })`），所以这里
+// 用假时钟推，而不是真等。
+func TestTheCollectionSearchFiltersTheSongs(t *testing.T) {
+	clock := newFakeClock(time.Unix(2026, 0))
+	_, s, tt := collectionShellOpts(t, []shellOpt{withClock(clock)}, "", "12345",
+		mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
+	waitSongs(t, tt, s, 3)
+
+	typeInto(t, tt, collectionSearchLabel, "二")
+
+	// ⚠️ **要画两帧**：第一帧是「这一页看见框里的字变了，把钟重打」，第二帧
+	// 才是 `syncSearchWatch` 把它那个钟装上（那个钟是每帧收一次「要不要醒着」
+	// 的）。少画一帧的话钟根本没装上，推时钟也推不动它。
+	tt.Frame()
+	tt.Frame()
+
+	// 钟到了：搜索发出去，列表重来一遍。
+	clock.Advance(searchDebounce + time.Millisecond)
+	tt.Frame()
+
+	waitFrames(t, tt, "筛完只剩一首歌", func() bool {
+		return s.collection != nil && s.collection.list.Paged().Loaded == 1
+	})
+
+	if _, ok := tt.Find("歌 二"); !ok {
+		t.Errorf("筛完之后找不到匹配的那首，文字有 %q", tt.Texts())
+	}
+	for _, gone := range []string{"歌 一", "歌 三"} {
+		if _, ok := tt.Find(gone); ok {
+			t.Errorf("「%s」没被筛掉，文字有 %q", gone, tt.Texts())
+		}
+	}
+}
+
+// TestTheCollectionSearchReachesTheInterface 断那个词真的发给了接口。
+//
+// ⚠️ 这一条和上面那条**各断一半**：请求带了词而界面没变，是界面没做；
+// 界面变了而请求没带词，是这一层没做。合成一条的话，两种坏里坏一种也能过。
+func TestTheCollectionSearchReachesTheInterface(t *testing.T) {
+	clock := newFakeClock(time.Unix(2026, 0))
+	b, s, tt := collectionShellOpts(t, []shellOpt{withClock(clock)}, "", "12345",
+		mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
+	waitSongs(t, tt, s, 3)
+
+	typeInto(t, tt, collectionSearchLabel, "二")
+	tt.Frame()
+	tt.Frame()
+	clock.Advance(searchDebounce + time.Millisecond)
+	tt.Frame()
+
+	waitFrames(t, tt, "词发给了接口", func() bool {
+		for _, kw := range b.seenKeywords() {
+			if kw == "二" {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// TestTheCollectionSearchSurvivesLeavingThePage 断「切走再切回来，那个还没
+// 发出去的搜索仍然发出去」。
+//
+// 框里还摆着用户敲的那个词，而列表还没筛——回来的时候那一帧它就该发出去。
+//
+// ⚠️ **清掉它的话，框里那个词就成了界面上的假话**：用户看见自己搜过，而列表
+// 是全的——而他没看见自己搜过（他切走的时候那个词还没发出去）。
+//
+// ⚠️ **切走的时候那个搜索不许在后台发出去**：这一页不在画面上，而发出去的那
+// 一趟会换掉整个列表——用户切回来看到的是一份他没要求过的内容。
+func TestTheCollectionSearchSurvivesLeavingThePage(t *testing.T) {
+	clock := newFakeClock(time.Unix(2026, 0))
+	b, s, tt := collectionShellOpts(t, []shellOpt{withClock(clock)}, "", "12345",
+		mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
+	waitSongs(t, tt, s, 3)
+
+	typeInto(t, tt, collectionSearchLabel, "二")
+	tt.Frame()
+	tt.Frame()
+
+	// 切走。**不推时钟**：那个搜索本来就还没到点（防抖 500ms）。
+	s.navigate("/")
+	tt.Frame()
+
+	// 钟走过去了（真机上就是这样），但**那一页不在画面上**，所以不许发出去。
+	clock.Advance(2 * time.Second)
+	tt.Frame()
+	for _, kw := range b.seenKeywords() {
+		if kw == "二" {
+			t.Fatalf("不在这一页的时候那个搜索发出去了，关键词有 %q", b.seenKeywords())
+		}
+	}
+
+	// 切回来：那一帧它就发出去了。
+	s.navigate("/collection/12345")
+	waitFrames(t, tt, "那个还没发出去的搜索发出去了", func() bool {
+		for _, kw := range b.seenKeywords() {
+			if kw == "二" {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// TestTheCollectionOpsRowStillFitsAtTheMinWindow 钉住操作条在**最小窗口**
+// 下还摆得下。
+//
+// 这一排右边多了那个输入框之后，最小窗口（900）加默认侧栏（200）那一档就
+// 紧了：排不下的时候框架缩的是**排序下拉**（它自己的最小宽是那两个字），
+// 而被裁掉的「最近收藏」在下拉里是用户唯一能看见的说明。
+//
+// 判据是**画面上的盒子**：排序下拉的自然宽是 83（右缘落在页边距 876 上），
+// 而这一栏的右缘就是 900 减页边距 24。
+//
+// ⚠️ 这一条和「输入框有多宽」那一条是**同一件事的两头**：宽度写大了这里就红，
+// 这里红了宽度就得改小——而改小的理由写在 `collectionSearchWidth` 的注释里。
+func TestTheCollectionOpsRowStillFitsAtTheMinWindow(t *testing.T) {
+	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
+	waitSongs(t, tt, s, 2)
+
+	tt.SetSize(minWindowW, minWindowH)
+	tt.Frame()
+
+	sort, ok := tt.Find("排序：最近收藏")
+	if !ok {
+		t.Fatalf("画面上找不到排序下拉，文字有 %q", tt.Texts())
+	}
+	// 页边距 24（`viewCollectionOps` 的 `Padding(0, 24, 12)`）：这一栏的右缘
+	// 应该是 900 - 24 = 876。
+	const wantRight = float32(minWindowW - 24)
+	if right := sort.X + sort.W; right > wantRight {
+		t.Errorf("排序下拉的右缘是 %.1f，越过了页边距（want ≤ %.0f）——"+
+			"输入框（%d 宽）把这一行挤出去了", right, wantRight, collectionSearchWidth)
+	}
+	// 排序下拉自己的自然宽：83 上下（「最近收藏 ▾」加内边距和描边）。
+	if sort.W < 80 {
+		t.Errorf("排序下拉被压到 %.1f 宽了——「最近收藏」那一行被裁掉了", sort.W)
+	}
+}
+
+// TestTheCollectionSearchGoesOutOnEnter 断**回车立刻搜**，不等那 500ms。
+//
+// 用户按下回车就是想现在搜，让他等半秒是另一回事（上游也是这么做的，见
+// `librarypage.go` 的文件头）。
+//
+// ⚠️ 这一条**不推时钟**：推了的话防抖那一支也会发出去，断的就不是「回车
+// 立刻」而是「回车也发了」。
+func TestTheCollectionSearchGoesOutOnEnter(t *testing.T) {
+	clock := newFakeClock(time.Unix(2026, 0))
+	b, s, tt := collectionShellOpts(t, []shellOpt{withClock(clock)}, "", "12345",
+		mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
+	waitSongs(t, tt, s, 3)
+
+	typeInto(t, tt, collectionSearchLabel, "二")
+	tt.Frame()
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+
+	waitFrames(t, tt, "回车就把词发出去了", func() bool {
+		for _, kw := range b.seenKeywords() {
+			if kw == "二" {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 // TestSortingReloadsFromTheFirstPage 换排序要从第一页重来——
