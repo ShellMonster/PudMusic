@@ -38,6 +38,8 @@ type Codec struct {
 	mft   uintptr
 	rate  int
 	chans int
+	// inputVariant 记的是**被 MFT 认下的那一种**输入配置（诊断用）。
+	inputVariant string
 	// callerAllocatesOutput 记的是输出样本由谁分配。
 	//
 	// `MFT_OUTPUT_STREAM_INFO` 的 dwFlags 说了算：带
@@ -74,6 +76,42 @@ func OpenAACCodec(rate, chans int, asc []byte, payloadType uint32) (*Codec, erro
 	return c, nil
 }
 
+// inputVariant 是一种输入配置。
+type inputVariant struct {
+	name        string
+	payloadType uint32
+	userData    bool
+}
+
+// inputVariants 是要挨个试的输入配置，**按这个顺序**。
+//
+// 为什么要有「挨个试」：MFT 认哪种配置，是这台 Windows 上的事实，不是我们
+// 能推出来的——SDK 的文档只写了「`MFAudioFormat_AAC` 认裸 AAC 和 ADTS」，
+// 但**带不带 `MF_MT_USER_DATA`**（也就是 AudioSpecificConfig）文档没写死。
+//
+// 所以这里把两种 payload × 两种 user data 的组合都试一遍，**用第一个被
+// 认的**。认了哪一个，spike 会打出来（`TestSpikeWhichInputTypesTheDecoder
+// Accepts`），产品那一票照着它接就行。
+func inputVariants(rate, chans int, asc []byte) []inputVariant {
+	both := []uint32{aacPayloadRaw, aacPayloadADTS}
+	out := make([]inputVariant, 0, 4)
+	for _, pt := range both {
+		for _, ud := range []bool{true, false} {
+			name := "裸 AAC"
+			if pt == aacPayloadADTS {
+				name = "ADTS"
+			}
+			if ud {
+				name += " + MF_MT_USER_DATA（AudioSpecificConfig）"
+			} else {
+				name += "，不带 MF_MT_USER_DATA"
+			}
+			out = append(out, inputVariant{name: name, payloadType: pt, userData: ud})
+		}
+	}
+	return out
+}
+
 // open 是真正建 MFT 的那部分，跑在 COM 线程上。
 func (c *Codec) open(rate, chans int, asc []byte, payloadType uint32) error {
 	clsid := guidCLSIDCMSAACDecMFT
@@ -82,15 +120,30 @@ func (c *Codec) open(rate, chans int, asc []byte, payloadType uint32) error {
 		return hresultError("CoCreateInstance(CLSID_CMSAACDecMFT)", hr)
 	}
 
-	input, err := c.buildInputType(rate, chans, asc, payloadType)
-	if err != nil {
-		return err
+	// 挨个试输入配置，用第一个被认的。
+	//
+	// ⚠️ 首选是「调用方要的那一种」（payloadType 参数指定的），试不通再换。
+	var lastErr error
+	accepted := ""
+	for _, v := range inputVariants(rate, chans, asc) {
+		input, err := c.buildInputTypeWith(rate, chans, asc, v.payloadType, v.userData)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		hr := c.setInputType(input)
+		release(input)
+		if hr < 0 {
+			lastErr = hresultError("SetInputType", hr)
+			continue
+		}
+		accepted = v.name
+		break
 	}
-	defer release(input)
-
-	if hr := c.setInputType(input); hr < 0 {
-		return hresultError("SetInputType", hr)
+	if accepted == "" {
+		return fmt.Errorf("mfadec: 这个 MFT 一种输入配置都不认：%w", lastErr)
 	}
+	c.inputVariant = accepted
 
 	out, err := c.buildOutputType(rate, chans)
 	if err != nil {
@@ -295,6 +348,12 @@ func (c *Codec) Channels() int { return c.chans }
 
 // CallerAllocatesOutput 记的是输出样本由谁分配（诊断用）。
 func (c *Codec) CallerAllocatesOutput() bool { return c.callerAllocatesOutput }
+
+// InputVariant 记的是被 MFT 认下的那一种输入配置（诊断用）。
+//
+// 「MFT 到底认哪一种」是这台 Windows 上的事实，不是能推出来的——报告里
+// 写的那个名字，就是产品那一票该照着接的。
+func (c *Codec) InputVariant() string { return c.inputVariant }
 
 // ThreadSwitches 是「那条 COM 线程在干活的时候被换掉过几次」。
 //

@@ -81,6 +81,7 @@ func TestSpikeAACLCDecodesOutOfMediaFoundation(t *testing.T) {
 			t.Logf("拆 %s 用了 %s", name, opened.Round(time.Microsecond))
 			t.Logf("payloadType=%d 核心码流：%d Hz / %d 声道，ASC %d 字节",
 				src.payloadType, src.rate, src.chans, len(src.asc))
+			t.Logf("MFT 认下的输入配置：%s", codec.InputVariant())
 			t.Logf("解码器输出：%d Hz / %d 声道（输出样本由调用方分配：%v）",
 				codec.SampleRate(), codec.Channels(), codec.CallerAllocatesOutput())
 
