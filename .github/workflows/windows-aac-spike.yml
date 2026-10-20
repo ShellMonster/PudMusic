@@ -41,6 +41,9 @@ jobs:
       # 为了把 spike 的输出贴成一条 PR 评论——真机数字得落在**看得到的地方**，
       # 而不是只躺在 Actions 的日志里。
       pull-requests: write
+      # 再贴一份到票面（issue #128）上：本仓库的约定是「裁决跟着票走」，
+      # 数字也一样——它们是这条路的**结论**，不是某次运行的副产品。
+      issues: write
 
     steps:
       - uses: actions/checkout@v4
@@ -113,4 +116,22 @@ jobs:
             } else {
               await github.rest.issues.createComment({
                 owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body: payload });
+            }
+            // 再贴一份到票面（#128）上：本仓库的约定是「裁决跟着票走」，
+            // 而这些数字是这条路的**结论**，不是某次运行的副产品。
+            // 找不到票、贴不上，都不算失败——PR 上那一条才是主的那一份。
+            try {
+              const { data: issueComments } = await github.rest.issues.listComments({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number: 128 });
+              const onIssue = issueComments.find(c => c.body && c.body.includes(marker));
+              const issuePayload = `${marker}\n## Windows 真机上的 AAC spike（自动贴出，每次跑覆盖上一条）\n${body}`;
+              if (onIssue) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner, repo: context.repo.repo, comment_id: onIssue.id, body: issuePayload });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner, repo: context.repo.repo, issue_number: 128, body: issuePayload });
+              }
+            } catch (e) {
+              core.info(`贴到 #128 上没成：${e.message}`);
             }
