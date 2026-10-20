@@ -105,7 +105,7 @@ func coverManager(t *testing.T, cdn *cdn, dir string) *Manager {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = m.Close("") })
+	t.Cleanup(func() { closeManager(t, m, dir) })
 	return m
 }
 
