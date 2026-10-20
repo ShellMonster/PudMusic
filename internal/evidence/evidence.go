@@ -1615,6 +1615,9 @@ var Items = []Item{
 			"TestThePagesThatNeedLoginSaySo",
 			// 九处小字的行高是定好的。
 			"TestTheSmallCopyHasAFixedLineHeight",
+			// 本地音乐那一页的「正在扫描…」也走共享出口（那一页的加载态在画面
+			// 上抓不住——扫硬盘一帧就完事——所以是代码那一层钉的）。
+			"TestTheLocalMusicLoadingComesFromTheSharedDrawer",
 			// 联想浮层里命中的那几个字被标出来。
 			"TestTheSuggestTermsShowWhichCharsWereHit",
 		},

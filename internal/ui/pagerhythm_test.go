@@ -221,7 +221,16 @@ func runHeight(img *image.RGBA, area image.Rectangle, lo, hi, x0, x1 int) int {
 func TestEveryPageHasTheSameHorizontalMargin(t *testing.T) {
 	sideW := app.DefaultSideMenuWidth
 	area := contentArea(sideW)
-	want := int(sideW) + pagePadX
+	// ⚠️ **期望值写的是字面的 20，不是 `pagePadX`**：用被测的同一个常量算期望值
+	// 的话，把 `pagePadX` 改成 24 这一条照样绿——「取 20」这个决定就没有护栏
+	// （票 #138 的评审用 `go test -overlay` 验过：改掉常量测试仍然 ok）。
+	// 下面那一句把那个数本身也钉住。
+	const wantPad = 20
+	want := int(sideW) + wantPad
+	if pagePadX != wantPad {
+		t.Errorf("pagePadX = %d，want %d——七页的横向页边距取的是 20（理由见"+
+			" pagerhythm.go 顶上那一段）", pagePadX, wantPad)
+	}
 
 	for _, page := range []struct {
 		name string
@@ -247,7 +256,7 @@ func TestEveryPageHasTheSameHorizontalMargin(t *testing.T) {
 			}
 			if got < want-2 || got > want+2 {
 				t.Errorf("%s 的内容从 x=%d 开始，want %d（侧栏 %d + 页边距 %d）——"+
-					"七页的横向内边距必须是同一个数", page.name, got, want, int(sideW), pagePadX)
+					"七页的横向内边距必须是同一个数", page.name, got, want, int(sideW), wantPad)
 			}
 		})
 	}
@@ -263,7 +272,7 @@ func TestEveryPageHasTheSameHorizontalMargin(t *testing.T) {
 		}
 		if got < want-2 || got > want+2 {
 			t.Errorf("收藏夹的内容从 x=%d 开始，want %d（侧栏 %d + 页边距 %d）——"+
-				"七页的横向内边距必须是同一个数", got, want, int(sideW), pagePadX)
+				"七页的横向内边距必须是同一个数", got, want, int(sideW), wantPad)
 		}
 	})
 }
@@ -744,15 +753,27 @@ func TestTheSearchPageShowsTheCurrentKeyword(t *testing.T) {
 			s.searchDraft, typed)
 	}
 
-	// 框空着的时候**要**写：用户把字清干净了、切走又切回来，框里就该是这一页
-	// 正在显示的那批歌的关键词——否则框是空的而下面有结果，还是对不上。
-	s.searchDraft = ""
-	s.navigate(homePath)
+	// ④ 🔴 **框被清空的时候不许弹回来**（票 #138 的评审抓出来的那一条）。
+	//
+	// 判据里多一条「框空着也写」的话，用户**还在这一页、正在删字**的时候就撞上
+	// 了：他把框里的字删干净 → 那一帧草稿是空串 → 关键词被立刻写回去 → 框**清
+	// 不掉**（自己弹回来了），而他接着敲的字被**粘在旧词后面**（「林周杰伦」，
+	// 回车就按这个搜）。
+	//
+	// 删着改是更常见的做法（实测：全选 + 直接重打能绕过去，而删着改绕不过去）。
+	tt.Click("搜索歌名或 UP 主")
+	tt.Key(mygoui.Cmd, mygoui.KeyA) // 全选
+	tt.Key(0, mygoui.KeyBackspace)  // 删掉
 	tt.Frame()
-	s.navigate(searchPath + "?" + searchQuery + "=" + "周杰伦")
+	if s.searchDraft != "" {
+		t.Errorf("把框里的字删干净之后，框里又变回 %q——框清不掉，而用户接着敲的"+
+			"字会被粘在旧词后面", s.searchDraft)
+	}
+	// 接着敲的那个字**只**是他敲的那个。
+	tt.Type("林")
 	tt.Frame()
-	if s.searchDraft != "周杰伦" {
-		t.Errorf("框空着的时候切回这一页，框里是 %q，want「周杰伦」", s.searchDraft)
+	if s.searchDraft != "林" {
+		t.Errorf("删干净之后接着敲「林」，框里是 %q，want「林」", s.searchDraft)
 	}
 }
 
@@ -1083,4 +1104,100 @@ func TestRenderPageRhythmShots(t *testing.T) {
 			save(t, dir, "61-收藏夹-"+name+".png", tt2)
 		})
 	}
+}
+
+// TestTheLocalMusicLoadingComesFromTheSharedDrawer 钉住「本地音乐那一页的「正在
+// 扫描…」也走共享出口」。
+//
+// # 为什么这一条是代码那一层的，不是画面那一层
+//
+// 那一页扫的是**硬盘**不是网络，而扫一个空目录**一帧之内就完事**——真机上的
+// 加载态也是一闪而过（库大了才看得见）。所以画面那一层抓不住它（第一帧画出来
+// 的时候它可能已经扫完了）。
+//
+// 所以这一条钉的是**代码**：那一行字必须由 `drawEmpty` 画（和这一页的「没有
+// 结果」是同一个出口），而且它必须用 `loadingState` 那一档（**不是**一个空状态
+// ——「还没好」和「没有」是两件事，票 #138 的两票边界就在这个标志上）。
+func TestTheLocalMusicLoadingComesFromTheSharedDrawer(t *testing.T) {
+	if !statementHasCall(t, "localmusic.go", "正在扫描…", "drawEmpty") {
+		t.Errorf("本地音乐那一页的「正在扫描…」不是由 `drawEmpty` 画的——" +
+			"「加载中」和「没有结果」必须走同一个出口")
+	}
+	if !statementHasCall(t, "localmusic.go", "正在扫描…", "loadingState") {
+		t.Errorf("本地音乐那一页的「正在扫描…」没有用 `loadingState` 那一档——" +
+			"「还没好」和「没有」是两件事")
+	}
+	// 同一页的「没有结果」也走那一个出口（这一条是「同一个出口」那一半）。
+	if !statementHasCall(t, "localmusic.go", "local:empty", "drawEmpty") {
+		t.Errorf("本地音乐那一页的「没有结果」不是由 `drawEmpty` 画的——" +
+			"「加载中」和「没有结果」必须走同一个出口")
+	}
+}
+
+// statementHasCall 报那个文件里「提到 key 的那一句」有没有调 funcName。
+//
+// 判据是**一句**（一个 `ExprStmt`）：本地音乐那一页的「正在扫描…」和它的
+// 「没有结果」各自是一句，两句都调 `drawEmpty` 才叫「同一个出口」。
+func statementHasCall(t *testing.T, file, key, funcName string) bool {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, file, nil, 0)
+	if err != nil {
+		t.Fatalf("解析 %s 失败：%v", file, err)
+	}
+	found := false
+	ast.Inspect(f, func(n ast.Node) bool {
+		stmt, ok := n.(*ast.ExprStmt)
+		if !ok {
+			return true
+		}
+		hasKey, hasCall := false, false
+		ast.Inspect(stmt, func(m ast.Node) bool {
+			call, ok := m.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if callName(call) == funcName {
+				hasCall = true
+			}
+			for _, arg := range call.Args {
+				if mentionsKey(arg, key) {
+					hasKey = true
+				}
+			}
+			return true
+		})
+		if hasKey && hasCall {
+			found = true
+		}
+		return true
+	})
+	return found
+}
+
+// callName 是这一次调用调的是谁（`drawEmpty` / `ui.Text` 都认）。
+func callName(call *ast.CallExpr) string {
+	switch fn := call.Fun.(type) {
+	case *ast.Ident:
+		return fn.Name
+	case *ast.SelectorExpr:
+		return fn.Sel.Name
+	}
+	return ""
+}
+
+// mentionsKey 报这个表达式里有没有那个字（字符串字面量）。
+//
+// ⚠️ **往里找**：本地音乐那一页的「正在扫描…」是 `loadingState("正在扫描…")` 的
+// 参数，而 `loadingState(...)` 本身是一个调用——只看最外层那一层的参数就找不到它。
+func mentionsKey(e ast.Expr, key string) bool {
+	found := false
+	ast.Inspect(e, func(n ast.Node) bool {
+		lit, ok := n.(*ast.BasicLit)
+		if ok && lit.Kind == token.STRING && strings.Trim(lit.Value, `"`) == key {
+			found = true
+		}
+		return true
+	})
+	return found
 }
