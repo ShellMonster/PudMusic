@@ -851,7 +851,7 @@ func TestSwitchingSongsLeavesNothingOfTheLastOne(t *testing.T) {
 // 「恢复」可言——而那一条会绿得像模像样。
 func TestTheSongBeforeTheOneYouGoBackTo(t *testing.T) {
 	s, tt := lyricShell(t)
-	s.app.MountLyrics(lyrics.NewCache(t.TempDir()))
+	s.app.MountLyrics(lyrics.NewCache(writableTempDir(t, "lyrics")))
 	putLyrics(s, lyricsOfN(20), "")
 	settleLyrics(t, s, tt)
 	s.app.SetLyricsOffset(app.LyricsOffsetStepMS * 4) // +200ms
