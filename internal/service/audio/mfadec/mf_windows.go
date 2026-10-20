@@ -327,6 +327,9 @@ func (t *comThread) do(fn func()) {
 	<-done
 }
 
+// workCount 是这个线程一共做了多少件事（诊断用）。
+func (t *comThread) workCount() int64 { return t.works.Load() }
+
 // close 把那条线程收掉。
 func (t *comThread) close() {
 	close(t.quit)

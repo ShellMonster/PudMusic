@@ -302,6 +302,9 @@ func (c *Codec) CallerAllocatesOutput() bool { return c.callerAllocatesOutput }
 // 见 `mf_windows.go` 里 `comThread` 那一节的说明。
 func (c *Codec) ThreadSwitches() int64 { return c.th.switches.Load() }
 
+// Works 是那条 COM 线程一共做了多少件事（诊断用）。
+func (c *Codec) Works() int64 { return c.th.workCount() }
+
 // Feed 喂一帧 AAC，返回这一次解出来的 PCM（16 位定点、交织）。
 //
 // 返回空切片是**正常**的：MFT 会攒着，某一帧喂进去不一定马上有输出。
@@ -361,6 +364,13 @@ func (c *Codec) makeSample(frame []byte) (uintptr, uintptr, error) {
 	if hr < 0 {
 		release(buf)
 		return 0, 0, hresultError("IMFMediaBuffer::Lock", hr)
+	}
+	// 缓冲是我们自己按 len(frame) 要来的，理论上装得下——但**万一装不下**，
+	// 往里 copy 就是越界写（踩的是 MF 的堆）。
+	if uint32(len(frame)) > maxLen {
+		comCall(buf, vtblBufferUnlock)
+		release(buf)
+		return 0, 0, fmt.Errorf("mfadec: 缓冲只有 %d 字节，装不下 %d 字节的一帧", maxLen, len(frame))
 	}
 	copy(unsafe.Slice(p, len(frame)), frame)
 	comCall(buf, vtblBufferUnlock)

@@ -352,6 +352,7 @@ func TestSpikeTheCOMApartmentSurvivesLoad(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, workers)
 	switches := make(chan int64, workers)
+	workCounts := make(chan int64, workers)
 	for w := range workers {
 		wg.Add(1)
 		go func(w int) {
@@ -361,7 +362,7 @@ func TestSpikeTheCOMApartmentSurvivesLoad(t *testing.T) {
 				errs <- err
 				return
 			}
-			var localSwitches int64
+			var localSwitches, localWorks int64
 			for range rounds {
 				codec, err := OpenAACCodec(src.rate, src.chans, src.asc, src.payloadType)
 				if err != nil {
@@ -384,18 +385,23 @@ func TestSpikeTheCOMApartmentSurvivesLoad(t *testing.T) {
 				codec.Close()
 			}
 			switches <- localSwitches
+			workCounts <- localWorks
 		}(w)
 	}
 	wg.Wait()
 	close(errs)
 	close(switches)
+	close(workCounts)
 
 	for err := range errs {
 		t.Errorf("负载下的解码：%v", err)
 	}
-	var totalSwitches int64
+	var totalSwitches, totalWorks int64
 	for n := range switches {
 		totalSwitches += n
+	}
+	for n := range workCounts {
+		totalWorks += n
 	}
 	apartment := comApartmentErrors.Load() - before
 
@@ -403,6 +409,7 @@ func TestSpikeTheCOMApartmentSurvivesLoad(t *testing.T) {
 		workers, rounds, workers*rounds, burners)
 	t.Logf("COM 线程被换掉的次数：%d", totalSwitches)
 	t.Logf("CO_E_NOTINITIALIZED / RPC_E_CHANGED_MODE 的次数：%d", apartment)
+	t.Logf("COM 线程一共做了 %d 件事", totalWorks)
 	t.Logf("Go 的线程数：%d，逻辑核：%d", runtime.NumGoroutine(), runtime.NumCPU())
 
 	if totalSwitches != 0 {
@@ -493,9 +500,9 @@ func decodeAll(t *testing.T, c *Codec, src *frameSource) (int64, []float32, time
 		if err != nil {
 			t.Fatalf("第 %d 帧: %v", frames, err)
 		}
-		if len(out) == 0 {
-			t.Fatalf("第 %d 帧: 没有错、也没有样本——这正是缓冲布局写错了的样子", frames)
-		}
+		// ⚠️ **某一帧没有输出是正常的**：MFT 会自己攒着，某一帧喂进去不一定
+		// 马上有 PCM 出来。真出了问题（解不出任何东西）由下面「一帧都没解
+		// 出来」那条兜住——不是由这一帧的空输出兜住。
 		for i := 0; i+1 < len(out); i += 2 {
 			all = append(all, float32(int16(binary.LittleEndian.Uint16(out[i:i+2])))/32768.0)
 		}
@@ -525,9 +532,16 @@ func swapChannels(pcm []float32, chans int) []float32 {
 // 比的是「错位」而不是「解码得对不对」。
 //
 // 搜索范围是 ±4096 个样本（约 ±93 毫秒）—— priming 的差是几十个样本量级。
+//
+// ⚠️ **搜索时只看前面一小段**：全量比对 8192 个偏移 × 35 万个样本 =
+// 几十亿次运算，CI 上会跑到超时。所以先用一小段（`probe`）找出最佳偏移，
+// 再在那个偏移上比全量——**判据仍然是全量的最大逐样本差**。
 func bestAlignment(a, b []float32) (offset int, worst float64) {
-	const span = 4096
-	worst = math.Inf(1)
+	const (
+		span  = 4096
+		probe = 8192
+	)
+	best := math.Inf(1)
 	for off := -span; off <= span; off++ {
 		if off >= len(a) || -off >= len(b) {
 			continue
@@ -535,16 +549,39 @@ func bestAlignment(a, b []float32) (offset int, worst float64) {
 		var m float64
 		switch {
 		case off >= 0:
-			m = maxAbsDiffFrom(a[off:], b)
+			m = meanAbsDiffFrom(a[off:min(off+probe, len(a))], b[:min(probe, len(b))])
 		default:
-			m = maxAbsDiffFrom(a, b[-off:])
+			m = meanAbsDiffFrom(a[:min(probe, len(a))], b[-off:min(-off+probe, len(b))])
 		}
-		if m < worst {
-			worst = m
+		if m < best {
+			best = m
 			offset = off
 		}
 	}
+	// 在最佳偏移上比全量。
+	switch {
+	case offset >= 0:
+		worst = maxAbsDiffFrom(a[offset:], b)
+	default:
+		worst = maxAbsDiffFrom(a, b[-offset:])
+	}
 	return offset, worst
+}
+
+// meanAbsDiffFrom 两条 PCM 的平均逐样本差（长度不等时只比公共的那一段）。
+//
+// 找偏移用它而不是最大差：平均差是**平滑**的，而最大差会被一两个尖峰
+// 带着跑，偏移会选得抖。
+func meanAbsDiffFrom(a, b []float32) float64 {
+	n := min(len(a), len(b))
+	if n == 0 {
+		return math.Inf(1)
+	}
+	var sum float64
+	for i := range n {
+		sum += math.Abs(float64(a[i] - b[i]))
+	}
+	return sum / float64(n)
 }
 
 // maxAbsDiffFrom 两条 PCM 的最大逐样本差（长度不等时只比公共的那一段）。
