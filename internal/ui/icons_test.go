@@ -531,10 +531,26 @@ func TestTheLikeKeyDrawsItsOwnIcon(t *testing.T) {
 	if err := e.tt.Click("赞"); err != nil {
 		t.Fatalf("点不动赞：%v", err)
 	}
-	waitFrames(t, e.tt, "赞变亮", func() bool {
-		_, ok := e.tt.Find("已赞")
-		return ok
-	})
+	// ⚠️ **等的是「应用里那个状态」，画面要**再画一帧**才收进去。**
+	//
+	// 为什么不接着用 `waitFrames` 等画面：
+	//
+	//   - 那个 10 秒是**墙钟**，而它每一轮都在**画一帧**——画一帧是**整个窗口**
+	//     重画一遍，满载的机器上它可能就要好几秒（同一时刻别的测试的 goroutine
+	//     正在抢 CPU）。于是十秒的预算全花在重画上，条件还没来得及成立。
+	//   - 赞是**乐观**的（`App.SetLike`：点下去那一帧本地就改了），而那一趟写
+	//     失败会**改回去**（`rollbackLike`）。慢机器上那一趟写可能超时——于是
+	//     「亮过」的那一小段在**检查之前**就没了：等画面等的是一个**已经被回滚
+	//     掉**的状态，报出来的却是「赞没变亮」——症状离真因隔了三层。
+	//
+	// 这一条要等的东西本来就是**应用里的状态**（`waitFor` 正是等这个的，见
+	// shelltest_test.go 的「两种等法」），画面那一帧单独画。
+	e.tt.Frame()
+	waitFor(t, "赞变亮了", func() bool { return e.s.app.LikeState().Liked })
+	e.tt.Frame()
+	if _, ok := e.tt.Find("已赞"); !ok {
+		t.Fatalf("赞变亮了，界面上却还是「赞」：%q", e.tt.Texts())
+	}
 	filled := glyphShape(e.tt, "已赞")
 	if filled == "" {
 		t.Fatalf("已赞那一枚上没画东西：%q", e.tt.Texts())

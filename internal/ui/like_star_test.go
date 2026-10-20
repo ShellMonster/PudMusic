@@ -42,7 +42,11 @@ func TestClickingTheStarLikesTheSong(t *testing.T) {
 		t.Fatalf("点不了星标：%v（文字：%q）", err, e.tt.Texts())
 	}
 
-	waitFrames(t, e.tt, "赞发出去了", func() bool { return e.f.likePostsCount() > 0 })
+	// ⚠️ **等的是「那一趟发出去没有」这个状态**，不是画面——所以用 `waitFor`
+	// （见 shelltest_test.go 的「两种等法」）。`waitFrames` 也能等，但那个 10 秒
+	// 是**墙钟**而它每一轮都在**画一帧**（整个窗口重画一遍）：满载的机器上十秒的
+	// 预算全花在重画上。
+	waitFor(t, "赞发出去了", func() bool { return e.f.likePostsCount() > 0 })
 	if got := e.f.lastLikeUp(); got != "1" {
 		t.Errorf("发出去的 up 是 %q，want 1（1 是赞，2 是取消赞）", got)
 	}
