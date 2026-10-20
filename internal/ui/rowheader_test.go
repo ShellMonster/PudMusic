@@ -37,6 +37,37 @@ func historyHoverShell(t *testing.T) (*ui.Tester, *Shell) {
 	return tt, s
 }
 
+// TestTheLibraryRowsAreTheSameHeightNoMatterHowLongTheTitle 钉住「稍后再看 /
+// 历史记录」那两页的行高是**定死的一个值**。
+//
+// 理由和 `widgets/list` 的 `TestEveryRowIsTheSameHeightNoMatterHowLongTheTitle` 是
+// 同一个：上游那一行的歌名是 `truncate`（**一行**），折成两行的话整张列表的行高就
+// 跟着歌名长短跳，一屏能看几首歌会变来变去。
+//
+// ⚠️ **这两页的行不是 `widgets/list` 画的**（它们多两列），所以那边钉过的那一条在
+// 这边不成立——得自己再钉一遍。
+func TestTheLibraryRowsAreTheSameHeightNoMatterHowLongTheTitle(t *testing.T) {
+	tt, s := laterHoverShell(t)
+
+	row, ok := tt.Find(libTitles[0])
+	if !ok {
+		t.Fatalf("画面上找不到第一行，文字有 %q", tt.Texts())
+	}
+	want := float32(metricsOf(s.laterPage.rows.Layout()).height)
+	if row.H != want {
+		t.Errorf("稍后再看那一行高 %v，want %v（行高是定死的一个值）", row.H, want)
+	}
+
+	// 相邻两行隔的也是行高：歌名折行不能把这一行顶高。
+	next, ok := tt.Find(libTitles[1])
+	if !ok {
+		t.Fatalf("画面上找不到第二行，文字有 %q", tt.Texts())
+	}
+	if got := next.Y - row.Y; got < want-0.5 || got > want+0.5 {
+		t.Errorf("第一行到第二行隔了 %v，want %v（行高是定死的一个值）", got, want)
+	}
+}
+
 // TestTheLaterHeaderSaysItsOwnColumns 钉住稍后再看那一行的表头列。
 //
 // 它比 `widgets/list` 那一族多两列：播放量 / 加入时间（上游是「投稿时间」，而这一页
@@ -242,8 +273,9 @@ func uiShows(tt *ui.Tester, s string) bool {
 // TestTheSearchUserTabHeaderHasNoClock 钉住「用户」那一档的表头**没有「时长」**。
 //
 // 那一档的行是「序号 / 头像 / 昵称 / 个性签名」（`searchUserMusic` 的注释），
-// `list.Music.Duration` 是零值，于是行里那一列**根本不画**——表头上还写着「时长」的
-// 的话，用户读到的是一列空的表头。
+// `list.Music.Duration` 是零值，于是行里那一列**没有字**——**位置是留着的**
+// （`widgets/list` 的 `viewCard` 无论有没有时长都留着那么宽，因为行尾那枚「⋯」的
+// 位置跟着这一列走）——但表头上还写着「时长」的话，用户读到的是一列空的表头。
 //
 // ⚠️ 断的是**规格里有没有那一列**而不是画面上有没有那个字：`CardHeaderSpec` 摆的是
 // 列定义，画面上的字是它画出来的，两者对不上这件事只有前者能说清。

@@ -182,3 +182,13 @@ func (s *SwitchView) ScrollTo(row int, align ui.Align) {
 	}
 	s.list.ScrollTo(row, align)
 }
+
+// ScrollOffset 是这一屏滚过了多少像素。回顶按钮判断「滚过 400 像素没有」用它。
+//
+// ⚠️ **认的是正在画的那一份**：用户看得见的是它，别的档停在哪儿与它无关。
+func (s *SwitchView) ScrollOffset() float32 {
+	if s.view == ViewCard {
+		return s.grid.ScrollOffset()
+	}
+	return s.list.ScrollOffset()
+}

@@ -195,6 +195,10 @@ type listMetrics struct {
 	viewedAt        float32
 	titleLines      int
 	titleSize       float32
+	// height 是这一行的高。**它是定死的**（封面 + 上下内边距），和
+	// `widgets/list` 的 `listRowHeight` 同一个道理：歌名只占一行，这一行由封面
+	// 撑着，行高写死是为了让这个数**保证**是它，而不是「碰巧量出来是它」。
+	height float32
 }
 
 // metricsOf 是「这一档该用哪一份尺寸」。
@@ -207,10 +211,14 @@ func metricsOf(v list.View) listMetrics {
 			padY: listPadY, padX: listPadX, gap: rowGap, cover: coverSide,
 			index: colIndex, count: colCount, date: colDate, clock: colClock,
 			progress: colProgress, viewedAt: colViewedAt,
-			titleLines: titleLines, titleSize: 14,
+			// ⚠️ **歌名一行**（上游那一行是 `truncate`）：折行的话整张列表的行高
+			// 就跟着歌名长短跳（理由见 `widgets/list/card.go` 的文件头）。
+			titleLines: listTitleLines, titleSize: 14,
+			// 行高：封面 48 + 上下内边距 8×2。
+			height: coverSide + 2*listPadY,
 		}
 	}
-	// 紧凑：封面 48 → 32、上下内边距 8 → 4、间距 8 → 6、歌名两行 → 一行。
+	// 紧凑：封面 48 → 32、上下内边距 8 → 4、间距 8 → 6。
 	// 几个数字比 `widgets/list` 的紧凑那一份略宽一点点——这两页右边多两列，收得太
 	// 狠的话歌名只剩几十像素（实测 900 宽的页面区下）。
 	return listMetrics{
@@ -219,6 +227,8 @@ func metricsOf(v list.View) listMetrics {
 		count: compactColCount, date: compactColDate, clock: compactColClock,
 		progress: compactColProgress, viewedAt: compactColViewedAt,
 		titleLines: 1, titleSize: 13,
+		// 行高：封面 32 + 上下内边距 4×2。
+		height: compactCoverSide + 2*compactListPadY,
 	}
 }
 
@@ -278,8 +288,10 @@ func libraryRowFace(t *ui.Theme, selected, playing bool) rowFace {
 //     `Children` 之前问」那一段）；
 //   - play 是按封面上那个三角做的事。
 //
-// ⚠️ 不给歌名那块设固定高度：它折到第二行时整张列表的行高就不一样了，那正是变高行
-// 存在的理由（见 `widgets/list/card.go` 顶上那段）。
+// ⚠️ **歌名只占一行**（`mt.titleLines` = 1，上游那一行是 `truncate`）：这一段只
+// 画行首那几块，行高由**外面那一行**定死（`mt.height`）——所以这里不用管折行，
+// 而折行本来也不该发生（折了的话整张列表的行高就跟着歌名长短跳，理由见
+// `widgets/list/card.go` 的文件头）。
 func viewLibraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, cover *imgcache.Cache,
 	mt listMetrics, face rowFace, onRow bool, play func()) {
 	// 序号；正在放的那一行换成一段跳动的波形（上游 `music-list-item`）。
