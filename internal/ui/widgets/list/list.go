@@ -153,6 +153,10 @@ type List struct {
 	empty    string
 	emptySet bool
 
+	// emptyView 是「一行都没有时那一格」的画法（见 SetEmptyView）。nil 是没装，
+	// 那一格走 emptyText() 那句话。
+	emptyView func(c *ui.Context)
+
 	// view 是这一份歌此刻摆成什么样，见 SetView。
 	//
 	// 🔴 **只有列表和紧凑两档真的走这里**：网格那一档不走 `List`，走
@@ -208,6 +212,20 @@ func (l *List) SetFooter(fn func(c *ui.Context)) { l.footer = fn }
 //
 // ⚠️ 只能由界面线程调，同 SetSongs。
 func (l *List) SetEmpty(text string) { l.empty, l.emptySet = text, true }
+
+// SetEmptyView 换掉「一行都没有时**那一格**」的画法。
+//
+// ⚠️ **它和 `SetEmpty` 不是一回事**：`SetEmpty` 换的是那一格里**那句话**
+// （13px 的一行淡灰字），而这个换的是**整格**——外面画成什么样就是什么样。
+//
+// 为什么要有这个口子：应用层要「加载中」那一格和「没有结果」那一格是**同一个
+// 形状**（居中、15px、同一套留白），而那一格住在应用层（`internal/ui`），这一层
+// 够不着它的画法——所以由外面把画法递进来。
+//
+// ⚠️ **传 nil 是退回那句话**（`SetEmpty` 那一句，或默认那句）。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (l *List) SetEmptyView(fn func(c *ui.Context)) { l.emptyView = fn }
 
 // SetView 换这一份歌的摆法（设置里的「数据显示样式」）。
 //
@@ -389,6 +407,13 @@ func (l *List) View(c *ui.Context) {
 		// 一句都不说的时候连这一支都不建（见 SetEmpty）。
 		Children(func() {
 			if len(l.songs) == 0 {
+				// ⚠️ **先看外面递进来的画法**（`SetEmptyView`），没有才退回那句
+				// 13px 的话——两者的形状差得很远（一个是居中带插画位的一格，一个是
+				// 缩在左上角的一行字）。
+				if l.emptyView != nil {
+					l.emptyView(c)
+					return
+				}
 				if s := l.emptyText(); s != "" {
 					ui.Text(c, s).FontSize(13).
 						TextColor(c.Theme().TextMuted).Padding(16)

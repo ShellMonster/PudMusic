@@ -238,9 +238,13 @@ func (s *Shell) newCollectionPage(ref app.CollectionRef) *collectionPage {
 func (s *Shell) newCollectionList(p *collectionPage) *list.PagedList {
 	acts := s.collectionActions()
 	ref, sort, keyword, media := p.ref, p.sort, p.keyword, &p.media
-	return list.NewPaged(s.images, acts, func(ctx context.Context, pageNo int) (list.Page, error) {
+	l := list.NewPaged(s.images, acts, func(ctx context.Context, pageNo int) (list.Page, error) {
 		return s.fetchCollectionPage(ctx, ref, sort, keyword, pageNo, media)
 	})
+	// ⚠️ **「正在加载」那一格由外面递进去**（票 #138）：分页列表自己那一句是
+	// 13px 淡灰缩在列表左上角，而这一页的「没有收藏夹」是居中 15pt 两行。
+	l.SetEmptyView(loadingCell("正在加载…"))
+	return l
 }
 
 // collectionActions 是这一页列表的操作，比通用那一份多换了「下载」那一项。
@@ -355,7 +359,13 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 	s.flushCollectionNotice(p)
 	info := s.app.Collection(ref)
 
-	ui.Column(c).Key("page:collection:" + ref.Key()).Grow(1).Children(func() {
+	// ⚠️ **横向那一格在**根**上，不在下面那几块里**：这一页原来是头图区、操作条
+	// 各自留 24，而下面那个列表**一点没留**——于是表头和列表行比头图区的标题还
+	// 靠左 24 像素，同一页里两条左缘对不齐（上游那边列表是在 `px-4` 里的，见
+	// `pages/video-collection/favorites/index.tsx:436`）。
+	//
+	// 收到根上之后，这一页的每一样东西都从同一条左缘开始（票 #138）。
+	ui.Column(c).Key("page:collection:"+ref.Key()).Grow(1).Padding(0, pagePadX).Children(func() {
 		s.viewCollectionHeader(c, p)
 		s.viewCollectionOps(c, p)
 
@@ -381,6 +391,16 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 			// 同一句话。
 			s.viewEmpty(c, "collection:no-results", noSearchResults)
 		default:
+			// ⚠️ **第一页在途时，这一格由列表自己画**（画法是外面递进去的，
+			// 见 `newCollectionList` 和 `loadingCell`）：它和「没有收藏夹」那一格
+			// 是同一个出口（票 #138）。
+			//
+			// ⚠️ **首屏只说一次「正在加载…」**：头图区那个大标题原来写的是
+			// 「正在加载…」（22px 粗体），下面列表又画一句 13pt 淡灰的——同一屏
+			// 两个加载提示，相隔一百多像素。现在头图区写的是**这一类容器的名字**
+			// （「收藏夹」/「视频合集」/「视频系列」，见 `collectionTitleText`），
+			// 加载那句话只由内容区这一格说。
+			//
 			// 🔴 设置里的「数据显示样式」在这一帧生效（理由同搜索页那一处）。
 			//
 			// ⚠️ 它**换不掉**多选接线（`attachSelection` 装的那一份挂在两份控件上，
@@ -456,19 +476,22 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 	t := c.Theme()
 	info := s.app.Collection(p.ref)
 
-	ui.Row(c).Key("collection-header").Gap(16).Padding(20, 24, 8).
+	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
+	ui.Row(c).Key("collection-header").Gap(16).Padding(20, 0, 8).
 		Children(func() {
 			// ① 封面。空地址时 imgcache 画空框（没给封面的收藏夹真的有）。
 			imgcache.View(c, s.images, info.Cover, collectionCoverW, collectionCoverH)
 
 			ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(6).Children(func() {
-				ui.Text(c, collectionTitleText(info)).FontSize(22).Bold().
+				// ⚠️ **这个标题是 30（`collectionTitleSize`），不是页标题那个数**：
+				// 头图区的大标题抄上游 `text-3xl`，见 pagerhythm.go 那段。
+				ui.Text(c, collectionTitleText(p.ref.Type, info)).FontSize(collectionTitleSize).Bold().
 					MaxLines(2).Ellipsis("…")
 
 				// ② 简介。Biu 是 `line-clamp-1`，有才画。
 				if info.Intro != "" {
-					ui.Text(c, info.Intro).FontSize(13).TextColor(t.TextMuted).
-						MaxLines(1).Ellipsis("…")
+					ui.Text(c, info.Intro).FontSize(13).LineHeight(smallCopyLeading).
+						TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 				}
 
 				// ③ 类型 + 条目数。Biu 写的是「{公开|私密}收藏夹 • N 条视频」
@@ -476,14 +499,15 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 				// 上游连音频也是这么写的，这里照抄。
 				ui.Text(c, collectionKindText(p.ref.Type, info.Private)+" • "+
 					strconv.Itoa(info.MediaCount)+" 条视频").
-					FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+					FontSize(12).LineHeight(smallCopyLeading).
+					TextColor(t.TextMuted).MaxLines(1)
 
 				// ④ 创建者。Biu 是一张头像加昵称；这一票没接头像地址
 				//（`bili.CollectionInfo` 有 `Owner.Face`，界面先不画——
 				// 一行字能说清是谁，一个空方块不能）。
 				if info.OwnerName != "" {
-					ui.Text(c, info.OwnerName).FontSize(12).TextColor(t.TextMuted).
-						MaxLines(1).Ellipsis("…")
+					ui.Text(c, info.OwnerName).FontSize(12).LineHeight(smallCopyLeading).
+						TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 				}
 
 				// ⑤ 「按歌名找 + 排序」，靠右。
@@ -500,7 +524,7 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 				//
 				// 靠右是 `AlignSelf(Stretch)` + `Justify(End)` 做的：这一行铺满
 				// 那一列，内容被推到右缘，而那一列的右缘是**页边距**
-				// （900 减 24 = 876）——和下面那一排的右缘是同一条线。
+				// （900 减 `pagePadX` 20 = 880）——和下面那一排的右缘是同一条线。
 				// ⚠️ **AlignSelf(Stretch) 不能省**：这一列是 `AlignItems(Start)`
 				// 的（那几行字要靠左），而 `Grow(1)` 在一列里长的是**竖着**的
 				// 方向——不写这一句，这一行就按内容宽摆着，排序下拉落在整页的
@@ -521,12 +545,17 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 
 // collectionTitleText 是头图区那个大标题。
 //
-// ⚠️ 还在拉的时候写「正在加载…」而不是空串：空标题会在那儿留一个空的 h1，
-// 用户会以为这个收藏夹真的没名字。
-func collectionTitleText(info app.CollectionInfo) string {
+// ⚠️ **还在拉的时候写「收藏夹 / 视频合集 / 视频系列」，不写「正在加载…」**：
+// 这一页的加载态由**内容区那一格**说（见 `viewCollection` 里加载那一支），而
+// 头图区再说一遍就是首屏**两个「正在加载…」**——一个 30px 粗体、一个 15px
+// 淡灰，相隔一百多像素（那正是这一票要消掉的东西）。
+//
+// 而写类型名也不是留一个空标题：空标题会在那儿留一个空的 h1，用户会以为这个
+// 收藏夹真的没名字。
+func collectionTitleText(typ bili.CollectionType, info app.CollectionInfo) string {
 	switch {
 	case !info.Loaded:
-		return "正在加载…"
+		return typ.Label()
 	case info.Title == "":
 		return "（没名字的收藏夹）"
 	}
@@ -576,7 +605,8 @@ func collectionKindText(typ bili.CollectionType, private bool) string {
 func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 	t := c.Theme()
 
-	ui.Row(c).Key("collection-ops").Center().Gap(8).Padding(0, 24, 12).
+	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
+	ui.Row(c).Key("collection-ops").Center().Gap(8).Padding(0, 0, 12).
 		Children(func() {
 			if ui.PrimaryButton(c, "播放全部").Clicked() {
 				s.playWholeCollection(p)
@@ -700,11 +730,11 @@ func (s *Shell) collectionMoreAction(p *collectionPage, item collectionMenuItem)
 		// 按错一次就是几百兆白下。
 		s.askConfirm(p, confirmDownload, p.list.List().Len(), false)
 	case "clear-invalid":
-		s.askConfirmAbout(p, confirmClearInvalid, 0, false, collectionTitleText(s.app.Collection(p.ref)))
+		s.askConfirmAbout(p, confirmClearInvalid, 0, false, collectionTitleText(p.ref.Type, s.app.Collection(p.ref)))
 	case "delete-folder":
-		s.askConfirmAbout(p, confirmDeleteFolder, 0, false, collectionTitleText(s.app.Collection(p.ref)))
+		s.askConfirmAbout(p, confirmDeleteFolder, 0, false, collectionTitleText(p.ref.Type, s.app.Collection(p.ref)))
 	case "forget-folder":
-		s.askConfirmAbout(p, confirmForgetFolder, 0, false, collectionTitleText(s.app.Collection(p.ref)))
+		s.askConfirmAbout(p, confirmForgetFolder, 0, false, collectionTitleText(p.ref.Type, s.app.Collection(p.ref)))
 	default:
 		s.addToast("「" + item.label + "」还没接收藏夹接口")
 	}

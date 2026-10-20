@@ -119,6 +119,12 @@ type PagedList struct {
 	// checkFill 会立刻再拉一次）。用户点末尾那行的「重试」才继续。
 	blocked bool
 
+	// emptyView 是「第一页在途时那一格」的画法（见 SetEmptyView）。nil 是没装，
+	// 那一格退回那句 13px 的「正在加载…」。
+	//
+	// ⚠️ **它只管「第一页在途」这一档**，别的一概不管（见 `syncList`）。
+	emptyView func(c *ui.Context)
+
 	// gen 是代次。每次换查询 +1：在途请求的结果回来时代次对不上就扔掉。
 	// 这是 PLAN 点名要补的「旧查询结果作废」——Biu 只靠组件重建挡着。
 	gen    uint64
@@ -220,6 +226,18 @@ func (p *PagedList) Selected() (Music, bool) { return p.surf.Selected() }
 // SetView 换摆法。**每一帧都要调**：设置随时会变，而忘了调的后果是「改了设置
 // 这一页没变」——正是本票要消灭的那一种。
 func (p *PagedList) SetView(v View) { p.surf.SetView(v) }
+
+// SetEmptyView 换掉「**第一页在途时那一格**」的画法。
+//
+// ⚠️ **它只管这一档**：拉失败了、或者已经有歌了，那一格都不归它管（见
+// `syncList`）。装上它的目的是让「正在加载…」那一格和「没有结果」那一格是
+// **同一个形状**——而后者住在应用层（`internal/ui`），这一层够不着它的画法，
+// 所以由外面把画法递进来。
+//
+// ⚠️ **传 nil 是退回那句 13px 的话**（这一层原本的样子）。
+//
+// ⚠️ 只能由界面线程调。
+func (p *PagedList) SetEmptyView(fn func(c *ui.Context)) { p.emptyView = fn }
 
 // Layout 返回此刻的摆法。测试照它断言「这一页真的换了视图」。
 func (p *PagedList) Layout() View { return p.surf.Layout() }
@@ -333,13 +351,23 @@ func (p *PagedList) syncList() {
 	case len(p.items) == 0 && p.loading:
 		// 一行都还没有：第一页在途。这时候列表里那一句就是它全部的内容，
 		// 页脚先收起来——同一句摆两遍（空状态一句 + 页脚一句）是噪音。
-		p.surf.SetEmpty("正在加载…")
+		//
+		// ⚠️ **外面递了画法就用那一格**（`SetEmptyView`）：应用层要「正在加载」
+		// 那一格和「没有结果」那一格是同一个形状（居中、15px、同一套留白），
+		// 而这一层够不着那个画法。没递就用这一层原本那句 13px 的话。
+		if p.emptyView != nil {
+			p.surf.SetEmptyView(p.emptyView)
+		} else {
+			p.surf.SetEmpty("正在加载…")
+		}
 		p.surf.SetFooter(nil)
 	case len(p.items) == 0 && p.blocked:
 		// 一行都没有还失败了：页面上就留那一个重试按钮，一句话都不多说。
+		p.surf.SetEmptyView(nil)
 		p.surf.SetEmpty("")
 		p.surf.SetFooter(p.footerView)
 	default:
+		p.surf.SetEmptyView(nil)
 		p.surf.SetEmpty("")
 		// 末尾那一行**只在还有下一页（或刚失败要人重试）时才有**（Biu 的
 		// `count = hasMore ? items.length + 1 : items.length`）：拉到底之后它

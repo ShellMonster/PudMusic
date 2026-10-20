@@ -152,14 +152,16 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 			ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
 				ui.Column(c).FillWidth().MaxWidth(settingsContentMaxW).
 					Padding(settingsContentPad).Gap(16).Children(func() {
-					ui.Text(c, "设置").FontSize(22).Bold()
+					ui.Text(c, "设置").FontSize(pageTitleSize).Bold()
 
 					if ro {
 						ui.Text(c, "设置只读：这份设置来自更新的版本，这一版一个字都不会写回去。").
 							FontSize(12).TextColor(t.Danger)
 					}
 
-					ui.Tabs(c, &s.settings.tab, settingsTabNames...)
+					// ⚠️ **主 Tab 用扁平那一种**（`flatTabs`，见 tabs.go）：这一排
+					// 和次级排序那几排不是同一个样子（票 #138）。
+					flatTabs(c, &s.settings.tab, settingsTabNames...)
 
 					ui.Column(c).FillWidth().Gap(18).Children(func() {
 						switch s.settings.tab {

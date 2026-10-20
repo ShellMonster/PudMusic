@@ -1586,4 +1586,40 @@ var Items = []Item{
 			"TestTheCollectionOpsRowStillFitsAtTheMinWindow",
 		},
 	},
+	{
+		// 归「双平台」那一组：这一票动的是**页面的节奏**（边距、标题、Tab、加载态）。
+		//
+		// 🔴 **这一族每一个症状都是静默的**：七页的横向页边距是四种值、页标题是
+		// 两种字号、「加载中」和「没有结果」不是同一个格子——没有一样会报错，
+		// 界面只是「不太对」。所以判据全是**画面上的位置和尺寸**。
+		Category: Platform,
+		// issue 138（#134 的第四单元）那一票：页面节奏与加载态。
+		Spec: "页面节奏：七页的横向页边距是同一个数、页标题是同一个字号（收藏夹那一页的大标题另算，是 30）；主 Tab 与次级排序不是同一个样子；搜索页的输入框里有当前关键词（且切页回来不覆盖用户正在敲的字）；「加载中」和「没有结果」走同一个出口（八个页面统一）；没登录时那一页说「先登录」而不摆空列表；小字的行高是定好的；搜索联想浮层里命中的那几个字被标出来",
+		Tests: []string{
+			// 页边距（七页逐页量内容区最靠左的那一笔）+ 页标题（代码里同一个常量，
+			// 画面上墨迹一样宽）。
+			"TestEveryPageHasTheSameHorizontalMargin",
+			"TestEveryPageTitleUsesTheSharedSize",
+			"TestEveryPageTitleIsTheSameSizeOnScreen",
+			// 收藏夹那一页的大标题：30，而且两行放得下 168 那个封面。
+			"TestTheCollectionTitleIsTheBigOne",
+			// 主 Tab 底下没有那条主色的横条，次级排序底下有。
+			"TestTheMainTabsAndTheSortTabsAreNotTheSame",
+			// 搜索页的输入框里有当前关键词。
+			"TestTheSearchPageShowsTheCurrentKeyword",
+			// 「加载中」走同一个出口：八个页面那一行字是同一个字号；同一页上它和
+			// 「没有结果」是同一个格子（一样高、居中的位置一样）。
+			"TestEveryLoadingStateIsDrawnTheSameWay",
+			"TestTheLoadingStateLooksLikeTheEmptyState",
+			// 没登录时那一页说「先登录」，不摆空列表。
+			"TestThePagesThatNeedLoginSaySo",
+			// 九处小字的行高是定好的。
+			"TestTheSmallCopyHasAFixedLineHeight",
+			// 本地音乐那一页的「正在扫描…」也走共享出口（那一页的加载态在画面
+			// 上抓不住——扫硬盘一帧就完事——所以是代码那一层钉的）。
+			"TestTheLocalMusicLoadingComesFromTheSharedDrawer",
+			// 联想浮层里命中的那几个字被标出来。
+			"TestTheSuggestTermsShowWhichCharsWereHit",
+		},
+	},
 }

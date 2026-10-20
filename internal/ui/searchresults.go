@@ -171,6 +171,10 @@ func (st *searchState) init(s *Shell) {
 	st.fetch, st.client = s.fetchSearchTab, s.app.BiliClient
 	for i := range st.lists {
 		st.lists[i].list = list.NewPaged(s.images, s.searchActions(i), s.searchFetcher(i))
+		// ⚠️ **「正在加载」那一格由外面递进去**（票 #138）：分页列表自己那一句是
+		// 13px 淡灰缩在列表左上角，而这一页的「没有结果」是居中 15pt 两行——
+		// 等的那几秒里那行字和回来之后那一格对不上。
+		st.lists[i].list.SetEmptyView(loadingCell("正在加载…"))
 	}
 }
 

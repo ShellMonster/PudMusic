@@ -195,6 +195,9 @@ func (s *Shell) upSpaceFor(mid int64) *upSpace {
 		func(ctx context.Context, page int) (list.Page, error) {
 			return s.fetchVideos(ctx, mid, page)
 		})
+	// ⚠️ **「正在加载」那一格由外面递进去**（票 #138）：分页列表自己那一句是
+	// 13px 淡灰缩在列表左上角，而「暂无投稿」是居中 15pt 两行。
+	sp.videos.SetEmptyView(loadingCell("正在加载…"))
 	s.upSpaces[mid] = sp
 	return sp
 }

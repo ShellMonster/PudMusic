@@ -93,7 +93,7 @@ func TestParamRoutesMatch(t *testing.T) {
 // 别的页画的是这一页的空状态（routes 表里每一条都带的那句）。
 //
 // ⚠️ 外壳是**登录过的**：它要点侧栏上的每一项，而「我的关注」「稍后再看」
-// 「历史记录」未登录时不摆（`Route.NeedsLogin`）。这一条问的是「菜单项本身
+// 「历史记录」未登录时不摆（`Route.HideInMenuWhenLoggedOut`）。这一条问的是「菜单项本身
 // 通不通」，所以挂着那份登录态，而不是把 login 时的菜单当成七项来数。
 func TestMenuItemsAllSwitch(t *testing.T) {
 	s, tt := newLoggedInShell(t, "7")
@@ -388,7 +388,7 @@ func TestNavigateResetsTheCrash(t *testing.T) {
 // TestBackReturnsToThePreviousPage 验历史能退回去，退回去时提示也不残留。
 //
 // ⚠️ 外壳是**登录过的**：它要点侧栏的「稍后再看」，而那三个入口未登录时不摆
-// （`Route.NeedsLogin`，见 sidebar.go）。这一条要的就是「切到某个具体页面之后
+// （`Route.HideInMenuWhenLoggedOut`，见 sidebar.go）。这一条要的就是「切到某个具体页面之后
 // 退得回去」，所以挂着那份登录态，而不是改点一个别的页面。
 func TestBackReturnsToThePreviousPage(t *testing.T) {
 	s, tt := newLoggedInShell(t, "7")
@@ -438,7 +438,7 @@ func TestRenderShots(t *testing.T) {
 		t.Skip("设 BIU_SHOT_DIR 才会存图")
 	}
 	// ⚠️ **登录过的**：存图那一族要点侧栏的「我的关注」，而那三个入口未登录时
-	// 不摆（`Route.NeedsLogin`）。存出来的图于是是「用户在正常使用」的那一份，
+	// 不摆（`Route.HideInMenuWhenLoggedOut`）。存出来的图于是是「用户在正常使用」的那一份，
 	// 而不是「刚装上、还没扫码」的那一份——后者另有前面几张空状态图。
 	s, tt := newLoggedInShell(t, "7")
 

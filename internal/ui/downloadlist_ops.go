@@ -49,7 +49,7 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 	dir := s.app.DownloadDir()
 
 	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "下载记录").FontSize(22).Bold()
+		ui.Text(c, "下载记录").FontSize(pageTitleSize).Bold()
 
 		// 路径。空串是「还没有下载目录」（设置里没选、系统目录也没拿到，
 		// 见 `app.Downloads.FallbackDir`）——那时候要说出来，不能画一段空白
@@ -60,8 +60,8 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 		}
 		// 超长被截掉的时候完整路径在 tooltip 里：用户不必去设置页才看得到它落在
 		// 哪儿。没有目录时那一截是空的（`Tooltip("")` 不画东西），没有可补充的。
-		ui.Text(c, path).Grow(1).FontSize(12).TextColor(t.TextMuted).
-			MaxLines(1).Ellipsis("…").Tooltip(dir)
+		ui.Text(c, path).Grow(1).FontSize(12).LineHeight(smallCopyLeading).
+			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").Tooltip(dir)
 
 		// ⚠️ 没有目录时不摆这个按钮：按下去是打不开的。一个只会说「不行」的
 		// 按钮不如不摆（和首页不摆「全部播放」是同一个取舍）。

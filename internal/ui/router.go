@@ -27,13 +27,28 @@ type Route struct {
 	// InMenu 的进侧栏的默认菜单组（Biu 的 side/default-menu，SD-04）。
 	// 参数路由和 404 不进：它们是从别的页面点进来的，不是菜单项。
 	InMenu bool
-	// NeedsLogin 标出这一页的内容要登录才有。没登录时侧栏**不摆它**，
-	// 摆出来的是一句「登录后可见」（见 sidebar.go 的 viewSideMenu）。
+	// HideInMenuWhenLoggedOut 是「没登录时侧栏**不摆它**」，摆出来的是一句
+	// 「登录后可见」（见 sidebar.go 的 viewSideMenu）。
 	//
-	// ⚠️ **只管侧栏那一行**：路由本身照样能进。用户在地址栏里输一个路径、或者
-	// 从收藏夹的某一页点过来，拦在路由上是另一件事（要的是 404 那一页说清楚
-	// 「这一页要登录」，而不是一条谁都不认识的白页）。
-	NeedsLogin bool
+	// ⚠️ **它和 `RequiresLogin` 是两件事**（这一票之前它们是同一个标志
+	// `NeedsLogin`）：一个是「要不要摆进侧栏」（一个界面上的选择），一个是
+	// 「这一页要不要拦」（内容本来就要登录才有）。混在一个标志上的代价是
+	// 「拦」那一层没有地方放——于是「稍后再看」「历史记录」从地址栏或者前进
+	// 后退进去时，标题、日期筛选、关键词框、表头全都在，列表空着，或者末尾
+	// 一行「加载失败，点此重试」，**一句都没提「你要先登录」**。
+	HideInMenuWhenLoggedOut bool
+	// RequiresLogin 是「这一页的内容要登录才有」。
+	//
+	// 没登录时这一页**画一句「先登录」**（`viewNeedsLogin`，见 loginprompt.go），
+	// **不画内容**，而且**一个请求都不发**——那几个接口全都要 Cookie，没登录时
+	// 它们一律回 -101，而 -101 和「网络断了」在这一层一模一样（见
+	// `app.ErrNotLoggedIn`）。
+	//
+	// ⚠️ **判它的是那一页自己，不是路由表**：三页各自在自己的 view 里判
+	// （`follow.go` / `later.go` / `history.go`），因为「B 站客户端没挂上」那句
+	// 要排在它前面（那一句说的是**这一次**怎么了，而这一句说的是**这个账号**
+	// 怎么了，前者更具体）。路由表里这个标志是**那一层唯一的声明处**。
+	RequiresLogin bool
 	// Empty 是这一页没有内容时说的话。**每一条都得填**：留空就是这一页画出
 	// 来一片白，那正是这一张要消掉的东西（见 empty.go）。
 	Empty emptyState
@@ -80,7 +95,7 @@ var routes = []Route{
 	// ⚠️ **「还没登录」不是这一句**，是 follow.go 里的 `followNotLoggedIn`：没登录
 	// 时那个接口一律回 -101，而说成「还没关注任何人」的话用户登录完发现还是空的，
 	// 会以为是登录坏了。两句话必须分开（见 follow.go 文件头）。
-	{Match: followPath, Title: "我的关注", InMenu: true, NeedsLogin: true, Empty: emptyState{
+	{Match: followPath, Title: "我的关注", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Empty: emptyState{
 		Title: "暂无内容",
 		Hint:  "登录之后点「关注」关注的 UP 主会出现在这里",
 		Icon:  iconEmptyGroup,
@@ -94,12 +109,12 @@ var routes = []Route{
 	//
 	// 上游：稍后再看 `pages/later/index.tsx:236`，历史记录
 	// `pages/history/index.tsx:284`。
-	{Match: laterPath, Title: "稍后再看", InMenu: true, NeedsLogin: true, Empty: emptyState{
+	{Match: laterPath, Title: "稍后再看", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Empty: emptyState{
 		Title: "暂无稍后再看内容",
 		Hint:  "登录之后在歌上点「稍后再看」，加进来的会出现在这里",
 		Icon:  iconEmptyLater,
 	}},
-	{Match: historyPath, Title: "历史记录", InMenu: true, NeedsLogin: true, Empty: emptyState{
+	{Match: historyPath, Title: "历史记录", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Empty: emptyState{
 		Title: "暂无历史记录",
 		Hint:  "登录之后听过的歌会出现在这里，也可以「清空历史记录」",
 		Icon:  iconEmptyHistory,
