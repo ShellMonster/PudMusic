@@ -29,8 +29,9 @@ package mfadec
 //   - **HE-AAC**：本机 ffmpeg 的原生 aac 编码器造不出 HE 码流
 //     （`ffmpeg -h encoder=aac` 没有 profile 选项，要 libfdk_aac），
 //     所以没有素材。TestSpikeWhichProfilesWeCanActuallyTest 会明确
-//     打出「UNVERIFIED」。**但有一条是验过的**：Windows 自带的这个解码器
-//     自己的文档写着它支持 HE-AAC v1 / v2（见那一段的说明）。
+//     打出「UNVERIFIED」。**有一条是查到的、不是验到的**：Windows 自带的
+//     这个解码器，微软自己的文档写着它支持 HE-AAC v1 / v2——但**文档说
+//     支持不等于我们验过**（见那一段的说明）。
 //   - **B 站的真实字节**：这里用的是按 B 站形状造的素材
 //     （MP4 + AAC-LC 44100 Hz 立体声）。真去拉 B 站的流要真登录态，
 //     而那把钥匙串里躺着真账号（见 AGENTS 的约定），不去碰。
