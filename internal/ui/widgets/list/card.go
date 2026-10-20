@@ -1,18 +1,23 @@
 // 音乐卡片：一行长什么样。
 //
 // 结构照 Biu 的 `src/components/music-list-item/index.tsx`（那一行的七列网格
-// 里取这里用得上的几列）：序号、封面、标题、UP 名、时长。封面用已经建好的
+// 里取这里用得上的几列）：序号、封面、标题、UP 名、时长、操作。封面用已经建好的
 // `widgets/imgcache`，它管空地址 / 载入中 / 就绪 / 失败四态，这里不重复画
 // 占位（重复画就会出现两个占位，或者一个图上面盖着一个框）。
 //
-// ⚠️ 有一件事是这张卡片存在的技术理由：**行高不能写死**。歌名一行摆不下时
-// 折到第二行（Biu 的 `line-clamp-2`），于是歌名长的行比歌名短的行高，整张
-// 列表的行高就不一样了。这正是变高行的真实场景——`ui.List` 会按实际量出来的
-// 高度校正它对未量到的行的估计（`mygo/ui/list.go` 的 listHeights）。
+// # ⚠️ **行高是定死的，歌名只占一行**
 //
-// 如果这里图省事写 `Height(rowHeight)` 把行高钉死，变高行的那条路就没人走了：
-// 几千行里只要有一行内容比钉死的高，它的内容会被裁掉或者溢出到下一行上，
-// 而且这种错在几屏之内看不出来。宁可多量一次。
+// 上游那一行的歌名是 `truncate`（**一行**，多了就省略号），而**网格卡片**那一格
+// 是 `line-clamp-2`（两行）。我们原来两处都按两行画，于是列表的行高在 64 和 76
+// 之间跳——一屏能看几首歌会随着歌名长短变来变去，而用户看的是「这一页有多少歌」。
+//
+// 现在列表这一档：**歌名一行，行高 64**（封面 48 + 上下内边距 8×2）。
+// 网格那一档**不动**：它那两行是上游的（`music-card/index.tsx` 的
+// `line-clamp-2`），而且网格的行高本来就是按内容量的（见 `grid.go`）。
+//
+// ⚠️ **别把行高改回「按内容量」**：那一条路是框架的（`ui.List` 按量出来的高度
+// 校正它对未量到的行的估计，`mygo/ui/list.go` 的 listHeights），网格那一档还在走。
+// 列表这一档钉死之后，它那部分机制就只剩网格在用了。
 package list
 
 import (
@@ -41,7 +46,21 @@ const (
 	// `tabular-nums`）；不写的话 3:05 和 10:05 两列会左右跳。
 	durationWidth = 48
 
-	// titleLines 是歌名最多几行。2 是 Biu 的 `line-clamp-2`。
+	// listRowHeight 是列表那一行的高。**它是定死的**：封面 48 + 上下内边距 8×2。
+	//
+	// ⚠️ 它不是「量出来的」而是「定下来的」：歌名只占一行（见文件头），这一行
+	// 的内容就是那 48 的封面撑着，量出来也是 64——写死是为了让这个数**保证**是
+	// 64，而不是「碰巧量出来是 64」（歌名那一列要是哪天多了一行，量出来的就变了）。
+	listRowHeight = 64
+
+	// listTitleLines 是列表那一行歌名最多几行。**1**——上游那一行是 `truncate`
+	// （多了就省略号），而网格卡片那一格是两行（`titleLines`）。
+	listTitleLines = 1
+
+	// titleLines 是**网格卡片**那一格歌名最多几行。2 是 Biu 的 `line-clamp-2`。
+	//
+	// ⚠️ **别拿它当列表那一行的行数**：那两处是两件事。网格那一格是方的，歌名
+	// 折两行不影响别的；列表那一行折两行，整张列表的行高就跟着跳（文件头那一段）。
 	titleLines = 2
 
 	// textGap 是歌名和 UP 名之间的距离。Biu 是 `mt-1`（4）。
@@ -50,10 +69,9 @@ const (
 	// titleLeading 是歌名的行高倍数。1.5 是 Tailwind 的默认行高，也是 Biu 那边
 	// `text-base` 的行高。
 	//
-	// ⚠️ 这一条不只是好看，它决定两行歌名的那一块**比 48 的封面高多少**：
-	// MyGo 的默认行高约 1.18，两行歌名 + UP 名的文字块是 51，比封面只高 3，
-	// 两行的歌名挤在封面的边上（实测行高 67 对 64）；用 1.5 之后文字块是 60，
-	// 实测行高 76 对 64——差得开才像两行，而不是「挤在一起的两行」。
+	// ⚠️ 列表那一行现在只有一行歌名了，这一条决定的是那一行**比 48 的封面矮多少**：
+	// 一行歌名 21 + 缝 4 + UP 名 12 = 37，比封面矮 11——所以行高由封面撑着，
+	// 歌名和 UP 名在那一行里居中（上游的 `items-center` 也是一个意思）。
 	titleLeading = 1.5
 
 	// ownerLeading 是 UP 名的行高倍数。1 是 Biu 那一行的 `leading-none`。
@@ -84,9 +102,13 @@ const (
 	// 宽度定住上下两行才对得齐。
 	compactDurationWidth = 40
 
-	// compactTitleLines 是紧凑档歌名最多几行。**1**——这是「紧凑」和「普通」在
-	// 行高上拉开距离的主要一条：歌名再长也只占一行。
+	// compactTitleLines 是紧凑档歌名最多几行。**1**——这一档和普通那一档现在歌名
+	// 一样都是一行（普通那一档改成一行是这一票的事，见文件头），这一档省下来的
+	// 高度是封面和内边距。
 	compactTitleLines = 1
+
+	// compactRowHeight 是紧凑档那一行的高：封面 32 + 上下内边距 4×2。
+	compactRowHeight = 40
 )
 
 // PlayingMark 是「这一行正在放」那个标记。
@@ -95,6 +117,35 @@ const (
 // 因为同一个应用里两套列表写着两种说法的话，用户会以为是两个意思（BMG-56 已经付过
 // 账的一个结论）。
 const PlayingMark = hover.PlayingMark
+
+// rowHeight 是这一档的行高。**列表这两档的行高是定死的**（见文件头），所以
+// 「滚过了多少像素」能从「顶上那一行是第几行」算出来（见 `List.ScrollOffset`）。
+func (l *List) rowHeight() float32 {
+	if l.view == ViewCompact {
+		return compactRowHeight
+	}
+	return listRowHeight
+}
+
+// ScrollOffset 是这一屏滚过了多少像素。
+//
+// ⚠️ **它是从「顶上那一行是第几行」算出来的**，不是量出来的：列表这一档的行高是
+// **定死的**（64 / 40），所以「第一行的下标 × 行高」就是滚过的像素数，一个不差。
+//
+// ## 为什么不挂一个 `ui.ScrollState` 来量
+//
+// `ui.ScrollState` 那一档是**像素**，而列表自己按**行**记位置（`ui.ListState`）。
+// 两者在行高可变的时候会对不上，对不上的时候框架会把它们**换算**一次——而换算要
+// 靠「还没量过的行按量过的平均值估」，估错了位置就跳了（实测：切回一个 Tab 之后
+// 顶上那一首从第 19 首变成第 6 首）。行高定死之后这个换算不再有误差，于是干脆不
+// 换算：直接按行算。
+//
+// ⚠️ **网格那一档是估的**（`Grid.ScrollOffset`）：它的行高跟着内容走（歌名两行），
+// 没有一个定死的数可乘。
+func (l *List) ScrollOffset() float32 {
+	first, _ := l.state.Visible()
+	return float32(first) * l.rowHeight()
+}
 
 // rowColors 是这一行文字该用的两个颜色。
 //
@@ -141,7 +192,10 @@ func (l *List) viewCard(r ui.ListRow) {
 	// ⚠️ 局部变量叫 `onRow` 而不是 `hover`：`hover` 是**包名**，在这里把它当变量
 	// 用的话，这一行以下所有用到那个包的地方都得绕开（编译器会让 `hover.RowCover`
 	// 报「hover 是个 float32」）。
+	//
+	// ⚠️ **行高写死 64**（见文件头）：歌名一行，这一行由 48 的封面撑着。
 	row := ui.Row(c).AlignSelf(ui.Stretch).Gap(cardGap).Padding(cardPadY, cardPadX).
+		Height(listRowHeight).
 		// 右键菜单挂在**这一行**上：MyGo 取的是最里层那个带菜单的元素
 		//（`ui/menu.go` 的 menuTarget），挂到列表外面的话整列共用一份菜单。
 		ContextMenu(func(m *ui.Menu) { l.buildMenu(m, i) })
@@ -162,22 +216,35 @@ func (l *List) viewCard(r ui.ListRow) {
 
 		// ③ 标题 + UP 名。这一列 Grow(1)，把剩下的宽度都吃掉。
 		//
-		// ⚠️ 别给这两块设固定高度（Height/SingleLine）：那样整张列表的行高
-		// 就是常数，变高行没得走（见文件开头）。
+		// ⚠️ 歌名**只占一行**（上游那一行是 `truncate`）：折行的话整张列表的行高
+		// 就跟着歌名长短跳（见文件头）。
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).Children(func() {
 			ui.Text(c, m.Title).FontSize(14).LineHeight(titleLeading).
-				TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
+				TextColor(titleColor).MaxLines(listTitleLines).Ellipsis("…")
 			if m.Owner != "" {
 				ui.Text(c, m.Owner).FontSize(12).LineHeight(ownerLeading).
 					TextColor(ownerColor).MaxLines(1).Ellipsis("…")
 			}
 		})
 
-		// ④ 时长。没有就不画——画一列空白比不画更难看。
-		if s := formatDuration(m.Duration); s != "" {
-			ui.Text(c, s).Width(durationWidth).TextAlign(ui.End).
-				FontSize(12).TextColor(t.TextMuted).MaxLines(1)
-		}
+		// ④ 时长。
+		//
+		// ⚠️ **没有时长也留着那么宽的空位**：行尾那枚「⋯」的位置跟着这一列走，
+		// 而表头那一列是永远在的（表头只说这一页真有的列）。少留的话「⋯」在有
+		// 时长的行上靠右、在没有的靠左——而表头上那个空位对着的是一个固定位置。
+		ui.Box(c).Width(durationWidth).Children(func() {
+			if s := formatDuration(m.Duration); s != "" {
+				ui.Text(c, s).Width(durationWidth).TextAlign(ui.End).
+					FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+			}
+		})
+
+		// ⑤ 行尾那枚「⋯」。点开的是**这一行的菜单**，和右键同一份
+		//（`operation.go` 的文件头）。
+		ui.Box(c).Width(OperationColWidth).Children(func() {
+			Operation(c, OperationLabel(m.Title), titleColor,
+				func(m *ui.Menu) { l.buildMenu(m, i) })
+		})
 	})
 }
 
@@ -186,9 +253,9 @@ func (l *List) viewCard(r ui.ListRow) {
 // ## 和普通那一行差在哪
 //
 // 四处，**一处都不碰语义**：封面 48 → 32、上下内边距 8 → 4、行内间距 8 → 6、
-// 歌名最多两行 → 一行。选中 / 正在放 / 右键菜单 / 勾选框 / 封面上的 hover 反馈，
-// 这些**一个不少**——紧凑是「同一种行排得更密」，不是「另一种行」。少一样就变成
-// 两个控件，而不是同一个控件的两档，用户会以为是两个功能。
+// 行高 64 → 40。选中 / 正在放 / 右键菜单 / 勾选框 / 封面上的 hover 反馈 / 行尾
+// 那枚「⋯」，这些**一个不少**——紧凑是「同一种行排得更密」，不是「另一种行」。
+// 少一样就变成两个控件，而不是同一个控件的两档，用户会以为是两个功能。
 //
 // ⚠️ **字号只降了歌名那一处**（14 → 13）。UP 名和时长还是 12：它们本来就比正文小，
 // 再降一档在 12pt 的基础上会糊，而这一档省的是高度不是宽度。
@@ -201,6 +268,7 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 	titleColor, ownerColor := rowColors(t, r.Selected(), playing)
 
 	row := ui.Row(c).AlignSelf(ui.Stretch).Gap(compactGap).Padding(compactPadY, compactPadX).
+		Height(compactRowHeight).
 		// 右键菜单挂在**这一行**上，和普通那一行同一个理由（见 View 里的注释）。
 		ContextMenu(func(m *ui.Menu) { l.buildMenu(m, i) })
 	onRow := row.Hovered()
@@ -222,10 +290,19 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 			}
 		})
 
-		if s := formatDuration(m.Duration); s != "" {
-			ui.Text(c, s).Width(compactDurationWidth).TextAlign(ui.End).
-				FontSize(12).TextColor(t.TextMuted).MaxLines(1)
-		}
+		// 时长那一列：没有时长也留着位置，理由同普通那一行（见那里）。
+		ui.Box(c).Width(compactDurationWidth).Children(func() {
+			if s := formatDuration(m.Duration); s != "" {
+				ui.Text(c, s).Width(compactDurationWidth).TextAlign(ui.End).
+					FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+			}
+		})
+
+		// 行尾那枚「⋯」，理由同普通那一行。
+		ui.Box(c).Width(OperationColWidth).Children(func() {
+			Operation(c, OperationLabel(m.Title), titleColor,
+				func(m *ui.Menu) { l.buildMenu(m, i) })
+		})
 	})
 }
 

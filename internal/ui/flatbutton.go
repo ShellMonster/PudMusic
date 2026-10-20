@@ -1,9 +1,9 @@
-// 扁平按钮：把控件上那圈 1px 描边和那块常驻底色去掉。
+// 界面层用的扁平按钮：**无描边、无常驻底色**。
 //
-// # 背景
+// # 配方在 `widgets/flat` 里，不在这里
 //
-// BMG-70 那份对照 Biu 的视觉调研（`~/.herdr-projects/reports/Biu_MyGo/70/`）的
-// 第一条差距就是它，报告 §1.1 记作 **F1**、量级 M、「单条影响面最大」：
+// 这份配方是 BMG-70 那份视觉调研（`~/.herdr-projects/reports/Biu_MyGo/70/`）的
+// 第一条差距的落点（报告 §1.1 记作 **F1**、量级 M、「单条影响面最大」）：
 //
 //	Biu 怎么做：HeroUI 的 `Button variant="light"`／`"flat"`：**无边框、透明底**，
 //	hover 才上一层很淡的底色。侧栏菜单项、播放条图标键、倍速键、折叠键全是这一类。
@@ -15,15 +15,9 @@
 // 我们这边那圈描边的出处是 `mygo@v0.5.5/ui/widgets.go` 的 `styleButton`：
 // `base, border = t.Surface, t.Border`。
 //
-// # 为什么自己封，而不是套 `ui.Toolbar`
-//
-// `ui.Toolbar` 看着正好是「一排无边框的按钮」，但它是 `coreRow` +
-// `FocusGroup(Horizontal)` + `role="Toolbar"`（`mygo/ui/toolbar.go:33-35`）——
-// 套到侧栏那种**竖排** `Column` 上会把菜单排成横排；而且 `layoutToolbar`
-// （同文件 `:135-155`）会把 intrinsic 宽度放不下的控件 collapse 掉、收进末尾
-// 那个 `»` 溢出菜单。所以走 `ui.ButtonBase`（`mygo/ui/api_gen.go:759`，注释原文
-// 「a button without a look」），照 `styleButton` 的配方给上尺寸，只把**底色和
-// 描边**换掉。
+// **配方本身在 `internal/ui/widgets/flat`**：列表包（`widgets/list`）每一行末尾
+// 那枚「⋯」要用同一份，而界面层在列表包的上面——反过来 import 是个环。理由和
+// 那边的取舍写在那个包的文件头上。
 //
 // # 尺寸照抄 `styleButton`，是刻意的
 //
@@ -44,30 +38,18 @@
 // 深浅给的是两个数（`flatSelected`），不是一个。
 package ui
 
-import "github.com/egoist/mygo/ui"
-
-// 悬停 / 按下那一层压多深。照上游 `bg-foreground/10` / `bg-foreground/20`
-// （HeroUI 的 `light` 变体就是这两个数）。
-const (
-	flatHoverA = 0.08
-	flatPressA = 0.16
+import (
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
+	"github.com/egoist/mygo/ui"
 )
 
 // flatButton 是一个无描边、无常驻底色的按钮，画着 label。
 //
 // 🔴 **别给它补 `Label(label)`**：可见的字就是它的无障碍名字，补上去会多出一个
 // 同样文字的无障碍节点，画面上出现两份（和 `sidebar.go` 的 `viewSideMenu` 里
-// 那一条同源）。**只有图标按钮要补**——见 `flatIconButton`。
+// 那一处同源）。**只有图标按钮要补**——见 `flatIconButton`。
 func flatButton(c *ui.Context, label string) ui.Element {
-	t := c.Theme()
-	b := ui.ButtonBase(c).
-		Padding(t.Space(1.5), t.Space(3.5)).
-		Gap(t.Space(1.5)).
-		Radius(t.Radius)
-	if label != "" {
-		b.Children(func() { ui.Text(c, label).SingleLine() })
-	}
-	return flatFeel(c, b)
+	return flat.Button(c, label)
 }
 
 // flatIconButton 是一个**只画一个图标**的扁平按钮。
@@ -79,9 +61,7 @@ func flatButton(c *ui.Context, label string) ui.Element {
 // 尺寸由调用方的 `Size` / `Padding` 撑——这里给的是「一个画着图标的扁平按钮」，
 // 不是「多大一个」。
 func flatIconButton(c *ui.Context, name, label string, font float32) ui.Element {
-	b := flatButton(c, "").Label(label)
-	b.Children(func() { ui.Icon(c, icon(name)).FontSize(font) })
-	return b
+	return flat.IconButton(c, icon(name), label, font)
 }
 
 // flatCurrent 是「这一项正选中」的那一层：一块中性的底，深色下再把字染成主色。
@@ -100,7 +80,7 @@ func flatIconButton(c *ui.Context, name, label string, font float32) ui.Element 
 //     → 拿它当字色等于把这一行读不出来。
 //
 // 所以浅色那一支**只换底、不动字**：底是主色很淡的一层，字还是 `t.Text`
-//（14.6:1）。
+// （14.6:1）。
 //
 // # 底下为什么是中性灰而不是主色淡底
 //
@@ -108,8 +88,8 @@ func flatIconButton(c *ui.Context, name, label string, font float32) ui.Element 
 // 达标；而上游那一格本来就是中性灰。`TestTheSelectedRowKeepsItsContrast`
 // 逐条钉着这几个数。
 //
-// **「没选中」就是不调它**：那一支一个字都不改，颜色继续由 `flatFeel` 按悬停 /
-// 按下决定。
+// **「没选中」就是不调它**：那一支一个字都不改，颜色继续由 `flat` 那个包里的
+// 反馈层按悬停 / 按下决定。
 func flatCurrent(c *ui.Context, e ui.Element) ui.Element {
 	t := c.Theme()
 	if t.Dark {
@@ -129,53 +109,4 @@ func flatCurrent(c *ui.Context, e ui.Element) ui.Element {
 // 主题里换算出来的差值一样（各 12~13 个通道）。
 func flatSelected(t *ui.Theme) ui.Color {
 	return t.SurfaceHover.Mix(t.Text, 0.06)
-}
-
-// flatFeel 铺上「悬停 / 按下」的那一层反馈。
-//
-// ⚠️ **「铺不铺」在建元素时问，「是不是禁用」在画的时候问**——见 `flatShade`。
-//
-// ⚠️ 它是在建元素时算的：`Element` 上没有 `styleFn`，而框架自己的 `styleButton`
-// 是把同一段逻辑挂进 `styleFn`（paint 时跑）才拿到「按下的那一帧立刻变深」。
-// 这里靠的是指针位置**不进事件循环就不变**（`mygo/ui/input.go:227` 的
-// `setHover`），于是画面上的效果一样。本包早就在用这个写法
-//（`navbar_suggest.go` 的 `viewSuggestTerm`）。
-func flatFeel(c *ui.Context, e ui.Element) ui.Element {
-	t := c.Theme()
-	switch {
-	case e.Pressed():
-		e = e.DrawOver(flatShade(e, t, flatPressA))
-	case e.Hovered():
-		e = e.DrawOver(flatShade(e, t, flatHoverA))
-	}
-	return e
-}
-
-
-// flatShade 是悬停 / 按下那一层：往按钮上压一层半透明的前景色。
-//
-// 为什么压前景色而不是换成一个底色（框架的 Toolbar 按钮用的就是
-// `t.SurfaceHover`）：换成底色的话，选中态那一层主色淡底会被整块顶掉——指针一
-// 落上去，「当前在哪」就整个不见了。而压一层前景色在**任何**底上都成立：透明底
-// 上是变灰，主色淡底上是变深，和上游 `bg-foreground/10` 是同一个做法。
-func flatShade(b ui.Element, t *ui.Theme, a float32) func(p *ui.Painter, r ui.Rect) {
-	shade, radius := t.Text.Alpha(a), t.Radius
-	// 🔴 **「禁用没有」必须在画的时候问，不能在建按钮的时候问。**
-	//
-	// 调用方是在 `flatButton` 返回**之后**才 `.Disabled(...)` 的
-	//（`settings_page.go` 的主题 / 窗口关闭两排、`settings_tab_general.go` 的两个
-	// 「选择」都是这个写法），而 `flatFeel` 跑在它之前——建元素那一刻问出来的
-	// `IsDisabled()` 恒是 false。于是只读设置里的禁用按钮，指针落上去照样铺一层
-	// 悬停底：**等于告诉用户这里点得动**（实测那层底是正常键的一半深，通道差 9，
-	// 正常键是 18）。
-	//
-	// 框架自己的 `styleButton` 没这个问题：它把这一段挂进 `styleFn`，paint 时才跑。
-	// 这里拿不到 `styleFn`，所以闭包多带一个 `b`，**在 paint 的那一刻**再问一遍
-	// （`Element.IsDisabled` 读的是节点此刻的 flag，不是建它那一刻的）。
-	return func(p *ui.Painter, r ui.Rect) {
-		if b.IsDisabled() {
-			return
-		}
-		p.Fill(r, shade, radius)
-	}
 }

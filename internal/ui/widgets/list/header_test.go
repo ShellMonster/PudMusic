@@ -200,6 +200,76 @@ func TestThereIsNoHeaderForTheGrid(t *testing.T) {
 // headerScrollFar 是一次滚到头的距离，够这一屏滚到底。
 const headerScrollFar = 100000
 
+// TestTheHeaderHasALineUnderIt 钉住「表头底下有一条线」。
+//
+// 判据是**逐像素采样**：表头那一层是「列名那一行 + 底下那条线」两层，而那条线是
+// **一整行**几乎每一个像素都不是底色。列名那几个字是**几个**像素不是底色——
+// 两者一比就知道哪一行是线。
+//
+// ⚠️ **线必须在列名下面**：线画在列名上面的话，表头和下面第一行还是粘在一起的
+// （那就是改之前的样子），而那种错在画面上只是「表头看着有点怪」。
+func TestTheHeaderHasALineUnderIt(t *testing.T) {
+	_, tt := newHeaderList(t, ViewList, false)
+
+	img := tt.Image()
+	w, h := img.Bounds().Dx(), img.Bounds().Dy()
+	bg := img.RGBAAt(w-1, h-1) // 右下角是空的：那就是底色
+
+	// 找那一行「几乎整行都不是底色」的像素。
+	line, most := -1, 0
+	for y := range 64 {
+		n := 0
+		for x := range w {
+			if img.RGBAAt(x, y) != bg {
+				n++
+			}
+		}
+		if n > most {
+			line, most = y, n
+		}
+	}
+	if most < w*9/10 {
+		t.Errorf("表头底下没有一道横线（最满的一行只有 %d/%d 个像素不是底色）", most, w)
+	}
+
+	// 线在列名**下面**。
+	head, ok := tt.Find("标题")
+	if !ok {
+		t.Fatalf("表头上没有「标题」，文字有 %q", tt.Texts())
+	}
+	if float32(line) < head.Y+head.H {
+		t.Errorf("那道线在 y=%d，列名那一块在 y=%v~%v——线在列名上面（或压在它身上）",
+			line, head.Y, head.Y+head.H)
+	}
+}
+
+// TestTheHeaderColumnNamesAreBiggerThanTheRowsSecondaryText 钉住「表头的字号比
+// 行里的次要文字大」。
+//
+// ⚠️ **判据是「比行里的次要文字大」而不是「正好多少像素」**：行里的次要文字是
+// 12px（UP 名 / 时长），表头是 14px（上游那一行表头的数，`text-sm`）。逐位相等
+// 不是「对」的证据（换个系统字体行高就变），而「谁大谁小」是这一条真正要的。
+//
+// 改之前表头是 12px——和行里的次要文字一样大、一样灰，竖着扫下去时它比下面那一列
+// 数字还弱（票面原话）。
+func TestTheHeaderColumnNamesAreBiggerThanTheRowsSecondaryText(t *testing.T) {
+	_, tt := newHeaderList(t, ViewList, false)
+
+	head, ok := tt.Find("标题")
+	if !ok {
+		t.Fatalf("表头上没有「标题」，文字有 %q", tt.Texts())
+	}
+	// 行里的次要文字：UP 名（12px）。
+	owner, ok := tt.Find("UP A")
+	if !ok {
+		t.Fatalf("画面上找不到 UP 名，文字有 %q", tt.Texts())
+	}
+	if head.H <= owner.H {
+		t.Errorf("表头的列名高 %v，行里的次要文字（UP 名）高 %v——列名没有比次要文字大",
+			head.H, owner.H)
+	}
+}
+
 // TestTheHeaderSurvivesScrolling 钉住「表头横向滚动时跟着走」的那一条在竖向滚动上：
 // 列表滚下去，表头还在。
 //

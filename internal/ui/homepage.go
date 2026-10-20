@@ -132,13 +132,14 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 		// `/` 那一条，见 viewHome）。让三个列表都说一遍自己那句「这里还没有歌」，
 		// 叠在那一页的空状态上就是两句话在讲同一件事。
 		l.SetEmpty("")
-		// ⚠️ **这里不调 SetScroll**（`widgets/list` 有那一档，是给「回顶按钮」
-		// 和分页列表的判断用的）：给一个 `List` 挂上 `ScrollState` 会和它自己按行
-		// 记的位置**打架**——TrackScroll 每一帧按那个像素数把容器摆过去，而
+		// ⚠️ **这里不挂 `ScrollState`**：给一个 `List` 挂上它会和它自己按行记的
+		// 位置**打架**——TrackScroll 每一帧按那个像素数把容器摆过去，而
 		// `ui.ListState` 记的是「第几行 + 那一行离顶多远」，两个数换算的那一帧里
-		// 锚点会被拽偏。实测：同一个列表滚到第 17 首、切走再切回来，挂上
-		// ScrollState 时回到第 5 首（Y 从 1200 变成 437），不挂时回到第 17 首。
-		// 「切 Tab 回到原位」靠的是三个 `list.List` 各自那份 `ListState`，不靠像素。
+		// 锚点会被拽偏。实测：同一个列表滚到第 19 首、切走再切回来，挂上
+		// ScrollState 时回到第 6 首（Y 从 1200 变成 359）。
+		//
+		// 「回顶按钮」要的「滚过多少像素」不靠它：列表那一档的行高是**定死的 64**，
+		// 「顶上那一行是第几行 × 64」就是滚过的像素数（`list.List.ScrollOffset`）。
 		h.lists[i] = l
 	}
 	return h
@@ -263,7 +264,23 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell) {
 		// 下滚它不动，宽屏下滚到右边列名也还在。
 		h.lists[h.tab].Header(c, "home:header:"+strconv.Itoa(h.tab))
 		h.lists[h.tab].View(c)
+
+		// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见
+		// `widgets/list` 的 `BackToTop`）。
+		//
+		// ⚠️ **给的是当前这一档的那一份位置**（`ScrollOffset`）：给错了的话按钮会在
+		// 没滚过的页面上冒出来。
+		list.BackToTop(c, h.lists[h.tab].ScrollOffset(), h.scrollTop)
 	}
+}
+
+// scrollTop 回到顶上。
+//
+// ⚠️ **回的是列表自己的行锚点**（`ListState.ScrollTo`）：这一页的位置由三个
+// `ListState` 各自记着（见文件末尾「切 Tab 的滚动位置」那一段），而回顶按钮的
+// 位置是**按行算**出来的（`ScrollOffset`）——不用另有一份像素要归零。
+func (h *homePage) scrollTop() {
+	h.lists[h.tab].ScrollTo(0, ui.Start)
 }
 
 // viewTabs 画那三个 Tab。
@@ -304,12 +321,13 @@ func (h *homePage) viewTabs(c *ui.Context) {
 //
 // ⚠️ **别拿 `ui.ScrollState` 去「存像素、切回来再 ScrollTo 回去」**：那是在已经
 // 记对了的锚点上抢方向盘。实测过一次——三个列表各挂一个 `ScrollState`
-// （`List.SetScroll`），滚到第 17 首（Y=1200）、切走再切回来，Y 变成 437，顶上
-// 那首变成第 5 首：TrackScroll 按像素把容器摆过去，`ListState` 按行把锚点算回
+// （`List.SetScroll`），滚到第 19 首（Y=1200）、切走再切回来，Y 变成 359，顶上
+// 那首变成第 6 首：TrackScroll 按像素把容器摆过去，`ListState` 按行把锚点算回
 // 去，两个数换算的那一帧里锚点被拽偏了。不挂 `ScrollState`（`newHomePage` 里
 // 特意不调 `SetScroll`）同一个用例一次就过。
 //
-// 真要按像素对外说（回顶按钮、分页列表判断「滚过 400 像素没有」），那是在
-// **那一个**列表上挂 `ScrollState`，不是拿来当三个 Tab 的位置备份——那两件事的
-// 区别在 widgets/list 的 PagedList 里就是同一个 `scroll`：它给的是当前这一屏的
-// 那一个列表，而「切 Tab 的位置」在那边是三个 `ListState`。
+// 真要按像素对外说（**回顶按钮**判断「滚过 400 像素没有」），**也别挂
+// `ScrollState`**——挂了就撞上上面那一条。列表那一档的行高是**定死的 64**，
+// 所以「顶上那一行是第几行 × 64」就是滚过的像素数，一个不差（见
+// `list.List.ScrollOffset`）。网格那一档的行高跟着内容走，那一档是**估**的
+// （见 `list.Grid.ScrollOffset`）。

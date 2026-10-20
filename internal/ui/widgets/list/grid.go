@@ -684,6 +684,15 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 		// ⓪ 多选态：这一格最上面的勾选框。没装多选就一格都不画。
 		g.viewCellCheckbox(c, i, m.Title)
 
+		// ⓪⓪ 格子右上角那枚「⋯」。点开的是**这一格的菜单**，和右键同一份
+		//（`operation.go` 的文件头）。
+		//
+		// ⚠️ **它压在封面上**（右上角那一块），所以自带一层半透明的深底——理由见
+		// `OperationCorner`。
+		OperationCorner(c, OperationLabel(m.Title), func(m *ui.Menu) {
+			buildSongMenu(m, g.songs, g.acts, i, g.playFrom)
+		})
+
 		// ① 封面 + 它上面那圈 hover 反馈：右下角一个 40 的主色圆播放钮，封面底部
 		// 一条 black/90 的渐变（左播放量 / 右时长），都 200ms 淡入。
 		hover.CardCover(c, g.cache, m.Cover, cell, gridCoverH, onCell,
@@ -692,9 +701,10 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 
 		// ② 歌名 + UP 名/时长。
 		//
-		// ⚠️ 别给这几块设固定高度（Height/SingleLine）：行高是量出来的，歌名
-		// 折行时那一行就高一点（card.go 文件开头写明了为什么）。行高写死了
-		// 变高行就没人走了。
+		// ⚠️ 别给这几块设固定高度（Height/SingleLine）：**网格这一档的行高是量出来
+		// 的**，歌名折行时那一行就高一点（上游的 music-card 是 `line-clamp-2`，两行）。
+		// 列表那一档的行高是定死的（`card.go` 的文件头），网格这一档不是——两处是
+		// 两件事，别把一边改成另一边的做法。
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).PaddingY(cardGap).
 			Children(func() {
 				ui.Text(c, m.Title).FontSize(14).LineHeight(titleLeading).
@@ -726,3 +736,23 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 
 // playFrom 从第 i 首往后接进队列并开始播。菜单的「播放」和双击这一格都用它。
 func (g *Grid) playFrom(i int) { playFrom(g.songs, g.acts, i) }
+
+// gridRowHeight 是网格那一行**大概**多高。
+//
+// ⚠️ **它是估的**：网格这一行的高跟着内容走（封面 140 + 歌名 + UP 名那一行），
+// 歌名折成两行就高 21。所以按行算出来的像素是**大概**的——回顶按钮早一点或晚一点
+// 出现，仅此而已。
+//
+// 这个数是**一行的常见高度**（歌名一行）：140 + 8（`cardGap`）+ 歌名一行 21 +
+// 缝 4 + UP 名那一行 14 ≈ 195，和 `grid_test.go` 的 `gridH` 那句注释（「网格每行
+// 约 195」）对得上。
+const gridRowHeight = 195
+
+// ScrollOffset 是这一屏滚过了多少像素。
+//
+// ⚠️ **它是估的**（见 `gridRowHeight`）：网格的行高跟着内容走，没有一个定死的行高
+// 可乘。列表那一档是准的（`List.ScrollOffset`）。
+func (g *Grid) ScrollOffset() float32 {
+	first, _ := g.state.Visible()
+	return float32(first) * gridRowHeight
+}
