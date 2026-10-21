@@ -67,21 +67,23 @@ var upTabNames = []string{"动态", "投稿", "收藏夹", "合集"}
 const upSeriesPageSize = 20
 
 // 头图区的尺寸。Biu 那边是 `h-[200px]`，头图是 200 高那一份
-// （`space-info.tsx:87-97` 用的 `top_photo_v2.l_200h_img`）。
+// （`space-info.tsx:83` 用的 `top_photo_v2.l_200h_img`）。
 // 200 正好塞得下头图 + 头像 + 昵称 + 签名 + 三个统计。
 const (
-	// upHeaderH 是头图区一共多高。Biu 那边是 `h-[200px]`（`space-info.tsx:86`）。
+	// upHeaderH 是头图区一共多高。Biu 那边是 `h-[200px]`（`space-info.tsx:83`）。
 	upHeaderH = 200
-	// upBannerH 是头图（横幅）那一块多高，剩下的给下面那一行头像/昵称/关注。
-	//
-	// ⚠️ **不能两个都给 200**：那样横幅吃掉整个头图区，下面那行被压成 0 高，
-	// 文字还在（Tester 照样 `Find` 得到）而按钮点不到——「看得见、点不着」
-	// 是最难查的那一类。
-	upBannerH = upHeaderH - 72 - 2*upPad
-	// upAvatarS 是头像边长。
-	upAvatarS = 72
-	// upPad 是头图区内边距。Biu 是 `px-8 py-4`，这里取一个等价的整数。
+	// upAvatarS 是头像边长。Biu 那边是 `h-[140px] w-[140px] flex-none shadow-lg`
+	// （`user-profile/space-info.tsx:89`）——**140 是上游的尺寸**，不是「比原来
+	// 大一点」估出来的。
+	upAvatarS = 140
+	// upPad 是头图区的**纵向**内边距，也是 Tab 那一条的左右内边距。Biu 是
+	// `py-4`（`space-info.tsx:83`）和内容区那一圈 `p-4`（`user-profile/index.tsx:130`）。
 	upPad = 16
+	// upPadX 是头图区的**左右**内边距。Biu 是 `px-8`（`space-info.tsx:83`）。
+	//
+	// ⚠️ **不要拿它去改 Tab 那一条**：上游 Tab 外面是 `p-4`（16），头图才是
+	// 32。两处共用一个数的话，Tab 会跟着头图一起往中间缩。
+	upPadX = 32
 )
 
 // upPathOf 是 mid 这个 UP 的空间地址。
@@ -436,36 +438,46 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 	case h.Relation.Blocked():
 		// 上游是整页换成一张「已拉黑」的图（`space-info.tsx:69-75`）。这里
 		// 保留头像和名字：用户多半只是想确认「我拉黑的是不是这个人」。
-		ui.Row(c).Key(key).Height(upHeaderH).FillWidth().Gap(12).Center().Children(func() {
-			s.spaceAvatar(c, h.User.Face, upAvatarS)
+		ui.Row(c).Key(key).Height(upHeaderH).FillWidth().Gap(16).Center().Children(func() {
+			s.spaceAvatar(c, h.User.Face, upAvatarS, true)
 			ui.Column(c).Gap(4).Children(func() {
-				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, 20)).Bold()
+				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, 20)).FontWeight(600)
 				ui.Text(c, "你把他拉黑了，他的内容在这儿看不到").
-					FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
+					FontSize(scale.Font(c, 14)).TextColor(t.TextMuted)
 			})
 		})
 		return
 	}
 
-	ui.Column(c).Key(key).Height(upHeaderH).FillWidth().Children(func() {
+	// 头图铺满整块 200 高（上游就是这一块自己的 `bg-cover`，不是「上面一条
+	// 横幅 + 下面一块底色」），头像和信息压在底边。
+	//
+	// ⚠️ **信息那一行必须是 `Absolute`**：放进 Column 的流里的话，它和头图
+	// 各占一份高度——头像 140 + 上下 16 就是 172，头图只剩 28，画出来是
+	// 一条缝。Absolute 让它压在同一块 200 高上，和上游 `items-end` 一致。
+	ui.Box(c).Key(key).Height(upHeaderH).FillWidth().Clip().Children(func() {
 		// ① 头图。没设头图的 UP 主占大多数（B 站这时候给的是空对象而不是
 		// 一张空白图），画一块纯色——**别去画 B 站的占位图**，那看着像加载失败。
 		if h.User.Banner != "" {
-			s.spaceFill(c, h.User.Banner, upBannerH)
+			s.spaceFill(c, h.User.Banner, upHeaderH)
 		} else {
-			ui.Box(c).Height(upBannerH).FillWidth().Background(t.Surface)
+			ui.Box(c).Height(upHeaderH).FillWidth().Background(t.Surface)
 		}
-		// ② 头像 + 昵称 + 签名 + 右边那一排关注和统计。
-		ui.Row(c).Key("space-head-info").Grow(1).FillWidth().Gap(12).
-			Padding(upPad).AlignItems(ui.Center).Children(func() {
-			s.spaceAvatar(c, h.User.Face, upAvatarS)
-			ui.Column(c).Gap(2).Children(func() {
-				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, 20)).Bold().MaxLines(1).Ellipsis("…")
+		// ② 头像 + 昵称 + 签名 + 右边那一排关注和统计。圆角留白与间距照上游：
+		// `px-8 py-4`、头像和文字 `space-x-4`、文字两行 `space-y-2`。
+		ui.Row(c).Key("space-head-info").Absolute().Left(0).Right(0).Bottom(0).
+			Padding(upPad, upPadX).Gap(16).AlignItems(ui.Center).Children(func() {
+			// 头像带 `shadow-lg`（上游 `space-info.tsx:89` 的 `shadow-lg`）。
+			s.spaceAvatar(c, h.User.Face, upAvatarS, true)
+			ui.Column(c).Gap(8).Children(func() {
+				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, 20)).FontWeight(600).MaxLines(1).Ellipsis("…")
 				if h.User.Official != "" {
 					ui.Text(c, "认证："+h.User.Official).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 				}
 				if h.User.Sign != "" {
-					ui.Text(c, h.User.Sign).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted).MaxLines(2)
+					// 上游是 `text-sm text-white/80`（`space-info.tsx:110`）：
+					// 14，不是 13。
+					ui.Text(c, h.User.Sign).FontSize(scale.Font(c, 14)).TextColor(t.TextMuted).MaxLines(2)
 				}
 			})
 			ui.Box(c).Grow(1)
@@ -487,7 +499,7 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 	t := c.Theme()
 	isSelf := s.app.SelfMid() == sp.mid
 
-	ui.Row(c).Key("space-actions").Gap(18).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Key("space-actions").Gap(16).AlignItems(ui.Center).Children(func() {
 		// 关注按钮**只在「登录了、且看的不是自己」时画**（上游
 		// `space-info.tsx:100` 的 `Boolean(user?.isLogin) && !isSelf`）。
 		// 看自己的时候画一个「关注自己」是 B 站网页版都不做的事。
@@ -530,8 +542,10 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 			if h.StatOK() {
 				spaceStat(c, "粉丝数", formatCount(h.Stat.Follower))
 				if isSelf {
+					spaceDivider(c)
 					spaceStat(c, "关注数", formatCount(h.Stat.Following))
 				}
+				spaceDivider(c)
 			} else if h.StatFailed() {
 				ui.Text(c, "粉丝数没读到").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 				if flatButton(c, "重试").FontSize(scale.Font(c, 12)).Clicked() {
@@ -556,12 +570,21 @@ func (sp *upSpace) follow(yes bool) {
 }
 
 // spaceStat 是一个统计数字（上面是数、下面是名字）。
+//
+// 字号照上游 `space-info.tsx:131-133`：数字 `text-lg font-semibold`（18 / 600），
+// 名字 `text-sm`（14）。
 func spaceStat(c *ui.Context, label, value string) {
 	t := c.Theme()
 	ui.Column(c).Key("space-stat:" + label).Gap(2).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, value).FontSize(scale.Font(c, 17)).Bold()
-		ui.Text(c, label).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+		ui.Text(c, value).FontSize(scale.Font(c, 18)).FontWeight(600)
+		ui.Text(c, label).FontSize(scale.Font(c, 14)).TextColor(t.TextMuted)
 	})
+}
+
+// spaceDivider 是统计之间那条竖线：上游 `Divider orientation="vertical"
+// className="h-4"`（`space-info.tsx:136-137`），高 16。
+func spaceDivider(c *ui.Context) {
+	ui.Box(c).Width(1).Height(16).Background(c.Theme().Border)
 }
 
 // spaceName 是这个 UP 显示在标题上的名字。还没加载时给一个占位，而不是空串
@@ -574,9 +597,19 @@ func spaceName(u app.User) string {
 }
 
 // spaceAvatar 画头像。**没有头像画一个圆底色**，不是画一个「加载失败」。
-func (s *Shell) spaceAvatar(c *ui.Context, face string, side float32) {
+//
+// shadow 说要不要带一圈 `shadow-lg`（Tailwind：`0 10px 15px -3px` 与
+// `0 4px 6px -4px`，都是 10% 黑）。**只有大号头像带**——上游给 UP 空间头像
+// 那一处写了 `shadow-lg`（`space-info.tsx:89`），列表里那些小头像没有；
+// 全都加上去的话，一排动态的作者头像会各带一圈影，看起来像浮在卡片上。
+func (s *Shell) spaceAvatar(c *ui.Context, face string, side float32, shadow bool) {
 	t := c.Theme()
-	ui.Box(c).Size(side, side).Radius(side / 2).Clip().Label(face).Children(func() {
+	box := ui.Box(c).Size(side, side).Radius(side / 2).Clip().Label(face)
+	if shadow {
+		box = box.Shadow(0, 10, 15, -3, ui.RGBA(0, 0, 0, 0.1)).
+			Shadow(0, 4, 6, -4, ui.RGBA(0, 0, 0, 0.1))
+	}
+	box.Children(func() {
 		if st := s.images.Get(face); face != "" && st.Ready() {
 			ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(side, side)
 			return
@@ -598,7 +631,9 @@ func (s *Shell) spaceFill(c *ui.Context, url string, h float32) {
 	t := c.Theme()
 	ui.Box(c).Height(h).FillWidth().Clip().Children(func() {
 		if st := s.images.Get(url); st.Ready() {
-			ui.Image(c, st.Bitmap).Fit(ui.Cover)
+			// ⚠️ **`FillWidth().Height(h)` 不能省**：只写 `Fit(ui.Cover)` 的话，
+			// 图片按**自己的像素尺寸**摆，小图只铺满左边一截，右边露出底色。
+			ui.Image(c, st.Bitmap).Fit(ui.Cover).FillWidth().Height(h)
 			return
 		}
 		ui.Box(c).Height(h).FillWidth().Background(t.Surface)
