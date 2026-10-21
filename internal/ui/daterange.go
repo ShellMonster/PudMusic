@@ -161,7 +161,8 @@ func (f *dateFilter) view(c *ui.Context, now time.Time) bool {
 		ui.Text(c, "到").FontSize(12).TextColor(t.TextMuted)
 		ui.DateInput(c, &f.to).Label("结束日期")
 
-		ui.Text(c, f.summary()).FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, f.summary()).FontSize(12).LineHeight(smallCopyLeading).
+			TextColor(t.TextMuted)
 	})
 
 	switch {

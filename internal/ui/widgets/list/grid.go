@@ -184,6 +184,10 @@ type Grid struct {
 	empty    string
 	emptySet bool
 
+	// emptyView 是「一行都没有时那一格」的画法（见 SetEmptyView）。nil 是没装，
+	// 那一格走 emptyText() 那句话。理由和 `List.emptyView` 一样。
+	emptyView func(c *ui.Context)
+
 	// width 是这个网格**上一帧**量出来的容器宽，用来判断点。
 	width float32
 
@@ -250,6 +254,13 @@ func (g *Grid) selectedID() string {
 //
 // ⚠️ 只能由界面线程调，同 SetSongs。
 func (g *Grid) SetEmpty(text string) { g.empty, g.emptySet = text, true }
+
+// SetEmptyView 换掉「一行都没有时**那一格**」的画法。理由见 `List.SetEmptyView`。
+//
+// ⚠️ **传 nil 是退回那句话**（`SetEmpty` 那一句，或默认那句）。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (g *Grid) SetEmptyView(fn func(c *ui.Context)) { g.emptyView = fn }
 
 // SetFooter 装末尾那一格的画法（转圈 / 重试），传 nil 去掉。
 //
@@ -425,6 +436,12 @@ func (g *Grid) View(c *ui.Context) {
 		// 没有歌时网格是空的，Children 里那一支就是它的空状态。
 		Children(func() {
 			if len(g.songs) == 0 {
+				// ⚠️ **先看外面递进来的画法**（`SetEmptyView`），理由见
+				// `List.SetEmptyView`。
+				if g.emptyView != nil {
+					g.emptyView(c)
+					return
+				}
 				if txt := g.emptyText(); txt != "" {
 					ui.Text(c, txt).FontSize(13).
 						TextColor(c.Theme().TextMuted).Padding(16)

@@ -7,6 +7,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -282,7 +283,16 @@ func TestTheReportHistorySwitchReallyWritesTheSetting(t *testing.T) {
 	cli := biliForTest(t, f)
 	b := newTestShell(t,
 		withSettings(app.DefaultSettings("")),
-		mounted(func(_ *testing.T, a *app.App) { a.MountLibrary(cli) }),
+		mounted(func(t *testing.T, a *app.App) {
+			// ⚠️ **挂一份登录态**（票 #138）：历史记录这一页要登录才有，没登录时
+			// 页面画的是「先登录」那一支，那个开关压根不在画面上。
+			store := app.NewMemoryStore("test")
+			if err := store.Save(context.Background(), app.Session{SESSDATA: "sess"}); err != nil {
+				t.Fatal(err)
+			}
+			a.MountLogin(store, cli)
+			a.MountLibrary(cli)
+		}),
 		withClock(newFakeClock(now)))
 	a, s, tt := b.a, b.s, b.tt
 	path := b.settingsPath

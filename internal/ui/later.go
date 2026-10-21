@@ -148,12 +148,25 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 		return
 	}
 
+	// 🔴 **没登录就说清，而且一个请求都不发**（票 #138）。
+	//
+	// ⚠️ **这一支原来没有**：从地址栏或者前进后退进这一页，标题、日期筛选、
+	// 关键词框、表头全都在，然后列表空着，或者末尾一行「加载失败，点此重试」——
+	// 一句都没提「你要先登录」。用户会以为应用坏了或者网络有问题。
+	//
+	// ⚠️ **旗标在路由表里**（`Route.RequiresLogin`），而「要不要摆进侧栏」是
+	// 另一个标志（`Route.HideInMenuWhenLoggedOut`）——两件事，两个标志。
+	if lookup(laterPath).RequiresLogin && !s.app.LoggedIn() {
+		s.viewNeedsLogin(c, "page:"+laterPath, laterNotLoggedIn)
+		return
+	}
+
 	p := &s.laterPage
 	now := s.clock.Now()
 
-	ui.Column(c).Key("page:"+laterPath).Grow(1).Padding(16, 20).Gap(8).
+	ui.Column(c).Key("page:"+laterPath).Grow(1).Padding(16, pagePadX).Gap(8).
 		Children(func() {
-			ui.Text(c, "稍后再看").FontSize(22).Bold()
+			ui.Text(c, "稍后再看").FontSize(pageTitleSize).Bold()
 
 			// 换查询的位置在**画列表之前**：Reload 会把已加载的行清掉，放在后面
 			// 的话这一帧画的是清掉之前的样子，用户会先看到一屏旧的、再变成空、

@@ -69,6 +69,16 @@ func IconButton(c *ui.Context, svg *ui.SVG, label string, font float32) ui.Eleme
 	return b
 }
 
+// Feel 铺上「悬停 / 按下」的那一层反馈。
+//
+// ⚠️ **这是给「不是按钮、但也要有反馈」的扁平控件用的**（票 #138 的主 Tab 就是
+// 这么做的）：按钮那一份 `Button` 自己带，而 Tab 是 `ui.TabsBase` 给的，我们
+// 拿不到它的 `styleFn`（那是框架内部的）。
+//
+// 用法：`e = flat.Feel(c, e)`，放在别的样式**之后**（选中那一层的底色要先铺好，
+// 悬停那层是压在它上面的）。
+func Feel(c *ui.Context, e ui.Element) ui.Element { return feel(c, e) }
+
 // feel 铺上「悬停 / 按下」的那一层反馈。
 //
 // ⚠️ **「铺不铺」在建元素时问，「是不是禁用」在画的时候问**——见 `shade`。

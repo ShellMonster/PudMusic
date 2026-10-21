@@ -410,7 +410,7 @@ func TestTheStatusColumnShowsTheThreeParts(t *testing.T) {
 // `dlStatusW`），不是扫整张图。早先这里是整幅宽度扫，于是「侧栏里当前页那一项
 // 用主色垫底」也会被量进来——而侧栏那一项的高度和这一页的状态列**没有任何
 // 关系**，它落没落进这几行像素全看侧栏上排了几项：未登录时那三个入口不摆
-// （`Route.NeedsLogin`），当前页那一项往上挪了三行，正好掉进
+// （`Route.HideInMenuWhenLoggedOut`），当前页那一项往上挪了三行，正好掉进
 // `txt.Y-4` 那一行，于是量到的恒是侧栏那一项左右两段空白里较长的一段
 // （实测 74），50% 和 90% 一样宽。
 //

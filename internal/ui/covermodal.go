@@ -374,7 +374,8 @@ func (s *Shell) viewCoverPicker(c *ui.Context, e *folderEdit) {
 		s.pickCover()
 	}
 
-	ui.Text(c, coverHint).FontSize(11).TextColor(t.TextMuted).MaxLines(1)
+	ui.Text(c, coverHint).FontSize(11).LineHeight(smallCopyHintLeading).
+		TextColor(t.TextMuted).MaxLines(1)
 }
 
 // folderEditing 报此刻有没有收藏夹编辑弹窗开着。

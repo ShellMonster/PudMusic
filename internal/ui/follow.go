@@ -331,8 +331,11 @@ func (s *Shell) viewFollow(c *ui.Context, _ *ui.Route) {
 	// 🔴 **没登录不假装有内容**。这一页的四个接口全都要 Cookie，没登录时它们
 	// 一律回 -101，而 -101 和「网络断了」在这一层一模一样。所以先判登录态、
 	// 一个请求都不发（理由见文件头「五种空」）。
-	if !s.app.LoggedIn() {
-		s.viewFollowNotLoggedIn(c)
+	//
+	// ⚠️ **旗标在路由表里**（`Route.RequiresLogin`），而「要不要摆进侧栏」是
+	// 另一个标志（`Route.HideInMenuWhenLoggedOut`）——两件事，两个标志（票 #138）。
+	if lookup(followPath).RequiresLogin && !s.app.LoggedIn() {
+		s.viewNeedsLogin(c, "page:"+followPath, followNotLoggedIn)
 		return
 	}
 
@@ -385,21 +388,6 @@ func (s *Shell) viewFollow(c *ui.Context, _ *ui.Route) {
 func (f *followPage) scrollTop() {
 	f.scroll.Y = 0
 	f.state.ScrollTo(0, ui.Start)
-}
-
-// viewFollowNotLoggedIn 是「还没登录」那一支。**不发任何请求**。
-func (s *Shell) viewFollowNotLoggedIn(c *ui.Context) {
-	t := c.Theme()
-	ui.Column(c).Key("page:" + followPath).Grow(1).Center().Gap(8).Padding(24).
-		Children(func() {
-			ui.Text(c, followNotLoggedIn.Title).FontSize(22).Bold()
-			ui.Text(c, followNotLoggedIn.Hint).FontSize(12).TextColor(t.TextMuted)
-			// 给一个能立刻做完的事：这一页在没登录之前永远是这个样子，而
-			// `/login` 就是扫码登录那一页（`router.go` 的 routes 表里那一条）。
-			if ui.PrimaryButton(c, "去登录").Clicked() {
-				s.navigate(loginPath)
-			}
-		})
 }
 
 // viewFollowPane 是左边那一列：标题 + 「全部关注(N)」+ 每个分组一格。
@@ -597,7 +585,10 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 		return
 	}
 	if !f.pager.started && f.pager.loading {
-		s.viewEmpty(c, "follow:loading", emptyState{Title: "正在加载关注的人…"})
+		// ⚠️ **走 `viewLoading`（和「没有结果」同一个出口）**：这一格原来是一句
+		// 13pt 淡灰缩在左边，而「没关注任何人」是居中 15pt——用户等的那几秒里
+		// 那一行字和回来之后那一格对不上（票 #138）。
+		s.viewLoading(c, "follow:loading", "正在加载关注的人…")
 		return
 	}
 	// 🔴 **「一格都没有」也分几种**：见下面 `followEmpty`。合成一句的话，用户

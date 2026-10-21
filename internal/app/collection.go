@@ -580,13 +580,16 @@ func DownloaderMissing(err error) bool { return errors.Is(err, errDownloaderMiss
 // 它是 `widgets/list` 的 `Fetcher` 背后那一支：**在后台 goroutine 里调**，
 // 所以它不许碰界面状态，要通知界面就把结果按返回去。
 //
+// keyword 是按歌名找的那个词，空串就是不过滤（筛是接口筛的，理由见
+// `bili.CollectionMedias` 顶上那一段）。
+//
 // 返回的第二项是「后面还有没有」。
-func (a *App) LoadCollectionPage(ctx context.Context, ref CollectionRef, sort bili.CollectionSort, page int) ([]bili.Media, bool, error) {
+func (a *App) LoadCollectionPage(ctx context.Context, ref CollectionRef, sort bili.CollectionSort, keyword string, page int) ([]bili.Media, bool, error) {
 	c := a.collectionsSnapshot()
 	if c == nil {
 		return nil, false, errCollectionsMissing
 	}
-	pg, err := c.refs.Client.CollectionMedias(ctx, ref.ID, sort, page, 0)
+	pg, err := c.refs.Client.CollectionMedias(ctx, ref.ID, sort, keyword, page, 0)
 	if err != nil {
 		return nil, false, err
 	}

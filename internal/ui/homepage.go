@@ -208,7 +208,8 @@ func (h *homePage) view(c *ui.Context, s *Shell) {
 		l.SetView(view)
 	}
 
-	ui.Column(c).Key("page:" + homePath).Grow(1).Padding(20).Gap(12).
+	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
+	ui.Column(c).Key("page:"+homePath).Grow(1).Padding(20, pagePadX).Gap(12).
 		AlignItems(ui.Stretch).Children(func() {
 		h.viewTabs(c)
 
@@ -293,12 +294,14 @@ func (h *homePage) scrollTop() {
 // 不该在接数据源这一票里顺手定下来。摆一个连语义都还没定的按钮不如不摆。
 func (h *homePage) viewTabs(c *ui.Context) {
 	ui.Row(c).Key("home:tabbar").FillWidth().AlignItems(ui.Center).Children(func() {
-		// 🔴 Key 要写在 `ui.Tabs` 的构造**之前**：Tabs 里面是个 List，它的状态在
+		// 🔴 Key 要写在 Tab 的构造**之前**：Tab 里面是个 List，它的状态在
 		// 构造的时候就已经读过了，构造之后再 `.Key()` 会 panic（`ui/element.go`
 		// 的 Key 注释：自带输入的控件都不能构造后 Key，只能构造前 `Context.Key`）。
 		// 中间的语句会把它抢走，所以这两句要紧挨着。
 		c.Key("home:tabs")
-		ui.Tabs(c, &h.tab, homeTabs[:]...).Grow(1)
+		// ⚠️ **主 Tab 用扁平那一种**（`flatTabs`，见 tabs.go）：这一排和次级
+		// 排序那几排不是同一个样子（票 #138）。
+		flatTabs(c, &h.tab, homeTabs[:]...).Grow(1)
 	})
 }
 
