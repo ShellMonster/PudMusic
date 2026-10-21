@@ -1272,7 +1272,7 @@ func TestTheMeasureBudgetIsBounded(t *testing.T) {
 	frames := 0
 	tt := mygoui.NewTester(func(c *mygoui.Context) {
 		frames++
-		lv.centre(c, 0, 0, app.DefaultLyricsFontSize)
+		lv.centre(c, 0, 0, app.DefaultLyricsFontSize, false)
 	}, 100, 100)
 
 	// 一共 lyricMeasureFrames+1 帧：pend 从 0 数起，头一帧（pend=0）本身就在预算

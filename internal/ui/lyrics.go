@@ -122,6 +122,14 @@ var lyricScrollAnim = ui.Animation{
 	Spring: ui.SpringOptions{Duration: 500 * time.Millisecond, Precision: 0.05},
 }
 
+// lyricSnapAnim 是「窗口刚重新看得见」那一帧用的那一下：一次到位。
+//
+// ⚠️ **不能用 `ui.Animation{}`**：它的零值是 `Smooth` 那条 500ms 的弹簧
+// （`mygo/ui/motion.go:33`），而那正好是票面不要的「慢慢追」。一个 1ns 的
+// 曲线在下一帧就落到目标上（`channel.step` 里 `t >= 1` 直接取 target），
+// 用户看到的是一次跳到位。
+var lyricSnapAnim = ui.Animation{Duration: time.Nanosecond, Ease: ui.Linear}
+
 // lyricLineKey 是每一句歌词的判重标识（铁律四）。
 //
 // 用**时间戳加行号**：时间戳单靠自己不唯一——两句完全同一时刻的话是有的，而
@@ -319,7 +327,7 @@ func (lv *lyricsView) ready() bool { return lv.box.H > 0 && lv.line.H > 0 }
 // 往下滚是内容往上走：这一句现在在中间偏**下**，就要往下滚那么多，把它带上来。
 // 写成减号的话目标越算越靠上、越算越够不着，最后被夹在 `MaxY` 那个端点上不动
 // ——而放大、渐隐、翻译全对，只有「没滚到中间」那一样看不出来。
-func (lv *lyricsView) centre(c *ui.Context, active int, content uint32, fontSize float32) {
+func (lv *lyricsView) centre(c *ui.Context, active int, content uint32, fontSize float32, snap bool) {
 	if !lv.ready() {
 		// 头一帧还没有框可量。这一帧不滚，但要一帧再来量。
 		//
@@ -337,6 +345,20 @@ func (lv *lyricsView) centre(c *ui.Context, active int, content uint32, fontSize
 	// 那一半，上下各让一半），就是要多滚的那一截。
 	off := (lv.line.Y - lv.box.Y) - (lv.box.H-lv.line.H)/2
 	aim := lv.aimOf(active, content, fontSize)
+
+	if snap {
+		// 窗口刚从看不见变成看得见（票 #156）：**一次跳到位**，不重放那段滚过去
+		// 的动画。不处理的话，看不见那段时间里唱到第几句都记着，恢复之后弹簧
+		// 从旧位置一帧一帧往新目标追——而用户其实只是把窗口切回来，看到的应该
+		// 是「现在唱到哪一句」，不是一段补放的滚动。
+		//
+		// 目标算法和下面那一支完全一样：几何是上一帧量到的，`ScrollTo` 的
+		// `MaxY` 夹取也是同一套（见 `lyricSnapAnim`）。
+		lv.aim = aim
+		lv.aiming = false
+		lv.scroll.ScrollTo(0, lv.scroll.Y+off, lyricSnapAnim)
+		return
+	}
 
 	switch {
 	case lv.scroll.Scrolling():
@@ -470,7 +492,8 @@ func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Dura
 	s.viewLyricKnobColumn(c, snap, true)
 
 	// ⚠️ 放在整棵树建完之后：它要用容器和正在唱那一句的框，而那两个是上面读到的。
-	lv.centre(c, active, lyricShapeOf(snap.Rows), snap.FontSize)
+	// snap = 「这一帧是窗口刚恢复可见的第一帧」，一次到位（见 centre 里那一支）。
+	lv.centre(c, active, lyricShapeOf(snap.Rows), snap.FontSize, s.snapScroll)
 }
 
 // lyricLine 画一句歌词，和叠在它下面的那句翻译。
