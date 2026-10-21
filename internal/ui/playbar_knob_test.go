@@ -215,3 +215,42 @@ func near(a, b color.RGBA) bool {
 
 // 免得这一族跟别的测试重名。
 var _ = app.State{}
+
+// TestTheVolumeSliderDoesNotDriftWithThePercentText 钉「滑块不跟着百分比字数横向漂」。
+//
+// 🔴 **这一条是评审点名缺的那一个护栏**（F6）：行为已经对了（那一列和百分比都定宽），
+// 但**没有任何测试能抓住它回退**——把两处定宽一起抽掉，仓库里原有四条相关测试
+// **全绿**，而滑块实测会从 1080.3 漂到 1085.0（4.7 像素，而它就在指针底下）。
+//
+// 判据是**滑块自己的 X**，三档音量各量一次，一像素都不许动：
+//
+//	音量 0   → 「0%」（两个字）
+//	音量 0.5 → 「50%」（三个字）
+//	音量 1   → 「100%」（四个字）
+//
+// 字数不同 → 百分比那行自然宽度不同 → 列宽若跟着它走、而滑块是居中的，
+// 滑块就会挪。
+func TestTheVolumeSliderDoesNotDriftWithThePercentText(t *testing.T) {
+	var first float32
+	var firstVol float64
+	for i, vol := range []float64{0, 0.5, 1} {
+		st := barState()
+		st.Volume = vol
+		tt, _ := bottomBarTester(t, st, 1200, 320, false)
+		hoverVolumeKey(t, tt)
+
+		sl, ok := tt.Find("音量")
+		if !ok {
+			t.Fatalf("音量 %.1f：浮层里没有那根音量滑块，文字有 %q", vol, tt.Texts())
+		}
+		if i == 0 {
+			first, firstVol = sl.X, vol
+			continue
+		}
+		if absF(sl.X-first) > 0.01 {
+			t.Errorf("音量 %.1f 时滑块的 x 是 %.2f，音量 %.1f 时是 %.2f（差 %.2f）——"+
+				"它跟着百分比的字数横向漂了：滑块就在指针底下，漂一下拖起来就跳",
+				vol, sl.X, firstVol, first, absF(sl.X-first))
+		}
+	}
+}
