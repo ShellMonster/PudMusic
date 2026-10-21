@@ -1,4 +1,4 @@
-// 全屏播放器自己那一份偏好：频谱开不开、什么颜色。
+// 全屏播放器自己那一份偏好：四个开关、三个颜色。
 //
 // ## 为什么不进 `app.Settings`
 //
@@ -10,18 +10,15 @@
 //  2. 顺带避开了往 `Settings` 里加键——那边 `settings_test.go` 的 `biuKeys` 和
 //     `ourOwnKeys` 是两张封闭的表，加一个键就得同时改那两张。
 //
-// ## 这一份里**只有**频谱那两样
+// ## 键名和默认值都照 Biu 的 store
 //
-// Biu 那一个 store 有七样（4 个开关 + 3 个颜色）。这里只留频谱开关和频谱颜色：
-// 封面开关、歌词开关、模糊背景开关都是**别的票的活**（歌词是 BMG-65，毛玻璃
-// 是阶段 6 的视觉取舍），先把它们摆上再让用户去调，调不动的东西比没有更坏。
+// 七样一个不少（4 个开关 + 3 个颜色）。默认值也照它：歌词、封面、虚化背景开着，
+// 频谱关着，三个颜色空串（= 走各自的默认；见 `internal/ui/fullplayer.go` 的
+// `fullForeground` 与 `fullplayer_spectrum.go` 的 `spectrumColorOf`）。
 //
-// ## 零值就是默认值
-//
-// `FullPlayerPrefs{}` 恰好等于 Biu 的 `defaultSettings` 里我们要的那两样：
-// 频谱默认**关**，颜色空串（= `#666`，见 `internal/ui/fullplayer_spectrum.go`）。
-// 所以「挂上之前」和「挂上之后文件里没有」这两种情形给用户的界面一模一样，
-// 不需要在这里补一份默认值。
+// ⚠️ **默认值不是零值**：`FullPlayerPrefs{}` 是三个开关全关。所以读盘是「先摆一份
+// 默认，再拿文件里有的键盖上去」——老版本写的那份文件只有 `showSpectrum` 和
+// `spectrumColor`，新加的三个键不在里面，缺的那个必须落回默认，而不是落成 false。
 
 package app
 
@@ -37,7 +34,9 @@ const (
 	// fullPlayerPrefsFileName 是这份文件的名字，和 Biu 的 store 名对上。
 	fullPlayerPrefsFileName = "full-screen-player.json"
 	// fullPlayerPrefsSchema 是这份文件的格式版本。改它的**结构**就涨它。
-	fullPlayerPrefsSchema = 1
+	//
+	// 2：从「频谱开关 + 频谱颜色」涨到 Biu 那七样。
+	fullPlayerPrefsSchema = 2
 )
 
 // FullPlayerPrefs 是全屏播放器的偏好。
@@ -45,9 +44,19 @@ const (
 // 键名和 Biu 那一个 store 一样（`store/full-screen-player-settings.ts` 的
 // `partialize`），将来从 Biu 迁过来的时候认得。
 type FullPlayerPrefs struct {
+	// ShowLyrics 歌词画不画。默认 **true**（Biu 的 `defaultSettings.showLyrics`）。
+	ShowLyrics bool `json:"showLyrics"`
 	// ShowSpectrum 频谱画不画。**默认 false**：Biu 的 `defaultSettings` 就是
 	// `showSpectrum: false`，用户得自己开。
 	ShowSpectrum bool `json:"showSpectrum"`
+	// ShowCover 封面画不画。默认 **true**。
+	ShowCover bool `json:"showCover"`
+	// ShowBlurredBackground 背景用不用毛玻璃。默认 **true**；关掉时铺
+	// `BackgroundColor`（空串 = 主题背景色）。
+	ShowBlurredBackground bool `json:"showBlurredBackground"`
+	// LyricsColor 是歌词的字色（`#rrggbb`）。空串 = 白（Biu 的默认值
+	// `lyricsColor: "#ffffff"`）。
+	LyricsColor string `json:"lyricsColor,omitempty"`
 	// SpectrumColor 是频谱条的颜色（`#rrggbb`）。空串 = 用默认的 `#666`。
 	//
 	// Biu 那边存的是字符串 `"currentColor"`，画的时候再判断一次是不是它、是就
@@ -55,6 +64,22 @@ type FullPlayerPrefs struct {
 	// 这一步：空串和 `#666` 在界面上是一回事，而存一个要每次画的时候再解释的
 	// 魔法值，只会让「用户到底选了哪个颜色」这件事永远说不清。
 	SpectrumColor string `json:"spectrumColor,omitempty"`
+	// BackgroundColor 是关掉毛玻璃之后那层底色（`#rrggbb`）。空串 = 主题背景色
+	// （Biu 的 `backgroundColor: undefined`）。
+	BackgroundColor string `json:"backgroundColor,omitempty"`
+}
+
+// DefaultFullPlayerPrefs 是 Biu 的 `defaultSettings`。
+//
+// ⚠️ 这个结构体的**零值不等于默认值**（三个默认开着的开关会变成关）。读盘、
+// 没挂盘、以及测试里「只改其中一样」都从这里起手。
+func DefaultFullPlayerPrefs() FullPlayerPrefs {
+	return FullPlayerPrefs{
+		ShowLyrics:            true,
+		ShowSpectrum:          false,
+		ShowCover:             true,
+		ShowBlurredBackground: true,
+	}
 }
 
 // FullPlayerPrefsPath 报这份文件的位置。dir 为空返回空串（= 只在内存里）。
@@ -81,12 +106,17 @@ type fullPlayerPrefsStore struct {
 	save error
 }
 
-// load 读盘，读不到就用零值。**在挂上的时候调一次**。
+// load 读盘，读不到就用默认。**在挂上的时候调一次**。
 //
 // 坏文件、别的版本写的、读不出来——三种都当没有，和更新器那份同一个理由：
-// 这一份丢了最坏的结果是「频谱默认关着」，而频谱本来就该默认关着。
+// 这一份丢了最坏的结果是七个键全回到 Biu 的默认（频谱关着、另外三个开着）。
 // （和 `LoadSettings` 那边不一样是有道理的：那边丢的是用户设过的东西。）
 func (p *fullPlayerPrefsStore) load() {
+	// 先摆默认：文件不存在、读不出来、或者没有这一份的目录，`get` 都该给出
+	// Biu 的那一份默认，而不是三个开关全关的零值。
+	p.mu.Lock()
+	p.cur = DefaultFullPlayerPrefs()
+	p.mu.Unlock()
 	if p.path == "" {
 		return
 	}
@@ -94,9 +124,20 @@ func (p *fullPlayerPrefsStore) load() {
 	if err != nil {
 		return
 	}
+	// ⚠️ **指针字段**：文件里**没有**的那个键要落回默认，而 `bool` 的零值会把
+	// 「缺这一键」读成 false。老版本写的那份文件只有频谱那两样，少了这一层，
+	// 升级之后歌词/封面/毛玻璃会一起变成关着的——而用户在文件里一个字节都没改。
 	var f struct {
-		SchemaVersion int             `json:"schemaVersion"`
-		FullPlayer    FullPlayerPrefs `json:"fullPlayer"`
+		SchemaVersion int `json:"schemaVersion"`
+		FullPlayer    struct {
+			ShowLyrics            *bool   `json:"showLyrics"`
+			ShowSpectrum          *bool   `json:"showSpectrum"`
+			ShowCover             *bool   `json:"showCover"`
+			ShowBlurredBackground *bool   `json:"showBlurredBackground"`
+			LyricsColor           *string `json:"lyricsColor"`
+			SpectrumColor         *string `json:"spectrumColor"`
+			BackgroundColor       *string `json:"backgroundColor"`
+		} `json:"fullPlayer"`
 	}
 	if err := json.Unmarshal(b, &f); err != nil {
 		return
@@ -107,16 +148,38 @@ func (p *fullPlayerPrefsStore) load() {
 		p.mu.Unlock()
 		return
 	}
+	cur := DefaultFullPlayerPrefs()
+	if f.FullPlayer.ShowLyrics != nil {
+		cur.ShowLyrics = *f.FullPlayer.ShowLyrics
+	}
+	if f.FullPlayer.ShowSpectrum != nil {
+		cur.ShowSpectrum = *f.FullPlayer.ShowSpectrum
+	}
+	if f.FullPlayer.ShowCover != nil {
+		cur.ShowCover = *f.FullPlayer.ShowCover
+	}
+	if f.FullPlayer.ShowBlurredBackground != nil {
+		cur.ShowBlurredBackground = *f.FullPlayer.ShowBlurredBackground
+	}
+	if f.FullPlayer.LyricsColor != nil {
+		cur.LyricsColor = *f.FullPlayer.LyricsColor
+	}
+	if f.FullPlayer.SpectrumColor != nil {
+		cur.SpectrumColor = *f.FullPlayer.SpectrumColor
+	}
+	if f.FullPlayer.BackgroundColor != nil {
+		cur.BackgroundColor = *f.FullPlayer.BackgroundColor
+	}
 	p.mu.Lock()
-	p.cur = f.FullPlayer
+	p.cur = cur
 	p.normalizeLocked()
 	p.mu.Unlock()
 }
 
-// get 返回现在这一份。挂上之前（p 是 nil）也给得出值：零值就是默认。
+// get 返回现在这一份。挂上之前（p 是 nil）也给得出值：Biu 的默认那一份。
 func (p *fullPlayerPrefsStore) get() FullPlayerPrefs {
 	if p == nil {
-		return FullPlayerPrefs{}
+		return DefaultFullPlayerPrefs()
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -157,10 +220,14 @@ func (p *fullPlayerPrefsStore) put(next FullPlayerPrefs) {
 //
 // 只管颜色：用户可以直接编辑这个文件，`"spectrumColor": "红"` 不该一路穿到
 // 画界面的那一行（那里 `parseHexColor` 认不出来会退回黑色，一条纯黑的频谱
-// 摆在深色背景上等于没有）。
+// 摆在深色背景上等于没有；背景色和歌词色同理）。
 func (p *fullPlayerPrefsStore) normalizeLocked() {
-	if p.cur.SpectrumColor != "" && !hexColor.MatchString(p.cur.SpectrumColor) {
-		p.cur.SpectrumColor = ""
+	for _, c := range []*string{
+		&p.cur.LyricsColor, &p.cur.SpectrumColor, &p.cur.BackgroundColor,
+	} {
+		if *c != "" && !hexColor.MatchString(*c) {
+			*c = ""
+		}
 	}
 }
 
@@ -184,16 +251,19 @@ func (a *App) FullPlayerPrefs() FullPlayerPrefs {
 
 // SetFullPlayerPrefs 改全屏播放器的偏好并立刻落盘。
 //
-// 为什么是「立刻」而不是像设置那样合并写：这一份只有两个键，改它的动作是
-// 「点一下开关」，一天点不了几次；而合并写要一个后台 goroutine 和一个停掉它
-// 的钩子，为两键的东西不值当。
+// 为什么是「立刻」而不是像设置那样合并写：这一份只有七样，改它的动作是
+// 「点一下开关 / 挑一个颜色」，一天点不了几次；而合并写要一个后台 goroutine
+// 和一个停掉它的钩子，为这么小的东西不值当。
 func (a *App) SetFullPlayerPrefs(next FullPlayerPrefs) {
 	a.mu.Lock()
 	if a.fullPlayerPrefs == nil {
 		// 没挂上盘（拿不到应用数据目录）：建一份只在内存里的，让这一轮能用，
 		// 而且**挂回 App 上**——不挂回去的话下一次改就又建一个，用户在这次会话
 		// 里改的开关会自己跳回去。
-		a.fullPlayerPrefs = &fullPlayerPrefsStore{}
+		//
+		// 初值要显式给默认：`next` 通常是调用方从 `FullPlayerPrefs()` 起手改出来
+		// 的，但这一层不该赌那件事。
+		a.fullPlayerPrefs = &fullPlayerPrefsStore{cur: DefaultFullPlayerPrefs()}
 	}
 	p := a.fullPlayerPrefs
 	wake := a.wake

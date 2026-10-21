@@ -45,13 +45,12 @@ import (
 
 // laterHeaderSpec 是「稍后再看」那一页的表头。
 //
-// ⚠️ **封面那一列的空位夹在编号和标题中间**：行里序号和标题中间隔着 48 的封面，表头不
-// 给它留位置，右边那几列就整整差 56（这一页原来那份表头就差在这里——它把「标题」摆在序
-// 号后面）。
+// ⚠️ **封面不进表头**（DESIGN.md：表头的「标题」从封面左缘起）：行里是「序号 / 封面 /
+// 标题」，表头是「序号 / 标题」。「标题」那一列 Grow(1) 吃掉左边少掉的宽，右边那几列
+// 照样和行里对齐（理由见 `widgets/list/header.go` 的 `CardHeaderSpec`）。
 func laterHeaderSpec(mt listMetrics, key string, showPubDate, showAddTime bool) list.HeaderSpec {
 	cols := []list.HeaderCol{
-		{Title: "#", Width: mt.index, End: true},
-		{Width: mt.cover}, // 封面：行里有、这一列没字
+		{Title: "#", Width: mt.index, Center: true},
 		{Title: "标题"},
 		{Title: "播放量", Width: mt.count, End: true},
 	}
@@ -81,8 +80,7 @@ func historyHeaderSpec(mt listMetrics, key string) list.HeaderSpec {
 	return list.HeaderSpec{
 		Key: key,
 		Cols: []list.HeaderCol{
-			{Title: "#", Width: mt.index, End: true},
-			{Width: mt.cover}, // 封面：行里有、这一列没字
+			{Title: "#", Width: mt.index, Center: true},
 			{Title: "标题"},
 			{Title: "播放进度", Width: mt.progress, End: true},
 			{Title: "观看时间", Width: mt.viewedAt, End: true},
@@ -127,6 +125,6 @@ func viewRowIndex(c *ui.Context, i int, playing bool, color ui.Color, id, title 
 		hover.Wave(c, "wave:"+id, width, color, title)
 		return
 	}
-	ui.Text(c, rowNumber(i)).Width(width).TextAlign(ui.End).
+	ui.Text(c, rowNumber(i)).Width(width).TextAlign(ui.Center).
 		FontSize(scale.Font(c, 12)).TextColor(c.Theme().TextMuted).MaxLines(1)
 }

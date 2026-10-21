@@ -37,12 +37,19 @@ const (
 	cardPadY = 8
 	cardPadX = 8
 
-	// cardGap 是行里几块之间的间距。Biu 是 grid 的 gap，这里取 8。
+	// rowGap 是**列表那一行**里几块（序号 / 封面 / 标题 / 各数字列 / 「⋯」）之间
+	// 的缝。Biu 是 grid 的 `gap-4`（= 16，`music-list-item/index.tsx:80`），
+	// 两种档位都是它。
+	rowGap = 16
+
+	// cardGap 是**网格卡片**里那几块的缝：封面下面那一块 `mt-2` 的纵向留白，
+	// 以及 UP 名和时长那一行的缝（Biu 的 `music-card/index.tsx`）。它和 `rowGap`
+	// 是两件事——列表的列间距是 16，而卡片里那圈是 8。
 	cardGap = 8
 
-	// indexWidth 是序号那一列的宽度。Biu 是 `min-w-8 text-center`，8 个字宽
-	// 够放四位数的歌单序号（9999 首）。
-	indexWidth = 40
+	// indexWidth 是序号那一列的宽度。Biu 是 `min-w-8 text-center`（= 32，居中）。
+	// 四位数的歌单序号（9999 首）也放得下。
+	indexWidth = 32
 
 	// durationWidth 是时长那一列的宽度。写死是为了让时长上下对齐（Biu 的
 	// `tabular-nums`）；不写的话 3:05 和 10:05 两列会左右跳。
@@ -78,6 +85,14 @@ const (
 	// 折两行不影响别的；列表那一行折两行，整张列表的行高就跟着跳（文件头那一段）。
 	titleLines = 2
 
+	// listTitleSize / listOwnerSize 是列表那一行歌名和 UP 名的字号。
+	//
+	// 上游是 `text-base`（16，`music-list-item/index.tsx:111`）和 `text-sm`
+	// （14，同一行下面那个 UP 名）；DESIGN.md 的「列表歌名 16 / UP 名 14」就是
+	// 这两个数。**改之前是 14 / 12**——比上游小一档，远一点就读不清。
+	listTitleSize = 16
+	listOwnerSize = 14
+
 	// textGap 是歌名和 UP 名之间的距离。Biu 是 `mt-1`（4）。
 	textGap = 4
 
@@ -97,20 +112,15 @@ const (
 // 值」的参数：普通那一行是十几条测试量着的对象，给它套一层按档位分支的取值之后，
 // 改坏紧凑那档可能连累普通那档的断言，而症状（行高差了七八像素）在屏幕上像「排版
 // 有点挤」——极难往回追。
+//
+// ⚠️ **紧凑档没有封面**（上游就是：`music-list-item/index.tsx:85-88` 的紧凑那一
+// 支只画歌名，`w-8` 的封面整块不在）。这一档省下来的高度里最大的一块就是它。
 const (
-	// compactCoverSize 是紧凑档的封面边长。48 → 32 是这一档省下来的高度里最大
-	// 的一块（Biu 的紧凑视图也是把封面缩到 `w-8` 一路）。
-	compactCoverSize = 32
-
 	// compactPadY / compactPadX 是紧凑档的内边距。上下 8 → 4，一行省 8 像素。
 	compactPadY = 4
 	compactPadX = 6
 
-	// compactGap 是紧凑档行里几块之间的间距。
-	compactGap = 6
-
-	// compactIndexWidth 是紧凑档序号那一列的宽。「9999 首」的歌单用 40 太宽，
-	// 而这一档省的就是横向空间。
+	// compactIndexWidth 是紧凑档序号那一列的宽。
 	compactIndexWidth = 32
 
 	// compactDurationWidth 是紧凑档时长那一列的宽。Biu 那边用 `tabular-nums`，
@@ -128,10 +138,12 @@ const (
 
 	// compactTitleLines 是紧凑档歌名最多几行。**1**——这一档和普通那一档现在歌名
 	// 一样都是一行（普通那一档改成一行是这一票的事，见文件头），这一档省下来的
-	// 高度是封面和内边距。
+	// 高度是封面（整块不画）和内边距。
 	compactTitleLines = 1
 
-	// compactRowHeight 是紧凑档那一行的高：封面 32 + 上下内边距 4×2。
+	// compactRowHeight 是紧凑档那一行的高。**定死的**（同 `listRowHeight`）：
+	// 这一行里没有封面撑着，歌名和 UP 名那两块加起来才 33，剩下的靠这个数钉住。
+	// 40 和改之前一样——这一档省的是封面和内边距，不是行高。
 	compactRowHeight = 40
 )
 
@@ -223,7 +235,7 @@ func (l *List) viewCard(r ui.ListRow) {
 	// 报「hover 是个 float32」）。
 	//
 	// ⚠️ **行高写死 64**（见文件头）：歌名一行，这一行由 48 的封面撑着。
-	row := ui.Row(c).AlignSelf(ui.Stretch).Gap(cardGap).Padding(cardPadY, cardPadX).
+	row := ui.Row(c).AlignSelf(ui.Stretch).Gap(rowGap).Padding(cardPadY, cardPadX).
 		Height(listRowHeight).
 		// 右键菜单挂在**这一行**上：MyGo 取的是最里层那个带菜单的元素
 		//（`ui/menu.go` 的 menuTarget），挂到列表外面的话整列共用一份菜单。
@@ -248,10 +260,10 @@ func (l *List) viewCard(r ui.ListRow) {
 		// ⚠️ 歌名**只占一行**（上游那一行是 `truncate`）：折行的话整张列表的行高
 		// 就跟着歌名长短跳（见文件头）。
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).Children(func() {
-			ui.Text(c, m.Title).FontSize(scale.Font(c, 14)).LineHeight(titleLeading).
+			ui.Text(c, m.Title).FontSize(scale.Font(c, listTitleSize)).LineHeight(titleLeading).
 				TextColor(titleColor).MaxLines(listTitleLines).Ellipsis("…")
 			if m.Owner != "" {
-				ui.Text(c, m.Owner).FontSize(scale.Font(c, 12)).LineHeight(ownerLeading).
+				ui.Text(c, m.Owner).FontSize(scale.Font(c, listOwnerSize)).LineHeight(ownerLeading).
 					TextColor(ownerColor).MaxLines(1).Ellipsis("…")
 			}
 		})
@@ -291,12 +303,16 @@ func (l *List) viewCard(r ui.ListRow) {
 //
 // ## 和普通那一行差在哪
 //
-// 四处，**一处都不碰语义**：封面 48 → 32、上下内边距 8 → 4、行内间距 8 → 6、
-// 行高 64 → 40。选中 / 正在放 / 右键菜单 / 勾选框 / 封面上的 hover 反馈 / 行尾
-// 那枚「⋯」，这些**一个不少**——紧凑是「同一种行排得更密」，不是「另一种行」。
-// 少一样就变成两个控件，而不是同一个控件的两档，用户会以为是两个功能。
+// 三处，**一处都不碰语义**：上下内边距 8 → 4、行高 64 → 40、**封面整块不画**
+// （上游的紧凑那一支只画歌名，见 `music-list-item/index.tsx:85-88`）。选中 / 正在放 /
+// 右键菜单 / 勾选框 / 行尾那枚「⋯」，这些**一个不少**——紧凑是「同一种行排得更密」，
+// 不是「另一种行」。少一样就变成两个控件，而不是同一个控件的两档，用户会以为是两个
+// 功能。
 //
-// ⚠️ **字号只降了歌名那一处**（14 → 13）。UP 名和时长还是 12：它们本来就比正文小，
+// ⚠️ **封面没有，所以也没有它上面那圈 hover 播放反馈**（`hover.RowCover`）。上游
+// 紧凑那一行同样没有：双击和右键菜单照样能播。
+//
+// ⚠️ **字号只降了歌名那一处**（16 → 13）。UP 名和时长还是 12：它们本来就比正文小，
 // 再降一档在 12pt 的基础上会糊，而这一档省的是高度不是宽度。
 func (l *List) viewCompactCard(r ui.ListRow) {
 	c, i := r.Context, r.Index
@@ -306,19 +322,14 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 
 	titleColor, ownerColor := rowColors(t, r.Selected(), playing)
 
-	row := ui.Row(c).AlignSelf(ui.Stretch).Gap(compactGap).Padding(compactPadY, compactPadX).
+	row := ui.Row(c).AlignSelf(ui.Stretch).Gap(rowGap).Padding(compactPadY, compactPadX).
 		Height(compactRowHeight).
 		// 右键菜单挂在**这一行**上，和普通那一行同一个理由（见 View 里的注释）。
 		ContextMenu(func(m *ui.Menu) { l.buildMenu(m, i) })
-	onRow := row.Hovered()
 
 	row.Children(func() {
 		l.viewCheckbox(c, i, m.Title)
 		l.viewIndex(c, i, playing, titleColor, m.Title, compactIndexWidth, 11)
-
-		// 封面 + 它上面那圈 hover 反馈，理由同普通那一行。
-		hover.RowCover(c, l.cache, m.Cover, compactCoverSize, onRow, m.Title,
-			func() { l.playFrom(i) })
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(2).Children(func() {
 			ui.Text(c, m.Title).FontSize(scale.Font(c, 13)).LineHeight(1.2).
@@ -364,6 +375,10 @@ func (l *List) isPlaying(m Music) bool { return isPlaying(l.acts, m.Item) }
 // ⚠️ **color 由调用方给**（就是这一行歌名的那个颜色）：波形摆的那一格在选中时是**主色
 // 底**，主色底上画一条主色波形等于没画，所以它跟着歌名走。
 //
+// ⚠️ **居中对齐**（上游是 `min-w-8 text-center`，`music-list-item/index.tsx:82`）：
+// 序号从 1 到几千，位数一变右对齐的左边缘就整列参差；居中之后几位数都落在同一根
+// 竖线上。
+//
 // ⚠️ **认的是「歌」不是「行」**（`isPlaying` 按判重标识，见 `Actions.IsPlaying`）：换歌
 // 之后波形跟着换，而正在放的歌在别的一行时这一行退回一个普通的序号。用行的序号认的
 // 话，「下一首播放」一插队它就会钉在错的那一行上。
@@ -373,7 +388,7 @@ func (l *List) viewIndex(c *ui.Context, i int, playing bool, color ui.Color, tit
 		hover.Wave(c, "wave:"+l.songs[i].ID, width, color, title)
 		return
 	}
-	ui.Text(c, indexText(i)).Width(width).TextAlign(ui.End).
+	ui.Text(c, indexText(i)).Width(width).TextAlign(ui.Center).
 		FontSize(scale.Font(c, font)).TextColor(t.TextMuted).MaxLines(1)
 }
 

@@ -157,12 +157,12 @@ func TestTheTimeColumnTitleCanBeChangedPerPage(t *testing.T) {
 // TestTheColumnsGiveWayToTheTitleWhenTheListIsNarrow 钉住窄窗口下的让位顺序。
 //
 // 票面加的两列是**额外交出来的宽度**，而列表的宽是窗口减侧栏和页边距来的。
-// 最小窗口 900 配最宽侧栏 480 时只剩 380：全画的话标题那一列是 4 甚至负数，
-// 歌名和表头「标题」都只剩「…」（评审量到过）。所以：
+// 最小窗口 900 配最宽侧栏 480 时只剩 380：全画的话标题那一列是负数，歌名和表头
+// 「标题」都只剩「…」（评审量到过）。所以（列间距 16、序号 32 之后的那几个数）：
 //
-//	宽 460（约 900 + 侧栏 400）	两列都在，标题 84
-//	宽 380（约 900 + 侧栏 480）	先收「投稿时间」，标题 92
-//	宽 280（再窄）		两列都收，标题 64
+//	宽 520		两列都在，标题 104
+//	宽 460（约 900 + 侧栏 400）	先收「投稿时间」，标题 140
+//	宽 380（约 900 + 侧栏 480）	播放量也收掉，标题 140
 //
 // ⚠️ **判据是「标题至少留 80」**（`minTitleWidth`），不是某个具体侧栏宽：
 // 侧栏是用户可以拖的，拿侧栏当判据会在中间某几档错位。
@@ -177,9 +177,9 @@ func TestTheColumnsGiveWayToTheTitleWhenTheListIsNarrow(t *testing.T) {
 		why        string
 	}{
 		{0, true, true, "还没量到宽：第一帧照全画（下一帧再收）"},
-		{460, true, true, "900 + 侧栏 400：两列都放得下，标题还有 84"},
-		{380, true, false, "900 + 侧栏 480：先收投稿时间，标题回到 92"},
-		{280, false, false, "再窄：播放量也收掉，标题 64"},
+		{520, true, true, "两列都放得下，标题还有 104"},
+		{460, true, false, "先收投稿时间，标题回到 140"},
+		{380, false, false, "再窄：播放量也收掉，标题 140"},
 	} {
 		l.width = c.width
 		got := l.Columns()
@@ -190,7 +190,7 @@ func TestTheColumnsGiveWayToTheTitleWhenTheListIsNarrow(t *testing.T) {
 	}
 
 	// 紧凑档用同一套判据（`MetricsOf` 取的是紧凑那一组尺寸）：宽 380 时
-	// 两列合计 320，标题只剩 60——先收「投稿时间」，播放量还在。
+	// 两列合计 348，标题只剩 32——先收「投稿时间」，播放量还在。
 	l.SetView(ViewCompact)
 	l.width = 380
 	if got := l.Columns(); !got.PlayCount || got.PubTime {
