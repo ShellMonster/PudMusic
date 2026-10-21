@@ -315,7 +315,7 @@ func TestThePagesThatDeliberatelyDoNotFollowIt(t *testing.T) {
 				}
 				return tt, s
 			},
-			why:     "它是首页顶部的一块**横向推荐位**，行数是按窗口高算出来的（`newMusicRowsAt`），翻页是「上一批 / 下一批」两个按钮——它有自己的几何，跟「一屏能看到更多歌」没关系",
+			why:     "它是首页顶部的一块**横向推荐位**，行数是按窗口高和格子宽算出来的（`newMusicRowsAt`），翻页是两枚图标箭头——它有自己的几何，跟「一屏能看到更多歌」没关系",
 			witness: "新歌",
 		},
 	} {
