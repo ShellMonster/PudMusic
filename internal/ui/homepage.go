@@ -306,9 +306,11 @@ func (h *homePage) viewTabs(c *ui.Context) {
 		// 的 Key 注释：自带输入的控件都不能构造后 Key，只能构造前 `Context.Key`）。
 		// 中间的语句会把它抢走，所以这两句要紧挨着。
 		c.Key("home:tabs")
-		// ⚠️ **主 Tab 用扁平那一种**（`flatTabs`，见 tabs.go）：这一排和次级
-		// 排序那几排不是同一个样子（票 #138）。
-		flatTabs(c, &h.tab, homeTabs[:]...).Grow(1)
+		// ⚠️ **主 Tab 用轨道 + 滑块那一种**（`mainTabs`，见 tabs.go）：这一排
+		// 和次级排序那几排不是同一个样子（票 #138）。
+		//
+		// 首页这一排上游是 `size="lg"`（44），其余三处是 md（40）。
+		mainTabs(c, &h.tab, tabLG, homeTabs[:]...)
 	})
 }
 
