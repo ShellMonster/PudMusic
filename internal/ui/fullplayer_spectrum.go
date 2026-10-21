@@ -97,9 +97,10 @@ func (s *Shell) viewFullSpectrum(c *ui.Context, st app.State, hidden bool) {
 
 	area.Draw(func(p *ui.Painter, r ui.Rect) {
 		s.paintSpectrum(p, r, bars, color)
-		// 只在真的在放的时候要下一帧：暂停时条子不动，一直要帧就是白烧 CPU
-		// （而全屏开着的时候这一层每个 pointer 移动都在画）。
-		if st.Playing {
+		// 只在真的在放、而且**用户看得到这一扇窗**的时候要下一帧：暂停时条子
+		// 不动，一直要帧就是白烧 CPU（而全屏开着的时候这一层每个 pointer 移动
+		// 都在画）；窗口收在后台时同理（票 #156）。
+		if st.Playing && s.presence.seen() {
 			p.AnimationFrame()
 		}
 	})
