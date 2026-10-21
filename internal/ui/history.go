@@ -145,11 +145,11 @@ func (s *Shell) viewHistory(c *ui.Context, _ *ui.Route) {
 	// 的（和设置页同一个理由，见 settings_page.go）。
 	ro := s.app.SettingsReadOnly()
 
-	ui.Column(c).Key("page:"+historyPath).Grow(1).Padding(16, pagePadX).Gap(8).
+	ui.Column(c).Key("page:"+historyPath).Grow(1).Padding(0, pagePadX).Gap(8).
 		Children(func() {
 			// 页头：标题在左，「记录播放历史」在右（上游是 `justify-between`）。
 			ui.Row(c).FillWidth().Center().Children(func() {
-				ui.Text(c, "历史记录").FontSize(scale.Font(c, pageTitleSize)).Bold().Grow(1)
+				ui.Text(c, "历史记录").FontSize(scale.Font(c, pageTitleSize)).Grow(1)
 				s.viewReportHistory(c, st.ReportPlayHistory, ro)
 			})
 
@@ -264,11 +264,13 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected boo
 			"", clockText(m.Duration), m.Title, func() { rows.playFrom(i) })
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).PaddingY(cardGapForCell).Children(func() {
-			ui.Text(c, m.Title).FontSize(scale.Font(c, 14)).LineHeight(1.5).
+			// 歌名 16 / UP 名 14：和 `widgets/list` 的网格卡同一档
+			// （DESIGN.md「网格：歌名 16、UP 14」）。
+			ui.Text(c, m.Title).FontSize(scale.Font(c, 16)).LineHeight(1.5).
 				TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 				if m.Owner != "" {
-					ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, 12)).LineHeight(1).
+					ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, 14)).LineHeight(1).
 						TextColor(metaColor).MaxLines(1).Ellipsis("…")
 				}
 				if playing {

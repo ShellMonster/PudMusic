@@ -87,6 +87,14 @@ issue 的验收标准**（`gh issue edit`，见 `docs/agents/issue-tracker.md`�
    每一扇窗叫醒**——只叫醒主窗口的话，迷你播放器停在旧内容（实测）。改状态用
    `Window.Update(func)`，只刷画面用 `Invalidate()`；`Window.Update(nil)` 会
    SIGSEGV。
+
+   ⚠️ **窗口看不见时那一帧会被这一扇窗自己丢掉**（`wakeHandle` + `presence`，
+   票 #156）：在放歌的时候 `App.tick` 每 50ms 叫醒每个窗口一次，收在后台的那扇
+   窗不丢的话就是风扇和电池。丢掉的只是**绘制**，状态照常落；窗口回来时
+   `Shell.noteWindow` 用 `invalidateNow` 补一帧，画出来就是此刻的样子。所以
+   「逐窗口叫醒」的那一层（`App.AddWake` / `AddLocalWake`）**不要**改成「只叫醒
+   看得见的窗口」——看不见这件事只有每个窗口自己知道（迷你窗就不看焦点）。
+   全新一帧里要判可见性的动画走 `hover.SetFrameVisible`（`Shell.View` 每帧设）。
 4. **动态列表的行必须给稳定且唯一的 key。** 默认身份是「父 ID + 兄弟序号」，
    在前面插入一行会让后面所有行的状态整体错配——症状是「选中的那一首变成了
    旁边另一首」，而每一行的字都是对的。

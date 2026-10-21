@@ -99,9 +99,9 @@ func (s *Shell) viewSearch(c *ui.Context, r *ui.Route) {
 	}
 
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
-	ui.Column(c).Key("page:/search").Grow(1).Padding(28, pagePadX).Gap(searchHeaderGap).
+	ui.Column(c).Key("page:/search").Grow(1).Padding(0, pagePadX).Gap(searchHeaderGap).
 		AlignItems(ui.Stretch).Children(func() {
-		ui.Text(c, "搜索").FontSize(scale.Font(c, pageTitleSize)).Bold()
+		ui.Text(c, "搜索").FontSize(scale.Font(c, pageTitleSize))
 
 		// ⚠️ Label 不只是给测试用的：没有它读屏软件读不出这是一个搜歌名的
 		// 输入框，只有旁边那行占位文字（占位文字不是标签）。顺带也是无头

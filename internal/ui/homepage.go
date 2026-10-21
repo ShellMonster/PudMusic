@@ -215,7 +215,7 @@ func (h *homePage) view(c *ui.Context, s *Shell) {
 	}
 
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
-	ui.Column(c).Key("page:"+homePath).Grow(1).Padding(20, pagePadX).Gap(12).
+	ui.Column(c).Key("page:"+homePath).Grow(1).Padding(0, pagePadX).Gap(12).
 		AlignItems(ui.Stretch).Children(func() {
 		h.viewTabs(c)
 

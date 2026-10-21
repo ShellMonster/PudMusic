@@ -1652,17 +1652,17 @@ var Items = []Item{
 		// issue 134 的第二单元（列表与网格）：表头、列表行、回顶。
 		//
 		// 🔴 **判据全是画面上的像素、位置和真的菜单**：这一票的四个症状**全都是
-		// 静默的**——表头底下没有线、列名比次要文字还弱、行里没有「⋯」、页面滚到
+		// 静默的**——表头底下没有线、列名比行里的字还弱、行里没有「⋯」、页面滚到
 		// 底没有回顶，这四样没有一样会报错，界面只是「不太对」。
 		//
 		// 「⋯」那一条钉的是**两条路给的是同一批动作**（行内的和右键的）：写两份菜单
 		// 的话，两边迟早会对不上，而那种错在界面上看不出来（两边都能点，只是点的
 		// 不是同一件事）。
-		Spec: "列表与网格：表头底下有一条线且列名的字号比行里的次要文字大；每一行末尾有一枚「⋯」，点开它和右键给出的是同一批动作；列表行的歌名只占一行、行高是定死的一个值；每一页滚到底都有「回到顶部」",
+		Spec: "列表与网格：表头底下有一条线且列名的字号不比行里的字小；每一行末尾有一枚「⋯」，点开它和右键给出的是同一批动作；列表行的歌名只占一行、行高是定死的一个值；每一页滚到底都有「回到顶部」",
 		Tests: []string{
 			// 表头：底下那条线（**逐像素采样**）+ 列名的字号。
 			"TestTheHeaderHasALineUnderIt",
-			"TestTheHeaderColumnNamesAreBiggerThanTheRowsSecondaryText",
+			"TestTheHeaderColumnNamesAreNoSmallerThanTheRowsText",
 			// 行内那枚「⋯」：两条路同一批动作、做的是**它那一行**的事、每一行都有。
 			"TestTheOperationButtonOpensTheSameMenuAsTheRightClick",
 			"TestTheOperationButtonActsOnTheSongItSitsOn",
@@ -1678,6 +1678,32 @@ var Items = []Item{
 			"TestTheSettingsPageHasABackToTop",
 			// 那两张表格的行高（回顶按钮换算像素时用的两个数）。
 			"TestTheTableRowHeightsAreWhatTheOffsetsAssume",
+		},
+	},
+	{
+		Category: Platform,
+		// 票 #167（#163 的第一批之一）：列表与网格的排版对齐 DESIGN.md。
+		//
+		// 这一票的错法**全是静默的**：字号小一档、列间距窄一半、表头「标题」比封面
+		// 往右多让 64、紧凑档还画着一块封面——没有一样会报错，画面上只是「和上游不是
+		// 同一个产品」。所以判据是量出来的位置、逐像素采样的中心和画出来的字谁高，
+		// 不是「调了哪个常量」。
+		Spec: "列表与网格的排版照 DESIGN.md：列表歌名 16 / UP 名 14 / 列间距 16 / 序号 32 居中；表头「标题」从封面左缘起（不多让一列封面空位）；网格卡歌名 16 / UP 14；紧凑档不画封面",
+		Tests: []string{
+			// 列表那一行的四个数 + 能直接量出来的两样：UP 名比时长高一档、
+			// 序号那一块的墨迹落在这一列的正中（逐像素采样）。
+			"TestTheRowScaleFollowsTheDesign",
+			"TestTheRowTextIsBiggerThanTheNumbers",
+			"TestTheRowIndexIsCentredInItsColumn",
+			// 序号 / 列间距 / 封面三者摆出来的横坐标。
+			"TestTheCoverSitsNextToTheTitle",
+			// 表头：「标题」落在封面左缘（不是歌名的左缘），右边那几列照样对齐。
+			"TestTheHeaderColumnsLineUpWithTheRows",
+			// 网格卡：歌名 16 > UP 名 14 > 时长 12（画出来的三块字谁高）。
+			"TestTheGridCardTextIs16And14",
+			// 紧凑档：整块不画封面（位置 + hover 反馈都没了）。
+			"TestTheCompactRowHasNoCover",
+			"TestTheCompactRowsAreShorterThanTheNormalOnes",
 		},
 	},
 	{
