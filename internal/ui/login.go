@@ -297,16 +297,14 @@ func qrHintColor(t *ui.Theme, phase app.LoginPhase) ui.Color {
 // 这一段放在 `viewNav` 那一行的末尾，不动 `viewMain` / `viewSide`。
 func (s *Shell) viewLoginEntry(c *ui.Context) {
 	if s.app.LoggedIn() {
-		if iconButton(c, iconLogout, "退出登录", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5).
-			Tooltip("退出登录").Clicked() {
+		if s.withTip(c, iconButton(c, iconLogout, "退出登录", iconMd).
+			Size(iconHitMd, iconHitMd).Padding(0, 5), "退出登录").Clicked() {
 			s.logoutAndStartOver()
 		}
 		return
 	}
-	if iconButtonPrimary(c, iconLogin, "登录", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 5).
-		Tooltip("登录 B 站账号").Clicked() {
+	if s.withTip(c, iconButtonPrimary(c, iconLogin, "登录", iconMd).
+		Size(iconHitMd, iconHitMd).Padding(0, 5), "登录 B 站账号").Clicked() {
 		s.goLogin()
 	}
 }
