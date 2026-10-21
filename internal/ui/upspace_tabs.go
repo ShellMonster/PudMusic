@@ -25,7 +25,9 @@ func (s *Shell) viewSpaceTabs(c *ui.Context, sp *upSpace) {
 	// 的时候就把状态建好了，事后再挂 key 会 panic（`ui/element.go` 的 `Key`）。
 	// 给他外面套一层是最省事的做法。
 	ui.Column(c).Key("space-tabs").PaddingX(upPad).Children(func() {
-		ui.Tabs(c, &sp.tab, upTabNames...)
+		// ⚠️ **主 Tab 用扁平那一种**（`flatTabs`，见 tabs.go）：这一排和次级
+		// 排序那几排不是同一个样子（票 #138）。
+		flatTabs(c, &sp.tab, upTabNames...)
 	})
 }
 
@@ -59,6 +61,11 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 	// 一条都没有、也没在拉、也没出错 = 真的没有投稿。这时候画空状态而不是
 	// 画一个空列表：`PagedList` 在这种时候把列表自己的空状态设成空串
 	// （见 paged.go 的 syncList），画出来是一片白。
+	//
+	// ⚠️ **「正在加载」那一格不在这儿画**（票 #138）：它由列表自己画，画法是
+	// 外面递进去的（`loadingCell`）——和「没有结果」那一格是同一个出口。
+	// 而列表**照画**（下面那一支）：后台回来的结果是在列表的 `View` 里收的
+	// （`adopt`），不画它这一页就永远停在「正在加载」。
 	if sp.videosStarted && p.Loaded == 0 && !p.Loading && p.Err == nil {
 		s.viewEmpty(c, "space:video:"+strconv.FormatInt(sp.mid, 10), emptyState{
 			Title: "暂无投稿",
@@ -123,7 +130,9 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	}
 	if !p.started && p.loading {
 		// 一条都还没有：第一页在途。这一句就是它全部的内容。
-		s.viewEmpty(c, upEmptyKey(sp, tab), emptyState{Title: "正在加载" + upTabNames[tab] + "…"})
+		// ⚠️ **走 `viewLoading`（和「没有结果」同一个出口）**，理由同 `follow.go`
+		// 那一处（票 #138）。
+		s.viewLoading(c, upEmptyKey(sp, tab), "正在加载"+upTabNames[tab]+"…")
 		return
 	}
 	// 🔴 **「一行都没有」也分两种**：

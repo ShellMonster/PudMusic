@@ -380,12 +380,16 @@ const keywordBoxLabel = "搜索标题/UP主名称"
 // 🔴 **搜索框的联想词那一档也共用它**（`suggestSearching`，见
 // `navbar_suggest.go`）：理由一模一样——同一个搜索框上的同一个「等用户把词敲完」，
 // 而且它那个钟不该在浮层收掉之后还醒着。
+//
+// 🔴 **收藏夹页那个按歌名找的输入框也共用它**（`collectionSearching`，见
+// `collectionpage.go`）：同一个道理——「等用户把词敲完」在这一个应用里只该
+// 有**一个**出处。
 func (s *Shell) syncSearchWatch() {
 	want := false
 	if p := s.libraryPageAt(s.router.Path()); p != nil {
 		want = !p.pendingSince.IsZero()
 	}
-	if s.lyricsSearching() || s.suggestSearching() {
+	if s.lyricsSearching() || s.suggestSearching() || s.collectionSearching() {
 		want = true
 	}
 	switch {

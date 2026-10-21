@@ -69,9 +69,38 @@ func (s *Shell) viewSearch(c *ui.Context, r *ui.Route) {
 
 	keyword := strings.TrimSpace(r.Query(searchQuery))
 
-	ui.Column(c).Key("page:/search").Grow(1).Padding(28).Gap(searchHeaderGap).
+	// ⚠️ **框里显示当前关键词**（票 #138）。
+	//
+	// 从顶栏搜完点进来，框是空的（占位「歌名或 UP 主」，420 像素宽），**下面
+	// 却已经显示着结果**——「搜索【夜空中最亮的星】的结果」和一屏结果行都在
+	// 画面上，而框右侧约 580 像素全空。**框里的词和它下面正在显示的那批歌对不上。**
+	//
+	// ⚠️ **用户正在敲的字不许被覆盖**：草稿挂在壳上（`Shell.searchDraft` 的
+	// 注释：即时模式每一帧都重画，局部变量下一帧就没了），所以它跨页活着——
+	// 而「切页回来时把它换成路由上那个词」就是把他敲到一半的字吃掉。
+	//
+	// 判据是「**这个草稿是从哪个关键词填上去的**」（`searchDraftFor`）：路由上
+	// 的词没变 → 草稿是用户自己的（哪怕已经被他改过、被删干净了），不动；变了
+	// → 草稿是上一个词留下的旧东西，换掉（不然从顶栏搜了另一个词，这一页的
+	// 框里还是上一个词，而下面已经是新词的结果了）。
+	//
+	// 🔴 **判据里不许有「框是不是空的」**：这一条是**用户还在这一页、正在删字**
+	// 的时候就会碰上的——他把框里的字删干净了，这一帧草稿是空串，于是「框空了
+	// 就把关键词写回去」那一支立刻生效，框**自己弹回来了**，而他接着敲的字被
+	// 粘在旧词后面（「林周杰伦」）。删着改是更常见的做法（实测：全选 + 直接
+	// 重打能绕过去，而删着改绕不过去）。
+	//
+	// 所以**只有路由上的词变了才写**。第一次进这一页也写得到（那时
+	// `searchDraftFor` 是空串，而路由上的词不是 ✓）。
+	if keyword != "" && s.searchDraftFor != keyword {
+		s.searchDraft = keyword
+		s.searchDraftFor = keyword
+	}
+
+	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
+	ui.Column(c).Key("page:/search").Grow(1).Padding(28, pagePadX).Gap(searchHeaderGap).
 		AlignItems(ui.Stretch).Children(func() {
-		ui.Text(c, "搜索").FontSize(22).Bold()
+		ui.Text(c, "搜索").FontSize(pageTitleSize).Bold()
 
 		// ⚠️ Label 不只是给测试用的：没有它读屏软件读不出这是一个搜歌名的
 		// 输入框，只有旁边那行占位文字（占位文字不是标签）。顺带也是无头
@@ -86,6 +115,10 @@ func (s *Shell) viewSearch(c *ui.Context, r *ui.Route) {
 		if box.Submitted() {
 			kw := strings.TrimSpace(s.searchDraft)
 			s.searchDraft = kw
+			// ⚠️ **记下「这个草稿是从哪个词来的」**：回车之后路由上的词就是它，
+			// 而判据（`searchDraftFor`）靠的就是这个——不记的话，用户把框清干净
+			// 之后那一支会把同一个词又弹回来（票 #138 的评审抓出来的那一条）。
+			s.searchDraftFor = kw
 			if kw == "" {
 				s.navigate(searchPath)
 			} else {
@@ -117,7 +150,10 @@ func (s *Shell) viewSearchResults(c *ui.Context, keyword string) {
 		// 「最多播放」，这一帧的 `current` 读到的还是旧排序，这一帧画的还是旧
 		// 顺序，要到**下一帧**才重置回第 1 页——屏幕上就是「按了排序，画面先抖
 		// 一下才换」，而中间那一帧还滚回了顶上，用户刚滚到的位置没了。
-		ui.Tabs(c, &st.tab, searchTabNames[:]...)
+		//
+		// ⚠️ **这一排是主 Tab（扁平那一种）**，下面 `viewSearchToolbar` 里那一排
+		// 排序是次级的（框架那一条下划线）——两排不是同一个样子（票 #138）。
+		flatTabs(c, &st.tab, searchTabNames[:]...)
 		cur := st.tab
 		s.viewSearchToolbar(c, cur)
 
@@ -157,7 +193,7 @@ func (s *Shell) viewSearchToolbar(c *ui.Context, tab int) {
 }
 
 // viewSearchResultsBody 是结果那一块。一行都没有、而且此刻没在拉 → 画「没有搜索
-// 结果」；正在拉 → 列表自己画「正在加载…」（paged.go 的 syncList）；其余 → 列表。
+// 结果」；一行都没有、正在拉 → 画「正在加载…」；其余 → 列表。
 //
 // ⚠️ 第一支**不看有没有出错**，照抄上游：它的 `retryInitial` 失败时
 // `addToast("加载失败")`，而 `list` 仍然是空的，于是下一句 `!initialLoading &&
@@ -166,6 +202,14 @@ func (s *Shell) viewSearchToolbar(c *ui.Context, tab int) {
 //
 // 拉了半截之后失败是另一回事：那时 `Loaded > 0`，末尾那一行由分页列表自己给出
 // 「加载失败，点此重试」。
+//
+// ⚠️ **「正在加载」那一格是列表自己画的那一格**（画法是外面递进去的，见
+// `loadingCell` 和 `searchresults.go` 的 `init`）：它原来是一句 13pt 淡灰缩在
+// 左上角，而「没有结果」是居中 15pt 两行。等的那几秒里那行字缩在角落里，回来
+// 后忽然变大、居中、还多了一行（票 #138）。
+//
+// ⚠️ **加载的时候列表照画，不 return**：后台回来的结果是在列表的 `View` 里收的
+// （`adopt`），不画它这一页就永远停在「正在加载」。
 func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int) {
 	t := &s.search.lists[tab]
 	pg := t.list.Paged()

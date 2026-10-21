@@ -172,7 +172,7 @@ func TestCollectionMediasSendsTheSortAsTheOrderParam(t *testing.T) {
 			}))
 		})
 
-		pg, err := f.client(t, Options{}).CollectionMedias(context.Background(), 7, sort, 1, 100)
+		pg, err := f.client(t, Options{}).CollectionMedias(context.Background(), 7, sort, "", 1, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -235,7 +235,7 @@ func TestPSIsClampedToBStationsLimit(t *testing.T) {
 		}
 		writeJSON(w, jsonData(t, 0, "0", map[string]any{"medias": []any{}, "has_more": false}))
 	})
-	if _, err := f.client(t, Options{}).CollectionMedias(context.Background(), 1, SortByFavTime, 1, 5000); err != nil {
+	if _, err := f.client(t, Options{}).CollectionMedias(context.Background(), 1, SortByFavTime, "", 1, 5000); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -249,7 +249,7 @@ func TestPageZeroBecomesOne(t *testing.T) {
 		}
 		writeJSON(w, jsonData(t, 0, "0", map[string]any{"medias": []any{}, "has_more": false}))
 	})
-	if _, err := f.client(t, Options{}).CollectionMedias(context.Background(), 1, SortByFavTime, 0, 0); err != nil {
+	if _, err := f.client(t, Options{}).CollectionMedias(context.Background(), 1, SortByFavTime, "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -558,7 +558,7 @@ func TestInvalidContentsStillComeBack(t *testing.T) {
 			},
 		}))
 	})
-	pg, err := f.client(t, Options{}).CollectionMedias(context.Background(), 1, SortByFavTime, 1, 0)
+	pg, err := f.client(t, Options{}).CollectionMedias(context.Background(), 1, SortByFavTime, "", 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -582,7 +582,7 @@ func TestACollectionMediaCarriesTheOwnerID(t *testing.T) {
 		}))
 	})
 
-	pg, err := f.client(t, Options{}).CollectionMedias(context.Background(), 7, SortByFavTime, 1, 20)
+	pg, err := f.client(t, Options{}).CollectionMedias(context.Background(), 7, SortByFavTime, "", 1, 20)
 	if err != nil {
 		t.Fatal(err)
 	}

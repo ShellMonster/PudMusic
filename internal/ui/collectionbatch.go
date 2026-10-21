@@ -50,7 +50,7 @@ func (s *Shell) viewCollectionBatchBar(c *ui.Context, p *collectionPage) {
 	// 框架点它时 `Changed()` 响，我们再照总数重算一次该全选还是全不选。
 	all := p.allSelected()
 
-	ui.Row(c).Key("collection-batch-bar").Center().Gap(12).Padding(10, 24).
+	ui.Row(c).Key("collection-batch-bar").Center().Gap(12).Padding(10, 0).
 		Background(t.Surface).Children(func() {
 		if ui.Checkbox(c, &all, "全选").Label("全选").Changed() {
 			s.toggleSelectAll(p, !p.allSelected())
@@ -376,7 +376,7 @@ func (s *Shell) startCollectionClearInvalid(p *collectionPage) {
 // `navigate` 和 `s.collection = nil` 都是界面状态（铁律一）。直接在回调里调，
 // `-race` 会报，而真机上的症状是「有时候跳、有时候不跳」。
 func (s *Shell) startCollectionDeleteFolder(p *collectionPage) {
-	ref, title := p.ref, collectionTitleText(s.app.Collection(p.ref))
+	ref, title := p.ref, collectionTitleText(p.ref.Type, s.app.Collection(p.ref))
 	s.app.DeleteCollectionFolder(ref, title, func(msg string, ok bool) {
 		s.sayFolderDone(msg)
 		if !ok {
@@ -395,7 +395,7 @@ func (s *Shell) startCollectionDeleteFolder(p *collectionPage) {
 // ⚠️ 但**这一页还留着**：收藏夹在 B 站上还在、刚才的内容也还在，只是侧栏
 // 不再列它了。页面继续停着是对的，用户刚才看的东西还在。
 func (s *Shell) startCollectionForgetFolder(p *collectionPage) {
-	s.app.ForgetCollectionFolder(p.ref, collectionTitleText(s.app.Collection(p.ref)), s.sayFolderDone)
+	s.app.ForgetCollectionFolder(p.ref, collectionTitleText(p.ref.Type, s.app.Collection(p.ref)), s.sayFolderDone)
 }
 
 // pendingLeave 是「刚被删掉的那个容器，等下一帧走开」那个交接槽。

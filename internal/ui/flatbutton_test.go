@@ -134,7 +134,7 @@ func assertFlat(t *testing.T, img *image.RGBA, r mygoui.Rect, what string) {
 // flatSideShell 建一个「登录过、停在**不在侧栏菜单里**的一页、指针不在任何按钮上」
 // 的整窗。
 //
-// ⚠️ **两处都得显式写出来**：登录是为了菜单摆满六项（未登录时那三个带 `NeedsLogin`
+// ⚠️ **两处都得显式写出来**：登录是为了菜单摆满六项（未登录时那三个带 `HideInMenuWhenLoggedOut`
 // 的不摆，见 `viewSideMenu`）；`systemIsDark` 是「假装系统是深色」，而设置里那一档
 // 默认是「跟随系统」，所以它就是深浅的开关——`newLoggedInShell` 不接这一项，用它
 // 会让两个子测试画出同一张图，**深色那一档看着全绿，其实根本没跑过**。

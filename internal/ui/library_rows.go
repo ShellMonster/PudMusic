@@ -430,7 +430,12 @@ func (p *pagedRows) emptyStateFor(t *ui.Theme) *emptyState {
 		//
 		// ⚠️ **不摆插画**：这一格说的是「还没好」，摆一枚「这里什么都没有」的
 		// 图形等于说反了（见 `emptyState.Icon`）。
-		return &emptyState{Title: "正在加载…"}
+		//
+		// ⚠️ **走 `loadingState`（「加载中」那一档）**：它和「没有结果」走同一个
+		// 出口（`drawEmpty`），而**不是同一档东西**——没有插画、没有第二句、
+		// 字是淡的（票 #138）。
+		loading := loadingState("正在加载…")
+		return &loading
 	case len(p.rows) == 0 && p.blocked:
 		// 一行都没有还失败了：页面上就留那一个重试按钮，一句话都不多说。
 		return nil

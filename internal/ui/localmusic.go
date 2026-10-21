@@ -331,7 +331,8 @@ func (p *localPage) view(c *ui.Context) {
 	st := p.app.LocalMusicState()
 	p.rows = p.filter(st.Tracks, st.Roots)
 
-	ui.Column(c).Key("page:" + localMusicPath).Grow(1).Padding(16).Gap(10).
+	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
+	ui.Column(c).Key("page:"+localMusicPath).Grow(1).Padding(16, pagePadX).Gap(10).
 		Children(func() {
 			p.viewHead(c)
 			p.viewToolbar(c, st)
@@ -383,7 +384,7 @@ func (p *localPage) cardsTop() { p.cards.ScrollTo(0, ui.Start) }
 // viewHead 是标题那一行：标题、展示样式切换、添加目录。
 func (p *localPage) viewHead(c *ui.Context) {
 	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(8).Children(func() {
-		ui.Text(c, "本地音乐").FontSize(20).Bold()
+		ui.Text(c, "本地音乐").FontSize(pageTitleSize).Bold()
 
 		// 展示样式切换。⚠️ 用 `ui.Segmented` 而不是三个按钮：三档互斥、
 		// 当前位置一眼可见，三个按钮的话用户得靠猜哪个是按下去的。
@@ -426,12 +427,14 @@ func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
 func (p *localPage) viewWarnings(c *ui.Context, t *ui.Theme, st app.LocalMusicState) {
 	if st.Err != "" {
 		ui.Text(c, "有目录读不到："+st.Err).
-			FontSize(12).TextColor(t.Danger).AlignSelf(ui.Stretch)
+			FontSize(12).LineHeight(smallCopyLeading).
+			TextColor(t.Danger).AlignSelf(ui.Stretch)
 	}
 	if names := unplayableFormats(st.Tracks); len(names) > 0 {
 		ui.Text(c, "这个目录里有我们还放不出的格式（"+strings.Join(names, " ")+
 			"），它们会列出来但放不了。").
-			FontSize(12).TextColor(t.Warning).AlignSelf(ui.Stretch)
+			FontSize(12).LineHeight(smallCopyLeading).
+			TextColor(t.Warning).AlignSelf(ui.Stretch)
 	}
 }
 
@@ -442,9 +445,14 @@ func (p *localPage) viewBody(c *ui.Context, t *ui.Theme, st app.LocalMusicState)
 		// ⚠️ 第一遍扫完之前**不能**说「这里没有歌」：那一屏上什么都还没有，
 		// 而扫描还在跑（几百上千个文件的 stat）。说「这里没有歌」是在报一件
 		// 还没发生的事。
-		ui.Text(c, "正在扫描…").FontSize(13).TextColor(t.TextMuted).Padding(16)
+		//
+		// ⚠️ **走 `drawEmpty` 那一个出口**（和这一页的「没有结果」同一套画法），
+		// 而这一页的「没有结果」也走它——原来这一页一个手写一个 13pt 淡灰的
+		// 「正在扫描…」，一个是左对齐的两行字，用户等的那几秒里那两样对不上
+		// （票 #138）。
+		drawEmpty(c, "local:loading", loadingState("正在扫描…"), emptyPagePad)
 	case len(p.rows) == 0:
-		p.viewEmpty(c, t, st)
+		p.viewEmpty(c, st)
 	case p.style == localStyleTable:
 		p.viewTable(c, t)
 	default:
@@ -478,19 +486,34 @@ func (p *localPage) viewStyle() list.View {
 //
 // 分两种，因为「为什么空」和「怎么才能不空」两句话在两种情况下不一样：
 // 一个目录都没加过 vs 加了但（筛选之后）没有。
-func (p *localPage) viewEmpty(c *ui.Context, t *ui.Theme, st app.LocalMusicState) {
-	ui.Column(c).AlignSelf(ui.Stretch).Padding(24).Gap(6).Children(func() {
-		if len(st.Roots) == 0 {
-			ui.Text(c, "还没有添加音乐目录").FontSize(15).Bold()
-			ui.Text(c, "点右上角「添加目录」选一个文件夹，它的第一层里的歌会出现在这里。").
-				FontSize(13).TextColor(t.TextMuted)
-			return
+//
+// ⚠️ **走 `drawEmpty` 那一个出口**（和全应用其余的空状态同一套画法）：这一页
+// 原来是自己写的一列左对齐的字，而这一页的「正在扫描…」也是自己写的一行
+// 13pt 淡灰——**同一页上两句话两个样子**，而全应用其余七页的空状态早就是
+// 居中带插画的那一套了（票 #138）。
+func (p *localPage) viewEmpty(c *ui.Context, st app.LocalMusicState) {
+	e := localEmptyState(st)
+	drawEmpty(c, "local:empty", e, emptyPagePad)
+}
+
+// localEmptyState 是这一页空着的时候说的那两句话。
+//
+// 分两种，因为「为什么空」和「怎么才能不空」在两种情况下不一样：
+// 一个目录都没加过 vs 加了但（筛选之后）没有。
+func localEmptyState(st app.LocalMusicState) emptyState {
+	if len(st.Roots) == 0 {
+		return emptyState{
+			Title: "还没有添加音乐目录",
+			Hint:  "点右上角「添加目录」选一个文件夹，它的第一层里的歌会出现在这里。",
+			Icon:  iconEmptyDisk,
 		}
-		ui.Text(c, "这里没有音频文件").FontSize(15).Bold()
-		ui.Text(c, "这一页只列所选目录第一层里的音频文件（"+
-			strings.Join(localmusic.Extensions, " ")+"），不会往子目录里翻。").
-			FontSize(13).TextColor(t.TextMuted)
-	})
+	}
+	return emptyState{
+		Title: "这里没有音频文件",
+		Hint: "这一页只列所选目录第一层里的音频文件（" +
+			strings.Join(localmusic.Extensions, " ") + "），不会往子目录里翻。",
+		Icon: iconEmptyDisk,
+	}
 }
 
 // viewTable 是表格那一档。
