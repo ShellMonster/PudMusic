@@ -130,29 +130,30 @@ func (s *Shell) pickFont(c *ui.Context, st app.Settings, ro bool) {
 			// `navbar_search.go` 的 `viewSuggest`）。
 			//
 			// 上限 256 = HeroUI 下拉默认那一档（`max-h-64`），Biu 用的就是它。
-			ui.Scroll(c).Key("font-menu").FillWidth().MaxHeight(fontMenuMaxH).
-				Children(func() {
-					ui.Column(c).FillWidth().Children(func() {
-						for i, family := range families {
-							// ⚠️ **不给这一格加 Label**：上面画的那个字就是它的名字，再补一个
-							// 只会多出一个同样文字的无障碍节点（见 sidebar.go 里那条）。
-							item := sel.Item(i).Padding(6, 10).Radius(6)
-							if item.Highlighted() {
-								item.Background(t.Accent).TextColor(t.AccentText)
-							} else if i == idx {
-								item.Background(t.Surface)
-							}
-							item.Children(func() {
-								// 🔴 这一句就是验收项：每一条选项用它自己的字体画。
-								//
-								// ⚠️ `Ellipsis` 不能省：族名的长短差得很远，而每一条用的是
-								// **它自己的字体**、宽度没有上限——长名字会画到旁边去。
-								ui.Text(c, labels[i]).Font(family).SingleLine().
-									Ellipsis("…").Grow(1)
-							})
+			menu := ui.Scroll(c).Key("font-menu").FillWidth().MaxHeight(fontMenuMaxH)
+			menu.Children(func() {
+				ui.Column(c).FillWidth().Children(func() {
+					for i, family := range families {
+						// ⚠️ **不给这一格加 Label**：上面画的那个字就是它的名字，再补一个
+						// 只会多出一个同样文字的无障碍节点（见 sidebar.go 里那条）。
+						item := sel.Item(i).Padding(6, 10).Radius(6)
+						if item.Highlighted() {
+							item.Background(t.Accent).TextColor(t.AccentText)
+						} else if i == idx {
+							item.Background(t.Surface)
 						}
-					})
+						item.Children(func() {
+							// 🔴 这一句就是验收项：每一条选项用它自己的字体画。
+							//
+							// ⚠️ `Ellipsis` 不能省：族名的长短差得很远，而每一条用的是
+							// **它自己的字体**、宽度没有上限——长名字会画到旁边去。
+							ui.Text(c, labels[i]).Font(family).SingleLine().
+								Ellipsis("…").Grow(1)
+						})
+					}
 				})
+			})
+			s.trackScrollbar(menu)
 		})
 	})
 

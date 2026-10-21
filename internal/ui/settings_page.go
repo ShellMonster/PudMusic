@@ -239,7 +239,9 @@ func (s *Shell) settingRowEl(c *ui.Context, title func(), desc string, control f
 // invalidate → 重画，一帧之内的事。走 `applySetting` 而不是 `SetThemeMode`，
 // 是为了和另外十几项共用同一条报错提示。
 func (s *Shell) pickTheme(c *ui.Context, st app.Settings, ro bool) {
-	ui.Row(c).Key("setting:themeMode").Width(segWidth).Gap(4).Children(func() {
+	// ⚠️ 宽度跟着字号缩放走：1.4 倍时四个字要 106 像素，三个各 100 的格子
+	// 装不下，选中项会被裁成「跟随系…」（评审在 1.4 倍下量到过）。
+	ui.Row(c).Key("setting:themeMode").Width(scale.Font(c, segWidth)).Gap(4).Children(func() {
 		for _, opt := range themeModes {
 			b := flatButton(c, opt.label).Grow(1).Radius(6).Disabled(ro)
 			if opt.mode == st.ThemeMode {
@@ -259,7 +261,7 @@ func (s *Shell) pickTheme(c *ui.Context, st app.Settings, ro bool) {
 // pickCloseWindow 是窗口关闭那两档。照 Biu 用的是横排单选（RadioGroup
 // orientation="horizontal"），我们用同一排按钮，选中的那个上主色。
 func (s *Shell) pickCloseWindow(c *ui.Context, st app.Settings, ro bool) {
-	ui.Row(c).Key("setting:closeWindowOption").Width(segWidth).Gap(4).Children(func() {
+	ui.Row(c).Key("setting:closeWindowOption").Width(scale.Font(c, segWidth)).Gap(4).Children(func() {
 		for _, opt := range closeWindowOptions {
 			b := flatButton(c, opt.label).Grow(1).Radius(6).Disabled(ro)
 			if opt.value == st.CloseWindowOption {

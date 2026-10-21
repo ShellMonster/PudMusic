@@ -122,3 +122,64 @@ func TestEnsureNeverWorse(t *testing.T) {
 		t.Errorf("浅底上应该往黑混，结果 %v 不比原来的绿暗", got)
 	}
 }
+
+// TestTheVariantReachesTheTargetOnMidToneBackgrounds 是评审指出的中间调边界。
+//
+// 早先按 `Luminance(bg) < 0.5` 选方向：#808080 的**线性**亮度是 0.22，被判成
+// 「深底」而往白混——可它的 sRGB 是中灰，往白到纯白也只有 3.95:1，4.5 永远到不了。
+// 方向必须按「哪一端给得出更大的对比度」选：这一组灰底上往黑是 5.3 / 7.1 / 9.0。
+func TestTheVariantReachesTheTargetOnMidToneBackgrounds(t *testing.T) {
+	for _, hex := range []string{"#808080", "#999999", "#AAAAAA"} {
+		light := ui.LightTheme()
+		light.Background = ui.Hex(hex)
+		light.Accent = ui.Hex("#1ed760")
+		got := AccentOn(light)
+		if r := Ratio(got, light.Background); r < 4.5 {
+			t.Errorf("底色 %s：主色当字色算出 %v，对比度 %.2f:1（< 4.5）——方向选反了",
+				hex, got, r)
+		}
+	}
+}
+
+// TestTheDisabledInkTakesTheBetterEnd 验禁用灰在中间调底色上取的是**更好的一端**。
+//
+// ⚠️ 这一档有个物理上限：框架把字色和底色各拉近一半，在 #808080 上两端最好的
+// 一端也只有 2.63:1——3:1 在那一个底色上数学上到不了。这一条钉的是「取到更好的
+// 那一端」（早先往白走只有 2.17），不是「任何底色都达标」。
+func TestTheDisabledInkTakesTheBetterEnd(t *testing.T) {
+	cases := []struct {
+		bg   string
+		want float64 // 两端里更好的那个能到的对比度，实测值
+	}{
+		{"#808080", 2.6}, // 往黑；往白只有 2.17
+		{"#999999", 2.95},
+		{"#AAAAAA", 3.0},
+	}
+	for _, c := range cases {
+		th := ui.LightTheme()
+		th.Background = ui.Hex(c.bg)
+		shown := Disabled(th).Alpha(0.5).Over(th.Background)
+		if r := Ratio(shown, th.Background); r < c.want {
+			t.Errorf("底色 %s：禁用字合完 50%% 之后 %.2f:1（< %.2f）——取的不是更好的那一端",
+				c.bg, r, c.want)
+		}
+	}
+}
+
+// TestTheAccentAsTextOnAHoveredRowIsReadable 是评审指出的 hover 边界。
+//
+// 列表行 / 网格格 hover 时底色被框架换成 `SurfaceHover`，比页面底色暗一档；
+// 只按 Background 算出来的变体压在上面只有 3.75:1。`AccentOn` 因此按两者里
+// 更暗的那个当判据。
+func TestTheAccentAsTextOnAHoveredRowIsReadable(t *testing.T) {
+	light := ui.LightTheme()
+	light.Accent = ui.Hex("#1ed760")
+	got := AccentOn(light)
+	if r := Ratio(got, light.SurfaceHover); r < 4.5 {
+		t.Errorf("hover 底色 %v 上主色当字色是 %v，对比度 %.2f:1（< 4.5）",
+			light.SurfaceHover, got, r)
+	}
+	if r := Ratio(got, light.Background); r < 4.5 {
+		t.Errorf("页面底色上反而不达标：%.2f:1", r)
+	}
+}

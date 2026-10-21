@@ -135,7 +135,11 @@ func (s *Shell) viewLyricKnobs(c *ui.Context, snap app.LyricsSnapshot) {
 
 // lyricFontPopover 画字号那个浮层：一条竖滑块加一个当前值。
 func (s *Shell) lyricFontPopover(c *ui.Context, anchor ui.Element, snap app.LyricsSnapshot) {
-	v := float64(app.ClampLyricsFontSize(scale.Font(c, snap.FontSize)))
+	// ⚠️ **这里收的是存下来的那个字号，不是缩放后画出来的那个**：滑块的值、
+	// `SetLyricsFontSize` 写回去的值、底下的标签都是同一个数。混进 TextScale 的话
+	// 一次拖动会把 20 存成 26，下一帧实际画 32.5、拇指跳过去，而标签还写着 26
+	//（评审在 1.25 倍下量到过）。
+	v := float64(app.ClampLyricsFontSize(snap.FontSize))
 	ui.PopoverBase(c, anchor, &s.lyric.fontOpen, func(panel ui.Element) {
 		lyricPanelStyle(c, panel, anchor)
 		panel.Children(func() {

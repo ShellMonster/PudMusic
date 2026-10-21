@@ -36,6 +36,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
@@ -434,7 +435,11 @@ func (g *newMusicGrid) viewCard(c *ui.Context, i int, cell float32) {
 		// 同一屏上「正在播放」在两个地方说两套话，用户只能靠猜。
 		titleColor := t.Text
 		if g.acts.IsPlaying != nil && g.acts.IsPlaying(m.Item) {
-			titleColor = t.Accent
+			// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（理由见
+			// `widgets/ink`）。这一处和列表 / 网格那三档说的是同一件事，
+			// 颜色也必须走同一个出口——漏了这里，同一屏上「正在播放」
+			// 在下面那一排是深绿、在这一块是读不出来的亮绿。
+			titleColor = ink.AccentOn(t)
 		}
 		ui.Text(c, m.Title).FontSize(scale.Font(c, 14)).TextColor(titleColor).MaxLines(1).Ellipsis("…")
 		if m.Owner != "" {

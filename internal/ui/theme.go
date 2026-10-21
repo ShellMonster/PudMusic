@@ -31,7 +31,12 @@ func ApplyTheme(c *ui.Context, s app.Settings, systemDark bool) {
 	c.SetTheme(buildTheme(s, systemDark, c.Preferences()))
 }
 
-// applyFrameTheme 是每帧开头那一次 ApplyTheme，界面层唯一的入口。
+// applyFrameTheme 是**每帧开头装主题**的那一处，生产上唯一会走到的入口。
+//
+// ⚠️ 它直接调 `buildTheme` + `c.SetTheme`，不再转一手 `ApplyTheme`：滚动条的
+// 悬停档要在装上去之前改一个字段（`scrollbarHot`），而那个状态只在 Shell 上。
+// `ApplyTheme` 因此只剩测试和预览在用（`grep ApplyTheme` 只有定义和测试文件），
+// **改 `ApplyTheme` 不会影响外壳**——要改生产行为，改这里和 `buildTheme`。
 //
 // ⚠️ **先读 `c.Theme().Dark` 再设**：读到的是 MyGo 刚在帧开头重置好的、跟随
 // 系统的那份，也就是「系统现在是不是深色」。反过来的话读到的是我们上一帧

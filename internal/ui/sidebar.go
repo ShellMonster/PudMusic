@@ -398,7 +398,9 @@ func sideItemTip(c *ui.Context, anchor ui.Element, text string) {
 	ui.TooltipBase(c, anchor, func(tip ui.Element) {
 		tip.AttachTo(anchor, ui.AnchorRight, ui.AnchorLeft).MarginStart(6).
 			Padding(t.Space(1.25), t.Space(2)).Radius(t.Space(1.25)).
-			Background(fill).TextColor(fg).FontSize(scale.Font(c, t.FontSize-1)).
+			// ⚠️ **`t.FontSize` 已经乘过 TextScale 了**（`buildTheme` 里那一句），
+			// 再走一遍 `scale.Font` 就是乘两次（1.4 倍下 17.2 → 24.08）。
+			Background(fill).TextColor(fg).FontSize(t.FontSize-1).
 			Shadow(0, 2, 8, 0, ui.RGBA(0, 0, 0, 0.2))
 		tip.Children(func() { ui.Text(c, text) })
 	})

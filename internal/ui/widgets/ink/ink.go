@@ -72,8 +72,16 @@ func Ensure(ink, bg ui.Color, ratio float64) ui.Color {
 	if Ratio(ink, bg) >= ratio {
 		return opaque(ink, bg)
 	}
+	// 🔴 **方向按「哪一端能到」选，不是按底色亮不亮**：中间调底色（#808080 到
+	// #AAAAAA）上，往白混到纯白也只有 3.95 / 2.85 / 2.32:1——离 4.5 差一截，
+	// 而往黑混是 5.3 / 7.1 / 9.0:1，绰绰有余。早先那一版用 `Luminance(bg) < 0.5`
+	// 判断（#808080 的线性亮度是 0.22，被判成「深底」），于是在这几个灰底上
+	// 永远返回纯白、永远不达标。
+	//
+	// 数学上有一道保底：黑、白两端里总有一端能到 ≥4.58:1（两端相等时正好是
+	// 4.58），所以 4.5 这个目标在**任何**底色上都可达。
 	target := black
-	if Luminance(bg) < 0.5 {
+	if Ratio(white, bg) > Ratio(black, bg) {
 		target = white
 	}
 	// 二分找**最小的**混合量：混合越多，颜色离主色越远。
@@ -103,7 +111,15 @@ func AccentOn(t *ui.Theme) ui.Color {
 	if t.Dark {
 		return t.Accent
 	}
-	return Ensure(t.Accent, t.Background, 4.5)
+	// ⚠️ **按「更严的那个底」算**：列表行 / 网格格 hover 时底色由框架换成
+	// `t.SurfaceHover`（浅色下比页面底色暗一档），同一条主色压在上面更淡
+	//（实测按 Background 算出来的变体压 #e9e9ec 只有 3.75:1）。取两者里更暗的
+	// 那个当判据——平时那一档只会更宽裕，hover 那一档正好达标。
+	bg := t.Background
+	if t.SurfaceHover.A == 255 && Luminance(t.SurfaceHover) < Luminance(bg) {
+		bg = t.SurfaceHover
+	}
+	return Ensure(t.Accent, bg, 4.5)
 }
 
 // Disabled 是**禁用控件里的字**该用的灰。
@@ -132,8 +148,13 @@ func Disabled(t *ui.Theme) ui.Color {
 	)
 	bg := t.Background
 	shown := func(c ui.Color) ui.Color { return c.Alpha(float32(fade)).Over(bg) }
+	// 方向同样按「合完 50% 之后哪一端更远」选（理由同 `Ensure`）。
+	//
+	// ⚠️ 中间调底色（#808080 一带）上 3:1 **数学上到不了**：框架的 50% 把字色
+	// 和底色各拉近一半，两端最好的那一端在 #808080 上是 2.63:1（#999999 起才够
+	// 3）。这一档能保证的是**取到两端里更好的那一个**，不是「任何底色都达标」。
 	dir := black
-	if Luminance(bg) < 0.5 {
+	if Ratio(shown(white), bg) > Ratio(shown(black), bg) {
 		dir = white
 	}
 	lo, hi := 0.0, 1.0
