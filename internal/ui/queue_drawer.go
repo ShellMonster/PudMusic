@@ -99,11 +99,19 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 	s.queueRows = queueRowsFor(s.app.Queue().Items())
 
 	ui.Overlay(c, func() {
-		// ⚠️ 底边留出播放条的高度（Biu 的 `data-[placement=right]:mb-22` 就是
+		// ⚠️ 底边留出底下那一条的高度（Biu 的 `data-[placement=right]:mb-22` 就是
 		// 88）。这一层是吃点击的（见下面 back.Clicked 那段），不留出这一条播放条
 		// 就**整个被它盖住**：抽屉开着时按播放、上一首、下一首都按不动。
+		//
+		// 满屏开着的时候底下那一条是满屏的底栏（进度 + 控制键，102 高，见
+		// `fullControlsHeight`），不是播放条——让出的高度要跟着它，否则进度条
+		// 上面那十几像素会被蒙版盖住、点一下就变成「关抽屉」。
+		bottomInset := float32(playbarHeight)
+		if s.full.open {
+			bottomInset = fullControlsHeight
+		}
 		back := ui.Row(c).Key("queue-backdrop").
-			Absolute().Left(0).Top(0).Right(0).Bottom(playbarHeight).
+			Absolute().Left(0).Top(0).Right(0).Bottom(bottomInset).
 			Justify(ui.End).AlignItems(ui.Stretch).
 			// 没有底色：Biu 的 `backdrop="transparent"`，底下那一层照旧看得见。
 			Modal()

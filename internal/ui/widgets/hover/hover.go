@@ -101,6 +101,13 @@ const (
 // 的事，只是那句话没有提前说。
 const PlayFrom = "从这一首往后听"
 
+// PlayNow 是「按下去只放这一首」这句话。
+//
+// ⚠️ 和 PlayFrom 分开：首页「新歌速递」那张卡片按下去换掉整个队列、只放这一首
+// （上游 `new-music-top.tsx` 的 `handlePlay`），说「从这一首往后听」会提前许诺一
+// 件那一下不做的事。
+const PlayNow = "播放"
+
 // PlayingMark 是「这一行正在放」那句话，无障碍标签和无头 Tester 都靠它认这一行。
 //
 // ⚠️ **它的唯一出处在这里**（`list.PlayingMark` 和 `internal/ui` 那个都指回来）。
@@ -112,6 +119,9 @@ const PlayingMark = "正在播放"
 // 是画出来的那几个字，光说「从这一首往后听」的话用户听到的是一句没头没尾的话，得自
 // 己猜是哪一首。顺带它让这一行在 Tester 里可认（`Tester.Find` 认标签）。
 func FromLabel(title string) string { return title + " " + PlayFrom }
+
+// PlayLabel 是「只放这一首」那枚播放钮的标签，理由同 FromLabel。
+func PlayLabel(title string) string { return title + " " + PlayNow }
 
 // PlayingLabel 是那个跳动波形的标签，理由同 FromLabel。
 func PlayingLabel(title string) string { return title + " " + PlayingMark }
@@ -251,18 +261,34 @@ func RowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 // 类，两边都是「封面 + 两行字浮在页面上」，那不是差距（票面「不要做」里点名了）。
 func CardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 	on bool, playCount, clock, title string, play func()) {
+	cardCover(c, cache, url, w, h, on, playCount, clock, FromLabel(title), PlayFrom, play)
+}
+
+// CardCoverOne 是同一圈反馈，但按下去**只放这一首**（`PlayNow`）。
+//
+// 首页「新歌速递」那一块用它：那张卡片单击就换掉整个队列只放这一首（上游
+// `new-music-top.tsx` 的 `handlePlay`），和网格卡片「从这一首往后接」不是一件事。
+// 两处的视觉是同一套——同一个应用里同一个手势不该长出两个样子。
+func CardCoverOne(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
+	on bool, title string, play func()) {
+	cardCover(c, cache, url, w, h, on, "", "", PlayLabel(title), PlayNow, play)
+}
+
+// cardCover 是 CardCover / CardCoverOne 共用的那一层：封面 + 上面那一圈反馈。
+func cardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
+	on bool, playCount, clock, label, tip string, play func()) {
 	t := c.Theme()
 
 	ui.Box(c).Size(w, h).Radius(t.Radius).Clip().Children(func() {
 		imgcache.View(c, cache, url, w, h)
-		cardOverlay(c, w, h, on, playCount, clock, title, play)
+		cardOverlay(c, w, h, on, playCount, clock, label, tip, play)
 	})
 }
 
 // cardOverlay 画网格卡片封面**上面**那一圈。
-func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock, title string, play func()) {
+func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock, label, tip string, play func()) {
 	t := c.Theme()
-	key := FromLabel(title)
+	key := label
 
 	bar := ui.Box(c).Key(key+":bar").Size(w, barH).
 		// 上游是 `bg-gradient-to-t from-black/90`：`from-` 那一头在下边，也就是封面的
@@ -303,7 +329,7 @@ func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock, title s
 		Attach(ui.AnchorBottomRight, ui.AnchorBottomRight).Right(btnInset).Bottom(btnInset)
 
 	show(circle, a).Children(func() {
-		e := ui.Box(c).Size(btn, btn).Label(key).Tooltip(PlayFrom).Center().
+		e := ui.Box(c).Size(btn, btn).Label(key).Tooltip(tip).Center().
 			Draw(func(p *ui.Painter, r ui.Rect) {
 				// 三角缩到圆的六成：整个圆那么大的三角会顶出圆外。
 				drawTri(p, shrink(r, 0.4), t.AccentText)

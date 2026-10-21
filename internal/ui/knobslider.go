@@ -16,7 +16,9 @@
 //
 // ## 三处用它
 //
-//   - **满屏播放器**那条进度（`fullplayer.go`）：横着，旋钮一直画着。
+//   - **满屏播放器**那条进度（`fullplayer.go`）：横着，**旋钮只在悬停或按下时
+//     画**，轨道 6 像素——照上游满屏那一行传下去的 `trackClassName="h-[6px]"`
+//     （`full-screen-player/index.tsx:395`）和 `hideThumb`。
 //   - **播放条**那条进度（`playbar.go`）：横着，**旋钮只在悬停或按下时画**，
 //     轨道压到 4 像素——照上游 `music-play-progress` 的 `h-[4px]` 和 `hideThumb`。
 //   - **音量浮层**里那根竖滑块（`playbar_volume.go`）：竖着——框架的 `ui.Slider`
@@ -81,18 +83,23 @@ type sliderLook struct {
 	face func(t *ui.Theme) ui.Color
 }
 
-// knobIdleLook 是满屏播放器那根的样子：旋钮一直画着，旋钮是白的。
+// knobFullLook 是满屏播放器那根的样子：轨道 6 像素、旋钮只在悬停或按下时画，
+// 旋钮是白的。
 //
-// 白是那边的对：满屏的底永远是糊过的封面加一层 60% 的黑（`fullplayer.go` 的
+// 轨道 6 照上游满屏那一行传下去的 `trackClassName="h-[6px]"`；「只在悬停或按下
+// 时画」照 `music-play-progress` 的 `hideThumb={!showThumb}`——一颗一直亮着的
+// 圆点在整条进度上全程抢注意力，而它是用户真正要抓的东西。
+//
+// 白是那边的对：满屏的底是糊过的封面加一层 55% 的黑（`fullplayer.go` 的
 // `fullScrim`），白旋钮压在上面最清楚。
 //
 // 尺寸照框架的 `coreSlider` 抄（`mygo/ui/widgets.go`）：旋钮 `t.Space(5)` ×
-// `t.Space(4)`、轨道 `t.Space(1.5)`、元素高 `t.Space(5)`、最小宽 `t.Space(20)`。
-var knobIdleLook = sliderLook{
+// `t.Space(4)`、元素高 `t.Space(5)`、最小宽 `t.Space(20)`。
+var knobFullLook = sliderLook{
 	trackW:       6,
 	knobW:        20,
 	knobH:        16,
-	knobWhenIdle: true,
+	knobWhenIdle: false,
 	face: func(t *ui.Theme) ui.Color {
 		if t.Dark {
 			return ui.RGB(224, 225, 225)
@@ -120,7 +127,7 @@ var knobHoverLook = sliderLook{
 // 出来的那个元素照旧可以 `.Grow(1)` / `.Label(…)` / `.Disabled(…)`。
 func knobSlider(c *ui.Context, value *float64, lo, hi float64) ui.Element {
 	t := c.Theme()
-	return selfSlider(c, value, lo, hi, knobIdleLook).
+	return selfSlider(c, value, lo, hi, knobFullLook).
 		Height(t.Space(5)).MinWidth(t.Space(20))
 }
 
