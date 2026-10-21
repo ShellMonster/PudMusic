@@ -299,8 +299,8 @@ func TestTheSharedDrawingEntryIsTheOnlyOne(t *testing.T) {
 		// 而且它还要在下面挂一枚「去登录」。见 fullplayer.go 那一处的注释。
 		"viewFullEmpty": true,
 		// 「还没登录」那一支（我的关注 / 稍后再看 / 历史记录共用）：它的
-		// `Title` 是一句**页标题那个字号**（20px）加粗的标题（不是共享入口
-		// 里那个 15px 的「这里为什么空」），下面还跟着一个「去登录」按钮。
+		// `Title` 是一句**页标题那个字号和字重**（24 / 400，不是共享入口里
+		// 那个 15px 的「这里为什么空」），下面还跟着一个「去登录」按钮。
 		// 形状不同就是另一支，不是抄了一份。见 loginprompt.go。
 		"viewNeedsLogin": true,
 	}

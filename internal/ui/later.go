@@ -237,9 +237,9 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 	p := &s.laterPage
 	now := s.clock.Now()
 
-	ui.Column(c).Key("page:"+laterPath).Grow(1).Padding(16, pagePadX).Gap(8).
+	ui.Column(c).Key("page:"+laterPath).Grow(1).Padding(0, pagePadX).Gap(8).
 		Children(func() {
-			ui.Text(c, "稍后再看").FontSize(scale.Font(c, pageTitleSize)).Bold()
+			ui.Text(c, "稍后再看").FontSize(scale.Font(c, pageTitleSize))
 
 			// 换查询的位置在**画列表之前**：Reload 会把已加载的行清掉，放在后面
 			// 的话这一帧画的是清掉之前的样子，用户会先看到一屏旧的、再变成空、
