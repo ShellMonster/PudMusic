@@ -44,17 +44,18 @@ import (
 // 而且错得很安静——这一页退回占位页，没人看得出来。
 const laterPath = "/later"
 
-// 列宽。Biu 那一行是 `grid-cols-[40px_1fr_150px_150px_150px_40px]`，取同样的
-// 量级。定死是为了让这几列上下对齐（Biu 用 `tabular-nums`）。
+// 列宽。序号 / 封面 / 列间距那几个数取自 DESIGN.md 的「列表」那一行：序号 32
+// （居中）、封面 48、列间距 16。右边那几列取上游同一个量级，定死是为了让它们上下
+// 对齐（Biu 用 `tabular-nums`）。
 const (
-	colIndex  = 40
+	colIndex  = 32
 	colCount  = 90
 	colDate   = 110
 	colClock  = 60
 	coverSide = 48
 	listPadX  = 8
 	listPadY  = 8
-	rowGap    = 8
+	rowGap    = 16
 	// colPubDate 是「投稿时间」那一列的宽。这一页的画法有三档
 	// （今天 / 昨天 / N天前 / MM-DD / YYYY-MM-DD），最长是 YYYY-MM-DD
 	// （10 个字符，font 12 下约 66 宽），84 够。
@@ -372,11 +373,13 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 			func() { rows.playFrom(i) })
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).PaddingY(cardGapForCell).Children(func() {
-			ui.Text(c, m.Title).FontSize(scale.Font(c, 14)).LineHeight(1.5).
+			// 歌名 16 / UP 名 14：和 `widgets/list` 的网格卡同一档
+			// （DESIGN.md「网格：歌名 16、UP 14」）。
+			ui.Text(c, m.Title).FontSize(scale.Font(c, 16)).LineHeight(1.5).
 				TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 				if m.Owner != "" {
-					ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, 12)).LineHeight(1).
+					ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, 14)).LineHeight(1).
 						TextColor(metaColor).MaxLines(1).Ellipsis("…")
 				}
 				// 「正在放」占时长那一格：两样都画必然把时长挤成「0:」，而用户读的

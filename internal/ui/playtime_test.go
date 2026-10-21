@@ -323,13 +323,17 @@ func TestTheLaterPageShowsTheUploadTimeAsWellAsTheAddTime(t *testing.T) {
 // 收藏夹 / 搜索页的歌名与表头「标题」都只剩「…」，而同尺寸的基线是好的。
 // 现在 `List.Columns()` 会先收「投稿时间」、再不行才收「播放量」——标题
 // 始终留得出字，行尾的「⋯」也不会被挤出画面。
+//
+// ⚠️ 列间距改成 16、序号收成 32 之后，右边那几列一共吃掉 416（原来 376）：
+// 侧栏 400 时只放得下「播放量」，侧栏 480 时**两列都放不下**。让位的顺序没变，
+// 变的是哪一档先让到位。
 func TestTheColumnsLeaveTheTitleVisibleInTheNarrowestWindow(t *testing.T) {
 	for _, tc := range []struct {
-		side    float64
-		wantPub bool
+		side              float64
+		wantPlay, wantPub bool
 	}{
-		{400, true},  // 列表宽约 450：两列 + 标题七十多像素都放得下
-		{480, false}, // 列表宽约 370：投稿时间让位，播放量还在
+		{400, true, false},  // 列表宽约 450：投稿时间让位，播放量还在
+		{480, false, false}, // 列表宽约 370：两列都让位，标题还读得出
 	} {
 		t.Run(strconv.FormatInt(int64(tc.side), 10), func(t *testing.T) {
 			st := app.DefaultSettings("")
@@ -364,23 +368,25 @@ func TestTheColumnsLeaveTheTitleVisibleInTheNarrowestWindow(t *testing.T) {
 				t.Errorf("侧栏 %.0f：「收藏时间」那一列在不在=%v，want %v",
 					tc.side, got, tc.wantPub)
 			}
-			if !uiShows(tt, "播放量") {
-				t.Errorf("侧栏 %.0f：播放量那一列不该收", tc.side)
+			if got := uiShows(tt, "播放量"); got != tc.wantPlay {
+				t.Errorf("侧栏 %.0f：播放量那一列在不在=%v，want %v", tc.side, got, tc.wantPlay)
 			}
 
 			// 表头和行里那一格必须对得上（评审量到过错开 9.9 像素）。
-			headCount, ok := tt.Find("播放量")
-			if !ok {
-				t.Fatalf("侧栏 %.0f：表头上没有「播放量」，文字有 %q", tc.side, tt.Texts())
-			}
-			rowCount, ok := tt.Find(list.PlayCountText(123_400))
-			if !ok {
-				t.Fatalf("侧栏 %.0f：行里没有播放量 %q：%q",
-					tc.side, list.PlayCountText(123_400), tt.Texts())
-			}
-			if rowCount.X != headCount.X || rowCount.W != headCount.W {
-				t.Errorf("侧栏 %.0f：播放量那一格 X=%.1f W=%.1f，表头 X=%.1f W=%.1f——错开了",
-					tc.side, rowCount.X, rowCount.W, headCount.X, headCount.W)
+			if tc.wantPlay {
+				headCount, ok := tt.Find("播放量")
+				if !ok {
+					t.Fatalf("侧栏 %.0f：表头上没有「播放量」，文字有 %q", tc.side, tt.Texts())
+				}
+				rowCount, ok := tt.Find(list.PlayCountText(123_400))
+				if !ok {
+					t.Fatalf("侧栏 %.0f：行里没有播放量 %q：%q",
+						tc.side, list.PlayCountText(123_400), tt.Texts())
+				}
+				if rowCount.X != headCount.X || rowCount.W != headCount.W {
+					t.Errorf("侧栏 %.0f：播放量那一格 X=%.1f W=%.1f，表头 X=%.1f W=%.1f——错开了",
+						tc.side, rowCount.X, rowCount.W, headCount.X, headCount.W)
+				}
 			}
 			// 行尾的「⋯」也要在（它被挤出画面之后，这一行就只剩右键能开菜单了）。
 			op, ok := tt.Find(list.OperationLabel("歌 一"))
@@ -420,8 +426,10 @@ func TestTheSearchListGivesWayToTheTitleAtTheWidestSidebar(t *testing.T) {
 	if uiShows(tt, "投稿时间") {
 		t.Errorf("放不下的「投稿时间」还在画：%q", tt.Texts())
 	}
-	if !uiShows(tt, "播放量") {
-		t.Errorf("窄窗口下播放量那一列不该收：%q", tt.Texts())
+	// 列间距 16、序号 32 之后，900 / 480 这个宽度连播放量那一列都放不下——
+	// **两列都让位**，而不是把标题挤成「…」（那正是这一票要修的那种坏法）。
+	if uiShows(tt, "播放量") {
+		t.Errorf("窄窗口下播放量那一列还占着位置：%q", tt.Texts())
 	}
 	if !uiShows(tt, stubTitle(1, 0)) {
 		t.Errorf("行里的歌名不在画面上：%q", tt.Texts())
@@ -433,9 +441,11 @@ func TestTheSearchListGivesWayToTheTitleAtTheWidestSidebar(t *testing.T) {
 // 评审量到过：加了「投稿时间」之后，900 宽 + 侧栏 400 起行尾「⋯」被挤成 0；
 // 侧栏 480 时连新的时间列本身都被裁。现在 `laterTimeCols` 两级让位：
 //
-//	400：投稿时间放不下 → 收它；基线五列只剩 16 给标题（画出来是「…」）
-//	     → 「加入时间」也收；标题回到 134，「⋯」可见
-//	480：两列都收；标题 54、「⋯」可见
+//	400：投稿时间放不下 → 收它；基线五列还是留不出标题 → 「加入时间」也收
+//	480：两列都收
+//
+// 两档都要验「标题读得出几个字、行尾『⋯』还在」——那两个数随列间距 / 序号宽度
+// 变（16 / 32 这一档改过一次），所以判据是拿得到的宽，不是某个具体像素。
 func TestTheLaterRowsKeepTheirOpButtonAtNarrowWidths(t *testing.T) {
 	for _, side := range []float64{400, 480} {
 		t.Run(strconv.FormatInt(int64(side), 10), func(t *testing.T) {
