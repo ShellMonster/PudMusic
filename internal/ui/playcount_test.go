@@ -15,8 +15,8 @@ import (
 //
 // 那一格渐变**画出来对不对**是 `widgets/list` 的事（`hover_test.go` 里已经断过）。这一组
 // 断的是**上一段路**：数据源明明带着这个数（`RecommendItem.View` / `VideoHit.Play` /
-// `UpVideo.Play` / `LibraryItem.View`），而往 `list.Music` 上翻的时候漏了 ——
-// **症状是那一半永远空着，而画面上一点异样都看不出来**（字都在、位置也在，只是少了
+// `UpVideo.Play` / `LibraryItem.View` / `Media.View`），而往 `list.Music` 上翻的时候漏了
+// ——**症状是那一半永远空着，而画面上一点异样都看不出来**（字都在、位置也在，只是少了
 // 左半边），所以只能从映射函数这一层断。
 
 // TestEachPageThatHasAPlayCountCarriesItIntoTheRow 逐页量「翻过去之后还在不在」。
@@ -106,6 +106,8 @@ func TestTheUpSpaceVideosCarryTheirPlayCount(t *testing.T) {
 				map[string]any{
 					"bvid": "BV1ok", "title": "点我", "length": "3:20",
 					"cid": "9", "play": 123_400,
+					// 投稿时间：这个接口叫 `created`（不是 pubdate）。
+					"created": int64(1700000000),
 				},
 			}},
 			"page": map[string]any{"count": 1},
@@ -124,5 +126,15 @@ func TestTheUpSpaceVideosCarryTheirPlayCount(t *testing.T) {
 	if m.View != 123_400 {
 		t.Errorf("翻过来之后播放量是 %d，want 123400（网格卡片封面底部那一条的左半边"+
 			"会空着，而这一页的接口明明给了 play）", m.View)
+	}
+	// 投稿时间：这一页的接口叫 `created`，画在「投稿时间」那一列上。
+	if got, want := m.PubTime.Unix(), int64(1700000000); got != want {
+		t.Errorf("翻过来之后投稿时间是 %d，want %d（接口的 created）", got, want)
+	}
+	// 表头两列都在。
+	for _, want := range []string{"播放量", "投稿时间"} {
+		if !uiShows(tt, want) {
+			t.Errorf("UP 空间的表头上没有「%s」，文字有 %q", want, tt.Texts())
+		}
 	}
 }

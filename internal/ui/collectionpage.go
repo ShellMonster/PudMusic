@@ -245,6 +245,15 @@ func (s *Shell) newCollectionList(p *collectionPage) *list.PagedList {
 	// ⚠️ **「正在加载」那一格由外面递进去**（票 #138）：分页列表自己那一句是
 	// 13px 淡灰缩在列表左上角，而这一页的「没有收藏夹」是居中 15pt 两行。
 	l.SetEmptyView(loadingCell("正在加载…"))
+	// 播放量 + 时间两列：这一页两个数都有（`bili.Media.View` / `FavTime` /
+	// `PubTime`）。时间那一列的**表头字和取哪个时间随容器类型变**——两处走
+	// `collectionTimeTitle` / `collectionTimeOf` 这一对，别只改一边。
+	l.SetColumns(list.Columns{
+		PlayCount:    true,
+		PubTime:      true,
+		PubTimeTitle: collectionTimeTitle(p.ref.Type),
+		Now:          s.now,
+	})
 	return l
 }
 
@@ -288,15 +297,46 @@ func (s *Shell) fetchCollectionPage(ctx context.Context, ref app.CollectionRef, 
 			Owner:    m.Owner,
 			Duration: m.Duration,
 			Item:     onlineItemOf(m),
-			// ⚠️ **没有 View**：收藏夹那个接口的返回里播放量在 `cnt_info.play`，
-			// 而 `bili.Media` 这一层压根没解析它（`collection.go` 的
-			// `resourceListData` 里没有这一列）。所以这里是零值，网格卡片封面
-			// 底部那一条渐变上**左半边不画**——而这不是「忘了填」，是上游那份
-			// 还没解析。补它要改的是 `internal/service/bili`（加字段 + 解析），
-			// 而验收不许打真 B 站接口去核那个字段名，所以那一格留给接线那一票。
+			// 播放量：接口的 `cnt_info.play`（`bili.Media.View`）。音轨那一条
+			// 本来就没有这个数——零值，界面那一格留空（见 `Music.View`）。
+			View: m.View,
+			// 时间那一列画哪个时间**随容器类型变**（上游也是分开的）：
+			//
+			//	收藏夹	`fav_time`（收藏时间，表头写「收藏时间」）
+			//	合集 / 系列	`pubtime`（发布时间，表头写「投稿时间」）
+			//
+			// 拿一个套另一个的话，收藏夹里会写着「投稿时间」而画的是收藏时间
+			// ——用户按它判断新旧，读到的是错的。
+			PubTime: collectionTimeOf(ref.Type, m),
 		})
 	}
 	return list.Page{Songs: songs, HasMore: hasMore}, nil
+}
+
+// collectionTimeOf 是这一条该画进「时间」那一列的时间。
+//
+// 按容器类型分开取，**不拿一个套另一个**（上游也是分开的）：
+//
+//	收藏夹	`fav_time`（上游 `favorites/list.tsx:63`，表头写「收藏时间」）
+//	合集 / 系列	`pubtime`（上游 `collections/list.tsx:75` / `series/list.tsx:84`）
+//
+// 零值照旧传出去（界面上那一格留空）：那一条没给这个时间，编一个
+// 「收藏时间 = 发布时间」比空着更坏。
+func collectionTimeOf(typ bili.CollectionType, m bili.Media) time.Time {
+	if typ == bili.CollectionFavorite {
+		return m.FavTime
+	}
+	return m.PubTime
+}
+
+// collectionTimeTitle 是时间那一列的表头字。和 `collectionTimeOf` 是同一
+// 件事的两半，**必须一起改**：收藏夹表头写「收藏时间」，合集 / 系列写
+// 「投稿时间」。
+func collectionTimeTitle(typ bili.CollectionType) string {
+	if typ == bili.CollectionFavorite {
+		return "收藏时间"
+	}
+	return "投稿时间"
 }
 
 // onlineItemOf 把一条 B 站内容翻成播放队列认的那一项。

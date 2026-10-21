@@ -7,13 +7,12 @@
 // # ⚠️ 表头**只说这一页真有的列**
 //
 // 上游那一行是六列（编号 / 标题 / UP / 播放量 / 投稿时间 / 时长），因为上游的每一行都有
-// 那几列。我们不是每一页都有：`list.Music` 上只有 ID / 歌名 / 封面 / UP 名 / 时长，播放
-// 量只在「稍后再看」那一页有（`internal/ui/library_rows.go` 的 `libraryRow.View`），而
-// 「投稿时间」我们走的是「加入时间 / 观看时间」。
+// 那几列。我们不是每一页都有：播放量和时间两列要 B 站接口的数据才有值，而本地音乐、
+// 历史记录、搜索的「用户」那一档两样都没有。
 //
 // **摆一列这一页没有内容的表头，比不摆表头更糟**，而它糟得很安静：字都在、位置也在，只
 // 是「播放量」那一列下面是空的——用户看不出那是没接，还是自己记错了。所以每一页把**它
-// 自己那些行的列**交给 `Header`，而**组件只有这一个**。
+// 自己那些行的列**交给 `Header`（`Columns`，行和表头读同一份），而**组件只有这一个**。
 //
 // # ⚠️ 列宽**从行的尺寸里取**，不另抄一份
 //
@@ -65,6 +64,8 @@ type CardMetrics struct {
 	PadY, PadX, Gap float32
 	// Index 是序号那一列的宽，Cover 是封面的边长，Clock 是时长那一列的宽。
 	Index, Cover, Clock float32
+	// Play 是播放量那一列的宽，Date 是时间那一列的宽（见 card.go 那两组常量）。
+	Play, Date float32
 	// Compact 报这一份是不是紧凑档。
 	Compact bool
 }
@@ -75,12 +76,14 @@ func MetricsOf(v View) CardMetrics {
 		return CardMetrics{
 			PadY: compactPadY, PadX: compactPadX, Gap: compactGap,
 			Index: compactIndexWidth, Cover: compactCoverSize, Clock: compactDurationWidth,
+			Play: compactPlayCountWidth, Date: compactPubTimeWidth,
 			Compact: true,
 		}
 	}
 	return CardMetrics{
 		PadY: cardPadY, PadX: cardPadX, Gap: cardGap,
 		Index: indexWidth, Cover: coverSize, Clock: durationWidth,
+		Play: playCountWidth, Date: pubTimeWidth,
 	}
 }
 
@@ -129,14 +132,18 @@ type HeaderSpec struct {
 }
 
 // CardHeaderSpec 是这个列表（`List` / `PagedList` / `SwitchView` 那一套）此刻该摆的表
-// 头：编号 / 标题 / 时长，外加**封面那一列的空位**。check 是此刻在多选态（最左边要给它
-// 让出勾选框那一列）。
+// 头：编号 / 标题 / [播放量] / [时间] / 时长，外加**封面那一列的空位**。check 是此刻在
+// 多选态（最左边要给它让出勾选框那一列），cols 是这一页多画哪两列（行和表头读的是同一份，
+// 见 `Columns`）。
 //
-// ⚠️ **列的顺序必须和行里一模一样**：行里是「勾选框 / 编号 / 封面 / 标题 / 时长」
-// （`card.go` 的 `viewCard`），所以封面那个空位夹在编号和标题中间。
+// ⚠️ **列的顺序必须和行里一模一样**：行里是「勾选框 / 编号 / 封面 / 标题 /
+// [播放量] / [时间] / 时长」（`card.go` 的 `viewCard`），所以封面那个空位夹在
+// 编号和标题中间。
 //
-// ⚠️ **本页的行没有播放量和投稿时间两列**，所以表头也没有——理由见文件头那一段。
-func CardHeaderSpec(v View, check bool, key string) HeaderSpec {
+// ⚠️ **两列只在 `cols` 说要的时候才摆**：摆一列这一页没有内容的表头比不摆更糟
+// （文件头那一段）。行那一边读的是同一份 `cols`，所以不会出现「表头多一列、
+// 行里少一列」——那会让右边几列整整错开。
+func CardHeaderSpec(v View, cols Columns, check bool, key string) HeaderSpec {
 	m := MetricsOf(v)
 	spec := HeaderSpec{
 		Key: key,
@@ -144,10 +151,16 @@ func CardHeaderSpec(v View, check bool, key string) HeaderSpec {
 			{Title: "#", Width: m.Index, End: true},
 			{Width: m.Cover}, // 封面：行里有、这一列没字
 			{Title: "标题"},
-			{Title: "时长", Width: m.Clock, End: true},
 		},
 		PadY: m.PadY, PadX: m.PadX, Gap: m.Gap,
 	}
+	if cols.PlayCount {
+		spec.Cols = append(spec.Cols, HeaderCol{Title: "播放量", Width: m.Play, End: true})
+	}
+	if cols.PubTime {
+		spec.Cols = append(spec.Cols, HeaderCol{Title: cols.pubTimeTitle(), Width: m.Date, End: true})
+	}
+	spec.Cols = append(spec.Cols, HeaderCol{Title: "时长", Width: m.Clock, End: true})
 	if check {
 		spec.Lead = append(spec.Lead, LeadCol{Check: true})
 	}
@@ -215,7 +228,9 @@ func Header(c *ui.Context, spec HeaderSpec) {
 //
 // 每一页在 `Children` 里**先调它再调 `View`**，表头就落在列表外面。
 func (l *List) Header(c *ui.Context, key string) {
-	Header(c, CardHeaderSpec(l.view, l.HasSelection(), key))
+	// `Columns()` 不是 `l.cols`：窄窗口下它会先把「投稿时间」收掉，表头和
+	// 行读同一份（见 `List.Columns`）。
+	Header(c, CardHeaderSpec(l.view, l.Columns(), l.HasSelection(), key))
 }
 
 // Header 同上，走这一层是因为页面拿到的常常是 `PagedList` 而不是 `List`。

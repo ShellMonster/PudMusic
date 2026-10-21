@@ -128,6 +128,12 @@ type VideoHit struct {
 	Mid int64
 	// Play 是播放量。
 	Play int64
+	// PubDate 是投稿时间（`pubdate`，Unix 秒）。零值是 B 站这一次没给。
+	//
+	// 搜索页那一列「投稿时间」画的就是它（上游
+	// `pages/search/video-list/list.tsx:61` 的
+	// `formatSecondsToDate(item.pubdate)`）。
+	PubDate time.Time
 }
 
 // UserHit 是一条用户搜索结果。
@@ -186,6 +192,9 @@ type searchItem struct {
 	Pic    string `json:"pic"`
 	Mid    int64  `json:"mid"`
 	Play   int64  `json:"play"`
+	// Pubdate 是投稿时间（Unix 秒）。上游 `web-interface-search-type.ts:112`
+	// 的 `pubdate?: number`。
+	Pubdate int64 `json:"pubdate"`
 	// Duration 是**两种形状**：数字（秒）或字符串（"4:20"）。见 parseDuration。
 	Duration json.RawMessage `json:"duration"`
 
@@ -230,6 +239,9 @@ func (c *Client) SearchVideos(ctx context.Context, q VideoQuery) (VideoPage, err
 			Duration: parseDuration(it.Duration),
 			Mid:      it.Mid,
 			Play:     it.Play,
+			// 会不会是毫秒？上游 `formatSecondsToDate` 走的是 `moment.unix(s)`，
+			// 也就是**秒**；这里跟着它（`unixSeconds` 也是秒）。
+			PubDate: unixSeconds(it.Pubdate),
 		})
 	}
 	out.HasMore = searchHasMore(q.Page, len(out.Hits), raw.NumResults)

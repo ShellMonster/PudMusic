@@ -253,7 +253,7 @@ func TestSpaceVideosReadsBothShapesOfDurationAndCid(t *testing.T) {
 		writeJSON(w, jsonData(t, 0, "0", map[string]any{
 			"list": map[string]any{"vlist": []any{
 				map[string]any{"bvid": "BV1a", "title": "文字格式", "length": "3:20", "cid": "555",
-					"pic": "https://f/a.jpg", "play": 100},
+					"pic": "https://f/a.jpg", "play": 100, "created": 1700000000},
 				map[string]any{"bvid": "BV1b", "title": "数字格式", "length": 200, "cid": 666,
 					"pic": "https://f/b.jpg", "play": 200},
 			}},
@@ -273,6 +273,14 @@ func TestSpaceVideosReadsBothShapesOfDurationAndCid(t *testing.T) {
 	}
 	if pg.Videos[1].Duration != "200" || pg.Videos[1].Cid != "666" {
 		t.Errorf("数字格式那条读成 duration=%q cid=%q", pg.Videos[1].Duration, pg.Videos[1].Cid)
+	}
+	// 投稿时间：这个接口的字段叫 `created`（上游 `SpaceArcVListItem.created`），
+	// **不是 pubdate**。拿别的页的字段名套这一页的话，那一列永远是空的。
+	if got, want := pg.Videos[0].Created.Unix(), int64(1700000000); got != want {
+		t.Errorf("投稿时间 %d，want %d（created）", got, want)
+	}
+	if !pg.Videos[1].Created.IsZero() {
+		t.Errorf("没给 created 的那条读成了 %v，want 零值", pg.Videos[1].Created)
 	}
 	if pg.HasMore {
 		t.Error("两页都拿完了（2/2）却还说有下一页")

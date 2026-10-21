@@ -48,6 +48,19 @@ const (
 	// `tabular-nums`）；不写的话 3:05 和 10:05 两列会左右跳。
 	durationWidth = 48
 
+	// playCountWidth / pubTimeWidth 是播放量和时间那两列的宽。
+	//
+	// 上游是 100 / 110（`music-list-item/styles.ts` 的 grid）。我们收窄一点
+	// 不是省地方——是**最窄那一档要留得出标题**：窗口最小 900、侧栏能拖到
+	// 480，放开的话右边那几列会顶出内容区。
+	//
+	// ⚠️ **播放量最长不是「9999.9万」而是「10000.0万」**：`PlayCountText` 对
+	// 一亿以下按万折，`FormatFloat(…, 1)` 会把 99999999 进成 10000.0——font 12
+	// 下约 60 宽。64 / 80 都还够（紧凑那档也因此是 64，见下面）。
+	// 日期最长是「2026-10-21」（约 66 宽），80 够。
+	playCountWidth = 64
+	pubTimeWidth   = 80
+
 	// listRowHeight 是列表那一行的高。**它是定死的**：封面 48 + 上下内边距 8×2。
 	//
 	// ⚠️ 它不是「量出来的」而是「定下来的」：歌名只占一行（见文件头），这一行
@@ -103,6 +116,15 @@ const (
 	// compactDurationWidth 是紧凑档时长那一列的宽。Biu 那边用 `tabular-nums`，
 	// 宽度定住上下两行才对得齐。
 	compactDurationWidth = 40
+
+	// compactPlayCountWidth / compactPubTimeWidth 是紧凑档那两列的宽。
+	//
+	// ⚠️ **播放量那一列和普通档一样是 64**：`PlayCountText` 最长能产出
+	// 「10000.0万」（99,999,999 按万折、一位小数进位之后），font 12 下约
+	// 60 宽。56 会把最后那一位裁掉，读数变成「10000....」——评审量到过。
+	// 日期那一档最长是「2026-10-21」，72 够。
+	compactPlayCountWidth = 64
+	compactPubTimeWidth   = 72
 
 	// compactTitleLines 是紧凑档歌名最多几行。**1**——这一档和普通那一档现在歌名
 	// 一样都是一行（普通那一档改成一行是这一票的事，见文件头），这一档省下来的
@@ -234,7 +256,17 @@ func (l *List) viewCard(r ui.ListRow) {
 			}
 		})
 
-		// ④ 时长。
+		// ④ 播放量 / ⑤ 投稿时间：这一页有才画（见 `Columns`）。两列都
+		// **留着位置**——没有这个数的那一行空着，但列宽不动，右边那几列
+		// 才不会逐行错开。
+		//
+		// ⚠️ **问 `l.Columns()` 而不是 `l.cols`**：窄窗口下它会先把「投稿
+		// 时间」收掉（见 `minTitleWidth`）。表头读的也是它，两边一致。
+		cols := l.Columns()
+		l.viewPlayCount(c, i, t, cols, playCountWidth, 12)
+		l.viewPubTime(c, i, t, cols, pubTimeWidth, 12)
+
+		// ⑥ 时长。
 		//
 		// ⚠️ **没有时长也留着那么宽的空位**：行尾那枚「⋯」的位置跟着这一列走，
 		// 而表头那一列是永远在的（表头只说这一页真有的列）。少留的话「⋯」在有
@@ -246,7 +278,7 @@ func (l *List) viewCard(r ui.ListRow) {
 			}
 		})
 
-		// ⑤ 行尾那枚「⋯」。点开的是**这一行的菜单**，和右键同一份
+		// ⑦ 行尾那枚「⋯」。点开的是**这一行的菜单**，和右键同一份
 		//（`operation.go` 的文件头）。
 		ui.Box(c).Width(OperationColWidth).Children(func() {
 			Operation(c, OperationLabel(m.Title), titleColor,
@@ -297,7 +329,11 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 			}
 		})
 
-		// 时长那一列：没有时长也留着位置，理由同普通那一行（见那里）。
+		// 播放量 / 投稿时间 / 时长：没有数也留着位置，理由同普通那一行
+		//（见那里）。三列的宽度是这一档自己那一组（见 `compact*Width`）。
+		cols := l.Columns()
+		l.viewPlayCount(c, i, t, cols, compactPlayCountWidth, 12)
+		l.viewPubTime(c, i, t, cols, compactPubTimeWidth, 12)
 		ui.Box(c).Width(compactDurationWidth).Children(func() {
 			if s := formatDuration(m.Duration); s != "" {
 				ui.Text(c, s).Width(compactDurationWidth).TextAlign(ui.End).
@@ -339,6 +375,40 @@ func (l *List) viewIndex(c *ui.Context, i int, playing bool, color ui.Color, tit
 	}
 	ui.Text(c, indexText(i)).Width(width).TextAlign(ui.End).
 		FontSize(scale.Font(c, font)).TextColor(t.TextMuted).MaxLines(1)
+}
+
+// viewPlayCount 画播放量那一列。**这一页没装这一列时一个元素都不建**——
+// 建一个空盒子的话，那些页的右边几列会白白让出一列的宽。
+//
+// 装了而这一行的 `View` 是零值时，格子**留着、字是空的**：那一页上有的行有
+// 播放量、有的没有（收藏夹里的音轨就是），字缺一格而列宽不动，上下才对得齐。
+func (l *List) viewPlayCount(c *ui.Context, i int, t *ui.Theme, cols Columns, width, font float32) {
+	if !cols.PlayCount {
+		return
+	}
+	ui.Box(c).Width(width).Children(func() {
+		if s := PlayCountText(l.songs[i].View); s != "" {
+			ui.Text(c, s).Width(width).TextAlign(ui.End).
+				FontSize(scale.Font(c, font)).TextColor(t.TextMuted).MaxLines(1)
+		}
+	})
+}
+
+// viewPubTime 画时间那一列。规矩同 `viewPlayCount`：这一页没装就不建，
+// 装了而这一条没有时间就留空。
+//
+// ⚠️ 字的样子在 `PubTimeText` 里定（`今天 / 昨天 / N天前 / MM-DD /
+// YYYY-MM-DD`），`now` 来自 `Columns.Now`（界面上是外壳那颗时钟）。
+func (l *List) viewPubTime(c *ui.Context, i int, t *ui.Theme, cols Columns, width, font float32) {
+	if !cols.PubTime {
+		return
+	}
+	ui.Box(c).Width(width).Children(func() {
+		if s := PubTimeText(l.songs[i].PubTime, l.now()); s != "" {
+			ui.Text(c, s).Width(width).TextAlign(ui.End).
+				FontSize(scale.Font(c, font)).TextColor(t.TextMuted).MaxLines(1)
+		}
+	})
 }
 
 // viewCheckbox 画这一行最左边那个勾选框，没装多选就什么都不画。

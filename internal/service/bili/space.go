@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"time"
 )
 
 // UP 空间这几个接口的路径。散在各处容易写错一个字母，而写错了的表现是
@@ -339,6 +340,14 @@ type UpVideo struct {
 	// ⚠️ **必须有**：B 站的取流接口不给 cid 会取到**第一集**。多 P 投稿的
 	// 第三集放出来是第一集，不报错。
 	Cid string
+	// Created 是投稿时间（`created`，Unix 秒）。零值是这一次没给。
+	//
+	// ⚠️ **这一页的时间字段叫 `created`，不叫 `pubdate`**：上游
+	// `service/space-wbi-arc-search.ts` 的 `SpaceArcVListItem.created`，而
+	// 投稿那一页画的就是它（`user-profile/post/list.tsx:62` 的
+	// `formatSecondsToDate(item.created)`）。拿别的页的字段名套这一页的话，
+	// 那一列永远是空的，而画面上看不出任何异样。
+	Created time.Time
 }
 
 // UpVideoQuery 是「投稿」Tab 的一次查询。
@@ -427,6 +436,8 @@ type upVideoData struct {
 			Cid         json.RawMessage `json:"cid"`
 			Description string          `json:"description"`
 			Author      string          `json:"author"`
+			// Created 是投稿时间（Unix 秒）。上游那个接口的字段名就是它。
+			Created int64 `json:"created"`
 		} `json:"vlist"`
 	} `json:"list"`
 	Page struct {
@@ -458,6 +469,7 @@ func upVideoPageFrom(raw []byte, q UpVideoQuery) (UpVideoPage, error) {
 			Description: v.Description,
 			Author:      v.Author,
 			Cid:         upVideoCid(v.Cid),
+			Created:     unixSeconds(v.Created),
 		})
 	}
 	// ⚠️ **空页一律收口**。B 站在 pn 超出范围时回的是空的 vlist 而不报错，

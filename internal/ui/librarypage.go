@@ -192,11 +192,13 @@ type listMetrics struct {
 	cover           float32
 	index           float32
 	count, date     float32
-	clock           float32
-	progress        float32
-	viewedAt        float32
-	titleLines      int
-	titleSize       float32
+	// pubDate 是「投稿时间」那一列的宽（稍后再看那一页多出来的一列）。
+	pubDate    float32
+	clock      float32
+	progress   float32
+	viewedAt   float32
+	titleLines int
+	titleSize  float32
 	// height 是这一行的高。**它是定死的**（封面 + 上下内边距），和
 	// `widgets/list` 的 `listRowHeight` 同一个道理：歌名只占一行，这一行由封面
 	// 撑着，行高写死是为了让这个数**保证**是它，而不是「碰巧量出来是它」。
@@ -212,7 +214,7 @@ func metricsOf(v list.View) listMetrics {
 		return listMetrics{
 			padY: listPadY, padX: listPadX, gap: rowGap, cover: coverSide,
 			index: colIndex, count: colCount, date: colDate, clock: colClock,
-			progress: colProgress, viewedAt: colViewedAt,
+			pubDate: colPubDate, progress: colProgress, viewedAt: colViewedAt,
 			// ⚠️ **歌名一行**（上游那一行是 `truncate`）：折行的话整张列表的行高
 			// 就跟着歌名长短跳（理由见 `widgets/list/card.go` 的文件头）。
 			titleLines: listTitleLines, titleSize: 14,
@@ -227,6 +229,7 @@ func metricsOf(v list.View) listMetrics {
 		padY: compactListPadY, padX: compactListPadX, gap: compactRowGap,
 		cover: compactCoverSide, index: compactColIndex,
 		count: compactColCount, date: compactColDate, clock: compactColClock,
+		pubDate:  compactColPubDate,
 		progress: compactColProgress, viewedAt: compactColViewedAt,
 		titleLines: 1, titleSize: 13,
 		// 行高：封面 32 + 上下内边距 4×2。
@@ -247,6 +250,9 @@ const (
 	compactColClock    = 50
 	compactColProgress = 110
 	compactColViewedAt = 118
+	// compactColPubDate 是紧凑档「投稿时间」那一列的宽。和 `colPubDate`
+	// 同一个算法（最长 YYYY-MM-DD，font 12 约 66 宽），这一档再收窄一点。
+	compactColPubDate = 76
 )
 
 // rowFace 是这一行字该用的两个颜色 + 「正在放」那一档。两页共用（理由见

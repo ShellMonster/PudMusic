@@ -70,12 +70,13 @@ func TestTheLibraryRowsAreTheSameHeightNoMatterHowLongTheTitle(t *testing.T) {
 
 // TestTheLaterHeaderSaysItsOwnColumns 钉住稍后再看那一行的表头列。
 //
-// 它比 `widgets/list` 那一族多两列：播放量 / 加入时间（上游是「投稿时间」，而这一页
-// 的筛选器筛的是 `add_at`——跟着筛的那个时间画，见 `later.go` 文件头）。
+// 它比 `widgets/list` 那一族多两列：加入时间（这一页的筛选器筛的是 `add_at`，
+// 见 `later.go` 文件头）和投稿时间（上游画的是 `pubdate`）。两个时间都在，
+// 各回答一半问题。
 func TestTheLaterHeaderSaysItsOwnColumns(t *testing.T) {
 	tt, _ := laterHoverShell(t)
 
-	for _, want := range []string{"#", "标题", "播放量", "加入时间", "时长"} {
+	for _, want := range []string{"#", "标题", "播放量", "加入时间", "投稿时间", "时长"} {
 		if !uiShows(tt, want) {
 			t.Errorf("稍后再看的表头上没有「%s」，文字有 %q", want, tt.Texts())
 		}
@@ -270,30 +271,32 @@ func uiShows(tt *ui.Tester, s string) bool {
 	return false
 }
 
-// TestTheSearchUserTabHeaderHasNoClock 钉住「用户」那一档的表头**没有「时长」**。
+// TestTheSearchUserTabHeaderHasNoClock 钉住「用户」那一档的表头**没有时长、
+// 播放量、投稿时间**。
 //
 // 那一档的行是「序号 / 头像 / 昵称 / 个性签名」（`searchUserMusic` 的注释），
-// `list.Music.Duration` 是零值，于是行里那一列**没有字**——**位置是留着的**
-// （`widgets/list` 的 `viewCard` 无论有没有时长都留着那么宽，因为行尾那枚「⋯」的
-// 位置跟着这一列走）——但表头上还写着「时长」的话，用户读到的是一列空的表头。
+// 时长 / 播放量 / 投稿时间三样它一样都没有——后两样的列定义是 `searchColumns`
+// 给的（用户那一档是零值），时长那一列则在规格末尾被切掉。
 //
 // ⚠️ 断的是**规格里有没有那一列**而不是画面上有没有那个字：`CardHeaderSpec` 摆的是
 // 列定义，画面上的字是它画出来的，两者对不上这件事只有前者能说清。
 func TestTheSearchUserTabHeaderHasNoClock(t *testing.T) {
-	video := searchHeaderSpec(0, list.ViewList, false, "k")
-	user := searchHeaderSpec(searchTabUser, list.ViewList, false, "k")
+	video := searchHeaderSpec(0, list.ViewList, list.Columns{PlayCount: true, PubTime: true}, false, "k")
+	user := searchHeaderSpec(searchTabUser, list.ViewList, list.Columns{}, false, "k")
 
 	if last := video.Cols[len(video.Cols)-1]; last.Title != "时长" {
 		t.Errorf("歌曲那一档的表头最后一列是「%s」，want 「时长」", last.Title)
 	}
 	for _, col := range user.Cols {
-		if col.Title == "时长" {
-			t.Errorf("「用户」那一档的表头上还摆着「时长」，而那一档的行里没有那一列")
+		switch col.Title {
+		case "时长", "播放量", "投稿时间":
+			t.Errorf("「用户」那一档的表头上还摆着「%s」，而那一档的行里没有那一列",
+				col.Title)
 		}
 	}
-	// 别的几列一个都不能少（封面那一列的空位也算）。
-	if len(user.Cols) != len(video.Cols)-1 {
-		t.Errorf("「用户」那一档的表头有 %d 列，want %d（只少「时长」那一列）",
-			len(user.Cols), len(video.Cols)-1)
+	// 剩下的三列一个都不能少：序号、封面那一列的空位、标题。
+	if len(user.Cols) != 3 {
+		t.Errorf("「用户」那一档的表头有 %d 列，want 3（# / 封面空位 / 标题）",
+			len(user.Cols))
 	}
 }

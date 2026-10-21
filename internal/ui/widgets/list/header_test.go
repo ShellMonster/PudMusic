@@ -54,9 +54,9 @@ func newHeaderList(t *testing.T, v View, check bool) (*List, *ui.Tester) {
 
 // TestTheHeaderSaysTheColumnsThisListActuallyHas 钉住表头说的是**这一页真有的列**。
 //
-// `list.Music` 上没有播放量也没有投稿时间，所以表头也只有三列。摆一列这一页没有内容
-// 的表头，比不摆更糟：字都在、位置也在，只是下面永远是空的，用户看不出那是没接还是
-// 自己记错了。
+// 这个列表**没装** `Columns`（零值），所以表头只有三列。摆一列这一页没有内容的
+// 表头，比不摆更糟：字都在、位置也在，只是下面永远是空的，用户看不出那是没接还是
+// 自己记错了。装了那两列的样子见 `columns_test.go`。
 func TestTheHeaderSaysTheColumnsThisListActuallyHas(t *testing.T) {
 	_, tt := newHeaderList(t, ViewList, false)
 

@@ -132,6 +132,12 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 		// `/` 那一条，见 viewHome）。让三个列表都说一遍自己那句「这里还没有歌」，
 		// 叠在那一页的空状态上就是两句话在讲同一件事。
 		l.SetEmpty("")
+		// 播放量那一列：首页三个 Tab 的接口都带着它（`RecommendItem.View`）。
+		//
+		// ⚠️ **投稿时间不画**：上游首页自己就是 `hidePubTime`
+		// （`pages/music-recommend/list.tsx:49` 与 `:60`），而它那一层的
+		// `RecommendItem` 也没把 `pubdate` 带上来——照它。
+		l.SetColumns(list.Columns{PlayCount: true})
 		// ⚠️ **这里不挂 `ScrollState`**：给一个 `List` 挂上它会和它自己按行记的
 		// 位置**打架**——TrackScroll 每一帧按那个像素数把容器摆过去，而
 		// `ui.ListState` 记的是「第几行 + 那一行离顶多远」，两个数换算的那一帧里

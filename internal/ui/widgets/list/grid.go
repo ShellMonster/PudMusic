@@ -658,8 +658,9 @@ func (g *Grid) viewCellGuarded(c *ui.Context, i int, cell float32) {
 // 歌名，再下面一行是 UP 名（左边）和时长（右边）。
 //
 // ⚠️ **封面底下渐变条的左边是播放量**（上游 `music-card/index.tsx:50-55`）：填的是
-// `Music.View`。**没有这个数的那几页（本地音乐）那一半不画**——画一列空白比不画更难看，
-// 而用户看见半行字会以为这一格「数据不全」（理由见 `Music.View`）。
+// `Music.View`。**没有这个数的那几页（本地音乐、历史记录、搜索的「用户」那一档）
+// 那一半不画**——画一列空白比不画更难看，而用户看见半行字会以为这一格「数据不全」
+// （理由见 `Music.View`）。
 func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 	t := c.Theme()
 	m := g.songs[i]

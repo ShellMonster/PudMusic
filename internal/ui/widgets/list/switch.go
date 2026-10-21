@@ -66,6 +66,10 @@ func (s *SwitchView) SetView(v View) {
 // Layout 返回此刻的摆法。
 func (s *SwitchView) Layout() View { return s.view }
 
+// SetColumns 换这一页多画哪两列。**只装在列表那半边**：网格卡片没有列，
+// 播放量走封面底部那一条渐变，而时间那一列网格里本来就不画。
+func (s *SwitchView) SetColumns(c Columns) { s.list.SetColumns(c) }
+
 // SetSongs 换掉这份歌。**两份控件都换**（见文件头）。
 func (s *SwitchView) SetSongs(songs []Music) {
 	s.list.SetSongs(songs)

@@ -482,6 +482,12 @@ func (p *pagedRows) drawList(c *ui.Context) {
 		Rows(func(r ui.ListRow) { p.viewRow(r) }).
 		TrackScroll(&p.scroll)
 
+	// 量这一帧的容器宽，下一帧用。理由同 `drawGrid` 末尾那一句；列表这一档
+	// 拿它判「稍后再看的投稿时间那一列放不放得下」（`laterTimeCols`）。
+	if bw := e.Bounds().W; bw > 0 {
+		p.width = bw
+	}
+
 	// 量滚动条的悬停（界面层下一帧据此换深一档，见 scrollbar.go）。
 	p.hot = scrollbar.Hot(e)
 }

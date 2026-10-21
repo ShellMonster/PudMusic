@@ -229,7 +229,9 @@ func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int) {
 	// **没有字**（位置留着——行尾那枚「⋯」的位置跟着它走），理由见
 	// `searchHeaderSpec`。
 	if v := t.list.Layout(); v != list.ViewCard {
-		list.Header(c, searchHeaderSpec(tab, v,
+		// 列定义**问列表要**（`init` 里装的就是 `searchColumns`）：表头和行
+		// 读同一份，只改一处时不会一边多一列、一边少一列。
+		list.Header(c, searchHeaderSpec(tab, v, t.list.List().Columns(),
 			t.list.List().HasSelection(), "search:header:"+strconv.Itoa(tab)))
 	}
 	t.list.View(c)
@@ -243,13 +245,27 @@ func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int) {
 // **没有字**——**位置是留着的**（`widgets/list` 的 `viewCard` 无论有没有时长都留着
 // 那么宽，因为行尾那枚「⋯」的位置跟着这一列走）——但表头上还写着「时长」的话，
 // 用户读到的是一列空的表头，而空表头比没有表头更难解释（看不出那是没数据还是坏了）。
-func searchHeaderSpec(tab int, v list.View, check bool, key string) list.HeaderSpec {
-	spec := list.CardHeaderSpec(v, check, key)
+func searchHeaderSpec(tab int, v list.View, cols list.Columns, check bool, key string) list.HeaderSpec {
+	spec := list.CardHeaderSpec(v, cols, check, key)
 	if tab == searchTabUser {
 		// 去掉最后那一列（「时长」）——`CardHeaderSpec` 的顺序是固定的，见它自己。
 		spec.Cols = spec.Cols[:len(spec.Cols)-1]
 	}
 	return spec
+}
+
+// searchColumns 是这一档要多画哪两列（行和表头读的是同一份）。
+//
+//	歌曲 / 视频	播放量 + 投稿时间（`VideoHit.Play` / `VideoHit.PubDate`）
+//	用户		两样都没有——用户不是视频，行里也不该凭空多出两列空的
+//
+// ⚠️ `Now` 传的是 `s.now`（读外壳那颗时钟的闭包），不是 `s.clock.Now`：
+// 测试会把 `s.clock` 换成假时钟，而值在取的那一刻就把旧时钟定住了。
+func searchColumns(tab int, s *Shell) list.Columns {
+	if tab == searchTabUser {
+		return list.Columns{}
+	}
+	return list.Columns{PlayCount: true, PubTime: true, Now: s.now}
 }
 
 // searchSortLabels 是 tab 那一档的排序标签，按 Biu 的顺序。
