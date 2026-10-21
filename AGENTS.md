@@ -38,8 +38,22 @@ FAIL，逐个包看 `ok`。
   `tt.Frame()` 数帧。框架的钟站着不动（README「版本」一节有实测记录），
   数帧那种等法会**静默失效**：不报错、不超时，直接放行，于是后面每一次点击都
   按在旧坐标上。症状是「点了没反应」，不是「等不到」。
-- **低负载下绿不算修好。** 这套测试在 load 9~10 时会飘，load 8 以下连续 10 次全绿。
+- **低负载下绿不算修好。** 这套测试在 load 9~10 时会飘，load 8 以下才作数。
   判「飘红是不是真 bug」之前先看一眼机器负载。
+- **复验用「加压 3 次」，不是「连跑 10 次」。** 这条规矩要的是**堆和 GC 压力**
+  ——整包 10 次挂 3 次、单独跑 0 次，差别就在「整包那些堆和 GC 压力」。
+  `GOGC=10` 直接造那个压力，一次顶十次：实测整包 3 次 `GOGC=10` 飘了 2 次
+  （`TestTheHoverLayerCoversOnlyTheCover`、
+  `TestEveryRouteShowsARealRowOrSaysWhichTicketIsMissing//follow`），
+  而整包 10 次要 26 分钟、还撞 `go test` 默认的 600 秒超时。
+
+  ```sh
+  go build ./... && go vet ./... && go test ./...   # 默认一次
+  GOGC=10 go test ./internal/ui/ -count=3 -timeout 15m   # 改了界面行为才加
+  ```
+
+  **只验自己改的那几处**时用 `-run` 过滤（比整包 10 次快 250 倍）：
+  `go test ./internal/ui/ -count=10 -run 'TestPlayBar|TestVolume'`。
 - **查布局问题先按 F12**，用框架自带的检查器：元素树、box model、帧耗时、取色器。
   **别先写测试再二分**——那样往往是在测一个猜错了的数，而界面上的位置、间距、
   颜色，检查器一眼就能量出来；量出来的数再写进断言，才是对着**画面**的断言。
