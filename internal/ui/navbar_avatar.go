@@ -353,10 +353,10 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 // 「未登录」和「已登录」必须是两回事（issue #95 的第三条验收），而「图没下来」
 // 和「压根没有地址」也不是一回事——前者网络好了会自己好，后者永远好不了。
 //
-// ⚠️ 这里读的是 `imgcache.Cache` 而不是直接调 `imgcache.View`：那个 View 的两种
-// 失败态画的是「载入中」「封面加载失败」两行字（见 imgcache/view.go 的
-// drawCover），那是给**封面**那个尺寸用的。头像只有 28 宽，那两行字塞进去会被
-// 裁成一团看不出是什么的色块——比一个讲得清的东西糟糕得多。
+// ⚠️ 这里读的是 `imgcache.Cache` 而不是直接调 `imgcache.View`：那个 View 是给
+// **封面**那一档尺寸定的（占位和失败态都是没有字的一格，见 imgcache/view.go 的
+// drawCover）。头像只有 28 宽，而且它要说的是「未登录 / 图没下来 / 在路上」
+// 三件不同的事，有自己的一套画法（见下面 drawAvatar）。
 func (s *Shell) viewAvatarFace(c *ui.Context) {
 	side := float32(avatarSize)
 	look, face, note := s.avatar.snapshot()
