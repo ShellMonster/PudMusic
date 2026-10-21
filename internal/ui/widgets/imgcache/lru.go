@@ -25,10 +25,21 @@ func newLRU(maxBytes int64) *lru {
 // touch 记一次使用，把 e 提到最前面。
 func (l *lru) touch(e *entry) {
 	if el, ok := l.byURL[e.url]; ok {
-		if el != l.order.Front() {
-			l.order.MoveToFront(el)
+		if el.Value.(*entry) == e {
+			if el != l.order.Front() {
+				l.order.MoveToFront(el)
+			}
+			return
 		}
-		return
+		// 表里是同一个 URL 的**旧条目**（失败表到上限挤掉的那一个，或者
+		// 被取消的那一个）。不能只把旧的提到前面：那样新的这一条永远不在
+		// 账上，它的字节数记进 used 却挤不掉，而旧的会一直占着 URL 表。
+		// 把旧条目归零拿掉，换新的。
+		l.order.Remove(el)
+		old := el.Value.(*entry)
+		l.used -= old.bytes
+		old.bytes = 0
+		delete(l.byURL, e.url)
 	}
 	l.byURL[e.url] = l.order.PushFront(e)
 }
