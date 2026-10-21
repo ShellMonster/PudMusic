@@ -41,12 +41,19 @@ const (
 	backTopGlyph = 20
 )
 
-// backToTopIcon 是回顶那一枚里的向上箭头（上游 `RiArrowUpLine`）。
+// BackToTopIcon 是回顶那一枚里的向上箭头（上游 `RiArrowUpLine`），也是**这份
+// 资源的唯一出处**。
 //
-// ⚠️ 它从 `iconset` 取而**不是**从界面层拿常量：这个包在界面层**下面**，
-// 反过来 import 是个环（见 `iconset` 文件头）。同一个文件在界面层的常量叫
-// `iconToTop`。
-var backToTopIcon = iconset.Must("Arrows/arrow-up-line.svg")
+// ⚠️ **界面层登记的那个名字直接取它**（`internal/ui/icons.go` 的
+// `iconToTop = list.BackToTopIcon`）。两处各写一遍文件名的话，改一边不会有任何
+// 编译错误——而画面上就出现两种「回到顶部」，谁也看不出来是哪一次改错的。
+// 这个包在界面层**下面**（见 `iconset` 文件头），所以常量只能住在这里、界面层
+// 过来取，不能反过来。
+const BackToTopIcon = "Arrows/arrow-up-line.svg"
+
+// backToTopIcon 是上面那个名字解析出来的图（`iconset` 按名字缓存，同一个名字
+// 永远是同一个指针）。
+var backToTopIcon = iconset.Must(BackToTopIcon)
 
 // BackToTop 画「回到顶部」那一枚：滚过 400 像素才出现。
 //

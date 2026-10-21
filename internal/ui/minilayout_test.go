@@ -13,6 +13,7 @@ package ui
 // 另一半（窗口开关、控制、两个窗口共享状态）在 `miniplayer_test.go`。
 
 import (
+	"math"
 	"testing"
 
 	mygoui "github.com/egoist/mygo/ui"
@@ -116,7 +117,7 @@ func TestTheMiniKeysAreIcons(t *testing.T) {
 	}
 	a.Toggle() // 暂停：播放键上写的是「播放」
 	tt := miniTester(s)
-	progressRect(t, tt) // 同上：封面在，才是最挤的那一档
+	progress := progressRect(t, tt) // 同上：封面在，才是最挤的那一档
 
 	for _, want := range []struct {
 		label string
@@ -141,6 +142,19 @@ func TestTheMiniKeysAreIcons(t *testing.T) {
 			t.Errorf("%q 那一格里没画图形（只有底色 %v）——图标键上什么都没有，"+
 				"名字还在、按得动，可用户看不见它", want.label, s.bg)
 		}
+	}
+
+	// 居中也在这里断：三个键一共 100 宽，而这一列有 244——左对齐的话右边空
+	// 144 像素，**播放键落在窗口左侧**，而它头顶那条进度条横跨整列
+	// （见 `viewMiniTransport` 的注释）。播放键的中点得在进度条中点底下。
+	play, ok := tt.Find("播放")
+	if !ok {
+		t.Fatalf("画面上找不到「播放」，文字有 %q", tt.Texts())
+	}
+	if d := math.Abs(float64(play.X+play.W/2) - float64(progress.X+progress.W/2)); d > 2 {
+		t.Errorf("播放键的中点在 x=%.1f，而进度条的中点在 x=%.1f（差 %.1f）——"+
+			"三个键没居中，左边挤成一团、右边空着",
+			play.X+play.W/2, progress.X+progress.W/2, d)
 	}
 }
 

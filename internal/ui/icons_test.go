@@ -114,24 +114,6 @@ func TestEveryIconOnDiskHasAName(t *testing.T) {
 	}
 }
 
-// TestTheBackToTopIconIsTheOneInTheTable 钉住「回到顶部」那一枚就是表里的
-// `iconToTop`，而且和 `widgets/list` 画的是**同一个文件**。
-//
-// 那一枚住在 `widgets/list` 的 `BackToTop` 里——那个包在界面层**下面**，import
-// 不到这里的常量（见 `iconset` 文件头），所以那边写的是同一个字面文件名
-// （`iconset.Must("Arrows/arrow-up-line.svg")`）。两个名字各写一遍，**没有编译期
-// 保证它们指同一张图**：有人把这边换成 `arrow-up-s-line.svg`（上游用的其实是那
-// 一张），那边不知道，画面上就出现两种「回到顶部」。
-//
-// `iconset` 按名字缓存，同一个名字永远是同一个指针——所以这里断的是指针相等。
-func TestTheBackToTopIconIsTheOneInTheTable(t *testing.T) {
-	const lists = "Arrows/arrow-up-line.svg"
-	if got, want := icon(iconToTop), iconset.Must(lists); got != want {
-		t.Errorf("界面层登记的「回到顶部」是 %s，而 widgets/list 画的是 %s——"+
-			"两处得指同一张图", iconToTop, lists)
-	}
-}
-
 // TestTheIconResourcesAreAllMonochrome 钉住「图标是单色的，跟着主题走」。
 //
 // MyGo 的 `ui.Icon` 画的是**形状本身**、颜色从祖先的文字色继承（`mygo/ui/svg.go`

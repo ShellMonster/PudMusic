@@ -554,8 +554,15 @@ func (s *Shell) viewMiniProgress(c *ui.Context, st app.State) {
 // 的只是画出来的那几个字，所有断言照样全绿。图标化之后那笔账整笔勾销（图形不
 // 会再被裁成偏旁），`TestTheMiniKeysAreIcons` 断的是「这三个键的框就是图标键的
 // 框，不是被挤扁的文字键」。
+//
+// ⚠️ **余量出来了就得居中**（`Justify(ui.Center)`）：左对齐的话这三个键挤在
+// 244 宽的左边 100 像素里、右边空 144，**播放键落在窗口左侧**，而它上面那条进度
+// 条横跨整列——两颗「中心」对不上，一眼就是「没排过版」。上游那一行是
+// `justify-between`，因为它那三组（模式 / 控制 / 展开）各占一头；我们这一行只有
+// 中间那一组，居中就是同一个意思：播放键在进度条中点底下。
 func (s *Shell) viewMiniTransport(c *ui.Context, st app.State) {
 	ui.Row(c).Key("mini-transport").FillWidth().Gap(6).AlignItems(ui.Center).
+		Justify(ui.Center).
 		Children(func() {
 			// 能不能按看的是队列，和播放条上那两个键是同一个判据（`viewStepButtons`）。
 			if flatIconButton(c, iconPrev, "上一首", 18).

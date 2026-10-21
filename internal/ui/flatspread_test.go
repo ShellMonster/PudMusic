@@ -200,6 +200,11 @@ func TestTheFullPlayerKeysAreFlat(t *testing.T) {
 			noPointer(tt)
 
 			assertKeysFlat(t, tt, "满屏播放器", "关闭全屏", "全屏设置")
+			// 「框里没描边、没底色」还不够：**图形本身要被画出来**。这两枚是白的
+			// （`fullOnColor`），压在一个压暗过的封面上——底要是把它吃掉，框内
+			// 框外照样同色（那是一枚透明的空键），所以得单独断那枚图形。
+			assertGlyphPainted(t, tt, "关闭全屏")
+			assertGlyphPainted(t, tt, "全屏设置")
 		})
 	}
 }
@@ -222,6 +227,7 @@ func TestTheFullPlayerPartsKeysAreFlat(t *testing.T) {
 			noPointer(tt)
 
 			assertKeysFlat(t, tt, "满屏播放器", "显示分集列表")
+			assertGlyphPainted(t, tt, "显示分集列表")
 
 			if err := tt.Click("显示分集列表"); err != nil {
 				t.Fatalf("点不了分集把手：%v（文字：%q）", err, tt.Texts())
@@ -229,6 +235,7 @@ func TestTheFullPlayerPartsKeysAreFlat(t *testing.T) {
 			tt.Frame()
 			noPointer(tt)
 			assertKeysFlat(t, tt, "分集面板", "收起分集")
+			assertGlyphPainted(t, tt, "收起分集")
 		})
 	}
 }
@@ -472,11 +479,22 @@ func (*flatProbeError) Error() string { return "这一块没拉出来（测试�
 // 它们原来各是一句手搓的 `ui.Row/Box + Height(1) + Background(t.Border)`，这一票
 // 换成框架的 `ui.Divider`——两处画出来逐字一样（1 DIP、无圆角、无内边距、
 // `t.Border`，方向看自己在 `Row` 还是 `Column` 里）。所以判据不是「调了哪个
-// 函数」（那只能证明换了写法，证明不了画面上还是一条线），而是**画面**：抽屉那
-// 一段里有一条横贯整条抽屉、颜色正好是 `t.Border` 的线。
+// 函数」（那只能证明换了写法，证明不了画面上还是一条线），而是**画面**。
 //
-// ⚠️ 抽屉宽 384 / 360，取 300 当「横贯」的下限：窗口里没有别的**横着** 300 像素
-// 的 `t.Border`（侧栏那条是竖的）。
+// 🔴 **只在「头那一格底下」那一条几像素高的带子里找**，不在整窗里找。第一版
+// 就是整窗找「最长的一条横线」，于是**删掉 `ui.Divider` 照样绿**：分集面板自己
+// 的顶边就是一条 348 像素的 `t.Border`（评审用 `-overlay` 验的，报出来 348px /
+// y=572），比 300 的门槛还长。队列抽屉那一半没这个问题（它删掉之后只剩 264），
+// 但两半用同一把尺子才说得上「验过」。
+//
+// 那一行在哪儿是**布局常量**说了算的，不是猜的：
+//
+//	队列抽屉  面板贴着窗口右边、宽 `queueDrawerWidth`，头高 `queueHeaderHeight`
+//	          → 线在面板顶往下第 `queueHeaderHeight` 行（实测 y=52，run=384）
+//	分集抽屉  面板自己的框由 `Label("分集列表")` 给，头高 `partHeaderHeight`
+//	          → 线在 `panel.Y + partHeaderHeight`（实测 y=621，run=360）
+//
+// 面板**自己**的那一圈边（分集那个 popover 的顶边就在 `panel.Y`）落在带子外面。
 func TestTheTwoRulesAreDrawnAsOnePixelLines(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -491,7 +509,11 @@ func TestTheTwoRulesAreDrawnAsOnePixelLines(t *testing.T) {
 			for range 3 {
 				tt.Frame()
 			}
-			assertHasRule(t, tt, s, dark, "队列抽屉")
+			img := tt.Image()
+			border := flatColor(BuildTheme(s.app.SettingsSnapshot(), dark).Border)
+			x0 := img.Rect.Max.X - queueDrawerWidth
+			assertRuleAt(t, img, border, "队列抽屉", x0, img.Rect.Max.X-1,
+				queueHeaderHeight-2, queueHeaderHeight+2, queueDrawerWidth-8)
 
 			// 分集抽屉：要一首有多 P 的，否则那一列摆不出来（`partsDrawer`
 			// 只在 `PartsWorthAsking` 的时候画）。
@@ -503,31 +525,49 @@ func TestTheTwoRulesAreDrawnAsOnePixelLines(t *testing.T) {
 			for range 3 {
 				stt.Frame()
 			}
-			assertHasRule(t, stt, sp, dark, "分集抽屉")
+			panel, ok := stt.Find("分集列表")
+			if !ok {
+				t.Fatalf("画面上找不到分集面板，文字有 %q", stt.Texts())
+			}
+			py := round32(panel.Y)
+			assertRuleAt(t, stt.Image(), border, "分集抽屉",
+				round32(panel.X), round32(panel.X+panel.W)-1,
+				py+partHeaderHeight-2, py+partHeaderHeight+2, int(panel.W)-8)
 		})
 	}
 }
 
-// assertHasRule 断画面上有一条横贯抽屉的 `t.Border` 线（见上面那一条）。
-func assertHasRule(t *testing.T, tt *mygoui.Tester, s *Shell, dark bool, what string) {
+// assertRuleAt 断给定那一条横带子里有**恰好一行**横贯的 `t.Border` 线。
+//
+// 「恰好一行」= 1 DIP：多一行就是 2 像素，那已经不是 `ui.Divider` 画出来的东西了。
+// `minRun` 是「横贯」的下限（按抽屉宽减几个像素），所以带子里别的东西（某一行
+// 的一半、一个图标的边）不会顶替它。
+func assertRuleAt(t *testing.T, img *image.RGBA, border color.RGBA, what string, x0, x1, y0, y1, minRun int) {
 	t.Helper()
-	want := flatColor(BuildTheme(s.app.SettingsSnapshot(), dark).Border)
-	img := tt.Image()
-	longest := 0
-	for y := range img.Rect.Max.Y {
+	if x0 < 0 {
+		x0 = 0
+	}
+	lines, longest := 0, 0
+	for y := y0; y <= y1; y++ {
 		run := 0
-		for x := range img.Rect.Max.X {
-			if maxDiff(img.RGBAAt(x, y), want) <= probeTolerance {
+		best := 0
+		for x := x0; x <= x1; x++ {
+			if maxDiff(img.RGBAAt(clampX(img, x), clampY(img, y)), border) <= probeTolerance {
 				run++
-				longest = max(longest, run)
+				best = max(best, run)
 			} else {
 				run = 0
 			}
 		}
+		longest = max(longest, best)
+		if best >= minRun {
+			lines++
+		}
 	}
-	if longest < 300 {
-		t.Errorf("%s里最长的一条横线只有 %d 像素是描边色——顶上那条分割线没画出来",
-			what, longest)
+	if lines != 1 {
+		t.Errorf("%s：y=%d..%d 那一条带子里横贯的描边线有 %d 行（want 恰好 1），"+
+			"最长的一行 %d 像素（门槛 %d）——头顶那条分割线没画出来（或者不只一像素）",
+			what, y0, y1, lines, longest, minRun)
 	}
 }
 
