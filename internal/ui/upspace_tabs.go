@@ -26,9 +26,11 @@ func (s *Shell) viewSpaceTabs(c *ui.Context, sp *upSpace) {
 	// 的时候就把状态建好了，事后再挂 key 会 panic（`ui/element.go` 的 `Key`）。
 	// 给他外面套一层是最省事的做法。
 	ui.Column(c).Key("space-tabs").PaddingX(upPad).Children(func() {
-		// ⚠️ **主 Tab 用扁平那一种**（`flatTabs`，见 tabs.go）：这一排和次级
-		// 排序那几排不是同一个样子（票 #138）。
-		flatTabs(c, &sp.tab, upTabNames...)
+		// ⚠️ **主 Tab 用轨道 + 滑块那一种**（`mainTabs`，见 tabs.go）：这一排
+		// 和次级排序那几排不是同一个样子（票 #138）。
+		//
+		// ⚠️ `AlignSelf(ui.Start)`：同上，Column 默认 Stretch，轨道要包着字。
+		mainTabs(c, &sp.tab, tabMD, upTabNames...).AlignSelf(ui.Start)
 	})
 }
 
