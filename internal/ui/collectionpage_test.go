@@ -726,9 +726,35 @@ func TestTheCollectionOpsRowStillFitsAtTheMinWindow(t *testing.T) {
 			if !ok {
 				t.Fatalf("侧栏 %.0f：画面上找不到排序下拉，文字有 %q", side, tt.Texts())
 			}
+			// 搜索收着的时候是一枚图标键（「搜索是会展开的按钮」那一半）。
+			button, ok := tt.Find(collectionSearchLabel)
+			if !ok {
+				t.Fatalf("侧栏 %.0f：画面上找不到那枚搜索按钮，文字有 %q", side, tt.Texts())
+			}
+			if button.W > 40 {
+				t.Errorf("侧栏 %.0f：搜索收着的时候宽 %.1f——那是一枚图标键，不是一个常驻输入框",
+					side, button.W)
+			}
+			// 展开之后才量输入框——挤的时候它要让位，但要停在自己的下限上。
+			if err := tt.Click(collectionSearchLabel); err != nil {
+				t.Fatalf("侧栏 %.0f：点不开搜索：%v", side, err)
+			}
+			tt.Frame()
 			box, ok := tt.Find(collectionSearchLabel)
 			if !ok {
-				t.Fatalf("侧栏 %.0f：画面上找不到那个输入框，文字有 %q", side, tt.Texts())
+				t.Fatalf("侧栏 %.0f：点开之后没有输入框，文字有 %q", side, tt.Texts())
+			}
+			// 收起时那枚图标键是 28（`iconHitMd`）；展开后至少是 40
+			// （`collectionSearchMinWidth`）。所以「还是 28 那一个」= 没展开，
+			// 而不能拿 40 当分界：最窄那一档展开后正好就是 40。
+			if box.W <= 30 {
+				t.Fatalf("侧栏 %.0f：点开之后还是一个 %.1f 宽的按钮——搜索没有展开",
+					side, box.W)
+			}
+			// 展开会把排序下拉往左推，重新量一次。
+			sort, ok = tt.Find("排序：最近收藏")
+			if !ok {
+				t.Fatalf("侧栏 %.0f：展开搜索之后排序下拉不见了，文字有 %q", side, tt.Texts())
 			}
 
 			// 页边距是页面根那一层的 `pagePadX`（收藏夹的根是
@@ -881,5 +907,125 @@ func TestCollectionEntriesFeedTheMediaSession(t *testing.T) {
 		if got := onlineItemOf(bili.Media{ID: 1, Type: typ, Owner: "某某 UP"}).Artist; got != "某某 UP" {
 			t.Errorf("type=%d 的艺人 = %q，want 某某 UP", typ, got)
 		}
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 票 #175：头图区、操作条、搜索按钮
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheCollectionHeaderShowsTheCreatorAvatar 创建者那一行前面有一枚 24 的圆头像。
+//
+// 判据是**画面上的盒子**：`Find` 认的是头像那一格的 `Label`，给回来的是它的框。
+// 头像地址空着时画的是一块同色的圆占位——那也是这一格，不许消失（消失之后
+// 创建者那一行左边凭空空一格，头像下回来时整页往右跳）。
+func TestTheCollectionHeaderShowsTheCreatorAvatar(t *testing.T) {
+	if collectionOwnerAvatarSize != 24 {
+		t.Errorf("collectionOwnerAvatarSize = %d，want 24（票面）", collectionOwnerAvatarSize)
+	}
+	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"))
+	waitSongs(t, tt, s, 1)
+
+	r, ok := tt.Find(collectionOwnerAvatarLabel)
+	if !ok {
+		t.Fatalf("头图区里找不到创建者头像（%q），文字有 %q", collectionOwnerAvatarLabel, tt.Texts())
+	}
+	if r.W < 23 || r.W > 25 || r.H < 23 || r.H > 25 {
+		t.Errorf("创建者头像是 %.0f×%.0f，want 24×24（票面）", r.W, r.H)
+	}
+}
+
+// TestTheCollectionSearchIsACollapsedButton 搜索收着是一枚图标键，点开才是输入框。
+//
+// 这是票 #175 的验收项：**搜索是会展开的按钮**（现在是一个常驻 180 的输入框）。
+// 三条判据，缺一条都不算：
+//
+//   - 刚进来那一下是一枚 28 的图标键，不是输入框；
+//   - 点开之后是一个 40 高的输入框，而且**焦点已经在里面**（用户点放大镜就是
+//     为了打字）；
+//   - 点别的控件之后它收回去（上游的 `useClickAway`）。
+func TestTheCollectionSearchIsACollapsedButton(t *testing.T) {
+	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
+	waitSongs(t, tt, s, 2)
+
+	r, ok := tt.Find(collectionSearchLabel)
+	if !ok {
+		t.Fatalf("找不到搜索，文字有 %q", tt.Texts())
+	}
+	if r.W > 30 || r.H > 30 {
+		t.Errorf("搜索刚进来就是 %.0f×%.0f——那是一枚图标键，不该是一个常驻输入框",
+			r.W, r.H)
+	}
+
+	tt.SetFocused(true)
+	if err := tt.Click(collectionSearchLabel); err != nil {
+		t.Fatalf("点不开搜索：%v", err)
+	}
+	tt.Frame()
+
+	r, ok = tt.Find(collectionSearchLabel)
+	if !ok {
+		t.Fatalf("点开之后搜索不见了，文字有 %q", tt.Texts())
+	}
+	if r.W <= 30 {
+		t.Fatalf("点开之后还是 %.0f 宽——搜索没有展开", r.W)
+	}
+	if r.H < 39 || r.H > 41 {
+		t.Errorf("展开后的输入框是 %.0f 高，want 40（上游 `h-10`）", r.H)
+	}
+	if !tt.Focused(collectionSearchLabel) {
+		t.Error("展开之后焦点不在输入框里——用户点放大镜就是为了打字")
+	}
+
+	// 点别的控件（它拿得走焦点）→ 收回去。
+	if err := tt.Click("多选"); err != nil {
+		t.Fatalf("点多选：%v", err)
+	}
+	tt.Frame()
+	tt.Frame()
+	r, ok = tt.Find(collectionSearchLabel)
+	if !ok {
+		t.Fatalf("收回之后搜索不见了，文字有 %q", tt.Texts())
+	}
+	if r.W > 30 {
+		t.Errorf("点了别处之后搜索还是 %.0f 宽——它没有收回去", r.W)
+	}
+}
+
+// TestThePlayAllButtonIsFortyHigh 操作条那枚主按钮是 40 高（上游 `Button` 的 md）。
+//
+// 判据是**像素**：主按钮是实心主色，字上面 / 下面各 8 像素必须还是主色。
+// 28 高那一版（`ui.Button` 的默认内边距）算出来上下只有 6 像素，8 就落在
+// 按钮外面了——那是这一条能红的地方。
+func TestThePlayAllButtonIsFortyHigh(t *testing.T) {
+	if collectionOpsButtonH != 40 {
+		t.Errorf("collectionOpsButtonH = %d，want 40（上游 md = h-10）", collectionOpsButtonH)
+	}
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"))
+			waitSongs(t, tt, s, 1)
+			tt.SetDark(dark)
+			tt.Frame()
+
+			text, ok := tt.Find("播放全部")
+			if !ok {
+				t.Fatalf("找不到「播放全部」，文字有 %q", tt.Texts())
+			}
+			accent := rgbaOf(BuildTheme(s.app.SettingsSnapshot(), dark).Accent)
+			x := round32(text.X + text.W/2)
+			img := tt.Image()
+			for _, y := range []int{round32(text.Y) - 8, round32(text.Y+text.H) + 8} {
+				got := img.RGBAAt(clampX(img, x), clampY(img, y))
+				if maxDiff(got, accent) > probeTolerance {
+					t.Errorf("主按钮字上下各 8 像素处是 %v，不是主色 %v——按钮没有 40 高"+
+						"（字在 %.1f…%.1f）", got, accent, text.Y, text.Y+text.H)
+				}
+			}
+		})
 	}
 }

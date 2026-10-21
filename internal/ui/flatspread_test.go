@@ -332,7 +332,8 @@ func TestTheLocalMusicKeysAreFlat(t *testing.T) {
 			tt.Frame()
 			noPointer(tt)
 
-			assertKeysFlat(t, tt, "本地音乐", "全部加入队列", "重新扫描", "打开文件夹", deleteRowLabel)
+			assertKeysFlat(t, tt, "本地音乐", "全部加入队列", "重新扫描", "打开文件夹", deleteRowLabel,
+				searchLocalLabel)
 			assertTextKeysFlat(t, tt, flatPageBG(s, dark), "本地音乐", "添加目录")
 
 			// 「移除此目录」只在一个**具体的**目录被选中时摆（「全部目录」那一档
@@ -365,7 +366,8 @@ func TestTheCollectionKeysAreFlat(t *testing.T) {
 			tt.Frame()
 			noPointer(tt)
 
-			assertKeysFlat(t, tt, "收藏夹", "添加到播放列表", "收藏这个收藏夹", "更多操作")
+			assertKeysFlat(t, tt, "收藏夹", "添加到播放列表", "收藏这个收藏夹", "更多操作",
+				collectionSearchLabel)
 			assertTextKeysFlat(t, tt, flatPageBG(s, dark), "收藏夹", "多选")
 		})
 	}

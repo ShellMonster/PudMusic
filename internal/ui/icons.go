@@ -55,6 +55,7 @@ import (
 const (
 	// ── 播放条 ──
 	iconPlay       = "Media/play-circle-fill.svg"   // 播放
+	iconPlayFill   = "Media/play-fill.svg"          // 播放（实心三角，列表行 hover 用）
 	iconPause      = "Media/pause-circle-fill.svg"  // 暂停
 	iconPrev       = "Media/skip-back-fill.svg"     // 上一首
 	iconNext       = "Media/skip-forward-fill.svg"  // 下一首
@@ -256,7 +257,7 @@ const (
 // 个**文件**」这一位）。注释里曾经写着 26，那是补之前的数。
 var iconNames = []string{
 	// 播放条
-	iconPlay, iconPause, iconPrev, iconNext,
+	iconPlay, iconPlayFill, iconPause, iconPrev, iconNext,
 	iconStar, iconStarFilled, iconDownload,
 	iconVolumeUp, iconVolumeMid, iconVolumeMute,
 	iconEnqueue, iconFullscreen, iconLike, iconLikeFilled, iconPageList,

@@ -870,16 +870,17 @@ func TestThePagesThatNeedLoginSaySo(t *testing.T) {
 	}
 }
 
-// TestTheCollectionTitleIsTheBigOne 钉住「收藏夹页大标题 22 → 30」。
+// TestTheCollectionTitleIsTheBigOne 钉住「收藏夹页大标题 30」和它下面那三行的
+// 排法。
 //
-// # 两件事
+// # 三件事
 //
-//  1. **那个数是 30**（上游 `text-3xl`），而页标题是 20——两处不是同一个数。
-//  2. **两行标题放得下**：封面高度写死 168，而头图区那一列是「两行标题 + 简介 +
-//     类型和条数 + 创建者」。标题一大，这一列就可能高过封面——而那一列是**靠左**
-//     的，高过封面的话它会从封面底下探出来，头图区也就不是 168 那一高了。
-//
-// 判据是**画面**：头图区那一列的最后一行（创建者）的底边不许越过封面的底边。
+//  1. **那个数是 30**（上游 `text-3xl`），而页标题是 24——两处不是同一个数。
+//  2. **两行标题也照常排**：30px 的名字真的会折成两行，这时头图区那一列会比
+//     封面（168）高——上游的 `space-y-4` 也是这个结果，头图区的高度由最高的
+//     那一列说了算。**不要**为了把这一列压回 168 去动竖距。
+//  3. 标题 / 简介 / 类型和条数 / 创建者四块**左缘对齐**，相邻两块之间 **16**
+//     （票 #175 的验收：14/14/14、竖距 16）。
 func TestTheCollectionTitleIsTheBigOne(t *testing.T) {
 	if collectionTitleSize != 30 {
 		t.Errorf("collectionTitleSize = %d，want 30（上游 `text-3xl`）", collectionTitleSize)
@@ -889,26 +890,50 @@ func TestTheCollectionTitleIsTheBigOne(t *testing.T) {
 	_, s, tt := collectionShellWithTitle(t, long)
 	_ = s
 
-	// 先确认那个名字**真的折成了两行**（否则下面那条「放得下」验的是一行）——
+	// 先确认那个名字**真的折成了两行**（否则下面的竖距验的是一行）——
 	// 30px 的一行是 35.3 高，两行是 70.6。
 	title, ok := tt.Find(long)
 	if !ok {
 		t.Fatalf("头图区里找不到那个大标题，文字有 %q", tt.Texts())
 	}
 	if title.H < 60 {
-		t.Fatalf("那个名字没有折成两行（高 %.1f）——下面那条「放得下」就成了一句空话", title.H)
+		t.Fatalf("那个名字没有折成两行（高 %.1f）——下面那几条就成了一句空话", title.H)
 	}
 
-	owner, ok := tt.Find("UP 小明")
-	if !ok {
-		t.Fatalf("头图区里找不到创建者那一行，文字有 %q", tt.Texts())
+	type block struct {
+		what string
+		box  mygoui.Rect
 	}
-	// 封面的底边：头图区从内容区顶上往下 20（`viewCollectionHeader` 的上内边距），
-	// 封面 168 高。
-	coverBottom := float32(navMinHeight) + 20 + collectionCoverH
-	if owner.Y+owner.H > coverBottom {
-		t.Errorf("两行标题把头图区那一列撑到 %.0f，越过了封面的底边 %.0f——"+
-			"标题一大，这一列就从封面底下探出来了", owner.Y+owner.H, coverBottom)
+	blocks := []block{{"标题", title}}
+	for _, item := range []struct{ what, key string }{
+		{"简介", "早上听"},
+		{"类型和条数", "公开收藏夹 • 1 条视频"},
+		{"创建者头像", collectionOwnerAvatarLabel},
+	} {
+		r, ok := tt.Find(item.key)
+		if !ok {
+			t.Fatalf("头图区里找不到%s（%q），文字有 %q", item.what, item.key, tt.Texts())
+		}
+		blocks = append(blocks, block{item.what, r})
+	}
+
+	// 四块的左缘是同一条线。创建者那一块量的是**头像**（昵称在头像右边 8+24）。
+	for _, b := range blocks[1:] {
+		if d := b.box.X - blocks[0].box.X; d < -1 || d > 1 {
+			t.Errorf("%s的左缘是 %.1f，标题是 %.1f（差 %.1f）——头图区这四块要左对齐",
+				b.what, b.box.X, blocks[0].box.X, d)
+		}
+	}
+	// 相邻两块之间是 16（`collectionHeadGap`）。
+	if collectionHeadGap != 16 {
+		t.Errorf("collectionHeadGap = %d，want 16（上游 `space-y-4`）", collectionHeadGap)
+	}
+	for i := 1; i < len(blocks); i++ {
+		gap := blocks[i].box.Y - (blocks[i-1].box.Y + blocks[i-1].box.H)
+		if gap < 15 || gap > 17 {
+			t.Errorf("%s和%s之间的竖距是 %.1f，want 16（±1）——头图区那三行字之间"+
+				"是 `space-y-4`", blocks[i-1].what, blocks[i].what, gap)
+		}
 	}
 }
 
@@ -1236,6 +1261,82 @@ func mentionsKey(e ast.Expr, key string) bool {
 	ast.Inspect(e, func(n ast.Node) bool {
 		lit, ok := n.(*ast.BasicLit)
 		if ok && lit.Kind == token.STRING && strings.Trim(lit.Value, `"`) == key {
+			found = true
+		}
+		return true
+	})
+	return found
+}
+
+// TestTheCollectionHeaderCopyIsFourteen 钉住头图区那三行小字是 **14**。
+//
+// # 判据是 AST
+//
+// 像素那一层量的是「墨迹有多高」，而字号和墨迹之间隔着一个随字体而异的系数
+// （同 `TestEveryPageTitleUsesTheSharedSize` 的理由）。票面给的是三个 14
+// （简介 / 类型和条数 / 创建者），精确的那个数只能由代码里的调用钉住。
+func TestTheCollectionHeaderCopyIsFourteen(t *testing.T) {
+	if collectionHeadCopySize != 14 {
+		t.Errorf("collectionHeadCopySize = %d，want 14（上游 `text-sm`）", collectionHeadCopySize)
+	}
+	for _, key := range []string{"info.Intro", "collectionKindText()", "info.OwnerName"} {
+		if !textUsesFontSize(t, "collectionpage.go", key, "collectionHeadCopySize") {
+			t.Errorf("头图区的 %q 没有用 `FontSize(scale.Font(c, collectionHeadCopySize))`"+
+				"——那三行小字必须是 14", key)
+		}
+	}
+}
+
+// textUsesFontSize 报那个文件里那一句 `ui.Text` 有没有用
+// `FontSize(scale.Font(c, want))`。
+//
+// 找法同 `smallCopyHasLineHeight`：在**一个表达式语句**里同时看到那个 `ui.Text`
+// 和那个 `FontSize`，不用顺着调用链往上爬。
+func textUsesFontSize(t *testing.T, file, key, want string) bool {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, file, nil, 0)
+	if err != nil {
+		t.Fatalf("解析 %s 失败：%v", file, err)
+	}
+	found := false
+	ast.Inspect(f, func(n ast.Node) bool {
+		stmt, ok := n.(*ast.ExprStmt)
+		if !ok {
+			return true
+		}
+		hasText, hasSize := false, false
+		ast.Inspect(stmt, func(m ast.Node) bool {
+			call, ok := m.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			switch sel.Sel.Name {
+			case "Text":
+				for _, arg := range call.Args {
+					if exprKey(arg) == key {
+						hasText = true
+					}
+				}
+			case "FontSize":
+				if len(call.Args) == 1 {
+					if inner, ok := call.Args[0].(*ast.CallExpr); ok {
+						if fn, ok := inner.Fun.(*ast.SelectorExpr); ok &&
+							fn.Sel.Name == "Font" && len(inner.Args) == 2 {
+							if id, ok := inner.Args[1].(*ast.Ident); ok && id.Name == want {
+								hasSize = true
+							}
+						}
+					}
+				}
+			}
+			return true
+		})
+		if hasText && hasSize {
 			found = true
 		}
 		return true

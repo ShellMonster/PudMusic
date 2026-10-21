@@ -744,7 +744,8 @@ func New(a *app.App) *Shell {
 	})
 	// 下载记录页同理（downloadlist.go）：两个「打开」接系统那一份，它们在无头
 	// Tester 里会 panic，测试建完外壳就换成记动作的桩；记录那一条接应用层。
-	s.downloads = newDownloadsPage(a.DownloadSnapshots, systemOpenDir, mygo.Shell.ShowItemInFolder)
+	s.downloads = newDownloadsPage(a.DownloadSnapshots, systemOpenDir,
+		mygo.Shell.ShowItemInFolder, systemOpenLink)
 	// 本地音乐页同理。⚠️ 传进去的唤醒是 `s.local.invalidate` 而不是
 	// `s.wake.invalidate`：后台扫完了要把**所有画过这一页的窗口**都叫醒，
 	// 只叫醒这一个外壳的窗口的话，另一个停在旧帧（铁律三）。
