@@ -13,12 +13,21 @@ package ui
 
 import "github.com/egoist/mygo/ui"
 
+// popupRadius 是浮层面板的圆角：**固定的 8**，不跟 `t.Radius` 走。
+//
+// 上游那一套浮层是 HeroUI 的 `rounded-medium`（主题里这一档是 8；
+// `search/index.tsx:100` 的联想面板就是它）。我们原来抄的是框架 `stylePanel` 的
+// `t.Radius+2`——默认 8 时是 10，比上游大 2；用户把全局圆角调到 24 时更是圆得
+// 不成样子。DESIGN 的令牌也把它单列成 `radius.popover: 8`，所以这里钉死，
+// 不跟全局可调圆角走。
+const popupRadius = 8
+
 // popupPanel 给一个浮层面板上外观：圆角、底、描边、阴影。
 //
 // 参数和框架 `stylePanel` 一样（没有 Margin/Padding：各处的间距不一样，调用方
 // 自己给）。**别在调用处再抄一遍这几个字段**——漏一个就是下一处「有一处无」。
 func popupPanel(t *ui.Theme, panel ui.Element) ui.Element {
-	return panel.Radius(t.Radius+2).
+	return panel.Radius(popupRadius).
 		Background(t.Background).Border(1, t.Border).
 		Shadow(0, 6, 20, 0, popupShadow(t))
 }

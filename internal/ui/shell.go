@@ -259,7 +259,8 @@ type Shell struct {
 
 	// 顶栏这一摊。**同样只由 view 在主线程上读写**。
 	//
-	// searchFocused 是搜索框有没有焦点，顶栏用它染边框。浮层**不**靠它开
+	// searchFocused 是搜索框有没有焦点，顶栏用它把输入区的底色抬到 30%
+	// （上游 `group-data-[focus=true]:bg-…/30`）。浮层**不**靠它开
 	// （见 navbar_search.go 里那一段：焦点被 MyGo 还回来是个假信号）。
 	//
 	// ⚠️ 叫 searchKeyword 不叫 searchQuery：包级已经有一个 `searchQuery` 了

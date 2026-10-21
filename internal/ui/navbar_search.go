@@ -57,20 +57,51 @@ const (
 	// `Find` 找的是「显示着这个字或者标着这个名字」的元素。
 	searchLabel = "搜索"
 
-	// searchHeight 是搜索框多高。Biu 那边是 `h-10`（40），而顶栏是 `h-16`（64，
-	// 票 #127 之后）——40 在 64 高里放得下，可这里取 28。
+	// searchHeight 是搜索框多高。Biu 那个 Input 是 md 档（`h-10`，
+	// `search/index.tsx:72-96`；Tailwind 1 单位 = 4px）——40，顶栏 64 高，
+	// 上下各留 12。
+	searchHeight = 40
+
+	// searchPadX / searchGap 是搜索框里那三样之间的留白：左右内边距、放大镜与
+	// 输入框之间的缝。上游 Input 的 md 档是 `px-3 gap-3`（12 / 12）——
+	// 12 + 18 的放大镜 + 12，输入框的字从框左边 42 起（上游的放大镜是 16，
+	// 我们这几枚图标统一 18，见 icons.go 的 iconMd）。
+	searchPadX = 12
+	searchGap  = 12
+
+	// 搜索框的底色：上游 `bg-default-400/20 dark:bg-default-500/20`
+	// （`search/index.tsx:97`），hover / focus 各抬到 30%。default-400 / 500
+	// 就是 HeroUI 那套灰里的 `#a1a1aa` / `#71717a`（报告 03 逐字对过）。
 	//
-	// ⚠️ **28 不是照抄的数，是量出来「放得下」的那一档**：28 上下正好放下放大镜、
-	// 一行字和清空按钮，而它是顶栏那一高里唯一让「这是一条顶栏」而不是
-	// 「这是一条输入框」的那个数。**真要跟上游一样就得连着抬到 40**，
-	// 而那会让顶栏看起来像一根输入框。
-	searchHeight = 28
+	// ⚠️ **深浅两套不是同一个灰**：浅色下用 400，深色下用 500——同一个 400 压在
+	// `#18181b` 上比底色亮一大截，框会像一块浮起来的板。
+	searchGrayLightR, searchGrayLightG, searchGrayLightB         = 0xa1, 0xa1, 0xaa
+	searchGrayDarkR, searchGrayDarkG, searchGrayDarkB            = 0x71, 0x71, 0x7a
+	searchBgIdle                                         float32 = 0.20
+	searchBgHot                                          float32 = 0.30
 
 	// 那个叉：图标边长和点击区。Biu 的 `isClearable` 是一个 16 的叉，
-	// 这里的叉小一点（12）——搜索框只有 28 高，16 的叉 + 内边距就把它撑满了。
+	// 这里的叉小一点（12）——40 高的框里放 16 的叉也不挤，但 12 和旁边的
+	// 放大镜（18）同一档，两个图形不会一大一小。
 	iconCloseGlyph = 12
 	iconCloseHit   = 26
 )
+
+// searchFieldBg 是搜索框这一刻的底色：静止 20%，指针压在上面或者有焦点时 30%。
+//
+// 判据是**底色**，不是描边：上游那一条 `classNames.inputWrapper` 里只有
+// `hover:bg-…/30` 和 `group-data-[focus=true]:bg-…/30`，没有 border 那一项。
+// 浮层的开关仍然只认「按了 / 敲了字」，这里只画样子（见 viewSearchBox）。
+func searchFieldBg(t *ui.Theme, hot bool) ui.Color {
+	a := searchBgIdle
+	if hot {
+		a = searchBgHot
+	}
+	if t.Dark {
+		return ui.RGBA(searchGrayDarkR, searchGrayDarkG, searchGrayDarkB, a)
+	}
+	return ui.RGBA(searchGrayLightR, searchGrayLightG, searchGrayLightB, a)
+}
 
 // 搜索页那条路由是 `searchPath`（在 searchpage.go 里），这里直接用它，不另立一份
 // 常量：两条路由同一个字符串，两个定义迟早会分家。
@@ -81,17 +112,15 @@ const (
 // （一个页面 view，签名都差一个 `*ui.Route`）。顶栏这个是框，页面那个是页。
 func (s *Shell) viewSearchBox(c *ui.Context) {
 	t := c.Theme()
-	// 焦点在输入框上时把边框染成主色（Biu 是 `group-data-[focus=true]`）。
-	// 读的是**上一帧**的 searchFocused——边框样式跟在这一帧的判断后面走，
-	// 差一帧看不出来。
-	border := t.Border
-	if s.searchFocused {
-		border = t.Accent
-	}
 
-	ui.Row(c).Key("search").Width(searchWidth).Height(searchHeight).
-		Radius(t.Radius).Background(t.Surface).Border(1, border).
-		Padding(0, 8).Gap(6).AlignItems(ui.Center).Children(func() {
+	// ⚠️ 底色在 Children **之后**才定：判定要用的两个状态里，焦点这一位是
+	// Children 里才量到的（`field.Focused()`），而指针那一位要等这一格建出来
+	// 才能问（`row.Hovered()`）。先铺一层静止档，再按这一帧的实况盖上去——
+	// 元素在 view 里改样式，画的是改完的那一份。
+	row := ui.Row(c).Key("search").Width(searchWidth).Height(searchHeight).
+		Radius(t.Radius).Background(searchFieldBg(t, false)).
+		Padding(0, searchPadX).Gap(searchGap).AlignItems(ui.Center)
+	row.Children(func() {
 		// 放大镜是**装饰**：它不可点，而输入框自己就带「搜索」这个无障碍名字
 		//（`searchLabel`），所以这里不加 Label——加了就是两个同名的，
 		// 而 `Tester.Find` 只会认到先画的那个。
@@ -159,6 +188,13 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 		}
 		s.viewSuggest(c, field)
 	})
+
+	// 指针压在框上、或者框拿着焦点：底色抬到 30%（上游那两条 `…/30`）。
+	// `s.searchFocused` 在 Children 里刚被这一帧的 `field.Focused()` 写过，
+	// 所以点下去的那一帧就是深的那一档，不用等下一帧。
+	if s.searchFocused || row.Hovered() {
+		row.Background(searchFieldBg(t, true))
+	}
 }
 
 // viewSuggest 是搜索建议浮层。**两档都在这个面板里**：搜索历史 + 联想词。
@@ -248,11 +284,49 @@ func (s *Shell) viewSuggestHeader(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).Key("suggest-header").FillWidth().Gap(8).
 		AlignItems(ui.Center).Padding(2, 4, 6, 4).Children(func() {
-		ui.Text(c, "搜索历史").FontSize(scale.Font(c, 13)).Bold().Grow(1)
+		// 14/400（上游 `text-sm`，`search/index.tsx:126`）。**不许加粗**：
+		// 上游那一行是正文那一档，靠字号和上面那排 chip 分开，不靠字重。
+		ui.Text(c, "搜索历史").FontSize(scale.Font(c, 14)).Grow(1)
 		if flatButton(c, "清除全部").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Clicked() {
 			s.hist.clear()
 		}
 	})
+}
+
+// 那枚灰色 Chip 的几个数。上游是 HeroUI 的 `Chip size="sm" radius="md"
+// isCloseable`（`search/index.tsx:142-166`）：
+//
+//	底色    solid 变体的 default：浅色 default-300 `#d4d4d8`、深色 default-700
+//	        `#3f3f46`（HeroUI 那套 default 色阶；深色这个数是从上游截图里播放条
+//	        那枚「无损」chip 逐像素量的，`_research/biu/screenshots/main.png`）
+//	高度    24（`h-6`）
+//	内边距  左右 8（`px-2`）
+//	圆角    8（`radius="md"`；用全局 t.Radius，见主题设置）
+//
+// ⚠️ **别再给它加描边**：上游 solid Chip 没有 border，一眼看过去就是一块很淡的
+// 灰。加一圈 `t.Border` 之后它又会变回「带框的方块」——那正是这张票要收掉的。
+const (
+	historyChipLightR, historyChipLightG, historyChipLightB uint8 = 0xd4, 0xd4, 0xd8
+	historyChipDarkR, historyChipDarkG, historyChipDarkB    uint8 = 0x3f, 0x3f, 0x46
+
+	historyChipPadY = 3
+	historyChipPadX = 4
+	// historyChipLabelPadX 是标签按钮自己的左右内边距。它和上面那一格加起来
+	// 才是视觉上的 8（上游 px-2）：分一半给按钮，指针落在左边那 8 像素里也点得中
+	// 这条历史，而不是只有字本身可点。
+	historyChipLabelPadX = 4
+	// historyChipClose 是右边那个关闭键的点击区。18 = 12 的图标 + 每边 3；
+	// 再加 chip 上下各 3，整个 chip 正好 24 高（上游 h-6）。
+	historyChipClose = 18
+	historyChipGap   = 2
+)
+
+// historyChipBg 是那枚灰色 Chip 的底色。深浅两套是 HeroUI default 色阶的两头。
+func historyChipBg(t *ui.Theme) ui.Color {
+	if t.Dark {
+		return ui.RGBA(historyChipDarkR, historyChipDarkG, historyChipDarkB, 1)
+	}
+	return ui.RGBA(historyChipLightR, historyChipLightG, historyChipLightB, 1)
 }
 
 // viewHistoryChip 是浮层里的一条历史。
@@ -260,18 +334,22 @@ func (s *Shell) viewSuggestHeader(c *ui.Context) {
 // Biu 那一排是可关的 Chip（`isCloseable`，`:142-166`）：点它去搜这条，点它右边
 // 的 × 只删这一条。这里同样拆成两个按钮，中间那个标签才是去搜的那一个。
 //
-// ⚠️ **chip 外面那一圈描边留着，里面两个按钮换成扁平的**：上游那枚是 HeroUI 的
-// `Chip`（有描边、无底色），而框里装的是**字**和一个**无边框的关闭图标键**，
-// 不是两枚描边药丸。改成扁平之后这枚 chip 从「描边药丸里再套两枚描边药丸」变回
-// 「一枚 chip」，而点击区与内边距一个数都没动（`flatButton` 照抄 `styleButton`）。
+// ⚠️ **形状是一枚 chip，不是一行带框的方块**：灰底、无描边、24 高。里面那两个
+// 按钮是扁平的（`flatButton` / `flatIconButton`），只在指针压上去时铺一层很淡的
+// 反馈；chip 自己的灰色底一直留着，所以它仍然是一个「小块」，而不是两枚按钮。
 func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 	t := c.Theme()
 	label := searchHistorySummary(item.Value)
 
 	ui.Row(c).Key("history:"+item.Value).Radius(t.Radius).
-		Background(t.Surface).Border(1, t.Border).
-		Padding(2, 4, 2, 8).Gap(4).AlignItems(ui.Center).Children(func() {
-		if flatButton(c, label).FontSize(scale.Font(c, 12)).Clicked() {
+		Background(historyChipBg(t)).
+		Padding(historyChipPadY, historyChipPadX).Gap(historyChipGap).
+		AlignItems(ui.Center).Children(func() {
+		// ⚠️ 标签按钮的上下内边距清零：`flatButton` 默认是 6，套在 chip 里会把
+		// 24 高撑到 30 以上，那就不再是 `h-6` 那种小块了。左右留 4，和外面的
+		// `historyChipPadX` 合起来是 8，并且左边那半截也点得中。
+		if flatButton(c, label).FontSize(scale.Font(c, 12)).
+			Padding(0, historyChipLabelPadX).Clicked() {
 			// ⚠️ **先把词填回框里**（Biu 的 `setValue(item.value)`，
 			// `search/index.tsx:154`）。不填的话用户点完历史，框里还是原来敲的
 			// 半截字，而页面那边搜的是这一条——两处对不上，按返回再回来还会
@@ -282,9 +360,10 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 		// 删这一条。Biu 的 onClose。
 		//
 		// ⚠️ 无障碍名字写全，别只留一个「×」：读屏软件念出来就是「乘号」，用户
-		// 根本不知道它在删哪一条。画面上还是那个叉。
-		if flatButton(c, "×").Label("删除「" + label + "」").
-			FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Clicked() {
+		// 根本不知道它在删哪一条。画面上是上游那枚叉图标。
+		if flatIconButton(c, iconClose, "删除「"+label+"」", iconCloseGlyph).
+			Size(historyChipClose, historyChipClose).Padding(0).
+			TextColor(t.TextMuted).Clicked() {
 			s.hist.remove(item.Value)
 		}
 	})
