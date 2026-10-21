@@ -138,6 +138,16 @@ func (s *SwitchView) View(c *ui.Context) {
 	s.list.View(c)
 }
 
+// Hot 报指针是不是压在底下这一对控件的滚动条上（见 `List.Hot`）。
+//
+// 两档各有一份滚动容器（同一份歌、两种摆法），所以问的是**这一帧画的那一档**。
+func (s *SwitchView) Hot() bool {
+	if s.view == ViewCard {
+		return s.grid.Hot()
+	}
+	return s.list.Hot()
+}
+
 // rows 是此刻画出来的**行**数，含末尾哨兵。
 //
 // 网格那一档的行数是按列数算出来的，所以切档时它会变——`PagedList` 的三重保障

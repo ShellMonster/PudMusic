@@ -16,6 +16,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
@@ -51,6 +52,12 @@ type Shell struct {
 
 	// shownPath 是上一帧画的是哪一页，syncRoute 拿它认出「换页了」。
 	shownPath string
+
+	// scrollbarHot / scrollbarHotNow 是「指针压在某个滚动条上」的上一帧与这一帧
+	// （见 scrollbar.go）。主题每帧开头只能知道上一帧的：滚动容器这一帧还没建
+	// 出来。两个字段都是主线程单点写，和别的界面状态一样。
+	scrollbarHot    bool
+	scrollbarHotNow bool
 
 	// searchDraft 是搜索框里正在敲的字。放在壳上而不是页面的局部变量：即时模式
 	// 每一帧都重画一遍，局部变量下一帧就没了（只有 view 里显式声明并被元素
@@ -719,6 +726,7 @@ func New(a *app.App) *Shell {
 	// 只认在线的），所以「收藏」那一项在本地音乐这一页会走「说清楚为什么」
 	// 那一支——那也是对的答案。
 	s.local = newLocalPage(a, s.images, s.listActions(), s.addToast, s.pickDir, s.displayView)
+	s.local.noteScrollbar = s.noteScrollbar
 	s.hist = newSearchHistory("")
 	s.keys = newShortcutKeys("")
 	s.picker = systemPathPicker{}
@@ -1056,6 +1064,9 @@ func (s *Shell) newCrashInfo(where string, r any) *crashInfo {
 // viewMain 是正常的那一帧：上导航 + 左边栏 + 路由页 + 播放条，浮层上是播放列表
 // 抽屉（开着的话）和右下角的提示。
 func (s *Shell) viewMain(c *ui.Context) {
+	// 滚动条的悬停状态交接：上一帧量到的这一帧用，这一帧重新量（各容器在
+	// `viewMain` 后半段把它们建出来）。必须排在 `applyFrameTheme` 之前。
+	s.scrollbarHot, s.scrollbarHotNow = s.scrollbarHotNow, false
 	// 🔴 铁律二：每帧第一件事就是装主题，而且必须在最开头——SetTheme 只影响
 	// 它之后创建的控件。不装的话 MyGo 在帧开头重置好的那份跟随系统的主题
 	// 就是这一帧真正用的那份，用户选了深色也只在这一帧是对的。
@@ -1195,11 +1206,11 @@ func (s *Shell) viewCrash(c *ui.Context) {
 		if v := errorArt; v != nil {
 			ui.Image(c, v).Height(errorArtHeight)
 		}
-		ui.Text(c, "界面出错了，播放器已经停在这一页").FontSize(18).Bold()
+		ui.Text(c, "界面出错了，播放器已经停在这一页").FontSize(scale.Font(c, 18)).Bold()
 
 		// 「出错在哪一步」这一块：三行，各自说清一件事。
 		ui.Column(c).Key("crash-where").Gap(2).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "出错的地方："+cr.where).FontSize(13).TextColor(t.Text)
+			ui.Text(c, "出错的地方："+cr.where).FontSize(scale.Font(c, 13)).TextColor(t.Text)
 			// 路径和页面名分开两行：用户在地址里看到的是路径，而跟开发者
 			// 说的时候说的是页面名（「下载记录那一页」）。只给一个的话，另一
 			// 边的人听不懂。
@@ -1211,15 +1222,15 @@ func (s *Shell) viewCrash(c *ui.Context) {
 			case cr.title == "" || cr.title == notFound.Title:
 				// 404 那一页没有「页面名」可言（`notFound` 的 Title 是兜底
 				// 的），只说路径。
-				ui.Text(c, "当时在看的路径："+cr.path).FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, "当时在看的路径："+cr.path).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 			default:
 				ui.Text(c, "当时在看的页面："+cr.title+"（"+cr.path+"）").
-					FontSize(12).TextColor(t.TextMuted)
+					FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 			}
 		})
 
-		ui.Textf(c, "%v", cr.got).FontSize(12).TextColor(t.TextMuted).MaxLines(3)
-		ui.Text(c, "细节已经写进日志。点下面的按钮再试一次。").FontSize(12).TextColor(t.TextMuted)
+		ui.Textf(c, "%v", cr.got).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(3)
+		ui.Text(c, "细节已经写进日志。点下面的按钮再试一次。").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 		ui.Row(c).Gap(10).Justify(ui.Center).Children(func() {
 			// 反馈是**描边**的那一枚、主操作是实心的那一枚：抄上游的
 			// `components/error-fallback/index.tsx:11-27`（「反馈」描边去

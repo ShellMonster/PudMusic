@@ -38,6 +38,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -418,8 +419,8 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 	case h.Err != "" && !h.Loaded:
 		ui.Column(c).Key(key).Height(upHeaderH).FillWidth().Center().Gap(10).
 			AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "打不开这个 UP 主的空间").FontSize(16).Bold()
-			ui.Text(c, h.Err).FontSize(12).TextColor(t.TextMuted).MaxLines(3)
+			ui.Text(c, "打不开这个 UP 主的空间").FontSize(scale.Font(c, 16)).Bold()
+			ui.Text(c, h.Err).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(3)
 			// ⚠️ **失败之后只有人能让它再来一次**：上面那一行每帧都跑，
 			// 没有这道门就是一个每帧发一次请求的死循环（见那里的注释）。
 			if ui.Button(c, "再试一次").Clicked() {
@@ -434,9 +435,9 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 		ui.Row(c).Key(key).Height(upHeaderH).FillWidth().Gap(12).Center().Children(func() {
 			s.spaceAvatar(c, h.User.Face, upAvatarS)
 			ui.Column(c).Gap(4).Children(func() {
-				ui.Text(c, spaceName(h.User)).FontSize(20).Bold()
+				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, 20)).Bold()
 				ui.Text(c, "你把他拉黑了，他的内容在这儿看不到").
-					FontSize(13).TextColor(t.TextMuted)
+					FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 			})
 		})
 		return
@@ -455,12 +456,12 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 			Padding(upPad).AlignItems(ui.Center).Children(func() {
 			s.spaceAvatar(c, h.User.Face, upAvatarS)
 			ui.Column(c).Gap(2).Children(func() {
-				ui.Text(c, spaceName(h.User)).FontSize(20).Bold().MaxLines(1).Ellipsis("…")
+				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, 20)).Bold().MaxLines(1).Ellipsis("…")
 				if h.User.Official != "" {
-					ui.Text(c, "认证："+h.User.Official).FontSize(12).TextColor(t.TextMuted)
+					ui.Text(c, "认证："+h.User.Official).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 				}
 				if h.User.Sign != "" {
-					ui.Text(c, h.User.Sign).FontSize(13).TextColor(t.TextMuted).MaxLines(2)
+					ui.Text(c, h.User.Sign).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted).MaxLines(2)
 				}
 			})
 			ui.Box(c).Grow(1)
@@ -503,8 +504,8 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 				// 🔴 **没查到就说没查到**。画一个能按的「关注」比不画更糟：
 				// 用户按下去是一次**取关**（B 站对没关注过的人「取关」是成功的），
 				// 于是他更确信自己关注过——而真相是我们压根没读到。
-				ui.Text(c, "关注状态没读到").FontSize(12).TextColor(t.TextMuted)
-				if ui.Button(c, "重试").FontSize(12).Clicked() {
+				ui.Text(c, "关注状态没读到").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+				if ui.Button(c, "重试").FontSize(scale.Font(c, 12)).Clicked() {
 					sp.header.RetryRelation()
 					sp.header.Load()
 				}
@@ -528,8 +529,8 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 					spaceStat(c, "关注数", formatCount(h.Stat.Following))
 				}
 			} else if h.StatFailed() {
-				ui.Text(c, "粉丝数没读到").FontSize(12).TextColor(t.TextMuted)
-				if ui.Button(c, "重试").FontSize(12).Clicked() {
+				ui.Text(c, "粉丝数没读到").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+				if ui.Button(c, "重试").FontSize(scale.Font(c, 12)).Clicked() {
 					sp.header.RetryRelation()
 					sp.header.Load()
 				}
@@ -554,8 +555,8 @@ func (sp *upSpace) follow(yes bool) {
 func spaceStat(c *ui.Context, label, value string) {
 	t := c.Theme()
 	ui.Column(c).Key("space-stat:" + label).Gap(2).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, value).FontSize(17).Bold()
-		ui.Text(c, label).FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, value).FontSize(scale.Font(c, 17)).Bold()
+		ui.Text(c, label).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 	})
 }
 

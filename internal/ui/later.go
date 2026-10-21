@@ -26,7 +26,9 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -166,7 +168,7 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 
 	ui.Column(c).Key("page:"+laterPath).Grow(1).Padding(16, pagePadX).Gap(8).
 		Children(func() {
-			ui.Text(c, "稍后再看").FontSize(pageTitleSize).Bold()
+			ui.Text(c, "稍后再看").FontSize(scale.Font(c, pageTitleSize)).Bold()
 
 			// 换查询的位置在**画列表之前**：Reload 会把已加载的行清掉，放在后面
 			// 的话这一帧画的是清掉之前的样子，用户会先看到一屏旧的、再变成空、
@@ -180,6 +182,7 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 			p.rows.SetView(s.displayView())
 			viewLibraryHeader(c, p.rows, laterHeaderSpec, laterHeaderKey)
 			p.rows.View(c)
+			s.noteScrollbar(p.rows.Hot())
 		})
 }
 
@@ -212,11 +215,11 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 			func() { rows.playFrom(r.Index) })
 
 		ui.Text(c, playCountText(m.View)).Width(mt.count).TextAlign(ui.End).
-			FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+			FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
 		ui.Text(c, dayText(m.ViewedAt)).Width(mt.date).TextAlign(ui.End).
-			FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+			FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
 		ui.Text(c, clockText(m.Duration)).Width(mt.clock).TextAlign(ui.End).
-			FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+			FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
 
 		// 行尾那枚「⋯」。点开的是**这一行的菜单**，和右键同一份（`rows.menu`
 		// 就是右键那一条挂上去的那个函数）。
@@ -248,7 +251,8 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 	case selected:
 		titleColor, metaColor = t.AccentText, t.AccentText.Alpha(0.75)
 	case playing:
-		titleColor = t.Accent
+		// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（理由见 `widgets/ink`）。
+		titleColor = ink.AccentOn(t)
 	}
 
 	box := ui.Column(c).Key("later-cell:" + m.ID).Radius(t.Radius).
@@ -280,11 +284,11 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 			func() { rows.playFrom(i) })
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).PaddingY(cardGapForCell).Children(func() {
-			ui.Text(c, m.Title).FontSize(14).LineHeight(1.5).
+			ui.Text(c, m.Title).FontSize(scale.Font(c, 14)).LineHeight(1.5).
 				TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 				if m.Owner != "" {
-					ui.Text(c, m.Owner).Grow(1).FontSize(12).LineHeight(1).
+					ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, 12)).LineHeight(1).
 						TextColor(metaColor).MaxLines(1).Ellipsis("…")
 				}
 				// 「正在放」占时长那一格：两样都画必然把时长挤成「0:」，而用户读的
@@ -293,11 +297,11 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 					viewPlayingMark(c, t, m.Title)
 					return
 				}
-				ui.Text(c, clockText(m.Duration)).FontSize(12).
+				ui.Text(c, clockText(m.Duration)).FontSize(scale.Font(c, 12)).
 					TextColor(metaColor).MaxLines(1)
 			})
 			// 播放量 / 加入时间：列表里是右边两列，格子里放到最下面那一行。
-			ui.Row(c).Gap(6).FontSize(11).Children(func() {
+			ui.Row(c).Gap(6).FontSize(scale.Font(c, 11)).Children(func() {
 				ui.Text(c, playCountText(m.View)).Grow(1).TextColor(metaColor).MaxLines(1)
 				ui.Text(c, dayText(m.ViewedAt)).TextColor(metaColor).MaxLines(1)
 			})

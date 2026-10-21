@@ -45,6 +45,8 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrollbar"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -219,6 +221,11 @@ type localPage struct {
 	// 再写一份就是第二处。
 	displayView func() list.View
 
+	// noteScrollbar 把「指针压在滚动条上」转告给壳（主题下一帧据此换深一档，
+	// 见 scrollbar.go）。由 Shell 在构造之后接上；为零时（测试里单独造这一页）
+	// 什么也不做。
+	noteScrollbar func(bool)
+
 	// style 是当前展示样式，下标对着 localStyles。
 	style int
 	// dirLabel 是目录筛选里选中那一档的**显示名**（不是路径，见 dirLabels）。
@@ -384,7 +391,7 @@ func (p *localPage) cardsTop() { p.cards.ScrollTo(0, ui.Start) }
 // viewHead 是标题那一行：标题、展示样式切换、添加目录。
 func (p *localPage) viewHead(c *ui.Context) {
 	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(8).Children(func() {
-		ui.Text(c, "本地音乐").FontSize(pageTitleSize).Bold()
+		ui.Text(c, "本地音乐").FontSize(scale.Font(c, pageTitleSize)).Bold()
 
 		// 展示样式切换。⚠️ 用 `ui.Segmented` 而不是三个按钮：三档互斥、
 		// 当前位置一眼可见，三个按钮的话用户得靠猜哪个是按下去的。
@@ -427,13 +434,13 @@ func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
 func (p *localPage) viewWarnings(c *ui.Context, t *ui.Theme, st app.LocalMusicState) {
 	if st.Err != "" {
 		ui.Text(c, "有目录读不到："+st.Err).
-			FontSize(12).LineHeight(smallCopyLeading).
+			FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
 			TextColor(t.Danger).AlignSelf(ui.Stretch)
 	}
 	if names := unplayableFormats(st.Tracks); len(names) > 0 {
 		ui.Text(c, "这个目录里有我们还放不出的格式（"+strings.Join(names, " ")+
 			"），它们会列出来但放不了。").
-			FontSize(12).LineHeight(smallCopyLeading).
+			FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
 			TextColor(t.Warning).AlignSelf(ui.Stretch)
 	}
 }
@@ -468,6 +475,9 @@ func (p *localPage) viewBody(c *ui.Context, t *ui.Theme, st app.LocalMusicState)
 		// 走不到这里来。
 		p.cards.Header(c, "localmusic:header")
 		p.cards.View(c)
+		if p.noteScrollbar != nil {
+			p.noteScrollbar(p.cards.Hot())
+		}
 	}
 }
 
@@ -526,11 +536,14 @@ func (p *localPage) viewTable(c *ui.Context, t *ui.Theme) {
 	p.table.Label = func(i int) string { return p.rows[i].Title }
 	p.table.Selected = &p.sel
 
-	ui.Table(c, &p.table, localColumns, len(p.rows), func(row, col int) {
+	table := ui.Table(c, &p.table, localColumns, len(p.rows), func(row, col int) {
 		p.viewCell(c, t, row, col)
 	}).
 		Grow(1).FillWidth().
 		OnSubmit(func() { p.playRow(p.sel) })
+	if p.noteScrollbar != nil {
+		p.noteScrollbar(scrollbar.Hot(table))
+	}
 }
 
 // viewCell 画表格的一个格子。
@@ -538,25 +551,25 @@ func (p *localPage) viewCell(c *ui.Context, t *ui.Theme, row, col int) {
 	tr := p.rows[row]
 	switch col {
 	case 0:
-		ui.Text(c, strconv.Itoa(row+1)).FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, strconv.Itoa(row+1)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 	case 1:
 		ui.Text(c, tr.Title).SingleLine()
 	case 2:
-		ui.Text(c, fileSize(tr.Size)).FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, fileSize(tr.Size)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 	case 3:
 		// 放不了的格式用警示色，而不是省略号或者别的字样：Biu 那一格画的是
 		// `data.format?.toUpperCase() || "-"`（`item.tsx:71`），我们多给一层
 		// 颜色，说的是同一件事（「列出来了，但这一格有毛病」）。
-		e := ui.Text(c, strings.ToUpper(strings.TrimPrefix(tr.Format, "."))).FontSize(12)
+		e := ui.Text(c, strings.ToUpper(strings.TrimPrefix(tr.Format, "."))).FontSize(scale.Font(c, 12))
 		if tr.Playable() {
 			e.TextColor(t.TextMuted)
 		} else {
 			e.TextColor(t.Warning)
 		}
 	case 4:
-		ui.Text(c, durText(tr.Duration)).FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, durText(tr.Duration)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 	case 5:
-		ui.Text(c, createdText(tr.Created)).FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, createdText(tr.Created)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 	case 6:
 		p.viewRowOps(c, tr)
 	}
@@ -570,11 +583,11 @@ func (p *localPage) viewCell(c *ui.Context, t *ui.Theme, row, col int) {
 // 用户看到的是「歌还在放，但列表里没了，再按下一首就报错」——一个说不清的状态。
 // 不给这个按钮，好过给一个按下去会变成那个状态的按钮。
 func (p *localPage) viewRowOps(c *ui.Context, tr localmusic.Track) {
-	ui.Button(c, "打开文件夹").FontSize(12).OnClick(func() {
+	ui.Button(c, "打开文件夹").FontSize(scale.Font(c, 12)).OnClick(func() {
 		mygo.Shell.ShowItemInFolder(tr.Path)
 	})
 	if !p.isPlaying(tr) {
-		ui.Button(c, deleteRowLabel).FontSize(12).TextColor(c.Theme().Danger).
+		ui.Button(c, deleteRowLabel).FontSize(scale.Font(c, 12)).TextColor(c.Theme().Danger).
 			OnClick(func() { p.askTrack, p.askOpen = tr, true })
 	}
 }

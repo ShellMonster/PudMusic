@@ -53,6 +53,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -352,9 +353,10 @@ func (d *downloadsPage) viewTable(c *ui.Context, s *Shell) {
 		return d.rows[i].ID
 	}
 
-	ui.Table(c, &d.state, downloadColumns, len(d.rows), func(row, col int) {
+	e := ui.Table(c, &d.state, downloadColumns, len(d.rows), func(row, col int) {
 		d.viewCell(c, s, row, col)
 	}).Grow(1)
+	s.trackScrollbar(e)
 }
 
 // dlRowKey 是「下标越界」时给的行身份。一个歌不可能撞上的类型。
@@ -367,7 +369,7 @@ type dlRowKey struct{}
 func (d *downloadsPage) viewCell(c *ui.Context, s *Shell, row, col int) {
 	id := fmt.Sprintf("%s#%d", d.rows[row].ID, col)
 	if d.failed[id] {
-		ui.Text(c, "画不出来").FontSize(11).TextColor(c.Theme().TextMuted)
+		ui.Text(c, "画不出来").FontSize(scale.Font(c, 11)).TextColor(c.Theme().TextMuted)
 		return
 	}
 	defer func() {
@@ -393,10 +395,10 @@ func (d *downloadsPage) drawCell(c *ui.Context, s *Shell, row, col int) {
 			// 这里不重复它的判断。
 			imgcache.View(c, s.images, r.Cover, dlCover, dlCover)
 			ui.Column(c).Grow(1).Gap(2).Children(func() {
-				ui.Text(c, r.Title).FontSize(14).MaxLines(2).Ellipsis("…")
+				ui.Text(c, r.Title).FontSize(scale.Font(c, 14)).MaxLines(2).Ellipsis("…")
 				// 音质徽章，照上游 `index.tsx:179-183` 的 `Chip`。空串不画。
 				if r.Label != "" {
-					ui.Text(c, r.Label).FontSize(11).TextColor(t.TextMuted).MaxLines(1)
+					ui.Text(c, r.Label).FontSize(scale.Font(c, 11)).TextColor(t.TextMuted).MaxLines(1)
 				}
 			})
 		})
@@ -405,11 +407,11 @@ func (d *downloadsPage) drawCell(c *ui.Context, s *Shell, row, col int) {
 	case colSize:
 		// 上游是 `item.totalBytes ? filesize(item.totalBytes) : "-"`，只写
 		// 总大小（`index.tsx:190`）。已下了多少在状态那一列的进度条上。
-		ui.Text(c, fileSize(r.Total)).FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+		ui.Text(c, fileSize(r.Total)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
 	case colTime:
 		// `formatMillisecond` 是 `moment(s).format("YYYY-MM-DD")`
 		// （biu/src/common/utils/time.ts:20），没有时刻也没有「几天前」。
-		ui.Text(c, addedOn(r.AddedAt)).FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+		ui.Text(c, addedOn(r.AddedAt)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
 	case colOps:
 		d.viewOps(c, s, r)
 	}

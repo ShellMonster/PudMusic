@@ -16,6 +16,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -141,11 +142,11 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 
 	ui.Row(c).Key("queue-header").Height(queueHeaderHeight).FillWidth().
 		PaddingY(10).PaddingX(12).Gap(8).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "播放列表").FontSize(15).Bold().TextColor(t.Text).Grow(1)
+		ui.Text(c, "播放列表").FontSize(scale.Font(c, 15)).Bold().TextColor(t.Text).Grow(1)
 		if len(rows) == 0 {
 			return
 		}
-		ui.Text(c, "("+strconv.Itoa(len(rows))+")").FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, "("+strconv.Itoa(len(rows))+")").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 
 		// 逐字照 Biu 那一段（`components/music-playlist-drawer/index.tsx:137-141`）：
 		// 两个 16px 的 `IconButton`（`RiFocus3Line` / `RiDeleteBinLine`）各带
@@ -196,12 +197,13 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme) {
 	// Label 是这一行给无障碍和「打字选中」用的名字。
 	s.queueList.Label = func(i int) string { return rows[i].item.Title }
 
-	ui.List(c, &s.queueList, len(rows), func(i int) {
+	e := ui.List(c, &s.queueList, len(rows), func(i int) {
 		s.viewQueueRow(c, rows[i], i == cur, t)
 	}).
 		// 滚动位置写进自己的句柄，「定位当前播放」改的就是它（ScrollTo 带动画）。
 		TrackScroll(&s.queueScroll).
 		Grow(1).FillWidth()
+	s.trackScrollbar(e)
 }
 
 // currentRow 是「正在放的那一首」在抽屉里的行号，没有是 -1。
@@ -268,9 +270,9 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 			// 歌名和来源两行（Biu 的 `space-y-1`，这里 Gap(2)）竖着堆，居中放在
 			// 48 那张封面旁边。
 			ui.Column(c).Grow(1).Gap(2).Children(func() {
-				ui.Text(c, row.item.Title).FontSize(15).
+				ui.Text(c, row.item.Title).FontSize(scale.Font(c, 15)).
 					TextColor(playlistTextColor(t, playing)).SingleLine()
-				ui.Text(c, itemSubtitle(row.item)).FontSize(12).
+				ui.Text(c, itemSubtitle(row.item)).FontSize(scale.Font(c, 12)).
 					TextColor(playlistSubColor(t, playing)).SingleLine()
 			})
 			// Biu 的那一颗「⋯」是个 DropdownTrigger。这里给它挂系统的菜单
@@ -319,7 +321,7 @@ func (s *Shell) viewQueueCover(c *ui.Context, item app.Item, playing, hovered bo
 		// 点它就不是「点这一行」了（那一行跳过去放歌正是要点封面附近的）。
 		ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Radius(6).
 			PassThrough().Center().Background(ui.RGBA(0, 0, 0, 0.35)).Children(func() {
-			ui.Text(c, "▶").FontSize(14).TextColor(ui.RGBA(255, 255, 255, 0.92))
+			ui.Text(c, "▶").FontSize(scale.Font(c, 14)).TextColor(ui.RGBA(255, 255, 255, 0.92))
 		})
 	})
 }

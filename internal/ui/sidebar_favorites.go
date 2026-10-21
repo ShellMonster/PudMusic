@@ -18,6 +18,7 @@ import (
 	"strconv"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -84,7 +85,7 @@ func (s *Shell) viewFavoritesRefreshing(c *ui.Context, st app.Settings) {
 	if st.SideMenuCollapsed || !s.app.FavoritesRefreshing() {
 		return
 	}
-	ui.Text(c, refreshLine).FontSize(12).
+	ui.Text(c, refreshLine).FontSize(scale.Font(c, 12)).
 		TextColor(c.Theme().TextMuted).Padding(4, 8)
 }
 
@@ -113,7 +114,7 @@ func (s *Shell) viewFavoriteGroup(c *ui.Context, st app.Settings, g app.Favorite
 			return
 		}
 		if len(items) == 0 {
-			ui.Text(c, "还没有收藏夹").FontSize(12).
+			ui.Text(c, "还没有收藏夹").FontSize(scale.Font(c, 12)).
 				TextColor(c.Theme().TextMuted).Padding(6, 8)
 			return
 		}
@@ -208,9 +209,10 @@ func (s *Shell) viewFavoriteList(c *ui.Context, g app.FavoriteGroup, items []app
 		s.reorderFavorite(g, items, rows, to)
 	}
 
-	ui.List(c, ls, len(items), func(i int) {
+	e := ui.List(c, ls, len(items), func(i int) {
 		s.viewFavoriteRow(c, g, items[i])
 	})
+	s.trackScrollbar(e)
 }
 
 // reorderFavorite 是拖完那一刻把顺序落下去。
@@ -273,7 +275,7 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 		//
 		// 上游那边是 CSS 的 `truncate`（`biu/src/components/menu/menu-item.tsx:111`
 		// 的 `className="pointer-events-none truncate"`），那是同一个意思。
-		ui.Text(c, label).FontSize(14).TextColor(rowTextColor(t, cur)).Grow(1).
+		ui.Text(c, label).FontSize(scale.Font(c, 14)).TextColor(rowTextColor(t, cur)).Grow(1).
 			MaxLines(1).Ellipsis("…")
 	})
 

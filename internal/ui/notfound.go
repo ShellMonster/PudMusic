@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -112,9 +113,9 @@ func (s *Shell) viewNotFound(c *ui.Context, path string) {
 	t := c.Theme()
 	ui.Column(c).Key("page:not-found").Grow(1).Center().Gap(8).Padding(20, 28).
 		Children(func() {
-			ui.Text(c, "404").FontSize(28).Bold().TextColor(t.TextMuted)
-			ui.Text(c, "没有「"+path+"」这一页").FontSize(15)
-			ui.Text(c, notFoundCountdown(s.notFoundLeft())).FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, "404").FontSize(scale.Font(c, 28)).Bold().TextColor(t.TextMuted)
+			ui.Text(c, "没有「"+path+"」这一页").FontSize(scale.Font(c, 15))
+			ui.Text(c, notFoundCountdown(s.notFoundLeft())).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 		})
 }
 

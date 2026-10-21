@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -171,7 +172,7 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	//     0×0（BMG-16 记着的 Tester 那个坑），套一层就正常。
 	ui.Column(c).Key("space-list:" + upTabNames[tab]).Grow(1).FillHeight().
 		Children(func() {
-			ui.List(c, st, rows).
+			spaceList := ui.List(c, st, rows).
 				Grow(1).FillHeight().FillWidth().
 				Rows(func(r ui.ListRow) {
 					// 🔴 行里 panic 会一路穿出 Cocoa 事件循环把进程带走。每一行
@@ -189,6 +190,7 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 					}
 					s.viewUpRow(r.Context, sp, tab, r.Index)
 				})
+			s.trackScrollbar(spaceList)
 		})
 
 	// ②滚到底 ③加载后再查一遍。
@@ -301,8 +303,8 @@ func (s *Shell) viewUpSentinel(c *ui.Context, sp *upSpace, tab int) {
 	ui.Row(c).Key("space-sentinel").Center().Gap(8).Padding(12).Children(func() {
 		switch {
 		case p.err != nil:
-			ui.Text(c, "加载失败："+p.err.Error()).FontSize(13).TextColor(t.TextMuted)
-			if ui.Button(c, "重试加载"+upTabNames[tab]).FontSize(13).Clicked() {
+			ui.Text(c, "加载失败："+p.err.Error()).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
+			if ui.Button(c, "重试加载"+upTabNames[tab]).FontSize(scale.Font(c, 13)).Clicked() {
 				p.err = nil
 				if ctx := p.begin(); ctx != nil {
 					go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
@@ -310,9 +312,9 @@ func (s *Shell) viewUpSentinel(c *ui.Context, sp *upSpace, tab int) {
 			}
 		case p.loading:
 			ui.Spinner(c)
-			ui.Text(c, "正在加载…").FontSize(13).TextColor(t.TextMuted)
+			ui.Text(c, "正在加载…").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 		default:
-			ui.Text(c, "继续往下滚，加载更多").FontSize(13).TextColor(t.TextMuted)
+			ui.Text(c, "继续往下滚，加载更多").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 		}
 	})
 }

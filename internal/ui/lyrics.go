@@ -53,6 +53,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -459,6 +460,7 @@ func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Dura
 						}
 					})
 			})
+			s.trackScrollbar(scroll)
 		})
 
 	// 右下角浮着的那一列旋钮。⚠️ **偏移与字号画在没有歌词的时候不画**（传下去的
@@ -488,7 +490,7 @@ func (s *Shell) lyricLine(c *ui.Context, i int, row lyrics.Row, active bool, fon
 		FillWidth().Padding(lyricsLinePadY, lyricsPadX).Opacity(opacity).
 		Children(func() {
 			ui.Text(c, row.Text).
-				FontSize(size).FontWeight(weight).LineHeight(lyricsLineHeight).
+				FontSize(scale.Font(c, size)).FontWeight(weight).LineHeight(lyricsLineHeight).
 				TextColor(t.Text)
 			// 译文不是每行都有（`lyrics.Rows` 里 Translation 为空的那种，见那个
 			// 类型的注释），空的时候一个字都不画——留一个空行的话，上下两行
@@ -496,7 +498,7 @@ func (s *Shell) lyricLine(c *ui.Context, i int, row lyrics.Row, active bool, fon
 			if row.Translation != "" {
 				ui.Text(c, row.Translation).
 					Margin(lyricsTranslationGap, 0, 0, 0).
-					FontSize(lyricsTranslationSize).
+					FontSize(scale.Font(c, lyricsTranslationSize)).
 					FixedLineHeight(lyricsTranslationLineHeight).
 					Opacity(lyricsTranslationOpacity).
 					TextColor(t.Text)

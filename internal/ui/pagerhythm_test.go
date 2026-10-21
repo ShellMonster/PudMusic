@@ -378,8 +378,21 @@ func titleUsesSharedSize(t *testing.T, title string) bool {
 					}
 				case "FontSize":
 					if len(call.Args) == 1 {
-						if id, ok := call.Args[0].(*ast.Ident); ok && id.Name == "pageTitleSize" {
-							hasShared = true
+						switch arg := call.Args[0].(type) {
+						case *ast.Ident:
+							if arg.Name == "pageTitleSize" {
+								hasShared = true
+							}
+						case *ast.CallExpr:
+							// `scale.Font(c, pageTitleSize)`：系统字号缩放那一层
+							//（票 #139）。里面那个数仍然必须是同一个常量——这一条
+							// 管的就是「七页用的是同一个数」，不是「没套缩放」。
+							if sel, ok := arg.Fun.(*ast.SelectorExpr); ok &&
+								sel.Sel.Name == "Font" && len(arg.Args) == 2 {
+								if id, ok := arg.Args[1].(*ast.Ident); ok && id.Name == "pageTitleSize" {
+									hasShared = true
+								}
+							}
 						}
 					}
 				}

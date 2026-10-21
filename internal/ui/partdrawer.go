@@ -31,6 +31,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -222,7 +223,7 @@ func (s *Shell) viewPartDrawer(c *ui.Context) {
 			case len(s.partRows) == 0:
 				// 一片空白在界面上和「这一首没有分集」长得一模一样。而分集是问 B 站
 				// 问来的，问不到是网络/风控的事，不是这一首没有分集——三句话说开。
-				ui.Text(c, s.partDrawerWhy()).FontSize(12).
+				ui.Text(c, s.partDrawerWhy()).FontSize(scale.Font(c, 12)).
 					TextColor(t.TextMuted).Padding(12)
 			default:
 				s.viewPartDrawerList(c, t)
@@ -245,9 +246,9 @@ func (s *Shell) viewPartDrawerHeader(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).FillWidth().Children(func() {
 		ui.Row(c).FillWidth().Height(partHeaderHeight).PaddingX(12).
 			AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "分集").FontSize(14).Bold().Grow(1)
+			ui.Text(c, "分集").FontSize(scale.Font(c, 14)).Bold().Grow(1)
 			if n := len(s.partRows); n > 0 {
-				ui.Text(c, "共 "+strconv.Itoa(n)+" 集").FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, "共 "+strconv.Itoa(n)+" 集").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 			}
 		})
 		ui.Box(c).FillWidth().Height(1).Background(t.Border)
@@ -260,9 +261,10 @@ func (s *Shell) viewPartDrawerList(c *ui.Context, t *ui.Theme) {
 	s.partList.Key = func(i int) any { return rows[i].key }
 	s.partList.Label = func(i int) string { return rows[i].title }
 
-	ui.List(c, &s.partList, len(rows), func(i int) {
+	e := ui.List(c, &s.partList, len(rows), func(i int) {
 		s.viewPartRow(c, rows[i], t)
 	}).Grow(1).FillWidth()
+	s.trackScrollbar(e)
 }
 
 // viewPartRow 是分集列表里的一行：编号 + 标题。
@@ -284,9 +286,9 @@ func (s *Shell) viewPartRow(c *ui.Context, r partRow, t *ui.Theme) {
 	}
 
 	row.Children(func() {
-		ui.Text(c, strconv.Itoa(r.page)).Width(partNumW).FontSize(12).
+		ui.Text(c, strconv.Itoa(r.page)).Width(partNumW).FontSize(scale.Font(c, 12)).
 			TextColor(partRowText(t, r.active, true))
-		ui.Text(c, r.title).Grow(1).FontSize(13).
+		ui.Text(c, r.title).Grow(1).FontSize(scale.Font(c, 13)).
 			TextColor(partRowText(t, r.active, false)).SingleLine()
 	})
 

@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -225,7 +226,7 @@ func (s *Shell) viewVolumePanel(c *ui.Context, st app.State) {
 			s.setVolume(vol)
 		}
 		// 百分比也定宽：不然它自己在那一格里靠左，字数一变位置就变。
-		ui.Text(c, volPercent(vol)).FontSize(11).TextColor(t.TextMuted).Width(volPanelW)
+		ui.Text(c, volPercent(vol)).FontSize(scale.Font(c, 11)).TextColor(t.TextMuted).Width(volPanelW)
 	})
 
 	// 记下「指针在浮层里」，给下一帧的收放判断用（见 `syncVolIdle`）。

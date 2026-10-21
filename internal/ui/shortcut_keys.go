@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -256,7 +258,9 @@ func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcut
 	color := t.Text
 	switch {
 	case recording:
-		color = t.Accent
+		// 「正在录」这几个字是主色当**字**：浅色下换成与底色 ≥4.5:1 的
+		// 变体（理由见 `widgets/ink`），否则录到一半的话读不出来。
+		color = ink.AccentOn(t)
 	case invalid:
 		color = t.Danger
 	}
@@ -291,7 +295,7 @@ func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcut
 	field.Children(func() {
 		// `Grow(1)`：把 × 右边剩下的宽度全吃掉，于是 × 永远贴着右边，超长的键被
 		// `SingleLine` 截断而不是把 × 顶出框外（手改过的设置文件里可能有很长的值）。
-		ui.Text(c, text).FontSize(13).SingleLine().Grow(1).Shrink(0).TextColor(color)
+		ui.Text(c, text).FontSize(scale.Font(c, 13)).SingleLine().Grow(1).Shrink(0).TextColor(color)
 		// 清空。Biu 的 `endContent` 那个 ×（`shortcut-key-input/index.tsx:46`），
 		// 它的显示条件是「不是只读**且**有值」——**不是**「没在录」。
 		//
@@ -310,7 +314,7 @@ func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcut
 		// 格里上下各只让出 0.35 DIP，看上去就是「贴边的一个大方块」而不是一个 ×。
 		if !ro && item.Shortcut != "" &&
 			ui.Button(c, "×").Label("清空「"+item.Name+"」的快捷键").
-				FontSize(12).TextColor(t.TextMuted).
+				FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).
 				Size(clearButtonSize, clearButtonSize).Padding(0).Radius(clearButtonSize/2).
 				Clicked() {
 			s.rejected = shortcutSlot{}

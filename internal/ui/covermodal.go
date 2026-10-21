@@ -37,6 +37,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -187,7 +188,7 @@ func (s *Shell) viewCoverCrop(c *ui.Context, crop *cropState) {
 		return
 	}
 	modal := ui.Modal(c, &crop.open, func() {
-		ui.Text(c, "裁剪封面").FontSize(15).Bold()
+		ui.Text(c, "裁剪封面").FontSize(scale.Font(c, 15)).Bold()
 		s.viewCropStage(c, crop)
 		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
 			if ui.Button(c, "取消").Disabled(crop.uploading).Clicked() {
@@ -368,13 +369,13 @@ func (s *Shell) viewCoverPicker(c *ui.Context, e *folderEdit) {
 			imgcache.View(c, s.images, e.cover, coverPreviewW, coverPreviewH)
 			return
 		}
-		ui.Text(c, "点击上传图片").FontSize(13).TextColor(t.TextMuted)
+		ui.Text(c, "点击上传图片").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 	})
 	if btn.Clicked() {
 		s.pickCover()
 	}
 
-	ui.Text(c, coverHint).FontSize(11).LineHeight(smallCopyHintLeading).
+	ui.Text(c, coverHint).FontSize(scale.Font(c, 11)).LineHeight(smallCopyHintLeading).
 		TextColor(t.TextMuted).MaxLines(1)
 }
 

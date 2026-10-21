@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -90,10 +91,12 @@ func (s *Shell) viewSide(c *ui.Context) {
 				s.viewSideBrand(c, st)
 				// 菜单和收藏夹一起滚。Biu 也是这么分的（ScrollContainer 包住
 				// DefaultMenus + Collection），侧栏窄的时候不至于把折叠按钮顶出去。
-				ui.Scroll(c).Key("side-scroll").Grow(1).FillWidth().Children(func() {
+				sideScroll := ui.Scroll(c).Key("side-scroll").Grow(1).FillWidth()
+				sideScroll.Children(func() {
 					s.viewSideMenu(c, st)
 					s.viewFavorites(c, st)
 				})
+				s.trackScrollbar(sideScroll)
 				s.viewSideCollapse(c, st)
 				// 完整应用名在折叠按钮下面那一条。见 `viewSideFoot`。
 				s.viewSideFoot(c, st)
@@ -221,11 +224,11 @@ func (s *Shell) commitSideWidth() {
 func (s *Shell) viewSideBrand(c *ui.Context, st app.Settings) {
 	if st.SideMenuCollapsed {
 		// 折叠态只 72 宽：标记大一号、贴左边，紧挨着下面那一列单字。
-		ui.Text(c, "B").FontSize(20).Bold().TextColor(c.Theme().Text).
+		ui.Text(c, "B").FontSize(scale.Font(c, 20)).Bold().TextColor(c.Theme().Text).
 			Padding(6, 0, 12, 0)
 		return
 	}
-	ui.Text(c, "B").FontSize(18).Bold().Padding(8, 8, 12, 8)
+	ui.Text(c, "B").FontSize(scale.Font(c, 18)).Bold().Padding(8, 8, 12, 8)
 }
 
 // viewSideFoot 是折叠按钮**下面**那一行完整应用名。
@@ -240,7 +243,7 @@ func (s *Shell) viewSideFoot(c *ui.Context, st app.Settings) {
 	if st.SideMenuCollapsed {
 		return
 	}
-	ui.Text(c, "BiuGo").FontSize(11).
+	ui.Text(c, "BiuGo").FontSize(scale.Font(c, 11)).
 		TextColor(c.Theme().TextMuted).Padding(0, 8, 4, 8)
 }
 
@@ -395,6 +398,8 @@ func sideItemTip(c *ui.Context, anchor ui.Element, text string) {
 	ui.TooltipBase(c, anchor, func(tip ui.Element) {
 		tip.AttachTo(anchor, ui.AnchorRight, ui.AnchorLeft).MarginStart(6).
 			Padding(t.Space(1.25), t.Space(2)).Radius(t.Space(1.25)).
+			// ⚠️ **`t.FontSize` 已经乘过 TextScale 了**（`buildTheme` 里那一句），
+			// 再走一遍 `scale.Font` 就是乘两次（1.4 倍下 17.2 → 24.08）。
 			Background(fill).TextColor(fg).FontSize(t.FontSize-1).
 			Shadow(0, 2, 8, 0, ui.RGBA(0, 0, 0, 0.2))
 		tip.Children(func() { ui.Text(c, text) })
@@ -424,7 +429,7 @@ func loggedOutHint(hidden int) string {
 // 以为侧栏坏了。
 func (s *Shell) viewLoggedOutHint(c *ui.Context, hidden int) {
 	ui.Column(c).Key("side-logged-out").Children(func() {
-		ui.Text(c, loggedOutHint(hidden)).FontSize(12).Wrap().
+		ui.Text(c, loggedOutHint(hidden)).FontSize(scale.Font(c, 12)).Wrap().
 			TextColor(c.Theme().TextMuted).Padding(4, 8)
 	})
 }

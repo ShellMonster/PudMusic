@@ -32,6 +32,7 @@ package ui
 import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -107,5 +108,5 @@ func viewRowIndex(c *ui.Context, i int, playing bool, color ui.Color, id, title 
 		return
 	}
 	ui.Text(c, rowNumber(i)).Width(width).TextAlign(ui.End).
-		FontSize(12).TextColor(c.Theme().TextMuted).MaxLines(1)
+		FontSize(scale.Font(c, 12)).TextColor(c.Theme().TextMuted).MaxLines(1)
 }

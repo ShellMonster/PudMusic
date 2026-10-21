@@ -27,7 +27,9 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -147,7 +149,7 @@ func (s *Shell) viewHistory(c *ui.Context, _ *ui.Route) {
 		Children(func() {
 			// 页头：标题在左，「记录播放历史」在右（上游是 `justify-between`）。
 			ui.Row(c).FillWidth().Center().Children(func() {
-				ui.Text(c, "历史记录").FontSize(pageTitleSize).Bold().Grow(1)
+				ui.Text(c, "历史记录").FontSize(scale.Font(c, pageTitleSize)).Bold().Grow(1)
 				s.viewReportHistory(c, st.ReportPlayHistory, ro)
 			})
 
@@ -160,6 +162,7 @@ func (s *Shell) viewHistory(c *ui.Context, _ *ui.Route) {
 			p.rows.SetView(s.displayView())
 			viewLibraryHeader(c, p.rows, historyHeaderSpec, historyHeaderKey)
 			p.rows.View(c)
+			s.noteScrollbar(p.rows.Hot())
 		})
 }
 
@@ -204,9 +207,9 @@ func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 			func() { rows.playFrom(r.Index) })
 
 		ui.Text(c, progressText(m.Progress, m.Duration)).Width(mt.progress).
-			TextAlign(ui.End).FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+			TextAlign(ui.End).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
 		ui.Text(c, viewedAtText(m.ViewedAt)).Width(mt.viewedAt).
-			TextAlign(ui.End).FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+			TextAlign(ui.End).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
 
 		// 行尾那枚「⋯」。点开的是**这一行的菜单**，和右键同一份（理由同
 		// `drawLaterRow` 里那一处）。
@@ -235,7 +238,8 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected boo
 	case selected:
 		titleColor, metaColor = t.AccentText, t.AccentText.Alpha(0.75)
 	case playing:
-		titleColor = t.Accent
+		// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（理由见 `widgets/ink`）。
+		titleColor = ink.AccentOn(t)
 	}
 
 	box := ui.Column(c).Key("history-cell:" + m.ID).Radius(t.Radius).
@@ -260,21 +264,21 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected boo
 			"", clockText(m.Duration), m.Title, func() { rows.playFrom(i) })
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).PaddingY(cardGapForCell).Children(func() {
-			ui.Text(c, m.Title).FontSize(14).LineHeight(1.5).
+			ui.Text(c, m.Title).FontSize(scale.Font(c, 14)).LineHeight(1.5).
 				TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 				if m.Owner != "" {
-					ui.Text(c, m.Owner).Grow(1).FontSize(12).LineHeight(1).
+					ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, 12)).LineHeight(1).
 						TextColor(metaColor).MaxLines(1).Ellipsis("…")
 				}
 				if playing {
 					viewPlayingMark(c, t, m.Title)
 					return
 				}
-				ui.Text(c, clockText(m.Duration)).FontSize(12).
+				ui.Text(c, clockText(m.Duration)).FontSize(scale.Font(c, 12)).
 					TextColor(metaColor).MaxLines(1)
 			})
-			ui.Row(c).Gap(6).FontSize(11).Children(func() {
+			ui.Row(c).Gap(6).FontSize(scale.Font(c, 11)).Children(func() {
 				ui.Text(c, progressText(m.Progress, m.Duration)).Grow(1).
 					TextColor(metaColor).MaxLines(1)
 				ui.Text(c, viewedAtText(m.ViewedAt)).TextColor(metaColor).MaxLines(1)

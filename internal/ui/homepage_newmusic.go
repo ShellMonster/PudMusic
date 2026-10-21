@@ -36,7 +36,9 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -315,8 +317,8 @@ func (g *newMusicGrid) view(c *ui.Context) {
 			// 失败之后网格整个换掉，这一块的高度跟着换会让下面那个列表跳一格。
 			ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
 				Background(t.Surface).Center().Gap(8).Children(func() {
-				ui.Text(c, "新歌速递没拉出来").FontSize(13).TextColor(t.Text)
-				ui.Text(c, g.err.Error()).FontSize(12).TextColor(t.TextMuted).MaxLines(2)
+				ui.Text(c, "新歌速递没拉出来").FontSize(scale.Font(c, 13)).TextColor(t.Text)
+				ui.Text(c, g.err.Error()).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(2)
 				if g.retry != nil && ui.Button(c, "重试加载新歌速递").Clicked() {
 					g.retry()
 				}
@@ -336,7 +338,7 @@ func (g *newMusicGrid) view(c *ui.Context) {
 			// 「暂无数据」。这里照它（那一句是上游的文案，别自己编）。
 			ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
 				Background(t.Surface).Center().Children(func() {
-				ui.Text(c, "暂无数据").FontSize(13).TextColor(t.TextMuted)
+				ui.Text(c, "暂无数据").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 			})
 			return
 		}
@@ -367,7 +369,7 @@ func (g *newMusicGrid) view(c *ui.Context) {
 // 上摆一个 1 / 0 的读数和两个转不动的箭头，用户只会以为界面坏了。
 func (g *newMusicGrid) viewHeader(c *ui.Context, total int) {
 	ui.Row(c).Key("new-music:head").FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "新歌速递").FontSize(16).Bold()
+		ui.Text(c, "新歌速递").FontSize(scale.Font(c, 16)).Bold()
 
 		if total == 0 {
 			return
@@ -381,7 +383,7 @@ func (g *newMusicGrid) viewHeader(c *ui.Context, total int) {
 			if prev.Clicked() {
 				g.page--
 			}
-			ui.Textf(c, "%d / %d", g.page, total).FontSize(13).Width(newMusicPageW).
+			ui.Textf(c, "%d / %d", g.page, total).FontSize(scale.Font(c, 13)).Width(newMusicPageW).
 				TextAlign(ui.Center).TextColor(c.Theme().TextMuted)
 			next := ui.Button(c, "下一页").Width(newMusicArrowW).
 				Disabled(g.page >= total)
@@ -433,11 +435,15 @@ func (g *newMusicGrid) viewCard(c *ui.Context, i int, cell float32) {
 		// 同一屏上「正在播放」在两个地方说两套话，用户只能靠猜。
 		titleColor := t.Text
 		if g.acts.IsPlaying != nil && g.acts.IsPlaying(m.Item) {
-			titleColor = t.Accent
+			// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（理由见
+			// `widgets/ink`）。这一处和列表 / 网格那三档说的是同一件事，
+			// 颜色也必须走同一个出口——漏了这里，同一屏上「正在播放」
+			// 在下面那一排是深绿、在这一块是读不出来的亮绿。
+			titleColor = ink.AccentOn(t)
 		}
-		ui.Text(c, m.Title).FontSize(14).TextColor(titleColor).MaxLines(1).Ellipsis("…")
+		ui.Text(c, m.Title).FontSize(scale.Font(c, 14)).TextColor(titleColor).MaxLines(1).Ellipsis("…")
 		if m.Owner != "" {
-			ui.Text(c, m.Owner).FontSize(12).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
+			ui.Text(c, m.Owner).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 		}
 	})
 }

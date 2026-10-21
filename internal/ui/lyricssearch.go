@@ -51,6 +51,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -291,7 +292,7 @@ func (s *Shell) viewLyricSearchDialog(c *ui.Context) {
 
 	ui.Modal(c, &l.open, func() {
 		ui.Column(c).Key("lyrics:search").Width(lyricSearchWidth).Gap(10).Children(func() {
-			ui.Text(c, lyricSearchHeading).FontSize(14).Bold()
+			ui.Text(c, lyricSearchHeading).FontSize(scale.Font(c, 14)).Bold()
 
 			// 关键词框 + 「搜索」按钮（上游 `index.tsx:153-161`）。
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -380,7 +381,7 @@ func (s *Shell) viewLyricCandidates(c *ui.Context, srcs []app.LyricSource, st ap
 	// 而候选是**按源搜出来的**，用户必须能一眼分清「这批是哪个源给的」——他多半
 	// 就是为了换个源才来搜的。失败时的那一句来自底下那一层（`lyricsErrText`），
 	// 它已经点了名。
-	ui.Text(c, lyricSourceLine(srcs, st)).FontSize(12).TextColor(t.TextMuted)
+	ui.Text(c, lyricSourceLine(srcs, st)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 
 	switch {
 	case st.Err != "":
@@ -391,7 +392,7 @@ func (s *Shell) viewLyricCandidates(c *ui.Context, srcs []app.LyricSource, st ap
 				// 「拉不到」和「这一条没有歌词」，而且**点了名是哪个源**）。外面再套
 				// 一句「搜索失败：」就变成「搜索失败：网易云 搜不到：…」——同一个意思
 				// 说两遍，而用户读第二遍的那几秒正是在等他点重试。
-				ui.Text(c, st.Err).FontSize(13).TextColor(t.Danger).MaxLines(3)
+				ui.Text(c, st.Err).FontSize(scale.Font(c, 13)).TextColor(t.Danger).MaxLines(3)
 				if ui.Button(c, lyricSearchRetryLabel).Clicked() {
 					// ⚠️ **重搜 `st.Query` 而不是 `l.draft`**：`app` 失败时留着
 					// `Query` 就是给这一下用的（`failLocked` 的注释）。拿框里此刻的
@@ -407,14 +408,14 @@ func (s *Shell) viewLyricCandidates(c *ui.Context, srcs []app.LyricSource, st ap
 
 	case !st.Searched:
 		ui.Column(c).Key(lyricSearchBodyKey).Grow(1).Center().Padding(24).Children(func() {
-			ui.Text(c, lyricSearchIdle).FontSize(13).TextColor(t.TextMuted)
+			ui.Text(c, lyricSearchIdle).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 		})
 
 	case len(st.Candidates) == 0:
 		ui.Column(c).Key(lyricSearchBodyKey).Grow(1).Center().Gap(6).Padding(24).
 			Children(func() {
-				ui.Text(c, lyricSearchEmpty).FontSize(15).TextColor(t.Text)
-				ui.Text(c, lyricNoHitsHint).FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, lyricSearchEmpty).FontSize(scale.Font(c, 15)).TextColor(t.Text)
+				ui.Text(c, lyricNoHitsHint).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 			})
 
 	default:
@@ -425,9 +426,10 @@ func (s *Shell) viewLyricCandidates(c *ui.Context, srcs []app.LyricSource, st ap
 		l.ls.Label = func(i int) string {
 			return lyricCell(st.Candidates[i].Title)
 		}
-		ui.List(c, &l.ls, len(st.Candidates), func(i int) {
+		e := ui.List(c, &l.ls, len(st.Candidates), func(i int) {
 			s.viewLyricCandidateRow(c, id, st.Tab, st.Candidates[i])
 		}).FillWidth().Height(lyricSearchListH)
+		s.trackScrollbar(e)
 	}
 }
 
@@ -482,17 +484,17 @@ func (s *Shell) viewLyricCandidateRow(c *ui.Context, srcID string, tab int, item
 	}
 	row.Children(func() {
 		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, lyricCell(item.Title)).Grow(1).FontSize(13).
+			ui.Text(c, lyricCell(item.Title)).Grow(1).FontSize(scale.Font(c, 13)).
 				TextColor(t.Text).MaxLines(1).Ellipsis("…")
-			ui.Text(c, lyricCell(item.Artist)).Width(lyricColArtist).FontSize(12).
+			ui.Text(c, lyricCell(item.Artist)).Width(lyricColArtist).FontSize(scale.Font(c, 12)).
 				TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
-			ui.Text(c, lyricDuration(item.DurationMS)).Width(lyricColDuration).FontSize(12).
+			ui.Text(c, lyricDuration(item.DurationMS)).Width(lyricColDuration).FontSize(scale.Font(c, 12)).
 				TextColor(t.TextMuted).MaxLines(1)
 		})
 		// 专辑单独一行（上游那一列在标题右边，我们把它放到下面——那一列最宽，
 		// 放右边的话标题和歌手就都没地方了）。
 		if a := strings.TrimSpace(item.Album); a != "" {
-			ui.Text(c, a).FontSize(11).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
+			ui.Text(c, a).FontSize(scale.Font(c, 11)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 		}
 	})
 	if row.Clicked() {
@@ -564,7 +566,7 @@ func (s *Shell) viewLyricPreviewDialog(c *ui.Context, pv app.LyricPreviewState) 
 			if strings.TrimSpace(heading) == "" {
 				heading = lyricPreviewHeading
 			}
-			ui.Text(c, heading).FontSize(14).Bold().MaxLines(2).Ellipsis("…")
+			ui.Text(c, heading).FontSize(scale.Font(c, 14)).Bold().MaxLines(2).Ellipsis("…")
 
 			// 「歌词原文 / 歌词翻译」两个 Tab（上游 `lyrics-preview-modal.tsx:53-56`）。
 			// ⚠️ **译文那一个只在真的有译文时才有**（上游是 `{Boolean(tlyrics) &&
@@ -594,37 +596,38 @@ func (s *Shell) viewLyricPreviewBody(c *ui.Context, pv app.LyricPreviewState) {
 
 	switch {
 	case pv.Loading:
-		ui.Text(c, lyricPreviewBusy).FontSize(13).TextColor(t.TextMuted).Padding(20)
+		ui.Text(c, lyricPreviewBusy).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted).Padding(20)
 
 	case pv.Err != "":
 		// ⚠️ 「未找到歌词内容」和「网络不通」长得很像，可它们要用户做的事完全相反：
 		// 前者要他换一条候选或者换个源，后者要他再试一次。这一句是底下那一层
 		// `lyricsErrText` 拼的（它点名了是哪个源）。
-		ui.Text(c, pv.Err).FontSize(13).TextColor(t.Danger).Padding(20).MaxLines(3)
+		ui.Text(c, pv.Err).FontSize(scale.Font(c, 13)).TextColor(t.Danger).Padding(20).MaxLines(3)
 
 	default:
 		// ⚠️ **只给 Height、不给 Grow**：这一列是弹窗面板，而面板的高度是**由内容撑
 		// 着的**（`ui.Modal` 自己只给 MaxHeight）。两个都给的话这一段会去抢面板的
 		// 高度，而它抢到的那个高度和它自己的滚动位置对不上。
-		ui.Scroll(c).Key(lyricPreviewBodyKey).FillWidth().
-			Height(lyricPreviewBodyH).TrackScroll(&l.previewScroll).
-			Children(func() {
-				// ⚠️ **一行一句，不要把整份 LRC 塞进一个 `ui.Text`**：`ui.Text` 按
-				// 拿到的那一框宽折行，不认 `\n`，于是整首歌词挤成一大坨、还带一堆
-				// 看得见的时间戳。一句一个元素是唯一能把 LRC 的分行原样摆出来的
-				// 画法。
-				ui.Column(c).Gap(2).Children(func() {
-					for _, line := range strings.Split(lyricPreviewText(pv, l.previewTab), "\n") {
-						if strings.TrimSpace(line) == "" {
-							// 空行不画：LRC 里每一句之间本来就有一个空行，全画出来
-							// 就是两倍的行数。
-							continue
-						}
-						ui.Text(c, strings.TrimRight(line, " \t")).FontSize(13).
-							LineHeight(1.6).TextColor(t.Text)
+		preview := ui.Scroll(c).Key(lyricPreviewBodyKey).FillWidth().
+			Height(lyricPreviewBodyH).TrackScroll(&l.previewScroll)
+		preview.Children(func() {
+			// ⚠️ **一行一句，不要把整份 LRC 塞进一个 `ui.Text`**：`ui.Text` 按
+			// 拿到的那一框宽折行，不认 `\n`，于是整首歌词挤成一大坨、还带一堆
+			// 看得见的时间戳。一句一个元素是唯一能把 LRC 的分行原样摆出来的
+			// 画法。
+			ui.Column(c).Gap(2).Children(func() {
+				for _, line := range strings.Split(lyricPreviewText(pv, l.previewTab), "\n") {
+					if strings.TrimSpace(line) == "" {
+						// 空行不画：LRC 里每一句之间本来就有一个空行，全画出来
+						// 就是两倍的行数。
+						continue
 					}
-				})
+					ui.Text(c, strings.TrimRight(line, " \t")).FontSize(scale.Font(c, 13)).
+						LineHeight(1.6).TextColor(t.Text)
+				}
 			})
+		})
+		s.trackScrollbar(preview)
 	}
 }
 

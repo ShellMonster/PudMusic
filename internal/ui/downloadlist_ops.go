@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -49,7 +50,7 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 	dir := s.app.DownloadDir()
 
 	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "下载记录").FontSize(pageTitleSize).Bold()
+		ui.Text(c, "下载记录").FontSize(scale.Font(c, pageTitleSize)).Bold()
 
 		// 路径。空串是「还没有下载目录」（设置里没选、系统目录也没拿到，
 		// 见 `app.Downloads.FallbackDir`）——那时候要说出来，不能画一段空白
@@ -60,7 +61,7 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 		}
 		// 超长被截掉的时候完整路径在 tooltip 里：用户不必去设置页才看得到它落在
 		// 哪儿。没有目录时那一截是空的（`Tooltip("")` 不画东西），没有可补充的。
-		ui.Text(c, path).Grow(1).FontSize(12).LineHeight(smallCopyLeading).
+		ui.Text(c, path).Grow(1).FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
 			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").Tooltip(dir)
 
 		// ⚠️ 没有目录时不摆这个按钮：按下去是打不开的。一个只会说「不行」的
@@ -291,10 +292,10 @@ func (d *downloadsPage) viewConfirm(c *ui.Context, s *Shell) {
 	ask := d.ask
 	if m := ui.Modal(c, &ask.open, func() {
 		ui.Column(c).Width(dlAskW).Gap(12).Children(func() {
-			ui.Text(c, ask.title).FontSize(16).Bold()
+			ui.Text(c, ask.title).FontSize(scale.Font(c, 16)).Bold()
 			// 正文允许折行：上游那句「当前任务未下载完成，确认删除后将无法恢复」
 			// 加上条数之后就宽过一行了，截掉就成了半句话。
-			ui.Text(c, ask.body).FontSize(13).TextColor(c.Theme().TextMuted).Wrap()
+			ui.Text(c, ask.body).FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).Wrap()
 			ui.Row(c).FillWidth().Gap(dlAskGap).Justify(ui.End).Children(func() {
 				if ui.Button(c, "取消").Width(dlAskBtnW).Clicked() {
 					d.ask = nil

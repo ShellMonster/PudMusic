@@ -44,6 +44,8 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrollbar"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -156,6 +158,9 @@ type List struct {
 	// emptyView 是「一行都没有时那一格」的画法（见 SetEmptyView）。nil 是没装，
 	// 那一格走 emptyText() 那句话。
 	emptyView func(c *ui.Context)
+
+	// hot 是上一帧画完后量到的「指针压在滚动条那一带」（见 `Hot`）。
+	hot bool
 
 	// view 是这一份歌此刻摆成什么样，见 SetView。
 	//
@@ -415,7 +420,7 @@ func (l *List) View(c *ui.Context) {
 					return
 				}
 				if s := l.emptyText(); s != "" {
-					ui.Text(c, s).FontSize(13).
+					ui.Text(c, s).FontSize(scale.Font(c, 13)).
 						TextColor(c.Theme().TextMuted).Padding(16)
 				}
 			}
@@ -426,7 +431,17 @@ func (l *List) View(c *ui.Context) {
 	if l.scroll != nil {
 		list.TrackScroll(l.scroll)
 	}
+
+	// 量滚动条的悬停。界面层下一帧据此把主题的滚动条色换深一档（`Hot` 的
+	// 注释；框架只有一个滚动条颜色）。
+	l.hot = scrollbar.Hot(list)
 }
+
+// Hot 报上一次 View 时指针是不是压在这个列表的滚动条上。
+//
+// 页面每帧在 `View` 之后把它交给壳（`Shell.noteScrollbar`）——主题是下一帧
+// 开头装的，所以读的正是这个「上一帧」的值。
+func (l *List) Hot() bool { return l.hot }
 
 // viewRow 画一行。
 //
@@ -463,7 +478,7 @@ func (l *List) viewFooter(c *ui.Context) {
 
 // failedRowText 是「这一行画不出来」那一行的占位。
 func (l *List) failedRowText(c *ui.Context) {
-	ui.Text(c, "这一行画不出来").FontSize(13).TextColor(c.Theme().TextMuted).
+	ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).
 		Padding(cardPadY, cardPadX).MaxLines(1)
 }
 

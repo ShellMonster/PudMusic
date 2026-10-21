@@ -28,10 +28,15 @@ import (
 // ApplyTheme 之前读的、MyGo 刚重置好的那份跟随系统的主题，正好是系统外观。
 // **必须先读再设**，反过来的话读到的是自己上一帧设的值。
 func ApplyTheme(c *ui.Context, s app.Settings, systemDark bool) {
-	c.SetTheme(BuildTheme(s, systemDark))
+	c.SetTheme(buildTheme(s, systemDark, c.Preferences()))
 }
 
-// applyFrameTheme 是每帧开头那一次 ApplyTheme，界面层唯一的入口。
+// applyFrameTheme 是**每帧开头装主题**的那一处，生产上唯一会走到的入口。
+//
+// ⚠️ 它直接调 `buildTheme` + `c.SetTheme`，不再转一手 `ApplyTheme`：滚动条的
+// 悬停档要在装上去之前改一个字段（`scrollbarHot`），而那个状态只在 Shell 上。
+// `ApplyTheme` 因此只剩测试和预览在用（`grep ApplyTheme` 只有定义和测试文件），
+// **改 `ApplyTheme` 不会影响外壳**——要改生产行为，改这里和 `buildTheme`。
 //
 // ⚠️ **先读 `c.Theme().Dark` 再设**：读到的是 MyGo 刚在帧开头重置好的、跟随
 // 系统的那份，也就是「系统现在是不是深色」。反过来的话读到的是我们上一帧
@@ -54,7 +59,16 @@ func ApplyTheme(c *ui.Context, s app.Settings, systemDark bool) {
 // 删掉守卫全绿——那个失败模式不存在。）
 func (s *Shell) applyFrameTheme(c *ui.Context) {
 	systemDark := c.Theme().Dark
-	ApplyTheme(c, s.app.SettingsSnapshot(), systemDark)
+	t := buildTheme(s.app.SettingsSnapshot(), systemDark, c.Preferences())
+	// 指针压在滚动条上时深一档（上游 `--os-handle-bg-hover`）。框架的绘制
+	// 只在**指针落在容器上**时画滚动条，所以这里只管「出现之后更明显」。
+	//
+	// ⚠️ 读的是**上一帧**量到的状态（`scrollbarHot`）：这一帧的容器还没建出来，
+	// 问不到。指针一移动就会有一帧，所以看上去是「移上去就变深」，不会晚。
+	if s.scrollbarHot {
+		t.Scrollbar = scrollbarHot(t)
+	}
+	c.SetTheme(t)
 }
 
 // BuildTheme 按设置拼出这一帧要用的主题。
@@ -62,7 +76,30 @@ func (s *Shell) applyFrameTheme(c *ui.Context) {
 // 从 `ui.LightTheme()` / `ui.DarkTheme()` 起步而不是从零拼结构体：那两份
 // 是 MyGo 自己的默认值，跟着框架升级一起变；自己写一个 `&ui.Theme{...}`
 // 的话，MyGo 新加一个字段我们不会知道，控件就会用零值画。
+//
+// ⚠️ **这一份不带桌面偏好**（高对比度 / 字号缩放）。它是给测试和预览直接
+// 拼主题用的；界面上每一帧走的是 `ApplyTheme` → `buildTheme`，那里会读
+// `Context.Preferences()`。两处只差这一层，别的算法是同一份。
 func BuildTheme(s app.Settings, systemDark bool) *ui.Theme {
+	return buildTheme(s, systemDark, ui.Preferences{})
+}
+
+// buildTheme 是 BuildTheme 加桌面偏好。
+//
+// ## 只跟框架 `Theme.follow` 的两样，不跟主色
+//
+// MyGo 的默认主题在每帧开头会 `t.follow(rt.preferences())`
+// （`mygo/ui/runtime.go:417`），里面三件事：系统主色、高对比度、字号缩放。
+// 我们从 `LightTheme()` / `DarkTheme()` 起步，那一层就绕开了——所以高对比度
+// 和字号缩放得自己接上。
+//
+// 🔴 **系统主色那一件不能接**（票面明写）。用户要的是 Biu 的绿，主色由她自己
+// 在设置里挑；框架那一步会把系统的主色铺上来，用户在系统里换个强调色，我们的
+// 按钮跟着变色——那不是我们的配色体系。
+//
+// 高对比度那几行照 `mygo/ui/preferences.go:72-77` 逐条来（Border / TextMuted /
+// Focus / Scrollbar），字号缩放照 `:78-80`（`t.FontSize *= TextScale`）。
+func buildTheme(s app.Settings, systemDark bool, p ui.Preferences) *ui.Theme {
 	dark := systemDark
 	switch s.ThemeMode {
 	case app.ThemeModeLight:
@@ -97,6 +134,9 @@ func BuildTheme(s app.Settings, systemDark bool) *ui.Theme {
 	}
 	if c, ok := parseHexColor(s.BackgroundColor); ok {
 		t.Background = c
+		// 用户改了底色，**控件那一层要跟着走**：不跟的话白底上的按钮还是
+		// 浅灰、深底上的还是深灰，两个主题的「层次」在自定义底色上就断了。
+		applyBackground(t)
 	}
 	if c, ok := parseHexColor(s.PrimaryColor); ok {
 		applyAccent(t, c)
@@ -111,7 +151,74 @@ func BuildTheme(s app.Settings, systemDark bool) *ui.Theme {
 	} else {
 		t.Inverse, t.InverseText = t.Text, t.Background
 	}
+
+	// 高对比度（系统「增加对比度」）：照 MyGo `Theme.follow` 那四行。
+	// ⚠️ 放在主色和底色之后：它调的是**最终**的 Border / TextMuted。
+	if p.HighContrast {
+		t.Border = t.Border.Mix(t.Text, 0.45)
+		t.TextMuted = t.TextMuted.Mix(t.Text, 0.4)
+		t.Focus.A = 255
+		t.Scrollbar = t.Scrollbar.Alpha(1.6)
+	}
+
+	// 字号缩放（Windows / GNOME 的「文本大小」）：框架那一步就是乘主题字号。
+	//
+	// ⚠️ 只影响**没显式设 FontSize** 的文字——显式字号是固定 DIP，框架不会
+	// 替你乘。我们页面里显式字号走的是 `widgets/scale` 的 `scale.Font`，那一处
+	// 乘的是同一个比例。
+	if p.TextScale > 0 && p.TextScale != 1 {
+		t.FontSize *= p.TextScale
+	}
+
+	// 滚动条宽度照上游 `--os-size: 10px`（`biu/src/app.css:56`）。框架默认 6。
+	t.ScrollbarWidth = scrollbarWidth
 	return t
+}
+
+// scrollbarHot 是「指针压在滚动条上」那一档的颜色。
+//
+// 上游那里是 `--os-handle-bg-hover`（比默认那档深一级，`app.css:58-59`），
+// 提示用户「这根能拖」。框架没有第二档颜色，只有 `Theme.Scrollbar` 一个字段
+// ——所以由界面层在**每帧开头**按上一帧量到的悬停状态选这一档（见
+// `scrollbar.go` 与 `Shell.applyFrameTheme`）。
+//
+// 做法是把同一份颜色的不透明度提上去（而不是换成另一个灰）：深色下本来就
+// 是白色半透明，提不透明度只会更亮/更实，和上游「深一级」是同一个方向。
+func scrollbarHot(t *ui.Theme) ui.Color {
+	return t.Scrollbar.Alpha(1.6)
+}
+
+// applyBackground 按用户挑的底色重推控件那一层：Surface 三档和 Border。
+//
+// ## 比例是从框架那两套默认值反推的
+//
+// 浅色默认底色 `#ffffff` → Surface `#f4f4f5`（往黑 4.3%）、Hover `#e9e9ec`
+// （8.6%）、Pressed `#dddde1`（13.7%）、Border `#d9d9de`（14.9%）。
+// 深色默认 `#18181b` → Surface `#27272a`（往白 6.5%）、Hover `#323236`
+// （11.3%）、Pressed `#3c3c41`（15.6%）、Border `#3f3f46`（16.9%）。
+//
+// 于是这四档在**默认底色上**推出来的值和框架那套几乎逐字节相同（差 1 个通道
+// 的地方是 `Mix` 的舍入），换个底色就整体跟着平移——「控件比底色亮/暗多少」
+// 这件事不随底色变。
+//
+// ⚠️ `Text` / `TextMuted` **不跟着推**：那是票面范围之外（只说「控件的底色和
+// 描边」），而且正文色的对比度是用户挑底色时自己要看的事。主色当字色的那一档
+// 倒是会跟着算——它每次都是从**当前底色**现推的（`widgets/ink`）。
+func applyBackground(t *ui.Theme) {
+	black := ui.Color{A: 255}
+	white := ui.Color{R: 255, G: 255, B: 255, A: 255}
+	mix := white
+	if !t.Dark {
+		mix = black
+	}
+	surface, hover, pressed, border := float32(0.043), float32(0.086), float32(0.137), float32(0.149)
+	if t.Dark {
+		surface, hover, pressed, border = 0.065, 0.113, 0.156, 0.169
+	}
+	t.Surface = t.Background.Mix(mix, surface)
+	t.SurfaceHover = t.Background.Mix(mix, hover)
+	t.SurfacePressed = t.Background.Mix(mix, pressed)
+	t.Border = t.Background.Mix(mix, border)
 }
 
 // radiusOf 是全局圆角，夹在 0~24。
