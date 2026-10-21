@@ -31,6 +31,7 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -195,12 +196,12 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 	ui.Column(c).Key("feed-authors").Width(authorPaneW).FillHeight().
 		Padding(8, 6).Gap(4).Children(func() {
 		// 上游这一栏的标题就是「用户动态」（`author-list.tsx:126`）。
-		ui.Text(c, "用户动态").FontSize(14).Bold().PaddingX(6)
+		ui.Text(c, "用户动态").FontSize(scale.Font(c, 14)).Bold().PaddingX(6)
 
 		if !s.app.LoggedIn() {
 			// 没登录**不假装有内容**：作者栏列的是「我关注的人」，没有登录态
 			// 就没有这个列表。给一句能指路的，比一个空列表有用。
-			ui.Text(c, "登录之后能看到你关注的人").FontSize(12).
+			ui.Text(c, "登录之后能看到你关注的人").FontSize(scale.Font(c, 12)).
 				TextColor(t.TextMuted).PaddingX(6)
 			return
 		}
@@ -240,7 +241,7 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 		// ⚠️ Key 挂在外面的 Column 上：List 是自己管状态的控件，事后再挂
 		// key 会 panic（`ui/element.go` 的 `Key`）。理由见 upspace_tabs.go。
 		ui.Column(c).Key("feed-author-list").Grow(1).FillHeight().Children(func() {
-			ui.List(c, st, rows).
+			authorList := ui.List(c, st, rows).
 				Grow(1).FillHeight().
 				Rows(func(r ui.ListRow) {
 					defer func() {
@@ -250,6 +251,7 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 					}()
 					s.viewAuthorRow(r.Context, f, r.Index)
 				})
+			s.trackScrollbar(authorList)
 		})
 
 		if auth.want() {
@@ -338,7 +340,7 @@ func (s *Shell) viewAuthorRow(c *ui.Context, f *dynamicFeed, i int) {
 		} else {
 			s.spaceAvatar(c, face, 28)
 		}
-		ui.Text(c, name).Grow(1).FontSize(13).MaxLines(1).Ellipsis("…")
+		ui.Text(c, name).Grow(1).FontSize(scale.Font(c, 13)).MaxLines(1).Ellipsis("…")
 	})
 }
 
@@ -403,7 +405,7 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 
 	// ⚠️ Key 挂在外面的 Column 上，理由见上面那一处。
 	ui.Column(c).Key("feed-dynamic-list").Grow(1).FillHeight().Children(func() {
-		ui.List(c, st, rows).
+		dynList := ui.List(c, st, rows).
 			Grow(1).FillHeight().FillWidth().
 			Rows(func(r ui.ListRow) {
 				defer func() {
@@ -422,6 +424,7 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 				}
 				s.viewDynamicCard(r.Context, f.items[r.Index])
 			})
+		s.trackScrollbar(dynList)
 	})
 
 	// 滚到底就拉下一页；容器没填满也拉（首屏那一拉在 view 开头已经发过了）。
@@ -487,15 +490,15 @@ func (s *Shell) viewFeedSentinel(c *ui.Context, p *upPager, hint, retryLabel str
 	ui.Row(c).Key("feed-sentinel").Center().Gap(8).Padding(12).Children(func() {
 		switch {
 		case p.err != nil:
-			ui.Text(c, "加载失败："+p.err.Error()).FontSize(13).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
-			if retry != nil && ui.Button(c, retryLabel).FontSize(13).Clicked() {
+			ui.Text(c, "加载失败："+p.err.Error()).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
+			if retry != nil && ui.Button(c, retryLabel).FontSize(scale.Font(c, 13)).Clicked() {
 				retry()
 			}
 		case p.loading:
 			ui.Spinner(c)
-			ui.Text(c, "正在加载…").FontSize(13).TextColor(t.TextMuted)
+			ui.Text(c, "正在加载…").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 		default:
-			ui.Text(c, hint).FontSize(13).TextColor(t.TextMuted)
+			ui.Text(c, hint).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 		}
 	})
 }

@@ -466,7 +466,9 @@ func openSettingsFor(t *testing.T, dark, readOnly bool) *mygoui.Tester {
 		return b.tt
 	}
 	path := filepath.Join(writableTempDir(t, "settings"), app.SettingsFileName)
-	if err := os.WriteFile(path, []byte(`{"schemaVersion": 99, "appSettings": {}}`), 0o644); err != nil {
+	// themeMode 要显式给：空字符串不是三档里的任何一个，三个主题按钮就都
+	// 不选中——而「选中那一档 DOM 色是主色」正是禁用态那条测试要量的东西。
+	if err := os.WriteFile(path, []byte(`{"schemaVersion": 99, "appSettings": {"themeMode": "system"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	a := app.New()
@@ -477,7 +479,10 @@ func openSettingsFor(t *testing.T, dark, readOnly bool) *mygoui.Tester {
 		a.Close()
 		_ = a.CloseSettings()
 	})
-	b := newTestShell(t, onApp(a))
+	// ⚠️ **`systemIsDark(dark)` 不能漏**：漏了的话这个分支永远画浅色，而
+	// 「禁用态在深色下读不读得出来」恰恰是这一处最坏的那一档（绿字乘完 50%
+	// 只剩 2.6:1）。数据那一半不改：只改 Tester 报给框架的系统外观。
+	b := newTestShell(t, onApp(a), systemIsDark(dark))
 	b.s.navigate(settingsPath)
 	b.tt.Frame()
 	return b.tt

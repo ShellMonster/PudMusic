@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -100,7 +101,7 @@ func (s *Shell) viewSearch(c *ui.Context, r *ui.Route) {
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
 	ui.Column(c).Key("page:/search").Grow(1).Padding(28, pagePadX).Gap(searchHeaderGap).
 		AlignItems(ui.Stretch).Children(func() {
-		ui.Text(c, "搜索").FontSize(pageTitleSize).Bold()
+		ui.Text(c, "搜索").FontSize(scale.Font(c, pageTitleSize)).Bold()
 
 		// ⚠️ Label 不只是给测试用的：没有它读屏软件读不出这是一个搜歌名的
 		// 输入框，只有旁边那行占位文字（占位文字不是标签）。顺带也是无头
@@ -142,7 +143,7 @@ func (s *Shell) viewSearchResults(c *ui.Context, keyword string) {
 
 	ui.Column(c).Key("search:results").Grow(1).Gap(searchHeaderGap).
 		AlignItems(ui.Stretch).Children(func() {
-		ui.Textf(c, "搜索【%s】的结果", keyword).FontSize(18).Bold()
+		ui.Textf(c, "搜索【%s】的结果", keyword).FontSize(scale.Font(c, 18)).Bold()
 
 		// 🔴 **两排 Tabs 都要在 `current` 之前画**：它们都是建到的时候才写
 		// `st.tab` / `st.sorts[cur]`（`mygo/ui/base.go` 的 `tabsParts.Tab` 的
@@ -232,6 +233,7 @@ func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int) {
 			t.list.List().HasSelection(), "search:header:"+strconv.Itoa(tab)))
 	}
 	t.list.View(c)
+	s.noteScrollbar(t.list.Hot())
 }
 
 // searchHeaderSpec 是这一档 Tab 的表头。

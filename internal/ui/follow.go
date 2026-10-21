@@ -50,6 +50,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -401,15 +402,15 @@ func (s *Shell) viewFollowPane(c *ui.Context, f *followPage) {
 		// ⚠️ **失败也要说失败**：`tagErr` 有值的时候下面那一支已经把分组列表
 		// 换成了错误提示，而标题还在——用户点「重试」时看得出自己重试的是
 		// 哪一摊。
-		ui.Text(c, followPaneTitle(f)).FontSize(14).Bold().PaddingX(6)
+		ui.Text(c, followPaneTitle(f)).FontSize(scale.Font(c, 14)).Bold().PaddingX(6)
 
 		// ⚠️ **「拉失败了」必须排在「空」前面**：反过来的话第一页失败时左边
 		// 是一片「还没有分组」，而 `tagStarted` 仍是 false、`tagErr` 非 nil，
 		// 切走再切回来也不会重拉——用户会以为他真的一个分组都没建过。
 		if !f.tagStarted && f.tagErr != nil {
-			ui.Text(c, "分组没拉出来："+f.tagErr.Error()).FontSize(12).
+			ui.Text(c, "分组没拉出来："+f.tagErr.Error()).FontSize(scale.Font(c, 12)).
 				TextColor(t.TextMuted).PaddingX(6)
-			if ui.Button(c, "重试拉分组").FontSize(12).Clicked() {
+			if ui.Button(c, "重试拉分组").FontSize(scale.Font(c, 12)).Clicked() {
 				f.tagErr, f.tagLoading = nil, true
 				go s.fetchFollowTags(context.Background(), f)
 			}
@@ -418,16 +419,17 @@ func (s *Shell) viewFollowPane(c *ui.Context, f *followPage) {
 		// 🔴 **「没拉到」和「一个分组都没有」是两件事**，界面上是两句话：
 		// 前者要按重试，后者不用（那是真的没有分组，B 站那会儿返回空数组）。
 		if !f.tagStarted {
-			ui.Text(c, "正在加载分组…").FontSize(12).TextColor(t.TextMuted).PaddingX(6)
+			ui.Text(c, "正在加载分组…").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).PaddingX(6)
 			return
 		}
 
 		// ⚠️ Key 挂在外面的 Column 上：List 是自己管状态的控件，事后再挂 key
 		// 会 panic（理由同 `dynamicfeed.go`）。
 		ui.Column(c).Key("follow-pane-list").Grow(1).FillHeight().Children(func() {
-			ui.List(c, &f.paneState, len(f.tags)+1).
+			pane := ui.List(c, &f.paneState, len(f.tags)+1).
 				Grow(1).FillHeight().
 				Rows(func(r ui.ListRow) { s.viewFollowPaneRow(r.Context, f, r.Index) })
+			s.trackScrollbar(pane)
 		})
 	})
 }
@@ -488,7 +490,7 @@ func (s *Shell) viewFollowPaneRow(c *ui.Context, f *followPage, i int) {
 		s.selectFollowTab(f, tab)
 	}
 	box.Children(func() {
-		ui.Text(c, label).Grow(1).FontSize(13).MaxLines(1).Ellipsis("…")
+		ui.Text(c, label).Grow(1).FontSize(scale.Font(c, 13)).MaxLines(1).Ellipsis("…")
 	})
 }
 
@@ -547,9 +549,9 @@ func (s *Shell) viewFollowSearch(c *ui.Context, f *followPage) {
 		// ⚠️ **清空按钮只在真的搜着的时候才在**：Biu 那个 `isClearable` 在框是空的
 		// 时候也画一颗，画出来按下去什么也没发生。
 		if f.applied != "" {
-			ui.Text(c, "正在搜「"+f.applied+"」").FontSize(12).TextColor(t.TextMuted).
+			ui.Text(c, "正在搜「"+f.applied+"」").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).
 				MaxLines(1).Ellipsis("…")
-			if ui.Button(c, "清空搜索").FontSize(12).Clicked() {
+			if ui.Button(c, "清空搜索").FontSize(scale.Font(c, 12)).Clicked() {
 				f.draft = ""
 				s.searchFollow(f, "")
 			}
@@ -646,6 +648,7 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 			//（理由见 `homepage.go` 里「切 Tab 的滚动位置」那一段）。
 			TrackScroll(&f.scroll).
 			Rows(func(r ui.ListRow) { s.viewFollowRow(r.Context, f, r.Index, cols) })
+		s.trackScrollbar(e)
 		// 量这一帧的容器宽，下一帧用。`Bounds` 报的是**上一帧**的盒子。
 		if bw := e.Bounds().W; bw > 0 {
 			f.width = bw
@@ -768,7 +771,7 @@ func (s *Shell) viewFollowRow(c *ui.Context, f *followPage, i, cols int) {
 func (s *Shell) viewFollowCardGuarded(c *ui.Context, f *followPage, i int) {
 	u := f.users[i]
 	if f.failed[u.Mid] {
-		ui.Text(c, "这一格画不出来").FontSize(13).TextColor(c.Theme().TextMuted).
+		ui.Text(c, "这一格画不出来").FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).
 			Padding(followCardPad).MaxLines(1)
 		return
 	}
@@ -816,15 +819,15 @@ func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser) {
 		// 头像。上游是 `rounded-full`，所以是圆的（`spaceAvatar` 画的也是圆的，
 		// 而且它四态齐全、还带 Label——无头 Tester 量得到）。
 		s.spaceAvatar(c, u.Face, followCardSide)
-		ui.Text(c, name).FontSize(15).MaxLines(1).Ellipsis("…")
+		ui.Text(c, name).FontSize(scale.Font(c, 15)).MaxLines(1).Ellipsis("…")
 		if u.Official != "" {
-			ui.Text(c, u.Official).FontSize(12).TextColor(t.TextMuted).
+			ui.Text(c, u.Official).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).
 				MaxLines(1).Ellipsis("…")
 		}
 		// ⚠️ **签名空的时候整块不画**：Biu 那一格是空的，我们这里留一个 6 的
 		// 间距 + 一段空白，看起来像卡少了一截（理由同 `list.Grid` 里时长那一列）。
 		if u.Sign != "" {
-			ui.Text(c, u.Sign).FontSize(12).LineHeight(1.4).TextColor(t.TextMuted).
+			ui.Text(c, u.Sign).FontSize(scale.Font(c, 12)).LineHeight(1.4).TextColor(t.TextMuted).
 				TextAlign(ui.Center).MaxLines(2).Ellipsis("…")
 		}
 	})
@@ -836,9 +839,9 @@ func (s *Shell) viewFollowSentinel(c *ui.Context, f *followPage) {
 	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(8).Padding(12).Children(func() {
 		switch {
 		case f.pager.err != nil:
-			ui.Text(c, "加载失败："+f.pager.err.Error()).FontSize(13).
+			ui.Text(c, "加载失败："+f.pager.err.Error()).FontSize(scale.Font(c, 13)).
 				TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
-			if ui.Button(c, "重试加载关注的人").FontSize(13).Clicked() {
+			if ui.Button(c, "重试加载关注的人").FontSize(scale.Font(c, 13)).Clicked() {
 				f.pager.err = nil
 				if ctx := f.pager.begin(); ctx != nil {
 					go s.fetchFollowUsers(context.Background(), f, f.gen, f.tab, f.applied,
@@ -847,9 +850,9 @@ func (s *Shell) viewFollowSentinel(c *ui.Context, f *followPage) {
 			}
 		case f.pager.loading:
 			ui.Spinner(c).Label("正在加载")
-			ui.Text(c, "正在加载…").FontSize(13).TextColor(t.TextMuted)
+			ui.Text(c, "正在加载…").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 		default:
-			ui.Text(c, "继续往下滚，加载更多关注的人").FontSize(13).TextColor(t.TextMuted)
+			ui.Text(c, "继续往下滚，加载更多关注的人").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 		}
 	})
 }

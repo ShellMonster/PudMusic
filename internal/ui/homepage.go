@@ -265,6 +265,7 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell) {
 		// 下滚它不动，宽屏下滚到右边列名也还在。
 		h.lists[h.tab].Header(c, "home:header:"+strconv.Itoa(h.tab))
 		h.lists[h.tab].View(c)
+		s.noteScrollbar(h.lists[h.tab].Hot())
 
 		// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见
 		// `widgets/list` 的 `BackToTop`）。

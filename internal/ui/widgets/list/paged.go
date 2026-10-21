@@ -40,6 +40,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -298,6 +299,9 @@ func (p *PagedList) ScrollTop() {
 // panic 会一路穿到 Cocoa 事件循环上去把整个进程带走。画在页面里时页级那道
 // Guard（`internal/ui` 的 `Shell.page`）也接得住，但这个控件不是只给页面用的
 // ——它自己这一道必须有，包一层是这里最便宜的保险。
+// Hot 报指针是不是压在底下那一对控件的滚动条上（见 `List.Hot`）。
+func (p *PagedList) Hot() bool { return p.surf.Hot() }
+
 func (p *PagedList) View(c *ui.Context) { p.draw(c) }
 
 // onPanic 记一笔并要一帧。
@@ -620,7 +624,7 @@ func (p *PagedList) footerView(c *ui.Context) {
 	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(cardGap).Padding(cardPadY, cardPadX).
 		Children(func() {
 			if p.blocked {
-				if ui.Button(c, "加载失败，点此重试").FontSize(13).Clicked() {
+				if ui.Button(c, "加载失败，点此重试").FontSize(scale.Font(c, 13)).Clicked() {
 					p.blocked = false
 					p.load(trigRetry)
 				}
@@ -628,7 +632,7 @@ func (p *PagedList) footerView(c *ui.Context) {
 			}
 			if p.loading {
 				ui.Spinner(c).Label(footerLabel)
-				ui.Text(c, "正在加载…").FontSize(13).TextColor(t.TextMuted)
+				ui.Text(c, "正在加载…").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 			}
 		})
 }

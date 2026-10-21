@@ -22,7 +22,10 @@
 // 「没登录」说的是**这个账号**怎么了——前者更具体。
 package ui
 
-import "github.com/egoist/mygo/ui"
+import (
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/egoist/mygo/ui"
+)
 
 // laterNotLoggedIn 是「稍后再看」那一页没登录时说的话。
 //
@@ -53,8 +56,8 @@ func (s *Shell) viewNeedsLogin(c *ui.Context, key string, e emptyState) {
 
 	t := c.Theme()
 	ui.Column(c).Key(key).Grow(1).Center().Gap(8).Padding(24).Children(func() {
-		ui.Text(c, e.Title).FontSize(pageTitleSize).Bold()
-		ui.Text(c, e.Hint).FontSize(13).TextColor(t.TextMuted)
+		ui.Text(c, e.Title).FontSize(scale.Font(c, pageTitleSize)).Bold()
+		ui.Text(c, e.Hint).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 		// 给一个能立刻做完的事：这一页在没登录之前永远是这个样子，而
 		// `/login` 就是扫码登录那一页（router.go 的 routes 表里那一条）。
 		if ui.PrimaryButton(c, "去登录").Clicked() {

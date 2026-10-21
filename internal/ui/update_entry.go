@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -57,10 +59,12 @@ func (s *Shell) updateVersionTitle(c *ui.Context, st app.UpdateState) {
 func (s *Shell) versionLine(c *ui.Context, key string, size float32, st app.UpdateState) {
 	t := c.Theme()
 	ui.Row(c).Key(key).Gap(6).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "当前版本 "+app.VersionLabel(st.Current)).FontSize(size).Bold()
+		ui.Text(c, "当前版本 "+app.VersionLabel(st.Current)).FontSize(scale.Font(c, size)).Bold()
 		if st.Available() {
-			ui.Text(c, "→").FontSize(size).TextColor(t.TextMuted)
-			ui.Text(c, st.Latest).FontSize(size).Bold().TextColor(t.Accent)
+			ui.Text(c, "→").FontSize(scale.Font(c, size)).TextColor(t.TextMuted)
+			// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（理由见
+			// `widgets/ink`）。深色下原样。
+			ui.Text(c, st.Latest).FontSize(scale.Font(c, size)).Bold().TextColor(ink.AccentOn(t))
 		}
 	})
 }

@@ -20,7 +20,10 @@
 // 网格那一块里的），两个都调 `drawEmpty`。
 package ui
 
-import "github.com/egoist/mygo/ui"
+import (
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/egoist/mygo/ui"
+)
 
 // emptyState 是一页空着时说的两句话，外加那一格插画位上的图标。
 type emptyState struct {
@@ -121,7 +124,7 @@ func drawEmpty(c *ui.Context, key string, e emptyState, pad float32) {
 // `viewLibraryMissing`（插画 / 页面名 / 那一页的空文案 / 「没接上接口」的原因）。
 // 那三样各自是 `emptyArt` / 一句自定义 / `emptyCopy`，而字号和主次色只有这一份。
 //
-// ⚠️ **写新的一处空状态时也要走这几个函数**，别把 `FontSize(15)` / `FontSize(12)`
+// ⚠️ **写新的一处空状态时也要走这几个函数**，别把 `FontSize(scale.Font(c, 15))` / `FontSize(scale.Font(c, 12))`
 // 抄一遍过去：抄一遍就会漂开（改一次字号只改一处，另一处不动），而界面上看不出来。
 func emptyContent(c *ui.Context, e emptyState) {
 	emptyArt(c, e.Icon)
@@ -148,12 +151,12 @@ func emptyArt(c *ui.Context, name string) {
 func emptyCopy(c *ui.Context, e emptyState) {
 	t := c.Theme()
 	if e.Loading {
-		ui.Text(c, e.Title).FontSize(emptyTitleSize).TextColor(t.TextMuted)
+		ui.Text(c, e.Title).FontSize(scale.Font(c, emptyTitleSize)).TextColor(t.TextMuted)
 		return
 	}
-	ui.Text(c, e.Title).FontSize(emptyTitleSize).TextColor(t.Text)
+	ui.Text(c, e.Title).FontSize(scale.Font(c, emptyTitleSize)).TextColor(t.Text)
 	if e.Hint != "" {
-		ui.Text(c, e.Hint).FontSize(emptyHintSize).LineHeight(smallCopyLeading).
+		ui.Text(c, e.Hint).FontSize(scale.Font(c, emptyHintSize)).LineHeight(smallCopyLeading).
 			TextColor(t.TextMuted)
 	}
 }
@@ -224,10 +227,10 @@ func (s *Shell) viewPageEmptyWithReason(c *ui.Context, key, title string, e empt
 	t := c.Theme()
 	ui.Column(c).Key(key).Grow(1).Center().Gap(emptyGap).Padding(emptyPagePad, 28).Children(func() {
 		emptyArt(c, e.Icon)
-		ui.Text(c, title).FontSize(emptyPageTitle).Bold()
+		ui.Text(c, title).FontSize(scale.Font(c, emptyPageTitle)).Bold()
 		if e.Title != "" {
 			emptyCopy(c, e)
-			ui.Text(c, biliNotMounted).FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, biliNotMounted).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 		}
 	})
 }
@@ -352,13 +355,13 @@ func (s *Shell) viewLoadError(c *ui.Context, key, where, retryLabel string, err 
 		// 插画用警告那一枚而**不是**空状态那一批：这一格说的是「没拉出来」，
 		// 不是「本来就没有」。
 		ui.Icon(c, icon(iconFailed)).FontSize(emptyIconSize).TextColor(t.Warning)
-		ui.Text(c, "这一块没拉出来").FontSize(15).TextColor(t.Text)
+		ui.Text(c, "这一块没拉出来").FontSize(scale.Font(c, 15)).TextColor(t.Text)
 		if where != "" {
 			// 主次和错误本身再分一档：这一行是给用户复现用的（说给开发者听），
 			// 而下面那行是原始错误。两者都别比标题更抢眼。
-			ui.Text(c, "没拉出来的是："+where).FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, "没拉出来的是："+where).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 		}
-		ui.Text(c, err.Error()).FontSize(12).TextColor(t.TextMuted).MaxLines(3)
+		ui.Text(c, err.Error()).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(3)
 		if retry != nil && ui.Button(c, retryLabel).Clicked() {
 			retry()
 		}

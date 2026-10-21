@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -262,11 +263,11 @@ func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock, title s
 			// 时它自己占满整行、仍然贴着右边。（第一版把它放在左边，于是没有播放量的
 			// 那一半——本地音乐和首页——时长浮在封面左下角，看着像另一个控件。）
 			if playCount != "" {
-				ui.Text(c, playCount).FontSize(11).
+				ui.Text(c, playCount).FontSize(scale.Font(c, 11)).
 					TextColor(ui.RGBA(255, 255, 255, triTint)).MaxLines(1)
 			}
 			if clock != "" {
-				ui.Text(c, clock).Grow(1).TextAlign(ui.End).FontSize(11).
+				ui.Text(c, clock).Grow(1).TextAlign(ui.End).FontSize(scale.Font(c, 11)).
 					TextColor(ui.RGBA(255, 255, 255, triTint)).MaxLines(1)
 			}
 		})

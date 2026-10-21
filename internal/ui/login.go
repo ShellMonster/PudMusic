@@ -27,6 +27,8 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -64,10 +66,11 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 	t := c.Theme()
 	st := s.app.LoginState()
 
-	ui.Scroll(c).Key("login-scroll").Grow(1).Children(func() {
+	loginScroll := ui.Scroll(c).Key("login-scroll").Grow(1)
+	loginScroll.Children(func() {
 		ui.Column(c).Key("page:" + loginPath).Grow(1).Padding(20).Gap(12).
 			AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "扫码登录").FontSize(pageTitleSize).Bold()
+			ui.Text(c, "扫码登录").FontSize(scale.Font(c, pageTitleSize)).Bold()
 
 			switch {
 			case !st.Busy() && st.QR == nil:
@@ -75,11 +78,11 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 				// 不放二维码是因为还没有——凭空画一张占位图会让人以为
 				// 「点了没反应」。
 				ui.Text(c, "用 bilibili 手机客户端扫一扫就能登进来").
-					FontSize(14).TextColor(t.Text)
+					FontSize(scale.Font(c, 14)).TextColor(t.Text)
 
 			case st.Phase == app.LoginExpired:
 				s.qrImage(c, st.QR, true)
-				ui.Text(c, "这张二维码已经过期了，扫不了了").FontSize(14).TextColor(t.Text)
+				ui.Text(c, "这张二维码已经过期了，扫不了了").FontSize(scale.Font(c, 14)).TextColor(t.Text)
 
 			default:
 				// 这一支（等扫码 / 已扫待确认）**永远不盖灰**。
@@ -88,13 +91,14 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 				// 盖完的码手机扫不出来（实测 45% 压暗之后相当一部分 App 直接放弃），
 				// 用户看到的却是一张「正常」的二维码。
 				s.qrImage(c, st.QR, false)
-				ui.Text(c, st.Hint).FontSize(14).TextColor(qrHintColor(t, st.Phase))
+				ui.Text(c, st.Hint).FontSize(scale.Font(c, 14)).TextColor(qrHintColor(t, st.Phase))
 			}
 
 			s.qrActions(c, st)
 			s.viewAccountFooter(c, t, st)
 		})
 	})
+	s.trackScrollbar(loginScroll)
 }
 
 // qrImage 把二维码画出来。
@@ -148,9 +152,9 @@ func dimImage(src *image.RGBA, amount float32) *image.RGBA {
 		for x := range src.Bounds().Dx() {
 			p := src.RGBAAt(x, y)
 			out.SetRGBA(x, y, color.RGBA{
-				R: scale(p.R, amount),
-				G: scale(p.G, amount),
-				B: scale(p.B, amount),
+				R: scaleChannel(p.R, amount),
+				G: scaleChannel(p.G, amount),
+				B: scaleChannel(p.B, amount),
 				A: p.A,
 			})
 		}
@@ -158,7 +162,11 @@ func dimImage(src *image.RGBA, amount float32) *image.RGBA {
 	return out
 }
 
-func scale(v uint8, amount float32) uint8 {
+// scaleChannel 把一个颜色通道压暗 amount。
+//
+// ⚠️ 名字不叫 `scale`：`internal/ui` 这一包现在 import 了 `widgets/scale`
+// （图标 / 字号的缩放），包级函数和包名撞上，编译期就过不去。
+func scaleChannel(v uint8, amount float32) uint8 {
 	return uint8(float32(v) * (1 - amount))
 }
 
@@ -201,7 +209,7 @@ func (s *Shell) qrActions(c *ui.Context, st app.LoginState) {
 				s.app.CancelLogin()
 			}
 		case app.LoginScanned:
-			ui.Text(c, "别关掉这一页").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, "别关掉这一页").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 			if ui.Button(c, "取消").Clicked() {
 				s.app.CancelLogin()
 			}
@@ -237,15 +245,15 @@ func (s *Shell) viewAccountFooter(c *ui.Context, t *ui.Theme, st app.LoginState)
 	sess := s.app.Session()
 	ui.Row(c).Key("account-footer").Gap(10).AlignItems(ui.Center).Children(func() {
 		if uid := sess.DedeUserID; uid != "" {
-			ui.Text(c, "已登录（UID "+uid+"）").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, "已登录（UID "+uid+"）").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 		} else {
-			ui.Text(c, "已登录").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, "已登录").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 		}
 		// 登录态存不存得住，一眼就该看见：后端不可用时用户必须在这里
 		// 知道「关掉应用就白登了」，而不是重启之后才发现。
 		if backend := s.app.CredentialBackendName(); backend == "none" {
 			ui.Text(c, "凭据后端不可用，登录态关掉应用就没了").
-				FontSize(12).TextColor(t.TextMuted)
+				FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 		}
 		if ui.Button(c, "退出登录").Clicked() {
 			s.logoutAndStartOver()
@@ -271,7 +279,10 @@ func (s *Shell) logoutAndStartOver() {
 func qrHintColor(t *ui.Theme, phase app.LoginPhase) ui.Color {
 	switch phase {
 	case app.LoginScanned:
-		return t.Accent
+		// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（理由见
+		// `widgets/ink`）。这句话是唯一要用户去手机上操作的那一句，读不出来
+		// 等于没说。
+		return ink.AccentOn(t)
 	case app.LoginExpired, app.LoginFailed:
 		return t.Text
 	}

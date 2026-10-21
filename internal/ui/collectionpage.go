@@ -37,6 +37,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -413,6 +414,7 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 			// 列表自己占了 Grow(1)（见 `list.List.View`），所以多选态下面那条
 			// 批量操作条自然被它顶到最下面。
 			p.list.View(c)
+			s.noteScrollbar(p.list.Hot())
 			if p.multi {
 				s.viewCollectionBatchBar(c, p)
 			}
@@ -485,12 +487,12 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 			ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(6).Children(func() {
 				// ⚠️ **这个标题是 30（`collectionTitleSize`），不是页标题那个数**：
 				// 头图区的大标题抄上游 `text-3xl`，见 pagerhythm.go 那段。
-				ui.Text(c, collectionTitleText(p.ref.Type, info)).FontSize(collectionTitleSize).Bold().
+				ui.Text(c, collectionTitleText(p.ref.Type, info)).FontSize(scale.Font(c, collectionTitleSize)).Bold().
 					MaxLines(2).Ellipsis("…")
 
 				// ② 简介。Biu 是 `line-clamp-1`，有才画。
 				if info.Intro != "" {
-					ui.Text(c, info.Intro).FontSize(13).LineHeight(smallCopyLeading).
+					ui.Text(c, info.Intro).FontSize(scale.Font(c, 13)).LineHeight(smallCopyLeading).
 						TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 				}
 
@@ -499,14 +501,14 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 				// 上游连音频也是这么写的，这里照抄。
 				ui.Text(c, collectionKindText(p.ref.Type, info.Private)+" • "+
 					strconv.Itoa(info.MediaCount)+" 条视频").
-					FontSize(12).LineHeight(smallCopyLeading).
+					FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
 					TextColor(t.TextMuted).MaxLines(1)
 
 				// ④ 创建者。Biu 是一张头像加昵称；这一票没接头像地址
 				//（`bili.CollectionInfo` 有 `Owner.Face`，界面先不画——
 				// 一行字能说清是谁，一个空方块不能）。
 				if info.OwnerName != "" {
-					ui.Text(c, info.OwnerName).FontSize(12).LineHeight(smallCopyLeading).
+					ui.Text(c, info.OwnerName).FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
 						TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 				}
 
@@ -760,7 +762,9 @@ func (s *Shell) viewCollectionSort(c *ui.Context, p *collectionPage) {
 	trigger.Label("排序：" + p.sort.Label())
 
 	sel.Popup(func(panel ui.Element) {
-		panel.Padding(4).Radius(t.Radius).Background(t.Background).Border(1, t.Border)
+		// 外观走共享出口（`popupPanel`）：这一处原来只有底色和描边，没有
+		// 阴影——和旁边框架自己弹的浮层差一层影子。
+		popupPanel(t, panel.Padding(4))
 		for _, sort := range bili.CollectionSorts {
 			item := sel.Item(sort).Padding(6, 10).Radius(t.Radius)
 			switch {

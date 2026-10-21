@@ -76,13 +76,14 @@ func TestPickingTheFontChangesWhatTheWholeWindowDrawsIn(t *testing.T) {
 	}
 
 	openFontMenu(t, tt)
-	// 「等宽」那条：family 是 `Menlo, Consolas, monospace`，和系统默认不是同一个。
-	if err := tt.Click("等宽"); err != nil {
-		t.Fatalf("点不到「等宽」：%v，文字有 %q", err, tt.Texts())
+	// 挑系统里真有的**第一个等宽族**：名单是问系统要来的，写死一个「Menlo」
+	// 在别的机器上可能不存在（那还是「挑好的名单」的老思路）。
+	want := firstMonospacedFamily(t)
+	if err := tt.Click(want); err != nil {
+		t.Fatalf("点不到「%s」：%v，文字有 %q", want, err, tt.Texts())
 	}
 	tt.Frame()
 
-	want := "Menlo, Consolas, monospace"
 	if got := s.app.SettingsSnapshot().FontFamily; got != want {
 		t.Errorf("设置里的字体是 %q，want %q", got, want)
 	}
@@ -105,15 +106,15 @@ func TestEveryFontOptionIsDrawnInItsOwnFont(t *testing.T) {
 	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
 	openFontMenu(t, tt)
 
-	// 这三条的族名列表第一个字族在这台机器上是真的中文宋体/黑体/楷体，拿它们比
-	// 才有意义：拉丁字族那几条的标签是中文，列表里没有中文字族，画出来的是同一套
-	// 回退字体，比了等于没比。
-	probes := []string{"苹方 / 微软雅黑", "黑体", "宋体", "楷体"}
-	for _, label := range probes {
-		family, ok := fontFamilyOf(fontOptions, label)
-		if !ok {
-			t.Fatalf("名单里没有 %q", label)
-		}
+	// 挑前几条系统字体当探针。名单是问系统要来的，所以**不写死族名**：写死的
+	// 名字在另一台机器上可能不存在，而这一条要验的是「每一条用它自己那一族」，
+	// 不是「这台机器上有哪几族」。
+	options := fontOptionList()
+	if len(options) < 4 {
+		t.Fatalf("系统只报了 %d 条字体，这条测试没有可比的三条", len(options)-1)
+	}
+	for _, opt := range options[1:4] {
+		family, label := opt.family, opt.label
 		got := inkShotOf(t, tt, label)
 		want := renderedIn(t, label, family)
 		if !sameGlyphs(got.img, got.at, want.img, want.at) {
@@ -126,17 +127,18 @@ func TestEveryFontOptionIsDrawnInItsOwnFont(t *testing.T) {
 	}
 }
 
-// fontFamilyOf 按**标签**在名单里找一条选项的族名。
+// firstMonospacedFamily 是这台机器上第一个等宽字体族的名字。
 //
-// `findFont` 是按族名找的（设置页用它来认出「设置里存的那个字体在不在名单里」），
-// 这里要的正好相反。
-func fontFamilyOf(options []fontOption, label string) (string, bool) {
-	for _, o := range options {
-		if o.label == label {
-			return o.family, true
+// 名单是问系统要来的，测试不能写死「Menlo」——那正是这一票要改掉的东西。
+func firstMonospacedFamily(t *testing.T) string {
+	t.Helper()
+	for _, f := range ui.FontFamilies() {
+		if f.Monospaced && f.Name != systemFontFamily {
+			return f.Name
 		}
 	}
-	return "", false
+	t.Fatal("系统没有报任何等宽字体，这条测试没法挑一条来点")
+	return ""
 }
 
 // renderedIn 另起一个无头窗口，只画一行字、写死它用哪一族字体，返回它的墨迹。
@@ -560,7 +562,10 @@ func openFontMenu(t *testing.T, tt *mygoui.Tester) {
 		t.Fatalf("点不到字体下拉：%v，文字有 %q", err, tt.Texts())
 	}
 	tt.Frame()
-	if !tt.HasText("苹方 / 微软雅黑") {
+	// 面板摆开之后第一个系统字体在画面上（「系统默认」那一条收起时本来就有，
+	// 不能拿它当判据）。
+	options := fontOptionList()
+	if len(options) < 2 || !tt.HasText(options[1].label) {
 		t.Fatalf("字体面板没有摆开，文字有 %q", tt.Texts())
 	}
 }

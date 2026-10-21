@@ -35,6 +35,7 @@ import (
 	"strconv"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -134,7 +135,7 @@ func (s *Shell) viewLyricKnobs(c *ui.Context, snap app.LyricsSnapshot) {
 
 // lyricFontPopover 画字号那个浮层：一条竖滑块加一个当前值。
 func (s *Shell) lyricFontPopover(c *ui.Context, anchor ui.Element, snap app.LyricsSnapshot) {
-	v := float64(app.ClampLyricsFontSize(snap.FontSize))
+	v := float64(app.ClampLyricsFontSize(scale.Font(c, snap.FontSize)))
 	ui.PopoverBase(c, anchor, &s.lyric.fontOpen, func(panel ui.Element) {
 		lyricPanelStyle(c, panel, anchor)
 		panel.Children(func() {
@@ -146,7 +147,7 @@ func (s *Shell) lyricFontPopover(c *ui.Context, anchor ui.Element, snap app.Lyri
 				s.app.SetLyricsFontSize(float32(v))
 			}
 			ui.Text(c, lyricFontValueLabel(snap.FontSize)).
-				FontSize(lyricValueSize).FontWeight(700).TextColor(c.Theme().TextMuted)
+				FontSize(scale.Font(c, lyricValueSize)).FontWeight(700).TextColor(c.Theme().TextMuted)
 		})
 	})
 }
@@ -165,7 +166,7 @@ func (s *Shell) lyricOffsetPopover(c *ui.Context, anchor ui.Element, snap app.Ly
 				s.app.SetLyricsOffset(int(v))
 			}
 			ui.Text(c, lyricOffsetValueLabel(snap.OffsetMS)).
-				FontSize(lyricValueSize).FontWeight(700).TextColor(c.Theme().TextMuted)
+				FontSize(scale.Font(c, lyricValueSize)).FontWeight(700).TextColor(c.Theme().TextMuted)
 		})
 	})
 }
@@ -181,12 +182,11 @@ func (s *Shell) lyricOffsetPopover(c *ui.Context, anchor ui.Element, snap app.Ly
 // 在下面。
 func lyricPanelStyle(c *ui.Context, panel, anchor ui.Element) {
 	t := c.Theme()
-	panel.
+	// 外观走共享出口（`popupPanel`），只有位置和间距是这一处自己的。
+	popupPanel(t, panel.
 		AttachTo(anchor, ui.AnchorLeft, ui.AnchorRight).
 		MarginEnd(lyricPopoverGap).
-		Padding(t.Space(1.5)).Radius(t.Radius+2).
-		Background(t.Background).Border(1, t.Border).
-		Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.18))
+		Padding(t.Space(1.5)))
 }
 
 // lyricSlider 画一条竖着的滑块，值落在 [*lo, hi]、按 step 跳。

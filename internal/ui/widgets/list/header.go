@@ -40,6 +40,7 @@
 package list
 
 import (
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -180,7 +181,7 @@ func Header(c *ui.Context, spec HeaderSpec) {
 						ui.Box(c).Width(col.Width).Height(0)
 						continue
 					}
-					e := ui.Text(c, col.Title).FontSize(headerFont).
+					e := ui.Text(c, col.Title).FontSize(scale.Font(c, headerFont)).
 						TextColor(t.TextMuted).MaxLines(1)
 					if col.Width > 0 {
 						e = e.Width(col.Width)

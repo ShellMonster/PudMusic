@@ -28,7 +28,9 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -263,7 +265,9 @@ func libraryRowFace(t *ui.Theme, selected, playing bool) rowFace {
 		// 「次要信息」的样子。
 		return rowFace{title: t.AccentText, own: t.AccentText.Alpha(0.75)}
 	case playing:
-		return rowFace{playing: true, title: t.Accent, own: t.TextMuted}
+		// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（默认那个绿压白底
+		// 1.9:1），深色下原样。理由同 `widgets/list/card.go` 的 `rowColors`。
+		return rowFace{playing: true, title: ink.AccentOn(t), own: t.TextMuted}
 	default:
 		return rowFace{title: t.Text, own: t.TextMuted}
 	}
@@ -302,10 +306,10 @@ func viewLibraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, cover *imgcac
 	hover.RowCover(c, cover, m.Cover, mt.cover, onRow, m.Title, play)
 
 	ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).Children(func() {
-		ui.Text(c, m.Title).FontSize(mt.titleSize).LineHeight(1.5).
+		ui.Text(c, m.Title).FontSize(scale.Font(c, mt.titleSize)).LineHeight(1.5).
 			TextColor(face.title).MaxLines(mt.titleLines).Ellipsis("…")
 		if m.Owner != "" {
-			ui.Text(c, m.Owner).FontSize(12).LineHeight(1).
+			ui.Text(c, m.Owner).FontSize(scale.Font(c, 12)).LineHeight(1).
 				TextColor(face.own).MaxLines(1).Ellipsis("…")
 		}
 	})

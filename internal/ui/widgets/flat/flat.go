@@ -25,7 +25,10 @@
 // 深一点」，没人当它坏了。
 package flat
 
-import "github.com/egoist/mygo/ui"
+import (
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/egoist/mygo/ui"
+)
 
 // 悬停 / 按下那一层压多深。照上游 `bg-foreground/10` / `bg-foreground/20`
 // （HeroUI 的 `light` 变体就是这两个数）。
@@ -67,6 +70,33 @@ func IconButton(c *ui.Context, svg *ui.SVG, label string, font float32) ui.Eleme
 	b := Button(c, "").Label(label)
 	b.Children(func() { ui.Icon(c, svg).FontSize(font) })
 	return b
+}
+
+// Dimmed 给一个**已经禁用**的控件换上「禁用态也读得出来」的字色。
+//
+// # 为什么需要它
+//
+// 框架对禁用元素的做法是整个元素乘 50% 不透明度（`mygo/ui/paint.go:154-156`）。
+// 只读设置页那三个主题按钮正好撞在这上面：深色下选中那一档的字是主色绿，绿乘
+// 完 0.5 压在选中底上只剩 **2.6:1**——用户以为「这三个选项在深色模式下消失了」，
+// 而不是「现在是只读的」。`ink.Disabled` 就是反着算的那个字色：它在乘完 0.5
+// **之后**仍 ≥3:1。
+//
+// # 调用时机
+//
+// 🔴 **必须在调用方 `.Disabled(...)` 之后调**，因为按钮是在 `Button` 返回之后
+// 才被禁用的（`internal/ui/settings_page.go` 那两处就是）。这和 `shade` 里
+// 「禁用没有要在画的时候问」是同一个坑的两种表现：那一处靠 paint 回调里再问，
+// 这一处靠**显式排在 `.Disabled` 之后**——建按钮的时候问，答案恒是「没禁用」，
+// 于是只读的键照样染着主色。
+//
+// 这一层不改按钮，只改它的文字色：底色、描边、悬停反馈仍然由框架的 50% 说了算，
+// 「禁用」的手感是一致的。
+func Dimmed(c *ui.Context, e ui.Element) ui.Element {
+	if e.IsDisabled() {
+		e = e.TextColor(ink.Disabled(c.Theme()))
+	}
+	return e
 }
 
 // Feel 铺上「悬停 / 按下」的那一层反馈。

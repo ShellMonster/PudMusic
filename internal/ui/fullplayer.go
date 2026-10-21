@@ -34,6 +34,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
@@ -345,8 +346,8 @@ func (s *Shell) viewFullEmpty(c *ui.Context) {
 				// （`fullOnColor` / `fullDimColor`），而不是主题的 Text /
 				// TextMuted——用主题那两档的话，在浅色封面铺满的屏上这两行
 				// 会糊进去。字号仍然是 15 / 12，和别处一样。
-				ui.Text(c, fullNothing.Title).FontSize(15).TextColor(fullOnColor)
-				ui.Text(c, fullNothing.Hint).FontSize(12).TextColor(fullDimColor)
+				ui.Text(c, fullNothing.Title).FontSize(scale.Font(c, 15)).TextColor(fullOnColor)
+				ui.Text(c, fullNothing.Hint).FontSize(scale.Font(c, 12)).TextColor(fullDimColor)
 			})
 		})
 
@@ -513,17 +514,17 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 	wasOpen := s.full.settings
 
 	bar.Children(func() {
-		if ui.Button(c, "关闭全屏").FontSize(13).Clicked() {
+		if ui.Button(c, "关闭全屏").FontSize(scale.Font(c, 13)).Clicked() {
 			s.closeFullPlayer()
 		}
 		// 歌名：上游是 `text-xl`（20 像素），而且限了宽度（最多占五分之二）。
 		//
 		// ⚠️ 18 → 20 **差两号**：18 那个是 `text-lg`。宽度那条也照抄（见
 		// fullTitleMaxWidth）。
-		ui.Text(c, st.Title).FontSize(20).Bold().TextColor(fullOnColor).
+		ui.Text(c, st.Title).FontSize(scale.Font(c, 20)).Bold().TextColor(fullOnColor).
 			Grow(1).MaxWidth(fullTitleMaxWidth(c)).SingleLine()
 
-		gear := ui.Button(c, "全屏设置").FontSize(13)
+		gear := ui.Button(c, "全屏设置").FontSize(scale.Font(c, 13))
 		if gear.Clicked() {
 			s.full.settings = !s.full.settings
 			if s.full.settings {
@@ -715,7 +716,7 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 func (s *Shell) viewFullProgress(c *ui.Context, st app.State) {
 	known := st.Duration > 0
 	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, clock(st.Position)).FontSize(12).TextColor(fullDimColor).Width(48)
+		ui.Text(c, clock(st.Position)).FontSize(scale.Font(c, 12)).TextColor(fullDimColor).Width(48)
 		sl := knobSlider(c, &s.fullScrub, 0, 1).Grow(1).Label("全屏播放进度").Disabled(!known)
 		switch held := sl.Pressed(); {
 		case held && !s.fullHeld:
@@ -731,7 +732,7 @@ func (s *Shell) viewFullProgress(c *ui.Context, st app.State) {
 		if !known {
 			total = "--:--"
 		}
-		ui.Text(c, total).FontSize(12).TextColor(fullDimColor).Width(48)
+		ui.Text(c, total).FontSize(scale.Font(c, 12)).TextColor(fullDimColor).Width(48)
 	})
 }
 
@@ -816,7 +817,7 @@ func (s *Shell) viewFullParts(c *ui.Context, hidden bool) {
 	}
 	if len(parts) > 1 || (len(parts) == 0 && s.app.PartsWorthAsking()) {
 		_, winH := c.Size()
-		tab := ui.Button(c, "显示分集列表").FontSize(11).
+		tab := ui.Button(c, "显示分集列表").FontSize(scale.Font(c, 11)).
 			Absolute().Right(0).Top(winH/2 - fullPartsTabH/2).
 			Width(fullPartsTabW).Height(fullPartsTabH)
 		if tab.Clicked() {
@@ -884,8 +885,8 @@ func (s *Shell) viewFullPartsPanel(c *ui.Context) {
 	panel.Children(func() {
 		ui.Row(c).FillWidth().Padding(10, 12).Gap(8).AlignItems(ui.Center).Children(func() {
 			// 字色跟着面板走（`TextColor(t.Text)`），这里不再自己定。
-			ui.Text(c, "分集").FontSize(14).Bold().Grow(1)
-			if ui.Button(c, "收起分集").FontSize(11).Clicked() {
+			ui.Text(c, "分集").FontSize(scale.Font(c, 14)).Bold().Grow(1)
+			if ui.Button(c, "收起分集").FontSize(scale.Font(c, 11)).Clicked() {
 				s.full.partsOpen = false
 			}
 		})
@@ -896,7 +897,7 @@ func (s *Shell) viewFullPartsPanel(c *ui.Context) {
 			if err := s.app.PartsErr(); err != nil {
 				why = "问不出分集：" + err.Error()
 			}
-			ui.Text(c, why).FontSize(12).TextColor(t.TextMuted).Padding(12)
+			ui.Text(c, why).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Padding(12)
 		default:
 			s.viewFullPartsList(c)
 		}
@@ -910,7 +911,7 @@ func (s *Shell) viewFullPartsList(c *ui.Context) {
 	s.full.partsList.Key = func(i int) any { return rows[i].key }
 	s.full.partsList.Label = func(i int) string { return rows[i].title }
 
-	ui.List(c, &s.full.partsList, len(rows), func(i int) {
+	partsList := ui.List(c, &s.full.partsList, len(rows), func(i int) {
 		r := rows[i]
 		row := ui.Column(c).Key(r.key).Grow(1).Height(fullPartRowHeight).
 			PaddingX(12).Radius(6)
@@ -926,7 +927,7 @@ func (s *Shell) viewFullPartsList(c *ui.Context) {
 		}
 		row.Children(func() {
 			// 字色跟着面板走（`TextColor(t.Text)`），这里不再自己定。
-			ui.Text(c, r.title).FontSize(13).SingleLine()
+			ui.Text(c, r.title).FontSize(scale.Font(c, 13)).SingleLine()
 		})
 		if row.Clicked() {
 			// 选完就收：Biu 的 PageList `onPressItem={onClose}`。
@@ -936,4 +937,5 @@ func (s *Shell) viewFullPartsList(c *ui.Context) {
 			}
 		}
 	}).Grow(1)
+	s.trackScrollbar(partsList)
 }

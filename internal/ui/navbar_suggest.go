@@ -39,6 +39,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -154,7 +155,7 @@ func (s *Shell) viewSuggestTerms(c *ui.Context) {
 	}
 	ui.Column(c).Key(suggestTermsKey).FillWidth().Gap(2).Children(func() {
 		// 标题和「搜索历史」那一句同一个字号和粗细：两栏是平级的，谁也不比谁大。
-		ui.Text(c, suggestTermsHeading).FontSize(13).Bold().Grow(1)
+		ui.Text(c, suggestTermsHeading).FontSize(scale.Font(c, 13)).Bold().Grow(1)
 		for _, term := range items {
 			s.viewSuggestTerm(c, term)
 		}
@@ -192,13 +193,13 @@ func (s *Shell) viewSuggestTerm(c *ui.Context, term string) {
 		pre, hit, post := splitSuggestion(s.searchKeyword, term)
 		if hit == "" {
 			// 找不到命中段（用户敲的词这一条里没有）：整行一个颜色，和原来一样。
-			ui.Text(c, term).FontSize(13).Grow(1).MaxLines(1).Ellipsis("…")
+			ui.Text(c, term).FontSize(scale.Font(c, 13)).Grow(1).MaxLines(1).Ellipsis("…")
 			return
 		}
 		ui.Row(c).Grow(1).Children(func() {
-			ui.Text(c, pre).FontSize(13).Shrink(0)
-			ui.Text(c, hit).FontSize(13).Shrink(0).TextColor(suggestHitColor(t))
-			ui.Text(c, post).FontSize(13).Grow(1).MaxLines(1).Ellipsis("…")
+			ui.Text(c, pre).FontSize(scale.Font(c, 13)).Shrink(0)
+			ui.Text(c, hit).FontSize(scale.Font(c, 13)).Shrink(0).TextColor(suggestHitColor(t))
+			ui.Text(c, post).FontSize(scale.Font(c, 13)).Grow(1).MaxLines(1).Ellipsis("…")
 		})
 	})
 

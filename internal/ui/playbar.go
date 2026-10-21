@@ -9,6 +9,8 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -252,7 +254,7 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 			// 「三行歌名 + UP 名 + 错误」，多出来的那两行被裁掉，而**界面上看不出坏了**
 			//（歌名还在，只是下面的话看不见了）。一行 + 省略号之后超长的那部分看不全，
 			// 但下面每一行都还在。
-			ui.Text(c, title).FontSize(15).Bold().
+			ui.Text(c, title).FontSize(scale.Font(c, 15)).Bold().
 				TextColor(textColor(t, st.HasTrack)).
 				MaxLines(1).Ellipsis("…")
 			s.viewQualityBadge(c, st, t)
@@ -265,7 +267,7 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 			// 而症状是「说了有话却看不见」（文本节点还在，测试也还找得到它）。
 			//
 			// 缩掉的那几个字用悬停补回来，和上面那个音质徽章同一个做法。
-			ui.Text(c, "打不开："+st.Err).FontSize(12).TextColor(t.Danger).
+			ui.Text(c, "打不开："+st.Err).FontSize(scale.Font(c, 12)).TextColor(t.Danger).
 				MaxLines(1).Ellipsis("…").Tooltip("打不开：" + st.Err)
 		}
 	})
@@ -346,14 +348,14 @@ func (s *Shell) viewTrackMeta(c *ui.Context, st app.State, t *ui.Theme) {
 // 这里跟着错，而且错得很安静（空间页退回占位页，没人看得出来）。
 func (s *Shell) viewArtist(c *ui.Context, st app.State, t *ui.Theme) {
 	if st.ArtistMid <= 0 {
-		ui.Text(c, st.Artist).Grow(1).MinWidth(artistMinW).FontSize(12).
+		ui.Text(c, st.Artist).Grow(1).MinWidth(artistMinW).FontSize(scale.Font(c, 12)).
 			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 		return
 	}
 	// 扁平按钮：UP 名这一格是**播放条上一枚按钮**，而调研点名的描边药丸里就有它
 	//（报告 §1.1 的 F1 证据：播放条上每一枚带描边的键）。它上面是 12px 的弱化
 	// 灰字，本来就不该配一块描边底。
-	if flatButton(c, st.Artist).Grow(1).MinWidth(artistMinW).FontSize(12).
+	if flatButton(c, st.Artist).Grow(1).MinWidth(artistMinW).FontSize(scale.Font(c, 12)).
 		Padding(0, 2).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").
 		Tooltip("打开 " + st.Artist + " 的空间").Clicked() {
 		s.navigate(upPathPrefix + strconv.FormatInt(st.ArtistMid, 10))
@@ -385,7 +387,11 @@ func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
 	if faved {
 		// ⚠️ **只在这一支设颜色**：没收藏的那一支一个字都不改，好让「默认那个颜色」
 		// 继续由按钮自己决定（图标从祖先的文字色继承，按钮给的就是它）。
-		btn = btn.TextColor(c.Theme().Accent)
+		//
+		// 和「正在播放」同一个规矩：主色当前景色时浅色下要一个与底色
+		// ≥4.5:1 的变体（理由见 `widgets/ink`）——图标也是前景，1.9:1 的绿
+		// 压在白底上同样看不出是「已收藏」。
+		btn = btn.TextColor(ink.AccentOn(c.Theme()))
 	}
 	if btn.Clicked() {
 		it, ok := s.app.PlayingItem()
@@ -448,7 +454,7 @@ func (s *Shell) viewQualityBadge(c *ui.Context, st app.State, t *ui.Theme) {
 	if st.Quality == "" {
 		return
 	}
-	ui.Text(c, st.Quality).FontSize(11).TextColor(t.TextMuted).
+	ui.Text(c, st.Quality).FontSize(scale.Font(c, 11)).TextColor(t.TextMuted).
 		Tooltip("音质：" + st.Quality + "（点一下换）").
 		Menu(func(m *ui.Menu) {
 			for _, q := range qualityChoices {
@@ -723,7 +729,7 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 	known := st.Duration > 0
 
 	ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, clock(st.Position)).FontSize(12).TextColor(c.Theme().TextMuted).Width(48)
+		ui.Text(c, clock(st.Position)).FontSize(scale.Font(c, 12)).TextColor(c.Theme().TextMuted).Width(48)
 
 		sl := playbarProgressSlider(c, &s.scrub, 0, 1).Grow(1).Label("播放进度").Disabled(!known)
 		// ⚠️ 这里必须用 Pressed()，不能用 Dragging()。
@@ -749,7 +755,7 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 		if !known {
 			total = "--:--"
 		}
-		ui.Text(c, total).FontSize(12).TextColor(c.Theme().TextMuted).Width(48)
+		ui.Text(c, total).FontSize(scale.Font(c, 12)).TextColor(c.Theme().TextMuted).Width(48)
 	})
 }
 

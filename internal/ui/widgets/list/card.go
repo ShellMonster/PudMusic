@@ -22,6 +22,8 @@ package list
 
 import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -160,7 +162,12 @@ func rowColors(t *ui.Theme, selected, playing bool) (title, owner ui.Color) {
 		// 站得住，也还是「次要信息」的样子。
 		return t.AccentText, t.AccentText.Alpha(0.75)
 	case playing:
-		return t.Accent, t.TextMuted
+		// 主色当**字**：浅色下要一个与底色对比度 ≥4.5:1 的变体（默认那个绿
+		// 压在白底上只有 1.9:1），深色下原样。算它的理由见 `widgets/ink`。
+		//
+		// ⚠️ 别写回 `t.Accent`：深色下看不出差别，浅色下那一行就是「正在放的
+		// 那首歌读不出来」——而它恰恰是最该一眼认出的那一行。
+		return ink.AccentOn(t), t.TextMuted
 	default:
 		return t.Text, t.TextMuted
 	}
@@ -219,10 +226,10 @@ func (l *List) viewCard(r ui.ListRow) {
 		// ⚠️ 歌名**只占一行**（上游那一行是 `truncate`）：折行的话整张列表的行高
 		// 就跟着歌名长短跳（见文件头）。
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).Children(func() {
-			ui.Text(c, m.Title).FontSize(14).LineHeight(titleLeading).
+			ui.Text(c, m.Title).FontSize(scale.Font(c, 14)).LineHeight(titleLeading).
 				TextColor(titleColor).MaxLines(listTitleLines).Ellipsis("…")
 			if m.Owner != "" {
-				ui.Text(c, m.Owner).FontSize(12).LineHeight(ownerLeading).
+				ui.Text(c, m.Owner).FontSize(scale.Font(c, 12)).LineHeight(ownerLeading).
 					TextColor(ownerColor).MaxLines(1).Ellipsis("…")
 			}
 		})
@@ -235,7 +242,7 @@ func (l *List) viewCard(r ui.ListRow) {
 		ui.Box(c).Width(durationWidth).Children(func() {
 			if s := formatDuration(m.Duration); s != "" {
 				ui.Text(c, s).Width(durationWidth).TextAlign(ui.End).
-					FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+					FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
 			}
 		})
 
@@ -282,10 +289,10 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 			func() { l.playFrom(i) })
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(2).Children(func() {
-			ui.Text(c, m.Title).FontSize(13).LineHeight(1.2).
+			ui.Text(c, m.Title).FontSize(scale.Font(c, 13)).LineHeight(1.2).
 				TextColor(titleColor).MaxLines(compactTitleLines).Ellipsis("…")
 			if m.Owner != "" {
-				ui.Text(c, m.Owner).FontSize(12).LineHeight(ownerLeading).
+				ui.Text(c, m.Owner).FontSize(scale.Font(c, 12)).LineHeight(ownerLeading).
 					TextColor(ownerColor).MaxLines(1).Ellipsis("…")
 			}
 		})
@@ -294,7 +301,7 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 		ui.Box(c).Width(compactDurationWidth).Children(func() {
 			if s := formatDuration(m.Duration); s != "" {
 				ui.Text(c, s).Width(compactDurationWidth).TextAlign(ui.End).
-					FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+					FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
 			}
 		})
 
@@ -331,7 +338,7 @@ func (l *List) viewIndex(c *ui.Context, i int, playing bool, color ui.Color, tit
 		return
 	}
 	ui.Text(c, indexText(i)).Width(width).TextAlign(ui.End).
-		FontSize(font).TextColor(t.TextMuted).MaxLines(1)
+		FontSize(scale.Font(c, font)).TextColor(t.TextMuted).MaxLines(1)
 }
 
 // viewCheckbox 画这一行最左边那个勾选框，没装多选就什么都不画。

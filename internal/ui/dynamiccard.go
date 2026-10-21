@@ -15,7 +15,9 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -142,8 +144,8 @@ func (s *Shell) viewCollectionRow(c *ui.Context, col bili.UpCollection) {
 	box.Children(func() {
 		s.spaceThumb(c, col.Cover, 48, 64)
 		ui.Column(c).Grow(1).Gap(2).Children(func() {
-			ui.Text(c, col.Title).FontSize(14).MaxLines(2).Ellipsis("…")
-			ui.Text(c, fmt.Sprintf("%d 条", col.Count)).FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, col.Title).FontSize(scale.Font(c, 14)).MaxLines(2).Ellipsis("…")
+			ui.Text(c, fmt.Sprintf("%d 条", col.Count)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 		})
 	})
 }
@@ -166,17 +168,17 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic) {
 				name = "这个 UP 主"
 			}
 			// 昵称是**链接**不是装饰：它是「从这条动态进他空间」这条路。
-			if ui.Button(c, name).FontSize(14).Clicked() && d.Author.Mid > 0 {
+			if ui.Button(c, name).FontSize(scale.Font(c, 14)).Clicked() && d.Author.Mid > 0 {
 				s.navigate(upPathOf(d.Author.Mid))
 			}
 			if d.Time != "" {
-				ui.Text(c, d.Time).FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+				ui.Text(c, d.Time).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
 			}
 		})
 
 		// ② 正文。
 		if d.Text != "" {
-			ui.Text(c, d.Text).FontSize(13).LineHeight(1.5).MaxLines(8)
+			ui.Text(c, d.Text).FontSize(scale.Font(c, 13)).LineHeight(1.5).MaxLines(8)
 		}
 
 		// ③ 内容：三种类型。
@@ -208,10 +210,12 @@ func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 		if count > 0 {
 			label = "赞 " + strconv.Itoa(count)
 		}
-		btn := ui.Button(c, label).FontSize(12)
+		btn := ui.Button(c, label).FontSize(scale.Font(c, 12))
 		if liked {
 			// 点亮的那一下是**看得见的**（「我赞过了」不是数字变大）。
-			btn = btn.TextColor(t.Accent)
+			// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（理由见
+			// `widgets/ink`）。
+			btn = btn.TextColor(ink.AccentOn(t))
 		} else {
 			btn = btn.TextColor(t.TextMuted)
 		}
@@ -222,15 +226,15 @@ func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 		if d.Kind != bili.DynamicVideo || d.Video == nil {
 			return
 		}
-		if ui.Button(c, "下一首播放").FontSize(12).TextColor(t.TextMuted).Clicked() {
+		if ui.Button(c, "下一首播放").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Clicked() {
 			s.playNextFromDynamic(d.Video, d.Author)
 		}
 		// ⚠️ 下载走 `downloadLater`（异步补 cid）：动态接口给的稿件**不带
 		// cid**（`major.archive` 里没有这个字段），而下载按分 P 存文件。
-		if ui.Button(c, "下载音频").FontSize(12).TextColor(t.TextMuted).Clicked() {
+		if ui.Button(c, "下载音频").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Clicked() {
 			s.downloadLater(dynVideoItem(d.Video, d.Author), false, "下载音频")
 		}
-		if ui.Button(c, "下载视频").FontSize(12).TextColor(t.TextMuted).Clicked() {
+		if ui.Button(c, "下载视频").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Clicked() {
 			s.downloadLater(dynVideoItem(d.Video, d.Author), true, "下载视频")
 		}
 	})
@@ -290,12 +294,12 @@ func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author b
 	box.Children(func() {
 		s.spaceThumb(c, v.Cover, dynamicCoverW, dynamicCoverH)
 		ui.Column(c).Grow(1).Gap(2).Children(func() {
-			ui.Text(c, v.Title).FontSize(14).MaxLines(2).Ellipsis("…")
+			ui.Text(c, v.Title).FontSize(scale.Font(c, 14)).MaxLines(2).Ellipsis("…")
 			if v.Desc != "" {
-				ui.Text(c, v.Desc).FontSize(12).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
+				ui.Text(c, v.Desc).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 			}
 			if meta := dynVideoMeta(v); meta != "" {
-				ui.Text(c, meta).FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+				ui.Text(c, meta).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
 			}
 		})
 	})

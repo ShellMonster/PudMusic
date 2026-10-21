@@ -37,6 +37,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -479,7 +480,7 @@ func (s *Shell) viewMiniTitleRow(c *ui.Context, st app.State, t *ui.Theme) {
 				title = nothingPlaying.Title
 			}
 			ui.Text(c, title).Key("mini-title").Grow(1).MinWidth(miniTitleMinW).
-				FontSize(13).Bold().MaxLines(1).Ellipsis("…").
+				FontSize(scale.Font(c, 13)).Bold().MaxLines(1).Ellipsis("…").
 				TextColor(textColor(t, st.HasTrack))
 
 			// 音量在这一行而不是控制那一行：Biu 那边没有音量，而控制那一行的宽被
@@ -495,7 +496,7 @@ func (s *Shell) viewMiniTitleRow(c *ui.Context, st app.State, t *ui.Theme) {
 			}
 
 			if ui.Button(c, "退出").Key("mini-back").Width(miniBackBtnW).
-				FontSize(13).Padding(2, 6).MaxLines(1).
+				FontSize(scale.Font(c, 13)).Padding(2, 6).MaxLines(1).
 				Tooltip("关掉迷你播放器，回到主窗口").Clicked() {
 				if s.toggleMini != nil {
 					s.toggleMini()
@@ -545,13 +546,13 @@ func (s *Shell) viewMiniTransport(c *ui.Context, st app.State) {
 		Children(func() {
 			// 能不能按看的是队列，和播放条上那两个键是同一个判据（`viewStepButtons`）。
 			if ui.Button(c, "上一首").Key("mini-prev").Width(miniStepW).
-				FontSize(13).Padding(2, 6).MaxLines(1).
+				FontSize(scale.Font(c, 13)).Padding(2, 6).MaxLines(1).
 				Disabled(!s.app.CanPrev()).Clicked() {
 				s.app.Prev()
 			}
 			s.viewMiniPlay(c, st)
 			if ui.Button(c, "下一首").Key("mini-next").Width(miniStepW).
-				FontSize(13).Padding(2, 6).MaxLines(1).
+				FontSize(scale.Font(c, 13)).Padding(2, 6).MaxLines(1).
 				Disabled(!s.app.CanNext()).Clicked() {
 				s.app.Next()
 			}
@@ -571,7 +572,7 @@ func (s *Shell) viewMiniPlay(c *ui.Context, st app.State) {
 
 	if st.Playing {
 		if ui.Button(c, "暂停").Key("mini-play").Width(style).
-			FontSize(13).Padding(2, 6).MaxLines(1).Clicked() {
+			FontSize(scale.Font(c, 13)).Padding(2, 6).MaxLines(1).Clicked() {
 			s.app.Toggle()
 		}
 		return
@@ -580,7 +581,7 @@ func (s *Shell) viewMiniPlay(c *ui.Context, st app.State) {
 	// （`pages/mini-player/index.tsx:139`）。一个亮着而按了没反应的键比一个灰的
 	// 键更容易让人以为坏了。
 	if ui.PrimaryButton(c, "播放").Key("mini-play").Width(style).
-		FontSize(13).Padding(2, 6).MaxLines(1).Disabled(!st.HasTrack).Clicked() {
+		FontSize(scale.Font(c, 13)).Padding(2, 6).MaxLines(1).Disabled(!st.HasTrack).Clicked() {
 		s.app.Toggle()
 	}
 }

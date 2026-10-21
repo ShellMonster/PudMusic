@@ -39,6 +39,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -193,36 +194,34 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 
 	ui.PopoverBase(c, field, &s.searchSuggest, func(panel ui.Element) {
 		// KeepFocus 的理由见文件头。少这一句，浮层里的条目点不到。
-		panel.KeepFocus().
-			Width(suggestWidth).Radius(t.Radius+2).
-			Background(t.Background).Border(1, t.Border).
-			Shadow(0, 6, 20, 0, suggestShadow(t)).
-			Padding(8).Children(func() {
+		popupPanel(t, panel.KeepFocus().
+			Width(suggestWidth).Padding(8)).Children(func() {
 			// 🔴 **这一层 `Scroll` 是「最下面那几条点得着」的全部**：MaxHeight 把它
 			// 压在屏幕之内，超出去的部分靠滚。没有它，少掉的是「词看得见」——而用户
 			// 看到的是一个**列表突然断在屏幕边上**，既不知道下面还有，也不知道能滚。
-			ui.Scroll(c).Key(suggestScrollKey).FillWidth().
+			suggestScroll := ui.Scroll(c).Key(suggestScrollKey).FillWidth().
 				MaxHeight(suggestPanelMaxH(winH)).
-				TrackScroll(&s.terms.scroll).
-				Children(func() {
-					// 历史在上、联想在下（Biu 的 topContent 在结果列表上面，见
-					// `search/index.tsx:121-146`）。中间那一道空隙是「这是两档」最直接的
-					// 一句提示：没有它时两栏连着排，看起来像一栏里混着两批词。
-					if showHistory {
-						s.viewSuggestHeader(c)
-						ui.Row(c).Key("suggest-history").Wrap().Gap(6).Children(func() {
-							for _, item := range history {
-								s.viewHistoryChip(c, item)
-							}
-						})
-					}
-					if len(terms) > 0 {
-						if showHistory {
-							ui.Box(c).FillWidth().Height(suggestTermsGap)
+				TrackScroll(&s.terms.scroll)
+			suggestScroll.Children(func() {
+				// 历史在上、联想在下（Biu 的 topContent 在结果列表上面，见
+				// `search/index.tsx:121-146`）。中间那一道空隙是「这是两档」最直接的
+				// 一句提示：没有它时两栏连着排，看起来像一栏里混着两批词。
+				if showHistory {
+					s.viewSuggestHeader(c)
+					ui.Row(c).Key("suggest-history").Wrap().Gap(6).Children(func() {
+						for _, item := range history {
+							s.viewHistoryChip(c, item)
 						}
-						s.viewSuggestTerms(c)
+					})
+				}
+				if len(terms) > 0 {
+					if showHistory {
+						ui.Box(c).FillWidth().Height(suggestTermsGap)
 					}
-				})
+					s.viewSuggestTerms(c)
+				}
+			})
+			s.trackScrollbar(suggestScroll)
 		})
 	})
 }
@@ -249,8 +248,8 @@ func (s *Shell) viewSuggestHeader(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).Key("suggest-header").FillWidth().Gap(8).
 		AlignItems(ui.Center).Padding(2, 4, 6, 4).Children(func() {
-		ui.Text(c, "搜索历史").FontSize(13).Bold().Grow(1)
-		if flatButton(c, "清除全部").FontSize(12).TextColor(t.TextMuted).Clicked() {
+		ui.Text(c, "搜索历史").FontSize(scale.Font(c, 13)).Bold().Grow(1)
+		if flatButton(c, "清除全部").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Clicked() {
 			s.hist.clear()
 		}
 	})
@@ -272,7 +271,7 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 	ui.Row(c).Key("history:"+item.Value).Radius(t.Radius).
 		Background(t.Surface).Border(1, t.Border).
 		Padding(2, 4, 2, 8).Gap(4).AlignItems(ui.Center).Children(func() {
-		if flatButton(c, label).FontSize(12).Clicked() {
+		if flatButton(c, label).FontSize(scale.Font(c, 12)).Clicked() {
 			// ⚠️ **先把词填回框里**（Biu 的 `setValue(item.value)`，
 			// `search/index.tsx:154`）。不填的话用户点完历史，框里还是原来敲的
 			// 半截字，而页面那边搜的是这一条——两处对不上，按返回再回来还会
@@ -285,7 +284,7 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 		// ⚠️ 无障碍名字写全，别只留一个「×」：读屏软件念出来就是「乘号」，用户
 		// 根本不知道它在删哪一条。画面上还是那个叉。
 		if flatButton(c, "×").Label("删除「" + label + "」").
-			FontSize(12).TextColor(t.TextMuted).Clicked() {
+			FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Clicked() {
 			s.hist.remove(item.Value)
 		}
 	})
@@ -331,12 +330,4 @@ func (s *Shell) viewSearchClear(c *ui.Context) {
 		Tooltip("清空搜索框").Clicked() {
 		s.searchKeyword = ""
 	}
-}
-
-// suggestShadow 是浮层那圈影子的颜色。Biu 是 `shadow-2xl`，跟着主题分深浅。
-func suggestShadow(t *ui.Theme) ui.Color {
-	if t.Dark {
-		return ui.Color{A: 90}
-	}
-	return ui.Color{A: 46}
 }
