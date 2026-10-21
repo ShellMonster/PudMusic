@@ -221,15 +221,18 @@ func runHeight(img *image.RGBA, area image.Rectangle, lo, hi, x0, x1 int) int {
 func TestEveryPageHasTheSameHorizontalMargin(t *testing.T) {
 	sideW := app.DefaultSideMenuWidth
 	area := contentArea(sideW)
-	// ⚠️ **期望值写的是字面的 20，不是 `pagePadX`**：用被测的同一个常量算期望值
-	// 的话，把 `pagePadX` 改成 24 这一条照样绿——「取 20」这个决定就没有护栏
+	// ⚠️ **期望值写的是字面的 16，不是 `pagePadX`**：用被测的同一个常量算期望值
+	// 的话，把 `pagePadX` 改成 20 这一条照样绿——「取 16」这个决定就没有护栏
 	// （票 #138 的评审用 `go test -overlay` 验过：改掉常量测试仍然 ok）。
 	// 下面那一句把那个数本身也钉住。
-	const wantPad = 20
+	//
+	// 16 是上游的 `px-4`（DESIGN.md 的 `spacing.page_horizontal`）；行里再 8，
+	// 内容离内容区边缘 24。
+	const wantPad = 16
 	want := int(sideW) + wantPad
 	if pagePadX != wantPad {
-		t.Errorf("pagePadX = %d，want %d——七页的横向页边距取的是 20（理由见"+
-			" pagerhythm.go 顶上那一段）", pagePadX, wantPad)
+		t.Errorf("pagePadX = %d，want %d——七页的横向页边距取的是 16（上游的"+
+			" `px-4`，理由见 pagerhythm.go 顶上那一段）", pagePadX, wantPad)
 	}
 
 	for _, page := range []struct {
@@ -327,10 +330,10 @@ func TestEveryPageTitleUsesTheSharedSize(t *testing.T) {
 				"是同一个数（pageTitleSize = %d）", title, pageTitleSize)
 		}
 	}
-	// 那个数本身也钉住：20（上游的 `text-xl`，见 pagerhythm.go 顶上那段）。
-	if pageTitleSize != 20 {
-		t.Errorf("pageTitleSize = %d，want 20——上游那一套里页标题取的是 `text-xl`"+
-			"（20），而 22 不在刻度上", pageTitleSize)
+	// 那个数本身也钉住：24（上游 `h1` 的 `text-2xl`，见 pagerhythm.go 顶上那段）。
+	if pageTitleSize != 24 {
+		t.Errorf("pageTitleSize = %d，want 24——上游那一套里页标题取的是 `text-2xl`"+
+			"（24，DESIGN.md 的 `typography.page_title`）", pageTitleSize)
 	}
 }
 
@@ -426,7 +429,7 @@ func mentionsTitle(call *ast.CallExpr, title string) bool {
 //
 // # 判据是墨迹的宽度，不是高度
 //
-// 墨迹的**高度**差得太小：20px 的汉字墨迹 18~19 行，22px 的 20~21 行——而同一
+// 墨迹的**高度**差得太小：24px 的汉字墨迹 22~23 行，20px 的 18~19 行——而同一
 // 个字号的不同字（稍 / 本 / 下 / 搜）自己就差一行（笔画多的字满一些），所以高度
 // 这一层只能当粗筛。
 //
@@ -445,83 +448,98 @@ func mentionsTitle(call *ast.CallExpr, title string) bool {
 //
 // 精确的那个数由 `TestEveryPageTitleUsesTheSharedSize`（AST）钉住。
 func TestEveryPageTitleIsTheSameSizeOnScreen(t *testing.T) {
-	area := contentArea(app.DefaultSideMenuWidth)
-	// 基准页：本地音乐那一页（它的标题是四个字，最容易量准）。
-	const ref = "本地音乐"
-	type measured struct {
-		span   int // 墨迹从头一个字到尾一个字的宽度
-		chars  int
-		height int // 墨迹占了几行
-	}
-	got := map[string]measured{}
-	for _, page := range []struct {
-		name  string
-		path  string
-		chars int
-		opts  []shellOpt
-	}{
-		{name: "稍后再看", path: laterPath, chars: 4, opts: libraryPageOpts(t)},
-		{name: "历史记录", path: historyPath, chars: 4, opts: libraryPageOpts(t)},
-		{name: ref, path: localMusicPath, chars: 4},
-		{name: "下载记录", path: downloadListPath, chars: 4},
-		{name: "搜索", path: searchPath + "?q=%E5%A4%9C%E7%A9%BA", chars: 2},
-	} {
-		b := newTestShell(t, page.opts...)
-		s, tt := b.s, b.tt
-		s.navigate(page.path)
-		tt.Frame()
-
-		img := tt.Image()
-		lo, hi, ok := firstBand(img, area)
-		if !ok {
-			t.Fatalf("%s：内容区顶上一点墨都没有，文字有 %q", page.name, tt.Texts())
+	// 深浅两套都量（票 #166 的验收）：深色下字形和底色挨得近，量出来的墨迹
+	// 边界可能不同——只出浅色的话，「深色下标题是不是同一个数」没人管。
+	for _, dark := range []bool{false, true} {
+		theme := "浅色"
+		if dark {
+			theme = "深色"
 		}
-		x0, x1, ok := firstRun(inkColumns(img, area, lo, hi))
-		if !ok {
-			t.Fatalf("%s：标题那一行里没有墨，文字有 %q", page.name, tt.Texts())
-		}
-		got[page.name] = measured{
-			span:   x1 - x0 + 1,
-			chars:  page.chars,
-			height: runHeight(img, area, lo, hi, x0, x1),
-		}
-	}
-
-	// 基准页的墨迹宽度折算成字号：`3×字号 + 常数`。
-	refm := got[ref]
-	const want = 20
-	k := refm.span - (refm.chars-1)*want
-	heights := map[string]int{}
-	for name, m := range got {
-		heights[name] = m.height
-	}
-	for name, m := range got {
-		if m.chars < 3 {
-			// ⚠️ **两个字的那一页量不准**：墨迹宽度里那个「常数」是**这一页的字
-			// 自己的**（最后一个字的墨迹宽 − 第一个字的边距），除以 (n-1) 之后
-			// 那一页的误差就是常数本身（一两个字的时候是 ±1~2 像素，折算到字号上
-			// 就是两像素）。它由下面那条「墨迹高度一样」的粗筛管着，而精确的那
-			// 一半由 AST 那一条钉住。
-			continue
-		}
-		size := float64(m.span-k) / float64(m.chars-1)
-		if size < want-1 || size > want+1 {
-			t.Errorf("「%s」的标题折算出来是 %.1fpx（墨迹宽 %d，%d 个字），want %d"+
-				"（±1）——页标题的字号必须是同一个数", name, size, m.span, m.chars, want)
-		}
-	}
-
-	// 粗筛：五页的标题墨迹高度一样（容忍一行——同一个字号的不同字自己就差一行）。
-	for name, h := range heights {
-		for other, oh := range heights {
-			if name == other {
-				continue
+		t.Run(theme, func(t *testing.T) {
+			area := contentArea(app.DefaultSideMenuWidth)
+			// 基准页：本地音乐那一页（它的标题是四个字，最容易量准）。
+			const ref = "本地音乐"
+			type measured struct {
+				span   int // 墨迹从头一个字到尾一个字的宽度
+				chars  int
+				height int // 墨迹占了几行
 			}
-			if oh != h && oh != h+1 && oh != h-1 {
-				t.Errorf("「%s」的标题墨迹 %d 行，「%s」是 %d 行——页标题的字号必须"+
-					"是同一个数", name, h, other, oh)
+			got := map[string]measured{}
+			for _, page := range []struct {
+				name  string
+				path  string
+				chars int
+				opts  []shellOpt
+			}{
+				{name: "稍后再看", path: laterPath, chars: 4, opts: libraryPageOpts(t)},
+				{name: "历史记录", path: historyPath, chars: 4, opts: libraryPageOpts(t)},
+				{name: ref, path: localMusicPath, chars: 4},
+				{name: "下载记录", path: downloadListPath, chars: 4},
+				{name: "搜索", path: searchPath + "?q=%E5%A4%9C%E7%A9%BA", chars: 2},
+				// 设置页和登录页也在这一族里：它们的页标题同样是 `pageTitleSize`
+				// （票 #166——「所有页面的大标题 24/400」）。
+				{name: "设置", path: settingsPath, chars: 2},
+				{name: "扫码登录", path: loginPath, chars: 4},
+			} {
+				b := newTestShell(t, append(page.opts, systemIsDark(dark))...)
+				s, tt := b.s, b.tt
+				s.navigate(page.path)
+				tt.Frame()
+
+				img := tt.Image()
+				lo, hi, ok := firstBand(img, area)
+				if !ok {
+					t.Fatalf("%s：内容区顶上一点墨都没有，文字有 %q", page.name, tt.Texts())
+				}
+				x0, x1, ok := firstRun(inkColumns(img, area, lo, hi))
+				if !ok {
+					t.Fatalf("%s：标题那一行里没有墨，文字有 %q", page.name, tt.Texts())
+				}
+				got[page.name] = measured{
+					span:   x1 - x0 + 1,
+					chars:  page.chars,
+					height: runHeight(img, area, lo, hi, x0, x1),
+				}
 			}
-		}
+
+			// 基准页的墨迹宽度折算成字号：`3×字号 + 常数`。
+			refm := got[ref]
+			const want = 24
+			k := refm.span - (refm.chars-1)*want
+			heights := map[string]int{}
+			for name, m := range got {
+				heights[name] = m.height
+			}
+			for name, m := range got {
+				if m.chars < 3 {
+					// ⚠️ **两个字的那一页量不准**：墨迹宽度里那个「常数」是**这一页
+					// 的字自己的**（最后一个字的墨迹宽 − 第一个字的边距），除以 (n-1)
+					// 之后那一页的误差就是常数本身（一两个字的时候是 ±1~2 像素，折算
+					// 到字号上就是 2 像素）。它由下面那条「墨迹高度一样」的粗筛管着，
+					// 而精确的那一半由 AST 那一条钉住。
+					continue
+				}
+				size := float64(m.span-k) / float64(m.chars-1)
+				if size < want-1 || size > want+1 {
+					t.Errorf("%s：「%s」的标题折算出来是 %.1fpx（墨迹宽 %d，%d 个字），"+
+						"want %d（±1）——页标题的字号必须是同一个数",
+						theme, name, size, m.span, m.chars, want)
+				}
+			}
+
+			// 粗筛：各页的标题墨迹高度一样（容忍一行——同一个字号的不同字自己就差一行）。
+			for name, h := range heights {
+				for other, oh := range heights {
+					if name == other {
+						continue
+					}
+					if oh != h && oh != h+1 && oh != h-1 {
+						t.Errorf("%s：「%s」的标题墨迹 %d 行，「%s」是 %d 行——页标题的"+
+							"字号必须是同一个数", theme, name, h, other, oh)
+					}
+				}
+			}
+		})
 	}
 }
 
@@ -1115,6 +1133,16 @@ func TestRenderPageRhythmShots(t *testing.T) {
 			tt2.Move(1180, 300)
 			homeFrame(tt2)
 			save(t, dir, "61-收藏夹-"+name+".png", tt2)
+
+			// 62 设置页：分组标题 20/400、行标题 16/500、说明 14、组间 24
+			// （票 #166）。深浅两套都出——这三档字号在深色下离得更近。
+			b3 := newTestShell(t, systemIsDark(dark))
+			s3, tt3 := b3.s, b3.tt
+			s3.navigate(settingsPath)
+			tt3.Frame()
+			tt3.Move(1180, 300)
+			homeFrame(tt3)
+			save(t, dir, "62-设置页-"+name+".png", tt3)
 		})
 	}
 }
