@@ -1,66 +1,177 @@
 package ui
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo/ui"
+	mygoui "github.com/egoist/mygo/ui"
 )
 
-// TestTooltipDelayIsMeasured 量框架 tooltip 的两档时延，把「对齐不了」这件事
-// 钉在屏幕上，而不是只写在注释里。
+// 这一组量的是 #165 顺带那条 G44：**tooltip 的时延对齐上游 HeroUI 的
+// 0 / 300 / 500 三档**。
 //
-// # 上游那三档是什么
+// 上游（HeroUI v2 的 Tooltip）：
 //
-// Biu 用的是 HeroUI 的 `Tooltip`，它有两个 props：
+//	delay       出提示前停多久，默认 0；音量那一处显式 300
+//	closeDelay  指针离开后停多久收，默认 500；侧栏 / 顶栏动态 / 新建收藏夹
+//	            那几处显式 0
 //
-//	delay       指针停多久出提示，默认 0；上游只有音量那一处显式写了 300
-//	             （`music-volume/index.tsx:119`）
-//	closeDelay  指针离开后停多久收，默认 500；上游的歌单菜单 / 动态 / 更新 /
-//	             新建收藏夹四处显式写了 0（`menu-item.tsx:78` 等）
+// 我们这一侧（`tooltip.go`）：
 //
-// 于是上游实际用到的是 **0 / 300 / 500** 三档（报告 06 的 Tooltip 行）。
+//	tipDefault  0 出、500 收
+//	tipMenu     0 出、0 收（上游显式 closeDelay={0} 的那几处）
+//	300         音量那个自绘浮层的 volHoverDelay（`playbar_volume.go`），
+//	            和 `tipDelayVolume` 是同一个数
 //
-// # 框架这一侧量出来是两件事
+// 框架自带的 `Element.Tooltip` 是**包级固定 600ms**（`mygo@v0.5.5/ui/tooltip.go:12`），
+// 所以界面层不用它——`TestNoFrameworkTooltipsInTheApp` 盯着这件事。
+
+// tipProbe 造一个「只有一个锚点 + 一枚提示」的窗口。
 //
-//	出提示  固定 600ms（`mygo@v0.5.5/ui/tooltip.go:12` 的 tooltipDelay），
-//	        没有按调用点改的口子
-//	收提示  指针一离开、下一帧就没了（close delay 0）
+// 提示状态挂在 Shell 上，所以必须走真外壳；`withView` 把整窗换成一个固定
+// 位置的按钮，量的就只剩时延本身。
+func tipProbe(t *testing.T, text string, timing tipTiming) (*Shell, *mygoui.Tester) {
+	t.Helper()
+	b := newTestShell(t, withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.applyFrameTheme(c)
+			ui.Column(c).Padding(40).Children(func() {
+				e := ui.Button(c, "锚点").Size(80, 30)
+				s.tip(c, e, text, timing)
+			})
+		}
+	}))
+	b.tt.Frame()
+	return b.s, b.tt
+}
+
+// TestTooltipDefaultTiming 验默认那一档：**0ms 出、500ms 收**。
+func TestTooltipDefaultTiming(t *testing.T) {
+	_, tt := tipProbe(t, "默认提示", tipDefault)
+	hoverOn(t, tt, "锚点")
+
+	if !tt.HasText("默认提示") {
+		t.Fatalf("指针刚停上去提示没出来——默认的 open delay 应该是 0，文字有 %q", tt.Texts())
+	}
+
+	tt.Move(1, 1)
+	tt.Frame()
+	tt.Advance(499 * time.Millisecond)
+	tt.Frame()
+	if !tt.HasText("默认提示") {
+		t.Errorf("指针离开不到 500ms 提示就收了——默认的 closeDelay 是 500")
+	}
+	tt.Advance(2 * time.Millisecond)
+	tt.Frame()
+	if tt.HasText("默认提示") {
+		t.Errorf("指针离开 501ms 之后提示还挂着——默认的 closeDelay 是 500")
+	}
+}
+
+// TestTooltipMenuTiming 验菜单那一档：**0ms 出、离开立刻收**。
+func TestTooltipMenuTiming(t *testing.T) {
+	_, tt := tipProbe(t, "菜单提示", tipMenu)
+	hoverOn(t, tt, "锚点")
+	if !tt.HasText("菜单提示") {
+		t.Fatalf("指针刚停上去提示没出来，文字有 %q", tt.Texts())
+	}
+
+	tt.Move(1, 1)
+	tt.Frame()
+	if tt.HasText("菜单提示") {
+		t.Errorf("指针离开之后提示还挂着——菜单那一档的 closeDelay 是 0")
+	}
+}
+
+// TestTooltipVolumeTiming 验音量那一档：**300ms 出**（收还是默认的 500）。
 //
-// 也就是说：出提示比上游最慢的那一档（500）还慢 100ms，收提示只对得上
-// 「closeDelay 0」那一批。**这一条没有对齐**——`Tooltip` / `TooltipBase` 的
-// 公开 API 里没有 delay 参数，要改只能自己重画一个浮层，那是另一张票的事。
-// 这里把实测记下来（票 #165 的 G44），下一轮要动时按这两个数改。
-func TestTooltipDelayIsMeasured(t *testing.T) {
+// 真控件是播放条上的音量浮层（`playbar_volume.go` 的 volHoverDelay，已有
+// `playbar_layout_test.go` 那组覆盖）；这里量的是同一档时延在通用提示上生效。
+func TestTooltipVolumeTiming(t *testing.T) {
+	_, tt := tipProbe(t, "音量提示", tipTiming{open: tipDelayVolume, close: tipDelayClose})
+	hoverOn(t, tt, "锚点")
+
+	if tt.HasText("音量提示") {
+		t.Fatalf("指针刚停上去提示就出来了——音量那一档的 open delay 是 300ms")
+	}
+	tt.Advance(299 * time.Millisecond)
+	tt.Frame()
+	if tt.HasText("音量提示") {
+		t.Errorf("299ms 提示就出来了——音量那一档的 open delay 是 300ms")
+	}
+	tt.Advance(2 * time.Millisecond)
+	tt.Frame()
+	if !tt.HasText("音量提示") {
+		t.Fatalf("301ms 提示还没出来，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheNavBarTooltipFollowsTheDefaultTiming 验顶栏真的接上了这份提示。
+//
+// 颜色和尺寸那几条测的是搜索框；这一条盯的是「顶栏那几枚图标键的悬停提示也
+// 走 tooltip.go」——否则只改了样式、提示还是框架那枚 600ms。
+func TestTheNavBarTooltipFollowsTheDefaultTiming(t *testing.T) {
 	_, tt := newShell(t)
 	tt.SetFocused(true)
 	tt.Frame()
 
-	// 顶栏那个「打开文件」的提示是单独一句话，和按钮自己的名字不同，找得到。
-	r, ok := tt.Find("打开文件")
+	hoverOn(t, tt, "打开文件")
+	if !tt.HasText("打开本地音频文件") {
+		t.Fatalf("顶栏「打开文件」的提示没有立刻出来（默认 0ms），文字有 %q", tt.Texts())
+	}
+
+	tt.Move(1, 1)
+	tt.Frame()
+	tt.Advance(501 * time.Millisecond)
+	tt.Frame()
+	if tt.HasText("打开本地音频文件") {
+		t.Errorf("顶栏提示在指针离开 501ms 后还挂着——它没走 tipDefault 的 500ms 收")
+	}
+}
+
+// hoverOn 把指针停在 s 那一格的中间，再画一帧。
+func hoverOn(t *testing.T, tt *mygoui.Tester, s string) {
+	t.Helper()
+	r, ok := tt.Find(s)
 	if !ok {
-		t.Fatalf("顶栏上没有「打开文件」，文字有 %q", tt.Texts())
+		t.Fatalf("画面上没有 %q，文字有 %q", s, tt.Texts())
 	}
-	const tip = "打开本地音频文件"
 	tt.Move(r.X+r.W/2, r.Y+r.H/2)
-
-	// 599ms：还不到 600，提示不能出来。
-	tt.Advance(599 * time.Millisecond)
 	tt.Frame()
-	if tt.HasText(tip) {
-		t.Errorf("指针只停了 599ms 提示就出来了——框架的出提示时延已经不是 600ms，"+
-			"票面记的那个数要重测，文字有 %q", tt.Texts())
+}
+
+// TestNoFrameworkTooltipsInTheApp 盯着「界面层不再用框架那枚固定 600ms 的提示」。
+//
+// 例外只有两处：
+//   - `tooltip.go` 的 `tipFrom`：页面没有接到 Shell 时（单独造一页的测试）退回
+//     框架那枚。生产路径上 `tip` 一定接上了。
+//   - `widgets/hover` 里那两枚三角形：那是我们自己加的「从这一首播放」，上游
+//     没有对应物，所以没有要对的时延。它们不在这个包的 glob 里。
+func TestNoFrameworkTooltipsInTheApp(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	// 再走 2ms（总共 601ms）：出了。
-	tt.Advance(2 * time.Millisecond)
-	tt.Frame()
-	if !tt.HasText(tip) {
-		t.Fatalf("指针停了 601ms 提示还没出来，文字有 %q", tt.Texts())
-	}
-
-	// 指针离开：框架没有 closeDelay，下一帧就该收掉。
-	tt.Move(600, 400)
-	tt.Frame()
-	if tt.HasText(tip) {
-		t.Errorf("指针离开之后提示还挂着——框架有了 closeDelay，上面记的「收提示 0」要重测")
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") || name == "tooltip.go" {
+			continue
+		}
+		src, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(src), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "//") {
+				continue
+			}
+			if strings.Contains(line, ".Tooltip(") {
+				t.Errorf("%s:%d 还在用框架那枚固定 600ms 的提示——"+
+					"换成 `s.withTip` / `tipWith`（tooltip.go）", name, i+1)
+			}
+		}
 	}
 }

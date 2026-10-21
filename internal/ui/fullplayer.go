@@ -712,11 +712,10 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 				// 三枚都是图标（和播放条上共用同一批，见 icons.go）。哪一档配哪一张
 				// 由 `transportIcon` 说了算——这一行不自己决定（守卫盯着）。
 				s.viewPrevButton(c)
-				if iconButtonPrimary(c, transportIcon(st.Playing),
+				if s.withTip(c, iconButtonPrimary(c, transportIcon(st.Playing),
 					transportLabel(st.Playing), fullPlayGlyph).
 					Size(fullPlayHit, fullPlayHit).Padding(0, 6).
-					Tooltip(transportLabel(st.Playing)).
-					Disabled(!st.Playing && !st.HasTrack).Clicked() {
+					Disabled(!st.Playing && !st.HasTrack), transportLabel(st.Playing)).Clicked() {
 					s.app.Toggle()
 				}
 				s.viewNextButton(c)
@@ -915,8 +914,8 @@ func (s *Shell) viewFullPartsPanel(c *ui.Context) {
 			ui.Text(c, "分集").FontSize(scale.Font(c, 14)).Bold().Grow(1)
 			// 上游是一枚 `RiArrowRightSLine` 16 的扁平图标键（`page-list.tsx:47`）。
 			// 字色不用给：面板自己 `TextColor(t.Text)`，图标跟着它走。
-			if iconButton(c, iconSideExpand, "收起分集", 16).
-				Size(24, 24).Padding(0, 4).Tooltip("收起分集").Clicked() {
+			if s.withTip(c, iconButton(c, iconSideExpand, "收起分集", 16).
+				Size(24, 24).Padding(0, 4), "收起分集").Clicked() {
 				s.full.partsOpen = false
 			}
 		})

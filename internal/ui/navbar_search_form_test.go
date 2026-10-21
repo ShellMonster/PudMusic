@@ -159,6 +159,17 @@ func TestSearchHistoryIsAGreyChip(t *testing.T) {
 			if _, ok := tt.Find("删除「周杰伦」"); !ok {
 				t.Errorf("历史 chip 上没有关闭键，文字有 %q", tt.Texts())
 			}
+
+			// ④ 左边那 8 像素归标签按钮，点在它的内边距上也点得中这条历史
+			// （上游整个 chip 可点；右半圈留给关闭键）。
+			tt.ClickAt(float32(int(chip.X)-4), float32(mid))
+			tt.Frame()
+			if got := s.searchKeyword; got != "周杰伦" {
+				t.Errorf("点 chip 左内边距之后框里是 %q，want 周杰伦——那一段没接在标签按钮上", got)
+			}
+			if got := s.router.Path(); got != searchPath {
+				t.Errorf("点 chip 左内边距之后在 %q，want %q", got, searchPath)
+			}
 		})
 	}
 }

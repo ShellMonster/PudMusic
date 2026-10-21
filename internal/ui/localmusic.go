@@ -221,6 +221,10 @@ type localPage struct {
 	// 再写一份就是第二处。
 	displayView func() list.View
 
+	// tip 是带延迟的悬停提示（tooltip.go）。由 Shell 在建完这一页时接上；
+	// 为零时（单独造这一页的测试）退回框架那枚。
+	tip tipFunc
+
 	// noteScrollbar 把「指针压在滚动条上」转告给壳（主题下一帧据此换深一档，
 	// 见 scrollbar.go）。由 Shell 在构造之后接上；为零时（测试里单独造这一页）
 	// 什么也不做。
@@ -297,6 +301,12 @@ func newLocalPage(a *app.App, cache *imgcache.Cache, acts list.Actions,
 
 // View 画这一页。每一帧调一次。
 func (p *localPage) View(c *ui.Context) { p.draw(c) }
+
+// tipWith 是这一页的悬停提示入口：状态挂在 Shell 上（tooltip.go），这里只是
+// 把这一页拿到的那份递过去；单独造这一页的测试没有那份，退回框架那枚。
+func (p *localPage) tipWith(c *ui.Context, e ui.Element, text string) ui.Element {
+	return tipFrom(p.tip, c, e, text, tipDefault)
+}
 
 // onPanic 记一笔并要一帧。
 //
@@ -414,9 +424,8 @@ func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
 			ui.PrimaryButton(c, "播放全部").OnClick(p.playAll)
 			// 照上游那一枚 `IconButton`（`local-music/index.tsx:208`，tooltip
 			// 「添加到播放列表」）：图标键 + 悬停说出它做什么。
-			if flatIconButton(c, iconEnqueue, "全部加入队列", iconMd).
-				Size(iconHitMd, iconHitMd).Padding(0, 5).
-				Tooltip("全部加入队列").Clicked() {
+			if p.tipWith(c, flatIconButton(c, iconEnqueue, "全部加入队列", iconMd).
+				Size(iconHitMd, iconHitMd).Padding(0, 5), "全部加入队列").Clicked() {
 				p.queueAll()
 			}
 		}
@@ -432,15 +441,13 @@ func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
 		// tooltip「刷新」「移除当前目录」）。悬停提示说的就是名字——图标键没有
 		// 可见的字，提示是它唯一说得出自己做什么的地方。
 		if p.currentRoot(st.Roots) != "" {
-			if flatIconButton(c, iconDeleteBin5, "移除此目录", iconMd).
-				Size(iconHitMd, iconHitMd).Padding(0, 5).
-				Tooltip("移除此目录").Clicked() {
+			if p.tipWith(c, flatIconButton(c, iconDeleteBin5, "移除此目录", iconMd).
+				Size(iconHitMd, iconHitMd).Padding(0, 5), "移除此目录").Clicked() {
 				p.askRemoveDir()
 			}
 		}
-		if flatIconButton(c, iconRefresh, "重新扫描", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5).
-			Tooltip("重新扫描").Clicked() {
+		if p.tipWith(c, flatIconButton(c, iconRefresh, "重新扫描", iconMd).
+			Size(iconHitMd, iconHitMd).Padding(0, 5), "重新扫描").Clicked() {
 			p.app.RescanLocalMusic()
 		}
 	})
@@ -609,16 +616,14 @@ func (p *localPage) viewRowOps(c *ui.Context, tr localmusic.Track) {
 	// ⚠️ 删除那一颗的红色靠 `TextColor`：图标继承祖先的文字色，而 `flat` 那个
 	// 配方不给颜色——不给的话它和打开文件夹那枚一样是灰的，「这一下是不可撤销的」
 	// 那层意思就没了。
-	if flatIconButton(c, iconFolder, "打开文件夹", iconSm).
-		Size(iconHit, iconHit).Padding(0, 7).
-		Tooltip("在访达里显示").Clicked() {
+	if p.tipWith(c, flatIconButton(c, iconFolder, "打开文件夹", iconSm).
+		Size(iconHit, iconHit).Padding(0, 7), "在访达里显示").Clicked() {
 		mygo.Shell.ShowItemInFolder(tr.Path)
 	}
 	if !p.isPlaying(tr) {
-		if flatIconButton(c, iconDeleteBin5, deleteRowLabel, iconSm).
+		if p.tipWith(c, flatIconButton(c, iconDeleteBin5, deleteRowLabel, iconSm).
 			Size(iconHit, iconHit).Padding(0, 7).
-			TextColor(c.Theme().Danger).
-			Tooltip(deleteRowLabel).Clicked() {
+			TextColor(c.Theme().Danger), deleteRowLabel).Clicked() {
 			p.askTrack, p.askOpen = tr, true
 		}
 	}

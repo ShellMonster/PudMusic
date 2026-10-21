@@ -301,7 +301,10 @@ func (s *Shell) viewSuggestHeader(c *ui.Context) {
 //	        那枚「无损」chip 逐像素量的，`_research/biu/screenshots/main.png`）
 //	高度    24（`h-6`）
 //	内边距  左右 8（`px-2`）
-//	圆角    8（`radius="md"`；用全局 t.Radius，见主题设置）
+//	圆角    上游 `radius="md"` 映射到 HeroUI v2 的 `rounded-medium`，那是 **12**。
+//	        我们没有照抄：DESIGN.md 只给浮层定了 `radius.popover: 8`，chip 这
+//	        一格跟着**全局可调圆角**（`t.Radius`，默认 8）走，用户调到 12 就是
+//	        上游那个数。
 //
 // ⚠️ **别再给它加描边**：上游 solid Chip 没有 border，一眼看过去就是一块很淡的
 // 灰。加一圈 `t.Border` 之后它又会变回「带框的方块」——那正是这张票要收掉的。
@@ -309,12 +312,13 @@ const (
 	historyChipLightR, historyChipLightG, historyChipLightB uint8 = 0xd4, 0xd4, 0xd8
 	historyChipDarkR, historyChipDarkG, historyChipDarkB    uint8 = 0x3f, 0x3f, 0x46
 
-	historyChipPadY = 3
-	historyChipPadX = 4
-	// historyChipLabelPadX 是标签按钮自己的左右内边距。它和上面那一格加起来
-	// 才是视觉上的 8（上游 px-2）：分一半给按钮，指针落在左边那 8 像素里也点得中
-	// 这条历史，而不是只有字本身可点。
-	historyChipLabelPadX = 4
+	historyChipPadY     = 3
+	historyChipPadRight = 8
+	// historyChipLabelPadX 是标签按钮**左边**的内边距，也是 chip 左半圈那 8
+	// 像素的归属：指针落在上面点得中这条历史，而不是只有字本身可点。
+	// 右边只留 2，和 chip 的 gap 合起来是字到关闭键的 4（上游 px-2 + gap-1）。
+	historyChipLabelPadX   = 8
+	historyChipLabelPadEnd = 2
 	// historyChipClose 是右边那个关闭键的点击区。18 = 12 的图标 + 每边 3；
 	// 再加 chip 上下各 3，整个 chip 正好 24 高（上游 h-6）。
 	historyChipClose = 18
@@ -343,13 +347,14 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 
 	ui.Row(c).Key("history:"+item.Value).Radius(t.Radius).
 		Background(historyChipBg(t)).
-		Padding(historyChipPadY, historyChipPadX).Gap(historyChipGap).
-		AlignItems(ui.Center).Children(func() {
+		// 左边不留内边距：那 8 像素归标签按钮，点了才落在这一条上。右边留 8，
+		// 给关闭键一圈和左面对称的留白。
+		Padding(historyChipPadY, historyChipPadRight, historyChipPadY, 0).
+		Gap(historyChipGap).AlignItems(ui.Center).Children(func() {
 		// ⚠️ 标签按钮的上下内边距清零：`flatButton` 默认是 6，套在 chip 里会把
-		// 24 高撑到 30 以上，那就不再是 `h-6` 那种小块了。左右留 4，和外面的
-		// `historyChipPadX` 合起来是 8，并且左边那半截也点得中。
+		// 24 高撑到 30 以上，那就不再是 `h-6` 那种小块了。
 		if flatButton(c, label).FontSize(scale.Font(c, 12)).
-			Padding(0, historyChipLabelPadX).Clicked() {
+			Padding(0, historyChipLabelPadEnd, 0, historyChipLabelPadX).Clicked() {
 			// ⚠️ **先把词填回框里**（Biu 的 `setValue(item.value)`，
 			// `search/index.tsx:154`）。不填的话用户点完历史，框里还是原来敲的
 			// 半截字，而页面那边搜的是这一条——两处对不上，按返回再回来还会
@@ -403,10 +408,9 @@ func (s *Shell) submitSearch(keyword string) {
 // ⚠️ 画面上是那个叉，**无障碍名字仍然是「清空」**：叉对读屏软件念出来是「乘号」，
 // 用户听不出它在清什么（同一个道理见 viewHistoryChip 里那个「删除「…」」）。
 func (s *Shell) viewSearchClear(c *ui.Context) {
-	if iconButton(c, iconClose, "清空", iconCloseGlyph).
+	if s.withTip(c, iconButton(c, iconClose, "清空", iconCloseGlyph).
 		Size(iconCloseHit, iconCloseHit).Padding(0, 7).
-		TextColor(c.Theme().TextMuted).
-		Tooltip("清空搜索框").Clicked() {
+		TextColor(c.Theme().TextMuted), "清空搜索框").Clicked() {
 		s.searchKeyword = ""
 	}
 }

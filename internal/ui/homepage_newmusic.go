@@ -198,6 +198,10 @@ type newMusicGrid struct {
 	// retry 是「重试」按钮按下去要干的活。首页给的闭包（`homePage.retryNew`）。
 	// nil 时那一块画不出重试按钮。
 	retry func()
+
+	// tip 是带延迟的悬停提示（tooltip.go），由 Shell 在首页建好之后接上。
+	// 为零时（单独造这一块的测试）退回框架那枚。
+	tip tipFunc
 }
 
 // newNewMusic 建新歌速递那一块。
@@ -214,6 +218,12 @@ func newNewMusic(cache *imgcache.Cache, acts list.Actions, wake func()) *newMusi
 		}
 	})
 	return g
+}
+
+// tipWith 是这一块的悬停提示入口：状态挂在 Shell 上（tooltip.go），这里只是
+// 把首页拿到的那份递过去；单独造这一块的测试没有那份，退回框架那枚。
+func (g *newMusicGrid) tipWith(c *ui.Context, e ui.Element, text string) ui.Element {
+	return tipFrom(g.tip, c, e, text, tipDefault)
 }
 
 // SetSongs 换掉新歌速递那一摊歌，页码夹回还存在的范围内。
@@ -383,17 +393,17 @@ func (g *newMusicGrid) viewHeader(c *ui.Context, total int) {
 			// 页码就是它唯一的「位置」。
 			// 上游那两枚是 `variant="flat"` 的 `RiArrowLeftSLine` / `RiArrowRightSLine`
 			// 16（`new-music-top.tsx:185-199`）。图标键 + 悬停说出它做什么。
-			prev := flatIconButton(c, iconSideCollapse, "上一页", 16).
+			prev := g.tipWith(c, flatIconButton(c, iconSideCollapse, "上一页", 16).
 				Size(newMusicArrowW, newMusicArrowW).Padding(0, 6).
-				Tooltip("上一页").Disabled(g.page <= 1)
+				Disabled(g.page <= 1), "上一页")
 			if prev.Clicked() {
 				g.page--
 			}
 			ui.Textf(c, "%d / %d", g.page, total).FontSize(scale.Font(c, 13)).Width(newMusicPageW).
 				TextAlign(ui.Center).TextColor(c.Theme().TextMuted)
-			next := flatIconButton(c, iconSideExpand, "下一页", 16).
+			next := g.tipWith(c, flatIconButton(c, iconSideExpand, "下一页", 16).
 				Size(newMusicArrowW, newMusicArrowW).Padding(0, 6).
-				Tooltip("下一页").Disabled(g.page >= total)
+				Disabled(g.page >= total), "下一页")
 			if next.Clicked() {
 				g.page++
 			}

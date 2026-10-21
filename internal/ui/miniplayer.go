@@ -506,9 +506,9 @@ func (s *Shell) viewMiniTitleRow(c *ui.Context, st app.State, t *ui.Theme) {
 			// 回到主窗口。上游是同一样东西的「展开」图标
 			// （`RiExpandDiagonalLine`，`pages/mini-player/index.tsx:203-212`）——
 			// 迷你 ↔ 主窗口是同一个开关的两头，图标说的是那件事。
-			if flatIconButton(c, iconExpand, "退出", 18).
-				Key("mini-back").Size(miniBackBtnW, miniBackBtnW).Padding(0, 5).
-				Tooltip("关掉迷你播放器，回到主窗口").Clicked() {
+			if s.withTip(c, flatIconButton(c, iconExpand, "退出", 18).
+				Key("mini-back").Size(miniBackBtnW, miniBackBtnW).Padding(0, 5),
+				"关掉迷你播放器，回到主窗口").Clicked() {
 				if s.toggleMini != nil {
 					s.toggleMini()
 				}
@@ -565,17 +565,15 @@ func (s *Shell) viewMiniTransport(c *ui.Context, st app.State) {
 		Justify(ui.Center).
 		Children(func() {
 			// 能不能按看的是队列，和播放条上那两个键是同一个判据（`viewStepButtons`）。
-			if flatIconButton(c, iconPrev, "上一首", 18).
+			if s.withTip(c, flatIconButton(c, iconPrev, "上一首", 18).
 				Key("mini-prev").Size(miniStepW, miniStepW).Padding(0, 5).
-				Tooltip("上一首").
-				Disabled(!s.app.CanPrev()).Clicked() {
+				Disabled(!s.app.CanPrev()), "上一首").Clicked() {
 				s.app.Prev()
 			}
 			s.viewMiniPlay(c, st)
-			if flatIconButton(c, iconNext, "下一首", 18).
+			if s.withTip(c, flatIconButton(c, iconNext, "下一首", 18).
 				Key("mini-next").Size(miniStepW, miniStepW).Padding(0, 5).
-				Tooltip("下一首").
-				Disabled(!s.app.CanNext()).Clicked() {
+				Disabled(!s.app.CanNext()), "下一首").Clicked() {
 				s.app.Next()
 			}
 		})
@@ -597,9 +595,8 @@ func (s *Shell) viewMiniPlay(c *ui.Context, st app.State) {
 	const style = miniPlayW
 
 	if st.Playing {
-		if flatIconButton(c, transportIcon(true), transportLabel(true), 28).
-			Key("mini-play").Size(style, style).Padding(0, 2).
-			Tooltip("暂停").Clicked() {
+		if s.withTip(c, flatIconButton(c, transportIcon(true), transportLabel(true), 28).
+			Key("mini-play").Size(style, style).Padding(0, 2), "暂停").Clicked() {
 			s.app.Toggle()
 		}
 		return
@@ -607,9 +604,9 @@ func (s *Shell) viewMiniPlay(c *ui.Context, st app.State) {
 	// 没歌时「播放」是灰的：Biu 那边是 `isDisabled={!title}`
 	// （`pages/mini-player/index.tsx:139`）。一个亮着而按了没反应的键比一个灰的
 	// 键更容易让人以为坏了。
-	if flatIconButton(c, transportIcon(false), transportLabel(false), 28).
+	if s.withTip(c, flatIconButton(c, transportIcon(false), transportLabel(false), 28).
 		Key("mini-play").Size(style, style).Padding(0, 2).
-		Tooltip("播放").Disabled(!st.HasTrack).Clicked() {
+		Disabled(!st.HasTrack), "播放").Clicked() {
 		s.app.Toggle()
 	}
 }
