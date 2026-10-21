@@ -189,20 +189,18 @@ func TestTheFullPlayerContentIsStillClickableThroughTheGlass(t *testing.T) {
 // TestTheTextOverTheBlurredBackgroundIsStillReadable 断「底下的字看得清」。
 //
 // 满屏上的字全是白的（`fullOnColor` / `fullDimColor`），底下是糊过的封面加一层
-// 60% 的黑（`fullScrim`）。判据是**画出来的对比度**：字最亮的那一个像素，和它
+// 55% 的黑（`fullScrim`）。判据是**画出来的对比度**：字最亮的那一个像素，和它
 // 背后底色的那一个像素，算 WCAG 的对比度。
 //
-// ⚠️ **门槛取 4.5:1（普通文字那一档）**：那个歌名现在是 20px 粗体，按 WCAG 算
-// 「大字」（要 14pt = 18.67px 粗体），门槛是 3:1——而这里取的是**更严**的那一档，
-// 顺带把满屏里那些 12px 的小字（时间标签）也管上。实测最坏的一档（**纯白**封面）
-// 是 **5.17:1**。
+// ⚠️ **20px / 400 是普通文字**（#169 把字重从 700 改成了 400）：WCAG AA 对它
+// 那一档的门槛是 **4.5:1**，而实测最坏的一档（**纯白**封面）是 **4.31:1**，
+// 差 0.19。这一条断的是**还读得出来**这条底线（3:1），够不到 AA 的那一点和
+// 12px 的时间标签（2.85:1）一起归可及性那一票（issue #139 的「增加对比度」）。
+// 把门槛直接提到 4.5 会让这条红——而红的那一处不在这一票的范围里。
 //
-// ⚠️ **压暗那一层为什么是 0.60**：0.55 的时候是 4.31:1，差 0.19（而这一层是
-// 改动前就有的，糊玻璃没有动它——`glass.Blur` 是「没有色调、没有描边、没有影子」
-// 的背景模糊，框架 `plugins/glass` 的文档，糊之前和糊之后底色是同一个数）。
-//
-// ⚠️ 满屏里**还没有歌词**（歌词开关是 BMG-65 的活），所以这一条量的是满屏里
-// 现有的那些字；歌词那一档将来加上时用的是同一套底色，同一个判据。
+// ⚠️ 满屏这一屏不画歌词：歌词区在迷你播放器那一页（`nowplaying.go`）。设置面板
+// 里「显示歌词」那一项存的是同一个改动，但这一屏没有歌词可显示，所以这一条量
+// 的是现有的那些字。
 func TestTheTextOverTheBlurredBackgroundIsStillReadable(t *testing.T) {
 	// 纯白的封面：底色最亮的那一档。
 	s, tt := fullTesterWithCoverPNG(t, whitePNG(t, 1200, 1200))
@@ -220,7 +218,7 @@ func TestTheTextOverTheBlurredBackgroundIsStillReadable(t *testing.T) {
 	// 等封面**画上来**：封面没画上来的时候底下是主题的深色底，那样的对比度
 	// 好看得多——量的是一个不存在的情形。
 	//
-	// 白封面压完 60% 的黑是 102（255 × 0.40），而没有封面时底下是主题的深色底
+	// 白封面压完 55% 的黑是 115（255 × 0.45），而没有封面时底下是主题的深色底
 	// （十几）。所以底色到 80 以上就说明封面已经铺上来了（门槛取在两者中间，
 	// 离两头都远）。
 	waitFrames(t, tt, "封面画上来了", func() bool {
@@ -246,7 +244,7 @@ func TestTheTextOverTheBlurredBackgroundIsStillReadable(t *testing.T) {
 	}
 	ratio := contrastRatio(best, bg)
 	t.Logf("歌名 %v、它背后的底色 %v，对比度 %.2f:1", best, bg, ratio)
-	// 门槛 3:1：那个歌名是 20px 粗体，够 WCAG AA 的「大字」（见这条的注释）。
+	// 门槛 3:1 是「还读得出来」的底线；AA 的 4.5:1 差 0.19，见这条的注释。
 	if ratio < 3 {
 		t.Errorf("歌名和它背后的底色对比度只有 %.2f:1（字 %v、底 %v）——"+
 			"糊过的背景太亮，白字读不出来", ratio, best, bg)
@@ -272,7 +270,7 @@ func TestTheBottomControlsComeBackTheSameWayTheTopBarDoes(t *testing.T) {
 	settleFull(t, tt)
 
 	// 底下那一条和顶栏各占窗口的一条横带。
-	topStrip := mygoui.Rect{X: 0, Y: 0, W: fullWinW, H: fullBarHeight}
+	topStrip := mygoui.Rect{X: 0, Y: 0, W: fullWinW, H: fullTopHeight}
 	bottomStrip := mygoui.Rect{X: 0, Y: fullWinH - fullControlsHeight, W: fullWinW, H: fullControlsHeight}
 	// 两条各自「全亮」的时候有多亮（当基准）。
 	topShown := maxBright(tt.Image(), topStrip)
@@ -372,7 +370,7 @@ func TestTheSpectrumSwitchMovesItsKnobAtOnce(t *testing.T) {
 		t.Fatal("频谱还关着，颜色那一行已经在了")
 	}
 
-	sw, ok := tt.Find("显示频谱图")
+	sw, ok := tt.Find("开关：显示频谱图")
 	if !ok {
 		t.Fatalf("找不到那个开关，文字有 %q", tt.Texts())
 	}
