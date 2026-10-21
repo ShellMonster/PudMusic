@@ -1,10 +1,14 @@
 package ui
 
 import (
+	"image/color"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
 )
@@ -98,13 +102,24 @@ func TestNewMusicColumnsFollowItsOwnBreakpoints(t *testing.T) {
 		{1280, 6}, {1600, 6}, // 1280 以上：6 列
 	} {
 		// 歌给足：每页两行，列数是「这一页几张」除以两行。
-		_, tt := newGridTester(t, list.Actions{}, homeSongsOf("新歌", 200), c.w, 900)
+		//
+		// ⚠️ 窗口给到 1200 高：封面是方的之后，两行有多高跟着格子宽走，最宽那一
+		// 档（639 宽只有 2 列、格子 313）要 1091 高才摆得下两行。这一条验的是
+		// **列数**，不是行数——行数不够会让它错报成「少了一列」。
+		_, tt := newGridTester(t, list.Actions{}, homeSongsOf("新歌", 200), c.w, 1200)
 		if got := cardsOnPage(t, tt, "新歌"); got != c.cols*newMusicRows {
 			t.Errorf("容器宽 %d 时这一页画着 %d 张卡片，want %d 列 × %d 行",
 				c.w, got, c.cols, newMusicRows)
 		}
 	}
 }
+
+// homeTallH 是「两行摆得下」的一个窗口高。
+//
+// 封面是方的之后，两行的门槛跟着格子宽走（见 newMusicTwoRowsMinH）；1200 宽、
+// 容器 ~960、4 列、格子 231 时要 926 高。1000 刚够，这里取 1000 而不是贴着门槛，
+// 留一点余量给字体行高那点平台差。
+const homeTallH = 1000
 
 // TestAShortWindowShowsOneRowSoTheListStillHasRoom 验「窗口矮了就只摆一行」。
 //
@@ -114,48 +129,63 @@ func TestNewMusicColumnsFollowItsOwnBreakpoints(t *testing.T) {
 //
 // 不减行数的后果是量出来的：窗口 560 高（`WindowOptions` 的 `MinHeight`）时，
 // 两行卡片 + 顶栏 + Tab 那一排 + 播放条把那一屏占满，**「流行」那一档的列表是
-// 0×0，一首歌都看不见**（见 newMusicTwoRowsMinH 上面那三段）。
+// 0×0，一首歌都看不见**（见 newMusicTwoRowsMinH）。
 //
-// 两条判据：**卡片是整行数**（只有一行，所以张数等于列数），以及**那一档的列表
-// 画得出至少一行**——后者才是这条要救的东西。
+// 判据是**这一页画着几张卡片**（列数 × 应摆的行数），以及**那一档的列表画得出
+// 至少一行**——后者才是这条要救的东西。1 行的那几档（含默认的 1200×800：方封面
+// 摆两行要 926 高）张数等于列数；两行的那一档是列数的两倍。
 func TestAShortWindowShowsOneRowSoTheListStillHasRoom(t *testing.T) {
 	s, tt := newHome(t, fullSongs())
+	clickTab(t, tt, homePopTab) // 先让这一块开始画，好量出容器宽
 
-	for _, h := range []int{560, 640} { // 都在 newMusicTwoRowsMinH 之下
+	wantRows := func(h int) int {
+		cols := newMusicColsFor(s.home.newGrid.width)
+		cell := newMusicCellWidth(s.home.newGrid.width, cols)
+		return newMusicRowsAt(float32(h), cell)
+	}
+
+	for _, h := range []int{560, 640, homeH} {
 		tt.SetSize(homeW, h)
 		homeFrame(tt)
-		clickTab(t, tt, homePopTab)
 
 		cols := newMusicColsFor(s.home.newGrid.width)
-		if got := cardsOnPage(t, tt, "新歌"); got != cols {
-			t.Errorf("窗口高 %d 时这一页画着 %d 张卡片，want 一行（%d 列）",
-				h, got, cols)
+		rows := wantRows(h)
+		if got := cardsOnPage(t, tt, "新歌"); got != cols*rows {
+			t.Errorf("窗口高 %d 时这一页画着 %d 张卡片，want %d 列 × %d 行",
+				h, got, cols, rows)
 		}
-		if rows := songsDrawn(t, tt, homeTabs[homePopTab]); rows == 0 {
+		if drawn := songsDrawn(t, tt, homeTabs[homePopTab]); drawn == 0 {
 			t.Errorf("窗口高 %d 时「%s」那一档的列表一首歌都画不出来",
 				h, homeTabs[homePopTab])
 		}
 	}
 
-	// 回到默认尺寸：两行回来了。**这时候那一块已经在画了**（循环里切到「流行」
-	// 之后一直没切走），所以这一段断的是「改窗口高度之后行数跟着换」。
-	tt.SetSize(homeW, homeH)
+	// 拖高：两行回来了，而且下面的列表**还留得下一行**（newMusicListMinH 那一条）。
+	tt.SetSize(homeW, homeTallH)
 	homeFrame(tt)
-	if got := cardsOnPage(t, tt, "新歌"); got == 0 || got%newMusicRows != 0 {
-		t.Errorf("窗口高 %d 时这一页画着 %d 张卡片，want 两行（整倍数）", homeH, got)
+	cols := newMusicColsFor(s.home.newGrid.width)
+	if got := cardsOnPage(t, tt, "新歌"); got != cols*newMusicRows {
+		t.Errorf("窗口高 %d 时这一页画着 %d 张卡片，want %d 列 × %d 行",
+			homeTallH, got, cols, newMusicRows)
+	}
+	if drawn := songsDrawn(t, tt, homeTabs[homePopTab]); drawn == 0 {
+		t.Errorf("窗口高 %d 摆了两行之后「%s」那一档的列表一首歌都画不出来",
+			homeTallH, homeTabs[homePopTab])
 	}
 }
 
 // TestResizingTheWindowChangesTheRowCount 钉住「改窗口高度，行数跟着换」。
 //
-// ⚠️ 这是一条**单独**的用例，不能和上面那条合：上面那条是「先改窗口、再切到
-// 流行」，行数在那一块**第一次被画**的时候就是对的（那一帧现读 `c.Size()`）。
+// ⚠️ 这是一条**单独**的用例，不能和上面那条合：上面那条是「先切到流行、再改
+// 窗口」，行数在那一块**第一次被画**的时候就是对的（那一帧现读 `c.Size()`）。
 // 这一条断的是另一种：那一块早就在画了，用户这时才拖窗口边。
 //
-// 实现上把窗口高记进字段（`windowH`）的话这里立刻红——记的是 800，用户拖到 560
+// 实现上把窗口高记进字段（`windowH`）的话这里立刻红——记的是 1000，用户拖到 560
 // 之后还是两行，下面那档的列表被挤成 0×0。这个坑真踩过，所以单开一条。
 func TestResizingTheWindowChangesTheRowCount(t *testing.T) {
 	s, tt := newHome(t, fullSongs())
+	tt.SetSize(homeW, homeTallH)
+	homeFrame(tt)
 	clickTab(t, tt, homePopTab) // 先让这一块开始画
 
 	cols := newMusicColsFor(s.home.newGrid.width)
@@ -170,12 +200,12 @@ func TestResizingTheWindowChangesTheRowCount(t *testing.T) {
 	if got := cardsOnPage(t, tt, "新歌"); got != cols {
 		t.Errorf("拖矮之后这一页画着 %d 张卡片，want 一行（%d 列）", got, cols)
 	}
-	if rows := songsDrawn(t, tt, homeTabs[homePopTab]); rows == 0 {
+	if drawn := songsDrawn(t, tt, homeTabs[homePopTab]); drawn == 0 {
 		t.Errorf("拖矮之后「%s」那一档的列表一首歌都画不出来", homeTabs[homePopTab])
 	}
 
-	// 再拖回来：两行回来了。
-	tt.SetSize(homeW, homeH)
+	// 再拖回去：两行回来了。
+	tt.SetSize(homeW, homeTallH)
 	homeFrame(tt)
 	if got := cardsOnPage(t, tt, "新歌"); got != cols*newMusicRows {
 		t.Errorf("拖回来之后这一页画着 %d 张卡片，want %d 列 × %d 行",
@@ -352,7 +382,7 @@ func TestInsertingAtTheHeadKeepsTheFocusOnTheSameSong(t *testing.T) {
 // 卡片显示**封面、歌名、UP 名**。
 //
 // 判据是画面上的东西和它们的**确切位置**：封面是卡片最上面那一块（宽度撑满一格、
-// 高是 newMusicCoverH），歌名在封面下面，UP 名在歌名下面。封面走 `imgcache`，
+// **宽高相等**），歌名在封面下面，UP 名在歌名下面。封面走 `imgcache`，
 // 它的四态（空地址 / 载入中 / 就绪 / 失败）是那边的事
 // （widgets/imgcache/view_test.go 验过），这里只验接进来之后画对了地方。
 func TestANewMusicCardShowsTheCoverTheTitleAndTheOwner(t *testing.T) {
@@ -377,14 +407,67 @@ func TestANewMusicCardShowsTheCoverTheTitleAndTheOwner(t *testing.T) {
 		t.Errorf("UP 名在 y=%.0f、卡片在 y=%.0f：它没有在卡片下面", owner.Y, card.Y)
 	}
 
-	// 封面那一块：卡片的高 = 封面（newMusicCoverH）+ 两道缝 + 歌名 + UP 名。
+	// 封面是方的：封面那一块的宽高都是格子的宽。
+	//
+	// 量法是**从 hover 时的播放钮倒推封面那两条边**：播放钮贴着封面右下角，离
+	// 右边和下边各 `btnInset`（8，上游 `music-card/index.tsx:39-47`）。量整张
+	// 卡片的高不行——它还包括下面两行字，不是封面。
+	side := newMusicCellWidth(800, newMusicColsFor(800))
+	hoverRow(t, tt, "夜空中最亮的星")
+	btn, ok := tt.Find(hover.PlayLabel("夜空中最亮的星"))
+	if !ok {
+		t.Fatalf("hover 之后封面上没有播放钮：%q", tt.Texts())
+	}
+	coverW := btn.X + btn.W + 8 - card.X
+	coverH := btn.Y + btn.H + 8 - card.Y
+	if coverW < side-1 || coverW > side+1 {
+		t.Errorf("封面宽 %.1f，want 格子的宽 %v——它没有占满一格", coverW, side)
+	}
+	if coverH < coverW-1 || coverH > coverW+1 {
+		t.Errorf("封面 %.1f 宽、%.1f 高——不是方的（宽高该相等）", coverW, coverH)
+	}
+
+	// 卡片的高 = 封面（格子的宽）+ 两道缝 + 歌名 + UP 名。
 	// 量的是**整张卡片的高度**而不是去 `Find` 封面——空地址的封面画的是一个空
 	// 框，它没有名字，Tester 找不着（imgcache/view.go 的 drawCover 那一支）。
 	// 上下各留一点余量：字体那一行的高度会跟着平台走，写死一个区间判「封面在
 	// 上面、占大头」而不是判到像素。
-	if h := card.H; h < newMusicCoverH || h > newMusicCoverH+70 {
-		t.Errorf("卡片高 %.0f，want 封面 %d 加两行字上下那点（%.0f~%.0f）",
-			h, newMusicCoverH, float32(newMusicCoverH), float32(newMusicCoverH+70))
+	if h := card.H; h < side || h > side+90 {
+		t.Errorf("卡片高 %.0f，want 封面 %v 加两行字上下那点（%v~%v）",
+			h, side, side, side+90)
+	}
+}
+
+// TestTheCoverStaysSquareAtTheMinimumWindowHeight 钉住最小窗口那一档的封面。
+//
+// 1200×560（`WindowOptions` 的 `MinHeight`）时，整宽 231 的封面 + 顶栏 / Tab /
+// 播放条会把下面的列表挤成 0×0，所以 `newMusicCoverSide` 把它压到 160。**压小之后
+// 它必须还是方的**——票面的判据是「宽高相等」，不是「一定占满格子」。
+func TestTheCoverStaysSquareAtTheMinimumWindowHeight(t *testing.T) {
+	_, tt := newHome(t, fullSongs())
+	tt.SetSize(homeW, 560)
+	homeFrame(tt)
+	clickTab(t, tt, homePopTab)
+	homeFrame(tt)
+
+	title := songName("新歌", 1)
+	card, ok := tt.Find(title)
+	if !ok || card.W == 0 {
+		t.Fatalf("最小窗口下找不到第一张卡片，文字有 %q", tt.Texts())
+	}
+	hoverRow(t, tt, title)
+	btn, ok := tt.Find(hover.PlayLabel(title))
+	if !ok {
+		t.Fatalf("hover 之后封面上没有播放钮：%q", tt.Texts())
+	}
+
+	coverW := btn.X + btn.W + 8 - card.X
+	coverH := btn.Y + btn.H + 8 - card.Y
+	if coverW <= 0 || coverH <= 0 {
+		t.Fatalf("封面量出来是 %.1f×%.1f——播放钮和卡片不在同一格上", coverW, coverH)
+	}
+	if coverH < coverW-1 || coverH > coverW+1 {
+		t.Errorf("最小窗口下封面 %.1f 宽、%.1f 高——不是方的", coverW, coverH)
 	}
 }
 
@@ -424,5 +507,172 @@ func TestClickingANewMusicCardQueuesExactlyThatSong(t *testing.T) {
 	}
 	if title := got[0][0].Title; title != songName("新歌", 3) {
 		t.Errorf("放进去的是 %q，want %q", title, songName("新歌", 3))
+	}
+}
+
+// TestTheNewMusicHeadingIsTwentyFourPixels 钉住票面那条「标题 24」。
+//
+// 判据是**行高**：16 号字的行高约 19，24 号约 29——差一号在行高上看得出来，而
+// `Tester` 不暴露字号。DESIGN.md 的「页标题 24/400」：上游这一处是整页唯一的
+// `<h1>`（`new-music-top.tsx:178`），字号 24、字重 400。
+func TestTheNewMusicHeadingIsTwentyFourPixels(t *testing.T) {
+	_, tt := newGridTester(t, list.Actions{}, homeSongsOf("新歌", 4), 800, 900)
+
+	head, ok := tt.Find("新歌速递")
+	if !ok || head.W == 0 {
+		t.Fatalf("标题没画出来，文字有 %q", tt.Texts())
+	}
+	if head.H < 26 {
+		t.Errorf("「新歌速递」的行高 %.1f，want 24 号字那档（约 29；16 号只有 19）",
+			head.H)
+	}
+}
+
+// TestTheNewMusicPagerIsThirtyTwoPixels 钉住票面那条「翻页换 32 图标箭头」。
+//
+// 判据是**点击区**：两枚都是 32×32。图标本身仍是 16（上游 `RiArrow*SLine` 的
+// size 是 16），32 是交给手指和鼠标的那一块。
+func TestTheNewMusicPagerIsThirtyTwoPixels(t *testing.T) {
+	_, tt := newGridTester(t, list.Actions{}, homeSongsOf("新歌", 20), 800, 900)
+
+	for _, label := range []string{"上一页", "下一页"} {
+		r, ok := tt.Find(label)
+		if !ok || r.W == 0 {
+			t.Fatalf("翻页键 %q 没画出来，文字有 %q", label, tt.Texts())
+		}
+		if r.W < newMusicArrowW-0.5 || r.H < newMusicArrowW-0.5 {
+			t.Errorf("翻页键 %q 是 %.1f×%.1f，want %d×%d",
+				label, r.W, r.H, newMusicArrowW, newMusicArrowW)
+		}
+	}
+}
+
+// TestHoveringANewMusicCardShowsThePlayButtonTheGradientAndTheAccentTitle 是票面
+// 最后一条：**hover 后播放钮与渐变出现在画面上，标题变主色**。
+//
+// 三样分开量，因为它们是三件独立会坏的事：
+//
+//   - 播放钮：`Tester.Find` 认标签（`hover.PlayLabel`），指针不在时找不到；
+//   - 渐变：**逐像素**——封面底部那一点在 hover 之后明显变暗（black/90 压上来）；
+//   - 标题：**逐像素**——离 `ink.AccentOn` 最近的那一笔，在 hover 之后明显更近。
+//
+// ⚠️ 推钟要按 AGENTS §2：`hoverRow` 用 `Advance(hover.Fade)`，不数帧。
+func TestHoveringANewMusicCardShowsThePlayButtonTheGradientAndTheAccentTitle(t *testing.T) {
+	th := ui.LightTheme()
+	th.Accent = ui.Hex("#1ed760")
+
+	songs := homeSongsOf("新歌", 8)
+	g := newNewMusic(homeTestCache(t), list.Actions{}, func() {})
+	g.SetSongs(songs)
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(th)
+		g.View(c)
+	}, 800, 900)
+	homeFrame(tt)
+
+	title := songName("新歌", 3)
+	card, ok := tt.Find(title)
+	if !ok || card.W == 0 {
+		t.Fatalf("画面上找不到第三张卡片，文字有 %q", tt.Texts())
+	}
+	if _, ok := tt.Find(hover.PlayLabel(title)); ok {
+		t.Fatalf("指针还没移上去，卡片上就有播放钮了：%q", tt.Texts())
+	}
+
+	side := newMusicCoverSide(900, newMusicCellWidth(800, newMusicColsFor(800)))
+	// 封面底边往上留一点，避开圆角；横向取中间，避开右下角那个播放钮。
+	px := int(card.X + side/2)
+	py := int(card.Y + side - 4)
+	idle := tt.Image().RGBAAt(px, py)
+
+	// 标题那一块：卡片从封面往下 6 是歌名。量的不是 `Find` 回来的那个盒子——
+	// 那个是整张卡片（Label 挂在 card 上），会把封面也算进去。
+	titleRect := ui.Rect{X: card.X, Y: card.Y + side + 6, W: card.W, H: 26}
+	want := ink.AccentOn(th)
+	target := color.RGBA{R: want.R, G: want.G, B: want.B, A: 255}
+	before := nearestPixel(tt.Image(), titleRect, want)
+
+	hoverRow(t, tt, title)
+
+	if _, ok := tt.Find(hover.PlayLabel(title)); !ok {
+		t.Fatalf("hover 之后封面上没有播放钮：%q", tt.Texts())
+	}
+	if lit := tt.Image().RGBAAt(px, py); luminanceRGBA(lit) >= luminanceRGBA(idle)-20 {
+		t.Errorf("封面底部那一点 hover 前后是 %v → %v：渐变没有压上来（black/90 该把它压暗一大截）",
+			idle, lit)
+	}
+	after := nearestPixel(tt.Image(), titleRect, want)
+	if colorDist(after, target) >= colorDist(before, target) {
+		t.Errorf("hover 之后歌名离主色 %v 反倒更远了（%v → %v）——标题没有变主色",
+			target, before, after)
+	}
+	if d := colorDist(after, target); d > 60 {
+		t.Errorf("hover 之后歌名上离主色最近的像素是 %v（差 %d），want 明显是主色",
+			after, d)
+	}
+}
+
+// TestClickingTheHoverPlayButtonQueuesExactlyThatSong 钉住 hover 播放钮的语义：
+// 和点卡片一样，**只放这一首**（不是网格卡片那枚「从这一首往后接」）。
+func TestClickingTheHoverPlayButtonQueuesExactlyThatSong(t *testing.T) {
+	var got [][]app.Item
+	acts := list.Actions{Play: func(items []app.Item) { got = append(got, items) }}
+	songs := homeSongsOf("新歌", 8)
+	_, tt := newGridTester(t, acts, songs, 800, 900)
+
+	hoverRow(t, tt, songs[2].Title)
+	if err := tt.Click(hover.PlayLabel(songs[2].Title)); err != nil {
+		t.Fatalf("点不了 hover 播放钮：%v（画面：%q）", err, tt.Texts())
+	}
+	homeFrame(tt)
+
+	if len(got) != 1 {
+		t.Fatalf("点了一下发出了 %d 次播放，want 1 次（播放钮和卡片单击不是两下）", len(got))
+	}
+	if len(got[0]) != 1 || got[0][0].Title != songs[2].Title {
+		t.Errorf("放进去的是 %+v，want 只有 %q 这一首", got[0], songs[2].Title)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 出图
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestRenderNewMusicShots 把新歌速递平时和 hover 两种状态存成 PNG，深浅各一套。
+//
+//	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderNewMusicShots
+//
+// ⚠️ **深浅两套都要出**（DESIGN.md §八）：深色下那条 black/90 渐变和主色播放钮
+// 压在同色卡片上，差距比浅色下更明显。
+//
+// ⚠️ **一个字都不许打真 B 站接口**：全部是内存夹具 + 无头渲染，和 hover_shot_test.go
+// 那一族同一个约定。
+func TestRenderNewMusicShots(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			b := newTestShell(t, systemIsDark(dark))
+			s, tt := b.s, b.tt
+			s.home.SetSongs(fullSongs())
+			homeFrame(tt)
+			clickTab(t, tt, homePopTab)
+			homeFrame(tt)
+
+			// 指针停在窗口右下那片空地上：第一张要的是「平时」。
+			tt.Move(1180, 770)
+			homeFrame(tt)
+			save(t, dir, "37-"+name+"-新歌速递-平时.png", tt)
+
+			hoverRow(t, tt, songName("新歌", 2))
+			save(t, dir, "38-"+name+"-新歌速递-卡片hover.png", tt)
+		})
 	}
 }
