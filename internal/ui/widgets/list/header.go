@@ -16,9 +16,12 @@
 //
 // # ⚠️ 列宽**从行的尺寸里取**，不另抄一份
 //
-// 表头另抄一份宽度的话，改了行忘了改表头，表头就在那几像素之差上慢慢错开（`later.go` 和
-// `history.go` 原来那两份就是：它们把「标题」摆在序号后面，而行里序号和标题中间还隔着一
-// 个 48 的封面，于是右边那几列整整差 56）。见 `MetricsOf`。
+// 表头另抄一份宽度的话，改了行忘了改表头，表头就在那几像素之差上慢慢错开。见
+// `MetricsOf`——它读的就是 `card.go` 里那几组常量。
+//
+// ⚠️ **封面那一块不进表头**（DESIGN.md：表头的「标题」从封面左缘起）：行里是「序号 /
+// 封面 / 标题」，表头是「序号 / 标题」。两边差着封面那一块，靠的是「标题」那一列
+// Grow(1)——左边少掉的宽正好被它吃掉，右边那几列一个像素都不差。
 //
 // # 表头**不在滚动区里**
 //
@@ -63,6 +66,10 @@ const headerLineH = 1
 type CardMetrics struct {
 	PadY, PadX, Gap float32
 	// Index 是序号那一列的宽，Cover 是封面的边长，Clock 是时长那一列的宽。
+	//
+	// ⚠️ **紧凑档的 Cover 是 0**（那一档不画封面）。表头那一列空位也就跟着不摆
+	// （见 `CardHeaderSpec`）——摆一个 0 宽的盒子还占着一个 `Gap`，右边那几列就
+	// 整整偏一截。
 	Index, Cover, Clock float32
 	// Play 是播放量那一列的宽，Date 是时间那一列的宽（见 card.go 那两组常量）。
 	Play, Date float32
@@ -74,14 +81,14 @@ type CardMetrics struct {
 func MetricsOf(v View) CardMetrics {
 	if v == ViewCompact {
 		return CardMetrics{
-			PadY: compactPadY, PadX: compactPadX, Gap: compactGap,
-			Index: compactIndexWidth, Cover: compactCoverSize, Clock: compactDurationWidth,
+			PadY: compactPadY, PadX: compactPadX, Gap: rowGap,
+			Index: compactIndexWidth, Cover: 0, Clock: compactDurationWidth,
 			Play: compactPlayCountWidth, Date: compactPubTimeWidth,
 			Compact: true,
 		}
 	}
 	return CardMetrics{
-		PadY: cardPadY, PadX: cardPadX, Gap: cardGap,
+		PadY: cardPadY, PadX: cardPadX, Gap: rowGap,
 		Index: indexWidth, Cover: coverSize, Clock: durationWidth,
 		Play: playCountWidth, Date: pubTimeWidth,
 	}
@@ -109,14 +116,18 @@ type LeadCol struct {
 
 // HeaderCol 是表头里的一列。
 type HeaderCol struct {
-	// Title 是列名。**空串是「行里有、这一列没字」**（封面那一列）——它在表头里占着和
-	// 封面一样宽的空位，为的是它后面的列和行里后面那几列对得上。
+	// Title 是列名。**空串是「行里有、这一列没字」**（`Lead` 之外的占位列，比如
+	// 行尾那枚「⋯」那一格）。
 	Title string
 	// Width 是这一列多宽。**0 是「标题」那一列**——它 Grow(1) 吃掉剩下的宽。
 	Width float32
-	// End 报这一列是不是右对齐。数字列（编号 / 播放量 / 时长 / 日期）要右对齐，不然上下
+	// End 报这一列是不是右对齐。数字列（播放量 / 时长 / 日期）要右对齐，不然上下
 	// 两行的数字左边缘对不齐、竖着扫不下来。
 	End bool
+	// Center 报这一列是不是居中。**只有「#」那一列用它**（上游是
+	// `min-w-8 text-center`）——序号从 1 到几千，位数一变右对齐的左边缘就参差，
+	// 而居中的序号和行里那一个落在同一根竖线上。
+	Center bool
 }
 
 // HeaderSpec 是这一页表头的样子。每一页给一份，**组件只有 `Header` 那一个**。
@@ -132,13 +143,19 @@ type HeaderSpec struct {
 }
 
 // CardHeaderSpec 是这个列表（`List` / `PagedList` / `SwitchView` 那一套）此刻该摆的表
-// 头：编号 / 标题 / [播放量] / [时间] / 时长，外加**封面那一列的空位**。check 是此刻在
-// 多选态（最左边要给它让出勾选框那一列），cols 是这一页多画哪两列（行和表头读的是同一份，
-// 见 `Columns`）。
+// 头：编号 / 标题 / [播放量] / [时间] / 时长。check 是此刻在多选态（最左边要给它让出勾
+// 选框那一列），cols 是这一页多画哪两列（行和表头读的是同一份，见 `Columns`）。
+//
+// ⚠️ **封面那一列在行里、不在表头里**（DESIGN.md「表头：『标题』从封面左缘起」）：
+// 上游 `music-list-item/index.tsx:90-110` 把封面画在**第二格**（那一格装的是「封面 +
+// 歌名」），所以表头第二列的「标题」正好从封面的左缘起。我们照它摆——表头**不再**
+// 给封面留一列空位，否则「标题」要往右多让 48 + `Gap`，而那一让在画面上只是「表头
+// 比下面那几列靠右一点」。
 //
 // ⚠️ **列的顺序必须和行里一模一样**：行里是「勾选框 / 编号 / 封面 / 标题 /
-// [播放量] / [时间] / 时长」（`card.go` 的 `viewCard`），所以封面那个空位夹在
-// 编号和标题中间。
+// [播放量] / [时间] / 时长」（`card.go` 的 `viewCard`）。表头这一边**跳过**封面那一
+// 块、直接摆「标题」，于是「标题」的左缘落在封面的左缘上；右边那几列照样对得齐——
+// 左边少掉的那块宽正好被 Grow(1) 的标题那一列吃掉。
 //
 // ⚠️ **两列只在 `cols` 说要的时候才摆**：摆一列这一页没有内容的表头比不摆更糟
 // （文件头那一段）。行那一边读的是同一份 `cols`，所以不会出现「表头多一列、
@@ -148,8 +165,8 @@ func CardHeaderSpec(v View, cols Columns, check bool, key string) HeaderSpec {
 	spec := HeaderSpec{
 		Key: key,
 		Cols: []HeaderCol{
-			{Title: "#", Width: m.Index, End: true},
-			{Width: m.Cover}, // 封面：行里有、这一列没字
+			// 序号：居中，和行里那一格同一个对齐（上游 `min-w-8 text-center`）。
+			{Title: "#", Width: m.Index, Center: true},
 			{Title: "标题"},
 		},
 		PadY: m.PadY, PadX: m.PadX, Gap: m.Gap,
@@ -201,8 +218,11 @@ func Header(c *ui.Context, spec HeaderSpec) {
 					} else {
 						e = e.Grow(1)
 					}
-					if col.End {
+					switch {
+					case col.End:
 						e = e.TextAlign(ui.End)
+					case col.Center:
+						e = e.TextAlign(ui.Center)
 					}
 				}
 				// 行尾那枚「⋯」的位置：表头留一个和它一样宽的空位。

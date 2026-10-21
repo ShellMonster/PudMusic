@@ -1179,7 +1179,13 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 右侧浮出来的 Drawer（`music-playlist-drawer/index.tsx` 的
 	// `data-[placement=right]`），底下那一层页面照旧看得见、点得着；塞进上面
 	// 那个 Row 里就成了「窗口窄一块」，页面被挤着走——那不是抽屉。
-	s.guardAt("播放列表抽屉", s.viewQueueDrawer)(c)
+	// ⚠️ **全屏开着的时候这一处不建**：满屏底栏上那一枚「播放列表」要开的是
+	// 同一个抽屉，而抽屉必须画在满屏**上面**（后建的浮层在上）。所以全屏那一支
+	// 在 `viewFullPlayer` 末尾自己建（`fullplayer.go`），这里让开——两处都建的话
+	// 同一个视图会在同一帧里建两遍，行 key 撞上（Tester 里当场 panic）。
+	if !s.full.open {
+		s.guardAt("播放列表抽屉", s.viewQueueDrawer)(c)
+	}
 
 	// 收藏夹管理那几个弹窗（新建 / 修改 / 选封面 / 裁剪 / 选收藏夹）。
 	//

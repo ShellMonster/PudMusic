@@ -264,11 +264,13 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected boo
 			"", clockText(m.Duration), m.Title, func() { rows.playFrom(i) })
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).PaddingY(cardGapForCell).Children(func() {
-			ui.Text(c, m.Title).FontSize(scale.Font(c, 14)).LineHeight(1.5).
+			// 歌名 16 / UP 名 14：和 `widgets/list` 的网格卡同一档
+			// （DESIGN.md「网格：歌名 16、UP 14」）。
+			ui.Text(c, m.Title).FontSize(scale.Font(c, 16)).LineHeight(1.5).
 				TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 				if m.Owner != "" {
-					ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, 12)).LineHeight(1).
+					ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, 14)).LineHeight(1).
 						TextColor(metaColor).MaxLines(1).Ellipsis("…")
 				}
 				if playing {
