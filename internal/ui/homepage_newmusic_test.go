@@ -104,7 +104,7 @@ func TestNewMusicColumnsFollowItsOwnBreakpoints(t *testing.T) {
 		// 歌给足：每页两行，列数是「这一页几张」除以两行。
 		//
 		// ⚠️ 窗口给到 1200 高：封面是方的之后，两行有多高跟着格子宽走，最宽那一
-		// 档（639 宽只有 2 列、格子 313）要 1091 高才摆得下两行。这一条验的是
+		// 档（639 宽只有 2 列、格子 313）要 1143 高才摆得下两行。这一条验的是
 		// **列数**，不是行数——行数不够会让它错报成「少了一列」。
 		_, tt := newGridTester(t, list.Actions{}, homeSongsOf("新歌", 200), c.w, 1200)
 		if got := cardsOnPage(t, tt, "新歌"); got != c.cols*newMusicRows {
@@ -117,7 +117,7 @@ func TestNewMusicColumnsFollowItsOwnBreakpoints(t *testing.T) {
 // homeTallH 是「两行摆得下」的一个窗口高。
 //
 // 封面是方的之后，两行的门槛跟着格子宽走（见 newMusicTwoRowsMinH）；1200 宽、
-// 容器 ~960、4 列、格子 231 时要 926 高。1000 刚够，这里取 1000 而不是贴着门槛，
+// 容器 ~960、4 列、格子 231 时要 978 高。1000 刚够，这里取 1000 而不是贴着门槛，
 // 留一点余量给字体行高那点平台差。
 const homeTallH = 1000
 
@@ -131,46 +131,47 @@ const homeTallH = 1000
 // 两行卡片 + 顶栏 + Tab 那一排 + 播放条把那一屏占满，**「流行」那一档的列表是
 // 0×0，一首歌都看不见**（见 newMusicTwoRowsMinH）。
 //
-// 判据是**这一页画着几张卡片**（列数 × 应摆的行数），以及**那一档的列表画得出
-// 至少一行**——后者才是这条要救的东西。1 行的那几档（含默认的 1200×800：方封面
-// 摆两行要 926 高）张数等于列数；两行的那一档是列数的两倍。
+// 判据是**这一页画着几张卡片**（列数 × 应摆的行数），以及**那一档的第一行是完整的
+// 64 高**——后者才是这条要救的东西。只看「列表里还有行」不够：视口比一行矮的时候
+// 那一行仍然画得出来，只是被裁掉了大半，而 `songsDrawn>0` 照样是绿的（评审在
+// 1200×640 / 560 / 930 上都量到过 25 / 16 高的一行）。
+//
+// 窗口高取这几档：最短的两档、默认、**两行门槛的两侧**（threshold−1 与 threshold）、
+// 以及更高的一档。门槛两侧是这一条最容易漏的地方：刚切到两行的那个高度上，列表
+// 最容易只剩一条缝。
 func TestAShortWindowShowsOneRowSoTheListStillHasRoom(t *testing.T) {
 	s, tt := newHome(t, fullSongs())
 	clickTab(t, tt, homePopTab) // 先让这一块开始画，好量出容器宽
 
-	wantRows := func(h int) int {
-		cols := newMusicColsFor(s.home.newGrid.width)
-		cell := newMusicCellWidth(s.home.newGrid.width, cols)
-		return newMusicRowsAt(float32(h), cell)
-	}
+	cols := newMusicColsFor(s.home.newGrid.width)
+	cell := newMusicCellWidth(s.home.newGrid.width, cols)
+	threshold := int(newMusicTwoRowsMinH(cell))
 
-	for _, h := range []int{560, 640, homeH} {
+	for _, h := range []int{560, 640, homeH, threshold - 1, threshold, homeTallH} {
 		tt.SetSize(homeW, h)
 		homeFrame(tt)
 
-		cols := newMusicColsFor(s.home.newGrid.width)
-		rows := wantRows(h)
+		rows := newMusicRowsAt(float32(h), cell)
 		if got := cardsOnPage(t, tt, "新歌"); got != cols*rows {
 			t.Errorf("窗口高 %d 时这一页画着 %d 张卡片，want %d 列 × %d 行",
 				h, got, cols, rows)
 		}
-		if drawn := songsDrawn(t, tt, homeTabs[homePopTab]); drawn == 0 {
-			t.Errorf("窗口高 %d 时「%s」那一档的列表一首歌都画不出来",
-				h, homeTabs[homePopTab])
-		}
+		assertFirstListRowFull(t, tt, h)
 	}
+}
 
-	// 拖高：两行回来了，而且下面的列表**还留得下一行**（newMusicListMinH 那一条）。
-	tt.SetSize(homeW, homeTallH)
-	homeFrame(tt)
-	cols := newMusicColsFor(s.home.newGrid.width)
-	if got := cardsOnPage(t, tt, "新歌"); got != cols*newMusicRows {
-		t.Errorf("窗口高 %d 时这一页画着 %d 张卡片，want %d 列 × %d 行",
-			homeTallH, got, cols, newMusicRows)
+// assertFirstListRowFull 断言下面那一档的第一行**没有被视口裁掉**。
+//
+// 一行的高是 64（`list.listRowHeight`）。被裁的时候 `Find` 仍然找得到它、宽也不是
+// 0，只有 H 变小——所以判据只能是高度，不能是「在不在」。
+func assertFirstListRowFull(t *testing.T, tt *ui.Tester, h int) {
+	t.Helper()
+	r, ok := tt.Find(songName(homeTabs[homePopTab], 1))
+	if !ok || r.W == 0 {
+		t.Fatalf("窗口高 %d 时列表第一行没画出来，文字有 %q", h, tt.Texts())
 	}
-	if drawn := songsDrawn(t, tt, homeTabs[homePopTab]); drawn == 0 {
-		t.Errorf("窗口高 %d 摆了两行之后「%s」那一档的列表一首歌都画不出来",
-			homeTallH, homeTabs[homePopTab])
+	if r.H < 63 {
+		t.Errorf("窗口高 %d 时列表第一行只有 %.1f 高（完整一行是 64）——被新歌速递那一块挤到视口外裁掉了", h, r.H)
 	}
 }
 
@@ -193,24 +194,24 @@ func TestResizingTheWindowChangesTheRowCount(t *testing.T) {
 		t.Fatalf("拖之前这一页画着 %d 张卡片，want %d 列 × %d 行",
 			got, cols, newMusicRows)
 	}
+	assertFirstListRowFull(t, tt, homeTallH)
 
-	// 往下拖：矮到放不下两行。
+	// 往下拖：矮到放不下两行，列表的第一行还得是完整的。
 	tt.SetSize(homeW, 560)
 	homeFrame(tt)
 	if got := cardsOnPage(t, tt, "新歌"); got != cols {
 		t.Errorf("拖矮之后这一页画着 %d 张卡片，want 一行（%d 列）", got, cols)
 	}
-	if drawn := songsDrawn(t, tt, homeTabs[homePopTab]); drawn == 0 {
-		t.Errorf("拖矮之后「%s」那一档的列表一首歌都画不出来", homeTabs[homePopTab])
-	}
+	assertFirstListRowFull(t, tt, 560)
 
-	// 再拖回去：两行回来了。
+	// 再拖回去：两行回来了，列表照样完整。
 	tt.SetSize(homeW, homeTallH)
 	homeFrame(tt)
 	if got := cardsOnPage(t, tt, "新歌"); got != cols*newMusicRows {
 		t.Errorf("拖回来之后这一页画着 %d 张卡片，want %d 列 × %d 行",
 			got, cols, newMusicRows)
 	}
+	assertFirstListRowFull(t, tt, homeTallH)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -286,7 +287,8 @@ func TestNewMusicPagesSideways(t *testing.T) {
 // 网格加两个转不动的箭头（上游也是这么处理的，`new-music-top.tsx:160-165` 那个
 // effect 干的同一件事）。
 func TestShrinkingTheSongsBringsThePageBack(t *testing.T) {
-	g, tt := newGridTester(t, list.Actions{}, homeSongsOf("新歌", 40), 800, 900)
+	// 窗口给 1000 高：这一条要按「每页 8 首」翻到第 4 页（方封面两行）。
+	g, tt := newGridTester(t, list.Actions{}, homeSongsOf("新歌", 40), 800, 1000)
 
 	for range 3 {
 		if err := tt.Click("下一页"); err != nil {
@@ -441,7 +443,7 @@ func TestANewMusicCardShowsTheCoverTheTitleAndTheOwner(t *testing.T) {
 // TestTheCoverStaysSquareAtTheMinimumWindowHeight 钉住最小窗口那一档的封面。
 //
 // 1200×560（`WindowOptions` 的 `MinHeight`）时，整宽 231 的封面 + 顶栏 / Tab /
-// 播放条会把下面的列表挤成 0×0，所以 `newMusicCoverSide` 把它压到 160。**压小之后
+// 播放条会把下面的列表挤成 0×0，所以 `newMusicCoverSide` 把它压到 108。**压小之后
 // 它必须还是方的**——票面的判据是「宽高相等」，不是「一定占满格子」。
 func TestTheCoverStaysSquareAtTheMinimumWindowHeight(t *testing.T) {
 	_, tt := newHome(t, fullSongs())
