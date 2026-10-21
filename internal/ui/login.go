@@ -68,9 +68,9 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 
 	loginScroll := ui.Scroll(c).Key("login-scroll").Grow(1)
 	loginScroll.Children(func() {
-		ui.Column(c).Key("page:" + loginPath).Grow(1).Padding(20).Gap(12).
+		ui.Column(c).Key("page:" + loginPath).Grow(1).Padding(0, 20).Gap(12).
 			AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "扫码登录").FontSize(scale.Font(c, pageTitleSize)).Bold()
+			ui.Text(c, "扫码登录").FontSize(scale.Font(c, pageTitleSize))
 
 			switch {
 			case !st.Busy() && st.QR == nil:

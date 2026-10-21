@@ -349,7 +349,7 @@ func (p *localPage) view(c *ui.Context) {
 	p.rows = p.filter(st.Tracks, st.Roots)
 
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
-	ui.Column(c).Key("page:"+localMusicPath).Grow(1).Padding(16, pagePadX).Gap(10).
+	ui.Column(c).Key("page:"+localMusicPath).Grow(1).Padding(0, pagePadX).Gap(10).
 		Children(func() {
 			p.viewHead(c)
 			p.viewToolbar(c, st)
@@ -401,7 +401,7 @@ func (p *localPage) cardsTop() { p.cards.ScrollTo(0, ui.Start) }
 // viewHead 是标题那一行：标题、展示样式切换、添加目录。
 func (p *localPage) viewHead(c *ui.Context) {
 	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(8).Children(func() {
-		ui.Text(c, "本地音乐").FontSize(scale.Font(c, pageTitleSize)).Bold()
+		ui.Text(c, "本地音乐").FontSize(scale.Font(c, pageTitleSize))
 
 		// 展示样式切换。⚠️ 用 `ui.Segmented` 而不是三个按钮：三档互斥、
 		// 当前位置一眼可见，三个按钮的话用户得靠猜哪个是按下去的。

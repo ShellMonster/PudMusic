@@ -38,8 +38,22 @@ FAIL，逐个包看 `ok`。
   `tt.Frame()` 数帧。框架的钟站着不动（README「版本」一节有实测记录），
   数帧那种等法会**静默失效**：不报错、不超时，直接放行，于是后面每一次点击都
   按在旧坐标上。症状是「点了没反应」，不是「等不到」。
-- **低负载下绿不算修好。** 这套测试在 load 9~10 时会飘，load 8 以下连续 10 次全绿。
+- **低负载下绿不算修好。** 这套测试在 load 9~10 时会飘，load 8 以下才作数。
   判「飘红是不是真 bug」之前先看一眼机器负载。
+- **复验用「加压 3 次」，不是「连跑 10 次」。** 这条规矩要的是**堆和 GC 压力**
+  ——整包 10 次挂 3 次、单独跑 0 次，差别就在「整包那些堆和 GC 压力」。
+  `GOGC=10` 直接造那个压力，一次顶十次：实测整包 3 次 `GOGC=10` 飘了 2 次
+  （`TestTheHoverLayerCoversOnlyTheCover`、
+  `TestEveryRouteShowsARealRowOrSaysWhichTicketIsMissing//follow`），
+  而整包 10 次要 26 分钟、还撞 `go test` 默认的 600 秒超时。
+
+  ```sh
+  go build ./... && go vet ./... && go test ./...   # 默认一次
+  GOGC=10 go test ./internal/ui/ -count=3 -timeout 15m   # 改了界面行为才加
+  ```
+
+  **只验自己改的那几处**时用 `-run` 过滤（比整包 10 次快 250 倍）：
+  `go test ./internal/ui/ -count=10 -run 'TestPlayBar|TestVolume'`。
 - **查布局问题先按 F12**，用框架自带的检查器：元素树、box model、帧耗时、取色器。
   **别先写测试再二分**——那样往往是在测一个猜错了的数，而界面上的位置、间距、
   颜色，检查器一眼就能量出来；量出来的数再写进断言，才是对着**画面**的断言。
@@ -73,6 +87,14 @@ issue 的验收标准**（`gh issue edit`，见 `docs/agents/issue-tracker.md`�
    每一扇窗叫醒**——只叫醒主窗口的话，迷你播放器停在旧内容（实测）。改状态用
    `Window.Update(func)`，只刷画面用 `Invalidate()`；`Window.Update(nil)` 会
    SIGSEGV。
+
+   ⚠️ **窗口看不见时那一帧会被这一扇窗自己丢掉**（`wakeHandle` + `presence`，
+   票 #156）：在放歌的时候 `App.tick` 每 50ms 叫醒每个窗口一次，收在后台的那扇
+   窗不丢的话就是风扇和电池。丢掉的只是**绘制**，状态照常落；窗口回来时
+   `Shell.noteWindow` 用 `invalidateNow` 补一帧，画出来就是此刻的样子。所以
+   「逐窗口叫醒」的那一层（`App.AddWake` / `AddLocalWake`）**不要**改成「只叫醒
+   看得见的窗口」——看不见这件事只有每个窗口自己知道（迷你窗就不看焦点）。
+   全新一帧里要判可见性的动画走 `hover.SetFrameVisible`（`Shell.View` 每帧设）。
 4. **动态列表的行必须给稳定且唯一的 key。** 默认身份是「父 ID + 兄弟序号」，
    在前面插入一行会让后面所有行的状态整体错配——症状是「选中的那一首变成了
    旁边另一首」，而每一行的字都是对的。

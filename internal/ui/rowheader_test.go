@@ -85,11 +85,14 @@ func TestTheLaterHeaderSaysItsOwnColumns(t *testing.T) {
 
 // TestTheLaterHeaderLinesUpWithItsRows 钉住表头和那一页的行对得齐。
 //
-// ⚠️ 量的是**编号**那一列：它是唯一会被前面几块顶偏的一列，而错的那一列在画面上只是
-// 「编号歪了一点」（这一页原来那份表头就是把「标题」摆在序号后面、忘了中间那个封面，
-// 右边三列整整差 56）。
+// ⚠️ 量的是**编号**和**右端那一列**：编号是唯一会被前面几块顶偏的一列，而右端那一列
+// 是「数字竖着扫得下来」的那一条——表头左边多让 / 少让一块封面，这两处一定有一处歪。
+//
+// ⚠️ **「标题」对的是封面的左缘**（DESIGN.md；票 #167）：行里序号和标题中间隔着 48 的
+// 封面，表头**不给它留空位**，「标题」直接落在封面的左缘上，右边那几列靠 Grow(1) 的标题
+// 那一列吸收掉这点差。所以这一条量的是三处：编号、标题（封面左缘）、右端时长。
 func TestTheLaterHeaderLinesUpWithItsRows(t *testing.T) {
-	tt, _ := laterHoverShell(t)
+	tt, s := laterHoverShell(t)
 
 	head, ok := tt.Find("#")
 	if !ok {
@@ -117,6 +120,24 @@ func TestTheLaterHeaderLinesUpWithItsRows(t *testing.T) {
 	if headClock.X != rowClock.X {
 		t.Errorf("表头的「时长」在 %.1f，行里那一列在 %.1f——差 %.1f",
 			headClock.X, rowClock.X, headClock.X-rowClock.X)
+	}
+
+	// 「标题」那一列落在**封面的左缘**（DESIGN.md；票 #167）：行里那张封面在 UP 名
+	// 左边「一个封面 + 一个列间距」的地方。这一条和上面那条一起才说得清「表头左边
+	// 少让了封面、右边那几列没跟着错」。
+	headTitle, ok := tt.Find("标题")
+	if !ok {
+		t.Fatalf("表头上没有「标题」，文字有 %q", tt.Texts())
+	}
+	owner, ok := tt.Find("UP " + libTitles[0])
+	if !ok {
+		t.Fatalf("画面上找不到 UP 名，文字有 %q", tt.Texts())
+	}
+	mt := metricsOf(s.laterPage.rows.Layout())
+	want := owner.X - (mt.cover + mt.gap)
+	if d := headTitle.X - want; d > 0.5 || d < -0.5 {
+		t.Errorf("表头的「标题」在 %.1f，封面左缘在 %.1f——差 %.1f（表头多让了封面？）",
+			headTitle.X, want, d)
 	}
 }
 
@@ -294,9 +315,12 @@ func TestTheSearchUserTabHeaderHasNoClock(t *testing.T) {
 				col.Title)
 		}
 	}
-	// 剩下的三列一个都不能少：序号、封面那一列的空位、标题。
-	if len(user.Cols) != 3 {
-		t.Errorf("「用户」那一档的表头有 %d 列，want 3（# / 封面空位 / 标题）",
-			len(user.Cols))
+	// 剩下的两列一个都不能少：序号、标题。
+	//
+	// ⚠️ **封面不在表头里**（DESIGN.md：表头的「标题」从封面左缘起）——所以是两列
+	// 而不是三列。多一列封面空位的话「标题」要往右让 64，而那在画面上只是「表头比
+	// 下面那几列靠右一点」。
+	if len(user.Cols) != 2 {
+		t.Errorf("「用户」那一档的表头有 %d 列，want 2（# / 标题）", len(user.Cols))
 	}
 }

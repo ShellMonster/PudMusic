@@ -215,6 +215,10 @@ func miniCorner(work mygo.Rectangle) (x, y int) {
 // 而 `closePerWindow` 也不会因为小窗关掉而停掉主窗口那份的写盘（见 `shared`）。
 func NewMini(a *app.App, main *Shell, toggle func()) *Shell {
 	s := New(a)
+	// 迷你播放器是面板语义：它浮在桌面上时用户看得到，但点它不激活应用，
+	// 所以「有没有焦点」不能拿来判它看不看得见（见 presence.go 的
+	// freeWhileBlurred）。
+	s.presence.update(func(p *windowPresence) { p.freeWhileBlurred = true })
 	if main != nil {
 		s.adoptShared(main)
 	}
@@ -357,6 +361,10 @@ func (s *Shell) bindMiniWindow() {
 func (s *Shell) attachMiniWindow(w *mygo.Window) {
 	s.win = w
 	s.bindMiniWindow()
+	// 这扇窗的可见性同主窗口一样由系统推过来，但「有没有焦点」不参与判断：
+	// 它是面板语义，点它不激活应用（票 #156 第六条），于是它几乎永远失焦
+	// ——拿焦点判的话，用户点一下播放键进度条就不再动了（见 presence.go）。
+	s.watchWindow(w)
 
 	w.OnClosed(func() {
 		if s.win == w {

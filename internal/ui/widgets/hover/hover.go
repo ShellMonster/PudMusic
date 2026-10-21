@@ -29,12 +29,36 @@ package hover
 
 import (
 	"math"
+	"sync/atomic"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
+
+// frameVisible 是「画这一帧的那个窗口，用户现在看得到吗」。
+//
+// 为什么是包级而不是参数：`Wave` 在控件层，拿不到 `Shell`；而它每帧都要问
+// 同一个问题。MyGo 的 view 全部跑在主线程上，同一时刻只画一个窗口，所以
+// `Shell.View` 每帧开头设一次就够，画完不用恢复——下一个窗口画自己那一帧时会
+// 重新设置（`internal/ui/shell.go` 的 `View`）。
+//
+// 零值必须是「看得见」：这个包自己的测试直接调 `Wave`，没有 Shell 来设置；
+// 设成 false 的话那些测试里的波形会永远不动，而它们测的正是「动」。
+//
+// ⚠️ **这个开关只管「要不要下一帧」，不管「这一帧画不画」**：看不见的时候
+// 能走到这里的那一帧照样画完整（也许是某条后台路径送进来的），只是画完不再
+// 要下一帧。真正让帧停下来的那一半在 `wakeHandle.invalidate`（wake.go）。
+var frameVisible = func() *atomic.Bool {
+	v := &atomic.Bool{}
+	v.Store(true)
+	return v
+}()
+
+// SetFrameVisible 告诉这个包「这一帧所在的窗口看不看得见」。只由
+// `internal/ui.Shell.View` 每帧调一次。
+func SetFrameVisible(visible bool) { frameVisible.Store(visible) }
 
 const (
 	// Fade 是淡入淡出的时长。Biu 那两处都是 `duration-200`。
@@ -328,9 +352,10 @@ const (
 // 变，而快速切歌时帧率本来就紧」）。**这一版换掉了那个理由**：界面骨架已经和上游对
 // 上了，而这一句字和上游的波形是两回事——用户扫一眼列表时，眼睛先被动的那个抓住。
 //
-// ⚠️ **它在每一帧都要一帧**（`Loop` 内部调 `AnimationFrame`）。这一帧的成本是重画一
+// ⚠️ **窗口看得见的时候它每一帧都要一帧**（`AnimationFrame`）。这一帧的成本是重画一
 // 次画面（`mygo/ui/runtime.go` 的 `next()`：`animating` → `requestFrame`），而屏幕上
-// 同时最多只有一行在放。
+// 同时最多只有一行在放。窗口看不见时不要（票 #156，见 `frameVisible`）——那是
+// 「后台还在每 50ms 叫醒一次」时风扇和电池的来源。
 //
 // ## color 是**调用方给的**
 //
@@ -342,7 +367,7 @@ func Wave(c *ui.Context, key string, width float32, color ui.Color, title string
 	wave := ui.Box(c).Key(key).Size(width, waveH).Label(PlayingLabel(title))
 	phase := wavePhase(c, wave, key)
 	wave.Draw(func(p *ui.Painter, r ui.Rect) {
-		// 竖条整体居中：4×2 + 3×2 = 14 宽，在 40 宽的序号那一列里两边各空 13。
+		// 竖条整体居中：4×2 + 3×2 = 14 宽，在 32 宽的序号那一列里两边各空 9。
 		x0 := r.X + (r.W-float32(waveBars*waveBarW+(waveBars-1)*waveGap))/2
 		for i := range waveBars {
 			// 每根条子错开 1/4 轮，四根于是永远不同相。
@@ -356,7 +381,12 @@ func Wave(c *ui.Context, key string, width float32, color ui.Color, title string
 	})
 }
 
-// wavePhase 是此刻的相位（0~1），并且在**钟走了的时候**要下一帧。
+// wavePhase 是此刻的相位（0~1），并且在**钟走了、窗口也看得见的时候**要下一帧。
+//
+// ⚠️ **看不见时 `seen` 照样更新，只是不要帧**：恢复可见之后那一次比较仍然
+// 「钟走了」，于是会重新要帧，波形也从当前时刻接着跳。要是不更新 `seen`，
+// 恢复后那一次也一样会要帧——两者在行为上一样，但更新让「这个字段是上一次
+// 看表的时间」这条意思保持诚实，而不是变成「上一次要帧的时间」。
 //
 // ## 为什么不直接用 `ui.Loop`
 //
@@ -371,7 +401,8 @@ func Wave(c *ui.Context, key string, width float32, color ui.Color, title string
 // （`headless.go`：「Its clock stands still unless the test moves it with Advance」）。
 //
 //   - 真窗口：`runFrame` 每一帧都取一次墙钟（`runtime.go` 的 `now := rt.now()`，然后
-//     `rt.c.reset(now, …)`），一帧一个时刻，两帧不会相同 → 每帧都要一帧 → 波形照跳。
+//     `rt.c.reset(now, …)`），一帧一个时刻，两帧不会相同 → 每帧都要一帧（窗口看得见
+//     时）→ 波形照跳。
 //   - Tester：`settle()` 里那 20 帧**共用一个时刻** → 只有第一帧要 → `settle()` 画两
 //     帧就收工。测试要看哪一刻的样子自己 `Advance` 多少（见 `hover_test.go` 的
 //     `advance`：`Advance` 之后还要补一帧 `Frame()`——`Advance` 只画它那一刻之前到点的
@@ -387,7 +418,12 @@ func wavePhase(c *ui.Context, wave ui.Element, key string) float32 {
 	seen := ui.Local(wave, key+":seen", func() time.Time { return time.Time{} })
 	if !now.Equal(*seen) {
 		*seen = now
-		c.AnimationFrame()
+		// 看不见的窗口不要再要帧（票 #156）：它每帧都请求下一帧，而
+		// `App.tick` 又在放歌时每 50ms 叫醒每个窗口一次——两条链合起来，
+		// 一扇收在后台的窗口会一直按帧重画，用户能感到的是风扇和电池。
+		if frameVisible.Load() {
+			c.AnimationFrame()
+		}
 	}
 	return float32(now.Sub(*start)%wavePeriod) / float32(wavePeriod)
 }

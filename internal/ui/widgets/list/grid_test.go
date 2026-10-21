@@ -7,8 +7,10 @@ import (
 	"log"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -23,7 +25,7 @@ import (
 // ⚠️ Tester 的高度固定：网格的行高是**量出来**的（歌名折行就高一点），判定
 // 「一行放了几首」靠的是歌名落在哪一行上，所以高度要够放得下好几行。
 
-// gridH 是无头窗口的高度。网格每行约 195（140 的封面 + 歌名 + UP 名），700 摆得
+// gridH 是无头窗口的高度。网格每行约 190（140 的封面 + 歌名 + UP 名），700 摆得
 // 下三行半，够数清一行有几首、也够验锚点。
 const gridH = 700
 
@@ -614,4 +616,43 @@ func cardPixel(t *testing.T, tt *ui.Tester, w, cols, i int) color.RGBA {
 		t.Fatalf("第 %d 格采样的位置 (%d, %d) 在画面外", i, x, y)
 	}
 	return tt.Image().RGBAAt(x, y)
+}
+
+// TestTheGridCardTextIs16And14 钉住网格卡的字号：歌名 16、UP 名 14
+// （DESIGN.md「网格：封面 140、歌名 16、UP 14、两行标题」）。
+//
+// 判据是**画出来的三块文字谁高**：16 > 14 > 12（时长）。改之前是 14 / 12，那时
+// 歌名和 UP 名只差一点点，和列表那一档也差一档——「两个视图像两个产品」就是它。
+//
+// ⚠️ **量的是第二首**：`ui.ListState.Label` 把每一行**第一首**的歌名挂成了整行的
+// 无障碍标签，`Find` 命中的是整行的高；同一行后面几首的歌名没有被挂标签，量到的
+// 才是那一块字本身（和 `gridRowTop` 的注释同一个道理）。
+func TestTheGridCardTextIs16And14(t *testing.T) {
+	songs := songsOf(6, "")
+	for i := range songs {
+		songs[i].Owner = "UP " + strconv.Itoa(i+1)
+		songs[i].Duration = time.Duration(65+i) * time.Second
+	}
+	// 1100 宽 → 4 列（断点表：>= 1024），所以前四首在同一行。
+	_, tt := newGrid(t, Actions{}, songs, 1100, gridH)
+
+	title, ok := tt.Find(titleOf(1))
+	if !ok || title.H > 100 {
+		t.Fatalf("第二首的歌名量成了整行（%v）——这条用例量不到字的大小", title)
+	}
+	owner, ok := tt.Find("UP 2")
+	if !ok {
+		t.Fatalf("画面上找不到 UP 名，文字有 %q", tt.Texts())
+	}
+	clock, ok := tt.Find(formatDuration(time.Duration(66) * time.Second))
+	if !ok {
+		t.Fatalf("画面上找不到时长，文字有 %q", tt.Texts())
+	}
+	if title.H <= owner.H {
+		t.Errorf("歌名那一块高 %v，UP 名高 %v——歌名没有比 UP 名大一档", title.H, owner.H)
+	}
+	if owner.H <= clock.H {
+		t.Errorf("UP 名那一块高 %v，时长高 %v——UP 名没有比次要数字大一档",
+			owner.H, clock.H)
+	}
 }

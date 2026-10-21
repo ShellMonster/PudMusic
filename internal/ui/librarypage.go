@@ -217,39 +217,43 @@ func metricsOf(v list.View) listMetrics {
 			pubDate: colPubDate, progress: colProgress, viewedAt: colViewedAt,
 			// ⚠️ **歌名一行**（上游那一行是 `truncate`）：折行的话整张列表的行高
 			// 就跟着歌名长短跳（理由见 `widgets/list/card.go` 的文件头）。
-			titleLines: listTitleLines, titleSize: 14,
+			// 字号 16 是 DESIGN.md 的「列表歌名 16」。
+			titleLines: listTitleLines, titleSize: 16,
 			// 行高：封面 48 + 上下内边距 8×2。
 			height: coverSide + 2*listPadY,
 		}
 	}
-	// 紧凑：封面 48 → 32、上下内边距 8 → 4、间距 8 → 6。
+	// 紧凑：**封面整块不画**、上下内边距 8 → 4、行高 64 → 40（和 `widgets/list`
+	// 紧凑那一档同一个道理，见它 `card.go` 顶上那一段）。
 	// 几个数字比 `widgets/list` 的紧凑那一份略宽一点点——这两页右边多两列，收得太
 	// 狠的话歌名只剩几十像素（实测 900 宽的页面区下）。
 	return listMetrics{
 		padY: compactListPadY, padX: compactListPadX, gap: compactRowGap,
-		cover: compactCoverSide, index: compactColIndex,
+		cover: 0, index: compactColIndex,
 		count: compactColCount, date: compactColDate, clock: compactColClock,
 		pubDate:  compactColPubDate,
 		progress: compactColProgress, viewedAt: compactColViewedAt,
 		titleLines: 1, titleSize: 13,
-		// 行高：封面 32 + 上下内边距 4×2。
-		height: compactCoverSide + 2*compactListPadY,
+		// 行高定死：这一档没有封面撑着，40 是它自己那一个值（改之前也是 40）。
+		height: compactListRowHeight,
 	}
 }
 
 // 紧凑那一档的行内尺寸。数在 `widgets/list/card.go` 那一组旁边，两个地方摆着同一个
 // 概念的两套数——那是因为这两页的行**多两列**（播放量 / 观看时间），列宽算得不一样。
 const (
-	compactListPadY    = 4
-	compactListPadX    = 6
-	compactRowGap      = 6
-	compactCoverSide   = 32
-	compactColIndex    = 32
-	compactColCount    = 74
-	compactColDate     = 92
-	compactColClock    = 50
-	compactColProgress = 110
-	compactColViewedAt = 118
+	compactListPadY = 4
+	compactListPadX = 6
+	compactRowGap   = 16
+	compactColIndex = 32
+	// compactListRowHeight 是紧凑档那一行的高。定死的（同普通那一档），而这一档
+	// 没有封面撑着——40 是行里歌名 + UP 名那两块留得下的那个高度。
+	compactListRowHeight = 40
+	compactColCount      = 74
+	compactColDate       = 92
+	compactColClock      = 50
+	compactColProgress   = 110
+	compactColViewedAt   = 118
 	// compactColPubDate 是紧凑档「投稿时间」那一列的宽。和 `colPubDate`
 	// 同一个算法（最长 YYYY-MM-DD，font 12 约 66 宽），这一档再收窄一点。
 	compactColPubDate = 76
@@ -309,13 +313,19 @@ func viewLibraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, cover *imgcac
 
 	// 封面，四态由 imgcache 画（空地址画空框，不画「失败」），上面压着 hover 反馈：
 	// 压暗 + 一个 20px 的白色播放三角。
-	hover.RowCover(c, cover, m.Cover, mt.cover, onRow, m.Title, play)
+	//
+	// ⚠️ **紧凑档不画封面**（`mt.cover` 是 0，上游紧凑那一支也没有封面），所以
+	// 那一档连这块盒子都不建：建一个 0 宽的呢，外圈那个 hover 反馈就没有地方贴。
+	if mt.cover > 0 {
+		hover.RowCover(c, cover, m.Cover, mt.cover, onRow, m.Title, play)
+	}
 
 	ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).Children(func() {
 		ui.Text(c, m.Title).FontSize(scale.Font(c, mt.titleSize)).LineHeight(1.5).
 			TextColor(face.title).MaxLines(mt.titleLines).Ellipsis("…")
 		if m.Owner != "" {
-			ui.Text(c, m.Owner).FontSize(scale.Font(c, 12)).LineHeight(1).
+			// UP 名 14（DESIGN.md「列表 UP 名 14」；上游是 `text-sm`）。
+			ui.Text(c, m.Owner).FontSize(scale.Font(c, 14)).LineHeight(1).
 				TextColor(face.own).MaxLines(1).Ellipsis("…")
 		}
 	})
