@@ -145,11 +145,11 @@ func (s *Shell) viewHistory(c *ui.Context, _ *ui.Route) {
 	// 的（和设置页同一个理由，见 settings_page.go）。
 	ro := s.app.SettingsReadOnly()
 
-	ui.Column(c).Key("page:"+historyPath).Grow(1).Padding(16, pagePadX).Gap(8).
+	ui.Column(c).Key("page:"+historyPath).Grow(1).Padding(0, pagePadX).Gap(8).
 		Children(func() {
 			// 页头：标题在左，「记录播放历史」在右（上游是 `justify-between`）。
 			ui.Row(c).FillWidth().Center().Children(func() {
-				ui.Text(c, "历史记录").FontSize(scale.Font(c, pageTitleSize)).Bold().Grow(1)
+				ui.Text(c, "历史记录").FontSize(scale.Font(c, pageTitleSize)).Grow(1)
 				s.viewReportHistory(c, st.ReportPlayHistory, ro)
 			})
 

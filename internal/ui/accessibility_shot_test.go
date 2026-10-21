@@ -75,7 +75,7 @@ func scaleShot(t *testing.T, dark bool, factor float32) *mygoui.Tester {
 		ApplyTheme(c, s, dark)
 		th := c.Theme()
 		ui.Column(c).Padding(24).Gap(8).Children(func() {
-			ui.Text(c, "页标题").FontSize(scale.Font(c, pageTitleSize)).Bold()
+			ui.Text(c, "页标题").FontSize(scale.Font(c, pageTitleSize))
 			ui.Text(c, "正文一行，用来对比字号。").
 				FontSize(scale.Font(c, 14)).TextColor(th.Text)
 		})
