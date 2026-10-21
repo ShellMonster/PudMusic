@@ -491,7 +491,8 @@ func (s *Shell) viewFeedSentinel(c *ui.Context, p *upPager, hint, retryLabel str
 		switch {
 		case p.err != nil:
 			ui.Text(c, "加载失败："+p.err.Error()).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
-			if retry != nil && ui.Button(c, retryLabel).FontSize(scale.Font(c, 13)).Clicked() {
+			// 哨兵那一行上的重试：扁平（错误页那一档是 `viewLoadError`，不动）。
+			if retry != nil && flatButton(c, retryLabel).FontSize(scale.Font(c, 13)).Clicked() {
 				retry()
 			}
 		case p.loading:

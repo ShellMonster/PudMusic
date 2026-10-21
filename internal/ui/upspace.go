@@ -509,7 +509,7 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 				// 用户按下去是一次**取关**（B 站对没关注过的人「取关」是成功的），
 				// 于是他更确信自己关注过——而真相是我们压根没读到。
 				ui.Text(c, "关注状态没读到").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
-				if ui.Button(c, "重试").FontSize(scale.Font(c, 12)).Clicked() {
+				if flatButton(c, "重试").FontSize(scale.Font(c, 12)).Clicked() {
 					sp.header.RetryRelation()
 					sp.header.Load()
 				}
@@ -534,7 +534,7 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 				}
 			} else if h.StatFailed() {
 				ui.Text(c, "粉丝数没读到").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
-				if ui.Button(c, "重试").FontSize(scale.Font(c, 12)).Clicked() {
+				if flatButton(c, "重试").FontSize(scale.Font(c, 12)).Clicked() {
 					sp.header.RetryRelation()
 					sp.header.Load()
 				}

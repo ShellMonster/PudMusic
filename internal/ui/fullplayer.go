@@ -84,11 +84,17 @@ const (
 	// 而两边的上一首/下一首共用播放条那几个（已经是图标了）。那一行于是变成
 	// 「图标 — 文字 — 图标」**半新半旧**：满屏是用户盯着看最久的一屏，中间夹一个
 	// 绿色文字块和两个灰色箭头，怎么看都不像一套。
-	fullPlayGlyph     = 34
-	fullPlayHit       = 46
-	fullBarHeight     = 56
-	fullBarPadX       = 24
-	fullBarPadY       = 12
+	fullPlayGlyph = 34
+	fullPlayHit   = 46
+	fullBarHeight = 56
+	fullBarPadX   = 24
+	fullBarPadY   = 12
+	// fullTopKey 是满屏顶栏上那两枚图标键的点击区边长。
+	//
+	// 56 减上下各 12 的内边距正好 32；上游那两枚是 28 / 22 的图标
+	// （`full-screen-player/index.tsx:294,313`），图标画多大由调用方给，这里只
+	// 管点击区——28 的图标在这个框里每边留 2，22 的那一枚每边留 5。
+	fullTopKey        = 32
 	fullPartsWidth    = 280
 	fullPartsHeight   = 420
 	fullPartsTabW     = 26
@@ -484,8 +490,9 @@ func (s *Shell) viewFullBackdropCanvas(c *ui.Context, url string) {
 // 排列照 Biu（`index.tsx:291-325`）：左上角收起、旁边是歌名、再旁边是设置。
 //
 // 🔴 **左边必须让开红黄绿**：隐藏标题栏的窗口里系统控件是叠在内容**上面**的，
-// 而满屏把普通顶栏整条盖住了——于是「关闭全屏」的前两个字正好被黄灯和绿灯压住
-// （实测按钮框 x∈[39,91]，红黄绿整簇 x∈[14,66]）。做法照 navbar.go 那一处：
+// 而满屏把普通顶栏整条盖住了——于是「关闭全屏」那一枚（当时是一枚文字键）正好被黄灯和绿灯压住
+// （实测按钮框 x∈[39,91]，红黄绿整簇 x∈[14,66]；现在是 32×32 的图标键，框更窄，
+// 但它贴着左边距的时候照样会落进那一簇）。做法照 navbar.go 那一处：
 // `c.TitleBar()` 给的 `bar.Left` 就是左边让出的量。
 //
 // ⚠️ 同一条顶栏还要能拖窗口：浮层盖住整窗，普通顶栏上那两处 `DragWindow`
@@ -514,7 +521,18 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 	wasOpen := s.full.settings
 
 	bar.Children(func() {
-		if ui.Button(c, "关闭全屏").FontSize(scale.Font(c, 13)).Clicked() {
+		// 关闭全屏：上游是一枚 `RiArrowDownSLine` 28 的图标键（`index.tsx:294`），
+		// 不是写着字的药丸。字色必须自己给（`fullOnColor`）：扁平按钮不再像
+		// `ui.Button` 那样把 `t.Text` 刷上来，图标是从祖先继承的——而这一条顶栏
+		// 压在压暗过的封面上，浅色主题下 `t.Text` 是黑的，黑图标会整个消失在背景里。
+		//
+		// ⚠️ **不给 `Tooltip`**：这一条顶栏三秒之后会自己藏起来（整条 `Translate`
+		// 出窗口），而提示是**浮在整窗之上**的另一个元素——它不跟着那一趟平移走，
+		// 于是界面藏好之后还留着一句悬空的话（实测：那一条「第二次没藏干净
+		// （138 个亮像素）」）。
+		if iconButton(c, iconChevronDown, "关闭全屏", 28).
+			Size(fullTopKey, fullTopKey).Padding(0, 2).
+			TextColor(fullOnColor).Clicked() {
 			s.closeFullPlayer()
 		}
 		// 歌名：上游是 `text-xl`（20 像素），而且限了宽度（最多占五分之二）。
@@ -524,7 +542,10 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 		ui.Text(c, st.Title).FontSize(scale.Font(c, 20)).Bold().TextColor(fullOnColor).
 			Grow(1).MaxWidth(fullTitleMaxWidth(c)).SingleLine()
 
-		gear := ui.Button(c, "全屏设置").FontSize(scale.Font(c, 13))
+		// 同上面那一条：提示不跟着顶栏一起藏起来，所以这里不给 `Tooltip`。
+		gear := iconButton(c, iconSettings, "全屏设置", 22).
+			Size(iconHit, iconHit).Padding(0, 3).
+			TextColor(fullOnColor)
 		if gear.Clicked() {
 			s.full.settings = !s.full.settings
 			if s.full.settings {
@@ -554,7 +575,7 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 //
 // `TitleBar().Left` 是系统控件在左边占掉的宽度（macOS 的红黄绿那一簇）。满屏把
 // 普通顶栏整条盖住了，所以这一条**必须自己让**：不写死 `fullBarPadX` 的话，
-// 「关闭全屏」的前两个字正好压在黄灯和绿灯底下（实测按钮 x∈[39,91]，红黄绿
+// 「关闭全屏」那枚键正好压在黄灯和绿灯底下（实测那会儿还是文字键，按钮 x∈[39,91]，红黄绿
 // x∈[14,66]）。
 //
 // 单独拎成一个函数是为了能测：无头 Tester 里 `bar.Left` 恒为 0（那里没有标题栏），
@@ -817,9 +838,15 @@ func (s *Shell) viewFullParts(c *ui.Context, hidden bool) {
 	}
 	if len(parts) > 1 || (len(parts) == 0 && s.app.PartsWorthAsking()) {
 		_, winH := c.Size()
-		tab := ui.Button(c, "显示分集列表").FontSize(scale.Font(c, 11)).
-			Absolute().Right(0).Top(winH/2 - fullPartsTabH/2).
-			Width(fullPartsTabW).Height(fullPartsTabH)
+		// 把手是一枚 `RiArrowLeftSLine` 24 的图标键（`page-list.tsx` 那一支，
+		// `full-screen-player/index.tsx:406-415`）——26×96 的那条竖把手是它的
+		// **框**，不是按钮的样子：没有描边、没有底色，只有悬停时那层淡底。
+		// 字色同顶栏，理由也同顶栏（压在压暗过的封面上）。
+		// 也不给 `Tooltip`：界面一藏，这条把手跟着不画，悬空的那句提示会留下来。
+		tab := iconButton(c, iconSideCollapse, "显示分集列表", 24).
+			Absolute().Right(0).Top(winH/2-fullPartsTabH/2).
+			Width(fullPartsTabW).Height(fullPartsTabH).Padding(0, 1).
+			TextColor(fullDimColor)
 		if tab.Clicked() {
 			s.full.partsOpen = true
 		}
@@ -886,7 +913,10 @@ func (s *Shell) viewFullPartsPanel(c *ui.Context) {
 		ui.Row(c).FillWidth().Padding(10, 12).Gap(8).AlignItems(ui.Center).Children(func() {
 			// 字色跟着面板走（`TextColor(t.Text)`），这里不再自己定。
 			ui.Text(c, "分集").FontSize(scale.Font(c, 14)).Bold().Grow(1)
-			if ui.Button(c, "收起分集").FontSize(scale.Font(c, 11)).Clicked() {
+			// 上游是一枚 `RiArrowRightSLine` 16 的扁平图标键（`page-list.tsx:47`）。
+			// 字色不用给：面板自己 `TextColor(t.Text)`，图标跟着它走。
+			if iconButton(c, iconSideExpand, "收起分集", 16).
+				Size(24, 24).Padding(0, 4).Tooltip("收起分集").Clicked() {
 				s.full.partsOpen = false
 			}
 		})

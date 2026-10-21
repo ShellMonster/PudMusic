@@ -410,7 +410,7 @@ func (s *Shell) viewFollowPane(c *ui.Context, f *followPage) {
 		if !f.tagStarted && f.tagErr != nil {
 			ui.Text(c, "分组没拉出来："+f.tagErr.Error()).FontSize(scale.Font(c, 12)).
 				TextColor(t.TextMuted).PaddingX(6)
-			if ui.Button(c, "重试拉分组").FontSize(scale.Font(c, 12)).Clicked() {
+			if flatButton(c, "重试拉分组").FontSize(scale.Font(c, 12)).Clicked() {
 				f.tagErr, f.tagLoading = nil, true
 				go s.fetchFollowTags(context.Background(), f)
 			}
@@ -841,7 +841,7 @@ func (s *Shell) viewFollowSentinel(c *ui.Context, f *followPage) {
 		case f.pager.err != nil:
 			ui.Text(c, "加载失败："+f.pager.err.Error()).FontSize(scale.Font(c, 13)).
 				TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
-			if ui.Button(c, "重试加载关注的人").FontSize(scale.Font(c, 13)).Clicked() {
+			if flatButton(c, "重试加载关注的人").FontSize(scale.Font(c, 13)).Clicked() {
 				f.pager.err = nil
 				if ctx := f.pager.begin(); ctx != nil {
 					go s.fetchFollowUsers(context.Background(), f, f.gen, f.tab, f.applied,

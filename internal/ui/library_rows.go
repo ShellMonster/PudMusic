@@ -683,7 +683,8 @@ func (p *pagedRows) viewFooter(c *ui.Context) {
 	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(8).Padding(8).
 		Children(func() {
 			if p.blocked {
-				if ui.Button(c, "加载失败，点此重试").FontSize(scale.Font(c, 13)).Clicked() {
+				// 行里的重试（不是错误页上那颗主按钮）：扁平配方，悬停才有一层淡底。
+				if flatButton(c, "加载失败，点此重试").FontSize(scale.Font(c, 13)).Clicked() {
 					p.blocked = false
 					p.load(trigRetry)
 				}

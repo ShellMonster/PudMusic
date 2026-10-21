@@ -656,10 +656,10 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
-		Spec:     "迷你播放器这一块本身：装得下 320×100、字没被截、控件身份稳（铁律四）",
+		Spec:     "迷你播放器这一块本身：装得下 320×100、那四个键是图标键（框对、图形在）、控件身份稳（铁律四）",
 		Tests: []string{
 			"TestTheMiniCardFitsInThreeHundredAndTwentyByOneHundred",
-			"TestTheMiniLabelsAreNotTruncated",
+			"TestTheMiniKeysAreIcons",
 			"TestTheMiniControlsKeepTheirIdentityWhenTheLabelChanges",
 		},
 	},
@@ -1676,6 +1676,42 @@ var Items = []Item{
 			"TestTheCollapsedSidebarItemHasItsFullName",
 			"TestTheCollapsedSidebarTipSitsToTheRightOfTheItem",
 			"TestALongFavoriteNameDoesNotMakeTheRowTaller",
+		},
+	},
+	{
+		// 归「双平台」那一组：这一票动的是**六处的动作键**，而六处画得不一样就
+		// 是「用户从播放条走进满屏播放器，控件库换了」。理由同 #134 第二单元那一条：
+		// 判据全在画面上。
+		Category: Platform,
+		// issue 141（#134 的第七单元）那一票：铺开扁平按钮。
+		//
+		// 🔴 **判据是像素**：满屏播放器 / 迷你播放器 / 下载记录 / 本地音乐 /
+		// 收藏夹 / 动态卡片这六处里的动作键，不再是 `ui.Button` 那枚「一圈 1px
+		// 描边 + 一块常驻底色」的药丸——换成它一样编译得过、点得动、无障碍名字
+		// 也还叫得出来，只有画面上多出那两样。反过来也断：对话框里的确定/取消、
+		// 空状态和错误页上的重试**仍然是**真按钮（主次分明，票面点名要保）。
+		//
+		// 另外两样也在这一票里：顶栏那枚「迷你」从文字键换成 `iconPiP`；
+		// 队列抽屉和分集抽屉那两条手搓的分割线换成框架的 `ui.Divider`。
+		Spec: "那六处里没有带描边、带常驻底的按钮（图标键框内框外同色，文字键上下就是页面底色）；对话框里的确定/取消和错误页的重试仍然带描边和常驻底；顶栏的「迷你」是一枚图标键；两处抽屉头上那条 1 像素的分割线还在",
+		Tests: []string{
+			// 六处各一条（深浅两套都在里面）。
+			"TestTheFullPlayerKeysAreFlat",
+			"TestTheFullPlayerPartsKeysAreFlat",
+			"TestTheMiniPlayerKeysAreFlat",
+			"TestTheDownloadListKeysAreFlat",
+			"TestTheLocalMusicKeysAreFlat",
+			"TestTheCollectionKeysAreFlat",
+			"TestTheDynamicCardKeysAreFlat",
+			// 反面：该保留描边的那一批。
+			"TestTheDialogButtonsStayOutlined",
+			"TestTheEmptyStateRetryStaysOutlined",
+			// 顶栏那枚「迷你」。
+			"TestTheNavBarMiniKeyIsAnIcon",
+			// 迷你那四个键**是图标键**（不是被挤扁的文字键）。
+			"TestTheMiniKeysAreIcons",
+			// 两处手搓的分割线换成了框架的 `ui.Divider`，画出来还得是那一条线。
+			"TestTheTwoRulesAreDrawnAsOnePixelLines",
 		},
 	},
 	{

@@ -251,7 +251,9 @@ func (s *Shell) viewPartDrawerHeader(c *ui.Context, t *ui.Theme) {
 				ui.Text(c, "共 "+strconv.Itoa(n)+" 集").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 			}
 		})
-		ui.Box(c).FillWidth().Height(1).Background(t.Border)
+		// 框架的 `ui.Divider`：1 DIP、无圆角、无内边距、取 `t.Border`——和原来
+		// 手搓的那一行逐字一样。外面是 `Column`，所以它给的是高 1 的那条横线。
+		ui.Divider(c)
 	})
 }
 

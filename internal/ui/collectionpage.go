@@ -653,7 +653,11 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 			if ui.PrimaryButton(c, "播放全部").Clicked() {
 				s.playWholeCollection(p)
 			}
-			if ui.Button(c, "添加到播放列表").Clicked() {
+			// 上游是一枚 `size="md" variant="flat"` 的图标键
+			//（`operation/index.tsx:44`，tooltip「添加到播放列表」）。
+			if flatIconButton(c, iconEnqueue, "添加到播放列表", iconMd).
+				Size(iconHitMd, iconHitMd).Padding(0, 5).
+				Tooltip("添加到播放列表").Clicked() {
 				s.addWholeCollectionToQueue(p)
 			}
 			s.viewCollectionStar(c, p)
@@ -662,7 +666,9 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 			ui.Spacer(c)
 
 			// 多选开关。多选态开着时这一排还在，只是列表左边多了一列勾。
-			multi := ui.Button(c, "多选")
+			// 它是文字键（那是「一个模式」，不是一个动作），但同样不走
+			// `ui.Button`——那一圈描边在这一排上是唯一的异类。
+			multi := flatButton(c, "多选")
 			if p.multi {
 				multi = multi.Background(t.SurfaceHover)
 			}
@@ -674,8 +680,10 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 
 // viewCollectionStar 是收藏 / 取消收藏那个星标。
 //
-// Biu 是实心 / 空心两个图标（`operation/fav-toggle.tsx:12-20`）——MyGo 没带
-// 图标集，拿一个字代替：★ 收藏着、☆ 没收藏着。
+// Biu 是实心 / 空心两个图标（`operation/fav-toggle.tsx:12-20`），而且是
+// `isIconOnly size="md" variant="flat"` 的一枚图标键。我们照它——图标集里
+// `iconStar` / `iconStarFilled` 就是那两个文件，画哪一张仍由 `favIcon` 说了算
+// （状态图标唯一出口那条规矩）。
 //
 // ⚠️ Biu 那一侧对「视频系列」和「自己创建的收藏夹」不画这个按钮
 // （`operation/index.tsx:47-49`）。这一页拿不到「是不是自己创建的」
@@ -683,11 +691,13 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 // 让服务端拒绝比在界面上猜一个条件准。
 func (s *Shell) viewCollectionStar(c *ui.Context, p *collectionPage) {
 	info := s.app.Collection(p.ref)
-	mark, tip := "☆", "收藏这个收藏夹"
+	tip := "收藏这个收藏夹"
 	if info.Faved {
-		mark, tip = "★", "取消收藏"
+		tip = "取消收藏"
 	}
-	if ui.Button(c, mark).Tooltip(tip).Label(tip).Clicked() {
+	if flatIconButton(c, favIcon(info.Faved), tip, iconMd).
+		Size(iconHitMd, iconHitMd).Padding(0, 5).
+		Tooltip(tip).Clicked() {
 		s.setCollectionFav(p, !info.Faved)
 	}
 }
@@ -704,14 +714,21 @@ func (s *Shell) viewCollectionStar(c *ui.Context, p *collectionPage) {
 // 用户按之前分不清那一下到底是 B 站上的收藏夹没了，还是只是这一侧不显示了。
 func (s *Shell) viewCollectionMore(c *ui.Context, p *collectionPage) {
 	items := s.collectionMoreItemsFor(p)
-	ui.MenuButton(c, "更多", func(m *ui.Menu) {
-		for _, item := range items {
-			if m.Item(item.label).Chosen() {
-				s.collectionMoreAction(p, item)
-				return
+	// 上游是一枚 `isIconOnly variant="flat"` 的 ⋯（`operation/menu.tsx:114`）。
+	// `.Menu()` 本身就是「按钮 + 菜单」（`mygo/ui/menu.go` 顶上那个例子就是用
+	// `ButtonBase` 拼的），所以扁平配方接得上——`ui.MenuButton` 那一版会自己
+	// 画一圈描边和一枚 ▾，放在这一排新扁平的三枚旁边就它一个不是。
+	flatIconButton(c, iconMore, "更多操作", iconMd).
+		Size(iconHitMd, iconHitMd).Padding(0, 5).
+		Tooltip("更多").
+		Menu(func(m *ui.Menu) {
+			for _, item := range items {
+				if m.Item(item.label).Chosen() {
+					s.collectionMoreAction(p, item)
+					return
+				}
 			}
-		}
-	}).Label("更多操作")
+		})
 }
 
 // collectionMoreBaseItems 是 ⋯ 菜单里**每一页都有**的那几项。文案照 Biu。
