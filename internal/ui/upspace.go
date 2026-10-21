@@ -199,6 +199,10 @@ func (s *Shell) upSpaceFor(mid int64) *upSpace {
 	// ⚠️ **「正在加载」那一格由外面递进去**（票 #138）：分页列表自己那一句是
 	// 13px 淡灰缩在列表左上角，而「暂无投稿」是居中 15pt 两行。
 	sp.videos.SetEmptyView(loadingCell("正在加载…"))
+	// 播放量 + 投稿时间：这一页两个数都有（`UpVideo.Play` / `UpVideo.Created`，
+	// 后者来自接口的 `created`——**不是 pubdate**，见那个字段的注释）。
+	// `Now` 传的是 `s.now`（闭包），不是 `s.clock.Now`（值）。
+	sp.videos.SetColumns(list.Columns{PlayCount: true, PubTime: true, Now: s.now})
 	s.upSpaces[mid] = sp
 	return sp
 }

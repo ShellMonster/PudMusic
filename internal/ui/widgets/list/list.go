@@ -53,8 +53,9 @@ import (
 //
 // 字段照 Biu 的 `src/components/music-list-item/index.tsx` 那一行取：
 // 封面、标题、UP 名，外加列表里定位一首歌要用的标识。Biu 那行还有播放量和
-// 投稿时间两列，这里没画——它们要 B 站接口的数据才有值（本地音乐没有这两个），
-// 空着画一列是给用户看一片空白。等接了 B 站再加，别提前画。
+// 投稿时间两列——它们要 B 站接口的数据才有值，所以**哪一页画不画由那一页
+// 自己的 `Columns` 决定**（见那个类型）：本地音乐两样都没有，硬画两列空的
+// 是给用户看一片空白。
 type Music struct {
 	// ID 是这一行的身份，**必须稳定且唯一**。
 	//
@@ -85,30 +86,81 @@ type Music struct {
 	Duration time.Duration
 
 	// View 是播放量。**零值是「这一页没有这个数」**——本地音乐（文件没有播放量）、
-	// 历史记录（那个接口不给）、搜索的「用户」那一档（用户不是视频）都是零，而
-	// 网格卡片封面底部那一条渐变上**就不画那半边**（见 `hover.CardCover`）。
+	// 历史记录（那个接口不给）、搜索的「用户」那一档（用户不是视频）、收藏夹里的
+	// 音轨（`cnt_info` 那一条本来就不带播放数）都是零，而网格卡片封面底部那一条
+	// 渐变上**就不画那半边**（见 `hover.CardCover`），列表那一列也留空。
 	//
 	// ⚠️ **它不是身份的一部分**：同一首歌在不同页面上播放量可能不一样（收藏夹里那份是
 	// 收藏夹那一刻的），而铁律四要的是稳定且唯一的**身份**。别把它并进 ID。
 	//
-	// ⚠️ **哪些页面有它**（往这一行填它的地方就是那四处，这一层不替谁猜）：
+	// ⚠️ **哪些页面有它**（往这一行填它的地方就是那五处，这一层不替谁猜）：
 	//
 	//	有：首页 / 新歌速递（`homeMusicOf`）、搜索歌曲与视频（`searchVideoMusic`）、
-	//	    UP 空间投稿（`fetchVideos`）、稍后再看（`laterRowOf`）——这四个数据源
-	//	    本来就带着这个数（`RecommendItem.View` / `VideoHit.Play` /
-	//	    `UpVideo.Play` / `LibraryItem.View`），是往 `Music` 上翻的时候漏了。
+	//	    UP 空间投稿（`fetchVideos`）、稍后再看（`laterRowOf`）、收藏夹 / 合集 /
+	//	    系列（`fetchCollectionPage`，收藏夹那一路的数据在 `bili.Media.View`，
+	//	    来源是接口的 `cnt_info.play`）。
 	//	没有（而且本来也没有）：本地音乐（文件没有播放量）、历史记录（那个接口
-	//	    不给）、搜索的「用户」那一档（用户不是视频）、收藏夹（`bili.Media`
-	//	    压根没解析 `cnt_info.play`——补它要改 service 层，验收又不许打真接口
-	//	    去核那个字段名）。
+	//	    不给）、搜索的「用户」那一档（用户不是视频）。
 	//
 	// 所以「哪一格空着」是**数据源的事**，不是某一页忘了填——而空着的效果是那半边
 	// 不画（理由见 `hover.CardCover`）。
 	View int64
 
+	// PubTime 是这一行**时间那一列**要画的时间。零值是「这一页没有这个数」——
+	// 那一格留空，不拿别的时间顶上。
+	//
+	// ⚠️ **各页的时间不是同一个字段**（票 #142 要求逐页核，不许拿一个页的
+	// 字段套另一个页）：
+	//
+	//	搜索歌曲 / 视频	`pubdate`（`bili.VideoHit.PubDate`）
+	//	UP 空间投稿	`created`（`bili.UpVideo.Created`，不是 pubdate）
+	//	稍后再看		`pubdate`（`bili.ToViewItem.PubDate`）
+	//	收藏夹		`fav_time`（收藏时间，那一页的表头也写「收藏时间」）
+	//	合集 / 系列	`pubtime`（`bili.Media.PubTime`）
+	//	首页		没有——上游首页就是 `hidePubTime`，而且那一层没把 pubdate
+	//			带到 RecommendItem 上。
+	//	本地音乐 / 历史记录 / 搜索的「用户」	没有。
+	//
+	// 哪些页真的画这一列由那一页的 `Columns.PubTime` 决定；画了而这一条是零值
+	// 时那一格空着（比如收藏夹里一条没给 fav_time 的音轨）。
+	PubTime time.Time
+
 	// Item 是播放和右键菜单真正用的那一项。B 站的歌以后由接口填，
 	// 现在先有本地文件（app.LocalItem）。
 	Item app.Item
+}
+
+// Columns 是一页的行**除了**序号 / 封面 / 标题 / 时长 / 行尾那枚「⋯」之外
+// 还画哪两列。
+//
+// ⚠️ **行和表头读同一份**：只给表头加一列、或者只给行加一列，右边那几列
+// 就整整错开一列的宽——而那种错在画面上只是「表头歪了一点」。所以一页
+// 只调一次 `SetColumns`，两边都从这里读。
+//
+// 零值是两列都不画：本地音乐、搜索的「用户」那一档都是这样（历史记录自己
+// 画行，压根不走这一个）——「摆一列这一页没有内容的」比不摆更糟（见
+// `header.go` 文件头）。
+type Columns struct {
+	// PlayCount 报播放量那一列画不画。
+	PlayCount bool
+	// PubTime 报时间那一列画不画。
+	PubTime bool
+	// PubTimeTitle 是时间那一列的表头字。空串是「投稿时间」——收藏夹那一页
+	// 写的是「收藏时间」，因为它画的是 `fav_time`（见 `Music.PubTime`）。
+	PubTimeTitle string
+	// Now 是判「几天前」用的「现在」。nil 是墙钟。
+	//
+	// ⚠️ **传一个读外壳时钟的闭包，别传 `s.clock.Now` 这个值**：测试是在
+	// 外壳建好之后才把 `s.clock` 换成假时钟的，值在那一刻就已经定住了。
+	Now func() time.Time
+}
+
+// pubTimeTitle 是时间那一列表头该写的字（空串的默认值只写这一处）。
+func (c Columns) pubTimeTitle() string {
+	if c.PubTimeTitle == "" {
+		return "投稿时间"
+	}
+	return c.PubTimeTitle
 }
 
 // List 是一个虚拟列表：几千行也只建看得见的那几行。
@@ -168,6 +220,16 @@ type List struct {
 	// `SwitchView` 里的另一个控件（`grid.go`）。`List` 看见 `ViewCard` 时的行为
 	// 是**退回列表**而不是画半张网格——理由见 SetView 的注释。
 	view View
+
+	// cols 是这一页要多画哪两列（播放量 / 时间），见 SetColumns。
+	cols Columns
+
+	// width 是这个列表**上一帧**量出来的宽，用来判「那两列放不放得下」。
+	//
+	// ⚠️ 量的是 `ui.List` 自己的盒子（`Bounds` 读的是上一帧的盒子）。所以
+	// 窄窗口的头一帧还是按全画，下一帧才收——和网格换列数同一个节奏（见
+	// `Grid.width`）。`View` 末尾写它，`Columns()` 读它。
+	width float32
 
 	// failed 是画崩了的行（按 ID 记），下一帧不重试。
 	//
@@ -255,6 +317,81 @@ func (l *List) SetView(v View) {
 
 // Layout 返回这一份歌此刻的摆法。页面和测试都要读它（见 SwitchView）。
 func (l *List) Layout() View { return l.view }
+
+// SetColumns 换这一页多画哪两列（播放量 / 时间）。零值是两列都不画。
+//
+// ⚠️ **它同时决定行和表头**（见 Columns 的注释）：只换一边的话右边那几列
+// 整整错开一列的宽。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (l *List) SetColumns(c Columns) { l.cols = c }
+
+// Columns 返回这一页**这一帧真的会画**哪几列。
+//
+// 它不一定等于 `SetColumns` 装的那一份：窗口窄到放不下时，这里会把「时间」
+// 先收掉、再不行把「播放量」也收掉（见 `minTitleWidth` 和 `fixedWidth`）。
+// 表头那一层和行读的都是它，所以两边永远一致。
+//
+// ⚠️ **判据是上一帧量到的列表宽**（`l.width`）：第一帧还没量，照全画；
+// 第二帧起按真的宽度算。和网格按容器宽换列数是同一个节奏。
+func (l *List) Columns() Columns {
+	c := l.cols
+	if l.width <= 0 {
+		return c
+	}
+	if c.PubTime && l.width-l.fixedWidth(c) < minTitleWidth {
+		c.PubTime = false
+	}
+	if c.PlayCount && l.width-l.fixedWidth(c) < minTitleWidth {
+		c.PlayCount = false
+	}
+	return c
+}
+
+// minTitleWidth 是**标题那一列至少留多宽**。
+//
+// 两列是这一票加的，而列表的宽是窗口减去侧栏和页边距来的——最小窗口 900
+// 配最宽侧栏 480 时只剩 380，全画的话标题那一列是 0 甚至负数，歌名和表头
+// 「标题」都只剩「…」（评审量到过）。80 是「还读得出几个字」的量：font 14
+// 下大约五个汉字，够认出是哪一首。到这个宽度以下就先把「投稿时间」收掉，
+// 它有 80 宽，正好换回一条像样的歌名；再不够才收播放量（64），那时标题
+// 回到基线的样子。
+//
+// ⚠️ **收的是「这一帧画不画」，不是把 `SetColumns` 改掉**：窗口拖宽之后
+// 下一帧自己回来。
+const minTitleWidth = 80
+
+// fixedWidth 是这一行**除标题那一列以外**的宽：序号、封面、可选的两列、
+// 时长、行尾那枚「⋯」，加上列间距和行的左右内边距。
+//
+// 它和 `viewCard` 里摆的那些盒子是同一批常量（`MetricsOf`），所以不会出现
+// 「判据算的和真摆的不是一个数」。
+func (l *List) fixedWidth(c Columns) float32 {
+	m := MetricsOf(l.view)
+	items := 5 // 序号 / 封面 / 标题 / 时长 / 行尾「⋯」
+	w := m.Index + m.Cover + m.Clock + OperationColWidth + 2*m.PadX
+	if c.PlayCount {
+		items++
+		w += m.Play
+	}
+	if c.PubTime {
+		items++
+		w += m.Date
+	}
+	return w + float32(items-1)*m.Gap
+}
+
+// now 是判「几天前」用的「现在」。没装 `Columns.Now` 时是墙钟。
+//
+// ⚠️ **nil 时退回 `time.Now()` 是有意的**：只有界面那一层知道该用哪颗时钟，
+// 而 `widgets/list` 的独立测试没有外壳。装上 `Columns.Now` 的页面（以及界
+// 面层的测试）都走那颗假时钟。
+func (l *List) now() time.Time {
+	if l.cols.Now != nil {
+		return l.cols.Now()
+	}
+	return time.Now()
+}
 
 // SetScroll 让这个列表把滚动位置写进 s（每帧写一次），调用方读它就知道滚到
 // 哪儿了，也能靠改它把列表滚到某处。传 nil 就断开。
@@ -430,6 +567,13 @@ func (l *List) View(c *ui.Context) {
 	// 滚动位置写回调用方的句柄（见 SetScroll）。
 	if l.scroll != nil {
 		list.TrackScroll(l.scroll)
+	}
+
+	// 量这一帧的列表宽，下一帧判那两列放不放得下（`Columns`）。`Bounds` 读的
+	// 是**上一帧**量好的盒子，所以窄窗口的头一帧还是照全画——和网格换列数
+	// 同一个节奏，见 `Grid.width`。
+	if bw := list.Bounds().W; bw > 0 {
+		l.width = bw
 	}
 
 	// 量滚动条的悬停。界面层下一帧据此把主题的滚动条色换深一档（`Hot` 的

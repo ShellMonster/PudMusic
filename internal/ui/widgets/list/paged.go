@@ -228,6 +228,12 @@ func (p *PagedList) Selected() (Music, bool) { return p.surf.Selected() }
 // 这一页没变」——正是本票要消灭的那一种。
 func (p *PagedList) SetView(v View) { p.surf.SetView(v) }
 
+// SetColumns 换这一页多画哪两列（播放量 / 时间）。理由和行、表头那一份
+// 都在 `Columns` 上（行和表头读同一份，别只装一边）。
+//
+// ⚠️ 只能由界面线程调。
+func (p *PagedList) SetColumns(c Columns) { p.surf.SetColumns(c) }
+
 // SetEmptyView 换掉「**第一页在途时那一格**」的画法。
 //
 // ⚠️ **它只管这一档**：拉失败了、或者已经有歌了，那一格都不归它管（见

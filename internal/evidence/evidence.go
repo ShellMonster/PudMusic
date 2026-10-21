@@ -491,6 +491,46 @@ var Items = []Item{
 			"TestThePreviewHighlightsTheChosenStyle",
 		},
 	},
+	{
+		Category: Paging,
+		// 播放量与投稿时间两列（票 #142）。
+		//
+		// 这一张是**功能票**，所以两头都要有证据：
+		//
+		//   - 数据层：各页接口返回里的那个数真的解析进了条目——收藏夹是
+		//     `cnt_info.play` / `fav_time` / `pubtime`，搜索是 `pubdate`，
+		//     UP 空间是 `created`（**不是 pubdate**）；没有这个数的那一条是
+		//     零值，不是编出来的 0。
+		//   - 界面层：列表行里有那一格、表头那两列、网格卡片封面底部渐变条的
+		//     左半边也有它，而且**收藏夹那一路也有**（票面点名最关键的一条）。
+		//   - 时间那一列的格式定在 `PubTimeText`（今天 / 昨天 / N天前 /
+		//     MM-DD / YYYY-MM-DD），拿假时钟判，不跟墙钟走。
+		Spec: "播放量与投稿时间：各页接口字段解析进条目（没有的页是零值不是 0）、列表行与表头有这两列、网格渐变条左半边有播放量、收藏夹一路也有、时间列的显示格式与「几天前」的日历日判据；窄窗口（最小窗口 900 + 侧栏 480）下两列依次让位给标题和行尾「⋯」，紧凑档播放量列装得下最长的一折",
+		Tests: []string{
+			"TestCollectionMediasCarriesThePlayCountAndTheTimes",
+			"TestSearchVideosReadsTheResult",
+			"TestSpaceVideosReadsBothShapesOfDurationAndCid",
+			"TestEachPageThatHasAPlayCountCarriesItIntoTheRow",
+			"TestTheUpSpaceVideosCarryTheirPlayCount",
+			"TestTheRowsAndTheHeaderCarryThePlayCountAndTheTime",
+			"TestTheColumnsStayOffWhenThePageDoesNotAskForThem",
+			"TestTheTimeColumnTitleCanBeChangedPerPage",
+			"TestPubTimeTextFoldsLikeTheTicket",
+			"TestPubTimeTextCountsCalendarDays",
+			"TestTheCollectionPageShowsThePlayCountAndTheCollectionTime",
+			"TestTheCollectionGridCarriesThePlayCountIntoTheGradient",
+			"TestTheCollectionTimeTitleFollowsTheContainer",
+			"TestTheSearchVideoTabShowsThePlayCountAndTheUploadTime",
+			"TestTheHomeTabShowsThePlayCountButNoUploadTime",
+			"TestTheLaterPageShowsTheUploadTimeAsWellAsTheAddTime",
+			// 评审返工：窄窗口下让位（先收时间列、再收播放量），标题与「⋯」不许被挤掉。
+			"TestTheColumnsGiveWayToTheTitleWhenTheListIsNarrow",
+			"TestTheCompactPlayCountColumnFitsTheLongestFold",
+			"TestTheColumnsLeaveTheTitleVisibleInTheNarrowestWindow",
+			"TestTheSearchListGivesWayToTheTitleAtTheWidestSidebar",
+			"TestTheLaterRowsKeepTheirOpButtonAtNarrowWidths",
+		},
+	},
 
 	// ── 双平台 ─────────────────────────────────────────────────────────────
 	{

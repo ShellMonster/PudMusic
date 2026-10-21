@@ -78,6 +78,13 @@ type LibraryItem struct {
 	// ViewedAt 是「什么时候加进稍后再看」/「什么时候看的」。两个时间在两页
 	// 上说的是同一件事——这一条出现在这个列表里的时间。
 	ViewedAt time.Time
+	// PubDate 是投稿时间。**只有稍后再看有**（历史记录那个接口不给，
+	// 上游的历史页画的也是观看时间，不是投稿时间）。
+	//
+	// ⚠️ 它和 ViewedAt 是两个时间，别拿一个顶另一个：稍后再看那一页的
+	// 日期筛选筛的是 `add_at`（ViewedAt），而列表上**另外**有一列画的是
+	// 投稿时间（上游 `later/list.tsx:68`）。
+	PubDate time.Time
 	// View 是播放量。**只有稍后再看有**（历史记录的接口不给）。
 	View int64
 	// CanPlay 报这一条能不能放。稍后再看里的 PGC 放不了（取流那一套对 PGC
@@ -121,6 +128,7 @@ func (l *Library) ToView(ctx context.Context, page int, q LibraryQuery) ([]Libra
 			Duration: it.Duration,
 			Progress: it.Progress,
 			ViewedAt: it.AddAt,
+			PubDate:  it.PubDate,
 			View:     it.View,
 			CanPlay:  !it.IsPGC,
 			Item:     onlineItem(it.Bvid, it.Cid, it.Title, it.Pic, it.OwnerName, it.OwnerMid),

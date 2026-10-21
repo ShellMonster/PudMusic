@@ -41,6 +41,7 @@ func videoItem(bvid, title string) map[string]any {
 		"bvid": bvid, "title": title,
 		"pic":      "//i2.hdslb.com/bfs/archive/" + bvid + ".jpg",
 		"play":     12345,
+		"pubdate":  1700000000,
 		"duration": "4:20",
 	}
 }
@@ -214,6 +215,11 @@ func TestSearchVideosReadsTheResult(t *testing.T) {
 	}
 	if h.Play != 12345 {
 		t.Errorf("播放量 %d，want 12345", h.Play)
+	}
+	// 投稿时间：上游 `pages/search/video-list/list.tsx:61` 画的是
+	// `formatSecondsToDate(item.pubdate)`，也就是这个 `pubdate`（Unix 秒）。
+	if got, want := h.PubDate.Unix(), int64(1700000000); got != want {
+		t.Errorf("投稿时间 %d，want %d（pubdate）", got, want)
 	}
 	if pg.HasMore {
 		t.Errorf("只有 1 条却说有下一页")

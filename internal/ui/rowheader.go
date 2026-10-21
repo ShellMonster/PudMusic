@@ -15,13 +15,20 @@
 // 有那几列。**摆一列这一页没有内容的表头比不摆更糟**，而它糟得很安静：字都在、位置也
 // 在，只是下面永远是空的，用户看不出那是没接还是自己记错了。所以：
 //
-//   - 首页 / 搜索 / 收藏夹 / UP 空间 / 本地音乐：走 `widgets/list` 的行，只有编号 / 标题 /
-//     时长三列（`list.CardHeaderSpec`）；
-//   - 稍后再看：编号 / 标题 / 播放量 / 加入时间 / 时长（下面那一档）；
+//   - 首页：编号 / 标题 / 播放量 / 时长（`list.Columns` 只开了播放量——上游首页
+//     也是 `hidePubTime`）；
+//   - 搜索的歌曲 / 视频、UP 空间投稿：编号 / 标题 / 播放量 / 投稿时间 / 时长；
+//   - 搜索的用户：编号 / 标题（两样都没有）；
+//   - 收藏夹 / 合集 / 系列：编号 / 标题 / 播放量 / 收藏时间或投稿时间 / 时长
+//     （`list.Columns` 的 `PubTimeTitle`，见 `collectionpage.go`）；
+//   - 本地音乐：编号 / 标题 / 时长（两样都没有）；
+//   - 稍后再看：编号 / 标题 / 播放量 / 加入时间 / 投稿时间 / 时长（下面那一档；
+//     窄窗口下两个时间列按 `laterTimeCols` 依次让位给标题和行尾的「⋯」）；
 //   - 历史记录：编号 / 标题 / 播放进度 / 观看时间（下面那一档）。
 //
-// 「投稿时间」我们走的是「加入时间 / 观看时间」——那是这一页真有的那个时间，和它的
-// 筛选器筛的是同一个（`later.go` 文件头写了为什么）。
+// ⚠️ **「加入时间」和「投稿时间」是两个时间**（稍后再看那一页两列都画）：
+// 前者是这一页的日期筛选筛的那个 `add_at`，后者是上游画的那个 `pubdate`
+// （`later.go` 文件头写了为什么两个都留）。
 //
 // # ⚠️ 网格那一档不摆表头
 //
@@ -41,17 +48,27 @@ import (
 // ⚠️ **封面那一列的空位夹在编号和标题中间**：行里序号和标题中间隔着 48 的封面，表头不
 // 给它留位置，右边那几列就整整差 56（这一页原来那份表头就差在这里——它把「标题」摆在序
 // 号后面）。
-func laterHeaderSpec(mt listMetrics, key string) list.HeaderSpec {
+func laterHeaderSpec(mt listMetrics, key string, showPubDate, showAddTime bool) list.HeaderSpec {
+	cols := []list.HeaderCol{
+		{Title: "#", Width: mt.index, End: true},
+		{Width: mt.cover}, // 封面：行里有、这一列没字
+		{Title: "标题"},
+		{Title: "播放量", Width: mt.count, End: true},
+	}
+	// 两个时间列都由 `laterTimeCols` 决定画不画（行那一处读的是同一个
+	// 判据）：窄窗口先收「投稿时间」，连基线都放不下时再收「加入时间」。
+	if showAddTime {
+		cols = append(cols, list.HeaderCol{Title: "加入时间", Width: mt.date, End: true})
+	}
+	// 投稿时间：上游这一页画的是 `pubdate`（票 #142）。它和「加入时间」
+	// 是两个时间——那一个是筛选器筛的 `add_at`，这一列才是「哪天发的」。
+	if showPubDate {
+		cols = append(cols, list.HeaderCol{Title: "投稿时间", Width: mt.pubDate, End: true})
+	}
+	cols = append(cols, list.HeaderCol{Title: "时长", Width: mt.clock, End: true})
 	return list.HeaderSpec{
-		Key: key,
-		Cols: []list.HeaderCol{
-			{Title: "#", Width: mt.index, End: true},
-			{Width: mt.cover}, // 封面：行里有、这一列没字
-			{Title: "标题"},
-			{Title: "播放量", Width: mt.count, End: true},
-			{Title: "加入时间", Width: mt.date, End: true},
-			{Title: "时长", Width: mt.clock, End: true},
-		},
+		Key:  key,
+		Cols: cols,
 		PadY: mt.padY, PadX: mt.padX, Gap: mt.gap,
 	}
 }
@@ -79,7 +96,10 @@ func historyHeaderSpec(mt listMetrics, key string) list.HeaderSpec {
 // ⚠️ **网格那一档什么都不画**（理由见文件头）。两页都照这一句调：
 //
 //	if !p.rows.isGrid() {
-//	    viewLibraryHeader(c, p.rows, laterHeaderSpec, "later:header")
+//	    viewLibraryHeader(c, p.rows, func(mt listMetrics, key string) list.HeaderSpec {
+//	        pubDate, addTime := laterTimeCols(p.rows)
+//	        return laterHeaderSpec(mt, key, pubDate, addTime)
+//	    }, "later:header")
 //	}
 //
 // 规格是一个**值**而不是一个页面方法：两页的列差在右边那两列，把它们并进一个函数里就

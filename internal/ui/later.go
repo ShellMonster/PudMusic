@@ -6,10 +6,16 @@
 //
 // # 两处按自己的判断改了上游
 //
-//   - **表头多一列「加入时间」**（上游 `music-list-item/header.tsx` 是「投稿时间」，
+//   - **表头多一列「加入时间」**（上游 `music-list-item/header.tsx` 只有「投稿时间」，
 //     传的是 `item.pubdate`）。**上游自己的日期筛选筛的是 `add_at`**——跟着筛的那
 //     个时间画，用户才看得见「我现在筛的是哪一段」，摆一个筛选没在用的时间是让人
 //     以为筛错了。
+//
+//     ⚠️ **上游那一列「投稿时间」也在**（票 #142 补的，画的是 `pubdate`）：
+//     两列并排，一列回答「我筛的是哪一段」，一列回答「哪首是哪天发的」。
+//     拿一个顶另一个，总有一半问题没答案。**窄窗口下它们依次让位**给标题和
+//     行尾的「⋯」（`laterTimeCols`）——窗口够宽时两列都在。
+//
 //   - **页头右上角那个「清除已看完」不摆**（上游 `later/index.tsx:221`）。它是
 //     **批量删除**，而本项目还没有一份**共用**的确认弹窗：收藏夹批量删、本地音乐
 //     删文件/删目录、下载记录删/清空各自有一份（PLAN 的 C-43 / L-05 那一格就写
@@ -49,6 +55,10 @@ const (
 	listPadX  = 8
 	listPadY  = 8
 	rowGap    = 8
+	// colPubDate 是「投稿时间」那一列的宽。这一页的画法有三档
+	// （今天 / 昨天 / N天前 / MM-DD / YYYY-MM-DD），最长是 YYYY-MM-DD
+	// （10 个字符，font 12 下约 66 宽），84 够。
+	colPubDate = 84
 	// titleLines 是**网格那一档**一格歌名最多几行。2 是 Biu 的 `line-clamp-2`
 	// （上游的 music-card 就是两行）。
 	titleLines = 2
@@ -115,6 +125,59 @@ func (s *Shell) fetchLater(ctx context.Context, page, loaded int, q libraryQuery
 	return rows, loaded+len(rows) < count, nil
 }
 
+// laterMinTitleWidth 是这一页的标题列至少留多宽。和 `widgets/list` 的
+// `minTitleWidth` 是同一个数（80）：到这个宽度以下就先把「投稿时间」收掉。
+const laterMinTitleWidth = 80
+
+// laterFixedWidth 是这一行**除标题以外**的宽。withPubDate 报算不算新加的
+// 「投稿时间」那一列。
+func laterFixedWidth(mt listMetrics, withPubDate bool) float32 {
+	// 孩子：序号 / 封面 / 标题 / 播放量 / 加入时间 / [投稿时间] / 时长 /「⋯」。
+	items := 7
+	w := mt.index + mt.cover + mt.count + mt.date + mt.clock +
+		list.OperationColWidth + 2*mt.padX
+	if withPubDate {
+		items++
+		w += mt.pubDate
+	}
+	return w + float32(items-1)*mt.gap
+}
+
+// laterTimeCols 报这一页此刻画哪几个时间列：新加的「投稿时间」和原有的
+// 「加入时间」。
+//
+// 判据是**上一帧量到的列表宽**（`pagedRows.width`，由 `drawList` 末尾写）：
+// 头一帧还没量，先照画，下一帧按真的宽度收——和 `widgets/list` 的
+// `List.Columns` 同一个节奏。表头和行读的是同一个判据。
+//
+// 两级让位：
+//
+//  1. **先收「投稿时间」**（这一票新加的）：它放不下时收掉，把宽度还给标题
+//     ——900 宽 + 侧栏 400 时加上它固定宽合计 536、内容只有 460，不收的话先
+//     被压成 0 的是标题，接着行尾那枚「⋯」被挤出窗口（评审量到过）。
+//  2. **基线那五列也留不出标题时再收「加入时间」**：900 + 400 时基线
+//     固定宽 444、内容只有 460——标题只剩 16，画出来是「…」；900 + 480 时
+//     基线固定宽 444、内容只有 380——标题 0、行尾的「⋯」被挤出画面。
+//     收掉「加入时间」之后标题回到 134（400）/ 54（480），「⋯」也可见。
+//
+// 两列都收掉之后标题仍有 54（900 + 480），那是这一页在这个窗口下能给出的
+// 最好结果；再往下就只剩窗口 900 加更宽侧栏，而侧栏上限就是 480。
+func laterTimeCols(rows *pagedRows) (pubDate, addTime bool) {
+	w := rows.width
+	if w <= 0 {
+		return true, true // 还没量过：先照全画，下一帧收
+	}
+	mt := metricsOf(rows.Layout())
+	base := laterFixedWidth(mt, false)
+	if w-(base+mt.pubDate+mt.gap) >= laterMinTitleWidth {
+		return true, true
+	}
+	if w-base >= laterMinTitleWidth {
+		return false, true
+	}
+	return false, false
+}
+
 // laterRowOf 把一行业务状态变成这一页的一行。
 func laterRowOf(it app.LibraryItem) libraryRow {
 	return libraryRow{
@@ -126,7 +189,14 @@ func laterRowOf(it app.LibraryItem) libraryRow {
 			Duration: it.Duration,
 			// 播放量：列表那一列和网格卡片封面底部那一条都是它（`Music.View`）。
 			View: it.View,
-			Item: it.Item,
+			// 投稿时间：接口的 `pubdate`（`app.LibraryItem.PubDate`）。
+			//
+			// ⚠️ **它和这一页的「加入时间」是两个时间，两列都画**：
+			// 「加入时间」是筛选器筛的那个 `add_at`（本文件头第一条），
+			// 「投稿时间」是上游画的那个 `pubdate`。拿一个顶另一个的话，
+			// 用户要么看不出筛的是哪一段、要么看不到「哪首是哪天发的」。
+			PubTime: it.PubDate,
+			Item:    it.Item,
 		},
 		Progress: it.Progress,
 		ViewedAt: it.ViewedAt,
@@ -180,7 +250,12 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 			// 表头**只在列表 / 紧凑两档**摆：网格里一格是一首歌，表头上那几列
 			// 和格子对不上号（理由见 `rowheader.go` 文件头）。
 			p.rows.SetView(s.displayView())
-			viewLibraryHeader(c, p.rows, laterHeaderSpec, laterHeaderKey)
+			// 两个时间列放不放得下由 `laterTimeCols` 说，行那一处读的是同一个
+			// 判据（见 drawLaterRow）。
+			viewLibraryHeader(c, p.rows, func(mt listMetrics, key string) list.HeaderSpec {
+				pubDate, addTime := laterTimeCols(p.rows)
+				return laterHeaderSpec(mt, key, pubDate, addTime)
+			}, laterHeaderKey)
 			p.rows.View(c)
 			s.noteScrollbar(p.rows.Hot())
 		})
@@ -216,8 +291,21 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 
 		ui.Text(c, playCountText(m.View)).Width(mt.count).TextAlign(ui.End).
 			FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
-		ui.Text(c, dayText(m.ViewedAt)).Width(mt.date).TextAlign(ui.End).
-			FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
+		// 两个时间列放不放得下由 `laterTimeCols` 说（表头那一处读的是同一个
+		// 判据）：窄窗口先收「投稿时间」，连基线都放不下时再收「加入时间」。
+		pubDate, addTime := laterTimeCols(rows)
+		if addTime {
+			ui.Text(c, dayText(m.ViewedAt)).Width(mt.date).TextAlign(ui.End).
+				FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
+		}
+		// 投稿时间：上游这一页画的就是 `pubdate`（本文件头第一条）。
+		//
+		// ⚠️ **它和「加入时间」不是同一个时间**：筛选器筛的是 `add_at`，
+		// 而「哪首是哪天发的」问的是 `pubdate`。
+		if pubDate {
+			ui.Text(c, list.PubTimeText(m.PubTime, s.now())).Width(mt.pubDate).
+				TextAlign(ui.End).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
+		}
 		ui.Text(c, clockText(m.Duration)).Width(mt.clock).TextAlign(ui.End).
 			FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
 

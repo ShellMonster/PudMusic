@@ -296,6 +296,29 @@ type Media struct {
 	// 用户会发现「收藏夹里的歌自己少了几首」而且不知道为什么——那是比看见
 	// 一条灰掉的失效内容更难解释的。
 	Attr int
+
+	// View 是播放量。收藏夹那个接口把它放在 `cnt_info.play` 里
+	// （上游 `service/fav-resource.ts` 的 `FavMediaCntInfo`：
+	// `{ collect, play, danmaku }`）。
+	//
+	// ⚠️ **零值是「这一次没有这个数」，不是「零播放」**：音轨（type=12）
+	// 本来就没有播放量，界面那一格留空。别把它改成一个编出来的 0——那会让
+	// 用户在音轨上读到「0 播放」，而收藏夹页最要紧的判断依据就是这一列。
+	View int64
+
+	// FavTime 是**收藏时间**（`fav_time`，Unix 秒）。
+	//
+	// 收藏夹那一页表头写的是「收藏时间」、画的是它（上游
+	// `pages/video-collection/favorites/list.tsx:63` 的
+	// `formatSecondsToDate(item.fav_time)`）。零值是「这一次没给」。
+	FavTime time.Time
+
+	// PubTime 是**发布时间**（`pubtime`，Unix 秒）。
+	//
+	// 合集 / 系列那一页表头写的是「投稿时间」、画的是它（上游
+	// `collections/list.tsx:75` 与 `series/list.tsx:84`）。零值是「这一次
+	// 没给」——比如这一条没有发布时间时，那一格留空，不拿别的时间顶上。
+	PubTime time.Time
 }
 
 // 容器里那几种内容类型。B 站的 `FavMedia.type`。
@@ -337,11 +360,17 @@ type resourceListData struct {
 		Page     int    `json:"page"`
 		CTime    int64  `json:"ctime"`
 		PubTime  int64  `json:"pubtime"`
+		FavTime  int64  `json:"fav_time"`
 		Bvid     string `json:"bvid"`
 		Upper    struct {
 			Name string `json:"name"`
 			Mid  int64  `json:"mid"`
 		} `json:"upper"`
+		// CntInfo 是状态数。播放量在 `play` 里（上游 `FavMediaCntInfo`）。
+		// 音轨那一条可能没有这个形状——零值就是「没有」，界面留空。
+		CntInfo struct {
+			Play int64 `json:"play"`
+		} `json:"cnt_info"`
 	} `json:"medias"`
 }
 
@@ -417,6 +446,13 @@ func (c *Client) CollectionMedias(ctx context.Context, id int64, sort Collection
 			// 歌会显示成 3 秒，而且界面上没有任何地方会露出错。
 			Duration: time.Duration(float64(m.Duration) * float64(time.Second)),
 			Attr:     m.Attr,
+			// 播放量在 `cnt_info.play`（上游 `FavMediaCntInfo`）。零值是
+			// 「没有这个数」——音轨那一条本来就没有，界面留空（见 Media.View）。
+			View: m.CntInfo.Play,
+			// 两个时间都是 Unix 秒；`unixSeconds` 把 0 / 负数收成零值，
+			// 于是「没给」和「1970 年」分得开。
+			FavTime: unixSeconds(m.FavTime),
+			PubTime: unixSeconds(m.PubTime),
 		})
 	}
 	return &CollectionPage{Medias: out, HasMore: d.HasMore}, nil
