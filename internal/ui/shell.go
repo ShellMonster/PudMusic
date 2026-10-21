@@ -281,7 +281,8 @@ type Shell struct {
 
 	// 顶栏这一摊。**同样只由 view 在主线程上读写**。
 	//
-	// searchFocused 是搜索框有没有焦点，顶栏用它染边框。浮层**不**靠它开
+	// searchFocused 是搜索框有没有焦点，顶栏用它把输入区的底色抬到 30%
+	// （上游 `group-data-[focus=true]:bg-…/30`）。浮层**不**靠它开
 	// （见 navbar_search.go 里那一段：焦点被 MyGo 还回来是个假信号）。
 	//
 	// ⚠️ 叫 searchKeyword 不叫 searchQuery：包级已经有一个 `searchQuery` 了
@@ -290,6 +291,9 @@ type Shell struct {
 	searchKeyword string
 	searchSuggest bool
 	searchFocused bool
+	// tips 是带延迟的悬停提示的状态（tooltip.go），按元素 ID 记。
+	// **只由界面线程读写**，和上面那几位同一条规矩。
+	tips map[uint64]*tipState
 	// terms 是浮层里「联想词」那一档的防抖状态，见 navbar_suggest.go。
 	//
 	// 挂在壳上而不是局部变量：即时模式每一帧都重画，「敲到哪儿了、从哪天起等的
@@ -733,6 +737,9 @@ func New(a *app.App) *Shell {
 	// 首页自己那一摊要在建好之后才有（它要用封面缓存），所以接在 images 后面。
 	// 操作接在应用状态上、提示接自己的 Toast，接法见 widgets/list 的 AppActions。
 	s.home = newHomePage(s.images, s.listActions(), s.wake.invalidate)
+	// 新歌速递那两块翻页键带提示；提示的状态挂在壳上（tooltip.go），所以这儿
+	// 把入口递进去。单独造那一块的测试拿到的是 nil，退回框架那枚。
+	s.home.newGrid.tip = s.tip
 	// 首页那一摊的取数接线（三个 Tab 的推荐单 + 新歌速递）：规则见
 	// homepage_feed.go。这里只递「要拉什么」，不管什么时候拉。
 	s.home.initLoads(homeLoads{
@@ -745,6 +752,7 @@ func New(a *app.App) *Shell {
 	// 下载记录页同理（downloadlist.go）：两个「打开」接系统那一份，它们在无头
 	// Tester 里会 panic，测试建完外壳就换成记动作的桩；记录那一条接应用层。
 	s.downloads = newDownloadsPage(a.DownloadSnapshots, systemOpenDir, mygo.Shell.ShowItemInFolder)
+	s.downloads.tip = s.tip
 	// 本地音乐页同理。⚠️ 传进去的唤醒是 `s.local.invalidate` 而不是
 	// `s.wake.invalidate`：后台扫完了要把**所有画过这一页的窗口**都叫醒，
 	// 只叫醒这一个外壳的窗口的话，另一个停在旧帧（铁律三）。
@@ -754,6 +762,7 @@ func New(a *app.App) *Shell {
 	// 那一支——那也是对的答案。
 	s.local = newLocalPage(a, s.images, s.listActions(), s.addToast, s.pickDir, s.displayView)
 	s.local.noteScrollbar = s.noteScrollbar
+	s.local.tip = s.tip
 	s.hist = newSearchHistory("")
 	s.keys = newShortcutKeys("")
 	s.picker = systemPathPicker{}

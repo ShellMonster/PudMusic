@@ -61,7 +61,7 @@ func (s *Shell) viewCollectionBatchBar(c *ui.Context, p *collectionPage) {
 
 		dl := ui.Button(c, "批量下载")
 		if !s.app.DownloaderMounted() {
-			dl = dl.Disabled(true).Tooltip("这个应用没把下载服务挂上")
+			dl = s.withTip(c, dl.Disabled(true), "这个应用没把下载服务挂上")
 		}
 		if dl.Clicked() {
 			s.askConfirm(p, confirmDownload, chosen, true)
