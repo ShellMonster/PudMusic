@@ -260,6 +260,24 @@ var Items = []Item{
 			"TestTheLongPressIsOffOnceTheSongIsLiked",
 		},
 	},
+	{
+		// 封面的暂时失败（断网、超时、5xx、限流）按指数退避自己再要一次；
+		// 永久失败（404、解码不了）不再要第二遍。所有等待都在假钟上推进，
+		// 「到点」是确定的，不受机器负载影响。
+		Category: FakeClock,
+		Spec:     "封面暂时失败按指数退避自己再试（间隔递增、封顶、有次数上限），永久失败不重试；重试走后台路径、守住在途上限，成功后唤醒窗口",
+		Tests: []string{
+			"TestTransientFailureRetriesWithGrowingBackoff",
+			"TestPermanentFailureIsNotRetried",
+			"TestFailureClassification",
+			"TestRetrySuccessFlipsStateAndWakes",
+			"TestTheCoverBecomesAnImageAfterARetry",
+			"TestFailureRecordsAreBounded",
+			"TestTouchReplacesAForgottenEntry",
+			"TestRetriesRespectTheInflightLimit",
+			"TestCloseDropsAWaitingRetry",
+		},
+	},
 
 	// ── 严格 HTTP fixture ──────────────────────────────────────────────────
 	{
