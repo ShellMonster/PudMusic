@@ -195,7 +195,7 @@ func (s *Shell) drawUpdateDialog(c *ui.Context, st app.UpdateState) {
 // updateVersionLine 是标题下面那一行。画法和设置页上那一行是同一份
 // （`versionLine`），只有字号不同。
 func (s *Shell) updateVersionLine(c *ui.Context, st app.UpdateState) {
-	s.versionLine(c, "update-versions", 13, st)
+	s.versionLine(c, "update-versions", 13, 700, st)
 }
 
 // updateNotes 画更新日志。空的那一档是居中的灰字，照 Biu。

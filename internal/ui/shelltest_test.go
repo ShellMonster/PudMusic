@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -204,6 +205,11 @@ func newTestShell(t *testing.T, opts ...shellOpt) *testShell {
 	// 包级那个迁移报告先抹成零（理由见 resetMigrationReport 的注释）。**必须在
 	// New(a) 之前**：外壳建好之后第一帧就会读它。
 	resetMigrationReport(t)
+
+	// 那一份「窗口看不看得见」是包级的（`hover.frameVisible`），而 `withView`
+	// 可以绕过 `Shell.View` 单独画一块——那样它就不会被每帧重设，于是上一条
+	// 测试留下的「看不见」会漏进这一条。每条测试都从「看得见」开始。
+	hover.SetFrameVisible(true)
 	if sp.migration != nil {
 		migration.mu.Lock()
 		migration.r = *sp.migration
