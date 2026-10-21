@@ -628,7 +628,7 @@ func (p *PagedList) stop() {
 // items.length + 1 : items.length`）。把它藏起来的话「滚到底」就永远触发不了。
 func (p *PagedList) footerView(c *ui.Context) {
 	t := c.Theme()
-	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(cardGap).Padding(cardPadY, cardPadX).
+	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(rowGap).Padding(cardPadY, cardPadX).
 		Children(func() {
 			if p.blocked {
 				// 这是**行里的一句重试**，不是错误页上那颗主按钮：它跟着列表

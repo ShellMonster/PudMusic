@@ -739,11 +739,11 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 		// 两件事，别把一边改成另一边的做法。
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).PaddingY(cardGap).
 			Children(func() {
-				ui.Text(c, m.Title).FontSize(scale.Font(c, 14)).LineHeight(titleLeading).
+				ui.Text(c, m.Title).FontSize(scale.Font(c, listTitleSize)).LineHeight(titleLeading).
 					TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
 				ui.Row(c).Gap(cardGap).Children(func() {
 					if m.Owner != "" {
-						ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, 12)).LineHeight(ownerLeading).
+						ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, listOwnerSize)).LineHeight(ownerLeading).
 							TextColor(metaColor).MaxLines(1).Ellipsis("…")
 					}
 					// 正在放的那一格：时长换成一句「正在播放」。
@@ -773,13 +773,13 @@ func (g *Grid) playFrom(i int) { playFrom(g.songs, g.acts, i) }
 // gridRowHeight 是网格那一行**大概**多高。
 //
 // ⚠️ **它是估的**：网格这一行的高跟着内容走（封面 140 + 歌名 + UP 名那一行），
-// 歌名折成两行就高 21。所以按行算出来的像素是**大概**的——回顶按钮早一点或晚一点
+// 歌名折成两行就高 24（16 × 1.5）。所以按行算出来的像素是**大概**的——回顶按钮早一点或晚一点
 // 出现，仅此而已。
 //
-// 这个数是**一行的常见高度**（歌名一行）：140 + 8（`cardGap`）+ 歌名一行 21 +
-// 缝 4 + UP 名那一行 14 ≈ 195，和 `grid_test.go` 的 `gridH` 那句注释（「网格每行
-// 约 195」）对得上。
-const gridRowHeight = 195
+// 这个数是**一行的常见高度**（歌名一行）：140 + 8（`cardGap`）+ 歌名一行 24
+// （16 × 1.5）+ 缝 4 + UP 名那一行 14 = 190，和 `grid_test.go` 的 `gridH` 那句注释
+// （「网格每行约 190」）对得上。
+const gridRowHeight = 190
 
 // ScrollOffset 是这一屏滚过了多少像素。
 //

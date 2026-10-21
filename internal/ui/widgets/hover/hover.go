@@ -367,7 +367,7 @@ func Wave(c *ui.Context, key string, width float32, color ui.Color, title string
 	wave := ui.Box(c).Key(key).Size(width, waveH).Label(PlayingLabel(title))
 	phase := wavePhase(c, wave, key)
 	wave.Draw(func(p *ui.Painter, r ui.Rect) {
-		// 竖条整体居中：4×2 + 3×2 = 14 宽，在 40 宽的序号那一列里两边各空 13。
+		// 竖条整体居中：4×2 + 3×2 = 14 宽，在 32 宽的序号那一列里两边各空 9。
 		x0 := r.X + (r.W-float32(waveBars*waveBarW+(waveBars-1)*waveGap))/2
 		for i := range waveBars {
 			// 每根条子错开 1/4 轮，四根于是永远不同相。
