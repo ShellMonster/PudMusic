@@ -1541,6 +1541,53 @@ var Items = []Item{
 		},
 	},
 	{
+		// 归「双平台」那一组：这一票动的也是**窗口的骨架**（播放条那一块），
+		// 而它和上面 issue 127 那一条是同一处规格的两个入口——所以两条分开写，
+		// 但说的是同一件事的两半。
+		Category: Platform,
+		// issue 135（票 #134 的第一单元）那一票：播放条从「能用」改成「对」。
+		//
+		// 🔴 **判据全是画面上的位置和像素**：这一票的五个症状**全都是静默的**——
+		// 进度条永远是 80 像素照样能拖，三键次序反了照样点得动，旋钮不画也照样
+		// 能 seek，音量图标是个样子也照样有音量——只有量得出来的那几样才算数。
+		//
+		// ⚠️ **「进度条随窗口变长」断的是单调，不是某个像素数**：进度条该有多长
+		// 取决于窗口有多宽、也取决于右边那一组有多宽（音量收成图标之后它窄了
+		// 141），所以钉死一个数的话，改动右边任何一枚键都会把它顶红。
+		Spec: "播放条：进度条随窗口变长、三键是上一首·播放·下一首、播放键 48 像素、旋钮只在悬停或按下时画（键盘焦点上时也画）、音量收成图标加浮层（浮层里一根竖滑块和百分比，点图标静音、滚轮 ±0.05）、音量轨道填的是已经调上去的那一段、浮层走远了会自己收起、旋钮不探出滑块的框、按住时多一层更深的影子、浮层里的滑块不跟着百分比字数横向漂",
+		Tests: []string{
+			// 进度条：900 / 1200 / 1600 三档单调变长（**中间那档 1200 必须在**：
+			// 只断两端的话，「中间那一列不参与分配」这种坏法在两端看不出来）。
+			"TestTheProgressBarGrowsWithTheWindow",
+			// 三键的左右次序（**断的是位置，不是「三个键都在」**）。
+			"TestTheTransportKeysArePrevPlayNext",
+			// 播放键的尺寸：自己够大（48 起），而且比上下首大。
+			"TestThePlayKeyIsBigEnoughToHit",
+			// 旋钮：没有悬停时不画、悬停时画（深浅两套）。
+			"TestTheProgressKnobIsOnlyDrawnWhileHovered",
+			// 音量浮层：一根**竖**滑块 + 底下的百分比。
+			"TestTheVolumePopoverHasAVerticalSlider",
+			// 点图标静音 / 取消静音放回原来的音量。
+			"TestClickingTheVolumeIconMutes",
+			// 滚轮 ±0.05。
+			"TestTheWheelOverTheVolumeIconChangesTheVolume",
+			// 音量轨道填的是**已经调上去的那一段**（0% 空、100% 满）。
+			"TestTheVolumeTrackIsFilledFromTheBottom",
+			// 浮层**自己**收掉（不播放的时候没有人要帧，所以那一段必须自己
+			// 排一个到点的唤醒）。
+			"TestTheVolumePopoverClosesOnItsOwn",
+			// 竖着那根旋钮**不许探出滑块的框**：它的中心要走**内容框**的算法，
+			// 和框架的竖直映射（`1-(y-st.cy)/st.ch`）同一个坐标系。
+			"TestTheVerticalKnobStaysInsideItsSlider",
+			// 键盘 Tab 过去的时候旋钮（和画在它上面的焦点圈）要画出来。
+			"TestTheProgressKnobShowsWithKeyboardFocus",
+			// 按住的时候旋钮底下要有一层**更深的**影子（票面原话）。
+			"TestTheKnobGetsDeeperWhileHeld",
+			// 音量浮层里那根滑块**不跟着百分比的字数横向漂**（它就在指针底下）。
+			"TestTheVolumeSliderDoesNotDriftWithThePercentText",
+		},
+	},
+	{
 		// 归「双平台」那一组，和上面 issue 127 那一条是同一件事的两半：那一票动的是
 		// 外壳（侧栏 / 顶栏 / 播放条），这一票动的是**内容那一块**（列表与网格）。
 		Category: Platform,

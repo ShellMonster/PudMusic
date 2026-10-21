@@ -698,14 +698,28 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 // 提示不是同一帧落地的。先问条件会在「标题已经在了、提示还在路上」那一刻就返回。
 func waitFrames(t *testing.T, tt *mygoui.Tester, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(waitBudget)
+	waitFramesFor(t, tt, waitBudget, what, cond)
+}
+
+// waitFramesFor 是 waitFrames 加一个「等多久」。
+//
+// ⚠️ **它只在一种场合用**：要等的那件事是**一趟后台的往返**，而那一趟在**满载的
+// 机器上**（`go test ./...` 并行跑包，别的包正在抢 CPU）要好几秒——而共用那个
+// 10 秒的保险丝是给「条件永远不成立」用的，不是给「慢」用的。
+//
+// ⚠️ **别拿它去放宽共用那个保险丝**：`internal/ui` 里有三百多处用它，
+// 一起放宽的话，一个真坏掉的构建要等到 `go test` 的十分钟上限才说话
+// （而那时候开发者看到的是「超时」，不是哪几条坏了）。
+func waitFramesFor(t *testing.T, tt *mygoui.Tester, d time.Duration, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(d)
 	for {
 		tt.Frame()
 		if cond() {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("等了 %v，画了多少帧都还没：%s，文字有 %q", waitBudget, what, tt.Texts())
+			t.Fatalf("等了 %v，画了多少帧都还没：%s，文字有 %q", d, what, tt.Texts())
 		}
 		time.Sleep(2 * time.Millisecond)
 	}

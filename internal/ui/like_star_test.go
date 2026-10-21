@@ -42,7 +42,16 @@ func TestClickingTheStarLikesTheSong(t *testing.T) {
 		t.Fatalf("点不了星标：%v（文字：%q）", err, e.tt.Texts())
 	}
 
-	waitFrames(t, e.tt, "赞发出去了", func() bool { return e.f.likePostsCount() > 0 })
+	// ⚠️ **这里必须用 `waitFrames`（要画帧），不能用 `waitFor`**：框架的点击是
+	// **建树的时候**才被消费的（`Clicked()` 问的是这一帧的状态），而 `waitFor`
+	// **不画帧**——那一下点击就永远没被消费，那一趟写也就永远发不出去。
+	//
+	// ⚠️ **而它等的那一趟要等更久**：那一趟是**真的发出去**（假 B 站那边记着调用了
+	// 几次），满载的机器上它要好几秒才到（假服务器在本机，本机慢是因为机器忙）——
+	// 共用那个 10 秒的保险丝是给「条件永远不成立」用的，不是给「慢」用的。
+	waitFramesFor(t, e.tt, 30*time.Second, "赞发出去了", func() bool {
+		return e.f.likePostsCount() > 0
+	})
 	if got := e.f.lastLikeUp(); got != "1" {
 		t.Errorf("发出去的 up 是 %q，want 1（1 是赞，2 是取消赞）", got)
 	}

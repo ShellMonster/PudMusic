@@ -137,10 +137,12 @@ func (s *Shell) runShortcut(id string) {
 // 钳在 0..1：Biu 是 `Math.min(1, volume + 0.05)` / `Math.max(0, volume - 0.05)`
 // （`src/app.tsx:75-76`），而 `App.SetVolume` 自己也会钳一遍——两边都钳是因为
 // **越界的那一下不能变成「声音突然大到最大」**：钳在读回来之后、送给播放器之前。
+//
+// ⚠️ **走 `setVolume` 而不是直接 `SetVolume`**：那一条顺带记住「最后一个不是 0
+// 的音量」，于是「按了静音之后按音量加」再「取消静音」，放回去的是用户自己调过
+// 的那个值，而不是一个记不着的旧值。
 func (s *Shell) nudgeVolume(delta float64) {
-	v := s.app.Snapshot().Volume + delta
-	v = max(0, min(1, v))
-	s.app.SetVolume(v)
+	s.setVolume(s.app.Snapshot().Volume + delta)
 }
 
 // toggleMiniPlayer 切到迷你播放器 / 从它切回来。
