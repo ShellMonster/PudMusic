@@ -168,7 +168,8 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic) {
 				name = "这个 UP 主"
 			}
 			// 昵称是**链接**不是装饰：它是「从这条动态进他空间」这条路。
-			if ui.Button(c, name).FontSize(scale.Font(c, 14)).Clicked() && d.Author.Mid > 0 {
+			// 扁平配方（上游那一格是 `User` 的 `hover:underline`，没有按钮壳）。
+			if flatButton(c, name).FontSize(scale.Font(c, 14)).Clicked() && d.Author.Mid > 0 {
 				s.navigate(upPathOf(d.Author.Mid))
 			}
 			if d.Time != "" {
@@ -210,7 +211,10 @@ func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 		if count > 0 {
 			label = "赞 " + strconv.Itoa(count)
 		}
-		btn := ui.Button(c, label).FontSize(scale.Font(c, 12))
+		// 上游那一枚是 `variant="light"`（`dynamic-feed/item.tsx:112`）：图标 +
+		// 数字，无边框无底。我们这一枚还带着数字（「赞 12」），所以保留文字键的
+		// 形状，只换掉那层壳——图标化会丢掉「赞过几次」这个用户要看的数。
+		btn := flatButton(c, label).FontSize(scale.Font(c, 12))
 		if liked {
 			// 点亮的那一下是**看得见的**（「我赞过了」不是数字变大）。
 			// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（理由见
@@ -226,15 +230,15 @@ func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 		if d.Kind != bili.DynamicVideo || d.Video == nil {
 			return
 		}
-		if ui.Button(c, "下一首播放").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Clicked() {
+		if flatButton(c, "下一首播放").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Clicked() {
 			s.playNextFromDynamic(d.Video, d.Author)
 		}
 		// ⚠️ 下载走 `downloadLater`（异步补 cid）：动态接口给的稿件**不带
 		// cid**（`major.archive` 里没有这个字段），而下载按分 P 存文件。
-		if ui.Button(c, "下载音频").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Clicked() {
+		if flatButton(c, "下载音频").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Clicked() {
 			s.downloadLater(dynVideoItem(d.Video, d.Author), false, "下载音频")
 		}
-		if ui.Button(c, "下载视频").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Clicked() {
+		if flatButton(c, "下载视频").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Clicked() {
 			s.downloadLater(dynVideoItem(d.Video, d.Author), true, "下载视频")
 		}
 	})

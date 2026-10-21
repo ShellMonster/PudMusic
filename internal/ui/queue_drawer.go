@@ -164,7 +164,11 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 			s.app.ClearQueue()
 		}
 	})
-	ui.Row(c).Key("queue-header-rule").FillWidth().Height(1).Background(t.Border)
+	// 头下面那条线用框架的 `ui.Divider`：1 DIP、无圆角、无内边距，取的就是
+	// `t.Border`（`mygo/ui/widgets.go` 的 `coreDivider`）——和原来手搓的这一行
+	// 逐字一样，只是换了个出处。它看自己在 `Row` 还是 `Column` 里决定给宽度还是
+	// 高度，这里外面是 `Column`，所以画出来还是横着那一条。
+	ui.Divider(c).Key("queue-header-rule")
 }
 
 // viewQueueBody 是抽屉下面那一块：有歌就是那一列，没有歌是一句空状态（分岔照

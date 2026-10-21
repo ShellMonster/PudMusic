@@ -13,6 +13,7 @@ package ui
 // 另一半（窗口开关、控制、两个窗口共享状态）在 `miniplayer_test.go`。
 
 import (
+	"math"
 	"testing"
 
 	mygoui "github.com/egoist/mygo/ui"
@@ -96,39 +97,64 @@ func TestTheMiniCardFitsInThreeHundredAndTwentyByOneHundred(t *testing.T) {
 	}
 }
 
-// TestTheMiniLabelsAreNotTruncated 盯「上一首」那三个字**画全了**。
+// TestTheMiniKeysAreIcons 盯那四个键**真的是图标键**。
 //
-// 和 `TestRateMenuLabelsAreNotTruncated` 同一个教训：无头 Tester 读的是控件的**文
-// 本**（`HasText("上一首")` 照样成立），被截的只是**画出来**的那几个字。换句话说：
-// 界面上唯一能分清「上一首还是下一首」的地方少了一大半信息，却没有任何一条别的测
-// 试会红。
+// 这条原来是 `TestTheMiniLabelsAreNotTruncated`：那时候四个键是写着「上一首」的
+// 文字键，判据是「画出来的框不窄于那几个字的自然宽」。这一票把它们换成了图标键
+// （上游 `pages/mini-player/index.tsx:165-212` 那一排），于是那个判据整条都不再
+// 成立——现在要断的是反过来的一件事：**框就是图标键的框，而且里面真的画了图形**。
 //
-// 断法是量画出来的框，和同样字号的同样几个字在**不设限**的一行里的自然宽度比。
-func TestTheMiniLabelsAreNotTruncated(t *testing.T) {
-	labels := []string{"上一首", "播放", "下一首", "退出"}
-	natural := miniNaturalWidths(t, labels)
-
+// 两条一起断，缺一不可：
+//
+//   - 框的宽高**等于** `miniStepW` / `miniPlayW`（不是「不大于」）：文字键那会儿
+//     这两个数是 64 / 72，谁把它们改回去了，这里立刻红。
+//   - 框里有一枚图形（`scanGlyph` 的墨迹不为空）：一个空的图标键点得到、也叫得出
+//     名字，但画面上什么都没有。
+func TestTheMiniKeysAreIcons(t *testing.T) {
 	s, a := newMiniShell(t, nil)
 	if err := enqueueTwoWithCover(a, t); err != nil {
 		t.Fatal(err)
 	}
 	a.Toggle() // 暂停：播放键上写的是「播放」
 	tt := miniTester(s)
-	progressRect(t, tt) // 同上：封面在，才是最挤的那一档
+	progress := progressRect(t, tt) // 同上：封面在，才是最挤的那一档
 
-	for _, l := range labels {
-		r, ok := tt.Find(l)
+	for _, want := range []struct {
+		label string
+		size  float32
+	}{
+		{"上一首", miniStepW},
+		{"播放", miniPlayW},
+		{"下一首", miniStepW},
+		{"退出", miniBackBtnW},
+	} {
+		r, ok := tt.Find(want.label)
 		if !ok {
-			t.Fatalf("画面上找不到 %q，文字有 %q", l, tt.Texts())
+			t.Fatalf("画面上找不到 %q，文字有 %q", want.label, tt.Texts())
 		}
 		// `Tester.Find` 报的是**画出来的那一块**（内部和父框的裁剪区求交，
-		// `mygo/ui/runtime.go:974`），所以字被键的宽度截掉时这一条立刻变小——
-		// 量按钮的外框是量不出来的。
-		if r.W+0.5 < natural[l] {
-			t.Errorf("%q 的键只有 %.1f 宽，而那几个字要 %.1f——被截了（无头 Tester "+
-				"读的是控件的文本，所以别的断言全绿；界面上看得见的只剩几个偏旁）",
-				l, r.W, natural[l])
+		// `mygo/ui/runtime.go:974`），所以「被挤扁了」在这里表现为框变小。
+		if r.W < want.size-0.5 || r.H < want.size-0.5 {
+			t.Errorf("%q 的键是 %.1f×%.1f，want 至少 %.0f×%.0f：它不是图标键的框",
+				want.label, r.W, r.H, want.size, want.size)
 		}
+		if s := scanGlyph(tt, want.label); s.ink == "" {
+			t.Errorf("%q 那一格里没画图形（只有底色 %v）——图标键上什么都没有，"+
+				"名字还在、按得动，可用户看不见它", want.label, s.bg)
+		}
+	}
+
+	// 居中也在这里断：三个键一共 100 宽，而这一列有 244——左对齐的话右边空
+	// 144 像素，**播放键落在窗口左侧**，而它头顶那条进度条横跨整列
+	// （见 `viewMiniTransport` 的注释）。播放键的中点得在进度条中点底下。
+	play, ok := tt.Find("播放")
+	if !ok {
+		t.Fatalf("画面上找不到「播放」，文字有 %q", tt.Texts())
+	}
+	if d := math.Abs(float64(play.X+play.W/2) - float64(progress.X+progress.W/2)); d > 2 {
+		t.Errorf("播放键的中点在 x=%.1f，而进度条的中点在 x=%.1f（差 %.1f）——"+
+			"三个键没居中，左边挤成一团、右边空着",
+			play.X+play.W/2, progress.X+progress.W/2, d)
 	}
 }
 

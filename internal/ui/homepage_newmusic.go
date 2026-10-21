@@ -92,8 +92,11 @@ const (
 	// 内容走，两位数翻成三位数时后面的按钮会左右跳一格——翻页时最不该跳的就是它。
 	newMusicPageW = 52
 
-	// newMusicArrowW 是左右两个翻页按钮的宽度，定住，理由同上。
-	newMusicArrowW = 84
+	// newMusicArrowW 是左右两个翻页键的点击区边长：16 的图标 + 每边 6。
+	//
+	// ⚠️ 原来它是 84（两个汉字加内边距），**图标化之后定成图标键的尺寸**——
+	// 84 宽 84 高的一枚图标键在这个页头上会是一块方砖，比旁边那个读数还大。
+	newMusicArrowW = 28
 )
 
 // newMusicColsFor 是容器有 w 那么宽时新歌速递摆几列。
@@ -319,7 +322,7 @@ func (g *newMusicGrid) view(c *ui.Context) {
 				Background(t.Surface).Center().Gap(8).Children(func() {
 				ui.Text(c, "新歌速递没拉出来").FontSize(scale.Font(c, 13)).TextColor(t.Text)
 				ui.Text(c, g.err.Error()).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(2)
-				if g.retry != nil && ui.Button(c, "重试加载新歌速递").Clicked() {
+				if g.retry != nil && flatButton(c, "重试加载新歌速递").Clicked() {
 					g.retry()
 				}
 			})
@@ -378,15 +381,19 @@ func (g *newMusicGrid) viewHeader(c *ui.Context, total int) {
 		ui.Row(c).Grow(1).Gap(8).Justify(ui.End).AlignItems(ui.Center).Children(func() {
 			// ⚠️ 翻页不重置网格那一块的横向位置——它本来就没有横向滚动，
 			// 页码就是它唯一的「位置」。
-			prev := ui.Button(c, "上一页").Width(newMusicArrowW).
-				Disabled(g.page <= 1)
+			// 上游那两枚是 `variant="flat"` 的 `RiArrowLeftSLine` / `RiArrowRightSLine`
+			// 16（`new-music-top.tsx:185-199`）。图标键 + 悬停说出它做什么。
+			prev := flatIconButton(c, iconSideCollapse, "上一页", 16).
+				Size(newMusicArrowW, newMusicArrowW).Padding(0, 6).
+				Tooltip("上一页").Disabled(g.page <= 1)
 			if prev.Clicked() {
 				g.page--
 			}
 			ui.Textf(c, "%d / %d", g.page, total).FontSize(scale.Font(c, 13)).Width(newMusicPageW).
 				TextAlign(ui.Center).TextColor(c.Theme().TextMuted)
-			next := ui.Button(c, "下一页").Width(newMusicArrowW).
-				Disabled(g.page >= total)
+			next := flatIconButton(c, iconSideExpand, "下一页", 16).
+				Size(newMusicArrowW, newMusicArrowW).Padding(0, 6).
+				Tooltip("下一页").Disabled(g.page >= total)
 			if next.Clicked() {
 				g.page++
 			}

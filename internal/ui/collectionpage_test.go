@@ -414,7 +414,15 @@ func TestCollectionShowsTheHeaderAndTheOpsBar(t *testing.T) {
 	for _, label := range []string{"播放全部", "添加到播放列表", "多选", "排序：最近收藏"} {
 		wantText(t, tt, label)
 	}
-	wantText(t, tt, "☆") // 星标：此刻没收藏
+	// 星标：此刻没收藏。它是图标键（上游 `fav-toggle.tsx` 那一枚），名字挂在
+	// `Label` 上——`Find` 找得到，但画面上一个「☆」字都没有，所以这里量的是
+	// 那一格里**有没有图形**。
+	if r, ok := tt.Find("收藏这个收藏夹"); !ok {
+		t.Errorf("操作条上没有星标，文字有 %q", tt.Texts())
+	} else if s := scanGlyph(tt, "收藏这个收藏夹"); s.ink == "" {
+		t.Errorf("星标那一格是空的（%.1f,%.1f %.1fx%.1f，只有底色 %v）——没画出图标",
+			r.X, r.Y, r.W, r.H, s.bg)
+	}
 
 	// ③ 列表：那一页的歌真的画出来了。
 	for _, title := range []string{"歌 一", "歌 二", "歌 三"} {

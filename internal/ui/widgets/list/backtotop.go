@@ -15,6 +15,7 @@ package list
 
 import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -31,14 +32,28 @@ const (
 	// backTopRadius 是按钮的圆角：Biu 的 `radius="full"` 是药丸形，圆角给到
 	// 比按钮高度大就等于它。
 	backTopRadius = 999
+
+	// backTopSize 是那一枚的点击区边长，backTopGlyph 是里面那个箭头的边长。
+	//
+	// 上游是 `<Button isIconOnly radius="full"><RiArrowUpSLine size={20}/></Button>`
+	// ——`size` 默认那一档是 40，图标 20，每边留 10。
+	backTopSize  = 40
+	backTopGlyph = 20
 )
 
-// backToTopIcon 是回顶那一枚里的向上箭头（上游 `RiArrowUpLine`）。
+// BackToTopIcon 是回顶那一枚里的向上箭头（上游 `RiArrowUpLine`），也是**这份
+// 资源的唯一出处**。
 //
-// ⚠️ 它从 `iconset` 取而**不是**从界面层拿常量：这个包在界面层**下面**，
-// 反过来 import 是个环（见 `iconset` 文件头）。同一个文件在界面层的常量叫
-// `iconToTop`。
-var backToTopIcon = iconset.Must("Arrows/arrow-up-line.svg")
+// ⚠️ **界面层登记的那个名字直接取它**（`internal/ui/icons.go` 的
+// `iconToTop = list.BackToTopIcon`）。两处各写一遍文件名的话，改一边不会有任何
+// 编译错误——而画面上就出现两种「回到顶部」，谁也看不出来是哪一次改错的。
+// 这个包在界面层**下面**（见 `iconset` 文件头），所以常量只能住在这里、界面层
+// 过来取，不能反过来。
+const BackToTopIcon = "Arrows/arrow-up-line.svg"
+
+// backToTopIcon 是上面那个名字解析出来的图（`iconset` 按名字缓存，同一个名字
+// 永远是同一个指针）。
+var backToTopIcon = iconset.Must(BackToTopIcon)
 
 // BackToTop 画「回到顶部」那一枚：滚过 400 像素才出现。
 //
@@ -61,15 +76,22 @@ func BackToTop(c *ui.Context, offset float32, top func()) {
 	// Radius 给一个大数就是 Biu 的 `radius="full"`（药丸形）。
 	ui.Overlay(c, func() {
 		//
-		// 药丸形留着（Biu 的 `ScrollContainer` 那一枚就是 `rounded-full`），
-		// 里面换成一枚向上箭头（上游 `RiArrowUpLine`）。`Label` 仍是「返回顶部」
+		// 一枚圆形图标键：`flat` 的配方（无描边）+ `radius="full"`（上游那一枚
+		// 就是 `rounded-full`），里面是 `RiArrowUpLine`。`Label` 仍是「返回顶部」
 		// ——图标对辅助技术是不可见的，而它同时也是无头 Tester 认得这一枚的
 		// 唯一凭据。
-		btn := ui.Button(c, "").Label("返回顶部")
-		btn.Children(func() { ui.Icon(c, backToTopIcon).FontSize(16).TextColor(t.Text) })
+		//
+		// ⚠️ **底色和阴影留着**（上游自己也有 `bg-default/50` + `shadow-xl`）：
+		// 这一枚浮在列表内容**上面**，去掉底之后箭头会压在某一行歌名上，读不清
+		// 也看不出那儿有个按钮。`flat` 去掉的是「常驻的控件底色 + 一圈描边」，
+		// 不是「浮层不能有自己的底」。
+		btn := flat.IconButton(c, backToTopIcon, "返回顶部", backTopGlyph).
+			Padding(0, 0).Size(backTopSize, backTopSize).TextColor(t.Text)
 		if btn.Absolute().
 			Right(backTopRight).Bottom(backTopBottom).
-			Radius(backTopRadius).Background(t.SurfaceHover).Clicked() {
+			Radius(backTopRadius).Background(t.SurfaceHover).
+			Shadow(0, 2, 6, 0, ui.RGBA(0, 0, 0, 0.18)).
+			Clicked() {
 			top()
 		}
 	})

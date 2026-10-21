@@ -44,6 +44,7 @@ package ui
 import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -200,22 +201,24 @@ const (
 	iconChart      = "Business/bar-chart-2-line.svg" // 统计
 
 	// ── 导航、方向、展开收起 ────────────────────────────────────────────
-	iconPrevEpisode    = "Arrows/arrow-left-line.svg"       // 上一集
-	iconNextEpisode    = "Arrows/arrow-right-line.svg"      // 下一集
-	iconGoBack         = "Arrows/arrow-go-back-line.svg"    // 后退
-	iconGoForward      = "Arrows/arrow-go-forward-line.svg" // 前进
-	iconSideCollapse   = "Arrows/arrow-left-s-line.svg"     // 侧栏收起
-	iconSideExpand     = "Arrows/arrow-right-s-line.svg"    // 侧栏展开
-	iconChevronDown    = "Arrows/arrow-down-s-line.svg"     // 向下展开
-	iconChevronUp      = "Arrows/arrow-up-s-line.svg"       // 向上收起
-	iconDropDown       = "Arrows/arrow-drop-down-line.svg"  // 下拉
-	iconDropUp         = "Arrows/arrow-drop-up-line.svg"    // 上拉
-	iconDownloadArrow  = "Arrows/arrow-right-down-line.svg" // 下载（带箭头那一版）
-	iconToTop          = "Arrows/arrow-up-line.svg"         // 回到顶部
-	iconToTopLeft      = "Arrows/arrow-left-up-line.svg"    // 左上
-	iconToBottomLeft   = "Arrows/arrow-left-down-line.svg"  // 左下
-	iconDrag           = "Arrows/drag-move-2-line.svg"      // 拖动
-	iconFullscreenLine = "Media/fullscreen-line.svg"        // 全屏
+	iconPrevEpisode   = "Arrows/arrow-left-line.svg"       // 上一集
+	iconNextEpisode   = "Arrows/arrow-right-line.svg"      // 下一集
+	iconGoBack        = "Arrows/arrow-go-back-line.svg"    // 后退
+	iconGoForward     = "Arrows/arrow-go-forward-line.svg" // 前进
+	iconSideCollapse  = "Arrows/arrow-left-s-line.svg"     // 侧栏收起
+	iconSideExpand    = "Arrows/arrow-right-s-line.svg"    // 侧栏展开
+	iconChevronDown   = "Arrows/arrow-down-s-line.svg"     // 向下展开
+	iconChevronUp     = "Arrows/arrow-up-s-line.svg"       // 向上收起
+	iconDropDown      = "Arrows/arrow-drop-down-line.svg"  // 下拉
+	iconDropUp        = "Arrows/arrow-drop-up-line.svg"    // 上拉
+	iconDownloadArrow = "Arrows/arrow-right-down-line.svg" // 下载（带箭头那一版）
+	// ⚠️ 「回到顶部」那一枚的**画法**在 `widgets/list`（那个包在界面层下面），
+	// 所以文件名只有一个出处：`list.BackToTopIcon`。这里取它，不是另写一遍。
+	iconToTop          = list.BackToTopIcon                // 回到顶部
+	iconToTopLeft      = "Arrows/arrow-left-up-line.svg"   // 左上
+	iconToBottomLeft   = "Arrows/arrow-left-down-line.svg" // 左下
+	iconDrag           = "Arrows/drag-move-2-line.svg"     // 拖动
+	iconFullscreenLine = "Media/fullscreen-line.svg"       // 全屏
 
 	// ── 文件、媒体、其余 ────────────────────────────────────────────────
 	iconImageAdd      = "Media/image-add-line.svg"              // 添加封面

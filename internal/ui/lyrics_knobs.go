@@ -109,7 +109,10 @@ func (s *Shell) viewLyricKnobColumn(c *ui.Context, snap app.LyricsSnapshot, adju
 			if adjustable {
 				s.viewLyricKnobs(c, snap)
 			}
-			if ui.Button(c, lyricSearchKnobLabel).Clicked() {
+			// 上游那一枚是 `isIconOnly` 的圆钮（`components/lyrics/index.tsx:389-397`），
+			// 我们这一枚带着「找歌词」三个字——图标化会把这个动作的唯一说明
+			// 一起拿掉，而它恰恰是**没有歌词时**唯一摆着的那个键。
+			if flatButton(c, lyricSearchKnobLabel).Clicked() {
 				s.openLyricSearch()
 			}
 		})
@@ -120,13 +123,17 @@ func (s *Shell) viewLyricKnobs(c *ui.Context, snap app.LyricsSnapshot) {
 	lv := &s.lyric
 
 	// 字号在上面、偏移在下面（`index.tsx:382-388` 的次序）。
-	font := ui.Button(c, lyricFontLabel(snap.FontSize)).Label(lyricFontKnobName)
+	//
+	// ⚠️ **这一枚上留着数字**（「20px」「+50ms」）：上游那两个圆钮只画一枚图标
+	// （`font-size-control.tsx:39-48`），当前值要打开浮层才看得到；我们把它写在
+	// 钮上，用户不点开就知道现在调到了多少。要改的只是那层描边和常驻底。
+	font := flatButton(c, lyricFontLabel(snap.FontSize)).Label(lyricFontKnobName)
 	if font.Clicked() {
 		lv.fontOpen = !lv.fontOpen
 	}
 	s.lyricFontPopover(c, font, snap)
 
-	offset := ui.Button(c, lyricOffsetLabel(snap.OffsetMS)).Label(lyricOffsetKnobName)
+	offset := flatButton(c, lyricOffsetLabel(snap.OffsetMS)).Label(lyricOffsetKnobName)
 	if offset.Clicked() {
 		lv.offsetOpen = !lv.offsetOpen
 	}

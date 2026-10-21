@@ -894,7 +894,12 @@ func TestEveryIconButtonNamesItself(t *testing.T) {
 				return true
 			}
 			id, ok := call.Fun.(*ast.Ident)
-			if !ok || (id.Name != "iconButton" && id.Name != "iconButtonPrimary") {
+			// ⚠️ **`flatIconButton` 也要扫**：这两个是同一件事的两个入口
+			// （`iconButton` 就是 `flatIconButton` 的别名，见 icons.go），而这
+			// 一票铺开扁平按钮之后 `flatIconButton` 的调用点比 `iconButton` 还多。
+			// 只扫 `iconButton` 的话，新写的那些图标键一个都管不到。
+			if !ok || (id.Name != "iconButton" && id.Name != "iconButtonPrimary" &&
+				id.Name != "flatIconButton") {
 				return true
 			}
 			checked++

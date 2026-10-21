@@ -26,10 +26,6 @@ import (
 )
 
 // 按钮上的字，和上游 `actions.tsx:71-136` 那一组 label 一个字不差。
-//
-// ⚠️ 这一列**不画图标**：上游每个按钮里是一个 Remix 图标，而 MyGo 的 `MenuItem`
-// / 这几颗文字按钮都没有图标位（widgets/list/menu.go 顶上那一段记着同一件事）。
-// 画一个不像的图标比画字更糟。
 const (
 	opPause  = "暂停"
 	opResume = "继续"
@@ -37,6 +33,22 @@ const (
 	opDelete = "删除"
 	opOpen   = "打开"
 )
+
+// opIcons 是每一颗操作按钮画哪一张图。
+//
+// 上游那几颗是 `isIconOnly` 的 `AsyncButton`（`actions.tsx:150-176`，每个按钮的
+// 悬停提示就是上面那个名字）。我们照它画图标键——`Label` 仍然给名字，读屏软件
+// 念的和无头 Tester 认的都还是这一句。
+//
+// ⚠️ 播放 / 暂停那两张走 `transportIcon`（`icons.go` 顶上那一段：状态图标只准
+// 从那个函数里出），不在调用点自己挑。
+var opIcons = map[string]string{
+	opOpen:   iconFolder,
+	opPause:  transportIcon(true),
+	opResume: transportIcon(false),
+	opRetry:  iconRefresh,
+	opDelete: iconDeleteBin5,
+}
 
 // viewToolbar 是页头那一行：标题 + 打开下载目录 + 清空记录。
 //
@@ -66,23 +78,29 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 
 		// ⚠️ 没有目录时不摆这个按钮：按下去是打不开的。一个只会说「不行」的
 		// 按钮不如不摆（和首页不摆「全部播放」是同一个取舍）。
-		if dir != "" && ui.Button(c, "打开文件夹").Width(dlOpenDirW).Clicked() {
+		if dir != "" && flatButton(c, "打开文件夹").Width(dlOpenDirW).Clicked() {
 			d.openDownloadDir(dir, s)
 		}
 		// ⚠️ 灰不灰看的是**整个队列**（`d.all`），不是筛完屏幕上那几行：
 		// 这一颗清的是整个队列，而在「视频」那一档筛出空来的时候它还摆得动，
 		// 就该还能按——否则用户看着一排有记录的表格之外的地方，想清却没得清。
-		if ui.Button(c, "清空记录").Width(dlClearW).Disabled(len(d.all) == 0).Clicked() {
+		//
+		// 上游是表格右上角一个 `isIconOnly` 的垃圾桶（`index.tsx:128-132`），
+		// 我们把它留在页头——表格那一块是共用的（widgets/list），页头才是这一页
+		// 自己的地方。
+		if flatIconButton(c, iconDeleteBin5, "清空记录", iconMd).
+			Size(iconHitMd, iconHitMd).Padding(0, 5).
+			Tooltip("清空记录").Disabled(len(d.all) == 0).Clicked() {
 			d.askClear(s)
 		}
 	})
 }
 
-// dlOpenDirW / dlClearW 是页头那两个按钮的宽度。
-const (
-	dlOpenDirW = 96
-	dlClearW   = 88
-)
+// dlOpenDirW 是页头「打开文件夹」那个文字键的宽度。
+//
+// 清空记录不再有宽度：它是一枚图标键（`iconHitMd`），宽由图标和它自己的内边距
+// 撑出来——写死一个宽度只会和旁边那个框对不上。
+const dlOpenDirW = 96
 
 // viewOps 是「操作」那一列。
 //
@@ -115,7 +133,9 @@ func (d *downloadsPage) viewOps(c *ui.Context, s *Shell, r download.Snapshot) {
 // 的那几颗**挑的（完成时是「打开」+「删除」，出错的行是「重试」+「删除」，
 // 最多两颗，见 `dlOpsW`）。
 func (d *downloadsPage) opButton(c *ui.Context, label string, fn func()) {
-	if ui.Button(c, label).Width(dlOpW).Clicked() {
+	if flatIconButton(c, opIcons[label], label, iconSm).
+		Size(dlOpW, dlOpW).Padding(0, 7).
+		Tooltip(label).Clicked() {
 		fn()
 	}
 }
