@@ -784,6 +784,12 @@ func (s *Shell) Attach(w *mygo.Window) {
 	// 旧内容（实测：只投递不唤醒两个窗口各 +0 帧；只唤醒主窗口则迷你窗口停在旧内容）。
 	s.wakeRemove = s.app.AddWake(s.wake.invalidate)
 
+	// 从访达 / 资源管理器拖进来的文件：音频进本地音乐，别的说清楚为什么
+	// （见 `localmusic_drop.go`）。挂在这里而不是 `New`：`Attach` 才是窗口
+	// 生命周期回调的入口，而且这一套只给主窗口——迷你播放器那一扇不画本地
+	// 音乐页，也没有画 toast 的地方。
+	w.OnFileDrop(func(e *mygo.FileDropEvent) { s.handleFileDrop(e.Paths) })
+
 	w.OnClose(func(e *mygo.CloseEvent) {
 		opt := s.app.SettingsSnapshot().CloseWindowOption
 		// 记一份：OnClosed 会把设置的挂载摘掉，之后再问就只剩默认值了（见

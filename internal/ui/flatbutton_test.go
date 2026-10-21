@@ -465,7 +465,7 @@ func openSettingsFor(t *testing.T, dark, readOnly bool) *mygoui.Tester {
 		b.tt.Frame()
 		return b.tt
 	}
-	path := filepath.Join(t.TempDir(), app.SettingsFileName)
+	path := filepath.Join(writableTempDir(t, "settings"), app.SettingsFileName)
 	if err := os.WriteFile(path, []byte(`{"schemaVersion": 99, "appSettings": {}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
