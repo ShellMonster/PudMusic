@@ -532,6 +532,31 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
+		// ⚠️ **Windows 那一半的解码能力**（GitHub issue #128）：macOS 走
+		// AudioToolbox（`extaf`），Windows 走 Media Foundation
+		// （`internal/service/audio/mfadec`，`IMFTransform` +
+		// `CLSID_CMSAACDecMFT`）。
+		//
+		// 下面这些证据**只在 Windows 上跑**（`//go:build windows`）。在 macOS 上
+		// 它们连编译都不进，所以「台账说它们在」和「它们上一次真的跑过」是两件
+		// 不同的事——这正是 RealOnly 那一位要说明的。跑它们的地方是 Actions 上的
+		// `windows-2022`（`.github/workflows/windows-aac-spike.yml`）。
+		//
+		// HE-AAC 那一档在台账里**故意不列**：没有素材可验，列进去就是拿一条
+		// 跳过的测试当证据。
+		Spec: "Windows 上 AAC（MP4 和裸 ADTS 两种容器）能解出 PCM；首帧在 200 毫秒内；解出来的 PCM 与另一个解码器**逐样本**对得上（不是 RMS）；左右声道没调换；COM apartment 在负载下反复跑不出错",
+		Tests: []string{
+			"TestSpikeAACLCDecodesOutOfMediaFoundation",
+			"TestSpikeFirstFrameLatency",
+			"TestSpikeWhichProfilesWeCanActuallyTest",
+			"TestSpikePCMIsWithinTolerancesOfTheReference",
+			"TestSpikeTheChannelsAreNotSwapped",
+			"TestSpikeTheCOMApartmentSurvivesLoad",
+		},
+		RealOnly: true,
+	},
+	{
+		Category: Platform,
 		Spec:     "异步结果**逐窗口**唤醒（只叫醒主窗口的话迷你窗口停在旧内容）",
 		Tests: []string{
 			"TestEveryWindowThatDrewItGetsWoken", "TestEveryWindowGetsWoken",

@@ -140,7 +140,7 @@ func lyricSearchShell(t *testing.T, srcs ...lyrics.Source) (*Shell, *mygoui.Test
 	s.clock = newFakeClock(now)
 	s.app.SetWake(s.wake.invalidate)
 	// 缓存挂在真的临时目录上：采用那一下要真的写盘，这一票才验得到「写进缓存」。
-	s.app.MountLyrics(lyrics.NewCache(t.TempDir()))
+	s.app.MountLyrics(lyrics.NewCache(writableTempDir(t, "lyrics")))
 	s.app.MountLyricSources(srcs...)
 	openATrack(t, s)
 	s.app.Pause()
