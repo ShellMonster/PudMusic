@@ -49,6 +49,15 @@ func tipProbe(t *testing.T, text string, timing tipTiming) (*Shell, *mygoui.Test
 	return b.s, b.tt
 }
 
+// TestTooltipDelayIsMeasured 是三档的总入口（评审复验 G44 用的那条命令：
+// `go test ./internal/ui/ -run TestTooltipDelayIsMeasured -v`）。
+func TestTooltipDelayIsMeasured(t *testing.T) {
+	t.Run("默认 0/500", TestTooltipDefaultTiming)
+	t.Run("菜单 0/0", TestTooltipMenuTiming)
+	t.Run("音量 300", TestTooltipVolumeTiming)
+	t.Run("顶栏接线", TestTheNavBarTooltipFollowsTheDefaultTiming)
+}
+
 // TestTooltipDefaultTiming 验默认那一档：**0ms 出、500ms 收**。
 func TestTooltipDefaultTiming(t *testing.T) {
 	_, tt := tipProbe(t, "默认提示", tipDefault)
