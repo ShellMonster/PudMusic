@@ -18,21 +18,59 @@ import (
 // 这一份**不进** `app.Settings`（理由见 fullplayer_prefs.go 的文件头），所以它
 // 自己的坏法得自己兜：认不出来的颜色不能一路穿到画界面的那一行。
 
-// TestTheSpectrumIsOffByDefault 是这一份最重要的一条。
+// TestTheDefaultsMatchBiusStore 是这一份最重要的一条。
 //
-// Biu 的 `defaultSettings.showSpectrum: false`（`store/full-screen-player-settings.ts:22`）。
-// 「默认是关的」这句话的另一半是「**没挂上盘**的时候也是关的」——那才是用户第一次
+// Biu 的 `defaultSettings`（`store/full-screen-player-settings.ts:21-29`）：
+// 歌词 / 封面 / 虚化背景开着，频谱关着，三个颜色都是空串（走各自的默认）。
+// 「默认」这句话的另一半是「**没挂上盘**的时候也是这份」——那才是用户第一次
 // 打开这个应用时的样子。
-func TestTheSpectrumIsOffByDefault(t *testing.T) {
+func TestTheDefaultsMatchBiusStore(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
 
-	if p := a.FullPlayerPrefs(); p.ShowSpectrum {
-		t.Error("没挂上盘的时候频谱是开着的")
+	p := a.FullPlayerPrefs()
+	if !p.ShowLyrics {
+		t.Error("默认歌词是关的，Biu 是开着的")
 	}
-	// 颜色空串 = 走默认（界面上那个 #666，见 ui/fullplayer_spectrum.go）。
-	if got := a.FullPlayerPrefs().SpectrumColor; got != "" {
-		t.Errorf("默认颜色是 %q，want 空串（界面上落到 #666）", got)
+	if p.ShowSpectrum {
+		t.Error("默认频谱是开着的，Biu 是关着的")
+	}
+	if !p.ShowCover {
+		t.Error("默认封面是关的，Biu 是开着的")
+	}
+	if !p.ShowBlurredBackground {
+		t.Error("默认虚化背景是关的，Biu 是开着的")
+	}
+	// 颜色空串 = 走默认（频谱落到 #666，歌词落到白，背景落到主题色）。
+	if p.LyricsColor != "" || p.SpectrumColor != "" || p.BackgroundColor != "" {
+		t.Errorf("默认颜色不是空串：歌词 %q、频谱 %q、背景 %q",
+			p.LyricsColor, p.SpectrumColor, p.BackgroundColor)
+	}
+}
+
+// TestAnOldPrefsFileKeepsTheNewDefaults 断「升级读老文件」。
+//
+// 1 版那份文件里只有 `showSpectrum` / `spectrumColor`。新加的三个开关**不在文件
+// 里**，读盘之后必须是默认（开着），不能因为 bool 零值是 false 就把用户的歌词、
+// 封面和毛玻璃一起关掉——他在文件里一个字节都没改。
+func TestAnOldPrefsFileKeepsTheNewDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, fullPlayerPrefsFileName)
+	body := `{"schemaVersion":1,"fullPlayer":{"showSpectrum":true,"spectrumColor":"#1ed760"}}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := New()
+	t.Cleanup(a.Close)
+	a.MountFullPlayerPrefs(path)
+
+	p := a.FullPlayerPrefs()
+	if !p.ShowSpectrum || p.SpectrumColor != "#1ed760" {
+		t.Errorf("老的频谱那两样没读回来：开关 %v、颜色 %q", p.ShowSpectrum, p.SpectrumColor)
+	}
+	if !p.ShowLyrics || !p.ShowCover || !p.ShowBlurredBackground {
+		t.Errorf("老文件里没有的三个开关没有落回默认：歌词 %v、封面 %v、虚化 %v",
+			p.ShowLyrics, p.ShowCover, p.ShowBlurredBackground)
 	}
 }
 
@@ -47,7 +85,9 @@ func TestTheSpectrumSwitchSurvivesARestart(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
 	a.MountFullPlayerPrefs(path)
-	a.SetFullPlayerPrefs(FullPlayerPrefs{ShowSpectrum: true, SpectrumColor: "#1ed760"})
+	p := DefaultFullPlayerPrefs()
+	p.ShowSpectrum, p.SpectrumColor = true, "#1ed760"
+	a.SetFullPlayerPrefs(p)
 
 	// 重开一个 App 读同一份文件。
 	b := New()
@@ -71,7 +111,10 @@ func TestThePrefsFileUsesBiusKeyNames(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
 	a.MountFullPlayerPrefs(FullPlayerPrefsPath(dir))
-	a.SetFullPlayerPrefs(FullPlayerPrefs{ShowSpectrum: true, SpectrumColor: "#ff0000"})
+	p := DefaultFullPlayerPrefs()
+	p.ShowSpectrum = true
+	p.LyricsColor, p.SpectrumColor, p.BackgroundColor = "#ffffff", "#ff0000", "#101014"
+	a.SetFullPlayerPrefs(p)
 
 	b, err := os.ReadFile(filepath.Join(dir, fullPlayerPrefsFileName))
 	if err != nil {
@@ -88,7 +131,12 @@ func TestThePrefsFileUsesBiusKeyNames(t *testing.T) {
 	if !ok {
 		t.Fatalf("文件里没有 fullPlayer 那一段：%s", b)
 	}
-	for _, k := range []string{"showSpectrum", "spectrumColor"} {
+	// ⚠️ 三个默认开着的开关**一定**在文件里（true 不能靠 omitempty 省）；两个
+	// 颜色和频谱开关这次也写了值，所以七个键一个不少。
+	for _, k := range []string{
+		"showLyrics", "showSpectrum", "showCover", "showBlurredBackground",
+		"lyricsColor", "spectrumColor", "backgroundColor",
+	} {
 		if _, ok := inner[k]; !ok {
 			t.Errorf("Biu 那一个 store 里的键 %q 不见了：%s", k, b)
 		}
@@ -99,38 +147,44 @@ func TestThePrefsFileUsesBiusKeyNames(t *testing.T) {
 //
 // 设置文件是用户能手改的。`"spectrumColor": "红"` 一路穿到画界面的那一行的话，
 // 界面上是一条纯黑的频谱摆在深色背景上——看着像「没画出来」，而他是在用着一个
-// 自己挑过的颜色。
+// 自己挑过的颜色。三个颜色同一把尺子。
 func TestAColorThatIsNotAColorFallsBackToTheDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, fullPlayerPrefsFileName)
-	write := func(v string) {
+	write := func(lyrics, spectrum, bg string) {
 		t.Helper()
-		body := `{"schemaVersion":1,"fullPlayer":{"showSpectrum":true,"spectrumColor":` +
-			quoteJSON(v) + `}}`
+		body := `{"schemaVersion":2,"fullPlayer":{"showSpectrum":true,` +
+			`"lyricsColor":` + quoteJSON(lyrics) + `,` +
+			`"spectrumColor":` + quoteJSON(spectrum) + `,` +
+			`"backgroundColor":` + quoteJSON(bg) + `}}`
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	for _, bad := range []string{"红", "#12345", "#gggggg", "rgb(1,2,3)"} {
-		write(bad)
+		write(bad, bad, bad)
 		a := New()
 		a.MountFullPlayerPrefs(path)
-		if got := a.FullPlayerPrefs().SpectrumColor; got != "" {
-			t.Errorf("颜色 %q 被原样留下了（got %q），want 空串=默认", bad, got)
+		p := a.FullPlayerPrefs()
+		if p.LyricsColor != "" || p.SpectrumColor != "" || p.BackgroundColor != "" {
+			t.Errorf("颜色 %q 被原样留下了（歌词 %q、频谱 %q、背景 %q），want 空串=默认",
+				bad, p.LyricsColor, p.SpectrumColor, p.BackgroundColor)
 		}
-		if !a.FullPlayerPrefs().ShowSpectrum {
+		if !p.ShowSpectrum {
 			t.Errorf("颜色 %q 不对就把开关也带坏了", bad)
 		}
 		a.Close()
 	}
 
-	write("#1ed760")
+	write("#ffffff", "#1ed760", "#101014")
 	a := New()
 	t.Cleanup(a.Close)
 	a.MountFullPlayerPrefs(path)
-	if got := a.FullPlayerPrefs().SpectrumColor; got != "#1ed760" {
-		t.Errorf("一个合法的颜色被扔了：%q", got)
+	p := a.FullPlayerPrefs()
+	if p.LyricsColor != "#ffffff" || p.SpectrumColor != "#1ed760" || p.BackgroundColor != "#101014" {
+		t.Errorf("合法颜色被扔了：歌词 %q、频谱 %q、背景 %q",
+			p.LyricsColor, p.SpectrumColor, p.BackgroundColor)
 	}
 }
 
@@ -153,8 +207,13 @@ func TestABrokenPrefsFileIsIgnored(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
 	a.MountFullPlayerPrefs(FullPlayerPrefsPath(dir))
-	if a.FullPlayerPrefs().ShowSpectrum {
+	p := a.FullPlayerPrefs()
+	if p.ShowSpectrum {
 		t.Error("坏文件被读成了「频谱开着」")
+	}
+	if !p.ShowLyrics || !p.ShowCover || !p.ShowBlurredBackground {
+		t.Errorf("坏文件没有落回默认：歌词 %v、封面 %v、虚化 %v",
+			p.ShowLyrics, p.ShowCover, p.ShowBlurredBackground)
 	}
 }
 
@@ -164,13 +223,16 @@ func TestASettingThatIsOnlyInMemoryStillSwitches(t *testing.T) {
 	t.Cleanup(a.Close)
 	// path 是空串 = 只在内存里（`FullPlayerPrefsPath("")`）。
 	a.MountFullPlayerPrefs(FullPlayerPrefsPath(""))
-	a.SetFullPlayerPrefs(FullPlayerPrefs{ShowSpectrum: true})
+	p := DefaultFullPlayerPrefs()
+	p.ShowSpectrum = true
+	a.SetFullPlayerPrefs(p)
 
 	if !a.FullPlayerPrefs().ShowSpectrum {
 		t.Fatal("只改内存的那一次没生效")
 	}
 	// 再改一次还是同一个实例：挂回 App 上是为了不让它自己跳回去。
-	a.SetFullPlayerPrefs(FullPlayerPrefs{ShowSpectrum: false, SpectrumColor: "#123456"})
+	p.ShowSpectrum, p.SpectrumColor = false, "#123456"
+	a.SetFullPlayerPrefs(p)
 	if a.FullPlayerPrefs().ShowSpectrum {
 		t.Error("第二次改没生效")
 	}
