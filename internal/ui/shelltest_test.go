@@ -288,13 +288,65 @@ func defaultTransition(animating bool) mygoui.Transition {
 	return mygoui.TransitionNone
 }
 
+// writableTempDir 造一个**后台写盘会往里写**的临时目录，测试结束时删掉。
+//
+// # 为什么不直接用 `t.TempDir()`
+//
+// `t.TempDir()` 的清理是 `os.RemoveAll` **一遍**：先读目录项、逐个删、再删目录。
+// 而后台写盘（设置、歌词缓存）是**原子写**——先在同一个目录里建一个
+// `.settings-*.tmp` / `.lyrics-*.tmp`，写完再 rename 过去。于是只要那个临时文件
+// 恰好在「读完目录项」和「删目录」之间出现，删目录就是 ENOTEMPTY：
+//
+//	--- FAIL: TestXxx
+//	    testing.go:1617: TempDir RemoveAll cleanup: unlinkat .../001: directory not empty
+//
+// **这种红跟被测的逻辑一点关系都没有**：测的是播放条，挂在的是临时目录删不掉。
+// 机器越忙（这台机器上别的会话同时在跑 `go test ./internal/ui/`），那个窗口越
+// 容易撞上——`testing` 包的 `t.TempDir()` 清理**只在 Windows 上重试**
+// （`isWindowsRetryable`），macOS 上不重试，于是只有 macOS 会红。
+//
+// 所以这里自己造目录、自己删，删的时候**重试**（和 `testing` 包在 Windows 上
+// 做的同一件事）。
+//
+// 目录建在 `t.TempDir()` 底下：崩了也会被 Go 收走，而它那份清理跑在我们之后
+// （后注册的先跑），那时候这一层已经空了。
+func writableTempDir(t *testing.T, tag string) string {
+	t.Helper()
+	dir, err := os.MkdirTemp(t.TempDir(), tag+"-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { removeAllWithRetry(t, dir) })
+	return dir
+}
+
+// removeAllWithRetry 删一个目录，撞上「正有后台写盘在往里写」就重试。
+//
+// 重试到点还删不掉就报错——那说明确实有东西一直往里写，那是另一回事（真 bug），
+// 不该在这里悄悄放过。
+func removeAllWithRetry(t *testing.T, dir string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		err := os.RemoveAll(dir)
+		if err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("删临时目录 %s：%v", dir, err)
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // writeTempSettings 把一份设置写到临时目录里的盘上，返回路径。
 //
 // 单独拎出来是因为「先写盘、再挂上去」这件事在好几个构造器里都要做一遍，
 // 而它是**生产那条路**（真程序启动时也是先读盘），不是往界面上塞一个值。
 func writeTempSettings(t *testing.T, st app.Settings) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), app.SettingsFileName)
+	path := filepath.Join(writableTempDir(t, "settings"), app.SettingsFileName)
 	store, err := app.OpenSettingsStore(path)
 	if err != nil {
 		t.Fatal(err)

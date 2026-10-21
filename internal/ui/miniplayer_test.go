@@ -195,7 +195,7 @@ func TestTheMiniCardCoversTheWindow(t *testing.T) {
 // 真正用的主题」，只能看它画出来的颜色。
 func TestTheMiniFramesCarryTheChosenTheme(t *testing.T) {
 	a := app.New()
-	if err := a.MountSettings(filepath.Join(t.TempDir(), app.SettingsFileName)); err != nil {
+	if err := a.MountSettings(filepath.Join(writableTempDir(t, "settings"), app.SettingsFileName)); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { a.Close(); _ = a.CloseSettings() })

@@ -27,6 +27,19 @@
 #                          该许可证 §2.3 明确允许把图标当作产品里的功能组件使用、
 #                          §3.1 禁止把它们**单独当图标包卖**；本项目是前者：图标
 #                          随应用分发，不作为图标库单独提供。
+#
+# ── 用到系统组件的那几样（这里**没有**许可证可附）───────────────────────────
+#
+# macOS 的音频解码走 AudioToolbox、Windows 的走 Media Foundation。两者都是
+# **操作系统自带的组件**：运行时的 LoadLibrary + 系统函数调用，没有链接进来，
+# 不进 go list -deps，也没有许可证需要随包发出去——它们是 Windows / macOS 的
+# 一部分，权利归系统厂商，用户拿到的是操作系统，而不是我们的二进制。
+#
+# 「用系统组件」这件事本身是个决定，写在这里是为了免得以后有人以为漏了：
+# Windows 上解 AAC 本来还有一条路（引 LGPL 的纯 Go 解码器），因为 Biu 本体
+# 是 PolyForm-Noncommercial 1.0.0（和 GPL 家族不兼容）才没走它。
+# TestWindowsAudioPullsInNothingNew 钉着「Windows 音频这一包只依赖 go-m4a
+# 这一个模块」——将来谁往里加第二个，那里会红。
 
 github.com/Eyevinn/mp4ff	v0.60.0	MIT	github.com-Eyevinn-mp4ff-LICENSE.txt
 github.com/ebitengine/purego	v0.11.1	Apache-2.0	github.com-ebitengine-purego-LICENSE.txt
