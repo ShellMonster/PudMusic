@@ -36,9 +36,10 @@ typography:
   settings_h2:  { size: 20, weight: 400 }
   row_title:    { size: 16, weight: 500 }   # font-medium
   list_title:   { size: 16, weight: 400 }
-  list_meta:    { size: 14, weight: 400 }   # UP 名
+  list_meta:    { size: 14, weight: 400 }   # UP 名 / 队列行副题
   body:         { size: 14, weight: 400 }
-  secondary:    { size: 12, weight: 400 }
+  h3:           { size: 18, weight: 400 }   # 队列抽屉标题；Preflight 重置字重
+  secondary:    { size: 12, weight: 400 }   # 时间等其余次要信息
   weights: [400, 500, 600, 700, 800]
 spacing:
   unit: 4
@@ -91,10 +92,12 @@ structural:
 | 页标题 | 24 / 400 | `h1`，Preflight 重置字重 |
 | 设置分组标题 | 20 / 400 | `h2` |
 | 设置行标题 | 16 / 500 | `font-medium` |
-| 列表 / 网格歌名 | 16 / 400 | `text-base` |
-| 列表 UP 名 | 14 / 400 | `text-sm` |
+| 列表 / 网格 / 队列歌名 | 16 / 400 | `text-base` |
+| 列表 UP 名 / 队列行副题 | 14 / 400 | `text-sm` |
 | 正文 / 说明 | 14 / 400 | `text-sm` |
-| 次要信息（时间、条数） | 12 / 400 | `text-xs` |
+| 队列抽屉标题 | 18 / 400 | `h3` = `text-lg` |
+| 队列抽屉条数 | 14 / 400 | `text-sm` |
+| 次要信息（时间等） | 12 / 400 | `text-xs` |
 | 品牌字 | 24 / 粗体 / 主色 | logo 旁 |
 
 **500 字重是一档正经的字重**，不是「介于 400 和 600 之间随便选」。上游用了 26 处。

@@ -137,16 +137,21 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 
 // viewQueueHeader 是顶上那一条：标题 + 定位 + 清空。两个键只在队列非空时才摆
 // （Biu 的 `Boolean(pureList?.length) && …`）。
+//
+// 字号照上游（`music-playlist-drawer/index.tsx:131-133`）：标题是 `h3`，也就是
+// `text-lg` = 18 / 400（Preflight 把标题字重重置成 inherit，不是加粗）；条数是
+// 同一处的 `text-sm` = 14。原来这里是 15 / 700 和 12——标题小一号还重两档，读起来
+// 像一句标语。
 func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 	rows := s.queueRows
 
 	ui.Row(c).Key("queue-header").Height(queueHeaderHeight).FillWidth().
 		PaddingY(10).PaddingX(12).Gap(8).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "播放列表").FontSize(scale.Font(c, 15)).Bold().TextColor(t.Text).Grow(1)
+		ui.Text(c, "播放列表").FontSize(scale.Font(c, 18)).TextColor(t.Text).Grow(1)
 		if len(rows) == 0 {
 			return
 		}
-		ui.Text(c, "("+strconv.Itoa(len(rows))+")").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+		ui.Text(c, "("+strconv.Itoa(len(rows))+")").FontSize(scale.Font(c, 14)).TextColor(t.TextMuted)
 
 		// 逐字照 Biu 那一段（`components/music-playlist-drawer/index.tsx:137-141`）：
 		// 两个 16px 的 `IconButton`（`RiFocus3Line` / `RiDeleteBinLine`）各带
@@ -273,10 +278,15 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 			s.viewQueueCover(c, row.item, playing, hovered)
 			// 歌名和来源两行（Biu 的 `space-y-1`，这里 Gap(2)）竖着堆，居中放在
 			// 48 那张封面旁边。
+			//
+			// 字号照上游 `music-playlist-drawer/list-item.tsx:68-80`：歌名
+			// `text-base` = 16、来源 `text-sm` = 14——也就是 DESIGN.md 里「列表」
+			// 那一档（歌名 16 / UP 14）。这里原来是 15 / 12，副题比列表行的 UP 名
+			// 还小一档，同一列两种刻度。
 			ui.Column(c).Grow(1).Gap(2).Children(func() {
-				ui.Text(c, row.item.Title).FontSize(scale.Font(c, 15)).
+				ui.Text(c, row.item.Title).FontSize(scale.Font(c, 16)).
 					TextColor(playlistTextColor(t, playing)).SingleLine()
-				ui.Text(c, itemSubtitle(row.item)).FontSize(scale.Font(c, 12)).
+				ui.Text(c, itemSubtitle(row.item)).FontSize(scale.Font(c, 14)).
 					TextColor(playlistSubColor(t, playing)).SingleLine()
 			})
 			// Biu 的那一颗「⋯」是个 DropdownTrigger。这里给它挂系统的菜单
@@ -311,8 +321,8 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 }
 
 // viewQueueCover 是行里那张封面。四种状态（没有地址 / 载入中 / 就绪 / 加载失败）
-// 都由 imgcache.View 画，这里不重复它的判断。悬停时上面浮一个「▶」（Biu 那层
-// 蒙版 + 播放图标）；正在放的那首不浮——它已经在放了。
+// 都由 imgcache.View 画，这里不重复它的判断。悬停时上面浮一枚 20 的播放三角
+// （Biu 那层蒙版 + `RiPlayFill`）；正在放的那首不浮——它已经在放了。
 func (s *Shell) viewQueueCover(c *ui.Context, item app.Item, playing, hovered bool) {
 	ui.Row(c).Width(queueCoverSize).FillHeight().Children(func() {
 		imgcache.View(c, s.images, item.Cover, queueCoverSize, queueCoverSize)
@@ -321,11 +331,18 @@ func (s *Shell) viewQueueCover(c *ui.Context, item app.Item, playing, hovered bo
 		}
 		// 半透明黑底 + 一个播放三角，就是 Biu 那层 `bg-[rgba(0,0,0,0.35)]`。
 		//
+		// 三角是**图标**不是字符（上游 `list-item.tsx:49` 的 `<RiPlayFill
+		// size={20}/>`）。原来这里写的是「▶」14 号字：字形跟着系统字体走，同一个
+		// 意思在两台机器上是两个不同的宽高，而且 14 号字在 48 的封面上太小。
+		// 图标不走 `scale.Font`：上游的 `size={20}` 是固定像素，图标不跟系统字号
+		// 缩放（见 widgets/scale 的文件头）。
+		//
 		// PassThrough：**不让这一层吃掉点击**。它盖在封面上面，不放行的话
 		// 点它就不是「点这一行」了（那一行跳过去放歌正是要点封面附近的）。
 		ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Radius(6).
 			PassThrough().Center().Background(ui.RGBA(0, 0, 0, 0.35)).Children(func() {
-			ui.Text(c, "▶").FontSize(scale.Font(c, 14)).TextColor(ui.RGBA(255, 255, 255, 0.92))
+			ui.Icon(c, icon(iconPlayFill)).FontSize(20).
+				TextColor(ui.RGBA(255, 255, 255, 0.92))
 		})
 	})
 }

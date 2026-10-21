@@ -604,8 +604,8 @@ func TestThePartsKeySharesTheMetaRowWithTheOtherKeys(t *testing.T) {
 
 // TestTheDrawerIsOnlyAsTallAsItsContent 断「面板不是一块固定高的死面板」。
 //
-// ⚠️ **判据是量出来的高度差**：三集的时候这一块该是 `头(45) + 3×40 = 165`，而照抄
-// Biu 那个浮层的 `h-[60vh]` 封顶会画成 420——**下面空出 259 像素（一屏的 62%）**，
+// ⚠️ **判据是量出来的高度差**：三集的时候这一块该是 `头(45) + 3×64 = 237`，而照抄
+// Biu 那个浮层的 `h-[60vh]` 封顶会画成 420——**下面空出 183 像素（一屏的 44%）**，
 // 而那块空白在界面上和「这个面板下面还有东西没画出来」长得一模一样。
 //
 // 顺带把封顶那一档也钉住：集数多到一屏放不下时，高度**停在上限**上（那一列靠
@@ -619,9 +619,9 @@ func TestTheDrawerIsOnlyAsTallAsItsContent(t *testing.T) {
 	}{
 		{"三集", 3, partHeaderHeight + partDividerH + 3*partRowHeight},
 		{"一集", 1, partHeaderHeight + partDividerH + partRowHeight},
-		// 一屏（winH 460）上限 276，减掉头 45 剩 231，只放得下 5 行（**整行取整**，
-		// 不切半行）；24 集超出，所以停在 45 + 5×40 = 245，而不是撑到 276。
-		{"集多到封顶", 24, partHeaderHeight + partDividerH + 5*partRowHeight},
+		// 一屏（winH 460）上限 276，减掉头 45 剩 231，只放得下 3 行（**整行取整**，
+		// 不切半行）；24 集超出，所以停在 45 + 3×64 = 237，而不是撑到 276。
+		{"集多到封顶", 24, partHeaderHeight + partDividerH + 3*partRowHeight},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			// 这一条断的是纯计算那一层，所以直接喂行数：真去造 24 集要一份 24 项的
@@ -648,6 +648,47 @@ func TestTheDrawerIsOnlyAsTallAsItsContent(t *testing.T) {
 		t.Errorf("三集的时候这块是 %.0f 高（去掉 8 的内边距是 %.0f），want ≤ %.0f——"+
 			"面板在最后一行下面空出了一大片（照 Biu 的 h-[60vh] 封顶的话是 420）",
 			panel.H, got, want)
+	}
+}
+
+// TestTheDrawerMatchesTheUpstreamWidthAndRowHeight 钉住「分集面板 ≥500 宽、
+// 行高 64」（票 #177）。
+//
+// 两个数都照上游 `layout/playbar/left/page-list.tsx`：`min-w-[500px]`
+// （`:29`）和传给分集列表的 `itemHeight={64}`（`:52`）。DESIGN.md 的
+// `parts_panel` 也是这两个数。改之前是 360 / 40。
+//
+// 行高量的是**两行标题文字的垂直距离**：两行都是同样的字、在同样高的行里居中，
+// 所以这个差就是行高本身。面板宽量的是面板自己的框（`Label("分集列表")`），
+// 不是里面某一行的字——字宽跟标题长短走，量它验不出面板多宽。
+func TestTheDrawerMatchesTheUpstreamWidthAndRowHeight(t *testing.T) {
+	// 用**最小窗口** 900×560 量：500 宽的面板要放得下，这才是「更宽」真正的
+	// 代价所在（窗口再小就不支持了，DESIGN.md 的 window.min_width 是 900）。
+	s, tt := onlineTester(t, multiPages(), false, at(900, 560))
+	partsReady(t, s, tt, 3)
+	openPartsDrawer(t, tt)
+
+	panel, ok := tt.Find("分集列表")
+	if !ok {
+		t.Fatalf("画面上找不到「分集列表」这一块，文字有 %q", tt.Texts())
+	}
+	const wantWidth, wantRow = 500, 64
+	if panel.W < wantWidth {
+		t.Errorf("分集面板只有 %.1f 宽，want ≥ %d（上游的 min-w-[500px]）——"+
+			"长标题在 360 里二十个字就截了", panel.W, wantWidth)
+	}
+
+	first, ok := tt.Find("第一集")
+	if !ok {
+		t.Fatalf("画面上找不到第一集，文字有 %q", tt.Texts())
+	}
+	second, ok := tt.Find("第二集")
+	if !ok {
+		t.Fatalf("画面上找不到第二集，文字有 %q", tt.Texts())
+	}
+	if got := second.Y - first.Y; widthGap(got-wantRow) > 1 {
+		t.Errorf("两集之间隔了 %.2f，want %d——行高没对齐上游的 itemHeight={64}",
+			got, wantRow)
 	}
 }
 
