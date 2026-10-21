@@ -27,6 +27,7 @@ package mfadec
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -219,16 +220,24 @@ func (c *Codec) createMFT() (uintptr, error) {
 //  2. 往里加一个缓冲。
 //  3. 问它现在有几个缓冲——**必须是 1**。
 //
-// 下标对的时候，第 39 格是 `GetBufferCount`，返回 1。
-// 下标错的时候（38 祖先那套），第 42 格是 `GetSampleDuration`（它往一个指针里
-// 写一个 LONGLONG，返回 S_OK）——缓冲**根本没加上**；而第 39 格是
-// `SetSampleDuration`（**按值**收一个 DWORD，返回 S_OK），它不写我们那个
-// 指针，所以那个计数原封不动地是我们放的哨兵值。
+// # 先做不会出事的那一半，再做会出事的那一半
 //
-// **这一步不会崩**：错的那一格要么按值收 DWORD（我们传的是合法的指针值，
-// 无害），要么往一个 8 字节的合法地址里写 8 字节（我们专门给了一个 8 字节的
-// 局部变量）。所以最坏的结果是「答案不对，当场红」，而不是「带着一串垃圾
-// 函数指针死掉」。
+// **先数一个空样本的缓冲数**（必须是 0）。这一步在两种下标假设下都**不会写坏
+// 东西**：
+//
+//   - 第 39 格真是 `GetBufferCount`：它往我们给的 `UINT32` 里写 0；
+//   - 第 39 格是「38 祖先」那套里的 `SetSampleDuration`：它**按值**收一个
+//     DWORD，什么都不写——我们放的哨兵原封不动，于是判出「不对」。
+//
+// **确认了 39 之后才去 `AddBuffer`**。这一步是唯一可能出事的：如果下标错了，
+// 第 42 格可能是 `GetSampleDuration`，它会往传进去的指针里写 8 个字节——而
+// 我们传的是那个 `IMFMediaBuffer` 对象本身，写进去就**踩坏它的虚表指针**，
+// 后面 `release` 时崩。但 39 已经对上了，说明祖先就是 33 格、整套布局就是这个
+// 形状，42 也就必然是 `AddBuffer`。
+//
+// ⚠️ 所以这一条的价值是「在布局确实对的时候，确认运行时行为和头文件一致」；
+// **它不能证明布局错的时候会干净地报错**——那要靠 `guid_test.go` 对着 SDK 的
+// `IMFSampleVtbl` 一条一条数出来的下标。
 func verifySampleVTable() error {
 	var buf uintptr
 	if hr := mfCreateMemoryBuffer(16, &buf); hr < 0 {
@@ -242,26 +251,32 @@ func verifySampleVTable() error {
 	}
 	defer release(sample)
 
-	// 一个专门的 8 字节局部变量：万一 `AddBuffer` 那一格其实是
-	// `GetSampleDuration`，它会往这里写 8 字节——不能让它踩到别的东西。
-	var slot uintptr
-	if hr := comHR(comCall(sample, vtblSampleAddBuffer, buf)); hr < 0 {
-		return hresultError("IMFSample::AddBuffer", hr)
-	}
-	_ = slot
-
-	// 哨兵：下标错的时候没人写它，它就还是这个数——于是「不等于 1」是确定的，
-	// 而不是「碰运气读到栈上的垃圾」。
+	// ① 空样本：缓冲数必须是 0。哨兵保证「没人写」也能判出来。
 	const sentinel = 0xDEADBEEF
 	n := uint32(sentinel)
 	if hr := comHR(comCall(sample, vtblSampleGetBufferCount,
 		uintptr(unsafe.Pointer(&n)))); hr < 0 {
 		return hresultError("IMFSample::GetBufferCount", hr)
 	}
+	if n != 0 {
+		return fmt.Errorf("mfadec: IMFSample 的虚表下标不对——一个**空**样本读回来有 %d 个缓冲"+
+			"（期望 0；哨兵 %#x 还在就说明第 %d 格根本不是 GetBufferCount）。"+
+			"这说明祖先槽位数不是 33，整个 IMFSample 的下标都错了。",
+			n, sentinel, vtblSampleGetBufferCount)
+	}
+
+	// ② 布局已经确认了，再加一个缓冲、数一遍。
+	if hr := comHR(comCall(sample, vtblSampleAddBuffer, buf)); hr < 0 {
+		return hresultError("IMFSample::AddBuffer", hr)
+	}
+	n = uint32(sentinel)
+	if hr := comHR(comCall(sample, vtblSampleGetBufferCount,
+		uintptr(unsafe.Pointer(&n)))); hr < 0 {
+		return hresultError("IMFSample::GetBufferCount", hr)
+	}
 	if n != 1 {
 		return fmt.Errorf("mfadec: IMFSample 的虚表下标不对——加了一个缓冲，读回来有 %d 个"+
-			"（期望 1，哨兵 %#x 还在就说明那一格根本不是 GetBufferCount）。"+
-			"这说明祖先槽位数不是 33，整个 IMFSample 的下标都错了。", n, sentinel)
+			"（期望 1；哨兵 %#x 还在就说明那一格根本不是 GetBufferCount）", n, sentinel)
 	}
 	return nil
 }
@@ -323,45 +338,8 @@ func (c *Codec) tryOpen(mft uintptr, rate, chans int, asc []byte, v inputVariant
 		return err
 	}
 	defer release(cur)
-
-	if rate, ok, _ := getUINT32(cur, &guidMTAudioSamplesPerSecond); ok {
-		c.rate = int(rate)
-	}
-	if chans, ok, _ := getUINT32(cur, &guidMTAudioNumChannels); ok {
-		c.chans = int(chans)
-	}
-	if c.rate == 0 || c.chans == 0 {
-		return fmt.Errorf("mfadec: 输出媒体类型里没有采样率或声道数")
-	}
-
-	// ⚠️ **输出格式必须核**：不核的话，「MFT 挑了浮点输出」会被当成
-	// 「16 位整数 PCM」去读——浮点的比特被当成 int16，得到的是一片看着像
-	// PCM 的垃圾，而症状是「RMS 不对」而不是报错。
-	sub, ok, _ := getGUID(cur, &guidMTSubtype)
-	if !ok {
-		return fmt.Errorf("mfadec: 输出媒体类型里没有子类型")
-	}
-	switch {
-	case sub.equal(guidAudioFormatPCM):
-		bits, ok, _ := getUINT32(cur, &guidMTAudioBitsPerSample)
-		if !ok || bits == 0 {
-			bits = 16
-		}
-		if bits != 16 {
-			return fmt.Errorf("mfadec: 输出是 %d 位定点 PCM，本 spike 要的是 16 位", bits)
-		}
-		c.outputFloat = false
-	case sub.equal(guidAudioFormatFloat):
-		bits, ok, _ := getUINT32(cur, &guidMTAudioBitsPerSample)
-		if !ok || bits == 0 {
-			bits = 32
-		}
-		if bits != 32 {
-			return fmt.Errorf("mfadec: 输出是 %d 位浮点，本 spike 要的是 32 位", bits)
-		}
-		c.outputFloat = true
-	default:
-		return fmt.Errorf("mfadec: 输出的子类型是 %s，既不是 PCM 也不是浮点", sub)
+	if err := c.adoptOutputType(cur); err != nil {
+		return err
 	}
 
 	// 输出样本由谁分配，看 `MFT_OUTPUT_STREAM_INFO` 的 dwFlags。
@@ -506,7 +484,11 @@ type InputProbe struct {
 //
 // 它**自己**建 MFT，不依赖某一个已经打开的解码器——所以「主路径打不开」
 // 的时候，这条依然能给出答案。
-func ProbeInputTypes(rate, chans int, asc []byte) []InputProbe {
+//
+// payloadType 是调用方手里那种字节的喂法（0 = 裸 AAC，1 = ADTS）。**两种都要
+// 各问一遍**：裸 AAC 和 ADTS 在解码器眼里是同一栏的两个取值，但「它认不认」
+// 是两回事，而报告里要的是**两种容器各认哪一种配置**。
+func ProbeInputTypes(rate, chans int, asc []byte, payloadType uint32) []InputProbe {
 	out := []InputProbe{}
 	if err := bindingsError(); err != nil {
 		return append(out, InputProbe{Name: "（系统函数没绑上）", Err: err})
@@ -520,7 +502,7 @@ func ProbeInputTypes(rate, chans int, asc []byte) []InputProbe {
 	var probes []InputProbe
 	th.do(func() {
 		c := &Codec{th: th}
-		for _, v := range inputVariants(aacPayloadRaw) {
+		for _, v := range inputVariants(payloadType) {
 			p := InputProbe{Name: v.name}
 			// ⚠️ **每一种顺序都建一个全新的 MFT**。
 			//
@@ -553,6 +535,62 @@ func ProbeInputTypes(rate, chans int, asc []byte) []InputProbe {
 		}
 	})
 	return append(out, probes...)
+}
+
+// adoptOutputType 从一份输出媒体类型里读出采样率、声道数和格式，记到 Codec 上。
+//
+// ⚠️ **输出格式必须核**：不核的话，「MFT 挑了浮点输出」会被当成「16 位整数
+// PCM」去读——浮点的比特被当成 int16，得到的是一片看着像 PCM 的垃圾，而症状
+// 是「RMS 不对」而不是报错。
+func (c *Codec) adoptOutputType(typ uintptr) error {
+	if v, ok, _ := getUINT32(typ, &guidMTAudioSamplesPerSecond); ok {
+		c.rate = int(v)
+	}
+	if v, ok, _ := getUINT32(typ, &guidMTAudioNumChannels); ok {
+		c.chans = int(v)
+	}
+	if c.rate == 0 || c.chans == 0 {
+		return fmt.Errorf("mfadec: 输出媒体类型里没有采样率或声道数")
+	}
+	sub, ok, _ := getGUID(typ, &guidMTSubtype)
+	if !ok {
+		return fmt.Errorf("mfadec: 输出媒体类型里没有子类型")
+	}
+	switch {
+	case sub.equal(guidAudioFormatPCM):
+		bits, ok, _ := getUINT32(typ, &guidMTAudioBitsPerSample)
+		if !ok || bits == 0 {
+			bits = 16
+		}
+		if bits != 16 {
+			return fmt.Errorf("mfadec: 输出是 %d 位定点 PCM，本 spike 要的是 16 位", bits)
+		}
+		c.outputFloat = false
+	case sub.equal(guidAudioFormatFloat):
+		bits, ok, _ := getUINT32(typ, &guidMTAudioBitsPerSample)
+		if !ok || bits == 0 {
+			bits = 32
+		}
+		if bits != 32 {
+			return fmt.Errorf("mfadec: 输出是 %d 位浮点，本 spike 要的是 32 位", bits)
+		}
+		c.outputFloat = true
+	default:
+		return fmt.Errorf("mfadec: 输出的子类型是 %s，既不是 PCM 也不是浮点", sub)
+	}
+	return nil
+}
+
+// outputAvailableType 问第 index 个可用的输出媒体类型（`GetOutputAvailableType`）。
+//
+// 枚举到头时返回负的 `hresult`（`MF_E_NO_MORE_TYPES`）。
+//
+//go:uintptrescapes
+func outputAvailableType(mft uintptr, id, index uint32) (uintptr, hresult) {
+	var out uintptr
+	hr := comHR(comCall(mft, vtblTransformGetOutputAvailableType,
+		uintptr(id), uintptr(index), uintptr(unsafe.Pointer(&out))))
+	return out, hr
 }
 
 // SampleRate 是输出采样率。
@@ -605,29 +643,63 @@ func (c *Codec) feed(frame []byte) ([]float32, error) {
 	defer release(buf)
 
 	hr := comHR(comCall(c.mft, vtblTransformProcessInput, 0, sample, 0))
-	if hr < 0 {
-		if uint32(hr) == hrMFNotAccepting {
-			// 「现在不收输入」——先把已有的输出取干净，再重试一次。
-			if _, err := c.pullOutput(); err != nil {
-				return nil, err
-			}
-			hr = comHR(comCall(c.mft, vtblTransformProcessInput, 0, sample, 0))
+	if hr < 0 && uint32(hr) == hrMFNotAccepting {
+		// 「现在不收输入」——微软的 `ProcessInput` 文档说这时候 MFT
+		// 「is ready to produce output」，客户端该先 `ProcessOutput` 把已有的
+		// 输出取走，再重试 `ProcessInput`。
+		//
+		// ⚠️⚠️ **取出来的 PCM 必须留着。** 原来这里写的是
+		// `if _, err := c.pullOutput(); err != nil`——把那一整段**丢掉了**，
+		// 然后只返回重试之后取到的那一份。而那一趟取出来的正是**这一帧之前
+		// 攒下的输出**，丢掉就是解码结果里少一段，而症状是「听着像跳了一下」，
+		// 不是报错。
+		pending, err := c.pullOutput()
+		if err != nil {
+			return nil, err
 		}
+		hr = comHR(comCall(c.mft, vtblTransformProcessInput, 0, sample, 0))
 		if hr < 0 {
 			return nil, hresultError("ProcessInput", hr)
 		}
+		rest, err := c.pullOutput()
+		if err != nil {
+			return nil, err
+		}
+		return append(pending, rest...), nil
+	}
+	if hr < 0 {
+		return nil, hresultError("ProcessInput", hr)
 	}
 	return c.pullOutput()
 }
+
+// errStreamChanged 是「输出流换了格式，得重新设一次输出类型再接着取」。
+//
+// 它**不是错误**：按文档，`ProcessOutput` 返回 `MF_E_TRANSFORM_STREAM_CHANGE`
+// （或 `dwStatus` 里带 `MFT_OUTPUT_DATA_BUFFER_FORMAT_CHANGE`）时，这一趟
+// **不产生输出**，客户端要重新问一次可用的输出类型、设上去，然后接着取。
+var errStreamChanged = errors.New("mfadec: 输出流换了格式")
 
 // pullOutput 把 MFT 手里的输出全取出来。
 //
 // ⚠️ **有迭代上限**：MFT 一直说「还有更多」（`MFT_OUTPUT_DATA_BUFFER_INCOMPLETE`）
 // 而不往前挪的时候，无限循环就是「CI 跑到超时」而不是「快速失败」。
+//
+// ⚠️ **换了格式要重设输出类型**：HE-AAC 会走到这里——SBR 把采样率翻倍、PS 把
+// 单声道变立体声，前几帧之后输出格式才定下来。原来这里把
+// `MF_E_TRANSFORM_STREAM_CHANGE` 当成致命错误，于是 **HE-AAC 在第一帧就失败**；
+// 而 `FORMAT_CHANGE` 那一支只是把当前类型读出来再放掉，**从来没有设过新的**
+// ——按文档，不重设的话后面的 `ProcessInput` / `ProcessOutput` 会一直失败。
 func (c *Codec) pullOutput() ([]float32, error) {
 	var pcm []float32
 	for range maxOutputPulls {
 		chunk, done, err := c.processOutput()
+		if errors.Is(err, errStreamChanged) {
+			if err := c.renegotiateOutput(); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -638,6 +710,73 @@ func (c *Codec) pullOutput() ([]float32, error) {
 	}
 	return nil, fmt.Errorf("mfadec: 取了 %d 趟输出还没取完（MFT 一直说 INCOMPLETE）", maxOutputPulls)
 }
+
+// renegotiateOutput 在输出流换了格式之后重新挑一个输出类型。
+//
+// 做法照文档：`GetOutputAvailableType` 枚举一遍，挑一个**我们读得动**的
+// （16 位定点 PCM 或 32 位浮点），`SetOutputType` 设上去，再读回当前的
+// 输出类型，把采样率 / 声道数 / 格式更新到 `Codec` 上——**HE-AAC 的采样率
+// 会在这里变成翻倍之后的那个**。
+//
+// ⚠️ 候选类型要先**试读**（`adoptOutputType` 会核子类型和位宽），确认读得动
+// 再提交；读不动的回滚，试下一个。
+func (c *Codec) renegotiateOutput() error {
+	var chosen uintptr
+	oldRate, oldChans, oldFloat := c.rate, c.chans, c.outputFloat
+	for i := uint32(0); i < maxOutputTypes; i++ {
+		typ, hr := outputAvailableType(c.mft, 0, i)
+		if hr < 0 {
+			break // 枚举到头了
+		}
+		if err := c.adoptOutputType(typ); err != nil {
+			c.rate, c.chans, c.outputFloat = oldRate, oldChans, oldFloat
+			release(typ)
+			continue
+		}
+		chosen = typ
+		break
+	}
+	if chosen == 0 {
+		return fmt.Errorf("mfadec: 输出流换了格式，但 %d 个可用输出类型里没有一个读得动", maxOutputTypes)
+	}
+	defer release(chosen)
+
+	if hr := setOutputType(c.mft, chosen); hr < 0 {
+		// 退一步：让 MFT 自己挑（pType 传 NULL），和 `tryOpen` 一样。
+		if hr2 := setOutputType(c.mft, 0); hr2 < 0 {
+			return hresultError("SetOutputType（换格式之后）", hr)
+		}
+	}
+
+	// 设完再读回**当前**的输出类型：MFT 可能没照我们挑的那个来。
+	cur, err := outputCurrentType(c.mft)
+	if err != nil {
+		return err
+	}
+	defer release(cur)
+	if err := c.adoptOutputType(cur); err != nil {
+		return err
+	}
+
+	// 输出样本的大小也可能变了（采样率翻倍的话一帧的字节数就变了），
+	// 「由调用方分配样本」那条路要用新值。
+	var info mftOutputStreamInfo
+	if hr := comHR(comCall(c.mft, vtblTransformGetOutputStreamInfo, 0,
+		uintptr(unsafe.Pointer(&info)))); hr < 0 {
+		return hresultError("GetOutputStreamInfo（换格式之后）", hr)
+	}
+	c.callerAllocatesOutput = info.Flags&(mftOutputStreamProvidesSamples|mftOutputStreamCanProvideSamples) == 0
+	if info.Size > 0 {
+		c.outputSize = int(info.Size)
+	}
+	return nil
+}
+
+// maxOutputTypes 是枚举可用输出类型时最多试几个。
+//
+// 解码器一般给两三个（16 位 PCM、浮点、也许还有折叠成立体声的）。给 16 是
+// 防「永远枚举不完」——那说明别的地方坏了，该快速失败。
+const maxOutputTypes = 16
 
 // maxOutputPulls 是一次取输出最多拉几趟。
 //
@@ -709,21 +848,28 @@ func (c *Codec) processOutput() ([]float32, bool, error) {
 		if uint32(hr) == hrTransformNeedMoreInput {
 			return nil, true, nil
 		}
+		// ⚠️ **这一条原来被当成致命错误**，于是 HE-AAC（SBR 把采样率翻倍、
+		// PS 把单声道变立体声）在第一帧就失败。文档说这时候它**不产生输出**，
+		// 要重新设一次输出类型再接着取。
+		if uint32(hr) == hrTransformStreamChange {
+			return nil, false, errStreamChanged
+		}
 		return nil, true, hresultError("ProcessOutput", hr)
 	}
 	// dwStatus 里那三个值（0x100 / 0x200 / 0x300）**不是互斥的位**，
 	// 是三个互斥的取值，所以这里按位取一段再比，而不是逐个 &。
 	switch out.Status & 0x00000300 {
 	case mftOutputDataFormatChange:
-		// 输出格式变了：按文档这时要**重新问一次输出媒体类型**然后接着走。
-		// 这一票的素材不会走到这里（解码器不处理动态格式变化），但真走到了
-		// 不能当成「这一趟没输出」糊过去。
-		cur, err := outputCurrentType(c.mft)
-		if err != nil {
-			return nil, true, err
+		// 输出格式变了：按文档要**重新设一次输出类型**再接着取。
+		// 原来这里只把当前类型读出来再放掉，**从来没设过新的**——而按文档，
+		// 不重设的话后面的 `ProcessInput` / `ProcessOutput` 会一直失败。
+		//
+		// ⚠️ 这一趟 MFT 仍可能塞给我们一个样本（`ours == 0` 时是它分配的），
+		// 不在这里放掉就漏一个 COM 引用。
+		if ours == 0 && out.Sample != 0 {
+			release(out.Sample)
 		}
-		release(cur)
-		return nil, false, nil
+		return nil, false, errStreamChanged
 	case mftOutputDataStreamEnd:
 		// 流到头了——但**这一趟可能还带着样本**，所以先把它读完再收工。
 		if out.Sample == 0 {

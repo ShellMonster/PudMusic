@@ -216,43 +216,51 @@ func TestSpikeWhichProfilesWeCanActuallyTest(t *testing.T) {
 // 素材的左右声道是**每一个样本都不一样**的（`TestTheFixtureChannelsDiffer`
 // 钉着这条），所以逐样本比对是能抓住「声道调换」的——下面那条
 // `TestSpikeTheChannelsAreNotSwapped` 就是专门干这个的。
+// ⚠️ **两种容器都要比**：`.m4a`（裸 AAC 帧）和 `.aac`（带 ADTS 头）走的是
+// `MF_MT_AAC_PAYLOAD_TYPE` 的两个取值。只比 `.m4a` 的话，ADTS 那一路**解错了
+// 也会通过**——上面那条「能不能解」对 `.aac` 只断了非静音，而一段解错但仍
+// 有声音的 PCM 是能过那一关的。
 func TestSpikePCMIsWithinTolerancesOfTheReference(t *testing.T) {
-	src, err := openFixture("aaclc-stereo.m4a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	codec, err := OpenAACCodec(src.rate, src.chans, src.asc, src.payloadType)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer codec.Close()
-	frames, pcm, _ := decodeAll(t, codec, src)
+	for _, name := range []string{"aaclc-stereo.m4a", "aaclc-stereo.aac"} {
+		t.Run(name, func(t *testing.T) {
+			src, err := openFixture(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			codec, err := OpenAACCodec(src.rate, src.chans, src.asc, src.payloadType)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer codec.Close()
+			frames, pcm, _ := decodeAll(t, codec, src)
 
-	_, chans, want := readReferenceWAV(t)
-	rms, peak := stats(pcm)
+			_, chans, want := readReferenceWAV(t)
+			rms, peak := stats(pcm)
 
-	t.Logf("Media Foundation: %d 帧 rms=%.6f peak=%.6f", frames, rms, peak)
-	t.Logf("ffmpeg 参考:     %d 帧 rms=%.6f peak=%.6f", refFrames, refRMS, refPeak)
+			t.Logf("Media Foundation: %d 帧 rms=%.6f peak=%.6f", frames, rms, peak)
+			t.Logf("ffmpeg 参考:     %d 帧 rms=%.6f peak=%.6f", refFrames, refRMS, refPeak)
 
-	// 帧数：两边对 priming 的剪法不一样，所以只要求落在音频工具书
-	// 「下界 = AudioToolbox 的 176400」到「上界 = 不剪的 178176」之间。
-	const (
-		framesLow  = 176400
-		framesHigh = 178176
-	)
-	if frames < framesLow || frames > framesHigh {
-		t.Errorf("解出 %d 帧，落在 [%d, %d] 之外", frames, framesLow, framesHigh)
-	}
-	if chans != codec.Channels() {
-		t.Fatalf("参考 %d 声道，解出来 %d 声道，没法比", chans, codec.Channels())
-	}
+			// 帧数：两边对 priming 的剪法不一样，所以只要求落在音频工具书
+			// 「下界 = AudioToolbox 的 176400」到「上界 = 不剪的 178176」之间。
+			const (
+				framesLow  = 176400
+				framesHigh = 178176
+			)
+			if frames < framesLow || frames > framesHigh {
+				t.Errorf("解出 %d 帧，落在 [%d, %d] 之外", frames, framesLow, framesHigh)
+			}
+			if chans != codec.Channels() {
+				t.Fatalf("参考 %d 声道，解出来 %d 声道，没法比", chans, codec.Channels())
+			}
 
-	// 对齐：两个解码器剪掉的 priming 不一样，先找出差多少个样本。
-	offset, worst := bestAlignment(pcm, want)
-	t.Logf("最佳对齐：MF 比参考晚/早 %d 个样本，最大逐样本差 = %.6f（= %.0f 个 16 位量化级）",
-		offset, worst, worst*32768)
-	if worst > 0.02 {
-		t.Errorf("最大逐样本差 %.6f 超过 %.2f——这已经不是两个解码器的正常分歧了", worst, 0.02)
+			// 对齐：两个解码器剪掉的 priming 不一样，先找出差多少个样本。
+			offset, worst := bestAlignment(pcm, want)
+			t.Logf("最佳对齐：MF 比参考晚/早 %d 个样本，最大逐样本差 = %.6f（= %.0f 个 16 位量化级）",
+				offset, worst, worst*32768)
+			if worst > 0.02 {
+				t.Errorf("最大逐样本差 %.6f 超过 %.2f——这已经不是两个解码器的正常分歧了", worst, 0.02)
+			}
+		})
 	}
 }
 
@@ -264,31 +272,36 @@ func TestSpikePCMIsWithinTolerancesOfTheReference(t *testing.T) {
 // 换句话说：如果哪天素材的左右声道变成了同一个信号，这条会先红，
 // 提醒人「现在的判据已经抓不住声道调换了」。
 func TestSpikeTheChannelsAreNotSwapped(t *testing.T) {
-	src, err := openFixture("aaclc-stereo.m4a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	codec, err := OpenAACCodec(src.rate, src.chans, src.asc, src.payloadType)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer codec.Close()
-	_, pcm, _ := decodeAll(t, codec, src)
+	// 和上面那条一样，**两种容器都要验**。
+	for _, name := range []string{"aaclc-stereo.m4a", "aaclc-stereo.aac"} {
+		t.Run(name, func(t *testing.T) {
+			src, err := openFixture(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			codec, err := OpenAACCodec(src.rate, src.chans, src.asc, src.payloadType)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer codec.Close()
+			_, pcm, _ := decodeAll(t, codec, src)
 
-	_, chans, want := readReferenceWAV(t)
-	swapped := swapChannels(pcm, chans)
+			_, chans, want := readReferenceWAV(t)
+			swapped := swapChannels(pcm, chans)
 
-	_, straight := bestAlignment(pcm, want)
-	_, flipped := bestAlignment(swapped, want)
+			_, straight := bestAlignment(pcm, want)
+			_, flipped := bestAlignment(swapped, want)
 
-	t.Logf("不换：最大逐样本差 %.6f；换了：最大逐样本差 %.6f", straight, flipped)
-	if flipped <= straight*4 {
-		t.Errorf("把左右声道换掉之后差值只从 %.6f 变成 %.6f——"+
-			"这个判据抓不住声道调换（素材的左右声道可能已经是同一个信号了）",
-			straight, flipped)
-	}
-	if straight > 0.02 {
-		t.Errorf("不换声道时的最大逐样本差 %.6f 已经超过 %.2f", straight, 0.02)
+			t.Logf("不换：最大逐样本差 %.6f；换了：最大逐样本差 %.6f", straight, flipped)
+			if flipped <= straight*4 {
+				t.Errorf("把左右声道换掉之后差值只从 %.6f 变成 %.6f——"+
+					"这个判据抓不住声道调换（素材的左右声道可能已经是同一个信号了）",
+					straight, flipped)
+			}
+			if straight > 0.02 {
+				t.Errorf("不换声道时的最大逐样本差 %.6f 已经超过 %.2f", straight, 0.02)
+			}
+		})
 	}
 }
 
@@ -470,16 +483,23 @@ func TestSpikeTheSampleVTableIsWhatWeThink(t *testing.T) {
 //
 // 每一种都试一遍，把 MFT 的真实回答记下来——**认和不认都记**。
 func TestSpikeWhichInputTypesTheDecoderAccepts(t *testing.T) {
-	src, err := openFixture("aaclc-stereo.m4a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range ProbeInputTypes(src.rate, src.chans, src.asc) {
-		if p.Err != nil {
-			t.Logf("❌ %s：%v", p.Name, p.Err)
-			continue
-		}
-		t.Logf("✅ %s：MFT 认", p.Name)
+	// ⚠️ **两种容器都问一遍**：`.m4a` 里是裸 AAC 帧、`.aac` 里带 ADTS 头，
+	// 在解码器眼里是 `MF_MT_AAC_PAYLOAD_TYPE` 的两个取值。报告里要给的是
+	// 「两种容器各认哪一种配置」——只问一种的话答案不完整。
+	for _, name := range []string{"aaclc-stereo.m4a", "aaclc-stereo.aac"} {
+		t.Run(name, func(t *testing.T) {
+			src, err := openFixture(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, p := range ProbeInputTypes(src.rate, src.chans, src.asc, src.payloadType) {
+				if p.Err != nil {
+					t.Logf("❌ %s：%v", p.Name, p.Err)
+					continue
+				}
+				t.Logf("✅ %s：MFT 认", p.Name)
+			}
+		})
 	}
 }
 
