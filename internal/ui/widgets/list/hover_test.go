@@ -230,7 +230,7 @@ func TestTheHoverFeedbackFadesInOverTwoHundredMilliseconds(t *testing.T) {
 			x = tri.X - coverSizeLeftEdge
 		} else {
 			// 还没出现时按行的位置推：封面左边 = 行左边 + 内边距 + 序号宽 + 间距。
-			x = cardPadX + indexWidth + cardGap
+			x = cardPadX + indexWidth + rowGap
 		}
 		return brightness(pixelAt(tt, x, triY(tt, songs[2].Title)))
 	}

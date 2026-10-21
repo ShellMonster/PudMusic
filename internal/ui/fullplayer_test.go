@@ -72,7 +72,7 @@ func advanceFull(s *Shell, tt *mygoui.Tester, fc *fakeClock, d time.Duration) {
 
 // ---- 共享元素转场 ----
 
-// TestTheFullPlayerControlsAreAllIcons 钉住满屏那一行**三枚都是图标**。
+// TestTheFullPlayerControlsAreAllIcons 钉住满屏那一行**五枚都是图标**。
 //
 // 🔴 **这一条是被评审指出来的**：满屏那一行原来是「图标 — 文字 — 图标」半新半旧
 // ——两边的上一首/下一首复用了播放条那几个（图标化之后成了图标），中间那个播放/
@@ -84,11 +84,12 @@ func advanceFull(s *Shell, tt *mygoui.Tester, fc *fakeClock, d time.Duration) {
 // 「有两种颜色」断不出来：主色按钮的底是主色、字是白的，本来就是两种颜色，
 // 而图标是白的、底也是主色——**两种颜色和文字按钮一模一样**。
 //
-// 能分开的是**图形的宽高比**：一个 34 见方的图标在 46 的点击区里，包围盒接近
+// 能分开的是**图形的宽高比**：一个 48 见方的图标在 58 的点击区里，包围盒接近
 // 正方；「暂停」两个字是 26×15 的横条，宽明显大于高。
 //
-// 另外钉住两件小事：三枚**中心在同一行**（绝对 y 不是判据——那一行是 `Absolute`
-// 贴在底部的，它的 y 是「窗口高 − 80」），以及从左到右是「上一首 · 播放 · 下一首」。
+// 另外钉住两件小事：五枚**中心在同一行**（绝对 y 不是判据——那一行是 `Absolute`
+// 贴在底部的，它的 y 是「窗口高 − 102」），以及从左到右是
+// 「模式 · 上一首 · 播放 · 下一首 · 队列」。
 func TestTheFullPlayerControlsAreAllIcons(t *testing.T) {
 	s, tt, fc := fullTester(t)
 	s.openFullPlayer()
@@ -100,7 +101,7 @@ func TestTheFullPlayerControlsAreAllIcons(t *testing.T) {
 	tt.Frame()
 
 	middle := transportLabel(s.app.Snapshot().Playing)
-	want := []string{"上一首", middle, "下一首"}
+	want := []string{"播放模式", "上一首", middle, "下一首", "播放列表"}
 
 	var lastX float32
 	for i, label := range want {
@@ -401,7 +402,9 @@ func TestTheSpectrumIsOffUntilTheUserTurnsItOn(t *testing.T) {
 		t.Fatalf("点不了偏好面板：%v（文字：%q）", err, tt.Texts())
 	}
 	tt.Frame()
-	if err := tt.Click("显示频谱图"); err != nil {
+	// ⚠️ 点的是**开关**（命名是「开关：那一行的标题」），不是左边那行标题的
+	// 文字：后者是兄弟节点，点它什么也不会发生。
+	if err := tt.Click("开关：显示频谱图"); err != nil {
 		t.Fatalf("点不了频谱开关：%v（文字：%q）", err, tt.Texts())
 	}
 	tt.Frame()
