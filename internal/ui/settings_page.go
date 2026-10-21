@@ -161,9 +161,13 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 						FontSize(scale.Font(c, 12)).TextColor(t.Danger)
 				}
 
-				// ⚠️ **主 Tab 用扁平那一种**（`flatTabs`，见 tabs.go）：这一排
-				// 和次级排序那几排不是同一个样子（票 #138）。
-				flatTabs(c, &s.settings.tab, settingsTabNames...)
+				// ⚠️ **主 Tab 用轨道 + 滑块那一种**（`mainTabs`，见 tabs.go）：
+				// 这一排和次级排序那几排不是同一个样子（票 #138）。
+				//
+				// ⚠️ `AlignSelf(ui.Start)`：Column 的默认跨轴对齐是 Stretch，
+				// 不拦一下轨道会横贯整个内容区；上游那一条是包着字的
+				//（`inline-flex`）。
+				mainTabs(c, &s.settings.tab, tabMD, settingsTabNames...).AlignSelf(ui.Start)
 
 				ui.Column(c).FillWidth().Gap(18).Children(func() {
 					switch s.settings.tab {

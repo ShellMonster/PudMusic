@@ -152,9 +152,14 @@ func (s *Shell) viewSearchResults(c *ui.Context, keyword string) {
 		// 顺序，要到**下一帧**才重置回第 1 页——屏幕上就是「按了排序，画面先抖
 		// 一下才换」，而中间那一帧还滚回了顶上，用户刚滚到的位置没了。
 		//
-		// ⚠️ **这一排是主 Tab（扁平那一种）**，下面 `viewSearchToolbar` 里那一排
-		// 排序是次级的（框架那一条下划线）——两排不是同一个样子（票 #138）。
-		flatTabs(c, &st.tab, searchTabNames[:]...)
+		// ⚠️ **这一排是主 Tab（轨道 + 滑块那一种）**，下面 `viewSearchToolbar`
+		// 里那一排排序是次级的（框架那一条下划线）——两排不是同一个样子
+		//（票 #138）。
+		//
+		// ⚠️ `AlignSelf(ui.Start)`：外面这个 Column 是 `AlignItems(Stretch)`，
+		// 不拦一下的话轨道会被拉成整个内容区的宽，而上游那一条是**包着字的**
+		//（`inline-flex`）。其余三处父容器本来就是 Start，不用这一句。
+		mainTabs(c, &st.tab, tabMD, searchTabNames[:]...).AlignSelf(ui.Start)
 		cur := st.tab
 		s.viewSearchToolbar(c, cur)
 
