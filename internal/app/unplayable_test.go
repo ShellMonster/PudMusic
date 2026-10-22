@@ -25,6 +25,7 @@ package app_test
 
 import (
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -253,4 +254,102 @@ func waitForErr(t *testing.T, a *app.App) string {
 		return msg != ""
 	})
 	return msg
+}
+
+// TestARetryAfterTheStreamDiesMidwayStartsTheSameSongAgain 播放中途断网之后，
+// 播放条上那枚「重试」必须是**活的**。
+//
+// 🔴 **这一条是评审逼出来的**：起播成功的时候把「用户刚才按的那一首」清掉了，
+// 于是中途断流之后按「重试」只得到一句「没有可以重试的那一首」——那枚键是
+// 死的，而这一类恰恰是**最该给重试**的一类（网络抖一下就好）。
+//
+// 场景：CDN 下到一半掐断连接 → 源换流 → 换流给的那条也拉不动 → 播放条上出现
+// 「拉不动了」并**给一枚重试** → 用户按下去 → 这一次取流拿到了完整的字节 →
+// 歌重新放起来（还是同一首）。
+func TestARetryAfterTheStreamDiesMidwayStartsTheSameSongAgain(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = readFlac(t)
+	// 播放中途断：CDN 只发三分之一就掐断连接（等 mediaGate 放行）。
+	f.failMediaAfter = len(f.media) / 3
+
+	// 取流接口按次数回答：
+	//
+	//	第 1 次（起播）	一条好地址
+	//	第 2 次（源换流）	服务端炸了 → 换流换不动 → 播放条上出现「拉不动了」
+	//	第 3 次（用户按了「重试」）	另一条好地址 → 歌重新放起来
+	//
+	// ⚠️ **换流必须真的换不动**：换得动的话源自己就换掉了，用户压根看不到错，
+	// 那枚「重试」也就没有机会被按。
+	var calls atomic.Int32
+	f.on("/x/player/wbi/playurl", func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		if n == 2 {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		name := "v1.flac"
+		if n >= 3 {
+			name = "v2.flac"
+		}
+		writeStreamJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
+			"data": map[string]any{"timelength": 1000,
+				"dash": dashFor(cdnURL(f.URL, name, time.Hour), int(bili.QualityHigh320), 110836)}})
+	})
+
+	a := newOnlineApp(t, f, t.TempDir())
+	if err := a.Enqueue(onlineItem("BV1", "1", "半路死掉的一首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "半路死掉的一首")
+
+	// 先让播放真的走起来，再放行掐断。
+	waitFor(t, 15*time.Second, "播放位置动起来", func() bool {
+		return a.Snapshot().Position > 0
+	})
+	close(f.mediaGate)
+
+	waitFor(t, 60*time.Second, "播放条上出现那句「拉不动了」", func() bool {
+		return a.Snapshot().Err != ""
+	})
+	if !a.Snapshot().CanRetry {
+		t.Fatalf("这句话是 %q，却没有给「重试」——它是可恢复的那一类", a.Snapshot().Err)
+	}
+
+	// 按「重试」：它放的还是**用户刚才按的那一首**，而且真的重新取流了。
+	if err := a.Retry(); err != nil {
+		t.Fatalf("「重试」是死的：%v", err)
+	}
+	waitFor(t, 60*time.Second, "重试之后歌重新放起来", func() bool {
+		st := a.Snapshot()
+		return st.Title == "半路死掉的一首" && st.Err == "" && st.Position > 0
+	})
+}
+
+// TestAFailedLocalFileDoesNotPointAtAnotherSong 本地文件打不开时，
+// 播放条上那枚「在 B 站打开」不许指向**另一首歌**。
+//
+// 🔴 那是评审逼出来的：本地文件打不开时，`pending` 里可能还留着上一首在线的
+// 歌，于是那枚键指向的是**跟这句错一点关系都没有**的一首歌——用户按下去
+// 打开的是一个他没在问的页面。
+func TestAFailedLocalFileDoesNotPointAtAnotherSong(t *testing.T) {
+	f := newStreamFixture(t)
+	// 取流失败（dash 里没有音频）：`pending` 留住的是这一首。
+	f.onPlayURL(map[string]any{"duration": 1})
+	a := newOnlineApp(t, f, t.TempDir())
+
+	if err := a.PlayFrom(onlineItem("BV1Stale", "1", "取流失败的那一首")); err != nil {
+		t.Fatalf("放不进去：%v", err)
+	}
+	waitForErr(t, a)
+	if got := a.Snapshot().BiliURL; got == "" {
+		t.Fatal("取流失败的那一首连 B 站地址都没有——「在 B 站里听它」正是用户能做的事")
+	}
+
+	// 再打开一个打不开的本地文件。
+	if err := a.Open(filepath.Join(t.TempDir(), "不是一个音频文件.m4a")); err == nil {
+		t.Fatal("打开一个不存在的文件居然成功了")
+	}
+	if got := a.Snapshot().BiliURL; got != "" {
+		t.Errorf("本地文件打不开，播放条上那枚「在 B 站打开」却指着 %q（那是另一首歌）", got)
+	}
 }

@@ -363,6 +363,13 @@ func playableOnline(it Item) error {
 		return nil
 	case it.Type == "mv" && it.Bvid != "":
 		return nil
+	case it.Type == "collection":
+		// 合集 / 电影 / 番剧那一类：它们**不是投稿**，也没有单独的音频流。
+		//
+		// ⚠️ **它和「没挂稿件的推荐条目」不是同一种**：那一种是「B 站没给
+		// 它挂可播的稿件」，而这一种是「这一条本来就是合集，里面才有单集」。
+		// 用户照着做的下一步也不一样（搜同名 vs 打开里面的单集）。
+		return unplayableOf(UnplayableNoAudioFlow)
 	}
 	return unplayableOf(UnplayableNoArchive)
 }
@@ -463,9 +470,12 @@ func (a *App) runOnline(it Item, gen int) {
 	a.online = &onlineTrack{item: it, ref: ref, source: src, quality: ref.Label}
 	a.reportedErr = nil
 	a.clearErrLocked()
-	// 这一首已经放上了：不必再留着「用户刚才想放的那一首」（它就是现在
-	// 在放的这首）。留着的话，换歌之后 `biliURLLocked` 会拿旧的那首算地址。
-	a.pending = Item{}
+	// ⚠️ **`pending` 不在这里清**：它是「当前这一首」，而中途断流之后
+	// 用户要的就是**重放这一首**（`App.Retry` 靠它）。在这里清掉的话，
+	// 「播放中途断网」那一类的「重试」键按下去只会得到一句
+	// 「没有可以重试的那一首」——那枚键是死的。
+	//
+	// 换歌不会让它过期：`playOnline` 每放一首都会把它换成新的那首。
 	wake := a.wake
 	a.mu.Unlock()
 

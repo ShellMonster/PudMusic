@@ -154,11 +154,16 @@ func (l *Library) ToView(ctx context.Context, page int, q LibraryQuery) ([]Libra
 // pgcCannotPlayReason 是 PGC 那一类放不了时的理由。
 //
 // 放得了的话给空串。
+//
+// 🔴 **它和收藏夹里合集/电影那一类说的是同一句**（同一个 kind
+// `UnplayableNoAudioFlow`）：那两类在 B 站那边是同一件事（不是投稿、
+// 没有单独的音频流），用户照着做的下一步也一样（打开里面的单集）。
+// 两处各写一个字面量的话，同一个类在两个界面就说成两句不同的话。
 func pgcCannotPlayReason(canPlay bool) string {
 	if canPlay {
 		return ""
 	}
-	return "这一条是番剧/剧集那一类，B 站没有给它们单独的音频流。打开里面的单集就能放"
+	return unplayableOf(UnplayableNoAudioFlow).Error()
 }
 
 // History 拉一页历史记录。

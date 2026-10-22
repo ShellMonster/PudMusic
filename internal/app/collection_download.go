@@ -67,6 +67,12 @@ func ItemOfMedia(m bili.Media) Item {
 		it.Type, it.Bvid = "mv", m.Bvid
 	case bili.MediaAudio:
 		it.Type = "audio"
+	case bili.MediaCollection, bili.MediaMovie:
+		// 🔴 **合集与电影要带着自己的身份**，不能只留一个空的 Type：
+		// 空 Type 在 `playableOnline` 眼里和「没挂稿件的推荐条目」是同一种，
+		// 于是界面上那句说明就成了「这一条不是投稿」——而用户看到的是
+		// 收藏夹里的一个合集，他该知道的是「打开里面的单集就能放」。
+		it.Type = "collection"
 	}
 	return it
 }

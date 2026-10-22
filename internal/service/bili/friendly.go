@@ -100,7 +100,7 @@ func Friendly(err error) string {
 		// 查网、换网、等它好，而这一条等一万年还是没有音频流。所以这一句
 		// 既说「为什么」（B 站压根没给这一条音频流），也说「还能怎么办」
 		// （打开里面的单集 / 在 B 站里打开它听）。
-		return "B 站没有给这一条单独的音频流（合集、剧集和歌单那一类多半是这样）。打开里面的单集，或者在 B 站里打开它听"
+		return "B 站没有给这一条单独的音频流（歌单、活动那一种多半是这样）。在 B 站里打开它听，或者换一首放"
 	case errors.Is(err, ErrStreamExpired):
 		return "播放地址过期了，正在换一条新的"
 	case errors.Is(err, ErrNoLoginForOnline):

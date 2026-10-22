@@ -86,7 +86,10 @@ func menuItems(m Music) []menuItem {
 // 合成一句会错——「下载音频」对放不了的条目也是对的（它压根下不了，
 // 但原因不同）。
 func markUnplayable(items []menuItem, it app.Item) []menuItem {
-	if note := app.UnplayableMenuNote(it); note != "" {
+	// ⚠️ **判据是 `app.CanPlay`**（应用层那一个），说明是
+	// `app.UnplayableMenuNote`（同一判据的另一面）：判据和话分开两处，
+	// 免得话说的是一种、判的是另一种。
+	if !app.CanPlay(it) {
 		for i := range items {
 			switch items[i].key {
 			case "play", "play-next", "queue", "download-audio":
@@ -96,7 +99,8 @@ func markUnplayable(items []menuItem, it app.Item) []menuItem {
 		// ⚠️ **只说一段**：放不了的条目必然也下不了（下载按 bvid 取流），
 		// 两段说明摆在一起是把同一件事说了两遍，而菜单末尾那一段会顶掉
 		// 前一段（用户只看见最后一句）。
-		items = append(items, menuItem{key: "why-unplayable", label: note, disabled: true, note: true})
+		items = append(items, menuItem{key: "why-unplayable",
+			label: app.UnplayableMenuNote(it), disabled: true, note: true})
 		return items
 	}
 	if note := app.UndownloadableMenuNote(it); note != "" {

@@ -48,15 +48,20 @@ const (
 	// 音乐库那一路取流认的是 sid（auid），没有它就无从问起。
 	UnplayableNoSid
 
-	// UnplayableNoAudioFlow 是「B 站说这一条没有单独的音频流」。
+	// UnplayableNoAudioFlow 是「这一条是合集/剧集那一类，没有单独的音频流」。
 	//
-	// ⚠️ **这一类点之前判不出来**：它要问一次 B 站才知道，而问一次是一次
-	// 带签名的网络往返，界面线程上一次都不许有（铁律三）。所以它只能
-	// 在**按下去之后**才报出来——而正因为如此，那一句必须说准是「B 站说
-	// 这一条没有音频流」，而不是笼统的「没获取到音频」。
+	// 它是**当场判得出**的（`bili.Media` 的 type=21/24 → `Item.Type`
+	// 是 `"collection"`），所以界面上**点之前就不给播放入口**。
 	//
-	// 实测过的一种：音乐区（tid=130）那种把歌单/活动整个塞进一个投稿的
-	// （单 P、三十多分钟），B 站的取流接口对它回的是「这个稿件没有音频流」。
+	// ⚠️ **它和「没挂稿件的推荐条目」必须说成两句话**：那一种是「B 站没给
+	// 它挂可播的稿件」（去搜同名），这一种是「这一条本来就是合集，里面才
+	// 有单集」（打开里面的单集）。用户照着做的下一步不一样。
+	//
+	// ⚠️ **另一个同名的东西在 `bili` 层**：`bili.ErrNoAudioFlow` 是「B 站
+	// 在取流的时候说这一条没有音频流」（实测：音乐区 tid=130 那种把歌单/
+	// 活动整个塞进一个投稿的，单 P、三十多分钟）——那一类**点之前判不出来**
+	// （判它要一次带签名的网络往返，界面线程上一次都不许有），只能在
+	// 按下去之后说准。**两个不是同一件事。**
 	UnplayableNoAudioFlow
 
 	// UnplayableNoDownload 是「这一类还没有下载通道」。
@@ -102,7 +107,7 @@ func defaultWhy(k UnplayableKind) string {
 	case UnplayableNoSid:
 		return "这一条是 B 站音乐库里的条目，但没有带音频 id"
 	case UnplayableNoAudioFlow:
-		return "B 站没有给这一条单独的音频流（合集、剧集和歌单那一类多半是这样）"
+		return "这一条是合集/剧集那一类，B 站没有给它们单独的音频流"
 	case UnplayableNoDownload:
 		return "这一条是 B 站音乐库里的条目，还没有下载通道"
 	}
@@ -122,7 +127,7 @@ func defaultNext(k UnplayableKind) string {
 	case UnplayableNoSid:
 		return "重新收藏一次，或者在 B 站搜同名的歌"
 	case UnplayableNoAudioFlow:
-		return "打开里面的单集，或者在 B 站里打开它听"
+		return "打开里面的单集就能放"
 	case UnplayableNoDownload:
 		return "先在应用里放它，或者去 B 站下载"
 	}
@@ -243,7 +248,7 @@ func menuNote(k UnplayableKind) string {
 	case UnplayableNoSid:
 		return "这一条是音乐库条目，缺音频 id。重新收藏一次"
 	case UnplayableNoAudioFlow:
-		return "B 站没给这一条音频流。去 B 站里听它"
+		return "这一条是合集/剧集，没有音频流。打开里面的单集就能放"
 	case UnplayableNoDownload:
 		return "音乐库条目还没下载通道。去 B 站下载"
 	}

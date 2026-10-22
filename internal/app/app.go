@@ -528,6 +528,10 @@ func (a *App) Open(path string) error {
 		// 连流都没有（它在你的磁盘上，坏了就是坏了）。留着上一句的
 		// `errRetryable` 的话，界面上会给出一枚按了也没用的「重试」。
 		a.errRetryable = false
+		// ⚠️ **`pending` 也清掉**：用户现在面对的是**这个本地文件**，而
+		// `pending` 里可能还留着上一首在线的歌——留着的话，播放条上那枚
+		// 「在 B 站打开」会指向**另一首歌**（和这句错一点关系都没有）。
+		a.pending = Item{}
 		wake := a.wake
 		a.mu.Unlock()
 		if wake != nil {
@@ -558,6 +562,10 @@ func (a *App) Open(path string) error {
 	a.wantPlay, a.playing = true, true
 	a.stopped = false
 	a.clearErrLocked()
+	// ⚠️ **本地文件把 `pending` 让出来**：那一栏记的是「在线的那一首」，
+	// 而本地文件在 B 站上没有对应的东西。留着上一首在线歌的话，播放条上
+	// 那枚「在 B 站打开」会指向另一首歌。
+	a.pending = Item{}
 	wake := a.wake
 	a.mu.Unlock()
 
@@ -722,6 +730,9 @@ func (a *App) ClearTrack() {
 	a.position, a.duration = 0, 0
 	a.wantPlay = false
 	a.clearErrLocked()
+	// 什么都没有了：「当前这一首」也就没有了（不然播放条上那枚
+	// 「在 B 站打开」会指着上一首）。
+	a.pending = Item{}
 	wake := a.wake
 	a.mu.Unlock()
 
