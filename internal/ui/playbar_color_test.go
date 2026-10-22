@@ -80,6 +80,19 @@ func TestTheIconKeysTurnAccentOnHover(t *testing.T) {
 //
 // ⚠️ **样本是「上一首 / 下一首」那两枚**：无头外壳里**没有播放器**，所以它们
 // 此刻都是禁用的（`App.CanPrev` 要 `player != nil`）。
+//
+// # 🔴 **判据是「悬停前后的图形墨迹色」，不是「数主色像素」
+//
+// 框架把**禁用**的控件整体乘 0.5 不透明度（`mygo/ui/paint.go:209`），所以一枚
+// **被染了主色**的禁用键画出来是 **rgb(136,188,154)** 那一档，**不是**主色那个
+// rgb(17,121,54)——「画面上有几个接近主色的像素」**一个都数不到**，于是那条判据
+// 恰恰对它要防的那类 bug **是绿的**。
+//
+// 正确的那套在仓库里早就有：`TestTheDisabledPlayKeyDoesNotTurnAccent`
+// （`playbar_layout_test.go`）比的是**悬停前后的图形墨迹色**——禁用的键**连那层
+// 悬停底都不该有**（`widgets/flat` 的 `shade` 是在**画的时候**重新问一遍
+// `IsDisabled()` 的），所以悬停前后那一片墨迹**一个像素都不该变**。这一条用的
+// 就是它那一套。
 func TestTheDisabledIconKeysDoNotTurnAccent(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -88,18 +101,36 @@ func TestTheDisabledIconKeysDoNotTurnAccent(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			tt, s := playbarTester(t, fullBarState(), 1200, 0, dark)
-			want := rgb(ink.AccentOn(BuildTheme(s.app.SettingsSnapshot(), dark)))
+			bg := rgb(BuildTheme(s.app.SettingsSnapshot(), dark).Background)
 
 			for _, label := range []string{"上一首", "下一首"} {
 				btn, ok := tt.Find(label)
 				if !ok {
 					t.Fatalf("播放条上找不到 %q，文字有 %q", label, tt.Texts())
 				}
+				// 指针先离开：那时候那一片墨迹是它本来的颜色。
+				tt.Move(600, 20)
+				tt.Frame()
+				idle := inkColor(tt.Image(), btn, bg)
+
+				// 指针落到这一枚上。
 				tt.Move(btn.X+btn.W/2, btn.Y+btn.H/2)
 				tt.Frame()
-				if n := nearPixels(tt.Image(), btn, want); n != 0 {
-					t.Errorf("禁用着的 %s 悬停之后画面上有 %d 个主色像素——"+
-						"一枚禁用的键不该用主色告诉用户「这里点得动」", label, n)
+				lit := inkColor(tt.Image(), btn, bg)
+
+				if !sameColor(lit, idle) {
+					t.Errorf("禁用着的 %s 悬停之后那一片墨迹从 %v 变成了 %v——"+
+						"一枚禁用的键不该有任何变化（它连那层淡底都不该有）",
+						label, idle, lit)
+				}
+				// 顺带断一句「它不是主色」：主色是绿的，前景色是中性色。
+				//
+				// ⚠️ **这一条不能省**：上面那条比的是「变了没有」，而一个**从
+				// 一开始就绿**的键（比如把状态色写死了）它是「没变」——只有这条
+				// 抓得住。
+				if absInt(int(lit.G)-int(lit.R)) > 12 {
+					t.Errorf("禁用着的 %s 悬停之后是 %v——那不是主色该有的样子，"+
+						"也是一枚禁用的键不该有的颜色", label, lit)
 				}
 			}
 		})

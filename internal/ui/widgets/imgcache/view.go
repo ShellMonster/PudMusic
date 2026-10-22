@@ -13,19 +13,25 @@ import (
 // ⚠️ 调用方必须先用 Cache.AddWake 注册一路唤醒，否则图下完之后界面会永远
 // 停在占位（实测：只投递不唤醒 = 0 帧刷新）。Shell.New 里已经注册了。
 func View(c *ui.Context, cache *Cache, url string, w, h float32) ui.Element {
-	// 圆角跟着主题走，不写死数字：Biu 那边的 radius="md" 也是跟着主题的，
-	// 不是常量。主题的 Radius 来自设置里的 app.Settings.BorderRadius
-	// （ui.BuildTheme 落到 t.Radius），用户在设置页调圆角时封面跟着变。
+	// 圆角跟着主题走，不写死数字：主题的 Radius 来自设置里的
+	// app.Settings.BorderRadius（ui.BuildTheme 落到 t.Radius），用户在设置页调
+	// 圆角时封面跟着变。
+	//
+	// ⚠️ **上游那个 `radius="md"` 是固定的 6，不是跟着主题的**（Tailwind 的
+	// `md` 就是 6）——我们这一档跟主题，是为了「用户在设置里调圆角，封面跟着变」
+	// 这件事**我们自己的**行为。上游那一个固定 6 的例子在下面（`ViewRadius`）。
 	return ViewRadius(c, cache, url, w, h, c.Theme().Radius)
 }
 
 // ViewRadius 是 View 加上「圆角」。
 //
-// ⚠️ **为什么要有这一档**：上游播放条上那张封面是 `radius="md"`（**6**，
-// `layout/playbar/left/index.tsx:31-41` 的 `<Image radius="md" …>`），而**全局
-// 那个圆角令牌是 8**——`radius.default` 动不得（用户在设置里能调它，改了它整
-// 个界面跟着变）。所以只有**播放条上那一张封面**用 6，其余的封面照旧跟主题走
-// （见 `internal/ui/playbar.go` 的 `coverRadius`）。
+// ⚠️ **为什么要有这一档**：上游播放条上那张封面是 `radius="md"`——**Tailwind 的
+// `md` 是固定的 6**（`layout/playbar/left/index.tsx:31-41` 的
+// `<Image radius="md" …>`），而**我们全局那个圆角令牌是 8**（`radius.default`
+// 是**令牌**，用户在设置里能调它，改了它整个界面跟着变）。
+//
+// 所以只有**播放条上那一张封面**用 6，其余的封面照旧跟主题走（见
+// `internal/ui/playbar.go` 的 `coverRadius`）。
 func ViewRadius(c *ui.Context, cache *Cache, url string, w, h, radius float32) ui.Element {
 	return ui.Box(c).Size(w, h).Radius(radius).Clip().Children(func() {
 		drawCover(c, cache, url, w, h, radius)
