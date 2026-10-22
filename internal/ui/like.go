@@ -270,7 +270,7 @@ func (s *Shell) ringPoints(r ui.Rect, progress float32) [][2]float32 {
 	return pts
 }
 
-// viewLikeStar 是播放条第二行那个「赞 / 已赞」键。
+// viewLikeStar 是播放条左边第三段那个「赞 / 已赞」键。
 //
 // 点一下切换（`App.SetLike`，**乐观**：那一帧就亮），失败改回去并说一句人话。
 //
@@ -278,6 +278,10 @@ func (s *Shell) ringPoints(r ui.Rect, progress float32) [][2]float32 {
 // 没有可赞的东西（`bili/like.go` 文件头），摆一个点了没反应的点不动的键，
 // 比不摆更让人以为它坏了。Biu 那边也是 `playItem.source !== "local"` 才摆
 // （`playbar/left/index.tsx:89`）。
+//
+// 🔴 **图标 18、点击区 32**（票 #219，报告 §3.6）：上游那一枚是
+// `RiThumbUpFill/Line size={18}`（`components/music-thumb/index.tsx:152-153`），
+// 而**播放条上全部图标键都是 18**。改之前是 14（`iconSm`）——比上游小 4 像素。
 func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 	if !s.app.Likeable() {
 		return
@@ -297,8 +301,8 @@ func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 	// icons.go 那四个函数的头一段：调用点一旦自己也能决定画哪张，「哪一档配哪
 	// 一张」就没有钉住的地方了。
 	name := likeIcon(rel.Liked)
-	btn := s.withTip(c, iconButton(c, name, label, iconSm).
-		Size(iconHit, iconHit).Padding(0, 9).TextColor(color),
+	btn := s.withTip(c, iconButton(c, name, label, iconMd).
+		Size(iconHitMd, iconHitMd).Padding(0, 7).TextColor(color),
 		likeStarTooltip(rel.Liked, s.app.LikeErr() != nil && !s.app.LikeAsked()))
 	if btn.Clicked() {
 		s.app.SetLike(!rel.Liked, func(err error) {

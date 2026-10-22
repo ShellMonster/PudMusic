@@ -504,8 +504,8 @@ func TestThePlayBarDrawsAnIconForEveryAction(t *testing.T) {
 			for _, label := range []string{"上一首", "下一首", "播放", "播放模式", "加歌"} {
 				assertGlyphPainted(t, tt, label)
 			}
-			// 赞 / 收藏在左边第二行（见 viewTrackMeta），下载在右边那一组
-			// （见 viewPlayBarRight）——**两处都要 `HasTrack` 才画**，
+			// 赞 / 收藏在左边**第三段**（见 viewTrackActions），下载在右边
+			// 那一组（见 viewPlayBarRight）——**两处都要 `HasTrack` 才画**，
 			// fullBarState 带了。
 			for _, label := range []string{"收藏", "下载"} {
 				assertGlyphPainted(t, tt, label)
@@ -703,9 +703,11 @@ func TestTheHitAreaIsBiggerThanTheGlyph(t *testing.T) {
 		// 下面单独断它。
 		{"播放模式", iconMd, iconHitMd},
 		{"加歌", iconMd, iconHitMd},
-		{"收藏", iconSm, iconHit},
+		// 收藏：票 #219 之后跟着上游走（`RiStarFill/Line size={18}`），
+		// 它和右边那一组一样是 18 的图标 + 32 的点击区。
+		{"收藏", iconMd, iconHitMd},
 		// 「下载」票 #127 之后摆在播放条**右边**那一组，尺寸跟着那一组走
-		// （`viewPlayBarRight`），不再是左边第二行里的一枚小键。
+		// （`viewPlayBarRight`），不再是左边那一段里的一枚小键。
 		{"下载", iconMd, iconHitMd},
 	}
 

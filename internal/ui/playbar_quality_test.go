@@ -38,11 +38,18 @@ func qualityBarTester(t *testing.T, st app.State, width ...int) *mygoui.Tester {
 }
 
 // TestQualityBadgeShowsForAnOnlineTrack 盯徽章画出来了。
+//
+// 🔴 **画面上的是**短版**（`bili.ChipLabel`），不是全称**（票 #219）：那一列
+// （歌名 + UP 名）在多 P 那一档只有 76 宽，而全称（52~60 宽）和歌名挤在一行
+// 放不下——框架按基宽分摊，于是**徽章自己被摊扁**（实测「杜比全景声」只剩
+// 13.8：一个字，点击区只剩 14 像素）。短版就是**上游那一枚 chip 的形状**
+// （「无损」/「杜比」，`playbar/left/index.tsx:50-56`），全称在悬停提示里。
 func TestQualityBadgeShowsForAnOnlineTrack(t *testing.T) {
 	for _, badge := range []string{"无损 FLAC", "320K", "128K", "64K", "杜比全景声"} {
+		chip := bili.ChipLabel(badge)
 		tt := qualityBarTester(t, app.State{HasTrack: true, Title: "在线的一首", Quality: badge})
-		if !tt.HasText(badge) {
-			t.Errorf("徽章 %q 没画出来，画面上的字：%q", badge, tt.Texts())
+		if !tt.HasText(chip) {
+			t.Errorf("徽章 %q（短版 %q）没画出来，画面上的字：%q", badge, chip, tt.Texts())
 		}
 	}
 }
@@ -160,7 +167,8 @@ func TestTheTitleAndBadgeShareOneLine(t *testing.T) {
 	if !ok {
 		t.Fatalf("歌名不在画面上：%q", tt.Texts())
 	}
-	badge, ok := tt.Find("无损 FLAC")
+	// ⚠️ **画面上的是短版**（票 #219，理由见 `TestQualityBadgeShowsForAnOnlineTrack`）。
+	badge, ok := tt.Find(bili.ChipLabel("无损 FLAC"))
 	if !ok {
 		t.Fatalf("徽章不在画面上：%q", tt.Texts())
 	}

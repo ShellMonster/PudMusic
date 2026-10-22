@@ -72,10 +72,13 @@ const (
 // 的，而「问不出分集：…」这句话要有一个能点开的地方才有地方显示——收掉的话它在
 // 真机上是死的。只有**确知只有一集**的时候才收起来，那时候确实没有「选」的意思。
 //
-// ⚠️ **摆在哪一行是量出来的**：它在歌名下面那一行（`viewTrackMeta`，那一段的注释
-// 里有账和那两条钉着它的测试）。而 `viewTrackMeta` **第一行就 return 了**——没有歌
-// 的时候它一格都不画，所以「没有歌就不摆」这条在这个函数里已经成立；下面那个
-// `HasTrack` 判是给**别的调用方**留的（将来这个键要是被摆到别处去，它自己认得）。
+// ⚠️ **摆在左边第三段**（票 #219，上游 `playbar/left/index.tsx:86`）：封面右边
+// **横着并排**的那一行（分集 / 收藏 / 赞），和「歌名/UP 名」那一列平级。
+// 改之前它在**歌名下面那一行**——那一段的注释里有账和那两条钉着它的测试。
+//
+// 而 `viewTrackActions` **第一行就 return 了**——没有歌的时候那一段一格都不画，
+// 所以「没有歌就不摆」这条在这个函数里已经成立；下面那个 `HasTrack` 判是给**别的
+// 调用方**留的（将来这个键要是被摆到别处去，它自己认得）。
 func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 	if !st.HasTrack {
 		s.partOpen = false
@@ -97,15 +100,16 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 	// 的（`mygo/ui/svg.go`），所以 `Label("分集")` 不许省——它既是无障碍名字，也是
 	// 无头 Tester 认得这个按钮的唯一凭据（`Find` 按 label 找）。
 	//
-	// 尺寸照这一行上另外两枚（赞 / 收藏）：`iconSm` 的图标 + `iconHit` 的点击区 +
-	// 每边 9 的内边距（那一圈留白就是 `TestTheHitAreaIsBiggerThanTheGlyph` 断的
-	// 「点击区比图形大」）。
+	// 🔴 **图标 18、点击区 32**（票 #219，报告 §3.6）：上游那一枚是
+	// `RiListRadio size={18}`（`layout/playbar/left/page-list.tsx:25`），而
+	// **播放条上全部图标键都是 18**。改之前是 14（`iconSm`）——比上游小 4 像素，
+	// 在 32 的盒子里每边留 9，看起来像「画糊了」。
 	//
-	// ⚠️ **这一段原来写的是「另外三个键（赞 / 收藏 / 下载）」**——票 #127 把
-	// 「下载」搬到了播放条右边那一组，而它跟着那一组换了尺寸（`iconMd`），
-	// 所以「照另外三个键」这句话连数量都不对了。
-	btn := s.withTip(c, iconButton(c, iconPageList, "分集", iconSm).
-		Size(iconHit, iconHit).Padding(0, 9),
+	// 尺寸照同一段上另外两枚（赞 / 收藏）：`iconMd` 的图标 + `iconHitMd` 的点击区
+	// + 每边 7 的内边距（那一圈留白就是 `TestTheHitAreaIsBiggerThanTheGlyph` 断的
+	// 「点击区比图形大」）。
+	btn := s.withTip(c, iconButton(c, iconPageList, "分集", iconMd).
+		Size(iconHitMd, iconHitMd).Padding(0, 7),
 		partEntryTooltip(parts, cur, s.app.PartsWorthAsking(), s.app.PartsErr()))
 	if btn.Clicked() {
 		s.partOpen = !s.partOpen

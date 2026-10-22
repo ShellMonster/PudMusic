@@ -30,7 +30,7 @@ import (
 //
 // ⚠️ **`HasTrack` 和「问到几集」两个条件都要**：只等集数的话会量到「这一瞬」——
 // 换歌和 `App.PlayPart` 都要先 `ClearTrack()`（`online.go`），而那几百毫秒里
-// `HasTrack` 恒为 false，播放条上什么都不画（`viewTrackMeta` 第一行就 return）。
+// `HasTrack` 恒为 false，播放条上什么都不画（`viewTrackActions` 第一行就 return）。
 // 那时候量到的是一个空的播放条，不是坏了。
 func partsReady(t *testing.T, s *Shell, tt *ui.Tester, want int) {
 	t.Helper()
@@ -385,17 +385,22 @@ const (
 	// partsTitleMinW 是歌名最少要留多宽。
 	//
 	// ⚠️ **它按「一行放得下几个字」算，不按某个像素数算**：歌名是 **16** 号字
-	// （票 #173 从 15 号粗体改过来的），一个汉字 16，这里留**八个字** = 128。
+	// （票 #173 从 15 号粗体改过来的），一个汉字 16，这里留**两个半字** = 40。
 	// 比它更窄的话，标题就开始一个字一行地竖着排，而**界面上看不出坏了**
-	// （字还在那儿）。用它自己的自然宽（222）当阈值的话，把播放条整体缩窄
-	// 一点点就会红，那测的就不是「有没有被这一票挤坏」了。
+	// （字还在那儿）。
 	//
-	// ⚠️ **它从 150 降到 128 是有理由的**：左边那一列现在按上游的分法只占
-	// **1 份**（`playbar/index.tsx:26` 的
-	// `grid-cols-[minmax(0,1fr)_minmax(0,3fr)_minmax(0,1fr)]`），歌名因此被挤到
-	// **146**（九个字）。上游那么分的时候歌名是**零宽**——它那一列里歌名右边
-	// 还横着三枚键——所以这条门槛量的是「有没有被挤坏」，不是「跟上游一样」。
-	partsTitleMinW = 128
+	// 🔴 **它从 128 降到 40 是票 #219 逼出来的**（改之前是**八个字**）：三枚键
+	// 从歌名下面那一行搬到了**封面右边第三段**（上游 `playbar/left/index.tsx:85`
+	// 的 `flex items-center`——横着并排），于是它们吃的是**歌名那一列**的宽度：
+	// 左边那一列还是 244（`playbarLeftMinW`），而现在分给歌名那一列的只有
+	// **76**（244 − 封面 56 − 两道 8 的缝 − 三枚键 96），歌名自己还要让出音质
+	// 徽章（28 + 一道 6 的缝）——**42**（两个多字）。
+	//
+	// ⚠️ **上游那边更狠**：它那一列里歌名右边也横着三枚键，而 1 份在 1200 宽
+	// （上游自己的默认窗口）上只有 233.6，歌名那一列是 **65.6**——比我们的 76
+	// 还窄（报告 §2.8 的表）。所以这条门槛量的是「有没有被挤成竖条」，不是
+	// 「跟上游一样」。
+	partsTitleMinW = 40
 	// partsScrubMinW 是进度条最少要留多宽。它是 `Grow(1)` 的，所以宽度随窗口变；
 	// 低于 60 的话拖一个位置要点半天，那不是「不好用」而是「用不了」。
 	partsScrubMinW = 60
@@ -452,7 +457,7 @@ func TestThePartsKeyDoesNotBreakThePlayBar(t *testing.T) {
 // TestTheDrawerDoesNotComeBackOnItsOwn 断「浮层状态不会在没人的时候自己回来」。
 //
 // 开着的浮层跨过「没有歌」那一段（歌放完了、用户按了停止、`App.ClearTrack`）：
-// 这一段里 `viewTrackMeta` 一格都不画，连带 `viewPartButton` 也没被调到，于是
+// 这一段里 `viewTrackActions` 一格都不画，连带 `viewPartButton` 也没被调到，于是
 // `partOpen` 留着 true。等下一首多 P 的歌放起来——**浮层自己弹出来**，而用户从
 // 头到尾什么都没按。
 //
@@ -497,31 +502,31 @@ func TestTheDrawerDoesNotComeBackOnItsOwn(t *testing.T) {
 //
 // # 为什么是「和另一档一样宽」而不是「宽多少」
 //
-// 这一票最花时间的一件事就是决定这个键摆哪儿，而**摆错了量得出来的后果**不止一
-// 种：歌名被压窄、进度条被压窄、UP 名被挤没、两个控件叠在一起。所以判据不能是某
-// 一个阈值——阈值定高了定低了都是在猜「多窄算坏」。
+// 决定这个键摆哪儿的时候，**摆错了量得出来的后果**不止一种：歌名被压窄、
+// 进度条被压窄、UP 名被挤没、两个控件叠在一起。所以判据不能是某一个阈值——
+// 阈值定高了定低了都是在猜「多窄算坏」。
 //
 // 这里的判据是**自比**：同一个 fixture、同一个窗口，**单 P**（不摆这个键）和
-// **多 P**（摆）各量一次，两次量出来的那几样**必须一样宽**。「摆这个键不许花掉别人
-// 的钱」于是变成一条不用猜的断言：搬错了地方，多出来的那份宽度总得从**某一样**上
-// 出，而那一栏立刻对不上。
+// **多 P**（摆）各量一次。
 //
-// ⚠️ **UP 名不在这个「不许花」的单子里**，量出来它确实会让出这个键自己的 40
-// （`iconHit` 32 + 一道 `metaGap` 8；900 上 152.4 → 112.4、1000 上 202.4 →
-// 162.4、1200 上 290.4 → 262.4（让位 28）、1280 起让位 0）：那一行里它是**唯一一个
-// 该让位的**——`Grow(1)` + `MinWidth` +
-// `Ellipsis("…")`，让位就是它存在的理由（见 `viewArtist`）。它只要还认得出是
-// 哪个 UP 就够了，那条由 `TestThePartsKeyDoesNotBreakThePlayBar` 的
-// `ownerNameMinW` 守着。
+// # 🔴 票 #219 之后：让位的换人了
 //
-// ⚠️ **另一个候选位置也量过**：中间那一列的第二行——摆在那儿**一样**只让 UP 名
-// 让出 40 上下（那一枚键自己要 32 + 8），歌名和进度条同样不丢。两处几乎等价，
-// 所以摆在歌名下面这一行是**照 Biu 挑的**，不是算出来的。
+// 改之前这个键在**歌名下面那一行**（和 UP 名并排），所以它让位的是**那一行
+// 里的歌名和 UP 名**（那一行是 `Grow(1)` 的，谁都可伸缩）。改之后它在**第三段**
+// ——封面右边**横着并排**的那一行（上游 `playbar/left/index.tsx:85` 的
+// `flex items-center`），而**歌名/UP 名那一列在它左边**。
 //
-// ⚠️ **上面那几个数是 2026-10（票 #127 把下载和播放模式搬去右边那一组之后）量的**：
-// 那一组多了三枚键，左边那一块就窄了，UP 名在 1000 上从「让位 19.7」变成
-// 「让位 40」（图标键的点击区从 28 长到 32 之后又是 40）。注释里的数是量出来
-// 的，所以量变了就得改它——`viewTrackMeta` 顶上那张表是同一批数，两处要一起改。
+// 于是现在的事实是（实测，900 / 1000 / 1200 三档都一样）：
+//
+//	让位的：歌名和 UP 名，各让 **32**（这个键自己那一格，`iconHitMd`）
+//	不让的：进度条、播放模式、下载、加歌——**一个像素都不让**
+//
+// ⚠️ **32 是这个键自己的宽度，不是「额外花掉的」**：第三段的宽度跟着内容走
+// （上游那一段也是 `flex`），所以它多出来的那一格是从**左边那一列里**出的。
+//
+// ⚠️ **进度条和右边那一组一个像素都不许少**：进度条被压窄就是「拖一个位置要
+// 点半天」，那不是不好用，是用不了；而右边那一组是**绝对定位**贴右沿的，
+// 它压根不在左列里。
 //
 // ⚠️ **两档必须是同一首歌**：用的是同一份 fixture 的同一首（bvid、标题、UP 名都
 // 一样），只有「B 站回几集」不同，差别只有那一个键。
@@ -538,8 +543,9 @@ func TestThePartsKeyCostsNothingElseOnThePlayBar(t *testing.T) {
 				t.Fatalf("宽度 %d：单 P 的那一档居然也摆了分集入口——这一条量的是宽度，"+
 					"入口该不该摆是另一条（TestThereIsNoPartsKeyForASinglePartVideo）", width)
 			}
+
+			// 不许被花掉的那几样。
 			for _, what := range []string{
-				"一首歌的名字很长很长很长很长", // 歌名：被压窄就是竖排，而界面上看不出坏了
 				"播放进度", // 进度条：拖一个位置要点半天，那不是不好用，是用不了
 				"播放模式", "下载", "加歌",
 			} {
@@ -553,20 +559,41 @@ func TestThePartsKeyCostsNothingElseOnThePlayBar(t *testing.T) {
 						widthGap(without[what]-with[what]))
 				}
 			}
-			// UP 名是唯一让位的（见上面那段），但要让得认得出是哪个 UP。
+
+			// 让位的那两样（歌名 / UP 名）：让的**只能是这个键自己那一格**。
+			for _, what := range []string{
+				"一首歌的名字很长很长很长很长",          // 歌名
+				"一个非常非常非常非常非常非常长的 UP 主名字", // UP 名
+			} {
+				if without[what] == 0 || with[what] == 0 {
+					t.Fatalf("宽度 %d：%q 有一档量不到（单 P %.0f / 多 P %.0f）——"+
+						"量的是「它有多宽」，量不到就没法比", width, what, without[what], with[what])
+				}
+				if d := widthGap(without[what] - with[what]); d > partsKeyWidth {
+					t.Errorf("宽度 %d：「%s」单 P %.1f / 多 P %.1f（让位 %.1f）——"+
+						"它只能让出这个键自己那一格（%d）", width, what, without[what], with[what],
+						d, partsKeyWidth)
+				}
+			}
+
+			// UP 名让位之后仍要认得出是哪个 UP。
 			if got := with["一个非常非常非常非常非常非常长的 UP 主名字"]; got < ownerNameMinW {
 				t.Errorf("宽度 %d：UP 名让位之后只剩 %.1f 宽（下限 %d）——"+
-					"它让位是因为它是那一行里唯一该让的，但让没了就是「这一首没有 UP 主」",
+					"它让位是因为它是那一列里唯一该让的，但让没了就是「这一首没有 UP 主」",
 					width, got, ownerNameMinW)
 			}
 		})
 	}
 }
 
-// TestThePartsKeySharesTheMetaRowWithTheOtherKeys 钉「这个键在歌名下面**那一行**」。
+// TestThePartsKeySharesTheRowWithTheOtherKeys 钉「这个键和赞 / 收藏在**同一行**」。
 //
-// ⚠️ **这一条是给本票吃过的两次亏写的**：第一版写了一段 19 行的注释宣称分集键挂在
-// 中间那一列的第二行（`viewProgress`），而代码里那个键在 `viewTrackMeta`——注释描述
+// ⚠️ **它原来叫 `TestThePartsKeySharesTheMetaRowWithTheOtherKeys`**——「歌名下面
+// 那一行」在票 #219 之后**没有了**：三枚键搬到了**第三段**（封面右边横着并排的
+// 那一行），歌名和 UP 名在它们**左边**那一列。
+//
+// 🔴 **这一条是给本票吃过的两次亏写的**：第一版写了一段 19 行的注释宣称分集键挂在
+// 中间那一列的第二行（`viewProgress`），而代码里那个键在歌名下面那一行——注释描述
 // 了一段不存在的代码，评审打回来的时候它还在那儿。注释和代码对不上，编译器不管，
 // 也没有任何一条测试管。
 //
@@ -580,10 +607,10 @@ func TestThePartsKeyCostsNothingElseOnThePlayBar(t *testing.T) {
 // 已经只列赞 / 收藏了（改循环的时候忘了改这段）。
 //
 // ⚠️ **别拿宽度当判据**：图标化之后两种摆位的代价几乎一样（都只让 UP 名让出 40 上下的
-// 宽度，歌名和进度条两档一模一样，见 `viewTrackMeta` 那段注释），所以
+// 宽度，歌名和进度条两档一模一样，见 `viewTrackActions` 那段注释），所以
 // `TestThePartsKeyCostsNothingElseOnThePlayBar` 分不出这两处——它量的是「不花掉别人
 // 的钱」，而这个键摆在哪儿都不是在花别人的钱。**位置要单独钉。**
-func TestThePartsKeySharesTheMetaRowWithTheOtherKeys(t *testing.T) {
+func TestThePartsKeySharesTheRowWithTheOtherKeys(t *testing.T) {
 	s, tt := onlineTester(t, multiPages(), false, at(900, 460))
 	partsReady(t, s, tt, 3)
 
@@ -592,10 +619,10 @@ func TestThePartsKeySharesTheMetaRowWithTheOtherKeys(t *testing.T) {
 		t.Fatalf("画面上找不到分集入口，文字有 %q", tt.Texts())
 	}
 	const sameLine = 2
-	// 赞 / 收藏都是这一行上的图标键。**「下载」不在这一列里**——票 #127 把它从
-	// 左边第二行搬到了播放条右边那一组（照 Biu 的 `playbar/right/index.tsx:15`），
-	// 而那一行在播放条的正中，比这一行低半条播放条，拿它当参照量出来的差永远是
-	// 几十像素，那不是「分集键摆错行了」。
+	// 赞 / 收藏都在**第三段**（封面右边横着并排的那一行）。**「下载」不在这一列
+	// 里**——票 #127 把它从左边那一段搬到了播放条右边那一组（照 Biu 的
+	// `playbar/right/index.tsx:15`），而那一行在播放条的正中，比这一行低半条
+	// 播放条，拿它当参照量出来的差永远是几十像素，那不是「分集键摆错行了」。
 	for _, other := range []string{"赞", "收藏"} {
 		r, ok := tt.Find(other)
 		if !ok {
@@ -605,8 +632,8 @@ func TestThePartsKeySharesTheMetaRowWithTheOtherKeys(t *testing.T) {
 		otherMid := r.Y + r.H/2
 		if widthGap(mid-otherMid) > sameLine {
 			t.Errorf("分集那一格的垂直中心在 y=%.1f，而 %q 那一格在 y=%.1f（差 %.1f）——"+
-				"它们不在同一条水平线上：分集键不在歌名下面那一行（挨着赞/收藏），"+
-				"而在中间那一列的第二行（挨着进度条）",
+				"它们不在同一条水平线上：三枚键该是**横着并排**的一行"+
+				"（上游 `playbar/left/index.tsx:85` 的 `flex items-center`）",
 				mid, other, otherMid, widthGap(mid-otherMid))
 		}
 	}
@@ -702,14 +729,18 @@ func TestTheDrawerMatchesTheUpstreamWidthAndRowHeight(t *testing.T) {
 	}
 }
 
-// assertIconKey 断 label 那一格是**一个图标键**（`iconButton` + `Size(iconHit,
-// iconHit)`），而不是一个文字键。
+// assertIconKey 断 label 那一格是**一个图标键**（`iconButton` + `Size(iconHitMd,
+// iconHitMd)`），而不是一个文字键。
 //
 // # 判据一：那一格的**点击区是正方的**
 //
-// 旁边赞 / 收藏那两个键量的都是 **32.00×32.00**（`iconHit`），而一个文字键的框
-// 是**照着字长出来**的——实测 `ui.Button(c, "分集")` 是 **25.80×15.31**，宽高差
-// 10.49。所以「宽和高差不超过 2」这一条，图标键过、文字键不过。
+// 旁边赞 / 收藏那两个键量的都是 **32.00×32.00**（`iconHitMd`），而一个文字键的
+// 框是**照着字长出来**的——实测 `ui.Button(c, "分集")` 是 **25.80×15.31**，宽高
+// 差 10.49。所以「宽和高差不超过 2」这一条，图标键过、文字键不过。
+//
+// ⚠️ **它们走的是 `iconHitMd` 而不是 `iconHit`**（票 #219 把图标从 14 改成 18
+// 之后）：那两个数**都是 32**（上游那一档：图标键的盒子恒是 32×32），差的是
+// 内边距——`iconHit` 是每边 9（配 14 的图标），`iconHitMd` 是每边 7（配 18）。
 //
 // ⚠️ **这一段原来写的是「赞 / 收藏 / 下载三个键」**：下载跟着上游搬到了播放条
 // 右边那一组（票 #127），它不再是这一行的邻居——而它用的 `iconHitMd` 恰好也是
@@ -763,6 +794,16 @@ func widthGap(f float32) float32 {
 // 反而宽 2.3）——那是文字换行到某一行的宽度的小数抖动，不是布局让了位。而真正「摆错
 // 了」的代价是 14 到 26（见上面那段），差一个数量级，4 分得开这两者。
 const partsWidthSlack = 4
+
+// partsKeyWidth 是分集那一枚**自己占的那一格**的宽度：32。
+//
+// ⚠️ **写的是字面的 32，不是 `iconHitMd`**：阈值取自被测对象的话，把它改小
+// 这一条就照样绿——而「它只让出自己那一格」正是这一条要断的东西。
+//
+// ⚠️ **它不是「额外花掉的钱」**：第三段的宽度跟着内容走（上游那一段也是
+// `flex`），所以它多出来的那一格是从**左边那一列里**出的——歌名和 UP 名让出
+// 的就是这 32（实测 900 / 1000 / 1200 三档都一样）。
+const partsKeyWidth = 32
 
 // playbarWidths 造一个外壳，把播放条上那几样各量多宽。
 //

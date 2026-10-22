@@ -20,6 +20,10 @@ import (
 
 // metaBarTester 只画播放条，State 从外面传进来（和 `qualityBarTester` 一样）。
 //
+// ⚠️ **它背后是一个空的 App**，所以第三段那三枚键里只有「收藏」在（分集要看
+// 这一首有几集，赞要看这一首能不能赞——两样都得问 App）。要量三枚都在的那一
+// 档，用 `playbar_left_test.go` 里的 `leftBarTester`。
+//
 // 喂 State 而不是真开一首文件，是为了让「有没有 UP 名」「有没有编号」这些
 // 组合都能摆出来——真放的话本地文件压根没有 UP 名。
 func metaBarTester(t *testing.T, st app.State, width int) (*mygoui.Tester, *Shell) {
@@ -123,6 +127,9 @@ func TestNoFavoriteOrDownloadWithoutATrack(t *testing.T) {
 
 // TestTheMetaKeysDrawTheirOwnGlyphs 盯那两个键上画的是各自的图形。
 //
+// ⚠️ **「那两个键」是收藏和下载**：下载在播放条**右边**那一组（票 #127），
+// 收藏在左边**第三段**（票 #219）。
+//
 // ⚠️ **这一条是被图标化顶掉的，原来叫 `TestTheMetaLabelsAreNotTruncated`**：它量
 // 「收藏」「下载」那两个字有没有被截短，而**图标没有字可截**——图标版的对应
 // 问题是「两枚图标认不认得出」，所以判据换成了「两枚的图形两两不同」。
@@ -209,14 +216,18 @@ func TestTheOwnerIsNeverSqueezedOutOfExistence(t *testing.T) {
 	}
 }
 
-// TestTheMetaRowDoesNotSquashTheTitle 盯加了第二行之后歌名还是一整行。
+// TestTheTextColumnDoesNotSquashTheTitle 盯加了第二行之后歌名还是一整行。
+//
+// ⚠️ **它原来叫 `TestTheMetaRowDoesNotSquashTheTitle`**：「歌名下面那一行」在
+// 票 #219 之后**没有了**——三枚键搬到了**封面右边第三段**，而 UP 名是那一列
+// 自己的第二行。
 //
 // 这一票之前踩过同一个坑：为了塞下一个控件把歌名挤成 20px 宽、88px 高的竖条，
 // 而**界面上看不出坏了**——字还在那儿，只是一个字一行。
 //
 // 断的是两件事：歌名横向要占得开（不能被压成竖排），三行都要留在 88 高的
 // 播放条里（不能被裁）。
-func TestTheMetaRowDoesNotSquashTheTitle(t *testing.T) {
+func TestTheTextColumnDoesNotSquashTheTitle(t *testing.T) {
 	for _, width := range []int{760, 900, 1000, 1200, 1280} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			// ⚠️ `PlayMode` 同样要给：见上面那条的注释（#104 那个键在右边那一组，

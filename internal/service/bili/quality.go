@@ -19,6 +19,7 @@ package bili
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Quality 是 B 站音频流的一档音质，就是接口里的 `dash.audio[].id`。
@@ -142,6 +143,41 @@ func (q Quality) Label(bitrate int) string {
 		return fmt.Sprintf("%dK", (bitrate+500)/1000)
 	}
 	return "未知音质"
+}
+
+// ChipLabel 是这一档音质在**播放条上**那枚 chip 的字。
+//
+// full 是 `Label` 给的那一串（「无损 FLAC」/「杜比全景声」/「杜比 Hi-Res」/「320K」）。
+//
+// # 为什么要收短
+//
+// 上游播放条上那枚 chip 是**短的**（「无损」/「杜比」，`playbar/left/index.tsx:50-56`
+// 的 `text-[10px]`），而我们那一行字说的是「**B 站给了什么**」——全称在 11px 下
+// 是 52~60 宽（实测「无损 FLAC」52.7、「杜比全景声」54.7、「杜比 Hi-Res」60.6）。
+//
+// 播放条上歌名那一行只有 **76** 宽（左边那一列的 244 减去封面 56、两道 8 的缝
+// 和三枚键 96），全称和歌名**挤在一行放不下**：框架在装不下时按**基宽的比例**
+// 分摊那份 shortfall，于是**徽章自己被摊扁**——实测「杜比全景声」只剩 13.8
+// （一个字），而它同时是「换音质」的入口，**点击区只剩 14 像素**。
+//
+// ⚠️ **全称不能丢**：它在悬停提示里（`internal/ui` 的 `viewQualityBadge`：
+// 「音质：杜比全景声（点一下换）」），那一行才是完整的说法。短的那一枚只是
+// **一眼认得出是哪一类**（无损 / 杜比 / 多少 K）——和上游那一枚 chip 一个道理。
+//
+// 「未知音质」也收成「未知」：它同样是四个字（44 宽），而那一行放不下。
+//
+// 认不出的档位原样返回：它本来就短（`Label` 给的是「128K」或「111K」那样
+// 的码率）。
+func ChipLabel(full string) string {
+	switch {
+	case strings.HasPrefix(full, "无损"):
+		return "无损"
+	case strings.HasPrefix(full, "杜比"):
+		return "杜比"
+	case strings.HasPrefix(full, "未知"):
+		return "未知"
+	}
+	return full
 }
 
 // IsLossless 报告这一档是不是无损 FLAC。
