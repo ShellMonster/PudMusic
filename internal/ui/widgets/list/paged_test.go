@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -155,7 +156,7 @@ const scrollToBottom = 100000
 // newPaged 造一个分页列表并把 fetch 给它。
 func newPaged(t *testing.T, fetch Fetcher) (*PagedList, *ui.Tester) {
 	t.Helper()
-	p := NewPaged(newCache(t), Actions{Notify: func(string) {}}, fetch)
+	p := NewPaged(newCache(t), Actions{Notify: func(string, notice.Tone) {}}, fetch)
 	tt := ui.NewTester(p.View, testerW, testerH)
 	tt.Frame()
 	return p, tt
@@ -238,7 +239,7 @@ func TestFirstRenderKeepsPullingUntilTheContainerIsFilled(t *testing.T) {
 // `tt.Frame()`**：要看的正是那第一帧。
 func TestTheVeryFirstFrameAlreadySaysLoading(t *testing.T) {
 	st := newStub().with(1, 200, false).gate(1)
-	p := NewPaged(newCache(t), Actions{Notify: func(string) {}}, st.fetch)
+	p := NewPaged(newCache(t), Actions{Notify: func(string, notice.Tone) {}}, st.fetch)
 	tt := ui.NewTester(p.View, testerW, testerH)
 
 	// loading 是 load 里同步置的（拉页本身在后台 goroutine 里），所以这一句
@@ -535,7 +536,7 @@ func TestAFetcherThatPanicDoesNotTakeTheProcessDown(t *testing.T) {
 func TestAPanicWhileDrawingDoesNotTakeTheProcessDown(t *testing.T) {
 	st := newStub().fails(1, errors.New("连不上"))
 	notified := 0
-	acts := Actions{Notify: func(string) {
+	acts := Actions{Notify: func(string, notice.Tone) {
 		notified++
 		if notified == 1 {
 			panic("提示画崩了") // 只有第一次崩：要看得见它之后活下来了

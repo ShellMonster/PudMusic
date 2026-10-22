@@ -2149,4 +2149,37 @@ var Items = []Item{
 			"TestTheBusyButtonTurnsAndGreysOut",
 		},
 	},
+	{
+		// 归「双平台」那一组：这一票动的是**右下角那条提示**（它的颜色、尺寸
+		// 和入场）。
+		//
+		// 🔴 **这一族的错法全是「静默」的**：失败也是绿的、卡片窄 36 像素、
+		// 提示「啪」地一下出现——**没有一样会报错**，界面只是「不太对」。
+		// 而「用户是看颜色才知道结果的」（规格 #163 的用户故事 74），所以
+		// 颜色错这一件比别的都贵。
+		Category: Platform,
+		// 票 #180（#163 的第三批）：Toast 语义色与入场。
+		//
+		// ⚠️ **这一票把「所有提示都是主色绿」改成了按语义分色**（上游那 164
+		// 处调用是按调用给 `color` 的：danger 84 / success 58 / warning 22），
+		// 同时把尺寸与位置对齐上游（356 宽 / `p-3` / 14/500 / 抬 90 / 离右边
+		// 4~8），并补上 250ms 的入场。
+		Spec: "右下角那条提示**按语义分色**（成功绿 #17c964 / 失败红 #f31260 / 警告橙 #f5a524 / 普通主色，四种颜色互不相同，「下载失败」不再是绿的）；**尺寸与位置**照上游：宽 356、`p-3`（四周各 12）、字 14/500、抬过底部 90、离右边 4~8；**入场有 250ms 的一段**（淡入 + 从右边滑进来，中间态推钟验得到），「减少动态效果」时一次到位",
+		Tests: []string{
+			// 四种语义色：画出来是四个不同的颜色（深浅两套都跑）。
+			"TestTheToastTakesTheToneColor",
+			// 「下载失败」不再是绿的（成功绿 / 失败红，各是各的）。
+			"TestAFailedDownloadIsNotGreen",
+			// 入场有中间态（推钟验），走完之后是满色。
+			"TestTheToastSlidesIn",
+			// 「减少动态效果」时一次到位。
+			"TestTheToastEnterHonoursReduceMotion",
+			// 尺寸与位置：356 宽、p-3、14、离右边 4~8、抬过底部 90。
+			"TestTheToastUsesTheUpstreamSize",
+			// 字重 500（AST：字重在画面上量不到盒子）。
+			"TestTheToastTextUsesTheMediumWeight",
+			// 提示那句话没缺字（改写调用点时少打一个字符，用户看到的是半截话）。
+			"TestTheToastMessagesKeepTheirBrackets",
+		},
+	},
 }

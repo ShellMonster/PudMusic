@@ -20,6 +20,7 @@
 package ui
 
 import (
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
@@ -158,7 +159,7 @@ func conflictText(other shortcutItem, ok bool) string {
 // 这一页录了 ⌘⌥K，切到别的应用按 ⌘⌥K 还是上一条——而界面上明明白白写着新键。
 func (s *Shell) applyShortcutChange(what string, fn func() error) {
 	if err := fn(); err != nil {
-		s.addToast(what + "没存上：" + err.Error())
+		s.addToast(what+"没存上："+err.Error(), notice.Danger)
 		return
 	}
 	s.syncGlobalShortcuts()

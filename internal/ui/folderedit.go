@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
@@ -180,6 +181,18 @@ func submitLabel(busy bool) string {
 	return "提交"
 }
 
+// folderResultTone 是后台那一条结果的语气：成了是绿的，没成是红的。
+//
+// ⚠️ **不看那句话的字**：app 层已经说了成没成（`app.FolderResult.OK`），而
+// 那句话是「改好了」还是「没登录，改不了」——按字猜的话，改一次文案就错一次
+// 颜色，而颜色错了**没有一处会报错**。
+func folderResultTone(ok bool) notice.Tone {
+	if ok {
+		return notice.Success
+	}
+	return notice.Danger
+}
+
 // openFolderEdit 打开弹窗。
 //
 // id 为 0 是新建，不为 0 是修改（**修改要在后台拉一份原来的样子**：名称、简介、
@@ -188,7 +201,7 @@ func (s *Shell) openFolderEdit(id int64) {
 	// ⚠️ **没挂上就别开弹窗**：弹窗开着而提交那一下什么都不会发生（后台那一层
 	// 直接就走了），用户看到的是「点了提交，界面一点反应都没有」。
 	if !s.app.CollectionsMounted() {
-		s.addToast("收藏夹还没接上：这一页要 B 站接口")
+		s.addToast("收藏夹还没接上：这一页要 B 站接口", notice.Warning)
 		return
 	}
 	e := newFolderEdit()
@@ -270,7 +283,7 @@ func (s *Shell) flushFolderResults() {
 			e.crop.uploading = false
 			s.closeCrop(&e.crop)
 			e.cover = url
-			s.addToast("封面裁好了")
+			s.addToast("封面裁好了", notice.Success)
 		}
 	}
 
@@ -284,7 +297,7 @@ func (s *Shell) flushFolderResults() {
 		// ⚠️ **成功才关弹窗，失败留着**：失败的时候勾还在界面上，重试一下就行；
 		// 关掉等于让用户从头勾一遍。
 		sel.submitting = false
-		s.addToast(res.Text)
+		s.addToast(res.Text, folderResultTone(res.OK))
 		if res.OK {
 			s.closeFolderSelect()
 		}
@@ -292,18 +305,18 @@ func (s *Shell) flushFolderResults() {
 		// ⚠️ **失败也要解除**：只解除成功的话失败之后按钮永远转圈，弹窗再也
 		// 关不掉，而用户看到的是一句「上传失败」加一把转不停的按钮。
 		e.crop.uploading = false
-		s.addToast(res.Text)
+		s.addToast(res.Text, folderResultTone(res.OK))
 	case e != nil && e.submitting:
 		// ⚠️ **成功要关掉弹窗、失败要留着**：失败的时候用户填的东西还在界面上，
 		// 关掉等于让他从头敲一遍（而失败的原因——比如「没登录」——在弹窗里
 		// 根本看不见）。
 		e.submitting = false
-		s.addToast(res.Text)
+		s.addToast(res.Text, folderResultTone(res.OK))
 		if res.OK {
 			s.closeFolderEdit()
 		}
 	default:
-		s.addToast(res.Text)
+		s.addToast(res.Text, folderResultTone(res.OK))
 	}
 }
 

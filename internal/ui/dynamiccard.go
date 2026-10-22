@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
@@ -121,7 +122,7 @@ func (s *Shell) toggleDynamicLike(d bili.Dynamic) {
 	s.app.LikeDynamic(d.ID, next.liked, func(err error) {
 		if err != nil {
 			s.dynLikes.revert(d.ID)
-			s.addToast(likeFailText(next.liked, err))
+			s.addToast(likeFailText(next.liked, err), notice.Danger)
 		}
 		s.wake.invalidate()
 	})
@@ -271,12 +272,12 @@ func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 // 而它在队尾的话他得等到整张列表放完——症状是「按了，什么也没发生，直到一小时后」。
 func (s *Shell) playNextFromDynamic(v *bili.DynamicArchive, author bili.DynamicAuthor) {
 	if err := s.app.EnqueueNext(dynVideoItem(v, author)); err != nil {
-		s.addToast("放不了这一首：" + err.Error())
+		s.addToast("放不了这一首："+err.Error(), notice.Danger)
 		return
 	}
 	// 这一句在两种情况下都是真的：队列里已经有歌时它排在下一位，而队列原本是
 	// 空的时候它就是接下来要放的那首（`EnqueueNext` 那时会直接起播）。
-	s.addToast("已经加进队列，下一首就放它")
+	s.addToast("已经加进队列，下一首就放它", notice.Success)
 }
 
 // dynamicPicsPerRow 是图文的图一行摆几张。Biu 是 `w-1/3`（一行三张，

@@ -30,6 +30,7 @@ import (
 	"strconv"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
@@ -307,7 +308,7 @@ func (s *Shell) viewPartRow(c *ui.Context, r partRow, t *ui.Theme) {
 		// 以为换失败了。
 		s.partOpen = false
 		if err := s.app.PlayPart(r.cid); err != nil {
-			s.addToast("换不了这一集：" + err.Error())
+			s.addToast("换不了这一集："+err.Error(), notice.Danger)
 		}
 	}
 }

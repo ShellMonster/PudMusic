@@ -18,6 +18,7 @@ import (
 	"log"
 	"slices"
 
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/egoist/mygo/ui"
 )
@@ -61,7 +62,7 @@ type removeResult struct {
 func (r removeResult) apply(p *pagedRows) {
 	if r.err != nil {
 		if p.acts.Notify != nil {
-			p.acts.Notify("删不掉：" + r.err.Error())
+			p.acts.Notify("删不掉："+r.err.Error(), notice.Danger)
 		}
 		return
 	}
@@ -119,7 +120,7 @@ func (p *pagedRows) applyPage(r libraryResult) {
 			// 「bili: /x/web-interface/history/search 返回 -101：账号未登录」，
 			// 前者是一句「登录已经过期了，重新扫码登录一下」。同一个错，两种说法，
 			// 用户只会觉得应用自己也不知道出了什么事。
-			p.acts.Notify("加载更多失败：" + bili.Friendly(r.err))
+			p.acts.Notify("加载更多失败："+bili.Friendly(r.err), notice.Danger)
 		}
 		return
 	}

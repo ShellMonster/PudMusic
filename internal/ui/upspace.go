@@ -37,6 +37,7 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -130,7 +131,9 @@ func upSpaceMidOf(path string) (int64, bool) {
 type upSpace struct {
 	mid int64
 	// notify 说一句话（后台跑完的结果）。nil 时那一句就没了。
-	notify func(string)
+	//
+	// ⚠️ **语气跟着话一起走**（票 #180）：失败是红的。
+	notify func(string, notice.Tone)
 	// tab 是当前停在哪个 Tab。它是 `ui.Tabs` 绑定的那个 int，所以**指针要
 	// 稳定**——每帧传 `&sp.tab` 就够（那是这一个字段的地址）。
 	tab int
@@ -618,7 +621,7 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 func (sp *upSpace) follow(yes bool) {
 	go func() {
 		if err := sp.header.Follow(context.Background(), yes); err != nil {
-			sp.notify("关注没改成：" + err.Error())
+			sp.notify("关注没改成："+err.Error(), notice.Danger)
 		}
 	}()
 }

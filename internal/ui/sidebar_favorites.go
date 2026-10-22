@@ -18,6 +18,7 @@ import (
 	"strconv"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
@@ -183,7 +184,7 @@ func (s *Shell) toggleFavoriteFolded(g app.FavoriteGroup, folded bool) {
 			st.SideMenuCollectionFolded.Created = !folded
 		}
 	}); err != nil {
-		s.addToast("折叠状态存不住：" + err.Error())
+		s.addToast("折叠状态存不住："+err.Error(), notice.Danger)
 	}
 }
 
@@ -241,7 +242,7 @@ func (s *Shell) reorderFavorite(g app.FavoriteGroup, items []app.Favorite, rows 
 		before = items[to].ID
 	}
 	if _, err := s.app.ReorderFavorite(g, items[rows[0]].ID, before); err != nil {
-		s.addToast("顺序存不住：" + err.Error())
+		s.addToast("顺序存不住："+err.Error(), notice.Danger)
 	}
 }
 
@@ -347,10 +348,10 @@ func (s *Shell) favoriteAction(f app.Favorite, item favMenuAction) {
 			}
 		})
 		if err != nil {
-			s.addToast("隐藏存不住：" + err.Error())
+			s.addToast("隐藏存不住："+err.Error(), notice.Danger)
 			return
 		}
-		s.addToast("已把「" + f.Title + "」从侧栏藏起来")
+		s.addToast("已把「"+f.Title+"」从侧栏藏起来", notice.Success)
 	case "play":
 		s.app.PlayFolder(f, s.sayFolderDone)
 	case "add-to-playlist":
@@ -362,7 +363,7 @@ func (s *Shell) favoriteAction(f app.Favorite, item favMenuAction) {
 	case "unfavorite":
 		s.app.UnfavoriteFolder(f, s.sayFolderDone)
 	default:
-		s.addToast("「" + item.label + "」还没接收藏夹接口")
+		s.addToast("「"+item.label+"」还没接收藏夹接口", notice.Warning)
 	}
 }
 
@@ -410,8 +411,8 @@ func (s *Shell) viewFavoriteDelete(c *ui.Context) {
 //
 // 参数是**已经说全了一整句**的话，成功和失败都是（见
 // `app/sidebar_folders.go` 的文件头）——这一层不再加任何前缀。
-func (s *Shell) sayFolderDone(msg string) {
-	s.addToast(msg)
+func (s *Shell) sayFolderDone(msg string, tone notice.Tone) {
+	s.addToast(msg, tone)
 	s.wake.invalidate()
 }
 
@@ -423,8 +424,8 @@ func (s *Shell) sayFolderDone(msg string) {
 // ⚠️ 它和侧栏那一行「正在刷新收藏夹…」是**两件事**，别合成一个判据：在飞的时候
 // 只有那一行在（话还没攒下），跑完之后话先弹出来、下一帧那一行才收掉。
 func (s *Shell) reportFavoritesRefresh() {
-	if msg, ok := s.app.TakeFavoritesRefresh(); ok {
-		s.addToast(msg)
+	if msg, tone, ok := s.app.TakeFavoritesRefresh(); ok {
+		s.addToast(msg, tone)
 	}
 }
 

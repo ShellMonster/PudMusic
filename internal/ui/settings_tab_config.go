@@ -42,6 +42,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo"
@@ -134,17 +135,17 @@ func (s *Shell) exportConfig() {
 	go func() {
 		path, err := picker.saveConfig(parent, name)
 		if err != nil {
-			s.addToast("导出配置失败：" + err.Error())
+			s.addToast("导出配置失败："+err.Error(), notice.Danger)
 			return
 		}
 		if path == "" {
 			return // 用户取消：什么都不说
 		}
 		if err := app.ExportSettings(path, s.app.SettingsSnapshot()); err != nil {
-			s.addToast("导出配置失败：" + err.Error())
+			s.addToast("导出配置失败："+err.Error(), notice.Danger)
 			return
 		}
-		s.addToast(fmt.Sprintf("已导出到 %s（不含任何登录信息）", path))
+		s.addToast(fmt.Sprintf("已导出到 %s（不含任何登录信息）", path), notice.Success)
 		s.wake.invalidate()
 	}()
 }
@@ -159,7 +160,7 @@ func (s *Shell) importConfig() {
 	go func() {
 		path, err := picker.pickConfig(parent)
 		if err != nil {
-			s.addToast("导入配置失败：" + err.Error())
+			s.addToast("导入配置失败："+err.Error(), notice.Danger)
 			return
 		}
 		if path == "" {
@@ -167,20 +168,20 @@ func (s *Shell) importConfig() {
 		}
 		next, err := app.ImportSettingsFile(path, s.app.SettingsSnapshot())
 		if err != nil {
-			s.addToast("导入配置失败：" + err.Error())
+			s.addToast("导入配置失败："+err.Error(), notice.Danger)
 			return
 		}
 		_, err = s.app.UpdateSettings(func(cur *app.Settings) { *cur = next })
 		if err != nil {
 			// 只读（来自更新的版本）时 UpdateSettings 拒掉。这里必须把话说清楚，
 			// 否则用户看到的是「点了没反应」。
-			s.addToast("导入配置失败：" + trimApp(err))
+			s.addToast("导入配置失败："+trimApp(err), notice.Danger)
 			return
 		}
 		if err := s.app.FlushSettings(); err != nil {
 			log.Printf("biu: 导入配置后落盘失败：%v", err)
 		}
-		s.addToast("已导入配置，设置已应用")
+		s.addToast("已导入配置，设置已应用", notice.Success)
 		s.wake.invalidate()
 	}()
 }
@@ -196,17 +197,17 @@ func (s *Shell) importFromBiu(dirs []string) {
 	dir := dirs[0]
 	go func() {
 		if LastMigration().ReadOnly {
-			s.addToast("数据目录来自更新的版本，这一版一个字都不会写回去")
+			s.addToast("数据目录来自更新的版本，这一版一个字都不会写回去", notice.Warning)
 			return
 		}
 		udir, err := userDataDir()
 		if err != nil {
-			s.addToast("从 Biu 导入失败：" + err.Error())
+			s.addToast("从 Biu 导入失败："+err.Error(), notice.Danger)
 			return
 		}
 		r, err := importFromBiu(dir, udir)
 		if err != nil && !r.Any() {
-			s.addToast("从 Biu 导入失败：" + err.Error())
+			s.addToast("从 Biu 导入失败："+err.Error(), notice.Danger)
 			return
 		}
 		// 设置是原地换掉的：store 内存里还是旧的，得推一份新的进去。
@@ -221,7 +222,7 @@ func (s *Shell) importFromBiu(dirs []string) {
 		}
 		// 报告落进 `LastMigration()`，设置页「配置」那一段会把它逐条列出来。
 		rememberImport(r)
-		s.addToast(biuImportToast(r))
+		s.addToast(biuImportToast(r), importTone(r))
 		s.wake.invalidate()
 	}()
 }

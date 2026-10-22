@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
@@ -434,7 +435,7 @@ func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
 	if btn.Clicked() {
 		it, ok := s.app.PlayingItem()
 		if !ok {
-			s.addToast("这一首还没有取回来，收藏不了")
+			s.addToast("这一首还没有取回来，收藏不了", notice.Warning)
 			return
 		}
 		s.openFolderSelect(it)
@@ -466,7 +467,7 @@ func (s *Shell) viewDownloadButton(c *ui.Context, st app.State) {
 		Size(iconHitMd, iconHitMd).Padding(0, 7), "把正在放的这首下载到本地").Clicked() {
 		it, ok := s.app.PlayingItem()
 		if !ok {
-			s.addToast("这一首还没有取回来，下载不了")
+			s.addToast("这一首还没有取回来，下载不了", notice.Warning)
 			return
 		}
 		s.downloadLater(it, false, "下载音频")

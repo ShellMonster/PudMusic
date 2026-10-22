@@ -16,13 +16,14 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/egoist/mygo/ui"
 )
 
 // newSwitch 造一对（列表 / 网格）并把 fetch 给分页那一层。
 func newSwitch(t *testing.T, fetch Fetcher, v View) (*PagedList, *ui.Tester) {
 	t.Helper()
-	p := NewPaged(newCache(t), Actions{Notify: func(string) {}}, fetch)
+	p := NewPaged(newCache(t), Actions{Notify: func(string, notice.Tone) {}}, fetch)
 	p.SetView(v)
 	tt := ui.NewTester(p.View, testerW, testerH)
 	tt.Frame()

@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo"
@@ -147,7 +148,7 @@ func (d *downloadsPage) opButton(c *ui.Context, label string, fn func()) {
 // pause 停下一项。
 func (d *downloadsPage) pause(r download.Snapshot, s *Shell) {
 	if err := s.app.PauseDownload(r.ID); err != nil {
-		s.addToast("暂停不了：" + trimDownloadErr(err))
+		s.addToast("暂停不了："+trimDownloadErr(err), notice.Danger)
 	}
 }
 
@@ -160,7 +161,7 @@ func (d *downloadsPage) pause(r download.Snapshot, s *Shell) {
 // 看得出已经重来了**。
 func (d *downloadsPage) resume(r download.Snapshot, s *Shell) {
 	if err := s.app.ResumeDownload(r.ID); err != nil {
-		s.addToast("继续不了：" + trimDownloadErr(err))
+		s.addToast("继续不了："+trimDownloadErr(err), notice.Danger)
 	}
 }
 
@@ -195,7 +196,7 @@ func (d *downloadsPage) askDeleteOne(r download.Snapshot, s *Shell) {
 // deleteOne 真的删掉一条。记录拿掉，半成品由引擎删（`Manager.Remove`）。
 func (d *downloadsPage) deleteOne(r download.Snapshot, s *Shell) {
 	if err := s.app.RemoveDownload(r.ID); err != nil {
-		s.addToast("删不掉：" + trimDownloadErr(err))
+		s.addToast("删不掉："+trimDownloadErr(err), notice.Danger)
 	}
 }
 
@@ -234,7 +235,7 @@ func (d *downloadsPage) askClear(s *Shell) {
 		ok:    "清空",
 		doIt: func() {
 			s.app.ClearDownloads()
-			s.addToast("清空了 " + strconv.Itoa(n) + " 条下载记录")
+			s.addToast("清空了 "+strconv.Itoa(n)+" 条下载记录", notice.Success)
 		},
 		open: true,
 	}
@@ -246,7 +247,7 @@ func (d *downloadsPage) openDownloadDir(dir string, s *Shell) {
 		return
 	}
 	if err := d.openDir(dir); err != nil {
-		s.addToast("打不开那个目录：" + trimDownloadErr(err))
+		s.addToast("打不开那个目录："+trimDownloadErr(err), notice.Danger)
 	}
 }
 
@@ -289,14 +290,14 @@ func (d *downloadsPage) openBiliPage(r download.Snapshot, s *Shell) {
 		bvid = bvid[:i]
 	}
 	if bvid == "" {
-		s.addToast("这一条没有 B 站地址")
+		s.addToast("这一条没有 B 站地址", notice.Warning)
 		return
 	}
 	if d.openLink == nil {
 		return
 	}
 	if err := d.openLink("https://www.bilibili.com/video/" + bvid); err != nil {
-		s.addToast("打不开那个链接：" + trimDownloadErr(err))
+		s.addToast("打不开那个链接："+trimDownloadErr(err), notice.Danger)
 	}
 }
 
@@ -304,7 +305,7 @@ func (d *downloadsPage) revealFile(r download.Snapshot, s *Shell) {
 	if r.Dest == "" {
 		// 队列里没有落盘路径 = 这一条是认不出位置的。回顶按钮已经在页头给出
 		// 了方向，这里说一句，别按了没反应。
-		s.addToast("这一条没有文件路径")
+		s.addToast("这一条没有文件路径", notice.Warning)
 		return
 	}
 	if d.reveal == nil {

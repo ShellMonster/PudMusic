@@ -27,6 +27,7 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -323,7 +324,7 @@ func (s *Shell) setCollectionFav(p *collectionPage, fav bool) {
 	if !fav {
 		what = "正在取消收藏…"
 	}
-	s.addToast(what)
+	s.addToast(what, notice.Plain)
 	s.app.SetFavorite(p.ref, fav)
 }
 
@@ -347,11 +348,11 @@ func (s *Shell) startCollectionDelete(p *collectionPage) {
 	if missing > 0 {
 		log.Printf("biu: 勾了 %d 首却只找齐 %d 条完整信息，%d 首会被跳过",
 			len(p.picked), len(medias), missing)
-		s.addToast("有 " + strconv.Itoa(missing) + " 首查不到完整信息，这次先删其余的")
+		s.addToast("有 "+strconv.Itoa(missing)+" 首查不到完整信息，这次先删其余的", notice.Warning)
 	}
 	if len(medias) == 0 {
 		if missing == 0 {
-			s.addToast("先勾几首再删")
+			s.addToast("先勾几首再删", notice.Warning)
 		}
 		return
 	}
@@ -364,7 +365,7 @@ func (s *Shell) startCollectionDelete(p *collectionPage) {
 	go func() {
 		if err := s.app.RemoveMedias(context.Background(), ref, medias); err != nil {
 			log.Printf("biu: 从收藏夹里删内容失败：%v", err)
-			s.addToast("删不掉：" + bili.Friendly(err))
+			s.addToast("删不掉："+bili.Friendly(err), notice.Danger)
 			s.wake.invalidate()
 		}
 	}()
@@ -381,7 +382,7 @@ func (s *Shell) startCollectionDelete(p *collectionPage) {
 // 一句「正在清除…」是给用户的进度：清一个几千首的收藏夹要走完一整个请求，
 // 十几秒里界面毫无动静的话多数人会再按一次。
 func (s *Shell) startCollectionClearInvalid(p *collectionPage) {
-	s.addToast("正在清除…")
+	s.addToast("正在清除…", notice.Plain)
 	s.app.ClearInvalidMedias(p.ref)
 }
 
@@ -396,8 +397,8 @@ func (s *Shell) startCollectionClearInvalid(p *collectionPage) {
 // `-race` 会报，而真机上的症状是「有时候跳、有时候不跳」。
 func (s *Shell) startCollectionDeleteFolder(p *collectionPage) {
 	ref, title := p.ref, collectionTitleText(p.ref.Type, s.app.Collection(p.ref))
-	s.app.DeleteCollectionFolder(ref, title, func(msg string, ok bool) {
-		s.sayFolderDone(msg)
+	s.app.DeleteCollectionFolder(ref, title, func(msg string, ok bool, tone notice.Tone) {
+		s.sayFolderDone(msg, tone)
 		if !ok {
 			return // 收藏夹还在，这一页留着，提示也留着
 		}
@@ -475,7 +476,7 @@ func (s *Shell) takeLeave() {
 // false（把已经加载出来的全部）。
 func (s *Shell) startCollectionDownload(p *collectionPage, only bool) {
 	if !s.app.DownloaderMounted() {
-		s.addToast("下载还没挂上：这个应用没把下载服务装进来")
+		s.addToast("下载还没挂上：这个应用没把下载服务装进来", notice.Danger)
 		return
 	}
 	medias := s.pickedMedias(p)
@@ -487,13 +488,20 @@ func (s *Shell) startCollectionDownload(p *collectionPage, only bool) {
 		if !only {
 			what = "这里"
 		}
-		s.addToast(what + "还没有可以下载的内容")
+		s.addToast(what+"还没有可以下载的内容", notice.Warning)
 		return
 	}
 	ref := p.ref
 	go func() {
 		err := s.app.DownloadMedias(context.Background(), ref, medias)
-		s.addToast(downloadDoneText(err))
+		// ⚠️ **语气跟着结果走**（票 #180）：成了是绿的，没成是红的。
+		// 「下载失败也是绿的」正是这一票要收掉的毛病——那一句话在这里是同一个
+		// 函数给的（`downloadDoneText`），所以语气也得跟着 err 走。
+		tone := notice.Success
+		if err != nil {
+			tone = notice.Danger
+		}
+		s.addToast(downloadDoneText(err), tone)
 		s.wake.invalidate()
 	}()
 }
@@ -555,11 +563,11 @@ func (s *Shell) allMedias(p *collectionPage) []bili.Media {
 func (s *Shell) playWholeCollection(p *collectionPage) {
 	items := itemsOfMedias(s.allMedias(p))
 	if len(items) == 0 {
-		s.addToast("这里还没有可以播的歌")
+		s.addToast("这里还没有可以播的歌", notice.Warning)
 		return
 	}
 	if err := s.app.PlayFrom(items...); err != nil {
-		s.addToast("放不了：" + err.Error())
+		s.addToast("放不了："+err.Error(), notice.Danger)
 	}
 }
 
@@ -567,11 +575,11 @@ func (s *Shell) playWholeCollection(p *collectionPage) {
 func (s *Shell) addWholeCollectionToQueue(p *collectionPage) {
 	items := itemsOfMedias(s.allMedias(p))
 	if len(items) == 0 {
-		s.addToast("这里还没有可以加的歌")
+		s.addToast("这里还没有可以加的歌", notice.Warning)
 		return
 	}
 	if err := s.app.Enqueue(items...); err != nil {
-		s.addToast("加不进队列：" + err.Error())
+		s.addToast("加不进队列："+err.Error(), notice.Danger)
 	}
 }
 

@@ -50,6 +50,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
@@ -187,14 +188,14 @@ func (l *lyricSearchUI) reset() {
 // 做了什么导致的。这跟「提交那一下什么都不会发生」是同一件。
 func (s *Shell) openLyricSearch() {
 	if len(s.app.LyricSources()) == 0 {
-		s.addToast("这一版还没有接上歌词源")
+		s.addToast("这一版还没有接上歌词源", notice.Warning)
 		return
 	}
 	st := s.app.Snapshot()
 	if !st.HasTrack {
 		// `app.OpenLyricPreview` 没有歌的时候什么都不做（没有能采用给谁），
 		// 所以在这儿说清比让用户对着一个空的弹窗发呆好。
-		s.addToast("先放一首歌，再去找它的歌词")
+		s.addToast("先放一首歌，再去找它的歌词", notice.Warning)
 		return
 	}
 
@@ -667,11 +668,11 @@ func (s *Shell) viewLyricPreviewFooter(c *ui.Context, pv app.LyricPreviewState) 
 // 要给用户看——它是这一票里少数几个「按了有反应但不是他想要的那个反应」的情形。
 func (s *Shell) adoptLyricPreview() {
 	if msg := s.app.AdoptLyricPreview(); msg != "" {
-		s.addToast(msg)
+		s.addToast(msg, notice.Danger)
 		return
 	}
 	s.lyricSearch.preview = false
 	s.lyricSearch.open = false
 	s.lyricSearch.reset()
-	s.addToast("已经换上这一版歌词")
+	s.addToast("已经换上这一版歌词", notice.Success)
 }

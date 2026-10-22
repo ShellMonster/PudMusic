@@ -13,6 +13,7 @@ import (
 	"strconv"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
@@ -341,7 +342,7 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 	// 就是一句 `if (playId === id) return`。重头播是播放条上「播放」那个键的活。
 	if rowEl.Clicked() {
 		if err := s.app.PlayAt(row.at); err != nil {
-			s.addToast("放不了这一首：" + err.Error())
+			s.addToast("放不了这一首："+err.Error(), notice.Danger)
 		}
 	}
 	// 右键菜单挂在**行**上（不是外面那个 List，也不是 ⋯ 那个按钮）：MyGo 取的是
@@ -429,17 +430,17 @@ func (s *Shell) locateCurrent() {
 	// 那一项的话，接歌失败停下来之后它还指着下一首，按这一下会把用户滚到一首
 	// 放不出来、也没在放的歌上面去——而屏幕上播放条是空的。
 	if !s.app.Snapshot().HasTrack {
-		s.addToast("当前没有正在播放的歌曲")
+		s.addToast("当前没有正在播放的歌曲", notice.Warning)
 		return
 	}
 	cur, ok := s.app.Queue().Current()
 	if !ok {
-		s.addToast("当前没有正在播放的歌曲")
+		s.addToast("当前没有正在播放的歌曲", notice.Warning)
 		return
 	}
 	id := cur.Identity()
 	if id == "" {
-		s.addToast("当前这一首认不出来，没法定位")
+		s.addToast("当前这一首认不出来，没法定位", notice.Warning)
 		return
 	}
 	idx := -1
@@ -450,7 +451,7 @@ func (s *Shell) locateCurrent() {
 		}
 	}
 	if idx < 0 {
-		s.addToast("播放列表里没有当前播放的歌曲")
+		s.addToast("播放列表里没有当前播放的歌曲", notice.Warning)
 		return
 	}
 	// 末尾那几行：目标偏移会超出内容，框架会把 glide 的目标钳在 MaxY 上
@@ -562,21 +563,21 @@ func (s *Shell) removeQueueRow(row queueRow) {
 		return
 	}
 	if _, err := s.app.RemoveSongFromList(row.item); err != nil {
-		s.addToast(err.Error())
+		s.addToast(err.Error(), notice.Danger)
 	}
 }
 
 // startDownload 是「下载音频」：加进下载队列（`app.Download`，下载那一票的实现）。
 func (s *Shell) startDownload(item app.Item) {
 	if !s.canDownload(item) {
-		s.addToast("这一首已经在你磁盘上了，没有东西可下载")
+		s.addToast("这一首已经在你磁盘上了，没有东西可下载", notice.Warning)
 		return
 	}
 	if _, err := s.app.Download(item); err != nil {
-		s.addToast("下不了这一首：" + err.Error())
+		s.addToast("下不了这一首："+err.Error(), notice.Danger)
 		return
 	}
-	s.addToast("已加进下载队列")
+	s.addToast("已加进下载队列", notice.Success)
 }
 
 // startDownloadVideo 是「下载视频」：取视频流、交织成一个 mp4，落在下载目录里。
@@ -586,14 +587,14 @@ func (s *Shell) startDownload(item app.Item) {
 // 却不知道为什么这么大。
 func (s *Shell) startDownloadVideo(item app.Item) {
 	if !s.canDownload(item) {
-		s.addToast("本地文件没有视频可下载")
+		s.addToast("本地文件没有视频可下载", notice.Warning)
 		return
 	}
 	if _, err := s.app.DownloadVideo(item, bili.VideoQualityUnknown); err != nil {
-		s.addToast("下不了这个视频：" + err.Error())
+		s.addToast("下不了这个视频："+err.Error(), notice.Danger)
 		return
 	}
-	s.addToast("已加进下载队列")
+	s.addToast("已加进下载队列", notice.Success)
 }
 
 // canDownload 报这一项有没有东西可下载。
@@ -617,19 +618,19 @@ func isLocalItem(item app.Item) bool { return item.IsLocal() }
 // 「成了 / 没成，理由是什么」。
 func (s *Shell) favoriteQueueRow(row queueRow) {
 	if isLocalItem(row.item) || row.item.Bvid == "" {
-		s.addToast("这一首是本地文件，B 站上没有对应的东西")
+		s.addToast("这一首是本地文件，B 站上没有对应的东西", notice.Warning)
 		return
 	}
 	s.app.FavoriteSong(row.item, func(folder bili.FavFolder, err error) {
 		if err != nil {
-			s.addToast("收藏不了：" + err.Error())
+			s.addToast("收藏不了："+err.Error(), notice.Danger)
 			return
 		}
 		name := folder.Title
 		if name == "" {
 			name = "收藏夹"
 		}
-		s.addToast("已收藏到「" + name + "」")
+		s.addToast("已收藏到「"+name+"」", notice.Success)
 	})
 }
 
@@ -638,6 +639,6 @@ func (s *Shell) favoriteQueueRow(row queueRow) {
 // 删是真的删掉了）。界面再套一句就是在当着用户的面说假话。
 func (s *Shell) sayQueueErr(err error) {
 	if err != nil {
-		s.addToast(err.Error())
+		s.addToast(err.Error(), notice.Danger)
 	}
 }
