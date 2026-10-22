@@ -405,9 +405,24 @@ func TestEachScreenIsBuiltOncePerFrame(t *testing.T) {
 func measureFrames(t *testing.T, tt *mygoui.Tester, n int) frameCost {
 	t.Helper()
 
+	// ⚠️ **单核要装在热身之前**：热身里的 `runtime.Gosched` 是为了让后台
+	// 线程跑得到（单核下它才是真的「让出」），而后台线程那一笔开销必须在
+	// **测量窗口之前**落地。
+	old := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(old)
+
 	// 稳态：先画几帧，把「只有头几帧才有」的一次性开销付掉（见 warmFrames）。
+	//
+	// ⚠️ **每一帧之后要让出 CPU**（`runtime.Gosched`）：后台线程（音频解码器）
+	// 的一次性开销——解码缓冲、文件缓冲——是在**它自己那条 goroutine** 上分配
+	// 的，而那条 goroutine 只有在当前 goroutine 让出 CPU 时才跑得到（单核下
+	// 尤其如此）。不让出的话，那一笔就落在**测量窗口**里：实测一次约 130 KB
+	// （解码器的环形缓冲 + 文件缓冲），摊到一百帧上是每帧多一千三百字节——
+	// 而界面自己每帧只花七百来字节。于是「这一帧的成本」会被那一笔决定，
+	// 而它落在哪一帧是随机的（实测落在第 10、141、171、176、187 帧都有）。
 	for range warmFrames {
 		tt.Frame()
+		runtime.Gosched()
 	}
 	// ⚠️ **画完还在要帧，「一帧」就不是一帧**：MyGo 的 Tester 会一直画到这一屏
 	// 不再要帧（最多二十帧），于是「一帧」这个单位被摊薄成好几帧，量出来的
@@ -419,9 +434,6 @@ func measureFrames(t *testing.T, tt *mygoui.Tester, n int) frameCost {
 		t.Fatalf("画了 %d 帧还在要帧——这一屏在稳态下还在逐帧要帧，"+
 			"「一帧」这个单位已经不是一帧了（量出来的数会小得离谱）", warmFrames)
 	}
-
-	old := runtime.GOMAXPROCS(1)
-	defer runtime.GOMAXPROCS(old)
 
 	var before, after, afterGC runtime.MemStats
 	// 先强制 GC：不然量到的是上一轮留下的垃圾（那是上一帧的账）。
@@ -465,7 +477,10 @@ func assertWithinBudget(t *testing.T, what string, got frameCost, want frameBudg
 	if got.bytes > want.bytes {
 		t.Errorf("%s：每帧分配了 %.0f 字节，上限 %.0f 字节。\n"+
 			"分配次数没超而字节超了：多半是**少而大**——每帧新建了一个大对象"+
-			"（一整张位图、一个大的切片），而次数上看不出来。",
+			"（一整张位图、一个大的切片），而次数上看不出来。\n"+
+			"（另一种可能：后台线程的一次性开销正好落进了测量窗口——音频解码器"+
+			"那一笔约 130 KB，摊到一百帧上是每帧多一千三百字节。那是噪声不是"+
+			"回归，热身里让出 CPU 那一步就是防它的。）",
 			what, got.bytes, want.bytes)
 	}
 	if got.live > liveHeapBudget {
