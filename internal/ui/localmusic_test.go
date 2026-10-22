@@ -413,6 +413,26 @@ func TestHoveringALocalRowTurnsItsNumberIntoAPlayIcon(t *testing.T) {
 			icon.Y, icon.Y+icon.H, first.Y, first.Y+first.H)
 	}
 
+	// ⚠️ **行的上/下各 6 像素也算「压在这一行」**：那 6 像素是 `ui.Table` 给
+	// 每一行的内边距（格子本身只有 28 高，行是 40 高）。只按格子算的话，指针在
+	// 那两圈上时图标不出现，图标会跟着指针上下闪（上游的 `group-hover` 是整行
+	// 都亮的）。
+	for _, where := range []struct {
+		what string
+		y    float32
+	}{
+		{"行的上边", first.Y + 2},
+		{"行的下边", first.Y + first.H - 2},
+	} {
+		tt.Move(first.X+first.W/2, where.y)
+		tt.Frame()
+		tt.Frame()
+		if _, ok := tt.Find(localPlayIconLabel); !ok {
+			t.Errorf("指针在%s（y=%.1f）时没有播放图标——那一行不全是热区",
+				where.what, where.y)
+		}
+	}
+
 	// 指到第二首：图标跟着换行。
 	second, ok := tt.Find("第二首")
 	if !ok {

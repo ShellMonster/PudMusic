@@ -401,6 +401,9 @@ func (p *localPage) view(c *ui.Context) {
 	}
 }
 
+// localTableRowPad 是 `ui.Table` 给每一行的上下内边距（6+6，行高 40 里占 12）。
+const localTableRowPad = 6
+
 // localTableRowPx 是本地音乐那一档表格里一行的高：操作那一列那枚键（28）+ `ui.Table`
 // 给每一行的上下内边距（6+6）。
 //
@@ -655,7 +658,7 @@ const localPlayIconLabel = "播放这首"
 //
 // 那个盒子是**固定尺寸**的：换图标不改变行高与列宽，否则指针一上去整行都跳。
 func (p *localPage) viewRowNumber(c *ui.Context, t *ui.Theme, row int) {
-	h := localTableRowPx - 2*t.Space(1.5)
+	h := float32(localTableRowPx - 2*localTableRowPad)
 	cell := ui.Row(c).FillWidth().Height(h).Center().Justify(ui.Center)
 	onRow := p.tableRowHovered(cell)
 	cell.Children(func() {
@@ -680,7 +683,11 @@ func (p *localPage) tableRowHovered(cell ui.Element) bool {
 		return false
 	}
 	_, y, _ := cell.PointerPosition()
-	return y >= 0 && y < cell.Bounds().H
+	// ⚠️ **判据要算上那一行的上下内边距**：格子（内容区）只有 28 高，而那一行是
+	// 40 高（上下各 6 是 `ui.Table` 给每一行的内边距）——指针压在那 6 像素上也算
+	// 「压在这一行」。只按 28 算的话，行的上/下各 6 像素是死区，图标会在指针
+	// 上下移动时闪一下（上游的 `group-hover` 是**整行**都亮的）。
+	return y >= -localTableRowPad && y < cell.Bounds().H+localTableRowPad
 }
 
 // viewRowOps 是表格每一行最后那一格的两个按钮。

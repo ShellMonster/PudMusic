@@ -12,6 +12,9 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -311,6 +314,15 @@ func collectionShellOpts(t *testing.T, opts []shellOpt, mid string, id string, m
 	t.Helper()
 	b := newCollectionBili(t)
 	b.setMedias(medias...)
+	return collectionShellFrom(t, b, opts, mid, id)
+}
+
+// collectionShellFrom 是上面那一版，外壳用**已经备好的**那个夹具。
+//
+// 有些用例要先把夹具备成某一种样子再建外壳——比如把创建者的头像地址换成一枚
+// 抓得到的图（`upper.face` 是 B 站给的地址，建外壳时它就会被拉走）。
+func collectionShellFrom(t *testing.T, b *favBili, opts []shellOpt, mid, id string) (*favBili, *Shell, *ui.Tester) {
+	t.Helper()
 	// ⚠️ **挂一份真设置**（临时目录）：侧栏那一行是从 `SettingsSnapshot` 读
 	// 顺序的，而「删收藏夹」「从侧栏移除」收尾时要写回那个顺序（`forgetFavorite`）。
 	// 不挂的话那一步回 `ErrSettingsNotMounted`，日志里多一行「顺序存不住」——
@@ -946,16 +958,42 @@ func TestCollectionEntriesFeedTheMediaSession(t *testing.T) {
 // 票 #175：头图区、操作条、搜索按钮
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheCollectionHeaderShowsTheCreatorAvatar 创建者那一行前面有一枚 24 的圆头像。
+// TestTheCollectionHeaderShowsTheCreatorAvatar 创建者那一行前面有一枚 24 的圆头像，
+// 而且**里头是那张图**。
 //
-// 判据是**画面上的盒子**：`Find` 认的是头像那一格的 `Label`，给回来的是它的框。
-// 头像地址空着时画的是一块同色的圆占位——那也是这一格，不许消失（消失之后
-// 创建者那一行左边凭空空一格，头像下回来时整页往右跳）。
+// # 两条判据，缺一条都不算
+//
+//   - **盒子是 24×24**（`Find` 认的是头像那一格的 `Label`）。
+//   - **图真的出来了**：中心像素是那枚图的颜色。
+//
+// ⚠️ **第二条是这一条的关键**：地址抓不到时（协议相对地址没补协议、图还在路上、
+// 抓失败）画的是一块同色的圆占位——**盒子还是 24×24**，所以只量盒子的话，一个
+// 永远抓不到图的空圆也是绿的（评审第 1 条就是这么漏过去的：真机上那一枚头像
+// 永远是空的，因为 B 站的 `upper.face` 是协议相对地址，而封面缓存的
+// `http.Client` 抓不了那种地址）。
+//
+// ⚠️ **图要从一个普通 http 的小服务器来**：封面缓存用的是默认的 `http.Client`，
+// 它不认自签证书——夹具那个是 TLS 的，抓不动。
 func TestTheCollectionHeaderShowsTheCreatorAvatar(t *testing.T) {
 	if collectionOwnerAvatarSize != 24 {
 		t.Errorf("collectionOwnerAvatarSize = %d，want 24（票面）", collectionOwnerAvatarSize)
 	}
-	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"))
+
+	// 一枚 1×1 的红图。
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+		img.Set(0, 0, color.RGBA{R: 255, A: 255})
+		if err := png.Encode(w, img); err != nil {
+			t.Errorf("编码那枚头像图失败：%v", err)
+		}
+	}))
+	defer srv.Close()
+
+	b := newCollectionBili(t)
+	b.setMedias(mediaOf(1, "歌 一"))
+	b.infos["upper"] = map[string]any{"mid": 1, "name": "UP 小明", "face": srv.URL + "/face.png"}
+	_, s, tt := collectionShellFrom(t, b, nil, "", "12345")
 	waitSongs(t, tt, s, 1)
 
 	r, ok := tt.Find(collectionOwnerAvatarLabel)
@@ -965,6 +1003,11 @@ func TestTheCollectionHeaderShowsTheCreatorAvatar(t *testing.T) {
 	if r.W < 23 || r.W > 25 || r.H < 23 || r.H > 25 {
 		t.Errorf("创建者头像是 %.0f×%.0f，want 24×24（票面）", r.W, r.H)
 	}
+	// 等那张图到（封面缓存是后台抓的，到���会叫醒界面）。
+	waitFrames(t, tt, "头像图到了", func() bool {
+		c := tt.Image().RGBAAt(round32(r.X+r.W/2), round32(r.Y+r.H/2))
+		return c.R > 200 && c.G < 80 && c.B < 80
+	})
 }
 
 // TestTheCollectionSearchIsACollapsedButton 搜索收着是一枚图标键，点开才是输入框。

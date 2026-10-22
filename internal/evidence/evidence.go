@@ -1872,6 +1872,9 @@ var Items = []Item{
 			"TestTheCollectionTitleIsTheBigOne",
 			"TestTheCollectionHeaderStaysInsideTheCoverOnOneLine",
 			"TestTheCollectionHeaderShowsTheCreatorAvatar",
+			// 头像那个地址要**抓得到**（B 站给的是协议相对地址，不补协议就是
+			// 一块永远抓不到图的空圆）。
+			"TestTheOwnerFaceGetsItsProtocol",
 			// 操作条：主按钮 40 高（像素）；搜索是会展开的按钮（收起 / 展开 /
 			// 点别处收起 / 切页回来不抢焦点）；两个分组在每一个侧栏宽度和字号
 			// 缩放下都不重叠。
