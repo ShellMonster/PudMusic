@@ -3,6 +3,8 @@ package ui
 import (
 	"testing"
 
+	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -145,21 +147,105 @@ func TestTheLeftBlockIsThreeSegments(t *testing.T) {
 //
 // ⚠️ **判据是「两个左沿差不超过 1 像素」**，不是「差不多」：差 2 像素就已经是
 // 「没对齐」了（上游那一列里两句话的左沿分毫不差）。
+//
+// # 🔴 **名字必须短，否则这一条是恒真的**
+//
+// 那一段（歌名 + UP 名）只有 76~140 宽，而**名字比它还长的话，文字盒被拉满**
+// ——于是**左对齐和居中算出来的左沿一模一样**（都是那一段的左沿），这一条就
+// 什么也钉不住。
+//
+// 第一版就是踩了这个：用的是「一个非常非常非常非常非常非常长的 UP 主名字」
+// （140 宽，比那一段还宽），去掉 `Justify(ui.Start)` 它**照样绿**——整包也没有
+// 任何一条测试能抓住那个变异。**实测**（去掉 `Justify(ui.Start)` 之后）：
+// 短名「某个 UP 主」→ UP 名在 x=115.9（差 35.9）；「UP」→ x=140.5（差 60.5）；
+// 而那个长名 → 仍然是 x=80.0（差 0）。
+//
+// 所以这里量的是**短名**；长名那一档只保证「它还在、没被挤没」。
 func TestTheOwnerNameIsLeftAlignedWithTheTitle(t *testing.T) {
-	tt, _ := leftBarTester(t, multiPages(), 1200)
+	for _, c := range []struct {
+		name      string
+		artist    string
+		artistMid int64
+		// pinned 说这一档量的是「左沿」（名字短，Start 和 Center 算得不一样）
+		// 还是「它还在」（名字比那一段还长，两种对齐算出来一样）。
+		pinned bool
+	}{
+		{"有编号 · 短名", "某个 UP 主", 12345, true},
+		{"没有编号 · 短名", "某个 UP 主", 0, true},
+		{"有编号 · 名字比那一段还长", "一个非常非常非常非常非常非常长的 UP 主名字", 12345, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tt, _ := metaBarTester(t, app.State{
+				HasTrack: true, Title: "一首歌的名字很长很长很长很长",
+				Artist: c.artist, ArtistMid: c.artistMid,
+			}, 1000)
 
-	title, ok := tt.Find("一首歌的名字很长很长很长很长")
-	if !ok {
-		t.Fatalf("画面上找不到歌名，文字有 %q", tt.Texts())
+			title, ok := tt.Find("一首歌的名字很长很长很长很长")
+			if !ok {
+				t.Fatalf("画面上找不到歌名，文字有 %q", tt.Texts())
+			}
+			owner, ok := tt.Find(c.artist)
+			if !ok {
+				t.Fatalf("画面上找不到 UP 名 %q，文字有 %q", c.artist, tt.Texts())
+			}
+			if !c.pinned {
+				// 这一档钉不住「左沿」（名字把那一段填满了），只钉「它还在、
+				// 没被挤没」——那是 `TestTheOwnerIsNeverSqueezedOutOfExistence`
+				// 的活。
+				if owner.W < ownerNameMinW {
+					t.Errorf("UP 名只剩 %.1f 宽（下限 %d）", owner.W, ownerNameMinW)
+				}
+				return
+			}
+			if d := widthGap(owner.X - title.X); d > 1 {
+				t.Errorf("UP 名在 x=%.1f，而歌名在 x=%.1f（差 %.1f）——"+
+					"它没有和歌名左对齐（上游那一列是 items-start，"+
+					"而框架的按钮内容默认居中）", owner.X, title.X, d)
+			}
+		})
 	}
-	owner, ok := tt.Find("一个非常非常非常非常非常非常长的 UP 主名字")
-	if !ok {
-		t.Fatalf("画面上找不到 UP 名，文字有 %q", tt.Texts())
-	}
-	if d := widthGap(owner.X - title.X); d > 1 {
-		t.Errorf("UP 名在 x=%.1f，而歌名在 x=%.1f（差 %.1f）——"+
-			"它没有和歌名左对齐（上游那一列是 items-start，"+
-			"而框架的按钮内容默认居中）", owner.X, title.X, d)
+}
+
+// TestTheQualityChipIsShortEnoughToSitNextToTheTitle 盯音质徽章**够短**。
+//
+// 那一列（歌名 + UP 名）在多 P 那一档只有 76 宽，而框架在装不下时按**基宽的
+// 比例**分摊那份 shortfall——**徽章自己被摊扁**就是从这儿来的：全称
+// 「杜比全景声」（11px 下 54.7 宽）被摊到 **13.8**（读出来一个字），而它同时
+// 是「换音质」的入口，**点击区只剩 14 像素**。
+//
+// 所以徽章显示的是**短版**（上游那一枚 chip 的形状：「无损」/「杜比」，
+// `playbar/left/index.tsx:50-56`），全称留在悬停提示里。
+//
+// ⚠️ **上限是 30**：76 − 6（那道缝）− 30 = **40**，而 40 是歌名那一档的下限
+// （`partsTitleMinW`）。徽章再宽，歌名就被挤到那个下限以下——那就不是「截短」
+// 而是「压成竖条」了。
+//
+// ⚠️ **量的是画出来的那一枚**：这一条靠 `metaBarTester`（那一段有 140 宽，
+// **装得下**徽章的自然宽），所以量到的是它**本来的**宽——徽章要是退回全称，
+// 这一条立刻红（54.7 > 30）。
+func TestTheQualityChipIsShortEnoughToSitNextToTheTitle(t *testing.T) {
+	for _, full := range []string{
+		"320K", "128K", "64K", "无损 FLAC", "杜比全景声", "杜比 Hi-Res", "未知音质",
+	} {
+		t.Run(full, func(t *testing.T) {
+			tt, _ := metaBarTester(t, app.State{
+				HasTrack: true, Title: "一首歌的名字很长很长很长很长",
+				Artist: "某个 UP 主", ArtistMid: 12345,
+				Quality: full,
+			}, 1000)
+
+			chip, ok := tt.Find(bili.ChipLabel(full))
+			if !ok {
+				t.Fatalf("画面上找不到徽章 %q，文字有 %q", bili.ChipLabel(full), tt.Texts())
+			}
+			const maxChipW = 30
+			if chip.W > maxChipW {
+				t.Errorf("徽章 %q 是 %.1f 宽（上限 %d）——"+
+					"它和歌名挤在 76 宽的那一行里会被摊扁"+
+					"（实测全称那一档被摊到 13.8：一个字，点击区只剩 14 像素）",
+					bili.ChipLabel(full), chip.W, maxChipW)
+			}
+		})
 	}
 }
 

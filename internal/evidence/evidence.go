@@ -1883,7 +1883,7 @@ var Items = []Item{
 		// ⚠️ **UP 名那一格原来也是「看不出坏了」**：它是一块 `Grow(1)` 的按钮，
 		// 而框架的按钮内容**默认居中**——那句话飘到了那一段的中间（实测歌名在
 		// x=80、UP 名在 x=219），而上游是 `items-start` 的普通 `span`。
-		Spec: "播放条左边是三段：封面 │ 歌名·UP名 │ 分集·收藏·赞（横着并排的一行）；UP 名和歌名左对齐；第二行与歌名之间的空隙是 4；三枚键的图标是 18",
+		Spec: "播放条左边是三段：封面 │ 歌名·UP名 │ 分集·收藏·赞（横着并排的一行）；UP 名和歌名左对齐；第二行与歌名之间的空隙是 4；三枚键的图标是 18；音质徽章是短版（它挤在歌名右边，被摊扁就点不准了）",
 		Tests: []string{
 			// 三段横着摆（三枚键在文字列**右边**、在同一条水平线上、次序是
 			// 分集 → 收藏 → 赞）。
@@ -1894,6 +1894,8 @@ var Items = []Item{
 			"TestTheGapBetweenTheTitleAndTheOwnerName",
 			// 三枚键的图标是 18（画面上的墨迹大小）。
 			"TestTheThreeLeftKeysUseTheUpstreamIconSize",
+			// 音质徽章**够短**（它是控件：挤窄它就是「点不准」和「读不出来」）。
+			"TestTheQualityChipIsShortEnoughToSitNextToTheTitle",
 			// 分集那一枚出现/消失的时候，收藏和赞**不挪位置**。
 			"TestTheLeftKeysStayPutWhenThePartsKeyAppears",
 		},
