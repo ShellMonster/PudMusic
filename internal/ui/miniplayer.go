@@ -57,18 +57,23 @@ const (
 	miniPad = 6
 
 	// miniCoverCol 是封面那一列的宽。Biu 那边是 100（`CoverView` 的 `w-[100px]`），
-	// 右边只剩 220；我们取 64，把省下来的 36 留给歌名——那一行现在还有音量条
-	// （上游没有，用户定的），而控制那一行图标化之后只要 88 宽（账在
-	// `viewMiniTransport`）。
-	miniCoverCol = 64
+	// 现在也是 100（票 #168 / G10），右边那一列剩 220。
+	//
+	// ⚠️ **100 是算得出来的那一档**：封面 88 = 100 − 左右各一个 miniPad，而窗高
+	// 100 − 上下各一个 miniPad 也正好是 88——**封面把这一列的高度填满**，上下
+	// 各留 6 的卡片内边距。上一版这一列是 64（封面 52），那是「320 宽塞不下
+	// 100 宽的封面、还得给歌名留地方」时的将就；控制键图标化之后那笔账已经勾销
+	// （三个键一共 100 宽，见 `viewMiniTransport`）。
+	miniCoverCol = 100
 	// miniCover 是封面本身的边长 = miniCoverCol - 左右各一个 miniPad
-	//（封面那一列的内边距是 `Padding(miniPad, 0, miniPad, miniPad)`）。
+	//（封面那一列的内边距是 `Padding(miniPad, miniPad, miniPad, miniPad)`——
+	// 四边一样，封面正好填满那个内容框）。
 	miniCover = miniCoverCol - 2*miniPad
 
 	// miniTitleMinW 是歌名那一格最少留多宽。
 	//
-	// ⚠️ **没有它，歌名会被挤成 0 宽**：右边那一列的宽是 320 - 64（封面）-
-	// 12（列的内边距）= 244，扣掉音量 80、退出那个键 28 和两道 6 的缝之后剩 124。
+	// ⚠️ **没有它，歌名会被挤成 0 宽**：右边那一列的宽是 320 - 100（封面）-
+	// 12（列的内边距）= 208，扣掉音量 80、退出那个键 28 和两道 6 的缝之后剩 88。
 	// 够画七八个字，而**界面上看不出坏了**（字还在那儿，只是没了）。60 是「还
 	// 认得出是哪首」的下限——留到 60 是给更窄的窗口兜底。
 	miniTitleMinW = 60
@@ -510,9 +515,13 @@ func (s *Shell) viewMini(c *ui.Context) {
 // viewMiniCover 是左边那一列封面。
 //
 // Biu 那边那一列是 `h-full w-[100px]`，封面**顶到窗口上下边**（`pages/mini-player/
-// index.tsx:28`）。这里是同样的形状——列占满整窗高——但封面本身是 52×52 的方图，
-// 在列里垂直居中：320 宽放不下 100 宽的封面而右边还塞得下歌名、音量、三个图标键
-// （账在 `miniCoverCol`）。
+// index.tsx:28`）。这里是同样的形状——列占满整窗高——而封面是 88×88 的方图
+// （`miniCoverCol` 100 减去左右各一个 `miniPad`），在列里垂直居中。
+//
+// ⚠️ **88 正好也是窗高减去上下各 6**：封面把这一列的高度填满，上下各留 6 的
+// 卡片内边距（那一圈透出桌面去，圆角才看得出来，见 `MiniWindowOptions` 的
+// `Transparent` 那一段）。上一版是 52×52（列 64），小得看不出是哪首歌——
+// 票 #168 / G10 要的是上游那个 100。
 //
 // ⚠️ 有封面才画。没歌时 Biu 那边是 `if (!cover) return null`——右边那一列铺满
 // 整窗。一个空框在那儿比没有更让人以为图加载坏了。
@@ -521,7 +530,7 @@ func (s *Shell) viewMiniCover(c *ui.Context, st app.State) {
 		return
 	}
 	ui.Row(c).Key("mini-cover-col").Width(miniCoverCol).Height(miniHeight).
-		Padding(miniPad, 0, miniPad, miniPad).AlignItems(ui.Center).Children(func() {
+		Padding(miniPad, miniPad, miniPad, miniPad).AlignItems(ui.Center).Children(func() {
 		imgcache.View(c, s.images, st.CoverURL, miniCover, miniCover)
 	})
 }
@@ -534,9 +543,10 @@ func (s *Shell) viewMiniCover(c *ui.Context, st app.State) {
 // 位置的「退出」。没有 key 的话这些换位会让后面每个控件的状态整体错配一格
 // ——而**界面上看不出坏了**：按钮都还在那儿，只是按「上一首」按到了「下一首」。
 func (s *Shell) viewMiniControls(c *ui.Context, st app.State, t *ui.Theme) {
-	// ⚠️ **垂直居中**而不是顶对齐：三行的内容一共 78 高，而这一列有 88（100 减去
-	// 上下各 6）。顶对齐的话底下空 16、上面空 6，整块看上去是往下坠的——而它贴在
-	// 屏幕边上，那 16 像素的空白会显得像没画完。
+	// ⚠️ **垂直居中**而不是顶对齐：三行的内容一共 84 高（标题行 28 + 进度 16 +
+	// 控制 32 + 两道 4 的缝），而这一列有 88（100 减去上下各 6）——居中之后上下
+	// 各空 2。顶对齐的话底下空 10、上面空 6，整块看上去是往下坠的——而它贴在
+	// 屏幕边上，那 10 像素的空白会显得像没画完。
 	ui.Column(c).Key("mini-controls").Grow(1).
 		Padding(miniPad, miniPad, miniPad, miniPad).Justify(ui.Center).
 		Gap(4).Children(func() {
@@ -615,8 +625,8 @@ func (s *Shell) viewMiniProgress(c *ui.Context, st app.State) {
 // viewMiniTransport 是第三行：上一首、播放/暂停、下一首。
 //
 // ⚠️ **这一行是 320 宽那一笔账的全部**：三个键 28 + 32 + 28 = 88，两道 6 的
-// 缝 12，一共 100，而右边那一列的宽是 320 - 64（封面列）- 12（列的内边距）
-// = 244。余量 144。
+// 缝 12，一共 100，而右边那一列的宽是 320 - 100（封面列）- 12（列的内边距）
+// = 208。余量 108。
 //
 // ⚠️ **这一行以前是一笔紧账**：三个汉字键 64 + 72 + 64 = 200，余量只有 32，
 // 再窄一点就有一个键被画成「上一…」——而**无头 Tester 读的是控件的文本**，被截
@@ -625,7 +635,7 @@ func (s *Shell) viewMiniProgress(c *ui.Context, st app.State) {
 // 框，不是被挤扁的文字键」。
 //
 // ⚠️ **余量出来了就得居中**（`Justify(ui.Center)`）：左对齐的话这三个键挤在
-// 244 宽的左边 100 像素里、右边空 144，**播放键落在窗口左侧**，而它上面那条进度
+// 208 宽的左边 100 像素里、右边空 108，**播放键落在窗口左侧**，而它上面那条进度
 // 条横跨整列——两颗「中心」对不上，一眼就是「没排过版」。上游那一行是
 // `justify-between`，因为它那三组（模式 / 控制 / 展开）各占一头；我们这一行只有
 // 中间那一组，居中就是同一个意思：播放键在进度条中点底下。

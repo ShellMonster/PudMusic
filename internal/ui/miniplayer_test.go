@@ -10,6 +10,7 @@ package ui
 
 import (
 	"image/color"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -879,6 +880,63 @@ func TestDraggingTheMiniProgressSeeksOnlyOnRelease(t *testing.T) {
 			"症状是**拖不动**（按住往右拖，一松劲就弹回去）",
 			got.Seconds(), dur, want.Seconds())
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 出图
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestRenderMiniShots 把迷你播放器存成 PNG（01-浅色 / 02-深色），留给人眼对照。
+//
+//	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderMiniShots
+//
+// ⚠️ **迷你窗单独出图**：它和主窗口是两个外壳、两扇窗，而这一扇只有 320×100——
+// 混在整窗图里看不清封面那一列到底多宽、四个图标键摆在哪。
+//
+// ⚠️ **两套主题都要出**（DESIGN.md §八）：深色下那一列和右边那块的层次差别
+// 更明显，而浅色下封面的圆角和卡片底几乎同色。
+func TestRenderMiniShots(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	requireTestAudio(t)
+
+	// ⚠️ **要挂设置**：深色那一档是用户在设置里选的，而迷你窗读的是**主窗口
+	// 那个 App 上的设置**（`NewMini` 的第二个参数就是主窗口的外壳）——不挂的话
+	// `UpdateSettings` 改的是一个没挂盘子的 App，画面上什么都不会变。
+	a := app.New()
+	if err := a.MountSettings(filepath.Join(writableTempDir(t, "settings"), app.SettingsFileName)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { a.Close(); _ = a.CloseSettings() })
+	main := newTestShell(t, onApp(a)).s
+	s := NewMini(a, main, nil)
+	t.Cleanup(s.closePerWindow)
+
+	// 带封面：这一票的封面列就是 100，没有封面的图看不出那一列多宽。
+	g := newGatedCover(t)
+	g.open()
+	if err := a.Enqueue(app.Item{
+		Source: "local", Type: "local", Path: testFLAC, Title: "第一首", Cover: g.url(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a.Toggle() // 暂停：画面上那个键写着「播放」
+
+	tt := miniTester(s)
+	waitFor(t, "封面画上来了", func() bool {
+		tt.Frame()
+		return !miniCoverBox(tt).Empty()
+	})
+	save(t, dir, "mini-01-light.png", tt)
+
+	// 深色：用户在设置里选的，这一扇窗下一帧就跟着变（铁律二）。
+	if _, err := a.UpdateSettings(func(st *app.Settings) { st.ThemeMode = app.ThemeModeDark }); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	save(t, dir, "mini-02-dark.png", tt)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
