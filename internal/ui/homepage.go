@@ -186,6 +186,8 @@ func (h *homePage) SetSongs(songs homeSongs) {
 // ⚠️ **别为了「看着完整」给它补一个大标题**：那是一个上游没有的新元素，而且
 // 这一页顶上已经有三个 Tab 了。真的想要一个页名，走**侧栏那一项**。
 func (s *Shell) viewHome(c *ui.Context, _ *ui.Route) {
+	// 记一笔「首页建了一遍」——给「一帧建了几遍」那条测试数（见 builds.go）。
+	s.builds.home++
 	s.applyFrameTheme(c)
 	s.home.view(c, s)
 }
