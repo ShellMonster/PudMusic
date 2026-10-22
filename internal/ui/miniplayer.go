@@ -106,6 +106,21 @@ const (
 // 判断），而 Biu 的迷你窗口 `frame: false`，压根没有系统控件——它自己画一整块。
 // 这里走真无边框。
 //
+// # Panel：点它不激活应用（票 #162）
+//
+// `Panel: true` 让这扇窗在 macOS 上是带 nonactivating 样式的 `NSPanel`
+// （框架的 `MyGoPanel`）：显示和聚焦时能拿键盘，但**应用保持不活动**——用户
+// 在别的应用里按迷你播放器的播放键，不会被拽出那个应用。它是普通窗口时的
+// 症状正好相反：点一下播放键，前台应用整个切走。
+//
+// 只开 Panel **不**把应用变成 accessory：程序坞图标、菜单栏、主窗口全都照旧
+// （票面明说「盖在别人的全屏应用上」不做，那要 accessory，是产品决定）。
+//
+// ⚠️ **Panel 和 `StateKey` 必须一起验。** 面板在语义上不能最大化，而「不能
+// 缩放 / 不能最大化」正是下面那一段实测出来的、让 `StateKey` 一条都存不下来
+// 的那条路（`isZoomed` 恒为真）。这一步在真窗口上量过：见函数末尾「本机实测」
+// 那一段。
+//
 // # ⚠️ 为什么**没有** `DisableResize`（Biu 那边有）
 //
 // 这不是抄漏了，是照抄会让 `StateKey` 整个失效。实测出来的链路，三步：
@@ -141,6 +156,20 @@ const (
 // 代价：用户能把这个窗口**往大拖**。而那没有后果——右边那一列是 `Grow(1)`，
 // 宽出来的部分全给歌名；**缩不到更小**由 `MinWidth/MinHeight` 兜住，三行控件
 // 不会被裁掉。
+//
+// # 本机实测（票 #162，macOS，真窗口）
+//
+// Panel 打开之后，用**生产这份选项**（`MiniWindowOptions`）建真窗口量过：
+//
+//	styleMask   0x808b，含 `NSWindowStyleMaskNonactivatingPanel`（1<<7）
+//	            ——「点它不激活应用」就是这一位（0x1 titled / 0x2 closable /
+//	            0x8 resizable / 0x80 nonactivatingPanel / 0x800 fullSizeContentView）
+//	isZoomed    false，建出来和显示之后各量一次——上面那个坑没有因为 Panel 重现
+//	位置记忆    拖到 (260,200) → 关窗 → `window-state.json` 里有 mini-player 键
+//	            → **新进程**再建，`Bounds()` 就是 (260,200)
+//
+// 「点它不激活应用」的最后一跳只有人能验：自动化只证明了样式位在，没有真的用
+// 鼠标去点（点一下会改动用户当前的前台应用）。收尾说明里把这两种证据分开写了。
 func MiniWindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 	return mygo.WindowOptions{
 		Title:  "BiuGo 迷你播放器",
@@ -151,10 +180,17 @@ func MiniWindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 		Transparent: true,
 		// Biu：`alwaysOnTop: true, skipTaskbar: true`。
 		// 「置顶」是它作为悬浮控件的本体；「不进任务栏 / 程序坞」是为了不跟
-		// 主窗口抢同一个格子。
-		AlwaysOnTop:       true,
-		SkipTaskbar:       true,
-		Frameless:         true,
+		// 主窗口抢同一个格子。面板语义已经隐含这两条（`mygo/window.go` 的
+		// `platformOptions` 里 `if o.Panel { … AlwaysOnTop, SkipTaskbar = true, true }`），
+		// 这里照写是把意图留在选项上，两处一致。
+		AlwaysOnTop: true,
+		SkipTaskbar: true,
+		// 票 #162：面板语义——显示 / 聚焦给键盘，但不激活应用。理由和
+		// 「位置记忆」那一半的风险见函数头上那一段。
+		Panel:     true,
+		Frameless: true,
+		// Panel 也会把这三条强制成 false（同一个 `platformOptions`）。照写不冲突，
+		// 而且「迷你窗不要最大化 / 最小化 / 全屏」这件事不该只靠 Panel 的语义转述。
 		DisableMinimize:   true,
 		DisableMaximize:   true,
 		DisableFullScreen: true,
@@ -167,7 +203,8 @@ func MiniWindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 		MinWidth:  miniWidth,
 		MinHeight: miniHeight,
 		// 停在用户上次关掉它的地方（和主窗口那个 `StateKey: "main"` 同一套机制）。
-		// **靠上面那个 `MinWidth` 才成立**，理由见函数上面那一段。
+		// **靠上面那个「不给 DisableResize」才成立**，理由和实测表见函数上面
+		// 那两段。
 		StateKey: "mini-player",
 		Content:  ui.View(view),
 	}
@@ -215,9 +252,9 @@ func miniCorner(work mygo.Rectangle) (x, y int) {
 // 而 `closePerWindow` 也不会因为小窗关掉而停掉主窗口那份的写盘（见 `shared`）。
 func NewMini(a *app.App, main *Shell, toggle func()) *Shell {
 	s := New(a)
-	// 迷你播放器是面板语义：它浮在桌面上时用户看得到，但点它不激活应用，
-	// 所以「有没有焦点」不能拿来判它看不看得见（见 presence.go 的
-	// freeWhileBlurred）。
+	// 迷你播放器是面板语义（`MiniWindowOptions` 的 `Panel: true`，票 #162）：
+	// 它浮在桌面上时用户看得到，但点它不激活应用，所以「有没有焦点」不能拿来
+	// 判它看不看得见（见 presence.go 的 freeWhileBlurred）。
 	s.presence.update(func(p *windowPresence) { p.freeWhileBlurred = true })
 	if main != nil {
 		s.adoptShared(main)
@@ -362,8 +399,8 @@ func (s *Shell) attachMiniWindow(w *mygo.Window) {
 	s.win = w
 	s.bindMiniWindow()
 	// 这扇窗的可见性同主窗口一样由系统推过来，但「有没有焦点」不参与判断：
-	// 它是面板语义，点它不激活应用（票 #156 第六条），于是它几乎永远失焦
-	// ——拿焦点判的话，用户点一下播放键进度条就不再动了（见 presence.go）。
+	// 它是 Panel，点它不激活应用（票 #162），于是它几乎永远失焦——拿焦点判的
+	// 话，用户点一下播放键进度条就不再动了（见 presence.go）。
 	s.watchWindow(w)
 
 	w.OnClosed(func() {
