@@ -173,7 +173,7 @@ func (p *localPage) addRoot(dir string) {
 	}
 	// `begin` 每一帧都会拿设置来对一遍根，对不上就换根并重扫——所以这里
 	// 不需要自己再调一次 SetLocalRoots。
-	p.say("已添加「"+dirName(dir)+"，正在扫描", notice.Success)
+	p.say("已添加「"+dirName(dir)+"」，正在扫描", notice.Success)
 }
 
 // askRemoveDir 记下要移的目录并打开确认。真正的那一步在 viewRemoveDirDialog。
@@ -204,7 +204,7 @@ func (p *localPage) removeRoot(dir string) {
 		p.say("存不住这次修改："+err.Error(), notice.Danger)
 		return
 	}
-	p.say("已从列表里移除「"+dirName(dir)+"，文件一个没动", notice.Success)
+	p.say("已从列表里移除「"+dirName(dir)+"」，文件一个没动", notice.Success)
 }
 
 // say 说一句话。notify 是 nil 时什么也不说（那样不会崩）。

@@ -478,7 +478,7 @@ func (s *Shell) searchUserActions() list.Actions {
 		Download: func(app.Item) {
 			s.addToast("UP 主不是视频，没有东西可下载", notice.Warning)
 		},
-		Notify: s.notify,
+		Notify: s.addToast,
 	}
 }
 

@@ -208,7 +208,7 @@ func (s *Shell) upSpaceFor(mid int64) *upSpace {
 	if sp, ok := s.upSpaces[mid]; ok {
 		return sp
 	}
-	sp := &upSpace{mid: mid, header: s.app.UpSpaceOf(mid), notify: s.notify}
+	sp := &upSpace{mid: mid, header: s.app.UpSpaceOf(mid), notify: s.addToast}
 	// 拉页器的闭包捕获 mid（不是 sp）：换 UP 主就是换一份 sp，这个闭包里
 	// 拿到的永远是对的 UP。
 	sp.videos = list.NewPaged(s.images, s.listActions(),

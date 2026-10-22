@@ -6,6 +6,8 @@ import (
 	"go/parser"
 	"go/token"
 	"image/color"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -108,6 +110,31 @@ func toastRectOf(t *testing.T, tt *mygoui.Tester, prefix string) mygoui.Rect {
 	}
 	t.Fatalf("画面上没有以 %q 开头的提示，文字有 %q", prefix, tt.Texts())
 	return mygoui.Rect{}
+}
+
+// toastInkColor 是那条提示上「字」的颜色。
+//
+// ⚠️ **取的是字形最深处那一个像素**：字是抗锯齿的，边缘那些像素是「字色和底色
+// 的混合」，只有笔画最粗的地方才是字色本身——所以这里扫整块文字的框，取离
+// 底色最远的那一个。
+//
+// ⚠️ **离底色最远**而不是「最深」：失败那一条是**白字**压在红底上，最深的是
+// 底色自己。
+func toastInkColor(t *testing.T, tt *mygoui.Tester, prefix string) color.RGBA {
+	t.Helper()
+	r := toastRectOf(t, tt, prefix)
+	img := tt.Image()
+	bg := toastColorAt(t, tt, prefix)
+	best, bestDist := bg, 0
+	for y := int(r.Y); y < int(r.Y+r.H); y++ {
+		for x := int(r.X); x < int(r.X+r.W); x++ {
+			p := img.RGBAAt(x, y)
+			if d := colorDistance(p, bg); d > bestDist {
+				best, bestDist = p, d
+			}
+		}
+	}
+	return best
 }
 
 // toastColorAt 采一条提示那张卡片上的底色。
@@ -417,12 +444,17 @@ func TestTheToastTakesTheToneColor(t *testing.T) {
 			for _, c := range []struct {
 				tone notice.Tone
 				want string
+				ink  string
 				what string
 			}{
-				{notice.Plain, toastUpstreamPrimary, "普通（主色）"},
-				{notice.Success, toastUpstreamSuccess, "成功"},
-				{notice.Warning, toastUpstreamWarning, "警告"},
-				{notice.Danger, toastUpstreamDanger, "失败"},
+				// ⚠️ **字色也是这一档的一部分**（DESIGN.md §六「Toast」）：
+				// 绿和橙上压的是**深色字**（白字压在那两个上只有 2.19:1 / 2.04:1，
+				// 读不清），红上压的是**白字**（与确认框那颗红色的「确认」键一致），
+				// 主色那一档的字色跟着主题走。
+				{notice.Plain, toastUpstreamPrimary, "#18181b", "普通（主色）"},
+				{notice.Success, toastUpstreamSuccess, "#18181b", "成功"},
+				{notice.Warning, toastUpstreamWarning, "#18181b", "警告"},
+				{notice.Danger, toastUpstreamDanger, "#ffffff", "失败"},
 			} {
 				text := "这一条是" + c.what
 				s.addToast(text, c.tone)
@@ -437,6 +469,19 @@ func TestTheToastTakesTheToneColor(t *testing.T) {
 					t.Errorf("%s和前面某一条是同一个颜色（%s）——四种语义色必须是四个颜色", c.what, c.want)
 				}
 				seen[c.want] = true
+
+				// 字色：字形最深处那一个像素就是它（见 toastInkColor）。
+				//
+				// ⚠️ **主色那一档的字色跟着主题走**（DESIGN.md §六）：用户把主色
+				// 换成深的就该配白字——所以这一档的期望值取自主题（`AccentText`），
+				// 而那三个语义色的字色是**写死的**（绿和橙上压深色字、红上压白字）。
+				wantInk := toastRGBA(c.ink)
+				if c.tone == notice.Plain {
+					wantInk = rgbaOf(BuildTheme(s.app.SettingsSnapshot(), dark).AccentText)
+				}
+				if ink := toastInkColor(t, tt, text); ink != wantInk {
+					t.Errorf("%s那一条的字色是 %v，want %v（压在这个底色上的字色）", c.what, ink, wantInk)
+				}
 
 				// 收掉这一条，下一条从空屏开始（不然三条会叠起来）。
 				s.clearToasts()
@@ -652,5 +697,89 @@ func TestTheToastTextUsesTheMediumWeight(t *testing.T) {
 	if !found {
 		t.Error("toast.go 里没有一句同时写着 `FontSize(…toastFont…)` 和 " +
 			"`FontWeight(weightMedium)`——提示那行字必须是 14/500")
+	}
+}
+
+// TestTheToastMessagesKeepTheirBrackets 钉住「提示那句话没缺字」。
+//
+// 这一票把 120 来处调用点逐条改写了一遍（加语气参数），而**改写的时候少打
+// 一个字符，用户看到的就是半截话**——实测就发生过两处：「已添加「音乐，正在扫描」
+// 和「已从列表里移除「音乐，文件一个没动」（右引号没了）。
+//
+// ⚠️ **那种错没有一处会报错**：编译得过、界面画得出来、字还在，只是断句是断的。
+// 所以这里逐条看那些话：**「」成对**（圆括号、书名号同理）。
+//
+// 判据是 AST：凡是**最后一个参数是 `notice.XXX` 的那个调用**，它前面那个参数
+// 就是「话」——那一串里的字符串字面量按顺序拼起来，括号必须成对。
+// （拼的是**字面量**那一段：话里夹着变量（目录名、歌名）时，那一段不在判据里。）
+func TestTheToastMessagesKeepTheirBrackets(t *testing.T) {
+	// 这两个目录：话有的在界面层（`addToast` / `say`），有的在应用层
+	// （`sayFolder` / `finishRefresh` 那一族——那边写的也是给用户看的话）。
+	for _, dir := range []string{".", "../app"} {
+		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range files {
+			if strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			fset := token.NewFileSet()
+			f, err := parser.ParseFile(fset, name, nil, 0)
+			if err != nil {
+				t.Fatalf("解析 %s 失败：%v", name, err)
+			}
+			ast.Inspect(f, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				idx := -1
+				for i, a := range call.Args {
+					sel, ok := a.(*ast.SelectorExpr)
+					if !ok {
+						continue
+					}
+					pkg, ok := sel.X.(*ast.Ident)
+					if !ok || pkg.Name != "notice" {
+						continue
+					}
+					switch sel.Sel.Name {
+					case "Plain", "Success", "Warning", "Danger":
+						idx = i
+					}
+				}
+				if idx <= 0 {
+					return true
+				}
+				var msg strings.Builder
+				ast.Inspect(call.Args[idx-1], func(m ast.Node) bool {
+					lit, ok := m.(*ast.BasicLit)
+					if !ok || lit.Kind != token.STRING {
+						return true
+					}
+					v, err := strconv.Unquote(lit.Value)
+					if err == nil {
+						msg.WriteString(v)
+					}
+					return true
+				})
+				text := msg.String()
+				if text == "" {
+					return true
+				}
+				for _, pair := range []struct{ open, close string }{
+					{"「", "」"}, {"（", "）"}, {"《", "》"},
+				} {
+					if strings.Count(text, pair.open) != strings.Count(text, pair.close) {
+						pos := fset.Position(call.Pos())
+						t.Errorf("%s:%d 的话「%s」里的 %s%s 不成对——"+
+							"用户看到的是半截话，而这种错没有任何一处会报错",
+							pos.Filename, pos.Line, text, pair.open, pair.close)
+					}
+				}
+				return true
+			})
+		}
 	}
 }

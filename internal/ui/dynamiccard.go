@@ -314,7 +314,7 @@ func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author b
 	box := ui.Row(c).Grow(1).Gap(8).Padding(6).Radius(6).
 		Background(t.Surface).AlignItems(ui.Center).Key("dynv:" + v.Bvid)
 	if box.Clicked() {
-		list.AppActions(s.app, s.notify).Play([]app.Item{dynVideoItem(v, author)})
+		list.AppActions(s.app, s.addToast).Play([]app.Item{dynVideoItem(v, author)})
 	}
 	box.Children(func() {
 		s.spaceThumb(c, v.Cover, dynamicCoverW, dynamicCoverH)

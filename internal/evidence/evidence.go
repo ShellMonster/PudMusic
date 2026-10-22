@@ -2178,6 +2178,8 @@ var Items = []Item{
 			"TestTheToastUsesTheUpstreamSize",
 			// 字重 500（AST：字重在画面上量不到盒子）。
 			"TestTheToastTextUsesTheMediumWeight",
+			// 提示那句话没缺字（改写调用点时少打一个字符，用户看到的是半截话）。
+			"TestTheToastMessagesKeepTheirBrackets",
 		},
 	},
 }

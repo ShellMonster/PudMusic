@@ -127,17 +127,6 @@ func (s *Shell) addToast(text string, tone notice.Tone) {
 	go s.expire(t)
 }
 
-// notify 是「说一句话」的那一档接线：把话和语气交给提示。
-//
-// 它是 `list.AppActions` 那种「只收 func(string, 语气)」的钩子要的那一份。
-//
-// ⚠️ **为什么不让 `addToast` 自己就是那个形状**：`addToast` 是**界面层**的
-// 私有方法，而那几个钩子（列表的操作、侧栏收藏夹、本地音乐那一页、UP 空间）
-// 要的是「话 + 语气」两样——语气必须跟着话一路走到画它的地方（票 #180）。
-func (s *Shell) notify(text string, tone notice.Tone) {
-	s.addToast(text, tone)
-}
-
 // expire 等到点就把这一条收走，然后叫醒界面。
 //
 // ⚠️ 收走之后**必须**调 invalidate。少了这一行，这条提示会一直挂在屏幕上，

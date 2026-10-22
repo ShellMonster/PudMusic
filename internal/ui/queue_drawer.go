@@ -543,7 +543,7 @@ func (s *Shell) queueAction(row queueRow, item queueMenuItem) {
 	case "bililink":
 		// 内容列表那套 `list.Actions.Open`：本地项先判访达、再判 B 站地址。
 		// 自己照着再写一遍的话，抽屉和列表会对同一项给出两种说法。
-		list.AppActions(s.app, s.notify).Open(row.item)
+		list.AppActions(s.app, s.addToast).Open(row.item)
 	case "del":
 		s.removeQueueRow(row)
 	}
