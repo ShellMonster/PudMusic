@@ -2,17 +2,28 @@ package ui
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"image"
 	"image/color"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
 )
+
+// mentionsString 报 e 里有没有写着一个值为 want 的字符串字面量。
+func mentionsString(e ast.Expr, want string) bool {
+	lit, ok := e.(*ast.BasicLit)
+	return ok && lit.Kind == token.STRING && lit.Value == strconv.Quote(want)
+}
 
 // 播放列表抽屉的验收：行高 64、按判重标识去重、「定位当前播放」平滑滚过去、
 // 行菜单那五项。
@@ -149,6 +160,247 @@ func TestQueueDrawerOpensFromThePlaybar(t *testing.T) {
 	h.tt.Frame()
 	if h.tt.HasText(queueEmptyHint) {
 		t.Error("按了 Esc 抽屉还开着")
+	}
+}
+
+// queueDrawerWithTwoRows 造一个开着、画着两行的抽屉：第一行是正在放的本地歌
+// （标题「a」），第二行是一首在线的音频（标题「队列里的第二首」，副题
+// 「B 站音乐」）。
+//
+// ⚠️ **第二行那首歌故意不播**：正在放的那一行不画悬停三角（它已经在放了），
+// 而这一族要量的是**没在放的那一行**上的三角。也不用能让它播——它只是排在
+// 队列第二个，`Enqueue` 放的是第一个。
+//
+// 副题用「B 站音乐」而不是「本地音乐」：后者在侧栏里也有一份（那一页的名字），
+// `Tester.Find` 拿到的是第一个，会量到侧栏的菜单行。
+func queueDrawerWithTwoRows(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t)
+	second := app.Item{
+		Source: "online", Type: "audio", Sid: "999", Bvid: "BV1probe", Cid: "1",
+		Title: "队列里的第二首",
+	}
+	enqueue(t, h, append(copiesOf(t, 1), second)...)
+	openDrawer(t, h)
+	return h
+}
+
+// TestTheQueueDrawerUsesTheUpstreamTypeScale 钉住队列抽屉那三档字号（票 #177）。
+//
+// 上游 `music-playlist-drawer/index.tsx:131-133` 与 `list-item.tsx:68-80`：
+//
+//	标题「播放列表」  18 / 400（`h3` = `text-lg`，Preflight 重置了字重）
+//	条数「(2)」       14（`text-sm`）
+//	行的歌名 / 副题   16 / 14（`text-base` / `text-sm`）
+//
+// 改之前是 15/700、12、15/12：标题小一号还重两档，副题比列表行的 UP 名还小一档。
+//
+// # 判据：能靠画面量的都走画面
+//
+// 条数和副题在画面上都只有一处，量的是文字盒高（字号 × `textBoxPerSize`，和
+// `typography_test.go` 同一把尺子）。
+//
+// ⚠️ **两个标题量不了，只能钉代码**：
+//
+//   - 「播放列表」：`Tester.Find` 拿到的是播放条上那个开抽屉的图标键（Label 也
+//     是「播放列表」，而且在树里排得更前），量到的是 28×28 的点击区。
+//   - 行歌名：`ListState.Label` 也用的是这一行的歌名，而标签节点的框是**整行**
+//     （实测 383×64），量到的是行高，不是字高。
+//
+// 所以这两条解析 `queue_drawer.go`：画标题那一句必须是 18 且**没有**
+// `Bold()` / `FontWeight(...)`；画行歌名那一句必须是 16。字重本来也画不出盒子的
+// 差别——这正是 `typography_test.go` 里设置页行标题那一条的做法。
+func TestTheQueueDrawerUsesTheUpstreamTypeScale(t *testing.T) {
+	h := queueDrawerWithTwoRows(t)
+
+	for _, want := range []struct {
+		text string
+		size float64
+		what string
+	}{
+		{text: "(2)", size: 14, what: "条数"},
+		{text: "B 站音乐", size: 14, what: "行副题"},
+	} {
+		r, ok := h.tt.Find(want.text)
+		if !ok {
+			t.Fatalf("抽屉里找不到%s「%s」，文字有 %q", want.what, want.text, h.tt.Texts())
+		}
+		if got := float64(r.H) / textBoxPerSize; math.Abs(got-want.size) > 0.8 {
+			t.Errorf("队列抽屉的%s「%s」折算出来是 %.1fpx，want %.0f"+
+				"（上游 18/14/16/14 那一套刻度）",
+				want.what, want.text, got, want.size)
+		}
+	}
+
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "queue_drawer.go", nil, 0)
+	if err != nil {
+		t.Fatalf("解析 queue_drawer.go 失败：%v", err)
+	}
+	header18, headerHeavy, row16 := false, "", false
+	ast.Inspect(f, func(n ast.Node) bool {
+		stmt, ok := n.(*ast.ExprStmt)
+		if !ok {
+			return true
+		}
+		header, rowTitle := false, false
+		has18, has16 := false, false
+		heavy := ""
+		ast.Inspect(stmt, func(m ast.Node) bool {
+			call, ok := m.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			switch callName(call) {
+			case "Text":
+				if len(call.Args) != 2 {
+					break
+				}
+				if mentionsString(call.Args[1], "播放列表") {
+					header = true
+				}
+				if sel, ok := call.Args[1].(*ast.SelectorExpr); ok && sel.Sel.Name == "Title" {
+					rowTitle = true
+				}
+			case "FontSize":
+				if len(call.Args) == 1 {
+					has18 = has18 || mentionsFloat(call.Args[0], 18)
+					has16 = has16 || mentionsFloat(call.Args[0], 16)
+				}
+			case "Bold":
+				heavy = "Bold()"
+			case "FontWeight":
+				heavy = "FontWeight(...)"
+			}
+			return true
+		})
+		if header && has18 {
+			header18 = true
+			headerHeavy = heavy
+		}
+		if rowTitle && has16 {
+			row16 = true
+		}
+		return true
+	})
+	if !header18 {
+		t.Error("queue_drawer.go 里没有一句同时写着 `Text(c, \"播放列表\")` 和 `FontSize(…18…)`" +
+			"——队列抽屉标题必须是 18/400")
+	}
+	if headerHeavy != "" {
+		t.Errorf("队列抽屉标题用了 %s——上游的 h3 是 400，不是加粗", headerHeavy)
+	}
+	if !row16 {
+		t.Error("queue_drawer.go 里没有一句同时写着 `Text(c, …Title…)` 和 `FontSize(…16…)`" +
+			"——队列行的歌名必须是 16（DESIGN.md 的列表歌名那一档）")
+	}
+}
+
+// TestTheHoveredQueueRowShowsAPlayIcon 钉住「行 hover 的播放三角是 20 的图标」
+// （票 #177）。
+//
+// 上游 `list-item.tsx:48-52` 在封面上盖一层 `bg-[rgba(0,0,0,0.35)]`，中间是
+// `<RiPlayFill size={20}/>`。我们原来画的是「▶」14 号字：字形跟着系统字体走，
+// 同一个意思在两台机器上是两个不同的宽高。
+//
+// # 判据
+//
+//  1. 画面上**不再有「▶」这个字**——图标对 `Tester.Texts()` 是不可见的，所以
+//     「`▶` 还在」就说明那还是一个字。
+//  2. 蒙层真的盖上了（封面中心那一块明显变暗），而且中心 32×32 里出现了**近白
+//     的像素**——那是压在蒙层上的白三角；蒙层下面的底色和封面的占位图标都到不了
+//     这个亮度。这些像素还得落在封面中心附近，高宽都有几像素（20 的图标里三角
+//     本身约 10×13）。
+//
+// 两步都要：只量「近白像素」的话，浅色主题下封面自己的浅色底就能凑出来，
+// 删掉整个悬停层这条也会绿。
+//
+// 量的是没在放的那一行：正在放的那行不浮三角（见 `viewQueueCover`）。
+func TestTheHoveredQueueRowShowsAPlayIcon(t *testing.T) {
+	h := queueDrawerWithTwoRows(t)
+
+	// ⚠️ 这个 `Find` 拿到的是**整行**（`ListState.Label` 也是这一行的歌名，
+	// 而标签节点的框是行框：实测 383×64）。所以行内的位置要用行高和内边距算：
+	// 行左边 + 8 是封面左沿，行中心就是封面中心（封面 48 竖着铺满 64-16）。
+	row, ok := h.tt.Find("队列里的第二首")
+	if !ok {
+		t.Fatalf("抽屉里找不到第二行，文字有 %q", h.tt.Texts())
+	}
+	coverLeft := row.X + queuePadX
+	cy := row.Y + row.H/2
+	cx := coverLeft + queueCoverSize/2
+
+	idle := snapshot(h.tt)
+	h.tt.Move(cx, cy)
+	h.tt.Frame()
+
+	if h.tt.HasText("▶") {
+		t.Errorf("悬停之后画面上还有「▶」这个字，文字有 %q——三角应该是一枚图标", h.tt.Texts())
+	}
+
+	hovered := snapshot(h.tt)
+	// 封面中心这一块：**先确认蒙层真的盖上了**。不先确认的话，下面「近白像素」
+	// 在浅色主题里拿封面自己的浅色底就能凑出来——删掉整个悬停层这条也会绿。
+	// 蒙层是 35% 黑，浅色底下这一块至少要暗三成。
+	const half = 16
+	darkened := 0
+	for y := int(cy) - half; y <= int(cy)+half; y++ {
+		for x := int(cx) - half; x <= int(cx)+half; x++ {
+			if glyphLuma(idle.RGBAAt(clampX(idle, x), clampY(idle, y)))-
+				glyphLuma(hovered.RGBAAt(clampX(hovered, x), clampY(hovered, y))) > 30 {
+				darkened++
+			}
+		}
+	}
+	if want := (2*half + 1) * (2*half + 1) / 2; darkened < want {
+		t.Fatalf("悬停在封面 %.0f,%.0f 上之后只有 %d 个像素变暗（want ≥ %d）——"+
+			"那层 35%% 黑的悬停蒙层没画出来，后面量到的「白三角」就不作数",
+			cx, cy, darkened, want)
+	}
+
+	// 蒙层是 35% 黑：盖上去之后整张封面都暗下来，只有那枚白三角是亮的。
+	// **只扫封面中心 32×32**：封面的圆角（Radius 6）在四个角上切掉了蒙层，
+	// 露出底下那层浅色底——在浅色主题下那几个角也是「近白」，按整块扫会把
+	// 它们算进三角的墨里。
+	var minX, minY, maxX, maxY = 1 << 30, 1 << 30, -1, -1
+	for y := int(cy) - half; y <= int(cy)+half; y++ {
+		for x := int(cx) - half; x <= int(cx)+half; x++ {
+			// 白三角是 92% 白压在蒙层上，两套主题下亮度都在 235 上下；
+			// 蒙层下面的底色（浅色 166 / 深色 20 上下）和封面的占位图标
+			// （`TextMuted`）都到不了 220。
+			if glyphLuma(hovered.RGBAAt(clampX(hovered, x), clampY(hovered, y))) < 220 {
+				continue
+			}
+			if x < minX {
+				minX = x
+			}
+			if y < minY {
+				minY = y
+			}
+			if x > maxX {
+				maxX = x
+			}
+			if y > maxY {
+				maxY = y
+			}
+		}
+	}
+	if maxX < minX || maxY < minY {
+		t.Fatalf("悬停在封面 %.0f,%.0f 上之后，封面中心没有一块白色的三角——播放图标没画出来",
+			cx, cy)
+	}
+	gw, gh := maxX-minX+1, maxY-minY+1
+	if gw < 5 || gh < 6 {
+		t.Errorf("三角的墨只有 %d×%d，太小了——它该是一枚 20 的图标（三角本身约 10×13）", gw, gh)
+	}
+	// 三角的墨应该落在封面中心附近（play-fill 的三角在图标框里偏右一个像素多）。
+	if dx := float32(minX+maxX)/2 - cx; math.Abs(float64(dx)) > 4 {
+		t.Errorf("三角的墨中心横向偏了 %.1f 像素（封面中心 %.1f，墨中心 %.1f）",
+			dx, cx, float32(minX+maxX)/2)
+	}
+	if dy := float32(minY+maxY)/2 - cy; math.Abs(float64(dy)) > 4 {
+		t.Errorf("三角的墨中心纵向偏了 %.1f 像素（封面中心 %.1f，墨中心 %.1f）",
+			dy, cy, float32(minY+maxY)/2)
 	}
 }
 

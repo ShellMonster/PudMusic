@@ -848,6 +848,30 @@ var Items = []Item{
 	},
 	{
 		Category: Negative,
+		// 封面落盘缓存（#158 / BMG-98）。这一组盯的都是**静默**的错法：
+		// 没有上限就是磁盘一直长；删到目录外面就是删用户文件；半截文件被当成
+		// 命中就是「每次启动都先闪一张坏图」；读盘放到主线程就是「滚列表卡住」。
+		// 全部用临时目录 + `httptest` 验，不碰用户真正的缓存目录，也不连图床。
+		Spec: "封面落盘缓存：目录有字节上限、按最久未用淘汰、启动清一次上次留下的超额；删除只发生在缓存目录内；半截文件按没有处理；空选项不落盘；重启（新实例、同一目录）不发请求就能拿到图；读盘在后台、写盘不挡主线程",
+		Tests: []string{
+			"TestDiskCacheEvictsTheLeastRecentlyUsed",
+			"TestStartupSweepTrimsWhatTheLastRunLeft",
+			"TestDeletionNeverLeavesTheCacheDir",
+			"TestAHalfWrittenFileIsNeverDecoded",
+			"TestACrashedWriteIsJustAMiss",
+			"TestEmptyDirMeansNoDisk",
+			"TestRestartServesFromDiskWithNoRequest",
+			"TestDiskReadsDoNotBlockTheCaller",
+			"TestDiskWritesDoNotBlockTheCaller",
+			"TestCoverCacheDirIsUnderTheAppsCachePath",
+			"TestTheMiniWindowSharesTheMainWindowsCoverCache",
+			"TestACorruptDiskEntryThatCannotBeDeletedIsNotReadForever",
+			"TestTheCacheIsClosedOnlyAfterTheLastUserReleasesIt",
+			"TestTheMiniWindowKeepsItsCoversAfterTheMainWindowIsClosed",
+		},
+	},
+	{
+		Category: Negative,
 		Spec:     "扫码中途取消/退登：在途的结果写不回来",
 		Tests: []string{
 			"TestCancelLoginStopsPolling",
