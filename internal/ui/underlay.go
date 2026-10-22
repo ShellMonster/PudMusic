@@ -35,6 +35,7 @@
 package ui
 
 import (
+	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -48,14 +49,10 @@ import (
 // 记着的那一页接着走——`Router` 的 `view.shown` 记着「上一次画的是哪一页」，
 // 中间跳过多少帧都认得出来，于是**不会**把这一页当成「刚换过来的」再走一遍
 // 换页动画。
-func (s *Shell) drawUnderlay(c *ui.Context) {
+func (s *Shell) drawUnderlay(c *ui.Context, st app.State) {
 	if s.underlayHidden() {
 		return
 	}
-
-	// 这一帧要画的播放状态。**只在要画的时候取**：满屏开着的时候底下那一层
-	// 一个像素都看不见，而 `Snapshot` 要拿应用层那把锁。
-	st := s.app.Snapshot()
 
 	ui.Column(c).Fill().Children(func() {
 		// 顶栏同样外面包一层 Guard（铁律三）：它坏了坏掉的是整条顶栏，

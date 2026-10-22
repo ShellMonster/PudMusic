@@ -260,10 +260,46 @@ func (d *downloadsPage) openDownloadDir(dir string, s *Shell) {
 // `downloadsPage` 的接缝上（`newDownloadsPage`），测试建完外壳换成记动作的桩。
 func systemOpenDir(path string) error { return mygo.Shell.OpenPath(path) }
 
+// systemOpenLink 是「文件那一列的外链」在真窗口里的那一份：交给默认浏览器。
+//
+// 和 `systemOpenDir` 同一个理由走接缝（无头 Tester 里 `mygo.Shell` 会 panic）。
+func systemOpenLink(url string) error { return mygo.Shell.OpenExternal(url) }
+
 // revealFile 在访达里显示这一首歌。
 //
 // 显出来的是 `Dest`（那首歌），不是目录（`ShowItemInFolder` 天然会把它所在
 // 的目录也打开，文件自己被选中）。
+// dlOpenBiliLabel 是文件那一列 hover 出来的外链图标的名字。
+//
+// 图标只在 hover 那一帧画，所以这个名字也是「这一下 hover 生效了没有」的
+// 测试凭据（`Find` 找得到它 = 图标在画面上）。
+const dlOpenBiliLabel = "在 B 站打开"
+
+// openBiliPage 点文件名时打开这一首在 B 站的页面。
+//
+// 上游是 `openBiliVideoLink({type: item.sid ? "audio" : "mv", bvid, sid})`
+// （`download-list/index.tsx:168-175`）。队列里的身份是 `TaskID`（`bvid|cid`，
+// 视频再带一个 `|video`），bvid 就是第一个 `|` 前面那一段——**不拿整个 ID 拼
+// URL**：那样拼出来的是一个 404，而浏览器打开 404 不会回到这里报错。
+//
+// 认不出 bvid（队列里有一条来历不明的记录）时说一句，别按了没反应。
+func (d *downloadsPage) openBiliPage(r download.Snapshot, s *Shell) {
+	bvid := r.ID
+	if i := strings.IndexByte(bvid, '|'); i >= 0 {
+		bvid = bvid[:i]
+	}
+	if bvid == "" {
+		s.addToast("这一条没有 B 站地址")
+		return
+	}
+	if d.openLink == nil {
+		return
+	}
+	if err := d.openLink("https://www.bilibili.com/video/" + bvid); err != nil {
+		s.addToast("打不开那个链接：" + trimDownloadErr(err))
+	}
+}
+
 func (d *downloadsPage) revealFile(r download.Snapshot, s *Shell) {
 	if r.Dest == "" {
 		// 队列里没有落盘路径 = 这一条是认不出位置的。回顶按钮已经在页头给出

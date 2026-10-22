@@ -421,3 +421,54 @@ func (c *countingTransport) RoundTrip(*http.Request) (*http.Response, error) {
 	c.count()
 	return nil, errors.New("这一条测试里不许有任何请求")
 }
+
+// TestTheFilterIsHorizontalRadioButtonsNow 那一排是**单选圆点**，不是 Segmented。
+//
+// 出处是上游 `download-list/index.tsx:110-120` 的 `RadioGroup orientation="horizontal"`。
+// 判据是像素：选中那一档（「全部」）的字左边 11 像素处是**主色**——那里正好
+// 落在 16 像素的圆点上、又避开了中间那 6 像素的小白点；未选中的「音频」同一
+// 位置是页面底色。
+//
+// ⚠️ **Segmented 在那一点上不是主色**：它选中那一格是一块近白的滑块，左边也
+// 没有圆点。所以这一条能把两种形态分开，而不是只断「有那三档字」。
+func TestTheFilterIsHorizontalRadioButtonsNow(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, tt := newRows(t, dlThreeShots()...)
+			tt.SetDark(dark)
+			dlFrame(tt)
+
+			th := BuildTheme(s.app.SettingsSnapshot(), dark)
+			accent := rgbaOf(th.Accent)
+			page := rgbaOf(th.Background)
+			img := tt.Image()
+
+			// 圆点中心 = 字左缘 − 24（16 的圆 + 8 的缝），取中心右边 5 像素。
+			selected, ok := tt.Find("全部")
+			if !ok {
+				t.Fatalf("找不到「全部」，文字有 %q", tt.Texts())
+			}
+			y := round32(selected.Y + selected.H/2)
+			got := img.RGBAAt(clampX(img, round32(selected.X)-11), clampY(img, y))
+			if maxDiff(got, accent) > probeTolerance {
+				t.Errorf("选中的「全部」左边那一格是 %v，want 主色 %v——那一排不是单选圆点"+
+					"（还是原来的 Segmented？）", got, accent)
+			}
+
+			off, ok := tt.Find("音频")
+			if !ok {
+				t.Fatalf("找不到「音频」，文字有 %q", tt.Texts())
+			}
+			y = round32(off.Y + off.H/2)
+			got = img.RGBAAt(clampX(img, round32(off.X)-16), clampY(img, y))
+			if maxDiff(got, page) > probeTolerance {
+				t.Errorf("未选中的「音频」圆点中心是 %v，want 页面底色 %v——未选中的圆点"+
+					"应该是一圈描边里面空着", got, page)
+			}
+		})
+	}
+}

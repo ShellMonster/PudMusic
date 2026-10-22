@@ -221,6 +221,10 @@ type localPage struct {
 	// 再写一份就是第二处。
 	displayView func() list.View
 
+	// justShownFn 报「这一帧是刚进这一页的第一帧」（`Shell.pageJustShown`）。
+	// 由 Shell 在建完这一页时接上；为零时（单独造这一页的测试）当作「不是」。
+	justShownFn func() bool
+
 	// tip 是带延迟的悬停提示（tooltip.go）。由 Shell 在建完这一页时接上；
 	// 为零时（单独造这一页的测试）退回框架那枚。
 	tip tipFunc
@@ -234,8 +238,22 @@ type localPage struct {
 	style int
 	// dirLabel 是目录筛选里选中那一档的**显示名**（不是路径，见 dirLabels）。
 	dirLabel string
-	// search 是搜索框里正在敲的字。
-	search string
+	// search 是搜索框里正在敲的字，searchBox 是那一枚会展开的搜索收着还是开着。
+	search    string
+	searchBox searchButtonState
+
+	// tableBox 是**这一帧**包着表格的那一层，只用来判「指针在不在表格上」。
+	//
+	// 表格每一行的序号要换成播放图标（上游 `item.tsx:57-64` 的 `group-hover`），
+	// 而 `ui.Table` 不把「哪一行被 hover」露出来（`cell` 回调只给行列号）。
+	// 所以这一格拿**上一帧的布局**自己判：表格那一层的 `PointerPosition()` 说
+	// 指针在不在表里，序号那一格的 `PointerPosition()` 给出指针在行里的纵向
+	// 位置。见 `viewRowNumber` / `tableRowHovered`。
+	//
+	// ⚠️ **它每一帧在建表格之前重新赋值**：`ui.Element` 属于建它的那一遍，
+	// 跨帧留着的话下一帧 `Valid()` 就是 false（框架的「keep a ui.Handle
+	// instead」那一条）。这里只在**同一帧**里用，所以没问题。
+	tableBox ui.Element
 
 	// askOpen 是删文件那道确认开着没有，askTrack 是它要删的那一项。
 	askOpen  bool
@@ -301,6 +319,14 @@ func newLocalPage(a *app.App, cache *imgcache.Cache, acts list.Actions,
 
 // View 画这一页。每一帧调一次。
 func (p *localPage) View(c *ui.Context) { p.draw(c) }
+
+// justShown 是「刚进这一页的第一帧」那一问。壳没接上的时候一律当「不是」。
+func (p *localPage) justShown() bool {
+	if p.justShownFn == nil {
+		return false
+	}
+	return p.justShownFn()
+}
 
 // tipWith 是这一页的悬停提示入口：状态挂在 Shell 上（tooltip.go），这里只是
 // 把这一页拿到的那份递过去；单独造这一页的测试没有那份，退回框架那枚。
@@ -401,6 +427,9 @@ func (s *Shell) syncLocalMusic(c *ui.Context) {
 	s.local.begin(c)
 }
 
+// localTableRowPad 是 `ui.Table` 给每一行的上下内边距（6+6，行高 40 里占 12）。
+const localTableRowPad = 6
+
 // localTableRowPx 是本地音乐那一档表格里一行的高：操作那一列那枚键（28）+ `ui.Table`
 // 给每一行的上下内边距（6+6）。
 //
@@ -458,10 +487,11 @@ func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
 
 		ui.Spacer(c)
 
-		// ⚠️ `Label` 和 `Placeholder` 都得给：`Label` 是这个控件的**名字**
-		//（无障碍念它、测试的 `Click`/`Find` 按它找），`Placeholder` 只是
-		// 空着时画的那几个字。少了 Label 这个框就没有可点的名字。
-		ui.TextInput(c, &p.search).Label(searchLocalLabel).Placeholder(searchLocalLabel).Width(180)
+		// 搜标题：上游是 `SearchButton`——收起时一枚放大镜，点开才是一个 240 的
+		// 输入框（`local-music/index.tsx:236`）。我们这一排放不下 240，展开的
+		// 上限沿用原来那个输入框的 180。
+		expandableSearch(c, p.tip, &p.searchBox, &p.search, searchLocalLabel, 64, 180,
+			p.justShown())
 		ui.Select(c, &p.dirLabel, dirLabels(st.Roots)).Width(180)
 		// 移除此目录 / 重新扫描：上游是两枚 `IconButton`（`local-music/index.tsx:238,244`，
 		// tooltip「刷新」「移除当前目录」）。悬停提示说的就是名字——图标键没有
@@ -589,14 +619,20 @@ func (p *localPage) viewTable(c *ui.Context, t *ui.Theme) {
 	p.table.Label = func(i int) string { return p.rows[i].Title }
 	p.table.Selected = &p.sel
 
-	table := ui.Table(c, &p.table, localColumns, len(p.rows), func(row, col int) {
-		p.viewCell(c, t, row, col)
-	}).
-		Grow(1).FillWidth().
-		OnSubmit(func() { p.playRow(p.sel) })
-	if p.noteScrollbar != nil {
-		p.noteScrollbar(scrollbar.Hot(table))
-	}
+	// 外面这一层是「表格的那一块」：`PointerPosition` 拿它判指针在不在表里
+	//（见 tableBox 的注释）。它自己什么也不画，尺寸跟着里面的表格走。
+	box := ui.Column(c).Grow(1).FillWidth()
+	p.tableBox = box
+	box.Children(func() {
+		table := ui.Table(c, &p.table, localColumns, len(p.rows), func(row, col int) {
+			p.viewCell(c, t, row, col)
+		}).
+			Grow(1).FillWidth().
+			OnSubmit(func() { p.playRow(p.sel) })
+		if p.noteScrollbar != nil {
+			p.noteScrollbar(scrollbar.Hot(table))
+		}
+	})
 }
 
 // viewCell 画表格的一个格子。
@@ -604,7 +640,7 @@ func (p *localPage) viewCell(c *ui.Context, t *ui.Theme, row, col int) {
 	tr := p.rows[row]
 	switch col {
 	case 0:
-		ui.Text(c, strconv.Itoa(row+1)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+		p.viewRowNumber(c, t, row)
 	case 1:
 		ui.Text(c, tr.Title).SingleLine()
 	case 2:
@@ -626,6 +662,58 @@ func (p *localPage) viewCell(c *ui.Context, t *ui.Theme, row, col int) {
 	case 6:
 		p.viewRowOps(c, tr)
 	}
+}
+
+// localPlayIconLabel 是行 hover 时那一枚播放图标的无障碍名字。
+//
+// 它只在 hover 的那一行画出来，所以它同时是测试认「这一下 hover 生效了没有」
+// 的凭据：画面上一共有几个这个名字，就是有几行正被指着。
+const localPlayIconLabel = "播放这首"
+
+// viewRowNumber 是表格序号那一格：平时是序号，指针压在这一行上时换成播放图标。
+//
+// 出处是上游 `local-music/item.tsx:57-64`：`group-hover:hidden` 藏序号、
+// `hidden group-hover:inline` 亮 `RiPlayFill`（16）。那一行是双击播放的，所以
+// 这个图标是「这里点得动」的提示，不是另一颗按钮——**不给它点击处理**：
+// 单击选行、双击播放这件事由表格自己做（`OnSubmit`）。
+//
+// ⚠️ **`ui.Table` 没有「这一行 hover 了」的回调**（`cell` 只给行列号），所以
+// 这里拿**上一帧的布局**自己判：表格在不在指针下面（`tableBox`），以及指针在
+// 序号这一格的纵向范围里（`PointerPosition` 给的 y 不受横向位置影响——它在
+// 指针压着别的列时照样算得出相对坐标）。
+//
+// 那个盒子是**固定尺寸**的：换图标不改变行高与列宽，否则指针一上去整行都跳。
+func (p *localPage) viewRowNumber(c *ui.Context, t *ui.Theme, row int) {
+	h := float32(localTableRowPx - 2*localTableRowPad)
+	cell := ui.Row(c).FillWidth().Height(h).Center().Justify(ui.Center)
+	onRow := p.tableRowHovered(cell)
+	cell.Children(func() {
+		if onRow {
+			ui.Icon(c, icon(iconPlayFill)).FontSize(16).TextColor(t.Text).Label(localPlayIconLabel)
+			return
+		}
+		ui.Text(c, strconv.Itoa(row+1)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+	})
+}
+
+// tableRowHovered 报这一格的纵向位置是不是压在指针下面。
+//
+// 判据分两半：**指针在表格里**（否则页面左边、侧栏里同一条横线上的那一格也会
+// 亮）和**指针在这一格的高度之内**。两样读的都是上一帧的盒子——即时模式里
+// 布局是这一帧开头量完的，`Bounds` / `PointerPosition` 给的正是它。
+func (p *localPage) tableRowHovered(cell ui.Element) bool {
+	if !p.tableBox.Valid() {
+		return false
+	}
+	if _, _, over := p.tableBox.PointerPosition(); !over {
+		return false
+	}
+	_, y, _ := cell.PointerPosition()
+	// ⚠️ **判据要算上那一行的上下内边距**：格子（内容区）只有 28 高，而那一行是
+	// 40 高（上下各 6 是 `ui.Table` 给每一行的内边距）——指针压在那 6 像素上也算
+	// 「压在这一行」。只按 28 算的话，行的上/下各 6 像素是死区，图标会在指针
+	// 上下移动时闪一下（上游的 `group-hover` 是**整行**都亮的）。
+	return y >= -localTableRowPad && y < cell.Bounds().H+localTableRowPad
 }
 
 // viewRowOps 是表格每一行最后那一格的两个按钮。

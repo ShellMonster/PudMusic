@@ -191,14 +191,16 @@ type downloadsPage struct {
 	// ask 是「你确定吗」那一弹窗，非 nil 时开着。见 downloadlist_ops.go。
 	ask *confirmAsk
 
-	// openDir 是「打开下载目录」，reveal 是「在访达里显示这一首」。
+	// openDir 是「打开下载目录」，reveal 是「在访达里显示这一首」，openLink
+	// 是「在浏览器里打开这一首的 B 站页面」（文件那一列 hover 出来的外链图标）。
 	//
-	// ⚠️ 两者都是**接缝**：真实现要去系统里开访达（`mygo.Shell`），而那一条在
-	// 无头 Tester 里会 panic（`mygo.App.Run` 没跑过，见 mygo 的 needsApp）。
-	// 测试里换成记动作的桩，于是「点『打开文件夹』打开的是不是歌真正落下来的
-	// 那个目录」这条能自动验。
-	openDir func(path string) error
-	reveal  func(path string)
+	// ⚠️ 三者都是**接缝**：真实现要去系统里开访达 / 浏览器（`mygo.Shell`），而
+	// 那一条在无头 Tester 里会 panic（`mygo.App.Run` 没跑过，见 mygo 的
+	// needsApp）。测试里换成记动作的桩，于是「点『打开文件夹』打开的是不是歌
+	// 真正落下来的那个目录」这条能自动验。
+	openDir  func(path string) error
+	reveal   func(path string)
+	openLink func(url string) error
 
 	// tip 是带延迟的悬停提示（tooltip.go），由 Shell 在建这一页时接上。
 	// 为零时（单独造这一页的测试）退回框架那枚。
@@ -208,9 +210,11 @@ type downloadsPage struct {
 // newDownloadsPage 建这一摊状态。
 //
 // rows 是这一帧要画的那些记录的来源（`Shell.New` 接的是 `app.DownloadSnapshots`）；
-// 两个接缝在 `Shell.New` 里接真的系统动作，测试建完外壳换成桩。
-func newDownloadsPage(rows func() []download.Snapshot, openDir func(string) error, reveal func(string)) *downloadsPage {
-	return &downloadsPage{rowsFn: rows, openDir: openDir, reveal: reveal}
+// 三个接缝（打开目录 / 在访达里显示 / 打开 B 站页面）在 `Shell.New` 里接真的
+// 系统动作，测试建完外壳换成桩。
+func newDownloadsPage(rows func() []download.Snapshot, openDir func(string) error,
+	reveal func(string), openLink func(string) error) *downloadsPage {
+	return &downloadsPage{rowsFn: rows, openDir: openDir, reveal: reveal, openLink: openLink}
 }
 
 // sync 把这一帧要画的行换掉（顺便筛一遍）。
@@ -370,10 +374,22 @@ func (d *downloadsPage) viewTable(c *ui.Context, s *Shell) {
 		return d.rows[i].ID
 	}
 
-	e := ui.Table(c, &d.state, downloadColumns, len(d.rows), func(row, col int) {
-		d.viewCell(c, s, row, col)
-	}).Grow(1)
-	s.trackScrollbar(e)
+	// 表格外面那一张**卡片底**：上游是 `Card radius="md" shadow="sm"` 包着
+	// `CardBody`（`download-list/index.tsx:104-107`），表格本身 `removeWrapper`。
+	// 没有它的话整张表直接铺在页面底色上，一眼就是「裸表格」——验收项点名的
+	// 就是这一层。
+	//
+	// ⚠️ 深浅两套都是同一张底（`t.Surface`）：深色下它比页面底色亮一点点，
+	// 而层次主要靠阴影（那一层归 #163 的「阴影补齐」那一票）。这里先给底和
+	// 圆角，免得表格的四条边压在页面上。
+	t := c.Theme()
+	ui.Column(c).Grow(1).FillWidth().Radius(t.Radius).Background(t.Surface).
+		Padding(t.Space(4)).Children(func() {
+		e := ui.Table(c, &d.state, downloadColumns, len(d.rows), func(row, col int) {
+			d.viewCell(c, s, row, col)
+		}).Grow(1)
+		s.trackScrollbar(e)
+	})
 }
 
 // dlRowKey 是「下标越界」时给的行身份。一个歌不可能撞上的类型。
@@ -412,7 +428,24 @@ func (d *downloadsPage) drawCell(c *ui.Context, s *Shell, row, col int) {
 			// 这里不重复它的判断。
 			imgcache.View(c, s.images, r.Cover, dlCover, dlCover)
 			ui.Column(c).Grow(1).Gap(2).Children(func() {
-				ui.Text(c, r.Title).FontSize(scale.Font(c, 14)).MaxLines(2).Ellipsis("…")
+				// 歌名那一行是**一个可点的块**：点它去浏览器里打开这一首的 B 站
+				// 页面，指针压上去时右边长出外链图标。出处是上游
+				// `download-list/index.tsx:166-178`——`group` 那一行
+				// `cursor-pointer hover:underline`，图标从 `w-0` 长到 `w-[16px]`。
+				//
+				// ⚠️ **图标不占位时是 width 0，展开时才加宽**（上游就是靠这个
+				// 让歌名不因为图标而变窄）；我们干脆**只在 hover 那一帧画它**，
+				// 一样的视觉，还少一个「宽度为 0 的图形」。
+				title := ui.Row(c).FillWidth().Gap(4).AlignItems(ui.Center).
+					OnClick(func() { d.openBiliPage(r, s) })
+				onTitle := title.Hovered()
+				title.Children(func() {
+					ui.Text(c, r.Title).FontSize(scale.Font(c, 14)).MaxLines(2).Ellipsis("…").Grow(1)
+					if onTitle {
+						ui.Icon(c, icon(iconExternal)).FontSize(16).TextColor(t.TextMuted).
+							Label(dlOpenBiliLabel)
+					}
+				})
 				// 音质徽章，照上游 `index.tsx:179-183` 的 `Chip`。空串不画。
 				if r.Label != "" {
 					ui.Text(c, r.Label).FontSize(scale.Font(c, 11)).TextColor(t.TextMuted).MaxLines(1)
