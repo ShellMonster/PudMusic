@@ -15,7 +15,7 @@ import (
 //	Frameless: true          真无边框——系统控件一起没了，窗口没有红黄绿
 //	TitleBarStyle: Hidden    无边框、标题栏自绘、**控件留着**
 //
-// 框架自己把它们合成一条判断（`mygo/window.go:428`）：
+// 框架自己把它们合成一条判断（`mygo/window.go:436`）：
 //
 //	hiddenTitleBar = !Frameless && (TitleBarStyle == Hidden || HiddenInset)
 //

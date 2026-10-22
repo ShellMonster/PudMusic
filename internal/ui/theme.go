@@ -3,7 +3,7 @@
 //
 // 🔴 铁律：Apply 必须在**每个窗口的每一帧开头**调一次。
 //
-// MyGo 的 ui/context.go:119 在每帧开头都执行
+// MyGo 的 ui/context.go:120 在每帧开头都执行
 // `c.theme = c.rt.defaultTheme()`——把主题重置成跟随系统外观的那份。
 // 上一帧 SetTheme 进去的东西**被静默丢掉**：不报错、不崩溃、不打日志，
 // 就是主题悄悄跳回系统色。所以「在切换按钮的回调里 SetTheme 一次」这种
@@ -48,7 +48,7 @@ func ApplyTheme(c *ui.Context, s app.Settings, systemDark bool) {
 // 界面对不上）。两次结果一样，是两件事各自兜住的：
 //
 //   - 跨 build pass：MyGo 每个 pass 开头的 `context.reset`
-//     （ui/context.go:119）都把 `c.theme` 换回框架那份，而 `SetTheme` 只改
+//     （ui/context.go:120）都把 `c.theme` 换回框架那份，而 `SetTheme` 只改
 //     `c.theme`、不碰 `rt.theme`，所以下一次读到的仍然是系统那份。
 //   - 同一 pass 内连着调：档位是浅色/深色时 `dark` 由档位说了算，读到的
 //     `Dark` 是几都不影响；档位是「跟随系统」时第一次装完 `Dark` 就等于
@@ -89,7 +89,7 @@ func BuildTheme(s app.Settings, systemDark bool) *ui.Theme {
 // ## 只跟框架 `Theme.follow` 的两样，不跟主色
 //
 // MyGo 的默认主题在每帧开头会 `t.follow(rt.preferences())`
-// （`mygo/ui/runtime.go:417`），里面三件事：系统主色、高对比度、字号缩放。
+// （`mygo/ui/runtime.go:464`），里面三件事：系统主色、高对比度、字号缩放。
 // 我们从 `LightTheme()` / `DarkTheme()` 起步，那一层就绕开了——所以高对比度
 // 和字号缩放得自己接上。
 //
@@ -97,8 +97,8 @@ func BuildTheme(s app.Settings, systemDark bool) *ui.Theme {
 // 在设置里挑；框架那一步会把系统的主色铺上来，用户在系统里换个强调色，我们的
 // 按钮跟着变色——那不是我们的配色体系。
 //
-// 高对比度那几行照 `mygo/ui/preferences.go:72-77` 逐条来（Border / TextMuted /
-// Focus / Scrollbar），字号缩放照 `:78-80`（`t.FontSize *= TextScale`）。
+// 高对比度那几行照 `mygo/ui/preferences.go:69-74` 逐条来（Border / TextMuted /
+// Focus / Scrollbar），字号缩放照 `:75-77`（`t.FontSize *= TextScale`）。
 func buildTheme(s app.Settings, systemDark bool, p ui.Preferences) *ui.Theme {
 	dark := systemDark
 	switch s.ThemeMode {

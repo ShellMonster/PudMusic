@@ -47,7 +47,7 @@ func (s *Shell) viewRate(c *ui.Context, st app.State) {
 	// 只有它是鼓出来的。
 	//
 	// ⚠️ **`Shrink(0)` 是必需的**：框架的 flex 默认 `shrink = 1`
-	//（`mygo/ui/context.go:87`），窗口一窄这一枚会被压扁，而它压扁的方式是
+	//（`mygo/ui/context.go:88`），窗口一窄这一枚会被压扁，而它压扁的方式是
 	// **把字截掉**——「1.25x」变成「1.…」。而这一枚上的字是**当前是多少倍**，
 	// 看不全的那一半等于没说。
 	btn := flatButton(c, rateLabel(st.Rate)).Shrink(0).Label("播放速率")

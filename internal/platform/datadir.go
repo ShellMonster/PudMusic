@@ -3,7 +3,7 @@
 // ## 这件事为什么存在
 //
 // 应用 2026-10 从 `Biu MyGo` 改名成 `BiuGo`。而 MyGo 的 `PathUserData` 是
-// `os.UserConfigDir()` **拼上应用名**（`mygo@v0.5.5/paths.go:90-93`）：
+// `os.UserConfigDir()` **拼上应用名**（`mygo@v0.6.2/paths.go:90-93`）：
 //
 //	case PathUserData:
 //	    dir, err := os.UserConfigDir()

@@ -2,7 +2,7 @@
 // 内存里。点得到、按得到键、找得到文字，所以「能不能用」能自动验。
 //
 // ⚠️ 每条都要 `tt.SetFocused(true)`：MyGo 的 `Element.Focused()` 判的是
-// `rt.focused == e.id && rt.windowFocus()`（`ui/input.go:1048`），窗口没被
+// `rt.focused == e.id && rt.windowFocus()`（`ui/input.go:1171`），窗口没被
 // 标成「在前台」的话它**恒为 false**，于是搜索框的失焦逻辑会每帧都成立。
 
 package ui
@@ -91,7 +91,7 @@ func fakeClockOn(s *Shell, t time.Time) *fakeClock {
 // TestNavBarSpansTheTopOfTheWindow 验顶栏真的横贯窗口顶上的一条。
 //
 // 「整条是拖动区」这件事本身无头**验不了**：MyGo 无头宿主的 `startDrag` 是空
-// 实现（`ui/headless.go:88`），拖没拖窗口在画面上看不出来。这条能验的是拖动区
+// 实现（`ui/headless.go:90`），拖没拖窗口在画面上看不出来。这条能验的是拖动区
 // 成立的前提——它得是**顶上那一条、并且横贯整个窗口宽度**，否则有一片窗口
 // 拖不动。
 func TestNavBarSpansTheTopOfTheWindow(t *testing.T) {
@@ -126,7 +126,7 @@ func TestNavBarSpansTheTopOfTheWindow(t *testing.T) {
 	//
 	// 留出来的 slack 是：顶栏自己的右内边距（8，见 viewNav 的 Padding）
 	// 加那个控件自己的内边距。**Tester 只能量到文字/名字那一小块**，
-	// 量不到按钮本身——`Find` 给的是标签节点的框（`ui/runtime.go:964`）。
+	// 量不到按钮本身——`Find` 给的是标签节点的框（`ui/runtime.go:1056`）。
 	// 所以这里量的是「顶栏那一组控件顶到了窗口右边附近」，不是「按钮的边缘
 	// 正好等于窗口边缘」。
 	const slack = 32
@@ -145,7 +145,7 @@ func TestNavBarSpansTheTopOfTheWindow(t *testing.T) {
 // TestNavBarControlsStillWorkInsideTheDragArea 验拖动区没把里面的控件吃掉。
 //
 // 这是「整条都是拖动区」真正会出事的地方：命中链上最内层带输入标志的元素才是
-// 目标（`ui/input.go:262`），拖动区做得不对，按钮就按不动了。
+// 目标（`ui/input.go:302`），拖动区做得不对，按钮就按不动了。
 func TestNavBarControlsStillWorkInsideTheDragArea(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
@@ -566,7 +566,7 @@ func TestDynamicDotPollsEveryFiveMinutes(t *testing.T) {
 //
 // 为什么单独拆一条：这一条验的是**定时器本身**（到点醒一次、每 interval 一次、
 // 停了就不响）。它不能写成「窗口静止着，推进时钟，红点自己就亮了」——无头 Tester
-// 的 `settle` 只在 `Frame()` / `Click()` 里跑（`ui/headless.go:214`），后台那个
+// 的 `settle` 只在 `Frame()` / `Click()` 里跑（`ui/headless.go:249`），后台那个
 // 定时器调 `Invalidate` 只是把 `requested` 置上，没人驱动就没有帧。所以「定时器
 // 醒了 → 那一帧被画出来 → view 问了 tick」这半截在无头里验不了，能验的是前两截。
 // 接线那一截（view 每帧都调了 arm）由下面那条盯着。
@@ -730,7 +730,7 @@ func TestSuggestClearAllEmptiesTheHistory(t *testing.T) {
 //
 // 崩在搜索页的 `c.Router().Query(...)`：换页动画还没走完时，**正在离场
 // 的那一页**会被重新建一遍，而 MyGo 建离场页时故意不设 `c.router`
-// （`mygo/router.go:685`，`Context.Router` 的文档也写着 "or nil outside one"）。
+// （`mygo/ui/router.go:685`，`Context.Router` 的文档也写着 "or nil outside one"）。
 //
 // ⚠️ 这一条必须把切页动画**打开**（生产默认就是自动滑动）。`newShell` 为了让
 // 截图可复现把它关了，关着的时候离场页根本不重建，这条就永远是绿的——**测试
@@ -817,7 +817,7 @@ func TestTheNavBarPanicIsCaught(t *testing.T) {
 // TestTheTopBarIsBiuHeight 钉住顶栏是 Biu 那个高度。
 //
 // Biu 的顶栏那一格是 `h-16 flex-none`（`biu/src/layout/index.tsx:40`），也就是
-// 64。我们原来是 32（MyGo 例子里的下限，`ui/context.go:334`）。
+// 64。我们原来是 32（MyGo 例子里的下限，`ui/context.go:357`）。
 //
 // ⚠️ **为什么这条不只是「好看一点」**：顶栏是**内容区上面那一行**，它矮 32，内容区
 // 就少 32——而设置页那一族测试量得着的可视区上下两个数（`settings_page_test.go`
@@ -834,7 +834,7 @@ func TestTheTopBarIsBiuHeight(t *testing.T) {
 	if !ok {
 		t.Fatalf("顶栏上没有登录入口，文字有 %q", tt.Texts())
 	}
-	// 无头 Tester 里 `c.TitleBar()` 是零（`ui/headless.go:44` 那张表默认没填），
+	// 无头 Tester 里 `c.TitleBar()` 是零（`ui/headless.go:46` 那张表默认没填），
 	// 所以这一帧顶栏画的就是 `navMinHeight` 本身。64 是量出来的，见 navMinHeight。
 	const want = 64
 	if navMinHeight != want {

@@ -684,7 +684,7 @@ func TestTheLoadingStateLooksLikeTheEmptyState(t *testing.T) {
 // # 判据是像素：那一排下面有没有那条主色的横条
 //
 // 框架的 `ui.Tabs` 是**下划线**（选中那一项底下画一条主色的横条，
-// `mygo@v0.5.5/ui/tabs.go` 的 `coreTabs`），而主 Tab 用的是我们自己那一套
+// `mygo@v0.6.2/ui/tabs.go` 的 `coreTabs`），而主 Tab 用的是我们自己那一套
 // **灰底轨道 + 白色滑块**（`tabs.go` 的 `mainTabs`）——那条横条**没有**。
 //
 // 搜索页正好两种都有：上面那一排是主 Tab（歌曲 / 视频 / 用户），下面那一排是

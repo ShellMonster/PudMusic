@@ -27,7 +27,7 @@ import (
 //	300         音量那个自绘浮层的 volHoverDelay（`playbar_volume.go`），
 //	            和 `tipDelayVolume` 是同一个数
 //
-// 框架自带的 `Element.Tooltip` 是**包级固定 600ms**（`mygo@v0.5.5/ui/tooltip.go:12`），
+// 框架自带的 `Element.Tooltip` 是**包级固定 600ms**（`mygo@v0.6.2/ui/tooltip.go:12`），
 // 所以界面层不用它——`TestNoFrameworkTooltipsInTheApp` 盯着这件事。
 
 // tipProbe 造一个「只有一个锚点 + 一枚提示」的窗口。

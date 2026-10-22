@@ -102,7 +102,7 @@ func TestTheTitleNextToTheCoverIsNotBlackedOut(t *testing.T) {
 
 // TestTheFullTopBarPadFollowsTheTitleBar 钉住左边距**跟着框架给的那个数走**。
 //
-// 隐藏标题栏的窗口里，红黄绿是叠在内容**上面**的（`mygo/ui/context.go:326-335`）。
+// 隐藏标题栏的窗口里，红黄绿是叠在内容**上面**的（`mygo/ui/context.go:349-358`）。
 // 而满屏把普通顶栏整条盖住了——于是「关闭全屏」那一枚（当时是一枚文字键）正好被黄灯和绿灯压住
 // （实测按钮框 x∈[39,91]，红黄绿整簇 x∈[14,66]；现在是 32×32 的图标键，框更窄，
 // 但它贴着左边距的时候照样会落进那一簇）。
@@ -147,7 +147,7 @@ func TestTheFullTopBarPadFollowsTheTitleBar(t *testing.T) {
 //
 // 满屏浮层盖住整窗，普通顶栏上那两处 `DragWindow` 够不着了，所以这一条要自己
 // 带一个。而 `DragWindow` 只有在**元素自己不接收别的东西**时才生效
-// （`mygo/ui/input.go:321`：`target.flags&(interactive&^flagDragWindow) == 0`），
+// （`mygo/ui/input.go:361`：`target.flags&(interactive&^flagDragWindow) == 0`），
 // 所以要盯的是「加上它之后按钮照样点得动」——挂错元素的表现正是按钮按不动。
 //
 // ⚠️ **「窗口真的被拖动」在无头环境里量不到**：`mygo/ui/headless.go` 的
@@ -271,9 +271,9 @@ func changedPixels(a, b *image.RGBA) []image.Point {
 //
 // 「把鼠标移过去、点一下」进全屏——而悬停浮层那个 ⤢ 正好就落在封面正中。
 //
-// 机制（`mygo/ui/input.go:131-145` 的 `appendHitChain`）：命中链是「最上面那个
+// 机制（`mygo/ui/input.go:140-154` 的 `appendHitChain`）：命中链是「最上面那个
 // 含点的框 + 它**自己的父链**」，**兄弟不在链上**。而 `flagPassThrough` 只跳过
-// 那一个自己的命中框、子节点照登记（`runtime.go:953`）——于是浮层那个 Row 虽然
+// 那一个自己的命中框、子节点照登记（`runtime.go:1046`）——于是浮层那个 Row 虽然
 // PassThrough 了，它里面的 `⤢` 文字照样登记，而可点的 `imgcache.View` 是浮层的
 // **兄弟**，永远不在链上。表现是：点封面**边角**能开（那儿没有文字），点**正中**
 // 什么也不会发生。

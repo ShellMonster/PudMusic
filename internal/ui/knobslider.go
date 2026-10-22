@@ -58,7 +58,7 @@ type sliderLook struct {
 	// vertical：竖着（0 在下面、1 在上面）。
 	//
 	// ⚠️ 框架的 `Vertical()` 只认 `SliderBase`，而它的值映射用的是**内容框**
-	// （`mygo/ui/value_input.go:203`：`1-(y-st.cy)/st.ch`）——所以竖着的时候
+	// （`mygo/ui/value_input.go:207`：`1-(y-st.cy)/st.ch`）——所以竖着的时候
 	// 内容框的高就是全程，旋钮的中心得跟着内容框走，不能自己再留半个旋钮的余量。
 	vertical bool
 
@@ -196,7 +196,7 @@ func selfSlider(c *ui.Context, value *float64, lo, hi float64, look sliderLook) 
 			//
 			// ⚠️ **为什么不能直接用 `r`**：框架的竖直映射是
 			// `1-(y-st.cy)/st.ch`，那个 `st.cy`/`st.ch` 是**内容框**的
-			// （`mygo/ui/runtime.go:934`），而 `Draw` 回调拿到的 `r` 是**边框框**
+			// （`mygo/ui/runtime.go:1023`），而 `Draw` 回调拿到的 `r` 是**边框框**
 			// （含内边距）。两者差着 `knobH/2`：值 0 时旋钮的中心该在内容框的
 			// **底**（`r.Y + r.H - knobH/2`），照 `r` 算会落在边框框的底上——
 			// **探出内容框 7 像素**，而框架的命中映射也在那儿取值，于是

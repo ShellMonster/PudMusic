@@ -4,7 +4,7 @@
 //
 // # 为什么不用框架的 `Element.Tooltip`
 //
-// 框架的时延是**包级固定的 600ms**（`mygo@v0.5.5/ui/tooltip.go:12` 的
+// 框架的时延是**包级固定的 600ms**（`mygo@v0.6.2/ui/tooltip.go:12` 的
 // `tooltipDelay`），`Tooltip` / `TooltipBase` 的公开 API 里没有按调用点改的
 // 参数；离开时则是下一帧立刻收。上游 Biu 用的是 HeroUI 的 `Tooltip`，两个
 // props 分三档：
@@ -94,7 +94,7 @@ func (s *Shell) withMenuTip(c *ui.Context, anchor ui.Element, text string) ui.El
 // 时用它（头像那一格里面的画法）。
 //
 // ⚠️ 理由：`Pressed()` / `Clicked()` 给元素打 `flagClickable`
-// （`mygo/ui/input.go:975-985,1085-1090`），而命中时最内层的可点元素才是
+// （`mygo/ui/input.go:1040-1050,1150-1160`），而命中时最内层的可点元素才是
 // target。给「菜单按钮里面的子元素」打上这个标志，点下去的目标就从按钮变成了
 // 子元素——实测头像下拉直接不开（`TestAvatarMenuHasBiuSixItems`）。这种锚点
 // 只跟悬停/离开走，按下由外面那个真按钮自己处理。

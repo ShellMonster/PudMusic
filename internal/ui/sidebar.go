@@ -149,17 +149,17 @@ func sideDragWidth(raw float64) (view, persist float64, collapsed bool) {
 //   - `Dragging()`（`ui/dragdrop.go:64`）报的是 Drag / Draggable 两套机制，
 //     普通 Column 永远不碰它——按着把手横移 200 DIP 它一直是 false。项目
 //     README 记的就是这一条（MyGo 自带的 `examples/timeline` 踩的也是它）。
-//   - `Pressed()`（`ui/input.go:1028`）多一条**指针必须在元素框内**的条件。
+//   - `Pressed()`（`ui/input.go:1150`）多一条**指针必须在元素框内**的条件。
 //     把手只有 8 宽，指针按下去之后往左挪 9 个像素就出框了，它当场变 false
 //     ——侧栏最多只能拖动 16 像素宽就卡住，而「拉到 160 以下自动折叠」正是
 //     这一张的验收。进度条那种「轨道横跨整个行程、指针一直留在框内」的控件
 //     才适用它（见 playbar.go 的进度条，那里的用法是对的）。
-//   - `Dragged()` 的 ok 就是 `s.pressed`（`ui/input.go:1124-1136`），没有框内
+//   - `Dragged()` 的 ok 就是 `s.pressed`（`ui/input.go:1246-1259`），没有框内
 //     这一条。
 //
 // ⚠️ **宽度算的是指针的绝对位置，不是 `Dragged()` 给的位移。**
-// `Dragged()` 的 `dragX` 要到一帧结束（`ui/runtime.go:670` 的 forgetInput）
-// 才清掉，而**一帧里 view 要跑好几遍**（`runtime.go:657` 的 `for pass := 0;
+// `Dragged()` 的 `dragX` 要到一帧结束（`ui/runtime.go:775` 的 forgetInput）
+// 才清掉，而**一帧里 view 要跑好几遍**（`runtime.go:524` 的 `for pass := 0;
 // pass < 3`），每一遍读到的都是同一个位移——累加起来就是拖快好几倍。所以
 // 这里只拿 `Dragged()` 判「按着没有」，位置改用 `PointerPosition`：
 //
@@ -304,7 +304,7 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 	hidden := 0
 
 	// ⚠️ Key 给的是包在外面的这一格，不是 Button 本身：`Key` 挂在「创建时
-	// 就处理了输入」的控件上会 panic（`ui/element.go:537`），要给就包一层。
+	// 就处理了输入」的控件上会 panic（`ui/element.go:658`），要给就包一层。
 	ui.Column(c).Key("side-menu").Gap(2).Children(func() {
 		for _, rt := range routes {
 			// 设置页「菜单设置」里藏起来的那几项（`hiddenMenuKeys`）不摆。

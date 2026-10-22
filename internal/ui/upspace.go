@@ -690,8 +690,8 @@ func (s *Shell) spaceAvatarZoom(c *ui.Context, face string, side float32, withSh
 // spaceFill 画一张铺满宽度、指定高度的网络图（头图）。
 //
 // ⚠️ **铺满是 `FillWidth()`（percent 100），不是 `Width(0)`**：`Width(v)` 的
-// 单位是 DIP，`Width(0)` 就是**宽 0**（`mygo/ui/element.go:637`），而布局里
-// 「只要设过宽度就按它算」（`layout.go:323`）。写成 `Width(0)` 的后果是整块
+// 单位是 DIP，`Width(0)` 就是**宽 0**（`mygo/ui/element.go:755-756`），而布局里
+// 「只要设过宽度就按它算」（`layout.go:312`）。写成 `Width(0)` 的后果是整块
 // 头图被压成零宽：昵称只剩一个省略号、头图永远画不出来、统计折成两行。
 //
 // 形状上不裁圆角：头图是横幅，方角是本来的样子（`space-info.tsx:86` 的

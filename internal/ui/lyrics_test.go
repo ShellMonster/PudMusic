@@ -1286,7 +1286,7 @@ func TestTheRangesComeFromTheStateLayer(t *testing.T) {
 // 症状是「歌词翻不动」：手指还在往上推，内容一帧一帧自己往回跑。抄上游的
 // `useEffect(..., [activeIndex, centerPadding])`——它**只在换句时**对一次目标，
 // 不是每帧都对着中间。框架那边一收到滚轮就把那支弹簧收走了
-// （`mygo/ui/input.go:490`），所以这里不用自己再记一份「用户是不是翻过了」。
+// （`mygo/ui/input.go:555`），所以这里不用自己再记一份「用户是不是翻过了」。
 func TestHandScrollingIsNotFought(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), "")
@@ -1350,7 +1350,7 @@ func TestTheLyricsStopAskingForFrames(t *testing.T) {
 // `lyricsView.centre` 在量不到容器和正在唱那一句的框时会要一帧再来量。**这条把
 // 「量不到」那个条件直接造出来**——用一份零值的 `lyricsView`（框永远是零），
 // 于是它每一帧都在要帧，而 Tester 的 `settle()` 最多跑 20 帧就自己停
-// （`mygo/ui/headless.go:246`）。
+// （`mygo/ui/headless.go:249`）。
 //
 // ⚠️ 为什么要单独造这个条件：从界面上走**逼不进**那个分支——歌词区一画出来，
 // 容器和那一句的框第二帧就量到了；而没有歌词那一支压根不调 `centre`。不单独

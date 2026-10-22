@@ -25,7 +25,7 @@
 // # 三样必须自己做、MyGo 不替我们做的事
 //
 //  1. **背景**：窗口是 `Transparent: true`，框架会把帧清成透明
-//     （`mygo/window.go:433`「Backends keep transparent windows clear」），
+//     （`mygo/window.go:442`「Backends keep transparent windows clear」），
 //     主题背景**不填**。不自己画一块不透明底的话，这个窗口在桌面上是隐形的
 //     ——而「窗口开着却看不见」是最难查的一种错。
 //  2. **主题**：铁律二，每一帧第一件事（`applyFrameTheme`）。
@@ -129,10 +129,10 @@ const (
 //     Resizable`（`mygo/internal/darwin/window.go:123`）。
 //
 //  2. 一个没有 resizable 位的窗口**没有「标准框」可言**，`isZoomed` 恒为真
-//     （`mygo/internal/darwin/window.go:779` 那句 `sendBool(w.win, "isZoomed")`）。
+//     （`mygo/internal/darwin/window.go:830` 那句 `sendBool(w.win, "isZoomed")`）。
 //
 //  3. `StateKey` 存不存位置，判的是 `!Maximized`
-//     （`mygo/window_state.go:188` 的 `captureState`）：
+//     （`mygo/window_state.go:195` 的 `captureState`）：
 //
 //     if !st.Maximized && !st.FullScreen && !n.IsMinimized() { 记下 X/Y/W/H }
 //     if st.Width <= 0 || st.Height <= 0 { return }               // 新键直接不存
@@ -378,7 +378,7 @@ func (s *Shell) restoreMainWindow() {
 
 // ensureMiniWindow 真的把迷你窗口开出来。**只能在应用 ready 之后调**
 // （`openMiniPlayer` 排的那条 `WhenReady` 就是为这个，见 `ensureWindow` 的注释：
-// `mygo.NewWindow` 在还没 ready 时是直接 panic 的，`mygo/window.go:374`）。
+// `mygo.NewWindow` 在还没 ready 时是直接 panic 的，`mygo/window.go:382`）。
 func (s *Shell) ensureMiniWindow() {
 	mygo.App.WhenReady(func() {
 		// 排队的这段时间里它可能已经被人关掉了（快捷键连按两下）。
@@ -564,7 +564,7 @@ func (s *Shell) viewMiniTitleRow(c *ui.Context, st app.State, t *ui.Theme) {
 			// 和它挤成一团（账在 `viewMiniTransport`）。
 			// ⚠️ **key 装在 `c` 上、不是装在 `Slider` 返回的那个元素上**：滑块建出来
 			// 的那一刻它的状态就初始化了，而 `Element.Key` 只认「还没初始化状态」的
-			// 元素（`mygo/ui/element.go:611` 直接 panic）。`Context.Key` 是为这类复合
+			// 元素（`mygo/ui/element.go:658` 直接 panic）。`Context.Key` 是为这类复合
 			// 控件准备的：它在控件被建出来**之前**把身份交给下一个。
 			vol := st.Volume
 			if ui.Slider(c.Key("mini-volume"), &vol, 0, 1).Width(miniVolumeW).

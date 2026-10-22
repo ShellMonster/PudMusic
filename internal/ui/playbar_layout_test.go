@@ -24,7 +24,7 @@ import (
 //
 // 和 `metaBarTester`（playbar_meta_test.go）的差别有三个：**能指定深浅**、
 // 这一份总是带一个**有时长的**状态（旋钮那条测试要进度条是**能用的**：框架的
-// `Hovered()` 对禁用的控件恒为 false，`mygo/ui/input.go:1051`），以及
+// `Hovered()` 对禁用的控件恒为 false，`mygo/ui/input.go:1116`），以及
 // **它把应用的主题装上了**（`applyFrameTheme`）——
 //
 // ⚠️ **最后那一条是这一族要读颜色的前提**：真窗口里每一帧开头都装一次主题
@@ -318,7 +318,7 @@ func TestTheVolumePopoverHasAVerticalSlider(t *testing.T) {
 	// 元素的高和宽是摆出来的，画法换了它还是那么高那么宽，而用户看见的是一根
 	// 横着的滑块（按在底下不动）。
 	//
-	// 框架的竖直映射是 `1-(y-cy)/ch`（`mygo/ui/value_input.go:203`）：**底下是 0、
+	// 框架的竖直映射是 `1-(y-cy)/ch`（`mygo/ui/value_input.go:207`）：**底下是 0、
 	// 顶上是 1**。横着的话，按在底下（同一个 x）就是中间那一档。
 	pressAt := func(y float32) {
 		tt.Press(sl.X+sl.W/2, y)

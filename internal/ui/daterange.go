@@ -4,7 +4,7 @@
 // # 底座是现成的，日历不自己造
 //
 // 上游那一整个组件是 HeroUI 的 `DateRangePicker` 加四个 `Tab`。我们这边有
-// `ui.Calendar` / `ui.DateInput`（MyGo v0.5.5，PLAN.md §6.8），所以：
+// `ui.Calendar` / `ui.DateInput`（MyGo v0.6.2，PLAN.md §6.8），所以：
 //
 //   - **日历**：`ui.DateInput` 自带，点开就是那个月的日历，点哪一天选哪一天。
 //     一个字都不自己画。

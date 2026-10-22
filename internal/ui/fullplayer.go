@@ -13,7 +13,7 @@
 //
 // 这是共享元素转场能两头都动的原因，值得写下来：
 // 框架的 `Match` 要的是「新出现的那一个**上一帧没被摆过**」
-// （`mygo/ui/transition.go:412` 的 `r.fresh = r.laid+1 != rt.frame`）。播放条那个
+// （`mygo/ui/transition.go:418` 的 `r.fresh = r.laid+1 != rt.frame`）。播放条那个
 // 封面在下一帧还会被摆一次（它只是被浮层盖住了），于是它**不算新出现**，
 // 满屏那个封面就找不到「上一个」了——不开转场，也不报错，只是封面「啪」地一下
 // 就位。所以开着全屏的时候整个播放条都不建：它被一层不透明的背景盖着，少建它
@@ -259,7 +259,7 @@ func colorLuminance(c ui.Color) float64 {
 // 另一个身份，于是转场不会把 A 的封面拉到 B 的位置上。
 //
 // 它就是 SwiftUI `matchedGeometryEffect` 在这一层的等价物：框架 `ElementTransition`
-// 的 `Match` 字段自己的注释就是这么写的（`mygo/ui/transition.go:42-46`：
+// 的 `Match` 字段自己的注释就是这么写的（`mygo/ui/transition.go:44-48`：
 // 「as SwiftUI's matchedGeometryEffect and Motion's layoutId」）——把两处元素认成
 // 同一个东西，让它在两个框之间自己长过去。给两个元素同一个 `Match`，新的那个
 // 从旧的那个**上一次摆在哪**长过来。

@@ -10,7 +10,7 @@
 // ## 三个规矩（Biu 的 handleKeyDown + PLAN C-49）
 //
 //   - **所有按键都吃掉**：回调返回 true，MyGo 就不会把这个键继续交给 Tab、方向键
-//     滚动、菜单角色那一整套（`ui/input.go:615` 的 `rt.deliver` 之后直接
+//     滚动、菜单角色那一整套（`ui/input.go:679` 的 `rt.deliver` 之后直接
 //     `return true`）。不这么做的话，在这一格里敲 A 会跳到下一个控件，敲 ← 会把
 //     整页滚走——录的是 ⌘←，得到的是「焦点跑掉了」。
 //   - **Backspace / Delete 清空**这一条。
@@ -284,7 +284,7 @@ func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcut
 		FocusBind(&s.recording, slot).Label(recorderLabel(item, slot))
 	if ro {
 		// 只读时这一格既不该吃键也不该抢焦点：Disabled 的元素不取焦点、不响应
-		// 点击、不处理输入（`ui/element.go:1252`）。FocusBind 已经把它标成可
+		// 点击、不处理输入（`ui/element.go:1299`）。FocusBind 已经把它标成可
 		// 聚焦了，所以这里必须补上这一句，否则用户一点就进到「正在录」那一支，
 		// 而按什么键都存不住。
 		field = field.Disabled(true)

@@ -12,7 +12,7 @@
 //	`Background(t.Surface) + Border(1,t.Border)`，于是**侧栏菜单的每一项、顶栏
 //	那三个图标键、倍速键、侧栏折叠键、队列抽屉行尾的「⋯」键**都是描边药丸。
 //
-// 我们这边那圈描边的出处是 `mygo@v0.5.5/ui/widgets.go` 的 `styleButton`：
+// 我们这边那圈描边的出处是 `mygo@v0.6.2/ui/widgets.go` 的 `styleButton`：
 // `base, border = t.Surface, t.Border`。
 //
 // **配方本身在 `internal/ui/widgets/flat`**：列表包（`widgets/list`）每一行末尾

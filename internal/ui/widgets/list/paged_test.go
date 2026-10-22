@@ -279,7 +279,7 @@ func TestAScrolledListDoesNotPullUntilTheEndIsReached(t *testing.T) {
 	}
 
 	// 滚到底：一次滚一大截，等于滚到了末尾。
-	//（mygo 的 PointerScroll：**正的 DY 是往下滚**，`platform/surface.go:168`）
+	//（mygo 的 PointerScroll：**正的 DY 是往下滚**，`platform/surface.go:192`）
 	tt.Scroll(testerW/2, testerH/2, 0, scrollToBottom)
 	pump(t, tt, "滚到底之后拉第 2 页", func() bool { return p.Paged().Page == 2 })
 	pump(t, tt, "第 2 页拉完", func() bool { return !p.Paged().Loading })

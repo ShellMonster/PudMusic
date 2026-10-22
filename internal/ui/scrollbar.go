@@ -2,7 +2,7 @@
 //
 // # 框架那儿缺的是「第二档颜色」
 //
-// 框架的 `scrollbars`（`mygo/ui/paint.go:918-960`）只用 `Theme.Scrollbar` 一个
+// 框架的 `scrollbars`（`mygo/ui/paint.go:970-1012`）只用 `Theme.Scrollbar` 一个
 // 颜色，只在**指针落在容器上**（或正在拖）时才画。所以「出现」这件事框架已经
 // 做了，缺的是「出现之后指针放到滚动条上再深一档」——上游那是
 // `--os-handle-bg-hover`（`biu/src/app.css:58-59`）。
@@ -26,7 +26,7 @@ import (
 // scrollbarWidth 是滚动条的宽，照上游那一个数（`--os-size: 10px`）。
 //
 // 放在主题里而不是某个控件上：框架的 `scrollBars` 从 `theme.scrollbarWidth()`
-// 读它（`mygo/ui/paint.go:946`），一处改了所有滚动容器一起变。
+// 读它（`mygo/ui/paint.go:998`），一处改了所有滚动容器一起变。
 const scrollbarWidth = scrollbar.Width
 
 // trackScrollbar 量 el 的滚动条这一帧有没有被指针压着，并把它原样返回。

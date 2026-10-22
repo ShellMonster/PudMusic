@@ -79,7 +79,7 @@ func (s *Shell) settingsProxy(c *ui.Context, st app.Settings, ro bool) {
 			})
 			ui.Row(c).FillWidth().Gap(8).Children(func() {
 				// ⚠️ **不许给输入框加 Key**：Key 只能挂在「创建时没有处理输入」的
-				// 控件上，挂上去直接 panic（`ui/element.go:537`）。
+				// 控件上，挂上去直接 panic（`ui/element.go:658`）。
 				ui.TextInput(c, &host).Grow(1).Label("代理主机").
 					Placeholder("例如 127.0.0.1").Disabled(ro)
 				ui.TextInput(c, &port).Grow(1).Label("代理端口").

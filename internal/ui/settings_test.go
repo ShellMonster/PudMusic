@@ -121,7 +121,7 @@ func TestShellPaintsTheThemeThatTheSettingsSay(t *testing.T) {
 //
 // 系统是深色、设置选了浅色，差得越远越说明问题。这条在 Tester 里是**稳定**
 // 复现的，不是碰运气：MyGo 每一遍 pass 开头都把主题重置回跟随系统的那份
-// （`ui/context.go:119`），而实测**一次 `tt.Frame()` 就会跑两遍 view**，点击
+// （`ui/context.go:120`），而实测**一次 `tt.Frame()` 就会跑两遍 view**，点击
 // 被消费时还会再多一遍。只在「档位变了」的那一遍里 SetTheme 的写法，第一遍
 // 画对了，第二遍就被悄悄打回系统色——不报错、不崩溃、屏幕上一闪而过。
 func TestShellKeepsTheThemeAfterClickingAround(t *testing.T) {

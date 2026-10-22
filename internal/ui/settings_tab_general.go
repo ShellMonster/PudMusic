@@ -240,7 +240,7 @@ func (s *Shell) pathField(c *ui.Context, path, label string, ro bool) {
 		shown = "未设置"
 	}
 	// ⚠️ **不许给输入框加 Key**：Key 只能挂在「创建时没有处理输入」的控件上，
-	// 挂上去直接 panic（`ui/element.go:537`）。外面那一格有 Key 就够了。
+	// 挂上去直接 panic（`ui/element.go:658`）。外面那一格有 Key 就够了。
 	ui.TextInput(c, &shown).Grow(1).Label(label).ReadOnly(true)
 }
 
