@@ -552,6 +552,15 @@ func TestRenderFullPlayerShots(t *testing.T) {
 			})
 			settleFull(t, b.tt)
 			save(t, dir, "60-全屏播放器-毛玻璃-"+name+".png", b.tt)
+
+			// 悬停到播放键上：那一枚**不会**变主色（满屏的底是压暗过的封面，
+			// 主色当字色那一档压在上面只有 1.0:1——理由见 `fullplayer.go` 的
+			// `viewFullControls`）。
+			if btn, ok := b.tt.Find(transportLabel(b.a.Snapshot().Playing)); ok {
+				b.tt.Move(btn.X+btn.W/2, btn.Y+btn.H/2)
+				b.tt.Frame()
+				save(t, dir, "61-全屏播放器-播放键悬停-"+name+".png", b.tt)
+			}
 			b.Close()
 		})
 	}

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -133,9 +134,9 @@ func TestTheTransportKeysArePrevPlayNext(t *testing.T) {
 // 进度条铺满整列，**两者的中轴互相对不上**（实测差 152 像素）。
 //
 // ⚠️ **断的是「三键那一排的中心 == 窗口的中心」，不是「播放键在窗口正中间」**：
-// 播放键是三枚里最宽的一枚（58），它在三键那一排里**正好居中**（32+24+29 =
-// 85 = 170 的一半），所以这两条是一回事——但写成前者，将来播放键换了尺寸
-// （票 #215 要把它改成 48×48）也不会误红。
+// 播放键是三枚里最宽的一枚（48），它在三键那一排里**正好居中**（32+24+24 =
+// 80 = 160 的一半），所以这两条是一回事——但写成前者，将来播放键换了尺寸也不会
+// 误红。
 //
 // ⚠️ **每一档都要在**：偏差是「左右两列差多少」的函数，而 760 那一档
 // （测试里最窄的窗口）差得最多。
@@ -171,7 +172,7 @@ func TestTheTransportKeysSitOnTheVerticalCenterLine(t *testing.T) {
 // ——左右只各留 12 的空。
 //
 // ⚠️ **断的是键与键之间的那两道缝**，不是三键的总宽：总宽还含着三枚键自己的
-// 宽度（32 / 58 / 32），改了键的尺寸就会把它顶红，而那不是回归。
+// 宽度（32 / 48 / 32），改了键的尺寸就会把它顶红，而那不是回归。
 func TestTheTransportKeysAre24Apart(t *testing.T) {
 	tt, _ := playbarTester(t, barState(), 1200, 0, false)
 
@@ -378,59 +379,70 @@ func TestTheRightGroupHugsTheRightEdge(t *testing.T) {
 	}
 }
 
-// TestThePlayKeyIsBigEnoughToHit 断播放键的尺寸。
+// TestThePlayKeyIsBigEnoughToHit 断播放键的尺寸**和它那一枚图形**。
 //
-// ⚠️ **断的是量出来的那个图形，不是常量**：这一票把图标从 30 放到 48
-// （上游的 `size={48}`），而 30 是全条上最小的一枚——用户要按的那一枚反而最难点。
+// ⚠️ **量的是画面上那一片图形，不是常量**：这一票把播放键换成上游那一枚
+// （`icons.go` 的 `iconButtonPlay`）——48×48 的盒子、**底下什么都没有**、
+// 图形是前景色。于是量法整个换了一副：原来是「主色底上那一片墨迹」，
+// 现在是**「播放条底色上那一片墨迹」**。
 //
-// 判据是三条：
+// 判据是四条：
 //
-//  1. **按钮自己够大**（48 起）——那是点击区。
+//  1. **盒子是 48×48**（上游的 `size-12 min-w-12`）——它不跟别的图标键的 32 走。
 //
-//  2. **比上下首大**（上下首是 18 的图标、32 的点击区）。只断第 1 条的话，
-//     一枚 48 的空按钮也算过。
+//  2. **比上下首大**（上下首是 22 的图标、32 的点击区）。只断第 1 条的话，
+//     一枚 48 的**空**盒子也算过。
 //
-//  3. 🔴 **图形本身够大**（≥ 36 宽）——**这一条是第 1 条抓不到的**：点击区是
-//     「图标 + 每边 5 的内边距」，把图标缩回 30 而点击区不动的话，按钮还是 58，
-//     第 1 条照样绿——而用户看见的那枚**图形**小了三成。
+//  3. 🔴 **图形本身够大**（≥ 36 宽）——**这一条是第 1 条抓不到的**：盒子还是 48
+//     而图形画成 24 的话，前两条照样绿——而用户看见的那枚**图形**小了一半。
 //
-//     图形多宽是**量**出来的：主色按钮的底是主色、图形是白（或者深色，看主色
-//     多亮），所以「和底色不一样的那一片」就是图形。
+//  4. 🔴 **图形落在盒子中间**（左右各留 ≥ 2 像素，且居中）——图形画歪了或者
+//     被裁掉（图标比盒子大）的话，前三条都抓不到。
+//
+// ⚠️ **用「暂停」那一张**：播放那一枚画的是**一个三角形**，而三角形落在
+// 24×24 的画板上只占 11 宽——量它的墨迹宽度，48 的图标量出 12，30 的量出 7，
+// 门槛定在哪儿都别扭。**暂停是一枚圆**（`RiPauseCircleFill`），圆占画布 20/24：
+// 48 的图标量出 40 宽，30 的量出 25——门槛放在 36，两头都离得开。
 func TestThePlayKeyIsBigEnoughToHit(t *testing.T) {
-	// ⚠️ **用「暂停」那一张**：播放那一枚画的是**一个三角形**，而三角形落在
-	// 24×24 的画板上只占 11 宽——量它的墨迹宽度，48 的图标量出 12，30 的量出 7，
-	// 门槛定在哪儿都别扭。**暂停是两条竖**（`RiPauseFill` 那类），墨迹是一块
-	// 干净的矩形：48 的图标量出 40 宽，30 的量出 25——门槛放在 36，两头都离得开。
 	st := barState()
 	st.Playing = true
 	tt, s := playbarTester(t, st, 1200, 0, false)
+	// 指针挪到播放条之外（理由见 `TestThePlayKeyHasNoSolidBackground` 那一条）：
+	// 悬停那一层压的是**整格**，量「图形有多宽」的时候不能把它算进来。
+	tt.Move(600, 300)
+	tt.Frame()
 
 	play, ok := tt.Find("暂停")
 	if !ok {
 		t.Fatalf("画面上找不到「暂停」，文字有 %q", tt.Texts())
 	}
-	if play.W < 48 || play.H < 48 {
-		t.Errorf("播放键只有 %v——它得是 48 像素那么大（上游的 `size={48}`，"+
-			"而它原来是 30，全条上最小的一枚）", play)
+	// ① 盒子是 48×48（上游那一枚的盒子，图形正好填满）。
+	//
+	// ⚠️ **这里写的是字面的 48，不是 `iconHitPlay`**：写成常量的话，把常量改回
+	// 58 这一条就照样绿——而「盒子是 48」是上游源码里的那个数（`size-12
+	// min-w-12`），它得由这一条钉住，不能由被测的那个常量钉住。
+	const wantBox = 48
+	if d := absFloat(play.W-wantBox) + absFloat(play.H-wantBox); d > 2 {
+		t.Errorf("播放键的盒子是 %.1fx%.1f，而上游那一枚是 48×48"+
+			"（`className=\"size-12 min-w-12\"`）——它不跟别的图标键的 32 走",
+			play.W, play.H)
 	}
 	prev, ok := tt.Find("上一首")
 	if !ok {
 		t.Fatalf("画面上找不到「上一首」，文字有 %q", tt.Texts())
 	}
+	// ② 比上下首大。
 	if play.W <= prev.W {
 		t.Errorf("播放键 %v 比「上一首」%v 还小——它得是全条上最大的一枚",
 			play, prev)
 	}
 
-	// 图形本身：主色底上那一块不是底色的像素有多宽。
+	// ③④ 图形本身：播放条底色上那一片不是底色的像素。
 	//
-	// ⚠️ **量的是按钮**里面那一块（每边缩 3 像素）：按钮是主色、播放条的底是白的，
-	// 两者的交界有抗锯齿的边——那一圈混出来的颜色和主色差得开，算进去的话
-	// 量到的永远是**按钮的整个宽**（58），图标缩到 30 也照样绿。
-	a := BuildTheme(s.app.SettingsSnapshot(), false).Accent
-	bg := color.RGBA{R: a.R, G: a.G, B: a.B, A: a.A}
-	inner := mygoui.Rect{X: play.X + 3, Y: play.Y + 3, W: play.W - 6, H: play.H - 6}
-	lo, hi, n := inkExtent(tt.Image(), inner, bg)
+	// ⚠️ **底色是播放条自己的**（`t.Background`），不是主色：这一枚现在**底下
+	// 什么都没有**，所以「不是底色的那一片」就是图形本身。
+	bg := rgb(BuildTheme(s.app.SettingsSnapshot(), false).Background)
+	lo, hi, n := inkExtent(tt.Image(), play, bg)
 	if n == 0 {
 		t.Fatalf("播放键上没画东西：%q", tt.Texts())
 	}
@@ -438,13 +450,239 @@ func TestThePlayKeyIsBigEnoughToHit(t *testing.T) {
 		t.Errorf("播放键上的图形只有 %d 宽（%d..%d）——图标是 48，"+
 			"而它原来只有 30（全条上最小的一枚）", hi-lo+1, lo, hi)
 	}
-	_ = s
+	// 图形落在盒子中间：左右各留 ≥ 2 像素（它没被盒子裁掉），中点对得上。
+	left := float32(lo) - play.X
+	right := play.X + play.W - float32(hi+1)
+	if left < 2 || right < 2 {
+		t.Errorf("播放键上的图形离盒子边只剩 %.1f / %.1f 像素（图形 %d..%d，"+
+			"盒子 %.1f..%.1f）——它被裁掉了一截", left, right, lo, hi,
+			play.X, play.X+play.W)
+	}
+	if d := absFloat(float32(lo+hi)/2 - (play.X + play.W/2)); d > 1.5 {
+		t.Errorf("播放键上的图形偏了 %.1f 像素（图形 %d..%d，盒子 %.1f..%.1f）——"+
+			"它没有落在盒子中间", d, lo, hi, play.X, play.X+play.W)
+	}
+}
+
+// TestThePlayKeyHasNoSolidBackground 断播放键**底下什么都没有**，而图形是**前景色**。
+//
+// ⚠️ **这一条是这一票的正题**：原来那一枚是 `ui.PrimaryButton`——一块 58×58 的
+// **实心主色圆角方块**（主题圆角 8，**不是药丸**），里面一枚**深色**的圆。
+// 上游那一枚是**无底色**的 `IconButton` + `RiPlayCircleFill size={48}`：
+// **底下什么都没有**，圆用**前景色**画（深色下白、浅色下近黑）。
+// **明暗正好反过来**，一眼就看不出是同一个东西。
+//
+// 三条判据：
+//
+//  1. **盒子的边缘是播放条的底色**——底下没有压着一块实色。
+//  2. **图形是前景色**（`t.Text`），不是主色。
+//  3. 🔴 **「正在播放」那一档也一样**（`RiPauseCircleFill`）：形状换了，颜色
+//     没换——两档都断，「只改了播放那一档」这种坏法就抓得住。
+//
+// 🔴 **第 1 条要量「四条边的中点」，不能只量「四个角」**（评审指出来的）：
+// 旧那一枚是**圆角 8** 的方块，四个角上**本来就是空的**（圆角之外没有填充），
+// 于是「四角是底色」对一块实心方块**照样成立**——浅色那一档就抓不住这一票
+// 自己的「改之前」那一种。**边的中点**才是实心方块和空按钮分开的地方：
+// 圆角只吃掉四个角，边中点上是实心的。
+//
+// ⚠️ **深浅两套都断**：旧那一枚的图形是 `t.AccentText`（主色底上的字色）——
+// **深色下那是白**（主色够亮），和前景色差 11 个通道，所以第 2 条抓得住；
+// **浅色下那是 #18181b，和前景色一模一样**，第 2 条抓不住——**靠的是第 1 条**
+// （边中点）。
+func TestThePlayKeyHasNoSolidBackground(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		for _, playing := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/正在播放=%v", name, playing), func(t *testing.T) {
+				st := barState()
+				st.Playing = playing
+				tt, s := playbarTester(t, st, 1200, 0, dark)
+				// 指针挪到播放条之外：悬停那一层会压一层淡底，量「底下有没有
+				// 实色」的时候不能把它算进来。
+				//
+				// ⚠️ **y=300 是「播放条之外」**：这一族只画播放条（`playbarTester`），
+				// 而它摆在窗口的**顶上**（那 88 高），所以窗口的中段是空的。指针要是
+				// 停在 (600, 20)，那正好落在播放键上——三键是居中的，x=600 就是
+				// 中间那一枚。
+				tt.Move(600, 300)
+				tt.Frame()
+
+				label := "播放"
+				if playing {
+					label = "暂停"
+				}
+				btn, ok := tt.Find(label)
+				if !ok {
+					t.Fatalf("画面上找不到 %q，文字有 %q", label, tt.Texts())
+				}
+				th := BuildTheme(s.app.SettingsSnapshot(), dark)
+				bg := rgb(th.Background)
+				accent := rgb(th.Accent)
+
+				// ① 边缘是底色：底下没有一块实色。
+				//
+				// ⚠️ **四个角 + 四条边的中点都要量**：角上对**圆角方块**是空的
+				// （抓不住旧那一枚），边中点才是实的（见上面那段）。
+				//
+				// ⚠️ **离边 2 像素**：抗锯齿那一圈是过渡色，贴着边量会读到它。
+				x0, y0 := round32(btn.X), round32(btn.Y)
+				x1, y1 := x0+int(btn.W)-1, y0+int(btn.H)-1
+				probes := [][2]int{
+					{x0 + 1, y0 + 1}, {x1 - 1, y0 + 1}, {x0 + 1, y1 - 1}, {x1 - 1, y1 - 1},
+					{x0 + 2, y0 + int(btn.H)/2}, {x1 - 2, y0 + int(btn.H)/2},
+					{x0 + int(btn.W)/2, y0 + 2}, {x0 + int(btn.W)/2, y1 - 2},
+				}
+				for _, p := range probes {
+					if got := tt.Image().RGBAAt(p[0], p[1]); !sameColor(got, bg) {
+						t.Errorf("%q 那一枚的边上 (%d,%d) 是 %v，而播放条底色是 %v——"+
+							"它底下压着一块实色（上游那一枚底下什么都没有）",
+							label, p[0], p[1], got, bg)
+					}
+				}
+
+				// ② 图形是前景色，不是主色。
+				got := inkColor(tt.Image(), btn, bg)
+				if !sameColor(got, rgb(th.Text)) {
+					t.Errorf("%q 那一枚的图形是 %v，而前景色是 %v——"+
+						"上游那一枚的圆是用**前景色**画的（深色下白、浅色下近黑）",
+						label, got, rgb(th.Text))
+				}
+				if sameColor(got, accent) {
+					t.Errorf("%q 那一枚的图形是 %v，和主色一样——"+
+						"上游那一枚不是主色的", label, got)
+				}
+			})
+		}
+	}
+}
+
+// TestThePlayKeyTurnsAccentOnHover 断**悬停时图形变主色**。
+//
+// 上游那个 `IconButton`（`src/components/icon-button/index.tsx:11-19`）是
+// `className="hover:text-primary text-inherit"`：**图形本身从前景色变成主色**，
+// 不只是底下多一层淡底。
+//
+// ⚠️ **浅色下那一档不是主色本身**：主色是 #1ed760，压在白底上只有 1.9:1
+// （`widgets/ink` 的文件头写着这件事），所以取「主色当字色时读得出来的那一档」
+// （`ink.AccentOn`）——和 `flatbutton.go` 的 `flatCurrent` 是同一条道理：
+// **主色当底和主色当字是两件事**。
+func TestThePlayKeyTurnsAccentOnHover(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			tt, s := playbarTester(t, barState(), 1200, 0, dark)
+			// 指针挪到播放条之外（理由见上面那一条）。
+			tt.Move(600, 300)
+			tt.Frame()
+
+			btn, ok := tt.Find("播放")
+			if !ok {
+				t.Fatalf("画面上找不到「播放」，文字有 %q", tt.Texts())
+			}
+			th := BuildTheme(s.app.SettingsSnapshot(), dark)
+			bg := rgb(th.Background)
+			idle := inkColor(tt.Image(), btn, bg)
+
+			// 指针落到这一枚上。
+			tt.Move(btn.X+btn.W/2, btn.Y+btn.H/2)
+			tt.Frame()
+			lit := inkColor(tt.Image(), btn, bg)
+
+			want := rgb(ink.AccentOn(th))
+			if !near(lit, want) {
+				t.Errorf("悬停之后播放键的图形是 %v，而那一档该是主色 %v——"+
+					"上游是 `hover:text-primary`：图形本身从前景色变成主色",
+					lit, want)
+			}
+			if near(lit, idle) {
+				t.Errorf("悬停之后播放键的图形还是 %v（没变）——"+
+					"图形要自己变成主色，不只是底下多一层淡底", lit)
+			}
+		})
+	}
+}
+
+// TestTheDisabledPlayKeyDoesNotTurnAccent 断**禁用**着的播放键**悬停时不变主色**。
+//
+// 🔴 **一枚禁用的键用主色告诉用户「这里点得动」**——那是错的（评审查出来的一条）。
+//
+// 原因在**顺序**：颜色是**建元素时**定的，而「悬停没有」也是**建元素时**问的
+// （`Hovered()`）。问的时候如果**还没禁用**，那一刻问出来的是「它悬停着」——于是
+// 一枚禁用的键也染上了主色（实测：浅色下悬停后变成 rgb(136,188,154) 的绿）。
+//
+// 修法是**先禁用、再问悬停**（`icons.go` 的 `iconButtonPlay`：禁不启用由调用方给，
+// 因为那是**状态**决定的——没歌的时候那一枚是禁用的）。
+//
+// 判据：禁用的那一枚**悬停之后一个像素都不变**（框架把禁用键整体乘 0.5 不透明度，
+// 所以它本来就该是暗的；而禁用的键**连那层淡底都不该有**——`widgets/flat` 的
+// `shade` 是在**画的时候**重新问一遍 `IsDisabled()` 的）。
+func TestTheDisabledPlayKeyDoesNotTurnAccent(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			st := barState()
+			st.HasTrack = false // 没有歌 → 那一枚是禁用的
+			tt, s := playbarTester(t, st, 1200, 0, dark)
+			bg := rgb(BuildTheme(s.app.SettingsSnapshot(), dark).Background)
+
+			btn, ok := tt.Find("播放")
+			if !ok {
+				t.Fatalf("画面上找不到「播放」，文字有 %q", tt.Texts())
+			}
+			// 指针先离开。
+			tt.Move(600, 300)
+			tt.Frame()
+			idle := inkColor(tt.Image(), btn, bg)
+
+			// 指针落到这一枚上。
+			tt.Move(btn.X+btn.W/2, btn.Y+btn.H/2)
+			tt.Frame()
+			lit := inkColor(tt.Image(), btn, bg)
+
+			if !sameColor(lit, idle) {
+				t.Errorf("禁用着的播放键悬停之后从 %v 变成了 %v——"+
+					"一枚禁用的键不该用主色告诉用户「这里点得动」", idle, lit)
+			}
+			// 顺带断一句「它不是主色」：主色是绿的，前景色是中性色。
+			if absInt(int(lit.G)-int(lit.R)) > 12 {
+				t.Errorf("禁用着的播放键悬停之后是 %v——那不是主色该有的样子", lit)
+			}
+		})
+	}
+}
+
+// inkColor 是 box 里「不是底色」的那一片像素的众数色——**图形本身的颜色**。
+//
+// ⚠️ **判据和底色不一样**：这一枚底下什么都没有，所以播放条底色上「不是底色的
+// 那一片」就是图形。众数而不是平均：抗锯齿那一圈是过渡色，平均出来谁也不像。
+func inkColor(img *image.RGBA, box mygoui.Rect, bg color.RGBA) color.RGBA {
+	var samples []color.RGBA
+	for y := max(int(box.Y), img.Rect.Min.Y); y < min(int(box.Y+box.H), img.Rect.Max.Y); y++ {
+		for x := max(int(box.X), img.Rect.Min.X); x < min(int(box.X+box.W), img.Rect.Max.X); x++ {
+			if p := img.RGBAAt(x, y); distinctPixel(p, bg) {
+				samples = append(samples, p)
+			}
+		}
+	}
+	if len(samples) == 0 {
+		return color.RGBA{}
+	}
+	return modeOf(samples)
 }
 
 // inkExtent 是 box 里「不是底色」的那一片像素有多宽（左右沿和个数）。
 //
-// 判据是**和底色不一样**：主色按钮的底是主色，图形是白（或者深色，看主色多亮）——
-// 所以「不是底色」的那一片就是图形。
+// 判据是**和底色不一样**：播放键底下什么都没有，所以播放条底色上「不是底色的
+// 那一片」就是图形（深色下白、浅色下近黑）。
 //
 // ⚠️ **左右沿是真的最小和最大**，不是「扫描顺序里第一个和最后一个」：扫描是逐行
 // 从上往下的，一个**圆**（暂停那一枚就是 `RiPauseCircleFill`）的最后一行最窄，
@@ -718,6 +956,59 @@ func TestRenderPlayBarRedoShots(t *testing.T) {
 		tt.Move(cover.X+cover.W/2, cover.Y+cover.H/2)
 		tt.Frame()
 		save(t, dir, "71-播放条-封面悬停-"+name+".png", tt)
+	}
+}
+
+// TestRenderPlayKeyShots 存图：播放键改成上游那一枚之后的样子，深浅各一套。
+//
+//	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderPlayKeyShots
+//
+// ⚠️ **四张都要**：平时（图形是**前景色**）、悬停（图形**变主色**）、正在播放
+// （形状换成 `RiPauseCircleFill`）、正在播放时悬停——「悬停变主色」是这一票的
+// 一半，而**平时那一张和悬停那一张长得完全不一样**。
+//
+// 🔴 **每一张的文件名都要带上状态**（评审指出来的）：第一版把「悬停」那一张
+// **写了两遍**（两档状态都写同一个文件名），后写的那一遍把先写的盖掉了——于是
+// 报告里那张标着「悬停」的图**其实是「正在播放」那一档**，而「悬停 + 播放三角」
+// 那一张**根本不存在**。这一条现在每一张的名字里都有状态。
+//
+// ⚠️ **窗口留 160 高、指针停在中段**：这一族只画播放条（`playbarTester`），而它
+// 摆在窗口的**顶上**（那 88 高），所以窗口的中段是空的——指针要停在那儿才算
+// 「不在任何一枚键上」（三键是居中的，x=600 就是中间那一枚）。
+func TestRenderPlayKeyShots(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		for _, playing := range []bool{false, true} {
+			st := barState()
+			st.Playing = playing
+			label := "播放"
+			idle, hover := "73-播放键-平时-"+name, "74-播放键-悬停-"+name
+			if playing {
+				label = "暂停"
+				idle, hover = "75-播放键-正在播放-"+name, "76-播放键-正在播放时悬停-"+name
+			}
+
+			tt, _ := playbarTester(t, st, 1200, 160, dark)
+			tt.Move(600, 130) // 播放条之外
+			tt.Frame()
+			save(t, dir, idle+".png", tt)
+
+			// 悬停：图形变主色。
+			btn, ok := tt.Find(label)
+			if !ok {
+				t.Fatalf("画面上找不到 %q，文字有 %q", label, tt.Texts())
+			}
+			tt.Move(btn.X+btn.W/2, btn.Y+btn.H/2)
+			tt.Frame()
+			save(t, dir, hover+".png", tt)
+		}
 	}
 }
 

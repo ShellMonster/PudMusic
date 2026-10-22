@@ -74,14 +74,14 @@ const (
 	// 满屏上播放/暂停那一枚的图标边长与点击区。
 	//
 	// 48 是上游那个数（`full-screen-player/index.tsx:396` 里的
-	// `MusicPlayControl`，`music-play-control/index.tsx:23-24` 的
-	// `RiPlayCircleFill size={48}`）；点击区 58 和播放条上那一枚是同一套
-	// （`iconHitPlay`，每边留 5）——满屏这一行以它为主角，点击区不该比播放条小。
+	// `MusicPlayControl`，`music-play-control/index.tsx:23-25` 的
+	// `RiPlayCircleFill size={48}`）；盒子也是 48，和播放条上那一枚是同一套
+	// （`iconHitPlay`）——满屏这一行以它为主角，盒子不该比播放条小。
 	//
 	// ⚠️ **以前这里是 34 / 46，理由写的是「满屏这一行本来就以它为主角……再大就
 	// 被切」**。那句话把因果说反了：不是「它小所以是主角」，而是满屏这一屏最该
 	// 有主角；而被切的原因是**底栏高度没跟着它重算**（当时是 80）。票 #169 把
-	// 底栏按上游重排（进度 20 + 缝 8 + 播放键 58 + 底边距 16 = 102），48 完全
+	// 底栏按上游重排（进度 20 + 缝 8 + 播放键 + 底边距 16），48 完全
 	// 放得下。**改底栏的留白时这个高度要一起重算**，别再让它去迁就一个旧框。
 	fullPlayGlyph = iconPlayBtn
 	fullPlayHit   = iconHitPlay
@@ -107,10 +107,10 @@ const (
 	// fullControlsHeight 是整条底栏的高度，**由内容算出来**：
 	// 进度行 20（`knobFullLook` 那个 `Height(t.Space(5))`）
 	// + 缝 8（`gap-2`）
-	// + 播放键 58（`fullPlayHit`，这一行最高的那一个）
+	// + 播放键 48（`fullPlayHit`，这一行最高的那一个）
 	// + 离底 16（`mb-4`）
-	// = 102。藏起来的时候整条要移出窗口，靠的也是这个数。
-	fullControlsHeight = 102
+	// = 92。藏起来的时候整条要移出窗口，靠的也是这个数。
+	fullControlsHeight = 92
 	fullBottomPadX     = 48
 	fullBottomMargin   = 16
 	fullBottomMaxW     = 1152
@@ -809,7 +809,7 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 		Justify(ui.Center).AlignItems(ui.End)
 	bar = bar.Opacity(bar.AnimateTo("full-controls:o", shown, ui.Smooth))
 	// ⚠️ 位移**不跟着淡入一起动**（顶栏也是这么写的）：藏起来的时候这一条要真的
-	// 移出窗口，不然停在窗口底下那 102 像素里的控件仍然接得到点击。
+	// 移出窗口，不然停在窗口底下那 92 像素里的控件仍然接得到点击。
 	bar = bar.Translate(0, (1-shown)*fullControlsHeight)
 
 	bar.Children(func() {
@@ -841,9 +841,17 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 				ui.Row(c).Gap(24).AlignItems(ui.Center).Children(func() {
 					s.viewPrevButton(c)
 					// 提示走 tooltip.go（时延照上游），不是框架那枚固定的 600ms。
-					if s.withTip(c, iconButtonPrimary(c, transportIcon(st.Playing),
+					//
+					// 🔴 **这一枚不走 `iconButtonPlay`**（那一枚带「悬停变主色」）：
+					// 满屏的底是**压暗过的封面**，不是应用底色——主色当字色那一档
+					// 压在那上面只有 1.0:1（实测：浅色主题下悬停后变成 rgb(18,114,52)
+					// 的深绿，比底色还暗），而且那一行其余四枚图标都是满屏自己的
+					// 前景色（白 92%），**一枚变绿另外四枚不变，一眼就不成套**。
+					// 所以这一枚就是那一行里的一枚图标键（图形是前景色），形状和
+					// 播放条上那一枚一样（48×48、图形正好填满）。
+					if s.withTip(c, iconButton(c, transportIcon(st.Playing),
 						transportLabel(st.Playing), fullPlayGlyph).
-						Size(fullPlayHit, fullPlayHit).Padding(0, 5).
+						Size(fullPlayHit, fullPlayHit).Padding(0, 0).
 						Disabled(!st.Playing && !st.HasTrack), transportLabel(st.Playing)).Clicked() {
 						s.app.Toggle()
 					}
