@@ -449,7 +449,7 @@ func searchOnRealClient(s *Shell, c *bili.Client) { s.search.client = func() *bi
 // TestASearchResultActuallyStartsPlaying 盯「搜出来的歌真的放得起来」。
 //
 // 这是评审挑出来的那条 critical：B 站的搜索结果**只给 bvid**，而在线播放当年要求
-// cid，于是搜出来的歌一首都放不了，播放条上红字写「缺稿件 id 或分 P id」——用户按的
+// cid，于是搜出来的歌一首都放不了，播放条上红字写「缺稿件 id 或分 P id」（那时 cid 还是判据之一）——用户按的
 // 就是搜索结果，说他缺一个他压根拿不到的东西。
 //
 // 这一条走的是**整条链**：真的搜索接口 → 真的映射成列表行 → 真的按「全部播放」→

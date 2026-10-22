@@ -459,8 +459,14 @@ func TestPlayURLSaysWhyThereIsNoStream(t *testing.T) {
 	}
 	// 「没有流」和「取不到」要说不同的话：前者让用户去检查收藏夹里那一首，
 	// 后者让用户检查网络/权限。
-	if got := Friendly(err); !strings.Contains(got, "没有音频") {
-		t.Errorf("人话 = %q，没有说清是「这一集没有音频」", got)
+	if got := Friendly(err); !strings.Contains(got, "音频流") {
+		t.Errorf("人话 = %q，没有说清是「这一条没有音频流」", got)
+	}
+	// 🔴 **更不许被说成「没取到」**（票 #209）：说成网络问题的话，用户会去
+	// 查网、换网、等它好，而这一条等一万年还是没有音频流——两件事做的
+	// 动作正好相反。
+	if got := Friendly(err); strings.Contains(got, "网络") || strings.Contains(got, "连不上") {
+		t.Errorf("人话 = %q，把「真的没有音频流」说成了「没取到」", got)
 	}
 }
 

@@ -88,7 +88,7 @@ const searchUserIDPrefix = "u:"
 //
 // ⚠️ **用户行永远不进播放队列**（`Play` 是跳路由，`Add` 是一句解释），所以这个 Type
 // 不会流到判重标识（`queue.go` 的 `streamKey`）里去。
-const searchUserItemType = "user"
+const searchUserItemType = app.ItemTypeUser
 
 // errSearchNotMounted 是「还没挂上 B 站客户端」。
 //
