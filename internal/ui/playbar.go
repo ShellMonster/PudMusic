@@ -55,7 +55,8 @@ const (
 	//
 	// ⚠️ **没有它，UP 名会被挤成 0 宽**：`Grow(1)` 的 UP 名在小到只剩一点的时候
 	// 一个像素都分不到，而**界面上看不出坏了**（按钮和那句话都还在，只有名字没了）。
-	// 留 60 是「还能认出是哪个 UP」的下限，再窄就只剩两个偏旁。
+	// 留 60 是「还能认出是哪个 UP」的下限（**14 号字**四个多字），再窄就只剩两个
+	// 偏旁了。
 	//
 	// 第二行现在是**两个**图标键（赞 / 收藏），每个 `iconHit` = 32、两道
 	// `metaGap` = 8，所以它们要 32×2 + 8×2 = **80**。
@@ -87,29 +88,41 @@ const (
 // **浮起来靠的是那圈影**（`widgets/shadow` 里 HeroUI 那几档）。所以「靠底色
 // 亮一档来分层」这一句已经作废——别再照着它去找「亮一级的板」。
 //
-// 🔴 **宽度账**（2026-10 票 #135 之后量的，深浅两套一样）：
+// 🔴 **宽度账**（2026-10 票 #173 之后量的，深浅两套一样）：
 //
 //	窗口   播放条可用   右边那一组   左边那一列   中间那一列   进度条
-//	 900       868         240.7        301.7        301.7      185.7
-//	1200      1168         240.7        451.7        451.7      335.7
-//	1600      1568         240.7        651.7        651.7      535.7
+//	 900       868         243.2        300.4        300.4      184.4
+//	1200      1168         243.2        450.4        450.4      334.4
+//	1600      1568         243.2        650.4        650.4      534.4
 //
 //	（可用 = 窗口 - 左右各 16 的内边距；左边和中间**各分一半**多出来的那一份，
 //	 所以窗口每宽 100，进度条就长 50。）
 //
-//	**歌名和 UP 名都是自然宽**（歌名 208.4、长的那个 UP 名 249.7），它们不跟着
+//	⚠️ **这张表的前提是「有歌」**，而有两样东西会改它：
+//
+//	 1. **「下载」那一枚只在有歌时摆**（`viewPlayBarRight` 的 `st.HasTrack`）。
+//		没有歌时右边那一组是 203.2（少一枚 32 的键加一道 8 的缝），中间那一列
+//		因此多拿 20——**表里那一列是「有歌」的那一档**。
+//	 2. **「倍速」那一枚贴字宽**（上游的 `min-w-fit`），所以它随当前倍率变：
+//		「1x」是 43.2，「1.25x」是 65.8——**表里是 1x 的那一档**。
+//		倍率摆成四位数那一档时，右边那一组会宽 22.6，而中间那一列（进度条）
+//		就窄 11.3（334.4 → 323.1）。
+//
+//	**歌名和 UP 名都是自然宽**（歌名 222.3、长的那个 UP 名 290.4），它们不跟着
 //	窗口长——左边那一列多出来的那一份是空的。票 #135 明确「不改左侧那一块的
 //	布局」，所以那一份空着是有意的。
 //
-//	⚠️ **900 上歌名会被截掉一点**（208.4 → 203.7，多出一个省略号）：左边那一列
-//	的分到 301.7，而歌名那一行还要让出封面（56 + 8）和音质徽章（28 + 6），
-//	剩下 203.7。这是图标键的点击区从 28 长到 32（上游那一档，G39）之后
-//	右边那一组多占 19.7 带来的——**上游那边也一样**（它的图标键恒是 32×32），
-//	而歌名截断本来就是设计好的（`MaxLines(1)` + 省略号）。
+//	⚠️ **900 上歌名会被截掉一点**（222.3 → 202.4，多出一个省略号）：左边那一列
+//	的分到 300.4，而歌名那一行还要让出封面（56 + 8）和音质徽章（28 + 6），
+//	剩下 202.4。这是图标键的点击区从 28 长到 32（上游那一档，G39）之后
+//	右边那一组多占 19.7、再加上票 #173 那几个字号带来的——**上游那边也一样**
+//	（它的图标键恒是 32×32），而歌名截断本来就是设计好的（`MaxLines(1)` + 省略号）。
 //
-//	⚠️ **右边那一组是 240.7**（不是票 #127 那时的 362）：音量收成一枚图标之后，
+//	⚠️ **右边那一组是 243.2**（不是票 #127 那时的 362）：音量收成一枚图标之后，
 //	 常驻的那根 120 像素横滑块没有了（见 `viewPlayBarRight`）；图标键的点击区
-//	 从 28 长到 32（上游那一档，G39）之后又加了 19.7——**五枚键各多 4**。
+//	 从 28 长到 32（上游那一档，G39）之后又加了 19.7——**五枚键各多 4**；
+//	 票 #173 又把倍速那一枚的字从 13/14 放到 16（上游的 `text-[16px]`），
+//	 它自己又宽了 2.5。
 func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 	// 记一笔「播放条建了一遍」——给「一帧建了几遍」那条测试数（见 builds.go）。
 	s.builds.playbar++
@@ -166,9 +179,13 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 // 键与键之间的缝是 8（`space-x-2`，`playbar/right/index.tsx:13`），不是外面
 // 那一行的 12：这一行最挤，8 是上游量出来摆得下五枚的那一档。
 //
-// 🔴 **这一组现在是 240.7 宽**（六个键 + 五道 8 的缝）：模式 32、下载 32、队列 32、
-// 音量 32、倍速 40.7（贴字宽）、加歌 32。票 #127 那时它是 362——多出来的是那根
-// **常驻的 120 像素横滑块**加一道缝，票 #135 把它收成了图标。
+// 🔴 **这一组现在是 243.2 宽**（六个键 + 五道 8 的缝）：模式 32、下载 32、队列 32、
+// 音量 32、倍速 43.2（贴字宽）、加歌 32。票 #127 那时它是 362——多出来的是那根
+// **常驻的 120 像素横滑块**加一道缝，票 #135 把它收成了图标；票 #173 又把倍速
+// 那一枚的字放到 16（上游的 `text-[16px]`），它自己宽了 2.5。
+//
+// ⚠️ **「下载」那一枚是有歌时才摆的**（下面那个 `if st.HasTrack`）——所以
+// 「243.2」是**有歌**的那一档；没有歌时这一组是 203.2。
 func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 	ui.Row(c).Key("playbar-right").Gap(playbarRightGap).AlignItems(ui.Center).Children(func() {
 		// 播放模式。**原来它摆在进度那一行的最右边**，而上游摆在右边这一组
@@ -207,7 +224,7 @@ func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 		//
 		// ⚠️ **常驻的那根 120 像素横滑块没有了**：它抢的是进度条该有的空间——
 		// 那一档右边这一组是 362 宽，而窗口下限是 900。收成图标之后右边这组窄了
-		// 121.3（362 → 240.7），中间那一列（进度条）拿得回来的宽度更多。
+		// 118.8（362 → 243.2），中间那一列（进度条）拿得回来的宽度更多。
 		s.viewVolumeButton(c, st)
 
 		// 倍速紧挨着音量：两个都是「听感」旋钮（上游也是挨着的）。
@@ -235,10 +252,10 @@ func drawerTip(open bool) string {
 // 出错时再补一句原因。
 //
 // 三行竖着堆，行数由**有没有那一句**决定：平时两行（歌名 / UP 名那一行），
-// 出错时三行。三行实测占 51（歌名 17.7 + 两行各 14 + 两道 4 的缝），在 88 高的
-// 播放条里上下各留 18——而横向仍然是 `Grow(1)` 那一块的整条宽：**下面两行的
-// 固定宽度不吃歌名的宽度**（这一条是「为什么第二行不挤歌名」的答案，
-// `TestTheMetaRowDoesNotSquashTheTitle` 盯着它）。
+// 出错时三行。三行实测占 65（歌名 18.8 + UP 名 16.5 + 错误 14.1 + 两道 7.8 的
+// 缝），在 88 高的播放条里上下各留 11.5——而横向仍然是 `Grow(1)` 那一块的整条
+// 宽：**下面两行的固定宽度不吃歌名的宽度**（这一条是「为什么第二行不挤歌名」
+// 的答案，`TestTheMetaRowDoesNotSquashTheTitle` 盯着它）。
 //
 // ⚠️ **外面必须是 Column**。这里曾经为了塞下音质徽章把 Column 拆成了一个裸
 // Row（歌名和徽章并排），结果错误文字变成了这一层的**兄弟**——它落到了
@@ -265,7 +282,12 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 			// 「三行歌名 + UP 名 + 错误」，多出来的那两行被裁掉，而**界面上看不出坏了**
 			//（歌名还在，只是下面的话看不见了）。一行 + 省略号之后超长的那部分看不全，
 			// 但下面每一行都还在。
-			ui.Text(c, title).FontSize(scale.Font(c, 15)).Bold().
+			//
+			// 🔴 **16 / 400**（票 #173 / G26）：原来是 15 / 700——字号小一档、
+			// 字重重一档。**层次靠大小，不靠重量**：上游那一句是 `text-base`
+			// （16 / 400），而加粗的那一档在整条播放条上会跟满屏播放器的标题
+			// （20 / 400）抢注意力——它是全条最大的字，不该是全条最重的字。
+			ui.Text(c, title).FontSize(scale.Font(c, 16)).
 				TextColor(textColor(t, st.HasTrack)).
 				MaxLines(1).Ellipsis("…")
 			s.viewQualityBadge(c, st, t)
@@ -297,19 +319,21 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 //
 // ⚠️ **它摆在这儿最贵的一次是花掉 UP 名 40 个像素（`iconHit` 32 + 一道 `metaGap` 8），
 // 别的什么都不花；而窗口一宽就连那 40 也不用花**——这是量的，不是推的。同一首歌、
-// 同一块屏幕，**单 P（不摆这个键）和多 P（摆）两档各量一次**（UP 名的自然宽是 249.7）：
+// 同一块屏幕，**单 P（不摆这个键）和多 P（摆）两档各量一次**（UP 名的自然宽是 290.4）：
 //
-//	窗口    UP 名 153.7→113.7   178.7→138.7   203.7→163.7   249.7→213.7   249.7→249.7
-//	        900          950          1000          1100           1200/1280
-//	    （让位 40）  （让位 40）  （让位 40）  （让位 36）     （让位 0）
+//	窗口    UP 名 152.4→112.4   177.4→137.4   202.4→162.4   252.4→212.4   290.4→262.4   290.4→290.4
+//	        900          950          1000          1100           1200          1280
+//	    （让位 40）  （让位 40）  （让位 40）  （让位 40）   （让位 28）     （让位 0）
 //
-// **每一档的歌名（208.4）、进度条（185.7 / 210.7 / 235.7 / 285.7 / 335.7 / 375.7）、
-// 播放模式（32）、下载（32）、加歌（32）两档都一模一样**——这个键不花它们一分钱。
+// **每一档的歌名（900 上是 202.4，宽窗口上是它的自然宽 222.3）、进度条
+// （184.4 / 209.4 / 234.4 / 284.4 / 334.4 / 374.4）、播放模式（32）、下载（32）、
+// 加歌（32）两档都一模一样**——这个键不花它们一分钱。
 //
-// 1200 以上让位是 0，原因是那一行**够宽到装得下 UP 名的自然宽再加这个键**，`Grow(1)`
-// 于是没东西可挤。这不是「宽窗口下碰巧没事」，而是 `Grow` 的正常行为：挤的永远是
+// 1280 起让位是 0，原因是那一行**够宽到装得下 UP 名的自然宽再加这个键**，`Grow(1)`
+// 于是没东西可挤（1200 上还差 28，所以那里让位 28）。这不是「宽窗口下碰巧没事」，
+// 而是 `Grow` 的正常行为：挤的永远是
 // 那个可伸缩的东西，而它在这一行里只有 UP 名一个（`Grow(1)` + `MinWidth` +
-// `Ellipsis("…")`，见 `viewArtist`）。在应用自己的窗口下限 900 上它让出 40，而 113
+// `Ellipsis("…")`，见 `viewArtist`）。在应用自己的窗口下限 900 上它让出 40，而 112
 // 仍远在 `ownerNameMinW`（40）之上。
 //
 // ⚠️ **另一处也量过：中间那一列的第二行**（挨着播放模式）——摆在那儿一样只让 UP 名
@@ -357,17 +381,21 @@ func (s *Shell) viewTrackMeta(c *ui.Context, st app.State, t *ui.Theme) {
 //
 // ⚠️ 走的是 `upPathPrefix` 而不是写死 `"/user/"`：路由表里那一条改了的话
 // 这里跟着错，而且错得很安静（空间页退回占位页，没人看得出来）。
+//
+// 🔴 **14**（票 #173 / G26）：原来是 12——那是「次要信息」那一档（列表里的
+// 播放量 / 投稿时间），而 UP 名是**列表里那一行同样的字**（上游两处都是
+// `text-sm`）。两处差一档的话，歌名从列表走到播放条会**缩回去一格**。
 func (s *Shell) viewArtist(c *ui.Context, st app.State, t *ui.Theme) {
 	if st.ArtistMid <= 0 {
-		ui.Text(c, st.Artist).Grow(1).MinWidth(artistMinW).FontSize(scale.Font(c, 12)).
+		ui.Text(c, st.Artist).Grow(1).MinWidth(artistMinW).FontSize(scale.Font(c, 14)).
 			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 		return
 	}
 	// 扁平按钮：UP 名这一格是**播放条上一枚按钮**，而调研点名的描边药丸里就有它
-	//（报告 §1.1 的 F1 证据：播放条上每一枚带描边的键）。它上面是 12px 的弱化
+	//（报告 §1.1 的 F1 证据：播放条上每一枚带描边的键）。它上面是 14px 的弱化
 	// 灰字，本来就不该配一块描边底。
 	if s.withTip(c, flatButton(c, st.Artist).Grow(1).MinWidth(artistMinW).
-		FontSize(scale.Font(c, 12)).Padding(0, 2).TextColor(t.TextMuted).
+		FontSize(scale.Font(c, 14)).Padding(0, 2).TextColor(t.TextMuted).
 		MaxLines(1).Ellipsis("…"), "打开 "+st.Artist+" 的空间").Clicked() {
 		s.navigate(upPathPrefix + strconv.FormatInt(st.ArtistMid, 10))
 	}
@@ -501,8 +529,9 @@ var qualityChoices = []bili.AudioQuality{
 // 改之前这里是「上一首 · 下一首 · 播放」——唯独播放条这处没照做。后果是**用户从
 // 全屏退回播放条时，肌肉记忆里「中间是播放」的位置按下去是下一首**。
 //
-// ⚠️ **「上一首」「下一首」两个按钮的本体一个字没动**（`viewPrevButton` /
-// `viewNextButton` 满屏那边也在用），动的只是它们在这一行里的位置。
+// ⚠️ **「上一首」「下一首」两个按钮的本体是共用的**（`viewPrevButton` /
+// `viewNextButton`，满屏播放器那边也在用）——所以它们长到 22 的时候，满屏底下
+// 那一排也跟着长（上游那两处是同一个 `MusicPlayControl` 组件，同一个数）。
 //
 // ⚠️ **三个都是只有图标的按钮**（Biu 的 `MusicPlayControl` 就是上面那三个）。
 // 文字版是三个汉字各占 88 宽——中间那一列 276 宽全被这三个键占满，而进度条
@@ -595,10 +624,14 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 			// 一个具体的颜色，不跟主题走（跟主题走的话深色主题下会是浅灰，
 			// 压在黑罩上反而看不清）。这是**唯一**一处图标不该跟主题走的地方。
 			//
+			// 🔴 **箭头是 32**（票 #173 / G26）：原来是 20——在 56×56 的封面
+			// 正中画一枚 20 的箭头，它小得像是「画糊了」，而不是「这里可以点开」。
+			// 上游那一枚是 `size={32}`，而它要装进的就是这个 56 的方框。
+			//
 			// PassThrough：浮层这一层和里面那个图标都不接点击。
 			ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Radius(c.Theme().Radius).
 				PassThrough().Center().Background(ui.RGBA(0, 0, 0, 0.5)).Children(func() {
-				ui.Icon(c, icon(iconFullscreen)).FontSize(20).
+				ui.Icon(c, icon(iconFullscreen)).FontSize(32).
 					TextColor(ui.RGBA(255, 255, 255, 0.92)).
 					PassThrough()
 			})
@@ -630,19 +663,27 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 //
 // ⚠️ 原来是 88 宽的三个汉字按钮，而三个汉字在按钮里要 54——**44 就已经放不下**，
 // 按 64 画出来是「上...」「下...」，看着像坏了。图标化之后这件事不再存在：
-// 18 的图标 + 每边 7 的内边距，点击区 32（`iconHitMd`），比原来那个 88 窄近三倍
+// 22 的图标 + 每边 5 的内边距，点击区 32（`iconHitMd`），比原来那个 88 窄近三倍
 // 还点得准（角上也点得到，见 `TestTheHitAreaIsBiggerThanTheGlyph`）。
+//
+// ⚠️ **图形是 22，不是 18**（票 #173 / G26）：上游那一排三枚是三个数——跳过那两枚
+// `size={22}`、中间那枚 48。照 `iconMd`（18）画的话，这一排里**最小的两枚紧挨着
+// 最大的那一枚**，中间空着一圈，而用户要找的恰恰是中间那一枚。
+//
+// ⚠️ **内边距跟着图形走**：命中区恒是 32，而 22 的图标要每边 5 才放得下；
+// 还留着 7 的话内容框只剩 18，那枚图形自己就被裁掉 4 像素（而**界面上看不出坏了**
+// ——它只是小了一圈）。
 func (s *Shell) viewPrevButton(c *ui.Context) {
-	if s.withTip(c, iconButton(c, iconPrev, "上一首", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 7).
+	if s.withTip(c, iconButton(c, iconPrev, "上一首", iconSkip).
+		Size(iconHitMd, iconHitMd).Padding(0, 5).
 		Disabled(!s.app.CanPrev()), "上一首").Clicked() {
 		s.app.Prev()
 	}
 }
 
 func (s *Shell) viewNextButton(c *ui.Context) {
-	if s.withTip(c, iconButton(c, iconNext, "下一首", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 7).
+	if s.withTip(c, iconButton(c, iconNext, "下一首", iconSkip).
+		Size(iconHitMd, iconHitMd).Padding(0, 5).
 		Disabled(!s.app.CanNext()), "下一首").Clicked() {
 		s.app.Next()
 	}
@@ -733,11 +774,16 @@ func (s *Shell) pickAndEnqueue() {
 // （深色底上等于消失）。上游那边是 4 像素的轨道加一颗**只在悬停时才出现**的
 // 圆点（`music-play-progress` 的 `h-[4px]` 和 `hideThumb={!showThumb}`）——
 // 一颗一直亮着的圆点在整条进度上全程抢注意力，而它是用户真正要抓的东西。
+//
+// 🔴 **两个时间是 14**（票 #173 / G26）：原来是 12。它们不是「列表里的次要信息」
+// （那一档是播放量 / 投稿时间），而是**控件旁边的一行读数**——上游那两个读数
+// 是 `text-sm`，和 UP 名同一档。12 在这一行里小得几乎看不见，而这一行恰恰是
+// 用户盯着看的一行。
 func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 	known := st.Duration > 0
 
 	ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, clock(st.Position)).FontSize(scale.Font(c, 12)).TextColor(c.Theme().TextMuted).Width(48)
+		ui.Text(c, clock(st.Position)).FontSize(scale.Font(c, 14)).TextColor(c.Theme().TextMuted).Width(48)
 
 		sl := playbarProgressSlider(c, &s.scrub, 0, 1).Grow(1).Label("播放进度").Disabled(!known)
 		// ⚠️ 这里必须用 Pressed()，不能用 Dragging()。
@@ -763,7 +809,7 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 		if !known {
 			total = "--:--"
 		}
-		ui.Text(c, total).FontSize(scale.Font(c, 12)).TextColor(c.Theme().TextMuted).Width(48)
+		ui.Text(c, total).FontSize(scale.Font(c, 14)).TextColor(c.Theme().TextMuted).Width(48)
 	})
 }
 

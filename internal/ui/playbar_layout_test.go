@@ -447,6 +447,19 @@ func TestRenderPlayBarRedoShots(t *testing.T) {
 		tt, _ := bottomBarTester(t, barState(), 1200, 320, dark)
 		hoverVolumeKey(t, tt)
 		save(t, dir, "72-播放条-音量浮层-"+name+".png", tt)
+
+		// 封面悬停：那一层黑罩和它正中那枚箭头（票 #173 把它放到 32）。
+		//
+		// ⚠️ **必须悬停才有**：那一层是 `wrap.Hovered()` 才画的，而箭头是**白色
+		// 92%** 压在 50% 的黑罩上——不悬停就只剩一块空的封面。
+		tt, _ = playbarTester(t, barState(), 1200, playbarHeight, dark)
+		cover, ok := tt.Find("当前封面")
+		if !ok {
+			t.Fatalf("画面上找不到封面，文字有 %q", tt.Texts())
+		}
+		tt.Move(cover.X+cover.W/2, cover.Y+cover.H/2)
+		tt.Frame()
+		save(t, dir, "71-播放条-封面悬停-"+name+".png", tt)
 	}
 }
 
