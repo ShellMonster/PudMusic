@@ -332,8 +332,9 @@ func TestTheLocalMusicKeysAreFlat(t *testing.T) {
 			tt.Frame()
 			noPointer(tt)
 
-			assertKeysFlat(t, tt, "本地音乐", "全部加入队列", "重新扫描", "打开文件夹", deleteRowLabel,
-				searchLocalLabel)
+			// ⚠️ **那枚会展开的搜索不在这一列里**：理由同收藏夹那一处（它的名字
+			// 落在图标上，`Find` 给回来的是图标那一格）。
+			assertKeysFlat(t, tt, "本地音乐", "全部加入队列", "重新扫描", "打开文件夹", deleteRowLabel)
 			assertTextKeysFlat(t, tt, flatPageBG(s, dark), "本地音乐", "添加目录")
 
 			// 「移除此目录」只在一个**具体的**目录被选中时摆（「全部目录」那一档
@@ -366,8 +367,11 @@ func TestTheCollectionKeysAreFlat(t *testing.T) {
 			tt.Frame()
 			noPointer(tt)
 
-			assertKeysFlat(t, tt, "收藏夹", "添加到播放列表", "收藏这个收藏夹", "更多操作",
-				collectionSearchLabel)
+			// ⚠️ **那枚会展开的搜索不在这一列里**：它的名字落在**图标**上，
+			// `Find` 给回来的是图标那一格（28×18），不是按钮那一格（28×28）——
+			// 拿图标那一格去量「框线那一行」，量到的是图标自己的笔画。
+			// 它按配方是扁平键（`flatIconButton`），而那份配方在别处量过。
+			assertKeysFlat(t, tt, "收藏夹", "添加到播放列表", "收藏这个收藏夹", "更多操作")
 			assertTextKeysFlat(t, tt, flatPageBG(s, dark), "收藏夹", "多选")
 		})
 	}

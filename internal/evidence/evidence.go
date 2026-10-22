@@ -1853,4 +1853,40 @@ var Items = []Item{
 			"TestTheSuggestTermsShowWhichCharsWereHit",
 		},
 	},
+	{
+		// 归「双平台」那一组：这一票动的是**三页的控件形态**（收藏夹头图区、
+		// 下载记录页、本地音乐页），而这一族每一个症状都是**静默的**——字号小一
+		// 档、控件该是图标键却是一排字、hover 反馈没有，**没有一样会报错**，
+		// 界面只是「不太对」。所以判据全是**画面上的位置 / 尺寸 / 颜色**。
+		Category: Platform,
+		// 票 #175（#163 的第二批之一）：收藏夹 / 下载 / 本地音乐的排版与按钮形态。
+		//
+		// ⚠️ **这一票的错法全是「少了一档」那种**：头图区那三行字小一档、创建者
+		// 那一行没有头像、搜索是一个常驻输入框而不是会展开的按钮、下载表是一张
+		// 裸表格、文件名 hover 不长出外链、工具条是一排字、行 hover 时序号不变
+		// 播放图标——每一件单看都「像个界面」，只有并排和上游比才看得出不对。
+		Spec: "收藏夹头图区：标题下面那三行字都是 14、行与行之间是 16、创建者有一枚 24 的头像（四块左缘对齐；一行标题时那一列不越过封面的下缘）；操作条那枚主按钮是 40 高；「按歌名找」是一枚**会展开的按钮**（收起是图标键，展开是输入框，点别处收回去，切页回来不抢键盘焦点），且它在每一个侧栏宽度和系统字号缩放下都不压到「多选」上；下载记录的表有一张卡片底，文件名 hover 长出外链图标并能点开 B 站页面，筛选是横排的单选圆点；本地音乐的工具条是图标键，行 hover 时序号换成播放图标",
+		Tests: []string{
+			// 收藏夹头图区：字号（AST）、竖距与左缘（画面）、头像的大小。
+			"TestTheCollectionHeaderCopyIsFourteen",
+			"TestTheCollectionTitleIsTheBigOne",
+			"TestTheCollectionHeaderStaysInsideTheCoverOnOneLine",
+			"TestTheCollectionHeaderShowsTheCreatorAvatar",
+			// 操作条：主按钮 40 高（像素）；搜索是会展开的按钮（收起 / 展开 /
+			// 点别处收起 / 切页回来不抢焦点）；两个分组在每一个侧栏宽度和字号
+			// 缩放下都不重叠。
+			"TestThePlayAllButtonIsFortyHigh",
+			"TestTheCollectionSearchIsACollapsedButton",
+			"TestTheCollectionSearchDoesNotStealTheFocusWhenComingBack",
+			"TestTheCollectionOpsRowStillFitsAtTheMinWindow",
+			// 下载记录：卡片底（深浅两套逐像素采样）、文件名 hover 的外链图标与
+			// 它点开的地址、筛选是横排单选圆点（像素）。
+			"TestTheDownloadTableSitsOnACard",
+			"TestHoveringAFileNameRevealsTheExternalLink",
+			"TestTheFilterIsHorizontalRadioButtonsNow",
+			// 本地音乐：工具条上的搜索是会展开的按钮；行 hover 时序号换成播放图标。
+			"TestTheLocalSearchIsACollapsedButton",
+			"TestHoveringALocalRowTurnsItsNumberIntoAPlayIcon",
+		},
+	},
 }

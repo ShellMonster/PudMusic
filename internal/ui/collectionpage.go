@@ -630,17 +630,27 @@ func collectionKindText(typ bili.CollectionType, private bool) string {
 // 排序」。项和顺序照 Biu 的 `src/pages/video-collection/operation/index.tsx:33-56`
 // （上游右边就是 `SearchWithSort`）。主按钮是上游 `Button` 默认的 md 档：**40 高**。
 //
-// # 这一排在最窄那一档也放得下（搜索展开时也一样）
+// # 两组之间必须有让位机制（这一条是机器钉着的）
 //
-// 最快的那一档是窗口 900 + 侧栏 480：内容区只剩 **388**。左边那一组实测
-// **249.4**（主按钮 79.6 + 三枚 28 的图标键 + 「多选」53.8 + 四道 8 的缝）；
-// 右边那一组收起态是 28 + 8 + 83.2 = **119.2**，展开到下限 40 时是 131.2。
-// 两组一共 249.4 + 131.2 = **380.6**，放得下。
+// 两组的宽度**跟着系统字号缩放走**：排序下拉的自然宽在 1.0 倍下是 83.2，1.4 倍
+// 下是 116.5；「播放全部」「多选」那两串字也一样。而最快的那一档（窗口 900 +
+// 侧栏 480）内容区只有 **388**——字号一大，两组就装不下了。
 //
-// ⚠️ **搜索的下限是 40，不是 64**：64 那一版要 404.6，而排序下拉**没有最小
-// 宽**，多出来的那部分会从它身上扣——实测被裁成 66.6 宽、右缘跑到 900（已经
-// 出窗口）。所以排序下拉钉住了它自己的自然宽（`collectionSortMinW`），让搜索
-// 去让位。见 `viewCollectionSort`。
+// ⚠️ **装不下的时候左边那一组自己换行**（`Wrap`）：多选开关落到第二行，那一排
+// 于是高一点，但**两组永远不重叠**。实测（评审第 1 条的同一组数）：
+//
+//	字号 1.25 侧栏 480：换行之前多选的右缘 750.6、搜索的左缘 744.0（重叠 6.6）；
+//	                换行之后多选的右缘 636.1、搜索的左缘 744.0（不重叠）。
+//	字号 1.40 侧栏 480：换行之前重叠 30.7；换行之后多选的右缘 631.8、搜索 731.5。
+//
+// 换行的**代价**是那一排在最挤的那一档会高出一行——比「两个控件叠在一起」好得多。
+//
+// # 右边那一组不许被挤扁
+//
+// 排序下拉**必须有最小宽**（`collectionSortMinW`，按字号缩放跟着长）：没有它，
+// 框架挤不下时先扣它——实测被裁成 66.6 宽、右缘跑到 900（已经出窗口），最后
+// 一个字和那个「▾」都不见了。搜索是那个该让位的，它的下限是
+// `collectionSearchMinWidth`（40）。见 `viewCollectionSort`。
 func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 	t := c.Theme()
 
@@ -652,7 +662,9 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 	// 全吃掉、内容靠右，既不留缝，搜索框又有一个能长到 240 的地方。
 	ui.Row(c).Key("collection-ops").FillWidth().Center().
 		Padding(0, 0, 12).Children(func() {
-		ui.Row(c).Gap(8).Center().Children(func() {
+		// ⚠️ **`Wrap` 是这一排的让位机制**（理由见文件头那两段）：这一组放不
+		// 下时它自己换行，而不是让内容溢出到右边那一组身上。
+		ui.Row(c).Gap(8).Center().Wrap().Children(func() {
 			// 上游那枚主按钮是 `Button` 默认的 md 档：**40 高**。
 			if ui.PrimaryButton(c, "播放全部").Height(collectionOpsButtonH).Clicked() {
 				s.playWholeCollection(p)
@@ -911,7 +923,7 @@ const collectionSearchLabel = "搜索歌名"
 // 的 `searchDebounce`）。回车不等那 500ms——用户按下回车就是想现在搜。
 func (s *Shell) viewCollectionSearch(c *ui.Context, p *collectionPage) {
 	box := expandableSearch(c, s.tip, &p.search, &p.draft, collectionSearchLabel,
-		collectionSearchMinWidth, collectionSearchWidth)
+		collectionSearchMinWidth, collectionSearchWidth, s.pageJustShown())
 	p.submitted = box.Submitted()
 
 	// 判据和排序那一处一个写法：这一帧条件变了就换查询。

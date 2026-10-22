@@ -221,6 +221,10 @@ type localPage struct {
 	// 再写一份就是第二处。
 	displayView func() list.View
 
+	// justShownFn 报「这一帧是刚进这一页的第一帧」（`Shell.pageJustShown`）。
+	// 由 Shell 在建完这一页时接上；为零时（单独造这一页的测试）当作「不是」。
+	justShownFn func() bool
+
 	// tip 是带延迟的悬停提示（tooltip.go）。由 Shell 在建完这一页时接上；
 	// 为零时（单独造这一页的测试）退回框架那枚。
 	tip tipFunc
@@ -315,6 +319,14 @@ func newLocalPage(a *app.App, cache *imgcache.Cache, acts list.Actions,
 
 // View 画这一页。每一帧调一次。
 func (p *localPage) View(c *ui.Context) { p.draw(c) }
+
+// justShown 是「刚进这一页的第一帧」那一问。壳没接上的时候一律当「不是」。
+func (p *localPage) justShown() bool {
+	if p.justShownFn == nil {
+		return false
+	}
+	return p.justShownFn()
+}
 
 // tipWith 是这一页的悬停提示入口：状态挂在 Shell 上（tooltip.go），这里只是
 // 把这一页拿到的那份递过去；单独造这一页的测试没有那份，退回框架那枚。
@@ -449,7 +461,8 @@ func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
 		// 搜标题：上游是 `SearchButton`——收起时一枚放大镜，点开才是一个 240 的
 		// 输入框（`local-music/index.tsx:236`）。我们这一排放不下 240，展开的
 		// 上限沿用原来那个输入框的 180。
-		expandableSearch(c, p.tip, &p.searchBox, &p.search, searchLocalLabel, 64, 180)
+		expandableSearch(c, p.tip, &p.searchBox, &p.search, searchLocalLabel, 64, 180,
+			p.justShown())
 		ui.Select(c, &p.dirLabel, dirLabels(st.Roots)).Width(180)
 		// 移除此目录 / 重新扫描：上游是两枚 `IconButton`（`local-music/index.tsx:238,244`，
 		// tooltip「刷新」「移除当前目录」）。悬停提示说的就是名字——图标键没有

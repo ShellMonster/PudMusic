@@ -19,6 +19,15 @@
 // 点到页面空白处不会移走焦点，所以那一下不收（上游的 `useClickAway` 会收）。
 // 要判「点到了空白」得有一个盖住整页的透明层，而这一层会挡掉下面所有控件——
 // 不值得为一个收起的时机做这件事。
+//
+// # 焦点不许抢
+//
+// 输入框只在**用户刚点了那枚放大镜**的那一次拿到焦点（`focusNext`）。别的时机
+// （尤其是「切到别的页再回来」）输入框照样是展开的，但**不碰键盘焦点**。
+//
+// 理由：回来的时候那个输入框是**重画**出来的（元素重建 = 新生），而
+// `AutoFocus` 认的正是「这一帧刚出生」——不挡一下的话，用户在别的页敲的字会
+// 落进这个他看不见自己打开过的框里。
 package ui
 
 import "github.com/egoist/mygo/ui"
@@ -36,6 +45,12 @@ type searchButtonState struct {
 	open bool
 	// wasFocused 是上一帧那个输入框有没有键盘焦点。见文件头「点外面」那一段。
 	wasFocused bool
+	// focusNext 是「下一帧给那个输入框焦点」。
+	//
+	// ⚠️ **只有用户点了放大镜才置它**：切页回来时输入框会重画（新生），而
+	// `AutoFocus` 正是按「这一帧刚出生」来抢焦点的——不挡这一下，用户在别的
+	// 页敲的字就落进这个框里（评审第 5 条）。
+	focusNext bool
 }
 
 // expandableSearch 画一枚会展开的搜索。
@@ -50,23 +65,36 @@ type searchButtonState struct {
 // 走它，和别的图标键一个时延（框架那枚固定 600ms，和全应用对不上）。为零时
 // （单独造这一页的测试）退回框架那枚。
 //
+// justShown 是「这一帧是刚进这一页的第一帧」（`Shell.pageJustShown`）：那一帧
+// 先不建输入框，好让框架别把焦点还给一个用户没打开过的框。
+//
 // 返回的是**展开时那个输入框**；收起时返回零值元素（它的 `Submitted` /
 // `Focused` 一律是 false）。调用方靠这个读回车。
 func expandableSearch(c *ui.Context, tip tipFunc, st *searchButtonState, text *string,
-	label string, minW, maxW float32) ui.Element {
-	if !st.open {
+	label string, minW, maxW float32, justShown bool) ui.Element {
+	// ⚠️ **刚进这一页的那一帧不建输入框**（`justShown`）：框架切页时会把焦点
+	// 还给「离开这一页时有焦点的那个元素」，而那正是这个输入框——不建它就没有
+	// 焦点可还，下一帧它照常展开（词还摆在那儿），焦点却不落在它身上。
+	//
+	// 详见 `Shell.pageJustShown`。
+	if !st.open || justShown {
 		if tipFrom(tip, c, flatIconButton(c, iconSearch, label, iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5), label, tipDefault).Clicked() {
-			st.open, st.wasFocused = true, false
+			Size(iconHitMd, iconMd).Padding(0, 5), label, tipDefault).Clicked() {
+			st.open, st.wasFocused, st.focusNext = true, false, true
 		}
 		return ui.Element{}
 	}
 
 	field := ui.TextInput(c, text).
 		Width(minW).Grow(1).MaxWidth(maxW).Height(searchFieldHeight).
-		Label(label).Placeholder(label).
-		// 展开的那一帧就把焦点给它：用户点的是放大镜，接下来要做的就是打字。
-		AutoFocus()
+		Label(label).Placeholder(label)
+	// 展开的那一帧把焦点给它——**但只在用户刚点了放大镜的时候**（见文件头
+	// 「焦点不许抢」）：用户点的是放大镜，接下来要做的就是打字；而切页回来时
+	// 那个框是重画出来的，不该抢走别处的键盘焦点。
+	if st.focusNext {
+		field = field.AutoFocus()
+		st.focusNext = false
+	}
 
 	// 见文件头：只有「上一帧在画面上、上一帧有焦点、这一帧没了」才算点到了别处。
 	onScreen := field.Bounds().W > 0

@@ -76,6 +76,13 @@ type Shell struct {
 	// shownPath 是上一帧画的是哪一页，syncRoute 拿它认出「换页了」。
 	shownPath string
 
+	// lastPath 是**上一帧**停在哪条路由上。
+	//
+	// 「刚进这一页的第一帧」就是拿它和这一帧的路由比出来的（`pageJustShown`）：
+	// 框架切页时会把焦点还给「离开那一页时有焦点的那个元素」，而那枚会展开的
+	// 搜索正是它——不挡一下，用户回来时键盘焦点就在一个他没打开过的框里。
+	lastPath string
+
 	// scrollbarHot / scrollbarHotNow 是「指针压在某个滚动条上」的上一帧与这一帧
 	// （见 scrollbar.go）。主题每帧开头只能知道上一帧的：滚动容器这一帧还没建
 	// 出来。两个字段都是主线程单点写，和别的界面状态一样。
@@ -827,6 +834,9 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	s.local = newLocalPage(a, s.images, s.listActions(), s.addToast, s.pickDir, s.displayView)
 	s.local.noteScrollbar = s.noteScrollbar
 	s.local.tip = s.tip
+	// 「刚进这一页的第一帧」那一问（框架切页时会把焦点还给离开时有焦点的那个
+	// 元素——这一页的「会展开的搜索」正是它，见 `Shell.pageJustShown`）。
+	s.local.justShownFn = s.pageJustShown
 	s.hist = newSearchHistory("")
 	s.keys = newShortcutKeys("")
 	s.picker = systemPathPicker{}
@@ -1276,6 +1286,26 @@ func (s *Shell) viewMain(c *ui.Context) {
 	s.guardAt("歌词弹窗", s.viewLyricDialogs)(c)
 
 	s.viewToasts(c)
+
+	// 记下这一帧停在哪条路由上（下一帧的「刚进这一页」就是拿它比出来的）。
+	//
+	// ⚠️ **必须排在最后**：页面是在 `s.viewRoutes(c)` 里画的，而那一段要用
+	// 「上一帧在哪条路由」来判断「这一帧是不是刚进这一页的第一帧」——所以
+	// 这个数要等到整帧画完才更新。
+	s.lastPath = s.router.Path()
+}
+
+// pageJustShown 报「这一帧是刚进这一页的第一帧」。
+//
+// 路由切走再切回来时，框架会把焦点还给「离开这一页时有焦点的那个元素」
+// （`Router.focusPage`，`mygo@v0.5.5/ui/router.go:726`）。收藏夹/local 那一页
+// 的「会展开的搜索」正好是那个元素——于是用户回来的时候，键盘焦点被塞进一个
+// 他没打开过的框里，他在别处敲的字就落进那里（评审第 5 条）。
+//
+// 所以刚进这一页的那一帧，**那个输入框先不建**：没有它，框架就没有焦点可还
+// （下一帧它照常展开，词还摆在那儿）。
+func (s *Shell) pageJustShown() bool {
+	return s.lastPath != s.router.Path()
 }
 
 // viewFolderDialogs 画收藏夹管理那几个弹窗，**并收掉后台回来的结果**。

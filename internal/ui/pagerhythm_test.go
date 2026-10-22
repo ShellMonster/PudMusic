@@ -1350,3 +1350,37 @@ func textUsesFontSize(t *testing.T, file, key, want string) bool {
 	})
 	return found
 }
+
+// TestTheCollectionHeaderStaysInsideTheCoverOnOneLine 钉住「一行标题时头图区那一列
+// 不越过封面的下缘」。
+//
+// # 为什么只管一行标题
+//
+// 票 #175 要的是「头图区三行小字 14、竖距 16」——竖距从 6 变成 16、字号从
+// 12/13 变成 14，这一列于是比改前高了一截（实测一行标题 149.3，两行标题
+// 194.5）。**两行标题时它会越过封面的下缘**（实测超出 15.2），而上游的
+// `space-y-4` 也是这个结果（上游那一列：两行标题 70.6 + 21 + 21 + 头像 32 +
+// 三道 16 = 192.6 > 168）——所以那一条不能当不变式。
+//
+// 但**一行标题**（绝大多数收藏夹的名字）是放得下的，那一条要继续有人管着：
+// 改前就有一条机器钉着的断言守着它，这一版不能把它换成别的断言就完事。
+//
+// 判据是**画面**：创建者那一行的底边不许越过封面的底边（封面 168 高，头图区
+// 从内容区顶上往下 20）。
+func TestTheCollectionHeaderStaysInsideTheCoverOnOneLine(t *testing.T) {
+	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"))
+	waitSongs(t, tt, s, 1)
+
+	owner, ok := tt.Find("UP 小明")
+	if !ok {
+		t.Fatalf("头图区里找不到创建者那一行，文字有 %q", tt.Texts())
+	}
+	// 封面的底边：头图区从内容区顶上往下 20（`viewCollectionHeader` 的上内边距），
+	// 封面 168 高。
+	coverBottom := float32(navMinHeight) + 20 + collectionCoverH
+	if owner.Y+owner.H > coverBottom {
+		t.Errorf("一行标题时头图区那一列高到 %.0f，越过了封面的底边 %.0f——"+
+			"标题 + 三行小字（14/14/14、竖距 16）必须还放得下 168 那个封面",
+			owner.Y+owner.H, coverBottom)
+	}
+}
