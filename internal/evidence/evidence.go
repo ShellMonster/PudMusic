@@ -549,6 +549,37 @@ var Items = []Item{
 			"TestTheLaterRowsKeepTheirOpButtonAtNarrowWidths",
 		},
 	},
+	{
+		Category: Paging,
+		// 满屏播放器开着的时候，底下那一页**一帧都不建**（票 #161），而它的
+		// 每帧副作用（收后台结果、起该起的那一拉）照跑。
+		//
+		// 三条各自钉一件事，**少一条就有一半是对的**：
+		//
+		//   - 只钉构建次数 → 副作用跟着一起停了（关掉满屏之后那一页停在打开
+		//     那一刻的样子，要再等一趟才更新）；
+		//   - 只钉副作用 → 页面还在每帧被建（用户看不见，机器白干）；
+		//   - 只钉前两条 → 「关掉满屏之后的第一帧」没人管（可能慢一帧才画出来）。
+		//
+		// 判据是**构建次数**（探针数 `Shell.page` 那一次分派）而不是「快了多少」
+		// ——后者在这台机器上量不出来，而前者是确定的。
+		Spec: "满屏播放器开着的时候底下那一页一帧都不建；它的每帧副作用照跑；关掉满屏之后的第一帧就是当前状态",
+		Tests: []string{
+			"TestTheUnderlyingPageIsNotBuiltWhileTheFullPlayerIsOpen",
+			"TestBackgroundResultsStillLandWhileTheFullPlayerIsOpen",
+			"TestTheFirstFrameAfterClosingTheFullPlayerShowsTheCurrentState",
+			"TestEscapeReturnsFromTheFullPlayerAtOnce",
+			// 「每一页的副作用都在那张表里」那一条：加了新页而忘了加它，那一页
+			// 在满屏开着的时候副作用就停更了——症状是静默的。
+			"TestEveryPageWithContentHasASync",
+			// 「跳过绘制不能连带跳过每帧的副作用」那三条：满屏期间那个 125ms 的
+			// 自激钟（防抖钟没人推进 → 每 125ms 醒一次，而那一帧画的是满屏）、
+			// 「正在录」的快捷键被静默取消（录制期间窗口一个组合键都不登记）。
+			"TestTheSearchWatchStopsWhileTheFullPlayerIsOpen",
+			"TestTheShortcutRecordingSurvivesTheFullPlayer",
+			"TestTheCollectionSearchClockStopsWhileTheFullPlayerIsOpen",
+		},
+	},
 
 	// ── 双平台 ─────────────────────────────────────────────────────────────
 	{

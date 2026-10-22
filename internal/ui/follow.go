@@ -340,11 +340,6 @@ func (s *Shell) viewFollow(c *ui.Context, _ *ui.Route) {
 
 	f := s.followPageOf()
 
-	// 先收后台投回来的结果，再画：这样这一帧画的就是已经加上/换掉的那几格，
-	// 不用等下一帧（铁律三）。
-	s.adoptFollow(f)
-	s.resetFollowIfAccountChanged(f)
-
 	// ⚠️ **没挂上客户端就说清，而不是发一个注定失败的请求**（理由见
 	// viewLibraryMissing）。这一支画的是**路由表里那一句**加上「没接上」这个
 	// 这一次特别的原因——从别的页面切过来的那条路按 `lookup(path).Empty.Title`
@@ -362,6 +357,47 @@ func (s *Shell) viewFollow(c *ui.Context, _ *ui.Route) {
 	// 另一个标志（`Route.HideInMenuWhenLoggedOut`）——两件事，两个标志（票 #138）。
 	if lookup(followPath).RequiresLogin && !s.app.LoggedIn() {
 		s.viewNeedsLogin(c, "page:"+followPath, followNotLoggedIn)
+		return
+	}
+
+	ui.Row(c).Key("page:" + followPath).Grow(1).FillHeight().Children(func() {
+		s.viewFollowPane(c, f)
+		ui.Column(c).Key("follow-body").Grow(1).FillHeight().Padding(16).
+			Gap(8).Children(func() {
+			s.viewFollowSearch(c, f)
+			s.viewFollowGrid(c, f)
+		})
+	})
+
+	// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见 `widgets/list` 的
+	// `BackToTop`）。
+	//
+	// ⚠️ **这一页右边那一格自己滚**（那些用户卡片是方的，行高跟着内容走），所以
+	// 位置是像素而不是行数——挂一个 `ScrollState` 上去，让框架把偏移写回来。
+	list.BackToTop(c, f.scroll.Y, f.scrollTop)
+}
+
+// syncFollow 是「我的关注」这一页每帧的副作用：收后台投回来的结果、换账号就重置、
+// 起该起的那两拉（分组那一列 + 右边第一格）。
+//
+// ⚠️ **它们原来在 `viewFollow` 的开头**，而这一页在满屏开着的时候不画（票 #161）
+// ——不挪的话，用户在满屏里看频谱的那几分钟里，关注列表的后台结果一直躺在信箱
+// 里没人取。
+//
+// ⚠️ **那两道闸（没挂上客户端 / 没登录）照抄**：没登录时那四个接口发了也是白发
+// （一律回 -101）。
+func (s *Shell) syncFollow(c *ui.Context) {
+	f := s.followPageOf()
+
+	// 先收后台投回来的结果，再画：这样这一帧画的就是已经加上/换掉的那几格，
+	// 不用等下一帧（铁律三）。
+	s.adoptFollow(f)
+	s.resetFollowIfAccountChanged(f)
+
+	if !s.app.ExploreMounted() {
+		return
+	}
+	if lookup(followPath).RequiresLogin && !s.app.LoggedIn() {
 		return
 	}
 
@@ -388,22 +424,6 @@ func (s *Shell) viewFollow(c *ui.Context, _ *ui.Route) {
 			go s.fetchFollowUsers(ctx, f, f.gen, f.tab, f.applied, f.pager.page, len(f.users), f.tabTotal())
 		}
 	}
-
-	ui.Row(c).Key("page:" + followPath).Grow(1).FillHeight().Children(func() {
-		s.viewFollowPane(c, f)
-		ui.Column(c).Key("follow-body").Grow(1).FillHeight().Padding(16).
-			Gap(8).Children(func() {
-			s.viewFollowSearch(c, f)
-			s.viewFollowGrid(c, f)
-		})
-	})
-
-	// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见 `widgets/list` 的
-	// `BackToTop`）。
-	//
-	// ⚠️ **这一页右边那一格自己滚**（那些用户卡片是方的，行高跟着内容走），所以
-	// 位置是像素而不是行数——挂一个 `ScrollState` 上去，让框架把偏移写回来。
-	list.BackToTop(c, f.scroll.Y, f.scrollTop)
 }
 
 // scrollTop 回到顶上。

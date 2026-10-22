@@ -72,6 +72,11 @@ func (s *Shell) viewShortcuts(c *ui.Context) {
 	//     有意义：那一页不画了，`keepRecordingFocus` 不跑，焦点迟早会离开那一格，
 	//     而 `FocusBind` 并**不**保证离开时把变量清零（实测：点一格再点侧栏回首页，
 	//     它还留着）。一帧的延迟无妨——走开之后那一帧本来就没有按键会来。
+	//
+	// ⚠️ **满屏开着的时候这一页也不画**（票 #161：底层那一层在满屏开着的时候
+	// 一个控件都不建）——所以 `syncSettings` 那一层要替它把 `recorderShown` 置上
+	// （见那里那一段）。不置的话，用户正在录的那一个快捷键会在满屏开着的时候
+	// 被这一句静默收掉。
 	drawn := s.recorderShown
 	s.recorderShown = false
 	if s.recording != (shortcutSlot{}) && !drawn {
