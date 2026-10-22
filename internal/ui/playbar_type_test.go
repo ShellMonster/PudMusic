@@ -344,16 +344,26 @@ func TestTheSkipKeysDrawBiggerGlyphs(t *testing.T) {
 	}
 }
 
-// TestTheBarIsWiderWithATrackThanWithout 钉宽度账的**前提**：右边那一组是
-// 「有歌时」的那一档。
+// TestTheRightGroupDoesNotTakeWidthFromTheMiddleColumn 钉宽度账的**前提**：
+// 右边那一组是「有歌时」的那一档，而**它不占中间那一列的宽度**。
 //
 // ⚠️ **「下载」那一枚是有歌时才摆的**（上游也是那个条件），所以没有歌时右边
-// 那一组窄 40（一枚 32 的键加一道 8 的缝），而中间那一列（进度条）多拿一半：
-// 20。
+// 那一组窄 40（一枚 32 的键加一道 8 的缝）。
 //
-// 这一条钉的是**那个差**（40 / 20），不是某个绝对数——绝对数会跟着「右边那一组
-// 以后多一枚键」这种正经改动一起变，而差值是「有没有歌」这件事本身。
-func TestTheBarIsWiderWithATrackThanWithout(t *testing.T) {
+// 🔴 **那一组不再从中间那一列拿宽度了**（票 #216）：它现在是**绝对定位**贴着
+// 内容区右沿的，不占那 1 份轨道，所以**有没有歌都不影响进度条**。
+//
+// ⚠️ **它原来叫 `TestTheBarIsWiderWithATrackThanWithout`**（票 #216 之前），
+// 断的是「没歌时进度条比有歌时宽 20」——那时候右边那一组和左边、中间**各分
+// 一半**多出来的那一份，它多占的 40 于是让中间那一列窄 20。那条机制**整个
+// 没有了**（中间那一列现在是 1:3:1 的三份，只由窗口宽度决定），所以判据改成
+// 现在这条：**两档一样宽**。名字也跟着改——留着「IsWider」而实际断的是
+// 「一样宽」，那是**注释说谎比没有注释更坏**（AGENTS §7）。
+//
+// 这一条钉的是**那个差**（右边那组的 40 / 进度条的 0），不是某个绝对数——
+// 绝对数会跟着「右边那一组以后多一枚键」这种正经改动一起变，而差值是
+// 「有没有歌」这件事本身。
+func TestTheRightGroupDoesNotTakeWidthFromTheMiddleColumn(t *testing.T) {
 	withTrack, _ := playbarTester(t, barState(), 1200, 0, false)
 	withoutTrack, _ := playbarTester(t, app.State{Rate: 1, PlayMode: app.PlayModeLoop}, 1200, 0, false)
 
@@ -367,9 +377,9 @@ func TestTheBarIsWiderWithATrackThanWithout(t *testing.T) {
 
 	withBar, _ := withTrack.Find("播放进度")
 	withoutBar, _ := withoutTrack.Find("播放进度")
-	if diff := withoutBar.W - withBar.W; math.Abs(float64(diff-20)) > 0.5 {
-		t.Errorf("没歌时进度条是 %.1f，有歌时是 %.1f（差 %.1f），want 差 20——"+
-			"右边那一组多占的 40 是左边和中间各分一半", withoutBar.W, withBar.W, diff)
+	if diff := withoutBar.W - withBar.W; math.Abs(float64(diff)) > 0.5 {
+		t.Errorf("没歌时进度条是 %.1f，有歌时是 %.1f（差 %.1f），want 差 0——"+
+			"右边那一组是绝对定位的，不占中间那一列的宽度", withoutBar.W, withBar.W, diff)
 	}
 }
 
