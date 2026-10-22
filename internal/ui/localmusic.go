@@ -177,9 +177,8 @@ const (
 // dialogOnDanger 是红色确认按钮上的字。
 //
 // 主题给的是 `Danger` 那一个颜色，没有配套的「危险底上的前景色」，而这里
-// 需要的正是后者。白色在两个主题的 Danger 上都读得清（见 confirmDialog 里
-// 那句关于 #dc2626 / #ef4444 的注释），所以就用白。
-// dialogOnDanger 是红色确认按钮上的字。
+// 需要的正是后者。白色在上游那一档 Danger（`#f31260`）上是 4.1:1——比改之前的
+// 深色档 `#ef4444`（3.8:1）还高一点，所以就用白（见 confirmDialog 里那句话）。
 var dialogOnDanger = ui.RGB(255, 255, 255)
 
 // localPage 是本地音乐这一页自己的状态。建一次，每一帧调 View。

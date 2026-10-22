@@ -84,6 +84,47 @@ func BuildTheme(s app.Settings, systemDark bool) *ui.Theme {
 	return buildTheme(s, systemDark, ui.Preferences{})
 }
 
+// 上游那三个语义色（DESIGN.md §四「颜色与状态」）。
+//
+// ⚠️ **深浅两套是同一个值**：上游 HeroUI 的 `danger` / `warning` / `success`
+// 本身就不分深浅，这里也不分——之前那三档是框架自己的默认（浅色 #dc2626 /
+// #d97706 / #16a34a，深色 #ef4444 / #f59e0b / #22c55e），红橙绿都是另一套色相。
+//
+// ⚠️ **`success` 和主色是两回事**：主色是 Biu 的绿 `#1ed760`（用户能在设置里
+// 换），`success` 是 HeroUI 那个绿 `#17c964`（写死的）。两个挨得很近，但用户
+// 换主色的时候不该把「下载完成」那一档一起换了。
+const (
+	semanticDanger  = "#f31260"
+	semanticWarning = "#f5a524"
+	semanticSuccess = "#17c964"
+)
+
+// 分隔线（上游 HeroUI 的 `divider`）。
+//
+// ⚠️ **深色那档是叠出来的**：`rgba(255,255,255,0.15)`——15% 白叠在**当前的底色**
+// 上。底色是默认的 `#18181b` 时叠出来是 `#3b3b3d`（DESIGN.md 注释里写的「约
+// #3a3a3b」是同一个数的口头值）。
+//
+// ⚠️ **不能写成实色**：用户自己挑了底色之后，那道线要叠在**那个**底色上——
+// 写死就是「按默认底色算的线压在用户挑的底上」。
+//
+// ⚠️ 框架默认那一份是 `#d9d9de`（浅）/ `#3f3f46`（深），两个都不是上游的值：
+// 深色那个是**实色**（比 15% 白亮得多），浅色那个差两个通道。
+const (
+	// dividerLight 是浅色下的分隔线：#dbdbdb。
+	dividerLight = "#dbdbdb"
+	// dividerDarkAlpha 是深色下那道线的浓度：15% 白。
+	dividerDarkAlpha = 0.15
+)
+
+// dividerColor 是当前这份主题的分隔线颜色。
+func dividerColor(t *ui.Theme) ui.Color {
+	if t.Dark {
+		return t.Background.Mix(ui.RGB(255, 255, 255), dividerDarkAlpha)
+	}
+	return ui.Hex(dividerLight)
+}
+
 // buildTheme 是 BuildTheme 加桌面偏好。
 //
 // ## 只跟框架 `Theme.follow` 的两样，不跟主色
@@ -138,9 +179,19 @@ func buildTheme(s app.Settings, systemDark bool, p ui.Preferences) *ui.Theme {
 		// 浅灰、深底上的还是深灰，两个主题的「层次」在自定义底色上就断了。
 		applyBackground(t)
 	}
+	// 分隔线：上游 HeroUI 的 `divider`（深色 15% 白叠出、浅色 #dbdbdb）。
+	//
+	// ⚠️ **放在底色之后**：深色那档是叠在**当前底色**上的，用户挑了底色，
+	// 那道线要跟着重算。
+	t.Border = dividerColor(t)
 	if c, ok := parseHexColor(s.PrimaryColor); ok {
 		applyAccent(t, c)
 	}
+
+	// 语义色换成上游那三档（DESIGN.md §四）。深浅两套同一个值。
+	t.Danger = ui.Hex(semanticDanger)
+	t.Warning = ui.Hex(semanticWarning)
+	t.Success = ui.Hex(semanticSuccess)
 
 	// 🔴 Inverse / InverseText 留零的话，MyGo 的 inverse() 会退回
 	// 「fill=Text、text=Background」——深色下就是**一张白底卡片**，
@@ -188,18 +239,21 @@ func scrollbarHot(t *ui.Theme) ui.Color {
 	return t.Scrollbar.Alpha(1.6)
 }
 
-// applyBackground 按用户挑的底色重推控件那一层：Surface 三档和 Border。
+// applyBackground 按用户挑的底色重推控件那一层：Surface 三档。
 //
 // ## 比例是从框架那两套默认值反推的
 //
 // 浅色默认底色 `#ffffff` → Surface `#f4f4f5`（往黑 4.3%）、Hover `#e9e9ec`
-// （8.6%）、Pressed `#dddde1`（13.7%）、Border `#d9d9de`（14.9%）。
+// （8.6%）、Pressed `#dddde1`（13.7%）。
 // 深色默认 `#18181b` → Surface `#27272a`（往白 6.5%）、Hover `#323236`
-// （11.3%）、Pressed `#3c3c41`（15.6%）、Border `#3f3f46`（16.9%）。
+// （11.3%）、Pressed `#3c3c41`（15.6%）。
 //
-// 于是这四档在**默认底色上**推出来的值和框架那套几乎逐字节相同（差 1 个通道
+// 于是这三档在**默认底色上**推出来的值和框架那套几乎逐字节相同（差 1 个通道
 // 的地方是 `Mix` 的舍入），换个底色就整体跟着平移——「控件比底色亮/暗多少」
 // 这件事不随底色变。
+//
+// ⚠️ **描边不在这儿**：分隔线是上游的 `divider`（深色 15% 白叠出、浅色
+// #dbdbdb），它自己有一套规矩，见 `dividerColor`。
 //
 // ⚠️ `Text` / `TextMuted` **不跟着推**：那是票面范围之外（只说「控件的底色和
 // 描边」），而且正文色的对比度是用户挑底色时自己要看的事。主色当字色的那一档
@@ -211,14 +265,13 @@ func applyBackground(t *ui.Theme) {
 	if !t.Dark {
 		mix = black
 	}
-	surface, hover, pressed, border := float32(0.043), float32(0.086), float32(0.137), float32(0.149)
+	surface, hover, pressed := float32(0.043), float32(0.086), float32(0.137)
 	if t.Dark {
-		surface, hover, pressed, border = 0.065, 0.113, 0.156, 0.169
+		surface, hover, pressed = 0.065, 0.113, 0.156
 	}
 	t.Surface = t.Background.Mix(mix, surface)
 	t.SurfaceHover = t.Background.Mix(mix, hover)
 	t.SurfacePressed = t.Background.Mix(mix, pressed)
-	t.Border = t.Background.Mix(mix, border)
 }
 
 // radiusOf 是全局圆角，夹在 0~24。
