@@ -213,7 +213,14 @@ func TestRateMenuLabelsAreNotTruncated(t *testing.T) {
 	for _, r := range app.RateSteps {
 		labels = append(labels, rateLabel(r))
 	}
-	natural := textWidths(t, labels)
+	// ⚠️ **自然宽度要用浮层里那个字号量**（上游 `size="sm"` 的 `text-tiny` = 12，
+	// 票 #220）：浮层里那七行的字是 12，而 `textWidths` 默认量的是主题的默认字号
+	// （13）——拿 13 的自然宽度去比 12 的画面，**每一个都会「被截了」**，而屏幕上
+	// 一个字都没少。
+	//
+	// ⚠️ **写的是字面的 12，不是 `rateMenuFont`**：照抄被测对象的话，改字号的人
+	// 顺手把这一行也改了，这条就永远不会红（票 #217 的评审查过一条同款的）。
+	natural := textWidths(t, labels, 12)
 
 	b := newTestShell(t, at(760, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
 		return func(c *mygoui.Context) {
@@ -240,12 +247,15 @@ func TestRateMenuLabelsAreNotTruncated(t *testing.T) {
 
 // textWidths 量几串字各占多宽，也就是它们的**自然**宽度：在一根够宽、不会
 // 截断的行里各画一次，量画出来的那一个。
-func textWidths(t *testing.T, ss []string) map[string]float32 {
+//
+// ⚠️ **字号必须和被量的那几行一样**：自然宽度是「这几个字在那个字号下有多宽」，
+// 拿另一个字号的宽度去比，短的会被说成「被截了」、长的会被说成「还有富余」。
+func textWidths(t *testing.T, ss []string, font float32) map[string]float32 {
 	t.Helper()
 	tt := mygoui.NewTester(func(c *mygoui.Context) {
 		mygoui.Row(c).Width(1200).Children(func() {
 			for _, s := range ss {
-				mygoui.Text(c, s)
+				mygoui.Text(c, s).FontSize(font)
 			}
 		})
 	}, 1200, 200)

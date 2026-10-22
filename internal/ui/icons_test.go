@@ -71,9 +71,12 @@ func TestEveryIconWeNamedIsThereAndItParses(t *testing.T) {
 //   - 盘上有、表里没有 → **孤儿**（这一条要抓的）
 //   - 表里有、盘上没有 → 启动时就 panic（`mustParseIcons`），由上面那条管
 //
-// ⚠️ 「同一个文件两个名字」是**允许**的（`iconPageList` 和 `iconQueue` 指的
-// 都是 `Editor/list-radio.svg`——上游那两个按钮确实用同一枚图标），所以这里比
+// ⚠️ 「同一个文件两个名字」是**允许**的（名字跟着那个按钮的用处走），所以这里比
 // 的是集合而不是个数。
+//
+// ⚠️ **「播放列表」和「分集」现在用的是两个不同的文件**（票 #220）：上游那边
+// 「播放列表」是 `RiPlayListLine`、分集是 `RiListRadio`，两个入口用同一张图的话
+// 用户分不出哪个是哪个（见 `TestThePlaylistKeyAndThePartKeyAreDifferentGlyphs`）。
 func TestEveryIconOnDiskHasAName(t *testing.T) {
 	dir := filepath.Join("iconset", "icons")
 	var onDisk []string

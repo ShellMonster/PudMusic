@@ -46,10 +46,14 @@ const (
 	// volSliderW / volSliderH 是浮层里那根竖滑块的宽和高。
 	//
 	// 上游是 `h-40 w-[32px]`（160 高、32 宽，`music-volume` 的
-	// `trackWrapper`）。我们矮一点：浮层是从播放条往上弹的，160 高在 560 高的
-	// 最小窗口里会顶进内容区。
-	volSliderW = 20
-	volSliderH = 120
+	// `trackWrapper`）——票 #220 / 报告 §3.9 把它对齐了。
+	//
+	// ⚠️ **160 高在 560 高的最小窗口里装得下**：浮层是**往上**弹的，160 高加上
+	// 播放条那 88 是 248，而窗口最少 560（`WindowOptions.MinHeight`）——
+	// 剩 312 给内容区，绰绰有余。改之前那句「160 高会顶进内容区」的理由是按
+	// 「浮层往下弹」算的（它不往下弹）。
+	volSliderW = 32
+	volSliderH = 160
 
 	// volCloseGrace 是「指针离开了图标和浮层」之后还留着浮层多久。
 	//
@@ -74,8 +78,18 @@ const (
 	//
 	// ⚠️ **定宽是必须的**：列宽若由最宽的那一行（百分比）撑着，而滑块是**居中**的，
 	// 数字从「0%」变成「100%」时列宽变了，**滑块就在指针底下横向挪**（评审指出来的）。
-	// 36 装得下「100%」那三个字（11px 的字约 26 宽）。
-	volPanelW = 36
+	//
+	// 40 = 滑块那 32 + 左右各 4 的内边距——**滑块要放得下**（票 #220 把它从 20
+	// 加宽到 32，而列的内容宽是「列宽 − 内边距」，列不改的话滑块会探出列外）。
+	// 里面那个百分比是**定宽**的一格（`Width(volPanelW)`），所以「100%」三个字
+	// 换不换位置都不会挪。
+	volPanelW = 40
+
+	// volPercentFont 是浮层底下那个百分比的字号：**12**。
+	//
+	// 上游是 `endContent` 的 `text-xs`（12，`music-volume/index.tsx:126-149`），
+	// 我们原来写的是 11（票 #220 / 报告 §3.9 对齐上游）。
+	volPercentFont = 12
 
 	// volDefaultUnmute 是「压根没静音过（音量本来就是 0）」时取消静音放回去的值。
 	//
@@ -85,13 +99,14 @@ const (
 
 // volSliderLook 是浮层里那根竖滑块的样子。
 //
-// 轨道 4 像素、旋钮 14 见方，旋钮是主色（浮层的底是 `t.Background`，白旋钮在
+// 轨道 4 像素、旋钮 **16** 见方（上游 `size="sm"` 的那一档，票 #220 / 报告 §3.9
+// 把 14 改成 16），旋钮是主色（浮层的底是 `t.Background`，白旋钮在
 // 浅色主题下和底色一样）。
 var volSliderLook = sliderLook{
 	vertical:     true,
 	trackW:       4,
-	knobW:        14,
-	knobH:        14,
+	knobW:        16,
+	knobH:        16,
 	knobWhenIdle: true,
 	face: func(t *ui.Theme) ui.Color {
 		return t.Accent
@@ -147,7 +162,7 @@ func (s *Shell) viewVolumeButton(c *ui.Context, st app.State) {
 	// 上游也没有：它那一枚的 `aria-label` 就是「静音 / 取消静音」，而悬停出来
 	// 的那个 Tooltip **是竖滑块本身**。所以「按一下会静音」这件事靠的是
 	// **图标本身**（静音了它换成静音那张）加上这一枚的无障碍名字。
-	btn := iconButton(c, name, label, iconMd).
+	btn := iconKey(c, name, label, iconMd, false).
 		Size(iconHitMd, iconHitMd).Padding(0, 7).
 		TextColor(t.TextMuted)
 
@@ -235,7 +250,8 @@ func (s *Shell) viewVolumePanel(c *ui.Context, st app.State) {
 			s.setVolume(vol)
 		}
 		// 百分比也定宽：不然它自己在那一格里靠左，字数一变位置就变。
-		ui.Text(c, volPercent(vol)).FontSize(scale.Font(c, 11)).TextColor(t.TextMuted).Width(volPanelW)
+		ui.Text(c, volPercent(vol)).FontSize(scale.Font(c, volPercentFont)).
+			TextColor(t.TextMuted).Width(volPanelW)
 	})
 
 	// 记下「指针在浮层里」，给下一帧的收放判断用（见 `syncVolIdle`）。
