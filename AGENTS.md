@@ -73,7 +73,8 @@ FAIL，逐个包看 `ok`。**它是默认不跑的**（见上），所以它绿�
   测出来的结果本身也不作数。**整包扫描是一次性的排查手段，不是每票的验收项。**
 
   ```sh
-  go build ./... && go vet ./... && go test ./...   # 默认一次
+  go build -p 4 ./... && go vet -p 4 ./... && go test -p 4 \
+      $(go list ./... | grep -v '/internal/ui$')   # 默认一次，不跑界面整包
   GOGC=10 go test ./internal/ui/ -count=3 -timeout 5m \
       -run '你这次改动对应的用例名'   # 改了界面行为才加
   ```
