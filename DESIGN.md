@@ -198,6 +198,8 @@ structural:
 
 ### 迷你播放器
 - 320×100、置顶、不占任务栏、位置记忆。
+- **面板语义**：点它不激活应用（macOS 的 nonactivating `NSPanel`）；应用仍是
+  普通 Dock 应用，不改成 accessory。
 - 控制键是图标；**音量保留**（用户已定，上游没有）。
 
 ### Tab
