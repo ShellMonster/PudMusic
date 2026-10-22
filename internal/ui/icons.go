@@ -44,6 +44,7 @@ package ui
 import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
 )
@@ -426,16 +427,17 @@ const (
 	// ⚠️ **它和 iconHit 是同一个数**（上游那一档不分大小：图标键的盒子恒是
 	// 32×32），而图标本身是 18——所以那圈留白是每边 7。
 	iconHitMd = 32
-	// iconHitPlay 是播放/暂停那一枚：48 的图标 + 每边 5。
+	// iconHitPlay 是播放/暂停那一枚的**盒子**：48×48。
 	//
-	// ⚠️ **它跟着 iconPlayBtn 一起长的**（30 → 48 的图标，点击区 40 → 58）：
-	// 点击区是「图标 + 每边 5 的内边距」，图标大了点击区就得跟着大，否则那圈
-	// 留白会被图标顶掉——图标画在按钮的中间，多出来的那一截会被裁掉。
+	// ⚠️ **它跟图标一样大**（`iconPlayBtn` 也是 48）：上游那一枚是
+	// `className="size-12 min-w-12"` 的空按钮，里面画一枚 `size={48}` 的图形——
+	// **图形正好填满盒子**（`music-play-control/index.tsx:23-25`）。上游**没有**
+	// 那 5 像素留白，我们原来有（图标 48 + 每边 5 = 58），于是那一枚比上游大了一圈。
 	//
-	// ⚠️ **它不跟上游的 32 走**：那一枚是 48 的图标，盒子恒是 32 的话图标
-	// 自己就装不下了（上游那一枚是 `size="md"` 的**实心**键，HeroUI 给它的是
-	// 40×40 的那一档，见 `DESIGN.md` 的「播放键 48」）。
-	iconHitPlay = 58
+	// ⚠️ **别又给它加回留白**：留白不是「好按」，是「图形没填满盒子」——
+	// 上游那一枚的图形自己就带着 4 像素（圆占画布 20/24），那 4 像素才是留白。
+	// 而 48×48 这一格本来就是全条上最大的一枚命中区（别的是 32）。
+	iconHitPlay = 48
 )
 
 // iconButton 造一个**只画一个图标**的扁平按钮。
@@ -456,18 +458,77 @@ func iconButton(c *ui.Context, name, label string, font float32) ui.Element {
 	return flatIconButton(c, name, label, font)
 }
 
-// iconButtonPrimary 是播放/暂停那一枚：主色按钮。
+// iconButtonPlay 是播放/暂停那一枚：**上游那一枚**。
+//
+// 上游（`components/music-play-control/index.tsx:23-25`）：
+//
+//	<IconButton isDisabled={…} radius="full" onPress={togglePlay} className="size-12 min-w-12">
+//	  {isPlaying ? <RiPauseCircleFill size={48}/> : <RiPlayCircleFill size={48}/>}
+//	</IconButton>
+//
+// 而那个 `IconButton`（`src/components/icon-button/index.tsx:11-19`）是
+// `Button isIconOnly radius="md" size="sm" variant="light" className="hover:text-primary text-inherit"`
+// ——**无底色、无描边，图形用前景色画**，悬停时变主色。
+//
+// 所以这一枚是四件事：
+//
+//  1. **没有实心底色**。原来是 `ui.PrimaryButton`：一块 58×58 的**主色圆角方块**
+//     （主题圆角 8，不是药丸），里面一枚**深色**的圆——**明暗正好和上游反过来**，
+//     一眼就看不出是同一个东西。
+//  2. **图形是前景色**（深色下白、浅色下近黑），不是主色。
+//  3. **盒子 48×48，图形正好填满**（`iconHitPlay`）。
+//  4. **悬停时图形变主色**（上游的 `hover:text-primary`）。
+//
+// ⚠️ **主色当字色那一档取 `ink.AccentOn`**：浅色下主色是 #1ed760，压在白底上
+// 只有 1.9:1（`widgets/ink` 的文件头写着这件事），所以取那个「读得出来」的变体；
+// 深色下就是主色本身。理由和 `flatbutton.go` 的 `flatCurrent` 是同一条：
+// **主色当底和主色当字是两件事**。
+//
+// 🔴 **这一档只给「底是应用底色」的地方用**：满屏播放器那一枚的底是**压暗过的
+// 封面**，不是应用底色——主色当字色那一档压在那上面只有 1.0:1（实测），而且
+// 那一行其余四枚图标都是满屏自己的前景色，一枚变绿另外四枚不变，一眼就不成套。
+// 所以满屏那一枚走 `iconButton`（见 `fullplayer.go` 的 `viewFullControls`）。
+//
+// ⚠️ **别把它改回实心主色**：那一版的理由写在 `iconButtonPrimary` 上面，
+// 那条理由已经跟着播放键一起作废了（上游那一枚同样是强调色的播放键，只是它靠的
+// 是 `RiPlayCircleFill` 那张实心图形，而不是一块底）。
+//
+// 判据在 `playbar_layout_test.go` 的 `TestThePlayKeyIsBigEnoughToHit`：
+// 那一枚现在量的是「播放条底色上那一片墨迹」，不再是「主色底上那一片墨迹」。
+func iconButtonPlay(c *ui.Context, name, label string, font float32, disabled bool) ui.Element {
+	b := flatIconButton(c, name, label, font).Disabled(disabled)
+	// 悬停时图形变主色。
+	//
+	// ⚠️ **在建元素的时候问 `Hovered()`**：框架把悬停那一层挂在 `styleFn` 上，
+	// 而那个我们拿不到——`flat` 那个包里的悬停底也是这么问的（见
+	// `widgets/flat/flat.go` 的 `feel`）：**指针位置不进事件循环就不变**，于是
+	// 画面上的效果一样。
+	//
+	// 🔴 **问之前先禁用**（上面那句 `Disabled`）：`Hovered()` 在**禁用**的键上恒为
+	// false（`mygo/ui/input.go:1116`），所以**先禁用、再问悬停**，一枚禁用的键
+	// 问出来就是 false。而反过来（先问悬停、后禁用）问出来的是「它悬停着」——
+	// 一枚**禁用**的键用主色告诉用户「这里点得动」。
+	// 禁不启用是**状态**决定的（没歌的时候那一枚是禁用的），所以由调用方给。
+	if b.Hovered() {
+		b = b.TextColor(ink.AccentOn(c.Theme()))
+	}
+	return b
+}
+
+// iconButtonPrimary 是顶栏那个**登录**键：一枚实心主色的方块。
 //
 // 和 iconButton 只差一个「底色是主色」——两者的形状、图标、点击区完全一样，
 // 写成两个是为了不去改 MyGo 建出来的按钮样式（`ui.PrimaryButton` 是建的时候
 // 选的，建完再改底色要连 hover / pressed 两个色一起改）。
 //
-// ⚠️ **这一枚故意不跟着扁平化走**：调研点名的「多了一圈 1px 描边和一块底色」
-// （报告 §1.1 的 F1）说的是那圈 `t.Border` 和 `t.Surface` 那种**控件底色**，
-// 而这一枚的实心主色是**强调色**，是「这里是主操作」的唯一视觉标记。上游那边
-// （`components/music-play-control/index.tsx:23-24`）同样是一枚强调色的播放键，
-// 只是它靠的是 `RiPlayCircleFill` 那张实心图形而不是一块底。换成扁平之后两边的
-// 形状不一样（我们是一块圆底，他们是一枚圆图形），**主操作的重量必须留着**。
+// ⚠️ **它和播放键不是一回事**：播放键早就改成上游那一枚了（无底色，见
+// `iconButtonPlay`），而**登录键上游那边没有对应的东西**（上游把登录挂在头像
+// 下拉里，`navbar/login`），所以这一枚是我们自己的设计——实心主色是「这是主操作」
+// 的标记。
+//
+// ⚠️ **别拿它当播放键的模板**：播放键原来也走它，理由写的是「实心主色是强调色，
+// 主操作的重量必须留着」——那条理由是照着**旧形状**写的（我们是一块圆底，上游是
+// 一枚圆图形），而上游那一枚改过来之后，这条理由自己就不成立了。
 func iconButtonPrimary(c *ui.Context, name, label string, font float32) ui.Element {
 	btn := ui.PrimaryButton(c, "").Label(label)
 	btn.Children(func() { ui.Icon(c, icon(name)).FontSize(font) })

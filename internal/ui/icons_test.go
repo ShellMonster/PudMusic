@@ -696,7 +696,11 @@ func TestTheHitAreaIsBiggerThanTheGlyph(t *testing.T) {
 	}{
 		{"上一首", iconMd, iconHitMd},
 		{"下一首", iconMd, iconHitMd},
-		{"播放", iconPlayBtn, iconHitPlay},
+		// ⚠️ **「播放」不在这张表里**：它是**图形正好填满盒子**的那一枚例外
+		// （上游 `className="size-12 min-w-12"` + `RiPlayCircleFill size={48}`，
+		// 没有那 5 像素留白），所以「每边留白 ≥ 3」按**图标边长**算是 0——
+		// 它得按**画面上量到的那一枚图形**算（圆占画布 20/24，留白是 4）。
+		// 下面单独断它。
 		{"播放模式", iconMd, iconHitMd},
 		{"加歌", iconMd, iconHitMd},
 		{"收藏", iconSm, iconHit},
@@ -705,6 +709,7 @@ func TestTheHitAreaIsBiggerThanTheGlyph(t *testing.T) {
 		{"下载", iconMd, iconHitMd},
 	}
 
+	const wantSlack = 3
 	for _, k := range keys {
 		btn, ok := h.tt.Find(k.label)
 		if !ok {
@@ -722,7 +727,6 @@ func TestTheHitAreaIsBiggerThanTheGlyph(t *testing.T) {
 		}
 
 		// (3) 留白够，且画面上那个框真的是 hit 那么大。
-		const wantSlack = 3
 		if slack := (k.hit - k.glyph) / 2; slack < wantSlack {
 			t.Errorf("%q 的图形 %.0f、点击区 %.0f，每边只留 %.1f 像素（want ≥ %d）——"+
 				"指针得瞄得很准才按得中", k.label, k.glyph, k.hit, slack, wantSlack)
@@ -732,6 +736,48 @@ func TestTheHitAreaIsBiggerThanTheGlyph(t *testing.T) {
 				"布局没用上那个尺寸", k.label, btn.W, btn.H, k.hit)
 		}
 
+	}
+
+	// 「播放」那一枚单独断：它的**盒子就是图形那一份画布**（上游
+	// `size-12 min-w-12`），所以留白要按**画面上量到的那一枚图形**算。
+	//
+	// ⚠️ **量它不能靠 `scanGlyph`**：那一枚的图形占了盒子的一大半（圆直径 40），
+	// 于是「框内的众数」是**图形本身**而不是底色，`scanGlyph` 量出来的是空的。
+	// 这一枚底下什么都没有（上游那一枚也是），所以拿**播放条的底色**当参照就
+	// 量得出来。
+	play, ok := h.tt.Find("播放")
+	if !ok {
+		t.Fatalf("画面上找不到播放键：%q", h.tt.Texts())
+	}
+	// 底色从画面上采：按钮左边三像素那一列（那一段是空的——上一首和它之间隔着
+	// 24 的缝）。不跟主题算，免得多一份依赖。
+	col := make([]color.RGBA, 0, int(play.H))
+	for dy := range int(play.H) {
+		col = append(col, h.tt.Image().RGBAAt(round32(play.X)-3, round32(play.Y)+dy))
+	}
+	bg := modeOf(col)
+	lo, hi, n := inkExtent(h.tt.Image(), play, bg)
+	if n == 0 {
+		t.Fatalf("播放键上没画东西：%q", h.tt.Texts())
+	}
+	// (1) 图形的外接框严格小于按钮框。
+	if float32(hi-lo+1) >= play.W {
+		t.Errorf("播放键的图形 %.0f 宽，并不小于按钮 %.0f——它把盒子填满了",
+			float32(hi-lo+1), play.W)
+	}
+	// (3) 留白每边至少 3 像素，且画面上那个框真的是 hit 那么大。
+	if slack := (play.W - float32(hi-lo+1)) / 2; slack < wantSlack {
+		t.Errorf("播放键的图形 %.0f、盒子 %.0f，每边只留 %.1f 像素（want ≥ %d）——"+
+			"指针得瞄得很准才按得中", float32(hi-lo+1), play.W, slack, wantSlack)
+	}
+	// 盒子真的是 48×48（上游 `size-12 min-w-12`）。
+	//
+	// ⚠️ **写的是字面的 48，不是 `iconHitPlay`**：写成常量的话，把常量改回 58
+	// 这一条就照样绿——而「48」是上游源码里的那个数，得由这一条钉住。
+	const wantPlayBox = 48
+	if d := absF(play.W-wantPlayBox) + absF(play.H-wantPlayBox); d > 2 {
+		t.Errorf("播放键在画面上是 %.1fx%.1f，而上游那一枚的盒子是 %d×%d——"+
+			"布局没用上那个尺寸", play.W, play.H, wantPlayBox, wantPlayBox)
 	}
 
 	// (2) 四条边内两像素处按得中。只在**播放/暂停**这一枚上量：它是唯一能连点
@@ -781,14 +827,22 @@ func absF(v float32) float32 {
 	return v
 }
 
-// TestTheRoundKeyKeepsItsEdge 钉住主色那一枚（播放/暂停）的图形也没有贴到边。
+// TestTheRoundKeyKeepsItsEdge 钉住播放/暂停那一枚的图形也没有贴到边。
 //
 // 它是**圆**的，所以量不出干净的包围盒（见 scanGlyph 那段）。改断**边中点**：
-// 左边那一列的中点像素必须还是按钮的底色——那一列在圆的最宽处，图形要是有
+// 左边那一列的中点像素必须还是底色——那一列在圆的最宽处，图形要是有
 // 顶到边，它就会出现在那里。四个边中点都量一遍。
 //
 // 这一条补的是 `TestTheHitAreaIsBiggerThanTheGlyph` 在圆形键上量不了的那一半：
 // 那个键是播放条上最大的一枚，也正是最容易被「给大一点」的那一枚。
+//
+// ⚠️ **参照色是「播放条的底色」，不是按钮自己的底色**：票 #217 把这一枚改成上游
+// 那一枚之后，它**底下什么都没有**了（原来是一块实心主色方块），于是「按钮的
+// 底色」就是播放条的底色。
+//
+// ⚠️ **不能拿 `scanGlyph` 给的 `g.bg`**：那一枚的图形占了框的一大半（圆直径 40），
+// 于是「框内的众数」是**图形本身**——拿它当参照等于拿图形和图形比，那一条会
+// 恒红。底色从画面上采：按钮左边三像素那一列（上一首和它之间隔着 24 的缝）。
 func TestTheRoundKeyKeepsItsEdge(t *testing.T) {
 	h := newHarness(t)
 	h.open(t)
@@ -807,10 +861,17 @@ func TestTheRoundKeyKeepsItsEdge(t *testing.T) {
 		t.Fatalf("播放键上没画东西：%q", h.tt.Texts())
 	}
 
+	// 参照色：播放条的底色（采自按钮左边那一列）。
+	col := make([]color.RGBA, 0, int(btn.H))
+	for dy := range int(btn.H) {
+		col = append(col, h.tt.Image().RGBAAt(round32(btn.X)-3, round32(btn.Y)+dy))
+	}
+	bg := modeOf(col)
+
 	// 边中点：左右取垂直中点，上下取水平中点。
 	//
 	// ⚠️ **四舍五入，不截断**（和上面 `scanGlyph` 同一个理由）：`Tester` 给的框是
-	// 小数，而这一枚的按钮在 309.65 —— `int()` 截下来落在按钮**外面**一像素，
+	// 小数，而 `int()` 截下来落在按钮**外面**一像素，
 	// 取到的是身后那一层（播放条的底色），于是报出来的是「图形顶到边了」，
 	// 而图形其实好好地待在离边五像素的地方。
 	edges := map[string][2]int{
@@ -823,9 +884,9 @@ func TestTheRoundKeyKeepsItsEdge(t *testing.T) {
 	for _, side := range []string{"左边", "右边", "上边", "下边"} {
 		at := edges[side]
 		p := img.RGBAAt(clampX(img, at[0]), clampY(img, at[1]))
-		if distinctPixel(p, g.bg) {
-			t.Errorf("%s中点 (%d,%d) 是 %v，和按钮底色 %v 不一样——"+
-				"图形顶到边了，那一圈没有内边距", side, at[0], at[1], p, g.bg)
+		if distinctPixel(p, bg) {
+			t.Errorf("%s中点 (%d,%d) 是 %v，和底色 %v 不一样——"+
+				"图形顶到边了，那一圈没有内边距", side, at[0], at[1], p, bg)
 		}
 	}
 }
@@ -898,8 +959,11 @@ func TestEveryIconButtonNamesItself(t *testing.T) {
 			// （`iconButton` 就是 `flatIconButton` 的别名，见 icons.go），而这
 			// 一票铺开扁平按钮之后 `flatIconButton` 的调用点比 `iconButton` 还多。
 			// 只扫 `iconButton` 的话，新写的那些图标键一个都管不到。
+			//
+			// ⚠️ **`iconButtonPlay` 也要扫**（票 #217 那一枚）：它同样是「只有图标的
+			// 按钮」，同样得有个无障碍名字。
 			if !ok || (id.Name != "iconButton" && id.Name != "iconButtonPrimary" &&
-				id.Name != "flatIconButton") {
+				id.Name != "iconButtonPlay" && id.Name != "flatIconButton") {
 				return true
 			}
 			checked++

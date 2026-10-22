@@ -358,8 +358,12 @@ func TestTheSidebarRowsHaveNoBorderAndNoFill(t *testing.T) {
 //     很薄的底，而不是换成了另一块实色」。
 //  4. 指针挪走要真的撤回去。
 //
-// ⚠️ **「播放 / 暂停」也不在**：那一枚走 `iconButtonPrimary`，是**实心主色**
-// （理由见 `icons.go` 里那个函数的抬头：实心主色是强调色，不是那圈控件描边）。
+// ⚠️ **「播放 / 暂停」也不在**：那一枚现在**也是扁平的**（票 #217 把它改成上游
+// 那一枚：48×48 的盒子、底下什么都没有、图形是前景色），但它**量不了这一族的
+// 判据**——`probeFill` 取的是框内像素的**众数**，而那一枚的图形（直径 40 的圆）
+// 占了框的一大半，于是众数是**图形本身**而不是底色。它自己的那几条在
+// `playbar_layout_test.go`（`TestThePlayKeyHasNoSolidBackground` /
+// `TestThePlayKeyTurnsAccentOnHover`）。
 // **「上一首 / 下一首」同样不在**：它们此刻是**禁用的**
 // （`CanPrev` 要 `player != nil`，无头外壳里没有播放器，`app/queue.go:1210`），
 // 而禁用键本来就不该有悬停反馈——那是 `TestADisabledFlatButtonDoesNotLightUpOnHover`
