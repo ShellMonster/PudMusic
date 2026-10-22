@@ -128,7 +128,12 @@ func (s *Shell) syncSuggestPending(now time.Time) {
 		// ⚠️ **业务层那一摊（`s.app.SearchSuggest("")`）不在这里收**：收浮层是
 		// 「看得见的那一半」的活（浮层关不关由用户点的那一下决定），它留在
 		// `syncSuggest` 里。
+		//
+		// 浮层的滚动位置也一起收（理由同 `syncSuggest` 那一处）：面板每帧都在建，
+		// 滚动位置每帧都重写，而面板**不画**的时候那一帧没人写它——所以这里把
+		// 位置收掉，重新点开那个框时才是顶上。
 		s.terms.seen, s.terms.pendingSince = "", time.Time{}
+		s.terms.scroll = ui.ScrollState{}
 		return
 	}
 	switch {
