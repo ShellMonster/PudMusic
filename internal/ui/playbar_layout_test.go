@@ -71,6 +71,11 @@ func barState() app.State {
 //
 // 中间那一档（1200）**必须**在：只断 900 和 1600 的话，「中间那一列不参与剩余
 // 空间分配、于是两端一样宽」这种坏法在两端是看不出来的（两端都是 80）。
+//
+// 🔴 **票 #216 之后这条仍然成立，但机制换了**：进度条不再是「铺满中间那一列」，
+// 而是中间那一列的 **3/4**（上游 `w-3/4`），而中间那一列是三列里的**三份**
+// （上游的 1:3:1）。新机制下的确切长度由
+// `TestTheMiddleColumnIsThreePartsWide` 那条钉着，这一条只管「越宽越长」。
 func TestTheProgressBarGrowsWithTheWindow(t *testing.T) {
 	var prevW float32
 	var prevAt int
@@ -118,6 +123,221 @@ func TestTheTransportKeysArePrevPlayNext(t *testing.T) {
 		t.Errorf("三键的次序是「上一首 %.1f · 播放 %.1f · 下一首 %.1f」——"+
 			"播放键得在**中间**（上游的 `MusicPlayControl` 就是上一首 · 播放 · 下一首，"+
 			"而我们自己的满屏播放器也是那个次序）", prev.X, play.X, next.X)
+	}
+}
+
+// TestTheTransportKeysSitOnTheVerticalCenterLine 断「三键落在窗口的竖直中轴上」。
+//
+// 🔴 **这是这一票的头一条**：上游把三键和进度条都摆在窗口的竖直中轴上
+// （`layout/playbar/center/index.tsx:12` 的 `items-center`），我们原来三键靠左、
+// 进度条铺满整列，**两者的中轴互相对不上**（实测差 152 像素）。
+//
+// ⚠️ **断的是「三键那一排的中心 == 窗口的中心」，不是「播放键在窗口正中间」**：
+// 播放键是三枚里最宽的一枚（58），它在三键那一排里**正好居中**（32+24+29 =
+// 85 = 170 的一半），所以这两条是一回事——但写成前者，将来播放键换了尺寸
+// （票 #215 要把它改成 48×48）也不会误红。
+//
+// ⚠️ **每一档都要在**：偏差是「左右两列差多少」的函数，而 760 那一档
+// （测试里最窄的窗口）差得最多。
+func TestTheTransportKeysSitOnTheVerticalCenterLine(t *testing.T) {
+	for _, width := range []int{760, 900, 1200, 1600} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			tt, _ := playbarTester(t, barState(), width, 0, false)
+
+			prev, ok := tt.Find("上一首")
+			if !ok {
+				t.Fatalf("画面上找不到「上一首」，文字有 %q", tt.Texts())
+			}
+			next, ok := tt.Find("下一首")
+			if !ok {
+				t.Fatalf("画面上找不到「下一首」，文字有 %q", tt.Texts())
+			}
+
+			got := (prev.X + next.X + next.W) / 2
+			want := float32(width) / 2
+			if absFloat(got-want) > 1 {
+				t.Errorf("三键那一排的中心在 %.1f，而窗口的竖直中轴在 %.1f（差 %.1f）——"+
+					"三键没有落在中轴上（上游 `center/index.tsx:12` 的 `items-center`）",
+					got, want, got-want)
+			}
+		})
+	}
+}
+
+// TestTheTransportKeysAre24Apart 断三键之间的空隙是 24。
+//
+// 上游是 `space-x-6`（`components/music-play-control/index.tsx:19`）= 24，
+// 我们原来只有 12：那时候三枚键挤成一堆，中间那枚——**用户真正要按的那一枚**
+// ——左右只各留 12 的空。
+//
+// ⚠️ **断的是键与键之间的那两道缝**，不是三键的总宽：总宽还含着三枚键自己的
+// 宽度（32 / 58 / 32），改了键的尺寸就会把它顶红，而那不是回归。
+func TestTheTransportKeysAre24Apart(t *testing.T) {
+	tt, _ := playbarTester(t, barState(), 1200, 0, false)
+
+	prev, ok := tt.Find("上一首")
+	if !ok {
+		t.Fatalf("画面上找不到「上一首」，文字有 %q", tt.Texts())
+	}
+	play, ok := tt.Find("播放")
+	if !ok {
+		t.Fatalf("画面上找不到「播放」，文字有 %q", tt.Texts())
+	}
+	next, ok := tt.Find("下一首")
+	if !ok {
+		t.Fatalf("画面上找不到「下一首」，文字有 %q", tt.Texts())
+	}
+
+	for _, gap := range []struct {
+		name string
+		got  float32
+	}{
+		{"上一首和播放之间", play.X - (prev.X + prev.W)},
+		{"播放和下一首之间", next.X - (play.X + play.W)},
+	} {
+		if absFloat(gap.got-transportGap) > 0.5 {
+			t.Errorf("%s只有 %.1f，而它该是 %d（上游的 `space-x-6`）",
+				gap.name, gap.got, transportGap)
+		}
+	}
+}
+
+// TestTheMiddleColumnIsThreePartsWide 断中间那一列是三列里的三份（1:3:1），
+// 而进度那一行是它的 3/4 且居中。
+//
+// 上游：`playbar/index.tsx:26` 的
+// `grid-cols-[minmax(0,1fr)_minmax(0,3fr)_minmax(0,1fr)]`，加上
+// `music-play-progress/index.tsx:25` 的 `w-3/4`。
+//
+// 🔴 **这两条只能一起量**：中间那一列在画面上**没有可见的边界**（它的底色和
+// 播放条一样），所以「它有多宽」量不出来——能从画面上量出来的是**它里面的
+// 东西**：三键那一行和进度那一行，而两者都在那一列里居中。于是：
+//
+//	进度行宽 = 0.75 × (3/5 × 可用宽 − 左右各 24 的内边距)
+//
+// ⚠️ **「3/5」是中间那一列在五份里占的三份**（1:3:1 ⇒ 左边 1 份、中间 3 份、
+// 右边 1 份，共 5 份）。任何一处不照上游来（中间列不是三份、进度行不是 3/4、
+// 内边距不是 24），这个数就会对不上。
+//
+// ⚠️ **居中单独断**：宽度对得上而位置偏了，那也是坏法（进度条在窗口里偏左，
+// 而上面那三键在正中——那正是这一票要修的那一种坏法）。
+func TestTheMiddleColumnIsThreePartsWide(t *testing.T) {
+	for _, width := range []int{760, 900, 1200, 1600} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			tt, _ := playbarTester(t, barState(), width, 0, false)
+
+			pos, ok := tt.Find(clock(0))
+			if !ok {
+				t.Fatalf("画面上找不到左边那个读数，文字有 %q", tt.Texts())
+			}
+			total, ok := tt.Find(clock(100 * time.Second))
+			if !ok {
+				t.Fatalf("画面上找不到右边那个读数，文字有 %q", tt.Texts())
+			}
+
+			// 进度那一行的宽（两个读数之间，两个读数各钉 48 宽）。
+			got := total.X + total.W - pos.X
+			// 中间那一列 = 三列里的三份（1:3:1）；内容区 = 那一列减去左右各 24。
+			usable := float32(width - playbarPadX*2)
+			want := 0.75 * (0.6*usable - 2*playbarCenterPadX)
+			if absFloat(got-want) > 1 {
+				t.Errorf("进度那一行只有 %.1f 宽，而它该是 %.1f——"+
+					"中间那一列是三列里的三份（1:3:1），进度行是它的 3/4",
+					got, want)
+			}
+
+			// 居中：进度行的中心 == 窗口的中心。
+			mid := pos.X + got/2
+			if absFloat(mid-float32(width)/2) > 1 {
+				t.Errorf("进度那一行的中心在 %.1f，而窗口的竖直中轴在 %.1f——"+
+					"它没有居中（上游 `w-3/4` + `items-center`）",
+					mid, float32(width)/2)
+			}
+		})
+	}
+}
+
+// TestTheLeftColumnIsOneFifthOfTheBar 断左边那一列是五份里的一份。
+//
+// 上一条量的是「中间那一列和三份的关系」，这一条量的是**左边那一列自己**：
+// 歌名的框宽 = 歌名那一列的宽 = 左边那一列的宽 − 封面 − 缝，而**歌名够长时
+// 它的框就是整个容器那么宽**（`MaxLines(1)` + 省略号）。
+//
+// ⚠️ **要歌名够长**：短歌名的框是它自己的自然宽，量的是字不是容器。
+// ⚠️ **要有 UP 名**：没有 UP 名的话歌名下面那一行只要 120，左边那一列的最小
+// 内容宽就不是 244，量到的就不是「轨道」而是「内容」。
+// ⚠️ **窗口要够宽**（≥ 1252）：窄窗口上左边那一列是**内容撑出来的**（244，
+// 见 `playbarLeftMinW`），不是轨道那么宽——那正是「溢出轨道」那一档。
+func TestTheLeftColumnIsOneFifthOfTheBar(t *testing.T) {
+	st := barState()
+	st.Title = "一首歌的名字很长很长很长很长很长很长很长"
+
+	for _, width := range []int{1280, 1400} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			tt, _ := playbarTester(t, st, width, 0, false)
+
+			title, ok := tt.Find(st.Title)
+			if !ok {
+				t.Fatalf("画面上找不到歌名，文字有 %q", tt.Texts())
+			}
+
+			got := title.W
+			want := float32(width-playbarPadX*2)/5 - coverSize - coverGap
+			if absFloat(got-want) > 1 {
+				t.Errorf("歌名那一列只有 %.1f 宽，而它该是 %.1f——"+
+					"左边那一列是五份里的一份（上游的 1:3:1）", got, want)
+			}
+		})
+	}
+}
+
+// absFloat 是两个浮点数相差多少（差一点点算 0）。
+func absFloat(v float32) float32 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+// TestTheRightGroupHugsTheRightEdge 断右边那一组贴在播放条内容区的右沿，
+// 而且**一枚键都没有跑到窗口外面去**。
+//
+// 🔴 **这一条钉的是票 #216 落地时踩到的一个坑**：第三列是 1 份（900 宽下
+// 只有 173.6），而右边那一组是**定宽**的 243.2——框架给格子里那一块的宽度
+// 是它**自己的内容宽**（于是比轨道宽），而横向排布在装不下的时候**一律
+// 靠左排**，于是它从轨道的左沿开始排：最右边那枚「加歌」键落在 x=921.6，
+// **而窗口只有 900**。那枚键看不见、点不着，**而界面上看不出坏了**（其余
+// 几枚都好好地在那儿）。
+//
+// ⚠️ **断的是「最右边那枚键的右沿 == 内容区的右沿」**：内容区的右沿是窗口宽
+// 减去右边那 16 的内边距（`playbarPadX`）。
+//
+// ⚠️ **竖直方向也断**：那一组在 88 高的播放条里**上下居中**（上游
+// `playbar/right/index.tsx:13` 的 `items-center`）——它现在是绝对定位的，
+// 高度得自己给，给歪了就会贴着上沿或下沿。
+func TestTheRightGroupHugsTheRightEdge(t *testing.T) {
+	for _, width := range []int{760, 900, 1200, 1600} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			tt, _ := playbarTester(t, barState(), width, 0, false)
+
+			last, ok := tt.Find("加歌")
+			if !ok {
+				t.Fatalf("宽度 %d：画面上找不到「加歌」那一枚，文字有 %q", width, tt.Texts())
+			}
+
+			wantX := float32(width - playbarPadX)
+			if absFloat(last.X+last.W-wantX) > 1 {
+				t.Errorf("宽度 %d：最右边那枚键的右沿在 %.1f，而内容区的右沿在 %.1f——"+
+					"它跑到窗口外面去了（那一枚看不见也点不着）",
+					width, last.X+last.W, wantX)
+			}
+
+			wantY := float32(playbarHeight) / 2
+			if absFloat(last.Y+last.H/2-wantY) > 1 {
+				t.Errorf("宽度 %d：那一枚键的垂直中心在 %.1f，而播放条的正中在 %.1f——"+
+					"它没有上下居中", width, last.Y+last.H/2, wantY)
+			}
+		})
 	}
 }
 
