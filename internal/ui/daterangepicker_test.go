@@ -10,6 +10,7 @@ package ui
 
 import (
 	"image/color"
+	"strconv"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -157,6 +158,67 @@ func TestNothingIsHighlightedWhileNothingIsFiltered(t *testing.T) {
 	}
 }
 
+// TestAManualRangeThatEqualsTodayIsNotDropped 钉住「手动挑的那一段**恰好就是
+// 默认摆着的那一天**时，不会被静默丢掉」。
+//
+// 🔴 **这是评审挑出来的一条**：不筛的时候 `from` / `to` 里摆着的就是今天
+// （`setPreset` 摆的，好让用户知道从哪儿开始改），而用户手动挑的恰好也是今天
+// 的话，挑完那四个值**一个都没变**——于是「变了没」那一句认不出来，这一次手动
+// 挑被**静默丢掉**：页面不重拉、还写着「不按日期筛」、触发键还写着「选择日期
+// 范围」。用户明明挑了「今天」，而界面上说什么都没发生。
+//
+// 判据：**查询真的带上了那两天**（`add_time_start` / `add_time_end`），而且
+// 界面上不再写着「不按日期筛」。
+//
+// ⚠️ 「今天」是**筛选器自己摆着的那一天**，测试里从它的状态读出来——
+// 不是从系统时钟算的：`buildLibraryPages` 是在 `New` 里跑的（那时时钟还是
+// 真时钟），而这一页的假时钟是外壳建好之后才换上的，所以「摆着的那一天」
+// 和「页面时钟说的今天」**不是同一天**。读状态才准。
+func TestAManualRangeThatEqualsTodayIsNotDropped(t *testing.T) {
+	f := newLibFake(t).withLater(1, 1, "甲")
+	tt, s := libraryShell(t, f, laterPath)
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
+
+	// 前提：真的没在筛（而默认摆着的就是那一天）。
+	if !tt.HasText("不按日期筛") {
+		t.Fatalf("默认就没有说清不筛，文字有 %q", tt.Texts())
+	}
+	d := s.pageOf(laterPath).dates
+	today := startOfDay(d.from)
+	dayLabel := today.Format("2006年1月2日")
+
+	openRangePicker(t, tt)
+	// 挑那一天两次：起始和结束都是它。
+	if err := tt.Click(dayLabel); err != nil {
+		t.Fatalf("日历上点不到 %q：%v，文字有 %q", dayLabel, err, tt.Texts())
+	}
+	tt.Frame()
+	if err := tt.Click(dayLabel); err != nil {
+		t.Fatalf("日历上点不到 %q（第二下）：%v，文字有 %q", dayLabel, err, tt.Texts())
+	}
+	tt.Frame()
+
+	waitFrames(t, tt, "按手动挑的日期重新拉", func() bool { return f.callsOf(laterPathAPI) == 2 })
+	q := f.queriesOf(laterPathAPI)[1]
+	if got, want := q.Get("add_time_start"), strconv.FormatInt(today.Unix(), 10); got != want {
+		t.Errorf("手动挑了那一天之后 add_time_start = %q，want %q——用户的选择被丢掉了",
+			got, want)
+	}
+	if got, want := q.Get("add_time_end"),
+		strconv.FormatInt(endOfDay(today).Unix(), 10); got != want {
+		t.Errorf("手动挑了那一天之后 add_time_end = %q，want %q——用户的选择被丢掉了",
+			got, want)
+	}
+	if tt.HasText("不按日期筛") {
+		t.Errorf("手动挑了那一天，界面上还说着「不按日期筛」，文字有 %q", tt.Texts())
+	}
+	if want := today.Format("2006-01-02") + " ~ " + today.Format("2006-01-02"); !tt.HasText(want) {
+		t.Errorf("手动挑了那一天，界面上没写出 %q，文字有 %q", want, tt.Texts())
+	}
+}
+
+// TestPickingAnEarlierDayStartsOver 钉住「第二次点到了更早的一天 → 从头再挑」。
+//
 // 上游的 DateRangePicker 也是这样：第二次点的那天**早于**第一次点的那天时，
 // 它把新点的当成新的起始（而不是把区间翻过来）。
 //

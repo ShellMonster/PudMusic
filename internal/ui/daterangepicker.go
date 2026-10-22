@@ -150,12 +150,16 @@ func (f *dateFilter) viewRangePanel(c *ui.Context) {
 		//
 		// ⚠️ **内边距清零**：扁平按钮左右各留 14，而这一枚只有 24 宽——
 		// 不清零的话内容区是负的，字被裁掉（而那一枚窄到只剩一个箭头）。
-		if flatButton(c, "‹").Width(dateArrowW).Padding(0, 0).Clicked() {
+		//
+		// ⚠️ **Label 是「上一个月」而不是那个符号**：可见的字是「‹」，
+		// 读屏软件念出来是「左尖括号」——那一句对用户什么也没说（这一票给
+		// 确认键补了「确认 + 那个词」的名字，这里也得补）。
+		if flatButton(c, "‹").Label("上一个月").Width(dateArrowW).Padding(0, 0).Clicked() {
 			f.month = f.month.AddDate(0, -1, 0)
 		}
 		f.viewMonth(c, f.month)
 		f.viewMonth(c, f.month.AddDate(0, 1, 0))
-		if flatButton(c, "›").Width(dateArrowW).Padding(0, 0).Clicked() {
+		if flatButton(c, "›").Label("下一个月").Width(dateArrowW).Padding(0, 0).Clicked() {
 			f.month = f.month.AddDate(0, 1, 0)
 		}
 	})
@@ -280,6 +284,11 @@ func (f *dateFilter) pickDay(day time.Time) {
 	f.from = startOfDay(f.pendingFrom)
 	f.to = endOfDay(day)
 	f.pickingEnd = false
+	// ⚠️ **「挑完了一段」这件事本身要单独记一笔**（`f.picked`）：挑出来的这一段
+	// **可能和现在摆着的一样**——不筛的时候摆着的就是今天，而用户手动挑的恰好
+	// 也是今天。只比 from / to 的话，这一次手动挑会被**静默丢掉**（页面不重拉、
+	// 还写着「不按日期筛」）。
+	f.picked = true
 	// 挑完了就收起：上游那个 DateRangePicker 选满两端之后弹层就关了。
 	f.open = false
 }

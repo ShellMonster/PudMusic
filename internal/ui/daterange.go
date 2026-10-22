@@ -80,6 +80,17 @@ type dateFilter struct {
 	// on 报现在有没有在按日期筛。选「全部时间」是 false。
 	on bool
 
+	// picked 是「用户刚刚手动挑完一段区间」。
+	//
+	// 🔴 **它不能靠 from / to 的变化来判断**：不筛的时候 `from` / `to` 里摆着的
+	// 就是今天（`setPreset` 摆的，好让用户知道从哪儿开始改），而用户手动挑的
+	// 恰好也是今天的话，挑完那四个值**一个都没变**——于是「变了没」那一句认不
+	// 出来，这一次手动挑被**静默丢掉**：页面不重拉、还写着「不按日期筛」、
+	// 触发键还写着「选择日期范围」，而用户明明挑了「今天」。
+	//
+	// 评审的探针：不筛的时候挑「今天」两次 → from/to/seenFrom/seenTo 一个没变。
+	picked bool
+
 	// ── 双月选择器自己的那一摊（见 `daterangepicker.go`）──────────────────
 
 	// open 是那块双月日历开着没有（`ui.PopoverBase` 的那个开关）。
@@ -132,6 +143,8 @@ func (f *dateFilter) setPreset(i int, now time.Time) {
 	// ⚠️ **半截挑着的区间作废**：换了预设就等于换了条件，而那个「起始已经
 	// 挑好、还等着挑结束」的半截状态是上一件事的。
 	f.pickingEnd = false
+	// 换预设也作废「刚刚手动挑完」那一下（它属于上一件事）。
+	f.picked = false
 	// 记下改完的值：**必须记**，否则 view 末尾那句「区间变了没」会把这个
 	// preset 自己的写入当成用户输入，预设的高亮当帧就被抹掉了。
 	f.seenTab, f.seenFrom, f.seenTo = f.tab, f.from, f.to
@@ -181,16 +194,27 @@ func (f *dateFilter) view(c *ui.Context, now time.Time) bool {
 		// seen* 更新掉，不然下一帧又会认成「用户又动了一次」）。
 		f.setPreset(picked, now)
 		return true
-	case !f.from.Equal(f.seenFrom) || !f.to.Equal(f.seenTo):
-		// 用户在日历上手动挑了日子：`ui.DateInput` 直接写的是上面那两个字段，
-		// 框架不报「变了」（它只改那个指针）。所以比对上一帧画完之后的样子——
-		// 变了就是用户动的。
+	case f.picked || !f.from.Equal(f.seenFrom) || !f.to.Equal(f.seenTo):
+		// 用户在日历上手动挑了日子。
 		//
-		// 这一句**必须在画完之后**：画的时候框架才会写这两个字段。
+		// ⚠️ **`f.picked` 那一下是「挑完了一段」这件事本身**，而它挑出来的
+		// 那段**可能和现在摆着的一样**：不筛的时候摆着的就是今天，而用户手动
+		// 挑的恰好也是今天。只比 from / to 的话，这一次手动挑会被**静默丢掉**
+		// （页面不重拉、还写着「不按日期筛」）——用户挑了「今天」，而界面上
+		// 说什么都没发生。
+		//
+		// 这一句**必须在画完之后**：画的时候才会写那两个字段（挑日子的那一下
+		// 是在日历那一格里被消费的）。
+		wasOn := f.on
+		wasFrom, wasTo := f.seenFrom, f.seenTo
+		f.picked = false
 		f.on = true
 		f.tab = -1 // 手动挑的日期不点亮任何预设（上游那一支 setSelectedKey("")）
 		f.seenTab, f.seenFrom, f.seenTo = f.tab, f.from, f.to
-		return true
+		// ⚠️ **「变了没」比的是生效的查询**（在不在筛 + 两端），不是「有没有人
+		// 点过」：挑出来的是**同一段**的话查询没变，重拉一次是白拉的（而预设
+		// 高亮的变化是另一件事，它已经写进 `f.tab` 了）。
+		return !wasOn || !f.from.Equal(wasFrom) || !f.to.Equal(wasTo)
 	}
 	return false
 }

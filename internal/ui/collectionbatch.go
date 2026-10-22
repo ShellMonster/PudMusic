@@ -81,8 +81,8 @@ func (s *Shell) viewCollectionBatchBar(c *ui.Context, p *collectionPage) {
 
 // askConfirm 记下「这件事要用户点一下确定」。
 //
-// ⚠️ **这里只记，不做**。真正那一下在 `viewCollectionConfirm` 里——确认框是
-// 系统模态，在它上面点任何别的控件都不该生效，所以两步必须分开。
+// ⚠️ **这里只记，不做**。真正那一下在 `viewCollectionConfirm` 里——那个框是
+// **模态**，在它上面点任何别的控件都不该生效，所以两步必须分开。
 func (s *Shell) askConfirm(p *collectionPage, kind confirmKind, count int, only bool) {
 	s.askConfirmAbout(p, kind, count, only, "")
 }

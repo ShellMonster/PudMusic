@@ -140,8 +140,12 @@ const (
 	deleteDialogTitle = "删除文件"
 	deleteDialogBody  = "该操作会删除本地文件且不可恢复，请谨慎操作"
 	// deleteConfirmLabel 是**弹窗里**那个确认按钮（Biu 是 `confirmText: "删除"`）。
-	// 它排在最后一个：`ui.AlertDialog` 把最后一个按钮当主按钮并自动聚焦
-	// （`mygo/ui/feedback.go:198`）。
+	//
+	// ⚠️ **它排在最后只是抄上游的写法**（上游的 `confirmText` 是最后一个）；
+	// 那个框现在是**应用自绘**的（`confirmModal`，票 #176），而自绘的那一份
+	// **不自动聚焦**（系统原生那个 `ui.AlertDialog` 会把最后一个按钮当主按钮
+	// 并自动聚焦，`mygo/ui/feedback.go:198`）——聚焦那颗**不可逆**的键上，
+	// 回车就等于直接删掉，而这里是自绘的，不聚焦反而更稳。
 	deleteConfirmLabel = "删除"
 	// deleteRowLabel 是**行里**那个按钮的名字。
 	//

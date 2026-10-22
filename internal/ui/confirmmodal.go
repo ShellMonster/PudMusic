@@ -166,11 +166,35 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 	t := c.Theme()
 	pressed := ""
 
-	// ⚠️ `ui.Modal` 自己已经把那块面板摆好并给了它内边距 / 圆角 / 背景
-	//（`mygo/ui/widgets.go` 的 `coreModal`），`fn` 往里放的是**面板的内容**。
-	// 在里面再套一个带自己宽度的 Column 会让按钮的命中区和面板对不上——
-	// 症状是「按钮看得见、点不动」。
-	m := ui.Modal(c, open, func() {
+	// 🔴 **用 `ui.DialogBase` 而不是 `ui.Modal`**——因为**面板得有个名字**。
+	//
+	// 系统原生那一份（`ui.AlertDialog`）建面板时是
+	// `Role(RoleAlertDialog)` + `panel.Label(title)` + `panel.description = message`
+	//（mygo v0.6.2 的 `ui/feedback.go:186-188`），所以读屏软件报得出「删除确认吗？」
+	// 和它下面那一句正文。
+	//
+	// 而 `ui.Modal`（`coreDialogBase`，`ui/base.go:486`）只给
+	// `Role(RoleDialog)`——**既没有名字也没有描述**。拿它换掉原生那一份之后，
+	// 读屏软件只报「一个对话框」，标题和正文都不报了。
+	//
+	// ⚠️ `ui.Modal` 的回调**拿不到面板**（签名是 `fn func()`），而
+	// `ui.DialogBase` 给（`fn func(backdrop, panel)`）——所以这里用后者，
+	// **自己把 `ui.Modal` 那套样子摆一遍**（下一段就是照抄 `coreModal` 的）。
+	m := ui.DialogBase(c, open, func(backdrop, panel ui.Element) {
+		w, h := c.Size()
+		backdrop.Background(ui.RGBA(0, 0, 0, 0.4))
+		panel.Padding(t.Space(5)).Gap(t.Space(3)).Radius(t.Space(2.5)).
+			Background(t.Background).
+			MaxWidth(w-t.Space(10)).MaxHeight(h-t.Space(10)).
+			Shadow(0, 10, 30, 0, ui.RGBA(0, 0, 0, 0.3)).
+			// 🔴 **这三样是「读屏软件报得出这个框是什么」**：角色、名字、描述。
+			// ⚠️ `Description` 对**不是输入框**的元素不会另外画一行字
+			// （`mygo/ui/form.go` 的 `fieldText`：`e.field == nil` 就原样返回），
+			// 所以这里只是给面板挂上那句描述，画面上不多东西。
+			Role(ui.RoleAlertDialog).
+			Label(spec.title).
+			Description(spec.body)
+
 		ui.Column(c).Key("confirm:" + spec.title).MaxWidth(confirmMaxW).Gap(confirmGap).
 			Children(func() {
 				// 标题那一行：按类型变色的警告图标 + 标题。
@@ -208,7 +232,7 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 		})
 	})
 
-	// 点外面 / 按 Esc：`ui.Modal` 已经把 `*open` 关掉了，而那一次**不算确认**。
+	// 点外面 / 按 Esc：`ui.DialogBase` 已经把 `*open` 关掉了，而那一次**不算确认**。
 	//
 	// ⚠️ **它算「取消」而不是「还开着」**：调用方要在这一档清掉自己那份状态
 	// （不然下一帧它又弹一次）。

@@ -356,8 +356,8 @@ func (s *Shell) favoriteAction(f app.Favorite, item favMenuAction) {
 	case "add-to-playlist":
 		s.app.EnqueueFolder(f, s.sayFolderDone)
 	case "delete":
-		// 只记，不做：真正那一下在 `viewFavoriteDelete` 里（确认框是系统
-		// 模态，在它上面点任何别的控件都不该生效，所以两步必须分开）。
+		// 只记，不做：真正那一下在 `viewFavoriteDelete` 里（那个框是**模态**，
+		// 在它上面点任何别的控件都不该生效，所以两步必须分开）。
 		s.folderDelete = favoriteDeleteAsk{open: true, id: f.ID, title: f.Title}
 	case "unfavorite":
 		s.app.UnfavoriteFolder(f, s.sayFolderDone)

@@ -41,19 +41,61 @@ const (
 //
 // 判据是**那块区域里有几块接近目标色的像素**：图标是 SVG，笔画之间是空的，
 // 所以不能指望整块都是色的——要找的是**笔画**。
+//
+// ⚠️ **找的是「面板」不是「标题那行字」**：面板自己带着标题（`Label`），
+// 而面板是标题那行字的**父**——父先被遍历，所以 `Find(标题)` 给的是**面板**
+// 那个框（`Texts()` 里那一次「面板的名字」在「标题字」前面）。
+// 图标在面板的左上角：面板的内边距 `t.Space(5)` 之后的第一样东西。
 func TestTheConfirmDialogHasAToneColoredWarningIcon(t *testing.T) {
 	_, s, tt := collectionShell(t, "12345",
 		mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
 	waitSongs(t, tt, s, 3)
 	openBatchConfirm(t, tt, "批量删除")
 
-	title, ok := tt.Find("确认删除选中的 2 首吗？")
+	panel, ok := tt.Find("确认删除选中的 2 首吗？")
 	if !ok {
 		t.Fatalf("确认框没画出来（找不到标题），文字有 %q", tt.Texts())
 	}
-	if n := countTonePixels(t, tt, title, hexColor(t, confirmDangerHex)); n < 3 {
+	// 面板的内边距（`coreModal` 那一套：`t.Space(5)`）。
+	pad := BuildTheme(app.DefaultSettings(""), false).Space(5)
+	icon := ui.Rect{
+		X: panel.X + pad, Y: panel.Y + pad,
+		W: confirmIconSize, H: confirmIconSize,
+	}
+	if n := countTonePixels(t, tt, icon, hexColor(t, confirmDangerHex)); n < 3 {
 		t.Errorf("标题左边只有 %d 块接近 %s 的像素，want ≥3——那枚警告图标不在（或者不是红的）",
 			n, confirmDangerHex)
+	}
+}
+
+// TestTheConfirmDialogHasANameInTheAccessibilityTree 钉住「那个框在无障碍树里
+// **有名字**」。
+//
+// 🔴 **这一条是换掉系统原生那一份时丢掉的**：原生那个 `ui.AlertDialog` 建面板
+// 时是 `Role(RoleAlertDialog)` + `panel.Label(title)` +
+// `panel.description = message`（mygo v0.6.2 的 `ui/feedback.go:186-188`），
+// 所以读屏软件报得出「删除确认吗？」和它下面那一句正文。而 `ui.Modal`
+// （`coreDialogBase`）只给 `Role(RoleDialog)`——**既没有名字也没有描述**，
+// 于是读屏软件只报「一个对话框」。
+//
+// 判据：**那个标题在 `Texts()` 里出现两次**——一次是面板的无障碍名字，一次是
+// 那个标题字本身（原生那一份也是这样：它也是 `Label` + 一个同名��字）。
+func TestTheConfirmDialogHasANameInTheAccessibilityTree(t *testing.T) {
+	_, s, tt := collectionShell(t, "12345",
+		mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
+	waitSongs(t, tt, s, 3)
+	openBatchConfirm(t, tt, "批量删除")
+
+	const title = "确认删除选中的 2 首吗？"
+	n := 0
+	for _, txt := range tt.Texts() {
+		if txt == title {
+			n++
+		}
+	}
+	if n < 2 {
+		t.Errorf("那个标题在无障碍树里只出现 %d 次，want ≥2（面板的名字 + 标题字）——"+
+			"它没有名字，读屏软件报不出这个框是什么", n)
 	}
 }
 
@@ -104,11 +146,18 @@ func TestTheConfirmButtonTakesTheToneColor(t *testing.T) {
 // 而框架的默认字号是 13——**差一档**，而这一档正是「正文读起来是不是和标题
 // 一个层次」的事。
 //
-// ⚠️ **量的是高度，而且拿同一个框里的标题当尺子**：文字的行高**正好跟着字号
-// 走**（实测 13px 的行高 15.310547、14px 的 16.488281、16px 的 18.84375——
-// 三档两两成比例，粗体也不变）。所以「正文行高 ÷ 标题行高」就是两个字号之比。
+// ⚠️ **量的是高度，而且拿同一个框里那颗「取消」的字当尺子**：文字的行高**正好
+// 跟着字号走**（实测 13px 的行高 15.310547、14px 的 16.488281、16px 的
+// 18.84375——三档两两成比例，粗体也不变）。而那颗「取消」是**框架的默认字号
+// （13）**，正文要的是 14。
 //
-// ⚠️ **不能拿宽度当判据**：中文标点在系统字体里是**半宽**的（实测「。」占
+// ⚠️ **不能拿标题当尺子**：面板自己带着标题（`Label`，见
+// `TestTheConfirmDialogHasANameInTheAccessibilityTree`），而面板是标题那行字的
+// **父**——父先被遍历，所以 `Find(标题)` 给的是**面板**那个框（高 126），不是
+// 标题字的高（19）。拿它当尺子，这一���会量出「正文的行高是标题的 87%」而
+// 判据写的是 14/16 ——差得远。
+//
+// ⚠️ **也不能拿宽度当判据**：中文标点在系统字体里是**半宽**的（实测「。」占
 // 半个字身），而哪几个标点是半宽的跟字体走——按「字数 × 字号」算出来的期望值
 // 和实测差 7 个像素（实测 285.09、期望 294）。
 func TestTheConfirmBodyIsTextSmall(t *testing.T) {
@@ -123,15 +172,15 @@ func TestTheConfirmBodyIsTextSmall(t *testing.T) {
 	if !ok {
 		t.Fatalf("弹窗上没有那句正文，文字有 %q", tt.Texts())
 	}
-	title, ok := tt.Find("确认删除吗？")
+	cancel, ok := tt.Find("取消")
 	if !ok {
-		t.Fatalf("弹窗上没有那个标题，文字有 %q", tt.Texts())
+		t.Fatalf("弹窗上没有那颗「取消」，文字有 %q", tt.Texts())
 	}
-	// 标题是 16（`confirmModal` 里写死的），正文要的是 14。
-	want := title.H * 14 / 16
+	// 「取消」是框架的默认字号 13，正文要的是 14。
+	want := cancel.H * 14 / 13
 	if r.H < want-0.05 || r.H > want+0.05 {
-		t.Errorf("正文的行高是 %v，want %v（标题 %v × 14/16）——它不是 text-sm",
-			r.H, want, title.H)
+		t.Errorf("正文的行高是 %v，want %v（「取消」%v × 14/13）——它不是 text-sm",
+			r.H, want, cancel.H)
 	}
 }
 
@@ -186,15 +235,14 @@ func assertConfirmButton(t *testing.T, tt *ui.Tester, label string, want color.R
 	}
 }
 
-// countTonePixels 数标题左边那一块里有几块接近 want 的像素。
-func countTonePixels(t *testing.T, tt *ui.Tester, title ui.Rect, want color.RGBA) int {
+// countTonePixels 数那一块矩形里有几块接近 want 的像素。
+func countTonePixels(t *testing.T, tt *ui.Tester, box ui.Rect, want color.RGBA) int {
 	t.Helper()
 	img := tt.Image()
-	// 图标在标题左边：18 宽 + 4 的缝。
-	x0 := max(int(title.X)-confirmIconSize-6, 0)
-	x1 := max(int(title.X)-2, 1)
-	y0 := max(int(title.Y)-6, 0)
-	y1 := min(int(title.Y+title.H)+6, img.Rect.Max.Y)
+	x0 := max(int(box.X)-2, 0)
+	y0 := max(int(box.Y)-2, 0)
+	x1 := min(int(box.X+box.W)+2, img.Rect.Max.X)
+	y1 := min(int(box.Y+box.H)+2, img.Rect.Max.Y)
 	n := 0
 	for y := y0; y < y1; y++ {
 		for x := x0; x < x1; x++ {

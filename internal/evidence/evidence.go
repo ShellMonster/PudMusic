@@ -2007,13 +2007,15 @@ var Items = []Item{
 		Spec: "确认框是应用自绘的模态（按类型变色的警告图标 + 标题 + text-sm 正文 + light 取消 + 按类型变色的确认键）；日期范围是**双月**选择器（256 宽的触发键，弹出来是两个月并排，能挑起始和结束，没在筛的时候日历上什么都不亮）；下载进度条是**蓝**的（不是主色），出错的那一条是红的，完成那一格有一枚**绿勾**",
 		Tests: []string{
 			// 确认框：图标在不在、是不是按类型变色；确认键的颜色；正文的字号；
-			// 取消是不是 light。
+			// 取消是不是 light；**那个框在无障碍树里有没有名字**。
 			"TestTheConfirmDialogHasAToneColoredWarningIcon",
 			"TestTheConfirmButtonTakesTheToneColor",
 			"TestTheConfirmBodyIsTextSmall",
 			"TestTheCancelButtonIsLight",
+			"TestTheConfirmDialogHasANameInTheAccessibilityTree",
 			// 双月日期选择器：两个月、一起翻、挑过的那天被高亮、点更早的一天
-			// 从头再挑、没在筛的时候什么都不亮、挑完真的换条件、最窄窗口下两块
+			// 从头再挑、没在筛的时候什么都不亮、挑完真的换条件、**挑的那一段
+			// 恰好等于默认摆着的那一天时不会被静默丢掉**、最窄窗口下两块
 			// 都点得到。
 			"TestTheRangePickerShowsTwoMonths",
 			"TestTheTwoMonthsMoveTogether",
@@ -2021,6 +2023,7 @@ var Items = []Item{
 			"TestPickingAnEarlierDayStartsOver",
 			"TestNothingIsHighlightedWhileNothingIsFiltered",
 			"TestTheRangePickerDrivesTheFilter",
+			"TestAManualRangeThatEqualsTodayIsNotDropped",
 			"TestTheDateRangeOpensItsCalendarAtTheMinimumWindowWidth",
 			// 下载状态：条是蓝的（且不是主色）、出错的是红的、完成的有一枚绿勾。
 			"TestTheDownloadBarIsBlueAndNotTheAccent",
