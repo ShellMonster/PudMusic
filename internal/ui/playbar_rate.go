@@ -13,6 +13,7 @@ import (
 	"strconv"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -50,7 +51,19 @@ func (s *Shell) viewRate(c *ui.Context, st app.State) {
 	//（`mygo/ui/context.go:88`），窗口一窄这一枚会被压扁，而它压扁的方式是
 	// **把字截掉**——「1.25x」变成「1.…」。而这一枚上的字是**当前是多少倍**，
 	// 看不全的那一半等于没说。
-	btn := flatButton(c, rateLabel(st.Rate)).Shrink(0).Label("播放速率")
+	//
+	// 🔴 **字是 16**（票 #173 / G26）：上游那一枚是 `text-[16px]`
+	//（`components/music-rate/index.tsx:49`，我们那句注释里本来就写着它）。
+	// 我们原来**没写字号**，于是它跟着主题的默认值走——macOS 上 13、别的平台
+	// 14，**同一枚按钮在两个平台上是两个字号**。写死 16 之后两边一样，也和上游
+	// 一样。
+	//
+	// ⚠️ **浮层里那七行不跟着长到 16**：那一列的宽度是 64（DESIGN.md 的
+	// `倍速：浮层里保持 64`），而按钮自己还要留 28 的内边距——「0.75x」在 16 下
+	// 要 39 宽，加上内边距是 67，**那一行会被截成「0.…」**。截掉的那一半恰恰是
+	// 用户挑倍速的全部依据（见 `TestRateMenuLabelsAreNotTruncated`）。
+	btn := flatButton(c, rateLabel(st.Rate)).FontSize(scale.Font(c, 16)).
+		Shrink(0).Label("播放速率")
 	if btn.Clicked() {
 		s.rateOpen = !s.rateOpen
 	}
