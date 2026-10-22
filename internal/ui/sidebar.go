@@ -39,9 +39,10 @@ const (
 	// sideDividerW / sideDividerA 是右缘那条分隔线的宽度和浓度。
 	//
 	// 照 Biu 的 `border-divider/30 border-r-1`（`side/index.tsx:145`）：
-	// 1 像素、透明度 30%。**不能照抄 `t.Border` 原色**——深色下 `#3f3f46`
-	// 压在 `#17181a` 上是一道亮线，比上游那道明显得多（flatbutton.go 的文件头
-	// 记的就是这件事：同一个色在深浅两套里的观感完全不同）。
+	// 1 像素、透明度 30%。**不能照抄 `t.Border` 原色**——深色下那道线
+	// （票 #172 之后是 15% 白叠出来的 `#3b3b3d`）压在 `#17181a` 上是一道亮线，
+	// 比上游那道明显得多（flatbutton.go 的文件头记的就是这件事：同一个色在深浅
+	// 两套里的观感完全不同）。
 	sideDividerW = 1
 	sideDividerA = 0.3
 )

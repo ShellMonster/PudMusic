@@ -236,7 +236,7 @@ func TestTheSettingsColorSwatchHasAShadow(t *testing.T) {
 			// 所以这里量的是**内缘那一道线**：它必须比卡面亮。
 			//
 			// ⚠️ **从离左边两像素的地方开始扫**：再往左是那一格自己的**描边**
-			//（`t.Border`，深色下 #3f3f46，比那道白边还亮）——它不是影，算上它
+			//（`t.Border`，深色下 15% 白叠出来的 #3b3b3d）——它不是影，算上它
 			// 这一条就永远绿。
 			const swatchX = 60
 			interior := img.RGBAAt(swatchX+20, 90)

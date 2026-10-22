@@ -381,9 +381,11 @@ func (d *downloadsPage) viewTable(c *ui.Context, s *Shell) {
 	// 没有它的话整张表直接铺在页面底色上，一眼就是「裸表格」——验收项点名的
 	// 就是这一层。
 	//
-	// ⚠️ 深浅两套都是同一张底（`t.Surface`）：深色下它比页面底色亮一点点，
-	// 而层次主要靠阴影（那一层归 #163 的「阴影补齐」那一票）。这里先给底和
-	// 圆角，免得表格的四条边压在页面上。
+	// ⚠️ **底色取 `t.Background`**（上游 HeroUI 的 `bg-content1`）：`content1` 是
+	// **#FFFFFF（浅）/ #18181b（深）**——正好是我们 `t.Background` 的两个值。
+	// 于是**深色下这张卡和页面底色几乎同色，靠那圈影分层**（DESIGN.md §四：
+	// 「不要用『比背景亮一级』的板」——`t.Surface` 在深色下是 #27272a，正是那个
+	// 「亮一级」的板）；**浅色下它也不是一块灰**，是白的（上游那张卡就是白的）。
 	//
 	// ⚠️ **那一圈影是 #179 那一票的**（上游那张 `Card` 的 `shadow="sm"` =
 	// `--heroui-box-shadow-small`）：HeroUI 那一档**深浅两套值不一样**——深色那套
@@ -391,9 +393,9 @@ func (d *downloadsPage) viewTable(c *ui.Context, s *Shell) {
 	// 那道白边才是真正把卡和底色分开的）。值在 `internal/ui/widgets/shadow`
 	// （那里是唯一一份）。
 	//
-	// ⚠️ **卡片底色是 #175 那一票定的**（`t.Surface`），影是本票的——两件事分开。
+	// ⚠️ **底色是 #172 那一票定的**（`t.Background`），影是 #179 的——两件事分开。
 	card := shadow.HeroSmall(ui.Column(c).Grow(1).FillWidth().Radius(t.Radius).
-		Background(t.Surface).Padding(t.Space(4)), t)
+		Background(t.Background).Padding(t.Space(4)), t)
 	card.Children(func() {
 		e := ui.Table(c, &d.state, downloadColumns, len(d.rows), func(row, col int) {
 			d.viewCell(c, s, row, col)

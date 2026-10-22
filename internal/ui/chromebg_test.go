@@ -142,11 +142,19 @@ func TestTheChromeStillHasASeparationFromTheBackground(t *testing.T) {
 }
 
 // TestCardsAndDialogsStillStandOffTheBackground 钉住「统一底色」没有把卡片和
-// 弹窗也一起刷平：抽屉那一块面板仍然是 `t.Surface`，比底色亮一档。
+// 弹窗也一起**刷没**：抽屉那一块面板和底色同色，但分开的正是它左缘那一圈。
 //
-// 这一条是上一条的另一半：底色统一之后，「和背景区分开」这件事全靠 `Surface`
-// 了。把它也刷成底色的话，弹窗在深色下就是一块什么都看不见的板子——而用户
-// 看到的是「弹窗没打开」，不会有人想到是它的底色和背后一样。
+// ⚠️ **这一条的判据跟着票 #172 换了**：面板的底色原来取 `t.Surface`（深色下
+// 比底色亮一档），现在取 `t.Background`——上游那一枚 Drawer 没有自己的底色类，
+// 走的是 HeroUI Drawer 的默认 `bg-background`，而上游主题把 `background` 这个
+// 色定义成了**页面底色**（`src/common/constants/theme.ts`：深色 #17181a、浅色
+// #ffffff）。所以它和底下那一页是**同一个颜色**，DESIGN.md §四说的正是这一条：
+// 「深色层次：卡片与背景几乎同色，靠阴影分层——不要用『比背景亮一级』的板」。
+//
+// 于是「和背景区分开」这件事改由**影**和**那条分隔线**负责（上游 HeroUI 那一档
+// `shadow="md"` 深色下有一层 1 像素的白色**内**影，深底上那才是真正看得见的
+// 边界）。本条只断「面板那一块 = 底色」和「面板左缘那一列 ≠ 底色」两件事；
+// 影的浓度在 `shadow_test.go` 里那一条钉着。
 func TestCardsAndDialogsStillStandOffTheBackground(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -157,17 +165,27 @@ func TestCardsAndDialogsStillStandOffTheBackground(t *testing.T) {
 			b := newTestShell(t, systemIsDark(dark), at(shotWinW, shotWinH))
 			s, tt := b.s, b.tt
 
-			want := rgbaOf(BuildTheme(s.app.SettingsSnapshot(), dark).Surface)
+			bg := rgbaOf(BuildTheme(s.app.SettingsSnapshot(), dark).Background)
 			s.drawerOpen = true
 			waitFrames(t, tt, "抽屉开出来了", func() bool {
 				_, ok := tt.Find("播放列表")
 				return ok
 			})
 
-			if got := probeColor(tt, drawerProbeX, drawerProbeY); got != want {
-				t.Errorf("播放列表抽屉面板 (%d,%d) 是 %v，want %v（Surface）——"+
-					"底色统一之后，面板要靠它跟背景分开",
-					drawerProbeX, drawerProbeY, got, want)
+			// ① 面板那一块和页面底色**一样**（上游的 `bg-background`）。
+			if got := probeColor(tt, drawerProbeX, drawerProbeY); got != bg {
+				t.Errorf("播放列表抽屉面板 (%d,%d) 是 %v，want %v（页面底色）——"+
+					"上游那一枚 Drawer 走的是 `bg-background`，和底下那一页同色，"+
+					"分开的��是那圈影", drawerProbeX, drawerProbeY, got, bg)
+			}
+
+			// ② 面板左缘那一列**不是**底色——那是分隔线和影，没有它这块面板就
+			// 真的和背后糊成一片了（深色下尤其）。
+			edgeX := shotWinW - queueDrawerWidth
+			edge := probeColor(tt, edgeX, drawerProbeY)
+			if maxDiff(edge, bg) <= 2 {
+				t.Errorf("抽屉左缘 x=%d 那一列是 %v，和底色 %v 一样——"+
+					"面板和背后之间一条边都没有", edgeX, edge, bg)
 			}
 		})
 	}

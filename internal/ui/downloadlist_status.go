@@ -74,6 +74,11 @@ func statusOf(r download.Snapshot, t *ui.Theme) statusCell {
 		// （progress.tsx:17-25）。对勾是 Remix 图标字体的图标，MyGo 没有
 		// 图标字体（widgets/list/menu.go 顶上那一段说的是同一件事），所以
 		// 这里只留那一句，用成功色。
+		//
+		// ⚠️ **浅色下这个成功绿当字色是 2.19:1**（旧的那一档是 3.30:1）——
+		// 上游 HeroUI 那个色相自带的代价，理由和数都在 `theme.go` 的语义色
+		// 那一段。那一段还写了「别拿对比度当理由把色值改回去」：真要同时
+		// 保住上游色相和可读性，得给「当字色用」另取一档，那是另一次裁决。
 		return statusCell{text: "下载完成", c: t.Success}
 
 	case download.StatusMuxing:
