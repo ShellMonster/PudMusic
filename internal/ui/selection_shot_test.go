@@ -73,6 +73,14 @@ func TestRenderSelectionShots(t *testing.T) {
 			// （框架的 `ui.Table` 铺主色底的方式和列表那一档不同）。
 			tt5 := shotLocalTable(t, dark)
 			save(t, dir, "84-"+name+"-本地音乐表格-点过的那一行.png", tt5)
+
+			// ⑥ 本地音乐的「表格」那一档：点一行**再按方向键**，游标那一行要有一圈
+			// **焦点环**（框架那个 `focusVisible` 方向键不会设回来，靠它那一路是哑的）。
+			tt6 := shotLocalTable(t, dark)
+			tt6.Key(0, ui.KeyDown)
+			tt6.Frame()
+			tt6.Frame()
+			save(t, dir, "85-"+name+"-本地音乐表格-键盘游标焦点环.png", tt6)
 		})
 	}
 }
@@ -86,7 +94,7 @@ func shotLocalTable(t *testing.T, dark bool) *mygoui.Tester {
 	dir := t.TempDir()
 	libSong(t, dir, "甲.mp3")
 	libSong(t, dir, "乙.mp3")
-	tt, s, _, _ := shellOnLocalMusic(t, dir)
+	tt, s, _, _ := shellOnLocalMusicIn(t, dark, dir)
 	s.local.style = localStyleTable
 	waitFrames(t, tt, "把文件扫回来", func() bool { return len(s.local.rows) >= 2 })
 	tt.Frame()

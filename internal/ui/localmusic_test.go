@@ -9,6 +9,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
+	"github.com/egoist/mygo/ui"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -27,12 +28,22 @@ import (
 // 桩返回什么，这一组测的就是「用户选了这个目录之后设置有没有写进去」。
 func shellOnLocalMusic(t *testing.T, dirs ...string) (*mygoui.Tester, *Shell, *app.App, *dirPicker) {
 	t.Helper()
+	return shellOnLocalMusicIn(t, false, dirs...)
+}
+
+// shellOnLocalMusicIn 是 `shellOnLocalMusic`，多一个深浅（出图那一组要两套）。
+//
+// ⚠️ **深浅是 Tester 的偏好**（`systemIsDark`），不是系统的真实状态——和
+// `chrome_shot_test.go` 那一组同一个做法。
+func shellOnLocalMusicIn(t *testing.T, dark bool, dirs ...string) (*mygoui.Tester, *Shell, *app.App, *dirPicker) {
+	t.Helper()
 
 	pick := &dirPicker{}
 	// ⚠️ **不挂文件监听**：测试里换掉 `s.local.pickDir` 和 wake 都很方便，
 	// 而真监听要系统事件循环（`WhenReady`），无头环境里根本起不来。
 	// 监听那一半由 app 层的桩验（`internal/app/localmusic_test.go`）。
 	b := newTestShell(t,
+		systemIsDark(dark),
 		withSettings(func() app.Settings {
 			st := app.DefaultSettings("")
 			st.LocalMusicDirs = dirs
@@ -418,6 +429,91 @@ func TestTheLocalTableRowHasNoSolidAccentBlock(t *testing.T) {
 		t.Errorf("点了「甲」，选中的却是第 %d 行（%q）",
 			s.local.sel+1, s.local.rows[s.local.sel].Title)
 	}
+}
+
+// TestTheLocalTableCursorHasAFocusRing 钉的是**评审点出来的那一条**：表格那一档的
+// **键盘游标**要有可见的焦点环。
+//
+// ⚠️ **这一条是「框架那个 `focusVisible` 靠不住」的证据**：框架只在 Tab 的时候把
+// `rt.focusVisible` 设成 true，指针按一下会把它清掉，而**方向键不会设回来**——
+// 所以「点一行 → 按 Down」那一路上，框架的判据一路是 false，屏幕上什么都不画。
+// 改动之前那一路是好的（实心主色底跟着键盘走），所以不能只满足于框架的判据。
+//
+// 三件事：
+//
+//  1. 点过之后那一行**没有环**（指针在管，鼠标点一行不改变它的样子）；
+//  2. 按了方向键之后，环落在**游标挪到的那一行**上；
+//  3. 原来那一行**没有环**了（环跟着游标走，不留在原地）。
+func TestTheLocalTableCursorHasAFocusRing(t *testing.T) {
+	dir := t.TempDir()
+	libSong(t, dir, "甲.mp3")
+	libSong(t, dir, "乙.mp3")
+	libSong(t, dir, "丙.mp3")
+	tt, s, _, _ := shellOnLocalMusic(t, dir)
+	s.local.style = localStyleTable
+	waitFrames(t, tt, "把文件扫回来", func() bool { return len(s.local.rows) >= 3 })
+	tt.Frame()
+
+	th := BuildTheme(s.app.SettingsSnapshot(), false)
+
+	// 点第一行：指针在管，那一行什么标记都没有。
+	first := s.local.rows[0].Title
+	if err := tt.Click(first); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if rowHasFocusRing(t, tt, th, first) {
+		t.Errorf("鼠标点过的那一行上有焦点环——指针在管的时候不该有")
+	}
+
+	// 按方向键：键盘在管了，环得跟着游标走。
+	tt.Key(0, mygoui.KeyDown)
+	tt.Frame()
+	tt.Frame()
+	second := s.local.rows[1].Title
+	if s.local.sel != 1 {
+		t.Fatalf("按了方向键，游标却在第 %d 行（want 第 2 行）", s.local.sel+1)
+	}
+	if !rowHasFocusRing(t, tt, th, second) {
+		t.Errorf("键盘走到「%s」了，那一行上沿却没有焦点环", second)
+	}
+	if rowHasFocusRing(t, tt, th, first) {
+		t.Errorf("「%s」那一行上沿还有焦点环——环没有跟着游标走", first)
+	}
+}
+
+// rowHasFocusRing 报那一行的上沿有没有焦点环。
+//
+// 判据是**那个像素是不是「焦点环压在页面底色上」该有的颜色**：环是主题里那个
+// Focus 色（半透明的主色）画的，压在底色上就是两者按透明度混出来的那个值。
+//
+// ⚠️ **不比「偏不偏主色」**：焦点环是半透明的，它离主色比离底色近；而实心主色底
+// 是**就是**那个主色。两者必须分得开，所以这里比的是「和期望的那个值差多少」。
+func rowHasFocusRing(t *testing.T, tt *mygoui.Tester, th *ui.Theme, title string) bool {
+	t.Helper()
+	r, ok := tt.Find(title)
+	if !ok {
+		t.Fatalf("画面上找不到「%s」，文字有 %q", title, tt.Texts())
+	}
+	got := tt.Image().RGBAAt(int(r.X+r.W/2), int(r.Y))
+	want := focusRingOn(th)
+	d := func(a, b uint8) int {
+		if a > b {
+			return int(a) - int(b)
+		}
+		return int(b) - int(a)
+	}
+	return d(got.R, want[0])+d(got.G, want[1])+d(got.B, want[2]) <= 24
+}
+
+// focusRingOn 是「焦点环压在页面底色上」该有的那个像素。
+func focusRingOn(th *ui.Theme) [3]uint8 {
+	bg := th.Background
+	a := float32(th.Focus.A) / 255
+	mix := func(fg, bgc uint8) uint8 {
+		return uint8(float32(fg)*a + float32(bgc)*(1-a) + 0.5)
+	}
+	return [3]uint8{mix(th.Focus.R, bg.R), mix(th.Focus.G, bg.G), mix(th.Focus.B, bg.B)}
 }
 
 // accentPixelsIn 是那个框里「主色」的像素有几个。
