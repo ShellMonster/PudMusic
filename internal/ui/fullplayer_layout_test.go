@@ -10,6 +10,7 @@ import (
 	"go/parser"
 	"go/token"
 	"image"
+	"image/color"
 	"os"
 	"testing"
 	"time"
@@ -20,6 +21,98 @@ import (
 
 // fullPlayLabel 是这一帧播放键的名字（在播时叫「暂停」）。
 func fullPlayLabel(s *Shell) string { return transportLabel(s.app.Snapshot().Playing) }
+
+// TestTheFullPlayerPlayKeyKeepsTheRowForeground 断满屏那一枚**悬停时不变主色**。
+//
+// 🔴 **这一条是评审查出来的（major）**：满屏的底是**压暗过的封面**，不是应用底色，
+// 而「悬停变主色」那一档是按**应用底色**算的（`widgets/ink` 的 `AccentOn`）——
+// 浅色主题下它是 rgb(18,114,52) 的深绿，压在满屏那个底（实测 {115,115,115}）上
+// **只有 1.0:1**，比底色还暗，**等于看不见**；而且那一行其余四枚图标都是满屏自己的
+// 前景色（白 92%），**一枚变绿另外四枚不变，一眼就不成套**。
+//
+// 所以满屏那一枚走 `iconButton`（图形是那一行的前景色），不走 `iconButtonPlay`
+// （那一枚带「悬停变主色」）。
+//
+// 判据：悬停之后那一枚图形**仍然是中性色**（白 92% 那一档），不是绿的。
+// 深浅两套都断：深色下主色是亮的绿，一样不是中性色。
+func TestTheFullPlayerPlayKeyKeepsTheRowForeground(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			// ⚠️ **自己搭一套，不用 `fullTester`**：那一支一律深色（它数的是
+			// 「接近白的像素」），而这里要量的是**浅色下**那一档——浅色下主色当字色
+			// 那一档最深，正好压在满屏压暗过的封面上。
+			s, tt := newShell(t)
+			s.clock = newFakeClock(time.Unix(1_700_000_000, 0))
+			tt.SetDark(dark)
+			if err := s.app.Enqueue(app.LocalItem(flacPath(t))); err != nil {
+				t.Fatalf("把歌放进队列：%v", err)
+			}
+			tt.Frame()
+			if !s.app.Snapshot().HasTrack {
+				t.Fatalf("歌没开起来：%q", s.app.Snapshot().Err)
+			}
+			openFull(t, tt)
+			settleFull(t, tt)
+
+			btn, ok := tt.Find(fullPlayLabel(s))
+			if !ok {
+				t.Fatalf("画面上找不到满屏的播放键，文字有 %q", tt.Texts())
+			}
+			// 指针落到那一枚上。
+			tt.Move(btn.X+btn.W/2, btn.Y+btn.H/2)
+			tt.Frame()
+
+			// 那一格里**离底色最远**的那个像素就是图形本身。
+			//
+			// ⚠️ **不能找「最白」的那个**：主色当字色那一档在浅色下是**比底色还暗**
+			// 的深绿（rgb(18,114,52)），那一格里面最白的像素反而是**底色**
+			// （实测 115）——找「最白」就永远找不到那一枚图形（这是第一版的错法，
+			// 浅色那一档因此绿了）。
+			bg := modeOf(columnLeftOf(tt.Image(), btn))
+			got := farthestFrom(tt.Image(), btn, bg)
+			if absInt(int(got.G)-int(got.R)) > 12 || absInt(int(got.B)-int(got.R)) > 12 {
+				t.Errorf("满屏的播放键悬停之后是 %v（底色 %v）——那不是满屏自己的"+
+					"前景色（白 92%%），是主色那一档（浅色主题下压在满屏那个底上"+
+					"只有 1.0:1，等于看不见；而且旁边四枚图标都还是白的）",
+					got, bg)
+			}
+		})
+	}
+}
+
+// columnLeftOf 是按钮左边三像素那一列的像素（当参照用）。
+//
+// ⚠️ **满屏那一枚左边是空的**：上一首和它之间隔着 24 的缝，而满屏的底是**压暗过
+// 的封面**——那一列采到的是封面本身（局部底色）。
+func columnLeftOf(img *image.RGBA, btn mygoui.Rect) []color.RGBA {
+	x := round32(btn.X) - 3
+	col := make([]color.RGBA, 0, int(btn.H))
+	for dy := range int(btn.H) {
+		col = append(col, img.RGBAAt(clampX(img, x), round32(btn.Y)+dy))
+	}
+	return col
+}
+
+// farthestFrom 是 box 里离 bg 最远的那一个像素——**图形本身**。
+//
+// ⚠️ **不能改成「找最白的那个」**：主色当字色那一档在浅色下是**比底色还暗**的
+// 深绿，那一格里面最白的像素反而是底色。
+func farthestFrom(img *image.RGBA, box mygoui.Rect, bg color.RGBA) color.RGBA {
+	best, bestD := bg, 0
+	for y := max(int(box.Y), img.Rect.Min.Y); y < min(int(box.Y+box.H), img.Rect.Max.Y); y++ {
+		for x := max(int(box.X), img.Rect.Min.X); x < min(int(box.X+box.W), img.Rect.Max.X); x++ {
+			p := img.RGBAAt(x, y)
+			if d := maxDiff(p, bg); d > bestD {
+				best, bestD = p, d
+			}
+		}
+	}
+	return best
+}
 
 // TestTheFullPlayerTopBarPaddingMatchesTheUpstream 断顶栏 `px-6 py-4`。
 //

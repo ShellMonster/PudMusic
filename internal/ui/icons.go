@@ -484,20 +484,31 @@ func iconButton(c *ui.Context, name, label string, font float32) ui.Element {
 // 深色下就是主色本身。理由和 `flatbutton.go` 的 `flatCurrent` 是同一条：
 // **主色当底和主色当字是两件事**。
 //
+// 🔴 **这一档只给「底是应用底色」的地方用**：满屏播放器那一枚的底是**压暗过的
+// 封面**，不是应用底色——主色当字色那一档压在那上面只有 1.0:1（实测），而且
+// 那一行其余四枚图标都是满屏自己的前景色，一枚变绿另外四枚不变，一眼就不成套。
+// 所以满屏那一枚走 `iconButton`（见 `fullplayer.go` 的 `viewFullControls`）。
+//
 // ⚠️ **别把它改回实心主色**：那一版的理由写在 `iconButtonPrimary` 上面，
 // 那条理由已经跟着播放键一起作废了（上游那一枚同样是强调色的播放键，只是它靠的
 // 是 `RiPlayCircleFill` 那张实心图形，而不是一块底）。
 //
 // 判据在 `playbar_layout_test.go` 的 `TestThePlayKeyIsBigEnoughToHit`：
 // 那一枚现在量的是「播放条底色上那一片墨迹」，不再是「主色底上那一片墨迹」。
-func iconButtonPlay(c *ui.Context, name, label string, font float32) ui.Element {
-	b := flatIconButton(c, name, label, font)
+func iconButtonPlay(c *ui.Context, name, label string, font float32, disabled bool) ui.Element {
+	b := flatIconButton(c, name, label, font).Disabled(disabled)
 	// 悬停时图形变主色。
 	//
 	// ⚠️ **在建元素的时候问 `Hovered()`**：框架把悬停那一层挂在 `styleFn` 上，
 	// 而那个我们拿不到——`flat` 那个包里的悬停底也是这么问的（见
 	// `widgets/flat/flat.go` 的 `feel`）：**指针位置不进事件循环就不变**，于是
 	// 画面上的效果一样。
+	//
+	// 🔴 **问之前先禁用**（上面那句 `Disabled`）：`Hovered()` 在**禁用**的键上恒为
+	// false（`mygo/ui/input.go:1116`），所以**先禁用、再问悬停**，一枚禁用的键
+	// 问出来就是 false。而反过来（先问悬停、后禁用）问出来的是「它悬停着」——
+	// 一枚**禁用**的键用主色告诉用户「这里点得动」。
+	// 禁不启用是**状态**决定的（没歌的时候那一枚是禁用的），所以由调用方给。
 	if b.Hovered() {
 		b = b.TextColor(ink.AccentOn(c.Theme()))
 	}

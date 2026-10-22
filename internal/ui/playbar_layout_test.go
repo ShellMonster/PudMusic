@@ -474,13 +474,21 @@ func TestThePlayKeyIsBigEnoughToHit(t *testing.T) {
 //
 // 三条判据：
 //
-//  1. **盒子的四角是播放条的底色**——底下没有压着一块实色。
+//  1. **盒子的边缘是播放条的底色**——底下没有压着一块实色。
 //  2. **图形是前景色**（`t.Text`），不是主色。
 //  3. 🔴 **「正在播放」那一档也一样**（`RiPauseCircleFill`）：形状换了，颜色
 //     没换——两档都断，「只改了播放那一档」这种坏法就抓得住。
 //
-// ⚠️ **深浅两套都断**：深色下前景色是白的、浅色下是近黑的，而**主色那一档在
-// 两边都不是它**（浅色下主色是绿的 #1ed760，近黑和它差得开；深色下白和它差得开）。
+// 🔴 **第 1 条要量「四条边的中点」，不能只量「四个角」**（评审指出来的）：
+// 旧那一枚是**圆角 8** 的方块，四个角上**本来就是空的**（圆角之外没有填充），
+// 于是「四角是底色」对一块实心方块**照样成立**——浅色那一档就抓不住这一票
+// 自己的「改之前」那一种。**边的中点**才是实心方块和空按钮分开的地方：
+// 圆角只吃掉四个角，边中点上是实心的。
+//
+// ⚠️ **深浅两套都断**：旧那一枚的图形是 `t.AccentText`（主色底上的字色）——
+// **深色下那是白**（主色够亮），和前景色差 11 个通道，所以第 2 条抓得住；
+// **浅色下那是 #18181b，和前景色一模一样**，第 2 条抓不住——**靠的是第 1 条**
+// （边中点）。
 func TestThePlayKeyHasNoSolidBackground(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -514,12 +522,22 @@ func TestThePlayKeyHasNoSolidBackground(t *testing.T) {
 				bg := rgb(th.Background)
 				accent := rgb(th.Accent)
 
-				// ① 四角是底色：底下没有一块实色。
+				// ① 边缘是底色：底下没有一块实色。
+				//
+				// ⚠️ **四个角 + 四条边的中点都要量**：角上对**圆角方块**是空的
+				// （抓不住旧那一枚），边中点才是实的（见上面那段）。
+				//
+				// ⚠️ **离边 2 像素**：抗锯齿那一圈是过渡色，贴着边量会读到它。
 				x0, y0 := round32(btn.X), round32(btn.Y)
 				x1, y1 := x0+int(btn.W)-1, y0+int(btn.H)-1
-				for _, p := range [][2]int{{x0 + 1, y0 + 1}, {x1 - 1, y0 + 1}, {x0 + 1, y1 - 1}, {x1 - 1, y1 - 1}} {
+				probes := [][2]int{
+					{x0 + 1, y0 + 1}, {x1 - 1, y0 + 1}, {x0 + 1, y1 - 1}, {x1 - 1, y1 - 1},
+					{x0 + 2, y0 + int(btn.H)/2}, {x1 - 2, y0 + int(btn.H)/2},
+					{x0 + int(btn.W)/2, y0 + 2}, {x0 + int(btn.W)/2, y1 - 2},
+				}
+				for _, p := range probes {
 					if got := tt.Image().RGBAAt(p[0], p[1]); !sameColor(got, bg) {
-						t.Errorf("%q 那一枚的角上 (%d,%d) 是 %v，而播放条底色是 %v——"+
+						t.Errorf("%q 那一枚的边上 (%d,%d) 是 %v，而播放条底色是 %v——"+
 							"它底下压着一块实色（上游那一枚底下什么都没有）",
 							label, p[0], p[1], got, bg)
 					}
@@ -585,6 +603,58 @@ func TestThePlayKeyTurnsAccentOnHover(t *testing.T) {
 			if near(lit, idle) {
 				t.Errorf("悬停之后播放键的图形还是 %v（没变）——"+
 					"图形要自己变成主色，不只是底下多一层淡底", lit)
+			}
+		})
+	}
+}
+
+// TestTheDisabledPlayKeyDoesNotTurnAccent 断**禁用**着的播放键**悬停时不变主色**。
+//
+// 🔴 **一枚禁用的键用主色告诉用户「这里点得动」**——那是错的（评审查出来的一条）。
+//
+// 原因在**顺序**：颜色是**建元素时**定的，而「悬停没有」也是**建元素时**问的
+// （`Hovered()`）。问的时候如果**还没禁用**，那一刻问出来的是「它悬停着」——于是
+// 一枚禁用的键也染上了主色（实测：浅色下悬停后变成 rgb(136,188,154) 的绿）。
+//
+// 修法是**先禁用、再问悬停**（`icons.go` 的 `iconButtonPlay`：禁不启用由调用方给，
+// 因为那是**状态**决定的——没歌的时候那一枚是禁用的）。
+//
+// 判据：禁用的那一枚**悬停之后一个像素都不变**（框架把禁用键整体乘 0.5 不透明度，
+// 所以它本来就该是暗的；而禁用的键**连那层淡底都不该有**——`widgets/flat` 的
+// `shade` 是在**画的时候**重新问一遍 `IsDisabled()` 的）。
+func TestTheDisabledPlayKeyDoesNotTurnAccent(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			st := barState()
+			st.HasTrack = false // 没有歌 → 那一枚是禁用的
+			tt, s := playbarTester(t, st, 1200, 0, dark)
+			bg := rgb(BuildTheme(s.app.SettingsSnapshot(), dark).Background)
+
+			btn, ok := tt.Find("播放")
+			if !ok {
+				t.Fatalf("画面上找不到「播放」，文字有 %q", tt.Texts())
+			}
+			// 指针先离开。
+			tt.Move(600, 300)
+			tt.Frame()
+			idle := inkColor(tt.Image(), btn, bg)
+
+			// 指针落到这一枚上。
+			tt.Move(btn.X+btn.W/2, btn.Y+btn.H/2)
+			tt.Frame()
+			lit := inkColor(tt.Image(), btn, bg)
+
+			if !sameColor(lit, idle) {
+				t.Errorf("禁用着的播放键悬停之后从 %v 变成了 %v——"+
+					"一枚禁用的键不该用主色告诉用户「这里点得动」", idle, lit)
+			}
+			// 顺带断一句「它不是主色」：主色是绿的，前景色是中性色。
+			if absInt(int(lit.G)-int(lit.R)) > 12 {
+				t.Errorf("禁用着的播放键悬停之后是 %v——那不是主色该有的样子", lit)
 			}
 		})
 	}
@@ -892,9 +962,14 @@ func TestRenderPlayBarRedoShots(t *testing.T) {
 //
 //	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderPlayKeyShots
 //
-// ⚠️ **三张都要**：平时（图形是**前景色**）、悬停（图形**变主色**）、正在播放
-// （形状换成 `RiPauseCircleFill`）——「悬停变主色」是这一票的一半，而**平时那
-// 一张和悬停那一张长得完全不一样**。
+// ⚠️ **四张都要**：平时（图形是**前景色**）、悬停（图形**变主色**）、正在播放
+// （形状换成 `RiPauseCircleFill`）、正在播放时悬停——「悬停变主色」是这一票的
+// 一半，而**平时那一张和悬停那一张长得完全不一样**。
+//
+// 🔴 **每一张的文件名都要带上状态**（评审指出来的）：第一版把「悬停」那一张
+// **写了两遍**（两档状态都写同一个文件名），后写的那一遍把先写的盖掉了——于是
+// 报告里那张标着「悬停」的图**其实是「正在播放」那一档**，而「悬停 + 播放三角」
+// 那一张**根本不存在**。这一条现在每一张的名字里都有状态。
 //
 // ⚠️ **窗口留 160 高、指针停在中段**：这一族只画播放条（`playbarTester`），而它
 // 摆在窗口的**顶上**（那 88 高），所以窗口的中段是空的——指针要停在那儿才算
@@ -912,15 +987,17 @@ func TestRenderPlayKeyShots(t *testing.T) {
 		for _, playing := range []bool{false, true} {
 			st := barState()
 			st.Playing = playing
-			label, shot := "播放", "73-播放键-平时-"+name
+			label := "播放"
+			idle, hover := "73-播放键-平时-"+name, "74-播放键-悬停-"+name
 			if playing {
-				label, shot = "暂停", "75-播放键-正在播放-"+name
+				label = "暂停"
+				idle, hover = "75-播放键-正在播放-"+name, "76-播放键-正在播放时悬停-"+name
 			}
 
 			tt, _ := playbarTester(t, st, 1200, 160, dark)
 			tt.Move(600, 130) // 播放条之外
 			tt.Frame()
-			save(t, dir, shot+".png", tt)
+			save(t, dir, idle+".png", tt)
 
 			// 悬停：图形变主色。
 			btn, ok := tt.Find(label)
@@ -929,7 +1006,7 @@ func TestRenderPlayKeyShots(t *testing.T) {
 			}
 			tt.Move(btn.X+btn.W/2, btn.Y+btn.H/2)
 			tt.Frame()
-			save(t, dir, "74-播放键-悬停-"+name+".png", tt)
+			save(t, dir, hover+".png", tt)
 		}
 	}
 }

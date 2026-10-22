@@ -809,7 +809,7 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 		Justify(ui.Center).AlignItems(ui.End)
 	bar = bar.Opacity(bar.AnimateTo("full-controls:o", shown, ui.Smooth))
 	// ⚠️ 位移**不跟着淡入一起动**（顶栏也是这么写的）：藏起来的时候这一条要真的
-	// 移出窗口，不然停在窗口底下那 102 像素里的控件仍然接得到点击。
+	// 移出窗口，不然停在窗口底下那 92 像素里的控件仍然接得到点击。
 	bar = bar.Translate(0, (1-shown)*fullControlsHeight)
 
 	bar.Children(func() {
@@ -841,7 +841,15 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 				ui.Row(c).Gap(24).AlignItems(ui.Center).Children(func() {
 					s.viewPrevButton(c)
 					// 提示走 tooltip.go（时延照上游），不是框架那枚固定的 600ms。
-					if s.withTip(c, iconButtonPlay(c, transportIcon(st.Playing),
+					//
+					// 🔴 **这一枚不走 `iconButtonPlay`**（那一枚带「悬停变主色」）：
+					// 满屏的底是**压暗过的封面**，不是应用底色——主色当字色那一档
+					// 压在那上面只有 1.0:1（实测：浅色主题下悬停后变成 rgb(18,114,52)
+					// 的深绿，比底色还暗），而且那一行其余四枚图标都是满屏自己的
+					// 前景色（白 92%），**一枚变绿另外四枚不变，一眼就不成套**。
+					// 所以这一枚就是那一行里的一枚图标键（图形是前景色），形状和
+					// 播放条上那一枚一样（48×48、图形正好填满）。
+					if s.withTip(c, iconButton(c, transportIcon(st.Playing),
 						transportLabel(st.Playing), fullPlayGlyph).
 						Size(fullPlayHit, fullPlayHit).Padding(0, 0).
 						Disabled(!st.Playing && !st.HasTrack), transportLabel(st.Playing)).Clicked() {

@@ -701,14 +701,16 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 		s.viewPrevButton(c)
 
 		if st.Playing {
-			if s.withTip(c, iconButtonPlay(c, transportIcon(true), "暂停", iconPlayBtn).
+			if s.withTip(c, iconButtonPlay(c, transportIcon(true), "暂停", iconPlayBtn, false).
 				Size(iconHitPlay, iconHitPlay).Padding(0, 0), "暂停").Clicked() {
 				s.app.Toggle()
 			}
 		} else {
-			if s.withTip(c, iconButtonPlay(c, transportIcon(false), "播放", iconPlayBtn).
-				Size(iconHitPlay, iconHitPlay).Padding(0, 0).
-				Disabled(!st.HasTrack), "播放").Clicked() {
+			// ⚠️ **禁不启用由这里给**（`iconButtonPlay` 的 `disabled`）：那一枚的
+			// 颜色是**建元素时**定的，「悬停变主色」要在**禁用之后**才问——问早了
+			// 一枚禁用的键会用主色告诉用户「这里点得动」（理由见那个函数）。
+			if s.withTip(c, iconButtonPlay(c, transportIcon(false), "播放", iconPlayBtn, !st.HasTrack).
+				Size(iconHitPlay, iconHitPlay).Padding(0, 0), "播放").Clicked() {
 				s.app.Toggle()
 			}
 		}
