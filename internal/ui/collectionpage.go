@@ -482,6 +482,13 @@ func (s *Shell) syncCollection(c *ui.Context) {
 	}
 	p := s.collectionFor(ref)
 
+	// ⚠️ **满屏开着的时候这一页不画 → 那个 500ms 的防抖钟没人推进**：不清它的话
+	// `syncSearchWatch` 会一直判「该醒着」，每 125ms 叫醒一次窗口，而那一帧画的是
+	// 满屏（白醒）。理由和 `syncLibraryPage` 那一处一字不差。
+	if s.underlayHidden() {
+		p.pendingSince = time.Time{}
+	}
+
 	// 后台攒下的话发成 Toast（取走而不是读）。
 	s.flushCollectionNotice(p)
 

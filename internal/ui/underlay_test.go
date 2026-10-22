@@ -201,3 +201,148 @@ func TestEveryPageWithContentHasASync(t *testing.T) {
 		}
 	}
 }
+
+// TestTheSearchWatchStopsWhileTheFullPlayerIsOpen 钉住「满屏开着的时候那个
+// 125ms 的自激钟不再醒着」。
+//
+// ## 它挡的是什么
+//
+// 那个 125ms 的钟（`syncSearchWatch`）认的是**三个防抖钟**（`librarypage.go:407`）：
+// 联想词那一档、稍后再看/历史记录那个关键词框、收藏夹那个按歌名找的输入框。
+// 哪一个非零，钟就每 125ms 叫醒一次窗口。
+//
+// 底层那一层在满屏开着的时候不画（票 #161），于是那几个防抖钟**没人推进**——
+// 钟一直挂着 → 钟每 125ms 醒一次 → 醒来的那一帧画的是满屏 → **白醒**。
+// 症状不是「慢」，是**CPU 空转**：这一帧和上一帧一模一样，而它每 125ms 来一次。
+//
+// ⚠️ **判据是那个钟本身**（`s.searchWatchStop`），不是「快了多少」——后者在这台
+// 机器上量不出来。
+func TestTheSearchWatchStopsWhileTheFullPlayerIsOpen(t *testing.T) {
+	f := newLibFake(t).withLater(1, 3, "甲", "乙", "丙")
+	tt, s := libraryShell(t, f, laterPath)
+
+	// 敲一个字，让那个 500ms 的防抖钟挂上（假时钟不走，所以它一直挂着）。
+	typeKeyword(t, tt, "周")
+	if s.laterPage.pendingSince.IsZero() {
+		t.Fatal("起点就不对：那个防抖钟没挂上")
+	}
+
+	// 满屏要有一首歌在放才开得出来。
+	if err := s.app.Enqueue(app.LocalItem(flacPath(t))); err != nil {
+		t.Fatalf("把歌放进队列：%v", err)
+	}
+	tt.Frame()
+	if !s.app.Snapshot().HasTrack {
+		t.Fatalf("歌没开起来：%q", s.app.Snapshot().Err)
+	}
+	s.openFullPlayer()
+	if !s.full.open {
+		t.Fatal("满屏没开")
+	}
+
+	// 画两帧：第一帧那个钟还会醒一次（`syncSearchWatch` 跑在副作用那一层之前），
+	// 第二帧它就该被收掉了（防抖钟已经被清成零，`want` 变成 false）。
+	for range 2 {
+		tt.Frame()
+	}
+	if s.searchWatchStop != nil {
+		t.Errorf("满屏开着的时候那个 125ms 的钟还醒着——"+
+			"它叫醒的每一帧画的都是满屏（白醒）")
+	}
+	if !s.laterPage.pendingSince.IsZero() {
+		t.Errorf("满屏开着的时候那个防抖钟还挂着（%v）——"+
+			"这一页不画，没人推进它，而挂着它那个 125ms 的钟就一直醒",
+			s.laterPage.pendingSince)
+	}
+}
+
+// TestTheShortcutRecordingSurvivesTheFullPlayer 钉住「满屏开着的时候，正在录的
+// 那个快捷键不被静默取消」。
+//
+// ## 它挡的是什么
+//
+// `viewShortcuts` 的兜底是「这一帧没画录制格就把正在录的清掉」（那是「用户切走了
+// 那一页」的兜底）。而满屏开着的时候设置页不画（票 #161）——不补上那个标志的话，
+// 用户正在录的那一个快捷键会在满屏开着的时候被清掉：**整个窗口一个应用内组合键
+// 都不登记**（录制期间 `viewShortcuts` 提前返回），而用户看不见「为什么现在按
+// 什么都不响」。
+//
+// ⚠️ **判据是 `s.recording` 本身**，不是画面：满屏那一屏上根本看不见录制格。
+func TestTheShortcutRecordingSurvivesTheFullPlayer(t *testing.T) {
+	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	openSettingsTab(t, tt, "快捷键设置")
+
+	clickCell(t, tt, "应用内快捷键：播放/暂停")
+	if s.recording == (shortcutSlot{}) {
+		t.Fatal("起点就不对：点了那一格没有进入录制")
+	}
+
+	// 满屏要有一首歌在放才开得出来。
+	if err := s.app.Enqueue(app.LocalItem(flacPath(t))); err != nil {
+		t.Fatalf("把歌放进队列：%v", err)
+	}
+	tt.Frame()
+	if !s.app.Snapshot().HasTrack {
+		t.Fatalf("歌没开起来：%q", s.app.Snapshot().Err)
+	}
+	s.openFullPlayer()
+	if !s.full.open {
+		t.Fatal("满屏没开")
+	}
+
+	// 两帧：第一帧 `viewShortcuts` 读到的还是满屏之前那一帧的标志（真的），
+	// 第二帧读到的就该是副作用那一层补上的那一个（也得是真的）。
+	for range 2 {
+		tt.Frame()
+	}
+	if s.recording == (shortcutSlot{}) {
+		t.Errorf("满屏开着的时候「正在录」被静默取消了——"+
+			"而录制期间窗口一个应用内组合键都不登记，用户看不见为什么")
+	}
+}
+
+// TestTheCollectionSearchClockStopsWhileTheFullPlayerIsOpen 钉住收藏夹那一页
+// 的同一个 125ms 自激钟。
+//
+// 收藏夹那个「按歌名找」的输入框有它自己的一份防抖钟（`collectionPage.pendingSince`），
+// 而 `syncSearchWatch` 认的是它（`collectionSearching`）——所以它和稍后再看那一页
+// 是同一个病：这一页不画 → 没人推进那个钟 → 钟一直挂着 → 每 125ms 白醒一次。
+//
+// ⚠️ 那个钟是**直接摆上去的**，不是敲出来的：这一条要验的是「钟挂着的时候满屏
+// 开着会怎样」，而敲字那条路会把它自己清掉（那正是它该有的样子）。
+func TestTheCollectionSearchClockStopsWhileTheFullPlayerIsOpen(t *testing.T) {
+	_, s, tt := collectionShell(t, "1")
+	s.navigate(collectionPath(1))
+	tt.Frame()
+	if s.collection == nil {
+		t.Fatal("起点就不对：这一页的状态还没建起来")
+	}
+
+	// 摆一个「敲了字、还没发出去」的状态。
+	s.collection.pendingSince = s.clock.Now()
+
+	// 满屏要有一首歌在放才开得出来。
+	if err := s.app.Enqueue(app.LocalItem(flacPath(t))); err != nil {
+		t.Fatalf("把歌放进队列：%v", err)
+	}
+	tt.Frame()
+	if !s.app.Snapshot().HasTrack {
+		t.Fatalf("歌没开起来：%q", s.app.Snapshot().Err)
+	}
+	s.openFullPlayer()
+	if !s.full.open {
+		t.Fatal("满屏没开")
+	}
+
+	for range 2 {
+		tt.Frame()
+	}
+	if !s.collection.pendingSince.IsZero() {
+		t.Errorf("满屏开着的时候收藏夹那个防抖钟还挂着（%v）——"+
+			"这一页不画，没人推进它，而挂着它那个 125ms 的钟就一直醒",
+			s.collection.pendingSince)
+	}
+	if s.searchWatchStop != nil {
+		t.Error("满屏开着的时候那个 125ms 的钟还醒着——它叫醒的每一帧画的都是满屏")
+	}
+}

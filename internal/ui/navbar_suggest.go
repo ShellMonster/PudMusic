@@ -121,6 +121,14 @@ type suggestTerms struct {
 func (s *Shell) syncSuggestPending(now time.Time) {
 	q := strings.TrimSpace(s.searchKeyword)
 	if q == "" || !s.searchSuggest {
+		// ⚠️ **钟要清**：浮层关着 / 框里空了的时候，`s.terms.pendingSince` 必须回到
+		// 零——不然 `syncSearchWatch` 会一直判「该醒着」，每 125ms 叫醒一次窗口，
+		// 而满屏开着的时候那一帧画的是满屏（白醒）。
+		//
+		// ⚠️ **业务层那一摊（`s.app.SearchSuggest("")`）不在这里收**：收浮层是
+		// 「看得见的那一半」的活（浮层关不关由用户点的那一下决定），它留在
+		// `syncSuggest` 里。
+		s.terms.seen, s.terms.pendingSince = "", time.Time{}
 		return
 	}
 	switch {

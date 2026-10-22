@@ -572,6 +572,12 @@ var Items = []Item{
 			// 「每一页的副作用都在那张表里」那一条：加了新页而忘了加它，那一页
 			// 在满屏开着的时候副作用就停更了——症状是静默的。
 			"TestEveryPageWithContentHasASync",
+			// 「跳过绘制不能连带跳过每帧的副作用」那三条：满屏期间那个 125ms 的
+			// 自激钟（防抖钟没人推进 → 每 125ms 醒一次，而那一帧画的是满屏）、
+			// 「正在录」的快捷键被静默取消（录制期间窗口一个组合键都不登记）。
+			"TestTheSearchWatchStopsWhileTheFullPlayerIsOpen",
+			"TestTheShortcutRecordingSurvivesTheFullPlayer",
+			"TestTheCollectionSearchClockStopsWhileTheFullPlayerIsOpen",
 		},
 	},
 

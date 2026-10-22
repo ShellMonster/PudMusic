@@ -449,6 +449,19 @@ func (s *Shell) libraryPageAt(path string) *libraryPage {
 // 发（B 站一律回 -101），而**没挂上客户端时拉页器会直接崩**（`s.app.LibraryOf()`
 // 是 nil）。
 func (s *Shell) syncLibraryPage(path string, p *libraryPage, c *ui.Context) {
+	// ⚠️ **满屏开着的时候这一页不画 → 那个 500ms 的防抖钟没人推进**：不清它的话
+	// `syncSearchWatch` 会一直判「该醒着」，每 125ms 叫醒一次窗口，而那一帧画的是
+	// 满屏（白醒）。
+	//
+	// 钟清掉之后，关掉满屏的第一帧就会把那个词换上去——`keywordChanged` 判「防抖
+	// 到点了」的那一支读的就是这个钟（零值意味着「早就到点了」）。
+	//
+	// ⚠️ **这里只清钟，不换查询**：换查询要读这一帧刚建出来的输入框（回车事件只由
+	// 存在着的输入框投递），而那一支留在画的那一半里。
+	if s.underlayHidden() {
+		p.pendingSince = time.Time{}
+	}
+
 	if !s.app.LibraryOf().Mounted() {
 		return
 	}

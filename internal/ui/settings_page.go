@@ -209,6 +209,16 @@ func (s *Shell) syncSettings(c *ui.Context) {
 	if s.settings.tab != settingsTabShortcut {
 		s.recording = shortcutSlot{}
 		s.rejected = shortcutSlot{}
+	} else {
+		// ⚠️ **「这一帧画没画快捷键录制格」这个标志要在这儿也置**：满屏开着的时候
+		// 设置页不画，而 `viewShortcuts` 的兜底是「这一帧没画录制格就把正在录的
+		// 清掉」——不置的话，用户正在录的那一个快捷键会在满屏开着的时候被静默
+		// 取消（而录制期间窗口一个应用内组合键都不登记，用户看不见为什么）。
+		//
+		// 它原来在 `settingsShortcuts`（画的那一半）里，而那一半在满屏开着的时候
+		// 不跑。顺序对得上：`viewShortcuts` 读的是**上一帧**的值，而这一句和画的那
+		// 一句落在同一帧里。
+		s.recorderShown = true
 	}
 
 	// 按 Tab 时回到顶上：Biu 换了面板就是新的一页。
