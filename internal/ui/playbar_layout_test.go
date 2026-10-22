@@ -52,9 +52,9 @@ func playbarTester(t *testing.T, st app.State, width, height int, dark bool) (*m
 
 // barState 是这一族用的那份状态：一首有歌、有时长、位置在 0 的。
 //
-// ⚠️ **位置必须是 0**：旋钮在 `frac=0` 那头，而填过的那一段轨道也是主色——
-// 位置不在 0 的话，「轨道上有一段主色」和「旋钮画出来了」就分不开了
-// （见 `TestTheProgressKnobIsOnlyDrawnWhileHovered`）。
+// ⚠️ **位置必须是 0**：旋钮在 `frac=0` 那头，而填过的那一段轨道**悬停时**也是
+// 主色（票 #218 之后）——位置不在 0 的话，「轨道上有一段主色」和「旋钮画出来了」
+// 就分不开了（见 `TestTheProgressKnobIsOnlyDrawnWhileHovered`）。
 func barState() app.State {
 	return app.State{
 		HasTrack: true, Title: "一首歌",
@@ -714,8 +714,9 @@ func inkExtent(img *image.RGBA, box mygoui.Rect, bg color.RGBA) (lo, hi, n int) 
 // 判据是**画面上有没有主色的那一团**：旋钮是主色的，而没有悬停的时候那一块
 // 只有 4 像素的轨道（`t.Border`）——两者分得开。
 //
-// ⚠️ **位置必须在 0**（`barState`）：填过的那一段轨道也是主色，位置不在 0 的
-// 时候「轨道上有一段主色」和「旋钮画出来了」在像素上是一回事。
+// ⚠️ **位置必须在 0**（`barState`）：填过的那一段轨道**悬停时**也是主色（票 #218
+// 之后：不悬停是前景色，悬停才主色），位置不在 0 的时候「轨道上有一段主色」和
+// 「旋钮画出来了」在像素上是一回事。
 func TestTheProgressKnobIsOnlyDrawnWhileHovered(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
