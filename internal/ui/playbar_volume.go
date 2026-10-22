@@ -96,6 +96,13 @@ var volSliderLook = sliderLook{
 	face: func(t *ui.Theme) ui.Color {
 		return t.Accent
 	},
+	// ⚠️ **这一根一直是主色，不拆两档**：上游音量那根是 `music-volume` 里另一个
+	// 组件（`orientation="vertical"` 的 HeroUI Slider），填过的那一段一直是一个
+	// 颜色；而它的旋钮**一直画着**（`knobWhenIdle: true`）——「旋钮出不出来」
+	// 这一档在它身上根本不存在。拆两档是播放条那根的事（票 #218）。
+	fill: func(t *ui.Theme) (ui.Color, ui.Color) {
+		return t.Accent, t.Accent
+	},
 }
 
 // volHoverKey 是「指针在音量图标上」那个动画的键。
