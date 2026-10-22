@@ -339,43 +339,33 @@ type confirmAsk struct {
 // 帧的这一段就把弹窗画出来。放反了的话用户要等下一次重画才看见弹窗，而这一帧
 // 的重画不一定有（按钮按下之后没有任何东西会要求再画一帧）。
 //
-// Escape 和点背景都关掉它（`Dismissed`），并且**这一次删除不算数**——上游也是
-// 「取消」什么都不做。
+// Escape 和点背景都关掉它，**并且这一次删除不算数**——上游也是「取消」什么
+// 都不做。
+//
+// ⚠️ **danger 那一档是红的**（上游 `download-list/actions.tsx:141-146` 那一处
+// 没有写 `type`，而那个弹窗的默认值就是 `danger`）：删掉的是一条下载任务，
+// 而任务没下完的时候删掉就再也下不回来了。
 func (d *downloadsPage) viewConfirm(c *ui.Context, s *Shell) {
 	if d.ask == nil {
 		return
 	}
 	ask := d.ask
-	if m := ui.Modal(c, &ask.open, func() {
-		ui.Column(c).Width(dlAskW).Gap(12).Children(func() {
-			ui.Text(c, ask.title).FontSize(scale.Font(c, 16)).Bold()
-			// 正文允许折行：上游那句「当前任务未下载完成，确认删除后将无法恢复」
-			// 加上条数之后就宽过一行了，截掉就成了半句话。
-			ui.Text(c, ask.body).FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).Wrap()
-			ui.Row(c).FillWidth().Gap(dlAskGap).Justify(ui.End).Children(func() {
-				if ui.Button(c, "取消").Width(dlAskBtnW).Clicked() {
-					d.ask = nil
-				}
-				if ui.PrimaryButton(c, ask.ok).Width(dlAskBtnW).Clicked() {
-					// 先关弹窗再做那件事：做的时候可能弹提示（addToast），
-					// 而弹窗还开着的话用户看到的是提示压在弹窗底下。
-					d.ask = nil
-					ask.doIt()
-				}
-			})
-		})
-	}); m.Dismissed() {
+	switch confirmModal(c, &ask.open, confirmSpec{
+		tone:    toneDanger,
+		title:   ask.title,
+		body:    ask.body,
+		confirm: ask.ok,
+		cancel:  "取消",
+	}) {
+	case confirmAccepted:
+		// 先关弹窗再做那件事：做的时候可能弹提示（addToast），
+		// 而弹窗还开着的话用户看到的是提示压在弹窗底下。
+		d.ask = nil
+		ask.doIt()
+	case confirmCancelled:
 		d.ask = nil
 	}
 }
-
-// 弹窗面板和里面两颗按钮的尺寸。dlAskGap 是它们之间的距离（布局上确认那颗
-// 排在「取消」右边，而 `Justify(ui.End)` 把这一行顶到右边）。
-const (
-	dlAskW    = 380
-	dlAskBtnW = 84
-	dlAskGap  = 8
-)
 
 // ─────────────────────────────────────────────────────────────────────────────
 

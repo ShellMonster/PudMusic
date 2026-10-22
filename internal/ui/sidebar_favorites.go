@@ -356,8 +356,8 @@ func (s *Shell) favoriteAction(f app.Favorite, item favMenuAction) {
 	case "add-to-playlist":
 		s.app.EnqueueFolder(f, s.sayFolderDone)
 	case "delete":
-		// 只记，不做：真正那一下在 `viewFavoriteDelete` 里（确认框是系统
-		// 模态，在它上面点任何别的控件都不该生效，所以两步必须分开）。
+		// 只记，不做：真正那一下在 `viewFavoriteDelete` 里（那个框是**模态**，
+		// 在它上面点任何别的控件都不该生效，所以两步必须分开）。
 		s.folderDelete = favoriteDeleteAsk{open: true, id: f.ID, title: f.Title}
 	case "unfavorite":
 		s.app.UnfavoriteFolder(f, s.sayFolderDone)
@@ -381,26 +381,26 @@ type favoriteDeleteAsk struct {
 // 画在侧栏里的后果不是「位置不对」：侧栏整个折叠时不画收藏夹，弹窗就跟着
 // 不见了，而用户刚按完「删除」——按下去之后界面毫无反应。
 //
-// 用 MyGo 的 `AlertDialog`（系统原生确认框）：它免费给到「点外面不关」和
-// 「Esc 当取消」——**点外面不关正是二次确认要的**（自绘浮层很容易漏掉，而漏掉
-// 的后果是误删整个收藏夹）。
+// 用**应用自绘**的确认框（`confirmModal`）：上游那一份是
+// `components/confirm-modal`，而删收藏夹在那边是 `type: "danger"`
+// （`side/collection/index.tsx:249`）。
 func (s *Shell) viewFavoriteDelete(c *ui.Context) {
 	d := &s.folderDelete
 	if !d.open {
 		return
 	}
-	switch ui.AlertDialog(c, &d.open,
-		"删掉「"+d.title+"」吗？",
-		"这个收藏夹和里面的所有歌都会没，撤不回来。", "取消", "删除") {
-	case 1:
-		// ⚠️ 先关掉再干活：删成功之后侧栏那一行没了，而 `d` 是下一帧还要读
-		// 的状态（不清的话下一帧同一个框又弹一次）。
-		d.open = false
-		s.app.DeleteFavoriteFolder(app.Favorite{ID: d.id, Title: d.title}, s.sayFolderDone)
-	case ui.AlertDismissed:
-		// Esc = 取消。
-		d.open = false
+	// ⚠️ 确认框自己会把 `d.open` 关掉（确认和取消都关），所以这里不用再关一遍。
+	if confirmModal(c, &d.open, confirmSpec{
+		tone:    toneDanger,
+		title:   "删掉「" + d.title + "」吗？",
+		body:    "这个收藏夹和里面的所有歌都会没，撤不回来。",
+		confirm: "删除",
+		cancel:  "取消",
+	}) != confirmAccepted {
+		// 取消 / Esc / 点外面：什么都不做。
+		return
 	}
+	s.app.DeleteFavoriteFolder(app.Favorite{ID: d.id, Title: d.title}, s.sayFolderDone)
 }
 
 // sayFolderDone 是侧栏收藏夹那几个后台动作跑完之后说的话。

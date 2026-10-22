@@ -409,7 +409,7 @@ func TestTheStatusColumnShowsTheThreeParts(t *testing.T) {
 	}
 }
 
-// progressWidth 是画面上那一条进度条涂了主色的宽度。
+// progressWidth 是画面上那一条进度条涂了色的宽度。
 //
 // 🔴 **只量「状态」那一列里那一段**（横向窗口是从百分比那一格的右边缘往左
 // `dlStatusW`），不是扫整张图。早先这里是整幅宽度扫，于是「侧栏里当前页那一项
@@ -427,23 +427,22 @@ func progressWidth(t *testing.T, tt *ui.Tester, pct string) float32 {
 	if !ok {
 		t.Fatalf("那一格没有写出 %q，文字有 %q", pct, tt.Texts())
 	}
-	// 主色从这一帧真正用的那份主题里取，别写死：默认设置是「跟随系统」，
-	// 而 Tester 默认不深色，所以浅色那份的 Accent 正是条上涂的那个颜色。
-	accent := BuildTheme(app.DefaultSettings(""), false).Accent
+	// 条涂的是**蓝**（上游 `progress.tsx:49` 的 `bg-blue-500`），不是主色。
+	bar := ui.Hex(dlBarColor)
 
 	// 百分比是那一格里**定宽靠右**的一段（`dlPctW`），它的右边缘就是状态列的
 	// 右边缘；条是同一格里 `FillWidth` 的，所以右边缘也是那儿。
 	right := int(txt.X + txt.W)
 	left := right - dlStatusW
 
-	// 条在百分比那一行**上面**：从文字的上边界往上扫，找主色。
+	// 条在百分比那一行**上面**：从文字的上边界往上扫，找那个颜色。
 	img := tt.Image()
 	y := int(txt.Y) - 4
 	for y > int(txt.Y)-24 {
 		run, best := 0, 0
 		for x := max(left, 0); x < right; x++ {
 			c := img.RGBAAt(x, y)
-			if c.R == accent.R && c.G == accent.G && c.B == accent.B && c.A > 0 {
+			if c.R == bar.R && c.G == bar.G && c.B == bar.B && c.A > 0 {
 				if run++; run > best {
 					best = run
 				}

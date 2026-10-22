@@ -140,8 +140,12 @@ const (
 	deleteDialogTitle = "删除文件"
 	deleteDialogBody  = "该操作会删除本地文件且不可恢复，请谨慎操作"
 	// deleteConfirmLabel 是**弹窗里**那个确认按钮（Biu 是 `confirmText: "删除"`）。
-	// 它排在最后一个：`ui.AlertDialog` 把最后一个按钮当主按钮并自动聚焦
-	// （`mygo/ui/feedback.go:198`）。
+	//
+	// ⚠️ **它排在最后只是抄上游的写法**（上游的 `confirmText` 是最后一个）；
+	// 那个框现在是**应用自绘**的（`confirmModal`，票 #176），而自绘的那一份
+	// **不自动聚焦**（系统原生那个 `ui.AlertDialog` 会把最后一个按钮当主按钮
+	// 并自动聚焦，`mygo/ui/feedback.go:198`）——聚焦那颗**不可逆**的键上，
+	// 回车就等于直接删掉，而这里是自绘的，不聚焦反而更稳。
 	deleteConfirmLabel = "删除"
 	// deleteRowLabel 是**行里**那个按钮的名字。
 	//
@@ -162,24 +166,11 @@ const (
 	removeDirBody  = "仅移除列表中的目录，不会删除本地文件"
 )
 
-// 确认框的尺寸。420 是按 Biu 那一行弹窗的观感定的：路径那一行在 420 宽下
-// 大概能放 45 个字符，再窄就开始一行一截地断。
+// 弹窗里各行之间的距离。
 //
-// ⚠️ 窗口缩到 700 以下时那个 420 就占掉大半屏了，所以另有一个 70% 的上限
-// （`MaxWidthPercent`）——`ui.Context` ��有宽度可问，只能给比例。
-const (
-	dialogWidth       = 420
-	dialogMaxWidthPct = 0.7
-	dialogPad         = 16
-	dialogGap         = 12
-)
-
-// dialogOnDanger 是红色确认按钮上的字。
-//
-// 主题给的是 `Danger` 那一个颜色，没有配套的「危险底上的前景色」，而这里
-// 需要的正是后者。白色在上游那一档 Danger（`#f31260`）上是 4.1:1——比改之前的
-// 深色档 `#ef4444`（3.8:1）还高一点，所以就用白（见 confirmDialog 里那句话）。
-var dialogOnDanger = ui.RGB(255, 255, 255)
+// ⚠️ **它现在只服务更新弹窗那一处**（`update_dialog.go`）：确认框的间距在
+// `confirmmodal.go` 的 `confirmGap` 那一处。
+const dialogGap = 12
 
 // localPage 是本地音乐这一页自己的状态。建一次，每一帧调 View。
 type localPage struct {

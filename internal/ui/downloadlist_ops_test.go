@@ -280,25 +280,18 @@ func TestDeletingAFinishedTaskStillAsks(t *testing.T) {
 
 // dlClickConfirm 点弹窗上那颗确认按钮。
 //
-// ⚠️ **按位置点，不按名字点**：弹窗上那颗的标签和行里那颗是**同一个字**
-// （上游 `confirmText: "删除"`，我们照抄），而 `Tester.Click` 命中的是**第一个**
-// 同名元素——那是行里的那颗。
+// ⚠️ **按无障碍名字点，不按可见的字点**：弹窗上那颗的**可见字**和行里那颗是
+// **同一个字**（上游 `confirmText: "删除"`，我们照抄），而 `Tester.Click` 命中
+// 的是**第一个**同名元素——那是行里的那颗。
 //
-// 「取消」和它之间隔着一颗按钮加一道缝（`dlAskBtnW + dlAskGap`，见 viewConfirm
-// 那一行），而确认那颗排在**右边**（`Justify(ui.End)` 那一行里它在后），所以
-// 从「取消」的字**中心**往右挪那么远就是确认那颗的字。
-// ⚠️ `Find` 给的是**字**的框（不是按钮的框），所以这里是中心减距离，不是左边
-// 减距离。
-//
-// 布局改了这里就会点空，而点空时上面那条断言会红（记录还在队列里），不是悄悄放
-// 过。
+// 所以弹窗上那颗的无障碍名字是「确认删除」（`confirmButton` 里的 `Label`）：
+// 那一层不是给测试凑的，是给读屏软件凑的——同一个画面里两颗都叫「删除」，
+// 而这一颗是不可逆的那一下（理由见 `confirmmodal.go` 的 `confirmButton`）。
 func dlClickConfirm(t *testing.T, tt *ui.Tester) {
 	t.Helper()
-	cancel, ok := tt.Find("取消")
-	if !ok {
-		t.Fatalf("弹窗上没有「取消」，文字有 %q", tt.Texts())
+	if err := tt.Click("确认删除"); err != nil {
+		t.Fatalf("弹窗上没有那颗确认键：%v，文字有 %q", err, tt.Texts())
 	}
-	tt.ClickAt(cancel.X+cancel.W/2+(dlAskBtnW+dlAskGap), cancel.Y+cancel.H/2)
 }
 
 // TestClearingAsksFirstAndThenEmptiesTheQueue 清空也要问，而且问的时候要说清

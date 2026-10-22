@@ -14,7 +14,6 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -30,12 +29,22 @@ func (p *localPage) viewDeleteDialog(c *ui.Context) {
 	}
 	// 正文后面带上完整路径：歌名可能重名（「同名.mp3」在好几个目录里），
 	// 而按下按钮之后**不可恢复**——用户得能确认自己删的是哪一个文件。
-	if p.confirmDialog(c, &p.askOpen, "dialog:delete", deleteDialogTitle,
-		deleteDialogBody, tr.Path, deleteConfirmLabel, true) {
+	//
+	// ⚠️ **danger 那一档是红的**（上游 `local-music/index.tsx:180` 的
+	// `type: "danger"`）：一个绿色的「删除」和行里那个红色的「删除文件」摆在一起，
+	// 是在说两件不一样的事——而这两个按钮指的是**同一个动作**。
+	if confirmModal(c, &p.askOpen, confirmSpec{
+		tone:    toneDanger,
+		title:   deleteDialogTitle,
+		body:    deleteDialogBody,
+		detail:  tr.Path,
+		confirm: deleteConfirmLabel,
+		cancel:  deleteCancelLabel,
+	}) == confirmAccepted {
 		p.deleteTrack(tr)
 	}
-	// ⚠️ 判「关掉了」用 `!p.askOpen`：**弹窗刚打开的那一帧 `confirmDialog`
-	// 返回 false**（还没有人按任何按钮），而这一帧 `*open` 还是 true。
+	// ⚠️ 判「关掉了」用 `!p.askOpen`：**弹窗刚打开的那一帧 `confirmModal`
+	// 报的是「还开着」**（还没有人按任何按钮），而这一帧 `*open` 还是 true。
 	// 两个条件都满足才清掉待删项——判错的话弹窗画出来的那一瞬间目标就没了，
 	// 按钮还在而按下去什么也不发生。
 	if !p.askOpen {
@@ -44,81 +53,29 @@ func (p *localPage) viewDeleteDialog(c *ui.Context) {
 }
 
 // viewRemoveDirDialog 是移除目录那道确认。
+//
+// ⚠️ **warning 那一档是橙的，不是红的**（上游 `local-music/index.tsx:113` 的
+// `type: "warning"`）：这一下只从列表里拿掉目录、不删文件（正文里写着这一句），
+// 比「删文件」轻一档——而红色会让用户以为歌也没了。
 func (p *localPage) viewRemoveDirDialog(c *ui.Context) {
 	dir := p.rmPath
 	if dir == "" {
 		return
 	}
-	if p.confirmDialog(c, &p.rmOpen, "dialog:remove-dir", removeDirTitle,
-		removeDirBody, dir, "移除", true) {
+	if confirmModal(c, &p.rmOpen, confirmSpec{
+		tone:    toneWarning,
+		title:   removeDirTitle,
+		body:    removeDirBody,
+		detail:  dir,
+		confirm: "移除",
+		cancel:  deleteCancelLabel,
+	}) == confirmAccepted {
 		p.removeRoot(dir)
 		p.dirLabel = allDirs
 	}
 	if !p.rmOpen {
 		p.rmPath = ""
 	}
-}
-
-// confirmDialog 画一道确认框，这一帧用户按了确认就返回 true。
-//
-// # 为什么不用 `ui.AlertDialog`
-//
-// 它把**最后一个按钮一律做成主按钮**（用主题的强调色，也就是绿的），
-// 而「删除」这个按钮要红色的：Biu 上游那个弹窗写的就是 `type: "danger"`
-// （`local-music.ts:179`）。一个绿色的「删除」和行里那个红色的「删除文件」
-// 摆在一起，是在说两件不一样的事——而这两个按钮指的是**同一个动作**。
-//
-// `ui.Modal` 把「点背景 / 按 Esc 关掉」做好了（`Dismissed` 报它），那一半
-// 不用自己写；剩下的（面板长什么样、按钮什么颜色）就是这一摊自己的事。
-//
-// ⚠️ 两个按钮都用 `ui.Button` 而不是 `ui.PrimaryButton`：后者一定是强调色，
-// 而这里要的是「取消不显眼、确认显眼且是红的」。
-func (p *localPage) confirmDialog(c *ui.Context, open *bool, key, title, body,
-	detail, confirm string, danger bool) bool {
-	if !*open {
-		return false
-	}
-	t := c.Theme()
-	pressed := ""
-
-	// ⚠️ `ui.Modal` 自己已经把那块面板摆好并给了它内边距/圆角/背景
-	//（`mygo/ui/widgets.go` 的 `coreModal`），`fn` 往里放的是**面板的内容**。
-	// 在里面再套一个 `ui.Column` 会让按钮的命中区域和面板对不上——症状是
-	// 「按钮看得见、点不动」。
-	ui.Modal(c, open, func() {
-		// 三句话量成一个 420 宽的块（路径那一行在 420 下大概能放 45 个字符）；
-		// 按钮行是面板的直接子元素。
-		ui.Column(c).Key(key).Width(dialogWidth).Gap(dialogGap).
-			Children(func() {
-				ui.Text(c, title).FontSize(scale.Font(c, 16)).Bold()
-				ui.Text(c, body).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
-				// 完整路径单独一行：它是用户按下按钮之前能用来认人的**唯一**
-				// 东西（歌名会重名，而按下去不可恢复）。
-				ui.Text(c, detail).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
-			})
-		ui.Row(c).AlignSelf(ui.End).Gap(8).Children(func() {
-			ok := ui.Button(c, deleteCancelLabel)
-			if ok.Clicked() {
-				pressed = deleteCancelLabel
-			}
-			yes := ui.Button(c, confirm)
-			if danger {
-				// ⚠️ 红色的底配白字：主题的 Danger 是上游那一档 `#f31260`
-				//（深浅两套同一个值，票 #172），白字在它上面是 4.1:1——比改之前的
-				// 深色档 `#ef4444`（3.8:1）还好一点。
-				yes = yes.Background(t.Danger).TextColor(dialogOnDanger)
-			}
-			if yes.Clicked() {
-				pressed = confirm
-			}
-		})
-	})
-
-	if pressed == "" {
-		return false
-	}
-	*open = false
-	return pressed == confirm
 }
 
 // deleteTrack 真的删。

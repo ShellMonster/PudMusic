@@ -2041,4 +2041,73 @@ var Items = []Item{
 			"TestHoveringALocalRowTurnsItsNumberIntoAPlayIcon",
 		},
 	},
+	{
+		// 归「双平台」那一组：这一票动的是**播放条自己的刻度**，而播放条是
+		// **每一屏都在**的那一条（理由同 issue 127 那一条）。
+		Category: Platform,
+		// 票 #173（#163 的第二批之一）：播放条的字号与图标尺寸。
+		//
+		// 🔴 **判据全是画面上的尺寸**：这一族每一个症状都是**静默**的——字号小一
+		// 档、字重重一档、图标小一圈，**没有一样会报错**，界面只是「跟那边不像」。
+		// 所以每一条都量：文字盒高（字号）、墨迹的多少（字重）、图形的墨迹（图标）。
+		//
+		// ⚠️ **字重只能由代码钉住一半**：400 和 700 的盒高一样，只有笔画粗细不同
+		// ——所以「哪一句用哪一档字重」由 AST 钉（不许出现 `Bold()`），而「画出来
+		// 的确实不是粗的那一版」由墨迹钉（同一串字在同一个进程里按 400 / 700 各
+		// 画一次，比谁的墨迹更接近）。两样都要，缺一样就有一类坏没人管。
+		//
+		// ⚠️ **最后一钉的是宽度账的前提**：右边那一组是「有歌」的那一档（没有歌时
+		// 少一枚「下载」），而「倍速」那一枚贴字宽（随当前倍率变）——这两样都写
+		// 在 `internal/ui/playbar.go` 的注释里，量出来的那张表也靠这一钉。
+		Spec: "播放条：歌名 16/400、UP 名 14、进度条两头的读数 14、倍速 16；封面 hover 的箭头 32；上一首 / 下一首 32/22（图标 22）；右边那一组与进度条的宽度账是「有歌」的那一档",
+		Tests: []string{
+			// 四个字号（文字盒高折算，深浅两套）。
+			"TestThePlayBarUsesTheBiuTypeScale",
+			// 歌名的字重：AST（不许 `Bold()`）+ 墨迹（不是粗的那一版）。
+			"TestThePlayBarTitleIsNotBold",
+			// 封面 hover 的箭头（亮像素的多少）。
+			"TestTheCoverHoverArrowIsBigEnough",
+			// 上一首 / 下一首：命中区 32 + 图形 22（墨迹的多少）。
+			"TestTheSkipKeysDrawBiggerGlyphs",
+			// 宽度账的前提：有歌 / 没歌差 40，右边那一组与进度条各差一半。
+			"TestTheBarIsWiderWithATrackThanWithout",
+		},
+	},
+	{
+		// 归「双平台」那一组：这一票动的是**三处控件的形态**（确认框、日期
+		// 范围、下载状态），而这一族的错法全是「长得不像上游」——系统原生那个
+		// 弹窗、两个并排的日期输入框、绿色的进度条，**没有一样会报错**，
+		// 界面只是「不是那个产品」。
+		Category: Platform,
+		// 票 #176（#163 的第二批之一）：弹窗 / 日期 / 下载状态。
+		//
+		// ⚠️ **判据全是画面上的东西**：图标是什么颜色、确认键是什么颜色、正文
+		// 的行高（= 字号）、日历上是几个月、进度条涂的是哪一块蓝。
+		Spec: "确认框是应用自绘的模态（按类型变色的警告图标 + 标题 + text-sm 正文 + light 取消 + 按类型变色的确认键）；日期范围是**双月**选择器（256 宽的触发键，弹出来是两个月并排，能挑起始和结束，没在筛的时候日历上什么都不亮）；下载进度条是**蓝**的（不是主色），出错的那一条是红的，完成那一格有一枚**绿勾**",
+		Tests: []string{
+			// 确认框：图标在不在、是不是按类型变色；确认键的颜色；正文的字号；
+			// 取消是不是 light；**那个框在无障碍树里有没有名字**。
+			"TestTheConfirmDialogHasAToneColoredWarningIcon",
+			"TestTheConfirmButtonTakesTheToneColor",
+			"TestTheConfirmBodyIsTextSmall",
+			"TestTheCancelButtonIsLight",
+			"TestTheConfirmDialogHasANameInTheAccessibilityTree",
+			// 双月日期选择器：两个月、一起翻、挑过的那天被高亮、点更早的一天
+			// 从头再挑、没在筛的时候什么都不亮、挑完真的换条件、**挑的那一段
+			// 恰好等于默认摆着的那一天时不会被静默丢掉**、最窄窗口下两块
+			// 都点得到。
+			"TestTheRangePickerShowsTwoMonths",
+			"TestTheTwoMonthsMoveTogether",
+			"TestThePickedDayIsHighlighted",
+			"TestPickingAnEarlierDayStartsOver",
+			"TestNothingIsHighlightedWhileNothingIsFiltered",
+			"TestTheRangePickerDrivesTheFilter",
+			"TestAManualRangeThatEqualsTodayIsNotDropped",
+			"TestTheDateRangeOpensItsCalendarAtTheMinimumWindowWidth",
+			// 下载状态：条是蓝的（且不是主色）、出错的是红的、完成的有一枚绿勾。
+			"TestTheDownloadBarIsBlueAndNotTheAccent",
+			"TestTheFailedBarIsRed",
+			"TestTheFinishedCellHasAGreenCheck",
+		},
+	},
 }
