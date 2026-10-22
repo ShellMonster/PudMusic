@@ -328,6 +328,3 @@ func TestHoveringTheTitleUnderlinesIt(t *testing.T) {
 			"悬停时那句字底下要长出一道下划线（上游的 `hover:underline`）", before, after)
 	}
 }
-
-// titleRectUnused 留着占位：这一族测试里没有别的辅助函数。
-var _ = mygoui.Rect{}
