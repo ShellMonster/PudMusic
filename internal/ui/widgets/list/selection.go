@@ -40,40 +40,135 @@ import (
 // 选中时做两件事（理由见文件头）：
 //
 //  1. 刷一层底色盖掉框架那一块实心主色（`rowCover`）；
-//  2. 键盘走到这一行时，给它一圈焦点环（`rowFocusRing`）。
+//  2. 给它一圈焦点环（`rowFocusRing`）——**ring 由调用方给**。
 //
-// state 是这张列表的状态：焦点是不是从键盘来的，问的是它（`FocusVisible`）。
+// # ring 为什么由调用方给
 //
-// ⚠️ **两个都要 `selected`**：没选中的行不该有环，而鼠标点过之后那一行连环都
-// 不该有（焦点不是从键盘来的）。
-func SelectedRow(row ui.Element, c *ui.Context, t *ui.Theme, state *ui.ListState,
-	selected, hovered bool) ui.Element {
+// 「那一行是不是键盘走到的那一行」要问两件事：**这张列表此刻有没有键盘焦点**，以及
+// **上一次输入是键盘还是指针**。这两件事都在**列表**那一层（不是行那一层），
+// 而不同的调用方拿着的列表状态不是同一份（`widgets/list` 的 `List` 一份，
+// `internal/ui` 的「稍后再看 / 历史记录」另一份），所以由调用方算好再传进来。
+//
+// ⚠️ **ring 也要 `selected`**：没选中的行不该有环。
+func SelectedRow(row ui.Element, t *ui.Theme, selected, hovered, ring bool) ui.Element {
 	if !selected {
 		return row
 	}
 	row = row.Background(rowCover(t, hovered))
-	if FocusVisible(c, state) {
+	if ring {
 		row = rowFocusRing(row, t)
 	}
 	return row
 }
 
-// FocusVisible 报这张列表此刻是不是「焦点从键盘来的」。
+// KeyboardMode 记「现在是键盘在管，还是指针在管」。
 //
-// # 为什么问的是**列表**而不是某一帧的那一行
+// # 为什么不用框架那个 `focusVisible`
 //
-// 焦点在框架里落在**列表这个元素**上（`mygo/ui/list.go` 的 buildList：列表有游标
-// 时 `e.Focusable()`），方向键挪的是那个游标（`*ListState.Selected`）。所以
-// 「键盘走到哪一行」= 「列表有焦点、焦点是键盘带来的，而那一行是选中的」。
+// 框架有 `FocusVisible()`（`mygo/ui/input.go` 的 `rt.focusVisible`），它的意思是
+// 「焦点是**从键盘来的**」——但它**只被 Tab 设回来**：指针按一下会把它清掉
+// （`rt.focusVisible = false`），而**方向键不会设回来**。
 //
-// # 怎么问的
+// 于是就有了这么一个洞：**鼠标点过一行之后再用方向键走位，那一行什么指示都没有**
+// ——键盘在管了，屏幕上却一声不响。这比改动之前还差（那时实心主色底跟着键盘走）。
 //
-// `ListState.Handle` 绑的就是列表这个元素（`mygo/ui/list.go` 的 buildList 里
-// `wrapElement(owner).Bind(&s.Handle)`，而它**在建行之前**就绑好了），所以
-// `c.Resolve` 拿回来的就是它；`FocusVisible()` 报的是「有焦点 && 焦点是键盘
-// 带来的」（`mygo/ui/input.go`：指针点一下会把它清掉）。
-func FocusVisible(c *ui.Context, state *ui.ListState) bool {
-	return c.Resolve(state.Handle).FocusVisible()
+// 所以这一份自己记：**来一个键就记「键盘在管」，来一次指针按下就记「指针在管」**。
+//
+// # 它是怎么知道「来了一按键」的
+//
+// `Element.HandleInput`（`mygo/ui/handler.go`）：元素有键盘焦点时的按键、以及指针
+// 在它身上时的按下，都交给那个回调。**返回 false 是刻意的**——自己不吃这个事件，
+// 引擎照常处理（方向键挪游标、点击选行、Tab 换焦点都还在）。
+//
+// ⚠️ **不要改成「有焦点就画环」**：那会让鼠标点过之后那一行也挂着环，而上游点一行
+// 是不改变它的样子的。
+type KeyboardMode struct {
+	// keyboard 报「现在是键盘在管」。
+	keyboard bool
+
+	// pointer 记「指针刚按下」：这一下的选中是它挪的（不是键盘）。
+	pointer bool
+
+	// lastSel 是上一帧看到的选中行，started 是已经看过一帧了。
+	//
+	// ⚠️ **零值不是「没选中」**：没选中是 -1，而零值是 0——所以这里要一个
+	// `started` 才分得出「这一帧从 -1 变成 0」和「一直就是 0」。
+	lastSel int
+	started bool
+}
+
+// Input 是给框架的输入回调（`Element.HandleInput`）。
+//
+// ⚠️ **永远返回 false**：这个回调只是「听一听」，不吃事件。
+//
+// ⚠️ **按键看 `InputKeyUp` 也算数**：方向键被框架自己的快捷键登记截走了
+// （`mygo/ui/list.go` 的 `f.navigate` 里 `o.Shortcut(0, k)` 登记了方向键，于是
+// `rt.claimed(k)` 为真，`InputKeyDown` 到不了这里）——只有**松开**那一下到得了。
+// 所以两样都收。
+func (k *KeyboardMode) Input(ev ui.InputEvent) bool {
+	switch ev.Kind {
+	case ui.InputKeyDown:
+		k.keyboard = true
+	case ui.InputKeyUp:
+		// ⚠️ `KeyUnknown` 是修饰键那类（平台只报「修饰键变了」，不报它自己）。
+		// 那一下不算「键盘在管」——用户按了 ⇧ 而没按别的键，不该冒出一圈环。
+		if ev.Key != ui.KeyUnknown {
+			k.keyboard = true
+		}
+	case ui.InputPointerDown:
+		k.keyboard = false
+		k.pointer = true
+	}
+	return false
+}
+
+// Moved 报「选中挪到了 sel，而这一挪是键盘挪的」。
+//
+// # 为什么还要看「选中挪没挪」
+//
+// 方向键被框架自己的快捷键登记截走了（见 `Input` 那一条），所以「**按住方向键
+// 不放**」那一路：键是按了、游标也一格一格挪了，但按键事件只在**松开**时才有。
+// 这一支补的就是那一下——游标每挪一格就算一次「键盘在管」。
+//
+// ⚠️ **指针挪的那一下不算**：指针按下时选中也会挪（点哪行选哪行），而那一下是
+// 指针挪的，不能算成键盘挪的——否则「点一行」之后那一行就挂上了环。
+//
+// ⚠️ **每一帧都要调**（画之前）：第一帧之前 `started` 是假，返回假。
+func (k *KeyboardMode) Moved(sel int) bool {
+	if !k.started {
+		k.started, k.lastSel = true, sel
+		return false
+	}
+	if sel == k.lastSel {
+		return false
+	}
+	k.lastSel = sel
+	byPointer := k.pointer
+	k.pointer = false
+	if byPointer {
+		return false
+	}
+	k.keyboard = true
+	return true
+}
+
+// On 报「此刻是键盘在管」。
+func (k *KeyboardMode) On() bool { return k.keyboard }
+
+// Focused 报这张列表此刻有没有键盘焦点。
+//
+// # 为什么问的是**列表**这个元素
+//
+// 焦点在框架里落在**列表**上（`mygo/ui/list.go` 的 buildList：列表有游标时
+// `e.Focusable()`），方向键挪的是那个游标（`*ListState.Selected`）。而行的那些
+// 按钮（「⋯」）能接焦点——那种情况下焦点**不在**列表上，键盘也就挪不动游标，
+// 不该画环。
+//
+// ⚠️ **用 `Focused` 而不是 `FocusWithin`**：后者把「列表的某个后代有焦点」也算进来，
+// 于是焦点落在行尾那枚「⋯」上的时候，行上也会挂着一圈环——而那时候键盘挪不动
+// 游标。
+func Focused(c *ui.Context, state *ui.ListState) bool {
+	return c.Resolve(state.Handle).Focused()
 }
 
 // rowCover 是「选中那一行」刷在行身上的底色。
@@ -98,12 +193,6 @@ func rowCover(t *ui.Theme, hovered bool) ui.Color {
 }
 
 // rowFocusRing 是「键盘走到哪一行」那一圈环。
-//
-// # 判据是**焦点是不是从键盘来的**
-//
-// 指针点一下会把框架那个标志清掉（`mygo/ui/input.go`：`rt.focusVisible = false`），
-// 于是鼠标点过之后那一行什么标记都没有——**这正是票 #197 要的样子**（上游点一行
-// 不给它任何标记）。而 Tab 进来之后按方向键走位，环跟着走。
 //
 // # 为什么自己画
 //

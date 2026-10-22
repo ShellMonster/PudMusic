@@ -376,6 +376,72 @@ func TestDirectoryLabelsAreAllDifferent(t *testing.T) {
 // 票 #175：行 hover 的播放图标、会展开的搜索
 // ─────────────────────────────────────────────────────────────────────────────
 
+// TestTheLocalTableRowHasNoSolidAccentBlock 钉验收第 1 条在**表格**那一档：
+// 点一行不再整行刷实心主色底。
+//
+// ⚠️ **这一页有两档，两档都要断**：表格那一档是框架的 `ui.Table`（它给选中的行
+// 铺主色底的方式和「歌曲」那一档自己画的列表不同），「歌曲」那一档是
+// `widgets/list` 的卡片控件。只断一档的话，另一档还是一整块绿——而用户在同一个
+// 页面里切一下档就看见了。
+//
+// ⚠️ **判据是「主色像素多了几个」**：那一行本来就有别的东西（序号、标题、按钮），
+// 所以数的是**点之前和点之后那一行的主色像素差**，不是「那��行有没有主色」。
+func TestTheLocalTableRowHasNoSolidAccentBlock(t *testing.T) {
+	dir := t.TempDir()
+	libSong(t, dir, "甲.mp3")
+	libSong(t, dir, "乙.mp3")
+	tt, s, _, _ := shellOnLocalMusic(t, dir)
+	s.local.style = localStyleTable
+	waitFrames(t, tt, "把文件扫回来", func() bool { return len(s.local.rows) >= 2 })
+	tt.Frame()
+
+	r, ok := tt.Find("甲")
+	if !ok {
+		t.Fatalf("画面上找不到「甲」，文字有 %q", tt.Texts())
+	}
+	before := accentPixelsIn(tt, r)
+	if err := tt.Click("甲"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	after := accentPixelsIn(tt, r)
+	if after > before {
+		t.Errorf("点过那一行之后主色像素从 %d 变成 %d——表格那一档还在整行刷实心主色底",
+			before, after)
+	}
+	// 状态还是选中的（去掉的是**颜色**，不是选中这件事）。
+	//
+	// ⚠️ **比的是歌名而不是行号**：文件按名字排过（「乙」在「甲」前面），所以
+	// 「甲」是第二行不是第一行——钉死行号的话，改一次排序就飘。
+	if s.local.sel < 0 || s.local.sel >= len(s.local.rows) ||
+		s.local.rows[s.local.sel].Title != "甲" {
+		t.Errorf("点了「甲」，选中的却是第 %d 行（%q）",
+			s.local.sel+1, s.local.rows[s.local.sel].Title)
+	}
+}
+
+// accentPixelsIn 是那个框里「主色」的像素有几个。
+//
+// ⚠️ **判的是绿调**（绿通道比红通道高出一截），和 `partdrawer_test.go` 的
+// `accentGreenGap` 同一个门槛：主题里那个 Accent 是 {30 215 96}（绿 − 红 = 185），
+// 而正文和底色都是灰的（差 0）——所以这一个条件既认得出主色，又不会把字算进去。
+func accentPixelsIn(tt *mygoui.Tester, r mygoui.Rect) int {
+	img := tt.Image()
+	n := 0
+	for y := int(r.Y); y < int(r.Y+r.H); y++ {
+		for x := int(r.X); x < int(r.X+r.W); x++ {
+			if x < 0 || y < 0 || x >= img.Bounds().Dx() || y >= img.Bounds().Dy() {
+				continue
+			}
+			c := img.RGBAAt(x, y)
+			if int(c.G)-int(c.R) >= accentGreenGap {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 // TestHoveringALocalRowTurnsItsNumberIntoAPlayIcon 行 hover 时序号换成播放图标。
 //
 // 出处是上游 `local-music/item.tsx:57-64`：`group-hover:hidden` 藏序号、

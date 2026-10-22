@@ -237,6 +237,12 @@ type List struct {
 	// 把整个进程带走（本包自己 recover 住，见 viewRow）。不记的话这一行
 	// 每帧崩一次，日志被刷爆、帧率拖垮——比画不出来糟得多。
 	failed map[string]bool
+
+	// keys 记「上一次输入是键盘还是指针」（理由见 `selection.go` 的 KeyboardMode）。
+	//
+	// ⚠️ **焦点环靠它**：框架那个 `focusVisible` 只被 Tab 设回来，方向键不会——
+	// 于是「鼠标点过一行之后再按方向键」那一路上，键盘走到哪一行都没有指示。
+	keys KeyboardMode
 }
 
 // New 建一个列表。
@@ -543,9 +549,21 @@ func (l *List) View(c *ui.Context) {
 	// 自己刷一层底色盖上去（见 `card.go` 的 `rowCover`）。
 	l.state.Selected = &l.sel
 
+	// 选中挪了没有？挪了而且不是指针挪的，就是键盘挪的（焦点环靠它，理由见
+	// `selection.go` 的 KeyboardMode）。
+	//
+	// ⚠️ **要在画行之前问**：焦点环是画在行上的，这一句晚了那一帧就少一圈环。
+	l.keys.Moved(l.sel)
+
 	list := ui.List(c, &l.state, l.rows()).
 		Grow(1).
 		FillWidth().
+		// ⚠️ **听一听输入**：只为了知道「上一次是键盘还是指针」（焦点环靠它，
+		// 理由见 `selection.go` 的 KeyboardMode）。
+		//
+		// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选行、Tab 换
+		// 焦点都还在。
+		HandleInput(l.keys.Input).
 		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击：
 		// `biu/src/components/music-list-item/index.tsx`）。
 		OnSubmit(func() { l.playFrom(l.sel) }).

@@ -172,6 +172,13 @@ type pagedRows struct {
 	// 拖垮帧率，比「这一行画不出来」糟得多。
 	failed map[string]bool
 
+	// keys 记「上一次输入是键盘还是指针」（理由见 `widgets/list/selection.go` 的
+	// KeyboardMode）。
+	//
+	// ⚠️ **焦点环靠它**：框架那个 `focusVisible` 只被 Tab 设回来，方向键不会——
+	// 于是「鼠标点过一行之后再按方向键」那一路上，键盘走到哪一行都没有指示。
+	keys list.KeyboardMode
+
 	// ── 跨 goroutine 的只有下面这两小摊 ──────────────────────────────────
 
 	// wakes 是**每个画过这个列表的窗口**一条，deliver 全部叫醒。
@@ -496,9 +503,24 @@ func (p *pagedRows) drawList(c *ui.Context) {
 
 	p.syncState(1)
 
+	// 选中挪了没有？挪了而且不是指针挪的，就是键盘挪的（焦点环靠它，理由见
+	// `widgets/list/selection.go` 的 KeyboardMode）。
+	//
+	// ⚠️ **要在画行之前问**：焦点环是画在行上的，这一句晚了那一帧就少一圈环。
+	//
+	// ⚠️ **只在这一档问**：网格那一档 `p.sel` 记的是**第几首歌**（格子才是用户
+	// 点的东西），和这里的**行下标**不是一回事，拿它比就是拿两套下标比。
+	p.keys.Moved(p.sel)
+
 	e := ui.List(c, &p.state, n).
 		Grow(1).
 		FillWidth().
+		// ⚠️ **听一听输入**：只为了知道「上一次是键盘还是指针」（焦点环靠它，
+		// 理由见 `widgets/list/selection.go` 的 KeyboardMode）。
+		//
+		// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选行、Tab 换
+		// 焦点都还在。
+		HandleInput(p.keys.Input).
 		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击）。
 		OnSubmit(func() { p.playFrom(p.sel) }).
 		// ⚠️ **焦点环只留在「还没选中任何一行」的时候**（票 #197）：框架默认给**整张

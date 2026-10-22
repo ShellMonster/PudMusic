@@ -175,6 +175,48 @@ func TestClickingARowLeavesNoFocusRing(t *testing.T) {
 	}
 }
 
+// TestTheKeyboardRingComesBackAfterAMouseClick 钉的是**评审点出来的那一条**：
+// 鼠标点过一行之后再用方向键走位，键盘走到的那一行**必须有指示**。
+//
+// ⚠️ **这一条是「框架那个 `focusVisible` 靠不住」的证据**：框架只在 Tab 的时候把
+// `rt.focusVisible` 设成 true，指针按一下会把它清掉，而**方向键不会设回来**——
+// 所以「点一行 → 按 Down」那一路上，框架的判据一路是 false，屏幕上什么都不画。
+// 改动之前那一路是好的（实心主色底跟着键盘走），所以不能只满足于框架的判据。
+//
+// 判据是三件事：
+//
+//  1. 点过之后那一行**没有环**（指针在管，鼠标点一行不改变它的样子）；
+//  2. 按了方向键之后，环落在**键盘走到的那一行**上；
+//  3. 原来那一行**没有环**了（环跟着键盘走，不留在原地）。
+func TestTheKeyboardRingComesBackAfterAMouseClick(t *testing.T) {
+	songs := songsOf(4, "UP")
+	l, tt := newList(t, Actions{}, songs)
+
+	// 点第二行：指针在管，那一行什么标记都没有。
+	if err := tt.Click("歌 2"); err != nil {
+		t.Fatal(err)
+	}
+	frame(tt)
+	if ringAt(t, tt, "歌 2") {
+		t.Fatalf("鼠标点过的那一行上沿有焦点环——指针在管的时候不该有")
+	}
+
+	// 按方向键：键盘在管了，环得跟着键盘走。
+	tt.Key(0, ui.KeyDown)
+	tt.Frame()
+	if !ringAt(t, tt, "歌 3") {
+		t.Errorf("鼠标点过之后按了方向键，键盘走到「歌 3」了，那一行上沿却没有焦点环")
+	}
+	if ringAt(t, tt, "歌 2") {
+		t.Errorf("「歌 2」那一行上沿还有焦点环——环没有跟着键盘走")
+	}
+	// 选中确实挪了（这一条是「指示」的前提：环得跟着选中走）。
+	got, ok := l.Selected()
+	if !ok || got.Title != "歌 3" {
+		t.Errorf("Selected() = (%q, %v)，want (歌 3, true)", got.Title, ok)
+	}
+}
+
 // TestClickingACardLeavesNoSolidAccentBlock 是上面那一条的**网格**那一档。
 //
 // ⚠️ 网格和列表是**两套控件**（`grid.go` 自己画格子），所以列表那条绿在这儿也得

@@ -254,7 +254,12 @@ func (l *List) viewCard(r ui.ListRow) {
 
 	// 选中那一行：盖掉框架的实心主色底，键盘走到它上面时给它一圈焦点环
 	//（理由见 `selection.go`）。
-	row = SelectedRow(row, c, t, &l.state, r.Selected(), onRow)
+	//
+	// ⚠️ **环的条件是「列表有键盘焦点」且「上一次输入是键盘」**：鼠标点过之后
+	// 方向键挪了游标，那一行也得有指示（框架那个 `focusVisible` 方向键不会设回来，
+	// 靠它那一路是哑的——理由见 `selection.go` 的 KeyboardMode）。
+	row = SelectedRow(row, t, r.Selected(), onRow,
+		l.keys.On() && Focused(c, &l.state))
 
 	row.Children(func() {
 		// ⓪ 多选态：这一行最左边的勾选框。没装多选就一格都不画
@@ -343,7 +348,8 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 
 	// 选中那一行：盖掉框架的实心主色底，键盘走到它上面时给它一圈焦点环
 	//（理由同 `viewCard` 里那一句）。
-	row = SelectedRow(row, c, t, &l.state, r.Selected(), row.Hovered())
+	row = SelectedRow(row, t, r.Selected(), row.Hovered(),
+		l.keys.On() && Focused(c, &l.state))
 
 	row.Children(func() {
 		l.viewCheckbox(c, i, m.Title)

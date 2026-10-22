@@ -16,6 +16,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/egoist/mygo/ui"
+	mygoui "github.com/egoist/mygo/ui"
 )
 
 // TestRenderSelectionShots 把这一票动的三处各存一张 PNG，深浅各一套。
@@ -56,8 +57,44 @@ func TestRenderSelectionShots(t *testing.T) {
 			}
 			tt3.Frame()
 			save(t, dir, "82-"+name+"-网格-点过的那一格.png", tt3)
+
+			// ④ 鼠标点过一行之后再按方向键：环**要回到键盘走到的那一行**上
+			//（框架那个「焦点从键盘来」的标志方向键不会设回来，靠它那一路是哑的）。
+			_, tt4 := shotHomeList(t, dark)
+			if err := tt4.Click(songName(homeTabs[0], 1)); err != nil {
+				t.Fatal(err)
+			}
+			tt4.Frame()
+			tt4.Key(0, ui.KeyDown)
+			tt4.Frame()
+			save(t, dir, "83-"+name+"-列表-鼠标点过之后按方向键.png", tt4)
+
+			// ⑤ 本地音乐的「表格」那一档：点一行同样**不再有实心主色底**
+			// （框架的 `ui.Table` 铺主色底的方式和列表那一档不同）。
+			tt5 := shotLocalTable(t, dark)
+			save(t, dir, "84-"+name+"-本地音乐表格-点过的那一行.png", tt5)
 		})
 	}
+}
+
+// shotLocalTable 造一个停在本地音乐「表格」那一档的外壳，并且点过一行。
+//
+// ⚠️ **本地音乐那一档的表格是框架的 `ui.Table`**：它给选中的行铺主色底的方式和
+// 我们自己画的列表不同（问的是「这一行在选择集里吗」），所以它得单独存一张图。
+func shotLocalTable(t *testing.T, dark bool) *mygoui.Tester {
+	t.Helper()
+	dir := t.TempDir()
+	libSong(t, dir, "甲.mp3")
+	libSong(t, dir, "乙.mp3")
+	tt, s, _, _ := shellOnLocalMusic(t, dir)
+	s.local.style = localStyleTable
+	waitFrames(t, tt, "把文件扫回来", func() bool { return len(s.local.rows) >= 2 })
+	tt.Frame()
+	if err := tt.Click("甲"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	return tt
 }
 
 // shotHomeGrid 造一个装着首页推荐音乐**网格**那一档的外壳。

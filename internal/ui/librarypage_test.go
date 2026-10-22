@@ -638,6 +638,41 @@ func TestInsertingARowAtTheHeadKeepsTheChosenSong(t *testing.T) {
 	}
 }
 
+// TestTheLaterRowKeepsItsRingAfterAMouseClick 钉的是**评审点出来的那一条**：
+// 鼠标点过一行之后再用方向键走位，键盘走到的那一行**必须有指示**。
+//
+// ⚠️ **这一条是「框架那个 `focusVisible` 靠不住」的证据**：框架只在 Tab 的时候把
+// `rt.focusVisible` 设成 true，指针按一下会把它清掉，而**方向键不会设回来**——
+// 所以「点一行 → 按 Down」那一路上，框架的判据一路是 false，屏幕上什么都不画。
+// 改动之前那一路是好的（实心主色底跟着键盘走），所以不能只满足于框架的判据。
+//
+// ⚠️ **这一页自己画行**（`library_rows.go` 的文件头写着为什么不能走
+// `widgets/list`），所以它得自己证明一遍，不能靠 `widgets/list` 那一条。
+func TestTheLaterRowKeepsItsRingAfterAMouseClick(t *testing.T) {
+	f := newLibFake(t).withLater(1, 3, "第一首", "第二首", "第三首")
+	tt, s := libraryShell(t, f, laterPath)
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 3 })
+
+	// 点第二行：指针在管，那一行什么标记都没有。
+	if err := tt.Click("第二首"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if rowHasRing(t, tt, "第二首") {
+		t.Errorf("鼠标点过的那一行上沿有焦点环——指针在管的时候不该有")
+	}
+
+	// 按方向键：键盘在管了，环得跟着键盘走。
+	tt.Key(0, mygoui.KeyDown)
+	tt.Frame()
+	if !rowHasRing(t, tt, "第三首") {
+		t.Errorf("鼠标点过之后按了方向键，键盘走到「第三首」了，那一行上沿却没有焦点环")
+	}
+	if rowHasRing(t, tt, "第二首") {
+		t.Errorf("「第二首」那一行上沿还有焦点环——环没有跟着键盘走")
+	}
+}
+
 // TestTwoViewingsOfOneVideoAreTwoRows 盯历史记录里的「同一首歌看过两次」。
 //
 // 🔴 铁律四的另一个说法：两条记录共用一个 bvid。拿 bvid 当身份，那几行的状态就串

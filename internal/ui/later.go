@@ -300,7 +300,11 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 
 	// 选中那一行：盖掉框架那一块实心主色底，键盘走到它上面时给它一圈焦点环
 	//（理由见 `widgets/list/selection.go`）。
-	row = list.SelectedRow(row, c, t, &rows.state, r.Selected(), onRow)
+	//
+	// ⚠️ **环的条件是「列表有键盘焦点」且「上一次输入是键盘」**：鼠标点过之后
+	// 方向键挪了游标，那一行也得有指示（框架那个 `focusVisible` 方向键不会设回来）。
+	row = list.SelectedRow(row, t, r.Selected(), onRow,
+		rows.keys.On() && list.Focused(c, &rows.state))
 
 	return row.Children(func() {
 		viewLibraryRowHead(c, r, m, s.images, mt, face, onRow,

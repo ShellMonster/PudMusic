@@ -1731,18 +1731,26 @@ var Items = []Item{
 		//
 		// ⚠️ **深浅两套都要跑**：主色在两套下是同一个值，而「没有实心主色块」在两套
 		// 下长得完全不一样（浅色下是白底上没东西，深色下是深灰底上没东西）。
-		Spec: "列表选中行：点一行不再整行刷实心主色底（选中的那一行和没选中的长得一样）；「正在播放」那一行仍是 flat 的主色高亮；键盘走到的那一行有焦点环",
+		Spec: "列表选中行：点一行不再整行刷实心主色底（选中的那一行和没选中的长得一样，列表 / 网格 / 稍后再看与历史记录 / 本地音乐表格四处都是）；「正在播放」那一行仍是 flat 的主色高亮；键盘走到的那一行有焦点环（鼠标点过之后再按方向键也照样有）",
 		Tests: []string{
 			// 列表：点一行 → 没有实心主色块（控件那一层 + 外壳那一层，深浅两套）。
 			"TestClickingARowLeavesNoSolidAccentBlock",
 			"TestClickingARowOnThePageLeavesNoSolidAccentBlock",
 			// 网格：点一格 → 同样没有实心主色块（两套控件各写各的，两边都要断）。
 			"TestClickingACardLeavesNoSolidAccentBlock",
+			// 本地音乐的「表格」那一档：点一行 → 同样没有实心主色块（框架的
+			// `ui.Table` 铺主色底的方式和列表那一档不同，两处都要断）。
+			"TestTheLocalTableRowHasNoSolidAccentBlock",
 			// 「正在播放」那一行：主色高亮还在，**而且是 flat 不是实心**。
 			"TestThePlayingRowKeepsTheFlatPrimaryHighlight",
 			// 键盘：走到哪一行，那一行有焦点环（而鼠标点过的那一行没有）。
 			"TestTheKeyboardRowHasAFocusRing",
 			"TestClickingARowLeavesNoFocusRing",
+			// 「鼠标点过之后再按方向键」那一路也得有指示——框架那个 `focusVisible`
+			// 方向键不会设回来，靠它那一路是哑的（控件那一层 + 外壳那一层）。
+			"TestTheKeyboardRingComesBackAfterAMouseClick",
+			"TestTheKeyboardRingComesBackAfterAMouseClickOnThePage",
+			"TestTheLaterRowKeepsItsRingAfterAMouseClick",
 			// 选中跟着**那一首**走，不跟着位置走（铁律四）——焦点环就是「选中画出来了」
 			// 唯一的证据，所以这一条现在量的是环的位置。
 			"TestInsertingARowAtTheHeadKeepsTheChosenSong",

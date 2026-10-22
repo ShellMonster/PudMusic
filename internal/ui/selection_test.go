@@ -134,6 +134,48 @@ func focusList(t *testing.T, tt *ui.Tester, anchor string) {
 	t.Fatalf("Tab 了 40 次还没走到列表上")
 }
 
+// TestTheKeyboardRingComesBackAfterAMouseClickOnThePage 钉的是**评审点出来的
+// 那一条**（外壳那一层）：鼠标点过一行之后再用方向键走位，键盘走到的那一行**必须
+// 有指示**。
+//
+// ⚠️ **这一条是「框架那个 `focusVisible` 靠不住」的证据**：框架只在 Tab 的时候把
+// `rt.focusVisible` 设成 true，指针按一下会把它清掉，而**方向键不会设回来**——
+// 所以「点一行 → 按 Down」那一路上，框架的判据一路是 false，屏幕上什么都不画。
+// 改动之前那一路是好的（实心主色底跟着键盘走），所以不能只满足于框架的判据。
+func TestTheKeyboardRingComesBackAfterAMouseClickOnThePage(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			_, tt := shotHomeList(t, dark)
+
+			// 点第二行：指针在管，那一行什么标记都没有。
+			second := songName(homeTabs[0], 2)
+			if err := tt.Click(second); err != nil {
+				t.Fatal(err)
+			}
+			tt.Frame()
+			if rowHasRing(t, tt, second) {
+				t.Errorf("鼠标点过的那一行上沿有焦点环——指针在管的时候不该有")
+			}
+
+			// 按方向键：键盘在管了，环得跟着键盘走。
+			tt.Key(0, ui.KeyDown)
+			tt.Frame()
+			third := songName(homeTabs[0], 3)
+			if !rowHasRing(t, tt, third) {
+				t.Errorf("鼠标点过之后按了方向键，键盘走到「%s」了，那一行上沿却没有焦点环",
+					third)
+			}
+			if rowHasRing(t, tt, second) {
+				t.Errorf("「%s」那一行上沿还有焦点环——环没有跟着键盘走", second)
+			}
+		})
+	}
+}
+
 // rowHasRing 报那一行的上沿有没有焦点环。
 //
 // 判据是**那个像素和这一行的底色不是一回事**：焦点环是主题里那个 Focus 色（半透明
