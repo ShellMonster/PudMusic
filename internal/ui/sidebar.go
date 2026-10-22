@@ -163,13 +163,16 @@ func sideTargetWidth(st app.Settings) float64 {
 // `isDragging ? renderWidth < MIN_WIDTH : sideMenuCollapsed`——**拖动的时候
 // 看的是画出来的宽度，不是设置里那个开关**。
 //
-// ⚠️ **不跟着走的话，拖到 160 以下的那一段里侧栏内容还是展开的**：菜单那一列
-// 摆着名字，而侧栏只有 72 宽——**内容把侧栏撑宽**（实测撑到 143），于是
-// 「拖窄了会自动折叠」这件事在画面上根本看不出来（`TestDraggingTheGripBelow
-// TheMinWidthCollapsesTheSidebar` 量到的宽度是 152 而不是 72）。
+// ⚠️ **不跟着走的话，拖到 160 以下的那一段里菜单还是展开的样子**：侧栏被拖到
+// 72，而菜单那一列摆的还是名字——**名字被截成「推…」「本…」「下…」**
+// （上游那一段摆的是图标格，所以它塞得进 72）。
 //
-// 而折叠之后菜单那一列摆的是**图标**（没有字），宽度自然就小下来了——这正是
-// 上游那一档能塞进 72 的原因。
+// 而这一票把菜单换成了图标格之后，不跟上的话是**另一种坏**：那一列的内容
+// （图标格 40 + 缝 8 + 名字 + 内边距）比 63 宽，**把侧栏的内容撑出去**
+// （实测那一列量到 143，而整条侧栏量到 152）——比截字更糟。
+//
+// 现在跟上游一样：拖动的那一段里菜单也换成图标格，侧栏真的折到 72
+// （`TestDraggingTheGripBelowTheMinWidthCollapsesTheSidebar` 量到 72）。
 func (s *Shell) sideCollapsedVisual(st app.Settings) bool {
 	if s.sideDragging {
 		return s.sideWidth < app.MinSideMenuWidth

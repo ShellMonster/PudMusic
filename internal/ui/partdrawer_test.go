@@ -732,7 +732,7 @@ func assertIconKey(t *testing.T, tt *ui.Tester, label string) {
 	const squareTolerance = 2
 	if widthGap(r.W-r.H) > squareTolerance {
 		t.Errorf("%q 那一格是 %.2f×%.2f（宽高差 %.2f），不是方的——旁边赞/收藏那两枚"+
-			"量的都是 28.00×28.00。一个文字键的框是照着字长出来的，所以这一格画的是"+
+			"量的都是 32.00×32.00。一个文字键的框是照着字长出来的，所以这一格画的是"+
 			"「分集」两个字而不是一枚图标（图标化之后这一格再没有字，而字是用户一眼"+
 			"认出它是什么的唯一东西）",
 			label, r.W, r.H, widthGap(r.W-r.H))

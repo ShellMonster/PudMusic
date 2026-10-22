@@ -567,7 +567,7 @@ const (
 )
 
 // collectionOpsButtonH 是操作条上那枚主按钮的高。上游的 `Button` 默认 size
-// 是 md = `h-10`，也就是 **40**。旁边那几枚图标键仍然是 `iconHitMd`（28）——
+// 是 md = `h-10`，也就是 **40**。旁边那几枚图标键仍然是 `iconHitMd`（32）——
 // 那一排的宽度在最小窗口上已经贴着边（见 `viewCollectionOps`），再把图标键
 // 撑到 40 就会把这一排挤出去。
 const collectionOpsButtonH = 40
@@ -920,7 +920,7 @@ func (s *Shell) setCollectionSort(p *collectionPage) {
 // collectionSearchWidth 是展开之后那个输入框的**上限**。
 //
 // 240 是上游 `search-button/index.tsx` 的 `animate={{ width: 240 }}`（它从 40
-// 展开到 240）。收起时只有一枚 `iconHitMd`（28）的放大镜。
+// 展开到 240）。收起时只有一枚 `iconHitMd`（32）的放大镜。
 const collectionSearchWidth = 240
 
 // collectionSearchMinWidth 是展开后那个输入框的**最小**宽。

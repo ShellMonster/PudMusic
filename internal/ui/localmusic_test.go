@@ -414,7 +414,7 @@ func TestHoveringALocalRowTurnsItsNumberIntoAPlayIcon(t *testing.T) {
 	}
 
 	// ⚠️ **行的上/下各 6 像素也算「压在这一行」**：那 6 像素是 `ui.Table` 给
-	// 每一行的内边距（格子本身只有 28 高，行是 40 高）。只按格子算的话，指针在
+	// 每一行的内边距（格子本身只有 32 高，行是 44 高）。只按格子算的话，指针在
 	// 那两圈上时图标不出现，图标会跟着指针上下闪（上游的 `group-hover` 是整行
 	// 都亮的）。
 	for _, where := range []struct {
@@ -473,9 +473,11 @@ func TestTheLocalSearchIsACollapsedButton(t *testing.T) {
 	if !ok {
 		t.Fatalf("找不到搜索，文字有 %q", tt.Texts())
 	}
-	if r.W > iconHitMd+2 || r.H > iconHitMd+2 {
-		t.Errorf("搜索刚进来就是 %.0f×%.0f——它该是一枚图标键（%d 见方）",
-			r.W, r.H, iconHitMd)
+	// 收起态那枚是 `iconHitMd` × `iconMd` 的一枚图标键（上游 HeroUI 的
+	// `isIconOnly` 恒是 32×32，见 `icons.go` 的 `iconHit`）。
+	if r.W > iconHitMd || r.H > iconMd {
+		t.Errorf("搜索刚进来就是 %.0f×%.0f——它该是一枚图标键（%d×%d）",
+			r.W, r.H, iconHitMd, iconMd)
 	}
 	if err := tt.Click(searchLocalLabel); err != nil {
 		t.Fatalf("点不开搜索：%v", err)
@@ -485,7 +487,7 @@ func TestTheLocalSearchIsACollapsedButton(t *testing.T) {
 	if !ok {
 		t.Fatalf("点开之后搜索不见了，文字有 %q", tt.Texts())
 	}
-	if r.W <= iconHitMd+2 {
+	if r.W <= iconHitMd {
 		t.Fatalf("点开之后还是 %.0f 宽——搜索没有展开", r.W)
 	}
 }

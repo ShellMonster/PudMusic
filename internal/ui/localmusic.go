@@ -711,9 +711,9 @@ func (p *localPage) tableRowHovered(cell ui.Element) bool {
 		return false
 	}
 	_, y, _ := cell.PointerPosition()
-	// ⚠️ **判据要算上那一行的上下内边距**：格子（内容区）只有 28 高，而那一行是
-	// 40 高（上下各 6 是 `ui.Table` 给每一行的内边距）——指针压在那 6 像素上也算
-	// 「压在这一行」。只按 28 算的话，行的上/下各 6 像素是死区，图标会在指针
+	// ⚠️ **判据要算上那一行的上下内边距**：格子（内容区）只有 32 高，而那一行是
+	// 44 高（上下各 6 是 `ui.Table` 给每一行的内边距）——指针压在那 6 像素上也算
+	// 「压在这一行」。只按 32 算的话，行的上/下各 6 像素是死区，图标会在指针
 	// 上下移动时闪一下（上游的 `group-hover` 是**整行**都亮的）。
 	return y >= -localTableRowPad && y < cell.Bounds().H+localTableRowPad
 }

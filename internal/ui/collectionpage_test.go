@@ -776,10 +776,15 @@ func TestTheCollectionOpsRowStillFitsAtTheMinWindow(t *testing.T) {
 				if !ok {
 					t.Fatalf("%s：点开之后没有输入框，文字有 %q", name, tt.Texts())
 				}
-				// 收起时那枚图标键是 28（`iconHitMd`）；展开后至少是 40
-				// （`collectionSearchMinWidth`）。所以「还是 28 那一个」= 没展开，
-				// 而不能拿 40 当分界：最窄那一档展开后正好就是 40。
-				if box.W <= 30 {
+				// 收起时那枚图标键是 `iconHitMd` 见方；展开后至少是
+				// `collectionSearchMinWidth`（40）。所以「还是那一枚图标键」=
+				// 没展开，而不能拿 40 当分界：最窄那一档展开后正好就是 40。
+				//
+				// ⚠️ **分界必须跟着 `iconHitMd` 走，不许写死一个数**：图标键的
+				// 点击区从 28 长到 32（上游那一档）之后，写死的 30 就成了**死
+				// 阈值**——收起态那枚是 32 宽，32 > 30，于是「切页回来搜索收起
+				// 了」这个 bug 再也测不出来（变异实验：基线上红、改动后绿）。
+				if box.W <= iconHitMd {
 					t.Fatalf("%s：点开之后还是一个 %.1f 宽的按钮——搜索没有展开",
 						name, box.W)
 				}
@@ -1027,9 +1032,11 @@ func TestTheCollectionSearchIsACollapsedButton(t *testing.T) {
 	if !ok {
 		t.Fatalf("找不到搜索，文字有 %q", tt.Texts())
 	}
-	if r.W > iconHitMd+2 || r.H > iconHitMd+2 {
-		t.Errorf("搜索刚进来就是 %.0f×%.0f——那是一枚图标键（%d 见方），"+
-			"不该是一个常驻输入框", r.W, r.H, iconHitMd)
+	// 收起态那枚是 `iconHitMd` × `iconMd` 的一枚图标键（上游 HeroUI 的
+	// `isIconOnly` 恒是 32×32，见 `icons.go` 的 `iconHit`）。
+	if r.W > iconHitMd || r.H > iconMd {
+		t.Errorf("搜索刚进来就是 %.0f×%.0f——那是一枚图标键（%d×%d），"+
+			"不该是一个常驻输入框", r.W, r.H, iconHitMd, iconMd)
 	}
 
 	tt.SetFocused(true)
@@ -1042,7 +1049,7 @@ func TestTheCollectionSearchIsACollapsedButton(t *testing.T) {
 	if !ok {
 		t.Fatalf("点开之后搜索不见了，文字有 %q", tt.Texts())
 	}
-	if r.W <= iconHitMd+2 {
+	if r.W <= iconHitMd {
 		t.Fatalf("点开之后还是 %.0f 宽——搜索没有展开", r.W)
 	}
 	if r.H < 39 || r.H > 41 {
@@ -1062,7 +1069,7 @@ func TestTheCollectionSearchIsACollapsedButton(t *testing.T) {
 	if !ok {
 		t.Fatalf("收回之后搜索不见了，文字有 %q", tt.Texts())
 	}
-	if r.W > iconHitMd+2 {
+	if r.W > iconHitMd {
 		t.Errorf("点了别处之后搜索还是 %.0f 宽——它没有收回去", r.W)
 	}
 }
@@ -1139,7 +1146,10 @@ func TestTheCollectionSearchDoesNotStealTheFocusWhenComingBack(t *testing.T) {
 	if !ok {
 		t.Fatalf("回来之后搜索不见了，文字有 %q", tt.Texts())
 	}
-	if box.W <= 30 {
+	// ⚠️ **分界跟着 `iconHitMd` 走**：收起态那枚图标键就是它那么宽，而图标键的
+	// 点击区从 28 长到 32（上游那一档）之后，写死的 30 成了**死阈值**——
+	// 「切页回来搜索收起了」这个 bug 从此测不出来（变异实验：基线上红、改动后绿）。
+	if box.W <= iconHitMd {
 		t.Fatalf("回来之后搜索收起来了（%.1f 宽）——列表还按上次的词筛着，界面上却"+
 			"没有第二处说这件事", box.W)
 	}
