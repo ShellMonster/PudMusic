@@ -33,8 +33,8 @@ import (
 //
 //	shown && !minimized && (focused || freeWhileBlurred)
 //
-// `freeWhileBlurred` 是给迷你播放器的：它走面板语义（点它不激活应用，
-// 见票 #156 的第六条），于是它**几乎永远没有焦点**。拿焦点去判它看不看得见的话，
+// `freeWhileBlurred` 是给迷你播放器的：它是面板（`Panel: true`，票 #162，
+// 点它不激活应用），于是它**几乎永远没有焦点**。拿焦点去判它看不看得见的话，
 // 用户点一下播放键，进度条就再也不动了——而它明明就浮在用户眼前。
 type windowPresence struct {
 	mu        sync.Mutex

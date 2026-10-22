@@ -645,6 +645,21 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
+		// 票 #162（规格票 #156 底下的一条）：迷你播放器是**面板语义**——显示和
+		// 聚焦能拿键盘，但点它不激活应用，用户不会被从别的应用里拽出来。
+		//
+		// ⚠️ 这一条证的是**选项摆对了**（`Panel: true`，以及位置记忆的那几个
+		// 前提还在：面板不能最大化，而 `isZoomed` 恒为真就会让 `StateKey` 一条
+		// 都存不下来）。真的「点下去不激活」和「关掉再开停在原处」要真窗口 +
+		// 真鼠标，量到的结果记在 `internal/ui/miniplayer.go` 的「本机实测」里，
+		// 不在这儿假装验过。
+		Spec: "迷你播放器是面板语义：点它不激活应用（票 #162），位置记忆仍然有效",
+		Tests: []string{
+			"TestTheMiniWindowIsAPanel",
+		},
+	},
+	{
+		Category: Platform,
 		Spec:     "迷你播放器里能换歌、上下一首（44）、拖进度条（45）、调音量",
 		Tests: []string{
 			"TestTheMiniWindowStepsThroughTheQueue",
