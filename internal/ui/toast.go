@@ -1,13 +1,3 @@
-package ui
-
-import (
-	"slices"
-	"time"
-
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
-	"github.com/egoist/mygo/ui"
-)
-
 // Toast 是 Biu 全局浮层里最常用的一条。参数逐条抄自 Biu 的
 // `src/app.tsx:166-172` 的 `<ToastProvider>`：
 //
@@ -19,11 +9,78 @@ import (
 // 这里自己管，不用 MyGo 内置的那一套：`AddToast` / `CloseToast` 挂在未导出的
 // `*ui.context` 上，从我们这个包里根本调不到（`ui.Context` 上没有转发）。
 // 而且「避开播放条、切路由不留上一页的提示」本来也得自己排版、自己管状态。
+//
+// # 票 #180：语义色、尺寸和入场
+//
+// 这一票把三件事一起改了（DESIGN.md §六「Toast」是那一档的目标值）：
+//
+//   - **按语义分色**：成功绿、失败红、警告橙、普通主色。上游那 164 处调用
+//     是按调用给 `color` 的（danger 84 / success 58 / warning 22），而我们
+//     此前**一律主色**——「下载失败」也是绿的。
+//   - **尺寸与位置**：宽 356（上游 `@heroui/theme` 的 toast）、`p-3`（12）、
+//     字 14/500、抬过底部 90、离右边 8。此前是 320、12/16、13/400、抬 106
+//     （90+16）、离右边 16。
+//   - **250ms 入场**（上游的 `appearance-in 250ms ease-out`）：淡入 + 从右边
+//     滑进来。此前是「啪」地一下出现。
+package ui
+
+import (
+	"slices"
+	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/egoist/mygo/ui"
+)
+
 const (
 	// toastLimit 是同时在屏幕上最多几条。多出来的把最旧的挤掉。
 	toastLimit = 3
 	// playbarClearance 是提示要抬过多高的那条底边。Biu 的 `toastOffset` 是 90。
+	//
+	// ⚠️ **90 就是 90**：此前这里是 106（90+16），多出来的那 16 是「右边也留
+	// 16」时顺手一起加的——于是提示比上游高了 16（票 #180 的 G23）。
 	playbarClearance = 90
+
+	// toastWidth 是卡片多宽（上游 `@heroui/theme` 的 toast：356）。
+	//
+	// ⚠️ 这是**外框宽**（框架的 `Width` 是 border-box：内边距算在里面）。
+	toastWidth = 356
+
+	// toastPad 是卡片自己的内边距（上游 `p-3` = 12，四边一样）。
+	//
+	// ⚠️ 此前是「上下 12、左右 16」——那是照着别处的卡片抄的，上游那个 toast
+	// 四边都是 12。
+	toastPad = 12
+
+	// toastFont 是卡片上那行字的字号（上游 `text-sm` = 14）。
+	//
+	// 字重是 `weightMedium`（500，上游的 `font-medium`）——此前是 13/400。
+	toastFont = 14
+
+	// toastRadius 是卡片的圆角。**这一条上游没写死**（HeroUI 那个 toast 用
+	// 的是 `rounded-large`），而此前这一处是 10：不是本票要改的，就不动它。
+	toastRadius = 10
+
+	// toastRight 是卡片离窗口右边多远。
+	//
+	// ⚠️ 上游是「4~8」（`@heroui/theme` 的 toast 与 `app.tsx:167-175` 的参数
+	// 一起算出来的那一档），取 **8**：宽一点的那一头，靠边一点更像上游。
+	toastRight = 8
+
+	// toastGap 是两条提示之间的距离（上游那几条之间是 8）。
+	toastGap = 8
+
+	// toastEnterTime 是入场动画的时长（DESIGN.md「动效」：Toast 入场 250ms；
+	// 上游是 `appearance-in 250ms ease-out`）。
+	toastEnterTime = 250 * time.Millisecond
+
+	// toastEnterShift 是入场时卡片从右边滑进来的距离（上游那一档是 100，
+	// 但那是在屏幕中间弹的；我们这一条贴着右边，从右边滑 16 就够看出来）。
+	//
+	// ⚠️ **它不能大到压住播放条**：卡片底边本来就只比播放条高 2px（抬 90、
+	// 播放条 88），往下挪一点就压上去了——所以这一段是**横着**滑的。
+	toastEnterShift = 16
 )
 
 // toastLifetime 是一条提示待多久。Biu 的 timeout 是 2000ms。
@@ -33,16 +90,34 @@ var toastLifetime = 2 * time.Second
 
 // toast 是一条提示。id 用来在到点时认出「是自己那一条」——文字可能重复。
 type toast struct {
-	id    uint64
-	text  string
+	id   uint64
+	text string
+	// tone 是这句话的语义：卡片按它取底色（见 `internal/notice`）。
+	tone notice.Tone
+	// until 是它到点被收走的时刻（**真时钟**，见 `addToast`）。
 	until time.Time
+	// enterAt 是它开始入场的时刻（**引擎钟**）。零值 = 还没入过场。
+	//
+	// ⚠️ **两个钟不是同一个**：到期靠后台那条 goroutine 真睡（真时钟），
+	// 而入场是画面上的动画（引擎钟——它才听「减少动态效果」，也才推得动）。
+	// 见 `toastEnterAt`。
+	enterAt time.Time
 }
 
 // addToast 弹一条提示。多到 3 条时把最旧的挤掉。
-func (s *Shell) addToast(text string) {
+//
+// tone 是这句话的语义（成功 / 警告 / 失败 / 普通），**每个调用点都要给**：
+// 上游那 164 处调用是按调用给 `color` 的，而「下载失败」也是绿的正是这一条
+// 要收掉的毛病（票 #180）。
+func (s *Shell) addToast(text string, tone notice.Tone) {
 	s.toastMu.Lock()
 	s.toastSeq++
-	t := toast{id: s.toastSeq, text: text, until: time.Now().Add(toastLifetime)}
+	t := toast{
+		id:    s.toastSeq,
+		text:  text,
+		tone:  tone,
+		until: time.Now().Add(toastLifetime),
+	}
 	s.toasts = append(s.toasts, t)
 	if len(s.toasts) > toastLimit {
 		s.toasts = s.toasts[1:]
@@ -50,6 +125,17 @@ func (s *Shell) addToast(text string) {
 	s.toastMu.Unlock()
 
 	go s.expire(t)
+}
+
+// notify 是「说一句话」的那一档接线：把话和语气交给提示。
+//
+// 它是 `list.AppActions` 那种「只收 func(string, 语气)」的钩子要的那一份。
+//
+// ⚠️ **为什么不让 `addToast` 自己就是那个形状**：`addToast` 是**界面层**的
+// 私有方法，而那几个钩子（列表的操作、侧栏收藏夹、本地音乐那一页、UP 空间）
+// 要的是「话 + 语气」两样——语气必须跟着话一路走到画它的地方（票 #180）。
+func (s *Shell) notify(text string, tone notice.Tone) {
+	s.addToast(text, tone)
 }
 
 // expire 等到点就把这一条收走，然后叫醒界面。
@@ -99,6 +185,31 @@ func (s *Shell) visibleToasts() []toast {
 	return slices.Clone(kept)
 }
 
+// toastEnterAt 报这一条开始入场的时刻，并在它**第一次被画出来**时记下那一刻。
+//
+// ⚠️ **入场是从「第一次被画出来」那一刻算的，不是从「被加进来」那一刻**：
+// 加进来的那一帧可能还没有画面（窗口看不见、或者这一帧还没轮到），从那一刻
+// 算起的话，等这一帧真的画出来时动画早就走完了——用户看见的是「啪」地一下
+// 出现，入场等于没有。
+//
+// ⚠️ **这个钟是引擎钟**（`Context.Now()`，也就是无头测试里那只推得动的钟）：
+// 入场是画面上的动画，而动画要听「减少动态效果」、要能被推钟验中间态。
+// 到点被收走用的是**真时钟**（后台那条 goroutine 真睡），两个钟各管各的。
+func (s *Shell) toastEnterAt(id uint64, now time.Time) time.Time {
+	s.toastMu.Lock()
+	defer s.toastMu.Unlock()
+	for i := range s.toasts {
+		if s.toasts[i].id != id {
+			continue
+		}
+		if s.toasts[i].enterAt.IsZero() {
+			s.toasts[i].enterAt = now
+		}
+		return s.toasts[i].enterAt
+	}
+	return now
+}
+
 // viewToasts 把提示浮在右下角、播放条上面。
 //
 // 用 Overlay 铺一层铺满窗口的空容器，而不是在主布局里塞一段留白——提示不该
@@ -115,10 +226,10 @@ func (s *Shell) viewToasts(c *ui.Context) {
 		// 认出是它。
 		ui.Column(c).Key("toasts").
 			Absolute().Left(0).Top(0).Right(0).Bottom(0).
-			Justify(ui.End).AlignItems(ui.End).Gap(8).
-			// 底边留出播放条的高度，再加一圈边距。Padding 的四个参数是
-			// 上、右、下、左，别把 88 写成了左边距。
-			Padding(16, 16, playbarClearance+16, 16).
+			Justify(ui.End).AlignItems(ui.End).Gap(toastGap).
+			// 底边留出播放条的高度（90），右边留 8（上游那一档是 4~8）。
+			// Padding 的四个参数是上、右、下、左，别把 90 写成了右边距。
+			Padding(0, toastRight, playbarClearance, 0).
 			// 空的地方让鼠标穿过去，不然会挡住底下侧栏和播放条的点击。
 			PassThrough().
 			Children(func() {
@@ -131,10 +242,9 @@ func (s *Shell) viewToasts(c *ui.Context) {
 
 // viewToast 一条提示的样子。
 //
-// ⚠️ 卡片底色用 Accent / AccentText（Biu 的 `color: "primary"` 就是主色卡片 +
-// 主色上的文字），**不要用 Theme.Inverse**：主题没设它的时候它是零值，
-// 等于 Background —— 白底白卡片，元素排版排得好好的，屏幕上什么也看不见
-// （头less Tester 只查元素框，查不到这个坑）。
+// ⚠️ 卡片底色用**语义色**（`toastColors`），**不要用 Theme.Inverse**：
+// 主题没设它的时候它是零值，等于 Background —— 白底白卡片，元素排版排得好好的，
+// 屏幕上什么也看不见（头less Tester 只查元素框，查不到这个坑）。
 //
 // 🔴 **卡片本身也 `PassThrough`**——和外面那个铺满窗口的容器一样（见 viewToasts）。
 // 一条提示**一个控件都没有**：它不可点、不可关、也不带任何动作。挡在它底下的东西
@@ -147,9 +257,83 @@ func (s *Shell) viewToasts(c *ui.Context) {
 // 框架那一边也是同一个做法：它自己的 tooltip 也是 `Absolute().PassThrough()`
 // （`mygo/ui/tooltip.go:80`）——同样的话，同样没有控件可点。
 func (s *Shell) viewToast(c *ui.Context, t toast, theme *ui.Theme) {
-	ui.Column(c).Width(320).Radius(10).PassThrough().
-		Background(theme.Accent).Padding(12, 16).
+	bg, fg := toastColors(t.tone, theme)
+
+	card := ui.Column(c).Width(toastWidth).Radius(toastRadius).PassThrough().
+		Background(bg).Padding(toastPad).
 		Children(func() {
-			ui.Text(c, t.text).FontSize(scale.Font(c, 13)).TextColor(theme.AccentText).PassThrough()
+			ui.Text(c, t.text).FontSize(scale.Font(c, toastFont)).
+				FontWeight(weightMedium).TextColor(fg).PassThrough()
 		})
+
+	// 入场：250ms 的一段（DESIGN.md「动效」）。淡入 + 从右边滑进来。
+	//
+	// ⚠️ **卡片是「画」上去的，位置是「排」上去的**：滑动用的是 `Translate`
+	// （视觉上的位移），而**布局不动**——于是「离右边 8、抬过底部 90」这一档
+	// 在动画的每一帧都是真的（量元素框量到的是布局框）。
+	k := s.toastEnterProgress(c, t)
+	if k < 1 {
+		card = card.Opacity(k).Translate((1-k)*toastEnterShift, 0)
+	}
+}
+
+// toastColors 是这一档语义的底色和压在这个底色上的字色。
+//
+// ⚠️ **字色不是白的**：白字压在成功绿（`#17c964`）上只有 2.19:1，压在警告
+// 橙（`#f5a524`）上只有 2.04:1——都读不清（DESIGN.md §四 那张表里「成功 浅
+// 2.19:1」「警告 浅 2.04:1」就是它们）。深色档 `#18181b` 压上去分别是
+// **8.08:1** 和 **8.68:1**，读得清。
+//
+// ⚠️ **危险色上是白的**：白字压在 `#f31260` 上是 4.15:1，比改之前的深色档
+// `#ef4444`（3.8:1）还高一点；而深色档是 4.27:1——两个几乎一样。选白是因为
+// 确认框那颗红色的「确认」键早就是白字（`internal/ui/confirmmodal.go` 的
+// `dialogOnDanger`），两处红底上的字色一样。
+//
+// ⚠️ **主色那一档的字色跟着主题走**（`theme.AccentText`）：用户把主色换成
+// 深的就该配白字，换成亮的就该配深字——那是 `buildTheme` 里 `applyAccent`
+// 算好的（浅色下压到 ≥4.5:1），这里不另算一份。
+func toastColors(tone notice.Tone, theme *ui.Theme) (bg, fg ui.Color) {
+	switch tone {
+	case notice.Success:
+		return theme.Success, toastOnSemantic
+	case notice.Warning:
+		return theme.Warning, toastOnSemantic
+	case notice.Danger:
+		return theme.Danger, toastOnDanger
+	}
+	return theme.Accent, theme.AccentText
+}
+
+// toastOnSemantic 是压在成功绿 / 警告橙上的字色。
+//
+// 深色档 `#18181b`（不是 `theme.Text`——深色主题下 `theme.Text` 是浅色的，
+// 压在这两个饱和底色上读不清）。
+var toastOnSemantic = ui.RGB(24, 24, 27)
+
+// toastOnDanger 是压在危险红上的字色：白。
+var toastOnDanger = ui.RGB(255, 255, 255)
+
+// toastEnterProgress 是这一条入场走到哪儿了：0 = 刚出现，1 = 到位。
+//
+// ⚠️ **「减少动态效果」时直接到终点**（DESIGN.md §五）：系统开着那个偏好时
+// 一点都不动——所以这一档返回 1，而且**不请求下一帧**（请求了就是白画）。
+func (s *Shell) toastEnterProgress(c *ui.Context, t toast) float32 {
+	if c.Preferences().ReduceMotion {
+		return 1
+	}
+	now := c.Now()
+	age := now.Sub(s.toastEnterAt(t.id, now))
+	if age <= 0 {
+		age = 0
+	}
+	if age >= toastEnterTime {
+		return 1
+	}
+	// 动画还没走完：这一帧画完还要再画一帧。
+	//
+	// ⚠️ **少了这一句，提示会停在半路**：即时模式是按需绘制，没有人在这个
+	// 时候要帧，动画就停在那儿——而那一帧是「刚出现」（几乎全透明），于是
+	// 提示看上去一直没出来。
+	c.AnimationFrame()
+	return ui.EaseOut(float32(age) / float32(toastEnterTime))
 }

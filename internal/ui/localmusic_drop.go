@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
 )
 
@@ -155,7 +156,7 @@ func (s *Shell) handleFileDrop(paths []string) {
 	if s.app.SettingsReadOnly() {
 		// 只读时 `UpdateSettings` 会失败，但错误码对用户没有意义。这里先说
 		// 清楚为什么，免得他拖了半天以为程序坏了。
-		s.addToast("设置只读：拖进来的文件加不进本地音乐")
+		s.addToast("设置只读：拖进来的文件加不进本地音乐", notice.Danger)
 		return
 	}
 
@@ -166,12 +167,12 @@ func (s *Shell) handleFileDrop(paths []string) {
 		if _, err := s.app.UpdateSettings(func(st *app.Settings) {
 			st.LocalMusicDirs = next
 		}); err != nil {
-			s.addToast("存不住这次拖放：" + err.Error())
+			s.addToast("存不住这次拖放："+err.Error(), notice.Danger)
 		} else {
 			// 换根会自己重扫（见 `App.SetLocalRoots` 的注释），不用再补一次
 			// `RescanLocalMusic`——那会让几千个文件白扫一遍。
 			s.app.SetLocalRoots(next)
-			s.addToast(dropAddedText(plan.added))
+			s.addToast(dropAddedText(plan.added), notice.Success)
 		}
 	} else if plan.rescan {
 		// 目录已经在库里（或者在这次拖放里刚加过）：文件可能是刚放进去的，
@@ -180,10 +181,10 @@ func (s *Shell) handleFileDrop(paths []string) {
 		s.app.RescanLocalMusic()
 	}
 	if len(plan.known) > 0 {
-		s.addToast(dropKnownText(plan.known))
+		s.addToast(dropKnownText(plan.known), notice.Plain)
 	}
 	if len(plan.rejected) > 0 {
-		s.addToast(dropRejectedText(plan.rejected))
+		s.addToast(dropRejectedText(plan.rejected), notice.Warning)
 	}
 }
 

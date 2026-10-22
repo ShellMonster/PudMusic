@@ -13,6 +13,7 @@ import (
 	"fmt"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
 	"github.com/egoist/mygo/ui"
 )
@@ -84,10 +85,10 @@ func (p *localPage) viewRemoveDirDialog(c *ui.Context) {
 // （它顺带把缓存和监听都顾上）。这里只负责把结果说出来。
 func (p *localPage) deleteTrack(tr localmusic.Track) {
 	if err := p.app.DeleteLocalTrack(tr.ID); err != nil {
-		p.say("删不掉：" + err.Error())
+		p.say("删不掉："+err.Error(), notice.Danger)
 		return
 	}
-	p.say("已从磁盘上删掉「" + tr.Title + "」")
+	p.say("已从磁盘上删掉「"+tr.Title+"」", notice.Success)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -116,7 +117,7 @@ func (p *localPage) queueAll() {
 		return
 	}
 	p.acts.Add(p.itemsOf(p.rows))
-	p.say(fmt.Sprintf("已把 %d 首加进播放队列", len(p.rows)))
+	p.say(fmt.Sprintf("已把 %d 首加进播放队列", len(p.rows)), notice.Success)
 }
 
 // itemsOf 把若干项变成播放队列要的条目。
@@ -140,7 +141,7 @@ func (p *localPage) addDirectory() {
 	go func() {
 		dir, err := p.pickDir()
 		if err != nil {
-			p.say("选不了目录：" + err.Error())
+			p.say("选不了目录："+err.Error(), notice.Danger)
 			return
 		}
 		if dir == "" {
@@ -155,24 +156,24 @@ func (p *localPage) addRoot(dir string) {
 	cur := p.app.SettingsSnapshot().LocalMusicDirs
 	for _, have := range cur {
 		if have == dir {
-			p.say("这个目录已经在里面了")
+			p.say("这个目录已经在里面了", notice.Plain)
 			return
 		}
 	}
 	if p.app.SettingsReadOnly() {
-		p.say("设置只读，加不了目录")
+		p.say("设置只读，加不了目录", notice.Danger)
 		return
 	}
 	next := append(append([]string(nil), cur...), dir)
 	if _, err := p.app.UpdateSettings(func(s *app.Settings) {
 		s.LocalMusicDirs = next
 	}); err != nil {
-		p.say("存不住这个目录：" + err.Error())
+		p.say("存不住这个目录："+err.Error(), notice.Danger)
 		return
 	}
 	// `begin` 每一帧都会拿设置来对一遍根，对不上就换根并重扫——所以这里
 	// 不需要自己再调一次 SetLocalRoots。
-	p.say("已添加「" + dirName(dir) + "」，正在扫描")
+	p.say("已添加「"+dirName(dir)+"，正在扫描", notice.Success)
 }
 
 // askRemoveDir 记下要移的目录并打开确认。真正的那一步在 viewRemoveDirDialog。
@@ -194,21 +195,24 @@ func (p *localPage) removeRoot(dir string) {
 		}
 	}
 	if p.app.SettingsReadOnly() {
-		p.say("设置只读，移不了目录")
+		p.say("设置只读，移不了目录", notice.Danger)
 		return
 	}
 	if _, err := p.app.UpdateSettings(func(s *app.Settings) {
 		s.LocalMusicDirs = next
 	}); err != nil {
-		p.say("存不住这次修改：" + err.Error())
+		p.say("存不住这次修改："+err.Error(), notice.Danger)
 		return
 	}
-	p.say("已从列表里移除「" + dirName(dir) + "」，文件一个没动")
+	p.say("已从列表里移除「"+dirName(dir)+"，文件一个没动", notice.Success)
 }
 
 // say 说一句话。notify 是 nil 时什么也不说（那样不会崩）。
-func (p *localPage) say(text string) {
+//
+// ⚠️ **语气跟着话一起走**（票 #180）：成功是绿的、失败是红的——而这一页的
+// 话有成的也有没成的，只给一句「删不掉」是说不清的。
+func (p *localPage) say(text string, tone notice.Tone) {
 	if p.notify != nil {
-		p.notify(text)
+		p.notify(text, tone)
 	}
 }

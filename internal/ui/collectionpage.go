@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
@@ -515,7 +516,7 @@ func (s *Shell) flushCollectionNotice(p *collectionPage) {
 	if !ok {
 		return
 	}
-	s.addToast(n.Text)
+	s.addToast(n.Text, n.Tone)
 	if n.Kind == app.NoticeCollectionChanged {
 		s.reloadCollection(p)
 	}
@@ -861,7 +862,7 @@ func (s *Shell) collectionMoreAction(p *collectionPage, item collectionMenuItem)
 	case "forget-folder":
 		s.askConfirmAbout(p, confirmForgetFolder, 0, false, collectionTitleText(p.ref.Type, s.app.Collection(p.ref)))
 	default:
-		s.addToast("「" + item.label + "」还没接收藏夹接口")
+		s.addToast("「"+item.label+"」还没接收藏夹接口", notice.Warning)
 	}
 }
 

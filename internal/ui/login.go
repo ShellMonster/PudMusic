@@ -26,6 +26,7 @@ import (
 	"image/color"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -68,7 +69,7 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 
 	loginScroll := ui.Scroll(c).Key("login-scroll").Grow(1)
 	loginScroll.Children(func() {
-		ui.Column(c).Key("page:" + loginPath).Grow(1).Padding(0, 20).Gap(12).
+		ui.Column(c).Key("page:"+loginPath).Grow(1).Padding(0, 20).Gap(12).
 			AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "扫码登录").FontSize(scale.Font(c, pageTitleSize))
 
@@ -277,7 +278,7 @@ func (s *Shell) logoutAndStartOver() {
 		// 退不干净要**说出来**：内存和 cookie 已经清了（应用层保证的），
 		// 只有系统存储那边可能还留着。悄悄吞掉的话，用户会以为退登
 		// 成功了，下次打开发现还在。
-		s.addToast("退出登录：" + err.Error())
+		s.addToast("退出登录："+err.Error(), notice.Danger)
 	}
 	s.clearToasts()
 }

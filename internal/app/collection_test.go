@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 )
 
@@ -751,7 +752,7 @@ func TestDeletingFromThePageGoesThroughTheSameCallAsTheSidebar(t *testing.T) {
 
 	said := make(chan string, 1)
 	wasOK := make(chan bool, 1)
-	a.DeleteCollectionFolder(testRef, "通勤路上", func(msg string, ok bool) {
+	a.DeleteCollectionFolder(testRef, "通勤路上", func(msg string, ok bool, _ notice.Tone) {
 		said <- msg
 		wasOK <- ok
 	})
@@ -795,7 +796,7 @@ func TestForgettingAFolderNeverTouchesBilibili(t *testing.T) {
 	a.SetFavorites(FavoritesCreated, []Favorite{{ID: 42, Title: "通勤路上"}})
 
 	var said string
-	a.ForgetCollectionFolder(testRef, "通勤路上", func(msg string) { said = msg })
+	a.ForgetCollectionFolder(testRef, "通勤路上", func(msg string, _ notice.Tone) { said = msg })
 
 	// ⚠️ **同步**跑完之后还要给它一点时间：万一它偷偷起了个 goroutine，
 	// 这一条就绿了——而那正是要挡的那种实现。
@@ -835,7 +836,7 @@ func TestAFailedDeleteSaysSoAndLeavesTheRowThere(t *testing.T) {
 
 	said := make(chan string, 1)
 	wasOK := make(chan bool, 1)
-	a.DeleteCollectionFolder(testRef, "通勤路上", func(msg string, ok bool) {
+	a.DeleteCollectionFolder(testRef, "通勤路上", func(msg string, ok bool, _ notice.Tone) {
 		said <- msg
 		wasOK <- ok
 	})
@@ -872,7 +873,7 @@ func TestForgettingClearsTheRowOutOfWhicheverGroupItIsIn(t *testing.T) {
 			a.SetFavorites(g, []Favorite{{ID: 42, Title: "通勤路上", Type: 11}})
 
 			var said string
-			a.ForgetCollectionFolder(testRef, "通勤路上", func(msg string) { said = msg })
+			a.ForgetCollectionFolder(testRef, "通勤路上", func(msg string, _ notice.Tone) { said = msg })
 
 			if n := len(a.SideFavorites(g)); n != 0 {
 				t.Errorf("「%s」那一组里还剩 %d 行，want 0（说了已移除却还在）", g, n)
@@ -895,7 +896,7 @@ func TestForgettingTakesTheRowOutOfBothGroups(t *testing.T) {
 	a.SetFavorites(FavoritesCreated, []Favorite{{ID: 42, Title: "通勤路上", Type: 11}})
 	a.SetFavorites(FavoritesCollected, []Favorite{{ID: 42, Title: "通勤路上", Type: 11}})
 
-	a.ForgetCollectionFolder(testRef, "通勤路上", func(string) {})
+	a.ForgetCollectionFolder(testRef, "通勤路上", func(string, notice.Tone) {})
 
 	for _, g := range []FavoriteGroup{FavoritesCreated, FavoritesCollected} {
 		if n := len(a.SideFavorites(g)); n != 0 {

@@ -1,15 +1,23 @@
 package ui
 
 import (
+	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"image/color"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
-// Toast 这一组盯的是 Biu 的三条硬要求：右下角、避开 88px 播放条、同时最多 3 条。
+// Toast 这一组盯的是 Biu 的硬要求：右下角、避开 88px 播放条、同时最多 3 条，
+// 外加票 #180 的三件：**按语义分色**、**250ms 入场**、**尺寸与位置**
+// （356 宽 / `p-3` / 14/500 / 抬 90 / 离右边 8）。
 // 加上「切路由不残留」在 router_test.go 里。
 
 // 短一点的存活时间，测试不用干等 4 秒。
@@ -20,6 +28,96 @@ func shortToasts(t *testing.T, d time.Duration) {
 	t.Cleanup(func() { toastLifetime = old })
 }
 
+// settleToast 让入场动画走完（推钟 300ms）。
+//
+// ⚠️ **必须推钟**：入场是 250ms 的一段，而 Tester 的钟站着不动——不推的话那条
+// 提示一直停在「刚出现」（几乎全透明），画面上什么都看不见。
+//
+// 推 300 而不是 250：多推一点，动画**准**走完（250ms 那一帧正好是终点，而
+// 「正好」在判据里是另一件事）。
+func settleToast(t *testing.T, tt *mygoui.Tester) {
+	t.Helper()
+	tt.Advance(300 * time.Millisecond)
+	tt.Frame()
+}
+
+// toastCardOf 是那条提示那张卡片的框。
+//
+// ⚠️ **卡片的框是从文字那一块的框推出来的**：卡片比文字大四周各 12（`p-3`），
+// 而 `tt.Find` 给的是**文字元素**的框（它的左边就是卡片的内边距那一层）。
+func toastCardOf(text mygoui.Rect) mygoui.Rect {
+	return mygoui.Rect{
+		X: text.X - toastPad,
+		Y: text.Y - toastPad,
+		W: text.W + 2*toastPad,
+		H: text.H + 2*toastPad,
+	}
+}
+
+// toastSampleAt 是卡片上那个「采得到底色、又不落在字上」的点。
+//
+// ⚠️ **取卡片底边那一块的中间**：入场动画是**横着**滑的（从右边滑进来），
+// 而左右两边都在滑动的范围里（卡片最右时右边滑出卡片 16 像素，最左时左边
+// 滑出 16 像素）——中间那一块是稳的。
+//
+// ⚠️ **取底边那一条留白**（卡片下边往里 6 像素）：文字是**左对齐**的，短句的
+// 右边空着——采到的是卡片底色，不是字的笔画。
+func toastSampleAt(text mygoui.Rect) (int, int) {
+	card := toastCardOf(text)
+	return int(card.X + card.W/2), int(card.Y + card.H - toastPad/2)
+}
+
+// colorDistance 是两个颜色差多远（逐通道取绝对值再加起来）。
+//
+// 判「有没有更接近」用它，而不是逐通道比大小：淡入是**每一个通道**都往目标
+// 靠，而目标色和底色的通道大小关系不一定一致（绿底上淡入白字，绿色的通道是
+// 变**大**的）。
+func colorDistance(a, b color.RGBA) int {
+	d := func(x, y uint8) int {
+		if x > y {
+			return int(x - y)
+		}
+		return int(y - x)
+	}
+	return d(a.R, b.R) + d(a.G, b.G) + d(a.B, b.B)
+}
+
+// toastRGBA 是那个十六进制颜色在画面上的样子（逐字相同就是它）。
+//
+// ⚠️ **画面上的像素是 `color.RGBA`，不是 `ui.Color`**：前者是采回来的，
+// 后者是「打算画成什么」——两个混起来比，比的就不是用户看见的东西了。
+func toastRGBA(hex string) color.RGBA {
+	return rgbaOf(mygoui.Hex(hex))
+}
+
+// toastRectOf 按**前缀**找一条提示的文字框。
+//
+// ⚠️ **用前缀不用全文**：有些话的后半截是运行时才知道的（`bili.Friendly`
+// 那一段），而 `tt.Find` 要的是逐字相同。
+func toastRectOf(t *testing.T, tt *mygoui.Tester, prefix string) mygoui.Rect {
+	t.Helper()
+	for _, s := range tt.Texts() {
+		if !strings.HasPrefix(s, prefix) {
+			continue
+		}
+		r, ok := tt.Find(s)
+		if !ok {
+			t.Fatalf("画面上有「%s」却找不到它的框", s)
+		}
+		return r
+	}
+	t.Fatalf("画面上没有以 %q 开头的提示，文字有 %q", prefix, tt.Texts())
+	return mygoui.Rect{}
+}
+
+// toastColorAt 采一条提示那张卡片上的底色。
+func toastColorAt(t *testing.T, tt *mygoui.Tester, prefix string) color.RGBA {
+	t.Helper()
+	r := toastRectOf(t, tt, prefix)
+	x, y := toastSampleAt(r)
+	return tt.Image().RGBAAt(x, y)
+}
+
 // TestToastSitsBottomRightAboveThePlayBar 验位置。
 //
 // 这两条是同一条要求的两半：右下角（Biu 的 `placement="bottom-right"`），并且
@@ -27,7 +125,7 @@ func shortToasts(t *testing.T, d time.Duration) {
 func TestToastSitsBottomRightAboveThePlayBar(t *testing.T) {
 	s, tt := newShell(t)
 
-	s.addToast("这是一条提示")
+	s.addToast("这是一条提示", notice.Plain)
 	tt.Frame()
 
 	r, ok := tt.Find("这是一条提示")
@@ -51,21 +149,19 @@ func TestToastSitsBottomRightAboveThePlayBar(t *testing.T) {
 // 这个坑踩过：卡片底色取的是 Theme.Inverse，而主题没设它的时候它是零值，
 // 等于 Background —— 白卡片画在白窗口上。元素框查得到、位置算得对、
 // 文字也在，可屏幕上什么都没有。只查元素框的测试是发现不了的。
+//
+// ⚠️ **要推钟让入场走完**：提示是淡进来的（250ms），刚出现那一帧它几乎是全
+// 透明的——那一帧采到的是窗口底色，于是这一条会把「入场动画」误判成
+// 「提示没画出来」。
 func TestToastIsActuallyPainted(t *testing.T) {
 	s, tt := newShell(t)
 
-	s.addToast("看得见吗")
+	s.addToast("看得见吗", notice.Plain)
 	tt.Frame()
+	settleToast(t, tt)
 
-	r, ok := tt.Find("看得见吗")
-	if !ok {
-		t.Fatalf("提示没画出来，文字有 %q", tt.Texts())
-	}
-	img := tt.Image()
-	// 卡片是 320 宽、左右各 16 内边距，文字框往左退 16 就是卡片左边。
-	// 取卡片左边缘内侧、竖直中间那一点，避开文字本身。
-	card := img.RGBAAt(int(r.X)-12, int(r.Y+r.H/2))
-	window := img.RGBAAt(4, 4)
+	card := toastColorAt(t, tt, "看得见吗")
+	window := tt.Image().RGBAAt(4, 4)
 	if card == window {
 		t.Errorf("提示和窗口是同一个颜色（%v），画出来看不见", card)
 	}
@@ -77,7 +173,7 @@ func TestAtMostThreeToasts(t *testing.T) {
 	shortToasts(t, time.Minute)
 
 	for i := range 5 {
-		s.addToast(string(rune('A' + i)))
+		s.addToast(string(rune('A'+i)), notice.Plain)
 	}
 	tt.Frame()
 
@@ -118,7 +214,7 @@ func TestToastGoesAwayOnItsOwn(t *testing.T) {
 	// 「到点自己收走」这一件事。
 	shortToasts(t, 300*time.Millisecond)
 
-	s.addToast("一会儿就没了")
+	s.addToast("一会儿就没了", notice.Plain)
 	tt.Frame()
 	if !tt.HasText("一会儿就没了") {
 		t.Fatalf("提示没画出来，文字有 %q", tt.Texts())
@@ -143,8 +239,8 @@ func TestClearToastsDropsEverything(t *testing.T) {
 	s, _ := newShell(t)
 	shortToasts(t, time.Minute)
 
-	s.addToast("甲")
-	s.addToast("乙")
+	s.addToast("甲", notice.Plain)
+	s.addToast("乙", notice.Plain)
 	s.clearToasts()
 
 	if got := s.visibleToasts(); len(got) != 0 {
@@ -160,7 +256,7 @@ func TestToastDoesNotBlockTheUI(t *testing.T) {
 	s, tt := newShell(t)
 	shortToasts(t, time.Minute)
 
-	s.addToast("挡着点试试")
+	s.addToast("挡着点试试", notice.Plain)
 	tt.Frame()
 	if !tt.HasText("挡着点试试") {
 		t.Fatalf("提示没画出来，文字有 %q", tt.Texts())
@@ -209,7 +305,7 @@ func TestTheToastCardItselfDoesNotBlockClicks(t *testing.T) {
 	// 叠起来还在表格下面——那就量不到任何东西。而真机上弹的那一串折了好几行，
 	// 卡片高到三条叠起来正好压住表格最后那几行（这就是它在真机上出问题的那一档）。
 	for i := range toastLimit {
-		s.addToast(longToastText + strings.Repeat("·", i))
+		s.addToast(longToastText+strings.Repeat("·", i), notice.Plain)
 	}
 	tt.Frame()
 	// `Find` 给的是**文字**那一块的框，而卡片比文字大（上下各 12 的内边距）。所以
@@ -272,10 +368,289 @@ func TestToastTextIsKeptVerbatim(t *testing.T) {
 	shortToasts(t, time.Minute)
 
 	want := "「收藏夹 / 合集 / 系列」这一页还没做"
-	s.addToast(want)
+	s.addToast(want, notice.Plain)
 	tt.Frame()
 
 	if !tt.HasText(strings.Trim(want[:5], "「")) {
 		t.Errorf("提示没画出来，文字有 %q", tt.Texts())
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 票 #180：语义色、尺寸与位置、入场
+// ─────────────────────────────────────────────────────────────────────────────
+
+// 上游那三个语义色（DESIGN.md §四）。
+//
+// ⚠️ **写死在这里，而不是从主题里取**：这一组要断的就是「和上游一致」，
+// 从主题里取就变成自己跟自己比了。
+const (
+	toastUpstreamDanger  = "#f31260"
+	toastUpstreamWarning = "#f5a524"
+	toastUpstreamSuccess = "#17c964"
+	// toastUpstreamPrimary 是主色（Biu 的绿，用户能在设置里换）。
+	toastUpstreamPrimary = "#1ed760"
+)
+
+// TestTheToastTakesTheToneColor 验四种语义色画出来是**四个不同的颜色**。
+//
+// 这一条是票 #180 的头一条验收项。此前所有提示都是主色绿——「下载失败」也是
+// 绿的，而用户是看颜色才知道结果的（规格 #163 的用户故事 74）。
+//
+// ⚠️ **深浅两套都要跑**：上游那三个语义色深浅同值，而**主色那一档**在深色
+// 底下不一样（`buildTheme` 的 `applyAccent` 会推 hover / pressed 那一组）——
+// 只跑浅色的话深色下那一面一次都没被验过。
+//
+// ⚠️ **一次只画一条**：同时最多 3 条（`toastLimit`），四条一起画的话最旧的
+// 那条会被挤掉，采到的就少一个颜色。
+func TestTheToastTakesTheToneColor(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, tt := newShell(t, systemIsDark(dark))
+			shortToasts(t, time.Minute)
+
+			seen := map[string]bool{}
+			for _, c := range []struct {
+				tone notice.Tone
+				want string
+				what string
+			}{
+				{notice.Plain, toastUpstreamPrimary, "普通（主色）"},
+				{notice.Success, toastUpstreamSuccess, "成功"},
+				{notice.Warning, toastUpstreamWarning, "警告"},
+				{notice.Danger, toastUpstreamDanger, "失败"},
+			} {
+				text := "这一条是" + c.what
+				s.addToast(text, c.tone)
+				tt.Frame()
+				settleToast(t, tt)
+
+				got := toastColorAt(t, tt, text)
+				if got != toastRGBA(c.want) {
+					t.Errorf("%s那一条的卡片底色是 %v，want %s（上游的色相）", c.what, got, c.want)
+				}
+				if seen[c.want] {
+					t.Errorf("%s和前面某一条是同一个颜色（%s）——四种语义色必须是四个颜色", c.what, c.want)
+				}
+				seen[c.want] = true
+
+				// 收掉这一条，下一条从空屏开始（不然三条会叠起来）。
+				s.clearToasts()
+				tt.Frame()
+			}
+		})
+	}
+}
+
+// TestAFailedDownloadIsNotGreen 钉住「下载失败不再是绿的」。
+//
+// 这一条是票 #180 点名的那一条：上游那 164 处调用是按调用给 `color` 的
+// （danger 84 / success 58 / warning 22），而我们此前**一律主色**——于是
+// 「下载没成」和「下载成了」在画面上是同一个绿。
+//
+// 判据落在**画面上那个像素**：失败那一条必须是危险色（红），成功那一条是
+// 成功色（绿）。只断「addToast 传了什么参数」的话，改成别的颜色也照样绿。
+func TestAFailedDownloadIsNotGreen(t *testing.T) {
+	s, tt := newShell(t)
+	shortToasts(t, time.Minute)
+
+	s.sayDownloadDone("下载", errors.New("网络不通"))
+	tt.Frame()
+	settleToast(t, tt)
+
+	failed := toastColorAt(t, tt, "下载没成：")
+	if want := toastRGBA(toastUpstreamDanger); failed != want {
+		t.Errorf("下载失败那一条的底色是 %v，want %s（失败是红的，不是绿的）", failed, toastUpstreamDanger)
+	}
+
+	// 成功那一条是绿的——两条不一样，才说明颜色是**跟着结果走**的。
+	s.clearToasts()
+	tt.Frame()
+	s.sayDownloadDone("下载", nil)
+	tt.Frame()
+	settleToast(t, tt)
+
+	ok := toastColorAt(t, tt, "已加进下载队列")
+	if want := toastRGBA(toastUpstreamSuccess); ok != want {
+		t.Errorf("下载成功那一条的底色是 %v，want %s（成功是绿的）", ok, toastUpstreamSuccess)
+	}
+}
+
+// TestTheToastSlidesIn 验入场有**中间态**（推钟验）。
+//
+// 上游是 `appearance-in 250ms ease-out`（HeroUI Toast 的默认入场）。此前我们
+// 的提示是「啪」地一下出现——而「啪」地出现的那一帧，界面是跳的。
+//
+// ⚠️ **判据是画面上那个像素**：提示是**淡**进来的，所以中途那一帧卡片是半
+// 透明的——采到的颜色既不是窗口底色，也不是满色。只量「有没有画出来」的
+// 测试量不出中间态（头尾两帧都是「画出来了」）。
+//
+// ⚠️ **推钟推 60ms 而不是 125ms**：ease-out 在一半处已经走了 87.5%（
+// `1-(1-0.5)³`），那时候的颜色离满色只剩一截，容差不好定。60ms 处走了约
+// 58%，离两头都还远，量得准。
+func TestTheToastSlidesIn(t *testing.T) {
+	s, tt := newShell(t)
+	shortToasts(t, time.Minute)
+
+	const text = "它是从右边滑进来的"
+	s.addToast(text, notice.Plain)
+	tt.Frame()
+
+	r, ok := tt.Find(text)
+	if !ok {
+		t.Fatalf("提示没画出来，文字有 %q", tt.Texts())
+	}
+	x, y := toastSampleAt(r)
+	full := toastRGBA(toastUpstreamPrimary)
+
+	// 第一帧：刚出现，几乎全透明——采到的是它底下那一片（不是卡片底色）。
+	start := tt.Image().RGBAAt(x, y)
+	if start == full {
+		t.Errorf("刚出现那一帧卡片已经是满色了（%v）——入场不是从零开始的", start)
+	}
+	// ⚠️ 动画在跑：这一帧之后界面还要帧（少了这一句，动画停在半路，
+	// 而那一帧是几乎全透明的那一帧——提示就永远看不见了）。
+	if !tt.FramePending() {
+		t.Error("入场动画还没走完，界面却不要帧了——动画停在半路")
+	}
+
+	// 中间态：推 60ms，卡片是半透明的。
+	tt.Advance(60 * time.Millisecond)
+	tt.Frame()
+	mid := tt.Image().RGBAAt(x, y)
+	if mid == start {
+		t.Errorf("入场 60ms 时颜色和第一帧一样（%v）——没有中间态", mid)
+	}
+	if mid == full {
+		t.Errorf("入场 60ms 时卡片已经是满色了——中间态没量到")
+	}
+	// 中间态是**朝着卡片底色去的**：离满色比第一帧近。
+	if colorDistance(mid, full) >= colorDistance(start, full) {
+		t.Errorf("入场 60ms 时颜色没有更接近卡片底色（起 %v → 中 %v，满色 %v）", start, mid, full)
+	}
+
+	// 走完：满色。
+	settleToast(t, tt)
+	done := tt.Image().RGBAAt(x, y)
+	if done != full {
+		t.Errorf("入场走完之后卡片的颜色是 %v，want %s", done, toastUpstreamPrimary)
+	}
+}
+
+// TestTheToastEnterHonoursReduceMotion 「减少动态效果」时提示一次到位。
+//
+// DESIGN.md 的「减少动态效果」那一节：所有自己写的过渡都要听系统偏好，为真
+// 时直接到终点。这一条量的是**第一帧就是满色**（而不是淡入 halfway）。
+func TestTheToastEnterHonoursReduceMotion(t *testing.T) {
+	s, tt := newShell(t, withPrefs(mygoui.Preferences{ReduceMotion: true}))
+	shortToasts(t, time.Minute)
+
+	const text = "它不淡入"
+	s.addToast(text, notice.Plain)
+	tt.Frame()
+
+	full := toastRGBA(toastUpstreamPrimary)
+	if got := toastColorAt(t, tt, text); got != full {
+		t.Errorf("减少动态效果时第一帧卡片的颜色是 %v，want %s（直接到终点）", got, toastUpstreamPrimary)
+	}
+}
+
+// TestTheToastUsesTheUpstreamSize 钉住尺寸与位置（票 #180 的 G23）。
+//
+// 上游那一档（`@heroui/theme` 的 toast 与 `app.tsx:167-175` 的参数）：
+//
+//	宽 356 / `p-3`（12，四边一样）/ 字 14/500 / 抬过底部 90 / 离右边 4~8
+//
+// 此前是 320 / 12,16 / 13/400 / 抬 106（90+16）/ 离右边 16。
+//
+// 判据是**画面上量出来的框**：文字那一块的框是排版排出来的，卡片比它大四周
+// 各 12（`p-3`），而卡片的位置就是「离右边 8、抬过底部 90」。
+func TestTheToastUsesTheUpstreamSize(t *testing.T) {
+	s, tt := newShell(t)
+	shortToasts(t, time.Minute)
+
+	const text = "这一条要量尺寸"
+	s.addToast(text, notice.Plain)
+	tt.Frame()
+	settleToast(t, tt)
+
+	r, ok := tt.Find(text)
+	if !ok {
+		t.Fatalf("提示没画出来，文字有 %q", tt.Texts())
+	}
+	card := toastCardOf(r)
+	const w, h = 1200, 800
+
+	if card.W != 356 {
+		t.Errorf("卡片是 %v 宽，want 356（上游 `@heroui/theme` 的 toast）", card.W)
+	}
+	if right := w - (card.X + card.W); right < 4 || right > 8 {
+		t.Errorf("卡片离右边 %v，want 4~8（上游那一档）", right)
+	}
+	if bottom := h - (card.Y + card.H); bottom != 90 {
+		t.Errorf("卡片离底边 %v，want 90（Biu 的 toastOffset）", bottom)
+	}
+	// 内边距：文字的框往里退 12（四边一样，`p-3`）。
+	if got := r.X - card.X; got != toastPad {
+		t.Errorf("文字离卡片左边 %v，want %v（`p-3`）", got, toastPad)
+	}
+	if got := card.Y + card.H - (r.Y + r.H); got != toastPad {
+		t.Errorf("文字离卡片下边 %v，want %v（`p-3`）", got, toastPad)
+	}
+	// 字号：文字盒高折算（`textBoxPerSize` 是那一族量出来的比值）。
+	if got := r.H / textBoxPerSize; got < 13.5 || got > 14.5 {
+		t.Errorf("折算出来的字号是 %.1f，want 14（上游 `text-sm`）", got)
+	}
+}
+
+// TestTheToastTextUsesTheMediumWeight 钉住提示那行字是 **14/500**。
+//
+// 字重画不出盒子的差别（400 和 500 的行高一样，只有笔画粗细不同），所以这一
+// 条只能钉代码：画提示那一句同时要有 14 的字号和 `weightMedium`。
+//
+// （500 那一档**真的画得比 400 粗**由 `typography_test.go` 的
+// `TestTheMediumWeightIsDrawnHeavierThanNormal` 证明。）
+func TestTheToastTextUsesTheMediumWeight(t *testing.T) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "toast.go", nil, 0)
+	if err != nil {
+		t.Fatalf("解析 toast.go 失败：%v", err)
+	}
+	found := false
+	ast.Inspect(f, func(n ast.Node) bool {
+		stmt, ok := n.(*ast.ExprStmt)
+		if !ok {
+			return true
+		}
+		has14, hasMedium := false, false
+		ast.Inspect(stmt, func(m ast.Node) bool {
+			call, ok := m.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			switch callName(call) {
+			case "FontSize":
+				if len(call.Args) == 1 && mentionsIdent(call.Args[0], "toastFont") {
+					has14 = true
+				}
+			case "FontWeight":
+				if len(call.Args) == 1 && mentionsIdent(call.Args[0], "weightMedium") {
+					hasMedium = true
+				}
+			}
+			return true
+		})
+		if has14 && hasMedium {
+			found = true
+		}
+		return true
+	})
+	if !found {
+		t.Error("toast.go 里没有一句同时写着 `FontSize(…toastFont…)` 和 " +
+			"`FontWeight(weightMedium)`——提示那行字必须是 14/500")
 	}
 }

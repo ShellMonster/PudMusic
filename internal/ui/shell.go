@@ -854,7 +854,7 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	// 每一处用（见 folderpick.go 里那个函数）。本地文件收藏不了（`favTarget`
 	// 只认在线的），所以「收藏」那一项在本地音乐这一页会走「说清楚为什么」
 	// 那一支——那也是对的答案。
-	s.local = newLocalPage(a, s.images, s.listActions(), s.addToast, s.pickDir, s.displayView)
+	s.local = newLocalPage(a, s.images, s.listActions(), s.notify, s.pickDir, s.displayView)
 	s.local.noteScrollbar = s.noteScrollbar
 	s.local.tip = s.tip
 	// 「刚进这一页的第一帧」那一问（框架切页时会把焦点还给离开时有焦点的那个

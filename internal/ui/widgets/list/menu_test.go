@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 )
 
 // 这一组验的是**右键菜单**：菜单是系统的原生菜单（不是自绘浮层），项照 Biu 的
@@ -31,7 +32,7 @@ func (r *recorded) actions() Actions {
 		Add:      func(items []app.Item) { r.added = append(r.added, items) },
 		PlayNext: func(item app.Item) { r.nexted = append(r.nexted, item) },
 		Open:     func(item app.Item) { r.opened = append(r.opened, item) },
-		Notify:   func(text string) { r.notices = append(r.notices, text) },
+		Notify:   func(text string, _ notice.Tone) { r.notices = append(r.notices, text) },
 	}
 }
 
@@ -140,7 +141,7 @@ func TestChoosingPlayNextHandsOverJustThatSong(t *testing.T) {
 func TestPlayNextSaysSoWhenNothingIsWired(t *testing.T) {
 	rec := &recorded{}
 	// 只留 Notify：`PlayNext` 缺席就是「那一层没接线」的样子。
-	_, tt := newList(t, Actions{Notify: func(s string) { rec.notices = append(rec.notices, s) }}, onlineSongs(3))
+	_, tt := newList(t, Actions{Notify: func(s string, _ notice.Tone) { rec.notices = append(rec.notices, s) }}, onlineSongs(3))
 
 	if err := tt.RightClick("在线的歌 B"); err != nil {
 		t.Fatal(err)
@@ -295,7 +296,7 @@ func TestTheMenuIsWiredToTheRealQueue(t *testing.T) {
 	}
 
 	var notices []string
-	_, tt := newList(t, AppActions(a, func(s string) { notices = append(notices, s) }), songs)
+	_, tt := newList(t, AppActions(a, func(s string, _ notice.Tone) { notices = append(notices, s) }), songs)
 
 	if err := tt.RightClick("第二首"); err != nil {
 		t.Fatal(err)

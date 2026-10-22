@@ -108,7 +108,7 @@ func readFileLimited(path string, limit int64) ([]byte, error) {
 // 不认识界面（`internal/app` 的包注释第一条）。所以这里补上，列表照旧只认
 // `list.Actions` 那几个字段。
 func (s *Shell) listActions() list.Actions {
-	acts := list.AppActions(s.app, s.addToast)
+	acts := list.AppActions(s.app, s.notify)
 	acts.FavSelect = s.openFolderSelect
 	return acts
 }

@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 )
 
 // downloadRecorder 是记「下载」这一下的桩。
@@ -27,7 +28,7 @@ func (r *downloadRecorder) actions() Actions {
 		Add:      func([]app.Item) {},
 		Open:     func(app.Item) {},
 		Download: func(it app.Item) { r.downloaded = append(r.downloaded, it) },
-		Notify:   func(text string) { r.notices = append(r.notices, text) },
+		Notify:   func(text string, _ notice.Tone) { r.notices = append(r.notices, text) },
 	}
 	return acts
 }
@@ -70,7 +71,7 @@ func TestDownloadingSomethingWithoutAPartSaysSo(t *testing.T) {
 	// `App.download` 是先判 cid 再判挂没挂的（见 downloads.go）。
 
 	var notices []string
-	acts := AppActions(a, func(s string) { notices = append(notices, s) })
+	acts := AppActions(a, func(s string, _ notice.Tone) { notices = append(notices, s) })
 	acts.Download(app.Item{Source: "online", Type: "mv", Bvid: "BV1"})
 
 	if len(notices) != 1 {
@@ -91,7 +92,7 @@ func TestDownloadingALocalFileSaysItIsAlreadyOnTheDisk(t *testing.T) {
 	t.Cleanup(a.Close)
 
 	var notices []string
-	acts := AppActions(a, func(s string) { notices = append(notices, s) })
+	acts := AppActions(a, func(s string, _ notice.Tone) { notices = append(notices, s) })
 	acts.Download(app.LocalItem("/tmp/一首歌.m4a"))
 
 	if len(notices) != 1 {

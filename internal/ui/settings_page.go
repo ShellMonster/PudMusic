@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
@@ -343,7 +344,7 @@ func (s *Shell) pickAutoStart(c *ui.Context, st app.Settings, ro bool) {
 		return
 	}
 	if err := s.SetAutoStart(on); err != nil {
-		s.addToast("开机自启没设上：" + strings.TrimPrefix(err.Error(), "app: "))
+		s.addToast("开机自启没设上："+strings.TrimPrefix(err.Error(), "app: "), notice.Danger)
 		// 下一帧 `on` 会从设置里重新读（没写成功，所以还是旧值），开关自己弹回去。
 	}
 }
@@ -369,6 +370,6 @@ func (s *Shell) pickTrayNote(c *ui.Context) {
 // 那一份，用户下次启动看到的才是旧值。
 func (s *Shell) applySetting(what string, fn func(*app.Settings)) {
 	if _, err := s.app.UpdateSettings(fn); err != nil {
-		s.addToast(what + "没存上：" + strings.TrimPrefix(err.Error(), "app: "))
+		s.addToast(what+"没存上："+strings.TrimPrefix(err.Error(), "app: "), notice.Danger)
 	}
 }

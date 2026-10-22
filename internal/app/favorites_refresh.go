@@ -31,6 +31,7 @@ import (
 	"log"
 	"strconv"
 
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 )
 
@@ -43,9 +44,14 @@ import (
 type favRefresh struct {
 	// busy 是「那一趟还在飞」。
 	busy bool
-	// have / text 是后台攒下的话。**取走过就没有了**。
+	// have / text / tone 是后台攒下的话。**取走过就没有了**。
+	//
+	// ⚠️ **tone 跟着话一起攒**（票 #180）：界面把这句话弹成一条提示，而提示
+	// 要按语义分色（成了绿、没成红）。话在这一层生成，**成没成也只有这一层
+	// 知道**——界面那边按字猜的话，改一次文案就错一次颜色。
 	have bool
 	text string
+	tone notice.Tone
 }
 
 // RefreshFavorites 后台重新拉一次侧栏那些收藏夹。**立刻返回**。
@@ -68,18 +74,18 @@ func (a *App) RefreshFavorites() {
 		// 两个不同位置，而字一样的话，读画面的测试分不出「侧栏上那行还在」和
 		// 「右下角那条提示还没过期」——等错一个就要多等两秒，而那两秒会把真正
 		// 要看的那句「已刷新…」吃掉。
-		f.setRefreshResult("已经在刷了，等这一趟完")
+		f.setRefreshResult("已经在刷了，等这一趟完", notice.Plain)
 		return
 	}
 
 	mid := a.SelfMid()
 	if mid <= 0 {
-		f.finishRefresh("还没登录，登录之后才能刷新收藏夹")
+		f.finishRefresh("还没登录，登录之后才能刷新收藏夹", notice.Warning)
 		return
 	}
 	c := a.collectionsSnapshot()
 	if c == nil {
-		f.finishRefresh("刷不了收藏夹：这一摊还没接上 B 站接口")
+		f.finishRefresh("刷不了收藏夹：这一摊还没接上 B 站接口", notice.Danger)
 		return
 	}
 	a.refreshCreatedFolders(f, c, mid)
@@ -98,7 +104,7 @@ func (a *App) refreshCreatedFolders(f *Favorites, c *collections, mid int64) {
 		list, err := a.fetchCreatedFolders(c, 0)
 		if err != nil {
 			log.Printf("biu: 刷新收藏夹失败：%v", err)
-			f.finishRefresh(errTextFolder(err))
+			f.finishRefresh(errTextFolder(err), notice.Danger)
 			a.wakeUI()
 			return
 		}
@@ -106,7 +112,7 @@ func (a *App) refreshCreatedFolders(f *Favorites, c *collections, mid int64) {
 		// 顺序排好，而**顺序不是接口给的，是用户拖出来的**（见 favorites.go 文件头）。
 		// 少走这一步的话每刷一次，用户整理好的顺序就被接口的顺序顶掉。
 		a.SetFavorites(FavoritesCreated, createdFavorites(list, mid))
-		f.finishRefresh(refreshDoneText(len(list)))
+		f.finishRefresh(refreshDoneText(len(list)), notice.Success)
 		a.wakeUI()
 	}()
 }
@@ -143,7 +149,9 @@ func (a *App) FavoritesRefreshing() bool { return a.FavoritesOf().refreshBusy() 
 //
 // 和 `TakeFolderResult` 同一个道理——**取走而不是读**：读而不取的话同一句会在
 // 每一帧都发一次提示，而用户看到的是一条永远消不掉的提示。
-func (a *App) TakeFavoritesRefresh() (string, bool) { return a.FavoritesOf().takeRefresh() }
+func (a *App) TakeFavoritesRefresh() (string, notice.Tone, bool) {
+	return a.FavoritesOf().takeRefresh()
+}
 
 // ── 那一小份状态的方法（都在 `Favorites.mu` 里） ─────────────────────────────
 
@@ -163,9 +171,9 @@ func (f *Favorites) tryBeginRefresh() bool {
 // ⚠️ **busy 一定要在说话之前清掉**：界面拿到那句话弹提示的那一帧，正好也是它
 // 要把侧栏上那行「正在刷新…」收掉的那一帧。顺序反了的话那一帧里两句话对着干，
 // 而留下的是「刷新完了，界面上还在转」的那一种。
-func (f *Favorites) finishRefresh(text string) {
+func (f *Favorites) finishRefresh(text string, tone notice.Tone) {
 	f.mu.Lock()
-	f.refresh.busy, f.refresh.have, f.refresh.text = false, true, text
+	f.refresh.busy, f.refresh.have, f.refresh.text, f.refresh.tone = false, true, text, tone
 	f.mu.Unlock()
 }
 
@@ -173,9 +181,9 @@ func (f *Favorites) finishRefresh(text string) {
 //
 // 给「按了第二次」那一档用：那一趟本来就还在飞，**不能**因为这一句就把界面上
 // 那行「正在刷新…」收了——用户会以为刷新已经结束了。
-func (f *Favorites) setRefreshResult(text string) {
+func (f *Favorites) setRefreshResult(text string, tone notice.Tone) {
 	f.mu.Lock()
-	f.refresh.have, f.refresh.text = true, text
+	f.refresh.have, f.refresh.text, f.refresh.tone = true, text, tone
 	f.mu.Unlock()
 }
 
@@ -185,12 +193,12 @@ func (f *Favorites) refreshBusy() bool {
 	return f.refresh.busy
 }
 
-func (f *Favorites) takeRefresh() (string, bool) {
+func (f *Favorites) takeRefresh() (string, notice.Tone, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if !f.refresh.have {
-		return "", false
+		return "", notice.Plain, false
 	}
 	f.refresh.have = false
-	return f.refresh.text, true
+	return f.refresh.text, f.refresh.tone, true
 }

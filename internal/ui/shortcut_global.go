@@ -46,6 +46,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/egoist/mygo"
 )
 
@@ -148,8 +149,10 @@ func (s *Shell) syncGlobalShortcuts() {
 		}
 	}
 	if len(skipped) > 0 {
-		s.addToast("有几个全局快捷键没登记上：" + strings.Join(skipped, "、") +
-			"。应用内那一列照常用。")
+		// ⚠️ **橙色而不是红色**（票 #180）：应用内那一列照常用，只有全局那一列
+		// 几个组合没登记上——是「有一件事没成」，不是「整件事失败了」。
+		s.addToast("有几个全局快捷键没登记上："+strings.Join(skipped, "、")+
+			"。应用内那一列照常用。", notice.Warning)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -219,7 +220,7 @@ func TestEmptyStateCopyIsNotBlank(t *testing.T) {
 func TestToastDoesNotSurviveNavigation(t *testing.T) {
 	s, tt := newShell(t)
 
-	s.addToast("上一页的提示")
+	s.addToast("上一页的提示", notice.Plain)
 	tt.Frame()
 	if !tt.HasText("上一页的提示") {
 		t.Fatalf("提示没画出来，文字有 %q", tt.Texts())
