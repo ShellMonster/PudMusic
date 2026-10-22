@@ -286,7 +286,7 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 	playing := rows.isPlaying(m)
 	// 紧凑档只是这一行的几处尺寸变矮（设置里的「数据显示样式」）。
 	mt := metricsOf(rows.Layout())
-	face := libraryRowFace(t, r.Selected(), playing)
+	face := libraryRowFace(t, playing)
 
 	// ⚠️ **hover 要在 Children 之前问**（同 `widgets/list/card.go` 里那一处）：它报的
 	// 是这一帧指针在不在这一行上，而封面上那圈反馈要等 Children 才建得出来。
@@ -297,6 +297,14 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 	row := ui.Row(c).Key("later-row:"+m.ID).AlignSelf(ui.Stretch).Gap(mt.gap).
 		Padding(mt.padY, mt.padX).Height(mt.height)
 	onRow := row.Hovered()
+
+	// 选中那一行：盖掉框架那一块实心主色底，键盘走到它上面时给它一圈焦点环
+	//（理由见 `widgets/list/selection.go`）。
+	//
+	// ⚠️ **环的条件是「列表有键盘焦点」且「上一次输入是键盘」**：鼠标点过之后
+	// 方向键挪了游标，那一行也得有指示（框架那个 `focusVisible` 方向键不会设回来）。
+	row = list.SelectedRow(row, t, r.Selected(), onRow,
+		rows.keys.On() && list.Focused(c, &rows.state))
 
 	return row.Children(func() {
 		viewLibraryRowHead(c, r, m, s.images, mt, face, onRow,
@@ -347,22 +355,20 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 		return ui.Box(c).Grow(1)
 	}
 	playing := rows.isPlaying(m)
+	// ⚠️ **选中不再改这一格的颜色**（票 #197）：原来选中的那一格铺一整块实心主色底
+	// （和列表选中行是同一套，`ui/table.go` 的 node.Selected），而拍板的是「点一行
+	// 不再整行刷绿」——上游压根没有这一层。所以选中的那一格和没选中的格子长得
+	// **一个像素都不差**。
+	//
+	// 剩下的唯一一档主色是「正在放」那一格：它跟着声音走，不跟着光标走。
 	titleColor, metaColor := t.Text, t.TextMuted
-	switch {
-	case selected:
-		titleColor, metaColor = t.AccentText, t.AccentText.Alpha(0.75)
-	case playing:
+	if playing {
 		// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（理由见 `widgets/ink`）。
 		titleColor = ink.AccentOn(t)
 	}
 
 	box := ui.Column(c).Key("later-cell:" + m.ID).Radius(t.Radius).
 		AlignSelf(ui.Stretch).Grow(1)
-	if selected {
-		// 选中那一格铺主色底——和列表选中行、网格选中格同一套（`ui/table.go` 的
-		// node.Selected）。
-		box = box.Background(t.Accent)
-	}
 	// ⚠️ **hover 要在 Children 之前问**（同 `widgets/list/grid.go` 里那一处）。
 	onCell := box.Hovered()
 

@@ -446,10 +446,10 @@ func TestChoosingAddOnACardAppendsJustThatSong(t *testing.T) {
 // 🔴 铁律四：选中的身份
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestClickingACardChoosesThatSong 验点哪一格选中哪一首，而且**画出来了**。
+// TestClickingACardChoosesThatSong 验点哪一格选中哪一首。
 //
-// ⚠️ 判据有两层：拿到的歌（`Selected()`）和画面上那一格的底色。只断言字段不够——
-// 字段对了画面没跟着变，同样算坏。
+// ⚠️ 判据是**拿到的歌**（`Selected()`）和**那一格的底色**：点过之后那一格既不是
+// 实心主色底（票 #197：点一格不再整格刷绿），也和没点过的格子一模一样。
 //
 // ⚠️ 点的是「歌 3」这样的**非行首**格子：`ListState.Label` 装的是每一行第一首
 // 的歌名，`Tester.Click` 点的是它命中的那个盒子的正中，行首那首命中的是整行的
@@ -466,10 +466,15 @@ func TestClickingACardChoosesThatSong(t *testing.T) {
 		t.Fatalf("点了「歌 3」，Selected() = (%q, %v)", got.Title, ok)
 	}
 
-	chosen := cardPixel(t, tt, 1100, cols, 2) // 第三格
-	other := cardPixel(t, tt, 1100, cols, 3)  // 第四格
-	if chosen == other {
-		t.Errorf("选中的那一格和没选中的格子是同一个底色（%v），选中根本没画出来", chosen)
+	// 选中那一格**没有**被刷成实心主色底（票 #197）。
+	th := ui.LightTheme()
+	chosen := cardPixel(t, tt, w, cols, 2) // 第三格
+	if isAccent(chosen, accentOf(th)) {
+		t.Errorf("点过的那一格是 %v，是实心主色底——票 #197 要的是点一格不再整格刷绿", chosen)
+	}
+	other := cardPixel(t, tt, w, cols, 3) // 第四格
+	if chosen != other {
+		t.Errorf("点过的那一格是 %v，没点过的那一格是 %v：点一格不该改变它的样子", chosen, other)
 	}
 }
 

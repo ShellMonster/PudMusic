@@ -299,9 +299,13 @@ func TestEveryRowIsTheSameHeightNoMatterHowLongTheTitle(t *testing.T) {
 // ⚠️ 这一条是**实测踩过的坑**：MyGo 默认拿「父 ID + 兄弟序号」当身份，头部插入
 // 一行之后，不带 key 的列表选中项会变成旁边另一首。对照见下面那条。
 //
-// 判据是**画面上那一行的底色**：选中行是主色底（`ui/table.go` 的
-// node.Selected），别的行不是。只断言状态字段不够——字段对了画面没跟着变，
-// 同样算坏。
+// 判据是**画面上那一行的焦点环**：键盘走到的那一行有一圈环（票 #197 之后，
+// 选中不再刷实心主色底，环就是「选中画出来了」唯一的证据）。只断言状态字段
+// 不够——字段对了画面没跟着变，同样算坏。
+//
+// ⚠️ **用键盘而不是鼠标**：鼠标点过的那一行**什么标记都没有**（上游点一行不改变
+// 它的样子，票 #197 就是这么定的），所以「选中画出来了」这件事只有键盘那条路
+// 说得清。
 func TestInsertingARowAtTheHeadKeepsTheChosenSong(t *testing.T) {
 	songs := []Music{
 		song("a", "第一首", "UP 甲"),
@@ -310,24 +314,27 @@ func TestInsertingARowAtTheHeadKeepsTheChosenSong(t *testing.T) {
 	}
 	l, tt := newList(t, Actions{}, songs)
 
-	if err := tt.Click("第二首"); err != nil {
-		t.Fatal(err)
-	}
-	chosen := rowPixel(t, tt, "第二首")
-	if chosen == rowPixel(t, tt, "第三首") {
-		t.Fatalf("选中的行和没选中的行是同一个底色（%v），选中根本没画出来", chosen)
+	// Tab 把焦点交给列表，方向键往下走两次，落在「第二首」上。
+	tt.Key(0, ui.KeyTab)
+	tt.Frame()
+	tt.Key(0, ui.KeyDown)
+	tt.Frame()
+	tt.Key(0, ui.KeyDown)
+	tt.Frame()
+	if !ringAt(t, tt, "第二首") {
+		t.Fatalf("键盘走到「第二首」了，那一行上沿却没有焦点环")
 	}
 
 	// 在最前面插一行：「新来的一首」排到最上面，原来选中的那首往后挪一位。
 	l.SetSongs(append([]Music{song("new", "新来的一首", "UP 新")}, songs...))
 	frame(tt)
 
-	if got := rowPixel(t, tt, "第二首"); got != chosen {
-		t.Errorf("头部插入一行之后「第二首」那一行是 %v，插入前是 %v，want 一样"+
-			"（选中的还是那一首）", got, chosen)
+	if !ringAt(t, tt, "第二首") {
+		t.Errorf("头部插入一行之后「第二首」那一行上沿没有焦点环了——" +
+			"光标跟着位置走了，没有跟着 ID 走")
 	}
-	if got := rowPixel(t, tt, "新来的一首"); got == chosen {
-		t.Error("新插进来的那一行被画成了选中——选中跟位置走了，没有跟着 ID 走")
+	if ringAt(t, tt, "新来的一首") {
+		t.Error("新插进来的那一行被画成了选中——光标跟着位置走了，没有跟着 ID 走")
 	}
 
 	// 拿歌问也一样：拿到的还是那一首，不是「第 2 行」。

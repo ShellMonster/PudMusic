@@ -614,20 +614,25 @@ func TestAHistoryRowWithNoLengthShowsOnlyWhatWasWatched(t *testing.T) {
 // ⚠️ **这一条是这个列表存在的理由**：MyGo 默认拿「父 ID + 兄弟序号」当身份，头部
 // 插入一行之后，不带 key 的列表选中项会变成旁边那一首。
 //
-// 判据是**画面上那一行的底色**（选中行是主色底，别的行不是）。只断言状态字段不
-// 够——字段对了画面没跟着变，同样算坏。
+// 判据是**画面上那一行的焦点环**（票 #197 之后，选中不再刷实心主色底，环就是
+// 「选中画出来了」唯一的证据）。只断言状态字段不够——字段对了画面没跟着变，同样
+// 算坏。
+//
+// ⚠️ **用键盘而不是鼠标**：鼠标点过的那一行**什么标记都没有**（上游点一行不改变它的
+// 样子，票 #197 就是这么定的），所以「选中画出来了」这件事只有键盘那条路说得清。
 func TestInsertingARowAtTheHeadKeepsTheChosenSong(t *testing.T) {
 	f := newLibFake(t).withLater(1, 3, "第一首", "第二首", "第三首")
 	tt, s := libraryShell(t, f, laterPath)
 	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 3 })
 
-	if err := tt.Click("第二首"); err != nil {
-		t.Fatal(err)
-	}
+	// Tab 把焦点交给列表，方向键往下走两次，落在「第二首」上。
+	focusList(t, tt, "第一首")
+	tt.Key(0, mygoui.KeyDown)
 	tt.Frame()
-	chosen := rowPixel(t, tt, "第二首")
-	if chosen == rowPixel(t, tt, "第三首") {
-		t.Fatalf("选中的行和没选中的行是同一个底色（%v），选中根本没画出来", chosen)
+	tt.Key(0, mygoui.KeyDown)
+	tt.Frame()
+	if !rowHasRing(t, tt, "第二首") {
+		t.Fatalf("键盘走到「第二首」了，那一行上沿却没有焦点环")
 	}
 
 	// 在最前面插一行：「新来的一首」排到最上面，原来选中的那首往后挪一位。
@@ -642,16 +647,51 @@ func TestInsertingARowAtTheHeadKeepsTheChosenSong(t *testing.T) {
 	if !tt.HasText("新来的一首") {
 		t.Fatalf("新插进来的那一行没画出来，文字有 %q", tt.Texts())
 	}
-	if got := rowPixel(t, tt, "第二首"); got != chosen {
-		t.Errorf("头部插入一行之后「第二首」那一行是 %v，插入前是 %v，want 一样"+
-			"（选中的还是那一首）", got, chosen)
+	if !rowHasRing(t, tt, "第二首") {
+		t.Errorf("头部插入一行之后「第二首」那一行上沿没有焦点环了——" +
+			"光标跟着位置走了，没有跟着 ID 走")
 	}
-	if got := rowPixel(t, tt, "新来的一首"); got == chosen {
-		t.Error("新插进来的那一行被画成了选中——选中跟位置走了，没有跟着 ID 走")
+	if rowHasRing(t, tt, "新来的一首") {
+		t.Error("新插进来的那一行被画成了选中——光标跟着位置走了，没有跟着 ID 走")
 	}
 	// 拿行问也一样：拿到的还是那一首，不是「第 2 行」。
 	if got, ok := s.laterPage.rows.Selected(); !ok || got.Title != "第二首" {
 		t.Errorf("Selected() = (%q, %v)，want (第二首, true)", got.Title, ok)
+	}
+}
+
+// TestTheLaterRowKeepsItsRingAfterAMouseClick 钉的是**评审点出来的那一条**：
+// 鼠标点过一行之后再用方向键走位，键盘走到的那一行**必须有指示**。
+//
+// ⚠️ **这一条是「框架那个 `focusVisible` 靠不住」的证据**：框架只在 Tab 的时候把
+// `rt.focusVisible` 设成 true，指针按一下会把它清掉，而**方向键不会设回来**——
+// 所以「点一行 → 按 Down」那一路上，框架的判据一路是 false，屏幕上什么都不画。
+// 改动之前那一路是好的（实心主色底跟着键盘走），所以不能只满足于框架的判据。
+//
+// ⚠️ **这一页自己画行**（`library_rows.go` 的文件头写着为什么不能走
+// `widgets/list`），所以它得自己证明一遍，不能靠 `widgets/list` 那一条。
+func TestTheLaterRowKeepsItsRingAfterAMouseClick(t *testing.T) {
+	f := newLibFake(t).withLater(1, 3, "第一首", "第二首", "第三首")
+	tt, s := libraryShell(t, f, laterPath)
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 3 })
+
+	// 点第二行：指针在管，那一行什么标记都没有。
+	if err := tt.Click("第二首"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if rowHasRing(t, tt, "第二首") {
+		t.Errorf("鼠标点过的那一行上沿有焦点环——指针在管的时候不该有")
+	}
+
+	// 按方向键：键盘在管了，环得跟着键盘走。
+	tt.Key(0, mygoui.KeyDown)
+	tt.Frame()
+	if !rowHasRing(t, tt, "第三首") {
+		t.Errorf("鼠标点过之后按了方向键，键盘走到「第三首」了，那一行上沿却没有焦点环")
+	}
+	if rowHasRing(t, tt, "第二首") {
+		t.Errorf("「第二首」那一行上沿还有焦点环——环没有跟着键盘走")
 	}
 }
 
@@ -672,17 +712,26 @@ func TestTwoViewingsOfOneVideoAreTwoRows(t *testing.T) {
 		t.Fatalf("两行的身份一样（%q）——状态会串在一起", rows[0].ID)
 	}
 
-	// 选中第一行，第二行不该跟着亮。
-	if err := tt.Click("同一首歌 第一次"); err != nil {
-		t.Fatal(err)
-	}
+	// 键盘走到第二行：环得落在**第二行**上。两行共用身份时，框架会按身份把游标
+	// 挪回第一行——那一行是「共用身份」时状态串在一起的证据。
+	//
+	// ⚠️ **用键盘而不是鼠标**：鼠标点过的那一行什么标记都没有（票 #197：点一行不
+	// 改变它的样子），所以「选中画出来了」只有键盘那条路说得清。
+	focusList(t, tt, "同一首歌 第一次")
+	tt.Key(0, mygoui.KeyDown)
 	tt.Frame()
-	if a, b := rowPixel(t, tt, "同一首歌 第一次"), rowPixel(t, tt, "同一首歌 第二次"); a == b {
-		t.Errorf("两行共用身份时选中状态串了（都是 %v）", a)
+	tt.Key(0, mygoui.KeyDown)
+	tt.Frame()
+	if !rowHasRing(t, tt, "同一首歌 第二次") {
+		t.Errorf("两行共用身份时选中状态串了——环没有落在「同一首歌 第二次」那一行上")
 	}
 }
 
-// rowPixel 是那一行的底色。选中行是主色底（Biu 那个绿），别的行不是。
+// rowPixel 是那一行的底色。
+//
+// ⚠️ **选中不再有实心主色底**（票 #197）：所以这个数**量不出「选中」**——选中的
+// 那一行和没选中的那一行长得一模一样。「选中画出来了」现在只有一件事说得清：
+// **键盘走到的那一行有一圈焦点环**（见 `rowHasRing`）。
 //
 // 取样点在**那一行自己的左边内侧**：`tt.Find` 给的框就是整行（不是那行字），所以
 // `X+2` 落在序号那一列上，而不在窗口底色上——钉死像素坐标的话，侧栏宽度一改就

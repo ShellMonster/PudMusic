@@ -664,21 +664,19 @@ func (g *Grid) viewCellGuarded(c *ui.Context, i int, cell float32) {
 func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 	t := c.Theme()
 	m := g.songs[i]
-	chosen := i == g.sel
 	playing := isPlaying(g.acts, m.Item)
 
-	// 选中那一格：主色底 + 主色上的反色字，和列表选中行是同一套颜色
-	//（`ui/table.go` 的 node.Selected 就是这么画的）。深色主题下换成别的
-	// 颜色会看不清。
+	// ⚠️ **选中不再改这一格的颜色**（票 #197）：原来选中的那一格铺一整块实心主色底
+	// （和列表选中行是同一套，`ui/table.go` 的 node.Selected），而拍板的是「点一行
+	// 不再整行刷绿」——上游压根没有这一层。所以选中的那一格和没选中的格子长得
+	// **一个像素都不差**。
 	//
-	// ⚠️ 「正在放」是**第二档**、不是并进去的第二种底色：它只把歌名染成主色
-	// 并挂一句「正在播放」。换底色就和「选中」分不出来了——而这两个问的是两件
-	// 不同的事（见 card.go 里同一段）。
+	// 剩下的唯一一档主色是「正在放」那一格：它跟着声音走，不跟着光标走。
+	//
+	// ⚠️ **「正在放」和「选中」同时成立时，「正在放」赢**（理由同 `card.go` 的
+	// `rowColors`）：主色底已经没有了，两件事里只有一件还画得出来。
 	titleColor, metaColor := t.Text, t.TextMuted
-	switch {
-	case chosen:
-		titleColor, metaColor = t.AccentText, t.AccentText.Alpha(0.75)
-	case playing:
+	if playing {
 		// 主色当**字**：浅色下要一个与底色对比度 ≥4.5:1 的变体（理由见
 		// `widgets/ink`）；深色下原样。
 		titleColor = ink.AccentOn(t)
@@ -692,9 +690,6 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 		// 点一下选中这一首。Biu 的卡片单击是直接播，这里只选中：桌面端单击
 		// 就换队列太容易误触，播放走双击和右键菜单。
 		OnClick(func() { g.sel = i })
-	if chosen {
-		box = box.Background(t.Accent)
-	}
 
 	// ⚠️ **hover 要在 `Children` 之前问**（同 `card.go` 里那一处）：它报的是这一帧指针
 	// 在不在这一格上，而封面上面那圈反馈要等 Children 才建得出来。

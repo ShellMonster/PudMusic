@@ -107,8 +107,9 @@ type pagedRows struct {
 	hot bool
 
 	// render 画这一行并**把它交回来**（菜单要挂在它身上，见 viewRow）。收整个
-	// ListRow 而不是光一个下标，是为了让页面能看见 `r.Selected()`——选中行的字色
-	// 和底色是一对。menu 是这一行的右键菜单。两者都由页面给。
+	// ListRow 而不是光一个下标，是为了让页面能看见 `r.Selected()`——选中的那一行要
+	// 盖掉框架那块实心主色底，键盘走到它上面时还要有一圈焦点环
+	//（`widgets/list/selection.go`）。menu 是这一行的右键菜单。两者都由页面给。
 	render func(c *ui.Context, r ui.ListRow) ui.Element
 	menu   func(m *ui.Menu, i int)
 
@@ -170,6 +171,13 @@ type pagedRows struct {
 	// failed 是画崩了的行（按 ID 记），下一帧不重试：同一行每帧崩一次会刷爆日志、
 	// 拖垮帧率，比「这一行画不出来」糟得多。
 	failed map[string]bool
+
+	// keys 记「上一次输入是键盘还是指针」（理由见 `widgets/list/selection.go` 的
+	// KeyboardMode）。
+	//
+	// ⚠️ **焦点环靠它**：框架那个 `focusVisible` 只被 Tab 设回来，方向键不会——
+	// 于是「鼠标点过一行之后再按方向键」那一路上，键盘走到哪一行都没有指示。
+	keys list.KeyboardMode
 
 	// ── 跨 goroutine 的只有下面这两小摊 ──────────────────────────────────
 
@@ -407,14 +415,17 @@ func (p *pagedRows) syncState(cols int) {
 
 	// 🔴 **网格那一档不装行选中**。`state.Selected` 收的是**行下标**，而这一份的
 	// `sel` 记的是**第几首歌**（格子才是用户点的东西，`widgets/list` 的 Grid 也是
-	// 自己管选中的）。两套下标塞进同一个 int 的后果有两个，而且都很难查：
+	// 自己管选中的）。两套下标塞进同一个 int 的后果有一个，而且很难查：
 	//
 	//   - 点在格子之间的空地上时框架写进来一个**行号**，于是「选中的那一首」变成
-	//     另一首；
-	//   - 整行铺主色底，于是网格里「选中了一格」看起来像「选中了一行」。
+	//     另一首。
 	//
-	// 选中由每一格自己画（`viewCellGuarded` 的 OnClick + 页面那一层的主色底），
-	// 和 `widgets/list` 的 Grid 同一个做法。
+	// 选中由每一格自己画（`viewCellGuarded` 的 OnClick），和 `widgets/list` 的 Grid
+	// 同一个做法。
+	//
+	// ⚠️ **框架那一层实心主色底本来还会让网格看起来像「选中了一行」**——那一条
+	// 在票 #197 之后不存在了：网格那一档不装行选中，框架不画；而列表那一档的
+	// 那一块由选中的行自己刷底色盖掉（`widgets/list/selection.go`）。
 	p.state.Selected = nil
 	if !p.isGrid() {
 		p.state.Selected = &p.sel
@@ -492,11 +503,33 @@ func (p *pagedRows) drawList(c *ui.Context) {
 
 	p.syncState(1)
 
+	// 选中挪了没有？挪了而且不是指针挪的，就是键盘挪的（焦点环靠它，理由见
+	// `widgets/list/selection.go` 的 KeyboardMode）。
+	//
+	// ⚠️ **要在画行之前问**：焦点环是画在行上的，这一句晚了那一帧就少一圈环。
+	//
+	// ⚠️ **只在这一档问**：网格那一档 `p.sel` 记的是**第几首歌**（格子才是用户
+	// 点的东西），和这里的**行下标**不是一回事，拿它比就是拿两套下标比。
+	p.keys.Moved(p.sel)
+
 	e := ui.List(c, &p.state, n).
 		Grow(1).
 		FillWidth().
+		// ⚠️ **听一听输入**：只为了知道「上一次是键盘还是指针」（焦点环靠它，
+		// 理由见 `widgets/list/selection.go` 的 KeyboardMode）。
+		//
+		// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选行、Tab 换
+		// 焦点都还在。
+		HandleInput(p.keys.Input).
 		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击）。
 		OnSubmit(func() { p.playFrom(p.sel) }).
+		// ⚠️ **焦点环只留在「还没选中任何一行」的时候**（票 #197）：框架默认给**整张
+		// 列表**画一圈焦点环，而票面要的是「键盘走到**哪一行**都要有可见焦点指示」
+		// ——指示落在那一行上（见 `widgets/list/selection.go`）。两处都画就是两圈环。
+		//
+		// 理由和那一处逐字一样：**还没选中行时环在列表上**（Tab 刚进来的那一瞬间，
+		// 焦点在列表上），**选中行之后环跟着那一行走**。
+		FocusRing(p.sel < 0).
 		Children(func() { p.viewEmptyState(c, t) }).
 		Rows(func(r ui.ListRow) { p.viewRow(r) }).
 		TrackScroll(&p.scroll)
