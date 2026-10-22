@@ -221,7 +221,7 @@ structural:
 - **逐像素采样**：颜色、描边、底色、阴影。
 - **假时钟推钟**：动效的中间态用 `Advance` + `FramePending`，**不要数帧、
   不要用固定毫秒**（框架的钟站着不动，数帧会静默失效）。
-- **默认验收不跑 `internal/ui`**：`go build ./... && go vet ./... && go test $(go list ./... | grep -v '/internal/ui$')`。
+- **默认验收不跑 `internal/ui`**：`go build -p 4 ./... && go vet -p 4 ./... && go test -p 4 $(go list ./... | grep -v '/internal/ui$')`（`-p 4` 是限并发，别调大）。
   界面行为测试**只在动了界面行为的票上跑，而且只跑自己改的那几处**
   （`-run` 过滤），例如
   `GOGC=10 go test ./internal/ui/ -count=3 -timeout 5m -run 'TestPlayBar|TestVolume'`。
