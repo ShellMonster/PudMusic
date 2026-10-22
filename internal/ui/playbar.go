@@ -100,6 +100,8 @@ const (
 //	⚠️ **右边那一组是 221**（不是票 #127 那时的 362）：音量收成一枚图标之后，
 //	 常驻的那根 120 像素横滑块没有了（见 `viewPlayBarRight`）。
 func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
+	// 记一笔「播放条建了一遍」——给「一帧建了几遍」那条测试数（见 builds.go）。
+	s.builds.playbar++
 	t := c.Theme()
 
 	ui.Column(c).Key("playbar").Height(playbarHeight).PaddingX(playbarPadX).

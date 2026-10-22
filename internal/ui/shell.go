@@ -548,6 +548,11 @@ type Shell struct {
 	// seek」——那一半就靠这对标记守住）。
 	miniScrub float64
 	miniHeld  bool
+	// builds 记着「各个界面一共建了几遍」。**给测试看的**（见 builds.go 与
+	// framebudget_test.go）：「一帧建两遍」是静默的坏处——画面上看着没差，
+	// 而帧成本翻倍。
+	builds buildTally
+
 	// closed 记着这个外壳收过尾了。它是**「关掉之后不许再装定时器」那道闸门**，
 	// 不是「收尾只走一遍」——`Close` 可以重复调，而底下每一项各自幂等。
 	//

@@ -327,6 +327,8 @@ func (s *Shell) viewFullPlayer(c *ui.Context) {
 	if !s.full.open {
 		return
 	}
+	// 记一笔「满屏建了一遍」——给「一帧建了几遍」那条测试数（见 builds.go）。
+	s.builds.full++
 	st := s.app.Snapshot()
 	if !st.HasTrack {
 		// 🔴 **不能在这里关掉自己**。
