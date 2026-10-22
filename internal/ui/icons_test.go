@@ -709,9 +709,15 @@ func TestTheHitAreaIsBiggerThanTheGlyph(t *testing.T) {
 		// 收藏：票 #219 之后跟着上游走（`RiStarFill/Line size={18}`），
 		// 它和右边那一组一样是 18 的图标 + 32 的点击区。
 		{"收藏", iconMd, iconHitMd},
-		// 「下载」票 #127 之后摆在播放条**右边**那一组，尺寸跟着那一组走
-		// （`viewPlayBarRight`），不再是左边那一段里的一枚小键。
-		{"下载", iconMd, iconHitMd},
+		// ⚠️ **「下载」不在这张表里了**（票 #222 / 报告 §3.12）：上游那一支的
+		// 条件是 `{Boolean(playId) && getPlayItem()?.source !== "local" && …}`
+		//（`playbar/right/index.tsx:15`）——**本地文件不摆**。而这一条放的是
+		// **真的本地文件**（`h.open(t)` 打开的是仓库里那份 FLAC），所以那一枚
+		// 压根不在画面上。
+		//
+		// 它的点击区由 `TestTheDownloadKeyIsNotThereForALocalFile` 那一族断
+		// （那一条喂的是假的 `app.State`，能同时断「本地文件不摆」和「B 站的
+		// 那一首摆」）。
 	}
 
 	const wantSlack = 3
@@ -741,6 +747,18 @@ func TestTheHitAreaIsBiggerThanTheGlyph(t *testing.T) {
 				"布局没用上那个尺寸", k.label, btn.W, btn.H, k.hit)
 		}
 
+	}
+
+	// ⚠️ **本地文件时「下载」那一枚压根不在**（票 #222 / 报告 §3.12）：这一条放
+	// 的是**真的**本地文件，而上游那一支的条件里有 `source !== "local"`
+	//（`playbar/right/index.tsx:15`）——本地文件在 B 站上压根没有 cid 可下，
+	// 给一个按了只会报错的键不如不摆。
+	//
+	// ⚠️ **这一句断的是「真 app」那一档**：`TestTheDownloadKeyIsNotThereForALocalFile`
+	// 喂的是假的 `app.State`，而这一条是**真的放了一首本地文件**——来源那一栏
+	// 要是判错了（`app.State.Source` 那一段），这里立刻红。
+	if _, ok := h.tt.Find("下载"); ok {
+		t.Error("本地文件的播放条上画出了「下载」——上游不摆（source !== \"local\"）")
 	}
 
 	// 「播放」那一枚单独断：它的**盒子就是图形那一份画布**（上游

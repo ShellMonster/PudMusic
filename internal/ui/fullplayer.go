@@ -879,7 +879,8 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 func (s *Shell) viewFullProgress(c *ui.Context, st app.State, dim ui.Color) {
 	known := st.Duration > 0
 	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, clock(st.Position)).FontSize(scale.Font(c, 12)).TextColor(dim).Width(48)
+		ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, 12)).TextColor(dim).
+			MinWidth(48).MaxLines(1)
 		sl := knobSlider(c, &s.fullScrub, 0, 1).Grow(1).Label("全屏播放进度").Disabled(!known)
 		switch held := sl.Pressed(); {
 		case held && !s.fullHeld:
@@ -891,11 +892,8 @@ func (s *Shell) viewFullProgress(c *ui.Context, st app.State, dim ui.Color) {
 		case !s.fullHeld && known:
 			s.fullScrub = float64(st.Position) / float64(st.Duration)
 		}
-		total := clock(st.Duration)
-		if !known {
-			total = "--:--"
-		}
-		ui.Text(c, total).FontSize(scale.Font(c, 12)).TextColor(dim).Width(48)
+		total := clockOrDash(st.Duration)
+		ui.Text(c, total).FontSize(scale.Font(c, 12)).TextColor(dim).MinWidth(48).MaxLines(1)
 	})
 }
 

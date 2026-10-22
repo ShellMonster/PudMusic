@@ -190,9 +190,10 @@ const (
 //
 //	⚠️ **这张表的前提是「有歌」**，而有两样东西会改它：
 //
-//	 1. **「下载」那一枚只在有歌时摆**（`viewPlayBarRight` 的 `st.HasTrack`）。
-//		没有歌时右边那一组是 203.2（少一枚 32 的键加一道 8 的缝）——**表里是
-//		「有歌」的那一档**。⚠️ **它不再影响中间那一列**：右边那一组是绝对定位
+//	 1. **「下载」那一枚只在有歌、且不是本地文件时摆**（`viewPlayBarRight` 的
+//		`st.HasTrack && st.Source != app.SourceLocal`）。没有歌时右边那一组是
+//		203.2（少一枚 32 的键加一道 8 的缝）——**表里是「有歌」的那一档**。
+//		⚠️ **它不再影响中间那一列**：右边那一组是绝对定位
 //		贴住右沿的（见 `viewPlayBarRight`），不占那 1 份轨道。
 //	 2. **「倍速」那一枚贴字宽**（上游的 `min-w-fit`），所以它随当前倍率变：
 //		「1x」是 43.2，「1.25x」是 65.8——**表里是 1x 的那一档**。同样地，它
@@ -328,8 +329,9 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 // **常驻的 120 像素横滑块**加一道缝，票 #135 把它收成了图标；票 #173 又把倍速
 // 那一枚的字放到 16（上游的 `text-[16px]`），它自己宽了 2.5。
 //
-// ⚠️ **「下载」那一枚是有歌时才摆的**（下面那个 `if st.HasTrack`）——所以
-// 「243.2」是**有歌**的那一档；没有歌时这一组是 203.2。
+// ⚠️ **「下载」那一枚是有歌、且不是本地文件时才摆的**（下面那个
+// `if st.HasTrack && st.Source != app.SourceLocal`）——所以「243.2」是**有歌且
+// 是 B 站那一首**的那一档；没有歌（或者放的是本地文件）时这一组是 203.2。
 func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 	// 🔴 **这一组是绝对定位，贴着播放条内容区的右沿**（上游
 	// `playbar/right/index.tsx:13` 的 `justify-end`）。
@@ -353,21 +355,15 @@ func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 		// 腾出 42（一个 32 的键加一道 10 的缝），而右边这一组多花同样的数。
 		s.viewPlayMode(c, st)
 
-		// 下载。**没有歌时不摆**——Biu 那一支的条件是
+		// 下载。**没有歌时不摆，本地文件也不摆**——Biu 那一支的条件是
 		// `{Boolean(playId) && getPlayItem()?.source !== "local" && …}`
 		// （`playbar/right/index.tsx:15`）。
 		//
-		// ⚠️ **我们只实现了前半截（`playId`），后半截（`source !== "local"`）
-		// 没实现**：本地文件照样摆着这一枚。**这是改之前就有的行为**——那一枚原来
-		// 在左边第二行（票 #219 之前是 `viewTrackMeta`），同样只判「有没有歌」。
-		//
-		// 为什么没顺手补上：那一支要的是「当前这一首是不是本地文件」，而
-		// `app.State`（这一行读的那一份快照）**没有来源这一栏**——`Item.Source`
-		// 在队列那一层（`app/queue.go:31`），不在快照里。补它要么给 `State` 加
-		// 一栏（动应用层），要么在 view 里每帧去问一次 `App.PlayingItem()`
-		//（那会绕过快照，而这一层是**每帧现读快照**的）。两样都超出这一票
-		// 「重排控件」的范围，所以这一票只把话说准。
-		if st.HasTrack {
+		// 🔴 **本地文件不摆**（票 #222 / 报告 §3.12）：本地文件在 B 站上压根
+		// 没有 cid 可下，按下去只会得到一句「这一首下不了」——给一个按了只会
+		// 报错的键不如不摆。**这一条以前判不出来**：`app.State` 里没有来源
+		// 那一栏（`Item.Source` 在队列那一层），现在有了（见 `State.Source`）。
+		if st.HasTrack && st.Source != app.SourceLocal {
 			s.viewDownloadButton(c, st)
 		}
 
@@ -457,9 +453,36 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 			// 字重重一档。**层次靠大小，不靠重量**：上游那一句是 `text-base`
 			// （16 / 400），而加粗的那一档在整条播放条上会跟满屏播放器的标题
 			// （20 / 400）抢注意力——它是全条最大的字，不该是全条最重的字。
-			ui.Text(c, title).FontSize(scale.Font(c, 16)).
+			//
+			// 🔴 **歌名可点**（票 #222 / 报告 §6.5）：上游那一句点了会跳 B 站
+			// 视频页（`layout/playbar/left/index.tsx:54-57` 的
+			// `openBiliVideoLink`），而且**悬停时有下划线**（`:56` 的
+			// `"hover:underline"`）。那是用户在这首歌上能走的**第二条路**：
+			// 听不下去就去 B 站看它。
+			//
+			// ⚠️ **本地文件不点**（上游的 `isClickable` 就是
+			// `playItem && playItem.source !== "local"`）：本地文件在 B 站上
+			// 压根没有页面可跳，给一个点了没用的入口比不给更糟。
+			//
+			// ⚠️ **判据是「有 B 站地址」**（`st.BiliURL`），不只是「不是本地
+			// 文件」：在线条目也可能没有稿件身份（既没有 bvid 也没有 sid），
+			// 那时候没有页面可跳——上游那边拼出来的是
+			// `bilibili.com/video/undefined`，那是个 404。
+			name := ui.Text(c, title).FontSize(scale.Font(c, 16)).
 				TextColor(textColor(t, st.HasTrack)).
 				MaxLines(1).Ellipsis("…")
+			if titleClickable(st) {
+				url := st.BiliURL
+				name = name.OnClick(func() { s.openExternalURL(url) })
+				// ⚠️ **悬停才画下划线**（上游的 `hover:underline`）：平时不画，
+				// 指针停上去才长出来。
+				//
+				// ⚠️ **问的是 `name` 自己**（元素建好之后）：`Hovered` 要元素在
+				// 命中列表里，而那要它已经建好（`OnClick` 之后才算）。
+				if name.Hovered() {
+					name = name.Underline()
+				}
+			}
 			s.viewQualityBadge(c, st, t)
 		})
 		// UP 名（点它进他的空间）。**没有歌不摆**（票 #219 之前是
@@ -578,9 +601,7 @@ func (s *Shell) viewTrackError(c *ui.Context, st app.State, t *ui.Theme) {
 		case st.BiliURL != "":
 			if s.withTip(c, flatButton(c, "在 B 站打开").FontSize(scale.Font(c, 12)),
 				"在 B 站里听这一首").Clicked() {
-				if err := systemOpenLink(st.BiliURL); err != nil {
-					s.addToast("打不开："+err.Error(), notice.Danger)
-				}
+				s.openExternalURL(st.BiliURL)
 			}
 		}
 	})
@@ -593,6 +614,24 @@ func (s *Shell) viewTrackError(c *ui.Context, st app.State, t *ui.Theme) {
 func (s *Shell) retryPlay() {
 	if err := s.app.Retry(); err != nil {
 		s.addToast(err.Error(), notice.Danger)
+	}
+}
+
+// openExternalURL 把一个网址交给默认浏览器。
+//
+// ⚠️ **走接缝**（`Shell.openExternal`）：无头 Tester 里 `systemOpenLink` 会 panic
+// （`mygo.Shell` 的 `needsApp` 见到 `App.Run` 没跑过就直接 panic）——而这一栏是
+// 「点歌名跳 B 站视频页」那条路的终点，**没有它就断不了「点了跳的是哪一页」**。
+//
+// ⚠️ **打不开要说一句**：静悄悄地失败的话，用户点了歌名什么都没发生，而
+// 「点了没反应」在界面上看不出坏在哪。
+func (s *Shell) openExternalURL(url string) {
+	open := s.openExternal
+	if open == nil {
+		open = systemOpenLink
+	}
+	if err := open(url); err != nil {
+		s.addToast("打不开："+err.Error(), notice.Danger)
 	}
 }
 
@@ -837,8 +876,19 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 
 // viewCover 是播放条左边那张封面。**点它开全屏播放器**。
 //
-// 四种状态（没有地址 / 载入中 / 就绪 / 加载失败）都由 imgcache.View 画，
+// 四种状态（没有地址 / 载入中 / 就绪 / 加载失败）都由 imgcache 画，
 // 这里不重复它的判断，也不替它决定长什么样——以后缓存换画法只改那一处。
+//
+// 🔴 **没歌时这一整块不画**（票 #222 / 报告 §5.2）：上游在没有歌的时候左边那一块
+// **整块不画**（`layout/playbar/index.tsx:28` 的 `{Boolean(playId) && <Left />}`），
+// 所以画面上**没有那个方块**——我们原来摆的是一块「封面占位」（描边框 + 图片
+// 图标），那一块在用户眼里是「有一首歌，只是封面还没拿到」。
+//
+// ⚠️ **连那 56×56 的位置一起不摆**：留着位置的话，没歌时那句「还没有打开文件」
+// 会比有歌时的歌名**更靠左**（x=16 对 x=80）——同一个位置在两档之间跳来跳去。
+//
+// ⚠️ **也不要点得动**：一个点下去会开全屏播放器的空方块，比不摆更让人以为坏了
+// （上游那一块压根不存在）。
 //
 // 🔴 它带着 `coverTransition(identity)`，而满屏上那一张带的是同一个——这就是
 // 「封面从列表行放大成全屏背景」那一段，等价于 SwiftUI 的 `matchedGeometryEffect`
@@ -849,6 +899,9 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 // 框架只认这一帧装的那个）。而框架只留一帧的记录（`rec.frame+1 < rt.frame` 就
 // 删），所以漏一帧就等于转场没了。
 func (s *Shell) viewCover(c *ui.Context, st app.State) {
+	if !st.HasTrack {
+		return
+	}
 	// 🔴 外面这一层 `Size(56,56)` 不是多余的：**`Absolute()` 是相对父容器摆的**，
 	// 而这一行的父容器是上面那个「封面 + 歌名」的 `Grow(1)` Row。不套这一层的话
 	// 悬停浮层盖住的是**整块左半边播放条**——实测那块黑从 x≈8 铺到 x≈1048，歌名
@@ -889,7 +942,14 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 		// 是 `radius="md"`（`layout/playbar/left/index.tsx:31-41`），而全局那个
 		// `radius.default: 8` 是**令牌**——用户在设置里能调它，动它整个界面跟着
 		// 变，所以只有这一处封面用 6。
-		imgcache.ViewRadius(c, s.images, st.CoverURL, coverSize, coverSize, coverRadius).
+		//
+		// ⚠️ **「压根没有封面」那一格是**一枚音符**（票 #222 / 报告 §5.3）：上游
+		// 那个 `Image` 传的是 `emptyPlaceholder={<RiMusic2Line />}`
+		// （`layout/playbar/left/index.tsx:40`），而我们原来摆的是一枚图片图标。
+		// 本地文件**永远**没有封面（见 `State.CoverURL`），所以这一档在播放条上
+		// 是常客——摆成音符才说得清「这是一首歌，只是它没有封面」。
+		imgcache.ViewPlaceholder(c, s.images, st.CoverURL, coverSize, coverSize, coverRadius,
+			icon(iconEmptyMusic)).
 			Label("当前封面").
 			Transition(coverTransition(coverIdentity(s, st)))
 
@@ -1075,11 +1135,20 @@ func (s *Shell) pickAndEnqueue() {
 // 钉住是为了读数从「0:00」变成「10:00」时**进度条不左右跳**。代价是进度条
 // 比上游短 26（上游 1200 宽下 399.6，我们 373.6）——那是**故意**的：让进度条
 // 抖一下比让它短一点更招人烦。
+//
+// ⚠️ **是「最少 48」，不是「正好 48」**（票 #222）：超一小时的歌读数是
+// `01:30:00`（八个字符，比 48 宽），钉死 48 的话它**换行**——画面上那一格变成
+// 「01:30:」加「00」两行，而 88 高的播放条里那一行本来就窄，换行之后它是
+// **整个播放条上唯一一处错版**。
+//
+// `MinWidth(48)` + `MaxLines(1)`：平时还是 48（进度条不跳），超一小时时那一格
+// 自己撑开、**不换行**（进度条短一点，那一档的例外）。
 func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 	known := st.Duration > 0
 
 	ui.Row(c).Gap(10).AlignItems(ui.Center).WidthPercent(75).Children(func() {
-		ui.Text(c, clock(st.Position)).FontSize(scale.Font(c, 14)).TextColor(c.Theme().TextMuted).Width(48)
+		ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, 14)).TextColor(c.Theme().TextMuted).
+			MinWidth(48).MaxLines(1)
 
 		sl := playbarProgressSlider(c, &s.scrub, 0, 1).Grow(1).Label("播放进度").Disabled(!known)
 		// ⚠️ 这里必须用 Pressed()，不能用 Dragging()。
@@ -1101,11 +1170,9 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 			s.scrub = float64(st.Position) / float64(st.Duration)
 		}
 
-		total := clock(st.Duration)
-		if !known {
-			total = "--:--"
-		}
-		ui.Text(c, total).FontSize(scale.Font(c, 14)).TextColor(c.Theme().TextMuted).Width(48)
+		total := clockOrDash(st.Duration)
+		ui.Text(c, total).FontSize(scale.Font(c, 14)).TextColor(c.Theme().TextMuted).
+			MinWidth(48).MaxLines(1)
 	})
 }
 
@@ -1117,11 +1184,67 @@ func textColor(t *ui.Theme, has bool) ui.Color {
 	return t.TextMuted
 }
 
-// clock 把时长写成 m:ss。
+// titleClickable 报**歌名该不该可点**（点了跳 B 站视频页）。
+//
+// 🔴 **三个条件每一个都要单测**（票 #222 的评审提出来的）：只断「本地文件的歌名
+// 点了没反应」是**钉不住的**——真实状态里本地文件**压根没有 B 站地址**，于是
+// 「点不动」可以是「没有地址」造成的，而**删掉本地那一半照样全绿**。
+// 那一半判据只有靠**人工的组合**（本地文件 + 一个地址）才验得到，所以判据本身
+// 抽成一个函数，用表驱动把四种组合各喂一遍（`TestTheTitleClickRule`）。
+//
+//	有歌 + 不是本地文件 + 有地址 → 可点
+//	有歌 + 不是本地文件 + 没地址 → 不可点（在线条目也可能没有稿件身份）
+//	有歌 + 本地文件     + 有地址 → 不可点（人工组合）
+//	没有歌               + 有地址 → 不可点（人工组合）
+//
+// ⚠️ **两个「人工组合」在真实状态里不会出现**：本地文件在 B 站上没有页面可跳
+//（所以它也没有地址），没有歌的时候更没有地址。它们在这儿是为了**把判据的
+// 每一半分开验**——真实状态里它们「顺带」也被前一个条件挡住了。
+func titleClickable(st app.State) bool {
+	return st.HasTrack && st.Source != app.SourceLocal && st.BiliURL != ""
+}
+
+// clock 把时长写成 m:ss；超过一小时写成 hh:mm:ss。
+//
+// 🔴 **超过一小时是 hh:mm:ss**（票 #222 / 报告 §4.2）：上游那个 `formatDuration`
+// （`src/common/utils/time.ts:6-16`）是
+//
+//	if seconds >= 3600 { return dur.format("hh:mm:ss", {trim: false}) }
+//	else               { return dur.format("mm:ss",     {trim: false}) }
+//
+// 我们原来只有 `m:ss`，于是**一小时以上的歌显示成「75:00」**——那不是时长，
+// 那是分钟数（而用户读不出它是分钟数）。真实场景：B 站的歌很少超一小时，但
+// 有声书和直播回放会。
+//
+// ⚠️ **小时是两位**（上游的 `trim: false`）：`01:15:00`，不是 `1:15:00`。
+//
+// ⚠️ **分钟那一位还是一位**（上游那边是两位，`00:05`）：这一条票面没要求，
+// 改它会让所有读数宽一格，而那两个读数是**各钉 48 宽**的（见 `viewProgress`）。
+// 要改就两处一起改（`history.go` 的 `playedText` 也在用同一套写法）。
 func clock(d time.Duration) string {
 	if d <= 0 {
 		return "0:00"
 	}
 	s := int(d.Seconds())
+	if s >= 3600 {
+		return fmt.Sprintf("%02d:%02d:%02d", s/3600, (s%3600)/60, s%60)
+	}
 	return fmt.Sprintf("%d:%02d", s/60, s%60)
+}
+
+// clockOrDash 是**读数那一格**：读不到就写 `-:--`。
+//
+// 🔴 **一个减号**（票 #222 / 报告 §4.2）：上游那两个读数在拿不到的时候都是
+// `-:--`（`components/music-play-progress/index.tsx:27,48`：
+// `currentTime ? formatDuration(currentTime) : "-:--"`），而我们原来总长写的是
+// `--:--`（两个减号），和上游差一个字。
+//
+// ⚠️ **位置那一格在 0 秒时也是 `-:--`**（上游的 `currentTime ?` 把 0 当成
+// 「还没有」）：刚开始放的那一秒，读数写「-:--」而不是「0:00」——它说的是
+// 「还没读到一个位置」，不是「这一秒零」。
+func clockOrDash(d time.Duration) string {
+	if d <= 0 {
+		return "-:--"
+	}
+	return clock(d)
 }

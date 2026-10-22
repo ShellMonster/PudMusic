@@ -139,6 +139,16 @@ type Shell struct {
 	// 是**整条顶栏**——用户连窗口都拖不动了，而且报错的地方不在页面上。
 	navBody func(*ui.Context)
 
+	// openExternal 是「打开一个外部网址」的那一下（把一个 B 站页面交给浏览器）。
+	//
+	// ⚠️ **默认是 `systemOpenLink`，而无头 Tester 里那一句会 panic**（`mygo.Shell`
+	// 的 `needsApp` 见到 `App.Run` 没跑过就直接 panic，见 `mygo/app.go:128`）——
+	// 所以**测试会把它换成记下地址的桩**。这一栏就是那个桩的插口。
+	//
+	// ⚠️ **别改成包级变量**：包级的可变全局会让两个窗口（主窗口 + 迷你）共享
+	// 一个桩，而这一栏是**每扇窗一份**的。
+	openExternal func(url string) error
+
 	// images 是网络封面缓存。整个窗口共用一份；迷你窗口借的是主窗口那一份
 	// （`adoptShared`），因为落盘的磁盘缓存目录只能有一个 writer/一本账，
 	// 两个实例同时写同一个目录会各算各的字节数，上限就守不住了。

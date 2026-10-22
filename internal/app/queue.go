@@ -31,6 +31,20 @@ import (
 // 一句对他毫无意义的话（「这一条不是投稿，放不了」）。
 const ItemTypeUser = "user"
 
+// 队列项的**来源**。值和 Biu 那边的字面量一样（`play-list.ts` 的 `source`：
+// "local" / "online"），别自己另起一套——这两个值会跟着队列项落进设置文件
+// （下载队列、播放历史那几处），改了名字就认不出旧记录了。
+//
+// ⚠️ **仓库里别处还有写字面量的**（`Item.Source` 的各个赋值处）。改成常量是
+// 另一件事（要一次改完所有赋值点，还要过一遍读旧记录的地方），不归这一票。
+// **新写的代码用这两个常量**。
+const (
+	// SourceLocal 是「本地文件」那一档。
+	SourceLocal = "local"
+	// SourceOnline 是「B 站在线」那一档。
+	SourceOnline = "online"
+)
+
 // Item 是队列里的一项。
 //
 // 身份按 Biu 的判重标识来（`_research/biu/src/store/play-list.ts` 的 isSame）：
@@ -102,7 +116,7 @@ type Item struct {
 // 所以本地音乐在那边也是占位，这里照它来，不拿路径凑一个假地址。
 func LocalItem(path string) Item {
 	return Item{
-		Source: "local",
+		Source: SourceLocal,
 		Type:   "local",
 		Path:   path,
 		Title:  strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),

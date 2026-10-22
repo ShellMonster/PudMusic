@@ -33,8 +33,25 @@ func View(c *ui.Context, cache *Cache, url string, w, h float32) ui.Element {
 // 所以只有**播放条上那一张封面**用 6，其余的封面照旧跟主题走（见
 // `internal/ui/playbar.go` 的 `coverRadius`）。
 func ViewRadius(c *ui.Context, cache *Cache, url string, w, h, radius float32) ui.Element {
+	return ViewPlaceholder(c, cache, url, w, h, radius, placeholderIcon)
+}
+
+// ViewPlaceholder 是 View 加上「**压根没有地址**那一格摆哪一枚图形」。
+//
+// ⚠️ **上游那是 `emptyPlaceholder` 一个 prop**（`components/image/index.tsx:31`：
+// `{emptyPlaceholder || <RiFileImageLine size="40%" …/>}`）：**播放条那一张传的是
+// `<RiMusic2Line />`**（`layout/playbar/left/index.tsx:40` 的
+// `emptyPlaceholder={<RiMusic2Line />}`），别处传的是默认的那张图片图标。
+//
+// 所以我们照它做成一个参数，而**不是**把全局那一格都换成音乐符号——那样
+// 列表行和网格里的空封面就都变成音符了，而上游那边它们是图片图标。
+//
+// ⚠️ **它只管「压根没有地址」那一档**：「拉失败」那一档画的是**图片图标**
+// （`drawCover` 的 `default` 那一支），不跟着这个参数走——那是我们比上游多
+// 分出来的一档（上游失败和空地址是同一个分支）。
+func ViewPlaceholder(c *ui.Context, cache *Cache, url string, w, h, radius float32, empty *ui.SVG) ui.Element {
 	return ui.Box(c).Size(w, h).Radius(radius).Clip().Children(func() {
-		drawCover(c, cache, url, w, h, radius)
+		drawCover(c, cache, url, w, h, radius, empty)
 	})
 }
 
@@ -48,9 +65,10 @@ func ViewRadius(c *ui.Context, cache *Cache, url string, w, h, radius float32) u
 //
 // 现在按上游 `components/image/index.tsx:22-32` 分成三样：
 //
-//	正在加载    骨架屏：一块浅色，**没有边框、没有图形、没有字**
+//	正在加载    一块浅色 + **一枚淡的音符**，**没有边框、没有字**
 //	拉失败了    描边框 + 40% 大小的图片图标，底色是 Surface 原色（较深）
-//	没有地址    同上，底色浅一档（更靠背景色）
+//	没有地址    描边框 + 一枚音符（**图形由调用方给**，上游的 emptyPlaceholder），
+//	            底色浅一档（更靠背景色）
 //
 // 那一档底色的深浅是这么定的：**「本该有而没拿到」比「本来就没有」更该显眼**
 // ——后者压根没人期待，描边框和那枚图标够了，底色再抢眼就是白抢。
@@ -61,6 +79,14 @@ func ViewRadius(c *ui.Context, cache *Cache, url string, w, h, radius float32) u
 //     连它都不画——先给一圈线再撤掉会让那一格闪一下。
 //   - **图标大小跟着封面走**（40% 边长），不是写死的像素：最小的一档封面
 //     只有 32 像素，写死 14 在那儿就占了将近一半；放大到满屏那张又小得看不见。
+//
+// 🔴 **「正在加载」那一档要画得出东西**（票 #222 / 报告 §5.3）：它原来是一块
+// **纯色**，在浅色主题下和背景几乎一样——一屏里几十张封面正在加载，用户看到的是
+// 一排空白，**分不出「还在加载」和「压根没有图」**。现在那一档压一枚**更淡的
+// 音符**：淡到「这是占位」而不是「这是一首歌」，但看得见。
+//
+// ⚠️ **它不闪**（上游那个骨架屏会闪）：框架没有现成的骨架屏动画，而闪起来在
+// 一屏几十张封面时是灾难（报告 §5.3 的建议②：保留静态）。
 //
 // ⚠️ **一个字都不写**：上游那一格也没有文字。写字的代价是它在 32 像素那一档
 // 会换行，而换行之后那行字压到封面上，看起来像叠了一层说明。要说的话在它
@@ -82,6 +108,17 @@ const placeholderIconRatio = 0.4
 // 没有边框也没有图形的方块上是看不出来的，骨架屏靠的是「不是白的」这一层。
 const skeletonMix = 0.5
 
+// loadingIconFade 是「正在加载」那一格里那枚音符往背景色那边挪的比例。
+//
+// ⚠️ **它比「没有地址」那一档的图形更淡，但看得见**：两档画的是同一枚音符，
+// 靠深浅分开（「还在加载」是临时状态，「压根没有」是长期状态——后者更该显眼
+// 一点）。
+//
+// ⚠️ **别调得太淡**：0.45 那一档在浅色主题下几乎看不见（实测出图：那枚音符是
+// 一团比背景亮不了多少的灰），于是那一格又变回「一块空白」——那正是这一档要
+// 改的那件事。0.25 是「看得见、但明显比旁边那枚淡」的那一档。
+const loadingIconFade = 0.25
+
 // emptyMix 是「压根没有地址」那一格的底色：比失败那一档**浅**一点（往背景色
 // 那边挪）。
 //
@@ -97,13 +134,25 @@ const emptyMix = 0.25
 // 那个常量 `iconCoverPlaceholder` 指的就是同一个文件。
 var placeholderIcon = iconset.Must("Media/image-line.svg")
 
+// loadingIcon 是「正在加载」那一格压着的那枚音符。
+//
+// ⚠️ **它是 `Media/music-2-line.svg`**（上游的 `RiMusic2Line`）：「正在加载一
+// 首歌的封面」这句话，用一枚音符说正好；而图片图标（`placeholderIcon`）是
+// 「拉失败了」那一档的标记——同一个图形出现在两档里，用户就分不出这两档了。
+//
+// ⚠️ 它同样从 `iconset` 取，理由和 `placeholderIcon` 一样（见上面那段）。
+var loadingIcon = iconset.Must("Media/music-2-line.svg")
+
 // drawCover 是 View 里面的那一支，分成四种情形。
-func drawCover(c *ui.Context, cache *Cache, url string, w, h, radius float32) {
+func drawCover(c *ui.Context, cache *Cache, url string, w, h, radius float32, empty *ui.SVG) {
 	// 没有地址：压根没有东西可显示，不是「加载失败」——两者画同一张（上游也是
 	// 同一个分支），但底色浅一档（`emptyMix` 往背景色那边挪），扫一眼就知道
 	// 这一格是空的而不是坏的。
+	//
+	// ⚠️ **图形由调用方给**（上游的 `emptyPlaceholder`）：播放条那一张是音符，
+	// 别处是图片图标（见 `ViewPlaceholder`）。
 	if url == "" {
-		drawPlaceholder(c, w, h, emptyMix, radius)
+		drawPlaceholder(c, w, h, emptyMix, radius, empty)
 		return
 	}
 
@@ -113,25 +162,41 @@ func drawCover(c *ui.Context, cache *Cache, url string, w, h, radius float32) {
 	case st.Loading:
 		drawSkeleton(c, w, h)
 	default:
-		drawPlaceholder(c, w, h, 0, radius)
+		drawPlaceholder(c, w, h, 0, radius, placeholderIcon)
 	}
 }
 
-// drawSkeleton 画「正在加载」那一格：一块浅色，**没有边框**。
+// drawSkeleton 画「正在加载」那一格：一块浅色 + **一枚更淡的音符**，**没有边框**。
 //
-// 边框和图标都留给「拿不到」那一支——见上面那段三态的说明。
+// 🔴 **它要画得出东西**（票 #222 / 报告 §5.3）：原来是一块纯色，在浅色主题下
+// 和背景几乎一样——一屏里几十张封面正在加载，用户看到的是一排空白，**分不出
+// 「还在加载」和「压根没有图」**。
+//
+// ⚠️ **那枚音符比「没有地址」那一档的更淡**：淡到「这是占位」而不是「这是一
+// 首歌」，但看得见。两档靠**深浅**分开（边框是「拿不到」的标记，骨架屏连它都
+// 不画——见上面那段三态的说明）。
+//
+// ⚠️ **它不闪**：上游那个骨架屏会闪，而框架没有现成的骨架屏动画（见上面那段）。
 func drawSkeleton(c *ui.Context, w, h float32) {
 	t := c.Theme()
-	ui.Column(c).Size(w, h).Background(t.Surface.Mix(t.Background, skeletonMix))
+	size := placeholderIconRatio * min32(w, h)
+	ui.Column(c).Size(w, h).Background(t.Surface.Mix(t.Background, skeletonMix)).
+		Center().Children(func() {
+		// 再往背景色那边挪一档：它说的是「还没到」，不是「在这儿」。
+		ui.Icon(c, loadingIcon).FontSize(size).
+			TextColor(t.TextMuted.Mix(t.Background, loadingIconFade))
+	})
 }
 
-// drawPlaceholder 画「拿不到 / 没有」那一格：描边框 + 一枚按封面缩放的图片图标。
+// drawPlaceholder 画「拿不到 / 没有」那一格：描边框 + 一枚按封面缩放的图形。
 //
 // mix 是底色从 `Surface` 往 `Background` 挪的比例（0 = 原色）。
 //
+// icon 是那一格中间那枚图形（上游的 `emptyPlaceholder`，或者默认的图片图标）。
+//
 // ⚠️ **圆角跟着外面那一层走**（`ViewRadius` 给的那一档）：外层已经裁过一次，
 // 这里再来一圈描边，那一圈描边才落在圆角上而不是先被裁成直角。
-func drawPlaceholder(c *ui.Context, w, h, mix, radius float32) {
+func drawPlaceholder(c *ui.Context, w, h, mix, radius float32, icon *ui.SVG) {
 	t := c.Theme()
 	size := placeholderIconRatio * min32(w, h)
 	ui.Column(c).Size(w, h).Background(t.Surface.Mix(t.Background, mix)).
@@ -143,7 +208,7 @@ func drawPlaceholder(c *ui.Context, w, h, mix, radius float32) {
 		Radius(radius).Center().Children(func() {
 		// 次要色：它在说「这儿没有图」，不是「这里有话要说」——和空状态
 		// 那一格里的插画同一档。
-		ui.Icon(c, placeholderIcon).FontSize(size).TextColor(t.TextMuted)
+		ui.Icon(c, icon).FontSize(size).TextColor(t.TextMuted)
 	})
 }
 
