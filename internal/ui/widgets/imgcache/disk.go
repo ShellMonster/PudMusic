@@ -29,6 +29,10 @@ package imgcache
 // 上（磁盘坏了、外部工具写坏），解码会失败，调用方会把这一份删掉重新下载
 // （见 `decodeWorker`），**不会把坏图解出来糊在界面上**。
 //
+// ⚠️ **删不掉的时候不能「读→失败→再读」**：那是一个没有出口的循环（一个解码
+// worker 100% 占着 CPU，那张图永远停在「加载中」，网络一次都没被试过）。所以
+// 盘上那份一坏，那一张在本次运行内就**不再从盘上读**（`entry.skipDisk`）。
+//
 // # 线程模型
 //
 // 读盘由调用方的后台 goroutine 调（`Cache.fetch`），写盘走本结构自己的
@@ -207,15 +211,23 @@ func (d *diskCache) open(name string) ([]byte, bool) {
 }
 
 // remove 删掉一份缓存并把它从账本上拿掉。解码发现盘上那份坏了的时候走这里。
-func (d *diskCache) remove(name string) {
+//
+// ⚠️ **删不掉要说话**：目录只读、文件被别的进程占着，都会让 `os.Remove` 失败。
+// 那种情况下文件还在（还占着地方），所以它**留在账上**，而调用方必须知道这次
+// 没删掉——「以为删掉了」会让调用方走进一个没有出口的循环（见 `decodeWorker`
+// 里那一段）。
+func (d *diskCache) remove(name string) error {
 	path, ok := d.filePath(name)
 	if !ok {
-		return
+		return nil
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
 	}
 	d.mu.Lock()
 	d.forgetLocked(name)
 	d.mu.Unlock()
-	_ = os.Remove(path)
+	return nil
 }
 
 // forgetLocked 把 name 从账本里摘掉（调用方持锁）。
@@ -361,7 +373,12 @@ func (d *diskCache) sweep() {
 		switch {
 		case isDiskTempName(name):
 			// 上次写到一半留下的：最终文件名下没有它，留着只会占地方。
-			_ = os.Remove(filepath.Join(d.dir, name))
+			//
+			// ⚠️ 路径也走 `filePath`：删除只发生在缓存目录内这一条，不许有第二
+			// 个拼接点（名字来自 `os.ReadDir`，永远是基名，但规矩得是规矩）。
+			if path, ok := d.filePath(name); ok {
+				_ = os.Remove(path)
+			}
 		case isDiskName(name):
 			info, err := ent.Info()
 			if err != nil || !info.Mode().IsRegular() {

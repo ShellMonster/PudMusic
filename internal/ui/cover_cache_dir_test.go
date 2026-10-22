@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"bytes"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -81,4 +84,53 @@ func TestTheMiniWindowSharesTheMainWindowsCoverCache(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+}
+
+// TestTheMiniWindowKeepsItsCoversAfterTheMainWindowIsClosed 钉两扇窗的寿命
+// 解耦：迷你借的是主窗口那份封面缓存，而**主窗口先被关掉**时迷你那份必须还能
+// 用。
+//
+// 没有引用计数的话，主窗口那个外壳一收尾就把这份缓存关了，迷你之后每要一张
+// 图都是 `ErrClosed` 永久失败态——界面上只是「图不出来」，没有一句报错。
+func TestTheMiniWindowKeepsItsCoversAfterTheMainWindowIsClosed(t *testing.T) {
+	body := pngBytesForUI(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	a := app.New()
+	t.Cleanup(a.Close)
+	main := newTestShell(t, onApp(a)).s
+	mini := main.newMiniShell()
+	t.Cleanup(mini.releaseMini)
+
+	main.Close() // 主窗口那个外壳收尾：生产里窗口真被销毁时走的就是它
+
+	url := srv.URL + "/after-main-closed.png"
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s := mini.images.Get(url)
+		if s.Err == imgcache.ErrClosed {
+			t.Fatal("主窗口收尾把迷你那份封面缓存一起关了：迷你之后每张图都是「已关闭」")
+		}
+		if s.Ready() {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("主窗口收尾之后迷你收不到图：%v", s.Err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// pngBytesForUI 编一张能解码的小图（界面层这边没有 imgcache 的那个 helper）。
+func pngBytesForUI(t *testing.T) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }

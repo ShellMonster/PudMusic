@@ -248,6 +248,11 @@ func (s *Shell) adoptShared(main *Shell) {
 		}
 		s.images.Close()
 		s.images = main.images
+		// ⚠️ **借之前必须 Retain**：封面缓存是引用计数的，借的那一份活得至少
+		// 和借它的人一样久。不 Retain 的话，主窗口那个外壳先收尾
+		// （`Shell.Close` → 放开引用）就会把这份一起关掉——迷你之后每要一张图
+		// 都是 `ErrClosed` 永久失败态，界面上只是「图不出来」。
+		main.images.Retain()
 		s.imagesWakeRemove = s.images.AddWake(s.wake.invalidate)
 		s.shared = true
 	}

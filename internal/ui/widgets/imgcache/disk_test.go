@@ -301,6 +301,90 @@ func TestRestartServesFromDiskWithNoRequest(t *testing.T) {
 	}
 }
 
+// TestACorruptDiskEntryThatCannotBeDeletedIsNotReadForever 验「盘上那份坏图
+// **删不掉**」时不会走进死循环。
+//
+// 坏法是这样的：解码发现盘上那份解不开 → 删掉它 → 回去下一次真的。可是目录
+// 只读的时候**删不掉**：于是「读 → 解码失败 → 删（失败）→ 再读」又绕回原地，
+// 一个解码 worker 100% 占着 CPU，那张图永远停在「加载中」（既不出图也不报
+// 失败），而网络一次都没被试过。
+//
+// 修法：盘上那份一坏，这一张在本次运行内就**不再从盘上读**，下一次直接走网络。
+func TestACorruptDiskEntryThatCannotBeDeletedIsNotReadForever(t *testing.T) {
+	body := pngBytes(t, 16, 16)
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	url := srv.URL + "/undeletable.png"
+	name := diskNameFor(url)
+	// 一份解不开的字节（半截图）。
+	if err := os.WriteFile(diskPath(dir, name), []byte("这不是图"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 目录只读：删文件要目录的写权限。
+	probe := diskPath(dir, "probe")
+	if err := os.WriteFile(probe, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	// 收尾要能删掉这个目录。
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	if err := os.Remove(probe); err == nil {
+		t.Skip("这个环境里目录只读也删得掉文件（多半是 root）：测不出「删不掉」这一支")
+	}
+
+	c := New(Options{Dir: dir})
+	t.Cleanup(c.Close)
+
+	var reads atomic.Int32
+	c.disk.readFile = func(path string) ([]byte, error) {
+		reads.Add(1)
+		return os.ReadFile(path)
+	}
+
+	// 网络那一份必须被试过，而且图要出来。
+	waitState(t, c, url, 5*time.Second, loaded)
+	if n := hits.Load(); n != 1 {
+		t.Errorf("盘上那份坏了之后应该去网络要一次真的，实际打了图床 %d 次", n)
+	}
+
+	// 再等一会儿：盘上那份只能被读一次。再读就是那个没有出口的循环。
+	time.Sleep(300 * time.Millisecond)
+	if n := reads.Load(); n > 2 {
+		t.Errorf("盘上那份坏文件被读了 %d 次：这是没有出口的循环（一个解码 worker "+
+			"100%% 占着 CPU，那张图永远停在加载中，网络一次都没被试过）", n)
+	}
+}
+
+// TestTheCacheIsClosedOnlyAfterTheLastUserReleasesIt 验封面缓存的引用计数：
+// 有人还在用的时候不能关。
+//
+// 迷你窗口借的是主窗口那份封面缓存（一个磁盘缓存目录只能有一本账），而这两扇
+// 窗的寿命不一样：主窗口那个外壳先收尾的时候，迷你那份必须还能用。
+func TestTheCacheIsClosedOnlyAfterTheLastUserReleasesIt(t *testing.T) {
+	c := New(Options{})
+	t.Cleanup(c.Close)
+
+	c.Retain() // 多一个使用者（迷你借主窗口那份时做的事）
+	c.Close()  // 放开自己这一份
+
+	if s := c.Get("https://example.invalid/still-alive.png"); s.Err == ErrClosed {
+		t.Errorf("还有人用着就把缓存关了：%v", s.Err)
+	}
+
+	c.Close() // 最后一份放开
+	if s := c.Get("https://example.invalid/closed.png"); s.Err != ErrClosed {
+		t.Errorf("最后一份放开之后应该关掉，拿到 %+v", s)
+	}
+}
+
 // TestDiskReadsDoNotBlockTheCaller 验读盘在后台：把磁盘读卡住，`Get`（渲染帧
 // 每张图都调它）必须照样立刻返回占位态。
 func TestDiskReadsDoNotBlockTheCaller(t *testing.T) {

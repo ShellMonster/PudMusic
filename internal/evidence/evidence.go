@@ -850,6 +850,9 @@ var Items = []Item{
 			"TestDiskWritesDoNotBlockTheCaller",
 			"TestCoverCacheDirIsUnderTheAppsCachePath",
 			"TestTheMiniWindowSharesTheMainWindowsCoverCache",
+			"TestACorruptDiskEntryThatCannotBeDeletedIsNotReadForever",
+			"TestTheCacheIsClosedOnlyAfterTheLastUserReleasesIt",
+			"TestTheMiniWindowKeepsItsCoversAfterTheMainWindowIsClosed",
 		},
 	},
 	{

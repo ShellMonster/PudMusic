@@ -143,6 +143,12 @@ type Shell struct {
 	// 退迷你之后不摘，那个回调列表每进一次迷你就多一条。
 	imagesWakeRemove func()
 
+	// imagesReleased 记着这一扇窗有没有放开过封面缓存那一份使用权。
+	//
+	// ⚠️ 必须记：`closePerWindow` 可以重复调（关窗、退迷你、测试收尾各一次），
+	// 而封面缓存是**引用计数**的——多放开一次会把还活着的那一份一起带走。
+	imagesReleased bool
+
 	// avatar 是顶栏右上角那一格的状态（见 navbar_avatar.go）。
 	//
 	// 建在 Shell 上而不是每帧新建：那一格跨帧要记「已经问过了没有」，每帧
@@ -678,13 +684,22 @@ func (s *Shell) closePerWindow() {
 	}
 
 	// 封面缓存：先摘掉这一扇窗的唤醒登记（借来的那一份活得比这一扇窗久），
-	// 再关掉**自己开的**那一份——关掉之后在途的下载和解码 worker 都会停。
+	// 再放开自己那一份使用权。
 	//
-	// ⚠️ **借来的不能关**（见下面 `shared`）：迷你窗口关掉时把主窗口那份关了，
-	// 主窗口后面所有新封面都会永远停在占位。
+	// ⚠️ **放开的不是「关掉」**：迷你窗口借的是主窗口那份封面缓存（一个磁盘
+	// 缓存目录只能有一本账），引用计数到 0 才真的关。所以主窗口那个外壳先收
+	// 尾时迷你那份照样能用——不然迷你之后每要一张图都是 `ErrClosed` 永久失败
+	// 态，界面上的症状只是「图不出来」。
+	//
+	// `imagesReleased` 保证**只放开一次**：`closePerWindow` 可以重复调（关窗、
+	// 退迷你、测试收尾都会调它），多放开一次会把别人那份一起带走。
 	if s.imagesWakeRemove != nil {
 		s.imagesWakeRemove()
 		s.imagesWakeRemove = nil
+	}
+	if !s.imagesReleased {
+		s.imagesReleased = true
+		s.images.Close()
 	}
 
 	// 🔴 摘掉「本地库变了」这一条（`New` 里登记的）。不摘的话「进迷你 / 退出迷你」
@@ -703,7 +718,6 @@ func (s *Shell) closePerWindow() {
 	if s.shared {
 		return
 	}
-	s.images.Close()
 	_ = s.hist.Close()
 	_ = s.keys.Close()
 }
