@@ -231,8 +231,9 @@ structural:
 - **逐像素采样**：颜色、描边、底色、阴影。
 - **假时钟推钟**：动效的中间态用 `Advance` + `FramePending`，**不要数帧、
   不要用固定毫秒**（框架的钟站着不动，数帧会静默失效）。
-- **负载**：load 8 以下才作数。改了界面行为的票要**加压复验**，但**只跑自己改的
-  那几处**（`-run` 过滤），例如
+- **默认验收不跑 `internal/ui`**：`go build ./... && go vet ./... && go test $(go list ./... | grep -v '/internal/ui$')`。
+  界面行为测试**只在动了界面行为的票上跑，而且只跑自己改的那几处**
+  （`-run` 过滤），例如
   `GOGC=10 go test ./internal/ui/ -count=3 -timeout 5m -run 'TestPlayBar|TestVolume'`。
   ⚠️ **不要整包跑**——整包一轮 62~298 秒，×3 就是十几分钟一票，而且压出来的
   飘红每次都是同样那几条既有测试，跟当票无关。细则见 AGENTS.md §2。
