@@ -959,6 +959,14 @@ func collectionShellWithTitle(t *testing.T, title string, extra ...shellOpt) (*f
 	waitFrames(t, tt, "容器元信息加载完", func() bool {
 		return s.collection != nil && s.app.Collection(s.collection.ref).Loaded
 	})
+	// ⚠️ **还要等那个名字真的画在画面上**：上面那条等的是**缓存**（`Loaded`），
+	// 而缓存变真和下一帧画出来之间差一帧——满载的机器上那一帧足够长，于是
+	// 接着去 `Find` 找的是**上一帧**的画面（那时候头图区还写着占位的
+	// 「收藏夹」）。这里等的是画面本身，所以差一帧也不怕。
+	waitFrames(t, tt, "收藏夹的名字画出来", func() bool {
+		_, ok := tt.Find(title)
+		return ok
+	})
 	return b, s, tt
 }
 
