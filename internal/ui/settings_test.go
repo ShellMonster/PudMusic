@@ -25,10 +25,14 @@ import (
 //
 // ⚠️ 取的是页面区域里**空着**的那一块，不是页面中间。页面中间是空状态那两行
 // 文字（y≈265~315，居中），而文字是逐帧排的：采到它上面，这一帧读到的是
-// 抗锯齿的灰，下一帧可能读到白，同一条测试时而红时而绿。y=430 在那块下面、
-// 播放条上面，哪一页都不会画到。
+// 抗锯齿的灰，下一帧可能读到白，同一条测试时而红时而绿。
+//
+// ⚠️ **x 贴在最左边的页边距里，不是内容区中间**：票 #166 把设置页的行标题和
+// 说明放大、行距拉松之后，原来的 (700,430) 正好落在「主题」那一排按钮上——
+// 读到的是按钮的浅灰底（{244 244 245}），不是窗口底色。x=214 落在页边距
+// （侧栏 200 到内容左缘 216~228 之间）里，哪一页都不会在那里画东西。
 const (
-	sampleX = 700
+	sampleX = 214
 	sampleY = 430
 )
 
@@ -122,7 +126,7 @@ func TestShellPaintsTheThemeThatTheSettingsSay(t *testing.T) {
 // 画对了，第二遍就被悄悄打回系统色——不报错、不崩溃、屏幕上一闪而过。
 func TestShellKeepsTheThemeAfterClickingAround(t *testing.T) {
 	// ⚠️ **登录过的**：它要点侧栏的「稍后再看」，而那三个入口未登录时不摆
-	// （`Route.NeedsLogin`，见 sidebar.go）。
+	// （`Route.HideInMenuWhenLoggedOut`，见 sidebar.go）。
 	tt, _, a, _ := shellWithSettings(t, app.ThemeModeLight, true, loggedInWith("7"))
 	if BuildTheme(a.SettingsSnapshot(), true).Dark {
 		t.Fatal("起点就不对：设置是浅色，却拼出了深色主题")

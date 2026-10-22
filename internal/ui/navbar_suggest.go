@@ -39,6 +39,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -154,7 +155,9 @@ func (s *Shell) viewSuggestTerms(c *ui.Context) {
 	}
 	ui.Column(c).Key(suggestTermsKey).FillWidth().Gap(2).Children(func() {
 		// 标题和「搜索历史」那一句同一个字号和粗细：两栏是平级的，谁也不比谁大。
-		ui.Text(c, suggestTermsHeading).FontSize(13).Bold().Grow(1)
+		// 两处都是 14/400（上游历史标题是 `text-sm`；联想词这一栏没有标题，
+		// 这一句是我们自己的，跟着它走）。
+		ui.Text(c, suggestTermsHeading).FontSize(scale.Font(c, 14)).Grow(1)
 		for _, term := range items {
 			s.viewSuggestTerm(c, term)
 		}
@@ -166,6 +169,11 @@ func (s *Shell) viewSuggestTerms(c *ui.Context) {
 // ⚠️ **不能是 chip**：chip 是历史那一档的形状，而两栏长得一样的话「哪个是我搜过
 // 的、哪个是 B 站给的」这件事就没有答案了（规格第二条）。所以这里是**一整行**、
 // 左对齐、没有边框、悬停才显出底色——和那排带边框、带 × 的 chip 一眼能分开。
+//
+// ⚠️ **命中的那几个字染成上游那个粉**（票 #138 的顺带那一条）：上游把 B 站回包里
+// 命中的部分染成粉色（回包里的 `name` 把命中的字包在 `<em>` 里，上游渲染成粉
+// 色），而我们取的是干净的 `term`——**十行全是同一种灰，用户得逐行读完才知道
+// 哪条对得上自己敲的那几个字**。
 //
 // Label 不只是给测试用的：读屏软件念出来的是这一条词，而正文（Children 里那个
 // Text）不念。
@@ -180,7 +188,21 @@ func (s *Shell) viewSuggestTerm(c *ui.Context, term string) {
 		row = row.Background(t.SurfaceHover)
 	}
 	row.Children(func() {
-		ui.Text(c, term).FontSize(13).Grow(1).MaxLines(1).Ellipsis("…")
+		// ⚠️ **三段：前缀 / 命中段 / 后缀**。命中段是**自己算的**（拿用户已经
+		// 敲的词在 `term` 里找）——B 站回包里的 `name` 带 `<em>` 标签，而**服务层
+		// 取的是干净的 `term`**（那个判断是对的：拿带标签的 `name` 去搜，等于把
+		// `<em>` 当关键词发出去，真会搜错）。
+		pre, hit, post := splitSuggestion(s.searchKeyword, term)
+		if hit == "" {
+			// 找不到命中段（用户敲的词这一条里没有）：整行一个颜色，和原来一样。
+			ui.Text(c, term).FontSize(scale.Font(c, 13)).Grow(1).MaxLines(1).Ellipsis("…")
+			return
+		}
+		ui.Row(c).Grow(1).Children(func() {
+			ui.Text(c, pre).FontSize(scale.Font(c, 13)).Shrink(0)
+			ui.Text(c, hit).FontSize(scale.Font(c, 13)).Shrink(0).TextColor(suggestHitColor(t))
+			ui.Text(c, post).FontSize(scale.Font(c, 13)).Grow(1).MaxLines(1).Ellipsis("…")
+		})
 	})
 
 	// ⚠️ **先把词填回框里**（和历史那一条同一件事，见 `viewHistoryChip` 的注释）：
@@ -190,4 +212,59 @@ func (s *Shell) viewSuggestTerm(c *ui.Context, term string) {
 		s.searchKeyword = term
 		s.submitSearch(term)
 	}
+}
+
+// splitSuggestion 把联想词那一行拆成「前缀 / 命中段 / 后缀」。
+//
+// ⚠️ **命中段是自己算的**：B 站回包里的 `name` 把命中的字包在 `<em>` 里，而
+// 我们取的是干净的 `term`——所以命中段是拿**用户已经敲的词**在 `term` 里找出来
+// 的（服务层那个判断是对的：拿带标签的 `name` 去搜，等于把 `<em>` 当关键词发
+// 出去，真会搜错）。
+//
+// 找不到就返回「前缀空、命中段空、后缀是整条」——那一行就整行一个颜色，和原来
+// 一样。
+//
+// ⚠️ **按 rune 找，不按字节**：大小写折叠会改字节长度（少见的 Unicode 字母），
+// 按字节切会切在字符中间，屏幕上就是半个字。
+func splitSuggestion(typed, term string) (pre, hit, post string) {
+	typed = strings.TrimSpace(typed)
+	if typed == "" || term == "" {
+		return "", "", term
+	}
+	rs := []rune(term)
+	qs := []rune(typed)
+	// 原样找一遍，找不到再按小写找一遍（英文的大小写：用户敲 "iphone"，
+	// B 站回 "iPhone"）。
+	for _, lower := range []bool{false, true} {
+		hay, needle := rs, qs
+		if lower {
+			hay = []rune(strings.ToLower(term))
+			needle = []rune(strings.ToLower(typed))
+		}
+		for i := 0; i+len(needle) <= len(hay); i++ {
+			if string(hay[i:i+len(needle)]) != string(needle) {
+				continue
+			}
+			return string(rs[:i]), string(rs[i : i+len(needle)]), string(rs[i+len(needle):])
+		}
+	}
+	return "", "", term
+}
+
+// suggestHitColor 是联想词那一行里「命中的那几个字」的颜色。
+//
+// ⚠️ **上游那个粉在浅色底上不够**：#F54180 压在白底上是 3.5:1（AA 的门槛是
+// 4.5:1），而这一行是 13px 的正文。所以**浅色那一档压暗一档**（5.2:1），深色
+// 那一档用上游那个数（压在深色底上是 5.0:1）。
+//
+// ⚠️ **别拿主色当这一段的字色**：那个亮绿压在白底上不到 2:1，整行读不出来
+// （理由在 `flatbutton.go` 的 `flatCurrent` 那一段，票 #139 处理那一族）。
+//
+// 出处：上游 `src/app.css` 的 `.suggest_high_light,.keyword{color:#F54180}`。
+func suggestHitColor(t *ui.Theme) ui.Color {
+	pink := ui.Color{R: 0xF5, G: 0x41, B: 0x80, A: 255}
+	if t.Dark {
+		return pink
+	}
+	return pink.Mix(ui.Color{A: 255}, 0.2)
 }

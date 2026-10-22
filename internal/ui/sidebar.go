@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -90,10 +91,12 @@ func (s *Shell) viewSide(c *ui.Context) {
 				s.viewSideBrand(c, st)
 				// 菜单和收藏夹一起滚。Biu 也是这么分的（ScrollContainer 包住
 				// DefaultMenus + Collection），侧栏窄的时候不至于把折叠按钮顶出去。
-				ui.Scroll(c).Key("side-scroll").Grow(1).FillWidth().Children(func() {
+				sideScroll := ui.Scroll(c).Key("side-scroll").Grow(1).FillWidth()
+				sideScroll.Children(func() {
 					s.viewSideMenu(c, st)
 					s.viewFavorites(c, st)
 				})
+				s.trackScrollbar(sideScroll)
 				s.viewSideCollapse(c, st)
 				// 完整应用名在折叠按钮下面那一条。见 `viewSideFoot`。
 				s.viewSideFoot(c, st)
@@ -221,11 +224,11 @@ func (s *Shell) commitSideWidth() {
 func (s *Shell) viewSideBrand(c *ui.Context, st app.Settings) {
 	if st.SideMenuCollapsed {
 		// 折叠态只 72 宽：标记大一号、贴左边，紧挨着下面那一列单字。
-		ui.Text(c, "B").FontSize(20).Bold().TextColor(c.Theme().Text).
+		ui.Text(c, "B").FontSize(scale.Font(c, 20)).Bold().TextColor(c.Theme().Text).
 			Padding(6, 0, 12, 0)
 		return
 	}
-	ui.Text(c, "B").FontSize(18).Bold().Padding(8, 8, 12, 8)
+	ui.Text(c, "B").FontSize(scale.Font(c, 18)).Bold().Padding(8, 8, 12, 8)
 }
 
 // viewSideFoot 是折叠按钮**下面**那一行完整应用名。
@@ -240,7 +243,7 @@ func (s *Shell) viewSideFoot(c *ui.Context, st app.Settings) {
 	if st.SideMenuCollapsed {
 		return
 	}
-	ui.Text(c, "BiuGo").FontSize(11).
+	ui.Text(c, "BiuGo").FontSize(scale.Font(c, 11)).
 		TextColor(c.Theme().TextMuted).Padding(0, 8, 4, 8)
 }
 
@@ -287,7 +290,7 @@ func (s *Shell) viewSideCollapse(c *ui.Context, st app.Settings) {
 //
 // ## 未登录时那三个入口不摆，摆一句「登录后可见」
 //
-// 「我的关注」「稍后再看」「历史记录」的内容全都要登录才有（`Route.NeedsLogin`）。
+// 「我的关注」「稍后再看」「历史记录」的内容全都要登录才有（`Route.HideInMenuWhenLoggedOut`）。
 // 未登录时照样摆着它们，点了进去是空的——用户会以为是应用坏了，而实际上他只是
 // 没登录。所以这里**不摆**，改在原位摆一句提示（见 viewLoggedOutHint）。
 //
@@ -310,7 +313,7 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 				continue
 			}
 			// 未登录时那几项不摆（理由见这一段的抬头）。
-			if rt.NeedsLogin && !loggedIn {
+			if rt.HideInMenuWhenLoggedOut && !loggedIn {
 				hidden++
 				continue
 			}
@@ -321,10 +324,29 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 			// 顺序是 Biu 的 SD-04 定的，所以行 key 用路由而不是序号：
 			// 以后菜单项按 hiddenMenuKeys 过滤、顺序会变，序号就不再稳定了。
 			//
-			// ⚠️ 别给 Button 再补一个 `Label(rt.Title)`：可见的字就是名字，
+			// ⚠️ **展开态别给 Button 补 `Label(rt.Title)`**：可见的字就是名字，
 			// 补上去会多出一个同样文字的无障碍节点，画面上出现两份。
 			ui.Column(c).Key("side-item:" + rt.Match).Children(func() {
 				item := flatButton(c, label).Grow(1)
+				// 折叠态只有一个字，鼠标停在上面要说清它是什么（见 sideItemTip）。
+				//
+				// ⚠️ **只在折叠态给**：展开时名字本来就画在那儿，再来一句提示
+				// 是把用户已经读到的东西又说一遍。
+				//
+				// 🔴 **折叠态还必须给一个无障碍的名字**：可见的字只有「下」「本」
+				// 「推」「设」一个字，读屏软件念出来就是那一个字——这一格等于
+				// 完全没有名字。`Label` 补上的是**名字**（`Element.Label`），
+				// **画面上不多画一个字**（折叠态画面上本来就没有那个全名）。
+				//
+				// `Description` 也补上：框架的 `Element.Tooltip` 会写它
+				// （`mygo/ui/tooltip.go` 的 `if e.description == "" {…}`），
+				// 而 `ui.TooltipBase` 不写——而框架的文档明说「assistive
+				// technology sees it as a tooltip, **which it does not read**」，
+				// 所以提示里那句话得由名字 / 描述带到读屏软件那儿。
+				if collapsed {
+					item = item.Label(rt.Title).Description(rt.Title)
+					s.sideItemTip(c, item, rt.Title)
+				}
 				// 选中那一层照上游 HeroUI 的 `variant="flat"` + `color="primary"`
 				// （`components/menu/menu-item.tsx:83-84`）：主色很淡的一层底 +
 				// 主色的字。**不是实心主色**——原来那一版 `Background(t.Accent)`
@@ -343,6 +365,25 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 			s.viewLoggedOutHint(c, hidden)
 		}
 	})
+}
+
+// sideItemTip 是折叠态侧栏那一项的悬停提示。
+//
+// # 位置照上游：贴在那一项的**右边**
+//
+// 上游折叠态那一项外面套的是 `<Tooltip content={title} placement="right">`
+// （`biu/src/components/menu/menu-item.tsx:78`）。框架自带的提示摆在**上面**，
+// 而折叠态的侧栏贴着窗口左边——摆在上面的话提示会盖住上面那几项，摆在左边
+// 又被窗口边钳住。所以走 `tipAt` 的自定义位置那一支。
+//
+// # 时延也是上游那一档
+//
+// 那一处还写了 `closeDelay={0}`：指针离开这一项，提示立刻收。菜单是用户顺着
+// 一列扫的，晚 500ms 收会压在下一项上。
+func (s *Shell) sideItemTip(c *ui.Context, anchor ui.Element, text string) {
+	s.tipAt(c, anchor, text, tipMenu, func(panel, anchor ui.Element, t *ui.Theme) {
+		panel.AttachTo(anchor, ui.AnchorRight, ui.AnchorLeft).MarginStart(6)
+	}, true)
 }
 
 // loggedOutHint 是那一句话的正文。
@@ -368,7 +409,7 @@ func loggedOutHint(hidden int) string {
 // 以为侧栏坏了。
 func (s *Shell) viewLoggedOutHint(c *ui.Context, hidden int) {
 	ui.Column(c).Key("side-logged-out").Children(func() {
-		ui.Text(c, loggedOutHint(hidden)).FontSize(12).Wrap().
+		ui.Text(c, loggedOutHint(hidden)).FontSize(scale.Font(c, 12)).Wrap().
 			TextColor(c.Theme().TextMuted).Padding(4, 8)
 	})
 }

@@ -47,9 +47,12 @@ func (s *Shell) fetchVideos(ctx context.Context, mid int64, page int) (list.Page
 			Title:    v.Title,
 			Cover:    v.Cover,
 			Duration: parseDurationText(v.Duration),
-			// 播放量：网格卡片封面底部那一条渐变上画的是它（`Music.View`）。
+			// 播放量：列表那一列和网格卡片封面底部那一条渐变上画的都是它
+			//（`Music.View`）。
 			View: v.Play,
-			Item: spaceVideoItem(v, mid),
+			// 投稿时间：这一页的接口把它放在 `created` 里（见 `UpVideo.Created`）。
+			PubTime: v.Created,
+			Item:    spaceVideoItem(v, mid),
 		})
 	}
 	return list.Page{Songs: songs, HasMore: pg.HasMore}, nil

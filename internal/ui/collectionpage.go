@@ -31,11 +31,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -174,6 +176,25 @@ type collectionPage struct {
 	sort     bili.CollectionSort
 	listSort bili.CollectionSort
 
+	// draft 是搜索框里正在敲的字，keyword 是**已经在筛**的那个词。
+	//
+	// 分成两个是因为即时模式每一帧都重画：直接拿框里的字去筛，用户每敲一个
+	// 字就重拉一次（防抖解决的是频率，解决不了「框里的字和生效的词是同一个」
+	// 这个混淆）。理由和 `libraryPage` 的那一份一字不差（见 librarypage.go）。
+	draft, keyword string
+
+	// seenDraft 是上一帧框里的字，pendingSince 是「敲下去、还没发出去」的起点。
+	//
+	// 零值 = 没有待发的搜索。防抖的钟靠 `seenDraft` 重打：用户每敲一个字都要
+	// 重新开始等那 500ms（上游 `useDebounceFn` 也就是这么做的）。
+	seenDraft    string
+	pendingSince time.Time
+
+	// submitted 是这一帧搜索框有没有被回车提交。**它必须记在状态上**而不是当成
+	// 一个返回值传下去：画完之后还要拿它判要不要换查询，而那一段和画输入框
+	// 不在同一个闭包里。
+	submitted bool
+
 	// media 是行身份 → 那一条完整信息。见 mediaIndex。
 	media mediaIndex
 
@@ -210,14 +231,30 @@ func (s *Shell) newCollectionPage(ref app.CollectionRef) *collectionPage {
 // 线程的字段：`-race` 直接报，而真机上的表现是「偶尔选了『最多播放』却拉回
 // 『最近收藏』的内容」。
 //
+// **搜索词也是这么拷的**（同一个道理）：词一换，整个列表换掉，而列表是拿建它
+// 当时那个词建的。
+//
 // 换排序时整个换掉列表而不是换 fetcher，同一个道理（换 fetcher 还是闭包读
 // 字段）。
 func (s *Shell) newCollectionList(p *collectionPage) *list.PagedList {
 	acts := s.collectionActions()
-	ref, sort, media := p.ref, p.sort, &p.media
-	return list.NewPaged(s.images, acts, func(ctx context.Context, pageNo int) (list.Page, error) {
-		return s.fetchCollectionPage(ctx, ref, sort, pageNo, media)
+	ref, sort, keyword, media := p.ref, p.sort, p.keyword, &p.media
+	l := list.NewPaged(s.images, acts, func(ctx context.Context, pageNo int) (list.Page, error) {
+		return s.fetchCollectionPage(ctx, ref, sort, keyword, pageNo, media)
 	})
+	// ⚠️ **「正在加载」那一格由外面递进去**（票 #138）：分页列表自己那一句是
+	// 13px 淡灰缩在列表左上角，而这一页的「没有收藏夹」是居中 15pt 两行。
+	l.SetEmptyView(loadingCell("正在加载…"))
+	// 播放量 + 时间两列：这一页两个数都有（`bili.Media.View` / `FavTime` /
+	// `PubTime`）。时间那一列的**表头字和取哪个时间随容器类型变**——两处走
+	// `collectionTimeTitle` / `collectionTimeOf` 这一对，别只改一边。
+	l.SetColumns(list.Columns{
+		PlayCount:    true,
+		PubTime:      true,
+		PubTimeTitle: collectionTimeTitle(p.ref.Type),
+		Now:          s.now,
+	})
+	return l
 }
 
 // collectionActions 是这一页列表的操作，比通用那一份多换了「下载」那一项。
@@ -240,8 +277,11 @@ func (s *Shell) collectionActions() list.Actions {
 //
 // ⚠️ **跑在后台 goroutine 里**（`list.PagedList` 的 Fetcher），所以它不许碰
 // 界面状态：这里唯一写的东西是 `media`，而它自己带锁（见 mediaIndex）。
-func (s *Shell) fetchCollectionPage(ctx context.Context, ref app.CollectionRef, sort bili.CollectionSort, pageNo int, media *mediaIndex) (list.Page, error) {
-	medias, hasMore, err := s.app.LoadCollectionPage(ctx, ref, sort, pageNo)
+//
+// keyword 是建这个列表时那个词（见 newCollectionList 的注释）：它是**值**，
+// 不是界面字段，所以后台读它不犯铁律一。
+func (s *Shell) fetchCollectionPage(ctx context.Context, ref app.CollectionRef, sort bili.CollectionSort, keyword string, pageNo int, media *mediaIndex) (list.Page, error) {
+	medias, hasMore, err := s.app.LoadCollectionPage(ctx, ref, sort, keyword, pageNo)
 	if err != nil {
 		return list.Page{}, err
 	}
@@ -257,15 +297,46 @@ func (s *Shell) fetchCollectionPage(ctx context.Context, ref app.CollectionRef, 
 			Owner:    m.Owner,
 			Duration: m.Duration,
 			Item:     onlineItemOf(m),
-			// ⚠️ **没有 View**：收藏夹那个接口的返回里播放量在 `cnt_info.play`，
-			// 而 `bili.Media` 这一层压根没解析它（`collection.go` 的
-			// `resourceListData` 里没有这一列）。所以这里是零值，网格卡片封面
-			// 底部那一条渐变上**左半边不画**——而这不是「忘了填」，是上游那份
-			// 还没解析。补它要改的是 `internal/service/bili`（加字段 + 解析），
-			// 而验收不许打真 B 站接口去核那个字段名，所以那一格留给接线那一票。
+			// 播放量：接口的 `cnt_info.play`（`bili.Media.View`）。音轨那一条
+			// 本来就没有这个数——零值，界面那一格留空（见 `Music.View`）。
+			View: m.View,
+			// 时间那一列画哪个时间**随容器类型变**（上游也是分开的）：
+			//
+			//	收藏夹	`fav_time`（收藏时间，表头写「收藏时间」）
+			//	合集 / 系列	`pubtime`（发布时间，表头写「投稿时间」）
+			//
+			// 拿一个套另一个的话，收藏夹里会写着「投稿时间」而画的是收藏时间
+			// ——用户按它判断新旧，读到的是错的。
+			PubTime: collectionTimeOf(ref.Type, m),
 		})
 	}
 	return list.Page{Songs: songs, HasMore: hasMore}, nil
+}
+
+// collectionTimeOf 是这一条该画进「时间」那一列的时间。
+//
+// 按容器类型分开取，**不拿一个套另一个**（上游也是分开的）：
+//
+//	收藏夹	`fav_time`（上游 `favorites/list.tsx:63`，表头写「收藏时间」）
+//	合集 / 系列	`pubtime`（上游 `collections/list.tsx:75` / `series/list.tsx:84`）
+//
+// 零值照旧传出去（界面上那一格留空）：那一条没给这个时间，编一个
+// 「收藏时间 = 发布时间」比空着更坏。
+func collectionTimeOf(typ bili.CollectionType, m bili.Media) time.Time {
+	if typ == bili.CollectionFavorite {
+		return m.FavTime
+	}
+	return m.PubTime
+}
+
+// collectionTimeTitle 是时间那一列的表头字。和 `collectionTimeOf` 是同一
+// 件事的两半，**必须一起改**：收藏夹表头写「收藏时间」，合集 / 系列写
+// 「投稿时间」。
+func collectionTimeTitle(typ bili.CollectionType) string {
+	if typ == bili.CollectionFavorite {
+		return "收藏时间"
+	}
+	return "投稿时间"
 }
 
 // onlineItemOf 把一条 B 站内容翻成播放队列认的那一项。
@@ -329,7 +400,13 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 	s.flushCollectionNotice(p)
 	info := s.app.Collection(ref)
 
-	ui.Column(c).Key("page:collection:" + ref.Key()).Grow(1).Children(func() {
+	// ⚠️ **横向那一格在**根**上，不在下面那几块里**：这一页原来是头图区、操作条
+	// 各自留 24，而下面那个列表**一点没留**——于是表头和列表行比头图区的标题还
+	// 靠左 24 像素，同一页里两条左缘对不齐（上游那边列表是在 `px-4` 里的，见
+	// `pages/video-collection/favorites/index.tsx:436`）。
+	//
+	// 收到根上之后，这一页的每一样东西都从同一条左缘开始（票 #138）。
+	ui.Column(c).Key("page:collection:"+ref.Key()).Grow(1).Padding(0, pagePadX).Children(func() {
 		s.viewCollectionHeader(c, p)
 		s.viewCollectionOps(c, p)
 
@@ -343,7 +420,28 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 		switch {
 		case info.Loaded && info.MediaCount == 0:
 			s.viewEmpty(c, "collection:empty", noFavorites)
+		case p.keyword != "" && p.list.Paged().Loaded == 0 && !p.list.Paged().Loading:
+			// 搜了，**一条都没有**：说清楚，而不是留一块空白。
+			//
+			// ⚠️ 判据是「**词已经发出去了**」而不是「列表此刻一行都没有」：
+			// 换词的这一瞬间列表是空的（还在拉），那时候画「换个词再搜一次」
+			// 是骗人——用户刚敲完词。
+			//
+			// 用的就是搜索页那一句（`searchpage.go` 的 `viewSearchResultsBody`）：
+			// 「暂无内容 / 换个词再搜一次，或者把关键词缩短一点」——同一件事，
+			// 同一句话。
+			s.viewEmpty(c, "collection:no-results", noSearchResults)
 		default:
+			// ⚠️ **第一页在途时，这一格由列表自己画**（画法是外面递进去的，
+			// 见 `newCollectionList` 和 `loadingCell`）：它和「没有收藏夹」那一格
+			// 是同一个出口（票 #138）。
+			//
+			// ⚠️ **首屏只说一次「正在加载…」**：头图区那个大标题原来写的是
+			// 「正在加载…」（22px 粗体），下面列表又画一句 13pt 淡灰的——同一屏
+			// 两个加载提示，相隔一百多像素。现在头图区写的是**这一类容器的名字**
+			// （「收藏夹」/「视频合集」/「视频系列」，见 `collectionTitleText`），
+			// 加载那句话只由内容区这一格说。
+			//
 			// 🔴 设置里的「数据显示样式」在这一帧生效（理由同搜索页那一处）。
 			//
 			// ⚠️ 它**换不掉**多选接线（`attachSelection` 装的那一份挂在两份控件上，
@@ -356,6 +454,7 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 			// 列表自己占了 Grow(1)（见 `list.List.View`），所以多选态下面那条
 			// 批量操作条自然被它顶到最下面。
 			p.list.View(c)
+			s.noteScrollbar(p.list.Hot())
 			if p.multi {
 				s.viewCollectionBatchBar(c, p)
 			}
@@ -411,26 +510,30 @@ const (
 	collectionCoverH = 168
 )
 
-// viewCollectionHeader 是顶部头图区：封面 + 标题 + 简介 + 类型和条数 + 创建者。
+// viewCollectionHeader 是顶部头图区：封面 + 标题 + 简介 + 类型和条数 + 创建者，
+// **外加右边那一行「按歌名找 + 排序」**（理由见 `viewCollectionOps` 顶上那一段）。
 //
 // 文案和排列照抄 `src/pages/video-collection/header/index.tsx:53-113`。
 func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 	t := c.Theme()
 	info := s.app.Collection(p.ref)
 
-	ui.Row(c).Key("collection-header").Gap(16).Padding(20, 24, 8).
+	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
+	ui.Row(c).Key("collection-header").Gap(16).Padding(20, 0, 8).
 		Children(func() {
 			// ① 封面。空地址时 imgcache 画空框（没给封面的收藏夹真的有）。
 			imgcache.View(c, s.images, info.Cover, collectionCoverW, collectionCoverH)
 
 			ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(6).Children(func() {
-				ui.Text(c, collectionTitleText(info)).FontSize(22).Bold().
+				// ⚠️ **这个标题是 30（`collectionTitleSize`），不是页标题那个数**：
+				// 头图区的大标题抄上游 `text-3xl`，见 pagerhythm.go 那段。
+				ui.Text(c, collectionTitleText(p.ref.Type, info)).FontSize(scale.Font(c, collectionTitleSize)).Bold().
 					MaxLines(2).Ellipsis("…")
 
 				// ② 简介。Biu 是 `line-clamp-1`，有才画。
 				if info.Intro != "" {
-					ui.Text(c, info.Intro).FontSize(13).TextColor(t.TextMuted).
-						MaxLines(1).Ellipsis("…")
+					ui.Text(c, info.Intro).FontSize(scale.Font(c, 13)).LineHeight(smallCopyLeading).
+						TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 				}
 
 				// ③ 类型 + 条目数。Biu 写的是「{公开|私密}收藏夹 • N 条视频」
@@ -438,27 +541,63 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 				// 上游连音频也是这么写的，这里照抄。
 				ui.Text(c, collectionKindText(p.ref.Type, info.Private)+" • "+
 					strconv.Itoa(info.MediaCount)+" 条视频").
-					FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+					FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
+					TextColor(t.TextMuted).MaxLines(1)
 
 				// ④ 创建者。Biu 是一张头像加昵称；这一票没接头像地址
 				//（`bili.CollectionInfo` 有 `Owner.Face`，界面先不画——
 				// 一行字能说清是谁，一个空方块不能）。
 				if info.OwnerName != "" {
-					ui.Text(c, info.OwnerName).FontSize(12).TextColor(t.TextMuted).
-						MaxLines(1).Ellipsis("…")
+					ui.Text(c, info.OwnerName).FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
+						TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 				}
+
+				// ⑤ 「按歌名找 + 排序」，靠右。
+				//
+				// 🔴 **它为什么在这儿，而不在下面那一排**（详见
+				// `viewCollectionOps` 顶上那一段）：那一排左边五件自己就要 484 宽，
+				// 而内容区在最小窗口（900）加侧栏 360 那一档只剩 492——**塞不下
+				// 第三件**。挤不下的时候框架缩的是**排序下拉**（实测被压到 29 宽、
+				// 右缘跑到 910~950，**已经出窗口了**）。
+				//
+				// 而**头图区有竖着的空**：封面 168 高，而左边那一列字只有 90 高
+				// ——多出来的 78 像素正好放得下这一行（实测这一行 29 高），
+				// **头图区的高度一个字都不涨**（列表那一块还是那么大）。
+				//
+				// 靠右是 `AlignSelf(Stretch)` + `Justify(End)` 做的：这一行铺满
+				// 那一列，内容被推到右缘，而那一列的右缘是**页边距**
+				// （900 减 `pagePadX` 20 = 880）——和下面那一排的右缘是同一条线。
+				// ⚠️ **AlignSelf(Stretch) 不能省**：这一列是 `AlignItems(Start)`
+				// 的（那几行字要靠左），而 `Grow(1)` 在一列里长的是**竖着**的
+				// 方向——不写这一句，这一行就按内容宽摆着，排序下拉落在整页的
+				// **中间**而不是右缘。
+				//
+				// ⚠️ **别加 Spacer**：加了它就会和输入框抢那点空隙（两个
+				// `Grow(1)` 按比例分），而**输入框是那个该让位的**——见
+				// `collectionSearchMinWidth` 的注释。
+				ui.Row(c).Key("collection-filters").AlignSelf(ui.Stretch).Gap(8).Center().
+					Justify(ui.End).
+					Children(func() {
+						s.viewCollectionSearch(c, p)
+						s.viewCollectionSort(c, p)
+					})
 			})
 		})
 }
 
 // collectionTitleText 是头图区那个大标题。
 //
-// ⚠️ 还在拉的时候写「正在加载…」而不是空串：空标题会在那儿留一个空的 h1，
-// 用户会以为这个收藏夹真的没名字。
-func collectionTitleText(info app.CollectionInfo) string {
+// ⚠️ **还在拉的时候写「收藏夹 / 视频合集 / 视频系列」，不写「正在加载…」**：
+// 这一页的加载态由**内容区那一格**说（见 `viewCollection` 里加载那一支），而
+// 头图区再说一遍就是首屏**两个「正在加载…」**——一个 30px 粗体、一个 15px
+// 淡灰，相隔一百多像素（那正是这一票要消掉的东西）。
+//
+// 而写类型名也不是留一个空标题：空标题会在那儿留一个空的 h1，用户会以为这个
+// 收藏夹真的没名字。
+func collectionTitleText(typ bili.CollectionType, info app.CollectionInfo) string {
 	switch {
 	case !info.Loaded:
-		return "正在加载…"
+		return typ.Label()
 	case info.Title == "":
 		return "（没名字的收藏夹）"
 	}
@@ -481,18 +620,43 @@ func collectionKindText(typ bili.CollectionType, private bool) string {
 
 // ── 操作条 ─────────────────────────────────────────────────────────────────
 
-// viewCollectionOps 是头图区下面那一排：左边四个动作，右边多选开关 + 排序。
+// viewCollectionOps 是头图区下面那一排：左边四个动作，右边多选开关。
 //
 // 项和顺序照 Biu 的 `src/pages/video-collection/operation/index.tsx:33-56`。
+//
+// # 🔴 **「按歌名找 + 排序」为什么不在这一排，而在头图区里**
+//
+// 上游把它们放在**这一排**的右边（`SearchWithSort` 就是一排）。我们这一排的
+// **左边比上游宽得多**：上游是「播放全部 + 两枚图标键」，我们是「播放全部 +
+// 添加到播放列表 + ☆ / ⋯ + 多选」五件，五件自己就要 **484** 宽。
+//
+// 而侧栏宽度是 **160~480**（`app.ClampSideMenuWidth`），窗口最窄是 **900**
+// （`shell.go` 的 `MinWidth`）。侧栏 360 那一档的内容区只剩 **492**——**塞不下
+// 第三件**。挤不下的时候框架缩的是**排序下拉**（它的最小宽就是那两个字），
+// 实测被压到 **29** 宽、右缘跑到 **910~950**（**已经出窗口了**）——而那一格
+// 是用户唯一看得见的说明，裁掉之后它就变成一个认不出的方块。
+//
+// 而**头图区有竖着的空**：封面 168 高，左边那一列字只有 90 高——多出来的
+// 78 像素放得下那一行（29 高），**头图区的高度一个字都不涨**（下面那一块
+// 列表还是那么大）。所以「按歌名找 + 排序」搬到头图区里，靠右，右缘还是
+// 同一条页边距。
+//
+// ⚠️ **别为了「和上游一样」把它们塞回这一排**：
+// `TestTheCollectionOpsRowStillFitsAtTheMinWindow` 钉着这一段（它量的是**每个
+// 侧栏宽度**下排序下拉的盒子）。
 func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 	t := c.Theme()
 
-	ui.Row(c).Key("collection-ops").Center().Gap(8).Padding(0, 24, 12).
+	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
+	ui.Row(c).Key("collection-ops").Center().Gap(8).Padding(0, 0, 12).
 		Children(func() {
 			if ui.PrimaryButton(c, "播放全部").Clicked() {
 				s.playWholeCollection(p)
 			}
-			if ui.Button(c, "添加到播放列表").Clicked() {
+			// 上游是一枚 `size="md" variant="flat"` 的图标键
+			//（`operation/index.tsx:44`，tooltip「添加到播放列表」）。
+			if s.withTip(c, flatIconButton(c, iconEnqueue, "添加到播放列表", iconMd).
+				Size(iconHitMd, iconHitMd).Padding(0, 5), "添加到播放列表").Clicked() {
 				s.addWholeCollectionToQueue(p)
 			}
 			s.viewCollectionStar(c, p)
@@ -501,22 +665,24 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 			ui.Spacer(c)
 
 			// 多选开关。多选态开着时这一排还在，只是列表左边多了一列勾。
-			multi := ui.Button(c, "多选")
+			// 它是文字键（那是「一个模式」，不是一个动作），但同样不走
+			// `ui.Button`——那一圈描边在这一排上是唯一的异类。
+			multi := flatButton(c, "多选")
 			if p.multi {
 				multi = multi.Background(t.SurfaceHover)
 			}
 			if multi.Clicked() {
 				s.toggleCollectionMulti(p)
 			}
-
-			s.viewCollectionSort(c, p)
 		})
 }
 
 // viewCollectionStar 是收藏 / 取消收藏那个星标。
 //
-// Biu 是实心 / 空心两个图标（`operation/fav-toggle.tsx:12-20`）——MyGo 没带
-// 图标集，拿一个字代替：★ 收藏着、☆ 没收藏着。
+// Biu 是实心 / 空心两个图标（`operation/fav-toggle.tsx:12-20`），而且是
+// `isIconOnly size="md" variant="flat"` 的一枚图标键。我们照它——图标集里
+// `iconStar` / `iconStarFilled` 就是那两个文件，画哪一张仍由 `favIcon` 说了算
+// （状态图标唯一出口那条规矩）。
 //
 // ⚠️ Biu 那一侧对「视频系列」和「自己创建的收藏夹」不画这个按钮
 // （`operation/index.tsx:47-49`）。这一页拿不到「是不是自己创建的」
@@ -524,11 +690,12 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 // 让服务端拒绝比在界面上猜一个条件准。
 func (s *Shell) viewCollectionStar(c *ui.Context, p *collectionPage) {
 	info := s.app.Collection(p.ref)
-	mark, tip := "☆", "收藏这个收藏夹"
+	tip := "收藏这个收藏夹"
 	if info.Faved {
-		mark, tip = "★", "取消收藏"
+		tip = "取消收藏"
 	}
-	if ui.Button(c, mark).Tooltip(tip).Label(tip).Clicked() {
+	if s.withTip(c, flatIconButton(c, favIcon(info.Faved), tip, iconMd).
+		Size(iconHitMd, iconHitMd).Padding(0, 5), tip).Clicked() {
 		s.setCollectionFav(p, !info.Faved)
 	}
 }
@@ -545,14 +712,20 @@ func (s *Shell) viewCollectionStar(c *ui.Context, p *collectionPage) {
 // 用户按之前分不清那一下到底是 B 站上的收藏夹没了，还是只是这一侧不显示了。
 func (s *Shell) viewCollectionMore(c *ui.Context, p *collectionPage) {
 	items := s.collectionMoreItemsFor(p)
-	ui.MenuButton(c, "更多", func(m *ui.Menu) {
-		for _, item := range items {
-			if m.Item(item.label).Chosen() {
-				s.collectionMoreAction(p, item)
-				return
+	// 上游是一枚 `isIconOnly variant="flat"` 的 ⋯（`operation/menu.tsx:114`）。
+	// `.Menu()` 本身就是「按钮 + 菜单」（`mygo/ui/menu.go` 顶上那个例子就是用
+	// `ButtonBase` 拼的），所以扁平配方接得上——`ui.MenuButton` 那一版会自己
+	// 画一圈描边和一枚 ▾，放在这一排新扁平的三枚旁边就它一个不是。
+	s.withTip(c, flatIconButton(c, iconMore, "更多操作", iconMd).
+		Size(iconHitMd, iconHitMd).Padding(0, 5), "更多").
+		Menu(func(m *ui.Menu) {
+			for _, item := range items {
+				if m.Item(item.label).Chosen() {
+					s.collectionMoreAction(p, item)
+					return
+				}
 			}
-		}
-	}).Label("更多操作")
+		})
 }
 
 // collectionMoreBaseItems 是 ⋯ 菜单里**每一页都有**的那几项。文案照 Biu。
@@ -613,11 +786,11 @@ func (s *Shell) collectionMoreAction(p *collectionPage, item collectionMenuItem)
 		// 按错一次就是几百兆白下。
 		s.askConfirm(p, confirmDownload, p.list.List().Len(), false)
 	case "clear-invalid":
-		s.askConfirmAbout(p, confirmClearInvalid, 0, false, collectionTitleText(s.app.Collection(p.ref)))
+		s.askConfirmAbout(p, confirmClearInvalid, 0, false, collectionTitleText(p.ref.Type, s.app.Collection(p.ref)))
 	case "delete-folder":
-		s.askConfirmAbout(p, confirmDeleteFolder, 0, false, collectionTitleText(s.app.Collection(p.ref)))
+		s.askConfirmAbout(p, confirmDeleteFolder, 0, false, collectionTitleText(p.ref.Type, s.app.Collection(p.ref)))
 	case "forget-folder":
-		s.askConfirmAbout(p, confirmForgetFolder, 0, false, collectionTitleText(s.app.Collection(p.ref)))
+		s.askConfirmAbout(p, confirmForgetFolder, 0, false, collectionTitleText(p.ref.Type, s.app.Collection(p.ref)))
 	default:
 		s.addToast("「" + item.label + "」还没接收藏夹接口")
 	}
@@ -643,7 +816,9 @@ func (s *Shell) viewCollectionSort(c *ui.Context, p *collectionPage) {
 	trigger.Label("排序：" + p.sort.Label())
 
 	sel.Popup(func(panel ui.Element) {
-		panel.Padding(4).Radius(t.Radius).Background(t.Background).Border(1, t.Border)
+		// 外观走共享出口（`popupPanel`）：这一处原来只有底色和描边，没有
+		// 阴影——和旁边框架自己弹的浮层差一层影子。
+		popupPanel(t, panel.Padding(4))
 		for _, sort := range bili.CollectionSorts {
 			item := sel.Item(sort).Padding(6, 10).Radius(t.Radius)
 			switch {
@@ -668,4 +843,144 @@ func (s *Shell) viewCollectionSort(c *ui.Context, p *collectionPage) {
 func (s *Shell) setCollectionSort(p *collectionPage) {
 	p.listSort = p.sort
 	s.reloadCollection(p)
+}
+
+// ── 按歌名找 ────────────────────────────────────────────────────────────────
+
+// collectionSearchWidth 是那个输入框的**常态**宽。
+//
+// # 参照物：仓库里现成的那个同类输入框
+//
+// `localmusic.go` 的本地音乐工具条上那个搜索框是 **180**
+// （`ui.TextInput(c, &p.search)…Width(180)`），而它和这一处的排法**一模一样**：
+// 一个输入框挨着一个下拉（那边是「目录」，这边是「排序」）。所以照它抄 **180**。
+//
+// ⚠️ 别拿 `keywordBoxWidth`（256）来：那是「稍后再看 / 历史记录」那一页的
+// 搜索框，那一页的内容区更宽、而且搜索框**另起一行**（见 `librarypage.go`
+// 的 `viewFilters` 注释）。
+//
+// ⚠️ **它不是那个框的下限**——下限是 `collectionSearchMinWidth`。宽裕的时候
+// 长到 180，挤的时候自己缩，**排序下拉永远是完整的**。
+const collectionSearchWidth = 180
+
+// collectionSearchMinWidth 是那个输入框的**最小**宽。
+//
+// # 它是这么算出来的
+//
+// 最小窗口（900）加最宽侧栏（480）那一档，内容区只剩 **372**；头图区左边是
+// 200 宽的封面加 16 的间距，于是右边那一列只有 **156**。而排序下拉自己就要
+// **83.2**（还带一个 8 的间距）——所以留给输入框的下限是
+// 156 − 83.2 − 8 = **64.8**，取 **64**。
+//
+// # ⚠️ **别把它调大**
+//
+// 调大了就是**排序下拉被裁**：180 那一版（输入框固定 180）在侧栏 400 就只剩
+// 64 宽、那个「▾」被裁没了，480 那一档字被裁成「最近收」——而那一格是用户
+// 唯一看得见的说明（裁掉之后它就变成一个认不出的方块）。
+//
+// 基线（`6247a3d`）在同样两档也是裁的（400 是 57 宽、480 是 0 宽、右缘跑到
+// 922 **出窗口**）——**这一票让它们都完整**。
+const collectionSearchMinWidth = 64
+
+// collectionSearchLabel 是那个输入框的名字，兼做它空着时画的那几个字。
+//
+// ⚠️ **Label 不能省**：它不只是给测试用的——没有它读屏软件读不出这是一个搜
+// 歌名的输入框（占位文字不是标签），无头 Tester 也只认 label / text。
+const collectionSearchLabel = "搜索歌名"
+
+// viewCollectionSearch 是那个按歌名找的输入框。
+//
+// 上游那一排的右边是 `SearchWithSort`（`components/search-with-sort/index.tsx`），
+// 里面是「搜索 + 排序」两样；我们之前只抄了排序那一半，于是这一页**只能缩小
+// 到「哪一档排序」，缩不到「某几首」**——一个 800 首歌的收藏夹里，用户只能靠
+// 滚和看。
+//
+// ⚠️ **筛是接口筛的**（`bili.CollectionMedias` 顶上那一段）：本地筛只能筛已经
+// 拉下来的那 20 首，搜「告白气球」在第 300 首的话，界面上的表现是「搜了没反应」。
+//
+// ⚠️ **回车立刻搜，防抖 500ms**：抄上游（`components/search-button/index.tsx`
+// 的 `useDebounceFn(..., { wait: 500 })`），也和这一页的邻居一致（`librarypage.go`
+// 的 `searchDebounce`）。回车不等那 500ms——用户按下回车就是想现在搜。
+func (s *Shell) viewCollectionSearch(c *ui.Context, p *collectionPage) {
+	box := ui.TextInput(c, &p.draft).
+		// ⚠️ **三件事一起写**：下限 64（`collectionSearchMinWidth` 的注释）、
+		// 常态 180、`Grow(1)` 让它把空出来的地都占了（上限还是 180）。
+		//
+		// **那个下限就是「排序下拉不动」的保证**：框架挤不下的时候缩的是**最小
+		// 宽最小**的那一个，而排序下拉的最小宽是它自己的自然宽（83.2）。
+		// 输入框让到 64 就停手，排序下拉就一直是完整的（实测侧栏 160~480
+		// 全是 83.2 宽）。
+		Width(collectionSearchMinWidth).
+		Grow(1).
+		MaxWidth(collectionSearchWidth).
+		Label(collectionSearchLabel).
+		Placeholder(collectionSearchLabel)
+	p.submitted = box.Submitted()
+
+	// 判据和排序那一处一个写法：这一帧条件变了就换查询。
+	if s.collectionSearchChanged(p) {
+		s.reloadCollection(p)
+	}
+}
+
+// collectionSearchChanged 报这一帧搜索条件变了没，变了就换查询。
+//
+// **防抖的钟在用户每敲一个字的时候重新打**：上一次敲的已经过去 400ms、这一下又
+// 敲了一个字，那一下就得从头再等 500ms，而不是把上一个字的 400ms 接着算——
+// 否则慢慢打的时候会在中途就发出去一个还没输完的词（上游 `useDebounceFn` 就是
+// 每个输入都重置那个钟）。回车是例外，立刻换。
+//
+// 这一段和 `libraryPage.keywordChanged` 是同一套（理由见 librarypage.go 的文件头）。
+func (s *Shell) collectionSearchChanged(p *collectionPage) bool {
+	now := s.clock.Now()
+	draft := strings.TrimSpace(p.draft)
+	switch {
+	case p.submitted:
+		p.seenDraft = draft
+		return s.applyCollectionKeyword(p, draft)
+	case draft != p.seenDraft:
+		// 用户又敲了一个字：把钟重打，这一帧不搜。
+		p.seenDraft, p.pendingSince = draft, now
+		return false
+	case p.pendingSince.IsZero():
+		return false
+	case now.Sub(p.pendingSince) >= searchDebounce:
+		return s.applyCollectionKeyword(p, draft)
+	}
+	return false
+}
+
+// applyCollectionKeyword 把生效的词换掉。
+//
+// **同一个词不重拉**：回车搜了「告白气球」再回车一次，B 站会给一模一样的
+// 20 条，而界面上那一瞬间是空的 + 清掉选中项。
+func (s *Shell) applyCollectionKeyword(p *collectionPage, kw string) bool {
+	p.pendingSince = time.Time{}
+	if kw == p.keyword {
+		return false
+	}
+	p.keyword = kw
+	return true
+}
+
+// collectionSearching 报「收藏夹页那个 500ms 的钟要不要醒着」。
+//
+// 它是 `syncSearchWatch` 的一个 `want`（理由见 librarypage.go 里那一个）：
+// **不许为这一档再排一个定时器**——同一个「等用户把词敲完」在代码里出现两个
+// 出处，改一个忘了另一个时界面上一点也看不出来。
+//
+// ⚠️ **离开这一页只是不醒那个钟，不是把那个「还没发出去的搜索」丢掉**：
+// 框里还摆着用户敲的那个词，而列表还没筛——回来的时候那一帧它就发出去了
+// （那一帧 `now - pendingSince` 早过了 500ms）。**清掉它的话，框里那个词就
+// 成了界面上的假话**：用户看见自己搜过，而列表是全的。同一栏的邻居
+// （`libraryPage`）也是这么做的。
+func (s *Shell) collectionSearching() bool {
+	p := s.collection
+	if p == nil {
+		return false
+	}
+	if !strings.HasPrefix(s.router.Path(), collectionPathPrefix) {
+		return false
+	}
+	return !p.pendingSince.IsZero()
 }

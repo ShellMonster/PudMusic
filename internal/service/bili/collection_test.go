@@ -172,7 +172,7 @@ func TestCollectionMediasSendsTheSortAsTheOrderParam(t *testing.T) {
 			}))
 		})
 
-		pg, err := f.client(t, Options{}).CollectionMedias(context.Background(), 7, sort, 1, 100)
+		pg, err := f.client(t, Options{}).CollectionMedias(context.Background(), 7, sort, "", 1, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -185,6 +185,64 @@ func TestCollectionMediasSendsTheSortAsTheOrderParam(t *testing.T) {
 		if got := pg.Medias[0].Owner; got != "UP 0" {
 			t.Errorf("Owner = %q", got)
 		}
+	}
+}
+
+// TestCollectionMediasCarriesThePlayCountAndTheTimes 钉住收藏夹那一路的三个数。
+//
+// 字段名照上游 `service/fav-resource.ts` 的 `FavMedia`：
+//
+//	播放量	`cnt_info.play`（`FavMediaCntInfo { collect, play, danmaku }`）
+//	收藏时间	`fav_time`（收藏夹那一页画的就是它，表头写「收藏时间」）
+//	发布时间	`pubtime`（合集 / 系列那一页画的）
+//
+// ⚠️ **没有这个数的那一条必须是零值**：音轨那一条本来就不带 `cnt_info`，
+// 编一个 0 出来会让用户在音轨上读到「0 播放」。
+func TestCollectionMediasCarriesThePlayCountAndTheTimes(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(pathResourceList, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			"medias": []any{
+				map[string]any{
+					"id": 1, "type": MediaVideo, "title": "有播放量的", "duration": 185,
+					"bvid":     "BV1play",
+					"cnt_info": map[string]any{"collect": 3, "play": 123_400, "danmaku": 7},
+					"fav_time": 1750000000,
+					"pubtime":  1700000000,
+				},
+				map[string]any{
+					// 音轨：没有 cnt_info，也没有那两个时间。
+					"id": 2, "type": MediaAudio, "title": "音轨",
+				},
+			},
+			"has_more": false,
+		}))
+	})
+
+	pg, err := f.client(t, Options{}).CollectionMedias(context.Background(), 7, SortByFavTime, "", 1, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pg.Medias) != 2 {
+		t.Fatalf("读出 %d 条，want 2", len(pg.Medias))
+	}
+	got := pg.Medias[0]
+	if got.View != 123_400 {
+		t.Errorf("播放量 %d，want 123400（上游在 cnt_info.play 里）", got.View)
+	}
+	if got, want := got.FavTime.Unix(), int64(1750000000); got != want {
+		t.Errorf("收藏时间 %d，want %d（fav_time）", got, want)
+	}
+	if got, want := got.PubTime.Unix(), int64(1700000000); got != want {
+		t.Errorf("发布时间 %d，want %d（pubtime）", got, want)
+	}
+
+	// 音轨那一条：三个数都是零值——**没给就是没给**。
+	audio := pg.Medias[1]
+	if audio.View != 0 || !audio.FavTime.IsZero() || !audio.PubTime.IsZero() {
+		t.Errorf("没有那几个字段的音轨读成了 播放量=%d 收藏=%v 发布=%v，want 全零值"+
+			"（编一个 0 出来会让用户在音轨上读到「0 播放」）",
+			audio.View, audio.FavTime, audio.PubTime)
 	}
 }
 
@@ -235,7 +293,7 @@ func TestPSIsClampedToBStationsLimit(t *testing.T) {
 		}
 		writeJSON(w, jsonData(t, 0, "0", map[string]any{"medias": []any{}, "has_more": false}))
 	})
-	if _, err := f.client(t, Options{}).CollectionMedias(context.Background(), 1, SortByFavTime, 1, 5000); err != nil {
+	if _, err := f.client(t, Options{}).CollectionMedias(context.Background(), 1, SortByFavTime, "", 1, 5000); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -249,7 +307,7 @@ func TestPageZeroBecomesOne(t *testing.T) {
 		}
 		writeJSON(w, jsonData(t, 0, "0", map[string]any{"medias": []any{}, "has_more": false}))
 	})
-	if _, err := f.client(t, Options{}).CollectionMedias(context.Background(), 1, SortByFavTime, 0, 0); err != nil {
+	if _, err := f.client(t, Options{}).CollectionMedias(context.Background(), 1, SortByFavTime, "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -558,7 +616,7 @@ func TestInvalidContentsStillComeBack(t *testing.T) {
 			},
 		}))
 	})
-	pg, err := f.client(t, Options{}).CollectionMedias(context.Background(), 1, SortByFavTime, 1, 0)
+	pg, err := f.client(t, Options{}).CollectionMedias(context.Background(), 1, SortByFavTime, "", 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -582,7 +640,7 @@ func TestACollectionMediaCarriesTheOwnerID(t *testing.T) {
 		}))
 	})
 
-	pg, err := f.client(t, Options{}).CollectionMedias(context.Background(), 7, SortByFavTime, 1, 20)
+	pg, err := f.client(t, Options{}).CollectionMedias(context.Background(), 7, SortByFavTime, "", 1, 20)
 	if err != nil {
 		t.Fatal(err)
 	}

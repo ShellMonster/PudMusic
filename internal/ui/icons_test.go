@@ -531,10 +531,26 @@ func TestTheLikeKeyDrawsItsOwnIcon(t *testing.T) {
 	if err := e.tt.Click("赞"); err != nil {
 		t.Fatalf("点不动赞：%v", err)
 	}
-	waitFrames(t, e.tt, "赞变亮", func() bool {
-		_, ok := e.tt.Find("已赞")
-		return ok
-	})
+	// ⚠️ **等的是「应用里那个状态」，画面要**再画一帧**才收进去。**
+	//
+	// 为什么不接着用 `waitFrames` 等画面：
+	//
+	//   - 那个 10 秒是**墙钟**，而它每一轮都在**画一帧**——画一帧是**整个窗口**
+	//     重画一遍，满载的机器上它可能就要好几秒（同一时刻别的测试的 goroutine
+	//     正在抢 CPU）。于是十秒的预算全花在重画上，条件还没来得及成立。
+	//   - 赞是**乐观**的（`App.SetLike`：点下去那一帧本地就改了），而那一趟写
+	//     失败会**改回去**（`rollbackLike`）。慢机器上那一趟写可能超时——于是
+	//     「亮过」的那一小段在**检查之前**就没了：等画面等的是一个**已经被回滚
+	//     掉**的状态，报出来的却是「赞没变亮」——症状离真因隔了三层。
+	//
+	// 这一条要等的东西本来就是**应用里的状态**（`waitFor` 正是等这个的，见
+	// shelltest_test.go 的「两种等法」），画面那一帧单独画。
+	e.tt.Frame()
+	waitFor(t, "赞变亮了", func() bool { return e.s.app.LikeState().Liked })
+	e.tt.Frame()
+	if _, ok := e.tt.Find("已赞"); !ok {
+		t.Fatalf("赞变亮了，界面上却还是「赞」：%q", e.tt.Texts())
+	}
 	filled := glyphShape(e.tt, "已赞")
 	if filled == "" {
 		t.Fatalf("已赞那一枚上没画东西：%q", e.tt.Texts())
@@ -792,11 +808,16 @@ func TestTheRoundKeyKeepsItsEdge(t *testing.T) {
 	}
 
 	// 边中点：左右取垂直中点，上下取水平中点。
+	//
+	// ⚠️ **四舍五入，不截断**（和上面 `scanGlyph` 同一个理由）：`Tester` 给的框是
+	// 小数，而这一枚的按钮在 309.65 —— `int()` 截下来落在按钮**外面**一像素，
+	// 取到的是身后那一层（播放条的底色），于是报出来的是「图形顶到边了」，
+	// 而图形其实好好地待在离边五像素的地方。
 	edges := map[string][2]int{
-		"左边": {int(btn.X), int(btn.Y + btn.H/2)},
-		"右边": {int(btn.X+btn.W) - 1, int(btn.Y + btn.H/2)},
-		"上边": {int(btn.X + btn.W/2), int(btn.Y)},
-		"下边": {int(btn.X + btn.W/2), int(btn.Y+btn.H) - 1},
+		"左边": {round32(btn.X), int(btn.Y + btn.H/2)},
+		"右边": {round32(btn.X+btn.W) - 1, int(btn.Y + btn.H/2)},
+		"上边": {int(btn.X + btn.W/2), round32(btn.Y)},
+		"下边": {int(btn.X + btn.W/2), round32(btn.Y+btn.H) - 1},
 	}
 	img := h.tt.Image()
 	for _, side := range []string{"左边", "右边", "上边", "下边"} {
@@ -873,7 +894,12 @@ func TestEveryIconButtonNamesItself(t *testing.T) {
 				return true
 			}
 			id, ok := call.Fun.(*ast.Ident)
-			if !ok || (id.Name != "iconButton" && id.Name != "iconButtonPrimary") {
+			// ⚠️ **`flatIconButton` 也要扫**：这两个是同一件事的两个入口
+			// （`iconButton` 就是 `flatIconButton` 的别名，见 icons.go），而这
+			// 一票铺开扁平按钮之后 `flatIconButton` 的调用点比 `iconButton` 还多。
+			// 只扫 `iconButton` 的话，新写的那些图标键一个都管不到。
+			if !ok || (id.Name != "iconButton" && id.Name != "iconButtonPrimary" &&
+				id.Name != "flatIconButton") {
 				return true
 			}
 			checked++

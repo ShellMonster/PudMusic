@@ -66,6 +66,10 @@ func (s *SwitchView) SetView(v View) {
 // Layout 返回此刻的摆法。
 func (s *SwitchView) Layout() View { return s.view }
 
+// SetColumns 换这一页多画哪两列。**只装在列表那半边**：网格卡片没有列，
+// 播放量走封面底部那一条渐变，而时间那一列网格里本来就不画。
+func (s *SwitchView) SetColumns(c Columns) { s.list.SetColumns(c) }
+
 // SetSongs 换掉这份歌。**两份控件都换**（见文件头）。
 func (s *SwitchView) SetSongs(songs []Music) {
 	s.list.SetSongs(songs)
@@ -78,6 +82,15 @@ func (s *SwitchView) SetSongs(songs []Music) {
 func (s *SwitchView) SetEmpty(text string) {
 	s.list.SetEmpty(text)
 	s.grid.SetEmpty(text)
+}
+
+// SetEmptyView 换掉「没有歌时**那一格**」的画法，两份都换。理由见
+// `List.SetEmptyView`。
+//
+// ⚠️ **传 nil 是退回那句话**（`SetEmpty` 那一句，或默认那句）。
+func (s *SwitchView) SetEmptyView(fn func(c *ui.Context)) {
+	s.list.SetEmptyView(fn)
+	s.grid.SetEmptyView(fn)
 }
 
 // SetFooter 装末尾哨兵的画法，两份都装。理由见 `Grid.footer` 那一段——**两份都要装**
@@ -127,6 +140,16 @@ func (s *SwitchView) View(c *ui.Context) {
 		return
 	}
 	s.list.View(c)
+}
+
+// Hot 报指针是不是压在底下这一对控件的滚动条上（见 `List.Hot`）。
+//
+// 两档各有一份滚动容器（同一份歌、两种摆法），所以问的是**这一帧画的那一档**。
+func (s *SwitchView) Hot() bool {
+	if s.view == ViewCard {
+		return s.grid.Hot()
+	}
+	return s.list.Hot()
 }
 
 // rows 是此刻画出来的**行**数，含末尾哨兵。

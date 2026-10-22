@@ -31,14 +31,25 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
 // 这一页的路由常量（`dynamicFeedPath`）在 navbar_feed.go：顶栏那个「动态」
 // 按钮也是往同一个地址跳，两边共用一份才是「点顶栏和点侧栏到的是同一页」。
 
-// authorPaneW 是左边那一栏的宽度。上游是 `w-64`（256）。
-const authorPaneW = 240
+// authorPaneW 是左边那一栏的宽度。上游是 `w-64`（`author-list.tsx:106`），
+// Tailwind 的 64 = 256。
+const authorPaneW = 256
+
+// authorAvatarS 是左边那一栏每行头像的边长。上游是 `h-9 w-9`（`user.tsx:46`），
+// 9 × 4 = 36。
+const authorAvatarS = 36
+
+// paneDividerA 是两栏之间那条分界线的浓度。上游写的是
+// `border-divider/40`（`author-list.tsx:107`、`follow-list/index.tsx:204`），
+// 也就是分隔线本身再乘 40%。
+const paneDividerA = 0.4
 
 // allAuthorsMid 是左边第一行「全部」那一行的 mid。
 //
@@ -183,7 +194,10 @@ func (s *Shell) viewDynamicFeed(c *ui.Context, _ *ui.Route) {
 
 	ui.Row(c).Key("page:" + dynamicFeedPath).Grow(1).FillHeight().Children(func() {
 		s.viewAuthorPane(c, f)
-		ui.Row(c).Key("feed-items").Grow(1).FillHeight().Children(func() {
+		// 动态卡片左右各 32：上游是外层 `px-4` 再套一层 `px-4`
+		// （`index.tsx:142` 的 ScrollContainer + 里面那个 `px-4 py-4`），
+		// 16 + 16 = 32。卡自己那一条的左右内边距因此是 0。
+		ui.Column(c).Key("feed-items").Grow(1).FillHeight().PaddingX(32).Children(func() {
 			s.viewFeedItems(c, f)
 		})
 	})
@@ -193,15 +207,18 @@ func (s *Shell) viewDynamicFeed(c *ui.Context, _ *ui.Route) {
 func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 	t := c.Theme()
 	ui.Column(c).Key("feed-authors").Width(authorPaneW).FillHeight().
-		Padding(8, 6).Gap(4).Children(func() {
-		// 上游这一栏的标题就是「用户动态」（`author-list.tsx:126`）。
-		ui.Text(c, "用户动态").FontSize(14).Bold().PaddingX(6)
+		Padding(8, 8).Gap(4).
+		BorderWidth(0, 1, 0, 0).BorderColor(t.Border.Alpha(paneDividerA)).Children(func() {
+		// 上游这一栏的标题就是「用户动态」（`author-list.tsx:126`），左右
+		// 再缩 16（`px-4`）；这一栏自己已经有 8 的横向内边距，所以这里
+		// 只再补 8。
+		ui.Text(c, "用户动态").FontSize(scale.Font(c, 14)).Bold().PaddingX(8)
 
 		if !s.app.LoggedIn() {
 			// 没登录**不假装有内容**：作者栏列的是「我关注的人」，没有登录态
 			// 就没有这个列表。给一句能指路的，比一个空列表有用。
-			ui.Text(c, "登录之后能看到你关注的人").FontSize(12).
-				TextColor(t.TextMuted).PaddingX(6)
+			ui.Text(c, "登录之后能看到你关注的人").FontSize(scale.Font(c, 12)).
+				TextColor(t.TextMuted).PaddingX(8)
 			return
 		}
 
@@ -240,7 +257,7 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 		// ⚠️ Key 挂在外面的 Column 上：List 是自己管状态的控件，事后再挂
 		// key 会 panic（`ui/element.go` 的 `Key`）。理由见 upspace_tabs.go。
 		ui.Column(c).Key("feed-author-list").Grow(1).FillHeight().Children(func() {
-			ui.List(c, st, rows).
+			authorList := ui.List(c, st, rows).
 				Grow(1).FillHeight().
 				Rows(func(r ui.ListRow) {
 					defer func() {
@@ -250,6 +267,7 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 					}()
 					s.viewAuthorRow(r.Context, f, r.Index)
 				})
+			s.trackScrollbar(authorList)
 		})
 
 		if auth.want() {
@@ -320,7 +338,7 @@ func (s *Shell) viewAuthorRow(c *ui.Context, f *dynamicFeed, i int) {
 	}
 
 	box := ui.Row(c).Grow(1).Key("feed-author:" + strconv.FormatInt(mid, 10)).
-		Gap(8).Padding(6).Radius(6).AlignItems(ui.Center)
+		Gap(12).Padding(8).Radius(6).AlignItems(ui.Center)
 	if all {
 		// 「全部」是**当前就在看的那一个**：主色底，和侧栏选中收藏夹同一套
 		// 颜色（见 sidebar_favorites.go 的 cur 那一支）。
@@ -334,11 +352,11 @@ func (s *Shell) viewAuthorRow(c *ui.Context, f *dynamicFeed, i int) {
 	box.Children(func() {
 		if all {
 			// 「全部」没有头像。给一个方块底子，一眼能认出「这不是某个人」。
-			ui.Box(c).Size(28, 28).Radius(6).Background(t.Surface)
+			ui.Box(c).Size(authorAvatarS, authorAvatarS).Radius(6).Background(t.Surface)
 		} else {
-			s.spaceAvatar(c, face, 28)
+			s.spaceAvatar(c, face, authorAvatarS, false)
 		}
-		ui.Text(c, name).Grow(1).FontSize(13).MaxLines(1).Ellipsis("…")
+		ui.Text(c, name).Grow(1).FontSize(scale.Font(c, 14)).MaxLines(1).Ellipsis("…")
 	})
 }
 
@@ -361,7 +379,7 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 	}
 	if !f.started && feed.loading {
 		// 一条都都没有：第一页在途。
-		s.viewEmpty(c, "feed:loading", emptyState{Title: "正在加载动态…"})
+		s.viewLoading(c, "feed:loading", "正在加载动态…")
 		return
 	}
 	// 🔴 **「一行都没有」也分两种**：没有下一页了 → 画空状态；**还有下一页**
@@ -403,7 +421,7 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 
 	// ⚠️ Key 挂在外面的 Column 上，理由见上面那一处。
 	ui.Column(c).Key("feed-dynamic-list").Grow(1).FillHeight().Children(func() {
-		ui.List(c, st, rows).
+		dynList := ui.List(c, st, rows).
 			Grow(1).FillHeight().FillWidth().
 			Rows(func(r ui.ListRow) {
 				defer func() {
@@ -422,6 +440,7 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 				}
 				s.viewDynamicCard(r.Context, f.items[r.Index])
 			})
+		s.trackScrollbar(dynList)
 	})
 
 	// 滚到底就拉下一页；容器没填满也拉（首屏那一拉在 view 开头已经发过了）。
@@ -487,15 +506,16 @@ func (s *Shell) viewFeedSentinel(c *ui.Context, p *upPager, hint, retryLabel str
 	ui.Row(c).Key("feed-sentinel").Center().Gap(8).Padding(12).Children(func() {
 		switch {
 		case p.err != nil:
-			ui.Text(c, "加载失败："+p.err.Error()).FontSize(13).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
-			if retry != nil && ui.Button(c, retryLabel).FontSize(13).Clicked() {
+			ui.Text(c, "加载失败："+p.err.Error()).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
+			// 哨兵那一行上的重试：扁平（错误页那一档是 `viewLoadError`，不动）。
+			if retry != nil && flatButton(c, retryLabel).FontSize(scale.Font(c, 13)).Clicked() {
 				retry()
 			}
 		case p.loading:
 			ui.Spinner(c)
-			ui.Text(c, "正在加载…").FontSize(13).TextColor(t.TextMuted)
+			ui.Text(c, "正在加载…").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 		default:
-			ui.Text(c, hint).FontSize(13).TextColor(t.TextMuted)
+			ui.Text(c, hint).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 		}
 	})
 }

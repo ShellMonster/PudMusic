@@ -54,9 +54,9 @@ func newHeaderList(t *testing.T, v View, check bool) (*List, *ui.Tester) {
 
 // TestTheHeaderSaysTheColumnsThisListActuallyHas 钉住表头说的是**这一页真有的列**。
 //
-// `list.Music` 上没有播放量也没有投稿时间，所以表头也只有三列。摆一列这一页没有内容
-// 的表头，比不摆更糟：字都在、位置也在，只是下面永远是空的，用户看不出那是没接还是
-// 自己记错了。
+// 这个列表**没装** `Columns`（零值），所以表头只有三列。摆一列这一页没有内容的
+// 表头，比不摆更糟：字都在、位置也在，只是下面永远是空的，用户看不出那是没接还是
+// 自己记错了。装了那两列的样子见 `columns_test.go`。
 func TestTheHeaderSaysTheColumnsThisListActuallyHas(t *testing.T) {
 	_, tt := newHeaderList(t, ViewList, false)
 
@@ -77,9 +77,13 @@ func TestTheHeaderSaysTheColumnsThisListActuallyHas(t *testing.T) {
 // 量的就是横坐标：表头那一列的盒子和行里那一列的盒子**一个像素都不能差**。左右两端各
 // 量一列——右边那列靠行的右边缘，左边那列吃掉所有余量，两边都对了中间才可能错。
 //
-// ⚠️ **左边的表头列拿「标题」比、行里拿 UP 名比**：行里那一列是
+// ⚠️ **「标题」那一列对的是封面的左缘，不是歌名的左缘**（DESIGN.md「表头：『标题』
+// 从封面左缘起」）：行里那一列（UP 名）在封面右边，所以表头要比它再往左「封面 + 一个
+// 列间距」。紧凑那一档没有封面，两边就正好重合。
+//
+// ⚠️ **左边的行里那一列拿 UP 名比**：行里那一列是
 // `ui.Column(...).AlignItems(ui.Start)`（歌名在上、UP 名在下），UP 名那一块的左边就是
-// 这一列的左边缘，和表头「标题」的左边缘是同一个数。
+// 标题那一列的左边缘。
 //
 // ⚠️ **右边的行里那一列拿时长比，不拿歌名比**：歌名要靠 `Tester.Find(歌名)` 找，而那
 // 命中的是 `ui.List` 挂在**整行**上的无障碍盒子（`List.View` 里那句 `l.state.Label`），
@@ -112,22 +116,27 @@ func TestTheHeaderColumnsLineUpWithTheRows(t *testing.T) {
 				t.Fatalf("%v：画面上找不到第 %d 行的时长 %q，文字有 %q",
 					v, i+1, formatDuration(durOf(i)), tt.Texts())
 			}
-			// 「#」那一列也要对：它是**唯一一列会被前面的空位顶偏的**（封面那一列的空
-			// 位夹在它和「标题」中间，放错位置的话错的是它，而画面上只是「编号歪了一点」——
-			// 第一版就是靠存图才发现的，`TestTheHeaderColumnsLineUpWithTheRows` 那时只
-			// 量了左右两端，中间那一列歪了它一声不响）。
+			// 「#」那一列也要对：它是**唯一一列会被前面的空位顶偏的**（多选开不开、
+			// 序号列多宽，错的是它，而画面上只是「编号歪了一点」——第一版就是靠存图才
+			// 发现的，那时只量了左右两端，中间那一列歪了它一声不响）。
 			rowNo, ok := tt.Find(strconv.Itoa(i + 1))
 			if !ok {
 				t.Fatalf("%v：画面上找不到第 %d 行的序号，文字有 %q", v, i+1, tt.Texts())
 			}
 			if headHash.X != rowNo.X {
-				t.Errorf("%v：表头的「#」在 %.1f，行里那个序号在 %.1f——差 %.1f"+
-					"（封面那一列的空位不在它和「标题」中间？）",
+				t.Errorf("%v：表头的「#」在 %.1f，行里那个序号在 %.1f——差 %.1f",
 					v, headHash.X, rowNo.X, headHash.X-rowNo.X)
 			}
-			if headTitle.X != rowOwner.X {
-				t.Errorf("%v：表头的「标题」在 %.1f，行里那一列在 %.1f——差 %.1f",
-					v, headTitle.X, rowOwner.X, headTitle.X-rowOwner.X)
+			// 「标题」落在**封面左缘**：行里那一列的左边再往左「封面 + 一个列间距」。
+			// 紧凑那一档没有封面（`MetricsOf` 的 Cover 是 0），两边重合。
+			wantTitle := rowOwner.X
+			if m := MetricsOf(v); m.Cover > 0 {
+				wantTitle -= m.Cover + m.Gap
+			}
+			if d := headTitle.X - wantTitle; d > 0.5 || d < -0.5 {
+				t.Errorf("%v：表头的「标题」在 %.1f，封面左缘在 %.1f——差 %.1f"+
+					"（表头多让了封面那一列的空位？）",
+					v, headTitle.X, wantTitle, d)
 			}
 			if headClock.X != rowClock.X || headClock.W != rowClock.W {
 				t.Errorf("%v：表头的「时长」在 %.1f、宽 %.1f，行里那一列在 %.1f、宽 %.1f"+
@@ -163,14 +172,17 @@ func TestTheHeaderLinesUpWithTheRowsInMultiSelect(t *testing.T) {
 		t.Fatalf("多选态下画面上找不到 UP 名，文字有 %q", multi.Texts())
 	}
 
-	if after.X != body.X {
-		t.Errorf("多选态下表头的「标题」在 %.1f，行里那一列在 %.1f——表头没给那个勾选框"+
-			"让位置（不开多选时它在 %.1f，差 %.1f）",
-			after.X, body.X, before.X, after.X-body.X)
+	// 「标题」在**封面左缘**（行里的 UP 名在封面右边），所以它比行里那一列再往左
+	// 「封面 + 一个列间距」。
+	wantTitle := body.X - coverSize - rowGap
+	if d := after.X - wantTitle; d > 0.5 || d < -0.5 {
+		t.Errorf("多选态下表头的「标题」在 %.1f，封面左缘在 %.1f——差 %.1f，表头没给"+
+			"那个勾选框让位置（不开多选时它在 %.1f）",
+			after.X, wantTitle, d, before.X)
 	}
 	if before.X == after.X {
 		t.Errorf("开不开多选，表头的「标题」都在 %.1f——行里那一列明明让开了勾选框的宽"+
-			"（勾选框 %d 加一个间距 %d）", after.X, 16, int(cardGap))
+			"（勾选框 %d 加一个间距 %d）", after.X, 16, int(rowGap))
 	}
 }
 
@@ -243,30 +255,39 @@ func TestTheHeaderHasALineUnderIt(t *testing.T) {
 	}
 }
 
-// TestTheHeaderColumnNamesAreBiggerThanTheRowsSecondaryText 钉住「表头的字号比
-// 行里的次要文字大」。
+// TestTheHeaderColumnNamesAreNoSmallerThanTheRowsText 钉住「表头的列名不比行里的
+// 字小」。
 //
-// ⚠️ **判据是「比行里的次要文字大」而不是「正好多少像素」**：行里的次要文字是
-// 12px（UP 名 / 时长），表头是 14px（上游那一行表头的数，`text-sm`）。逐位相等
-// 不是「对」的证据（换个系统字体行高就变），而「谁大谁小」是这一条真正要的。
+// ⚠️ **判据是「不比行里的字小」而不是「正好多少像素」**：DESIGN.md 里表头列名和
+// 行里的 UP 名是**同一档**（14，上游 `text-sm`），而它们比行里那个 12 的播放量 /
+// 时长高一档。逐位相等不是「对」的证据（换个系统字体行高就变），而「不比它小」是
+// 这一条真正要的。
 //
 // 改之前表头是 12px——和行里的次要文字一样大、一样灰，竖着扫下去时它比下面那一列
 // 数字还弱（票面原话）。
-func TestTheHeaderColumnNamesAreBiggerThanTheRowsSecondaryText(t *testing.T) {
+func TestTheHeaderColumnNamesAreNoSmallerThanTheRowsText(t *testing.T) {
 	_, tt := newHeaderList(t, ViewList, false)
 
 	head, ok := tt.Find("标题")
 	if !ok {
 		t.Fatalf("表头上没有「标题」，文字有 %q", tt.Texts())
 	}
-	// 行里的次要文字：UP 名（12px）。
+	// 行里的文字：UP 名（14，和表头同一档）和时长（12，次要文字那一档）。
 	owner, ok := tt.Find("UP A")
 	if !ok {
 		t.Fatalf("画面上找不到 UP 名，文字有 %q", tt.Texts())
 	}
-	if head.H <= owner.H {
-		t.Errorf("表头的列名高 %v，行里的次要文字（UP 名）高 %v——列名没有比次要文字大",
+	clock, ok := tt.Find(formatDuration(durOf(0)))
+	if !ok {
+		t.Fatalf("画面上找不到时长，文字有 %q", tt.Texts())
+	}
+	if head.H < owner.H {
+		t.Errorf("表头的列名高 %v，行里的 UP 名高 %v——列名比行里的字还小",
 			head.H, owner.H)
+	}
+	if head.H <= clock.H {
+		t.Errorf("表头的列名高 %v，行里的时长高 %v——列名没有比次要文字大",
+			head.H, clock.H)
 	}
 }
 

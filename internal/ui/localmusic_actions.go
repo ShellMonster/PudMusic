@@ -14,6 +14,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -89,11 +90,11 @@ func (p *localPage) confirmDialog(c *ui.Context, open *bool, key, title, body,
 		// 按钮行是面板的直接子元素。
 		ui.Column(c).Key(key).Width(dialogWidth).Gap(dialogGap).
 			Children(func() {
-				ui.Text(c, title).FontSize(16).Bold()
-				ui.Text(c, body).FontSize(13).TextColor(t.TextMuted)
+				ui.Text(c, title).FontSize(scale.Font(c, 16)).Bold()
+				ui.Text(c, body).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 				// 完整路径单独一行：它是用户按下按钮之前能用来认人的**唯一**
 				// 东西（歌名会重名，而按下去不可恢复）。
-				ui.Text(c, detail).FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, detail).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 			})
 		ui.Row(c).AlignSelf(ui.End).Gap(8).Children(func() {
 			ok := ui.Button(c, deleteCancelLabel)

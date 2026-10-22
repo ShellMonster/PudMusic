@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -110,7 +111,7 @@ func (d *downloadsPage) viewStatus(c *ui.Context, r download.Snapshot) {
 	// 居中块。这里让它**顶格靠左**：一列里所有格子左对齐，「等待中」和
 	// 「下载完成」才在同一处，读起来是一列而不是两列。
 	if !cell.showBar {
-		ui.Text(c, cell.text).FontSize(13).TextColor(cell.c).MaxLines(2)
+		ui.Text(c, cell.text).FontSize(scale.Font(c, 13)).TextColor(cell.c).MaxLines(2)
 		return
 	}
 
@@ -122,13 +123,13 @@ func (d *downloadsPage) viewStatus(c *ui.Context, r download.Snapshot) {
 		}
 		ui.Row(c).FillWidth().Gap(8).Children(func() {
 			// 出错时这一段是错误原因，允许折两行（上游的 `line-clamp-2`）。
-			ui.Text(c, cell.text).Grow(1).FontSize(12).TextColor(cell.c).
+			ui.Text(c, cell.text).Grow(1).FontSize(scale.Font(c, 12)).TextColor(cell.c).
 				MaxLines(2).Ellipsis("…")
 			if cell.showPct {
 				// 定宽 + 靠右：Biu 用的是 tabular-nums 那一列，不定宽的话
 				// 9% 和 100% 两帧之间整个右边会跳一下。
 				ui.Text(c, strconv.Itoa(r.Percent)+"%").Width(dlPctW).
-					TextAlign(ui.End).FontSize(12).TextColor(c.Theme().TextMuted).
+					TextAlign(ui.End).FontSize(scale.Font(c, 12)).TextColor(c.Theme().TextMuted).
 					MaxLines(1)
 			}
 		})

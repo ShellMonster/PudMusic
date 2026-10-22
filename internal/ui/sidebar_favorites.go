@@ -18,6 +18,7 @@ import (
 	"strconv"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -84,7 +85,7 @@ func (s *Shell) viewFavoritesRefreshing(c *ui.Context, st app.Settings) {
 	if st.SideMenuCollapsed || !s.app.FavoritesRefreshing() {
 		return
 	}
-	ui.Text(c, refreshLine).FontSize(12).
+	ui.Text(c, refreshLine).FontSize(scale.Font(c, 12)).
 		TextColor(c.Theme().TextMuted).Padding(4, 8)
 }
 
@@ -113,7 +114,7 @@ func (s *Shell) viewFavoriteGroup(c *ui.Context, st app.Settings, g app.Favorite
 			return
 		}
 		if len(items) == 0 {
-			ui.Text(c, "还没有收藏夹").FontSize(12).
+			ui.Text(c, "还没有收藏夹").FontSize(scale.Font(c, 12)).
 				TextColor(c.Theme().TextMuted).Padding(6, 8)
 			return
 		}
@@ -165,8 +166,8 @@ func (s *Shell) viewFavoriteHeader(c *ui.Context, g app.FavoriteGroup, folded bo
 // 收藏夹」：图标对辅助技术是不可见的（`mygo/ui/svg.go` 的 Icon 文档），而这一
 // 颗画出来只有一个加号，光看不知道是什么。
 func (s *Shell) viewNewFavoriteButton(c *ui.Context) {
-	if flatIconButton(c, iconAdd, "新建收藏夹", iconSm).
-		Tooltip("新建收藏夹").Clicked() {
+	// 上游是 `Tooltip closeDelay={0}`（`side/collection/index.tsx:486`）。
+	if s.withMenuTip(c, flatIconButton(c, iconAdd, "新建收藏夹", iconSm), "新建收藏夹").Clicked() {
 		s.openFolderEdit(0)
 	}
 }
@@ -208,9 +209,10 @@ func (s *Shell) viewFavoriteList(c *ui.Context, g app.FavoriteGroup, items []app
 		s.reorderFavorite(g, items, rows, to)
 	}
 
-	ui.List(c, ls, len(items), func(i int) {
+	e := ui.List(c, ls, len(items), func(i int) {
 		s.viewFavoriteRow(c, g, items[i])
 	})
+	s.trackScrollbar(e)
 }
 
 // reorderFavorite 是拖完那一刻把顺序落下去。
@@ -263,7 +265,18 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 		if label == "" {
 			label = "（没名字）"
 		}
-		ui.Text(c, label).FontSize(14).TextColor(rowTextColor(t, cur)).Grow(1)
+		// 🔴 **单行 + 省略号**：名字一长（上游那种「【长期主义】2026 年度歌单
+		// 合集·最终版」）这一行会长高一截，把下面那些收藏夹整体顶下去，
+		// 侧栏跟着抖。侧栏只有 160~480 宽，超过约 20 个汉字就换行。
+		//
+		// ⚠️ **别用 `Wrap()`**：那是给弹性容器用的（让子元素换行），对文字
+		// 叶子无效。列表行和播放条那几处都是「单行 + 省略号」这一套
+		// （`library_rows.go` / `follow.go`），照它们抄。
+		//
+		// 上游那边是 CSS 的 `truncate`（`biu/src/components/menu/menu-item.tsx:111`
+		// 的 `className="pointer-events-none truncate"`），那是同一个意思。
+		ui.Text(c, label).FontSize(scale.Font(c, 14)).TextColor(rowTextColor(t, cur)).Grow(1).
+			MaxLines(1).Ellipsis("…")
 	})
 
 	if row.Clicked() {

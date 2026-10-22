@@ -53,6 +53,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -90,8 +91,8 @@ const (
 //	状态     150 = 进度条 ~84 + 缝 8 + 百分比 40 + 内边距 20（少一列就先砍它）
 //	大小      76 = 「120.0 MB」在 12px 下约 52 + 内边距 20
 //	时间      88 = 「2023-11-15」在 12px 下约 66 + 内边距 20
-//	操作     138 = 两颗 56 的按钮 + 缝 6 + 内边距 20（同时最多亮两颗）
-//	合计     452 → 900 那一档文件列剩 208，装得下封面 + 歌名 + 徽章
+//	操作      84 = 两颗 28 的图标键 + 缝 6 + 内边距 20（同时最多亮两颗）
+//	合计     398 → 900 那一档文件列剩 262，装得下封面 + 歌名 + 徽章
 //
 // ⚠️ 再窄就不够了：**文件那一列另有一个下限**（`dlFileMin`），而 MyGo 的
 // `clampWidth` 只认 `TableColumn.MinWidth`（`mygo/ui/table.go`）。低于那个下限
@@ -102,7 +103,7 @@ const (
 	dlStatusW = 150
 	dlSizeW   = 76
 	dlTimeW   = 88
-	dlOpsW    = 138
+	dlOpsW    = 84
 )
 
 // dlFileMin 是「文件」那一列的下限。
@@ -113,12 +114,12 @@ const (
 // 歌名那一块下面还有一行音质徽章（「无损 FLAC」在 11px 下约 55），124 也装得下。
 const dlFileMin = 200
 
-// dlOpW 是操作列里每个按钮的宽度。
+// dlOpW 是操作列里每个图标键的边长。
 //
-// ⚠️ **56 是 MyGo 按钮的最小值，别再往下压**：按钮左右各留 `t.Space(3.5)`
-// （`mygo/ui/widgets.go` 的 `styleButton`），14px 的两个汉字正好 28，加起来
-// 56。再窄一个字都放不下，画出来是「暂…」。
-const dlOpW = 56
+// 它是 `iconHit`（14 的图标 + 每边 7）——这一列的操作现在是图标键（上游
+// `actions.tsx:164-175` 就是 `isIconOnly` 的 `AsyncButton`），不再有「两个汉字
+// 加内边距 56、再窄就画成『暂…』」那笔账。
+const dlOpW = iconHit
 
 // dlCover 是封面边长。Biu 那一行是 48（`index.tsx:164` 的 width/height）。
 const dlCover = 48
@@ -198,6 +199,10 @@ type downloadsPage struct {
 	// 那个目录」这条能自动验。
 	openDir func(path string) error
 	reveal  func(path string)
+
+	// tip 是带延迟的悬停提示（tooltip.go），由 Shell 在建这一页时接上。
+	// 为零时（单独造这一页的测试）退回框架那枚。
+	tip tipFunc
 }
 
 // newDownloadsPage 建这一摊状态。
@@ -248,7 +253,8 @@ func (s *Shell) viewDownloadList(c *ui.Context, _ *ui.Route) {
 	d := s.downloads
 	d.sync(d.rowsFn())
 
-	ui.Column(c).Key("page:" + downloadListPath).Grow(1).Padding(20).Gap(12).
+	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
+	ui.Column(c).Key("page:"+downloadListPath).Grow(1).Padding(0, pagePadX).Gap(12).
 		AlignItems(ui.Stretch).Children(func() {
 		d.viewToolbar(c, s)
 
@@ -351,9 +357,10 @@ func (d *downloadsPage) viewTable(c *ui.Context, s *Shell) {
 		return d.rows[i].ID
 	}
 
-	ui.Table(c, &d.state, downloadColumns, len(d.rows), func(row, col int) {
+	e := ui.Table(c, &d.state, downloadColumns, len(d.rows), func(row, col int) {
 		d.viewCell(c, s, row, col)
 	}).Grow(1)
+	s.trackScrollbar(e)
 }
 
 // dlRowKey 是「下标越界」时给的行身份。一个歌不可能撞上的类型。
@@ -366,7 +373,7 @@ type dlRowKey struct{}
 func (d *downloadsPage) viewCell(c *ui.Context, s *Shell, row, col int) {
 	id := fmt.Sprintf("%s#%d", d.rows[row].ID, col)
 	if d.failed[id] {
-		ui.Text(c, "画不出来").FontSize(11).TextColor(c.Theme().TextMuted)
+		ui.Text(c, "画不出来").FontSize(scale.Font(c, 11)).TextColor(c.Theme().TextMuted)
 		return
 	}
 	defer func() {
@@ -392,10 +399,10 @@ func (d *downloadsPage) drawCell(c *ui.Context, s *Shell, row, col int) {
 			// 这里不重复它的判断。
 			imgcache.View(c, s.images, r.Cover, dlCover, dlCover)
 			ui.Column(c).Grow(1).Gap(2).Children(func() {
-				ui.Text(c, r.Title).FontSize(14).MaxLines(2).Ellipsis("…")
+				ui.Text(c, r.Title).FontSize(scale.Font(c, 14)).MaxLines(2).Ellipsis("…")
 				// 音质徽章，照上游 `index.tsx:179-183` 的 `Chip`。空串不画。
 				if r.Label != "" {
-					ui.Text(c, r.Label).FontSize(11).TextColor(t.TextMuted).MaxLines(1)
+					ui.Text(c, r.Label).FontSize(scale.Font(c, 11)).TextColor(t.TextMuted).MaxLines(1)
 				}
 			})
 		})
@@ -404,11 +411,11 @@ func (d *downloadsPage) drawCell(c *ui.Context, s *Shell, row, col int) {
 	case colSize:
 		// 上游是 `item.totalBytes ? filesize(item.totalBytes) : "-"`，只写
 		// 总大小（`index.tsx:190`）。已下了多少在状态那一列的进度条上。
-		ui.Text(c, fileSize(r.Total)).FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+		ui.Text(c, fileSize(r.Total)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
 	case colTime:
 		// `formatMillisecond` 是 `moment(s).format("YYYY-MM-DD")`
 		// （biu/src/common/utils/time.ts:20），没有时刻也没有「几天前」。
-		ui.Text(c, addedOn(r.AddedAt)).FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+		ui.Text(c, addedOn(r.AddedAt)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
 	case colOps:
 		d.viewOps(c, s, r)
 	}

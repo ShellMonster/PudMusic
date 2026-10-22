@@ -171,6 +171,13 @@ func (st *searchState) init(s *Shell) {
 	st.fetch, st.client = s.fetchSearchTab, s.app.BiliClient
 	for i := range st.lists {
 		st.lists[i].list = list.NewPaged(s.images, s.searchActions(i), s.searchFetcher(i))
+		// ⚠️ **「正在加载」那一格由外面递进去**（票 #138）：分页列表自己那一句是
+		// 13px 淡灰缩在列表左上角，而这一页的「没有结果」是居中 15pt 两行——
+		// 等的那几秒里那行字和回来之后那一格对不上。
+		st.lists[i].list.SetEmptyView(loadingCell("正在加载…"))
+		// 播放量 / 投稿时间：歌曲和视频两档有，用户那一档两样都没有（见
+		// `searchColumns`）。**装在这里而不是每一帧**：一档 Tab 的列不会变。
+		st.lists[i].list.SetColumns(searchColumns(i, s))
 	}
 }
 
@@ -330,8 +337,11 @@ func searchVideoMusic(hit bili.VideoHit) list.Music {
 		Cover:    hit.Cover,
 		Owner:    hit.Owner,
 		Duration: hit.Duration,
-		// 播放量：网格卡片封面底部那一条渐变上画的是它（`Music.View`）。
+		// 播放量：列表那一列和网格卡片封面底部那一条渐变上画的都是它
+		//（`Music.View`）。
 		View: hit.Play,
+		// 投稿时间：搜索页那一列画的是接口的 `pubdate`（见 `Music.PubTime`）。
+		PubTime: hit.PubDate,
 		// ⚠️ Cid 大多数情况是空的（B 站的搜索结果不给分 P id，见
 		// `service/bili/search.go` 文件头）。空着的时候在线播放会按「缺稿件 id
 		// 或分 P id」拒掉并说清为什么，那条限制不许为了「搜出来的歌能放」而放松。

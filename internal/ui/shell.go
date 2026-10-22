@@ -15,7 +15,9 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
@@ -42,6 +44,27 @@ type Shell struct {
 	// wake 是这个窗口的唤醒句柄，由 view 每帧重新登记。
 	wake wakeHandle
 
+	// presence 是「用户现在看得到这一扇窗吗」（见 presence.go）。
+	//
+	// 窗口自己的生命周期回调改它；`wake.invalidate` 拿它决定这一帧要不要画；
+	// `View` 拿它决定这一帧的逐帧动画要不要继续要下一帧。
+	presence windowPresence
+
+	// snapScroll 是「这一帧是从看不见恢复过来的那一帧」，snapAt 是它的时刻。
+	//
+	// ⚠️ **不能只取一次**：MyGo 一帧会跑两遍 view（第一遍摆、第二遍留），而
+	// 真正留在画面上的是**第二遍**。一次性取走的话第一遍把它用掉，第二遍就
+	// 按普通路径滚了——症状正好是「恢复之后从旧位置慢慢追」。
+	//
+	// 所以按**时刻**认帧：`View` 在 `c.Now()` 变了的时候把它清掉，同一时刻的
+	// 两遍都算这一帧。真窗口每帧一个时刻（`runtime.go` 的 `runFrame` 取一次
+	// 墙钟）；Tester 的钟站着不动，于是它会多保持几帧——那没有副作用（目标
+	// 就是当前位置，1ns 的那一下原地不动）。
+	//
+	// 歌词用它一次跳到位（见 lyricsView.centre 的 snap 参数）。
+	snapScroll bool
+	snapAt     time.Time
+
 	// router 是 Biu 那 14 条路由的调度，带前进/后退历史。
 	router *ui.Router
 
@@ -52,10 +75,24 @@ type Shell struct {
 	// shownPath 是上一帧画的是哪一页，syncRoute 拿它认出「换页了」。
 	shownPath string
 
+	// scrollbarHot / scrollbarHotNow 是「指针压在某个滚动条上」的上一帧与这一帧
+	// （见 scrollbar.go）。主题每帧开头只能知道上一帧的：滚动容器这一帧还没建
+	// 出来。两个字段都是主线程单点写，和别的界面状态一样。
+	scrollbarHot    bool
+	scrollbarHotNow bool
+
 	// searchDraft 是搜索框里正在敲的字。放在壳上而不是页面的局部变量：即时模式
 	// 每一帧都重画一遍，局部变量下一帧就没了（只有 view 里显式声明并被元素
 	// 认下的状态才留得住）。
 	searchDraft string
+	// searchDraftFor 是「`searchDraft` 是从哪个关键词填上去的」。
+	//
+	// ⚠️ **它是「切页回来时不覆盖用户正在敲的字」那一条的判据**（票 #138）：
+	// 草稿挂在壳上，所以它跨页活着——而路由上的关键词换了的时候，草稿里那个
+	// 就是上一个词留下的旧东西（用户从顶栏搜了另一个词，这一页的框里却还是
+	// 上一个词）。判据是「草稿是从哪个词填上去的」：路由上的词没变 → 草稿是
+	// 用户自己的（哪怕已经被他改得面目全非），不动；变了 → 换掉。
+	searchDraftFor string
 
 	// laterPage / historyPage 是「稍后再看」和「历史记录」这两页各自的状态
 	// （见 librarypage.go）。挂在壳上而不是页面的局部变量，理由同上。
@@ -173,6 +210,30 @@ type Shell struct {
 	// 见 playbar_rate.go。
 	rateOpen bool
 
+	// 音量浮层那一摊。**只由 view 在主线程上读写**，见 playbar_volume.go。
+	//
+	// volOpen 是那个浮层开着没有（悬停图标就开，指针走远了就收）。
+	volOpen bool
+	// volIdleSince 是「指针既不在图标上、也不在浮层里」的那一刻。零值表示此刻
+	// 指针还在其中之一上面。
+	volIdleSince time.Time
+	// volPanelHovered 是**上一帧**指针在不在浮层里。
+	//
+	// ⚠️ **只能记上一帧的**：浮层在**覆盖层**里建，而覆盖层是主树**之后**才建的
+	// ——主树里问不到「浮层这一帧的悬停」。
+	volPanelHovered bool
+	// volIdleStop 是那个「到点叫醒界面」的钟（见 `armVolIdle`）。
+	//
+	// ⚠️ **没有它浮层永远不会自己收掉**：不播放的时候没有任何东西在要帧，
+	// 「指针离开了」只在那一帧被算一次，浮层于是永远留在画面上。
+	volIdleStop func()
+	// volBeforeMute 是**最后一个不是 0 的音量**——取消静音的时候放回去的就是它。
+	//
+	// ⚠️ **它不跟着设置走**：音量是「这一刻的听感」，存进设置就意味着「这台机器
+	// 上静音过」会跨到另一台机器上去。设置里**没有**音量这一栏（音量只在应用
+	// 内存里，`app.App.volume`），所以这一份也是跟着窗口走的。
+	volBeforeMute float64
+
 	// 侧栏这一摊。**只由 view 在主线程上读写**，不跨 goroutine。
 	//
 	// sideWidth 是这一帧画出来的宽度：拖动中它跟着指针走（可能小于 160，
@@ -220,7 +281,8 @@ type Shell struct {
 
 	// 顶栏这一摊。**同样只由 view 在主线程上读写**。
 	//
-	// searchFocused 是搜索框有没有焦点，顶栏用它染边框。浮层**不**靠它开
+	// searchFocused 是搜索框有没有焦点，顶栏用它把输入区的底色抬到 30%
+	// （上游 `group-data-[focus=true]:bg-…/30`）。浮层**不**靠它开
 	// （见 navbar_search.go 里那一段：焦点被 MyGo 还回来是个假信号）。
 	//
 	// ⚠️ 叫 searchKeyword 不叫 searchQuery：包级已经有一个 `searchQuery` 了
@@ -229,6 +291,9 @@ type Shell struct {
 	searchKeyword string
 	searchSuggest bool
 	searchFocused bool
+	// tips 是带延迟的悬停提示的状态（tooltip.go），按元素 ID 记。
+	// **只由界面线程读写**，和上面那几位同一条规矩。
+	tips map[uint64]*tipState
 	// terms 是浮层里「联想词」那一档的防抖状态，见 navbar_suggest.go。
 	//
 	// 挂在壳上而不是局部变量：即时模式每一帧都重画，「敲到哪儿了、从哪天起等的
@@ -591,6 +656,7 @@ func (s *Shell) closePerWindow() {
 	}
 	s.feed.disarm()    // 红点，每五分钟一跳（navbar_feed.go）
 	s.disarmNotFound() // 404 倒计时，每一秒一跳（notfound.go）
+	s.disarmVolIdle()  // 音量浮层那个到点叫醒界面的钟（playbar_volume.go）
 
 	// 🔴 摘掉这一条唤醒句柄（铁律三那个逐窗口的列表）。摘掉之后调它是 no-op，
 	// 而不摘不致命——但「进迷你 / 退出迷你」来回十次之后那个列表就有十条，
@@ -658,7 +724,12 @@ func New(a *app.App) *Shell {
 		autostart: systemAutoStart{},
 		pickImage: pickImageFile,
 		hotkeys:   nilGlobalShortcuts{},
+		// 「看得见」的默认值（见 newWindowPresence）：无头 Tester 没有窗口，
+		// 还没建出窗口的那段启动路径也一样——它们都得照常画动画。
+		presence: newWindowPresence(),
 	}
+	// 唤醒句柄问的是**这个外壳**的可见性（wake.go 的规则三）。
+	s.wake.seen = s.presence.seen
 	// 快捷键那两条路的动作都落到它。方法值在这儿绑一次就够：runShortcut 只碰
 	// s.app 和 s.router，两个都是建好之后就一直在的。
 	s.onShortcut = s.runShortcut
@@ -666,6 +737,9 @@ func New(a *app.App) *Shell {
 	// 首页自己那一摊要在建好之后才有（它要用封面缓存），所以接在 images 后面。
 	// 操作接在应用状态上、提示接自己的 Toast，接法见 widgets/list 的 AppActions。
 	s.home = newHomePage(s.images, s.listActions(), s.wake.invalidate)
+	// 新歌速递那两块翻页键带提示；提示的状态挂在壳上（tooltip.go），所以这儿
+	// 把入口递进去。单独造那一块的测试拿到的是 nil，退回框架那枚。
+	s.home.newGrid.tip = s.tip
 	// 首页那一摊的取数接线（三个 Tab 的推荐单 + 新歌速递）：规则见
 	// homepage_feed.go。这里只递「要拉什么」，不管什么时候拉。
 	s.home.initLoads(homeLoads{
@@ -678,6 +752,7 @@ func New(a *app.App) *Shell {
 	// 下载记录页同理（downloadlist.go）：两个「打开」接系统那一份，它们在无头
 	// Tester 里会 panic，测试建完外壳就换成记动作的桩；记录那一条接应用层。
 	s.downloads = newDownloadsPage(a.DownloadSnapshots, systemOpenDir, mygo.Shell.ShowItemInFolder)
+	s.downloads.tip = s.tip
 	// 本地音乐页同理。⚠️ 传进去的唤醒是 `s.local.invalidate` 而不是
 	// `s.wake.invalidate`：后台扫完了要把**所有画过这一页的窗口**都叫醒，
 	// 只叫醒这一个外壳的窗口的话，另一个停在旧帧（铁律三）。
@@ -686,6 +761,8 @@ func New(a *app.App) *Shell {
 	// 只认在线的），所以「收藏」那一项在本地音乐这一页会走「说清楚为什么」
 	// 那一支——那也是对的答案。
 	s.local = newLocalPage(a, s.images, s.listActions(), s.addToast, s.pickDir, s.displayView)
+	s.local.noteScrollbar = s.noteScrollbar
+	s.local.tip = s.tip
 	s.hist = newSearchHistory("")
 	s.keys = newShortcutKeys("")
 	s.picker = systemPathPicker{}
@@ -717,6 +794,13 @@ func New(a *app.App) *Shell {
 	return s
 }
 
+// now 是界面层的「现在」。给那些要判「几天前」的地方用（投稿时间那一列）。
+//
+// ⚠️ **传 `s.now` 这个方法值，别传 `s.clock.Now`**：后者在取的那一刻就把
+// 当时那个时钟接口定住了，而测试是在外壳建好之后才把 `s.clock` 换成假时钟
+// 的——传值的话「今天 / 昨天」那一档永远跟着墙钟走。
+func (s *Shell) now() time.Time { return s.clock.Now() }
+
 // pickDir 是本地音乐页「添加目录」要用的那一次系统对话框。
 //
 // 界面上没有它就进不去任何一个目录，而这一页的第一句空状态就是「点右上角
@@ -747,9 +831,18 @@ func (s *Shell) viewLocalMusic(c *ui.Context, _ *ui.Route) {
 // （「窗口没关干净」「图下完了界面不动」）都跟漏装的那一行毫无关系，极难查。
 func (s *Shell) Attach(w *mygo.Window) {
 	s.win = w
+	// 「用户看不看得到这一扇窗」从这一刻起由系统推过来（票 #156）：
+	// 失焦、最小化、隐藏各自会更新 `presence`，重新看得见时补一帧。
+	s.watchWindow(w)
 	// 🔴 铁律三：**逐窗口**登记，App 那边挨个叫醒。只叫醒主窗口的话迷你窗口停在
 	// 旧内容（实测：只投递不唤醒两个窗口各 +0 帧；只唤醒主窗口则迷你窗口停在旧内容）。
 	s.wakeRemove = s.app.AddWake(s.wake.invalidate)
+
+	// 从访达 / 资源管理器拖进来的文件：音频进本地音乐，别的说清楚为什么
+	// （见 `localmusic_drop.go`）。挂在这里而不是 `New`：`Attach` 才是窗口
+	// 生命周期回调的入口，而且这一套只给主窗口——迷你播放器那一扇不画本地
+	// 音乐页，也没有画 toast 的地方。
+	w.OnFileDrop(func(e *mygo.FileDropEvent) { s.handleFileDrop(e.Paths) })
 
 	w.OnClose(func(e *mygo.CloseEvent) {
 		opt := s.app.SettingsSnapshot().CloseWindowOption
@@ -963,6 +1056,25 @@ func (s *Shell) View(c *ui.Context) {
 	// 每帧重新登记：句柄内部是窗口的弱引用，窗口关了自动失效，关掉重开也不用管。
 	s.wake.set(c)
 
+	// 这一帧的窗口看不看得见，交给「每帧都要一帧」的动画自己去判断（见
+	// hover.SetFrameVisible 的注释）。**必须在 draw 之前**：波形是在 draw 里
+	// 建出来的，而它在建的那一刻就要知道这一帧要不要再要一帧。
+	//
+	// ⚠️ 这一句挡的是「自发动画」，不挡「有人在要帧」：看不见的时候之所以
+	// 没有帧，是因为 `wakeHandle.invalidate` 不进来了；万一有别的路径送进来
+	// 一帧（比如本地库扫完那一支直接调 `Services.Invalidate`），这一帧照样
+	// 画得出来，只是它**不会再要下一帧**。两处合起来才停得下来。
+	hover.SetFrameVisible(s.presence.seen())
+
+	// 从看不见恢复过来的那一帧：让那些「有中间状态」的动画一次到位（见
+	// snapScroll 的注释：同一时刻的两遍 view 都算这一帧）。
+	if now := c.Now(); s.snapScroll && !now.Equal(s.snapAt) {
+		s.snapScroll = false
+	}
+	if s.presence.takeResumed() {
+		s.snapScroll, s.snapAt = true, c.Now()
+	}
+
 	if s.crash != nil {
 		s.viewCrash(c)
 		return
@@ -1017,6 +1129,9 @@ func (s *Shell) newCrashInfo(where string, r any) *crashInfo {
 // viewMain 是正常的那一帧：上导航 + 左边栏 + 路由页 + 播放条，浮层上是播放列表
 // 抽屉（开着的话）和右下角的提示。
 func (s *Shell) viewMain(c *ui.Context) {
+	// 滚动条的悬停状态交接：上一帧量到的这一帧用，这一帧重新量（各容器在
+	// `viewMain` 后半段把它们建出来）。必须排在 `applyFrameTheme` 之前。
+	s.scrollbarHot, s.scrollbarHotNow = s.scrollbarHotNow, false
 	// 🔴 铁律二：每帧第一件事就是装主题，而且必须在最开头——SetTheme 只影响
 	// 它之后创建的控件。不装的话 MyGo 在帧开头重置好的那份跟随系统的主题
 	// 就是这一帧真正用的那份，用户选了深色也只在这一帧是对的。
@@ -1072,7 +1187,13 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 右侧浮出来的 Drawer（`music-playlist-drawer/index.tsx` 的
 	// `data-[placement=right]`），底下那一层页面照旧看得见、点得着；塞进上面
 	// 那个 Row 里就成了「窗口窄一块」，页面被挤着走——那不是抽屉。
-	s.guardAt("播放列表抽屉", s.viewQueueDrawer)(c)
+	// ⚠️ **全屏开着的时候这一处不建**：满屏底栏上那一枚「播放列表」要开的是
+	// 同一个抽屉，而抽屉必须画在满屏**上面**（后建的浮层在上）。所以全屏那一支
+	// 在 `viewFullPlayer` 末尾自己建（`fullplayer.go`），这里让开——两处都建的话
+	// 同一个视图会在同一帧里建两遍，行 key 撞上（Tester 里当场 panic）。
+	if !s.full.open {
+		s.guardAt("播放列表抽屉", s.viewQueueDrawer)(c)
+	}
 
 	// 收藏夹管理那几个弹窗（新建 / 修改 / 选封面 / 裁剪 / 选收藏夹）。
 	//
@@ -1156,11 +1277,11 @@ func (s *Shell) viewCrash(c *ui.Context) {
 		if v := errorArt; v != nil {
 			ui.Image(c, v).Height(errorArtHeight)
 		}
-		ui.Text(c, "界面出错了，播放器已经停在这一页").FontSize(18).Bold()
+		ui.Text(c, "界面出错了，播放器已经停在这一页").FontSize(scale.Font(c, 18)).Bold()
 
 		// 「出错在哪一步」这一块：三行，各自说清一件事。
 		ui.Column(c).Key("crash-where").Gap(2).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "出错的地方："+cr.where).FontSize(13).TextColor(t.Text)
+			ui.Text(c, "出错的地方："+cr.where).FontSize(scale.Font(c, 13)).TextColor(t.Text)
 			// 路径和页面名分开两行：用户在地址里看到的是路径，而跟开发者
 			// 说的时候说的是页面名（「下载记录那一页」）。只给一个的话，另一
 			// 边的人听不懂。
@@ -1172,15 +1293,15 @@ func (s *Shell) viewCrash(c *ui.Context) {
 			case cr.title == "" || cr.title == notFound.Title:
 				// 404 那一页没有「页面名」可言（`notFound` 的 Title 是兜底
 				// 的），只说路径。
-				ui.Text(c, "当时在看的路径："+cr.path).FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, "当时在看的路径："+cr.path).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 			default:
 				ui.Text(c, "当时在看的页面："+cr.title+"（"+cr.path+"）").
-					FontSize(12).TextColor(t.TextMuted)
+					FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 			}
 		})
 
-		ui.Textf(c, "%v", cr.got).FontSize(12).TextColor(t.TextMuted).MaxLines(3)
-		ui.Text(c, "细节已经写进日志。点下面的按钮再试一次。").FontSize(12).TextColor(t.TextMuted)
+		ui.Textf(c, "%v", cr.got).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(3)
+		ui.Text(c, "细节已经写进日志。点下面的按钮再试一次。").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 		ui.Row(c).Gap(10).Justify(ui.Center).Children(func() {
 			// 反馈是**描边**的那一枚、主操作是实心的那一枚：抄上游的
 			// `components/error-fallback/index.tsx:11-27`（「反馈」描边去

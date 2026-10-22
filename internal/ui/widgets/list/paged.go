@@ -39,7 +39,9 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -118,6 +120,12 @@ type PagedList struct {
 	// 没填满 → 又拉 → 又失败（PLAN 风险栏里 Biu 那份就缺这一条：解锁之后
 	// checkFill 会立刻再拉一次）。用户点末尾那行的「重试」才继续。
 	blocked bool
+
+	// emptyView 是「第一页在途时那一格」的画法（见 SetEmptyView）。nil 是没装，
+	// 那一格退回那句 13px 的「正在加载…」。
+	//
+	// ⚠️ **它只管「第一页在途」这一档**，别的一概不管（见 `syncList`）。
+	emptyView func(c *ui.Context)
 
 	// gen 是代次。每次换查询 +1：在途请求的结果回来时代次对不上就扔掉。
 	// 这是 PLAN 点名要补的「旧查询结果作废」——Biu 只靠组件重建挡着。
@@ -221,6 +229,24 @@ func (p *PagedList) Selected() (Music, bool) { return p.surf.Selected() }
 // 这一页没变」——正是本票要消灭的那一种。
 func (p *PagedList) SetView(v View) { p.surf.SetView(v) }
 
+// SetColumns 换这一页多画哪两列（播放量 / 时间）。理由和行、表头那一份
+// 都在 `Columns` 上（行和表头读同一份，别只装一边）。
+//
+// ⚠️ 只能由界面线程调。
+func (p *PagedList) SetColumns(c Columns) { p.surf.SetColumns(c) }
+
+// SetEmptyView 换掉「**第一页在途时那一格**」的画法。
+//
+// ⚠️ **它只管这一档**：拉失败了、或者已经有歌了，那一格都不归它管（见
+// `syncList`）。装上它的目的是让「正在加载…」那一格和「没有结果」那一格是
+// **同一个形状**——而后者住在应用层（`internal/ui`），这一层够不着它的画法，
+// 所以由外面把画法递进来。
+//
+// ⚠️ **传 nil 是退回那句 13px 的话**（这一层原本的样子）。
+//
+// ⚠️ 只能由界面线程调。
+func (p *PagedList) SetEmptyView(fn func(c *ui.Context)) { p.emptyView = fn }
+
 // Layout 返回此刻的摆法。测试照它断言「这一页真的换了视图」。
 func (p *PagedList) Layout() View { return p.surf.Layout() }
 
@@ -280,6 +306,9 @@ func (p *PagedList) ScrollTop() {
 // panic 会一路穿到 Cocoa 事件循环上去把整个进程带走。画在页面里时页级那道
 // Guard（`internal/ui` 的 `Shell.page`）也接得住，但这个控件不是只给页面用的
 // ——它自己这一道必须有，包一层是这里最便宜的保险。
+// Hot 报指针是不是压在底下那一对控件的滚动条上（见 `List.Hot`）。
+func (p *PagedList) Hot() bool { return p.surf.Hot() }
+
 func (p *PagedList) View(c *ui.Context) { p.draw(c) }
 
 // onPanic 记一笔并要一帧。
@@ -333,13 +362,23 @@ func (p *PagedList) syncList() {
 	case len(p.items) == 0 && p.loading:
 		// 一行都还没有：第一页在途。这时候列表里那一句就是它全部的内容，
 		// 页脚先收起来——同一句摆两遍（空状态一句 + 页脚一句）是噪音。
-		p.surf.SetEmpty("正在加载…")
+		//
+		// ⚠️ **外面递了画法就用那一格**（`SetEmptyView`）：应用层要「正在加载」
+		// 那一格和「没有结果」那一格是同一个形状（居中、15px、同一套留白），
+		// 而这一层够不着那个画法。没递就用这一层原本那句 13px 的话。
+		if p.emptyView != nil {
+			p.surf.SetEmptyView(p.emptyView)
+		} else {
+			p.surf.SetEmpty("正在加载…")
+		}
 		p.surf.SetFooter(nil)
 	case len(p.items) == 0 && p.blocked:
 		// 一行都没有还失败了：页面上就留那一个重试按钮，一句话都不多说。
+		p.surf.SetEmptyView(nil)
 		p.surf.SetEmpty("")
 		p.surf.SetFooter(p.footerView)
 	default:
+		p.surf.SetEmptyView(nil)
 		p.surf.SetEmpty("")
 		// 末尾那一行**只在还有下一页（或刚失败要人重试）时才有**（Biu 的
 		// `count = hasMore ? items.length + 1 : items.length`）：拉到底之后它
@@ -589,10 +628,12 @@ func (p *PagedList) stop() {
 // items.length + 1 : items.length`）。把它藏起来的话「滚到底」就永远触发不了。
 func (p *PagedList) footerView(c *ui.Context) {
 	t := c.Theme()
-	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(cardGap).Padding(cardPadY, cardPadX).
+	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(rowGap).Padding(cardPadY, cardPadX).
 		Children(func() {
 			if p.blocked {
-				if ui.Button(c, "加载失败，点此重试").FontSize(13).Clicked() {
+				// 这是**行里的一句重试**，不是错误页上那颗主按钮：它跟着列表
+				// 最后一行出现，用扁平配方（无常驻底、无描边），悬停才有一层淡底。
+				if flat.Button(c, "加载失败，点此重试").FontSize(scale.Font(c, 13)).Clicked() {
 					p.blocked = false
 					p.load(trigRetry)
 				}
@@ -600,7 +641,7 @@ func (p *PagedList) footerView(c *ui.Context) {
 			}
 			if p.loading {
 				ui.Spinner(c).Label(footerLabel)
-				ui.Text(c, "正在加载…").FontSize(13).TextColor(t.TextMuted)
+				ui.Text(c, "正在加载…").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 			}
 		})
 }

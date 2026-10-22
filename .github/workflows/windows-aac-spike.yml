@@ -1,0 +1,137 @@
+name: Windows AAC spike
+
+# 这一份是 GitHub issue #128 的验收通道：**Windows 上解 AAC 的 spike**。
+#
+# 为什么要专门一个工作流：这个仓库的主验收跑在 macOS 上，而这一票要验的
+# 东西（Media Foundation、COM apartment、逐样本解码）**只在 Windows 上存在**。
+# GitHub Actions 的 `windows-2022` runner 是免费的真 Windows——
+# 「没有 Windows 机器所以无法验证」这个前提不成立。
+#
+# 它跑的是 `internal/service/audio/mfadec` 那一包里的 `TestSpike*`：
+#
+#   - TestSpikeAACLCDecodesOutOfMediaFoundation —— MFT 能不能解出 AAC
+#   - TestSpikeFirstFrameLatency                —— 首帧延迟（目标 200 ms 内）
+#   - TestSpikeWhichProfilesWeCanActuallyTest   —— 支持哪些 profile
+#   - TestSpikePCMIsWithinTolerancesOfTheReference —— 逐样本比对
+#   - TestSpikeTheChannelsAreNotSwapped         —— 左右声道没调换
+#   - TestSpikeTheCOMApartmentSurvivesLoad      —— COM apartment 在负载下反复跑
+#
+# 答案全在 `t.Logf` 里，所以**必须 `-v`**，而且日志要存成 artifact——
+# 报告里引用的那些数字就是从这儿来的。
+
+on:
+  pull_request:
+    paths:
+      - "internal/service/audio/mfadec/**"
+      - "internal/licensing/**"
+      - "resources/licenses/**"
+      - ".github/workflows/windows-aac-spike.yml"
+  push:
+    branches:
+      - "work/**"
+  workflow_dispatch:
+
+jobs:
+  windows-aac-spike:
+    name: Windows 真机跑 AAC spike
+    runs-on: windows-2022
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # 为了把 spike 的输出贴成一条 PR 评论——真机数字得落在**看得到的地方**，
+      # 而不是只躺在 Actions 的日志里。
+      pull-requests: write
+      # 再贴一份到票面（issue #128）上：本仓库的约定是「裁决跟着票走」，
+      # 数字也一样——它们是这条路的**结论**，不是某次运行的副产品。
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # 这一步在 macOS 上**根本不存在**：那一半的代码有 `//go:build windows`，
+      # 在 macOS 上连编译都不进。所以「能不能编过」这件事只能在这里问。
+      - name: 编译与 vet（Windows 这一半）
+        run: |
+          go build ./...
+          go vet ./...
+
+      - name: 跑 spike
+        run: |
+          go test -v -count=1 -timeout 20m ./internal/service/audio/mfadec/ 2>&1 |
+            Tee-Object -FilePath spike.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # COM apartment 那一条**在负载下反复跑**才有意义（小规模测试跑不出来），
+      # 所以它单独再跑几遍。
+      - name: COM apartment 反复跑
+        run: |
+          go test -v -count=5 -timeout 20m -run TestSpikeTheCOMApartmentSurvivesLoad ./internal/service/audio/mfadec/ 2>&1 |
+            Tee-Object -FilePath apartment.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # 报告里引用的数字就在这两个日志里，所以**失败也要存**。
+      - name: 存下 spike 的输出
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-aac-spike-${{ github.run_number }}
+          path: |
+            spike.log
+            apartment.log
+          if-no-files-found: warn
+
+      # 把真机数字贴成一条 PR 评论。
+      #
+      # 为什么多这一步：spike 的结论是**数字**（首帧多少毫秒、逐样本差多少、
+      # COM 线程被换掉几次），而这些数字只存在于日志里。评审看的是 PR，
+      # 人看的是 PR——把数字放到 PR 上，才不用去翻 Actions 的日志。
+      - name: 把真机数字贴到 PR 上
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = '';
+            for (const f of ['spike.log', 'apartment.log']) {
+              if (!fs.existsSync(f)) continue;
+              body += `\n### ${f}\n\n\`\`\`\n${fs.readFileSync(f, 'utf8').slice(0, 40000)}\n\`\`\`\n`;
+            }
+            if (!body) body = '\n（没有日志：spike 还没跑起来就失败了。）\n';
+            const marker = '<!-- windows-aac-spike -->';
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const mine = comments.find(c => c.body && c.body.includes(marker));
+            const payload = `${marker}\n## Windows 真机上的 AAC spike\n\n本评论由 \`windows-aac-spike\` 这个工作流自动贴出（每次跑覆盖上一条）。\n${body}`;
+            if (mine) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo, comment_id: mine.id, body: payload });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body: payload });
+            }
+            // 再贴一份到票面（#128）上：本仓库的约定是「裁决跟着票走」，
+            // 而这些数字是这条路的**结论**，不是某次运行的副产品。
+            // 找不到票、贴不上，都不算失败——PR 上那一条才是主的那一份。
+            try {
+              const { data: issueComments } = await github.rest.issues.listComments({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number: 128 });
+              const onIssue = issueComments.find(c => c.body && c.body.includes(marker));
+              const issuePayload = `${marker}\n## Windows 真机上的 AAC spike（自动贴出，每次跑覆盖上一条）\n${body}`;
+              if (onIssue) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner, repo: context.repo.repo, comment_id: onIssue.id, body: issuePayload });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner, repo: context.repo.repo, issue_number: 128, body: issuePayload });
+              }
+            } catch (e) {
+              core.info(`贴到 #128 上没成：${e.message}`);
+            }

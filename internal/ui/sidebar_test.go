@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"os"
 	"path/filepath"
 	"slices"
@@ -672,6 +673,194 @@ func TestTheSidebarShowsTheAppNameExactlyOnce(t *testing.T) {
 	}
 	if len(names) != 1 {
 		t.Errorf("界面上有 %d 处应用名（%q），want 1 处", len(names), names)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 折叠态的悬停提示、收藏夹名的截断
+// ─────────────────────────────────────────────────────────────────────────────
+
+// collapsedShell 造一个**折叠着**的侧栏。
+//
+// ⚠️ 折叠后的宽度过渡是 200ms 的动画，无头 Tester 一帧最多 settle 20 帧，
+// 走不完——所以开了 ReduceMotion，动画直接落到终点（理由同 `sideShell`）。
+func collapsedShell(t *testing.T) (*Shell, *app.App, *mygoui.Tester) {
+	t.Helper()
+	st := app.DefaultSettings("")
+	st.SideMenuCollapsed = true
+	s, tt := newShell(t, withSettings(st),
+		withPrefs(mygoui.Preferences{ReduceMotion: true, TextScale: 1}))
+	tt.Frame()
+	return s, s.app, tt
+}
+
+// TestTheCollapsedSidebarItemSaysItsName 钉住验收第 1 条：
+// 折叠后每一项在悬停时给出名称提示。
+//
+// 折叠态那一格只有一个字（上游摆的是图标，而那一档还没换），没有字可以让用户
+// 对照着认——这一格完全靠记忆。
+//
+// ⚠️ **悬停提示要指针停够 0.6 秒才出**（`mygo/ui/tooltip.go` 的 tooltipDelay），
+// 所以是 Move + Advance + Frame，不是 Move + Frame。
+//
+// ⚠️ **断的是「多了一个」而不是「有没有」**：折叠态那一项的**无障碍名字**就是
+// 「下载记录」（见 `TestTheCollapsedSidebarItemHasItsFullName`），而提示是
+// 浮层里的**另一个**元素——所以判据是**同一个字出现了两次**（名字 + 提示），
+// 不是「画面上有这句话」。
+func TestTheCollapsedSidebarItemSaysItsName(t *testing.T) {
+	_, _, tt := collapsedShell(t)
+
+	// 折叠态那一列摆的是每个标题的第一个字。
+	r, ok := tt.Find("下")
+	if !ok {
+		t.Fatalf("折叠态的侧栏上没有「下载记录」那一个字，文字有 %q", tt.Texts())
+	}
+	before := countText(tt, "下载记录")
+	if before != 1 {
+		t.Fatalf("悬停之前「下载记录」出现了 %d 次，want 1（那一项的无障碍名字），文字有 %q",
+			before, tt.Texts())
+	}
+
+	tt.Move(r.X+r.W/2, r.Y+r.H/2)
+	tt.Advance(700 * time.Millisecond)
+	tt.Frame()
+
+	if got := countText(tt, "下载记录"); got != before+1 {
+		t.Errorf("悬停的时候没有多出一个「下载记录」（提示），出现了 %d 次，want %d，文字有 %q",
+			got, before+1, tt.Texts())
+	}
+}
+
+// TestTheCollapsedSidebarItemHasItsFullName 钉住折叠态那一项的**无障碍名字**。
+//
+// 折叠态可见的字只有一个字（「下」「本」「推」「设」），读屏软件念出来就是那一个
+// 字——这一格等于**完全没有名字**。所以那一项要带一个 `Label`（全名）。
+//
+// ⚠️ **Label 不在画面上多画一个字**：折叠态画面上本来就没有那个全名（展开态
+// 才有，而展开态**不**给 Label——那一档可见的字就是名字，见 `sidebar.go` 的
+// 注释）。
+func TestTheCollapsedSidebarItemHasItsFullName(t *testing.T) {
+	_, _, tt := collapsedShell(t)
+
+	for _, name := range []string{"推荐音乐", "本地音乐", "下载记录", "设置"} {
+		if !tt.HasText(name) {
+			t.Errorf("折叠态那一项没有全名 %q，文字有 %q", name, tt.Texts())
+		}
+	}
+	// 全名在，**那个字**也得在（折叠态画的是单字，不是全名）。
+	if _, ok := tt.Find("下"); !ok {
+		t.Errorf("折叠态那一列画的不是单字，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheCollapsedSidebarTipSitsToTheRightOfTheItem 钉住提示的**位置**。
+//
+// 上游折叠态那一项的提示是 `placement="right"`
+// （`biu/src/components/menu/menu-item.tsx:78`）——贴在那一项的右边。
+// 摆在上面的话提示会盖住上面那几项（侧栏只有 72 宽，摆不下别的东西），
+// 而摆在左边会被窗口边钳住。
+//
+// # ⚠️ **为什么断的是像素而不是那个元素的盒子**
+//
+// 折叠态那一项的**无障碍名字**也是「下载记录」（见
+// `TestTheCollapsedSidebarItemHasItsFullName`），而 `Tester.Find` 找的是**第一个**
+// 同样的字——那是那一项自己，**不是提示**。所以提示在哪儿只能看**画面**：
+// 提示的底色是**反色**（浅色下是深色，深色下是比背景略亮的 Surface），
+// 而侧栏那一列的底色是 `t.Background`。
+//
+// 深浅两套都量：浅色下反色是**深**色（和底色差得开），深色下反色是**略亮**的
+// Surface（只差一级），而那一格到底是不是提示，只有量了才知道。
+func TestTheCollapsedSidebarTipSitsToTheRightOfTheItem(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			st := app.DefaultSettings("")
+			st.SideMenuCollapsed = true
+			s, tt := newShell(t, systemIsDark(dark), withSettings(st),
+				withPrefs(mygoui.Preferences{ReduceMotion: true, TextScale: 1}))
+			tt.Frame()
+			theme := BuildTheme(s.app.SettingsSnapshot(), dark)
+
+			r, ok := tt.Find("下")
+			if !ok {
+				t.Fatalf("折叠态的侧栏上没有「下载记录」那一个字，文字有 %q", tt.Texts())
+			}
+			// 上面那一个字（「本」）——提示摆在**上面**的话它会被盖住。
+			above, ok := tt.Find("本")
+			if !ok {
+				t.Fatalf("折叠态的侧栏上没有「本地音乐」那一个字，文字有 %q", tt.Texts())
+			}
+
+			tt.Move(r.X+r.W/2, r.Y+r.H/2)
+			tt.Advance(700 * time.Millisecond)
+			tt.Frame()
+
+			inverse := color.RGBA{R: theme.Inverse.R, G: theme.Inverse.G,
+				B: theme.Inverse.B, A: theme.Inverse.A}
+			img := tt.Image()
+			// ① 侧栏右边那一格是提示的底色 → 提示贴在那一项的右边。
+			at := img.RGBAAt(int(app.CollapsedSideMenuWidth)+4, int(r.Y+r.H/2))
+			if at != inverse {
+				t.Errorf("侧栏右边那一格是 %v，want %v（提示的底色）——"+
+					"提示没有贴在那一项的右边", at, inverse)
+			}
+			// ② 上面那一个字没有被盖住 → 提示不在上面。
+			over := img.RGBAAt(int(above.X+above.W/2), int(above.Y+above.H/2))
+			if over == inverse {
+				t.Errorf("上面那一个字被提示盖住了（%v）——提示摆在上面了", over)
+			}
+		})
+	}
+}
+
+// TestALongFavoriteNameDoesNotMakeTheRowTaller 钉住验收第 2 条：
+// 长收藏夹名**不换行**（断高度不变）。
+//
+// 收藏夹名一长（比如「【长期主义】2026 年度歌单合集·最终版」），侧栏那一行
+// 会长高一截，把下面的收藏夹整体顶下去，侧栏跟着抖。侧栏只有 160~480 宽，
+// 超过约 20 个汉字就换行。
+//
+// ⚠️ **断的是高度，不是「有没有省略号」**：画面上那行字被截断了没有，画面上
+// 看不出来（省略号是画出来的，而截断的字和没截断的字**一样高**）——
+// 能分出来的只有「这一行有没有变高」。
+func TestALongFavoriteNameDoesNotMakeTheRowTaller(t *testing.T) {
+	_, a, tt, _ := favShell(t, 0, 0)
+
+	const longName = "【长期主义】2026 年度歌单合集·最终版"
+	a.SetFavorites(app.FavoritesCreated, []app.Favorite{
+		{ID: 1, Title: "短名字", Mid: 42, Type: 2},
+		{ID: 2, Title: longName, Mid: 42, Type: 2},
+		{ID: 3, Title: "第三首", Mid: 42, Type: 2},
+	})
+	tt.Frame()
+
+	first, ok := tt.Find("短名字")
+	if !ok {
+		t.Fatalf("侧栏上没有第一条收藏夹，文字有 %q", tt.Texts())
+	}
+	middle, ok := tt.Find(longName)
+	if !ok {
+		t.Fatalf("侧栏上没有那条长名字的收藏夹，文字有 %q", tt.Texts())
+	}
+	last, ok := tt.Find("第三首")
+	if !ok {
+		t.Fatalf("侧栏上没有第三条收藏夹，文字有 %q", tt.Texts())
+	}
+
+	// ① 长名字那一行**一样高**：换行的话它会是两行。
+	if middle.H != first.H {
+		t.Errorf("长名字那一行是 %v 高，短的是 %v 高——它换行了",
+			middle.H, first.H)
+	}
+	// ② 它**没有把下面那一行顶下去**：两条间距一样。
+	gapBefore := middle.Y - first.Y
+	gapAfter := last.Y - middle.Y
+	if gapBefore != gapAfter {
+		t.Errorf("长名字那一行前后两条的间距是 %v 和 %v——它把下面的顶下去了",
+			gapBefore, gapAfter)
 	}
 }
 

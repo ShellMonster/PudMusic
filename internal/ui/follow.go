@@ -47,9 +47,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -68,6 +70,24 @@ const followCardSide = 128
 
 // followCardPad 是卡里那圈留白。上游是 `p-4`（16）。
 const followCardPad = 16
+
+// 关注卡上那条 hover 操作条的三个数，照上游 `user-card.tsx:89`：
+//   - 从底边往上 16（`bottom-4`）；
+//   - 平时再往下藏 80（`translate-y-20`），指针移上去才升回来；
+//   - 300 毫秒（`duration-300 ease-in-out`）。
+const (
+	followActionBarBottom = 16
+	followActionBarRise   = 80
+	followActionBarTime   = 300 * time.Millisecond
+)
+
+// followActionBarKey 是操作条那个动画的键。
+//
+// ⚠️ **每一帧都要问，哪怕这一帧没 hover**（理由同 `playbar_volume.go` 的
+// `volHoverKey`）：框架的 `Animate` 在**第一次**见到一个键时直接返回目标值，
+// 只在 hover 时才问的话，第一次 hover 就「啪」地到终点、没有上滑。键用
+// 一个零大小结构体，和别的动画撞不上。
+var followActionBarKey = struct{ followActionBar bool }{}
 
 // followSearchLabel 是搜索框的标签。**抄上游那个 placeholder 一字不差**
 // （`follow-list/index.tsx:296`）。
@@ -220,6 +240,9 @@ type followWhich uint8
 const (
 	followTags followWhich = iota
 	followUsers
+	// followUnfollow 是卡片操作条上那一次「取消关注」回来了。它不带列表，
+	// 只带「取的是谁、成没成」。
+	followUnfollow
 )
 
 // followResult 是后台拉完之后投进信箱的东西。
@@ -238,7 +261,10 @@ type followResult struct {
 	// total 是「一共多少人」。三个接口给总数、分组明细不给（那一档用分组自己的
 	// count，发请求之前就在界面线程上取好了，见 tabTotal）。
 	total int
-	err   error
+	// unfollowMid 是这一趟取消关注的是谁（只在 which == followUnfollow 时
+	// 有意义）。
+	unfollowMid int64
+	err         error
 }
 
 // followPageOf 是这一页的状态，第一次问的时候现建。
@@ -331,8 +357,11 @@ func (s *Shell) viewFollow(c *ui.Context, _ *ui.Route) {
 	// 🔴 **没登录不假装有内容**。这一页的四个接口全都要 Cookie，没登录时它们
 	// 一律回 -101，而 -101 和「网络断了」在这一层一模一样。所以先判登录态、
 	// 一个请求都不发（理由见文件头「五种空」）。
-	if !s.app.LoggedIn() {
-		s.viewFollowNotLoggedIn(c)
+	//
+	// ⚠️ **旗标在路由表里**（`Route.RequiresLogin`），而「要不要摆进侧栏」是
+	// 另一个标志（`Route.HideInMenuWhenLoggedOut`）——两件事，两个标志（票 #138）。
+	if lookup(followPath).RequiresLogin && !s.app.LoggedIn() {
+		s.viewNeedsLogin(c, "page:"+followPath, followNotLoggedIn)
 		return
 	}
 
@@ -387,41 +416,29 @@ func (f *followPage) scrollTop() {
 	f.state.ScrollTo(0, ui.Start)
 }
 
-// viewFollowNotLoggedIn 是「还没登录」那一支。**不发任何请求**。
-func (s *Shell) viewFollowNotLoggedIn(c *ui.Context) {
-	t := c.Theme()
-	ui.Column(c).Key("page:" + followPath).Grow(1).Center().Gap(8).Padding(24).
-		Children(func() {
-			ui.Text(c, followNotLoggedIn.Title).FontSize(22).Bold()
-			ui.Text(c, followNotLoggedIn.Hint).FontSize(12).TextColor(t.TextMuted)
-			// 给一个能立刻做完的事：这一页在没登录之前永远是这个样子，而
-			// `/login` 就是扫码登录那一页（`router.go` 的 routes 表里那一条）。
-			if ui.PrimaryButton(c, "去登录").Clicked() {
-				s.navigate(loginPath)
-			}
-		})
-}
-
 // viewFollowPane 是左边那一列：标题 + 「全部关注(N)」+ 每个分组一格。
 //
 // ⚠️ **左边的行和右边的格是两个 `ListState`，不能共用**（MyGo 会在同一个
 // ListState 被两个 List 显示时 panic）。
 func (s *Shell) viewFollowPane(c *ui.Context, f *followPage) {
 	t := c.Theme()
+	// 右缘一条分界线，照上游 `follow-list/index.tsx:204` 的 `border-r`
+	// （`border-divider/40`）。
 	ui.Column(c).Key("follow-pane").Width(followPaneW).FillHeight().
-		Padding(8, 6).Gap(4).Children(func() {
+		Padding(8, 8).Gap(4).
+		BorderWidth(0, 1, 0, 0).BorderColor(t.Border.Alpha(paneDividerA)).Children(func() {
 		// ⚠️ **失败也要说失败**：`tagErr` 有值的时候下面那一支已经把分组列表
 		// 换成了错误提示，而标题还在——用户点「重试」时看得出自己重试的是
 		// 哪一摊。
-		ui.Text(c, followPaneTitle(f)).FontSize(14).Bold().PaddingX(6)
+		ui.Text(c, followPaneTitle(f)).FontSize(scale.Font(c, 14)).Bold().PaddingX(6)
 
 		// ⚠️ **「拉失败了」必须排在「空」前面**：反过来的话第一页失败时左边
 		// 是一片「还没有分组」，而 `tagStarted` 仍是 false、`tagErr` 非 nil，
 		// 切走再切回来也不会重拉——用户会以为他真的一个分组都没建过。
 		if !f.tagStarted && f.tagErr != nil {
-			ui.Text(c, "分组没拉出来："+f.tagErr.Error()).FontSize(12).
+			ui.Text(c, "分组没拉出来："+f.tagErr.Error()).FontSize(scale.Font(c, 12)).
 				TextColor(t.TextMuted).PaddingX(6)
-			if ui.Button(c, "重试拉分组").FontSize(12).Clicked() {
+			if flatButton(c, "重试拉分组").FontSize(scale.Font(c, 12)).Clicked() {
 				f.tagErr, f.tagLoading = nil, true
 				go s.fetchFollowTags(context.Background(), f)
 			}
@@ -430,16 +447,17 @@ func (s *Shell) viewFollowPane(c *ui.Context, f *followPage) {
 		// 🔴 **「没拉到」和「一个分组都没有」是两件事**，界面上是两句话：
 		// 前者要按重试，后者不用（那是真的没有分组，B 站那会儿返回空数组）。
 		if !f.tagStarted {
-			ui.Text(c, "正在加载分组…").FontSize(12).TextColor(t.TextMuted).PaddingX(6)
+			ui.Text(c, "正在加载分组…").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).PaddingX(6)
 			return
 		}
 
 		// ⚠️ Key 挂在外面的 Column 上：List 是自己管状态的控件，事后再挂 key
 		// 会 panic（理由同 `dynamicfeed.go`）。
 		ui.Column(c).Key("follow-pane-list").Grow(1).FillHeight().Children(func() {
-			ui.List(c, &f.paneState, len(f.tags)+1).
+			pane := ui.List(c, &f.paneState, len(f.tags)+1).
 				Grow(1).FillHeight().
 				Rows(func(r ui.ListRow) { s.viewFollowPaneRow(r.Context, f, r.Index) })
+			s.trackScrollbar(pane)
 		})
 	})
 }
@@ -500,7 +518,7 @@ func (s *Shell) viewFollowPaneRow(c *ui.Context, f *followPage, i int) {
 		s.selectFollowTab(f, tab)
 	}
 	box.Children(func() {
-		ui.Text(c, label).Grow(1).FontSize(13).MaxLines(1).Ellipsis("…")
+		ui.Text(c, label).Grow(1).FontSize(scale.Font(c, 13)).MaxLines(1).Ellipsis("…")
 	})
 }
 
@@ -559,9 +577,9 @@ func (s *Shell) viewFollowSearch(c *ui.Context, f *followPage) {
 		// ⚠️ **清空按钮只在真的搜着的时候才在**：Biu 那个 `isClearable` 在框是空的
 		// 时候也画一颗，画出来按下去什么也没发生。
 		if f.applied != "" {
-			ui.Text(c, "正在搜「"+f.applied+"」").FontSize(12).TextColor(t.TextMuted).
+			ui.Text(c, "正在搜「"+f.applied+"」").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).
 				MaxLines(1).Ellipsis("…")
-			if ui.Button(c, "清空搜索").FontSize(12).Clicked() {
+			if ui.Button(c, "清空搜索").FontSize(scale.Font(c, 12)).Clicked() {
 				f.draft = ""
 				s.searchFollow(f, "")
 			}
@@ -597,7 +615,10 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 		return
 	}
 	if !f.pager.started && f.pager.loading {
-		s.viewEmpty(c, "follow:loading", emptyState{Title: "正在加载关注的人…"})
+		// ⚠️ **走 `viewLoading`（和「没有结果」同一个出口）**：这一格原来是一句
+		// 13pt 淡灰缩在左边，而「没关注任何人」是居中 15pt——用户等的那几秒里
+		// 那一行字和回来之后那一格对不上（票 #138）。
+		s.viewLoading(c, "follow:loading", "正在加载关注的人…")
 		return
 	}
 	// 🔴 **「一格都没有」也分几种**：见下面 `followEmpty`。合成一句的话，用户
@@ -655,6 +676,7 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 			//（理由见 `homepage.go` 里「切 Tab 的滚动位置」那一段）。
 			TrackScroll(&f.scroll).
 			Rows(func(r ui.ListRow) { s.viewFollowRow(r.Context, f, r.Index, cols) })
+		s.trackScrollbar(e)
 		// 量这一帧的容器宽，下一帧用。`Bounds` 报的是**上一帧**的盒子。
 		if bw := e.Bounds().W; bw > 0 {
 			f.width = bw
@@ -777,7 +799,7 @@ func (s *Shell) viewFollowRow(c *ui.Context, f *followPage, i, cols int) {
 func (s *Shell) viewFollowCardGuarded(c *ui.Context, f *followPage, i int) {
 	u := f.users[i]
 	if f.failed[u.Mid] {
-		ui.Text(c, "这一格画不出来").FontSize(13).TextColor(c.Theme().TextMuted).
+		ui.Text(c, "这一格画不出来").FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).
 			Padding(followCardPad).MaxLines(1)
 		return
 	}
@@ -814,29 +836,126 @@ func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser) {
 
 	// ⚠️ **格子的底色跟着这一格自己**（不是 `ui.List` 那一行的选中底）——行是
 	// 布局，用户认的是「我点的是这张卡」。
-	card := ui.Column(c).Grow(1).Radius(t.Radius).AlignSelf(ui.Stretch).
+	//
+	// ⚠️ **`Clip()` 是操作条藏起来的前提**：那一条平时停在卡片下沿之外 64 点
+	// （见 `followActionBarBottom` / `Rise`），不裁的话它会画到下面那张卡上。
+	card := ui.Column(c).Grow(1).Radius(t.Radius).AlignSelf(ui.Stretch).Clip().
 		AlignItems(ui.Center).Gap(6).Padding(followCardPad).
 		OnClick(func() { s.navigate(upPathOf(u.Mid)) })
 	if card.Hovered() {
 		card = card.Background(t.SurfaceHover)
 	}
 
+	// 🔴 **每帧都问一次**（理由见 `followActionBarKey`）：指针在卡上时目标是 1，
+	// 不在时是 0；框架在这 300 毫秒里自己一帧一帧推。
+	shown := float32(0)
+	if card.Hovered() {
+		shown = 1
+	}
+	// 缓动照上游的 `ease-in-out`（`user-card.tsx:89`），不是框架 `Animate`
+	// 默认的 ease-out。
+	shown = card.AnimateWith(followActionBarKey, shown, followActionBarTime, ui.EaseInOut)
+
 	card.Children(func() {
 		// 头像。上游是 `rounded-full`，所以是圆的（`spaceAvatar` 画的也是圆的，
 		// 而且它四态齐全、还带 Label——无头 Tester 量得到）。
-		s.spaceAvatar(c, u.Face, followCardSide)
-		ui.Text(c, name).FontSize(15).MaxLines(1).Ellipsis("…")
+		s.spaceAvatar(c, u.Face, followCardSide, false)
+		// 名字 18、签名 14，照 `user-card.tsx:84-85` 的 `text-lg` / `text-sm`。
+		ui.Text(c, name).FontSize(scale.Font(c, 18)).MaxLines(1).Ellipsis("…")
 		if u.Official != "" {
-			ui.Text(c, u.Official).FontSize(12).TextColor(t.TextMuted).
+			ui.Text(c, u.Official).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).
 				MaxLines(1).Ellipsis("…")
 		}
 		// ⚠️ **签名空的时候整块不画**：Biu 那一格是空的，我们这里留一个 6 的
 		// 间距 + 一段空白，看起来像卡少了一截（理由同 `list.Grid` 里时长那一列）。
 		if u.Sign != "" {
-			ui.Text(c, u.Sign).FontSize(12).LineHeight(1.4).TextColor(t.TextMuted).
+			ui.Text(c, u.Sign).FontSize(scale.Font(c, 14)).LineHeight(1.4).TextColor(t.TextMuted).
 				TextAlign(ui.Center).MaxLines(2).Ellipsis("…")
 		}
+		s.viewFollowActions(c, u, shown)
 	})
+}
+
+// viewFollowActions 是卡片底下那条 hover 才升上来的操作条。
+//
+// 位置照上游 `user-card.tsx:89`：`absolute bottom-4 left-1/2 -translate-x-1/2`
+// 加 `translate-y-20`，hover 时 `translate-y-0`。我们不用 transform（DESIGN
+// §5：「动画不要用 transform 动大子树」），改成直接动 `Bottom`——动的只是这一条
+// 自己的布局位置。
+//
+// ⚠️ **这里只摆「取消关注」**：上游那一格还有「设置分组」，而设置分组要先
+// 选一个组、再走 `/x/relation/tags/addUsers`——那条写接口和选组的弹层都不在
+// 这一页现有的四个 GET 里（见 `bili/follow.go` 的文件头）。按下去什么都不会
+// 发生的按钮，比少这一枚更糟。
+func (s *Shell) viewFollowActions(c *ui.Context, u bili.FollowUser, shown float32) {
+	t := c.Theme()
+	bottom := followActionBarBottom - (1-shown)*followActionBarRise
+
+	// 完全藏起来时连指针也别吃：`Invisible` 保留布局、不画、不吃指针，
+	// 而且无头 Tester 也找不到它——「没 hover 时画面上没有这条」才断言得了。
+	layer := ui.Column(c).Absolute().Left(0).Right(0).Bottom(bottom).
+		AlignItems(ui.Center)
+	if shown <= 0.001 {
+		layer = layer.Invisible()
+	}
+	layer.Children(func() {
+		bar := ui.Row(c).Gap(2).Padding(4, 8).Radius(999).
+			Background(t.Background).Border(1, t.Border).
+			Shadow(0, 6, 20, 0, popupShadow(t))
+		bar.Children(func() {
+			if flatButton(c, "取消关注").FontSize(scale.Font(c, 13)).
+				TextColor(t.Danger).Clicked() {
+				s.unfollowFromFollowCard(u)
+			}
+		})
+	})
+}
+
+// unfollowFromFollowCard 是操作条上按了「取消关注」。
+//
+// 🔴 **写接口要一个往返，所以在后台跑**（理由同 `upSpace.follow`）。后台只
+// 往带锁的信箱里投「取的是谁、成没成」，界面线程在下一帧开头收（铁律三：
+// 投递完必须叫醒界面）。
+func (s *Shell) unfollowFromFollowCard(u bili.FollowUser) {
+	f := s.followPageOf()
+	go func() {
+		err := s.app.UpSpaceOf(u.Mid).Follow(context.Background(), false)
+		f.boxMu.Lock()
+		f.box = append(f.box, followResult{
+			which:       followUnfollow,
+			selfMid:     s.app.SelfMid(),
+			unfollowMid: u.Mid,
+			err:         err,
+		})
+		f.boxMu.Unlock()
+		s.wake.invalidate()
+	}()
+}
+
+// removeFollowUser 把 u.Mid 从这一页上拿掉（取消关注成功之后）。
+//
+// ⚠️ **不整页重拉**：重拉会让滚动位置回到顶上，用户刚取关的那个人可能在第 3
+// 页，而他一按就被弹回第 1 页。拿掉这一格、把总数减一就够；后面翻页时的重叠
+// 仍由 `seen` 挡着。
+func (f *followPage) removeFollowUser(mid int64) {
+	for i := range f.users {
+		if f.users[i].Mid == mid {
+			f.users = append(f.users[:i], f.users[i+1:]...)
+			break
+		}
+	}
+	delete(f.seen, "follow:"+strconv.FormatInt(mid, 10))
+	if f.total > 0 {
+		f.total--
+	}
+	// 正在看某一组时，那一组后面的人数也跟着减一（B 站那两个数字是同一个数
+	// 的两份，只减一处的话界面上会互相打架）。停在「全部关注」时不知道这个人
+	// 还在哪些组里，那几格就先不动——下次切过去时 B 站给的是新的。
+	for i := range f.tags {
+		if followTagTab(f.tags[i].ID) == f.tab && f.tags[i].Count > 0 {
+			f.tags[i].Count--
+		}
+	}
 }
 
 // viewFollowSentinel 是末尾那一行：还有就拉，拉失败让人点重试。
@@ -845,9 +964,9 @@ func (s *Shell) viewFollowSentinel(c *ui.Context, f *followPage) {
 	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(8).Padding(12).Children(func() {
 		switch {
 		case f.pager.err != nil:
-			ui.Text(c, "加载失败："+f.pager.err.Error()).FontSize(13).
+			ui.Text(c, "加载失败："+f.pager.err.Error()).FontSize(scale.Font(c, 13)).
 				TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
-			if ui.Button(c, "重试加载关注的人").FontSize(13).Clicked() {
+			if flatButton(c, "重试加载关注的人").FontSize(scale.Font(c, 13)).Clicked() {
 				f.pager.err = nil
 				if ctx := f.pager.begin(); ctx != nil {
 					go s.fetchFollowUsers(context.Background(), f, f.gen, f.tab, f.applied,
@@ -856,9 +975,9 @@ func (s *Shell) viewFollowSentinel(c *ui.Context, f *followPage) {
 			}
 		case f.pager.loading:
 			ui.Spinner(c).Label("正在加载")
-			ui.Text(c, "正在加载…").FontSize(13).TextColor(t.TextMuted)
+			ui.Text(c, "正在加载…").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 		default:
-			ui.Text(c, "继续往下滚，加载更多关注的人").FontSize(13).TextColor(t.TextMuted)
+			ui.Text(c, "继续往下滚，加载更多关注的人").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 		}
 	})
 }
@@ -1009,11 +1128,24 @@ func (s *Shell) adoptFollow(f *followPage) {
 		// 拉取的代码自己崩了，全走这一条。漏了它那一格会永远停在「正在加载」。
 		if r.selfMid != f.selfMid {
 			// 换账号之前发出去的那一页（`stop` 停不掉已经在回来的那一页）。
-			if r.which == followTags {
+			// 取关那一趟直接丢掉：它改的是**上一个账号**的关注。
+			switch r.which {
+			case followTags:
 				f.tagLoading = false
-			} else {
+			case followUsers:
 				f.pager.settle()
 			}
+			continue
+		}
+		if r.which == followUnfollow {
+			// 取关回来了。**成功才把那一格拿掉**；失败就让它留在原地，并说一句
+			// 为什么——画面上卡片消失、而 B 站那边其实没取关，是最坏的那种假象。
+			if r.err != nil {
+				log.Printf("biu: 取消关注失败了：%v", r.err)
+				s.addToast("取关没成功：" + r.err.Error())
+				continue
+			}
+			f.removeFollowUser(r.unfollowMid)
 			continue
 		}
 		if r.which == followTags {

@@ -142,14 +142,52 @@ func TestTheCacheIsKeyedBySourceAndByWord(t *testing.T) {
 }
 
 // TestEachSourceHasItsOwnCache：两个源搜同一个词是两次请求、两条缓存。
+//
+// # ⚠️ 为什么两个源要**一个一个**来
+//
+// 原来这里是「连着发两次」：
+//
+//	a.SearchLyrics(0, "晴天")
+//	a.SearchLyrics(1, "晴天")
+//
+// 第二次会把**代次**加一（`SearchLyrics` 里 `s.gen++`），而第一次那趟还在路上。
+// 它回来时发现代次变了，就**按规矩**把结果丢掉（那条守卫有它自己的回归测试
+// `TestAStaleSearchNeverLands`——它防的是「旧的一批盖掉新的一批」）。
+//
+// **丢掉的那一趟连缓存也不写**（`rememberSearchLocked` 在守卫后面），所以第一
+// 个源的结果**没进缓存**，下面那一轮就会**重搜一次**——症状是
+// 「网易云搜了 2 次，want 1」。
+//
+// 而这**是不是 bug 要看机器忙不忙**：第一次那趟必须赶在第二次 `SearchLyrics`
+// 拿到锁**之前**跑完并写进缓存。机器闲的时候它基本总能赶上，机器忙的时候
+// 那个 goroutine 排在后面，就赶不上了——**飘红飘绿跟被测的逻辑一点关系
+// 都没有**。
+//
+// 实测（10 核机器，`GOMAXPROCS=2` + 24 个烧 CPU 的 goroutine）：
+// 同样这个测试 150 次里飘了好几次；本机低负载下 150 次全绿。
+//
+// # 改法为什么是对的
+//
+// - 守卫本身**是对的**（界面上的「正在搜…」是按代次算的），本测试不该去改它。
+// - 真实的界面一次只搜**当前那个** tab（`internal/ui/lyricssearch.go` 里是
+//   `s.app.SearchLyrics(l.tab, q)`），**不会连着搜两个 tab**——所以原来那个
+//   摆法测的是一个界面根本不会产生的时序。
+// - 同一个文件里那条 `TestTheCacheIsKeyedBySourceAndByWord` **本来就是这么写的**
+//   （先等第一个词回来，再发第二个词）。这一条改成一样的写法，两个测试就一致了。
+//
+// 断的东西**一点没少**：两个源各搜一次、各进各的缓存，再搜一遍一个请求都不发。
 func TestEachSourceHasItsOwnCache(t *testing.T) {
 	netease := sourceOf("netease", lyrics.Candidate{ID: "n1"})
 	lrclib := sourceOf("lrclib", lyrics.Candidate{ID: "l1"})
 	a, _ := searchApp(t, netease, lrclib)
 
+	// ⚠️ **两个源要一个一个来**（原因见下面那段注释）。
 	a.SearchLyrics(0, "晴天")
+	waitSearch(t, 2*time.Second, "第一个源回来", func() bool {
+		return a.LyricSearch().Tab == 0 && len(a.LyricSearch().Candidates) == 1
+	})
 	a.SearchLyrics(1, "晴天")
-	waitSearch(t, 2*time.Second, "两个源都回来", func() bool {
+	waitSearch(t, 2*time.Second, "第二个源回来", func() bool {
 		return a.LyricSearch().Tab == 1 && len(a.LyricSearch().Candidates) == 1
 	})
 	a.SearchLyrics(0, "晴天")

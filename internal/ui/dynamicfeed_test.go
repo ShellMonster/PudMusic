@@ -4,6 +4,8 @@
 package ui
 
 import (
+	"image"
+	"image/color"
 	"net/http"
 	"sync"
 	"testing"
@@ -424,4 +426,105 @@ func TestTheAuthorRetryWhilePendingDoesNotSendASecondRequest(t *testing.T) {
 		t.Errorf("整个过程第二页被请求了 %d 次，want %d —— 重试期间又发起了重复请求",
 			after-before, 1)
 	}
+}
+
+// TestTheDynamicPaneCardAndCoverMatchUpstream 钉住动态流这一页的结构尺寸：
+// 左栏 256（上游 `w-64`）、卡片左右各 32、作者头像 36、投稿封面 192×128、
+// 每张卡片一条下边框，以及左栏右缘那条分界线。
+func TestTheDynamicPaneCardAndCoverMatchUpstream(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "我自己", 0, 1)
+	b.on("/x/polymer/web-dynamic/v1/feed/all", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{"items": []any{
+			uiDynamic("1", "第一条正文"),
+			uiDynamicArchive("2", "BV1xx"),
+		}, "has_more": false})
+	})
+	b.on("/x/relation/followings", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{"total": 2, "list": []any{
+			map[string]any{"mid": 11, "uname": "第一个 UP", "face": "https://f/author-11.jpg"},
+			map[string]any{"mid": 12, "uname": "第二个 UP", "face": "https://f/author-12.jpg"},
+		}})
+	})
+
+	s, tt, _ := newSpaceShell(t, b, true, "77")
+	s.navigate(dynamicFeedPath)
+	tt.Frame()
+	f := s.dynamicFeedOf()
+	waitFrames(t, tt, "动态到了", func() bool { return len(f.items) == 2 && len(f.authors) == 2 })
+	tt.Frame()
+
+	pageLeft := float32(sideTargetWidth(s.app.SettingsSnapshot()))
+
+	// ① 左边那一栏 256，卡片左右各 32。第一张卡那一行的无障碍盒子就是
+	// 卡片的内容区（`st.Label` 挂在整行上），它的左右缘同时钉住这两个数。
+	card, ok := tt.Find("第一条正文")
+	if !ok {
+		t.Fatalf("画面上找不到第一条动态，文字有 %q", tt.Texts())
+	}
+	wantLeft := pageLeft + authorPaneW + 32
+	if card.X != wantLeft {
+		t.Errorf("卡片左缘在 %.1f，want %.1f（左栏 %d + 左右 32）", card.X, wantLeft, authorPaneW)
+	}
+	winW := float32(tt.Image().Bounds().Dx())
+	if got := winW - (card.X + card.W); got != 32 {
+		t.Errorf("卡片离页面右缘 %.1f，want 32", got)
+	}
+
+	// ② 左栏右缘那条分界线：上游 `border-r` + `border-divider/40`。
+	img := tt.Image()
+	bx := int(pageLeft) + authorPaneW - 1
+	if got, ref := img.RGBAAt(bx, 400), img.RGBAAt(bx-4, 400); got == ref {
+		t.Errorf("左栏右缘 (%d,400) 是 %v，和左边四像素一样——那条分界线没画", bx, got)
+	}
+
+	// ③ 左栏每行的头像 36（上游 `h-9 w-9`）。
+	av, ok := tt.Find("https://f/author-11.jpg")
+	if !ok {
+		t.Fatalf("作者栏头像没画出来，文字有 %q", tt.Texts())
+	}
+	if av.W != 36 || av.H != 36 {
+		t.Errorf("作者栏头像量出来是 %.1f×%.1f，want 36×36", av.W, av.H)
+	}
+
+	// ④ 投稿封面 192×128（上游 `h-32 w-48`）。
+	cover, ok := tt.Find("https://f/c.jpg")
+	if !ok {
+		t.Fatalf("投稿封面没画出来，文字有 %q", tt.Texts())
+	}
+	if cover.W != 192 || cover.H != 128 {
+		t.Errorf("投稿封面量出来是 %.1f×%.1f，want 192×128", cover.W, cover.H)
+	}
+
+	// ⑤ 两张卡之间那条下边框：扫两行之间，找一行**贯穿卡片整宽**的线。
+	second, ok := tt.Find("投稿 BV1xx")
+	if !ok {
+		t.Fatalf("画面上找不到第二条动态，文字有 %q", tt.Texts())
+	}
+	ref := img.RGBAAt(int(card.X)+4, int(card.Y)+4)
+	if _, ok := fullWidthRule(img, int(card.X), int(card.X+card.W),
+		int(card.Y), int(second.Y), ref); !ok {
+		t.Errorf("两张动态之间没有贯穿卡片宽的一条下边框（卡片边框 `border-b` 没画）")
+	}
+}
+
+// fullWidthRule 在一段竖向范围里找一条**几乎贯穿整宽**的水平线，返回它的 y。
+//
+// 判据是「这一行 95% 以上的采样点都不等于底色」：正文、头像这些也会比底色深，
+// 但它们只占一行里的一小段；下边框是整条铺满的。
+func fullWidthRule(img *image.RGBA, x0, x1, y0, y1 int, bg color.RGBA) (int, bool) {
+	for y := y0; y < y1; y++ {
+		n, all := 0, 0
+		for x := x0; x < x1; x += 2 {
+			all++
+			c := img.RGBAAt(x, y)
+			if absDiff(c.R, bg.R)+absDiff(c.G, bg.G)+absDiff(c.B, bg.B) > 6 {
+				n++
+			}
+		}
+		if all > 0 && n*100/all >= 95 {
+			return y, true
+		}
+	}
+	return 0, false
 }

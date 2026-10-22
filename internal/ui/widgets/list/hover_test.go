@@ -230,7 +230,7 @@ func TestTheHoverFeedbackFadesInOverTwoHundredMilliseconds(t *testing.T) {
 			x = tri.X - coverSizeLeftEdge
 		} else {
 			// 还没出现时按行的位置推：封面左边 = 行左边 + 内边距 + 序号宽 + 间距。
-			x = cardPadX + indexWidth + cardGap
+			x = cardPadX + indexWidth + rowGap
 		}
 		return brightness(pixelAt(tt, x, triY(tt, songs[2].Title)))
 	}
@@ -575,7 +575,8 @@ func TestTheCardGradientBarSaysTheDuration(t *testing.T) {
 // TestTheCardGradientBarSaysThePlayCount 钉住封面底部那一条渐变**左半边是播放量**。
 //
 // 上游 `music-card/index.tsx:50-55` 的那一条上是「左播放量、右时长」。播放量来自
-// `Music.View`（见它那几段注释：有它的是首页 / 搜索歌曲视频 / UP 空间投稿 / 稍后再看）。
+// `Music.View`（见它那几段注释：有它的是首页 / 搜索歌曲视频 / UP 空间投稿 /
+// 稍后再看 / 收藏夹·合集·系列）。
 //
 // ⚠️ **它必须在左边**：那一条只有 22 高，播放量和时长挤在两头，而这一条量的是播放量
 // 的右边缘紧跟着时长的左边——放反了就是两串字贴在一起。

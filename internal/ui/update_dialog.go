@@ -35,6 +35,7 @@ import (
 	"strings"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 )
@@ -164,11 +165,11 @@ func (s *Shell) drawUpdateDialog(c *ui.Context, st app.UpdateState) {
 		// 症状是「看得见、点不动」）。
 		ui.Column(c).Key("dialog:update").Width(updateDialogWidth).Gap(dialogGap).
 			Children(func() {
-				ui.Text(c, updateDialogTitle).FontSize(16).Bold()
+				ui.Text(c, updateDialogTitle).FontSize(scale.Font(c, 16)).Bold()
 				s.updateVersionLine(c, st)
 				s.updateNotes(c, st)
 				if st.FellBack {
-					ui.Text(c, updateFellBack).FontSize(12).TextColor(t.TextMuted).Wrap()
+					ui.Text(c, updateFellBack).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Wrap()
 				}
 				if st.Phase == app.UpdateDownloading && st.Total > 0 {
 					ui.Progress(c.Key("update-bar"), st.Percent/100).FillWidth()
@@ -194,7 +195,7 @@ func (s *Shell) drawUpdateDialog(c *ui.Context, st app.UpdateState) {
 // updateVersionLine 是标题下面那一行。画法和设置页上那一行是同一份
 // （`versionLine`），只有字号不同。
 func (s *Shell) updateVersionLine(c *ui.Context, st app.UpdateState) {
-	s.versionLine(c, "update-versions", 13, st)
+	s.versionLine(c, "update-versions", 13, 700, st)
 }
 
 // updateNotes 画更新日志。空的那一档是居中的灰字，照 Biu。
@@ -208,7 +209,7 @@ func (s *Shell) updateNotes(c *ui.Context, st app.UpdateState) {
 	// 里那个三元）。不 trim 的话那一份会渲染成一个空白的滚动区，用户看见的是
 	// 一块什么都没有的框，而不是「暂无更新日志」这一句能回答他的话。
 	if strings.TrimSpace(st.Notes) == "" {
-		ui.Text(c, updateNoNotes).FontSize(13).TextColor(c.Theme().TextMuted).
+		ui.Text(c, updateNoNotes).FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).
 			TextAlign(ui.Center).FillWidth().Padding(0, 0, 8, 0)
 		return
 	}
@@ -223,9 +224,10 @@ func (s *Shell) updateNotes(c *ui.Context, st app.UpdateState) {
 		// 打开」，正是更新日志要的（发布者写的是 GitHub 上那个 issue 的链接）。
 		s.update.notes = &markdown.Options{}
 	}
-	ui.Scroll(c).Key("update-notes").FillWidth().MaxHeight(updateNotesMaxH).
+	notes := ui.Scroll(c).Key("update-notes").FillWidth().MaxHeight(updateNotesMaxH).
 		TrackScroll(&s.update.scroll).
 		Children(func() { markdown.View(c, st.Notes, s.update.notes) })
+	s.trackScrollbar(notes)
 }
 
 // updateFooter 是底部那一行：左边速度 / 错误 / 完成，右边大小和按钮。
@@ -241,17 +243,17 @@ func (s *Shell) updateFooter(c *ui.Context, st app.UpdateState) {
 			case st.Phase == app.UpdateFailed && st.Err != "":
 				// 出错了就把原因说全（框架那一句可能很长），并让它可以选中复制：
 				// 用户要拿这句话去提 issue。
-				ui.Text(c, st.Err).FontSize(12).TextColor(t.Danger).Wrap().Selectable()
+				ui.Text(c, st.Err).FontSize(scale.Font(c, 12)).TextColor(t.Danger).Wrap().Selectable()
 			case st.Phase == app.UpdateReady:
-				ui.Text(c, updateReadyText).FontSize(12).TextColor(t.TextMuted)
-				ui.Text(c, updateReadyNote).FontSize(11).TextColor(t.TextMuted).Wrap()
+				ui.Text(c, updateReadyText).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+				ui.Text(c, updateReadyNote).FontSize(scale.Font(c, 11)).TextColor(t.TextMuted).Wrap()
 			case st.Phase == app.UpdateDownloading:
-				ui.Text(c, updateSpeed(st.Speed)).FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, updateSpeed(st.Speed)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 			}
 		})
 		if st.Phase == app.UpdateDownloading {
 			ui.Text(c, updateSizes(st.Transferred, st.Total)).
-				FontSize(12).TextColor(t.TextMuted)
+				FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 		}
 		// ⚠️ 按钮这一行是**面板的直接子元素**（在上面那个 Column 外面），
 		// 见 drawUpdateDialog 的注释：套进 Column 的话点不动。

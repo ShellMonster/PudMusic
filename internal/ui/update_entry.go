@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -42,8 +44,11 @@ func (s *Shell) settingsUpdate(c *ui.Context, st app.UpdateState) {
 }
 
 // updateVersionTitle 是那一行的标题。
+//
+// 字号和字重跟着设置页的行标题走（16/500，票 #166 的 G06）；弹窗里那一行是
+// 另一档（13/700），所以这两样都从调用点传进 `versionLine`。
 func (s *Shell) updateVersionTitle(c *ui.Context, st app.UpdateState) {
-	s.versionLine(c, "setting:updateVersion", 14, st)
+	s.versionLine(c, "setting:updateVersion", 16, weightMedium, st)
 }
 
 // versionLine 是「当前版本 x.y.z → a.b.c」那一行，设置页和弹窗共用一份。
@@ -54,13 +59,15 @@ func (s *Shell) updateVersionTitle(c *ui.Context, st app.UpdateState) {
 // 照 Biu 的 `system-settings.tsx`：`<span>当前版本 {appVersion}</span>` 后面
 // （有这个才画）`<RiArrowRightLongLine/>` + 主色的新版本号，连「箭头朝右」这个
 // 方向都照抄——Biu 那一段是横排的，箭头朝左会读成「版本往回退」。
-func (s *Shell) versionLine(c *ui.Context, key string, size float32, st app.UpdateState) {
+func (s *Shell) versionLine(c *ui.Context, key string, size float32, weight int, st app.UpdateState) {
 	t := c.Theme()
 	ui.Row(c).Key(key).Gap(6).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "当前版本 "+app.VersionLabel(st.Current)).FontSize(size).Bold()
+		ui.Text(c, "当前版本 "+app.VersionLabel(st.Current)).FontSize(scale.Font(c, size)).FontWeight(weight)
 		if st.Available() {
-			ui.Text(c, "→").FontSize(size).TextColor(t.TextMuted)
-			ui.Text(c, st.Latest).FontSize(size).Bold().TextColor(t.Accent)
+			ui.Text(c, "→").FontSize(scale.Font(c, size)).TextColor(t.TextMuted)
+			// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（理由见
+			// `widgets/ink`）。深色下原样。
+			ui.Text(c, st.Latest).FontSize(scale.Font(c, size)).FontWeight(weight).TextColor(ink.AccentOn(t))
 		}
 	})
 }

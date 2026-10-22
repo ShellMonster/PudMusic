@@ -37,7 +37,7 @@ func newShellWithSettings(t *testing.T) (*Shell, *mygoui.Tester) {
 // 「菜单项接到了哪」，不联网，而 `SeedCookies` 只动 jar，不发请求。
 //
 // ⚠️ **要摆侧栏那三个入口的测试都得挂它**：「我的关注」「稍后再看」「历史记录」
-// 要登录才摆（见 `Route.NeedsLogin`），没挂这一份的外壳上那三行压根不在
+// 要登录才摆（见 `Route.HideInMenuWhenLoggedOut`），没挂这一份的外壳上那三行压根不在
 // （`TestTheSidebarHidesTheLoginOnlyEntriesUntilYouLogIn` 钉的就是那件事）。
 // 那些测试只是**恰好**要用一个侧栏入口的话，换成不挑登录态的那几个更好——
 // 它们钉的是别的东西，不该顺带把登录态也钉进去。
@@ -268,7 +268,7 @@ func TestSuggestCollapsesOnBlur(t *testing.T) {
 	// 仍然是这一段真正要说的。
 	//
 	// ⚠️ 刻意挑一个**不挑登录态**的入口：这一条钉的是「点别处会失焦」，而
-	// 「我的关注」「稍后再看」「历史记录」未登录时不摆（`Route.NeedsLogin`），
+	// 「我的关注」「稍后再看」「历史记录」未登录时不摆（`Route.HideInMenuWhenLoggedOut`），
 	// 拿它们当失焦的落点的话，这条测试还会顺带把登录态也钉进去。
 	if err := tt.Click("本地音乐"); err != nil {
 		t.Fatalf("点不到侧栏：%v，文字有 %q", err, tt.Texts())
@@ -919,7 +919,7 @@ func TestTheTopBarShowsNoPageTitle(t *testing.T) {
 //
 // # 为什么还要断一次高度
 //
-// 页标题是一行 22px 的字（实测高 24~26），而路由容器是整块内容区（高 648）。
+// 页标题是一行 24px 的字（实测高约 28），而路由容器是整块内容区（高 648）。
 // 这一句让「量到的是标题而不是容器」成为断言的一部分，而不是靠「我绕开了
 // router」这个前提。
 //
@@ -959,7 +959,7 @@ func TestThePageStillShowsItsOwnTitle(t *testing.T) {
 		}},
 	}
 
-	// 一行标题的高度上限。22px 的字实测 24~26 高（见上面那一段），
+	// 一行标题的高度上限。24px 的字实测约 28 高（见上面那一段），
 	// 而整块内容区是几百高——60 把这两者分得很开。
 	const titleLineMaxH = 60
 

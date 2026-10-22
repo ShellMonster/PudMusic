@@ -4,6 +4,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -149,6 +150,6 @@ func (s *Shell) viewToast(c *ui.Context, t toast, theme *ui.Theme) {
 	ui.Column(c).Width(320).Radius(10).PassThrough().
 		Background(theme.Accent).Padding(12, 16).
 		Children(func() {
-			ui.Text(c, t.text).FontSize(13).TextColor(theme.AccentText).PassThrough()
+			ui.Text(c, t.text).FontSize(scale.Font(c, 13)).TextColor(theme.AccentText).PassThrough()
 		})
 }

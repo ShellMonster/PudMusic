@@ -95,6 +95,36 @@ func TestTheMiniWindowIsAtBiuNumbers(t *testing.T) {
 	}
 }
 
+// TestTheMiniWindowIsAPanel 盯票 #162：迷你窗是面板语义，点它不激活应用。
+//
+// 无头环境里这一条**只量得到选项**（`Panel: true`）：真正让应用保持不活动的是
+// Cocoa 的 `NSPanel` + nonactivating 样式，只有真窗口才量得到（列在文件末尾）。
+//
+// 但它同时盯住票面点名的那个坑：**Panel 不能把位置记忆一起带走**。面板语义上
+// 不能最大化，而「不能缩放 / 不能最大化」和「`isZoomed` 恒为真、`StateKey` 一条
+// 都存不下来」只差一层（那个坑的实测表在 `MiniWindowOptions` 的注释里）。所以
+// 这里钉的三条是「Panel 开着的时候，位置记忆的那几个前提还在」：
+//
+//   - `StateKey` 还在；
+//   - `DisableResize` 没被打开（它才是那条路的开关）；
+//   - 大小没有被 `Min == Max` 钉死（实测表里同样会让 `isZoomed` 恒真）。
+func TestTheMiniWindowIsAPanel(t *testing.T) {
+	opts := MiniWindowOptions(nil)
+	if !opts.Panel {
+		t.Error("迷你窗不是 Panel：用户点一下播放键，前台应用整个切走（票 #162）")
+	}
+	if opts.StateKey == "" {
+		t.Error("Panel 把 StateKey 弄没了：窗口每次开都回到同一个位置，用户拖过的地方不记得")
+	}
+	if opts.DisableResize {
+		t.Error("Panel 顺带打开了 DisableResize：`isZoomed` 恒为真，StateKey 一条都存不下来")
+	}
+	if opts.MaxWidth != 0 || opts.MaxHeight != 0 {
+		t.Errorf("Panel 把窗口大小钉死了（Max %d×%d）：实测表里 min==max 会让 "+
+			"`isZoomed` 恒为真，位置一条都存不下来", opts.MaxWidth, opts.MaxHeight)
+	}
+}
+
 // TestTheMiniWindowParksInTheTopRightCorner 盯「贴边」。
 //
 // 迷你窗口第一次出现时停哪儿。Biu 那边是居中（`center: true`），我们改成贴右上角
@@ -195,7 +225,7 @@ func TestTheMiniCardCoversTheWindow(t *testing.T) {
 // 真正用的主题」，只能看它画出来的颜色。
 func TestTheMiniFramesCarryTheChosenTheme(t *testing.T) {
 	a := app.New()
-	if err := a.MountSettings(filepath.Join(t.TempDir(), app.SettingsFileName)); err != nil {
+	if err := a.MountSettings(filepath.Join(writableTempDir(t, "settings"), app.SettingsFileName)); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { a.Close(); _ = a.CloseSettings() })
@@ -863,4 +893,8 @@ func TestDraggingTheMiniProgressSeeksOnlyOnRelease(t *testing.T) {
 //	3. 从迷你窗口关掉它（关窗口 / 点关闭）：那走的是 `attachMiniWindow` 装的
 //	   `OnClosed`，要真窗口。测试里量的是它前面那一半（`dropMini`）。
 //	4. 从别的应用按全局快捷键「切换mini/完整模式」：Carbon 热键要真事件循环。
+//	5. 面板语义本身：点迷你窗**不激活应用**（票 #162）。那靠的是 Cocoa 的
+//	   nonactivating `NSPanel`，无头 Tester 里没有窗口可点。
+//	6. Panel 开着的时候位置记忆仍然有效（票 #162 的硬指标）：`isZoomed` 是 Cocoa
+//	   的行为，窗口状态也要真窗口才写得出来（见 `MiniWindowOptions` 的实测表）。
 // ─────────────────────────────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ package ui
 // 只能证明状态层有那个方法，证明不了界面上真有一个入口。
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"image/color"
@@ -173,10 +174,29 @@ func biliOK(data any) string {
 // **假时钟**是这里的关键：「今天」永远是 2026-10-16，而「敲完字等 500ms」也不用真睡。
 func libraryShell(t *testing.T, f *libFake, path string) (*mygoui.Tester, *Shell) {
 	t.Helper()
+	return libraryShellOpts(t, f, path)
+}
 
-	b := newTestShell(t,
-		mounted(func(_ *testing.T, a *app.App) { a.MountLibrary(biliForTest(t, f)) }),
-		withClock(newFakeClock(now)))
+// libraryShellOpts 是 `libraryShell` 加一批外壳选项（出图那一族要 `systemIsDark`）。
+func libraryShellOpts(t *testing.T, f *libFake, path string, opts ...shellOpt) (*mygoui.Tester, *Shell) {
+	t.Helper()
+
+	b := newTestShell(t, append([]shellOpt{
+		mounted(func(t *testing.T, a *app.App) {
+			// ⚠️ **同一个客户端**（生产环境就是同一个，见 main.go 那段注释）：
+			// 登录态、请求头、WBI 密钥都挂在它身上。
+			cli := biliForTest(t, f)
+			// ⚠️ **挂一份登录态**（票 #138）：这两页的内容要登录才有
+			// （`Route.RequiresLogin`），没登录时页面画的是「先登录」那一支，
+			// 一个请求都不发——于是这一组测试（它们要的是**内容**）就永远等不到。
+			store := app.NewMemoryStore("test")
+			if err := store.Save(context.Background(), app.Session{SESSDATA: "sess"}); err != nil {
+				t.Fatal(err)
+			}
+			a.MountLogin(store, cli)
+			a.MountLibrary(cli)
+		}),
+		withClock(newFakeClock(now))}, opts...)...)
 	s, tt := b.s, b.tt
 	// 关键词防抖那个钟由基座的 `Shell.Close` 收：以前这里手写一份
 	// `searchWatchStop`，而 `TestTheSearchWatchStopsWhenThePageIsLeft` 敲完字就

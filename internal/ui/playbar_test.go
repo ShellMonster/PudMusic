@@ -84,7 +84,11 @@ func TestWindowShowsPlayBar(t *testing.T) {
 	if !h.tt.HasText("还没有打开文件") {
 		t.Errorf("没歌时的提示不在，文字有 %q", h.tt.Texts())
 	}
-	for _, want := range []string{"播放", "音量", "播放进度"} {
+	// ⚠️ **「音量」那一枚现在叫「静音」**：音量收成了一枚图标，而那枚图标的
+	// 无障碍名字说的是**按下去会发生什么**（静音 / 取消静音），和上游
+	// `music-volume` 的 `aria-label={isMuted ? "取消静音" : "静音"}` 一样。
+	// 真的那根音量滑块在浮层里，浮层关着的时候不在画面上。
+	for _, want := range []string{"播放", "静音", "播放进度"} {
 		if _, ok := h.tt.Find(want); !ok {
 			t.Errorf("画面上找不到 %q，文字有 %q", want, h.tt.Texts())
 		}
@@ -254,20 +258,28 @@ func TestRenderPlayBarShots(t *testing.T) {
 	save(t, dir, "05-error.png", h.tt)
 }
 
+// TestVolumeSliderDrivesTheApp 盯浮层里那根竖滑块真的在调音量。
+//
+// ⚠️ **它现在要先打开浮层**：音量收成了一枚图标，那根滑块在悬停浮出来的浮层里
+// （上游 `music-volume` 那个做法）。悬停 → 浮层出来 → 滑块在画面上 → 按它。
 func TestVolumeSliderDrivesTheApp(t *testing.T) {
 	h := newHarness(t)
 	h.open(t)
 
+	hoverVolumeKey(t, h.tt)
+
 	bar, ok := h.tt.Find("音量")
 	if !ok {
-		t.Fatalf("画面上找不到音量条，文字有 %q", h.tt.Texts())
+		t.Fatalf("浮层里找不到那根音量滑块，文字有 %q", h.tt.Texts())
 	}
-	h.tt.Press(bar.X+bar.W*0.1, bar.Y+bar.H/2)
-	h.tt.Release(bar.X+bar.W*0.1, bar.Y+bar.H/2)
+	// 竖滑块：按在**底下**就是 0（框架的竖直映射是 `1-(y-cy)/ch`，见
+	// `mygo/ui/value_input.go:203`）。
+	h.tt.Press(bar.X+bar.W/2, bar.Y+bar.H-2)
+	h.tt.Release(bar.X+bar.W/2, bar.Y+bar.H-2)
 	h.tt.Frame()
 
 	if got := h.app.Snapshot().Volume; got > 0.3 {
-		t.Errorf("把音量条拉到最左，音量却是 %v", got)
+		t.Errorf("把音量条拉到最下，音量却是 %v", got)
 	}
 }
 
@@ -285,10 +297,20 @@ func TestVolumeSliderDrivesTheApp(t *testing.T) {
 func TestThePlayBarRightRowFollowsBiuOrder(t *testing.T) {
 	// 有歌时才全：Biu 那一行是 `{Boolean(playId) && … && <MusicDownloadButton />}`
 	// （`playbar/right/index.tsx:15`），没歌的时候不摆下载。
-	want := []string{"播放模式", "下载", "播放列表", "音量", "播放速率"}
+	want := []string{"播放模式", "下载", "播放列表", "播放速率"}
 
 	tt, _ := metaBarTester(t, fullBarState(), 1200)
-	for i, label := range want {
+
+	// 音量那一枚**自己找**：它的无障碍名字跟着静音状态变（见 volumeKeyOnTheBar）。
+	vol, ok := volumeKeyOnTheBar(tt)
+	if !ok {
+		t.Fatalf("播放条右边那一组里没有音量那一枚，文字有 %q", tt.Texts())
+	}
+
+	// 次序：模式 → 下载 → 队列 → 音量 → 倍速。
+	ordered := []mygoui.Rect{}
+	names := []string{}
+	for _, label := range want[:3] {
 		r, ok := tt.Find(label)
 		if !ok {
 			t.Fatalf("播放条右边那一组里没有 %q，文字有 %q", label, tt.Texts())
@@ -296,13 +318,23 @@ func TestThePlayBarRightRowFollowsBiuOrder(t *testing.T) {
 		if r.X < 0 || r.X+r.W > 1200 {
 			t.Errorf("%q 在 %v，有一半在窗口外面", label, r)
 		}
-		if i == 0 {
-			continue
-		}
-		prev, _ := tt.Find(want[i-1])
-		if r.X <= prev.X {
+		ordered = append(ordered, r)
+		names = append(names, label)
+	}
+	ordered = append(ordered, vol)
+	names = append(names, "音量")
+	rate, ok := tt.Find("播放速率")
+	if !ok {
+		t.Fatalf("播放条右边那一组里没有 %q，文字有 %q", "播放速率", tt.Texts())
+	}
+	ordered = append(ordered, rate)
+	names = append(names, "播放速率")
+
+	for i := 1; i < len(ordered); i++ {
+		if ordered[i].X <= ordered[i-1].X {
 			t.Errorf("%q（x=%.1f）排在 %q（x=%.1f）**前面**了——"+
-				"次序要和 Biu 一致：%v", label, r.X, want[i-1], prev.X, want)
+				"次序要和 Biu 一致：%v", names[i], ordered[i].X, names[i-1],
+				ordered[i-1].X, names)
 		}
 	}
 
@@ -311,10 +343,23 @@ func TestThePlayBarRightRowFollowsBiuOrder(t *testing.T) {
 	if !ok {
 		t.Fatalf("播放条上没有「加歌」，文字有 %q", tt.Texts())
 	}
-	rate, _ := tt.Find("播放速率")
 	if enq.X <= rate.X {
 		t.Errorf("「加歌」（x=%.1f）不在最后——它在「播放速率」（x=%.1f）前面", enq.X, rate.X)
 	}
+}
+
+// volumeKeyOnTheBar 找播放条右边那一组里的音量键。
+//
+// ⚠️ **它的无障碍名字跟着状态变**：没静音的时候是「静音」（按下去会静音），
+// 静音了是「取消静音」——和上游 `music-volume` 的
+// `aria-label={isMuted ? "取消静音" : "静音"}` 一个做法。所以两个都要试。
+func volumeKeyOnTheBar(tt *mygoui.Tester) (mygoui.Rect, bool) {
+	for _, label := range []string{"静音", "取消静音"} {
+		if r, ok := tt.Find(label); ok {
+			return r, true
+		}
+	}
+	return mygoui.Rect{}, false
 }
 
 // TestTheDownloadKeyIsOnlyThereWhenThereIsATrack 钉住没歌时不摆下载键。

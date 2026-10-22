@@ -134,7 +134,7 @@ func assertFlat(t *testing.T, img *image.RGBA, r mygoui.Rect, what string) {
 // flatSideShell 建一个「登录过、停在**不在侧栏菜单里**的一页、指针不在任何按钮上」
 // 的整窗。
 //
-// ⚠️ **两处都得显式写出来**：登录是为了菜单摆满六项（未登录时那三个带 `NeedsLogin`
+// ⚠️ **两处都得显式写出来**：登录是为了菜单摆满六项（未登录时那三个带 `HideInMenuWhenLoggedOut`
 // 的不摆，见 `viewSideMenu`）；`systemIsDark` 是「假装系统是深色」，而设置里那一档
 // 默认是「跟随系统」，所以它就是深浅的开关——`newLoggedInShell` 不接这一项，用它
 // 会让两个子测试画出同一张图，**深色那一档看着全绿，其实根本没跑过**。
@@ -158,8 +158,8 @@ func flatSideShell(t *testing.T, dark bool) (*Shell, *mygoui.Tester) {
 //
 // ⚠️ **只探图标键是有原因的**：`Tester.Find` 找的是「显示着这个字或者被 `Label`
 // 命名的那一个元素」，而纯文字按钮上**没有 `Label`**（`flatbutton.go` 里那条：不许
-// 补，补上去画面上会出现两份同样的字）。于是 `Find("迷你")` 给回来的是**那两个字
-// 自己的框**，按它去量框线，量到的是笔画而不是按钮。
+// 补，补上去画面上会出现两份同样的字）。于是 `Find("导出配置")` 给回来的是**那几个
+// 字自己的框**，按它去量框线，量到的是笔画而不是按钮。
 //
 // 纯文字按钮（侧栏菜单行、设置页那几个小按钮）改用另外两条：侧栏用
 // `TestTheSidebarColumnHasOnlyOneColour`，选中态用
@@ -181,6 +181,9 @@ func TestTheIconButtonsAreTransparentAndUnbordered(t *testing.T) {
 			for _, what := range []struct{ label, where string }{
 				{"打开文件", "顶栏"},
 				{"设置", "顶栏"},
+				// 它原来是文字键（「迷你」两个字），票 #134 的第七单元接上了
+				// `iconPiP`——现在它也走这一条探针。
+				{"迷你", "顶栏"},
 				{"播放列表", "播放条右边"},
 			} {
 				r, ok := tt.Find(what.label)
@@ -465,8 +468,10 @@ func openSettingsFor(t *testing.T, dark, readOnly bool) *mygoui.Tester {
 		b.tt.Frame()
 		return b.tt
 	}
-	path := filepath.Join(t.TempDir(), app.SettingsFileName)
-	if err := os.WriteFile(path, []byte(`{"schemaVersion": 99, "appSettings": {}}`), 0o644); err != nil {
+	path := filepath.Join(writableTempDir(t, "settings"), app.SettingsFileName)
+	// themeMode 要显式给：空字符串不是三档里的任何一个，三个主题按钮就都
+	// 不选中——而「选中那一档 DOM 色是主色」正是禁用态那条测试要量的东西。
+	if err := os.WriteFile(path, []byte(`{"schemaVersion": 99, "appSettings": {"themeMode": "system"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	a := app.New()
@@ -477,7 +482,10 @@ func openSettingsFor(t *testing.T, dark, readOnly bool) *mygoui.Tester {
 		a.Close()
 		_ = a.CloseSettings()
 	})
-	b := newTestShell(t, onApp(a))
+	// ⚠️ **`systemIsDark(dark)` 不能漏**：漏了的话这个分支永远画浅色，而
+	// 「禁用态在深色下读不读得出来」恰恰是这一处最坏的那一档（绿字乘完 50%
+	// 只剩 2.6:1）。数据那一半不改：只改 Tester 报给框架的系统外观。
+	b := newTestShell(t, onApp(a), systemIsDark(dark))
 	b.s.navigate(settingsPath)
 	b.tt.Frame()
 	return b.tt

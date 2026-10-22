@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -25,7 +26,11 @@ func (s *Shell) viewSpaceTabs(c *ui.Context, sp *upSpace) {
 	// 的时候就把状态建好了，事后再挂 key 会 panic（`ui/element.go` 的 `Key`）。
 	// 给他外面套一层是最省事的做法。
 	ui.Column(c).Key("space-tabs").PaddingX(upPad).Children(func() {
-		ui.Tabs(c, &sp.tab, upTabNames...)
+		// ⚠️ **主 Tab 用轨道 + 滑块那一种**（`mainTabs`，见 tabs.go）：这一排
+		// 和次级排序那几排不是同一个样子（票 #138）。
+		//
+		// ⚠️ `AlignSelf(ui.Start)`：同上，Column 默认 Stretch，轨道要包着字。
+		mainTabs(c, &sp.tab, tabMD, upTabNames...).AlignSelf(ui.Start)
 	})
 }
 
@@ -59,6 +64,11 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 	// 一条都没有、也没在拉、也没出错 = 真的没有投稿。这时候画空状态而不是
 	// 画一个空列表：`PagedList` 在这种时候把列表自己的空状态设成空串
 	// （见 paged.go 的 syncList），画出来是一片白。
+	//
+	// ⚠️ **「正在加载」那一格不在这儿画**（票 #138）：它由列表自己画，画法是
+	// 外面递进去的（`loadingCell`）——和「没有结果」那一格是同一个出口。
+	// 而列表**照画**（下面那一支）：后台回来的结果是在列表的 `View` 里收的
+	// （`adopt`），不画它这一页就永远停在「正在加载」。
 	if sp.videosStarted && p.Loaded == 0 && !p.Loading && p.Err == nil {
 		s.viewEmpty(c, "space:video:"+strconv.FormatInt(sp.mid, 10), emptyState{
 			Title: "暂无投稿",
@@ -123,7 +133,9 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	}
 	if !p.started && p.loading {
 		// 一条都还没有：第一页在途。这一句就是它全部的内容。
-		s.viewEmpty(c, upEmptyKey(sp, tab), emptyState{Title: "正在加载" + upTabNames[tab] + "…"})
+		// ⚠️ **走 `viewLoading`（和「没有结果」同一个出口）**，理由同 `follow.go`
+		// 那一处（票 #138）。
+		s.viewLoading(c, upEmptyKey(sp, tab), "正在加载"+upTabNames[tab]+"…")
 		return
 	}
 	// 🔴 **「一行都没有」也分两种**：
@@ -160,27 +172,33 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	//   - List 是自己管状态的控件，Key 只能挂在外面的元素上（见 element.go）；
 	//   - 滚动容器**直接**当别的容器的下一层时，它里面文字的盒子量出来是
 	//     0×0（BMG-16 记着的 Tester 那个坑），套一层就正常。
+	//
+	// ⚠️ **左右 16 是这一层给的，不在卡片里**：上游这三张 Tab 的内容摆在
+	// `user-profile/index.tsx:130` 那个 `p-4` 里，而动态卡片自己左右是 0
+	// （动态流那一页的 32 是另一层 16+16）。卡片自己做内边距的话，同一个
+	// 组件在两页就会缩成两个宽度。
 	ui.Column(c).Key("space-list:" + upTabNames[tab]).Grow(1).FillHeight().
-		Children(func() {
-			ui.List(c, st, rows).
-				Grow(1).FillHeight().FillWidth().
-				Rows(func(r ui.ListRow) {
-					// 🔴 行里 panic 会一路穿出 Cocoa 事件循环把进程带走。每一行
-					// 自己兜一层，**只废掉这一行**（页级的 Shell.page 接的是整棵树，
-					// 两者不重复）。
-					defer func() {
-						if rec := recover(); rec != nil {
-							log.Printf("biu: UP 空间那一行画崩了（%s）：%v\n%s",
-								upRowKey(sp, tab, r.Index), rec, debug.Stack())
-						}
-					}()
-					if r.Index >= upRowCount(sp, tab) {
-						s.viewUpSentinel(r.Context, sp, tab)
-						return
+		PaddingX(upPad).Children(func() {
+		spaceList := ui.List(c, st, rows).
+			Grow(1).FillHeight().FillWidth().
+			Rows(func(r ui.ListRow) {
+				// 🔴 行里 panic 会一路穿出 Cocoa 事件循环把进程带走。每一行
+				// 自己兜一层，**只废掉这一行**（页级的 Shell.page 接的是整棵树，
+				// 两者不重复）。
+				defer func() {
+					if rec := recover(); rec != nil {
+						log.Printf("biu: UP 空间那一行画崩了（%s）：%v\n%s",
+							upRowKey(sp, tab, r.Index), rec, debug.Stack())
 					}
-					s.viewUpRow(r.Context, sp, tab, r.Index)
-				})
-		})
+				}()
+				if r.Index >= upRowCount(sp, tab) {
+					s.viewUpSentinel(r.Context, sp, tab)
+					return
+				}
+				s.viewUpRow(r.Context, sp, tab, r.Index)
+			})
+		s.trackScrollbar(spaceList)
+	})
 
 	// ②滚到底 ③加载后再查一遍。
 	//
@@ -292,8 +310,8 @@ func (s *Shell) viewUpSentinel(c *ui.Context, sp *upSpace, tab int) {
 	ui.Row(c).Key("space-sentinel").Center().Gap(8).Padding(12).Children(func() {
 		switch {
 		case p.err != nil:
-			ui.Text(c, "加载失败："+p.err.Error()).FontSize(13).TextColor(t.TextMuted)
-			if ui.Button(c, "重试加载"+upTabNames[tab]).FontSize(13).Clicked() {
+			ui.Text(c, "加载失败："+p.err.Error()).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
+			if ui.Button(c, "重试加载"+upTabNames[tab]).FontSize(scale.Font(c, 13)).Clicked() {
 				p.err = nil
 				if ctx := p.begin(); ctx != nil {
 					go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
@@ -301,9 +319,9 @@ func (s *Shell) viewUpSentinel(c *ui.Context, sp *upSpace, tab int) {
 			}
 		case p.loading:
 			ui.Spinner(c)
-			ui.Text(c, "正在加载…").FontSize(13).TextColor(t.TextMuted)
+			ui.Text(c, "正在加载…").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 		default:
-			ui.Text(c, "继续往下滚，加载更多").FontSize(13).TextColor(t.TextMuted)
+			ui.Text(c, "继续往下滚，加载更多").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 		}
 	})
 }

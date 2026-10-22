@@ -10,19 +10,25 @@
 // 用 `ui.Select`（普通下拉）摆不了这个：它的选项是纯字符串，画出来一律是当前
 // 字体。所以这里用 `ui.SelectBase` 自己拼一个面板，选项里画自己的字。
 //
-// ## 列表是定死的，不是问系统要来的
+// ## 列表是问系统要来的
 //
-// Biu 那个下拉里装的是 `window.electron.getFonts()` 报上来的系统字体表。MyGo
-// v0.5.5 **没有**这个 API（`internal/text/` 底下只有排版引擎，没有枚举字体的
-// 入口），所以这一份是一张挑好的名单。
+// Biu 那个下拉里装的是 `window.electron.getFonts()` 报上来的系统字体表；对应
+// 的入口是 MyGo 的 `ui.FontFamilies()`（`mygo/ui/window.go:66`），列举这台机器
+// 上文字能用的全部字体族。**不是一张挑好的名单**——早先那份注释写着「MyGo
+// 没有这个 API」，那是错的（票 #139 改掉）。
 //
-// 名单怎么挑的：每一项都写成**族名列表**而不是单个族名，于是缺的那一个自动由
-// 后面的顶上——「苹方」在 macOS 上是 PingFang SC，在 Windows 上落到
-// Microsoft YaHei，两边都有字可看。系统默认那一条用 `system-ui`，那是 MyGo 认得
-// 的系统自己的字体（`ui/keys.go` 旁边 `Font` 的注释里点名的两个之一）。
+// 系统默认那一条仍用 `system-ui`，那是 MyGo 认得的系统自己的字体
+// （`Font` 的注释里点名的两个之一）。
+//
+// ⚠️ **枚举要缓存**：`FontFamilies()` 第一次会问系统要一遍（几百个字体的 Mac
+// 上是几十毫秒），而且每次都复制一份切片。设置页每一帧都要这份名单，所以这里
+// 用 `sync.Once` 只取一次；框架自己也会缓存，但复制那一层躲不掉。
 package ui
 
 import (
+	"strings"
+	"sync"
+
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/egoist/mygo/ui"
 )
@@ -33,18 +39,42 @@ type fontOption struct {
 	family string
 }
 
-// fontOptions 是那张名单。第一项是 Biu 那个 `[{ name: "系统默认", ... }]`。
-var fontOptions = []fontOption{
-	{"系统默认", "system-ui"},
-	{"苹方 / 微软雅黑", "PingFang SC, Microsoft YaHei, system-ui"},
-	{"黑体", "Heiti SC, SimHei, sans-serif"},
-	{"宋体", "Songti SC, SimSun, serif"},
-	{"圆体", "Hiragino Maru Gothic ProN, Yuanti SC, sans-serif"},
-	{"楷体", "Kaiti SC, KaiTi, serif"},
-	{"衬线", "Georgia, Times New Roman, serif"},
-	{"无衬线", "Helvetica Neue, Arial, sans-serif"},
-	{"等宽", "Menlo, Consolas, monospace"},
-	{"打字机", "Courier New, monospace"},
+// systemFontFamilies 是系统字体族的名字，只问一次。
+//
+// 枚举失败（或者这一版框架在不支持的平台上给空）时就是空表：下面只剩「系统
+// 默认」一条，设置仍然能用——比一页空白好。
+var (
+	fontFamiliesOnce sync.Once
+	fontFamilyNames  []string
+)
+
+func systemFontFamilies() []string {
+	fontFamiliesOnce.Do(func() {
+		for _, f := range ui.FontFamilies() {
+			name := strings.TrimSpace(f.Name)
+			if name == "" {
+				continue
+			}
+			fontFamilyNames = append(fontFamilyNames, name)
+		}
+	})
+	return fontFamilyNames
+}
+
+// fontOptionList 是下拉里那一份名单：先是「系统默认」，再是系统字体。
+//
+// ⚠️ **`system-ui` 要排掉**：它是「默认」那一条存的值，系统枚举里也可能出现
+// 同名的一项——同一个值出现两次的话 `indexOfString` 只认第一个，用户点第二条
+// 得到的还是第一条，看上去像「点了没反应」。
+func fontOptionList() []fontOption {
+	opts := []fontOption{{label: "系统默认", family: systemFontFamily}}
+	for _, name := range systemFontFamilies() {
+		if strings.EqualFold(name, systemFontFamily) {
+			continue
+		}
+		opts = append(opts, fontOption{label: name, family: name})
+	}
+	return opts
 }
 
 // systemFontFamily 是「系统默认」那一条的值。Biu 的默认设置里也是这个串
@@ -53,17 +83,19 @@ const systemFontFamily = app.DefaultFontFamily
 
 // pickFont 是字体那一格。
 func (s *Shell) pickFont(c *ui.Context, st app.Settings, ro bool) {
-	families := make([]string, len(fontOptions))
-	labels := make([]string, len(fontOptions))
-	for i, f := range fontOptions {
+	options := fontOptionList()
+	families := make([]string, len(options))
+	labels := make([]string, len(options))
+	for i, f := range options {
 		families[i], labels[i] = f.family, f.label
 	}
 
-	// 手改过的设置文件可能带一个不在名单里的族名。**不能当成系统默认**——那样
-	// 用户刚打开这一页看到的字就是错的，而且他自己也不知道设置里存了什么。
-	// 面板里加一条临时的「设置里的：xxx」，选中它就还是他原来那个。
+	// 手改过的设置文件可能带一个不在名单里的族名（比如旧版写进去的
+	// 「PingFang SC, Microsoft YaHei, system-ui」那种族名列表）。**不能当成系统
+	// 默认**——那样用户刚打开这一页看到的字就是错的，而且他自己也不知道设置里
+	// 存了什么。面板里加一条临时的「设置里的：xxx」，选中它就还是他原来那个。
 	chosen := st.FontFamily
-	if _, ok := findFont(chosen); !ok {
+	if _, ok := findFont(options, chosen); !ok {
 		families = append(families, chosen)
 		labels = append(labels, "设置里的："+chosen)
 	}
@@ -91,22 +123,37 @@ func (s *Shell) pickFont(c *ui.Context, st app.Settings, ro bool) {
 
 	sel.Popup(func(panel ui.Element) {
 		t := c.Theme()
-		panel.Grow(1).MaxWidth(fontMenuWidth).Padding(4).Radius(t.Radius+2).
-			Background(t.Background).Border(1, t.Border).Children(func() {
-			for i, family := range families {
-				// ⚠️ **不给这一格加 Label**：上面画的那个字就是它的名字，再补一个
-				// 只会多出一个同样文字的无障碍节点（见 sidebar.go 里那条）。
-				item := sel.Item(i).Padding(6, 10).Radius(6)
-				if item.Highlighted() {
-					item.Background(t.Accent).TextColor(t.AccentText)
-				} else if i == idx {
-					item.Background(t.Surface)
-				}
-				item.Children(func() {
-					// 🔴 这一句就是验收项：每一条选项用它自己的字体画。
-					ui.Text(c, labels[i]).Font(family).SingleLine().Grow(1)
+		popupPanel(t, panel.MaxWidth(fontMenuWidth).Padding(4)).Children(func() {
+			// 🔴 **这份名单现在是系统报上来的，可能有两百多条**（这台 Mac 上
+			// 245 条）。不套滚动容器、不限高的话，面板会比窗口还高：超出窗口的
+			// 那些既看不见也点不到（和联想浮层当年那个坑一样，见
+			// `navbar_search.go` 的 `viewSuggest`）。
+			//
+			// 上限 256 = HeroUI 下拉默认那一档（`max-h-64`），Biu 用的就是它。
+			menu := ui.Scroll(c).Key("font-menu").FillWidth().MaxHeight(fontMenuMaxH)
+			menu.Children(func() {
+				ui.Column(c).FillWidth().Children(func() {
+					for i, family := range families {
+						// ⚠️ **不给这一格加 Label**：上面画的那个字就是它的名字，再补一个
+						// 只会多出一个同样文字的无障碍节点（见 sidebar.go 里那条）。
+						item := sel.Item(i).Padding(6, 10).Radius(6)
+						if item.Highlighted() {
+							item.Background(t.Accent).TextColor(t.AccentText)
+						} else if i == idx {
+							item.Background(t.Surface)
+						}
+						item.Children(func() {
+							// 🔴 这一句就是验收项：每一条选项用它自己的字体画。
+							//
+							// ⚠️ `Ellipsis` 不能省：族名的长短差得很远，而每一条用的是
+							// **它自己的字体**、宽度没有上限——长名字会画到旁边去。
+							ui.Text(c, labels[i]).Font(family).SingleLine().
+								Ellipsis("…").Grow(1)
+						})
+					}
 				})
-			}
+			})
+			s.trackScrollbar(menu)
 		})
 	})
 
@@ -120,9 +167,12 @@ func (s *Shell) pickFont(c *ui.Context, st app.Settings, ro bool) {
 // Neue），按 180 画就会被裁成「Helvetica N…」，用户挑不了。
 const fontMenuWidth = 220
 
+// fontMenuMaxH 是字体面板最高多高。256 = HeroUI 下拉默认的 `max-h-64`。
+const fontMenuMaxH = 256
+
 // findFont 在名单里找一条。
-func findFont(family string) (fontOption, bool) {
-	for _, f := range fontOptions {
+func findFont(options []fontOption, family string) (fontOption, bool) {
+	for _, f := range options {
 		if f.family == family {
 			return f, true
 		}

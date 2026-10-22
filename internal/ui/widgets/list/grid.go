@@ -22,6 +22,9 @@ package list
 import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrollbar"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -152,6 +155,9 @@ type Grid struct {
 	// 出画面了（实测拖 1600→500 漂 6 首，一步跳到同一个宽度则漂 0 首）。
 	anchorID string
 
+	// hot 是上一帧画完后量到的「指针压在滚动条那一带」（见 `Hot`）。
+	hot bool
+
 	// footer 是末尾多出来的那一格的画法（转圈 / 重试），为 nil 时没有。
 	//
 	// 它和 `List.footer` 是同一件东西：翻页的哨兵。网格里它占**最后一行的第一格**
@@ -183,6 +189,10 @@ type Grid struct {
 	// 没调过 SetEmpty 用默认那句。
 	empty    string
 	emptySet bool
+
+	// emptyView 是「一行都没有时那一格」的画法（见 SetEmptyView）。nil 是没装，
+	// 那一格走 emptyText() 那句话。理由和 `List.emptyView` 一样。
+	emptyView func(c *ui.Context)
 
 	// width 是这个网格**上一帧**量出来的容器宽，用来判断点。
 	width float32
@@ -250,6 +260,13 @@ func (g *Grid) selectedID() string {
 //
 // ⚠️ 只能由界面线程调，同 SetSongs。
 func (g *Grid) SetEmpty(text string) { g.empty, g.emptySet = text, true }
+
+// SetEmptyView 换掉「一行都没有时**那一格**」的画法。理由见 `List.SetEmptyView`。
+//
+// ⚠️ **传 nil 是退回那句话**（`SetEmpty` 那一句，或默认那句）。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (g *Grid) SetEmptyView(fn func(c *ui.Context)) { g.emptyView = fn }
 
 // SetFooter 装末尾那一格的画法（转圈 / 重试），传 nil 去掉。
 //
@@ -425,8 +442,14 @@ func (g *Grid) View(c *ui.Context) {
 		// 没有歌时网格是空的，Children 里那一支就是它的空状态。
 		Children(func() {
 			if len(g.songs) == 0 {
+				// ⚠️ **先看外面递进来的画法**（`SetEmptyView`），理由见
+				// `List.SetEmptyView`。
+				if g.emptyView != nil {
+					g.emptyView(c)
+					return
+				}
 				if txt := g.emptyText(); txt != "" {
-					ui.Text(c, txt).FontSize(13).
+					ui.Text(c, txt).FontSize(scale.Font(c, 13)).
 						TextColor(c.Theme().TextMuted).Padding(16)
 				}
 			}
@@ -445,7 +468,13 @@ func (g *Grid) View(c *ui.Context) {
 	if bw := e.Bounds().W; bw > 0 {
 		g.width = bw
 	}
+
+	// 量滚动条的悬停（理由同 `List.View` 末尾那一行）。
+	g.hot = scrollbar.Hot(e)
 }
+
+// Hot 报上一次 View 时指针是不是压在这个网格的滚动条上。见 `List.Hot`。
+func (g *Grid) Hot() bool { return g.hot }
 
 // keepAnchor 是「换列数时滚动锚点保持」的那一段（验收第 2 条）。
 //
@@ -518,7 +547,7 @@ func (g *Grid) viewRow(r ui.ListRow, cols int, cell float32) {
 	// 的 ID，第一格崩了记的就是第一首的 ID，共用一张表的话下一帧行先短路成
 	// 「这一行画不出来」，同行里另外几首好的也跟着没了。
 	if g.failedRow[m.ID] {
-		ui.Text(c, "这一行画不出来").FontSize(13).TextColor(c.Theme().TextMuted).
+		ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).
 			Padding(cardPadY, cardPadX).MaxLines(1)
 		return
 	}
@@ -608,7 +637,7 @@ func (g *Grid) viewCellCheckbox(c *ui.Context, i int, title string) {
 // ⚠️ 和画崩了的那**一行**（「这一行画不出来」）说的不是同一件事：前者是一首歌的
 // 封面坏了，后者是这一行的布局坏了。两句分开是照着 `List` 那边已有的两句来的。
 func (g *Grid) failedCellText(c *ui.Context) {
-	ui.Text(c, "这一格画不出来").FontSize(13).TextColor(c.Theme().TextMuted).
+	ui.Text(c, "这一格画不出来").FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).
 		Padding(cardPadY, cardPadX).MaxLines(1)
 }
 
@@ -629,8 +658,9 @@ func (g *Grid) viewCellGuarded(c *ui.Context, i int, cell float32) {
 // 歌名，再下面一行是 UP 名（左边）和时长（右边）。
 //
 // ⚠️ **封面底下渐变条的左边是播放量**（上游 `music-card/index.tsx:50-55`）：填的是
-// `Music.View`。**没有这个数的那几页（本地音乐）那一半不画**——画一列空白比不画更难看，
-// 而用户看见半行字会以为这一格「数据不全」（理由见 `Music.View`）。
+// `Music.View`。**没有这个数的那几页（本地音乐、历史记录、搜索的「用户」那一档）
+// 那一半不画**——画一列空白比不画更难看，而用户看见半行字会以为这一格「数据不全」
+// （理由见 `Music.View`）。
 func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 	t := c.Theme()
 	m := g.songs[i]
@@ -649,7 +679,9 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 	case chosen:
 		titleColor, metaColor = t.AccentText, t.AccentText.Alpha(0.75)
 	case playing:
-		titleColor = t.Accent
+		// 主色当**字**：浅色下要一个与底色对比度 ≥4.5:1 的变体（理由见
+		// `widgets/ink`）；深色下原样。
+		titleColor = ink.AccentOn(t)
 	}
 
 	box := ui.Column(c).Radius(t.Radius).
@@ -707,11 +739,11 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 		// 两件事，别把一边改成另一边的做法。
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).PaddingY(cardGap).
 			Children(func() {
-				ui.Text(c, m.Title).FontSize(14).LineHeight(titleLeading).
+				ui.Text(c, m.Title).FontSize(scale.Font(c, listTitleSize)).LineHeight(titleLeading).
 					TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
 				ui.Row(c).Gap(cardGap).Children(func() {
 					if m.Owner != "" {
-						ui.Text(c, m.Owner).Grow(1).FontSize(12).LineHeight(ownerLeading).
+						ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, listOwnerSize)).LineHeight(ownerLeading).
 							TextColor(metaColor).MaxLines(1).Ellipsis("…")
 					}
 					// 正在放的那一格：时长换成一句「正在播放」。
@@ -719,15 +751,16 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 					// ⚠️ **换掉时长而不是加在后面**：一格就那么宽，两样都画必然把
 					// 时长挤成「0:」——而用户读的是「正在放」不是那半截时长。
 					if playing {
-						// 标签带上歌名，理由见 card.go 那一处。
+						// 标签带上歌名，理由见 card.go 那一处。颜色和上面那个歌名
+						// 是同一档「主色当字」（`ink.AccentOn`）。
 						ui.Text(c, PlayingMark).Label(m.Title + " " + PlayingMark).
-							FontSize(11).TextColor(t.Accent).MaxLines(1)
+							FontSize(scale.Font(c, 11)).TextColor(ink.AccentOn(t)).MaxLines(1)
 						return
 					}
 					// 时长没有就不画（Biu 的 `durationText` 为空时那一块
 					// 整个不渲染）。
 					if s := formatDuration(m.Duration); s != "" {
-						ui.Text(c, s).FontSize(12).TextColor(metaColor).MaxLines(1)
+						ui.Text(c, s).FontSize(scale.Font(c, 12)).TextColor(metaColor).MaxLines(1)
 					}
 				})
 			})
@@ -740,13 +773,13 @@ func (g *Grid) playFrom(i int) { playFrom(g.songs, g.acts, i) }
 // gridRowHeight 是网格那一行**大概**多高。
 //
 // ⚠️ **它是估的**：网格这一行的高跟着内容走（封面 140 + 歌名 + UP 名那一行），
-// 歌名折成两行就高 21。所以按行算出来的像素是**大概**的——回顶按钮早一点或晚一点
+// 歌名折成两行就高 24（16 × 1.5）。所以按行算出来的像素是**大概**的——回顶按钮早一点或晚一点
 // 出现，仅此而已。
 //
-// 这个数是**一行的常见高度**（歌名一行）：140 + 8（`cardGap`）+ 歌名一行 21 +
-// 缝 4 + UP 名那一行 14 ≈ 195，和 `grid_test.go` 的 `gridH` 那句注释（「网格每行
-// 约 195」）对得上。
-const gridRowHeight = 195
+// 这个数是**一行的常见高度**（歌名一行）：140 + 8（`cardGap`）+ 歌名一行 24
+// （16 × 1.5）+ 缝 4 + UP 名那一行 14 = 190，和 `grid_test.go` 的 `gridH` 那句注释
+// （「网格每行约 190」）对得上。
+const gridRowHeight = 190
 
 // ScrollOffset 是这一屏滚过了多少像素。
 //

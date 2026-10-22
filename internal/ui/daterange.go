@@ -32,6 +32,7 @@ package ui
 import (
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -143,7 +144,7 @@ func (f *dateFilter) view(c *ui.Context, now time.Time) bool {
 		// 两句话互相打架。自己画这四个按钮就一个 if 的事（和设置页那三档
 		// 主题同一个写法）。
 		for i, p := range datePresets {
-			b := ui.Button(c, p.label).FontSize(12).Radius(6)
+			b := ui.Button(c, p.label).FontSize(scale.Font(c, 12)).Radius(6)
 			if i == f.tab {
 				b = b.Background(t.SurfaceHover)
 			}
@@ -153,15 +154,16 @@ func (f *dateFilter) view(c *ui.Context, now time.Time) bool {
 		}
 
 		// 手动区间的两端。日历是 `ui.DateInput` 自带的，这里一个字都不画。
-		ui.Text(c, "从").FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, "从").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 		// ⚠️ Label 不能省：它不只是给测试用的，没有它读屏软件读不出这是一个
 		// 选起始日期的输入框（旁边那行「从」是占位文字，不是标签），而
 		// 无头 Tester 也只认 label / text。
 		ui.DateInput(c, &f.from).Label("起始日期")
-		ui.Text(c, "到").FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, "到").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 		ui.DateInput(c, &f.to).Label("结束日期")
 
-		ui.Text(c, f.summary()).FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, f.summary()).FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
+			TextColor(t.TextMuted)
 	})
 
 	switch {

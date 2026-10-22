@@ -128,7 +128,9 @@ const folderPageLimit = 200
 func (a *App) folderItems(ctx context.Context, ref CollectionRef) ([]Item, int, error) {
 	var items []Item
 	for page := 1; page <= folderPageLimit; page++ {
-		medias, hasMore, err := a.LoadCollectionPage(ctx, ref, bili.SortByFavTime, page)
+		// 空词：这里拉的是**整个**收藏夹（右键「播放」/「添加到播放列表」要的是
+		// 全部），不是界面上那个搜索框筛过的那一批。
+		medias, hasMore, err := a.LoadCollectionPage(ctx, ref, bili.SortByFavTime, "", page)
 		if err != nil {
 			return items, 0, err
 		}

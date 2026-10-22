@@ -70,12 +70,13 @@ func TestTheLibraryRowsAreTheSameHeightNoMatterHowLongTheTitle(t *testing.T) {
 
 // TestTheLaterHeaderSaysItsOwnColumns 钉住稍后再看那一行的表头列。
 //
-// 它比 `widgets/list` 那一族多两列：播放量 / 加入时间（上游是「投稿时间」，而这一页
-// 的筛选器筛的是 `add_at`——跟着筛的那个时间画，见 `later.go` 文件头）。
+// 它比 `widgets/list` 那一族多两列：加入时间（这一页的筛选器筛的是 `add_at`，
+// 见 `later.go` 文件头）和投稿时间（上游画的是 `pubdate`）。两个时间都在，
+// 各回答一半问题。
 func TestTheLaterHeaderSaysItsOwnColumns(t *testing.T) {
 	tt, _ := laterHoverShell(t)
 
-	for _, want := range []string{"#", "标题", "播放量", "加入时间", "时长"} {
+	for _, want := range []string{"#", "标题", "播放量", "加入时间", "投稿时间", "时长"} {
 		if !uiShows(tt, want) {
 			t.Errorf("稍后再看的表头上没有「%s」，文字有 %q", want, tt.Texts())
 		}
@@ -84,11 +85,14 @@ func TestTheLaterHeaderSaysItsOwnColumns(t *testing.T) {
 
 // TestTheLaterHeaderLinesUpWithItsRows 钉住表头和那一页的行对得齐。
 //
-// ⚠️ 量的是**编号**那一列：它是唯一会被前面几块顶偏的一列，而错的那一列在画面上只是
-// 「编号歪了一点」（这一页原来那份表头就是把「标题」摆在序号后面、忘了中间那个封面，
-// 右边三列整整差 56）。
+// ⚠️ 量的是**编号**和**右端那一列**：编号是唯一会被前面几块顶偏的一列，而右端那一列
+// 是「数字竖着扫得下来」的那一条——表头左边多让 / 少让一块封面，这两处一定有一处歪。
+//
+// ⚠️ **「标题」对的是封面的左缘**（DESIGN.md；票 #167）：行里序号和标题中间隔着 48 的
+// 封面，表头**不给它留空位**，「标题」直接落在封面的左缘上，右边那几列靠 Grow(1) 的标题
+// 那一列吸收掉这点差。所以这一条量的是三处：编号、标题（封面左缘）、右端时长。
 func TestTheLaterHeaderLinesUpWithItsRows(t *testing.T) {
-	tt, _ := laterHoverShell(t)
+	tt, s := laterHoverShell(t)
 
 	head, ok := tt.Find("#")
 	if !ok {
@@ -116,6 +120,24 @@ func TestTheLaterHeaderLinesUpWithItsRows(t *testing.T) {
 	if headClock.X != rowClock.X {
 		t.Errorf("表头的「时长」在 %.1f，行里那一列在 %.1f——差 %.1f",
 			headClock.X, rowClock.X, headClock.X-rowClock.X)
+	}
+
+	// 「标题」那一列落在**封面的左缘**（DESIGN.md；票 #167）：行里那张封面在 UP 名
+	// 左边「一个封面 + 一个列间距」的地方。这一条和上面那条一起才说得清「表头左边
+	// 少让了封面、右边那几列没跟着错」。
+	headTitle, ok := tt.Find("标题")
+	if !ok {
+		t.Fatalf("表头上没有「标题」，文字有 %q", tt.Texts())
+	}
+	owner, ok := tt.Find("UP " + libTitles[0])
+	if !ok {
+		t.Fatalf("画面上找不到 UP 名，文字有 %q", tt.Texts())
+	}
+	mt := metricsOf(s.laterPage.rows.Layout())
+	want := owner.X - (mt.cover + mt.gap)
+	if d := headTitle.X - want; d > 0.5 || d < -0.5 {
+		t.Errorf("表头的「标题」在 %.1f，封面左缘在 %.1f——差 %.1f（表头多让了封面？）",
+			headTitle.X, want, d)
 	}
 }
 
@@ -270,30 +292,35 @@ func uiShows(tt *ui.Tester, s string) bool {
 	return false
 }
 
-// TestTheSearchUserTabHeaderHasNoClock 钉住「用户」那一档的表头**没有「时长」**。
+// TestTheSearchUserTabHeaderHasNoClock 钉住「用户」那一档的表头**没有时长、
+// 播放量、投稿时间**。
 //
 // 那一档的行是「序号 / 头像 / 昵称 / 个性签名」（`searchUserMusic` 的注释），
-// `list.Music.Duration` 是零值，于是行里那一列**没有字**——**位置是留着的**
-// （`widgets/list` 的 `viewCard` 无论有没有时长都留着那么宽，因为行尾那枚「⋯」的
-// 位置跟着这一列走）——但表头上还写着「时长」的话，用户读到的是一列空的表头。
+// 时长 / 播放量 / 投稿时间三样它一样都没有——后两样的列定义是 `searchColumns`
+// 给的（用户那一档是零值），时长那一列则在规格末尾被切掉。
 //
 // ⚠️ 断的是**规格里有没有那一列**而不是画面上有没有那个字：`CardHeaderSpec` 摆的是
 // 列定义，画面上的字是它画出来的，两者对不上这件事只有前者能说清。
 func TestTheSearchUserTabHeaderHasNoClock(t *testing.T) {
-	video := searchHeaderSpec(0, list.ViewList, false, "k")
-	user := searchHeaderSpec(searchTabUser, list.ViewList, false, "k")
+	video := searchHeaderSpec(0, list.ViewList, list.Columns{PlayCount: true, PubTime: true}, false, "k")
+	user := searchHeaderSpec(searchTabUser, list.ViewList, list.Columns{}, false, "k")
 
 	if last := video.Cols[len(video.Cols)-1]; last.Title != "时长" {
 		t.Errorf("歌曲那一档的表头最后一列是「%s」，want 「时长」", last.Title)
 	}
 	for _, col := range user.Cols {
-		if col.Title == "时长" {
-			t.Errorf("「用户」那一档的表头上还摆着「时长」，而那一档的行里没有那一列")
+		switch col.Title {
+		case "时长", "播放量", "投稿时间":
+			t.Errorf("「用户」那一档的表头上还摆着「%s」，而那一档的行里没有那一列",
+				col.Title)
 		}
 	}
-	// 别的几列一个都不能少（封面那一列的空位也算）。
-	if len(user.Cols) != len(video.Cols)-1 {
-		t.Errorf("「用户」那一档的表头有 %d 列，want %d（只少「时长」那一列）",
-			len(user.Cols), len(video.Cols)-1)
+	// 剩下的两列一个都不能少：序号、标题。
+	//
+	// ⚠️ **封面不在表头里**（DESIGN.md：表头的「标题」从封面左缘起）——所以是两列
+	// 而不是三列。多一列封面空位的话「标题」要往右让 64，而那在画面上只是「表头比
+	// 下面那几列靠右一点」。
+	if len(user.Cols) != 2 {
+		t.Errorf("「用户」那一档的表头有 %d 列，want 2（# / 标题）", len(user.Cols))
 	}
 }

@@ -20,7 +20,10 @@
 // 网格那一块里的），两个都调 `drawEmpty`。
 package ui
 
-import "github.com/egoist/mygo/ui"
+import (
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/egoist/mygo/ui"
+)
 
 // emptyState 是一页空着时说的两句话，外加那一格插画位上的图标。
 type emptyState struct {
@@ -46,6 +49,31 @@ type emptyState struct {
 	// （见 dynamicfeed.go / follow.go），那一支说的是「还没好」而不是「没有」，
 	// 摆一枚插画反而像在说「这里什么都没有」。
 	Icon string
+	// Loading 是「**还在拉**」那一档。
+	//
+	// ⚠️ **它和「空」不是同一档东西**：空状态是一个**结论**（这里没有东西），
+	// 加载中是一句**过程**（还没好）。上一轮（#133）做的是「空」，这一轮
+	// （#138）做的是「加载中」——两票的边界就在这个标志上。
+	//
+	// 但它们**走同一个出口**（`drawEmpty`），所以框、留白、字号、主次色都是
+	// 同一份：用户等的那几秒里那一行字和回来之后那一格是同一个形状，不会
+	// 「忽然变大、居中、还多了一行」。
+	//
+	// ⚠️ **这一档不摆插画、也没有第二句**：插画说的是「这里什么都没有」，
+	// 而这一档说的是「还没好」——摆反了就是在骗用户。
+	Loading bool
+}
+
+// loadingState 是「正在加载…」那一档。
+//
+// ⚠️ **「加载中」和「没有结果」走同一个出口**（`drawEmpty`），但**不是同一档
+// 东西**：这一档没有插画、没有第二句，字是淡的（还没好，不是结论）。
+//
+// 标题写什么由调用方给：有的页写「正在加载…」，有的写「正在加载动态…」
+// （那一页要说明拉的是哪一块），还有的写「正在扫描…」（本地音乐那一页拉的是
+// 硬盘，不是网络）。
+func loadingState(text string) emptyState {
+	return emptyState{Title: text, Loading: true}
 }
 
 // 空状态那一格插画的大小。抄上游 `components/empty/index.tsx:16` 的 `size={32}`。
@@ -58,6 +86,16 @@ const emptyIconSize = 32
 // emptyGap 是图标、标题、提示三样之间的间距。上游是 `space-y-2`（8），
 // 这里多一样东西（上游只有两样），照抄 8 的话三样会挤成一团。
 const emptyGap = 8
+
+// emptyTitleSize 是空状态那一行「这里为什么空」的字号。**15**。
+//
+// ⚠️ **「正在加载」那一档也用这个数**（见 `emptyCopy`）：用户等的那几秒里
+// 那一行字和回来之后那一格得是同一个形状，否则界面会「忽然变大、居中、
+// 还多了一行」（票 #138 消掉的就是这个）。
+const emptyTitleSize = 15
+
+// emptyHintSize 是空状态第二句「怎么才能不空」的字号。**12**。
+const emptyHintSize = 12
 
 // drawEmpty 是**唯一**的空状态画法。页面级（`viewEmpty`）和列表 / 网格那一块
 // （`pagedRows.viewEmptyState`）都走它——七页共用一套绘制入口就是指这个。
@@ -86,7 +124,7 @@ func drawEmpty(c *ui.Context, key string, e emptyState, pad float32) {
 // `viewLibraryMissing`（插画 / 页面名 / 那一页的空文案 / 「没接上接口」的原因）。
 // 那三样各自是 `emptyArt` / 一句自定义 / `emptyCopy`，而字号和主次色只有这一份。
 //
-// ⚠️ **写新的一处空状态时也要走这几个函数**，别把 `FontSize(15)` / `FontSize(12)`
+// ⚠️ **写新的一处空状态时也要走这几个函数**，别把 `FontSize(scale.Font(c, 15))` / `FontSize(scale.Font(c, 12))`
 // 抄一遍过去：抄一遍就会漂开（改一次字号只改一处，另一处不动），而界面上看不出来。
 func emptyContent(c *ui.Context, e emptyState) {
 	emptyArt(c, e.Icon)
@@ -105,11 +143,21 @@ func emptyArt(c *ui.Context, name string) {
 }
 
 // emptyCopy 画「这里为什么空」和「怎么才能不空」那两行。
+//
+// ⚠️ **「正在加载」那一档也走这里**：它只有上面那一行，字是淡的——
+// 「还没好」不是一个结论，不该用正文的颜色说。而**字号和「这里为什么空」
+// 一样**（`emptyTitleSize`），因为用户等的那几秒里那一行字和回来之后那一格
+// 得是同一个形状（票 #138）。
 func emptyCopy(c *ui.Context, e emptyState) {
 	t := c.Theme()
-	ui.Text(c, e.Title).FontSize(15).TextColor(t.Text)
+	if e.Loading {
+		ui.Text(c, e.Title).FontSize(scale.Font(c, emptyTitleSize)).TextColor(t.TextMuted)
+		return
+	}
+	ui.Text(c, e.Title).FontSize(scale.Font(c, emptyTitleSize)).TextColor(t.Text)
 	if e.Hint != "" {
-		ui.Text(c, e.Hint).FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, e.Hint).FontSize(scale.Font(c, emptyHintSize)).LineHeight(smallCopyLeading).
+			TextColor(t.TextMuted)
 	}
 }
 
@@ -130,6 +178,37 @@ func (s *Shell) viewEmpty(c *ui.Context, key string, e emptyState) {
 	drawEmpty(c, key, e, emptyPagePad)
 }
 
+// viewLoading 画「正在加载…」那一档。**和 `viewEmpty` 是同一个出口**
+// （`drawEmpty`），只是那一档的状态不同（见 `loadingState`）。
+//
+// ⚠️ **八页的加载态都走它**：首页那一屏是转圈（上游就是转圈，见
+// `homepage.go` 的 `viewTabBody`），其余八页原来各写各的——搜索页和收藏夹页
+// 是一行 13pt 淡灰缩在左上角，本地音乐是一行 13pt 淡灰，而「没有结果」是
+// 居中 15pt 两行。于是用户等的那几秒里那一行字和回来之后那一格对不上。
+//
+// ⚠️ **它不装主题**：这一格大多画在页面里面，而页面那一层已经装过了
+// （铁律二）。`applyFrameTheme` 是幂等的，多调一次没有副作用——而漏掉它
+// 的症状是「这一格用的是系统色」，和旁边的界面对不上。
+func (s *Shell) viewLoading(c *ui.Context, key, text string) {
+	s.applyFrameTheme(c)
+	drawEmpty(c, key, loadingState(text), emptyPagePad)
+}
+
+// loadingCell 是**列表里**「第一页在途」那一格的画法。
+//
+// ⚠️ **它和列表自己那句 13px 的「正在加载…」是同一件事的两种画法**：这一格
+// 装的是外面递进来的（`widgets/list` 的 `SetEmptyView`），所以「加载中」那一格
+// 和「没有结果」那一格是**同一个出口**（`drawEmpty`）——而列表自己那句是缩在
+// 列表左上角的一行小字。
+//
+// ⚠️ **留白用 `emptyRowPad`**（不是整页那个 `emptyPagePad`）：这一格在列表
+// 那一块里，四周全是行，留白大了就只剩字飘在当中（理由同 `emptyRowPad`）。
+func loadingCell(text string) func(c *ui.Context) {
+	return func(c *ui.Context) {
+		drawEmpty(c, "", loadingState(text), emptyRowPad)
+	}
+}
+
 // biliNotMounted 是「B 站客户端没挂上」这一次的特别原因，那三页共用同一句。
 //
 // 抽成常量是因为**它原来在三个文件里各写一遍**（`librarypage.go` 和 `follow.go`
@@ -148,10 +227,10 @@ func (s *Shell) viewPageEmptyWithReason(c *ui.Context, key, title string, e empt
 	t := c.Theme()
 	ui.Column(c).Key(key).Grow(1).Center().Gap(emptyGap).Padding(emptyPagePad, 28).Children(func() {
 		emptyArt(c, e.Icon)
-		ui.Text(c, title).FontSize(emptyPageTitle).Bold()
+		ui.Text(c, title).FontSize(scale.Font(c, emptyPageTitle)).Bold()
 		if e.Title != "" {
 			emptyCopy(c, e)
-			ui.Text(c, biliNotMounted).FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, biliNotMounted).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 		}
 	})
 }
@@ -276,13 +355,13 @@ func (s *Shell) viewLoadError(c *ui.Context, key, where, retryLabel string, err 
 		// 插画用警告那一枚而**不是**空状态那一批：这一格说的是「没拉出来」，
 		// 不是「本来就没有」。
 		ui.Icon(c, icon(iconFailed)).FontSize(emptyIconSize).TextColor(t.Warning)
-		ui.Text(c, "这一块没拉出来").FontSize(15).TextColor(t.Text)
+		ui.Text(c, "这一块没拉出来").FontSize(scale.Font(c, 15)).TextColor(t.Text)
 		if where != "" {
 			// 主次和错误本身再分一档：这一行是给用户复现用的（说给开发者听），
 			// 而下面那行是原始错误。两者都别比标题更抢眼。
-			ui.Text(c, "没拉出来的是："+where).FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, "没拉出来的是："+where).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 		}
-		ui.Text(c, err.Error()).FontSize(12).TextColor(t.TextMuted).MaxLines(3)
+		ui.Text(c, err.Error()).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(3)
 		if retry != nil && ui.Button(c, retryLabel).Clicked() {
 			retry()
 		}

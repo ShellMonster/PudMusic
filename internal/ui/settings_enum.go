@@ -53,8 +53,7 @@ func enumSelect[T comparable](c *ui.Context, value *T, items []enumItem[T], labe
 	})
 
 	sel.Popup(func(panel ui.Element) {
-		panel.Grow(1).MaxWidth(width+24).Padding(4).Radius(t.Radius+2).
-			Background(t.Background).Border(1, t.Border).Children(func() {
+		popupPanel(t, panel.Grow(1).MaxWidth(width+24).Padding(4)).Children(func() {
 			for _, it := range items {
 				opt := sel.Item(it.value).Padding(6, 10).Radius(6)
 				switch {

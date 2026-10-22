@@ -41,7 +41,10 @@
 // 见 theme.go）。
 package ui
 
-import "github.com/egoist/mygo/ui"
+import (
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/egoist/mygo/ui"
+)
 
 // miniPlayerPath 是迷你播放器那条路由，和 routes 表里登记的是同一个字符串。
 const miniPlayerPath = "/mini-player"
@@ -72,7 +75,7 @@ func (s *Shell) viewNowPlaying(c *ui.Context, _ *ui.Route) {
 	// `app/lyrics` 的切歌先重置 / 偏移字号夹界 / 防抖落盘）负责「哪一句正在唱」
 	// 和「那两个旋钮能走到哪儿」，这一层只画。
 	ui.Column(c).Key("page:mini-player").Grow(1).Padding(28).Gap(12).Children(func() {
-		ui.Text(c, st.Title).FontSize(20).Bold()
+		ui.Text(c, st.Title).FontSize(scale.Font(c, 20)).Bold()
 		s.viewLyrics(c, s.app.Lyrics(), st.Position)
 	})
 }

@@ -132,6 +132,12 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 		// `/` 那一条，见 viewHome）。让三个列表都说一遍自己那句「这里还没有歌」，
 		// 叠在那一页的空状态上就是两句话在讲同一件事。
 		l.SetEmpty("")
+		// 播放量那一列：首页三个 Tab 的接口都带着它（`RecommendItem.View`）。
+		//
+		// ⚠️ **投稿时间不画**：上游首页自己就是 `hidePubTime`
+		// （`pages/music-recommend/list.tsx:49` 与 `:60`），而它那一层的
+		// `RecommendItem` 也没把 `pubdate` 带上来——照它。
+		l.SetColumns(list.Columns{PlayCount: true})
 		// ⚠️ **这里不挂 `ScrollState`**：给一个 `List` 挂上它会和它自己按行记的
 		// 位置**打架**——TrackScroll 每一帧按那个像素数把容器摆过去，而
 		// `ui.ListState` 记的是「第几行 + 那一行离顶多远」，两个数换算的那一帧里
@@ -208,7 +214,8 @@ func (h *homePage) view(c *ui.Context, s *Shell) {
 		l.SetView(view)
 	}
 
-	ui.Column(c).Key("page:" + homePath).Grow(1).Padding(20).Gap(12).
+	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
+	ui.Column(c).Key("page:"+homePath).Grow(1).Padding(0, pagePadX).Gap(12).
 		AlignItems(ui.Stretch).Children(func() {
 		h.viewTabs(c)
 
@@ -264,6 +271,7 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell) {
 		// 下滚它不动，宽屏下滚到右边列名也还在。
 		h.lists[h.tab].Header(c, "home:header:"+strconv.Itoa(h.tab))
 		h.lists[h.tab].View(c)
+		s.noteScrollbar(h.lists[h.tab].Hot())
 
 		// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见
 		// `widgets/list` 的 `BackToTop`）。
@@ -293,12 +301,16 @@ func (h *homePage) scrollTop() {
 // 不该在接数据源这一票里顺手定下来。摆一个连语义都还没定的按钮不如不摆。
 func (h *homePage) viewTabs(c *ui.Context) {
 	ui.Row(c).Key("home:tabbar").FillWidth().AlignItems(ui.Center).Children(func() {
-		// 🔴 Key 要写在 `ui.Tabs` 的构造**之前**：Tabs 里面是个 List，它的状态在
+		// 🔴 Key 要写在 Tab 的构造**之前**：Tab 里面是个 List，它的状态在
 		// 构造的时候就已经读过了，构造之后再 `.Key()` 会 panic（`ui/element.go`
 		// 的 Key 注释：自带输入的控件都不能构造后 Key，只能构造前 `Context.Key`）。
 		// 中间的语句会把它抢走，所以这两句要紧挨着。
 		c.Key("home:tabs")
-		ui.Tabs(c, &h.tab, homeTabs[:]...).Grow(1)
+		// ⚠️ **主 Tab 用轨道 + 滑块那一种**（`mainTabs`，见 tabs.go）：这一排
+		// 和次级排序那几排不是同一个样子（票 #138）。
+		//
+		// 首页这一排上游是 `size="lg"`（44），其余三处是 md（40）。
+		mainTabs(c, &h.tab, tabLG, homeTabs[:]...)
 	})
 }
 

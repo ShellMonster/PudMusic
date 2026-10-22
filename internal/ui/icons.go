@@ -44,6 +44,7 @@ package ui
 import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -200,22 +201,24 @@ const (
 	iconChart      = "Business/bar-chart-2-line.svg" // 统计
 
 	// ── 导航、方向、展开收起 ────────────────────────────────────────────
-	iconPrevEpisode    = "Arrows/arrow-left-line.svg"       // 上一集
-	iconNextEpisode    = "Arrows/arrow-right-line.svg"      // 下一集
-	iconGoBack         = "Arrows/arrow-go-back-line.svg"    // 后退
-	iconGoForward      = "Arrows/arrow-go-forward-line.svg" // 前进
-	iconSideCollapse   = "Arrows/arrow-left-s-line.svg"     // 侧栏收起
-	iconSideExpand     = "Arrows/arrow-right-s-line.svg"    // 侧栏展开
-	iconChevronDown    = "Arrows/arrow-down-s-line.svg"     // 向下展开
-	iconChevronUp      = "Arrows/arrow-up-s-line.svg"       // 向上收起
-	iconDropDown       = "Arrows/arrow-drop-down-line.svg"  // 下拉
-	iconDropUp         = "Arrows/arrow-drop-up-line.svg"    // 上拉
-	iconDownloadArrow  = "Arrows/arrow-right-down-line.svg" // 下载（带箭头那一版）
-	iconToTop          = "Arrows/arrow-up-line.svg"         // 回到顶部
-	iconToTopLeft      = "Arrows/arrow-left-up-line.svg"    // 左上
-	iconToBottomLeft   = "Arrows/arrow-left-down-line.svg"  // 左下
-	iconDrag           = "Arrows/drag-move-2-line.svg"      // 拖动
-	iconFullscreenLine = "Media/fullscreen-line.svg"        // 全屏
+	iconPrevEpisode   = "Arrows/arrow-left-line.svg"       // 上一集
+	iconNextEpisode   = "Arrows/arrow-right-line.svg"      // 下一集
+	iconGoBack        = "Arrows/arrow-go-back-line.svg"    // 后退
+	iconGoForward     = "Arrows/arrow-go-forward-line.svg" // 前进
+	iconSideCollapse  = "Arrows/arrow-left-s-line.svg"     // 侧栏收起
+	iconSideExpand    = "Arrows/arrow-right-s-line.svg"    // 侧栏展开
+	iconChevronDown   = "Arrows/arrow-down-s-line.svg"     // 向下展开
+	iconChevronUp     = "Arrows/arrow-up-s-line.svg"       // 向上收起
+	iconDropDown      = "Arrows/arrow-drop-down-line.svg"  // 下拉
+	iconDropUp        = "Arrows/arrow-drop-up-line.svg"    // 上拉
+	iconDownloadArrow = "Arrows/arrow-right-down-line.svg" // 下载（带箭头那一版）
+	// ⚠️ 「回到顶部」那一枚的**画法**在 `widgets/list`（那个包在界面层下面），
+	// 所以文件名只有一个出处：`list.BackToTopIcon`。这里取它，不是另写一遍。
+	iconToTop          = list.BackToTopIcon                // 回到顶部
+	iconToTopLeft      = "Arrows/arrow-left-up-line.svg"   // 左上
+	iconToBottomLeft   = "Arrows/arrow-left-down-line.svg" // 左下
+	iconDrag           = "Arrows/drag-move-2-line.svg"     // 拖动
+	iconFullscreenLine = "Media/fullscreen-line.svg"       // 全屏
 
 	// ── 文件、媒体、其余 ────────────────────────────────────────────────
 	iconImageAdd      = "Media/image-add-line.svg"              // 添加封面
@@ -337,9 +340,14 @@ const (
 	// iconMd 是播放条上那些大一点的键（上一首 / 下一首 / 播放 / 播放模式 /
 	// 下载 / 播放列表 / 加歌），加上顶栏上多数按钮。Biu 那边是 18~22。
 	iconMd = 18
-	// iconPlayBtn 是播放/暂停那一枚。Biu 是 48，而这里的播放条只有 88 高，
-	// 中间那一列还压着进度条；48 会把那一列撑到别处借宽度（见 playbar.go 的账）。
-	iconPlayBtn = 30
+	// iconPlayBtn 是播放/暂停那一枚。Biu 是 48（`music-play-control` 的
+	// `<RiPlayCircleFill size={48} />`），我们照抄。
+	//
+	// ⚠️ **它曾经是 30**，理由写的是「播放条只有 88 高，中间那一列还压着进度条」——
+	// 而那个理由是假的：88 高装得下 48（48 + 2 的缝 + 20 的进度行 = 70）。
+	// 30 的真正后果是**它成了全条上最小的一枚**，而 18 的上下首和它挤成一小堆，
+	// 一眼看过去中间是空的——用户要找的那枚键反而不显眼。
+	iconPlayBtn = 48
 )
 
 // 点击区比图标大出来的那一圈。**靠内边距，不靠资源**（见文件头）。
@@ -353,8 +361,12 @@ const (
 	iconHit = 28
 	// iconHitMd 是中等图标键（iconMd）的点击区边长：18 + 每边 5。
 	iconHitMd = 28
-	// iconHitPlay 是播放/暂停那一枚：30 的图标 + 每边 5。
-	iconHitPlay = 40
+	// iconHitPlay 是播放/暂停那一枚：48 的图标 + 每边 5。
+	//
+	// ⚠️ **它跟着 iconPlayBtn 一起长的**（30 → 48 的图标，点击区 40 → 58）：
+	// 点击区是「图标 + 每边 5 的内边距」，图标大了点击区就得跟着大，否则那圈
+	// 留白会被图标顶掉——图标画在按钮的中间，多出来的那一截会被裁掉。
+	iconHitPlay = 58
 )
 
 // iconButton 造一个**只画一个图标**的扁平按钮。

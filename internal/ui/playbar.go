@@ -9,6 +9,8 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -66,7 +68,7 @@ const (
 	artistMinW = 60
 )
 
-// viewPlayBar 是底部那条播放条：封面、歌名、上一首/下一首/播放、可拖的进度条、
+// viewPlayBar 是底部那条播放条：封面、歌名、上一首/播放/下一首、可拖的进度条、
 // 右边那一组控件。
 //
 // 一行摆完，横着分三块，和 Biu 的 playbar/left|center|right 一一对应：
@@ -80,6 +82,23 @@ const (
 // 深色下差一整级**（`#27272a` / `#18181b`），于是深色下界面裂成三条带
 // （票 #127 的头一条）。三处统一之后层次没丢：上面那条线在、卡片和弹窗仍然
 // 取 `Surface`，比底色亮一档。
+//
+// 🔴 **宽度账**（2026-10 票 #135 之后量的，深浅两套一样）：
+//
+//	窗口   播放条可用   右边那一组   左边那一列   中间那一列   进度条
+//	 900       868          221         311.5        311.5      195.7
+//	1200      1168          221         455.5        455.5      345.7
+//	1600      1568          221         655.5        655.5      545.7
+//
+//	（可用 = 窗口 - 左右各 16 的内边距；左边和中间**各分一半**多出来的那一份，
+//	 所以窗口每宽 100，进度条就长 50。）
+//
+//	**歌名和 UP 名都是自然宽**（歌名 208.4、长的那个 UP 名 249.7），它们不跟着
+//	窗口长——左边那一列多出来的那一份是空的。票 #135 明确「不改左侧那一块的
+//	布局」，所以那一份空着是有意的。
+//
+//	⚠️ **右边那一组是 221**（不是票 #127 那时的 362）：音量收成一枚图标之后，
+//	 常驻的那根 120 像素横滑块没有了（见 `viewPlayBarRight`）。
 func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 	t := c.Theme()
 
@@ -96,7 +115,18 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 				})
 
 				// 中：控制在上、进度在下。Biu 的 playbar/center 就是一个 flex-col。
-				ui.Column(c).Gap(2).Children(func() {
+				//
+				// 🔴 **这一列 `Grow(1)`**：进度条原来永远是 80 像素宽，因为中间这一列
+				// **不参与**剩余空间的分配——窗口从 900 拉到 1600，多出来的宽度全被
+				// 歌名吃掉。左边那一列和这一列**各分一半**多出来的那一份，于是
+				// 进度条随窗口单调变长（实测 900 → 195.7、1200 → 345.7、
+				// 1600 → 545.7，每一档正好是窗口宽的一半；整张表见上面那段）。
+				//
+				// 上游那边中间那一份更大（`grid-cols-[minmax(0,1fr)_minmax(0,3fr)_minmax(0,1fr)]`），
+				// 但那一套是**三列都按比例**分的，而右边那一组是**定宽**的（六个键
+				// 加五道缝），照抄过来右边那一份会被挤扁——所以这里取「一半」这个
+				// 折中：左边那一份仍然够摆封面加歌名，进度条也真的长起来了。
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
 					s.viewTransport(c, st)
 					s.viewProgress(c, st)
 				})
@@ -122,6 +152,10 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 //
 // 键与键之间的缝是 8（`space-x-2`，`playbar/right/index.tsx:13`），不是外面
 // 那一行的 12：这一行最挤，8 是上游量出来摆得下五枚的那一档。
+//
+// 🔴 **这一组现在是 221 宽**（六个键 + 五道 8 的缝）：模式 28、下载 28、队列 28、
+// 音量 28、倍速 41（贴字宽）、加歌 28。票 #127 那时它是 362——多出来的是那根
+// **常驻的 120 像素横滑块**加一道缝，票 #135 把它收成了图标。
 func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 	ui.Row(c).Key("playbar-right").Gap(playbarRightGap).AlignItems(ui.Center).Children(func() {
 		// 播放模式。**原来它摆在进度那一行的最右边**，而上游摆在右边这一组
@@ -150,33 +184,24 @@ func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 		// 播放列表抽屉的开关（原来在顶栏，见 navbar.go）。上游它就在右边这一组
 		// 的第三个（`playbar/right/index.tsx:16`），而顶栏那一枚是当初右边摆不下
 		// 时挪过去的——现在右边腾得开，两处只能留一个，留两个就会不一致。
-		if iconButton(c, iconQueue, "播放列表", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5).
-			Tooltip(drawerTip(s.drawerOpen)).Clicked() {
+		if s.withTip(c, iconButton(c, iconQueue, "播放列表", iconMd).
+			Size(iconHitMd, iconHitMd).Padding(0, 5), drawerTip(s.drawerOpen)).Clicked() {
 			s.drawerOpen = !s.drawerOpen
 		}
 
-		// 音量图标是**装饰**：它不可点，旁边那条滑块才是控件，而滑块自己
-		// 带着「音量」这个无障碍名字。所以这里刻意不加 Label——加了就是
-		// 两个同名的东西，而 `Tester.Find` 只会认到先画的那个（图标），
-		// 那些要量滑块宽度的测试就会量到图标上去。
+		// 音量收成**一枚图标 + 悬停浮出的竖滑块**（上游 `music-volume` 那个做法），
+		// 见 playbar_volume.go。
 		//
-		// 画的是哪一档看音量本身（Biu 的 music-volume 三档同一个做法）。
-		ui.Icon(c, icon(volumeIcon(st.Volume))).
-			FontSize(iconMd).TextColor(c.Theme().TextMuted)
-
-		// 音量条自己带无障碍标签，不用旁边再摆一个「音量」字。
-		vol := st.Volume
-		if ui.Slider(c, &vol, 0, 1).Width(120).Label("音量").Changed() {
-			s.app.SetVolume(vol)
-		}
+		// ⚠️ **常驻的那根 120 像素横滑块没有了**：它抢的是进度条该有的空间——
+		// 那一档右边这一组是 362 宽，而窗口下限是 900。收成图标之后右边这组窄了
+		// 141（362 → 221），中间那一列（进度条）拿得回来的宽度更多。
+		s.viewVolumeButton(c, st)
 
 		// 倍速紧挨着音量：两个都是「听感」旋钮（上游也是挨着的）。
 		s.viewRate(c, st)
 
-		if iconButton(c, iconEnqueue, "加歌", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5).
-			Tooltip("把本地文件加到队列末尾").Clicked() {
+		if s.withTip(c, iconButton(c, iconEnqueue, "加歌", iconMd).
+			Size(iconHitMd, iconHitMd).Padding(0, 5), "把本地文件加到队列末尾").Clicked() {
 			s.pickAndEnqueue()
 		}
 	})
@@ -227,7 +252,7 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 			// 「三行歌名 + UP 名 + 错误」，多出来的那两行被裁掉，而**界面上看不出坏了**
 			//（歌名还在，只是下面的话看不见了）。一行 + 省略号之后超长的那部分看不全，
 			// 但下面每一行都还在。
-			ui.Text(c, title).FontSize(15).Bold().
+			ui.Text(c, title).FontSize(scale.Font(c, 15)).Bold().
 				TextColor(textColor(t, st.HasTrack)).
 				MaxLines(1).Ellipsis("…")
 			s.viewQualityBadge(c, st, t)
@@ -240,8 +265,8 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 			// 而症状是「说了有话却看不见」（文本节点还在，测试也还找得到它）。
 			//
 			// 缩掉的那几个字用悬停补回来，和上面那个音质徽章同一个做法。
-			ui.Text(c, "打不开："+st.Err).FontSize(12).TextColor(t.Danger).
-				MaxLines(1).Ellipsis("…").Tooltip("打不开：" + st.Err)
+			s.withTip(c, ui.Text(c, "打不开："+st.Err).FontSize(scale.Font(c, 12)).
+				TextColor(t.Danger).MaxLines(1).Ellipsis("…"), "打不开："+st.Err)
 		}
 	})
 }
@@ -261,25 +286,26 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 // 别的什么都不花；而窗口一宽就连那 36 也不用花**——这是量的，不是推的。同一首歌、
 // 同一块屏幕，**单 P（不摆这个键）和多 P（摆）两档各量一次**（UP 名的自然宽是 249.7）：
 //
-//	窗口    UP 名 146→110   196→160   246→210   249.7→249.7   249.7→249.7
-//	        900      950       1000        1100            1200/1280
-//	    （让位 36） （让位 36） （让位 36）  （让位 0）      （让位 0）
+//	窗口    UP 名 171.7→135.7   196.7→160.7   221.7→185.7   249.7→235.7   249.7→249.7
+//	        900          950          1000          1100           1200/1280
+//	    （让位 36）  （让位 36）  （让位 36）  （让位 14）     （让位 0）
 //
-// **每一档的歌名（208.4）、进度条（80）、播放模式（28）、下载（28）、加歌（28）
-// 两档都一模一样**——这个键不花它们一分钱。
+// **每一档的歌名（208.4）、进度条（195.7 / 220.7 / 245.7 / 295.7 / 345.7 / 385.7）、
+// 播放模式（28）、下载（28）、加歌（28）两档都一模一样**——这个键不花它们一分钱。
 //
-// 1100 以上让位是 0，原因是那一行**够宽到装得下 UP 名的自然宽再加这个键**，`Grow(1)`
+// 1200 以上让位是 0，原因是那一行**够宽到装得下 UP 名的自然宽再加这个键**，`Grow(1)`
 // 于是没东西可挤。这不是「宽窗口下碰巧没事」，而是 `Grow` 的正常行为：挤的永远是
 // 那个可伸缩的东西，而它在这一行里只有 UP 名一个（`Grow(1)` + `MinWidth` +
-// `Ellipsis("…")`，见 `viewArtist`）。在应用自己的窗口下限 900 上它让出 36，而 110
+// `Ellipsis("…")`，见 `viewArtist`）。在应用自己的窗口下限 900 上它让出 36，而 135
 // 仍远在 `ownerNameMinW`（40）之上。
 //
 // ⚠️ **另一处也量过：中间那一列的第二行**（挨着播放模式）——摆在那儿一样只让 UP 名
 // 让出 38 左右，歌名和进度条同样一分不丢。两处几乎等价，所以这一条**不是算出来的，
 // 是照 Biu 挑的**（Biu 的分集入口就摆在收藏/收藏夹旁边）。
 //
-// ⚠️ **上表是 2026-10（票 #127 把下载和播放模式搬去右边那一组之后）重量的**。
-// 搬之前这一行有三枚小键、进度那一行还挂着播放模式，于是 1000 上只让位 19.7。
+// ⚠️ **上表是 2026-10（票 #135 把音量收成图标、中间那一列改成参与分配之后）
+// 重量的**。改之前左边那一列**独占**多出来的宽度（中间那一列不参与分配），
+// UP 名因此更宽（900 上是 146），而进度条永远是 80。
 // **注释里的数是量出来的，量变了就得改它**——`partdrawer_test.go` 的
 // `TestThePartsKeyCostsNothingElseOnThePlayBar` 每一次都在重跑那两档。
 //
@@ -320,16 +346,16 @@ func (s *Shell) viewTrackMeta(c *ui.Context, st app.State, t *ui.Theme) {
 // 这里跟着错，而且错得很安静（空间页退回占位页，没人看得出来）。
 func (s *Shell) viewArtist(c *ui.Context, st app.State, t *ui.Theme) {
 	if st.ArtistMid <= 0 {
-		ui.Text(c, st.Artist).Grow(1).MinWidth(artistMinW).FontSize(12).
+		ui.Text(c, st.Artist).Grow(1).MinWidth(artistMinW).FontSize(scale.Font(c, 12)).
 			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 		return
 	}
 	// 扁平按钮：UP 名这一格是**播放条上一枚按钮**，而调研点名的描边药丸里就有它
 	//（报告 §1.1 的 F1 证据：播放条上每一枚带描边的键）。它上面是 12px 的弱化
 	// 灰字，本来就不该配一块描边底。
-	if flatButton(c, st.Artist).Grow(1).MinWidth(artistMinW).FontSize(12).
-		Padding(0, 2).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").
-		Tooltip("打开 " + st.Artist + " 的空间").Clicked() {
+	if s.withTip(c, flatButton(c, st.Artist).Grow(1).MinWidth(artistMinW).
+		FontSize(scale.Font(c, 12)).Padding(0, 2).TextColor(t.TextMuted).
+		MaxLines(1).Ellipsis("…"), "打开 "+st.Artist+" 的空间").Clicked() {
 		s.navigate(upPathPrefix + strconv.FormatInt(st.ArtistMid, 10))
 	}
 }
@@ -353,13 +379,16 @@ func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
 	// 空心 = 还没收藏，实心 = 已经收藏。图标认的是「有没有」，和原来那个
 	// 靠主色染出来的「收藏」两个字说的是同一件事。
 	// 哪一档配哪一张只有 `favIcon` 说了算（理由见 icons.go 那几个函数的头一段）。
-	btn := iconButton(c, favIcon(faved), "收藏", iconSm).
-		Size(iconHit, iconHit).Padding(0, 7).
-		Tooltip(favTooltip(faved))
+	btn := s.withTip(c, iconButton(c, favIcon(faved), "收藏", iconSm).
+		Size(iconHit, iconHit).Padding(0, 7), favTooltip(faved))
 	if faved {
 		// ⚠️ **只在这一支设颜色**：没收藏的那一支一个字都不改，好让「默认那个颜色」
 		// 继续由按钮自己决定（图标从祖先的文字色继承，按钮给的就是它）。
-		btn = btn.TextColor(c.Theme().Accent)
+		//
+		// 和「正在播放」同一个规矩：主色当前景色时浅色下要一个与底色
+		// ≥4.5:1 的变体（理由见 `widgets/ink`）——图标也是前景，1.9:1 的绿
+		// 压在白底上同样看不出是「已收藏」。
+		btn = btn.TextColor(ink.AccentOn(c.Theme()))
 	}
 	if btn.Clicked() {
 		it, ok := s.app.PlayingItem()
@@ -392,9 +421,8 @@ func favTooltip(faved bool) string {
 // 五枚键在一条线上会看出参差——而参差正是「这一枚是从别处搬来的」在画面上
 // 唯一的痕迹。
 func (s *Shell) viewDownloadButton(c *ui.Context, st app.State) {
-	if iconButton(c, iconDownload, "下载", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 5).
-		Tooltip("把正在放的这首下载到本地").Clicked() {
+	if s.withTip(c, iconButton(c, iconDownload, "下载", iconMd).
+		Size(iconHitMd, iconHitMd).Padding(0, 5), "把正在放的这首下载到本地").Clicked() {
 		it, ok := s.app.PlayingItem()
 		if !ok {
 			s.addToast("这一首还没有取回来，下载不了")
@@ -422,8 +450,8 @@ func (s *Shell) viewQualityBadge(c *ui.Context, st app.State, t *ui.Theme) {
 	if st.Quality == "" {
 		return
 	}
-	ui.Text(c, st.Quality).FontSize(11).TextColor(t.TextMuted).
-		Tooltip("音质：" + st.Quality + "（点一下换）").
+	s.withTip(c, ui.Text(c, st.Quality).FontSize(scale.Font(c, 11)).TextColor(t.TextMuted),
+		"音质："+st.Quality+"（点一下换）").
 		Menu(func(m *ui.Menu) {
 			for _, q := range qualityChoices {
 				// `Checked` 是「当前选的是这一档」。选的和给的要能分开看：
@@ -450,33 +478,45 @@ var qualityChoices = []bili.AudioQuality{
 	bili.AudioLow,
 }
 
-// viewTransport 是上一首、下一首、播放/暂停。
+// viewTransport 是上一首、播放/暂停、下一首。
 //
-// ⚠️ **三个都是只有图标的按钮**（Biu 的 `MusicPlayControl` 就是
-// `RiSkipBackFill` / `RiPlayCircleFill` / `RiSkipForwardFill`）。
+// 🔴 **次序是「上一首 · 播放 · 下一首」**：上游的 `MusicPlayControl` 就是
+// `RiSkipBackFill` / `RiPlayCircleFill` / `RiSkipForwardFill`
+// （`components/music-play-control/index.tsx:16-18`），而**我们自己的**满屏播放器
+// （`fullplayer.go`）和迷你播放器（`miniplayer.go`）也是这个次序。
+//
+// 改之前这里是「上一首 · 下一首 · 播放」——唯独播放条这处没照做。后果是**用户从
+// 全屏退回播放条时，肌肉记忆里「中间是播放」的位置按下去是下一首**。
+//
+// ⚠️ **「上一首」「下一首」两个按钮的本体一个字没动**（`viewPrevButton` /
+// `viewNextButton` 满屏那边也在用），动的只是它们在这一行里的位置。
+//
+// ⚠️ **三个都是只有图标的按钮**（Biu 的 `MusicPlayControl` 就是上面那三个）。
 // 文字版是三个汉字各占 88 宽——中间那一列 276 宽全被这三个键占满，而进度条
-// 那一行是从它这儿借的富余（见 viewProgress）。换成图标之后那一列只剩 132，
-// 歌名那边宽出来的 144 就是「加得下东西」的那一段。
+// 那一行是从它这儿借的富余（见 viewProgress）。换成图标之后那一行只有
+// **138** 宽（上一首 28 + 12 + 播放 58 + 12 + 下一首 28），歌名那边宽出来的
+// 就是「加得下东西」的那一段。
 //
 // 无障碍名字一个字没少（「上一首」「播放」「暂停」「下一首」），所以读屏软件
 // 念出来和原来一字一样——变的是**画出来的**，不是**念出来的**。
 func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-		s.viewStepButtons(c)
+		s.viewPrevButton(c)
 
 		if st.Playing {
-			if iconButtonPrimary(c, transportIcon(true), "暂停", iconPlayBtn).
-				Size(iconHitPlay, iconHitPlay).Padding(0, 5).
-				Tooltip("暂停").Clicked() {
+			if s.withTip(c, iconButtonPrimary(c, transportIcon(true), "暂停", iconPlayBtn).
+				Size(iconHitPlay, iconHitPlay).Padding(0, 5), "暂停").Clicked() {
 				s.app.Toggle()
 			}
 		} else {
-			if iconButtonPrimary(c, transportIcon(false), "播放", iconPlayBtn).
+			if s.withTip(c, iconButtonPrimary(c, transportIcon(false), "播放", iconPlayBtn).
 				Size(iconHitPlay, iconHitPlay).Padding(0, 5).
-				Tooltip("播放").Disabled(!st.HasTrack).Clicked() {
+				Disabled(!st.HasTrack), "播放").Clicked() {
 				s.app.Toggle()
 			}
 		}
+
+		s.viewNextButton(c)
 	})
 }
 
@@ -568,35 +608,29 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 	}
 }
 
-// viewStepButtons 是上一首和下一首。
+// viewPrevButton / viewNextButton 是那两首键。分成两个是为了全屏播放器能把它们
+// 摆到播放键**两边**（Biu 的 `MusicPlayControl` 就是 上一首 · 播放 · 下一首）。
 //
 // 能不能按看的是队列：没放过歌、或者只有刚打开的那一首（没进队列）时是灰的。
 // 队列里只有一首歌时按钮仍然是亮的——按下去听到的是同一首从头来，
 // 表现成按了没反应更让人困惑。
-func (s *Shell) viewStepButtons(c *ui.Context) {
-	s.viewPrevButton(c)
-	s.viewNextButton(c)
-}
-
-// viewPrevButton / viewNextButton 是那两首键。分成两个是为了全屏播放器能把它们
-// 摆到播放键**两边**（Biu 的 `MusicPlayControl` 就是 上一首 · 播放 · 下一首）。
 //
 // ⚠️ 原来是 88 宽的三个汉字按钮，而三个汉字在按钮里要 54——**44 就已经放不下**，
 // 按 64 画出来是「上...」「下...」，看着像坏了。图标化之后这件事不再存在：
 // 18 的图标 + 每边 5 的内边距，点击区 28（`iconHitMd`），比原来那个 88 窄三倍
 // 还点得准（角上也点得到，见 `TestTheHitAreaIsBiggerThanTheGlyph`）。
 func (s *Shell) viewPrevButton(c *ui.Context) {
-	if iconButton(c, iconPrev, "上一首", iconMd).
+	if s.withTip(c, iconButton(c, iconPrev, "上一首", iconMd).
 		Size(iconHitMd, iconHitMd).Padding(0, 5).
-		Tooltip("上一首").Disabled(!s.app.CanPrev()).Clicked() {
+		Disabled(!s.app.CanPrev()), "上一首").Clicked() {
 		s.app.Prev()
 	}
 }
 
 func (s *Shell) viewNextButton(c *ui.Context) {
-	if iconButton(c, iconNext, "下一首", iconMd).
+	if s.withTip(c, iconButton(c, iconNext, "下一首", iconMd).
 		Size(iconHitMd, iconHitMd).Padding(0, 5).
-		Tooltip("下一首").Disabled(!s.app.CanNext()).Clicked() {
+		Disabled(!s.app.CanNext()), "下一首").Clicked() {
 		s.app.Next()
 	}
 }
@@ -616,9 +650,9 @@ func (s *Shell) viewNextButton(c *ui.Context) {
 func (s *Shell) viewPlayMode(c *ui.Context, st app.State) {
 	// 四档各配一个图标（Biu 的 `getPlayModeList`，逐个照它的 `icon` 那一项），
 	// 悬停那句话仍然报的是**当前这一档**。
-	btn := iconButton(c, playModeIcon(st.PlayMode), "播放模式", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 5).
-		Tooltip(st.PlayMode.Label() + "：" + st.PlayMode.Desc() + "（点一下换，右键看全部）")
+	btn := s.withTip(c, iconButton(c, playModeIcon(st.PlayMode), "播放模式", iconMd).
+		Size(iconHitMd, iconHitMd).Padding(0, 5),
+		st.PlayMode.Label()+"："+st.PlayMode.Desc()+"（点一下换，右键看全部）")
 
 	// 按一下换到下一档。档序（顺序 → 循环 → 随机 → 单曲 → 回顺序）是 App 那边
 	// 的 `PlayMode.Next`，照 Biu 的 `getPlayModeList` 次序，两边按几下能转回
@@ -680,13 +714,19 @@ func (s *Shell) pickAndEnqueue() {
 // 进度条拖起来是这样分工的：按住的时候值归用户，松手才 seek，seek 完交还给
 // 播放器。不这么分的话，后台时钟每 50ms 写回一次位置，会和拖动打架——
 // 表现就是拖不动，或者松手又弹回去。
+//
+// 🔴 **它不是 `ui.Slider`**，是 `playbarProgressSlider`（见 knobslider.go）：
+// 框架那一颗的旋钮全程亮着、轨道有 6 像素粗，而按住的时候旋钮会褪成一圈黑边
+// （深色底上等于消失）。上游那边是 4 像素的轨道加一颗**只在悬停时才出现**的
+// 圆点（`music-play-progress` 的 `h-[4px]` 和 `hideThumb={!showThumb}`）——
+// 一颗一直亮着的圆点在整条进度上全程抢注意力，而它是用户真正要抓的东西。
 func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 	known := st.Duration > 0
 
 	ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, clock(st.Position)).FontSize(12).TextColor(c.Theme().TextMuted).Width(48)
+		ui.Text(c, clock(st.Position)).FontSize(scale.Font(c, 12)).TextColor(c.Theme().TextMuted).Width(48)
 
-		sl := ui.Slider(c, &s.scrub, 0, 1).Grow(1).Label("播放进度").Disabled(!known)
+		sl := playbarProgressSlider(c, &s.scrub, 0, 1).Grow(1).Label("播放进度").Disabled(!known)
 		// ⚠️ 这里必须用 Pressed()，不能用 Dragging()。
 		//
 		// Dragging() 报的是「这个控件正在拖一个值 / 正在被拖动」（Drag 与
@@ -710,7 +750,7 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 		if !known {
 			total = "--:--"
 		}
-		ui.Text(c, total).FontSize(12).TextColor(c.Theme().TextMuted).Width(48)
+		ui.Text(c, total).FontSize(scale.Font(c, 12)).TextColor(c.Theme().TextMuted).Width(48)
 	})
 }
 

@@ -260,6 +260,24 @@ var Items = []Item{
 			"TestTheLongPressIsOffOnceTheSongIsLiked",
 		},
 	},
+	{
+		// 封面的暂时失败（断网、超时、5xx、限流）按指数退避自己再要一次；
+		// 永久失败（404、解码不了）不再要第二遍。所有等待都在假钟上推进，
+		// 「到点」是确定的，不受机器负载影响。
+		Category: FakeClock,
+		Spec:     "封面暂时失败按指数退避自己再试（间隔递增、封顶、有次数上限），永久失败不重试；重试走后台路径、守住在途上限，成功后唤醒窗口",
+		Tests: []string{
+			"TestTransientFailureRetriesWithGrowingBackoff",
+			"TestPermanentFailureIsNotRetried",
+			"TestFailureClassification",
+			"TestRetrySuccessFlipsStateAndWakes",
+			"TestTheCoverBecomesAnImageAfterARetry",
+			"TestFailureRecordsAreBounded",
+			"TestTouchReplacesAForgottenEntry",
+			"TestRetriesRespectTheInflightLimit",
+			"TestCloseDropsAWaitingRetry",
+		},
+	},
 
 	// ── 严格 HTTP fixture ──────────────────────────────────────────────────
 	{
@@ -491,6 +509,46 @@ var Items = []Item{
 			"TestThePreviewHighlightsTheChosenStyle",
 		},
 	},
+	{
+		Category: Paging,
+		// 播放量与投稿时间两列（票 #142）。
+		//
+		// 这一张是**功能票**，所以两头都要有证据：
+		//
+		//   - 数据层：各页接口返回里的那个数真的解析进了条目——收藏夹是
+		//     `cnt_info.play` / `fav_time` / `pubtime`，搜索是 `pubdate`，
+		//     UP 空间是 `created`（**不是 pubdate**）；没有这个数的那一条是
+		//     零值，不是编出来的 0。
+		//   - 界面层：列表行里有那一格、表头那两列、网格卡片封面底部渐变条的
+		//     左半边也有它，而且**收藏夹那一路也有**（票面点名最关键的一条）。
+		//   - 时间那一列的格式定在 `PubTimeText`（今天 / 昨天 / N天前 /
+		//     MM-DD / YYYY-MM-DD），拿假时钟判，不跟墙钟走。
+		Spec: "播放量与投稿时间：各页接口字段解析进条目（没有的页是零值不是 0）、列表行与表头有这两列、网格渐变条左半边有播放量、收藏夹一路也有、时间列的显示格式与「几天前」的日历日判据；窄窗口（最小窗口 900 + 侧栏 480）下两列依次让位给标题和行尾「⋯」，紧凑档播放量列装得下最长的一折",
+		Tests: []string{
+			"TestCollectionMediasCarriesThePlayCountAndTheTimes",
+			"TestSearchVideosReadsTheResult",
+			"TestSpaceVideosReadsBothShapesOfDurationAndCid",
+			"TestEachPageThatHasAPlayCountCarriesItIntoTheRow",
+			"TestTheUpSpaceVideosCarryTheirPlayCount",
+			"TestTheRowsAndTheHeaderCarryThePlayCountAndTheTime",
+			"TestTheColumnsStayOffWhenThePageDoesNotAskForThem",
+			"TestTheTimeColumnTitleCanBeChangedPerPage",
+			"TestPubTimeTextFoldsLikeTheTicket",
+			"TestPubTimeTextCountsCalendarDays",
+			"TestTheCollectionPageShowsThePlayCountAndTheCollectionTime",
+			"TestTheCollectionGridCarriesThePlayCountIntoTheGradient",
+			"TestTheCollectionTimeTitleFollowsTheContainer",
+			"TestTheSearchVideoTabShowsThePlayCountAndTheUploadTime",
+			"TestTheHomeTabShowsThePlayCountButNoUploadTime",
+			"TestTheLaterPageShowsTheUploadTimeAsWellAsTheAddTime",
+			// 评审返工：窄窗口下让位（先收时间列、再收播放量），标题与「⋯」不许被挤掉。
+			"TestTheColumnsGiveWayToTheTitleWhenTheListIsNarrow",
+			"TestTheCompactPlayCountColumnFitsTheLongestFold",
+			"TestTheColumnsLeaveTheTitleVisibleInTheNarrowestWindow",
+			"TestTheSearchListGivesWayToTheTitleAtTheWidestSidebar",
+			"TestTheLaterRowsKeepTheirOpButtonAtNarrowWidths",
+		},
+	},
 
 	// ── 双平台 ─────────────────────────────────────────────────────────────
 	{
@@ -532,6 +590,31 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
+		// ⚠️ **Windows 那一半的解码能力**（GitHub issue #128）：macOS 走
+		// AudioToolbox（`extaf`），Windows 走 Media Foundation
+		// （`internal/service/audio/mfadec`，`IMFTransform` +
+		// `CLSID_CMSAACDecMFT`）。
+		//
+		// 下面这些证据**只在 Windows 上跑**（`//go:build windows`）。在 macOS 上
+		// 它们连编译都不进，所以「台账说它们在」和「它们上一次真的跑过」是两件
+		// 不同的事——这正是 RealOnly 那一位要说明的。跑它们的地方是 Actions 上的
+		// `windows-2022`（`.github/workflows/windows-aac-spike.yml`）。
+		//
+		// HE-AAC 那一档在台账里**故意不列**：没有素材可验，列进去就是拿一条
+		// 跳过的测试当证据。
+		Spec: "Windows 上 AAC（MP4 和裸 ADTS 两种容器）能解出 PCM；首帧在 200 毫秒内；解出来的 PCM 与另一个解码器**逐样本**对得上（不是 RMS）；左右声道没调换；COM apartment 在负载下反复跑不出错",
+		Tests: []string{
+			"TestSpikeAACLCDecodesOutOfMediaFoundation",
+			"TestSpikeFirstFrameLatency",
+			"TestSpikeWhichProfilesWeCanActuallyTest",
+			"TestSpikePCMIsWithinTolerancesOfTheReference",
+			"TestSpikeTheChannelsAreNotSwapped",
+			"TestSpikeTheCOMApartmentSurvivesLoad",
+		},
+		RealOnly: true,
+	},
+	{
+		Category: Platform,
 		Spec:     "异步结果**逐窗口**唤醒（只叫醒主窗口的话迷你窗口停在旧内容）",
 		Tests: []string{
 			"TestEveryWindowThatDrewItGetsWoken", "TestEveryWindowGetsWoken",
@@ -558,6 +641,21 @@ var Items = []Item{
 			// 第二扇窗上铁律二（每帧开头装主题）和铁律四（view 包 Guard）也成立。
 			"TestTheMiniFramesCarryTheChosenTheme",
 			"TestAPanicInsideTheMiniViewLeavesTheProcessAlive",
+		},
+	},
+	{
+		Category: Platform,
+		// 票 #162（规格票 #156 底下的一条）：迷你播放器是**面板语义**——显示和
+		// 聚焦能拿键盘，但点它不激活应用，用户不会被从别的应用里拽出来。
+		//
+		// ⚠️ 这一条证的是**选项摆对了**（`Panel: true`，以及位置记忆的那几个
+		// 前提还在：面板不能最大化，而 `isZoomed` 恒为真就会让 `StateKey` 一条
+		// 都存不下来）。真的「点下去不激活」和「关掉再开停在原处」要真窗口 +
+		// 真鼠标，量到的结果记在 `internal/ui/miniplayer.go` 的「本机实测」里，
+		// 不在这儿假装验过。
+		Spec: "迷你播放器是面板语义：点它不激活应用（票 #162），位置记忆仍然有效",
+		Tests: []string{
+			"TestTheMiniWindowIsAPanel",
 		},
 	},
 	{
@@ -591,10 +689,10 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
-		Spec:     "迷你播放器这一块本身：装得下 320×100、字没被截、控件身份稳（铁律四）",
+		Spec:     "迷你播放器这一块本身：装得下 320×100、那四个键是图标键（框对、图形在）、控件身份稳（铁律四）",
 		Tests: []string{
 			"TestTheMiniCardFitsInThreeHundredAndTwentyByOneHundred",
-			"TestTheMiniLabelsAreNotTruncated",
+			"TestTheMiniKeysAreIcons",
 			"TestTheMiniControlsKeepTheirIdentityWhenTheLabelChanges",
 		},
 	},
@@ -1516,23 +1614,70 @@ var Items = []Item{
 		},
 	},
 	{
+		// 归「双平台」那一组：这一票动的也是**窗口的骨架**（播放条那一块），
+		// 而它和上面 issue 127 那一条是同一处规格的两个入口——所以两条分开写，
+		// 但说的是同一件事的两半。
+		Category: Platform,
+		// issue 135（票 #134 的第一单元）那一票：播放条从「能用」改成「对」。
+		//
+		// 🔴 **判据全是画面上的位置和像素**：这一票的五个症状**全都是静默的**——
+		// 进度条永远是 80 像素照样能拖，三键次序反了照样点得动，旋钮不画也照样
+		// 能 seek，音量图标是个样子也照样有音量——只有量得出来的那几样才算数。
+		//
+		// ⚠️ **「进度条随窗口变长」断的是单调，不是某个像素数**：进度条该有多长
+		// 取决于窗口有多宽、也取决于右边那一组有多宽（音量收成图标之后它窄了
+		// 141），所以钉死一个数的话，改动右边任何一枚键都会把它顶红。
+		Spec: "播放条：进度条随窗口变长、三键是上一首·播放·下一首、播放键 48 像素、旋钮只在悬停或按下时画（键盘焦点上时也画）、音量收成图标加浮层（浮层里一根竖滑块和百分比，点图标静音、滚轮 ±0.05）、音量轨道填的是已经调上去的那一段、浮层走远了会自己收起、旋钮不探出滑块的框、按住时多一层更深的影子、浮层里的滑块不跟着百分比字数横向漂",
+		Tests: []string{
+			// 进度条：900 / 1200 / 1600 三档单调变长（**中间那档 1200 必须在**：
+			// 只断两端的话，「中间那一列不参与分配」这种坏法在两端看不出来）。
+			"TestTheProgressBarGrowsWithTheWindow",
+			// 三键的左右次序（**断的是位置，不是「三个键都在」**）。
+			"TestTheTransportKeysArePrevPlayNext",
+			// 播放键的尺寸：自己够大（48 起），而且比上下首大。
+			"TestThePlayKeyIsBigEnoughToHit",
+			// 旋钮：没有悬停时不画、悬停时画（深浅两套）。
+			"TestTheProgressKnobIsOnlyDrawnWhileHovered",
+			// 音量浮层：一根**竖**滑块 + 底下的百分比。
+			"TestTheVolumePopoverHasAVerticalSlider",
+			// 点图标静音 / 取消静音放回原来的音量。
+			"TestClickingTheVolumeIconMutes",
+			// 滚轮 ±0.05。
+			"TestTheWheelOverTheVolumeIconChangesTheVolume",
+			// 音量轨道填的是**已经调上去的那一段**（0% 空、100% 满）。
+			"TestTheVolumeTrackIsFilledFromTheBottom",
+			// 浮层**自己**收掉（不播放的时候没有人要帧，所以那一段必须自己
+			// 排一个到点的唤醒）。
+			"TestTheVolumePopoverClosesOnItsOwn",
+			// 竖着那根旋钮**不许探出滑块的框**：它的中心要走**内容框**的算法，
+			// 和框架的竖直映射（`1-(y-st.cy)/st.ch`）同一个坐标系。
+			"TestTheVerticalKnobStaysInsideItsSlider",
+			// 键盘 Tab 过去的时候旋钮（和画在它上面的焦点圈）要画出来。
+			"TestTheProgressKnobShowsWithKeyboardFocus",
+			// 按住的时候旋钮底下要有一层**更深的**影子（票面原话）。
+			"TestTheKnobGetsDeeperWhileHeld",
+			// 音量浮层里那根滑块**不跟着百分比的字数横向漂**（它就在指针底下）。
+			"TestTheVolumeSliderDoesNotDriftWithThePercentText",
+		},
+	},
+	{
 		// 归「双平台」那一组，和上面 issue 127 那一条是同一件事的两半：那一票动的是
 		// 外壳（侧栏 / 顶栏 / 播放条），这一票动的是**内容那一块**（列表与网格）。
 		Category: Platform,
 		// issue 134 的第二单元（列表与网格）：表头、列表行、回顶。
 		//
 		// 🔴 **判据全是画面上的像素、位置和真的菜单**：这一票的四个症状**全都是
-		// 静默的**——表头底下没有线、列名比次要文字还弱、行里没有「⋯」、页面滚到
+		// 静默的**——表头底下没有线、列名比行里的字还弱、行里没有「⋯」、页面滚到
 		// 底没有回顶，这四样没有一样会报错，界面只是「不太对」。
 		//
 		// 「⋯」那一条钉的是**两条路给的是同一批动作**（行内的和右键的）：写两份菜单
 		// 的话，两边迟早会对不上，而那种错在界面上看不出来（两边都能点，只是点的
 		// 不是同一件事）。
-		Spec: "列表与网格：表头底下有一条线且列名的字号比行里的次要文字大；每一行末尾有一枚「⋯」，点开它和右键给出的是同一批动作；列表行的歌名只占一行、行高是定死的一个值；每一页滚到底都有「回到顶部」",
+		Spec: "列表与网格：表头底下有一条线且列名的字号不比行里的字小；每一行末尾有一枚「⋯」，点开它和右键给出的是同一批动作；列表行的歌名只占一行、行高是定死的一个值；每一页滚到底都有「回到顶部」",
 		Tests: []string{
 			// 表头：底下那条线（**逐像素采样**）+ 列名的字号。
 			"TestTheHeaderHasALineUnderIt",
-			"TestTheHeaderColumnNamesAreBiggerThanTheRowsSecondaryText",
+			"TestTheHeaderColumnNamesAreNoSmallerThanTheRowsText",
 			// 行内那枚「⋯」：两条路同一批动作、做的是**它那一行**的事、每一行都有。
 			"TestTheOperationButtonOpensTheSameMenuAsTheRightClick",
 			"TestTheOperationButtonActsOnTheSongItSitsOn",
@@ -1548,6 +1693,140 @@ var Items = []Item{
 			"TestTheSettingsPageHasABackToTop",
 			// 那两张表格的行高（回顶按钮换算像素时用的两个数）。
 			"TestTheTableRowHeightsAreWhatTheOffsetsAssume",
+		},
+	},
+	{
+		Category: Platform,
+		// 票 #167（#163 的第一批之一）：列表与网格的排版对齐 DESIGN.md。
+		//
+		// 这一票的错法**全是静默的**：字号小一档、列间距窄一半、表头「标题」比封面
+		// 往右多让 64、紧凑档还画着一块封面——没有一样会报错，画面上只是「和上游不是
+		// 同一个产品」。所以判据是量出来的位置、逐像素采样的中心和画出来的字谁高，
+		// 不是「调了哪个常量」。
+		Spec: "列表与网格的排版照 DESIGN.md：列表歌名 16 / UP 名 14 / 列间距 16 / 序号 32 居中；表头「标题」从封面左缘起（不多让一列封面空位）；网格卡歌名 16 / UP 14；紧凑档不画封面",
+		Tests: []string{
+			// 列表那一行的四个数 + 能直接量出来的两样：UP 名比时长高一档、
+			// 序号那一块的墨迹落在这一列的正中（逐像素采样）。
+			"TestTheRowScaleFollowsTheDesign",
+			"TestTheRowTextIsBiggerThanTheNumbers",
+			"TestTheRowIndexIsCentredInItsColumn",
+			// 序号 / 列间距 / 封面三者摆出来的横坐标。
+			"TestTheCoverSitsNextToTheTitle",
+			// 表头：「标题」落在封面左缘（不是歌名的左缘），右边那几列照样对齐。
+			"TestTheHeaderColumnsLineUpWithTheRows",
+			// 网格卡：歌名 16 > UP 名 14 > 时长 12（画出来的三块字谁高）。
+			"TestTheGridCardTextIs16And14",
+			// 紧凑档：整块不画封面（位置 + hover 反馈都没了）。
+			"TestTheCompactRowHasNoCover",
+			"TestTheCompactRowsAreShorterThanTheNormalOnes",
+		},
+	},
+	{
+		// 归「双平台」那一组：侧栏是**窗口的骨架**（理由同 issue 127 那一条）。
+		Category: Platform,
+		// issue 137（#134 的第三单元）那一票：折叠态的侧栏 + 收藏夹名。
+		//
+		// 🔴 **判据全是画面上的东西**：提示那一格要**悬停 0.6 秒**才出，
+		// 收藏夹名那一格要**量高度**。两者都是静默的——名字换成单字不会报错，
+		// 名字换行也不会报错，只有提示和高度分得出来。
+		Spec: "侧栏折叠后每一项悬停说出自己是什么（提示贴在那一项右边）且有可及的名字；收藏夹名单行 + 省略号，长名字不换行也不把下面那一行顶下去",
+		Tests: []string{
+			"TestTheCollapsedSidebarItemSaysItsName",
+			"TestTheCollapsedSidebarItemHasItsFullName",
+			"TestTheCollapsedSidebarTipSitsToTheRightOfTheItem",
+			"TestALongFavoriteNameDoesNotMakeTheRowTaller",
+		},
+	},
+	{
+		// 归「双平台」那一组：这一票动的是**六处的动作键**，而六处画得不一样就
+		// 是「用户从播放条走进满屏播放器，控件库换了」。理由同 #134 第二单元那一条：
+		// 判据全在画面上。
+		Category: Platform,
+		// issue 141（#134 的第七单元）那一票：铺开扁平按钮。
+		//
+		// 🔴 **判据是像素**：满屏播放器 / 迷你播放器 / 下载记录 / 本地音乐 /
+		// 收藏夹 / 动态卡片这六处里的动作键，不再是 `ui.Button` 那枚「一圈 1px
+		// 描边 + 一块常驻底色」的药丸——换成它一样编译得过、点得动、无障碍名字
+		// 也还叫得出来，只有画面上多出那两样。反过来也断：对话框里的确定/取消、
+		// 空状态和错误页上的重试**仍然是**真按钮（主次分明，票面点名要保）。
+		//
+		// 另外两样也在这一票里：顶栏那枚「迷你」从文字键换成 `iconPiP`；
+		// 队列抽屉和分集抽屉那两条手搓的分割线换成框架的 `ui.Divider`。
+		Spec: "那六处里没有带描边、带常驻底的按钮（图标键框内框外同色，文字键上下就是页面底色）；对话框里的确定/取消和错误页的重试仍然带描边和常驻底；顶栏的「迷你」是一枚图标键；两处抽屉头上那条 1 像素的分割线还在",
+		Tests: []string{
+			// 六处各一条（深浅两套都在里面）。
+			"TestTheFullPlayerKeysAreFlat",
+			"TestTheFullPlayerPartsKeysAreFlat",
+			"TestTheMiniPlayerKeysAreFlat",
+			"TestTheDownloadListKeysAreFlat",
+			"TestTheLocalMusicKeysAreFlat",
+			"TestTheCollectionKeysAreFlat",
+			"TestTheDynamicCardKeysAreFlat",
+			// 反面：该保留描边的那一批。
+			"TestTheDialogButtonsStayOutlined",
+			"TestTheEmptyStateRetryStaysOutlined",
+			// 顶栏那枚「迷你」。
+			"TestTheNavBarMiniKeyIsAnIcon",
+			// 迷你那四个键**是图标键**（不是被挤扁的文字键）。
+			"TestTheMiniKeysAreIcons",
+			// 两处手搓的分割线换成了框架的 `ui.Divider`，画出来还得是那一条线。
+			"TestTheTwoRulesAreDrawnAsOnePixelLines",
+		},
+	},
+	{
+		// 归「分页与路由」那一组：按歌名找是**接口**筛的（词发给
+		// `/x/v3/fav/resource/list`），而列表是按那个词重新拉的。
+		Category: Paging,
+		// issue 137（#134 的第三单元）那一票：收藏夹页那个按歌名找的输入框。
+		//
+		// ⚠️ **请求和画面各断一半**：请求带了词而界面没变，是界面没做；
+		// 界面变了而请求没带词，是这一层没做。合成一条的话，两种坏里坏一种
+		// 也能过。
+		Spec: "收藏夹页有一个按歌名找的输入框，和排序并排；输入能筛出歌（筛是接口筛的，回车立刻搜、否则防抖 500ms），搜不出东西时有「换个词再搜一次」而不是一块空白；最小窗口下**每一个侧栏宽度（160~480）**上排序下拉都是完整的、且不出窗口（挤不下的时候让位的是输入框）",
+		Tests: []string{
+			"TestTheCollectionPageHasASearchBox",
+			"TestTheCollectionSearchFiltersTheSongs",
+			"TestTheCollectionSearchReachesTheInterface",
+			"TestTheCollectionSearchGoesOutOnEnter",
+			"TestTheCollectionSearchSurvivesLeavingThePage",
+			"TestTheCollectionSearchSaysWhenThereIsNoResult",
+			"TestTheCollectionOpsRowStillFitsAtTheMinWindow",
+		},
+	},
+	{
+		// 归「双平台」那一组：这一票动的是**页面的节奏**（边距、标题、Tab、加载态）。
+		//
+		// 🔴 **这一族每一个症状都是静默的**：七页的横向页边距是四种值、页标题是
+		// 两种字号、「加载中」和「没有结果」不是同一个格子——没有一样会报错，
+		// 界面只是「不太对」。所以判据全是**画面上的位置和尺寸**。
+		Category: Platform,
+		// issue 138（#134 的第四单元）那一票：页面节奏与加载态。
+		Spec: "页面节奏：七页的横向页边距是同一个数、页标题是同一个字号（收藏夹那一页的大标题另算，是 30）；主 Tab 与次级排序不是同一个样子；搜索页的输入框里有当前关键词（且切页回来不覆盖用户正在敲的字）；「加载中」和「没有结果」走同一个出口（八个页面统一）；没登录时那一页说「先登录」而不摆空列表；小字的行高是定好的；搜索联想浮层里命中的那几个字被标出来",
+		Tests: []string{
+			// 页边距（七页逐页量内容区最靠左的那一笔）+ 页标题（代码里同一个常量，
+			// 画面上墨迹一样宽）。
+			"TestEveryPageHasTheSameHorizontalMargin",
+			"TestEveryPageTitleUsesTheSharedSize",
+			"TestEveryPageTitleIsTheSameSizeOnScreen",
+			// 收藏夹那一页的大标题：30，而且两行放得下 168 那个封面。
+			"TestTheCollectionTitleIsTheBigOne",
+			// 主 Tab 底下没有那条主色的横条，次级排序底下有。
+			"TestTheMainTabsAndTheSortTabsAreNotTheSame",
+			// 搜索页的输入框里有当前关键词。
+			"TestTheSearchPageShowsTheCurrentKeyword",
+			// 「加载中」走同一个出口：八个页面那一行字是同一个字号；同一页上它和
+			// 「没有结果」是同一个格子（一样高、居中的位置一样）。
+			"TestEveryLoadingStateIsDrawnTheSameWay",
+			"TestTheLoadingStateLooksLikeTheEmptyState",
+			// 没登录时那一页说「先登录」，不摆空列表。
+			"TestThePagesThatNeedLoginSaySo",
+			// 九处小字的行高是定好的。
+			"TestTheSmallCopyHasAFixedLineHeight",
+			// 本地音乐那一页的「正在扫描…」也走共享出口（那一页的加载态在画面
+			// 上抓不住——扫硬盘一帧就完事——所以是代码那一层钉的）。
+			"TestTheLocalMusicLoadingComesFromTheSharedDrawer",
+			// 联想浮层里命中的那几个字被标出来。
+			"TestTheSuggestTermsShowWhichCharsWereHit",
 		},
 	},
 }

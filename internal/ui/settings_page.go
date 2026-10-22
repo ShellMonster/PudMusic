@@ -23,7 +23,9 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -69,12 +71,23 @@ const (
 	radiusReadoutW = 48
 )
 
-// settingsContentPad 是设置的内容那一段四边的内边距。
+// settingsContentPad 是设置的内容那一段左右与下边的内边距。
 //
 // 28 不是 Biu 的数（那是 `px-8 py-4` = 32 / 16），是**内容区页边距**那个已经
 // 批准的决定（比上游大 4px，调研判「很小」，见票 #124 的「不要动」那一节）。
 // 设置页是内容区里的一页，跟着走同一个数才不会在页面之间跳。
+//
+// ⚠️ **上边距是 0**（票 #166 的 G40）：上游那一页没有 py，我们此前四周都留
+// 28，于是设置页的内容比别的页、也比上游低一截。上边距单独收掉，左右和下边
+// 仍然是那个数——它是这一栏的内边距，不是页面根的上边距。
 const settingsContentPad = 28
+
+// settingsGroupGap 是设置分组之间的间距。DESIGN.md 的
+// `spacing.settings_group_gap`：24（上游分节之间那个 `space-y-*` 换算下来的数）。
+//
+// 它同时用在两处：Tab 内容那一层（分组与分组之间），以及页头（标题、只读提示、
+// 主 Tab、内容）那一层。两处此前分别是 18 和 16，各说各的。
+const settingsGroupGap = 24
 
 // selectWidth 是下拉框多宽。Biu 是 `w-[180px]`（`system-settings.tsx:164`），
 // 代理那一页是 `w-[240px]`（`proxy-settings.tsx:43`）。
@@ -145,37 +158,45 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 		s.settings.shownTab, s.settings.scroll.Y = tab, 0
 	}
 
-	ui.Scroll(c).Key("settings-scroll").Grow(1).TrackScroll(&s.settings.scroll).
-		Children(func() {
-			// 这一层是 `m-auto`：Column 的横向对齐（跨轴），所以内容那一段在
-			// 可视区里居中，而可视区不满 900 时它就是满的（`MaxWidth` 是上限）。
-			ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
-				ui.Column(c).FillWidth().MaxWidth(settingsContentMaxW).
-					Padding(settingsContentPad).Gap(16).Children(func() {
-					ui.Text(c, "设置").FontSize(22).Bold()
+	scroll := ui.Scroll(c).Key("settings-scroll").Grow(1).TrackScroll(&s.settings.scroll)
+	scroll.Children(func() {
+		// 这一层是 `m-auto`：Column 的横向对齐（跨轴），所以内容那一段在
+		// 可视区里居中，而可视区不满 900 时它就是满的（`MaxWidth` 是上限）。
+		ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
+			ui.Column(c).FillWidth().MaxWidth(settingsContentMaxW).
+				Padding(0, settingsContentPad, settingsContentPad, settingsContentPad).
+				Gap(settingsGroupGap).Children(func() {
+				ui.Text(c, "设置").FontSize(scale.Font(c, pageTitleSize))
 
-					if ro {
-						ui.Text(c, "设置只读：这份设置来自更新的版本，这一版一个字都不会写回去。").
-							FontSize(12).TextColor(t.Danger)
+				if ro {
+					ui.Text(c, "设置只读：这份设置来自更新的版本，这一版一个字都不会写回去。").
+						FontSize(scale.Font(c, 12)).TextColor(t.Danger)
+				}
+
+				// ⚠️ **主 Tab 用轨道 + 滑块那一种**（`mainTabs`，见 tabs.go）：
+				// 这一排和次级排序那几排不是同一个样子（票 #138）。
+				//
+				// ⚠️ `AlignSelf(ui.Start)`：Column 的默认跨轴对齐是 Stretch，
+				// 不拦一下轨道会横贯整个内容区；上游那一条是包着字的
+				//（`inline-flex`）。
+				mainTabs(c, &s.settings.tab, tabMD, settingsTabNames...).AlignSelf(ui.Start)
+
+				ui.Column(c).FillWidth().Gap(settingsGroupGap).Children(func() {
+					switch s.settings.tab {
+					case settingsTabGeneral:
+						s.settingsGeneral(c, st, ro)
+					case settingsTabMenu:
+						s.settingsMenu(c, st, ro)
+					case settingsTabShortcut:
+						s.settingsShortcuts(c)
+					case settingsTabProxy:
+						s.settingsProxy(c, st, ro)
 					}
-
-					ui.Tabs(c, &s.settings.tab, settingsTabNames...)
-
-					ui.Column(c).FillWidth().Gap(18).Children(func() {
-						switch s.settings.tab {
-						case settingsTabGeneral:
-							s.settingsGeneral(c, st, ro)
-						case settingsTabMenu:
-							s.settingsMenu(c, st, ro)
-						case settingsTabShortcut:
-							s.settingsShortcuts(c)
-						case settingsTabProxy:
-							s.settingsProxy(c, st, ro)
-						}
-					})
 				})
 			})
 		})
+	})
+	s.trackScrollbar(scroll)
 
 	// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见 `widgets/list` 的
 	// `BackToTop`）。
@@ -186,9 +207,13 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 }
 
 // settingSection 是一组设置上面的那个标题。Biu 用的是 `<h2>`（system-settings.tsx
-// 的「外观」「播放」「下载」…）。
+// 的「外观」「播放」「下载」…），`text-xl` 也就是 **20px**，字重同样被 Preflight
+// 重置为 inherit——**不加粗**。
+//
+// ⚠️ 这一句原来写着「Biu 用的是 `<h2>`」就完了，既没写字号也没写字重，于是这一
+// 组标题在我们这边一路是 16/700：比上游小一档、还粗两档（票 #166 的 G06）。
 func (s *Shell) settingSection(c *ui.Context, title string) {
-	ui.Text(c, title).FontSize(16).Bold().Padding(0, 0, 4, 0)
+	ui.Text(c, title).FontSize(scale.Font(c, 20)).Padding(0, 0, 4, 0)
 }
 
 // settingSectionEnd 是两组设置之间那条分隔线。Biu 的 `<Divider />`。
@@ -202,7 +227,9 @@ func (s *Shell) settingSectionEnd(c *ui.Context) {
 // 的标题和说明，右边固定宽度的控件）。两边的伸缩比例照抄：文字吃掉剩下的
 // 宽度，说明换行了控件也不会被挤走。
 func (s *Shell) settingRow(c *ui.Context, title, desc string, control func()) {
-	s.settingRowEl(c, func() { ui.Text(c, title).FontSize(14).Bold() }, desc, control)
+	s.settingRowEl(c, func() {
+		ui.Text(c, title).FontSize(scale.Font(c, 16)).FontWeight(weightMedium)
+	}, desc, control)
 }
 
 // settingRowEl 是 settingRow 那一行，标题那一格换成自己画的。
@@ -218,7 +245,7 @@ func (s *Shell) settingRowEl(c *ui.Context, title func(), desc string, control f
 	ui.Row(c).FillWidth().Gap(24).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).Children(func() {
 			title()
-			ui.Text(c, desc).FontSize(12).TextColor(t.TextMuted).Wrap()
+			ui.Text(c, desc).FontSize(scale.Font(c, 14)).TextColor(t.TextMuted).Wrap()
 		})
 		control()
 	})
@@ -234,12 +261,18 @@ func (s *Shell) settingRowEl(c *ui.Context, title func(), desc string, control f
 // invalidate → 重画，一帧之内的事。走 `applySetting` 而不是 `SetThemeMode`，
 // 是为了和另外十几项共用同一条报错提示。
 func (s *Shell) pickTheme(c *ui.Context, st app.Settings, ro bool) {
-	ui.Row(c).Key("setting:themeMode").Width(segWidth).Gap(4).Children(func() {
+	// ⚠️ 宽度跟着字号缩放走：1.4 倍时四个字要 106 像素，三个各 100 的格子
+	// 装不下，选中项会被裁成「跟随系…」（评审在 1.4 倍下量到过）。
+	ui.Row(c).Key("setting:themeMode").Width(scale.Font(c, segWidth)).Gap(4).Children(func() {
 		for _, opt := range themeModes {
 			b := flatButton(c, opt.label).Grow(1).Radius(6).Disabled(ro)
 			if opt.mode == st.ThemeMode {
 				b = flatCurrent(c, b)
 			}
+			// ⚠️ 排在 `.Disabled(ro)` 和 `flatCurrent` **之后**：禁用前那一档的
+			// 字是主色（深色下），乘完框架的 50% 只有 2.6:1——只读时用户会以为
+			// 这三个选项消失了。`flat.Dimmed` 里的注释写了整个来由。
+			b = flat.Dimmed(c, b)
 			if b.Clicked() {
 				s.applySetting("主题", func(cur *app.Settings) { cur.ThemeMode = opt.mode })
 			}
@@ -250,12 +283,13 @@ func (s *Shell) pickTheme(c *ui.Context, st app.Settings, ro bool) {
 // pickCloseWindow 是窗口关闭那两档。照 Biu 用的是横排单选（RadioGroup
 // orientation="horizontal"），我们用同一排按钮，选中的那个上主色。
 func (s *Shell) pickCloseWindow(c *ui.Context, st app.Settings, ro bool) {
-	ui.Row(c).Key("setting:closeWindowOption").Width(segWidth).Gap(4).Children(func() {
+	ui.Row(c).Key("setting:closeWindowOption").Width(scale.Font(c, segWidth)).Gap(4).Children(func() {
 		for _, opt := range closeWindowOptions {
 			b := flatButton(c, opt.label).Grow(1).Radius(6).Disabled(ro)
 			if opt.value == st.CloseWindowOption {
 				b = flatCurrent(c, b)
 			}
+			b = flat.Dimmed(c, b)
 			if b.Clicked() {
 				s.applySetting("窗口关闭", func(cur *app.Settings) { cur.CloseWindowOption = opt.value })
 			}
@@ -301,7 +335,7 @@ func (s *Shell) pickTrayNote(c *ui.Context) {
 	// macOS 上没有托盘（与 Biu 一致），「隐藏到托盘」这一格在这儿是「收进 Dock」。
 	// 得说出来，不然用户以为 Biu 有而我们没做。
 	ui.Text(c, "macOS 上不建托盘图标（与 Biu 一致）：「隐藏到托盘」是收进程序坞，"+
-		"图标还在，点一下就回来。").FontSize(12).TextColor(c.Theme().TextMuted)
+		"图标还在，点一下就回来。").FontSize(scale.Font(c, 12)).TextColor(c.Theme().TextMuted)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -338,3 +338,59 @@ func absI(v int) int {
 	}
 	return v
 }
+
+// TestReduceMotionMakesTheFadeArriveAtOnce 钉住「系统开着减少动态效果时，
+// 我们自己的淡入直接到位」。
+//
+// 这一包的淡入走框架的 `Animate`（`hover.go` 的 `fade`），框架在
+// `Preferences.ReduceMotion` 时把值直接给到目标（`mygo/ui/motion.go:322`）——
+// 所以这一条测的是**这条路上真的接上了**：第一帧就满，而不是「等 200ms」。
+//
+// 两条必须一起验：
+//   - 默认（没开减少动态）：第一帧**还没到满**——不然「直接到位」这一条会因为
+//     「根本没有淡入」而白白地绿；
+//   - 开了之后第一帧就是满的，而且和默认那条走完时画出来的一样（同一个终点）。
+func TestReduceMotionMakesTheFadeArriveAtOnce(t *testing.T) {
+	const cover = 48
+	// 封面在 60 的盒子里留了 6 的边，中心就是 (30,30)。
+	const cx, cy = 30, 30
+
+	firstFrame := func(reduce bool) (base, first, settled color.RGBA) {
+		cache := newCache(t)
+		on := false
+		tt := coverTester(t, cache, func(c *ui.Context) {
+			RowCover(c, cache, "", cover, on, "甲", nil)
+		})
+		if reduce {
+			tt.SetPreferences(ui.Preferences{ReduceMotion: true})
+		}
+		tt.Frame()
+		base = tt.Image().RGBAAt(cx, cy)
+
+		on = true
+		tt.Frame()
+		first = tt.Image().RGBAAt(cx, cy)
+
+		settle(tt)
+		settled = tt.Image().RGBAAt(cx, cy)
+		return base, first, settled
+	}
+
+	base, first, settled := firstFrame(false)
+	if diff(first, base) >= 10 {
+		t.Fatalf("默认那一档的第一帧已经画满了（%v → %v）——这一条就没有对照，"+
+			"「减少动态效果」那一半会白白地绿", base, first)
+	}
+	if diff(settled, base) < 20 {
+		t.Fatalf("淡入走完之后画面没有变化（%v → %v），测试本身有问题", base, settled)
+	}
+
+	rbase, rfirst, rsettled := firstFrame(true)
+	if diff(rfirst, rbase) < 20 {
+		t.Errorf("开了减少动态效果之后第一帧还是空的（%v → %v）——淡入没有直接到位",
+			rbase, rfirst)
+	}
+	if diff(rsettled, settled) > 4 {
+		t.Errorf("两条路的终点不一样：减少动态 %v，默认走完 %v", rsettled, settled)
+	}
+}

@@ -35,7 +35,10 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrollbar"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -99,6 +102,9 @@ type pagedRows struct {
 	// state 是这一份列表的滚动位置和选中项（铁律四的关键，见 view）。
 	state ui.ListState
 	sel   int
+
+	// hot 是上一帧画完后量到的「指针压在滚动条那一带」（见 `Hot`）。
+	hot bool
 
 	// render 画这一行并**把它交回来**（菜单要挂在它身上，见 viewRow）。收整个
 	// ListRow 而不是光一个下标，是为了让页面能看见 `r.Selected()`——选中行的字色
@@ -430,7 +436,12 @@ func (p *pagedRows) emptyStateFor(t *ui.Theme) *emptyState {
 		//
 		// ⚠️ **不摆插画**：这一格说的是「还没好」，摆一枚「这里什么都没有」的
 		// 图形等于说反了（见 `emptyState.Icon`）。
-		return &emptyState{Title: "正在加载…"}
+		//
+		// ⚠️ **走 `loadingState`（「加载中」那一档）**：它和「没有结果」走同一个
+		// 出口（`drawEmpty`），而**不是同一档东西**——没有插画、没有第二句、
+		// 字是淡的（票 #138）。
+		loading := loadingState("正在加载…")
+		return &loading
 	case len(p.rows) == 0 && p.blocked:
 		// 一行都没有还失败了：页面上就留那一个重试按钮，一句话都不多说。
 		return nil
@@ -462,7 +473,7 @@ func (p *pagedRows) drawList(c *ui.Context) {
 
 	p.syncState(1)
 
-	ui.List(c, &p.state, n).
+	e := ui.List(c, &p.state, n).
 		Grow(1).
 		FillWidth().
 		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击）。
@@ -470,7 +481,20 @@ func (p *pagedRows) drawList(c *ui.Context) {
 		Children(func() { p.viewEmptyState(c, t) }).
 		Rows(func(r ui.ListRow) { p.viewRow(r) }).
 		TrackScroll(&p.scroll)
+
+	// 量这一帧的容器宽，下一帧用。理由同 `drawGrid` 末尾那一句；列表这一档
+	// 拿它判「稍后再看的投稿时间那一列放不放得下」（`laterTimeCols`）。
+	if bw := e.Bounds().W; bw > 0 {
+		p.width = bw
+	}
+
+	// 量滚动条的悬停（界面层下一帧据此换深一档，见 scrollbar.go）。
+	p.hot = scrollbar.Hot(e)
 }
+
+// Hot 报上一次画时指针是不是压在这个列表的滚动条上。见 `widgets/list` 的
+// `List.Hot`。
+func (p *pagedRows) Hot() bool { return p.hot }
 
 // drawGrid 画网格那一档：一行几首。
 //
@@ -511,6 +535,8 @@ func (p *pagedRows) drawGrid(c *ui.Context) {
 	if bw := e.Bounds().W; bw > 0 {
 		p.width = bw
 	}
+
+	p.hot = scrollbar.Hot(e)
 }
 
 // columns 是这一帧排几列。头一帧还没量到容器时先拿**列表那一块**的宽（`c.Size`
@@ -540,7 +566,7 @@ func (p *pagedRows) viewGridRow(r ui.ListRow, cols int) {
 	}
 	m := p.rows[first]
 	if p.failed[m.ID] {
-		ui.Text(c, "这一行画不出来").FontSize(13).TextColor(c.Theme().TextMuted).
+		ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).
 			Padding(8).MaxLines(1)
 		return
 	}
@@ -591,7 +617,7 @@ func (p *pagedRows) viewFooterCell(c *ui.Context) {
 func (p *pagedRows) viewCellGuarded(c *ui.Context, i int, cell float32) {
 	m := p.rows[i]
 	if p.failed[m.ID] {
-		ui.Text(c, "这一格画不出来").FontSize(13).TextColor(c.Theme().TextMuted).
+		ui.Text(c, "这一格画不出来").FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).
 			Padding(8).MaxLines(1)
 		return
 	}
@@ -626,7 +652,7 @@ func (p *pagedRows) viewRow(r ui.ListRow) {
 	}
 	m := p.rows[i]
 	if p.failed[m.ID] {
-		ui.Text(c, "这一行画不出来").FontSize(13).TextColor(c.Theme().TextMuted).
+		ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).
 			Padding(8).MaxLines(1)
 		return
 	}
@@ -657,7 +683,8 @@ func (p *pagedRows) viewFooter(c *ui.Context) {
 	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(8).Padding(8).
 		Children(func() {
 			if p.blocked {
-				if ui.Button(c, "加载失败，点此重试").FontSize(13).Clicked() {
+				// 行里的重试（不是错误页上那颗主按钮）：扁平配方，悬停才有一层淡底。
+				if flatButton(c, "加载失败，点此重试").FontSize(scale.Font(c, 13)).Clicked() {
 					p.blocked = false
 					p.load(trigRetry)
 				}
@@ -665,7 +692,7 @@ func (p *pagedRows) viewFooter(c *ui.Context) {
 			}
 			if p.loading {
 				ui.Spinner(c).Label("加载更多")
-				ui.Text(c, "正在加载…").FontSize(13).TextColor(t.TextMuted)
+				ui.Text(c, "正在加载…").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 			}
 		})
 }
@@ -714,8 +741,9 @@ func (p *pagedRows) isPlaying(m libraryRow) bool {
 // 「正在播放」的话用户听到的是一句没头没尾的话。顺带它让这一行在 Tester 里
 // 可认（理由同 `widgets/list` 的 `card.go`）。
 func viewPlayingMark(c *ui.Context, t *ui.Theme, title string) {
+	// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（理由见 `widgets/ink`）。
 	ui.Text(c, playingMark).Label(title + " " + playingMark).
-		FontSize(11).TextColor(t.Accent).MaxLines(1)
+		FontSize(scale.Font(c, 11)).TextColor(ink.AccentOn(t)).MaxLines(1)
 }
 
 // playFrom 从第 i 行往后接进队列并开始播。

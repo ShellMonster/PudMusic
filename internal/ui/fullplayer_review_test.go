@@ -27,7 +27,19 @@ import (
 // 判据用**两帧的差**：不悬停那一帧和悬停那一帧之间变了颜色的像素，必须全部落在
 // 封面的框里。这条不认颜色——蒙层是半透明黑，叠在什么上面出来的颜色随主题变。
 func TestTheHoverLayerCoversOnlyTheCover(t *testing.T) {
-	_, tt, _ := fullTester(t)
+	s, tt, _ := fullTester(t)
+
+	// ⚠️ **先把「在不在播」定下来**：这一条比的是**两帧之间变了哪些像素**，而满屏
+	// 底下那个播放键画的是「播放 / 暂停」两个字——**歌刚开始播的那一瞬它换一张图**，
+	// 而那一换在封面**外面**，于是这一条报的是「浮层盖过了封面」，症状离真因隔了
+	// 三层（真因是那两个字换了）。
+	//
+	// 做法是**把歌按停**：按停之后那个键不再换，歌也不会放到头（放到头它又换回去）。
+	// 这一条要验的是「悬停浮层只盖住封面」，播不播跟它没关系 ✓。
+	waitFor(t, "歌开始播了", func() bool { return s.app.Snapshot().Playing })
+	tt.Frame()
+	s.app.Toggle() // 暂停：那个键从此不动
+	tt.Frame()
 
 	cover, ok := tt.Find("当前封面")
 	if !ok {
@@ -91,14 +103,15 @@ func TestTheTitleNextToTheCoverIsNotBlackedOut(t *testing.T) {
 // TestTheFullTopBarPadFollowsTheTitleBar 钉住左边距**跟着框架给的那个数走**。
 //
 // 隐藏标题栏的窗口里，红黄绿是叠在内容**上面**的（`mygo/ui/context.go:326-335`）。
-// 而满屏把普通顶栏整条盖住了——于是「关闭全屏」的前两个字正好被黄灯和绿灯压住
-// （实测按钮框 x∈[39,91]，红黄绿整簇 x∈[14,66]）。
+// 而满屏把普通顶栏整条盖住了——于是「关闭全屏」那一枚（当时是一枚文字键）正好被黄灯和绿灯压住
+// （实测按钮框 x∈[39,91]，红黄绿整簇 x∈[14,66]；现在是 32×32 的图标键，框更窄，
+// 但它贴着左边距的时候照样会落进那一簇）。
 //
 // 做法照 `navbar.go` 那一处：`c.TitleBar()` 的 `bar.Left` 就是左边要让出的量。
 //
 // ⚠️ **Tester 默认没有标题栏**（`bar.Left` 是 0），而这一条整个要验的就是
 // 「有标题栏的时候让开了」——所以这里显式装一个 macOS 那样的进去
-// （`tt.SetTitleBar`）。光量函数不算数：把 view 里那一行改回写死 `fullBarPadX`，
+// （`tt.SetTitleBar`）。光量函数不算数：把 view 里那一行改回写死 `fullTopPadX`，
 // 函数本身照样对，但 view 早就不听它的了（实测：那样改了这一条还是绿的）。
 func TestTheFullTopBarPadFollowsTheTitleBar(t *testing.T) {
 	_, tt, _ := fullTester(t)
@@ -107,8 +120,8 @@ func TestTheFullTopBarPadFollowsTheTitleBar(t *testing.T) {
 	// 无头环境（没有标题栏）：按钮贴着左边距。
 	if btn, ok := tt.Find("关闭全屏"); !ok {
 		t.Fatalf("找不到「关闭全屏」，文字有 %q", tt.Texts())
-	} else if btn.X < fullBarPadX {
-		t.Errorf("没有标题栏时按钮在 x=%v，want ≥ %v", btn.X, fullBarPadX)
+	} else if btn.X < fullTopPadX {
+		t.Errorf("没有标题栏时按钮在 x=%v，want ≥ %v", btn.X, fullTopPadX)
 	}
 
 	// 装一个 macOS 那样的标题栏进去：左边整簇红黄绿让出 46。
@@ -120,13 +133,13 @@ func TestTheFullTopBarPadFollowsTheTitleBar(t *testing.T) {
 	if !ok {
 		t.Fatalf("装上标题栏之后找不到「关闭全屏」，文字有 %q", tt.Texts())
 	}
-	if want := barLeft + fullBarPadX; btn.X < want {
+	if want := barLeft + fullTopPadX; btn.X < want {
 		t.Errorf("「关闭全屏」在 x=%v，want ≥ %v —— 红黄绿整簇占 x∈[0,%v]，被压住了",
 			btn.X, want, barLeft)
 	}
 	// 顶栏本身也要够高，红黄绿那一行才不是浮在半空里。
-	if want := fullTopBarPadLeft(ui.TitleBar{Left: barLeft}); want != barLeft+fullBarPadX {
-		t.Fatalf("fullTopBarPadLeft 算出了 %v，want %v", want, barLeft+fullBarPadX)
+	if want := fullTopBarPadLeft(ui.TitleBar{Left: barLeft}); want != barLeft+fullTopPadX {
+		t.Fatalf("fullTopBarPadLeft 算出了 %v，want %v", want, barLeft+fullTopPadX)
 	}
 }
 

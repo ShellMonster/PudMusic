@@ -45,6 +45,8 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrollbar"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -219,6 +221,15 @@ type localPage struct {
 	// 再写一份就是第二处。
 	displayView func() list.View
 
+	// tip 是带延迟的悬停提示（tooltip.go）。由 Shell 在建完这一页时接上；
+	// 为零时（单独造这一页的测试）退回框架那枚。
+	tip tipFunc
+
+	// noteScrollbar 把「指针压在滚动条上」转告给壳（主题下一帧据此换深一档，
+	// 见 scrollbar.go）。由 Shell 在构造之后接上；为零时（测试里单独造这一页）
+	// 什么也不做。
+	noteScrollbar func(bool)
+
 	// style 是当前展示样式，下标对着 localStyles。
 	style int
 	// dirLabel 是目录筛选里选中那一档的**显示名**（不是路径，见 dirLabels）。
@@ -291,6 +302,12 @@ func newLocalPage(a *app.App, cache *imgcache.Cache, acts list.Actions,
 // View 画这一页。每一帧调一次。
 func (p *localPage) View(c *ui.Context) { p.draw(c) }
 
+// tipWith 是这一页的悬停提示入口：状态挂在 Shell 上（tooltip.go），这里只是
+// 把这一页拿到的那份递过去；单独造这一页的测试没有那份，退回框架那枚。
+func (p *localPage) tipWith(c *ui.Context, e ui.Element, text string) ui.Element {
+	return tipFrom(p.tip, c, e, text, tipDefault)
+}
+
 // onPanic 记一笔并要一帧。
 //
 // 要下一帧是必须的：recover 接住的是 build pass 中间，那一帧剩下的部分没建，
@@ -331,7 +348,8 @@ func (p *localPage) view(c *ui.Context) {
 	st := p.app.LocalMusicState()
 	p.rows = p.filter(st.Tracks, st.Roots)
 
-	ui.Column(c).Key("page:" + localMusicPath).Grow(1).Padding(16).Gap(10).
+	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
+	ui.Column(c).Key("page:"+localMusicPath).Grow(1).Padding(0, pagePadX).Gap(10).
 		Children(func() {
 			p.viewHead(c)
 			p.viewToolbar(c, st)
@@ -383,14 +401,17 @@ func (p *localPage) cardsTop() { p.cards.ScrollTo(0, ui.Start) }
 // viewHead 是标题那一行：标题、展示样式切换、添加目录。
 func (p *localPage) viewHead(c *ui.Context) {
 	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(8).Children(func() {
-		ui.Text(c, "本地音乐").FontSize(20).Bold()
+		ui.Text(c, "本地音乐").FontSize(scale.Font(c, pageTitleSize))
 
 		// 展示样式切换。⚠️ 用 `ui.Segmented` 而不是三个按钮：三档互斥、
 		// 当前位置一眼可见，三个按钮的话用户得靠猜哪个是按下去的。
 		ui.Segmented(c, &p.style, localStyles[:]...)
 
 		ui.Spacer(c)
-		ui.Button(c, "添加目录").OnClick(p.addDirectory)
+		// 上游是 `variant="flat"` 的一个文字键（`local-music/index.tsx:189`）。
+		// 它旁边那颗文件夹加的图标没画：`flat.Button` 只接管文字，图标 + 文字
+		// 要再开一个配方，而这一票要的是「把描边和常驻底去掉」，不是重画按钮。
+		flatButton(c, "添加目录").OnClick(p.addDirectory)
 	})
 }
 
@@ -401,7 +422,12 @@ func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
 			// 「播放全部」用主按钮：Biu 那一页上它就是 primary
 			//（`local-music.ts:212` 的 `color="primary"`）。
 			ui.PrimaryButton(c, "播放全部").OnClick(p.playAll)
-			ui.Button(c, "全部加入队列").OnClick(p.queueAll)
+			// 照上游那一枚 `IconButton`（`local-music/index.tsx:208`，tooltip
+			// 「添加到播放列表」）：图标键 + 悬停说出它做什么。
+			if p.tipWith(c, flatIconButton(c, iconEnqueue, "全部加入队列", iconMd).
+				Size(iconHitMd, iconHitMd).Padding(0, 5), "全部加入队列").Clicked() {
+				p.queueAll()
+			}
 		}
 
 		ui.Spacer(c)
@@ -411,10 +437,19 @@ func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
 		// 空着时画的那几个字。少了 Label 这个框就没有可点的名字。
 		ui.TextInput(c, &p.search).Label(searchLocalLabel).Placeholder(searchLocalLabel).Width(180)
 		ui.Select(c, &p.dirLabel, dirLabels(st.Roots)).Width(180)
+		// 移除此目录 / 重新扫描：上游是两枚 `IconButton`（`local-music/index.tsx:238,244`，
+		// tooltip「刷新」「移除当前目录」）。悬停提示说的就是名字——图标键没有
+		// 可见的字，提示是它唯一说得出自己做什么的地方。
 		if p.currentRoot(st.Roots) != "" {
-			ui.Button(c, "移除此目录").OnClick(p.askRemoveDir)
+			if p.tipWith(c, flatIconButton(c, iconDeleteBin5, "移除此目录", iconMd).
+				Size(iconHitMd, iconHitMd).Padding(0, 5), "移除此目录").Clicked() {
+				p.askRemoveDir()
+			}
 		}
-		ui.Button(c, "重新扫描").OnClick(p.app.RescanLocalMusic)
+		if p.tipWith(c, flatIconButton(c, iconRefresh, "重新扫描", iconMd).
+			Size(iconHitMd, iconHitMd).Padding(0, 5), "重新扫描").Clicked() {
+			p.app.RescanLocalMusic()
+		}
 	})
 }
 
@@ -426,12 +461,14 @@ func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
 func (p *localPage) viewWarnings(c *ui.Context, t *ui.Theme, st app.LocalMusicState) {
 	if st.Err != "" {
 		ui.Text(c, "有目录读不到："+st.Err).
-			FontSize(12).TextColor(t.Danger).AlignSelf(ui.Stretch)
+			FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
+			TextColor(t.Danger).AlignSelf(ui.Stretch)
 	}
 	if names := unplayableFormats(st.Tracks); len(names) > 0 {
 		ui.Text(c, "这个目录里有我们还放不出的格式（"+strings.Join(names, " ")+
 			"），它们会列出来但放不了。").
-			FontSize(12).TextColor(t.Warning).AlignSelf(ui.Stretch)
+			FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
+			TextColor(t.Warning).AlignSelf(ui.Stretch)
 	}
 }
 
@@ -442,9 +479,14 @@ func (p *localPage) viewBody(c *ui.Context, t *ui.Theme, st app.LocalMusicState)
 		// ⚠️ 第一遍扫完之前**不能**说「这里没有歌」：那一屏上什么都还没有，
 		// 而扫描还在跑（几百上千个文件的 stat）。说「这里没有歌」是在报一件
 		// 还没发生的事。
-		ui.Text(c, "正在扫描…").FontSize(13).TextColor(t.TextMuted).Padding(16)
+		//
+		// ⚠️ **走 `drawEmpty` 那一个出口**（和这一页的「没有结果」同一套画法），
+		// 而这一页的「没有结果」也走它——原来这一页一个手写一个 13pt 淡灰的
+		// 「正在扫描…」，一个是左对齐的两行字，用户等的那几秒里那两样对不上
+		// （票 #138）。
+		drawEmpty(c, "local:loading", loadingState("正在扫描…"), emptyPagePad)
 	case len(p.rows) == 0:
-		p.viewEmpty(c, t, st)
+		p.viewEmpty(c, st)
 	case p.style == localStyleTable:
 		p.viewTable(c, t)
 	default:
@@ -460,6 +502,9 @@ func (p *localPage) viewBody(c *ui.Context, t *ui.Theme, st app.LocalMusicState)
 		// 走不到这里来。
 		p.cards.Header(c, "localmusic:header")
 		p.cards.View(c)
+		if p.noteScrollbar != nil {
+			p.noteScrollbar(p.cards.Hot())
+		}
 	}
 }
 
@@ -478,19 +523,34 @@ func (p *localPage) viewStyle() list.View {
 //
 // 分两种，因为「为什么空」和「怎么才能不空」两句话在两种情况下不一样：
 // 一个目录都没加过 vs 加了但（筛选之后）没有。
-func (p *localPage) viewEmpty(c *ui.Context, t *ui.Theme, st app.LocalMusicState) {
-	ui.Column(c).AlignSelf(ui.Stretch).Padding(24).Gap(6).Children(func() {
-		if len(st.Roots) == 0 {
-			ui.Text(c, "还没有添加音乐目录").FontSize(15).Bold()
-			ui.Text(c, "点右上角「添加目录」选一个文件夹，它的第一层里的歌会出现在这里。").
-				FontSize(13).TextColor(t.TextMuted)
-			return
+//
+// ⚠️ **走 `drawEmpty` 那一个出口**（和全应用其余的空状态同一套画法）：这一页
+// 原来是自己写的一列左对齐的字，而这一页的「正在扫描…」也是自己写的一行
+// 13pt 淡灰——**同一页上两句话两个样子**，而全应用其余七页的空状态早就是
+// 居中带插画的那一套了（票 #138）。
+func (p *localPage) viewEmpty(c *ui.Context, st app.LocalMusicState) {
+	e := localEmptyState(st)
+	drawEmpty(c, "local:empty", e, emptyPagePad)
+}
+
+// localEmptyState 是这一页空着的时候说的那两句话。
+//
+// 分两种，因为「为什么空」和「怎么才能不空」在两种情况下不一样：
+// 一个目录都没加过 vs 加了但（筛选之后）没有。
+func localEmptyState(st app.LocalMusicState) emptyState {
+	if len(st.Roots) == 0 {
+		return emptyState{
+			Title: "还没有添加音乐目录",
+			Hint:  "点右上角「添加目录」选一个文件夹，它的第一层里的歌会出现在这里。",
+			Icon:  iconEmptyDisk,
 		}
-		ui.Text(c, "这里没有音频文件").FontSize(15).Bold()
-		ui.Text(c, "这一页只列所选目录第一层里的音频文件（"+
-			strings.Join(localmusic.Extensions, " ")+"），不会往子目录里翻。").
-			FontSize(13).TextColor(t.TextMuted)
-	})
+	}
+	return emptyState{
+		Title: "这里没有音频文件",
+		Hint: "这一页只列所选目录第一层里的音频文件（" +
+			strings.Join(localmusic.Extensions, " ") + "），不会往子目录里翻。",
+		Icon: iconEmptyDisk,
+	}
 }
 
 // viewTable 是表格那一档。
@@ -503,11 +563,14 @@ func (p *localPage) viewTable(c *ui.Context, t *ui.Theme) {
 	p.table.Label = func(i int) string { return p.rows[i].Title }
 	p.table.Selected = &p.sel
 
-	ui.Table(c, &p.table, localColumns, len(p.rows), func(row, col int) {
+	table := ui.Table(c, &p.table, localColumns, len(p.rows), func(row, col int) {
 		p.viewCell(c, t, row, col)
 	}).
 		Grow(1).FillWidth().
 		OnSubmit(func() { p.playRow(p.sel) })
+	if p.noteScrollbar != nil {
+		p.noteScrollbar(scrollbar.Hot(table))
+	}
 }
 
 // viewCell 画表格的一个格子。
@@ -515,25 +578,25 @@ func (p *localPage) viewCell(c *ui.Context, t *ui.Theme, row, col int) {
 	tr := p.rows[row]
 	switch col {
 	case 0:
-		ui.Text(c, strconv.Itoa(row+1)).FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, strconv.Itoa(row+1)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 	case 1:
 		ui.Text(c, tr.Title).SingleLine()
 	case 2:
-		ui.Text(c, fileSize(tr.Size)).FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, fileSize(tr.Size)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 	case 3:
 		// 放不了的格式用警示色，而不是省略号或者别的字样：Biu 那一格画的是
 		// `data.format?.toUpperCase() || "-"`（`item.tsx:71`），我们多给一层
 		// 颜色，说的是同一件事（「列出来了，但这一格有毛病」）。
-		e := ui.Text(c, strings.ToUpper(strings.TrimPrefix(tr.Format, "."))).FontSize(12)
+		e := ui.Text(c, strings.ToUpper(strings.TrimPrefix(tr.Format, "."))).FontSize(scale.Font(c, 12))
 		if tr.Playable() {
 			e.TextColor(t.TextMuted)
 		} else {
 			e.TextColor(t.Warning)
 		}
 	case 4:
-		ui.Text(c, durText(tr.Duration)).FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, durText(tr.Duration)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 	case 5:
-		ui.Text(c, createdText(tr.Created)).FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, createdText(tr.Created)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 	case 6:
 		p.viewRowOps(c, tr)
 	}
@@ -547,12 +610,22 @@ func (p *localPage) viewCell(c *ui.Context, t *ui.Theme, row, col int) {
 // 用户看到的是「歌还在放，但列表里没了，再按下一首就报错」——一个说不清的状态。
 // 不给这个按钮，好过给一个按下去会变成那个状态的按钮。
 func (p *localPage) viewRowOps(c *ui.Context, tr localmusic.Track) {
-	ui.Button(c, "打开文件夹").FontSize(12).OnClick(func() {
+	// 两个图标键。上游那一格是一枚「⋯」菜单（`operation.tsx:38`）；我们这里是
+	// 两个直接点得到的动作——一行的操作一共就两件，藏进菜单多一次点击。
+	//
+	// ⚠️ 删除那一颗的红色靠 `TextColor`：图标继承祖先的文字色，而 `flat` 那个
+	// 配方不给颜色——不给的话它和打开文件夹那枚一样是灰的，「这一下是不可撤销的」
+	// 那层意思就没了。
+	if p.tipWith(c, flatIconButton(c, iconFolder, "打开文件夹", iconSm).
+		Size(iconHit, iconHit).Padding(0, 7), "在访达里显示").Clicked() {
 		mygo.Shell.ShowItemInFolder(tr.Path)
-	})
+	}
 	if !p.isPlaying(tr) {
-		ui.Button(c, deleteRowLabel).FontSize(12).TextColor(c.Theme().Danger).
-			OnClick(func() { p.askTrack, p.askOpen = tr, true })
+		if p.tipWith(c, flatIconButton(c, iconDeleteBin5, deleteRowLabel, iconSm).
+			Size(iconHit, iconHit).Padding(0, 7).
+			TextColor(c.Theme().Danger), deleteRowLabel).Clicked() {
+			p.askTrack, p.askOpen = tr, true
+		}
 	}
 }
 
