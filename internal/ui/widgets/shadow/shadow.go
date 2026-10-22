@@ -27,12 +27,18 @@ package shadow
 
 import "github.com/egoist/mygo/ui"
 
-// Tailwind 的几档。**颜色是 Tailwind 默认的那档黑**（10%，`2xl` 是 25%）——
-// 上游那些 `shadow-*` 后面没有跟 `shadow-black/…`，用的就是默认色。
+// Tailwind 的几档。**颜色是 Tailwind 默认的那档黑**（`sm` 是 5%、其余 10%、
+// `2xl` 25%）——上游那些 `shadow-*` 后面没有跟 `shadow-black/…`，用的就是默认色。
 //
 // ⚠️ 每个函数都往 e 上**加**影子（`Element.Shadow` 是累加的），所以拿到的还是
 // 同一个元素，可以继续链下去。
 const (
+	// tailwindBlack05 是 `shadow-sm` 的颜色：5% 黑。
+	//
+	// ⚠️ **它比其余几档淡一半**：Tailwind 的 `shadow-sm` 就是 5%，
+	// 拿 10% 去填会得到**两倍浓度**的影（而这一档画出来的是最淡的一圈，
+	// 差一倍一眼就看得出来）。
+	tailwindBlack05 = 0.05
 	// tailwindBlack10 是 Tailwind 默认的那档影子的颜色：10% 黑。
 	tailwindBlack10 = 0.1
 	// tailwindBlack25 是 `shadow-2xl` 的颜色：25% 黑。
@@ -41,7 +47,7 @@ const (
 
 // TailwindSM 是上游的 `shadow-sm`：`0 1px 2px 0 rgb(0 0 0/0.05)`。
 func TailwindSM(e ui.Element) ui.Element {
-	return e.Shadow(0, 1, 2, 0, ui.RGBA(0, 0, 0, tailwindBlack10))
+	return e.Shadow(0, 1, 2, 0, ui.RGBA(0, 0, 0, tailwindBlack05))
 }
 
 // TailwindMD 是上游的 `shadow-md`：
@@ -130,6 +136,24 @@ func HeroMedium(e ui.Element, t *ui.Theme) ui.Element {
 	return e.Shadow(0, 0, 15, 0, ui.RGBA(0, 0, 0, 0.03)).
 		Shadow(0, 2, 30, 0, ui.RGBA(0, 0, 0, 0.08)).
 		Shadow(0, 0, 1, 0, ui.RGBA(0, 0, 0, 0.3))
+}
+
+// HeroInnerRim 是 HeroUI 那一档的**内**那一层：深色下是 1 像素的**白边**
+// （`inset 0 0 1px 0 rgb(255 255 255/0.15)`）。
+//
+// ⚠️ **浅色那一档没有这一层可加**：它的第三层是 1 像素的**外**黑边
+// （`0 0 1px 0 rgb(0 0 0/0.3)`）——落在盒子**外面**，不会被谁盖住，所以浅色下
+// 这个函数什么也不做。
+//
+// ⚠️ **什么时候用这个**：那一档的影要落在**一个被别的控件铺满的盒子**上时——
+// 外面那一圈看得见，而**内**那一层会被铺在上面的那个控件整个盖住，于是深色下
+// 那道白边（深底上唯一看得见的那一层）就没了。设置里那块色卡就是这一种：那个
+// 取色板控件（`ui.ColorWell`）铺满了整格。
+func HeroInnerRim(e ui.Element, t *ui.Theme) ui.Element {
+	if !t.Dark {
+		return e
+	}
+	return e.InsetShadow(0, 0, 1, 0, ui.RGBA(255, 255, 255, 0.15))
 }
 
 // HeroLarge 是 HeroUI 的 `shadow="lg"`（`--heroui-box-shadow-large`）。

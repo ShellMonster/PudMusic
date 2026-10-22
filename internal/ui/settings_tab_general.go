@@ -302,12 +302,21 @@ func (s *Shell) colorItem(c *ui.Context, label, hex string, ro, overridden bool,
 		// HeroUI 的卡，带描边和 `shadow="sm"`。
 		//
 		// HeroUI 的 `shadow="sm"` 深浅两套值不一样（见 `widgets/shadow` 的文件头）：
-		// 浅色那套是 1 像素的**外**黑边，深色那套是 1 像素的**内**白边。这一格是
-		// 一块**纯色**，深色下那道白边就是它和底下那一页之间的分界。
+		// 浅色那套是 1 像素的**外**黑边，深色那套是 1 像素的**内**白边——深底上黑边
+		// 看不见，那道白边就是这张卡和底下那一页之间的分界。
 		swatch := shadow.HeroSmall(ui.Box(c).Width(colorItemWidth).Height(colorItemHeight).
 			Radius(t.Radius).Background(col).Border(1, t.Border), t)
 		swatch.Children(func() {
-			if ui.ColorWell(c, &col).Fill().Disabled(ro).Label(label).Changed() {
+			well := ui.ColorWell(c, &col).Fill().Disabled(ro).Label(label)
+			// ⚠️ **深色那一档的白边要补在取色板这一格上**：ColorWell 是 `.Fill()`
+			// 的（铺满整格，还画着自己的 `t.Surface` 底色），于是**外面那张卡的内
+			// 阴影整个被盖住**——而深底上唯一看得见的那一层就是它（评审量过：深色下
+			// 色卡内缘一路是 `t.Surface`，没有那道白边）。
+			//
+			// 内阴影是画在**自己这一格的背景之上**（`mygo/ui/paint.go`：先背景、后内
+			// 阴影），所以补在 ColorWell 上就看得见（深色下实测 46，卡面 39）。
+			shadow.HeroInnerRim(well, t)
+			if well.Changed() {
 				set(toHex(col))
 			}
 		})

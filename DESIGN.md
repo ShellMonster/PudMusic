@@ -192,6 +192,20 @@ structural:
 ⚠️ **网格那个播放钮的影会被封面裁掉一半**：它在封面那个 `overflow-hidden` 的框里，
 而 `shadow-2xl` 往下偏 25——**看得见的是它左边那一圈**（上游也一样）。
 
+### 带影的那两张卡的底色
+
+**卡片的底色用 `t.Background`**，不用 `t.Surface`：
+
+- 上游那张卡是 HeroUI 的 `Card`，底色是 `bg-content1`，而 `content1` 的值是
+  **#FFFFFF（浅）/ #18181b（深）**——**正好是我们 `t.Background` 的两个值**
+  （`@heroui/theme` 的 `semantic.ts`）。
+- 所以**深色下这张卡和页面底色几乎同色，靠那圈影分层**——这正是 §4 那条
+  「不要用『比背景亮一级』的板」。`t.Surface`（深色下 #27272a）正好是那个
+  「亮一级」的板。
+- **关注卡 hover 那一档用 `t.Surface`**：上游 `isHoverable` 是
+  `data-[hover=true]:bg-content2`，而 `content2` 是 **zinc[100] #f4f4f5（浅）/
+  zinc[800] #27272a（深）**——也正好是 `t.Surface` 的两个值。
+
 ## 五、动效
 
 ### hover 放大

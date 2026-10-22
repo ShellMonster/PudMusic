@@ -77,6 +77,14 @@ func uiServePNG(b *uiExplore, name string, data []byte) string {
 	return b.URL + "/" + name
 }
 
+// wantZoom 是上游的 `hover:scale-105`——**写死在这个文件里**，不取实现里那个
+// 常量（`hoverZoomScale`）。
+//
+// ⚠️ **期望值一旦取自实现，常量写错了断言跟着错**：把实现改成 1.0（等于完全不
+// 放大）那两条照样绿。DESIGN.md §五特意警告过的那一档（列表行播放三角的 110%）
+// 也是这么蒙混过去的——所以这里写死 105%，实现改了它就红。
+const wantZoom = 1.05
+
 // assertGrew 断「那一格在指针移上去之后变大了」。
 //
 // before 是没放大时量到的盒子，after 是放大后量到的。want 是放大到的倍数。
@@ -189,7 +197,7 @@ func TestTheAuthorAvatarGrowsOnHover(t *testing.T) {
 	if !ok {
 		t.Fatalf("指针移上去之后那个头像不见了，文字有 %q", tt.Texts())
 	}
-	assertGrew(t, before, after, hoverZoomScale, "作者栏那个头像")
+	assertGrew(t, before, after, wantZoom, "作者栏那个头像")
 }
 
 // TestTheNavbarAvatarGrowsOnHover 钉住 **顶栏那个头像**放大到 105%。
@@ -214,5 +222,5 @@ func TestTheNavbarAvatarGrowsOnHover(t *testing.T) {
 	if !ok {
 		t.Fatalf("指针移上去之后顶栏那个头像不见了，文字有 %q", tt.Texts())
 	}
-	assertGrew(t, before, after, hoverZoomScale, "顶栏那个头像")
+	assertGrew(t, before, after, wantZoom, "顶栏那个头像")
 }

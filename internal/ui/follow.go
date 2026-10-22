@@ -848,17 +848,21 @@ func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser) {
 	// `defaultVariants.shadow = "md"`），所以上游那些没写 `shadow=` 的卡片带的是
 	// 那一档。
 	//
-	// 底色取 `t.Surface`（上游那是 `content1`）。⚠️ **深色下这一档和背景差得
-	// 太多**（上游 `content1 = #18181b`、背景 `#17181a`，我们 `Surface` 是
-	// `#27272a`）——那是 #172「语义色与深色层次」那一票的事：上游深色下**靠
-	// 阴影分层而不是靠底色亮一级**（DESIGN.md §4）。
+	// 底色取 **`t.Background`**：上游的 `content1` 是 **#FFFFFF（浅）/ #18181b
+	// （深）**——**正好是我们 `t.Background` 的两个值**。所以这张卡在深色下和页面
+	// 底色几乎同色，**靠那圈影分层**（DESIGN.md §4：「不要用『比背景亮一级』的
+	// 板」）。
+	//
+	// hover 那一档取 `t.Surface`：上游 `isHoverable` 是 `data-[hover=true]:bg-
+	// content2`，而 `content2` 是 **zinc[100] #f4f4f5（浅）/ zinc[800] #27272a
+	// （深）**——也正好是 `t.Surface` 的两个值。
 	card := ui.Column(c).Grow(1).Radius(t.Radius).AlignSelf(ui.Stretch).Clip().
 		AlignItems(ui.Center).Gap(6).Padding(followCardPad).
-		Background(t.Surface).
+		Background(t.Background).
 		OnClick(func() { s.navigate(upPathOf(u.Mid)) })
 	card = shadow.HeroMedium(card, t)
 	if card.Hovered() {
-		card = card.Background(t.SurfaceHover)
+		card = card.Background(t.Surface)
 	}
 
 	// 🔴 **每帧都问一次**（理由见 `followActionBarKey`）：指针在卡上时目标是 1，

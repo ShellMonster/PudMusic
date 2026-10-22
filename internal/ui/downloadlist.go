@@ -364,11 +364,16 @@ func (d *downloadsPage) viewTable(c *ui.Context, s *Shell) {
 	// 表格在卡片里面。那张卡有两样东西——**底色**和**那一圈影**——而影是这一票
 	// 要的（票 #179 的「下载表」那一项）。
 	//
-	// 底色用 `t.Surface`：上游那张卡是 `bg-content1`，那是「卡片面」那一档。
-	// ⚠️ **深色下这一档和背景只差一两个色阶**（上游 `content1 = #18181b`、背景
-	// `#17181a`），**靠的是那圈影分层而不是靠底色亮一级**（DESIGN.md §4）。
+	// 底色用 **`t.Background`**，因为上游那张卡是 `bg-content1`，而
+	// `content1` 的值是 **#FFFFFF（浅）/ #18181b（深）**——**正好就是我们
+	// `t.Background` 的两个值**（`@heroui/theme` 的 `semantic.ts`：content1 =
+	// zinc[900] = #18181b，浅色那一份是 #FFFFFF）。
+	//
+	// ⚠️ **所以深色下这张卡和页面底色几乎同色，靠的是那圈影分层**（DESIGN.md §4：
+	// 「不要用『比背景亮一级』的板」）。用 `t.Surface`（深色下 #27272a）就正好是
+	// 那个「亮一级」的板。
 	card := shadow.HeroSmall(ui.Box(c).Grow(1).FillHeight().
-		Radius(t.Radius).Background(t.Surface).Clip(), t)
+		Radius(t.Radius).Background(t.Background).Clip(), t)
 	card.Children(func() {
 		e := ui.Table(c, &d.state, downloadColumns, len(d.rows), func(row, col int) {
 			d.viewCell(c, s, row, col)

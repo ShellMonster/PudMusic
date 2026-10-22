@@ -58,28 +58,31 @@ func shotQueueDrawer(t *testing.T, dir, name string, dark bool) {
 }
 
 // shotBackToTop 存回顶那一枚：它底下那一圈影。
+//
+// ⚠️ **这一页要真的能滚过 400 像素**：那一枚是「滚过 400 像素才出现」（上游的数），
+// 而动态流那一页只有一屏内容——滚不动，按钮压根不出现，存下来的那张图就**证明不了
+// 任何事**（评审量过：按钮该在的那 1600 个像素全是同一个颜色）。所以这里用首页
+// 那一屏（三个 Tab 各四十首，滚得动）。
 func shotBackToTop(t *testing.T, dir, name string, dark bool) {
 	t.Helper()
-	b := newUIExplore(t)
-	uiSpaceData(b, "我自己", 0, 1)
-	b.on("/x/relation/followings", func(w http.ResponseWriter, r *http.Request) {
-		uiExploreJSON(w, 0, map[string]any{"total": 1, "list": []any{
-			map[string]any{"mid": 11, "uname": "第一个 UP", "face": "https://f/author-11.jpg"},
-		}})
+	_, tt := shotHomeShell(t, dark, app.DisplayModeList)
+	// ⚠️ **滚到那一枚真的出现为止**（不能用「滚固定几下」——那是赌「滚完那几下的时候
+	// 那一枚已经出现了」，而它出现与否是**行数**算出来的，见 `list.BackToTop`）。
+	scrollToEnd(t, tt, homeW/2, homeH/2, "回顶按钮出现", func() bool {
+		return tt.HasText(backTopLabel)
 	})
-	s, tt := shotSpaceShell(t, b, dark, true, "77")
-	s.navigate(dynamicFeedPath)
-	tt.Frame()
-	f := s.dynamicFeedOf()
-	waitFrames(t, tt, "人到了", func() bool { return len(f.authors) == 1 })
-	tt.Frame()
-	// 滚到底，那一枚才出来。
-	for range 40 {
-		tt.Scroll(600, 400, 0, 900)
-		tt.Frame()
-		if tt.HasText("返回顶部") {
-			break
-		}
+	// ⚠️ **存图之前先看一眼它画出来没有**：按钮那一格和它下面的底色必须不一样——
+	// 一样就说明那一格是空的（按钮没画出来），那张图不能当证据。
+	btn, ok := tt.Find(backTopLabel)
+	if !ok {
+		t.Fatalf("回顶按钮没画出来，这张图证明不了「回顶有影」，文字有 %q", tt.Texts())
+	}
+	img := tt.Image()
+	center := img.RGBAAt(int(btn.X+btn.W/2), int(btn.Y+btn.H/2))
+	below := img.RGBAAt(int(btn.X+btn.W/2), int(btn.Y+btn.H+20))
+	if center == below {
+		t.Fatalf("按钮那一格 (%v) 和它下面二十像素处的底色 (%v) 一模一样——"+
+			"按钮没画出来，这张图证明不了「回顶有影」", center, below)
 	}
 	save(t, dir, "51-"+name+"-回顶.png", tt)
 }
@@ -87,7 +90,7 @@ func shotBackToTop(t *testing.T, dir, name string, dark bool) {
 // shotGridPlayButton 存网格卡片右下角那个主色播放钮：它左边那一圈影。
 func shotGridPlayButton(t *testing.T, dir, name string, dark bool) {
 	t.Helper()
-	_, tt := shotHomeShell(t, dark)
+	_, tt := shotHomeShell(t, dark, app.DisplayModeCard)
 	tt.Frame()
 	// 指针停在第一张网格卡的封面上。
 	card, ok := tt.Find("音乐 1")
@@ -107,7 +110,7 @@ func shotGridPlayButton(t *testing.T, dir, name string, dark bool) {
 // 那一档——停在「音乐」那一档的话，屏幕上只有一张列表。
 func shotNewMusicCover(t *testing.T, dir, name string, dark bool) {
 	t.Helper()
-	s, tt := shotHomeShell(t, dark)
+	s, tt := shotHomeShell(t, dark, app.DisplayModeCard)
 	s.home.tab = homePopTab
 	tt.Frame()
 	save(t, dir, "53-"+name+"-新歌速递封面.png", tt)
@@ -270,14 +273,14 @@ func shotDownloadShell(t *testing.T, dark bool, rows []download.Snapshot) (*Shel
 	return b.s, b.tt
 }
 
-// shotHomeShell 造一个带着首页的外壳，**显示样式是网格那一档**。
+// shotHomeShell 造一个带着首页的外壳，显示样式是 mode 那一档。
 //
 // ⚠️ **网格那一档是这一票要的**：网格卡片右下角那个主色播放钮是 `shadow-2xl`
 // 的那一处，而列表档根本没有那一枚。
-func shotHomeShell(t *testing.T, dark bool) (*Shell, *mygoui.Tester) {
+func shotHomeShell(t *testing.T, dark bool, mode app.DisplayMode) (*Shell, *mygoui.Tester) {
 	t.Helper()
 	st := app.DefaultSettings("")
-	st.DisplayMode = app.DisplayModeCard
+	st.DisplayMode = mode
 	b := newTestShell(t, systemIsDark(dark), withSettings(st))
 	s := b.s
 	s.home.SetSongs(fullSongs())

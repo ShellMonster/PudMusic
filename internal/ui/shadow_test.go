@@ -224,6 +224,33 @@ func TestTheSettingsColorSwatchHasAShadow(t *testing.T) {
 				mygoui.Rect{X: 60 - 10, Y: 80, W: 10, H: 20},
 				mygoui.Rect{X: 20, Y: 80, W: 10, H: 20},
 				2, "设置里那块色卡")
+
+			if !dark {
+				return
+			}
+			// ⚠️ **深色下真正把这一格和底色分开的是内缘那道 1 像素的白边**：外面
+			// 那一圈是 20% 的黑，压在 `#18181b` 上只差一两个色阶；而那一档影的第三层
+			// 在深色下是 `inset`（1 像素白边）——**它会被铺满整格的那个取色板控件
+			// 盖住**（评审量过：没有它的时候色卡内缘一路是 `t.Surface`）。
+			//
+			// 所以这里量的是**内缘那一道线**：它必须比卡面亮。
+			//
+			// ⚠️ **从离左边两像素的地方开始扫**：再往左是那一格自己的**描边**
+			//（`t.Border`，深色下 #3f3f46，比那道白边还亮）——它不是影，算上它
+			// 这一条就永远绿。
+			const swatchX = 60
+			interior := img.RGBAAt(swatchX+20, 90)
+			lit := false
+			for x := swatchX + 2; x < swatchX+10; x++ {
+				if c := img.RGBAAt(x, 90); int(c.R) > int(interior.R)+3 {
+					lit = true
+					break
+				}
+			}
+			if !lit {
+				t.Errorf("深色下色卡内缘没有那道 1 像素的白边（卡面是 %v）——"+
+					"`shadow=\"sm\"` 深色那一档的内层没画出来", interior)
+			}
 		})
 	}
 }
