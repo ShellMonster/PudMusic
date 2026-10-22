@@ -374,6 +374,12 @@ func TestTheDownloadInterfaceIsWiredOnceImplemented(t *testing.T) {
 	s.app.MountCollections(app.CollectionRefs{
 		Client: collectionClient(t, b), Settle: 0, Downloader: d,
 	})
+	// ⚠️ **先画一帧再点**：`MountCollections` 换掉的是整份依赖（连同元信息的
+	// 缓存），下一帧头图区回到未加载态——那三行字不画，整页比加载完矮一截。
+	// 不画这一帧的话，`Click("多选")` 按的是上一帧的坐标，而按钮已经往上移了。
+	// （这一页不会自己重拉元信息；换依赖不是用户会遇到的事，测试也不验它。）
+	tt.Frame()
+	tt.Frame()
 	enterMulti(t, tt)
 	for _, title := range []string{"歌 一", "歌 三"} {
 		if err := tt.Click("选择 " + title); err != nil {
