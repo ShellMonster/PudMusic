@@ -203,6 +203,10 @@ func TestTheDividerReachesThePixels(t *testing.T) {
 //
 // 判据是**两个像素比**：卡里那一块和卡外那一块（页面底色）必须**一样**。
 // 只断「卡里那一块是不是某个数」的话，卡和页面底色一起变的时候测不出来。
+//
+// ⚠️ **还要断「它不是 `t.Surface`」**：深色下 `t.Surface` 是 #27272a，正是
+// DESIGN.md §四说的那个「比背景亮一级的板」；浅色下它是 #f4f4f5，那正是
+// 「一块灰」。两条合起来才是「底色换成上游那一档了」。
 func TestTheCardIsThePageColor(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -211,6 +215,11 @@ func TestTheCardIsThePageColor(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			tt := downloadCardScene(t, dark)
+			// 表格在那张卡里面——表头在，就说明那张卡画出来了（否则下面那些
+			// 「卡里那一块」量到的是页面底色，判据会白过）。
+			if _, ok := tt.Find("文件"); !ok {
+				t.Fatalf("画面上找不到那张卡里的表头，文字有 %q", tt.Texts())
+			}
 			img := tt.Image()
 			// 卡在留白之后：x ∈ [60, 540]、y ∈ [60, 340]。表格只占顶上那一段，
 			// 再下面那一块是**卡自己的底**。
@@ -219,6 +228,12 @@ func TestTheCardIsThePageColor(t *testing.T) {
 			if inside != outside {
 				t.Errorf("卡里那一块是 %v，卡外那一块是 %v——深色下它们应当是同一个颜色"+
 					"（层次靠影，不靠底色）", inside, outside)
+			}
+			// 它不是「亮一级的那块板」，也不是一块灰。
+			surface := rgb(BuildTheme(app.DefaultSettings(""), dark).Surface)
+			if inside == surface {
+				t.Errorf("卡里那一块是 %v（`t.Surface`）——那正是「比背景亮一级的板」",
+					inside)
 			}
 			// 浅色下那张卡是白的，不是一块灰。
 			if !dark && inside == rgb(mygoui.Hex("#f4f4f5")) {
