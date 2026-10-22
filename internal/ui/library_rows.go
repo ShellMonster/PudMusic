@@ -57,6 +57,12 @@ type libraryRow struct {
 	View int64
 	// CanPlay 报这一条能不能放。放不了的行界面上不给「播放」。
 	CanPlay bool
+	// CannotPlay 是放不了的理由（空串 = 放得了）。
+	//
+	// 界面上菜单项按不动的时候把它摆在旁边：**按不动而不说为什么**，
+	// 用户只会以为这一行坏了。理由由应用层给（`app.LibraryItem.CannotPlay`），
+	// 界面不自己编——那一句要能回答「为什么」和「还能怎么办」。
+	CannotPlay string
 }
 
 // libraryQuery 是拉一页要用的那一份筛选条件。

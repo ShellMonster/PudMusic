@@ -68,6 +68,23 @@ type State struct {
 	Rate float64
 	// Err 是最近一次打开文件的失败原因，显示在播放条上，直到下一次打开成功。
 	Err string
+	// CanRetry 报当前那一句错误**再试一次有没有用**。
+	//
+	// ⚠️ **它和 `Err` 是一对**：Err 说「出了什么事」，CanRetry 说「还能不能
+	// 再试一下」。两件事必须分开——把「B 站说这一条没有音频流」（重试一万
+	// 次也没用）和「网络断了」（点一下就好）说成同一句，用户就分不清该
+	// 换网还是该换歌。
+	//
+	// 为真时界面在播放条上给一枚「重试」键；为假时**不给**。
+	CanRetry bool
+
+	// BiliURL 是当前这一首在 B 站上的地址。空串 = 没有（本地文件，或者
+	// 这一条压根没有稿件身份）。
+	//
+	// 它的用处是给「还能怎么办」一个**动作**：B 站说这一条没有音频流的
+	// 时候，用户能做的事就是「去 B 站里听它」——而那一枚键就是这句话。
+	// 只给一句文字的话，播放条上那一行放不下（它只有一行，还带省略号）。
+	BiliURL string
 
 	// Artist 是当前这首的 UP 主名，播放条上那一行字点它进 UP 主空间。
 	//
@@ -131,6 +148,16 @@ type App struct {
 	wantPlay bool
 	playing  bool
 	errText  string
+	// errRetryable 说的是当前那一句错误**再试一次有没有用**。
+	//
+	// 界面上据此决定给不给「重试」那一枚键：给一个按了也没用的重试比不给
+	// 更糟（用户按两次发现还是那样，就不再信这个应用了）。
+	errRetryable bool
+	// pending 是「上一次用户想放的那一项」。
+	//
+	// 它是重试那一枚键的**凭据**：重试要放的还是这一首，而不是队列里
+	// 当前的那一首（取流失败时队列往往已经滚回去了）。
+	pending Item
 
 	queue *Queue // 播放队列，见 queue.go
 
@@ -441,6 +468,8 @@ func (a *App) Snapshot() State {
 		Volume:      a.volume,
 		Rate:        a.rate,
 		Err:         a.errText,
+		CanRetry:    a.errRetryable,
+		BiliURL:     a.biliURLLocked(),
 		Quality:     a.quality,
 		QualityPref: pref,
 		Artist:      a.artist,
@@ -452,6 +481,23 @@ func (a *App) Snapshot() State {
 		PlayMode:               a.queue.PlayMode(),
 		KeepPagesOrderInRandom: a.queue.KeepPagesOrderInRandom(),
 	}
+}
+
+// biliURLLocked 是当前这一首在 B 站上的地址。**必须在持锁时调**。
+//
+// 正在放的那一首（`a.online`）优先；还没有放上（取流失败了）就用**用户
+// 刚才想放的那一首**（`a.pending`）。
+//
+// 本地文件在 B 站上没有对应的东西，而没有稿件身份的在线条目（没挂投稿的
+// 那种）也没有——那两种都给空串。
+func (a *App) biliURLLocked() string {
+	if a.online != nil {
+		return BiliLink(a.online.item)
+	}
+	// 🔴 **取流失败的时候 `a.online` 从没装上**（那条流压根没建起来），
+	// 而用户想听的那一首在 `pending` 里。「在 B 站里听它」正是失败之后
+	// 用户能做的事，地址得从那儿来——不然那枚键压根不会出现。
+	return BiliLink(a.pending)
 }
 
 // setCover 记下当前这首的封面地址。
@@ -478,6 +524,14 @@ func (a *App) Open(path string) error {
 	if err != nil {
 		a.mu.Lock()
 		a.errText = err.Error()
+		// 🔴 **本地文件打不开是不可重试的**：重试是「再取一次流」，而这一首
+		// 连流都没有（它在你的磁盘上，坏了就是坏了）。留着上一句的
+		// `errRetryable` 的话，界面上会给出一枚按了也没用的「重试」。
+		a.errRetryable = false
+		// ⚠️ **`pending` 也清掉**：用户现在面对的是**这个本地文件**，而
+		// `pending` 里可能还留着上一首在线的歌——留着的话，播放条上那枚
+		// 「在 B 站打开」会指向**另一首歌**（和这句错一点关系都没有）。
+		a.pending = Item{}
 		wake := a.wake
 		a.mu.Unlock()
 		if wake != nil {
@@ -507,7 +561,11 @@ func (a *App) Open(path string) error {
 	a.duration = p.Duration()
 	a.wantPlay, a.playing = true, true
 	a.stopped = false
-	a.errText = ""
+	a.clearErrLocked()
+	// ⚠️ **本地文件把 `pending` 让出来**：那一栏记的是「在线的那一首」，
+	// 而本地文件在 B 站上没有对应的东西。留着上一首在线歌的话，播放条上
+	// 那枚「在 B 站打开」会指向另一首歌。
+	a.pending = Item{}
 	wake := a.wake
 	a.mu.Unlock()
 
@@ -671,7 +729,10 @@ func (a *App) ClearTrack() {
 	a.artistMid = 0
 	a.position, a.duration = 0, 0
 	a.wantPlay = false
-	a.errText = ""
+	a.clearErrLocked()
+	// 什么都没有了：「当前这一首」也就没有了（不然播放条上那枚
+	// 「在 B 站打开」会指着上一首）。
+	a.pending = Item{}
 	wake := a.wake
 	a.mu.Unlock()
 

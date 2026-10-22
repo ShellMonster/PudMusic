@@ -67,6 +67,12 @@ func ItemOfMedia(m bili.Media) Item {
 		it.Type, it.Bvid = "mv", m.Bvid
 	case bili.MediaAudio:
 		it.Type = "audio"
+	case bili.MediaCollection, bili.MediaMovie:
+		// 🔴 **合集与电影要带着自己的身份**，不能只留一个空的 Type：
+		// 空 Type 在 `playableOnline` 眼里和「没挂稿件的推荐条目」是同一种，
+		// 于是界面上那句说明就成了「这一条不是投稿」——而用户看到的是
+		// 收藏夹里的一个合集，他该知道的是「打开里面的单集就能放」。
+		it.Type = "collection"
 	}
 	return it
 }
@@ -127,19 +133,18 @@ func (a *App) EnqueueDownload(ctx context.Context, folder CollectionRef, medias 
 //
 // 「这一首下不了」的两种：合集 / 电影（`Playable` 判掉，它们没有音频流），
 // 以及 B 站音乐库里的音频条目（有 sid 没有 bvid，而下载按稿件存文件）。
-// ErrNoAudioDownload 是「B 站音乐库里的条目（type=12）还没有下载通道」。
 //
 // 🔴 **下载那一路是按稿件 + 分 P 取流的**（`resolveDownload` → `PlayURL(bvid, cid)`），
 // 而音乐库条目只有一个 auid（sid），没有 bvid 也没有 cid。所以这一类**现在**下不了。
 //
-// 单独一个哨兵是因为两处要说**同一句话**：批量那条（`downloadableItem`）和单首那条
-// （`downloadLater`）。两处各写一个字面量的话，改了一处另一处就开始说别的，而
-// 那是同一页上两个出口——用户对照着看会发现「同一个东西两句话」。
-var ErrNoAudioDownload = errors.New("B 站音乐库里的条目还没有下载通道")
+// 两种各有各的哨兵（`errNoAudioFlow` / `ErrNoAudioDownload`），而哨兵是
+// `Unplayable`：**它们各自带着「为什么」和「还能怎么办」**——下载那一路
+// 说错的话，用户会去查网、换网络、等它好，而真正要做的（去 B 站下载）
+// 跟网络一点关系都没有。
 
 func (a *App) downloadableItem(ctx context.Context, m bili.Media) (Item, error) {
 	if !m.Playable() {
-		return Item{}, errors.New("合集和剧集那一类没有单独的音频流")
+		return Item{}, errNoAudioFlow
 	}
 	it := ItemOfMedia(m)
 	if it.Bvid == "" {

@@ -115,9 +115,10 @@ func historyRowOf(it app.LibraryItem) libraryRow {
 			// **左半边不画**——而这不是「忘了填」，是这个接口没有。
 			Item: it.Item,
 		},
-		Progress: it.Progress,
-		ViewedAt: it.ViewedAt,
-		CanPlay:  it.CanPlay,
+		Progress:   it.Progress,
+		ViewedAt:   it.ViewedAt,
+		CanPlay:    it.CanPlay,
+		CannotPlay: it.CannotPlay,
 	}
 }
 
@@ -339,6 +340,10 @@ func (s *Shell) historyMenu(m *ui.Menu, i int) {
 		acts.Download(i)
 	case m.Item("删除").Chosen():
 		p.rows.Remove(i, s.app.LibraryOf().RemoveHistory)
+	}
+	// 🔴 **按不动的那几项要说明为什么**：理由见 laterMenu 里同一段。
+	if row.CannotPlay != "" {
+		m.Item(row.CannotPlay).Disabled(true).Chosen()
 	}
 }
 

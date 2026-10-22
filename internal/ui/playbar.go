@@ -295,16 +295,66 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 		})
 		s.viewTrackMeta(c, st, t)
 		if st.Err != "" {
-			// 🔴 **一行 + 省略号，和歌名同一个理由**：这一列最窄的时候（760 宽
-			// 的测试窗口，比应用自己的下限 900 还窄）只剩 70，而这一句话有 14 个
-			// 字——换成两行就是四行，**88 高的播放条装不下，最后一行被裁掉**，
-			// 而症状是「说了有话却看不见」（文本节点还在，测试也还找得到它）。
-			//
-			// 缩掉的那几个字用悬停补回来，和上面那个音质徽章同一个做法。
-			s.withTip(c, ui.Text(c, "打不开："+st.Err).FontSize(scale.Font(c, 12)).
-				TextColor(t.Danger).MaxLines(1).Ellipsis("…"), "打不开："+st.Err)
+			s.viewTrackError(c, st, t)
 		}
 	})
+}
+
+// viewTrackError 是播放条上那一句错，和它旁边那一枚**能做的事**。
+//
+// # 为什么是「一枚键」而不是「一句更长的说明」
+//
+// 这一行只有一行宽（还带省略号），而「为什么 + 还能怎么办」两半加起来
+// 有一二十个字——写在这里必然被截掉一半，而截掉的那一半恰恰是**用户下一步
+// 要做的事**。所以那句话留在悬停提示里（全文），旁边给一枚**动作**：
+//
+//	能重试	「重试」——网络断了、风控拦了、地址过期了，再试一次就有可能好
+//	不能重试但有 B 站地址	「在 B 站打开」——B 站说这一条没有音频流，
+//	                    用户能做的就是去 B 站里听它
+//
+// 两样都没有（比如本地文件打不开）就只留那句话。
+//
+// ⚠️ **不能重试的时候不给「重试」**：给一个按了也没用的重试比不给更糟——
+// 用户按两次发现还是那样，就不再信这个应用了。
+//
+// ⚠️ 这一行**只在出错的时候才有这一枚键**，所以平时播放条的布局一个像素
+// 都不动（那一列的宽度、进度条的长度都不受影响）。
+func (s *Shell) viewTrackError(c *ui.Context, st app.State, t *ui.Theme) {
+	msg := "打不开：" + st.Err
+	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+		// 🔴 **一行 + 省略号，和歌名同一个理由**：这一列最窄的时候（760 宽
+		// 的测试窗口，比应用自己的下限 900 还窄）只剩 70，而这一句话有 14 个
+		// 字——换成两行就是四行，**88 高的播放条装不下，最后一行被裁掉**，
+		// 而症状是「说了有话却看不见」（文本节点还在，测试也还找得到它）。
+		//
+		// 缩掉的那几个字用悬停补回来，和上面那个音质徽章同一个做法。
+		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, 12)).
+			TextColor(t.Danger).MaxLines(1).Ellipsis("…").Grow(1), msg)
+		switch {
+		case st.CanRetry:
+			if s.withTip(c, flatButton(c, "重试").FontSize(scale.Font(c, 12)),
+				"再试一次这一首").Clicked() {
+				s.retryPlay()
+			}
+		case st.BiliURL != "":
+			if s.withTip(c, flatButton(c, "在 B 站打开").FontSize(scale.Font(c, 12)),
+				"在 B 站里听这一首").Clicked() {
+				if err := systemOpenLink(st.BiliURL); err != nil {
+					s.addToast("打不开："+err.Error(), notice.Danger)
+				}
+			}
+		}
+	})
+}
+
+// retryPlay 重试上一次失败的那一首。
+//
+// 界面上给「重试」这一枚键只在**能重试**的时候（`State.CanRetry`）——
+// 给一个按了也没用的重试比不给更糟。
+func (s *Shell) retryPlay() {
+	if err := s.app.Retry(); err != nil {
+		s.addToast(err.Error(), notice.Danger)
+	}
 }
 
 // viewTrackMeta 是歌名下面那一行：UP 名（点它进他的空间）、分集、赞、收藏。

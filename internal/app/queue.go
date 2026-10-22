@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"path/filepath"
@@ -18,6 +19,17 @@ import (
 // 谁」是播放条上那个模式按钮背后唯一的一件事。
 //
 // 队列跟着 App 走：App 一开始就是空队列（见 app.go 的 New）。
+
+// ItemTypeUser 是「**一个用户**，不是一首歌」那一项在 `Item.Type` 上的值。
+//
+// ⚠️ **搜索结果的用户 Tab 那一行用它**（那一行的「播放」是进 UP 主空间，
+// 不是放这一首）。它出现在 `Item.Type` 上，是因为菜单那一层的协议只把
+// `Item` 递给回调（「用户刚按的是哪一个」得能从那一项本身答得出来）。
+//
+// 🔴 **判据要把它和「一首歌但放不了」分开**：这一行压根没有「能不能放」这
+// 回事，把它当成放不了的歌的话，菜单里那一项会变成灰的，而用户看到的是
+// 一句对他毫无意义的话（「这一条不是投稿，放不了」）。
+const ItemTypeUser = "user"
 
 // Item 是队列里的一项。
 //
@@ -975,7 +987,7 @@ func (a *App) step(delta int) {
 	}
 	if item.Path == "" && !item.isOnline() {
 		a.queue.Move(-delta)
-		a.setErr("这一首还不能放：还没有接来源")
+		a.setErr(errNoSource.Error())
 		return
 	}
 	if err := a.play(item); err != nil {
@@ -1098,7 +1110,7 @@ func (a *App) onTrackFinished() {
 	case AdvancePlay:
 		if d.Item.Path == "" && !d.Item.isOnline() {
 			a.queue.selectAt(prev)
-			a.setErr("这一首还不能放：还没有接来源")
+			a.setErr(errNoSource.Error())
 			return
 		}
 		if err := a.play(d.Item); err != nil {
@@ -1190,14 +1202,60 @@ func (a *App) ClearQueue() {
 }
 
 // setErr 在播放条上显示一条错误，直到下一次打开成功。
-func (a *App) setErr(msg string) {
+//
+// **这一句是不可重试的**：界面上不给「重试」那一枚键。能重试的错误走
+// `setErrText(msg, true)`——`failOnline` 按错误本身判，不靠这里。
+func (a *App) setErr(msg string) { a.setErrText(msg, false) }
+
+// setErrText 在播放条上显示一句错误，并记下它**再试一次有没有用**。
+//
+// 两个值必须一起落：界面上「打不开：……」这句话和「给不给重试那一枚键」
+// 是**同一件事的两半**。只落前一半的话，界面上要么给一个按了也没用的
+// 重试，要么把「网络断了」说成死路。
+func (a *App) setErrText(msg string, retryable bool) {
 	a.mu.Lock()
 	a.errText = msg
+	a.errRetryable = retryable
 	wake := a.wake
 	a.mu.Unlock()
 	if wake != nil {
 		wake()
 	}
+}
+
+// clearErrLocked 清掉播放条上那一句错误。**必须在持锁时调**。
+//
+// 🔴 **两个值一起清**：只清 `errText` 而留着 `errRetryable`，界面上就变成
+// 「没有错误了，但重试那一枚键还亮着」——而那枚键按下去会重放上一首，
+// 用户会以为是自己按错了。
+func (a *App) clearErrLocked() {
+	a.errText = ""
+	a.errRetryable = false
+}
+
+// Retry 再放一次上一次用户想放的那一首。
+//
+// 它是给「取流失败（可恢复）」用的：网络抖了、风控拦了、地址过期了这一类
+// 再试一次就有可能好，而界面在播放条上给用户一枚「重试」键。
+//
+// ⚠️ **不可重试的失败界面上不给这一枚键**：B 站说这一条没有音频流的时候，
+// 重试一万次还是那一句，而用户按了两次发现还是那样，就不再信这个应用了。
+//
+// 放的还是**用户刚才按的那一首**（`pending`），不是队列里当前的那一首——
+// 取流失败时队列常常已经滚回去了，而用户想重试的是他刚才点的那首。
+func (a *App) Retry() error {
+	a.mu.Lock()
+	it := a.pending
+	a.mu.Unlock()
+	if !it.isOnline() {
+		// ⚠️ **这一句也要答两问**：它跳出来的时候是在 Toast 上，而 Toast
+		// 上只有这一句话——用户看到「没有可以重试的那一首」却不知道
+		// 该干什么，就等于把问题推回给他。
+		return errors.New("没有可以重试的那一首了（它已经不在播放队列里）。换一首放，或者重新搜一次")
+	}
+	// 同步就能判出来的错（这一条压根没有可播的身份）在这里就报回去，
+	// 界面上会把它当成一次新的失败说出来。
+	return a.playOnline(it)
 }
 
 // CanNext / CanPrev 报告这两个按钮现在该不该亮着。

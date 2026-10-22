@@ -812,7 +812,7 @@ func lastPlayURLCids(f *streamFixture) []string {
 // 这样的条目（见 `service/bili/search.go` 文件头）。缺 cid 不是「同步就能看出来的
 // 不能放」，是「还不知道该放哪一集，要问一次」——问的那一趟在
 // `TestMissingCidIsResolvedBeforePlaying` 里。把它留在这儿的话，用户搜出来的歌
-// 一首都放不了，播放条上红字写「缺稿件 id 或分 P id」——说他缺一个他压根拿不到的
+// 一首都放不了，播放条上红字写「缺稿件 id 或分 P id」（那时 cid 还是判据之一）——说他缺一个他压根拿不到的
 // 东西，那句话是错的。
 //
 // ⚠️ 同样不在这一列里的还有**带 sid 的音乐库条目**：以前它在，是因为那一路
@@ -824,18 +824,31 @@ func TestUnplayableOnlineItemsAreRefusedSynchronously(t *testing.T) {
 	a := app.New()
 	t.Cleanup(a.Close)
 
-	for _, it := range []app.Item{
-		{Source: "online", Type: "mv", Cid: "1", Title: "缺 bvid"},
-		{Source: "online", Type: "audio", Title: "缺音频 id"},
-		{Source: "online", Type: "", Title: "认不出来的类型"},
+	// ⚠️ **每一句都要能回答「为什么」和「还能怎么办」**（票 #209）：只说
+	// 「不能放」的话，用户既不知道出了什么事，也不知道自己该干什么。
+	// 所以这里两半都钉住——「为什么」按种类各不相同，「怎么办」也各不相同。
+	for _, c := range []struct {
+		it   app.Item
+		why  string
+		next string
+	}{
+		{app.Item{Source: "online", Type: "mv", Cid: "1", Title: "缺 bvid"},
+			"不是投稿", "搜同名"},
+		{app.Item{Source: "online", Type: "audio", Title: "缺音频 id"},
+			"音乐库", "重新收藏"},
+		{app.Item{Source: "online", Type: "", Title: "认不出来的类型"},
+			"不是投稿", "搜同名"},
 	} {
-		err := a.PlayFrom(it)
+		err := a.PlayFrom(c.it)
 		if err == nil {
-			t.Errorf("%s 居然放进去了", it.Title)
+			t.Errorf("%s 居然放进去了", c.it.Title)
 			continue
 		}
-		if !strings.Contains(err.Error(), "缺") {
-			t.Errorf("%s 的错没说要紧：%v", it.Title, err)
+		if !strings.Contains(err.Error(), c.why) {
+			t.Errorf("%s 的错没说清「为什么」：%v", c.it.Title, err)
+		}
+		if !strings.Contains(err.Error(), c.next) {
+			t.Errorf("%s 的错没说清「还能怎么办」：%v", c.it.Title, err)
 		}
 		if a.Queue().Len() != 0 {
 			t.Errorf("放不进去的那一首留在了队列里：%d 项", a.Queue().Len())

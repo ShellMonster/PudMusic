@@ -91,6 +91,14 @@ type LibraryItem struct {
 	// 不通，见 `playableOnline`）；界面上据此不给「播放」，而不是让用户按了
 	// 才听一句「还不能放」。
 	CanPlay bool
+	// CannotPlay 是放不了的理由（空串 = 放得了）。
+	//
+	// 它和 `CanPlay` 是一对：`CanPlay` 判「能不能」，这一句说「为什么」。
+	// 界面上菜单项按不动的时候，把这一句摆在旁边——**按不动而不说为什么
+	// 等于让用户猜**，而用户猜不出来（他不会知道 PGC 是什么）。
+	//
+	// ⚠️ 它得能独立回答「还能怎么办」，所以写的是一整句，不是「PGC」。
+	CannotPlay string
 	// Item 是播放和右键菜单真正用的那一项。已是 `Source: "online"`。
 	Item Item
 }
@@ -119,6 +127,7 @@ func (l *Library) ToView(ctx context.Context, page int, q LibraryQuery) ([]Libra
 			// 身份。跳过，不给它占一行。
 			continue
 		}
+		canPlay := !it.IsPGC
 		items = append(items, LibraryItem{
 			ID:       laterID(it.Bvid, it.Aid),
 			Title:    it.Title,
@@ -130,11 +139,31 @@ func (l *Library) ToView(ctx context.Context, page int, q LibraryQuery) ([]Libra
 			ViewedAt: it.AddAt,
 			PubDate:  it.PubDate,
 			View:     it.View,
-			CanPlay:  !it.IsPGC,
-			Item:     onlineItem(it.Bvid, it.Cid, it.Title, it.Pic, it.OwnerName, it.OwnerMid),
+			CanPlay:  canPlay,
+			// 🔴 **按不动的那一行也得说清为什么**：PGC（番剧 / 纪录片）没有
+			// 单独的音频流，取流那一套对它不通。Biu 上游也是不给这一类入口
+			// （`cannotPlay = is_pgc`），而它没解释——我们解释一句，
+			// 因为用户看到的是「一行灰的」，他不知道灰的是哪一种。
+			CannotPlay: pgcCannotPlayReason(canPlay),
+			Item:       onlineItem(it.Bvid, it.Cid, it.Title, it.Pic, it.OwnerName, it.OwnerMid),
 		})
 	}
 	return items, pg.Count, nil
+}
+
+// pgcCannotPlayReason 是 PGC 那一类放不了时的理由。
+//
+// 放得了的话给空串。
+//
+// 🔴 **它和收藏夹里合集/电影那一类说的是同一句**（同一个 kind
+// `UnplayableNoAudioFlow`）：那两类在 B 站那边是同一件事（不是投稿、
+// 没有单独的音频流），用户照着做的下一步也一样（打开里面的单集）。
+// 两处各写一个字面量的话，同一个类在两个界面就说成两句不同的话。
+func pgcCannotPlayReason(canPlay bool) string {
+	if canPlay {
+		return ""
+	}
+	return unplayableOf(UnplayableNoAudioFlow).Error()
 }
 
 // History 拉一页历史记录。
@@ -167,6 +196,7 @@ func (l *Library) History(ctx context.Context, page int, q LibraryQuery) ([]Libr
 		// 观看是同一个 kid。Biu 删除时拼的那个 kid 就是这个（`pages/history/
 		// index.tsx:223`），所以它是删除的凭据，不是行的身份。
 		id := historyID(it.Bvid+"@"+strconv.FormatInt(it.ViewAt.Unix(), 10), it.Kid)
+		canPlay := it.Business == "archive"
 		items = append(items, LibraryItem{
 			ID:       id,
 			Title:    it.Title,
@@ -178,8 +208,11 @@ func (l *Library) History(ctx context.Context, page int, q LibraryQuery) ([]Libr
 			ViewedAt: it.ViewAt,
 			// 只有投稿能放：Biu 对 PGC 不给播放入口（history/menu.tsx 的
 			// `canPlay = business === "archive"`）。
-			CanPlay: it.Business == "archive",
-			Item:    onlineItem(it.Bvid, it.Cid, it.Title, it.Cover, it.AuthorName, it.AuthorMid),
+			CanPlay: canPlay,
+			// 同上：按不动的那一行要说清是**哪一种**。历史里放不了的是
+			// 直播、专栏、番剧那些不是投稿的东西——它们压根没有音频轨。
+			CannotPlay: historyCannotPlayReason(canPlay),
+			Item:       onlineItem(it.Bvid, it.Cid, it.Title, it.Cover, it.AuthorName, it.AuthorMid),
 		})
 	}
 	return items, pg.HasMore, nil
@@ -291,7 +324,17 @@ func historyKidOf(id string) (string, bool) {
 	return kid, true
 }
 
-// onlineItem 造一个在线队列项。
+// historyCannotPlayReason 是历史记录里放不了的那一类的理由。
+//
+// 放得了的话给空串。
+func historyCannotPlayReason(canPlay bool) string {
+	if canPlay {
+		return ""
+	}
+	return "这一条不是投稿（直播、专栏、番剧那一类），B 站没有给它音频流。搜同名的歌再放"
+}
+
+// onlineItem 造一个在线队列项.
 //
 // ownerName / ownerMid 是这一首的 UP 主，播放条上那一句要显示它、点它进他的
 // 空间（见 `Item.Artist`）。**两个都要传**：只给名字的话播放条上那一句点不动，
