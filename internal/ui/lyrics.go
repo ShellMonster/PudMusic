@@ -24,12 +24,14 @@
 //   - 译文 14px、离原词 4px、80% 不透明：`index.tsx:344` 的
 //     `mt-1 text-sm text-white/80`
 //
-// 抄不来的两样，各有各的理由，都写在下面那一项上：`font-extrabold`（MyGo 的
-// `FontWeight` 能给 800，是有的——真正抄不来的是那层 `drop-shadow`）与
-// `transition-all duration-300`（字号和透明度是每一帧重新算出来的值，MyGo
-// 不会自动给它们补一段动画；自己接一段 `AnimateTo` 是能做的，但那会让
-// 「当前这一句是哪一句」这件事本身带上时间，而这一版**不**做——见
-// `lyricActiveScale` 那一条）。
+// 抄不来的那样，理由写在下面那一项上：`font-extrabold`（MyGo 的 `FontWeight`
+// 能给 800，是有的——真正抄不来的是那层 `drop-shadow`）。
+//
+// `transition-all duration-300 ease-out` 是抄了的，走 `AnimateTo`（见
+// `lyricLineAnim`）：每一行自己带一个 0/1 的「在唱」值，字号和透明度按它插值，
+// 换句时两端各用 300ms 走完。**「正在唱的是第几句」仍然不带时间**——句号照旧
+// 由 `lyrics.ActiveAt` 每一帧算出来，滚动、渐隐、译文、居中的依据全部还是那个
+// 离散的句号；带上时间（过渡到了九成几）的只有这一行的**字号和透明度**。
 //
 // # 「滚到中间」这件事最容易错的地方
 //
@@ -65,6 +67,9 @@ const (
 
 	// lyricsActiveScale 是正在唱的那一句放大到几倍，抄 `index.tsx:335` 的
 	// `fontSize: isActive ? fontSize * 1.5 : fontSize`。
+	//
+	// 过渡期间这个倍数是**插出来的**（见 `lyricLineAnim`）：换句那一刻并不是
+	// 从 1 直接跳到 1.5，而是 300ms 走完中间那些倍。
 	lyricsActiveScale = 1.5
 
 	// lyricsIdleOpacity / lyricsActiveOpacity 抄 `index.tsx:333` 的
@@ -129,6 +134,28 @@ var lyricScrollAnim = ui.Animation{
 // 曲线在下一帧就落到目标上（`channel.step` 里 `t >= 1` 直接取 target），
 // 用户看到的是一次跳到位。
 var lyricSnapAnim = ui.Animation{Duration: time.Nanosecond, Ease: ui.Linear}
+
+// lyricLineTransition 是「这一句从没在唱变成正在唱」（以及反过来）走多久，
+// 抄上游 `index.tsx:330` 的 `transition-all duration-300 ease-out`。
+const lyricLineTransition = 300 * time.Millisecond
+
+// lyricLineAnim 就是那段过渡。
+//
+// ⚠️ **Ease 留空 = `ui.EaseOut`**（`mygo/ui/motion.go:17` 与 `widgets.go:98`），
+// 和上游那个 `ease-out` 是同一条三次曲线。写成 `ui.Smooth`（零值）会变成 500ms
+// 的弹簧——那是滚到中间那段用的东西，不是行样式这段。
+//
+// 「减少动态效果」不用在这里判：`AnimateTo` 自己读 `Preferences.ReduceMotion`，
+// 为真时第一帧就落到目标上（`mygo/ui/motion.go:322-330`）。DESIGN.md 的
+// 「减少动态效果」那一节要的就是这个。
+var lyricLineAnim = ui.Animation{Duration: lyricLineTransition}
+
+// lyricPresenceKey 是每一行那个 0/1 的「在唱」值在节点上的键。
+//
+// 行元素本身已经有 `lyricLineKey`（跨帧稳定），所以这个键只要在**同一行**里
+// 唯一就够了。用字符串而不是 `lyricLineKey` 那样的结构：行与行之间互不相干，
+// 各自的动画值各记各的。
+const lyricPresenceKey = "lyrics:line:presence"
 
 // lyricLineKey 是每一句歌词的判重标识（铁律四）。
 //
@@ -475,7 +502,7 @@ func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Dura
 				ui.Column(c).Gap(lyricsLineGap).Padding(pad, lyricsPadX, pad, lyricsPadX).
 					Children(func() {
 						for i, row := range snap.Rows {
-							line := s.lyricLine(c, i, row, i == active, snap.FontSize)
+							line := s.lyricLine(c, i, row, i == active, snap.FontSize, s.snapScroll)
 							if i == active {
 								lv.line = line.Bounds()
 							}
@@ -500,33 +527,67 @@ func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Dura
 //
 // 返回这一句的元素：调用方拿它的 `Bounds()` 量出这一句有多高、在哪儿
 // （`Bounds()` 是上一帧的，见 lyricsView.box 那一段）。
-func (s *Shell) lyricLine(c *ui.Context, i int, row lyrics.Row, active bool, fontSize float32) ui.Element {
+func (s *Shell) lyricLine(c *ui.Context, i int, row lyrics.Row, active bool, fontSize float32, snap bool) ui.Element {
 	t := c.Theme()
-	size := fontSize
-	weight, opacity := lyricsIdleWeight, float32(lyricsIdleOpacity)
-	if active {
-		size *= lyricsActiveScale
-		weight, opacity = lyricsActiveWeight, lyricsActiveOpacity
-	}
-	return ui.Column(c).
+
+	line := ui.Column(c).
 		Key(lyricLineKey{at: row.At, i: i}).
-		FillWidth().Padding(lyricsLinePadY, lyricsPadX).Opacity(opacity).
-		Children(func() {
-			ui.Text(c, row.Text).
-				FontSize(scale.Font(c, size)).FontWeight(weight).LineHeight(lyricsLineHeight).
+		FillWidth().Padding(lyricsLinePadY, lyricsPadX)
+
+	// 「这一句正在唱」这件事在这一行上是一个 0/1 的值，换句时由 300ms 的
+	// ease-out 推过去（`lyricLineAnim`）。
+	//
+	// ⚠️ **第一次出现的那一行不会「长出来」**：`AnimateTo` 的通道是那一帧才建
+	// 的，建的时候值就在目标上。所以换歌、第一次找到歌词时，整屏歌词一上来就是
+	// 对的；会过渡的只有「已经画着的那一行被换成了唱/不唱」。
+	//
+	// ⚠️ `snap`（窗口刚从看不见恢复过来的那一帧）**一次到位**：和滚到中间那
+	// 一支是同一个理由（见 `centre` 里那一支）。窗口看不见那段时间里歌照常在
+	// 走，恢复那一刻用户要看的是「现在唱到哪一句」，不是一段补放的放大/缩小。
+	// 用 `Jump` 而不是一个 1ns 的 `AnimateTo`：`AnimateTo` 第一帧返回的还是旧值，
+	// 而这一帧的布局正是要用新值——晚一帧的话，`centre` 拿到的框还是旧大小，
+	// 那一下「一次到位」会停在差一截的位置上。
+	//
+	// ⚠️ 这里的 `active` 仍然是**离散**的那一位（`lyrics.ActiveAt` 的答案）：
+	// 句号不带时间，滚动、居中、渐隐的依据也都不带。带时间的只有下面的字号和
+	// 透明度——这一点是这一票刻意守的边界（见文件头）。
+	target := float32(0)
+	if active {
+		target = 1
+	}
+	var presence float32
+	if snap {
+		presence = line.Jump(lyricPresenceKey, target)
+	} else {
+		presence = line.AnimateTo(lyricPresenceKey, target, lyricLineAnim)
+	}
+
+	// 字号和透明度按 presence 插值。**字重不插**：上游的 `transition-all` 对
+	// font-weight 也是离散的（字重没有中间值），类一换就跳过去；这里照它，
+	// 用 `active` 直接取端点，而不是拿 presence 去四舍五入。
+	size := fontSize * (1 + (lyricsActiveScale-1)*presence)
+	opacity := float32(lyricsIdleOpacity) +
+		(lyricsActiveOpacity-lyricsIdleOpacity)*presence
+	weight := lyricsIdleWeight
+	if active {
+		weight = lyricsActiveWeight
+	}
+	return line.Opacity(opacity).Children(func() {
+		ui.Text(c, row.Text).
+			FontSize(scale.Font(c, size)).FontWeight(weight).LineHeight(lyricsLineHeight).
+			TextColor(t.Text)
+		// 译文不是每行都有（`lyrics.Rows` 里 Translation 为空的那种，见那个
+		// 类型的注释），空的时候一个字都不画——留一个空行的话，上下两行
+		// 译文之间的缝会突然比别处大一倍。
+		if row.Translation != "" {
+			ui.Text(c, row.Translation).
+				Margin(lyricsTranslationGap, 0, 0, 0).
+				FontSize(scale.Font(c, lyricsTranslationSize)).
+				FixedLineHeight(lyricsTranslationLineHeight).
+				Opacity(lyricsTranslationOpacity).
 				TextColor(t.Text)
-			// 译文不是每行都有（`lyrics.Rows` 里 Translation 为空的那种，见那个
-			// 类型的注释），空的时候一个字都不画——留一个空行的话，上下两行
-			// 译文之间的缝会突然比别处大一倍。
-			if row.Translation != "" {
-				ui.Text(c, row.Translation).
-					Margin(lyricsTranslationGap, 0, 0, 0).
-					FontSize(scale.Font(c, lyricsTranslationSize)).
-					FixedLineHeight(lyricsTranslationLineHeight).
-					Opacity(lyricsTranslationOpacity).
-					TextColor(t.Text)
-			}
-		})
+		}
+	})
 }
 
 // paintLyricFade 在歌词区上下各盖一条渐隐遮罩。

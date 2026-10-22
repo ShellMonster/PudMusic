@@ -492,7 +492,7 @@ func (*flatProbeError) Error() string { return "这一块没拉出来（测试�
 //	队列抽屉  面板贴着窗口右边、宽 `queueDrawerWidth`，头高 `queueHeaderHeight`
 //	          → 线在面板顶往下第 `queueHeaderHeight` 行（实测 y=52，run=384）
 //	分集抽屉  面板自己的框由 `Label("分集列表")` 给，头高 `partHeaderHeight`
-//	          → 线在 `panel.Y + partHeaderHeight`（实测 y=621，run=360）
+//	          → 线在 `panel.Y + partHeaderHeight`（run 跟着面板宽度 `panel.W-8` 走）
 //
 // 面板**自己**的那一圈边（分集那个 popover 的顶边就在 `panel.Y`）落在带子外面。
 func TestTheTwoRulesAreDrawnAsOnePixelLines(t *testing.T) {
