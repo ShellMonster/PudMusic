@@ -40,27 +40,20 @@ FAIL，逐个包看 `ok`。
   按在旧坐标上。症状是「点了没反应」，不是「等不到」。
 - **低负载下绿不算修好。** 这套测试在 load 9~10 时会飘，load 8 以下才作数。
   判「飘红是不是真 bug」之前先看一眼机器负载。
-- **复验用「加压 3 次」，不是「连跑 10 次」——而且只跑自己改的那几处。**
-  这条规矩要的是**堆和 GC 压力**：`GOGC=10` 直接造那个压力，一次顶十次。
+- **复验用「加压 3 次」，不是「连跑 10 次」。** 这条规矩要的是**堆和 GC 压力**
+  ——整包 10 次挂 3 次、单独跑 0 次，差别就在「整包那些堆和 GC 压力」。
+  `GOGC=10` 直接造那个压力，一次顶十次：实测整包 3 次 `GOGC=10` 飘了 2 次
+  （`TestTheHoverLayerCoversOnlyTheCover`、
+  `TestEveryRouteShowsARealRowOrSaysWhichTicketIsMissing//follow`），
+  而整包 10 次要 26 分钟、还撞 `go test` 默认的 600 秒超时。
 
   ```sh
   go build ./... && go vet ./... && go test ./...   # 默认一次
-  GOGC=10 go test ./internal/ui/ -count=3 -timeout 5m -run 'TestPlayBar|TestVolume'   # 改了界面行为才加
+  GOGC=10 go test ./internal/ui/ -count=3 -timeout 15m   # 改了界面行为才加
   ```
 
-  ⚠️ **加压复验是「自己改的那几处」，不是整包。** 整包 `GOGC=10 -count=3` 在那台
-  机器上单轮要 **62~298 秒**，跑的是同一批既有测试，飘的也是那几条固定的
-  （`TestTheHoverLayerCoversOnlyTheCover`、
-  `TestEveryRouteShowsARealRowOrSaysWhichTicketIsMissing//follow`），
-  **与这一票的改动无关**；而机器上常常还有别的 agent 在跑，整包的结果本身也不
-  作数（load 20 上下时整包三遍要两分钟，那两分钟量的是别人的负载）。
-  定向跑本票那几条：三遍只要几秒。
-
-  **整包扫描是一次性的排查手段，不是每票的验收项。** 真要查是不是自己搞坏的，
-  整包扫一遍看看飘的是哪几条；日常复验只跑自己改的那几处。
-
-  ⚠️ **压出来的是别的用例的飘红，就记下来交给人另开一票，不要顺手修。** 那是既有的
-  毛病，不属于这一票的验收范围（动了它，这一票的 diff 就不是这一票的事了）。
+  **只验自己改的那几处**时用 `-run` 过滤（比整包 10 次快 250 倍）：
+  `go test ./internal/ui/ -count=10 -run 'TestPlayBar|TestVolume'`。
 - **查布局问题先按 F12**，用框架自带的检查器：元素树、box model、帧耗时、取色器。
   **别先写测试再二分**——那样往往是在测一个猜错了的数，而界面上的位置、间距、
   颜色，检查器一眼就能量出来；量出来的数再写进断言，才是对着**画面**的断言。
