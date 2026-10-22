@@ -168,10 +168,11 @@ func TestLeavingMultiModeClearsThePicks(t *testing.T) {
 // 批量删除（二次确认）
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestDeletingAsksFirst 点「批量删除」不会直接删——系统确认框先问一次。
+// TestDeletingAsksFirst 点「批量删除」不会直接删——确认框先问一次。
 //
-// 用 MyGo 的 `AlertDialog`（系统原生）而不是自绘浮层，因为**点外面不关**
-// 正是二次确认要的：自绘浮层很容易漏掉，而漏掉的后果是误删一整批。
+// ⚠️ 那个框现在是**应用自绘**的（票 #176 / G33，形状照上游的
+// `components/confirm-modal`），而**遮罩照样吃掉点在外面那一下**——不会
+// 「穿过去」按到下面的按钮上（那才是「误删一整批」那一类错的来源）。
 func TestDeletingAsksFirst(t *testing.T) {
 	b, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
 	waitSongs(t, tt, s, 3)

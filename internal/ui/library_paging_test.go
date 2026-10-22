@@ -216,7 +216,7 @@ func TestChangingTheFilterWhilePagesAreFetchingIsNotADataRace(t *testing.T) {
 // TestTheFiltersDoNotOverlapAtTheMinimumWindowWidth 盯 900 宽（`WindowOptions.MinWidth`）。
 //
 // 上游把日期选择器和搜索框摆在同一排（`justify-between`），那一排在我们的页面区
-// 摆不下——**后果不是挤一挤，是叠在一起**：结束日期的框和搜索框重叠，点结束日期点
+// 摆不下——**后果不是挤一挤，是叠在一起**：日期那一块和搜索框重叠，点日期点
 // 的是搜索框，它的日历打不开。所以搜索框另起一行（`viewFilters`）。
 //
 // 判据是**两个控件的矩形不相交**：元素都「在画面上」，只有量几何才发现得了它压住了
@@ -229,36 +229,56 @@ func TestTheFiltersDoNotOverlapAtTheMinimumWindowWidth(t *testing.T) {
 		tt.SetSize(w, 800)
 		tt.Frame()
 
-		end, ok := tt.Find("结束日期")
+		// ⚠️ 找的是**那个键的框**（`Label` 那一条），不是它里面那行字：
+		// 字只占 256 宽里的左边一小块，而「压住搜索框」这件事是整块的事。
+		trigger, ok := tt.Find(dateRangeLabel)
 		if !ok {
-			t.Fatalf("宽度 %d 下找不到结束日期，文字有 %q", w, tt.Texts())
+			t.Fatalf("宽度 %d 下找不到日期范围那一块，文字有 %q", w, tt.Texts())
 		}
 		box, ok := tt.Find(keywordBoxLabel)
 		if !ok {
 			t.Fatalf("宽度 %d 下找不到搜索框，文字有 %q", w, tt.Texts())
 		}
-		if overlap(end, box) {
-			t.Errorf("宽度 %d 下搜索框盖住了结束日期（搜索框 %+v，结束日期 %+v）", w, box, end)
+		if overlap(trigger, box) {
+			t.Errorf("宽度 %d 下搜索框盖住了日期范围（搜索框 %+v，日期范围 %+v）", w, box, trigger)
 		}
 	}
 }
 
-// TestTheEndDateOpensItsCalendarAtTheMinimumWindowWidth 钉住「点得开」。
+// TestTheDateRangeOpensItsCalendarAtTheMinimumWindowWidth 钉住「点得开」。
 //
 // 光量不重叠不够：控件在、位置对，可点击落在别人身上，它那个日历照样打不开——
 // 而用户缩小窗口正是为了点点什么。
-func TestTheEndDateOpensItsCalendarAtTheMinimumWindowWidth(t *testing.T) {
+//
+// ⚠️ **而且弹出来的那一块自己要整个在窗口里**：它有**两个月**那么宽（≈500），
+// 而窗口最窄是 900——面板要是往右长，右半边（正是右边那个月）会被裁掉。
+// 而裁掉的那一半**看不出来**：用户看到的是「这个日历只有一个月」，而另一个月的
+// 那些日子他根本点不到。
+func TestTheDateRangeOpensItsCalendarAtTheMinimumWindowWidth(t *testing.T) {
 	f := newLibFake(t).withLater(1, 1, "甲")
 	tt, _ := libraryShell(t, f, laterPath)
 	tt.SetSize(900, 800)
 	tt.Frame()
 
-	if err := tt.Click("结束日期"); err != nil {
-		t.Fatalf("点不到结束日期：%v，文字有 %q", err, tt.Texts())
+	if err := tt.Click(dateRangeLabel); err != nil {
+		t.Fatalf("点不到日期范围：%v，文字有 %q", err, tt.Texts())
 	}
 	tt.Frame()
-	if !tt.HasText("October 2026") && !tt.HasText("2026年10月") {
-		t.Errorf("900 宽下点结束日期没有打开日历，文字有 %q", tt.Texts())
+	for _, want := range []string{"2026年10月", "2026年11月"} {
+		if !tt.HasText(want) {
+			t.Errorf("900 宽下点日期范围没有打开两个月（缺 %q），文字有 %q", want, tt.Texts())
+		}
+	}
+	// ⚠️ **右边那个月的最后一天也要在窗口里**（点得到）。
+	//
+	// 「两个月都在画面上」不够：面板可能往右长出窗口，而那半个月的日子看着
+	// 还在（文字画出来了），可它们的坐标已经在窗口外面——点它们会落在空气上。
+	last, ok := tt.Find("2026年11月30日")
+	if !ok {
+		t.Fatalf("右边那个月没有画出来，文字有 %q", tt.Texts())
+	}
+	if last.X+last.W > 900 {
+		t.Errorf("右边那个月的最后一天在窗口外面（右边 %v，窗口 900）", last.X+last.W)
 	}
 }
 

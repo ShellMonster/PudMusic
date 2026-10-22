@@ -9,6 +9,14 @@
 //
 // 「交织中」是这一版自己加的（上游那边是 `merging`「下载完成，合并分块中」），
 // 理由写在 `downloadlist.go` 的文件头。
+//
+// # 这一列的两处颜色（票 #176 / G46）
+//
+//	进度条   蓝（`#3b82f6`，上游 `progress.tsx:49` 的 `bg-blue-500`），
+//	         出错的那一条是红（上游同一个 `indicator` 的另一支）。
+//	完成     绿勾 +「下载完成」，两样都是成功色（上游 `progress.tsx:17-25`）。
+//
+// 蓝**不是**主色：上游那一格是蓝的，用户把主色换成红的它也还是蓝的。
 
 package ui
 
@@ -41,6 +49,9 @@ type statusCell struct {
 	// danger 让进度条变红（上游 `progress.tsx:49` 的 `indicator: failed ?
 	// "bg-danger"`）。
 	danger bool
+	// done 让这一格前面多一枚对勾（上游 `progress.tsx:17-25` 的
+	// `<RiCheckboxCircleLine size={16} />`）。
+	done bool
 }
 
 // statusOf 把一条下载记录翻译成那一格要画的东西。
@@ -71,15 +82,14 @@ func statusOf(r download.Snapshot, t *ui.Theme) statusCell {
 
 	case download.StatusDone:
 		// 上游画的是一枚对勾 +「下载完成」，**不画进度条**
-		// （progress.tsx:17-25）。对勾是 Remix 图标字体的图标，MyGo 没有
-		// 图标字体（widgets/list/menu.go 顶上那一段说的是同一件事），所以
-		// 这里只留那一句，用成功色。
+		// （progress.tsx:17-25）。对勾是 `RiCheckboxCircleLine`——我们图标集里
+		// 有同一张（`System/checkbox-circle-line.svg`），所以照画。
 		//
 		// ⚠️ **浅色下这个成功绿当字色是 2.19:1**（旧的那一档是 3.30:1）——
 		// 上游 HeroUI 那个色相自带的代价，理由和数都在 `theme.go` 的语义色
 		// 那一段。那一段还写了「别拿对比度当理由把色值改回去」：真要同时
 		// 保住上游色相和可读性，得给「当字色用」另取一档，那是另一次裁决。
-		return statusCell{text: "下载完成", c: t.Success}
+		return statusCell{text: "下载完成", c: t.Success, done: true}
 
 	case download.StatusMuxing:
 		// 交织中：字节已经全下完了，这一格说的是**交织**而不是字节，而交织
@@ -115,6 +125,16 @@ func (d *downloadsPage) viewStatus(c *ui.Context, r download.Snapshot) {
 	// 上游的 waiting / completed 两支没有条也没有百分比：一个只有一句话的
 	// 居中块。这里让它**顶格靠左**：一列里所有格子左对齐，「等待中」和
 	// 「下载完成」才在同一处，读起来是一列而不是两列。
+	//
+	// ⚠️ **「完成」那一支前面还有一枚对勾**（上游 `progress.tsx:17-25`）：
+	// 一枚绿勾 +「下载完成」，两样都是成功色。
+	if cell.done {
+		ui.Row(c).Gap(dlDoneGap).AlignItems(ui.Center).Children(func() {
+			ui.Icon(c, icon(iconChecked)).FontSize(dlDoneIconSize).TextColor(cell.c)
+			ui.Text(c, cell.text).FontSize(scale.Font(c, 13)).TextColor(cell.c).MaxLines(2)
+		})
+		return
+	}
 	if !cell.showBar {
 		ui.Text(c, cell.text).FontSize(scale.Font(c, 13)).TextColor(cell.c).MaxLines(2)
 		return
@@ -122,9 +142,9 @@ func (d *downloadsPage) viewStatus(c *ui.Context, r download.Snapshot) {
 
 	ui.Column(c).FillWidth().Gap(4).Children(func() {
 		if cell.danger {
-			dangerBar(c, cell.bar)
+			statusBar(c, cell.bar, c.Theme().Danger)
 		} else {
-			ui.Progress(c, cell.bar).FillWidth()
+			statusBar(c, cell.bar, ui.Hex(dlBarColor))
 		}
 		ui.Row(c).FillWidth().Gap(8).Children(func() {
 			// 出错时这一段是错误原因，允许折两行（上游的 `line-clamp-2`）。
@@ -148,21 +168,45 @@ func (d *downloadsPage) viewStatus(c *ui.Context, r download.Snapshot) {
 // 这里多给一个像素，状态列的条就少一个。
 const dlPctW = 40
 
-// dangerBar 画一条红色的进度条。
+// 「完成」那一支的尺寸。
+//
+// 上游 `progress.tsx:17-25`：`<RiCheckboxCircleLine size={16} />` 加上
+// `space-x-1`（4px）的缝。
+const (
+	dlDoneIconSize = 16
+	dlDoneGap      = 4
+)
+
+// dlBarColor 是进度条涂的那个颜色。
+//
+// 上游 `download-list/progress.tsx:49` 的 `indicator` 是
+// `data.status === "failed" ? "bg-danger" : "bg-blue-500"`——
+// **蓝的，不是主色**。而 Tailwind 的 `blue-500` 是 `#3b82f6`。
+//
+// ⚠️ **它不是主题里的一个语义色**：DESIGN.md §四 那一组语义色是
+// 危险 / 警告 / 成功，主色是 Biu 的绿。这一条是上游那一枚进度条自己的颜色，
+// 所以**不跟用户挑的主色走**——用户把主色换成红的，进度条还是蓝的（那正是
+// 上游的样子）。
+//
+// ⚠️ 深浅两套是**同一个值**：这一条是「这一格是蓝的」而不是「这一格比底色
+// 亮一点」，深色下它照样是 `#3b82f6`。
+const dlBarColor = "#3b82f6"
+
+// statusBar 画一条进度条，填充色是给定的那一个。
 //
 // ⚠️ MyGo 的 `Progress` 把填充色**写死**成建它那一刻主题的 Accent
 // （mygo/ui/widgets.go 的 `coreProgress` 里 `p.Fill(…, t.Accent, …)`），元素
-// 上没有换色的方法。所以「出错的那一条要变红」只能在这里临时把主题的 Accent
-// 换成 Danger 建这一条控件，**建完立刻换回来**。
+// 上没有换色的方法。所以「这一条要涂蓝 / 涂红」只能在这里临时把主题的 Accent
+// 换成那个颜色建这一条控件，**建完立刻换回来**。
 //
 // 后半句是这一段能安全存在的前提：`SetTheme` 只影响**它之后创建**的控件
 // （铁律二，见 theme.go），所以这一条之后的任何东西都还是原来的颜色。忘了
-// 换回来，那一帧剩下的整个页面就都是红的了——而那种错不报错、不崩溃。
-func dangerBar(c *ui.Context, value float64) ui.Element {
+// 换回来，那一帧剩下的整个页面就都是蓝的了——而那种错不报错、不崩溃。
+func statusBar(c *ui.Context, value float64, color ui.Color) ui.Element {
 	orig := c.Theme()
-	red := *orig
-	red.Accent = orig.Danger
-	c.SetTheme(&red)
+	themed := *orig
+	themed.Accent = color
+	c.SetTheme(&themed)
 	e := ui.Progress(c, value).FillWidth()
 	c.SetTheme(orig)
 	return e
