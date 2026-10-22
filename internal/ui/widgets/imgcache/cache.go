@@ -43,9 +43,20 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// DefaultMaxBytes 是**内存**缓存默认的字节上限。Biu 一次能列出几十张封面，64MB
-// 大约相当于 50 张 672×378 的，够一屏用又不至于让歌单一滚就吃掉几百 MB。
-const DefaultMaxBytes int64 = 64 << 20
+// DefaultMaxBytes 是**内存**缓存默认的字节上限。Biu 一次能列出几十张封面，
+// 96MB 大约相当于 50 张 768×432 的（一张 RGBA 加 mipmap 链约 1.8MB）。
+//
+// ⚠️ **这个数和「存下来的那一张图有多大」是一对**（见 `scale.go`）：
+// 存的是 1920×1080 的原图时一张就是 11MB，50 张要 550MB——那不是缓存，那是
+// 内存泄漏。而界面上最大的那一格（满屏播放器那张封面，384 DIP）用不着那么多
+// 像素，所以存下来的那一份缩到最长边 768（见 `maxStoredSide`）：一张 1.8MB，
+// 50 张 90MB，和这一行原来那个「64MB ≈ 50 张 672×378」是同一个意思。
+//
+// ⚠️ **别只把这个数调大**：一屏十几张封面按原图存就是 170MB，比上限还多，
+// 于是 LRU 只能把**正在显示着的**封面挤掉——挤掉的那一张下一帧就退回占位，
+// 重新下一次、再解一次码，界面上就是「有图 ↔ 占位」反复切换（issue #208）。
+// 那是 `scale.go` 那一格要解决的事，不是这个数。
+const DefaultMaxBytes int64 = 96 << 20
 
 // DefaultDiskMaxBytes 是**磁盘**缓存默认的字节上限：256MB。
 //
@@ -584,7 +595,7 @@ func (c *Cache) decodeWorker() {
 	for {
 		select {
 		case j := <-c.decodeCh:
-			bm, err := ui.DecodeBitmap(j.data)
+			bm, err := decodeStored(j.data)
 			if err != nil {
 				if j.fromDisk && !j.e.isDropped() && !c.closed.Load() {
 					// 盘上那份解不开（上一个版本留下的、或者被外部写坏了）：
