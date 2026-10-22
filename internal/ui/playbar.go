@@ -57,8 +57,8 @@ const (
 	// 一个像素都分不到，而**界面上看不出坏了**（按钮和那句话都还在，只有名字没了）。
 	// 留 60 是「还能认出是哪个 UP」的下限，再窄就只剩两个偏旁。
 	//
-	// 第二行现在是**两个**图标键（赞 / 收藏），每个 `iconHit` = 28、两道
-	// `metaGap` = 8，所以它们要 28×2 + 8×2 = **72**。
+	// 第二行现在是**两个**图标键（赞 / 收藏），每个 `iconHit` = 32、两道
+	// `metaGap` = 8，所以它们要 32×2 + 8×2 = **80**。
 	// 图标化之前它们是三个 44 宽的文字键（赞 / 收藏 / 下载）加三道缝，要
 	// 44×3 + 8×3 = **156**——第二行比原来**窄了 84**（下载跟着上游搬去了右边
 	// 那一组，见 `viewPlayBarRight`），这一档的上限松了，而这个下限没动。
@@ -86,9 +86,9 @@ const (
 // 🔴 **宽度账**（2026-10 票 #135 之后量的，深浅两套一样）：
 //
 //	窗口   播放条可用   右边那一组   左边那一列   中间那一列   进度条
-//	 900       868          221         311.5        311.5      195.7
-//	1200      1168          221         455.5        455.5      345.7
-//	1600      1568          221         655.5        655.5      545.7
+//	 900       868         240.7        301.7        301.7      185.7
+//	1200      1168         240.7        451.7        451.7      335.7
+//	1600      1568         240.7        651.7        651.7      535.7
 //
 //	（可用 = 窗口 - 左右各 16 的内边距；左边和中间**各分一半**多出来的那一份，
 //	 所以窗口每宽 100，进度条就长 50。）
@@ -97,8 +97,15 @@ const (
 //	窗口长——左边那一列多出来的那一份是空的。票 #135 明确「不改左侧那一块的
 //	布局」，所以那一份空着是有意的。
 //
-//	⚠️ **右边那一组是 221**（不是票 #127 那时的 362）：音量收成一枚图标之后，
-//	 常驻的那根 120 像素横滑块没有了（见 `viewPlayBarRight`）。
+//	⚠️ **900 上歌名会被截掉一点**（208.4 → 203.7，多出一个省略号）：左边那一列
+//	的分到 301.7，而歌名那一行还要让出封面（56 + 8）和音质徽章（28 + 6），
+//	剩下 203.7。这是图标键的点击区从 28 长到 32（上游那一档，G39）之后
+//	右边那一组多占 19.7 带来的——**上游那边也一样**（它的图标键恒是 32×32），
+//	而歌名截断本来就是设计好的（`MaxLines(1)` + 省略号）。
+//
+//	⚠️ **右边那一组是 240.7**（不是票 #127 那时的 362）：音量收成一枚图标之后，
+//	 常驻的那根 120 像素横滑块没有了（见 `viewPlayBarRight`）；图标键的点击区
+//	 从 28 长到 32（上游那一档，G39）之后又加了 19.7——**五枚键各多 4**。
 func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 	// 记一笔「播放条建了一遍」——给「一帧建了几遍」那条测试数（见 builds.go）。
 	s.builds.playbar++
@@ -187,7 +194,7 @@ func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 		// 的第三个（`playbar/right/index.tsx:16`），而顶栏那一枚是当初右边摆不下
 		// 时挪过去的——现在右边腾得开，两处只能留一个，留两个就会不一致。
 		if s.withTip(c, iconButton(c, iconQueue, "播放列表", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5), drawerTip(s.drawerOpen)).Clicked() {
+			Size(iconHitMd, iconHitMd).Padding(0, 7), drawerTip(s.drawerOpen)).Clicked() {
 			s.drawerOpen = !s.drawerOpen
 		}
 
@@ -203,7 +210,7 @@ func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 		s.viewRate(c, st)
 
 		if s.withTip(c, iconButton(c, iconEnqueue, "加歌", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5), "把本地文件加到队列末尾").Clicked() {
+			Size(iconHitMd, iconHitMd).Padding(0, 7), "把本地文件加到队列末尾").Clicked() {
 			s.pickAndEnqueue()
 		}
 	})
@@ -284,21 +291,21 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 // （`playbar/left/index.tsx` 的 `{hasMultiPart && <PageListDrawer/>}` 紧跟着
 // `MusicFavButton` / `MusicThumb`）。
 //
-// ⚠️ **它摆在这儿最贵的一次是花掉 UP 名 36 个像素（`iconHit` 28 + 一道 `metaGap` 8），
-// 别的什么都不花；而窗口一宽就连那 36 也不用花**——这是量的，不是推的。同一首歌、
+// ⚠️ **它摆在这儿最贵的一次是花掉 UP 名 40 个像素（`iconHit` 32 + 一道 `metaGap` 8），
+// 别的什么都不花；而窗口一宽就连那 40 也不用花**——这是量的，不是推的。同一首歌、
 // 同一块屏幕，**单 P（不摆这个键）和多 P（摆）两档各量一次**（UP 名的自然宽是 249.7）：
 //
-//	窗口    UP 名 171.7→135.7   196.7→160.7   221.7→185.7   249.7→235.7   249.7→249.7
+//	窗口    UP 名 153.7→113.7   178.7→138.7   203.7→163.7   249.7→213.7   249.7→249.7
 //	        900          950          1000          1100           1200/1280
-//	    （让位 36）  （让位 36）  （让位 36）  （让位 14）     （让位 0）
+//	    （让位 40）  （让位 40）  （让位 40）  （让位 36）     （让位 0）
 //
-// **每一档的歌名（208.4）、进度条（195.7 / 220.7 / 245.7 / 295.7 / 345.7 / 385.7）、
-// 播放模式（28）、下载（28）、加歌（28）两档都一模一样**——这个键不花它们一分钱。
+// **每一档的歌名（208.4）、进度条（185.7 / 210.7 / 235.7 / 285.7 / 335.7 / 375.7）、
+// 播放模式（32）、下载（32）、加歌（32）两档都一模一样**——这个键不花它们一分钱。
 //
 // 1200 以上让位是 0，原因是那一行**够宽到装得下 UP 名的自然宽再加这个键**，`Grow(1)`
 // 于是没东西可挤。这不是「宽窗口下碰巧没事」，而是 `Grow` 的正常行为：挤的永远是
 // 那个可伸缩的东西，而它在这一行里只有 UP 名一个（`Grow(1)` + `MinWidth` +
-// `Ellipsis("…")`，见 `viewArtist`）。在应用自己的窗口下限 900 上它让出 36，而 135
+// `Ellipsis("…")`，见 `viewArtist`）。在应用自己的窗口下限 900 上它让出 40，而 113
 // 仍远在 `ownerNameMinW`（40）之上。
 //
 // ⚠️ **另一处也量过：中间那一列的第二行**（挨着播放模式）——摆在那儿一样只让 UP 名
@@ -382,7 +389,7 @@ func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
 	// 靠主色染出来的「收藏」两个字说的是同一件事。
 	// 哪一档配哪一张只有 `favIcon` 说了算（理由见 icons.go 那几个函数的头一段）。
 	btn := s.withTip(c, iconButton(c, favIcon(faved), "收藏", iconSm).
-		Size(iconHit, iconHit).Padding(0, 7), favTooltip(faved))
+		Size(iconHit, iconHit).Padding(0, 9), favTooltip(faved))
 	if faved {
 		// ⚠️ **只在这一支设颜色**：没收藏的那一支一个字都不改，好让「默认那个颜色」
 		// 继续由按钮自己决定（图标从祖先的文字色继承，按钮给的就是它）。
@@ -424,7 +431,7 @@ func favTooltip(faved bool) string {
 // 唯一的痕迹。
 func (s *Shell) viewDownloadButton(c *ui.Context, st app.State) {
 	if s.withTip(c, iconButton(c, iconDownload, "下载", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 5), "把正在放的这首下载到本地").Clicked() {
+		Size(iconHitMd, iconHitMd).Padding(0, 7), "把正在放的这首下载到本地").Clicked() {
 		it, ok := s.app.PlayingItem()
 		if !ok {
 			s.addToast("这一首还没有取回来，下载不了")
@@ -619,11 +626,11 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 //
 // ⚠️ 原来是 88 宽的三个汉字按钮，而三个汉字在按钮里要 54——**44 就已经放不下**，
 // 按 64 画出来是「上...」「下...」，看着像坏了。图标化之后这件事不再存在：
-// 18 的图标 + 每边 5 的内边距，点击区 28（`iconHitMd`），比原来那个 88 窄三倍
+// 18 的图标 + 每边 7 的内边距，点击区 32（`iconHitMd`），比原来那个 88 窄近三倍
 // 还点得准（角上也点得到，见 `TestTheHitAreaIsBiggerThanTheGlyph`）。
 func (s *Shell) viewPrevButton(c *ui.Context) {
 	if s.withTip(c, iconButton(c, iconPrev, "上一首", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 5).
+		Size(iconHitMd, iconHitMd).Padding(0, 7).
 		Disabled(!s.app.CanPrev()), "上一首").Clicked() {
 		s.app.Prev()
 	}
@@ -631,7 +638,7 @@ func (s *Shell) viewPrevButton(c *ui.Context) {
 
 func (s *Shell) viewNextButton(c *ui.Context) {
 	if s.withTip(c, iconButton(c, iconNext, "下一首", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 5).
+		Size(iconHitMd, iconHitMd).Padding(0, 7).
 		Disabled(!s.app.CanNext()), "下一首").Clicked() {
 		s.app.Next()
 	}
@@ -653,7 +660,7 @@ func (s *Shell) viewPlayMode(c *ui.Context, st app.State) {
 	// 四档各配一个图标（Biu 的 `getPlayModeList`，逐个照它的 `icon` 那一项），
 	// 悬停那句话仍然报的是**当前这一档**。
 	btn := s.withTip(c, iconButton(c, playModeIcon(st.PlayMode), "播放模式", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 5),
+		Size(iconHitMd, iconHitMd).Padding(0, 7),
 		st.PlayMode.Label()+"："+st.PlayMode.Desc()+"（点一下换，右键看全部）")
 
 	// 按一下换到下一档。档序（顺序 → 循环 → 随机 → 单曲 → 回顺序）是 App 那边

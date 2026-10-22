@@ -117,7 +117,7 @@ const dlFileMin = 200
 
 // dlOpW 是操作列里每个图标键的边长。
 //
-// 它是 `iconHit`（14 的图标 + 每边 7）——这一列的操作现在是图标键（上游
+// 它是 `iconHit`（14 的图标 + 每边 9）——这一列的操作现在是图标键（上游
 // `actions.tsx:164-175` 就是 `isIconOnly` 的 `AsyncButton`），不再有「两个汉字
 // 加内边距 56、再窄就画成『暂…』」那笔账。
 const dlOpW = iconHit

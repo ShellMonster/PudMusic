@@ -308,13 +308,13 @@ func qrHintColor(t *ui.Theme, phase app.LoginPhase) ui.Color {
 func (s *Shell) viewLoginEntry(c *ui.Context) {
 	if s.app.LoggedIn() {
 		if s.withTip(c, iconButton(c, iconLogout, "退出登录", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5), "退出登录").Clicked() {
+			Size(iconHitMd, iconHitMd).Padding(0, 7), "退出登录").Clicked() {
 			s.logoutAndStartOver()
 		}
 		return
 	}
 	if s.withTip(c, iconButtonPrimary(c, iconLogin, "登录", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 5), "登录 B 站账号").Clicked() {
+		Size(iconHitMd, iconHitMd).Padding(0, 7), "登录 B 站账号").Clicked() {
 		s.goLogin()
 	}
 }

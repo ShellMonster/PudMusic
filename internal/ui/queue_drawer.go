@@ -181,12 +181,12 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 		// 播放」「清空」，换成图标之后靠 `Label` 念的还是这两句，而它们同时也是
 		// 无头 Tester 认这两个按钮的唯一凭据（`queue_drawer_test.go` 靠它点）。
 		if s.withTip(c, iconButton(c, iconLocate, "定位当前播放", iconSm).
-			Size(iconHit, iconHit).Padding(0, 7),
+			Size(iconHit, iconHit).Padding(0, 9),
 			"把队列滚到正在放的那一首").Clicked() {
 			s.locateCurrent()
 		}
 		if s.withTip(c, iconButton(c, iconDelete, "清空", iconSm).
-			Size(iconHit, iconHit).Padding(0, 7), "清空播放列表").Clicked() {
+			Size(iconHit, iconHit).Padding(0, 9), "清空播放列表").Clicked() {
 			s.app.ClearQueue()
 		}
 	})

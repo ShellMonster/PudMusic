@@ -297,7 +297,7 @@ func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 	// 一张」就没有钉住的地方了。
 	name := likeIcon(rel.Liked)
 	btn := s.withTip(c, iconButton(c, name, label, iconSm).
-		Size(iconHit, iconHit).Padding(0, 7).TextColor(color),
+		Size(iconHit, iconHit).Padding(0, 9).TextColor(color),
 		likeStarTooltip(rel.Liked, s.app.LikeErr() != nil && !s.app.LikeAsked()))
 	if btn.Clicked() {
 		s.app.SetLike(!rel.Liked, func(err error) {

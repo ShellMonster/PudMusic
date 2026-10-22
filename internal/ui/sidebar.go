@@ -7,11 +7,15 @@
 package ui
 
 import (
+	"runtime"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/platform"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
@@ -44,6 +48,38 @@ const (
 	// 记的就是这件事：同一个色在深浅两套里的观感完全不同）。
 	sideDividerW = 1
 	sideDividerA = 0.3
+
+	// sideRowHeight 是侧栏菜单里一行的高。
+	//
+	// 上游那一行是 HeroUI 的 Button **md**：40（`h-10`）——`MenuItem` 没有指定
+	// size，而 HeroUI 的默认就是 md（`biu/src/components/menu/menu-item.tsx`）。
+	// 我们原来是 6 + 15.3 + 6 ≈ **28**：指针要瞄得准才按得中，而上游那一列
+	// 是 40（票 #164 的验收第二条）。
+	//
+	// ⚠️ **它和 `sideIconCell` 是同一个数，不是巧合**：那一行的高度就是那一格
+	// 图标格的高度（上游折叠态那个 `h-10 w-10` 的图标格，和展开态那枚坐在
+	// 40 高的按钮里的图标，是同一个 40）。留着两个名字是因为它们说的是两件事：
+	// 一个是**行**多高，一个是**格子**多大。
+	sideRowHeight = sideIconCell
+
+	// sideIconSize 是菜单项那枚图标的边长。上游 `<Icon size={18}/>`
+	// （`menu-item.tsx` 的 `iconContent`）。
+	sideIconSize = 18
+
+	// sideIconCell 是**图标格子**的边长：展开态和折叠态都是它。
+	//
+	// 上游折叠态那一项摆的是一个 `h-10 w-10` 的 Avatar（图标是它的 fallback），
+	// 展开态那枚图标则坐在 40 高的按钮里——两边占的是**同一个 40 的格子**，
+	// 所以折叠 / 展开时图标不会左右跳。
+	sideIconCell = 40
+
+	// sideBrandLogo 是左上角那个 logo 的边长。上游
+	// `<LogoIcon className="h-10 w-10" />`（`biu/src/layout/side/logo/index.tsx`）。
+	sideBrandLogo = 40
+
+	// sideBrandNameSize 是品牌字（应用名）的字号。上游 `text-2xl` = 24
+	// （`DESIGN.md` 的排版表：品牌字 = 24 / 粗体 / 主色）。
+	sideBrandNameSize = 24
 )
 
 // viewSide 是左侧栏。
@@ -55,6 +91,9 @@ func (s *Shell) viewSide(c *ui.Context) {
 	st := s.app.SettingsSnapshot()
 	// 折叠时画 72，展开时画钳过的宽度。设置里那个数在这一层才说了算。
 	target := sideTargetWidth(st)
+	// ⚠️ **画出来的那一档**和设置里那个开关**不是同一件事**：拖动的时候看的是
+	// 画出来的宽度（上游的 `isCollapsedVisual`），理由见 `sideCollapsedVisual`。
+	collapsed := s.sideCollapsedVisual(st)
 
 	side := ui.Row(c).Key("side")
 	// 拖动中不过渡（Biu 的 `transition-none`），松手和折叠才走 200ms。
@@ -88,18 +127,16 @@ func (s *Shell) viewSide(c *ui.Context) {
 			// centers them vertically」），不拉满高这一栏就按内容高度浮在中间，
 			// 底下空出一大块，滚动区也就没高度了。
 			ui.Column(c).Key("side-body").Grow(1).FillHeight().Children(func() {
-				s.viewSideBrand(c, st)
+				s.viewSideBrand(c, collapsed)
 				// 菜单和收藏夹一起滚。Biu 也是这么分的（ScrollContainer 包住
 				// DefaultMenus + Collection），侧栏窄的时候不至于把折叠按钮顶出去。
 				sideScroll := ui.Scroll(c).Key("side-scroll").Grow(1).FillWidth()
 				sideScroll.Children(func() {
-					s.viewSideMenu(c, st)
-					s.viewFavorites(c, st)
+					s.viewSideMenu(c, st, collapsed)
+					s.viewFavorites(c, st, collapsed)
 				})
 				s.trackScrollbar(sideScroll)
-				s.viewSideCollapse(c, st)
-				// 完整应用名在折叠按钮下面那一条。见 `viewSideFoot`。
-				s.viewSideFoot(c, st)
+				s.viewSideCollapse(c, st, collapsed)
 			})
 
 			grip := ui.Column(c).Key("side-grip").FillHeight().Width(sideGrip).
@@ -118,6 +155,26 @@ func sideTargetWidth(st app.Settings) float64 {
 		return app.CollapsedSideMenuWidth
 	}
 	return app.ClampSideMenuWidth(st.SideMenuWidth)
+}
+
+// sideCollapsedVisual 是这一帧**画出来**的那一档（折叠 / 展开）。
+//
+// 上游是 `isCollapsedVisual`（`biu/src/layout/side/index.tsx:55`）：
+// `isDragging ? renderWidth < MIN_WIDTH : sideMenuCollapsed`——**拖动的时候
+// 看的是画出来的宽度，不是设置里那个开关**。
+//
+// ⚠️ **不跟着走的话，拖到 160 以下的那一段里侧栏内容还是展开的**：菜单那一列
+// 摆着名字，而侧栏只有 72 宽——**内容把侧栏撑宽**（实测撑到 143），于是
+// 「拖窄了会自动折叠」这件事在画面上根本看不出来（`TestDraggingTheGripBelow
+// TheMinWidthCollapsesTheSidebar` 量到的宽度是 152 而不是 72）。
+//
+// 而折叠之后菜单那一列摆的是**图标**（没有字），宽度自然就小下来了——这正是
+// 上游那一档能塞进 72 的原因。
+func (s *Shell) sideCollapsedVisual(st app.Settings) bool {
+	if s.sideDragging {
+		return s.sideWidth < app.MinSideMenuWidth
+	}
+	return st.SideMenuCollapsed
 }
 
 // sideDragWidth 是拖动中的那一套算法，逐字照 Biu 的 `computeWidth`
@@ -205,53 +262,93 @@ func (s *Shell) commitSideWidth() {
 	}
 }
 
-// viewSideBrand 是顶上那一条品牌：一个字母的标记。
+// viewSideBrand 是左上角那一条品牌：40×40 的 logo + 24px 主色粗体的应用名。
 //
-// ⚠️ **这里摆的是字母，不是应用名。** 完整名字在侧栏最下面那一行
-// （`viewSideFoot`）。两处别搞混，也别只改一处——2026-10 从 `Biu MyGo` 改名成
-// `BiuGo` 时就是只改了下面那行，于是展开的侧栏上方一个 18pt 的「Biu」、下面一个
-// 11pt 的「BiuGo」，**同一栏里两个产品名**，而两行都是正常的 Text，没有任何一处
-// 会报错。`sidebar_test.go` 的 `TestTheSidebarShowsTheAppNameExactlyOnce` 钉住它。
+// 上游是 `biu/src/layout/side/logo/index.tsx`：一个 `h-10 w-10` 的 logo，
+// 旁边 `text-2xl` 粗体的应用名，整个块 `py-3 pr-3 pl-4`。
 //
-// ⚠️ **为什么摆不下整行应用名**：折叠后的侧栏是 72 像素（`app.CollapsedSideMenuWidth`），
-// 而「拖窄到 160 以下自动折叠」这件事要求侧栏**能缩到 72**——内容最小宽度比 72 大
-// 的话，它会被顶在 75.4，`TestDraggingTheGripBelowTheMinWidthCollapsesTheSidebar`
-// 当场红（实测：顶上换成 18pt 的「BiuGo」就是这个数）。18pt 的「BiuGo」光文字就
-// 约 55 宽，加上内边距过不了 72。所以顶上只摆标记——这和折叠态一直以来的做法
-// 是同一件事，顺带还保住了 72 这个宽度。
+// ⚠️ **这里摆的是应用名，折叠按钮下面那一行早就不摆它了。** 2026-10 从
+// `Biu MyGo` 改名成 `BiuGo` 时只改了下面那行，于是展开的侧栏上方一个 18pt 的
+// 「Biu」、下面一个 11pt 的「BiuGo」，**同一栏里两个产品名**，而两行都是正常的
+// Text，没有任何一处会报错。现在这一处是**唯一**一处写着应用名的地方，
+// `sidebar_test.go` 的 `TestTheSidebarShowsTheAppNameExactlyOnce` 钉住它。
 //
-// 红绿灯的位置不用让：顶栏已经把 `bar.Left` 让出来了，侧栏从它下面开始。
-func (s *Shell) viewSideBrand(c *ui.Context, st app.Settings) {
-	if st.SideMenuCollapsed {
-		// 折叠态只 72 宽：标记大一号、贴左边，紧挨着下面那一列单字。
-		ui.Text(c, "B").FontSize(scale.Font(c, 20)).Bold().TextColor(c.Theme().Text).
-			Padding(6, 0, 12, 0)
-		return
+// ⚠️ **折叠态只摆 logo，不摆名字**：侧栏折叠后是 72 像素
+// （`app.CollapsedSideMenuWidth`），而 24px 的「BiuGo」光文字就约 73 宽——
+// 摆不下。上游也是折叠态不摆名字（`{!isCollapsed && <span>Biu</span>}`）。
+//
+// # 字色：主色，但浅色下走 `ink.AccentOn`
+//
+// 上游那一行是 `text-primary`，也就是**原样的主色**。浅色下那个绿（`#1ed760`）
+// 压在白底上只有 1.9:1——品牌字是全应用最大的一行字之一，糊在那儿最扎眼。
+// `ink.AccentOn` 是我们自己的那一档（浅色下从**用户选的那个**主色算一个
+// ≥4.5:1 的变体，深色下原样不动），见 `widgets/ink`。
+func (s *Shell) viewSideBrand(c *ui.Context, collapsed bool) {
+	t := c.Theme()
+	row := ui.Row(c).Key("side-brand").Gap(8).AlignItems(ui.Center).
+		Padding(s.sideBrandTopPad(), 12, 12, 16)
+	if collapsed {
+		// 🔴 **折叠态必须把左右那两格内边距去掉**：侧栏折叠后是 72，而其中
+		// **9 像素是右缘那条把手和分隔线**（8 + 1）——内容区只剩 63。
+		// 16 + 40 + 12 = 68 > 63，于是品牌那一块**把侧栏撑宽了 5 像素**：
+		// 折叠后的侧栏变成 77，而折叠宽度是 72（`app.CollapsedSideMenuWidth`）。
+		// 症状是「拖窄了没折叠到 72」，而界面上看不出是哪一块多出来的。
+		//
+		// 去掉内边距之后 logo 是**居中**的（和折叠态那一列图标格一样），
+		// 上下对齐。
+		row = row.Padding(s.sideBrandTopPad(), 0, 12, 0).Justify(ui.Center)
 	}
-	ui.Text(c, "B").FontSize(scale.Font(c, 18)).Bold().Padding(8, 8, 12, 8)
+	row.Children(func() {
+		ui.Image(c, brandLogo()).Size(sideBrandLogo, sideBrandLogo)
+		if !collapsed {
+			ui.Text(c, appName).FontSize(scale.Font(c, sideBrandNameSize)).Bold().
+				TextColor(ink.AccentOn(t))
+		}
+	})
 }
 
-// viewSideFoot 是折叠按钮**下面**那一行完整应用名。
+// sideBrandTopPad 是品牌那一块的**上**内边距。
 //
-// （原来那行代码上方写着「应用名贴在折叠按钮上面」，而它其实画在按钮下面——
-// 注释与代码不符，这次一并改对。）
+// 上游是 12（`py-3`），而 **macOS 上还没全屏时是 32**（`pt-8`）——那一格是
+// 给红黄绿让开的：上游的侧栏从窗口最上头就开始（`layout/index.tsx` 的
+// `flex h-full`），红黄绿浮在它左上角，所以 logo 得往下挪一格。
 //
-// 它是侧栏里**唯一**写着应用名的地方，写的就是窗口标题（`shell.go` 的
-// `WindowOptions.Title`）那个名字：展开时从上往下扫一眼，名字在最下面，
-// 和窗口标题对得上。折叠态不画：72 宽摆不下（Biu 那边也没有这一行）。
-func (s *Shell) viewSideFoot(c *ui.Context, st app.Settings) {
-	if st.SideMenuCollapsed {
-		return
+// ⚠️ **我们这边的侧栏在顶栏下面**（`drawUnderlay` 是「顶栏 / 侧栏+内容区 /
+// 播放条」三层），红黄绿在**顶栏那一带**，够不着品牌——所以这 32 是**照上游
+// 抄下来的数**，不是这里非留不可的。票面明写「mac 非全屏时顶部留白照上游」，
+// 就照它来；要改的话是改布局（把侧栏挪成上游那种通栏），那是另一张票的事。
+func (s *Shell) sideBrandTopPad() float32 {
+	if runtime.GOOS == "darwin" && !s.fullScreen {
+		return 32
 	}
-	ui.Text(c, "BiuGo").FontSize(scale.Font(c, 11)).
-		TextColor(c.Theme().TextMuted).Padding(0, 8, 4, 8)
+	return 12
+}
+
+// brandLogo 是左上角那个 logo 的图：应用图标本身。
+//
+// ⚠️ **只做一次**：MyGo 的 `NewBitmap` 会把图转成一张纹理，而框架的文档明写
+// 「Create it once: converting an image is not free」——每帧建一张的话，
+// 侧栏每帧都多一笔分配，而这一帧本来该是零（界面层里这一处是常驻的）。
+//
+// 用的是 `AppIconShared`（进程内那一份只读图）而不是 `AppIcon`：托盘图标用的
+// 是同一份，两边不能各画各的。
+var (
+	brandLogoOnce sync.Once
+	brandLogoImg  *ui.Bitmap
+)
+
+// brandLogo 取那一张 40×40 的图。
+func brandLogo() *ui.Bitmap {
+	brandLogoOnce.Do(func() {
+		brandLogoImg = ui.NewBitmap(platform.AppIconShared(sideBrandLogo))
+	})
+	return brandLogoImg
 }
 
 // viewSideCollapse 是底下那个折叠开关。Biu 的 `RiArrowLeftDoubleLine` /
 // `RiArrowRightDoubleLine`（`side/index.tsx:171-173`）没有图标可用，
 // 这里用两个双尖括号，意思一样。
-func (s *Shell) viewSideCollapse(c *ui.Context, st app.Settings) {
-	collapsed := st.SideMenuCollapsed
+func (s *Shell) viewSideCollapse(c *ui.Context, st app.Settings, collapsed bool) {
 	label, tip := "«", "折叠侧栏"
 	if collapsed {
 		label, tip = "»", "展开侧栏"
@@ -270,9 +367,13 @@ func (s *Shell) viewSideCollapse(c *ui.Context, st app.Settings) {
 	// 「菜单行还有一圈描边」。给这一枚开特例要改的是那条不变量，而它守的是
 	// #123 那票的核心结论（侧栏菜单不该有描边药丸）——为了一枚按钮的两条线去
 	// 放宽它，代价大于收益。分界靠上面那条右缘的竖线和它自己的 hover。
+	//
+	// ⚠️ **翻的是设置里那个开关，不是这一帧画出来的那一档**：拖动的时候视觉档
+	// 可能和设置不一致（`sideCollapsedVisual`），而点这一枚要翻的永远是设置
+	// （上游的 `onToggleCollapsed` 也是这么写的）。
 	if flatButton(c, label).Label(tip).Height(sideCollapseHeight).Clicked() {
 		if _, err := s.app.UpdateSettings(func(cur *app.Settings) {
-			cur.SideMenuCollapsed = !collapsed
+			cur.SideMenuCollapsed = !st.SideMenuCollapsed
 		}); err != nil {
 			s.addToast("折叠状态存不住：" + err.Error())
 		}
@@ -281,12 +382,16 @@ func (s *Shell) viewSideCollapse(c *ui.Context, st app.Settings) {
 
 // viewSideMenu 是默认菜单那一组（Biu 的 SD-04）。
 //
-// 折叠后只摆每个标题的第一个字：Biu 折叠态摆的是图标
-// （`default-menu/index.tsx` 的 `collapsed`）。⚠️ **那一档还没换**：图标资源里
-// 已经有清单 / 网格 / 本地音乐 / 下载记录 / 设置那几枚（见 `icons.go`），而
-// **每一项该配哪一枚要对着 Biu 逐条抄**——七项抄错一处，折叠态就会有一项
-// 配错意思，而那个 72 宽的方块里只有一枚图标，没有字可以让用户对照着认出来。
-// 摆全名会被裁成半个字，比一个字更认不出来。
+// 每一项前面有一枚 18 的线框图标，**选中那一项换成实心的那一枚**（上游
+// `biu/src/common/constants/menus.tsx` 的 `icon` / `activeIcon`）。图标配在
+// 路由表里（`router.go` 的 `Route.Icon` / `Route.ActiveIcon`），不在这里写死。
+//
+// ## 折叠态：整个按钮就是那个 40×40 的图标格
+//
+// 上游折叠态那一项摆的是一个 `h-10 w-10` 的 Avatar，图标是它的 fallback
+// （`menu-item.tsx` 的 `collapsed` 那一支）。我们照着摆成一个 40×40 的图标格
+// ——**不再是一个汉字**：原来那一档摆的是每个标题的第一个字（「下」「本」「推」
+// 「设」），而那个 72 宽的方块里只有一枚图标时，没有字可以让用户对照着认出来。
 //
 // ## 未登录时那三个入口不摆，摆一句「登录后可见」
 //
@@ -297,9 +402,8 @@ func (s *Shell) viewSideCollapse(c *ui.Context, st app.Settings) {
 // ⚠️ **那句提示不许写出那三个名字**：写出来的话「未登录时侧栏里没有这三个词」
 // 就成了一句永远不成立的话，而它正是这一条验收的全部（判据是画面上**找不到**
 // 那三个词，而提示和它们在同一个侧栏里）。
-func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
+func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings, collapsed bool) {
 	cur := s.router.Path()
-	collapsed := st.SideMenuCollapsed
 	loggedIn := s.app.LoggedIn()
 	hidden := 0
 
@@ -317,43 +421,13 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 				hidden++
 				continue
 			}
-			label := rt.Title
-			if collapsed {
-				label = firstRune(rt.Title)
-			}
 			// 顺序是 Biu 的 SD-04 定的，所以行 key 用路由而不是序号：
 			// 以后菜单项按 hiddenMenuKeys 过滤、顺序会变，序号就不再稳定了。
 			//
 			// ⚠️ **展开态别给 Button 补 `Label(rt.Title)`**：可见的字就是名字，
 			// 补上去会多出一个同样文字的无障碍节点，画面上出现两份。
 			ui.Column(c).Key("side-item:" + rt.Match).Children(func() {
-				item := flatButton(c, label).Grow(1)
-				// 折叠态只有一个字，鼠标停在上面要说清它是什么（见 sideItemTip）。
-				//
-				// ⚠️ **只在折叠态给**：展开时名字本来就画在那儿，再来一句提示
-				// 是把用户已经读到的东西又说一遍。
-				//
-				// 🔴 **折叠态还必须给一个无障碍的名字**：可见的字只有「下」「本」
-				// 「推」「设」一个字，读屏软件念出来就是那一个字——这一格等于
-				// 完全没有名字。`Label` 补上的是**名字**（`Element.Label`），
-				// **画面上不多画一个字**（折叠态画面上本来就没有那个全名）。
-				//
-				// `Description` 也补上：框架的 `Element.Tooltip` 会写它
-				// （`mygo/ui/tooltip.go` 的 `if e.description == "" {…}`），
-				// 而 `ui.TooltipBase` 不写——而框架的文档明说「assistive
-				// technology sees it as a tooltip, **which it does not read**」，
-				// 所以提示里那句话得由名字 / 描述带到读屏软件那儿。
-				if collapsed {
-					item = item.Label(rt.Title).Description(rt.Title)
-					s.sideItemTip(c, item, rt.Title)
-				}
-				// 选中那一层照上游 HeroUI 的 `variant="flat"` + `color="primary"`
-				// （`components/menu/menu-item.tsx:83-84`）：主色很淡的一层底 +
-				// 主色的字。**不是实心主色**——原来那一版 `Background(t.Accent)`
-				// 就是调研点名的「选中整条刷实心绿」（报告 §2 基线 B 标注 3）。
-				if rt.Match == cur {
-					item = flatCurrent(c, item)
-				}
+				item := s.sideMenuItem(c, rt, rt.Match == cur, collapsed)
 				if item.Clicked() {
 					s.navigate(rt.Match)
 				}
@@ -365,6 +439,53 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 			s.viewLoggedOutHint(c, hidden)
 		}
 	})
+}
+
+// sideMenuItem 是侧栏菜单里的一项。
+//
+// selected 是「当前就在这一页」——它换的是**图标那一枚**（实心）和**底色**
+// （上游 HeroUI 的 `variant="flat"` + `color="primary"`，见 flatCurrent）。
+//
+// # 展开态：图标在 40×40 的格子里，名字在格子右边
+//
+// 整行 40 高（上游 HeroUI 的 Button md），内容**左对齐**（上游的
+// `justify-start`）——图标要成列，内容居中就没有列了。
+//
+// # 折叠态：整个按钮就是那一个 40×40 的格子
+//
+// ⚠️ **折叠态必须给一个无障碍的名字**：画面上只有一枚图标，读屏软件念出来是
+// 「图标」——这一格等于**完全没有名字**。`Label` 补上的是**名字**
+// （`Element.Label`），**画面上不多画一个字**（折叠态画面上本来就没有那个全名）。
+//
+// 悬停提示是 `sideItemTip` 给的（贴在那一项的**右边**，上游的
+// `placement="right"`）：折叠态那一格只有一个图标，得让人认出它是哪一项。
+func (s *Shell) sideMenuItem(c *ui.Context, rt Route, selected, collapsed bool) ui.Element {
+	name := rt.Icon
+	if selected {
+		name = rt.ActiveIcon
+	}
+
+	if collapsed {
+		// `AlignSelf(Center)`：格子是 40 宽，而侧栏折叠后是 72——不居中的话
+		// 它会贴在左边沿上（上游那一格也是居中的：Avatar 在 `justify-center`
+		// 的按钮里）。
+		item := flatIconCellButton(c, name, rt.Title, sideIconSize, sideIconCell).
+			AlignSelf(ui.Center)
+		s.sideItemTip(c, item, rt.Title)
+		if selected {
+			item = flatCurrent(c, item)
+		}
+		return item
+	}
+	item := flatIconLabelButton(c, name, rt.Title, sideIconSize, sideIconCell)
+	// 选中那一层照上游 HeroUI 的 `variant="flat"` + `color="primary"`
+	// （`components/menu/menu-item.tsx:83-84`）：主色很淡的一层底 +
+	// 主色的字。**不是实心主色**——原来那一版 `Background(t.Accent)`
+	// 就是调研点名的「选中整条刷实心绿」（报告 §2 基线 B 标注 3）。
+	if selected {
+		item = flatCurrent(c, item)
+	}
+	return item
 }
 
 // sideItemTip 是折叠态侧栏那一项的悬停提示。
@@ -412,14 +533,6 @@ func (s *Shell) viewLoggedOutHint(c *ui.Context, hidden int) {
 		ui.Text(c, loggedOutHint(hidden)).FontSize(scale.Font(c, 12)).Wrap().
 			TextColor(c.Theme().TextMuted).Padding(4, 8)
 	})
-}
-
-// firstRune 是一个标题折叠后摆出来的那一个字。
-func firstRune(s string) string {
-	for _, r := range s {
-		return string(r)
-	}
-	return ""
 }
 
 // collectionPath 是一个收藏夹在侧栏里点进去的路由。

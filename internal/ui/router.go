@@ -52,6 +52,18 @@ type Route struct {
 	// Empty 是这一页没有内容时说的话。**每一条都得填**：留空就是这一页画出
 	// 来一片白，那正是这一张要消掉的东西（见 empty.go）。
 	Empty emptyState
+	// Icon / ActiveIcon 是这一项在**侧栏菜单**里配的那两枚图标（RemixIcon 的
+	// 「分类/文件名」，见 `icons.go`）：平时画 Icon，**选中那一项换 ActiveIcon**
+	// 那一枚实心的。
+	//
+	// ⚠️ **只有 `InMenu` 的那几条要填**：别的路由不进侧栏菜单，配了也画不出来。
+	// 而进菜单的那几条**都得填**——漏一条，那一项在侧栏里就**一个图标都没有**，
+	// 而画面上只是「那一项比别人少点东西」，不会报错（票 #164 的验收第一条）。
+	//
+	// 上游那六项逐字照抄 `biu/src/common/constants/menus.tsx` 的 `icon` /
+	// `activeIcon`；「设置」是我们自己多摆的那一项（上游设置在头像下拉里），
+	// 配的是设置那一枚。
+	Icon, ActiveIcon string
 }
 
 // routes 是那 14 条。**InMenu 的七条**，顺序就是侧栏菜单从上到下的顺序：前六条
@@ -80,7 +92,7 @@ var routes = []Route{
 	// 一个重试，见 empty.go 那段「为什么它不能是 viewEmpty 的一个空状态」）。
 	// 两件事在界面上必须是两句话——用户读到「暂无内容」会以为 B 站没有推荐
 	// 给他，于是永远不会去按那个本该在那儿的重试。
-	{Match: "/", Title: "推荐音乐", InMenu: true, Empty: emptyState{
+	{Match: "/", Title: "推荐音乐", InMenu: true, Icon: iconMenuRecommend, ActiveIcon: iconMenuRecommendOn, Empty: emptyState{
 		Title: "暂无内容",
 		Hint:  "先在顶栏「打开文件」放几首进来，或者搜一首歌",
 		Icon:  iconEmptyMusic,
@@ -95,7 +107,7 @@ var routes = []Route{
 	// ⚠️ **「还没登录」不是这一句**，是 follow.go 里的 `followNotLoggedIn`：没登录
 	// 时那个接口一律回 -101，而说成「还没关注任何人」的话用户登录完发现还是空的，
 	// 会以为是登录坏了。两句话必须分开（见 follow.go 文件头）。
-	{Match: followPath, Title: "我的关注", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Empty: emptyState{
+	{Match: followPath, Title: "我的关注", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Icon: iconMenuFollow, ActiveIcon: iconMenuFollowOn, Empty: emptyState{
 		Title: "暂无内容",
 		Hint:  "登录之后点「关注」关注的 UP 主会出现在这里",
 		Icon:  iconEmptyGroup,
@@ -109,24 +121,24 @@ var routes = []Route{
 	//
 	// 上游：稍后再看 `pages/later/index.tsx:236`，历史记录
 	// `pages/history/index.tsx:284`。
-	{Match: laterPath, Title: "稍后再看", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Empty: emptyState{
+	{Match: laterPath, Title: "稍后再看", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Icon: iconMenuLater, ActiveIcon: iconMenuLaterOn, Empty: emptyState{
 		Title: "暂无稍后再看内容",
 		Hint:  "登录之后在歌上点「稍后再看」，加进来的会出现在这里",
 		Icon:  iconEmptyLater,
 	}},
-	{Match: historyPath, Title: "历史记录", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Empty: emptyState{
+	{Match: historyPath, Title: "历史记录", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Icon: iconMenuHistory, ActiveIcon: iconMenuHistoryOn, Empty: emptyState{
 		Title: "暂无历史记录",
 		Hint:  "登录之后听过的歌会出现在这里，也可以「清空历史记录」",
 		Icon:  iconEmptyHistory,
 	}},
 	// 上游：`pages/local-music/index.tsx:263`。
-	{Match: "/local-music", Title: "本地音乐", InMenu: true, Empty: emptyState{
+	{Match: "/local-music", Title: "本地音乐", InMenu: true, Icon: iconMenuLocal, ActiveIcon: iconMenuLocalOn, Empty: emptyState{
 		Title: "暂无内容",
 		Hint:  "用顶栏的「打开文件」把本地音乐加进来",
 		Icon:  iconEmptyDisk,
 	}},
 	// 「没有下载记录」，文案在 empty.go 的 noDownloads（上游出处也写在那儿）。
-	{Match: "/download-list", Title: "下载记录", InMenu: true, Empty: noDownloads},
+	{Match: "/download-list", Title: "下载记录", InMenu: true, Icon: iconMenuDownload, ActiveIcon: iconMenuDownloadOn, Empty: noDownloads},
 	// 设置页在上游不是一张内容页，是一长串表单，**没有空状态可抄**——而这一页
 	// 也不是空页面：settings_page.go 已经把设置页本身接进 builtPage 了（主题、
 	// 圆角、窗口关闭三项）。所以这一条**不填 Empty**：填了就是一句没人会看到的
@@ -137,7 +149,7 @@ var routes = []Route{
 	//
 	// 另外 Biu 把设置放在头像下拉里（N-08），这里先挂侧栏底部，等头像那块
 	// 做出来再挪回去。
-	{Match: "/settings", Title: "设置", InMenu: true},
+	{Match: "/settings", Title: "设置", InMenu: true, Icon: iconMenuSettings, ActiveIcon: iconMenuSettingsOn},
 	// 搜索页有搜索框和两个空状态（searchpage.go），所以**不填 Empty**：填了就是
 	// 一句没人会看到的话，那一页根本走不到空状态那一支。
 	{Match: "/search", Title: "搜索"},

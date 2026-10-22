@@ -656,7 +656,7 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 
 		// 同上面那一条：提示不跟着顶栏一起藏起来，所以这里不给 `Tooltip`。
 		gear := iconButton(c, iconSettings, "全屏设置", 22).
-			Size(iconHit, iconHit).Padding(0, 3).
+			Size(iconHit, iconHit).Padding(0, 5).
 			TextColor(on)
 		if gear.Clicked() {
 			s.full.settings = !s.full.settings
@@ -850,7 +850,7 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 				})
 				// 同一处：队列开关的提示也走 tooltip.go。
 				if s.withTip(c, iconButton(c, iconQueue, "播放列表", iconMd).
-					Size(iconHitMd, iconHitMd).Padding(0, 5), drawerTip(s.drawerOpen)).Clicked() {
+					Size(iconHitMd, iconHitMd).Padding(0, 7), drawerTip(s.drawerOpen)).Clicked() {
 					s.drawerOpen = !s.drawerOpen
 				}
 			})

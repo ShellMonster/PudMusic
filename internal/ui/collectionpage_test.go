@@ -1015,7 +1015,7 @@ func TestTheCollectionHeaderShowsTheCreatorAvatar(t *testing.T) {
 // 这是票 #175 的验收项：**搜索是会展开的按钮**（现在是一个常驻 180 的输入框）。
 // 三条判据，缺一条都不算：
 //
-//   - 刚进来那一下是一枚 28 的图标键，不是输入框；
+//   - 刚进来那一下是一枚 32 的图标键（`iconHitMd`），不是输入框；
 //   - 点开之后是一个 40 高的输入框，而且**焦点已经在里面**（用户点放大镜就是
 //     为了打字）；
 //   - 点别的控件之后它收回去（上游的 `useClickAway`）。
@@ -1027,9 +1027,9 @@ func TestTheCollectionSearchIsACollapsedButton(t *testing.T) {
 	if !ok {
 		t.Fatalf("找不到搜索，文字有 %q", tt.Texts())
 	}
-	if r.W > 30 || r.H > 30 {
-		t.Errorf("搜索刚进来就是 %.0f×%.0f——那是一枚图标键，不该是一个常驻输入框",
-			r.W, r.H)
+	if r.W > iconHitMd+2 || r.H > iconHitMd+2 {
+		t.Errorf("搜索刚进来就是 %.0f×%.0f——那是一枚图标键（%d 见方），"+
+			"不该是一个常驻输入框", r.W, r.H, iconHitMd)
 	}
 
 	tt.SetFocused(true)
@@ -1042,7 +1042,7 @@ func TestTheCollectionSearchIsACollapsedButton(t *testing.T) {
 	if !ok {
 		t.Fatalf("点开之后搜索不见了，文字有 %q", tt.Texts())
 	}
-	if r.W <= 30 {
+	if r.W <= iconHitMd+2 {
 		t.Fatalf("点开之后还是 %.0f 宽——搜索没有展开", r.W)
 	}
 	if r.H < 39 || r.H > 41 {
@@ -1062,7 +1062,7 @@ func TestTheCollectionSearchIsACollapsedButton(t *testing.T) {
 	if !ok {
 		t.Fatalf("收回之后搜索不见了，文字有 %q", tt.Texts())
 	}
-	if r.W > 30 {
+	if r.W > iconHitMd+2 {
 		t.Errorf("点了别处之后搜索还是 %.0f 宽——它没有收回去", r.W)
 	}
 }

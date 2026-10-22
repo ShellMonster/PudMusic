@@ -61,11 +61,11 @@ func favMenuItems(g app.FavoriteGroup) []favMenuAction {
 // 顶上那一行「正在刷新收藏夹…」是头像下拉里「刷新数据」那一项的在飞状态
 // （见 viewFavoritesRefreshing）。它排在两组**外面**而不是某一组底下：刷的是
 // 这一片，不是其中一组——摆在某一组底下的话，另一组会像是也在动。
-func (s *Shell) viewFavorites(c *ui.Context, st app.Settings) {
+func (s *Shell) viewFavorites(c *ui.Context, st app.Settings, collapsed bool) {
 	hidden := hiddenMenuKeys(st)
-	s.viewFavoritesRefreshing(c, st)
+	s.viewFavoritesRefreshing(c, st, collapsed)
 	for g := range favGroups {
-		s.viewFavoriteGroup(c, st, app.FavoriteGroup(g), hidden)
+		s.viewFavoriteGroup(c, st, app.FavoriteGroup(g), hidden, collapsed)
 	}
 }
 
@@ -81,8 +81,8 @@ const refreshLine = "正在刷新收藏夹…"
 // 折叠态不画，理由同 viewLoggedOutHint：72 宽摆不下，而且整个收藏夹那一块
 // 在折叠态压根不画（`viewFavoriteGroup` 第一行就 return 了）——单独留一句悬在
 // 空侧栏里，用户会以为收藏夹跑到别处去了。
-func (s *Shell) viewFavoritesRefreshing(c *ui.Context, st app.Settings) {
-	if st.SideMenuCollapsed || !s.app.FavoritesRefreshing() {
+func (s *Shell) viewFavoritesRefreshing(c *ui.Context, st app.Settings, collapsed bool) {
+	if collapsed || !s.app.FavoritesRefreshing() {
 		return
 	}
 	ui.Text(c, refreshLine).FontSize(scale.Font(c, 12)).
@@ -94,8 +94,8 @@ func (s *Shell) viewFavoritesRefreshing(c *ui.Context, st app.Settings) {
 // 折叠态只画标题，和 Biu 一样（`collection/index.tsx:432-434`）。顺带把
 // 折叠态下的拖拽也一起禁掉了——列表根本没建，「禁用」是自然发生的，
 // 不需要另写一条分支（SD-09 要的就是这个结果）。
-func (s *Shell) viewFavoriteGroup(c *ui.Context, st app.Settings, g app.FavoriteGroup, hidden map[string]bool) {
-	if st.SideMenuCollapsed {
+func (s *Shell) viewFavoriteGroup(c *ui.Context, st app.Settings, g app.FavoriteGroup, hidden map[string]bool, collapsed bool) {
+	if collapsed {
 		// 折叠态是 72 宽，只摆得下图标。Biu 摆的是图标，而**这一档还没换**：
 		// 收藏夹有几组、每组画哪一枚要对着 Biu 逐条抄，抄错一处那一格就
 		// 配错意思（72 宽里只有一枚图标，没有字可以对照着认）。摆一列字会被

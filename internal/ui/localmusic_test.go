@@ -473,8 +473,9 @@ func TestTheLocalSearchIsACollapsedButton(t *testing.T) {
 	if !ok {
 		t.Fatalf("找不到搜索，文字有 %q", tt.Texts())
 	}
-	if r.W > 30 || r.H > 30 {
-		t.Errorf("搜索刚进来就是 %.0f×%.0f——它该是一枚图标键", r.W, r.H)
+	if r.W > iconHitMd+2 || r.H > iconHitMd+2 {
+		t.Errorf("搜索刚进来就是 %.0f×%.0f——它该是一枚图标键（%d 见方）",
+			r.W, r.H, iconHitMd)
 	}
 	if err := tt.Click(searchLocalLabel); err != nil {
 		t.Fatalf("点不开搜索：%v", err)
@@ -484,7 +485,7 @@ func TestTheLocalSearchIsACollapsedButton(t *testing.T) {
 	if !ok {
 		t.Fatalf("点开之后搜索不见了，文字有 %q", tt.Texts())
 	}
-	if r.W <= 30 {
+	if r.W <= iconHitMd+2 {
 		t.Fatalf("点开之后还是 %.0f 宽——搜索没有展开", r.W)
 	}
 }

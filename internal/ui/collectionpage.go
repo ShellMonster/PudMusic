@@ -716,7 +716,7 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 			// 上游是一枚 `size="md" variant="flat"` 的图标键
 			// （`operation/index.tsx:44`，tooltip「添加到播放列表」）。
 			if s.withTip(c, flatIconButton(c, iconEnqueue, "添加到播放列表", iconMd).
-				Size(iconHitMd, iconHitMd).Padding(0, 5), "添加到播放列表").Clicked() {
+				Size(iconHitMd, iconHitMd).Padding(0, 7), "添加到播放列表").Clicked() {
 				s.addWholeCollectionToQueue(p)
 			}
 			s.viewCollectionStar(c, p)
@@ -764,7 +764,7 @@ func (s *Shell) viewCollectionStar(c *ui.Context, p *collectionPage) {
 		tip = "取消收藏"
 	}
 	if s.withTip(c, flatIconButton(c, favIcon(info.Faved), tip, iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 5), tip).Clicked() {
+		Size(iconHitMd, iconHitMd).Padding(0, 7), tip).Clicked() {
 		s.setCollectionFav(p, !info.Faved)
 	}
 }
@@ -786,7 +786,7 @@ func (s *Shell) viewCollectionMore(c *ui.Context, p *collectionPage) {
 	// `ButtonBase` 拼的），所以扁平配方接得上——`ui.MenuButton` 那一版会自己
 	// 画一圈描边和一枚 ▾，放在这一排新扁平的三枚旁边就它一个不是。
 	s.withTip(c, flatIconButton(c, iconMore, "更多操作", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 5), "更多").
+		Size(iconHitMd, iconHitMd).Padding(0, 7), "更多").
 		Menu(func(m *ui.Menu) {
 			for _, item := range items {
 				if m.Item(item.label).Chosen() {

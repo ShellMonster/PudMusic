@@ -64,6 +64,28 @@ func flatIconButton(c *ui.Context, name, label string, font float32) ui.Element 
 	return flat.IconButton(c, icon(name), label, font)
 }
 
+// flatIconLabelButton 是一个「图标 + 文字」的扁平按钮：图标在一个 cell×cell 的
+// 格子里，文字在格子右边，内容**左对齐**。
+//
+// 侧栏菜单项是它（上游 HeroUI 的 Button md：左边 `startContent` 是 18 的图标，
+// 右边是名字，整行 40 高）。
+//
+// ⚠️ **别给它补 `Label(label)`**：可见的字就是它的无障碍名字（同 flatButton）。
+func flatIconLabelButton(c *ui.Context, name, label string, font, cell float32) ui.Element {
+	return flat.IconLabelButton(c, icon(name), label, font, cell)
+}
+
+// flatIconCellButton 是一个**只有图标格**的扁平按钮：整个按钮就是那一个
+// cell×cell 的格子，图标在它中间。
+//
+// 侧栏折叠态那一列是它（上游折叠态摆的是一个 `h-10 w-10` 的图标格）。
+//
+// 🔴 **label 不许省**，理由和 `icons.go` 的 `iconButton` 一字不差：图标对辅助技术
+// 不可见，而这个按钮再没有字可念。它同时也是无头 Tester 认得这个按钮的唯一凭据。
+func flatIconCellButton(c *ui.Context, name, label string, font, cell float32) ui.Element {
+	return flat.IconCellButton(c, icon(name), label, font, cell)
+}
+
 // flatCurrent 是「这一项正选中」的那一层：一块中性的底，深色下再把字染成主色。
 //
 // 原来我们侧栏那一行刷的是**实心主色**（`sidebar.go` 的 `Background(t.Accent)`），

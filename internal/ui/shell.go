@@ -201,6 +201,16 @@ type Shell struct {
 	// 以弹）。见 `announceMigration`。
 	migrationAnnounced bool
 
+	// fullScreen 是主窗口此刻是不是全屏。
+	//
+	// ⚠️ **它由窗口的回调推过来，不在 view 里问**：`win.IsFullScreen()`
+	// 每帧问一次是跨一次 ObjC 调用（`mygo@v0.6.2/window.go:764` 的 `get`），
+	// 而答案在**进全屏那一刻**就定了——事件推过来既省事又准。
+	//
+	// 它只给侧栏那个品牌块用（macOS 非全屏时要多留一格，见 `sidebar.go` 的
+	// `sideBrandTopPad`）。只由界面线程读写（窗口回调都在主线程上）。
+	fullScreen bool
+
 	// scrub 是进度条的值（0..1），held 是指针有没有按在它上面。
 	// 两个都只由 view 读写——view 永远跑在主线程上。
 	scrub float64
@@ -931,6 +941,15 @@ func (s *Shell) Attach(w *mygo.Window) {
 	// 音乐页，也没有画 toast 的地方。
 	w.OnFileDrop(func(e *mygo.FileDropEvent) { s.handleFileDrop(e.Paths) })
 
+	// 进 / 出全屏：侧栏左上角那个品牌块在 macOS 非全屏时要多留一格（上游的
+	// `pt-8`，见 `sidebar.go` 的 `sideBrandTopPad`）。
+	//
+	// ⚠️ **改完要叫醒一帧**：这一格是画出来的，状态变了而画面没重画的话，
+	// 用户看到的还是进全屏之前的样子（而窗口在进全屏那一刻本来就会重画，
+	// 但**出**全屏那一帧不一定）。
+	w.OnEnterFullScreen(func() { s.fullScreen = true; s.wake.invalidate() })
+	w.OnLeaveFullScreen(func() { s.fullScreen = false; s.wake.invalidate() })
+
 	w.OnClose(func(e *mygo.CloseEvent) {
 		opt := s.app.SettingsSnapshot().CloseWindowOption
 		// 记一份：OnClosed 会把设置的挂载摘掉，之后再问就只剩默认值了（见
@@ -1067,6 +1086,17 @@ func (s *Shell) mountShortcuts() {
 	s.keys = newShortcutKeys(shortcutPath(dir))
 }
 
+// appName 是应用的名字。
+//
+// ⚠️ **只有这一处写着它**：窗口标题（`WindowOptions`）和侧栏左上角那个品牌字
+// （`sidebar.go` 的 `viewSideBrand`）写的是同一个名字——2026-10 从 `Biu MyGo`
+// 改名成 `BiuGo` 时分头改了两处，漏了一处，于是同一栏里两个产品名
+// （`sidebar_test.go` 的 `TestTheSidebarShowsTheAppNameExactlyOnce` 钉住它）。
+//
+// ⚠️ **这和 bundle id、钥匙串服务名、用户数据目录名是四件互不相干的事**
+// （见 AGENTS.md §5）：改显示名不许顺手动那三样。
+const appName = "BiuGo"
+
 // WindowOptions 是主窗口的样子。view 是这个窗口每帧要画的界面。
 //
 // ⚠️ macOS 上要的是**保留红绿灯的隐藏标题栏**，不是 `Frameless: true`——
@@ -1076,7 +1106,7 @@ func (s *Shell) mountShortcuts() {
 // `TitleBarHiddenInset` 只是把控件再往里缩一点，Biu 没做这个差别。
 func WindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 	return mygo.WindowOptions{
-		Title:     "BiuGo",
+		Title:     appName,
 		Width:     1200,
 		Height:    800,
 		MinWidth:  900,

@@ -53,6 +53,34 @@ import (
 // 命名成 Go 常量而不是到处写字符串：拼错一个分类在 map 里查不到时只会画出
 // 一格空白，而 `icons_test.go` 那一条会把每个名字都过一次 embed。
 const (
+	// ── 侧栏菜单 ──
+	//
+	// 每一项两枚：线框的那枚是平时画的，**选中那一项换成实心的那一枚**
+	// （上游 `biu/src/common/constants/menus.tsx` 的 `icon` / `activeIcon`）。
+	//
+	// ⚠️ **名字逐字照上游的 RemixIcon 文件名**，而上游那几枚是从
+	// `@remixicon/react` 引进来的：`RiDiscLine` → `Media/disc-line.svg`、
+	// `RiUserFollowLine` → `User & Faces/user-follow-line.svg`、
+	// `RiCalendarScheduleLine` → `Business/calendar-schedule-line.svg`、
+	// `RiHistoryLine` → `System/history-line.svg`、
+	// `RiFolderMusicLine` → `Document/folder-music-line.svg`、
+	// `RiFileDownloadLine` → `Document/file-download-line.svg`。
+	// 「设置」是我们自己多摆的那一项（上游设置在头像下拉里），配的是设置那一枚。
+	iconMenuRecommend   = "Media/disc-line.svg"                 // 推荐音乐
+	iconMenuRecommendOn = "Media/disc-fill.svg"                 // 推荐音乐（选中）
+	iconMenuFollow      = "User & Faces/user-follow-line.svg"   // 我的关注
+	iconMenuFollowOn    = "User & Faces/user-follow-fill.svg"   // 我的关注（选中）
+	iconMenuLater       = "Business/calendar-schedule-line.svg" // 稍后再看
+	iconMenuLaterOn     = "Business/calendar-schedule-fill.svg" // 稍后再看（选中）
+	iconMenuHistory     = "System/history-line.svg"             // 历史记录
+	iconMenuHistoryOn   = "System/history-fill.svg"             // 历史记录（选中）
+	iconMenuLocal       = "Document/folder-music-line.svg"      // 本地音乐
+	iconMenuLocalOn     = "Document/folder-music-fill.svg"      // 本地音乐（选中）
+	iconMenuDownload    = "Document/file-download-line.svg"     // 下载记录
+	iconMenuDownloadOn  = "Document/file-download-fill.svg"     // 下载记录（选中）
+	iconMenuSettings    = "System/settings-3-line.svg"          // 设置
+	iconMenuSettingsOn  = "System/settings-3-fill.svg"          // 设置（选中）
+
 	// ── 播放条 ──
 	iconPlay       = "Media/play-circle-fill.svg"   // 播放
 	iconPause      = "Media/pause-circle-fill.svg"  // 暂停
@@ -262,6 +290,15 @@ const (
 // 这一票补到与它相当（`TestTheIconSetIsNotSlimmerThanBiu` 钉的就是「不小于 105
 // 个**文件**」这一位）。注释里曾经写着 26，那是补之前的数。
 var iconNames = []string{
+	// 侧栏菜单
+	iconMenuRecommend, iconMenuRecommendOn,
+	iconMenuFollow, iconMenuFollowOn,
+	iconMenuLater, iconMenuLaterOn,
+	iconMenuHistory, iconMenuHistoryOn,
+	iconMenuLocal, iconMenuLocalOn,
+	iconMenuDownload, iconMenuDownloadOn,
+	iconMenuSettings, iconMenuSettingsOn,
+
 	// 播放条
 	iconPlay, iconPause, iconPrev, iconNext,
 	iconStar, iconStarFilled, iconDownload,
@@ -339,7 +376,7 @@ func icon(name string) *ui.SVG { return icons[name] }
 const (
 	// iconSm 是播放条**左边第二行**那几枚小键（分集 / 赞 / 收藏）的图标边长。
 	// Biu 的 `music-thumb` 用的是 18，我们那几枚挤在 88 高播放条的第二行，
-	// 留给它们 14 才是完整的一圈（28 的点击区里每边 7 的空白）。
+	// 留给它们 14 才是完整的一圈（32 的点击区里每边 9 的空白）。
 	//
 	// ⚠️ **「下载」不在这一档**：票 #127 把它搬到了播放条右边那一组，尺寸跟着
 	// 那一组走（`iconMd` / `iconHitMd`）。
@@ -364,15 +401,31 @@ const (
 // 按钮框、每边留白至少 3 像素、以及**图形之外的那一圈按得中**（它按的是播放键
 // 四条边内两像素处；点得中说明那一圈是真的能按，而不是画着好看）。
 const (
-	// iconHit 是小图标键（iconSm）的点击区边长：14 的图标 + 每边 7。
-	iconHit = 28
-	// iconHitMd 是中等图标键（iconMd）的点击区边长：18 + 每边 5。
-	iconHitMd = 28
+	// iconHit 是小图标键（iconSm）的点击区边长：14 的图标 + 每边 9。
+	//
+	// ⚠️ **32 是上游那一档**（G39）：HeroUI 的图标键（`isIconOnly`）不管
+	// `size` 是哪一档，盒子都是 `w-[2rem] h-[2rem]`——**32×32**。
+	// 我们原来是 28（图标 + 每边 7），比上游小了一档。
+	//
+	// ⚠️ **它是全局默认**：播放条、顶栏、队列抽屉头、收藏夹行尾、下载表那一列、
+	// 本地音乐工具条、满屏播放器的顶栏……全是从这两个数长出来的。改了它，
+	// **每一处图标键都跟着长 4 像素**——所以改之前量过「相邻控件有没有被挤重」
+	// （见 `playbar.go` 顶上那段宽度账：那一条还剩 100 多像素的余量）。
+	iconHit = 32
+	// iconHitMd 是中等图标键（iconMd）的点击区边长：18 + 每边 7。
+	//
+	// ⚠️ **它和 iconHit 是同一个数**（上游那一档不分大小：图标键的盒子恒是
+	// 32×32），而图标本身是 18——所以那圈留白是每边 7。
+	iconHitMd = 32
 	// iconHitPlay 是播放/暂停那一枚：48 的图标 + 每边 5。
 	//
 	// ⚠️ **它跟着 iconPlayBtn 一起长的**（30 → 48 的图标，点击区 40 → 58）：
 	// 点击区是「图标 + 每边 5 的内边距」，图标大了点击区就得跟着大，否则那圈
 	// 留白会被图标顶掉——图标画在按钮的中间，多出来的那一截会被裁掉。
+	//
+	// ⚠️ **它不跟上游的 32 走**：那一枚是 48 的图标，盒子恒是 32 的话图标
+	// 自己就装不下了（上游那一枚是 `size="md"` 的**实心**键，HeroUI 给它的是
+	// 40×40 的那一档，见 `DESIGN.md` 的「播放键 48」）。
 	iconHitPlay = 58
 )
 

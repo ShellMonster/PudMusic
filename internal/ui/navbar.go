@@ -93,7 +93,7 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// 走的是播放条「加歌」那一条路：多选的文件全都进队列，用它打开的歌
 		// 上一首/下一首才是亮的（直接调 app.Open 就进不了队列，见 pickAndEnqueue）。
 		if s.withTip(c, iconButton(c, iconFolder, "打开文件", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5), "打开本地音频文件").Clicked() {
+			Size(iconHitMd, iconHitMd).Padding(0, 7), "打开本地音频文件").Clicked() {
 			s.pickAndEnqueue()
 		}
 		//
@@ -118,7 +118,7 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// 忘了换（#134 的第七单元点名了这个）。文字没有消失：`Label` 和悬停提示
 		// 说的是同一件事，读屏软件和测试都还叫得出它。
 		if s.withTip(c, iconButton(c, iconPiP, "迷你", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5),
+			Size(iconHitMd, iconHitMd).Padding(0, 7),
 			"缩成 320×100 的小窗贴边悬浮，音乐不停").Clicked() {
 			s.toggleMiniPlayer()
 		}
@@ -130,7 +130,7 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// 侧栏里也有一条「设置」（那是我们自己多摆的，见 routes 表），顶栏这一枚
 		// 是给已经在别的页上、不想先回侧栏的人用的。
 		if s.withTip(c, iconButton(c, iconSettings, "设置", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5), "设置").Clicked() {
+			Size(iconHitMd, iconHitMd).Padding(0, 7), "设置").Clicked() {
 			s.navigate(settingsPath)
 		}
 		s.viewDynamicDot(c)
