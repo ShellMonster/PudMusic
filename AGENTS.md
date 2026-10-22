@@ -49,11 +49,22 @@ FAIL，逐个包看 `ok`。
 
   ```sh
   go build ./... && go vet ./... && go test ./...   # 默认一次
-  GOGC=10 go test ./internal/ui/ -count=3 -timeout 15m   # 改了界面行为才加
   ```
 
-  **只验自己改的那几处**时用 `-run` 过滤（比整包 10 次快 250 倍）：
-  `go test ./internal/ui/ -count=10 -run 'TestPlayBar|TestVolume'`。
+  **改了界面行为的票，加压复验只跑自己改的那几处**（`-run` 过滤），
+  **不要整包跑**——整包一轮在负载下就要 62~298 秒：
+
+  ```sh
+  GOGC=10 go test ./internal/ui/ -count=3 -timeout 5m -run 'TestPlayBar|TestVolume'
+  ```
+
+  ⚠️ **整包的 `GOGC=10` 扫描是「一次性排查手段」，不是每张票的验收项。**
+  它抓到的是**既有测试**的飘（`TestTheHoverLayerCoversOnlyTheCover`、
+  `TestEveryRouteShowsARealRowOrSaysWhichTicketIsMissing//follow` 那些），
+  和当票的代码无关。
+
+  ⚠️ **压出来别的票的飘红，不要顺手修。** 那是另一个问题，另开一张票；
+  顺手修会让这一票越滚越大、评审也说不清哪些是有意的。
 - **查布局问题先按 F12**，用框架自带的检查器：元素树、box model、帧耗时、取色器。
   **别先写测试再二分**——那样往往是在测一个猜错了的数，而界面上的位置、间距、
   颜色，检查器一眼就能量出来；量出来的数再写进断言，才是对着**画面**的断言。
