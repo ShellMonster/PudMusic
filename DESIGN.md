@@ -194,7 +194,7 @@ structural:
 
 ### 带影的那两张卡的底色
 
-**卡片的底色用 `t.Background`**，不用 `t.Surface`：
+**关注卡（这一票自己加的那张）底色用 `t.Background`**：
 
 - 上游那张卡是 HeroUI 的 `Card`，底色是 `bg-content1`，而 `content1` 的值是
   **#FFFFFF（浅）/ #18181b（深）**——**正好是我们 `t.Background` 的两个值**
@@ -202,9 +202,14 @@ structural:
 - 所以**深色下这张卡和页面底色几乎同色，靠那圈影分层**——这正是 §4 那条
   「不要用『比背景亮一级』的板」。`t.Surface`（深色下 #27272a）正好是那个
   「亮一级」的板。
-- **关注卡 hover 那一档用 `t.Surface`**：上游 `isHoverable` 是
+- **hover 那一档用 `t.Surface`**：上游 `isHoverable` 是
   `data-[hover=true]:bg-content2`，而 `content2` 是 **zinc[100] #f4f4f5（浅）/
   zinc[800] #27272a（深）**——也正好是 `t.Surface` 的两个值。
+
+⚠️ **下载表外面那张卡的底色是 #175 那一票定的**（`t.Surface`，那张卡是那一票加
+的）：本票只给它**加影**（上游那张 `Card` 的 `shadow="sm"`）。深色下它的底色比
+页面亮一整级，而上游那张卡是 `bg-content1`（≈ 页面底色）——**改底色是 #175/#172
+的裁决**，不在本票。
 
 ## 五、动效
 
