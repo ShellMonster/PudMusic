@@ -333,8 +333,22 @@ func (p *pagedRows) onPanic(rec any) {
 	p.invalidate()
 }
 
-// view 是真的画法，View 是它外面那道 recover。
-func (p *pagedRows) view(c *ui.Context) {
+// Sync 是这一份翻页列表每帧的**副作用**：登记唤醒句柄、收后台投回来的结果、
+// 起该起的那一拉。
+//
+// ⚠️ **它和 `view` 的分工**：收结果和起第一拉不能跟着画一起停——满屏播放器
+// 开着的时候底层那一页不画（票 #161），而这一份列表的结果一直落在信箱里没人
+// 取的话，用户关掉满屏看到的是「打开那一刻的样子」。
+//
+// ⚠️ **二重保障（②滚到底、③容器没填满）不在这里**：那两条都要用户先滚过去，
+// 而满屏开着的时候用户滚不动底下那一页。它们留在 `view` 里，跟着画一起停。
+//
+// ⚠️ **副作用**：它们要读 `ListState.Visible()`，而那一句会置框架的 `read` 标志
+// （`mygo/ui/list.go:225`）——不读它，框架就不会因为「可见区变了」自动补那一帧
+// （`mygo/ui/list.go:1394-1400`）。满屏期间那一帧本来就是白补（画的是满屏），
+// 而恢复之后的第一帧 `Visible()` 报的还是满屏之前的旧行号，「末尾还在画面外」
+// 那个判断会晚一帧才成立。
+func (p *pagedRows) Sync(c *ui.Context) {
 	// 🔴 铁律三：把这一帧的窗口登记进去。后台投递完结果要靠它叫醒界面，不唤醒就是
 	// 「结果到了、画面停在旧帧」（实测 0 帧刷新）。
 	p.setWake(c.Services())
@@ -347,6 +361,11 @@ func (p *pagedRows) view(c *ui.Context) {
 	if p.page == 0 {
 		p.load(trigFirstRender)
 	}
+}
+
+// view 是真的画法，View 是它外面那道 recover。
+func (p *pagedRows) view(c *ui.Context) {
+	p.Sync(c)
 
 	if p.isGrid() {
 		p.drawGrid(c)

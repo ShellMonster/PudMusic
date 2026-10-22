@@ -192,6 +192,28 @@ func (s *Shell) viewHome(c *ui.Context, _ *ui.Route) {
 	s.home.view(c, s)
 }
 
+// syncHome 是首页每帧的副作用：收后台投回来的结果、起该起的那一拉、装上设置里
+// 那个「数据显示样式」。
+//
+// ⚠️ **它们原来在 `homePage.view` 的最开头**，而首页在满屏开着的时候不画
+// （票 #161）——不挪的话，用户在满屏里看频谱的那几分钟里，首页的后台结果一直
+// 落在信箱里没人取，关掉满屏之后要再等一趟才补上。
+func (s *Shell) syncHome(c *ui.Context) {
+	h := s.home
+	// 先收后台投回来的结果，再发该发的那一摊（画之前发：画完再发的话那一帧画
+	// 的是「正在加载」，要等这一页回来才换掉）。
+	h.adopt()
+	h.pull()
+
+	// 🔴 设置里的「数据显示样式」在**画之前**装给这一屏的三个列表：忘了这一句的
+	// 症状是「设置改了、首页没变」——而首页是用户打开应用看到的第一页，最先发现
+	// 「这个设置没用」的就是这儿。
+	view := s.displayView()
+	for _, l := range h.lists {
+		l.SetView(view)
+	}
+}
+
 // view 画首页的内容。
 //
 // 摆法是「一列三块」：Tab 那一排 →（只在流行上）新歌速递 → 选中那一屏的列表。
@@ -204,18 +226,11 @@ func (s *Shell) viewHome(c *ui.Context, _ *ui.Route) {
 // 两句的规矩见 homepage_feed.go 的文件头。
 //
 // s 是拿来画这一页的空状态和失败状态的（`viewEmpty` / `viewLoadError`）。
+//
+// ⚠️ **取数不在这里**（`adopt` / `pull` / 装「数据显示样式」那三样）：它们挪到
+// `syncHome` 那一层了（票 #161）——满屏开着的时候这一页不画，而那三样是「每帧
+// 都要跑」的副作用，停在画的那一半里就等于停更。
 func (h *homePage) view(c *ui.Context, s *Shell) {
-	h.adopt()
-	h.pull()
-
-	// 🔴 设置里的「数据显示样式」在**画之前**装给这一屏的三个列表：忘了这一句的
-	// 症状是「设置改了、首页没变」——而首页是用户打开应用看到的第一页，最先发现
-	// 「这个设置没用」的就是这儿。
-	view := s.displayView()
-	for _, l := range h.lists {
-		l.SetView(view)
-	}
-
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
 	ui.Column(c).Key("page:"+homePath).Grow(1).Padding(0, pagePadX).Gap(12).
 		AlignItems(ui.Stretch).Children(func() {

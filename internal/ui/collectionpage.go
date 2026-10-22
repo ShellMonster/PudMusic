@@ -400,7 +400,6 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 	}
 
 	p := s.collectionFor(ref)
-	s.flushCollectionNotice(p)
 	info := s.app.Collection(ref)
 
 	// ⚠️ **横向那一格在**根**上，不在下面那几块里**：这一页原来是头图区、操作条
@@ -466,6 +465,43 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 	s.viewCollectionConfirm(c, p)
 }
 
+// syncCollection 是收藏夹 / 合集 / 系列这一页每帧的副作用：收「刚才那个容器真的
+// 删掉了」那一趟、把后台攒下的话发成 Toast、收列表的后台结果、起该起的那一拉。
+//
+// ⚠️ **它们原来在 `viewCollection` 的开头**，而这一页在满屏开着的时候不画
+// （票 #161）——不挪的话，用户在满屏里看频谱的那几分钟里，列表的后台结果一直
+// 躺在信箱里没人取，关掉满屏之后那一页还是「正在加载」。
+//
+// ⚠️ **换排序 / 换关键词那两条不在这里**：它们要读这一帧刚建出来的下拉和输入框
+// （`viewCollectionSort` / `viewCollectionSearch`），而满屏开着的时候用户碰不到
+// 它们。
+func (s *Shell) syncCollection(c *ui.Context) {
+	// 「刚才那个收藏夹真的删掉了，所以该走开了」——**消费在界面线程的这一帧**。
+	s.takeLeave()
+
+	ref := collectionRefOfPath(s.router.Path(), s.router.Query(collectionTypeQuery))
+	if !s.app.CollectionsMounted() {
+		return
+	}
+	p := s.collectionFor(ref)
+
+	// ⚠️ **满屏开着的时候这一页不画 → 那个 500ms 的防抖钟没人推进**：不清它的话
+	// `syncSearchWatch` 会一直判「该醒着」，每 125ms 叫醒一次窗口，而那一帧画的是
+	// 满屏（白醒）。理由和 `syncLibraryPage` 那一处一字不差。
+	if s.underlayHidden() {
+		p.pendingSince = time.Time{}
+	}
+
+	// 后台攒下的话发成 Toast（取走而不是读）。
+	s.flushCollectionNotice(p)
+
+	// 🔴 设置里的「数据显示样式」在这一帧生效（理由同搜索页那一处）。
+	p.list.SetView(s.displayView())
+
+	// 收后台投回来的结果、起该起的那一拉。
+	p.list.Sync(c)
+}
+
 // flushCollectionNotice 把后台攒下的话发成 Toast。
 //
 // **每帧开头调一次，而且取走**：取过就不会再说第二遍，不取的话同一句会在
@@ -495,14 +531,22 @@ func (s *Shell) flushCollectionNotice(p *collectionPage) {
 // id 读不出来（不是数字）时是 0，接口会回 -400，界面上是一句
 // 「打不开这个收藏夹」——比画一张空白页好。
 func collectionRefOf(r *ui.Route) app.CollectionRef {
+	return collectionRefOfPath(r.Path(), r.Query(collectionTypeQuery))
+}
+
+// collectionRefOfPath 从路径和查询串上读出是哪个容器。
+//
+// ⚠️ **它和 `collectionRefOf` 是同一件事的两条路**：画的时候问路由，而每帧的
+// 副作用那一层手上只有一条路径和一个查询串。
+func collectionRefOfPath(path, query string) app.CollectionRef {
 	id := int64(0)
-	if rest, ok := strings.CutPrefix(r.Path(), collectionPathPrefix); ok {
+	if rest, ok := strings.CutPrefix(path, collectionPathPrefix); ok {
 		// 后半截（真有了「合集里的某一集」那种子路径时）不参与识别：
 		// 那一段是哪一条由下一页自己读，这里认的是容器本身。
 		head, _, _ := strings.Cut(rest, "/")
 		id, _ = strconv.ParseInt(head, 10, 64)
 	}
-	return app.CollectionRef{ID: id, Type: bili.ParseCollectionType(r.Query(collectionTypeQuery))}
+	return app.CollectionRef{ID: id, Type: bili.ParseCollectionType(query)}
 }
 
 // ── 头图区 ─────────────────────────────────────────────────────────────────

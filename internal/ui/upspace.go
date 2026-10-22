@@ -33,6 +33,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -101,6 +102,18 @@ func parseMid(s string) (int64, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// upSpaceMidOf 从路径里认出 UP 主的编号。
+//
+// ⚠️ **它和 `r.Param("id")` 是同一件事的两条路**：画的时候问路由（那一行是
+// 路由自己认出来的），而每帧的副作用那一层手上只有一条路径。
+func upSpaceMidOf(path string) (int64, bool) {
+	rest, ok := strings.CutPrefix(path, upPathPrefix)
+	if !ok {
+		return 0, false
+	}
+	return parseMid(rest)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -359,6 +372,42 @@ func (s *Shell) viewUpSpace(c *ui.Context, r *ui.Route) {
 
 	sp := s.upSpaceFor(mid)
 
+	// ⚠️ **收结果和起头图那一拉挪到 `syncUpSpace` 那一层了**（票 #161）：满屏
+	// 开着的时候这一页不画，而头图和列表的后台结果不能跟着一起停。
+	h := sp.header.Snapshot()
+
+	// ⚠️ **切 Tab 什么都不重置**——这是 PLAN 阶段 5 的一条验收（「切 Tab 的
+	// 滚动位置恢复与 Biu 一致」），也是 Biu 那边本来的行为（上游那四张 Tab
+	// 各自是独立的组件，状态各自留着）。
+	//
+	// 特别是**不要在这里 reload**：reload 会把闸门清成「第一页」，而已经
+	// 拿到的行还在 `dynItems` 里，于是下一次拉回来的是**同一页**，被直接
+	// 追加在后面——两个一模一样的行身份，框架按 key 对位时那几行共用一份
+	// 状态（Tester 里当场 panic，真窗口里选中一个另一个也亮）。
+	// 翻回一张 Tab 只会问「还要不要下一页」，而 `started` 为真时答案是否。
+
+	ui.Column(c).Key("page:" + upPath).Grow(1).FillHeight().Children(func() {
+		s.viewSpaceHeader(c, sp, h)
+		s.viewSpaceTabs(c, sp)
+		ui.Row(c).Key("space-body").Grow(1).FillHeight().Children(func() {
+			s.viewSpaceTab(c, sp)
+		})
+	})
+}
+
+// syncUpSpace 是 UP 主空间这一页每帧的副作用：收后台投回来的结果、起头图那一
+// 拉、起「投稿」那一张 Tab 的列表、起另外三张 Tab 的首屏那一拉。
+//
+// ⚠️ **它们原来在 `viewUpSpace` 和那几张 Tab 的 view 里**，而这一页在满屏开着
+// 的时候不画（票 #161）——不挪的话，用户在满屏里看频谱的那几分钟里，头图和
+// 列表的后台结果一直躺在信箱里没人取。
+func (s *Shell) syncUpSpace(c *ui.Context) {
+	mid, ok := upSpaceMidOf(s.router.Path())
+	if !ok {
+		return
+	}
+	sp := s.upSpaceFor(mid)
+
 	// 先收后台投回来的结果，再画：这样这一帧画的就是已经加上/换掉的那几行，
 	// 不用等下一帧（铁律三）。
 	s.adoptUp(sp)
@@ -387,23 +436,27 @@ func (s *Shell) viewUpSpace(c *ui.Context, r *ui.Route) {
 		sp.header.Load()
 	}
 
-	// ⚠️ **切 Tab 什么都不重置**——这是 PLAN 阶段 5 的一条验收（「切 Tab 的
-	// 滚动位置恢复与 Biu 一致」），也是 Biu 那边本来的行为（上游那四张 Tab
-	// 各自是独立的组件，状态各自留着）。
+	// 「投稿」那一张 Tab 的列表。**只有当前停在那张 Tab 上时才有东西要收**——
+	// 别的 Tab 上它压根没发过那一趟（`viewSpaceVideos` 里那一支）。
 	//
-	// 特别是**不要在这里 reload**：reload 会把闸门清成「第一页」，而已经
-	// 拿到的行还在 `dynItems` 里，于是下一次拉回来的是**同一页**，被直接
-	// 追加在后面——两个一模一样的行身份，框架按 key 对位时那几行共用一份
-	// 状态（Tester 里当场 panic，真窗口里选中一个另一个也亮）。
-	// 翻回一张 Tab 只会问「还要不要下一页」，而 `started` 为真时答案是否。
+	// ⚠️ **判的是上一帧的那张 Tab**：这一层的副作用跑在画的前面，而 Tab 是
+	// 画的时候才写的。满屏开着的时候用户切不了 Tab，所以读到的就是当前那一张。
+	if sp.tab == upTabVideo {
+		if !sp.videosStarted {
+			sp.videosStarted = true
+			sp.videos.Reload()
+		}
+		sp.videos.SetView(s.displayView())
+		sp.videos.Sync(c)
+	}
 
-	ui.Column(c).Key("page:" + upPath).Grow(1).FillHeight().Children(func() {
-		s.viewSpaceHeader(c, sp, h)
-		s.viewSpaceTabs(c, sp)
-		ui.Row(c).Key("space-body").Grow(1).FillHeight().Children(func() {
-			s.viewSpaceTab(c, sp)
-		})
-	})
+	// 另外三张 Tab 的首屏那一拉。
+	p := sp.pagerOf(sp.tab)
+	if !p.started && !p.loading {
+		if ctx := p.begin(); ctx != nil {
+			go s.fetchUp(ctx, sp, sp.tab, p.cursor, p.page)
+		}
+	}
 }
 
 // viewSpaceHeader 是头图 + 关注 + 统计。

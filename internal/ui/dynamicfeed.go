@@ -166,16 +166,37 @@ func (s *Shell) viewDynamicFeed(c *ui.Context, _ *ui.Route) {
 	s.applyFrameTheme(c)
 
 	f := s.dynamicFeedOf()
+
+	ui.Row(c).Key("page:" + dynamicFeedPath).Grow(1).FillHeight().Children(func() {
+		s.viewAuthorPane(c, f)
+		// 动态卡片左右各 32：上游是外层 `px-4` 再套一层 `px-4`
+		// （`index.tsx:142` 的 ScrollContainer + 里面那个 `px-4 py-4`），
+		// 16 + 16 = 32。卡自己那一条的左右内边距因此是 0。
+		ui.Column(c).Key("feed-items").Grow(1).FillHeight().PaddingX(32).Children(func() {
+			s.viewFeedItems(c, f)
+		})
+	})
+}
+
+// syncDynamicFeed 是「用户动态」这一页每帧的副作用：收后台投回来的结果、换账号
+// 就把这一页整个换掉、起该起的那两拉（作者栏 + 动态列表）。
+//
+// ⚠️ **它们原来散在这一页的 view 和作者栏那一栏里**，而这一页在满屏开着的时候
+// 不画（票 #161）——不挪的话，用户在满屏里看频谱的那几分钟里，动态列表的后台
+// 结果一直躺在信箱里没人取。
+func (s *Shell) syncDynamicFeed(c *ui.Context) {
+	f := s.dynamicFeedOf()
 	s.adoptFeed(f)
 
-	// 首屏那两拉，**必须在画之前发出去**。画完再发的话这一帧画出来的是
-	// 「正在加载」，要等这一页回来才换掉——而那一段没有任何东西会叫醒界面。
 	// 🔴 **换账号了就把这一页整个换掉**：作者栏列的是「**我**关注的人」，
 	// 而整个 `dynamicFeed` 是挂在壳上的一份缓存 —— 不换的话退出 A 登录 B，
 	// 左边仍然是 A 关注的人（实测：SelfMid 已经是 88，界面上还是「账号77
 	// 专属作者」，接口一次都没再请求）。
 	s.resetIfAccountChanged(f)
 
+	// 首屏那两拉，**必须在画之前发出去**。画完再发的话这一帧画出来的是
+	// 「正在加载」，要等这一页回来才换掉——而那一段没有任何东西会叫醒界面。
+	//
 	// ⚠️ **只在「一页都还没拉过」时发**（理由同 `viewSpaceList` 里那一段）：
 	// 这一段每帧都跑，不设这道门就是第一页一落地、下一帧又拉一页，用户
 	// 什么都没滚就把后面的页全拉完了。
@@ -187,20 +208,15 @@ func (s *Shell) viewDynamicFeed(c *ui.Context, _ *ui.Route) {
 			go s.fetchFeed(ctx, f, feedItems, f.feed.cursor, f.feed.page)
 		}
 	}
-	// ⚠️ **作者栏那一拉不在这里发**：它要的是「我关注的人」，没登录时那个接口
-	// 一定回 -101，而 -101 在这一层和「网络断了」长得一模一样。发出去的话
-	// 那一栏会一直亮着转圈，而界面上看不出原因是「你没登录」。
-	// 它在 `viewAuthorPane` 里、判完登录态之后发。
 
-	ui.Row(c).Key("page:" + dynamicFeedPath).Grow(1).FillHeight().Children(func() {
-		s.viewAuthorPane(c, f)
-		// 动态卡片左右各 32：上游是外层 `px-4` 再套一层 `px-4`
-		// （`index.tsx:142` 的 ScrollContainer + 里面那个 `px-4 py-4`），
-		// 16 + 16 = 32。卡自己那一条的左右内边距因此是 0。
-		ui.Column(c).Key("feed-items").Grow(1).FillHeight().PaddingX(32).Children(func() {
-			s.viewFeedItems(c, f)
-		})
-	})
+	// ⚠️ **作者栏那一拉要的是「我关注的人」，没登录时那个接口一定回 -101**，
+	// 而 -101 在这一层和「网络断了」长得一模一样。发出去的话那一栏会一直亮着
+	// 转圈，而界面上看不出原因是「你没登录」。
+	if s.app.LoggedIn() && !f.auth.started && f.auth.err == nil {
+		if ctx := f.auth.begin(); ctx != nil {
+			go s.fetchFeed(ctx, f, feedAuthors, f.auth.cursor, f.auth.page)
+		}
+	}
 }
 
 // viewAuthorPane 是左边那一栏：标题 + 「全部」+ 关注的人 + 哨兵。
@@ -223,11 +239,9 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 		}
 
 		// 登录态过了才拉第一页。理由见 viewDynamicFeed 里那一段。
-		if !f.auth.started && f.auth.err == nil {
-			if ctx := f.auth.begin(); ctx != nil {
-				go s.fetchFeed(ctx, f, feedAuthors, f.auth.cursor, f.auth.page)
-			}
-		}
+		//
+		// ⚠️ **那一拉挪到 `syncDynamicFeed` 那一层了**（票 #161）：满屏开着的时候
+		// 这一页不画，而作者栏这一趟不能跟着一起停。
 
 		// ⚠️ **作者栏第一页拉失败也要说失败**：上面那一支是「登录之后能看到
 		// 你关注的人」，那是**没登录**的话；而拉失败了界面上一句话都不提，

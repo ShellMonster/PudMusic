@@ -245,10 +245,11 @@ func matchPath(pattern, path string) bool {
 //
 // 画什么由 pageContent 决定（见下）：已经有内容的页走 builtPage，其余走这一页
 // 自己的空状态。
+//
+// ⚠️ **换页那个 3 秒倒计时（`syncRoute`）不在这儿了**：它在 `syncUnderlay`
+// 那一层（`underlay.go`），因为满屏开着的时候这整个函数都不跑——不挪的话，
+// 用户在满屏里待着的那几秒里，那个倒计时停在半路。
 func (s *Shell) viewRoutes(c *ui.Context) {
-	// 换页的收口（404 那个 3 秒倒计时就在这儿驱动），必须在画页之前。
-	s.syncRoute()
-
 	s.router.View(c, func(r *ui.Route) {
 		s.page(c, r, lookup(r.Path()))
 	})
@@ -260,6 +261,8 @@ func (s *Shell) viewRoutes(c *ui.Context) {
 // 十四页并排着时，「崩在页面」和「崩在下载记录」对用户是两件完全不同的事，而
 // 这一句是错误页上「出错在哪一步」的来源（见 `crashInfo`）。
 func (s *Shell) page(c *ui.Context, r *ui.Route, rt Route) {
+	// 探针：这一页被建了一次（理由见 `Shell.pageBuilds`）。
+	s.pageBuilds++
 	s.guardAt("页面「"+rt.Title+"」", func(c *ui.Context) {
 		r.Title(rt.Title)
 		s.pageBody(c, r, rt)
