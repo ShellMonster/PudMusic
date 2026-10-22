@@ -471,7 +471,7 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 			name := ui.Text(c, title).FontSize(scale.Font(c, 16)).
 				TextColor(textColor(t, st.HasTrack)).
 				MaxLines(1).Ellipsis("…")
-			if st.HasTrack && st.Source != app.SourceLocal && st.BiliURL != "" {
+			if titleClickable(st) {
 				url := st.BiliURL
 				name = name.OnClick(func() { s.openExternalURL(url) })
 				// ⚠️ **悬停才画下划线**（上游的 `hover:underline`）：平时不画，
@@ -1182,6 +1182,26 @@ func textColor(t *ui.Theme, has bool) ui.Color {
 		return t.Text
 	}
 	return t.TextMuted
+}
+
+// titleClickable 报**歌名该不该可点**（点了跳 B 站视频页）。
+//
+// 🔴 **三个条件每一个都要单测**（票 #222 的评审提出来的）：只断「本地文件的歌名
+// 点了没反应」是**钉不住的**——真实状态里本地文件**压根没有 B 站地址**，于是
+// 「点不动」可以是「没有地址」造成的，而**删掉本地那一半照样全绿**。
+// 那一半判据只有靠**人工的组合**（本地文件 + 一个地址）才验得到，所以判据本身
+// 抽成一个函数，用表驱动把四种组合各喂一遍（`TestTheTitleClickRule`）。
+//
+//	有歌 + 不是本地文件 + 有地址 → 可点
+//	有歌 + 不是本地文件 + 没地址 → 不可点（在线条目也可能没有稿件身份）
+//	有歌 + 本地文件     + 有地址 → 不可点（人工组合）
+//	没有歌               + 有地址 → 不可点（人工组合）
+//
+// ⚠️ **两个「人工组合」在真实状态里不会出现**：本地文件在 B 站上没有页面可跳
+//（所以它也没有地址），没有歌的时候更没有地址。它们在这儿是为了**把判据的
+// 每一半分开验**——真实状态里它们「顺带」也被前一个条件挡住了。
+func titleClickable(st app.State) bool {
+	return st.HasTrack && st.Source != app.SourceLocal && st.BiliURL != ""
 }
 
 // clock 把时长写成 m:ss；超过一小时写成 hh:mm:ss。

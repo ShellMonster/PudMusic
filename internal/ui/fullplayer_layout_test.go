@@ -200,6 +200,9 @@ func TestTheFullPlayerBottomBarPaddingAndMaxWidth(t *testing.T) {
 	if !ok {
 		t.Fatalf("找不到进度条，文字有 %q", tt.Texts())
 	}
+	// ⚠️ **那两个读数是「最少 48 宽」，不是「正好 48 宽」**（票 #222）：超一小时的
+	// 歌读数是 `01:30:00`，比 48 宽——钉死 48 的话它会**换行**。平时（读数短）
+	// 它们就是 48，所以这里的算式一个字不用改。
 	const timeW, gap = 48, 10 // viewFullProgress 里那两个数
 	wantW := float32(wantMaxW - 2*wantPadX - 2*timeW - 2*gap)
 	if d := absF(prog.W - wantW); d > 1 {
@@ -228,6 +231,78 @@ func TestTheFullPlayerBottomBarPaddingAndMaxWidth(t *testing.T) {
 		t.Errorf("窗口 %d 宽时进度条中心在 %.1f，不在窗口中线 %.1f",
 			wideW, prog.X+prog.W/2, float32(wideW)/2)
 	}
+}
+
+// TestTheFullPlayerTimeReadsDoNotWrap 断**满屏上超一小时的读数不换行**。
+//
+// 🔴 票 #222 把两个读数从「**正好** 48 宽」改成「**最少** 48 宽」——超一小时的歌
+// 读数是 `01:30:00`（八个字符，比 48 宽），钉死 48 的话它会**换行**，而满屏的
+// 底栏只有一行高。换行之后那一格变成「01:30:」加「00」两行，而**界面上看不出
+// 坏了**（数字还在，只是分了两行）。
+//
+// ⚠️ **判据是盒高**：一行字是 12 号 × 1.1767 ≈ 14 像素，两行 ≈ 28。
+//
+// ⚠️ **顺带把那一档的代价钉住**：读数宽了，**进度条就窄了**（那一行是 flex，
+// 读数占了多少就剩多少给滑块）。这是**故意**的——宁可进度条短一点，也不要读数
+// 换行。
+func TestTheFullPlayerTimeReadsDoNotWrap(t *testing.T) {
+	long, _ := fullStateTester(t, app.State{
+		HasTrack: true, Title: "一小时以上的一首",
+		Duration: 75 * time.Minute, Position: 90 * time.Minute,
+		Volume: 1, Rate: 1, PlayMode: app.PlayModeLoop,
+	})
+	for _, want := range []string{"01:30:00", "01:15:00"} {
+		r, ok := long.Find(want)
+		if !ok {
+			t.Fatalf("满屏上找不到读数 %q，文字有 %q", want, long.Texts())
+		}
+		if r.H > 20 {
+			t.Errorf("满屏上的读数 %q 占了 %.1f 像素高——它**换行**了"+
+				"（一行是 14 上下，两行是 28）", want, r.H)
+		}
+	}
+
+	// 那一档的代价：读数宽了，进度条就窄了。
+	short, _ := fullStateTester(t, app.State{
+		HasTrack: true, Title: "短的一首",
+		Duration: 100 * time.Second, Position: 42 * time.Second,
+		Volume: 1, Rate: 1, PlayMode: app.PlayModeLoop,
+	})
+	longBar, ok := long.Find("全屏播放进度")
+	if !ok {
+		t.Fatalf("满屏上找不到进度条，文字有 %q", long.Texts())
+	}
+	shortBar, ok := short.Find("全屏播放进度")
+	if !ok {
+		t.Fatalf("满屏上找不到进度条，文字有 %q", short.Texts())
+	}
+	if longBar.W >= shortBar.W {
+		t.Errorf("超一小时那一档的进度条是 %.1f，短读数那一档是 %.1f——"+
+			"读数宽了 8 个字符，进度条却一点没让", longBar.W, shortBar.W)
+	}
+}
+
+// fullStateTester 只画满屏播放器，状态由测试给。
+//
+// ⚠️ **不走 `fullTester`**：那一个放的是真本地文件（4 秒），而这一族要摆
+// 「超一小时」那一档——真放不出那么长的歌。
+//
+// ⚠️ **主题自己装**（`applyFrameTheme`）：满屏播放器是页面，按铁律二第一件正事
+// 就是装主题；而隔离出来画的时候没人替它装。
+func fullStateTester(t *testing.T, st app.State) (*mygoui.Tester, *Shell) {
+	t.Helper()
+	b := newTestShell(t, at(fullWinW, fullWinH), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.applyFrameTheme(c)
+			// 直接开，不走 `openFullPlayer`：那一条会装一个三秒的隐藏定时器
+			//（界面三秒不动就藏起来）。
+			s.full.open = true
+			s.viewFullPlayer(c, st)
+		}
+	}))
+	tt := b.tt
+	tt.Frame()
+	return tt, b.s
 }
 
 // TestTheFullPlayerBottomBarHasPlayModeAndQueue 断底栏是

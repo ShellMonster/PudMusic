@@ -492,20 +492,28 @@ func dayText(t time.Time) string {
 	return t.Format("2006-01-02")
 }
 
-// clockText 是时长那一列的字：不足一小时 `mm:ss`，超过一小时 `hh:mm:ss`。
+// clockText 是时长那一列的字：不足一小时 `m:ss`，超过一小时 `hh:mm:ss`。
 //
 // ⚠️ 这一列要定宽（`colClock`）且用等宽数字（Biu 的 `tabular-nums`），不然 3:05 和
 // 10:05 两列会左右跳。
 //
-// 一小时以上**带小时**：写 `mm:ss` 的话一首一小时的歌显示成「61:30」，用户得在心里
+// 一小时以上**带小时**：写 `m:ss` 的话一首一小时的歌显示成「61:30」，用户得在心里
 // 换算一次才知道那是多长。
+//
+// 🔴 **小时是两位**（票 #222 的评审）：播放条上那一份（`playbar.go` 的 `clock`）
+// 照上游的 `trim: false` 写成 `01:15:00`，而这里原来写 `1:15:00`——**同一个
+// 时长在两处有两种写法**，用户对着播放条和历史列表看同一首歌，会以为其中一处
+// 坏了。
+//
+// ⚠️ **分钟那一位还是一位**（上游那边是两位，`00:05`）：票面只钉了小时那一份，
+// 而这一列是定宽的（`colClock` 60、`colProgress` 132），两位分钟会让它宽一格。
 func clockText(d time.Duration) string {
 	if d <= 0 {
 		return ""
 	}
 	s := int(d.Round(time.Second).Seconds())
 	if h := s / 3600; h > 0 {
-		return fmt.Sprintf("%d:%02d:%02d", h, s/60%60, s%60)
+		return fmt.Sprintf("%02d:%02d:%02d", h, s/60%60, s%60)
 	}
 	return fmt.Sprintf("%d:%02d", s/60, s%60)
 }

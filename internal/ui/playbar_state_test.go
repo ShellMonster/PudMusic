@@ -279,9 +279,18 @@ func TestClickingTheTitleOpensTheBiliPage(t *testing.T) {
 //
 // ⚠️ **判据是「按下去什么也没发生」**：这一条断的不是「跳错了地方」，而是
 // **压根没有那条路**。
+//
+// 🔴 **这里喂的是「本地文件 + 一个 B 站地址」这个人工组合**（票 #222 的评审
+// 提出来的）：真实状态里本地文件**压根没有地址**，于是「点不动」可以是
+// 「没有地址」造成的——**把本地那一半判据删掉，这一条照样绿**，而它压根没
+// 验到「本地文件不跳」。人工组合把那**两半**分开了：地址有，所以「点不动」
+// 只可能是**本地**那一半造成的。
+//
+// （判据本身的四个组合由 `TestTheTitleClickRule` 表驱动地各断一遍。）
 func TestTheTitleIsNotClickableForALocalFile(t *testing.T) {
 	tt, s := metaBarTester(t, app.State{
 		HasTrack: true, Title: "本地的一首歌", Source: app.SourceLocal,
+		BiliURL: "https://www.bilibili.com/video/BV1xx411c7mD",
 	}, 1200)
 
 	var got string
@@ -293,6 +302,91 @@ func TestTheTitleIsNotClickableForALocalFile(t *testing.T) {
 	tt.Frame()
 	if got != "" {
 		t.Errorf("本地文件的歌名点下去跳了 %q——本地文件在 B 站上没有页面可跳", got)
+	}
+}
+
+// TestTheTitleClickRule 把**歌名可点的那三个条件**各断一遍。
+//
+// 🔴 **这一条是票 #222 的评审逼出来的**：只断「本地文件的歌名点了没反应」是
+// **钉不住的**——真实状态里本地文件压根没有 B 站地址，于是「点不动」可以是
+// 「没有地址」造成的，而**把本地那一半判据删掉，整包仍然全绿**。
+//
+// ⚠️ **两个「人工组合」在真实状态里不会出现**（本地文件没有地址、没有歌更没有
+// 地址）：它们在这儿是为了**把判据的每一半分开验**——真实状态里它们「顺带」
+// 也被前一个条件挡住了，而那一半就**从来没被验证过**。
+//
+// ⚠️ **表驱动**：四种组合都在这儿，任何一半判据被删掉，这一行立刻红。
+func TestTheTitleClickRule(t *testing.T) {
+	const url = "https://www.bilibili.com/video/BV1xx411c7mD"
+	for _, c := range []struct {
+		name string
+		st   app.State
+		want bool
+	}{
+		{
+			name: "在线且有地址 → 可点",
+			st:   app.State{HasTrack: true, Source: app.SourceOnline, BiliURL: url},
+			want: true,
+		},
+		{
+			// 在线条目也可能没有稿件身份（既没有 bvid 也没有 sid），那时候没有
+			// 页面可跳——上游那边拼出来的是 `bilibili.com/video/undefined`。
+			name: "在线但没有地址 → 不可点",
+			st:   app.State{HasTrack: true, Source: app.SourceOnline},
+			want: false,
+		},
+		{
+			// 人工组合：真实状态里本地文件没有地址。
+			name: "本地文件（人工地给它一个地址）→ 不可点",
+			st:   app.State{HasTrack: true, Source: app.SourceLocal, BiliURL: url},
+			want: false,
+		},
+		{
+			// 人工组合：没歌的时候那一句是「还没有打开文件」。
+			name: "没有歌（人工地给它一个地址）→ 不可点",
+			st:   app.State{Source: app.SourceOnline, BiliURL: url},
+			want: false,
+		},
+	} {
+		if got := titleClickable(c.st); got != c.want {
+			t.Errorf("%s：titleClickable = %v，want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestTheTwoDurationWritersAgree 断**同一个时长在两处是同一种写法**。
+//
+// 🔴 播放条上那一份（`clock`）照上游的 `trim: false` 把小时写成两位
+// （`01:15:00`），而历史 / 稍后看那一列（`clockText`）原来写 `1:15:00`——
+// **同一个时长在两处有两种写法**，用户对着播放条和历史列表看同一首歌，会以为
+// 其中一处坏了（票 #222 的评审）。
+//
+// ⚠️ **只比整秒的时长**：两处的**取整方式本来就不一样**——播放条那一份截断
+// （`int(d.Seconds())`），列表那一份四舍五入（`d.Round(time.Second)`）。那是
+// 既有的差异，不归这一票；差一秒在跨小时的临界点上会放大成「59:59 对 01:00:00」，
+// 但那也不是这一票要治的。
+//
+// ⚠️ **零值两边不一样**：`clockText` 的零值是**空串**（「不知道多长」——B 站
+// 不给 duration 的那几类），而 `clock` 的零值是 `0:00`（读数那一格）。所以零值
+// 单独断。
+func TestTheTwoDurationWritersAgree(t *testing.T) {
+	for _, d := range []time.Duration{
+		5 * time.Second,
+		185 * time.Second,
+		59*time.Minute + 59*time.Second,
+		60 * time.Minute,
+		75 * time.Minute,
+		90*time.Minute + 30*time.Second,
+		25 * time.Hour,
+	} {
+		want, got := clock(d), clockText(d)
+		if got != want {
+			t.Errorf("%v：clockText = %q，而播放条上那一份是 %q——"+
+				"同一个时长在两处写法不一样", d, got, want)
+		}
+	}
+	if got := clockText(0); got != "" {
+		t.Errorf("零值的 clockText = %q，want 空串（「不知道多长」）", got)
 	}
 }
 

@@ -1911,6 +1911,56 @@ var Items = []Item{
 		},
 	},
 	{
+		// 归「双平台」那一组：还是播放条那一块，但说的是它上面的**状态**和
+		// 几样杂项（issue 222 / BMG-134）。
+		Category: Platform,
+		// issue 222：播放条的状态与杂项（BMG-124 报告 §5.2 §5.3 §4.2 §3.12
+		// §6.5）。
+		//
+		// 🔴 **这一族全是「静默」的坏法**：没歌时多摆一个封面占位、加载中的
+		// 封面是一块和背景几乎一样的纯色、超一小时的时长写成「75:00」、本地
+		// 文件照样摆着「下载」、歌名点不动——**没有一样会报错**，界面只是
+		// 「不太对」，而其中几样（加载中那一档、时间读数）用户得盯着看才
+		// 说得清哪里不对。
+		//
+		// ⚠️ **「歌名可点」那一族断的是判据的每一半**：真实状态里本地文件
+		// 压根没有 B 站地址，于是「点不动」可以是「没有地址」造成的——只断
+		// 真实状态的话，**把本地那一半判据删掉照样全绿**。所以有两条：一条
+		// 走画面（喂「本地文件 + 一个地址」这个人工组合），一条表驱动地断
+		// 四种组合。
+		Spec: "播放条的状态与杂项：没歌时左边那一块不画（不摆封面占位）；封面那一格的三档分得开（没有地址=描边框+音符、正在加载=无描边框+更淡的音符、拉失败=描边框+图片图标）；进度读数超一小时写成 hh:mm:ss、读不到写 -:--（一个减号，两处的写法一致）；没封面时是音乐符号；本地文件不摆「下载」；歌名可点（跳 B 站视频页，悬停有下划线）、本地文件不跳",
+		Tests: []string{
+			// 没歌时左边那一块没有封面（画面上那一块是干净的底色）。
+			"TestNoTrackMeansNoCoverPlaceholder",
+			// 没封面时那一格要的是**音符**（AST：像素上分不出是哪一枚图形）。
+			"TestThePlayBarAsksForTheMusicNote",
+			// 没封面时那一格画得出东西（有图形 + 有描边框）。
+			"TestThePlayBarCoverWithoutOneShowsSomething",
+			// 加载中那一格**画得出东西**、且**没有描边框**（那是「拿不到」的标记）。
+			"TestPlayBarCoverWhileLoadingShowsThePlaceholder",
+			// 超一小时写成 hh:mm:ss（画面上找得到那个读数）。
+			"TestTheTrackTimeTellsTheHourWhenItIsPastAnHour",
+			// 读不到写 -:--（两个读数都是）。
+			"TestTheTrackTimeReadsDashWhenThereIsNone",
+			// 播放条和历史/稍后看那两处写的是同一种时长。
+			"TestTheTwoDurationWritersAgree",
+			// 本地文件不摆「下载」、B 站那一首摆。
+			"TestTheDownloadKeyIsNotThereForALocalFile",
+			// **真的**本地文件那一档：播放条上没有「下载」。
+			"TestTheHitAreaIsBiggerThanTheGlyph",
+			// 点歌名跳的是**那个地址**（不是「按下去没报错」）。
+			"TestClickingTheTitleOpensTheBiliPage",
+			// 本地文件的歌名点了什么也不发生（喂的是「本地文件 + 一个地址」）。
+			"TestTheTitleIsNotClickableForALocalFile",
+			// 判据的三个条件各断一遍（表驱动）。
+			"TestTheTitleClickRule",
+			// 悬停时歌名底下长出一道下划线。
+			"TestHoveringTheTitleUnderlinesIt",
+			// 快照里的来源和正在放的那一首对得上（界面以前判不出来源）。
+			"TestTheSnapshotTellsTheSource",
+		},
+	},
+	{
 		// 归「双平台」那一组，和上面 issue 127 那一条是同一件事的两半：那一票动的是
 		// 外壳（侧栏 / 顶栏 / 播放条），这一票动的是**内容那一块**（列表与网格）。
 		Category: Platform,
