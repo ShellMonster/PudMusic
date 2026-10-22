@@ -613,9 +613,18 @@ func dlTitles(rows []download.Snapshot) []string {
 
 // TestTheDownloadTableSitsOnACard 那一整张表有一张卡片底（上游 `Card` + `CardBody`）。
 //
-// 判据是像素：表头左边那 8 像素（卡片的内边距）必须是 `t.Surface`，再往左 8
-// 像素（页面内边距）必须是页面底色。两处都量，是因为只量一处的话「把整页刷成
-// Surface」也能过——那不是卡片底。
+// 判据是像素，两半：
+//
+//	① 表头左边那 18 像素（卡片的内边距）是**卡片底**；
+//	② 卡片左缘外侧那一圈**不是**页面底色——那是影。
+//
+// ⚠️ **卡片底和页面底色是同一个颜色**（票 #172）：上游那张 `Card` 的底色是
+// `bg-content1`，而 `content1` 是 **#FFFFFF（浅）/ #18181b（深）**——正好是
+// 我们 `t.Background` 的两个值。于是深色下这张卡和页面几乎同色（分开的正是
+// 那圈影），浅色下它也不是一块灰（上游那张卡是白的）。
+//
+// ② 那一半不能省：① 说的「卡片底 = 页面底色」在「根本没有那张卡」的界面上
+// 也成立——那时候表头左边那一块同样是页面底色。**影才是那张卡存在的证据**。
 func TestTheDownloadTableSitsOnACard(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -632,24 +641,27 @@ func TestTheDownloadTableSitsOnACard(t *testing.T) {
 				t.Fatalf("找不到「文件」那一列表头，文字有 %q", tt.Texts())
 			}
 			th := BuildTheme(s.app.SettingsSnapshot(), dark)
-			surface := rgbaOf(th.Surface)
 			page := rgbaOf(th.Background)
 			img := tt.Image()
 			y := round32(header.Y + header.H/2)
 
 			in := img.RGBAAt(clampX(img, round32(header.X)-18), clampY(img, y))
-			if maxDiff(in, surface) > probeTolerance {
-				t.Errorf("表头左边 18 像素处是 %v，want 卡片底 %v——表格没有卡片底",
-					in, surface)
+			if maxDiff(in, page) > probeTolerance {
+				t.Errorf("表头左边 18 像素处是 %v，want 卡片底 %v——上游那张卡的底是 "+
+					"`bg-content1`（= 页面底色），不是一块灰", in, page)
 			}
-			out := img.RGBAAt(clampX(img, round32(header.X)-34), clampY(img, y))
-			if maxDiff(out, page) > probeTolerance {
-				t.Errorf("再往左 16 像素处是 %v，want 页面底色 %v——卡片底铺到页面内边距里去了",
-					out, page)
+			// 卡片左缘外侧那一圈必须有「不是底色」的像素：影（浅色下是那一圈
+			// 30% 黑的外边，深色下是 1 像素的白内边）。
+			edge := false
+			for x := round32(header.X) - 34; x < round32(header.X)-16; x++ {
+				if maxDiff(img.RGBAAt(clampX(img, x), clampY(img, y)), page) > 2 {
+					edge = true
+					break
+				}
 			}
-			if maxDiff(surface, page) <= probeTolerance {
-				t.Fatalf("这套主题下 Surface 和 Background 是同一个颜色（%v）——这一条量不出东西",
-					surface)
+			if !edge {
+				t.Errorf("卡片左缘外侧那一圈全是页面底色 %v——那圈影没了，"+
+					"这张卡在深色下就真的和页面糊成一片", page)
 			}
 		})
 	}

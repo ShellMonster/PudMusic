@@ -129,9 +129,18 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 			// **面板本身**上。抽屉是浮在页面右边的一整条，没有影的话它和底下那一页
 			// 是「同一块底上的两块颜色」——深色下尤其如此（上游的卡片底和背景几乎
 			// 同色，**靠阴影分层**，见 DESIGN.md §4）。
+			//
+			// ⚠️ **面板底色取 `t.Background`（= 上游的 `bg-background`）**：上游
+			// 那一枚 Drawer 没有自己的底色类，走的是 HeroUI Drawer 的默认
+			// `bg-background`，而上游主题把 `background` 这个色定义成了**页面底色**
+			// （`src/common/constants/theme.ts`：深色 #17181a、浅色 #ffffff）。所以
+			// 那一块和底下那一页是**同一个颜色**，分开的正是上面那圈影。
+			//
+			// 之前这里取 `t.Surface`（深色下 #27272a）——那正是 DESIGN.md §四说的
+			// 「比背景亮一级的板」。
 			panel := shadow.HeroMedium(ui.Column(c).Key("queue-drawer").
 				Width(queueDrawerWidth).FillHeight().
-				Background(t.Surface).BorderStartWidth(1).BorderColor(t.Border), t)
+				Background(t.Background).BorderStartWidth(1).BorderColor(t.Border), t)
 			panel.Role(ui.RoleDialog).Label("播放列表").
 				Children(func() {
 					s.viewQueueHeader(c, t)

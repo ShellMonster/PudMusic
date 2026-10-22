@@ -103,8 +103,9 @@ func (p *localPage) confirmDialog(c *ui.Context, open *bool, key, title, body,
 			}
 			yes := ui.Button(c, confirm)
 			if danger {
-				// ⚠️ 红色的底配白字：主题的 Danger 在浅色下是 #dc2626、深色下
-				// 是 #ef4444，两边都够深，白字都读得清（`ui/theme.go` 119/146 行）。
+				// ⚠️ 红色的底配白字：主题的 Danger 是上游那一档 `#f31260`
+				//（深浅两套同一个值，票 #172），白字在它上面是 4.1:1——比改之前的
+				// 深色档 `#ef4444`（3.8:1）还好一点。
 				yes = yes.Background(t.Danger).TextColor(dialogOnDanger)
 			}
 			if yes.Clicked() {

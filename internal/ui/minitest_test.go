@@ -70,7 +70,7 @@ func enqueueTwo(a *app.App, t *testing.T) error {
 
 // enqueueTwoWithCover 是 `enqueueTwo` 加上一张封面。
 //
-// ⚠️ **带封面才是紧的那一档**：封面占掉左边 64 宽，右边那一列从 308 缩到 244。
+// ⚠️ **带封面才是紧的那一档**：封面占掉左边 100 宽，右边那一列从 308 缩到 208。
 // 量版面的那两条测试必须走这一支（`app.Item.Cover` 是唯一一处封面地址的来源——
 // 本地文件本身不读内嵌的图，见 `app.State.CoverURL` 的注释）。
 func enqueueTwoWithCover(a *app.App, t *testing.T) error {
@@ -135,6 +135,25 @@ var testFLAC, testMONO = func() (string, string) {
 // miniPixel 取一个像素（用 `snapshot` 先复制一份，免得被下一帧覆盖掉）。
 func miniPixel(img *image.RGBA, x, y int) color.RGBA {
 	return color.RGBAModel.Convert(img.RGBAAt(x, y)).(color.RGBA)
+}
+
+// miniCoverBox 扫出画面上被封面试图那张纯色图涂到的最小外框；没有那个颜色时
+// 返回一个空框。
+//
+// ⚠️ **不能直接用 `paintedBox`**：它在画面上没有那个颜色时是 `t.Fatalf`，而
+// 这一份要拿「空框」当「图还没到」的判据（等得到才算数）。
+func miniCoverBox(tt *mygoui.Tester) image.Rectangle {
+	img := tt.Image()
+	var box image.Rectangle
+	for y := img.Rect.Min.Y; y < img.Rect.Max.Y; y++ {
+		for x := img.Rect.Min.X; x < img.Rect.Max.X; x++ {
+			if !sameColor(img.RGBAAt(x, y), coverColor) {
+				continue
+			}
+			box = box.Union(image.Rect(x, y, x+1, y+1))
+		}
+	}
+	return box
 }
 
 // miniIsDark 报一个颜色是不是暗底（按亮度，不是按某一根通道）。
