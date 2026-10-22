@@ -160,12 +160,10 @@ func (s *Shell) settingsUpdateButton(c *ui.Context, st app.UpdateState) {
 		//
 		// 按钮上那一句也仍然是这个按钮的**无障碍名字**（`Label`），读屏的人听到
 		// 的还是「正在检查…」。
-		ui.PrimaryButton(c, "").Disabled(true).Label(label).Children(func() {
-			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-				ui.Spinner(c).Size(14, 14).TextColor(c.Theme().AccentText)
-				ui.Text(c, label).FontSize(c.Theme().FontSize)
-			})
-		})
+		//
+		// ⚠️ 这一档是**共用的**（`busyPrimaryButton`，票 #178）：另外三处
+		// 「只换 label」的按钮（上传 / 提交 / 确认）也换成它。
+		busyPrimaryButton(c, label)
 	case onClick == nil:
 		// 这一版不能自动更新：按钮关着，**字留着**（为什么不能，下面那句话说了）。
 		//

@@ -194,7 +194,13 @@ func (s *Shell) viewCoverCrop(c *ui.Context, crop *cropState) {
 			if ui.Button(c, "取消").Disabled(crop.uploading).Clicked() {
 				s.closeCrop(crop)
 			}
-			if ui.PrimaryButton(c, uploadLabel(crop.uploading)).Disabled(crop.uploading).Clicked() {
+			// ⚠️ **上传中那一档是「转起来 + 灰下去」**（票 #178）：原来只是把字
+			// 换成「上传中…」，而 Biu 那个 `<AsyncButton isLoading>` 画的是一枚
+			// **转圈**的按钮——「在忙」这件事只靠字说，没有一个能一眼看出来的
+			// 样子。共用的那一档见 `loading.go` 的 `busyPrimaryButton`。
+			if crop.uploading {
+				busyPrimaryButton(c, uploadLabel(true))
+			} else if ui.PrimaryButton(c, uploadLabel(false)).Clicked() {
 				s.uploadCrop(crop)
 			}
 		})
