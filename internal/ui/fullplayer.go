@@ -323,13 +323,21 @@ type partRow struct {
 }
 
 // viewFullPlayer 画全屏播放器。没开就一个字都不建。
-func (s *Shell) viewFullPlayer(c *ui.Context) {
+//
+// ⚠️ **状态是外面递进来的**（和 `viewPlayBar` 同一个样子）：`viewMain` 那一帧
+// 已经取过一份快照了（`st`），这里再取一份就是**两份快照、两个时刻**——播放
+// 状态在那一帧里变了的话，底下那条播放条和这一屏画的是不同的歌。
+//
+// 而它也是**测试能摆一份假状态**的地方（见 framebudget_test.go）：满屏那一档
+// 的每帧成本要量的是**画界面**，不是**放歌**——真放歌的话，解码器那条 goroutine
+// 会在测量窗口里分掉一大笔（一次性缓冲，约 130 KB），那是音频的成本，不是
+// 界面的，而它落在哪一帧还是随机的。
+func (s *Shell) viewFullPlayer(c *ui.Context, st app.State) {
 	if !s.full.open {
 		return
 	}
 	// 记一笔「满屏建了一遍」——给「一帧建了几遍」那条测试数（见 builds.go）。
 	s.builds.full++
-	st := s.app.Snapshot()
 	if !st.HasTrack {
 		// 🔴 **不能在这里关掉自己**。
 		//
