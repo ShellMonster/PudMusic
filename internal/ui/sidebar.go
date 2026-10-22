@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -262,7 +263,7 @@ func (s *Shell) commitSideWidth() {
 		st.SideMenuCollapsed = collapsed
 		st.SideMenuWidth = persist
 	}); err != nil {
-		s.addToast("侧栏宽度存不住：" + err.Error())
+		s.addToast("侧栏宽度存不住："+err.Error(), notice.Danger)
 	}
 }
 
@@ -379,7 +380,7 @@ func (s *Shell) viewSideCollapse(c *ui.Context, st app.Settings, collapsed bool)
 		if _, err := s.app.UpdateSettings(func(cur *app.Settings) {
 			cur.SideMenuCollapsed = !st.SideMenuCollapsed
 		}); err != nil {
-			s.addToast("折叠状态存不住：" + err.Error())
+			s.addToast("折叠状态存不住："+err.Error(), notice.Danger)
 		}
 	}
 }

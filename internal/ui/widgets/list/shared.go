@@ -15,6 +15,7 @@ import (
 	"runtime/debug"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 )
 
 // warnDuplicateIDs 把重复的行标识指出来。
@@ -86,9 +87,12 @@ func playFrom(songs []Music, acts Actions, i int) {
 }
 
 // notify 说一句话。给还没接上的操作用：按了没反应最难解释，说一句就好解释。
-func notify(acts Actions, text string) {
+//
+// ⚠️ **语气由说这句话的那一处给**（票 #180）：「还没接上」是橙的（要用户
+// 知道），「加载更多失败」是红的（真的没成）。
+func notify(acts Actions, text string, tone notice.Tone) {
 	if acts.Notify != nil {
-		acts.Notify(text)
+		acts.Notify(text, tone)
 	}
 }
 

@@ -46,6 +46,7 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -113,7 +114,7 @@ var avatarMenuItems = []avatarMenuItem{
 	}},
 	{label: "退出登录", run: func(s *Shell, _ *ui.Context) {
 		if !s.app.LoggedIn() {
-			s.addToast("还没登录，没有可退的")
+			s.addToast("还没登录，没有可退的", notice.Warning)
 			return
 		}
 		// 走 login.go 那一支：它退完会把界面收回未登录的样子，退不干净
@@ -130,7 +131,7 @@ var avatarMenuItems = []avatarMenuItem{
 func (s *Shell) goProfile() {
 	mid := s.app.Session().DedeUserID
 	if mid == "" {
-		s.addToast("还没登录，个人资料用不了")
+		s.addToast("还没登录，个人资料用不了", notice.Warning)
 		return
 	}
 	s.navigate("/user/" + mid)

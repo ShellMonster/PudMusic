@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/egoist/mygo/ui"
 )
@@ -293,7 +294,7 @@ func TestDeletingFromThePageIsTheSameCallTheSidebarMakes(t *testing.T) {
 	// 它还得做完 `forgetFavorite`（写设置文件）才轮到 `sayFolder`。
 	said := make(chan string, 1)
 	s.app.DeleteFavoriteFolder(app.Favorite{ID: 12345, Title: "通勤路上"},
-		func(msg string) { said <- msg })
+		func(msg string, _ notice.Tone) { said <- msg })
 	waitFor(t, "侧栏那一遍删完", func() bool { return len(b.deletedFolders()) == 1 })
 	// 收进 `waitFor` 而不是自己 `select` + `time.After`：等条件只有那两条
 	// （守卫 `TestTheTestSuiteDoesNotGrowASecondWay…` 盯着这件事），而超时的

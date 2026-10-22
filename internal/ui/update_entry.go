@@ -217,7 +217,7 @@ func (s *Shell) openUpdateDialog() { s.update.wanted = true }
 // goroutine 直接调 `addToast`，而提示列表归界面所有，跨 goroutine 写它就违反
 // 了铁律一。
 func (s *Shell) reportUpdateNotice() {
-	if note := s.app.TakeUpdateNotice(); note != "" {
-		s.addToast(note)
+	if note, tone := s.app.TakeUpdateNotice(); note != "" {
+		s.addToast(note, tone)
 	}
 }

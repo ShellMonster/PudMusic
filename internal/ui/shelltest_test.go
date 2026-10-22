@@ -419,6 +419,10 @@ func TestALeakedMigrationReportCannotReachTheNextShell(t *testing.T) {
 		want := BuildTheme(s.app.SettingsSnapshot(), true).Background
 		for f := range 3 {
 			tt.Frame()
+			// ⚠️ **推钟让入场走完**：提示是淡进来的（250ms），而 Tester 的钟
+			// 站着不动——不推的话那条提示在头几帧里几乎是全透明的，采样点照样
+			// 是背景色，于是这一条会**绿得像没漏**（它要抓的恰恰是那个漏）。
+			settleToast(t, tt)
 			got := tt.Image().RGBAAt(sampleX, sampleY)
 			if got == (color.RGBA{R: want.R, G: want.G, B: want.B, A: want.A}) {
 				continue

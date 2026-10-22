@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
@@ -66,7 +67,7 @@ func (s *Shell) openFolderSelect(item app.Item) {
 	// ⚠️ **没挂上就别开弹窗**：理由同 `openFolderEdit`（提交那一下会什么
 	// 都不发生，而用户看到的是「点了没反应」）。
 	if !s.app.CollectionsMounted() {
-		s.addToast("收藏夹还没接上：这一页要 B 站接口")
+		s.addToast("收藏夹还没接上：这一页要 B 站接口", notice.Warning)
 		return
 	}
 	if rid, typ, ok := favTarget(item); ok {
@@ -131,19 +132,19 @@ func (s *Shell) openFolderSelectNow(item app.Item, rid int64, typ int) {
 // 但**保证不靠它**——把它删掉也不会有递归。
 func (s *Shell) askFavoriteIDThen(item app.Item) {
 	if item.Source != "online" || item.Bvid == "" {
-		s.addToast("这一首还没有可以收藏的身份")
+		s.addToast("这一首还没有可以收藏的身份", notice.Warning)
 		return
 	}
 	s.app.ResolveFavoriteID(item, func(fixed app.Item, err error) {
 		switch {
 		case err != nil:
-			s.addToast("收藏不了：" + bili.Friendly(err))
+			s.addToast("收藏不了："+bili.Friendly(err), notice.Danger)
 		default:
 			rid, typ, ok := favTarget(fixed)
 			if !ok {
 				// 问回来了还是认不出（协议变了，或者 B 站给了一个空 id）。
 				// **到这里就停**——再调 `openFolderSelect` 就是那条死循环。
-				s.addToast("这一首还没有可以收藏的身份")
+				s.addToast("这一首还没有可以收藏的身份", notice.Warning)
 				break
 			}
 			s.openFolderSelectNow(fixed, rid, typ)

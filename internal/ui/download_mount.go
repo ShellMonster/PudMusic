@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/egoist/mygo"
@@ -117,8 +118,8 @@ func (s *Shell) downloadLater(it app.Item, video bool, label string) {
 func (s *Shell) sayDownloadDone(label string, err error) {
 	switch {
 	case err == nil:
-		s.addToast("已加进下载队列")
+		s.addToast("已加进下载队列", notice.Success)
 	default:
-		s.addToast(label + "没成：" + bili.Friendly(err))
+		s.addToast(label+"没成："+bili.Friendly(err), notice.Danger)
 	}
 }

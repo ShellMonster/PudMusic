@@ -199,7 +199,7 @@ func TestACheckFindsTheNewVersionAndKeepsIt(t *testing.T) {
 	}
 	// 用户自己按的检查：要给一句「有更新」以外的话吗？——Biu 那边按完是弹窗，
 	// 而弹窗是我们开着的，所以这一句留白（见 check 的注释）。
-	if n := f.app.TakeUpdateNotice(); n != "" {
+	if n, _ := f.app.TakeUpdateNotice(); n != "" {
 		t.Errorf("用户按的那一次留了提示 %q", n)
 	}
 
@@ -221,7 +221,7 @@ func TestAnAppThatIsUpToDateSaysSo(t *testing.T) {
 	if got := f.snapshot().Phase; got != UpdateIdle {
 		t.Fatalf("相位是 %v，要 Idle", got)
 	}
-	if n := f.app.TakeUpdateNotice(); n != "当前版本为最新版本" {
+	if n, _ := f.app.TakeUpdateNotice(); n != "当前版本为最新版本" {
 		t.Errorf("提示是 %q", n)
 	}
 	// 查成功了，时刻要记住；界面那一行「上次检查：…」靠它。
@@ -235,11 +235,11 @@ func TestABackgroundCheckLeavesANoticeInsteadOfOpeningAnything(t *testing.T) {
 	f := newUpdFixture(t, "0.1.0", &UpdateRelease{Version: "0.2.0"})
 	f.checkAndWait(t, false)
 
-	if n := f.app.TakeUpdateNotice(); n != "发现新版本 0.2.0" {
+	if n, _ := f.app.TakeUpdateNotice(); n != "发现新版本 0.2.0" {
 		t.Errorf("提示是 %q", n)
 	}
 	// 取过就没了：Toast 弹两遍比不弹更糟。
-	if n := f.app.TakeUpdateNotice(); n != "" {
+	if n, _ := f.app.TakeUpdateNotice(); n != "" {
 		t.Errorf("提示被取了两次：%q", n)
 	}
 }
@@ -256,7 +256,7 @@ func TestABackgroundCheckThatFailsKeepsQuiet(t *testing.T) {
 	if got := f.snapshot().Phase; got != UpdateFailed {
 		t.Fatalf("相位是 %v，要 UpdateFailed", got)
 	}
-	if n := f.app.TakeUpdateNotice(); n != "" {
+	if n, _ := f.app.TakeUpdateNotice(); n != "" {
 		t.Errorf("后台那次也留了提示：%q", n)
 	}
 	// 但原因得留在状态里：用户自己按的时候要看见它。
@@ -274,7 +274,7 @@ func TestACheckTheUserAskedForSaysWhatWentWrong(t *testing.T) {
 
 	f.checkAndWait(t, true)
 
-	if n := f.app.TakeUpdateNotice(); !strings.Contains(n, "i/o timeout") {
+	if n, _ := f.app.TakeUpdateNotice(); !strings.Contains(n, "i/o timeout") {
 		t.Errorf("提示是 %q，要带原因", n)
 	}
 }
@@ -389,7 +389,7 @@ func TestWithoutTheUpdaterEveryEntryPointIsQuiet(t *testing.T) {
 	a.DismissUpdate()
 	stop := a.StartAutoChecks()
 	stop()
-	if n := a.TakeUpdateNotice(); n != "" {
+	if n, _ := a.TakeUpdateNotice(); n != "" {
 		t.Errorf("没挂却留了提示 %q", n)
 	}
 }

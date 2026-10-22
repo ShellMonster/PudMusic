@@ -18,6 +18,7 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo"
@@ -449,33 +450,33 @@ func (s *Shell) searchUserActions() list.Actions {
 		// `user-card.tsx:51`：`onPress={() => navigate(`/user/${u.mid}`)}`）。
 		Play: s.openSearchUser,
 		Add: func([]app.Item) {
-			s.addToast("UP 主不是歌，加不进队列；进他的空间听他的歌")
+			s.addToast("UP 主不是歌，加不进队列；进他的空间听他的歌", notice.Warning)
 		},
 		// 「下一首播放」照实说一句为什么不**能用**：菜单是列表和网格共用的一份
 		// （`widgets/list` 的 menuItems），这一项在用户 Tab 照样摆着。给 nil
 		// 的话它会落到那句「还没接上」——而它其实早接上了（UP 主确实不是歌，
 		// 和上面两项是同一个理由）。
 		PlayNext: func(app.Item) {
-			s.addToast("UP 主不是歌，没有东西可排；进他的空间听他的歌")
+			s.addToast("UP 主不是歌，没有东西可排；进他的空间听他的歌", notice.Warning)
 		},
 		Open: func(item app.Item) {
 			mid, ok := searchUserMid(item)
 			if !ok {
-				s.addToast("这一项不是一个 UP 主")
+				s.addToast("这一项不是一个 UP 主", notice.Warning)
 				return
 			}
 			if err := mygo.Shell.OpenExternal(searchUserSpaceURL(mid)); err != nil {
-				s.addToast("打不开：" + err.Error())
+				s.addToast("打不开："+err.Error(), notice.Danger)
 			}
 		},
 		// ⚠️ 收藏 / 下载这两项**给的不是 nil**：给 nil 的话 `doAction` 会说
 		// 「还没接 B 站接口」——那是一句假话（接口早就在了），而用户会以为这
 		// 个应用还没做完。UP 主不是歌，这两句是真的。
 		FavSelect: func(app.Item) {
-			s.addToast("UP 主不是歌，没有东西可收藏；进他的空间收藏他的歌")
+			s.addToast("UP 主不是歌，没有东西可收藏；进他的空间收藏他的歌", notice.Warning)
 		},
 		Download: func(app.Item) {
-			s.addToast("UP 主不是视频，没有东西可下载")
+			s.addToast("UP 主不是视频，没有东西可下载", notice.Warning)
 		},
 		Notify: s.addToast,
 	}
@@ -525,9 +526,9 @@ func (s *Shell) searchPlayAll(t *searchTab) {
 	}
 
 	if err := s.app.Enqueue(items...); err != nil {
-		s.addToast("加不进队列：" + err.Error())
+		s.addToast("加不进队列："+err.Error(), notice.Danger)
 		return
 	}
 	// 话照抄上游（`video-list/index.tsx:100`）。
-	s.addToast("已添加 " + strconv.Itoa(len(items)) + " 首到播放列表")
+	s.addToast("已添加 "+strconv.Itoa(len(items))+" 首到播放列表", notice.Success)
 }

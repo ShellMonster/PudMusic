@@ -38,6 +38,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
@@ -447,7 +448,7 @@ func (p *PagedList) apply(r pageResult) {
 		p.err = r.err
 		p.blocked = true
 		log.Printf("biu: 第 %d 页拉失败（%s）：%v", r.page, p.why, r.err)
-		notify(p.surf.List().acts, "加载更多失败："+r.err.Error())
+		notify(p.surf.List().acts, "加载更多失败："+r.err.Error(), notice.Danger)
 		return
 	}
 

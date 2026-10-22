@@ -315,7 +315,7 @@ func TestQuittingWhileCheckingIsQuiet(t *testing.T) {
 	if got := f.snapshot().Phase; got == UpdateChecking {
 		t.Error("退出之后相位还停在「正在查」")
 	}
-	if n := f.app.TakeUpdateNotice(); n != "" {
+	if n, _ := f.app.TakeUpdateNotice(); n != "" {
 		t.Errorf("退出之后留了提示 %q", n)
 	}
 }
@@ -343,7 +343,7 @@ func TestNoCheckSurvivesTheQuit(t *testing.T) {
 		t.Errorf("退出之后的检查改了状态：%v/%q → %v/%q",
 			before.Phase, before.Latest, after.Phase, after.Latest)
 	}
-	if n := f.app.TakeUpdateNotice(); n != "" {
+	if n, _ := f.app.TakeUpdateNotice(); n != "" {
 		t.Errorf("退出之后的检查留了提示 %q", n)
 	}
 }

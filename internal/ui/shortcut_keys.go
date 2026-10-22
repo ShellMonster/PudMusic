@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
@@ -440,7 +441,7 @@ func (s *Shell) takeRecordedKey(field ui.Element, slot shortcutSlot) {
 // 用户在设置页上录的键在别的应用里压根不响——而录完就退出录制、界面上一切正常。
 func (s *Shell) applyShortcut(slot shortcutSlot, accel string) {
 	if err := s.keys.set(slot, accel); err != nil {
-		s.addToast("快捷键没存上：" + strings.TrimPrefix(err.Error(), "app: "))
+		s.addToast("快捷键没存上："+strings.TrimPrefix(err.Error(), "app: "), notice.Danger)
 		return
 	}
 	s.syncGlobalShortcuts()

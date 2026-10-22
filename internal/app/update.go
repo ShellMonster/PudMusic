@@ -51,6 +51,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 )
 
 // UpdatePhase 是更新器走到哪一步了。界面上弹窗出不出现、按钮是什么，全看它。
@@ -190,7 +192,11 @@ type updater struct {
 
 	state updateState
 	// notice 是给界面的一次性提示（后台查到了新版本之类），取走就没了。
+	//
+	// ⚠️ **tone 跟着 notice 一起存**（票 #180）：界面把这句话弹成一条提示，
+	// 而提示按语义分色。话和「成没成」都是这一层产的，所以语气也在这里定。
 	notice string
+	tone   notice.Tone
 	// cancel 是这次下载的取消函数。close 调它，用户在下载中途退出应用靠的就是它。
 	cancel context.CancelFunc
 	// checkCancel 是**正在查**那一次的取消函数。
@@ -298,18 +304,18 @@ func (a *App) UpdateSnapshot() UpdateState {
 //
 // 去重在这里做，不在调用方：界面每帧都会问一句，问到就弹一条 Toast，而「后台
 // 查到了新版本」这种话弹两遍比不弹更糟。
-func (a *App) TakeUpdateNotice() string {
+func (a *App) TakeUpdateNotice() (string, notice.Tone) {
 	a.mu.Lock()
 	u := a.updates
 	a.mu.Unlock()
 	if u == nil {
-		return ""
+		return "", notice.Plain
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	n := u.notice
+	n, tone := u.notice, u.tone
 	u.notice = ""
-	return n
+	return n, tone
 }
 
 // CheckUpdates 查一次更新（用户按了「检查更新」）。**立即返回**，结果走
@@ -527,7 +533,8 @@ func (u *updater) check(user bool) {
 	}
 	now := u.now()
 
-	var notice string
+	var msg string
+	var tone notice.Tone
 	var phase UpdatePhase
 	// prefs 是**出了 u.mu 之后**才写盘的那一份（见下面 ⚠️）。
 	var prefs *updatePrefsFile
@@ -542,7 +549,7 @@ func (u *updater) check(user bool) {
 		// 后台那次失败**不弹提示**：用户没按任何键，突然冒一句红字只会让人以为
 		// 应用坏了。下一次自己会好，真想知道可以去设置页按一下。
 		if user {
-			notice = "检查更新失败：" + err.Error()
+			msg, tone = "检查更新失败："+err.Error(), notice.Danger
 		}
 	case rel == nil:
 		// 已是最新。这一句一定要给用户看：Biu 那边是「当前版本为最新版本」的
@@ -552,7 +559,7 @@ func (u *updater) check(user bool) {
 		u.state.latest, u.state.notes, u.state.released = "", "", time.Time{}
 		prefs = &updatePrefsFile{LastCheck: now, KnownVersion: u.current}
 		if user {
-			notice = "当前版本为最新版本"
+			msg, tone = "当前版本为最新版本", notice.Success
 		}
 	default:
 		u.state.phase = UpdateAvailable
@@ -564,11 +571,11 @@ func (u *updater) check(user bool) {
 		if !user {
 			// 后台查到的：留一句话，让界面弹一条 Toast，然后用户自己决定要不要看。
 			// 硬弹窗是最招人烦的一种做法（见函数头）。
-			notice = "发现新版本 " + rel.Version
+			msg, tone = "发现新版本 "+rel.Version, notice.Success
 		}
 	}
-	if notice != "" {
-		u.notice = notice
+	if msg != "" {
+		u.notice, u.tone = msg, tone
 	}
 	u.mu.Unlock()
 

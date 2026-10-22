@@ -31,6 +31,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 )
 
@@ -199,10 +200,10 @@ func (n *collectionNotice) take(key string) (CollectionNotice, bool) {
 // ⚠️ **同一条内容说第二遍时 ID 一定要变**：界面是「取到新的一条才发 Toast」
 // 的，拿 ID 判重、而 ID 不变的话，第二遍就不会说了——「已收藏」只出现一次，
 // 用户会以为第二次点击没生效。
-func (n *collectionNotice) add(ref CollectionRef, text string, kind CollectionNoticeKind) {
+func (n *collectionNotice) add(ref CollectionRef, text string, kind CollectionNoticeKind, tone notice.Tone) {
 	n.mu.Lock()
 	n.nextID++
-	n.unread = append(n.unread, CollectionNotice{ID: n.nextID, Ref: ref, Text: text, Kind: kind})
+	n.unread = append(n.unread, CollectionNotice{ID: n.nextID, Ref: ref, Text: text, Kind: kind, Tone: tone})
 	n.mu.Unlock()
 }
 
@@ -237,6 +238,10 @@ type CollectionNotice struct {
 	Text string
 	// Kind 是这句话属于哪一类。界面按它决定除了 Toast 还要不要做点什么。
 	Kind CollectionNoticeKind
+	// Tone 是这句话的语义（成功 / 警告 / 失败 / 普通）：界面弹提示时按它
+	// 分色（票 #180）。**话是在这一层生成的，成没成也只有这一层知道**，
+	// 所以语气跟着话一起走。
+	Tone notice.Tone
 }
 
 // errCollectionsMissing 是「歌单这一摊没挂上」。
@@ -349,7 +354,7 @@ func (a *App) LoadCollection(ref CollectionRef) {
 		info, err := a.fetchCollection(ref)
 		if err != nil {
 			log.Printf("biu: 拉收藏夹 %s 的信息失败：%v", ref.Key(), err)
-			c.notice.add(ref, "打不开这个收藏夹："+bili.Friendly(err), NoticePlain)
+			c.notice.add(ref, "打不开这个收藏夹："+bili.Friendly(err), NoticePlain, notice.Danger)
 			a.wakeUI()
 			return
 		}
@@ -409,7 +414,7 @@ func (a *App) SetFavorite(ref CollectionRef, fav bool) {
 		}
 		if err != nil {
 			log.Printf("biu: 收藏夹 %s 收藏状态改成 %v 失败：%v", ref.Key(), fav, err)
-			c.notice.add(ref, favoriteFailText(fav, err), NoticePlain)
+			c.notice.add(ref, favoriteFailText(fav, err), NoticePlain, notice.Danger)
 			a.wakeUI()
 			return
 		}
@@ -423,15 +428,15 @@ func (a *App) SetFavorite(ref CollectionRef, fav bool) {
 		info, err := a.fetchCollection(ref)
 		if err != nil {
 			log.Printf("biu: 收藏之后刷新收藏夹 %s 的信息失败：%v", ref.Key(), err)
-			c.notice.add(ref, favoriteFailText(fav, err), NoticePlain)
+			c.notice.add(ref, favoriteFailText(fav, err), NoticePlain, notice.Danger)
 			a.wakeUI()
 			return
 		}
 		c.cache.put(info)
 		if fav {
-			c.notice.add(ref, "已收藏这个收藏夹", NoticePlain)
+			c.notice.add(ref, "已收藏这个收藏夹", NoticePlain, notice.Success)
 		} else {
-			c.notice.add(ref, "已取消收藏", NoticePlain)
+			c.notice.add(ref, "已取消收藏", NoticePlain, notice.Success)
 		}
 		a.wakeUI()
 	}()
@@ -486,7 +491,7 @@ func (a *App) ClearInvalidMedias(ref CollectionRef) {
 	go func() {
 		if err := c.refs.Client.CleanInvalidResources(context.Background(), ref.ID); err != nil {
 			log.Printf("biu: 清收藏夹 %s 的失效内容失败：%v", ref.Key(), err)
-			c.notice.add(ref, "清不掉失效内容："+bili.Friendly(err), NoticePlain)
+			c.notice.add(ref, "清不掉失效内容："+bili.Friendly(err), NoticePlain, notice.Danger)
 			a.wakeUI()
 			return
 		}
@@ -494,7 +499,7 @@ func (a *App) ClearInvalidMedias(ref CollectionRef) {
 		//
 		// ⚠️ Kind 是 `NoticeCollectionChanged`：界面拿到这一条时除了发 Toast
 		// 还要把列表从第一页重来。刷新的时机由这一趟说了算（理由见那个常量）。
-		c.notice.add(ref, "失效内容已清除", NoticeCollectionChanged)
+		c.notice.add(ref, "失效内容已清除", NoticeCollectionChanged, notice.Success)
 		go a.LoadCollection(ref)
 		a.wakeUI()
 	}()
@@ -604,7 +609,7 @@ func (a *App) LoadCollectionPage(ctx context.Context, ref CollectionRef, sort bi
 // 所以这句话只在用户真的点了什么的时候才说。
 func (a *App) sayCollectionsMissing() {
 	if c := a.collectionsSnapshot(); c != nil {
-		c.notice.add(CollectionRef{}, "歌单接口还没挂上", NoticePlain)
+		c.notice.add(CollectionRef{}, "歌单接口还没挂上", NoticePlain, notice.Danger)
 	}
 	a.wakeUI()
 }
