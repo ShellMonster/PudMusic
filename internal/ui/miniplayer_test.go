@@ -167,7 +167,7 @@ func TestTheMiniWindowParksInTheTopRightCorner(t *testing.T) {
 // TestTheMiniCardCoversTheWindow 量「透明窗口自己给了底」。
 //
 // 这条是被「窗口开着却看不见」这件事逼出来的：`Transparent: true` 之后框架把帧清
-// 成透明（`mygo/window.go:433`「Backends keep transparent windows clear」），主题
+// 成透明（`mygo/window.go:442`「Backends keep transparent windows clear」），主题
 // 背景**不填**——所以不自己画一块不透明底，320×100 的窗口在桌面上是隐形的，而它
 // 明明开着、有内容、点得动。
 //

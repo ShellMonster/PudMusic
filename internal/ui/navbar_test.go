@@ -730,7 +730,7 @@ func TestSuggestClearAllEmptiesTheHistory(t *testing.T) {
 //
 // 崩在搜索页的 `c.Router().Query(...)`：换页动画还没走完时，**正在离场
 // 的那一页**会被重新建一遍，而 MyGo 建离场页时故意不设 `c.router`
-// （`mygo/router.go:685`，`Context.Router` 的文档也写着 "or nil outside one"）。
+// （`mygo/ui/router.go:685`，`Context.Router` 的文档也写着 "or nil outside one"）。
 //
 // ⚠️ 这一条必须把切页动画**打开**（生产默认就是自动滑动）。`newShell` 为了让
 // 截图可复现把它关了，关着的时候离场页根本不重建，这条就永远是绿的——**测试

@@ -86,7 +86,7 @@ func TestTheVariantKeepsTheHueWhereItCan(t *testing.T) {
 
 // TestTheDisabledInkSurvivesTheFrameworkFade 是禁用态那一条。
 //
-// MyGo 把禁用元素整个乘 50% 不透明度（`mygo/ui/paint.go:210-212`）。所以判据要
+// MyGo 把禁用元素整个乘 50% 不透明度（`mygo/ui/paint.go:209-212`）。所以判据要
 // **先合一次 50%**、再算对比度：算的是屏幕上那个灰，不是 ink 里存的那个色。
 //
 // 深色下那个「选中」的主题按钮原来是主色绿：绿乘完 0.5 压在选中底上只剩

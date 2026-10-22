@@ -61,7 +61,7 @@ const searchHeaderGap = 12
 //
 // 🔴 关键词**问 `r`，不要问 `c.Router()`**：换页动画期间离场的那一页会被重建一遍
 // （`Router.View` 的 leaving 那一支），而 MyGo 建离场页时**故意不设 `c.router`**
-// （`mygo/router.go:685`），`c.Router().Query` 在那一帧就是空指针解引用，整个窗口
+// （`mygo/ui/router.go:685`），`c.Router().Query` 在那一帧就是空指针解引用，整个窗口
 // 被换成错误页。`(*ui.Route).Query` 读的是它自己那条 entry 的 loc，正是这一页自己
 // 的查询串。
 func (s *Shell) viewSearch(c *ui.Context, r *ui.Route) {

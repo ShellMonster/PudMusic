@@ -802,7 +802,7 @@ func TestQuittingUnregistersTheGlobalShortcuts(t *testing.T) {
 // TestSyncingTwiceLeavesNoDuplicate 验同步是幂等的。
 //
 // 全撤全建这个形状本来就是为幂等去的（`Register` 撞上同一个 accelerator 会直接
-// 报错，见 `mygo/modules.go:551`）。而设置页上「录一个键」「恢复默认」「那个开关」
+// 报错，见 `mygo/modules.go:560`）。而设置页上「录一个键」「恢复默认」「那个开关」
 // 三条出口都会走到同步，同一个键被同步两次是常事。
 func TestSyncingTwiceLeavesNoDuplicate(t *testing.T) {
 	s, _, hot, _ := shellWithHotkeys(t)

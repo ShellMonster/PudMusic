@@ -10,7 +10,7 @@
 // # 登记用的是存下来的那一串，一个字都不翻译
 //
 // `mygo.GlobalShortcut.Register` 自己会用 `mygo/internal/accelerator` 解析
-// （`modules.go:540`），而那个解析器认得 `CommandOrControl`、`Alt`、`Shift`、
+// （`modules.go:551`），而那个解析器认得 `CommandOrControl`、`Alt`、`Shift`、
 // 方向键、空格、F 键和单个字符——也就是说**我们存给 Biu 的那一串可以原样喂给它**。
 // 自己再翻一遍的话，两套词表迟早会走岔，而症状是「设置页显示 ⌘⇧P，别的应用里
 // 按 ⌘⇧P 什么也没有」。

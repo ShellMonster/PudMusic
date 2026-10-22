@@ -25,7 +25,7 @@
 // # 三样必须自己做、MyGo 不替我们做的事
 //
 //  1. **背景**：窗口是 `Transparent: true`，框架会把帧清成透明
-//     （`mygo/window.go:433`「Backends keep transparent windows clear」），
+//     （`mygo/window.go:442`「Backends keep transparent windows clear」），
 //     主题背景**不填**。不自己画一块不透明底的话，这个窗口在桌面上是隐形的
 //     ——而「窗口开着却看不见」是最难查的一种错。
 //  2. **主题**：铁律二，每一帧第一件事（`applyFrameTheme`）。
@@ -378,7 +378,7 @@ func (s *Shell) restoreMainWindow() {
 
 // ensureMiniWindow 真的把迷你窗口开出来。**只能在应用 ready 之后调**
 // （`openMiniPlayer` 排的那条 `WhenReady` 就是为这个，见 `ensureWindow` 的注释：
-// `mygo.NewWindow` 在还没 ready 时是直接 panic 的，`mygo/window.go:374`）。
+// `mygo.NewWindow` 在还没 ready 时是直接 panic 的，`mygo/window.go:382`）。
 func (s *Shell) ensureMiniWindow() {
 	mygo.App.WhenReady(func() {
 		// 排队的这段时间里它可能已经被人关掉了（快捷键连按两下）。

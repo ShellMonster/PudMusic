@@ -120,7 +120,7 @@ const (
 // 不回弹，`mygo/ui/motion.go:33`）。这里是在它上面**只**补一个 Precision。
 //
 // ⚠️ **必须给 Precision**，理由是这一层拿 `ScrollState.Scrolling()` 判
-// 「弹簧还在飞、让它飞完」。框架的默认是 0.001 DIP（`motion.go:70`），到这个
+// 「弹簧还在飞、让它飞完」。框架的默认是 0.001 DIP（`motion.go:75`），到这个
 // 精度之后弹簧还要再真跑两秒才收手——而这两秒里用户拿滚轮翻了歌词，下一帧
 // 就会重新对一次目标。0.05 DIP 是一根头发丝的误差，肉眼看不出来，到点就收手。
 var lyricScrollAnim = ui.Animation{

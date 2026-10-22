@@ -1008,7 +1008,7 @@ func Run(a *app.App, sess *media.Session) error {
 		s.installTray()
 		s.syncAutoStart()
 		// 全局快捷键也在这儿登记，理由和上面两件一样：`mygo.GlobalShortcut.Register`
-		// 头上有 `needsApp`，应用没 ready 时调它直接 panic（`modules.go:540`）。
+		// 头上有 `needsApp`，应用没 ready 时调它直接 panic（`modules.go:550`）。
 		// 排在 `openWindow` 之前：窗口还没建的时候注册失败要弹的那句提示，
 		// 第一帧就能画出来（提示挂在壳上，见 addToast）。
 		s.syncGlobalShortcuts()
