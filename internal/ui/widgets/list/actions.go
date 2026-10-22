@@ -110,8 +110,8 @@ func AppActions(a *app.App, notify func(string)) Actions {
 		Download: func(item app.Item) {
 			if item.IsLocal() {
 				// 本地文件已经在磁盘上了，没有东西可下载。**先说这一句**，
-				// 别让用户读到「这一首还不能放：缺稿件 id」——那是放的说法，
-				// 会让他以为这首本地歌坏了。
+				// 别让用户读到「这一条不是投稿，B 站没有给它挂能播的稿件」——
+				// 那是放的说法，会让他以为这首本地歌坏了。
 				if notify != nil {
 					notify("这一首已经在你磁盘上了，没有东西可下载")
 				}
@@ -179,12 +179,8 @@ func OpenLabel(item app.Item) string {
 //
 // 什么都没有就返回空串——调用方拿空串不去开浏览器（开一个空白页比什么都不
 // 做更让人以为界面卡了）。
-func BiliLink(item app.Item) string {
-	switch {
-	case item.Bvid != "":
-		return "https://www.bilibili.com/video/" + item.Bvid
-	case item.Sid != "":
-		return "https://www.bilibili.com/audio/au" + item.Sid
-	}
-	return ""
-}
+//
+// 🔴 **拼法只有 `app.BiliLink` 一处**：播放条上「在 B 站打开」那一枚键要的是
+// 同一个地址，而两处各拼一遍的话，改了一处另一处就会打开一个打不开的页面
+// （症状是「点了没反应」，而界面上看不出任何异样）。
+func BiliLink(item app.Item) string { return app.BiliLink(item) }

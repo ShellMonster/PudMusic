@@ -32,6 +32,25 @@ var (
 	// 这一条把「查得到但没得放」和「查都查不到」分开。
 	ErrNoStream = errors.New("bili: 没能取到可播的音频流")
 
+	// ErrNoAudioFlow 是「B 站说这一条**没有单独的音频流**」。
+	//
+	// 它和 `ErrNoStream` 分开，是因为**要走的路正好相反**：
+	//
+	//	ErrNoStream		「查到了这一条，但没给可播的」——多半是没大会员、
+	//	                已下架那一类，换一档音质或者换个账号也许还有戏
+	//	ErrNoAudioFlow	这一条**压根就没有音频流**：合集、剧集、还有把歌单
+	//	                整个塞进一个投稿的那种（实测：音乐区 tid=130、
+	//	                单 P、三十多分钟，取流接口回的就是这一句）
+	//
+	// 后者重试一万次还是这一句。给用户的话必须说清是后者——说成「没获取到
+	// 音频」的话，用户会以为是网络抖了，去查网、换网、等它好，而它永远
+	// 不会好（这一条见 `internal/app/unplayable.go`）。
+	//
+	// ⚠️ **它包着 `ErrNoStream`**：`errors.Is(err, ErrNoStream)` 仍然成立
+	// （那一类仍然是「查到了但没得放」），而 `errors.Is(err, ErrNoAudioFlow)`
+	// 只在这一种更细的情况上成立。两层判据不是重复，是「粗的一层 + 细的一层」。
+	ErrNoAudioFlow = fmt.Errorf("%w: 这一条没有单独的音频流", ErrNoStream)
+
 	// ErrStreamExpired 是「手上这条流已经过期了」。
 	//
 	// 它不是从接口返回的，是从地址的 deadline 算出来的——
@@ -220,7 +239,11 @@ func (c *Client) PlayURL(ctx context.Context, bvid, cid string, pref AudioQualit
 // 那种问题不拆出来就只能靠人眼发现。
 func refFrom(d *playurlData, bvid, cid string, pref AudioQuality) (*StreamRef, error) {
 	if d == nil || d.Dash == nil {
-		return nil, fmt.Errorf("%w: 这个稿件没有音频流", ErrNoStream)
+		// 🔴 **用 `ErrNoAudioFlow` 而不是 `ErrNoStream`**：这一支是「B 站说
+		// 这一条压根没有音频流」（合集 / 剧集 / 歌单塞一个投稿的那种），
+		// 重试一万次还是这一句。混进 `ErrNoStream` 里的话，界面上给用户的
+		// 那句就会变成「没能取到可播的音频流」——用户会以为是网络抖了。
+		return nil, fmt.Errorf("%w：这个稿件没有音频流", ErrNoAudioFlow)
 	}
 
 	s, q, ok := pickAudio(d.Dash, pref)
@@ -231,7 +254,7 @@ func refFrom(d *playurlData, bvid, cid string, pref AudioQuality) (*StreamRef, e
 		if pref == AudioLossless {
 			return nil, fmt.Errorf("%w: 这一首没有无损（要的是「%s」），换一档音质或用大会员账号", ErrNoStream, pref.Label())
 		}
-		return nil, fmt.Errorf("%w: 稿件 %s 的第 %s 集没有音频", ErrNoStream, bvid, cid)
+		return nil, fmt.Errorf("%w：稿件 %s 的第 %s 集没有音频", ErrNoAudioFlow, bvid, cid)
 	}
 
 	urls := make([]string, 0, 1+len(s.BackupURL))

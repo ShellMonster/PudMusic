@@ -93,6 +93,14 @@ func Friendly(err error) string {
 		// 🔴 **要排在 `ErrNetwork` 前面**：问不出分 P 底下多半真的是网络/风控，可
 		// 用户看到「连不上 B 站」不知道能做什么，而这一条有明确的下一步。
 		return "问不出这一集是哪一集，等网络好一些，或者换个词重新搜一次"
+	case errors.Is(err, ErrNoAudioFlow):
+		// 🔴 **「真的没有音频流」和「没取到」必须说成两句话**。
+		//
+		// 用户分不清这两件的时候，做的动作正好相反：以为「没取到」就会去
+		// 查网、换网、等它好，而这一条等一万年还是没有音频流。所以这一句
+		// 既说「为什么」（B 站压根没给这一条音频流），也说「还能怎么办」
+		// （打开里面的单集 / 在 B 站里打开它听）。
+		return "B 站没有给这一条单独的音频流（合集、剧集和歌单那一类多半是这样）。打开里面的单集，或者在 B 站里打开它听"
 	case errors.Is(err, ErrStreamExpired):
 		return "播放地址过期了，正在换一条新的"
 	case errors.Is(err, ErrNoLoginForOnline):
@@ -124,9 +132,13 @@ func Friendly(err error) string {
 		return fmt.Sprintf("B 站返回了一个看不懂的错误（%d）", api.Code)
 	}
 
-	// 取到流了但没有可播的：那句话里已经带了「为什么」（没大会员 / 稿件没音频）。
+	// 取到流了但没有可播的：那句话里已经带了「为什么」（没大会员 / 稿件已下架）。
 	if errors.Is(err, ErrNoStream) {
-		return trimBiliPrefix(err.Error())
+		// 🔴 **只留后半句**：前半句「没能取到可播的音频流」是**我们自己的内部
+		// 说法**，而播放条上只有一行（还带省略号），挤掉的正是后半句——
+		// 后半句才是用户看得懂、也照着做得动的话（「换一档音质或用大会员
+		// 账号」）。
+		return trimStreamPrefix(err.Error())
 	}
 
 	if errors.Is(err, ErrNetwork) {
@@ -158,6 +170,88 @@ func Friendly(err error) string {
 // 意义，但整句是有意义的，所以只剥前缀不砍句子。
 func trimBiliPrefix(s string) string {
 	return strings.TrimSpace(strings.TrimPrefix(s, "bili: "))
+}
+
+// trimStreamPrefix 去掉取流错误里的**内部说法**，只留用户看得懂的那半句。
+//
+// 「bili: 没能取到可播的音频流: 这一首没有无损（要的是「无损」），换一档音质
+// 或用大会员账号」里，前半句说的是**我们内部的状态**，后半句才是**用户的
+// 下一步**。播放条上那一行还带省略号，所以前半句挤掉的正是后半句。
+func trimStreamPrefix(s string) string {
+	s = trimBiliPrefix(s)
+	for _, p := range []string{"没能取到可播的音频流：", "没能取到可播的音频流: "} {
+		s = strings.TrimSpace(strings.TrimPrefix(s, p))
+	}
+	return s
+}
+
+// Recoverable 报这个错**再试一次有没有用**。
+//
+// 判据只有一条：「再问一次 B 站，会不会给出不一样的答案」。
+//
+//	网络断了、超时了、风控拦了、地址过期了	会变 → 可重试
+//	B 站说没有音频流、稿件被删了、要大会员	不会变 → 不可重试
+//
+// 界面上据此决定给不给「重试」。**给一个按了也没用的重试比不给更糟**——
+// 用户按两次发现还是那样，就不再信这个应用了；而「不可重试」那一句自己
+// 已经说了还能怎么办（换一档音质 / 去 B 站里打开它听）。
+func Recoverable(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch {
+	// 「压根没有音频流」：B 站这么说了，再问一次还是这一句。
+	case errors.Is(err, ErrNoAudioFlow):
+		return false
+	// 「查到了但没得放」：换一档音质、换个账号也许有戏，但**原样重试**没有用。
+	case errors.Is(err, ErrNoStream):
+		return false
+	// 要会员才有完整版：等不来。
+	case errors.Is(err, ErrPreviewOnly):
+		return false
+	// 没登录：重试还是没登录，要的是重新登录（那句话已经说了）。
+	case errors.Is(err, ErrNoLoginForOnline), errors.Is(err, ErrNotLoggedIn):
+		return false
+	// 风控和限流：等一会儿会变（`Friendly` 已经说了「等一会儿再试」）。
+	case errors.Is(err, ErrRiskControl), errors.Is(err, ErrTooFrequent):
+		return true
+	// 问不出分 P：底下多半是网络抖了一下。
+	case errors.Is(err, ErrNoPart):
+		return true
+	// 地址过期：换一条新的就好。
+	case errors.Is(err, ErrStreamExpired):
+		return true
+	// 字节源拉不动：网络或地址的问题，换张网 / 再试一次。
+	case errors.Is(err, audio.ErrStreamDead):
+		return true
+	// 没拿到 HTTP 响应（断网、超时、DNS）。
+	case errors.Is(err, ErrNetwork):
+		return true
+	}
+	// B 站的业务错误：逐个码判。
+	var api *APIError
+	if errors.As(err, &api) {
+		switch api.Code {
+		case -352, -412, -509:
+			// 风控 / 被拦 / 太快：等一会儿再来。
+			return true
+		case 72010027:
+			// 「这首音乐换了地址，已经跟不上了」——再问一次也许就是新地址。
+			return true
+		default:
+			// -101（登录过期）、-111、-400、-403、-404、10003、62002、
+			// 62004、62012、11010、7201006、72000000 ……：重试多少次都一样。
+			return false
+		}
+	}
+	// 超时那一类（不是 ErrNetwork 包住的）。
+	if strings.Contains(err.Error(), "timeout") ||
+		strings.Contains(err.Error(), "deadline exceeded") {
+		return true
+	}
+	// ⚠️ **不认识的错按「可重试」算**：用户宁可多点一次重试，也不要被一句
+	// 「不可重试」堵死——而这一句的文案本身已经说了出了什么事，用户看得见。
+	return true
 }
 
 // cleanMessage 把 B 站给的消息收拾干净再用。

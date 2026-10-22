@@ -84,7 +84,7 @@ func TestDownloadingSomethingWithoutAPartSaysSo(t *testing.T) {
 // TestDownloadingALocalFileSaysItIsAlreadyOnTheDisk 本地文件那一项按下去要说
 // 对的那一句。
 //
-// ⚠️ **不是**「这一首还不能放：缺稿件 id」——那是放的说法，会让用户以为这首
+// ⚠️ **不是**「这一条不是投稿，B 站没有给它挂能播的稿件」——那是放的说法，会让用户以为这首
 // 本地歌坏了。
 func TestDownloadingALocalFileSaysItIsAlreadyOnTheDisk(t *testing.T) {
 	a := app.New()

@@ -345,9 +345,10 @@ func collectionTimeTitle(typ bili.CollectionType) string {
 // onlineItemOf 把一条 B 站内容翻成播放队列认的那一项。
 //
 // ⚠️ **合集（21）和电影（24）也给 Source="online"**，但 Type 空着：它们没有
-// 音频流，而 `app.playableOnline` 对 Type 空的会回一句「这一首还不能放」，
-// 那句话说的就是事实。给它们编一个 Type 的话错误信息会指向另一个原因
-// （见 `app.playableOnline` 的注释）。
+// 音频流，而 `app.playableOnline` 对 Type 空的会回一句「这一条不是投稿，
+// B 站没有给它挂能播的稿件」——那一类**在界面上压根不给播放入口**
+// （见 `app.UnplayableMenuNote`）。给它们编一个 Type 的话错误信息会指向
+// 另一个原因（见 `app.playableOnline` 的注释）。
 //
 // 换算本身在 `app.ItemOfMedia`——**全项目只有那一份**，而批量下载那边也要用
 // （`app.EnqueueDownload`）。这里留一个调用是为了那一处调用点不用改。

@@ -122,13 +122,16 @@ func TestEveryRowWeDrawHasAVerdictThatMatchesWhatHappens(t *testing.T) {
 			if !r.Judged {
 				// 放不了的那一类，判据说出去之后界面上要有一句人话，而不是一行
 				// 画出来按不动的死条目。这里钉的是 `app.playableOnline` 说的话：
-				// 空 Type 的条目被拒时说的是「这一首还不能放」，而这一句说的正是
-				// 事实（它们真的没有音频流）。
+				// 空 Type 的条目被拒时说的是「这一条不是投稿，B 站没有给它挂能播
+				// 的稿件」——而这一句说的正是事实（它们真的没有音频流），并且带着
+				// 「还能怎么办」（票 #209：每一句都要答「为什么」和「怎么办」）。
 				err := a.PlayFrom(onlineItemOf(m))
 				if err == nil {
 					t.Errorf("%s：判据说放不了，按播放却没给一句话", r.What)
-				} else if !strings.Contains(err.Error(), "还不能放") {
+				} else if !strings.Contains(err.Error(), "没有给它挂能播的稿件") {
 					t.Errorf("%s：拒它的理由是 %q，说的不是「它没有流」这件事", r.What, err)
+				} else if !strings.Contains(err.Error(), "搜同名") {
+					t.Errorf("%s：拒它的理由是 %q，没有说「还能怎么办」", r.What, err)
 				}
 				return
 			}

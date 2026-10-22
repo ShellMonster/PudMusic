@@ -199,10 +199,11 @@ func laterRowOf(it app.LibraryItem) libraryRow {
 			PubTime: it.PubDate,
 			Item:    it.Item,
 		},
-		Progress: it.Progress,
-		ViewedAt: it.ViewedAt,
-		View:     it.View,
-		CanPlay:  it.CanPlay,
+		Progress:   it.Progress,
+		ViewedAt:   it.ViewedAt,
+		View:       it.View,
+		CanPlay:    it.CanPlay,
+		CannotPlay: it.CannotPlay,
 	}
 }
 
@@ -464,6 +465,14 @@ func (s *Shell) laterMenu(m *ui.Menu, i int) {
 		acts.Download(i)
 	case m.Item("移除").Chosen():
 		p.rows.Remove(i, s.app.LibraryOf().RemoveLater)
+	}
+	// 🔴 **按不动的那几项要说明为什么**。
+	//
+	// 用户看到的是「一行灰的」，而他不知道灰的是哪一种、还能怎么办——
+	// 而他也不可能猜到「PGC」是什么。说明摆在菜单末尾（它不是动作，
+	// 只是给人看的一句话）。
+	if row.CannotPlay != "" {
+		m.Item(row.CannotPlay).Disabled(true).Chosen()
 	}
 }
 

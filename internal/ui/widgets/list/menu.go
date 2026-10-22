@@ -25,6 +25,17 @@ type menuItem struct {
 	key   string
 	label string
 	sep   bool
+	// disabled 是这一项**按不动**。
+	//
+	// 它是「这一首压根放不了」那一类（没挂稿件的推荐条目、缺音频 id 的
+	// 音乐库条目）的落地方式：**在按之前就不给入口**，而不是让人按了
+	// 再听一句「不能放」。
+	disabled bool
+	// note 是这一项**不是动作**，是一句给用户看的说明。
+	//
+	// 它排在菜单末尾，写着「为什么按不动」和「还能怎么办」——按不动而不
+	// 说为什么等于让用户猜，而用户猜不出来。
+	note bool
 }
 
 // menuSeparator 是分隔那一行。
@@ -42,8 +53,19 @@ var menuSeparator = menuItem{sep: true}
 // `actions.go` 的 OpenLabel 里，播放列表抽屉的行菜单也调它。
 //
 // ⚠️ 别看着 Biu 有图标就给每一项补一张图：MenuItem 没有图标字段，补不进去。
+//
+// # 放不了的那一类：先别给入口
+//
+// 首页推荐、音乐榜、新歌速递、搜索结果**共用这一份菜单**，而它们里面
+// 确实有放不了的条目（B 站给纯音乐条目不挂稿件，那种行画得出来而放不了）。
+// 那一种在菜单里是**灰的**（`Disabled`），并在末尾补一句说明——
+// 用户右键就能看到「为什么这一首没有播放」和「还能怎么办」。
+//
+// ⚠️ **别改成「按了才说」**：那就是把一句应用内部的判断甩给用户，而用户
+// 分不清「真没有音频流」和「没取到」（这两件事要走的路正好相反，见
+// `internal/app/unplayable.go`）。
 func menuItems(m Music) []menuItem {
-	return []menuItem{
+	items := []menuItem{
 		{key: "play", label: "播放"},
 		{key: "play-next", label: "下一首播放"},
 		{key: "queue", label: "添加到队列"},
@@ -53,6 +75,38 @@ func menuItems(m Music) []menuItem {
 		{key: "favorite", label: "收藏"},
 		{key: "download-audio", label: "下载音频"},
 	}
+	return markUnplayable(items, m.Item)
+}
+
+// markUnplayable 把放不了 / 下不了的那些项按不动，并补上说明。
+//
+// 两类分开判：**放不了**（没有可播的稿件身份）动的是三个播放入口；
+// **下不了**（音乐库条目：放得了但没有下载通道）动的是「下载音频」。
+// 合成一句会错——「下载音频」对放不了的条目也是对的（它压根下不了，
+// 但原因不同）。
+func markUnplayable(items []menuItem, it app.Item) []menuItem {
+	if note := app.UnplayableMenuNote(it); note != "" {
+		for i := range items {
+			switch items[i].key {
+			case "play", "play-next", "queue", "download-audio":
+				items[i].disabled = true
+			}
+		}
+		// ⚠️ **只说一段**：放不了的条目必然也下不了（下载按 bvid 取流），
+		// 两段说明摆在一起是把同一件事说了两遍，而菜单末尾那一段会顶掉
+		// 前一段（用户只看见最后一句）。
+		items = append(items, menuItem{key: "why-unplayable", label: note, disabled: true, note: true})
+		return items
+	}
+	if note := app.UndownloadableMenuNote(it); note != "" {
+		for i := range items {
+			if items[i].key == "download-audio" {
+				items[i].disabled = true
+			}
+		}
+		items = append(items, menuItem{key: "why-undownloadable", label: note, disabled: true, note: true})
+	}
+	return items
 }
 
 // buildMenu 建第 i 行的菜单。被选中那一项时按它的 key 做对应的事。
@@ -86,7 +140,15 @@ func buildSongMenu(menu *ui.Menu, songs []Music, acts Actions, i int, playFrom f
 			continue
 		}
 		// ⚠️ 每一项都要 Item 一遍：只有 Chosen 的那一项为 true。
-		if menu.Item(item.label).Chosen() {
+		//
+		// 灰的那几项（放不了 / 下不了）也要 Item —— 少了它们菜单里就没有
+		// 那些项，而**说明那一项**也必须 Item，否则它压根不在菜单里。
+		it := menu.Item(item.label).Disabled(item.disabled)
+		if it.Chosen() {
+			// 说明那一项不是动作：它摆在那儿就是给人看的。
+			if item.note {
+				return
+			}
 			doAction(item, i, song, acts, playFrom)
 			return
 		}

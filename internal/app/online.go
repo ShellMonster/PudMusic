@@ -208,7 +208,7 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 			quality: ref.Label,
 		}
 		a.reportedErr = nil
-		a.errText = ""
+		a.clearErrLocked()
 		wake := a.wake
 		a.mu.Unlock()
 
@@ -234,7 +234,7 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 //
 // ⚠️ 真出了播放错误（网络断、字节源拉不动）时那句话是**真的**，不许清——
 // 清了就成了「静悄悄地停着」，那比留一句过时的话糟得多。这和成功那一支里
-// `a.errText = ""` 不一样：那一支是先换好了流再清，那一句一定是旧的。
+// `a.clearErrLocked()` 不一样：那一支是先换好了流再清，那一句一定是旧的。
 func (a *App) clearStaleQualityErr(gen int, tr *onlineTrack) {
 	a.mu.Lock()
 	stale := a.onlineGen != gen || a.closed || a.online != tr ||
@@ -343,36 +343,39 @@ func (it Item) isOnline() bool { return it.Source == "online" }
 //
 // ⚠️ **cid 不再是「有没有」的判据**：B 站的搜索结果只给 bvid，而搜索页那一整个
 // Tab 都是这样的条目（见 `service/bili/search.go` 的文件头）。以前这里要求 cid，
-// 表现是搜出来的歌一首都放不了，播放条上红字写「缺稿件 id 或分 P id」——用户按的
+// 表现是搜出来的歌一首都放不了，播放条上红字写「缺稿件 id 或分 P id」（那时 cid 还是判据之一）——用户按的
 // 就是搜索结果，说他缺一个他压根拿不到的东西，这句话是错的。
 //
 // cid 缺失时不是「放不了」而是「放哪一集还不知道」：那是**要问一次**才能知道的
 // 事情，不是当场能判出来的。`runOnline` 在后台问一次分 P（`bili.VideoPages`），
 // 问不到才退到第一集。同步能判出来的仍然是「压根没有 bvid」和「不是投稿」这两种。
+//
+// 🔴 **拒它的理由现在是一句带类型的话**（`Unplayable`），不是「这一首还不能放：
+// 缺稿件 id」：那句话说得像应用没接完，而这一条其实**接完了**——是这一条
+// 压根没有可播的稿件。界面上要靠这个类型决定「给不给播放入口」，也要靠它
+// 说清「还能怎么办」（见 `unplayable.go`）。
 func playableOnline(it Item) error {
 	switch {
 	case it.Type == "audio":
 		if it.Sid == "" {
-			return errors.New("这一首还不能放：缺音频 id")
+			return unplayableOf(UnplayableNoSid)
 		}
 		return nil
 	case it.Type == "mv" && it.Bvid != "":
 		return nil
 	}
-	return errors.New("这一首还不能放：缺稿件 id")
+	return unplayableOf(UnplayableNoArchive)
 }
 
 // OnlineReady 报告这一项在线播放的身份齐了没。
 //
-// ⚠️ **生产代码里目前没有一处调它**——界面层筛条目的那一步用的是
-// `bili.Media.Playable`（`itemsOfMedias`），而它在翻成 `Item` 之前就筛完了。
 // 它是给**测试**用的：那条不变量要钉的正是「`Playable` 说的和播放器认的认的是
 // 不是同一件事」，而在测试里比对的就是 `bili.Media.Playable()` 和这一步
 // （`ui.TestEveryPlayableCollectionEntryIsAcceptedByThePlayer`）。
 //
-// 留着这个导出是因为判据本身就该有一处能直接问「这一项放不放得了」的地方：
-// 将来界面真要按 `Item` 筛的时候有它可调，而今天没有调用方这件事不该写成一
-// 句「界面层拿它判……」（那句话会让下一个人去找一个不存在的调用点）。
+// ⚠️ **界面层那一处走的是 `app.CanPlay`**（同一个判据，但先判本地文件）：
+// 菜单里「给不给播放入口」问的是它（见 `internal/ui/widgets/list/menu.go`）。
+// 这一条留着是因为测试要一个能直接问「这一项放不放得了」的地方。
 //
 // 它和 `playableOnline` 是同一个判据，分成两个是因为一个给断言用、一个要在
 // 播放那一步报出原因。
@@ -394,7 +397,10 @@ func (a *App) playOnline(it Item) error {
 	a.mu.Lock()
 	a.onlineGen++
 	gen := a.onlineGen
-	a.errText = ""
+	a.clearErrLocked()
+	// 🔴 **记下用户刚才按的是哪一首**：重试要放的是它，而不是队列里当前的
+	// 那一首——取流失败时队列常常已经滚回去了（见 `App.Retry`）。
+	a.pending = it
 	a.mu.Unlock()
 
 	go a.runOnline(it, gen)
@@ -456,7 +462,10 @@ func (a *App) runOnline(it Item, gen int) {
 	a.quality = ref.Label
 	a.online = &onlineTrack{item: it, ref: ref, source: src, quality: ref.Label}
 	a.reportedErr = nil
-	a.errText = ""
+	a.clearErrLocked()
+	// 这一首已经放上了：不必再留着「用户刚才想放的那一首」（它就是现在
+	// 在放的这首）。留着的话，换歌之后 `biliURLLocked` 会拿旧的那首算地址。
+	a.pending = Item{}
 	wake := a.wake
 	a.mu.Unlock()
 
@@ -804,7 +813,9 @@ func (a *App) checkPlayback() {
 		// 从那儿重开就是「换流后从原来的位置继续」。
 		a.refreshOnlineNow()
 	default:
-		a.setErr(bili.Friendly(err))
+		// 🔴 **「能不能重试」跟着这句话一起落**：字节源拉不动多半是网络或
+		// 地址的问题（可重试），而「这一条压根没有音频流」重试也没用。
+		a.setErrText(bili.Friendly(err), bili.Recoverable(err))
 	}
 }
 
@@ -812,6 +823,11 @@ func (a *App) checkPlayback() {
 //
 // 代次对不上就一声不吭地走人：那已经是上一首歌的事了，在播放条上冒一句
 // 红字只会让用户以为现在这首选不动了。
+//
+// 🔴 **「能不能重试」跟着这句话一起落**（`bili.Recoverable` 判）：
+// 网络断了、风控拦了、地址过期了——重试一次就有可能好，界面上给一枚
+// 「重试」键；而「B 站说这一条没有音频流」重试一万次也没用，界面上
+// **不给**那一枚键，只把「为什么」和「还能怎么办」说准。
 func (a *App) failOnline(gen int, err error) {
 	a.mu.Lock()
 	stale := a.onlineGen != gen
@@ -819,7 +835,7 @@ func (a *App) failOnline(gen int, err error) {
 	if stale {
 		return
 	}
-	a.setErr(bili.Friendly(err))
+	a.setErrText(bili.Friendly(err), bili.Recoverable(err))
 }
 
 // refreshOnlineNow 从当前的播放位置重开一首。
@@ -869,7 +885,7 @@ func (a *App) refreshOnlineNow() {
 		a.online = &onlineTrack{item: tr.item, ref: ref, source: src, quality: ref.Label,
 			reopening: true}
 		a.reportedErr = nil
-		a.errText = ""
+		a.clearErrLocked()
 		wake := a.wake
 		a.mu.Unlock()
 
