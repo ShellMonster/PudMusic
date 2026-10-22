@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -479,7 +480,7 @@ func (s *Shell) closeFullPlayer() {
 // 别处会走这条路（快捷键将来就有），所以这里再判一次。
 func (s *Shell) openFullPlayer() {
 	if !s.app.Snapshot().HasTrack {
-		s.addToast("还没有在放什么，先进一首歌")
+		s.addToast("还没有在放什么，先进一首歌", notice.Warning)
 		return
 	}
 	if s.full.open {
@@ -1097,7 +1098,7 @@ func (s *Shell) viewFullPartsList(c *ui.Context) {
 			// 选完就收：Biu 的 PageList `onPressItem={onClose}`。
 			s.full.partsOpen = false
 			if err := s.app.PlayPart(r.cid); err != nil {
-				s.addToast(err.Error())
+				s.addToast(err.Error(), notice.Danger)
 			}
 		}
 	}).Grow(1)

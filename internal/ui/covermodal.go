@@ -35,6 +35,7 @@ package ui
 import (
 	"image"
 
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -137,7 +138,7 @@ func (s *Shell) flushCoverPick() {
 		return
 	}
 	if errMsg != "" {
-		s.addToast(errMsg)
+		s.addToast(errMsg, notice.Danger)
 		return
 	}
 	e := s.folderEdit
@@ -322,7 +323,7 @@ func (s *Shell) uploadCrop(crop *cropState) {
 	}
 	url, err := cropToDataURL(crop.src, crop.box, crop.dpr)
 	if err != nil {
-		s.addToast("裁不出来：" + err.Error())
+		s.addToast("裁不出来："+err.Error(), notice.Danger)
 		return
 	}
 	crop.uploading = true

@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/egoist/mygo/ui"
 )
@@ -181,14 +182,14 @@ func (g *likeGesture) swallowClick() bool {
 func (s *Shell) tripleNow() {
 	s.app.TripleLike(func(res bili.TripleResult, err error) {
 		if err != nil {
-			s.addToast("一键三连没成功：" + err.Error())
+			s.addToast("一键三连没成功："+err.Error(), notice.Danger)
 			return
 		}
 		// ⚠️ **三样要分开说**：B 站可能只做成一部分（硬币不够、这一首投过了、
 		// 风控拦了）。一句话「三连成功」会骗用户说「投出去了」——而他手上没有
 		// 那一枚币，那是他花了钱的。
 		if msg := tripleSaysWhatHappened(res); msg != "" {
-			s.addToast(msg)
+			s.addToast(msg, notice.Danger)
 		}
 	})
 }
@@ -302,7 +303,7 @@ func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 	if btn.Clicked() {
 		s.app.SetLike(!rel.Liked, func(err error) {
 			if err != nil {
-				s.addToast("赞不了：" + err.Error())
+				s.addToast("赞不了："+err.Error(), notice.Danger)
 			}
 		})
 	}

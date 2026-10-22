@@ -41,6 +41,7 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
@@ -187,7 +188,7 @@ type localPage struct {
 	app    *app.App
 	cache  *imgcache.Cache
 	acts   list.Actions
-	notify func(string)
+	notify func(string, notice.Tone)
 	// pickDir 弹系统框选一个文件夹。它必须从**后台 goroutine** 调，所以
 	// 调用方（`addDirectory`）自己起 goroutine，这里只管调。
 	pickDir func() (string, error)
@@ -333,7 +334,7 @@ const maxLocalWakes = 4
 // ⚠️ 五样都要传：卡片那两档要走封面缓存和操作，「删掉了/放不了」这些话只有
 // 一个出口（Toast），而「添加目录」没有它就进不去任何一个目录。
 func newLocalPage(a *app.App, cache *imgcache.Cache, acts list.Actions,
-	notify func(string), pickDir func() (string, error), displayView func() list.View) *localPage {
+	notify func(string, notice.Tone), pickDir func() (string, error), displayView func() list.View) *localPage {
 	p := &localPage{
 		app: a, cache: cache, acts: acts, notify: notify, pickDir: pickDir,
 		displayView: displayView,

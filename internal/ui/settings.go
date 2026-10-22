@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/egoist/mygo"
 )
 
@@ -71,7 +72,7 @@ func (s *Shell) reportSettingsError() {
 		return
 	}
 	// 设置的错自带中文说明，前面那个「app: 」是包名，去掉。
-	s.addToast("设置：" + strings.TrimPrefix(err.Error(), "app: "))
+	s.addToast("设置："+strings.TrimPrefix(err.Error(), "app: "), notice.Danger)
 }
 
 // themeModes 是三档主题，顺序就是从左到右的顺序。设置页那三个按钮用。

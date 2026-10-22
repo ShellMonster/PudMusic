@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 )
 
 // `AppActions` 那两份新接线的**落位**（对照审计的 A9 和 A24）。
@@ -76,7 +77,7 @@ func TestAppActionsPlayNextSaysSoWhenItCannotQueue(t *testing.T) {
 	t.Cleanup(a.Close)
 
 	var said []string
-	acts := AppActions(a, func(s string) { said = append(said, s) })
+	acts := AppActions(a, func(s string, _ notice.Tone) { said = append(said, s) })
 	acts.PlayNext(app.LocalItem(filepath.Join(t.TempDir(), "没有这个文件.mp3")))
 
 	if len(said) == 0 {

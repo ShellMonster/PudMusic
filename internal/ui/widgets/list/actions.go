@@ -8,6 +8,7 @@ package list
 
 import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/egoist/mygo"
 )
 
@@ -63,7 +64,10 @@ type Actions struct {
 	Download func(item app.Item)
 
 	// Notify 说一句话。刚接的操作（比如还没接 B 站接口的收藏）按不动就是靠它。
-	Notify func(text string)
+	//
+	// ⚠️ **语气跟着话一起走**（票 #180）：成功是绿的、失败是红的、警告是橙的，
+	// 而这一句话是什么语气，**说这句话的那一处知道**——本包只把话和语气递出去。
+	Notify func(text string, tone notice.Tone)
 
 	// IsPlaying 报这一首是不是**正在放的那首**，列表据此给那一行画高亮。
 	//
@@ -88,21 +92,21 @@ type Actions struct {
 // 拿不到 cid 的两处（收藏夹的行、动态卡片）各自在那一页把这一项换掉成
 // `App.DownloadItem`（后台补 cid，见 `ui` 里的两处），**别在这里改成后台的**：
 // 搜索结果的条目也只有 bvid，而它**要**如实拒绝——见 `Actions.Download`。
-func AppActions(a *app.App, notify func(string)) Actions {
+func AppActions(a *app.App, notify func(string, notice.Tone)) Actions {
 	return Actions{
 		Play: func(items []app.Item) {
 			if err := a.PlayFrom(items...); err != nil && notify != nil {
-				notify("放不了这一首：" + err.Error())
+				notify("放不了这一首："+err.Error(), notice.Danger)
 			}
 		},
 		Add: func(items []app.Item) {
 			if err := a.Enqueue(items...); err != nil && notify != nil {
-				notify("加不进队列：" + err.Error())
+				notify("加不进队列："+err.Error(), notice.Danger)
 			}
 		},
 		PlayNext: func(item app.Item) {
 			if err := a.EnqueueNext(item); err != nil && notify != nil {
-				notify("排不进下一首：" + err.Error())
+				notify("排不进下一首："+err.Error(), notice.Danger)
 			}
 		},
 		Open:      func(item app.Item) { open(item, notify) },
@@ -113,25 +117,25 @@ func AppActions(a *app.App, notify func(string)) Actions {
 				// 别让用户读到「这一条不是投稿，B 站没有给它挂能播的稿件」——
 				// 那是放的说法，会让他以为这首本地歌坏了。
 				if notify != nil {
-					notify("这一首已经在你磁盘上了，没有东西可下载")
+					notify("这一首已经在你磁盘上了，没有东西可下载", notice.Warning)
 				}
 				return
 			}
 			if _, err := a.Download(item); err != nil {
 				if notify != nil {
-					notify("下载不了：" + err.Error())
+					notify("下载不了："+err.Error(), notice.Danger)
 				}
 				return
 			}
 			// 成了一样要说一句：按下去之后界面上没有任何变化的话，用户会以为
 			// 这一项是死的（下载记录页确实多了一行，但他在别的页面上）。
 			if notify != nil {
-				notify("已加进下载队列")
+				notify("已加进下载队列", notice.Success)
 			}
 		},
-		Notify: func(text string) {
+		Notify: func(text string, tone notice.Tone) {
 			if notify != nil {
-				notify(text)
+				notify(text, tone)
 			}
 		},
 		// 🔴 **每帧现读**（闭包拿的是 `a`）：正在放的那首会换，缓存住的话
@@ -145,19 +149,19 @@ func AppActions(a *app.App, notify func(string)) Actions {
 // 两分支是有先后的：**本地文件先判**。一个从 B 站下下来又存到本地的音频，
 // 两边都有值，这时候「在访达里显示」才是用户想按的那个（Biu 的本地音乐行
 // 就是这么做的）。
-func open(item app.Item, notify func(string)) {
+func open(item app.Item, notify func(string, notice.Tone)) {
 	if item.Source == "local" && item.Path != "" {
 		mygo.Shell.ShowItemInFolder(item.Path)
 		return
 	}
 	if link := BiliLink(item); link != "" {
 		if err := mygo.Shell.OpenExternal(link); err != nil && notify != nil {
-			notify("打不开：" + err.Error())
+			notify("打不开："+err.Error(), notice.Danger)
 		}
 		return
 	}
 	if notify != nil {
-		notify("这一项还没有可以打开的来处")
+		notify("这一项还没有可以打开的来处", notice.Warning)
 	}
 }
 

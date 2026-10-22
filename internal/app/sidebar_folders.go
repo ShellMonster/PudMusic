@@ -11,16 +11,19 @@
 // 「删除」和「取消收藏」更直接：它们动的是用户真实的数据，而写操作在整个项目
 // 里**各只有这一处**——第二处发出去的那次没人挡得住。
 //
-// # 结果是一个字符串，不是 error
+// # 结果是一个字符串 + 一个语气，不是 error
 //
-// 四个方法的回调是 `func(string)`，**成功和失败都调**，而那句话是已经说全了的
-// 一整句（「已播放 200 首，这个收藏夹里还有更多没放进来」/「播放不了这个收藏夹：
-// 被 B 站风控拦下了」）。
+// 四个方法的回调是 `func(string, notice.Tone)`，**成功和失败都调**，而那句话
+// 是已经说全了的一整句（「已播放 200 首，这个收藏夹里还有更多没放进来」/「播放
+// 不了这个收藏夹：被 B 站风控拦下了」）。
 //
 // 这么定是因为这四件事里有一半**成功得并不圆满**：截断、跳过放不了的条目。
 // 用 error 报就得在每一处判断「这个错是失败还是『成功但是少放了』」，而那句
-// 话的措辞只有这一层知道（见 `folderItems` 里那个 200 的截断）。界面那边
-// 一律 `s.addToast(msg)`。
+// 话的措辞只有这一层知道（见 `folderItems` 里那个 200 的截断）。
+//
+// ⚠️ **语气也一起给**（票 #180）：界面把这句话弹成一条提示，而提示要按语义
+// 分色（成了绿、没成红）。**成没成只有这一层知道**——界面那边按字猜的话，
+// 改一次文案就错一次颜色，而颜色错了**没有一处会报错**。
 //
 // # 「整个收藏夹」是有限的
 //
@@ -36,6 +39,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 )
 
@@ -51,7 +55,7 @@ const folderItemLimit = 200
 //
 // 从第一首起，把翻出来的那几首接进队列并开始播——和收藏夹页的「播放全部」是
 // 同一件事，那边读到的是用户已经滚出来的那几页，这边是现拉的。
-func (a *App) PlayFolder(f Favorite, done func(string)) {
+func (a *App) PlayFolder(f Favorite, done func(string, notice.Tone)) {
 	a.withFolderItems(f, "播放", "播放", done, func(items []Item) error {
 		return a.PlayFrom(items...)
 	})
@@ -60,7 +64,7 @@ func (a *App) PlayFolder(f Favorite, done func(string)) {
 // EnqueueFolder 把这个容器里的内容接进队列末尾。**立刻返回**，跑完了调 done。
 //
 // 不打断正在放的那首——和「播放」的分界就在这儿（见 `Enqueue` 的注释）。
-func (a *App) EnqueueFolder(f Favorite, done func(string)) {
+func (a *App) EnqueueFolder(f Favorite, done func(string, notice.Tone)) {
 	a.withFolderItems(f, "加入队列", "加进队列", done, func(items []Item) error {
 		return a.Enqueue(items...)
 	})
@@ -74,33 +78,33 @@ func (a *App) EnqueueFolder(f Favorite, done func(string)) {
 //
 // ⚠️ `done` 一定被调，**成功和失败都调**：界面那边是一次性的接缝，不调就是
 // 用户按下去之后什么也没发生（比说错一句话更难查）。
-func (a *App) withFolderItems(f Favorite, verb, able string, done func(string), act func(items []Item) error) {
+func (a *App) withFolderItems(f Favorite, verb, able string, done func(string, notice.Tone), act func(items []Item) error) {
 	if a.collectionsSnapshot() == nil {
-		sayFolder(done, verb+"不了这个收藏夹：歌单接口还没挂上")
+		sayFolder(done, verb+"不了这个收藏夹：歌单接口还没挂上", notice.Danger)
 		return
 	}
 	ref := folderRef(f)
 	go func() {
 		items, left, err := a.folderItems(context.Background(), ref)
 		if err != nil {
-			sayFolder(done, verb+"不了这个收藏夹："+bili.Friendly(err))
+			sayFolder(done, verb+"不了这个收藏夹："+bili.Friendly(err), notice.Danger)
 			return
 		}
 		if len(items) == 0 {
-			sayFolder(done, "这个收藏夹里还没有能"+able+"的歌")
+			sayFolder(done, "这个收藏夹里还没有能"+able+"的歌", notice.Warning)
 			return
 		}
 		if err := act(items); err != nil {
-			sayFolder(done, verb+"不了："+bili.Friendly(err))
+			sayFolder(done, verb+"不了："+bili.Friendly(err), notice.Danger)
 			return
 		}
 		// 🔴 截断的那一句：**成功也要说**（理由见文件头）。
 		if left > 0 {
 			sayFolder(done, fmt.Sprintf("已%s %d 首，这个收藏夹里还有更多没放进来",
-				verb, len(items)))
+				verb, len(items)), notice.Success)
 			return
 		}
-		sayFolder(done, fmt.Sprintf("已%s %d 首", verb, len(items)))
+		sayFolder(done, fmt.Sprintf("已%s %d 首", verb, len(items)), notice.Success)
 	}()
 }
 
@@ -169,8 +173,8 @@ func playableItems(medias []bili.Media) []Item {
 //
 // ⚠️ **只对「我创建的」那一组有意义**：删除别人的收藏夹是 B 站不允许的，
 // 而菜单上「删除」这一项本来就只出现在我创建的那一组（见 `favMenuItems`）。
-func (a *App) DeleteFavoriteFolder(f Favorite, done func(string)) {
-	a.deleteCreatedFolder(f.ID, f.Title, func(msg string, _ bool) { done(msg) })
+func (a *App) DeleteFavoriteFolder(f Favorite, done func(string, notice.Tone)) {
+	a.deleteCreatedFolder(f.ID, f.Title, func(msg string, _ bool, tone notice.Tone) { done(msg, tone) })
 }
 
 // DeleteCollectionFolder 从歌单内容页删掉这个容器（连同里面的内容）。
@@ -185,26 +189,26 @@ func (a *App) DeleteFavoriteFolder(f Favorite, done func(string)) {
 // 没有了的容器**上，界面得自己走开——而 B 站拒绝的时候它还在，于是**必须留在
 // 原地**（跳走的话用户看到的是一个空页面加一句「删不掉」，而收藏夹好好地在那儿）。
 // 不带成败的话回调分不出这两种，「失败也跳走」是唯一可能的行为。
-func (a *App) DeleteCollectionFolder(ref CollectionRef, title string, done func(text string, ok bool)) {
+func (a *App) DeleteCollectionFolder(ref CollectionRef, title string, done func(text string, ok bool, tone notice.Tone)) {
 	a.deleteCreatedFolder(ref.ID, title, done)
 }
 
 // deleteCreatedFolder 是上面两个背后那一个。
-func (a *App) deleteCreatedFolder(id int64, title string, done func(text string, ok bool)) {
+func (a *App) deleteCreatedFolder(id int64, title string, done func(text string, ok bool, tone notice.Tone)) {
 	c := a.collectionsSnapshot()
 	if c == nil {
-		sayFolderDone(done, "删不掉这个收藏夹：歌单接口还没挂上", false)
+		sayFolderDone(done, "删不掉这个收藏夹：歌单接口还没挂上", false, notice.Danger)
 		return
 	}
 	go func() {
 		if err := c.refs.Client.DeleteFolder(context.Background(), id); err != nil {
 			log.Printf("biu: 删收藏夹 %d 失败：%v", id, err)
-			sayFolderDone(done, "删不掉这个收藏夹："+bili.Friendly(err), false)
+			sayFolderDone(done, "删不掉这个收藏夹："+bili.Friendly(err), false, notice.Danger)
 			a.wakeUI()
 			return
 		}
 		a.forgetFavorite(FavoritesCreated, id)
-		sayFolderDone(done, "已删掉「"+title+"」", true)
+		sayFolderDone(done, "已删掉「"+title+"」", true, notice.Success)
 		a.wakeUI()
 	}()
 }
@@ -223,13 +227,13 @@ func (a *App) deleteCreatedFolder(id int64, title string, done func(text string,
 // 里的那一行加一次 `UpdateSettings`，而落盘本来就在后台合并写（见
 // `UpdateSettings` 的注释）——塞进 goroutine 只会让「侧栏那一行还没消失」
 // 这件事变成看运气。
-func (a *App) ForgetCollectionFolder(ref CollectionRef, title string, done func(string)) {
+func (a *App) ForgetCollectionFolder(ref CollectionRef, title string, done func(string, notice.Tone)) {
 	if a.collectionsSnapshot() == nil {
-		sayFolder(done, "移不了这个收藏夹：歌单接口还没挂上")
+		sayFolder(done, "移不了这个收藏夹：歌单接口还没挂上", notice.Danger)
 		return
 	}
 	a.forgetFavoriteGroup(ref.ID)
-	sayFolder(done, "已从侧栏移除「"+title+"」，B 站上的那个还在")
+	sayFolder(done, "已从侧栏移除「"+title+"」，B 站上的那个还在", notice.Success)
 }
 
 // forgetFavoriteGroup 把这一行从**它所在的那一组**里拿掉。
@@ -257,21 +261,21 @@ func (a *App) forgetFavoriteGroup(id int64) {
 // 和删除的分界：删除的是「我创建的、连同里面的歌一起没了」，这个只是把我对
 // 它的那份收藏摘掉——歌还在 UP 主那里，UP 主那边一个字都不会少。所以它
 // **不要二次确认**：撤回来只要再点一次，而点错了之后还弹一个框只会让人更烦。
-func (a *App) UnfavoriteFolder(f Favorite, done func(string)) {
+func (a *App) UnfavoriteFolder(f Favorite, done func(string, notice.Tone)) {
 	c := a.collectionsSnapshot()
 	if c == nil {
-		sayFolder(done, "取消不了收藏：歌单接口还没挂上")
+		sayFolder(done, "取消不了收藏：歌单接口还没挂上", notice.Danger)
 		return
 	}
 	go func() {
 		if err := c.refs.Client.UnfavoriteCollection(context.Background(), f.ID); err != nil {
 			log.Printf("biu: 取消收藏收藏夹 %d 失败：%v", f.ID, err)
-			sayFolder(done, "取消不了收藏："+bili.Friendly(err))
+			sayFolder(done, "取消不了收藏："+bili.Friendly(err), notice.Danger)
 			a.wakeUI()
 			return
 		}
 		a.forgetFavorite(FavoritesCollected, f.ID)
-		sayFolder(done, "已取消收藏「"+f.Title+"」")
+		sayFolder(done, "已取消收藏「"+f.Title+"」", notice.Success)
 		a.wakeUI()
 	}()
 }
@@ -309,9 +313,9 @@ func folderRef(f Favorite) CollectionRef {
 // sayFolder 是「后台那一趟做完了，说一句」那一步。
 //
 // done 是 nil 的调用方（测试里那些不想听结果的）什么都不用做。
-func sayFolder(done func(string), msg string) {
+func sayFolder(done func(string, notice.Tone), msg string, tone notice.Tone) {
 	if done != nil {
-		done(msg)
+		done(msg, tone)
 	}
 }
 
@@ -319,8 +323,8 @@ func sayFolder(done func(string), msg string) {
 //
 // ⚠️ **成没成是回调的一个参数，不靠那句话的字**：失败时界面要**留在原地**
 // （收藏夹还在 B 站上），而成功时它得走开——只给一句话的话，界面只能一律走开。
-func sayFolderDone(done func(text string, ok bool), msg string, ok bool) {
+func sayFolderDone(done func(text string, ok bool, tone notice.Tone), msg string, ok bool, tone notice.Tone) {
 	if done != nil {
-		done(msg, ok)
+		done(msg, ok, tone)
 	}
 }

@@ -40,6 +40,7 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/egoist/mygo"
 )
@@ -414,7 +415,7 @@ func (s *Shell) announceMigration() {
 	rep := LastMigration()
 	switch {
 	case rep.UpgradeErr != nil:
-		s.addToast("数据升级失败：" + rep.Upgraded)
+		s.addToast("数据升级失败："+rep.Upgraded, notice.Danger)
 	case rep.Imported.Any(), len(rep.Imported.Notes) > 0:
 		// 🔴 **这里只弹最短的那一句，绝不弹完整报告。**
 		//
@@ -428,8 +429,22 @@ func (s *Shell) announceMigration() {
 		// 段——那里逐条列着，位置固定、不会被盖住、用户想看多久看多久。
 		//
 		// 「请重新登录」这一句仍然必须出现在首帧：用户不会主动去设置页。
-		s.addToast(shortImportToast(rep.Imported))
+		s.addToast(shortImportToast(rep.Imported), importTone(rep.Imported))
 	}
+}
+
+// importTone 是「从 Biu 导入」那一句话的语气。
+//
+// ⚠️ **有要用户动手的事就是橙的**：导入成了（那是绿的），但「Biu 的登录信息
+// 不迁，请在这个应用里重新登录一次」——那一件要用户**现在**就动手。给它一个
+// 绿色，用户会以为这一页不用管了。
+//
+// 什么都没带过来也是橙的：用户按了导入，什么都没发生。
+func importTone(r app.Imported) notice.Tone {
+	if !r.Any() || len(r.Notes) > 0 {
+		return notice.Warning
+	}
+	return notice.Success
 }
 
 // shortImportToast 是首帧弹的那一句：**短**，最多一行。

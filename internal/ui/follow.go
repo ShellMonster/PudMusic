@@ -49,6 +49,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -1187,7 +1188,7 @@ func (s *Shell) adoptFollow(f *followPage) {
 			// 为什么——画面上卡片消失、而 B 站那边其实没取关，是最坏的那种假象。
 			if r.err != nil {
 				log.Printf("biu: 取消关注失败了：%v", r.err)
-				s.addToast("取关没成功：" + r.err.Error())
+				s.addToast("取关没成功："+r.err.Error(), notice.Danger)
 				continue
 			}
 			f.removeFollowUser(r.unfollowMid)

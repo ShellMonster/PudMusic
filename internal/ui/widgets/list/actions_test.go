@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 )
 
 // 这一组验的是**接线**：`AppActions` 接在真的 App 上之后，每一项做什么。
@@ -42,7 +43,7 @@ func TestAppActionsSaysWhatWentWrong(t *testing.T) {
 	t.Cleanup(a.Close)
 
 	var notices []string
-	acts := AppActions(a, func(s string) { notices = append(notices, s) })
+	acts := AppActions(a, func(s string, _ notice.Tone) { notices = append(notices, s) })
 
 	missing := app.LocalItem(filepath.Join(t.TempDir(), "没有这个文件.mp3"))
 	acts.Play([]app.Item{missing})
@@ -59,7 +60,7 @@ func TestAppActionsOnAnUnwiredItemSaysSo(t *testing.T) {
 	t.Cleanup(a.Close)
 
 	var notices []string
-	acts := AppActions(a, func(s string) { notices = append(notices, s) })
+	acts := AppActions(a, func(s string, _ notice.Tone) { notices = append(notices, s) })
 	acts.Open(app.Item{Source: "online", Type: "mv"}) // 没有 bvid
 
 	if len(notices) != 1 {
