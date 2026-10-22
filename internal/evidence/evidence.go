@@ -1869,6 +1869,36 @@ var Items = []Item{
 		},
 	},
 	{
+		// 归「双平台」那一组：还是播放条那一块，但说的是**左边那一块的结构**
+		//（issue 219 / BMG-131）。
+		Category: Platform,
+		// issue 219：播放条左边改成上游那**三段**——封面 │ 歌名·UP名 │
+		// 分集·收藏·赞（**横着并排**的一行）；UP 名**左对齐**；第二行与歌名
+		// 之间的空隙是上游那个（`space-y-1` = 4）；三枚键的图标是 **18**。
+		//
+		// 🔴 **判据全是画面上的位置和尺寸**：改之前三枚键在**歌名下面那一行**，
+		// 而那也是一个「三枚键」的样子——键还是那三枚、也还点得动，**界面上
+		// 看不出坏了**，只是和上游不像（上游那三枚是封面右边**横着并排**的）。
+		//
+		// ⚠️ **UP 名那一格原来也是「看不出坏了」**：它是一块 `Grow(1)` 的按钮，
+		// 而框架的按钮内容**默认居中**——那句话飘到了那一段的中间（实测歌名在
+		// x=80、UP 名在 x=219），而上游是 `items-start` 的普通 `span`。
+		Spec: "播放条左边是三段：封面 │ 歌名·UP名 │ 分集·收藏·赞（横着并排的一行）；UP 名和歌名左对齐；第二行与歌名之间的空隙是 4；三枚键的图标是 18",
+		Tests: []string{
+			// 三段横着摆（三枚键在文字列**右边**、在同一条水平线上、次序是
+			// 分集 → 收藏 → 赞）。
+			"TestTheLeftBlockIsThreeSegments",
+			// UP 名左对齐（和歌名同一个左沿）。
+			"TestTheOwnerNameIsLeftAlignedWithTheTitle",
+			// 第二行与歌名之间的空隙是 4（上游的 `space-y-1`）。
+			"TestTheGapBetweenTheTitleAndTheOwnerName",
+			// 三枚键的图标是 18（画面上的墨迹大小）。
+			"TestTheThreeLeftKeysUseTheUpstreamIconSize",
+			// 分集那一枚出现/消失的时候，收藏和赞**不挪位置**。
+			"TestTheLeftKeysStayPutWhenThePartsKeyAppears",
+		},
+	},
+	{
 		// 归「双平台」那一组，和上面 issue 127 那一条是同一件事的两半：那一票动的是
 		// 外壳（侧栏 / 顶栏 / 播放条），这一票动的是**内容那一块**（列表与网格）。
 		Category: Platform,

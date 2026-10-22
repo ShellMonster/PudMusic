@@ -261,12 +261,21 @@ func TestTheMiddleColumnIsThreePartsWide(t *testing.T) {
 // TestTheLeftColumnIsOneFifthOfTheBar 断左边那一列是五份里的一份。
 //
 // 上一条量的是「中间那一列和三份的关系」，这一条量的是**左边那一列自己**：
-// 歌名的框宽 = 歌名那一列的宽 = 左边那一列的宽 − 封面 − 缝，而**歌名够长时
-// 它的框就是整个容器那么宽**（`MaxLines(1)` + 省略号）。
+// 歌名的框宽 = 歌名那一列的宽 = 左边那一列的宽 − 封面 − 两道缝 − 第三段，
+// 而**歌名够长时它的框就是整个容器那么宽**（`MaxLines(1)` + 省略号）。
+//
+// 🔴 **票 #219 之后左边那一列是三段**（上游 `playbar/left/index.tsx:29`）：
+//
+//	封面 │ 缝 │ 歌名·UP名 │ 缝 │ 分集·收藏·赞
+//
+// 所以歌名那一列要减掉**两道**缝（改之前只有一道——键在歌名下面那一行），
+// 还要减掉**第三段**（三枚键横着并排的那一段）。
+//
+// ⚠️ **第三段的宽度是量出来的，不是写死的**：它是**跟着内容走的**（上游那一段
+// 也是 `flex`）——单 P 的稿子少一枚分集键，那一段就窄 32，而歌名那一列跟着
+// 宽 32。这个 tester 背后是一个空的 App，所以那一段里只有「收藏」一枚。
 //
 // ⚠️ **要歌名够长**：短歌名的框是它自己的自然宽，量的是字不是容器。
-// ⚠️ **要有 UP 名**：没有 UP 名的话歌名下面那一行只要 120，左边那一列的最小
-// 内容宽就不是 244，量到的就不是「轨道」而是「内容」。
 // ⚠️ **窗口要够宽**（≥ 1252）：窄窗口上左边那一列是**内容撑出来的**（244，
 // 见 `playbarLeftMinW`），不是轨道那么宽——那正是「溢出轨道」那一档。
 func TestTheLeftColumnIsOneFifthOfTheBar(t *testing.T) {
@@ -282,11 +291,26 @@ func TestTheLeftColumnIsOneFifthOfTheBar(t *testing.T) {
 				t.Fatalf("画面上找不到歌名，文字有 %q", tt.Texts())
 			}
 
+			// 第三段有多宽：量画出来的那几枚键的跨度。
+			segLo, segHi := float32(1e9), float32(-1e9)
+			for _, k := range []string{"分集", "收藏", "赞"} {
+				r, ok := tt.Find(k)
+				if !ok {
+					continue
+				}
+				segLo = min32(segLo, r.X)
+				segHi = max32(segHi, r.X+r.W)
+			}
+			if segHi < segLo {
+				t.Fatalf("第三段那几枚键一枚都量不到，文字有 %q", tt.Texts())
+			}
+
 			got := title.W
-			want := float32(width-playbarPadX*2)/5 - coverSize - coverGap
+			want := float32(width-playbarPadX*2)/5 - coverSize - 2*coverGap - (segHi - segLo)
 			if absFloat(got-want) > 1 {
 				t.Errorf("歌名那一列只有 %.1f 宽，而它该是 %.1f——"+
-					"左边那一列是五份里的一份（上游的 1:3:1）", got, want)
+					"左边那一列是五份里的一份（上游的 1:3:1），"+
+					"而它里面是三段（封面 │ 歌名·UP名 │ 三枚键）", got, want)
 			}
 		})
 	}

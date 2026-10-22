@@ -61,7 +61,7 @@ func TestEveryEntryCarriesTheUPOwner(t *testing.T) {
 		t.Run(c.from, func(t *testing.T) {
 			if c.item.Artist != c.want {
 				t.Errorf("%s 那一项的 UP 名是 %q，want %q——"+
-					"播放条上那一行整个不画（viewTrackMeta 只在 Artist 非空时画名字）",
+					"播放条上那句话整个不画（那一列只在 Artist 非空时画名字）",
 					c.from, c.item.Artist, c.want)
 			}
 			if c.item.ArtistMid != c.mid {
