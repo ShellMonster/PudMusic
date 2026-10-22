@@ -340,7 +340,7 @@ func (s *Shell) viewTrackError(c *ui.Context, st app.State, t *ui.Theme) {
 			if s.withTip(c, flatButton(c, "在 B 站打开").FontSize(scale.Font(c, 12)),
 				"在 B 站里听这一首").Clicked() {
 				if err := systemOpenLink(st.BiliURL); err != nil {
-					s.addToast("打不开：" + err.Error())
+					s.addToast("打不开："+err.Error(), notice.Danger)
 				}
 			}
 		}
@@ -353,7 +353,7 @@ func (s *Shell) viewTrackError(c *ui.Context, st app.State, t *ui.Theme) {
 // 给一个按了也没用的重试比不给更糟。
 func (s *Shell) retryPlay() {
 	if err := s.app.Retry(); err != nil {
-		s.addToast(err.Error())
+		s.addToast(err.Error(), notice.Danger)
 	}
 }
 
