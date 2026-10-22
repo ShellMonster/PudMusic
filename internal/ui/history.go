@@ -159,11 +159,20 @@ func (s *Shell) viewHistory(c *ui.Context, _ *ui.Route) {
 			}
 
 			// 表头**只在列表 / 紧凑两档**摆，理由见 later.go 那一处。
-			p.rows.SetView(s.displayView())
+			//
+			// ⚠️ **摆法（列表 / 紧凑 / 网格）在 `syncLibraryPage` 那一层装**，理由同
+			// later.go 那一处（票 #161）。
 			viewLibraryHeader(c, p.rows, historyHeaderSpec, historyHeaderKey)
 			p.rows.View(c)
 			s.noteScrollbar(p.rows.Hot())
 		})
+}
+
+// syncHistory 是「历史记录」这一页每帧的副作用。
+//
+// ⚠️ **换查询（关键词 / 日期范围）不在这里**，理由见 `syncLater` 那一段。
+func (s *Shell) syncHistory(c *ui.Context) {
+	s.syncLibraryPage(historyPath, &s.historyPage, c)
 }
 
 // viewReportHistory 是那个「记录播放历史」的开关，改的是**盘上已经有的键**

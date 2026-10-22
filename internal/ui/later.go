@@ -250,7 +250,10 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 
 			// 表头**只在列表 / 紧凑两档**摆：网格里一格是一首歌，表头上那几列
 			// 和格子对不上号（理由见 `rowheader.go` 文件头）。
-			p.rows.SetView(s.displayView())
+			//
+			// ⚠️ **摆法（列表 / 紧凑 / 网格）在 `syncLibraryPage` 那一层装**：它每一帧
+			// 都要跟着设置里那个「数据显示样式」换，而满屏开着的时候这一页不画
+			// （票 #161）——不挪的话，用户在满屏里改完设置回来，这一页还是旧的那一档。
 			// 两个时间列放不放得下由 `laterTimeCols` 说，行那一处读的是同一个
 			// 判据（见 drawLaterRow）。
 			viewLibraryHeader(c, p.rows, func(mt listMetrics, key string) list.HeaderSpec {
@@ -260,6 +263,15 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 			p.rows.View(c)
 			s.noteScrollbar(p.rows.Hot())
 		})
+}
+
+// syncLater 是「稍后再看」这一页每帧的副作用。
+//
+// ⚠️ **换查询（关键词 / 日期范围）不在这里**：那一条要读这一帧刚建出来的输入框
+// （`viewFilters` 和 `box.Submitted()`），而满屏开着的时候这一页不画、用户也
+// 碰不到那个框。收结果和起第一拉在 `syncLibraryPage` 那一层。
+func (s *Shell) syncLater(c *ui.Context) {
+	s.syncLibraryPage(laterPath, &s.laterPage, c)
 }
 
 // drawLaterRow 画第 r 行。

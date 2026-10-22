@@ -101,6 +101,16 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 	s.trackScrollbar(loginScroll)
 }
 
+// syncLogin 是登录页每帧的副作用。**这一页没有**。
+//
+// 理由：这一页只读状态、只发命令（见文件头那段话），所有异步的事都在
+// `app.Account` 里，而那一边是**自己叫醒界面**的——二维码回来了界面自己会
+// 醒，不需要这一页每帧去收什么。
+//
+// ⚠️ **它在 `pageSyncs` 表里是个空函数**，不是漏了：那张表和 `builtPage` 是
+// 同一件事的两面（见 underlay.go 的注释），加新页的人照着表就知道该往哪儿加。
+func (s *Shell) syncLogin(c *ui.Context) {}
+
 // qrImage 把二维码画出来。
 //
 // # Bitmap 只在换二维码时重建

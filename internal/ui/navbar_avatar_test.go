@@ -386,7 +386,9 @@ func TestTheAvatarShowsMyOwnPictureOnceLoggedIn(t *testing.T) {
 // TestTheAvatarOnlyAsksOnceEvenThoughEveryFrameAsks 验「每一帧问一次」没有变成
 // 「每一帧打一次」。
 //
-// 顶栏是整个应用重画最勤的一处，而「问一次」这个闸门住在 view 里（`avatarSync`）。
+// 顶栏是整个应用重画最勤的一处，而「问一次」这个闸门住在**每帧的副作用那一层**
+// 里（`avatarSync`，票 #161：满屏开着的时候顶栏不画，而这一格必须自己追得上
+// 登录态）。
 // 写错了的样子是**画面完全正常**——头像照样出来——只是那台 B 站被问了几十次，
 // 而登录之后每一条都是带凭据的请求。
 //
@@ -409,7 +411,7 @@ func TestTheAvatarOnlyAsksOnceEvenThoughEveryFrameAsks(t *testing.T) {
 
 	if n := f.countHit(avatarNavPath); n != 1 {
 		t.Errorf("画了 30 帧之后那台 B 站被问了 %d 次，want 1——"+
-			"闸门住在 view 里，写松了一点就变成每一帧一个带凭据的请求", n)
+			"闸门住在每帧的副作用那一层里，写松了一点就变成每一帧一个带凭据的请求", n)
 	}
 }
 

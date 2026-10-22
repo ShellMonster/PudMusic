@@ -136,6 +136,43 @@ func (s *Shell) viewSearch(c *ui.Context, r *ui.Route) {
 	})
 }
 
+// syncSearch 是搜索页每帧的副作用：草稿跟着路由上的词走、换查询就重置到第 1 页、
+// 收当前那一张 Tab 的后台结果、起该起的那一拉。
+//
+// ⚠️ **它们原来散在 `viewSearch` 和 `viewSearchResults` 里**，而这一页在满屏
+// 开着的时候不画（票 #161）——不挪的话，用户在满屏里看频谱的那几分钟里，搜索
+// 结果的后台数据一直躺在信箱里没人取。
+//
+// ⚠️ **只同步当前那一张 Tab**：另外两张的列表**从来没打开过**，而
+// `PagedList.Sync` 里那一支「一页都还没拉过就发第一拉」会把它们也拉起来——
+// 那是用户根本没要的三趟请求。
+func (s *Shell) syncSearch(c *ui.Context) {
+	st := &s.search
+	keyword := strings.TrimSpace(s.router.Query(searchQuery))
+
+	// ⚠️ **草稿跟着路由上的词走**（理由见 `viewSearch` 里那一段：路由上的词
+	// 变了才写，用户正在敲的字不许被覆盖）。
+	if keyword != "" && s.searchDraftFor != keyword {
+		s.searchDraft = keyword
+		s.searchDraftFor = keyword
+	}
+
+	cur := st.tab
+	// 🔴 换查询 → 重置到第 1 页（理由见 searchTab.current）。
+	//
+	// ⚠️ **判的是上一帧的那张 Tab**：这一层的副作用跑在画的前面，而 Tab 是
+	// 画的时候才写的。画的那一半里还有一次 `current`（用这一帧的 Tab），两次
+	// 各管各的：`current` 自己认得出「已经重置过了」，所以跑两遍不重来。
+	st.lists[cur].current(searchQuerySpec{keyword: keyword, sort: st.sorts[cur]})
+
+	// 🔴 设置里的「数据显示样式」在这一帧生效（`s.displayView` 的注释写了为什么
+	// 每帧都要调）。
+	st.lists[cur].list.SetView(s.displayView())
+
+	// 收后台投回来的结果、起该起的那一拉。
+	st.lists[cur].list.Sync(c)
+}
+
 // viewSearchResults 是搜了词之后的那一块：标题 + 三个 Tab + 排序行 + 结果。
 // 摆的顺序照上游（`pages/search/index.tsx:23-58`）。
 func (s *Shell) viewSearchResults(c *ui.Context, keyword string) {

@@ -352,13 +352,23 @@ func TestEachScreenIsBuiltOncePerFrame(t *testing.T) {
 			// 而播放条是 **0**：满屏开着的时候它整个不建（共享元素转场要的是
 			// 「上一帧没被摆过的那个」封面，播放条那个封面下一帧还会被摆一次，
 			// 满屏的封面就找不到「上一个」了——见 fullplayer.go 顶上那一段）。
+			//
+			// ⚠️ **首页也是 0**（票 #161）：满屏播放器是一层铺满整窗的不透明
+			// 浮层，底下那一整页（顶栏 + 侧栏 + 路由页 + 播放条）一个像素都
+			// 看不见——而它自己还在每一帧重新布局、重新绘制。#161 把「画」和「每帧
+			// 的副作用」拆开了：满屏开着的时候**不画**，而**副作用照跑**（后台
+			// 结果照落、该起的拉照起）。
+			//
+			// 所以这一档的判据是「**没有一块被建两遍**」，而底层那一页是
+			// **0 遍**（不是 2 遍）——这一条要抓的坏处是「两个调用方都建了它」，
+			// 「压根不建」是另一件事（#161 要的就是它）。
 			name: "满屏播放器",
 			setup: func(t *testing.T, s *Shell, tt *mygoui.Tester) {
 				loadPausedTrack(t, s, tt)
 				s.full.open = true
 				s.drawerOpen = true
 			},
-			want: buildTally{home: 1, playbar: 0, drawer: 1, full: 1},
+			want: buildTally{home: 0, playbar: 0, drawer: 1, full: 1},
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {

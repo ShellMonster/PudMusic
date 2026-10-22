@@ -438,3 +438,41 @@ func (s *Shell) libraryPageAt(path string) *libraryPage {
 	}
 	return nil
 }
+
+// syncLibraryPage 是「稍后再看」和「历史记录」两页共用的那一份每帧副作用。
+//
+// ⚠️ **它原来散在两页的 view 里**，而那两页在满屏开着的时候不画（票 #161）——
+// 不挪的话，用户在满屏里看频谱的那几分钟里，后台拉回来的那一页一直躺在信箱里
+// 没人取，关掉满屏之后要再等一趟才补上。
+//
+// ⚠️ **那两道闸（没挂上客户端 / 没登录）必须照抄**：没登录时那一个请求发了也是白
+// 发（B 站一律回 -101），而**没挂上客户端时拉页器会直接崩**（`s.app.LibraryOf()`
+// 是 nil）。
+func (s *Shell) syncLibraryPage(path string, p *libraryPage, c *ui.Context) {
+	// ⚠️ **满屏开着的时候这一页不画 → 那个 500ms 的防抖钟没人推进**：不清它的话
+	// `syncSearchWatch` 会一直判「该醒着」，每 125ms 叫醒一次窗口，而那一帧画的是
+	// 满屏（白醒）。
+	//
+	// 钟清掉之后，关掉满屏的第一帧就会把那个词换上去——`keywordChanged` 判「防抖
+	// 到点了」的那一支读的就是这个钟（零值意味着「早就到点了」）。
+	//
+	// ⚠️ **这里只清钟，不换查询**：换查询要读这一帧刚建出来的输入框（回车事件只由
+	// 存在着的输入框投递），而那一支留在画的那一半里。
+	if s.underlayHidden() {
+		p.pendingSince = time.Time{}
+	}
+
+	if !s.app.LibraryOf().Mounted() {
+		return
+	}
+	if lookup(path).RequiresLogin && !s.app.LoggedIn() {
+		return
+	}
+
+	// 🔴 **摆法（列表 / 紧凑 / 网格）每一帧都要装**：设置里的「数据显示样式」
+	// 改了之后要立刻生效（不装的话症状是「改了设置、这一页没变」）。
+	p.rows.SetView(s.displayView())
+
+	// 收后台投回来的结果、起该起的那一拉。
+	p.rows.Sync(c)
+}

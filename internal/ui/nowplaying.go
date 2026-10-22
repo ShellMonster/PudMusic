@@ -79,3 +79,14 @@ func (s *Shell) viewNowPlaying(c *ui.Context, _ *ui.Route) {
 		s.viewLyrics(c, s.app.Lyrics(), st.Position)
 	})
 }
+
+// syncNowPlaying 是迷你播放器那一页每帧的副作用。**这一页没有**。
+//
+// 理由：歌词是**每一帧从快照读的**（`app.Lyrics()`），歌词区自己的滚动位置
+// 记在 `s.lyric` 那一摊里，而那一摊只在这一页画的时候才动——换歌时作废的那
+// 一下（`lyricsView.onSong`）也跟着画走是对的：满屏开着的时候用户看不见歌词，
+// 关掉满屏之后第一帧再作废，用户看到的是「新歌从头开始」，而不是「新歌从
+// 上一首滚到的那个位置开始」。
+//
+// ⚠️ **它在 `pageSyncs` 表里是个空函数**，不是漏了（理由见 `syncLogin`）。
+func (s *Shell) syncNowPlaying(c *ui.Context) {}

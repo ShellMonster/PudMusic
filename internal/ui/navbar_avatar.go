@@ -197,14 +197,18 @@ func (a *avatarState) snapshot() (look avatarLook, face, note string) {
 	return a.look, a.face, a.note
 }
 
-// avatarSync 让那一格追上此刻的登录态。**每一帧都会被 view 叫到**
-// （`viewAvatar` 的第一句），所以它必须满足两件事：
+// avatarSync 让那一格追上此刻的登录态。**每一帧都会被叫到**
+// （`syncUnderlay` 里那一句，票 #161：满屏开着的时候顶栏不画，而这一格必须
+// 自己追得上登录态），所以它必须满足两件事：
 //
 //  1. 没换过登录态时**一个请求都不发**——这里是整个应用重画最勤的一处。
 //  2. 换了登录态时**至多发一个**，而且退登那一支**一个都不发**。
 //
 // 「至多一个」靠 `acted` + `mid`，「在途的那一趟作废」靠 `gen`。两条各自都不够：
 // 只有 `acted` 的话，退登之后在途的那一趟会把上一个账号的头像写回来。
+//
+// ⚠️ **它原来在 `viewAvatar` 的第一句**：那是「画这一格」的动作，而它要做的
+// 其实是「问一次登录态变了没有」——一件跟画不画无关的事（票 #161）。
 func (s *Shell) avatarSync() {
 	// ⚠️ `closed` 那道闸门和三个装定时器的地方是同一道（见 shell.go 的字段注释）：
 	// 无头 Tester 里 `Close` 之后再 `Frame()` 就会调到这一句，而那时候
@@ -323,12 +327,6 @@ const (
 
 // viewAvatar 是头像 + 它的下拉。
 func (s *Shell) viewAvatar(c *ui.Context) {
-	// 每一帧都问一句「登录态变了吗」——判据全在 `avatarSync` 里，那一句只做
-	// 两次比较。放在 view 而不是登录/退登的回调里，是因为**这一格必须自己
-	// 追得上登录态**：登录成功发生在扫码那一页、退登发生在系统菜单的回调里，
-	// 而这个外壳还会被别的地方 `TestOnlyAdoptLogin` 装一份登录态（测试）。
-	s.avatarSync()
-
 	// Key 挂在外面这一格上：`.Menu()` 会把元素变成菜单按钮（`ui/menu.go:66`
 	// 置 flagClickable / flagFocusable），Key 挂在这种元素上会 panic
 	// （`ui/element.go:658`）。
