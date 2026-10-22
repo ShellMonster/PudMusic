@@ -176,6 +176,9 @@ type collectionPage struct {
 	sort     bili.CollectionSort
 	listSort bili.CollectionSort
 
+	// search 是那一枚会展开的搜索此刻是收着还是开着。
+	search searchButtonState
+
 	// draft 是搜索框里正在敲的字，keyword 是**已经在筛**的那个词。
 	//
 	// 分成两个是因为即时模式每一帧都重画：直接拿框里的字去筛，用户每敲一个
@@ -508,12 +511,27 @@ func collectionRefOf(r *ui.Route) app.CollectionRef {
 const (
 	collectionCoverW = 200
 	collectionCoverH = 168
+
+	// 标题下面那三行字（简介 / 类型 + 条数 / 创建者）都是 `text-sm` = **14**，
+	// 行与行之间是 `space-y-4` = **16**（上游同一个文件 :53-113）。
+	collectionHeadCopySize = 14
+	collectionHeadGap      = 16
+
+	// 创建者是 `User` 组件那一枚圆头像。票面给的是 **24**。
+	collectionOwnerAvatarSize  = 24
+	collectionOwnerAvatarLabel = "创建者头像"
 )
 
-// viewCollectionHeader 是顶部头图区：封面 + 标题 + 简介 + 类型和条数 + 创建者，
-// **外加右边那一行「按歌名找 + 排序」**（理由见 `viewCollectionOps` 顶上那一段）。
+// collectionOpsButtonH 是操作条上那枚主按钮的高。上游的 `Button` 默认 size
+// 是 md = `h-10`，也就是 **40**。旁边那几枚图标键仍然是 `iconHitMd`（28）——
+// 那一排的宽度在最小窗口上已经贴着边（见 `viewCollectionOps`），再把图标键
+// 撑到 40 就会把这一排挤出去。
+const collectionOpsButtonH = 40
+
+// viewCollectionHeader 是顶部头图区：封面 + 标题 + 简介 + 类型和条数 + 创建者。
 //
-// 文案和排列照抄 `src/pages/video-collection/header/index.tsx:53-113`。
+// 文案和排列照抄 `src/pages/video-collection/header/index.tsx:53-113`：右边那一
+// 列是 `space-y-4`，标题 `text-3xl font-bold`，下面三行都是 `text-sm`（14）。
 func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 	t := c.Theme()
 	info := s.app.Collection(p.ref)
@@ -524,7 +542,7 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 			// ① 封面。空地址时 imgcache 画空框（没给封面的收藏夹真的有）。
 			imgcache.View(c, s.images, info.Cover, collectionCoverW, collectionCoverH)
 
-			ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(6).Children(func() {
+			ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(collectionHeadGap).Children(func() {
 				// ⚠️ **这个标题是 30（`collectionTitleSize`），不是页标题那个数**：
 				// 头图区的大标题抄上游 `text-3xl`，见 pagerhythm.go 那段。
 				ui.Text(c, collectionTitleText(p.ref.Type, info)).FontSize(scale.Font(c, collectionTitleSize)).Bold().
@@ -532,57 +550,45 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 
 				// ② 简介。Biu 是 `line-clamp-1`，有才画。
 				if info.Intro != "" {
-					ui.Text(c, info.Intro).FontSize(scale.Font(c, 13)).LineHeight(smallCopyLeading).
+					ui.Text(c, info.Intro).FontSize(scale.Font(c, collectionHeadCopySize)).LineHeight(smallCopyLeading).
 						TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 				}
 
 				// ③ 类型 + 条目数。Biu 写的是「{公开|私密}收藏夹 • N 条视频」
-				//（`header/index.tsx:88-96`）——**条目数永远说「条视频」**，
+				// （`header/index.tsx:88-96`）——**条目数永远说「条视频」**，
 				// 上游连音频也是这么写的，这里照抄。
 				ui.Text(c, collectionKindText(p.ref.Type, info.Private)+" • "+
 					strconv.Itoa(info.MediaCount)+" 条视频").
-					FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
+					FontSize(scale.Font(c, collectionHeadCopySize)).LineHeight(smallCopyLeading).
 					TextColor(t.TextMuted).MaxLines(1)
 
-				// ④ 创建者。Biu 是一张头像加昵称；这一票没接头像地址
-				//（`bili.CollectionInfo` 有 `Owner.Face`，界面先不画——
-				// 一行字能说清是谁，一个空方块不能）。
+				// ④ 创建者：一枚 24 的圆头像 + 14 的昵称（上游是一个 `User`）。
 				if info.OwnerName != "" {
-					ui.Text(c, info.OwnerName).FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
-						TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
-				}
-
-				// ⑤ 「按歌名找 + 排序」，靠右。
-				//
-				// 🔴 **它为什么在这儿，而不在下面那一排**（详见
-				// `viewCollectionOps` 顶上那一段）：那一排左边五件自己就要 484 宽，
-				// 而内容区在最小窗口（900）加侧栏 360 那一档只剩 492——**塞不下
-				// 第三件**。挤不下的时候框架缩的是**排序下拉**（实测被压到 29 宽、
-				// 右缘跑到 910~950，**已经出窗口了**）。
-				//
-				// 而**头图区有竖着的空**：封面 168 高，而左边那一列字只有 90 高
-				// ——多出来的 78 像素正好放得下这一行（实测这一行 29 高），
-				// **头图区的高度一个字都不涨**（列表那一块还是那么大）。
-				//
-				// 靠右是 `AlignSelf(Stretch)` + `Justify(End)` 做的：这一行铺满
-				// 那一列，内容被推到右缘，而那一列的右缘是**页边距**
-				// （900 减 `pagePadX` 20 = 880）——和下面那一排的右缘是同一条线。
-				// ⚠️ **AlignSelf(Stretch) 不能省**：这一列是 `AlignItems(Start)`
-				// 的（那几行字要靠左），而 `Grow(1)` 在一列里长的是**竖着**的
-				// 方向——不写这一句，这一行就按内容宽摆着，排序下拉落在整页的
-				// **中间**而不是右缘。
-				//
-				// ⚠️ **别加 Spacer**：加了它就会和输入框抢那点空隙（两个
-				// `Grow(1)` 按比例分），而**输入框是那个该让位的**——见
-				// `collectionSearchMinWidth` 的注释。
-				ui.Row(c).Key("collection-filters").AlignSelf(ui.Stretch).Gap(8).Center().
-					Justify(ui.End).
-					Children(func() {
-						s.viewCollectionSearch(c, p)
-						s.viewCollectionSort(c, p)
+					ui.Row(c).Gap(8).Center().Children(func() {
+						s.viewCollectionOwnerAvatar(c, info.OwnerFace)
+						ui.Text(c, info.OwnerName).FontSize(scale.Font(c, collectionHeadCopySize)).
+							LineHeight(smallCopyLeading).TextColor(t.TextMuted).
+							MaxLines(1).Ellipsis("…")
 					})
+				}
 			})
 		})
+}
+
+// viewCollectionOwnerAvatar 是创建者那一枚圆头像（`collectionOwnerAvatarSize`）。
+//
+// 地址空着、还没下回来、或者下失败时画一块同色的圆占位——**头像这一格不消失**：
+// 它是「创建者」那一行的开头，消失之后那一行只剩一个名字，左边凭空空出一格；
+// 而占位的大小和真头像一样，换上来的时候那一行不会动。
+func (s *Shell) viewCollectionOwnerAvatar(c *ui.Context, face string) {
+	t := c.Theme()
+	side := float32(collectionOwnerAvatarSize)
+	ui.Box(c).Size(side, side).Radius(side / 2).Clip().
+		Background(t.Surface).Label(collectionOwnerAvatarLabel).Children(func() {
+		if st := s.images.Get(face); face != "" && st.Ready() {
+			ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(side, side)
+		}
+	})
 }
 
 // collectionTitleText 是头图区那个大标题。
@@ -620,49 +626,57 @@ func collectionKindText(typ bili.CollectionType, private bool) string {
 
 // ── 操作条 ─────────────────────────────────────────────────────────────────
 
-// viewCollectionOps 是头图区下面那一排：左边四个动作，右边多选开关。
+// viewCollectionOps 是头图区下面那一排：左边四个动作 + 多选，右边「按歌名找 +
+// 排序」。项和顺序照 Biu 的 `src/pages/video-collection/operation/index.tsx:33-56`
+// （上游右边就是 `SearchWithSort`）。主按钮是上游 `Button` 默认的 md 档：**40 高**。
 //
-// 项和顺序照 Biu 的 `src/pages/video-collection/operation/index.tsx:33-56`。
+// # 两组之间必须有让位机制（这一条是机器钉着的）
 //
-// # 🔴 **「按歌名找 + 排序」为什么不在这一排，而在头图区里**
+// 两组的宽度**跟着系统字号缩放走**：排序下拉的自然宽在 1.0 倍下是 83.2，1.4 倍
+// 下是 116.5；「播放全部」「多选」那两串字也一样。而最快的那一档（窗口 900 +
+// 侧栏 480）内容区只有 **388**——字号一大，两组就装不下了。
 //
-// 上游把它们放在**这一排**的右边（`SearchWithSort` 就是一排）。我们这一排的
-// **左边比上游宽得多**：上游是「播放全部 + 两枚图标键」，我们是「播放全部 +
-// 添加到播放列表 + ☆ / ⋯ + 多选」五件，五件自己就要 **484** 宽。
+// ⚠️ **装不下的时候左边那一组自己换行**（`Wrap`）：多选开关落到第二行，那一排
+// 于是高一点，但**两组永远不重叠**。实测（评审第 1 条的同一组数）：
 //
-// 而侧栏宽度是 **160~480**（`app.ClampSideMenuWidth`），窗口最窄是 **900**
-// （`shell.go` 的 `MinWidth`）。侧栏 360 那一档的内容区只剩 **492**——**塞不下
-// 第三件**。挤不下的时候框架缩的是**排序下拉**（它的最小宽就是那两个字），
-// 实测被压到 **29** 宽、右缘跑到 **910~950**（**已经出窗口了**）——而那一格
-// 是用户唯一看得见的说明，裁掉之后它就变成一个认不出的方块。
+//	字号 1.25 侧栏 480：换行之前多选的右缘 750.6、搜索的左缘 744.0（重叠 6.6）；
+//	                换行之后多选的右缘 636.1、搜索的左缘 744.0（不重叠）。
+//	字号 1.40 侧栏 480：换行之前重叠 30.7；换行之后多选的右缘 631.8、搜索 731.5。
 //
-// 而**头图区有竖着的空**：封面 168 高，左边那一列字只有 90 高——多出来的
-// 78 像素放得下那一行（29 高），**头图区的高度一个字都不涨**（下面那一块
-// 列表还是那么大）。所以「按歌名找 + 排序」搬到头图区里，靠右，右缘还是
-// 同一条页边距。
+// 换行的**代价**是那一排在最挤的那一档会高出一行——比「两个控件叠在一起」好得多。
 //
-// ⚠️ **别为了「和上游一样」把它们塞回这一排**：
-// `TestTheCollectionOpsRowStillFitsAtTheMinWindow` 钉着这一段（它量的是**每个
-// 侧栏宽度**下排序下拉的盒子）。
+// # 右边那一组不许被挤扁
+//
+// 排序下拉**必须有最小宽**（`collectionSortMinW`，按字号缩放跟着长）：没有它，
+// 框架挤不下时先扣它——实测被裁成 66.6 宽、右缘跑到 900（已经出窗口），最后
+// 一个字和那个「▾」都不见了。搜索是那个该让位的，它的下限是
+// `collectionSearchMinWidth`（40）。见 `viewCollectionSort`。
 func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 	t := c.Theme()
 
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
-	ui.Row(c).Key("collection-ops").Center().Gap(8).Padding(0, 0, 12).
-		Children(func() {
-			if ui.PrimaryButton(c, "播放全部").Clicked() {
+	//
+	// ⚠️ **右边那一组自己 `Grow(1)` + `Justify(End)`，不是外面一个 `Spacer`**：
+	// `Spacer` 自己也是一个子元素，它两边各占一道 8 的缝——最窄那一档里那 16
+	// 像素正好把搜索挤到下限以下（实测多出 8.6）。让右边那一组把剩下的空地
+	// 全吃掉、内容靠右，既不留缝，搜索框又有一个能长到 240 的地方。
+	ui.Row(c).Key("collection-ops").FillWidth().Center().
+		Padding(0, 0, 12).Children(func() {
+		// ⚠️ **`Wrap` 是这一排的让位机制**（理由见文件头那两段）：这一组放不
+		// 下时它自己换行，而不是让内容溢出到右边那一组身上。
+		ui.Row(c).Gap(8).Center().Wrap().Children(func() {
+			// 上游那枚主按钮是 `Button` 默认的 md 档：**40 高**。
+			if ui.PrimaryButton(c, "播放全部").Height(collectionOpsButtonH).Clicked() {
 				s.playWholeCollection(p)
 			}
 			// 上游是一枚 `size="md" variant="flat"` 的图标键
-			//（`operation/index.tsx:44`，tooltip「添加到播放列表」）。
+			// （`operation/index.tsx:44`，tooltip「添加到播放列表」）。
 			if s.withTip(c, flatIconButton(c, iconEnqueue, "添加到播放列表", iconMd).
 				Size(iconHitMd, iconHitMd).Padding(0, 5), "添加到播放列表").Clicked() {
 				s.addWholeCollectionToQueue(p)
 			}
 			s.viewCollectionStar(c, p)
 			s.viewCollectionMore(c, p)
-
-			ui.Spacer(c)
 
 			// 多选开关。多选态开着时这一排还在，只是列表左边多了一列勾。
 			// 它是文字键（那是「一个模式」，不是一个动作），但同样不走
@@ -675,6 +689,17 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 				s.toggleCollectionMulti(p)
 			}
 		})
+
+		// 右边「按歌名找 + 排序」，照上游 `SearchWithSort` 的次序。
+		//
+		// ⚠️ **`Grow(1)` 是给搜索框留的那块地**：它自己上限 240，而 `Grow` 只
+		// 在有富余的父宽度里才长。少了这一句，输入框永远是 40 宽（实测截图里
+		// 一个字都填不满）。`Justify(End)` 让这一组贴着页边距。
+		ui.Row(c).Grow(1).Gap(8).Center().Justify(ui.End).Children(func() {
+			s.viewCollectionSearch(c, p)
+			s.viewCollectionSort(c, p)
+		})
+	})
 }
 
 // viewCollectionStar 是收藏 / 取消收藏那个星标。
@@ -808,7 +833,8 @@ func (s *Shell) viewCollectionSort(c *ui.Context, p *collectionPage) {
 	t := c.Theme()
 	sel := ui.SelectBase[bili.CollectionSort](c, &p.sort)
 
-	trigger := sel.Trigger.Padding(4, 10).Radius(t.Radius).Border(1, t.Border)
+	trigger := sel.Trigger.Padding(4, 10).Radius(t.Radius).Border(1, t.Border).
+		MinWidth(scale.Font(c, collectionSortMinW))
 	trigger.Children(func() {
 		ui.Text(c, p.sort.Label()).SingleLine()
 		ui.Text(c, " ▾").TextColor(t.TextMuted)
@@ -847,53 +873,47 @@ func (s *Shell) setCollectionSort(p *collectionPage) {
 
 // ── 按歌名找 ────────────────────────────────────────────────────────────────
 
-// collectionSearchWidth 是那个输入框的**常态**宽。
+// collectionSearchWidth 是展开之后那个输入框的**上限**。
 //
-// # 参照物：仓库里现成的那个同类输入框
-//
-// `localmusic.go` 的本地音乐工具条上那个搜索框是 **180**
-// （`ui.TextInput(c, &p.search)…Width(180)`），而它和这一处的排法**一模一样**：
-// 一个输入框挨着一个下拉（那边是「目录」，这边是「排序」）。所以照它抄 **180**。
-//
-// ⚠️ 别拿 `keywordBoxWidth`（256）来：那是「稍后再看 / 历史记录」那一页的
-// 搜索框，那一页的内容区更宽、而且搜索框**另起一行**（见 `librarypage.go`
-// 的 `viewFilters` 注释）。
-//
-// ⚠️ **它不是那个框的下限**——下限是 `collectionSearchMinWidth`。宽裕的时候
-// 长到 180，挤的时候自己缩，**排序下拉永远是完整的**。
-const collectionSearchWidth = 180
+// 240 是上游 `search-button/index.tsx` 的 `animate={{ width: 240 }}`（它从 40
+// 展开到 240）。收起时只有一枚 `iconHitMd`（28）的放大镜。
+const collectionSearchWidth = 240
 
-// collectionSearchMinWidth 是那个输入框的**最小**宽。
+// collectionSearchMinWidth 是展开后那个输入框的**最小**宽。
 //
-// # 它是这么算出来的
+// 40 是这么倒推的：窗口 900 + 侧栏 480 那一档，内容区 388；操作条左边五件 +
+// 七道 8 的缝 + 排序下拉的自然宽（83.2）一共 **356.6**，留给输入框的只有
+// 388 − 356.6 ≈ **40**（差 0.6 落在排序下拉的描边余量里）。再大一点排序下拉
+// 就轮到被裁了，而那一格是用户唯一看得见的说明（裁掉之后它变成一个认不出的
+// 方块）。
 //
-// 最小窗口（900）加最宽侧栏（480）那一档，内容区只剩 **372**；头图区左边是
-// 200 宽的封面加 16 的间距，于是右边那一列只有 **156**。而排序下拉自己就要
-// **83.2**（还带一个 8 的间距）——所以留给输入框的下限是
-// 156 − 83.2 − 8 = **64.8**，取 **64**。
-//
-// # ⚠️ **别把它调大**
-//
-// 调大了就是**排序下拉被裁**：180 那一版（输入框固定 180）在侧栏 400 就只剩
-// 64 宽、那个「▾」被裁没了，480 那一档字被裁成「最近收」——而那一格是用户
-// 唯一看得见的说明（裁掉之后它就变成一个认不出的方块）。
-//
-// 基线（`6247a3d`）在同样两档也是裁的（400 是 57 宽、480 是 0 宽、右缘跑到
-// 922 **出窗口**）——**这一票让它们都完整**。
-const collectionSearchMinWidth = 64
+// ⚠️ **排序下拉自己也钉了最小宽**（`collectionSortMinW`）：不然框架会先把
+// 它压扁，而搜索还有 40 的下限——两个都「不能被裁」的控件抢同一块地时，
+// 先被裁的永远是没有下限的那个。
+const collectionSearchMinWidth = 40
 
-// collectionSearchLabel 是那个输入框的名字，兼做它空着时画的那几个字。
+// collectionSortMinW 是排序下拉的**最小**宽：它的自然宽（「最近收藏 ▾」四个
+// 汉字 + 内边距 + 描边），实测 83.2。
+//
+// ⚠️ **不给它下限的话它会被搜索挤扁**：框架分配不下时缩的是没有下限的那个，
+// 实测在 900 + 侧栏 480 那一档被压到 66.6 宽，最后一个字和那个「▾」都不见了。
+// 下面 `viewCollectionSort` 把它按**字号缩放**挂上去（系统字号 1.4 倍时自然宽
+// 也长大，写死 83.2 会把字裁掉）。
+const collectionSortMinW = 83.2
+
+// collectionSearchLabel 是那一枚搜索的名字，兼做展开后输入框空着时画的那几个字。
 //
 // ⚠️ **Label 不能省**：它不只是给测试用的——没有它读屏软件读不出这是一个搜
-// 歌名的输入框（占位文字不是标签），无头 Tester 也只认 label / text。
+// 歌名的控件（占位文字不是标签），无头 Tester 也只认 label / text。
 const collectionSearchLabel = "搜索歌名"
 
-// viewCollectionSearch 是那个按歌名找的输入框。
+// viewCollectionSearch 是「按歌名找」，**一枚会展开的按钮**。
 //
 // 上游那一排的右边是 `SearchWithSort`（`components/search-with-sort/index.tsx`），
 // 里面是「搜索 + 排序」两样；我们之前只抄了排序那一半，于是这一页**只能缩小
 // 到「哪一档排序」，缩不到「某几首」**——一个 800 首歌的收藏夹里，用户只能靠
-// 滚和看。
+// 滚和看。后来补上了搜索，但补成了一个**常驻 180 的输入框**；上游那个是收起
+// 时一枚放大镜、点开才展开（`components/search-button/index.tsx`）。
 //
 // ⚠️ **筛是接口筛的**（`bili.CollectionMedias` 顶上那一段）：本地筛只能筛已经
 // 拉下来的那 20 首，搜「告白气球」在第 300 首的话，界面上的表现是「搜了没反应」。
@@ -902,19 +922,8 @@ const collectionSearchLabel = "搜索歌名"
 // 的 `useDebounceFn(..., { wait: 500 })`），也和这一页的邻居一致（`librarypage.go`
 // 的 `searchDebounce`）。回车不等那 500ms——用户按下回车就是想现在搜。
 func (s *Shell) viewCollectionSearch(c *ui.Context, p *collectionPage) {
-	box := ui.TextInput(c, &p.draft).
-		// ⚠️ **三件事一起写**：下限 64（`collectionSearchMinWidth` 的注释）、
-		// 常态 180、`Grow(1)` 让它把空出来的地都占了（上限还是 180）。
-		//
-		// **那个下限就是「排序下拉不动」的保证**：框架挤不下的时候缩的是**最小
-		// 宽最小**的那一个，而排序下拉的最小宽是它自己的自然宽（83.2）。
-		// 输入框让到 64 就停手，排序下拉就一直是完整的（实测侧栏 160~480
-		// 全是 83.2 宽）。
-		Width(collectionSearchMinWidth).
-		Grow(1).
-		MaxWidth(collectionSearchWidth).
-		Label(collectionSearchLabel).
-		Placeholder(collectionSearchLabel)
+	box := expandableSearch(c, s.tip, &p.search, &p.draft, collectionSearchLabel,
+		collectionSearchMinWidth, collectionSearchWidth, s.pageJustShown())
 	p.submitted = box.Submitted()
 
 	// 判据和排序那一处一个写法：这一帧条件变了就换查询。
@@ -970,9 +979,9 @@ func (s *Shell) applyCollectionKeyword(p *collectionPage, kw string) bool {
 // 出处，改一个忘了另一个时界面上一点也看不出来。
 //
 // ⚠️ **离开这一页只是不醒那个钟，不是把那个「还没发出去的搜索」丢掉**：
-// 框里还摆着用户敲的那个词，而列表还没筛——回来的时候那一帧它就发出去了
-// （那一帧 `now - pendingSince` 早过了 500ms）。**清掉它的话，框里那个词就
-// 成了界面上的假话**：用户看见自己搜过，而列表是全的。同一栏的邻居
+// `draft` 里还留着用户敲的那个词，而列表还没筛——回来的时候那一帧它就发出去
+// 了（那一帧 `now - pendingSince` 早过了 500ms）。**清掉它的话，用户再点开
+// 那个搜索时框里就是空的**，而列表按着一个他看不见的词筛着。同一栏的邻居
 // （`libraryPage`）也是这么做的。
 func (s *Shell) collectionSearching() bool {
 	p := s.collection

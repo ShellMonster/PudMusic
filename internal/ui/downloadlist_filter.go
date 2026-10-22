@@ -24,9 +24,8 @@ import (
 
 // downloadFilter 是那一排的档。
 //
-// 用整数而不是字符串，因为 `ui.Segmented` 收的就是一个下标（`localmusic.go`
-// 的展示样式切换是同一个控件）；而 `label()` 把下标说成人话，免得界面上直接写
-// 「你在看第 2 档」。
+// 用整数而不是字符串，因为 `ui.Radio` 收的就是一个可比较的值（这一排是三档
+// 互斥的单选）；而 `label()` 把下标说成人话，免得界面上直接写「你在看第 2 档」。
 type downloadFilter int
 
 const (
@@ -74,26 +73,40 @@ func dlEmptyAfterFilter(f downloadFilter) emptyState {
 	}
 }
 
-// viewFilter 画那一排开关。
+// viewFilter 画那一排单选。
+//
+// 上游是 HeroUI 的 `RadioGroup orientation="horizontal"`（`download-list/index.tsx:110-120`），
+// 三个 `Radio` 之间 `gap-4`（16）。**不是 `Segmented`**：那个控件的形状是
+// 「一条灰底轨道 + 一块白色滑块」，说的是「切视图」，而这一排是「留哪一类」。
 //
 // ⚠️ **另起一行，不塞进页头那一行**：那一行在窗口最窄那一档（900 减掉侧栏和
 // 页内边距约 660）已经满了——标题 + 路径 + 「打开文件夹」+「清空记录」固定占
-// 掉约 302，剩下的全给路径（见 `viewToolbar` 的注释）。再挤进一个三档的开关，
+// 掉约 302，剩下的全给路径（见 `viewToolbar` 的注释）。再挤进一个三档的控件，
 // 就只能去吃路径，而路径是那一行里唯一在回答「歌下到哪儿了」的那一段。
 // 拆两行是唯一在**每一个**宽度上都对的排法，代价是竖着多一行的位置——和
 // `libraryPage.viewFilters` 把搜索框拆成第二行是同一个取舍、同一个理由。
 //
 // ⚠️ 控件写的是 `sel`，画完之后**无条件**抄回来：MyGo 是即时模式，点中一个
-// segment 时框架在处理输入那一刻就把新下标写进 `sel` 了，而下一帧再画一遍时
-// 读的就是这个值。判 `Changed()` 也行，无条件抄更耐得住框架改这两者的先后。
+// 单选时框架在处理输入那一刻就把新值写进 `sel` 了，而下一帧再画一遍时读的
+// 就是这个值。判 `Changed()` 也行，无条件抄更耐得住框架改这两者的先后。
 func (d *downloadsPage) viewFilter(c *ui.Context) {
-	ui.Row(c).Key("downloads:filter").FillWidth().AlignItems(ui.Center).
-		Children(func() {
-			sel := int(d.filter)
-			// ⚠️ `Label` 给的是**无障碍名字**，不是画在屏幕上的一行字：它让读屏
-			// 软件念出「筛选」而不是三个孤零零的词，也顺手让 `Tester.Find("筛选")`
-			// 能认出这是那一个控件。它不占位置。
-			ui.Segmented(c, &sel, dlFilterLabels[:]...).Label("筛选")
-			d.filter = downloadFilter(sel)
-		})
+	sel := int(d.filter)
+	// `RadioGroup` 默认是一列（`coreRadioGroup` 建的是 Column），`.Row()` 把它
+	// 改成横排；`Gap(16)` 是上游的 `wrapper: "gap-4"`。
+	//
+	// ⚠️ `Label("筛选")` 给的是**无障碍名字**，不是画在屏幕上的一行字：它让读屏
+	// 软件念出「筛选」而不是三个孤零零的词，也顺手让 `Tester.Find("筛选")`
+	// 能认出这是那一个控件。它不占位置。
+	//
+	// ⚠️ **Key 挂在外面那个 Row 上，不能挂在 RadioGroup 上**：后者建的时候已经
+	// 装过状态（焦点组），再挂 Key 框架会直接 panic（「whose state was
+	// initialized: use Context.Key before construction」）。
+	ui.Row(c).Key("downloads:filter").FillWidth().AlignItems(ui.Center).Children(func() {
+		ui.RadioGroup(c, func() {
+			for i, label := range dlFilterLabels {
+				ui.Radio(c, &sel, i, label)
+			}
+		}).Row().Gap(c.Theme().Space(4)).Label("筛选")
+	})
+	d.filter = downloadFilter(sel)
 }

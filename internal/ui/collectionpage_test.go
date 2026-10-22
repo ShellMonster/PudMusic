@@ -11,6 +11,10 @@ package ui
 
 import (
 	"encoding/json"
+	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -310,6 +314,15 @@ func collectionShellOpts(t *testing.T, opts []shellOpt, mid string, id string, m
 	t.Helper()
 	b := newCollectionBili(t)
 	b.setMedias(medias...)
+	return collectionShellFrom(t, b, opts, mid, id)
+}
+
+// collectionShellFrom 是上面那一版，外壳用**已经备好的**那个夹具。
+//
+// 有些用例要先把夹具备成某一种样子再建外壳——比如把创建者的头像地址换成一枚
+// 抓得到的图（`upper.face` 是 B 站给的地址，建外壳时它就会被拉走）。
+func collectionShellFrom(t *testing.T, b *favBili, opts []shellOpt, mid, id string) (*favBili, *Shell, *ui.Tester) {
+	t.Helper()
 	// ⚠️ **挂一份真设置**（临时目录）：侧栏那一行是从 `SettingsSnapshot` 读
 	// 顺序的，而「删收藏夹」「从侧栏移除」收尾时要写回那个顺序（`forgetFavorite`）。
 	// 不挂的话那一步回 `ErrSettingsNotMounted`，日志里多一行「顺序存不住」——
@@ -707,62 +720,119 @@ func TestTheCollectionSearchSaysWhenThereIsNoResult(t *testing.T) {
 //   - 它的右缘要落在**页边距**里面（900 减 `pagePadX` 16 = 884）。
 //   - 那个输入框不许被压到比它的下限（64）更窄。
 func TestTheCollectionOpsRowStillFitsAtTheMinWindow(t *testing.T) {
-	for _, side := range []float64{160, 200, 240, 280, 320, 360, 400, 480} {
-		t.Run(strconv.FormatInt(int64(side), 10), func(t *testing.T) {
-			st := app.DefaultSettings("")
-			st.SideMenuWidth = side
-			// ⚠️ **ReduceMotion 是必须的**：侧栏的宽度过渡是 200ms 的动画，而
-			// 无头 Tester 的钟站着不动——不关掉动画的话，这一档量到的其实是
-			// **还没走到位的那个宽**（第一次量出来六个侧栏宽度量出来的是同一个
-			// 位置，就是这个原因）。
-			_, s, tt := collectionShellOpts(t,
-				[]shellOpt{withSettings(st), at(minWindowW, minWindowH),
-					withPrefs(ui.Preferences{ReduceMotion: true, TextScale: 1})},
-				"", "12345",
-				mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
-			waitSongs(t, tt, s, 2)
+	// ⚠️ **字号缩放也在里面**：排序下拉的自然宽跟着缩放走（83.2 → 116.5），
+	// 而最快的那一档（窗口 900 + 侧栏 480）内容区只有 388——两组装不下时**左边
+	// 那一组自己换行**（`viewCollectionOps` 的注释），换行之前它们是重叠的
+	// （评审第 1 条：字号 1.25 重叠 6.6、1.40 重叠 30.7）。
+	//
+	// macOS 上 TextScale 恒为 1，所以这一档在 mac 上复现不出来（Windows 读注册表
+	// 的 TextScaleFactor、GNOME 读 text-scaling-factor）。
+	for _, scale := range []float32{1, 1.25, 1.4} {
+		for _, side := range []float64{160, 200, 240, 280, 320, 360, 400, 480} {
+			name := fmt.Sprintf("字号%.2f-侧栏%.0f", scale, side)
+			t.Run(name, func(t *testing.T) {
+				st := app.DefaultSettings("")
+				st.SideMenuWidth = side
+				// ⚠️ **ReduceMotion 是必须的**：侧栏的宽度过渡是 200ms 的动画，而
+				// 无头 Tester 的钟站着不动——不关掉动画的话，这一档量到的其实是
+				// **还没走到位的那个宽**（第一次量出来六个侧栏宽度量出来的是同一个
+				// 位置，就是这个原因）。
+				_, s, tt := collectionShellOpts(t,
+					[]shellOpt{withSettings(st), at(minWindowW, minWindowH),
+						withPrefs(ui.Preferences{ReduceMotion: true, TextScale: scale})},
+					"", "12345",
+					mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
+				waitSongs(t, tt, s, 2)
 
-			sort, ok := tt.Find("排序：最近收藏")
-			if !ok {
-				t.Fatalf("侧栏 %.0f：画面上找不到排序下拉，文字有 %q", side, tt.Texts())
-			}
-			box, ok := tt.Find(collectionSearchLabel)
-			if !ok {
-				t.Fatalf("侧栏 %.0f：画面上找不到那个输入框，文字有 %q", side, tt.Texts())
-			}
+				sort, ok := tt.Find("排序：最近收藏")
+				if !ok {
+					t.Fatalf("%s：画面上找不到排序下拉，文字有 %q", name, tt.Texts())
+				}
+				// 搜索收着的时候是一枚图标键（「搜索是会展开的按钮」那一半）。
+				button, ok := tt.Find(collectionSearchLabel)
+				if !ok {
+					t.Fatalf("%s：画面上找不到那枚搜索按钮，文字有 %q", name, tt.Texts())
+				}
+				if button.W > 40 {
+					t.Errorf("%s：搜索收着的时候宽 %.1f——那是一枚图标键，不是一个常驻输入框",
+						name, button.W)
+				}
+				// 收起态：多选不许压到搜索上。
+				multi, ok := tt.Find("多选")
+				if !ok {
+					t.Fatalf("%s：画面上找不到「多选」，文字有 %q", name, tt.Texts())
+				}
+				if multi.X+multi.W > button.X {
+					t.Errorf("%s：收起态「多选」的右缘是 %.1f，压到了搜索的左缘 %.1f 上"+
+						"（重叠 %.1f）——两组之间没有让位机制", name,
+						multi.X+multi.W, button.X, multi.X+multi.W-button.X)
+				}
+				// 展开之后才量输入框——挤的时候它要让位，但要停在自己的下限上。
+				if err := tt.Click(collectionSearchLabel); err != nil {
+					t.Fatalf("%s：点不开搜索：%v", name, err)
+				}
+				tt.Frame()
+				box, ok := tt.Find(collectionSearchLabel)
+				if !ok {
+					t.Fatalf("%s：点开之后没有输入框，文字有 %q", name, tt.Texts())
+				}
+				// 收起时那枚图标键是 28（`iconHitMd`）；展开后至少是 40
+				// （`collectionSearchMinWidth`）。所以「还是 28 那一个」= 没展开，
+				// 而不能拿 40 当分界：最窄那一档展开后正好就是 40。
+				if box.W <= 30 {
+					t.Fatalf("%s：点开之后还是一个 %.1f 宽的按钮——搜索没有展开",
+						name, box.W)
+				}
+				// 展开态：多选也不许压到输入框上（展开的框更靠左）。
+				multi, ok = tt.Find("多选")
+				if !ok {
+					t.Fatalf("%s：展开之后找不到「多选」，文字有 %q", name, tt.Texts())
+				}
+				if multi.X+multi.W > box.X {
+					t.Errorf("%s：展开态「多选」的右缘是 %.1f，压到了输入框的左缘 %.1f 上"+
+						"（重叠 %.1f）", name, multi.X+multi.W, box.X, multi.X+multi.W-box.X)
+				}
+				// 展开会把排序下拉往左推，重新量一次。
+				sort, ok = tt.Find("排序：最近收藏")
+				if !ok {
+					t.Fatalf("%s：展开搜索之后排序下拉不见了，文字有 %q", name, tt.Texts())
+				}
 
-			// 页边距是页面根那一层的 `pagePadX`（收藏夹的根是
-			// `Padding(0, pagePadX)`；票 #166 把它从 20 收成 16）：这一列的右缘
-			// 应该是 900 - 16 = 884。
-			//
-			// ⚠️ **那 4 个像素的余量**：排序下拉那个触发器的**盒子**比它的布局
-			// 基线宽 3.2（描边那一圈），所以它的右缘会比基线的右缘多出那么一点。
-			// 量的是盒子，就得多留那 3.2。
-			wantRight := float32(minWindowW-pagePadX) + 4
-			if right := sort.X + sort.W; right > wantRight {
-				t.Errorf("侧栏 %.0f：排序下拉的右缘是 %.1f，越过了页边距（want ≤ %.0f）",
-					side, right, wantRight)
-			}
-			// **排序下拉必须完整**——「最近收藏 ▾」那一个字都不能少。
-			if sort.W < 83 {
-				t.Errorf("侧栏 %.0f：排序下拉被压到 %.1f 宽了——「最近收藏 ▾」被裁掉了",
-					side, sort.W)
-			}
-			// 输入框是那个让位的：它可以窄，但不许窄过自己的下限。
-			if box.W < collectionSearchMinWidth {
-				t.Errorf("侧栏 %.0f：那个输入框被压到 %.1f 宽了（want ≥ %d）",
-					side, box.W, collectionSearchMinWidth)
-			}
-			// 都不许跑出窗口。
-			if right := box.X + box.W; right > minWindowW {
-				t.Errorf("侧栏 %.0f：输入框的右缘是 %.1f，跑出窗口了（want ≤ %d）",
-					side, right, minWindowW)
-			}
-			if right := sort.X + sort.W; right > minWindowW {
-				t.Errorf("侧栏 %.0f：排序下拉的右缘是 %.1f，跑出窗口了（want ≤ %d）",
-					side, right, minWindowW)
-			}
-		})
+				// 页边距是页面根那一层的 `pagePadX`（收藏夹的根是
+				// `Padding(0, pagePadX)`；票 #166 把它从 20 收成 16）：这一列的右缘
+				// 应该是 900 - 16 = 884。
+				//
+				// ⚠️ **那 4 个像素的余量**：排序下拉那个触发器的**盒子**比它的布局
+				// 基线宽 3.2（描边那一圈），所以它的右缘会比基线的右缘多出那么一点。
+				// 量的是盒子，就得多留那 3.2。
+				wantRight := float32(minWindowW-pagePadX) + 4
+				if right := sort.X + sort.W; right > wantRight {
+					t.Errorf("%s：排序下拉的右缘是 %.1f，越过了页边距（want ≤ %.0f）",
+						name, right, wantRight)
+				}
+				// **排序下拉必须完整**——「最近收藏 ▾」那一个字都不能少。
+				// 它的自然宽跟着字号缩放走（83.2 → 116.5），所以下限也跟着走。
+				wantSort := float32(collectionSortMinW)*scale - 1
+				if sort.W < wantSort {
+					t.Errorf("%s：排序下拉被压到 %.1f 宽了（want ≥ %.1f）——"+
+						"「最近收藏 ▾」被裁掉了", name, sort.W, wantSort)
+				}
+				// 输入框是那个让位的：它可以窄，但不许窄过自己的下限。
+				if box.W < collectionSearchMinWidth {
+					t.Errorf("%s：那个输入框被压到 %.1f 宽了（want ≥ %d）",
+						name, box.W, collectionSearchMinWidth)
+				}
+				// 都不许跑出窗口。
+				if right := box.X + box.W; right > minWindowW {
+					t.Errorf("%s：输入框的右缘是 %.1f，跑出窗口了（want ≤ %d）",
+						name, right, minWindowW)
+				}
+				if right := sort.X + sort.W; right > minWindowW {
+					t.Errorf("%s：排序下拉的右缘是 %.1f，跑出窗口了（want ≤ %d）",
+						name, right, minWindowW)
+				}
+			})
+		}
 	}
 }
 
@@ -881,5 +951,206 @@ func TestCollectionEntriesFeedTheMediaSession(t *testing.T) {
 		if got := onlineItemOf(bili.Media{ID: 1, Type: typ, Owner: "某某 UP"}).Artist; got != "某某 UP" {
 			t.Errorf("type=%d 的艺人 = %q，want 某某 UP", typ, got)
 		}
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 票 #175：头图区、操作条、搜索按钮
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheCollectionHeaderShowsTheCreatorAvatar 创建者那一行前面有一枚 24 的圆头像，
+// 而且**里头是那张图**。
+//
+// # 两条判据，缺一条都不算
+//
+//   - **盒子是 24×24**（`Find` 认的是头像那一格的 `Label`）。
+//   - **图真的出来了**：中心像素是那枚图的颜色。
+//
+// ⚠️ **第二条是这一条的关键**：地址抓不到时（协议相对地址没补协议、图还在路上、
+// 抓失败）画的是一块同色的圆占位——**盒子还是 24×24**，所以只量盒子的话，一个
+// 永远抓不到图的空圆也是绿的（评审第 1 条就是这么漏过去的：真机上那一枚头像
+// 永远是空的，因为 B 站的 `upper.face` 是协议相对地址，而封面缓存的
+// `http.Client` 抓不了那种地址）。
+//
+// ⚠️ **图要从一个普通 http 的小服务器来**：封面缓存用的是默认的 `http.Client`，
+// 它不认自签证书——夹具那个是 TLS 的，抓不动。
+func TestTheCollectionHeaderShowsTheCreatorAvatar(t *testing.T) {
+	if collectionOwnerAvatarSize != 24 {
+		t.Errorf("collectionOwnerAvatarSize = %d，want 24（票面）", collectionOwnerAvatarSize)
+	}
+
+	// 一枚 1×1 的红图。
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+		img.Set(0, 0, color.RGBA{R: 255, A: 255})
+		if err := png.Encode(w, img); err != nil {
+			t.Errorf("编码那枚头像图失败：%v", err)
+		}
+	}))
+	defer srv.Close()
+
+	b := newCollectionBili(t)
+	b.setMedias(mediaOf(1, "歌 一"))
+	b.infos["upper"] = map[string]any{"mid": 1, "name": "UP 小明", "face": srv.URL + "/face.png"}
+	_, s, tt := collectionShellFrom(t, b, nil, "", "12345")
+	waitSongs(t, tt, s, 1)
+
+	r, ok := tt.Find(collectionOwnerAvatarLabel)
+	if !ok {
+		t.Fatalf("头图区里找不到创建者头像（%q），文字有 %q", collectionOwnerAvatarLabel, tt.Texts())
+	}
+	if r.W < 23 || r.W > 25 || r.H < 23 || r.H > 25 {
+		t.Errorf("创建者头像是 %.0f×%.0f，want 24×24（票面）", r.W, r.H)
+	}
+	// 等那张图到（封面缓存是后台抓的，到���会叫醒界面）。
+	waitFrames(t, tt, "头像图到了", func() bool {
+		c := tt.Image().RGBAAt(round32(r.X+r.W/2), round32(r.Y+r.H/2))
+		return c.R > 200 && c.G < 80 && c.B < 80
+	})
+}
+
+// TestTheCollectionSearchIsACollapsedButton 搜索收着是一枚图标键，点开才是输入框。
+//
+// 这是票 #175 的验收项：**搜索是会展开的按钮**（现在是一个常驻 180 的输入框）。
+// 三条判据，缺一条都不算：
+//
+//   - 刚进来那一下是一枚 28 的图标键，不是输入框；
+//   - 点开之后是一个 40 高的输入框，而且**焦点已经在里面**（用户点放大镜就是
+//     为了打字）；
+//   - 点别的控件之后它收回去（上游的 `useClickAway`）。
+func TestTheCollectionSearchIsACollapsedButton(t *testing.T) {
+	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
+	waitSongs(t, tt, s, 2)
+
+	r, ok := tt.Find(collectionSearchLabel)
+	if !ok {
+		t.Fatalf("找不到搜索，文字有 %q", tt.Texts())
+	}
+	if r.W > 30 || r.H > 30 {
+		t.Errorf("搜索刚进来就是 %.0f×%.0f——那是一枚图标键，不该是一个常驻输入框",
+			r.W, r.H)
+	}
+
+	tt.SetFocused(true)
+	if err := tt.Click(collectionSearchLabel); err != nil {
+		t.Fatalf("点不开搜索：%v", err)
+	}
+	tt.Frame()
+
+	r, ok = tt.Find(collectionSearchLabel)
+	if !ok {
+		t.Fatalf("点开之后搜索不见了，文字有 %q", tt.Texts())
+	}
+	if r.W <= 30 {
+		t.Fatalf("点开之后还是 %.0f 宽——搜索没有展开", r.W)
+	}
+	if r.H < 39 || r.H > 41 {
+		t.Errorf("展开后的输入框是 %.0f 高，want 40（上游 `h-10`）", r.H)
+	}
+	if !tt.Focused(collectionSearchLabel) {
+		t.Error("展开之后焦点不在输入框里——用户点放大镜就是为了打字")
+	}
+
+	// 点别的控件（它拿得走焦点）→ 收回去。
+	if err := tt.Click("多选"); err != nil {
+		t.Fatalf("点多选：%v", err)
+	}
+	tt.Frame()
+	tt.Frame()
+	r, ok = tt.Find(collectionSearchLabel)
+	if !ok {
+		t.Fatalf("收回之后搜索不见了，文字有 %q", tt.Texts())
+	}
+	if r.W > 30 {
+		t.Errorf("点了别处之后搜索还是 %.0f 宽——它没有收回去", r.W)
+	}
+}
+
+// TestThePlayAllButtonIsFortyHigh 操作条那枚主按钮是 40 高（上游 `Button` 的 md）。
+//
+// 判据是**像素**：主按钮是实心主色，字上面 / 下面各 8 像素必须还是主色。
+// 28 高那一版（`ui.Button` 的默认内边距）算出来上下只有 6 像素，8 就落在
+// 按钮外面了——那是这一条能红的地方。
+func TestThePlayAllButtonIsFortyHigh(t *testing.T) {
+	if collectionOpsButtonH != 40 {
+		t.Errorf("collectionOpsButtonH = %d，want 40（上游 md = h-10）", collectionOpsButtonH)
+	}
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"))
+			waitSongs(t, tt, s, 1)
+			tt.SetDark(dark)
+			tt.Frame()
+
+			text, ok := tt.Find("播放全部")
+			if !ok {
+				t.Fatalf("找不到「播放全部」，文字有 %q", tt.Texts())
+			}
+			accent := rgbaOf(BuildTheme(s.app.SettingsSnapshot(), dark).Accent)
+			x := round32(text.X + text.W/2)
+			img := tt.Image()
+			for _, y := range []int{round32(text.Y) - 8, round32(text.Y+text.H) + 8} {
+				got := img.RGBAAt(clampX(img, x), clampY(img, y))
+				if maxDiff(got, accent) > probeTolerance {
+					t.Errorf("主按钮字上下各 8 像素处是 %v，不是主色 %v——按钮没有 40 高"+
+						"（字在 %.1f…%.1f）", got, accent, text.Y, text.Y+text.H)
+				}
+			}
+		})
+	}
+}
+
+// TestTheCollectionSearchDoesNotStealTheFocusWhenComingBack 断「切走再回来，那枚
+// 会展开的搜索不抢键盘焦点」。
+//
+// ⚠️ **搜索要留着展开的**：列表还按上次的词筛着，界面上得看得见那个词（收起来
+// 的话，用户看见的是一份筛过的列表，而没有第二处说「它按什么筛的」）。
+//
+// 但**焦点不能跟着回来**：那个输入框回来时是重画出来的（元素重建 = 新生），
+// 而 `AutoFocus` 认的正是「这一帧刚出生」——不挡这一下的话，用户在别的页敲的
+// 字会落进这个他没打开过的框里（评审第 5 条）。
+func TestTheCollectionSearchDoesNotStealTheFocusWhenComingBack(t *testing.T) {
+	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
+	waitSongs(t, tt, s, 2)
+
+	tt.SetFocused(true)
+	if err := tt.Click(collectionSearchLabel); err != nil {
+		t.Fatalf("点不开搜索：%v", err)
+	}
+	tt.Frame()
+	if !tt.Focused(collectionSearchLabel) {
+		t.Fatalf("点开搜索之后焦点不在输入框里——用户点放大镜就是为了打字")
+	}
+
+	// 切到别的页，再回来。
+	s.navigate(localMusicPath)
+	tt.Frame()
+	s.navigate(collectionPathPrefix + "12345")
+	tt.Frame()
+	tt.Frame()
+
+	// 搜索还开着（列表还按上次的词筛着，界面上要看得见）。
+	box, ok := tt.Find(collectionSearchLabel)
+	if !ok {
+		t.Fatalf("回来之后搜索不见了，文字有 %q", tt.Texts())
+	}
+	if box.W <= 30 {
+		t.Fatalf("回来之后搜索收起来了（%.1f 宽）——列表还按上次的词筛着，界面上却"+
+			"没有第二处说这件事", box.W)
+	}
+	// 但焦点不在这儿。
+	//
+	// ⚠️ **判据是「光标」，不是 `Tester.Focused`**：那个查询是「这个元素**或者它的
+	// 祖先**有焦点」——框架切页时把焦点给了**页面容器**（`Router.focusPage`），
+	// 而页面容器是那个输入框的祖先，所以 `Focused` 照样是 true（实测）。
+	// 真正要断的是「焦点在不在那个框里」：**输入框有焦点时光标是有位置的**。
+	if caret, ok := tt.TextCaret(); ok {
+		t.Errorf("回来之后焦点落在那个输入框里（光标 %v）——用户在别处敲的字会落进"+
+			"这个框里", caret)
 	}
 }

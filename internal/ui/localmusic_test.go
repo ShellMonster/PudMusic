@@ -371,3 +371,120 @@ func TestDirectoryLabelsAreAllDifferent(t *testing.T) {
 		}
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 票 #175：行 hover 的播放图标、会展开的搜索
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestHoveringALocalRowTurnsItsNumberIntoAPlayIcon 行 hover 时序号换成播放图标。
+//
+// 出处是上游 `local-music/item.tsx:57-64`：`group-hover:hidden` 藏序号、
+// `hidden group-hover:inline` 亮 `RiPlayFill`（16）。
+//
+// 判据是画面上**那枚图标的名字**：它只在 hover 的那一行画出来。三条——
+// 平时没有、指到第一首有、换到第二首时它跟着换行，最后指针离开表格又消失。
+func TestHoveringALocalRowTurnsItsNumberIntoAPlayIcon(t *testing.T) {
+	root := t.TempDir()
+	libSong(t, root, "第一首.mp3")
+	libSong(t, root, "第二首.mp3")
+	tt, _, _, _ := shellOnLocalMusic(t, root)
+
+	if _, ok := tt.Find(localPlayIconLabel); ok {
+		t.Fatalf("没有 hover 就有播放图标")
+	}
+	first, ok := tt.Find("第一首")
+	if !ok {
+		t.Fatalf("找不到第一首，文字有 %q", tt.Texts())
+	}
+	tt.Move(first.X+first.W/2, first.Y+first.H/2)
+	// 两帧：hover 是上一帧的布局决定的。
+	tt.Frame()
+	tt.Frame()
+	icon, ok := tt.Find(localPlayIconLabel)
+	if !ok {
+		t.Fatalf("hover 第一首之后没有播放图标，文字有 %q", tt.Texts())
+	}
+	if icon.W < 15 || icon.W > 17 || icon.H < 15 || icon.H > 17 {
+		t.Errorf("播放图标是 %.0f×%.0f，want 16×16（上游 `RiPlayFill size={16}`）",
+			icon.W, icon.H)
+	}
+	if icon.Y+icon.H < first.Y || icon.Y > first.Y+first.H {
+		t.Errorf("播放图标画在 %.1f…%.1f，不在第一首那一行（%.1f…%.1f）里",
+			icon.Y, icon.Y+icon.H, first.Y, first.Y+first.H)
+	}
+
+	// ⚠️ **行的上/下各 6 像素也算「压在这一行」**：那 6 像素是 `ui.Table` 给
+	// 每一行的内边距（格子本身只有 28 高，行是 40 高）。只按格子算的话，指针在
+	// 那两圈上时图标不出现，图标会跟着指针上下闪（上游的 `group-hover` 是整行
+	// 都亮的）。
+	for _, where := range []struct {
+		what string
+		y    float32
+	}{
+		{"行的上边", first.Y + 2},
+		{"行的下边", first.Y + first.H - 2},
+	} {
+		tt.Move(first.X+first.W/2, where.y)
+		tt.Frame()
+		tt.Frame()
+		if _, ok := tt.Find(localPlayIconLabel); !ok {
+			t.Errorf("指针在%s（y=%.1f）时没有播放图标——那一行不全是热区",
+				where.what, where.y)
+		}
+	}
+
+	// 指到第二首：图标跟着换行。
+	second, ok := tt.Find("第二首")
+	if !ok {
+		t.Fatalf("找不到第二首，文字有 %q", tt.Texts())
+	}
+	tt.Move(second.X+second.W/2, second.Y+second.H/2)
+	tt.Frame()
+	tt.Frame()
+	icon, ok = tt.Find(localPlayIconLabel)
+	if !ok {
+		t.Fatalf("hover 第二首之后没有播放图标")
+	}
+	if icon.Y+icon.H < second.Y || icon.Y > second.Y+second.H {
+		t.Errorf("hover 第二首时播放图标画在 %.1f…%.1f，不在第二首那一行（%.1f…%.1f）",
+			icon.Y, icon.Y+icon.H, second.Y, second.Y+second.H)
+	}
+
+	// 指针离开表格（播放条那条空地）：图标收回去。
+	tt.Move(600, 795)
+	tt.Frame()
+	tt.Frame()
+	if _, ok := tt.Find(localPlayIconLabel); ok {
+		t.Errorf("指针离开表格之后播放图标还在")
+	}
+}
+
+// TestTheLocalSearchIsACollapsedButton 本地音乐的搜索也是一枚会展开的图标键。
+//
+// 上游那一页用的是同一个 `SearchButton`（`local-music/index.tsx:236`）；而这一页
+// 的工具条在最小窗口上本来就挤（搜索框 180 的时候侧栏一拉宽，「重新扫描」整个
+// 被挤到窗口外面），收起来正好也把那 152 像素还回去。
+func TestTheLocalSearchIsACollapsedButton(t *testing.T) {
+	root := t.TempDir()
+	libSong(t, root, "歌.mp3")
+	tt, _, _, _ := shellOnLocalMusic(t, root)
+
+	r, ok := tt.Find(searchLocalLabel)
+	if !ok {
+		t.Fatalf("找不到搜索，文字有 %q", tt.Texts())
+	}
+	if r.W > 30 || r.H > 30 {
+		t.Errorf("搜索刚进来就是 %.0f×%.0f——它该是一枚图标键", r.W, r.H)
+	}
+	if err := tt.Click(searchLocalLabel); err != nil {
+		t.Fatalf("点不开搜索：%v", err)
+	}
+	tt.Frame()
+	r, ok = tt.Find(searchLocalLabel)
+	if !ok {
+		t.Fatalf("点开之后搜索不见了，文字有 %q", tt.Texts())
+	}
+	if r.W <= 30 {
+		t.Fatalf("点开之后还是 %.0f 宽——搜索没有展开", r.W)
+	}
+}
