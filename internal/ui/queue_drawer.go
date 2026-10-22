@@ -95,6 +95,12 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 	if !s.drawerOpen {
 		return
 	}
+	// 记一笔「抽屉建了一遍」——给「一帧建了几遍」那条测试数（见 builds.go）。
+	//
+	// ⚠️ 这一句数的是**两个调用方**：满屏播放器开着的时候抽屉由满屏那一支
+	// 建（`viewFullPlayer` 末尾那一句），而 `viewMain` 必须让开。两处都建
+	// 的话这里会是 2——而画面上看着没差。
+	s.builds.drawer++
 	t := c.Theme()
 	s.queueRows = queueRowsFor(s.app.Queue().Items())
 

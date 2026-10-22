@@ -569,6 +569,11 @@ type Shell struct {
 	// seek」——那一半就靠这对标记守住）。
 	miniScrub float64
 	miniHeld  bool
+	// builds 记着「各个界面一共建了几遍」。**给测试看的**（见 builds.go 与
+	// framebudget_test.go）：「一帧建两遍」是静默的坏处——画面上看着没差，
+	// 而帧成本翻倍。
+	builds buildTally
+
 	// closed 记着这个外壳收过尾了。它是**「关掉之后不许再装定时器」那道闸门**，
 	// 不是「收尾只走一遍」——`Close` 可以重复调，而底下每一项各自幂等。
 	//
@@ -1266,7 +1271,10 @@ func (s *Shell) viewMain(c *ui.Context) {
 
 	// 全屏播放器排在收藏夹弹窗**之后**、Toast **之前**：它盖住整个窗口，
 	// 而提示要浮在最上面（右下角那句话在满屏里也得看得见）。
-	s.guardAt("全屏播放器", s.viewFullPlayer)(c)
+	//
+	// ⚠️ **递的是这一帧开头取的那份快照**（`st`），不是满屏自己再取一份——
+	// 见 `viewFullPlayer` 的注释。
+	s.guardAt("全屏播放器", func(c *ui.Context) { s.viewFullPlayer(c, st) })(c)
 
 	// 歌词搜索与预览那两个弹窗（lyricssearch.go）。**排在满屏之后**：它们是模态
 	// 的、要盖住整页，而满屏盖住的是整个窗口——次序反过来的话用户在满屏里按到
