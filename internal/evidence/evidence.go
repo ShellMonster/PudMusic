@@ -1994,4 +1994,38 @@ var Items = []Item{
 			"TestHoveringALocalRowTurnsItsNumberIntoAPlayIcon",
 		},
 	},
+	{
+		// 归「双平台」那一组：这一票动的是**三处控件的形态**（确认框、日期
+		// 范围、下载状态），而这一族的错法全是「长得不像上游」——系统原生那个
+		// 弹窗、两个并排的日期输入框、绿色的进度条，**没有一样会报错**，
+		// 界面只是「不是那个产品」。
+		Category: Platform,
+		// 票 #176（#163 的第二批之一）：弹窗 / 日期 / 下载状态。
+		//
+		// ⚠️ **判据全是画面上的东西**：图标是什么颜色、确认键是什么颜色、正文
+		// 的行高（= 字号）、日历上是几个月、进度条涂的是哪一块蓝。
+		Spec: "确认框是应用自绘的模态（按类型变色的警告图标 + 标题 + text-sm 正文 + light 取消 + 按类型变色的确认键）；日期范围是**双月**选择器（256 宽的触发键，弹出来是两个月并排，能挑起始和结束，没在筛的时候日历上什么都不亮）；下载进度条是**蓝**的（不是主色），出错的那一条是红的，完成那一格有一枚**绿勾**",
+		Tests: []string{
+			// 确认框：图标在不在、是不是按类型变色；确认键的颜色；正文的字号；
+			// 取消是不是 light。
+			"TestTheConfirmDialogHasAToneColoredWarningIcon",
+			"TestTheConfirmButtonTakesTheToneColor",
+			"TestTheConfirmBodyIsTextSmall",
+			"TestTheCancelButtonIsLight",
+			// 双月日期选择器：两个月、一起翻、挑过的那天被高亮、点更早的一天
+			// 从头再挑、没在筛的时候什么都不亮、挑完真的换条件、最窄窗口下两块
+			// 都点得到。
+			"TestTheRangePickerShowsTwoMonths",
+			"TestTheTwoMonthsMoveTogether",
+			"TestThePickedDayIsHighlighted",
+			"TestPickingAnEarlierDayStartsOver",
+			"TestNothingIsHighlightedWhileNothingIsFiltered",
+			"TestTheRangePickerDrivesTheFilter",
+			"TestTheDateRangeOpensItsCalendarAtTheMinimumWindowWidth",
+			// 下载状态：条是蓝的（且不是主色）、出错的是红的、完成的有一枚绿勾。
+			"TestTheDownloadBarIsBlueAndNotTheAccent",
+			"TestTheFailedBarIsRed",
+			"TestTheFinishedCellHasAGreenCheck",
+		},
+	},
 }

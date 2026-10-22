@@ -1,16 +1,11 @@
 // 日期范围筛选：Biu 那个 `src/components/date-range-picker/index.tsx` 的 4 个
 // 预设 Tab 加上手动区间。
 //
-// # 底座是现成的，日历不自己造
+// # 手动区间是**双月日期选择器**（票 #176 / G34）
 //
-// 上游那一整个组件是 HeroUI 的 `DateRangePicker` 加四个 `Tab`。我们这边有
-// `ui.Calendar` / `ui.DateInput`（MyGo v0.6.2，PLAN.md §6.8），所以：
-//
-//   - **日历**：`ui.DateInput` 自带，点开就是那个月的日历，点哪一天选哪一天。
-//     一个字都不自己画。
-//   - **四个预设 Tab**：`ui.Tabs`（上游也是 Tab，交互一模一样）。
-//   - **区间的两端**：两个 `ui.DateInput`。上游是一个范围选择器，我们没有
-//     对应的东西，而范围本来就是两个日期，取两个输入框是同一件事。
+// 上游那一整个组件是 HeroUI 的 `DateRangePicker`（`visibleMonths={2}`）加四个
+// `Tab`。日历那一半自己画了——理由在 `daterangepicker.go` 的文件头（框架的
+// `ui.Calendar` 只能选一天，而且翻月会把选中的日子一起翻掉）。
 //
 // # 预设的值逐条抄上游
 //
@@ -63,16 +58,20 @@ const presetAll = 0
 
 // dateFilter 是一个日期范围筛选条件。
 //
-// 零值不可用，请用 newDateFilter：两个输入框里得先有**真的日期**——`ui.DateInput`
-// 把零值时刻画出来是「1/1/1」（公元元年），那不是「没选」，那是坏了。
+// 零值不可用，请用 newDateFilter：两个端点里得先有**真的日期**——零值时刻
+// 画出来是「1/1/1」（公元元年），那不是「没选」，那是坏了。
 type dateFilter struct {
-	// from / to 是区间的两端。它们同时是**输入框里显示的东西**：框架直接改
-	// 这两个字段（`coreDateInput` 写的是那个指针），所以它们既是状态也是控件。
+	// from / to 是区间的两端。
+	//
+	// ⚠️ **它们现在是纯状态，不是控件**：手动挑日期的那一块是自己画的
+	// （`daterangepicker.go` 的双月选择器），而框架的 `ui.DateInput` 只能选
+	// **一天**、画不出「两头实心、中间一段淡色」那个区间（见那个文件的
+	// 文件头）。所以现在只有这一层改它们。
 	from, to time.Time
 
-	// tab 是当前选中的预设（0..3）。-1 = 用户在输入框里手动挑了，预设不高亮。
+	// tab 是当前选中的预设（0..3）。-1 = 用户手动挑了，预设不高亮。
 	tab int
-	// seenTab / seenFrom / seenTo 是上一帧画完之后输入框和 Tab 里的值。
+	// seenTab / seenFrom / seenTo 是上一帧画完之后的值。
 	// 拿它们比对才知道「用户改了」——直接比当前值和上次算出来的值会把用户
 	// 的每一次输入都当成没发生。
 	seenTab          int
@@ -80,16 +79,29 @@ type dateFilter struct {
 
 	// on 报现在有没有在按日期筛。选「全部时间」是 false。
 	on bool
+
+	// ── 双月选择器自己的那一摊（见 `daterangepicker.go`）──────────────────
+
+	// open 是那块双月日历开着没有（`ui.PopoverBase` 的那个开关）。
+	open bool
+	// month 是**左边**那个月（哪一天都行，月份有效）。右边那个月恒定是它的
+	// 下一个月。
+	month time.Time
+	// pickingEnd 是「起始已经挑好了，正等着挑结束」吗。
+	pickingEnd bool
+	// pendingFrom 是刚挑好的那个**起始**（还在等结束的那一段）。
+	pendingFrom time.Time
 }
 
 // newDateFilter 建一个「不按日期筛」的筛选器。
 //
-// now 是用来把两个输入框填成今天的那一下时钟——测试传假时钟，这一页上的
+// now 是用来把区间填成今天的那一下时钟——测试传假时钟，这一页上的
 // 「今天」就永远是那一天，不会随测试跑的时间变。
 func newDateFilter(now time.Time) *dateFilter {
 	d := startOfDay(now)
 	f := &dateFilter{from: d, to: endOfDay(d), tab: presetAll, seenTab: presetAll}
 	f.seenFrom, f.seenTo = f.from, f.to
+	f.month = startOfMonth(d)
 	return f
 }
 
@@ -109,7 +121,7 @@ func (f *dateFilter) setPreset(i int, now time.Time) {
 	f.tab = i
 	if datePresets[i].span == nil {
 		f.on = false
-		// 把两个输入框收成今天。用户下一步多半是要手动挑一天——摆着今天，
+		// 把区间收成今天。用户下一步多半是要手动挑一天——摆着今天，
 		// 他知道自己是从哪儿开始改的；摆着公元元年，他以为界面坏了。
 		d := startOfDay(now)
 		f.from, f.to = d, endOfDay(d)
@@ -117,7 +129,10 @@ func (f *dateFilter) setPreset(i int, now time.Time) {
 		f.on = true
 		f.from, f.to = datePresets[i].span(now)
 	}
-	// 记下改完的值：**必须记**，否则 view 末尾那句「输入框变了没」会把这个
+	// ⚠️ **半截挑着的区间作废**：换了预设就等于换了条件，而那个「起始已经
+	// 挑好、还等着挑结束」的半截状态是上一件事的。
+	f.pickingEnd = false
+	// 记下改完的值：**必须记**，否则 view 末尾那句「区间变了没」会把这个
 	// preset 自己的写入当成用户输入，预设的高亮当帧就被抹掉了。
 	f.seenTab, f.seenFrom, f.seenTo = f.tab, f.from, f.to
 }
@@ -153,14 +168,8 @@ func (f *dateFilter) view(c *ui.Context, now time.Time) bool {
 			}
 		}
 
-		// 手动区间的两端。日历是 `ui.DateInput` 自带的，这里一个字都不画。
-		ui.Text(c, "从").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
-		// ⚠️ Label 不能省：它不只是给测试用的，没有它读屏软件读不出这是一个
-		// 选起始日期的输入框（旁边那行「从」是占位文字，不是标签），而
-		// 无头 Tester 也只认 label / text。
-		ui.DateInput(c, &f.from).Label("起始日期")
-		ui.Text(c, "到").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
-		ui.DateInput(c, &f.to).Label("结束日期")
+		// 手动挑区间：**双月日期选择器**（上游 `visibleMonths={2}`）。
+		f.viewRangePicker(c)
 
 		ui.Text(c, f.summary()).FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
 			TextColor(t.TextMuted)

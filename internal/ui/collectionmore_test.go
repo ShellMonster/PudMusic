@@ -336,8 +336,9 @@ func TestDeletingFromThePageIsTheSameCallTheSidebarMakes(t *testing.T) {
 // TestCancellingLeavesNothingBehind 不：两个「不」的来源各走一遍，而「删 B 站
 // 上那个」**一个字节都不发出去**。
 //
-// ⚠️ **两个来源都要**：点「取消」按钮（`AlertDialog` 返回它的下标 **0**）和按
-// Esc（返回 `AlertDismissed`）。它们是两个不同的返回值，只清其中一个的话，
+// ⚠️ **两个来源都要**：点「取消」按钮和按 Esc（现在它们都走
+// `confirmCancelled` 那一档——票 #176 之后确认框是自绘的了，而 `ui.Modal`
+// 把「点外面 / 按 Esc 关掉」做好了）。它们是两个不同的来源，只清一个的话，
 // 另一个就是「按了取消还是删了」——而这里测的是**不可逆**的那一下。
 //
 // 🔴 **判据是「没发请求」，不是「`p.confirm.kind` 清了没」**：Esc 那条路上一旦
