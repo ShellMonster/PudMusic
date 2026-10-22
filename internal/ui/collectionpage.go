@@ -567,7 +567,7 @@ const (
 )
 
 // collectionOpsButtonH 是操作条上那枚主按钮的高。上游的 `Button` 默认 size
-// 是 md = `h-10`，也就是 **40**。旁边那几枚图标键仍然是 `iconHitMd`（28）——
+// 是 md = `h-10`，也就是 **40**。旁边那几枚图标键仍然是 `iconHitMd`（32）——
 // 那一排的宽度在最小窗口上已经贴着边（见 `viewCollectionOps`），再把图标键
 // 撑到 40 就会把这一排挤出去。
 const collectionOpsButtonH = 40
@@ -716,7 +716,7 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 			// 上游是一枚 `size="md" variant="flat"` 的图标键
 			// （`operation/index.tsx:44`，tooltip「添加到播放列表」）。
 			if s.withTip(c, flatIconButton(c, iconEnqueue, "添加到播放列表", iconMd).
-				Size(iconHitMd, iconHitMd).Padding(0, 5), "添加到播放列表").Clicked() {
+				Size(iconHitMd, iconHitMd).Padding(0, 7), "添加到播放列表").Clicked() {
 				s.addWholeCollectionToQueue(p)
 			}
 			s.viewCollectionStar(c, p)
@@ -764,7 +764,7 @@ func (s *Shell) viewCollectionStar(c *ui.Context, p *collectionPage) {
 		tip = "取消收藏"
 	}
 	if s.withTip(c, flatIconButton(c, favIcon(info.Faved), tip, iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 5), tip).Clicked() {
+		Size(iconHitMd, iconHitMd).Padding(0, 7), tip).Clicked() {
 		s.setCollectionFav(p, !info.Faved)
 	}
 }
@@ -786,7 +786,7 @@ func (s *Shell) viewCollectionMore(c *ui.Context, p *collectionPage) {
 	// `ButtonBase` 拼的），所以扁平配方接得上——`ui.MenuButton` 那一版会自己
 	// 画一圈描边和一枚 ▾，放在这一排新扁平的三枚旁边就它一个不是。
 	s.withTip(c, flatIconButton(c, iconMore, "更多操作", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 5), "更多").
+		Size(iconHitMd, iconHitMd).Padding(0, 7), "更多").
 		Menu(func(m *ui.Menu) {
 			for _, item := range items {
 				if m.Item(item.label).Chosen() {
@@ -920,7 +920,7 @@ func (s *Shell) setCollectionSort(p *collectionPage) {
 // collectionSearchWidth 是展开之后那个输入框的**上限**。
 //
 // 240 是上游 `search-button/index.tsx` 的 `animate={{ width: 240 }}`（它从 40
-// 展开到 240）。收起时只有一枚 `iconHitMd`（28）的放大镜。
+// 展开到 240）。收起时只有一枚 `iconHitMd`（32）的放大镜。
 const collectionSearchWidth = 240
 
 // collectionSearchMinWidth 是展开后那个输入框的**最小**宽。

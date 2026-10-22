@@ -1837,6 +1837,33 @@ var Items = []Item{
 		},
 	},
 	{
+		// 归「双平台」那一组：这一票动的是**侧栏本身**（图标 / 行高 / 品牌），
+		// 理由同上面那一条。
+		Category: Platform,
+		// issue 164（#163 的批次 1）那一票：菜单项的图标、行高与左上角的品牌。
+		//
+		// 🔴 **判据全是画面上的东西**：图标有没有画、选中那一项换没换实心、
+		// 那一行多高、折叠态那一格是不是 40×40 的图标格、左上角是不是
+		// 40×40 的 logo 加 24px 的「BiuGo」——**没有一条会报错**：图标没画
+		// 出来，那一项只是「比别人少点东西」；行高不对，只是「矮了一点」。
+		//
+		// ⚠️ **这一票还把图标键的命中区从 28 改成了上游那一档的 32**，而命中区
+		// 是**全局默认**（播放条、顶栏、队列抽屉头、收藏夹行尾、下载表那一列共用
+		// 那两个数）。所以下面那几条也守着它涨上去之后的样子——尤其是
+		// `TestTheSideMenuRowsAreFortyHigh`（行高 40 是「图标格 40 + 命中区
+		// 涨上去」之后仍然成立的那一档）。
+		Spec: "侧栏菜单每一项前面有一枚 18px 的线框图标（选中那一项换实心的）、菜单行高 40、折叠态每一项是 40×40 的图标格且悬停说出全名、左上角是 40×40 的 logo 加 24px 主色粗体的应用名",
+		Tests: []string{
+			"TestEverySideMenuEntryHasAnIcon",
+			"TestTheSelectedSideMenuEntryDrawsTheFilledIcon",
+			"TestTheSideMenuRowsAreFortyHigh",
+			"TestTheCollapsedSideMenuItemIsAFortySquareIconCell",
+			"TestTheBrandIsALogoAndTheAppName",
+			// 路由表里那两枚图标逐条照上游的源码（表里写的是上游的字面文件名）。
+			"TestTheSideMenuIconsMatchBiu",
+		},
+	},
+	{
 		// 归「双平台」那一组：这一票动的是**六处的动作键**，而六处画得不一样就
 		// 是「用户从播放条走进满屏播放器，控件库换了」。理由同 #134 第二单元那一条：
 		// 判据全在画面上。

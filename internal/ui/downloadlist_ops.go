@@ -90,7 +90,7 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 		// 我们把它留在页头——表格那一块是共用的（widgets/list），页头才是这一页
 		// 自己的地方。
 		if d.tipWith(c, flatIconButton(c, iconDeleteBin5, "清空记录", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5).
+			Size(iconHitMd, iconHitMd).Padding(0, 7).
 			Disabled(len(d.all) == 0), "清空记录").Clicked() {
 			d.askClear(s)
 		}

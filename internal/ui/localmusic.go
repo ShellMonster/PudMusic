@@ -426,19 +426,21 @@ func (s *Shell) syncLocalMusic(c *ui.Context) {
 	s.local.begin(c)
 }
 
-// localTableRowPad 是 `ui.Table` 给每一行的上下内边距（6+6，行高 40 里占 12）。
+// localTableRowPad 是 `ui.Table` 给每一行的上下内边距（6+6，行高 44 里占 12）。
 const localTableRowPad = 6
 
-// localTableRowPx 是本地音乐那一档表格里一行的高：操作那一列那枚键（28）+ `ui.Table`
-// 给每一行的上下内边距（6+6）。
+// localTableRowPx 是本地音乐那一档表格里一行的高：操作那一列那枚键（`iconHit`
+// = 32）+ `ui.Table` 给每一行的上下内边距（6+6）。
 //
 // ⚠️ **它只用来把「顶上那一行是第几行」换算成像素**（回顶按钮的阈值是 400
 // 像素）。这一页的表格自己滚，而它内部那个滚动容器的像素偏移拿不到。
 //
 // ⚠️ **它是量出来的那一个数**（`TestTheTableRowHeightsAreWhatTheOffsetsAssume`
 // 钉着）：那一行的高由最高的格子决定（操作那一列的键），改了那一列的字号就得
-// 跟着改它。
-const localTableRowPx = 40
+// 跟着改它。图标键的点击区从 28 长到 32（上游那一档，G39）之后，它从 40 变成
+// 44——**回顶按钮的换算也跟着变**，不改的话「滚过了多少」算错，回顶会早几行
+// 或者晚几行才出现。
+const localTableRowPx = 44
 
 // localTableOffset 是表格那一档滚过了多少像素。
 func (p *localPage) localTableOffset() float32 {
@@ -479,7 +481,7 @@ func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
 			// 照上游那一枚 `IconButton`（`local-music/index.tsx:208`，tooltip
 			// 「添加到播放列表」）：图标键 + 悬停说出它做什么。
 			if p.tipWith(c, flatIconButton(c, iconEnqueue, "全部加入队列", iconMd).
-				Size(iconHitMd, iconHitMd).Padding(0, 5), "全部加入队列").Clicked() {
+				Size(iconHitMd, iconHitMd).Padding(0, 7), "全部加入队列").Clicked() {
 				p.queueAll()
 			}
 		}
@@ -497,12 +499,12 @@ func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
 		// 可见的字，提示是它唯一说得出自己做什么的地方。
 		if p.currentRoot(st.Roots) != "" {
 			if p.tipWith(c, flatIconButton(c, iconDeleteBin5, "移除此目录", iconMd).
-				Size(iconHitMd, iconHitMd).Padding(0, 5), "移除此目录").Clicked() {
+				Size(iconHitMd, iconHitMd).Padding(0, 7), "移除此目录").Clicked() {
 				p.askRemoveDir()
 			}
 		}
 		if p.tipWith(c, flatIconButton(c, iconRefresh, "重新扫描", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5), "重新扫描").Clicked() {
+			Size(iconHitMd, iconHitMd).Padding(0, 7), "重新扫描").Clicked() {
 			p.app.RescanLocalMusic()
 		}
 	})
@@ -710,9 +712,9 @@ func (p *localPage) tableRowHovered(cell ui.Element) bool {
 		return false
 	}
 	_, y, _ := cell.PointerPosition()
-	// ⚠️ **判据要算上那一行的上下内边距**：格子（内容区）只有 28 高，而那一行是
-	// 40 高（上下各 6 是 `ui.Table` 给每一行的内边距）——指针压在那 6 像素上也算
-	// 「压在这一行」。只按 28 算的话，行的上/下各 6 像素是死区，图标会在指针
+	// ⚠️ **判据要算上那一行的上下内边距**：格子（内容区）只有 32 高，而那一行是
+	// 44 高（上下各 6 是 `ui.Table` 给每一行的内边距）——指针压在那 6 像素上也算
+	// 「压在这一行」。只按 32 算的话，行的上/下各 6 像素是死区，图标会在指针
 	// 上下移动时闪一下（上游的 `group-hover` 是**整行**都亮的）。
 	return y >= -localTableRowPad && y < cell.Bounds().H+localTableRowPad
 }
@@ -732,12 +734,12 @@ func (p *localPage) viewRowOps(c *ui.Context, tr localmusic.Track) {
 	// 配方不给颜色——不给的话它和打开文件夹那枚一样是灰的，「这一下是不可撤销的」
 	// 那层意思就没了。
 	if p.tipWith(c, flatIconButton(c, iconFolder, "打开文件夹", iconSm).
-		Size(iconHit, iconHit).Padding(0, 7), "在访达里显示").Clicked() {
+		Size(iconHit, iconHit).Padding(0, 9), "在访达里显示").Clicked() {
 		mygo.Shell.ShowItemInFolder(tr.Path)
 	}
 	if !p.isPlaying(tr) {
 		if p.tipWith(c, flatIconButton(c, iconDeleteBin5, deleteRowLabel, iconSm).
-			Size(iconHit, iconHit).Padding(0, 7).
+			Size(iconHit, iconHit).Padding(0, 9).
 			TextColor(c.Theme().Danger), deleteRowLabel).Clicked() {
 			p.askTrack, p.askOpen = tr, true
 		}

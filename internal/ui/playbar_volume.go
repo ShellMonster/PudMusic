@@ -141,7 +141,7 @@ func (s *Shell) viewVolumeButton(c *ui.Context, st app.State) {
 	// 的那个 Tooltip **是竖滑块本身**。所以「按一下会静音」这件事靠的是
 	// **图标本身**（静音了它换成静音那张）加上这一枚的无障碍名字。
 	btn := iconButton(c, name, label, iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 5).
+		Size(iconHitMd, iconHitMd).Padding(0, 7).
 		TextColor(t.TextMuted)
 
 	// 悬停就浮出那根竖滑块——**但要停一会儿**（上游那个 Tooltip 的 `delay={300}`）。

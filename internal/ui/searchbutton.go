@@ -79,7 +79,7 @@ func expandableSearch(c *ui.Context, tip tipFunc, st *searchButtonState, text *s
 	// 详见 `Shell.pageJustShown`。
 	if !st.open || justShown {
 		if tipFrom(tip, c, flatIconButton(c, iconSearch, label, iconMd).
-			Size(iconHitMd, iconMd).Padding(0, 5), label, tipDefault).Clicked() {
+			Size(iconHitMd, iconMd).Padding(0, 7), label, tipDefault).Clicked() {
 			st.open, st.wasFocused, st.focusNext = true, false, true
 		}
 		return ui.Element{}
