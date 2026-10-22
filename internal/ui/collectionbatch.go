@@ -81,8 +81,8 @@ func (s *Shell) viewCollectionBatchBar(c *ui.Context, p *collectionPage) {
 
 // askConfirm 记下「这件事要用户点一下确定」。
 //
-// ⚠️ **这里只记，不做**。真正那一下在 `viewCollectionConfirm` 里——确认框是
-// 系统模态，在它上面点任何别的控件都不该生效，所以两步必须分开。
+// ⚠️ **这里只记，不做**。真正那一下在 `viewCollectionConfirm` 里——那个框是
+// **模态**，在它上面点任何别的控件都不该生效，所以两步必须分开。
 func (s *Shell) askConfirm(p *collectionPage, kind confirmKind, count int, only bool) {
 	s.askConfirmAbout(p, kind, count, only, "")
 }
@@ -127,10 +127,9 @@ func confirmText(req confirmRequest, mediaCount int) (title, what, button string
 
 // viewCollectionConfirm 是批量删除 / 批量下载、以及 ⋯ 菜单里那三件的二次确认。
 //
-// 用 MyGo 的 `AlertDialog`（系统原生确认框）而不是自绘浮层：Biu 那边的
-// `components/confirm-modal` 就是模态框，而系统这一份免费给到「点外面不关」
-// 和「Esc 当取消」——**点外面不关正是二次确认要的**（自绘浮层很容易漏掉，
-// 而漏掉的后果是误删一整批）。
+// 用**应用自绘**的确认框（`confirmModal`）而不是系统原生的 `AlertDialog`：
+// 上游那一份是 `components/confirm-modal`——按类型变色的警告图标 + 标题 +
+// 正文 + light 取消 + 实心确认（票 #176 / G33）。
 //
 // ⚠️ 确认框画在**批量操作条外面**（`viewCollection` 的下一层）才有遮罩盖住
 // 整页；塞进那条 Row 里的话遮罩只有那一条高。
@@ -138,38 +137,57 @@ func (s *Shell) viewCollectionConfirm(c *ui.Context, p *collectionPage) {
 	if p.confirm.kind == confirmNone {
 		return
 	}
-	title, what, button := confirmText(p.confirm, s.app.Collection(p.ref).MediaCount)
-	switch ui.AlertDialog(c, &p.confirm.open, title, what, "取消", button) {
-	case 1:
-		// ⚠️ 先把整份抄下来再干活：干活的过程中 `p.confirm` 会被重画的那一帧
-		// 改掉，而旧的那一份才是「用户在确认的是哪一件事」。
-		req := p.confirm
+	// ⚠️ 先把整份抄下来再干活：干活的过程中 `p.confirm` 会被重画的那一帧
+	// 改掉，而旧的那一份才是「用户在确认的是哪一件事」。
+	req := p.confirm
+	title, what, button := confirmText(req, s.app.Collection(p.ref).MediaCount)
+
+	switch confirmModal(c, &p.confirm.open, confirmSpec{
+		tone:    confirmToneOf(req.kind),
+		title:   title,
+		body:    what,
+		confirm: button,
+		cancel:  "取消",
+	}) {
+	case confirmAccepted:
 		// ⚠️ 再清掉 kind：干活的过程中列表可能整个换掉（删除会），
 		// 而 `p.confirm` 挂在旧的那一份状态上——不清的话它会被带进新列表。
 		p.confirm.kind = confirmNone
 		s.runConfirmed(p, req)
-	case 0, ui.AlertDismissed:
-		// 不。**两个来源都要在这儿**：点「取消」按钮（`AlertDialog` 返回它的下标
-		// 0）和按 Esc（返回 `AlertDismissed`）——后者才是原来那一支。
+	case confirmCancelled:
+		// 取消 / Esc / 点外面：**什么都不做**。
 		//
-		// ⚠️ 别把这一行说成「修了一个 bug」。**两个后果都验过，它都不成立**：
-		// 框不会重画（`coreAlertDialog` 在 `*open` 为 false 时第一句就 return -1，
-		// 而「取消」按下去的时候 `open` 已经被 `AlertDialog` 自己关掉了）；而残留
-		// 的 `kind` 也不会连着把事情做掉——`askConfirm` / `askConfirmAbout` 是
-		// **整份替换** `confirmRequest`，下一次有人按菜单时它早就被覆盖了
-		// （评审的变异验证也确认了这一点：拿掉 `case 0` 之后全部测试照样绿）。
-		//
-		// 它真正值着的只有一件小事：**清掉状态是本分**。不唯一的代价是这一页
-		// 每一帧白跑一次 `confirmText` 加一次立刻返回 -1 的 `AlertDialog`——
-		// 便宜，但不该白花，而且「这一页没在等任何确认」和「它在等一个没人看得见
-		// 的确认」在以后加新动作时会长出不一样的行为。
+		// ⚠️ 清掉 `kind` 是本分：不唯一的代价是这一页每一帧白跑一次
+		// `confirmText` 加一次确认框，而「这一页没在等任何确认」和「它在等一个
+		// 没人看得见的确认」在以后加新动作时会长出不一样的行为。
 		p.confirm.kind = confirmNone
 	}
 }
 
+// confirmToneOf 是「这一件事该配哪一种确认框」。
+//
+// 逐条照上游用它自己的那几处（`components/confirm-modal` 的 `type` 字段）：
+//
+//	清除失效内容 → warning（`video-collection/operation/menu.tsx:66`）
+//	删收藏夹     → danger （同文件 `:84`，以及 `side/collection/index.tsx:249`）
+//	其余（批量下载、从侧栏移除）→ primary
+//
+// ⚠️ **「从侧栏移除」是 primary 而不是 danger**：它一个字节都不往 B 站发
+// （`app.ForgetCollectionFolder` 不碰网络），而上游同位置的「取消收藏」
+// 是要发请求的—— ours 更轻，配红是吓人。
+func confirmToneOf(kind confirmKind) confirmTone {
+	switch kind {
+	case confirmDelete, confirmDeleteFolder:
+		return toneDanger
+	case confirmClearInvalid:
+		return toneWarning
+	}
+	return tonePrimary
+}
+
 // runConfirmed 是用户在确认框上点了那一下之后做的事。
 //
-// ⚠️ **取消不落到这里**（`AlertDismissed` 那一支），而这一层**一个网络请求
+// ⚠️ **取消不落到这里**（`confirmCancelled` 那一支），而这一层**一个网络请求
 // 都不发**：所有写操作都在后面的后台 goroutine 里。点错一次的代价就是白发一
 // 次请求，而白发一次「删收藏夹」在 B 站那边是删掉了——所以这里必须真的什么都不做。
 func (s *Shell) runConfirmed(p *collectionPage, req confirmRequest) {
