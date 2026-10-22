@@ -234,6 +234,15 @@ func newTestShell(t *testing.T, opts ...shellOpt) *testShell {
 		sp.mount(t, a)
 	}
 
+	// 封面磁盘缓存：替成临时目录。无头 Tester 里 `mygo.App.Path` 返回的也是
+	// 一个**真的、可写的**用户缓存目录，不替的话每条测试都往那里写封面，
+	// 测试之间还会串数据。收尾顺序（LIFO）：先 `Shell.Close` 把盘落完、把
+	// writer 停掉，再恢复这一格，最后才是 `writableTempDir` 删目录。
+	origCoverCacheDir := coverCacheDir
+	cacheDir := writableTempDir(t, "covers")
+	coverCacheDir = func() string { return cacheDir }
+	t.Cleanup(func() { coverCacheDir = origCoverCacheDir })
+
 	s := New(a)
 	sh.s = s
 	if sp.stub != nil {

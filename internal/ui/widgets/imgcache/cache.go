@@ -16,6 +16,11 @@
 // ——这是实测踩过的坑（只投递不唤醒 = 新状态到了但 0 帧刷新），不是理论风险。
 // 有几个窗口注册就通知几个，只通知主窗口的话迷你窗口会停在旧内容。
 //
+// 落盘那一半（`Options.Dir` 非空才开）：第一次下载成功之后把字节写到应用自己
+// 的缓存目录，同一张图第二次启动直接从盘上读，不再打图床。目录有独立的字节
+// 上限，按最久未用淘汰；**读盘在后台，写盘在自己的 worker 里**，主线程一次都
+// 不碰磁盘（见 `disk.go`）。
+//
 // ⚠️ `ui.Bitmap` 造出来之后像素就读不回来了（只有 Pixelated / Update / Size
 // 三个方法）。所以要缩放、取主色、做模糊占位，都得在 DecodeBitmap 之前做完。
 package imgcache
@@ -23,14 +28,12 @@ package imgcache
 import (
 	"container/list"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"sync"
@@ -40,9 +43,16 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// DefaultMaxBytes 是缓存默认的字节上限。Biu 一次能列出几十张封面，64MB 大约
-// 相当于 50 张 672×378 的，够一屏用又不至于让歌单一滚就吃掉几百 MB。
+// DefaultMaxBytes 是**内存**缓存默认的字节上限。Biu 一次能列出几十张封面，64MB
+// 大约相当于 50 张 672×378 的，够一屏用又不至于让歌单一滚就吃掉几百 MB。
 const DefaultMaxBytes int64 = 64 << 20
+
+// DefaultDiskMaxBytes 是**磁盘**缓存默认的字节上限：256MB。
+//
+// 它和内存那一份是两个预算：盘上存的是压缩后的原始字节（一张 672×378 的 WebP
+// 约 30KB），256MB 能放八千多张——按几百张一屏的歌单算，也够很多次启动复用。
+// 设上限不是为了省这 256MB，是为了给「一直滚下去」一个确定的终点。
+const DefaultDiskMaxBytes int64 = 256 << 20
 
 // defaultMaxInflight 是同时在途的下载数。B 站图床对同一个 IP 的并发是有限
 // 的，歌单一次几十张全放出去会被拒。
@@ -87,10 +97,17 @@ func (systemClock) AfterFunc(d time.Duration, f func()) Timer { return time.Afte
 
 // Options 是建缓存时能调的旋钮。零值就是推荐值。
 type Options struct {
-	// MaxBytes 是缓存的字节上限，零值是 DefaultMaxBytes。
+	// MaxBytes 是**内存**缓存的字节上限，零值是 DefaultMaxBytes。
 	MaxBytes int64
-	// Dir 是磁盘缓存目录，空就是不落盘。落盘之后同一张图第二次启动不用再下。
+	// Dir 是磁盘缓存目录，空就是不落盘——零值就是「全在内存里」，和以前一样。
+	//
+	// 落盘之后同一张图第二次启动不用再下。⚠️ 调用方要给**应用自己的缓存路径
+	// 下的一个专用子目录**（`mygo.App.Path(mygo.PathCache)` 底下），不要指向
+	// 用户文件目录：这个目录会被整个用来做缓存，超出上限的文件会被删掉。
 	Dir string
+	// DiskMaxBytes 是磁盘缓存的字节上限，零值是 DefaultDiskMaxBytes。
+	// 只在 Dir 非空时有意义。
+	DiskMaxBytes int64
 	// MaxInflight 是同时在途的下载数，零值是 6。
 	MaxInflight int
 	// Decoders 是解码 worker 数，零值是 min(核数, 4)。
@@ -125,10 +142,15 @@ type State struct {
 func (s State) Ready() bool { return s.Bitmap != nil }
 
 // Cache 是图片缓存。整个界面共用一个，别每个页面建一个。
+//
+// ⚠️ **用着它的几方要各自 Retain / Close**（引用计数）：迷你窗口借的是主窗口
+// 那一份（一个磁盘缓存目录只能有一本账），而这两扇窗的寿命不一样。谁最后
+// 放开谁就关。
 type Cache struct {
-	client   *http.Client
-	ua       string
-	dir      string
+	client *http.Client
+	ua     string
+	// disk 是落盘那一半，nil = 不落盘（Options.Dir 为空）。
+	disk     *diskCache
 	decodeCh chan job
 
 	clock      Clock
@@ -159,6 +181,15 @@ type Cache struct {
 	stop   context.CancelFunc
 	closed atomic.Bool
 
+	// refs 是**用着这份缓存的人数**。建缓存算一份（`New`），
+	// `Retain` 再加一份，`Close` 放开一份——真的关掉要等最后一份放开。
+	//
+	// 为什么要有它：迷你窗口借的是主窗口那份封面缓存（一个磁盘缓存目录只能有
+	// 一本账），而这两扇窗的寿命不一样。没有引用计数的话，主窗口那个外壳先
+	// 收尾（`Shell.Close` → `images.Close`）就会把迷你那份一起带走——迷你之后
+	// 每要一张图都是 `ErrClosed` 永久失败态，而界面上的症状只是「图不出来」。
+	refs atomic.Int64
+
 	decodeWG sync.WaitGroup
 }
 
@@ -166,6 +197,9 @@ type Cache struct {
 func New(opts Options) *Cache {
 	if opts.MaxBytes <= 0 {
 		opts.MaxBytes = DefaultMaxBytes
+	}
+	if opts.DiskMaxBytes <= 0 {
+		opts.DiskMaxBytes = DefaultDiskMaxBytes
 	}
 	if opts.MaxInflight <= 0 {
 		opts.MaxInflight = defaultMaxInflight
@@ -200,7 +234,6 @@ func New(opts Options) *Cache {
 	c := &Cache{
 		client:     opts.Client,
 		ua:         opts.UserAgent,
-		dir:        opts.Dir,
 		lru:        newLRU(opts.MaxBytes),
 		decodeCh:   make(chan job, opts.Decoders*4),
 		inflight:   make(chan struct{}, opts.MaxInflight),
@@ -213,9 +246,11 @@ func New(opts Options) *Cache {
 		failOrder:  list.New(),
 	}
 	c.ctx, c.stop = context.WithCancel(context.Background())
-	if c.dir != "" {
-		if err := os.MkdirAll(c.dir, 0o755); err != nil {
-			c.dir = "" // 落不了盘就当没配，不影响下载
+	c.refs.Store(1) // 建缓存的人算一份使用者
+	if opts.Dir != "" {
+		if err := os.MkdirAll(opts.Dir, 0o755); err == nil {
+			// 目录建好了才算「要落盘」。建不了就当没配，封面照常从网上下来。
+			c.disk = newDiskCache(opts.Dir, opts.DiskMaxBytes)
 		}
 	}
 	for range opts.Decoders {
@@ -317,8 +352,45 @@ func (c *Cache) Cancel(url string) {
 	}
 }
 
-// Close 停掉在途的下载、排着的重试和解码 worker。已经拿到的图还能继续画。
+// Retain 多一份使用者。借别人那份缓存时调它——**借的那一份活得至少和借它的
+// 人一样久**，所以借之前必须 Retain。
+//
+// 已经关掉的缓存不用 Retain（借了也没用）。
+func (c *Cache) Retain() {
+	for {
+		n := c.refs.Load()
+		if n <= 0 {
+			return // 已经关掉了
+		}
+		if c.refs.CompareAndSwap(n, n+1) {
+			return
+		}
+	}
+}
+
+// Close 放开自己那一份使用权；**最后一份放开时才真的关掉**。
+//
+// ⚠️ 以前 Close 是「立刻关掉」。现在是引用计数，因为迷你窗口借的是主窗口那份
+// 封面缓存（一个磁盘缓存目录只能有一本账），而这两扇窗的寿命不一样：主窗口
+// 那个外壳先收尾就把迷你那份一起带走的话，迷你之后每要一张图都是 `ErrClosed`
+// 永久失败态——界面上的症状只是「图不出来」，没有一句报错。
+//
+// 可以重复调：多调一次不多减（引用数到 0 之后就是空操作）。
 func (c *Cache) Close() {
+	for {
+		n := c.refs.Load()
+		if n <= 0 {
+			return // 已经关过了
+		}
+		if !c.refs.CompareAndSwap(n, n-1) {
+			continue
+		}
+		if n > 1 {
+			return // 还有别人用着
+		}
+		break
+	}
+
 	c.lifeMu.Lock()
 	if c.closed.Load() {
 		c.lifeMu.Unlock()
@@ -335,6 +407,11 @@ func (c *Cache) Close() {
 	})
 	c.lifeWG.Wait()
 	c.decodeWG.Wait()
+	// 排着队的写盘在这里落完再走：落盘有一份延迟，不 Flush 的话「刚下完就关」
+	// 那一份会丢，而「重启之后不用再下」正是它要保证的。
+	if c.disk != nil {
+		c.disk.close()
+	}
 }
 
 // forget 把 e 从 LRU 表里拿掉并记账归零。
@@ -360,11 +437,41 @@ type entry struct {
 	err      error
 	done     bool // 已经落到过终态；暂时失败时重试会排上，但 done 不撤
 	dropped  bool // 被取消或挤掉了，结果回来也没人要
+	skipDisk bool // 盘上那份解不开，这一张从此不再从盘上读（见 decodeWorker）
 	bytes    int64
 	ctx      context.Context
 	cancel   context.CancelFunc
 	failures int   // 连续失败了几次（含第一次），成功就归零
 	timer    Timer // 排着的下一次重试；nil 表示没排
+}
+
+// isDropped 报这个条目是不是已经被取消/挤掉了。晚到的结果不用再管它。
+func (e *entry) isDropped() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.dropped
+}
+
+// diskSkipped 报这一张已经不再从盘上读了。
+func (e *entry) diskSkipped() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.skipDisk
+}
+
+// skipDiskFromNowOn 记下「这一张不再从盘上读」。
+//
+// 为什么要有这一格：盘上那份解不开的时候，正常的做法是「删掉它，回去下一次
+// 真的」。可是**删不掉**的时候（目录只读、文件被占着），「读 → 解码失败 →
+// 删 → 再读」就是一个没有出口的循环：一个解码 worker 100% 占着 CPU，那张图
+// 永远停在「加载中」（既不出图也不报失败），而网络一次都没被试过。
+//
+// 所以：盘上那份一坏，这一张在本次运行内就**不再从盘上读**。下一次读盘的机会
+// 是下次启动——那时那一份要么被清掉了，要么又坏一次（而这一次同样会走网络）。
+func (e *entry) skipDiskFromNowOn() {
+	e.mu.Lock()
+	e.skipDisk = true
+	e.mu.Unlock()
 }
 
 func (e *entry) state() State {
@@ -392,43 +499,53 @@ func (e *entry) stopTimer() {
 	}
 }
 
-// job 是一张已经下完、等着解码的图。
+// job 是一张已经拿到字节、等着解码的图。
 type job struct {
 	e    *entry
 	data []byte
+	// fromDisk 报这批字节是从盘上读的。盘上那份解不开时不能当成「这张图就是
+	// 坏的」——先删掉它，回去下一次真的（见 decodeWorker）。
+	fromDisk bool
 }
 
-// fetch 下载一张图：先看磁盘缓存，没有才走网络。在途数限流拿不到名额就一直
-// 等，直到轮到自己或者被取消。
+// fetch 拿到一张图的字节：先看磁盘缓存，没有才走网络。
+//
+// ⚠️ **读盘不占在途名额**：名额是给网络下载的，盘上命中根本不用打图床。要是
+// 先抢名额再读盘，重启之后一屏几十张封面会跟正在下载的那几条一起排队。
 func (c *Cache) fetch(e *entry) {
-	select {
-	case c.inflight <- struct{}{}:
-	case <-e.ctx.Done():
-		return
+	name := c.diskName(e.url)
+	fromDisk := false
+	var data []byte
+	// ⚠️ 盘上那份坏过就不要再读了（`skipDisk`）：删不掉的时候「读→失败→再读」
+	// 是一个没有出口的循环，见 `entry.skipDiskFromNowOn`。
+	if name != "" && !e.diskSkipped() {
+		data, fromDisk = c.disk.open(name)
 	}
-	defer func() { <-c.inflight }()
-
-	data, err := c.read(e.ctx, e.url)
-	if err != nil {
-		if !errors.Is(err, context.Canceled) {
-			c.finish(e, nil, err)
+	if !fromDisk {
+		select {
+		case c.inflight <- struct{}{}:
+		case <-e.ctx.Done():
+			return
 		}
-		return
+		defer func() { <-c.inflight }()
+
+		var err error
+		data, err = c.download(e.ctx, e.url)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				c.finish(e, nil, err)
+			}
+			return
+		}
 	}
 	select {
-	case c.decodeCh <- job{e: e, data: data}:
+	case c.decodeCh <- job{e: e, data: data, fromDisk: fromDisk}:
 	case <-e.ctx.Done():
 	}
 }
 
-// read 拿到这张图的字节。磁盘缓存里有就直接用，没有才下；下了顺手落盘。
-func (c *Cache) read(ctx context.Context, url string) ([]byte, error) {
-	if path := c.path(url); path != "" {
-		if data, err := os.ReadFile(path); err == nil {
-			return data, nil
-		}
-	}
-
+// download 从网络拿这张图的字节。
+func (c *Cache) download(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		// 地址本身不合法：再试多少次也是同一个结果。
@@ -447,23 +564,15 @@ func (c *Cache) read(ctx context.Context, url string) ([]byte, error) {
 		return nil, &statusError{url: url, code: resp.StatusCode}
 	}
 
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxImageBytes))
-	if err != nil {
-		return nil, err
-	}
-	if path := c.path(url); path != "" {
-		_ = os.WriteFile(path, data, 0o644)
-	}
-	return data, nil
+	return io.ReadAll(io.LimitReader(resp.Body, maxImageBytes))
 }
 
-// path 是这个 url 在磁盘缓存里的文件名，空表示不落盘。
-func (c *Cache) path(url string) string {
-	if c.dir == "" {
+// diskName 是这个 url 在磁盘缓存里的文件名，空表示不落盘。
+func (c *Cache) diskName(url string) string {
+	if c.disk == nil {
 		return ""
 	}
-	sum := sha256.Sum256([]byte(url))
-	return filepath.Join(c.dir, hex.EncodeToString(sum[:16])+".img")
+	return diskNameFor(url)
 }
 
 // decodeWorker 是解码池的一个 worker。
@@ -477,8 +586,34 @@ func (c *Cache) decodeWorker() {
 		case j := <-c.decodeCh:
 			bm, err := ui.DecodeBitmap(j.data)
 			if err != nil {
-				// 解码不了就是解码不了：同一段字节再解一百次也一样。
+				if j.fromDisk && !j.e.isDropped() && !c.closed.Load() {
+					// 盘上那份解不开（上一个版本留下的、或者被外部写坏了）：
+					// 删掉它，当作没命中，回去下一次真的。不能把坏字节当成
+					// 「这张图就是坏的」——那会让一张好封面从此显示失败。
+					//
+					// ⚠️ **删不掉也不能再读**：目录只读的时候「读 → 解码失败 →
+					// 删（失败）→ 再读」是一个没有出口的循环——一个解码 worker
+					// 100% 占着 CPU，那张图永远停在「加载中」（既不出图也不报
+					// 失败），而网络一次都没被试过。所以这一张从此刻起不再从盘
+					// 上读（`skipDisk`），下一次直接走网络。
+					if rmErr := c.disk.remove(c.diskName(j.e.url)); rmErr != nil {
+						log.Printf("biu: 删不掉磁盘缓存里那份坏封面（%s）：%v", j.e.url, rmErr)
+					}
+					j.e.skipDiskFromNowOn()
+					if c.start(j.e) {
+						continue
+					}
+				}
+				// 网络拿回来的字节解不开：同一段字节再解一百次也一样。
 				err = &permanentError{err: err}
+			} else {
+				// 只把**解出来过**的字节写盘：下回来的东西万一是错误页或者
+				// 截断的响应，写进去就成了「每次启动都先撞一次坏缓存」。
+				// 写盘排在 finish 之前：状态变成「有图」时这一笔已经在队列里，
+				// Close 会把它落完（测试靠这个判「重启之后不用再下」）。
+				if !j.fromDisk && c.disk != nil && !c.closed.Load() {
+					c.disk.write(c.diskName(j.e.url), j.data)
+				}
 			}
 			c.finish(j.e, bm, err)
 		case <-c.ctx.Done():
