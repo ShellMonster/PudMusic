@@ -46,6 +46,22 @@ type State struct {
 	HasTrack bool
 	Title    string
 	Path     string
+
+	// Source 是当前这一首的来源：`SourceLocal` / `SourceOnline`。
+	//
+	// 空串 = **没有歌**（和 `HasTrack` 一起是假）。
+	//
+	// ⚠️ **界面要靠它分两件事**（票 #222 / 报告 §3.12、§6.5）：
+	//
+	//	本地文件不摆「下载」那一枚（上游 `playbar/right/index.tsx:15` 的
+	//	`source !== "local"`——本地文件在 B 站上压根没有 cid 可下）。
+	//	歌名**点得动**与否也看它（上游 `playbar/left/index.tsx:31` 的
+	//	`isClickable = playItem && playItem.source !== "local"`）：本地文件
+	//	在 B 站上没有页面可跳。
+	//
+	// 这两处以前都判不出来——`State` 里没有来源这一栏（`Item.Source` 在队列
+	// 那一层，不在快照里）。
+	Source string
 	// CoverURL 是当前这首的封面地址，交给界面的封面缓存去取。空串表示没有封面。
 	//
 	// ⚠️ 本地文件永远是空的，而且这是照抄 Biu 的行为，不是省事：Biu 上游也不读
@@ -461,6 +477,7 @@ func (a *App) Snapshot() State {
 		HasTrack:    a.player != nil,
 		Title:       a.title,
 		Path:        a.path,
+		Source:      a.sourceLocked(),
 		CoverURL:    a.cover,
 		Playing:     a.playing,
 		Position:    a.position,
@@ -481,6 +498,27 @@ func (a *App) Snapshot() State {
 		PlayMode:               a.queue.PlayMode(),
 		KeepPagesOrderInRandom: a.queue.KeepPagesOrderInRandom(),
 	}
+}
+
+// sourceLocked 报当前这一首的来源。**必须在持锁时调**。
+//
+// 🔴 **判据是 `a.path`**：本地文件那一路（`App.Open`）把路径写进去，在线那一路
+// （`online.go` 的 `runOnline` 装上播放器那一段）把它清空——而**写标题和清路径
+// 是同一段代码**，所以这一栏和 `Title` 永远是同一首的歌。
+//
+// ⚠️ **别改用 `a.online != nil` 判在线**：取流失败的时候 `a.online` 从没装上
+// （那条流压根没建起来），而那一首**就是**在线的歌——判据换成它的话，用户听
+// 不到声音的那几秒里播放条会以为自己在放本地文件，于是「下载」那一枚不见了。
+//
+// 空串 = 没有歌（`a.player == nil`）。
+func (a *App) sourceLocked() string {
+	if a.player == nil {
+		return ""
+	}
+	if a.path != "" {
+		return SourceLocal
+	}
+	return SourceOnline
 }
 
 // biliURLLocked 是当前这一首在 B 站上的地址。**必须在持锁时调**。

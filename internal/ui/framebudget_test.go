@@ -557,7 +557,6 @@ func budgetState() app.State {
 	return app.State{
 		HasTrack:    true,
 		Title:       "一首歌",
-		Path:        "/Users/x/Music/one.flac",
 		Artist:      "某个 UP 主",
 		ArtistMid:   12345,
 		Duration:    3 * time.Minute,
@@ -568,6 +567,15 @@ func budgetState() app.State {
 		Quality:     "无损 FLAC",
 		QualityPref: app.AudioQualityLossless,
 		PlayMode:    app.PlayModeSequence,
+		// 🔴 **来源是 B 站**（票 #222）：这一副摆的是「一首 B 站的歌」，而
+		// `Source` 决定了两件事——「下载」那一枚摆不摆（本地文件不摆），和
+		// **歌名可不可点**（B 站那一首点了跳 B 站视频页）。
+		//
+		// ⚠️ **它量的是「最贵的那一档」**：歌名可点要多建一个闭包（每帧一次
+		// 分配），而本地文件那一副（不可点）更省——所以量出来的数是上限。
+		Source: app.SourceOnline,
+		// 有 B 站地址，歌名才**真的可点**（本地文件和没有稿件身份的条目都不可点）。
+		BiliURL: "https://www.bilibili.com/video/BV1xx411c7mD",
 	}
 }
 

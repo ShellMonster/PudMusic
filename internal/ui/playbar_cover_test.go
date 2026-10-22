@@ -103,26 +103,40 @@ func TestPlayBarCoverWithNoURLIsABlankBox(t *testing.T) {
 	}
 }
 
-// TestPlayBarCoverWhileLoadingShowsThePlaceholder 是载入中：骨架屏。
+// TestPlayBarCoverWhileLoadingShowsThePlaceholder 是载入中：一块浅底 + 一枚
+// **更淡的音符**，**没有描边框**。
+//
+// 🔴 **判据是「画面上画得出东西」，不是「一块纯色」**（票 #222 / 报告 §5.3）：
+// 那一格原来是一块**纯色**——在浅色主题下它和背景几乎一样，一屏里几十张封面
+// 正在加载时用户看到的是一排空白，**分不出「还在加载」和「压根没有图」**。
+// 现在那一档压一枚淡的音符（比「压根没有」那一档的更淡，两档靠深浅分开）。
 //
 // ⚠️ **断的是画面，不是「载入中」那三个字**：按上游 `components/image/
-// index.tsx:22-32`，那一格**一个字都不写**。骨架屏的形状是「一块纯色、没有
-// 边框、没有图形」——而这三条只有像素能断。
+// index.tsx:22-32`，那一格**一个字都不写**。
+//
+// ⚠️ **「没有描边框」这一半是「加载中 ≠ 拿不到」的标记**：描边框是「这一格最后
+// 会是一张图，但现在拿不到」的标记，骨架屏连它都不画（上游也是这么分的）。
 func TestPlayBarCoverWhileLoadingShowsThePlaceholder(t *testing.T) {
 	g := newGatedCover(t)
 	_, tt := coverBarTester(t, app.State{HasTrack: true, Title: "在线的一首歌", CoverURL: g.url()})
 
-	// 服务端卡着不回，第一帧一定是骨架屏：一整块纯色。
+	// 服务端卡着不回，第一帧一定是骨架屏。
 	// 往里收 4 像素，免得把边框那一圈和它的抗锯齿边算进来。
-	if got := coverColors(t, tt, 4); len(got) != 1 {
-		t.Fatalf("图没来之前那一格不是一块纯色（%v）——占位上多画了东西（边框？图标？）", got)
+	got := coverColors(t, tt, 4)
+	if len(got) < 2 {
+		t.Fatalf("图没来之前那一格是一块纯色（%v）——加载中这一档**画不出东西**，"+
+			"用户分不出「还在加载」和「压根没有图」", got)
+	}
+	if hasCoverBorder(tt) {
+		t.Errorf("加载中那一格画出了描边框（%v）——边框是「拿不到」的标记，"+
+			"骨架屏连它都不画", got)
 	}
 
 	waitFor(t, "封面请求发出去了", func() bool { return g.hits.Load() > 0 })
 
 	// 一直卡着就一直停在骨架屏——这一条同时钉住「骨架屏不是失败」。
 	tt.Frame()
-	if got := coverColors(t, tt, 4); len(got) != 1 {
+	if got := coverColors(t, tt, 4); len(got) < 2 {
 		t.Errorf("图还没来，骨架屏没了（%v）", got)
 	}
 }

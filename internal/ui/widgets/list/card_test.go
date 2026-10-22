@@ -90,10 +90,15 @@ func TestTheCoverGoesThroughImgcache(t *testing.T) {
 	})
 
 	bx, by, bw, bh := coverBox(t, tt, "有封面的歌")
-	// 第一帧是骨架屏：一整块**纯色**（没有边框、没有图形、没有字）。
+	// 第一帧是骨架屏：一块浅底 + **一枚更淡的音符**（没有描边框、没有字）。
+	//
+	// 🔴 **判据是「画得出东西」，不是「一块纯色」**（票 #222 / 报告 §5.3）：那一格
+	// 原来是一块**纯色**——浅色主题下它和背景几乎一样，一屏里几十张封面正在加载
+	// 时用户看到的是一排空白，**分不出「还在加载」和「压根没有图」**。
 	loading := distinctIn(tt, bx, by, bw, bh)
-	if len(loading) != 1 {
-		t.Errorf("正在加载那一格不是一块纯色（%v）——占位上多画了东西", loading)
+	if len(loading) < 2 {
+		t.Errorf("正在加载那一格是一块纯色（%v）——加载中这一档**画不出东西**，"+
+			"用户分不出「还在加载」和「压根没有图」", loading)
 	}
 
 	close(release)

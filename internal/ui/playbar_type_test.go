@@ -64,7 +64,11 @@ func TestThePlayBarUsesTheBiuTypeScale(t *testing.T) {
 			}{
 				{text: "一首歌", size: 16, what: "歌名"},
 				{text: "某个 UP 主", size: 14, what: "UP 名"},
-				{text: "0:00", size: 14, what: "当前时间"},
+				// ⚠️ **位置是 0 的时候写 `-:--`**（票 #222 / 报告 §4.2）：上游
+				// 那个读数是 `currentTime ? formatDuration(currentTime) : "-:--"`
+				//（`components/music-play-progress/index.tsx:27`），而我们原来
+				// 写的是 `0:00`——那是「这一秒零」，不是「还没读到一个位置」。
+				{text: "-:--", size: 14, what: "当前时间"},
 				{text: "1:40", size: 14, what: "总时长"},
 				{text: "1x", size: 16, what: "倍速"},
 			} {
@@ -120,11 +124,26 @@ func TestThePlayBarTitleIsNotBold(t *testing.T) {
 			return true
 		}
 		ast.Inspect(fn, func(m ast.Node) bool {
-			stmt, ok := m.(*ast.ExprStmt)
-			if !ok {
+			// ⚠️ **认两种写法**（票 #222）：画歌名的那一句原来是独立的表达式
+			// 语句（`ui.Text(c, title)…`），而现在它**要拿住句柄**——歌名可点、
+			// 悬停有下划线（见 `viewTrackText`），所以那一句变成了赋值
+			// （`name := ui.Text(c, title)…`）。
+			//
+			// **断的东西一个字没变**：还是「画歌名的那一句」不许调 `Bold()`、
+			// 字号得是 16；只是它现在被赋值给一个变量了。
+			var expr ast.Expr
+			switch stmt := m.(type) {
+			case *ast.ExprStmt:
+				expr = stmt.X
+			case *ast.AssignStmt:
+				if len(stmt.Rhs) != 1 {
+					return true
+				}
+				expr = stmt.Rhs[0]
+			default:
 				return true
 			}
-			chain := chainCalls(stmt.X)
+			chain := chainCalls(expr)
 			// 找那一句 `ui.Text(c, title)…`——歌名。
 			if !chainHas(chain, "Text") || !chainTextArgIsTitle(chain) {
 				return true

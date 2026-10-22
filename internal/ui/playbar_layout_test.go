@@ -227,11 +227,15 @@ func TestTheMiddleColumnIsThreePartsWide(t *testing.T) {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			tt, _ := playbarTester(t, barState(), width, 0, false)
 
-			pos, ok := tt.Find(clock(0))
+			// ⚠️ **写的是字面量，不是 `clock(...)`**（票 #222）：位置是 0 的
+			// 时候读数是 `-:--`（上游的 `currentTime ? … : "-:--"`），而
+			// `clock(0)` 算出来的是 `0:00`——用被测的那段代码算期望值，
+			// 改什么都发现不了。
+			pos, ok := tt.Find("-:--")
 			if !ok {
 				t.Fatalf("画面上找不到左边那个读数，文字有 %q", tt.Texts())
 			}
-			total, ok := tt.Find(clock(100 * time.Second))
+			total, ok := tt.Find("1:40")
 			if !ok {
 				t.Fatalf("画面上找不到右边那个读数，文字有 %q", tt.Texts())
 			}
