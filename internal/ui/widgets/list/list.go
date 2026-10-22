@@ -536,7 +536,11 @@ func (l *List) View(c *ui.Context) {
 		}
 		return l.songs[i].Title
 	}
-	// Selected 让点击能选中一行（画成主色），双击提交。
+	// Selected 让点击能选中一行，双击提交。
+	//
+	// ⚠️ **它不再画东西了**：框架会给选中的行铺一整块实心主色底（`ui/table.go`
+	// 的 node.Selected），票 #197 拍板去掉它——那一层在库里改不动，所以选中的行
+	// 自己刷一层底色盖上去（见 `card.go` 的 `rowCover`）。
 	l.state.Selected = &l.sel
 
 	list := ui.List(c, &l.state, l.rows()).
@@ -545,6 +549,16 @@ func (l *List) View(c *ui.Context) {
 		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击：
 		// `biu/src/components/music-list-item/index.tsx`）。
 		OnSubmit(func() { l.playFrom(l.sel) }).
+		// ⚠️ **焦点环只留在「还没选中任何一行」的时候**（票 #197）。
+		//
+		// 框架默认给**整张列表**画一圈焦点环（`mygo/ui/inline.go` 的 ringShown），
+		// 而票面要的是「键盘走到**哪一行**都要有可见焦点指示」——指示得落在那一行
+		// 上（见 `card.go` 的 `rowFocusRing`）。两处都画就是两圈环。
+		//
+		// 所以：**还没选中行时环在列表上**（Tab 刚进来的那一瞬间，焦点在列表上，
+		// 列表就是焦点所在的地方），**选中行之后环跟着那一行走**（列表那一圈收
+		// 起来，免得两处都亮）。鼠标点过之后焦点不是从键盘来的，两边都不画。
+		FocusRing(l.sel < 0).
 		// 没有歌时列表是空的，Children 里那一支就是它的空状态。
 		// 一句都不说的时候连这一支都不建（见 SetEmpty）。
 		Children(func() {

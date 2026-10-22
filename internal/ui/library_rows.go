@@ -107,8 +107,9 @@ type pagedRows struct {
 	hot bool
 
 	// render 画这一行并**把它交回来**（菜单要挂在它身上，见 viewRow）。收整个
-	// ListRow 而不是光一个下标，是为了让页面能看见 `r.Selected()`——选中行的字色
-	// 和底色是一对。menu 是这一行的右键菜单。两者都由页面给。
+	// ListRow 而不是光一个下标，是为了让页面能看见 `r.Selected()`——选中的那一行要
+	// 盖掉框架那块实心主色底，键盘走到它上面时还要有一圈焦点环
+	//（`widgets/list/selection.go`）。menu 是这一行的右键菜单。两者都由页面给。
 	render func(c *ui.Context, r ui.ListRow) ui.Element
 	menu   func(m *ui.Menu, i int)
 
@@ -497,6 +498,13 @@ func (p *pagedRows) drawList(c *ui.Context) {
 		FillWidth().
 		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击）。
 		OnSubmit(func() { p.playFrom(p.sel) }).
+		// ⚠️ **焦点环只留在「还没选中任何一行」的时候**（票 #197）：框架默认给**整张
+		// 列表**画一圈焦点环，而票面要的是「键盘走到**哪一行**都要有可见焦点指示」
+		// ——指示落在那一行上（见 `widgets/list/selection.go`）。两处都画就是两圈环。
+		//
+		// 理由和那一处逐字一样：**还没选中行时环在列表上**（Tab 刚进来的那一瞬间，
+		// 焦点在列表上），**选中行之后环跟着那一行走**。
+		FocusRing(p.sel < 0).
 		Children(func() { p.viewEmptyState(c, t) }).
 		Rows(func(r ui.ListRow) { p.viewRow(r) }).
 		TrackScroll(&p.scroll)

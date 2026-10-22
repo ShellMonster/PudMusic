@@ -185,34 +185,44 @@ func (l *List) ScrollOffset() float32 {
 
 // rowColors 是这一行文字该用的两个颜色。
 //
-// 「选中」和「正在放」是**两件事**，所以是两档而不是一种底色（理由见下面那个
-// switch）：选中跟着光标走（点哪行亮哪行），正在放跟着声音走（声音从哪来亮哪行）。
-// 滚歌单的时候光标停在上头、正在放的往往在屏幕中间——不分开的话用户得靠播放条
-// 才知道放的是哪首。
-func rowColors(t *ui.Theme, selected, playing bool) (title, owner ui.Color) {
-	switch {
-	case selected:
-		// 主色底上的字。UP 名那一行压到 0.75，主色底太亮时它比正文色更
-		// 站得住，也还是「次要信息」的样子。
-		return t.AccentText, t.AccentText.Alpha(0.75)
-	case playing:
+// # ⚠️ **「选中」不再是一档颜色**（票 #197）
+//
+// 原来这里是两档：选中的行给主色底上的反色字，正在放的行给主色当字。2026-10-22
+// 拍板的是「列表选中行的实心主色底：去掉」——上游压根没有这一层，点一行不刷绿。
+// 于是选中的行**和没选中的行长得一样**（见 `rowCover`：框架那一层实心主色底被
+// 这一行自己刷的底色盖掉了），文字也就没有理由再分一档。
+//
+// 剩下的唯一一档主色是「正在放」那一行：它跟着声音走，不跟着光标走。滚歌单的
+// 时候光标停在上头、正在放的往往在屏幕中间——不分开的话用户得靠播放条才知道放
+// 的是哪首。
+//
+// ⚠️ **「正在放」和「选中」同时成立时，「正在放」赢**：主色底已经没有了，两件事
+// 里只有一件还画得出来，而它才是用户随时要认的那一件（正在放的那首在别的页面上
+// 也要认得出来）。
+func rowColors(t *ui.Theme, playing bool) (title, owner ui.Color) {
+	if playing {
 		// 主色当**字**：浅色下要一个与底色对比度 ≥4.5:1 的变体（默认那个绿
 		// 压在白底上只有 1.9:1），深色下原样。算它的理由见 `widgets/ink`。
 		//
 		// ⚠️ 别写回 `t.Accent`：深色下看不出差别，浅色下那一行就是「正在放的
 		// 那首歌读不出来」——而它恰恰是最该一眼认出的那一行。
 		return ink.AccentOn(t), t.TextMuted
-	default:
-		return t.Text, t.TextMuted
 	}
+	return t.Text, t.TextMuted
 }
+
+// rowCover / rowFocusRing / FocusVisible 都在 `selection.go` 那一层（票 #197
+// 把「选中」这一层整个翻了过来，理由写在那儿）。
 
 // viewCard 画一行：Biu 的 music-list-item 在 MyGo 里的样子。
 //
-// ⚠️ 选中那一行的底色和字色由 `ui.List` 自己刷（主色底 + 主色上的反色字，
-// `ui/table.go` 的 node.Selected），这里**不要**再给文字设固定颜色——一设就
-// 盖掉它，选中行会变成主色底上的深色字，深色主题下直接看不见。所以正文色是
-// 跟着选中与否给的。
+// ⚠️ **选中那一行的实心主色底是这一行自己盖掉的**（`rowCover`）：框架的 `ui.List`
+// 会给选中的行铺一整块主色底（`ui/table.go` 的 node.Selected），票 #197 拍板去掉
+// 它，而那一层在库里改不动——所以这一行自己刷一层底色盖上去。
+//
+// ⚠️ **文字颜色不再跟着选中与否变**（`rowColors`）：主色底没了，「主色底上的反色
+// 字」也就没有意义了；留着它的话，选中的行在浅色下会变成白底上的白字——直接
+// 看不见。
 func (l *List) viewCard(r ui.ListRow) {
 	if l.view == ViewCompact {
 		l.viewCompactCard(r)
@@ -224,7 +234,7 @@ func (l *List) viewCard(r ui.ListRow) {
 	m := l.songs[i]
 	playing := l.isPlaying(m)
 
-	titleColor, ownerColor := rowColors(t, r.Selected(), playing)
+	titleColor, ownerColor := rowColors(t, playing)
 
 	// ⚠️ **hover 必须在 Children 之前问**：`Hovered` 报的是**这一帧**指针在不在
 	// 上面，而「按下去有反应」这件事本身要等 Children 建它。MyGo 自己的例子
@@ -241,6 +251,10 @@ func (l *List) viewCard(r ui.ListRow) {
 		//（`ui/menu.go` 的 menuTarget），挂到列表外面的话整列共用一份菜单。
 		ContextMenu(func(m *ui.Menu) { l.buildMenu(m, i) })
 	onRow := row.Hovered()
+
+	// 选中那一行：盖掉框架的实心主色底，键盘走到它上面时给它一圈焦点环
+	//（理由见 `selection.go`）。
+	row = SelectedRow(row, c, t, &l.state, r.Selected(), onRow)
 
 	row.Children(func() {
 		// ⓪ 多选态：这一行最左边的勾选框。没装多选就一格都不画
@@ -320,12 +334,16 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 	m := l.songs[i]
 	playing := l.isPlaying(m)
 
-	titleColor, ownerColor := rowColors(t, r.Selected(), playing)
+	titleColor, ownerColor := rowColors(t, playing)
 
 	row := ui.Row(c).AlignSelf(ui.Stretch).Gap(rowGap).Padding(compactPadY, compactPadX).
 		Height(compactRowHeight).
 		// 右键菜单挂在**这一行**上，和普通那一行同一个理由（见 View 里的注释）。
 		ContextMenu(func(m *ui.Menu) { l.buildMenu(m, i) })
+
+	// 选中那一行：盖掉框架的实心主色底，键盘走到它上面时给它一圈焦点环
+	//（理由同 `viewCard` 里那一句）。
+	row = SelectedRow(row, c, t, &l.state, r.Selected(), row.Hovered())
 
 	row.Children(func() {
 		l.viewCheckbox(c, i, m.Title)

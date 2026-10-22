@@ -260,27 +260,27 @@ const (
 )
 
 // rowFace 是这一行字该用的两个颜色 + 「正在放」那一档。两页共用（理由见
-// `widgets/list/card.go` 的 `rowColors`）：选中跟着光标走、正在放跟着声音走，是两件
-// 不同的事，分成两档而不是一种底色。
+// `widgets/list/card.go` 的 `rowColors`）：正在放跟着声音走，和「选中」是两件不同的
+// 事，分成两档而不是一种底色。
 type rowFace struct {
 	playing    bool
 	title, own ui.Color
 }
 
 // libraryRowFace 算这一档。两页和它们的网格格子都走这一个。
-func libraryRowFace(t *ui.Theme, selected, playing bool) rowFace {
-	switch {
-	case selected:
-		// 主色底上的字。UP 名那一块压到 0.75：主色底太亮时它比正文色更站得住，也还是
-		// 「次要信息」的样子。
-		return rowFace{title: t.AccentText, own: t.AccentText.Alpha(0.75)}
-	case playing:
+//
+// ⚠️ **「选中」不再是一档颜色**（票 #197）：点一行不再整行刷实心主色底，所以选中的
+// 那一行和没选中的那一行**长得一样**——原来那个「主色底上的反色字」也就没有意义
+// 了（留着它的话，选中的行在浅色下是白底上的白字，直接看不见）。
+//
+// 剩下的唯一一档主色是「正在放」：它跟着声音走，不跟着光标走。
+func libraryRowFace(t *ui.Theme, playing bool) rowFace {
+	if playing {
 		// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（默认那个绿压白底
 		// 1.9:1），深色下原样。理由同 `widgets/list/card.go` 的 `rowColors`。
 		return rowFace{playing: true, title: ink.AccentOn(t), own: t.TextMuted}
-	default:
-		return rowFace{title: t.Text, own: t.TextMuted}
 	}
+	return rowFace{title: t.Text, own: t.TextMuted}
 }
 
 // viewLibraryRowHead 画这两页**行首**那几块：序号（正在放的那一行是跳动的波形）、
@@ -296,7 +296,7 @@ func libraryRowFace(t *ui.Theme, selected, playing bool) rowFace {
 // ⚠️ **mt / face / onRow / play 都是外面给进来的**，这一段自己不问：
 //
 //   - mt 是那一档的行内尺寸（`metricsOf`）——和行右边那几列必须是同一份；
-//   - face 是按「选中 / 正在放」判好的颜色（`libraryRowFace`）；
+//   - face 是按「正在放」判好的颜色（`libraryRowFace`）；
 //   - onRow 是**指针在不在这行上**，而它问的是**外层那个 `ui.Row`**（这一段画在它
 //     里面），在这里问自己只会得到 false（同 `widgets/list/card.go` 里「`Hovered` 要在
 //     `Children` 之前问」那一段）；

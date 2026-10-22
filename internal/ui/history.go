@@ -202,7 +202,7 @@ func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 	m := rows.Rows()[r.Index]
 	playing := rows.isPlaying(m)
 	mt := metricsOf(rows.Layout())
-	face := libraryRowFace(t, r.Selected(), playing)
+	face := libraryRowFace(t, playing)
 
 	// ⚠️ **hover 要在 Children 之前问**（同 `widgets/list/card.go` 里那一处）。
 	//
@@ -210,6 +210,10 @@ func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 	row := ui.Row(c).Key("history-row:"+m.ID).AlignSelf(ui.Stretch).Gap(mt.gap).
 		Padding(mt.padY, mt.padX).Height(mt.height)
 	onRow := row.Hovered()
+
+	// 选中那一行：盖掉框架那一块实心主色底，键盘走到它上面时给它一圈焦点环
+	//（理由见 `widgets/list/selection.go`）。
+	row = list.SelectedRow(row, c, t, &rows.state, r.Selected(), onRow)
 
 	return row.Children(func() {
 		viewLibraryRowHead(c, r, m, s.images, mt, face, onRow,
@@ -242,20 +246,20 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected boo
 		return ui.Box(c).Grow(1)
 	}
 	playing := rows.isPlaying(m)
+	// ⚠️ **选中不再改这一格的颜色**（票 #197）：原来选中的那一格铺一整块实心主色底
+	// （和列表选中行是同一套，`ui/table.go` 的 node.Selected），而拍板的是「点一行
+	// 不再整行刷绿」——上游压根没有这一层。所以选中的那一格和没选中的格子长得
+	// **一个像素都不差**。
+	//
+	// 剩下的唯一一档主色是「正在放」那一格：它跟着声音走，不跟着光标走。
 	titleColor, metaColor := t.Text, t.TextMuted
-	switch {
-	case selected:
-		titleColor, metaColor = t.AccentText, t.AccentText.Alpha(0.75)
-	case playing:
+	if playing {
 		// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（理由见 `widgets/ink`）。
 		titleColor = ink.AccentOn(t)
 	}
 
 	box := ui.Column(c).Key("history-cell:" + m.ID).Radius(t.Radius).
 		AlignSelf(ui.Stretch).Grow(1)
-	if selected {
-		box = box.Background(t.Accent)
-	}
 	// ⚠️ **hover 要在 Children 之前问**（同 `widgets/list/grid.go` 里那一处）。
 	onCell := box.Hovered()
 
