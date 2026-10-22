@@ -110,6 +110,9 @@ type CollectionInfo struct {
 	Cover      string
 	MediaCount int
 	OwnerName  string
+	// OwnerFace 是创建者的头像地址。头图区那一小枚圆头像用它；空串时界面画
+	// 一块占位（不是不画）。
+	OwnerFace string
 	// OwnerMid 是创建者的 mid。界面靠它认出「这个容器是不是我自己建的」
 	// ——见 `App.CanDeleteCollection`。
 	OwnerMid int64
@@ -372,6 +375,7 @@ func (a *App) fetchCollection(ref CollectionRef) (CollectionInfo, error) {
 		Cover:      raw.Cover,
 		MediaCount: raw.MediaCount,
 		OwnerName:  raw.Owner.Name,
+		OwnerFace:  raw.Owner.Face,
 		OwnerMid:   raw.Owner.Mid,
 		Private:    raw.Private,
 		Default:    raw.Default,

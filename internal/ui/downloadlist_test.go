@@ -198,17 +198,22 @@ func newDownloadShell(t *testing.T, a *app.App) *Shell {
 	// 造外壳的地方给的是 `onApp`：收尾只停外壳自己占的那些东西，不碰那个 a。
 	b := newTestShell(t, onApp(a),
 		stubbed(func(_ *testing.T, s *Shell) {
-			dlOpened, dlRevealed = nil, nil
+			dlOpened, dlRevealed, dlOpenedLinks = nil, nil, nil
 			s.downloads.openDir = func(path string) error { dlOpened = append(dlOpened, path); return nil }
 			s.downloads.reveal = func(path string) { dlRevealed = append(dlRevealed, path) }
+			s.downloads.openLink = func(url string) error {
+				dlOpenedLinks = append(dlOpenedLinks, url)
+				return nil
+			}
 		}))
 	return b.s
 }
 
-// dlOpened / dlRevealed 记下两个「打开」各自打开了什么。
+// dlOpened / dlRevealed / dlOpenedLinks 记下三个「打开」各自打开了什么。
 var (
-	dlOpened   []string
-	dlRevealed []string
+	dlOpened      []string
+	dlRevealed    []string
+	dlOpenedLinks []string
 )
 
 // dlFrame 连跑几帧。
@@ -600,4 +605,106 @@ func dlTitles(rows []download.Snapshot) []string {
 		out = append(out, fmt.Sprintf("%s(%s)", r.Title, r.Status))
 	}
 	return out
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 票 #175：卡片底、文件名 hover 的外链
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheDownloadTableSitsOnACard 那一整张表有一张卡片底（上游 `Card` + `CardBody`）。
+//
+// 判据是像素：表头左边那 8 像素（卡片的内边距）必须是 `t.Surface`，再往左 8
+// 像素（页面内边距）必须是页面底色。两处都量，是因为只量一处的话「把整页刷成
+// Surface」也能过——那不是卡片底。
+func TestTheDownloadTableSitsOnACard(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, tt := newRows(t, dlSnapshot("歌 甲", download.StatusDone, dlChunk, dlChunk))
+			tt.SetDark(dark)
+			dlFrame(tt)
+
+			header, ok := tt.Find("文件")
+			if !ok {
+				t.Fatalf("找不到「文件」那一列表头，文字有 %q", tt.Texts())
+			}
+			th := BuildTheme(s.app.SettingsSnapshot(), dark)
+			surface := rgbaOf(th.Surface)
+			page := rgbaOf(th.Background)
+			img := tt.Image()
+			y := round32(header.Y + header.H/2)
+
+			in := img.RGBAAt(clampX(img, round32(header.X)-18), clampY(img, y))
+			if maxDiff(in, surface) > probeTolerance {
+				t.Errorf("表头左边 18 像素处是 %v，want 卡片底 %v——表格没有卡片底",
+					in, surface)
+			}
+			out := img.RGBAAt(clampX(img, round32(header.X)-34), clampY(img, y))
+			if maxDiff(out, page) > probeTolerance {
+				t.Errorf("再往左 16 像素处是 %v，want 页面底色 %v——卡片底铺到页面内边距里去了",
+					out, page)
+			}
+			if maxDiff(surface, page) <= probeTolerance {
+				t.Fatalf("这套主题下 Surface 和 Background 是同一个颜色（%v）——这一条量不出东西",
+					surface)
+			}
+		})
+	}
+}
+
+// TestHoveringAFileNameRevealsTheExternalLink 文件名 hover 长出外链图标，点它去 B 站。
+//
+// 出处是上游 `download-list/index.tsx:166-178`：那一行是 `group`，图标从 `w-0`
+// 长到 `w-[16px]`，点它 `openBiliVideoLink`。判据分三段：没有 hover 时图标不在、
+// hover 之后在（16×16）、点下去**交给系统的地址是 bvid 那一段**（不是整条
+// `bvid|cid` ——那样拼出来是一个 404）。
+func TestHoveringAFileNameRevealsTheExternalLink(t *testing.T) {
+	_, tt := newRows(t, dlSnapshot("歌 甲", download.StatusDone, dlChunk, dlChunk))
+	// 指针先挪到播放条那条空地上（不在表格里）。
+	tt.Move(600, 795)
+	tt.Frame()
+	if _, ok := tt.Find(dlOpenBiliLabel); ok {
+		t.Fatalf("没有 hover 就有外链图标")
+	}
+
+	title, ok := tt.Find("歌 甲")
+	if !ok {
+		t.Fatalf("找不到文件名，文字有 %q", tt.Texts())
+	}
+	tt.Move(title.X+title.W/2, title.Y+title.H/2)
+	// 两帧：hover 是上一帧的布局决定的，第一帧指针刚移过去、命中链还没换过来。
+	tt.Frame()
+	tt.Frame()
+	icon, ok := tt.Find(dlOpenBiliLabel)
+	if !ok {
+		t.Fatalf("hover 文件名之后没有长出外链图标，文字有 %q", tt.Texts())
+	}
+	if icon.W < 15 || icon.W > 17 || icon.H < 15 || icon.H > 17 {
+		t.Errorf("外链图标是 %.0f×%.0f，want 16×16（上游 `w-[16px]`）", icon.W, icon.H)
+	}
+	if icon.X <= title.X {
+		t.Errorf("外链图标在文件名左边（%.1f ≤ %.1f）——它该在名字右端",
+			icon.X, title.X)
+	}
+
+	if err := tt.Click("歌 甲"); err != nil {
+		t.Fatalf("点文件名：%v", err)
+	}
+	tt.Frame()
+	want := "https://www.bilibili.com/video/BV1歌 甲"
+	if len(dlOpenedLinks) != 1 || dlOpenedLinks[0] != want {
+		t.Errorf("点文件名打开的是 %v，want [%q]——URL 里不能带 `|cid`",
+			dlOpenedLinks, want)
+	}
+
+	// 指针移走，图标收回去。
+	tt.Move(600, 795)
+	tt.Frame()
+	tt.Frame()
+	if _, ok := tt.Find(dlOpenBiliLabel); ok {
+		t.Errorf("指针移开之后外链图标还在")
+	}
 }

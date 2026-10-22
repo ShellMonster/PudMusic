@@ -34,7 +34,9 @@ func TestCollectionInfoReadsTheFieldsTheHeaderNeeds(t *testing.T) {
 			"id": 12345, "attr": 2, // 2 = 二进制 10：公开、非默认
 			"title": "通勤路上", "cover": "https://i0.hdslb.com/cover.jpg",
 			"intro": "早上听", "media_count": 42, "fav_state": 1,
-			"upper": map[string]any{"mid": 900, "name": "UP 小明", "face": "f.jpg"},
+			// ⚠️ **头像是协议相对地址**（B 站真机就是这样给的），所以解析出来
+			// 的一定是补过协议的（见下面那条断言）。
+			"upper": map[string]any{"mid": 900, "name": "UP 小明", "face": "//i0.hdslb.com/bfs/face/x.jpg"},
 		}))
 	})
 
@@ -45,7 +47,8 @@ func TestCollectionInfoReadsTheFieldsTheHeaderNeeds(t *testing.T) {
 	want := CollectionInfo{
 		ID: 12345, Title: "通勤路上", Intro: "早上听",
 		Cover: "https://i0.hdslb.com/cover.jpg", Type: CollectionAlbum,
-		MediaCount: 42, Owner: CollectionOwner{Mid: 900, Name: "UP 小明", Face: "f.jpg"},
+		MediaCount: 42, Owner: CollectionOwner{Mid: 900, Name: "UP 小明",
+			Face: "https://i0.hdslb.com/bfs/face/x.jpg"},
 		Private: false, Default: false, Faved: true,
 	}
 	if *got != want {
@@ -654,6 +657,43 @@ func TestACollectionMediaCarriesTheOwnerID(t *testing.T) {
 		if m.OwnerMid != int64(900+i) {
 			t.Errorf("第 %d 条的 UP 编号是 %d，want %d——播放条上那一句点不动",
 				i, m.OwnerMid, 900+i)
+		}
+	}
+}
+
+// TestTheOwnerFaceGetsItsProtocol 钉住「创建者头像的地址是能抓的」。
+//
+// ⚠️ **B 站给的是协议相对地址**（`//i0.hdslb.com/bfs/face/…`），而封面缓存
+// 是拿 `http.Client` 抓的——那种地址在 Go 那边是
+// `unsupported protocol scheme ""`，抓回来的是一张空图，而界面上那一枚 24×24
+// 的头像于是**永远是一块空圆**（盒子还是 24×24，所以量盒子抓不到这件事）。
+//
+// 仓库里另外三处消费同一个字段的地方都补了协议（`search.go` 的
+// `normalizeImageURL`、`follow.go` 的 `avatarURL`、UP 空间那一处），只有收藏夹这一处
+// 漏了——所以这里补上，并且**逐档钉住**。
+func TestTheOwnerFaceGetsItsProtocol(t *testing.T) {
+	for _, c := range []struct {
+		raw, want string
+	}{
+		{"//i0.hdslb.com/bfs/face/x.jpg", "https://i0.hdslb.com/bfs/face/x.jpg"},
+		{"http://i0.hdslb.com/bfs/face/x.jpg", "http://i0.hdslb.com/bfs/face/x.jpg"},
+		{"https://i0.hdslb.com/bfs/face/x.jpg", "https://i0.hdslb.com/bfs/face/x.jpg"},
+		{"", ""},
+	} {
+		f := newFakeBili(t)
+		f.on(pathFolderInfo, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, jsonData(t, 0, "0", map[string]any{
+				"id": 12345, "attr": 2, "title": "通勤路上", "cover": "",
+				"intro": "早上听", "media_count": 1, "fav_state": 0,
+				"upper": map[string]any{"mid": 900, "name": "UP 小明", "face": c.raw},
+			}))
+		})
+		got, err := f.client(t, Options{}).CollectionInfo(context.Background(), 12345, CollectionAlbum)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Owner.Face != c.want {
+			t.Errorf("face %q → %q，want %q", c.raw, got.Owner.Face, c.want)
 		}
 	}
 }

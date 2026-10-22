@@ -260,10 +260,17 @@ func (c *Client) CollectionInfo(ctx context.Context, id int64, typ CollectionTyp
 		Cover:      d.Cover,
 		Type:       typ,
 		MediaCount: d.MediaCount,
-		Owner:      CollectionOwner{Mid: d.Upper.Mid, Name: d.Upper.Name, Face: d.Upper.Face},
-		Private:    d.Attr&1 == 1,
-		Default:    (d.Attr>>1)&1 == 0,
-		Faved:      d.FavState == 1,
+		// ⚠️ **头像要补协议头**（`normalizeImageURL`）：B 站给的 `upper.face` 是
+		// **协议相对地址**（`//i0.hdslb.com/bfs/face/…`），而封面缓存是用
+		// `http.Client` 抓的——那种地址在 Go 那边是 `unsupported protocol scheme ""`，
+		// 抓不到，于是界面上那一枚头像永远是一块空圆（仓库里另外三处消费同一个
+		// 字段的地方都补了协议：`search.go` 的 `normalizeImageURL`、`follow.go` 的
+		// `avatarURL`、以及 UP 空间那一处）。
+		Owner: CollectionOwner{Mid: d.Upper.Mid, Name: d.Upper.Name,
+			Face: normalizeImageURL(d.Upper.Face)},
+		Private: d.Attr&1 == 1,
+		Default: (d.Attr>>1)&1 == 0,
+		Faved:   d.FavState == 1,
 	}, nil
 }
 
