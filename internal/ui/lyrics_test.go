@@ -112,9 +112,9 @@ func lyricsOfNWithTranslation(n int) string {
 // ⚠️ **播完立刻暂停**：测试素材那 4 秒是真在走的，而后面的断言全靠
 // `SeekTo` 把位置定死。暂停之后 `App.tick` 那个 50ms 的钟不再改位置
 // （`internal/app/app.go` 的 `live := a.wantPlay || a.playing`），位置就定住了。
-func lyricShell(t *testing.T) (*Shell, *mygoui.Tester) {
+func lyricShell(t *testing.T, opts ...shellOpt) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	s, tt := newShell(t)
+	s, tt := newShell(t, opts...)
 	s.app.SetWake(s.wake.invalidate)
 	openATrack(t, s)
 	s.app.Pause()
@@ -382,6 +382,94 @@ func TestTheSungLineIsHalfAgainAsBig(t *testing.T) {
 	gotRatio := float64(active.H) / float64(quiet.H)
 	if math.Abs(gotRatio-1.5) > 0.02 {
 		t.Errorf("放大后和旁边的比是 %.3f，want 1.5（上游 index.tsx:335 的 fontSize * 1.5）", gotRatio)
+	}
+}
+
+// TestTheSungLineChangesGradually 歌词行切换有 300ms 的过渡（票 #177）。
+//
+// 上游那一行是 `transition-all duration-300 ease-out`（`index.tsx:330`）：
+// 换句那一刻，上一句不是「啪」地缩回去，这一句也不是「啪」地长大——两端各用
+// 300ms 走完中间那些字号和透明度。
+//
+// # 判据是**推钟量到的中间态**
+//
+// 只量最终状态的话，「有过渡」和「直接切」长得一模一样：推完钟两边都会到终点。
+// 所以这里先量换句前两句的高度当基准，换句之后推 100ms（钟是 Tester 那只站着
+// 不动的，`Advance` 才走），量到的两个高度必须**都在两个端点之间**，而且
+// `FramePending()` 还是 true（过渡确实还没走完）。100ms 那一帧落在 300ms 的
+// ease-out 上约走六成多：离两端都还差 5 像素上下，容差 1 像素，量得出来。
+//
+// ⚠️ **换句之后要先画一帧**：`AnimateTo` 是在建这一帧的元素时才知道新目标、
+// 才从头开始走。不画这一帧直接推钟的话，100ms 里一帧都没建，动画还停在原地。
+func TestTheSungLineChangesGradually(t *testing.T) {
+	s, tt := lyricShell(t)
+	putLyrics(s, lyricsOfN(20), "")
+	settleLyrics(t, s, tt)
+	seekTo(t, s, tt, 8)
+
+	oldActive := lyricRowAt(t, tt, 8).H
+	oldIdle := lyricRowAt(t, tt, 9).H
+	if oldActive-oldIdle < 10 {
+		t.Fatalf("正在唱的那一句 %.2f，旁边那句 %.2f——高差太小，量不出中间态",
+			oldActive, oldIdle)
+	}
+
+	// 换到第 9 句。这一帧把新目标交给动画，钟没走，所以值还在起点。
+	s.app.SeekTo(9 * lyricStepMS * time.Millisecond)
+	tt.Frame()
+	if got := lyricRowAt(t, tt, 8).H; math.Abs(float64(got-oldActive)) > 0.5 {
+		t.Fatalf("换句那一帧第 8 句就从 %.2f 变成了 %.2f——它应该还没开始缩",
+			oldActive, got)
+	}
+
+	tt.Advance(100 * time.Millisecond)
+	midOld := lyricRowAt(t, tt, 8).H
+	midNew := lyricRowAt(t, tt, 9).H
+	if !(midOld > oldIdle+1 && midOld < oldActive-1) {
+		t.Errorf("100ms 时第 8 句高 %.2f（正在唱 %.2f、平时 %.2f）——"+
+			"它不是「正在缩回去」的中间态", midOld, oldActive, oldIdle)
+	}
+	if !(midNew > oldIdle+1 && midNew < oldActive-1) {
+		t.Errorf("100ms 时第 9 句高 %.2f（正在唱 %.2f、平时 %.2f）——"+
+			"它不是「正在长起来」的中间态", midNew, oldActive, oldIdle)
+	}
+	if !tt.FramePending() {
+		t.Error("100ms 时已经不要帧了——300ms 的过渡应该还在跑")
+	}
+
+	// 走完：上一句回到平时的高度，这一句长到正在唱的高度。
+	settleLyrics(t, s, tt)
+	if got := lyricRowAt(t, tt, 8).H; math.Abs(float64(got-oldIdle)) > 0.5 {
+		t.Errorf("过渡走完第 8 句是 %.2f 高，want %.2f（平时的高度）", got, oldIdle)
+	}
+	if got := lyricRowAt(t, tt, 9).H; math.Abs(float64(got-oldActive)) > 0.5 {
+		t.Errorf("过渡走完第 9 句是 %.2f 高，want %.2f（正在唱的高度）", got, oldActive)
+	}
+}
+
+// TestTheSungLineTransitionHonoursReduceMotion 「减少动态效果」时歌词一次到位。
+//
+// DESIGN.md 的「减少动态效果」那一节：所有自己写的过渡都要听系统偏好，为真时
+// 直接到终点。这一条走的是框架那一条（`AnimateTo` 读到 Preferences.ReduceMotion
+// 就落到目标），所以它同时钉住「这一层没有绕开框架自己写一段动画」。
+func TestTheSungLineTransitionHonoursReduceMotion(t *testing.T) {
+	s, tt := lyricShell(t, withPrefs(mygoui.Preferences{ReduceMotion: true}))
+	putLyrics(s, lyricsOfN(20), "")
+	settleLyrics(t, s, tt)
+	seekTo(t, s, tt, 8)
+
+	active := lyricRowAt(t, tt, 8).H
+	idle := lyricRowAt(t, tt, 9).H
+
+	s.app.SeekTo(9 * lyricStepMS * time.Millisecond)
+	tt.Frame()
+	if got := lyricRowAt(t, tt, 8).H; math.Abs(float64(got-idle)) > 0.5 {
+		t.Errorf("减少动态效果时，换句那一帧第 8 句是 %.2f 高，want %.2f——它应该已经缩回去了",
+			got, idle)
+	}
+	if got := lyricRowAt(t, tt, 9).H; math.Abs(float64(got-active)) > 0.5 {
+		t.Errorf("减少动态效果时，换句那一帧第 9 句是 %.2f 高，want %.2f——它应该已经长好了",
+			got, active)
 	}
 }
 
