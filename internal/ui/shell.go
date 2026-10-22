@@ -6,6 +6,7 @@ package ui
 import (
 	"embed"
 	"log"
+	"path/filepath"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -131,8 +132,16 @@ type Shell struct {
 	// 是**整条顶栏**——用户连窗口都拖不动了，而且报错的地方不在页面上。
 	navBody func(*ui.Context)
 
-	// images 是网络封面缓存。整个窗口共用一个。
+	// images 是网络封面缓存。整个窗口共用一份；迷你窗口借的是主窗口那一份
+	// （`adoptShared`），因为落盘的磁盘缓存目录只能有一个 writer/一本账，
+	// 两个实例同时写同一个目录会各算各的字节数，上限就守不住了。
 	images *imgcache.Cache
+
+	// imagesWakeRemove 是摘掉「封面好了，叫醒这一扇窗」那条登记的动作。
+	//
+	// 和 `wakeRemove` 同一个理由：借来的那一份缓存活得比这一扇窗久，
+	// 退迷你之后不摘，那个回调列表每进一次迷你就多一条。
+	imagesWakeRemove func()
 
 	// avatar 是顶栏右上角那一格的状态（见 navbar_avatar.go）。
 	//
@@ -507,11 +516,13 @@ type Shell struct {
 	// 见 `attachMiniWindow`。
 	main *Shell
 
-	// shared 记着「快捷键和搜索历史是**主窗口那一份**」，不是自己开的。
+	// shared 记着「封面缓存、快捷键和搜索历史是**主窗口那一份**」，不是自己开的。
 	//
-	// ⚠️ 它管的是**收尾**：那两个各自有一个后台写盘循环，而它们此刻**属于另一个
-	// 外壳**——迷你窗口关掉时把主窗口那份 `Close()` 了，主窗口后面在设置页改快捷键
-	// 就再也落不了盘（症状是「设置页改了，重启之后没记住」，而界面上看不出异样）。
+	// ⚠️ 它管的是**收尾**：那几样各自有一份后台资源（封面缓存有 writer 和解码
+	// worker，快捷键 / 搜索历史有写盘循环），而它们此刻**属于另一个外壳**——
+	// 迷你窗口关掉时把主窗口那份 `Close()` 了，主窗口后面在设置页改快捷键就再也
+	// 落不了盘（症状是「设置页改了，重启之后没记住」，而界面上看不出异样），
+	// 封面缓存关掉之后主窗口的新封面永远停在占位。
 	// 详见 `adoptShared`。
 	shared bool
 
@@ -662,8 +673,15 @@ func (s *Shell) closePerWindow() {
 		s.wakeRemove = nil
 	}
 
-	// 封面缓存：关掉之后在途的下载和解码 worker 都会停。
-	s.images.Close()
+	// 封面缓存：先摘掉这一扇窗的唤醒登记（借来的那一份活得比这一扇窗久），
+	// 再关掉**自己开的**那一份——关掉之后在途的下载和解码 worker 都会停。
+	//
+	// ⚠️ **借来的不能关**（见下面 `shared`）：迷你窗口关掉时把主窗口那份关了，
+	// 主窗口后面所有新封面都会永远停在占位。
+	if s.imagesWakeRemove != nil {
+		s.imagesWakeRemove()
+		s.imagesWakeRemove = nil
+	}
 
 	// 🔴 摘掉「本地库变了」这一条（`New` 里登记的）。不摘的话「进迷你 / 退出迷你」
 	// 来回十次之后那个列表就有十条，每扫一遍库就多走一趟空转——而这一条属于**已经
@@ -681,6 +699,7 @@ func (s *Shell) closePerWindow() {
 	if s.shared {
 		return
 	}
+	s.images.Close()
 	_ = s.hist.Close()
 	_ = s.keys.Close()
 }
@@ -702,6 +721,28 @@ func (s *Shell) bindMedia(w *mygo.Window) {
 	s.media.BindWindow(w.NativeHandle())
 }
 
+// coverCacheDir 是封面磁盘缓存的位置：**应用自己的缓存目录**下单独一个子目录。
+//
+// `mygo.PathCache` 是 `os.UserCacheDir()` 拼上应用名（macOS 上是
+// `~/Library/Caches/BiuGo`），系统认定的「这些都可以删」的地方——不是用户文件
+// 目录，也不在应用数据目录（`Biu MyGo`）里，所以清缓存不会碰到设置和历史。
+// 再套一层 `cover-images` 是为了不让别的东西混进这个「整目录都归缓存」的地方。
+//
+// ⚠️ **测试必须把它替成临时目录**（`newTestShell` 替了）：无头 Tester 里
+// `mygo.App.Path` 照样会返回一个真的、可写的目录，不替的话每条测试都会往用户
+// 真正的缓存目录里写封面，而且测试之间串数据。
+//
+// 拿不到缓存目录不算错误：返回空串 = 不落盘，封面照常从网上下来，只是下次启动
+// 要再下一次。为缓存挡住窗口不值当。
+var coverCacheDir = func() string {
+	dir, err := mygo.App.Path(mygo.PathCache)
+	if err != nil {
+		log.Printf("biu: 拿不到缓存目录，封面这次不落盘：%v", err)
+		return ""
+	}
+	return filepath.Join(dir, "cover-images")
+}
+
 // New 建一个窗口外壳，绑在状态 a 上。
 //
 // ⚠️ 封面缓存的唤醒在这里装，不在 Attach 里：注册的是这个外壳自己的唤醒句柄，
@@ -711,12 +752,20 @@ func (s *Shell) bindMedia(w *mygo.Window) {
 // 钉得住（实测：只投递不唤醒 = 0 帧刷新）。**每个窗口一个外壳，也就注册一次。**
 //
 // TestPlayBarCoverWakeRedrawsTheWindow 走的就是这一行。
-func New(a *app.App) *Shell {
+func New(a *app.App) *Shell { return newShellWithImages(a, coverCacheDir()) }
+
+// newShellWithImages 是 New 的本体。imagesDir 空 = 封面缓存只在内存里。
+//
+// ⚠️ 迷你窗口那一份用**空目录**：它建好之后马上就把封面缓存换成主窗口那一份
+// （`adoptShared`）。要是先按真目录建一份，每进一次迷你就会白扫一遍缓存目录
+// （建目录即启动清扫），还可能按自己刚扫出来的账删掉几个主窗口正在用的文件
+// ——两个实例各有一本账，谁都算不准对方。
+func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	s := &Shell{
 		app:       a,
 		router:    ui.NewRouter("/"),
 		clock:     realClock{},
-		images:    imgcache.New(imgcache.Options{}),
+		images:    imgcache.New(imgcache.Options{Dir: imagesDir}),
 		autostart: systemAutoStart{},
 		pickImage: pickImageFile,
 		hotkeys:   nilGlobalShortcuts{},
@@ -729,7 +778,7 @@ func New(a *app.App) *Shell {
 	// 快捷键那两条路的动作都落到它。方法值在这儿绑一次就够：runShortcut 只碰
 	// s.app 和 s.router，两个都是建好之后就一直在的。
 	s.onShortcut = s.runShortcut
-	s.images.AddWake(s.wake.invalidate)
+	s.imagesWakeRemove = s.images.AddWake(s.wake.invalidate)
 	// 首页自己那一摊要在建好之后才有（它要用封面缓存），所以接在 images 后面。
 	// 操作接在应用状态上、提示接自己的 Toast，接法见 widgets/list 的 AppActions。
 	s.home = newHomePage(s.images, s.listActions(), s.wake.invalidate)

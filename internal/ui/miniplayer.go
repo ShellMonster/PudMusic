@@ -214,7 +214,9 @@ func miniCorner(work mygo.Rectangle) (x, y int) {
 // 所以这里接的是主窗口**那一个实例**（不是再读一遍盘）：设置页改了它立刻就见效，
 // 而 `closePerWindow` 也不会因为小窗关掉而停掉主窗口那份的写盘（见 `shared`）。
 func NewMini(a *app.App, main *Shell, toggle func()) *Shell {
-	s := New(a)
+	// 封面缓存先建成**只在内存里**的那一份：下面 `adoptShared` 会把它换成主
+	// 窗口那一份。按真目录建的话，每进一次迷你白扫一遍磁盘缓存（见 newShellWithImages）。
+	s := newShellWithImages(a, "")
 	// 迷你播放器是面板语义：它浮在桌面上时用户看得到，但点它不激活应用，
 	// 所以「有没有焦点」不能拿来判它看不看得见（见 presence.go 的
 	// freeWhileBlurred）。
@@ -227,11 +229,28 @@ func NewMini(a *app.App, main *Shell, toggle func()) *Shell {
 	return s
 }
 
-// adoptShared 把「整进程只有一份」的那几样接到另一个外壳上，并把自己开的那几份收掉。
+// adoptShared 把「整进程只有一份」的那几样（封面缓存、快捷键、搜索历史）接到
+// 另一个外壳上，并把自己开的那几份收掉。
 //
-// ⚠️ **`New` 刚建出来的那两份要真的收掉**：`newShortcutKeys` 和 `newSearchHistory`
-// 各自起了一个后台写盘 goroutine，不收就一直跑到进程退出（而这一份从此没人用）。
+// ⚠️ **`New` 刚建出来的那几份要真的收掉**：`newShortcutKeys` 和
+// `newSearchHistory` 各自起了一个后台写盘 goroutine，封面缓存有一个磁盘 writer
+// 和一组解码 worker，不收就全都一直跑到进程退出（而这一份从此没人用）。
 func (s *Shell) adoptShared(main *Shell) {
+	// 封面缓存接主窗口那一份：落盘的磁盘缓存**一个目录只能有一个记账人**。
+	// 两个实例各写各的，字节上限就变成了「各自以为的上限」，而且各自启动时
+	// 扫一遍目录、各自按自己的账删文件——一个实例刚写进去的图可能被另一个
+	// 按它过时的账挤掉。共用一份顺带让两扇窗不再重复下载同一张图。
+	if main.images != nil && main.images != s.images {
+		// 收掉 `New` 刚建的那一份（它的磁盘 writer 和解码 worker 都在跑）。
+		if s.imagesWakeRemove != nil {
+			s.imagesWakeRemove()
+			s.imagesWakeRemove = nil
+		}
+		s.images.Close()
+		s.images = main.images
+		s.imagesWakeRemove = s.images.AddWake(s.wake.invalidate)
+		s.shared = true
+	}
 	if main.keys != nil && main.keys != s.keys {
 		// 收掉 `New` 刚建的那一份（不报错：这一份从没被用过，也就没有要落盘的东西）。
 		_ = s.keys.Close()
