@@ -17,6 +17,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -122,9 +123,16 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 			// 没有底色：Biu 的 `backdrop="transparent"`，底下那一层照旧看得见。
 			Modal()
 		back.Children(func() {
-			ui.Column(c).Key("queue-drawer").Width(queueDrawerWidth).FillHeight().
-				Background(t.Surface).BorderStartWidth(1).BorderColor(t.Border).
-				Role(ui.RoleDialog).Label("播放列表").
+			// ⚠️ **那一圈影是上游给的**：Biu 那一枚是 HeroUI 的
+			// `<Drawer radius="md" shadow="md">`（`components/music-playlist-drawer/
+			// index.tsx:116`），而 HeroUI 的 Drawer 是拿 Modal 画的，那一档影落在
+			// **面板本身**上。抽屉是浮在页面右边的一整条，没有影的话它和底下那一页
+			// 是「同一块底上的两块颜色」——深色下尤其如此（上游的卡片底和背景几乎
+			// 同色，**靠阴影分层**，见 DESIGN.md §4）。
+			panel := shadow.HeroMedium(ui.Column(c).Key("queue-drawer").
+				Width(queueDrawerWidth).FillHeight().
+				Background(t.Surface).BorderStartWidth(1).BorderColor(t.Border), t)
+			panel.Role(ui.RoleDialog).Label("播放列表").
 				Children(func() {
 					s.viewQueueHeader(c, t)
 					s.viewQueueBody(c, t)

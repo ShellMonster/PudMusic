@@ -136,15 +136,24 @@ func likeFailText(like bool, err error) string {
 }
 
 // viewCollectionRow 画一张收藏夹 / 合集卡片。**整行可点**，跳到那个的内容页。
+//
+// ⚠️ **封面在指针移上去的时候放大 5%**：上游 UP 空间那两张 Tab（收藏夹 / 合集）
+// 摆的是一格一格的封面卡（`user-profile/grid-card/index.tsx:26` 的
+// `group-hover:scale-105` + `transition-transform duration-300`）。放大的是
+// **框里那张图**，框不动——框要是自己长大，它就会压到旁边的标题上。
 func (s *Shell) viewCollectionRow(c *ui.Context, col bili.UpCollection) {
 	t := c.Theme()
 	box := ui.Row(c).Grow(1).Gap(10).Padding(8).AlignItems(ui.Center).
 		Key("coll:" + strconv.FormatInt(col.ID, 10))
+	// ⚠️ hover 要在 Children **之前**问（理由同 `widgets/list` 的 grid.go）：
+	// 它报的是这一帧指针在不在这一行上，而封面是在 Children 里画的。
+	on := box.Hovered()
 	if box.Clicked() {
 		s.navigate(collectionPath(col.ID))
 	}
 	box.Children(func() {
-		s.spaceThumb(c, col.Cover, 48, 64)
+		s.spaceThumbZoom(c, col.Cover, 48, 64,
+			"coll-zoom:"+strconv.FormatInt(col.ID, 10), on)
 		ui.Column(c).Grow(1).Gap(2).Children(func() {
 			ui.Text(c, col.Title).FontSize(scale.Font(c, 14)).MaxLines(2).Ellipsis("…")
 			ui.Text(c, fmt.Sprintf("%d 条", col.Count)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)

@@ -59,6 +59,11 @@ motion:
   toast_in: 250ms
   lyrics_line: 300ms
   follow_action_bar: 300ms
+  hover_zoom: 300ms
+shadow:
+  # 值只写在 internal/ui/widgets/shadow（调用处只说「要哪一档」）。逐值见 §四·五。
+  tailwind: [sm, md, lg, xl, "2xl"]
+  heroui: [sm, md, lg]          # 深浅两套值不一样
 structural:
   window: { width: 1200, height: 800, min_width: 900, min_height: 560 }
   sidebar: { expanded: 200, collapsed: 72, min: 160, max: 480 }
@@ -134,7 +139,95 @@ structural:
 - **禁用态**：用仍然 **≥3:1** 的灰，不是整体降透明度。
 - **焦点环**：保留（上游 HeroUI 有）。**不要为了「对齐」去掉。**
 
+## 四·五、阴影
+
+上游的阴影来自**两个互不相干的地方**，而它们各自的数值都散在好几处：
+
+- **Tailwind 的 `shadow-*`**（上游 `src/` 里那些类）：颜色是 Tailwind 默认的那档黑
+  （10%，`2xl` 是 25%）。
+- **HeroUI 的 `shadow="sm|md|lg"`**（`--heroui-box-shadow-*`）：**另一套数值**，
+  而且**深浅两套不一样**。
+
+**值只写一处**：`internal/ui/widgets/shadow`（调用处只说「要哪一档」）。抄成两个数
+的那个地方，在画面上只是「这一块看着比那一块平一点」。
+
+### Tailwind v4 的五档
+
+| 档 | 值 |
+|---|---|
+| `shadow-sm` | `0 1px 2px 0 rgb(0 0 0/0.05)` |
+| `shadow-md` | `0 4px 6px -1px rgb(0 0 0/0.1), 0 2px 4px -2px rgb(0 0 0/0.1)` |
+| `shadow-lg` | `0 10px 15px -3px rgb(0 0 0/0.1), 0 4px 6px -4px rgb(0 0 0/0.1)` |
+| `shadow-xl` | `0 20px 25px -5px rgb(0 0 0/0.1), 0 8px 10px -6px rgb(0 0 0/0.1)` |
+| `shadow-2xl` | `0 25px 50px -12px rgb(0 0 0/0.25)`（**只有一层**，颜色 25%） |
+
+### HeroUI 的三档（深浅两套）
+
+| 档 | 浅色 | 深色 |
+|---|---|---|
+| `shadow="sm"` | `0 0 5px 0 rgb(0 0 0/0.02), 0 2px 10px 0 rgb(0 0 0/0.06), 0 0 1px 0 rgb(0 0 0/0.3)` | `0 0 5px 0 rgb(0 0 0/0.05), 0 2px 10px 0 rgb(0 0 0/0.2), inset 0 0 1px 0 rgb(255 255 255/0.15)` |
+| `shadow="md"` | `0 0 15px 0 rgb(0 0 0/0.03), 0 2px 30px 0 rgb(0 0 0/0.08), 0 0 1px 0 rgb(0 0 0/0.3)` | `0 0 15px 0 rgb(0 0 0/0.06), 0 2px 30px 0 rgb(0 0 0/0.22), inset 0 0 1px 0 rgb(255 255 255/0.15)` |
+| `shadow="lg"` | `0 0 30px 0 rgb(0 0 0/0.04), 0 30px 60px 0 rgb(0 0 0/0.12), 0 0 1px 0 rgb(0 0 0/0.3)` | `0 0 30px 0 rgb(0 0 0/0.07), 0 30px 60px 0 rgb(0 0 0/0.26), inset 0 0 1px 0 rgb(255 255 255/0.15)` |
+
+⚠️ **深色那套的第三层是「内」阴影（1 像素白边），浅色那套是「外」黑边**：深底上
+黑边看不见，白边才看得出边界。抄成一样的话深色下那张卡就是「糊在底上的一块」。
+
+### 用在哪几处（票 #179）
+
+| 位置 | 档 | 上游 |
+|---|---|---|
+| 队列抽屉 | HeroUI `md` | `music-playlist-drawer/index.tsx:116` |
+| 回顶按钮 | Tailwind `xl` + **30% 黑** | `scroll-container/index.tsx:82` |
+| 网格卡片右下角那个播放钮 | Tailwind `2xl` | `music-card/index.tsx:51` |
+| 新歌速递那张封面 | Tailwind `md` | `new-music-top.tsx:234` |
+| 下载表外面那张卡 | HeroUI `sm` | `download-list/index.tsx:105` |
+| 设置里那块色卡 | HeroUI `sm` | `settings/color-settings.tsx:24` |
+| 关注卡 | HeroUI `md` | `follow-list/user-card.tsx:60` |
+| 关注卡 hover 升起来的那条药丸 | Tailwind `lg` | `follow-list/user-card.tsx:89` |
+| UP 空间那个头像 | Tailwind `lg` | `user-profile/space-info.tsx:89` |
+
+⚠️ **回顶那一枚是 `shadow-black/30`**：那把**两层**的颜色都换成 30% 黑（不是只换
+一层）。它是**浮在内容上面**的按钮，底下那一圈影就是它和内容之间的分界。
+
+⚠️ **网格那个播放钮的影会被封面裁掉一半**：它在封面那个 `overflow-hidden` 的框里，
+而 `shadow-2xl` 往下偏 25——**看得见的是它左边那一圈**（上游也一样）。
+
+### 带影的那两张卡的底色
+
+**关注卡（这一票自己加的那张）底色用 `t.Background`**：
+
+- 上游那张卡是 HeroUI 的 `Card`，底色是 `bg-content1`，而 `content1` 的值是
+  **#FFFFFF（浅）/ #18181b（深）**——**正好是我们 `t.Background` 的两个值**
+  （`@heroui/theme` 的 `semantic.ts`）。
+- 所以**深色下这张卡和页面底色几乎同色，靠那圈影分层**——这正是 §4 那条
+  「不要用『比背景亮一级』的板」。`t.Surface`（深色下 #27272a）正好是那个
+  「亮一级」的板。
+- **hover 那一档用 `t.Surface`**：上游 `isHoverable` 是
+  `data-[hover=true]:bg-content2`，而 `content2` 是 **zinc[100] #f4f4f5（浅）/
+  zinc[800] #27272a（深）**——也正好是 `t.Surface` 的两个值。
+
+⚠️ **下载表外面那张卡的底色是 #175 那一票定的**（`t.Surface`，那张卡是那一票加
+的）：本票只给它**加影**（上游那张 `Card` 的 `shadow="sm"`）。深色下它的底色比
+页面亮一整级，而上游那张卡是 `bg-content1`（≈ 页面底色）——**改底色是 #175/#172
+的裁决**，不在本票。
+
 ## 五、动效
+
+### hover 放大
+
+| 位置 | 倍数 | 时长 | 上游 |
+|---|---|---|---|
+| UP 空间 / 合集网格那张封面 | **105%** | 300ms | `user-profile/grid-card/index.tsx:26` |
+| 动态流作者栏那个头像 | **105%** | 300ms | `dynamic-feed/user.tsx:46` |
+| 顶栏那个头像 | **105%** | 300ms | `layout/navbar/user/index.tsx:178` |
+
+⚠️ **放大的是「画的时候」的变换**（`Scale`），布局不动——改尺寸的话那一格会**重排**
+（封面长大 5% 就把旁边的字挤走了，而上游那一处是整块图在框里放大）。
+
+⚠️ **110% 是列表行那个播放三角的**（上游 `music-list-item/index.tsx:105`），
+两处别混。
+
+### 逐处
 
 | 场景 | 时长 | 说明 |
 |---|---|---|

@@ -54,6 +54,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -358,6 +359,7 @@ func (d *downloadsPage) emptyState() emptyState {
 // 这一张表上它落成的是**滚动锚点**：用户滚到下面、在上面删掉一条，屏幕上
 // 还是那几首歌。`TestDeletingARowAboveKeepsTheTopRowWhereItIs` 钉的就是它。
 func (d *downloadsPage) viewTable(c *ui.Context, s *Shell) {
+	t := c.Theme()
 	// Label 是这一行给无障碍和「打字选中」用的名字。
 	d.state.Label = func(i int) string {
 		if i < 0 || i >= len(d.rows) {
@@ -382,9 +384,17 @@ func (d *downloadsPage) viewTable(c *ui.Context, s *Shell) {
 	// ⚠️ 深浅两套都是同一张底（`t.Surface`）：深色下它比页面底色亮一点点，
 	// 而层次主要靠阴影（那一层归 #163 的「阴影补齐」那一票）。这里先给底和
 	// 圆角，免得表格的四条边压在页面上。
-	t := c.Theme()
-	ui.Column(c).Grow(1).FillWidth().Radius(t.Radius).Background(t.Surface).
-		Padding(t.Space(4)).Children(func() {
+	//
+	// ⚠️ **那一圈影是 #179 那一票的**（上游那张 `Card` 的 `shadow="sm"` =
+	// `--heroui-box-shadow-small`）：HeroUI 那一档**深浅两套值不一样**——深色那套
+	// 多一层 1 像素的**白色内**阴影（深底上外面那一圈 20% 的黑只差一两个色阶，
+	// 那道白边才是真正把卡和底色分开的）。值在 `internal/ui/widgets/shadow`
+	// （那里是唯一一份）。
+	//
+	// ⚠️ **卡片底色是 #175 那一票定的**（`t.Surface`），影是本票的——两件事分开。
+	card := shadow.HeroSmall(ui.Column(c).Grow(1).FillWidth().Radius(t.Radius).
+		Background(t.Surface).Padding(t.Space(4)), t)
+	card.Children(func() {
 		e := ui.Table(c, &d.state, downloadColumns, len(d.rows), func(row, col int) {
 			d.viewCell(c, s, row, col)
 		}).Grow(1)
