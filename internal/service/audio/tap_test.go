@@ -3,6 +3,7 @@ package audio
 import (
 	"errors"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -74,6 +75,41 @@ func feed(t *testing.T, d mygoaudio.Decoder, frames int) {
 	if _, err := d.Read(buf); err != nil && !errors.Is(err, io.EOF) {
 		t.Fatalf("读 %d 帧：%v", frames, err)
 	}
+}
+
+// gatedDec 是「第一次读要等放行」的假解码器。
+//
+// 用来把「解码器开始读」和「音量已经落下来」这两件事**排成确定的顺序**：
+// 播放器建好之后它自己那条解码 goroutine 就开始读了（`mygo/audio/source.go:82`
+// 的 `go s.decode()`，它在 `NewPlayer` 里就起了），而那一读会把**当时的**音量
+// 乘进这一段谱里（`tap.Read` 里 `t.an.SetVolume` 就在 `push` 之前）。
+//
+// 于是「建播放器」和「把音量设成 0」这两句谁先谁后，就成了那条测试绿还是红的
+// **唯一**原因：主 goroutine 让出 CPU 的那一瞬间，解码 goroutine 可能已经算出
+// 好几段满格的了。实测大约 100 次里飘 1~3 次。
+//
+// 放行之后读到的每一段都是按**放行那一刻**的音量算的，而那一刻音量早就落下
+// 来了——于是这一条量的是「解出来了但是静音」这件事本身，而不是「谁先跑到」。
+type gatedDec struct {
+	*fakeDec
+	release chan struct{}
+	once    sync.Once
+}
+
+func newGatedDec(rate, ch int, frames int64) *gatedDec {
+	return &gatedDec{fakeDec: newFakeDec(rate, ch, frames), release: make(chan struct{})}
+}
+
+// open 放行解码器（幂等，收尾时也拿它兜底）。
+func (d *gatedDec) open() { d.once.Do(func() { close(d.release) }) }
+
+// Read 先等放行，再读。
+//
+// ⚠️ **卡住的是「解码器开始读」这一步，不是数据本身**：放行之后读到的每一段
+// 都是按当时的音量算的。
+func (d *gatedDec) Read(buf []float32) (int, error) {
+	<-d.release
+	return d.fakeDec.Read(buf)
 }
 
 // TestTheTapIsTransparent 断「它只是看一眼」。
@@ -315,9 +351,23 @@ func TestBarsWithNothingDecodedYetAreZero(t *testing.T) {
 // 挂点，这是它能免锁的前提），两处一起读就是 `-race` 直接报——而且报的栈指向
 // `tap_test.go` 自己的 `feed`，看起来像生产代码有问题。
 func TestTheBarsAreTwoPixelsTallWhenSilent(t *testing.T) {
-	p := New(newFakeDec(48000, 2, 48000*3))
+	d := newGatedDec(48000, 2, 48000*3)
+	p := New(d)
 	t.Cleanup(p.Close)
+	// ⚠️ **收尾一定先放行**（`t.Cleanup` 后进先出，所以这一句排在 `p.Close` 后面）：
+	// 关一个还卡在 `Read` 里的解码器，那条解码 goroutine 就永远醒不过来。
+	t.Cleanup(d.open)
+
+	// ⚠️ **音量先落，再放行解码——这个顺序是这一条的全部。**
+	//
+	// 播放器建好之后它自己那条解码 goroutine 就开始读了（`mygo/audio/source.go:82`
+	// 的 `go s.decode()`，在 `NewPlayer` 里就起了），而那一读会把**当时的**音量
+	// 乘进这一段谱里（`tap.Read` 里 `t.an.SetVolume` 就在 `push` 之前）。
+	// 不排这个顺序的话，这一格量到的可能是「音量还没设成 0 时算出来的那一段」——
+	// 而 `At(0)` 永远返回**第一段**（它盖着源帧 0），于是绿还是红全看谁先跑到：
+	// 实测大约 100 次里飘 1~3 次（主 goroutine 让出 CPU 的那一瞬间就够）。
 	p.SetVolume(0)
+	d.open()
 
 	// 等**它自己**解出来。
 	deadline := time.Now().Add(2 * time.Second)
