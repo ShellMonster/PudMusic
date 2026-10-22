@@ -2,9 +2,11 @@ package ui
 
 import (
 	"fmt"
+	"image"
 	"image/color"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -694,11 +697,11 @@ func collapsedShell(t *testing.T) (*Shell, *app.App, *mygoui.Tester) {
 	return s, s.app, tt
 }
 
-// TestTheCollapsedSidebarItemSaysItsName 钉住验收第 1 条：
+// TestTheCollapsedSidebarItemSaysItsName 钉住验收第 3 条的后半句：
 // 折叠后每一项在悬停时给出名称提示。
 //
-// 折叠态那一格只有一个字（上游摆的是图标，而那一档还没换），没有字可以让用户
-// 对照着认——这一格完全靠记忆。
+// 折叠态那一格只有一枚图标（上游摆的也是图标），没有字可以让用户对照着认——
+// 这一格完全靠记忆。
 //
 // ⚠️ **悬停提示要指针停够 0.6 秒才出**（`mygo/ui/tooltip.go` 的 tooltipDelay），
 // 所以是 Move + Advance + Frame，不是 Move + Frame。
@@ -710,10 +713,10 @@ func collapsedShell(t *testing.T) (*Shell, *app.App, *mygoui.Tester) {
 func TestTheCollapsedSidebarItemSaysItsName(t *testing.T) {
 	_, _, tt := collapsedShell(t)
 
-	// 折叠态那一列摆的是每个标题的第一个字。
-	r, ok := tt.Find("下")
+	// 折叠态那一列摆的是图标，没有字——找的是那一项的**无障碍名字**。
+	r, ok := tt.Find("下载记录")
 	if !ok {
-		t.Fatalf("折叠态的侧栏上没有「下载记录」那一个字，文字有 %q", tt.Texts())
+		t.Fatalf("折叠态的侧栏上没有「下载记录」那一格，文字有 %q", tt.Texts())
 	}
 	before := countText(tt, "下载记录")
 	if before != 1 {
@@ -733,8 +736,8 @@ func TestTheCollapsedSidebarItemSaysItsName(t *testing.T) {
 
 // TestTheCollapsedSidebarItemHasItsFullName 钉住折叠态那一项的**无障碍名字**。
 //
-// 折叠态可见的字只有一个字（「下」「本」「推」「设」），读屏软件念出来就是那一个
-// 字——这一格等于**完全没有名字**。所以那一项要带一个 `Label`（全名）。
+// 折叠态画面上只有一枚图标，读屏软件念出来就是「图标」——这一格等于**完全没有
+// 名字**。所以那一项要带一个 `Label`（全名）。
 //
 // ⚠️ **Label 不在画面上多画一个字**：折叠态画面上本来就没有那个全名（展开态
 // 才有，而展开态**不**给 Label——那一档可见的字就是名字，见 `sidebar.go` 的
@@ -746,10 +749,6 @@ func TestTheCollapsedSidebarItemHasItsFullName(t *testing.T) {
 		if !tt.HasText(name) {
 			t.Errorf("折叠态那一项没有全名 %q，文字有 %q", name, tt.Texts())
 		}
-	}
-	// 全名在，**那个字**也得在（折叠态画的是单字，不是全名）。
-	if _, ok := tt.Find("下"); !ok {
-		t.Errorf("折叠态那一列画的不是单字，文字有 %q", tt.Texts())
 	}
 }
 
@@ -784,14 +783,14 @@ func TestTheCollapsedSidebarTipSitsToTheRightOfTheItem(t *testing.T) {
 			tt.Frame()
 			theme := BuildTheme(s.app.SettingsSnapshot(), dark)
 
-			r, ok := tt.Find("下")
+			r, ok := tt.Find("下载记录")
 			if !ok {
-				t.Fatalf("折叠态的侧栏上没有「下载记录」那一个字，文字有 %q", tt.Texts())
+				t.Fatalf("折叠态的侧栏上没有「下载记录」那一格，文字有 %q", tt.Texts())
 			}
-			// 上面那一个字（「本」）——提示摆在**上面**的话它会被盖住。
-			above, ok := tt.Find("本")
+			// 上面那一格（「本地音乐」）——提示摆在**上面**的话它会被盖住。
+			above, ok := tt.Find("本地音乐")
 			if !ok {
-				t.Fatalf("折叠态的侧栏上没有「本地音乐」那一个字，文字有 %q", tt.Texts())
+				t.Fatalf("折叠态的侧栏上没有「本地音乐」那一格，文字有 %q", tt.Texts())
 			}
 
 			tt.Move(r.X+r.W/2, r.Y+r.H/2)
@@ -807,10 +806,10 @@ func TestTheCollapsedSidebarTipSitsToTheRightOfTheItem(t *testing.T) {
 				t.Errorf("侧栏右边那一格是 %v，want %v（提示的底色）——"+
 					"提示没有贴在那一项的右边", at, inverse)
 			}
-			// ② 上面那一个字没有被盖住 → 提示不在上面。
+			// ② 上面那一格没有被盖住 → 提示不在上面。
 			over := img.RGBAAt(int(above.X+above.W/2), int(above.Y+above.H/2))
 			if over == inverse {
-				t.Errorf("上面那一个字被提示盖住了（%v）——提示摆在上面了", over)
+				t.Errorf("上面那一格被提示盖住了（%v）——提示摆在上面了", over)
 			}
 		})
 	}
@@ -894,5 +893,398 @@ func TestTheSidebarPanicIsCaught(t *testing.T) {
 	}
 	if !tt.HasText("侧栏画崩了") {
 		t.Errorf("错误页上没有崩掉的原因，文字有 %q", tt.Texts())
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #164：菜单项的图标、行高，以及左上角那一条品牌
+// ─────────────────────────────────────────────────────────────────────────────
+
+// sideInkPixels 报这一块里「有多少像素和众数不一样」——也就是画上去的东西
+// 有多少。众数当背景（那一块大部分是底色）。
+//
+// ⚠️ **不是「有没有非底色像素」而是「有多少个」**：抗锯齿的边缘像素也算，
+// 而「图标被换成一个字母」那种改动会让墨迹的**位置**变掉、数量也变掉——
+// 数量这一维足够把两种图形分开。
+func sideInkPixels(img *image.RGBA, x0, y0, x1, y1 int) int {
+	x0, x1 = clampX(img, x0), clampX(img, x1)
+	y0, y1 = clampY(img, y0), clampY(img, y1)
+	if x1 < x0 || y1 < y0 {
+		return 0
+	}
+	var samples []color.RGBA
+	for y := y0; y <= y1; y++ {
+		for x := x0; x <= x1; x++ {
+			samples = append(samples, img.RGBAAt(x, y))
+		}
+	}
+	if len(samples) == 0 {
+		return 0
+	}
+	bg := modeOf(samples)
+	n := 0
+	for _, c := range samples {
+		if maxDiff(c, bg) > probeTolerance {
+			n++
+		}
+	}
+	return n
+}
+
+// sideIconCell 是「菜单项那一枚图标」在画面上占的那一格。
+//
+// 展开态那一行的结构是「[按钮内边距 8][40×40 的图标格][缝 8][名字]」，而
+// 名字那一块的左边就是图标格的右边再往左 8 像素。
+//
+// ⚠️ **这里量的是「名字左边那一段」而不是「图标本身」**：图标对辅助技术
+// 不可见（`mygo/ui/svg.go` 的 Icon 文档），无头 Tester 的 `Find` 只认文字和
+// `Label`，图标元素根本不在那张表里——所以只能从画面上量。
+func sideMenuIconCell(text mygoui.Rect) (x0, y0, x1, y1 int) {
+	return int(text.X) - 52, int(text.Y) - 10, int(text.X) - 4, int(text.Y) + 10
+}
+
+// TestEverySideMenuEntryHasAnIcon 钉住验收第一条的前半句：
+// 每一个菜单入口**前面都有一枚图标**。
+//
+// 判据是**画面**：每一项的**名字左边**那一格里必须有墨（图标格在那儿）。
+//
+// ⚠️ **为什么是「每一项」而不是「上游那六项」**：上游的默认菜单是六项
+// （`biu/src/common/constants/menus.tsx`），而我们**多摆了一条「设置」**
+// （DESIGN.md §九「侧栏多一条设置」）。七项都要有图标——漏一条，那一项在
+// 侧栏里就**一个图标都没有**，而画面上只是「那一项比别人少点东西」。
+//
+// ⚠️ **登录了才全**：未登录时那三项（我的关注 / 稍后再看 / 历史记录）根本不摆
+// （`viewSideMenu` 的抬头），不在这一条的检查范围里。
+func TestEverySideMenuEntryHasAnIcon(t *testing.T) {
+	s, tt := newShell(t, loggedInWith("7"))
+	s.navigate("/")
+	tt.Frame()
+	tt.Move(600, 400)
+	tt.Frame()
+
+	img := tt.Image()
+	checked := 0
+	for _, rt := range routes {
+		if !rt.InMenu {
+			continue
+		}
+		text, ok := tt.Find(rt.Title)
+		if !ok {
+			t.Errorf("侧栏上没有「%s」那一项，文字有 %q", rt.Title, tt.Texts())
+			continue
+		}
+		checked++
+		x0, y0, x1, y1 := sideMenuIconCell(text)
+		if n := sideInkPixels(img, x0, y0, x1, y1); n == 0 {
+			t.Errorf("「%s」那一项**前面没有图标**（名字左边 %d..%d 那一格是空的）",
+				rt.Title, x0, x1)
+		}
+	}
+	if checked != 7 {
+		t.Errorf("这一条只查了 %d 项，want 7（六个上游入口 + 我们多摆的「设置」）", checked)
+	}
+}
+
+// TestTheSelectedSideMenuEntryDrawsTheFilledIcon 钉住验收第一条的后半句：
+// **选中那一项换成实心的那一枚**。
+//
+// 断法是**同一项的前后对照**：先在别的页上（那一项没选中，画的是线框的那枚），
+// 再切到那一页（画的是实心的那一枚），比两边的墨迹——实心的那枚明显更实。
+//
+// 为什么要这么绕：直接比「选中项的墨迹」和「没选中项的墨迹」没有意义
+// （那是两枚不同的图形）。**同一枚图形的两种状态**才有可比性。
+func TestTheSelectedSideMenuEntryDrawsTheFilledIcon(t *testing.T) {
+	s, tt := newShell(t, loggedInWith("7"))
+	tt.Move(600, 400)
+
+	// ① 先停在别的页上：「推荐音乐」没选中，画的是线框的 `disc-line`。
+	s.navigate("/settings")
+	tt.Frame()
+	text, ok := tt.Find("推荐音乐")
+	if !ok {
+		t.Fatalf("侧栏上没有「推荐音乐」那一项，文字有 %q", tt.Texts())
+	}
+	x0, y0, x1, y1 := sideMenuIconCell(text)
+	off := sideInkPixels(tt.Image(), x0, y0, x1, y1)
+
+	// ② 切到它：换实心的 `disc-fill`。
+	s.navigate("/")
+	tt.Frame()
+	text, ok = tt.Find("推荐音乐")
+	if !ok {
+		t.Fatalf("切过去之后侧栏上没有「推荐音乐」那一项，文字有 %q", tt.Texts())
+	}
+	x0, y0, x1, y1 = sideMenuIconCell(text)
+	on := sideInkPixels(tt.Image(), x0, y0, x1, y1)
+
+	if on <= off {
+		t.Errorf("选中之后那一枚图标没有换成实心的：没选中 %d 个墨点、选中 %d 个——"+
+			"实心的 `disc-fill` 明显应该更实", off, on)
+	}
+}
+
+// TestTheSideMenuRowsAreFortyHigh 钉住验收第二条：**菜单行高 40**。
+//
+// 上游是 HeroUI 的 Button **md**：`h-10` = 40。我们原来那一行是
+// 6 + 15.3 + 6 ≈ **28**。
+//
+// 怎么量：选中那一行有一层很淡的底（上游的 `variant="flat"`），沿着侧栏
+// 那一列扫下去，那一段连续的「和底色不一样」的像素就是**那一行的盒子**。
+// 扫的列取 **x = 120**（按钮的中部）：两头的圆角在 x = 4 那一列上会切掉
+// 两三个像素，量出来是 38 而不是 40。
+func TestTheSideMenuRowsAreFortyHigh(t *testing.T) {
+	s, tt := newShell(t, loggedInWith("7"))
+	s.navigate("/")
+	tt.Frame()
+	tt.Move(600, 400)
+	tt.Frame()
+
+	text, ok := tt.Find("推荐音乐")
+	if !ok {
+		t.Fatalf("侧栏上没有「推荐音乐」那一项，文字有 %q", tt.Texts())
+	}
+
+	img := tt.Image()
+	const col = 120
+	// 那一行在画面上的纵坐标：名字是**居中**在那一行里的，所以行高是
+	// 「名字的上下沿再各加一点」——真正的判据是下面扫出来的那一段。
+	cy := int(text.Y + text.H/2)
+
+	bg := img.RGBAAt(col, 40) // 侧栏的底色（y=40 在顶栏那一带，不是侧栏）
+	// 底色取侧栏里那一列的众数：扫的这一段里大部分是底色。
+	var col0 []color.RGBA
+	for y := 60; y < 700; y++ {
+		col0 = append(col0, img.RGBAAt(col, y))
+	}
+	bg = modeOf(col0)
+
+	// 从行中心往上、往下找那一段的两个边（**走到第一个还是底色的那一格就停**，
+	// 所以 up/down 落在那一段的两个端点上，而不是它外面那一格）。
+	up := cy
+	for up > 60 && maxDiff(img.RGBAAt(col, up-1), bg) > probeTolerance {
+		up--
+	}
+	down := cy
+	for down < 699 && maxDiff(img.RGBAAt(col, down+1), bg) > probeTolerance {
+		down++
+	}
+	got := down - up + 1
+	if got != sideRowHeight {
+		t.Errorf("菜单那一行是 %d 高，want %d（上游 HeroUI 的 Button md 是 `h-10`）",
+			got, sideRowHeight)
+	}
+}
+
+// TestTheCollapsedSideMenuItemIsAFortySquareIconCell 钉住验收第三条的前半句：
+// 折叠态是 **40×40 的图标格**，不再是 `firstRune` 摆出来的一个汉字。
+//
+// 判据是**那一格的盒子**：折叠态那一项带 `Label`（全名），所以
+// `Tester.Find` 给回来的是**按钮自己**的盒子。
+//
+// ⚠️ **旧形状是「一个铺满侧栏的按钮 + 里面一个 13px 的汉字」**——那一格的盒子
+// 是 72 宽（整个侧栏），而汉字在它中间。所以「盒子是 40×40」这一条就把两种
+// 形状分开了：旧形状的宽度是侧栏的宽度。
+//
+// 里面还得**有东西**：一格空的图标格和「图标没画出来」在盒子这一层长得一样。
+func TestTheCollapsedSideMenuItemIsAFortySquareIconCell(t *testing.T) {
+	_, _, tt := collapsedShell(t)
+
+	r, ok := tt.Find("下载记录")
+	if !ok {
+		t.Fatalf("折叠态的侧栏上没有「下载记录」那一格，文字有 %q", tt.Texts())
+	}
+	if r.W != sideIconCell || r.H != sideIconCell {
+		t.Errorf("折叠态那一格是 %.1f×%.1f，want %d×%d（上游折叠态摆的是一个 "+
+			"`h-10 w-10` 的图标格）", r.W, r.H, sideIconCell, sideIconCell)
+	}
+	// 里面有墨：那一枚图标。
+	if n := sideInkPixels(tt.Image(), int(r.X), int(r.Y), int(r.X+r.W)-1, int(r.Y+r.H)-1); n == 0 {
+		t.Error("折叠态那一格是空的——图标没画出来")
+	}
+	// ⚠️ **格子要居中**：侧栏折叠后是 72，而格子是 40——不居中的话它会贴在
+	// 左���沿上（上游那一格也是居中的）。
+	if got := r.X; got < 8 || got > 24 {
+		t.Errorf("折叠态那一格的左边在 %.1f——它没有居中在 72 宽的侧栏里", got)
+	}
+}
+
+// TestTheBrandIsALogoAndTheAppName 钉住验收第四条：
+// 左上角是 **40×40 的 logo + 24px 主色的「BiuGo」**。
+//
+// 三件事分别量：
+//
+//  1. **logo**：侧栏左上角有一块约 33×31 的**图**（40×40 的元素，减去应用
+//     图标自己那 8% 的留白——见 `internal/platform` 的 `iconShapeRatio`）。
+//     旧形状是 18px 的一个字母「B」，那块墨只有十来像素宽。
+//  2. **字**：品牌字那一行的**行高**是 24px 字号该有的行高（MyGo 的行高是
+//     字号的 1.178 倍，实测 24 → 28.27）。13px 的默认字号是 15.3，18 是 21.2——
+//     区间 [26, 32] 把它们都排除在外。
+//  3. **色**：那一行的墨色就是**主色**（浅色下是 `ink.AccentOn` 那一档：
+//     从用户选的主色算出来的、压得住浅底的变体）。
+//
+// # ④ macOS 非全屏时顶部留白 32
+//
+// 上游是 `pt-8`（`biu/src/layout/side/logo/index.tsx`），为的是给红黄绿让开。
+// 这里量的是 **logo 那一块墨的上沿**：它等于「侧栏的上沿 + 顶部留白 +
+// 图标自己的那点留白」。
+func TestTheBrandIsALogoAndTheAppName(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, tt := newShell(t, systemIsDark(dark), loggedInWith("7"))
+			s.navigate("/")
+			tt.Frame()
+			tt.Move(600, 400)
+			tt.Frame()
+
+			img := tt.Image()
+			text, ok := tt.Find(appName)
+			if !ok {
+				t.Fatalf("侧栏上没有 %q 那一行，文字有 %q", appName, tt.Texts())
+			}
+
+			// 侧栏的底色：侧栏**右边**那一列（x = 190）、品牌那一块的高度上
+			// 取的众数。
+			//
+			// ⚠️ **别取菜单那一段**：选中的那一行有一层很淡的底（上游的
+			// `variant="flat"`），拿它当底色的话整块都成了「墨」。
+			var col []color.RGBA
+			for y := 90; y < 140; y++ {
+				col = append(col, img.RGBAAt(190, y))
+			}
+			bg := modeOf(col)
+
+			// ① logo：品牌字左边那一块（x < 62）里的墨。
+			minX, minY, maxX, maxY := 9999, 9999, -1, -1
+			for y := 64; y < int(text.Y+text.H); y++ {
+				for x := 0; x < 62; x++ {
+					if maxDiff(img.RGBAAt(x, y), bg) <= 12 {
+						continue
+					}
+					minX, minY = min(minX, x), min(minY, y)
+					maxX, maxY = max(maxX, x), max(maxY, y)
+				}
+			}
+			if maxX < 0 {
+				t.Fatalf("品牌那一块左边没有图（一个字都没画）")
+			}
+			w, h := maxX-minX+1, maxY-minY+1
+			if w < 28 || w > 40 || h < 28 || h > 40 {
+				t.Errorf("左上角那块 logo 是 %d×%d，want 约 33×33"+
+					"（40×40 的元素减去应用图标自己的留白）", w, h)
+			}
+			if minX > 24 {
+				t.Errorf("logo 的左沿在 %d，want ≈ 19（侧栏左沿 + 16 的内边距 + 图标自己的留白）",
+					minX)
+			}
+
+			// ④ 顶部留白：logo 的上沿 = 侧栏的上沿 + 留白 + 图标自己的留白。
+			//
+			// 侧栏的上沿就是顶栏的高度：Tester 没有标题栏，所以顶栏正好是
+			// `navMinHeight`（64）。
+			wantTop := 12
+			if runtime.GOOS == "darwin" {
+				wantTop = 32 // 上游的 `pt-8`
+			}
+			if got := minY - navMinHeight; got < wantTop-1 || got > wantTop+7 {
+				t.Errorf("logo 的上沿离侧栏上沿 %d，want ≈ %d"+
+					"（上游 macOS 非全屏时是 `pt-8`）", got, wantTop)
+			}
+
+			// ② 品牌字的行高 ≈ 24px 字号。
+			if h := text.H; h < 26 || h > 32 {
+				t.Errorf("品牌字那一行是 %.1f 高，want 26~32（24px 字号"+
+					"的行高；13px 的默认字号是 15.3）", h)
+			}
+
+			// ③ 品牌字的墨色 = 主色。
+			th := BuildTheme(s.app.SettingsSnapshot(), dark)
+			want := ink.AccentOn(th)
+			var inks []color.RGBA
+			for y := int(text.Y); y < int(text.Y+text.H); y++ {
+				for x := int(text.X); x < int(text.X+text.W); x++ {
+					if c := img.RGBAAt(x, y); maxDiff(c, bg) > 40 {
+						inks = append(inks, c)
+					}
+				}
+			}
+			if len(inks) == 0 {
+				t.Fatalf("品牌字那一块没有墨")
+			}
+			if got := modeOf(inks); maxDiff(got, color.RGBA{R: want.R, G: want.G, B: want.B, A: want.A}) > 8 {
+				t.Errorf("品牌字是 %v，want 主色那一档 %v", got, want)
+			}
+		})
+	}
+}
+
+// buiMenuIcons 是「哪个入口配哪两枚图标」的**外部依据**：逐条抄自 Biu 的
+// `src/common/constants/menus.tsx`，写的是**上游的字面文件名**，不是这里的
+// 常量。
+//
+// ⚠️ 抄的是上游的**文件名**（`@remixicon/react` 引进来的那几个）：
+// `RiDiscLine` → `Media/disc-line.svg`、`RiUserFollowLine` →
+// `User & Faces/user-follow-line.svg`、`RiCalendarScheduleLine` →
+// `Business/calendar-schedule-line.svg`、`RiHistoryLine` →
+// `System/history-line.svg`、`RiFolderMusicLine` →
+// `Document/folder-music-line.svg`、`RiFileDownloadLine` →
+// `Document/file-download-line.svg`。
+//
+// 「设置」不在这张表里：上游的设置在头像下拉里，**不进侧栏菜单**——是我们
+// 自己多摆的一条（DESIGN.md §九）。
+var buiMenuIcons = []struct {
+	title      string
+	line, fill string
+}{
+	{"推荐音乐", "Media/disc-line.svg", "Media/disc-fill.svg"},
+	{"我的关注", "User & Faces/user-follow-line.svg", "User & Faces/user-follow-fill.svg"},
+	{"稍后再看", "Business/calendar-schedule-line.svg", "Business/calendar-schedule-fill.svg"},
+	{"历史记录", "System/history-line.svg", "System/history-fill.svg"},
+	{"本地音乐", "Document/folder-music-line.svg", "Document/folder-music-fill.svg"},
+	{"下载记录", "Document/file-download-line.svg", "Document/file-download-fill.svg"},
+}
+
+// TestTheSideMenuIconsMatchBiu 钉住「每一项配哪两枚图标」。
+//
+// ⚠️ **表里写的是上游的字面文件名**：改了路由表里的常量而不改这张表，立刻红；
+// 要改这张表，得对着 Biu 的源码看一眼——那正是我们要的。
+//
+// 而「两两不同」断不了的是**换反了**（实心画成线框）——所以这一条同时断
+// **线框的那一枚真的是 `-line`、实心的那一枚真的是 `-fill`**。
+func TestTheSideMenuIconsMatchBiu(t *testing.T) {
+	byTitle := map[string]Route{}
+	for _, rt := range routes {
+		if rt.InMenu {
+			byTitle[rt.Title] = rt
+		}
+	}
+	for _, want := range buiMenuIcons {
+		rt, ok := byTitle[want.title]
+		if !ok {
+			t.Errorf("路由表里没有「%s」这一项", want.title)
+			continue
+		}
+		if rt.Icon != want.line {
+			t.Errorf("「%s」的线框图标是 %q，want %q（照 Biu 的源码）",
+				want.title, rt.Icon, want.line)
+		}
+		if rt.ActiveIcon != want.fill {
+			t.Errorf("「%s」的实心图标是 %q，want %q（照 Biu 的源码）",
+				want.title, rt.ActiveIcon, want.fill)
+		}
+	}
+	// 每一个进菜单的都**得有两枚**：漏一枚，那一项在侧栏里就没有图标（或者
+	// 选中了也换不掉），而画面上只是「那一项比别人少点东西」。
+	for _, rt := range routes {
+		if !rt.InMenu {
+			continue
+		}
+		if rt.Icon == "" || rt.ActiveIcon == "" {
+			t.Errorf("「%s」没有配齐两枚图标（线框 %q / 实心 %q）",
+				rt.Title, rt.Icon, rt.ActiveIcon)
+		}
 	}
 }

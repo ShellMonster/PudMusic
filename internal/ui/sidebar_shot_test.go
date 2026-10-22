@@ -39,6 +39,9 @@ func TestRenderSidebarShots(t *testing.T) {
 			//
 			// ⚠️ 提示要**指针停够 0.6 秒**才出（`mygo/ui/tooltip.go` 的
 			// tooltipDelay），所以是 Move + Advance + Frame。
+			//
+			// ⚠️ 找的是**无障碍名字**（`Label`），不是画面上的字：折叠态那一列
+			// 摆的是图标，画面上**一个字都没有**了（票 #164 之后）。
 			{
 				st := app.DefaultSettings("")
 				st.SideMenuCollapsed = true
@@ -46,9 +49,9 @@ func TestRenderSidebarShots(t *testing.T) {
 					withPrefs(mygoui.Preferences{ReduceMotion: true, TextScale: 1}))
 				tt := b.tt
 				tt.Frame()
-				r, ok := tt.Find("下")
+				r, ok := tt.Find("下载记录")
 				if !ok {
-					t.Fatalf("折叠态的侧栏上没有「下载记录」那一个字，文字有 %q", tt.Texts())
+					t.Fatalf("折叠态的侧栏上没有「下载记录」那一格，文字有 %q", tt.Texts())
 				}
 				tt.Move(r.X+r.W/2, r.Y+r.H/2)
 				tt.Advance(700 * time.Millisecond)
@@ -81,6 +84,23 @@ func TestRenderSidebarShots(t *testing.T) {
 				tt.Move(700, 500)
 				homeFrame(tt)
 				save(t, dir, "03-长收藏夹名-"+name+".png", tt)
+				b.Close()
+			}
+
+			// 04 **展开态的侧栏**：左上角那一条品牌（40×40 的 logo + 24px 的
+			// 「BiuGo」）和下面那一列带图标的菜单项。票 #164 的主体就是这一张。
+			//
+			// ⚠️ 指针停在**内容区**上，别停在侧栏里：停在菜单项上会叠一层悬停底，
+			// 那一格的颜色就不是「平时的样子」了。
+			{
+				b := newTestShell(t, systemIsDark(dark), withSettings(app.DefaultSettings("")),
+					withPrefs(mygoui.Preferences{ReduceMotion: true, TextScale: 1}))
+				tt := b.tt
+				b.s.navigate("/")
+				waitFrames(t, tt, "首页画出来了", func() bool { return tt.HasText("播放") })
+				tt.Move(600, 400)
+				homeFrame(tt)
+				save(t, dir, "04-展开侧栏-"+name+".png", tt)
 				b.Close()
 			}
 		})

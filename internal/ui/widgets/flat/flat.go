@@ -37,6 +37,21 @@ const (
 	pressA = 0.16
 )
 
+const (
+	// labelPad 是「图标 + 文字」那一类按钮的**左**内边距。
+	//
+	// ⚠️ **16 是照上游的形状算出来的**：上游那一行的图标左边是
+	// `ScrollContainer` 的 `px-4`（16）加上按钮的 `px-2`（8），一共 24；我们这边
+	// 没有那一层滚动内边距（侧栏的内容区是**通栏**的），而图标要跟左上角那个
+	// logo 对齐——logo 也在 16 处——所以这一格取 16。
+	//
+	// 差的那 8 是我们和上游的**结构**差别（上游的侧栏内容区有一层 16 的内边距，
+	// 我们没有），不是抄漏了。
+	labelPad = 16
+	// labelGap 是图标格和文字之间的缝（上游 HeroUI 按钮的 `gap-2`）。
+	labelGap = 8
+)
+
 // Button 是一个无描边、无常驻底色的按钮，画着 label。
 //
 // 🔴 **别给它补 `Label(label)`**：可见的字就是它的无障碍名字，补上去会多出一个
@@ -68,6 +83,48 @@ func Button(c *ui.Context, label string) ui.Element {
 // `iconset.Must`——同一个名字永远是同一个指针，两边不会各画各的。
 func IconButton(c *ui.Context, svg *ui.SVG, label string, font float32) ui.Element {
 	b := Button(c, "").Label(label)
+	b.Children(func() { ui.Icon(c, svg).FontSize(font) })
+	return b
+}
+
+// IconLabelButton 是一个「图标 + 文字」的扁平按钮：图标在一个 cell×cell 的
+// **格子**里，文字在格子右边。
+//
+// 格子是给「图标要成列」的那些地方用的（侧栏菜单项）：图标自己只有 font 那么
+// 大（上游 18），而上游把那一格留成了 40×40（HeroUI 的 Button md 是 `h-10`，
+// 折叠态那个图标格也是 `h-10 w-10`）——**格子才是那一行的高度**，图标在格子
+// 里居中。
+//
+// 内容**左对齐**（`Justify(Start)`）：框架的按钮默认把内容居中，而上游那一行是
+// `justify-start`——图标要成列，内容居中就没有列了。
+//
+// 🔴 **别给它补 `Label(label)`**：可见的字就是它的无障碍名字（同 `Button`）。
+func IconLabelButton(c *ui.Context, svg *ui.SVG, label string, font, cell float32) ui.Element {
+	b := Button(c, "").
+		Height(cell).
+		Padding(0, labelPad).
+		Gap(labelGap).
+		Radius(c.Theme().Radius).
+		Justify(ui.Start)
+	b.Children(func() {
+		ui.Column(c).Size(cell, cell).AlignItems(ui.Center).Justify(ui.Center).
+			Children(func() { ui.Icon(c, svg).FontSize(font) })
+		ui.Text(c, label).SingleLine()
+	})
+	return b
+}
+
+// IconCellButton 是一个**只有图标格**的扁平按钮：整个按钮就是那一个 cell×cell
+// 的格子，图标在它中间。
+//
+// 这是折叠态那一列要的形状（上游折叠态摆的是一个 `h-10 w-10` 的 Avatar，
+// 图标是它的 fallback）。和 `IconButton` 的差别是**尺寸**：那一个由调用方的
+// `Size` / `Padding` 撑，这一个把尺寸定死成格子。
+//
+// ⚠️ **内边距必须清零**：`Button` 默认给的是 `Padding(6, 14)`，而格子里只有
+// 一枚 font 那么大的图标——14 的内边距会把 40 的格子掏成 12 宽，图标直接被裁。
+func IconCellButton(c *ui.Context, svg *ui.SVG, label string, font, cell float32) ui.Element {
+	b := Button(c, "").Label(label).Size(cell, cell).Padding(0, 0)
 	b.Children(func() { ui.Icon(c, svg).FontSize(font) })
 	return b
 }
