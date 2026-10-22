@@ -40,28 +40,25 @@ FAIL，逐个包看 `ok`。
   按在旧坐标上。症状是「点了没反应」，不是「等不到」。
 - **低负载下绿不算修好。** 这套测试在 load 9~10 时会飘，load 8 以下才作数。
   判「飘红是不是真 bug」之前先看一眼机器负载。
-- **复验用「加压 3 次」，不是「连跑 10 次」。** 这条规矩要的是**堆和 GC 压力**
-  ——整包 10 次挂 3 次、单独跑 0 次，差别就在「整包那些堆和 GC 压力」。
-  `GOGC=10` 直接造那个压力，一次顶十次：实测整包 3 次 `GOGC=10` 飘了 2 次
-  （`TestTheHoverLayerCoversOnlyTheCover`、
-  `TestEveryRouteShowsARealRowOrSaysWhichTicketIsMissing//follow`），
-  而整包 10 次要 26 分钟、还撞 `go test` 默认的 600 秒超时。
+- **改了界面行为要加压复验，但只跑自己改的那几处。**
+
+  这条规矩要的是**堆和 GC 压力**——整包跑会飘、单独跑不飘，差别就在压力。
+  `GOGC=10` 能造出那个压力，但**必须用 `-run` 过滤到自己的改动范围**：
 
   ```sh
-  go build ./... && go vet ./... && go test ./...   # 默认一次
-  ```
+  # 默认验收：一次
+  go build ./... && go vet ./... && go test ./...
 
-  **改了界面行为的票，加压复验只跑自己改的那几处**（`-run` 过滤），
-  **不要整包跑**——整包一轮在负载下就要 62~298 秒：
-
-  ```sh
+  # 改了界面行为：加压复验，只跑自己改的那几处
   GOGC=10 go test ./internal/ui/ -count=3 -timeout 5m -run 'TestPlayBar|TestVolume'
   ```
 
-  ⚠️ **整包的 `GOGC=10` 扫描是「一次性排查手段」，不是每张票的验收项。**
-  它抓到的是**既有测试**的飘（`TestTheHoverLayerCoversOnlyTheCover`、
-  `TestEveryRouteShowsARealRowOrSaysWhichTicketIsMissing//follow` 那些），
-  和当票的代码无关。
+  ⚠️ **不要整包跑。** 整包一轮在负载下要 62~298 秒，×3 就是十几分钟一票；
+  而且它压出来的飘红**每次都是同样那几条既有测试**
+  （`TestTheHoverLayerCoversOnlyTheCover`、
+  `TestEveryRouteShowsARealRowOrSaysWhichTicketIsMissing//follow`），
+  **跟当票的代码没关系**。整包扫描是**一次性排查手段**（那张票叫「排查：哪些测试天生会飘」），
+  **不是每张票的验收项**。
 
   ⚠️ **压出来别的票的飘红，不要顺手修。** 那是另一个问题，另开一张票；
   顺手修会让这一票越滚越大、评审也说不清哪些是有意的。
