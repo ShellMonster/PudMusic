@@ -87,6 +87,42 @@ func IconButton(c *ui.Context, svg *ui.SVG, label string, font float32) ui.Eleme
 	return b
 }
 
+// IconButtonAccent 是 IconButton 加上「**悬停时图形变主色**」。
+//
+// 上游 `src/components/icon-button/index.tsx:16`：
+// `className={twMerge("hover:text-primary text-inherit", className)}` —— 悬停时
+// 图形从前景色变成主色（报告 §3.5）。**不只是底下多一层淡底**：图形本身换色。
+//
+// 🔴 **染的是图形自己，不是按钮**：按钮上可能还有调用方给的颜色（赞 / 收藏 /
+// 音量那几枚各有一档），染在按钮上会被那些 `.TextColor(...)` 盖掉——而盖掉的
+// 那一半正好是「悬停变主色」要的东西。
+//
+// ⚠️ **主色当字色那一档取 `ink.AccentOn`**：浅色下主色是 #1ed760，压在白底上
+// 只有 1.9:1（`widgets/ink` 的文件头写着这件事），所以取那个「读得出来」的变体；
+// 深色下就是主色本身。理由和 `internal/ui/flatbutton.go` 的 `flatCurrent` 是同一
+// 条：**主色当底和主色当字是两件事**。
+//
+// ⚠️ **禁用的状态必须从这里给**，不能靠调用方链 `.Disabled(...)`：悬停是**建元素
+// 的时候**问的（`Hovered()` 在禁用的键上恒为 false，见 `mygo/ui/input.go:1111`），
+// 而链式调用是在返回**之后**才把禁用设上去——问早了，一枚**禁用**的键会用主色
+// 告诉用户「这里点得动」（票 #217 的评审查出来过同款的一条）。
+//
+// ⚠️ **它只给「底是应用底色」的地方用**：主色当字色那一档是按 `t.Background`
+// 算的，而满屏播放器那一行的底是**压暗过的封面**——浅色下那一档压在上面只有
+// 1.0:1（等于看不见，见票 #217 的评审）。所以那一行**不用这一档**。
+func IconButtonAccent(c *ui.Context, svg *ui.SVG, label string, font float32, disabled bool) ui.Element {
+	b := Button(c, "").Label(label).Disabled(disabled)
+	b.Children(func() {
+		ic := ui.Icon(c, svg).FontSize(font)
+		// ⚠️ **问的是按钮的悬停**：图标的悬停要问它自己，而它那时候还没长在按钮
+		// 里面（`Children` 的回调是在建的时候跑的），问出来的是「它在按钮外面」。
+		if !disabled && b.Hovered() {
+			ic = ic.TextColor(ink.AccentOn(c.Theme()))
+		}
+	})
+	return b
+}
+
 // IconLabelButton 是一个「图标 + 文字」的扁平按钮：图标在一个 cell×cell 的
 // **格子**里，文字在格子右边。
 //

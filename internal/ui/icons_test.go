@@ -71,9 +71,12 @@ func TestEveryIconWeNamedIsThereAndItParses(t *testing.T) {
 //   - 盘上有、表里没有 → **孤儿**（这一条要抓的）
 //   - 表里有、盘上没有 → 启动时就 panic（`mustParseIcons`），由上面那条管
 //
-// ⚠️ 「同一个文件两个名字」是**允许**的（`iconPageList` 和 `iconQueue` 指的
-// 都是 `Editor/list-radio.svg`——上游那两个按钮确实用同一枚图标），所以这里比
+// ⚠️ 「同一个文件两个名字」是**允许**的（名字跟着那个按钮的用处走），所以这里比
 // 的是集合而不是个数。
+//
+// ⚠️ **「播放列表」和「分集」现在用的是两个不同的文件**（票 #220）：上游那边
+// 「播放列表」是 `RiPlayListLine`、分集是 `RiListRadio`，两个入口用同一张图的话
+// 用户分不出哪个是哪个（见 `TestThePlaylistKeyAndThePartKeyAreDifferentGlyphs`）。
 func TestEveryIconOnDiskHasAName(t *testing.T) {
 	dir := filepath.Join("iconset", "icons")
 	var onDisk []string
@@ -932,9 +935,9 @@ func TestTheResourceFilesCarryNoTransparentMargin(t *testing.T) {
 // 的**症状**是「读屏软件念不出这个按钮」：界面上它好好的（图标在、点得动、
 // 也有 Tooltip），无头 Tester 也照样全绿，只有用读屏的人才发现。
 //
-// 所以这里扫**每一个** `iconButton(` / `iconButtonPrimary(` 调用，断言第三个
-// 参数（非障碍名字）是非空的字符串字面量。空串、变量、或者干脆少一个参数，都
-// 当场报错并报出文件:行号。
+// 所以这里扫**每一个** `iconButton(` / `iconButtonPrimary(` / `iconButtonPlay(` /
+// `iconKey(` / `flatIconButton(` 调用，断言第三个参数（非障碍名字）是非空的字符串
+// 字面量。空串、变量、或者干脆少一个参数，都当场报错并报出文件:行号。
 func TestEveryIconButtonNamesItself(t *testing.T) {
 	matches, err := filepath.Glob("*.go")
 	if err != nil {
@@ -964,8 +967,14 @@ func TestEveryIconButtonNamesItself(t *testing.T) {
 			//
 			// ⚠️ **`iconButtonPlay` 也要扫**（票 #217 那一枚）：它同样是「只有图标的
 			// 按钮」，同样得有个无障碍名字。
+			//
+			// ⚠️ **`iconKey` 也要扫**（票 #220 那一族）：它是「图标键」——播放条上
+			// 那些悬停时图形会变主色的键都走它（`iconButton` 的那个「图标键」
+			// 变体）。它同样得有个无障碍名字，而**它挪走了就等于掉出了这张网**：
+			// 只扫 `iconButton` 的话，这一票新写的那些图标键一个都管不到。
 			if !ok || (id.Name != "iconButton" && id.Name != "iconButtonPrimary" &&
-				id.Name != "iconButtonPlay" && id.Name != "flatIconButton") {
+				id.Name != "iconButtonPlay" && id.Name != "iconKey" &&
+				id.Name != "flatIconButton") {
 				return true
 			}
 			checked++

@@ -41,6 +41,17 @@ const (
 	coverSize     = 56
 	coverGap      = 8
 
+	// coverRadius 是播放条上那张封面（和它悬停时那层黑罩）的圆角：**6**。
+	//
+	// 上游是 `radius="md"`（`layout/playbar/left/index.tsx:31-41` 的
+	// `<Image radius="md" …>`）和浮层那一层的 `rounded-md`（`:42-44`）——Tailwind
+	// 的 `md` 是 6。
+	//
+	// ⚠️ **它不是全局那个 `radius.default: 8`**：那是个**令牌**，用户在设置页
+	// 能调它（`app.Settings.BorderRadius` → `t.Radius`），改了它整个界面跟着变。
+	// 所以**只有这一处封面**用 6（票 #220 / 报告 §3.3、§3.4）。
+	coverRadius = 6
+
 	// trackRowGap 是歌名下面那几行之间的缝（UP 名 / 出错那一句）。
 	//
 	// 上游是 `space-y-1`（`playbar/left/index.tsx:46`）= **4**。
@@ -363,7 +374,7 @@ func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 		// 播放列表抽屉的开关（原来在顶栏，见 navbar.go）。上游它就在右边这一组
 		// 的第三个（`playbar/right/index.tsx:16`），而顶栏那一枚是当初右边摆不下
 		// 时挪过去的——现在右边腾得开，两处只能留一个，留两个就会不一致。
-		if s.withTip(c, iconButton(c, iconQueue, "播放列表", iconMd).
+		if s.withTip(c, iconKey(c, iconQueue, "播放列表", iconMd, false).
 			Size(iconHitMd, iconHitMd).Padding(0, 7), drawerTip(s.drawerOpen)).Clicked() {
 			s.drawerOpen = !s.drawerOpen
 		}
@@ -382,7 +393,7 @@ func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 		// 倍速紧挨着音量：两个都是「听感」旋钮（上游也是挨着的）。
 		s.viewRate(c, st)
 
-		if s.withTip(c, iconButton(c, iconEnqueue, "加歌", iconMd).
+		if s.withTip(c, iconKey(c, iconEnqueue, "加歌", iconMd, false).
 			Size(iconHitMd, iconHitMd).Padding(0, 7), "把本地文件加到队列末尾").Clicked() {
 			s.pickAndEnqueue()
 		}
@@ -652,7 +663,7 @@ func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
 	// `RiStarFill/Line size={18}`（`components/music-fav-button/index.tsx:55-56`），
 	// 而**播放条上全部图标键都是 18**。改之前是 14（`iconSm`）——比上游小 4 像素，
 	// 在 32 的盒子里每边留 9，看起来像「画糊了」。
-	btn := s.withTip(c, iconButton(c, favIcon(faved), "收藏", iconMd).
+	btn := s.withTip(c, iconKey(c, favIcon(faved), "收藏", iconMd, false).
 		Size(iconHitMd, iconHitMd).Padding(0, 7), favTooltip(faved))
 	if faved {
 		// ⚠️ **只在这一支设颜色**：没收藏的那一支一个字都不改，好让「默认那个颜色」
@@ -694,7 +705,7 @@ func favTooltip(faved bool) string {
 // 五枚键在一条线上会看出参差——而参差正是「这一枚是从别处搬来的」在画面上
 // 唯一的痕迹。
 func (s *Shell) viewDownloadButton(c *ui.Context, st app.State) {
-	if s.withTip(c, iconButton(c, iconDownload, "下载", iconMd).
+	if s.withTip(c, iconKey(c, iconDownload, "下载", iconMd, false).
 		Size(iconHitMd, iconHitMd).Padding(0, 7), "把正在放的这首下载到本地").Clicked() {
 		it, ok := s.app.PlayingItem()
 		if !ok {
@@ -873,7 +884,12 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 	wrap := ui.Row(c).Key("playbar-cover").Size(coverSize, coverSize)
 	wrap.Children(func() {
 		// 共享元素转场留在里面那张图上（它才是转场的那一半）。
-		imgcache.View(c, s.images, st.CoverURL, coverSize, coverSize).
+		//
+		// ⚠️ **圆角是 6，不是主题那一个 8**（票 #220 / 报告 §3.4）：上游那张封面
+		// 是 `radius="md"`（`layout/playbar/left/index.tsx:31-41`），而全局那个
+		// `radius.default: 8` 是**令牌**——用户在设置里能调它，动它整个界面跟着
+		// 变，所以只有这一处封面用 6。
+		imgcache.ViewRadius(c, s.images, st.CoverURL, coverSize, coverSize, coverRadius).
 			Label("当前封面").
 			Transition(coverTransition(coverIdentity(s, st)))
 
@@ -882,19 +898,27 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 			// （`layout/playbar/left/index.tsx:38-41`，图标是 `RiArrowUpSLine`）。
 			// 没有这一层的话，用户不知道那张封面是能点的。
 			//
-			// 那一层浮层上是**白**的半透明，而画布是深色遮罩——所以这里给了它
-			// 一个具体的颜色，不跟主题走（跟主题走的话深色主题下会是浅灰，
-			// 压在黑罩上反而看不清）。这是**唯一**一处图标不该跟主题走的地方。
+			// 🔴 **箭头是主色绿**（票 #220 / 报告 §3.3）：上游那一层是
+			// `text-primary`（`layout/playbar/left/index.tsx:42-44`），而我们原来
+			// 给的是白 92%——**明暗正好和上游反过来**。
+			//
+			// ⚠️ **取的是主色本身，不是 `ink.AccentOn` 那一档**：那一档是按**应用
+			// 底色**算的（浅色下是一个深绿 rgb(18,114,52)），而这里压的是**半黑
+			// 罩**——罩子底下是封面那张图，深绿压在上面读不出来。罩子永远是暗的，
+			// 所以这里要的是**亮的那一档主色**。
 			//
 			// 🔴 **箭头是 32**（票 #173 / G26）：原来是 20——在 56×56 的封面
 			// 正中画一枚 20 的箭头，它小得像是「画糊了」，而不是「这里可以点开」。
 			// 上游那一枚是 `size={32}`，而它要装进的就是这个 56 的方框。
 			//
+			// ⚠️ **圆角是 6**（票 #220 / 报告 §3.3）：上游那一层是 `rounded-md`，
+			// 而它要**和封面那一块对齐**（两边都是 6 才看得出来是一张）。
+			//
 			// PassThrough：浮层这一层和里面那个图标都不接点击。
-			ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Radius(c.Theme().Radius).
+			ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Radius(coverRadius).
 				PassThrough().Center().Background(ui.RGBA(0, 0, 0, 0.5)).Children(func() {
 				ui.Icon(c, icon(iconFullscreen)).FontSize(32).
-					TextColor(ui.RGBA(255, 255, 255, 0.92)).
+					TextColor(c.Theme().Accent).
 					PassThrough()
 			})
 		}
@@ -936,17 +960,15 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 // 还留着 7 的话内容框只剩 18，那枚图形自己就被裁掉 4 像素（而**界面上看不出坏了**
 // ——它只是小了一圈）。
 func (s *Shell) viewPrevButton(c *ui.Context) {
-	if s.withTip(c, iconButton(c, iconPrev, "上一首", iconSkip).
-		Size(iconHitMd, iconHitMd).Padding(0, 5).
-		Disabled(!s.app.CanPrev()), "上一首").Clicked() {
+	if s.withTip(c, iconKey(c, iconPrev, "上一首", iconSkip, !s.app.CanPrev()).
+		Size(iconHitMd, iconHitMd).Padding(0, 5), "上一首").Clicked() {
 		s.app.Prev()
 	}
 }
 
 func (s *Shell) viewNextButton(c *ui.Context) {
-	if s.withTip(c, iconButton(c, iconNext, "下一首", iconSkip).
-		Size(iconHitMd, iconHitMd).Padding(0, 5).
-		Disabled(!s.app.CanNext()), "下一首").Clicked() {
+	if s.withTip(c, iconKey(c, iconNext, "下一首", iconSkip, !s.app.CanNext()).
+		Size(iconHitMd, iconHitMd).Padding(0, 5), "下一首").Clicked() {
 		s.app.Next()
 	}
 }
@@ -966,7 +988,7 @@ func (s *Shell) viewNextButton(c *ui.Context) {
 func (s *Shell) viewPlayMode(c *ui.Context, st app.State) {
 	// 四档各配一个图标（Biu 的 `getPlayModeList`，逐个照它的 `icon` 那一项），
 	// 悬停那句话仍然报的是**当前这一档**。
-	btn := s.withTip(c, iconButton(c, playModeIcon(st.PlayMode), "播放模式", iconMd).
+	btn := s.withTip(c, iconKey(c, playModeIcon(st.PlayMode), "播放模式", iconMd, false).
 		Size(iconHitMd, iconHitMd).Padding(0, 7),
 		st.PlayMode.Label()+"："+st.PlayMode.Desc()+"（点一下换，右键看全部）")
 

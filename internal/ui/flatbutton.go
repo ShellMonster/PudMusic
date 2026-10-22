@@ -65,6 +65,15 @@ func flatIconButton(c *ui.Context, name, label string, font float32) ui.Element 
 	return flat.IconButton(c, icon(name), label, font)
 }
 
+// flatIconButtonAccent 是 flatIconButton 加上「**悬停时图形变主色**」。
+//
+// 上游 `IconButton` 的 `hover:text-primary`（报告 §3.5）。理由、颜色那一档怎么取、
+// 以及「禁用的状态必须从这里给」的原因，都在 `widgets/flat` 的 `IconButtonAccent`
+// 上面写着。
+func flatIconButtonAccent(c *ui.Context, name, label string, font float32, disabled bool) ui.Element {
+	return flat.IconButtonAccent(c, icon(name), label, font, disabled)
+}
+
 // flatIconLabelButton 是一个「图标 + 文字」的扁平按钮：图标在一个 cell×cell 的
 // 格子里，文字在格子右边，内容**左对齐**。
 //
@@ -132,6 +141,27 @@ func flatCurrent(c *ui.Context, e ui.Element) ui.Element {
 		return e.Background(flatSelected(t)).TextColor(t.Accent)
 	}
 	return e.Background(t.Accent.Alpha(0.14))
+}
+
+// flatSolid 是「这一项正选中」的**另一种**画法：一块**实心主色**，字取
+// `t.AccentText`。
+//
+// # 它和 `flatCurrent` 是两件事
+//
+// `flatCurrent` 是「中性灰底 + 主色的字」（侧栏菜单那一格），而**上游倍速浮层里
+// 那个当前档是实心的**：`color="primary" variant="solid"`
+// （`components/music-rate/index.tsx:26-46`，票 #220 / 报告 §3.10）。
+//
+// 差在哪：实心主色底上，字**不能**是主色（绿字压绿底 = 同一支颜色压自己，
+// 浅色下 1.55:1，见 `flatCurrent` 那段）——所以字取 `t.AccentText`：那是框架
+// 按主色的亮度挑出来的黑或白（`mygo/ui` 的 `applyAccent`），**在主色底上一定
+// 读得出来**。
+//
+// 底是主色、字是 `AccentText`——这和「主色当字色」是两回事（后者取
+// `ink.AccentOn`，那是**浅底**上要用的那一档）。
+func flatSolid(c *ui.Context, e ui.Element) ui.Element {
+	t := c.Theme()
+	return e.Background(t.Accent).TextColor(t.AccentText)
 }
 
 // flatSelected 是选中态那一层**中性**的底。

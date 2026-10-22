@@ -44,7 +44,6 @@ package ui
 import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
 )
@@ -98,13 +97,16 @@ const (
 	iconLike       = "System/thumb-up-line.svg"     // 赞（还没赞）
 	iconLikeFilled = "System/thumb-up-fill.svg"     // 赞（已经赞了）
 
-	// iconPageList 是播放条上那个分集抽屉的入口。
+	// iconPageList 是播放条上那个**分集抽屉**的入口。
 	//
-	// ⚠️ **它和 `iconQueue` 是同一张图，这不是笔误**：Biu 那边播放列表的开关
-	// （`layout/playbar/right/index.tsx` 的 `OpenPlaylistDrawerButton`）和分集的
-	// 入口（`layout/playbar/left/page-list.tsx:25`）用的都是 `<RiListRadio size={18}/>`。
-	// 两个按钮不是一回事（一个开队列、一个开分集），所以这里给**两个名字**——
-	// 名字得跟着那个按钮的用处走，`iconQueue` 的注释才不至于替分集按钮说它不是队列。
+	// 逐字照上游：`RiListRadio`（`layout/playbar/left/page-list.tsx:25` 的
+	// `<RiListRadio size={18}/>`）。
+	//
+	// ⚠️ **它和 `iconQueue` 是两张不同的图**（票 #220 / 报告 §3.7）：上游那边
+	// 「播放列表」用的是 `RiPlayListLine`（`components/open-playlist-drawer-button/
+	// index.tsx:10-13`），和分集这一枚**不是同一个图形**——两个按钮一个开队列、
+	// 一个开分集，用同一张图的话用户分不出哪个是哪个。改之前我们两个都用了这张
+	// `Editor/list-radio.svg`，那是一个**看得见的错**（不是「静默」的那一种）。
 	iconPageList = "Editor/list-radio.svg"
 
 	// ── 播放模式四档 ──
@@ -130,7 +132,16 @@ const (
 	// ── 播放条右边那一组 ──
 	// ⚠️ 「播放列表」原来在顶栏那一列里，票 #127 跟着上游搬到了播放条
 	//（`layout/playbar/right/index.tsx:16`），所以它归在这一列而不是顶栏那一列。
-	iconQueue = "Editor/list-radio.svg" // 播放列表（抽屉的开关）
+	//
+	// 图形逐字照上游：`RiPlayListLine`（`components/open-playlist-drawer-button/
+	// index.tsx:10-13` 的 `<RiPlayListLine size={18}/>`）——
+	// **和分集那一枚（`iconPageList` 的 `RiListRadio`）不是同一张图**（票 #220 /
+	// 报告 §3.7）。改之前我们两枚都用 `Editor/list-radio.svg`，于是用户看见的是
+	// **两个一模一样的图形**，而它们一个开队列、一个开分集。
+	//
+	// ⚠️ **这张图是这一票引进来的**（之前 `iconset` 里没有它）：
+	// `gh api repos/Remix-Design/RemixIcon/contents/icons/Media/play-list-line.svg`。
+	iconQueue = "Media/play-list-line.svg" // 播放列表（抽屉的开关）
 
 	// ── 队列抽屉头 ──
 	// 逐字照 Biu 的 `components/music-playlist-drawer/index.tsx:137-141`：
@@ -462,6 +473,26 @@ func iconButton(c *ui.Context, name, label string, font float32) ui.Element {
 	return flatIconButton(c, name, label, font)
 }
 
+// iconKey 造一枚**图标键**：只画一个图标的扁平按钮，**悬停时图形变主色**。
+//
+// 上游 `src/components/icon-button/index.tsx:16`：
+// `className={twMerge("hover:text-primary text-inherit", className)}` —— 悬停时
+// 图形**从前景色变成主色**，不只是底下多一层淡底（报告 §3.5）。
+//
+// ⚠️ **它和 `iconButton` 是两件事**：上游那个 `IconButton` 是**共享组件**，而我们
+// 把「底是应用底色」和「底是压暗过的封面」分成两种情况（见下面那段），所以
+// **按调用点挑**，不是全局的。播放条上那些图标键走它，满屏播放器那一行不走。
+//
+// ⚠️ **禁用的状态必须从这里给**（`disabled` 那一栏），不能靠调用方链
+// `.Disabled(...)`：悬停是**建元素的时候**问的（`Hovered()` 在禁用的键上恒为
+// false），而链式调用是在返回**之后**才把禁用设上去——问早了，一枚**禁用**的键
+// 会用主色告诉用户「这里点得动」（票 #217 的评审查出来过同款的一条）。
+//
+// 理由、颜色那一档怎么取，都在 `widgets/flat` 的 `IconButtonAccent` 上面写着。
+func iconKey(c *ui.Context, name, label string, font float32, disabled bool) ui.Element {
+	return flatIconButtonAccent(c, name, label, font, disabled)
+}
+
 // iconButtonPlay 是播放/暂停那一枚：**上游那一枚**。
 //
 // 上游（`components/music-play-control/index.tsx:23-25`）：
@@ -500,23 +531,14 @@ func iconButton(c *ui.Context, name, label string, font float32) ui.Element {
 // 判据在 `playbar_layout_test.go` 的 `TestThePlayKeyIsBigEnoughToHit`：
 // 那一枚现在量的是「播放条底色上那一片墨迹」，不再是「主色底上那一片墨迹」。
 func iconButtonPlay(c *ui.Context, name, label string, font float32, disabled bool) ui.Element {
-	b := flatIconButton(c, name, label, font).Disabled(disabled)
-	// 悬停时图形变主色。
+	// ⚠️ **它就是 `iconKey`**：悬停变主色、禁用的状态由这里给，两条都在那边写着。
+	// 写成两个是因为这一枚的**形状**（48×48、图形正好填满、底下什么都没有）是
+	// 它自己的事，而「悬停变主色」是所有图标键共有的那一条。
 	//
-	// ⚠️ **在建元素的时候问 `Hovered()`**：框架把悬停那一层挂在 `styleFn` 上，
-	// 而那个我们拿不到——`flat` 那个包里的悬停底也是这么问的（见
-	// `widgets/flat/flat.go` 的 `feel`）：**指针位置不进事件循环就不变**，于是
-	// 画面上的效果一样。
-	//
-	// 🔴 **问之前先禁用**（上面那句 `Disabled`）：`Hovered()` 在**禁用**的键上恒为
-	// false（`mygo/ui/input.go:1116`），所以**先禁用、再问悬停**，一枚禁用的键
-	// 问出来就是 false。而反过来（先问悬停、后禁用）问出来的是「它悬停着」——
-	// 一枚**禁用**的键用主色告诉用户「这里点得动」。
-	// 禁不启用是**状态**决定的（没歌的时候那一枚是禁用的），所以由调用方给。
-	if b.Hovered() {
-		b = b.TextColor(ink.AccentOn(c.Theme()))
-	}
-	return b
+	// ⚠️ **禁不启用由调用方给**（`disabled` 那一栏）：那是**状态**决定的（没歌的
+	// 时候那一枚是禁用的），而它必须在**问悬停之前**就定下来——问早了，一枚禁用
+	// 的键会用主色告诉用户「这里点得动」（见 `iconKey` 那段）。
+	return iconKey(c, name, label, font, disabled)
 }
 
 // iconButtonPrimary 是顶栏那个**登录**键：一枚实心主色的方块。

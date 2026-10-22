@@ -2289,4 +2289,34 @@ var Items = []Item{
 			"TestTheToastMessagesKeepTheirBrackets",
 		},
 	},
+	{
+		// 归「双平台」那一组：这一票动的是**播放条上那些控件的颜色与反馈**
+		// （悬停、圆角、倍速浮层、音量浮层、两枚图形的区别）。
+		//
+		// 🔴 **这一族的错法全是「静默」的**：图形悬停不变色、圆角差了两像素、
+		// 当前档还是灰底绿字、音量浮层比上游小一号——**没有一样会报错**，
+		// 界面只是「不太对」。
+		Category: Platform,
+		// 票 #220（报告 §3.3 §3.4 §3.5 §3.6 §3.7 §3.9 §3.10）：播放条上的
+		// 颜色与反馈一批。
+		//
+		// ⚠️ **图标键悬停变主色只给播放条上那些**（满屏播放器那一行的底是压暗过
+		// 的封面，主色当字色那一档压在上面等于看不见，见票 #217 的评审）。
+		Spec: "播放条上的**图标键悬停时图形变主色**（不是只多一层淡底；禁用着的键不变）；**封面和它悬停那层黑罩的圆角是 6**、罩上的箭头是主色（全局圆角令牌不动）；**倍速浮层**：浮层 60、那七行 44（左右没有内边距，「0.75x」看得全）、当前那一档是实心主色底 + `t.AccentText` 的字；**音量浮层**：滑块 32×160、旋钮 16、百分比 12 号字；**「播放列表」和「分集」是两个不同的图形**",
+		Tests: []string{
+			// 悬停变主色（深浅两套），以及禁用的那一枚不变。
+			"TestTheIconKeysTurnAccentOnHover",
+			"TestTheDisabledIconKeysDoNotTurnAccent",
+			// 封面那一块：圆角 6、箭头是主色。
+			"TestTheCoverHoverOverlayIsAccentAndRoundedSix",
+			"TestThePlayBarCoverIsRoundedSix",
+			// 倍速浮层：60 / 44 / 实心当前档；「0.75x」看得全（既有那条）。
+			"TestTheRateMenuIsSixtyWideWithASolidCurrentRow",
+			"TestRateMenuLabelsAreNotTruncated",
+			// 音量浮层的尺寸。
+			"TestTheVolumePopoverMatchesTheUpstreamSizes",
+			// 两枚入口不是同一张图。
+			"TestThePlaylistKeyAndThePartKeyAreDifferentGlyphs",
+		},
+	},
 }

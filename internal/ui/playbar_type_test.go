@@ -271,14 +271,18 @@ func titleInk(t *testing.T, bold bool) int {
 // ⚠️ **判据是画面上那枚箭头的墨迹，不是代码里的字号**：图标是 SVG，框的大小是
 // 摆出来的，而「画出来多大」才是用户看见的。
 //
-// ⚠️ **量的是「亮的那一片」**：悬停时封面盖上一层 50% 的黑，而箭头是 92% 的白
-// ——这一块里只有箭头是亮的。（封面的占位框自己有一圈亮边，所以那一块要**往里
+// ⚠️ **量的是「主色像素」，不是「亮像素」**（票 #220）：那一枚箭头**改成主色了**
+// （上游是 `text-primary`），而主色绿在三个通道上都不到 180——用「亮」当判据的话，
+// 主色的箭头一个都数不到。
+//
+// ⚠️ **量的是「那一块里的主色像素」**：悬停时封面盖上一层 50% 的黑，而箭头是主色
+// ——这一块里只有箭头是主色。（封面的占位框自己有一圈亮边，所以那一块要**往里
 // 缩 8 像素**再量。）
 //
-// 32 的那枚箭头有 60 个亮像素（16 宽 × 10 高）；20 的那枚只有 22 个（10 × 6）——
+// 32 的那枚箭头有 60 个像素（16 宽 × 10 高）；20 的那枚只有 22 个（10 × 6）——
 // 门槛放在 40，两头都离得开。
 func TestTheCoverHoverArrowIsBigEnough(t *testing.T) {
-	tt, _ := playbarTester(t, barState(), 1200, 0, false)
+	tt, s := playbarTester(t, barState(), 1200, 0, false)
 	cover, ok := tt.Find("当前封面")
 	if !ok {
 		t.Fatalf("播放条上找不到封面，画面上的字：%q", tt.Texts())
@@ -291,9 +295,10 @@ func TestTheCoverHoverArrowIsBigEnough(t *testing.T) {
 		X: cover.X + 8, Y: cover.Y + 8,
 		W: cover.W - 16, H: cover.H - 16,
 	}
-	n, w, h := brightExtent(tt.Image(), inner)
+	accent := themeColor(BuildTheme(s.app.SettingsSnapshot(), false).Accent)
+	n, w, h := colorExtent(tt.Image(), inner, accent)
 	if n == 0 {
-		t.Fatalf("悬停之后封面正中一块亮像素都没有——那一层浮层（和它那枚箭头）没画出来")
+		t.Fatalf("悬停之后封面正中一块主色像素都没有——那一层浮层（和它那枚箭头）没画出来")
 	}
 	const wantPixels = 40
 	if n < wantPixels {
@@ -440,16 +445,20 @@ func inkExtent2(img *image.RGBA, box mygoui.Rect, bg color.RGBA) (n int, w, h fl
 	return n, float32(x1 - x0 + 1), float32(y1 - y0 + 1)
 }
 
-// brightExtent 数 box 里「亮」的像素（三个通道都大于 180）有多少，并给出外接框。
+// colorExtent 数 box 里「接近 want 那个颜色」的像素有多少，并给出外接框。
 //
-// 用于封面那一层浮层：罩子是 50% 的黑，箭头是 92% 的白——这一块里只有箭头亮。
-func brightExtent(img *image.RGBA, box mygoui.Rect) (n int, w, h float32) {
+// 用于封面那一层浮层：罩子是 50% 的黑，箭头是主色——这一块里只有箭头是主色。
+//
+// ⚠️ **门槛是每通道各差 24 以内**：抗锯齿的边上是它和底色混出来的。
+func colorExtent(img *image.RGBA, box mygoui.Rect, want color.RGBA) (n int, w, h float32) {
+	const slack = 24
 	x0, y0 := int(box.X+box.W), int(box.Y+box.H)
 	x1, y1 := -1, -1
 	for y := max(int(box.Y), img.Rect.Min.Y); y < min(int(box.Y+box.H), img.Rect.Max.Y); y++ {
 		for x := max(int(box.X), img.Rect.Min.X); x < min(int(box.X+box.W), img.Rect.Max.X); x++ {
 			c := img.RGBAAt(x, y)
-			if c.R <= 180 || c.G <= 180 || c.B <= 180 {
+			if absInt(int(c.R)-int(want.R)) > slack || absInt(int(c.G)-int(want.G)) > slack ||
+				absInt(int(c.B)-int(want.B)) > slack {
 				continue
 			}
 			n++

@@ -108,7 +108,7 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 	// 尺寸照同一段上另外两枚（赞 / 收藏）：`iconMd` 的图标 + `iconHitMd` 的点击区
 	// + 每边 7 的内边距（那一圈留白就是 `TestTheHitAreaIsBiggerThanTheGlyph` 断的
 	// 「点击区比图形大」）。
-	btn := s.withTip(c, iconButton(c, iconPageList, "分集", iconMd).
+	btn := s.withTip(c, iconKey(c, iconPageList, "分集", iconMd, false).
 		Size(iconHitMd, iconHitMd).Padding(0, 7),
 		partEntryTooltip(parts, cur, s.app.PartsWorthAsking(), s.app.PartsErr()))
 	if btn.Clicked() {
