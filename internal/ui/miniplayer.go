@@ -108,10 +108,10 @@ const (
 //     Resizable`（`mygo/internal/darwin/window.go:123`）。
 //
 //  2. 一个没有 resizable 位的窗口**没有「标准框」可言**，`isZoomed` 恒为真
-//     （`mygo/internal/darwin/window.go:779` 那句 `sendBool(w.win, "isZoomed")`）。
+//     （`mygo/internal/darwin/window.go:830` 那句 `sendBool(w.win, "isZoomed")`）。
 //
 //  3. `StateKey` 存不存位置，判的是 `!Maximized`
-//     （`mygo/window_state.go:188` 的 `captureState`）：
+//     （`mygo/window_state.go:195` 的 `captureState`）：
 //
 //     if !st.Maximized && !st.FullScreen && !n.IsMinimized() { 记下 X/Y/W/H }
 //     if st.Width <= 0 || st.Height <= 0 { return }               // 新键直接不存

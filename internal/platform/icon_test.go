@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// 框架从源图渲出来的尺寸集。抄的是 `mygo@v0.5.5/cmd/mygo/icon.go` 的
+// 框架从源图渲出来的尺寸集。抄的是 `mygo@v0.6.2/cmd/mygo/icon.go` 的
 // `pngToICNS` 与 `pngToICO` 两张表——**故意抄一份在这里**。
 //
 // 为什么不直接去问框架：这个包 import 不到 `cmd/mygo`（它是 `package main`）。

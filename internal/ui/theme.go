@@ -89,7 +89,7 @@ func BuildTheme(s app.Settings, systemDark bool) *ui.Theme {
 // ## 只跟框架 `Theme.follow` 的两样，不跟主色
 //
 // MyGo 的默认主题在每帧开头会 `t.follow(rt.preferences())`
-// （`mygo/ui/runtime.go:417`），里面三件事：系统主色、高对比度、字号缩放。
+// （`mygo/ui/runtime.go:464`），里面三件事：系统主色、高对比度、字号缩放。
 // 我们从 `LightTheme()` / `DarkTheme()` 起步，那一层就绕开了——所以高对比度
 // 和字号缩放得自己接上。
 //
@@ -97,8 +97,8 @@ func BuildTheme(s app.Settings, systemDark bool) *ui.Theme {
 // 在设置里挑；框架那一步会把系统的主色铺上来，用户在系统里换个强调色，我们的
 // 按钮跟着变色——那不是我们的配色体系。
 //
-// 高对比度那几行照 `mygo/ui/preferences.go:72-77` 逐条来（Border / TextMuted /
-// Focus / Scrollbar），字号缩放照 `:78-80`（`t.FontSize *= TextScale`）。
+// 高对比度那几行照 `mygo/ui/preferences.go:69-74` 逐条来（Border / TextMuted /
+// Focus / Scrollbar），字号缩放照 `:75-77`（`t.FontSize *= TextScale`）。
 func buildTheme(s app.Settings, systemDark bool, p ui.Preferences) *ui.Theme {
 	dark := systemDark
 	switch s.ThemeMode {

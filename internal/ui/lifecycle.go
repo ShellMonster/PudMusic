@@ -127,7 +127,7 @@ func (s *Shell) handleDeepLink(route string) {
 // postMain 队列），`applicationDidFinishLaunching` 才把 `ready` 置上。在这两件
 // 事之间，第二个实例转交过来的命令行**已经会被处理**了——它的回调走的也是
 // postMain。而 `NewWindow` 在主线程上遇到「还没 ready」是直接 panic 的
-// （`mygo/window.go:374`）。
+// （`mygo/window.go:382`）。
 //
 // 症状是：用户把图标连点两下（或者同一个链接点两下），第一个进程当场崩掉，
 // 栈顶是 `NewWindow ← openWindow ← OnSecondInstance`。改用 WhenReady 之后，
