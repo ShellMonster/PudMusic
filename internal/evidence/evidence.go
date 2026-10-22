@@ -903,6 +903,30 @@ var Items = []Item{
 	},
 	{
 		Category: Negative,
+		// 封面在「有图 ↔ 占位」之间反复切换（#208）。这一组盯的是一个**静默**
+		// 的坏法：封面闪起来没有一句报错，用户读到的是「这个应用加载不动」。
+		//
+		// 根因是两条，**加在一起**才闪：存下来的那一张图太大（B 站的封面是
+		// 1920×1080 的原图，解码之后 11MB，一屏十几张就是 170MB，超出缓存的
+		// 字节上限），于是 LRU 把**正在显示着的**封面挤掉；而 LRU 的字节账还会
+		// 漏（一条在解码回来之前被挤掉的条目，解码回来之后又记一笔，而那一笔再也
+		// 挤不掉），挤的循环于是最后把整张表清空还挤不下——之后每来一张图就把
+		// 表里剩下的全挤掉。
+		//
+		// 全部用 `httptest` 验（假图床 + 假 B 站接口），不连真网。
+		Spec: "首页推荐的封面不再在有图和占位之间反复切换：一屏封面按显示尺寸存得下、字节账不漏、还在下的那一张不参与淘汰",
+		Tests: []string{
+			"TestTheSameCoverStaysReadyAcrossFrames",
+			"TestTheHomeCoversDoNotGoBackToPlaceholder",
+			"TestStoredCoversAreScaledDown",
+			"TestAnEntryEvictedBeforeItIsDecodedIsNotAccounted",
+			"TestTheEvictionSkipsEntriesThatHaveNoBytesYet",
+			"TestACoverThatIsStillLoadingIsNotEvicted",
+			"TestTheByteAccountDoesNotLeak",
+		},
+	},
+	{
+		Category: Negative,
 		Spec:     "扫码中途取消/退登：在途的结果写不回来",
 		Tests: []string{
 			"TestCancelLoginStopsPolling",
