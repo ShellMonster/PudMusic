@@ -360,9 +360,10 @@ func TestThePlayBarHasTheUpstreamShadow(t *testing.T) {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
-			with := shadowScene(t, dark, func(s *Shell, c *mygoui.Context) {
+			tt := shadowScene(t, dark, func(s *Shell, c *mygoui.Context) {
 				s.viewPlayBar(c, barState())
-			}).Image()
+			})
+			with := tt.Image()
 			// 对照：**同一个场景，只少一个播放条**——两者之差就是那道影的贡献。
 			without := shadowScene(t, dark, func(s *Shell, c *mygoui.Context) {
 			}).Image()
@@ -372,10 +373,20 @@ func TestThePlayBarHasTheUpstreamShadow(t *testing.T) {
 			assertShadowDarker(t, with, without,
 				mygoui.Rect{X: 200, Y: top - 1, W: 200, H: 1}, "播放条")
 
-			// 条身：离上沿远一点、又没控件的那一块（x=220 在歌名和「上一首」之间）。
-			body := with.RGBAAt(220, top+30)
-			rim := with.RGBAAt(220, top)     // 条的**第一行**
-			above := with.RGBAAt(220, top-1) // 条**上面**那一行
+			// ⚠️ **取样那一列是「封面左边那块内边距」**（封面左缘往左 8 像素）：
+			// 那里**任何布局下都没有控件**——写死一个 x 的话，播放条中间那一列
+			// 一重排（三键居中那一票，票 #224）就可能取到一枚按钮上，量到的
+			// 就不是条自己的底色了。
+			cover, ok := tt.Find("当前封面")
+			if !ok {
+				t.Fatalf("画面上找不到封面：%q", tt.Texts())
+			}
+			x := int(cover.X) - 8
+
+			// 条身：离上沿远一点的那一行（同一列，控件只在更右边）。
+			body := with.RGBAAt(x, top+30)
+			rim := with.RGBAAt(x, top)     // 条的**第一行**
+			above := with.RGBAAt(x, top-1) // 条**上面**那一行
 
 			if dark {
 				// 深色：Card 那档的第三层是 1 像素的**内白边**。

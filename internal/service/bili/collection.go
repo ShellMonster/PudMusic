@@ -334,6 +334,15 @@ const (
 	MediaVideo = 2
 	// MediaAudio 是音频（type=12）。
 	MediaAudio = 12
+	// MediaCollection 是合集（type=21）。
+	//
+	// 🔴 **它和 `MediaMovie` 一样没有音频流**（见 `Playable`），而它们在
+	// 收藏夹里是**画得出来的行**——所以界面上要能说清「这一条是合集/电影
+	// 那一类」，而不是笼统的「这一条不是投稿」（那是**没挂稿件的推荐条目**
+	// 才该说的话，两者的下一步也不一样：合集是「打开里面的单集」）。
+	MediaCollection = 21
+	// MediaMovie 是电影（type=24）。
+	MediaMovie = 24
 )
 
 // Playable 报这个条目是不是能放的那种（视频稿件 / 音频）。

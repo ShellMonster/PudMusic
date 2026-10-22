@@ -78,11 +78,13 @@ type RecommendItem struct {
 	//
 	// ⚠️ **榜上有些条目没有稿件**（纯音乐条目，`related_archive` 是空的），
 	// 那种行画得出来（身份走榜上那一条的 id）而**放不了**：没有 bvid，取流要
-	// bvid。用户按了「播放」会得到一句「这一首还不能放：缺稿件 id」。
+	// bvid。
 	//
-	// 界面上**没有**把那一项画灰：`widgets/list` 的行菜单是搜索结果、新歌速递、
-	// 首页共用的一份，它没有「按行置灰」这一档（见 `menuItems`）。要给就得改那个
-	// 共用控件，那是另一件事——上游 Biu 在这一页上同样不给纯音乐条目置灰。
+	// 界面上**在按之前就不给入口**：`widgets/list` 那一份共用菜单（搜索结果、
+	// 新歌速递、首页都用它）会把「播放 / 下一首播放 / 添加到队列」按成灰的，
+	// 并在菜单末尾补一句「为什么」和「还能怎么办」（见 `menuItems` 与
+	// `app.UnplayableMenuNote`）。上游 Biu 在这一页上不给纯音乐条目置灰，
+	// 而用户看到的是一个按了没反应的入口——那比灰掉更难解释。
 	Item Item
 }
 
@@ -145,8 +147,7 @@ func recommendID(it bili.RecommendItem) string {
 // recommendItem 把一条推荐变成能进队列的那一项。
 //
 // 没有 bvid 时给的是 `Source: "online"`、Bvid 空串的项——它进不了队列，
-// 而用户按了播放会得到一句「这一首还不能放：缺稿件 id」（见
-// `RecommendItem.Item` 上那一段）。
+// 而界面上在按之前就不给它播放入口（见 `RecommendItem.Item` 上那一段）。
 func recommendItem(it bili.RecommendItem) Item {
 	return onlineItem(it.Bvid, it.Cid, it.Title, it.Cover, it.Owner, it.OwnerMid)
 }

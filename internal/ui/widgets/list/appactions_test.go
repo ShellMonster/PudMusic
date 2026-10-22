@@ -22,7 +22,7 @@ import (
 // seedQueue 摆一条三首的队列并让第一首成为当前项。
 //
 // ⚠️ 走 `Queue.Reset` 而不是 `Enqueue`：`Reset` 只摆不播，而 `Enqueue` 见到空队列
-// 会**直接起播**——这一层没有播放器，起播会一路走到「这一首还不能放」。
+// 会**直接起播**——这一层没有播放器，起播会一路走到「放不了这一首」那句话。
 func seedQueue(t *testing.T, a *app.App, names ...string) []app.Item {
 	t.Helper()
 	items := make([]app.Item, len(names))

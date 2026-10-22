@@ -170,6 +170,12 @@ func (a *App) DownloadVideo(it Item, qn bili.VideoQuality) (download.Snapshot, e
 // （视频是例外：落盘的既不是任何一条源流，也不是改个后缀就行的东西，
 // 所以 `AddRequest.Video` 一说，`download` 那边直接给 `.mp4`。）
 func (a *App) download(it Item, req download.AddRequest) (download.Snapshot, error) {
+	// ⚠️ **本地文件先判**：它走的是开文件那一路，和取流无关，而在线那一套
+	// 的判据（`playableOnline`）对它会回「不是投稿」——那是**错的**：
+	// 这一首是你的歌，它只是没有稿件。
+	if it.IsLocal() {
+		return download.Snapshot{}, errors.New("这一首已经在你磁盘上了，没有东西可下载")
+	}
 	if err := playableOnline(it); err != nil {
 		return download.Snapshot{}, err
 	}

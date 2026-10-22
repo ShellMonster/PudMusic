@@ -86,10 +86,17 @@ var verdictLedger = []verdictRow{
 	{
 		// 合集 / 电影也在收藏夹里躺着，它们没有音频流。判据把它们排除在批量操作
 		// 之外（而不是放进去再报错），这一半是对的。
+		//
+		// 🔴 **它说的话要说清是哪一种**：合集/电影是「这一条本来就是合集，
+		// 里面才有单集」（下一步是打开里面的单集），而**没挂稿件的推荐条目**
+		// 是「B 站没给它挂能播的稿件」（下一步是搜同名）。混成一句
+		// 「不是投稿」的话，用户照着做的下一步就不对。
 		What: "合集（type=21）", Type: 21, Judged: false,
+		Refuses: "合集/剧集",
 	},
 	{
 		What: "电影（type=24）", Type: 24, Judged: false,
+		Refuses: "合集/剧集",
 	},
 }
 
@@ -122,13 +129,15 @@ func TestEveryRowWeDrawHasAVerdictThatMatchesWhatHappens(t *testing.T) {
 			if !r.Judged {
 				// 放不了的那一类，判据说出去之后界面上要有一句人话，而不是一行
 				// 画出来按不动的死条目。这里钉的是 `app.playableOnline` 说的话：
-				// 空 Type 的条目被拒时说的是「这一首还不能放」，而这一句说的正是
-				// 事实（它们真的没有音频流）。
+				// 它要**说清是哪一种**（表里 `Refuses` 那一列），并且带着
+				// 「还能怎么办」（票 #209：每一句都要答「为什么」和「怎么办」）。
 				err := a.PlayFrom(onlineItemOf(m))
 				if err == nil {
 					t.Errorf("%s：判据说放不了，按播放却没给一句话", r.What)
-				} else if !strings.Contains(err.Error(), "还不能放") {
-					t.Errorf("%s：拒它的理由是 %q，说的不是「它没有流」这件事", r.What, err)
+				} else if !strings.Contains(err.Error(), r.Refuses) {
+					t.Errorf("%s：拒它的理由是 %q，没说清是哪一种（want %q）", r.What, err, r.Refuses)
+				} else if !strings.Contains(err.Error(), "打开里面的单集") {
+					t.Errorf("%s：拒它的理由是 %q，没有说「还能怎么办」", r.What, err)
 				}
 				return
 			}

@@ -381,3 +381,62 @@ func TestDoubleClickingARowPlaysIt(t *testing.T) {
 		t.Errorf("双击第二行放出来的是 %q，want BV2", got)
 	}
 }
+
+// TestAnUnplayableSongHasNoPlayEntryBeforeYouPressIt 「点之前就不给播放入口」。
+//
+// 首页推荐、音乐榜、新歌速递、搜索结果**共用这一份菜单**，而它们里面确实有
+// 放不了的条目（B 站给纯音乐条目不挂稿件，那种行画得出来而放不了）。
+//
+// 这一条钉的是**按不动**：菜单项还在（用户看得到这一份菜单），但它是灰的——
+// 而「按了才说」是把一句应用内部的判断甩给用户，用户分不清「真没有音频流」
+// 和「没取到」，而这两件事要走的路正好相反。
+//
+// 末尾还要有**一句说明**：按不动而不说为什么等于让用户猜，而用户猜不出来。
+func TestAnUnplayableSongHasNoPlayEntryBeforeYouPressIt(t *testing.T) {
+	songs := []Music{{
+		ID:    "x",
+		Title: "没挂稿件的那一条",
+		Item:  app.Item{Source: "online", Type: "mv", Title: "没挂稿件的那一条"},
+	}}
+	_, tt := newList(t, Actions{}, songs)
+
+	if err := tt.RightClick("没挂稿件的那一条"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("播放"); err == nil {
+		t.Error("放不了的条目，「播放」竟然能按")
+	}
+	items := tt.Menu()
+	last := items[len(items)-1]
+	if !strings.Contains(last, "不是投稿") || !strings.Contains(last, "搜同名") {
+		t.Errorf("菜单末尾那句话是 %q，没有说清「为什么」和「还能怎么办」", last)
+	}
+}
+
+// TestALocalSongStillHasAPlayEntry 本地文件不许被误判成放不了。
+//
+// 🔴 **这个坑真踩过一次**：判据写成「没有 bvid 就没有身份」的话，本地文件
+// 落进「不是投稿」那一支，于是本地音乐那一页的「播放」整片灰掉——
+// 而本地文件走的是开文件那一路，它当然放得了。
+func TestALocalSongStillHasAPlayEntry(t *testing.T) {
+	paths := audioCopies(t, "第一首")
+	rec := &recorded{}
+	songs := []Music{{ID: "a", Title: "第一首", Item: app.LocalItem(paths[0])}}
+	_, tt := newList(t, rec.actions(), songs)
+
+	if err := tt.RightClick("第一首"); err != nil {
+		t.Fatal(err)
+	}
+	// ⚠️ **菜单项要在点之前数**：点完菜单就关了，而 `tt.Menu()` 读的是
+	// **当前开着的那一份**。
+	items := tt.Menu()
+	if len(items) != 8 {
+		t.Errorf("菜单上有 %d 项：%q", len(items), items)
+	}
+	if err := tt.ChooseMenuItem("播放"); err != nil {
+		t.Errorf("本地文件的「播放」按不动：%v", err)
+	}
+	if len(rec.played) != 1 {
+		t.Errorf("本地文件的「播放」没接上（动作记了 %d 次）", len(rec.played))
+	}
+}
