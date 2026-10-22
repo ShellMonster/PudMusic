@@ -199,6 +199,10 @@ type downloadsPage struct {
 	// 那个目录」这条能自动验。
 	openDir func(path string) error
 	reveal  func(path string)
+
+	// tip 是带延迟的悬停提示（tooltip.go），由 Shell 在建这一页时接上。
+	// 为零时（单独造这一页的测试）退回框架那枚。
+	tip tipFunc
 }
 
 // newDownloadsPage 建这一摊状态。

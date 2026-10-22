@@ -161,14 +161,13 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 		// tooltip。**无障碍名字一个字没少**——原来那两个文字键念出来是「定位当前
 		// 播放」「清空」，换成图标之后靠 `Label` 念的还是这两句，而它们同时也是
 		// 无头 Tester 认这两个按钮的唯一凭据（`queue_drawer_test.go` 靠它点）。
-		if iconButton(c, iconLocate, "定位当前播放", iconSm).
-			Size(iconHit, iconHit).Padding(0, 7).
-			Tooltip("把队列滚到正在放的那一首").Clicked() {
+		if s.withTip(c, iconButton(c, iconLocate, "定位当前播放", iconSm).
+			Size(iconHit, iconHit).Padding(0, 7),
+			"把队列滚到正在放的那一首").Clicked() {
 			s.locateCurrent()
 		}
-		if iconButton(c, iconDelete, "清空", iconSm).
-			Size(iconHit, iconHit).Padding(0, 7).
-			Tooltip("清空播放列表").Clicked() {
+		if s.withTip(c, iconButton(c, iconDelete, "清空", iconSm).
+			Size(iconHit, iconHit).Padding(0, 7), "清空播放列表").Clicked() {
 			s.app.ClearQueue()
 		}
 	})

@@ -229,6 +229,21 @@ func playTheLikeSong(t *testing.T, f *biliFixture, width int, waitAsked bool) *l
 	} else if s.app.LikeAsked() {
 		t.Fatal("赞没赞问回来了 —— 这一条要的是「一直没问回来」那一段")
 	}
+
+	// 🔴 **再把分集那一格等定下来**：赞键前面那一格「分集」在 `pagelist` 回来
+	// 之前是摆着的（`partsWorthEntry`），回来只有一集时又收掉。
+	//
+	// 收掉的那一帧，**赞键的位置一点没变**（那一行右对齐，前面的 UP 名让出宽度），
+	// 但它的**兄弟序号变了**——框架按序号认元素，于是点击状态挂在旧的那一格上：
+	// 按下去，下一帧赞还是暗的，而画面上看不出任何异样。实测在 load 17 上
+	// `-count=300` 约 1% 的用例会撞上（`TestTheLikeKeyDrawsItsOwnIcon` 和
+	// `TestClickingTheStarLikesTheSong` 都点这一格）。
+	//
+	// ⚠️ **这是播放条自己的一个真问题**（点得早的用户也会丢那一下），不是这一票
+	// 要修的东西；这里只把**用例的起跑线**放到那一格不再变之后。
+	waitFrames(t, tt, "分集那一格定下来", func() bool {
+		return !partsWorthEntry(s.app.Parts(), s.app.PartsWorthAsking())
+	})
 	tt.Frame()
 	return &likeEnv{s: s, tt: tt, fc: fc, f: f}
 }

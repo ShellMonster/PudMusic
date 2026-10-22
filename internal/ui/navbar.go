@@ -92,9 +92,8 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// 阶段 1 唯一的入口：选一个本地文件。Biu 里对应侧栏的「本地音乐」。
 		// 走的是播放条「加歌」那一条路：多选的文件全都进队列，用它打开的歌
 		// 上一首/下一首才是亮的（直接调 app.Open 就进不了队列，见 pickAndEnqueue）。
-		if iconButton(c, iconFolder, "打开文件", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5).
-			Tooltip("打开本地音频文件").Clicked() {
+		if s.withTip(c, iconButton(c, iconFolder, "打开文件", iconMd).
+			Size(iconHitMd, iconHitMd).Padding(0, 5), "打开本地音频文件").Clicked() {
 			s.pickAndEnqueue()
 		}
 		//
@@ -118,9 +117,9 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// `iconPiP`——同一排里左边三枚都是图标键，只有这一枚是两个字，看上去像
 		// 忘了换（#134 的第七单元点名了这个）。文字没有消失：`Label` 和悬停提示
 		// 说的是同一件事，读屏软件和测试都还叫得出它。
-		if iconButton(c, iconPiP, "迷你", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5).
-			Tooltip("缩成 320×100 的小窗贴边悬浮，音乐不停").Clicked() {
+		if s.withTip(c, iconButton(c, iconPiP, "迷你", iconMd).
+			Size(iconHitMd, iconHitMd).Padding(0, 5),
+			"缩成 320×100 的小窗贴边悬浮，音乐不停").Clicked() {
 			s.toggleMiniPlayer()
 		}
 		// 设置。Biu 的设置在侧栏菜单和头像下拉里（`layout/side/index.tsx`、
@@ -130,9 +129,8 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// 改任何东西都要走一遍的那个入口，藏在头像下拉第三项里是两级。
 		// 侧栏里也有一条「设置」（那是我们自己多摆的，见 routes 表），顶栏这一枚
 		// 是给已经在别的页上、不想先回侧栏的人用的。
-		if iconButton(c, iconSettings, "设置", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5).
-			Tooltip("设置").Clicked() {
+		if s.withTip(c, iconButton(c, iconSettings, "设置", iconMd).
+			Size(iconHitMd, iconHitMd).Padding(0, 5), "设置").Clicked() {
 			s.navigate(settingsPath)
 		}
 		s.viewDynamicDot(c)
@@ -161,13 +159,13 @@ func (s *Shell) viewNav(c *ui.Context) {
 // 这里改的只有**名字**：框架给的是英文的 "Back" / "Forward"，中文界面里读屏
 // 念出来是英文。
 func (s *Shell) viewNavBack(c *ui.Context, back func()) {
-	if ui.BackButton(c, s.router).Label(navBackLabel).Tooltip(navBackLabel).Clicked() {
+	if s.withTip(c, ui.BackButton(c, s.router).Label(navBackLabel), navBackLabel).Clicked() {
 		back()
 	}
 }
 
 func (s *Shell) viewNavForward(c *ui.Context, back func()) {
-	if ui.ForwardButton(c, s.router).Label(navForwardLabel).Tooltip(navForwardLabel).Clicked() {
+	if s.withTip(c, ui.ForwardButton(c, s.router).Label(navForwardLabel), navForwardLabel).Clicked() {
 		back()
 	}
 }

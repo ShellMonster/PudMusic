@@ -358,9 +358,17 @@ func TestChangingTheKeywordGoesBackToPageOne(t *testing.T) {
 	if got := calls[before]; got.page != 1 {
 		t.Errorf("换词之后发出去的第一趟是第 %d 页，want 第 1 页", got.page)
 	}
-	if _, ok := tt.Find("第 1 页 第 1 首"); !ok {
-		t.Errorf("换词之后没有回到第 1 页的头，文字有 %q", tt.Texts())
-	}
+	// 画面回到那一页的头：第 1 页的第 1 首重新在屏幕上。
+	//
+	// ⚠️ **等这一句画出来，不要读完请求就断言**。上面等的是「请求发出去了」，
+	// 而这一句断的是「画面上有了」——两者之间隔着响应 → 解码 → 投递状态 →
+	// 唤醒 → 排版 → 画帧。满载时读完请求就断言画面会偶发红（实测 load 26 时
+	// 红过一次，02:55 那次验收）。上面那条排序测试早就是等画面的写法，这一条
+	// 漏了同一步。
+	waitFrames(t, tt, "画面回到第 1 页的头", func() bool {
+		_, ok := tt.Find("第 1 页 第 1 首")
+		return ok
+	})
 }
 
 // TestSwitchingTabsKeepsWhereYouWere 是验收第 3 条：切 Tab **不重置滚动位置**。

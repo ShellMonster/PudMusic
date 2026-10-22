@@ -655,9 +655,8 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 			}
 			// 上游是一枚 `size="md" variant="flat"` 的图标键
 			//（`operation/index.tsx:44`，tooltip「添加到播放列表」）。
-			if flatIconButton(c, iconEnqueue, "添加到播放列表", iconMd).
-				Size(iconHitMd, iconHitMd).Padding(0, 5).
-				Tooltip("添加到播放列表").Clicked() {
+			if s.withTip(c, flatIconButton(c, iconEnqueue, "添加到播放列表", iconMd).
+				Size(iconHitMd, iconHitMd).Padding(0, 5), "添加到播放列表").Clicked() {
 				s.addWholeCollectionToQueue(p)
 			}
 			s.viewCollectionStar(c, p)
@@ -695,9 +694,8 @@ func (s *Shell) viewCollectionStar(c *ui.Context, p *collectionPage) {
 	if info.Faved {
 		tip = "取消收藏"
 	}
-	if flatIconButton(c, favIcon(info.Faved), tip, iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 5).
-		Tooltip(tip).Clicked() {
+	if s.withTip(c, flatIconButton(c, favIcon(info.Faved), tip, iconMd).
+		Size(iconHitMd, iconHitMd).Padding(0, 5), tip).Clicked() {
 		s.setCollectionFav(p, !info.Faved)
 	}
 }
@@ -718,9 +716,8 @@ func (s *Shell) viewCollectionMore(c *ui.Context, p *collectionPage) {
 	// `.Menu()` 本身就是「按钮 + 菜单」（`mygo/ui/menu.go` 顶上那个例子就是用
 	// `ButtonBase` 拼的），所以扁平配方接得上——`ui.MenuButton` 那一版会自己
 	// 画一圈描边和一枚 ▾，放在这一排新扁平的三枚旁边就它一个不是。
-	flatIconButton(c, iconMore, "更多操作", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 5).
-		Tooltip("更多").
+	s.withTip(c, flatIconButton(c, iconMore, "更多操作", iconMd).
+		Size(iconHitMd, iconHitMd).Padding(0, 5), "更多").
 		Menu(func(m *ui.Menu) {
 			for _, item := range items {
 				if m.Item(item.label).Chosen() {

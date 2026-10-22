@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
@@ -1014,5 +1015,153 @@ func TestSwitchingAccountsDoesNotKeepTheOldTotal(t *testing.T) {
 	}
 	if showsText(tt, "全部关注(7)") {
 		t.Errorf("新账号的 Tab 上还挂着上一个账号的关注数，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheFollowCardTypographyAndItsHoverBar 钉住关注卡的两处：
+// 名字 18、签名 14（上游 `user-card.tsx:84-85` 的 `text-lg` / `text-sm`），
+// 以及鼠标移上去才升起来的那条操作条（300ms，`translate-y-20` → 0）。
+func TestTheFollowCardTypographyAndItsHoverBar(t *testing.T) {
+	b := newUIExplore(t)
+	uiFollowTags(b, map[int]any{0: "默认分组"})
+	uiFollowList(b, 3, []any{
+		uiFollowUser(11, "第一个 UP"), uiFollowUser(12, "第二个 UP"), uiFollowUser(13, "第三个 UP"),
+	})
+	uiFollowSearch(b, "", nil)
+	uiFollowTag(b, 0, []any{})
+
+	s, tt, _ := newSpaceShell(t, b, true, "77")
+	s.navigate(followPath)
+	tt.Frame()
+	f := s.followPageOf()
+	waitFrames(t, tt, "人到了", func() bool { return len(f.users) == 3 && f.tagStarted })
+	tt.Frame()
+
+	// ① 字号。第二张卡的名字不是整行的无障碍名字（那是第一张卡的），所以
+	// `Find` 拿到的就是名字那一段文字本身；签名一直是唯一的。
+	//
+	// 量的是**盒子高**：行高跟着字号走，18 点那行实测 21.2、14 点加 1.4 行高
+	// 实测 19.6。取 20.5 / 19.0 两条线——旧值 15 / 12 分别是 17.7 / 16.8，
+	// 离得够开。
+	name, ok := tt.Find("第二个 UP")
+	if !ok {
+		t.Fatalf("画面上找不到名字，文字有 %q", tt.Texts())
+	}
+	if name.H < 20.5 {
+		t.Errorf("名字那一段只有 %.1f 高，want ≥ 20.5（上游是 text-lg，18 点）", name.H)
+	}
+	sign, ok := tt.Find("第二个 UP 的签名")
+	if !ok {
+		t.Fatalf("画面上找不到签名，文字有 %q", tt.Texts())
+	}
+	if sign.H < 19 {
+		t.Errorf("签名那一段只有 %.1f 高，want ≥ 19（上游是 text-sm，14 点）", sign.H)
+	}
+
+	// ② 操作条平时不在画面上。
+	if _, ok := tt.Find("取消关注"); ok {
+		t.Fatalf("还没 hover，操作条就已经在画面上了（文字有 %q）", tt.Texts())
+	}
+	av, ok := tt.Find(f.users[1].Face)
+	if !ok {
+		t.Fatalf("第二张卡的头像没画出来，文字有 %q", tt.Texts())
+	}
+	tt.Move(av.X+av.W/2, av.Y+av.H/2)
+	tt.Frame()
+	// 悬停的那一帧动画才刚开始，位置还藏在卡片下沿外。
+	if _, ok := tt.Find("取消关注"); ok {
+		t.Fatalf("刚移上去的那一帧操作条就已经到位了——300ms 上滑没走")
+	}
+
+	// 推钟：150ms 时已经在画面里，但还没升到终点；再走完 300ms 就到顶。
+	tt.Advance(150 * time.Millisecond)
+	tt.Frame()
+	mid, ok := tt.Find("取消关注")
+	if !ok {
+		t.Fatalf("hover 150ms 之后操作条还没出现，文字有 %q", tt.Texts())
+	}
+	tt.Advance(250 * time.Millisecond)
+	tt.Frame()
+	done, ok := tt.Find("取消关注")
+	if !ok {
+		t.Fatalf("hover 400ms 之后操作条不见了，文字有 %q", tt.Texts())
+	}
+	if done.Y >= mid.Y {
+		t.Errorf("操作条在 150ms 时 y=%.1f、走完之后 y=%.1f——没有往上滑", mid.Y, done.Y)
+	}
+
+	// ③ 移开就收回去（同一段 300ms 走完）。
+	tt.Move(5, 5)
+	tt.Frame()
+	tt.Advance(400 * time.Millisecond)
+	tt.Frame()
+	if _, ok := tt.Find("取消关注"); ok {
+		t.Errorf("指针移开之后操作条还留在画面上，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheFollowPaneHasARightBorder 钉住左栏右缘那条分界线（上游
+// `follow-list/index.tsx:204` 的 `border-r`）。
+func TestTheFollowPaneHasARightBorder(t *testing.T) {
+	b := newUIExplore(t)
+	uiFollowTags(b, map[int]any{0: "默认分组"})
+	uiFollowList(b, 1, []any{uiFollowUser(11, "一个人")})
+	uiFollowSearch(b, "", nil)
+	uiFollowTag(b, 0, []any{})
+
+	s, tt, _ := newSpaceShell(t, b, true, "77")
+	s.navigate(followPath)
+	tt.Frame()
+	f := s.followPageOf()
+	waitFrames(t, tt, "人到了", func() bool { return len(f.users) == 1 && f.tagStarted })
+	tt.Frame()
+
+	pageLeft := int(sideTargetWidth(s.app.SettingsSnapshot()))
+	img := tt.Image()
+	bx := pageLeft + followPaneW - 1
+	if got, ref := img.RGBAAt(bx, 400), img.RGBAAt(bx-4, 400); got == ref {
+		t.Errorf("左栏右缘 (%d,400) 是 %v，和左边四像素一样——那条分界线没画", bx, got)
+	}
+}
+
+// TestUnfollowingFromTheCardRemovesIt 钉住操作条上那个「取消关注」真的能按：
+// 写接口走后台、成功后那一格从画面上消失、左栏的人数跟着减一。
+func TestUnfollowingFromTheCardRemovesIt(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "我自己", 0, 1)
+	uiFollowTags(b, map[int]any{0: "默认分组"})
+	uiFollowList(b, 2, []any{uiFollowUser(11, "第一个 UP"), uiFollowUser(12, "第二个 UP")})
+	uiFollowSearch(b, "", nil)
+	uiFollowTag(b, 0, []any{})
+
+	s, tt, _ := newSpaceShell(t, b, true, "77")
+	s.navigate(followPath)
+	tt.Frame()
+	f := s.followPageOf()
+	waitFrames(t, tt, "人到了", func() bool { return len(f.users) == 2 && f.tagStarted })
+	tt.Frame()
+
+	av, ok := tt.Find(f.users[1].Face)
+	if !ok {
+		t.Fatalf("第二张卡的头像没画出来，文字有 %q", tt.Texts())
+	}
+	tt.Move(av.X+av.W/2, av.Y+av.H/2)
+	tt.Frame()
+	tt.Advance(400 * time.Millisecond)
+	tt.Frame()
+	if err := tt.Click("取消关注"); err != nil {
+		t.Fatalf("点不到操作条上的取消关注：%v，文字有 %q", err, tt.Texts())
+	}
+
+	waitFrames(t, tt, "取关之后那一格没了", func() bool { return len(f.users) == 1 })
+	tt.Frame()
+	if showsText(tt, "第二个 UP") {
+		t.Errorf("取关成功了，画面上还挂着那个人，文字有 %q", tt.Texts())
+	}
+	if !b.hit("/x/relation/modify") {
+		t.Errorf("取关没有真的发出去（假 B 站没收到 /x/relation/modify）")
+	}
+	if !showsText(tt, "全部关注(1)") {
+		t.Errorf("取关之后左栏的人数没跟着减一，文字有 %q", tt.Texts())
 	}
 }
