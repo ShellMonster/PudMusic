@@ -363,6 +363,11 @@ func playableOnline(it Item) error {
 		return nil
 	case it.Type == "mv" && it.Bvid != "":
 		return nil
+	case it.Type == ItemTypeUser:
+		// ⚠️ **它不是一首歌**：搜索结果的用户 Tab 那一行，「播放」是进 UP 主
+		// 空间。它压根没有「能不能放」这回事——界面据此照常给那个入口
+		// （见 `CanPlay`），而这里只是拦住「把它塞进队列」。
+		return unplayableOf(UnplayableNotSong)
 	case it.Type == "collection":
 		// 合集 / 电影 / 番剧那一类：它们**不是投稿**，也没有单独的音频流。
 		//

@@ -70,3 +70,30 @@ func TestTheCollectionKindAndThePGCOneSayTheSameThing(t *testing.T) {
 		t.Error("放得了的也给了理由")
 	}
 }
+
+// TestAUserRowIsNotAnUnplayableSong 用户行不是「放不了的歌」。
+//
+// 🔴 **这一条是评审逼出来的**：本票新加的菜单判据把「不是歌的行」也当成了
+// 「放不了的歌」，于是搜索结果的用户 Tab 那一行——它的「播放」是**进 UP 主
+// 空间**——被按成了灰的，用户想进 UP 主空间进不去，而菜单末尾还多一句
+// 「这一条不是投稿，放不了。搜同名的歌再放」。
+//
+// 「不是歌」和「一首歌但放不了」必须分开：前者的那一项压根没有音频，
+// 它那一行的动作是别的。
+func TestAUserRowIsNotAnUnplayableSong(t *testing.T) {
+	user := Item{Source: "online", Type: ItemTypeUser, Bvid: "1001"}
+
+	if !CanPlay(user) {
+		t.Error("用户行被判成「放不了」——可它那一行的「播放」是进 UP 主空间")
+	}
+	if note := UnplayableMenuNote(user); note != "" {
+		t.Errorf("用户行的菜单末尾多了一句对他毫无意义的话：%q", note)
+	}
+	if reason := UnplayableReason(user); reason != "" {
+		t.Errorf("用户行被判成了放不了：%q", reason)
+	}
+	// ⚠️ **但它进不了队列**：用户不是歌，没有可播的音频。
+	if err := playableOnline(user); err == nil {
+		t.Error("用户行被放进了取流那一路")
+	}
+}

@@ -64,6 +64,17 @@ const (
 	// 按下去之后说准。**两个不是同一件事。**
 	UnplayableNoAudioFlow
 
+	// UnplayableNotSong 是「这一项**不是一首歌**」。
+	//
+	// ⚠️ **它和「一首歌但放不了」必须分开**：搜索结果的用户 Tab 那一行就是
+	// 它（`Item.Type` 是 `ItemTypeUser`），而那一行的「播放」是**进 UP 主
+	// 空间**——它压根没有「能不能放」这回事。
+	//
+	// 混进「放不了」那一类的后果是实打实的：那一行在菜单里被按成灰的，
+	// 用户想进 UP 主空间进不去，而菜单末尾还多一句对他毫无意义的话
+	// （「这一条不是投稿，放不了。搜同名的歌再放」）。
+	UnplayableNotSong
+
 	// UnplayableNoDownload 是「这一类还没有下载通道」。
 	//
 	// 音乐库条目只有一个 auid（sid），而下载是**按稿件 + 分 P**取流的，
@@ -108,6 +119,8 @@ func defaultWhy(k UnplayableKind) string {
 		return "这一条是 B 站音乐库里的条目，但没有带音频 id"
 	case UnplayableNoAudioFlow:
 		return "这一条是合集/剧集那一类，B 站没有给它们单独的音频流"
+	case UnplayableNotSong:
+		return "这一项不是一首歌"
 	case UnplayableNoDownload:
 		return "这一条是 B 站音乐库里的条目，还没有下载通道"
 	}
@@ -128,6 +141,8 @@ func defaultNext(k UnplayableKind) string {
 		return "重新收藏一次，或者在 B 站搜同名的歌"
 	case UnplayableNoAudioFlow:
 		return "打开里面的单集就能放"
+	case UnplayableNotSong:
+		return "它没有可播的音频"
 	case UnplayableNoDownload:
 		return "先在应用里放它，或者去 B 站下载"
 	}
@@ -193,13 +208,30 @@ func unplayableReasonOf(it Item) *Unplayable {
 	return AsUnplayable(playableOnline(it))
 }
 
-// CanPlay 报这一项现在放得了放不了。
+// notSong 报这一项**不是一首歌**。
+//
+// ⚠️ **它不是「放不了」**：搜索结果的用户 Tab 那一行（`Item.Type` 是
+// `ItemTypeUser`）压根没有音频，它那一行的「播放」是**进 UP 主空间**。
+//
+// 把它算成「放不了」的话，界面上那一项会被按成灰的——用户想进 UP 主空间
+// 进不去，而菜单末尾还多一句对他毫无意义的话。
+func notSong(it Item) bool {
+	return it.Type == ItemTypeUser
+}
+
+// CanPlay 报这一行**要不要给播放入口**。
 //
 // **界面上「给不给播放入口」问的就是它**（见 `internal/ui/widgets/list/menu.go`）。
 //
-// ⚠️ 判据必须和 `app.streamFor` 那两条取流路径一致：说放得了而实际放不了，
-// 「可放」就成了界面上的谎言（`bili.Media.Playable` 当初就是那个情况）。
+// ⚠️ **它问的不是「这一首能不能放」**，两者要分清：
+//
+//	本地文件	能放（走开文件那一路）
+//	不是歌的行	**给**——那一行的「播放」是别的动作（进 UP 主空间）
+//	一首歌	它放不放得了（说放得了而实际放不了，「可放」就成了界面上的谎言）
 func CanPlay(it Item) bool {
+	if it.IsLocal() || notSong(it) {
+		return true
+	}
 	return unplayableReasonOf(it) == nil
 }
 
@@ -214,6 +246,9 @@ func CanPlay(it Item) bool {
 // 「这一条放不了」后面必须跟着「为什么」和「还能怎么办」，
 // 而不是一个只有错误码的句子。
 func UnplayableReason(it Item) string {
+	if notSong(it) {
+		return ""
+	}
 	u := unplayableReasonOf(it)
 	if u == nil {
 		return ""
@@ -229,6 +264,9 @@ func UnplayableReason(it Item) string {
 // 但它**仍然两半都有**（「为什么」和「还能怎么办」）——按不动而不说为什么
 // 等于让用户猜，而用户猜不出来（他不会知道「没挂稿件」是什么意思）。
 func UnplayableMenuNote(it Item) string {
+	if notSong(it) {
+		return ""
+	}
 	u := unplayableReasonOf(it)
 	if u == nil {
 		return ""
@@ -249,6 +287,8 @@ func menuNote(k UnplayableKind) string {
 		return "这一条是音乐库条目，缺音频 id。重新收藏一次"
 	case UnplayableNoAudioFlow:
 		return "这一条是合集/剧集，没有音频流。打开里面的单集就能放"
+	case UnplayableNotSong:
+		return "这一项不是一首歌"
 	case UnplayableNoDownload:
 		return "音乐库条目还没下载通道。去 B 站下载"
 	}
