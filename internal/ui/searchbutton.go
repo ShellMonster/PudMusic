@@ -46,13 +46,17 @@ type searchButtonState struct {
 // minW / maxW 是展开后那个输入框的宽度范围。给 `minW` 是为了挤的时候它先让位
 // （旁边的排序下拉不能被压扁），给 `maxW` 是因为上游展开到 240 就停了。
 //
+// tip 是界面层那一份带延迟的悬停提示（tooltip.go）：收起时那枚图标键的提示
+// 走它，和别的图标键一个时延（框架那枚固定 600ms，和全应用对不上）。为零时
+// （单独造这一页的测试）退回框架那枚。
+//
 // 返回的是**展开时那个输入框**；收起时返回零值元素（它的 `Submitted` /
 // `Focused` 一律是 false）。调用方靠这个读回车。
-func expandableSearch(c *ui.Context, st *searchButtonState, text *string, label string, minW, maxW float32) ui.Element {
+func expandableSearch(c *ui.Context, tip tipFunc, st *searchButtonState, text *string,
+	label string, minW, maxW float32) ui.Element {
 	if !st.open {
-		if flatIconButton(c, iconSearch, label, iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5).
-			Tooltip(label).Clicked() {
+		if tipFrom(tip, c, flatIconButton(c, iconSearch, label, iconMd).
+			Size(iconHitMd, iconHitMd).Padding(0, 5), label, tipDefault).Clicked() {
 			st.open, st.wasFocused = true, false
 		}
 		return ui.Element{}

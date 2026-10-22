@@ -685,15 +685,14 @@ func TestTheLoadingStateLooksLikeTheEmptyState(t *testing.T) {
 //
 // 框架的 `ui.Tabs` 是**下划线**（选中那一项底下画一条主色的横条，
 // `mygo@v0.5.5/ui/tabs.go` 的 `coreTabs`），而主 Tab 用的是我们自己那一套
-// **扁平**样式（`tabs.go` 的 `flatTabs`）——那条横条**没有**。
+// **灰底轨道 + 白色滑块**（`tabs.go` 的 `mainTabs`）——那条横条**没有**。
 //
 // 搜索页正好两种都有：上面那一排是主 Tab（歌曲 / 视频 / 用户），下面那一排是
 // 次级排序（综合排序 / 最多播放 / …）。所以这一条在**同一页上**比。
 //
-// ⚠️ **只看「有没有主色的横条」不看别的**：主 Tab 那一项选中时有一层淡底
-// （浅色下是主色很淡的一层，深色下是中性灰），而它是**一整块**、不是一条
-// 2 像素的横条——而且它的颜色和主色**不一样**（淡底是主色掺出来的），
-// 所以按「逐字等于主色」去扫不会把它算进去。
+// ⚠️ **只看「有没有主色的横条」不看别的**：主 Tab 那一项选中时是一整块滑块
+// （浅色下是白的，深色下是比轨道亮一档的灰），不是一条 2 像素的横条——而且
+// 它的颜色和主色**不一样**，所以按「逐字等于主色」去扫不会把它算进去。
 func TestTheMainTabsAndTheSortTabsAreNotTheSame(t *testing.T) {
 	st := newSearchStub(2, 0)
 	_, tt := newSearchPage(t, "周杰伦", st)
@@ -712,8 +711,8 @@ func TestTheMainTabsAndTheSortTabsAreNotTheSame(t *testing.T) {
 	}
 
 	if hasAccentBar(img, main, accent) {
-		t.Errorf("主 Tab 那一排下面有那条主色的横条——主 Tab 要的是扁平那一种" +
-			"（见 tabs.go 的 flatTabs），不是下划线")
+		t.Errorf("主 Tab 那一排下面有那条主色的横条——主 Tab 要的是灰底轨道 + " +
+			"白色滑块那一种（见 tabs.go 的 mainTabs），不是下划线")
 	}
 	if !hasAccentBar(img, sort, accent) {
 		t.Errorf("次级排序那一排下面没有那条主色的横条——次级排序保持框架那一套" +
@@ -1138,8 +1137,8 @@ func TestRenderPageRhythmShots(t *testing.T) {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
-			// 60 搜索页：框里是当前关键词（不是空框），上面那一排是扁平的主 Tab，
-			// 下面那一排是下划线的次级排序——两排不是同一个样子。
+			// 60 搜索页：框里是当前关键词（不是空框），上面那一排是轨道 + 滑块的
+			// 主 Tab，下面那一排是下划线的次级排序——两排不是同一个样子。
 			st := newSearchStub(2, 4)
 			b := newTestShell(t, systemIsDark(dark))
 			s, tt := b.s, b.tt
@@ -1152,7 +1151,7 @@ func TestRenderPageRhythmShots(t *testing.T) {
 			homeFrame(tt)
 			save(t, dir, "60-搜索页-"+name+".png", tt)
 
-			// 61 收藏夹：头图区那个 30px 的大标题（下面那一排是扁平的主 Tab）。
+			// 61 收藏夹：头图区那个 30px 的大标题。
 			_, s2, tt2 := collectionShellWithTitle(t, "通勤路上", systemIsDark(dark))
 			_ = s2
 			tt2.Move(1180, 300)
