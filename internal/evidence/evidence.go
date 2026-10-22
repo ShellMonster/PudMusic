@@ -1691,6 +1691,16 @@ var Items = []Item{
 			"TestTheChromeSharesOneBackground",
 			"TestTheChromeStillHasASeparationFromTheBackground",
 			"TestCardsAndDialogsStillStandOffTheBackground",
+			// 播放条和内容区之间的**那道影**（票 #221）：上游是两层——外层 div
+			// 的 `shadow-2xl` + 里面 Card 的 `shadow="sm"`——值在
+			// `internal/ui/widgets/shadow` 里。
+			//
+			// 两条都要：一条量**画面上那两道线**（深色下认出它的是 Card 那档的
+			// 1 像素**内白边**，浅色下是条外面那道 1 像素外黑边），一条钉
+			// **值不许写在调用处**（外层那档朝下洒，在真窗口里几乎看不见，
+			// 画面上量不出「它是不是两档」）。
+			"TestThePlayBarHasTheUpstreamShadow",
+			"TestThePlayBarShadowComesFromTheShadowPackage",
 			// 设置页：封顶 900 + 居中（两档窗口都量），控件不横跨整行。
 			"TestTheSettingsContentIsCappedAndCentered",
 			"TestTheSettingsInputsAreNotFullRowWide",

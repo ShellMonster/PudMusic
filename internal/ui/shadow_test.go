@@ -1,4 +1,4 @@
-// 这一组验**八处阴影**（票 #179）。
+// 这一组验**九处阴影**（票 #179；播放条那一处是票 #221）。
 //
 // # 为什么用「单独画一样东西」的机器，而不是整页
 //
@@ -19,9 +19,18 @@
 // ⚠️ **深浅两套都要跑**：HeroUI 的 `shadow="sm|md|lg"` 深浅两套值不一样
 // （深色那套多一层 1 像素的白色**内**阴影，浅色那套那一层是外黑边），
 // 只跑浅色的话深色下那套值一次都没被验过。
+//
+// # 最后一处不一样：播放条那两道影是**上游那个结构**（票 #221）
+//
+// 别的八处都是「一档影落在一个元素上」，播放条是**两层**（外层 div 的
+// `shadow-2xl` + 里面 Card 的 `shadow="sm"`），所以它多断一条**源码**上的事：
+// 值不许写在调用处。
 package ui
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"image"
 	"testing"
 
@@ -36,6 +45,11 @@ import (
 const (
 	shadowW = 600
 	shadowH = 400
+	// shadowPad 是那台机器四周留的空白——**影落脚的地方**。
+	//
+	// 它同时是「那一块东西从哪儿起」的数：留白的左上角就是内容区的原点，
+	// 所以单独画的那一样东西摆在 (shadowPad, shadowPad) 上。
+	shadowPad = 60
 )
 
 // shadowScene 造一台只画一样东西的机器，返回它的 Tester。
@@ -53,7 +67,8 @@ func shadowScene(t *testing.T, dark bool, draw func(s *Shell, c *mygoui.Context)
 				s.applyFrameTheme(c)
 				uiBox(c).FillWidth().FillHeight().
 					Background(c.Theme().Background).
-					Padding(60, 60, 60, 60).Children(func() { draw(s, c) })
+					Padding(shadowPad, shadowPad, shadowPad, shadowPad).
+					Children(func() { draw(s, c) })
 			}
 		}))
 	b.tt.Frame()
@@ -310,4 +325,188 @@ func TestTheSpaceAvatarHasAShadow(t *testing.T) {
 				"UP 空间那个头像")
 		})
 	}
+}
+
+// TestThePlayBarHasTheUpstreamShadow 钉住**播放条**那一道影（票 #221）。
+//
+// 上游是**两层**（票 #221）：
+//
+//   - 外层那个 div 的 Tailwind `shadow-2xl`（`layout/index.tsx:48`）
+//   - 里面那张 Card 的 HeroUI `shadow="sm"`（`playbar/index.tsx:24`）
+//
+// 两层落在**同一个矩形**上（那个 div 是 `h-[88px] w-full`，Card 是 `h-full`
+// 铺满它），所以合成一层元素上的几道影，值都在 `internal/ui/widgets/shadow`。
+//
+// # 判据是那两道「线」，不是影有多浓
+//
+// 影是渐变的，浓度随主题和位置变；**能认出上游那一档的是两条线**：
+//
+//	深色：Card 那档的第三层是 1 像素的**内白边** → 播放条**第一行**比条身亮
+//	      （实测 +5；上游截图那一行是 #1e1e21 = 30，比条身 #18181b 亮 +6）
+//	浅色：同一档在浅色下**没有**内层，第三层是 1 像素的**外黑边** → 播放条
+//	      **上面那一行**比条身暗（实测 −22）
+//
+// ⚠️ **深浅两套的第三层不一样**：深色下那条线在条**里**，浅色下那条线在条
+// **外**。抄成一样的话，深色下播放条会「糊」在内容区上——上游专门用白边就是
+// 为了那个。
+//
+// ⚠️ **认的是深色那一半**：之前那道自己调的影（朝上、模糊 8）**浅色下也压得
+// 暗**（它本来就是朝上洒的），所以浅色那一半分不出新旧；分得出的是深色下
+// 那道**内白边**——之前那一道影没有内层，条的第一行和条身一模一样。
+func TestThePlayBarHasTheUpstreamShadow(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			with := shadowScene(t, dark, func(s *Shell, c *mygoui.Context) {
+				s.viewPlayBar(c, barState())
+			}).Image()
+			// 对照：**同一个场景，只少一个播放条**——两者之差就是那道影的贡献。
+			without := shadowScene(t, dark, func(s *Shell, c *mygoui.Context) {
+			}).Image()
+
+			// 播放条的上沿在 shadowPad 那儿（留白就是影落脚的地方）。
+			const top = shadowPad
+			assertShadowDarker(t, with, without,
+				mygoui.Rect{X: 200, Y: top - 1, W: 200, H: 1}, "播放条")
+
+			// 条身：离上沿远一点、又没控件的那一块（x=220 在歌名和「上一首」之间）。
+			body := with.RGBAAt(220, top+30)
+			rim := with.RGBAAt(220, top)     // 条的**第一行**
+			above := with.RGBAAt(220, top-1) // 条**上面**那一行
+
+			if dark {
+				// 深色：Card 那档的第三层是 1 像素的**内白边**。
+				d := int(rim.R) - int(body.R)
+				if d < 3 || d > 12 {
+					t.Errorf("深色下播放条第一行是 %v，条身是 %v（亮 %d）——"+
+						"上游那一档的内白边是 1 像素白（实测 +5，上游截图是 +6）",
+						rim, body, d)
+				}
+				return
+			}
+			// 浅色：同一档的第三层是 1 像素的**外黑边**，落在条**外面**。
+			d := int(body.R) - int(above.R)
+			if d < 10 || d > 60 {
+				t.Errorf("浅色下播放条上面那一行是 %v，条身是 %v（暗 %d）——"+
+					"上游那一档的外黑边是 1 像素 30%% 黑（实测 22）", above, body, d)
+			}
+			// 浅色下**不该有内白边**（上游那一档浅色下没有内层）。
+			if int(rim.R) != int(body.R) {
+				t.Errorf("浅色下播放条第一行是 %v，条身是 %v——"+
+					"上游那一档浅色下**没有**内层，多出来的是一层白边", rim, body)
+			}
+		})
+	}
+}
+
+// TestThePlayBarShadowComesFromTheShadowPackage 钉住「播放条那道影的值只写在
+// `internal/ui/widgets/shadow` 里」（DESIGN.md §四·五：「调用处不许现调
+// `Shadow(...)`」）。
+//
+// 三样都要：
+//
+//  1. `playbar.go` 里没有**元素级**的 `Shadow(...)` / `InsetShadow(...)` 调用
+//  2. `playbar.go` 走的是那个包（调 `shadow.PlayBar`）
+//  3. `widgets/shadow.PlayBar` 同时用了 `Tailwind2XL` 和 `HeroSmall`——
+//     **上游那两层都在**
+//
+// ⚠️ **第 3 条只能是源码级的**：外层那档 `shadow-2xl` 是**朝下**洒的
+// （+25、模糊 50），主体落在播放条**下面**——而播放条贴着窗口底边，于是那一档
+// 在真窗口里几乎看不见（深色下连一个色阶都不到）。画面上量它，量出来的是
+// 「它没有出现」，量不出「它是不是两档」。
+//
+// ⚠️ **第 1 条认的是元素级那套 API**（`Shadow(x, y, blur, spread, c)`，
+// 五个参数）：画笔那一套是 `p.Shadow(rect, radius, x, y, blur, spread, c)`，
+// 七个参数——那是框架画一枚控件的影用的，跟「上游那几档的值写在哪」无关。
+func TestThePlayBarShadowComesFromTheShadowPackage(t *testing.T) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "playbar.go", nil, 0)
+	if err != nil {
+		t.Fatalf("解析 playbar.go 失败：%v", err)
+	}
+
+	// 1. 不许现调元素级的影。
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || len(call.Args) != 5 {
+			return true
+		}
+		if sel.Sel.Name == "Shadow" || sel.Sel.Name == "InsetShadow" {
+			t.Errorf("playbar.go 里现调了 %s(...)——上游那几档的值只写在 "+
+				"`internal/ui/widgets/shadow` 里（DESIGN.md §四·五）",
+				sel.Sel.Name)
+		}
+		return true
+	})
+
+	// 2. 走的是那个包。
+	imported := false
+	for _, imp := range f.Imports {
+		if imp.Path.Value == `"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"` {
+			imported = true
+		}
+	}
+	if !imported {
+		t.Error("playbar.go 没有 import `internal/ui/widgets/shadow`——" +
+			"播放条那道影该从那个包里取")
+	}
+	if !callsName(f, "PlayBar") {
+		t.Error("playbar.go 没有调 `shadow.PlayBar(...)`——" +
+			"播放条那两道影（外层 2xl + Card 的 sm）是上游那个结构，取值走那一个出口")
+	}
+
+	// 3. 那一个出口里，两层都在。
+	sf, err := parser.ParseFile(fset, "widgets/shadow/shadow.go", nil, 0)
+	if err != nil {
+		t.Fatalf("解析 widgets/shadow/shadow.go 失败：%v", err)
+	}
+	var playBar *ast.FuncDecl
+	for _, decl := range sf.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name.Name == "PlayBar" {
+			playBar = fn
+		}
+	}
+	if playBar == nil {
+		t.Fatal("widgets/shadow 里没有 PlayBar——播放条那两道影的出口不见了")
+	}
+	for _, want := range []string{"Tailwind2XL", "HeroSmall"} {
+		if !callsName(playBar, want) {
+			t.Errorf("widgets/shadow.PlayBar 里没有 %s——上游播放条是**两层**"+
+				"（外层 div 的 shadow-2xl + Card 的 shadow=\"sm\"），少一层就不是上游那一档了",
+				want)
+		}
+	}
+}
+
+// callsName 报这个语法树里有没有调过那个名字的函数。
+//
+// ⚠️ **认的是「被调用的名字」**，不认是谁调的：包里的函数是 `Tailwind2XL(e)`
+// 那样直接调的，外面是 `shadow.PlayBar(...)` 那样带包名的——两种都算。
+func callsName(n ast.Node, name string) bool {
+	found := false
+	ast.Inspect(n, func(m ast.Node) bool {
+		if found {
+			return false
+		}
+		call, ok := m.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		switch fn := call.Fun.(type) {
+		case *ast.Ident:
+			found = fn.Name == name
+		case *ast.SelectorExpr:
+			found = fn.Sel.Name == name
+		}
+		return !found
+	})
+	return found
 }

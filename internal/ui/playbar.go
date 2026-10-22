@@ -12,6 +12,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -37,20 +38,6 @@ const (
 	// playbarRightGap 是右边那一组里键与键之间的缝。Biu 那一行是
 	// `space-x-2`（`playbar/right/index.tsx:13`），不是外面那一行的 12。
 	playbarRightGap = 8
-
-	// playbarShadowY / playbarShadowBlur / playbarShadowA 是播放条上缘那道阴影。
-	//
-	// Biu 那一层靠 `shadow-2xl`（`layout/index.tsx:48`）和 Card 上那层 `sm`
-	// 浮起来，而**底色和内容区是同一个**（`playbar/index.tsx:26` 的
-	// `bg-background`）。统一底色之后那道阴影就是这一条唯一的分界，去掉它
-	// 播放条会和内容区糊成一片（浅色下尤其明显：两边都是 `#ffffff`）。
-	//
-	// 三个数是照 Tailwind 的 `shadow-2xl` 抄的：`0 4px 8px -4px rgb(0 0 0/0.1)`，
-	// 往上翻一半（阴影往上洒，所以 y 取负的 2）再把浓度提到 0.24 ——上游那道在
-	// 88 高的条上是看得见的，而 0.1 在深色底上等于没有。
-	playbarShadowY    = -2
-	playbarShadowBlur = 8
-	playbarShadowA    = 0.24
 
 	// artistMinW 是 UP 名那一段最少留多宽。
 	//
@@ -79,8 +66,10 @@ const (
 // 🔴 **底色取 `Background`（和内容区同一个来源），靠一条阴影和侧栏分开**。
 //
 // Biu 的播放条是 `bg-background`（`layout/playbar/index.tsx:26` 的 `Card`），
-// 底色和内容区一样，分界靠的是外层那个 `shadow-2xl`
-// （`layout/index.tsx:48`）。我们原来取 `Surface`：**浅色下只差一档，
+// 底色和内容区一样，分界靠的是那**两道**影：外层 div 的 `shadow-2xl`
+// （`layout/index.tsx:48`）+ 里面那张 Card 的 `shadow="sm"`
+// （`layout/playbar/index.tsx:24`）——**深色下真正把那条线画出来的是后者**
+// （1 像素内白边）。我们原来取 `Surface`：**浅色下只差一档，
 // 深色下差一整级**（`#27272a` / `#18181b`），于是深色下界面裂成三条带
 // （票 #127 的头一条）。三处统一之后层次没丢：上面那条线在。
 //
@@ -129,38 +118,44 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 	s.builds.playbar++
 	t := c.Theme()
 
-	ui.Column(c).Key("playbar").Height(playbarHeight).PaddingX(playbarPadX).
-		Background(t.Background).
-		Shadow(0, playbarShadowY, playbarShadowBlur, 0, ui.RGBA(0, 0, 0, playbarShadowA)).
-		Children(func() {
-			ui.Row(c).Fill().Gap(12).AlignItems(ui.Center).Children(func() {
-				// 左：封面 + 歌名。封面与歌名之间是 8（coverGap），歌名与右边那两块
-				// 之间仍是 12。
-				ui.Row(c).Gap(coverGap).AlignItems(ui.Center).Grow(1).Children(func() {
-					s.viewCover(c, st)
-					s.viewTrackText(c, st, t)
-				})
-
-				// 中：控制在上、进度在下。Biu 的 playbar/center 就是一个 flex-col。
-				//
-				// 🔴 **这一列 `Grow(1)`**：进度条原来永远是 80 像素宽，因为中间这一列
-				// **不参与**剩余空间的分配——窗口从 900 拉到 1600，多出来的宽度全被
-				// 歌名吃掉。左边那一列和这一列**各分一半**多出来的那一份，于是
-				// 进度条随窗口单调变长（实测 900 → 195.7、1200 → 345.7、
-				// 1600 → 545.7，每一档正好是窗口宽的一半；整张表见上面那段）。
-				//
-				// 上游那边中间那一份更大（`grid-cols-[minmax(0,1fr)_minmax(0,3fr)_minmax(0,1fr)]`），
-				// 但那一套是**三列都按比例**分的，而右边那一组是**定宽**的（六个键
-				// 加五道缝），照抄过来右边那一份会被挤扁——所以这里取「一半」这个
-				// 折中：左边那一份仍然够摆封面加歌名，进度条也真的长起来了。
-				ui.Column(c).Gap(2).Grow(1).Children(func() {
-					s.viewTransport(c, st)
-					s.viewProgress(c, st)
-				})
-
-				s.viewPlayBarRight(c, st)
+	// ⚠️ **那道影是上游的两层**（外层 div 的 `shadow-2xl` + Card 自己的
+	// `shadow="sm"`），值都在 `internal/ui/widgets/shadow` 里（DESIGN.md §四·五：
+	// 调用处不许现调 `Shadow(...)`）。
+	//
+	// **底色和内容区是同一个**（上游 `playbar/index.tsx:26` 的 `bg-background`），
+	// 所以影是这一条唯一的分界——去掉它播放条会和内容区糊成一片（浅色下尤其
+	// 明显：两边都是 `#ffffff`）。
+	bar := shadow.PlayBar(ui.Column(c).Key("playbar").Height(playbarHeight).
+		PaddingX(playbarPadX).Background(t.Background), t)
+	bar.Children(func() {
+		ui.Row(c).Fill().Gap(12).AlignItems(ui.Center).Children(func() {
+			// 左：封面 + 歌名。封面与歌名之间是 8（coverGap），歌名与右边那两块
+			// 之间仍是 12。
+			ui.Row(c).Gap(coverGap).AlignItems(ui.Center).Grow(1).Children(func() {
+				s.viewCover(c, st)
+				s.viewTrackText(c, st, t)
 			})
+
+			// 中：控制在上、进度在下。Biu 的 playbar/center 就是一个 flex-col。
+			//
+			// 🔴 **这一列 `Grow(1)`**：进度条原来永远是 80 像素宽，因为中间这一列
+			// **不参与**剩余空间的分配——窗口从 900 拉到 1600，多出来的宽度全被
+			// 歌名吃掉。左边那一列和这一列**各分一半**多出来的那一份，于是
+			// 进度条随窗口单调变长（实测 900 → 195.7、1200 → 345.7、
+			// 1600 → 545.7，每一档正好是窗口宽的一半；整张表见上面那段）。
+			//
+			// 上游那边中间那一份更大（`grid-cols-[minmax(0,1fr)_minmax(0,3fr)_minmax(0,1fr)]`），
+			// 但那一套是**三列都按比例**分的，而右边那一组是**定宽**的（六个键
+			// 加五道缝），照抄过来右边那一份会被挤扁——所以这里取「一半」这个
+			// 折中：左边那一份仍然够摆封面加歌名，进度条也真的长起来了。
+			ui.Column(c).Gap(2).Grow(1).Children(func() {
+				s.viewTransport(c, st)
+				s.viewProgress(c, st)
+			})
+
+			s.viewPlayBarRight(c, st)
 		})
+	})
 }
 
 // viewPlayBarRight 是播放条右边那一组。**次序照 Biu 的 `playbar/right`**：

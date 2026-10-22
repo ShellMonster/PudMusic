@@ -96,6 +96,24 @@ func Tailwind2XL(e ui.Element) ui.Element {
 	return e.Shadow(0, 25, 50, -12, ui.RGBA(0, 0, 0, tailwindBlack25))
 }
 
+// PlayBar 是播放条那一整套影：**外层那个 div 的 Tailwind `shadow-2xl` +
+// 里面那张 Card 的 HeroUI `shadow="sm"`**。
+//
+// 上游那两层落在**同一个矩形**上（`layout/index.tsx:48` 那个 div 是
+// `h-[88px] w-full`，里面 `playbar/index.tsx:24` 那张 Card 是 `h-full` 铺满它），
+// 所以这里一层元素上就够。
+//
+// ⚠️ **顺序不能反**：上游是 Card（子元素）压着外层 div 的影，而 MyGo 的影按
+// 加进去的先后画（**后加的压在上面**）——所以 `shadow-2xl` 先加、`shadow="sm"`
+// 后加。反了的话深色下那道 1 像素的内白边会被 `shadow-2xl` 那层糊掉。
+//
+// ⚠️ **两层是上游那个结构，不是两套随便挑的**：外层那档朝下洒 25、模糊 50，
+// 于是它**在播放条下方**（窗口外，看不见），真正落在内容区那一侧的是 Card
+// 自己那档 `shadow="sm"`（深色下 1 像素内白边，浅色下 1 像素外黑边）。
+func PlayBar(e ui.Element, t *ui.Theme) ui.Element {
+	return HeroSmall(Tailwind2XL(e), t)
+}
+
 // HeroSmall 是 HeroUI 的 `shadow="sm"`（`--heroui-box-shadow-small`）。
 //
 // 浅色：`0 0 5px 0 rgb(0 0 0/0.02), 0 2px 10px 0 rgb(0 0 0/0.06),
