@@ -20,6 +20,7 @@ package ui
 import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -295,8 +296,17 @@ func (s *Shell) colorItem(c *ui.Context, label, hex string, ro, overridden bool,
 	t := c.Theme()
 	col := colorOfHex(hex)
 	ui.Column(c).Width(colorItemWidth).Gap(4).Children(func() {
-		ui.Box(c).Width(colorItemWidth).Height(colorItemHeight).Radius(t.Radius).
-			Background(col).Border(1, t.Border).Children(func() {
+		// ⚠️ **那一圈影是上游给的**：Biu 那一格是
+		// `<Card as="div" isPressable radius="md" shadow="sm" className="border-default
+		// w-[100px] border">`（`pages/settings/color-settings.tsx:24`）——一张
+		// HeroUI 的卡，带描边和 `shadow="sm"`。
+		//
+		// HeroUI 的 `shadow="sm"` 深浅两套值不一样（见 `widgets/shadow` 的文件头）：
+		// 浅色那套是 1 像素的**外**黑边，深色那套是 1 像素的**内**白边。这一格是
+		// 一块**纯色**，深色下那道白边就是它和底下那一页之间的分界。
+		swatch := shadow.HeroSmall(ui.Box(c).Width(colorItemWidth).Height(colorItemHeight).
+			Radius(t.Radius).Background(col).Border(1, t.Border), t)
+		swatch.Children(func() {
 			if ui.ColorWell(c, &col).Fill().Disabled(ro).Label(label).Changed() {
 				set(toHex(col))
 			}

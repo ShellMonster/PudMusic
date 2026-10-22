@@ -342,6 +342,14 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 				}
 			}
 		})
+		// ⚠️ **指针移上去时那个圆头像放大 5%**：上游顶栏那一枚是
+		// `<Avatar ... className="mr-4 cursor-pointer transition-transform
+		// hover:scale-105" />`（`layout/navbar/user/index.tsx:178`）。放大的是
+		// **整个圆**（上游那个类加在 Avatar 上），不是里面那张图。
+		//
+		// ⚠️ hover 要在 Children **之前**问（理由同 `widgets/list` 的 grid.go）。
+		on := face.Hovered()
+		face = hoverZoom(c, face, "avatar-zoom", on)
 		face.Children(func() { s.viewAvatarFace(c) })
 	})
 }

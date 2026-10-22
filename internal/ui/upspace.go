@@ -39,6 +39,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -598,16 +599,31 @@ func spaceName(u app.User) string {
 
 // spaceAvatar 画头像。**没有头像画一个圆底色**，不是画一个「加载失败」。
 //
-// shadow 说要不要带一圈 `shadow-lg`（Tailwind：`0 10px 15px -3px` 与
+// withShadow 说要不要带一圈 `shadow-lg`（Tailwind：`0 10px 15px -3px` 与
 // `0 4px 6px -4px`，都是 10% 黑）。**只有大号头像带**——上游给 UP 空间头像
 // 那一处写了 `shadow-lg`（`space-info.tsx:89`），列表里那些小头像没有；
 // 全都加上去的话，一排动态的作者头像会各带一圈影，看起来像浮在卡片上。
-func (s *Shell) spaceAvatar(c *ui.Context, face string, side float32, shadow bool) {
+func (s *Shell) spaceAvatar(c *ui.Context, face string, side float32, withShadow bool) {
+	s.spaceAvatarZoom(c, face, side, withShadow, "", false)
+}
+
+// spaceAvatarZoom 是 spaceAvatar 加一个「指针移上去放大」。
+//
+// zoomKey 非空串时才放大——那一格每一帧都要重建，而动画的值记在**节点的状态**
+// 上，身份跨帧不变才有那份状态（见 `hoverzoom.go` 的文件头）。on 是这一帧指针
+// 在不在它上面。
+//
+// ⚠️ **放大的是整个头像（那个圆），不是里面那张图**：上游那一处写的是
+// `hover:scale-105`，加在 `<Avatar>` 上（`dynamic-feed/user.tsx:46`），而 Avatar
+// 整个是圆的——所以圆自己长大 5%。图在框里放大是另一回事（那是封面那一处）。
+func (s *Shell) spaceAvatarZoom(c *ui.Context, face string, side float32, withShadow bool, zoomKey string, on bool) {
 	t := c.Theme()
 	box := ui.Box(c).Size(side, side).Radius(side / 2).Clip().Label(face)
-	if shadow {
-		box = box.Shadow(0, 10, 15, -3, ui.RGBA(0, 0, 0, 0.1)).
-			Shadow(0, 4, 6, -4, ui.RGBA(0, 0, 0, 0.1))
+	if withShadow {
+		box = shadow.TailwindLG(box)
+	}
+	if zoomKey != "" {
+		box = hoverZoom(c, box, zoomKey, on)
 	}
 	box.Children(func() {
 		if st := s.images.Get(face); face != "" && st.Ready() {
@@ -646,12 +662,36 @@ func (s *Shell) spaceFill(c *ui.Context, url string, h float32) {
 // ⚠️ **带一个 `Label`**：没有它这些图对方块是全隐形的——读屏软件念不出来，
 // 无头 Tester 也量不到（它只认 label / text，不认图片）。头像和头图同理。
 func (s *Shell) spaceThumb(c *ui.Context, url string, w, h float32) {
+	s.spaceThumbZoom(c, url, w, h, "", false)
+}
+
+// spaceThumbZoom 是带 hover 放大的那一版封面。
+//
+// zoomKey 非空串时才放大（理由同 `spaceAvatarZoom`）。on 是这一帧指针在不在
+// 它上面。
+//
+// ⚠️ **放大的是里面那张图，不是外面那个框**：上游那一处是
+// `<Image className="h-full w-full transition-transform duration-300
+// group-hover:scale-105">`（`user-profile/grid-card/index.tsx:26`），而那个框是
+// `overflow-hidden` 的——于是画面上是「图在框里涨大 5%」，**框不动**。
+//
+// 框要是自己长大，它就会压到旁边的字上（那一行是「封面 + 标题 + 条数」）。
+//
+// ⚠️ **标签挂在外面的框上**：外面那个框**不放大**（放大的是框里那张图），所以
+// 标签挂在框上，量到的就是**框**的尺寸——而框不动正是上游的样子。
+func (s *Shell) spaceThumbZoom(c *ui.Context, url string, w, h float32, zoomKey string, on bool) {
 	t := c.Theme()
 	ui.Box(c).Size(w, h).Clip().Label(url).Children(func() {
 		if st := s.images.Get(url); url != "" && st.Ready() {
-			ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(w, h)
+			img := ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(w, h)
+			if zoomKey != "" {
+				hoverZoom(c, img, zoomKey, on)
+			}
 			return
 		}
+		// ⚠️ **还没下下来的那一格不放大**：放大的是**那张图**，还没下下来的图
+		// 没有可放大的东西。上游也一样（`emptyPlaceholder` 是另一个元素，那个
+		// `scale-105` 加在 `<Image>` 上）。
 		ui.Box(c).Size(w, h).Background(t.Surface)
 	})
 }

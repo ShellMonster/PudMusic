@@ -54,6 +54,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -341,6 +342,7 @@ func (d *downloadsPage) emptyState() emptyState {
 // 这一张表上它落成的是**滚动锚点**：用户滚到下面、在上面删掉一条，屏幕上
 // 还是那几首歌。`TestDeletingARowAboveKeepsTheTopRowWhereItIs` 钉的就是它。
 func (d *downloadsPage) viewTable(c *ui.Context, s *Shell) {
+	t := c.Theme()
 	// Label 是这一行给无障碍和「打字选中」用的名字。
 	d.state.Label = func(i int) string {
 		if i < 0 || i >= len(d.rows) {
@@ -357,10 +359,22 @@ func (d *downloadsPage) viewTable(c *ui.Context, s *Shell) {
 		return d.rows[i].ID
 	}
 
-	e := ui.Table(c, &d.state, downloadColumns, len(d.rows), func(row, col int) {
-		d.viewCell(c, s, row, col)
-	}).Grow(1)
-	s.trackScrollbar(e)
+	// ⚠️ **表格外面套一张卡**：上游那一页是
+	// `<Card radius="md" shadow="sm">`（`pages/download-list/index.tsx:105`），
+	// 表格在卡片里面。那张卡有两样东西——**底色**和**那一圈影**——而影是这一票
+	// 要的（票 #179 的「下载表」那一项）。
+	//
+	// 底色用 `t.Surface`：上游那张卡是 `bg-content1`，那是「卡片面」那一档。
+	// ⚠️ **深色下这一档和背景只差一两个色阶**（上游 `content1 = #18181b`、背景
+	// `#17181a`），**靠的是那圈影分层而不是靠底色亮一级**（DESIGN.md §4）。
+	card := shadow.HeroSmall(ui.Box(c).Grow(1).FillHeight().
+		Radius(t.Radius).Background(t.Surface).Clip(), t)
+	card.Children(func() {
+		e := ui.Table(c, &d.state, downloadColumns, len(d.rows), func(row, col int) {
+			d.viewCell(c, s, row, col)
+		}).Grow(1)
+		s.trackScrollbar(e)
+	})
 }
 
 // dlRowKey 是「下标越界」时给的行身份。一个歌不可能撞上的类型。

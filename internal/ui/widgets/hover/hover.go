@@ -34,6 +34,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -261,7 +262,7 @@ func RowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 // 类，两边都是「封面 + 两行字浮在页面上」，那不是差距（票面「不要做」里点名了）。
 func CardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 	on bool, playCount, clock, title string, play func()) {
-	cardCover(c, cache, url, w, h, on, playCount, clock, FromLabel(title), PlayFrom, play)
+	cardCover(c, cache, url, w, h, on, playCount, clock, FromLabel(title), PlayFrom, play, false)
 }
 
 // CardCoverOne 是同一圈反馈，但按下去**只放这一首**（`PlayNow`）。
@@ -269,17 +270,33 @@ func CardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 // 首页「新歌速递」那一块用它：那张卡片单击就换掉整个队列只放这一首（上游
 // `new-music-top.tsx` 的 `handlePlay`），和网格卡片「从这一首往后接」不是一件事。
 // 两处的视觉是同一套——同一个应用里同一个手势不该长出两个样子。
+//
+// ⚠️ **只有这一处的封面自己带一圈影**（`shadow-md`，上游
+// `new-music-top.tsx:234` 的 `rounded-medium shadow-md`）。网格卡片那张封面
+// **没有**：上游 `music-card/index.tsx:32` 的 `<Image>` 上没有任何 shadow 类，
+// 它只有底下那条渐变和右下角那个带影的播放钮。
 func CardCoverOne(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 	on bool, title string, play func()) {
-	cardCover(c, cache, url, w, h, on, "", "", PlayLabel(title), PlayNow, play)
+	cardCover(c, cache, url, w, h, on, "", "", PlayLabel(title), PlayNow, play, true)
 }
 
 // cardCover 是 CardCover / CardCoverOne 共用的那一层：封面 + 上面那一圈反馈。
+//
+// coverShadow 说**封面自己**要不要带一圈影（见 CardCoverOne 顶上那一段）。
+//
+// ⚠️ **影加在封面这一格上，不加在里面的图上**：影是**盒子外面**那一圈，而这一格
+// 是裁着的（`Clip`）——影于是画在封面的四周，正好是上游那个 `shadow-md` 的样子。
+// 加在里面的图上会变成「图在框里放大」，那是另一回事（hover 放大才那么做）。
 func cardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
-	on bool, playCount, clock, label, tip string, play func()) {
+	on bool, playCount, clock, label, tip string, play func(), coverShadow bool) {
 	t := c.Theme()
 
-	ui.Box(c).Size(w, h).Radius(t.Radius).Clip().Children(func() {
+	cover := ui.Box(c).Size(w, h).Radius(t.Radius).Clip()
+	if coverShadow {
+		// `shadow-md` = `0 4px 6px -1px rgb(0 0 0/0.1), 0 2px 4px -2px rgb(0 0 0/0.1)`。
+		cover = shadow.TailwindMD(cover)
+	}
+	cover.Children(func() {
 		imgcache.View(c, cache, url, w, h)
 		cardOverlay(c, w, h, on, playCount, clock, label, tip, play)
 	})
@@ -327,6 +344,14 @@ func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock, label, 
 	circle := ui.Box(c).Key(key+":btn").Size(btn, btn).Radius(btn/2).
 		Background(t.Accent).
 		Attach(ui.AnchorBottomRight, ui.AnchorBottomRight).Right(btnInset).Bottom(btnInset)
+	// ⚠️ **那一圈影是 `shadow-2xl`**（上游 `music-card/index.tsx:51` 的
+	// `<div className="bg-primary rounded-full shadow-2xl">`）：
+	// `0 25px 50px -12px rgb(0 0 0/0.25)`——**只有一层，颜色是 25% 黑**。
+	//
+	// 影落在**盒子外面**，而这一枚是贴在封面里的（`Attach`）——所以右边和下边那
+	// 两半影会被封面的圆角裁掉，**看得见的是左边和上边那一圈**。上游也一样：
+	// 那一枚在 `overflow-hidden` 的封面里（`music-card/index.tsx:33`）。
+	shadow.Tailwind2XL(circle)
 
 	show(circle, a).Children(func() {
 		e := ui.Box(c).Size(btn, btn).Label(key).Tooltip(tip).Center().

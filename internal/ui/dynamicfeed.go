@@ -339,11 +339,13 @@ func (s *Shell) viewAuthorRow(c *ui.Context, f *dynamicFeed, i int) {
 
 	box := ui.Row(c).Grow(1).Key("feed-author:" + strconv.FormatInt(mid, 10)).
 		Gap(12).Padding(8).Radius(6).AlignItems(ui.Center)
+	// ⚠️ hover 要在 Children **之前**问（理由同 `widgets/list` 的 grid.go）。
+	on := box.Hovered()
 	if all {
 		// 「全部」是**当前就在看的那一个**：主色底，和侧栏选中收藏夹同一套
 		// 颜色（见 sidebar_favorites.go 的 cur 那一支）。
 		box = box.Background(t.Accent)
-	} else if box.Hovered() {
+	} else if on {
 		box = box.Background(t.SurfaceHover)
 	}
 	if box.Clicked() && !all {
@@ -354,7 +356,12 @@ func (s *Shell) viewAuthorRow(c *ui.Context, f *dynamicFeed, i int) {
 			// 「全部」没有头像。给一个方块底子，一眼能认出「这不是某个人」。
 			ui.Box(c).Size(authorAvatarS, authorAvatarS).Radius(6).Background(t.Surface)
 		} else {
-			s.spaceAvatar(c, face, authorAvatarS, false)
+			// ⚠️ **指针移上去时那个圆头像放大 5%**：上游作者栏那一行是
+			// `<Avatar className="h-9 w-9 shrink-0 rounded-full transition-transform
+			// hover:scale-105">`（`dynamic-feed/user.tsx:46`）。放大的是**整个圆**
+			// （上游那个类加在 Avatar 上），不是里面那张图。
+			s.spaceAvatarZoom(c, face, authorAvatarS, false,
+				"feed-author-zoom:"+strconv.FormatInt(mid, 10), on)
 		}
 		ui.Text(c, name).Grow(1).FontSize(scale.Font(c, 14)).MaxLines(1).Ellipsis("…")
 	})

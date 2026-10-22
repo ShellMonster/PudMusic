@@ -16,6 +16,7 @@ package list
 import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -90,9 +91,18 @@ func BackToTop(c *ui.Context, offset float32, top func()) {
 		if btn.Absolute().
 			Right(backTopRight).Bottom(backTopBottom).
 			Radius(backTopRadius).Background(t.SurfaceHover).
-			Shadow(0, 2, 6, 0, ui.RGBA(0, 0, 0, 0.18)).
 			Clicked() {
 			top()
 		}
+		// ⚠️ **影子在 `Clicked()` 之后装**：那一圈影是**外面**的（`Shadow` 只画在
+		// 盒子外面），而 `Absolute` 那一支是这一格的位置——两件事互不相干，装的
+		// 先后也一样。放在后面只是因为读的时候「先摆位置，再加影」顺一点。
+		//
+		// 数值照上游 `shadow-xl shadow-black/30`（`components/scroll-container/
+		// index.tsx:82`）：**30% 黑**、两档（`0 20px 25px -5px` 与
+		// `0 8px 10px -6px`）。原来这里是 `0 2 6 0 18%`——那是我们自己的一档，
+		// 比上游淡得多，而这一枚是**浮在内容上面**的按钮：它和底下那一行歌名之间
+		// 就靠这圈影分界，影太淡时它看着像印在歌名上的一个箭头。
+		shadow.TailwindXLBlack30(btn)
 	})
 }
