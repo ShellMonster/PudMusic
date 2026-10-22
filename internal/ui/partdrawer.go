@@ -103,9 +103,9 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 	// ⚠️ **这一段原来写的是「另外三个键（赞 / 收藏 / 下载）」**——票 #127 把
 	// 「下载」搬到了播放条右边那一组，而它跟着那一组换了尺寸（`iconMd`），
 	// 所以「照另外三个键」这句话连数量都不对了。
-	btn := iconButton(c, iconPageList, "分集", iconSm).
-		Size(iconHit, iconHit).Padding(0, 7).
-		Tooltip(partEntryTooltip(parts, cur, s.app.PartsWorthAsking(), s.app.PartsErr()))
+	btn := s.withTip(c, iconButton(c, iconPageList, "分集", iconSm).
+		Size(iconHit, iconHit).Padding(0, 7),
+		partEntryTooltip(parts, cur, s.app.PartsWorthAsking(), s.app.PartsErr()))
 	if btn.Clicked() {
 		s.partOpen = !s.partOpen
 	}

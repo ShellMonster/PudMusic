@@ -61,12 +61,14 @@ const (
 
 	// volHoverDelay 是「指针停在音量图标上」到浮层出来之间的那一下延迟。
 	//
-	// 300 毫秒照上游（`music-volume` 那个 Tooltip 的 `delay={300}`）。
+	// 300 毫秒照上游（`music-volume` 那个 Tooltip 的 `delay={300}`）；这个数和
+	// `tooltip.go` 的 `tipDelayVolume` 是同一个——浮层虽然是自己画的，但它在
+	// 上游就是那个 Tooltip，时延不能和别处的提示分家。
 	//
 	// ⚠️ **没有这一下的坏处**：指针**扫过**那一枚图标的时候浮层就弹出来，
 	// 而它弹在内容区里（播放条的上方）——用户从左边划到倍速键，中间扫过音量
 	// 那一枚，于是内容区里闪一下一个竖滑块。
-	volHoverDelay = 300 * time.Millisecond
+	volHoverDelay = tipDelayVolume
 
 	// volPanelW 是音量浮层里那一列的宽度。
 	//

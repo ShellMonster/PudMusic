@@ -7,6 +7,8 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -196,6 +198,9 @@ func uiSpaceData(b *uiExplore, name string, attribute int, follower int64) {
 	b.on("/x/space/wbi/acc/info", func(w http.ResponseWriter, r *http.Request) {
 		uiExploreJSON(w, 0, map[string]any{
 			"mid": 42, "name": name, "sign": "这是一个签名", "level": 4,
+			// ⚠️ **头像地址是量尺寸用的**：`spaceAvatar` 把它挂在 Label 上，
+			// 无头 Tester 靠它找到那个盒子。空串的话头像照样画，但量不到。
+			"face":         "https://f/face-42.jpg",
 			"top_photo_v2": map[string]string{"l_200h_img": "https://f/banner.jpg"},
 			"official":     map[string]any{"role": 0},
 		})
@@ -1243,4 +1248,72 @@ func rowKeys(sp *upSpace, tab, n int) []any {
 		out = append(out, upRowKey(sp, tab, i))
 	}
 	return out
+}
+
+// TestTheSpaceAvatarIs140AndTheHeaderPads32 钉住头图区那两个数：
+// 头像 140（上游 `space-info.tsx:89` 的 `h-[140px] w-[140px]`）、左右留白 32
+// （同一行的 `px-8`，`space-info.tsx:83`）。
+func TestTheSpaceAvatarIs140AndTheHeaderPads32(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "量尺寸的 UP 主", 0, 123456)
+	s, tt, _ := newSpaceShell(t, b, true, "77")
+	openSpace(t, s, tt, 42)
+
+	av, ok := tt.Find("https://f/face-42.jpg")
+	if !ok {
+		t.Fatalf("画面上找不到头像，文字有 %q", tt.Texts())
+	}
+	if av.W != 140 || av.H != 140 {
+		t.Errorf("头像量出来是 %.1f×%.1f，want 140×140", av.W, av.H)
+	}
+
+	winW := float32(tt.Image().Bounds().Dx())
+	pageLeft := float32(sideTargetWidth(s.app.SettingsSnapshot()))
+	if got := av.X - pageLeft; got != 32 {
+		t.Errorf("头像离页面左缘 %.1f，want 32（上游头像那一行是 px-8）", got)
+	}
+	name, ok := tt.Find("量尺寸的 UP 主")
+	if !ok {
+		t.Fatalf("画面上找不到昵称，文字有 %q", tt.Texts())
+	}
+	if got := name.X - (av.X + av.W); got != 16 {
+		t.Errorf("昵称离头像右边 %.1f，want 16（上游头像和文字之间是 space-x-4）", got)
+	}
+	lv, ok := tt.Find("Lv4")
+	if !ok {
+		t.Fatalf("画面上找不到「Lv4」，文字有 %q", tt.Texts())
+	}
+	if got := winW - (lv.X + lv.W); got != 32 {
+		t.Errorf("统计离页面右缘 %.1f，want 32（上游同一行 px-8）", got)
+	}
+
+	// 头图区 200 高：头像上沿离页面顶 44（200 - 16 - 140），下沿再留 16。
+	if av.Y-64 != 44 {
+		t.Errorf("头像上沿在 %.1f（页面顶 64 往下 %.1f），want 44", av.Y, av.Y-64)
+	}
+
+	// 头像那圈 `shadow-lg`：头像正下方那一带的底色，要比同一块头图的别处暗。
+	// 没有影子的版本实测是 0 个暗像素——判据取 200，离「有」和「没有」都远。
+	img := tt.Image()
+	ref := img.RGBAAt(int(av.X+av.W+60), int(av.Y+av.H+3))
+	shadowed := mygoui.Rect{X: av.X + 20, Y: av.Y + av.H + 1, W: av.W - 40, H: 8}
+	plain := mygoui.Rect{X: av.X + 250, Y: av.Y + av.H + 1, W: 100, H: 8}
+	if n := darkerIn(img, shadowed, ref, 2); n < 200 {
+		t.Errorf("头像底下的影子只有 %d 个暗像素（没有影子的地方是 %d 个）——"+
+			"`shadow-lg` 没画出来", n, darkerIn(img, plain, ref, 2))
+	}
+}
+
+// darkerIn 数 box 里比 ref 暗（每个通道都低过 tol）的像素个数。
+func darkerIn(img *image.RGBA, box mygoui.Rect, ref color.RGBA, tol int) int {
+	n := 0
+	for y := int(box.Y); y < int(box.Y+box.H); y++ {
+		for x := int(box.X); x < int(box.X+box.W); x++ {
+			c := img.RGBAAt(x, y)
+			if int(c.R)+tol < int(ref.R) && int(c.G)+tol < int(ref.G) && int(c.B)+tol < int(ref.B) {
+				n++
+			}
+		}
+	}
+	return n
 }

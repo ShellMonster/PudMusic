@@ -296,10 +296,9 @@ func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 	// icons.go 那四个函数的头一段：调用点一旦自己也能决定画哪张，「哪一档配哪
 	// 一张」就没有钉住的地方了。
 	name := likeIcon(rel.Liked)
-	btn := iconButton(c, name, label, iconSm).
-		Size(iconHit, iconHit).Padding(0, 7).
-		TextColor(color).
-		Tooltip(likeStarTooltip(rel.Liked, s.app.LikeErr() != nil && !s.app.LikeAsked()))
+	btn := s.withTip(c, iconButton(c, name, label, iconSm).
+		Size(iconHit, iconHit).Padding(0, 7).TextColor(color),
+		likeStarTooltip(rel.Liked, s.app.LikeErr() != nil && !s.app.LikeAsked()))
 	if btn.Clicked() {
 		s.app.SetLike(!rel.Liked, func(err error) {
 			if err != nil {

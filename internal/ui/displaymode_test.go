@@ -679,6 +679,12 @@ func TestTheGridStillPagesOnARealPage(t *testing.T) {
 // 最窄窗口是**两列**——三首歌占两行，第二行在 560 高的窗口外面。三首里少一首是
 // 对的，不是坏了。
 //
+// ⚠️ **网格那一档只要求头一首**：歌名在卡片的最下面（封面 140 在上面），而主 Tab
+// 对齐上游 40 高之后（票 #171），最窄窗口里第二张卡的歌名那一行正好落到可视区
+// 底下——卡片和封面都还在，裁掉的只是那一行字。这不是「画崩了」，两列这件事由
+// 宽窗口的 `TestEveryPageFollowsTheDisplayStyleSetting` 钉着；这里管的是「挤到
+// 最窄时每一档都还画得出来」。
+//
 // ⚠️ 「画不出来」那一句是**兜住 panic 的占位**（`widgets/list` 的 `guardFailed`）：
 // 一格画崩了就是它。不崩就没有那一句——所以它是「没崩」的直接判据，比「有几首可见」
 // 灵敏得多。
@@ -697,7 +703,11 @@ func TestEveryViewSurvivesTheNarrowestWindow(t *testing.T) {
 				if tt.HasText("画不出来") {
 					t.Errorf("%s 那一档下画面上有「画不出来」：%q", m, tt.Texts())
 				}
-				for _, n := range titles[:2] {
+				want := titles[:2]
+				if m == app.DisplayModeCard {
+					want = titles[:1] // 理由见函数头上那一段
+				}
+				for _, n := range want {
 					if r, ok := tt.Find(n); !ok || r.W <= 0 || r.H <= 0 {
 						t.Errorf("%s 那一档下 %q 不在画面上（%v）", m, n, r)
 						break
