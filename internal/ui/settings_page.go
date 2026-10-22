@@ -146,18 +146,6 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 	// 那边也这么写）。它是在说「别让控件看起来还能按」这件事，而举的例子举错了。
 	ro := s.app.SettingsReadOnly()
 
-	// 切走就停录：`FocusBind` 的「焦点在哪一格」在控件没建出来时会一直等下去，
-	// 切回来时焦点又回到那一格，用户在还没准备好的时候敲的第一下键就被录进去了。
-	if s.settings.tab != settingsTabShortcut {
-		s.recording = shortcutSlot{}
-		s.rejected = shortcutSlot{}
-	}
-
-	// 按 Tab 时回到顶上：Biu 换了面板就是新的一页。
-	if last, tab := s.settings.shownTab, s.settings.tab; last != tab {
-		s.settings.shownTab, s.settings.scroll.Y = tab, 0
-	}
-
 	scroll := ui.Scroll(c).Key("settings-scroll").Grow(1).TrackScroll(&s.settings.scroll)
 	scroll.Children(func() {
 		// 这一层是 `m-auto`：Column 的横向对齐（跨轴），所以内容那一段在
@@ -204,6 +192,29 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 	// ⚠️ **这一页滚的是整页**（外面那个 `ui.Scroll`），不是某一栏——所以位置就是
 	// 那一个 `ScrollState`。
 	list.BackToTop(c, s.settings.scroll.Y, func() { s.settings.scroll.Y = 0 })
+}
+
+// syncSettings 是设置页每帧的副作用：切走就停录、换 Tab 就回到顶上。
+//
+// ⚠️ **它们原来在 `viewSettings` 的最开头**，而设置页在满屏开着的时候不画
+// （票 #161）——不挪的话，用户在满屏里看频谱的那几分钟里，「正在录快捷键」那一
+// 格还记着上一次录到一半的东西。
+//
+// ⚠️ **读的是上一帧的 `s.settings.tab`**：那一格是 `mainTabs` 在画的时候写的，
+// 而这一句原来也在 `mainTabs` 之前——所以挪过来之后读到的还是同一个值，行为
+// 一模一样。
+func (s *Shell) syncSettings(c *ui.Context) {
+	// 切走就停录：`FocusBind` 的「焦点在哪一格」在控件没建出来时会一直等下去，
+	// 切回来时焦点又回到那一格，用户在还没准备好的时候敲的第一下键就被录进去了。
+	if s.settings.tab != settingsTabShortcut {
+		s.recording = shortcutSlot{}
+		s.rejected = shortcutSlot{}
+	}
+
+	// 按 Tab 时回到顶上：Biu 换了面板就是新的一页。
+	if last, tab := s.settings.shownTab, s.settings.tab; last != tab {
+		s.settings.shownTab, s.settings.scroll.Y = tab, 0
+	}
 }
 
 // settingSection 是一组设置上面的那个标题。Biu 用的是 `<h2>`（system-settings.tsx

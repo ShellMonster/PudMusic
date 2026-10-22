@@ -211,6 +211,14 @@ type Shell struct {
 	// **只由 view 在主线程上读写**，不跨 goroutine（铁律一）。
 	full fullPlayer
 
+	// pageBuilds 是「路由页被建了几次」。**给测试看的探针**（理由同
+	// `full.bgDraws`）：满屏开着的时候底下那一页不该再被建，而「有没有被建」
+	// 在界面上看不出来——它被一层不透明的浮层整个盖着。
+	//
+	// ⚠️ 数的是 `Shell.page` 那一次分派（`router.go`）：换页动画期间离场的那
+	// 一页也会被建一次，所以这个数在换页那一帧会跳两下——那是对的，两页都建了。
+	pageBuilds int
+
 	// like 是长按封面 2.5 秒一键三连那一摊，见 like.go。
 	// **同样只由 view 在主线程上读写**。
 	//
@@ -1222,29 +1230,17 @@ func (s *Shell) viewMain(c *ui.Context) {
 	//
 	// 排在 `syncSearchWatch` 之后：这一句会 `addToast`，而上面那一句收的是
 	// 「搜索页那个钟」的状态。两句互不相干，先后无所谓，但**都必须在
-	// `s.app.Snapshot()` 之前**——那一行拿的是这一帧要画的播放状态。
+	// `drawUnderlay` 之前**——那一句拿的是这一帧要画的播放状态。
 	s.announceMigration()
 
-	st := s.app.Snapshot()
-
-	ui.Column(c).Fill().Children(func() {
-		// 顶栏同样外面包一层 Guard（铁律三）：它坏了坏掉的是整条顶栏，
-		// 用户连窗口都拖不动了，而出错的地方不在页面上。
-		s.guardAt("顶栏", s.navBody)(c)
-		ui.Row(c).Grow(1).Children(func() {
-			// 侧栏是**一整块** view，外面包一层 Guard（铁律三）。它坏了的
-			// 表现是整个窗口空一大块，连报错的地方都没有。
-			s.guardAt("侧栏", s.sideBody)(c)
-			s.viewRoutes(c)
-		})
-		// ⚠️ **全屏开着的时候不建播放条**。理由见 fullplayer.go 顶上那一段：
-		// 共享元素转场要的是「上一帧没被摆过的那个」，播放条那个封面下一帧
-		// 还会被摆一次，满屏的封面就找不到「上一个」了——封面会「啪」地一下
-		// 就位而不是长过去。它反正被一层不透明的背景盖着，少建它看不出异样。
-		if !s.full.open {
-			s.viewPlayBar(c, st)
-		}
-	})
+	// 🔴 **满屏开着的时候底层那一层不画，但每帧的副作用照跑**（票 #161）。
+	// 两件事拆开在 `underlay.go` 那一层：这一句跑副作用，下面那句画。
+	//
+	// ⚠️ **顺序不能反**：副作用在前、画在后——画的那一帧要看到副作用刚落下
+	// 的状态（后台的结果、刚换好的查询）。反过来的话每一帧画的都是上一帧的
+	// 状态，而用户在满屏里待久了之后关掉它，看到的是「慢了一帧」的那一份。
+	s.syncUnderlay(c)
+	s.drawUnderlay(c)
 
 	// 抽屉是浮在侧栏和页面**上面**的一层，不是主布局里的另一块。Biu 那边它是
 	// 右侧浮出来的 Drawer（`music-playlist-drawer/index.tsx` 的

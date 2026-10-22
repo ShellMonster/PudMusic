@@ -251,7 +251,6 @@ func (s *Shell) viewDownloadList(c *ui.Context, _ *ui.Route) {
 	s.applyFrameTheme(c)
 
 	d := s.downloads
-	d.sync(d.rowsFn())
 
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
 	ui.Column(c).Key("page:"+downloadListPath).Grow(1).Padding(0, pagePadX).Gap(12).
@@ -290,6 +289,20 @@ func (s *Shell) viewDownloadList(c *ui.Context, _ *ui.Route) {
 	// 几行**换算的（`dlRowPx` 是这一行的高：封面 48 + 表格那一行的上下内边距
 	// 6+6）。
 	list.BackToTop(c, d.tableOffset(), d.scrollTop)
+}
+
+// syncDownloads 是下载记录这一页每帧的副作用：取一次队列快照、按当前那一档筛出
+// 这一帧要画的那些行。
+//
+// ⚠️ **它原来在 `viewDownloadList` 的最开头**，而这一页在满屏开着的时候不画
+// （票 #161）——不挪的话，用户在满屏里看频谱的那几分钟里，下载队列的变化
+// 一直看不见（而下载是**后台**在跑的事，满屏期间照样在下载）。
+//
+// ⚠️ **筛的是上一帧选中的那一档**：这一档是筛选那一排的按钮写的，而它在画的
+// 时候才写；这一句原来也在那一排之前，所以读到的值一模一样。
+func (s *Shell) syncDownloads(c *ui.Context) {
+	d := s.downloads
+	d.sync(d.rowsFn())
 }
 
 // dlRowPx 是下载记录那一行的高：封面 `dlCover`（48）+ `ui.Table` 给每一行的上下

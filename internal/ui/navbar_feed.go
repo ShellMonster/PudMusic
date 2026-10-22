@@ -129,15 +129,24 @@ func (p *feedPoller) disarm() {
 	}
 }
 
-// viewDynamicDot 是顶栏上的「动态」那一格：有新动态时右上角一个圆点。
-func (s *Shell) viewDynamicDot(c *ui.Context) {
-	t := c.Theme()
+// syncFeedDot 是红点那个轮询的每帧副作用：问一次有多少条、装上「到点叫醒界面」
+// 的那一路。返回这一帧该画几个红点。
+//
+// ⚠️ **它原来在 `viewDynamicDot` 里**，而顶栏在满屏开着的时候不画（票 #161）——
+// 不挪的话，用户在满屏里看频谱的那几分钟里，红点那个「每五分钟问一次」就停了，
+// 关掉满屏之后要再等五分钟才补上。挪到这里它就一直问着。
+//
+// ⚠️ **它不碰 `ui.*`**：这一层只做「问一次 + 装钟」，画红点那一枚是顶栏的事。
+//
+// ⚠️ **画的那一处也调它**：一帧里调两次没关系——`tick` 到点才拉，拉完把下一轮
+// 的时刻推到 `now + interval`，于是第二遍直接返回刚拉到的那个数。
+func (s *Shell) syncFeedDot() int {
 	count := s.feed.tick(s.clock)
 	// ⚠️ 这一句是「窗口静止时也会轮询」的全部保证：光靠上面那一行，静止的窗口
 	// 永远没人问。到点的那一趟把界面叫醒，下一帧上面就会问。
 	//
 	// ⚠️ **关了之后不许再装**（`s.closed`）。`Close` 收掉的是一个具体装上的
-	// 定时器，而这一句是**每帧**都会到的——所以只要关掉之后还有一帧画到顶栏
+	// 定时器，而这一句是**每帧**都会到的——所以只要关掉之后还有一帧画到
 	// （无头 Tester 里 `Close` 之后再 `Frame()` 就会，见
 	// `close_while_loading_test.go`），它就会在这儿再装一个，而 `Close` 已经走过
 	// 一趟、不会再走。那一个就挂到测试进程结束（真窗口里 OnClosed 之后不会再有帧，
@@ -145,6 +154,13 @@ func (s *Shell) viewDynamicDot(c *ui.Context) {
 	if !s.closed {
 		s.feed.arm(s.clock, s.wake.invalidate)
 	}
+	return count
+}
+
+// viewDynamicDot 是顶栏上的「动态」那一格：有新动态时右上角一个圆点。
+func (s *Shell) viewDynamicDot(c *ui.Context) {
+	t := c.Theme()
+	count := s.syncFeedDot()
 
 	// Biu 只在登录后摆这一格（`navbar/index.tsx:38` 的 `{Boolean(user?.isLogin) && ...}`）。
 	// 这里**没按登录态隐藏**——和头像下拉那六项同一个理由（见 navbar_avatar.go

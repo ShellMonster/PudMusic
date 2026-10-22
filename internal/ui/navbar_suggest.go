@@ -104,6 +104,37 @@ type suggestTerms struct {
 	scroll ui.ScrollState
 }
 
+// syncSuggestPending 推进联想词那个防抖，**不碰收浮层那一支**。
+//
+// ⚠️ **它和 `syncSuggest` 的区别只有一处**：`syncSuggest` 在浮层关着 / 框里空了
+// 的时候会把业务层那一摊收掉（`app.SearchSuggest("")`），而这一支不收——
+// 收浮层这件事是**看得见的那一半**的活（浮层关不关由用户点的那一下决定），
+// 满屏开着的时候顶栏不画（票 #161），那一支跟着一起停才对。
+//
+// 为什么要有这一支：满屏开着的时候顶栏不画，`syncSuggest` 也不跑，于是那个
+// 500ms 的防抖**停在半路**——用户敲完词、开了满屏，那一趟联想词要等到关掉满屏
+// 才问出去。挪到这里它就照常到点就问。
+//
+// ⚠️ **一帧里它和 `syncSuggest` 各跑一次**：这一支在画的前面（`syncUnderlay`），
+// `syncSuggest` 在画的里面。跑两遍不冲突——这一支先走一遍「重打钟」，`syncSuggest`
+// 再走一遍时看到的是「钟已经打好了」，于是两遍的结果一样。
+func (s *Shell) syncSuggestPending(now time.Time) {
+	q := strings.TrimSpace(s.searchKeyword)
+	if q == "" || !s.searchSuggest {
+		return
+	}
+	switch {
+	case q != s.terms.seen:
+		// 用户又敲了一个字：把钟重打，这一帧不问。
+		s.terms.seen, s.terms.pendingSince = q, now
+	case q == s.app.SuggestState().Query:
+		s.terms.pendingSince = time.Time{}
+	case now.Sub(s.terms.pendingSince) >= searchDebounce:
+		s.terms.pendingSince = time.Time{}
+		s.app.SearchSuggest(q)
+	}
+}
+
 // syncSuggest 收「这一帧要不要问 B 站要联想词」。**每帧调一次**（`viewSearchBox` 里）。
 //
 // 🔴 **浮层没开、框里没有词，都不问**：浮层关着的时候用户看不见联想词，为一个

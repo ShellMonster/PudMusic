@@ -320,6 +320,14 @@ func (p *localPage) onPanic(rec any) {
 }
 
 // begin 是每一帧开头做的事：登记唤醒、对一遍设置里的目录、发起第一遍扫描。
+// begin 是这一页每帧要做的那些事：登记唤醒句柄、把根目录对齐到设置里那一份、
+// 第一遍扫描。
+//
+// ⚠️ **它跑两遍是安全的，而且就是要跑两遍**：一层是 `syncLocalMusic`（每帧
+// 无条件，票 #161），一层是这一页自己的 view。后者有**不经过 `Shell.View` 的
+// 调用方**（测试直接画 `localPage.View`，而那一层不走 `syncUnderlay`）。
+// 三样各自都幂等：`setWake` 更新的是同一条、`SetLocalRoots` 对得上就立刻返回、
+// `RescanLocalMusic` 由 `started` 挡着。
 func (p *localPage) begin(c *ui.Context) {
 	// 🔴 铁律三：把这一帧的窗口登记进去。后台扫完了要靠它叫醒界面。
 	p.setWake(c.Services())
@@ -343,6 +351,10 @@ func (p *localPage) begin(c *ui.Context) {
 func (p *localPage) view(c *ui.Context) {
 	// 🔴 铁律二：主题这一页**不装**——`viewMain` 在每一帧最开头装好了。
 	t := c.Theme()
+
+	// ⚠️ **`begin` 跑两遍**（一层是这里，一层是 `syncLocalMusic`）：三样各自都
+	// 幂等，而这一页的 view 有**不经过 `Shell.View` 的调用方**（测试直接画它，
+	// 而那一层不走 `syncUnderlay`）。理由见 `begin` 那段注释。
 	p.begin(c)
 
 	st := p.app.LocalMusicState()
@@ -373,6 +385,20 @@ func (p *localPage) view(c *ui.Context) {
 	} else {
 		list.BackToTop(c, p.cards.ScrollOffset(), p.cardsTop)
 	}
+}
+
+// syncLocalMusic 是本地音乐这一页每帧的副作用：登记唤醒句柄、把根目录对齐到
+// 设置里那一份、第一遍扫描。
+//
+// ⚠️ **它原来在 `localPage.view` 的最开头**，而这一页在满屏开着的时候不画
+// （票 #161）——不挪的话，用户在满屏里看频谱的那几分钟里，后台扫回来的文件
+// 一直没人收，关掉满屏之后那一页还是旧的。
+//
+// ⚠️ **筛出「这一帧要画的那些行」不在这儿**：那是画的时候要用的数据（画的那
+// 一半自己算），而后台扫描的结果落在应用层（`app.LocalMusicState`），关掉
+// 满屏之后第一帧重算就是最新的。
+func (s *Shell) syncLocalMusic(c *ui.Context) {
+	s.local.begin(c)
 }
 
 // localTableRowPx 是本地音乐那一档表格里一行的高：操作那一列那枚键（28）+ `ui.Table`
