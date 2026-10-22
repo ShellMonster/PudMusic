@@ -591,11 +591,16 @@ func blockedBiliOpts(t *testing.T, loggedIn bool) []shellOpt {
 
 // TestEveryLoadingStateIsDrawnTheSameWay 钉住「八个页面的「加载中」走同一个出口」。
 //
-// # 判据是画面：那一行字的字号
+// # 判据是画面：那一枚转圈的大小
 //
-// ⚠️ **不是断函数名**：这一条量的是「加载中」那一行字**画出来是什么形状**——
-// 同一个字号（15px 那一档，和「没有结果」那一行字一样）。八个页面都是同一个数，
-// 所以它们是同一处构造出来的。
+// ⚠️ **不是断函数名**：这一条量的是「加载中」那一枚**画出来是什么形状**——
+// 同一个直径（32，`loadingSpinnerSize`）。八个页面都是同一个数，所以它们是同一处
+// 构造出来的。
+//
+// ⚠️ **改之前这一条量的是「那一行字的字号」**（票 #138 那一版是 15px 的淡字）。
+// 票 #178 把加载态换成了一枚转圈（上游那几页的首屏就是它，见 `loading.go` 的
+// 文件头），于是判据换成了直径——**转圈没有可见的字**，它在无障碍树里的名字是
+// 那一句话（`Label`），而 Tester 认的就是名字，所以 `Find` 拿回来的是转圈本身。
 //
 // # 怎么进到加载态
 //
@@ -634,49 +639,24 @@ func TestEveryLoadingStateIsDrawnTheSameWay(t *testing.T) {
 			if !ok {
 				t.Fatalf("%s 没有说「%s」，文字有 %q", page.name, page.loading, tt.Texts())
 			}
-			// 字号：15px 那一档的行高是 17.67（`emptyTitleSize` × 字体行高）。
-			if r.H < 16 || r.H > 19 {
-				t.Errorf("%s 的「%s」那一行高 %.2f，want 17.7（15px 那一档）——"+
-					"「加载中」和「没有结果」必须走同一个出口", page.name, page.loading, r.H)
+			if r.W != loadingSpinnerSize || r.H != loadingSpinnerSize {
+				t.Errorf("%s 的「%s」那一枚是 %.0f×%.0f，want %d×%d——"+
+					"「加载中」在每一页上都是同一枚转圈", page.name, page.loading,
+					r.W, r.H, loadingSpinnerSize, loadingSpinnerSize)
 			}
 		})
 	}
 }
 
-// TestTheLoadingStateLooksLikeTheEmptyState 断「同一页上，「加载中」和「没有
-// 结果」是同一个格子」。
+// ⚠️ **「加载中」和「没有结果」不再是同一个格子**（票 #178）：加载中是一枚转圈
+// （上游那几页的首屏），空状态是一枚插画 + 两行字——两档，不混。
 //
-// 判据是画面：两行字**一样高**（同一个字号）、**居中的位置一样**（同一个格子）。
-func TestTheLoadingStateLooksLikeTheEmptyState(t *testing.T) {
-	st := newSearchStub(2, 0)
-	st.hold("周杰伦", 1)
-	_, tt := newSearchPage(t, "周杰伦", st)
-	tt.Frame()
-
-	loading, ok := tt.Find("正在加载…")
-	if !ok {
-		t.Fatalf("没有说「正在加载…」，文字有 %q", tt.Texts())
-	}
-	// 放行，让它变成「没有结果」。
-	st.release("周杰伦", 1)
-	waitFrames(t, tt, "结果回来了（没有结果那一支）", func() bool {
-		return tt.HasText("暂无内容")
-	})
-	empty, ok := tt.Find("暂无内容")
-	if !ok {
-		t.Fatalf("没有说「暂无内容」，文字有 %q", tt.Texts())
-	}
-
-	if loading.H != empty.H {
-		t.Errorf("「正在加载…」高 %.2f，「暂无内容」高 %.2f——同一页上这两句话必须"+
-			"是同一个格子（同一个出口）", loading.H, empty.H)
-	}
-	lc, ec := loading.X+loading.W/2, empty.X+empty.W/2
-	if lc < ec-2 || lc > ec+2 {
-		t.Errorf("「正在加载…」居中在 %.1f，「暂无内容」居中在 %.1f——"+
-			"同一页上这两句话得在同一个格子里", lc, ec)
-	}
-}
+// 这一条由 `loading_test.go` 的 `TestTheLoadingStateIsNotTheEmptyState` 钉住
+// （它多钉一条：横向两档在同一个位置）。
+//
+// 改之前这里是 `TestTheLoadingStateLooksLikeTheEmptyState`——它量的是「两行字
+// 一样高、居中的位置一样」，而那一条在换掉加载态的画法之后就**不再成立**
+// （转圈 32 高，那一行字 17.67 高）。
 
 // TestTheMainTabsAndTheSortTabsAreNotTheSame 钉住「主 Tab 与次级 Tab 不是同一个
 // 样子」。

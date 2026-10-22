@@ -275,9 +275,10 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell) {
 		s.viewLoadError(c, "home:fail:"+homeTabs[tab], homeTabs[tab]+"推荐", "重试加载"+homeTabs[tab]+"推荐",
 			err, func() { h.retryTab(tab) })
 	case err == nil && h.feed.loadingOf(h.tab) && len(songs) == 0:
-		ui.Column(c).Key("home:loading").Grow(1).Center().Children(func() {
-			ui.Spinner(c).Label("正在加载" + homeTabs[h.tab] + "推荐")
-		})
+		// ⚠️ 走**共用**的那一格（`drawLoading`）：上游首页那一屏也是
+		// `h-[40vh]` 那一格里的转圈（`src/pages/music-recommend/index.tsx:319`），
+		// 而这一票把其余几页也统一成那一格（票 #178，见 `loading.go`）。
+		drawLoading(c, "home:loading", "正在加载"+homeTabs[h.tab]+"推荐")
 	case len(songs) == 0:
 		// ⚠️ 走 `viewEmpty`（`routes` 表里 `/` 那一条，出处和其余 13 条写在
 		// 一起），不是让 `list.List` 说它自己那句「这里还没有歌」：那句只说

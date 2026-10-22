@@ -1927,7 +1927,13 @@ var Items = []Item{
 		// 界面只是「不太对」。所以判据全是**画面上的位置和尺寸**。
 		Category: Platform,
 		// issue 138（#134 的第四单元）那一票：页面节奏与加载态。
-		Spec: "页面节奏：七页的横向页边距是同一个数、页标题是同一个字号（收藏夹那一页的大标题另算，是 30）；主 Tab 与次级排序不是同一个样子；搜索页的输入框里有当前关键词（且切页回来不覆盖用户正在敲的字）；「加载中」和「没有结果」走同一个出口（八个页面统一）；没登录时那一页说「先登录」而不摆空列表；小字的行高是定好的；搜索联想浮层里命中的那几个字被标出来",
+		//
+		// ⚠️ **「加载中」那一档在票 #178 换过画法**：它原来是一行 15px 的淡字
+		// （和「没有结果」同一个出口、同样的大小），现在是一枚**居中的转圈**
+		// （上游那几页的首屏，见 `internal/ui/loading.go` 的文件头）。所以这一条
+		// 里关于加载态的两句都改了：不再是「同一个格子」，而是「同一枚转圈 +
+		// 40vh 那一格」。
+		Spec: "页面节奏：七页的横向页边距是同一个数、页标题是同一个字号（收藏夹那一页的大标题另算，是 30）；主 Tab 与次级排序不是同一个样子；搜索页的输入框里有当前关键词（且切页回来不覆盖用户正在敲的字）；「加载中」在每一页上都是**同一枚居中的转圈**（32，落在 40vh 那一格的正中），而它和「没有结果」是**两档**（转圈 vs 插画 + 两行字）；没登录时那一页说「先登录」而不摆空列表；小字的行高是定好的；搜索联想浮层里命中的那几个字被标出来",
 		Tests: []string{
 			// 页边距（七页逐页量内容区最靠左的那一笔）+ 页标题（代码里同一个常量，
 			// 画面上墨迹一样宽）。
@@ -1940,10 +1946,16 @@ var Items = []Item{
 			"TestTheMainTabsAndTheSortTabsAreNotTheSame",
 			// 搜索页的输入框里有当前关键词。
 			"TestTheSearchPageShowsTheCurrentKeyword",
-			// 「加载中」走同一个出口：八个页面那一行字是同一个字号；同一页上它和
-			// 「没有结果」是同一个格子（一样高、居中的位置一样）。
+			// 「加载中」走同一个出口：八个页面是**同一枚转圈**（同一个直径）。
 			"TestEveryLoadingStateIsDrawnTheSameWay",
-			"TestTheLoadingStateLooksLikeTheEmptyState",
+			// 那一枚转圈落在 40vh 那一格的正中（票 #178）。
+			"TestTheLoadingSpinnerSitsInTheTopFortyPercent",
+			// 每一页的首屏在拉的时候是居中的转圈（票 #178）。
+			"TestEveryFirstScreenIsACenteredSpinner",
+			// 「加载中」和「没有结果」是两档，不混（票 #178；改之前那一条叫
+			// `TestTheLoadingStateLooksLikeTheEmptyState`，量的是「两行字一样高」，
+			// 换掉加载态的画法之后它不再成立）。
+			"TestTheLoadingStateIsNotTheEmptyState",
 			// 没登录时那一页说「先登录」，不摆空列表。
 			"TestThePagesThatNeedLoginSaySo",
 			// 九处小字的行高是定好的。
@@ -2029,6 +2041,33 @@ var Items = []Item{
 			"TestTheDownloadBarIsBlueAndNotTheAccent",
 			"TestTheFailedBarIsRed",
 			"TestTheFinishedCellHasAGreenCheck",
+		},
+	},
+	{
+		// 归「双平台」那一组：这一票动的是**加载态的画法**（页面首屏那一枚转圈
+		// 和按钮「在忙」那一档）。
+		//
+		// 🔴 **这一族的错法全是「静默」的**：少一枚转圈、转圈落在别的地方、
+		// 按钮在忙的时候不转——**没有一样会报错**，界面只是「不太对」。所以判据
+		// 全是**画面上的东西**：转圈在不在、多大、落在哪，以及按钮在忙的时候
+		// 是不是真的在转、是不是真的灰了。
+		Category: Platform,
+		// 票 #178（#163 的第三批）：加载态铺开——居中 Spinner 与按钮 loading。
+		//
+		// ⚠️ **这一票把加载态从「一行 15px 的淡字」换成了「一枚居中的转圈」**
+		// （上游那几页的首屏就是 `h-[40vh]` 那一格里居中的 `<Spinner>`），所以
+		// 票 #138 那一条「加载中和没有结果是同一个格子」的判据**不再成立**——
+		// 那一族现在是**两档**：转圈 vs 插画 + 两行字。
+		Spec: "页面首屏在拉的时候是**一枚居中的转圈**（32 见方，落在 40vh 那一格的正中，横向在内容区的正中）；「加载中」和「没有结果」是两档不混（转圈 vs 插画 + 两行字）；按钮在忙的时候**转起来 + 灰下去**（不是只换 label），字留着不缩成小方块",
+		Tests: []string{
+			// 转圈落在 40vh 那一格的正中（离那一格的顶 20vh）。
+			"TestTheLoadingSpinnerSitsInTheTopFortyPercent",
+			// 每一页的首屏在拉的时候是居中的转圈（同一枚 32 见方）。
+			"TestEveryFirstScreenIsACenteredSpinner",
+			// 「加载中」和「没有结果」是两档，不混。
+			"TestTheLoadingStateIsNotTheEmptyState",
+			// 按钮在忙的时候：里面有转圈、它真的在转、按钮灰成主色的一半、字还在。
+			"TestTheBusyButtonTurnsAndGreysOut",
 		},
 	},
 }

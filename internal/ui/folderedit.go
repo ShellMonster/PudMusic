@@ -135,7 +135,18 @@ func (s *Shell) viewFolderEdit(c *ui.Context) {
 			if ui.Button(c, "取消").Disabled(e.submitting).Clicked() {
 				s.closeFolderEdit()
 			}
-			sub := ui.PrimaryButton(c, submitLabel(e.submitting)).Disabled(busy || !e.valid())
+			// ⚠️ **提交中那一档是「转起来 + 灰下去」**（票 #178）：原来只是把字
+			// 换成「提交中…」，而 Biu 那个 `<AsyncButton isLoading>` 画的是一枚
+			// **转圈**的按钮——「在忙」这件事只靠字说，没有一个能一眼看出来的
+			// 样子。共用的那一档见 `loading.go` 的 `busyPrimaryButton`。
+			//
+			// ⚠️ **「提交中」和「还在拉封面」是两件事**：后者那个按钮是灰着的，
+			// 但它**不是在忙**——它上面不该转圈（转圈会让用户以为还在提交）。
+			if e.submitting {
+				busyPrimaryButton(c, submitLabel(true))
+				return
+			}
+			sub := ui.PrimaryButton(c, submitLabel(false)).Disabled(busy || !e.valid())
 			if sub.Clicked() {
 				s.submitFolderEdit(e)
 			}

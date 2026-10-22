@@ -226,8 +226,15 @@ func (s *Shell) viewFolderSelect(c *ui.Context) {
 			if ui.Button(c, "取消").Disabled(f.submitting).Clicked() {
 				s.closeFolderSelect()
 			}
-			sub := ui.PrimaryButton(c, confirmLabel(f.submitting)).
-				Disabled(f.submitting || !f.changed())
+			// ⚠️ **提交中那一档是「转起来 + 灰下去」**（票 #178）：原来只是把字
+			// 换成「提交中…」，而 Biu 那个 `<AsyncButton isLoading>` 画的是一枚
+			// **转圈**的按钮——「在忙」这件事只靠字说，没有一个能一眼看出来的
+			// 样子。共用的那一档见 `loading.go` 的 `busyPrimaryButton`。
+			if f.submitting {
+				busyPrimaryButton(c, confirmLabel(true))
+				return
+			}
+			sub := ui.PrimaryButton(c, confirmLabel(false)).Disabled(!f.changed())
 			if sub.Clicked() {
 				s.submitFolderSelect(f)
 			}
