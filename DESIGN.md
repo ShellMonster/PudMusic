@@ -186,7 +186,17 @@ structural:
 
 ⚠️ **调用处不许现调 `Shadow(...)`**——播放条那一道影曾经就是这么画的（自己调了
 一个朝上、模糊 8 的影），它既不在这个包里，也不是上游那一档。播放条那两道
-（外层 + Card）都从这里取。
+（外层 + Card）现在都从这里取（`widgets/shadow` 的 `shadow.PlayBar`，票 #221）。
+
+⚠️ **还有三处仍在调用处手写影值——它们是「还没对齐上游」，不是「上游没有对应物」**：
+`popup.go`（浮层面板）、`tooltip.go`（提示）、`confirmmodal.go`（确认框）。
+上游**有**对应物：联想面板是 `shadow-2xl`
+（`layout/navbar/search/index.tsx:102`）、分集那个 Popover 是 `shadow="lg"`
+（`layout/playbar/left/page-list.tsx:14`），提示与对话框上游走的是 HeroUI 的
+`<Tooltip>` / `<Modal>`（`layout/navbar/user-feed/index.tsx:50`、
+`layout/navbar/login/index.tsx:52`）。我们那三处的数是**自己挑的，不是上游那一
+档**，所以浮层「浮起来」的分界**和上游还不一样**。改是另一票的事：一改就是三处，
+而且动的是浮层的样子。
 
 ### Tailwind v4 的五档
 
@@ -231,6 +241,12 @@ structural:
 ⚠️ **播放条是两层**：外层 `shadow-2xl`（朝下洒，模糊 50，会往上漫 25）+ Card 自己
 的 `shadow="sm"`——**深色下 Card 那档的第三层是 1 像素的内白边**，它就是「播放条从
 内容区里浮起来」那道线。少画这一层，深色下播放条会「糊」在内容区上。
+
+⚠️ **这两层落在同一个矩形上**（外层那个 div 是 `h-[88px] w-full`，Card 是 `h-full`
+铺满它），所以一层元素上就够。加进去的**先后看不出差别**：MyGo 是「外影 → 底 →
+内影」，那道 1 像素的内白边**永远**画在 `shadow-2xl` 之上（两层反过来加，逐行
+像素一个都不差）。`widgets/shadow` 的 `shadow.PlayBar` 按上游的叠放次序写，只是
+为了看着像上游那个结构。
 
 ⚠️ **网格那个播放钮的影会被封面裁掉一半**：它在封面那个 `overflow-hidden` 的框里，
 而 `shadow-2xl` 往下偏 25——**看得见的是它左边那一圈**（上游也一样）。

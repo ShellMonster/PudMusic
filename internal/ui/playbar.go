@@ -12,6 +12,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -50,20 +51,6 @@ const (
 	// ⚠️ **它不是装饰**：右边那一组是**定宽**的一排键（比 1 份轨道宽），在窄
 	// 窗口下会从轨道里溢出来——这 24 是进度行和那排键之间的缓冲。
 	playbarCenterPadX = 24
-
-	// playbarShadowY / playbarShadowBlur / playbarShadowA 是播放条上缘那道阴影。
-	//
-	// Biu 那一层靠 `shadow-2xl`（`layout/index.tsx:48`）和 Card 上那层 `sm`
-	// 浮起来，而**底色和内容区是同一个**（`playbar/index.tsx:26` 的
-	// `bg-background`）。统一底色之后那道阴影就是这一条唯一的分界，去掉它
-	// 播放条会和内容区糊成一片（浅色下尤其明显：两边都是 `#ffffff`）。
-	//
-	// 三个数是照 Tailwind 的 `shadow-2xl` 抄的：`0 4px 8px -4px rgb(0 0 0/0.1)`，
-	// 往上翻一半（阴影往上洒，所以 y 取负的 2）再把浓度提到 0.24 ——上游那道在
-	// 88 高的条上是看得见的，而 0.1 在深色底上等于没有。
-	playbarShadowY    = -2
-	playbarShadowBlur = 8
-	playbarShadowA    = 0.24
 
 	// artistMinW 是 UP 名那一段最少留多宽。
 	//
@@ -112,8 +99,10 @@ const (
 // 🔴 **底色取 `Background`（和内容区同一个来源），靠一条阴影和侧栏分开**。
 //
 // Biu 的播放条是 `bg-background`（`layout/playbar/index.tsx:26` 的 `Card`），
-// 底色和内容区一样，分界靠的是外层那个 `shadow-2xl`
-// （`layout/index.tsx:48`）。我们原来取 `Surface`：**浅色下只差一档，
+// 底色和内容区一样，分界靠的是那**两道**影：外层 div 的 `shadow-2xl`
+// （`layout/index.tsx:48`）+ 里面那张 Card 的 `shadow="sm"`
+// （`layout/playbar/index.tsx:24`）——**深色下真正把那条线画出来的是后者**
+// （1 像素内白边）。我们原来取 `Surface`：**浅色下只差一档，
 // 深色下差一整级**（`#27272a` / `#18181b`），于是深色下界面裂成三条带
 // （票 #127 的头一条）。三处统一之后层次没丢：上面那条线在。
 //
@@ -175,68 +164,74 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 	s.builds.playbar++
 	t := c.Theme()
 
-	ui.Column(c).Key("playbar").Height(playbarHeight).PaddingX(playbarPadX).
-		Background(t.Background).
-		Shadow(0, playbarShadowY, playbarShadowBlur, 0, ui.RGBA(0, 0, 0, playbarShadowA)).
-		Children(func() {
-			// 🔴 **三列按 1:3:1 分**（上游 `playbar/index.tsx:26` 的
-			// `grid-cols-[minmax(0,1fr)_minmax(0,3fr)_minmax(0,1fr)]`）。
-			//
-			// 框架的 `ui.Fr` 就是 CSS 的 `minmax(0, <f>fr)`：**轨道宽度只按比例
-			// 走，内容更宽也不把它撑开**（`mygo/ui/grid.go` 的 `sizeTracks`）——
-			// 和上游那个 `minmax(0,…)` 是一个意思。
-			//
-			// ⚠️ **左右两列等宽，是「三键落在窗口竖直中轴上」的前提**：三键在
-			// 中间那一列里居中，而那一列要对称于窗口，左右两列就得等宽（外层
-			// 左右各 16 的内边距也是对称的）。**这一条不是排版偏好，是算出来的**：
-			// 两列不等宽的时候，中间那列的中心就偏了，三键跟着偏。
-			//
-			// ⚠️ **这里为什么是 Grid 而不是 Row**：Row 里三块各 `Grow(1)` 分的是
-			// 「剩下的空间」，而**剩下多少取决于左右两块自己的内容有多宽**——左边
-			// 那一块（封面 + 歌名 + UP 名 + 三枚键）最少要 244，右边那一组是
-			// 定宽的 243.2，于是中间那列分到的永远不是三份里的一份。Grid 的
-			// `Fr` 轨道不看内容（见上面那段），这才是上游那个比例。
-			ui.Grid(c).Fill().ColumnTracks(ui.Fr(1), ui.Fr(3), ui.Fr(1)).
-				RowTracks(ui.Fixed(playbarHeight)).Children(func() {
-				// 左：封面 + 歌名。封面与歌名之间是 8（coverGap）。
-				ui.Row(c).Gap(coverGap).AlignItems(ui.Center).
-					MinWidth(playbarLeftMinW).Children(func() {
-					s.viewCover(c, st)
-					s.viewTrackText(c, st, t)
-				})
-
-				// 中：控制在上、进度在下。Biu 的 playbar/center 就是一个 flex-col。
-				//
-				// 🔴 **`AlignItems(ui.Center)` 是这一票的主体**：三键和进度行
-				// 都在这一列里横向居中，于是三键落在窗口的竖直中轴上（上游
-				// `center/index.tsx:12` 的 `items-center`）。原来这一列没有它，
-				// 三键靠左，而进度条铺满整列——**两者的中轴互相对不上**。
-				//
-				// `Justify(ui.Center)` 是竖直居中（上游的 `justify-center`）。
-				//
-				// 🔴 **`PassThrough()`：这一列不接指针**——它那一个框会让
-				// **左列撑出来的那一截点不动**。
-				//
-				// 原因是命中测试取**最上面**那个含点的元素
-				// （`mygo/ui/input.go:145` 从 hits 列表末尾往前找），而这一列是
-				// 左列的**后一个兄弟**、先画后画，于是它那整个框（900 宽下从
-				// x=189.6 起）把左列溢出来的那一截盖住了：**收藏、赞、音质徽章
-				// 这些在左列右端的键点了没反应**，而**界面上看不出坏了**（它们
-				// 好好地画在那儿）。窗口宽小于约 1175 时都这样（那是「这一列的
-				// 左沿越过左列右端」的那个临界宽度）。
-				//
-				// `flagPassThrough` 只跳过**它自己**的命中框，**子节点照旧登记**
-				//（`mygo/ui/runtime.go:1046`）——所以三键和进度条照旧能点、能拖，
-				// 而这一列那一大片空白不再挡着左列。
-				ui.Column(c).Gap(2).AlignItems(ui.Center).Justify(ui.Center).
-					PaddingX(playbarCenterPadX).PassThrough().Children(func() {
-					s.viewTransport(c, st)
-					s.viewProgress(c, st)
-				})
-
-				s.viewPlayBarRight(c, st)
+	// ⚠️ **那道影是上游的两层**（外层 div 的 `shadow-2xl` + Card 自己的
+	// `shadow="sm"`），值都在 `internal/ui/widgets/shadow` 里（DESIGN.md §四·五：
+	// 调用处不许现调 `Shadow(...)`）。
+	//
+	// **底色和内容区是同一个**（上游 `playbar/index.tsx:26` 的 `bg-background`），
+	// 所以影是这一条唯一的分界——去掉它播放条会和内容区糊成一片（浅色下尤其
+	// 明显：两边都是 `#ffffff`）。
+	bar := shadow.PlayBar(ui.Column(c).Key("playbar").Height(playbarHeight).
+		PaddingX(playbarPadX).Background(t.Background), t)
+	bar.Children(func() {
+		// 🔴 **三列按 1:3:1 分**（上游 `playbar/index.tsx:26` 的
+		// `grid-cols-[minmax(0,1fr)_minmax(0,3fr)_minmax(0,1fr)]`）。
+		//
+		// 框架的 `ui.Fr` 就是 CSS 的 `minmax(0, <f>fr)`：**轨道宽度只按比例
+		// 走，内容更宽也不把它撑开**（`mygo/ui/grid.go` 的 `sizeTracks`）——
+		// 和上游那个 `minmax(0,…)` 是一个意思。
+		//
+		// ⚠️ **左右两列等宽，是「三键落在窗口竖直中轴上」的前提**：三键在
+		// 中间那一列里居中，而那一列要对称于窗口，左右两列就得等宽（外层
+		// 左右各 16 的内边距也是对称的）。**这一条不是排版偏好，是算出来的**：
+		// 两列不等宽的时候，中间那列的中心就偏了，三键跟着偏。
+		//
+		// ⚠️ **这里为什么是 Grid 而不是 Row**：Row 里三块各 `Grow(1)` 分的是
+		// 「剩下的空间」，而**剩下多少取决于左右两块自己的内容有多宽**——左边
+		// 那一块（封面 + 歌名 + UP 名 + 三枚键）最少要 244，右边那一组是
+		// 定宽的 243.2，于是中间那列分到的永远不是三份里的一份。Grid 的
+		// `Fr` 轨道不看内容（见上面那段），这才是上游那个比例。
+		ui.Grid(c).Fill().ColumnTracks(ui.Fr(1), ui.Fr(3), ui.Fr(1)).
+			RowTracks(ui.Fixed(playbarHeight)).Children(func() {
+			// 左：封面 + 歌名。封面与歌名之间是 8（coverGap）。
+			ui.Row(c).Gap(coverGap).AlignItems(ui.Center).
+				MinWidth(playbarLeftMinW).Children(func() {
+				s.viewCover(c, st)
+				s.viewTrackText(c, st, t)
 			})
+
+			// 中：控制在上、进度在下。Biu 的 playbar/center 就是一个 flex-col。
+			//
+			// 🔴 **`AlignItems(ui.Center)` 是这一票的主体**：三键和进度行
+			// 都在这一列里横向居中，于是三键落在窗口的竖直中轴上（上游
+			// `center/index.tsx:12` 的 `items-center`）。原来这一列没有它，
+			// 三键靠左，而进度条铺满整列——**两者的中轴互相对不上**。
+			//
+			// `Justify(ui.Center)` 是竖直居中（上游的 `justify-center`）。
+			//
+			// 🔴 **`PassThrough()`：这一列不接指针**——它那一个框会让
+			// **左列撑出来的那一截点不动**。
+			//
+			// 原因是命中测试取**最上面**那个含点的元素
+			// （`mygo/ui/input.go:145` 从 hits 列表末尾往前找），而这一列是
+			// 左列的**后一个兄弟**、先画后画，于是它那整个框（900 宽下从
+			// x=189.6 起）把左列溢出来的那一截盖住了：**收藏、赞、音质徽章
+			// 这些在左列右端的键点了没反应**，而**界面上看不出坏了**（它们
+			// 好好地画在那儿）。窗口宽小于约 1175 时都这样（那是「这一列的
+			// 左沿越过左列右端」的那个临界宽度）。
+			//
+			// `flagPassThrough` 只跳过**它自己**的命中框，**子节点照旧登记**
+			//（`mygo/ui/runtime.go:1046`）——所以三键和进度条照旧能点、能拖，
+			// 而这一列那一大片空白不再挡着左列。
+			ui.Column(c).Gap(2).AlignItems(ui.Center).Justify(ui.Center).
+				PaddingX(playbarCenterPadX).PassThrough().Children(func() {
+				s.viewTransport(c, st)
+				s.viewProgress(c, st)
+			})
+
+			s.viewPlayBarRight(c, st)
 		})
+	})
 }
 
 // viewPlayBarRight 是播放条右边那一组。**次序照 Biu 的 `playbar/right`**：
