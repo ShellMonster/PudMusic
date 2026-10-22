@@ -44,10 +44,10 @@ var historyNotLoggedIn = emptyState{
 
 // viewNeedsLogin 画「这一页要登录才有内容」那一支。
 //
-// ⚠️ **它不是空状态那一套**：标题是**页标题那个字号**（`pageTitleSize`）而且
-// 加粗，下面跟着一句提示和一枚「去登录」——而空状态是 15px 的一行标题加一句
-// 12px 的提示、居中带一枚插画。形状不同就是另一支（`emptyicon_test.go` 的
-// allowlist 上有它）。
+// ⚠️ **它不是空状态那一套**：标题是**页标题那个字号**（`pageTitleSize`，24）
+// 和字重（400，不加粗），下面跟着一句提示和一枚「去登录」——而空状态是 15px
+// 的一行标题加一句 12px 的提示、居中带一枚插画。形状不同就是另一支
+// （`emptyicon_test.go` 的 allowlist 上有它）。
 //
 // ⚠️ **它不发任何请求**：这一支画出来的时候，那一页的接口一个都不该发。
 func (s *Shell) viewNeedsLogin(c *ui.Context, key string, e emptyState) {
@@ -56,7 +56,7 @@ func (s *Shell) viewNeedsLogin(c *ui.Context, key string, e emptyState) {
 
 	t := c.Theme()
 	ui.Column(c).Key(key).Grow(1).Center().Gap(8).Padding(24).Children(func() {
-		ui.Text(c, e.Title).FontSize(scale.Font(c, pageTitleSize)).Bold()
+		ui.Text(c, e.Title).FontSize(scale.Font(c, pageTitleSize))
 		ui.Text(c, e.Hint).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 		// 给一个能立刻做完的事：这一页在没登录之前永远是这个样子，而
 		// `/login` 就是扫码登录那一页（router.go 的 routes 表里那一条）。

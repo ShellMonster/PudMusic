@@ -166,8 +166,8 @@ func (s *Shell) viewFavoriteHeader(c *ui.Context, g app.FavoriteGroup, folded bo
 // 收藏夹」：图标对辅助技术是不可见的（`mygo/ui/svg.go` 的 Icon 文档），而这一
 // 颗画出来只有一个加号，光看不知道是什么。
 func (s *Shell) viewNewFavoriteButton(c *ui.Context) {
-	if flatIconButton(c, iconAdd, "新建收藏夹", iconSm).
-		Tooltip("新建收藏夹").Clicked() {
+	// 上游是 `Tooltip closeDelay={0}`（`side/collection/index.tsx:486`）。
+	if s.withMenuTip(c, flatIconButton(c, iconAdd, "新建收藏夹", iconSm), "新建收藏夹").Clicked() {
 		s.openFolderEdit(0)
 	}
 }

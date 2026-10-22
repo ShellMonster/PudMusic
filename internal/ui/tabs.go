@@ -1,63 +1,167 @@
-// 主 Tab 的那一种样式：**扁平**（选中那一项是一块淡底 + 加粗的字，没有下划线）。
+// 主 Tab 的样子：**一条灰底轨道 + 一块白色滑块**，切换时滑块滑过去。
 //
-// # 为什么不是框架的 `ui.Tabs`
+// # 数值的出处
 //
-// 框架那一套是**下划线**：选中那一项底下画一条主色的横条（`mygo@v0.6.2/ui/tabs.go`
-// 的 `coreTabs` 里的 `DrawOver`）。而这一票要的是「**主 Tab 和次级排序不是同一个
-// 样子**」（票 #138）——主 Tab 用这一套，次级排序保持框架那一条下划线。
+// 上游是 HeroUI 的 `<Tabs variant="solid">`（`pages/music-recommend/index.tsx:263`、
+// `pages/search/index.tsx:27`、`pages/user-profile/index.tsx:136`、
+// `pages/settings/index.tsx:124`）。默认那一套在 `@heroui/theme@2.4.25` 的
+// `components/tabs.ts`：
 //
-// 而框架给了 `ui.TabsBase`：「没有外观的 Tab」。点击、左右方向键、Home/End、
-// 焦点跟着选中走，全是框架给的那一套，我们不去重写——**只有画法是自己的**。
+//   - 轨道（tabList）：`p-1`（4）+ `gap-2`（8）+ `bg-default-100`（浅色 #f4f4f5）；
+//   - 滑块（cursor）：`bg-white`（浅色）、`dark:bg-default`（#3f3f46，zinc-700）；
+//   - 动效：`transition-[left,top,width,height]`，250ms `ease-out`；
+//   - 高度：`md` 的 Tab 是 `h-8`（32）+ 上下各 4 = **40**；`lg` 是 `h-9`（36）
+//   - 上下各 4 = **44**（和 DESIGN.md「Tab」与「动效」两节一致）。
 //
-// # 七处一起换（换四处留三处更难看）
+// 首页那一排是 `size="lg"`（44），搜索 / 设置 / UP 空间是默认的 `md`（40）——
+// 上游那四处就是这么分的。
 //
-// 主 Tab 四处：首页那三档、搜索结果那三档、设置那四档、UP 空间那四档。
-// 次级排序三处：歌词搜索的来源、歌词预览的原文 / 译文、搜索结果的排序。
+// # 为什么滑块不是子控件
 //
-// ⚠️ **次级那三处保持框架的 `ui.Tabs`**：它们是「排序 / 来源」那一档的小一档
-// 选择，下划线那一套正合适（上游 HeroUI 的 `variant="light"` 是另一种，但我们
-// 这里的次级排序沿用框架这一套，见 `searchpage.go` 的 `viewSearchToolbar`）。
+// 它要**压在轨道上、文字下**。子控件的画法在文字之后，铺上去就把字盖住了；
+// 框架的 `Element.Draw` 正好是「底色之后、子控件之前」，所以轨道是 List 自己
+// 的底色，滑块在那里面画。
+//
+// 滑块的位置取**上一帧量到的选中格**（`LayoutBounds`），再相对**轨道自己的
+// 盒子**算，不用窗口坐标：设置页的 Tab 会跟着内容滚，用窗口坐标的话每一次滚动
+// 都会被当成「目标变了」，滑块会追着轨道跑一截。
+//
+// # 减少动态效果
+//
+// 动画走框架的 `AnimateTo`：系统开着「减少动态效果」时它直接把值给到目标
+// （`mygo/ui/motion.go:322`），第一帧就在终点。这里不自己判偏好，也不另写一份
+// 过渡——两份判断迟早会有一份忘了听系统设置。
+//
+// # 次级排序不在这里
+//
+// 「主 Tab 和次级排序不是同一个样子」（票 #138）：主 Tab 是这一套轨道 + 滑块，
+// 次级那三处（歌词来源、歌词原文/译文、搜索结果排序）保持框架 `ui.Tabs` 的
+// **下划线**，不退化成同一种。
 package ui
 
 import (
+	"time"
+
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 
-// flatTabGap 是主 Tab 之间隔多远。
+// tabSize 是主 Tab 的两档尺寸，对应上游的 `size="md"` / `size="lg"`。
 //
-// 框架那一套是 `t.Space(1)`（4）。这里取 8：选中那一项有一块淡底，4 的缝会让
-// 两块底几乎连成一片（看着像一条灰带，而不是一格一格）。
-const flatTabGap = 8
+// 三处高度是一起定的，别单独改一个：
+//   - track 是整条轨道（含上下各 4 的内边距）；
+//   - block 是每个 Tab / 滑块的盒子；
+//   - font 是标签的字号（md 上游 `text-small` = 14，lg `text-medium` = 16）。
+type tabSize struct {
+	track float32
+	block float32
+	font  float32
+}
 
-// flatTabs 画一排**扁平**的主 Tab。selected 是当前选中的下标。
+var (
+	tabMD = tabSize{track: 40, block: 32, font: 14}
+	tabLG = tabSize{track: 44, block: 36, font: 16}
+)
+
+// tabSlideTime 是滑块滑过去的时间（DESIGN.md「动效」：主 Tab 滑块 250ms）。
+const tabSlideTime = 250 * time.Millisecond
+
+// tabSlide 是滑块那一条曲线：250ms、ease-out，和上游 `duration-250 ease-out` 一样。
+var tabSlide = ui.Animation{Duration: tabSlideTime, Ease: ui.EaseOut}
+
+// mainTabs 画一排主 Tab。selected 是当前选中的下标，size 决定 40 / 44 那一档。
 //
-// ⚠️ **选中那一层用 `flatCurrent`**（侧栏「当前那一项」那一份配方）：浅色下是
-// 主色很淡的一层底 + 正文的字，深色下是中性灰底 + 主色的字。**别拿主色当字色
-// 用在浅色底下**——那个亮绿压在白底上不到 2:1，整行读不出来（理由在
-// `flatbutton.go` 的 `flatCurrent` 那一段）。
+// 点击、左右方向键、Home/End、焦点跟着选中走，仍然是框架 `TabsBase` 那一套；
+// 我们只换画法。
 //
-// ⚠️ **悬停 / 按下那一层用 `flat.Feel`**：Tab 是 `TabsBase` 给的，我们拿不到
-// 框架那个 `styleFn`，而反馈这一层不是装饰（没有它用户不知道哪里点得动）。
-func flatTabs(c *ui.Context, selected *int, labels ...string) ui.Element {
+// ⚠️ **选中那一格不再加粗**：字重一变，格子的宽度就变，滑块既要滑位置又要改
+// 宽度，还会带着后面的 Tab 整体挪一下。上游的 `tabContent` 只换字色
+// （`text-default-500` → `text-foreground`），所以这里也只换字色。
+//
+// ⚠️ **悬停反馈只铺在没选中的格子上**：上游是
+// `data-[hover-unselected=true]:opacity-disabled`，选中那一格没有这一层。铺上
+// 去的话，指针停在刚点过的那一格上，白色滑块就被压成灰的了。
+func mainTabs(c *ui.Context, selected *int, size tabSize, labels ...string) ui.Element {
 	t := c.Theme()
 	tabs := ui.TabsBase(c, selected, len(labels))
-	tabs.List.Gap(flatTabGap).Children(func() {
-		for i, label := range labels {
-			// ⚠️ **内边距照框架那一套**（`t.Space(2), t.Space(3)`）：换掉的话
-			// 四页的 Tab 那一行高度就变了，而它下面那些内容会跟着挪——而这一票
-			// 要改的是「样子」，不是「版面」。
-			tab := tabs.Tab(i).
-				Padding(t.Space(2), t.Space(3)).
-				Radius(t.Radius)
-			if i == *selected {
-				tab = flatCurrent(c, tab).FontWeight(600)
-			} else {
-				tab = tab.TextColor(t.TextMuted)
+
+	// 每块 Tab 的 Element 留到画滑块时量位置。
+	blocks := make([]ui.Element, 0, len(labels))
+
+	tabs.List.
+		Gap(t.Space(2)).
+		Padding(t.Space(1)).
+		Height(size.track).
+		Radius(t.Radius).
+		Background(trackColor(t)).
+		Children(func() {
+			for i, label := range labels {
+				block := tabs.Tab(i).
+					Height(size.block).
+					Padding(t.Space(1), t.Space(3)).
+					Radius(t.Radius)
+				if i == *selected {
+					block = block.TextColor(t.Text)
+				} else {
+					block = flat.Feel(c, block.TextColor(t.TextMuted))
+				}
+				block.Children(func() {
+					ui.Text(c, label).SingleLine().FontSize(scale.Font(c, size.font))
+				})
+				blocks = append(blocks, block)
 			}
-			tab = flat.Feel(c, tab)
-			tab.Children(func() { ui.Text(c, label).SingleLine() })
-		}
+		})
+
+	// 滑块：目标取选中那一格**上一帧**的盒子，转成相对轨道的坐标。
+	//
+	// 第一帧还没有量过（LayoutBounds 是空的），这一帧就不画——否则要先从
+	// (0,0) 长出来，开窗时看见滑块凭空滑一下。等下一帧量到了再建动画通道，
+	// `AnimateTo` 第一次拿到的目标就是终点，不会再补一段动画。
+	if len(labels) == 0 || *selected < 0 || *selected >= len(blocks) {
+		return tabs.List
+	}
+	sel := *selected
+	block := blocks[sel].LayoutBounds()
+	track := tabs.List.LayoutBounds()
+	if block.W <= 0 || block.H <= 0 {
+		// 这一帧还量不到（第一次画这一页）。🔴 **要主动要下一帧**：这时候
+		// 没有任何动画在跑，界面画完这一帧就安静了，滑块要等到下一次鼠标
+		// 移动才出现。
+		c.AnimationFrame()
+		return tabs.List
+	}
+	x := tabs.List.AnimateTo("tab-slide-x", block.X-track.X, tabSlide)
+	y := tabs.List.AnimateTo("tab-slide-y", block.Y-track.Y, tabSlide)
+	w := tabs.List.AnimateTo("tab-slide-w", block.W, tabSlide)
+	h := tabs.List.AnimateTo("tab-slide-h", block.H, tabSlide)
+
+	fill := sliderColor(t)
+	radius := t.Radius
+	tabs.List.Draw(func(p *ui.Painter, r ui.Rect) {
+		p.Fill(ui.Rect{X: r.X + x, Y: r.Y + y, W: w, H: h}, fill, radius)
 	})
 	return tabs.List
+}
+
+// trackColor 是那条灰底轨道的颜色。
+//
+// 上游 `bg-default-100`：浅色是 zinc-100（#f4f4f5），深色是**换过来的** zinc-900
+// （#18181b，和页面底色几乎一样）。我们的 `t.Surface` 在浅色下正好是 #f4f4f5，
+// 深色下是 #27272a——跟着用户自己挑的底色走，比照抄一个写死的 #18181b 可靠。
+func trackColor(t *ui.Theme) ui.Color {
+	return t.Surface
+}
+
+// sliderColor 是滑块的颜色。
+//
+// 浅色就是**白色**（上游 `bg-background`，也就是用户挑的页面底色）；深色上游
+// 是 `dark:bg-default` = zinc-700（#3f3f46），比轨道亮一档。主题里最接近那一档
+// 的是 `SurfacePressed`（默认 #3c3c41），而且它跟着底色一起平移，不会在自定义
+// 底色上跳出来。
+func sliderColor(t *ui.Theme) ui.Color {
+	if t.Dark {
+		return t.SurfacePressed
+	}
+	return t.Background
 }

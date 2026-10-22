@@ -142,32 +142,6 @@ func miniIsDark(c color.RGBA) bool {
 	return 0.299*float64(c.R)+0.587*float64(c.G)+0.114*float64(c.B) < 110
 }
 
-// miniNaturalWidths 量每一串字在**不设限**的一行里各占多宽，也就是它们的自然宽度。
-//
-// 字号和内边距照迷你窗口里那几个键写死（13 号、`Padding(2, 6)`），量出来的那个框
-// 就是「那几个字本身要多少」。
-func miniNaturalWidths(t *testing.T, labels []string) map[string]float32 {
-	t.Helper()
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		mygoui.Column(c).Width(miniWidth).Children(func() {
-			for _, l := range labels {
-				mygoui.Button(c, l).FontSize(13).Padding(2, 6).MaxLines(1)
-			}
-		})
-	}, miniWidth, 200)
-	tt.Frame()
-
-	out := make(map[string]float32, len(labels))
-	for _, l := range labels {
-		r, ok := tt.Find(l)
-		if !ok {
-			t.Fatalf("连不设限的一行都量不出 %q 的宽度", l)
-		}
-		out[l] = r.W
-	}
-	return out
-}
-
 // settleMini 跑到 cond 成立为止。每一轮走一帧，顺带让后台那一支有机会跑。
 //
 // ⚠️ 不能只 `tt.Frame()` 一次：播放器的时长和解码都在后台 goroutine 里，结果要靠

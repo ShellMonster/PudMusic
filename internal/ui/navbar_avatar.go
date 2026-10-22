@@ -353,10 +353,10 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 // 「未登录」和「已登录」必须是两回事（issue #95 的第三条验收），而「图没下来」
 // 和「压根没有地址」也不是一回事——前者网络好了会自己好，后者永远好不了。
 //
-// ⚠️ 这里读的是 `imgcache.Cache` 而不是直接调 `imgcache.View`：那个 View 的两种
-// 失败态画的是「载入中」「封面加载失败」两行字（见 imgcache/view.go 的
-// drawCover），那是给**封面**那个尺寸用的。头像只有 28 宽，那两行字塞进去会被
-// 裁成一团看不出是什么的色块——比一个讲得清的东西糟糕得多。
+// ⚠️ 这里读的是 `imgcache.Cache` 而不是直接调 `imgcache.View`：那个 View 是给
+// **封面**那一档尺寸定的（占位和失败态都是没有字的一格，见 imgcache/view.go 的
+// drawCover）。头像只有 28 宽，而且它要说的是「未登录 / 图没下来 / 在路上」
+// 三件不同的事，有自己的一套画法（见下面 drawAvatar）。
 func (s *Shell) viewAvatarFace(c *ui.Context) {
 	side := float32(avatarSize)
 	look, face, note := s.avatar.snapshot()
@@ -364,7 +364,7 @@ func (s *Shell) viewAvatarFace(c *ui.Context) {
 	// 没有地址：这一格归状态那一层说，缓存压根不用问（它对空地址不表态，
 	// 而 `Get("")` 会拿空串当一个键去查——那是个永远下不下来的地址）。
 	if face == "" {
-		drawAvatar(c, look, note)
+		s.drawAvatar(c, look, note)
 		return
 	}
 
@@ -377,16 +377,16 @@ func (s *Shell) viewAvatarFace(c *ui.Context) {
 		// ⚠️ **这一档不能摆成空白**——28 见方的一格空白在顶栏上是一个看不出是
 		// 什么的洞，而用户真正缺的不是那张图，是「为什么没有」。所以染成告警色
 		// 并且把那句话挂上去。
-		drawAvatar(c, avatarTrouble, avatarNoteNoPicture)
+		s.drawAvatar(c, avatarTrouble, avatarNoteNoPicture)
 	default:
 		// 有地址、在路上：这一帧画的是人形，而说的是「加载中」——和未登录
 		// 画出来一样、说的话不一样（理由见 avatarLook 那一段）。
-		drawAvatar(c, avatarSilhouette, avatarNoteWaiting)
+		s.drawAvatar(c, avatarSilhouette, avatarNoteWaiting)
 	}
 }
 
 // drawAvatar 按那一档的样子画。**三档都在这里定死**，view 不再插嘴。
-func drawAvatar(c *ui.Context, look avatarLook, note string) {
+func (s *Shell) drawAvatar(c *ui.Context, look avatarLook, note string) {
 	t := c.Theme()
 	side := float32(avatarSize)
 
@@ -395,12 +395,15 @@ func drawAvatar(c *ui.Context, look avatarLook, note string) {
 		bg, ink = t.Danger.Alpha(0.18), t.Danger
 	}
 
-	// ⚠️ `Label` 和 `Tooltip` 用的是**同一句话**：这一格只有 28 见方，写不下
+	// ⚠️ `Label` 和悬停提示用的是**同一句话**：这一格只有 28 见方，写不下
 	// 「这个账号没有头像」那几句；而这三样（无障碍名、悬停说明、测试点得到的
 	// 凭据）读的是同一件事，给它们三份不同的措辞只会让其中一份开始说谎。
-	ui.Column(c).Size(side, side).Center().Background(bg).
-		Label(note).Tooltip(note).
-		Children(func() { avatarPerson(c, side, ink) })
+	col := ui.Column(c).Size(side, side).Center().Background(bg).Label(note)
+	col.Children(func() { avatarPerson(c, side, ink) })
+	// ⚠️ **quiet**：锚点是外面那个头像菜单按钮里的子元素。普通的提示会问
+	// `Pressed()` / `Clicked()`（那会给元素打上可点标志），命中目标就从菜单
+	// 按钮变成它——头像下拉根本不开（见 withQuietTip）。
+	s.withQuietTip(c, col, note)
 }
 
 // avatarPerson 画那个人形：一个圆脑袋 + 一块肩膀。

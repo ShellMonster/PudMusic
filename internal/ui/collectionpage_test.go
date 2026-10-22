@@ -414,7 +414,15 @@ func TestCollectionShowsTheHeaderAndTheOpsBar(t *testing.T) {
 	for _, label := range []string{"播放全部", "添加到播放列表", "多选", "排序：最近收藏"} {
 		wantText(t, tt, label)
 	}
-	wantText(t, tt, "☆") // 星标：此刻没收藏
+	// 星标：此刻没收藏。它是图标键（上游 `fav-toggle.tsx` 那一枚），名字挂在
+	// `Label` 上——`Find` 找得到，但画面上一个「☆」字都没有，所以这里量的是
+	// 那一格里**有没有图形**。
+	if r, ok := tt.Find("收藏这个收藏夹"); !ok {
+		t.Errorf("操作条上没有星标，文字有 %q", tt.Texts())
+	} else if s := scanGlyph(tt, "收藏这个收藏夹"); s.ink == "" {
+		t.Errorf("星标那一格是空的（%.1f,%.1f %.1fx%.1f，只有底色 %v）——没画出图标",
+			r.X, r.Y, r.W, r.H, s.bg)
+	}
 
 	// ③ 列表：那一页的歌真的画出来了。
 	for _, title := range []string{"歌 一", "歌 二", "歌 三"} {
@@ -683,7 +691,7 @@ func TestTheCollectionSearchSaysWhenThereIsNoResult(t *testing.T) {
 // 台账三处对不上**。
 //
 // **现在**：输入框自己让位（`Width(64).Grow(1).MaxWidth(180)`），**排序下拉在
-// 每一个侧栏宽度上都是完整的 83.2**（实测 160~480 全是 83.2、右缘 876）。
+// 每一个侧栏宽度上都是完整的 83.2**（实测 160~480 全是 83.2、右缘 884）。
 // 让位的是输入框：它平时长到 180，挤的时候缩到 64。
 //
 // 基线（`6247a3d`）在侧栏 400 是 57 宽、480 是 **0 宽**（右缘 922，**出窗口**）
@@ -696,7 +704,7 @@ func TestTheCollectionSearchSaysWhenThereIsNoResult(t *testing.T) {
 // # 判据是**画面上的盒子**
 //
 //   - 排序下拉的自然宽是 83.2（「最近收藏 ▾」加内边距和描边）：被压扁就是坏了。
-//   - 它的右缘要落在**页边距**里面（900 减 24 = 876）。
+//   - 它的右缘要落在**页边距**里面（900 减 `pagePadX` 16 = 884）。
 //   - 那个输入框不许被压到比它的下限（64）更窄。
 func TestTheCollectionOpsRowStillFitsAtTheMinWindow(t *testing.T) {
 	for _, side := range []float64{160, 200, 240, 280, 320, 360, 400, 480} {
@@ -723,13 +731,14 @@ func TestTheCollectionOpsRowStillFitsAtTheMinWindow(t *testing.T) {
 				t.Fatalf("侧栏 %.0f：画面上找不到那个输入框，文字有 %q", side, tt.Texts())
 			}
 
-			// 页边距 24（`viewCollectionHeader` 的 `Padding(20, 24, 8)`）：这一列
-			// 的右缘应该是 900 - 24 = 876。
+			// 页边距是页面根那一层的 `pagePadX`（收藏夹的根是
+			// `Padding(0, pagePadX)`；票 #166 把它从 20 收成 16）：这一列的右缘
+			// 应该是 900 - 16 = 884。
 			//
 			// ⚠️ **那 4 个像素的余量**：排序下拉那个触发器的**盒子**比它的布局
 			// 基线宽 3.2（描边那一圈），所以它的右缘会比基线的右缘多出那么一点。
 			// 量的是盒子，就得多留那 3.2。
-			const wantRight = float32(minWindowW - 24 + 4)
+			wantRight := float32(minWindowW-pagePadX) + 4
 			if right := sort.X + sort.W; right > wantRight {
 				t.Errorf("侧栏 %.0f：排序下拉的右缘是 %.1f，越过了页边距（want ≤ %.0f）",
 					side, right, wantRight)

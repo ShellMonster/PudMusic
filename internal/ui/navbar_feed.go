@@ -154,9 +154,10 @@ func (s *Shell) viewDynamicDot(c *ui.Context) {
 	// 代价说清楚：登录之后这一格还在，而 Biu 那时候已经把它藏了。
 	ui.Row(c).Key("nav-feed").Gap(4).AlignItems(ui.Start).Children(func() {
 		ui.Column(c).Key("nav-feed-btn").Children(func() {
-			if iconButton(c, iconFeed, "动态", iconMd).
-				Size(iconHitMd, iconHitMd).Padding(0, 5).
-				Tooltip("动态").Clicked() {
+			// 上游这一枚是 user-feed 的 `Tooltip closeDelay={0}`
+			// （`navbar/user-feed/index.tsx:50`）：菜单那一档，指针一走就收。
+			if s.withMenuTip(c, iconButton(c, iconFeed, "动态", iconMd).
+				Size(iconHitMd, iconHitMd).Padding(0, 5), "动态").Clicked() {
 				// Biu 的 handleOpen：清掉红点，再去看动态。
 				s.feed.clear()
 				s.navigate(dynamicFeedPath)

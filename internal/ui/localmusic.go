@@ -221,6 +221,10 @@ type localPage struct {
 	// 再写一份就是第二处。
 	displayView func() list.View
 
+	// tip 是带延迟的悬停提示（tooltip.go）。由 Shell 在建完这一页时接上；
+	// 为零时（单独造这一页的测试）退回框架那枚。
+	tip tipFunc
+
 	// noteScrollbar 把「指针压在滚动条上」转告给壳（主题下一帧据此换深一档，
 	// 见 scrollbar.go）。由 Shell 在构造之后接上；为零时（测试里单独造这一页）
 	// 什么也不做。
@@ -298,6 +302,12 @@ func newLocalPage(a *app.App, cache *imgcache.Cache, acts list.Actions,
 // View 画这一页。每一帧调一次。
 func (p *localPage) View(c *ui.Context) { p.draw(c) }
 
+// tipWith 是这一页的悬停提示入口：状态挂在 Shell 上（tooltip.go），这里只是
+// 把这一页拿到的那份递过去；单独造这一页的测试没有那份，退回框架那枚。
+func (p *localPage) tipWith(c *ui.Context, e ui.Element, text string) ui.Element {
+	return tipFrom(p.tip, c, e, text, tipDefault)
+}
+
 // onPanic 记一笔并要一帧。
 //
 // 要下一帧是必须的：recover 接住的是 build pass 中间，那一帧剩下的部分没建，
@@ -339,7 +349,7 @@ func (p *localPage) view(c *ui.Context) {
 	p.rows = p.filter(st.Tracks, st.Roots)
 
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
-	ui.Column(c).Key("page:"+localMusicPath).Grow(1).Padding(16, pagePadX).Gap(10).
+	ui.Column(c).Key("page:"+localMusicPath).Grow(1).Padding(0, pagePadX).Gap(10).
 		Children(func() {
 			p.viewHead(c)
 			p.viewToolbar(c, st)
@@ -391,14 +401,17 @@ func (p *localPage) cardsTop() { p.cards.ScrollTo(0, ui.Start) }
 // viewHead 是标题那一行：标题、展示样式切换、添加目录。
 func (p *localPage) viewHead(c *ui.Context) {
 	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(8).Children(func() {
-		ui.Text(c, "本地音乐").FontSize(scale.Font(c, pageTitleSize)).Bold()
+		ui.Text(c, "本地音乐").FontSize(scale.Font(c, pageTitleSize))
 
 		// 展示样式切换。⚠️ 用 `ui.Segmented` 而不是三个按钮：三档互斥、
 		// 当前位置一眼可见，三个按钮的话用户得靠猜哪个是按下去的。
 		ui.Segmented(c, &p.style, localStyles[:]...)
 
 		ui.Spacer(c)
-		ui.Button(c, "添加目录").OnClick(p.addDirectory)
+		// 上游是 `variant="flat"` 的一个文字键（`local-music/index.tsx:189`）。
+		// 它旁边那颗文件夹加的图标没画：`flat.Button` 只接管文字，图标 + 文字
+		// 要再开一个配方，而这一票要的是「把描边和常驻底去掉」，不是重画按钮。
+		flatButton(c, "添加目录").OnClick(p.addDirectory)
 	})
 }
 
@@ -409,7 +422,12 @@ func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
 			// 「播放全部」用主按钮：Biu 那一页上它就是 primary
 			//（`local-music.ts:212` 的 `color="primary"`）。
 			ui.PrimaryButton(c, "播放全部").OnClick(p.playAll)
-			ui.Button(c, "全部加入队列").OnClick(p.queueAll)
+			// 照上游那一枚 `IconButton`（`local-music/index.tsx:208`，tooltip
+			// 「添加到播放列表」）：图标键 + 悬停说出它做什么。
+			if p.tipWith(c, flatIconButton(c, iconEnqueue, "全部加入队列", iconMd).
+				Size(iconHitMd, iconHitMd).Padding(0, 5), "全部加入队列").Clicked() {
+				p.queueAll()
+			}
 		}
 
 		ui.Spacer(c)
@@ -419,10 +437,19 @@ func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
 		// 空着时画的那几个字。少了 Label 这个框就没有可点的名字。
 		ui.TextInput(c, &p.search).Label(searchLocalLabel).Placeholder(searchLocalLabel).Width(180)
 		ui.Select(c, &p.dirLabel, dirLabels(st.Roots)).Width(180)
+		// 移除此目录 / 重新扫描：上游是两枚 `IconButton`（`local-music/index.tsx:238,244`，
+		// tooltip「刷新」「移除当前目录」）。悬停提示说的就是名字——图标键没有
+		// 可见的字，提示是它唯一说得出自己做什么的地方。
 		if p.currentRoot(st.Roots) != "" {
-			ui.Button(c, "移除此目录").OnClick(p.askRemoveDir)
+			if p.tipWith(c, flatIconButton(c, iconDeleteBin5, "移除此目录", iconMd).
+				Size(iconHitMd, iconHitMd).Padding(0, 5), "移除此目录").Clicked() {
+				p.askRemoveDir()
+			}
 		}
-		ui.Button(c, "重新扫描").OnClick(p.app.RescanLocalMusic)
+		if p.tipWith(c, flatIconButton(c, iconRefresh, "重新扫描", iconMd).
+			Size(iconHitMd, iconHitMd).Padding(0, 5), "重新扫描").Clicked() {
+			p.app.RescanLocalMusic()
+		}
 	})
 }
 
@@ -583,12 +610,22 @@ func (p *localPage) viewCell(c *ui.Context, t *ui.Theme, row, col int) {
 // 用户看到的是「歌还在放，但列表里没了，再按下一首就报错」——一个说不清的状态。
 // 不给这个按钮，好过给一个按下去会变成那个状态的按钮。
 func (p *localPage) viewRowOps(c *ui.Context, tr localmusic.Track) {
-	ui.Button(c, "打开文件夹").FontSize(scale.Font(c, 12)).OnClick(func() {
+	// 两个图标键。上游那一格是一枚「⋯」菜单（`operation.tsx:38`）；我们这里是
+	// 两个直接点得到的动作——一行的操作一共就两件，藏进菜单多一次点击。
+	//
+	// ⚠️ 删除那一颗的红色靠 `TextColor`：图标继承祖先的文字色，而 `flat` 那个
+	// 配方不给颜色——不给的话它和打开文件夹那枚一样是灰的，「这一下是不可撤销的」
+	// 那层意思就没了。
+	if p.tipWith(c, flatIconButton(c, iconFolder, "打开文件夹", iconSm).
+		Size(iconHit, iconHit).Padding(0, 7), "在访达里显示").Clicked() {
 		mygo.Shell.ShowItemInFolder(tr.Path)
-	})
+	}
 	if !p.isPlaying(tr) {
-		ui.Button(c, deleteRowLabel).FontSize(scale.Font(c, 12)).TextColor(c.Theme().Danger).
-			OnClick(func() { p.askTrack, p.askOpen = tr, true })
+		if p.tipWith(c, flatIconButton(c, iconDeleteBin5, deleteRowLabel, iconSm).
+			Size(iconHit, iconHit).Padding(0, 7).
+			TextColor(c.Theme().Danger), deleteRowLabel).Clicked() {
+			p.askTrack, p.askOpen = tr, true
+		}
 	}
 }
 

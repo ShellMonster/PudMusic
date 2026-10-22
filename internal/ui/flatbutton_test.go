@@ -158,8 +158,8 @@ func flatSideShell(t *testing.T, dark bool) (*Shell, *mygoui.Tester) {
 //
 // ⚠️ **只探图标键是有原因的**：`Tester.Find` 找的是「显示着这个字或者被 `Label`
 // 命名的那一个元素」，而纯文字按钮上**没有 `Label`**（`flatbutton.go` 里那条：不许
-// 补，补上去画面上会出现两份同样的字）。于是 `Find("迷你")` 给回来的是**那两个字
-// 自己的框**，按它去量框线，量到的是笔画而不是按钮。
+// 补，补上去画面上会出现两份同样的字）。于是 `Find("导出配置")` 给回来的是**那几个
+// 字自己的框**，按它去量框线，量到的是笔画而不是按钮。
 //
 // 纯文字按钮（侧栏菜单行、设置页那几个小按钮）改用另外两条：侧栏用
 // `TestTheSidebarColumnHasOnlyOneColour`，选中态用
@@ -181,6 +181,9 @@ func TestTheIconButtonsAreTransparentAndUnbordered(t *testing.T) {
 			for _, what := range []struct{ label, where string }{
 				{"打开文件", "顶栏"},
 				{"设置", "顶栏"},
+				// 它原来是文字键（「迷你」两个字），票 #134 的第七单元接上了
+				// `iconPiP`——现在它也走这一条探针。
+				{"迷你", "顶栏"},
 				{"播放列表", "播放条右边"},
 			} {
 				r, ok := tt.Find(what.label)

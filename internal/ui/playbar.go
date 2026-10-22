@@ -184,9 +184,8 @@ func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 		// 播放列表抽屉的开关（原来在顶栏，见 navbar.go）。上游它就在右边这一组
 		// 的第三个（`playbar/right/index.tsx:16`），而顶栏那一枚是当初右边摆不下
 		// 时挪过去的——现在右边腾得开，两处只能留一个，留两个就会不一致。
-		if iconButton(c, iconQueue, "播放列表", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5).
-			Tooltip(drawerTip(s.drawerOpen)).Clicked() {
+		if s.withTip(c, iconButton(c, iconQueue, "播放列表", iconMd).
+			Size(iconHitMd, iconHitMd).Padding(0, 5), drawerTip(s.drawerOpen)).Clicked() {
 			s.drawerOpen = !s.drawerOpen
 		}
 
@@ -201,9 +200,8 @@ func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 		// 倍速紧挨着音量：两个都是「听感」旋钮（上游也是挨着的）。
 		s.viewRate(c, st)
 
-		if iconButton(c, iconEnqueue, "加歌", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5).
-			Tooltip("把本地文件加到队列末尾").Clicked() {
+		if s.withTip(c, iconButton(c, iconEnqueue, "加歌", iconMd).
+			Size(iconHitMd, iconHitMd).Padding(0, 5), "把本地文件加到队列末尾").Clicked() {
 			s.pickAndEnqueue()
 		}
 	})
@@ -267,8 +265,8 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 			// 而症状是「说了有话却看不见」（文本节点还在，测试也还找得到它）。
 			//
 			// 缩掉的那几个字用悬停补回来，和上面那个音质徽章同一个做法。
-			ui.Text(c, "打不开："+st.Err).FontSize(scale.Font(c, 12)).TextColor(t.Danger).
-				MaxLines(1).Ellipsis("…").Tooltip("打不开：" + st.Err)
+			s.withTip(c, ui.Text(c, "打不开："+st.Err).FontSize(scale.Font(c, 12)).
+				TextColor(t.Danger).MaxLines(1).Ellipsis("…"), "打不开："+st.Err)
 		}
 	})
 }
@@ -355,9 +353,9 @@ func (s *Shell) viewArtist(c *ui.Context, st app.State, t *ui.Theme) {
 	// 扁平按钮：UP 名这一格是**播放条上一枚按钮**，而调研点名的描边药丸里就有它
 	//（报告 §1.1 的 F1 证据：播放条上每一枚带描边的键）。它上面是 12px 的弱化
 	// 灰字，本来就不该配一块描边底。
-	if flatButton(c, st.Artist).Grow(1).MinWidth(artistMinW).FontSize(scale.Font(c, 12)).
-		Padding(0, 2).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").
-		Tooltip("打开 " + st.Artist + " 的空间").Clicked() {
+	if s.withTip(c, flatButton(c, st.Artist).Grow(1).MinWidth(artistMinW).
+		FontSize(scale.Font(c, 12)).Padding(0, 2).TextColor(t.TextMuted).
+		MaxLines(1).Ellipsis("…"), "打开 "+st.Artist+" 的空间").Clicked() {
 		s.navigate(upPathPrefix + strconv.FormatInt(st.ArtistMid, 10))
 	}
 }
@@ -381,9 +379,8 @@ func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
 	// 空心 = 还没收藏，实心 = 已经收藏。图标认的是「有没有」，和原来那个
 	// 靠主色染出来的「收藏」两个字说的是同一件事。
 	// 哪一档配哪一张只有 `favIcon` 说了算（理由见 icons.go 那几个函数的头一段）。
-	btn := iconButton(c, favIcon(faved), "收藏", iconSm).
-		Size(iconHit, iconHit).Padding(0, 7).
-		Tooltip(favTooltip(faved))
+	btn := s.withTip(c, iconButton(c, favIcon(faved), "收藏", iconSm).
+		Size(iconHit, iconHit).Padding(0, 7), favTooltip(faved))
 	if faved {
 		// ⚠️ **只在这一支设颜色**：没收藏的那一支一个字都不改，好让「默认那个颜色」
 		// 继续由按钮自己决定（图标从祖先的文字色继承，按钮给的就是它）。
@@ -424,9 +421,8 @@ func favTooltip(faved bool) string {
 // 五枚键在一条线上会看出参差——而参差正是「这一枚是从别处搬来的」在画面上
 // 唯一的痕迹。
 func (s *Shell) viewDownloadButton(c *ui.Context, st app.State) {
-	if iconButton(c, iconDownload, "下载", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 5).
-		Tooltip("把正在放的这首下载到本地").Clicked() {
+	if s.withTip(c, iconButton(c, iconDownload, "下载", iconMd).
+		Size(iconHitMd, iconHitMd).Padding(0, 5), "把正在放的这首下载到本地").Clicked() {
 		it, ok := s.app.PlayingItem()
 		if !ok {
 			s.addToast("这一首还没有取回来，下载不了")
@@ -454,8 +450,8 @@ func (s *Shell) viewQualityBadge(c *ui.Context, st app.State, t *ui.Theme) {
 	if st.Quality == "" {
 		return
 	}
-	ui.Text(c, st.Quality).FontSize(scale.Font(c, 11)).TextColor(t.TextMuted).
-		Tooltip("音质：" + st.Quality + "（点一下换）").
+	s.withTip(c, ui.Text(c, st.Quality).FontSize(scale.Font(c, 11)).TextColor(t.TextMuted),
+		"音质："+st.Quality+"（点一下换）").
 		Menu(func(m *ui.Menu) {
 			for _, q := range qualityChoices {
 				// `Checked` 是「当前选的是这一档」。选的和给的要能分开看：
@@ -508,15 +504,14 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 		s.viewPrevButton(c)
 
 		if st.Playing {
-			if iconButtonPrimary(c, transportIcon(true), "暂停", iconPlayBtn).
-				Size(iconHitPlay, iconHitPlay).Padding(0, 5).
-				Tooltip("暂停").Clicked() {
+			if s.withTip(c, iconButtonPrimary(c, transportIcon(true), "暂停", iconPlayBtn).
+				Size(iconHitPlay, iconHitPlay).Padding(0, 5), "暂停").Clicked() {
 				s.app.Toggle()
 			}
 		} else {
-			if iconButtonPrimary(c, transportIcon(false), "播放", iconPlayBtn).
+			if s.withTip(c, iconButtonPrimary(c, transportIcon(false), "播放", iconPlayBtn).
 				Size(iconHitPlay, iconHitPlay).Padding(0, 5).
-				Tooltip("播放").Disabled(!st.HasTrack).Clicked() {
+				Disabled(!st.HasTrack), "播放").Clicked() {
 				s.app.Toggle()
 			}
 		}
@@ -625,17 +620,17 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 // 18 的图标 + 每边 5 的内边距，点击区 28（`iconHitMd`），比原来那个 88 窄三倍
 // 还点得准（角上也点得到，见 `TestTheHitAreaIsBiggerThanTheGlyph`）。
 func (s *Shell) viewPrevButton(c *ui.Context) {
-	if iconButton(c, iconPrev, "上一首", iconMd).
+	if s.withTip(c, iconButton(c, iconPrev, "上一首", iconMd).
 		Size(iconHitMd, iconHitMd).Padding(0, 5).
-		Tooltip("上一首").Disabled(!s.app.CanPrev()).Clicked() {
+		Disabled(!s.app.CanPrev()), "上一首").Clicked() {
 		s.app.Prev()
 	}
 }
 
 func (s *Shell) viewNextButton(c *ui.Context) {
-	if iconButton(c, iconNext, "下一首", iconMd).
+	if s.withTip(c, iconButton(c, iconNext, "下一首", iconMd).
 		Size(iconHitMd, iconHitMd).Padding(0, 5).
-		Tooltip("下一首").Disabled(!s.app.CanNext()).Clicked() {
+		Disabled(!s.app.CanNext()), "下一首").Clicked() {
 		s.app.Next()
 	}
 }
@@ -655,9 +650,9 @@ func (s *Shell) viewNextButton(c *ui.Context) {
 func (s *Shell) viewPlayMode(c *ui.Context, st app.State) {
 	// 四档各配一个图标（Biu 的 `getPlayModeList`，逐个照它的 `icon` 那一项），
 	// 悬停那句话仍然报的是**当前这一档**。
-	btn := iconButton(c, playModeIcon(st.PlayMode), "播放模式", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 5).
-		Tooltip(st.PlayMode.Label() + "：" + st.PlayMode.Desc() + "（点一下换，右键看全部）")
+	btn := s.withTip(c, iconButton(c, playModeIcon(st.PlayMode), "播放模式", iconMd).
+		Size(iconHitMd, iconHitMd).Padding(0, 5),
+		st.PlayMode.Label()+"："+st.PlayMode.Desc()+"（点一下换，右键看全部）")
 
 	// 按一下换到下一档。档序（顺序 → 循环 → 随机 → 单曲 → 回顺序）是 App 那边
 	// 的 `PlayMode.Next`，照 Biu 的 `getPlayModeList` 次序，两边按几下能转回

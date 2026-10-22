@@ -68,9 +68,9 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 
 	loginScroll := ui.Scroll(c).Key("login-scroll").Grow(1)
 	loginScroll.Children(func() {
-		ui.Column(c).Key("page:" + loginPath).Grow(1).Padding(20).Gap(12).
+		ui.Column(c).Key("page:" + loginPath).Grow(1).Padding(0, 20).Gap(12).
 			AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "扫码登录").FontSize(scale.Font(c, pageTitleSize)).Bold()
+			ui.Text(c, "扫码登录").FontSize(scale.Font(c, pageTitleSize))
 
 			switch {
 			case !st.Busy() && st.QR == nil:
@@ -297,16 +297,14 @@ func qrHintColor(t *ui.Theme, phase app.LoginPhase) ui.Color {
 // 这一段放在 `viewNav` 那一行的末尾，不动 `viewMain` / `viewSide`。
 func (s *Shell) viewLoginEntry(c *ui.Context) {
 	if s.app.LoggedIn() {
-		if iconButton(c, iconLogout, "退出登录", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 5).
-			Tooltip("退出登录").Clicked() {
+		if s.withTip(c, iconButton(c, iconLogout, "退出登录", iconMd).
+			Size(iconHitMd, iconHitMd).Padding(0, 5), "退出登录").Clicked() {
 			s.logoutAndStartOver()
 		}
 		return
 	}
-	if iconButtonPrimary(c, iconLogin, "登录", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 5).
-		Tooltip("登录 B 站账号").Clicked() {
+	if s.withTip(c, iconButtonPrimary(c, iconLogin, "登录", iconMd).
+		Size(iconHitMd, iconHitMd).Padding(0, 5), "登录 B 站账号").Clicked() {
 		s.goLogin()
 	}
 }

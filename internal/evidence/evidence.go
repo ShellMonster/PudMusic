@@ -260,6 +260,24 @@ var Items = []Item{
 			"TestTheLongPressIsOffOnceTheSongIsLiked",
 		},
 	},
+	{
+		// 封面的暂时失败（断网、超时、5xx、限流）按指数退避自己再要一次；
+		// 永久失败（404、解码不了）不再要第二遍。所有等待都在假钟上推进，
+		// 「到点」是确定的，不受机器负载影响。
+		Category: FakeClock,
+		Spec:     "封面暂时失败按指数退避自己再试（间隔递增、封顶、有次数上限），永久失败不重试；重试走后台路径、守住在途上限，成功后唤醒窗口",
+		Tests: []string{
+			"TestTransientFailureRetriesWithGrowingBackoff",
+			"TestPermanentFailureIsNotRetried",
+			"TestFailureClassification",
+			"TestRetrySuccessFlipsStateAndWakes",
+			"TestTheCoverBecomesAnImageAfterARetry",
+			"TestFailureRecordsAreBounded",
+			"TestTouchReplacesAForgottenEntry",
+			"TestRetriesRespectTheInflightLimit",
+			"TestCloseDropsAWaitingRetry",
+		},
+	},
 
 	// ── 严格 HTTP fixture ──────────────────────────────────────────────────
 	{
@@ -627,6 +645,21 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
+		// 票 #162（规格票 #156 底下的一条）：迷你播放器是**面板语义**——显示和
+		// 聚焦能拿键盘，但点它不激活应用，用户不会被从别的应用里拽出来。
+		//
+		// ⚠️ 这一条证的是**选项摆对了**（`Panel: true`，以及位置记忆的那几个
+		// 前提还在：面板不能最大化，而 `isZoomed` 恒为真就会让 `StateKey` 一条
+		// 都存不下来）。真的「点下去不激活」和「关掉再开停在原处」要真窗口 +
+		// 真鼠标，量到的结果记在 `internal/ui/miniplayer.go` 的「本机实测」里，
+		// 不在这儿假装验过。
+		Spec: "迷你播放器是面板语义：点它不激活应用（票 #162），位置记忆仍然有效",
+		Tests: []string{
+			"TestTheMiniWindowIsAPanel",
+		},
+	},
+	{
+		Category: Platform,
 		Spec:     "迷你播放器里能换歌、上下一首（44）、拖进度条（45）、调音量",
 		Tests: []string{
 			"TestTheMiniWindowStepsThroughTheQueue",
@@ -656,10 +689,10 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
-		Spec:     "迷你播放器这一块本身：装得下 320×100、字没被截、控件身份稳（铁律四）",
+		Spec:     "迷你播放器这一块本身：装得下 320×100、那四个键是图标键（框对、图形在）、控件身份稳（铁律四）",
 		Tests: []string{
 			"TestTheMiniCardFitsInThreeHundredAndTwentyByOneHundred",
-			"TestTheMiniLabelsAreNotTruncated",
+			"TestTheMiniKeysAreIcons",
 			"TestTheMiniControlsKeepTheirIdentityWhenTheLabelChanges",
 		},
 	},
@@ -1634,17 +1667,17 @@ var Items = []Item{
 		// issue 134 的第二单元（列表与网格）：表头、列表行、回顶。
 		//
 		// 🔴 **判据全是画面上的像素、位置和真的菜单**：这一票的四个症状**全都是
-		// 静默的**——表头底下没有线、列名比次要文字还弱、行里没有「⋯」、页面滚到
+		// 静默的**——表头底下没有线、列名比行里的字还弱、行里没有「⋯」、页面滚到
 		// 底没有回顶，这四样没有一样会报错，界面只是「不太对」。
 		//
 		// 「⋯」那一条钉的是**两条路给的是同一批动作**（行内的和右键的）：写两份菜单
 		// 的话，两边迟早会对不上，而那种错在界面上看不出来（两边都能点，只是点的
 		// 不是同一件事）。
-		Spec: "列表与网格：表头底下有一条线且列名的字号比行里的次要文字大；每一行末尾有一枚「⋯」，点开它和右键给出的是同一批动作；列表行的歌名只占一行、行高是定死的一个值；每一页滚到底都有「回到顶部」",
+		Spec: "列表与网格：表头底下有一条线且列名的字号不比行里的字小；每一行末尾有一枚「⋯」，点开它和右键给出的是同一批动作；列表行的歌名只占一行、行高是定死的一个值；每一页滚到底都有「回到顶部」",
 		Tests: []string{
 			// 表头：底下那条线（**逐像素采样**）+ 列名的字号。
 			"TestTheHeaderHasALineUnderIt",
-			"TestTheHeaderColumnNamesAreBiggerThanTheRowsSecondaryText",
+			"TestTheHeaderColumnNamesAreNoSmallerThanTheRowsText",
 			// 行内那枚「⋯」：两条路同一批动作、做的是**它那一行**的事、每一行都有。
 			"TestTheOperationButtonOpensTheSameMenuAsTheRightClick",
 			"TestTheOperationButtonActsOnTheSongItSitsOn",
@@ -1663,6 +1696,32 @@ var Items = []Item{
 		},
 	},
 	{
+		Category: Platform,
+		// 票 #167（#163 的第一批之一）：列表与网格的排版对齐 DESIGN.md。
+		//
+		// 这一票的错法**全是静默的**：字号小一档、列间距窄一半、表头「标题」比封面
+		// 往右多让 64、紧凑档还画着一块封面——没有一样会报错，画面上只是「和上游不是
+		// 同一个产品」。所以判据是量出来的位置、逐像素采样的中心和画出来的字谁高，
+		// 不是「调了哪个常量」。
+		Spec: "列表与网格的排版照 DESIGN.md：列表歌名 16 / UP 名 14 / 列间距 16 / 序号 32 居中；表头「标题」从封面左缘起（不多让一列封面空位）；网格卡歌名 16 / UP 14；紧凑档不画封面",
+		Tests: []string{
+			// 列表那一行的四个数 + 能直接量出来的两样：UP 名比时长高一档、
+			// 序号那一块的墨迹落在这一列的正中（逐像素采样）。
+			"TestTheRowScaleFollowsTheDesign",
+			"TestTheRowTextIsBiggerThanTheNumbers",
+			"TestTheRowIndexIsCentredInItsColumn",
+			// 序号 / 列间距 / 封面三者摆出来的横坐标。
+			"TestTheCoverSitsNextToTheTitle",
+			// 表头：「标题」落在封面左缘（不是歌名的左缘），右边那几列照样对齐。
+			"TestTheHeaderColumnsLineUpWithTheRows",
+			// 网格卡：歌名 16 > UP 名 14 > 时长 12（画出来的三块字谁高）。
+			"TestTheGridCardTextIs16And14",
+			// 紧凑档：整块不画封面（位置 + hover 反馈都没了）。
+			"TestTheCompactRowHasNoCover",
+			"TestTheCompactRowsAreShorterThanTheNormalOnes",
+		},
+	},
+	{
 		// 归「双平台」那一组：侧栏是**窗口的骨架**（理由同 issue 127 那一条）。
 		Category: Platform,
 		// issue 137（#134 的第三单元）那一票：折叠态的侧栏 + 收藏夹名。
@@ -1676,6 +1735,42 @@ var Items = []Item{
 			"TestTheCollapsedSidebarItemHasItsFullName",
 			"TestTheCollapsedSidebarTipSitsToTheRightOfTheItem",
 			"TestALongFavoriteNameDoesNotMakeTheRowTaller",
+		},
+	},
+	{
+		// 归「双平台」那一组：这一票动的是**六处的动作键**，而六处画得不一样就
+		// 是「用户从播放条走进满屏播放器，控件库换了」。理由同 #134 第二单元那一条：
+		// 判据全在画面上。
+		Category: Platform,
+		// issue 141（#134 的第七单元）那一票：铺开扁平按钮。
+		//
+		// 🔴 **判据是像素**：满屏播放器 / 迷你播放器 / 下载记录 / 本地音乐 /
+		// 收藏夹 / 动态卡片这六处里的动作键，不再是 `ui.Button` 那枚「一圈 1px
+		// 描边 + 一块常驻底色」的药丸——换成它一样编译得过、点得动、无障碍名字
+		// 也还叫得出来，只有画面上多出那两样。反过来也断：对话框里的确定/取消、
+		// 空状态和错误页上的重试**仍然是**真按钮（主次分明，票面点名要保）。
+		//
+		// 另外两样也在这一票里：顶栏那枚「迷你」从文字键换成 `iconPiP`；
+		// 队列抽屉和分集抽屉那两条手搓的分割线换成框架的 `ui.Divider`。
+		Spec: "那六处里没有带描边、带常驻底的按钮（图标键框内框外同色，文字键上下就是页面底色）；对话框里的确定/取消和错误页的重试仍然带描边和常驻底；顶栏的「迷你」是一枚图标键；两处抽屉头上那条 1 像素的分割线还在",
+		Tests: []string{
+			// 六处各一条（深浅两套都在里面）。
+			"TestTheFullPlayerKeysAreFlat",
+			"TestTheFullPlayerPartsKeysAreFlat",
+			"TestTheMiniPlayerKeysAreFlat",
+			"TestTheDownloadListKeysAreFlat",
+			"TestTheLocalMusicKeysAreFlat",
+			"TestTheCollectionKeysAreFlat",
+			"TestTheDynamicCardKeysAreFlat",
+			// 反面：该保留描边的那一批。
+			"TestTheDialogButtonsStayOutlined",
+			"TestTheEmptyStateRetryStaysOutlined",
+			// 顶栏那枚「迷你」。
+			"TestTheNavBarMiniKeyIsAnIcon",
+			// 迷你那四个键**是图标键**（不是被挤扁的文字键）。
+			"TestTheMiniKeysAreIcons",
+			// 两处手搓的分割线换成了框架的 `ui.Divider`，画出来还得是那一条线。
+			"TestTheTwoRulesAreDrawnAsOnePixelLines",
 		},
 	},
 	{

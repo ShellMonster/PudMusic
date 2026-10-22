@@ -345,7 +345,7 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 				// 所以提示里那句话得由名字 / 描述带到读屏软件那儿。
 				if collapsed {
 					item = item.Label(rt.Title).Description(rt.Title)
-					sideItemTip(c, item, rt.Title)
+					s.sideItemTip(c, item, rt.Title)
 				}
 				// 选中那一层照上游 HeroUI 的 `variant="flat"` + `color="primary"`
 				// （`components/menu/menu-item.tsx:83-84`）：主色很淡的一层底 +
@@ -372,38 +372,18 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 // # 位置照上游：贴在那一项的**右边**
 //
 // 上游折叠态那一项外面套的是 `<Tooltip content={title} placement="right">`
-// （`biu/src/components/menu/menu-item.tsx:78`）。框架自带的
-// `Element.Tooltip` 把提示摆在**上面**，而折叠态的侧栏贴着窗口左边——
-// 摆在上面的话提示会盖住上面那几项，摆在左边又被窗口边钳住。
+// （`biu/src/components/menu/menu-item.tsx:78`）。框架自带的提示摆在**上面**，
+// 而折叠态的侧栏贴着窗口左边——摆在上面的话提示会盖住上面那几项，摆在左边
+// 又被窗口边钳住。所以走 `tipAt` 的自定义位置那一支。
 //
-// # 为什么要自己写而不用 `Element.Tooltip`
+// # 时延也是上游那一档
 //
-// `Element.Tooltip` 的位置是写死的（`mygo/ui/tooltip.go:111` 的
-// `AttachTo(e, AnchorTop, AnchorBottom)`），而 `ui.TooltipBase` 让我们自己
-// 摆位置。外观照框架那一套抄：反色底 + 反色字 + 一层阴影。
-//
-// ⚠️ **反色那一对要自己兜底**：框架的 `Theme.inverse()` 是未导出的，而
-// `Inverse` / `InverseText` 留空时那一层是透明的（`mygo/ui/theme.go:70-77`）。
-// 照抄它的兜底（`Inverse` 空就用 `Text`，`InverseText` 空就用 `Background`），
-// 否则提示会是一块看不见底的字。
-func sideItemTip(c *ui.Context, anchor ui.Element, text string) {
-	t := c.Theme()
-	fill, fg := t.Inverse, t.InverseText
-	if fill == ui.Transparent {
-		fill = t.Text
-	}
-	if fg == ui.Transparent {
-		fg = t.Background
-	}
-	ui.TooltipBase(c, anchor, func(tip ui.Element) {
-		tip.AttachTo(anchor, ui.AnchorRight, ui.AnchorLeft).MarginStart(6).
-			Padding(t.Space(1.25), t.Space(2)).Radius(t.Space(1.25)).
-			// ⚠️ **`t.FontSize` 已经乘过 TextScale 了**（`buildTheme` 里那一句），
-			// 再走一遍 `scale.Font` 就是乘两次（1.4 倍下 17.2 → 24.08）。
-			Background(fill).TextColor(fg).FontSize(t.FontSize-1).
-			Shadow(0, 2, 8, 0, ui.RGBA(0, 0, 0, 0.2))
-		tip.Children(func() { ui.Text(c, text) })
-	})
+// 那一处还写了 `closeDelay={0}`：指针离开这一项，提示立刻收。菜单是用户顺着
+// 一列扫的，晚 500ms 收会压在下一项上。
+func (s *Shell) sideItemTip(c *ui.Context, anchor ui.Element, text string) {
+	s.tipAt(c, anchor, text, tipMenu, func(panel, anchor ui.Element, t *ui.Theme) {
+		panel.AttachTo(anchor, ui.AnchorRight, ui.AnchorLeft).MarginStart(6)
+	}, true)
 }
 
 // loggedOutHint 是那一句话的正文。

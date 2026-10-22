@@ -18,8 +18,9 @@
 // ## 一页摆多少
 //
 // 上游 `pageSize = colCount * 2`：一页两行，左右两个箭头翻页（`new-music-top.tsx:157`
-// 与 `:186-203`）。所以这里也是**两行**，不是一行——一行的话 6 列只有 6 首，占
-// 不满那一块，箭头也用不上。
+// 与 `:186-203`）。这里是**够高就两行、不够就一行**：封面是方的，两行有多高跟着
+// 容器宽走（见 newMusicTwoRowsMinH）。默认的 1200×800 摆不下两行（那一档要 978
+// 高），所以默认是一行、4 首一页，两枚箭头照旧翻页。
 //
 // ## 🔴 行身份
 //
@@ -35,6 +36,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
@@ -50,40 +52,51 @@ const (
 	// 列表才是这一屏的主内容。
 	newMusicRows = 2
 
-	// newMusicTwoRowsMinH 是「窗口有这么高才摆两行」的那个数。
+	// newMusicChromeH 是这一块之外、这一屏不管怎样都要花掉的高度。
 	//
 	// 量出来的：顶栏 ~52 + 播放条 ~90 + 页面内边距 40 + Tab 那一排 ~34 + 页面里
-	// 两道缝 24 = 240 是这一屏不管怎样都要花掉的；两行卡片是 2×(140 封面 + 6 + 17
-	// 歌名 + 6 + 14 UP 名) + 12 行间缝 = 366，加标题那 19 + 12 缝 = 397。397 + 240
-	// = 637 是「两行 + 列表还剩得下一两行」的那个高度，所以取 700 留一点余量。
+	// 两道缝 24 = 240。封面是方的之后，两行的总高跟着容器宽走（见
+	// newMusicTwoRowsMinH），所以这个数从「一个定死的门槛」变成公式里的一项。
+	newMusicChromeH = 240
+
+	// newMusicHeadH 是「新歌速递」那一行标题占的高。24 号字的行高约 29，取 32
+	// 留一点余量。
+	newMusicHeadH = 32
+
+	// newMusicCardTextH 是封面下面那两行字占的高：歌名 16（行高 ~20）、UP 名
+	// 14（行高 ~18）、两道 6 的缝。取 52 留一点余量。
+	newMusicCardTextH = 52
+
+	// newMusicListRowH 是下面那一档列表**一行**的高（widgets/list 的
+	// `listRowHeight` 是 64）。
+	newMusicListRowH = 64
+
+	// newMusicListHeadH 是列表**表头**加「表头到第一行那道缝」的高。
 	//
-	// 窗口最小高是 560（`WindowOptions` 的 `MinHeight`），那一档按两行摆的话
-	// 下面的列表就只剩 0——实测那一档的行盒子宽 0 高 0，一首歌都看不见。
-	newMusicTwoRowsMinH = 700
+	// 表头是 `list.Header`：上下各 8 的 Padding + 14 号字那行（约 17）+ 1 的
+	// 分隔线 ≈ 34；首页这一页的 Column 在表头和列表之间还有一道 12 的 gap。
+	// 取 52 留一点余量（行高会跟着平台差几个十分之一像素）。
+	//
+	// ⚠️ **这一段原来漏掉了**：只给列表留一行 64 的话，真正画出来的那一行只剩
+	// 64 − 约 48 = 16 上下——一行被裁掉四分之三，而 `Tester` 里它仍然「在」
+	// （盒子在、字也在，只是被视口切了），只看「有没有」的测试抓不到。评审在
+	// 1200×640 / 560 / 930 上都量到过（约 25 / 16 / 25 高）。
+	newMusicListHeadH = 52
+
+	// newMusicListMinH 是摆完这一块之后，下面那一档至少要留下的高：**表头 +
+	// 一行完整的行**。少给的话用户看到的是一排卡片下面压着一根切了一半的歌名，
+	// 比少摆一行更糟。
+	newMusicListMinH = newMusicListHeadH + newMusicListRowH
 
 	// newMusicGap 是格子之间的间距。上游是 `gap-3`（12 像素）。
 	newMusicGap = 12
 
-	// newMusicCoverH 是封面那一块的高，**定死**。
+	// newMusicTitleSize 是「新歌速递」那一行标题的字号。
 	//
-	// ⚠️ 上游这里是方的（`new-music-top.tsx:225` 的 `aspect-square w-full`），这里
-	// 不是，方的原因和为什么敢这么定：
-	//
-	//	上游那整页在一个 `ScrollContainer` 里（新歌速递和下面的推荐列表一起滚），
-	//	所以它可以让封面有多高就多高，滚下去就是了。我们不行——「流行」那一档
-	//	的推荐列表是个**虚拟列表**，它自己占着滚动（widgets/list 的 List.View
-	//	是 Grow(1) 的），整页再套一层 Scroll 的话那个列表就没有确定的视口高度，
-	//	虚拟滚动会退化成「全建出来」。
-	//
-	// 不给高度上限的后果是量出来的：窗口 1200×800 时新歌速递那块的封面有 226 高，
-	//	两行连歌名加起来 580，顶栏 + 侧栏 + Tab 那一排 + 播放条一共占掉 658 ——
-	//	**「流行」那一档的列表被挤成 0×0，一首歌都看不见**（实测：那一档的行盒子
-	//	量出来宽 0 高 0）。
-	//
-	// 140 是 Biu 另一处网格的封面高（`components/music-card` 的 `height={140}`、
-	//	`width="100%"`，widgets/list 的 grid.go 里那份也是从它抄的）：拿同一个数，
-	//	新歌速递和下面那个网格在同一个窗口里看起来是一套的。
-	newMusicCoverH = 140
+	// 上游那一处是整页唯一的 `<h1>`（`new-music-top.tsx:178`），字号照
+	// DESIGN.md 的「页标题 24/400」：24 号、**不加粗**（权重由 Preflight 重置成
+	// inherit）。这一块要「立得住」靠的是字号，不是字重。
+	newMusicTitleSize = 24
 
 	// newMusicEmptyH 是「暂无数据」那一块占多高。上游是 `h-[200px]`。
 	newMusicEmptyH = 200
@@ -92,8 +105,13 @@ const (
 	// 内容走，两位数翻成三位数时后面的按钮会左右跳一格——翻页时最不该跳的就是它。
 	newMusicPageW = 52
 
-	// newMusicArrowW 是左右两个翻页按钮的宽度，定住，理由同上。
-	newMusicArrowW = 84
+	// newMusicArrowW 是左右两个翻页键的点击区边长：32×32。
+	//
+	// 图标本身还是 16（上游那两枚 `RiArrowLeftSLine` / `RiArrowRightSLine` 的
+	// size 是 16，`new-music-top.tsx:185-199`），32 是**点击区**（票 #170 的数）。
+	// 原来它是 84（两个汉字加内边距），图标化之后 84×84 的一枚图标键在这个页头上
+	// 会是一块方砖，比旁边那个读数还大。
+	newMusicArrowW = 32
 )
 
 // newMusicColsFor 是容器有 w 那么宽时新歌速递摆几列。
@@ -118,12 +136,52 @@ var newMusicColsFor = func(w float32) int {
 //
 // 上游永远是两行（`new-music-top.tsx:157` 的 `colCount * 2`），因为上游那一整页在
 // 一个滚动容器里，滚下去就是了。这里摆不下两行时**减成一行**，理由见
-// `newMusicTwoRowsMinH` 上面那三段。
-func newMusicRowsAt(h float32) int {
-	if h >= newMusicTwoRowsMinH {
+// `newMusicTwoRowsMinH`。
+//
+// ⚠️ 判据要**格子宽**：封面是方的（边长等于格子宽），所以两行有多高跟着容器有多
+// 宽走。拿一个定死的窗口高当门槛是封面还定高 140 时的算法，方封面下它会算错：
+// 1200 宽时容器 4 列、格子 231，两行要 978 高；639 宽时容器只有 2 列、格子反而
+// 313，两行要 1143 高——两种宽度不可能共用一个门槛。
+func newMusicRowsAt(h, cell float32) int {
+	if h >= newMusicTwoRowsMinH(cell) {
 		return newMusicRows
 	}
 	return 1
+}
+
+// newMusicTwoRowsMinH 是「窗口要这么高，两行才摆得下」的那个数。
+//
+// 它按格子宽算：两行的封面是 2×cell，加上两行文字、行间缝、标题和这一屏的固定
+// 开销（`newMusicChromeH`），再给下面的列表留**表头 + 一行完整的行**
+// （`newMusicListMinH`）。
+//
+// 窗口最小高是 560（`WindowOptions` 的 `MinHeight`），那一档按两行摆的话下面的
+// 列表就只剩 0——实测那一档的行盒子宽 0 高 0，一首歌都看不见。
+func newMusicTwoRowsMinH(cell float32) float32 {
+	return newMusicChromeH + newMusicHeadH + 2*newMusicGap +
+		2*(cell+newMusicCardTextH) + newMusicListMinH
+}
+
+// newMusicCoverSide 是这一帧封面那个正方形的边长。
+//
+// 平时就是格子的宽（上游 `aspect-square w-full`）。窗口矮到**连一行整宽的封面
+// 都放不下**时（最小窗口 1200×560 就是那一档：整宽 231 的封面 + 顶栏 / Tab /
+// 播放条会把下面的列表挤成 0×0），把边长压到「摆完之后列表还留得下
+// `newMusicListMinH`（表头 + 一行完整的行）」的那个数。压小之后它仍然是方的——
+// 票面要的就是宽高相等，而不是「一定要占满格子」。
+//
+// ⚠️ 两行的档不用在这里再算一遍：两行的门槛（newMusicTwoRowsMinH）成立时，
+// 这个函数算出来的上限一定大于格子宽，于是边长就是格子宽。
+func newMusicCoverSide(h, cell float32) float32 {
+	room := h - newMusicChromeH - newMusicHeadH - newMusicGap -
+		newMusicCardTextH - newMusicListMinH
+	if room < 0 {
+		room = 0
+	}
+	if cell < room {
+		return cell
+	}
+	return room
 }
 
 // newMusicCellWidth 是一格有多宽：容器减去列间的缝，平分。
@@ -195,6 +253,10 @@ type newMusicGrid struct {
 	// retry 是「重试」按钮按下去要干的活。首页给的闭包（`homePage.retryNew`）。
 	// nil 时那一块画不出重试按钮。
 	retry func()
+
+	// tip 是带延迟的悬停提示（tooltip.go），由 Shell 在首页建好之后接上。
+	// 为零时（单独造这一块的测试）退回框架那枚。
+	tip tipFunc
 }
 
 // newNewMusic 建新歌速递那一块。
@@ -211,6 +273,12 @@ func newNewMusic(cache *imgcache.Cache, acts list.Actions, wake func()) *newMusi
 		}
 	})
 	return g
+}
+
+// tipWith 是这一块的悬停提示入口：状态挂在 Shell 上（tooltip.go），这里只是
+// 把首页拿到的那份递过去；单独造这一块的测试没有那份，退回框架那枚。
+func (g *newMusicGrid) tipWith(c *ui.Context, e ui.Element, text string) ui.Element {
+	return tipFrom(g.tip, c, e, text, tipDefault)
 }
 
 // SetSongs 换掉新歌速递那一摊歌，页码夹回还存在的范围内。
@@ -297,12 +365,14 @@ func (g *newMusicGrid) view(c *ui.Context) {
 	if w <= 0 {
 		w = ww
 	}
-	cols, rows := newMusicColsFor(w), newMusicRowsAt(wh)
+	cols := newMusicColsFor(w)
+	cell := newMusicCellWidth(w, cols)
+	rows := newMusicRowsAt(wh, cell)
+	coverSide := newMusicCoverSide(wh, cell)
 	g.width, g.rows = w, rows
 
 	g.clampPage()
 	total := g.totalPages()
-	cell := newMusicCellWidth(w, cols)
 	size := newMusicPageSize(cols, rows)
 
 	ui.Column(c).Key("new-music").FillWidth().Gap(12).Children(func() {
@@ -319,7 +389,7 @@ func (g *newMusicGrid) view(c *ui.Context) {
 				Background(t.Surface).Center().Gap(8).Children(func() {
 				ui.Text(c, "新歌速递没拉出来").FontSize(scale.Font(c, 13)).TextColor(t.Text)
 				ui.Text(c, g.err.Error()).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(2)
-				if g.retry != nil && ui.Button(c, "重试加载新歌速递").Clicked() {
+				if g.retry != nil && flatButton(c, "重试加载新歌速递").Clicked() {
 					g.retry()
 				}
 			})
@@ -351,7 +421,7 @@ func (g *newMusicGrid) view(c *ui.Context) {
 					// 空格子不占位也不画边框）。
 					return
 				}
-				g.viewCard(c, n, cell)
+				g.viewCard(c, n, coverSide)
 			}
 		})
 		// 量这一帧的容器宽，下一帧用它分列。`Bounds` 读的是**上一帧**量好的盒子，
@@ -369,7 +439,7 @@ func (g *newMusicGrid) view(c *ui.Context) {
 // 上摆一个 1 / 0 的读数和两个转不动的箭头，用户只会以为界面坏了。
 func (g *newMusicGrid) viewHeader(c *ui.Context, total int) {
 	ui.Row(c).Key("new-music:head").FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "新歌速递").FontSize(scale.Font(c, 16)).Bold()
+		ui.Text(c, "新歌速递").FontSize(scale.Font(c, newMusicTitleSize))
 
 		if total == 0 {
 			return
@@ -378,15 +448,19 @@ func (g *newMusicGrid) viewHeader(c *ui.Context, total int) {
 		ui.Row(c).Grow(1).Gap(8).Justify(ui.End).AlignItems(ui.Center).Children(func() {
 			// ⚠️ 翻页不重置网格那一块的横向位置——它本来就没有横向滚动，
 			// 页码就是它唯一的「位置」。
-			prev := ui.Button(c, "上一页").Width(newMusicArrowW).
-				Disabled(g.page <= 1)
+			// 上游那两枚是 `variant="flat"` 的 `RiArrowLeftSLine` / `RiArrowRightSLine`
+			// 16（`new-music-top.tsx:185-199`）。图标键 + 悬停说出它做什么。
+			prev := g.tipWith(c, flatIconButton(c, iconSideCollapse, "上一页", 16).
+				Size(newMusicArrowW, newMusicArrowW).Padding(0, 8).
+				Disabled(g.page <= 1), "上一页")
 			if prev.Clicked() {
 				g.page--
 			}
 			ui.Textf(c, "%d / %d", g.page, total).FontSize(scale.Font(c, 13)).Width(newMusicPageW).
 				TextAlign(ui.Center).TextColor(c.Theme().TextMuted)
-			next := ui.Button(c, "下一页").Width(newMusicArrowW).
-				Disabled(g.page >= total)
+			next := g.tipWith(c, flatIconButton(c, iconSideExpand, "下一页", 16).
+				Size(newMusicArrowW, newMusicArrowW).Padding(0, 8).
+				Disabled(g.page >= total), "下一页")
 			if next.Clicked() {
 				g.page++
 			}
@@ -397,15 +471,16 @@ func (g *newMusicGrid) viewHeader(c *ui.Context, total int) {
 // viewCard 画一格：封面 + 歌名 + UP 名，外加点一下就放队列。
 //
 // 结构照上游 `new-music-top.tsx:217-261` 那个 `role="button" tabIndex={0}` 的
-// 卡片：封面占满一格的宽、高定死在 newMusicCoverH、下面 `mt-2` 是歌名，再下面
-// 一行小字（上游那一行是 `作者 · 日期`，我们这一块的 `list.Music` 没有日期字段，
-// 所以只有 UP 名）。
+// 卡片：封面**占满一格的宽、宽高相等**（上游 `:225` 的 `aspect-square w-full`；
+// 窗口矮到整宽的封面会把列表挤没时按 `newMusicCoverSide` 压小，但还是方的），
+// 下面 `mt-2` 是歌名，再下面一行小字（上游那一行是 `作者 · 日期`，我们这一块的
+// `list.Music` 没有日期字段，所以只有 UP 名）。
 //
 // ⚠️ 歌名和 UP 名都是 `MaxLines(1)`（上游两行都是 `line-clamp-1`），所以这一块
 // **每一格都一样高**：卡片的高就是「封面 + 两行字 + 两道缝」。widgets/list 的
 // 列表行现在也是**定死行高**的（`card.go` 的文件头），而这一块是它自己的一档
 // ——别顺手把 MaxLines 去掉，那一格会比旁边的高，整块网格的边就对不齐了。
-func (g *newMusicGrid) viewCard(c *ui.Context, i int, cell float32) {
+func (g *newMusicGrid) viewCard(c *ui.Context, i int, coverSide float32) {
 	m := g.songs[i]
 	t := c.Theme()
 
@@ -413,7 +488,7 @@ func (g *newMusicGrid) viewCard(c *ui.Context, i int, cell float32) {
 	// 序号」，新歌速递换歌时新的一首会插在头上（上游按发布时间排），那样后面
 	// 所有卡片的焦点、这类状态就整体错配了——用户 Tab 到第三首，刷新一下，焦点
 	// 跑到别的那首上去了。
-	card := ui.Column(c).Key(m.ID).FillWidth().AlignItems(ui.Start).Gap(6).
+	card := ui.Column(c).Key(m.ID).AlignItems(ui.Start).Gap(6).
 		// 上游那张卡片是 `role="button" tabIndex={0}`：能点也能 Tab 到。焦点
 		// 落在它身上时它才认得出「用户现在盯的是哪一首」，而这也正是铁律四那一
 		// 条要保住的东西有一个能看见的地方（`Focused` + 头插一首，见上面那条
@@ -423,27 +498,39 @@ func (g *newMusicGrid) viewCard(c *ui.Context, i int, cell float32) {
 		// 同）：上游这一块就是单击 `handlePlay`，桌面端在这里跟着它。
 		OnClick(func() { g.play(i) })
 
-	card.Children(func() {
-		// ① 封面。占满一格的宽，高定死（不是方的，理由见 newMusicCoverH 上面那
-		// 四段）。四态由 imgcache.View 画：空地址画空框，不画「失败」。
-		imgcache.View(c, g.cache, m.Cover, cell, newMusicCoverH)
+	// ⚠️ **hover 要在 `Children` 之前问**（同 widgets/list 的 grid.go）：它报的是
+	// 这一帧指针在不在这一格上，而封面上面那圈反馈要等 Children 才建得出来。
+	onCard := card.Hovered()
 
-		// ② 歌名 + UP 名。上游两行都是 `line-clamp-1`，这里照它。
+	card.Children(func() {
+		// ① 封面。边长是 `coverSide`（平时等于格子的宽，见 newMusicCoverSide），
+		// 上面那一圈 hover 反馈是**和网格卡片同一套**：封面底部一条 black/90
+		// 渐变、右下角一个主色圆播放钮、200ms 淡入。四态由 imgcache.View 画：
+		// 空地址画空框，不画「失败」。
 		//
-		// ⚠️ **正在放的那一首把歌名染成主色**：这一块和上面三个 Tab 是同一页，
-		// 判据也是同一份（`Actions.IsPlaying`，按 `app.Item.Identity`）。
-		// 同一屏上「正在播放」在两个地方说两套话，用户只能靠猜。
+		// ⚠️ 播放钮按下去是 `g.play(i)`（只放这一首），不是网格卡片那枚「从这一
+		// 首往后接」——所以走 `CardCoverOne`，它的标签和提示说的也是这一件事。
+		hover.CardCoverOne(c, g.cache, m.Cover, coverSide, coverSide, onCard, m.Title,
+			func() { g.play(i) })
+
+		// ② 歌名 + UP 名。上游两行都是 `line-clamp-1`，这里照它。字号走 DESIGN.md
+		// 的网格那一档：歌名 16、UP 名 14。
+		//
+		// ⚠️ **正在放的那一首、以及指针压着的那一格，都把歌名染成主色**：这一块
+		// 和上面三个 Tab 是同一页，判据也是同一份（`Actions.IsPlaying`，按
+		// `app.Item.Identity`）。同一屏上「正在播放」在两个地方说两套话，用户只能
+		// 靠猜。hover 变主色是上游那张卡片的 `group-hover:text-primary`（票 #170）。
 		titleColor := t.Text
-		if g.acts.IsPlaying != nil && g.acts.IsPlaying(m.Item) {
+		if onCard || (g.acts.IsPlaying != nil && g.acts.IsPlaying(m.Item)) {
 			// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（理由见
 			// `widgets/ink`）。这一处和列表 / 网格那三档说的是同一件事，
 			// 颜色也必须走同一个出口——漏了这里，同一屏上「正在播放」
 			// 在下面那一排是深绿、在这一块是读不出来的亮绿。
 			titleColor = ink.AccentOn(t)
 		}
-		ui.Text(c, m.Title).FontSize(scale.Font(c, 14)).TextColor(titleColor).MaxLines(1).Ellipsis("…")
+		ui.Text(c, m.Title).FontSize(scale.Font(c, 16)).TextColor(titleColor).MaxLines(1).Ellipsis("…")
 		if m.Owner != "" {
-			ui.Text(c, m.Owner).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
+			ui.Text(c, m.Owner).FontSize(scale.Font(c, 14)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 		}
 	})
 }
