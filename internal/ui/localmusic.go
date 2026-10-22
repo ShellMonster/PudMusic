@@ -199,6 +199,49 @@ type localPage struct {
 	table ui.ListState
 	// sel 是表格里选中的那一行，-1 是没选。框架把点中的下标写进来。
 	sel int
+	// selID 是选中的**那一首**的身份（铁律四：行身份是 ID 不是下标）。
+	//
+	// ⚠️ **那一首暂时不在列表里时也留着**：重扫期间列表是空的（`st.Tracks` 空的），
+	// 那一帧按身份找不到它，但等它回来还得选中它——所以身份和下标分开记。
+	selID string
+	// lastSel 是上一帧框架的游标下标，用来判「**它挪了没有**」（点了哪一行 /
+	// 方向键走到哪一行）。理由见 `view` 里那三句。
+	lastSel int
+	// keys 记「现在是键盘在管还是指针在管」（焦点环靠它，理由见
+	// `widgets/list/selection.go` 的 KeyboardMode）。
+	keys list.KeyboardMode
+	// tableEl 是表格那个元素（画焦点环要拿它的盒子）。
+	tableEl ui.Element
+	// cursorCell 是**游标那一行**序号那一格的盒子：它撑满那一格（见
+	// `viewRowNumber`），所以它的盒子就是那一行的位置——焦点环按它算。
+	cursorCell ui.Element
+	// showCursorRing 报「要不要给游标那一行画焦点环」。
+	showCursorRing bool
+	// tableSel 是表格那一档的「选择集」，**它永远是空的**——而它正是那一块实心
+	// 主色底消失的原因（票 #197）。
+	//
+	// ## 为什么要有它
+	//
+	// 框架给**选中的行**铺一整块实心主色底，判据是 `f.chosen(i, key)`，而它问的
+	// 是「这一行在**选择集**里吗」（`mygo/ui/list.go`）：
+	//
+	//	if sel := f.s.Selection; sel != nil { return sel.has(k) }
+	//	return *f.s.Selected == i
+	//
+	// 也就是说：**装了选择集，就不问单选的那一份**。所以给表格装一份**永远是空的**
+	// 选择集，框架就不画那一块主色底——而点击、方向键、双击全都照旧（它们走的是
+	// `Selected` 和游标，不是选择集）。
+	//
+	// ## 为什么盖不掉
+	//
+	// 列表那一行能盖（那一行是我们自己的元素，铺满整行，见
+	// `widgets/list/selection.go`），表格这一行**盖不掉**：框架把主色刷在**行元素**
+	// 上，而格子四周那一圈内边距（`mygo/ui/table.go` 的 `Padding(Space(1.5),
+	// Space(2.5))`）是行元素的地盘——我们画的每一格都在那圈缝里面。
+	//
+	// ⚠️ **每一帧都要清空它**：框架点一行时会往选择集里放那一份（`f.choose`），
+	// 放着不管，下一帧就又画上实心主色底了。
+	tableSel ui.Selection[string]
 
 	// cards 是「歌曲」那一档的控件（`widgets/list` 的 `SwitchView`：列表 / 紧凑 /
 	// 网格三个摆法在它里面分发，见文件头那一段）。它自己记着滚动位置，所以建一次
@@ -374,7 +417,32 @@ func (p *localPage) view(c *ui.Context) {
 	p.begin(c)
 
 	st := p.app.LocalMusicState()
+	// 🔴 **选中的那一首跟着**那一首**走**（铁律四）：行换了之后按 ID 重新对位。
+	//
+	// ⚠️ **为什么自己扛这一件**：框架本来会做（「游标跟着它的项走」，靠
+	// `ListState.Key` + `Selected`），但它**在装了选择集的时候就不做了**
+	// （`mygo/ui/list.go` 的 sync：那个条件里有 `s.Selection.has(s.selKey)`）——
+	// 而我们**要**装一份选择集，正是它让框架不再给选中的行铺实心主色底
+	// （票 #197，见 `tableSel`）。两件事只能自己扛一件，所以这里扛「跟着 ID 走」
+	// 这一件。
+	//
+	// 框架的游标挪了没有（点了哪一行 / 方向键走到哪一行）：焦点环靠它（理由见
+	// `widgets/list/selection.go` 的 KeyboardMode）。
+	//
+	// ⚠️ **要在这一页自己改 `p.sel` 之前问**：框架把点中的下标写进来是在**上一帧
+	// 画完的时候**，而下面那几行是这一帧开头改的。
+	p.keys.Moved(p.sel)
+	// 框架的游标挪了（点了哪一行 / 方向键走到哪一行）时，先记住**那一首的身份**——
+	// 它按位置记，我们按身份记（铁律四）。
+	if p.sel != p.lastSel {
+		p.lastSel = p.sel
+		if id := p.trackIDAt(p.sel); id != "" {
+			p.selID = id
+		}
+	}
 	p.rows = p.filter(st.Tracks, st.Roots)
+	p.sel = indexOfTrackID(p.rows, p.selID)
+	p.lastSel = p.sel
 
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
 	ui.Column(c).Key("page:"+localMusicPath).Grow(1).Padding(0, pagePadX).Gap(10).
@@ -603,6 +671,34 @@ func localEmptyState(st app.LocalMusicState) emptyState {
 	}
 }
 
+// trackIDAt 是第 i 行那一首的身份，越界是空串。
+//
+// ⚠️ **读的是上一帧那一份行**（`p.rows` 在 `view` 开头才换）：框架把点中的下标
+// 写进 `p.sel` 是在**上一帧画完的时候**，那时候 `p.rows` 还是旧的——所以这里
+// 读到的正是用户点的那一首。
+func (p *localPage) trackIDAt(i int) string {
+	if i < 0 || i >= len(p.rows) {
+		return ""
+	}
+	return p.rows[i].ID
+}
+
+// indexOfTrackID 是 ID 为 id 的那一首的下标，没有是 -1。
+//
+// ⚠️ **认的是 ID 不是位置**：行换了之后同一首挪了位置（铁律四）。按位置找的话，
+// 「插到最前面」之后选中的就变成旁边那一首——而画面上什么异样都看不出来。
+func indexOfTrackID(rows []localmusic.Track, id string) int {
+	if id == "" {
+		return -1
+	}
+	for i := range rows {
+		if rows[i].ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
 // viewTable 是表格那一档。
 func (p *localPage) viewTable(c *ui.Context, t *ui.Theme) {
 	// 🔴 铁律四：Key 和 Label 每一帧都重装，装的是 ID（不是序号）。
@@ -612,21 +708,94 @@ func (p *localPage) viewTable(c *ui.Context, t *ui.Theme) {
 	p.table.Key = func(i int) any { return p.rows[i].ID }
 	p.table.Label = func(i int) string { return p.rows[i].Title }
 	p.table.Selected = &p.sel
+	// 装一份**永远是空的**选择集：框架于是不再给选中的行铺实心主色底（票 #197，
+	// 理由见 `tableSel` 那一段）。
+	p.table.Selection = &p.tableSel
+	// ⚠️ **先清空它**：框架点一行时会往里面放那一份（`f.choose`），放着不管下一帧
+	// 就又画上实心主色底了。
+	p.tableSel.Clear()
 
 	// 外面这一层是「表格的那一块」：`PointerPosition` 拿它判指针在不在表里
 	//（见 tableBox 的注释）。它自己什么也不画，尺寸跟着里面的表格走。
 	box := ui.Column(c).Grow(1).FillWidth()
 	p.tableBox = box
 	box.Children(func() {
+		// ⚠️ **游标那一行的盒子每帧要重新记**：游标不在画面上时没有那一格，
+		// 留着上一次的那个会让环画在老地方。
+		p.cursorCell = ui.Element{}
 		table := ui.Table(c, &p.table, localColumns, len(p.rows), func(row, col int) {
 			p.viewCell(c, t, row, col)
 		}).
 			Grow(1).FillWidth().
-			OnSubmit(func() { p.playRow(p.sel) })
+			OnSubmit(func() { p.playRow(p.sel) }).
+			// ⚠️ **听一听输入**：只为了知道「上一次是键盘还是指针」（焦点环靠它，
+			// 理由见 `widgets/list/selection.go` 的 KeyboardMode）。
+			//
+			// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选行、双击
+			// 播放都还在。
+			HandleInput(p.keys.Input)
+		p.tableEl = table
+		// 焦点环画不画：**键盘在管**而且**表格有焦点**。
+		//
+		// ⚠️ **表格有焦点是第二半**：方向键挪的是表格的游标，焦点不在表格上时按
+		// 方向键挪不动它（挪的是别的东西），那一行也就不是「键盘走到的那一行」。
+		//
+		// ⚠️ **要在表格建好之后才算**：句柄是建表格的时候绑的（`mygo/ui/list.go` 的
+		// buildList），之前问「表格有没有焦点」问的是上一帧那个元素。
+		p.showCursorRing = p.keys.On() && list.Focused(c, &p.table)
+		// 游标那一行的**焦点环**。
+		//
+		// ⚠️ **画在表格自己的空间里**：格子四周那圈内边距（`mygo/ui/table.go` 的
+		// `Padding(Space(1.5), Space(2.5))`）是**行元素**的地盘——画在格子里会被
+		// 裁掉，而框架把主色刷在行元素上（那一块实心主色底票 #197 去掉了）。
+		table.DrawOver(func(cp *ui.Painter, r ui.Rect) {
+			p.drawCursorRing(cp, r, t)
+		})
 		if p.noteScrollbar != nil {
 			p.noteScrollbar(scrollbar.Hot(table))
 		}
 	})
+}
+
+// drawCursorRing 给**游标那一行**画一圈焦点环。
+//
+// # 为什么自己画
+//
+// 框架给表格的游标那一行也画圈环（`mygo/ui/list.go`：多选时「键挪到的那一行」），
+// 但它认的是框架那个 `focusVisible`——**指针按一下会把它清掉，方向键不会设回来**
+// （理由见 `widgets/list/selection.go` 的 KeyboardMode）。于是「点一行 → 按 Down」
+// 那一路上，框架那一圈不画，而表格的游标在画面上就一个标记都没有了。
+//
+// # 那圈环画在哪
+//
+// **游标那一行的整行**：行元素是框架的（画不到），但**序号那一格的盒子是我们的**，
+// 而它撑满那一格（`viewRowNumber`）——所以按它算出那一行的位置，再往外扩到整行
+// 的宽（表格的宽减掉两边的内边距）。
+//
+// # 什么时候画
+//
+// **键盘在管的时候**：指针点过之后那一行什么标记都没有（上游点一行不改变它的样子），
+// 但**再按方向键走位时环要回来**。
+func (p *localPage) drawCursorRing(cp *ui.Painter, r ui.Rect, t *ui.Theme) {
+	if !p.showCursorRing || !p.cursorCell.Valid() || !p.tableEl.Valid() {
+		return
+	}
+	cell := p.cursorCell.Bounds()
+	tb := p.tableEl.Bounds()
+	// 框架给每一格左右留的内边距（`mygo/ui/table.go` 的 `Padding(Space(1.5),
+	// Space(2.5))`）：行是那些格子的地盘，环要贴着行的边。
+	padX := t.Space(2.5)
+	// 表格的盒子在它**父元素**的空间里（`DrawOver` 给的 `r`），而盒子的
+	// `Bounds()` 是**窗口**坐标——两者的差就是「相对表格左上角的位置」。
+	rect := ui.Rect{
+		X: r.X + cell.X - tb.X - padX,
+		Y: r.Y + cell.Y - tb.Y - localTableRowPad,
+		W: tb.W - 2*padX,
+		H: localTableRowPx,
+	}
+	// 往里收 3 像素，和框架画行焦点环时同一个数（`mygo/ui/list.go`）。
+	cp.FocusRing(ui.Rect{X: rect.X + 3, Y: rect.Y + 3, W: rect.W - 6, H: rect.H - 6},
+		[4]float32{0, 0, 0, 0})
 }
 
 // viewCell 画表格的一个格子。
@@ -677,10 +846,16 @@ const localPlayIconLabel = "播放这首"
 // 指针压着别的列时照样算得出相对坐标）。
 //
 // 那个盒子是**固定尺寸**的：换图标不改变行高与列宽，否则指针一上去整行都跳。
-func (p *localPage) viewRowNumber(c *ui.Context, t *ui.Theme, row int) {
+func (p *localPage) viewRowNumber(c *ui.Context, t *ui.Theme, row int) ui.Element {
 	h := float32(localTableRowPx - 2*localTableRowPad)
 	cell := ui.Row(c).FillWidth().Height(h).Center().Justify(ui.Center)
 	onRow := p.tableRowHovered(cell)
+	// ⚠️ **游标那一行的盒子要留着**：焦点环按它算出那一行的位置（理由见
+	// `drawCursorRing`）。它是**撑满那一格**的（`FillWidth` + `Height`），所以它的
+	// 盒子就是那一行的位置。
+	if row == p.sel {
+		p.cursorCell = cell
+	}
 	cell.Children(func() {
 		if onRow {
 			ui.Icon(c, icon(iconPlayFill)).FontSize(16).TextColor(t.Text).Label(localPlayIconLabel)
@@ -688,6 +863,7 @@ func (p *localPage) viewRowNumber(c *ui.Context, t *ui.Theme, row int) {
 		}
 		ui.Text(c, strconv.Itoa(row+1)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 	})
+	return cell
 }
 
 // tableRowHovered 报这一格的纵向位置是不是压在指针下面。
