@@ -10,7 +10,7 @@
 // `isUserDropdownOpen` 决定。MyGo 里对应的是 `Element.DragWindow()`。
 //
 // 落在外层 Row 上、而不是像骨架里那样单独留一列空的拖动占位，靠的是
-// `ui/input.go:262` 的命中链：`target` 是链上**最内层**带输入标志的元素。
+// `ui/input.go:302` 的命中链：`target` 是链上**最内层**带输入标志的元素。
 // 指针落在按钮、搜索框、头像上时 target 是它自己（它没有 flagDragWindow），
 // 于是点按钮就是点按钮；落在顶栏的空处时 target 才是这行 Row，窗口才被拖。
 // 拖动区和控件因此**天然不打架**，不必像 Biu 那样逐个挂 `window-no-drag`。
@@ -45,7 +45,7 @@ const (
 // 🔴 **64 是照 Biu 量出来的**：它的顶栏那一格是 `h-16 flex-none`
 // （`biu/src/layout/index.tsx:40`），而那一格里的 navbar 写的是 `h-full`——
 // 也就是「有多高就是多高」，而外面钉死的就是 64。我们原来是 32（MyGo 自己
-// 例子里的下限，`ui/context.go:334` 的 `max(bar.Height, 32)`），矮了整整一半。
+// 例子里的下限，`ui/context.go:357` 的 `max(bar.Height, 32)`），矮了整整一半。
 //
 // 这一条不只是「好看一点」：顶栏是**内容区上面那一行**，它矮 32，内容区就
 // 少 32 ——而 `settings_page_test.go` 里量得着的可视区上下两个数

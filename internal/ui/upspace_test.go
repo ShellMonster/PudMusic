@@ -589,8 +589,8 @@ func TestTheEmptyStatesSayWhatToDoInsteadOfWhiteSpace(t *testing.T) {
 // TestTheHeaderIsNotSqueezedToZeroWidth 钉住「铺满是 `FillWidth()`，不是
 // `Width(0)`」。
 //
-// ⚠️ **`Width(v)` 的单位是 DIP**（`mygo/ui/element.go:637`），而布局里
-// 「只要设过宽度就按它算」（`layout.go:323`）——所以 `Width(0)` 就是**宽 0**，
+// ⚠️ **`Width(v)` 的单位是 DIP**（`mygo/ui/element.go:755-756`），而布局里
+// 「只要设过宽度就按它算」（`layout.go:312`）——所以 `Width(0)` 就是**宽 0**，
 // 不是「没设宽度、随容器」。写成那样时整个头图区被压成零宽：昵称只剩一个
 // 省略号、头图永远画不出来、统计折成两行。
 //

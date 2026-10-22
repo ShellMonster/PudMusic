@@ -1306,7 +1306,7 @@ func (s *Shell) viewMain(c *ui.Context) {
 // pageJustShown 报「这一帧是刚进这一页的第一帧」。
 //
 // 路由切走再切回来时，框架会把焦点还给「离开这一页时有焦点的那个元素」
-// （`Router.focusPage`，`mygo@v0.5.5/ui/router.go:726`）。收藏夹/local 那一页
+// （`Router.focusPage`，`mygo@v0.6.2/ui/router.go:726`）。收藏夹/local 那一页
 // 的「会展开的搜索」正好是那个元素——于是用户回来的时候，键盘焦点被塞进一个
 // 他没打开过的框里，他在别处敲的字就落进那里（评审第 5 条）。
 //

@@ -133,7 +133,7 @@ func TestTheMiniKeysAreIcons(t *testing.T) {
 			t.Fatalf("画面上找不到 %q，文字有 %q", want.label, tt.Texts())
 		}
 		// `Tester.Find` 报的是**画出来的那一块**（内部和父框的裁剪区求交，
-		// `mygo/ui/runtime.go:974`），所以「被挤扁了」在这里表现为框变小。
+		// `mygo/ui/runtime.go:1066`），所以「被挤扁了」在这里表现为框变小。
 		if r.W < want.size-0.5 || r.H < want.size-0.5 {
 			t.Errorf("%q 的键是 %.1f×%.1f，want 至少 %.0f×%.0f：它不是图标键的框",
 				want.label, r.W, r.H, want.size, want.size)

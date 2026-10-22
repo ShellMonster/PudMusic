@@ -218,9 +218,9 @@ func (s *Shell) viewFavoriteList(c *ui.Context, g app.FavoriteGroup, items []app
 // reorderFavorite 是拖完那一刻把顺序落下去。
 //
 // `to` 是 MyGo 给的**落点**：要插到第 `to` 行**前面**；`to` 等于列表的行数
-// 就是排到最后面。依据是 `mygo/ui/list.go:727` 的 dropAt——「the row before
+// 就是排到最后面。依据是 `mygo/ui/list.go:863` 的 dropAt——「the row before
 // which rows dropped at y go」——落点那条指示线就画在第 `to` 行的**上边缘**
-// （`list.go:744` 的 boundary）。
+// （`list.go:886` 的 boundary）。
 //
 // ⚠️ 这里只把序号换成 ID，**不许**再自己挪一格。之前写的是「to 超过末行就改用
 // 最后一行」，那把「插到某行前面」当成了「挪到某行的位置」：往下拖的时候指示

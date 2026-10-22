@@ -273,7 +273,7 @@ func TestVolumeSliderDrivesTheApp(t *testing.T) {
 		t.Fatalf("浮层里找不到那根音量滑块，文字有 %q", h.tt.Texts())
 	}
 	// 竖滑块：按在**底下**就是 0（框架的竖直映射是 `1-(y-cy)/ch`，见
-	// `mygo/ui/value_input.go:203`）。
+	// `mygo/ui/value_input.go:207`）。
 	h.tt.Press(bar.X+bar.W/2, bar.Y+bar.H-2)
 	h.tt.Release(bar.X+bar.W/2, bar.Y+bar.H-2)
 	h.tt.Frame()

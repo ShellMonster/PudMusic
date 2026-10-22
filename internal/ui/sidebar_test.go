@@ -91,7 +91,7 @@ func sideWidthOnScreen(t *testing.T, tt *mygoui.Tester) float32 {
 //
 // ⚠️ 「走的是过渡，不是一步到位」这件事在无头 Tester 里**钉不住**，别再试：
 // MyGo 的动画按墙上时间推进，而 `Tester.Frame()` 一帧里 settle 最多跑 20 遍
-// view（`ui/headless.go:215`）。20 遍在 -race 下足够走完 200ms，中间态一次
+// view（`ui/headless.go:218`）。20 遍在 -race 下足够走完 200ms，中间态一次
 // 也抓不到——写成「折叠那一帧的宽既不是 300 也不是 72」，实测 -race 下
 // 20 次错 4 次。那种测试比没有更糟：它会把「跑得慢」报成「功能没做」。
 //
@@ -183,7 +183,7 @@ func TestDraggingBackOutExpandsTheSidebar(t *testing.T) {
 // TestDraggingTheGripBeyondItsOwnBoxKeepsWidening 盯的是一个具体的坑。
 //
 // 把手只有 8 宽。`Pressed()` 多一条「指针必须在元素框内」的条件
-// （`ui/input.go:1030`），所以指针往左一挪 9 个像素它就报 false——
+// （`ui/input.go:1157`），所以指针往左一挪 9 个像素它就报 false——
 // 侧栏最多只能拖动 16 像素宽就卡住。这条测试把「指针早就出框了还在跟着
 // 手指走」钉住，换成 `Pressed()` 它会当场红。
 func TestDraggingTheGripBeyondItsOwnBoxKeepsWidening(t *testing.T) {
@@ -501,7 +501,7 @@ func TestDraggingAFavoriteReordersItAndKeepsItAfterARestart(t *testing.T) {
 // TestDroppingOnARowPutsTheDraggedOneRightAboveIt 钉住**落点和结果**对得上。
 //
 // MyGo 给的落点是「插到第 to 行前面」，屏幕上那条指示线就画在第 to 行的
-// **上边缘**（`mygo/ui/list.go:727` 的 dropAt、`list.go:744` 的 boundary）。
+// **上边缘**（`mygo/ui/list.go:863` 的 dropAt、`list.go:886` 的 boundary）。
 // 所以验法只有一句：拖走的那一条，最后必须**紧挨着落在那一行的上面**。
 //
 // 这条是拖拽排序的验收本体。之前的写法把「挪到某行的位置」当成了「插到某行

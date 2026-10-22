@@ -547,8 +547,8 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 	// 🔴 **可点的是外面这一层 wrapper，不是里面那张图。**
 	//
 	// 命中链是「最上面那个含点的框 + 它**自己的父链**」，**兄弟不在链上**
-	// （`mygo/ui/input.go:131-145` 的 `appendHitChain`）；而 `flagPassThrough` 只
-	// 跳过那一个自己的命中框、子节点照登记（`runtime.go:953`）。于是只要可点的
+	// （`mygo/ui/input.go:140-154` 的 `appendHitChain`）；而 `flagPassThrough` 只
+	// 跳过那一个自己的命中框、子节点照登记（`runtime.go:1046`）。于是只要可点的
 	// 是浮层的**兄弟**，浮层里任何一个字都会把它挡住：⤢ 正好落在封面正中，而
 	// 「把鼠标移过去、点一下」点的就是那个正中。
 	//

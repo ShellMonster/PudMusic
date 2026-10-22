@@ -564,7 +564,7 @@ func (s *Shell) viewMiniTitleRow(c *ui.Context, st app.State, t *ui.Theme) {
 			// 和它挤成一团（账在 `viewMiniTransport`）。
 			// ⚠️ **key 装在 `c` 上、不是装在 `Slider` 返回的那个元素上**：滑块建出来
 			// 的那一刻它的状态就初始化了，而 `Element.Key` 只认「还没初始化状态」的
-			// 元素（`mygo/ui/element.go:611` 直接 panic）。`Context.Key` 是为这类复合
+			// 元素（`mygo/ui/element.go:658` 直接 panic）。`Context.Key` 是为这类复合
 			// 控件准备的：它在控件被建出来**之前**把身份交给下一个。
 			vol := st.Volume
 			if ui.Slider(c.Key("mini-volume"), &vol, 0, 1).Width(miniVolumeW).

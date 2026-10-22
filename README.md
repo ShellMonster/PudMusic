@@ -293,12 +293,12 @@ internal/platform/cmd/, internal/licensing/cmd/   → 生成用的命令行，�
 2. **`Pressed()` 还要求「指针仍在控件框内」。** 进度条那种轨道横跨整个行程、
    指针一直留在框里的控件用它没问题；**一条 8 像素宽的拖拽把手用它只能拖动
    16 像素就卡住**——指针往左挪 9 个像素就出框了，它当场变 `false`
-   （`ui/input.go:1028`）。薄把手要用 `Dragged()` 判按着没有，再用
+   （`ui/input.go:1157`）。薄把手要用 `Dragged()` 判按着没有，再用
    `PointerPosition()` 取指针位置（侧栏那条把手就是这么做的，见
    `internal/ui/sidebar.go`）。
 
    顺带：**别拿 `Dragged()` 的位移累加**。`dragX` 要到一帧结束才清掉，而一帧里
-   view 要跑好几遍（`ui/runtime.go:657`），每一遍读到的都是同一个位移，
+   view 要跑好几遍（`ui/runtime.go:524`），每一遍读到的都是同一个位移，
    累加起来就是拖快好几倍。取绝对位置就没有这个问题。
 
 ## 版本

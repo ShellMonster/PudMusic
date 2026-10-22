@@ -331,7 +331,7 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 
 	// Key 挂在外面这一格上：`.Menu()` 会把元素变成菜单按钮（`ui/menu.go:66`
 	// 置 flagClickable / flagFocusable），Key 挂在这种元素上会 panic
-	// （`ui/element.go:537`）。
+	// （`ui/element.go:658`）。
 	ui.Column(c).Key("avatar").Children(func() {
 		face := ui.Box(c).Size(avatarSize, avatarSize).
 			Radius(avatarSize/2).Clip().Border(1, c.Theme().Border)

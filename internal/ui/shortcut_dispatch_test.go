@@ -266,7 +266,7 @@ func TestAShortcutWithNoModifierRunsWhenNothingElseHasTheFocus(t *testing.T) {
 //
 // 这一条由引擎保证，不是我们判的：`keyDownPhysical` 先问焦点上的输入框「这一下
 // 归不归你」（`editor.wants`，`mygo/ui/editor_navigation.go:27`），归它的话按键
-// 在**进快捷键路由之前**就被拿走了（`ui/input.go:629`）。所以这一条同时也是
+// 在**进快捷键路由之前**就被拿走了（`ui/input.go:694`）。所以这一条同时也是
 // 「框架那一层没变」的证据。
 //
 // ⚠️ 用 `TypeKey` 而不是 `Key`：真键盘是「键下去 → 文字上来 → 键起来」三件事，
@@ -317,7 +317,7 @@ func TestTheSearchBoxGetsTheKeyBeforeAnyShortcut(t *testing.T) {
 // TestTheRecorderCellStillGetsAKeyThatIsARegisteredShortcut 验正在录的那一格优先。
 //
 // 引擎在把按键交给焦点上的元素**之前**先问「有没有人认领这个组合键」
-// （`rt.claimed`，`ui/input.go:564`），认领了就不交给那个元素。窗口登记了 ⌘P 的
+// （`rt.claimed`，`ui/input.go:629`），认领了就不交给那个元素。窗口登记了 ⌘P 的
 // 下一帧，正在录的那一格就收不到 ⌘P——而用户想录的往往正是这个键。
 //
 // 症状极难自己发现：录不进别的键（那几条没被登记，收得到），只有「把 ⌘P 改成别的

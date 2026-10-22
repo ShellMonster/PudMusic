@@ -76,7 +76,7 @@ func IconButton(c *ui.Context, svg *ui.SVG, label string, font float32) ui.Eleme
 //
 // # 为什么需要它
 //
-// 框架对禁用元素的做法是整个元素乘 50% 不透明度（`mygo/ui/paint.go:154-156`）。
+// 框架对禁用元素的做法是整个元素乘 50% 不透明度（`mygo/ui/paint.go:210-212`）。
 // 只读设置页那三个主题按钮正好撞在这上面：深色下选中那一档的字是主色绿，绿乘
 // 完 0.5 压在选中底上只剩 **2.6:1**——用户以为「这三个选项在深色模式下消失了」，
 // 而不是「现在是只读的」。`ink.Disabled` 就是反着算的那个字色：它在乘完 0.5
@@ -115,7 +115,7 @@ func Feel(c *ui.Context, e ui.Element) ui.Element { return feel(c, e) }
 //
 // ⚠️ 它是在建元素时算的：`Element` 上没有 `styleFn`，而框架自己的 `styleButton`
 // 是把同一段逻辑挂进 `styleFn`（paint 时跑）才拿到「按下的那一帧立刻变深」。
-// 这里靠的是指针位置**不进事件循环就不变**（`mygo/ui/input.go:227` 的
+// 这里靠的是指针位置**不进事件循环就不变**（`mygo/ui/input.go:265` 的
 // `setHover`），于是画面上的效果一样。本包早就在用这个写法
 // （`internal/ui/navbar_suggest.go` 的 `viewSuggestTerm`）。
 func feel(c *ui.Context, e ui.Element) ui.Element {

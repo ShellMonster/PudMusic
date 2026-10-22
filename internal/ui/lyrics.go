@@ -37,7 +37,7 @@
 //
 // 这一块难的不是功能，是三处一帧的滞后合起来之后**界面上看不出任何异样**：
 //
-//  1. `Element.Bounds()` 读的是**上一帧**量好的盒子（`mygo/ui/element.go:1322`
+//  1. `Element.Bounds()` 读的是**上一帧**量好的盒子（`mygo/ui/element.go:1382`
 //     的注释就写着 "the previous frame's"），而弹簧是在**布局里**跑的
 //     （`mygo/ui/scroll.go` 的 `adoptScroll` 在 `place` 当中）。
 //  2. `ScrollState.MaxY` 同样是布局里才写的，而 `ScrollTo` 拿它夹目标。
@@ -228,7 +228,7 @@ var lyricFadeBottomStops = []lyricFadeStop{
 // 顶边是 `pad + Σ(前面各行) + 该行一半`，而 `pad = box.H/2 − 该行一半`，两处
 // 抵消掉之后剩下 `box.H/2 + Σ` —— 那一项正好就是**容器自己的中心**。所以容器
 // 变矮变矮都不改变「这一句偏不偏」，变的是 `MaxY` 能滚到哪儿，而那是框架自己在
-// 夹（`mygo/ui/scroll.go:129`）。宽度不一样：它决定句子折几行，而折几行决定
+// 夹（`mygo/ui/scroll.go:130`）。宽度不一样：它决定句子折几行，而折几行决定
 // `Σ`，也就决定偏不偏。
 type lyricAim struct {
 	active  int
@@ -281,7 +281,7 @@ type lyricsView struct {
 	// 的哪个框。它们只在两个地方写：画完这一帧的元素之后读它的 `Bounds()`。
 	//
 	// ⚠️ 「上一帧」不是保守，是唯一能读到的：`Bounds()` 读的是框架在上一帧
-	// 布局末尾提交的那一份盒子（`mygo/ui/element.go:1322`）。拿它算目标和拿
+	// 布局末尾提交的那一份盒子（`mygo/ui/element.go:1382`）。拿它算目标和拿
 	// `scroll.Y` 是同一帧的那一份，两者自洽——见 `lyricsView.centre`。
 	box  ui.Rect
 	line ui.Rect
@@ -392,7 +392,7 @@ func (lv *lyricsView) centre(c *ui.Context, active int, content uint32, fontSize
 		// 弹簧还在飞：每一帧按**当下**的几何重新对一次。
 		//
 		// 这一支修两件都慢一帧的事：`ScrollTo` 拿**上一帧**的 `MaxY` 夹目标
-		// （`mygo/ui/scroll.go:129`），刚换歌那一刻内容还没撑开，夹出来的目标会
+		// （`mygo/ui/scroll.go:130`），刚换歌那一刻内容还没撑开，夹出来的目标会
 		// 短一截；那份居中留白也是按上一帧的框算的。
 
 	case aim != lv.aim:
@@ -423,7 +423,7 @@ func (lv *lyricsView) centre(c *ui.Context, active int, content uint32, fontSize
 		//
 		// ⚠️ **用户拿滚轮翻歌词走的也是这一支**：翻的时候依据一个字都没变，于是
 		// 这里返回，歌词就停在用户翻到的地方。框架那边一收到滚轮就把弹簧收走
-		// （`mygo/ui/input.go:490` 的 `s.track.glide = nil // the user takes over
+		// （`mygo/ui/input.go:555` 的 `s.track.glide = nil // the user takes over
 		// from ScrollTo`），`Scrolling()` 跟着变 false，不用自己再记一份
 		// 「用户是不是翻过了」。
 		return
@@ -475,7 +475,7 @@ func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Dura
 	// （放大、渐隐、译文全对，只有滚不到中间）。
 	//
 	// 直接 Column + `Grow(1)` 就对：主轴是竖的，高度由外层分给它，而框架**不会**
-	// 给 `Grow` 的那一个套上「不许比内容矮」这条下限（`mygo/ui/layout.go:605` 的
+	// 给 `Grow` 的那一个套上「不许比内容矮」这条下限（`mygo/ui/layout.go:720` 的
 	// `c.grow == 0`），所以内容再长也只是一个可滚动的容器。
 	ui.Column(c).Key(lyricsAreaKey).Grow(1).FillWidth().AlignItems(ui.Center).
 		Children(func() {
@@ -489,14 +489,14 @@ func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Dura
 			lv.box = scroll.Bounds()
 
 			// 渐隐遮罩画在内容**之上**：`DrawOver` 在框架的绘制次序里排在子元素
-			// 和滚动条之后（`mygo/ui/paint.go:278`），而画成绝对定位的兄弟元素
+			// 和滚动条之后（`mygo/ui/paint.go:328`），而画成绝对定位的兄弟元素
 			// 会被容器的裁剪切掉。
 			scroll.DrawOver(func(p *ui.Painter, r ui.Rect) {
 				paintLyricFade(p, r, t.Background)
 			})
 
 			scroll.Children(func() {
-				// ⚠️ `Padding` 四个值是「上、右、下、左」（`mygo/ui/element.go:675`
+				// ⚠️ `Padding` 四个值是「上、右、下、左」（`mygo/ui/element.go:722`
 				// 的 CSS 那一套）。写成 `Padding(0, padX, pad, pad)` 的话上面那份
 				// 居中留白跑到**左**边去了：第一句贴在顶上，而且越往下越往左缩。
 				ui.Column(c).Gap(lyricsLineGap).Padding(pad, lyricsPadX, pad, lyricsPadX).
@@ -605,7 +605,7 @@ func paintLyricFade(p *ui.Painter, r ui.Rect, bg ui.Color) {
 
 // lyricFade 把一张「盖住的程度」表变成渐变。
 //
-// ⚠️ 角度是 180：MyGo 的角度是**从向上顺时针**数的（`mygo/ui/element.go:499`），
+// ⚠️ 角度是 180：MyGo 的角度是**从向上顺时针**数的（`mygo/ui/element.go:546`），
 // 180 才是从上往下。写成 90 会横过来盖，而那一眼看过去是「歌词左右两头淡掉」。
 func lyricFade(bg ui.Color, stops []lyricFadeStop) ui.LinearGradient {
 	g := ui.LinearGradient{Angle: 180}

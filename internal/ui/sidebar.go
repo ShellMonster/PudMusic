@@ -158,8 +158,8 @@ func sideDragWidth(raw float64) (view, persist float64, collapsed bool) {
 //     这一条。
 //
 // ⚠️ **宽度算的是指针的绝对位置，不是 `Dragged()` 给的位移。**
-// `Dragged()` 的 `dragX` 要到一帧结束（`ui/runtime.go:670` 的 forgetInput）
-// 才清掉，而**一帧里 view 要跑好几遍**（`runtime.go:657` 的 `for pass := 0;
+// `Dragged()` 的 `dragX` 要到一帧结束（`ui/runtime.go:775` 的 forgetInput）
+// 才清掉，而**一帧里 view 要跑好几遍**（`runtime.go:524` 的 `for pass := 0;
 // pass < 3`），每一遍读到的都是同一个位移——累加起来就是拖快好几倍。所以
 // 这里只拿 `Dragged()` 判「按着没有」，位置改用 `PointerPosition`：
 //
@@ -304,7 +304,7 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings) {
 	hidden := 0
 
 	// ⚠️ Key 给的是包在外面的这一格，不是 Button 本身：`Key` 挂在「创建时
-	// 就处理了输入」的控件上会 panic（`ui/element.go:537`），要给就包一层。
+	// 就处理了输入」的控件上会 panic（`ui/element.go:658`），要给就包一层。
 	ui.Column(c).Key("side-menu").Gap(2).Children(func() {
 		for _, rt := range routes {
 			// 设置页「菜单设置」里藏起来的那几项（`hiddenMenuKeys`）不摆。

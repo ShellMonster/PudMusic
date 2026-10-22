@@ -127,7 +127,7 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 		ui.Icon(c, icon(iconSearch)).FontSize(iconMd).TextColor(t.TextMuted)
 
 		// ⚠️ **不许给输入框加 Key**：Key 只能挂在「创建时没有处理输入」的控件上，
-		// 挂上去直接 panic（`ui/element.go:537`）。外面这一格有 Key 就够了。
+		// 挂上去直接 panic（`ui/element.go:658`）。外面这一格有 Key 就够了。
 		field := ui.TextInputBase(c, &s.searchKeyword).
 			Label(searchLabel).Placeholder(searchLabel).
 			Grow(1).Shrink(0)
