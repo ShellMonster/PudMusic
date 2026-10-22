@@ -2107,7 +2107,7 @@ var Items = []Item{
 		// ⚠️ **最后一钉的是宽度账的前提**：右边那一组是「有歌」的那一档（没有歌时
 		// 少一枚「下载」），而「倍速」那一枚贴字宽（随当前倍率变）——这两样都写
 		// 在 `internal/ui/playbar.go` 的注释里，量出来的那张表也靠这一钉。
-		Spec: "播放条：歌名 16/400、UP 名 14、进度条两头的读数 14、倍速 16；封面 hover 的箭头 32；上一首 / 下一首 32/22（图标 22）；右边那一组与进度条的宽度账是「有歌」的那一档",
+		Spec: "播放条：歌名 16/400、UP 名 14、进度条两头的读数 14、倍速 16；封面 hover 的箭头 32；上一首 / 下一首 32/22（图标 22）；右边那一组是「有歌」的那一档，而它不占中间那一列的宽度；左列撑出轨道的那一截上的键点得动",
 		Tests: []string{
 			// 四个字号（文字盒高折算，深浅两套）。
 			"TestThePlayBarUsesTheBiuTypeScale",
@@ -2117,8 +2117,11 @@ var Items = []Item{
 			"TestTheCoverHoverArrowIsBigEnough",
 			// 上一首 / 下一首：命中区 32 + 图形 22（墨迹的多少）。
 			"TestTheSkipKeysDrawBiggerGlyphs",
-			// 宽度账的前提：有歌 / 没歌差 40，右边那一组与进度条各差一半。
-			"TestTheBarIsWiderWithATrackThanWithout",
+			// 宽度账的前提：有歌 / 没歌右边那一组差 40，而**进度条两档一样宽**
+			//（那一组是绝对定位的，不占中间那一列——票 #216 之后）。
+			"TestTheRightGroupDoesNotTakeWidthFromTheMiddleColumn",
+			// 左列撑出轨道的那一截上的键（收藏 / 赞 / 音质徽章）**点得动**。
+			"TestTheLeftColumnKeysAreNotCoveredByTheMiddleColumn",
 		},
 	},
 	{

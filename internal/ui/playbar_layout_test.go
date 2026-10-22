@@ -299,6 +299,43 @@ func absFloat(v float32) float32 {
 	return v
 }
 
+// TestTheLeftColumnKeysAreNotCoveredByTheMiddleColumn 断左列**撑出轨道**的那
+// 一截上的键点得动。
+//
+// 🔴 **这一条钉的是票 #216 踩到的一个坑**：中间那一列在 Grid 里是左列的
+// **后一个兄弟**，而框架的命中测试取**最上面**那个含点的元素
+// （`mygo/ui/input.go:145` 从 hits 列表末尾往前找），于是中间那一列那整个框
+// （900 宽下从 x=189.6 起）把左列撑出来的那一截盖住了——**收藏、赞、音质徽章
+// 这些在左列右端的键点了没反应**，而**界面上看不出坏了**（它们好好地画在
+// 那儿，一根汗毛都没少）。
+//
+// ⚠️ **临界宽度在 1175 上下**：中间那一列的左沿 = 16 + (窗口 − 32) / 5，左列
+// 的右端 = 244（`playbarLeftMinW`），两者一碰，左列右端那些键就全进了中间
+// 那一列的框里。所以这里量的是**最窄的那几档**（应用的窗口下限是 900）。
+//
+// ⚠️ **判据是悬停**：指针停在键的正中心上，那句话要出来。悬停是命中链的第一
+// 环——命中链错了，悬停和点击一起错，而**点击**更难断（点下去要弹东西，
+// 弹的东西又是另一条路）。
+func TestTheLeftColumnKeysAreNotCoveredByTheMiddleColumn(t *testing.T) {
+	for _, width := range []int{900, 1000, 1100} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			tt, _ := playbarTester(t, barState(), width, 0, false)
+
+			fav, ok := tt.Find("收藏")
+			if !ok {
+				t.Fatalf("宽度 %d：画面上找不到「收藏」，文字有 %q", width, tt.Texts())
+			}
+			tt.Move(fav.X+fav.W/2, fav.Y+fav.H/2)
+			tt.Frame()
+			if !tt.HasText(favTooltip(false)) {
+				t.Errorf("宽度 %d：指针停在「收藏」上（x=%.1f..%.1f）却没有那句话——"+
+					"它被中间那一列的命中框盖住了（那一片点了没反应，而界面上看不出坏了）",
+					width, fav.X, fav.X+fav.W)
+			}
+		})
+	}
+}
+
 // TestTheRightGroupHugsTheRightEdge 断右边那一组贴在播放条内容区的右沿，
 // 而且**一枚键都没有跑到窗口外面去**。
 //

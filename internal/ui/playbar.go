@@ -213,8 +213,23 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 				// 三键靠左，而进度条铺满整列——**两者的中轴互相对不上**。
 				//
 				// `Justify(ui.Center)` 是竖直居中（上游的 `justify-center`）。
+				//
+				// 🔴 **`PassThrough()`：这一列不接指针**——它那一个框会让
+				// **左列撑出来的那一截点不动**。
+				//
+				// 原因是命中测试取**最上面**那个含点的元素
+				// （`mygo/ui/input.go:145` 从 hits 列表末尾往前找），而这一列是
+				// 左列的**后一个兄弟**、先画后画，于是它那整个框（900 宽下从
+				// x=189.6 起）把左列溢出来的那一截盖住了：**收藏、赞、音质徽章
+				// 这些在左列右端的键点了没反应**，而**界面上看不出坏了**（它们
+				// 好好地画在那儿）。窗口宽小于约 1175 时都这样（那是「这一列的
+				// 左沿越过左列右端」的那个临界宽度）。
+				//
+				// `flagPassThrough` 只跳过**它自己**的命中框，**子节点照旧登记**
+				//（`mygo/ui/runtime.go:1046`）——所以三键和进度条照旧能点、能拖，
+				// 而这一列那一大片空白不再挡着左列。
 				ui.Column(c).Gap(2).AlignItems(ui.Center).Justify(ui.Center).
-					PaddingX(playbarCenterPadX).Children(func() {
+					PaddingX(playbarCenterPadX).PassThrough().Children(func() {
 					s.viewTransport(c, st)
 					s.viewProgress(c, st)
 				})
