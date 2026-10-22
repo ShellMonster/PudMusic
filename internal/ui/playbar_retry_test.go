@@ -66,7 +66,7 @@ func TestThePlayBarDoesNotOfferARetryThatWouldDoNothing(t *testing.T) {
 
 	waitFor(t, "播放条上出现那句话", func() bool {
 		tt.Frame()
-		return showsText(tt, "打不开：B 站没有给这一条单独的音频流（合集、剧集和歌单那一类多半是这样）。打开里面的单集，或者在 B 站里打开它听")
+		return showsText(tt, "打不开：B 站没有给这一条单独的音频流（歌单、活动那一种多半是这样）。在 B 站里打开它听，或者换一首放")
 	})
 	if showsText(tt, "重试") {
 		t.Error("给了一枚按了也没用的「重试」")
