@@ -155,7 +155,9 @@ func (s *Shell) viewSuggestTerms(c *ui.Context) {
 	}
 	ui.Column(c).Key(suggestTermsKey).FillWidth().Gap(2).Children(func() {
 		// 标题和「搜索历史」那一句同一个字号和粗细：两栏是平级的，谁也不比谁大。
-		ui.Text(c, suggestTermsHeading).FontSize(scale.Font(c, 13)).Bold().Grow(1)
+		// 两处都是 14/400（上游历史标题是 `text-sm`；联想词这一栏没有标题，
+		// 这一句是我们自己的，跟着它走）。
+		ui.Text(c, suggestTermsHeading).FontSize(scale.Font(c, 14)).Grow(1)
 		for _, term := range items {
 			s.viewSuggestTerm(c, term)
 		}

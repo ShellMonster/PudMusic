@@ -831,18 +831,18 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 				s.viewPlayMode(c, st)
 				ui.Row(c).Gap(24).AlignItems(ui.Center).Children(func() {
 					s.viewPrevButton(c)
-					if iconButtonPrimary(c, transportIcon(st.Playing),
+					// 提示走 tooltip.go（时延照上游），不是框架那枚固定的 600ms。
+					if s.withTip(c, iconButtonPrimary(c, transportIcon(st.Playing),
 						transportLabel(st.Playing), fullPlayGlyph).
 						Size(fullPlayHit, fullPlayHit).Padding(0, 5).
-						Tooltip(transportLabel(st.Playing)).
-						Disabled(!st.Playing && !st.HasTrack).Clicked() {
+						Disabled(!st.Playing && !st.HasTrack), transportLabel(st.Playing)).Clicked() {
 						s.app.Toggle()
 					}
 					s.viewNextButton(c)
 				})
-				if iconButton(c, iconQueue, "播放列表", iconMd).
-					Size(iconHitMd, iconHitMd).Padding(0, 5).
-					Tooltip(drawerTip(s.drawerOpen)).Clicked() {
+				// 同一处：队列开关的提示也走 tooltip.go。
+				if s.withTip(c, iconButton(c, iconQueue, "播放列表", iconMd).
+					Size(iconHitMd, iconHitMd).Padding(0, 5), drawerTip(s.drawerOpen)).Clicked() {
 					s.drawerOpen = !s.drawerOpen
 				}
 			})
@@ -1041,8 +1041,8 @@ func (s *Shell) viewFullPartsPanel(c *ui.Context) {
 			ui.Text(c, "分集").FontSize(scale.Font(c, 14)).Bold().Grow(1)
 			// 上游是一枚 `RiArrowRightSLine` 16 的扁平图标键（`page-list.tsx:47`）。
 			// 字色不用给：面板自己 `TextColor(t.Text)`，图标跟着它走。
-			if iconButton(c, iconSideExpand, "收起分集", 16).
-				Size(24, 24).Padding(0, 4).Tooltip("收起分集").Clicked() {
+			if s.withTip(c, iconButton(c, iconSideExpand, "收起分集", 16).
+				Size(24, 24).Padding(0, 4), "收起分集").Clicked() {
 				s.full.partsOpen = false
 			}
 		})

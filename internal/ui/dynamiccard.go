@@ -23,10 +23,12 @@ import (
 
 // dynamicCoverW / dynamicCoverH 是投稿那一块的封面尺寸。
 //
-// Biu 那边是 `h-32 w-48`（`dynamic-feed/item.tsx:118`），比例 1.5:1。
+// Biu 那边是 `h-32 w-48`（`dynamic-feed/item.tsx:156`），Tailwind 的
+// 32 × 4 = 128 高、48 × 4 = 192 宽，比例 1.5:1。**不是 132×88**——那是
+// 早一版自己缩过的尺寸，卡片左右两侧因此空出一大块。
 const (
-	dynamicCoverW = 132
-	dynamicCoverH = 88
+	dynamicCoverW = 192
+	dynamicCoverH = 128
 )
 
 // dynamicPicSide 是图文里每张图的边长。
@@ -159,10 +161,19 @@ func (s *Shell) viewCollectionRow(c *ui.Context, col bili.UpCollection) {
 // `/user/{mid}`）。这是「能点进对应 UP 空间」那条验收在卡片上的落点。
 func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic) {
 	t := c.Theme()
-	ui.Column(c).Key("dyn:" + d.ID).Grow(1).Padding(10).Gap(6).Children(func() {
+	// 卡片本身照上游 `border-default-100 mb-2 w-full rounded-none border-b
+	// bg-transparent pb-4`（`dynamic-feed/item.tsx:80`）：
+	//   - 下边框一条；
+	//   - 距下一条 8（`mb-2`）；
+	//   - 卡内下边距 16（`pb-4`）、上边距 16（CardHeader 的 `pt-4`）；
+	//   - **左右 0**：那 32 由页面那一层给（动态流是 16+16，UP 空间是 `p-4`）。
+	ui.Column(c).Key("dyn:"+d.ID).Grow(1).
+		Padding(16, 0, 16, 0).Margin(0, 0, 8, 0).
+		BorderWidth(0, 0, 1, 0).BorderColor(t.Border).
+		Gap(6).Children(func() {
 		// ① 头一行：头像 + 昵称（可点）+ 时间。
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			s.spaceAvatar(c, d.Author.Face, 32)
+			s.spaceAvatar(c, d.Author.Face, 32, false)
 			name := d.Author.Name
 			if name == "" {
 				name = "这个 UP 主"
