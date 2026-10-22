@@ -687,7 +687,7 @@ var qualityChoices = []bili.AudioQuality{
 // ⚠️ **三个都是只有图标的按钮**（Biu 的 `MusicPlayControl` 就是上面那三个）。
 // 文字版是三个汉字各占 88 宽——中间那一列 276 宽全被这三个键占满，而进度条
 // 那一行是从它这儿借的富余（见 viewProgress）。换成图标之后那一行只有
-// **170** 宽（上一首 32 + 24 + 播放 58 + 24 + 下一首 32），歌名那边宽出来的
+// **160** 宽（上一首 32 + 24 + 播放 48 + 24 + 下一首 32），歌名那边宽出来的
 // 就是「加得下东西」的那一段。
 //
 // 🔴 **三键之间的空隙是 24**（上游 `music-play-control/index.tsx:19` 的
@@ -701,13 +701,13 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 		s.viewPrevButton(c)
 
 		if st.Playing {
-			if s.withTip(c, iconButtonPrimary(c, transportIcon(true), "暂停", iconPlayBtn).
-				Size(iconHitPlay, iconHitPlay).Padding(0, 5), "暂停").Clicked() {
+			if s.withTip(c, iconButtonPlay(c, transportIcon(true), "暂停", iconPlayBtn).
+				Size(iconHitPlay, iconHitPlay).Padding(0, 0), "暂停").Clicked() {
 				s.app.Toggle()
 			}
 		} else {
-			if s.withTip(c, iconButtonPrimary(c, transportIcon(false), "播放", iconPlayBtn).
-				Size(iconHitPlay, iconHitPlay).Padding(0, 5).
+			if s.withTip(c, iconButtonPlay(c, transportIcon(false), "播放", iconPlayBtn).
+				Size(iconHitPlay, iconHitPlay).Padding(0, 0).
 				Disabled(!st.HasTrack), "播放").Clicked() {
 				s.app.Toggle()
 			}

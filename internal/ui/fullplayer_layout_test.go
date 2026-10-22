@@ -85,14 +85,14 @@ func TestTheFullPlayerBottomBarPaddingAndMaxWidth(t *testing.T) {
 	settleFull(t, tt)
 
 	// 上游那几个类名换算出来的字面量：px-12 = 48、mb-4 = 16、max-w-6xl = 1152；
-	// 播放键 48 的图标 + 每边 5 的内边距 = 58。
-	const wantPadX, wantMargin, wantMaxW, wantHit = 48, 16, 1152, 58
+	// 播放键的盒子是 48（上游 `size-12 min-w-12`，图形正好填满）。
+	const wantPadX, wantMargin, wantMaxW, wantHit = 48, 16, 1152, 48
 	play, ok := tt.Find(fullPlayLabel(s))
 	if !ok {
 		t.Fatalf("找不到播放键，文字有 %q", tt.Texts())
 	}
 	if play.W != wantHit || play.H != wantHit {
-		t.Errorf("播放键是 %.0fx%.0f，want %dx%d（48 的图标 + 每边 5）",
+		t.Errorf("播放键是 %.0fx%.0f，want %dx%d（上游的 `size-12 min-w-12`）",
 			play.W, play.H, wantHit, wantHit)
 	}
 	if d := float32(fullWinH) - (play.Y + play.H) - wantMargin; d != 0 {
@@ -185,7 +185,7 @@ func TestTheFullPlayerBottomBarHasPlayModeAndQueue(t *testing.T) {
 		}
 	}
 
-	// 抽屉底下让出来的是**满屏的底栏**（102 高），不是播放条那 88：进度条整条
+	// 抽屉底下让出来的是**满屏的底栏**（92 高），不是播放条那 88：进度条整条
 	// 都该按得着。点它一下，抽屉不该被当成「点了蒙版」关掉。
 	prog, ok := tt.Find("全屏播放进度")
 	if !ok {
@@ -207,10 +207,15 @@ func TestTheFullPlayerBottomBarHasPlayModeAndQueue(t *testing.T) {
 
 // TestTheFullPlayerPlayGlyphIsFortyEight 断播放键的**图形**是 48 的。
 //
-// 按钮框是 58（点击区，见上一条）；图形本身是 48——上游
-// `music-play-control/index.tsx:23-24` 的 `RiPlayCircleFill size={48}`。
+// 按钮框是 48（上游 `size-12 min-w-12`，见上一条）；图形本身是 48——上游
+// `music-play-control/index.tsx:23-25` 的 `RiPlayCircleFill size={48}`。
 // 判据是图形墨迹的外接框：一个画满 viewBox 的圆形图标在 48 字号下量出来
 // 40~48 之间（图形自己留了一圈边），34 那一档量出来只有 28 上下。
+//
+// ⚠️ **票 #217 之后那一枚底下什么都没有了**（原来是实心主色方块），于是「框内的
+// 众数」是**图形本身**而不是底色，`scanGlyph` 量到的那一片「墨迹」其实是
+// **圆盘边缘那一圈抗锯齿**——它的外接框和圆盘的外接框是同一个数（40 + 4 的
+// 回扩 = 44），所以这一条量到的仍然是图形的大小。
 func TestTheFullPlayerPlayGlyphIsFortyEight(t *testing.T) {
 	s, tt, _ := fullTester(t)
 	openFull(t, tt)
