@@ -36,9 +36,10 @@ typography:
   settings_h2:  { size: 20, weight: 400 }
   row_title:    { size: 16, weight: 500 }   # font-medium
   list_title:   { size: 16, weight: 400 }
-  list_meta:    { size: 14, weight: 400 }   # UP 名
+  list_meta:    { size: 14, weight: 400 }   # UP 名 / 队列行副题
   body:         { size: 14, weight: 400 }
-  secondary:    { size: 12, weight: 400 }
+  h3:           { size: 18, weight: 400 }   # 队列抽屉标题；Preflight 重置字重
+  secondary:    { size: 12, weight: 400 }   # 时间等其余次要信息
   weights: [400, 500, 600, 700, 800]
 spacing:
   unit: 4
@@ -65,9 +66,6 @@ structural:
   playbar: { height: 88, padding_x: 16, cover: 56 }
   list_row: { height: 64, cover: 48, compact_cover: 0 }
   grid: { cover: 140, gap: 16, breakpoints: [1536, 1280, 1024, 768], columns: [6, 5, 4, 3, 2] }
-  up_space: { header: 200, avatar: 140, padding_x: 32, padding_y: 16 }
-  dynamic_feed: { author_pane: 256, author_avatar: 36, card_padding_x: 32, cover: [192, 128] }
-  follow: { pane: 200, card_avatar: 128, card_name: 18, card_sign: 14 }
   queue_drawer: { width: 384, row: 64 }
   parts_panel: { min_width: 500, row: 64 }
   toast: { width: 356, offset_bottom: 90, offset_right: 8, max: 3, life: 2000ms }
@@ -94,15 +92,12 @@ structural:
 | 页标题 | 24 / 400 | `h1`，Preflight 重置字重 |
 | 设置分组标题 | 20 / 400 | `h2` |
 | 设置行标题 | 16 / 500 | `font-medium` |
-| 列表 / 网格歌名 | 16 / 400 | `text-base` |
-| 列表 UP 名 | 14 / 400 | `text-sm` |
-| UP 空间昵称 | 20 / 600 | `text-xl font-semibold` |
-| UP 空间签名 | 14 / 400 | `text-sm` |
-| UP 空间统计 | 18 / 600（名字 14 / 400） | `text-lg font-semibold` / `text-sm` |
-| 关注卡名字 | 18 / 400 | `text-lg` |
-| 关注卡签名 | 14 / 400 | `text-sm` |
+| 列表 / 网格 / 队列歌名 | 16 / 400 | `text-base` |
+| 列表 UP 名 / 队列行副题 | 14 / 400 | `text-sm` |
 | 正文 / 说明 | 14 / 400 | `text-sm` |
-| 次要信息（时间、条数） | 12 / 400 | `text-xs` |
+| 队列抽屉标题 | 18 / 400 | `h3` = `text-lg` |
+| 队列抽屉条数 | 14 / 400 | `text-sm` |
+| 次要信息（时间等） | 12 / 400 | `text-xs` |
 | 品牌字 | 24 / 粗体 / 主色 | logo 旁 |
 
 **500 字重是一档正经的字重**，不是「介于 400 和 600 之间随便选」。上游用了 26 处。
@@ -123,11 +118,6 @@ structural:
 | 播放条 | 高 88 / 左右 16 / 封面 56 |
 | 列表行 | 高 64 / 封面 48；**紧凑档没有封面** |
 | 网格 | 封面 140、格间距 16、断点 1536/1280/1024/768 → 6/5/4/3/2 |
-| UP 空间头图区 | 高 200；头像 140 + 阴影；左右 32 / 上下 16 |
-| 动态左栏 / 关注左栏 | 宽 256 / 200，右缘一条分隔线（分隔线 40%） |
-| 动态卡片 | 页面左右 32；卡内上下 16、距下一条 8、一条下边框 |
-| 动态作者头像 / 投稿封面 | 36 / 192×128 |
-| 关注卡 | 头像 128；hover 操作条距底 16、上滑 80、300ms |
 | 队列抽屉 | 宽 384、行 64 |
 | 分集面板 | 宽 ≥500、行 64 |
 | Toast | 宽 356、距底 90、距右 4–8、最多 3 条、活 2000ms |
@@ -198,6 +188,8 @@ structural:
 
 ### 迷你播放器
 - 320×100、置顶、不占任务栏、位置记忆。
+- **面板语义**：点它不激活应用（macOS 的 nonactivating `NSPanel`）；应用仍是
+  普通 Dock 应用，不改成 accessory。
 - 控制键是图标；**音量保留**（用户已定，上游没有）。
 
 ### Tab
@@ -229,8 +221,12 @@ structural:
 - **逐像素采样**：颜色、描边、底色、阴影。
 - **假时钟推钟**：动效的中间态用 `Advance` + `FramePending`，**不要数帧、
   不要用固定毫秒**（框架的钟站着不动，数帧会静默失效）。
-- **负载**：load 8 以下才作数；改了界面行为的票加压复验
-  `GOGC=10 go test ./internal/ui/ -count=3 -timeout 15m`。
+- **默认验收不跑 `internal/ui`**：`go build -p 4 ./... && go vet -p 4 ./... && go test -p 4 $(go list ./... | grep -v '/internal/ui$')`（`-p 4` 是限并发，别调大）。
+  界面行为测试**只在动了界面行为的票上跑，而且只跑自己改的那几处**
+  （`-run` 过滤），例如
+  `GOGC=10 go test ./internal/ui/ -count=3 -timeout 5m -run 'TestPlayBar|TestVolume'`。
+  ⚠️ **不要整包跑**——整包一轮 62~298 秒，×3 就是十几分钟一票，而且压出来的
+  飘红每次都是同样那几条既有测试，跟当票无关。细则见 AGENTS.md §2。
 - **不打真 B 站接口**，所有页面数据走内存夹具。
 
 ## 九、已经拍板、不要重新提的

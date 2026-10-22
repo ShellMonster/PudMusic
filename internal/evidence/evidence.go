@@ -645,6 +645,21 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
+		// 票 #162（规格票 #156 底下的一条）：迷你播放器是**面板语义**——显示和
+		// 聚焦能拿键盘，但点它不激活应用，用户不会被从别的应用里拽出来。
+		//
+		// ⚠️ 这一条证的是**选项摆对了**（`Panel: true`，以及位置记忆的那几个
+		// 前提还在：面板不能最大化，而 `isZoomed` 恒为真就会让 `StateKey` 一条
+		// 都存不下来）。真的「点下去不激活」和「关掉再开停在原处」要真窗口 +
+		// 真鼠标，量到的结果记在 `internal/ui/miniplayer.go` 的「本机实测」里，
+		// 不在这儿假装验过。
+		Spec: "迷你播放器是面板语义：点它不激活应用（票 #162），位置记忆仍然有效",
+		Tests: []string{
+			"TestTheMiniWindowIsAPanel",
+		},
+	},
+	{
+		Category: Platform,
 		Spec:     "迷你播放器里能换歌、上下一首（44）、拖进度条（45）、调音量",
 		Tests: []string{
 			"TestTheMiniWindowStepsThroughTheQueue",
@@ -829,6 +844,30 @@ var Items = []Item{
 			"TestRestartKeepsTheLoginState",
 			"TestMountedSettingsSurviveAProcessRestart",
 			"TestSearchHistorySurvivesRestart",
+		},
+	},
+	{
+		Category: Negative,
+		// 封面落盘缓存（#158 / BMG-98）。这一组盯的都是**静默**的错法：
+		// 没有上限就是磁盘一直长；删到目录外面就是删用户文件；半截文件被当成
+		// 命中就是「每次启动都先闪一张坏图」；读盘放到主线程就是「滚列表卡住」。
+		// 全部用临时目录 + `httptest` 验，不碰用户真正的缓存目录，也不连图床。
+		Spec: "封面落盘缓存：目录有字节上限、按最久未用淘汰、启动清一次上次留下的超额；删除只发生在缓存目录内；半截文件按没有处理；空选项不落盘；重启（新实例、同一目录）不发请求就能拿到图；读盘在后台、写盘不挡主线程",
+		Tests: []string{
+			"TestDiskCacheEvictsTheLeastRecentlyUsed",
+			"TestStartupSweepTrimsWhatTheLastRunLeft",
+			"TestDeletionNeverLeavesTheCacheDir",
+			"TestAHalfWrittenFileIsNeverDecoded",
+			"TestACrashedWriteIsJustAMiss",
+			"TestEmptyDirMeansNoDisk",
+			"TestRestartServesFromDiskWithNoRequest",
+			"TestDiskReadsDoNotBlockTheCaller",
+			"TestDiskWritesDoNotBlockTheCaller",
+			"TestCoverCacheDirIsUnderTheAppsCachePath",
+			"TestTheMiniWindowSharesTheMainWindowsCoverCache",
+			"TestACorruptDiskEntryThatCannotBeDeletedIsNotReadForever",
+			"TestTheCacheIsClosedOnlyAfterTheLastUserReleasesIt",
+			"TestTheMiniWindowKeepsItsCoversAfterTheMainWindowIsClosed",
 		},
 	},
 	{

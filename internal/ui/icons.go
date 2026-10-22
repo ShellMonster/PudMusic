@@ -110,6 +110,13 @@ const (
 	iconLocate = "Design/focus-3-line.svg"    // 定位当前播放
 	iconDelete = "System/delete-bin-line.svg" // 清空队列
 
+	// iconPlayFill 是队列行悬停时封面上的那一枚播放三角，逐字照上游
+	// `music-playlist-drawer/list-item.tsx` 的 `<RiPlayFill size={20}/>`。
+	//
+	// ⚠️ **不是播放条那一枚** `play-circle-fill`：那一枚带着一圈圆底，缩到 20
+	// 像素再压在 35% 的黑色蒙层上会糊成一团；上游这里用的就是一枚光三角。
+	iconPlayFill = "Media/play-fill.svg"
+
 	// ⚠️ **头像那一格故意不在这一列。** #115（真实头像与未登录形态）把它整个
 	// 重做成了三档——真图 / 出问题的人形 / 等着的人形——而那个人形是
 	// `navbar_avatar.go` 的 `avatarPerson` 按 `avatarSize` 的分数倍画出来的
@@ -265,8 +272,8 @@ var iconNames = []string{
 	// 顶栏
 	iconSettings, iconFolder, iconQueue,
 	iconSearch, iconClose, iconFeed, iconLogin, iconLogout,
-	// 队列抽屉头
-	iconLocate, iconDelete,
+	// 队列抽屉头与行
+	iconLocate, iconDelete, iconPlayFill,
 
 	// 空状态插画位
 	iconEmptyDefault, iconEmptyMusic, iconEmptyGroup, iconEmptyLater,
