@@ -52,6 +52,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -859,11 +860,29 @@ func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser) {
 	//
 	// ⚠️ **`Clip()` 是操作条藏起来的前提**：那一条平时停在卡片下沿之外 64 点
 	// （见 `followActionBarBottom` / `Rise`），不裁的话它会画到下面那张卡上。
+	//
+	// ⚠️ **底色 + 那一圈影是上游那张 `Card` 的两样东西**（上游
+	// `pages/follow-list/user-card.tsx:60` 那一枚是 HeroUI 的 `<Card radius="md"
+	// isHoverable isPressable>`）：HeroUI 的 Card 底色是 `bg-content1`，而它的
+	// `shadow` **默认就是 `md`**（`@heroui/theme` 的 card 主题
+	// `defaultVariants.shadow = "md"`），所以上游那些没写 `shadow=` 的卡片带的是
+	// 那一档。
+	//
+	// 底色取 **`t.Background`**：上游的 `content1` 是 **#FFFFFF（浅）/ #18181b
+	// （深）**——**正好是我们 `t.Background` 的两个值**。所以这张卡在深色下和页面
+	// 底色几乎同色，**靠那圈影分层**（DESIGN.md §4：「不要用『比背景亮一级』的
+	// 板」）。
+	//
+	// hover 那一档取 `t.Surface`：上游 `isHoverable` 是 `data-[hover=true]:bg-
+	// content2`，而 `content2` 是 **zinc[100] #f4f4f5（浅）/ zinc[800] #27272a
+	// （深）**——也正好是 `t.Surface` 的两个值。
 	card := ui.Column(c).Grow(1).Radius(t.Radius).AlignSelf(ui.Stretch).Clip().
 		AlignItems(ui.Center).Gap(6).Padding(followCardPad).
+		Background(t.Background).
 		OnClick(func() { s.navigate(upPathOf(u.Mid)) })
+	card = shadow.HeroMedium(card, t)
 	if card.Hovered() {
-		card = card.Background(t.SurfaceHover)
+		card = card.Background(t.Surface)
 	}
 
 	// 🔴 **每帧都问一次**（理由见 `followActionBarKey`）：指针在卡上时目标是 1，
@@ -919,9 +938,15 @@ func (s *Shell) viewFollowActions(c *ui.Context, u bili.FollowUser, shown float3
 		layer = layer.Invisible()
 	}
 	layer.Children(func() {
-		bar := ui.Row(c).Gap(2).Padding(4, 8).Radius(999).
-			Background(t.Background).Border(1, t.Border).
-			Shadow(0, 6, 20, 0, popupShadow(t))
+		// ⚠️ **那一圈影是上游的 `shadow-lg`**（`follow-list/user-card.tsx:89`
+		// 那一枚浮层上的 `shadow-lg`）：`0 10px 15px -3px rgb(0 0 0/0.1)` 与
+		// `0 4px 6px -4px rgb(0 0 0/0.1)`，**两层**。
+		//
+		// 原来这里是框架浮层那一档（`0 6 20 0` + 我们自己的浓度）——那是**面板**
+		// 的影（`popup.go` 那个出口），而这一条是**浮在卡片上面的一条药丸**，它
+		// 底下压着的是头像和名字。影淡了它就贴着卡片，而不是浮在上面。
+		bar := shadow.TailwindLG(ui.Row(c).Gap(2).Padding(4, 8).Radius(999).
+			Background(t.Background).Border(1, t.Border))
 		bar.Children(func() {
 			if flatButton(c, "取消关注").FontSize(scale.Font(c, 13)).
 				TextColor(t.Danger).Clicked() {
