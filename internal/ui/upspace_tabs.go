@@ -172,28 +172,33 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	//   - List 是自己管状态的控件，Key 只能挂在外面的元素上（见 element.go）；
 	//   - 滚动容器**直接**当别的容器的下一层时，它里面文字的盒子量出来是
 	//     0×0（BMG-16 记着的 Tester 那个坑），套一层就正常。
+	//
+	// ⚠️ **左右 16 是这一层给的，不在卡片里**：上游这三张 Tab 的内容摆在
+	// `user-profile/index.tsx:130` 那个 `p-4` 里，而动态卡片自己左右是 0
+	// （动态流那一页的 32 是另一层 16+16）。卡片自己做内边距的话，同一个
+	// 组件在两页就会缩成两个宽度。
 	ui.Column(c).Key("space-list:" + upTabNames[tab]).Grow(1).FillHeight().
-		Children(func() {
-			spaceList := ui.List(c, st, rows).
-				Grow(1).FillHeight().FillWidth().
-				Rows(func(r ui.ListRow) {
-					// 🔴 行里 panic 会一路穿出 Cocoa 事件循环把进程带走。每一行
-					// 自己兜一层，**只废掉这一行**（页级的 Shell.page 接的是整棵树，
-					// 两者不重复）。
-					defer func() {
-						if rec := recover(); rec != nil {
-							log.Printf("biu: UP 空间那一行画崩了（%s）：%v\n%s",
-								upRowKey(sp, tab, r.Index), rec, debug.Stack())
-						}
-					}()
-					if r.Index >= upRowCount(sp, tab) {
-						s.viewUpSentinel(r.Context, sp, tab)
-						return
+		PaddingX(upPad).Children(func() {
+		spaceList := ui.List(c, st, rows).
+			Grow(1).FillHeight().FillWidth().
+			Rows(func(r ui.ListRow) {
+				// 🔴 行里 panic 会一路穿出 Cocoa 事件循环把进程带走。每一行
+				// 自己兜一层，**只废掉这一行**（页级的 Shell.page 接的是整棵树，
+				// 两者不重复）。
+				defer func() {
+					if rec := recover(); rec != nil {
+						log.Printf("biu: UP 空间那一行画崩了（%s）：%v\n%s",
+							upRowKey(sp, tab, r.Index), rec, debug.Stack())
 					}
-					s.viewUpRow(r.Context, sp, tab, r.Index)
-				})
-			s.trackScrollbar(spaceList)
-		})
+				}()
+				if r.Index >= upRowCount(sp, tab) {
+					s.viewUpSentinel(r.Context, sp, tab)
+					return
+				}
+				s.viewUpRow(r.Context, sp, tab, r.Index)
+			})
+		s.trackScrollbar(spaceList)
+	})
 
 	// ②滚到底 ③加载后再查一遍。
 	//

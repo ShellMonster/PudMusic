@@ -72,9 +72,10 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 			path = "还没有下载目录"
 		}
 		// 超长被截掉的时候完整路径在 tooltip 里：用户不必去设置页才看得到它落在
-		// 哪儿。没有目录时那一截是空的（`Tooltip("")` 不画东西），没有可补充的。
-		ui.Text(c, path).Grow(1).FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
-			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").Tooltip(dir)
+		// 哪儿。没有目录时那一截是空的（提示为空就不画东西），没有可补充的。
+		d.tipWith(c, ui.Text(c, path).Grow(1).FontSize(scale.Font(c, 12)).
+			LineHeight(smallCopyLeading).TextColor(t.TextMuted).MaxLines(1).
+			Ellipsis("…"), dir)
 
 		// ⚠️ 没有目录时不摆这个按钮：按下去是打不开的。一个只会说「不行」的
 		// 按钮不如不摆（和首页不摆「全部播放」是同一个取舍）。
@@ -88,9 +89,9 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 		// 上游是表格右上角一个 `isIconOnly` 的垃圾桶（`index.tsx:128-132`），
 		// 我们把它留在页头——表格那一块是共用的（widgets/list），页头才是这一页
 		// 自己的地方。
-		if flatIconButton(c, iconDeleteBin5, "清空记录", iconMd).
+		if d.tipWith(c, flatIconButton(c, iconDeleteBin5, "清空记录", iconMd).
 			Size(iconHitMd, iconHitMd).Padding(0, 5).
-			Tooltip("清空记录").Disabled(len(d.all) == 0).Clicked() {
+			Disabled(len(d.all) == 0), "清空记录").Clicked() {
 			d.askClear(s)
 		}
 	})
@@ -133,9 +134,8 @@ func (d *downloadsPage) viewOps(c *ui.Context, s *Shell, r download.Snapshot) {
 // 的那几颗**挑的（完成时是「打开」+「删除」，出错的行是「重试」+「删除」，
 // 最多两颗，见 `dlOpsW`）。
 func (d *downloadsPage) opButton(c *ui.Context, label string, fn func()) {
-	if flatIconButton(c, opIcons[label], label, iconSm).
-		Size(dlOpW, dlOpW).Padding(0, 7).
-		Tooltip(label).Clicked() {
+	if d.tipWith(c, flatIconButton(c, opIcons[label], label, iconSm).
+		Size(dlOpW, dlOpW).Padding(0, 7), label).Clicked() {
 		fn()
 	}
 }
@@ -342,6 +342,12 @@ const (
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+// tipWith 是这一页的悬停提示入口：状态挂在 Shell 上（tooltip.go），这里只是
+// 把这一页拿到的那份递过去。
+func (d *downloadsPage) tipWith(c *ui.Context, e ui.Element, text string) ui.Element {
+	return tipFrom(d.tip, c, e, text, tipDefault)
+}
 
 // trimDownloadErr 把错误里那截前缀去掉。
 //
