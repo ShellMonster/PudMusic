@@ -761,7 +761,7 @@ HeroUI 的 `<Tooltip>` / `<Modal>`（`layout/navbar/user-feed/index.tsx:50`、
 - **逐像素采样**：颜色、描边、底色、阴影。
 - **假时钟推钟**：动效的中间态用 `Advance` + `FramePending`，**不要数帧、
   不要用固定毫秒**（框架的钟站着不动，数帧会静默失效）。
-- **默认验收不跑 `internal/ui`**：`go build -p 4 ./... && go vet -p 4 ./... && go test -p 4 $(go list ./... | grep -v '/internal/ui$')`（`-p 4` 是限并发，别调大）。
+- **默认验收不跑 `internal/ui`**：`go build -trimpath -p 4 ./... && go vet -trimpath -p 4 ./... && go test -p 4 $(go list ./... | grep -v '/internal/ui$')`（`-p 4` 是限并发，别调大；`-trimpath` 是为了让编译缓存跨 worktree 命中，`test` 那一步**不带**它，理由见 AGENTS.md §1）。
   界面行为测试**只在动了界面行为的票上跑，而且只跑自己改的那几处**
   （`-run` 过滤），例如
   `GOGC=10 go test ./internal/ui/ -count=3 -timeout 5m -run 'TestPlayBar|TestVolume'`。
