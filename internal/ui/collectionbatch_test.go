@@ -357,7 +357,7 @@ func TestDownloadingSaysItIsNotWiredYet(t *testing.T) {
 		t.Fatal(err)
 	}
 	settleFrame(tt)
-	wantText(t, tt, "下载还没挂上：这个应用没把下载服务装进来")
+	wantText(t, tt, "下载暂时用不了")
 	dontWantText(t, tt, "下载任务已添加")
 }
 

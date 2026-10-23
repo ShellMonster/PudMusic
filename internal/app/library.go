@@ -36,7 +36,10 @@ import (
 )
 
 // errLibraryMissing 是「这一页还没挂上 B 站客户端」。
-var errLibraryMissing = errors.New("app: 还没挂上 B 站客户端")
+//
+// ⚠️ **这句话会原样弹到用户面前**（失败态走 `viewLoadError`，它画的就是
+// `err.Error()`），所以不许说「客户端」（票 #242，UX 报告 §3-F 的 F2）。
+var errLibraryMissing = errors.New("app: 这一页暂时加载不出来")
 
 // Library 是这两页要的那几个接口的依赖。零值不挂——界面要判空。
 type Library struct {
