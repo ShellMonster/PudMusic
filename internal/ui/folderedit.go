@@ -130,7 +130,7 @@ func (s *Shell) viewFolderEdit(c *ui.Context) {
 
 		// ⚠️ **碰过之后才画**（理由见 touched 那个字段）。
 		if !e.valid() && !busy && e.touched {
-			ui.Text(c, "名称为必填项").FontSize(scale.Font(c, 11)).TextColor(t.Danger)
+			ui.Text(c, "名称为必填项").FontSize(scale.Font(c, 11)).TextColor(dangerText(t))
 		}
 
 		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {

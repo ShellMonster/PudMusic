@@ -201,8 +201,26 @@ func newAvatarShellIn(t *testing.T, f *avatarFixture, mid string, systemDark boo
 // 量画面
 // ─────────────────────────────────────────────────────────────────────────────
 
-// avatarBox 是头像那一格的位置。没找到就是零值 + false。
+// avatarBox 是头像那一**格**（菜单按钮）的位置。没找到就是零值 + false。
 func avatarBox(tt *mygoui.Tester) (mygoui.Rect, bool) { return tt.Find(avatarLabel) }
+
+// avatarCircleBox 是头像那一枚**圆**的位置。
+//
+// ⚠️ **命中区是 32×32，那一枚圆是 18，居中**（票 #241 / 报告 F-16：末两枚的
+// 视觉重量要和左边那四枚线框图标同一档，而**点得到的那一块不许跟着变小**——
+// 缩小的只是画出来的那一枚圆）。
+//
+// 所以量「画出来的那一枚圆」不能直接用那个 32 的框：那一格里有 32×32−18×18
+// 多的空白，量它等于量「那一格有多大」。
+func avatarCircleBox(tt *mygoui.Tester) (mygoui.Rect, bool) {
+	hit, ok := avatarBox(tt)
+	if !ok {
+		return mygoui.Rect{}, false
+	}
+	side := float32(avatarSize)
+	inset := (hit.W - side) / 2
+	return mygoui.Rect{X: hit.X + inset, Y: hit.Y + inset, W: side, H: side}, true
+}
 
 // ⚠️⚠️ **下面三个函数每一帧都会被问一次，而 `tt.Image()` 是贵的那一个**
 //
@@ -216,7 +234,7 @@ func avatarBox(tt *mygoui.Tester) (mygoui.Rect, bool) { return tt.Find(avatarLab
 //
 // 所以下面每一个都**只取一次**画面，剩下的都从 `img` 里读。
 func avatarShowsThePicture(tt *mygoui.Tester) bool {
-	r, ok := avatarBox(tt)
+	r, ok := avatarCircleBox(tt)
 	if !ok {
 		return false
 	}
@@ -262,14 +280,24 @@ const (
 	avatarInkDelta = 40
 	// avatarFigureMinRun / avatarFigureMinInk 是「画出来的是人形」的界。
 	//
-	// 实测：人形 17 / 211，12 号粗体「B」7 / 50，**什么都不画 0 / 0**。
-	// 两个数都取在正中间，两边各留 5 px / 70 点的余量。
-	avatarFigureMinRun = 12
-	avatarFigureMinInk = 120
+	// 实测：人形 17 / 211（28 那一档），12 号粗体「B」7 / 50，**什么都不画
+	// 0 / 0**。两个数都取在正中间，两边各留 5 px / 70 点的余量。
+	//
+	// ⚠️ **人形是按 `avatarSize` 的分数倍画的**（`avatarPerson`），而那个字母
+	// 占位符的大小**不跟头像走**——所以头像越小，这两个数靠得越近：18 那一档
+	// 实测是 10 / 78（对 7 / 50）。所以这两个界跟着 `avatarSize` 走，而不是写死。
+	avatarFigureMinRun = 0.45 // × avatarSize
+	avatarFigureMinInk = 3.5  // × avatarSize
 )
 
+// avatarFigureMin 是「画出来的是人形」那两个界（跟着 `avatarSize` 走）。
+func avatarFigureMin() (run, ink int) {
+	side := float32(avatarSize)
+	return int(side * float32(avatarFigureMinRun)), int(side * float32(avatarFigureMinInk))
+}
+
 func avatarFigure(tt *mygoui.Tester) (widestRun, inkPixels int) {
-	r, ok := avatarBox(tt)
+	r, ok := avatarCircleBox(tt)
 	if !ok {
 		return 0, 0
 	}
@@ -326,7 +354,8 @@ func max3(a, b, c int) int { return max(a, max(b, c)) }
 // avatarHasFigure 报「那一格里画出了一个撑得开的图形」（见 avatarFigure）。
 func avatarHasFigure(tt *mygoui.Tester) bool {
 	run, ink := avatarFigure(tt)
-	return run >= avatarFigureMinRun && ink >= avatarFigureMinInk
+	minRun, minInk := avatarFigureMin()
+	return run >= minRun && ink >= minInk
 }
 
 // avatarHasColor 数一数那一格里有多少个点是 want 这个颜色。
@@ -336,7 +365,7 @@ func avatarHasFigure(tt *mygoui.Tester) bool {
 // 取决于它落在第几个小数像素上。数「整块脑袋里有多少个」才是稳的——纯色区域
 // 十几个像素，抗锯齿的一圈两三个。
 func avatarHasColor(tt *mygoui.Tester, want mygoui.Color) int {
-	r, ok := avatarBox(tt)
+	r, ok := avatarCircleBox(tt)
 	if !ok {
 		return 0
 	}
@@ -486,12 +515,13 @@ func TestTheAvatarShowsAPersonAndNotALetterWhenNobodyIsLoggedIn(t *testing.T) {
 			})
 
 			run, ink := avatarFigure(tt)
-			if run < avatarFigureMinRun || ink < avatarFigureMinInk {
+			minRun, minInk := avatarFigureMin()
+			if run < minRun || ink < minInk {
 				t.Errorf("那一格画出来的是「最长的一段墨 %d px、整格 %d 个墨点」，"+
 					"而人形是 %d px / %d 个——**一个字母撑不开一格**"+
 					"（12 号粗体「B」实测 7 px / 50 点，**什么都不画 0 / 0**），"+
 					"issue #95 明令不许字母占位符",
-					run, ink, avatarFigureMinRun, avatarFigureMinInk)
+					run, ink, minRun, minInk)
 			}
 		})
 	}
@@ -683,7 +713,10 @@ const avatarSameThreshold = 0.25
 // 要 11 秒，而且时好时坏（10 秒的保险丝有一大半被这个判断本身吃掉了）。
 func avatarShot(t *testing.T, tt *mygoui.Tester) []color.RGBA {
 	t.Helper()
-	r, ok := avatarBox(tt)
+	// ⚠️ **拍的是那一枚圆，不是那个 32 的命中区**：命中区里大半是空的
+	// （`avatarCircleBox` 那段），拿它当分母的话三种形态彼此都只差两成，
+	// 「两档被合并成一个」这条判据就永远抓不住真正的合并。
+	r, ok := avatarCircleBox(tt)
 	if !ok {
 		t.Fatalf("画面上找不到%q", avatarLabel)
 	}

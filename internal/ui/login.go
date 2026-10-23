@@ -319,6 +319,18 @@ func qrHintColor(t *ui.Theme, phase app.LoginPhase) ui.Color {
 // 而侧栏是放菜单的地方——把「登录」放进侧栏会让用户为了登录先翻一遍菜单。
 //
 // 这一段放在 `viewNav` 那一行的末尾，不动 `viewMain` / `viewSide`。
+//
+// ⚠️ **未登录那一枚也是扁平的**（票 #241 / 报告 F-05 + F-16）：它原来是一块
+// **实心主色的方块**（32×24、墨迹 752），是紧挨着它左边那四枚线框图标
+// （140~152）的 **5.4 倍**——整条顶栏最响的元素，而它挂的是「登录」这么一
+// 个低频次动作。**上游的顶栏右侧压根没有这么一枚按钮**（那边登录在头像下拉
+// 里），所以「实心主色」是我们自己加的强调，而它强调错了地方。
+//
+// 现在两态同形（`iconButton`，无底色，悬停时才变主色），**未登录 / 已登录
+// 只有图标不同**。
+//
+// ⚠️ **别把它改回实心主色**：主色留给「正在播放」那种方向标（DESIGN.md §四），
+// 而这一排的视觉重量由**图标**说话——这一枚曾经是那一排里最响的一个。
 func (s *Shell) viewLoginEntry(c *ui.Context) {
 	if s.app.LoggedIn() {
 		if s.withTip(c, iconButton(c, iconLogout, "退出登录", iconMd).
@@ -327,18 +339,13 @@ func (s *Shell) viewLoginEntry(c *ui.Context) {
 		}
 		return
 	}
-	// ⚠️ **和已登录那一支同形**（`iconButton`，无底色）：这一枚原来是一块
-	// **实心主色的方块**——墨迹 752 像素，是紧挨着它左边那几枚线框图标
-	// （140~152）的 **5.4 倍**，是整条顶栏视觉权重最高的元素，而「登录」是
-	// 一个低频次动作（UI 报告 §3 的 F-05）。
+	// ⚠️ **图标是 16（`iconLoginSize`），不是 `iconMd`**：这一枚的图形是二维码
+	// （票 #242），18px 下它那几块方块糊成一块，16px 下还是分得开的，**墨迹和
+	// 左边那四枚线框图标同一档**（理由见 `icons.go` 的 `iconLoginSize`）。
 	//
-	// 去掉底色之后它的墨迹就是那枚图标自己的（~150），和左边几枚同一档；
-	// 悬停时那一层淡底还在（`widgets/flat` 的配方），所以它照样点得动、
-	// 找得到。
-	//
-	// ⚠️ **上游的顶栏右侧根本没有这一枚**：Biu 把登录挂在头像下拉里
-	// （`navbar/login`），顶栏上从来没有一枚实心主色的登录方块。
-	if s.withTip(c, iconButton(c, iconLogin, "登录", iconMd).
+	// ⚠️ **这一枚和已登录那一支同形**（`iconButton`，无底色）——票 #241 /
+	// 报告 F-05 去掉的那块实心主色底，理由见上面那段。
+	if s.withTip(c, iconButton(c, iconLogin, "登录", iconLoginSize).
 		Size(iconHitMd, iconHitMd).Padding(0, 7), "登录 B 站账号").Clicked() {
 		s.goLogin()
 	}

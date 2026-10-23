@@ -499,7 +499,7 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 		ui.Row(c).Key(key).Height(upHeaderH).FillWidth().Gap(16).Center().Children(func() {
 			s.spaceAvatar(c, h.User.Face, upAvatarS, true)
 			ui.Column(c).Gap(4).Children(func() {
-				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, 20)).FontWeight(600)
+				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, 20)).FontWeight(weightMedium)
 				ui.Text(c, "你把他拉黑了，他的内容在这儿看不到").
 					FontSize(scale.Font(c, 14)).TextColor(t.TextMuted)
 			})
@@ -528,7 +528,11 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 			// 头像带 `shadow-lg`（上游 `space-info.tsx:89` 的 `shadow-lg`）。
 			s.spaceAvatar(c, h.User.Face, upAvatarS, true)
 			ui.Column(c).Gap(8).Children(func() {
-				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, 20)).FontWeight(600).MaxLines(1).Ellipsis("…")
+				// ⚠️ **字重是 500（`weightMedium`），不是 600**（票 #241 / 报告
+				// F-26）：600 在 `DESIGN.md` §二 的刻度里有那一档却没有用途，
+				// 而这三个数字 / 名字正是「比正文重一档」的那一档。理由同
+				// `spaceStat` 那处的注释。
+				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, 20)).FontWeight(weightMedium).MaxLines(1).Ellipsis("…")
 				if h.User.Official != "" {
 					ui.Text(c, "认证："+h.User.Official).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 				}
@@ -629,12 +633,16 @@ func (sp *upSpace) follow(yes bool) {
 
 // spaceStat 是一个统计数字（上面是数、下面是名字）。
 //
-// 字号照上游 `space-info.tsx:131-133`：数字 `text-lg font-semibold`（18 / 600），
-// 名字 `text-sm`（14）。
+// 字号照上游 `space-info.tsx:131-133`：数字 `text-lg`（18），名字 `text-sm`（14）。
+//
+// ⚠️ **字重取 500（`weightMedium`），不是上游那个 600**（票 #241 / 报告 F-26）。
+// 上游是 `font-semibold`，而 600 在 `DESIGN.md` §二 的刻度里**有这一档却没有
+// 用途**——「600 是无主」：没有人能说出这三个数字为什么该是 600。500 才是
+// 仓库里唯一被命名的字重，用途正是「比正文重一档但不到标题那么重」。
 func spaceStat(c *ui.Context, label, value string) {
 	t := c.Theme()
 	ui.Column(c).Key("space-stat:" + label).Gap(2).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, value).FontSize(scale.Font(c, 18)).FontWeight(600)
+		ui.Text(c, value).FontSize(scale.Font(c, 18)).FontWeight(weightMedium)
 		ui.Text(c, label).FontSize(scale.Font(c, 14)).TextColor(t.TextMuted)
 	})
 }
