@@ -166,7 +166,8 @@ func (s *Shell) drawUpdateDialog(c *ui.Context, st app.UpdateState) {
 		// 症状是「看得见、点不动」）。
 		ui.Column(c).Key("dialog:update").Width(updateDialogWidth).Gap(dialogGap).
 			Children(func() {
-				ui.Text(c, updateDialogTitle).FontSize(scale.Font(c, scale.Size16)).Bold()
+				// ⚠️ **字重不写**（400）：弹窗标题是 16/400（DESIGN.md §二）。
+				ui.Text(c, updateDialogTitle).FontSize(scale.Font(c, scale.Size16))
 				s.updateVersionLine(c, st)
 				s.updateNotes(c, st)
 				if st.FellBack {
@@ -195,8 +196,13 @@ func (s *Shell) drawUpdateDialog(c *ui.Context, st app.UpdateState) {
 
 // updateVersionLine 是标题下面那一行。画法和设置页上那一行是同一份
 // （`versionLine`），只有字号不同。
+//
+// ⚠️ **字重是 400，不是 700**（票 #235）：这一行比弹窗标题（16/400）小一号，
+// 层次靠字号拉开（DESIGN.md §二「粗体只出现在标了粗体的那几行」）。它原来是
+// 700（#166 留下的），而那时标题也是粗的——本票把标题改回 400 之后，那一行
+// 成了整个弹窗里唯一最粗的字，层次反了。
 func (s *Shell) updateVersionLine(c *ui.Context, st app.UpdateState) {
-	s.versionLine(c, "update-versions", 13, 700, st)
+	s.versionLine(c, "update-versions", 13, 400, st)
 }
 
 // updateNotes 画更新日志。空的那一档是居中的灰字，照 Biu。

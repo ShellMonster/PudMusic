@@ -340,6 +340,12 @@ func (s *Shell) viewLoginEntry(c *ui.Context) {
 		}
 		return
 	}
+	// ⚠️ **图标是 16（`iconLoginSize`），不是 `iconMd`**：这一枚的图形是二维码
+	// （票 #242），18px 下它那几块方块糊成一块，16px 下还是分得开的，**墨迹和
+	// 左边那四枚线框图标同一档**（理由见 `icons.go` 的 `iconLoginSize`）。
+	//
+	// ⚠️ **这一枚和已登录那一支同形**（`iconButton`，无底色）——票 #241 /
+	// 报告 F-05 去掉的那块实心主色底，理由见上面那段。
 	if s.withTip(c, iconButton(c, iconLogin, "登录", iconLoginSize).
 		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "登录 B 站账号").Clicked() {
 		s.goLogin()

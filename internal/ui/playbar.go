@@ -1200,7 +1200,7 @@ func textColor(t *ui.Theme, has bool) ui.Color {
 //	没有歌               + 有地址 → 不可点（人工组合）
 //
 // ⚠️ **两个「人工组合」在真实状态里不会出现**：本地文件在 B 站上没有页面可跳
-//（所以它也没有地址），没有歌的时候更没有地址。它们在这儿是为了**把判据的
+// （所以它也没有地址），没有歌的时候更没有地址。它们在这儿是为了**把判据的
 // 每一半分开验**——真实状态里它们「顺带」也被前一个条件挡住了。
 func titleClickable(st app.State) bool {
 	return st.HasTrack && st.Source != app.SourceLocal && st.BiliURL != ""

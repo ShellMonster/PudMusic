@@ -79,40 +79,83 @@ const (
 // 角色成立的地方用它（`scale.PageTitle = scale.PageTitle`），
 // 讲的是「这一处要哪一档」而不是「这一处是几」。
 const (
-	// PageTitle 是页标题（上游 `h1` = `text-2xl`）。
+	// PageTitle 是页标题（上游 `h1` = `text-2xl` = 24），字重被 Preflight
+	// 重置为 inherit，也就是 400——**不是加粗**。
+	//
+	// ⚠️ 因此页标题那一句**不调 `.Bold()`**：标题的层次靠字号拉开，不靠重量
+	// （`TestPageTitlesAreNotBold` 钉着这一条）。
+	//
+	// ⚠️ **收藏夹那一页的大标题不走这个数**：它是 30（上游 `text-3xl`），
+	// 见 `CollectionTitle`——那一页有头图，标题是头图的一部分，不是页标题。
 	PageTitle = Size24
 	// CollectionTitle 是合集 / 收藏夹头图区的大标题（上游 `text-3xl`）。
 	CollectionTitle = Size30
-	// NotFoundTitle 是 404 那一页的大字。
+	// NotFoundTitle 是 404 那一页的大字：它是那一页上最大的一个字。
 	NotFoundTitle = Size28
-	// NewMusicTitle 是首页「新歌速递」那一块的大标题。
+	// NewMusicTitle 是「新歌速递」那一行标题的字号。
+	//
+	// 上游那一处是整页唯一的 `<h1>`（`new-music-top.tsx:178`），字号照
+	// DESIGN.md 的「页标题 24/400」：24 号、**不加粗**（权重由 Preflight 重置成
+	// inherit）。这一块要「立得住」靠的是字号，不是字重。
 	NewMusicTitle = Size24
-	// BrandName 是侧栏里那个品牌字。
+	// BrandName 是品牌字（应用名）的字号。上游 `text-2xl` = 24
+	// （DESIGN.md 的排版表：品牌字 = 24 / 粗体 / 主色）。
 	BrandName = Size24
-	// ListTitle 是列表 / 网格 / 队列那一行的歌名。
+	// PlayerTitle 是播放器（满屏 / 迷你播放器）那一页的歌名（上游 `h2` =
+	// `text-xl`）。
+	//
+	// ⚠️ **满屏和迷你播放器必须是同一个数**：它们是同一首歌的两个地方，
+	// 字号不一样的话，从迷你窗点开满屏会看见那行字忽然变大。
+	PlayerTitle = Size20
+	// ListTitle 是列表 / 网格 / 队列那一行的歌名（DESIGN.md 的「列表歌名 16」）。
 	ListTitle = Size16
-	// ListOwner 是列表那一行的 UP 名 / 副题。
+	// ListOwner 是列表那一行的 UP 名 / 副题（DESIGN.md 的「列表 UP 名 14」）。
 	ListOwner = Size14
-	// CollectionCopy 是合集头图区下面那几行说明（简介 / 类型 / 创建者）。
+	// CollectionCopy 是合集头图区下面那三行字（简介 / 类型 + 条数 / 创建者），
+	// 都是 `text-sm` = **14**（上游同一个文件 :53-113）。
 	CollectionCopy = Size14
-	// LyricsTranslation 是歌词的译文那一行。
+	// LyricsTranslation 是译文那一行的字号，抄 `index.tsx:344` 的 `text-sm`
+	// （0.875rem = 14px）。**是死的**，不跟着原词那个字号走——上游的
+	// `text-sm` 就是绝对值，12px 的歌词配 14px 的翻译是 Biu 自己的样子。
 	LyricsTranslation = Size14
-	// EmptyTitle 是空状态那一行「这里为什么空」。
+	// EmptyTitle 是空状态那一行「这里为什么空」的字号。
+	//
+	// ⚠️ **「正在加载」那一档不用这个数**（票 #178）：那一档画的是一枚转圈，
+	// 没有字。改之前那一档是一行同样大小的淡字，而它现在是一个图形。
 	EmptyTitle = Size15
-	// EmptyHint 是空状态第二句「怎么才能不空」。
+	// EmptyHint 是空状态第二句「怎么才能不空」的字号。
 	EmptyHint = Size12
-	// EmptyPageTitle 是页面级空状态（整页只有一句）那个标题。
+	// EmptyPageTitle 是上面那一页**页面名**的字号。
+	//
+	// 它比 `emptyCopy` 的标题大一号，因为它是**这一页叫什么**（一直都在），而
+	// `emptyCopy` 那一句是**这里为什么空**（只在空着的时候有）。两句混成一个字号的话，
+	// 用户分不出哪一句是导航、哪一句是状态。
 	EmptyPageTitle = Size20
-	// LyricValue 是歌词面板里那个数值。
+	// LyricValue 是浮层里那个数值的字号，抄两个 control 里
+	// `text-[10px] font-bold`。
 	LyricValue = Size10
-	// HeaderFont 是列表表头那一行的字。
+	// HeaderFont 是列表表头那一行的字。**14** 是上游那一行表头的数
+	// （`music-list-item/header.tsx:22` 的 `text-sm`）。
+	//
+	// ⚠️ 原来是 12：那是行里**次要文字**（UP 名 / 时长 / 播放量）的号。列名用着和
+	// 次要文字一样的号、一样的灰，竖着扫下去时它比下面那一列数字还弱——而数字列本来
+	// 就是靠表头才对得齐的。上游那边列名 14、次要文字 14、播放量 / 时长 12，列名站在
+	// 它们上面。
 	HeaderFont = Size14
-	// ToastFont 是提示条那一行的字。
+	// ToastFont 是卡片上那行字的字号（上游 `text-sm` = 14）。
+	//
+	// 字重是 `weightMedium`（500，上游的 `font-medium`）——此前是 13/400。
 	ToastFont = Size14
 	// FavPanelItem 是收藏夹浮层里那一项的字。
 	FavPanelItem = Size13
-	// RateMenuFont 是倍速菜单里那一项的字。
+	// RateMenuFont 是浮层里那七行的字号：**12**。
+	//
+	// 上游那一列的按钮是 `size="sm"`，HeroUI 那个档的字是 `text-tiny`（12）。
+	// 字大一号，44 宽就装不下「0.75x」了（见 playbar_rate.go 那段）。
 	RateMenuFont = Size12
-	// VolPercentFont 是音量浮层里那个百分比的字。
+	// VolPercentFont 是浮层底下那个百分比的字号：**12**。
+	//
+	// 上游是 `endContent` 的 `text-xs`（12，`music-volume/index.tsx:126-149`），
+	// 我们原来写的是 11（票 #220 / 报告 §3.9 对齐上游）。
 	VolPercentFont = Size12
 )

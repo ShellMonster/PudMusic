@@ -203,6 +203,44 @@ var Items = []Item{
 	// 那一条里（`Play` 组，靠后）——它连着那张表一起钉，而那才是它该在的地方。
 	// 别在这里再抄一份：台账里有两条说同一句话的，读的人得自己猜哪条才是活的。
 
+	{
+		// 满屏接上歌词之后（票 #236，UX 报告 F-08 + B3）。这一条盯的是**两枚
+		// 开关不再是死的**：以前「显示歌词」和「歌词字体颜色」只改偏好里的值，
+		// 画面上什么都不会变——而用户看到的是「按了没反应」，症状与「整个设置
+		// 面板坏了」一模一样。
+		//
+		// 而「没有歌词」必须**说出口**：满屏开着、这一首没有歌词的时候，界面
+		// 上一个字都不说的话，用户分不清是「这一首没有」还是「这一版没做」
+		// （UX 报告 B3：「没有」和「没显示出来」在画面上长得一样）。
+		Category: Play,
+		Spec:     "满屏播放器接上歌词：「显示歌词」与「歌词字体颜色」两枚开关真的管画面；这一首没有歌词时是空状态（「暂无歌词」+ 一枚「找歌词」）而不是整屏空白；歌词让开分集面板，不被它从中间切断；关掉歌词时封面回到整窗居中；界面藏起来之后歌词还在；滚过去之后滚进视野的歌词看得见（渐隐按容器上下沿，不按离唱到哪一句多远）",
+		Tests: []string{
+			"TestTheFullPlayerShowsTheLyrics",
+			"TestTurningOffTheLyricsHidesThem",
+			"TestTheLyricsColorSwitchChangesTheLyrics",
+			"TestTheFullPlayerSaysWhenThereAreNoLyrics",
+			"TestTheLyricsStayClearOfThePartsPanel",
+			"TestTheCoverIsCentredInTheWindowWhenTheLyricsAreOff",
+			"TestTheLyricsStayWhenTheInterfaceHides",
+			"TestAShortLyricDoesNotFadeItsLastLine",
+			"TestTheLyricsStayVisibleWhenScrolled",
+			"TestTheLyricsDoNotJumpWhenTheInterfaceHides",
+			"TestTheLyricsTakeTheWholeWidthWhenTheCoverIsOff",
+		},
+	},
+	{
+		// 满屏那个偏好面板的三样（UX 报告 B4）：**有标题**（用户不用靠里面的
+		// 开关名猜这是什么面板）、**能关**（除了点外面和 Esc，还有一枚看得见的
+		// 「×」）、**和齿轮对齐**（面板的左沿对着齿轮的图形，不对着那枚键的
+		// 点击区）。
+		Category: Play,
+		Spec:     "满屏偏好面板：有标题（一个字都不多一个字都不少地画着）、能关、面板左沿和齿轮对齐",
+		Tests: []string{
+			"TestTheFullSettingsPanelHasATitleAndCanBeClosed",
+			"TestTheFullSettingsPanelLinesUpWithTheGear",
+		},
+	},
+
 	// ── 假时钟 ─────────────────────────────────────────────────────────────
 	{
 		Category: FakeClock,
@@ -661,6 +699,96 @@ var Items = []Item{
 			"TestThePlatformDecoderIsUsedWhenItIsAvailable",
 			"TestOpenDecoderDoesNotFallBackWhenTheFileItselfIsBroken",
 			"TestOpenDecoderSaysBothWhenThePlatformIsUnavailableAndTheFileIsNotFLAC",
+		},
+	},
+	{
+		Category: Platform,
+		// Windows 上没有 AudioToolbox，**有损那一档（AAC）**靠的是 Media
+		// Foundation（`internal/service/audio/mfadec`）。这一条盯的是接线：
+		// `openDecoder` 在「平台解码器不可用」时问 Media Foundation，问成了
+		// 就用它，问不成**才**落回 `flacdec`（MP4 里的 FLAC）。
+		//
+		// ⚠️ 这一条是**注入**验的（`internal/service/audio/fallback_test.go` 把
+		// 「平台解码器」和「Media Foundation」都换成测试自己给的）：真 Windows
+		// 上 Media Foundation 恒可用，macOS 上恒不可用——不注入的话，这条分支
+		// 在**能跑测试的这个平台上**一条都走不到。
+		//
+		// 真机上那一条（逐样本比）是另一条证据（下面那条，RealOnly）。
+		Spec: "平台解码器不可用时走 Media Foundation 解 AAC；平台解码器可用时不绕道；Media Foundation 认不出来时仍落回 flacdec",
+		Tests: []string{
+			"TestOpenDecoderUsesMediaFoundationWhenThePlatformDecoderIsUnavailable",
+			"TestOpenDecoderDoesNotUseMediaFoundationWhenThePlatformDecoderIsAvailable",
+			"TestOpenDecoderFallsBackToFLACWhenMediaFoundationCannotDecodeTheFile",
+			// 认容器那一步：按头几个字节认，而且**不把 MP3 认成 ADTS**
+			//（两者都以 FF 开头，只断同步位的话 MP3 也认得出来）。
+			"TestTheContainerIsRecognizedByItsHeader",
+			// **Media Foundation 的真实原因要进最终那句错**：Windows 上明明有
+			// 系统解码器，只报「这台机器没有系统解码器」是句假话。
+			"TestOpenDecoderSaysWhyMediaFoundationCouldNotDecodeIt",
+		},
+	},
+	{
+		Category: Platform,
+		// 「B 站五档音质在两个平台上各能解几档」——这张表是**跑出来的**，
+		// 每一格都真的解了一遍。
+		//
+		// ⚠️ 它在两个平台上跑出的是**两张不同的表**：macOS 走 AudioToolbox，
+		// Windows 走 Media Foundation（FLAC 那一档落回 `flacdec`）。而 E-AC-3
+		// 那一档在 Windows 上是**划掉**的（授权限制 + Win11 24H2 移除了系统
+		// 自带的 AC-3 解码器），在 macOS 上 AudioToolbox 却解得了。
+		Spec: "B 站五档音质（64K / 128K / 192K / 杜比全景声 / Hi-Res 无损）在当前平台上逐档真解一遍，解不出来的把原因记下来",
+		Tests: []string{"TestTheBilibiliQualityCoverage"},
+	},
+	{
+		Category: Platform,
+		// **产品这一层**解出来的 AAC 和 ffmpeg 的参考**逐样本**比（不是 RMS）。
+		//
+		// 这一层多做了三件事，每一件都可能把对的解码结果弄坏：认容器、截到
+		// 容器说的呈现长度、丢掉编码器延迟。所以它要**单独**验一遍——spike 那
+		// 几条验的是解码器本身，碰不到这三件事。
+		//
+		// ⚠️ 它在 macOS 和 Windows 上**各跑一遍**，走的是两个不同的解码器
+		// （AudioToolbox / Media Foundation），比的是同一份参考。而两条线是
+		// **不一样**的：Windows（Media Foundation）用票面定的 0.02，macOS
+		// 用实测出来的 0.1（AudioToolbox 在同一份素材上是 0.070597）。理由写
+		// 在 `internal/service/audio/aac_reference_test.go` 顶上。
+		Spec: "产品这一层解出来的 AAC 与另一个解码器**逐样本**对得上（不是 RMS），帧数落在 176400~178176 之间，左右声道没调换；**两种容器都要比**（只比 .m4a 的话 ADTS 那一路解错了也会通过）",
+		Tests: []string{
+			"TestTheProductPathDecodesAACSampleForSample",
+			"TestTheProductPathDecodesADTSSampleForSample",
+			"TestTheProductPathKeepsTheChannelsInPlace",
+			// ADTS 那一路**自己拼出来的** AudioSpecificConfig，必须和 MP4
+			// 那一路从容器读到的**核心部分**一致（拼错了会变调）。
+			"TestTheADTSPathDerivesTheSameAudioSpecificConfig",
+		},
+	},
+	{
+		Category: Platform,
+		// 「开口到第一个采样 ≤ 200 毫秒」——**只量解码那一侧**，不含下载等待
+		// （真网上 B 站的音频 60 秒才 1.2 MB，光下载就够这个数了）。
+		//
+		// 这一条量的是**产品这一层**：拆容器（go-m4a）、认容器、开解码器、解
+		// 第一帧，全在里面。口径是五轮里**最快**的一次（和
+		// `quality_test.go` 的 `TestAAC320FromTheStreamIsAudibleFast` 一样：
+		// 测的是解码器的能力，不是调度），而最慢的那一次照样打出来。
+		Spec: "产品这一层开口到第一个采样不超过 200 毫秒（不含下载等待）",
+		Tests: []string{
+			"TestTheFirstFrameComesOutFast",
+		},
+	},
+	{
+		Category: Platform,
+		// **编码器延迟不能丢两遍**。AAC 的 MDCT 有重叠，解码器**自己吞掉**它
+		// 输出的第一帧（那一帧是「重叠不完整」的冷启动帧 = 编码器的预热），
+		// 所以解码器的输出**本来就从呈现音频的开头起**。而 MP4 的编辑列表里
+		// 还写着同一个 `media_time = 1024`——那是给「不知道解码器会吞它」的
+		// 解码器用的（AudioToolbox / ffmpeg 都照它剪）。
+		//
+		// 再按 `EncoderDelay` 丢一遍就是**丢了两遍**：凭空砍掉 1024 个真实
+		// 采样（23 毫秒），比容器说的呈现长度少 272 个采样，**判据①会因此红**。
+		Spec: "解码器的输出本来就从呈现音频开头起：产品层不再按 EncoderDelay 丢一遍",
+		Tests: []string{
+			"TestTheDecoderDoesNotDropTheEncoderDelayTwice",
 		},
 	},
 	{
@@ -1203,6 +1331,18 @@ var Items = []Item{
 			// 判据一路绿，用户点进去才撞上「不支持这个音频格式」。
 			"TestOggVorbisReallyDecodes",
 			"TestTheOggDurationIsProbedFromItsOwnContainer",
+			// MP3 这一边：换了解码器之后，「放得了」这件事要重新验一遍——
+			// 而且验的是**三件具体的事**，不是「注册表里有它」。
+			//
+			// ⚠️ 少了这几条，「MPEG-2.5 放不了」「编码器延迟留在歌的开头」
+			// 「打开一个 MP3 要把整个文件读一遍」这三件事**都不会有人知道**：
+			// 它们全都不报错，只是悄悄不对。
+			"TestMPEG25ReallyDecodes",
+			"TestTheLameGaplessTrimIsApplied",
+			"TestTheGaplessDecodeStartsWhereTheSourceStarts",
+			"TestOpeningAnMp3DoesNotReadTheWholeFile",
+			"TestTheMp3DurationIsProbedFromItsOwnContainer",
+			"TestTheMp3DecoderIsOurs",
 		},
 	},
 	{
@@ -2472,6 +2612,40 @@ var Items = []Item{
 			"TestAnEmptySearchGoesBackToTheIdleState",
 			// 满屏顶栏那一组的构图（齿轮紧跟歌名）。
 			"TestTheFullPlayerGearSitsRightAfterTheTitle",
+		},
+	},
+	{
+		// 🔴 **这一族的错法也全是「静默」的**：控件列参差、登录键是一块实心
+		// 主色的大方块、标题是粗的——**没有一样会报错**，界面只是「不精致」。
+		Category: Platform,
+		// 票 #235（审计 F-04 / F-05 / F-07）：视觉一致性第二批（轻量一批）。
+		//
+		// ⚠️ **控件列那条说的是文本缩放为 1 的时候**：缩放 > 1 时「主题」「窗口
+		// 关闭」那两行会跟着字号变宽（它们的字要放得下），那一列的左边缘于是有
+		// 两条线——这不是回归，是那一行字要放得下（见 `settings_page.go` 的
+		// `settingsControlW` 与 DESIGN.md §三）。
+		Spec: "设置页的控件列有**一条共同的左边缘**（**文本缩放为 1 的时候**）：基准宽度 300，每一行的控件都从同一条线上开始并填满那一格（此前左边缘落在 762 / 801 / 822 / 942 四个位置，预览那三张右边空 16、色卡那两块右边空 91）；顶栏最右那枚登录键**不是实心主色的方块**——它的墨迹和紧挨着它左边那几枚线框图标同一档（此前是相邻图标的 5.4 倍，整条顶栏最响的元素）；**粗体只出现在刻度写明的那几处**（页标题 / 分组标题 / 弹窗标题 / 空状态标题 / 列表里的名字一律 400；粗体只剩品牌字、收藏夹头图区那个大标题、404 那个数字、歌词浮层里那两个读数，和正在唱的那一行歌词——上游的 `font-extrabold`）",
+		Tests: []string{
+			// 控件列的左边缘是一条线（每一个控件都从同一条线上开始）。
+			"TestTheSettingsControlsShareOneBaseline",
+			// 那一列里的控件填满那一格（色卡两块、预览三张、下拉本身）。
+			"TestTheSettingsControlColumnIsFilled",
+			// 顶栏那枚登录键的墨迹和相邻图标同一档（深浅两套）。
+			"TestTheLoginKeyIsNotASolidBlock",
+			// 粗体只在刻度写明的那几处（AST：**递归扫整个 internal/ui**，找四样
+			// 东西——`.Bold()`、`FontWeight(字面量 ≥ 700)`、**字面量 ≥ 700 传给
+			// 一个字重参数**（调用点）、**字重常量 ≥ 700**）。
+			// ⚠️ 后两样是评审补上的：更新弹窗那一行 13/700 的字面量在**调用点**，
+			// 而正在唱的那一行歌词 800 藏在**常量**里——只认 `FontWeight(700)`
+			// 的那条判据这两处一个都看不见。
+			"TestOnlyTheScaleIsBold",
+			// **页标题**那几个字号的字重是 400（AST：`pageTitleSize` 与
+			// `emptyPageTitle`）。
+			// ⚠️ **播放器那一页的歌名（`playerTitleSize`）不在这条里**：那是**歌名**
+			// 不是页标题，而票 #169 的 `TestTheFullPlayerTitleIsNotBold` 钉的
+			// 就是「满屏那一句**要写** `.FontWeight(400)`」——加进去会把那一处判红。
+			// 那一处由上一条（全局白名单）盖着。
+			"TestPageTitlesAreNotBold",
 		},
 	},
 }

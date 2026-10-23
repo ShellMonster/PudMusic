@@ -208,10 +208,15 @@ func TestTheCoverFliesFromTheRowIntoTheFullScreenBackground(t *testing.T) {
 		t.Errorf("满屏的封面是 %vx%v，Biu 的是 %dx%d（1200×800 的窗口）",
 			end.W, end.H, biuFullCoverW, biuFullCoverH)
 	}
-	// 居中：左右各差不超过一像素。
-	midX := float32(fullWinW) / 2
+	// 居中：它在**左边那一栏**里居中（票 #236：歌词开着的时候满屏分两栏，
+	// 右边那一栏让给歌词，见 `viewFullStage`）。
+	//
+	// ⚠️ **0.42 写死在这儿**：布局和期望都用生产代码那个常量的话，常量一改
+	// 两边一起变，测试就发现不了了（这个文件的规矩）。
+	const wantCoverColRatio = 0.42
+	midX := float32(fullWinW) * wantCoverColRatio / 2
 	if d := abs32(end.X + end.W/2 - midX); d > 1 {
-		t.Errorf("满屏封面的中心在 x=%v，窗口中线是 %v", end.X+end.W/2, midX)
+		t.Errorf("满屏封面的中心在 x=%v，左边那一栏的中线是 %v", end.X+end.W/2, midX)
 	}
 }
 
@@ -289,6 +294,11 @@ func TestTheInterfaceHidesAfterThreeSeconds(t *testing.T) {
 // 按钮当然还有像素，而那不是「没藏起来」。
 func TestTheHiddenInterfaceIsReallyGoneFromTheScreen(t *testing.T) {
 	s, tt, fc := fullTester(t)
+	// ⚠️ **歌词是内容，不是界面**：满屏接上歌词之后（票 #236），界面藏起来
+	// 歌词**还在**（见 `TestTheLyricsStayWhenTheInterfaceHides`）——而这一条量的是
+	// 「界面上还有没有亮像素」，歌词的字也在那儿，会把量出来的东西搅浑。
+	// 所以这一条把歌词关掉，量的就是界面本身。
+	fullNoLyricsPrefs(t, s)
 	openFull(t, tt)
 	tt.Move(600, 400)
 	tt.Frame()

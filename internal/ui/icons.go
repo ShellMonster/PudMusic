@@ -577,6 +577,7 @@ func iconKey(c *ui.Context, name, label string, font float32, disabled bool) ui.
 // ⚠️ 顶栏那个**登录**键原来也有一份实心主色的按钮（`iconButtonPrimary`），
 // 票 #241 把它去掉了——**那个函数已经删了**，别再加回来：顶栏那一排的视觉
 // 重量由图标说话，理由见 `login.go` 的 `viewLoginEntry`。
+// **现在整条顶栏没有一枚实心底色的方块**——这一枚也不能例外。
 //
 // 判据在 `playbar_layout_test.go` 的 `TestThePlayKeyIsBigEnoughToHit`：
 // 那一枚现在量的是「播放条底色上那一片墨迹」，不再是「主色底上那一片墨迹」。

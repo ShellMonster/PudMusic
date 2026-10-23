@@ -409,6 +409,13 @@ type Shell struct {
 	// 一句，主窗口跟着歌往前走，这才是对的。
 	lyric lyricsView
 
+	// fullLyric 是**满屏播放器那一屏**的歌词区自己那一摊。
+	//
+	// ⚠️ **不是 `lyric` 那一份**：同一首歌，迷你播放器那一页和满屏这一屏都画
+	// 它的歌词，而「滚到了哪儿」是各人各眼的事——共用一份的话，在满屏里翻一下
+	// 歌词，迷你播放器那一页也跟着被拽回去（反过来也一样）。
+	fullLyric lyricsView
+
 	// lyricSearch 是「搜索歌词」和「歌词预览」那两个弹窗自己那一摊：搜索框里
 	// 正在敲的字、待发的那一次搜索、切在哪个源、候选表。见 lyricssearch.go。
 	//
@@ -1501,8 +1508,8 @@ func (s *Shell) viewCrash(c *ui.Context) {
 		if v := errorArt; v != nil {
 			ui.Image(c, v).Height(errorArtHeight)
 		}
-		ui.Text(c, "界面出错了，播放器已经停在这一页").FontSize(scale.Font(c, scale.Size18)).Bold()
-
+		// ⚠️ **字重不写**（400）：标题那一档是 400（DESIGN.md §二）。
+		ui.Text(c, "界面出错了，播放器已经停在这一页").FontSize(scale.Font(c, scale.Size18))
 		// 「出错在哪一步」这一块：三行，各自说清一件事。
 		ui.Column(c).Key("crash-where").Gap(space.Px2).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "出错的地方："+cr.where).FontSize(scale.Font(c, scale.Size13)).TextColor(t.Text)

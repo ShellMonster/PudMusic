@@ -86,7 +86,10 @@ var Extensions = []string{
 //
 // 现在这一份每一项的来历：
 //
-//   - WAV / MP3：MyGo 自带（`mygo/audio`、`mygo/audio/mp3`）
+//   - WAV：MyGo 自带（`mygo/audio`）
+//   - MP3：`internal/service/audio/mp3dec`（本仓库自己解，vendor 进来的
+//     `tphakala/go-mp3`；真解一次的判据在
+//     `internal/service/audio/mp3_test.go`）
 //   - 裸 FLAC：`internal/service/audio/flacdec`
 //   - MP4 / AAC：系统解码器（macOS 的 AudioToolbox）
 //   - AIFF / AIFC：`internal/service/audio/aiff.go`

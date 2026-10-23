@@ -236,8 +236,8 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 		// 上游这一栏的标题就是「用户动态」（`author-list.tsx:126`），左右
 		// 再缩 16（`px-4`）；这一栏自己已经有 8 的横向内边距，所以这里
 		// 只再补 8。
-		ui.Text(c, "用户动态").FontSize(scale.Font(c, scale.Size14)).Bold().PaddingX(space.Px8)
-
+		// ⚠️ **字重不写**（400）：这一栏的标题是 14/400（DESIGN.md §二）。
+		ui.Text(c, "用户动态").FontSize(scale.Font(c, scale.Size14)).PaddingX(space.Px8)
 		if !s.app.LoggedIn() {
 			// 没登录**不假装有内容**：作者栏列的是「我关注的人」，没有登录态
 			// 就没有这个列表。给一句能指路的，比一个空列表有用。

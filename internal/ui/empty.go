@@ -282,7 +282,9 @@ func (s *Shell) viewPageEmptyWithReason(c *ui.Context, key, title string, e empt
 	t := c.Theme()
 	ui.Column(c).Key(key).Grow(1).Center().Gap(emptyGap).Padding(emptyPagePad, space.Px28).Children(func() {
 		emptyArt(c, e.Icon)
-		ui.Text(c, title).FontSize(scale.Font(c, scale.EmptyPageTitle)).Bold()
+		// ⚠️ **字重不写**（400）：这一句是「这一页叫什么」，页标题那一档是
+		// 400（DESIGN.md §二），层次靠字号拉开，不靠重量。
+		ui.Text(c, title).FontSize(scale.Font(c, scale.EmptyPageTitle))
 		if e.Title != "" {
 			emptyCopy(c, e)
 			ui.Text(c, biliNotMounted).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)

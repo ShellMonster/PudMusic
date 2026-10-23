@@ -100,16 +100,10 @@ func ascFromADTS(info ADTSInfo) ([]byte, error) {
 //
 // 两种来源：.m4a（go-m4a 拆出来的裸帧 + AudioSpecificConfig）和 .aac
 // （带 ADTS 头的帧）。
-type frameSource struct {
-	// payloadType 是 `MF_MT_AAC_PAYLOAD_TYPE`。
-	payloadType uint32
-	// rate/chans 是核心码流的采样率和声道数。
-	rate, chans int
-	// asc 是 AudioSpecificConfig（给解码器用）。
-	asc []byte
-	// next 拿下一帧。
-	next func() ([]byte, error)
-}
+//
+// ⚠️ **这个结构体定义在 `source.go` 里**——那边还带着「跳位置」和「长度」
+// 要用的那几个字段（`seek` / `total` / `delay` / `unitLen`）。这里只留一句
+// 说明，免得两处定义各说各话。
 
 // inputVariant 是一种输入配置。
 type inputVariant struct {

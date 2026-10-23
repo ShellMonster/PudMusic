@@ -16,13 +16,18 @@ name: Windows AAC spike
 #   - TestSpikeTheChannelsAreNotSwapped         —— 左右声道没调换
 #   - TestSpikeTheCOMApartmentSurvivesLoad      —— COM apartment 在负载下反复跑
 #
+# **外加**产品那一层（`./internal/service/audio/...`）：字节从 `openDecoder`
+# 进、采样从 MyGo 的 `audio.Decoder` 接口出——认容器、截到容器说的呈现长度、
+# 丢掉编码器延迟，这三件事 spike 那几条碰不到。它顺带产出「B 站五档 ×
+# Windows」那张覆盖表。
+#
 # 答案全在 `t.Logf` 里，所以**必须 `-v`**，而且日志要存成 artifact——
 # 报告里引用的那些数字就是从这儿来的。
 
 on:
   pull_request:
     paths:
-      - "internal/service/audio/mfadec/**"
+      - "internal/service/audio/**"
       - "internal/licensing/**"
       - "resources/licenses/**"
       - ".github/workflows/windows-aac-spike.yml"
@@ -74,6 +79,21 @@ jobs:
             Tee-Object -FilePath apartment.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      # **产品这一层**：字节从 `openDecoder` 进（MyGo 的格式表 → extaf 报
+      # 「这台机器没有系统解码器」→ 落回 Media Foundation），采样从 MyGo 的
+      # `audio.Decoder` 接口出。
+      #
+      # 这一层多做了三件事，每一件都可能把对的解码结果弄坏：认容器、截到容器
+      # 说的呈现长度、丢掉编码器延迟。所以它要**单独**跑一遍——spike 那几条
+      # 验的是解码器本身，碰不到这三件事。
+      #
+      # 它顺带产出「B 站五档 × Windows」那张覆盖表（`TestTheBilibiliQualityCoverage`）。
+      - name: 跑产品这一层的解码测试
+        run: |
+          go test -v -count=1 -timeout 20m ./internal/service/audio/... 2>&1 |
+            Tee-Object -FilePath product.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       # 报告里引用的数字就在这两个日志里，所以**失败也要存**。
       - name: 存下 spike 的输出
         if: always()
@@ -83,6 +103,7 @@ jobs:
           path: |
             spike.log
             apartment.log
+            product.log
           if-no-files-found: warn
 
       # 把真机数字贴成一条 PR 评论。
@@ -97,7 +118,7 @@ jobs:
           script: |
             const fs = require('fs');
             let body = '';
-            for (const f of ['spike.log', 'apartment.log']) {
+            for (const f of ['spike.log', 'apartment.log', 'product.log']) {
               if (!fs.existsSync(f)) continue;
               body += `\n### ${f}\n\n\`\`\`\n${fs.readFileSync(f, 'utf8').slice(0, 40000)}\n\`\`\`\n`;
             }

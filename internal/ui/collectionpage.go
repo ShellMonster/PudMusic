@@ -563,6 +563,8 @@ const (
 	collectionCoverW = 200
 	collectionCoverH = 168
 
+	// collectionHeadGap 是那三行字之间的行距：`space-y-4` = **16**
+	// （上游同一个文件 :53-113）。
 	collectionHeadGap = space.Px16
 
 	// 创建者是 `User` 组件那一枚圆头像。票面给的是 **24**。

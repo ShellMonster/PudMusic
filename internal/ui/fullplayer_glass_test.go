@@ -198,9 +198,9 @@ func TestTheFullPlayerContentIsStillClickableThroughTheGlass(t *testing.T) {
 // 12px 的时间标签（2.85:1）一起归可及性那一票（issue #139 的「增加对比度」）。
 // 把门槛直接提到 4.5 会让这条红——而红的那一处不在这一票的范围里。
 //
-// ⚠️ 满屏这一屏不画歌词：歌词区在迷你播放器那一页（`nowplaying.go`）。设置面板
-// 里「显示歌词」那一项存的是同一个改动，但这一屏没有歌词可显示，所以这一条量
-// 的是现有的那些字。
+// ⚠️ 这一条量的是**歌名**那两个字：满屏上歌词是**另一块字**（右边那一列），
+// 而它们压在的是同一层糊过的封面上——歌词那一列的对比度是它自己那一条
+// （见 `fullplayer_lyrics.go` 的 `fullLyricColor`）。
 func TestTheTextOverTheBlurredBackgroundIsStillReadable(t *testing.T) {
 	// 纯白的封面：底色最亮的那一档。
 	s, tt := fullTesterWithCoverPNG(t, whitePNG(t, 1200, 1200))

@@ -21,10 +21,16 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/audio/flacdec"
 	mygoaudio "github.com/egoist/mygo/audio"
 
-	// MP3 由 MyGo 自带，这里只需要它的注册副作用。
-	_ "github.com/egoist/mygo/audio/mp3"
+	// MP3 是本仓库自己解的（`internal/service/audio/mp3dec`，里面 vendor 的是
+	// `tphakala/go-mp3`，MIT）：补 MPEG-2.5、补 LAME gapless、不再全文件扫帧头。
+	// 注册写在那个包的 `init()` 里，所以这里只需要它的注册副作用。
+	//
+	// ⚠️ **别改回 `mygo/audio/mp3`**：MyGo 的注册表是「按注册顺序找第一条
+	// 命中的」，两个 mp3 解码器都注册的话，认出哪一个取决于 init 顺序——
+	// 而那个顺序不是能靠读代码定下来的东西。撤掉这一行是刻意的。
+	_ "github.com/ShellMonster/Biu_Go/internal/service/audio/mp3dec"
 
-	// Ogg Vorbis 同理：`mygo/audio/vorbis` 靠 init 把 `OggS` 注册进 MyGo 的
+	// Ogg Vorbis：`mygo/audio/vorbis` 靠 init 把 `OggS` 注册进 MyGo 的
 	// 格式表，解码器是 `github.com/jfreymuth/oggvorbis`（MIT）。
 	//
 	// ⚠️ **这一行不是可有可无的**：少了它 `.ogg` 在界面上照样显示「可放」
@@ -128,30 +134,38 @@ func OpenStream(r CloserReadSeeker) (*Player, error) {
 }
 
 // openDecoder 是**唯一**认容器的地方：`Open`（本地文件）和 `OpenStream`
-//（在线流）都调它。返回值第二项是认出来的容器名，只作记录和给测试看。
+// （在线流）都调它。返回值第二项是认出来的容器名，只作记录和给测试看。
 //
-// 三步，顺序不能反过来：
+// 四步，顺序不能反过来：
 //
 //  1. MyGo 的格式表（`containers.go` 注册的 `????ftyp` / `????styp` / `\xff??`，
 //     加上 MP3 / WAV / AIFF 各自包的注册副作用）。
 //  2. 认不出来（`ErrFormat`）就试 `flacdec`——那是**本地裸 `.flac` 文件**的
 //     路子，而 MyGo 的表是对字面量做匹配的，没法给变长的 magic（`fLaC` +
 //     STREAMINFO）注册一条。
-//  3. **平台解码器不可用**（`extaf.ErrUnsupported`）也试 `flacdec`——
-//     Windows 上没有 AudioToolbox，而 `flacdec` 能解 MP4 里的 FLAC
-//     （`flacdec/mp4.go`：B 站无损流的那种形状）。不落回的话，Windows 上
-//     B 站在线音频**一档都放不出来**：MP4 家族先被格式表认成 mp4，交给
-//     `extaf` 拿到 `ErrUnsupported`，而 `ErrUnsupported` 不是 `ErrFormat`，
-//     于是这里就直接返回错误了。
+//  3. **平台解码器不可用**（`extaf.ErrUnsupported`）就试 **Media
+//     Foundation**（`mfadec`）——那是 Windows 自带的 AAC 解码器，B 站有损流
+//     （`.m4a` / `.m4s`）和本地 `.aac` 都是它解的。
+//  4. 还是不行就试 `flacdec`——它解 MP4 里的 FLAC（`flacdec/mp4.go`：B 站
+//     无损流的那种形状）。不落回的话，Windows 上 B 站在线音频**一档都放不出
+//     来**：MP4 家族先被格式表认成 mp4，交给 `extaf` 拿到 `ErrUnsupported`，
+//     而 `ErrUnsupported` 不是 `ErrFormat`，于是这里就直接返回错误了。
+//
+// ⚠️ **第 3 步和第 4 步的顺序是有讲究的**：Media Foundation 只解 AAC，
+// `flacdec` 只解 FLAC，两边认的是**不同的容器内容**，所以谁先谁后都行。
+// 但**落回的前提是「这个平台没有解码器」**：`extaf` 报别的错（文件坏了、
+// AudioToolbox 打不开）时**不落回**——那是「这个文件解不了」，落回只会把它
+// 说成「不像 FLAC」，把真错盖掉——而真错才是用户该看到的那句。
 //
 // ⚠️ **B 站在线的无损流不走第 2 步**（实测，2026-10-23，issue #252）：它的头
 // 16 字节是 `ftyp` 盒（MP4 里的 FLAC），不是裸 FLAC 的 `fLaC`，所以在第 1 步
 // 就被 MyGo 的表认成 MP4 了。第 2 步管的是**本地裸 `.flac` 文件**。素材见
 // `internal/service/bili/testdata/lossless/`。
 //
-// ⚠️ **只有「平台没有解码器」才落回。** `extaf` 报别的错（文件坏了、
-// AudioToolbox 打不开）时**不落回**：那是「这个文件解不了」，落回只会把它
-// 说成「不像 FLAC」，把真错盖掉——而真错才是用户该看到的那句。
+// ⚠️ **第 3 步会读整个 MP4**：`mfadec` 用 `go-m4a` 拆帧，而 `go-m4a` 要先知道
+// 这个流有多长、还要把每一个顶层盒子走一遍——所以在 Windows 上打开一条
+// **在线**流会等它**整个下完**才开口（`flacdec` 的 MP4 那条路也一样）。
+// macOS 上没有这个问题：那条路走 AudioToolbox，它是按需读的。
 //
 // 反过来的话，MP4 里的 FLAC（头几个字节是 `ftyp`）会被 flacdec 当裸 FLAC 处理。
 func openDecoder(r io.ReadSeeker) (mygoaudio.Decoder, string, error) {
@@ -162,15 +176,41 @@ func openDecoder(r io.ReadSeeker) (mygoaudio.Decoder, string, error) {
 	if !errors.Is(err, mygoaudio.ErrFormat) && !errors.Is(err, extaf.ErrUnsupported) {
 		return nil, "", err
 	}
+	// mfErr 是 Media Foundation 那边的真实原因。
+	//
+	// ⚠️ **它必须进最终那句错**：Windows 上**有**系统解码器（Media
+	// Foundation），只是它解不了这一个文件（比如 E-AC-3、比如 ALAC）。只报
+	// 「这台机器没有系统解码器」的话，用户看到的是一句**假话**——而真实
+	// 原因（「这个 MP4 里不是 AAC」）才是他能拿去做决定的。
+	var mfErr error
+	if errors.Is(err, extaf.ErrUnsupported) {
+		// 这台机器没有 AudioToolbox。Windows 上它有 Media Foundation，
+		// 它解 AAC（B 站有损流、本地 `.m4a`、裸 `.aac`）。
+		//
+		// ⚠️ 认不出来的时候**不要往下走**：Media Foundation 认不出的 MP4
+		// （比如里面装的是 FLAC）应该交给 `flacdec`，而它和「这不是 AAC」
+		// 是两回事——所以这里只把「成了」当成功。
+		md, merr := mediaFoundationDecoderOpen(r)
+		if merr == nil {
+			return md, "aac", nil
+		}
+		mfErr = merr
+	}
 	fd, ferr := flacdec.Open(r)
 	if ferr != nil {
 		// 两个都不认：报告**第一个**错。那是「走完全套格式表都没认出来」，
 		// 比 flacdec 的那句「不像 FLAC」有用得多——后者会让人以为
 		// 文件损坏，而它可能只是一段还没下到的字节。
 		if errors.Is(err, extaf.ErrUnsupported) {
-			// ⚠️ 这一条要**两句**一起报：「这台机器没有系统解码器」和
-			// 「这也不像 FLAC」。只报一句的话，界面上会出现「文件坏了」这种
-			// **其实不是**的提示——那会把人引到完全错的方向上去查。
+			// ⚠️ 这一条要**三句**一起报：没有 AudioToolbox、Media Foundation
+			// 的真实原因、这也不像 FLAC。
+			//
+			// 只报一句的话，界面上会出现「文件坏了」这种**其实不是**的提示——
+			// 而把 Media Foundation 的原因漏掉更糟：Windows 上明明有系统
+			// 解码器，界面上却说「没有」。
+			if mfErr != nil {
+				return nil, "", fmt.Errorf("%w: %w: %w", extaf.ErrUnsupported, mfErr, ferr)
+			}
 			return nil, "", fmt.Errorf("%w: %w", extaf.ErrUnsupported, ferr)
 		}
 		return nil, "", err

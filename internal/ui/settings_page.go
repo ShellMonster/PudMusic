@@ -114,15 +114,31 @@ const (
 // settingsTabNames 是四个 Tab 上的字。照 Biu `index.tsx:125-137` 的 title。
 var settingsTabNames = []string{"常规设置", "菜单设置", "快捷键设置", "代理设置"}
 
-// 控件的宽度。Biu 那一页右边固定 360px（`w-[360px]`），三档切换占 300。
+// 控件列的宽度。设置页每一行是「左边标题 + 一句说明，右边控件」，**右边那一列
+// 全部按同一个基准宽度排**（票 #235 的 F-04）。
 //
 // 300 是量出来的，不是挑的：主题那三个按钮里「跟随系统」四个汉字最宽，按钮
 // 自己还要留内边距。窄了它会被画成「跟随…」——用户看见半个词，第一反应是
 // 这个应用坏了，而不是「这个按钮窄了一点」。
+//
+// # 这一列因此有**一条共同的左边缘**
+//
+// 此前那一列的左边缘落在四个位置（762 / 801 / 822 / 942），而其中两个控件
+// 还没填满自己的盒子——那一列看上去是参差的（UI 报告 §4 的 F-04）。
+// 现在每一行的控件都占**同样宽**的一格，右边齐在内容那一段的右沿，
+// 左边也就齐在同一条线上（内容右沿往左 `settingsControlW`）。
+//
+// ⚠️ **开关是那一列里唯一比基准窄的控件**（它天生就那么宽），它靠右排在那
+// 一格的右端——开关在表单里本来就该贴着行尾。**其余的控件都正好是基准宽**
+// （下拉也是：`selectWidth` 就是 `settingsControlW`），所以整列的左边缘仍然
+// 是一条线。
+//
+// ⚠️ **文本缩放大于 1 的时候，「主题」「窗口关闭」那两行会跟着变宽**
+// （它们里面的字要放得下，见 pickTheme 的注释）。那是这一列唯一的不齐，
+// 基准宽度说的是**缩放为 1 的时候**。
 const (
-	segWidth       = 300
-	radiusWidth    = 360
-	radiusReadoutW = 48
+	settingsControlW = 300
+	radiusReadoutW   = 48
 )
 
 // settingsContentPad 是设置的内容那一段左右与下边的内边距。
@@ -143,9 +159,15 @@ const settingsContentPad = space.Px28
 // 主 Tab、内容）那一层。两处此前分别是 18 和 16，各说各的。
 const settingsGroupGap = space.SettingsGroupGap
 
-// selectWidth 是下拉框多宽。Biu 是 `w-[180px]`（`system-settings.tsx:164`），
-// 代理那一页是 `w-[240px]`（`proxy-settings.tsx:43`）。
-const selectWidth = 180
+// selectWidth 是设置页那两个下拉框多宽。
+//
+// ⚠️ **它就是控件列的基准宽度**（`settingsControlW`）：这一列里别的控件都是
+// 300 宽，下拉要是还按上游那个 180（`system-settings.tsx:164`），这一列的左
+// 边缘就又落在两个位置上了——而那正是票 #235 要消灭的那件事。
+//
+// ⚠️ 代理那一页的下拉是另一个数（`proxySelectWidth`，240）：那一页是**两列**
+// 布局，不在这一列里。
+const selectWidth = settingsControlW
 
 // closeWindowOptions 是窗口关闭那两档，顺序就是从左到右的顺序。
 //
@@ -451,7 +473,12 @@ func (s *Shell) pickTheme(c *ui.Context, st app.Settings, ro bool) {
 	t := c.Theme()
 	// ⚠️ 宽度跟着字号缩放走：1.4 倍时四个字要 106 像素，三个各 100 的格子
 	// 装不下，选中项会被裁成「跟随系…」（评审在 1.4 倍下量到过）。
-	ui.Row(c).Key("setting:themeMode").Width(scale.Font(c, segWidth)).Gap(space.Px4).Children(func() {
+	// ⚠️ **那个 `Label("主题模式")` 是给这一排三个按钮起个组名**：读屏软件要
+	// 知道这三个键是一组（互斥的三档），而 `Tester.Find` 也靠它量这一排的盒子
+	// ——控件列的左边是不是一条线，就靠它断（见 `TestTheSettingsControlsShare
+	// OneBaseline`）。
+	ui.Row(c).Key("setting:themeMode").Width(scale.Font(c, settingsControlW)).
+		Label("主题模式").Gap(space.Px4).Children(func() {
 		for _, opt := range themeModes {
 			b := flatButton(c, opt.label).Grow(1).Radius(t.Radius).Disabled(ro)
 			if opt.mode == st.ThemeMode {
@@ -495,7 +522,7 @@ func (s *Shell) pickSelected(c *ui.Context, b ui.Element, ro bool) ui.Element {
 // orientation="horizontal"），我们用同一排按钮，选中的那个上主色。
 func (s *Shell) pickCloseWindow(c *ui.Context, st app.Settings, ro bool) {
 	t := c.Theme()
-	ui.Row(c).Key("setting:closeWindowOption").Width(scale.Font(c, segWidth)).Gap(space.Px4).Children(func() {
+	ui.Row(c).Key("setting:closeWindowOption").Width(scale.Font(c, settingsControlW)).Gap(space.Px4).Children(func() {
 		for _, opt := range closeWindowOptions {
 			b := flatButton(c, opt.label).Grow(1).Radius(t.Radius).Disabled(ro)
 			if opt.value == st.CloseWindowOption {

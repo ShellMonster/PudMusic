@@ -467,8 +467,10 @@ func (s *Shell) viewFollowPane(c *ui.Context, f *followPage) {
 		// ⚠️ **失败也要说失败**：`tagErr` 有值的时候下面那一支已经把分组列表
 		// 换成了错误提示，而标题还在——用户点「重试」时看得出自己重试的是
 		// 哪一摊。
-		ui.Text(c, followPaneTitle(f)).FontSize(scale.Font(c, scale.Size14)).Bold().PaddingX(space.Px6)
-
+		// ⚠️ **字重不许写**：这一句是「这一栏叫什么」，不是页标题，字重由框架的
+		// 默认档（400）给。DESIGN.md §二「正文 / 说明 14 / 400」——层次靠字号
+		// 拉开，不靠重量。
+		ui.Text(c, followPaneTitle(f)).FontSize(scale.Font(c, scale.Size14)).PaddingX(space.Px6)
 		// ⚠️ **「拉失败了」必须排在「空」前面**：反过来的话第一页失败时左边
 		// 是一片「还没有分组」，而 `tagStarted` 仍是 false、`tagErr` 非 nil，
 		// 切走再切回来也不会重拉——用户会以为他真的一个分组都没建过。
