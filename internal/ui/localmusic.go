@@ -516,7 +516,6 @@ func (p *localPage) cardsTop() { p.cards.ScrollTo(0, ui.Start) }
 
 // viewHead 是标题那一行：标题、展示样式切换、添加目录。
 func (p *localPage) viewHead(c *ui.Context) {
-	t := c.Theme()
 	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(8).Children(func() {
 		ui.Text(c, "本地音乐").FontSize(scale.Font(c, pageTitleSize))
 
@@ -525,18 +524,25 @@ func (p *localPage) viewHead(c *ui.Context) {
 		ui.Segmented(c, &p.style, localStyles[:]...)
 
 		ui.Spacer(c)
-		// ⚠️ **这一枚是「看得见的入口」**：它原来是一行小字，而空状态那句话
-		// 让用户去点它——按提示找过去，扫到右上角只看见一行说明文字，**很可能
-		// 以为那不是能点的**（报告 C2：用户于是以为要去顶栏找「打开文件」，而
-		// 那是另一件事）。
+		// ⚠️ **它旁边那一枚文件夹加的图标**：上游那一枚是「图标 + 文字」的
+		// flat 键（`local-music/index.tsx:189`），而 `flat.Button` 只接管文字
+		// ——图标一直没画（那一票要的是「把描边和常驻底去掉」，不是重画按钮）。
 		//
-		// 所以它现在是一枚**描边按钮**：有边框、有底、指针压上去有反馈。
+		// 于是它在画面上就是**一行小字**，而空状态那句话让用户去点它：按提示
+		// 找过去，扫到右上角只看见一行说明文字，**很可能以为那不是能点的**
+		//（报告 C2：用户于是以为要去顶栏找「打开文件」，而那是另一件事）。
 		//
-		// ⚠️ **描边是这一处破例**：全应用的次级按钮都是扁平的（无描边、无常驻
-		// 底，见 flatbutton.go 的文件头），而扁平那一套靠的是「一堆按钮排在一
-		// 起」才看得出是按钮——**孤零零摆在页头的这一枚不行**。
-		addDir := flatButton(c, "添加目录").
-			Radius(t.Radius).Border(1, t.Border).Background(t.Surface)
+		// 所以这里把上游那一枚图标补上——**同一个词、同一个动作**，而它一眼就
+		// 看得出是个入口。
+		//
+		// ⚠️ **它仍然是扁平的**（无描边、无常驻底）：那是全应用次级按钮的
+		// 规矩（`flatbutton.go` 的文件头），`flatspread_test.go` 逐页钉着。
+		// 「看得见」靠的是那枚图标和空状态里那枚实心主色按钮，不是给它描一圈边。
+		addDir := flatButton(c, "")
+		addDir.Children(func() {
+			ui.Icon(c, icon(iconFolderAdd)).FontSize(14)
+			ui.Text(c, "添加目录")
+		})
 		if addDir.Clicked() {
 			p.addDirectory()
 		}

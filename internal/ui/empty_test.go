@@ -208,21 +208,45 @@ func TestSearchingShowsTheNoResultsState(t *testing.T) {
 //
 // 只查元素框发现不了这一类：元素在、位置对、文字也在，可屏幕上什么也没有。
 // 这里读像素——空状态那块和窗口底色必须不是一个颜色。
+//
+// ⚠️ **下载记录页有两种空，两种都画**：没有下载目录（`noDownloadDir`）和
+// 真的没下载过（`noDownloads`）。少画一种，那一种在真机上就是一片白。
 func TestEmptyStateIsPaintedNotBlank(t *testing.T) {
-	s, tt := newShell(t)
-	s.navigate("/download-list")
-	tt.Frame()
+	for _, c := range []struct {
+		what string
+		dir  bool
+	}{
+		{"没有下载目录", false},
+		{"没有下载记录", true},
+	} {
+		t.Run(c.what, func(t *testing.T) {
+			s, tt := newShell(t)
+			if c.dir {
+				if err := s.app.MountDownloads(app.Downloads{
+					Media: http.DefaultClient, FallbackDir: t.TempDir(),
+				}); err != nil {
+					t.Fatalf("挂下载：%v", err)
+				}
+			}
+			s.navigate("/download-list")
+			tt.Frame()
 
-	r, ok := tt.Find(lookup("/download-list").Empty.Title)
-	if !ok {
-		t.Fatalf("下载记录的空状态没画出来，文字有 %q", tt.Texts())
-	}
-	img := tt.Image()
-	// 窗口左上角是窗口底色，空状态那块是次要文字色。
-	window := img.RGBAAt(4, 4)
-	text := img.RGBAAt(int(r.X)+2, int(r.Y+r.H/2))
-	if text == window {
-		t.Errorf("空状态的字和窗口底色同色（%v），画出来看不见", text)
+			title := noDownloadDir.Title
+			if c.dir {
+				title = noDownloads.Title
+			}
+			r, ok := tt.Find(title)
+			if !ok {
+				t.Fatalf("下载记录的空状态没画出来，文字有 %q", tt.Texts())
+			}
+			img := tt.Image()
+			// 窗口左上角是窗口底色，空状态那块是次要文字色。
+			window := img.RGBAAt(4, 4)
+			text := img.RGBAAt(int(r.X)+2, int(r.Y+r.H/2))
+			if text == window {
+				t.Errorf("空状态的字和窗口底色同色（%v），画出来看不见", text)
+			}
+		})
 	}
 }
 

@@ -48,8 +48,14 @@ func findAccentBlock(img *image.RGBA) (image.Rectangle, bool) {
 // TestTheAddDirectoryEntryIsNotAPlainPieceOfText 断右上角那个「添加目录」
 // **看得见它是能点的**。
 //
-// 判据是**它左边那一格**：描边按钮在文字左边的内边距上铺的是**自己的底色**，
-// 而一段纯文字那一段是**页面底色**。这一条断的就是「12px 纯文字」那个形态。
+// 判据是**它左边那一段有图形**：上游那一枚是「图标 + 文字」的 flat 键
+// （`local-music/index.tsx:189`），而图标一直没画——于是在画面上它就是**一行
+// 小字**，而空状态那句话让用户去点它：用户按提示找过去，扫到右上角只看见
+// 一行说明文字，**很可能以为那只是说明文字**（报告 C2）。
+//
+// ⚠️ **断的是「有图形」而不是「有底色」**：全应用的次级按钮都是扁平的（无描边、
+// 无常驻底，见 flatbutton.go 的文件头），`flatspread_test.go` 逐页钉着这一条。
+// 「看得见」靠的是那枚图标和空状态里那枚实心主色按钮，不是给它裹一圈边。
 func TestTheAddDirectoryEntryIsNotAPlainPieceOfText(t *testing.T) {
 	tt, _, _, _ := shellOnLocalMusic(t)
 
@@ -59,15 +65,22 @@ func TestTheAddDirectoryEntryIsNotAPlainPieceOfText(t *testing.T) {
 	}
 	img := tt.Image()
 	bg := img.RGBAAt(4, 4)
-	// 按钮的内边距是 14（`flat.Button` 的 `t.Space(3.5)`），文字左边那一格
-	// 就在按钮里面。
-	x, y := int(r.X)-7, int(r.Y+r.H/2)
-	if x < 0 || y < 0 || x >= img.Bounds().Dx() || y >= img.Bounds().Dy() {
-		t.Fatalf("「添加目录」那个框不在画面上：%+v", r)
+	// 文字左边那一段：图标就在那儿（14 的图标 + 6 的缝）。
+	x0, y0 := int(r.X)-24, int(r.Y)-2
+	strokes := 0
+	for y := y0; y < y0+int(r.H)+4 && y < img.Bounds().Dy(); y++ {
+		for x := x0; x < x0+18 && x < img.Bounds().Dx(); x++ {
+			if x < 0 || y < 0 {
+				continue
+			}
+			if maxDiff(img.RGBAAt(x, y), bg) > probeTolerance {
+				strokes++
+			}
+		}
 	}
-	if img.RGBAAt(x, y) == bg {
-		t.Errorf("「添加目录」左边那一格还是页面底色——它还是一段纯文字，" +
-			"用户看不出那是个能点的入口")
+	if strokes < 5 {
+		t.Errorf("「添加目录」左边那一段没有图形（只有 %d 个非底色像素）——它还是"+
+			"一段纯文字，用户看不出那是个能点的入口", strokes)
 	}
 }
 
