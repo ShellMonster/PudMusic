@@ -83,6 +83,121 @@ func TestTheLyricsStayWhenTheInterfaceHides(t *testing.T) {
 	}
 }
 
+// TestTheLyricsStayClearOfThePartsPanel 钉住「歌词不许被分集面板从中间切断」。
+//
+// ⚠️ **这一条是评审抓出来的**：分集面板是**贴右边的一竖条**（280 宽，
+// `viewFullPartsPanel` 的 `Absolute().Right(0)`），而它开着的时候浮在歌词那一列
+// 上面——歌词从中间被切掉（实测：歌词那一行的右沿 1128，面板的左沿 920，
+// 超出 208 像素）。这一票之前满屏中间只有一张居中的封面（408..792），不碰
+// 这一块，所以是这个改动引入的。
+//
+// 修法：歌词那一列的右边界**让开面板**（`viewFullStage`）。判据是「歌词的
+// 文字不许越过面板的左沿」。
+func TestTheLyricsStayClearOfThePartsPanel(t *testing.T) {
+	s, tt, _ := fullLyricsTester(t)
+	s.app.PutLyrics(fullTestLRC, "")
+	openFull(t, tt)
+	settleFull(t, tt)
+
+	// 开分集面板（和 `fullplayer_parts_test.go` 那一族一样直接开那一档）。
+	s.full.partsOpen = true
+	tt.Frame()
+	settleFull(t, tt)
+
+	panel, ok := tt.Find("分集列表")
+	if !ok {
+		t.Fatalf("画面上找不到分集面板，文字有 %q", tt.Texts())
+	}
+	lyrics, ok := tt.Find("满屏歌词")
+	if !ok {
+		t.Fatalf("画面上找不到歌词那一列，文字有 %q", tt.Texts())
+	}
+	// 歌词那一列的右边有 `fullLyricsPadX` 的留白，字到那儿为止。
+	textRight := lyrics.X + lyrics.W - fullLyricsPadX
+	if textRight > panel.X {
+		t.Errorf("歌词的字到 %.1f，分集面板从 %.1f 开始——面板会把歌词从中间切断",
+			textRight, panel.X)
+	}
+}
+
+// TestTheCoverIsCentredInTheWindowWhenTheLyricsAreOff 钉住「关掉歌词那一条
+// 路径，封面和这一票之前**逐像素一样**」。
+//
+// ⚠️ **这一条是评审抓出来的**：原来那一条路径把封面放在「顶栏与频谱之间那一段」
+// 里居中，于是它**上移了 40 像素**（y=216，而这一票之前是整窗居中的 256）——
+// 而代码注释和报告都写着「和这一票之前一模一样」。
+//
+// 判据是**两个方向都在窗口中线上**（x 和 y）：只量 x 的话，上移 40 像素照样
+// 全绿。
+func TestTheCoverIsCentredInTheWindowWhenTheLyricsAreOff(t *testing.T) {
+	s, tt, _ := fullLyricsTester(t)
+	fullNoLyricsPrefs(t, s)
+	openFull(t, tt)
+	settleFull(t, tt)
+
+	cover, ok := tt.Find("当前封面")
+	if !ok {
+		t.Fatalf("满屏上找不到封面，文字有 %q", tt.Texts())
+	}
+	if d := absF(cover.X + cover.W/2 - float32(fullWinW)/2); d > 1 {
+		t.Errorf("封面中心在 x=%.1f，窗口中线是 %d——它没有在整窗里居中",
+			cover.X+cover.W/2, fullWinW)
+	}
+	if d := absF(cover.Y + cover.H/2 - float32(fullWinH)/2); d > 1 {
+		t.Errorf("封面中心在 y=%.1f，窗口的中线是 y=%.1f——它没有在整窗里居中"+
+			"（这一票之前它就是整窗居中，关掉歌词那一条路径不该被这一票动到）",
+			cover.Y+cover.H/2, float32(fullWinH)/2)
+	}
+}
+
+// TestAShortLyricDoesNotFadeItsLastLine 钉住「短歌词不会无缘无故暗一截」。
+//
+// ⚠️ **这一条是评审抓出来的（minor）**：满屏的渐隐那一档是按「离正在唱的那一句
+// 多远」压暗的，而上游那条遮罩是按**容器上下沿**淡的——歌词很少时（几行）两者
+// 不一样：上游那两条带子正好落在居中留白的空处，几行一样亮，而这一档会让最远
+// 的那一句无缘无故暗一截（实测：第二句 192、第三句 192、**第四句 166**）。
+//
+// 判据是**逐行量最亮的像素**：正在唱的那一句最亮（放大 1.5 倍且不透明），**其余
+// 几句一样亮**。
+func TestAShortLyricDoesNotFadeItsLastLine(t *testing.T) {
+	s, tt, _ := fullLyricsTester(t)
+	s.app.PutLyrics(fullTestLRC, "")
+	openFull(t, tt)
+	settleFull(t, tt)
+
+	img := tt.Image()
+	bright := map[string]int{}
+	for _, line := range []string{"第一句", "第二句", "第三句", "第四句"} {
+		box, ok := tt.Find(line)
+		if !ok {
+			t.Fatalf("找不到 %q，文字有 %q", line, tt.Texts())
+		}
+		bright[line] = maxBright(img, box)
+	}
+	// 最亮的那一句是正在唱的（它放大 1.5 倍、字重也更重）。
+	active, others := "", []string{}
+	for _, line := range []string{"第一句", "第二句", "第三句", "第四句"} {
+		if bright[line] == 0 {
+			t.Fatalf("%q 那一行一个像素都没有", line)
+		}
+		if active == "" || bright[line] > bright[active] {
+			if active != "" {
+				others = append(others, active)
+			}
+			active = line
+		} else {
+			others = append(others, line)
+		}
+	}
+	want := bright[others[0]]
+	for _, line := range others[1:] {
+		if absDiff(byte(bright[line]), byte(want)) > 12 {
+			t.Errorf("%q 那一行最亮的是 %d，%q 是 %d——短歌词不该有哪一句无缘无故暗一截",
+				line, bright[line], others[0], want)
+		}
+	}
+}
+
 // TestTheFullPlayerShowsTheLyrics 断满屏那一屏真的画歌词。
 //
 // ⚠️ **判据不只是「文字出现了」**：歌词也可能压在封面底下（那一屏的底是糊过
@@ -320,6 +435,59 @@ func TestRenderFullPlayerLyricsShot(t *testing.T) {
 			})
 			settleFull(t, b.tt)
 			save(t, dir, "63-满屏播放器-歌词-"+name+".png", b.tt)
+			b.Close()
+		})
+	}
+}
+
+// TestRenderFullPlayerLyricsAndPartsPanelShot 存图：满屏 + **分集面板开着**，
+// 歌词让开它。
+//
+//	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderFullPlayerLyricsAndPartsPanelShot
+//
+// 这一张是评审那条 major 的证据：分集面板（贴右边 280 宽的一竖条）开着的时候，
+// 歌词那一列**让开它**——而不是从中间被面板切断。
+func TestRenderFullPlayerLyricsAndPartsPanelShot(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	body := splitCoverPNG(t, 1200, 1200)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			b := newTestShell(t, at(fullWinW, fullWinH), systemIsDark(dark),
+				withClock(newFakeClock(time.Unix(1_700_000_000, 0))))
+			item := app.LocalItem(flacPath(t))
+			item.Cover = srv.URL + "/cover.png"
+			if err := b.a.Enqueue(item); err != nil {
+				t.Fatalf("把歌放进队列：%v", err)
+			}
+			waitFrames(t, b.tt, "歌开起来了", func() bool {
+				return b.a.Snapshot().HasTrack
+			})
+			waitFrames(t, b.tt, "封面下回来了", func() bool {
+				return b.s.images.Get(item.Cover).Ready()
+			})
+			b.a.Pause()
+			b.a.PutLyrics(fullTestLRC, "")
+			b.s.openFullPlayer()
+			waitFrames(t, b.tt, "满屏开出来了", func() bool {
+				return b.tt.HasText("关闭全屏")
+			})
+			// 开分集面板：歌词那一列要让开它。
+			b.s.full.partsOpen = true
+			b.tt.Frame()
+			settleFull(t, b.tt)
+			save(t, dir, "65-满屏播放器-歌词与分集面板-"+name+".png", b.tt)
 			b.Close()
 		})
 	}

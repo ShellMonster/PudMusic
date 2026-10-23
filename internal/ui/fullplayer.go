@@ -742,6 +742,25 @@ func fullStageRect(c *ui.Context) ui.Rect {
 	return ui.Rect{X: 0, Y: top, W: winW, H: max(bottom-top, 0)}
 }
 
+// fullWindowRect 是**整窗**。
+//
+// ⚠️ **它只给「歌词关着」那一条路径用**：那一路径上封面必须和这一票之前
+// **逐像素一样**（整窗居中），而中间那一段（`fullStageRect`）的上边界是顶栏
+// （64）、下边界是给频谱留的那一截（656）——拿它给封面居中，封面会**上移 40
+// 像素**（评审抓到的那一条：注释写着「和这一票之前一模一样」，而画面上不是）。
+func fullWindowRect(c *ui.Context) ui.Rect {
+	winW, winH := c.Size()
+	return ui.Rect{X: 0, Y: 0, W: winW, H: winH}
+}
+
+// fullLyricsPartsGap 是歌词那一列与分集面板之间留的缝。
+//
+// ⚠️ **分集面板是贴右边的一竖条**（280 宽，`viewFullPartsPanel` 的
+// `Absolute().Right(0)`），而它开着的时候盖在歌词那一列上面——歌词从中间被
+// 切断（评审抓到的那一条）。所以歌词那一列的右边界要**让开它**：让开量是
+// 面板宽减去这一份缝。
+const fullLyricsPartsGap = 24
+
 // viewFullStage 画中间那一块：左边封面，右边歌词。
 //
 // # 分不分栏只看「显示歌词」那一个开关
@@ -752,19 +771,32 @@ func fullStageRect(c *ui.Context) ui.Rect {
 //
 // # 歌词关着的时候，这一块就是原来那一块
 //
-// 封面在**整窗**里居中（和「显示歌词」开着之前一模一样）；开着的时候封面
-// 挪到左边那一列，右边让给歌词。
+// ⚠️ **封面在整窗里居中，和这一票之前逐像素一样**（`fullWindowRect`）——不是
+// 在中间那一段里居中：那一段的上边界是顶栏（64），拿它居中封面会**上移 40
+// 像素**（评审抓到的那一条：注释写着「一模一样」，而画面上不是）。
+//
+// 歌词开着的时候封面挪到左边那一列（纵向在中间那一段里居中，与歌词那一列
+// 同一个中线），右边让给歌词。
 func (s *Shell) viewFullStage(c *ui.Context, st app.State, hidden bool) {
 	prefs := s.app.FullPlayerPrefs()
-	stage := fullStageRect(c)
 	if !prefs.ShowLyrics {
-		s.viewFullCover(c, st, hidden, stage)
+		s.viewFullCover(c, st, hidden, fullWindowRect(c))
 		return
 	}
+	stage := fullStageRect(c)
 	colW := stage.W * fullCoverColRatio
+	// 歌词那一列的右边界：分集面板开着的时候**让开它**（面板是浮在歌词上面
+	// 的，不让开的话歌词从中间被切断）。
+	//
+	// ⚠️ **界面藏起来的时候不算**：那时候面板不画（`viewFullParts` 见到 hidden
+	// 就返回），歌词却还亮着——让开一块没有面板的地方，歌词就偏在左边了。
+	right := stage.X + stage.W
+	if s.full.partsOpen && !hidden {
+		right = stage.X + stage.W - fullPartsWidth + fullLyricsPartsGap
+	}
 	s.viewFullCover(c, st, hidden, ui.Rect{X: stage.X, Y: stage.Y, W: colW, H: stage.H})
 	s.viewFullLyrics(c, st, ui.Rect{
-		X: stage.X + colW, Y: stage.Y, W: stage.W - colW, H: stage.H,
+		X: stage.X + colW, Y: stage.Y, W: right - (stage.X + colW), H: stage.H,
 	})
 }
 

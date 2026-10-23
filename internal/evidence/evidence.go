@@ -213,12 +213,16 @@ var Items = []Item{
 		// 上一个字都不说的话，用户分不清是「这一首没有」还是「这一版没做」
 		// （UX 报告 B3：「没有」和「没显示出来」在画面上长得一样）。
 		Category: Play,
-		Spec:     "满屏播放器接上歌词：「显示歌词」与「歌词字体颜色」两枚开关真的管画面；这一首没有歌词时是空状态（「暂无歌词」+ 一枚「找歌词」）而不是整屏空白",
+		Spec:     "满屏播放器接上歌词：「显示歌词」与「歌词字体颜色」两枚开关真的管画面；这一首没有歌词时是空状态（「暂无歌词」+ 一枚「找歌词」）而不是整屏空白；歌词让开分集面板，不被它从中间切断；关掉歌词时封面回到整窗居中；界面藏起来之后歌词还在",
 		Tests: []string{
 			"TestTheFullPlayerShowsTheLyrics",
 			"TestTurningOffTheLyricsHidesThem",
 			"TestTheLyricsColorSwitchChangesTheLyrics",
 			"TestTheFullPlayerSaysWhenThereAreNoLyrics",
+			"TestTheLyricsStayClearOfThePartsPanel",
+			"TestTheCoverIsCentredInTheWindowWhenTheLyricsAreOff",
+			"TestTheLyricsStayWhenTheInterfaceHides",
+			"TestAShortLyricDoesNotFadeItsLastLine",
 		},
 	},
 	{

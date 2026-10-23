@@ -72,6 +72,9 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, area ui.Rect) {
 	ui.Box(c).Key(fullLyricsBoxKey).
 		Absolute().Left(area.X).Top(area.Y).Width(area.W).Height(area.H).
 		Padding(0, fullLyricsPadX).
+		// 名字：读屏软件念得出「满屏歌词」，而无头 Tester 也靠它量这一列的框
+		//（分集面板开着时它必须让开面板——那一条要量它的右沿）。
+		Label("满屏歌词").
 		Children(func() {
 			s.viewLyricLines(c, lv, snap, active, lyricStyle{
 				color:  s.fullLyricColor(c),
@@ -100,16 +103,20 @@ func (s *Shell) viewFullLyricsEmpty(c *ui.Context, area ui.Rect) {
 	on, dim := s.fullForeground(c)
 	ui.Box(c).Key(fullLyricsEmptyKey).
 		Absolute().Left(area.X).Top(area.Y).Width(area.W).Height(area.H).
-		Center().Gap(emptyGap).Children(func() {
-		ui.Icon(c, icon(noLyrics.Icon)).FontSize(emptyIconSize).TextColor(dim)
-		ui.Text(c, noLyrics.Title).FontSize(scale.Font(c, emptyTitleSize)).TextColor(on)
-		ui.Text(c, noLyrics.Hint).FontSize(scale.Font(c, emptyHintSize)).TextColor(dim)
-		// 字色给满屏那一档：这一枚是浮在糊过的封面上的，主题的字色在浅色
-		// 主题下是黑的（压在上面读不出来）。
-		if flatButton(c, lyricSearchKnobLabel).TextColor(on).Clicked() {
-			s.openLyricSearch()
-		}
-	})
+		Center().Gap(emptyGap).
+		// 名字和歌词那一列一样（两者是同一块地方的两档内容）：读屏念得出
+		// 「满屏歌词」，而无头 Tester 量这一块的右沿靠它。
+		Label("满屏歌词").
+		Children(func() {
+			ui.Icon(c, icon(noLyrics.Icon)).FontSize(emptyIconSize).TextColor(dim)
+			ui.Text(c, noLyrics.Title).FontSize(scale.Font(c, emptyTitleSize)).TextColor(on)
+			ui.Text(c, noLyrics.Hint).FontSize(scale.Font(c, emptyHintSize)).TextColor(dim)
+			// 字色给满屏那一档：这一枚是浮在糊过的封面上的，主题的字色在浅色
+			// 主题下是黑的（压在上面读不出来）。
+			if flatButton(c, lyricSearchKnobLabel).TextColor(on).Clicked() {
+				s.openLyricSearch()
+			}
+		})
 }
 
 // fullLyricColor 是满屏歌词的字色。
