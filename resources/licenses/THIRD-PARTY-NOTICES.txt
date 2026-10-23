@@ -59,6 +59,6 @@ github.com/jfreymuth/vorbis	v1.0.2	MIT	github.com-jfreymuth-vorbis-LICENSE.txt
 github.com/mewkiz/flac	v1.0.14	Unlicense	github.com-mewkiz-flac-LICENSE.txt
 github.com/mewkiz/pkg	v0.0.0-20250417130911-3f050ff8c56d	Unlicense	github.com-mewkiz-pkg-LICENSE.txt
 github.com/mewpkg/term	v0.0.0-20241026122259-37a80af23985	Unlicense	github.com-mewpkg-term-LICENSE.txt
-github.com/tphakala/go-m4a	v0.7.0	MIT	github.com-tphakala-go-m4a-LICENSE.txt
+github.com/tphakala/go-m4a	v0.8.0	MIT	github.com-tphakala-go-m4a-LICENSE.txt
 golang.org/x/image	v0.46.0	BSD-3-Clause	golang.org-x-image-LICENSE.txt
 golang.org/x/text	v0.43.0	BSD-3-Clause	golang.org-x-text-LICENSE.txt
