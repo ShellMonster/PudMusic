@@ -340,7 +340,7 @@ func (d *downloadsPage) scrollTop() {
 	d.state.ScrollTo(0, ui.Start)
 }
 
-// emptyState 是这一页空着的时候说的那两句话。
+// downloadsEmptyState 是这一页空着的时候说的那两句话。
 //
 // **两句话必须分得开**：真的没下载是「怎么才能不空」（`noDownloads`），筛完了
 // 没有是「你在看哪一档、换一档看看」（`dlEmptyAfterFilter`）。混成一句的话，用户
