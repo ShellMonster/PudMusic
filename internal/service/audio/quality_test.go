@@ -1,4 +1,4 @@
-// 在线音质覆盖：320K AAC 和无损 FLAC 在线路径都要能播，且解出来的采样
+// 在线音质覆盖：有损 AAC 和无损 FLAC 在线路径都要能播，且解出来的采样
 // 跟原始录音**逐个相同**。
 //
 // # 为什么逐样本，不看 RMS
@@ -15,9 +15,9 @@
 //
 // # 真网上验不到的那部分
 //
-// 真 B 站的无损流要大会员账号，本机没有；320K 那条真机验过
+// 真 B 站的无损流要大会员账号，本机没有；有损那一档真机验过
 // （`reports/Biu_MyGo/14`）。这里验的是**解码侧**：字节从 CDN 来，和本地
-// 文件走的是同一个 `openDecoder`。取流那一侧（怎么选中 320K / FLAC 那一档）
+// 文件走的是同一个 `openDecoder`。取流那一侧（怎么选中有损 / 无损那一档）
 // 在 `internal/app/online_test.go` 与 `internal/service/bili`。
 
 package audio
@@ -304,7 +304,7 @@ func TestLosslessFLACFromTheStreamIsSampleForSample(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 320K AAC：首次可听 ≤ 200 ms
+// 有损 AAC：首次可听 ≤ 200 ms
 // ─────────────────────────────────────────────────────────────────────────────
 
 // firstAudibleBudget 是「下载等待之外的首次可听时间」的上限。
@@ -314,7 +314,7 @@ func TestLosslessFLACFromTheStreamIsSampleForSample(t *testing.T) {
 // 60 秒才 1.2 MB，光下载就够这个数了。
 const firstAudibleBudget = 200 * time.Millisecond
 
-// TestAAC320FromTheStreamIsAudibleFast 盯「320K AAC 在线可播，首次可听
+// TestAAC320FromTheStreamIsAudibleFast 盯「有损 AAC 在线可播，首次可听
 // 时间不超过 200 毫秒」。
 //
 // # 为什么 CDN 只发前半截
@@ -347,10 +347,10 @@ func TestAAC320FromTheStreamIsAudibleFast(t *testing.T) {
 		start := time.Now()
 		d, name, err := openDecoder(g)
 		if err != nil {
-			t.Fatalf("第 %d 轮：320K 流认不出容器：%v", i+1, err)
+			t.Fatalf("第 %d 轮：有损流认不出容器：%v", i+1, err)
 		}
 		if name != "mp4" {
-			t.Errorf("容器名 = %q，want mp4（320K 走的是注册表里系统解码器那一条）", name)
+			t.Errorf("容器名 = %q，want mp4（有损那一档走的是注册表里系统解码器那一条）", name)
 		}
 		firstSampleWithin(t, d, 30*time.Second)
 		if c, ok := d.(io.Closer); ok {
@@ -366,12 +366,12 @@ func TestAAC320FromTheStreamIsAudibleFast(t *testing.T) {
 	t.Logf("首次可听：下载等待之外的解码时间 %v（含等待共 %v）", best.Round(time.Millisecond),
 		bestTotal.Round(time.Millisecond))
 	if best > firstAudibleBudget {
-		t.Errorf("320K 在线流首次可听（不含下载等待）用了 %v，超过 %v",
+		t.Errorf("有损在线流首次可听（不含下载等待）用了 %v，超过 %v",
 			best.Round(time.Millisecond), firstAudibleBudget)
 	}
 }
 
-// TestAAC320FromTheStreamActuallyDecodes 盯「在线的 320K 解出来是真声音」。
+// TestAAC320FromTheStreamActuallyDecodes 盯「在线的有损流解出来是真声音」。
 //
 // 快是快，出不出声是另一件事：解码器一路顺利地交出 0 个采样也满足「快」。
 // 所以这里数采样、看声道和采样率、看波形不是静音——静音的话播放条上照样
@@ -380,10 +380,10 @@ func TestAAC320FromTheStreamActuallyDecodes(t *testing.T) {
 	data := aac320(t)
 	d, _, err := openDecoder(newOnlineSource(t, newByteCDN(t, data)))
 	if err != nil {
-		t.Fatalf("320K 流认不出容器：%v", err)
+		t.Fatalf("有损流认不出容器：%v", err)
 	}
 	if d.Channels() != 2 {
-		t.Errorf("声道数 = %d，want 2（B 站的 320K 是立体声）", d.Channels())
+		t.Errorf("声道数 = %d，want 2（B 站的有损档是立体声）", d.Channels())
 	}
 	got := decodeAll(t, d)
 	if len(got) < d.SampleRate() {
@@ -479,7 +479,7 @@ func (g *netGauge) blockedTotal() time.Duration {
 
 // aac320 用系统自带的 afconvert 造一份 320K 立体声 AAC（MP4 容器）素材。
 //
-// 为什么现造而不是把二进制塞进仓库：B 站的 320K 流就是 AAC-in-MP4，
+// 为什么现造而不是把二进制塞进仓库：B 站的有损流就是 AAC-in-MP4，
 // 而 `afconvert` 是 macOS 自带的、造出来的东西和 `verify-streaming.md`
 // §0 用的是同一条命令（那边就是拿它做的实测）。造不出来就跳过——
 // 拿 FLAC 假装验过 AAC 比不验更糟。

@@ -46,7 +46,7 @@ func newDownloadApp(t *testing.T, f *streamFixture, dlDir, queueFile string) *ap
 	cli.TestOnlyPointHostsAtFixture(f.URL)
 	// ⚠️ 音质偏好要照 `ui.MountStreaming` 那样**从设置里读**（#67 加的）。
 	// 少了这一行，下载拿到的是零值 `AudioAuto`——于是「用户选了省流量、
-	// 下回来的却是 320K」这条在测试里看不出来。
+	// 下回来的却是 192K」这条在测试里看不出来。
 	a.MountStreaming(app.Streaming{
 		Client:  cli,
 		Media:   f.Client(),
@@ -106,7 +106,7 @@ func TestADownloadGoesFromAFavoriteItemToAFileOnDisk(t *testing.T) {
 	f := newStreamFixture(t)
 	data := []byte(strings.Repeat("biu-download-", 400)) // 5 KB
 	hits := serveRanged(f, data)
-	f.onPlayURL(dashFor(cdnURL(f.URL, "audio.m4s", 2*time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "audio.m4s", 2*time.Hour), int(bili.QualityHigh192), 110836))
 
 	dir := t.TempDir()
 	a := newDownloadApp(t, f, dir, filepath.Join(t.TempDir(), "queue.json"))
@@ -128,7 +128,7 @@ func TestADownloadGoesFromAFavoriteItemToAFileOnDisk(t *testing.T) {
 		t.Fatalf("下了 %d 字节，源有 %d", got.Done, len(data))
 	}
 	// 音质徽章从 B 站给的那一档来（app 层问的是 `bili.Client`）。
-	if got.Label != bili.QualityHigh320.Label(110836) {
+	if got.Label != bili.QualityHigh192.Label(110836) {
 		t.Fatalf("音质是 %q", got.Label)
 	}
 	// 净化过的名字落在下载目录里。
@@ -155,7 +155,7 @@ func TestADownloadGoesFromAFavoriteItemToAFileOnDisk(t *testing.T) {
 // 设置里的偏好喂给 `Streaming.Quality`，而下载的取流走的是**同一个**
 // `Streaming`（`resolveDownload` → `streamingSnapshot`）。所以这条是白捡的
 // ——也正因为白捡，不钉住就会悄悄退回自动档：用户为了省流量选了 64K，下回来
-// 的是 320K，而界面上一点提示都没有（那不是「错」，是白花三倍流量下载）。
+// 的是 192K，而界面上一点提示都没有（那不是「错」，是白花三倍流量下载）。
 //
 // ⚠️ 取流接口**不带 `qn`**——它把所有档都返回来，由 `bili.pickAudio` 按偏好
 // 在客户端挑。所以这条造的是「同一个 dash 里给两档、两个不同的地址」，断的是
@@ -169,7 +169,7 @@ func TestDownloadUsesTheQualityTheUserPicked(t *testing.T) {
 	f.onPlayURL(map[string]any{
 		"duration": 1,
 		"audio": []any{
-			map[string]any{"id": int(bili.QualityHigh320), "bandwidth": 110836,
+			map[string]any{"id": int(bili.QualityHigh192), "bandwidth": 110836,
 				"codecs": "mp4a.40.2", "mimeType": "audio/mp4",
 				"baseUrl": cdnURL(f.URL, "high.m4s", 2*time.Hour)},
 			map[string]any{"id": int(bili.QualityLow64), "bandwidth": 50000,
@@ -244,7 +244,7 @@ func serveFixed(f *streamFixture, path string, data []byte) {
 func TestTheDownloadDirectoryComesFromTheSettings(t *testing.T) {
 	f := newStreamFixture(t)
 	serveRanged(f, []byte("12345678"))
-	f.onPlayURL(dashFor(cdnURL(f.URL, "audio.m4s", 2*time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "audio.m4s", 2*time.Hour), int(bili.QualityHigh192), 110836))
 
 	first, second := t.TempDir(), t.TempDir()
 	a := newDownloadApp(t, f, first, filepath.Join(t.TempDir(), "queue.json"))
@@ -289,7 +289,7 @@ func TestTheQueueIsSavedOnQuitAndRestoredOnStart(t *testing.T) {
 	f := newStreamFixture(t)
 	data := []byte(strings.Repeat("x", 3<<20)) // 3 MB
 	serveRanged(f, data)
-	f.onPlayURL(dashFor(cdnURL(f.URL, "audio.m4s", 2*time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "audio.m4s", 2*time.Hour), int(bili.QualityHigh192), 110836))
 
 	dir, queueFile := t.TempDir(), filepath.Join(t.TempDir(), "queue.json")
 
@@ -427,7 +427,7 @@ func TestTheFourQueueActionsAreWired(t *testing.T) {
 	f := newStreamFixture(t)
 	data := []byte(strings.Repeat("y", 8<<20)) // 8 MB
 	serveRanged(f, data)
-	f.onPlayURL(dashFor(cdnURL(f.URL, "audio.m4s", 2*time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "audio.m4s", 2*time.Hour), int(bili.QualityHigh192), 110836))
 
 	dir := t.TempDir()
 	a := newDownloadApp(t, f, dir, filepath.Join(t.TempDir(), "queue.json"))

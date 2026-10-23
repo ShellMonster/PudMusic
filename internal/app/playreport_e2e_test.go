@@ -109,7 +109,7 @@ func TestPlayingARealStreamReachesBilibili(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
 	sink := serveReporting(t, f)
-	f.onPlayURL(dashFor(cdnURL(f.URL, "e2e.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "e2e.flac", 2*time.Hour), int(bili.QualityHigh192), 110836))
 
 	a := newReportOnlineApp(t, f)
 	if err := a.Enqueue(onlineItem("BV1e2e", "999", "上报的那一首")); err != nil {
@@ -164,7 +164,7 @@ func TestStoppingARealStreamTellsBilibiliItIsOver(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
 	sink := serveReporting(t, f)
-	f.onPlayURL(dashFor(cdnURL(f.URL, "stop.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "stop.flac", 2*time.Hour), int(bili.QualityHigh192), 110836))
 
 	a := newReportOnlineApp(t, f)
 	a.SetPlayReportInterval(20 * time.Millisecond)
@@ -206,7 +206,7 @@ func TestLoggingOutARealStreamStopsTheReporting(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
 	sink := serveReporting(t, f)
-	f.onPlayURL(dashFor(cdnURL(f.URL, "logout.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "logout.flac", 2*time.Hour), int(bili.QualityHigh192), 110836))
 
 	a := newReportOnlineApp(t, f)
 	a.SetPlayReportInterval(20 * time.Millisecond)

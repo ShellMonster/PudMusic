@@ -82,8 +82,9 @@ func playurlClient(t *testing.T, dash map[string]any) (*fakeBili, *Client) {
 
 // TestPlayURLTakesTheBestAvailable 盯「默认档给最好的那条」。
 //
-// 真 B 站对未登录账号给的是 30216 / 30232 / 30280 三条，码率 51651 /
-// 110836 / 110836。默认（Auto）应该挑 30280。
+// 真 B 站给的是 30216 / 30232 / 30280 三条（2026-10-23 只读实测：码率
+// ~44K / ~103K / ~204K，30216 的 codecs 是 `mp4a.40.5`）。默认（Auto）应该挑
+// 30280。
 func TestPlayURLTakesTheBestAvailable(t *testing.T) {
 	exp := time.Unix(1702204169+7200, 0)
 	_, c := playurlClient(t, map[string]any{
@@ -99,11 +100,11 @@ func TestPlayURLTakesTheBestAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ref.Quality != QualityHigh320 {
+	if ref.Quality != QualityHigh192 {
 		t.Errorf("音质 = %d，want 30280", ref.Quality)
 	}
-	if ref.Label != "320K" {
-		t.Errorf("徽章 = %q，want 320K", ref.Label)
+	if ref.Label != "192K" {
+		t.Errorf("徽章 = %q，want 192K", ref.Label)
 	}
 	if ref.Container != "mp4" {
 		t.Errorf("容器 = %q，want mp4", ref.Container)
@@ -115,16 +116,19 @@ func TestPlayURLTakesTheBestAvailable(t *testing.T) {
 // B 站的 `dash.audio` 里**根本不含 FLAC**：无损只在 `dash.flac.audio` 那个
 // 独立字段里。所以这一条既是「优先无损」的规则，也是「不查 flac 就永远拿不到
 // 无损」的提醒——`fnval` 给 16 而不是 4048 的话，这里连字段都没有。
+//
+// ⚠️ 夹具里的 id 是 **30251**（2026-10-23 只读实测的真值）。以前这里写的是
+// 30257——那个 id 在公开资料和实测里都找不到（票 #255）。
 func TestPlayURLPrefersFLAC(t *testing.T) {
 	exp := time.Unix(1702204169+7200, 0)
 	_, c := playurlClient(t, map[string]any{
 		"duration": 100,
 		"audio": []any{
-			audioItem(30280, 110836, "mp4a.40.2", streamURL(exp, "-320.m4s")),
+			audioItem(30280, 203786, "mp4a.40.2", streamURL(exp, "-192.m4s")),
 		},
 		"flac": map[string]any{
 			"display": true,
-			"audio":   audioItem(30257, 1_400_000, "flac", streamURL(exp, "-flac.flac")),
+			"audio":   audioItem(30251, 1_609_860, "fLaC", streamURL(exp, "-flac.m4s")),
 		},
 	})
 
@@ -135,18 +139,59 @@ func TestPlayURLPrefersFLAC(t *testing.T) {
 	if !ref.Quality.IsLossless() {
 		t.Errorf("音质 = %d，want 无损", ref.Quality)
 	}
-	if ref.Label != "无损 FLAC" {
-		t.Errorf("徽章 = %q，want 无损 FLAC", ref.Label)
+	if ref.Quality != QualityHiResLossless {
+		t.Errorf("音质 = %d，want %d（Hi-Res 无损）", ref.Quality, QualityHiResLossless)
+	}
+	if ref.Label != "Hi-Res 无损" {
+		t.Errorf("徽章 = %q，want Hi-Res 无损", ref.Label)
 	}
 	if ref.Container != "flac" {
 		t.Errorf("容器 = %q，want flac", ref.Container)
 	}
 }
 
+// TestPlayURLTrustsTheFlacFieldNotTheIdInsideIt 盯「**字段比 id 权威**」。
+//
+// `dash.flac` 这个**字段名**就说明了「这是 FLAC 无损流」；字段**里面**的 id
+// 是 B 站的内部编号，而且**改过**（老资料里是 30257，2026-10-23 实测是
+// 30251）。
+//
+// 靠 id 猜的话，B 站一改 id，无损流就会挂上不相干的标签——票 #255 的症状就是
+// 30251 被当成了「杜比 Hi-Res」，`IsLossless()` 也跟着判成不是无损。
+//
+// 所以这里故意造一个**表里没有的 id**：档位必须仍然是「Hi-Res 无损」。
+func TestPlayURLTrustsTheFlacFieldNotTheIdInsideIt(t *testing.T) {
+	exp := time.Unix(1702204169+7200, 0)
+	_, c := playurlClient(t, map[string]any{
+		"duration": 100,
+		"audio": []any{
+			audioItem(30280, 203786, "mp4a.40.2", streamURL(exp, "-192.m4s")),
+		},
+		"flac": map[string]any{
+			"display": true,
+			"audio":   audioItem(99999, 1_609_860, "fLaC", streamURL(exp, "-flac.m4s")),
+		},
+	})
+
+	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioAuto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Quality != QualityHiResLossless {
+		t.Errorf("音质 = %d，want %d（字段说了算，不看里面的 id）", ref.Quality, QualityHiResLossless)
+	}
+	if !ref.Quality.IsLossless() {
+		t.Errorf("IsLossless() = false，want true")
+	}
+	if ref.Label != "Hi-Res 无损" {
+		t.Errorf("徽章 = %q，want Hi-Res 无损", ref.Label)
+	}
+}
+
 // TestPlayURLLosslessRefusesToFallBack 盯「要无损就必须要无损」。
 //
-// 静默降级比报错更糟：用户为无损付了钱，界面上还写着「无损 FLAC」，
-// 而实际放的是 320K。Biu 上游这里是不管的（auto 与 lossless 都往下退）。
+// 静默降级比报错更糟：用户为无损付了钱，界面上还写着「Hi-Res 无损」，
+// 而实际放的是 192K。Biu 上游这里是不管的（auto 与 lossless 都往下退）。
 func TestPlayURLLosslessRefusesToFallBack(t *testing.T) {
 	exp := time.Unix(1702204169+7200, 0)
 	_, c := playurlClient(t, map[string]any{
@@ -181,7 +226,7 @@ func TestPlayURLPicksTheNamedTier(t *testing.T) {
 		pref AudioQuality
 		want Quality
 	}{
-		{AudioHigh, QualityHigh320},
+		{AudioHigh, QualityHigh192},
 		{AudioMedium, QualityMid128},
 		{AudioLow, QualityLow64},
 	} {
@@ -197,7 +242,7 @@ func TestPlayURLPicksTheNamedTier(t *testing.T) {
 
 // TestPlayURLFallsBackWhenTheNamedTierIsMissing 盯点名那一档没有时的退路。
 //
-// 用户选 320K 但账号只能给 128K —— 退到 128K 是对的，界面上的徽章会跟着
+// 用户选 192K 但账号只能给 128K —— 退到 128K 是对的，界面上的徽章会跟着
 // 变成「128K」，用户看得见。**报错反而更糟**（歌都放不了）。
 func TestPlayURLFallsBackWhenTheNamedTierIsMissing(t *testing.T) {
 	exp := time.Unix(1702204169+7200, 0)
@@ -222,7 +267,7 @@ func TestPlayURLFallsBackWhenTheNamedTierIsMissing(t *testing.T) {
 //
 // 上一条断的是「要高的没有 → 退到低的」，那是对的。这条断的是反过来的
 // 那一半，同样重要：用户为了少流量点了 64K，B 站没给 64K，而旧写法会直接
-// 取最好的那一条——也就是 320K。流量翻五倍，而界面上只多一个「320K」徽章，
+// 取最好的那一条——也就是 192K。流量翻三倍，而界面上只多一个「192K」徽章，
 // 用户多半不会注意到自己多花了钱。
 //
 // 退路是「不高于点名那一档里最好的」；一条都不低于点名的那档时才退到最低的
@@ -246,7 +291,7 @@ func TestPlayURLNeverHandsBackABetterTierThanAsked(t *testing.T) {
 	}{
 		{"要省流量", AudioLow, QualityMid128},
 		{"要标准", AudioMedium, QualityMid128},
-		{"要高音质", AudioHigh, QualityHigh320},
+		{"要高音质", AudioHigh, QualityHigh192},
 	} {
 		ref, err := c.PlayURL(context.Background(), testBvid, testCid, tc.pref)
 		if err != nil {
@@ -262,7 +307,7 @@ func TestPlayURLNeverHandsBackABetterTierThanAsked(t *testing.T) {
 //
 // 造的是**条目在、地址空**那一种：`dash.dolby` 里摆着一条杜比，`baseUrl` 是
 // 空串。挑流的时候不把它剔掉，自动档就把它当成「有杜比」挑中，然后报一句
-// 「这个稿件没有音频流」——**而 `dash.audio` 里好好的 320K 就在旁边摆着**。
+// 「这个稿件没有音频流」——**而 `dash.audio` 里好好的 192K 就在旁边摆着**。
 //
 // ⚠️ 别和「那一段是空的」搞混：真机实测过没有大会员时 B 站回的是
 // `dash.dolby = {"type":0,"audio":[]}`、`dash.flac = null`，那种形状由
@@ -284,14 +329,14 @@ func TestPlayURLIgnoresStreamsWithoutAnAddress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("自动档被一条没有地址的流带偏了：%v", err)
 	}
-	if ref.Quality != QualityHigh320 {
+	if ref.Quality != QualityHigh192 {
 		t.Errorf("自动档拿到的是 %d，want 30280", ref.Quality)
 	}
 }
 
 // TestPlayURLGivesTheOnlyTierThereIs 盯「全都比点名的那档高」。
 //
-// B 站只给了 320K，而用户点了「省流量」。这时没法不越级——那就给唯一的那条，
+// B 站只给了 192K，而用户点了「省流量」。这时没法不越级——那就给唯一的那条，
 // 让徽章说出真相（用户看得见自己没省到流量，可以再决定）。
 func TestPlayURLGivesTheOnlyTierThereIs(t *testing.T) {
 	exp := time.Unix(1702204169+7200, 0)
@@ -306,11 +351,11 @@ func TestPlayURLGivesTheOnlyTierThereIs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ref.Quality != QualityHigh320 {
+	if ref.Quality != QualityHigh192 {
 		t.Errorf("音质 = %d，want 30280（只有这一档）", ref.Quality)
 	}
-	if ref.Label != "320K" {
-		t.Errorf("徽章 = %q，want 320K（徽章要说实话，用户才知道没省到流量）", ref.Label)
+	if ref.Label != "192K" {
+		t.Errorf("徽章 = %q，want 192K（徽章要说实话，用户才知道没省到流量）", ref.Label)
 	}
 }
 
@@ -650,11 +695,12 @@ func TestAPIErrorKeepsItsData(t *testing.T) {
 func TestAgainstTheRealBiliStreamingAPIIsNotCovered(t *testing.T) {
 	t.Log("以下只有 fixture 覆盖，必须真机回归：")
 	t.Log("  1. dash.audio[].id / bandwidth / codecs / mimeType / baseUrl / backupUrl 的真值")
-	t.Log("     —— 实测未登录账号拿到 30216(51651, mp4a.40.5) / 30232(110836) / 30280(110836)")
+	t.Log("     —— 2026-10-23 实测（登录账号）：30216(~44K, mp4a.40.5) / 30232(~103K) / 30280(~204K)")
 	t.Log("  2. fnval=4048 时 dash.flac 才会出现（fnval=16 时整个字段都没有）")
 	t.Log("  3. 地址上的 deadline 是 Unix 秒；实测有效期 2 小时")
-	t.Log("  4. 有大会员时 dash.flac.audio 的 id / 容器是裸 FLAC 还是 MP4 —— **没验过**")
-	t.Log("  5. dash.dolby.audio[0] 在开了杜比之后长什么样 —— **没验过**")
+	t.Log("  4. dash.flac.audio 的 id 与容器 —— 2026-10-23 实测：id=30251、codecs=fLaC、")
+	t.Log("     mimeType=audio/mp4（**MP4 里的 FLAC**，不是裸 FLAC）")
+	t.Log("  5. dash.dolby.audio[0] —— 2026-10-23 实测：id=30250、codecs=ec-3、dolby.type=2")
 	t.Log("  6. playurl 接口带不带 WBI 签名都能通（实测不带也通，本实现仍然签）")
 	t.Log("  7. 多个 P 时不给 cid 会取到第一集，且 code 仍是 0")
 	t.Log("  8. 取到的地址从 CDN 拉要带 Referer（不给直接 403）")
