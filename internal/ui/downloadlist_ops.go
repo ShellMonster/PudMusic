@@ -83,6 +83,10 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 				Clicked() {
 				s.goToDownloadDirSetting()
 			}
+			// ⚠️ **补一个空隙**：有路径时那一段是 `Grow(1)` 的（它把页头剩下的
+			// 地方吃掉，右边那枚垃圾桶才落在最右边）。这一支没有那一段——不补
+			// 空隙的话，垃圾桶会紧跟在按钮后面，整页头的布局就变了。
+			ui.Spacer(c)
 		} else {
 			// 超长被截掉的时候完整路径在 tooltip 里：用户不必去设置页才看得到它
 			// 落在哪儿。
@@ -104,14 +108,13 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 		// 我们把它留在页头——表格那一块是共用的（widgets/list），页头才是这一页
 		// 自己的地方。
 		//
-		// ⚠️ **队列整个是空的时候不摆它**：一颗按了没反应的按钮（清空一件都
-		// 没有的东西）看着像能点，而它按下去只会弹一句「确认清空这 0 条吗」。
-		// 「什么都不摆」比「摆一颗按了没反应的」清楚（报告 C1 的最后一句）。
-		if len(d.all) > 0 {
-			if d.tipWith(c, flatIconButton(c, iconDeleteBin5, "清空记录", iconMd).
-				Size(iconHitMd, iconHitMd).Padding(0, 7), "清空记录").Clicked() {
-				d.askClear(s)
-			}
+		// ⚠️ **队列整个是空的时候它是灰的**（`Disabled`）：一条记录都没有时按它
+		// 什么都不会发生，而一颗亮着的按钮按下去没反应是最难解释的那种
+		// （`TestClearingIsGreyWhenThereIsNothingToClear` 钉的就是这一条）。
+		if d.tipWith(c, flatIconButton(c, iconDeleteBin5, "清空记录", iconMd).
+			Size(iconHitMd, iconHitMd).Padding(0, 7).
+			Disabled(len(d.all) == 0), "清空记录").Clicked() {
+			d.askClear(s)
 		}
 	})
 }
