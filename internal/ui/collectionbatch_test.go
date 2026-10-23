@@ -507,7 +507,7 @@ func TestTheNotMountedPageSaysSo(t *testing.T) {
 	tt.Frame()
 	tt.Frame()
 	wantText(t, tt, "暂时打不开收藏夹")
-	wantText(t, tt, "这一页要 B 站接口，它还没挂上")
+	wantText(t, tt, "这一页现在打不开，稍后再试试")
 }
 
 func newEmptyFolderClient(t *testing.T) *bili.Client {

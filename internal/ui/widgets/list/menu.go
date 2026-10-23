@@ -168,7 +168,10 @@ func doAction(item menuItem, i int, song Music, acts Actions, playFrom func(int)
 	case "play-next":
 		if acts.PlayNext == nil {
 			// 说清楚比按了没反应好（和下面两项同一个道理）。
-			notify(acts, "「"+item.label+"」还没接上", notice.Warning)
+			//
+			// ⚠️ **不许说「还没接上」**（票 #242，UX 报告 §3-F 的 F2）：那是把
+			// 实现细节说给用户听——用户不知道应用里哪一块还没接上。
+			notify(acts, "「"+item.label+"」现在还不能用", notice.Warning)
 			return
 		}
 		acts.PlayNext(song.Item)
@@ -183,8 +186,11 @@ func doAction(item menuItem, i int, song Music, acts Actions, playFrom func(int)
 	case "favorite":
 		if acts.FavSelect == nil {
 			// 说清楚比按了没反应好。**话里带上用户按的那个字**：菜单有五项，
-			// 只说「还没接」的话用户不知道说的是哪一项，得自己再点一遍试。
-			notify(acts, "「"+item.label+"」还没接 B 站接口", notice.Warning)
+			// 只说一句「现在还不能用」的话用户不知道说的是哪一项，得自己再点
+			// 一遍试。
+			//
+			// ⚠️ **不许说「还没接接口」**（票 #242，UX 报告 §3-F 的 F2）。
+			notify(acts, "「"+item.label+"」现在还不能用", notice.Warning)
 			return
 		}
 		acts.FavSelect(song.Item)
@@ -193,7 +199,9 @@ func doAction(item menuItem, i int, song Music, acts Actions, playFrom func(int)
 			// 同上。Biu 对本地项和「用户不是歌」那几种是把这一项藏起来的，
 			// 我们不藏（见 `queue_drawer.go` 的 queueMenuItems 那一段），
 			// 所以这里要有一句能说清「为什么这一项按不动」的话。
-			notify(acts, "「"+item.label+"」还没接 B 站接口", notice.Warning)
+			//
+			// ⚠️ **不许说「还没接接口」**（票 #242，UX 报告 §3-F 的 F2）。
+			notify(acts, "「"+item.label+"」现在还不能用", notice.Warning)
 			return
 		}
 		acts.Download(song.Item)

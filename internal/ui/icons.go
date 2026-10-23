@@ -126,8 +126,38 @@ const (
 	iconSearch   = "System/search-line.svg"        // 搜索
 	iconClose    = "System/close-line.svg"         // 清空
 	iconFeed     = "User & Faces/team-line.svg"    // 动态
-	iconLogin    = "System/login-circle-line.svg"  // 登录
-	iconLogout   = "System/logout-circle-line.svg" // 退出登录
+
+	// iconLogin / iconLogout 是顶栏右端那两枚（登录 / 退出登录）。
+	//
+	// ⚠️ **这一对换过图形**：原来是 `System/login-circle-line.svg` 和
+	// `System/logout-circle-line.svg`——**同一枚圆圈差一个箭头方向**（一个向右、
+	// 一个向左），在 18px 上肉眼极难分清（UX 报告 §3-A 的 A1，票 #242）。
+	// 顶栏那一枚**没有文字**，于是「我按的是登录还是退出」全靠图形认。
+	//
+	// 现在这一对是：
+	//
+	//   - 登录 = `Device/qr-code-line.svg`（二维码）
+	//   - 退出 = `System/logout-circle-r-line.svg`（圆圈 + 一支**朝外**的箭头）
+	//
+	// 为什么不沿用上游那一对「进门 / 出门」：它们都是「门框 + 箭头」，而门框是
+	// 同一个矩形，差只在箭头进还是出——18px 上仍然是「一个框里有个箭头」。
+	// 二维码是**另一种东西**（密的方块），和圆圈箭头一眼就是两样。
+	//
+	// 为什么登录用二维码：这一票的登录就是**扫码登录**（`login.go` 那一页），
+	// 而中文音乐客户端的登录入口历来是二维码（QQ 音乐 / 网易云 PC 端右上角都是）。
+	// 二维码还顺带和顶栏那枚**头像**分开——头像那一格画的是一个人形，而顶栏
+	// 右边再摆一枚人形会看着像重复。
+	//
+	// ⚠️ **这两张图是这一票引进来的**（之前 `iconset` 里没有它们）：
+	// `gh api repos/Remix-Design/RemixIcon/contents/icons/Device/qr-code-line.svg`、
+	// `gh api repos/Remix-Design/RemixIcon/contents/icons/System/logout-circle-r-line.svg`。
+	iconLogin  = "Device/qr-code-line.svg"         // 登录（扫码）
+	iconLogout = "System/logout-circle-r-line.svg" // 退出登录
+
+	// iconLoginCircle / iconLogoutCircle 是上游原来那**一对**（圆圈里一支箭头，
+	// 一个朝右一个朝左）。界面现在不用它们——理由在上面那一段——但资源留着。
+	iconLoginCircle  = "System/login-circle-line.svg"
+	iconLogoutCircle = "System/logout-circle-line.svg"
 
 	// ── 播放条右边那一组 ──
 	// ⚠️ 「播放列表」原来在顶栏那一列里，票 #127 跟着上游搬到了播放条
@@ -320,6 +350,10 @@ var iconNames = []string{
 	// 顶栏
 	iconSettings, iconFolder, iconQueue,
 	iconSearch, iconClose, iconFeed, iconLogin, iconLogout,
+	// 上游原来的那一对登录 / 退出（圆圈 + 一个向左、一个向右的箭头）。界面
+	// 现在不用它们了（18px 上分不清，票 #242），但**资源留着**：这一份图标
+	// 是照上游备齐的，「备齐」和「接上去」是两件事（见文件头）。
+	iconLoginCircle, iconLogoutCircle,
 	// 队列抽屉头与行
 	iconLocate, iconDelete, iconPlayFill,
 

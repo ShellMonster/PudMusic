@@ -86,9 +86,9 @@ func playFrom(songs []Music, acts Actions, i int) {
 	}
 }
 
-// notify 说一句话。给还没接上的操作用：按了没反应最难解释，说一句就好解释。
+// notify 说一句话。给按不动的操作用：按了没反应最难解释，说一句就好解释。
 //
-// ⚠️ **语气由说这句话的那一处给**（票 #180）：「还没接上」是橙的（要用户
+// ⚠️ **语气由说这句话的那一处给**（票 #180）：「现在还不能用」是橙的（要用户
 // 知道），「加载更多失败」是红的（真的没成）。
 func notify(acts Actions, text string, tone notice.Tone) {
 	if acts.Notify != nil {

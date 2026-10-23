@@ -353,3 +353,42 @@ func TestEveryPageViewIsGuarded(t *testing.T) {
 		})
 	}
 }
+
+// TestThe404PageHasAWayOutRightNow 钉住「404 上立刻能回去」。
+//
+// # 为什么这一条要紧
+//
+// 原来这一页**只有一条出路**：等 3 秒自动跳首页。而 404 一般是**用户点错了
+// 链接**——他多半想去别的页，不是主页；那个倒计时把他丢到主页，他刚才想找的
+// 东西没了（UX 报告 §3-A 的 A4）。
+//
+// ⚠️ **判据是「点下去立刻就回」**：光断言「页面上有那枚按钮」的话，一枚按了
+// 没反应的按钮也照样绿——而那正是原来那一版的病。
+//
+// ⚠️ **推钟推十秒也不该再被拽走**：倒计时在按下去的那一刻就要收掉，否则它会在
+// 用户已经回首页之后**再拽一次**。
+func TestThe404PageHasAWayOutRightNow(t *testing.T) {
+	s, tt := newShell(t)
+	fake := fakeClockAt(t, s)
+
+	s.navigate("/根本没有这一页")
+	tt.Frame()
+
+	if !tt.HasText("回到主页") {
+		t.Fatalf("404 页上没有「回到主页」那一枚，文字有 %q", tt.Texts())
+	}
+	if err := tt.Click("回到主页"); err != nil {
+		t.Fatalf("点不了「回到主页」：%v", err)
+	}
+	tt.Frame()
+
+	if got := s.router.Path(); got != "/" {
+		t.Errorf("点了「回到主页」之后在 %q，want /", got)
+	}
+
+	fake.Advance(10 * notFoundTick)
+	tt.Frame()
+	if got := s.router.Path(); got != "/" {
+		t.Errorf("回了首页之后倒计时还活着，又把用户拽到了 %q", got)
+	}
+}
