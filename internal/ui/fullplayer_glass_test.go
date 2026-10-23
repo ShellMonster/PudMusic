@@ -679,6 +679,24 @@ func brightIn(img *image.RGBA, box mygoui.Rect) int {
 }
 
 // knobHalves 数开关那一个框的左右两半里各有多少个亮像素（旋钮是白的）。
+//
+// # 🔴 **一像素的抗锯齿要算在它该在的那半边**
+//
+// 开关那个框的 X **可能是小数**：它锚在满屏顶栏那枚齿轮上（`viewFullTopBar`
+// 的 `ui.Popover`），而齿轮的 X 是「左边距 + 关闭键 + 缝 + **歌名的宽度** + 缝」
+// ——歌名的宽度是字体量出来的小数（实测 75.45732），于是齿轮落在 x=147.45732、
+// 开关落在 x=420.45734。
+//
+// 切口中线于是是 438.45734，而旋钮最左边那一列（x=438）**画在右半边**（旋钮的
+// 左沿正好压在中线上）——按「x < 中线就算左半边」判，那一列被算进了左半边，于是
+// 「旋钮整个在右半边」这一条判据在**画面是对的**的情况下红。
+//
+// 所以判据是「**这一像素大部分落在哪半边**」：只有它整个（`x+1`）还在中线左边
+// 才算左半边。刀口那一列算右边——它挨着旋钮，画的是旋钮，不是左半边。
+//
+// ⚠️ 这**不是**把判据放宽：关着的状态仍然要求左半边**一个**亮像素都没有（旋钮
+// 整个在左边），开着的那一帧仍然要求左半边一个都没有。改的只是「刀口上那一列
+// 归谁」。
 func knobHalves(img *image.RGBA, box mygoui.Rect) (left, right int) {
 	mid := box.X + box.W/2
 	for y := max(int(box.Y), img.Rect.Min.Y); y < min(int(box.Y+box.H), img.Rect.Max.Y); y++ {
@@ -687,7 +705,8 @@ func knobHalves(img *image.RGBA, box mygoui.Rect) (left, right int) {
 			if p.R < 190 || p.G < 190 || p.B < 190 {
 				continue
 			}
-			if float32(x) < mid {
+			// 这一像素整个还在中线左边 → 左半边；否则（右半边，含刀口那一列）。
+			if float32(x)+1 <= mid {
 				left++
 			} else {
 				right++

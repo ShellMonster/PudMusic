@@ -165,6 +165,63 @@ func TestTheFullPlayerTopBarPaddingMatchesTheUpstream(t *testing.T) {
 	}
 }
 
+// TestTheFullPlayerGearSitsRightAfterTheTitle 断满屏顶栏那一组的构图（票 #234）。
+//
+// 上游那一组是 `flex w-full max-w-2/5 items-center space-x-2`
+// （`src/components/full-screen-player/index.tsx:290-321`）：**齿轮是这一组的最后
+// 一个子元素，而 `<h2>` 不 grow**——所以齿轮**紧跟在歌名后面**（8 像素），
+// 不是靠右。上游的「靠右」是给 Windows / Linux 那个窗口按钮留的位置。
+//
+// 原来我们那一行是「⌄ 歌名 …… ⚙」：歌名框 `Grow(1)` + `MaxWidth(480)` 铺满，
+// 把齿轮顶到 x=552（窗口 1200 宽的 **47%** 处），离歌名 421 像素——看起来像一个
+// 不属于任何东西的浮标（审计 F-03）。
+//
+// 判据两条：① 齿轮紧跟着歌名（中间 8 像素）；② 齿轮**不在窗口右边**（那是改
+// 之前的样子，也是「靠右」那一版的画法）。
+func TestTheFullPlayerGearSitsRightAfterTheTitle(t *testing.T) {
+	_, tt, _ := fullTester(t)
+	openFull(t, tt)
+
+	gear, ok := tt.Find("全屏设置")
+	if !ok {
+		t.Fatalf("找不到「全屏设置」，文字有 %q", tt.Texts())
+	}
+	title, ok := tt.Find(fullTestTitle)
+	if !ok {
+		t.Fatalf("找不到歌名 %q，文字有 %q", fullTestTitle, tt.Texts())
+	}
+
+	// ① 歌名那一格**没有被拉宽**。
+	//
+	// ⚠️ 原来那一格是 `Grow(1)` + `MaxWidth(480)`：歌名只有「stereo16」那么宽，
+	// 框却铺成 480，于是齿轮被顶到 x=552（窗口 1200 宽的 47% 处），离歌名 421
+	// 像素——看起来像一个不属于任何东西的浮标（审计 F-03）。
+	//
+	// 上游那一组的歌名是 `<h2 className="truncate text-xl">`，**不 grow**——框就是
+	// 字那么宽（上限是那一组的 `max-w-2/5`）。
+	cap := float32(fullWinW) * 0.4
+	if title.W >= cap-1 {
+		t.Errorf("歌名那一格是 %.0f 宽（上限 %.0f）——它被拉宽了，齿轮也就被顶到离歌名"+
+			"很远的地方（改之前那一枚浮标在窗口 47%% 处，离歌名 421 像素）",
+			title.W, cap)
+	}
+
+	// ② 齿轮紧跟在歌名后面：中间 8 像素（上游的 `space-x-2`）。
+	const wantGap = 8
+	if d := absF(gear.X - (title.X + title.W) - wantGap); d > 1 {
+		t.Errorf("齿轮在 x=%.1f，歌名右沿 %.1f，中间那道缝 %.1f，want %d——"+
+			"齿轮是上游那一组的最后一个子元素（`space-x-2`），要紧跟着歌名",
+			gear.X, title.X+title.W, gear.X-(title.X+title.W), wantGap)
+	}
+
+	// ③ 齿轮不在窗口右边。
+	if gear.X > float32(fullWinW)-100 {
+		t.Errorf("齿轮在 x=%.1f，窗口宽 %d——它跑到窗口右边去了（改之前是浮在窗口"+
+			"47%% 处的那一枚浮标，靠右也不对：上游那一组是包着字的）",
+			gear.X, fullWinW)
+	}
+}
+
 // TestTheFullPlayerBottomBarPaddingAndMaxWidth 断底栏 `px-12 mb-4 max-w-6xl`。
 //
 // 上游 `index.tsx:394`：左右 48、离底 16、最宽 1152。判据分两处量：

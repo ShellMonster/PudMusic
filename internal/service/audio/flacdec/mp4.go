@@ -21,6 +21,11 @@ import (
 // stream are `00 00 00 20 66 74 79 70 69 73 6f 35 00 00 00 01 69 73 6f 35`
 // — a `ftyp` box, not the bare-FLAC `fLaC` marker. The captured bytes and the
 // notes are in `internal/service/bili/testdata/lossless/`.
+//
+// The measured stream decodes here: 48000 Hz, 2 channels, 24 bits. Its box
+// structure is "initialization segment + fragments" (`ftyp` → `moov` → `sidx`
+// → `moof`/`mdat`), so the `fLaC` sample entry and its `dfLa` box are in
+// `moov` — which is exactly what this source reads them from.
 type mp4Source struct {
 	rd   *m4a.Reader
 	info m4a.Info

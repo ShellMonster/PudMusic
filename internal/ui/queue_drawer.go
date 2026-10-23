@@ -16,6 +16,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
@@ -297,8 +298,16 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 	hovered := rowEl.Hovered()
 	switch {
 	case playing:
-		// Biu 的 `variant="flat" color="primary"`。
-		rowEl = rowEl.Background(t.Accent)
+		// Biu 的 `variant="flat" color="primary"`——**flat，不是实心**。
+		//
+		// ⚠️ **这一段原来是 `Background(t.Accent)`**（一整块实心主色，383×64），
+		// 而紧挨着的注释写着上游是 flat：注释和代码对不上（AGENTS §7）。实心那一版
+		// 也和 `DESIGN.md` §四 2026-10-22 拍板的那一条相反——「唯一剩下的主色
+		// 高亮是『正在播放』那一行：flat（主色当字），不是实心」。
+		//
+		// 所以这里走 `flatCurrent`（和侧栏菜单当前项、左栏那三处同一套）：底是
+		// 淡主色一层（深色下是中性灰），字是主色（见下面 `playlistTextColor`）。
+		rowEl = flatCurrent(c, rowEl)
 	case hovered:
 		// 悬停要有反应：这一行点得动（跳过去放它），没有反馈用户不知道它是能点的。
 		rowEl = rowEl.Background(t.SurfaceHover)
@@ -317,8 +326,10 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 			ui.Column(c).Grow(1).Gap(2).Children(func() {
 				ui.Text(c, row.item.Title).FontSize(scale.Font(c, 16)).
 					TextColor(playlistTextColor(t, playing)).SingleLine()
+				// 副题两态一样：次要色。**正在放那一行靠歌名说话**（主色当字），
+				// 副题再染一遍主色就成了两处都在喊。
 				ui.Text(c, itemSubtitle(row.item)).FontSize(scale.Font(c, 14)).
-					TextColor(playlistSubColor(t, playing)).SingleLine()
+					TextColor(t.TextMuted).SingleLine()
 			})
 			// Biu 的那一颗「⋯」是个 DropdownTrigger。这里给它挂系统的菜单
 			// （Element.Menu），点它和右键这一行是同一份菜单——`queueMenu` 只
@@ -378,22 +389,19 @@ func (s *Shell) viewQueueCover(c *ui.Context, item app.Item, playing, hovered bo
 	})
 }
 
-// playlistTextColor / playlistSubColor 是正在放的那一行里两行字的颜色。
+// playlistTextColor 是正在放的那一行里**歌名**的颜色。
 //
-// 正在放的那行是主色底（见上面），字就得是主色上的反色，不然浅色主题下是一行
-// 白底浅字——元素摆得好好的，屏幕上什么也看不见（同 viewToast 里那条注释）。
+// 正在放的那一行是 **flat**（主色当字 + 一层很淡的主色底，见上面），所以歌名
+// 取的是「主色当字色」那一档：`ink.AccentOn`——浅色下主色是亮绿，压在浅底上
+// 只有 1.9:1（读不出来），所以取那个压深到 ≥4.5:1 的变体；深色下就是主色本身。
+//
+// ⚠️ **和列表行 / 网格卡片那一档是同一个数**（`widgets/list` 的 `rowColors`）：
+// 「正在播放」在应用里只有一种说法——主色当字，不是实心底。
 func playlistTextColor(t *ui.Theme, playing bool) ui.Color {
 	if playing {
-		return t.AccentText
+		return ink.AccentOn(t)
 	}
 	return t.Text
-}
-
-func playlistSubColor(t *ui.Theme, playing bool) ui.Color {
-	if playing {
-		return t.AccentText
-	}
-	return t.TextMuted
 }
 
 // itemSubtitle 是歌名下面那一行。Biu 摆的是 UP 主名，我们这一层还没有那个字段，

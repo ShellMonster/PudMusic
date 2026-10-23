@@ -2,6 +2,7 @@ package bili
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"os"
@@ -39,8 +40,8 @@ const bareFLACMagic = "fLaC"
 // `fLaC` 走 `flacdec`。
 func TestTheLosslessStreamIsAnMP4Container(t *testing.T) {
 	for _, name := range []string{
-		"flac-stream-head-fragmented.bin",
-		"flac-stream-head-progressive.bin",
+		"flac-stream-head-dash.bin",
+		"flac-stream-head-isom.bin",
 	} {
 		t.Run(name, func(t *testing.T) {
 			head := readLosslessFixture(t, name)
@@ -68,25 +69,69 @@ func TestTheLosslessStreamIsAnMP4Container(t *testing.T) {
 // 写死它是为了让「B 站改形状」这件事变成一次**测试红**，而不是又一次
 // 「用户说 Windows 上放不出来」。
 func TestTheLosslessStreamHeadIsPinned(t *testing.T) {
-	// 分片 MP4 那一支：`ftyp` 的 brand 是 `iso5`，后面 `00 00 00 01` 是
-	// 下一个盒的长度（一个字节的兼容 brand `iso5`）。
-	wantFragmented := "000000206674797069736f3500000001"
-	// 非分片那一支：`ftyp` 的 brand 是 `isom`，后面 `00 00 02 00` 是兼容
-	// brand 列表的长度（512 字节：`isom iso2 mp41 iso5`）。
-	wantProgressive := "000000206674797069736f6d00000200"
+	// B 站 DASH 那一支（brand `iso5`，兼容 brand `dsms msi xdash`）：
+	// `ftyp` 后面紧跟 `00 00 00 01`（下一个盒的长度）+ `iso5`（兼容 brand）。
+	wantDash := "000000206674797069736f3500000001"
+	// `isom` 那一支（兼容 brand `isom iso2 mp41 iso5`）：
+	// `ftyp` 后面是 `00 00 02 00`（兼容 brand 列表的长度，512 字节）。
+	wantISOM := "000000206674797069736f6d00000200"
 
 	for _, tc := range []struct {
 		file string
 		want string
 	}{
-		{"flac-stream-head-fragmented.bin", wantFragmented},
-		{"flac-stream-head-progressive.bin", wantProgressive},
+		{"flac-stream-head-dash.bin", wantDash},
+		{"flac-stream-head-isom.bin", wantISOM},
 	} {
 		t.Run(tc.file, func(t *testing.T) {
 			head := readLosslessFixture(t, tc.file)
 			got := hex.EncodeToString(head[:16])
 			if got != tc.want {
 				t.Errorf("前 16 字节 = %s，want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTheLosslessStreamCarriesItsMovieBox 钉「头里有 `moov`」。
+//
+// 这一条不是装饰：**`fLaC` 采样条目和它里面的 `dfLa` 盒都在 `moov` 里**
+// ——那是 `flacdec` 的 MP4 那条路（`flacdec/mp4.go`）找 STREAMINFO 和帧的
+// 地方。少了 `moov`，`go-m4a` 就没有轨道可读，**整条流解不出来**。
+//
+// 实测两条流都是「初始化段 + 分片」：`ftyp` → `moov` → `sidx` →
+// `moof`/`mdat` 分片。`moov` 之前可以有 `free` 填充盒（B 站 DASH 那一支
+// 有两个）。
+func TestTheLosslessStreamCarriesItsMovieBox(t *testing.T) {
+	for _, tc := range []struct {
+		file string
+		// moov 在头里的偏移（实测）。
+		moovAt int
+	}{
+		{"flac-stream-head-dash.bin", 114},
+		{"flac-stream-head-isom.bin", 32},
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			head := readLosslessFixture(t, tc.file)
+			off := 0
+			sawMoov := false
+			for off+8 <= len(head) {
+				size := int(binary.BigEndian.Uint32(head[off : off+4]))
+				typ := string(head[off+4 : off+8])
+				if typ == "moov" {
+					sawMoov = true
+					if off != tc.moovAt {
+						t.Errorf("moov 在 %d，实测是 %d", off, tc.moovAt)
+					}
+					break
+				}
+				if size < 8 {
+					break
+				}
+				off += size
+			}
+			if !sawMoov {
+				t.Errorf("头 512 字节里没有 moov 盒：%q", boxTypes(head))
 			}
 		})
 	}
@@ -138,6 +183,21 @@ func TestTheLosslessStreamShapeFromTheRealResponse(t *testing.T) {
 	if got := containerOf(picked); got != "mp4" {
 		t.Errorf("容器 = %q，want mp4（实测：这条流是 MP4 盒里的 FLAC）", got)
 	}
+}
+
+// boxTypes 把头里的盒名列出来（给报错用）。
+func boxTypes(head []byte) []string {
+	var out []string
+	off := 0
+	for off+8 <= len(head) {
+		size := int(binary.BigEndian.Uint32(head[off : off+4]))
+		out = append(out, string(head[off+4:off+8]))
+		if size < 8 {
+			break
+		}
+		off += size
+	}
+	return out
 }
 
 // readLosslessFixture 读一份实测素材。
