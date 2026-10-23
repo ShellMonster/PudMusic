@@ -130,11 +130,15 @@ func (f *dateFilter) viewRangePicker(c *ui.Context) {
 	// 所以改成「面板的右边和触发键的右边对齐」（`AnchorBottomEnd` /
 	// `AnchorTopEnd`）：面板往左长，最小窗口下也还在窗口里。
 	ui.PopoverBase(c, trig, &f.open, func(panel ui.Element) {
-		panel.AttachTo(trig, ui.AnchorBottomEnd, ui.AnchorTopEnd).
+		// 外观走共享出口（`popupPanel`）：圆角 / 底 / 描边 / 阴影四件一起，
+		// 跟旁边那几个浮层（联想面板、歌词旁的旋钮、设置里的下拉）一模一样。
+		// 这一处原来自己抄了框架 `stylePanel` 的一份：圆角抄的是 `t.Radius+2`
+		//（跟着全局圆角走，默认 8 时是 10，不是 DESIGN 的 8），阴影抄的是固定
+		// 18% 的黑（深色下太淡，面板和底下的内容糊成一片）。
+		popupPanel(t, panel.
+			AttachTo(trig, ui.AnchorBottomEnd, ui.AnchorTopEnd).
 			MarginStart(8).
-			Padding(datePanelPad).Radius(t.Radius+2).
-			Background(t.Background).Border(1, t.Border).
-			Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.18))
+			Padding(datePanelPad))
 		f.viewRangePanel(c)
 	})
 }

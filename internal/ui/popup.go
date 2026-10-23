@@ -3,12 +3,14 @@
 // # 为什么要有这一处
 //
 // 框架的 `stylePanel`（`mygo/ui/widgets.go:623`）给浮层的是
-// 「Radius+2 / Background / Border / Shadow(0,6,20,0,黑18%)」。我们用
+// 「Radius+2 / Background / Border / Shadow(0,6,20,0,黑18%)」。我们曾经用
 // `SelectBase` / `PopoverBase` 自己拼面板时，**每一处都只抄了前三个**——阴影
 // 漏掉了。于是同一屏上，框架自己弹的浮层有影子，我们抄的那几个没有：两块面板
 // 挨着的时候，一块浮在内容上、一块像贴上去的，而那种差别没人说得清是哪不对。
 //
 // 票面要的是「两处有一处无」统一；这里收成一个出口，以后再加浮层就不会漏。
+// ⚠️ **自己拼面板的地方必须走这个出口**——`internal/ui/popup_test.go` 的
+// `TestEveryHandMadePopupHasAShadow` 扫源码盯着这件事（#229）。
 package ui
 
 import "github.com/egoist/mygo/ui"
