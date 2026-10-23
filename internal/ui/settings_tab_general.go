@@ -212,7 +212,7 @@ func (s *Shell) pickAudioQuality(c *ui.Context, st app.Settings, ro bool) {
 	// 一帧一读的局部量：控件建的时候把新值写进 `quality`，紧接着这里读到的就是它。
 	// 存不进去（只读）时下一帧重新从设置里读，下拉自己弹回去。
 	quality := st.AudioQuality
-	enumSelect(c, &quality, items, "选择音质偏好", selectWidth, ro)
+	enumSelect(c, &quality, items, "选择音质偏好", selectWidth, settingsControlMinW, ro)
 	if quality != st.AudioQuality {
 		s.applySetting("音质偏好", func(cur *app.Settings) { cur.AudioQuality = quality })
 	}

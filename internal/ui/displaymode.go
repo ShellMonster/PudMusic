@@ -52,8 +52,12 @@ func (s *Shell) displayView() list.View {
 // 跟着缩放走（理由见 `settingsSegment`）；预览三张要是不跟着走，这一格的两行
 // 就一宽一窄，右边缘参差（票 #235 / F-04 刚消灭掉的那件事）。
 func (s *Shell) viewDisplayMode(c *ui.Context, st app.Settings, ro bool) {
-	ui.Column(c).Key("setting:displayMode").Width(scale.Font(c, settingsControlW)).
-		MinWidth(scale.Font(c, settingsControlMinW)).Gap(space.Px8).Children(func() {
+	// ⚠️ **宽度按内容区算**（`settingsControlFitW`）：这一格跟着字号缩放走
+	// （1.4 倍时 420），而内容区最窄的那一档（窗口 900 + 侧栏拉到 480）只有
+	// 364——不按内容区算，右边那一截会被窗口切掉。
+	colW := s.settingsControlFitW(c, scale.Font(c, settingsControlW))
+	ui.Column(c).Key("setting:displayMode").Width(colW).
+		MinWidth(settingsControlMinW).Gap(space.Px8).Children(func() {
 		s.pickDisplayMode(c, st, ro)
 		viewDisplayModePreview(c, list.ViewOf(st.DisplayMode))
 	})

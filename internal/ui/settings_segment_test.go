@@ -13,6 +13,7 @@ package ui
 
 import (
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
@@ -104,6 +105,75 @@ type settingsCols struct {
 	contentR  float32 // 内容那一段（去内边距）的右沿
 }
 
+// settingsScenes 是**设置页最坏的几档配置**。
+//
+// ⚠️ **每一档都是用户碰得到的**：侧栏能拉到 480（`app.MaxSideMenuWidth`），
+// 窗口最小是 900（`WindowOptions.MinWidth`），系统字号最大 1.4 倍。
+//
+// ⚠️ **「侧栏 480」这一档是评审抓出来的那一档**：说明列的下限（320）加上控件列
+// 的下限（260）加上缝（24）是 604，而那一档的内容区只有 900 - 480 - 56 = **364**
+// ——**放不下**。框架的 flex **没有收缩**（一项的 `shrink` 零值是 0，
+// `mygo/ui/layout.go` 的 `resolveFlexible`），所以放不下就是**溢出**：控件列会被
+// 推出窗口右缘，用户看见的是半个按钮。
+var settingsScenes = []struct {
+	name  string
+	winW  int
+	side  float64
+	scale float32
+}{
+	{"1200 默认", 1200, app.DefaultSideMenuWidth, 1},
+	{"900 默认", 900, app.DefaultSideMenuWidth, 1},
+	{"900 侧栏 480", 900, app.MaxSideMenuWidth, 1},
+	{"900 侧栏 320", 900, 320, 1},
+	{"900 字号 1.4", 900, app.DefaultSideMenuWidth, 1.4},
+	{"900 侧栏 480 + 字号 1.4", 900, app.MaxSideMenuWidth, 1.4},
+	{"870 默认（比最小尺寸还窄）", 870, app.DefaultSideMenuWidth, 1},
+}
+
+// TestTheSettingsControlColumnIsNeverCutOff 钉住「控件列不会被推出内容区」。
+//
+// # 这是评审抓出来的那条回归
+//
+// 给说明列加了下限（`settingsDescMinW` = 320）之后，在**内容区放不下**
+// 320 + 24 + 260 = 604 的那些配置里（窗口 900 + 侧栏拉到 480、内容区只有 364；
+// 或者 1.4 倍字号下控件列要 420），说明列的**硬下限**把控件列**推出窗口右缘**：
+// 主题那排、显示样式那排、色卡、字体下拉全被切掉——而基线（改动前）在同样的
+// 配置下是**完整可见**的。
+//
+// # 判据是「控件列的右沿 ≤ 内容那一段的右沿」
+//
+// 这一条比「说明列有多宽」要紧：说明列窄一点只是难读，控件被切掉是**没法用**。
+//
+// ⚠️ **量法**：用 `settingRect` 把「主题模式」那一排**滚进可视区**再量它的盒子
+// ——不滚的话量到的是旧一帧的盒子，在滚动过的页面上会量错（评审那一版就量错过）。
+func TestTheSettingsControlColumnIsNeverCutOff(t *testing.T) {
+	for _, sc := range settingsScenes {
+		t.Run(sc.name, func(t *testing.T) {
+			tt, s, _, _ := shellOnSettings(t, sideSceneSettings(sc.side), at(sc.winW, 800),
+				withPrefs(mygoui.Preferences{TextScale: sc.scale}))
+			// 侧栏宽度有 200ms 的过渡，推钟让它到位（否则量的是动画中间那一档）。
+			for range 4 {
+				tt.Advance(200 * time.Millisecond)
+				tt.Frame()
+			}
+			homeFrame(tt)
+
+			ctrl := settingRect(t, tt, s, "主题模式")
+			right := settingsContentRight(sc.winW, sc.side)
+			if ctrl.X+ctrl.W > right+1 {
+				t.Errorf("控件列的右沿在 %.1f，而内容那一段的右沿是 %.1f——"+
+					"控件被推出内容区了（窗口 %d / 侧栏 %.0f / 字号 %.1f）",
+					ctrl.X+ctrl.W, right, sc.winW, sc.side, sc.scale)
+			}
+			if ctrl.W < settingsControlMinW-0.5 {
+				t.Errorf("控件列只有 %.1f 宽，want ≥ %.1f——窄过这个数，"+
+					"「跟随系统」那一档会被裁成半个词",
+					ctrl.W, float32(settingsControlMinW))
+			}
+		})
+	}
+}
+
 // TestTheSettingsDescriptionColumnKeepsItsWidth 钉住「说明列有最小宽度」。
 //
 // # 那一列原来是被挤扁的
@@ -115,92 +185,111 @@ type settingsCols struct {
 //
 // # 判据
 //
-//   - **900（最小尺寸）**：说明列不小于 `settingsDescMinW`，控件列还是基准宽 300，
-//     控件的右沿**没有超出**内容那一段的右沿（没被推出内容区）；
+//   - **900（最小尺寸）与 1200**：说明列不小于 `settingsDescMinW`；
 //   - **900 相对 1200 那一档**：说明列掉不超过 44%（票面那条验收）；
-//   - **870**：说明列**仍然**是 `settingsDescMinW`——这一条是**下限真的生效**的证据。
-//     900 那一档上 320 + 24 + 300 正好是内容那一段的宽，下限**刚好不触发**；要看见
-//     它触发，得再窄一点。870 是**刚好**放得下「说明列 320 + 缝 24 + 控件列 260」
-//     的那个宽度，比最小窗口窄 30。
+//   - **放不下的那些档**（侧栏 480 / 1.4 倍字号）：说明列让位，但**控件列完整**
+//     （上一条钉的是那一条）。
+//
+// ⚠️ **下限是条件性的**：内容区放不下 320 + 缝 + 控件列基准宽的时候**不给**
+// 下限——那一档宁可说明列窄一点，也不能把控件推出窗口（`settingsDescFloor`
+// 的注释写着整段来由）。
 func TestTheSettingsDescriptionColumnKeepsItsWidth(t *testing.T) {
-	const sideW = 200 // 默认侧栏宽（app.DefaultSideMenuWidth）
-
-	wide := settingsColsAt(t, 1200, sideW)
-	if wide.desc <= 0 {
+	wide := settingsDescWidth(t, 1200, app.DefaultSideMenuWidth, 1)
+	if wide <= 0 {
 		t.Fatalf("1200 那一档的说明列没量出来")
 	}
 
 	// 票面那条验收：最小尺寸那一档的说明列掉不超过 44%。
-	floor := wide.desc * 0.56
+	floor := wide * 0.56
 	if float32(settingsDescMinW) < floor {
 		t.Errorf("说明列的下限 %.1f 比 1200 那一档的 56%%（%.1f）还小——"+
 			"「掉到 44%%」那条验收过不去", float32(settingsDescMinW), floor)
 	}
 
-	for _, c := range []struct {
-		winW int
-		// wantMin 是这一档说明列的下限。
-		wantMin float32
-	}{
-		{900, settingsDescMinW}, // 最小尺寸
-		{870, settingsDescMinW}, // 更窄：下限要生效
-	} {
-		got := settingsColsAt(t, c.winW, sideW)
-		if got.desc < c.wantMin {
-			t.Errorf("窗口 %d：说明列是 %.1f 宽，want ≥ %.1f——说明列有最小宽度，"+
-				"控件列会让位（UI 报告 §4 的 F-27）",
-				c.winW, got.desc, c.wantMin)
+	for _, sc := range settingsScenes {
+		if sc.winW < 900 {
+			continue // 那一档说明列本来就放不下下限（见 `settingsDescFloor`）
 		}
-		if got.desc < floor {
-			t.Errorf("窗口 %d：说明列是 %.1f 宽，1200 那一档是 %.1f——掉到 %.0f%%，"+
-				"比 44%% 还狠（UI 报告 §4 的 F-27）",
-				c.winW, got.desc, wide.desc, 100*(1-got.desc/wide.desc))
-		}
-		// 900 那一档：控件列还是基准宽，右沿齐内容那一段的右沿。
-		if c.winW == 900 {
-			if got.ctrl != float32(settingsControlW) {
-				t.Errorf("窗口 %d：控件列是 %.1f 宽，want %.1f——最小尺寸那一档"+
-					"控件列还是基准宽", c.winW, got.ctrl, float32(settingsControlW))
+		desc := settingsDescWidth(t, sc.winW, sc.side, sc.scale)
+		if sc.side == app.DefaultSideMenuWidth && sc.scale == 1 {
+			// 默认侧栏 + 1.0 倍字号：内容区放得下 ⇒ 下限生效。
+			if desc < settingsDescMinW {
+				t.Errorf("%s：说明列是 %.1f 宽，want ≥ %.1f——说明列有最小宽度"+
+					"（UI 报告 §4 的 F-27）", sc.name, desc, float32(settingsDescMinW))
 			}
-			if got.ctrlRight > got.contentR+1 {
-				t.Errorf("窗口 %d：控件的右沿在 %.1f，而内容那一段的右沿是 %.1f——"+
-					"控件被推出内容区了", c.winW, got.ctrlRight, got.contentR)
+			if desc < floor {
+				t.Errorf("%s：说明列是 %.1f 宽，1200 那一档是 %.1f——掉到 %.0f%%，"+
+					"比 44%% 还狠（UI 报告 §4 的 F-27）",
+					sc.name, desc, wide, 100*(1-desc/wide))
 			}
 		}
 	}
 }
 
-// settingsColsAt 量某一档窗口下设置页的说明列、控件列和内容那一段的右沿。
+// sideSceneSettings 造一份「侧栏宽是 scene 那一档」的设置。
+func sideSceneSettings(side float64) app.Settings {
+	st := app.DefaultSettings("")
+	st.SideMenuWidth = side
+	return st
+}
+
+// settingsContentRight 是内容那一段（**去掉左右内边距**）的右沿。
+//
+// ⚠️ **按窗口坐标算，不受滚动影响**（设置页滚的是纵向）。
+func settingsContentRight(winW int, side float64) float32 {
+	avail := float32(winW) - float32(side)
+	block := float32(settingsContentMaxW)
+	if avail < block {
+		block = avail
+	}
+	// 内容那一段居中：左右各留 (可视区 - 内容段) / 2。
+	left := float32(side) + (avail-block)/2 + settingsContentPad
+	return left + block - 2*settingsContentPad
+}
+
+// settingsDescWidth 量某一档配置下设置页的说明列有多宽。
 //
 // ⚠️ **说明列的宽是推出来的**：它没有自己的元素（左边那个 `Column` 没有 Label），
 // 所以按「控件列的左沿 - 缝 - 内容那一段的内左沿」算。
-func settingsColsAt(t *testing.T, winW, sideW int) settingsCols {
+func settingsDescWidth(t *testing.T, winW int, side float64, scale float32) float32 {
 	t.Helper()
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), at(winW, 800))
+	tt, s, _, _ := shellOnSettings(t, sideSceneSettings(side), at(winW, 800),
+		withPrefs(mygoui.Preferences{TextScale: scale}))
+	for range 4 {
+		tt.Advance(200 * time.Millisecond)
+		tt.Frame()
+	}
 	homeFrame(tt)
 
 	head, ok := tt.Find("外观")
 	if !ok {
 		t.Fatalf("窗口 %d：设置页上没有「外观」那个分组标题，文字有 %q", winW, tt.Texts())
 	}
-	// 标题在内容那一段的内边距之内，所以它的左沿就是内容那一段的**内**左沿。
-	contentLeft := head.X
+	ctrl := settingRect(t, tt, s, "主题模式")
+	// 「外观」那个标题可能被滚出可视区了 ⇒ 用它的横坐标（不受纵向滚动影响）。
+	return ctrl.X - space.Px24 - head.X
+}
 
-	themeRow, ok := tt.Find("主题模式")
+// TestTheProxyTypeSelectKeepsItsOwnWidth 钉住「代理页那个下拉还是 240 宽」。
+//
+// ⚠️ **它不归设置页那一列管**：代理页是**两列布局**，那一格宽是上游的
+// `w-[240px]`（`proxySelectWidth`）。给 `enumSelect` 顺手加的
+// `MinWidth(settingsControlMinW)`（260）会把那个下拉撑成 260——右沿比它上面
+// 那行标题多出 20 像素，右边缘不再对齐（评审抓出来的那条 minor）。
+//
+// ⚠️ **所以下限是每一格自己给的**（`enumSelect` 的 `minW` 参数）：设置页那一列
+// 给 260，代理页给 0（不设）。
+func TestTheProxyTypeSelectKeepsItsOwnWidth(t *testing.T) {
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	openSettingsTab(t, tt, "代理设置")
+
+	sel, ok := tt.Find("选择代理类型")
 	if !ok {
-		t.Fatalf("窗口 %d：设置页上没有「主题模式」那一排，文字有 %q", winW, tt.Texts())
+		t.Fatalf("代理页上没有「选择代理类型」那个下拉，文字有 %q", tt.Texts())
 	}
-
-	// 内容那一段的右沿：那一段是居中的，宽是 min(上限, 可视区)。
-	avail := float32(winW - sideW)
-	block := float32(settingsContentMaxW)
-	if avail < block {
-		block = avail
-	}
-	return settingsCols{
-		desc:      themeRow.X - space.Px24 - contentLeft,
-		ctrl:      themeRow.W,
-		ctrlRight: themeRow.X + themeRow.W,
-		contentR:  contentLeft + block - settingsContentPad,
+	if sel.W != float32(proxySelectWidth) {
+		t.Errorf("代理类型那个下拉是 %.1f 宽，want %.1f——它是两列布局里的一格，"+
+			"宽度是上游的 w-[240px]，不归设置页那一列的下限管",
+			sel.W, float32(proxySelectWidth))
 	}
 }

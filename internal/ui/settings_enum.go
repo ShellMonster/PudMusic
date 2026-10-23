@@ -30,10 +30,15 @@ type enumItem[T comparable] struct {
 // 写着同一个词的时候，读屏软件念出来是「音质偏好、音质偏好」，用户不知道第二个
 // 是干什么的。
 //
+// ⚠️ **minW 是这一格自己的下限**（0 = 不设）：设置页那一列的下限是
+// `settingsControlMinW`（防「跟随系统」那一档被裁成半个词），而**代理页**那一格
+// 是两列布局、宽度是上游的 240（`w-[240px]`），不归那一列管——给它套上 260 的
+// 下限，下拉就会比它上面那行标题多出 20 像素，右边缘不再对齐。
+//
 // ⚠️ 收起来和展开都摆 label，所以 `value` 在设置里是 `auto` 这样的词、界面上是
 // 「自动」这样的字——两者之间的翻译只有这一份，`Changed()` 之后读回来的 value
 // 直接就是设置里该有的东西，中间没有第二次转换可以出错。
-func enumSelect[T comparable](c *ui.Context, value *T, items []enumItem[T], label string, width float32, ro bool) {
+func enumSelect[T comparable](c *ui.Context, value *T, items []enumItem[T], label string, width float32, minW float32, ro bool) {
 	t := c.Theme()
 	labelOf := func(v T) string {
 		for _, it := range items {
@@ -45,7 +50,7 @@ func enumSelect[T comparable](c *ui.Context, value *T, items []enumItem[T], labe
 	}
 
 	sel := ui.SelectBase(c, value)
-	trigger := sel.Trigger.Width(width).MinWidth(settingsControlMinW).Radius(t.Radius).
+	trigger := sel.Trigger.Width(width).MinWidth(minW).Radius(t.Radius).
 		Background(t.Surface).Border(1, t.Border).Padding(space.None, space.Px8).Disabled(ro).
 		Label(label)
 	trigger.Children(func() {

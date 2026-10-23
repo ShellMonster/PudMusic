@@ -91,6 +91,20 @@ type settingsPageState struct {
 	// scrollEl 是这一页那个滚动容器（`ui.Scroll`）的盒子：量「视野」要靠它
 	// （行的盒子是窗口坐标，容器的盒子也是，两个一比就知道它在不在视野里）。
 	scrollEl ui.Element
+
+	// descFloor 是说明列这一帧的**下限**（0 = 不给下限）。
+	//
+	// ⚠️ **每帧算一次**，不是每一行算一次：它取决于**内容区有多宽**
+	// （窗口宽 - 侧栏宽 - 内边距），而这一页的每一行都是同一个内容区。
+	// 算一次存下来，各行读它（见 `settingsDescFloor`）。
+	descFloor float32
+
+	// contentW 是内容那一段（**去掉左右内边距**）的宽。
+	//
+	// ⚠️ **控件列的宽度要钳在它里面**：跟字号缩放走的那一列（分段控件）在
+	// 1.4 倍下是 420，而内容区最窄的那一档（窗口 900 + 侧栏 480）只有 364——
+	// 不钳的话那一列就**比内容区还宽**，右边被窗口切掉。
+	contentW float32
 }
 
 // settingsFocus 是「从别处跳过来时要指的那一项」的身份。
@@ -158,9 +172,22 @@ const (
 // （15 个字，14px 下 210 像素），320 是它的 1.5 倍——再窄它就折行，而那一折
 // 让**整行**变高，右边那个控件也跟着往下挪半格，一页设置于是参差不齐。
 //
-// ⚠️ **这个下限不是白给的**：行放不下它的时候，**右边那列控件先收窄**
-// （框架的 flex 会先满足这里的 `MinWidth`），说明列不会被压到 320 以下。
-// 收窄也有下限（`settingsControlMinW`），不然「跟随系统」那一档会被裁成半个词。
+// 🔴 **这个下限是「有条件」的**（`settingsDescFloor`）：只有内容区**放得下**
+// 它的时候才给。放不下时**不给**——那一档回到改动前的样子（说明列被压扁，
+// 右边那列控件完整可见）。
+//
+// ⚠️ **为什么不能无条件给**：框架的 flex **没有收缩**——一项的 `shrink` 零值
+// 就是 0（`mygo/ui/layout.go` 的 `resolveFlexible`：`factor = shrink × inner`），
+// 所以**放不下就是溢出**：控件列会被顶出窗口右缘。于是「说明列至少 320 +
+// 控件列至少 260 + 缝 24 = 604」在内容区窄过 604 时，用户看见的是半个按钮。
+// （`MinWidth` 还是**硬下限**：`mygo/ui/layout.go` 里 `minW` 一旦存在就接管
+// 那一项的自动最小宽，没有才用内容的 min-content 宽——所以 `MinWidth(0)`
+// 不是「没有下限」，而是把下限变成 0。）
+//
+// 合法配置里最窄的那一档是**窗口 900 + 侧栏拉到最大 480**
+// （`app.MaxSideMenuWidth`），内容区只有 900 - 480 - 56 = 364 ⇒ 604 放不下。
+// 另一档是**窗口 900 + 系统字号 1.4 倍**：控件列跟着字号变宽（420），于是
+// 320 + 24 + 420 = 764 > 644 ⇒ 同样放不下。
 //
 // ⚠️ **报告 §4 那个「掉到 44%」是按一个算错的数算出来的**：它说 900 那一档的
 // 「设置栏宽」是 668，于是说明列是 290。真窗口那张 900×560 的截图上量出来的
@@ -178,9 +205,97 @@ const settingsDescMinW = 320
 // 控件列窄过这个数，「跟随系统」就被裁成「跟随系…」——用户看见半个词，第一反应
 // 是这个应用坏了，而不是「这个按钮窄了一点」。
 //
-// ⚠️ **只有窄到装不下说明列的下限时才会走到这里**：900 宽（最小尺寸）那一档
-// 刚好是 320 + 24 + 300 = 644（内容那一段的宽），控件列还是基准宽 300。
+// ⚠️ **它不跟字号缩放走**：1.4 倍时「跟随系统」要 106 像素一格，三格加缝是 327
+// ——那个数当硬下限的话，内容区窄过 327 + 24 时又会**溢出**。所以下限取**固定**
+// 的 260（1 倍字号的最小值），而**基准宽**才跟缩放走。
+//
+// ⚠️ **它只在控件列被内容区挤窄时才会被撞上**：900 宽（最小尺寸）、默认侧栏
+// 那一档是 320 + 24 + 300 = 644（内容那一段的宽），控件列还是基准宽 300；
+// 而「侧栏拉到 480」那一档内容区只有 364，控件列被挤到 320.4（`settingsControlFitW`
+// 算出来的），还是高于 260 ⇒ 这一档「跟随系统」那三个字也放得下。
 const settingsControlMinW = 260
+
+// settingsDescFloor 是说明列这一帧的**下限**。
+//
+// 🔴 **下限是条件性的**：只有内容区**放得下**它的时候才给（0 = 不给）。
+//
+// 「放得下」= 内容区（去掉内边距）够不够 `说明列下限 + 缝 + 控件列的基准宽`。
+// 放不下时**不给下限**——那一档就回到改动前的样子：说明列被压扁，
+// **右边那列控件完整可见**（评审抓的就是这一点：控件被推出窗口右缘、
+// 半个按钮看不见，比说明列窄一点坏得多）。
+//
+// ⚠️ **为什么不能用 `MinWidth` 一给了之**：框架的 flex **没有收缩**——一项的
+// `shrink` 零值就是 0（`mygo/ui/layout.go` 的 `resolveFlexible`：
+// `factor = shrink × inner`），所以**放不下就是溢出**：控件列被顶出窗口右缘。
+//
+// ⚠️ **而且 `MinWidth(0)` 不是「没有下限」**：框架里 `minW` 一旦存在就接管那一项
+// 的**自动最小宽**（`mygo/ui/layout.go` 的 `flexLayout`：有 `minW` 就用它，
+// 没有才用内容的 min-content 宽）。中文可以逐字换行，内容的 min-content 是**一个
+// 字宽**；给了 0 就连那一个字都不剩，整行塌成 0 高——那一行在画面上整个消失。
+//
+// ⚠️ **控件列的基准宽取「分段控件那一族」的**（`scale.Font(c, settingsControlW)`）：
+// 它是这一列里唯一跟着字号缩放走的（另外几行都固定 300），所以它是最坏的一档。
+func (s *Shell) settingsDescFloor(c *ui.Context, st app.Settings) float32 {
+	need := float32(settingsDescMinW) + space.Px24 + scale.Font(c, settingsControlW)
+	if s.settingsContentInnerW(c, st) < need {
+		return 0
+	}
+	return settingsDescMinW
+}
+
+// settingsContentInnerW 是设置的内容那一段（**去掉左右内边距**）的宽。
+//
+// 可视区 = 窗口宽 - 侧栏宽；内容段收在 min(900, 可视区) 里（`MaxWidth` 是上限，
+// 居中）。
+func (s *Shell) settingsContentInnerW(c *ui.Context, st app.Settings) float32 {
+	winW, _ := c.Size()
+	avail := winW - s.settingsSideWidth(st)
+	block := float32(settingsContentMaxW)
+	if avail < block {
+		block = avail
+	}
+	return block - 2*settingsContentPad
+}
+
+// settingsControlFitW 是控件列在**这一帧**能占的宽（上限）。
+//
+// 🔴 **为什么必须自己算**：框架的 flex **没有收缩**——一项的 `shrink` 零值是 0
+// （`mygo/ui/layout.go` 的 `resolveFlexible`：`factor = shrink × inner`，而
+// `shrink` 的零值就是 0），所以**放不下就是溢出**：控件列会被推出窗口右缘，
+// 用户看见的是半个按钮。
+//
+// 算式：控件列 ≤ 内容区宽 - 缝 - 说明列的最小宽。说明列的最小宽是**一个字**
+// （中文可以逐字换行，内容的 min-content 就是一个字宽），除非这一帧给了它
+// 更大的下限（`settingsDescFloor`）。
+//
+// ⚠️ **只有跟字号缩放走的那一族走这个算式**（分段控件，1.4 倍时 420）：固定的
+// 300 在合法配置里放得下（最窄那一档是窗口 900 + 侧栏 480，内容区 364 >
+// 300 + 24 + 一个字）。
+func (s *Shell) settingsControlFitW(c *ui.Context, base float32) float32 {
+	descMin := scale.Font(c, 14) // 说明列的最小宽：一个字
+	if s.settings.descFloor > 0 {
+		descMin = s.settings.descFloor
+	}
+	room := s.settings.contentW - space.Px24 - descMin
+	if room < 0 {
+		room = 0
+	}
+	return min(base, room)
+}
+
+// settingsSideWidth 是这一帧侧栏占多宽。
+//
+// ⚠️ **取两者的较大值**：设置里那个数（`sideTargetWidth`）是**目标**，而拖动时
+// 画出来的是指针在哪儿（`s.sideWidth`）；侧栏还有 200ms 的过渡，动画期间实际
+// 宽度在动。取大的一档 ⇒ **内容区算得偏小** ⇒ 说明列的下限早一点让位 ⇒
+// 控件列不会被推出内容区。
+func (s *Shell) settingsSideWidth(st app.Settings) float32 {
+	w := sideTargetWidth(st)
+	if s.sideWidth > w {
+		w = s.sideWidth
+	}
+	return float32(w)
+}
 
 // settingsContentPad 是设置的内容那一段左右与下边的内边距。
 //
@@ -262,6 +377,11 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 	// 主题按钮组，主题那三档就在这一页自己这儿（`pickTheme`，`app/settings.go`
 	// 那边也这么写）。它是在说「别让控件看起来还能按」这件事，而举的例子举错了。
 	ro := s.app.SettingsReadOnly()
+
+	// 说明列这一帧的下限（**有条件**：内容区放得下才给，见 `settingsDescFloor`）。
+	s.settings.descFloor = s.settingsDescFloor(c, st)
+	// 内容那一段的宽（控件列的宽度要钳在它里面）。
+	s.settings.contentW = s.settingsContentInnerW(c, st)
 
 	scroll := ui.Scroll(c).Key("settings-scroll").Grow(1).TrackScroll(&s.settings.scroll)
 	// 记下这个滚动容器的盒子：把指着的那一行滚进视野时要拿它当「视野」（见
@@ -484,7 +604,22 @@ func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc s
 		// ⚠️ **说明列有最小宽度**（`settingsDescMinW`）：控件那一列是定宽的，
 		// 说明这一列吃剩下的——没有这个下限，窗口一窄说明就被压扁（理由见那个
 		// 常量的注释）。
-		ui.Column(c).Grow(1).MinWidth(settingsDescMinW).Children(func() {
+		//
+		// ⚠️ **下限是有条件的**（`s.settings.descFloor`，每帧算一次）：内容区
+		// 放不下它的时候**不给**——那一档宁可说明列窄一点，也不能把右边那列
+		// 控件顶出窗口（`settingsDescFloor` 的注释写着整段来由）。
+		//
+		// 🔴 **下限是 0 的时候不许链 `MinWidth(0)`**：框架里 `minW` 一旦存在就
+		// 接管这一项的**自动最小宽**（`mygo/ui/layout.go` 的 `flexLayout`：
+		// 有 `minW` 就用它，没有才用内容的 min-content 宽）。于是
+		// `MinWidth(0)` 会把说明列的最小宽变成 **0**——中文可以逐字换行，
+		// 内容的 min-content 是一个字宽（19.6），给了 0 就连那一个字都不剩，
+		// 整行塌成 0 高，**「主题」那一行在画面上整个消失**。
+		descCol := ui.Column(c).Grow(1)
+		if s.settings.descFloor > 0 {
+			descCol = descCol.MinWidth(s.settings.descFloor)
+		}
+		descCol.Children(func() {
 			title()
 			ui.Text(c, desc).FontSize(scale.Font(c, 14)).TextColor(t.TextMuted).Wrap()
 		})
@@ -542,14 +677,17 @@ func (s *Shell) settingsSegment(c *ui.Context, key, group string, w float32, lab
 	// 一条线，就靠它断（见 `TestTheSettingsControlsShareOneBaseline`）。
 	row := ui.Row(c).Key(key).Label(group).Gap(space.Px4)
 	if w > 0 {
-		row = row.Width(w)
+		// ⚠️ **按内容区算宽度**（`settingsControlFitW`）：这一族的宽度跟着字号
+		// 缩放走（1.4 倍时 420），而内容区最窄的那一档（窗口 900 + 侧栏拉到
+		// 480）只有 364——不按内容区算，右边那一截会被窗口切掉。
+		row = row.Width(s.settingsControlFitW(c, w))
 	} else {
 		row = row.FillWidth()
 	}
 	// ⚠️ **下限**：行放不下说明列的最小宽度时，这一列先收窄（框架的 flex 会先
 	// 满足说明列那个 `MinWidth`）——但不低于 `settingsControlMinW`，不然「跟随
 	// 系统」那一档会被裁成半个词（那个常量的注释写着整段来由）。
-	row = row.MinWidth(scale.Font(c, settingsControlMinW))
+	row = row.MinWidth(settingsControlMinW)
 	row.Children(func() {
 		for i, text := range labels {
 			b := flatButton(c, text).Grow(1).Radius(6).Disabled(ro)
