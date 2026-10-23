@@ -200,6 +200,9 @@ func flatCurrentText(t *ui.Theme, current bool) ui.Color {
 // 跟着淡下来之后，字（`ink.Disabled`）压在上面只剩 2.6:1 / 2.9:1，掉到 3:1
 // 以下。设置页那两处档位在只读时改用 `flatCurrent`——见 `settings_page.go` 的
 // `pickSelected`。
+//
+// ⚠️ **只读那一档的画面上是「灰底 + 灰字」**：`flat.Dimmed` 排在后面，把
+// `flatCurrent` 铺的主色那一档的字换成了禁用灰，所以**主色在只读时不出现**。
 func flatSolid(c *ui.Context, e ui.Element) ui.Element {
 	t := c.Theme()
 	return e.Background(t.Accent).TextColor(t.AccentText)

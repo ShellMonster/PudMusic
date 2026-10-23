@@ -289,6 +289,11 @@ func (s *Shell) settingRowEl(c *ui.Context, title func(), desc string, control f
 //
 // 上游 Biu 这一排是 HeroUI 的 `RadioGroup`，而 HeroUI 的 `Radio` 选中项就是
 // `bg-primary` 实心底 + `text-primary-foreground`——所以这一档是照上游的。
+//
+// ⚠️ **和上游 F-17「设置页同页两种分段控件」互相拆台**（票 #239 记下来的）：
+// F-17 建议把这一排也换成框架 `ui.Segmented`（**灰轨 + 白色滑块**，和同一页
+// 「数据显示样式」那三档一样）——F-17 一做，这一档就被推倒，而「被选中的选项」
+// 会变成**白色滑块**那一档。**F-17 没做之前，别把这一档当成定案。**
 func (s *Shell) pickTheme(c *ui.Context, st app.Settings, ro bool) {
 	// ⚠️ 宽度跟着字号缩放走：1.4 倍时四个字要 106 像素，三个各 100 的格子
 	// 装不下，选中项会被裁成「跟随系…」（评审在 1.4 倍下量到过）。
@@ -316,8 +321,15 @@ func (s *Shell) pickTheme(c *ui.Context, st app.Settings, ro bool) {
 // 底变成「主色 × 0.5 叠页面底色」，字换成 `ink.Disabled` 之后压在上面只有
 // **2.6:1（深色）/ 2.9:1（浅色）**，掉到 3:1 以下（那一档是非正文要的门槛）。
 //
-// 中性灰那一档乘完 50% 之后是 4.7:1 / 3.3:1 —— 读得出来，而**只读的时候这一档
-// 本来就不该那么响**。
+// 中性灰那一档乘完 50% 之后是 **4.43:1（深色）/ 3.28:1（浅色）** —— 读得出来，
+// 而**只读的时候这一档本来就不该那么响**。
+//
+// ⚠️ **画面上那一格是「灰底 + 灰字」，一点绿都没有**：字是 `flat.Dimmed` 换的
+// （`ink.Disabled`），而它排在 `flatCurrent` **之后**——所以主色那一档的字在只读
+// 时被盖掉了。实测：浅色底 #ededef / 字 #828285，深色底 #2b2b2e / 字 #909092。
+//
+// ⚠️ **别照着「只读时是灰底 + 主色的字」去写文档**（评审抓出来过一条）：那一档
+// 的**底**是中性灰，**字**是禁用灰——主色在只读时**根本不出现**。
 func (s *Shell) pickSelected(c *ui.Context, b ui.Element, ro bool) ui.Element {
 	if ro {
 		return flatCurrent(c, b)

@@ -32,6 +32,7 @@ import (
 	"go/parser"
 	"go/token"
 	"image"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -486,7 +487,10 @@ func TestThePlayBarShadowComesFromTheShadowPackage(t *testing.T) {
 		t.Error("playbar.go 没有 import `internal/ui/widgets/shadow`——" +
 			"播放条那道影该从那个包里取")
 	}
-	if !callsName(f, "PlayBar") {
+	// ⚠️ **认的是「这个包的调用」**（`shadow.PlayBar(...)`），不是「有个叫 PlayBar
+	// 的东西被调了」——`callsName` 不认是谁调的，用在界面层会被同名的东西喂饱
+	// （见下面 `callsName` 的注释）。
+	if !callsShadowTier(f, shadowLocalName(f), "PlayBar") {
 		t.Error("playbar.go 没有调 `shadow.PlayBar(...)`——" +
 			"播放条那两道影（外层 2xl + Card 的 sm）是上游那个结构，取值走那一个出口")
 	}
@@ -517,8 +521,12 @@ func TestThePlayBarShadowComesFromTheShadowPackage(t *testing.T) {
 
 // callsName 报这个语法树里有没有调过那个名字的函数。
 //
-// ⚠️ **认的是「被调用的名字」**，不认是谁调的：包里的函数是 `Tailwind2XL(e)`
-// 那样直接调的，外面是 `shadow.PlayBar(...)` 那样带包名的——两种都算。
+// ⚠️ **认的是「被调用的名字」，不认是谁调的**——所以它**只许用在那个包内部**
+// （`PlayBar` 调 `Tailwind2XL(e)`，是光秃秃一个 Ident）。
+//
+// 🔴 **界面层的调用不许用它**：同名的框架 API 会把判据喂饱——`ui.Popover`、
+// `anchor.Tooltip`、`ui.Modal` 都和我们的档同名，认名字的话把真调用点删掉它照样
+// PASS（评审抓出来的 major）。界面层用 `callsShadowTier`（认 `shadow.<档名>`）。
 func callsName(n ast.Node, name string) bool {
 	found := false
 	ast.Inspect(n, func(m ast.Node) bool {
@@ -548,23 +556,32 @@ func callsName(n ast.Node, name string) bool {
 // 有调用点**（「定义了没人用的档比没有档更坏」）。
 // ─────────────────────────────────────────────────────────────────────────────
 
-// uiGoFiles 是 `internal/ui` 下面要扫的那些文件（含 `widgets/` 里的）。
+// uiGoFiles 是 `internal/ui` 下面要扫的那些文件（**递归**，含各个子包里的）。
 //
 // ⚠️ **不含 `_test.go`**：测试自己会造元素、也会调框架那套 API，扫进去是噪音。
+//
+// ⚠️ **递归，不许用 glob 凑**：Go 的 `filepath.Glob` 里 `*` **不跨 `/`**，所以
+// `*.go` + `widgets/*/*.go` 那两条会漏掉 `guard/guard.go` 和 `iconset/iconset.go`
+// ——判据比它自己写的窄（评审抓出来的）。今天那两处没有元素级的影，结论不受
+// 影响，但**守卫得守它声称守的那一片**。
 func uiGoFiles(t *testing.T) []string {
 	t.Helper()
 	var out []string
-	for _, pat := range []string{"*.go", "widgets/*/*.go"} {
-		matches, err := filepath.Glob(pat)
+	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
-		for _, m := range matches {
-			if strings.HasSuffix(m, "_test.go") {
-				continue
-			}
-			out = append(out, m)
+		if d.IsDir() {
+			return nil
 		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		out = append(out, path)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	return out
 }
@@ -616,6 +633,15 @@ func TestNoElementShadowIsWrittenAtTheCallSite(t *testing.T) {
 // 「这一档可以用」，照着它抄一遍，而它画出来的东西上游从来没有过。
 //
 // 票 #239 删掉了三档没有调用点的：`TailwindSM` / `TailwindXL` / `HeroLarge`。
+//
+// 🔴 **调用点必须认得出是「这个包的调用」**（评审抓出来的 major）：只认「被调用
+// 的名字」的话，`ui.Popover`（框架的浮层）、`anchor.Tooltip`、`ui.Modal` 这些
+// **同名**的框架 API 会把判据喂饱——把 `shadow.Popover` / `shadow.Tooltip` /
+// `shadow.Modal` 的真调用点全删掉，这条判据仍然 PASS，而它声称要挡的正是
+// 「这一档没人用了」。
+//
+// 所以这里认的是 **`shadow.<档名>(...)` 这个形状**：那个标识符得是**这个包在
+// 那个文件里的本地名**（没起别名就是 `shadow`）。
 func TestEveryShadowTierHasACallSite(t *testing.T) {
 	fset := token.NewFileSet()
 	pkg, err := parser.ParseFile(fset, "widgets/shadow/shadow.go", nil, 0)
@@ -648,8 +674,13 @@ func TestEveryShadowTierHasACallSite(t *testing.T) {
 		if err != nil {
 			t.Fatalf("解析 %s 失败：%v", name, err)
 		}
+		// 这个包里那些档在**这个文件**里的本地名（没 import 就没有）。
+		local := shadowLocalName(f)
+		if local == "" {
+			continue
+		}
 		for _, tier := range tiers {
-			if callsName(f, tier) {
+			if callsShadowTier(f, local, tier) {
 				used[tier] = true
 			}
 		}
@@ -662,4 +693,60 @@ func TestEveryShadowTierHasACallSite(t *testing.T) {
 				"而它画出来的东西上游从来没有过）", tier)
 		}
 	}
+}
+
+// shadowPkgPath 是那个包的 import 路径。
+const shadowPkgPath = `"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"`
+
+// shadowLocalName 是 `widgets/shadow` 在这个文件里的**本地名**。
+//
+// ⚠️ **认的是 import 路径，不是包名**：包名是 `shadow`，但**起别名**的时候本地名
+// 就不是它了（`import sh "…/widgets/shadow"` → 本地名 `sh`）。认包名的话，起了
+// 别名的文件会被算成「没调用」，那一档就会误报成死档。
+//
+// 没有 import 那个包就返回空串。
+func shadowLocalName(f *ast.File) string {
+	for _, imp := range f.Imports {
+		if imp.Path.Value != shadowPkgPath {
+			continue
+		}
+		if imp.Name != nil {
+			return imp.Name.Name
+		}
+		return "shadow"
+	}
+	return ""
+}
+
+// callsShadowTier 报这个文件里有没有调过 `local.<tier>(...)`。
+//
+// ⚠️ **只认 `local.<tier>(...)` 这个形状**，不认光秃秃一个名字：
+//
+//   - `ui.Popover(...)` / `anchor.Tooltip(...)` / `ui.Modal(...)` 这些**同名**的
+//     框架 API 和这一档没有关系（评审抓出来的 major：认名字的话，把真调用点删
+//     掉这条判据照样 PASS）。
+//   - 包**内部**的调用（`PlayBar` 调 `Tailwind2XL(e)`，是光秃秃一个 Ident）
+//     也不算——那是这个包自己内部的事，不是「界面层的调用点」。
+func callsShadowTier(f *ast.File, local, tier string) bool {
+	found := false
+	ast.Inspect(f, func(m ast.Node) bool {
+		if found {
+			return false
+		}
+		call, ok := m.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != tier {
+			return true
+		}
+		x, ok := sel.X.(*ast.Ident)
+		if !ok || x.Name != local {
+			return true
+		}
+		found = true
+		return false
+	})
+	return found
 }
