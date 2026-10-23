@@ -1286,3 +1286,68 @@ func frac(f float32) float32 { return f - float32(int(f)) }
 
 func clampX(img *image.RGBA, x int) int { return min(max(x, img.Rect.Min.X), img.Rect.Max.X-1) }
 func clampY(img *image.RGBA, y int) int { return min(max(y, img.Rect.Min.Y), img.Rect.Max.Y-1) }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 登录 / 退出两枚图标：一眼要能分清
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheLoginAndLogoutGlyphsAreNotTheSamePicture 钉住「登录和退出不是同一张图」。
+//
+// # 为什么这条不是「两个名字不一样」就够了
+//
+// 原来那两枚是 `System/login-circle-line.svg` 和 `System/logout-circle-line.svg`：
+// **同一个圆圈，箭头一个朝右一个朝左**——文件不一样、名字不一样、尺寸也一样，
+// 而用户在 18px 上**分不出**（UX 报告 §3-A 的 A1：「顶栏那枚没有文字，
+// 按的是登录还是退出全靠图形认」）。
+//
+// 所以判据是**画出来的像素差多少**：把两枚各画一次（同一个位置、同一个字号），
+// 数一数有多少个像素不一样。
+//
+// ⚠️ **阈值 150 是量出来的**，不是拍的：
+//
+//	新的这一对（qr-code / logout-circle-r）：差 217 个像素
+//	旧的那一对（login-circle / logout-circle）：差  74 个像素
+//
+// 18px 的图标画下来满打满算三百来个像素，74 个差别就是「同一个圆圈换个箭头
+// 朝向」——那正是分不清的那一种；217 是「两样东西」。判据取 150，两边都离得开。
+//
+// ⚠️ **这一条断的是「差得多」，不是「一眼认得出」**：后者是人的判断，出图
+// （深浅两套）才是它的证据。这里只防住「有人又换回那一对只差一个箭头的」。
+func TestTheLoginAndLogoutGlyphsAreNotTheSamePicture(t *testing.T) {
+	const wantDiff = 150
+
+	login := renderIconAt18(t, iconLogin)
+	logout := renderIconAt18(t, iconLogout)
+
+	diff := 0
+	for y := 0; y < 64; y++ {
+		for x := 0; x < 64; x++ {
+			if login.At(x, y) != logout.At(x, y) {
+				diff++
+			}
+		}
+	}
+	if diff < wantDiff {
+		t.Errorf("登录和退出那两枚图标在 18px 下只差 %d 个像素（want ≥ %d）——"+
+			"它们多半是「同一个图形差一个方向」，而顶栏那两枚**没有文字**，"+
+			"用户分不出按的是哪一个（文件分别是 %s / %s）",
+			diff, wantDiff, iconLogin, iconLogout)
+	}
+}
+
+// renderIconAt18 把一枚图标画在一块 64×64 的画布上，返回画完的图。
+//
+// ⚠️ **两枚必须画在同一处**：位置差一点点，边缘的抗锯齿就全对不上，量出来的
+// 「差别」里就全是位置而不是图形。所以这里给的是同一个尺寸、同一段 view。
+func renderIconAt18(t *testing.T, name string) image.Image {
+	t.Helper()
+	b := newTestShell(t, at(64, 64), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			mygoui.Icon(c, iconset.Must(name)).FontSize(iconMd).TextColor(c.Theme().Text)
+		}
+	}))
+	b.tt.Frame()
+	img := b.tt.Image()
+	b.Close()
+	return img
+}

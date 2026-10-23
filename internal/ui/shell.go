@@ -287,6 +287,12 @@ type Shell struct {
 	// 两组一份是因为两组各排各的（见 sidebar_favorites.go）。
 	sideLists [favGroups]ui.ListState
 
+	// favPanelOpen 是**折叠态**那枚「收藏夹」图标点开之后的那层浮层开没开。
+	//
+	// ⚠️ 它只属于折叠态：展开态的收藏夹本来就在侧栏里，不需要浮层（见
+	// sidebar_favorites.go 的 viewFavoritesCollapsed）。
+	favPanelOpen bool
+
 	// 播放列表抽屉这一摊。**同样只由 view 在主线程上读写**。
 	//
 	// drawerOpen 是开没开。它不进设置：抽屉是「我现在要看队列」这一下的事，
@@ -1354,6 +1360,16 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 「上一帧在哪条路由」来判断「这一帧是不是刚进这一页的第一帧」——所以
 	// 这个数要等到整帧画完才更新。
 	s.lastPath = s.router.Path()
+
+	// ⚠️ **离开设置页就把「指着的那一行」收掉**：那根手指是给「刚从下载记录页
+	// 跳过来」的人看的（见 goToDownloadDirSetting），留着的话，用户下次自己
+	// 从侧栏进设置页，「下载目录」那一行的标题还是主色——他没跳过来过。
+	//
+	// 排在最后是安全的：这一帧的页面已经画完了（那一格已经被指着画过一次），
+	// 而设置页自己那一格是**切走**才清的（见 syncSettings）。
+	if s.lastPath != settingsPath && s.settings.focus != settingsFocusNone {
+		s.settings.focus = settingsFocusNone
+	}
 }
 
 // pageJustShown 报「这一帧是刚进这一页的第一帧」。

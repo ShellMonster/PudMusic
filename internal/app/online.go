@@ -36,7 +36,10 @@ import (
 )
 
 // errStreamingMissing 是「在线播放没挂上」。见 `MountStreaming`。
-var errStreamingMissing = errors.New("在线播放还没接上")
+//
+// ⚠️ **这句是给用户看的**（播放失败时它就是失败原因），不许说「还没接上」
+// （票 #242，UX 报告 §3-F 的 F2）。
+var errStreamingMissing = errors.New("在线播放暂时用不了")
 
 // Streaming 是取流这一摊事的依赖。零值不挂——界面要判空。
 type Streaming struct {
@@ -144,7 +147,7 @@ func (a *App) rememberAudioQuality(q bili.AudioQuality) {
 
 // restreamOnline 按新档重新取流，从原来的播放位置接着播。
 //
-// 先判「其实没变」：用户点的那一档拿回来的还是同一档（B 站只给了 320K，
+// 先判「其实没变」：用户点的那一档拿回来的还是同一档（B 站只给了 192K，
 // 用户从自动点「高音质」），那就什么都别做——为一个听不出区别的改动
 // 打断一首歌，比点了没反应更糟。
 //

@@ -201,7 +201,8 @@ func (s *Shell) openFolderEdit(id int64) {
 	// ⚠️ **没挂上就别开弹窗**：弹窗开着而提交那一下什么都不会发生（后台那一层
 	// 直接就走了），用户看到的是「点了提交，界面一点反应都没有」。
 	if !s.app.CollectionsMounted() {
-		s.addToast("收藏夹还没接上：这一页要 B 站接口", notice.Warning)
+		// ⚠️ **不许说「还没接接口」**（票 #242，UX 报告 §3-F 的 F2）。
+		s.addToast("收藏夹现在打不开", notice.Warning)
 		return
 	}
 	e := newFolderEdit()

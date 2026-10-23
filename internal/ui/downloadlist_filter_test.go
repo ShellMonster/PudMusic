@@ -248,7 +248,10 @@ func TestTheEmptyCopyAfterFilteringIsNotTheCopyForNoDownloads(t *testing.T) {
 // ⚠️ 它和下一条是一对：**筛出来的空要摆**（用户得回得去），**真的没下载不摆**
 // （没得可回）。只钉一条的话，「一空就收起来」那个实现照样过一半。
 func TestTheEmptyPageHasNoFilterToPoke(t *testing.T) {
-	_, tt := newRows(t)
+	// ⚠️ **有目录**：这一条断的是「真的没下载过」那一支的文案，而那一句只在
+	// **有目录**的时候才是那一句（没目录时那一格说的是「去设置里选一个」，
+	// 见报告 F3）。
+	_, tt := newRowsWithDir(t)
 	for _, label := range dlFilterNamesInOrder {
 		if tt.HasText(label) {
 			t.Errorf("一条记录都没有却摆出了筛选 %q，文字有 %q", label, tt.Texts())

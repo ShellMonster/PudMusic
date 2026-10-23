@@ -339,7 +339,7 @@ func playing(t *testing.T, a *app.App, title string) {
 func TestOnlineItemActuallyPlays(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
-	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh192), 110836))
 
 	a := newOnlineApp(t, f, t.TempDir())
 	if err := a.Enqueue(onlineItem("BV1xx", "123", "在线的一首")); err != nil {
@@ -355,8 +355,8 @@ func TestOnlineItemActuallyPlays(t *testing.T) {
 	if st.Err != "" {
 		t.Errorf("播放条上有错：%s", st.Err)
 	}
-	if st.Quality != "320K" {
-		t.Errorf("音质徽章 = %q，want 320K", st.Quality)
+	if st.Quality != "192K" {
+		t.Errorf("音质徽章 = %q，want 192K", st.Quality)
 	}
 	if st.Path != "" {
 		t.Errorf("在线条目不该有本地路径，却有 %q", st.Path)
@@ -400,7 +400,7 @@ func TestStaleStreamIsRefetchedBeforePlaying(t *testing.T) {
 	stale := cdnURL(f.URL, "stale.flac", time.Minute)
 	fresh := cdnURL(f.URL, "fresh.flac", 2*time.Hour)
 	f.forbidden["/cdn/stale.flac"] = true // 旧地址已经失效了
-	f.onPlayURL(dashFor(stale, int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(stale, int(bili.QualityHigh192), 110836))
 	f.onPlayURL(dashFor(fresh, int(bili.QualityMid128), 192000))
 
 	a := newOnlineApp(t, f, t.TempDir())
@@ -440,7 +440,7 @@ func TestStaleStreamIsRefetchedBeforePlaying(t *testing.T) {
 func TestStillValidStreamIsReusedBeforePlaying(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
-	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh192), 110836))
 
 	a := newOnlineApp(t, f, t.TempDir())
 	it := onlineItem("BV1", "1", "还新鲜的那首")
@@ -477,8 +477,8 @@ func TestStreamCutMidwayRefetchesAndKeepsPlaying(t *testing.T) {
 	f.failMediaAfter = len(f.media) / 3
 
 	// 两条地址指向**同一段字节**：B 站换流给的就是同一段。
-	f.onPlayURL(dashFor(cdnURL(f.URL, "v1.flac", time.Hour), int(bili.QualityHigh320), 110836))
-	f.onPlayURL(dashFor(cdnURL(f.URL, "v2.flac", time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "v1.flac", time.Hour), int(bili.QualityHigh192), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "v2.flac", time.Hour), int(bili.QualityHigh192), 110836))
 
 	a := newOnlineApp(t, f, t.TempDir())
 	if err := a.Enqueue(onlineItem("BV1", "1", "会被掐断的一首")); err != nil {
@@ -507,8 +507,8 @@ func TestStreamCutMidwayRefetchesAndKeepsPlaying(t *testing.T) {
 	if st := a.Snapshot(); st.Err != "" {
 		t.Errorf("换流之后播放条上有错：%s", st.Err)
 	}
-	if q := a.Snapshot().Quality; q != "320K" {
-		t.Errorf("换流之后徽章 = %q，want 320K", q)
+	if q := a.Snapshot().Quality; q != "192K" {
+		t.Errorf("换流之后徽章 = %q，want 192K", q)
 	}
 }
 
@@ -521,7 +521,7 @@ func TestQualityBadgeFollowsTheRefresh(t *testing.T) {
 	f.media = readFlac(t)
 	f.failMediaAfter = len(f.media) / 3
 
-	f.onPlayURL(dashFor(cdnURL(f.URL, "v1.flac", time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "v1.flac", time.Hour), int(bili.QualityHigh192), 110836))
 	f.onPlayURL(dashFor(cdnURL(f.URL, "v2.flac", time.Hour), int(bili.QualityMid128), 192000))
 
 	a := newOnlineApp(t, f, t.TempDir())
@@ -529,8 +529,8 @@ func TestQualityBadgeFollowsTheRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	playing(t, a, "会降级的一首")
-	if q := a.Snapshot().Quality; q != "320K" {
-		t.Fatalf("一开始的徽章 = %q，want 320K", q)
+	if q := a.Snapshot().Quality; q != "192K" {
+		t.Fatalf("一开始的徽章 = %q，want 192K", q)
 	}
 	waitFor(t, 15*time.Second, "播放位置动起来", func() bool { return a.Snapshot().Position > 0 })
 	close(f.mediaGate)
@@ -548,11 +548,11 @@ func TestAutoPrefersLossless(t *testing.T) {
 	f.onPlayURL(map[string]any{
 		"duration": 1,
 		"audio": []any{map[string]any{
-			"id": int(bili.QualityHigh320), "bandwidth": 110836,
+			"id": int(bili.QualityHigh192), "bandwidth": 110836,
 			"codecs": "mp4a.40.2", "mimeType": "audio/mp4", "baseUrl": url,
 		}},
 		"flac": map[string]any{"display": true, "audio": map[string]any{
-			"id": int(bili.QualityFLAC), "bandwidth": 1_400_000,
+			"id": int(bili.QualityHiResLossless), "bandwidth": 1_400_000,
 			"codecs": "flac", "mimeType": "audio/mp4", "baseUrl": url,
 		}},
 	})
@@ -562,8 +562,8 @@ func TestAutoPrefersLossless(t *testing.T) {
 		t.Fatal(err)
 	}
 	playing(t, a, "有无损的一首")
-	if q := a.Snapshot().Quality; q != "无损 FLAC" {
-		t.Errorf("徽章 = %q，want 无损 FLAC（有 flac 段时自动档必须先拿它）", q)
+	if q := a.Snapshot().Quality; q != "Hi-Res 无损" {
+		t.Errorf("徽章 = %q，want Hi-Res 无损（有 flac 段时自动档必须先拿它）", q)
 	}
 }
 
@@ -586,8 +586,8 @@ func TestStreamChangedReopensFromTheSamePosition(t *testing.T) {
 	f.failMediaAfter = len(data) / 2
 
 	// v1 是 .flac，v2 是 .m4s —— 不同容器，源会拒绝把它们接在一起。
-	f.onPlayURL(dashFor(cdnURL(f.URL, "v1.flac", time.Hour), int(bili.QualityHigh320), 110836))
-	f.onPlayURL(dashFor(cdnURL(f.URL, "v2.m4s", time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "v1.flac", time.Hour), int(bili.QualityHigh192), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "v2.m4s", time.Hour), int(bili.QualityHigh192), 110836))
 
 	a := newOnlineApp(t, f, t.TempDir())
 	if err := a.Enqueue(onlineItem("BV1", "1", "换了流的一首")); err != nil {
@@ -719,7 +719,7 @@ func TestNoStreamSaysWhy(t *testing.T) {
 func TestMissingCidIsResolvedBeforePlaying(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
-	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh192), 110836))
 
 	var asked sync.Map // bvid → struct{}
 	f.on("/x/player/pagelist", func(w http.ResponseWriter, r *http.Request) {
@@ -754,7 +754,7 @@ func TestMissingCidIsResolvedBeforePlaying(t *testing.T) {
 func TestMissingCidSaysWhyWhenThePartCannotBeAsked(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
-	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh192), 110836))
 	f.on("/x/player/pagelist", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "风控", http.StatusForbidden)
 	})
@@ -862,7 +862,7 @@ func TestStreamingNotMountedSaysSo(t *testing.T) {
 	t.Cleanup(a.Close)
 	err := a.PlayFrom(onlineItem("BV1", "1", "还没挂取流"))
 	if err == nil || !strings.Contains(err.Error(), "在线播放") {
-		t.Errorf("err = %v，want 一句说清「在线播放还没接上」的话", err)
+		t.Errorf("err = %v，want 一句说清「在线播放暂时用不了」的话", err)
 	}
 }
 
@@ -893,7 +893,7 @@ func TestMidPlaybackDeathSurfacesOnThePlaybar(t *testing.T) {
 		w.(http.Flusher).Flush()
 		panic(http.ErrAbortHandler)
 	})
-	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh192), 110836))
 
 	a := newOnlineApp(t, f, t.TempDir())
 	if err := a.Enqueue(onlineItem("BV1", "1", "半路死掉的一首")); err != nil {
@@ -934,7 +934,7 @@ func TestDeadStreamFromTheStartSaysSo(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
 	f.forbidden["/cdn/a.flac"] = true
-	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh192), 110836))
 
 	a := newOnlineApp(t, f, t.TempDir())
 	if err := a.Enqueue(onlineItem("BV1", "1", "一开始就不行的一首")); err != nil {
@@ -972,7 +972,7 @@ func rangeStartOf(r *http.Request) int {
 func TestOnlyTheLastTrackWinsWhenSwitchingFast(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
-	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh192), 110836))
 
 	dir := t.TempDir()
 	a := app.New()
@@ -1015,7 +1015,7 @@ func TestOnlyTheLastTrackWinsWhenSwitchingFast(t *testing.T) {
 func TestClosingTheAppReleasesEverything(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
-	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh192), 110836))
 
 	dir := t.TempDir()
 	a := app.New()
@@ -1050,7 +1050,7 @@ func TestAudioQualityIsHonouredAndChangeable(t *testing.T) {
 	f.media = readFlac(t)
 	url := cdnURL(f.URL, "a.flac", 2*time.Hour)
 	f.onPlayURL(map[string]any{"duration": 1, "audio": []any{map[string]any{
-		"id": int(bili.QualityHigh320), "bandwidth": 110836, "codecs": "flac",
+		"id": int(bili.QualityHigh192), "bandwidth": 110836, "codecs": "flac",
 		"mimeType": "audio/mp4", "baseUrl": url,
 	}, map[string]any{
 		"id": int(bili.QualityLow64), "bandwidth": 51651, "codecs": "flac",
@@ -1333,7 +1333,7 @@ func TestEveryPlayableEntryCanActuallyBeStreamed(t *testing.T) {
 	t.Run("投稿", func(t *testing.T) {
 		f := newStreamFixture(t)
 		f.media = readFlac(t)
-		f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
+		f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh192), 110836))
 		a := newOnlineApp(t, f, t.TempDir())
 		if err := a.Enqueue(onlineItem("BV1xx", "123", "投稿")); err != nil {
 			t.Fatal(err)
@@ -1366,17 +1366,17 @@ func TestAFailedQualitySwitchDoesNotLeaveItsWordsBehind(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
 	url := cdnURL(f.URL, "a.flac", 2*time.Hour)
-	// 只有 320K 这一档：**点无损一定拿不到**，而「高音质」拿回来的正是现在这一档。
+	// 只有 192K 这一档：**点无损一定拿不到**，而「高音质」拿回来的正是现在这一档。
 	f.onPlayURL(map[string]any{"duration": 1, "audio": []any{map[string]any{
-		"id": int(bili.QualityHigh320), "bandwidth": 110836, "codecs": "flac",
+		"id": int(bili.QualityHigh192), "bandwidth": 110836, "codecs": "flac",
 		"mimeType": "audio/mp4", "baseUrl": url,
 	}}})
 
 	a := newOnlineApp(t, f, t.TempDir())
-	if err := a.Enqueue(onlineItem("BV1", "1", "只有 320K 的一首")); err != nil {
+	if err := a.Enqueue(onlineItem("BV1", "1", "只有 192K 的一首")); err != nil {
 		t.Fatal(err)
 	}
-	playing(t, a, "只有 320K 的一首")
+	playing(t, a, "只有 192K 的一首")
 
 	// 点「无损」：拿不到，播放条上如实说，歌照放。
 	a.SetAudioQuality(bili.AudioLossless)
@@ -1392,7 +1392,7 @@ func TestAFailedQualitySwitchDoesNotLeaveItsWordsBehind(t *testing.T) {
 	waitFor(t, 15*time.Second, "那句不成立的话被清掉", func() bool {
 		return a.Snapshot().Err == ""
 	})
-	if st := a.Snapshot(); !st.Playing || st.Quality != "320K" {
+	if st := a.Snapshot(); !st.Playing || st.Quality != "192K" {
 		t.Errorf("清掉那句话的时候把歌弄坏了：playing=%v 徽章=%q", st.Playing, st.Quality)
 	}
 }
