@@ -21,11 +21,12 @@ func waitUntil(t *testing.T, d time.Duration, cond func() bool) {
 	}
 }
 
-// Open 是本地播放的总入口，用四种真实素材各验一遍：都能打开、报得出长度、
+// Open 是本地播放的总入口，用五种真实素材各验一遍：都能打开、报得出长度、
 // 能跳、关掉不漏句柄。
 //
 // testdata/tone.mp3 来自 MyGo 仓库自带的那份（MIT），放在这儿是为了让
 // MP3 这条路也有真文件可测，而不是只测它「注册成功」。
+// testdata/tone.ogg 同理（见 vorbis_test.go 顶上那段：它还要解出音高）。
 func TestOpenPlaysEachSupportedFormat(t *testing.T) {
 	w := stereo16(t)
 	aiff := writeTemp(t, "t.aiff", buildAIFF("AIFF", w.samples, w.channels, w.rate, ""))
@@ -37,6 +38,7 @@ func TestOpenPlaysEachSupportedFormat(t *testing.T) {
 	}{
 		{"flac", filepath.Join("flacdec", "testdata", "stereo16.flac")},
 		{"mp3", filepath.Join("testdata", "tone.mp3")},
+		{"ogg", filepath.Join("testdata", "tone.ogg")},
 		{"aiff", aiff},
 		{"wav", wav},
 	} {
