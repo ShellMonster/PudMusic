@@ -197,7 +197,8 @@ func (s *Shell) viewFolderSelect(c *ui.Context) {
 	t := c.Theme()
 
 	modal := ui.Modal(c, &f.open, func() {
-		ui.Text(c, f.title).FontSize(scale.Font(c, 14)).Bold().MaxLines(2).Ellipsis("…")
+		// ⚠️ **字重不写**（400）：弹窗标题是 400（DESIGN.md §二）。
+		ui.Text(c, f.title).FontSize(scale.Font(c, 14)).MaxLines(2).Ellipsis("…")
 
 		// 「全选」那一行。⚠️ 判据是**当前列表里的每一行都勾上了**（严格长度
 		// 相等），理由和批量操作条那一处一样：`collectionbatch.go` 的

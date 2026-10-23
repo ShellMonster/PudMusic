@@ -142,15 +142,20 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 - **本项目不含任何 LGPL 代码。** 清单不是照 `go.mod` 抄的，是照 `go list -deps` 的实际
   结果核出来的，四个构建目标都核；`go test ./internal/licensing/` 会在对不上时失败。
 
-两处曾经被写错过、现在由测试钉住的事实：
+这些依赖的许可证（其中一处曾经被写错过、现在由测试钉住）：
 
 | 依赖 | 许可证 |
 |---|---|
 | `github.com/ebitengine/purego` | **Apache-2.0**（不是 MIT） |
-| `github.com/hajimehoshi/go-mp3` | **Apache-2.0**（不是 MIT） |
 | `github.com/tphakala/go-m4a` | MIT |
 | `github.com/mewkiz/flac` | Unlicense |
 | `github.com/jfreymuth/oggvorbis` / `github.com/jfreymuth/vorbis` | MIT（Ogg Vorbis 解码器） |
+
+另外还有一份**不在 `go list -deps` 里**的第三方代码：MP3 解码器
+`tphakala/go-mp3`（**MIT**，不是 BSD-3）是 **vendor 进仓库**的
+（`internal/service/audio/mp3dec/`），来路、版本和「为什么 vendor 而不是进
+`go.mod`」见那一带的 `PROVENANCE.md`；它的许可证原文同样随包发出去
+（`resources/licenses/github.com-tphakala-go-mp3-LICENSE.txt`）。
 
 ---
 
@@ -164,7 +169,7 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 | 裸 FLAC（`.flac`） | `internal/service/audio/flacdec` | 自带解码器，已逐样本验证 |
 | MP4 家族（`.m4a` / `.m4s` / `.mp4`） | `internal/service/audio/extaf`（macOS）/ `internal/service/audio/mfadec`（Windows，⚠️ **还没在真 Windows 上验过**） | macOS 走 AudioToolbox；**Windows 上 AAC 接的是 Media Foundation**（`mfadec`）。⚠️ **MP4 里的 FLAC 在 macOS 上也走 AudioToolbox，在 Windows 上落回 `flacdec`** |
 | 裸 ADTS（`.aac`） | 同上 | 没有容器，头两字节就是同步字。⚠️ **Windows 上接的是 Media Foundation**（同样**还没在真 Windows 上验过**） |
-| MP3 | `mygo/audio/mp3` | MyGo 自带，两个平台都能解 |
+| MP3 | `internal/service/audio/mp3dec` | 本仓库自己解（vendor 进来的 `tphakala/go-mp3`，MIT），两个平台都能解。补了 **MPEG-2.5**、**LAME gapless**（编码器延迟被裁掉，歌和下一首接得上），打开一个文件也不再全文件扫帧头 |
 | Ogg Vorbis（`.ogg`） | `mygo/audio/vorbis` | MyGo 自带，纯 Go，两个平台都能解。⚠️ 那一行 blank import 在 `internal/service/audio/player.go`——少了它 `.ogg` 在本地音乐里**列得出来、点进去报「不支持这个音频格式」** |
 | AIFF / AIFC | `internal/service/audio/aiff.go` | 本项目写的，只认未压缩的 PCM |
 | WAV | `mygo/audio` | MyGo 自带 |
@@ -176,10 +181,10 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 16 字节是 `00 00 00 20 66 74 79 70 69 73 6f 35 00 00 00 01 69 73 6f 35`
 ——`ftyp` 盒，也就是 **MP4 里的 FLAC**（素材与形状说明见
 `internal/service/bili/testdata/lossless/`）。所以在线的无损流走的是上表里
-「MP4 家族」那一行（macOS 上是系统解码器；**Windows 上没有系统解码器，落回
-`flacdec`**），**不是** `flacdec` 的裸 FLAC 那一条。
+「MP4 家族」那一行（macOS 上是系统解码器；**Windows 上 AAC 接 Media Foundation，
+而 MP4 里的 FLAC 落回 `flacdec`**），**不是** `flacdec` 的裸 FLAC 那一条。
 
-**这个平台没有系统解码器时**（Windows），先问 **Media Foundation**
+**这个平台没有 AudioToolbox 时**（Windows），先问 **Media Foundation**
 （`internal/service/audio/mfadec`）——它解 AAC（MP4 家族和裸 ADTS 两种容器）；
 它认不出来（比如 MP4 里装的是 FLAC）才落回 `flacdec`——`flacdec` 能解 MP4
 里的 FLAC，于是 B 站无损流在 Windows 上照样放得出来。

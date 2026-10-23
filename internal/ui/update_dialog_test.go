@@ -112,17 +112,21 @@ type updFixture struct {
 	be *fakeUpdate
 }
 
-func newUpdFixture(t *testing.T, rel *app.UpdateRelease) *updFixture {
+// ⚠️ **opts 是给深浅两套主题用的**（变参 = 原来那些调用一个字都不用改）：不传
+// `systemIsDark` 的话，「深色」那一档存出来和「浅色」逐字节相同——票 #241 的评审
+// 在确认弹窗那一族踩过这个（`collectionShell` 没带 `systemIsDark`）。
+func newUpdFixture(t *testing.T, rel *app.UpdateRelease, opts ...shellOpt) *updFixture {
 	t.Helper()
 	be := newFakeUpdate("0.1.0", rel)
 	updatesFile := filepath.Join(t.TempDir(), "app-update.json")
 	// 更新源必须在**建外壳之前**挂上：设置页每一帧都要问它「这个构建能不能自动
 	// 更新」，而 MountUpdates 换了之后要重新问（见 app.MountUpdates 的注释）。
-	b := newTestShell(t,
+	b := newTestShell(t, append([]shellOpt{
 		withSettings(app.DefaultSettings("")),
 		mounted(func(_ *testing.T, a *app.App) {
 			a.MountUpdates(be, updatesFile)
-		}))
+		}),
+	}, opts...)...)
 	tt := b.tt
 	tt.Frame()
 	openSettings(t, tt)

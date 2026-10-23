@@ -118,7 +118,8 @@ func (s *Shell) importNotes(c *ui.Context, rep MigrationReport) {
 	}
 	t := c.Theme()
 	ui.Column(c).FillWidth().Gap(space.Px4).Children(func() {
-		ui.Text(c, "这次没有带过来的：").FontSize(scale.Font(c, 12)).Bold()
+		// ⚠️ **字重不写**（400）：次要信息那一档是 12/400（DESIGN.md §二）。
+		ui.Text(c, "这次没有带过来的：").FontSize(scale.Font(c, 12))
 		for _, n := range rep.Imported.Notes {
 			ui.Text(c, "· "+n).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Wrap()
 		}

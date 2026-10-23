@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -463,14 +464,109 @@ func TestTheSettingsContentIsCappedAndCentered(t *testing.T) {
 	}
 }
 
+// TestTheSettingsControlsShareOneBaseline 钉住「设置页控件列的左边缘是一条线」。
+//
+// # 此前那一列的左边缘落在四个位置
+//
+// 762 / 801 / 822 / 942，而且其中两个控件**没填满自己的盒子**——那一列看上去
+// 是参差的（UI 报告 §4 的 F-04）。现在那一列有了一个基准宽度
+// （`settingsControlW`），每一行的控件都占同样宽的一格，右边齐在内容那一段
+// 的右沿，左边也就齐在同一条线上。
+//
+// # 判据是**画面**
+//
+// 量那一列里每一个控件的盒子，看它们是不是从同一条线上开始。那条线就是
+// 「内容那一段的右沿往左 `settingsControlW`」。
+//
+// ⚠️ **容差一像素**：色卡那一行量到的是**色块**，而色块在卡片**里面**——卡片
+// 自己有一像素的描边（上游 HeroUI 那一档 `shadow-sm` 的边），所以它是 823 而
+// 不是 822。
+//
+// ⚠️ **量的是盒子，不是那一行字**：按钮上的字是居中的，量字的位置量的是字，
+// 不是控件的边。主题那一排三个按钮靠一个组名（`Label("主题模式")`）才量得到
+// 它自己那一格。
+func TestTheSettingsControlsShareOneBaseline(t *testing.T) {
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	homeFrame(tt)
+
+	// 内容那一段的右沿：分组标题（「外观」）铺满内容那一段的宽。
+	head, ok := tt.Find("外观")
+	if !ok {
+		t.Fatalf("设置页上没有「外观」那个分组标题，文字有 %q", tt.Texts())
+	}
+	baseline := head.X + head.W - settingsControlW
+
+	for _, c := range []struct {
+		label string
+		what  string
+		// offset 是这一格在控件列里往右挪多少（第二块色卡在右半边）。
+		offset float32
+	}{
+		{label: "预览：列表", what: "「数据显示样式」那一列（三张预览）"},
+		{label: "主题模式", what: "「主题」那一排三个按钮"},
+		{label: "背景", what: "「颜色」那一行的第一块色卡"},
+		{label: "主色", what: "「颜色」那一行的第二块色卡",
+			offset: colorItemWidth + colorItemGap},
+		{label: "选择字体", what: "「字体」那一行的下拉"},
+		{label: "全局圆角", what: "「圆角」那一行的滑块"},
+		{label: "选择音质偏好", what: "「音质偏好」那一行的下拉"},
+	} {
+		r, ok := tt.Find(c.label)
+		if !ok {
+			t.Errorf("设置页上找不到%s（%q），文字有 %q", c.what, c.label, tt.Texts())
+			continue
+		}
+		want := baseline + c.offset
+		if r.X < want-0.5 || r.X > want+1.5 {
+			t.Errorf("%s 从 %.1f 起，而它该从 %.1f 起（控件列的左边缘是 %.1f）"+
+				"——那一列的左边缘得是一条线（UI 报告 §4 的 F-04）",
+				c.what, r.X, want, baseline)
+		}
+	}
+}
+
+// TestTheSettingsControlColumnIsFilled 钉住「控件列里的控件填满那一格」。
+//
+// F-04 抱怨的是两件事：左边缘落在四个位置，**以及两个控件没填满自己的盒子**
+// ——预览那三张右边空 16、色卡那两块右边空 91（UI 报告 §4 的 F-04）。
+// 上一条钉的是左边缘，这一条钉的是「填满」。
+//
+// ⚠️ **判据是代码里的那三个数**：色卡是两块各占一半（中间 12 的缝），预览是
+// 三张各占三分之一（中间两道 10 的缝），下拉就是基准宽本身。它们加起来必须
+// 正好是那一格——差一个像素，那一行的右边缘就又参差了一格。
+func TestTheSettingsControlColumnIsFilled(t *testing.T) {
+	if settingsControlW != 300 {
+		t.Errorf("settingsControlW = %d，want 300——控件列的基准宽度是量出来的"+
+			"（主题那三个按钮里「跟随系统」最宽，窄了它会被画成「跟随…」）",
+			settingsControlW)
+	}
+	for _, c := range []struct {
+		what string
+		got  float64
+	}{
+		{"两块色卡加中间的缝", float64(colorItemWidth*2 + colorItemGap)},
+		{"三张预览加两道缝", float64(previewW*3 + 2*previewGap)},
+	} {
+		if math.Abs(c.got-float64(settingsControlW)) > 0.01 {
+			t.Errorf("%s 是 %.2f，want %.0f——它们要正好铺满控件列那一格，"+
+				"差一像素那一行的右边缘就参差了", c.what, c.got, float64(settingsControlW))
+		}
+	}
+	if selectWidth != settingsControlW {
+		t.Errorf("selectWidth = %d，want %d——那一列里的下拉也要按基准宽走，"+
+			"否则控件列的左边缘又落在两个位置上", selectWidth, settingsControlW)
+	}
+}
+
 // TestTheSettingsInputsAreNotFullRowWide 钉住输入框不横跨整行。
 //
 // 那一格原来写的是 `Grow(1)`，而它所在那一行的左边（标题 + 说明）也是 `Grow(1)`
 // ——两边平分那一行，于是「系统默认」四个字摆在一个 410 宽的框里，而它右边什么
 // 都没有。那不是「点哪儿都行」的好心：用户要按准那个框的右下角才能展开它。
 //
-// 抄的是 Biu 的 `w-[180px]`（`system-settings.tsx:164`），也就是这一页其余
-// 下拉（音频品质 180、代理类型 240）是同一个数。
+// ⚠️ **上限是控件列的基准宽度**（`settingsControlW`）：这一列里的控件都按它
+// 排（票 #235 的 F-04），所以「不横跨整行」这一条的上限也跟着它——
+// 比它宽的控件就该把那一行撑歪，而那一行左边还有标题和说明。
 //
 // ⚠️ **断的是控件自己的宽**：一个 410 宽的框里那四个字仍然是「点得准」的
 // （点框的哪儿都算点中），所以判据是**它有多宽**，不是「点一下有没有反应」。
@@ -482,9 +578,9 @@ func TestTheSettingsInputsAreNotFullRowWide(t *testing.T) {
 		label string
 		want  float32
 	}{
-		{"选择字体", selectWidth}, // 180（Biu 的 w-[180px]）
-		{"全局圆角", radiusWidth}, // 360（Biu 的 w-[360px]）
-		{"选择音质偏好", selectWidth},
+		{"选择字体", selectWidth},      // 控件列的基准宽度
+		{"全局圆角", settingsControlW}, // 那一行的盒子
+		{"选择音质偏好", selectWidth},    //
 	} {
 		r, ok := tt.Find(c.label)
 		if !ok {
