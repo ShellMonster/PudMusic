@@ -529,9 +529,13 @@ func (s *Shell) viewFollowPaneRow(c *ui.Context, f *followPage, i int) {
 	box := ui.Row(c).Grow(1).Key("follow-tab:" + tab).Gap(6).Padding(6).Radius(6).
 		AlignItems(ui.Center)
 	if tab == f.tab {
-		// 当前正在看的那一格：主色底，和侧栏选中收藏夹同一套颜色（见
-		// sidebar_favorites.go 的 cur 那一支）。
-		box = box.Background(t.Accent)
+		// 当前正在看的那一格：和侧栏菜单当前项**同一套**画法（`flatCurrent`——
+		// 淡主色底 + 深色字 / 中性灰底 + 主色字）。
+		//
+		// ⚠️ **原来这里是实心主色**（`Background(t.Accent)`，一块 192×32 的实心
+		// 绿）：那是审计 F-02 / F-06 点名的那一处——同一个屏上左栏是实心绿、
+		// 侧栏是淡底，两种画法并排，而实心那一块比主操作还响。
+		box = flatCurrent(c, box)
 	} else if box.Hovered() {
 		box = box.Background(t.SurfaceHover)
 	}

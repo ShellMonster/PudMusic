@@ -652,8 +652,17 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 		// ⚠️ **20 / 400**，不是 20 / 700：上游那个 `h2` 的字重被 Preflight 重置成
 		// inherit（`DESIGN.md` 的 `settings_h2` 就是 20/400）。20 → 22 或者加粗
 		// 都会让它变成「页头」，而这一行只是歌名。
+		//
+		// ⚠️ **不许 `Grow(1)`**：上游那一组是 `flex w-full max-w-2/5 items-center
+		// space-x-2`（`src/components/full-screen-player/index.tsx:290-321`）——
+		// **齿轮是这一组的最后一个子元素，而 `<h2>` 不 grow**，所以齿轮**紧跟在歌名
+		// 后面**（8 像素），不是靠右。
+		//
+		// 原来这里是 `Grow(1)` + `MaxWidth(480)`：歌名框铺满 480，把齿轮顶到
+		// x=552（窗口 1200 宽的 **47%** 处），离歌名 421 像素——看起来像一个不属于
+		// 任何东西的浮标（审计 F-03）。
 		ui.Text(c, st.Title).FontSize(scale.Font(c, 20)).FontWeight(400).TextColor(on).
-			Grow(1).MaxWidth(fullTitleMaxWidth(c)).SingleLine()
+			MaxWidth(fullTitleMaxWidth(c)).SingleLine()
 
 		// 同上面那一条：提示不跟着顶栏一起藏起来，所以这里不给 `Tooltip`。
 		gear := iconButton(c, iconSettings, "全屏设置", 22).

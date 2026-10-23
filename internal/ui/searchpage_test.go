@@ -656,6 +656,48 @@ func TestAddingAUserToTheQueueSaysWhyNot(t *testing.T) {
 	}
 }
 
+// TestTheSearchPageHasOneTitleAndNoSecondSearchBox 钉住搜索页的**减法**（票 #234）。
+//
+// 2026-10-22 人定的（`DESIGN.md` §十.1）：结果页**不再放第二个输入框**，改词回
+// 顶栏那个 280 宽的框；上游那一行「搜索」标题也不加（上游那一页只有一句
+// `<h1>搜索【{keyword}】的结果</h1>`，`src/pages/search/index.tsx:16-26`）。
+//
+// 这一条以前**只改了 DESIGN.md 没改代码**，于是页面上摆着两个框（顶栏那个空着、
+// 页内那个装着词），还多一层标题。
+//
+// 三件事：
+//
+//  1. 页内那个输入框没了（它那个无障碍名字「搜索歌名或 UP 主」找不到了）；
+//  2. 内容区**顶上第一行就是**那句结果标题——原来上面还压着一句「搜索」；
+//  3. 那句标题**不再是 18/Bold**：它是这一页的页标题（24/400，字号由
+//     `TestEveryPageTitleUsesTheSharedSize` 那一族钉住）。
+func TestTheSearchPageHasOneTitleAndNoSecondSearchBox(t *testing.T) {
+	st := newSearchStub(2, 0)
+	_, tt := newSearchPage(t, "周杰伦", st)
+	tt.Frame()
+
+	// ① 页内那个输入框没了。
+	if _, ok := tt.Find("搜索歌名或 UP 主"); ok {
+		t.Errorf("搜索页上还有那个 420 宽的页内输入框——2026-10-22 拍板不加"+
+			"（DESIGN.md §十.1），改词回顶栏")
+	}
+
+	// ② 内容区顶上第一行就是那句结果标题。
+	title, ok := tt.Find("搜索【周杰伦】的结果")
+	if !ok {
+		t.Fatalf("没有那句结果标题，文字有 %q", tt.Texts())
+	}
+	area := contentArea(app.DefaultSideMenuWidth)
+	lo, hi, ok := firstBand(tt.Image(), area)
+	if !ok {
+		t.Fatalf("内容区顶上一点墨都没有，文字有 %q", tt.Texts())
+	}
+	if float64(hi) < float64(title.Y)-2 || float64(lo) > float64(title.Y+title.H)+2 {
+		t.Errorf("内容区顶上第一行墨在 y=%d..%d，而标题在 y=%.1f..%.1f——上面还压着"+
+			"别的（原来那句「搜索」标题就在那儿）", lo, hi, title.Y, title.Y+title.H)
+	}
+}
+
 // TestTheResultRowsArePaintedNotBlank 盯「有结果时那一块不是一片白」。
 //
 // 只查元素框发现不了这一类：元素在、位置对、文字也在，可屏幕上什么也没有。
