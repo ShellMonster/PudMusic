@@ -516,6 +516,7 @@ func (p *localPage) cardsTop() { p.cards.ScrollTo(0, ui.Start) }
 
 // viewHead 是标题那一行：标题、展示样式切换、添加目录。
 func (p *localPage) viewHead(c *ui.Context) {
+	t := c.Theme()
 	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(8).Children(func() {
 		ui.Text(c, "本地音乐").FontSize(scale.Font(c, pageTitleSize))
 
@@ -524,10 +525,21 @@ func (p *localPage) viewHead(c *ui.Context) {
 		ui.Segmented(c, &p.style, localStyles[:]...)
 
 		ui.Spacer(c)
-		// 上游是 `variant="flat"` 的一个文字键（`local-music/index.tsx:189`）。
-		// 它旁边那颗文件夹加的图标没画：`flat.Button` 只接管文字，图标 + 文字
-		// 要再开一个配方，而这一票要的是「把描边和常驻底去掉」，不是重画按钮。
-		flatButton(c, "添加目录").OnClick(p.addDirectory)
+		// ⚠️ **这一枚是「看得见的入口」**：它原来是一行小字，而空状态那句话
+		// 让用户去点它——按提示找过去，扫到右上角只看见一行说明文字，**很可能
+		// 以为那不是能点的**（报告 C2：用户于是以为要去顶栏找「打开文件」，而
+		// 那是另一件事）。
+		//
+		// 所以它现在是一枚**描边按钮**：有边框、有底、指针压上去有反馈。
+		//
+		// ⚠️ **描边是这一处破例**：全应用的次级按钮都是扁平的（无描边、无常驻
+		// 底，见 flatbutton.go 的文件头），而扁平那一套靠的是「一堆按钮排在一
+		// 起」才看得出是按钮——**孤零零摆在页头的这一枚不行**。
+		addDir := flatButton(c, "添加目录").
+			Radius(t.Radius).Border(1, t.Border).Background(t.Surface)
+		if addDir.Clicked() {
+			p.addDirectory()
+		}
 	})
 }
 
@@ -649,6 +661,16 @@ func (p *localPage) viewStyle() list.View {
 // 居中带插画的那一套了（票 #138）。
 func (p *localPage) viewEmpty(c *ui.Context, st app.LocalMusicState) {
 	e := localEmptyState(st)
+	// ⚠️ **一个目录都没加过时，这一格带一枚按钮**：空状态那句话让用户去点
+	// 右上角那枚按钮，而那一枚离这句话三百多像素、还只是一行小字（报告 C2：
+	// 「用户按提示找过去，扫到右上角只看见一行小字，很可能以为那只是说明文
+	// 字」）。
+	//
+	// 所以这里**同一个词、同一个动作**再摆一枚，就在那句话下面——用户读到
+	// 哪儿就在哪儿动手。
+	if len(st.Roots) == 0 {
+		e.Action = &emptyAction{Label: "添加目录", Do: p.addDirectory}
+	}
 	drawEmpty(c, "local:empty", e, emptyPagePad)
 }
 
@@ -660,7 +682,7 @@ func localEmptyState(st app.LocalMusicState) emptyState {
 	if len(st.Roots) == 0 {
 		return emptyState{
 			Title: "还没有添加音乐目录",
-			Hint:  "点右上角「添加目录」选一个文件夹，它的第一层里的歌会出现在这里。",
+			Hint:  "点下面的按钮选一个文件夹，它的第一层里的歌会出现在这里。",
 			Icon:  iconEmptyDisk,
 		}
 	}

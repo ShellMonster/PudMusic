@@ -150,6 +150,34 @@ func newRows(t *testing.T, rows ...download.Snapshot) (*Shell, *ui.Tester) {
 	return newRowsIn(t, dlWide, rows...)
 }
 
+// newRowsWithDir 是 newRows 加一个下载目录。
+//
+// ⚠️ **为什么要有它**：下载记录页有**两种**空——「连落盘的地方都没有」和「真的
+// 没下载过」。后者的那一句（`noDownloads`）只在**有目录**的时候才是那一句：没
+// 目录时那一格说的是「去设置里选一个」（报告 F3）。所以验「真的没下载过」那
+// 几句的测试得有一个目录。
+//
+// ⚠️ 目录走 `FallbackDir`（「设置里没选过时下到哪儿」那一条），而**不是**去改
+// 设置里的 `DownloadPath`——这一组测试的外壳**没挂设置**（`newRowsIn` 造的那
+// 一个），改设置会写不进去。
+func newRowsWithDir(t *testing.T, rows ...download.Snapshot) (*Shell, *ui.Tester) {
+	t.Helper()
+	a := app.New()
+	t.Cleanup(a.Close)
+	if err := a.MountDownloads(app.Downloads{
+		Media: http.DefaultClient, FallbackDir: dlDir,
+	}); err != nil {
+		t.Fatalf("挂下载：%v", err)
+	}
+	s := newDownloadShell(t, a)
+	s.downloads.rowsFn = func() []download.Snapshot { return rows }
+
+	tt := ui.NewTester(s.View, dlWide, 800)
+	s.navigate(downloadListPath)
+	dlFrame(tt)
+	return s, tt
+}
+
 // newRowsIn 是 `newRows` 加一个窗口宽度。窄那一档的布局只有它量得出来（
 // `TestTheFileColumnStaysReadableAtTheNarrowestWindow`）。
 func newRowsIn(t *testing.T, w int, rows ...download.Snapshot) (*Shell, *ui.Tester) {

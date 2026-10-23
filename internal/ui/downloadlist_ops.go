@@ -68,15 +68,28 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 		// 路径。空串是「还没有下载目录」（设置里没选、系统目录也没拿到，
 		// 见 `app.Downloads.FallbackDir`）——那时候要说出来，不能画一段空白
 		// 让用户以为按钮坏了。
-		path := dir
-		if path == "" {
-			path = "还没有下载目录"
+		//
+		// ⚠️ **没有目录时那一句是能点的**（报告 C1）：这句话说的是「下载这件事
+		// 现在做不了」，而它就挂在页标题旁边——用户读完还是得自己去找设置页
+		// 里那一项（设置页有四个 Tab，而「下载目录」在「常规设置」那一格的
+		// 第三段，界面上一个字都没说它在哪儿）。所以它是一枚按钮：点了直接
+		// 跳到那一项上（见 goToDownloadDirSetting）。
+		//
+		// ⚠️ **它是一枚扁平按钮而不是一行灰字**：灰字在画面上就是一句说明，
+		// 用户不会想到它点得动；按钮有悬停反馈和指针，而提示（tooltip）说得出
+		// 按下去会发生什么。
+		if dir == "" {
+			if d.tipWith(c, flatButton(c, "还没有下载目录"), "去设置里选一个下载目录").
+				Clicked() {
+				s.goToDownloadDirSetting()
+			}
+		} else {
+			// 超长被截掉的时候完整路径在 tooltip 里：用户不必去设置页才看得到它
+			// 落在哪儿。
+			d.tipWith(c, ui.Text(c, dir).Grow(1).FontSize(scale.Font(c, 12)).
+				LineHeight(smallCopyLeading).TextColor(t.TextMuted).MaxLines(1).
+				Ellipsis("…"), dir)
 		}
-		// 超长被截掉的时候完整路径在 tooltip 里：用户不必去设置页才看得到它落在
-		// 哪儿。没有目录时那一截是空的（提示为空就不画东西），没有可补充的。
-		d.tipWith(c, ui.Text(c, path).Grow(1).FontSize(scale.Font(c, 12)).
-			LineHeight(smallCopyLeading).TextColor(t.TextMuted).MaxLines(1).
-			Ellipsis("…"), dir)
 
 		// ⚠️ 没有目录时不摆这个按钮：按下去是打不开的。一个只会说「不行」的
 		// 按钮不如不摆（和首页不摆「全部播放」是同一个取舍）。
@@ -90,10 +103,15 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 		// 上游是表格右上角一个 `isIconOnly` 的垃圾桶（`index.tsx:128-132`），
 		// 我们把它留在页头——表格那一块是共用的（widgets/list），页头才是这一页
 		// 自己的地方。
-		if d.tipWith(c, flatIconButton(c, iconDeleteBin5, "清空记录", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 7).
-			Disabled(len(d.all) == 0), "清空记录").Clicked() {
-			d.askClear(s)
+		//
+		// ⚠️ **队列整个是空的时候不摆它**：一颗按了没反应的按钮（清空一件都
+		// 没有的东西）看着像能点，而它按下去只会弹一句「确认清空这 0 条吗」。
+		// 「什么都不摆」比「摆一颗按了没反应的」清楚（报告 C1 的最后一句）。
+		if len(d.all) > 0 {
+			if d.tipWith(c, flatIconButton(c, iconDeleteBin5, "清空记录", iconMd).
+				Size(iconHitMd, iconHitMd).Padding(0, 7), "清空记录").Clicked() {
+				d.askClear(s)
+			}
 		}
 	})
 }

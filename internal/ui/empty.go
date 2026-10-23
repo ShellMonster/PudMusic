@@ -25,6 +25,22 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+// emptyAction 是空状态里那一个按钮：上面的字，和按下去要做的事。
+//
+// ⚠️ **空状态这一套要能比相等**（`Route` 里有 `emptyState`，而路由表里有
+// `rt == notFound` 那种比较），而**一个装了闭包的 struct 是不能比的**。
+// 所以按钮是**一个指针**：指针能比，而这里比的是「是不是同一个按钮」，不是
+// 「两个按钮做的是不是同一件事」。
+type emptyAction struct {
+	// Label 是按钮上的字。
+	Label string
+	// Do 是按下去要做的事。
+	//
+	// ⚠️ **它是闭包**：要做的事认得的东西（哪个 App、哪一页、哪个目录）只有
+	// 画它的那一处知道——给一个 id 再回头查，多半查不到。
+	Do func()
+}
+
 // emptyState 是一页空着时说的两句话，外加那一格插画位上的图标。
 type emptyState struct {
 	// Title 是上游那句：这里为什么空。
@@ -49,6 +65,11 @@ type emptyState struct {
 	// （见 dynamicfeed.go / follow.go），那一支说的是「还没好」而不是「没有」，
 	// 摆一枚插画反而像在说「这里什么都没有」。
 	Icon string
+	// Action 是这一格里那一个按钮（可选）。nil 就不画。
+	//
+	// 它是「怎么才能不空」那句话的**行动版**：提示说「去设置里选一个下载
+	// 目录」，而按钮就是那一步本身（报告 C1 / F3）。
+	Action *emptyAction
 	// Loading 是「**还在拉**」那一档。
 	//
 	// ⚠️ **它和「空」不是同一档东西**：空状态是一个**结论**（这里没有东西），
@@ -143,6 +164,26 @@ func drawEmpty(c *ui.Context, key string, e emptyState, pad float32) {
 func emptyContent(c *ui.Context, e emptyState) {
 	emptyArt(c, e.Icon)
 	emptyCopy(c, e)
+	drawEmptyAction(c, e)
+}
+
+// drawEmptyAction 是空状态里那一个按钮。
+//
+// ⚠️ **它是主按钮**：这一格是那一页此刻唯一能做的事（没有目录就没有下载、
+// 没有收藏夹就先去建一个），所以它是这一页的主操作。而空状态那一格整体是
+// 淡的（图标淡、标题淡、提示更淡），一枚实心主色是那一格里唯一的实心块——
+// 它得能被一眼看见，而不是和旁边那两行字一个份量。
+//
+// ⚠️ **它不在 `emptyCopy` 里面**：那一处是「两行字」，加一枚按钮会让它变成
+// 三样，而 `viewPageEmptyWithReason`（B 站没挂上那一支）也走 `emptyCopy`
+// ——它那一格**不许**有按钮（那儿按了也没用）。
+func drawEmptyAction(c *ui.Context, e emptyState) {
+	if e.Action == nil || e.Action.Label == "" || e.Action.Do == nil {
+		return
+	}
+	if ui.PrimaryButton(c, e.Action.Label).Clicked() {
+		e.Action.Do()
+	}
 }
 
 // emptyArt 画插画位上那一枚图标。空名就不画。
@@ -316,6 +357,25 @@ var noSearchResults = emptyState{
 var noDownloads = emptyState{
 	Title: "暂无内容",
 	Hint:  "搜一首歌，在它旁边点「下载」，下完的会出现在这里",
+	Icon:  iconEmptyDownload,
+}
+
+// noDownloadDir 是「还没有下载目录」。
+//
+// ⚠️ **它和 `noDownloads` 是两件事，不能合成一句**（报告 F3）：真的没下载过是
+// 「怎么才能不空」（去搜一首歌），而**连落盘的地方都没有**是「下载这个动作
+// 现在做不了」——这一档摆前一句的话，用户照着做，下完发现没地方放。
+//
+// 判据是 `App.DownloadDir()` 为空：设置里没选过**而且**系统下载目录也没拿到
+// （`app/downloads.go` 的 `downloadDir`）。那是一次真的坏掉的状态，所以这一格
+// 给的是**一条路**（去设置里选一个），不是一句「怎么才能不空」。
+//
+// ⚠️ **标题是「还没有下载目录」而不是「暂无内容」**：这一格说的是「下载这件事
+// 现在做不了」，而「暂无内容」说的是「这里没有东西」——两件事，用户的下一步
+// 也不同。
+var noDownloadDir = emptyState{
+	Title: "还没有下载目录",
+	Hint:  "先在设置里选一个下载目录，下完的歌才有地方放。",
 	Icon:  iconEmptyDownload,
 }
 

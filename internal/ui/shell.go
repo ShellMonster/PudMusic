@@ -287,6 +287,12 @@ type Shell struct {
 	// 两组一份是因为两组各排各的（见 sidebar_favorites.go）。
 	sideLists [favGroups]ui.ListState
 
+	// favPanelOpen 是**折叠态**那枚「收藏夹」图标点开之后的那层浮层开没开。
+	//
+	// ⚠️ 它只属于折叠态：展开态的收藏夹本来就在侧栏里，不需要浮层（见
+	// sidebar_favorites.go 的 viewFavoritesCollapsed）。
+	favPanelOpen bool
+
 	// 播放列表抽屉这一摊。**同样只由 view 在主线程上读写**。
 	//
 	// drawerOpen 是开没开。它不进设置：抽屉是「我现在要看队列」这一下的事，

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -52,7 +53,17 @@ func TestSpecEmptyStates(t *testing.T) {
 			},
 		},
 		{"没有搜索结果", noSearchResults, "/search?q=" + url.QueryEscape("周杰伦"), searchPath, nil},
-		{"没有下载记录", noDownloads, "/download-list", "/download-list", nil},
+		{"没有下载记录", noDownloads, "/download-list", "/download-list",
+			// ⚠️ **下载记录页有两种空**：「连落盘的地方都没有」和「真的没下载
+			// 过」。这一条验的是后者，所以得有一个目录（没目录时那一格说的是
+			// 「去设置里选一个」，见报告 F3）。
+			func(t *testing.T, s *Shell) {
+				if err := s.app.MountDownloads(app.Downloads{
+					Media: http.DefaultClient, FallbackDir: t.TempDir(),
+				}); err != nil {
+					t.Fatalf("挂下载：%v", err)
+				}
+			}},
 		{"没有歌词", noLyrics, miniPlayerPath, miniPlayerPath, nil},
 	}
 	for _, c := range cases {
@@ -92,7 +103,11 @@ func TestSpecEmptyStates(t *testing.T) {
 			s.navigate(c.target)
 			// 收藏夹那一页要先等后台把容器拉回来（头图区第一帧是「正在加载…」，
 			// 空状态那一支要 `info.Loaded` 才画得出来）；别的几页不发请求。
-			if c.setup != nil {
+			//
+			// ⚠️ **判的是「收藏夹那一页」而不是「有没有 setup」**：下载记录那一条
+			// 也要 setup（挂一个下载目录，好让「真的没下载过」那一句是那一句），
+			// 而它不等收藏夹的头图。
+			if c.path == collectionMatch {
 				waitCollectionHeader(t, s, tt)
 			}
 			// ⚠️ 搜索页那一条要多等几帧：结果是异步回来的，「画不画空状态」
