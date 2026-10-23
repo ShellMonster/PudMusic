@@ -139,6 +139,98 @@ func TestOpenDecoderSaysBothWhenThePlatformIsUnavailableAndTheFileIsNotFLAC(t *t
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Media Foundation 那条分支（Windows 上解 AAC 的那条路）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestOpenDecoderUsesMediaFoundationWhenThePlatformDecoderIsUnavailable 盯
+// **Windows 上有损那一档**：平台解码器不可用时，MP4 里的 AAC 要交给 Media
+// Foundation。
+//
+// 这是 Windows 发布阻塞项的那一条路（issue #253）：接不上它，Windows 上
+// B 站有损流（64K / 128K / 192K）**一档都放不出来**。
+//
+// 断的是两件事：
+//
+//  1. 走的**确实是** Media Foundation 那一个（不是碰巧也返回了一个解码器）；
+//  2. **平台解码器能用的时候不走它**（macOS 的行为不许变）。
+func TestOpenDecoderUsesMediaFoundationWhenThePlatformDecoderIsUnavailable(t *testing.T) {
+	stubPlatformDecoder(t, func(io.ReadSeeker) (mygoaudio.Decoder, error) {
+		return nil, extaf.ErrUnsupported
+	})
+	fake := &platformFakeDecoder{}
+	stubMediaFoundation(t, func(io.ReadSeeker) (mygoaudio.Decoder, error) {
+		return fake, nil
+	})
+
+	d, name, err := openDecoder(bytes.NewReader(buildAACMP4(t)))
+	if err != nil {
+		t.Fatalf("平台解码器不可用时没走 Media Foundation：%v", err)
+	}
+	if name != "aac" {
+		t.Errorf("容器名 = %q，want aac（走的是 Media Foundation 那条路）", name)
+	}
+	if d != mygoaudio.Decoder(fake) {
+		t.Errorf("用的不是 Media Foundation，而是 %T", d)
+	}
+}
+
+// TestOpenDecoderDoesNotUseMediaFoundationWhenThePlatformDecoderIsAvailable 盯
+// **反面**：macOS 上平台解码器能解码，就**不许**绕道 Media Foundation。
+//
+// 这条不许有例外：Media Foundation 只在 Windows 上有，而 macOS 上 AudioToolbox
+// 什么都解得了。绕过去的话，macOS 的行为就变了（而 macOS 是这个仓库唯一能
+// 跑全套测试的平台——行为在那儿变了，别处就没人知道了）。
+func TestOpenDecoderDoesNotUseMediaFoundationWhenThePlatformDecoderIsAvailable(t *testing.T) {
+	fake := &platformFakeDecoder{}
+	stubPlatformDecoder(t, func(io.ReadSeeker) (mygoaudio.Decoder, error) {
+		return fake, nil
+	})
+	stubMediaFoundation(t, func(io.ReadSeeker) (mygoaudio.Decoder, error) {
+		t.Error("平台解码器明明能用，却还是去问了 Media Foundation")
+		return nil, errors.New("不该走到这里")
+	})
+
+	d, name, err := openDecoder(bytes.NewReader(buildAACMP4(t)))
+	if err != nil {
+		t.Fatalf("认不出容器：%v", err)
+	}
+	if name != "mp4" {
+		t.Errorf("容器名 = %q，want mp4（平台解码器能用的时候不绕道）", name)
+	}
+	if d != mygoaudio.Decoder(fake) {
+		t.Errorf("用的不是平台解码器，而是 %T", d)
+	}
+}
+
+// TestOpenDecoderFallsBackToFLACWhenMediaFoundationCannotDecodeTheFile 盯
+// **Media Foundation 认不出来之后还要落回 flacdec**。
+//
+// Windows 上 MP4 家族里装的不一定是 AAC：B 站的无损流是「MP4 里的 FLAC」。
+// 那一种 Media Foundation 认不出来（它只解 AAC），而**落回 flacdec 之后要照
+// 旧能放**——不然 Windows 上连无损那一档都保不住。
+func TestOpenDecoderFallsBackToFLACWhenMediaFoundationCannotDecodeTheFile(t *testing.T) {
+	stubPlatformDecoder(t, func(io.ReadSeeker) (mygoaudio.Decoder, error) {
+		return nil, extaf.ErrUnsupported
+	})
+	stubMediaFoundation(t, func(io.ReadSeeker) (mygoaudio.Decoder, error) {
+		return nil, errors.New("mfadec: 这个 MP4 里不是 AAC（是 flac）")
+	})
+
+	d, name, err := openDecoder(bytes.NewReader(fixture(t, "stereo16.mp4")))
+	if err != nil {
+		t.Fatalf("Media Foundation 认不出 MP4 里的 FLAC，却没有落回 flacdec：%v", err)
+	}
+	if name != "flac" {
+		t.Errorf("容器名 = %q，want flac（落回走的是 flacdec 那条路）", name)
+	}
+	src := stereo16(t)
+	if d.Channels() != src.channels || d.SampleRate() != src.rate {
+		t.Errorf("格式 = %d Hz / %d 声道，原始录音是 %d Hz / %d 声道",
+			d.SampleRate(), d.Channels(), src.rate, src.channels)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 注入点
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -151,6 +243,16 @@ func stubPlatformDecoder(t *testing.T, open func(io.ReadSeeker) (mygoaudio.Decod
 	old := platformDecoderOpen
 	platformDecoderOpen = open
 	t.Cleanup(func() { platformDecoderOpen = old })
+}
+
+// stubMediaFoundation 把「Media Foundation」换成测试自己给的，测试结束自动还原。
+//
+// ⚠️ 和 `stubPlatformDecoder` 一样：换掉的是包级变量，所以不能 `t.Parallel`。
+func stubMediaFoundation(t *testing.T, open func(io.ReadSeeker) (mygoaudio.Decoder, error)) {
+	t.Helper()
+	old := mediaFoundationDecoderOpen
+	mediaFoundationDecoderOpen = open
+	t.Cleanup(func() { mediaFoundationDecoderOpen = old })
 }
 
 // platformFakeDecoder 是「平台解码器成功」时的占位解码器。

@@ -75,8 +75,8 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 | 边界 | 说明 |
 |---|---|
 | **本地音乐不支持 WMA** | **明确的功能缺口。** Biu 的本地扫描白名单里有 `.wma`，本项目解不了它（还没有能用的纯 Go WMA 解码器）。扫到 `.wma` 会列出来但**播不了**——页面顶上会明写「这个目录里有我们还放不出的格式（.wma），它们会列出来但放不了。」，行里的作者那一格也写着「这个格式我们放不了」，不会让人以为文件坏了。这条是「决定还没做，但当前边界清楚」，不是「没排期」。将来要不要做还没拍板。 |
-| **Windows 上解不了 AAC / ALAC** | 也就是 B 站的有损音质（`dash.audio`，最高 192K）那一档，以及 `.m4a` / `.m4s` / `.mp4` 里装的**有损**音轨。这些走 macOS 自带的 AudioToolbox，**Windows 上没有对应的解码器**。这是一条**还没决定的路线选择**（走系统 MediaFoundation，还是换一个纯 Go 解码器），不是「来不及做」。⚠️ 后果要说明白：Windows 版目前只能播无损 FLAC、MP3、WAV、OGG、AIFF——**MP4 容器里的 FLAC 也算**（那档落回本仓库的 `flacdec`，不依赖系统解码器）。⚠️ **B 站在线的无损流正好是「MP4 容器里的 FLAC」**（实测，见下一节），所以它落在能播的那一档里。 |
-| **杜比音轨不能手动选** | 杜比全景声（实测 id `30250`，`codecs` 是 `ec-3`）没有放进设置里的音质档位（只有 自动 / 无损 / 192K / 128K / 64K）。自动档在 B 站只给杜比时会取它，能不能解出取决于系统解码器。⚠️ 「杜比 Hi-Res = `30251`」是**二手映射表**里的说法，不是公开资料的说法——公开资料（「视频伴音音质代码」一节）写的是 `30251` = **Hi-Res 无损**，实测它就是 `dash.flac` 那一档（编码 `fLaC`，见下一节）。 |
+| **Windows 上解不了 ALAC** | B 站的有损音质（`dash.audio`，最高 192K）那一档**在 Windows 上能放了**——走 Windows 自带的 Media Foundation（本仓库的 `internal/service/audio/mfadec`，`IMFTransform` + `CLSID_CMSAACDecMFT`，issue #253）。⚠️ **ALAC 仍然解不了**（`.m4a` / `.m4s` / `.mp4` 里装的 ALAC 音轨），而 B 站不发 ALAC。⚠️ 代价要说明白：Windows 上**在线**的有损流要**等整个文件下完才开口**——拆分片 MP4 得先把每一个 `moof` 走一遍，而 `moof` 在文件末尾；macOS 上是边下边播。 |
+| **杜比音轨不能手动选** | 杜比全景声（实测 id `30250`，`codecs` 是 `ec-3`）没有放进设置里的音质档位（只有 自动 / 无损 / 192K / 128K / 64K）。自动档在 B 站只给杜比时会取它，能不能解出取决于平台：macOS 的 AudioToolbox **解得了**，**Windows 上解不了**——Media Foundation 不带 E-AC-3，而且 Win11 24H2 移除了系统自带的 AC-3 解码器（再加上 Dolby 那边的 field-of-use 授权限制），所以这一档在 Windows 上是**划掉**的。⚠️ 「杜比 Hi-Res = `30251`」是**二手映射表**里的说法，不是公开资料的说法——公开资料（「视频伴音音质代码」一节）写的是 `30251` = **Hi-Res 无损**，实测它就是 `dash.flac` 那一档（编码 `fLaC`，见下一节）。 |
 | **AIFF 只认未压缩的 PCM** | `internal/service/audio/aiff.go` 是本项目自己写的，只解未压缩的 PCM。AIFF 容器里的压缩编码（MAC3/IMA4 等）解不了。 |
 | **FLAC 解码器在本仓库里** | 裸 FLAC 走 `internal/service/audio/flacdec`（纯 Go，已逐样本验证）；**MP4 容器里的 FLAC 在 macOS 上走系统解码器**（那条路是按容器认的），**在 Windows 上落回 `flacdec`**（那里没有系统解码器）。实测 B 站那条无损流是 `48000` / 2 声道 / **24 bit**，`flacdec` 解得动。 |
 
@@ -162,8 +162,8 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 | 容器 | 谁在解 | 备注 |
 |---|---|---|
 | 裸 FLAC（`.flac`） | `internal/service/audio/flacdec` | 自带解码器，已逐样本验证 |
-| MP4 家族（`.m4a` / `.m4s` / `.mp4`） | `internal/service/audio/extaf` | 走 macOS AudioToolbox；**MP4 里的 FLAC 在 macOS 上也走这里**。⚠️ **Windows 上 AAC / ALAC 解不了**，而 **MP4 里的 FLAC 落回 `flacdec`** |
-| 裸 ADTS（`.aac`） | 同上 | 没有容器，头两字节就是同步字。⚠️ **Windows 上解不了** |
+| MP4 家族（`.m4a` / `.m4s` / `.mp4`） | `internal/service/audio/extaf`（macOS）/ `internal/service/audio/mfadec`（Windows） | macOS 走 AudioToolbox；**Windows 上 AAC 走 Media Foundation**（`mfadec`）。⚠️ **MP4 里的 FLAC 在 macOS 上也走 AudioToolbox，在 Windows 上落回 `flacdec`** |
+| 裸 ADTS（`.aac`） | 同上 | 没有容器，头两字节就是同步字。⚠️ **Windows 上走 Media Foundation** |
 | MP3 | `mygo/audio/mp3` | MyGo 自带，两个平台都能解 |
 | Ogg Vorbis（`.ogg`） | `mygo/audio/vorbis` | MyGo 自带，纯 Go，两个平台都能解。⚠️ 那一行 blank import 在 `internal/service/audio/player.go`——少了它 `.ogg` 在本地音乐里**列得出来、点进去报「不支持这个音频格式」** |
 | AIFF / AIFC | `internal/service/audio/aiff.go` | 本项目写的，只认未压缩的 PCM |
@@ -179,11 +179,18 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 「MP4 家族」那一行（macOS 上是系统解码器；**Windows 上没有系统解码器，落回
 `flacdec`**），**不是** `flacdec` 的裸 FLAC 那一条。
 
-**这个平台没有系统解码器时**（Windows），认得出容器的也落回 `flacdec`——
-`flacdec` 能解 MP4 里的 FLAC，于是 B 站无损流在 Windows 上照样放得出来。
+**这个平台没有系统解码器时**（Windows），先问 **Media Foundation**
+（`internal/service/audio/mfadec`）——它解 AAC（MP4 家族和裸 ADTS 两种容器）；
+它认不出来（比如 MP4 里装的是 FLAC）才落回 `flacdec`——`flacdec` 能解 MP4
+里的 FLAC，于是 B 站无损流在 Windows 上照样放得出来。
 
-**Windows 上 MP3 / WAV / FLAC / OGG / AIFF 和 MP4 里的 FLAC 能用**（除了 MP4 家族里
-的 AAC / ALAC，其余都不依赖系统解码器）。
+**Windows 上 MP3 / WAV / FLAC / OGG / AIFF、AAC（MP4 家族和裸 ADTS）和 MP4
+里的 FLAC 能用**（除了 MP4 家族里的 ALAC，其余都不依赖 macOS 的系统解码器）。
+
+⚠️ **Windows 上有一个代价**：Media Foundation 那条路靠 `go-m4a` 拆分片 MP4，
+而 `go-m4a` 要先把每一个 `moof` 走一遍——`moof` 在文件末尾，所以**在线**的流
+要等整个文件下完才开口（本地文件不用）。macOS 上那条路走 AudioToolbox，是
+按需读的，边下边播。
 
 FLAC 解码器是 t-0017 验证过的实现，本仓库里带着它的 64 项测试和测试素材
 （`internal/service/audio/flacdec/`）。搬进来时只改了 import 路径，代码逐字未动。
@@ -219,7 +226,8 @@ B 站在线流分两档路：**Hi-Res 无损**（`dash.flac`，要大会员）�
 （`dash.audio`，最高 192K）。用户选的那一档在 `internal/service/bili/quality.go`
 里翻译成 B 站的档位 id；播放条上歌名右边的徽章点一下就能换档，换完立刻按新档
 重新取流、从原来的播放位置接着播（不需要切歌，也不需要重启）。
-⚠️ 无损那一路在两个平台都能播；有损那一路在 Windows 上还解不了（见「已知边界」）。
+⚠️ 无损那一路在两个平台都能播；有损那一路现在**两个平台也能播**了（Windows
+上走 Media Foundation，见「已知边界」里那条代价）。
 
 ## 怎么测
 
