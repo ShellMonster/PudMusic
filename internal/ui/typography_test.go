@@ -17,6 +17,7 @@ import (
 	"go/parser"
 	"go/token"
 	"image"
+	"io/fs"
 	"math"
 	"path/filepath"
 	"strconv"
@@ -50,23 +51,33 @@ const textBoxPerSize = 1.1767
 var titleSizes = []string{"pageTitleSize", "emptyPageTitle"}
 
 // stmtSpans 是这个文件里所有语句连同它们的范围。
+//
+// ⚠️ **元素是 `ast.Node` 而不是 `ast.Stmt`**：包级的常量声明（`ast.GenDecl`）
+// 不是语句，而「一处粗体」的判据常常就在那种声明里。
 type stmtSpans struct {
-	stmts []ast.Stmt
+	stmts []ast.Node
 	lo    []int
 	hi    []int
 }
 
 // collectStmts 收下这个文件里所有的语句。
+//
+// ⚠️ **常量声明也算**：它不是 `ast.Stmt`（是 `ast.Decl`），而「一处粗体」的判据
+// 常常就在那种声明里（`lyricsActiveWeight = 800`）——只收语句的话，那一处就
+// 没有「它所在的那一句」可查，白名单认不出它。
 func collectStmts(fset *token.FileSet, f *ast.File) stmtSpans {
 	var sp stmtSpans
 	ast.Inspect(f, func(n ast.Node) bool {
-		s, ok := n.(ast.Stmt)
-		if !ok {
+		switch v := n.(type) {
+		case ast.Stmt:
+			sp.stmts = append(sp.stmts, v)
+		case *ast.GenDecl:
+			sp.stmts = append(sp.stmts, v)
+		default:
 			return true
 		}
-		sp.stmts = append(sp.stmts, s)
-		sp.lo = append(sp.lo, fset.Position(s.Pos()).Offset)
-		sp.hi = append(sp.hi, fset.Position(s.End()).Offset)
+		sp.lo = append(sp.lo, fset.Position(n.Pos()).Offset)
+		sp.hi = append(sp.hi, fset.Position(n.End()).Offset)
 		return true
 	})
 	return sp
@@ -166,8 +177,10 @@ func TestPageTitlesAreNotBold(t *testing.T) {
 // boldOnScale 是**唯一**允许粗的那几处。
 //
 // DESIGN.md §二 的字重刻度里，每一条用途都标了字重（页标题 400、设置行标题
-// 500、正文 400……），粗体只有三处写在表里（品牌字、收藏夹那一页头图区的大标题、
-// 404 那个数字），另有一处是上游原样抄下来的（歌词浮层里那两个读数）。
+// 500、正文 400……），粗体只有下面这几处：表里写着的三处（品牌字、收藏夹那一页
+// 头图区的大标题、404 那个数字），上游原样抄下来的两处（歌词浮层里那两个读数
+// ——`text-[10px] font-bold`），还有一处上游的 `font-extrabold`（正在唱的那一行
+// 歌词，800）。
 //
 // 每一条都写着**为什么它可以是粗的**——刻度上没写的事不许悄悄留着。
 var boldOnScale = []struct {
@@ -195,6 +208,11 @@ var boldOnScale = []struct {
 		file: "lyrics_knobs.go", mark: "lyricValueSize", count: 2,
 		why: "歌词浮层里那两个读数：上游那两个 control 是 `text-[10px] font-bold`",
 	},
+	{
+		file: "lyrics.go", mark: "lyricsActiveWeight", count: 1,
+		why: "正在唱的那一行歌词：上游是 `font-extrabold`（800）——它要靠重量" +
+			"从别的行里跳出来（那一行的字号还是 1.5 倍，光靠字号不够）",
+	},
 }
 
 // TestOnlyTheScaleIsBold 钉住「粗体只出现在刻度写明的那几处」。
@@ -203,58 +221,62 @@ var boldOnScale = []struct {
 // 400/500」的位置上——页面标题、分组标题、弹窗标题、空状态标题、列表里的名字
 // 全是 700（UI 报告 §2 的 F-07）。
 //
-// 判据是 AST：扫 `internal/ui` 下每一个非测试文件，找 `.Bold()` 和
-// `FontWeight(700)`；每一处都必须落在 `boldOnScale` 那张表里，而表里的每一处
-// 都写着**为什么它可以是粗的**。
+// # 判据是 AST，扫 `internal/ui` 下**每一个**非测试文件（**递归**——`widgets/`、
+// `guard/` 那些子包也在内）
+//
+// 找的是四样东西，**少一样就有一类粗体漏出去**：
+//
+//	A. `.Bold()`
+//	B. `FontWeight(<字面量>)` 且字面量 ≥ 700
+//	C. **调用点**：字面量 ≥ 700 传给一个名字带 `weight` 的参数
+//	   （更新弹窗那一行「当前版本 x → y」原来就是 13/700：字面量在**调用点**，
+//	   `FontWeight(weight)` 那一处只看得到一个变量——评审抓过这一条）
+//	D. 本包里声明成 ≥ 700、名字带 `weight` 的**常量**
+//	   （正在唱的那一行歌词是 800：`FontWeight(weight)` 那里是个**局部变量**，
+//	   看得见的只有那个常量）
+//
+// ⚠️ **B 只认字面量是不够的**：C 和 D 补的正是「字面量不在 `FontWeight` 旁边」
+// 的那两类。少一条就有一类粗体漏出去——而粗体漏出去在画面上是**静默**的
+// （字重差一档不会让任何测试红，只是「看着不精致」）。
 //
 // ⚠️ **这张表是「白名单」，不是「黑名单」**：新增一处粗体要往表里加一条并写清
 // 理由——这样「为什么这一处可以粗」不会随着时间烂掉（注释说谎比没有注释更坏）。
 func TestOnlyTheScaleIsBold(t *testing.T) {
 	fset := token.NewFileSet()
-	matches, err := filepath.Glob("*.go")
+	pkgs, err := loadPackages(fset, ".")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	counts := make([]int, len(boldOnScale))
-	for _, name := range matches {
-		if strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		f, err := parser.ParseFile(fset, name, nil, 0)
-		if err != nil {
-			t.Fatalf("解析 %s 失败：%v", name, err)
-		}
-
-		sp := collectStmts(fset, f)
-		ast.Inspect(f, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok || !isHeavyWeight(call) {
-				return true
-			}
-			pos := fset.Position(call.Pos())
-			// 最里层的那一句 = 范围最小的那一句。
-			best := sp.innermost(pos.Offset)
-			hit := -1
-			if best >= 0 {
-				for i, a := range boldOnScale {
-					if a.file != name {
-						continue
-					}
-					if mentionsMark(sp.stmts[best], a.mark) {
-						hit = i
-						break
+	for _, pkg := range pkgs {
+		for i, f := range pkg.files {
+			sp := collectStmts(fset, f)
+			for _, site := range heavySites(fset, f, pkg) {
+				pos := fset.Position(site.pos)
+				// 最里层的那一句 = 范围最小的那一句。
+				best := sp.innermost(pos.Offset)
+				hit := -1
+				if best >= 0 {
+					for j, a := range boldOnScale {
+						if a.file != pkg.paths[i] {
+							continue
+						}
+						if mentionsMark(sp.stmts[best], a.mark) {
+							hit = j
+							break
+						}
 					}
 				}
+				if hit < 0 {
+					t.Errorf("%s:%d %s——粗体只出现在刻度写明的那几处"+
+						"（DESIGN.md §二；UI 报告 §2 的 F-07）",
+						pos.Filename, pos.Line, site.what)
+					continue
+				}
+				counts[hit]++
 			}
-			if hit < 0 {
-				t.Errorf("%s:%d 调了重字重——粗体只出现在刻度写明的那几处"+
-					"（DESIGN.md §二；UI 报告 §2 的 F-07）", pos.Filename, pos.Line)
-				return true
-			}
-			counts[hit]++
-			return true
-		})
+		}
 	}
 
 	// 表里的每一处都还要在（别留下写空了却还占着位的条目）。
@@ -264,6 +286,188 @@ func TestOnlyTheScaleIsBold(t *testing.T) {
 				a.file, counts[i], a.count, a.why)
 		}
 	}
+}
+
+// pkgFacts 是一个包（= `internal/ui` 下的一个目录）里，判据要用的那些事实。
+type pkgFacts struct {
+	// files 是这个包里那些非测试文件。
+	files []*ast.File
+	// paths 是那些文件相对 `internal/ui` 的路径（白名单按它索引）。
+	paths []string
+	// params 是这个包里那些函数 / 方法的参数名（按名字索引）。
+	params map[string][]string
+}
+
+// loadPackages 收下 `internal/ui` 下所有的包（按目录分组）。
+//
+// ⚠️ **递归**：子包（`widgets/**`、`guard/**`、`iconset/**`）也在内——粗体漏到
+// 子包里的话，界面上一样看得出来，而顶层扫不到它。
+func loadPackages(fset *token.FileSet, root string) ([]*pkgFacts, error) {
+	byDir := map[string]*pkgFacts{}
+	var dirs []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if path != root && (d.Name() == "testdata" || strings.HasPrefix(d.Name(), ".")) {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		dir := filepath.Dir(path)
+		pkg, ok := byDir[dir]
+		if !ok {
+			pkg = &pkgFacts{params: map[string][]string{}}
+			byDir[dir] = pkg
+			dirs = append(dirs, dir)
+		}
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return err
+		}
+		pkg.files = append(pkg.files, f)
+		pkg.paths = append(pkg.paths, filepath.ToSlash(path))
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// 收每个包那些函数 / 方法的参数名。
+	for _, dir := range dirs {
+		pkg := byDir[dir]
+		for _, f := range pkg.files {
+			for _, decl := range f.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok {
+					continue
+				}
+				pkg.params[fn.Name.Name] = paramNames(fn.Type)
+			}
+		}
+	}
+
+	out := make([]*pkgFacts, 0, len(dirs))
+	for _, dir := range dirs {
+		out = append(out, byDir[dir])
+	}
+	return out, nil
+}
+
+// calleeParams 报这一次调用对应的是哪个本地函数 / 方法，以及它的参数名。
+//
+// 返回 (nil, nil) 表示「不是本包的函数 / 方法」（比如框架的 `ui.Text`）。
+func (p *pkgFacts) calleeParams(call *ast.CallExpr) ([]ast.Expr, []string) {
+	var name string
+	switch fn := call.Fun.(type) {
+	case *ast.Ident:
+		name = fn.Name
+	case *ast.SelectorExpr:
+		name = fn.Sel.Name
+	default:
+		return nil, nil
+	}
+	params, ok := p.params[name]
+	if !ok {
+		return nil, nil
+	}
+	return call.Args, params
+}
+
+// paramNames 报一个函数的参数名（方法的接收者不算）。
+func paramNames(ft *ast.FuncType) []string {
+	var out []string
+	if ft == nil || ft.Params == nil {
+		return out
+	}
+	for _, f := range ft.Params.List {
+		for _, n := range f.Names {
+			out = append(out, n.Name)
+		}
+	}
+	return out
+}
+
+// heavySite 是「一处可能是粗体」的地方。
+type heavySite struct {
+	// pos 是它在那一句里的位置。
+	pos token.Pos
+	// what 是它是什么（写进报错里的那句话）。
+	what string
+}
+
+// heavySites 找出这个文件里所有「可能是粗体（700 / 800）」的地方。
+//
+// 判据的四样见 `TestOnlyTheScaleIsBold` 的注释（A / B / C / D）。
+func heavySites(fset *token.FileSet, f *ast.File, pkg *pkgFacts) []heavySite {
+	var out []heavySite
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.CallExpr:
+			// A：`.Bold()`
+			if callName(v) == "Bold" {
+				out = append(out, heavySite{pos: v.Pos(), what: "调了 `.Bold()`"})
+				return true
+			}
+			// B：`FontWeight(<字面量 ≥ 700>)`
+			if callName(v) == "FontWeight" && len(v.Args) == 1 {
+				if lit, ok := v.Args[0].(*ast.BasicLit); ok && lit.Kind == token.INT {
+					if n, err := strconv.Atoi(lit.Value); err == nil && n >= 700 {
+						out = append(out, heavySite{pos: v.Pos(),
+							what: "把字重调成了 " + lit.Value})
+					}
+				}
+			}
+			// C：**调用点**——字面量 ≥ 700 传给一个名字带 weight 的参数
+			if args, params := pkg.calleeParams(v); args != nil {
+				for i, a := range args {
+					lit, ok := a.(*ast.BasicLit)
+					if !ok || lit.Kind != token.INT {
+						continue
+					}
+					n, err := strconv.Atoi(lit.Value)
+					if err != nil || n < 700 || i >= len(params) {
+						continue
+					}
+					if !strings.Contains(strings.ToLower(params[i]), "weight") {
+						continue
+					}
+					out = append(out, heavySite{pos: v.Pos(),
+						what: "把 " + lit.Value + " 传给了一个字重参数"})
+				}
+			}
+		case *ast.GenDecl:
+			// D：本包里声明成 ≥ 700、名字带 weight 的常量
+			if v.Tok != token.CONST && v.Tok != token.VAR {
+				return true
+			}
+			for _, spec := range v.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok || len(vs.Values) != 1 || len(vs.Names) != 1 {
+					continue
+				}
+				lit, ok := vs.Values[0].(*ast.BasicLit)
+				if !ok || lit.Kind != token.INT {
+					continue
+				}
+				n, err := strconv.Atoi(lit.Value)
+				if err != nil || n < 700 {
+					continue
+				}
+				if !strings.Contains(strings.ToLower(vs.Names[0].Name), "weight") {
+					continue
+				}
+				out = append(out, heavySite{pos: vs.Pos(),
+					what: "声明了字重常量 " + vs.Names[0].Name + " = " + lit.Value})
+			}
+		}
+		return true
+	})
+	return out
 }
 
 // isHeavyWeight 报这一次调用是不是「把字重调到 700」。
@@ -281,7 +485,7 @@ func isHeavyWeight(call *ast.CallExpr) bool {
 //
 // ⚠️ **字符串字面量也算**：404 那个数字是 `ui.Text(c, "404")`——它没有名字，
 // 只有那句话本身。
-func mentionsMark(stmt ast.Stmt, mark string) bool {
+func mentionsMark(stmt ast.Node, mark string) bool {
 	found := false
 	ast.Inspect(stmt, func(n ast.Node) bool {
 		switch v := n.(type) {
