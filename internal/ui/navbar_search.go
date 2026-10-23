@@ -113,6 +113,9 @@ func searchFieldBg(t *ui.Theme, hot bool) ui.Color {
 func (s *Shell) viewSearchBox(c *ui.Context) {
 	t := c.Theme()
 
+	// 🔴 **框里要显示当前这一页搜的词**（理由见 `syncSearchKeyword`）。
+	s.syncSearchKeyword()
+
 	// ⚠️ 底色在 Children **之后**才定：判定要用的两个状态里，焦点这一位是
 	// Children 里才量到的（`field.Focused()`），而指针那一位要等这一格建出来
 	// 才能问（`row.Hovered()`）。先铺一层静止档，再按这一帧的实况盖上去——
@@ -151,8 +154,30 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 		//
 		// ⚠️ Biu 还有第三条 onFocus，**这里故意不要**：见下面「失焦」那一支的
 		// 说明——「焦点回来了」在这套浮层上是一个假信号。
+		wasFocused := s.searchFocused
 		focused := field.Focused()
 		s.searchFocused = focused
+
+		// 🔴 **填上去的那个词：点进来直接敲字是「替换」，不是「追加」**。
+		//
+		// 框里那个词有的时候是我们**填上去的**（深链接进来的 /search?q=周杰伦，
+		// 或者翻到另一条历史），不是用户自己敲的——那时候用户点进框里敲一个字，
+		// 期望的是「就搜这个字」，而实际得到的是「周杰伦林」。
+		//
+		// 所以**刚拿到焦点的时候把整个词选上**：接着敲的字就把它盖掉了（浏览器
+		// 对自动填进去的值也是这么做的）。
+		//
+		// ⚠️ **只对「填上去的」那一次**：用户自己敲出来的词不许动——他在框里
+		// 敲到一半要改，替他全选上等于把他敲的字吃掉。
+		if focused && !wasFocused && s.searchKeywordFilled {
+			field.SetTextSelection(0, len([]rune(s.searchKeyword)))
+			s.searchKeywordFilled = false
+		}
+		if field.Changed() {
+			// 用户自己敲了 → 框里那个词从此是他的。
+			s.searchKeywordFilled = false
+		}
+
 		switch {
 		case field.Changed(), field.Pressed():
 			s.searchSuggest = true
@@ -260,6 +285,46 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 			s.trackScrollbar(suggestScroll)
 		})
 	})
+}
+
+// syncSearchKeyword 让顶栏那个框里显示**当前这一页搜的词**。
+//
+// # 为什么需要它
+//
+// 页内那个输入框 2026-10-22 拍板删了（`DESIGN.md` §十.1，见 searchpage.go 的
+// 文件头），于是「当前搜的是什么」在界面上**只剩顶栏这一个显示**——框里空着而
+// 下面已经是一屏结果，用户会以为框坏了（而改词也只能回顶栏）。
+//
+// # 判据是「路由上的词换了吗」，不是「框是不是空的」
+//
+//   - 用户正在顶栏里敲字 → 路由没变 → **一个字都不动他的**；
+//   - 用户把框里的字删干净 → 路由没变 → **框不许自己弹回来**（票 #138 的评审
+//     抓过这一条：弹回来之后他接着敲的字会被粘在旧词后面）；
+//   - 搜了另一个词 / 翻到了另一条历史 → 路由上的词变了 → 框里那个是旧的了，
+//     换掉。
+//
+// ⚠️ **路由上没有词的那一支直接跳过**：去别的页面（路由上的词变成空）不是
+// 「换了词」，只是这一页不搜东西了——那一支要是也写，框里用户正在敲的字就会
+// 在他切页回来时被他自己搜的那个词盖掉（票 #138 抓的就是这一条的反面）。
+//
+// ⚠️ **写的是框，不是路由**：路由上的词是「这一页在搜什么」，框里的是「用户
+// 正在敲什么」——用户敲到一半没回车，那一句就还没算数。
+func (s *Shell) syncSearchKeyword() {
+	kw := strings.TrimSpace(s.router.Query(searchQuery))
+	if kw == "" || kw == s.searchKeywordFor {
+		return
+	}
+	s.searchKeywordFor = kw
+	if s.searchKeyword == kw {
+		// 框里那个词**就是**这个（用户自己敲的、刚搜完）：它是他自己的，不动，
+		// 也不标成「填上去的」。
+		s.searchKeywordFilled = false
+		return
+	}
+	// 框里那个词不是这个（深链接 / 翻历史）：换掉，并且**记下它是填上去的**——
+	// 用户点进来直接敲字的时候要替换，不是追加（见 `viewSearchBox` 里那一段）。
+	s.searchKeyword = kw
+	s.searchKeywordFilled = true
 }
 
 // suggestPanelMaxH 是这个面板最多能有多高（滚动容器的上限）。
@@ -387,9 +452,16 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 //
 // ⚠️ 已经在搜索页上时**不重发** `navigate`：同一个 target 再 push 一次会在历史里
 // 连着留两条一样的（`Router.Push` 不去重），返回键要按两下才回得去。
+//
+// ⚠️ **空词 = 没有这一场搜索**：在搜索页上就回到「还没输入」那一支（页内那个框
+// 2026-10-22 删掉之前就是这个行为——清空之后回车回到「没搜」）。不回的话，用户把
+// 框里的字删干净又按回车，界面上什么也不发生，而下面还是上一场搜索的结果。
 func (s *Shell) submitSearch(keyword string) {
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {
+		if s.router.Path() == searchPath {
+			s.navigate(searchPath)
+		}
 		return
 	}
 	s.hist.add(keyword)
@@ -407,10 +479,27 @@ func (s *Shell) submitSearch(keyword string) {
 //
 // ⚠️ 画面上是那个叉，**无障碍名字仍然是「清空」**：叉对读屏软件念出来是「乘号」，
 // 用户听不出它在清什么（同一个道理见 viewHistoryChip 里那个「删除「…」」）。
+//
+// 🔴 **在搜索页上它清的是「这一场搜索」，不只是框里那几个字**（票 #234 的评审
+// 抓出来的那一条）：页内那个输入框删掉之后，「清空」只剩这一个入口，而清完框
+// 而下面还是「搜索【周杰伦】的结果」和一屏结果——那正是 F-01 要消掉的那种
+// 「框和结果对不上」。所以在搜索页上按它就回到「还没输入」那一支。
+//
+// ⚠️ **别的页面上它只清框**：首页上按它不该把用户带到搜索页去。
 func (s *Shell) viewSearchClear(c *ui.Context) {
+	onSearch := s.router.Path() == searchPath
+	tip := "清空搜索框"
+	if onSearch {
+		tip = "清空搜索"
+	}
 	if s.withTip(c, iconButton(c, iconClose, "清空", iconCloseGlyph).
 		Size(iconCloseHit, iconCloseHit).Padding(0, 7).
-		TextColor(c.Theme().TextMuted), "清空搜索框").Clicked() {
+		TextColor(c.Theme().TextMuted), tip).Clicked() {
 		s.searchKeyword = ""
+		s.searchKeywordFilled = false
+		if onSearch {
+			// 回到「还没输入」那一支：框空了，结果也就该没有。
+			s.navigate(searchPath)
+		}
 	}
 }

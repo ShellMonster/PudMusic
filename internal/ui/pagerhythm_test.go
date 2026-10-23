@@ -375,7 +375,11 @@ func titleUsesSharedSize(t *testing.T, title string) bool {
 					return true
 				}
 				switch sel.Sel.Name {
-				case "Text":
+				case "Text", "Textf":
+					// ⚠️ **`Textf` 也算**：搜索页的页标题是
+					// `ui.Textf(c, "搜索【%s】的结果", keyword)`（票 #234 把页内那个
+					// 输入框和「搜索」那一行标题删掉之后，只剩这一句，而它带一个
+					// 词）。
 					if mentionsTitle(call, title) {
 						hasTitle = true
 					}
@@ -719,38 +723,45 @@ func hasAccentBar(img *image.RGBA, label mygoui.Rect, accent mygoui.Color) bool 
 	return false
 }
 
-// TestTheSearchPageShowsTheCurrentKeyword 钉住「搜索页的输入框显示当前关键词」。
+// TestTheSearchPageShowsTheCurrentKeyword 钉住「当前搜的那个词显示在顶栏的框里」。
 //
 // # 三件事
 //
-//  1. 从顶栏搜完点进来，框里是**那个词**（原来框是空的，而下面已经显示着
-//     「搜索【夜空中最亮的星】的结果」和一屏结果行——框里的词和它下面正在显示
-//     的那批歌对不上）。
-//  2. 画面上框里画的是那个词（不是那句占位「歌名或 UP 主」）。
-//  3. **切页回来不覆盖用户正在敲的字**。
+//  1. 进搜索页（URL 上带着词）→ 顶栏那个框里是**那个词**。
+//  2. **切页回来不覆盖用户正在敲的字**。
+//  3. **框被清空的时候不许弹回来**（票 #138 的评审抓出来的那一条）。
+//
+// ⚠️ **页内那个输入框已经删了**（2026-10-22 拍板，`DESIGN.md` §十.1，票 #234）：
+// 那一页不再摆第二个框，于是「当前搜的是什么」在界面上**只剩顶栏一个显示**——
+// 框里空着而下面已经是一屏结果，用户会以为框坏了（审计 F-01 / UX B1 说的就是
+// 「两个框，一个空一个有词」）。
+//
+// ⚠️ **判据是「路由上的词换了吗」**：切到别的页面（路由上没有词）不算「换了
+// 词」，所以框里用户正在敲的字在切页回来时还在。
 func TestTheSearchPageShowsTheCurrentKeyword(t *testing.T) {
 	st := newSearchStub(2, 0)
 	s, tt := newSearchPage(t, "周杰伦", st)
 	tt.Frame()
 
-	if s.searchDraft != "周杰伦" {
-		t.Errorf("搜索页的输入框里是 %q，want「周杰伦」——框里要显示当前关键词",
-			s.searchDraft)
+	// ① 顶栏那个框里是当前这个词。
+	if s.searchKeyword != "周杰伦" {
+		t.Errorf("顶栏的搜索框里是 %q，want「周杰伦」——这一页没有页内输入框了，"+
+			"当前搜的词只剩顶栏这一个显示", s.searchKeyword)
 	}
 	// 画面上：框里画的是那个词（正文色），不是占位那句（次要色）。
-	box, ok := tt.Find("搜索歌名或 UP 主")
+	box, ok := tt.Find(searchLabel)
 	if !ok {
-		t.Fatalf("画面上找不到那个输入框，文字有 %q", tt.Texts())
+		t.Fatalf("画面上找不到顶栏那个搜索框，文字有 %q", tt.Texts())
 	}
 	if !boxHasTextColor(tt, box) {
-		t.Errorf("那个输入框里没有正文色的字——框里画的是占位那句，而不是当前关键词")
+		t.Errorf("顶栏那个框里没有正文色的字——框里画的是占位那句，而不是当前关键词")
 	}
 
-	// ③ 切页回来不覆盖用户正在敲的字。
-	tt.Click("搜索歌名或 UP 主")
+	// ② 切页回来不覆盖用户正在敲的字。
+	tt.Click(searchLabel)
 	tt.Type("伦")
 	tt.Frame()
-	typed := s.searchDraft
+	typed := s.searchKeyword
 	if !strings.Contains(typed, "伦") {
 		t.Fatalf("敲进去的字没进框里：%q", typed)
 	}
@@ -758,12 +769,12 @@ func TestTheSearchPageShowsTheCurrentKeyword(t *testing.T) {
 	tt.Frame()
 	s.navigate(searchPath + "?" + searchQuery + "=" + "周杰伦")
 	tt.Frame()
-	if s.searchDraft != typed {
+	if s.searchKeyword != typed {
 		t.Errorf("切页回来之后框里是 %q，want %q——用户正在敲的字不许被覆盖",
-			s.searchDraft, typed)
+			s.searchKeyword, typed)
 	}
 
-	// ④ 🔴 **框被清空的时候不许弹回来**（票 #138 的评审抓出来的那一条）。
+	// ③ 🔴 **框被清空的时候不许弹回来**（票 #138 的评审抓出来的那一条）。
 	//
 	// 判据里多一条「框空着也写」的话，用户**还在这一页、正在删字**的时候就撞上
 	// 了：他把框里的字删干净 → 那一帧草稿是空串 → 关键词被立刻写回去 → 框**清
@@ -771,19 +782,19 @@ func TestTheSearchPageShowsTheCurrentKeyword(t *testing.T) {
 	// 回车就按这个搜）。
 	//
 	// 删着改是更常见的做法（实测：全选 + 直接重打能绕过去，而删着改绕不过去）。
-	tt.Click("搜索歌名或 UP 主")
+	tt.Click(searchLabel)
 	tt.Key(mygoui.Cmd, mygoui.KeyA) // 全选
 	tt.Key(0, mygoui.KeyBackspace)  // 删掉
 	tt.Frame()
-	if s.searchDraft != "" {
+	if s.searchKeyword != "" {
 		t.Errorf("把框里的字删干净之后，框里又变回 %q——框清不掉，而用户接着敲的"+
-			"字会被粘在旧词后面", s.searchDraft)
+			"字会被粘在旧词后面", s.searchKeyword)
 	}
 	// 接着敲的那个字**只**是他敲的那个。
 	tt.Type("林")
 	tt.Frame()
-	if s.searchDraft != "林" {
-		t.Errorf("删干净之后接着敲「林」，框里是 %q，want「林」", s.searchDraft)
+	if s.searchKeyword != "林" {
+		t.Errorf("删干净之后接着敲「林」，框里是 %q，want「林」", s.searchKeyword)
 	}
 }
 
