@@ -33,15 +33,21 @@ import (
 // 17.65（`TestEveryLoadingStateIsDrawnTheSameWay`），两者都是 1.1767。
 const textBoxPerSize = 1.1767
 
-// titleSizes 是**标题类**文字用的那几个字号。
+// titleSizes 是**页标题**用的那几个字号：字重**一个字都不许写**。
 //
-// ⚠️ **不止一个**：页标题 24（`pageTitleSize`）、空状态那一页的页面名 20
-// （`emptyPageTitle`）、播放器那一页的歌名 20（`playerTitleSize`）。
+// ⚠️ **页标题只有两个字号**：页标题 24（`pageTitleSize`）、空状态那一页的页面名
+// 20（`emptyPageTitle`）。
 //
-// 此前 `TestPageTitlesAreNotBold` 只钉了第一个——于是搜索页、收藏夹页、迷你
-// 播放器那几处的粗体一路漏到了今天（UI 报告 §2 的 F-07：21 处 `.Bold()` 不在
-// 刻度上）。**这条测试的覆盖面就是在这儿补上的**。
-var titleSizes = []string{"pageTitleSize", "emptyPageTitle", "playerTitleSize"}
+// 此前这一条只钉了第一个——于是搜索页、收藏夹页、迷你播放器那几处的粗体一路漏到
+// 了今天（UI 报告 §2 的 F-07：21 处 `.Bold()` 不在刻度上）。**这条测试的覆盖面
+// 就是在这儿补上的**（空状态那一页是第二档）。
+//
+// ⚠️ **播放器那一页的歌名（`playerTitleSize`）不在这张表里**：那一档是**歌名**，
+// 不是页标题，而票 #169 的 `TestTheFullPlayerTitleIsNotBold` 钉的是**满屏那一处
+// 要写 `.FontWeight(400)`**——两者的判据不是同一条（页标题一个字重都不写，
+// 歌名那一处写出来）。迷你播放器那一处（`nowplaying.go`）由
+// `TestOnlyTheScaleIsBold` 盖住——**任何一处 `.Bold()` 都不许有**，它管全局。
+var titleSizes = []string{"pageTitleSize", "emptyPageTitle"}
 
 // stmtSpans 是这个文件里所有语句连同它们的范围。
 type stmtSpans struct {
