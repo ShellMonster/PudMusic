@@ -13,6 +13,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -37,9 +38,9 @@ import (
 // **左右**的关系（见 `viewTrackActions`）。
 const (
 	playbarHeight = 88
-	playbarPadX   = 16
+	playbarPadX   = space.Px16
 	coverSize     = 56
-	coverGap      = 8
+	coverGap      = space.Px8
 
 	// coverRadius 是播放条上那张封面（和它悬停时那层黑罩）的圆角：**6**。
 	//
@@ -64,24 +65,24 @@ const (
 	// 实测（2026-10，票 #219）：上游那张 README 截图里，歌名的墨迹底到 UP 名的
 	// 墨迹顶是 17 个**设备像素**（那张图缩过 1.21 倍，换成 CSS 是 **14**）；
 	// 我们不设缝的时候是 **10**，加上这 4 就是 **14**——对上了。
-	trackRowGap = 4
+	trackRowGap = space.Px4
 
 	// playbarRightGap 是右边那一组里键与键之间的缝。Biu 那一行是
 	// `space-x-2`（`playbar/right/index.tsx:13`），不是外面那一行的 12。
-	playbarRightGap = 8
+	playbarRightGap = space.Px8
 
 	// transportGap 是上一首 / 播放 / 下一首三枚键之间的空隙。
 	//
 	// 上游是 `space-x-6`（`components/music-play-control/index.tsx:19`）= **24**。
 	// 原来是 12：那一排挤成一堆，中间那枚（用户真正要按的那枚）左右只各留 12。
-	transportGap = 24
+	transportGap = space.Px24
 
 	// playbarCenterPadX 是中间那一列左右各留的内边距。
 	//
 	// 上游是 `px-6`（`layout/playbar/center/index.tsx:12`）= **24**。
 	// ⚠️ **它不是装饰**：右边那一组是**定宽**的一排键（比 1 份轨道宽），在窄
 	// 窗口下会从轨道里溢出来——这 24 是进度行和那排键之间的缓冲。
-	playbarCenterPadX = 24
+	playbarCenterPadX = space.Px24
 
 	// artistMinW 是 UP 名那一段最少留多宽。
 	//
@@ -296,7 +297,7 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 			// `flagPassThrough` 只跳过**它自己**的命中框，**子节点照旧登记**
 			//（`mygo/ui/runtime.go:1046`）——所以三键和进度条照旧能点、能拖，
 			// 而这一列那一大片空白不再挡着左列。
-			ui.Column(c).Gap(2).AlignItems(ui.Center).Justify(ui.Center).
+			ui.Column(c).Gap(space.Px2).AlignItems(ui.Center).Justify(ui.Center).
 				PaddingX(playbarCenterPadX).PassThrough().Children(func() {
 				s.viewTransport(c, st)
 				s.viewProgress(c, st)
@@ -371,7 +372,7 @@ func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 		// 的第三个（`playbar/right/index.tsx:16`），而顶栏那一枚是当初右边摆不下
 		// 时挪过去的——现在右边腾得开，两处只能留一个，留两个就会不一致。
 		if s.withTip(c, iconKey(c, iconQueue, "播放列表", iconMd, false).
-			Size(iconHitMd, iconHitMd).Padding(0, 7), drawerTip(s.drawerOpen)).Clicked() {
+			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), drawerTip(s.drawerOpen)).Clicked() {
 			s.drawerOpen = !s.drawerOpen
 		}
 
@@ -390,7 +391,7 @@ func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 		s.viewRate(c, st)
 
 		if s.withTip(c, iconKey(c, iconEnqueue, "加歌", iconMd, false).
-			Size(iconHitMd, iconHitMd).Padding(0, 7), "把本地文件加到队列末尾").Clicked() {
+			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "把本地文件加到队列末尾").Clicked() {
 			s.pickAndEnqueue()
 		}
 	})
@@ -441,7 +442,7 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 
 	// 🔴 **缝是 4**（上游那一列的 `space-y-1`）——理由和量法见 `trackRowGap`。
 	ui.Column(c).Grow(1).Gap(trackRowGap).Children(func() {
-		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 			// ⚠️ **一行，截断**——照 Biu：`left/index.tsx` 的歌名是
 			// `min-w-0 flex-1 truncate`。以前这里不设 MaxLines，窗口一窄它就换行、
 			// 换到三行，而**下面两行一格都分不到**：88 高的播放条塞不下
@@ -583,7 +584,7 @@ func (s *Shell) viewTrackActions(c *ui.Context, st app.State) {
 // 都不动（那一列的宽度、进度条的长度都不受影响）。
 func (s *Shell) viewTrackError(c *ui.Context, st app.State, t *ui.Theme) {
 	msg := "打不开：" + st.Err
-	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 		// 🔴 **一行 + 省略号，和歌名同一个理由**：这一列最窄的时候（760 宽
 		// 的测试窗口，比应用自己的下限 900 还窄）只剩 70，而这一句话有 14 个
 		// 字——换成两行就是四行，**88 高的播放条装不下，最后一行被裁掉**，
@@ -591,7 +592,7 @@ func (s *Shell) viewTrackError(c *ui.Context, st app.State, t *ui.Theme) {
 		//
 		// 缩掉的那几个字用悬停补回来，和上面那个音质徽章同一个做法。
 		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, 12)).
-			TextColor(t.Danger).MaxLines(1).Ellipsis("…").Grow(1), msg)
+			TextColor(dangerText(t)).MaxLines(1).Ellipsis("…").Grow(1), msg)
 		switch {
 		case st.CanRetry:
 			if s.withTip(c, flatButton(c, "重试").FontSize(scale.Font(c, 12)),
@@ -672,7 +673,7 @@ func (s *Shell) viewArtist(c *ui.Context, st app.State, t *ui.Theme) {
 	//（报告 §1.1 的 F1 证据：播放条上每一枚带描边的键）。它上面是 14px 的弱化
 	// 灰字，本来就不该配一块描边底。
 	if s.withTip(c, flatButton(c, st.Artist).Grow(1).MinWidth(artistMinW).
-		Justify(ui.Start).FontSize(scale.Font(c, 14)).Padding(0, 0).TextColor(t.TextMuted).
+		Justify(ui.Start).FontSize(scale.Font(c, 14)).Padding(space.None, space.None).TextColor(t.TextMuted).
 		MaxLines(1).Ellipsis("…"), "打开 "+st.Artist+" 的空间").Clicked() {
 		s.navigate(upPathPrefix + strconv.FormatInt(st.ArtistMid, 10))
 	}
@@ -703,7 +704,7 @@ func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
 	// 而**播放条上全部图标键都是 18**。改之前是 14（`iconSm`）——比上游小 4 像素，
 	// 在 32 的盒子里每边留 9，看起来像「画糊了」。
 	btn := s.withTip(c, iconKey(c, favIcon(faved), "收藏", iconMd, false).
-		Size(iconHitMd, iconHitMd).Padding(0, 7), favTooltip(faved))
+		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), favTooltip(faved))
 	if faved {
 		// ⚠️ **只在这一支设颜色**：没收藏的那一支一个字都不改，好让「默认那个颜色」
 		// 继续由按钮自己决定（图标从祖先的文字色继承，按钮给的就是它）。
@@ -745,7 +746,7 @@ func favTooltip(faved bool) string {
 // 唯一的痕迹。
 func (s *Shell) viewDownloadButton(c *ui.Context, st app.State) {
 	if s.withTip(c, iconKey(c, iconDownload, "下载", iconMd, false).
-		Size(iconHitMd, iconHitMd).Padding(0, 7), "把正在放的这首下载到本地").Clicked() {
+		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "把正在放的这首下载到本地").Clicked() {
 		it, ok := s.app.PlayingItem()
 		if !ok {
 			s.addToast("这一首还没有取回来，下载不了", notice.Warning)
@@ -857,7 +858,7 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 
 		if st.Playing {
 			if s.withTip(c, iconButtonPlay(c, transportIcon(true), "暂停", iconPlayBtn, false).
-				Size(iconHitPlay, iconHitPlay).Padding(0, 0), "暂停").Clicked() {
+				Size(iconHitPlay, iconHitPlay).Padding(space.None, space.None), "暂停").Clicked() {
 				s.app.Toggle()
 			}
 		} else {
@@ -865,7 +866,7 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 			// 颜色是**建元素时**定的，「悬停变主色」要在**禁用之后**才问——问早了
 			// 一枚禁用的键会用主色告诉用户「这里点得动」（理由见那个函数）。
 			if s.withTip(c, iconButtonPlay(c, transportIcon(false), "播放", iconPlayBtn, !st.HasTrack).
-				Size(iconHitPlay, iconHitPlay).Padding(0, 0), "播放").Clicked() {
+				Size(iconHitPlay, iconHitPlay).Padding(space.None, space.None), "播放").Clicked() {
 				s.app.Toggle()
 			}
 		}
@@ -1021,14 +1022,14 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 // ——它只是小了一圈）。
 func (s *Shell) viewPrevButton(c *ui.Context) {
 	if s.withTip(c, iconKey(c, iconPrev, "上一首", iconSkip, !s.app.CanPrev()).
-		Size(iconHitMd, iconHitMd).Padding(0, 5), "上一首").Clicked() {
+		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px5), "上一首").Clicked() {
 		s.app.Prev()
 	}
 }
 
 func (s *Shell) viewNextButton(c *ui.Context) {
 	if s.withTip(c, iconKey(c, iconNext, "下一首", iconSkip, !s.app.CanNext()).
-		Size(iconHitMd, iconHitMd).Padding(0, 5), "下一首").Clicked() {
+		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px5), "下一首").Clicked() {
 		s.app.Next()
 	}
 }
@@ -1049,7 +1050,7 @@ func (s *Shell) viewPlayMode(c *ui.Context, st app.State) {
 	// 四档各配一个图标（Biu 的 `getPlayModeList`，逐个照它的 `icon` 那一项），
 	// 悬停那句话仍然报的是**当前这一档**。
 	btn := s.withTip(c, iconKey(c, playModeIcon(st.PlayMode), "播放模式", iconMd, false).
-		Size(iconHitMd, iconHitMd).Padding(0, 7),
+		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
 		st.PlayMode.Label()+"："+st.PlayMode.Desc()+"（点一下换，右键看全部）")
 
 	// 按一下换到下一档。档序（顺序 → 循环 → 随机 → 单曲 → 回顺序）是 App 那边
@@ -1146,7 +1147,7 @@ func (s *Shell) pickAndEnqueue() {
 func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 	known := st.Duration > 0
 
-	ui.Row(c).Gap(10).AlignItems(ui.Center).WidthPercent(75).Children(func() {
+	ui.Row(c).Gap(space.Px10).AlignItems(ui.Center).WidthPercent(75).Children(func() {
 		ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, 14)).TextColor(c.Theme().TextMuted).
 			MinWidth(48).MaxLines(1)
 

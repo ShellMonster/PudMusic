@@ -42,6 +42,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -81,12 +82,12 @@ const (
 	upAvatarS = 140
 	// upPad 是头图区的**纵向**内边距，也是 Tab 那一条的左右内边距。Biu 是
 	// `py-4`（`space-info.tsx:83`）和内容区那一圈 `p-4`（`user-profile/index.tsx:130`）。
-	upPad = 16
+	upPad = space.Px16
 	// upPadX 是头图区的**左右**内边距。Biu 是 `px-8`（`space-info.tsx:83`）。
 	//
 	// ⚠️ **不要拿它去改 Tab 那一条**：上游 Tab 外面是 `p-4`（16），头图才是
 	// 32。两处共用一个数的话，Tab 会跟着头图一起往中间缩。
-	upPadX = 32
+	upPadX = space.Px32
 )
 
 // upPathOf 是 mid 这个 UP 的空间地址。
@@ -490,7 +491,7 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 		return
 
 	case h.Err != "" && !h.Loaded:
-		ui.Column(c).Key(key).Height(upHeaderH).FillWidth().Center().Gap(10).
+		ui.Column(c).Key(key).Height(upHeaderH).FillWidth().Center().Gap(space.Px10).
 			AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "打不开这个 UP 主的空间").FontSize(scale.Font(c, 16)).Bold()
 			ui.Text(c, h.Err).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(3)
@@ -505,10 +506,10 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 	case h.Relation.Blocked():
 		// 上游是整页换成一张「已拉黑」的图（`space-info.tsx:69-75`）。这里
 		// 保留头像和名字：用户多半只是想确认「我拉黑的是不是这个人」。
-		ui.Row(c).Key(key).Height(upHeaderH).FillWidth().Gap(16).Center().Children(func() {
+		ui.Row(c).Key(key).Height(upHeaderH).FillWidth().Gap(space.Px16).Center().Children(func() {
 			s.spaceAvatar(c, h.User.Face, upAvatarS, true)
-			ui.Column(c).Gap(4).Children(func() {
-				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, 20)).FontWeight(600)
+			ui.Column(c).Gap(space.Px4).Children(func() {
+				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, 20)).FontWeight(weightMedium)
 				ui.Text(c, "你把他拉黑了，他的内容在这儿看不到").
 					FontSize(scale.Font(c, 14)).TextColor(t.TextMuted)
 			})
@@ -533,11 +534,15 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 		// ② 头像 + 昵称 + 签名 + 右边那一排关注和统计。圆角留白与间距照上游：
 		// `px-8 py-4`、头像和文字 `space-x-4`、文字两行 `space-y-2`。
 		ui.Row(c).Key("space-head-info").Absolute().Left(0).Right(0).Bottom(0).
-			Padding(upPad, upPadX).Gap(16).AlignItems(ui.Center).Children(func() {
+			Padding(upPad, upPadX).Gap(space.Px16).AlignItems(ui.Center).Children(func() {
 			// 头像带 `shadow-lg`（上游 `space-info.tsx:89` 的 `shadow-lg`）。
 			s.spaceAvatar(c, h.User.Face, upAvatarS, true)
-			ui.Column(c).Gap(8).Children(func() {
-				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, 20)).FontWeight(600).MaxLines(1).Ellipsis("…")
+			ui.Column(c).Gap(space.Px8).Children(func() {
+				// ⚠️ **字重是 500（`weightMedium`），不是 600**（票 #241 / 报告
+				// F-26）：600 在 `DESIGN.md` §二 的刻度里有那一档却没有用途，
+				// 而这三个数字 / 名字正是「比正文重一档」的那一档。理由同
+				// `spaceStat` 那处的注释。
+				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, 20)).FontWeight(weightMedium).MaxLines(1).Ellipsis("…")
 				if h.User.Official != "" {
 					ui.Text(c, "认证："+h.User.Official).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 				}
@@ -566,7 +571,7 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 	t := c.Theme()
 	isSelf := s.app.SelfMid() == sp.mid
 
-	ui.Row(c).Key("space-actions").Gap(16).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Key("space-actions").Gap(space.Px16).AlignItems(ui.Center).Children(func() {
 		// 关注按钮**只在「登录了、且看的不是自己」时画**（上游
 		// `space-info.tsx:100` 的 `Boolean(user?.isLogin) && !isSelf`）。
 		// 看自己的时候画一个「关注自己」是 B 站网页版都不做的事。
@@ -638,12 +643,16 @@ func (sp *upSpace) follow(yes bool) {
 
 // spaceStat 是一个统计数字（上面是数、下面是名字）。
 //
-// 字号照上游 `space-info.tsx:131-133`：数字 `text-lg font-semibold`（18 / 600），
-// 名字 `text-sm`（14）。
+// 字号照上游 `space-info.tsx:131-133`：数字 `text-lg`（18），名字 `text-sm`（14）。
+//
+// ⚠️ **字重取 500（`weightMedium`），不是上游那个 600**（票 #241 / 报告 F-26）。
+// 上游是 `font-semibold`，而 600 在 `DESIGN.md` §二 的刻度里**有这一档却没有
+// 用途**——「600 是无主」：没有人能说出这三个数字为什么该是 600。500 才是
+// 仓库里唯一被命名的字重，用途正是「比正文重一档但不到标题那么重」。
 func spaceStat(c *ui.Context, label, value string) {
 	t := c.Theme()
-	ui.Column(c).Key("space-stat:" + label).Gap(2).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, value).FontSize(scale.Font(c, 18)).FontWeight(600)
+	ui.Column(c).Key("space-stat:" + label).Gap(space.Px2).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, value).FontSize(scale.Font(c, 18)).FontWeight(weightMedium)
 		ui.Text(c, label).FontSize(scale.Font(c, 14)).TextColor(t.TextMuted)
 	})
 }

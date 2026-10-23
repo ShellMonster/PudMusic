@@ -45,6 +45,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -61,8 +62,8 @@ func (s *Shell) settingsConfig(c *ui.Context) {
 	s.settingSection(c, "配置")
 	s.settingSectionEnd(c)
 
-	ui.Column(c).FillWidth().Gap(8).Children(func() {
-		ui.Row(c).FillWidth().Gap(8).Children(func() {
+	ui.Column(c).FillWidth().Gap(space.Px8).Children(func() {
+		ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
 			if flatButton(c, "导出配置").FontSize(scale.Font(c, 13)).Clicked() {
 				s.exportConfig()
 			}
@@ -76,11 +77,11 @@ func (s *Shell) settingsConfig(c *ui.Context) {
 		// 摆一句说明，比摆一个必然失败的按钮诚实。
 		if rep.ReadOnly {
 			ui.Text(c, "数据目录来自更新的版本，这一版一个字都不会写回去，所以下面几样都没有带过来。").
-				FontSize(scale.Font(c, 12)).TextColor(t.Danger).Wrap()
+				FontSize(scale.Font(c, 12)).TextColor(dangerText(t)).Wrap()
 		} else if dirs := rep.BiuDirs; len(dirs) > 0 {
 			// 「从 Biu 导入」只在**找得到** Biu 的数据目录时才摆。摆一个点了必然说
 			// 「没找到 Biu」的按钮，等于让用户自己判断这台机器上有没有装过 Biu。
-			ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
 				if flatButton(c, "从 Biu 导入").FontSize(scale.Font(c, 13)).Clicked() {
 					s.importFromBiu(dirs)
 				}
@@ -116,7 +117,7 @@ func (s *Shell) importNotes(c *ui.Context, rep MigrationReport) {
 		return
 	}
 	t := c.Theme()
-	ui.Column(c).FillWidth().Gap(4).Children(func() {
+	ui.Column(c).FillWidth().Gap(space.Px4).Children(func() {
 		ui.Text(c, "这次没有带过来的：").FontSize(scale.Font(c, 12)).Bold()
 		for _, n := range rep.Imported.Notes {
 			ui.Text(c, "· "+n).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Wrap()

@@ -25,6 +25,7 @@ package ui
 
 import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -68,7 +69,7 @@ func (s *Shell) viewNeedsLogin(c *ui.Context, key string, e emptyState) {
 	s.applyFrameTheme(c)
 
 	t := c.Theme()
-	ui.Column(c).Key(key).Grow(1).Center().Gap(8).Padding(24).Children(func() {
+	ui.Column(c).Key(key).Grow(1).Center().Gap(space.Px8).Padding(space.Px24).Children(func() {
 		// 一枚插画，和别页的空状态同一副样子（理由见上面那段注释）。
 		emptyArt(c, e.Icon)
 		ui.Text(c, e.Title).FontSize(scale.Font(c, pageTitleSize))

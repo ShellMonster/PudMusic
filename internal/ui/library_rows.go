@@ -39,6 +39,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrollbar"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -650,7 +651,7 @@ func (p *pagedRows) viewGridRow(r ui.ListRow, cols int) {
 	m := p.rows[first]
 	if p.failed[m.ID] {
 		ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).
-			Padding(8).MaxLines(1)
+			Padding(space.Px8).MaxLines(1)
 		return
 	}
 	// ⚠️ **格子宽度要算出来交给页面**：封面按格子宽画（`widgets/list` 的
@@ -701,7 +702,7 @@ func (p *pagedRows) viewCellGuarded(c *ui.Context, i int, cell float32) {
 	m := p.rows[i]
 	if p.failed[m.ID] {
 		ui.Text(c, "这一格画不出来").FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).
-			Padding(8).MaxLines(1)
+			Padding(space.Px8).MaxLines(1)
 		return
 	}
 	guard.Wrap(func(c *ui.Context) {
@@ -736,7 +737,7 @@ func (p *pagedRows) viewRow(r ui.ListRow) {
 	m := p.rows[i]
 	if p.failed[m.ID] {
 		ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).
-			Padding(8).MaxLines(1)
+			Padding(space.Px8).MaxLines(1)
 		return
 	}
 	guard.Wrap(func(c *ui.Context) {
@@ -763,7 +764,7 @@ func (p *pagedRows) markFailed(id string) {
 // viewFooter 画末尾那一行：转圈，或者失败了让人点重试。
 func (p *pagedRows) viewFooter(c *ui.Context) {
 	t := c.Theme()
-	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(8).Padding(8).
+	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(space.Px8).Padding(space.Px8).
 		Children(func() {
 			if p.blocked {
 				// 行里的重试（不是错误页上那颗主按钮）：扁平配方，悬停才有一层淡底。

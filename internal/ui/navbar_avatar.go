@@ -47,18 +47,26 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
 const (
-	// avatarSize 是头像多大。Biu 是 `size="sm"` 加 `mr-4`，具体值没露出来；
-	// 28 是顶栏这个高度里放得下、又不抢戏的一个数。
+	// avatarSize 是头像那一枚圆有多大。Biu 是 `size="sm"` 加 `mr-4`，具体值没
+	// 露出来。
+	//
+	// ⚠️ **18 是照着「顶栏那一排的视觉重量」定的**（票 #241 / 报告 F-16）：
+	// 左边那四枚线框图标（文件 / 迷你 / 设置 / 动态）都是 16 宽的图形，墨迹
+	// 137~141；**头像原来那一枚是 28 直径的一块实心圆盘（墨迹 608）**——是那
+	// 四枚的 **4.3 倍**，用户第一眼落在它上面而不是任何一枚功能键上。
+	// 18 是那一档：现在这一枚的墨迹是 152~160，和那四枚**同一档**
+	// （1.08~1.14 倍，而那四枚彼此之间也有 1.03 倍的差别）。
 	//
 	// ⚠️ **改这个数要连着下面那一堆比例一起看**：人形剪影的每一块都是它的分数
-	// 倍。⚠️ 这句话原来还接着「而 `navMinHeight` 是 32——再大一点剪影就被顶栏
-	// 切了」——票 #127 把顶栏从 32 抬到 **64**（Biu 的 `h-16`）之后，这一半
-	// 理由不再成立：28 在 64 高里是绰绰有余的。当年的上限是那 28。
-	avatarSize = 28
+	// 倍（`avatarPerson`）。⚠️ 这句话原来还接着「28 是顶栏这个高度里放得下、
+	// 又不抢戏的一个数」——那是**在它比邻居重四倍的时候**说的，现在那一半
+	// 理由已经作废：这一格要和左边四枚**同一档**，不是比它们大一号。
+	avatarSize = 18
 
 	// avatarLabel 是头像那个**可点的方块**的无障碍名字，也是测试点得到它的
 	// 凭据——无头 Tester 的 `Find` 找的是「显示着这个字或者标着这个名字」的
@@ -145,7 +153,7 @@ func (s *Shell) goProfile() {
 //
 // ⚠️ **只有三档，而它们分的是「画什么」不是「为什么」**。为什么在 `note` 里。
 // 拆成「未登录一种、载入中一种、没有头像一种、失效一种」四五个相位看起来更齐，
-// 可它们在 28 宽的一格里**画出来是同一样东西**——那个人形。相位拆得再细，
+// 可它们在 18 宽的一格里**画出来是同一样东西**——那个人形。相位拆得再细，
 // 界面上分不出来，而「界面上分不出来的两种状态用两种相位记着」正是下一次
 // 有人把它们合并时找不到证据的那一票。
 //
@@ -296,7 +304,7 @@ func (s *Shell) fetchAvatarFace(gen uint64) {
 		a.note = "这个账号没有头像"
 	default:
 		// ⚠️ **note 在这一档是空的，而且必须空**：地址有了而图好了的时候画出去的是
-		// **那张图**，图自己就是交代，一个字都不占那 28 见方。留着 note 的作用
+		// **那张图**，图自己就是交代，一个字都不占那 18 见方。留着 note 的作用
 		// 只是给 `viewAvatarFace` 的另一支兜底，而那一支自己会盖掉它。
 		//
 		// 顺带记下一件真的没有做的事：**这一档不重试**。nav 问失败（刚开机时网络
@@ -312,7 +320,7 @@ func (s *Shell) fetchAvatarFace(gen uint64) {
 
 // 那一格无障碍名 / 悬停说明用的几句话。
 //
-// ⚠️ **它们不是装饰**：这一格只有 28 见方，装不下几句话，而「这一格是什么意思」
+// ⚠️ **它们不是装饰**：这一格只有 18 见方，装不下几句话，而「这一格是什么意思」
 // 是读代码以外的人唯一能拿到的交代。屏幕阅读器读 `Label`，鼠标用户读 `Tooltip`，
 // 测试读 `Find`——三条路读的是同一句话。
 const (
@@ -327,14 +335,17 @@ const (
 )
 
 // viewAvatar 是头像 + 它的下拉。
+//
+// ⚠️ **命中区 32×32，里面那枚圆 20**（票 #241 / 报告 F-16）：顶栏那一排的图标
+// 键命中区都是 32（`iconHitMd`），头像原来那一格只有 28 见方——**它缩小之后
+// 命中区反而更小了**，于是把命中区留在 32、只把**画出来的那一枚圆**收到 20。
 func (s *Shell) viewAvatar(c *ui.Context) {
 	// Key 挂在外面这一格上：`.Menu()` 会把元素变成菜单按钮（`ui/menu.go:66`
 	// 置 flagClickable / flagFocusable），Key 挂在这种元素上会 panic
 	// （`ui/element.go:658`）。
 	ui.Column(c).Key("avatar").Children(func() {
-		face := ui.Box(c).Size(avatarSize, avatarSize).
-			Radius(avatarSize/2).Clip().Border(1, c.Theme().Border)
-		face.Label(avatarLabel).Menu(func(m *ui.Menu) {
+		hit := ui.Box(c).Size(iconHitMd, iconHitMd).Center().
+			Label(avatarLabel).Menu(func(m *ui.Menu) {
 			for _, item := range avatarMenuItems {
 				if m.Item(item.label).Chosen() {
 					item.run(s, c)
@@ -347,9 +358,14 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 		// **整个圆**（上游那个类加在 Avatar 上），不是里面那张图。
 		//
 		// ⚠️ hover 要在 Children **之前**问（理由同 `widgets/list` 的 grid.go）。
-		on := face.Hovered()
-		face = hoverZoom(c, face, "avatar-zoom", on)
-		face.Children(func() { s.viewAvatarFace(c) })
+		on := hit.Hovered()
+		hit = hoverZoom(c, hit, "avatar-zoom", on)
+		hit.Children(func() {
+			// 那一枚圆：**裁成圆的**（里面的图要按圆裁），外面留一圈 1 像素的描边。
+			face := ui.Box(c).Size(avatarSize, avatarSize).
+				Radius(avatarSize/2).Clip().Border(1, c.Theme().Border)
+			face.Children(func() { s.viewAvatarFace(c) })
+		})
 	})
 }
 
@@ -362,7 +378,7 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 //
 // ⚠️ 这里读的是 `imgcache.Cache` 而不是直接调 `imgcache.View`：那个 View 是给
 // **封面**那一档尺寸定的（占位和失败态都是没有字的一格，见 imgcache/view.go 的
-// drawCover）。头像只有 28 宽，而且它要说的是「未登录 / 图没下来 / 在路上」
+// drawCover）。头像只有 18 宽，而且它要说的是「未登录 / 图没下来 / 在路上」
 // 三件不同的事，有自己的一套画法（见下面 drawAvatar）。
 func (s *Shell) viewAvatarFace(c *ui.Context) {
 	side := float32(avatarSize)
@@ -381,7 +397,7 @@ func (s *Shell) viewAvatarFace(c *ui.Context) {
 	case st.Ready():
 		ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(side, side)
 	case st.Err != nil:
-		// ⚠️ **这一档不能摆成空白**——28 见方的一格空白在顶栏上是一个看不出是
+		// ⚠️ **这一档不能摆成空白**——18 见方的一格空白在顶栏上是一个看不出是
 		// 什么的洞，而用户真正缺的不是那张图，是「为什么没有」。所以染成告警色
 		// 并且把那句话挂上去。
 		s.drawAvatar(c, avatarTrouble, avatarNoteNoPicture)
@@ -393,19 +409,29 @@ func (s *Shell) viewAvatarFace(c *ui.Context) {
 }
 
 // drawAvatar 按那一档的样子画。**三档都在这里定死**，view 不再插嘴。
+//
+// ⚠️ **那一格不铺底色**（票 #241 / 报告 F-16）：原来占位那一档在圆里铺的是
+// `t.Surface`——在深色下那是 #27272a，而顶栏的底是 #18181b，**整块圆盘都是
+// 「墨迹」**：28 直径的一块实心圆 = 608 像素，是左边那四枚线框图标（137~141）
+// 的 **4.3 倍**。现在只画那个人形（外加外面那一圈 1 像素的描边），墨迹是
+// 152~160，和邻居同一档。
+//
+// ⚠️ **「出问题」那一档仍然铺底色**（危险色 18%）：那一档**要**是显眼的——
+// 它说的是「这儿出事了」，而那一档平时不出现。
 func (s *Shell) drawAvatar(c *ui.Context, look avatarLook, note string) {
 	t := c.Theme()
 	side := float32(avatarSize)
 
-	bg, ink := t.Surface, t.TextMuted
+	ink := t.TextMuted
+	col := ui.Column(c).Size(side, side).Center().Label(note)
 	if look == avatarTrouble {
-		bg, ink = t.Danger.Alpha(0.18), t.Danger
+		ink = t.Danger
+		col = col.Background(t.Danger.Alpha(0.18))
 	}
 
-	// ⚠️ `Label` 和悬停提示用的是**同一句话**：这一格只有 28 见方，写不下
+	// ⚠️ `Label` 和悬停提示用的是**同一句话**：这一格只有 18 见方，写不下
 	// 「这个账号没有头像」那几句；而这三样（无障碍名、悬停说明、测试点得到的
 	// 凭据）读的是同一件事，给它们三份不同的措辞只会让其中一份开始说谎。
-	col := ui.Column(c).Size(side, side).Center().Background(bg).Label(note)
 	col.Children(func() { avatarPerson(c, side, ink) })
 	// ⚠️ **quiet**：锚点是外面那个头像菜单按钮里的子元素。普通的提示会问
 	// `Pressed()` / `Clicked()`（那会给元素打上可点标志），命中目标就从菜单
@@ -418,7 +444,7 @@ func (s *Shell) drawAvatar(c *ui.Context, look avatarLook, note string) {
 // 为什么画人不画字：这一格没登录时**没有一个字是诚实的**。原来的「B」是应用
 // 自己的名字（见老注释），用户看到的是一个占位符坏了；换成昵称头一个字的话，
 // 那一格在没登录时显示的是**别人的名字的第一个字**——那更糟。用户资料接口
-// 明明能给出真实头像，于是没登录就该说「这儿没有人」，而人这个形状在 28 见方
+// 明明能给出真实头像，于是没登录就该说「这儿没有人」，而人这个形状在 18 见方
 // 里是认得出来的。
 //
 // ⚠️ **每一块都是 side 的分数倍**，所以换 `avatarSize` 时它跟着等比缩放。
@@ -433,5 +459,5 @@ func avatarPerson(c *ui.Context, side float32, ink ui.Color) {
 	head := side * headD
 	ui.Box(c).Size(head, head).Radius(head / 2).Background(ink)
 	ui.Box(c).Size(side*shoulder, side*torso).Radius(side*0.15).
-		Margin(side*gap, 0, 0, 0).Background(ink)
+		Margin(side*gap, space.None, space.None, space.None).Background(ink)
 }

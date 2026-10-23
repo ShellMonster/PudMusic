@@ -26,6 +26,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -85,11 +86,15 @@ func statusOf(r download.Snapshot, t *ui.Theme) statusCell {
 		// （progress.tsx:17-25）。对勾是 `RiCheckboxCircleLine`——我们图标集里
 		// 有同一张（`System/checkbox-circle-line.svg`），所以照画。
 		//
-		// ⚠️ **浅色下这个成功绿当字色是 2.19:1**（旧的那一档是 3.30:1）——
-		// 上游 HeroUI 那个色相自带的代价，理由和数都在 `theme.go` 的语义色
-		// 那一段。那一段还写了「别拿对比度当理由把色值改回去」：真要同时
-		// 保住上游色相和可读性，得给「当字色用」另取一档，那是另一次裁决。
-		return statusCell{text: "下载完成", c: t.Success, done: true}
+		// ⚠️ **那几个字取成功色「当字色」的那一档**（票 #241 / 报告 F-22）：
+		// 浅色下上游那个成功绿 `#17c964` 压在白底上只有 **2.19:1**，读不出来。
+		// 色相不变，只压深到 ≥4.5:1（`successText` 的那一层，理由见
+		// `internal/ui/semantic.go`）。
+		//
+		// ⚠️ **那枚绿勾不动**：它是**图形**，不受 4.5:1 约束（3:1 即可），而改它
+		// 就是改上游那一枚图标的颜色（`TestTheFinishedCellHasAGreenCheck` 钉的
+		// 就是 `#17c964`）。
+		return statusCell{text: "下载完成", c: successText(t), done: true}
 
 	case download.StatusMuxing:
 		// 交织中：字节已经全下完了，这一格说的是**交织**而不是字节，而交织
@@ -109,7 +114,10 @@ func statusOf(r download.Snapshot, t *ui.Theme) statusCell {
 		if text == "" {
 			text = "任务出错"
 		}
-		return statusCell{text: text, c: t.Danger, bar: fill, showBar: true,
+		// ⚠️ **错误原因当字色用，取危险色「当字色」的那一档**（票 #241 / 报告
+		// F-22）：浅色下上游那个 `#f31260` 压在白底上是 4.14:1，不到正文那一档。
+		// 色相不变，只压深（理由见 `internal/ui/semantic.go`）。
+		return statusCell{text: text, c: dangerText(t), bar: fill, showBar: true,
 			showPct: r.Percent >= 0, danger: true}
 	}
 }
@@ -128,9 +136,13 @@ func (d *downloadsPage) viewStatus(c *ui.Context, r download.Snapshot) {
 	//
 	// ⚠️ **「完成」那一支前面还有一枚对勾**（上游 `progress.tsx:17-25`）：
 	// 一枚绿勾 +「下载完成」，两样都是成功色。
+	//
+	// ⚠️ **那枚对勾用主题里那一个成功色，那几个字用「当字色」的那一档**
+	// （票 #241 / 报告 F-22）：图标是**图形**（3:1 即可），字是**正文**（4.5:1），
+	// 而上游那个 `#17c964` 当字色只有 2.19:1。理由见 `internal/ui/semantic.go`。
 	if cell.done {
 		ui.Row(c).Gap(dlDoneGap).AlignItems(ui.Center).Children(func() {
-			ui.Icon(c, icon(iconChecked)).FontSize(dlDoneIconSize).TextColor(cell.c)
+			ui.Icon(c, icon(iconChecked)).FontSize(dlDoneIconSize).TextColor(c.Theme().Success)
 			ui.Text(c, cell.text).FontSize(scale.Font(c, 13)).TextColor(cell.c).MaxLines(2)
 		})
 		return
@@ -140,25 +152,58 @@ func (d *downloadsPage) viewStatus(c *ui.Context, r download.Snapshot) {
 		return
 	}
 
-	ui.Column(c).FillWidth().Gap(4).Children(func() {
-		if cell.danger {
-			statusBar(c, cell.bar, c.Theme().Danger)
-		} else {
-			statusBar(c, cell.bar, ui.Hex(dlBarColor))
-		}
-		ui.Row(c).FillWidth().Gap(8).Children(func() {
-			// 出错时这一段是错误原因，允许折两行（上游的 `line-clamp-2`）。
+	// ⚠️ **出错那一支是另一套排法**（票 #241 / 报告 F-19）：错误原因**独占一行、
+	// 整宽**，而百分比上到条那一行去。
+	//
+	// 原来错误原因和百分比**并排**（「这一条流有多…」那一截就是这么没的）：状态列
+	// 150 宽，扣掉单元格左右各 10 的内边距是 130；再扣掉百分比那一档 40 和中间
+	// 那道 8 的缝，错误原因只剩 **82**——12px 下每行六个字，「服务器不肯说这一条
+	// 流有多长」这 13 个字折两行还多两个字，于是画面上只剩「这一条流有多…」。
+	// **截掉的是信息本身**，而这一句是用户唯一能知道「哪儿坏了」的地方。
+	//
+	// 现在这一句拿整宽（130）：12px 下每行十个字，13 个字折成两行（十 + 三），
+	// 整句都在。
+	if cell.danger {
+		ui.Column(c).FillWidth().Gap(space.Px4).Children(func() {
+			ui.Row(c).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
+				// 条在这一行里**让出百分比那一档**（`Grow(1)` 而不是 `FillWidth`）：
+				// 两样挤在一行，条就短一截，而短的那一截是「下载到哪儿了」。
+				statusBar(c, cell.bar, c.Theme().Danger).Grow(1)
+				if cell.showPct {
+					dlPercent(c, r)
+				}
+			})
+			// 三行是留给更长的原因的兜底：这一句**通常**两行就够（13 个字），
+			// 而省略号只在它真的超过三行时才出现。
+			ui.Text(c, cell.text).FillWidth().FontSize(scale.Font(c, 12)).TextColor(cell.c).
+				MaxLines(3).Ellipsis("…")
+		})
+		return
+	}
+
+	ui.Column(c).FillWidth().Gap(space.Px4).Children(func() {
+		statusBar(c, cell.bar, ui.Hex(dlBarColor)).FillWidth()
+		ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
+			// ⚠️ **12 和省略号都照原样**（这一支是「下载中 / 下载暂停 / 交织中」
+			// 那几句短的，省略号实际上不出现）——这一票只动**出错**那一支的排法，
+			// 不顺手改这里的字号。
 			ui.Text(c, cell.text).Grow(1).FontSize(scale.Font(c, 12)).TextColor(cell.c).
 				MaxLines(2).Ellipsis("…")
 			if cell.showPct {
-				// 定宽 + 靠右：Biu 用的是 tabular-nums 那一列，不定宽的话
-				// 9% 和 100% 两帧之间整个右边会跳一下。
-				ui.Text(c, strconv.Itoa(r.Percent)+"%").Width(dlPctW).
-					TextAlign(ui.End).FontSize(scale.Font(c, 12)).TextColor(c.Theme().TextMuted).
-					MaxLines(1)
+				dlPercent(c, r)
 			}
 		})
 	})
+}
+
+// dlPercent 是状态列里那个百分比。
+//
+// 定宽 + 靠右：Biu 用的是 tabular-nums 那一列，不定宽的话 9% 和 100% 两帧之间
+// 整个右边会跳一下。
+func dlPercent(c *ui.Context, r download.Snapshot) ui.Element {
+	return ui.Text(c, strconv.Itoa(r.Percent)+"%").Width(dlPctW).
+		TextAlign(ui.End).FontSize(scale.Font(c, 12)).TextColor(c.Theme().TextMuted).
+		MaxLines(1)
 }
 
 // dlPctW 是百分比那一段的宽度。
@@ -174,7 +219,7 @@ const dlPctW = 40
 // `space-x-1`（4px）的缝。
 const (
 	dlDoneIconSize = 16
-	dlDoneGap      = 4
+	dlDoneGap      = space.Px4
 )
 
 // dlBarColor 是进度条涂的那个颜色。
@@ -202,12 +247,15 @@ const dlBarColor = "#3b82f6"
 // 后半句是这一段能安全存在的前提：`SetTheme` 只影响**它之后创建**的控件
 // （铁律二，见 theme.go），所以这一条之后的任何东西都还是原来的颜色。忘了
 // 换回来，那一帧剩下的整个页面就都是蓝的了——而那种错不报错、不崩溃。
+//
+// ⚠️ **宽度由调用方给**（`FillWidth()` / `Grow(1)`）：出错那一支的条要和百分比
+// 并排（`Grow(1)` 让出那一档），别的分支的条是整宽的——所以这里不写死。
 func statusBar(c *ui.Context, value float64, color ui.Color) ui.Element {
 	orig := c.Theme()
 	themed := *orig
 	themed.Accent = color
 	c.SetTheme(&themed)
-	e := ui.Progress(c, value).FillWidth()
+	e := ui.Progress(c, value)
 	c.SetTheme(orig)
 	return e
 }

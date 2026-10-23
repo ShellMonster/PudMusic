@@ -55,7 +55,7 @@ func localSong(t *testing.T, dir, name string) app.Item {
 //
 // 这里写死一份是故意的：那句话是**给人看的**，改文案就该顺手改这里，而不是
 // 让测试跟着代码走、什么文案都判「在」。
-const queueEmptyHint = "点歌右边的「加入队列」，或者用播放条上的「加歌」放几个文件进来"
+const queueEmptyHint = "点歌右边的「加入队列」，或者用播放条上的「加歌」把本地的文件放进来"
 
 // writeCopy 把 FLAC 素材复制成 dir/name 这个文件，返回完整路径。dir 不存在就建。
 func writeCopy(t *testing.T, dir, name string) string {

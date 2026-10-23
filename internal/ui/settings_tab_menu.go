@@ -23,6 +23,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -36,13 +37,13 @@ func (s *Shell) settingsMenu(c *ui.Context, st app.Settings, ro bool) {
 	// （`menu-settings.tsx:23-38`）。那边第一句是**整页**的标题、第二句是**这一组**
 	// 的名字，所以不算重复；我们这一页还摆着侧栏折叠和侧栏宽度，「整页的标题」
 	// 用在这里就不对了，于是只剩「这一组的名字」——所以只摆它一次。
-	ui.Row(c).FillWidth().Gap(24).AlignItems(ui.Start).Children(func() {
+	ui.Row(c).FillWidth().Gap(space.Px24).AlignItems(ui.Start).Children(func() {
 		// ⚠️ **这一处是 16/500，不是分组标题那个 20/400**：它是左边那一列的
 		// 组名（上游 `text-medium`，位宽 100），不是整页的 `h2`。20px 的六
 		// 个汉字要 120 宽，在 100 的位宽里会折成「系统默认菜 / 单」（出图量过）。
 		ui.Text(c, menuGroupName).FontSize(scale.Font(c, 16)).FontWeight(weightMedium).
 			Width(menuLabelWidth)
-		ui.Column(c).Grow(1).Gap(8).Children(func() {
+		ui.Column(c).Grow(1).Gap(space.Px8).Children(func() {
 			s.pickMenuVisibility(c, st, ro)
 			ui.Divider(c).FillWidth()
 			s.pickSideMenu(c, st, ro)
@@ -199,7 +200,7 @@ func (s *Shell) pickSideMenu(c *ui.Context, st app.Settings, ro bool) {
 				func(cur *app.Settings, on bool) { cur.SideMenuCollapsed = on })
 		})
 	w := st.SideMenuWidth
-	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).FillWidth().Gap(space.Px12).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, "侧栏宽度").FontSize(scale.Font(c, 16)).FontWeight(weightMedium).Grow(1)
 		sl := ui.Slider(c, &w, app.MinSideMenuWidth, app.MaxSideMenuWidth).
 			Grow(1).Label("侧栏宽度").Disabled(ro)
@@ -232,7 +233,7 @@ func (s *Shell) pickSideMenu(c *ui.Context, st app.Settings, ro bool) {
 func (s *Shell) pickLocalMusicDirs(c *ui.Context, st app.Settings, ro bool) {
 	t := c.Theme()
 	s.settingSection(c, "音乐库")
-	ui.Row(c).FillWidth().Gap(24).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).FillWidth().Gap(space.Px24).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).Children(func() {
 			ui.Text(c, "本地音乐目录").FontSize(scale.Font(c, 16)).FontWeight(weightMedium)
 			ui.Text(c, "从这些文件夹里读取本地音乐").FontSize(scale.Font(c, 14)).TextColor(t.TextMuted).Wrap()
@@ -250,7 +251,7 @@ func (s *Shell) pickLocalMusicDirs(c *ui.Context, st app.Settings, ro bool) {
 	})
 
 	if len(st.LocalMusicDirs) == 0 {
-		ui.Text(c, "还没有目录").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Padding(4, 0, 0, 0)
+		ui.Text(c, "还没有目录").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Padding(space.Px4, space.None, space.None, space.None)
 		return
 	}
 	// ⚠️ **重复的目录只画一次**。设置文件是用户能直接编辑的（也能从 Biu 那边来），
@@ -261,13 +262,13 @@ func (s *Shell) pickLocalMusicDirs(c *ui.Context, st app.Settings, ro bool) {
 	// 这里去重而不是去改设置：写设置是 `internal/app` 那一层的事，那份文件不是这一票
 	// 的；而重复的目录本来就该只出现一遍（Biu 的 local-music 页也是这么去的）。
 	seen := make(map[string]bool, len(st.LocalMusicDirs))
-	ui.Column(c).FillWidth().Gap(4).Children(func() {
+	ui.Column(c).FillWidth().Gap(space.Px4).Children(func() {
 		for i, dir := range st.LocalMusicDirs {
 			if seen[dir] {
 				continue
 			}
 			seen[dir] = true
-			ui.Row(c).Key("local-dir:" + dir).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).Key("local-dir:" + dir).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
 				// ⚠️ 这一行的 key 用的是**路径**，不是序号（🔴 铁律四）：删掉中间
 				// 那一条之后序号会整体前移一格，按序号排的身份就落到旁边那条上
 				// 了，而 × 删掉的是它自己那一格还是隔壁那一格，从画面上看不出来。

@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -163,7 +164,7 @@ func (f *dateFilter) view(c *ui.Context, now time.Time) bool {
 	// Reload，而界面看上去只是那一句变了、列表没重拉。
 	picked := -1
 
-	ui.Row(c).Key("filter:dateRange").FillWidth().Center().Gap(6).Children(func() {
+	ui.Row(c).Key("filter:dateRange").FillWidth().Center().Gap(space.Px6).Children(func() {
 		// 四个预设。为什么是四个按钮而不是 `ui.Tabs`：上游用的是 Tab，而**用户
 		// 手动在日历上挑过之后，上游把四个 Tab 全取消选中**
 		//（`setSelectedKey("")`），表示「这不是任何一个预设」。`ui.Tabs` 表达不了

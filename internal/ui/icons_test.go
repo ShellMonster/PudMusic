@@ -953,7 +953,7 @@ func TestTheResourceFilesCarryNoTransparentMargin(t *testing.T) {
 // 的**症状**是「读屏软件念不出这个按钮」：界面上它好好的（图标在、点得动、
 // 也有 Tooltip），无头 Tester 也照样全绿，只有用读屏的人才发现。
 //
-// 所以这里扫**每一个** `iconButton(` / `iconButtonPrimary(` / `iconButtonPlay(` /
+// 所以这里扫**每一个** `iconButton(` / `iconButtonPlay(` /
 // `iconKey(` / `flatIconButton(` 调用，断言第三个参数（非障碍名字）是非空的字符串
 // 字面量。空串、变量、或者干脆少一个参数，都当场报错并报出文件:行号。
 func TestEveryIconButtonNamesItself(t *testing.T) {
@@ -990,7 +990,7 @@ func TestEveryIconButtonNamesItself(t *testing.T) {
 			// 那些悬停时图形会变主色的键都走它（`iconButton` 的那个「图标键」
 			// 变体）。它同样得有个无障碍名字，而**它挪走了就等于掉出了这张网**：
 			// 只扫 `iconButton` 的话，这一票新写的那些图标键一个都管不到。
-			if !ok || (id.Name != "iconButton" && id.Name != "iconButtonPrimary" &&
+			if !ok || (id.Name != "iconButton" &&
 				id.Name != "iconButtonPlay" && id.Name != "iconKey" &&
 				id.Name != "flatIconButton") {
 				return true

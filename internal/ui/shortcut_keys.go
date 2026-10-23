@@ -26,6 +26,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -263,7 +264,14 @@ func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcut
 		// 变体（理由见 `widgets/ink`），否则录到一半的话读不出来。
 		color = ink.AccentOn(t)
 	case invalid:
-		color = t.Danger
+		// ⚠️ **取「危险色当**字色**」的那一档**（票 #241 / 报告 F-22）：这一格是
+		// 画在 `Background(t.Surface)` 上的，而浅色下原值 `#f31260` 压在那上面
+		// 只有 **3.77:1**——「这一格和别的键撞了」是最该读出来的一句话。
+		//
+		// 那一档（`dangerText` → `ink.SemanticOn`）对的是**最严的那个底**
+		// （`t.SurfaceHover`：浅色下最暗、深色下最亮），而 `t.Surface` 夹在中间
+		// ——所以它在 `t.Surface` 上也够 4.5:1。
+		color = dangerText(t)
 	}
 
 	// 🔴 **这一格必须是 `ui.Row`，不是 `ui.Box`。**
@@ -281,7 +289,7 @@ func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcut
 	field := ui.Row(c).Key(shortcutFieldKey(slot)).
 		Width(shortcutFieldWidth).Height(shortcutFieldHeight).
 		Radius(t.Radius).Background(t.Surface).Border(1, border).
-		Padding(0, 8).AlignItems(ui.Center).
+		Padding(space.None, space.Px8).AlignItems(ui.Center).
 		FocusBind(&s.recording, slot).Label(recorderLabel(item, slot))
 	if ro {
 		// 只读时这一格既不该吃键也不该抢焦点：Disabled 的元素不取焦点、不响应
@@ -316,7 +324,7 @@ func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcut
 		if !ro && item.Shortcut != "" &&
 			ui.Button(c, "×").Label("清空「"+item.Name+"」的快捷键").
 				FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).
-				Size(clearButtonSize, clearButtonSize).Padding(0).Radius(clearButtonSize/2).
+				Size(clearButtonSize, clearButtonSize).Padding(space.None).Radius(clearButtonSize/2).
 				Clicked() {
 			s.rejected = shortcutSlot{}
 			s.recording = shortcutSlot{}

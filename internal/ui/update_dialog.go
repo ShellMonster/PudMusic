@@ -36,6 +36,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 )
@@ -210,7 +211,7 @@ func (s *Shell) updateNotes(c *ui.Context, st app.UpdateState) {
 	// 一块什么都没有的框，而不是「暂无更新日志」这一句能回答他的话。
 	if strings.TrimSpace(st.Notes) == "" {
 		ui.Text(c, updateNoNotes).FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).
-			TextAlign(ui.Center).FillWidth().Padding(0, 0, 8, 0)
+			TextAlign(ui.Center).FillWidth().Padding(space.None, space.None, space.Px8, space.None)
 		return
 	}
 	if s.update.shownNotes != st.Latest {
@@ -237,13 +238,13 @@ func (s *Shell) updateFooter(c *ui.Context, st app.UpdateState) {
 	t := c.Theme()
 	label, onClick, busy := s.updateButton(st)
 
-	ui.Row(c).Key("update-foot").FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
-		ui.Column(c).Grow(1).Gap(2).Children(func() {
+	ui.Row(c).Key("update-foot").FillWidth().Gap(space.Px12).AlignItems(ui.Center).Children(func() {
+		ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
 			switch {
 			case st.Phase == app.UpdateFailed && st.Err != "":
 				// 出错了就把原因说全（框架那一句可能很长），并让它可以选中复制：
 				// 用户要拿这句话去提 issue。
-				ui.Text(c, st.Err).FontSize(scale.Font(c, 12)).TextColor(t.Danger).Wrap().Selectable()
+				ui.Text(c, st.Err).FontSize(scale.Font(c, 12)).TextColor(dangerText(t)).Wrap().Selectable()
 			case st.Phase == app.UpdateReady:
 				ui.Text(c, updateReadyText).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 				ui.Text(c, updateReadyNote).FontSize(scale.Font(c, 11)).TextColor(t.TextMuted).Wrap()

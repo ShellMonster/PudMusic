@@ -57,6 +57,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -77,9 +78,9 @@ const (
 	dateCellW = 32
 	dateCellH = 28
 	// dateMonthGap 是两个月之间的距离。
-	dateMonthGap = 8
+	dateMonthGap = space.Px8
 	// dateGridGap 是日历里各行之间的距离（标题 / 星期 / 星期几那几行）。
-	dateGridGap = 2
+	dateGridGap = space.Px2
 	// dateRangeLabel 是触发键的**无障碍名字**。
 	//
 	// ⚠️ 它和键上**看得见**的字不是一回事：看得见的那一句是当前区间
@@ -137,14 +138,14 @@ func (f *dateFilter) viewRangePicker(c *ui.Context) {
 		// 18% 的黑（深色下太淡，面板和底下的内容糊成一片）。
 		popupPanel(t, panel.
 			AttachTo(trig, ui.AnchorBottomEnd, ui.AnchorTopEnd).
-			MarginStart(8).
+			MarginStart(space.Px8).
 			Padding(datePanelPad))
 		f.viewRangePanel(c)
 	})
 }
 
 // datePanelPad 是弹层那一块的内边距。
-const datePanelPad = 8
+const datePanelPad = space.Px8
 
 // viewRangePanel 画弹层里的那一块：两个月并排，两头各一枚翻月键。
 func (f *dateFilter) viewRangePanel(c *ui.Context) {
@@ -158,12 +159,12 @@ func (f *dateFilter) viewRangePanel(c *ui.Context) {
 		// ⚠️ **Label 是「上一个月」而不是那个符号**：可见的字是「‹」，
 		// 读屏软件念出来是「左尖括号」——那一句对用户什么也没说（这一票给
 		// 确认键补了「确认 + 那个词」的名字，这里也得补）。
-		if flatButton(c, "‹").Label("上一个月").Width(dateArrowW).Padding(0, 0).Clicked() {
+		if flatButton(c, "‹").Label("上一个月").Width(dateArrowW).Padding(space.None, space.None).Clicked() {
 			f.month = f.month.AddDate(0, -1, 0)
 		}
 		f.viewMonth(c, f.month)
 		f.viewMonth(c, f.month.AddDate(0, 1, 0))
-		if flatButton(c, "›").Label("下一个月").Width(dateArrowW).Padding(0, 0).Clicked() {
+		if flatButton(c, "›").Label("下一个月").Width(dateArrowW).Padding(space.None, space.None).Clicked() {
 			f.month = f.month.AddDate(0, 1, 0)
 		}
 	})
@@ -217,7 +218,7 @@ func (f *dateFilter) viewDay(c *ui.Context, day, month time.Time) {
 	// `i18n.FormatDate(locale, day, {Skeleton: "yMMMMd"})`）。
 	cell := flatButton(c, strconv.Itoa(day.Day())).
 		Label(day.Format("2006年1月2日")).
-		Width(dateCellW).Height(dateCellH).Padding(0, 0).Radius(4)
+		Width(dateCellW).Height(dateCellH).Padding(space.None, space.None).Radius(4)
 
 	fg := t.Text
 	if day.Month() != month.Month() {

@@ -30,6 +30,7 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -113,7 +114,7 @@ func (s *Shell) pickFont(c *ui.Context, st app.Settings, ro bool) {
 	// 用户要按准那个 410 宽框的右下角才能展开它。
 	trigger := sel.Trigger.
 		Width(selectWidth).Radius(c.Theme().Radius).Border(1, c.Theme().Border).
-		Background(c.Theme().Surface).Padding(0, 8).Disabled(ro).
+		Background(c.Theme().Surface).Padding(space.None, space.Px8).Disabled(ro).
 		Label("选择字体")
 	trigger.Children(func() {
 		// ⚠️ 触发器上显示的那一行也用它自己的字体画，不然「我选了圆体」在收起
@@ -123,7 +124,7 @@ func (s *Shell) pickFont(c *ui.Context, st app.Settings, ro bool) {
 
 	sel.Popup(func(panel ui.Element) {
 		t := c.Theme()
-		popupPanel(t, panel.MaxWidth(fontMenuWidth).Padding(4)).Children(func() {
+		popupPanel(t, panel.MaxWidth(fontMenuWidth).Padding(space.Px4)).Children(func() {
 			// 🔴 **这份名单现在是系统报上来的，可能有两百多条**（这台 Mac 上
 			// 245 条）。不套滚动容器、不限高的话，面板会比窗口还高：超出窗口的
 			// 那些既看不见也点不到（和联想浮层当年那个坑一样，见
@@ -136,7 +137,7 @@ func (s *Shell) pickFont(c *ui.Context, st app.Settings, ro bool) {
 					for i, family := range families {
 						// ⚠️ **不给这一格加 Label**：上面画的那个字就是它的名字，再补一个
 						// 只会多出一个同样文字的无障碍节点（见 sidebar.go 里那条）。
-						item := sel.Item(i).Padding(6, 10).Radius(6)
+						item := sel.Item(i).Padding(space.Px6, space.Px10).Radius(6)
 						if item.Highlighted() {
 							// 高亮走「被选中的选项」那一个出口（实心主色底 +
 							// `t.AccentText` 字，票 #239，审计 F-14）。

@@ -19,6 +19,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -144,7 +145,7 @@ func likeFailText(like bool, err error) string {
 // **框里那张图**，框不动——框要是自己长大，它就会压到旁边的标题上。
 func (s *Shell) viewCollectionRow(c *ui.Context, col bili.UpCollection, selected, ring bool) {
 	t := c.Theme()
-	box := ui.Row(c).Grow(1).Gap(10).Padding(8).AlignItems(ui.Center).
+	box := ui.Row(c).Grow(1).Gap(space.Px10).Padding(space.Px8).AlignItems(ui.Center).
 		Key("coll:" + strconv.FormatInt(col.ID, 10))
 	// ⚠️ hover 要在 Children **之前**问（理由同 `widgets/list` 的 grid.go）：
 	// 它报的是这一帧指针在不在这一行上，而封面是在 Children 里画的。
@@ -161,7 +162,7 @@ func (s *Shell) viewCollectionRow(c *ui.Context, col bili.UpCollection, selected
 	box.Children(func() {
 		s.spaceThumbZoom(c, col.Cover, 48, 64,
 			"coll-zoom:"+strconv.FormatInt(col.ID, 10), on)
-		ui.Column(c).Grow(1).Gap(2).Children(func() {
+		ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
 			ui.Text(c, col.Title).FontSize(scale.Font(c, 14)).MaxLines(2).Ellipsis("…")
 			ui.Text(c, fmt.Sprintf("%d 条", col.Count)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 		})
@@ -184,15 +185,15 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic, selected, ring bo
 	//   - 卡内下边距 16（`pb-4`）、上边距 16（CardHeader 的 `pt-4`）；
 	//   - **左右 0**：那 32 由页面那一层给（动态流是 16+16，UP 空间是 `p-4`）。
 	card := ui.Column(c).Key("dyn:"+d.ID).Grow(1).
-		Padding(16, 0, 16, 0).Margin(0, 0, 8, 0).
+		Padding(space.Px16, space.None, space.Px16, space.None).Margin(space.None, space.None, space.Px8, space.None).
 		BorderWidth(0, 0, 1, 0).BorderColor(t.Border).
-		Gap(6)
+		Gap(space.Px6)
 	// 选中那一层：盖掉框架那块实心主色底，键盘走到它上面时给它一圈焦点环
 	//（理由见 `widgets/list/selection.go`）。
 	card = list.SelectedRow(card, t, selected, card.Hovered(), ring)
 	card.Children(func() {
 		// ① 头一行：头像 + 昵称（可点）+ 时间。
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
 			s.spaceAvatar(c, d.Author.Face, 32, false)
 			name := d.Author.Name
 			if name == "" {
@@ -236,7 +237,7 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic, selected, ring bo
 //     条目还没有取流通道），摆出来按不动。
 func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 	t := c.Theme()
-	ui.Row(c).Key("dyn-acts:" + d.ID).Gap(6).Children(func() {
+	ui.Row(c).Key("dyn-acts:" + d.ID).Gap(space.Px6).Children(func() {
 		liked, count := s.dynLikes.get(d.ID, d.Liked, d.LikeCount)
 		label := "赞"
 		if count > 0 {
@@ -304,9 +305,9 @@ func (s *Shell) viewDynamicPics(c *ui.Context, pics []string) {
 	if len(pics) > maxDynamicPics {
 		pics = pics[:maxDynamicPics]
 	}
-	ui.Column(c).Key("dyn-pics").Gap(6).Children(func() {
+	ui.Column(c).Key("dyn-pics").Gap(space.Px6).Children(func() {
 		for i := 0; i < len(pics); i += dynamicPicsPerRow {
-			ui.Row(c).Key(fmt.Sprintf("dyn-pics-row:%d", i/dynamicPicsPerRow)).Gap(6).Children(func() {
+			ui.Row(c).Key(fmt.Sprintf("dyn-pics-row:%d", i/dynamicPicsPerRow)).Gap(space.Px6).Children(func() {
 				for _, p := range pics[i:min(i+dynamicPicsPerRow, len(pics))] {
 					s.spaceThumb(c, p, dynamicPicSide, dynamicPicSide)
 				}
@@ -321,14 +322,14 @@ func (s *Shell) viewDynamicPics(c *ui.Context, pics []string) {
 // 真放不了的时候说一句话（`list.Actions.Play` 里的 Toast），不装死。
 func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author bili.DynamicAuthor) {
 	t := c.Theme()
-	box := ui.Row(c).Grow(1).Gap(8).Padding(6).Radius(6).
+	box := ui.Row(c).Grow(1).Gap(space.Px8).Padding(space.Px6).Radius(6).
 		Background(t.Surface).AlignItems(ui.Center).Key("dynv:" + v.Bvid)
 	if box.Clicked() {
 		list.AppActions(s.app, s.addToast).Play([]app.Item{dynVideoItem(v, author)})
 	}
 	box.Children(func() {
 		s.spaceThumb(c, v.Cover, dynamicCoverW, dynamicCoverH)
-		ui.Column(c).Grow(1).Gap(2).Children(func() {
+		ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
 			ui.Text(c, v.Title).FontSize(scale.Font(c, 14)).MaxLines(2).Ellipsis("…")
 			if v.Desc != "" {
 				ui.Text(c, v.Desc).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")

@@ -46,6 +46,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrollbar"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -618,7 +619,7 @@ func (l *List) View(c *ui.Context) {
 				}
 				if s := l.emptyText(); s != "" {
 					ui.Text(c, s).FontSize(scale.Font(c, 13)).
-						TextColor(c.Theme().TextMuted).Padding(16)
+						TextColor(c.Theme().TextMuted).Padding(space.Px16)
 				}
 			}
 		}).

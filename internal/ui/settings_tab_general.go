@@ -22,6 +22,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -184,7 +185,7 @@ func (s *Shell) pickDisplayMode(c *ui.Context, st app.Settings, ro bool) {
 // 不是设置里还存着的旧值——慢一帧的话读数会一直追不上手指。
 func (s *Shell) pickRadius(c *ui.Context, st app.Settings, ro bool) {
 	v := st.BorderRadius
-	ui.Row(c).Key("setting:borderRadius").Width(radiusWidth).Gap(12).
+	ui.Row(c).Key("setting:borderRadius").Width(radiusWidth).Gap(space.Px12).
 		AlignItems(ui.Center).Children(func() {
 		sl := ui.Slider(c, &v, 0, app.MaxBorderRadius).Grow(1).Label("全局圆角").Disabled(ro)
 		if sl.Changed() {
@@ -216,7 +217,7 @@ func (s *Shell) pickAudioQuality(c *ui.Context, st app.Settings, ro bool) {
 // 用户最容易当成「设置没生效」的那一种形态。这一句说清两件事：下载记录页上
 // 写的就是它，下完的歌也放在那儿。
 func (s *Shell) pickDownloadPath(c *ui.Context, st app.Settings, ro bool) {
-	ui.Row(c).Key("setting:downloadPath").Width(radiusWidth).Gap(8).Children(func() {
+	ui.Row(c).Key("setting:downloadPath").Width(radiusWidth).Gap(space.Px8).Children(func() {
 		s.pathField(c, st.DownloadPath, "下载目录", ro)
 		if flatButton(c, "选择").Width(64).Disabled(ro).Clicked() {
 			s.pickPath("下载目录", true, func(path string) {
@@ -230,7 +231,7 @@ func (s *Shell) pickDownloadPath(c *ui.Context, st app.Settings, ro bool) {
 
 // pickFFmpegPath 是 FFmpeg 路径那一格，和下载目录同一套。
 func (s *Shell) pickFFmpegPath(c *ui.Context, st app.Settings, ro bool) {
-	ui.Row(c).Key("setting:ffmpegPath").Width(radiusWidth).Gap(8).Children(func() {
+	ui.Row(c).Key("setting:ffmpegPath").Width(radiusWidth).Gap(space.Px8).Children(func() {
 		s.pathField(c, st.FFmpegPath, "FFmpeg 路径", ro)
 		if flatButton(c, "选择").Width(64).Disabled(ro).Clicked() {
 			s.pickPath("FFmpeg 路径", false, func(path string) {
@@ -276,7 +277,7 @@ func (s *Shell) pickColors(c *ui.Context, st app.Settings, ro bool) {
 	// 「当前主题的背景色」就是这一帧真在画的那份——ApplyTheme 在 view 最开头
 	// 已经装好了，所以 `c.Theme()` 读到的就是它，不用再拼一遍。
 	dark := c.Theme().Dark
-	ui.Row(c).Key("setting:colors").Width(segWidth + 12).Gap(12).Children(func() {
+	ui.Row(c).Key("setting:colors").Width(segWidth + 12).Gap(space.Px12).Children(func() {
 		bg := pick(st.BackgroundColor != "", st.BackgroundColor, themeBackground(dark))
 		s.colorItem(c, "背景", bg, ro, st.BackgroundColor != "", func(col string) {
 			s.applySetting("背景色", func(cur *app.Settings) { cur.BackgroundColor = col })
@@ -306,7 +307,7 @@ func (s *Shell) pickColors(c *ui.Context, st app.Settings, ro bool) {
 func (s *Shell) colorItem(c *ui.Context, label, hex string, ro, overridden bool, set func(string), reset func()) {
 	t := c.Theme()
 	col := colorOfHex(hex)
-	ui.Column(c).Width(colorItemWidth).Gap(4).Children(func() {
+	ui.Column(c).Width(colorItemWidth).Gap(space.Px4).Children(func() {
 		// ⚠️ **那一圈影是上游给的**：Biu 那一格是
 		// `<Card as="div" isPressable radius="md" shadow="sm" className="border-default
 		// w-[100px] border">`（`pages/settings/color-settings.tsx:24`）——一张

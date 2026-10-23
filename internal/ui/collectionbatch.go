@@ -31,6 +31,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -52,7 +53,7 @@ func (s *Shell) viewCollectionBatchBar(c *ui.Context, p *collectionPage) {
 	// 框架点它时 `Changed()` 响，我们再照总数重算一次该全选还是全不选。
 	all := p.allSelected()
 
-	ui.Row(c).Key("collection-batch-bar").Center().Gap(12).Padding(10, 0).
+	ui.Row(c).Key("collection-batch-bar").Center().Gap(space.Px12).Padding(space.Px10, space.None).
 		Background(t.Surface).Children(func() {
 		if ui.Checkbox(c, &all, "全选").Label("全选").Changed() {
 			s.toggleSelectAll(p, !p.allSelected())
