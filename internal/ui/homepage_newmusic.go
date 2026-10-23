@@ -41,6 +41,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -386,8 +387,13 @@ func (g *newMusicGrid) view(c *ui.Context) {
 		case g.err != nil && len(g.songs) == 0:
 			// 高度照「暂无数据」那一支（`new-music-top.tsx:186` 的 h-[200px]）：
 			// 失败之后网格整个换掉，这一块的高度跟着换会让下面那个列表跳一格。
-			ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
-				Background(t.Surface).Center().Gap(space.Px8).Children(func() {
+			//
+			// ⚠️ **底色是页面底色 + 一圈影**（`shadow.HeroSmall`），不是「比背景
+			// 亮一级」的板（票 #239，审计 F-14）：DESIGN.md §四「卡片与背景几乎同色，
+			// 靠阴影分层」。这一块原来取 `t.Surface`——同一屏里于是既有「同色靠影」
+			// 的卡（关注卡、下载表那张），又有「亮一级」的板。
+			shadow.HeroSmall(ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
+				Background(t.Background).Center().Gap(space.Px8), t).Children(func() {
 				ui.Text(c, "新歌速递没拉出来").FontSize(scale.Font(c, 13)).TextColor(t.Text)
 				ui.Text(c, g.err.Error()).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(2)
 				if g.retry != nil && flatButton(c, "重试加载新歌速递").Clicked() {
@@ -398,8 +404,8 @@ func (g *newMusicGrid) view(c *ui.Context) {
 
 		case g.loading && len(g.songs) == 0:
 			// 上游 `new-music-top.tsx:207-209`：拉的时候就是一个转圈。
-			ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
-				Background(t.Surface).Center().Children(func() {
+			shadow.HeroSmall(ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
+				Background(t.Background).Center(), t).Children(func() {
 				ui.Spinner(c).Label("正在加载新歌速递")
 			})
 			return
@@ -407,8 +413,8 @@ func (g *newMusicGrid) view(c *ui.Context) {
 		case total == 0:
 			// 上游 `new-music-top.tsx:211-214`：整块宽的一张卡片，正中间一句
 			// 「暂无数据」。这里照它（那一句是上游的文案，别自己编）。
-			ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
-				Background(t.Surface).Center().Children(func() {
+			shadow.HeroSmall(ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
+				Background(t.Background).Center(), t).Children(func() {
 				ui.Text(c, "暂无数据").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 			})
 			return

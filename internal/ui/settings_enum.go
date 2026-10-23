@@ -59,9 +59,14 @@ func enumSelect[T comparable](c *ui.Context, value *T, items []enumItem[T], labe
 				opt := sel.Item(it.value).Padding(space.Px6, space.Px10).Radius(6)
 				switch {
 				case opt.Highlighted():
-					opt.Background(t.Accent).TextColor(t.AccentText)
+					// 高亮（指针 / 键盘游标在这一项）走「被选中的选项」那一个
+					// 出口：实心主色底 + `t.AccentText` 字（票 #239，审计 F-14）。
+					opt = flatSolid(c, opt)
 				case it.value == *value:
-					opt.Background(t.Surface)
+					// ⚠️ **这一档不是「选中」**：它是**当前值**（指针不在这一项上时
+					// 靠它认出选的是哪个），所以是**淡底、没有主色**。指针落在当前值
+					// 上时两个态叠在一起——那时「高亮」那一档盖过它。
+					opt = opt.Background(t.Surface)
 				}
 				opt.Children(func() { ui.Text(c, it.label).SingleLine().Grow(1) })
 			}

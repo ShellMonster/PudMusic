@@ -139,9 +139,12 @@ func (s *Shell) pickFont(c *ui.Context, st app.Settings, ro bool) {
 						// 只会多出一个同样文字的无障碍节点（见 sidebar.go 里那条）。
 						item := sel.Item(i).Padding(space.Px6, space.Px10).Radius(6)
 						if item.Highlighted() {
-							item.Background(t.Accent).TextColor(t.AccentText)
+							// 高亮走「被选中的选项」那一个出口（实心主色底 +
+							// `t.AccentText` 字，票 #239，审计 F-14）。
+							item = flatSolid(c, item)
 						} else if i == idx {
-							item.Background(t.Surface)
+							// 当前值（不是「选中」）：淡底、没有主色。
+							item = item.Background(t.Surface)
 						}
 						item.Children(func() {
 							// 🔴 这一句就是验收项：每一条选项用它自己的字体画。
