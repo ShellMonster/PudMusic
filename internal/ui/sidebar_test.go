@@ -26,7 +26,7 @@ import (
 //
 // 为什么不用 newShell：那个不挂设置，写进去的每一笔宽度和折叠态都会被
 // `ErrSettingsNotMounted` 挡掉——这一组要验的正好是「存没存住」。
-func sideShell(t *testing.T) (*Shell, *app.App, *mygoui.Tester, string) {
+func sideShell(t *testing.T, opts ...shellOpt) (*Shell, *app.App, *mygoui.Tester, string) {
 	t.Helper()
 	// 宽度过渡是 200ms 的动画，无头 Tester 一帧最多 settle 20 帧，走不完。
 	// 开了 ReduceMotion，动画直接落到终点——这里要验的是**终点**，动的那段
@@ -39,8 +39,10 @@ func sideShell(t *testing.T) (*Shell, *app.App, *mygoui.Tester, string) {
 	if err := a.MountSettings(path); err != nil {
 		t.Fatal(err)
 	}
-	b := newTestShell(t, onApp(a),
-		withPrefs(mygoui.Preferences{ReduceMotion: true, TextScale: 1}))
+	b := newTestShell(t, append([]shellOpt{
+		onApp(a),
+		withPrefs(mygoui.Preferences{ReduceMotion: true, TextScale: 1}),
+	}, opts...)...)
 	tt := b.tt
 	tt.Frame()
 	return b.s, a, tt, path
@@ -330,9 +332,9 @@ func writeReadOnlySettings(t *testing.T) string {
 // 两组的标题带前缀（「我建的 1」/「我收的 1」）——B 站那边完全可能有同一个
 // 收藏夹既是自己创建的又是自己收藏的，两组同名的话测试根本分不清右键点到了
 // 哪一行。
-func favShell(t *testing.T, created, collected int) (*Shell, *app.App, *mygoui.Tester, string) {
+func favShell(t *testing.T, created, collected int, opts ...shellOpt) (*Shell, *app.App, *mygoui.Tester, string) {
 	t.Helper()
-	s, a, tt, path := sideShell(t)
+	s, a, tt, path := sideShell(t, opts...)
 	a.SetFavorites(app.FavoritesCreated, testFavorites("我建的 ", created))
 	a.SetFavorites(app.FavoritesCollected, testFavorites("我收的 ", collected))
 	tt.Frame()

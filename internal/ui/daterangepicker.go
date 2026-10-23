@@ -98,7 +98,7 @@ const dateRangePlaceholder = "选择日期范围"
 //
 // ⚠️ **它自己管 `f.open`**：弹层开着的时候 `ui.PopoverBase` 才建面板，关着的
 // 时候一个节点都不建（框架那一支）。而 `f.open` 是**跨帧**的状态——即时模式
-// 下一帧一新建，局部变量下一帧就没了（和 `Shell.searchDraft` 同一个理由）。
+// 下一帧一新建，局部变量下一帧就没了（和 `Shell.searchKeyword` 同一个理由）。
 func (f *dateFilter) viewRangePicker(c *ui.Context) {
 	t := c.Theme()
 

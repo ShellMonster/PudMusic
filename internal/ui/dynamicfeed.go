@@ -356,9 +356,13 @@ func (s *Shell) viewAuthorRow(c *ui.Context, f *dynamicFeed, i int) {
 	// ⚠️ hover 要在 Children **之前**问（理由同 `widgets/list` 的 grid.go）。
 	on := box.Hovered()
 	if all {
-		// 「全部」是**当前就在看的那一个**：主色底，和侧栏选中收藏夹同一套
-		// 颜色（见 sidebar_favorites.go 的 cur 那一支）。
-		box = box.Background(t.Accent)
+		// 「全部」是**当前就在看的那一个**：和侧栏菜单当前项**同一套**画法
+		// （`flatCurrent`——淡主色底 + 深色字 / 中性灰底 + 主色字）。
+		//
+		// ⚠️ **原来这里是实心主色**（`Background(t.Accent)`，一块 248×50 的实心
+		// 绿）：那是审计 F-02 / F-06 点名的那一处——同一个屏上左栏是实心绿、
+		// 侧栏是淡底，两种画法并排，而实心那一块是那一页纯主色像素最多的地方。
+		box = flatCurrent(c, box)
 	} else if on {
 		box = box.Background(t.SurfaceHover)
 	}

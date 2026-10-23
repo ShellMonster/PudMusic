@@ -1,15 +1,28 @@
 // 搜索页：Biu 的 `/search`（`src/pages/search/`）。
 //
-// 一个搜索框 + 三个 Tab 的结果（**歌曲 / 视频 / 用户**），每个 Tab 一套自己的排序、
-// 一份自己的分页列表。拉页、防重入、取消、自动续拉、回顶全是 `widgets/list` 那一层
-// 的事，这一页只管摆；状态、查询、三个反直觉行为在 searchresults.go。
+// 三个 Tab 的结果（**歌曲 / 视频 / 用户**），每个 Tab 一套自己的排序、一份自己的
+// 分页列表。拉页、防重入、取消、自动续拉、回顶全是 `widgets/list` 那一层的事，
+// 这一页只管摆；状态、查询、三个反直觉行为在 searchresults.go。
+//
+// # 这一页**没有输入框**，也没有「搜索」那一行标题
+//
+// 2026-10-22 人定的（`DESIGN.md` §十.1）：结果页不再放第二个输入框，改词回顶栏
+// 那个 280 宽的框就行；上游那一行「搜索」标题也不加（上游那一页只有一句
+// `<h1>搜索【{keyword}】的结果</h1>`，`src/pages/search/index.tsx:16-26`）。
+//
+// 这一条以前是**只改了 DESIGN.md 没改代码**，于是页面上摆着两个框：顶栏那个
+// （显示占位「搜索」，空的）和页内那个 420 宽的（装着刚搜的词）——两个框既不
+// 左对齐也不右对齐，在屏幕上错开（审计 F-01 / UX B1）。
+//
+// ⚠️ **删掉页内那个框之后，「当前搜的是什么」在界面上只剩顶栏一个显示**——
+// 顶栏那个框里必须显示当前这个词（`navbar_search.go` 的 `syncSearchKeyword`），
+// 否则框空着而下面已经是一屏结果，用户会以为框坏了。
 //
 // 🔴 本文件里的 view **不许**调 `c.SetTheme`：主题每帧开头装一次就够（铁律二，见
 // theme.go）。
 package ui
 
 import (
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -43,21 +56,20 @@ const userPathPrefix = "/user/"
 const searchQuery = "q"
 
 // searchIdle 是「还没输入搜索词」这一支：上游 `pages/search/index.tsx:16`。
+//
+// ⚠️ **提示指着顶栏那个框**：页内那个输入框 2026-10-22 拍板删了（见文件头），
+// 而这一页能搜的地方只剩顶栏——「在上面的搜索框里」指的是一个已经不存在的框。
 var searchIdle = emptyState{
 	Title: "暂无内容",
-	Hint:  "在上面的搜索框里输入歌名或 UP 主",
+	Hint:  "在顶栏的搜索框里输入歌名或 UP 主",
 	Icon:  iconEmptySearch,
 }
 
-// searchPageMaxWidth 是搜索框的宽度。Biu 搜索页的内容区是 `max-w-3xl`，这里
-// 取一个够放下歌名的整数。
-const searchPageMaxWidth = 420
-
-// searchHeaderGap 是页头那几块（标题、搜索框、Tab、排序）之间的距离。
+// searchHeaderGap 是页头那几块（标题、Tab、排序）之间的距离。
 // Biu 那边是 `py-4`（`pages/search/index.tsx:26`）。
 const searchHeaderGap = 12
 
-// viewSearch 是搜索页：页头 + 搜索框 + 当前状态该画的那一块。
+// viewSearch 是搜索页：当前状态该画的那一块。
 //
 // 🔴 关键词**问 `r`，不要问 `c.Router()`**：换页动画期间离场的那一页会被重建一遍
 // （`Router.View` 的 leaving 那一支），而 MyGo 建离场页时**故意不设 `c.router`**
@@ -70,63 +82,9 @@ func (s *Shell) viewSearch(c *ui.Context, r *ui.Route) {
 
 	keyword := strings.TrimSpace(r.Query(searchQuery))
 
-	// ⚠️ **框里显示当前关键词**（票 #138）。
-	//
-	// 从顶栏搜完点进来，框是空的（占位「歌名或 UP 主」，420 像素宽），**下面
-	// 却已经显示着结果**——「搜索【夜空中最亮的星】的结果」和一屏结果行都在
-	// 画面上，而框右侧约 580 像素全空。**框里的词和它下面正在显示的那批歌对不上。**
-	//
-	// ⚠️ **用户正在敲的字不许被覆盖**：草稿挂在壳上（`Shell.searchDraft` 的
-	// 注释：即时模式每一帧都重画，局部变量下一帧就没了），所以它跨页活着——
-	// 而「切页回来时把它换成路由上那个词」就是把他敲到一半的字吃掉。
-	//
-	// 判据是「**这个草稿是从哪个关键词填上去的**」（`searchDraftFor`）：路由上
-	// 的词没变 → 草稿是用户自己的（哪怕已经被他改过、被删干净了），不动；变了
-	// → 草稿是上一个词留下的旧东西，换掉（不然从顶栏搜了另一个词，这一页的
-	// 框里还是上一个词，而下面已经是新词的结果了）。
-	//
-	// 🔴 **判据里不许有「框是不是空的」**：这一条是**用户还在这一页、正在删字**
-	// 的时候就会碰上的——他把框里的字删干净了，这一帧草稿是空串，于是「框空了
-	// 就把关键词写回去」那一支立刻生效，框**自己弹回来了**，而他接着敲的字被
-	// 粘在旧词后面（「林周杰伦」）。删着改是更常见的做法（实测：全选 + 直接
-	// 重打能绕过去，而删着改绕不过去）。
-	//
-	// 所以**只有路由上的词变了才写**。第一次进这一页也写得到（那时
-	// `searchDraftFor` 是空串，而路由上的词不是 ✓）。
-	if keyword != "" && s.searchDraftFor != keyword {
-		s.searchDraft = keyword
-		s.searchDraftFor = keyword
-	}
-
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
 	ui.Column(c).Key("page:/search").Grow(1).Padding(0, pagePadX).Gap(searchHeaderGap).
 		AlignItems(ui.Stretch).Children(func() {
-		ui.Text(c, "搜索").FontSize(scale.Font(c, pageTitleSize))
-
-		// ⚠️ Label 不只是给测试用的：没有它读屏软件读不出这是一个搜歌名的
-		// 输入框，只有旁边那行占位文字（占位文字不是标签）。顺带也是无头
-		// Tester 唯一能认出这个控件的东西——它只认 label / text，不认
-		// placeholder。
-		box := ui.TextInput(c, &s.searchDraft).
-			Width(searchPageMaxWidth).
-			Label("搜索歌名或 UP 主").
-			Placeholder("歌名或 UP 主")
-		// 回车 = 搜。没输入就回退到「还没输入」那一支：一条空 query 的 URL
-		// 和没搜过是同一件事，别让它停在「搜了没有」上。
-		if box.Submitted() {
-			kw := strings.TrimSpace(s.searchDraft)
-			s.searchDraft = kw
-			// ⚠️ **记下「这个草稿是从哪个词来的」**：回车之后路由上的词就是它，
-			// 而判据（`searchDraftFor`）靠的就是这个——不记的话，用户把框清干净
-			// 之后那一支会把同一个词又弹回来（票 #138 的评审抓出来的那一条）。
-			s.searchDraftFor = kw
-			if kw == "" {
-				s.navigate(searchPath)
-			} else {
-				s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape(kw))
-			}
-		}
-
 		if keyword == "" {
 			// 还没输入：上游 `pages/search/index.tsx:16` 的那一支。
 			s.viewEmpty(c, "search:idle", searchIdle)
@@ -136,8 +94,8 @@ func (s *Shell) viewSearch(c *ui.Context, r *ui.Route) {
 	})
 }
 
-// syncSearch 是搜索页每帧的副作用：草稿跟着路由上的词走、换查询就重置到第 1 页、
-// 收当前那一张 Tab 的后台结果、起该起的那一拉。
+// syncSearch 是搜索页每帧的副作用：换查询就重置到第 1 页、收当前那一张 Tab 的
+// 后台结果、起该起的那一拉。
 //
 // ⚠️ **它们原来散在 `viewSearch` 和 `viewSearchResults` 里**，而这一页在满屏
 // 开着的时候不画（票 #161）——不挪的话，用户在满屏里看频谱的那几分钟里，搜索
@@ -146,16 +104,12 @@ func (s *Shell) viewSearch(c *ui.Context, r *ui.Route) {
 // ⚠️ **只同步当前那一张 Tab**：另外两张的列表**从来没打开过**，而
 // `PagedList.Sync` 里那一支「一页都还没拉过就发第一拉」会把它们也拉起来——
 // 那是用户根本没要的三趟请求。
+//
+// ⚠️ **草稿那一摊不在这里了**：页内那个输入框 2026-10-22 拍板删了之后，要跟着
+// 路由走的那个词在**顶栏**那个框里（`navbar_search.go` 的 `syncSearchKeyword`）。
 func (s *Shell) syncSearch(c *ui.Context) {
 	st := &s.search
 	keyword := strings.TrimSpace(s.router.Query(searchQuery))
-
-	// ⚠️ **草稿跟着路由上的词走**（理由见 `viewSearch` 里那一段：路由上的词
-	// 变了才写，用户正在敲的字不许被覆盖）。
-	if keyword != "" && s.searchDraftFor != keyword {
-		s.searchDraft = keyword
-		s.searchDraftFor = keyword
-	}
 
 	cur := st.tab
 	// 🔴 换查询 → 重置到第 1 页（理由见 searchTab.current）。
@@ -180,7 +134,14 @@ func (s *Shell) viewSearchResults(c *ui.Context, keyword string) {
 
 	ui.Column(c).Key("search:results").Grow(1).Gap(searchHeaderGap).
 		AlignItems(ui.Stretch).Children(func() {
-		ui.Textf(c, "搜索【%s】的结果", keyword).FontSize(scale.Font(c, 18)).Bold()
+		// 这一句是这一页的**页标题**（上游的 `<h1>`，`pages/search/index.tsx:23`）：
+		// 24 / 400。
+		//
+		// ⚠️ **字重不许写**：页标题的字重由框架的默认档（400）给，写上
+		// `FontWeight(400)` 也会被 `TestPageTitlesAreNotBold` 拦下——那一条钉的
+		// 是「拿 `pageTitleSize` 当字号的那一句里不许出现字重」，
+		// `DESIGN.md` §二「页标题 24 / 400」靠的是**不调** `.Bold()`。
+		ui.Textf(c, "搜索【%s】的结果", keyword).FontSize(scale.Font(c, pageTitleSize))
 
 		// 🔴 **两排 Tabs 都要在 `current` 之前画**：它们都是建到的时候才写
 		// `st.tab` / `st.sorts[cur]`（`mygo/ui/base.go` 的 `tabsParts.Tab` 的

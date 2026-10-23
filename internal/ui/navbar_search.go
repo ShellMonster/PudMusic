@@ -113,6 +113,9 @@ func searchFieldBg(t *ui.Theme, hot bool) ui.Color {
 func (s *Shell) viewSearchBox(c *ui.Context) {
 	t := c.Theme()
 
+	// 🔴 **框里要显示当前这一页搜的词**（理由见 `syncSearchKeyword`）。
+	s.syncSearchKeyword()
+
 	// ⚠️ 底色在 Children **之后**才定：判定要用的两个状态里，焦点这一位是
 	// Children 里才量到的（`field.Focused()`），而指针那一位要等这一格建出来
 	// 才能问（`row.Hovered()`）。先铺一层静止档，再按这一帧的实况盖上去——
@@ -260,6 +263,37 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 			s.trackScrollbar(suggestScroll)
 		})
 	})
+}
+
+// syncSearchKeyword 让顶栏那个框里显示**当前这一页搜的词**。
+//
+// # 为什么需要它
+//
+// 页内那个输入框 2026-10-22 拍板删了（`DESIGN.md` §十.1，见 searchpage.go 的
+// 文件头），于是「当前搜的是什么」在界面上**只剩顶栏这一个显示**——框里空着而
+// 下面已经是一屏结果，用户会以为框坏了（而改词也只能回顶栏）。
+//
+// # 判据是「路由上的词换了吗」，不是「框是不是空的」
+//
+//   - 用户正在顶栏里敲字 → 路由没变 → **一个字都不动他的**；
+//   - 用户把框里的字删干净 → 路由没变 → **框不许自己弹回来**（票 #138 的评审
+//     抓过这一条：弹回来之后他接着敲的字会被粘在旧词后面）；
+//   - 搜了另一个词 / 翻到了另一条历史 → 路由上的词变了 → 框里那个是旧的了，
+//     换掉。
+//
+// ⚠️ **路由上没有词的那一支直接跳过**：去别的页面（路由上的词变成空）不是
+// 「换了词」，只是这一页不搜东西了——那一支要是也写，框里用户正在敲的字就会
+// 在他切页回来时被他自己搜的那个词盖掉（票 #138 抓的就是这一条的反面）。
+//
+// ⚠️ **写的是框，不是路由**：路由上的词是「这一页在搜什么」，框里的是「用户
+// 正在敲什么」——用户敲到一半没回车，那一句就还没算数。
+func (s *Shell) syncSearchKeyword() {
+	kw := strings.TrimSpace(s.router.Query(searchQuery))
+	if kw == "" || kw == s.searchKeywordFor {
+		return
+	}
+	s.searchKeywordFor = kw
+	s.searchKeyword = kw
 }
 
 // suggestPanelMaxH 是这个面板最多能有多高（滚动容器的上限）。

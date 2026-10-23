@@ -321,7 +321,7 @@ func (d *downloadsPage) revealFile(r download.Snapshot, s *Shell) {
 // confirmAsk 是「你确定吗」那一弹窗：正在等用户点头的那一次操作。
 //
 // 状态长在页面上（不是 view 的局部变量）——即时模式每一帧都重画一遍，局部变
-// 量下一帧就没了（和 `Shell.searchDraft` 同一个理由）。
+// 量下一帧就没了（和 `Shell.searchKeyword` 同一个理由）。
 type confirmAsk struct {
 	// title 是标题，body 是正文，ok 是确认按钮上的字。三样都摆出来，不靠
 	// 「你确定吗？」那一句话让用户猜自己在删什么。

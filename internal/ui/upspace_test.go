@@ -145,9 +145,11 @@ func uiExploreJSON(w http.ResponseWriter, code int, data any) {
 //
 // `loggedIn` 决定有没有登录态：**关注按钮只在「登录了且看的不是自己」时画**
 // （照 Biu `space-info.tsx:100`），所以要验那个按钮就得带登录态。
-func newSpaceShell(t *testing.T, b *uiExplore, loggedIn bool, mid string) (*Shell, *mygoui.Tester, *app.App) {
+//
+// `opts` 是给外壳本身的（深浅两套主题等）——**变参**，所以原来那些调用不用改。
+func newSpaceShell(t *testing.T, b *uiExplore, loggedIn bool, mid string, opts ...shellOpt) (*Shell, *mygoui.Tester, *app.App) {
 	t.Helper()
-	sh := newTestShell(t, mounted(func(_ *testing.T, a *app.App) {
+	sh := newTestShell(t, append([]shellOpt{mounted(func(_ *testing.T, a *app.App) {
 		transport := &app.CredentialTransport{Base: b.Server.Client().Transport, Policy: app.DefaultInjectPolicy()}
 		cli := bili.NewClient(bili.Options{Transport: transport})
 		cli.TestOnlyPointHostsAtFixture(b.URL)
@@ -160,7 +162,7 @@ func newSpaceShell(t *testing.T, b *uiExplore, loggedIn bool, mid string) (*Shel
 		if loggedIn {
 			a.TestOnlyAdoptLogin(mid)
 		}
-	}))
+	})}, opts...)...)
 	return sh.s, sh.tt, sh.a
 }
 
