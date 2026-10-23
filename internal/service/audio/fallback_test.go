@@ -118,20 +118,34 @@ func TestOpenDecoderDoesNotFallBackWhenTheFileItselfIsBroken(t *testing.T) {
 // TestOpenDecoderSaysBothWhenThePlatformIsUnavailableAndTheFileIsNotFLAC 盯
 // **两条路径分得清**：平台没有解码器，而这个文件也不是 FLAC。
 //
-// 这种情况下两句都要在：一句说「这台机器没有系统解码器」，一句说「这也不像
+// 这种情况下两句都要在：一句说「这台机器没有 AudioToolbox」，一句说「这也不像
 // FLAC」。只报一句的话，界面上会出现「文件坏了」这种**其实不是**的提示——
 // 而按那条提示去查文件，永远查不出问题。
+//
+// ⚠️ **Media Foundation 那一边也要一起挡掉**（这是本票接上 mfadec 之后才必须
+// 挡的）：Windows 上它**能**解这个 AAC 的 MP4（那正是本票接上去的东西），
+// 于是 `openDecoder` 会**成功**——这条要断的「两个解码器都认不出来」的前提
+// 就不成立了，条用例会红。
+//
+// 所以这一条断的是「**都**认不出来的时候，那句话怎么说」，而不是「某一个
+// 认不出来的时候」——后者由
+// `TestOpenDecoderFallsBackToFLACWhenMediaFoundationCannotDecodeTheFile`
+// 和 `TestOpenDecoderUsesMediaFoundationWhenThePlatformDecoderIsUnavailable`
+// 两条一起管。
 func TestOpenDecoderSaysBothWhenThePlatformIsUnavailableAndTheFileIsNotFLAC(t *testing.T) {
 	stubPlatformDecoder(t, func(io.ReadSeeker) (mygoaudio.Decoder, error) {
 		return nil, extaf.ErrUnsupported
 	})
+	stubMediaFoundation(t, func(io.ReadSeeker) (mygoaudio.Decoder, error) {
+		return nil, errors.New("mfadec: 这个 MP4 里不是 AAC")
+	})
 
 	_, _, err := openDecoder(bytes.NewReader(buildAACMP4(t)))
 	if err == nil {
-		t.Fatal("平台没有解码器、文件也不是 FLAC，却报成功")
+		t.Fatal("两个解码器都认不出来、文件也不是 FLAC，却报成功")
 	}
 	if !errors.Is(err, extaf.ErrUnsupported) {
-		t.Errorf("错误 = %v，丢了「这个平台没有系统解码器」这一半", err)
+		t.Errorf("错误 = %v，丢了「这个平台没有 AudioToolbox」这一半", err)
 	}
 	if !errors.Is(err, flacdec.ErrFormat) {
 		t.Errorf("错误 = %v，丢了「这也不像 FLAC」这一半", err)
