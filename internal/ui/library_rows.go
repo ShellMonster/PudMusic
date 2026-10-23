@@ -346,9 +346,21 @@ func (p *pagedRows) View(c *ui.Context) {
 	// 这个类型的文件头），所以登记得自己写一遍——焦点句柄是同一个框架机制
 	// （`ui.ListState.Handle`）。
 	if p.acts.Focus != nil {
-		p.acts.Focus(list.HandleFocus(&p.state.Handle))
+		p.acts.Focus(p)
 	}
 	p.draw(c)
+}
+
+// TakeFocus 把键盘焦点接到这份行列表上，并把光标放到第一行。
+//
+// ⚠️ **和 `widgets/list` 的 `List.TakeFocus` 是同一件事**（票 #245 的 E4）：
+// 用户是「从侧栏走进内容区」的，进来就停在第一首上，才对得起「走进来就在
+// 第一首歌上」。
+func (p *pagedRows) TakeFocus() {
+	if len(p.rows) > 0 {
+		p.sel = 0
+	}
+	p.state.Handle.Focus()
 }
 
 // onPanic 记一笔并要一帧。

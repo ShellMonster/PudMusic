@@ -370,6 +370,8 @@ type Shell struct {
 	// 侧栏在 build 的时候收到请求，而内容区**在侧栏之后才画**——所以这里记
 	// 下来，等这一遍画完了再兑现（见 focus.go 的 `applyContentFocus`）。
 	focusIntoContent bool
+	// sideHandle 是侧栏那一栏的焦点句柄（方向键的入口，见 sidebar.go）。
+	sideHandle ui.Handle
 	// sideAnchor 是侧栏第一项的焦点句柄（焦点回侧栏时用它）。
 	//
 	// 逐窗口一份：壳是逐窗口的（主窗口、迷你播放器各一个），而框架的

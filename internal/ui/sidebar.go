@@ -8,6 +8,7 @@ package ui
 
 import (
 	"runtime"
+
 	"slices"
 	"strconv"
 	"sync"
@@ -98,6 +99,24 @@ func (s *Shell) viewSide(c *ui.Context) {
 	collapsed := s.sideCollapsedVisual(st)
 
 	side := ui.Row(c).Key("side")
+	// 🔴 **方向键的入口在这一层**（票 #245 的 E4）：焦点在侧栏的哪一项上时按 ↓，
+	// 就把焦点交给内容区。
+	//
+	// ⚠️ **为什么绑在容器上而不是每一项上**：容器是**焦点链上的祖先**，所以
+	// 焦点在侧栏里的**任何**一处（菜单项、收藏夹、折叠键），这一下都能被它接住
+	// ——而焦点链是**从内往外**派发的（`mygo/ui/input.go` 的 `routeKey`），所以
+	// **焦点在收藏夹列表上时，方向键先被那个列表接走**（列表要靠方向键挪游标），
+	// 走不到这里。
+	//
+	// ⚠️ **焦点在内容区时更不会误触发**：内容区和侧栏是兄弟，不在一条焦点链上。
+	//
+	// ⚠️ **副作用**：焦点在侧栏时 ↓ 不再滚侧栏了。那一档滚动靠的是框架的
+	// `scrollKey`（方向键在**焦点链上没有任何控件吃**时才轮到它），而现在侧栏
+	// 吃了方向键。侧栏要滚的话用滚轮——那一栏本来就窄，滚轮是它主要的方式。
+	side.Bind(&s.sideHandle)
+	if side.Shortcut(0, ui.KeyDown) {
+		s.focusContent()
+	}
 	// 拖动中不过渡（Biu 的 `transition-none`），松手和折叠才走 200ms。
 	//
 	// ⚠️ 拖动那一支必须先 `Jump`：动画的值还停在上一段动画的终点，不先钉住
@@ -493,7 +512,7 @@ func (s *Shell) sideMenuItem(c *ui.Context, rt Route, selected, collapsed bool) 
 		if selected {
 			item = flatCurrent(c, item)
 		}
-		return s.sideItemKeys(c, item)
+		return item
 	}
 	item := flatIconLabelButton(c, name, rt.Title, sideIconSize, sideIconCell)
 	// 选中那一层照上游 HeroUI 的 `variant="flat"` + `color="primary"`
@@ -502,28 +521,6 @@ func (s *Shell) sideMenuItem(c *ui.Context, rt Route, selected, collapsed bool) 
 	// 就是调研点名的「选中整条刷实心绿」（报告 §2 基线 B 标注 3）。
 	if selected {
 		item = flatCurrent(c, item)
-	}
-	return s.sideItemKeys(c, item)
-}
-
-// sideItemKeys 接上侧栏菜单项在键盘上的那件事（票 #245 的 E4）。
-//
-// # ↓ 把焦点交给内容区
-//
-// 焦点停在侧栏这一项上时按 ↓，**内容区那一块收不到**——框架的快捷键按
-// **焦点链**派发（`mygo/ui/input.go` 的 `routeKey`），而侧栏和内容区是兄弟，
-// 内容区不在焦点链上。按钮本身也不吃方向键，于是这一下什么也不发生：键盘
-// 用户 Tab 到侧栏之后就卡住了，得用鼠标点一下内容区才能用方向键。
-//
-// 现在这一项把 ↓ 接过来，转给内容区里当前那一个列表（登记见 focus.go）。
-//
-// ⚠️ **副作用**：焦点在侧栏时 ↓ 不再滚侧栏了。那一档滚动靠的是框架的
-// `scrollKey`（方向键在**焦点链上没有任何控件吃**时才轮到它），而现在这一项
-// 吃了方向键。侧栏要滚的话用滚轮——那一栏本来就窄，滚轮是它主要的方式。
-func (s *Shell) sideItemKeys(c *ui.Context, item ui.Element) ui.Element {
-	// ↓ 交给内容区。
-	if item.Shortcut(0, ui.KeyDown) {
-		s.focusContent()
 	}
 	return item
 }
