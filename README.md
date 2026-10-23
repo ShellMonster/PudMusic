@@ -75,10 +75,10 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 | 边界 | 说明 |
 |---|---|
 | **本地音乐不支持 WMA** | **明确的功能缺口。** Biu 的本地扫描白名单里有 `.wma`，本项目解不了它（还没有能用的纯 Go WMA 解码器）。扫到 `.wma` 会列出来但**播不了**——页面顶上会明写「这个目录里有我们还放不出的格式（.wma），它们会列出来但放不了。」，行里的作者那一格也写着「这个格式我们放不了」，不会让人以为文件坏了。这条是「决定还没做，但当前边界清楚」，不是「没排期」。将来要不要做还没拍板。 |
-| **Windows 上解不了 AAC / ALAC** | 也就是 B 站的有损音质（`dash.audio`，未登录最高 320K）那一档，以及 `.m4a` / `.m4s` / `.mp4` 里装的**有损**音轨。这些走 macOS 自带的 AudioToolbox，**Windows 上没有对应的解码器**。这是一条**还没决定的路线选择**（走系统 MediaFoundation，还是换一个纯 Go 解码器），不是「来不及做」。⚠️ 后果要说明白：Windows 版目前只能播无损 FLAC、MP3、WAV、AIFF——**MP4 容器里的 FLAC 也算**（那档落回本仓库的 `flacdec`，不依赖系统解码器）。 |
-| **杜比音轨不能手动选** | 杜比全景声（`30250`）和杜比 Hi-Res（`30251`）没有放进设置里的音质档位（只有 自动 / 无损 / 320K / 128K / 64K）。自动档在 B 站只给杜比时会取它，能不能解出取决于系统解码器。 |
+| **Windows 上解不了 AAC / ALAC** | 也就是 B 站的有损音质（`dash.audio`，未登录最高 320K）那一档，以及 `.m4a` / `.m4s` / `.mp4` 里装的**有损**音轨。这些走 macOS 自带的 AudioToolbox，**Windows 上没有对应的解码器**。这是一条**还没决定的路线选择**（走系统 MediaFoundation，还是换一个纯 Go 解码器），不是「来不及做」。⚠️ 后果要说明白：Windows 版目前只能播无损 FLAC、MP3、WAV、AIFF——**MP4 容器里的 FLAC 也算**（那档落回本仓库的 `flacdec`，不依赖系统解码器）。⚠️ **B 站在线的无损流正好是「MP4 容器里的 FLAC」**（实测，见下一节），所以它落在能播的那一档里。 |
+| **杜比音轨不能手动选** | 杜比全景声（实测 id `30250`，`codecs` 是 `ec-3`）没有放进设置里的音质档位（只有 自动 / 无损 / 320K / 128K / 64K）。自动档在 B 站只给杜比时会取它，能不能解出取决于系统解码器。⚠️ 公开资料里的「杜比 Hi-Res = `30251`」**在真接口上没出现过**——实测 id `30251` 是 `dash.flac` 那一档（编码 `fLaC`，见下一节）。 |
 | **AIFF 只认未压缩的 PCM** | `internal/service/audio/aiff.go` 是本项目自己写的，只解未压缩的 PCM。AIFF 容器里的压缩编码（MAC3/IMA4 等）解不了。 |
-| **FLAC 解码器在本仓库里** | 裸 FLAC 走 `internal/service/audio/flacdec`（纯 Go，已逐样本验证）；**MP4 容器里的 FLAC 在 macOS 上走系统解码器**（那条路是按容器认的），**在 Windows 上落回 `flacdec`**（那里没有系统解码器）。 |
+| **FLAC 解码器在本仓库里** | 裸 FLAC 走 `internal/service/audio/flacdec`（纯 Go，已逐样本验证）；**MP4 容器里的 FLAC 在 macOS 上走系统解码器**（那条路是按容器认的），**在 Windows 上落回 `flacdec`**（那里没有系统解码器）。实测 B 站那条无损流是 `48000` / 2 声道 / **24 bit**，`flacdec` 解得动。 |
 
 ### 登录
 
@@ -167,8 +167,15 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 | AIFF / AIFC | `internal/service/audio/aiff.go` | 本项目写的，只认未压缩的 PCM |
 | WAV | `mygo/audio` | MyGo 自带 |
 
-注册表认不出来、而头几个字节是 `fLaC` 的，落回 `flacdec`——B 站的无损流就是
-裸 FLAC，而 MyGo 的表是对字面量做匹配的，给变长的 magic 注册不了。
+注册表认不出来、而头几个字节是 `fLaC` 的，落回 `flacdec`——那是**本地裸
+`.flac` 文件**的路子（MyGo 的表是对字面量做匹配的，给变长的 magic 注册不了）。
+
+⚠️ **B 站在线的无损流不是裸 FLAC。** 实测（2026-10-23，issue #252）它的头
+16 字节是 `00 00 00 20 66 74 79 70 69 73 6f 35 00 00 00 01 69 73 6f 35`
+——`ftyp` 盒，也就是 **MP4 里的 FLAC**（素材与形状说明见
+`internal/service/bili/testdata/lossless/`）。所以在线的无损流走的是上表里
+「MP4 家族」那一行（macOS 上是系统解码器；**Windows 上没有系统解码器，落回
+`flacdec`**），**不是** `flacdec` 的裸 FLAC 那一条。
 
 **这个平台没有系统解码器时**（Windows），认得出容器的也落回 `flacdec`——
 `flacdec` 能解 MP4 里的 FLAC，于是 B 站无损流在 Windows 上照样放得出来。

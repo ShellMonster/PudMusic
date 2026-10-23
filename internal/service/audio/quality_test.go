@@ -266,8 +266,12 @@ func TestContentDecidesTheContainerNotTheFileName(t *testing.T) {
 //
 // 两种容器都要断，因为它们走的**不是同一个解码器**：裸 FLAC 认不出来、
 // 落回 flacdec；MP4 里的 FLAC 在 macOS 上认成 MP4、走系统解码器，在**没有
-// 系统解码器**的平台上（Windows）落回 flacdec。B 站的无损流是哪一种
-// 没有实测过（要大会员），所以两种都得是逐位准的。
+// 系统解码器**的平台上（Windows）落回 flacdec。
+//
+// ⚠️ **B 站的无损流是哪一种已经实测过了**（2026-10-23，issue #252）：是
+// **MP4 里的 FLAC**——头 16 字节是 `ftyp` 盒。素材与形状说明见
+// `internal/service/bili/testdata/lossless/`。两种容器都还得是逐位准的，
+// 因为本地裸 `.flac` 文件还要走另一条路。
 //
 // 先断素材的左右声道不同：这两个声道是不同信号，接错了才测得出来。
 // 全程逐个采样比，不用 RMS（`SPEC.md`「Testing Decisions」）。
