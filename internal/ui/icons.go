@@ -524,9 +524,14 @@ func iconKey(c *ui.Context, name, label string, font float32, disabled bool) ui.
 // 那一行其余四枚图标都是满屏自己的前景色，一枚变绿另外四枚不变，一眼就不成套。
 // 所以满屏那一枚走 `iconButton`（见 `fullplayer.go` 的 `viewFullControls`）。
 //
-// ⚠️ **别把它改回实心主色**：那一版的理由写在 `iconButtonPrimary` 上面，
-// 那条理由已经跟着播放键一起作废了（上游那一枚同样是强调色的播放键，只是它靠的
-// 是 `RiPlayCircleFill` 那张实心图形，而不是一块底）。
+// ⚠️ **别把它改回实心主色**：那一版（「实心主色是强调色，主操作的重量必须
+// 留着」）是照着**旧形状**写的（我们是一块圆底，上游是一枚圆图形），而上游
+// 那一枚改过来之后，这条理由自己就不成立了（上游那一枚同样是强调色的播放键，
+// 只是它靠的是 `RiPlayCircleFill` 那张实心图形，而不是一块底）。
+//
+// ⚠️ 顶栏那个**登录**键原来也有一份实心主色的按钮（`iconButtonPrimary`），
+// 票 #241 把它去掉了——**那个函数已经删了**，别再加回来：顶栏那一排的视觉
+// 重量由图标说话，理由见 `login.go` 的 `viewLoginEntry`。
 //
 // 判据在 `playbar_layout_test.go` 的 `TestThePlayKeyIsBigEnoughToHit`：
 // 那一枚现在量的是「播放条底色上那一片墨迹」，不再是「主色底上那一片墨迹」。
@@ -539,26 +544,6 @@ func iconButtonPlay(c *ui.Context, name, label string, font float32, disabled bo
 	// 时候那一枚是禁用的），而它必须在**问悬停之前**就定下来——问早了，一枚禁用
 	// 的键会用主色告诉用户「这里点得动」（见 `iconKey` 那段）。
 	return iconKey(c, name, label, font, disabled)
-}
-
-// iconButtonPrimary 是顶栏那个**登录**键：一枚实心主色的方块。
-//
-// 和 iconButton 只差一个「底色是主色」——两者的形状、图标、点击区完全一样，
-// 写成两个是为了不去改 MyGo 建出来的按钮样式（`ui.PrimaryButton` 是建的时候
-// 选的，建完再改底色要连 hover / pressed 两个色一起改）。
-//
-// ⚠️ **它和播放键不是一回事**：播放键早就改成上游那一枚了（无底色，见
-// `iconButtonPlay`），而**登录键上游那边没有对应的东西**（上游把登录挂在头像
-// 下拉里，`navbar/login`），所以这一枚是我们自己的设计——实心主色是「这是主操作」
-// 的标记。
-//
-// ⚠️ **别拿它当播放键的模板**：播放键原来也走它，理由写的是「实心主色是强调色，
-// 主操作的重量必须留着」——那条理由是照着**旧形状**写的（我们是一块圆底，上游是
-// 一枚圆图形），而上游那一枚改过来之后，这条理由自己就不成立了。
-func iconButtonPrimary(c *ui.Context, name, label string, font float32) ui.Element {
-	btn := ui.PrimaryButton(c, "").Label(label)
-	btn.Children(func() { ui.Icon(c, icon(name)).FontSize(font) })
-	return btn
 }
 
 // 下面这四个是「哪个状态配哪一张」的唯一出口。
