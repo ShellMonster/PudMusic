@@ -646,6 +646,25 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
+		// Windows 上没有 AudioToolbox，`extaf.Open` 恒返回 `ErrUnsupported`。
+		// 而「**平台没有解码器**」和「**这个文件解不了**」是两回事：只有前者
+		// 才落回 `flacdec`（`openDecoder`），后者照旧报错——落回会把真错盖成
+		// 「不像 FLAC」，而真错才是用户该看到的那句。
+		//
+		// ⚠️ 这一条是**注入**验的（`internal/service/audio/fallback_test.go` 把
+		// 「平台解码器」换成测试自己给的）：真 Windows 上 `extaf` 恒不可用，
+		// 而 macOS 上它恒可用——不注入的话，这条路径在**能跑测试的这个平台上**
+		// 一条都走不到。
+		Spec: "平台解码器不可用时落回 flacdec：MP4 里的 FLAC 仍能解出来（逐样本）；平台解码器可用时不落回；「平台没解码器」和「文件解不了」分得清",
+		Tests: []string{
+			"TestOpenDecoderFallsBackToFLACWhenThePlatformDecoderIsUnavailable",
+			"TestThePlatformDecoderIsUsedWhenItIsAvailable",
+			"TestOpenDecoderDoesNotFallBackWhenTheFileItselfIsBroken",
+			"TestOpenDecoderSaysBothWhenThePlatformIsUnavailableAndTheFileIsNotFLAC",
+		},
+	},
+	{
+		Category: Platform,
 		Spec:     "异步结果**逐窗口**唤醒（只叫醒主窗口的话迷你窗口停在旧内容）",
 		Tests: []string{
 			"TestEveryWindowThatDrewItGetsWoken", "TestEveryWindowGetsWoken",
