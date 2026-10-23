@@ -795,8 +795,8 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 	w, h := fullCoverSize(c, area.W)
 	// ⚠️ **自己算位置**，不要用 `Absolute().Center()`：那个 `Center` 是「把**子**
 	// 元素沿着主轴居中」（`mygo/ui/api_gen.go:3006`），不是「把这个元素摆到中间」。
-	// 这么写的后果是外层那个 Box 宽高就是封面本身、贴在左边 x=0，
-	// 界面上是「封面靠左」，而转场的终点也跟着错。
+	// 这么写的后果是外层那个 Box 宽高就是封面本身、贴在**它待的那一块的最左边**
+	// （x=0），而转场的终点也跟着错。
 	box := ui.Box(c).Key("full-cover").
 		Absolute().Left(area.X+(area.W-w)/2).Top(area.Y+(area.H-h)/2).Size(w, h)
 	if hidden {
