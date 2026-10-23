@@ -86,8 +86,11 @@ type Decoder struct {
 	pos int64
 	// skip 是还要丢掉多少个采样（每声道）才轮到交出去。
 	//
-	// 它有两个来源：容器说的**编码器延迟**（开头那几百个采样是编码器的
-	// 「预热」，不属于呈现出来的音频），和 **seek**（跳过去的那一段）。
+	// ⚠️ **它只有一个来源：seek**（跳过去的那一段）。
+	//
+	// 它**不是**容器的 `EncoderDelay`——解码器的输出本来就从呈现音频的开头起
+	//（解码器自己吞掉了它输出的第一帧，也就是编码器的预热），按 `EncoderDelay`
+	// 再丢一遍就是丢了两遍。理由见 `Open` 里那段。
 	skip int
 	// drained 记着「已经 drain 过了」——流读完只 drain 一次。
 	drained bool
@@ -141,8 +144,23 @@ func Open(r io.ReadSeeker) (*Decoder, error) {
 		rate:     codec.SampleRate(),
 		chans:    codec.Channels(),
 		total:    src.total,
-		// 开头的编码器延迟是要丢掉的：它是编码器的预热，不是呈现出来的音频。
-		skip: src.delay,
+		// ⚠️ **这里不丢容器的 `EncoderDelay`**——丢两遍就把音频挪早了。
+		//
+		// 理由（issue #128 的评审 + 本仓库量过的数）：**解码器的输出本来就从
+		// 呈现音频的开头起**。AAC 的 MDCT 是有重叠的，解码器**自己吞掉**第一帧
+		// 那半个重叠（那一帧是「不完整的」，也就是编码器的预热），所以：
+		//
+		//   - 原始输出 = 173 帧 = 177152 个采样，**正好等于** ffmpeg 解同一份
+		//     .m4a 的结果（`fixture_test.go` 的 `refFrames`）；
+		//   - macOS 的 AudioToolbox 给 176400 帧，而它和参考 WAV 的**前 176400
+		//     个采样**逐样本对齐（平均差 29/32768、最大 2313/32768）。
+		//
+		// 也就是说：那 1024 个预热采样**根本不在解码输出里**。再按
+		// `EncoderDelay` 丢一遍，就等于**凭空砍掉 1024 个真实采样**：音频比
+		// 参考晚 23 毫秒，而且比容器说的呈现长度少 272 个采样。
+		//
+		// 详见 `mfadec/decoder_test.go` 的 `TestTheDecoderDoesNotDropTheEncoderDelayTwice`。
+		skip: 0,
 	}, nil
 }
 

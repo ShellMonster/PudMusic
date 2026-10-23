@@ -230,6 +230,43 @@ func TestOpenDecoderFallsBackToFLACWhenMediaFoundationCannotDecodeTheFile(t *tes
 	}
 }
 
+// TestOpenDecoderSaysWhyMediaFoundationCouldNotDecodeIt 盯「**Media Foundation
+// 的真实原因要进最终那句错**」。
+//
+// Windows 上**有**系统解码器（Media Foundation），只是它解不了这一个文件
+// （E-AC-3、ALAC 都是这种）。所以最终那句错里如果只有「这台机器没有系统
+// 解码器」，用户看到的是一句**假话**——而真实原因（「这个 MP4 里不是 AAC」）
+// 才是他能拿去做决定的。
+//
+// 这一条断的是**那句错里有没有真话**。
+func TestOpenDecoderSaysWhyMediaFoundationCouldNotDecodeIt(t *testing.T) {
+	stubPlatformDecoder(t, func(io.ReadSeeker) (mygoaudio.Decoder, error) {
+		return nil, extaf.ErrUnsupported
+	})
+	// 真实原因长什么样，就用什么形状——别拿一个假的字符串糊弄过去。
+	mfErr := errors.New("mfadec: 这个 MP4 里不是 AAC（是 ec-3）")
+	stubMediaFoundation(t, func(io.ReadSeeker) (mygoaudio.Decoder, error) {
+		return nil, mfErr
+	})
+
+	// 素材要挑一个**两个解码器都认不出来**的：`stereo16.mp4` 里装的是 FLAC，
+	// 落回 flacdec 之后是能放的（那正是另一条测试要断的）。
+	_, _, err := openDecoder(bytes.NewReader(buildAACMP4(t)))
+	if err == nil {
+		t.Fatal("两个解码器都认不出来，却报成功")
+	}
+	if !errors.Is(err, mfErr) {
+		t.Errorf("错误 = %v，丢了 Media Foundation 的真实原因（%v）", err, mfErr)
+	}
+	if !errors.Is(err, extaf.ErrUnsupported) {
+		t.Errorf("错误 = %v，丢了「没有 AudioToolbox」这一半", err)
+	}
+	if !errors.Is(err, flacdec.ErrFormat) {
+		t.Errorf("错误 = %v，丢了「这也不像 FLAC」这一半", err)
+	}
+	t.Logf("最终那句错：%v", err)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 注入点
 // ─────────────────────────────────────────────────────────────────────────────

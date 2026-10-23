@@ -40,13 +40,21 @@ const fakeUnitLen = 1024
 // 它每一帧吐 `perFrame` 个采样（每声道），采样值是**这一帧的序号**——所以
 // 「解出来的第几个采样」是可以对着算的，而不是「看起来对」。
 //
-// ⚠️ **它模仿了真解码器的一个关键行为**：喂一帧进去，出来的是**上一帧**的
-// 采样——MDCT 的重叠状态要靠下一帧才补齐。所以喂 N 帧只交出 N-1 帧，
-// **最后一次 drain 才交出最后一帧**。
+// # ⚠️ 它模仿了真解码器的**两个**关键行为
 //
-// 不模仿这一条的话，「读完要 drain」那条测试就是假的：替身每一帧都有输出，
-// 于是永远轮不到 drain，而真解码器少了那一帧的症状是「结尾少 1024 个采样」
-// （17 毫秒，悄悄少掉）。
+//  1. **解码器吞掉第一帧**。AAC 的 MDCT 是有重叠的，解码器输出的第一帧是
+//     「重叠不完整」的冷启动帧——也就是**编码器的预热**，**它不是呈现出来的
+//     音频的一部分**。所以喂 N 帧只交出 **N-1** 帧，而且交出来的第一帧是
+//     **第 1 帧**（第 0 帧被吞了）。
+//  2. **输出比输入慢一帧**：这一帧解出来的采样要等下一趟才交出去，所以
+//     **最后一次 drain 才交出最后一帧**。
+//
+// 这两条合起来就是真机的行为（issue #128 的评审 + 仓库自己量过的数：原始输出
+// 173 帧 = 177152 个采样，正好等于 ffmpeg 解同一份 .m4a 的结果）。
+//
+// 不模仿它们的话，「读完要 drain」和「不丢编码器延迟」那两条测试都是假的：
+// 替身每一帧都有输出、而且从第 0 帧起算，于是永远轮不到 drain，而真解码器
+// 少了那一帧的症状是「结尾少 1024 个采样」（17 毫秒，悄悄少掉）。
 type fakeCodec struct {
 	rate, chans int
 	// perFrame 是每一帧吐多少个采样（每声道）。
@@ -55,24 +63,32 @@ type fakeCodec struct {
 	feeds int
 	// produced 是已经**解出来**几帧（不等于交出去几帧）。
 	produced int
+	// held 是攥着还没交出去的那一帧（输出比输入慢一帧）。
+	held []float32
 	// drains 是 drain 过几次。
 	drains int
 	// closed 是关过几次。
 	closed int
-	// drained 是 drain 时吐出来的采样（默认空）。
+	// drained 是 drain 时额外吐出来的采样（默认空）。
 	drained []float32
 }
 
-// Feed 吐**上一帧**的采样。
+// Feed 吐**上一帧**的采样；第一帧被解码器吞掉。
 func (c *fakeCodec) Feed(frame []byte) ([]float32, error) {
 	c.feeds++
-	if c.produced == 0 {
-		// 第一帧没有「上一帧」可交：解码器的重叠状态是冷的。
-		c.produced++
+	cur := c.frameSamples(c.produced)
+	c.produced++
+	if c.produced == 1 {
+		// ⚠️ **第一帧被吞掉**：它是 MDCT 重叠不完整的冷启动帧 = 编码器的预热。
 		return nil, nil
 	}
-	out := c.frameSamples(c.produced - 1)
-	c.produced++
+	// 输出比输入慢一帧：这一帧先攥着，下一趟再交出去。
+	if c.held == nil {
+		c.held = cur
+		return nil, nil
+	}
+	out := c.held
+	c.held = cur
 	return out, nil
 }
 
@@ -87,17 +103,17 @@ func (c *fakeCodec) frameSamples(index int) []float32 {
 	return out
 }
 
-// Drain 吐出攒着的最后一帧。
+// Drain 吐出攥着的最后一帧。
 func (c *fakeCodec) Drain() ([]float32, error) {
 	c.drains++
 	if len(c.drained) > 0 {
 		return c.drained, nil
 	}
-	if c.produced == 0 {
+	if c.held == nil {
 		return nil, nil
 	}
-	out := c.frameSamples(c.produced - 1)
-	c.produced++
+	out := c.held
+	c.held = nil
 	return out, nil
 }
 
@@ -129,7 +145,9 @@ func newTestDecoder(t *testing.T, name string, perFrame int) (*Decoder, *fakeCod
 		rate:  codec.SampleRate(),
 		chans: codec.Channels(),
 		total: src.total,
-		skip:  src.delay,
+		// ⚠️ **不按容器的 `EncoderDelay` 丢**——解码器自己吞掉了那一帧
+		// （见 `TestTheDecoderDoesNotDropTheEncoderDelayTwice`）。
+		skip: 0,
 	}, codec
 }
 
@@ -154,28 +172,39 @@ func readAll(t *testing.T, d *Decoder) []float32 {
 // 用例
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheDecoderDropsTheContainersEncoderDelay 断「开头那几百个采样要丢掉」。
+// TestTheDecoderDoesNotDropTheEncoderDelayTwice 断「编码器延迟**不能**按容器的
+// `EncoderDelay` 再丢一遍」。
 //
-// 那是编码器的预热（MP4 的编辑列表把它记成 `EncoderDelay`），**不属于**呈现
-// 出来的音频。不丢的话，开头会有一声「咔」——而且歌整体早了那一点。
+// # 为什么
 //
-// 断的是**丢掉的数量**：第一个交出来的采样必须正好落在 delay 之后的那一帧。
-func TestTheDecoderDropsTheContainersEncoderDelay(t *testing.T) {
+// AAC 的 MDCT 是有重叠的，**解码器输出的第一帧是「重叠不完整」的冷启动帧**——
+// 它就是编码器的预热，**不在呈现出来的音频里**。解码器自己会吞掉它，所以
+// 解码器的输出**本来就从呈现音频的开头起**。
+//
+// 而 MP4 的编辑列表里还写着 `media_time = 1024`（同一个预热）。**那一条是给
+// 「不知道有解码器会吞它」的解码器用的**——AudioToolbox 和 ffmpeg 都照它剪，
+// 所以它们解出来的东西和参考 WAV 对得上。
+//
+// 我们的解码器（Media Foundation）自己已经吞了那一帧。**再按 `EncoderDelay`
+// 丢一遍就是丢了两遍**：凭空砍掉 1024 个真实采样（23 毫秒），而且比容器说的
+// 呈现长度少 272 个采样——**判据①的下界会因此红**。
+//
+// # 断的是什么
+//
+// 第一个交出来的采样必须**就是解码器交出来的第一帧**（替身给它打的序号是
+// 1，因为第 0 帧被解码器吞了）。要是产品层又丢了一遍，这个序号会变成 2。
+func TestTheDecoderDoesNotDropTheEncoderDelayTwice(t *testing.T) {
 	for _, name := range []string{"aaclc-stereo.m4a", "aaclc-stereo.aac"} {
 		t.Run(name, func(t *testing.T) {
 			d, _ := newTestDecoder(t, name, fakeUnitLen)
-			if d.src.delay == 0 {
-				t.Skip("这份素材没有编码器延迟（裸 ADTS 没有容器，没有延迟可丢）")
-			}
 			got := readAll(t, d)
-			// 第一个采样是原始的第 delay 个采样之后的那一个。
-			want := float32(d.src.delay / fakeUnitLen)
+			// 替身的第 0 帧被解码器吞掉了，所以交出来的第一帧是第 1 帧。
+			const want = 1.0
 			if got[0] != want {
-				t.Errorf("第一个采样 = %v，want %v（编码器延迟 %d 没有被丢掉）",
-					got[0], want, d.src.delay)
+				t.Errorf("第一个采样来自第 %v 帧，want %v——编码器延迟被丢了两遍",
+					got[0], want)
 			}
-			t.Logf("%s：编码器延迟 %d 个采样，丢掉之后第一个采样来自第 %v 帧",
-				name, d.src.delay, got[0])
+			t.Logf("%s：第一个采样来自第 %v 帧（解码器吞掉的是第 0 帧）", name, got[0])
 		})
 	}
 }
@@ -354,5 +383,57 @@ func TestTheContainerIsRecognizedByItsHeader(t *testing.T) {
 			}
 			t.Logf("%s → %q", c.name, got)
 		})
+	}
+}
+
+// TestTheADTSPathDerivesTheSameAudioSpecificConfig 断「ADTS 那一路自己拼出来的
+// AudioSpecificConfig，和 MP4 那一路从容器里读到的**是同一份**」。
+//
+// # 为什么这条重要
+//
+// 两种容器装的是**同一段录音**（同一份 WAV 编出来的），所以它们的
+// AudioSpecificConfig 必须**逐字节相同**——那是解码器的全部输入参数
+// （采样率、声道数、AAC-LC）。
+//
+// 而这两条路的 ASC **来源完全不同**：MP4 那一路是容器里的 `esds` 盒
+// （go-m4a 读出来的），ADTS 那一路是**我们自己从 ADTS 头里拼的**
+// （`ascFromADTS`）。拼错了的话，ADTS 那一路会用错的参数去解码——
+// 症状是「能出声，但不是那首歌」（采样率错 → 变调）。
+//
+// 这条**不需要真解码器**，所以在 macOS 上就能验 ✓。
+func TestTheADTSPathDerivesTheSameAudioSpecificConfig(t *testing.T) {
+	adtsSrc, err := openADTS(bytes.NewReader(readFixture(t, "aaclc-stereo.aac")))
+	if err != nil {
+		t.Fatalf("拆裸 ADTS：%v", err)
+	}
+	m4aSrc, err := openM4A(bytes.NewReader(readFixture(t, "aaclc-stereo.m4a")))
+	if err != nil {
+		t.Fatalf("拆 MP4：%v", err)
+	}
+
+	// ⚠️ **只比前两个字节**：MP4 的 ASC（`esds` 盒里的）在这份素材上是 **5
+	// 字节**——`12 10` 后面还有 3 个字节的扩展信令。ADTS 的头里**没有**扩展
+	// 那一段（ADTS 头的格式里放不下），所以我们拼出来的必然只有 2 字节。
+	//
+	// 那 3 个字节在这份素材上是**不起作用**的（ffprobe 报的是 profile=LC、
+	// 44100 Hz，编码器没用 SBR/PS），所以少给它们不影响解码。
+	// ⚠️ 但这是一件**要记着**的事：**HE-AAC（SBR）在 ADTS 那一路表达不出来**——
+	// 那一档本项目没验过（素材造不出来）。
+	if len(adtsSrc.asc) != 2 {
+		t.Errorf("ADTS 拼出来的 ASC 是 %d 字节（% x），want 2", len(adtsSrc.asc), adtsSrc.asc)
+	}
+	if len(m4aSrc.asc) < 2 || !bytes.Equal(adtsSrc.asc, m4aSrc.asc[:2]) {
+		t.Errorf("ADTS 拼出来的 ASC = % x，MP4 的头两个字节 = % x——核心配置必须一样",
+			adtsSrc.asc, m4aSrc.asc)
+	}
+	t.Logf("ADTS 拼出来的 ASC = % x（%d 字节），MP4 的是 % x（%d 字节，多的 %d 字节是 ADTS 头表达不了的扩展信令）",
+		adtsSrc.asc, len(adtsSrc.asc), m4aSrc.asc, len(m4aSrc.asc), len(m4aSrc.asc)-2)
+
+	if adtsSrc.rate != m4aSrc.rate || adtsSrc.chans != m4aSrc.chans {
+		t.Errorf("ADTS 说 %d Hz / %d 声道，MP4 说 %d Hz / %d 声道",
+			adtsSrc.rate, adtsSrc.chans, m4aSrc.rate, m4aSrc.chans)
+	}
+	if adtsSrc.payloadType != aacPayloadADTS || m4aSrc.payloadType != aacPayloadRaw {
+		t.Errorf("payloadType 不对：ADTS = %d，MP4 = %d", adtsSrc.payloadType, m4aSrc.payloadType)
 	}
 }

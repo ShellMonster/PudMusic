@@ -684,6 +684,9 @@ var Items = []Item{
 			// 认容器那一步：按头几个字节认，而且**不把 MP3 认成 ADTS**
 			//（两者都以 FF 开头，只断同步位的话 MP3 也认得出来）。
 			"TestTheContainerIsRecognizedByItsHeader",
+			// **Media Foundation 的真实原因要进最终那句错**：Windows 上明明有
+			// 系统解码器，只报「这台机器没有系统解码器」是句假话。
+			"TestOpenDecoderSaysWhyMediaFoundationCouldNotDecodeIt",
 		},
 	},
 	{
@@ -711,10 +714,14 @@ var Items = []Item{
 		// **不一样**的：Windows（Media Foundation）用票面定的 0.02，macOS
 		// 用实测出来的 0.1（AudioToolbox 在同一份素材上是 0.070597）。理由写
 		// 在 `internal/service/audio/aac_reference_test.go` 顶上。
-		Spec: "产品这一层解出来的 AAC 与另一个解码器**逐样本**对得上（不是 RMS），帧数落在 176400~178176 之间，左右声道没调换",
+		Spec: "产品这一层解出来的 AAC 与另一个解码器**逐样本**对得上（不是 RMS），帧数落在 176400~178176 之间，左右声道没调换；**两种容器都要比**（只比 .m4a 的话 ADTS 那一路解错了也会通过）",
 		Tests: []string{
 			"TestTheProductPathDecodesAACSampleForSample",
+			"TestTheProductPathDecodesADTSSampleForSample",
 			"TestTheProductPathKeepsTheChannelsInPlace",
+			// ADTS 那一路**自己拼出来的** AudioSpecificConfig，必须和 MP4
+			// 那一路从容器读到的**核心部分**一致（拼错了会变调）。
+			"TestTheADTSPathDerivesTheSameAudioSpecificConfig",
 		},
 	},
 	{
@@ -729,6 +736,21 @@ var Items = []Item{
 		Spec: "产品这一层开口到第一个采样不超过 200 毫秒（不含下载等待）",
 		Tests: []string{
 			"TestTheFirstFrameComesOutFast",
+		},
+	},
+	{
+		Category: Platform,
+		// **编码器延迟不能丢两遍**。AAC 的 MDCT 有重叠，解码器**自己吞掉**它
+		// 输出的第一帧（那一帧是「重叠不完整」的冷启动帧 = 编码器的预热），
+		// 所以解码器的输出**本来就从呈现音频的开头起**。而 MP4 的编辑列表里
+		// 还写着同一个 `media_time = 1024`——那是给「不知道解码器会吞它」的
+		// 解码器用的（AudioToolbox / ffmpeg 都照它剪）。
+		//
+		// 再按 `EncoderDelay` 丢一遍就是**丢了两遍**：凭空砍掉 1024 个真实
+		// 采样（23 毫秒），比容器说的呈现长度少 272 个采样，**判据①会因此红**。
+		Spec: "解码器的输出本来就从呈现音频开头起：产品层不再按 EncoderDelay 丢一遍",
+		Tests: []string{
+			"TestTheDecoderDoesNotDropTheEncoderDelayTwice",
 		},
 	},
 	{

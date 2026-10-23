@@ -70,6 +70,12 @@ const aacRefPath = "mfadec/testdata/aaclc-stereo.ref.wav"
 // aacFixturePath 是被解的那份 .m4a（B 站有损流的形状：MP4 + AAC-LC）。
 const aacFixturePath = "mfadec/testdata/aaclc-stereo.m4a"
 
+// aacFixtureADTSPath 是被解的那份裸 ADTS（.aac）。
+//
+// ⚠️ 它和 `.m4a` 里装的是**同一段录音**（同一份 `stereo16.wav` 编出来的），
+// 所以可以和同一份参考 WAV 比。
+const aacFixtureADTSPath = "mfadec/testdata/aaclc-stereo.aac"
+
 // aacMaxDiffBudget 是「最佳对齐后最大逐样本差」的上限。
 //
 // Windows（Media Foundation）用票面定的 0.02；别的平台用 macOS 实测出来的
@@ -143,6 +149,71 @@ func TestTheProductPathDecodesAACSampleForSample(t *testing.T) {
 		offset, worst, worst*32768, mean)
 	if budget := aacMaxDiffBudget(); worst > budget {
 		t.Errorf("最大逐样本差 %.6f 超过 %.2f——这已经不是两个解码器的正常分歧了", worst, budget)
+	}
+}
+
+// TestTheProductPathDecodesADTSSampleForSample 断「**裸 ADTS** 那一路也要逐样本
+// 对得上」。
+//
+// # 为什么不能只比 .m4a
+//
+// 两种容器走的是**不同的解码器输入**（`MF_MT_AAC_PAYLOAD_TYPE` 的两个取值：
+// 裸 AAC 帧 / 带 ADTS 头），而 ADTS 那一路还要自己从 ADTS 头里拼出
+// AudioSpecificConfig（`ascFromADTS`）。只比 `.m4a` 的话，**ADTS 那一路解错了
+// 也会通过**——这是票面点名的那一条（#253 判据④）。
+//
+// # 参考值是同一份
+//
+// `.aac` 和 `.m4a` 里装的是**同一段录音**（同一份 `stereo16.wav` 编出来的），
+// 所以可以和同一份参考 WAV 比。
+//
+// ⚠️ **两种容器呈现出来的长度不一样**：`.m4a` 有编辑列表（呈现 176400 个采样），
+// `.aac` 没有容器（整条都是），所以长度差 752 个采样——这在两个平台上也一样。
+// 逐样本比对是**对齐之后**比，所以不影响。
+func TestTheProductPathDecodesADTSSampleForSample(t *testing.T) {
+	data, err := os.ReadFile(aacFixtureADTSPath)
+	if err != nil {
+		t.Fatalf("读不到素材 %s：%v", aacFixtureADTSPath, err)
+	}
+
+	d, name, err := openDecoder(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("认不出这个裸 ADTS：%v", err)
+	}
+	defer func() {
+		if c, ok := d.(io.Closer); ok {
+			c.Close()
+		}
+	}()
+	t.Logf("容器名 = %q，%d Hz / %d 声道", name, d.SampleRate(), d.Channels())
+
+	if d.Channels() != 2 {
+		t.Fatalf("解出来 %d 声道，want 2", d.Channels())
+	}
+	if d.SampleRate() != 44100 {
+		t.Fatalf("解出来 %d Hz，want 44100", d.SampleRate())
+	}
+
+	pcm := readAllSamples(t, d)
+	frames := len(pcm) / d.Channels()
+	t.Logf("裸 ADTS 解出来 %d 帧（%.3f 秒）", frames, float64(frames)/float64(d.SampleRate()))
+
+	// 帧数：和 .m4a 那一路同一个区间（裸 ADTS 没有编辑列表，所以它是整条）。
+	const (
+		framesLow  = 176400
+		framesHigh = 178176
+	)
+	if frames < framesLow || frames > framesHigh {
+		t.Errorf("解出 %d 帧，落在 [%d, %d] 之外", frames, framesLow, framesHigh)
+	}
+
+	ref := readReference(t)
+	offset, worst := bestAlignment(pcm, ref)
+	mean := meanAbsDiffFrom(pcm[max(offset, 0):], ref)
+	t.Logf("最佳对齐：裸 ADTS 比参考晚/早 %d 个采样，最大逐样本差 = %.6f（= %.0f 个 16 位量化级），平均逐样本差 = %.6f",
+		offset, worst, worst*32768, mean)
+	if budget := aacMaxDiffBudget(); worst > budget {
+		t.Errorf("最大逐样本差 %.6f 超过 %.2f——这一路解错了", worst, budget)
 	}
 }
 

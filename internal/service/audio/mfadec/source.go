@@ -61,17 +61,17 @@ type frameSource struct {
 	// 只有裸 ADTS 用得上：它没有容器，没有长度可读，而「不知道有多长」在
 	// 界面上的表现是**进度条没有长度**（`Player.Duration()` 返回 0）。
 	measure func() int64
-	// delay 是**开头**要丢掉的采样数（每声道）：编码器的预热。
-	//
-	// 它属于容器（MP4 的编辑列表），不属于码流——所以只有 MP4 那一路有。
-	delay int
 	// next 拿下一帧。
 	next func() ([]byte, error)
 	// seek 把源挪到含第 sample 个采样（每声道，**从呈现出来的音频算起**）的
 	// 那一帧，并报「从那一帧的开头起，要丢掉多少个采样（每声道）」。
 	//
-	// 为什么要「丢掉」而不是「正好落在」：AAC 的 MDCT 有重叠状态，冷启动解
-	// 出来的第一帧是坏的，所以实现会**往回退一帧**再解，把那一帧丢掉。
+	// ⚠️ **「sample」是解码器输出的坐标**，而解码器**吞掉了它输出的第一帧**
+	//（MDCT 重叠不完整的冷启动帧 = 编码器的预热）——所以输出的第 0 个采样在
+	// 码流的第 1 帧里。
+	//
+	// 实现会**往回退一帧**再解：解码器会吞掉**它输出的第一帧**，所以退一帧
+	// 之后它交出来的第一帧正好是目标所在的那一帧（**一退一吞，抵掉**）。
 	seek func(sample int64) (int, error)
 }
 
@@ -150,8 +150,6 @@ func openM4A(r io.ReadSeeker) (*frameSource, error) {
 		unitLen:     unitLen,
 		// 呈现出来的长度：容器的编辑列表已经把编码器的预热算在外面了。
 		total: presentedFrames(info.Duration, info.SampleRate),
-		// 编码器的预热：开头那几百个采样不属于呈现出来的音频。
-		delay: int(info.EncoderDelay),
 		next:  rd.ReadFrame,
 	}
 	src.seek = func(sample int64) (int, error) {
@@ -161,15 +159,20 @@ func openM4A(r io.ReadSeeker) (*frameSource, error) {
 			return 0, fmt.Errorf("mfadec: 跳到第 %d 帧：%w", sample, err)
 		}
 		if idx <= 0 {
-			// 第一帧没有前一帧可以退：MDCT 的重叠状态是冷的，解出来的
-			// 第一帧是坏的。跳到开头只能认这个。
+			// 目标就在第一帧里：没有前一帧可以退。
 			return int(off), nil
 		}
-		// 往回退一帧，让解码器的重叠状态热起来。不退的话每次跳都会「咔」一声。
+		// 往回退一帧：解码器**自己会吞掉**它输出的第一帧（那一帧是 MDCT
+		// 重叠不完整的「冷启动」帧，也就是编码器的预热），所以退一帧之后，
+		// 解码器交出来的第一帧正好是目标所在的那一帧。
+		//
+		// ⚠️ **退一帧 + 解码器吞一帧 = 一帧不多一帧不少**。多退一帧的话，
+		// 跳过去的位置会**早 1024 个采样**（23 毫秒）——肉耳听不出来，
+		// 但拖进度条之后听到的位置和界面上写的差了一拍。
 		if err := rd.SeekSample(idx - 1); err != nil {
 			return 0, fmt.Errorf("mfadec: 跳到第 %d 帧：%w", sample, err)
 		}
-		return unitLen + int(off), nil
+		return int(off), nil
 	}
 	return src, nil
 }
@@ -239,7 +242,13 @@ func (s *adtsSource) measure() int64 {
 	if _, err := s.r.Seek(pos, io.SeekStart); err != nil {
 		return -1
 	}
-	return frames * int64(aacUnitLen)
+	if frames == 0 {
+		return -1
+	}
+	// ⚠️ **减一帧**：解码器**吞掉了它输出的第一帧**（MDCT 重叠不完整的冷启动
+	// 帧 = 编码器的预热），那一帧不属于呈现出来的音频。数帧数的是码流里的帧，
+	// 呈现出来的比它少一帧。
+	return (frames - 1) * int64(aacUnitLen)
 }
 
 // next 拿下一帧。
@@ -264,21 +273,22 @@ func (s *adtsSource) seek(sample int64) (int, error) {
 	if sample < 0 {
 		return 0, fmt.Errorf("mfadec: 跳到第 %d 帧：%w", sample, ErrSeekRange)
 	}
-	unit := int(sample / int64(aacUnitLen))
+	// ⚠️ **「第 sample 个采样」是解码器输出的坐标**，而解码器**吞掉了它输出的
+	// 第一帧**（MDCT 重叠不完整的冷启动帧 = 编码器的预热）。所以输出的第 0 个
+	// 采样在**码流的第 1 帧**里——坐标差一帧。
 	skip := int(sample % int64(aacUnitLen))
+	unit := int(sample/int64(aacUnitLen)) + 1
 	// 拨回开头。
 	if _, err := s.r.Seek(s.start, io.SeekStart); err != nil {
 		return 0, fmt.Errorf("mfadec: 跳到第 %d 帧：%w", sample, err)
 	}
 	s.pend = nil
-	// 停在目标帧的**前一帧**：那一帧解出来是坏的（冷启动），要丢掉。
+	// 停在目标帧的**前一帧**：解码器会吞掉它输出的第一帧（冷启动帧），
+	// 所以退一帧之后，解码器交出来的第一帧正好是目标所在的那一帧。
 	for i := 0; i < unit-1; i++ {
 		if _, _, err := readADTSFrame(s.r); err != nil {
 			return 0, fmt.Errorf("mfadec: 跳到第 %d 帧：%w", sample, err)
 		}
-	}
-	if unit > 0 {
-		skip += aacUnitLen
 	}
 	return skip, nil
 }

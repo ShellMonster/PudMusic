@@ -170,6 +170,13 @@ func openDecoder(r io.ReadSeeker) (mygoaudio.Decoder, string, error) {
 	if !errors.Is(err, mygoaudio.ErrFormat) && !errors.Is(err, extaf.ErrUnsupported) {
 		return nil, "", err
 	}
+	// mfErr 是 Media Foundation 那边的真实原因。
+	//
+	// ⚠️ **它必须进最终那句错**：Windows 上**有**系统解码器（Media
+	// Foundation），只是它解不了这一个文件（比如 E-AC-3、比如 ALAC）。只报
+	// 「这台机器没有系统解码器」的话，用户看到的是一句**假话**——而真实
+	// 原因（「这个 MP4 里不是 AAC」）才是他能拿去做决定的。
+	var mfErr error
 	if errors.Is(err, extaf.ErrUnsupported) {
 		// 这台机器没有 AudioToolbox。Windows 上它有 Media Foundation，
 		// 它解 AAC（B 站有损流、本地 `.m4a`、裸 `.aac`）。
@@ -177,9 +184,11 @@ func openDecoder(r io.ReadSeeker) (mygoaudio.Decoder, string, error) {
 		// ⚠️ 认不出来的时候**不要往下走**：Media Foundation 认不出的 MP4
 		// （比如里面装的是 FLAC）应该交给 `flacdec`，而它和「这不是 AAC」
 		// 是两回事——所以这里只把「成了」当成功。
-		if md, merr := mediaFoundationDecoderOpen(r); merr == nil {
+		md, merr := mediaFoundationDecoderOpen(r)
+		if merr == nil {
 			return md, "aac", nil
 		}
+		mfErr = merr
 	}
 	fd, ferr := flacdec.Open(r)
 	if ferr != nil {
@@ -187,9 +196,15 @@ func openDecoder(r io.ReadSeeker) (mygoaudio.Decoder, string, error) {
 		// 比 flacdec 的那句「不像 FLAC」有用得多——后者会让人以为
 		// 文件损坏，而它可能只是一段还没下到的字节。
 		if errors.Is(err, extaf.ErrUnsupported) {
-			// ⚠️ 这一条要**两句**一起报：「这台机器没有系统解码器」和
-			// 「这也不像 FLAC」。只报一句的话，界面上会出现「文件坏了」这种
-			// **其实不是**的提示——那会把人引到完全错的方向上去查。
+			// ⚠️ 这一条要**三句**一起报：没有 AudioToolbox、Media Foundation
+			// 的真实原因、这也不像 FLAC。
+			//
+			// 只报一句的话，界面上会出现「文件坏了」这种**其实不是**的提示——
+			// 而把 Media Foundation 的原因漏掉更糟：Windows 上明明有系统
+			// 解码器，界面上却说「没有」。
+			if mfErr != nil {
+				return nil, "", fmt.Errorf("%w: %w: %w", extaf.ErrUnsupported, mfErr, ferr)
+			}
 			return nil, "", fmt.Errorf("%w: %w", extaf.ErrUnsupported, ferr)
 		}
 		return nil, "", err
