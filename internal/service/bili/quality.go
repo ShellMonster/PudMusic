@@ -13,6 +13,53 @@
 //
 // 混成一个的后果是：界面上会出现「30280」这种数字，而且「用户选了无损」
 // 和「B 站给了一条 30280」不再是两件事——降级发生时就没法说清降到了什么。
+//
+// # 档位从哪来：id 表是**快照**，不是永恒真理
+//
+// B 站的音质 id 会改。所以这里**不把 id 表当真理**，而是分清两件事：
+//
+//	**类别**（无损 / 杜比）由**字段**决定：`dash.flac` 就是 FLAC，
+//	`dash.dolby` 就是杜比全景声，`dash.audio[]` 才是按 id 分档的有损流。
+//	**档位名**（64K / 128K / 192K / 杜比全景声 / Hi-Res 无损）才查 id 表。
+//
+// 这条分界是本文件最重要的一道防线：查 id 表错了，最坏是**徽章写错**；
+// 而连「这条流是不是无损」都靠 id 猜的话，B 站一改 id，无损流就会挂上
+// 「杜比 Hi-Res」这种完全不相干的标签——票 #255 的症状就是这个。
+//
+// # id 表的出处
+//
+// **公开资料**：社区恢复的接口文档 `docs/video/videostream_url.md`
+// （「视频伴音音质代码」一节。原仓 `SocialSisterYi/bilibili-API-collect` 已于
+// 2026-01 因律师函关停，此处为镜像 `afiuh/bilibili-API-collect`）。
+// 调研报告 `Biu_MyGo/150` §3.1 转引了那张表。那一节**只有五行**（原文照抄）：
+//
+//	30216 = 64K          30232 = 132K        30280 = 192K
+//	30250 = 杜比全景声      30251 = Hi-Res 无损
+//
+// **只读实测**（2026-10-23，票 #255）：只读打 `x/player/playurl`，把 `dash`
+// 三个容器里的 id / codecs / bandwidth 记下来（音乐区排行 ~50 个稿件，外加
+// 几个带杜比的），结果：
+//
+//	容器               id     codecs              bandwidth 实测
+//	dash.audio[]       30216  mp4a.40.2 / 40.5    33K ~ 66K
+//	dash.audio[]       30232  mp4a.40.2            37K ~ 129K
+//	dash.audio[]       30280  mp4a.40.2            75K ~ 231K
+//	dash.dolby.audio[] 30250  ec-3                768K ~ 1024K
+//	dash.flac.audio    30251  fLaC                1609K ~ 1821K
+//
+// 两边**逐档对得上**：实测的 id 与公开资料那一节完全一致，码率也落在那一档的
+// 标称附近（那份文档里的真实响应示例：`30216` 的 `bw=31750`、`30232` 的
+// `bw=76527`、`30280` 的 `bw=155073`）。
+//
+// ⚠️ **30257 / 30259 / 30260 在公开资料里一次都没出现**（那份文档里一次都没有），
+// 它们出自一份互相抄来抄去的二手映射表，而那份表自己内部就矛盾（同一个
+// 30260，一处写 320K、一处写 128K）。留着它们当「已知档位」的话，界面上就
+// 会冒出「杜比 Hi-Res」（票 #255 的症状）。认不出来的 id 一律落到 `Label`
+// 的兜底：按码率说话。
+//
+// ⚠️ **这张表会过期**：B 站加档、改档的时候它就旧了。旧了不要紧——认不出来
+// 的 id 有兜底，不会报错、不会挂错标签。要紧的是**别把某一时点的表当永恒
+// 真理硬编码进去**（那正是本文件以前干的事）。
 
 package bili
 
@@ -35,29 +82,31 @@ const (
 	// QualityLow64 是 64 Kbps。B 站给未登录用户的默认档。
 	QualityLow64 Quality = 30216
 	// QualityMid128 是 128 Kbps。
+	//
+	// ⚠️ B 站标称这一档是 **132K**，我们显示「128K」——那是 AAC-LC 这一档的
+	// 业界通用叫法（B 站自己的播放器上写「标准 132K」）。指的是同一档。
 	QualityMid128 Quality = 30232
-	// QualityHigh320 是 320 Kbps。普通大会员能拿到的最高有损。
-	QualityHigh320 Quality = 30280
+	// QualityHigh192 是 192 Kbps。投稿侧能拿到的**最高的有损档**。
+	//
+	// ⚠️ **投稿侧没有 320K**：320K 是**音乐库**的 `type=2`（`MusicTier320`），
+	// 那是第三套编号（见 `MusicTier`）。这里以前写「320K」，是把两套编号
+	// 混成一套了（票 #255）。
+	QualityHigh192 Quality = 30280
 
-	// QualityDolby 是杜比全景声（`dash.dolby`）。
+	// QualityDolby 是杜比全景声（`dash.dolby`，codecs 是 `ec-3`）。
 	QualityDolby Quality = 30250
-	// QualityDolbyHiRes 是杜比全景声的高解析版（`dash.dolby`）。
-	QualityDolbyHiRes Quality = 30251
-
-	// QualityFLAC 是 FLAC 无损。`dash.flac` 下的 id 有好几个，
-	// 区别是采样率和声道数，不是「是不是 FLAC」——所以它们都归到无损，
-	// 具体是哪一档由码率说出来。
-	QualityFLAC Quality = 30257
-	// QualityFLACHR 是 FLAC 无损（高解析）。
-	QualityFLACHR Quality = 30260
-	// QualityFLACSurround 是 FLAC 无损（环绕声）。
-	QualityFLACSurround Quality = 30259
+	// QualityHiResLossless 是 Hi-Res 无损（`dash.flac`，codecs 是 `fLaC`）。
+	//
+	// ⚠️ 这个 id 以前叫「杜比 Hi-Res」（`QualityDolbyHiRes`）——**那是错的**：
+	// 30251 是**投稿侧的无损流**，和杜比没有关系。挂错了标签、无损判定也跟着
+	// 判错（票 #255）。
+	QualityHiResLossless Quality = 30251
 )
 
 // AudioQuality 是**用户**选的那一档偏好。
 //
 // 界面上给的是这几档，不是 B 站的 id：用户要选的是「无损」还是「省流量」，
-// 「30259」对谁都没有意义。
+// 「30251」对谁都没有意义。
 type AudioQuality int
 
 const (
@@ -70,7 +119,7 @@ const (
 	// AudioLossless 只要无损。拿不到就报错，不要偷偷降到有损——
 	// 用户为无损付了钱，静默降级比报错更糟。
 	AudioLossless
-	// AudioHigh 只要 320K。
+	// AudioHigh 只要 192K（投稿侧最高的有损档）。
 	AudioHigh
 	// AudioMedium 只要 128K。
 	AudioMedium
@@ -98,20 +147,18 @@ func (q AudioQuality) Label() string {
 }
 
 // qualityRank 是「从低到高」的排序键。B 站的 id 本身不是可比的
-// （30257 是无损、30280 是 320K，数字大小和音质无关），所以要另排一张表。
+// （30251 是 Hi-Res 无损、30280 是 192K，数字大小和音质无关），所以要另排
+// 一张表。
 //
 // ⚠️ 表里没有的 id 排在**所有已知档之下**（rank 0），不是中间：
 // 认不出来的档位我们不知道它有多好，宁可当成最低的那档让别的档胜出，
 // 也不要凭 id 的大小猜。
 var qualityRank = map[Quality]int{
-	QualityLow64:        1,
-	QualityMid128:       2,
-	QualityHigh320:      3,
-	QualityDolby:        4,
-	QualityDolbyHiRes:   5,
-	QualityFLAC:         6,
-	QualityFLACHR:       7,
-	QualityFLACSurround: 8,
+	QualityLow64:         1,
+	QualityMid128:        2,
+	QualityHigh192:       3,
+	QualityDolby:         4,
+	QualityHiResLossless: 5,
 }
 
 // Label 是播放条上那个徽章的字。
@@ -119,20 +166,20 @@ var qualityRank = map[Quality]int{
 // bitrate 是这条流的码率（B 站给的 `bandwidth`，单位 bit/s），
 // **只在认不出档位时才用**。
 //
-// ⚠️ 认得出的档位必须用**档位自己的名字**，不能拿码率去算：实测 B 站给
-// 30280（320K）时回的 `bandwidth` 是 110836，算出来是「111K」——那个字段
-// 是这次编码的实际码率，和档位标称的码率对不上（`electron/ipc/download/utils.ts`
-// 里 Biu 自己也是按 id 查表出名字的，没用过 bandwidth）。
+// ⚠️ 认得出的档位必须用**档位自己的名字**，不能拿码率去算：实测 B 站给的
+// `bandwidth` 是**这一次编码的实际码率**，和档位标称的码率对不上——30232
+// （标称 132K）实测落在 37K~129K，30280（标称 192K）实测落在 75K~231K，
+// 同一个档位在不同稿件上能差近一倍。按码率算出来的数字说的不是「这一档」
+// （`electron/ipc/download/utils.ts` 里 Biu 自己也是按 id 查表出名字的，
+// 没用过 bandwidth）。
 func (q Quality) Label(bitrate int) string {
 	switch q {
-	case QualityFLAC, QualityFLACHR, QualityFLACSurround:
-		return "无损 FLAC"
+	case QualityHiResLossless:
+		return "Hi-Res 无损"
 	case QualityDolby:
 		return "杜比全景声"
-	case QualityDolbyHiRes:
-		return "杜比 Hi-Res"
-	case QualityHigh320:
-		return "320K"
+	case QualityHigh192:
+		return "192K"
 	case QualityMid128:
 		return "128K"
 	case QualityLow64:
@@ -147,13 +194,13 @@ func (q Quality) Label(bitrate int) string {
 
 // ChipLabel 是这一档音质在**播放条上**那枚 chip 的字。
 //
-// full 是 `Label` 给的那一串（「无损 FLAC」/「杜比全景声」/「杜比 Hi-Res」/「320K」）。
+// full 是 `Label` 给的那一串（「Hi-Res 无损」/「杜比全景声」/「192K」）。
 //
 // # 为什么要收短
 //
 // 上游播放条上那枚 chip 是**短的**（「无损」/「杜比」，`playbar/left/index.tsx:50-56`
 // 的 `text-[10px]`），而我们那一行字说的是「**B 站给了什么**」——全称在 11px 下
-// 是 52~60 宽（实测「无损 FLAC」52.7、「杜比全景声」54.7、「杜比 Hi-Res」60.6）。
+// 是 52~60 宽（实测「无损 FLAC」52.7、「杜比全景声」54.7、「Hi-Res 无损」60.6）。
 //
 // 播放条上歌名那一行只有 **76** 宽（左边那一列的 244 减去封面 56、两道 8 的缝
 // 和三枚键 96），全称和歌名**挤在一行放不下**：框架在装不下时按**基宽的比例**
@@ -170,7 +217,10 @@ func (q Quality) Label(bitrate int) string {
 // 的码率）。
 func ChipLabel(full string) string {
 	switch {
-	case strings.HasPrefix(full, "无损"):
+	case strings.Contains(full, "无损"):
+		// 「Hi-Res 无损」（投稿那套）和「无损 FLAC」（音乐库那套）都是「无损」。
+		// 用 Contains 而不是 HasPrefix：投稿那套的全称**以「Hi-Res」开头**，
+		// 按前缀收会收不到。
 		return "无损"
 	case strings.HasPrefix(full, "杜比"):
 		return "杜比"
@@ -181,15 +231,18 @@ func ChipLabel(full string) string {
 }
 
 // IsLossless 报告这一档是不是无损 FLAC。
+//
+// 判据是**档位**不是编码名：投稿侧的无损只有 Hi-Res 一档（`dash.flac`）。
 func (q Quality) IsLossless() bool {
-	return q == QualityFLAC || q == QualityFLACHR || q == QualityFLACSurround
+	return q == QualityHiResLossless
 }
 
 // MusicTier 是**B 站音乐库**的音质档，和 `Quality` 是**第三套**编号。
 //
 // 这一套是 `/audio/music-service-c/url` 的 `quality` 请求参数，返回的
 // `data.type` 用的也是它。它和投稿那套 dash id（30216 / 30280 那种）没有任何
-// 关系：两个 `3` 不是一个东西，一个是杜比全景声、一个是 FLAC。所以不并进
+// 关系：投稿侧的 30251 是 Hi-Res 无损，音乐库这里的 `3` 是 FLAC——**两个 3
+// 说的不是同一件事**（投稿侧的 30250 才是杜比全景声）。所以不并进
 // `Quality`——这正是本文件顶上「两套编号，别混」那条规矩，多一套也一样。
 //
 // Biu 上游同样分开处理：`getDashUrl` 用 dash 的 id，`getAudioUrl` 只判
@@ -206,10 +259,11 @@ const (
 
 	// MusicTier128 是 128 Kbps。
 	MusicTier128 MusicTier = 0
-	// MusicTier192 是 192 Kbps。**只有音乐库给得出这一档**，投稿的 dash 流里
-	// 没有对应的 id（那边最低就是 64K，接着跳到 128K）。
+	// MusicTier192 是 192 Kbps。投稿侧也有这一档——那是 `QualityHigh192`
+	// （30280，B 站标称 192K）。
 	MusicTier192 MusicTier = 1
-	// MusicTier320 是 320 Kbps。
+	// MusicTier320 是 320 Kbps。**只有音乐库有这一档**：投稿侧最高的有损
+	// 是 192K（30280），没有 320K（票 #255 把这个搞错过一次）。
 	MusicTier320 MusicTier = 2
 	// MusicTierFLAC 是无损 FLAC，要会员。
 	MusicTierFLAC MusicTier = 3
@@ -253,6 +307,9 @@ func MusicTierFor(pref AudioQuality) MusicTier {
 		return MusicTier128
 	}
 	// 自动档要 **320K，不冒然要无损**。
+	//
+	// ⚠️ 这个 320K 是**音乐库**的 320K（`type=2`）。投稿侧没有 320K——
+	// 那边最高的有损是 192K（`QualityHigh192`）。两套编号，别混。
 	//
 	// B 站对「没权限的那一档」不报错，回的是试听片段（`MusicTierPreview`），
 	// 而这一层拿不到「这个号有没有会员」——所以自动档不去赌那一档，否则
@@ -312,6 +369,8 @@ type dashInfo struct {
 // **先**找 flac，**再**找 dolby，**最后**才在 `dash.audio` 里按档位挑。
 // 不是因为无损更重要，而是 B 站的 `dash.audio` 里**根本不含 FLAC**——
 // 无损只在 `dash.flac` 那个独立字段里。先翻 dash.audio 会永远拿不到无损。
+//
+// 返回的档位按「**字段定类别、id 定档位名**」来（见 `quality.go` 的文件头）。
 func pickAudio(d *dashInfo, pref AudioQuality) (audioStream, Quality, bool) {
 	if d == nil {
 		return audioStream{}, QualityUnknown, false
@@ -325,13 +384,21 @@ func pickAudio(d *dashInfo, pref AudioQuality) (audioStream, Quality, bool) {
 	hasFlac := d.Flac != nil && d.Flac.Audio != nil && d.Flac.Audio.BaseURL != ""
 
 	// 只要无损/自动：先看 flac，再看 dolby。
+	//
+	// ⚠️ 这两条**不盲信流里的 id**：`dash.flac` 就是 FLAC、`dash.dolby` 就是杜比
+	// 全景声——**字段名本身才是权威的**，id 是 B 站的内部编号，而且**改过**：
+	// FLAC 那一档在老资料里是 30257，2026-10-23 实测是 30251。按 id 猜的话，
+	// B 站一改，无损流就会挂上「杜比 Hi-Res」这种完全不相干的标签（票 #255）。
+	//
+	// 有损那几档（`dash.audio[]`）反过来**只能**靠 id：同一个字段里躺着好几档，
+	// 字段名分不出来。
 	if (pref == AudioAuto || pref == AudioLossless) && hasFlac {
 		s := *d.Flac.Audio
-		return s, Quality(s.ID), true
+		return s, QualityHiResLossless, true
 	}
 	if pref == AudioAuto && hasDolby {
 		s := bestOf(dolby)
-		return s, Quality(s.ID), true
+		return s, QualityDolby, true
 	}
 
 	list := sortStreams(playable(d.Audio))
@@ -340,8 +407,8 @@ func pickAudio(d *dashInfo, pref AudioQuality) (audioStream, Quality, bool) {
 		// 到这里还没有无损，而无损是被点名要的：不给。
 		return audioStream{}, QualityUnknown, false
 	case AudioHigh:
-		if s, ok := pickExact(list, QualityHigh320); ok {
-			return s, QualityHigh320, true
+		if s, ok := pickExact(list, QualityHigh192); ok {
+			return s, QualityHigh192, true
 		}
 	case AudioMedium:
 		if s, ok := pickExact(list, QualityMid128); ok {
@@ -355,7 +422,7 @@ func pickAudio(d *dashInfo, pref AudioQuality) (audioStream, Quality, bool) {
 
 	// 点名的档位没有：退到**不高于**它的那一档里最好的（Biu 上游对 high 的
 	// 处理是直接取 sortedList[0]，那对「省流量」是反的——用户为了少流量点了
-	// 64K，拿到 320K，流量翻五倍）。真的一个都没有（比如 B 站只给了 320K），
+	// 64K，拿到 192K，流量翻三倍）。真的一个都没有（比如 B 站只给了 192K），
 	// 退到最低的那一档：宁可少要一档，也不要多给——用户可以再点一次提高。
 	//
 	// 自动档不走这条路：它的意思就是「能给的多好就多好」，直接拿最好的那条。
@@ -374,13 +441,13 @@ func pickAudio(d *dashInfo, pref AudioQuality) (audioStream, Quality, bool) {
 func wantedTier(pref AudioQuality) Quality {
 	switch pref {
 	case AudioHigh:
-		return QualityHigh320
+		return QualityHigh192
 	case AudioMedium:
 		return QualityMid128
 	case AudioLow:
 		return QualityLow64
 	}
-	return QualityHigh320
+	return QualityHigh192
 }
 
 // closestTo 在 list（已按从好到坏排好）里挑最接近 want 的那一档：
@@ -406,7 +473,7 @@ func closestTo(list []audioStream, want Quality) audioStream {
 //
 // 它挡的是**另一种形状**：条目在，`baseUrl` 是空的。自动档会把它当成「有杜比」
 // 挑中它，然后由 `refFrom` 报一句「这个稿件没有音频流」——**而 `dash.audio`
-// 里好好的 320K 就在旁边摆着**。用户看到的是「这一首放不了」，而真因是我们
+// 里好好的 192K 就在旁边摆着**。用户看到的是「这一首放不了」，而真因是我们
 // 挑错了列表里的一条。
 //
 // 一条没有地址的流不是流，这一条不需要理由。
@@ -423,8 +490,12 @@ func playable(in []audioStream) []audioStream {
 // sortStreams 把一批流按「码率高的优先，码率一样时音质 id 高的优先」排。
 //
 // 码率在前面：Biu 上游也是这么排的（`sortAudio` 的第一个比较条件），
-// 而且它比 id 可靠——id 的高低在有损档里跟码率一致，在无损档里却是反的
-// （30257 是最低的无损、30251 是杜比高解析）。
+// 而且它比 id 可靠——id 的高低在有损档里跟码率一致，而 `bandwidth` 是**这一
+// 次编码的实际码率**，同一个档位在不同稿件上能差近一倍（见 `Label` 那一段）。
+//
+// ⚠️ 它只用在**一个字段里躺着好几档**的那两个容器上（`dash.audio[]` 和
+// `dash.dolby.audio[]`）：那种地方字段名分不出档位，只能靠码率和 id 排。
+// `dash.flac` 不走这里——它只有一条，而那一档由**字段**决定（见 `pickAudio`）。
 func sortStreams(in []audioStream) []audioStream {
 	out := make([]audioStream, len(in))
 	copy(out, in)

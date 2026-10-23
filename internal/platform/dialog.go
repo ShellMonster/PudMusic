@@ -16,12 +16,13 @@ import "github.com/egoist/mygo"
 //
 // ⚠️ 末位的「所有文件」必须留着：白名单只是把该看见的摆到前面，不是拦路虎。
 var audioFilters = []mygo.FileFilter{
-	{Name: "音频文件", Extensions: []string{"flac", "m4a", "m4s", "aac", "mp3", "wav", "aiff", "aif", "aifc"}},
+	{Name: "音频文件", Extensions: []string{"flac", "m4a", "m4s", "aac", "mp3", "wav", "ogg", "aiff", "aif", "aifc"}},
 	{Name: "FLAC", Extensions: []string{"flac"}},
 	{Name: "AAC / M4A", Extensions: []string{"m4a", "m4s", "aac"}},
 	{Name: "MP3", Extensions: []string{"mp3"}},
 	{Name: "AIFF", Extensions: []string{"aiff", "aif", "aifc"}},
 	{Name: "WAV", Extensions: []string{"wav"}},
+	{Name: "OGG", Extensions: []string{"ogg"}},
 	{Name: "所有文件", Extensions: []string{"*"}},
 }
 

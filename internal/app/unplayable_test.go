@@ -89,7 +89,7 @@ func TestANetworkFailureIsOfferedARetryThatActuallyWorks(t *testing.T) {
 		}
 		f.servePlayURL(w, r.URL.Query())
 	})
-	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", time.Hour), int(bili.QualityHigh192), 110836))
 	a := newOnlineApp(t, f, t.TempDir())
 
 	if err := a.PlayFrom(onlineItem("BV1MbZnYoEk1", "29165486316", "这一首")); err != nil {
@@ -293,7 +293,7 @@ func TestARetryAfterTheStreamDiesMidwayStartsTheSameSongAgain(t *testing.T) {
 		}
 		writeStreamJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
 			"data": map[string]any{"timelength": 1000,
-				"dash": dashFor(cdnURL(f.URL, name, time.Hour), int(bili.QualityHigh320), 110836)}})
+				"dash": dashFor(cdnURL(f.URL, name, time.Hour), int(bili.QualityHigh192), 110836)}})
 	})
 
 	a := newOnlineApp(t, f, t.TempDir())

@@ -1032,7 +1032,10 @@ func TestTheSmallCopyHasAFixedLineHeight(t *testing.T) {
 		{file: "collectionpage.go", key: "info.Intro", want: "smallCopyLeading"},
 		{file: "collectionpage.go", key: "collectionKindText()", want: "smallCopyLeading"},
 		{file: "collectionpage.go", key: "info.OwnerName", want: "smallCopyLeading"},
-		{file: "downloadlist_ops.go", key: "path", want: "smallCopyLeading"},
+		// ⚠️ **key 是「源码里那一行字长什么样」**：下载记录页头那一行路径以前
+		// 叫 `path`，而没有目录时它换成了一枚按钮，路径那一行直接用 `dir` 了
+		// （报告 C1）。
+		{file: "downloadlist_ops.go", key: "dir", want: "smallCopyLeading"},
 		{file: "localmusic.go", key: "有目录读不到：", want: "smallCopyLeading"},
 		{file: "localmusic.go", key: "这个目录里有我们还放不出的格式（", want: "smallCopyLeading"},
 		{file: "daterange.go", key: "f.summary()", want: "smallCopyLeading"},
