@@ -255,7 +255,26 @@ type List struct {
 // 没有封面的行照画（imgcache 对空地址早返回），所以看到「一部分行挂了、一部分
 // 好好的」就是这个原因。
 func New(cache *imgcache.Cache, acts Actions) *List {
-	return &List{cache: cache, acts: acts, sel: -1}
+	l := &List{cache: cache, acts: acts, sel: -1}
+	// 「↑ 到顶时把焦点交回侧栏」那一档（票 #245 的 E4）。接的是接线里的那份，
+	// 为 nil 时列表到了顶也不管——单独造这个包的测试没有界面层，那种情况下
+	// 「往回走」这件事压根不发生。
+	l.keys.upAtTop = acts.FocusOut
+	return l
+}
+
+// TakeFocus 把键盘焦点接到这张列表上，并把光标放到第一行。
+//
+// ⚠️ **光标放到第一行**：用户是「从侧栏走进内容区」的。进来之后光标停在
+// 「还没选中任何一行」的话，方向键要先按一下才开始挪——进来就停在第一首上，
+// 才是「走进来就在第一首歌上」。
+//
+// ⚠️ **下一帧才生效**：框架的焦点请求是在一帧的末尾统一兑现的。
+func (l *List) TakeFocus() {
+	if len(l.songs) > 0 {
+		l.sel = 0
+	}
+	l.state.Handle.Focus()
 }
 
 // SetSongs 换掉列表里的歌。
@@ -519,6 +538,15 @@ func (l *List) Selected() (Music, bool) {
 // Column（纵向页面）或一个 Grow(1) 配 FillHeight 的 Row（旁边还有东西的页面）里。
 // 直接摆在根上不给高度的话，它会按自己的行数去要高度，几千行直接撑爆窗口。
 func (l *List) View(c *ui.Context) {
+	// 登记自己是「**此刻内容区里是这一个**」：界面层靠它把焦点交进来
+	// （票 #245 的 E4 的「进内容区」）。理由见 focus.go 的文件头。
+	//
+	// ⚠️ **每一帧都登记**：切页、切 Tab 之后登记的就是新那一个——登记的是
+	// 「此刻」，不是「建过」。
+	if l.acts.Focus != nil {
+		l.acts.Focus(l)
+	}
+
 	// 🔴 铁律四：这一行是整个包存在的理由。Key 每一帧都重装，装的是 ID。
 	//
 	// 为什么不装在 New 里：Key 是一个闭包，闭包捕获的是 l.songs 这一个切片

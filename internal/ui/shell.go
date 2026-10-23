@@ -360,6 +360,21 @@ type Shell struct {
 	// 登记的那一份——理由见 `tipFocusBusy`。
 	tipFocusNow  uint64
 	tipFocusPrev uint64
+	// contentFocus 是「内容区里当前那一个能被方向键走位的」。
+	//
+	// **每帧开头清空**，每一帧由各个列表的登记重新填（见 focus.go 的
+	// `registerContentFocus`）。只由界面线程读写（铁律一）。
+	contentFocus focusTarget
+	// focusIntoContent 是「用户要求把焦点交给内容区」。
+	//
+	// 侧栏在 build 的时候收到请求，而内容区**在侧栏之后才画**——所以这里记
+	// 下来，等这一遍画完了再兑现（见 focus.go 的 `applyContentFocus`）。
+	focusIntoContent bool
+	// sideAnchor 是侧栏第一项的焦点句柄（焦点回侧栏时用它）。
+	//
+	// 逐窗口一份：壳是逐窗口的（主窗口、迷你播放器各一个），而框架的
+	// `Handle.Focus` 不传窗口时用的是「唯一绑定着的那个窗口」。
+	sideAnchor ui.Handle
 	// tips 是带延迟的悬停提示的状态（tooltip.go），按元素 ID 记。
 	// **只由界面线程读写**，和上面那几位同一条规矩。
 	tips map[uint64]*tipState
@@ -1206,6 +1221,13 @@ func (s *Shell) View(c *ui.Context) {
 	// 上一遍——指针悬停着的那一枚可能先被 build。
 	s.tipFocusPrev, s.tipFocusNow = s.tipFocusNow, 0
 
+	// 「内容区里当前那一个列表」每帧重新登记：这一遍开头先清空，登记的那几
+	// 个会在这一遍 build 里重新填（见 focus.go 的 `registerContentFocus`）。
+	//
+	// ⚠️ **清空是必须的**：不清的话，切到「这一页没有列表」之后，焦点会被
+	// 交给一个**不在画面上**的列表——用户看不见任何指示，方向键也收不到。
+	s.contentFocus = nil
+
 	// 每帧重新登记：句柄内部是窗口的弱引用，窗口关了自动失效，关掉重开也不用管。
 	s.wake.set(c)
 
@@ -1233,6 +1255,15 @@ func (s *Shell) View(c *ui.Context) {
 		return
 	}
 	s.draw(c)
+
+	// 兑现「把焦点交给内容区」这个请求（票 #245 的 E4）。
+	//
+	// ⚠️ **排在 draw 之后**：内容区在 draw 里画，各张列表的登记也在那儿——
+	// 兑现的时候得已经有「当前那一个列表」可交。
+	//
+	// ⚠️ **每一遍 build 都会走到这里**：兑现一次就把请求清掉（见
+	// `applyContentFocus`），所以只有第一遍真的兑现。
+	s.applyContentFocus()
 }
 
 // guardAt 给一层 view 包 Guard，并记住**它是界面的哪一块**。

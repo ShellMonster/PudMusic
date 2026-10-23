@@ -95,6 +95,16 @@ type KeyboardMode struct {
 	// `started` 才分得出「这一帧从 -1 变成 0」和「一直就是 0」。
 	lastSel int
 	started bool
+
+	// upAtTop 是「键盘往回走、列表已经在顶上一行了」时该做的事。
+	//
+	// 界面层装一个进来：把焦点交回侧栏（票 #245 的 E4）。为 nil 时到顶也不管。
+	//
+	// ⚠️ **判据是 `lastSel`，不是「这一帧的选中行」**：`lastSel` 是**按键之前**
+	// 的那一行（按键事件是在两遍 build 之间处理的，而 `Moved` 要等下一遍 build
+	// 才更新它）。用「这一帧的选中行」的话，从第 2 行按 ↑ 到第 1 行那一下会被
+	// 误判成「已经在顶」——用户还在往上走就被踢出列表了。
+	upAtTop func()
 }
 
 // Input 是给框架的输入回调（`Element.HandleInput`）。
@@ -114,6 +124,18 @@ func (k *KeyboardMode) Input(ev ui.InputEvent) bool {
 		// 那一下不算「键盘在管」——用户按了 ⇧ 而没按别的键，不该冒出一圈环。
 		if ev.Key != ui.KeyUnknown {
 			k.keyboard = true
+		}
+		// 🔴 **↑ 在顶上一行时把焦点交出去**（票 #245 的 E4）。
+		//
+		// 判据是 `lastSel <= 0`：那是**按键之前**的选中行（理由见那个字段的
+		// 注释）。已经在顶上了还按 ↑，那就是「往回走」的意图——把焦点交回侧栏，
+		// 否则键盘用户走到列表顶就再也回不去了。
+		//
+		// ⚠️ **只有 KeyUp 到得了这里**：方向键的 KeyDown 被框架自己的快捷键
+		// 登记截走了（见上面那段注释），只有松开那一下到得了——而松开那一下
+		// 正好是「这次按键结束了」的信号。
+		if ev.Key == ui.KeyUp && k.upAtTop != nil && k.lastSel <= 0 {
+			k.upAtTop()
 		}
 	case ui.InputPointerDown:
 		k.keyboard = false

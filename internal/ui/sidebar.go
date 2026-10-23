@@ -411,6 +411,9 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings, collapsed bool) {
 	cur := s.router.Path()
 	loggedIn := s.app.LoggedIn()
 	hidden := 0
+	// first 是「这一帧第一个画出来的菜单项」——它登记成「焦点回侧栏时落回的那
+	// 一项」（票 #245 的 E4）。理由见下面那一处。
+	first := true
 
 	// ⚠️ Key 给的是包在外面的这一格，不是 Button 本身：`Key` 挂在「创建时
 	// 就处理了输入」的控件上会 panic（`ui/element.go:658`），要给就包一层。
@@ -435,6 +438,16 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings, collapsed bool) {
 				item := s.sideMenuItem(c, rt, rt.Match == cur, collapsed)
 				if item.Clicked() {
 					s.navigate(rt.Match)
+				}
+				// 🔴 **只有第一项登记成「焦点回侧栏时落回的那一项」**
+				// （票 #245 的 E4）：登记是「一个句柄绑一个控件」，而这一帧侧栏
+				// 里画着的菜单项有好几个——全登记的话框架会当场 panic。
+				//
+				// ⚠️ **「第一项」是「第一个画出来的」**：未登录时前面几项被藏起来
+				// （`HideInMenuWhenLoggedOut`），落回的那一项要跟着变。
+				if first {
+					first = false
+					s.sideFocusItem(item)
 				}
 			})
 		}
@@ -480,7 +493,7 @@ func (s *Shell) sideMenuItem(c *ui.Context, rt Route, selected, collapsed bool) 
 		if selected {
 			item = flatCurrent(c, item)
 		}
-		return item
+		return s.sideItemKeys(c, item)
 	}
 	item := flatIconLabelButton(c, name, rt.Title, sideIconSize, sideIconCell)
 	// 选中那一层照上游 HeroUI 的 `variant="flat"` + `color="primary"`
@@ -489,6 +502,28 @@ func (s *Shell) sideMenuItem(c *ui.Context, rt Route, selected, collapsed bool) 
 	// 就是调研点名的「选中整条刷实心绿」（报告 §2 基线 B 标注 3）。
 	if selected {
 		item = flatCurrent(c, item)
+	}
+	return s.sideItemKeys(c, item)
+}
+
+// sideItemKeys 接上侧栏菜单项在键盘上的那件事（票 #245 的 E4）。
+//
+// # ↓ 把焦点交给内容区
+//
+// 焦点停在侧栏这一项上时按 ↓，**内容区那一块收不到**——框架的快捷键按
+// **焦点链**派发（`mygo/ui/input.go` 的 `routeKey`），而侧栏和内容区是兄弟，
+// 内容区不在焦点链上。按钮本身也不吃方向键，于是这一下什么也不发生：键盘
+// 用户 Tab 到侧栏之后就卡住了，得用鼠标点一下内容区才能用方向键。
+//
+// 现在这一项把 ↓ 接过来，转给内容区里当前那一个列表（登记见 focus.go）。
+//
+// ⚠️ **副作用**：焦点在侧栏时 ↓ 不再滚侧栏了。那一档滚动靠的是框架的
+// `scrollKey`（方向键在**焦点链上没有任何控件吃**时才轮到它），而现在这一项
+// 吃了方向键。侧栏要滚的话用滚轮——那一栏本来就窄，滚轮是它主要的方式。
+func (s *Shell) sideItemKeys(c *ui.Context, item ui.Element) ui.Element {
+	// ↓ 交给内容区。
+	if item.Shortcut(0, ui.KeyDown) {
+		s.focusContent()
 	}
 	return item
 }
