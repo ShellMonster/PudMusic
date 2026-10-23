@@ -34,6 +34,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -49,7 +50,7 @@ const (
 	//
 	// ⚠️ **右边那一份是给分集那个把手留的**：那个把手贴在窗口右边（26 宽），
 	// 歌词压到它底下去的话两样叠在一起，谁也读不出来。
-	fullLyricsPadX = 48
+	fullLyricsPadX = space.Px48
 )
 
 // viewFullLyrics 画满屏那一屏的歌词（右边那一列）。
@@ -71,7 +72,7 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, area ui.Rect) {
 
 	ui.Box(c).Key(fullLyricsBoxKey).
 		Absolute().Left(area.X).Top(area.Y).Width(area.W).Height(area.H).
-		Padding(0, fullLyricsPadX).
+		Padding(space.None, fullLyricsPadX).
 		// 名字：读屏软件念得出「满屏歌词」，而无头 Tester 也靠它量这一列的框
 		//（分集面板开着时它必须让开面板——那一条要量它的右沿）。
 		Label("满屏歌词").

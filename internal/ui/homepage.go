@@ -30,6 +30,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -232,7 +233,7 @@ func (s *Shell) syncHome(c *ui.Context) {
 // 都要跑」的副作用，停在画的那一半里就等于停更。
 func (h *homePage) view(c *ui.Context, s *Shell) {
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
-	ui.Column(c).Key("page:"+homePath).Grow(1).Padding(0, pagePadX).Gap(12).
+	ui.Column(c).Key("page:"+homePath).Grow(1).Padding(space.None, pagePadX).Gap(space.Px12).
 		AlignItems(ui.Stretch).Children(func() {
 		h.viewTabs(c)
 

@@ -48,6 +48,7 @@ package ui
 
 import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -79,7 +80,7 @@ func (s *Shell) viewNowPlaying(c *ui.Context, _ *ui.Route) {
 	// 右下角浮着偏移与字号两个旋钮。底下那一层（`service/lyrics` 的解析与缓存、
 	// `app/lyrics` 的切歌先重置 / 偏移字号夹界 / 防抖落盘）负责「哪一句正在唱」
 	// 和「那两个旋钮能走到哪儿」，这一层只画。
-	ui.Column(c).Key("page:mini-player").Grow(1).Padding(28).Gap(12).Children(func() {
+	ui.Column(c).Key("page:mini-player").Grow(1).Padding(space.Px28).Gap(space.Px12).Children(func() {
 		ui.Text(c, st.Title).FontSize(scale.Font(c, 20)).Bold()
 		s.viewLyrics(c, s.app.Lyrics(), st.Position)
 	})

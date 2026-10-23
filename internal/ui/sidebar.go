@@ -18,6 +18,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -290,8 +291,8 @@ func (s *Shell) commitSideWidth() {
 // ≥4.5:1 的变体，深色下原样不动），见 `widgets/ink`。
 func (s *Shell) viewSideBrand(c *ui.Context, collapsed bool) {
 	t := c.Theme()
-	row := ui.Row(c).Key("side-brand").Gap(8).AlignItems(ui.Center).
-		Padding(s.sideBrandTopPad(), 12, 12, 16)
+	row := ui.Row(c).Key("side-brand").Gap(space.Px8).AlignItems(ui.Center).
+		Padding(s.sideBrandTopPad(), space.Px12, space.Px12, space.Px16)
 	if collapsed {
 		// 🔴 **折叠态必须把左右那两格内边距去掉**：侧栏折叠后是 72，而其中
 		// **9 像素是右缘那条把手和分隔线**（8 + 1）——内容区只剩 63。
@@ -301,7 +302,7 @@ func (s *Shell) viewSideBrand(c *ui.Context, collapsed bool) {
 		//
 		// 去掉内边距之后 logo 是**居中**的（和折叠态那一列图标格一样），
 		// 上下对齐。
-		row = row.Padding(s.sideBrandTopPad(), 0, 12, 0).Justify(ui.Center)
+		row = row.Padding(s.sideBrandTopPad(), space.None, space.Px12, space.None).Justify(ui.Center)
 	}
 	row.Children(func() {
 		ui.Image(c, brandLogo()).Size(sideBrandLogo, sideBrandLogo)
@@ -414,7 +415,7 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings, collapsed bool) {
 
 	// ⚠️ Key 给的是包在外面的这一格，不是 Button 本身：`Key` 挂在「创建时
 	// 就处理了输入」的控件上会 panic（`ui/element.go:658`），要给就包一层。
-	ui.Column(c).Key("side-menu").Gap(2).Children(func() {
+	ui.Column(c).Key("side-menu").Gap(space.Px2).Children(func() {
 		for _, rt := range routes {
 			// 设置页「菜单设置」里藏起来的那几项（`hiddenMenuKeys`）不摆。
 			// 这是 Biu 的 `DefaultMenus` 那一支（`side/index.tsx` 的 filter）。
@@ -508,7 +509,7 @@ func (s *Shell) sideMenuItem(c *ui.Context, rt Route, selected, collapsed bool) 
 // 一列扫的，晚 500ms 收会压在下一项上。
 func (s *Shell) sideItemTip(c *ui.Context, anchor ui.Element, text string) {
 	s.tipAt(c, anchor, text, tipMenu, func(panel, anchor ui.Element, t *ui.Theme) {
-		panel.AttachTo(anchor, ui.AnchorRight, ui.AnchorLeft).MarginStart(6)
+		panel.AttachTo(anchor, ui.AnchorRight, ui.AnchorLeft).MarginStart(space.Px6)
 	}, true)
 }
 
@@ -547,7 +548,7 @@ func loggedOutHint(hidden int) string {
 func (s *Shell) viewLoggedOutHint(c *ui.Context, hidden int) {
 	ui.Column(c).Key("side-logged-out").Children(func() {
 		hint := ui.Text(c, loggedOutHint(hidden)).FontSize(scale.Font(c, 12)).Wrap().
-			TextColor(c.Theme().TextMuted).Padding(4, 8).
+			TextColor(c.Theme().TextMuted).Padding(space.Px4, space.Px8).
 			OnClick(func() { s.goLogin() })
 		// 悬停才显出「点得动」：主色 + 下划线。
 		//

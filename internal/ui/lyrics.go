@@ -56,6 +56,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -79,11 +80,11 @@ const (
 	lyricsIdleWeight     = 400 // font-normal
 	lyricsActiveWeight   = 800 // font-extrabold
 	lyricsLineHeight     = 1.375
-	lyricsLineGap        = 8   // `space-y-2`：0.5rem
-	lyricsLinePadY       = 8   // `py-2`：0.5rem
-	lyricsPadX           = 12  // 我们自己加的：上游那一句靠容器边，这里留一点
-	lyricsMaxWidth       = 896 // `max-w-4xl`：56rem
-	lyricsTranslationGap = 4   // `mt-1`：0.25rem
+	lyricsLineGap        = space.Px8  // `space-y-2`：0.5rem
+	lyricsLinePadY       = space.Px8  // `py-2`：0.5rem
+	lyricsPadX           = space.Px12 // 我们自己加的：上游那一句靠容器边，这里留一点
+	lyricsMaxWidth       = 896        // `max-w-4xl`：56rem
+	lyricsTranslationGap = space.Px4  // `mt-1`：0.25rem
 
 	// lyricsTranslationSize 是译文那一行的字号，抄 `index.tsx:344` 的 `text-sm`
 	// （0.875rem = 14px）。**是死的**，不跟着原词那个字号走——上游的
@@ -692,7 +693,7 @@ func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyri
 		// 译文之间的缝会突然比别处大一倍。
 		if row.Translation != "" {
 			ui.Text(c, row.Translation).
-				Margin(lyricsTranslationGap, 0, 0, 0).
+				Margin(lyricsTranslationGap, space.None, space.None, space.None).
 				FontSize(scale.Font(c, lyricsTranslationSize)).
 				FixedLineHeight(lyricsTranslationLineHeight).
 				Opacity(lyricsTranslationOpacity).

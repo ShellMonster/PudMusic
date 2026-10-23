@@ -19,6 +19,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -28,8 +29,8 @@ const (
 	queueRowHeight    = 64
 	queueDrawerWidth  = 384
 	queueCoverSize    = 48
-	queuePadY         = 8
-	queuePadX         = 8
+	queuePadY         = space.Px8
+	queuePadX         = space.Px8
 	queueHeaderHeight = 52
 )
 
@@ -178,7 +179,7 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 	rows := s.queueRows
 
 	ui.Row(c).Key("queue-header").Height(queueHeaderHeight).FillWidth().
-		PaddingY(10).PaddingX(12).Gap(8).AlignItems(ui.Center).Children(func() {
+		PaddingY(space.Px10).PaddingX(space.Px12).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, "播放列表").FontSize(scale.Font(c, 18)).TextColor(t.Text).Grow(1)
 		if len(rows) == 0 {
 			return
@@ -191,12 +192,12 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 		// 播放」「清空」，换成图标之后靠 `Label` 念的还是这两句，而它们同时也是
 		// 无头 Tester 认这两个按钮的唯一凭据（`queue_drawer_test.go` 靠它点）。
 		if s.withTip(c, iconButton(c, iconLocate, "定位当前播放", iconSm).
-			Size(iconHit, iconHit).Padding(0, 9),
+			Size(iconHit, iconHit).Padding(space.None, space.Px9),
 			"把队列滚到正在放的那一首").Clicked() {
 			s.locateCurrent()
 		}
 		if s.withTip(c, iconButton(c, iconDelete, "清空", iconSm).
-			Size(iconHit, iconHit).Padding(0, 9), "清空播放列表").Clicked() {
+			Size(iconHit, iconHit).Padding(space.None, space.Px9), "清空播放列表").Clicked() {
 			s.app.ClearQueue()
 		}
 	})
@@ -213,7 +214,7 @@ func (s *Shell) viewQueueBody(c *ui.Context, t *ui.Theme) {
 	if len(s.queueRows) == 0 {
 		// ⚠️ 那两行走 `emptyCopy`（empty.go），和七个页面的空状态同一份字号、
 		// 同一份主次色。原先这里自己抄了一份 15 / 12——而抄一份就会漂开。
-		ui.Column(c).Key("queue-empty").Grow(1).Center().Padding(20, 16).Children(func() {
+		ui.Column(c).Key("queue-empty").Grow(1).Center().Padding(space.Px20, space.Px16).Children(func() {
 			emptyCopy(c, queueEmpty)
 		})
 		return
@@ -313,7 +314,7 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 	}
 
 	rowEl.Children(func() {
-		ui.Row(c).Grow(1).FillHeight().Gap(8).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Grow(1).FillHeight().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
 			s.viewQueueCover(c, row.item, playing, hovered)
 			// 歌名和来源两行（Biu 的 `space-y-1`，这里 Gap(2)）竖着堆，居中放在
 			// 48 那张封面旁边。
@@ -322,7 +323,7 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 			// `text-base` = 16、来源 `text-sm` = 14——也就是 DESIGN.md 里「列表」
 			// 那一档（歌名 16 / UP 14）。这里原来是 15 / 12，副题比列表行的 UP 名
 			// 还小一档，同一列两种刻度。
-			ui.Column(c).Grow(1).Gap(2).Children(func() {
+			ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
 				ui.Text(c, row.item.Title).FontSize(scale.Font(c, 16)).
 					TextColor(playlistTextColor(t, playing)).SingleLine()
 				// 副题两态一样：次要色。**正在放那一行靠歌名说话**（主色当字），

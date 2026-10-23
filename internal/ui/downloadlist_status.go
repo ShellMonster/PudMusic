@@ -26,6 +26,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -163,8 +164,8 @@ func (d *downloadsPage) viewStatus(c *ui.Context, r download.Snapshot) {
 	// 现在这一句拿整宽（130）：12px 下每行十个字，13 个字折成两行（十 + 三），
 	// 整句都在。
 	if cell.danger {
-		ui.Column(c).FillWidth().Gap(4).Children(func() {
-			ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+		ui.Column(c).FillWidth().Gap(space.Px4).Children(func() {
+			ui.Row(c).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
 				// 条在这一行里**让出百分比那一档**（`Grow(1)` 而不是 `FillWidth`）：
 				// 两样挤在一行，条就短一截，而短的那一截是「下载到哪儿了」。
 				statusBar(c, cell.bar, c.Theme().Danger).Grow(1)
@@ -180,9 +181,9 @@ func (d *downloadsPage) viewStatus(c *ui.Context, r download.Snapshot) {
 		return
 	}
 
-	ui.Column(c).FillWidth().Gap(4).Children(func() {
+	ui.Column(c).FillWidth().Gap(space.Px4).Children(func() {
 		statusBar(c, cell.bar, ui.Hex(dlBarColor)).FillWidth()
-		ui.Row(c).FillWidth().Gap(8).Children(func() {
+		ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
 			// ⚠️ **12 和省略号都照原样**（这一支是「下载中 / 下载暂停 / 交织中」
 			// 那几句短的，省略号实际上不出现）——这一票只动**出错**那一支的排法，
 			// 不顺手改这里的字号。
@@ -218,7 +219,7 @@ const dlPctW = 40
 // `space-x-1`（4px）的缝。
 const (
 	dlDoneIconSize = 16
-	dlDoneGap      = 4
+	dlDoneGap      = space.Px4
 )
 
 // dlBarColor 是进度条涂的那个颜色。

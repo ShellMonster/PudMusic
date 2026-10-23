@@ -51,6 +51,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -66,7 +67,10 @@ const (
 	// 22，所以图形在框里居中、左右各留 5（`viewFullTopBar` 里的 `Padding(0, 5)`）。
 	// 面板默认贴在**点击区**的左沿上，于是它比图形左沿还左 5——看过去就是
 	// 「从按钮底下歪出来一块」（UX 报告 B4 的第三条）。
-	fullSettingsAlignPad = 5
+	//
+	// ⚠️ **值从间距表里取**（`space.Px5`）：满屏那几处的间距都在那张表上
+	// （票 #267 把三百多处字面量收进了一张表），这一处是同一个刻度上的同一档。
+	fullSettingsAlignPad = space.Px5
 )
 
 // MountFullPlayerPrefs 把全屏播放器那份偏好挂到盘上。
@@ -98,7 +102,7 @@ func (s *Shell) viewFullSettings(c *ui.Context) {
 	showLyrics, showSpectrum := prefs.ShowLyrics, prefs.ShowSpectrum
 	showCover, blurred := prefs.ShowCover, prefs.ShowBlurredBackground
 
-	ui.Column(c).Width(320).Padding(16).Gap(16).Children(func() {
+	ui.Column(c).Width(320).Padding(space.Px16).Gap(space.Px16).Children(func() {
 		s.fullSettingsHeader(c)
 		s.fullSwitchRow(c, "显示歌词", &showLyrics, func(on bool) {
 			s.setFullPrefs(func(p *app.FullPlayerPrefs) { p.ShowLyrics = on })
@@ -179,7 +183,7 @@ func (s *Shell) viewFullSettingsPanel(c *ui.Context, panel, gear ui.Element) {
 		AttachTo(gear, ui.AnchorBottomStart, ui.AnchorTopStart).
 		// ⚠️ **Margin 的四个值是「上、右、下、左」**：这里给的是面板与齿轮之间
 		// 那道缝（框架自己那个浮层也留 4，见 `stylePanel`）。
-		Margin(t.Space(1), 0, 0, 0).
+		Margin(t.Space(1), space.None, space.None, space.None).
 		MarginStart(fullSettingsAlignPad).
 		// 面板自己有个名字：读屏软件念得出「全屏设置面板」，而无头 Tester 也
 		// 靠它找这个盒子（对齐那一条要量它的左沿）。
@@ -201,7 +205,7 @@ func (s *Shell) fullSettingsHeader(c *ui.Context) {
 	ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, fullSettingsTitle).FontSize(scale.Font(c, 14)).FontWeight(500)
 		if flatIconButton(c, iconClose, "关闭设置", 16).
-			Size(24, 24).Padding(0, 4).Clicked() {
+			Size(24, 24).Padding(space.None, space.Px4).Clicked() {
 			s.full.settings = false
 		}
 	})
@@ -252,7 +256,7 @@ func (s *Shell) fullColorRow(c *ui.Context, title, hex, fallback string, overrid
 
 	ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, title).FontSize(scale.Font(c, 16)).FontWeight(500)
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
 			if overridden {
 				if flatButton(c, "用默认").FontSize(scale.Font(c, 12)).
 					TextColor(t.TextMuted).Clicked() {

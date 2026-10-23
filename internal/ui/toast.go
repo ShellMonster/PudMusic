@@ -30,6 +30,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -40,7 +41,7 @@ const (
 	//
 	// ⚠️ **90 就是 90**：此前这里是 106（90+16），多出来的那 16 是「右边也留
 	// 16」时顺手一起加的——于是提示比上游高了 16（票 #180 的 G23）。
-	playbarClearance = 90
+	playbarClearance = space.Px90
 
 	// toastWidth 是卡片多宽（上游 `@heroui/theme` 的 toast：356）。
 	//
@@ -51,7 +52,7 @@ const (
 	//
 	// ⚠️ 此前是「上下 12、左右 16」——那是照着别处的卡片抄的，上游那个 toast
 	// 四边都是 12。
-	toastPad = 12
+	toastPad = space.Px12
 
 	// toastFont 是卡片上那行字的字号（上游 `text-sm` = 14）。
 	//
@@ -66,10 +67,10 @@ const (
 	//
 	// ⚠️ 上游是「4~8」（`@heroui/theme` 的 toast 与 `app.tsx:167-175` 的参数
 	// 一起算出来的那一档），取 **8**：宽一点的那一头，靠边一点更像上游。
-	toastRight = 8
+	toastRight = space.Px8
 
 	// toastGap 是两条提示之间的距离（上游那几条之间是 8）。
-	toastGap = 8
+	toastGap = space.Px8
 
 	// toastEnterTime 是入场动画的时长（DESIGN.md「动效」：Toast 入场 250ms；
 	// 上游是 `appearance-in 250ms ease-out`）。
@@ -218,7 +219,7 @@ func (s *Shell) viewToasts(c *ui.Context) {
 			Justify(ui.End).AlignItems(ui.End).Gap(toastGap).
 			// 底边留出播放条的高度（90），右边留 8（上游那一档是 4~8）。
 			// Padding 的四个参数是上、右、下、左，别把 90 写成了右边距。
-			Padding(0, toastRight, playbarClearance, 0).
+			Padding(space.None, toastRight, playbarClearance, space.None).
 			// 空的地方让鼠标穿过去，不然会挡住底下侧栏和播放条的点击。
 			PassThrough().
 			Children(func() {

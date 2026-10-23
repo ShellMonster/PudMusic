@@ -14,6 +14,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -116,7 +117,7 @@ func (s *Shell) viewRateMenu(c *ui.Context) {
 	// 读屏软件念出来的时候该有一个名字；而测试要量它有多宽（60），Tester 找
 	// 元素只认「字」和「名字」（`mygo/ui/headless.go` 的 `Find`）。
 	ui.Column(c).Key("playbar:rate").Label("倍速菜单").
-		Padding(12, 8).Gap(2).Width(rateMenuW).Children(func() {
+		Padding(space.Px12, space.Px8).Gap(space.Px2).Width(rateMenuW).Children(func() {
 		for _, r := range app.RateSteps {
 			// ⚠️ **左右内边距清零**：上游那一列的按钮是 `isIconOnly`（HeroUI 给
 			// 它的就是 `px-0`），而我们那枚扁平按钮左右各留 14——44 减去 28 只剩
@@ -125,7 +126,7 @@ func (s *Shell) viewRateMenu(c *ui.Context) {
 			// ⚠️ **字是 12**（上游 `size="sm"` 的 `text-tiny`）：字大一号，44 宽
 			// 就装不下了。
 			b := flatButton(c, rateLabel(r)).Width(rateBtnW).Radius(4).
-				Padding(t.Space(1.5), 0).FontSize(scale.Font(c, rateMenuFont)).
+				Padding(t.Space(1.5), space.None).FontSize(scale.Font(c, rateMenuFont)).
 				Label("播放速率 " + rateLabel(r))
 			// 选中那一档是**一块实心主色**（上游 `color="primary" variant="solid"`），
 			// 字取 `t.AccentText`（主色底上该有的那一档黑白）。

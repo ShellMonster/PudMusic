@@ -25,13 +25,14 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrollbar"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
 const (
 	// gridGap 是格子之间的间距。Biu 的 `virtual-grid-page-list` 里是
 	// `ROW_GAP = 16`（CSS grid 的 `gap`，横竖一样）。
-	gridGap = 16
+	gridGap = space.Px16
 
 	// gridCoverH 是封面那一块的高。Biu 的 music-card 是 `height={140}`，
 	// 宽度跟着格子走（`width="100%"`）——所以封面不是方的，列数变多它就变窄，
@@ -450,7 +451,7 @@ func (g *Grid) View(c *ui.Context) {
 				}
 				if txt := g.emptyText(); txt != "" {
 					ui.Text(c, txt).FontSize(scale.Font(c, 13)).
-						TextColor(c.Theme().TextMuted).Padding(16)
+						TextColor(c.Theme().TextMuted).Padding(space.Px16)
 				}
 			}
 		}).

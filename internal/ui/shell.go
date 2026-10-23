@@ -19,6 +19,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
@@ -1448,7 +1449,7 @@ func (s *Shell) viewCrash(c *ui.Context) {
 
 	t := c.Theme()
 	cr := s.crash
-	ui.Column(c).Fill().Center().Gap(10).Padding(24).Children(func() {
+	ui.Column(c).Fill().Center().Gap(space.Px10).Padding(space.Px24).Children(func() {
 		// 上游那张 480 宽的插画。它是 `currentColor` 的（见 art/error.svg
 		// 顶上那一段），所以深浅两套主题里它各自是「在这套底色上看得清」的
 		// 那个色——不给它定死颜色是既定行为，和图标那一批同一条理由。
@@ -1458,7 +1459,7 @@ func (s *Shell) viewCrash(c *ui.Context) {
 		ui.Text(c, "界面出错了，播放器已经停在这一页").FontSize(scale.Font(c, 18)).Bold()
 
 		// 「出错在哪一步」这一块：三行，各自说清一件事。
-		ui.Column(c).Key("crash-where").Gap(2).AlignItems(ui.Center).Children(func() {
+		ui.Column(c).Key("crash-where").Gap(space.Px2).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "出错的地方："+cr.where).FontSize(scale.Font(c, 13)).TextColor(t.Text)
 			// 路径和页面名分开两行：用户在地址里看到的是路径，而跟开发者
 			// 说的时候说的是页面名（「下载记录那一页」）。只给一个的话，另一
@@ -1480,7 +1481,7 @@ func (s *Shell) viewCrash(c *ui.Context) {
 
 		ui.Textf(c, "%v", cr.got).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(3)
 		ui.Text(c, "细节已经写进日志。点下面的按钮再试一次。").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
-		ui.Row(c).Gap(10).Justify(ui.Center).Children(func() {
+		ui.Row(c).Gap(space.Px10).Justify(ui.Center).Children(func() {
 			// 反馈是**描边**的那一枚、主操作是实心的那一枚：抄上游的
 			// `components/error-fallback/index.tsx:11-27`（「反馈」描边去
 			// GitHub issues、「回到首页」主色）。

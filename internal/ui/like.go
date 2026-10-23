@@ -33,6 +33,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -302,7 +303,7 @@ func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 	// 一张」就没有钉住的地方了。
 	name := likeIcon(rel.Liked)
 	btn := s.withTip(c, iconKey(c, name, label, iconMd, false).
-		Size(iconHitMd, iconHitMd).Padding(0, 7).TextColor(color),
+		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7).TextColor(color),
 		likeStarTooltip(rel.Liked, s.app.LikeErr() != nil && !s.app.LikeAsked()))
 	if btn.Clicked() {
 		s.app.SetLike(!rel.Liked, func(err error) {

@@ -28,6 +28,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -133,14 +134,14 @@ const (
 // ⚠️ **上边距是 0**（票 #166 的 G40）：上游那一页没有 py，我们此前四周都留
 // 28，于是设置页的内容比别的页、也比上游低一截。上边距单独收掉，左右和下边
 // 仍然是那个数——它是这一栏的内边距，不是页面根的上边距。
-const settingsContentPad = 28
+const settingsContentPad = space.Px28
 
 // settingsGroupGap 是设置分组之间的间距。DESIGN.md 的
 // `spacing.settings_group_gap`：24（上游分节之间那个 `space-y-*` 换算下来的数）。
 //
 // 它同时用在两处：Tab 内容那一层（分组与分组之间），以及页头（标题、只读提示、
 // 主 Tab、内容）那一层。两处此前分别是 18 和 16，各说各的。
-const settingsGroupGap = 24
+const settingsGroupGap = space.SettingsGroupGap
 
 // selectWidth 是下拉框多宽。Biu 是 `w-[180px]`（`system-settings.tsx:164`），
 // 代理那一页是 `w-[240px]`（`proxy-settings.tsx:43`）。
@@ -208,7 +209,7 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 		// 可视区里居中，而可视区不满 900 时它就是满的（`MaxWidth` 是上限）。
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			ui.Column(c).FillWidth().MaxWidth(settingsContentMaxW).
-				Padding(0, settingsContentPad, settingsContentPad, settingsContentPad).
+				Padding(space.None, settingsContentPad, settingsContentPad, settingsContentPad).
 				Gap(settingsGroupGap).Children(func() {
 				ui.Text(c, "设置").FontSize(scale.Font(c, pageTitleSize))
 
@@ -356,7 +357,7 @@ const settingsFocusTries = 3
 // ⚠️ 这一句原来写着「Biu 用的是 `<h2>`」就完了，既没写字号也没写字重，于是这一
 // 组标题在我们这边一路是 16/700：比上游小一档、还粗两档（票 #166 的 G06）。
 func (s *Shell) settingSection(c *ui.Context, title string) {
-	ui.Text(c, title).FontSize(scale.Font(c, 20)).Padding(0, 0, 4, 0)
+	ui.Text(c, title).FontSize(scale.Font(c, 20)).Padding(space.None, space.None, space.Px4, space.None)
 }
 
 // settingSectionEnd 是两组设置之间那条分隔线。Biu 的 `<Divider />`。
@@ -412,7 +413,7 @@ func (s *Shell) settingRowEl(c *ui.Context, title func(), desc string, control f
 // （见 settingsScrollFocusIntoView）。
 func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc string, control func()) {
 	t := c.Theme()
-	row := ui.Row(c).FillWidth().Gap(24).AlignItems(ui.Center)
+	row := ui.Row(c).FillWidth().Gap(space.Px24).AlignItems(ui.Center)
 	if focused {
 		s.settings.focusEl = row
 	}
@@ -449,7 +450,7 @@ func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc s
 func (s *Shell) pickTheme(c *ui.Context, st app.Settings, ro bool) {
 	// ⚠️ 宽度跟着字号缩放走：1.4 倍时四个字要 106 像素，三个各 100 的格子
 	// 装不下，选中项会被裁成「跟随系…」（评审在 1.4 倍下量到过）。
-	ui.Row(c).Key("setting:themeMode").Width(scale.Font(c, segWidth)).Gap(4).Children(func() {
+	ui.Row(c).Key("setting:themeMode").Width(scale.Font(c, segWidth)).Gap(space.Px4).Children(func() {
 		for _, opt := range themeModes {
 			b := flatButton(c, opt.label).Grow(1).Radius(6).Disabled(ro)
 			if opt.mode == st.ThemeMode {
@@ -492,7 +493,7 @@ func (s *Shell) pickSelected(c *ui.Context, b ui.Element, ro bool) ui.Element {
 // pickCloseWindow 是窗口关闭那两档。照 Biu 用的是横排单选（RadioGroup
 // orientation="horizontal"），我们用同一排按钮，选中的那个上主色。
 func (s *Shell) pickCloseWindow(c *ui.Context, st app.Settings, ro bool) {
-	ui.Row(c).Key("setting:closeWindowOption").Width(scale.Font(c, segWidth)).Gap(4).Children(func() {
+	ui.Row(c).Key("setting:closeWindowOption").Width(scale.Font(c, segWidth)).Gap(space.Px4).Children(func() {
 		for _, opt := range closeWindowOptions {
 			b := flatButton(c, opt.label).Grow(1).Radius(6).Disabled(ro)
 			if opt.value == st.CloseWindowOption {

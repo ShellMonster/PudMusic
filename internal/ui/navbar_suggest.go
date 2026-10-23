@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -60,13 +61,13 @@ const (
 	//
 	// 比 chip 那圈大一点：chip 是小圆角的小块，而联想词是**一整行**，行高小一点
 	// 的话指针扫过去时行与行之间几乎没有可停的地方。
-	suggestTermPadY, suggestTermPadX = 5, 8
+	suggestTermPadY, suggestTermPadX = space.Px5, space.Px8
 
 	// suggestTermsGap 是历史那一档和联想词那一档之间留的那一道空隙。
 	//
 	// ⚠️ **只在一档都没少的时候才有**：没有历史可摆时凭空留一道，浮层顶上就是一条
 	// 空边，看着像被切掉了一块。
-	suggestTermsGap = 8
+	suggestTermsGap = space.Px8
 
 	// suggestScrollKey 是面板里那个滚动容器的键（铁律四）。
 	suggestScrollKey = "suggest-scroll"
@@ -77,7 +78,7 @@ const (
 
 	// suggestPanelMargin 是面板底边离屏幕底边留的空白。贴着屏幕底边看起来像被切掉
 	// 了半截。
-	suggestPanelMargin = 12
+	suggestPanelMargin = space.Px12
 
 	// suggestPanelFloor 是面板的最小高度：窗口再矮也不能矮成三四行。
 	suggestPanelFloor = 160
@@ -197,7 +198,7 @@ func (s *Shell) viewSuggestTerms(c *ui.Context) {
 	if len(items) == 0 {
 		return
 	}
-	ui.Column(c).Key(suggestTermsKey).FillWidth().Gap(2).Children(func() {
+	ui.Column(c).Key(suggestTermsKey).FillWidth().Gap(space.Px2).Children(func() {
 		// 标题和「搜索历史」那一句同一个字号和粗细：两栏是平级的，谁也不比谁大。
 		// 两处都是 14/400（上游历史标题是 `text-sm`；联想词这一栏没有标题，
 		// 这一句是我们自己的，跟着它走）。

@@ -17,6 +17,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -87,7 +88,7 @@ func BackToTop(c *ui.Context, offset float32, top func()) {
 		// 也看不出那儿有个按钮。`flat` 去掉的是「常驻的控件底色 + 一圈描边」，
 		// 不是「浮层不能有自己的底」。
 		btn := flat.IconButton(c, backToTopIcon, "返回顶部", backTopGlyph).
-			Padding(0, 0).Size(backTopSize, backTopSize).TextColor(t.Text)
+			Padding(space.None, space.None).Size(backTopSize, backTopSize).TextColor(t.Text)
 		if btn.Absolute().
 			Right(backTopRight).Bottom(backTopBottom).
 			Radius(backTopRadius).Background(t.SurfaceHover).

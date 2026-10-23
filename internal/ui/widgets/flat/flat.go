@@ -27,6 +27,7 @@ package flat
 
 import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -47,9 +48,9 @@ const (
 	//
 	// 差的那 8 是我们和上游的**结构**差别（上游的侧栏内容区有一层 16 的内边距，
 	// 我们没有），不是抄漏了。
-	labelPad = 16
+	labelPad = space.Px16
 	// labelGap 是图标格和文字之间的缝（上游 HeroUI 按钮的 `gap-2`）。
-	labelGap = 8
+	labelGap = space.Px8
 )
 
 // Button 是一个无描边、无常驻底色的按钮，画着 label。
@@ -138,7 +139,7 @@ func IconButtonAccent(c *ui.Context, svg *ui.SVG, label string, font float32, di
 func IconLabelButton(c *ui.Context, svg *ui.SVG, label string, font, cell float32) ui.Element {
 	b := Button(c, "").
 		Height(cell).
-		Padding(0, labelPad).
+		Padding(space.None, labelPad).
 		Gap(labelGap).
 		Radius(c.Theme().Radius).
 		Justify(ui.Start)
@@ -160,7 +161,7 @@ func IconLabelButton(c *ui.Context, svg *ui.SVG, label string, font, cell float3
 // ⚠️ **内边距必须清零**：`Button` 默认给的是 `Padding(6, 14)`，而格子里只有
 // 一枚 font 那么大的图标——14 的内边距会把 40 的格子掏成 12 宽，图标直接被裁。
 func IconCellButton(c *ui.Context, svg *ui.SVG, label string, font, cell float32) ui.Element {
-	b := Button(c, "").Label(label).Size(cell, cell).Padding(0, 0)
+	b := Button(c, "").Label(label).Size(cell, cell).Padding(space.None, space.None)
 	b.Children(func() { ui.Icon(c, svg).FontSize(font) })
 	return b
 }

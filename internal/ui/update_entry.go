@@ -19,6 +19,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -61,7 +62,7 @@ func (s *Shell) updateVersionTitle(c *ui.Context, st app.UpdateState) {
 // 方向都照抄——Biu 那一段是横排的，箭头朝左会读成「版本往回退」。
 func (s *Shell) versionLine(c *ui.Context, key string, size float32, weight int, st app.UpdateState) {
 	t := c.Theme()
-	ui.Row(c).Key(key).Gap(6).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Key(key).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, "当前版本 "+app.VersionLabel(st.Current)).FontSize(scale.Font(c, size)).FontWeight(weight)
 		if st.Available() {
 			ui.Text(c, "→").FontSize(scale.Font(c, size)).TextColor(t.TextMuted)
