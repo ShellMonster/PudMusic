@@ -240,17 +240,20 @@ func (s *Shell) tipAt(c *ui.Context, anchor ui.Element, text string, timing tipT
 
 	// 🔴 **同一时刻只出一枚提示**（票 #245 的 E3）。
 	//
-	// 焦点驱动的提示先登记：别的提示（多半是指针正悬停着的那一枚）据此知道自己
-	// 该让位。登记的是**元素 ID**，所以一枚提示换了一个锚点就是另一枚。
-	if st.focus.shown {
-		s.tipFocusNow = id
-	}
-	// 悬停那一档在「有别的元素拿着焦点那一档的提示」时让位。
+	// ⚠️ **指针优先于键盘焦点**（票 #245 的评审）：焦点那一枚的提示，在**别处**
+	// 有悬停提示时让位——**指针是比键盘焦点更贴近当下操作的信号**：鼠标停在
+	// 「迷你」那一枚上，用户要的就是「迷你」那一句说明，而屏幕上留着「打开文件」
+	// 那一句（焦点还停在那儿）是在讲一件用户当下没在做的事。
 	//
-	// ⚠️ **让位不是永久的**：焦点那一档一收（焦点走到别处去了），悬停的那一枚
-	// 下一帧就回来——指针还停在上面，提示就该在。
-	if st.hover.shown && s.tipFocusBusy() {
-		st.hover.shown = false
+	// ⚠️ **「别处」不含自己**：指针正停在焦点那一枚上时，那一枚的提示两个来源
+	// 都指着它——它当然显示（而且显示的是同一枚）。
+	//
+	// ⚠️ **登记的是元素 ID**：一枚提示换了一个锚点就是另一枚。
+	if st.hover.shown {
+		s.tipHoverNow = id
+	}
+	if st.focus.shown && s.tipHoverBusy(id) {
+		st.focus.shown = false
 	}
 
 	if !st.hover.shown && !st.focus.shown {
@@ -291,22 +294,22 @@ func (s *Shell) tipAt(c *ui.Context, anchor ui.Element, text string, timing tipT
 	return anchor
 }
 
-// tipFocusBusy 报「现在（或刚才那一遍）有一枚元素拿着焦点驱动的提示」。
+// tipHoverBusy 报「**别处**有悬停着的提示」（self 是这一枚自己的元素 ID）。
 //
-// 🔴 **两个都要看**，因为提示是**逐个元素** build 的，而**焦点所在的那一枚
-// 不一定先被 build**：指针正悬停着的那一枚先被 build 时，它看不到「这一遍已经
-// 有焦点提示了」。
+// 🔴 **两个都要看**，因为提示是**逐个元素** build 的，而**指针悬停着的那一枚
+// 不一定先被 build**：焦点所在的那一枚先被 build 时，它看不到「这一遍已经有
+// 悬停提示了」。
 //
 // 「刚才那一遍」那一项靠的是框架的**多遍 build**（`mygo/ui/runtime.go` 的
 // `for pass := 0; pass < 3`）：每一遍的开头都把上一遍登记的那一枚挪到
-// `tipFocusPrev`，于是**真正留在画面上的那一遍**（最后一遍）一定看得见焦点
+// `tipHoverPrev`，于是**真正留在画面上的那一遍**（最后一遍）一定看得见悬停
 // 提示已经登记过了——它是在前面那遍里登记的。
 //
-// ⚠️ 代价是「焦点刚从一枚**没有**提示的元素移进来」的那一遍，悬停的那一枚
-// 还能和焦点的那一枚并存（十几毫秒，肉眼看不见）；而键盘走位走的那一路
-// （焦点一直在带提示的元素之间移动）从第二遍起就只剩一枚。
-func (s *Shell) tipFocusBusy() bool {
-	return s.tipFocusNow != 0 || s.tipFocusPrev != 0
+// ⚠️ 代价是「指针**刚刚**移到别处」的那一遍，焦点那一枚的提示还亮着（十几
+// 毫秒，肉眼看不见）；而「指针停着不动」的那一路从第二遍起就只剩一枚。
+func (s *Shell) tipHoverBusy(self uint64) bool {
+	return (s.tipHoverNow != 0 && s.tipHoverNow != self) ||
+		(s.tipHoverPrev != 0 && s.tipHoverPrev != self)
 }
 
 // tipFrom 是给页面用的入口：页面拿到 `tipFunc`（可能为 nil——单独造这一页的

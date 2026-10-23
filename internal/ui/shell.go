@@ -359,13 +359,13 @@ type Shell struct {
 	searchKeywordFilled bool
 	searchSuggest       bool
 	searchFocused       bool
-	// tipFocusNow / tipFocusPrev 是「正拿着**焦点驱动**的那枚提示」的元素 ID。
+	// tipHoverNow / tipHoverPrev 是「正拿着**悬停驱动**的那枚提示」的元素 ID。
 	//
 	// ⚠️ **每一遍 build 都要挪一次**（见 `Shell.View` 开头）：框架一帧跑好几遍
-	// view，真正留在画面上的是最后一遍，所以「这一遍有没有焦点提示」要问上一遍
-	// 登记的那一份——理由见 `tipFocusBusy`。
-	tipFocusNow  uint64
-	tipFocusPrev uint64
+	// view，真正留在画面上的是最后一遍，所以「这一遍有没有悬停提示」要问上一遍
+	// 登记的那一份——理由见 `tipHoverBusy`。
+	tipHoverNow  uint64
+	tipHoverPrev uint64
 	// contentFocus 是「内容区里当前那一个能被方向键走位的」。
 	//
 	// **每帧开头清空**，每一帧由各个列表的登记重新填（见 focus.go 的
@@ -907,6 +907,11 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	// 只认在线的），所以「收藏」那一项在本地音乐这一页会走「说清楚为什么」
 	// 那一支——那也是对的答案。
 	s.local = newLocalPage(a, s.images, s.listActions(), s.addToast, s.pickDir, s.displayView)
+	// 键盘交接（票 #245 的 E4）：这一页自己画列表（`ui.Table`），所以「登记这一页
+	// 的方向键目标」和「焦点交回侧栏」得自己装进去——理由见 `localPage` 那两个
+	// 字段的注释。
+	s.local.focusSink = s.registerContentFocus
+	s.local.focusSide = s.focusSide
 	s.local.noteScrollbar = s.noteScrollbar
 	s.local.tip = s.tip
 	// 「刚进这一页的第一帧」那一问（框架切页时会把焦点还给离开时有焦点的那个
@@ -1222,12 +1227,12 @@ type crashInfo struct {
 
 // View 画一帧，MyGo 在需要新画面的时候调它。
 func (s *Shell) View(c *ui.Context) {
-	// 提示的「焦点那一枚」登记，每一遍 build 挪一次（理由见 tipFocusBusy）。
+	// 提示的「悬停那一枚」登记，每一遍 build 挪一次（理由见 tipHoverBusy）。
 	//
 	// ⚠️ **挪在每一遍的开头，不是一帧的开头**：框架一帧跑好几遍 view，真正留在
-	// 画面上的是最后一遍，而「焦点提示有没有登记过」这件事在最后那一遍里要问
-	// 上一遍——指针悬停着的那一枚可能先被 build。
-	s.tipFocusPrev, s.tipFocusNow = s.tipFocusNow, 0
+	// 画面上的是最后一遍，而「悬停提示有没有登记过」这件事在最后那一遍里要问
+	// 上一遍——焦点所在的那一枚可能先被 build。
+	s.tipHoverPrev, s.tipHoverNow = s.tipHoverNow, 0
 
 	// 「内容区里当前那一个列表」每帧重新登记：这一遍开头先清空，登记的那几
 	// 个会在这一遍 build 里重新填（见 focus.go 的 `registerContentFocus`）。

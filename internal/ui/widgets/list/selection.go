@@ -100,11 +100,36 @@ type KeyboardMode struct {
 	//
 	// 界面层装一个进来：把焦点交回侧栏（票 #245 的 E4）。为 nil 时到顶也不管。
 	//
-	// ⚠️ **判据是 `lastSel`，不是「这一帧的选中行」**：`lastSel` 是**按键之前**
-	// 的那一行（按键事件是在两遍 build 之间处理的，而 `Moved` 要等下一遍 build
-	// 才更新它）。用「这一帧的选中行」的话，从第 2 行按 ↑ 到第 1 行那一下会被
-	// 误判成「已经在顶」——用户还在往上走就被踢出列表了。
+	// ⚠️ **判据不是「松开时游标在哪」，而是「↑ 到底生效了没有」**（见
+	// `upPressed`）。原因在下面那一段。
 	upAtTop func()
+
+	// upAt 记「**最近一次往上挪**发生在第几遍 build」，-1 是「没有往上挪过」。
+	//
+	// 🔴 **为什么要记「第几遍」**（票 #245 的评审抓到的）：框架的方向键事件在
+	// **两遍 build 之间**送达，而**游标是在 build 之后的 finalizeInputs 里挪的**
+	//（`mygo/ui/list.go` 的 `listInput`→`navigate`）——所以
+	//
+	//	「松开 ↑ 的那一刻」  ≠  「↑ 挪完之后」
+	//
+	// 中间隔着一次 navigate，而两者的先后**不固定**（按键按得久还是按得快，
+	// 决定了 navigate 落在 KeyUp 之前还是之后）。于是「松开时游标在哪」这个
+	// 判据，两种时刻给出的答案**正好相反**——从第 2 行按 ↑，有时被误判成
+	// 「已经在顶上」→ **焦点被甩回侧栏**，而用户明明还想往上走一行。
+	//
+	// 所以判断靠**「挪动」和「按键」隔了几遍**（`upAt` 与 `upKeyAt`）：挪动就
+	// 发生在按键的前一两遍 → **↑ 生效了** → 不交回侧栏；隔得远（或者压根没
+	// 往上挪过）→ **↑ 没生效** → 交回侧栏。
+	upAt int
+
+	// upKeyAt 记「用户按 ↑ 的那一下到了」发生在第几遍 build，-1 是「还没按」。
+	upKeyAt int
+
+	// passes 是「`Moved` 被调过几遍」——一遍 build 一次。
+	//
+	// ⚠️ **它是这一层唯一的「时间坐标」**：方向键事件和游标的挪动**落在不同的
+	// 遍**上（理由见 `upAt`），而「先后」只能靠遍数来比。
+	passes int
 }
 
 // Input 是给框架的输入回调（`Element.HandleInput`）。
@@ -119,24 +144,36 @@ func (k *KeyboardMode) Input(ev ui.InputEvent) bool {
 	switch ev.Kind {
 	case ui.InputKeyDown:
 		k.keyboard = true
+		// ⚠️ **别的键要把那个记号清掉**（理由见 `Input` 里那一段）。
+		if ev.Key != ui.KeyUp {
+			k.upKeyAt = -1
+		}
+
 	case ui.InputKeyUp:
 		// ⚠️ `KeyUnknown` 是修饰键那类（平台只报「修饰键变了」，不报它自己）。
 		// 那一下不算「键盘在管」——用户按了 ⇧ 而没按别的键，不该冒出一圈环。
 		if ev.Key != ui.KeyUnknown {
 			k.keyboard = true
 		}
-		// 🔴 **↑ 在顶上一行时把焦点交出去**（票 #245 的 E4）。
+		// 🔴 **↑ 按过了就记下「在第几遍到的」**（票 #245 的 E4）。
 		//
-		// 判据是 `lastSel <= 0`：那是**按键之前**的选中行（理由见那个字段的
-		// 注释）。已经在顶上了还按 ↑，那就是「往回走」的意图——把焦点交回侧栏，
-		// 否则键盘用户走到列表顶就再也回不去了。
+		// ⚠️ **这里只记，不判**：方向键的 KeyDown 被框架自己的快捷键登记截走了
+		//（见上面那段注释），只有松开那一下到得了——而松开那一下**不一定是
+		// 「这次 ↑ 生效了」的那一刻**（理由见 `upAt` 那一段）。
 		//
-		// ⚠️ **只有 KeyUp 到得了这里**：方向键的 KeyDown 被框架自己的快捷键
-		// 登记截走了（见上面那段注释），只有松开那一下到得了——而松开那一下
-		// 正好是「这次按键结束了」的信号。
-		if ev.Key == ui.KeyUp && k.upAtTop != nil && k.lastSel <= 0 {
-			k.upAtTop()
+		// 「↑ 生效了没有」由后面的 `Moved` 判（它比的是遍数）。
+		if ev.Key == ui.KeyUp {
+			// ⚠️ **只记第一次**：每一遍 build 之后输入都会被投递一次，而「按键到了」
+			// 这件事只有一次（理由见 `upKeyAt`）。
+			if k.upKeyAt < 0 {
+				k.upKeyAt = k.passes
+			}
+		} else {
+			// 别的键：那个记号作废（用户按了 ↑ 又按了别的键，这一次 ↑ 的效果
+			// 就不该由按键来判了）。
+			k.upKeyAt = -1
 		}
+
 	case ui.InputPointerDown:
 		k.keyboard = false
 		k.pointer = true
@@ -152,6 +189,9 @@ func (k *KeyboardMode) Input(ev ui.InputEvent) bool {
 // 是干什么的」只有这一处写着。
 func (k *KeyboardMode) SetUpAtTop(fn func()) { k.upAtTop = fn }
 
+func (k *KeyboardMode) upKeyAtForDebug() int { return k.upKeyAt }
+func (k *KeyboardMode) passesForDebug() int  { return k.passes }
+
 // Moved 报「选中挪到了 sel，而这一挪是键盘挪的」。
 //
 // # 为什么还要看「选中挪没挪」
@@ -165,14 +205,51 @@ func (k *KeyboardMode) SetUpAtTop(fn func()) { k.upAtTop = fn }
 //
 // ⚠️ **每一帧都要调**（画之前）：第一帧之前 `started` 是假，返回假。
 func (k *KeyboardMode) Moved(sel int) bool {
+	k.passes++
 	if !k.started {
 		k.started, k.lastSel = true, sel
+		// 「没有往上挪过」「还没按 ↑」——零值是 0，而 0 也是「第 0 遍」，所以
+		// 这两个要用 -1 才分得出「没有」（理由见 `upAt`）。
+		k.upAt, k.upKeyAt = -1, -1
 		return false
 	}
 	if sel == k.lastSel {
+		// 这一遍游标一动没动。
+		//
+		// 🔴 **「↑ 生效了没有」的结论就在这里**（票 #245 的 E4）：用户按过 ↑
+		//（`upKeyAt >= 0`），而「最近一次往上挪」（`upAt`）**要么没有**、要么
+		// **隔得太远**（不是这一次按键造成的）→ **↑ 确实没生效** → 用户已经在
+		// 顶上，往回走 → 把焦点交回侧栏。
+		//
+		// ⚠️ **而「挪动就发生在按键的前一两遍」→ ↑ 生效了** → **不交回**
+		//（用户还在往上走一行，不是在往回走）。**差一行**就是差在这里。
+		if k.upKeyAt >= 0 {
+			// ⚠️ **判一次就清掉那两个记号**：一次按键只判一次（每一遍 build 之后
+			// 输入都会被投递一次，不清的话下一次按键会沿用上一次的位置）。
+			keyAt, upAt := k.upKeyAt, k.upAt
+			k.upKeyAt, k.upAt = -1, -1
+			// ⚠️ **差值取绝对值**：挪动和按键落在哪一遍，谁先谁后**不固定**
+			//（按键按得快，navigate 就落在按键之后；按得慢，就落在之前）。
+			// 只要**挨得近**（前后两三遍），那就是**这一次 ↑ 的效果**。
+			d := keyAt - upAt
+			if d < 0 {
+				d = -d
+			}
+			if upAt < 0 || d > 2 {
+				// 「↑ 确实没生效」→ 用户已经在顶上，往回走 → 交回侧栏。
+				if k.upAtTop != nil {
+					k.upAtTop()
+				}
+			}
+		}
 		return false
 	}
+	up := sel < k.lastSel
 	k.lastSel = sel
+	if up {
+		// 往上挪了 → 记下「发生在第几遍」（理由见 `upAt`）。
+		k.upAt = k.passes
+	}
 	byPointer := k.pointer
 	k.pointer = false
 	if byPointer {

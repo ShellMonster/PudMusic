@@ -2,6 +2,7 @@ package ui
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -95,6 +96,62 @@ func TestTheArrowKeysWalkBetweenTheSidebarAndTheContent(t *testing.T) {
 	}
 }
 
+// TestTheUpKeyMovesOneRowUpBeforeLeavingTheContent 钉住「↑ 先往上走一行，
+// **到顶了**才交回侧栏」。
+//
+// 🔴 **回归**（票 #245 的评审抓到的）：交接是在按键**松开**那一刻判的，而那时
+// 游标**已经往上挪了一格**——于是「从第 2 行按 ↑」被误判成「已经在顶上」，
+// 焦点被甩回侧栏。**键盘用户在列表里就只剩往下走了，回不去。**
+//
+// ⚠️ **要「按住一帧」再松开**：框架的方向键事件在**两遍 build 之间**送达，
+// 而游标是在 build 之后的 finalizeInputs 里挪的——「立刻松开」和「按一会儿
+// 再松开」走的是不同的路径，**两条都要对**。
+func TestTheUpKeyMovesOneRowUpBeforeLeavingTheContent(t *testing.T) {
+	f := newLibFake(t).withLater(1, 3, "第一首", "第二首", "第三首")
+	fc := &focusCtx{}
+	tt, s := libraryShellOpts(t, f, laterPath, fc.opt())
+	tt.SetFocused(true)
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 3 })
+
+	inSide := func() bool { return s.sideAnchor.Focused(fc.c) }
+	inContent := func() bool { return s.laterPage.rows.state.Handle.Focused(fc.c) }
+
+	s.sideAnchor.Focus()
+	tt.Frame()
+	waitFrames(t, tt, "焦点落到侧栏的第一项上", inSide)
+
+	// ↓：进内容区，游标在第一行。
+	tt.Key(0, mygoui.KeyDown)
+	tt.Frame()
+	waitFrames(t, tt, "焦点走进内容区", inContent)
+	if s.laterPage.rows.sel != 0 {
+		t.Fatalf("走进内容区时游标在第 %d 行，want 第一行", s.laterPage.rows.sel+1)
+	}
+
+	// ↓：第二行。
+	tt.Key(0, mygoui.KeyDown)
+	tt.Frame()
+	waitFrames(t, tt, "游标挪到第二行", func() bool { return s.laterPage.rows.sel == 1 })
+
+	// ↑：**按住一帧**再松开。
+	tt.KeyDown(mygoui.KeyUp)
+	tt.Frame()
+	tt.KeyUp(mygoui.KeyUp)
+	tt.Frame()
+	waitFrames(t, tt, "游标挪回第一行", func() bool { return s.laterPage.rows.sel == 0 })
+	if !inContent() {
+		t.Errorf("从第二行按 ↑ 之后焦点离开了内容区（焦点在侧栏=%v）——"+
+			"↑ 生效了就不该交回侧栏", inSide())
+	}
+
+	// 再 ↑：**已经在顶上了** → 这一次才交回侧栏。
+	tt.KeyDown(mygoui.KeyUp)
+	tt.Frame()
+	tt.KeyUp(mygoui.KeyUp)
+	tt.Frame()
+	waitFrames(t, tt, "在顶上按 ↑ 之后焦点交回侧栏", inSide)
+}
+
 // TestTheArrowKeysWalkOutOfTheSelfDrawnContent 钉住「内容区是**自画列表**的那几页，
 // ↑ 回得到侧栏」。
 //
@@ -147,8 +204,23 @@ func TestTheArrowKeysWalkOutOfTheSelfDrawnContent(t *testing.T) {
 	waitFrames(t, tt, "方向键在内容区里挪到第二行",
 		func() bool { return f.keys.sel == 1 })
 
-	// ↑：回侧栏（键盘用户不能被留在内容区里）。
-	tt.Key(0, mygoui.KeyUp)
+	// ↑：先往上走一行——**焦点要留在内容区**（键盘用户不能只剩往下走）。
+	tt.KeyDown(mygoui.KeyUp)
+	tt.Frame()
+	tt.KeyUp(mygoui.KeyUp)
+	tt.Frame()
+	if f.keys.sel != 0 {
+		t.Errorf("从第二行按 ↑ 之后游标没回到第一行（sel=%d）", f.keys.sel)
+	}
+	if !inContent() {
+		t.Errorf("从第二行按 ↑ 之后焦点离开了内容区（焦点在侧栏=%v）——"+
+			"↑ 生效了就不该交回侧栏", inSide())
+	}
+
+	// 再 ↑：**已经在顶上了** → 这一次才交回侧栏。
+	tt.KeyDown(mygoui.KeyUp)
+	tt.Frame()
+	tt.KeyUp(mygoui.KeyUp)
 	tt.Frame()
 	waitFrames(t, tt, "焦点从内容区回到侧栏", inSide)
 }
@@ -195,19 +267,33 @@ func TestTheListWiringCarriesTheFocusHandover(t *testing.T) {
 //
 // 判据是**源文件里有没有那句登记**：漏写的话这里当场红。
 func TestEveryPageThatDrawsItsOwnListRegistersIt(t *testing.T) {
-	for _, name := range []string{
-		"follow.go", "dynamicfeed.go", "upspace_tabs.go", "library_rows.go",
-	} {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
 		b, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatalf("读不到 %s：%v", name, err)
 		}
-		// 两个登记入口：`s.registerContentFocus`（页面自己画的列表）和
-		// `acts.Focus`（`pagedRows` 那一整份，它拿不到 Shell）。
-		if !strings.Contains(string(b), "registerContentFocus") &&
-			!strings.Contains(string(b), "acts.Focus") {
+		src := string(b)
+		// 没自己画列表的文件不管（它们走 `widgets/list` 那个包，登记在那边）。
+		if !strings.Contains(src, "ui.List(") && !strings.Contains(src, "ui.Table(") {
+			continue
+		}
+		if _, ok := focusNotRegistered[name]; ok {
+			continue
+		}
+		// 三个登记入口：`s.registerContentFocus(...)`、`acts.Focus(...)`（列表包
+		// 自己登记），以及界面层自己画的那些（`p.focusSink(...)`）。
+		if !strings.Contains(src, "registerContentFocus") &&
+			!strings.Contains(src, "acts.Focus") &&
+			!strings.Contains(src, "focusSink") {
 			t.Errorf("%s 自己画了列表，却没有登记它——"+
-				"那一页的方向键进不去内容区（见 focus.go）", name)
+				"那一页的方向键进不去内容区（见 focus.go 的 focusNotRegistered）", name)
 		}
 	}
 }

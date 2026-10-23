@@ -97,41 +97,36 @@ func TestOnlyOneTooltipIsOnScreenWhileTabbing(t *testing.T) {
 }
 
 // TestTheHoveredTooltipGivesWayToTheFocusedOne 钉住「悬停的那一枚和焦点的那一枚
-// 不同时在屏幕上」。
+// TestTheFocusTooltipGivesWayToTheHoveredOne 钉住「**指针悬停的那一枚优先**」。
 //
-// 这是 E3 的另一半：键盘走位时，指针很可能还停在某枚控件上（用户是从鼠标
-// 切到键盘的）。那一枚的**悬停**提示和焦点所在那一枚的**焦点**提示如果同时在，
-// 屏幕上就是两条——而两条叠在一起正是「读不出哪句对哪枚」。
-func TestTheHoveredTooltipGivesWayToTheFocusedOne(t *testing.T) {
+// 🔴 **指针是比键盘焦点更贴近当下操作的信号**（票 #245 的评审）：焦点还停在
+// 顶栏「打开文件」那一枚上，而鼠标移到了「迷你」那一枚——屏幕上要留的是**「迷你」
+// 那一句**（用户当下指着的东西），而不是焦点那一枚的旧说明。
+//
+// ⚠️ **「焦点那一枚」自己也可能是被悬停的** —— 那时两档指的是同一枚，它当然显示。
+func TestTheFocusTooltipGivesWayToTheHoveredOne(t *testing.T) {
 	tt := tipRow(t)
 	tt.SetFocused(true)
 	tt.Frame()
 
-	// 指针停在第一枚上：出的是它的悬停提示。
-	r, ok := tt.Find("第一枚")
+	// 焦点走到第一枚上：它的提示出来。
+	tt.Key(0, ui.KeyTab)
+	tt.Frame()
+	waitFrames(t, tt, "焦点那一枚的提示出来",
+		func() bool { return tt.HasText("提示第一枚") })
+
+	// 指针移到第二枚上：屏幕上留的是「提示第二枚」。
+	r, ok := tt.Find("第二枚")
 	if !ok {
-		t.Fatalf("画面上没有「第一枚」，文字有 %q", tt.Texts())
+		t.Fatalf("画面上没有「第二枚」，文字有 %q", tt.Texts())
 	}
 	tt.Move(r.X+r.W/2, r.Y+r.H/2)
 	tt.Frame()
-	if !tt.HasText("提示第一枚") {
-		t.Fatalf("指针停在第一枚上，它的悬停提示没出来（文字有 %q）", tt.Texts())
-	}
-
-	// 焦点走到第二枚：第一枚的悬停提示让位，第二枚的焦点提示接手。
-	tt.Key(0, ui.KeyTab)
-	tt.Key(0, ui.KeyTab)
-	tt.Frame()
-	if n := countTips(tt); n != 1 {
-		t.Fatalf("焦点在第二枚、指针在第一枚的时候，屏幕上有 %d 条提示（%q）——"+
-			"该只剩一条", n, tt.Texts())
-	}
-	if !tt.HasText("提示第二枚") {
-		t.Errorf("焦点那一枚的提示没出来（文字有 %q）", tt.Texts())
-	}
+	waitFrames(t, tt, "指针那一枚的提示出来",
+		func() bool { return tt.HasText("提示第二枚") })
 	if tt.HasText("提示第一枚") {
-		t.Errorf("指针那一枚的悬停提示还挂在屏幕上（文字有 %q）——"+
-			"它该给焦点那一枚让位", tt.Texts())
+		t.Errorf("焦点那一枚的提示还挂在屏幕上（文字有 %q）——"+
+			"指针那一枚该优先", tt.Texts())
 	}
 }
 

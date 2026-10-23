@@ -32,6 +32,49 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+// localTableFocus 是「本地音乐页的表格那一档」的焦点目标。
+//
+// ⚠️ **它自己管游标**（`sel` 指向本地音乐页那个 `p.sel`），而框架的焦点句柄
+// 是表格元素自己的（`ui.ListState.Handle`）——两者不是同一个 `ListState`，所以
+// 不能直接用 `list.HandleFocus`。
+type localTableFocus struct {
+	h   *ui.Handle
+	sel *int
+}
+
+// TakeFocus 把键盘焦点接到这张表格上，并把游标摆到第一行。
+func (f localTableFocus) TakeFocus() {
+	if f.sel != nil {
+		*f.sel = 0
+	}
+	if f.h != nil {
+		f.h.Focus()
+	}
+}
+
+// focusNotRegistered 是「自己画了列表、但那一张**不是内容区**的列表」的文件。
+//
+// ⚠️ **这是一份「例外」清单**：它列的是**不该登记**的那些，剩下的（凡是自己画了
+// 列表、又不在这份清单里的文件）**都必须登记**。
+//
+// ⚠️ **为什么不能反过来列**（「该登记的那些」）：反过来列的话，**新增一个页面而
+// 忘了登记**，它不在清单里 → 没人管 → 那一页侧栏按 ↓ 进不去内容区。
+// 而「漏登记」的症状是「有的页面进得去、有的进不去」——用户只以为这个应用有时候
+// 键盘不好使。**评审已经在这上面抓到过两回**（我的关注 / 用户动态 / UP 主空间那
+// 几页，还有本地音乐页的表格——它是默认那一档，而清单当时正正好漏着它）。
+var focusNotRegistered = map[string]string{
+	"sidebar_favorites.go": "侧栏里的收藏夹（在侧栏里，不在内容区）",
+	"queue_drawer.go":      "右下角的播放列表抽屉",
+	"partdrawer.go":        "「分 P」那个抽屉",
+	"folderselect.go":      "「放进哪些收藏夹」那个弹窗",
+	"lyricssearch.go":      "歌词搜索那个弹窗",
+	"fullplayer.go":        "满屏播放器",
+	// ⚠️ **下载记录页的表格还没有游标**（`ui.ListState.Selected` 没装），所以方向键
+	// 在它上面**挪不动**——「内容区里能走位的列表」暂时还不包括它。
+	// 而它**确实**是内容区的列表，所以这一条要跟着那张表格装上游标一起撤掉。
+	"downloadlist.go": "下载记录页的表格还没有游标（`Selected` 没装），方向键挪不动它",
+}
+
 // focusTarget 是「能把键盘焦点接过去」的东西。
 //
 // 界面层自己画的那几张列表（不是 `widgets/list` 包里的）用
