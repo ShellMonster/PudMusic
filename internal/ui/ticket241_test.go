@@ -62,12 +62,14 @@ func TestTheTopBarEndsWithTwoLightControls(t *testing.T) {
 			tail := []string{avatarLabel, "登录"}
 
 			inks := map[string]int{}
+			rects := map[string]ui.Rect{}
 			for _, label := range append(append([]string{}, lineIcons...), tail...) {
 				r, ok := tt.Find(label)
 				if !ok {
 					t.Fatalf("顶栏上找不到 %q（文字有 %q）", label, tt.Texts())
 				}
 				inks[label] = inkInRect(tt.Image(), r, bg)
+				rects[label] = r
 			}
 
 			// 四枚线框图标之间没有差别（报告实测 140~152），取它们的最大值当
@@ -78,16 +80,34 @@ func TestTheTopBarEndsWithTwoLightControls(t *testing.T) {
 					tier = inks[label]
 				}
 			}
-			for _, label := range tail {
-				// ⚠️ **上限给到 1.3 倍**：那一档不是「一模一样」（头像有一圈 1 像素
-				// 的描边，四枚线框图标没有），而是「同一档」——报告的原话。实测：
-				// 头像 152~160、那四枚 137~141，也就是 1.08~1.14 倍（那四枚彼此
-				// 之间也有 1.03 倍的差别）。改之前是 608 和 752（4.3 倍 / 5.4 倍）。
-				if inks[label] > tier*13/10 {
-					t.Errorf("%q 的墨迹是 %d 像素，而左边那四枚线框图标是 %d~%d——"+
-						"它比邻居重，用户的眼睛先落在它身上",
-						label, inks[label], inks[lineIcons[0]], tier)
-				}
+			// 头像：和那四枚线框图标**同一档**。
+			//
+			// ⚠️ **上限给到 1.3 倍**：那一档不是「一模一样」（头像有一圈 1 像素的描
+			// 边，四枚线框图标没有），而是「同一档」——报告的原话。实测：头像
+			// 152~160、那四枚 137~141，也就是 1.08~1.14 倍（那四枚彼此之间也有
+			// 1.03 倍的差别）。改之前是 608（4.3 倍）。
+			if inks[avatarLabel] > tier*13/10 {
+				t.Errorf("头像那一格的墨迹是 %d 像素，而左边那四枚线框图标是 %d~%d——"+
+					"它比邻居重，用户的眼睛先落在它身上（框 %v）",
+					inks[avatarLabel], inks[lineIcons[0]], tier, rects[avatarLabel])
+			}
+			// 登录键：**它不是一块实心主色的方块**。
+			//
+			// ⚠️ **这一枚不按「和线框图标同档」量**：它的图形是票 #242 换过的
+			// **二维码**（`Device/qr-code-line.svg`）——二维码本来就是密的一块，
+			// 墨迹（191）比线框图标（137~141）高 1.36 倍。F-16 / F-05 说的是
+			// **那块实心底色**（778，是邻居的 5.4 倍），所以这里断的是「那一格里
+			// 没有主色像素」：图标是前景色画的，没有底。
+			loginRect := rects["登录"]
+			accent := hexColorOf(t, "#1ed760")
+			if n := countPixelsIn(t, tt, int(loginRect.X)-2, int(loginRect.Y)-2,
+				int(loginRect.X+loginRect.W)+2, int(loginRect.Y+loginRect.H)+2, accent); n > 0 {
+				t.Errorf("登录键那一格里有 %d 块主色像素——它不该再是一块实心主色的方块"+
+					"（改之前是 778，是相邻线框图标的 5.4 倍）", n)
+			}
+			if inks["登录"] > tier*2 {
+				t.Errorf("登录键那一格的墨迹是 %d 像素（旁边那四枚是 %d~%d）——"+
+					"它比邻居重太多了", inks["登录"], inks[lineIcons[0]], tier)
 			}
 			t.Logf("四枚线框图标 %v，末两枚 %v", inks, inks)
 		})
