@@ -80,13 +80,22 @@ type StreamRef struct {
 	// Bitrate 是码率（bit/s）。认不出的音质靠它说话。
 	Bitrate int
 
-	// Codecs 是 B 站的编码名（`mp4a.40.2` / `flac` / `mp4a.40.5`）。
+	// Codecs 是 B 站的编码名（`mp4a.40.2` / `fLaC` / `mp4a.40.5`）。
+	//
+	// ⚠️ **实测（2026-10-23，issue #252）：无损那条写的是 `"fLaC"`，
+	// 首字母大写**——`strings.Contains(codecs, "flac")` 对它判不出来。
+	// 素材见 `testdata/lossless/`。
 	//
 	// ⚠️ 它和 Container 都只是**给人看的记录**，播放那一侧不用它们选解码器：
 	// 解码器是按字节流的头几个字节嗅探出来的（`audio.containers.go` 注册的
 	// `????ftyp` / `fLaC`，`audio.OpenStream` 先试 MyGo 的格式表再试 flacdec）。
 	// 换句话说，即使这两个字段填错了，歌照样放得出来——所以别拿它们做判断。
-	Codecs    string
+	Codecs string
+	// Container 是这条流的**容器**名（`mp4` / `m4a` / `flac`）。
+	//
+	// ⚠️ B 站投稿那一路（dash）**一律是 `mp4`**——包括无损那条：
+	// 它是 MP4 盒里的 FLAC，不是裸 FLAC（实测，见 `containerOf`）。
+	// 音乐库那一路（`audio.go` 的 `refFromSongURL`）才是 `flac` / `m4a`。
 	Container string
 
 	// Width / Height 是视频那条流的分辨率（音频流恒为 0）。
@@ -266,7 +275,7 @@ func refFrom(d *playurlData, bvid, cid string, pref AudioQuality) (*StreamRef, e
 		Quality:   q,
 		Bitrate:   s.Bandwidth,
 		Codecs:    s.Codecs,
-		Container: containerOf(s, q),
+		Container: containerOf(s),
 		ExpiresAt: deadlineOf(urls[0]),
 		Bvid:      bvid,
 		Cid:       cid,
@@ -277,20 +286,28 @@ func refFrom(d *playurlData, bvid, cid string, pref AudioQuality) (*StreamRef, e
 
 // containerOf 记下这条流的容器名，**只作记录**。
 //
-// 判据是**编码名**而不是 `mimeType`：B 站的音频 mime 是 `audio/mp4`，
-// 无损那条也是 `audio/mp4`（装 FLAC 的还是 MP4 盒），靠 mime 分不出
-// FLAC 和 AAC。而 `codecs` 里写的是 `flac`。
+// ⚠️ **实测（2026-10-23，issue #252）：B 站 dash 的音频流全都是 MP4 盒**——
+// `dash.audio` 是 AAC in MP4、`dash.dolby` 是 E-AC-3 in MP4、`dash.flac` 是
+// **FLAC in MP4**（头几个字节是 `ftyp` 盒，不是裸 FLAC 的 `fLaC`）。
+// 素材见 `testdata/lossless/`，测试见 `lossless_container_test.go`。
+//
+// 所以判据是 `mimeType` 的子类型，和视频那一路（`videoContainer`）一样：
+// B 站的音频 mime 是 `audio/mp4`，**无损那条也是 `audio/mp4`**。
+//
+// 以前这里是按**编码名**分的，理由写着「靠 mime 分不出 FLAC 和 AAC」——
+// 那是在还不知道「无损那条的容器也是 MP4」的时候写的，那条理由现在不成立：
+// 分不出的是**编码**，而编码在 `Codecs` 字段里（实测值是 `"fLaC"`，
+// 首字母大写）。这里记的是**容器**，两件事本来就不该混在一个字段里。
 //
 // ⚠️ 播放那一侧**不用**这个结果去选解码器——见 `StreamRef.Container` 的
 // 注释：解码器是按头几个字节嗅探的。这里记一份是为了诊断和日志里能一眼
 // 看出「这会儿在放的是 mp4 还是 flac」。
-func containerOf(s audioStream, q Quality) string {
-	if q.IsLossless() || strings.Contains(s.Codecs, "flac") {
-		// `dash.flac.audio` 里可能是裸 FLAC 也可能是 MP4 里的 FLAC，
-		// 两种 `flacdec.Open` 都认（见 flacdec.go 的分支），所以这里
-		// 统一说 flac，让 flacdec 自己判。
-		return "flac"
+func containerOf(s audioStream) string {
+	if i := strings.Index(s.MimeType, "/"); i >= 0 {
+		return s.MimeType[i+1:]
 	}
+	// mimeType 缺了（老接口或者形状变了）：dash 的音频流历来都是 MP4 盒，
+	// 猜成 mp4 不会错。
 	return "mp4"
 }
 

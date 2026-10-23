@@ -125,8 +125,13 @@ func OpenStream(r CloserReadSeeker) (*Player, error) {
 //
 //  1. MyGo 的格式表（`containers.go` 注册的 `????ftyp` / `????styp` / `\xff??`，
 //     加上 MP3 / WAV / AIFF 各自包的注册副作用）。
-//  2. 认不出来就试 `flacdec`——B 站的无损流是**裸 FLAC**，而 MyGo 的表是对
-//     字面量做匹配的，没法给变长的 magic（`fLaC` + STREAMINFO）注册一条。
+//  2. 认不出来就试 `flacdec`——那是**本地裸 `.flac` 文件**的路子，而 MyGo
+//     的表是对字面量做匹配的，没法给变长的 magic（`fLaC` + STREAMINFO）注册一条。
+//
+// ⚠️ **B 站在线的无损流不走这一步**：实测（2026-10-23，issue #252）它的头
+// 16 字节是 `ftyp` 盒（MP4 里的 FLAC），不是裸 FLAC 的 `fLaC`，所以它在
+// 第一步就被 MyGo 的表认成 MP4 了。素材见
+// `internal/service/bili/testdata/lossless/`。
 //
 // 反过来的话，MP4 里的 FLAC（头几个字节是 `ftyp`）会被 flacdec 当裸 FLAC 处理。
 func openDecoder(r io.ReadSeeker) (mygoaudio.Decoder, string, error) {

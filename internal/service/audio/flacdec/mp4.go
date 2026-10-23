@@ -15,6 +15,12 @@ import (
 // whose dfLa FLACSpecificBox holds the STREAMINFO, with one FLAC frame per MP4
 // access unit. This is the shape Bilibili's FLAC audio streams have, and
 // go-m4a is what finds the frames, the sample rate and the edit list.
+//
+// The "Bilibili's FLAC audio streams have" part is **measured**, not assumed
+// (2026-10-23, issue #252): the first 16 bytes of a real `dash.flac.audio`
+// stream are `00 00 00 20 66 74 79 70 69 73 6f 35 00 00 00 01 69 73 6f 35`
+// — a `ftyp` box, not the bare-FLAC `fLaC` marker. The captured bytes and the
+// notes are in `internal/service/bili/testdata/lossless/`.
 type mp4Source struct {
 	rd   *m4a.Reader
 	info m4a.Info

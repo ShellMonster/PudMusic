@@ -115,6 +115,12 @@ func TestPlayURLTakesTheBestAvailable(t *testing.T) {
 // B 站的 `dash.audio` 里**根本不含 FLAC**：无损只在 `dash.flac.audio` 那个
 // 独立字段里。所以这一条既是「优先无损」的规则，也是「不查 flac 就永远拿不到
 // 无损」的提醒——`fnval` 给 16 而不是 4048 的话，这里连字段都没有。
+//
+// ⚠️ 这里的 fixture 是**合成的**：id 用的是 `quality.go` 那张表里的 FLAC id
+// （30257），而 B 站真给的形状是 **id 30251 + codecs `"fLaC"`**（实测，
+// 见 `testdata/lossless/` 与 `lossless_container_test.go`）。真形状那一支
+// 验的是「容器是 MP4」和「解析 + 挑流」，因为**音色标签**那一条
+// （实测 id 30251 在表里被叫成「杜比 Hi-Res」）是另一张票的事，不在这里钉。
 func TestPlayURLPrefersFLAC(t *testing.T) {
 	exp := time.Unix(1702204169+7200, 0)
 	_, c := playurlClient(t, map[string]any{
@@ -124,7 +130,7 @@ func TestPlayURLPrefersFLAC(t *testing.T) {
 		},
 		"flac": map[string]any{
 			"display": true,
-			"audio":   audioItem(30257, 1_400_000, "flac", streamURL(exp, "-flac.flac")),
+			"audio":   audioItem(30257, 1_400_000, "flac", streamURL(exp, "-flac.m4s")),
 		},
 	})
 
@@ -138,8 +144,11 @@ func TestPlayURLPrefersFLAC(t *testing.T) {
 	if ref.Label != "无损 FLAC" {
 		t.Errorf("徽章 = %q，want 无损 FLAC", ref.Label)
 	}
-	if ref.Container != "flac" {
-		t.Errorf("容器 = %q，want flac", ref.Container)
+	// ⚠️ **容器是 MP4，不是裸 FLAC**：实测 B 站的无损流头几个字节是 `ftyp`
+	// 盒（2026-10-23，issue #252）。以前这里写的是 "flac"，那是照着
+	// 「B 站给的是裸 FLAC」那个（没验过的）说法写的。
+	if ref.Container != "mp4" {
+		t.Errorf("容器 = %q，want mp4（实测：B 站的无损流是 MP4 盒里的 FLAC）", ref.Container)
 	}
 }
 
@@ -646,15 +655,17 @@ func TestAPIErrorKeepsItsData(t *testing.T) {
 // TestAgainstTheRealBiliStreamingAPIIsNotCovered 不是测试，是一份**欠账清单**。
 //
 // 上面每一条 fixture 都证明不了「B 站真的这么返回」。真机上验过的是
-// 2026-10-16 未登录状态下打真接口的那一次，记在这里免得下次重新踩。
+// 2026-10-16 未登录状态下打真接口的那一次，加上 2026-10-23 用大会员账号
+// 验的无损流形状（issue #252，素材见 `testdata/lossless/`）——
+// 记在这里免得下次重新踩。
 func TestAgainstTheRealBiliStreamingAPIIsNotCovered(t *testing.T) {
 	t.Log("以下只有 fixture 覆盖，必须真机回归：")
 	t.Log("  1. dash.audio[].id / bandwidth / codecs / mimeType / baseUrl / backupUrl 的真值")
 	t.Log("     —— 实测未登录账号拿到 30216(51651, mp4a.40.5) / 30232(110836) / 30280(110836)")
 	t.Log("  2. fnval=4048 时 dash.flac 才会出现（fnval=16 时整个字段都没有）")
 	t.Log("  3. 地址上的 deadline 是 Unix 秒；实测有效期 2 小时")
-	t.Log("  4. 有大会员时 dash.flac.audio 的 id / 容器是裸 FLAC 还是 MP4 —— **没验过**")
-	t.Log("  5. dash.dolby.audio[0] 在开了杜比之后长什么样 —— **没验过**")
+	t.Log("  4. 有大会员时 dash.flac.audio 的 id / 容器 —— **验过了**（2026-10-23，issue #252：id 30251、codecs \"fLaC\"、容器是 MP4 盒，素材见 testdata/lossless/）")
+	t.Log("  5. dash.dolby.audio[0] —— 实测 id 30250、codecs \"ec-3\"、容器是 MP4 盒（issue #252）；**没验过的是 30251 那一档**（公开资料叫「杜比 Hi-Res」，真接口一次都没给过）")
 	t.Log("  6. playurl 接口带不带 WBI 签名都能通（实测不带也通，本实现仍然签）")
 	t.Log("  7. 多个 P 时不给 cid 会取到第一集，且 code 仍是 0")
 	t.Log("  8. 取到的地址从 CDN 拉要带 Referer（不给直接 403）")
