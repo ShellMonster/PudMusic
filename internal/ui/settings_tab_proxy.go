@@ -55,7 +55,7 @@ func (s *Shell) settingsProxy(c *ui.Context, st app.Settings, ro bool) {
 		chosen := cur.Type
 		ui.Column(c).Width(proxySelectWidth).Children(func() {
 			ui.Text(c, "代理类型").FontSize(scale.Font(c, 16)).FontWeight(weightMedium)
-			enumSelect(c, &chosen, items, "选择代理类型", proxySelectWidth, ro)
+			enumSelect(c, &chosen, items, "选择代理类型", proxySelectWidth, 0, ro)
 		})
 		if chosen != cur.Type {
 			s.applySetting("代理类型", func(s *app.Settings) { s.ProxySettings.Type = chosen })

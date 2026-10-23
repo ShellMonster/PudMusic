@@ -736,7 +736,7 @@ var Items = []Item{
 		// Windows 走 Media Foundation（FLAC 那一档落回 `flacdec`）。而 E-AC-3
 		// 那一档在 Windows 上是**划掉**的（授权限制 + Win11 24H2 移除了系统
 		// 自带的 AC-3 解码器），在 macOS 上 AudioToolbox 却解得了。
-		Spec: "B 站五档音质（64K / 128K / 192K / 杜比全景声 / Hi-Res 无损）在当前平台上逐档真解一遍，解不出来的把原因记下来",
+		Spec:  "B 站五档音质（64K / 128K / 192K / 杜比全景声 / Hi-Res 无损）在当前平台上逐档真解一遍，解不出来的把原因记下来",
 		Tests: []string{"TestTheBilibiliQualityCoverage"},
 	},
 	{
@@ -2646,6 +2646,33 @@ var Items = []Item{
 			// 就是「满屏那一句**要写** `.FontWeight(400)`」——加进去会把那一处判红。
 			// 那一处由上一条（全局白名单）盖着。
 			"TestPageTitlesAreNotBold",
+		},
+	},
+	{
+		// 🔴 **这一族的错法也全是「静默」的**：同一页上两个分段控件长得不一样、
+		// 说明列被挤扁——**没有一样会报错**，界面只是「不精致」。
+		Category: Platform,
+		// 票 #240（审计 F-17 / F-27）：设置页的分段控件归一 + 说明列的最小宽度。
+		//
+		// ⚠️ **那一档是「实心主色底」，不是灰轨 + 白滑块**：框架 `ui.Segmented`
+		// 没有滑块动画，宽度还按内容算（填不满控件列那一格），而「数据显示样式」
+		// 那一格下面就是预览图、选中那张描主色边——见 DESIGN.md §四。
+		Spec: "设置页只有**一种**分段控件：三处分段控件（主题三档 / 数据显示样式三档 / 窗口关闭两档）画法一致——选中的那一档是**实心主色底**，没有灰底轨道；说明列有**最小宽度**：窗口缩到 900（最小尺寸）时它掉不超过 44%，控件列让位而不是把说明挤扁",
+		Tests: []string{
+			// 三处分段控件的**选中档**底色都是实心主色、**没选中的那一档**都是
+			// 页面底色（深浅两套）。
+			"TestTheSettingsPageHasOnlyOneSegmentedControl",
+			// 说明列的宽（默认侧栏 + 1.0 倍字号）与「掉不超过 44%」。
+			"TestTheSettingsDescriptionColumnKeepsItsWidth",
+			// **控件列不会被推出内容区**（七档配置：900 / 1200 / 870 × 默认侧栏 /
+			// 侧栏 480 / 侧栏 320 / 字号 1.4 倍 / 侧栏 480 + 1.4 倍）。
+			// ⚠️ 这一条是评审之后加的：框架的 flex 没有收缩，放不下就是溢出，
+			// 而第一版给说明列的是**无条件**的下限——内容区窄过
+			// 「320 + 24 + 260」时控件列被顶出窗口右缘。
+			"TestTheSettingsControlColumnIsNeverCutOff",
+			// 代理页那个下拉还是 240 宽（上游的 `w-[240px]`）：它不归设置页那一列
+			// 的下限管。
+			"TestTheProxyTypeSelectKeepsItsOwnWidth",
 		},
 	},
 }
