@@ -327,6 +327,11 @@ func (a *App) resolveDownload(ctx context.Context, want download.Identity) (*dow
 		// ⚠️ `ref.Container` 只作记录、播放那一侧不用它选解码器
 		// （`bili.StreamRef.Container` 的注释），但**落盘文件名**用它是对的：
 		// 它记的就是这一段字节的容器，而文件后缀要说的正是这件事。
+		//
+		// ⚠️ B 站投稿那一路**一律**是 `mp4`——**包括无损那条**：实测它就是
+		// MP4 盒里的 FLAC（2026-10-23，issue #252，见
+		// `internal/service/bili/testdata/lossless/`），所以无损下下来是
+		// `.m4a`，不是 `.flac`——而那是对的，后缀说的是容器。
 		Ext: extOfContainer(ref.Container),
 	}, nil
 }

@@ -126,8 +126,8 @@ func OpenStream(r CloserReadSeeker) (*Player, error) {
 //
 //  1. MyGo 的格式表（`containers.go` 注册的 `????ftyp` / `????styp` / `\xff??`，
 //     加上 MP3 / WAV / AIFF 各自包的注册副作用）。
-//  2. 认不出来（`ErrFormat`）就试 `flacdec`——B 站的无损流是**裸 FLAC**，
-//     而 MyGo 的表是对字面量做匹配的，没法给变长的 magic（`fLaC` +
+//  2. 认不出来（`ErrFormat`）就试 `flacdec`——那是**本地裸 `.flac` 文件**的
+//     路子，而 MyGo 的表是对字面量做匹配的，没法给变长的 magic（`fLaC` +
 //     STREAMINFO）注册一条。
 //  3. **平台解码器不可用**（`extaf.ErrUnsupported`）也试 `flacdec`——
 //     Windows 上没有 AudioToolbox，而 `flacdec` 能解 MP4 里的 FLAC
@@ -135,6 +135,11 @@ func OpenStream(r CloserReadSeeker) (*Player, error) {
 //     B 站在线音频**一档都放不出来**：MP4 家族先被格式表认成 mp4，交给
 //     `extaf` 拿到 `ErrUnsupported`，而 `ErrUnsupported` 不是 `ErrFormat`，
 //     于是这里就直接返回错误了。
+//
+// ⚠️ **B 站在线的无损流不走第 2 步**（实测，2026-10-23，issue #252）：它的头
+// 16 字节是 `ftyp` 盒（MP4 里的 FLAC），不是裸 FLAC 的 `fLaC`，所以在第 1 步
+// 就被 MyGo 的表认成 MP4 了。第 2 步管的是**本地裸 `.flac` 文件**。素材见
+// `internal/service/bili/testdata/lossless/`。
 //
 // ⚠️ **只有「平台没有解码器」才落回。** `extaf` 报别的错（文件坏了、
 // AudioToolbox 打不开）时**不落回**：那是「这个文件解不了」，落回只会把它
