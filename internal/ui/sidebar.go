@@ -8,6 +8,7 @@ package ui
 
 import (
 	"runtime"
+
 	"slices"
 	"strconv"
 	"sync"
@@ -99,6 +100,24 @@ func (s *Shell) viewSide(c *ui.Context) {
 	collapsed := s.sideCollapsedVisual(st)
 
 	side := ui.Row(c).Key("side")
+	// 🔴 **方向键的入口在这一层**（票 #245 的 E4）：焦点在侧栏的哪一项上时按 ↓，
+	// 就把焦点交给内容区。
+	//
+	// ⚠️ **为什么绑在容器上而不是每一项上**：容器是**焦点链上的祖先**，所以
+	// 焦点在侧栏里的**任何**一处（菜单项、收藏夹、折叠键），这一下都能被它接住
+	// ——而焦点链是**从内往外**派发的（`mygo/ui/input.go` 的 `routeKey`），所以
+	// **焦点在收藏夹列表上时，方向键先被那个列表接走**（列表要靠方向键挪游标），
+	// 走不到这里。
+	//
+	// ⚠️ **焦点在内容区时更不会误触发**：内容区和侧栏是兄弟，不在一条焦点链上。
+	//
+	// ⚠️ **副作用**：焦点在侧栏时 ↓ 不再滚侧栏了。那一档滚动靠的是框架的
+	// `scrollKey`（方向键在**焦点链上没有任何控件吃**时才轮到它），而现在侧栏
+	// 吃了方向键。侧栏要滚的话用滚轮——那一栏本来就窄，滚轮是它主要的方式。
+	side.Bind(&s.sideHandle)
+	if side.Shortcut(0, ui.KeyDown) {
+		s.focusContent()
+	}
 	// 拖动中不过渡（Biu 的 `transition-none`），松手和折叠才走 200ms。
 	//
 	// ⚠️ 拖动那一支必须先 `Jump`：动画的值还停在上一段动画的终点，不先钉住
@@ -412,6 +431,9 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings, collapsed bool) {
 	cur := s.router.Path()
 	loggedIn := s.app.LoggedIn()
 	hidden := 0
+	// first 是「这一帧第一个画出来的菜单项」——它登记成「焦点回侧栏时落回的那
+	// 一项」（票 #245 的 E4）。理由见下面那一处。
+	first := true
 
 	// ⚠️ Key 给的是包在外面的这一格，不是 Button 本身：`Key` 挂在「创建时
 	// 就处理了输入」的控件上会 panic（`ui/element.go:658`），要给就包一层。
@@ -436,6 +458,16 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings, collapsed bool) {
 				item := s.sideMenuItem(c, rt, rt.Match == cur, collapsed)
 				if item.Clicked() {
 					s.navigate(rt.Match)
+				}
+				// 🔴 **只有第一项登记成「焦点回侧栏时落回的那一项」**
+				// （票 #245 的 E4）：登记是「一个句柄绑一个控件」，而这一帧侧栏
+				// 里画着的菜单项有好几个——全登记的话框架会当场 panic。
+				//
+				// ⚠️ **「第一项」是「第一个画出来的」**：未登录时前面几项被藏起来
+				// （`HideInMenuWhenLoggedOut`），落回的那一项要跟着变。
+				if first {
+					first = false
+					s.sideFocusItem(item)
 				}
 			})
 		}

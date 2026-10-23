@@ -212,6 +212,12 @@ type followPage struct {
 	// ResizeObserver 改 state 再重画是同一个节奏。
 	width float32
 	cols  int
+	// keys 是这一页那张列表的键盘接线（游标 + 「↑ 到顶回侧栏」）。
+	//
+	// ⚠️ **这一页的内容区是裸的 `ui.List`**（卡片是自己画的，走不了
+	// `widgets/list` 那个包），所以游标和那一档回调得自己接——不然方向键在
+	// 内容区里只滚动不选行，而 ↑ 也回不到侧栏（票 #245 的 E4）。
+	keys listKeys
 	// anchorMid 是滚动锚点守着的**那一个 mid**（见文件头「换列数时守住滚动位置」）。
 	anchorMid int64
 	started   bool
@@ -477,6 +483,9 @@ func (s *Shell) viewFollowPane(c *ui.Context, f *followPage) {
 		// ⚠️ Key 挂在外面的 Column 上：List 是自己管状态的控件，事后再挂 key
 		// 会 panic（理由同 `dynamicfeed.go`）。
 		ui.Column(c).Key("follow-pane-list").Grow(1).FillHeight().Children(func() {
+			// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
+			// ⚠️ **分组栏先登记、网格后登记**，于是网格赢——它是这一页的主内容。
+			s.registerContentFocus(list.HandleFocus(&f.paneState.Handle))
 			pane := ui.List(c, &f.paneState, len(f.tags)+1).
 				Grow(1).FillHeight().
 				Rows(func(r ui.ListRow) { s.viewFollowPaneRow(r.Context, f, r.Index) })
@@ -696,7 +705,21 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 
 	// ⚠️ Key 挂在外面的 Column 上，理由见 `dynamicfeed.go`。
 	ui.Column(c).Key("follow-grid").Grow(1).FillHeight().FillWidth().Children(func() {
+		// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
+		// 网格在分组栏**之后**登记，所以它赢——它是这一页的主内容。
+		//
+		// ⚠️ **登记的是 `&f.keys` 而不是裸的句柄**：这一份的 `TakeFocus` 还要
+		// 把游标摆到第一行（走进来就在第一格上）。
+		s.registerContentFocus(&f.keys)
+		// 键盘接线：游标 + 「↑ 到顶回侧栏」（票 #245 的 E4）。
+		f.keys.wire(c, st, s.focusSide)
 		e := ui.List(c, st, n).Grow(1).FillWidth().
+			// ⚠️ **听一听输入**：为了知道「键盘往回走到顶上了」。
+			// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选格、
+			// Tab 换焦点都还在。
+			HandleInput(f.keys.keys.Input).
+			// 焦点环只留在「还没选中任何一行」的时候（和 `widgets/list` 同一档）。
+			FocusRing(f.keys.sel < 0).
 			// ⚠️ **挂上 `ScrollState`**：这一格自己滚（那些卡片是方的，行高跟着内容
 			// 走），而「回到顶部」那一枚要的是**像素**（上游的阈值是 400 像素）。
 			// 这一页**没有 Tab**，列表不会被换掉，所以挂着它不会和行锚点打架
@@ -839,7 +862,7 @@ func (s *Shell) viewFollowCardGuarded(c *ui.Context, f *followPage, i int) {
 			log.Printf("biu: 关注页那张卡画崩了（%d）：%v\n%s", u.Mid, rec, debug.Stack())
 		}
 	}()
-	s.viewFollowCard(c, u)
+	s.viewFollowCard(c, u, f.keys.selectedCell(i, f.cols), f.keys.ring(c))
 }
 
 // viewFollowCard 画一张卡。
@@ -852,7 +875,7 @@ func (s *Shell) viewFollowCardGuarded(c *ui.Context, f *followPage, i int) {
 // `RiVerifiedFill`，而我们的图标资源里**没有那一枚**（这一票补的是界面上一处一处
 // 用得上的那一批，不是一个分类整个搬进来）。`official_verify.desc` 我们已经解出来
 // 了（`bili/follow.go`），摆一行字是最诚实的画法。
-func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser) {
+func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser, selected, ring bool) {
 	t := c.Theme()
 	name := u.Name
 	if name == "" {
@@ -886,6 +909,12 @@ func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser) {
 		AlignItems(ui.Center).Gap(space.Px6).Padding(followCardPad).
 		Background(t.Background).
 		OnClick(func() { s.navigate(upPathOf(u.Mid)) })
+	// 选中那一层：盖掉框架那块实心主色底，键盘走到它上面时给它一圈焦点环
+	//（理由见 `widgets/list/selection.go`）。
+	//
+	// ⚠️ **环落在「格」上而不是「行」上**：这一页是网格，而用户认的是「我选的是
+	// 这张卡」（理由同上面那句「格子的底色跟着这一格自己」）。
+	card = list.SelectedRow(card, t, selected, card.Hovered(), ring)
 	card = shadow.HeroMedium(card, t)
 	if card.Hovered() {
 		card = card.Background(t.Surface)

@@ -245,6 +245,19 @@ type localPage struct {
 	// 放着不管，下一帧就又画上实心主色底了。
 	tableSel ui.Selection[string]
 
+	// focusSink 是「登记这一页的方向键目标」的地方（界面层装进来）。
+	//
+	// ⚠️ **这一页自己画列表**（`ui.Table`，不走 `widgets/list` 那个包），所以
+	// 登记得自己写一遍——漏了的话「侧栏按 ↓ 进不去这一页」（票 #245 的评审抓到
+	// 过一回：本地音乐页的表格是**默认那一档**，而它当时没登记）。
+	focusSink func(focusTarget)
+
+	// focusSide 是「把焦点交回侧栏」的动作（界面层装进来）。
+	//
+	// ⚠️ **↑ 在顶上一行时**用（票 #245 的 E4）：内容区里的列表走到顶，用户还
+	// 想往上走 → 焦点交回侧栏。
+	focusSide func()
+
 	// cards 是「歌曲」那一档的控件（`widgets/list` 的 `SwitchView`：列表 / 紧凑 /
 	// 网格三个摆法在它里面分发，见文件头那一段）。它自己记着滚动位置，所以建一次
 	// 存着。
@@ -744,6 +757,21 @@ func (p *localPage) viewTable(c *ui.Context, t *ui.Theme) {
 	// ⚠️ **先清空它**：框架点一行时会往里面放那一份（`f.choose`），放着不管下一帧
 	// 就又画上实心主色底了。
 	p.tableSel.Clear()
+
+	// 🔴 **键盘交接**（票 #245 的 E4）：
+	//
+	//   - **↑ 在顶上一行时**把焦点交回侧栏（否则键盘用户被留在内容区里）。
+	//   - **登记这一页的方向键目标**：侧栏按 ↓ 走进来，走的是这一张表格。
+	//
+	// ⚠️ **这一页的表格是默认那一档**（`localStyles` 那段：「表格是默认那一档」，
+	// 因为它是 Biu 那一页的本体）——所以它没登记的话，**侧栏按 ↓ 在这一页上什么
+	// 也不发生**。
+	if p.focusSide != nil {
+		p.keys.SetUpAtTop(p.focusSide)
+	}
+	if p.focusSink != nil {
+		p.focusSink(localTableFocus{&p.table.Handle, &p.sel})
+	}
 
 	// 外面这一层是「表格的那一块」：`PointerPosition` 拿它判指针在不在表里
 	//（见 tableBox 的注释）。它自己什么也不画，尺寸跟着里面的表格走。
