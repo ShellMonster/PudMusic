@@ -955,7 +955,7 @@ func (s *Shell) viewFollowActions(c *ui.Context, u bili.FollowUser, shown float3
 			Background(t.Background).Border(1, t.Border))
 		bar.Children(func() {
 			if flatButton(c, "取消关注").FontSize(scale.Font(c, 13)).
-				TextColor(t.Danger).Clicked() {
+				TextColor(dangerText(t)).Clicked() {
 				s.unfollowFromFollowCard(u)
 			}
 		})

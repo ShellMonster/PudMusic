@@ -53,7 +53,7 @@ func (s *Shell) settingsShortcuts(c *ui.Context) {
 
 		if ro {
 			ui.Text(c, "快捷键只读：这份文件来自更新的版本，这一版一个字都不会写回去。").
-				FontSize(scale.Font(c, 12)).TextColor(t.Danger)
+				FontSize(scale.Font(c, 12)).TextColor(dangerText(t))
 		}
 		// 这一页两列分别管两件事，写出来，不然用户会以为「全局」那一列只是应用内
 		// 那一列的备份。挂掉的时候另有提示（syncGlobalShortcuts 弹的那一句），
@@ -134,7 +134,7 @@ func (s *Shell) recorderCell(c *ui.Context, item shortcutItem, slot shortcutSlot
 	ui.Column(c).Width(shortcutFieldWidth).Gap(space.Px2).Children(func() {
 		rec = s.shortcutRecorder(c, item, slot, conflict, ro)
 		if conflict != "" {
-			ui.Text(c, conflict).FontSize(scale.Font(c, 11)).TextColor(c.Theme().Danger)
+			ui.Text(c, conflict).FontSize(scale.Font(c, 11)).TextColor(dangerText(c.Theme()))
 		}
 	})
 	return rec

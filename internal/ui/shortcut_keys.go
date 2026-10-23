@@ -264,7 +264,14 @@ func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcut
 		// 变体（理由见 `widgets/ink`），否则录到一半的话读不出来。
 		color = ink.AccentOn(t)
 	case invalid:
-		color = t.Danger
+		// ⚠️ **取「危险色当**字色**」的那一档**（票 #241 / 报告 F-22）：这一格是
+		// 画在 `Background(t.Surface)` 上的，而浅色下原值 `#f31260` 压在那上面
+		// 只有 **3.77:1**——「这一格和别的键撞了」是最该读出来的一句话。
+		//
+		// 那一档（`dangerText` → `ink.SemanticOn`）对的是**最严的那个底**
+		// （`t.SurfaceHover`：浅色下最暗、深色下最亮），而 `t.Surface` 夹在中间
+		// ——所以它在 `t.Surface` 上也够 4.5:1。
+		color = dangerText(t)
 	}
 
 	// 🔴 **这一格必须是 `ui.Row`，不是 `ui.Box`。**

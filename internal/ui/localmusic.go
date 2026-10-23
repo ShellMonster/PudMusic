@@ -598,7 +598,7 @@ func (p *localPage) viewWarnings(c *ui.Context, t *ui.Theme, st app.LocalMusicSt
 	if st.Err != "" {
 		ui.Text(c, "有目录读不到："+st.Err).
 			FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
-			TextColor(t.Danger).AlignSelf(ui.Stretch)
+			TextColor(dangerText(t)).AlignSelf(ui.Stretch)
 	}
 	if names := unplayableFormats(st.Tracks); len(names) > 0 {
 		// ⚠️ **浅色下这个警告橙当字色是 2.04:1**（旧的那一档是 3.19:1）——
@@ -606,7 +606,7 @@ func (p *localPage) viewWarnings(c *ui.Context, t *ui.Theme, st app.LocalMusicSt
 		ui.Text(c, "这个目录里有我们还放不出的格式（"+strings.Join(names, " ")+
 			"），它们会列出来但放不了。").
 			FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
-			TextColor(t.Warning).AlignSelf(ui.Stretch)
+			TextColor(warningText(t)).AlignSelf(ui.Stretch)
 	}
 }
 
@@ -846,7 +846,7 @@ func (p *localPage) viewCell(c *ui.Context, t *ui.Theme, row, col int) {
 		if tr.Playable() {
 			e.TextColor(t.TextMuted)
 		} else {
-			e.TextColor(t.Warning)
+			e.TextColor(warningText(t))
 		}
 	case 4:
 		ui.Text(c, durText(tr.Duration)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)

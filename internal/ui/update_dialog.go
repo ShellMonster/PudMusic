@@ -244,7 +244,7 @@ func (s *Shell) updateFooter(c *ui.Context, st app.UpdateState) {
 			case st.Phase == app.UpdateFailed && st.Err != "":
 				// 出错了就把原因说全（框架那一句可能很长），并让它可以选中复制：
 				// 用户要拿这句话去提 issue。
-				ui.Text(c, st.Err).FontSize(scale.Font(c, 12)).TextColor(t.Danger).Wrap().Selectable()
+				ui.Text(c, st.Err).FontSize(scale.Font(c, 12)).TextColor(dangerText(t)).Wrap().Selectable()
 			case st.Phase == app.UpdateReady:
 				ui.Text(c, updateReadyText).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 				ui.Text(c, updateReadyNote).FontSize(scale.Font(c, 11)).TextColor(t.TextMuted).Wrap()

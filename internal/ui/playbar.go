@@ -592,7 +592,7 @@ func (s *Shell) viewTrackError(c *ui.Context, st app.State, t *ui.Theme) {
 		//
 		// 缩掉的那几个字用悬停补回来，和上面那个音质徽章同一个做法。
 		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, 12)).
-			TextColor(t.Danger).MaxLines(1).Ellipsis("…").Grow(1), msg)
+			TextColor(dangerText(t)).MaxLines(1).Ellipsis("…").Grow(1), msg)
 		switch {
 		case st.CanRetry:
 			if s.withTip(c, flatButton(c, "重试").FontSize(scale.Font(c, 12)),

@@ -215,7 +215,7 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 
 				if ro {
 					ui.Text(c, "设置只读：这份设置来自更新的版本，这一版一个字都不会写回去。").
-						FontSize(scale.Font(c, 12)).TextColor(t.Danger)
+						FontSize(scale.Font(c, 12)).TextColor(dangerText(t))
 				}
 
 				// ⚠️ **主 Tab 用轨道 + 滑块那一种**（`mainTabs`，见 tabs.go）：
