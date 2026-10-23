@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
@@ -179,6 +180,8 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	// 组件在两页就会缩成两个宽度。
 	ui.Column(c).Key("space-list:" + upTabNames[tab]).Grow(1).FillHeight().
 		PaddingX(upPad).Children(func() {
+		// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
+		s.registerContentFocus(list.HandleFocus(&st.Handle))
 		spaceList := ui.List(c, st, rows).
 			Grow(1).FillHeight().FillWidth().
 			Rows(func(r ui.ListRow) {

@@ -144,6 +144,14 @@ func (k *KeyboardMode) Input(ev ui.InputEvent) bool {
 	return false
 }
 
+// SetUpAtTop 装上「键盘往回走、列表已经在顶上一行了」时该做的事。
+//
+// ⚠️ **为什么是方法而不是导出的字段**：这一份状态机在**界面层**也有一份
+// （`internal/ui` 的 `pagedRows`，它自己画行、不走这个包的 `List`），而那一处
+// 要装的是同一个回调。字段导出的话，两处都能直接写；用方法的话，「这个回调
+// 是干什么的」只有这一处写着。
+func (k *KeyboardMode) SetUpAtTop(fn func()) { k.upAtTop = fn }
+
 // Moved 报「选中挪到了 sel，而这一挪是键盘挪的」。
 //
 // # 为什么还要看「选中挪没挪」

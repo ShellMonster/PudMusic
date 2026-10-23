@@ -31,6 +31,7 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
@@ -271,6 +272,9 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 		// ⚠️ Key 挂在外面的 Column 上：List 是自己管状态的控件，事后再挂
 		// key 会 panic（`ui/element.go` 的 `Key`）。理由见 upspace_tabs.go。
 		ui.Column(c).Key("feed-author-list").Grow(1).FillHeight().Children(func() {
+			// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
+			// 作者栏先登记、动态栏后登记，于是动态栏赢——它是这一页的主内容。
+			s.registerContentFocus(list.HandleFocus(&st.Handle))
 			authorList := ui.List(c, st, rows).
 				Grow(1).FillHeight().
 				Rows(func(r ui.ListRow) {
@@ -446,6 +450,8 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 
 	// ⚠️ Key 挂在外面的 Column 上，理由见上面那一处。
 	ui.Column(c).Key("feed-dynamic-list").Grow(1).FillHeight().Children(func() {
+		// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
+		s.registerContentFocus(list.HandleFocus(&st.Handle))
 		dynList := ui.List(c, st, rows).
 			Grow(1).FillHeight().FillWidth().
 			Rows(func(r ui.ListRow) {

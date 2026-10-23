@@ -212,6 +212,9 @@ func newPagedRows(render func(*ui.Context, ui.ListRow) ui.Element, menu func(*ui
 		hasMore: true,
 		seen:    map[string]bool{},
 	}
+	// 「↑ 到顶时把焦点交回侧栏」那一档（票 #245 的 E4）。理由同
+	// `widgets/list` 的 `New`。
+	p.keys.SetUpAtTop(acts.FocusOut)
 	p.draw = guard.Wrap(p.view, p.onPanic)
 	return p
 }
@@ -336,7 +339,17 @@ func (p *pagedRows) Drop(id string) {
 //
 // 🔴 外面包着 recover（`guard.Wrap`，建的时候包一次）：view 里 panic 会一路穿到
 // Cocoa 事件循环上去把整个进程带走。
-func (p *pagedRows) View(c *ui.Context) { p.draw(c) }
+func (p *pagedRows) View(c *ui.Context) {
+	// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
+	//
+	// ⚠️ **这一份是界面层自己画的**（不走 `widgets/list` 的 `List`，理由见
+	// 这个类型的文件头），所以登记得自己写一遍——焦点句柄是同一个框架机制
+	// （`ui.ListState.Handle`）。
+	if p.acts.Focus != nil {
+		p.acts.Focus(list.HandleFocus(&p.state.Handle))
+	}
+	p.draw(c)
+}
 
 // onPanic 记一笔并要一帧。
 //

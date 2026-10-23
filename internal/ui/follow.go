@@ -476,6 +476,9 @@ func (s *Shell) viewFollowPane(c *ui.Context, f *followPage) {
 		// ⚠️ Key 挂在外面的 Column 上：List 是自己管状态的控件，事后再挂 key
 		// 会 panic（理由同 `dynamicfeed.go`）。
 		ui.Column(c).Key("follow-pane-list").Grow(1).FillHeight().Children(func() {
+			// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
+			// ⚠️ **分组栏先登记、网格后登记**，于是网格赢——它是这一页的主内容。
+			s.registerContentFocus(list.HandleFocus(&f.paneState.Handle))
 			pane := ui.List(c, &f.paneState, len(f.tags)+1).
 				Grow(1).FillHeight().
 				Rows(func(r ui.ListRow) { s.viewFollowPaneRow(r.Context, f, r.Index) })
@@ -695,6 +698,9 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 
 	// ⚠️ Key 挂在外面的 Column 上，理由见 `dynamicfeed.go`。
 	ui.Column(c).Key("follow-grid").Grow(1).FillHeight().FillWidth().Children(func() {
+		// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
+		// 网格在分组栏**之后**登记，所以它赢——它是这一页的主内容。
+		s.registerContentFocus(list.HandleFocus(&st.Handle))
 		e := ui.List(c, st, n).Grow(1).FillWidth().
 			// ⚠️ **挂上 `ScrollState`**：这一格自己滚（那些卡片是方的，行高跟着内容
 			// 走），而「回到顶部」那一枚要的是**像素**（上游的阈值是 400 像素）。
