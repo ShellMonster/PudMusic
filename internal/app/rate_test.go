@@ -397,7 +397,7 @@ func TestRateSurvivesTrackChanges(t *testing.T) {
 func TestOnlineTrackKeepsTheRate(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readWav(t, longWav(t, "在线的一首.wav"))
-	f.onPlayURL(dashFor(cdnURL(f.URL, "a.wav", 2*time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.wav", 2*time.Hour), int(bili.QualityHigh192), 110836))
 
 	a := newOnlineApp(t, f, t.TempDir())
 	a.SetRate(2)

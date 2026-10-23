@@ -111,7 +111,7 @@ func TestSnapshotIsNotStalledByAStuckStream(t *testing.T) {
 		}
 	})
 	f.onPlayURL(dashFor(cdnURL(f.URL, "frozen.flac", 2*time.Hour),
-		int(bili.QualityHigh320), 110836))
+		int(bili.QualityHigh192), 110836))
 
 	a := newOnlineApp(t, f, t.TempDir())
 	if err := a.Enqueue(onlineItem("BV1xx", "123", "在线的一首")); err != nil {

@@ -30,7 +30,7 @@ import (
 // ——共享变量 + 一个 bool 收尾是最容易写出数据竞争的那种写法（`-race` 一跑
 // 就红，而且红的还是测试而不是产品代码）。
 
-// twoTierDash 造一份「有 320K 也有 128K」的 dash，两条流指向同一段字节。
+// twoTierDash 造一份「有 192K 也有 128K」的 dash，两条流指向同一段字节。
 //
 // 指向同一段是刻意的：这里要验的是「换档之后接线对不对」，不是「B 站换了
 // 一段字节」——后者是 `internal/service/audio` 那边换流机制自己的事。
@@ -43,7 +43,7 @@ func twoTierDash(mediaURL string) map[string]any {
 		"duration": 1,
 		"audio": []any{
 			map[string]any{
-				"id": int(bili.QualityHigh320), "bandwidth": 320000,
+				"id": int(bili.QualityHigh192), "bandwidth": 320000,
 				"codecs": "flac", "mimeType": "audio/mp4", "baseUrl": mediaURL,
 			},
 			map[string]any{
@@ -66,8 +66,8 @@ func TestSwitchingQualitySwapsTheStreamWithoutRestarting(t *testing.T) {
 		t.Fatal(err)
 	}
 	playing(t, a, "换档的那首")
-	if got := a.Snapshot().Quality; got != "320K" {
-		t.Fatalf("一开始的徽章 = %q，want 320K（自动档取最好的那一档）", got)
+	if got := a.Snapshot().Quality; got != "192K" {
+		t.Fatalf("一开始的徽章 = %q，want 192K（自动档取最好的那一档）", got)
 	}
 	waitFor(t, 30*time.Second, "播放位置动起来", func() bool {
 		return a.Snapshot().Position > 700*time.Millisecond
@@ -99,7 +99,7 @@ func TestSwitchingQualitySwapsTheStreamWithoutRestarting(t *testing.T) {
 // TestSwitchingToATierThatIsAlreadyPlayingChangesNothing 盯「本来就是那一档，
 // 别打断」。
 //
-// 用户从「自动」点「高音质」，而 B 站只给了 320K：拿回来的还是同一档。
+// 用户从「自动」点「高音质」，而 B 站只给了 192K：拿回来的还是同一档。
 // 这时候重建播放器就是白打断一首歌——歌会顿一下、进度条会跳一下，用户
 // 什么都没换来。
 //
@@ -108,9 +108,9 @@ func TestSwitchingQualitySwapsTheStreamWithoutRestarting(t *testing.T) {
 func TestSwitchingToATierThatIsAlreadyPlayingChangesNothing(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
-	// 只有 320K 一档：自动档和高音质档拿到的都是它。
+	// 只有 192K 一档：自动档和高音质档拿到的都是它。
 	f.onPlayURL(map[string]any{"duration": 1, "audio": []any{map[string]any{
-		"id": int(bili.QualityHigh320), "bandwidth": 110836,
+		"id": int(bili.QualityHigh192), "bandwidth": 110836,
 		"codecs": "flac", "mimeType": "audio/mp4", "baseUrl": cdnURL(f.URL, "a.flac", 2*time.Hour),
 	}}})
 
@@ -152,18 +152,18 @@ func TestSwitchingToATierThatIsAlreadyPlayingChangesNothing(t *testing.T) {
 	}
 }
 
-// TestA320KAACStreamFromCDNPlays 盯「320K AAC 在线可播」的那一整条链。
+// TestA192KAACStreamFromCDNPlays 盯「192K AAC 在线可播」的那一整条链。
 //
 // 队列 → 取流 → CDN → 字节源 → 注册表 → 系统解码器 → 播放条徽章。
 // 这里用的是**真的 AAC-in-MP4 素材**（`handles_test.go` 里那个 `m4a()` 现造
-// 的），不是拿 FLAC 顶着：B 站的 320K 就是这个容器，而「本地放得了、在线放
+// 的），不是拿 FLAC 顶着：B 站的 192K 就是这个容器，而「本地放得了、在线放
 // 不了」正是容器认错时最常见的表现。
 //
 // 首次可听时间的那个 200ms 断言在 `internal/service/audio`
 // （`TestAAC320FromTheStreamIsAudibleFast`）——那一层能摘掉「等字节」的
 // 时间，这一层摘不掉：取流是带签名的网络往返，那是规格明确不算进那个数里
 // 的部分。
-func TestA320KAACStreamFromCDNPlays(t *testing.T) {
+func TestA192KAACStreamFromCDNPlays(t *testing.T) {
 	media, err := os.ReadFile(m4a(t))
 	if err != nil {
 		t.Fatal(err)
@@ -172,16 +172,16 @@ func TestA320KAACStreamFromCDNPlays(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = media
 	f.onPlayURL(map[string]any{"duration": 1, "audio": []any{map[string]any{
-		"id": int(bili.QualityHigh320), "bandwidth": 320000,
+		"id": int(bili.QualityHigh192), "bandwidth": 320000,
 		"codecs": "mp4a.40.2", "mimeType": "audio/mp4",
 		"baseUrl": cdnURL(f.URL, "a.m4a", 2*time.Hour),
 	}}})
 
 	a := newOnlineApp(t, f, t.TempDir())
-	if err := a.Enqueue(onlineItem("BV1", "1", "在线的 320K")); err != nil {
+	if err := a.Enqueue(onlineItem("BV1", "1", "在线的 192K")); err != nil {
 		t.Fatal(err)
 	}
-	playing(t, a, "在线的 320K")
+	playing(t, a, "在线的 192K")
 
 	waitFor(t, 30*time.Second, "进度条往前走", func() bool {
 		return a.Snapshot().Position > 0
@@ -190,8 +190,8 @@ func TestA320KAACStreamFromCDNPlays(t *testing.T) {
 	if st.Err != "" {
 		t.Errorf("播放条上有错：%s", st.Err)
 	}
-	if st.Quality != "320K" {
-		t.Errorf("音质徽章 = %q，want 320K", st.Quality)
+	if st.Quality != "192K" {
+		t.Errorf("音质徽章 = %q，want 192K", st.Quality)
 	}
 	if st.Duration <= 0 {
 		t.Errorf("时长 = %v，AAC 流应该报得出长度", st.Duration)
@@ -260,8 +260,8 @@ func TestALateFailureFromAStaleSwitchNeverReachesThePlaybar(t *testing.T) {
 		t.Errorf("播放条上挂着一次已被取代的失败：%q（偏好已经是 %v，徽章 %q）",
 			st.Err, a.AudioQuality(), st.Quality)
 	}
-	if st.Quality != "320K" {
-		t.Errorf("徽章 = %q，want 320K", st.Quality)
+	if st.Quality != "192K" {
+		t.Errorf("徽章 = %q，want 192K", st.Quality)
 	}
 	if n := calls.Load(); n < 2 {
 		t.Errorf("取流接口只被打了 %d 次，这条用例没验到东西（两次换档都该发一次）", n)
@@ -303,7 +303,7 @@ func TestAskingForLosslessWithoutItKeepsPlaying(t *testing.T) {
 	waitFor(t, 30*time.Second, "原来那条流继续播", func() bool {
 		return a.Snapshot().Position > before
 	})
-	if q := a.Snapshot().Quality; q != "320K" {
+	if q := a.Snapshot().Quality; q != "192K" {
 		t.Errorf("徽章变成了 %q——明明没换成无损，不该改徽章（也不该悄悄降级）", q)
 	}
 }

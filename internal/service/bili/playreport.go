@@ -96,7 +96,7 @@ func (a PlayAction) String() string {
 //
 // 🔴 **它必须和我们取流时发的那一个一样**（`stream.go` 的 `dashAll` = 4048）：
 // 心跳报的是「这一轮我放的是哪一档流」，而我们放的和要的是同一个答案。
-// 写成别的数，B 站那边看到的就是「说是无损、实际发的是 320K」。
+// 写成别的数，B 站那边看到的就是「说是无损、实际发的是 192K」。
 const PlayFnval = dashAll
 
 // PlayFinished 是「这一首播完了」的进度值。

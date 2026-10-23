@@ -66,7 +66,7 @@ func TestQuittingWhileTheStreamIsStillDownloading(t *testing.T) {
 		<-r.Context().Done()
 		close(aborted)
 	})
-	f.onPlayURL(dashFor(cdnURL(f.URL, "slow.flac", time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "slow.flac", time.Hour), int(bili.QualityHigh192), 110836))
 
 	dir := t.TempDir()
 	a := app.New()

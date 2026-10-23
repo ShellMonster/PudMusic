@@ -100,7 +100,7 @@ type StreamReply struct {
 	Size int64
 	// ExpiresAt 是这组地址的失效时刻。
 	ExpiresAt time.Time
-	// Quality 是这条流的音质徽章文字（「无损 FLAC」/「320K」）。
+	// Quality 是这条流的音质徽章文字（「Hi-Res 无损」/「192K」）。
 	// 换流之后界面上的徽章要跟着变：降级了用户得看见。
 	Quality string
 }

@@ -1930,6 +1930,41 @@ var Items = []Item{
 		},
 	},
 	{
+		// 归「双平台」那一组：说的是**播放条上那枚音质徽章**念的是哪一档
+		// （issue 255 / BMG-155）。
+		Category: Platform,
+		// issue 255：投稿侧的音质 id ↔ 标签要对上。Hi-Res 无损流（`dash.flac`
+		// 里的 FLAC）以前挂着「杜比 Hi-Res」——30251 这个 id 被当成了杜比的
+		// 高解析版，于是 `IsLossless()` 判它**不是**无损、`qualityRank` 把它
+		// 排在有损档下面。
+		//
+		// 🔴 **这一族全是「静默」的坏法**：徽章上写错一个字、`IsLossless()`
+		// 判错一次，**没有一样会报错**，界面只是「不太对」——用户看到的是
+		// 「无损流被标成杜比」，而下载、容器判定、挑流排序全跟着错。
+		//
+		// ⚠️ **标签、`IsLossless()`、`qualityRank` 三者必须一致**：它们是同一
+		// 件事的三种说法，各说各的就会出现「徽章说无损、机器说不无损」。
+		//
+		// ⚠️ **id 表会过期**（B 站会加档改档），所以这一条钉的是「**已知这
+		// 几档**」而不是「**只有这几档**」：认不出来的 id 有兜底（按码率说
+		// 话），不会报错、不会挂错标签。
+		Spec: "投稿侧的音质 id ↔ 标签：64K / 128K / 192K / 杜比全景声 / Hi-Res 无损；Hi-Res 无损流（dash.flac）挂「Hi-Res 无损」而不挂「杜比 Hi-Res」，且 IsLossless() 判它无损、qualityRank 把它排在杜比之上；认不出来的 id 按码率说话而不报错",
+		Tests: []string{
+			// 这几档分别是什么标签（认得出的档位不吃码率）。
+			"TestKnownQualityLabelsArePinned",
+			// 标签 / IsLossless() / qualityRank 三者一致，且 rank 严格递增。
+			"TestTheThreeViewsOfAQualityAgree",
+			// 30251 是 Hi-Res 无损，不是杜比 Hi-Res。
+			"TestHiResLosslessIsNotDolbyHiRes",
+			// B 站加新档时的兜底：按码率说话，不报错、不挂错标签。
+			"TestAnUnknownQualityFallsBackToTheBitrate",
+			// 播放条上那枚 chip 的短版（宽度有上限，见上面那一条）。
+			"TestChipLabelShortensTheQualityNames",
+			// 「字段比 id 权威」：`dash.flac` 里的 id 换了，档位不能跟着乱。
+			"TestPlayURLTrustsTheFlacFieldNotTheIdInsideIt",
+		},
+	},
+	{
 		// 归「双平台」那一组：还是播放条那一块，但说的是它上面的**状态**和
 		// 几样杂项（issue 222 / BMG-134）。
 		Category: Platform,
