@@ -862,7 +862,7 @@ func TestStreamingNotMountedSaysSo(t *testing.T) {
 	t.Cleanup(a.Close)
 	err := a.PlayFrom(onlineItem("BV1", "1", "还没挂取流"))
 	if err == nil || !strings.Contains(err.Error(), "在线播放") {
-		t.Errorf("err = %v，want 一句说清「在线播放还没接上」的话", err)
+		t.Errorf("err = %v，want 一句说清「在线播放暂时用不了」的话", err)
 	}
 }
 

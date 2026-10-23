@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -52,7 +53,17 @@ func TestSpecEmptyStates(t *testing.T) {
 			},
 		},
 		{"没有搜索结果", noSearchResults, "/search?q=" + url.QueryEscape("周杰伦"), searchPath, nil},
-		{"没有下载记录", noDownloads, "/download-list", "/download-list", nil},
+		{"没有下载记录", noDownloads, "/download-list", "/download-list",
+			// ⚠️ **下载记录页有两种空**：「连落盘的地方都没有」和「真的没下载
+			// 过」。这一条验的是后者，所以得有一个目录（没目录时那一格说的是
+			// 「去设置里选一个」，见报告 F3）。
+			func(t *testing.T, s *Shell) {
+				if err := s.app.MountDownloads(app.Downloads{
+					Media: http.DefaultClient, FallbackDir: t.TempDir(),
+				}); err != nil {
+					t.Fatalf("挂下载：%v", err)
+				}
+			}},
 		{"没有歌词", noLyrics, miniPlayerPath, miniPlayerPath, nil},
 	}
 	for _, c := range cases {
@@ -92,7 +103,11 @@ func TestSpecEmptyStates(t *testing.T) {
 			s.navigate(c.target)
 			// 收藏夹那一页要先等后台把容器拉回来（头图区第一帧是「正在加载…」，
 			// 空状态那一支要 `info.Loaded` 才画得出来）；别的几页不发请求。
-			if c.setup != nil {
+			//
+			// ⚠️ **判的是「收藏夹那一页」而不是「有没有 setup」**：下载记录那一条
+			// 也要 setup（挂一个下载目录，好让「真的没下载过」那一句是那一句），
+			// 而它不等收藏夹的头图。
+			if c.path == collectionMatch {
 				waitCollectionHeader(t, s, tt)
 			}
 			// ⚠️ 搜索页那一条要多等几帧：结果是异步回来的，「画不画空状态」
@@ -193,21 +208,45 @@ func TestSearchingShowsTheNoResultsState(t *testing.T) {
 //
 // 只查元素框发现不了这一类：元素在、位置对、文字也在，可屏幕上什么也没有。
 // 这里读像素——空状态那块和窗口底色必须不是一个颜色。
+//
+// ⚠️ **下载记录页有两种空，两种都画**：没有下载目录（`noDownloadDir`）和
+// 真的没下载过（`noDownloads`）。少画一种，那一种在真机上就是一片白。
 func TestEmptyStateIsPaintedNotBlank(t *testing.T) {
-	s, tt := newShell(t)
-	s.navigate("/download-list")
-	tt.Frame()
+	for _, c := range []struct {
+		what string
+		dir  bool
+	}{
+		{"没有下载目录", false},
+		{"没有下载记录", true},
+	} {
+		t.Run(c.what, func(t *testing.T) {
+			s, tt := newShell(t)
+			if c.dir {
+				if err := s.app.MountDownloads(app.Downloads{
+					Media: http.DefaultClient, FallbackDir: t.TempDir(),
+				}); err != nil {
+					t.Fatalf("挂下载：%v", err)
+				}
+			}
+			s.navigate("/download-list")
+			tt.Frame()
 
-	r, ok := tt.Find(lookup("/download-list").Empty.Title)
-	if !ok {
-		t.Fatalf("下载记录的空状态没画出来，文字有 %q", tt.Texts())
-	}
-	img := tt.Image()
-	// 窗口左上角是窗口底色，空状态那块是次要文字色。
-	window := img.RGBAAt(4, 4)
-	text := img.RGBAAt(int(r.X)+2, int(r.Y+r.H/2))
-	if text == window {
-		t.Errorf("空状态的字和窗口底色同色（%v），画出来看不见", text)
+			title := noDownloadDir.Title
+			if c.dir {
+				title = noDownloads.Title
+			}
+			r, ok := tt.Find(title)
+			if !ok {
+				t.Fatalf("下载记录的空状态没画出来，文字有 %q", tt.Texts())
+			}
+			img := tt.Image()
+			// 窗口左上角是窗口底色，空状态那块是次要文字色。
+			window := img.RGBAAt(4, 4)
+			text := img.RGBAAt(int(r.X)+2, int(r.Y+r.H/2))
+			if text == window {
+				t.Errorf("空状态的字和窗口底色同色（%v），画出来看不见", text)
+			}
+		})
 	}
 }
 

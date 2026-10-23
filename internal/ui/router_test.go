@@ -381,7 +381,10 @@ func TestNavigateResetsTheCrash(t *testing.T) {
 	if tt.HasText("界面出错了") {
 		t.Errorf("换页之后还在错误页，文字有 %q", tt.Texts())
 	}
-	if _, ok := tt.Find(lookup("/download-list").Empty.Title); !ok {
+	// ⚠️ **这一页现在有两种空**：没有下载目录（这一支画的是它）和真的没下载
+	// 过。这一组的外壳没挂下载（`DownloadDir()` 是空串），所以找的是前者
+	// （报告 F3）。
+	if _, ok := tt.Find(noDownloadDir.Title); !ok {
 		t.Errorf("没有切到下载记录，文字有 %q", tt.Texts())
 	}
 }

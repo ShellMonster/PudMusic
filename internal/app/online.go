@@ -36,7 +36,10 @@ import (
 )
 
 // errStreamingMissing 是「在线播放没挂上」。见 `MountStreaming`。
-var errStreamingMissing = errors.New("在线播放还没接上")
+//
+// ⚠️ **这句是给用户看的**（播放失败时它就是失败原因），不许说「还没接上」
+// （票 #242，UX 报告 §3-F 的 F2）。
+var errStreamingMissing = errors.New("在线播放暂时用不了")
 
 // Streaming 是取流这一摊事的依赖。零值不挂——界面要判空。
 type Streaming struct {
