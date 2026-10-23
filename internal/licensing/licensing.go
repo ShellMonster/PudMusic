@@ -134,7 +134,7 @@ const BiuRequiredNotice = "Required Notice: Copyright (c) 2022–2025 wood3n"
 // Entry 是清单里的一行：一个编进去的依赖，及其许可证。
 type Entry struct {
 	Module  string // 例 "github.com/tphakala/go-m4a"
-	Version string // 例 "v0.7.0"
+	Version string // 例 "v0.8.0"
 	SPDX    string // 例 "MIT"
 	File    string // 许可证原文在 resources/licenses 下的文件名
 }

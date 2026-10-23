@@ -441,7 +441,7 @@ func TestDetectSPDXRefusesToGuess(t *testing.T) {
 // 测试都读的是同一份代码，写和读一起坏掉的话谁都发现不了。
 func TestNoticesRoundTrip(t *testing.T) {
 	want := []Entry{
-		{Module: "github.com/tphakala/go-m4a", Version: "v0.7.0", SPDX: "MIT", File: "a-LICENSE.txt"},
+		{Module: "github.com/tphakala/go-m4a", Version: "v0.8.0", SPDX: "MIT", File: "a-LICENSE.txt"},
 		{Module: "golang.org/x/text", Version: "v0.43.0", SPDX: "BSD-3-Clause", File: "b-LICENSE.txt"},
 		{Module: "x/y", Version: "v0.0.0-20250101000000-abcdefabcdef", SPDX: "Unlicense OR BSD-3-Clause", File: "c-LICENSE.txt"},
 	}

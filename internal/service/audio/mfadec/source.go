@@ -8,6 +8,23 @@ package mfadec
 //
 // .m4a 用 `go-m4a`（MIT，已在 go.mod 里）：它认 MP4 的帧、采样率和
 // AudioSpecificConfig。B 站下发的音频有的叫 .m4a 有的叫 .m4s，内容却一样。
+//
+// # go-m4a v0.8.0 带来的两处变化（2026-10 升的，issue #256）
+//
+//  1. **帧走一个 64 KiB 的读前窗口**：不是「一帧定位一次、读一次」。于是一条
+//     1414 帧的流，对源做的 Seek+Read 从**上千次**降到**几十次**——源是在线
+//     流时那是缓存文件上的系统调用。判据在 `read_window_test.go`（那个文件里
+//     的三条用例在 go-m4a v0.7.0 上**全是红**的）。
+//
+//  2. **读帧失败不再报 `ErrCorrupt`**：底层读不动了，报的是**包着底层原因**
+//     的错。这一条要紧，因为上层（`internal/service/bili/friendly.go`）靠
+//     `errors.Is` 认出 `ErrStreamDead`，才说得出「网络断了，不是歌坏了」；
+//     v0.7.0 把「网络断了」一律说成「容器坏了」，那是一句假话。
+//
+// ⚠️ **本文件里没有一处匹配 `ErrCorrupt`**（那是升级时要查的地方，查过了：
+// 一处也没有）。`decoder.go` 的 `fill()` 认的是 `errors.Is(err, io.EOF)`，
+// 而 v0.8.0 保证「没有一种读失败会匹配 `io.EOF`」——所以「流拉不动了」不会
+// 被误当成「流完了」而安静地停住。
 
 import (
 	"errors"
@@ -132,6 +149,10 @@ func detectContainer(head []byte) string {
 func openM4A(r io.ReadSeeker) (*frameSource, error) {
 	rd, err := m4a.NewReader(r)
 	if err != nil {
+		// ⚠️ **这个错要用 `%w` 原样传上去**：go-m4a v0.8.0 起，「流拉不动了」
+		// 报的是包着底层原因的错，而上层靠 `errors.Is` 认出它才说得出
+		// 「网络断了，不是歌坏了」。把它换成一句「认不出这个 MP4」的话，
+		// 真实原因就没了——而用户看到的正是那句人话。
 		return nil, fmt.Errorf("mfadec: 认不出这个 MP4：%w", err)
 	}
 	info := rd.Info()
