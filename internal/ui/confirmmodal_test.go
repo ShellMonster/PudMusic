@@ -3,7 +3,7 @@ package ui
 // 这一组盯的是「确认框是**应用自绘**的那一种」（票 #176 / G33）。
 //
 // 判据全是**画面上的东西**：图标在不在、图标是什么颜色、确认按钮是什么颜色、
-// 取消按钮是不是 light、正文是不是 `text-sm`。断函数调用断不出这些——而
+// 取消按钮是不是带壳、正文是不是 `text-sm`。断函数调用断不出这些——而
 // 「系统原生那个」和「自绘那个」的区别**恰好全在画面上**（原生那个面板固定
 // 300 宽、标题 14 粗体、**一个图标都没有**）。
 //
@@ -184,11 +184,23 @@ func TestTheConfirmBodyIsTextSmall(t *testing.T) {
 	}
 }
 
-// TestTheCancelButtonIsLight 钉住「取消」是 light 的：透明底、没有描边。
+// TestTheCancelButtonKeepsItsShell 钉住「取消」是**带壳**的（常驻底 + 描边）。
 //
-// 上游是 `<Button variant="light">`。它和「确认」摆在一起时，用户一眼要能分出
-// 哪个是主操作——而 light 那一档（不显眼）正是这个作用。
-func TestTheCancelButtonIsLight(t *testing.T) {
+// 🔴 **这一条在 #176 之后反过来过一次**：#176 把两处系统原生 `ui.AlertDialog`
+// 换成自绘模态的时候，把取消键从 `coreButton`（带壳）换成了 `flatButton`
+// （扁的），而那违反了 #141「铺开扁平按钮」定下的契约——那一票把页面上**一批**
+// 药丸拍平了，**明确留下**对话框这一批（主次分明的地方）。
+// `flatspread_test.go` 的 `TestTheDialogButtonsStayOutlined` 一直在钉那一条
+// （它从 #176 起就红，票 #228 修的就是它）。
+//
+// 上游是 HeroUI 的 `variant="light"`（透明底、无描边），而这一处按**仓库的**
+// 契约走：取消键和确认键的层级靠的是「壳」，不是颜色——确认键那一档是危险红 /
+// 警告橙 / 普通主色，取消键**不在那三档里**（票 #228 明确点名「别把它也涂成
+// 主色」）。
+//
+// ⚠️ **和上游不一样是故意的**：上游要的是「不显眼」，我们要的是「看得出是个键，
+// 而且和旁边那颗实心主键分得开」。
+func TestTheCancelButtonKeepsItsShell(t *testing.T) {
 	_, s, tt := collectionShell(t, "12345",
 		mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
 	waitSongs(t, tt, s, 3)
@@ -198,9 +210,9 @@ func TestTheCancelButtonIsLight(t *testing.T) {
 	if !ok {
 		t.Fatalf("弹窗上没有「取消」，文字有 %q", tt.Texts())
 	}
-	// 它坐在弹窗那块面板上，而面板的底色就是页面底色——所以「这一格和它
-	// 后面那一块是同一个颜色」正是 light 的样子。
-	assertFlat(t, tt.Image(), cancel, "取消")
+	// 它坐在弹窗那块面板上，而面板的底色就是页面底色——所以「字上面那几行
+	// 和外面是同一个颜色」正是「它被拍平了」的样子。
+	assertTextKeyHasAShell(t, tt.Image(), cancel, "弹窗里的「取消」")
 }
 
 // openBatchConfirm 是「进多选 → 勾两首 → 点某个键 → 确认框弹出来」那一下。

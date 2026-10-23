@@ -2252,14 +2252,14 @@ var Items = []Item{
 		//
 		// ⚠️ **判据全是画面上的东西**：图标是什么颜色、确认键是什么颜色、正文
 		// 的行高（= 字号）、日历上是几个月、进度条涂的是哪一块蓝。
-		Spec: "确认框是应用自绘的模态（按类型变色的警告图标 + 标题 + text-sm 正文 + light 取消 + 按类型变色的确认键）；日期范围是**双月**选择器（256 宽的触发键，弹出来是两个月并排，能挑起始和结束，没在筛的时候日历上什么都不亮）；下载进度条是**蓝**的（不是主色），出错的那一条是红的，完成那一格有一枚**绿勾**",
+		Spec: "确认框是应用自绘的模态（按类型变色的警告图标 + 标题 + text-sm 正文 + **带壳的取消**（常驻底 + 描边，票 #228）+ 按类型变色的确认键）；日期范围是**双月**选择器（256 宽的触发键，弹出来是两个月并排，能挑起始和结束，没在筛的时候日历上什么都不亮）；下载进度条是**蓝**的（不是主色），出错的那一条是红的，完成那一格有一枚**绿勾**",
 		Tests: []string{
 			// 确认框：图标在不在、是不是按类型变色；确认键的颜色；正文的字号；
-			// 取消是不是 light；**那个框在无障碍树里有没有名字**。
+			// 取消是不是带壳；**那个框在无障碍树里有没有名字**。
 			"TestTheConfirmDialogHasAToneColoredWarningIcon",
 			"TestTheConfirmButtonTakesTheToneColor",
 			"TestTheConfirmBodyIsTextSmall",
-			"TestTheCancelButtonIsLight",
+			"TestTheCancelButtonKeepsItsShell",
 			"TestTheConfirmDialogHasANameInTheAccessibilityTree",
 			// 双月日期选择器：两个月、一起翻、挑过的那天被高亮、点更早的一天
 			// 从头再挑、没在筛的时候什么都不亮、挑完真的换条件、**挑的那一段
