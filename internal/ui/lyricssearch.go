@@ -393,7 +393,7 @@ func (s *Shell) viewLyricCandidates(c *ui.Context, srcs []app.LyricSource, st ap
 				// 「拉不到」和「这一条没有歌词」，而且**点了名是哪个源**）。外面再套
 				// 一句「搜索失败：」就变成「搜索失败：网易云 搜不到：…」——同一个意思
 				// 说两遍，而用户读第二遍的那几秒正是在等他点重试。
-				ui.Text(c, st.Err).FontSize(scale.Font(c, 13)).TextColor(t.Danger).MaxLines(3)
+				ui.Text(c, st.Err).FontSize(scale.Font(c, 13)).TextColor(dangerText(t)).MaxLines(3)
 				if ui.Button(c, lyricSearchRetryLabel).Clicked() {
 					// ⚠️ **重搜 `st.Query` 而不是 `l.draft`**：`app` 失败时留着
 					// `Query` 就是给这一下用的（`failLocked` 的注释）。拿框里此刻的
@@ -603,7 +603,7 @@ func (s *Shell) viewLyricPreviewBody(c *ui.Context, pv app.LyricPreviewState) {
 		// ⚠️ 「未找到歌词内容」和「网络不通」长得很像，可它们要用户做的事完全相反：
 		// 前者要他换一条候选或者换个源，后者要他再试一次。这一句是底下那一层
 		// `lyricsErrText` 拼的（它点名了是哪个源）。
-		ui.Text(c, pv.Err).FontSize(scale.Font(c, 13)).TextColor(t.Danger).Padding(20).MaxLines(3)
+		ui.Text(c, pv.Err).FontSize(scale.Font(c, 13)).TextColor(dangerText(t)).Padding(20).MaxLines(3)
 
 	default:
 		// ⚠️ **只给 Height、不给 Grow**：这一列是弹窗面板，而面板的高度是**由内容撑

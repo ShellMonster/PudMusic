@@ -107,9 +107,13 @@ func BuildTheme(s app.Settings, systemDark bool) *ui.Theme {
 // 字色用），不是实现走样——DESIGN.md §四 指定的就是这一档。
 //
 // ⚠️ **别拿「对比度不够」当理由把色值改回去**：改回去就是「自己发明了一个
-// 上游没有的配色」，那一条是 #163 的整张对照表在盯着的。真要同时保住上游色相
-// 和可读性，路子是**当字色用时另取一档**（像主色那样，`widgets/ink` 压深到
-// ≥4.5:1）——那是**另一次裁决**，不是这一票顺手能做的。
+// 上游没有的配色」，那一条是 #163 的整张对照表在盯着的。
+//
+// ✅ **当字色用时另取一档**（票 #241 / 报告 F-22）：**色相不变，只压深**到
+// ≥4.5:1——和主色那一档（`widgets/ink` 的 `AccentOn`）是同一个路数。那一档在
+// `internal/ui/semantic.go`（`dangerText` / `warningText` / `successText`），
+// 而**主题里这三个值一个字节都没动**（`semantic_test.go` 盯着它们）。
+// ⚠️ **当底色**（确认键、Toast）不走那一档——那一档要的是「底上的前景色」。
 const (
 	semanticDanger  = "#f31260"
 	semanticWarning = "#f5a524"

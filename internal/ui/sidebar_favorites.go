@@ -419,7 +419,7 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 	switch {
 	case cur:
 		// 当前就在这一页：和侧栏菜单当前项**同一套**画法（`flatCurrent`——
-		// 淡主色底 + 深色字 / 中性灰底 + 主色字）。
+		// 中性灰底 + 主色的字，深浅两套同一个数）。
 		//
 		// ⚠️ **原来这里是实心主色**（`Background(t.Accent)`）：那是审计 F-02 /
 		// F-06 点名的那一处——同一个屏上（关注页、动态流页）左栏是实心绿大块、
@@ -472,7 +472,8 @@ func favRowKey(g app.FavoriteGroup, id int64) string {
 //
 // ⚠️ **和 `flatCurrent` 配的是同一档**（`flatCurrentText`）：这一行的字是**自己
 // 画的**（不是从父元素继承），所以底换了字也得跟着换——深色下当前那一行是
-// 主色字，浅色下是正文色（主色压在浅底上读不出来，见 flatbutton.go 那一段）。
+// 主色字，浅色下是**从主色现算的、压到 ≥4.5:1 的那一档**（主色压在浅底上读不
+// 出来，见 flatbutton.go 那一段）。
 func rowTextColor(t *ui.Theme, current bool) ui.Color {
 	return flatCurrentText(t, current)
 }

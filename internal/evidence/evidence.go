@@ -1763,6 +1763,15 @@ var Items = []Item{
 			// 画面上量不出「它是不是两档」）。
 			"TestThePlayBarHasTheUpstreamShadow",
 			"TestThePlayBarShadowComesFromTheShadowPackage",
+			// 影的**值只写一处**（票 #239）：界面层一处都不许现调元素级的影，
+			// 而那个包里**每一档都必须有调用点**（「定义了没人用的档比没有档更
+			// 坏」）。
+			//
+			// ⚠️ 两条都是**源码级**的判据：影是「落在元素外面那一圈」上的，
+			// 那一圈在整页上是别的内容，量它量出来的是「它有没有出现」，量不出
+			// 「它的值写在哪」。
+			"TestNoElementShadowIsWrittenAtTheCallSite",
+			"TestEveryShadowTierHasACallSite",
 			// 设置页：封顶 900 + 居中（两档窗口都量），控件不横跨整行。
 			"TestTheSettingsContentIsCappedAndCentered",
 			"TestTheSettingsInputsAreNotFullRowWide",
@@ -1794,7 +1803,7 @@ var Items = []Item{
 		//
 		// ⚠️ **深浅两套都要跑**：深色下这三件事的差别最大（卡片与背景同色、
 		// 分隔线是 15% 白叠出来的），只跑浅色的话深色下那一面一次都没被验过。
-		Spec: "配色：危险/警告/成功三个语义色是上游那一档（深浅两套同一个值）；分隔线深色是 15% 白叠在当前底色上、浅色是 #dbdbdb；深色下卡片和页面底色同源、浮起来靠的是那圈影，浅色下卡片不是一块灰",
+		Spec: "配色：危险/警告/成功三个语义色是上游那一档（深浅两套同一个值）；分隔线深色是 15% 白叠在当前底色上、浅色是 #dbdbdb；深色下卡片和页面底色同源、浮起来靠的是那圈影，浅色下卡片不是一块灰；**被选中的选项**（设置页那些：主题三档 / 窗口关闭两档 / 下拉项的高亮）是实心主色底 + 主色上的字，只有一种画法",
 		Tests: []string{
 			// 三个语义色：主题里的值 + 画面上那个像素。
 			"TestTheSemanticColorsMatchUpstream",
@@ -1806,6 +1815,14 @@ var Items = []Item{
 			"TestTheCardIsThePageColor",
 			// 「那张卡真的在」——卡和页面同色之后，**影才是它存在的证据**。
 			"TestTheDownloadTableSitsOnACard",
+			// 「被选中的选项」只有一种画法（票 #239 / 审计 F-14）：设置页的档位
+			// 按钮、窗口关闭那两档、下拉项的高亮，三处都是**实心主色底 +
+			// 主色上的字**。
+			//
+			// ⚠️ 和上面「列表选中行不刷底色」不冲突：那一条说的是**行**（点一
+			// 行不刷绿），这一条说的是**选项**（选中的那一个亮起来）——两个是
+			// 不同的东西。
+			"TestTheSelectedOptionLooksTheSameEverywhere",
 		},
 	},
 	{

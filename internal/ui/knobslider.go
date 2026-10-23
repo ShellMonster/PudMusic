@@ -157,6 +157,37 @@ var knobHoverLook = sliderLook{
 	},
 }
 
+// knobMiniVolumeLook 是**迷你播放器里那根音量滑块**的样子（票 #241 / 报告 F-21）。
+//
+// ⚠️ **它和框架那一颗唯一的不同是填充色**：框架的 `ui.Slider` 把填充色**写死**
+// 成 `t.Accent`（`mygo/ui/widgets.go` 的 `coreSlider`：`p.Fill(…, t.Accent, …)`），
+// 元素上没有换色的方法——所以迷你窗里那根音量滑块一直是**主色绿的实心填充**，
+// 而那是 320×100 那扇窗里**最大的一块颜色**（占 0.97%），比同窗那条播放位置
+// （主要）还响。
+//
+// 现在：**填过的那一段平时是次要色（中性灰），悬停 / 按下才变主色**——和播放条
+// 那根进度同一个思路（票 #218）。于是那一扇窗里的主色留给「正在放的位置」。
+//
+// ⚠️ **轨道和旋钮照框架那一颗抄**：6 像素的轨道、20×16 的旋钮、常驻（旋钮一直
+// 画着），而旋钮那面白 / 深灰 #e0e1e1（框架的 `paintKnob` 就是这一档）——
+// **迷你窗里那两根滑块看起来是同一套**（进度那根还是框架那一颗）。
+var knobMiniVolumeLook = sliderLook{
+	trackW:       6,
+	knobW:        20,
+	knobH:        16,
+	knobWhenIdle: true,
+	face: func(t *ui.Theme) ui.Color {
+		if t.Dark {
+			return ui.RGB(224, 225, 225)
+		}
+		return ui.RGB(255, 255, 255)
+	},
+	// 平时次要色，悬停 / 按下才主色（理由见上面那段）。
+	fill: func(t *ui.Theme) (ui.Color, ui.Color) {
+		return t.TextMuted, t.Accent
+	},
+}
+
 // knobSlider 造一根旋钮按住也看得见的滑块（满屏播放器那条进度）。
 //
 // 出来的那个元素照旧可以 `.Grow(1)` / `.Label(…)` / `.Disabled(…)`。

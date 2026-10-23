@@ -530,7 +530,7 @@ func (s *Shell) viewFollowPaneRow(c *ui.Context, f *followPage, i int) {
 		AlignItems(ui.Center)
 	if tab == f.tab {
 		// 当前正在看的那一格：和侧栏菜单当前项**同一套**画法（`flatCurrent`——
-		// 淡主色底 + 深色字 / 中性灰底 + 主色字）。
+		// 中性灰底 + 主色的字，深浅两套同一个数）。
 		//
 		// ⚠️ **原来这里是实心主色**（`Background(t.Accent)`，一块 192×32 的实心
 		// 绿）：那是审计 F-02 / F-06 点名的那一处——同一个屏上左栏是实心绿、
@@ -954,7 +954,7 @@ func (s *Shell) viewFollowActions(c *ui.Context, u bili.FollowUser, shown float3
 			Background(t.Background).Border(1, t.Border))
 		bar.Children(func() {
 			if flatButton(c, "取消关注").FontSize(scale.Font(c, 13)).
-				TextColor(t.Danger).Clicked() {
+				TextColor(dangerText(t)).Clicked() {
 				s.unfollowFromFollowCard(u)
 			}
 		})

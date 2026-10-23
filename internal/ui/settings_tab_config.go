@@ -76,7 +76,7 @@ func (s *Shell) settingsConfig(c *ui.Context) {
 		// 摆一句说明，比摆一个必然失败的按钮诚实。
 		if rep.ReadOnly {
 			ui.Text(c, "数据目录来自更新的版本，这一版一个字都不会写回去，所以下面几样都没有带过来。").
-				FontSize(scale.Font(c, 12)).TextColor(t.Danger).Wrap()
+				FontSize(scale.Font(c, 12)).TextColor(dangerText(t)).Wrap()
 		} else if dirs := rep.BiuDirs; len(dirs) > 0 {
 			// 「从 Biu 导入」只在**找得到** Biu 的数据目录时才摆。摆一个点了必然说
 			// 「没找到 Biu」的按钮，等于让用户自己判断这台机器上有没有装过 Biu。

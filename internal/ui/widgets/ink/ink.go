@@ -104,9 +104,14 @@ func Ensure(ink, bg ui.Color, ratio float64) ui.Color {
 //   - 浅色：从 `t.Accent` 现算一个与 `t.Background` 至少 4.5:1 的变体。主色是
 //     用户可设的，所以这里**每次都是从他选的那个色算的**，没有写死的绿。
 //
-// ⚠️ 说的是「主色当**字**」。主色当**底**（实心按钮、选中行）是另一件事：那
-// 一档用的是 `t.AccentText`，由 `applyAccent` 按主色亮度挑黑白。两件事的关系
-// 写在 `internal/ui/flatbutton.go` 的 `flatCurrent` 里。
+// ⚠️ 说的是「主色当**字**」。主色当**底**（实心按钮、实心选中项）是另一件事：
+// 那一档用的是 `t.AccentText`，由 `applyAccent` 按主色亮度挑黑白。两件事的关系
+// 写在 `internal/ui/flatbutton.go` 的 `flatCurrent`（主色当字）和 `flatSolid`
+// （主色当底）两处。
+//
+// ⚠️ **这一档按 `t.Background` 算，不按别的底算**：字压在**页面底色**上时用它。
+// 压在别的底上（比如「当前在哪」那一档的中性灰底）要用 `Ensure(ink, 那个底, 4.5)`
+// 另算一个——见 `internal/ui/flatbutton.go` 的 `flatCurrentText`。
 func AccentOn(t *ui.Theme) ui.Color {
 	if t.Dark {
 		return t.Accent
@@ -122,6 +127,43 @@ func AccentOn(t *ui.Theme) ui.Color {
 	return Ensure(t.Accent, bg, 4.5)
 }
 
+// SemanticOn 是**语义色**（危险 / 警告 / 成功）当**字色**用时该用的那一档。
+//
+//   - **色相不变**，只压深（浅色底下往黑混、深色底下往白混）——和 `AccentOn`
+//     是同一个路数：先把「读不出来」这件事解决掉，颜色的身份尽量留着。
+//   - 目标是对**当前底色** ≥4.5:1（WCAG 正文 AA）。
+//
+// # 为什么底色取 `SurfaceHover`
+//
+// ⚠️ **语义色当字色用的地方不止页面底色**：快捷键那一格（`shortcut_keys.go`）
+// 是画在 `Background(t.Surface)` 上的，设置页那些提示句是画在页面底色上的。
+// 只对页面底色保证 4.5:1 的话，**落在 Surface 上的那一处就只剩 4.09:1**
+// （实测：浅色下危险色 #e8115c 对底色 4.50、对 Surface 4.09、对 SurfaceHover
+// 3.71）——而那一处恰恰是「这一格和别的键撞了」，是最该读出来的一句话。
+//
+// `t.SurfaceHover` 是三种可能的底里**最严**的那一个：
+//
+//   - **浅色下**它最暗（#e9e9ec，而 Surface 是 #f4f4f5、底色是 #ffffff）——往黑
+//     混的墨压在最暗的底上最难读。
+//   - **深色下**它最亮（#323236，而 Surface 是 #27272a、底色是 #18181b）——往白
+//     混的墨压在最亮的底上最难读。
+//
+// `t.Surface` 夹在中间，所以**它也跟着达标**（深浅两套都验过）。
+//
+// ⚠️ **只管「当字色」**：语义色当**底**（确认键、Toast）是另一件事，那一档要的是
+// 「底上的前景色」（见 `internal/ui/confirmmodal.go` 的 `dialogOnDanger`），
+// 两个方向别混。
+//
+// ⚠️ **当图形色（图标、圆点、描边）不算在这里**：图形不受 4.5:1 约束（3:1 即可），
+// 而那些地方用的是**主题里那一个原值**——改了它们就改了上游那三枚图标的颜色。
+func SemanticOn(t *ui.Theme, c ui.Color) ui.Color {
+	bg := t.SurfaceHover
+	if bg.A != 255 {
+		bg = t.Background
+	}
+	return Ensure(c, bg, 4.5)
+}
+
 // Disabled 是**禁用控件里的字**该用的灰。
 //
 // # 为什么不是「整体降透明度」
@@ -129,7 +171,7 @@ func AccentOn(t *ui.Theme) ui.Color {
 // MyGo 对禁用元素的做法是把它（连同子元素）按 50% 不透明度画一遍
 // （`mygo/ui/paint.go:209-212` 的 `p.opacity *= 0.5`）。原来只读设置页那三个
 // 主题按钮用的就是这个：深色下选中那一档的字是主色绿，绿乘完 0.5 压在
-// `#3e3e42` 上只剩 **2.6:1**——用户看见的是「这三个选项在深色模式下消失了」，
+// `#3e3e41` 上只剩 **2.6:1**——用户看见的是「这三个选项在深色模式下消失了」，
 // 而不是「现在是只读的」。
 //
 // 所以禁用时把字色本身换掉，让**乘完 0.5 之后**仍然 ≥3:1（WCAG 对非正文的
