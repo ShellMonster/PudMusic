@@ -21,10 +21,16 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/audio/flacdec"
 	mygoaudio "github.com/egoist/mygo/audio"
 
-	// MP3 由 MyGo 自带，这里只需要它的注册副作用。
-	_ "github.com/egoist/mygo/audio/mp3"
+	// MP3 是本仓库自己解的（`internal/service/audio/mp3dec`，里面 vendor 的是
+	// `tphakala/go-mp3`，MIT）：补 MPEG-2.5、补 LAME gapless、不再全文件扫帧头。
+	// 注册写在那个包的 `init()` 里，所以这里只需要它的注册副作用。
+	//
+	// ⚠️ **别改回 `mygo/audio/mp3`**：MyGo 的注册表是「按注册顺序找第一条
+	// 命中的」，两个 mp3 解码器都注册的话，认出哪一个取决于 init 顺序——
+	// 而那个顺序不是能靠读代码定下来的东西。撤掉这一行是刻意的。
+	_ "github.com/ShellMonster/Biu_Go/internal/service/audio/mp3dec"
 
-	// Ogg Vorbis 同理：`mygo/audio/vorbis` 靠 init 把 `OggS` 注册进 MyGo 的
+	// Ogg Vorbis：`mygo/audio/vorbis` 靠 init 把 `OggS` 注册进 MyGo 的
 	// 格式表，解码器是 `github.com/jfreymuth/oggvorbis`（MIT）。
 	//
 	// ⚠️ **这一行不是可有可无的**：少了它 `.ogg` 在界面上照样显示「可放」
@@ -128,7 +134,7 @@ func OpenStream(r CloserReadSeeker) (*Player, error) {
 }
 
 // openDecoder 是**唯一**认容器的地方：`Open`（本地文件）和 `OpenStream`
-//（在线流）都调它。返回值第二项是认出来的容器名，只作记录和给测试看。
+// （在线流）都调它。返回值第二项是认出来的容器名，只作记录和给测试看。
 //
 // 三步，顺序不能反过来：
 //
