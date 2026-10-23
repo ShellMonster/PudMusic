@@ -25,6 +25,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
@@ -35,6 +36,25 @@ import (
 // 拿来和 `Route.Match` 比，而不是拿 `routes[6]`：那条表一改顺序，这里跟着错，
 // 而且错得很安静——设置页退回占位页，没人看得出来。
 const settingsPath = "/settings"
+
+// goToDownloadDirSetting 去设置页的「下载目录」那一项。
+//
+// ⚠️ **它不只切页**：设置页有四个 Tab，而「下载目录」在「常规设置」那一格的
+// 第三段（要往下滚才看得到）。只把用户送到设置页的话，等于让他自己把「下载
+// 记录页的一句话」翻译成「设置页第 N 个 Tab 的第 M 行」（报告 C1）。
+//
+// 所以这里三件事一起做：切到那一格、**指**着那一行（标题是主色）、让那一页
+// 把它滚进视野（见 settingsScrollFocusIntoView）。
+//
+// ⚠️ **它是从别的页面调过来的**：调用方是下载记录页（那一句「还没有下载
+// 目录」）。设置页自己不会指着谁——`settingsFocusNone` 就是「没指」。
+func (s *Shell) goToDownloadDirSetting() {
+	s.settings.tab = settingsTabGeneral
+	s.settings.focus = settingsFocusDownload
+	s.settings.focusScrolled = false
+	s.settings.focusTries = 0
+	s.navigate(settingsPath)
+}
 
 // settingsPageState 是设置页自己那一摊，**只由 view 在主线程上读写**。
 type settingsPageState struct {
@@ -48,7 +68,39 @@ type settingsPageState struct {
 
 	// shownTab 是上一帧画的是第几个 Tab，用它认出「刚按了 Tab」。
 	shownTab int
+
+	// focus 是「从别处跳过来时要指的那一项」（见 goToDownloadDirSetting）。
+	//
+	// ⚠️ **它不是路由**：跳过来的时候用户要的是「那一项」，不是「设置页」——
+	// 而设置页有四个 Tab、几十行，「下载目录」在第三段里，不指一下用户还得
+	// 自己找（报告 C1：「等于让用户自己把『下载记录页的一句话』翻译成『设置页
+	// 第 N 个 Tab 的第 M 行』」）。
+	focus settingsFocus
+
+	// focusEl 是被指着的**那一行**的盒子，focusScrolled 记「滚进视野」这件事
+	// 做了没有。
+	//
+	// ⚠️ **滚进视野要跨两帧**：量的是**上一帧**的盒子（`Element.Bounds()` 的
+	// 规矩），而刚跳过来那一帧画的是别的页——所以量不到的时候要**再要一帧**。
+	focusEl       ui.Element
+	focusScrolled bool
+	// focusTries 是「量不到、再要一帧」已经试了几次。
+	focusTries int
+
+	// scrollEl 是这一页那个滚动容器（`ui.Scroll`）的盒子：量「视野」要靠它
+	// （行的盒子是窗口坐标，容器的盒子也是，两个一比就知道它在不在视野里）。
+	scrollEl ui.Element
 }
+
+// settingsFocus 是「从别处跳过来时要指的那一项」的身份。
+type settingsFocus string
+
+const (
+	// settingsFocusNone 是「没指着谁」。
+	settingsFocusNone settingsFocus = ""
+	// settingsFocusDownload 是「常规设置」里的「下载目录」那一行。
+	settingsFocusDownload settingsFocus = "downloadPath"
+)
 
 // 四个 Tab。顺序就是从左到右的顺序，和 Biu 那一页一样。
 const (
@@ -148,6 +200,9 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 	ro := s.app.SettingsReadOnly()
 
 	scroll := ui.Scroll(c).Key("settings-scroll").Grow(1).TrackScroll(&s.settings.scroll)
+	// 记下这个滚动容器的盒子：把指着的那一行滚进视野时要拿它当「视野」（见
+	// settingsScrollFocusIntoView）。
+	s.settings.scrollEl = scroll
 	scroll.Children(func() {
 		// 这一层是 `m-auto`：Column 的横向对齐（跨轴），所以内容那一段在
 		// 可视区里居中，而可视区不满 900 时它就是满的（`MaxWidth` 是上限）。
@@ -187,6 +242,10 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 	})
 	s.trackScrollbar(scroll)
 
+	// 把「指着的那一行」滚进视野。⚠️ **排在内容建完之后**：它量的是上一帧的
+	// 盒子，而那个盒子属于这一帧建出来的那个元素（见 settingsScrollFocusIntoView）。
+	s.settingsScrollFocusIntoView()
+
 	// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见 `widgets/list` 的
 	// `BackToTop`）。
 	//
@@ -225,8 +284,70 @@ func (s *Shell) syncSettings(c *ui.Context) {
 	// 按 Tab 时回到顶上：Biu 换了面板就是新的一页。
 	if last, tab := s.settings.shownTab, s.settings.tab; last != tab {
 		s.settings.shownTab, s.settings.scroll.Y = tab, 0
+		// ⚠️ **指着的那一项只在它所在的那一格**：换到别的 Tab 就没东西可指了，
+		// 而留着它会让下一次跳过来以为已经指过（settingsScrollFocusIntoView
+		// 直接跳过）。
+		if s.settings.focus != settingsFocusNone && tab != settingsTabGeneral {
+			s.settings.focus = settingsFocusNone
+		}
 	}
 }
+
+// settingsFocusMargin 是「指着的那一行」滚进视野之后离边留多少。
+//
+// 16 是「贴着边的那一行看起来像是被切掉了」和「别把无关的东西滚走太多」之间
+// 的那个数。
+const settingsFocusMargin = 16
+
+// settingsScrollFocusIntoView 把「指着的那一行」滚进视野。
+//
+// ⚠️ **它必须在这一页的内容建完之后调**：它量的是**上一帧**的盒子
+// （`Element.Bounds()` 的规矩），而那个盒子属于**这一帧建出来的那个元素**
+// ——跨帧去读上一帧的元素是**用旧把手**（框架会当它过期，详见
+// `mygo/ui/frame.go` 的 `expired`）。
+//
+// ⚠️ **它要跨两帧**：刚跳过来那一帧，上一帧画的是**别的页**，那一行压根没有
+// 盒子。所以第一帧量不到，要**再要一帧**——不然就没有下一帧，那一行就永远停在
+// 视野外，而用户看到的是「设置页打开了，可这里没有下载目录」。
+//
+// ⚠️ **最多再要三帧**：万一那一行一直没量到（它不在这一格、或者这一页被换掉
+// 了），别把它变成一个每帧都要一帧的死循环。
+func (s *Shell) settingsScrollFocusIntoView() {
+	st := &s.settings
+	if st.focus == settingsFocusNone || st.focusScrolled {
+		return
+	}
+	row, view := st.focusEl, st.scrollEl
+	// ⚠️ `Valid()` 读的是「这个把手属于这一帧吗」：不属于就是**上一帧**留下的
+	// 那个（这一帧没画那一行），那个盒子不能用来算。
+	if !row.Valid() || !view.Valid() || row.Bounds().H <= 0 || view.Bounds().H <= 0 {
+		st.focusTries++
+		if st.focusTries > settingsFocusTries {
+			// 量不到了：放弃，别再要帧（死循环比滚不到更糟）。
+			st.focusScrolled = true
+			return
+		}
+		s.wake.invalidate()
+		return
+	}
+	rb, vb := row.Bounds(), view.Bounds()
+	// 差多少：上面露出去就往上滚，下面露出去就往下滚。
+	need := float32(0)
+	if rb.Y < vb.Y {
+		need = rb.Y - vb.Y
+	} else if rb.Y+rb.H > vb.Y+vb.H {
+		need = rb.Y + rb.H - (vb.Y + vb.H)
+	}
+	if need > 0 {
+		st.scroll.Y += need + settingsFocusMargin
+	} else if need < 0 {
+		st.scroll.Y += need - settingsFocusMargin
+	}
+	st.focusScrolled = true
+}
+
+// settingsFocusTries 是「量不到就再要一帧」的次数上限。
+const settingsFocusTries = 3
 
 // settingSection 是一组设置上面的那个标题。Biu 用的是 `<h2>`（system-settings.tsx
 // 的「外观」「播放」「下载」…），`text-xl` 也就是 **20px**，字重同样被 Preflight
@@ -249,8 +370,27 @@ func (s *Shell) settingSectionEnd(c *ui.Context) {
 // 的标题和说明，右边固定宽度的控件）。两边的伸缩比例照抄：文字吃掉剩下的
 // 宽度，说明换行了控件也不会被挤走。
 func (s *Shell) settingRow(c *ui.Context, title, desc string, control func()) {
-	s.settingRowEl(c, func() {
-		ui.Text(c, title).FontSize(scale.Font(c, 16)).FontWeight(weightMedium)
+	s.settingRowAt(c, "", title, desc, control)
+}
+
+// settingRowAt 是 settingRow 加上「这一行的身份」。
+//
+// 身份是给「从别处跳过来要指着一行」用的（见 settingsFocus）：**被指着的
+// 那一行，标题是主色**——它和旁边那些行一眼就分得开，而那一行多半在屏幕
+// 下面，滚过去之后用户第一眼看见的就是它。
+//
+// 空身份（`settingRow` 走的那条）就还是普通的一行。
+func (s *Shell) settingRowAt(c *ui.Context, key, title, desc string, control func()) {
+	t := c.Theme()
+	focused := key != "" && s.settings.focus == settingsFocus(key)
+	s.settingRowElAt(c, focused, func() {
+		txt := ui.Text(c, title).FontSize(scale.Font(c, 16)).FontWeight(weightMedium)
+		if focused {
+			// ⚠️ **主色当字色取 `ink.AccentOn`**：浅色下主色本身压在白底上读
+			// 不出来（flatbutton.go 那一大段），而「指着的那一行」恰恰是用户
+			// 要找的那一行——它必须一眼看得见。
+			txt.TextColor(ink.AccentOn(t))
+		}
 	}, desc, control)
 }
 
@@ -263,8 +403,20 @@ func (s *Shell) settingRow(c *ui.Context, title, desc string, control func()) {
 //
 // 其余的行一律用 `settingRow`：那一个签名足够的地方不要多一个。
 func (s *Shell) settingRowEl(c *ui.Context, title func(), desc string, control func()) {
+	s.settingRowElAt(c, false, title, desc, control)
+}
+
+// settingRowElAt 是 settingRowEl 加上「这一行正被指着」。
+//
+// ⚠️ **被指着的时候这一行的盒子要留下来**（`focusEl`）：滚进视野要量它
+// （见 settingsScrollFocusIntoView）。
+func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc string, control func()) {
 	t := c.Theme()
-	ui.Row(c).FillWidth().Gap(24).AlignItems(ui.Center).Children(func() {
+	row := ui.Row(c).FillWidth().Gap(24).AlignItems(ui.Center)
+	if focused {
+		s.settings.focusEl = row
+	}
+	row.Children(func() {
 		ui.Column(c).Grow(1).Children(func() {
 			title()
 			ui.Text(c, desc).FontSize(scale.Font(c, 14)).TextColor(t.TextMuted).Wrap()
