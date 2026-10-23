@@ -67,6 +67,7 @@ package ui
 
 import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -198,10 +199,12 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 	m := ui.DialogBase(c, open, func(backdrop, panel ui.Element) {
 		w, h := c.Size()
 		backdrop.Background(ui.RGBA(0, 0, 0, 0.4))
-		panel.Padding(t.Space(5)).Gap(t.Space(3)).Radius(t.Space(2.5)).
+		// ⚠️ **影的值从 `widgets/shadow` 取**（`shadow.Modal`）：值只写一处
+		// （DESIGN.md §四·五，票 #239 把这一处收进去了）。
+		panel = shadow.Modal(panel.Padding(t.Space(5)).Gap(t.Space(3)).Radius(t.Space(2.5)).
 			Background(t.Background).
-			MaxWidth(w-t.Space(10)).MaxHeight(h-t.Space(10)).
-			Shadow(0, 10, 30, 0, ui.RGBA(0, 0, 0, 0.3)).
+			MaxWidth(w-t.Space(10)).MaxHeight(h-t.Space(10)),
+			t).
 			// 🔴 **这三样是「读屏软件报得出这个框是什么」**：角色、名字、描述。
 			// ⚠️ `Description` 对**不是输入框**的元素不会另外画一行字
 			// （`mygo/ui/form.go` 的 `fieldText`：`e.field == nil` 就原样返回），

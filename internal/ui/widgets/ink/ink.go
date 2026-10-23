@@ -104,9 +104,14 @@ func Ensure(ink, bg ui.Color, ratio float64) ui.Color {
 //   - 浅色：从 `t.Accent` 现算一个与 `t.Background` 至少 4.5:1 的变体。主色是
 //     用户可设的，所以这里**每次都是从他选的那个色算的**，没有写死的绿。
 //
-// ⚠️ 说的是「主色当**字**」。主色当**底**（实心按钮、选中行）是另一件事：那
-// 一档用的是 `t.AccentText`，由 `applyAccent` 按主色亮度挑黑白。两件事的关系
-// 写在 `internal/ui/flatbutton.go` 的 `flatCurrent` 里。
+// ⚠️ 说的是「主色当**字**」。主色当**底**（实心按钮、实心选中项）是另一件事：
+// 那一档用的是 `t.AccentText`，由 `applyAccent` 按主色亮度挑黑白。两件事的关系
+// 写在 `internal/ui/flatbutton.go` 的 `flatCurrent`（主色当字）和 `flatSolid`
+// （主色当底）两处。
+//
+// ⚠️ **这一档按 `t.Background` 算，不按别的底算**：字压在**页面底色**上时用它。
+// 压在别的底上（比如「当前在哪」那一档的中性灰底）要用 `Ensure(ink, 那个底, 4.5)`
+// 另算一个——见 `internal/ui/flatbutton.go` 的 `flatCurrentText`。
 func AccentOn(t *ui.Theme) ui.Color {
 	if t.Dark {
 		return t.Accent
@@ -166,7 +171,7 @@ func SemanticOn(t *ui.Theme, c ui.Color) ui.Color {
 // MyGo 对禁用元素的做法是把它（连同子元素）按 50% 不透明度画一遍
 // （`mygo/ui/paint.go:209-212` 的 `p.opacity *= 0.5`）。原来只读设置页那三个
 // 主题按钮用的就是这个：深色下选中那一档的字是主色绿，绿乘完 0.5 压在
-// `#3e3e42` 上只剩 **2.6:1**——用户看见的是「这三个选项在深色模式下消失了」，
+// `#3e3e41` 上只剩 **2.6:1**——用户看见的是「这三个选项在深色模式下消失了」，
 // 而不是「现在是只读的」。
 //
 // 所以禁用时把字色本身换掉，让**乘完 0.5 之后**仍然 ≥3:1（WCAG 对非正文的
