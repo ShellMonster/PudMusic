@@ -112,17 +112,31 @@ func TestTheInventoryListsExactlyWhatGetsCompiled(t *testing.T) {
 	}
 }
 
-// TestTheShippedAssetLicensesExist 钉住「资源的许可证也随包发出去」。
+// TestTheShippedAssetLicensesExist 钉住「不是构建依赖的那几份许可证也随包
+// 发出去，而且和仓库里的**源头**一字不差」。
 //
 // 🔴 **这一条补的是 `TestTheInventoryListsExactlyWhatGetsCompiled` 的一个盲区**：
 // 那条只认 `go list -deps` 数出来的**模块**。图标是 `//go:embed` 进二进制的
 // 资源，不是链接进来的代码——它少一份许可证，上面那些断言**一条都不会红**，
 // 而包照发、DMG 照做，只是法律上已经不合规了（Apache §4(a) / 各类 CC 的
-// 「随附声明」义务都是这一类）。
+// 「随附声明」义务都是这一类）。vendor 进仓库的第三方代码（MP3 解码器）是
+// 同一类：它是**静态链接进可执行文件**的第三方代码，但它是本仓库的一部分、
+// 不是 Go 模块，`go list` 数不到。
 //
 // 顺带断一件更靠前的事：**图标在不在**。删掉 `internal/ui/icons/` 里的文件，
 // `go build` 会立刻红（`//go:embed` 找不到目录），所以真正会「安静不合规」的
 // 只有许可证那一份——两条一起看才不会漏。
+//
+// # 为什么还要比「源头」
+//
+// `AssetLicenseSources` 说的是「发出去的那份是从哪儿抄来的」。抄的过程会错：
+// 手抄一遍少一个条款、把 "provided that" 抄成 "provided that you"、忘了拷
+// `NOTICE` 文件——受照的人手里那份就是**残缺的**，而没有任何工具会发现。
+//
+// 模块依赖那几份由 `TestTheShippedLicenseTextsAreTheRealOnes` 盯着（它比的是
+// 模块缓存里那份）；**vendor 进来的那份在模块缓存里没有对应物**——它的源头
+// 就是仓库里 `internal/service/audio/mp3dec/gomp3/LICENSE` 那一份，所以这条
+// 比的是「发出去的」和「vendor 的」。
 func TestTheShippedAssetLicensesExist(t *testing.T) {
 	root := repoRoot(t)
 	for _, rel := range AssetLicenseRelPaths {
@@ -136,6 +150,20 @@ func TestTheShippedAssetLicensesExist(t *testing.T) {
 		}
 		if len(b) == 0 {
 			t.Errorf("%s 是空的", rel)
+			continue
+		}
+		src := AssetLicenseSources[rel]
+		if src == "" {
+			continue // 源头就是它自己
+		}
+		want, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(src)))
+		if err != nil {
+			t.Errorf("读不到 %s（%s 的源头）：%v", src, rel, err)
+			continue
+		}
+		if string(b) != string(want) {
+			t.Errorf("%s 和它的源头 %s 不是同一份（%d vs %d 字节）——"+
+				"多半是手抄的", rel, src, len(b), len(want))
 		}
 	}
 }
@@ -263,6 +291,34 @@ func TestNoDependencyIsCopyleft(t *testing.T) {
 			t.Errorf("%s@%s 是 %s（带传染性）——这推翻了 Plan §4 R13 的「一行 LGPL 都不用」。"+
 				"要引的话先回去核清 LGPL 第 6 条的合规义务，别只核第 4 条",
 				e.Module, e.Version, e.SPDX)
+		}
+	}
+
+	// ⚠️ **vendor 进仓库的第三方代码同样要过这一关。**
+	//
+	// 上面那一半走的是**清单**（发出去的那份文件），而 vendor 进来的代码
+	// 不在清单里——它是本仓库的一部分，不是 Go 模块。可它照样静态链接进了
+	// 可执行文件，照样受「一行 LGPL 都不用」那句话约束。所以这里直接读
+	// 它的许可证原文判一次。
+	//
+	// ⚠️ 扫的是 `VendoredCodeLicenseRelPaths`（**代码**），不是「所有随包发
+	// 出去的许可证」：图标那份是 Remix Icon License，不是 SPDX 里那套，
+	// 认不出标识不等于有传染性。
+	root := repoRoot(t)
+	for _, rel := range VendoredCodeLicenseRelPaths {
+		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			continue // 不在的那一份由 TestTheShippedAssetLicensesExist 报
+		}
+		id, err := DetectSPDX(b)
+		if err != nil {
+			t.Errorf("%s：认不出许可证：%v", rel, err)
+			continue
+		}
+		if IsCopyleft(id) {
+			t.Errorf("%s 是 %s（带传染性）——这推翻了 Plan §4 R13 的"+
+				"「一行 LGPL 都不用」。vendor 进来的代码也算数：它是静态链接进"+
+				"可执行文件的第三方代码", rel, id)
 		}
 	}
 }

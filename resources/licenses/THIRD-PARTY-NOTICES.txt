@@ -15,7 +15,7 @@
 # ── 不是 Go 模块的那几样 ─────────────────────────────────────────────────────
 #
 # 上面那张表只列**编进可执行文件的 Go 模块**（go list -deps 数得出来的那些）。
-# 这个目录里还有两份**不是模块**的，同样随包发出去：
+# 这个目录里还有三份**不是模块**的，同样随包发出去：
 #
 # BIU-LICENSE.txt          Biu 本体（PolyForm Noncommercial 1.0.0）。Biu 不是构建
 #                          依赖，它是这个项目的**上游**；PolyForm 的 Notices 一节
@@ -27,6 +27,14 @@
 #                          该许可证 §2.3 明确允许把图标当作产品里的功能组件使用、
 #                          §3.1 禁止把它们**单独当图标包卖**；本项目是前者：图标
 #                          随应用分发，不作为图标库单独提供。
+# github.com-tphakala-go-mp3-LICENSE.txt
+#                          MP3 解码器（tphakala/go-mp3，MIT）。它是 **vendor 进
+#                          仓库**的（internal/service/audio/mp3dec/gomp3/），所以
+#                          它是本仓库的一部分、不是 Go 模块，go list -deps 同样
+#                          看不见它——但它是一整份第三方代码，静态链接进了可执行
+#                          文件，义务和模块依赖一样。发出去的那一份是仓库里
+#                          vendor 那份的逐字副本，由 TestTheShippedAssetLicenses-
+#                          Exist 盯着。
 #
 # ── 用到系统组件的那几样（这里**没有**许可证可附）───────────────────────────
 #
@@ -45,7 +53,6 @@ github.com/Eyevinn/mp4ff	v0.60.0	MIT	github.com-Eyevinn-mp4ff-LICENSE.txt
 github.com/ebitengine/purego	v0.11.1	Apache-2.0	github.com-ebitengine-purego-LICENSE.txt
 github.com/egoist/mygo	v0.6.2	MIT	github.com-egoist-mygo-LICENSE.txt
 github.com/go-text/typesetting	v0.3.5	Unlicense OR BSD-3-Clause	github.com-go-text-typesetting-LICENSE.txt
-github.com/hajimehoshi/go-mp3	v0.3.4	Apache-2.0	github.com-hajimehoshi-go-mp3-LICENSE.txt
 github.com/icza/bitio	v1.1.0	Apache-2.0	github.com-icza-bitio-LICENSE.txt
 github.com/jfreymuth/oggvorbis	v1.0.5	MIT	github.com-jfreymuth-oggvorbis-LICENSE.txt
 github.com/jfreymuth/vorbis	v1.0.2	MIT	github.com-jfreymuth-vorbis-LICENSE.txt
