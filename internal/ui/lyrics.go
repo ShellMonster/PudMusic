@@ -162,9 +162,64 @@ const lyricPresenceKey = "lyrics:line:presence"
 // 用**时间戳加行号**：时间戳单靠自己不唯一——两句完全同一时刻的话是有的，而
 // 那正是该保留先后顺序的时候（见 `lyrics.Row` 的注释），把它们合成一句会丢掉
 // 顺序。行号是位置，换一首歌整体换掉，跨歌撞不上。
+//
+// ⚠️ **ns 是「哪一处在画」**：迷你播放器那一页和满屏播放器那一屏画的是同一首歌的
+// 同一份歌词，两边的行键要分开——不然同一个键在两棵树上各有一个节点，跨帧认人的
+// 那一套会挑错一个（症状是「一首歌在两个地方显示，滚动的却是同一份」）。
 type lyricLineKey struct {
+	ns string
 	at time.Duration
 	i  int
+}
+
+// 两处歌词区各自的行键前缀。
+const (
+	// lyricNSPage 是迷你播放器那一页（`nowplaying.go`）。
+	lyricNSPage = "page"
+	// lyricNSFull 是满屏播放器那一屏（`fullplayer_lyrics.go`）。
+	lyricNSFull = "full"
+)
+
+// lyricStyle 是歌词区那一屏的**画法**。
+//
+// # 它管的是「同一份歌词画在两个地方」的差别
+//
+// 迷你播放器那一页和满屏播放器那一屏画的是同一首歌的同一份歌词
+// （`app.Lyrics()`），而两处的**字色**与**渐隐盖到的颜色**不一样：
+//
+//	迷你播放器那一页   字色是主题的正文色；渐隐盖到主题的底色（那一页底下
+//	                   就是它自己的底）
+//	满屏播放器那一屏   字色是满屏自己的前景色（白 92% / 黑 92%，跟着底走，
+//	                   见 `fullForeground`）；渐隐盖到满屏的底（糊过的封面
+//	                   压着 55% 的黑）
+//
+// 而画法本身（放大 1.5 倍、别的句 60% 的不透明度、译文叠在原词下面、上下渐隐、
+// 正在唱的那一句滚到中间）两边**共用同一份代码**（`viewLyricLines`）——
+// 抄一份的地方迟早会漂开，而漂开的那一处界面上看不出来。
+type lyricStyle struct {
+	// color 是歌词的字色。正在唱的那一句也是它，只是字号和不透明度不同。
+	color ui.Color
+	// fade 是上下那两条遮罩渐隐到的颜色。
+	fade ui.Color
+	// area 是歌词区那一块的键（铁律四）。
+	area string
+	// ns 是这一块的行键前缀（见 `lyricLineKey`）。
+	ns string
+	// center 是「每一行**居中**」还是「每一行左对齐」。
+	//
+	// ⚠️ **迷你播放器那一页是左对齐**（一页那么宽，左对齐读起来是一张歌词纸），
+	// **满屏那一屏是居中**（那一列有六百多宽，左对齐的话字全贴在左边，右边空出
+	// 一大块，看着像没画完）。
+	center bool
+	// ramp 是「按离正在唱那一句的远近把两头的行压暗」那一档。
+	//
+	// ⚠️ **它替代的是上下那两条遮罩**（`fade` 那一项）：上游那条 `maskImage`
+	// （`index.tsx:357-360`）是把内容变**透明**，而我们那一层是**盖一层底色**
+	// ——在迷你播放器那一页（底下就是主题的底色）两者是一回事，而在满屏那一屏
+	// （底下是糊过的封面）盖一层底色会在背景上留下一个看得见的方块。
+	//
+	// 满屏那一屏因此走这一档：两头的行淡进背景里，而背景一个像素都不动。
+	ramp bool
 }
 
 // lyricFadeStop 是渐变上的一个点：位置（在**那一条带子**里从 0 到 1）和盖住的
@@ -464,20 +519,45 @@ func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Dura
 	}
 
 	t := c.Theme()
+	s.viewLyricLines(c, lv, snap, active, lyricStyle{
+		color: t.Text,
+		fade:  t.Background,
+		area:  lyricsAreaKey,
+		ns:    lyricNSPage,
+	})
+
+	// 右下角浮着的那一列旋钮。⚠️ **偏移与字号画在没有歌词的时候不画**（传下去的
+	// 那个 `false`）：没有歌词时它们无处可附，落盘那边也不写（见
+	// `app.flushLyrics`），摆着两个按下去什么都不发生的旋钮比不摆更糟。而「找
+	// 歌词」那一个两种时候都画（见 `viewLyricKnobColumn`）。
+	s.viewLyricKnobColumn(c, snap, true)
+
+	// ⚠️ 放在整棵树建完之后：它要用容器和正在唱那一句的框，而那两个是上面读到的。
+	// snap = 「这一帧是窗口刚恢复可见的第一帧」，一次到位（见 centre 里那一支）。
+	lv.centre(c, active, lyricShapeOf(snap.Rows), snap.FontSize, s.snapScroll)
+}
+
+// viewLyricLines 画歌词的本体：一个可滚动的列，逐行高亮，正在唱的那一句在中间。
+//
+// ⚠️ **它只画本体**：空状态（没有歌词时）和右下角那三个旋钮都**不画**——
+// 那两样在迷你播放器那一页和满屏播放器那一屏不一样（前者是「暂无歌词」+ 三个
+// 旋钮，后者是「暂无歌词」+ 一个「找歌词」），所以留给调用方。
+//
+// ⚠️ **这一块必须是一个 `Grow(1)` 的 Column，不能是 Box 里套一个 Row。**
+//
+// 绕进 Row 里的话，Row 的 `Grow(1)` 走的是**横**那条轴（Row 的主轴是横的），
+// 它的高度就变成「由内容撑着」——而内容的高度里有那两份居中留白，留白又是
+// 按容器高度算的：`pad = 高/2 - 一句/2`，于是 高 → pad → 内容更高 → 高更大，
+// 一帧大一截，最后歌词区比窗口还高、顶上半截在屏幕外，而界面上看不出异样
+// （放大、渐隐、译文全对，只有滚不到中间）。
+//
+// 直接 Column + `Grow(1)` 就对：主轴是竖的，高度由外层分给它，而框架**不会**
+// 给 `Grow` 的那一个套上「不许比内容矮」这条下限（`mygo/ui/layout.go:720` 的
+// `c.grow == 0`），所以内容再长也只是一个可滚动的容器。
+func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSnapshot, active int, st lyricStyle) {
 	pad := lv.centerPad()
 
-	// ⚠️ **这一块必须是一个 `Grow(1)` 的 Column，不能是 Box 里套一个 Row。**
-	//
-	// 绕进 Row 里的话，Row 的 `Grow(1)` 走的是**横**那条轴（Row 的主轴是横的），
-	// 它的高度就变成「由内容撑着」——而内容的高度里有那两份居中留白，留白又是
-	// 按容器高度算的：`pad = 高/2 - 一句/2`，于是 高 → pad → 内容更高 → 高更大，
-	// 一帧大一截，最后歌词区比窗口还高、顶上半截在屏幕外，而界面上看不出异样
-	// （放大、渐隐、译文全对，只有滚不到中间）。
-	//
-	// 直接 Column + `Grow(1)` 就对：主轴是竖的，高度由外层分给它，而框架**不会**
-	// 给 `Grow` 的那一个套上「不许比内容矮」这条下限（`mygo/ui/layout.go:720` 的
-	// `c.grow == 0`），所以内容再长也只是一个可滚动的容器。
-	ui.Column(c).Key(lyricsAreaKey).Grow(1).FillWidth().AlignItems(ui.Center).
+	ui.Column(c).Key(st.area).Grow(1).FillWidth().AlignItems(ui.Center).
 		Children(func() {
 			// 上游那一条 `max-w-4xl` + 居中（`index.tsx:352-355`）：歌词不贴着
 			// 窗口边，中间空出一段。
@@ -491,48 +571,63 @@ func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Dura
 			// 渐隐遮罩画在内容**之上**：`DrawOver` 在框架的绘制次序里排在子元素
 			// 和滚动条之后（`mygo/ui/paint.go:328`），而画成绝对定位的兄弟元素
 			// 会被容器的裁剪切掉。
-			scroll.DrawOver(func(p *ui.Painter, r ui.Rect) {
-				paintLyricFade(p, r, t.Background)
-			})
+			//
+			// ⚠️ **满屏那一屏不画它**（它走 `ramp` 那一档，理由见 `lyricStyle`）：
+			// 这一层是**盖一层底色**，而满屏的底是糊过的封面——盖出来的是背景上一个
+			// 看得见的方块。
+			if !st.ramp {
+				scroll.DrawOver(func(p *ui.Painter, r ui.Rect) {
+					paintLyricFade(p, r, st.fade)
+				})
+			}
 
 			scroll.Children(func() {
 				// ⚠️ `Padding` 四个值是「上、右、下、左」（`mygo/ui/element.go:722`
 				// 的 CSS 那一套）。写成 `Padding(0, padX, pad, pad)` 的话上面那份
 				// 居中留白跑到**左**边去了：第一句贴在顶上，而且越往下越往左缩。
-				ui.Column(c).Gap(lyricsLineGap).Padding(pad, lyricsPadX, pad, lyricsPadX).
-					Children(func() {
-						for i, row := range snap.Rows {
-							line := s.lyricLine(c, i, row, i == active, snap.FontSize, s.snapScroll)
-							if i == active {
-								lv.line = line.Bounds()
-							}
+				//
+				// ⚠️ **`AlignItems(ui.Center)` 只在满屏那一屏给**：迷你播放器那一页
+				// 的歌词是**左对齐**的（一页那么宽，左对齐读起来是一张歌词纸），
+				// 而满屏那一屏的歌词那一列有六百多宽——左对齐的话字全贴在左边，
+				// 右边空出一大块，看着像没画完。居中的是**每一行**（不是那一列）：
+				// 正在唱的那一句放大 1.5 倍，它在中间那一条上。
+				content := ui.Column(c).Gap(lyricsLineGap).
+					Padding(pad, lyricsPadX, pad, lyricsPadX)
+				if st.center {
+					content = content.AlignItems(ui.Center)
+				}
+				content.Children(func() {
+					for i, row := range snap.Rows {
+						line := s.lyricLine(c, i, active, row, snap.FontSize, st)
+						if i == active {
+							lv.line = line.Bounds()
 						}
-					})
+					}
+				})
 			})
 			s.trackScrollbar(scroll)
 		})
-
-	// 右下角浮着的那一列旋钮。⚠️ **偏移与字号画在没有歌词的时候不画**（传下去的
-	// 那个 `false`）：没有歌词时它们无处可附，落盘那边也不写（见
-	// `app.flushLyrics`），摆着两个按下去什么都不发生的旋钮比不摆更糟。而「找
-	// 歌词」那一个两种时候都画（见 `viewLyricKnobColumn`）。
-	s.viewLyricKnobColumn(c, snap, true)
-
-	// ⚠️ 放在整棵树建完之后：它要用容器和正在唱那一句的框，而那两个是上面读到的。
-	// snap = 「这一帧是窗口刚恢复可见的第一帧」，一次到位（见 centre 里那一支）。
-	lv.centre(c, active, lyricShapeOf(snap.Rows), snap.FontSize, s.snapScroll)
 }
 
 // lyricLine 画一句歌词，和叠在它下面的那句翻译。
 //
 // 返回这一句的元素：调用方拿它的 `Bounds()` 量出这一句有多高、在哪儿
 // （`Bounds()` 是上一帧的，见 lyricsView.box 那一段）。
-func (s *Shell) lyricLine(c *ui.Context, i int, row lyrics.Row, active bool, fontSize float32, snap bool) ui.Element {
-	t := c.Theme()
-
+//
+// active 是**正在唱的是第几句**（`-1` = 还没有哪一句到点）。它不只用来判「这一句
+// 是不是在唱」：满屏那一屏还按「离它多远」把两头的行压暗（见 `lyricRamp`）。
+//
+// st 是这一屏的画法（字色、行键前缀、居中还是左对齐），见 `lyricStyle`。
+func (s *Shell) lyricLine(c *ui.Context, i, active int, row lyrics.Row, fontSize float32, st lyricStyle) ui.Element {
 	line := ui.Column(c).
-		Key(lyricLineKey{at: row.At, i: i}).
-		FillWidth().Padding(lyricsLinePadY, lyricsPadX)
+		Key(lyricLineKey{ns: st.ns, at: row.At, i: i}).
+		Padding(lyricsLinePadY, lyricsPadX)
+	// ⚠️ **居中那一支不铺满**：铺满了那一行就永远是整列那么宽，字还是左对齐
+	// （`AlignItems` 管的是**行**的位置，不是行**里面**的字）。不铺满的话这一行
+	// 收成字那么宽，于是能被居中。
+	if !st.center {
+		line = line.FillWidth()
+	}
 
 	// 「这一句正在唱」这件事在这一行上是一个 0/1 的值，换句时由 300ms 的
 	// ease-out 推过去（`lyricLineAnim`）。
@@ -541,7 +636,7 @@ func (s *Shell) lyricLine(c *ui.Context, i int, row lyrics.Row, active bool, fon
 	// 的，建的时候值就在目标上。所以换歌、第一次找到歌词时，整屏歌词一上来就是
 	// 对的；会过渡的只有「已经画着的那一行被换成了唱/不唱」。
 	//
-	// ⚠️ `snap`（窗口刚从看不见恢复过来的那一帧）**一次到位**：和滚到中间那
+	// ⚠️ `s.snapScroll`（窗口刚从看不见恢复过来的那一帧）**一次到位**：和滚到中间那
 	// 一支是同一个理由（见 `centre` 里那一支）。窗口看不见那段时间里歌照常在
 	// 走，恢复那一刻用户要看的是「现在唱到哪一句」，不是一段补放的放大/缩小。
 	// 用 `Jump` 而不是一个 1ns 的 `AnimateTo`：`AnimateTo` 第一帧返回的还是旧值，
@@ -552,11 +647,11 @@ func (s *Shell) lyricLine(c *ui.Context, i int, row lyrics.Row, active bool, fon
 	// 句号不带时间，滚动、居中、渐隐的依据也都不带。带时间的只有下面的字号和
 	// 透明度——这一点是这一票刻意守的边界（见文件头）。
 	target := float32(0)
-	if active {
+	if i == active {
 		target = 1
 	}
 	var presence float32
-	if snap {
+	if s.snapScroll {
 		presence = line.Jump(lyricPresenceKey, target)
 	} else {
 		presence = line.AnimateTo(lyricPresenceKey, target, lyricLineAnim)
@@ -569,13 +664,21 @@ func (s *Shell) lyricLine(c *ui.Context, i int, row lyrics.Row, active bool, fon
 	opacity := float32(lyricsIdleOpacity) +
 		(lyricsActiveOpacity-lyricsIdleOpacity)*presence
 	weight := lyricsIdleWeight
-	if active {
+	if i == active {
 		weight = lyricsActiveWeight
+	}
+	// 满屏那一屏：离正在唱的那一句越远，这一行越暗（见 `lyricRamp`）。
+	if st.ramp {
+		dist := i - active
+		if dist < 0 {
+			dist = -dist
+		}
+		opacity *= lyricRamp(dist)
 	}
 	return line.Opacity(opacity).Children(func() {
 		ui.Text(c, row.Text).
 			FontSize(scale.Font(c, size)).FontWeight(weight).LineHeight(lyricsLineHeight).
-			TextColor(t.Text)
+			TextColor(st.color)
 		// 译文不是每行都有（`lyrics.Rows` 里 Translation 为空的那种，见那个
 		// 类型的注释），空的时候一个字都不画——留一个空行的话，上下两行
 		// 译文之间的缝会突然比别处大一倍。
@@ -585,7 +688,7 @@ func (s *Shell) lyricLine(c *ui.Context, i int, row lyrics.Row, active bool, fon
 				FontSize(scale.Font(c, lyricsTranslationSize)).
 				FixedLineHeight(lyricsTranslationLineHeight).
 				Opacity(lyricsTranslationOpacity).
-				TextColor(t.Text)
+				TextColor(st.color)
 		}
 	})
 }
@@ -594,6 +697,9 @@ func (s *Shell) lyricLine(c *ui.Context, i int, row lyrics.Row, active bool, fon
 //
 // 盖的是歌词区自己的底色（`t.Background`）：渐隐是「让歌词淡进背景里」，不是
 // 「让歌词变透明露出底下的东西」——迷你播放器这一页底下没有别的东西。
+//
+// ⚠️ **满屏那一屏不走这里**（它走 `lyricRamp` 那一档）：那底下是糊过的封面，
+// 盖一层底色会在背景上留下一个看得见的方块。
 func paintLyricFade(p *ui.Painter, r ui.Rect, bg ui.Color) {
 	top := r.H * lyricsFadeTop
 	bottom := r.H * lyricsFadeBottom
@@ -617,6 +723,36 @@ func lyricFade(bg ui.Color, stops []lyricFadeStop) ui.LinearGradient {
 		g.Stops = append(g.Stops, ui.GradientStop{Color: c, At: s.at})
 	}
 	return g
+}
+
+// lyricRamp 是「离正在唱的那一句越远越暗」的那一档。
+//
+// # 它替代的是上下那两条遮罩
+//
+// 上游那条 `maskImage`（`index.tsx:357-360`）是把**内容变透明**（两头的行淡进
+// 背景里），而我们那一层是**盖一层底色**——在迷你播放器那一页（底下就是主题的
+// 底色）两者是一回事，在满屏那一屏（底下是糊过的封面）却会在背景上留下一个
+// 看得见的方块。
+//
+// 于是满屏那一屏走这一档：按**离正在唱那一句的远近**把两头的行压暗，效果和
+// 上游那条遮罩一样，而背景一个像素都不动。
+//
+// # 那两个数
+//
+//	full  这么近之内还是全亮（2）。一屏十来行，正在唱的那一句在正中，
+//	      上下各五句——上下各两句全亮、往外开始暗，跟上游那 24% 的遮罩
+//	      （约两行半）对得上。
+//	step  每远一句暗多少（0.35）。到第五句就是 0（更远的完全看不见）。
+func lyricRamp(dist int) float32 {
+	const (
+		full = 2
+		step = 0.35
+	)
+	d := float32(dist - full)
+	if d <= 0 {
+		return 1
+	}
+	return max(0, 1-d*step)
 }
 
 // lyricFontStep 是字号滑块的步长，抄 `font-size-control.tsx:16` 那一段的

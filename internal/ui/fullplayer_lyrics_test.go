@@ -1,0 +1,376 @@
+// 满屏播放器接上歌词之后的样子（票 #236，UX 报告 F-08 + B3 + B4）：
+//
+//	满屏能显示歌词，「显示歌词」那枚开关真的管它
+//	没有歌词时是空状态（「暂无歌词」+ 一枚「找歌词」），不是整屏空白
+//	偏好面板有标题、能关、而且和齿轮对齐
+//
+// 这一族走仓库现成的接缝：外壳与测试器基座（shelltest_test.go）、假时钟
+// （clock.go）、`BIU_SHOT_DIR` 出图。
+package ui
+
+import (
+	"image"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/app"
+	mygoui "github.com/egoist/mygo/ui"
+)
+
+// fullTestLRC 是这一组测试用的那份歌词：四句，各带一个时间戳。
+//
+// ⚠️ **句数要够**：一屏放得下十来句才看得出「滚到中间」那件事，而四句是
+// 「一屏放得下」的最小值——再多几句，这一组测试就慢起来了。
+const fullTestLRC = "[00:00.00]第一句\n[00:01.00]第二句\n[00:02.00]第三句\n[00:03.00]第四句\n"
+
+// fullLyricsTester 造一个开着歌、**暂停着**、挂着假歌词源的外壳 + Tester。
+//
+// ⚠️ **假源是必须的**：满屏那个「找歌词」的键会真的去搜（那是它存在的意义），
+// 而不挂源的话那一次搜索会打到真网上去——验收一律走 fixture（AGENTS §6）。
+//
+// ⚠️ **暂停是必须的**：歌在放的时候播放位置一直在走，于是「正在唱的是第几句」
+// 每隔一秒换一句，而换一句就要重新对一次滚动的目标——界面于是永远在要帧
+// （`settleFull` 等不到它停）。歌词那一列的滚动要停下来，位置就得停住。
+func fullLyricsTester(t *testing.T) (*Shell, *mygoui.Tester, *fakeClock) {
+	t.Helper()
+	s, tt, fc := fullTester(t)
+	s.app.Pause()
+	s.app.SetWake(s.wake.invalidate)
+	s.app.MountLyricSources(lrclibSource(cand("1", "第一句")))
+	return s, tt, fc
+}
+
+// fullNoLyricsPrefs 把「显示歌词」关掉——满屏那一屏于是不画歌词。
+//
+// ⚠️ **这是给「量界面」的那些测试用的**：歌词是**内容**，界面藏起来之后它还在
+// （见 `TestTheLyricsStayWhenTheInterfaceHides`），而那些测试量的是「界面上还
+// 有没有亮像素」——歌词的字也在那儿，会把量出来的东西搅浑。
+func fullNoLyricsPrefs(t *testing.T, s *Shell) {
+	t.Helper()
+	p := app.DefaultFullPlayerPrefs()
+	p.ShowLyrics = false
+	s.app.SetFullPlayerPrefs(p)
+}
+
+// TestTheLyricsStayWhenTheInterfaceHides 钉住「歌词是内容，不是界面」。
+//
+// 满屏那个「三秒不动就藏起来」藏的是顶栏、频谱和底栏那些**控件**；封面和歌词
+// 是**内容**——用户盯着歌词读词，指针不动三秒就把字也收走的话，满屏那一屏就
+// 只剩一张封面了（而满屏存在的理由正是看歌词）。
+//
+// 判据是**画面上还有没有亮像素**：正在唱的那一句是全亮的（别的句是 60%），
+// 界面藏起来之后它还在，就说明歌词没跟着藏。
+func TestTheLyricsStayWhenTheInterfaceHides(t *testing.T) {
+	s, tt, fc := fullLyricsTester(t)
+	s.app.PutLyrics(fullTestLRC, "")
+	openFull(t, tt)
+	tt.Move(600, 400)
+	tt.Frame()
+
+	advanceFull(s, tt, fc, biuHideSeconds*time.Second+time.Second)
+	if !s.fullHidden() {
+		t.Fatal("三秒过去了界面没有藏起来")
+	}
+	line, ok := tt.Find("第一句")
+	if !ok {
+		t.Fatalf("找不到「第一句」，文字有 %q", tt.Texts())
+	}
+	if n := brightIn(tt.Image(), line); n == 0 {
+		t.Errorf("界面藏起来之后歌词一个亮像素都没有了——歌词是内容，不该跟着控件一起藏")
+	}
+}
+
+// TestTheFullPlayerShowsTheLyrics 断满屏那一屏真的画歌词。
+//
+// ⚠️ **判据不只是「文字出现了」**：歌词也可能压在封面底下（那一屏的底是糊过
+// 的封面，字照样在画面上）。所以量的是它和**封面右沿**的关系——它在右边那一列。
+func TestTheFullPlayerShowsTheLyrics(t *testing.T) {
+	s, tt, _ := fullLyricsTester(t)
+	s.app.PutLyrics(fullTestLRC, "")
+	openFull(t, tt)
+	settleFull(t, tt)
+
+	for _, want := range []string{"第一句", "第二句", "第三句", "第四句"} {
+		if !tt.HasText(want) {
+			t.Fatalf("满屏上没有歌词 %q，文字有 %q", want, tt.Texts())
+		}
+	}
+	cover, ok := tt.Find("当前封面")
+	if !ok {
+		t.Fatalf("满屏上找不到封面，文字有 %q", tt.Texts())
+	}
+	line, ok := tt.Find("第二句")
+	if !ok {
+		t.Fatalf("找不到「第二句」，文字有 %q", tt.Texts())
+	}
+	if line.X < cover.X+cover.W {
+		t.Errorf("歌词压在封面底下（歌词 x=%.1f，封面右沿 %.1f）——"+
+			"它应该在右边那一列", line.X, cover.X+cover.W)
+	}
+}
+
+// TestTurningOffTheLyricsHidesThem 断「显示歌词」那枚开关真的管画面。
+//
+// 摆一个按下去什么都不变的开关比不摆更坏（见 fullplayer_settings.go 顶上）。
+func TestTurningOffTheLyricsHidesThem(t *testing.T) {
+	s, tt, _ := fullLyricsTester(t)
+	s.app.PutLyrics(fullTestLRC, "")
+	openFull(t, tt)
+	settleFull(t, tt)
+	if !tt.HasText("第一句") {
+		t.Fatalf("满屏上本来就没有歌词，文字有 %q", tt.Texts())
+	}
+
+	if err := tt.Click("全屏设置"); err != nil {
+		t.Fatalf("点不了偏好面板：%v（文字：%q）", err, tt.Texts())
+	}
+	tt.Frame()
+	if err := tt.Click("开关：显示歌词"); err != nil {
+		t.Fatalf("点不了歌词开关：%v", err)
+	}
+	tt.Frame()
+
+	if tt.HasText("第一句") {
+		t.Error("关掉「显示歌词」之后歌词还在画面上")
+	}
+	if s.app.FullPlayerPrefs().ShowLyrics {
+		t.Error("偏好里没有记下歌词关着")
+	}
+	// 关掉之后右边那一栏让出来了：封面回到**整窗**里居中。
+	cover, ok := tt.Find("当前封面")
+	if !ok {
+		t.Fatalf("关掉歌词之后封面不见了，文字有 %q", tt.Texts())
+	}
+	if d := absF(cover.X + cover.W/2 - float32(fullWinW)/2); d > 1 {
+		t.Errorf("关掉歌词之后封面的中心在 x=%.1f，窗口中线是 %d——"+
+			"它没有回到整窗里居中", cover.X+cover.W/2, fullWinW)
+	}
+}
+
+// TestTheFullPlayerSaysWhenThereAreNoLyrics 断「没有歌词」时是空状态。
+//
+// ⚠️ **这一条是 UX 报告 B3**：满屏开着、这一首没有歌词的时候，界面上一个字都
+// 不说——用户分不清是「这一首没有」还是「这一版没做」。
+func TestTheFullPlayerSaysWhenThereAreNoLyrics(t *testing.T) {
+	_, tt, _ := fullLyricsTester(t)
+	openFull(t, tt)
+	settleFull(t, tt)
+
+	if !tt.HasText("暂无歌词") {
+		t.Fatalf("满屏上没有说「暂无歌词」，文字有 %q", tt.Texts())
+	}
+	// 而「怎么才能不空」那一句要兑现得了：找歌词那一枚摆着，按下去开搜索弹窗。
+	if !tt.HasText(lyricSearchKnobLabel) {
+		t.Fatalf("没有歌词时那一枚「%s」没摆，文字有 %q",
+			lyricSearchKnobLabel, tt.Texts())
+	}
+	if err := tt.Click(lyricSearchKnobLabel); err != nil {
+		t.Fatalf("点不了「%s」：%v", lyricSearchKnobLabel, err)
+	}
+	tt.Frame()
+	if !tt.HasText(lyricSearchHeading) {
+		t.Errorf("按了「%s」，搜索弹窗没开，文字有 %q",
+			lyricSearchKnobLabel, tt.Texts())
+	}
+}
+
+// TestTheLyricsColorSwitchChangesTheLyrics 断「歌词字体颜色」那一枚真的管字色。
+//
+// 它以前也是死控件（满屏没有歌词视图，挑了颜色画面上什么都不会变）。
+//
+// 判据是**画面上的像素**：歌词是红的（挑的就是红），而别的字（歌名那些）
+// 仍然是满屏自己的前景色。
+func TestTheLyricsColorSwitchChangesTheLyrics(t *testing.T) {
+	s, tt, _ := fullLyricsTester(t)
+	s.app.PutLyrics(fullTestLRC, "")
+	p := app.DefaultFullPlayerPrefs()
+	p.LyricsColor = "#ff0000"
+	s.app.SetFullPlayerPrefs(p)
+	openFull(t, tt)
+	settleFull(t, tt)
+
+	line, ok := tt.Find("第二句")
+	if !ok {
+		t.Fatalf("找不到「第二句」，文字有 %q", tt.Texts())
+	}
+	if n := redIn(tt.Image(), line); n == 0 {
+		t.Errorf("歌词那一块里一个红的像素都没有（字色没跟着「歌词字体颜色」走）")
+	}
+}
+
+// redIn 是 box 里「明显是红」的像素个数。
+func redIn(img *image.RGBA, box mygoui.Rect) int {
+	n := 0
+	for y := max(int(box.Y), img.Rect.Min.Y); y < min(int(box.Y+box.H), img.Rect.Max.Y); y++ {
+		for x := max(int(box.X), img.Rect.Min.X); x < min(int(box.X+box.W), img.Rect.Max.X); x++ {
+			p := img.RGBAAt(x, y)
+			if p.R > 120 && p.G < 90 && p.B < 90 {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// TestTheFullSettingsPanelHasATitleAndCanBeClosed 断偏好面板有标题、能关。
+//
+// ⚠️ **两条都是 UX 报告 B4**：面板没有标题（用户得靠里面的开关名猜这是什么
+// 面板），只能再点一次齿轮关掉（忘了齿轮在哪，面板就一直浮在歌的封面上）。
+func TestTheFullSettingsPanelHasATitleAndCanBeClosed(t *testing.T) {
+	s, tt, _ := fullLyricsTester(t)
+	openFull(t, tt)
+	if err := tt.Click("全屏设置"); err != nil {
+		t.Fatalf("点不了偏好面板：%v（文字：%q）", err, tt.Texts())
+	}
+	tt.Frame()
+
+	if !tt.HasText(fullSettingsTitle) {
+		t.Errorf("偏好面板没有标题 %q，文字有 %q", fullSettingsTitle, tt.Texts())
+	}
+	if err := tt.Click("关闭设置"); err != nil {
+		t.Fatalf("面板上没有「关闭设置」那一枚：%v（文字：%q）", err, tt.Texts())
+	}
+	tt.Frame()
+	if s.full.settings {
+		t.Error("按了「关闭设置」，面板还开着")
+	}
+	// 关掉之后面板里那些开关也不在了。
+	if tt.HasText("显示频谱图") {
+		t.Errorf("面板关了，「显示频谱图」还在画面上，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheFullSettingsPanelLinesUpWithTheGear 断面板的左沿和齿轮的**图形**左沿对齐。
+//
+// ⚠️ **对齐的是图形，不是那枚键的点击区**：齿轮的点击区是 32 见方、图形是 22，
+// 图形在框里居中（左右各留 5）。面板默认贴在点击区的左沿上，于是它比图形左沿
+// 还左 5——看过去就是「从按钮底下歪出来一块」（UX 报告 B4 的第三条）。
+func TestTheFullSettingsPanelLinesUpWithTheGear(t *testing.T) {
+	_, tt, _ := fullLyricsTester(t)
+	openFull(t, tt)
+	gear, ok := tt.Find("全屏设置")
+	if !ok {
+		t.Fatalf("找不到「全屏设置」，文字有 %q", tt.Texts())
+	}
+	if err := tt.Click("全屏设置"); err != nil {
+		t.Fatalf("点不了偏好面板：%v", err)
+	}
+	tt.Frame()
+
+	panel, ok := tt.Find("全屏设置面板")
+	if !ok {
+		t.Fatalf("画面上找不到偏好面板那个盒子，文字有 %q", tt.Texts())
+	}
+	wantX := gear.X + fullSettingsAlignPad
+	if d := absF(panel.X - wantX); d > 1 {
+		t.Errorf("面板左沿在 x=%.1f，齿轮的图形左沿是 %.1f（键的左沿 %.1f + %d）——"+
+			"面板没有和齿轮对齐", panel.X, wantX, gear.X, fullSettingsAlignPad)
+	}
+}
+
+// ---- 出图 ----
+
+// TestRenderFullPlayerLyricsShot 存图：满屏播放器**带歌词**的那一屏，深浅各一套。
+//
+//	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderFullPlayerLyricsShot
+//
+// ⚠️ **深浅两套都要出**：满屏的字是白 92%（浅色底上换成黑 92%），而歌词那一列
+// 是这一屏里唯一一大块字——只出一套等于没验它压在两种底上读不读得出来。
+func TestRenderFullPlayerLyricsShot(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	body := splitCoverPNG(t, 1200, 1200)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			b := newTestShell(t, at(fullWinW, fullWinH), systemIsDark(dark),
+				withClock(newFakeClock(time.Unix(1_700_000_000, 0))))
+			item := app.LocalItem(flacPath(t))
+			item.Cover = srv.URL + "/cover.png"
+			if err := b.a.Enqueue(item); err != nil {
+				t.Fatalf("把歌放进队列：%v", err)
+			}
+			waitFrames(t, b.tt, "歌开起来了", func() bool {
+				return b.a.Snapshot().HasTrack
+			})
+			waitFrames(t, b.tt, "封面下回来了", func() bool {
+				return b.s.images.Get(item.Cover).Ready()
+			})
+			// ⚠️ **暂停**：歌在放的时候播放位置一直在走，于是「正在唱的是第几句」
+			// 每隔一秒换一句，而换一句就要重新对一次滚动的目标——界面于是永远在
+			// 要帧（`settleFull` 等不到它停，出来的是一张半路上的图）。
+			b.a.Pause()
+			b.a.PutLyrics(fullTestLRC, "")
+			b.s.openFullPlayer()
+			waitFrames(t, b.tt, "满屏开出来了", func() bool {
+				return b.tt.HasText("关闭全屏")
+			})
+			settleFull(t, b.tt)
+			save(t, dir, "63-满屏播放器-歌词-"+name+".png", b.tt)
+			b.Close()
+		})
+	}
+}
+
+// TestRenderFullPlayerNoLyricsShot 存图：满屏播放器**这一首没有歌词**的那一屏。
+//
+//	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderFullPlayerNoLyricsShot
+//
+// 这一张是给 B3 那一格留的证据：空状态**不是整屏空白**。
+func TestRenderFullPlayerNoLyricsShot(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	body := splitCoverPNG(t, 1200, 1200)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			b := newTestShell(t, at(fullWinW, fullWinH), systemIsDark(dark),
+				withClock(newFakeClock(time.Unix(1_700_000_000, 0))))
+			item := app.LocalItem(flacPath(t))
+			item.Cover = srv.URL + "/cover.png"
+			if err := b.a.Enqueue(item); err != nil {
+				t.Fatalf("把歌放进队列：%v", err)
+			}
+			waitFrames(t, b.tt, "歌开起来了", func() bool {
+				return b.a.Snapshot().HasTrack
+			})
+			waitFrames(t, b.tt, "封面下回来了", func() bool {
+				return b.s.images.Get(item.Cover).Ready()
+			})
+			// ⚠️ **暂停**：理由同上（位置一直在走，界面就一直在要帧）。
+			b.a.Pause()
+			b.s.openFullPlayer()
+			waitFrames(t, b.tt, "满屏开出来了", func() bool {
+				return b.tt.HasText("关闭全屏")
+			})
+			settleFull(t, b.tt)
+			save(t, dir, "64-满屏播放器-没有歌词-"+name+".png", b.tt)
+			b.Close()
+		})
+	}
+}
+
+// ---- 小帮手 ----

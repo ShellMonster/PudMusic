@@ -385,7 +385,7 @@ func (s *Shell) viewFullPlayer(c *ui.Context, st app.State) {
 
 		probe.Children(func() {
 			s.viewFullTopBar(c, st, hidden)
-			s.viewFullCover(c, st, hidden)
+			s.viewFullStage(c, st, hidden)
 			s.viewFullSpectrum(c, st, hidden)
 			s.viewFullControls(c, st, hidden)
 			s.viewFullParts(c, hidden)
@@ -677,9 +677,14 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 				s.disarmFullHide()
 			}
 		}
-		ui.Popover(c, gear, &s.full.settings, func() {
-			s.viewFullSettings(c)
-		})
+		// ⚠️ **自己拼面板**（`PopoverBase`）而不是框架那个 `ui.Popover`：框架
+		// 那一版把面板钉在锚点（这枚键的**点击区**）的左沿，而我们要的是面板的
+		// 左沿和**图形**的左沿对齐（见 `fullSettingsAlignPad`）。
+		//
+		// 拼面板的那一支在 `fullplayer_settings.go`（面板的**外观**和**内容**
+		// 都在那儿，而自己拼的面板必须和 `popupPanel` 那个出口在同一个文件里——
+		// `popup_test.go` 盯着这一条）。
+		s.viewFullSettingsPopover(c, gear)
 	})
 
 	// 关掉的那一下要把三秒重新算起。
@@ -713,9 +718,59 @@ func fullTitleMaxWidth(c *ui.Context) float32 {
 	return winW * 0.4
 }
 
-// ---- 封面（共享元素） ----
+// ---- 中间那一块：封面（左边）与歌词（右边） ----
 
-// viewFullCover 是满屏中间那张封面——**和播放条上那一张是同一个元素**。
+// fullCoverColRatio 是左边那一列（封面）占窗口宽的几成。
+//
+// ⚠️ **0.42 是「封面 + 留白」那一块**：上游那个封面宽度式子（`fullCoverSize`）
+// 算出来最多 520，而窗口 1200 宽时右边要留给歌词——两样各占一半的话封面会被
+// 压到 520 以下（上游那个数就白抄了）。0.42 的话 1200 宽的窗口上左边那一列是
+// 504，封面 384 摆得下（两边各留 60），右边 696 留给歌词。
+const fullCoverColRatio = 0.42
+
+// fullStageRect 是中间那一块的区域：顶栏与底栏之间那一段。
+//
+// ⚠️ **底下那一条给频谱留了位置**（`fullSpectrumHeight + fullSpectrumGapY`）：
+// 频谱是画在底栏正上方那一段的（`viewFullSpectrum` 的 `Bottom(...)`），而歌词
+// 那一列要是铺到那儿，频谱就压在歌词上——一堆每帧重画的条从字上穿过去，
+// 两样都读不出来。
+func fullStageRect(c *ui.Context) ui.Rect {
+	winW, winH := c.Size()
+	top := float32(fullTopHeight)
+	bottom := winH - float32(fullControlsHeight) -
+		float32(fullSpectrumHeight+fullSpectrumGapY)
+	return ui.Rect{X: 0, Y: top, W: winW, H: max(bottom-top, 0)}
+}
+
+// viewFullStage 画中间那一块：左边封面，右边歌词。
+//
+// # 分不分栏只看「显示歌词」那一个开关
+//
+// ⚠️ **不看这首歌有没有歌词**：歌词是**异步**到的（缓存读回来、`PutLyrics`
+// 都在后台），而布局跟着歌词的有无跳来跳去，用户看着的是封面自己动了一下
+// ——而他什么都没做。开关是用户自己按的，布局跟着它走才是可预期的。
+//
+// # 歌词关着的时候，这一块就是原来那一块
+//
+// 封面在**整窗**里居中（和「显示歌词」开着之前一模一样）；开着的时候封面
+// 挪到左边那一列，右边让给歌词。
+func (s *Shell) viewFullStage(c *ui.Context, st app.State, hidden bool) {
+	prefs := s.app.FullPlayerPrefs()
+	stage := fullStageRect(c)
+	if !prefs.ShowLyrics {
+		s.viewFullCover(c, st, hidden, stage)
+		return
+	}
+	colW := stage.W * fullCoverColRatio
+	s.viewFullCover(c, st, hidden, ui.Rect{X: stage.X, Y: stage.Y, W: colW, H: stage.H})
+	s.viewFullLyrics(c, st, ui.Rect{
+		X: stage.X + colW, Y: stage.Y, W: stage.W - colW, H: stage.H,
+	})
+}
+
+// viewFullCover 是满屏那张封面——**和播放条上那一张是同一个元素**。
+//
+// area 是它待的那一块：歌词开着的时候是左边那一列，关着的时候是整窗。
 //
 // 🔴 这里的 `Match` 就是 SwiftUI `matchedGeometryEffect` 的等价物，见 coverMatch。
 // 它和 `viewCover`（播放条那一张）轮流带同一个 `coverTransition(id)`。
@@ -730,21 +785,20 @@ func fullTitleMaxWidth(c *ui.Context) float32 {
 // 于是它是接点击的那一个——指针落在封面正中时 `CursorNone` 根本轮不到探针。
 // 实测：满屏指针放在封面正中（600,400）推进 3 秒，光标是箭头而不是 none。
 // 照抄探针那一支（`viewFullPlayer` 里 `probe.Cursor(ui.CursorNone)`）就对了。
-func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool) {
+func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.Rect) {
 	// 「显示封面」关掉就一个字都不建（Biu 的 `{!isLocal && showCover && <Image …>}`
 	// ——`index.tsx:328`）。本地那一半的判据（`!isLocal`）不在这一层：本地文件
 	// 没有封面时画的是占位图，关掉它照样是「中间不摆东西」，和上游同一个结果。
 	if !s.app.FullPlayerPrefs().ShowCover {
 		return
 	}
-	winW, winH := c.Size()
-	w, h := fullCoverSize(c)
+	w, h := fullCoverSize(c, area.W)
 	// ⚠️ **自己算位置**，不要用 `Absolute().Center()`：那个 `Center` 是「把**子**
 	// 元素沿着主轴居中」（`mygo/ui/api_gen.go:3006`），不是「把这个元素摆到中间」。
 	// 这么写的后果是外层那个 Box 宽高就是封面本身、贴在左边 x=0，
 	// 界面上是「封面靠左」，而转场的终点也跟着错。
 	box := ui.Box(c).Key("full-cover").
-		Absolute().Left((winW-w)/2).Top((winH-h)/2).Size(w, h)
+		Absolute().Left(area.X+(area.W-w)/2).Top(area.Y+(area.H-h)/2).Size(w, h)
 	if hidden {
 		box = box.Cursor(ui.CursorNone)
 	}
@@ -790,10 +844,17 @@ func coverIdentity(s *Shell, st app.State) string {
 //
 // Biu：`Math.max(260, Math.min(windowWidth * 0.7, windowHeight * 0.48, 520))`
 // 然后 `coverHeight = coverWidth * 0.75`。
-func fullCoverSize(c *ui.Context) (float32, float32) {
+//
+// ⚠️ **maxW 是「它待的那一块有多宽」**：歌词开着的时候封面只占左边那一列，
+// 而上游那个式子算出来的宽度（最多 520）可能比那一列还宽——那就压到歌词上去了。
+// 夹一下之后窄窗口里的封面跟着那一列一起变小，而宽高的比例不变。
+func fullCoverSize(c *ui.Context, maxW float32) (float32, float32) {
 	winW, winH := c.Size()
 	w := min(winW*0.7, winH*0.48)
 	w = min(max(w, fullMinCoverWidth), fullMaxCoverWidth)
+	if maxW > 0 {
+		w = min(w, maxW)
+	}
 	return w, w * fullCoverAspect
 }
 

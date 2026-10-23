@@ -21,10 +21,12 @@
 // （`store/full-screen-player-settings.ts:21-29`）。看
 // `TestTheSpectrumIsOffUntilTheUserTurnsItOn` 和 `TestTheDefaultsMatchBiusStore`。
 //
-// ⚠️ **满屏这一屏没有歌词视图**（歌词区在迷你播放器那一页，见
-// `nowplaying.go`），所以「显示歌词」和「歌词字体颜色」改的是偏好里的值，
-// 这一屏的画面上没有歌词跟着变。票 #169 要的是**面板补齐**——上游那七项一项
-// 不少，键名和默认值都和它的 store 对齐，将来满屏接歌词时直接用这一份。
+// # 四个开关**每一个都真的管画面**（票 #236）
+//
+// 「显示歌词」和「歌词字体颜色」以前是**死控件**：偏好里存着，而满屏那一屏
+// 没有歌词视图（歌词区在迷你播放器那一页，见 `nowplaying.go`），拨了画面上什么
+// 都不会变——用户只会以为整个设置面板坏了。现在满屏接上了歌词
+// （`fullplayer_lyrics.go`），那两个开关真的管右边那一列歌词。
 //
 // ## 面板的尺寸
 //
@@ -37,6 +39,10 @@
 // 上游那块是 `h-8 w-12 rounded-full border`（48×32 的药丸，`settings-panel.tsx:142`）。
 // 取色器仍然是框架的 `ui.ColorWell`（和设置页 `colorItem` 同一个），只是把
 // 它的底色和描边让给外面那颗药丸——设置页那口是 100×40 的方色块，这里照上游。
+//
+// ## 面板顶上那一行
+//
+// 标题 + 一枚「×」（UX 报告 B4：面板没有标题、没有关闭方式）。
 
 package ui
 
@@ -47,6 +53,20 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+)
+
+const (
+	// fullSettingsTitle 是偏好面板的标题。
+	fullSettingsTitle = "显示"
+
+	// fullSettingsAlignPad 是面板左沿往右让开多少，好让**面板的左沿和齿轮的
+	// 图形左沿对齐**。
+	//
+	// ⚠️ **5 是那枚键自己的留白**：齿轮的点击区是 32 见方（`iconHit`），图形是
+	// 22，所以图形在框里居中、左右各留 5（`viewFullTopBar` 里的 `Padding(0, 5)`）。
+	// 面板默认贴在**点击区**的左沿上，于是它比图形左沿还左 5——看过去就是
+	// 「从按钮底下歪出来一块」（UX 报告 B4 的第三条）。
+	fullSettingsAlignPad = 5
 )
 
 // MountFullPlayerPrefs 把全屏播放器那份偏好挂到盘上。
@@ -66,10 +86,9 @@ func MountFullPlayerPrefs(a *app.App) {
 	a.MountFullPlayerPrefs(app.FullPlayerPrefsPath(dir))
 }
 
-// viewFullSettings 是偏好面板。
+// viewFullSettings 是偏好面板的**内容**。
 //
-// 它在 `ui.Popover` 里面（挂在顶上那个齿轮上，Biu 那边是 PopoverTrigger +
-// PopoverContent）。`Popover` 自己带「点外面关掉」和「Esc 关掉」。
+// 面板那个浮层是 `viewFullSettingsPanel`（外观 + 对齐），内容是这里。
 func (s *Shell) viewFullSettings(c *ui.Context) {
 	prefs := s.app.FullPlayerPrefs()
 
@@ -80,6 +99,7 @@ func (s *Shell) viewFullSettings(c *ui.Context) {
 	showCover, blurred := prefs.ShowCover, prefs.ShowBlurredBackground
 
 	ui.Column(c).Width(320).Padding(16).Gap(16).Children(func() {
+		s.fullSettingsHeader(c)
 		s.fullSwitchRow(c, "显示歌词", &showLyrics, func(on bool) {
 			s.setFullPrefs(func(p *app.FullPlayerPrefs) { p.ShowLyrics = on })
 		})
@@ -124,6 +144,65 @@ func (s *Shell) viewFullSettings(c *ui.Context) {
 				func() {
 					s.setFullPrefs(func(p *app.FullPlayerPrefs) { p.BackgroundColor = "" })
 				})
+		}
+	})
+}
+
+// viewFullSettingsPopover 把偏好面板那个浮层挂在齿轮上。
+//
+// ⚠️ **自己拼**（`PopoverBase`），不是框架那个 `ui.Popover`——理由见
+// `viewFullSettingsPanel`。
+func (s *Shell) viewFullSettingsPopover(c *ui.Context, gear ui.Element) {
+	ui.PopoverBase(c, gear, &s.full.settings, func(panel ui.Element) {
+		s.viewFullSettingsPanel(c, panel, gear)
+	})
+}
+
+// viewFullSettingsPanel 画偏好面板那个浮层：外观 + 对齐，内容是 `viewFullSettings`。
+//
+// # ⚠️ **面板自己拼**（`PopoverBase`），不是框架那个 `ui.Popover`
+//
+// 框架那一版把面板钉在锚点（那枚齿轮键）的**左沿**，给不了「往右让开 5」这个
+// 偏移——而那正是「面板的左缘和齿轮对齐」要的那一档：齿轮的点击区是 32 见方、
+// 图形是 22（左右各留 5），面板默认贴在点击区的左沿上，于是它比**图形**的左沿
+// 还左 5，看过去就是「从按钮底下歪出来一块」（UX 报告 B4）。
+//
+// 拼出来的面板**走共享出口 `popupPanel`**：底色、描边、圆角、阴影四件一样都不少
+// （理由见 popup.go；`popup_test.go` 的 `TestEveryHandMadePopupHasAShadow` 盯着
+// 这一条）。
+//
+// 而「点外面关掉」和「Esc 关掉」是框架那个浮层自己管的，`PopoverBase` 一样有
+// （`mygo/ui/base.go` 的 `popover`）——换成自己拼并不会丢掉那两个手势。
+func (s *Shell) viewFullSettingsPanel(c *ui.Context, panel, gear ui.Element) {
+	t := c.Theme()
+	popupPanel(t, panel.
+		AttachTo(gear, ui.AnchorBottomStart, ui.AnchorTopStart).
+		// ⚠️ **Margin 的四个值是「上、右、下、左」**：这里给的是面板与齿轮之间
+		// 那道缝（框架自己那个浮层也留 4，见 `stylePanel`）。
+		Margin(t.Space(1), 0, 0, 0).
+		MarginStart(fullSettingsAlignPad).
+		// 面板自己有个名字：读屏软件念得出「全屏设置面板」，而无头 Tester 也
+		// 靠它找这个盒子（对齐那一条要量它的左沿）。
+		Label("全屏设置面板"))
+	s.viewFullSettings(c)
+}
+
+// fullSettingsHeader 是面板顶上那一行：左边标题，右边一枚「×」。
+//
+// ⚠️ **标题是「这是什么面板」**：以前面板一打开就是四行开关，用户得自己判断
+// 「显示什么」（UX 报告 B4 的第一条）。
+//
+// ⚠️ **关闭的那一枚是图标键**（`iconClose` 是 `System/close-line.svg`）：面板顶上
+// 摆一枚带框的药丸会把标题压住，而「×」是这一类面板的通用记号。
+//
+// 而**面板本来就能关**（点外面、按 Esc，框架那个浮层自己管），这一枚是给「忘了
+// 齿轮在哪」的人留的出口（UX 报告 B4 的第二条：只能再点一次齿轮关掉）。
+func (s *Shell) fullSettingsHeader(c *ui.Context) {
+	ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, fullSettingsTitle).FontSize(scale.Font(c, 14)).FontWeight(500)
+		if flatIconButton(c, iconClose, "关闭设置", 16).
+			Size(24, 24).Padding(0, 4).Clicked() {
+			s.full.settings = false
 		}
 	})
 }
