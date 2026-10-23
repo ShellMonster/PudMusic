@@ -39,6 +39,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -191,7 +192,7 @@ func (s *Shell) viewCoverCrop(c *ui.Context, crop *cropState) {
 	modal := ui.Modal(c, &crop.open, func() {
 		ui.Text(c, "裁剪封面").FontSize(scale.Font(c, 15)).Bold()
 		s.viewCropStage(c, crop)
-		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+		ui.Row(c).Gap(space.Px8).Justify(ui.End).Children(func() {
 			if ui.Button(c, "取消").Disabled(crop.uploading).Clicked() {
 				s.closeCrop(crop)
 			}

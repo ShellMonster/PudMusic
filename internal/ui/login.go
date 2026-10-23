@@ -30,6 +30,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -69,7 +70,7 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 
 	loginScroll := ui.Scroll(c).Key("login-scroll").Grow(1)
 	loginScroll.Children(func() {
-		ui.Column(c).Key("page:"+loginPath).Grow(1).Padding(0, 20).Gap(12).
+		ui.Column(c).Key("page:"+loginPath).Grow(1).Padding(space.None, space.Px20).Gap(space.Px12).
 			AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "扫码登录").FontSize(scale.Font(c, pageTitleSize))
 
@@ -208,7 +209,7 @@ func qrDisplaySize(code *bili.Code) int {
 // 摆在那里只会让用户以为扫码失败了。
 func (s *Shell) qrActions(c *ui.Context, st app.LoginState) {
 	t := c.Theme()
-	ui.Row(c).Key("qr-actions").Gap(10).Children(func() {
+	ui.Row(c).Key("qr-actions").Gap(space.Px10).Children(func() {
 		switch st.Phase {
 		case app.LoginIdle:
 			if ui.PrimaryButton(c, "开始扫码登录").Clicked() {
@@ -254,7 +255,7 @@ func (s *Shell) viewAccountFooter(c *ui.Context, t *ui.Theme, st app.LoginState)
 		return
 	}
 	sess := s.app.Session()
-	ui.Row(c).Key("account-footer").Gap(10).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Key("account-footer").Gap(space.Px10).AlignItems(ui.Center).Children(func() {
 		if uid := sess.DedeUserID; uid != "" {
 			ui.Text(c, "已登录（UID "+uid+"）").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 		} else {
@@ -309,13 +310,13 @@ func qrHintColor(t *ui.Theme, phase app.LoginPhase) ui.Color {
 func (s *Shell) viewLoginEntry(c *ui.Context) {
 	if s.app.LoggedIn() {
 		if s.withTip(c, iconButton(c, iconLogout, "退出登录", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 7), "退出登录").Clicked() {
+			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "退出登录").Clicked() {
 			s.logoutAndStartOver()
 		}
 		return
 	}
 	if s.withTip(c, iconButtonPrimary(c, iconLogin, "登录", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 7), "登录 B 站账号").Clicked() {
+		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "登录 B 站账号").Clicked() {
 		s.goLogin()
 	}
 }

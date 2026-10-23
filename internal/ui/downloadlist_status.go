@@ -26,6 +26,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -140,13 +141,13 @@ func (d *downloadsPage) viewStatus(c *ui.Context, r download.Snapshot) {
 		return
 	}
 
-	ui.Column(c).FillWidth().Gap(4).Children(func() {
+	ui.Column(c).FillWidth().Gap(space.Px4).Children(func() {
 		if cell.danger {
 			statusBar(c, cell.bar, c.Theme().Danger)
 		} else {
 			statusBar(c, cell.bar, ui.Hex(dlBarColor))
 		}
-		ui.Row(c).FillWidth().Gap(8).Children(func() {
+		ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
 			// 出错时这一段是错误原因，允许折两行（上游的 `line-clamp-2`）。
 			ui.Text(c, cell.text).Grow(1).FontSize(scale.Font(c, 12)).TextColor(cell.c).
 				MaxLines(2).Ellipsis("…")
@@ -174,7 +175,7 @@ const dlPctW = 40
 // `space-x-1`（4px）的缝。
 const (
 	dlDoneIconSize = 16
-	dlDoneGap      = 4
+	dlDoneGap      = space.Px4
 )
 
 // dlBarColor 是进度条涂的那个颜色。

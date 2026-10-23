@@ -22,6 +22,7 @@ package ui
 import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -41,7 +42,7 @@ func (s *Shell) settingsShortcuts(c *ui.Context) {
 	//（这一页不画了，录制状态就该收掉，理由见那里）。
 	s.recorderShown = true
 
-	ui.Column(c).FillWidth().Gap(12).Children(func() {
+	ui.Column(c).FillWidth().Gap(space.Px12).Children(func() {
 		// 顶上那一行：Biu 的 `<h2>快捷键设置</h2>` 和右边的「恢复默认」。
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "快捷键设置").FontSize(scale.Font(c, 20)).Grow(1)
@@ -70,7 +71,7 @@ func (s *Shell) settingsShortcuts(c *ui.Context) {
 			FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 
 		// 三列的表头。Biu 的 `grid grid-cols-[1fr_200px_200px]`（`:102`）。
-		ui.Row(c).FillWidth().Gap(12).Children(func() {
+		ui.Row(c).FillWidth().Gap(space.Px12).Children(func() {
 			ui.Text(c, "功能说明").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Grow(1)
 			ui.Text(c, "应用内快捷键").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Width(shortcutFieldWidth)
 			ui.Text(c, "全局快捷键").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Width(shortcutFieldWidth)
@@ -109,7 +110,7 @@ func (s *Shell) shortcutRow(c *ui.Context, in, global shortcutItem, all shortcut
 		name = global.Name
 	}
 
-	ui.Row(c).Key("shortcut:" + in.ID).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Key("shortcut:" + in.ID).FillWidth().Gap(space.Px12).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, name).FontSize(scale.Font(c, 14)).Grow(1)
 
 		inSlot := shortcutSlot{id: in.ID}
@@ -130,7 +131,7 @@ func (s *Shell) shortcutRow(c *ui.Context, in, global shortcutItem, all shortcut
 // 冲突的字放在**框外面**：放在框里的话框要变高，两列的行高就不再一样，表格看着
 // 是歪的。
 func (s *Shell) recorderCell(c *ui.Context, item shortcutItem, slot shortcutSlot, conflict string, ro bool) (rec ui.Element) {
-	ui.Column(c).Width(shortcutFieldWidth).Gap(2).Children(func() {
+	ui.Column(c).Width(shortcutFieldWidth).Gap(space.Px2).Children(func() {
 		rec = s.shortcutRecorder(c, item, slot, conflict, ro)
 		if conflict != "" {
 			ui.Text(c, conflict).FontSize(scale.Font(c, 11)).TextColor(c.Theme().Danger)

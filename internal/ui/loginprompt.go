@@ -24,6 +24,7 @@ package ui
 
 import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -55,7 +56,7 @@ func (s *Shell) viewNeedsLogin(c *ui.Context, key string, e emptyState) {
 	s.applyFrameTheme(c)
 
 	t := c.Theme()
-	ui.Column(c).Key(key).Grow(1).Center().Gap(8).Padding(24).Children(func() {
+	ui.Column(c).Key(key).Grow(1).Center().Gap(space.Px8).Padding(space.Px24).Children(func() {
 		ui.Text(c, e.Title).FontSize(scale.Font(c, pageTitleSize))
 		ui.Text(c, e.Hint).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
 		// 给一个能立刻做完的事：这一页在没登录之前永远是这个样子，而

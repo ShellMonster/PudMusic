@@ -34,6 +34,7 @@ package ui
 import (
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -200,7 +201,7 @@ func (s *Shell) tipAt(c *ui.Context, anchor ui.Element, text string, timing tipT
 			place(panel, anchor, t)
 		} else {
 			panel.AttachTo(anchor, ui.AnchorTop, ui.AnchorBottom).
-				Margin(0, 0, t.Space(1.5), 0)
+				Margin(space.None, space.None, t.Space(1.5), space.None)
 		}
 		if panel.OverlayShortcut(0, ui.KeyEscape) {
 			st.shown = false

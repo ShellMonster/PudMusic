@@ -47,6 +47,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -433,5 +434,5 @@ func avatarPerson(c *ui.Context, side float32, ink ui.Color) {
 	head := side * headD
 	ui.Box(c).Size(head, head).Radius(head / 2).Background(ink)
 	ui.Box(c).Size(side*shoulder, side*torso).Radius(side*0.15).
-		Margin(side*gap, 0, 0, 0).Background(ink)
+		Margin(side*gap, space.None, space.None, space.None).Background(ink)
 }

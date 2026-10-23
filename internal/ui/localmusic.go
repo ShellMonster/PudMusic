@@ -48,6 +48,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrollbar"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -171,7 +172,7 @@ const (
 //
 // ⚠️ **它现在只服务更新弹窗那一处**（`update_dialog.go`）：确认框的间距在
 // `confirmmodal.go` 的 `confirmGap` 那一处。
-const dialogGap = 12
+const dialogGap = space.Px12
 
 // localPage 是本地音乐这一页自己的状态。建一次，每一帧调 View。
 type localPage struct {
@@ -446,7 +447,7 @@ func (p *localPage) view(c *ui.Context) {
 	p.lastSel = p.sel
 
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
-	ui.Column(c).Key("page:"+localMusicPath).Grow(1).Padding(0, pagePadX).Gap(10).
+	ui.Column(c).Key("page:"+localMusicPath).Grow(1).Padding(space.None, pagePadX).Gap(space.Px10).
 		Children(func() {
 			p.viewHead(c)
 			p.viewToolbar(c, st)
@@ -487,7 +488,7 @@ func (s *Shell) syncLocalMusic(c *ui.Context) {
 }
 
 // localTableRowPad 是 `ui.Table` 给每一行的上下内边距（6+6，行高 44 里占 12）。
-const localTableRowPad = 6
+const localTableRowPad = space.Px6
 
 // localTableRowPx 是本地音乐那一档表格里一行的高：操作那一列那枚键（`iconHit`
 // = 32）+ `ui.Table` 给每一行的上下内边距（6+6）。
@@ -516,7 +517,7 @@ func (p *localPage) cardsTop() { p.cards.ScrollTo(0, ui.Start) }
 
 // viewHead 是标题那一行：标题、展示样式切换、添加目录。
 func (p *localPage) viewHead(c *ui.Context) {
-	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(8).Children(func() {
+	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(space.Px8).Children(func() {
 		ui.Text(c, "本地音乐").FontSize(scale.Font(c, pageTitleSize))
 
 		// 展示样式切换。⚠️ 用 `ui.Segmented` 而不是三个按钮：三档互斥、
@@ -533,7 +534,7 @@ func (p *localPage) viewHead(c *ui.Context) {
 
 // viewToolbar 是操作那一行。
 func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
-	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(8).Children(func() {
+	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(space.Px8).Children(func() {
 		if len(p.rows) > 0 {
 			// 「播放全部」用主按钮：Biu 那一页上它就是 primary
 			//（`local-music.ts:212` 的 `color="primary"`）。
@@ -541,7 +542,7 @@ func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
 			// 照上游那一枚 `IconButton`（`local-music/index.tsx:208`，tooltip
 			// 「添加到播放列表」）：图标键 + 悬停说出它做什么。
 			if p.tipWith(c, flatIconButton(c, iconEnqueue, "全部加入队列", iconMd).
-				Size(iconHitMd, iconHitMd).Padding(0, 7), "全部加入队列").Clicked() {
+				Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "全部加入队列").Clicked() {
 				p.queueAll()
 			}
 		}
@@ -559,12 +560,12 @@ func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
 		// 可见的字，提示是它唯一说得出自己做什么的地方。
 		if p.currentRoot(st.Roots) != "" {
 			if p.tipWith(c, flatIconButton(c, iconDeleteBin5, "移除此目录", iconMd).
-				Size(iconHitMd, iconHitMd).Padding(0, 7), "移除此目录").Clicked() {
+				Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "移除此目录").Clicked() {
 				p.askRemoveDir()
 			}
 		}
 		if p.tipWith(c, flatIconButton(c, iconRefresh, "重新扫描", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 7), "重新扫描").Clicked() {
+			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "重新扫描").Clicked() {
 			p.app.RescanLocalMusic()
 		}
 	})
@@ -902,12 +903,12 @@ func (p *localPage) viewRowOps(c *ui.Context, tr localmusic.Track) {
 	// 配方不给颜色——不给的话它和打开文件夹那枚一样是灰的，「这一下是不可撤销的」
 	// 那层意思就没了。
 	if p.tipWith(c, flatIconButton(c, iconFolder, "打开文件夹", iconSm).
-		Size(iconHit, iconHit).Padding(0, 9), "在访达里显示").Clicked() {
+		Size(iconHit, iconHit).Padding(space.None, space.Px9), "在访达里显示").Clicked() {
 		mygo.Shell.ShowItemInFolder(tr.Path)
 	}
 	if !p.isPlaying(tr) {
 		if p.tipWith(c, flatIconButton(c, iconDeleteBin5, deleteRowLabel, iconSm).
-			Size(iconHit, iconHit).Padding(0, 9).
+			Size(iconHit, iconHit).Padding(space.None, space.Px9).
 			TextColor(c.Theme().Danger), deleteRowLabel).Clicked() {
 			p.askTrack, p.askOpen = tr, true
 		}

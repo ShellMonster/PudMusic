@@ -41,6 +41,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -89,7 +90,7 @@ const (
 	newMusicListMinH = newMusicListHeadH + newMusicListRowH
 
 	// newMusicGap 是格子之间的间距。上游是 `gap-3`（12 像素）。
-	newMusicGap = 12
+	newMusicGap = space.Px12
 
 	// newMusicTitleSize 是「新歌速递」那一行标题的字号。
 	//
@@ -375,7 +376,7 @@ func (g *newMusicGrid) view(c *ui.Context) {
 	total := g.totalPages()
 	size := newMusicPageSize(cols, rows)
 
-	ui.Column(c).Key("new-music").FillWidth().Gap(12).Children(func() {
+	ui.Column(c).Key("new-music").FillWidth().Gap(space.Px12).Children(func() {
 		g.viewHeader(c, total)
 
 		// ⚠️ **三态分开画**（理由同 `viewTabBody`）：正在拉 / 拉不到 / 真的
@@ -386,7 +387,7 @@ func (g *newMusicGrid) view(c *ui.Context) {
 			// 高度照「暂无数据」那一支（`new-music-top.tsx:186` 的 h-[200px]）：
 			// 失败之后网格整个换掉，这一块的高度跟着换会让下面那个列表跳一格。
 			ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
-				Background(t.Surface).Center().Gap(8).Children(func() {
+				Background(t.Surface).Center().Gap(space.Px8).Children(func() {
 				ui.Text(c, "新歌速递没拉出来").FontSize(scale.Font(c, 13)).TextColor(t.Text)
 				ui.Text(c, g.err.Error()).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(2)
 				if g.retry != nil && flatButton(c, "重试加载新歌速递").Clicked() {
@@ -438,20 +439,20 @@ func (g *newMusicGrid) view(c *ui.Context) {
 // ⚠️ 一首都没有时**整个翻页那一块都不画**（上游那时候画的是「1 / 0」）：空网格
 // 上摆一个 1 / 0 的读数和两个转不动的箭头，用户只会以为界面坏了。
 func (g *newMusicGrid) viewHeader(c *ui.Context, total int) {
-	ui.Row(c).Key("new-music:head").FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Key("new-music:head").FillWidth().Gap(space.Px12).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, "新歌速递").FontSize(scale.Font(c, newMusicTitleSize))
 
 		if total == 0 {
 			return
 		}
 
-		ui.Row(c).Grow(1).Gap(8).Justify(ui.End).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Grow(1).Gap(space.Px8).Justify(ui.End).AlignItems(ui.Center).Children(func() {
 			// ⚠️ 翻页不重置网格那一块的横向位置——它本来就没有横向滚动，
 			// 页码就是它唯一的「位置」。
 			// 上游那两枚是 `variant="flat"` 的 `RiArrowLeftSLine` / `RiArrowRightSLine`
 			// 16（`new-music-top.tsx:185-199`）。图标键 + 悬停说出它做什么。
 			prev := g.tipWith(c, flatIconButton(c, iconSideCollapse, "上一页", 16).
-				Size(newMusicArrowW, newMusicArrowW).Padding(0, 8).
+				Size(newMusicArrowW, newMusicArrowW).Padding(space.None, space.Px8).
 				Disabled(g.page <= 1), "上一页")
 			if prev.Clicked() {
 				g.page--
@@ -459,7 +460,7 @@ func (g *newMusicGrid) viewHeader(c *ui.Context, total int) {
 			ui.Textf(c, "%d / %d", g.page, total).FontSize(scale.Font(c, 13)).Width(newMusicPageW).
 				TextAlign(ui.Center).TextColor(c.Theme().TextMuted)
 			next := g.tipWith(c, flatIconButton(c, iconSideExpand, "下一页", 16).
-				Size(newMusicArrowW, newMusicArrowW).Padding(0, 8).
+				Size(newMusicArrowW, newMusicArrowW).Padding(space.None, space.Px8).
 				Disabled(g.page >= total), "下一页")
 			if next.Clicked() {
 				g.page++
@@ -488,7 +489,7 @@ func (g *newMusicGrid) viewCard(c *ui.Context, i int, coverSide float32) {
 	// 序号」，新歌速递换歌时新的一首会插在头上（上游按发布时间排），那样后面
 	// 所有卡片的焦点、这类状态就整体错配了——用户 Tab 到第三首，刷新一下，焦点
 	// 跑到别的那首上去了。
-	card := ui.Column(c).Key(m.ID).AlignItems(ui.Start).Gap(6).
+	card := ui.Column(c).Key(m.ID).AlignItems(ui.Start).Gap(space.Px6).
 		// 上游那张卡片是 `role="button" tabIndex={0}`：能点也能 Tab 到。焦点
 		// 落在它身上时它才认得出「用户现在盯的是哪一首」，而这也正是铁律四那一
 		// 条要保住的东西有一个能看见的地方（`Focused` + 头插一首，见上面那条

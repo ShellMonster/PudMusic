@@ -28,6 +28,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -132,7 +133,7 @@ func (s *Shell) viewFolderEdit(c *ui.Context) {
 			ui.Text(c, "名称为必填项").FontSize(scale.Font(c, 11)).TextColor(t.Danger)
 		}
 
-		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+		ui.Row(c).Gap(space.Px8).Justify(ui.End).Children(func() {
 			if ui.Button(c, "取消").Disabled(e.submitting).Clicked() {
 				s.closeFolderEdit()
 			}

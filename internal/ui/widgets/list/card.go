@@ -24,6 +24,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -34,18 +35,18 @@ const (
 	// cardPadY / cardPadX 是一行的内边距（`Padding` 的 CSS 写法：上下、左右）。
 	// Biu 是 `p-2`，四边都是 8，这里照它来。两个名字是为了以后只想改一边时
 	// 不用重写调用处。
-	cardPadY = 8
-	cardPadX = 8
+	cardPadY = space.Px8
+	cardPadX = space.Px8
 
 	// rowGap 是**列表那一行**里几块（序号 / 封面 / 标题 / 各数字列 / 「⋯」）之间
 	// 的缝。Biu 是 grid 的 `gap-4`（= 16，`music-list-item/index.tsx:80`），
 	// 两种档位都是它。
-	rowGap = 16
+	rowGap = space.ListGap
 
 	// cardGap 是**网格卡片**里那几块的缝：封面下面那一块 `mt-2` 的纵向留白，
 	// 以及 UP 名和时长那一行的缝（Biu 的 `music-card/index.tsx`）。它和 `rowGap`
 	// 是两件事——列表的列间距是 16，而卡片里那圈是 8。
-	cardGap = 8
+	cardGap = space.Px8
 
 	// indexWidth 是序号那一列的宽度。Biu 是 `min-w-8 text-center`（= 32，居中）。
 	// 四位数的歌单序号（9999 首）也放得下。
@@ -94,7 +95,7 @@ const (
 	listOwnerSize = 14
 
 	// textGap 是歌名和 UP 名之间的距离。Biu 是 `mt-1`（4）。
-	textGap = 4
+	textGap = space.Px4
 
 	// titleLeading 是歌名的行高倍数。1.5 是 Tailwind 的默认行高，也是 Biu 那边
 	// `text-base` 的行高。
@@ -117,8 +118,8 @@ const (
 // 支只画歌名，`w-8` 的封面整块不在）。这一档省下来的高度里最大的一块就是它。
 const (
 	// compactPadY / compactPadX 是紧凑档的内边距。上下 8 → 4，一行省 8 像素。
-	compactPadY = 4
-	compactPadX = 6
+	compactPadY = space.Px4
+	compactPadX = space.Px6
 
 	// compactIndexWidth 是紧凑档序号那一列的宽。
 	compactIndexWidth = 32
@@ -355,7 +356,7 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 		l.viewCheckbox(c, i, m.Title)
 		l.viewIndex(c, i, playing, titleColor, m.Title, compactIndexWidth, 11)
 
-		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(2).Children(func() {
+		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px2).Children(func() {
 			ui.Text(c, m.Title).FontSize(scale.Font(c, 13)).LineHeight(1.2).
 				TextColor(titleColor).MaxLines(compactTitleLines).Ellipsis("…")
 			if m.Owner != "" {

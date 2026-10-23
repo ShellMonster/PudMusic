@@ -22,6 +22,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -62,7 +63,7 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 	t := c.Theme()
 	dir := s.app.DownloadDir()
 
-	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).FillWidth().Gap(space.Px10).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, "下载记录").FontSize(scale.Font(c, pageTitleSize))
 
 		// 路径。空串是「还没有下载目录」（设置里没选、系统目录也没拿到，
@@ -91,7 +92,7 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 		// 我们把它留在页头——表格那一块是共用的（widgets/list），页头才是这一页
 		// 自己的地方。
 		if d.tipWith(c, flatIconButton(c, iconDeleteBin5, "清空记录", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(0, 7).
+			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7).
 			Disabled(len(d.all) == 0), "清空记录").Clicked() {
 			d.askClear(s)
 		}
@@ -110,7 +111,7 @@ const dlOpenDirW = 96
 // 那一侧（`Status.CanPause` / `CanResume` 就在状态类型上），这里只判断**摆不摆**
 // 这颗按钮。摆一颗按了没反应的按钮比不摆更糟。
 func (d *downloadsPage) viewOps(c *ui.Context, s *Shell, r download.Snapshot) {
-	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 		// 打开文件所在文件夹：只在真的下完、文件已经在盘上的时候摆
 		// （上游 `index.tsx:153-173` 的 `show: data.status === "completed"`）。
 		// 半成品和失败的那两支不摆——`Dest` 上要么是空的，要么是一个 `.part`，
@@ -136,7 +137,7 @@ func (d *downloadsPage) viewOps(c *ui.Context, s *Shell, r download.Snapshot) {
 // 最多两颗，见 `dlOpsW`）。
 func (d *downloadsPage) opButton(c *ui.Context, label string, fn func()) {
 	if d.tipWith(c, flatIconButton(c, opIcons[label], label, iconSm).
-		Size(dlOpW, dlOpW).Padding(0, 7), label).Clicked() {
+		Size(dlOpW, dlOpW).Padding(space.None, space.Px7), label).Clicked() {
 		fn()
 	}
 }

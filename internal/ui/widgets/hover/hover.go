@@ -35,6 +35,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -79,7 +80,7 @@ const (
 	btn = 40
 
 	// btnInset 是那个播放钮离封面边留多少。
-	btnInset = 8
+	btnInset = space.Px8
 
 	// barH 是封面底部那一条渐变多高。
 	barH = 22
@@ -323,7 +324,7 @@ func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock, label, 
 		//
 		// 左右写反的话时长压在播放钮底下，而那种错在画面上只是「时长看着偏了一点」。
 		ui.Row(c).FillWidth().FillHeight().
-			Padding(0, barTextInset, 0, btnInset).Children(func() {
+			Padding(space.None, barTextInset, space.None, btnInset).Children(func() {
 			// ⚠️ **时长那一块是 Grow + 右对齐，播放量不是**：Row 默认把子元素**从左边一
 			// 个挨一个**摆，而时长是这一行里最后一块，它要贴着那个播放钮的左边。给它
 			// `Grow(1)` + 右对齐，两种情形都对：左边有播放量时它被推到右边，只有时长
@@ -382,7 +383,7 @@ const (
 	// waveBarW 是每根竖条多宽，waveGap 是两根之间空多少。4×2 + 3×2 = 14 宽，摆在序号
 	// 那一列（40）里正好居中。
 	waveBarW = 2
-	waveGap  = 2
+	waveGap  = space.Px2
 
 	// waveMin / waveMax 是竖条最短和最长时多高，waveH 是这一块盒子多高
 	// （12 号字的行高，和原来那一句「正在播放」占的一样高）。

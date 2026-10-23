@@ -20,6 +20,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -87,7 +88,7 @@ func (s *Shell) viewFavoritesRefreshing(c *ui.Context, st app.Settings, collapse
 		return
 	}
 	ui.Text(c, refreshLine).FontSize(scale.Font(c, 12)).
-		TextColor(c.Theme().TextMuted).Padding(4, 8)
+		TextColor(c.Theme().TextMuted).Padding(space.Px4, space.Px8)
 }
 
 // viewFavoriteGroup 是一组：折叠标题 + （展开时的）那一列。
@@ -109,14 +110,14 @@ func (s *Shell) viewFavoriteGroup(c *ui.Context, st app.Settings, g app.Favorite
 	items := visibleFavorites(s.app.SideFavorites(g), hidden)
 
 	// Key 是这一组的序号：两组各自独立，折叠/展开不会让另一组的状态串过来。
-	ui.Column(c).Key("fav-group:" + strconv.Itoa(int(g))).Gap(2).Children(func() {
+	ui.Column(c).Key("fav-group:" + strconv.Itoa(int(g))).Gap(space.Px2).Children(func() {
 		s.viewFavoriteHeader(c, g, folded)
 		if folded {
 			return
 		}
 		if len(items) == 0 {
 			ui.Text(c, "还没有收藏夹").FontSize(scale.Font(c, 12)).
-				TextColor(c.Theme().TextMuted).Padding(6, 8)
+				TextColor(c.Theme().TextMuted).Padding(space.Px6, space.Px8)
 			return
 		}
 		s.viewFavoriteList(c, g, items)
@@ -144,7 +145,7 @@ func (s *Shell) viewFavoriteHeader(c *ui.Context, g app.FavoriteGroup, folded bo
 	// ⚠️ **灰字**：上游的分组标题是弱化的（`layout/side/collection/index.tsx:425`
 	// 一带的次级文字），而菜单项和收藏夹名才是 `t.Text`。这一层要是和下面那些
 	// 一样黑，六个分组标题就会比六个名字还抢眼。
-	ui.Row(c).Gap(2).Center().Children(func() {
+	ui.Row(c).Gap(space.Px2).Center().Children(func() {
 		fold := flatButton(c, arrow+" "+g.String()).Grow(1).
 			TextColor(c.Theme().TextMuted)
 		if fold.Clicked() {
@@ -251,7 +252,7 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 	t := c.Theme()
 	cur := s.router.Path() == collectionPath(f.ID)
 
-	row := ui.Column(c).Key(favRowKey(g, f.ID)).Grow(1).Radius(6).Padding(6, 8)
+	row := ui.Column(c).Key(favRowKey(g, f.ID)).Grow(1).Radius(6).Padding(space.Px6, space.Px8)
 	switch {
 	case cur:
 		// 当前就在这一页：和侧栏菜单当前项**同一套**画法（`flatCurrent`——

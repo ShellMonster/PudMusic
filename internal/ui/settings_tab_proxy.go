@@ -21,6 +21,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -46,7 +47,7 @@ const proxySelectWidth = 240
 func (s *Shell) settingsProxy(c *ui.Context, st app.Settings, ro bool) {
 	cur := st.ProxySettings
 
-	ui.Column(c).FillWidth().Gap(16).Children(func() {
+	ui.Column(c).FillWidth().Gap(space.Px16).Children(func() {
 		items := make([]enumItem[app.ProxyType], len(proxyTypeOptions))
 		for i, o := range proxyTypeOptions {
 			items[i] = enumItem[app.ProxyType]{value: o.value, label: o.label}
@@ -72,12 +73,12 @@ func (s *Shell) settingsProxy(c *ui.Context, st app.Settings, ro bool) {
 		if cur.Port != nil {
 			port = strconv.Itoa(*cur.Port)
 		}
-		ui.Column(c).FillWidth().Gap(6).Children(func() {
-			ui.Row(c).FillWidth().Gap(8).Children(func() {
+		ui.Column(c).FillWidth().Gap(space.Px6).Children(func() {
+			ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
 				ui.Text(c, "主机").FontSize(scale.Font(c, 12)).Grow(1)
 				ui.Text(c, "端口").FontSize(scale.Font(c, 12)).Grow(1)
 			})
-			ui.Row(c).FillWidth().Gap(8).Children(func() {
+			ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
 				// ⚠️ **不许给输入框加 Key**：Key 只能挂在「创建时没有处理输入」的
 				// 控件上，挂上去直接 panic（`ui/element.go:658`）。
 				ui.TextInput(c, &host).Grow(1).Label("代理主机").
@@ -103,14 +104,14 @@ func (s *Shell) settingsProxy(c *ui.Context, st app.Settings, ro bool) {
 		user := cur.Username
 		pass := cur.Password
 		showPass := cur.Type == app.ProxyHTTP || cur.Type == app.ProxyHTTPS || cur.Type == app.ProxySOCKS5
-		ui.Column(c).FillWidth().Gap(6).Children(func() {
-			ui.Row(c).FillWidth().Gap(8).Children(func() {
+		ui.Column(c).FillWidth().Gap(space.Px6).Children(func() {
+			ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
 				ui.Text(c, "用户名").FontSize(scale.Font(c, 12)).Grow(1)
 				if showPass {
 					ui.Text(c, "密码").FontSize(scale.Font(c, 12)).Grow(1)
 				}
 			})
-			ui.Row(c).FillWidth().Gap(8).Children(func() {
+			ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
 				ui.TextInput(c, &user).Grow(1).Label("代理用户名").
 					Placeholder("没有就留空").Disabled(ro)
 				if showPass {

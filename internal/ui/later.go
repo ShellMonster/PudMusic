@@ -35,6 +35,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -53,9 +54,9 @@ const (
 	colDate   = 110
 	colClock  = 60
 	coverSide = 48
-	listPadX  = 8
-	listPadY  = 8
-	rowGap    = 16
+	listPadX  = space.Px8
+	listPadY  = space.Px8
+	rowGap    = space.ListGap
 	// colPubDate 是「投稿时间」那一列的宽。这一页的画法有三档
 	// （今天 / 昨天 / N天前 / MM-DD / YYYY-MM-DD），最长是 YYYY-MM-DD
 	// （10 个字符，font 12 下约 66 宽），84 够。
@@ -238,7 +239,7 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 	p := &s.laterPage
 	now := s.clock.Now()
 
-	ui.Column(c).Key("page:"+laterPath).Grow(1).Padding(0, pagePadX).Gap(8).
+	ui.Column(c).Key("page:"+laterPath).Grow(1).Padding(space.None, pagePadX).Gap(space.Px8).
 		Children(func() {
 			ui.Text(c, "稍后再看").FontSize(scale.Font(c, pageTitleSize))
 
@@ -391,12 +392,12 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 			playCountText(m.View), clockText(m.Duration), m.Title,
 			func() { rows.playFrom(i) })
 
-		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).PaddingY(cardGapForCell).Children(func() {
+		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px4).PaddingY(cardGapForCell).Children(func() {
 			// 歌名 16 / UP 名 14：和 `widgets/list` 的网格卡同一档
 			// （DESIGN.md「网格：歌名 16、UP 14」）。
 			ui.Text(c, m.Title).FontSize(scale.Font(c, 16)).LineHeight(1.5).
 				TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
-			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 				if m.Owner != "" {
 					ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, 14)).LineHeight(1).
 						TextColor(metaColor).MaxLines(1).Ellipsis("…")
@@ -411,7 +412,7 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 					TextColor(metaColor).MaxLines(1)
 			})
 			// 播放量 / 加入时间：列表里是右边两列，格子里放到最下面那一行。
-			ui.Row(c).Gap(6).FontSize(scale.Font(c, 11)).Children(func() {
+			ui.Row(c).Gap(space.Px6).FontSize(scale.Font(c, 11)).Children(func() {
 				ui.Text(c, playCountText(m.View)).Grow(1).TextColor(metaColor).MaxLines(1)
 				ui.Text(c, dayText(m.ViewedAt)).TextColor(metaColor).MaxLines(1)
 			})
@@ -424,7 +425,7 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 // 写死一个宽的话窗口一窄封面就顶出格子。
 const (
 	laterCellCoverH = 140
-	cardGapForCell  = 8
+	cardGapForCell  = space.Px8
 )
 
 // laterMenu 是这一行的右键菜单，七项：播放 / 下一首播放 / 添加到队列 /
