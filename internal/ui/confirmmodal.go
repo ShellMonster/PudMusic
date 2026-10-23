@@ -10,6 +10,10 @@
 //
 // 抄的是这四样：图标、标题、正文、两颗按钮的档位。
 //
+// ⚠️ **「取消」那一颗没照抄**：上游是 `variant="light"`（透明底、无描边），而
+// 这一颗**带壳**（常驻底 + 描边）——仓库自己的契约（票 #141「铺开扁平按钮」
+// 明确留下了对话框这一批），理由见 `cancelButton`。
+//
 // # 为什么**不做成全局的**
 //
 // 上游全局，是因为它整套界面只有一处弹窗逻辑。我们这里每一页自己管自己的确认
@@ -221,9 +225,7 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 		// 塞进 Column 的话这一行的宽度是 Column 的宽度，按钮靠右对齐也就跟着
 		// 面板走——那倒是想要的；可 `AlignSelf(End)` 才能让这一行**自己**贴右。
 		ui.Row(c).AlignSelf(ui.End).Gap(8).Children(func() {
-			// 取消是 **light**（上游 `variant="light"`）：透明底、无描边，
-			// 悬停才上一层很淡的底色——也就是仓库里的 `flatButton`。
-			if flatButton(c, spec.cancel).Clicked() {
+			if cancelButton(c, spec).Clicked() {
 				pressed = spec.cancel
 			}
 			if confirmButton(c, spec).Clicked() {
@@ -292,6 +294,36 @@ func confirmButton(c *ui.Context, spec confirmSpec) ui.Element {
 			Background(t.Warning).TextColor(confirmOnWarning)
 	}
 	return ui.PrimaryButton(c, spec.confirm).Label(name)
+}
+
+// cancelButton 是那颗「取消」键。
+//
+// 🔴 **它带壳（常驻底 + 描边），不是扁的**——这一条是**仓库自己的**契约
+// （票 #141「铺开扁平按钮」），不是上游的。
+//
+// 上游那个弹窗的取消键是 HeroUI 的 `variant="light"`：透明底、无描边。而 #141
+// 那一票把页面上**一批**药丸拍平的时候，**明确留下了对话框这一批**
+// （`internal/ui/flatspread_test.go` 的 `TestTheDialogButtonsStayOutlined` 钉着
+// 那一件）——理由是「主次分明的地方，去掉描边就没了主次」。
+//
+// ⚠️ **#176 把两处系统原生 `ui.AlertDialog` 换成自绘模态的时候，把这一件一起
+// 丢了**：系统原生那一份的取消键是 `coreButton`
+// （`mygo@v0.6.2/ui/feedback.go:201`），也就是 `t.Surface` 的常驻底 + 一圈
+// `t.Border`——**带壳**。换成自绘之后它变成了 `flatButton`，那一层底和那一圈
+// 描边就都没了（票 #228）。
+//
+// # 🔴 它和确认键的层级**不是靠颜色分的**
+//
+// 确认键那一档是危险红 / 警告橙 / 普通主色（上游的 `color={type}`），而**取消键
+// 不在那三档里**——把它也涂成主色，两颗键就分不出主次了（票 #228 明确点名
+// 「别把它也涂成主色」）。它靠的是「壳」：一颗带壳的中性键摆在一颗实心主键旁边。
+//
+// ⚠️ **别改回 `flatButton`**：`flatspread_test.go` 的
+// `TestTheDialogButtonsStayOutlined` 会红（它量的是「字上面那几行和背景是不是
+// 同一个颜色」）。仓库里别处那些「取消」（`covermodal.go` / `folderedit.go` /
+// `folderselect.go` / `login.go`）用的都是 `ui.Button`——这一处跟它们一样。
+func cancelButton(c *ui.Context, spec confirmSpec) ui.Element {
+	return ui.Button(c, spec.cancel)
 }
 
 // confirmIconColor 是警告图标的颜色。
