@@ -35,10 +35,33 @@ func init() {
 	mygoaudio.RegisterFormat("aac", "\xff??", openExtAudioFile)
 }
 
-func openExtAudioFile(r io.ReadSeeker) (mygoaudio.Decoder, error) {
+// platformDecoderOpen 是「平台解码器」的入口。
+//
+// 生产代码里它就是 `extaf.Open`。把它做成变量只有一个理由：**测试要模拟
+// 「这个平台没有系统解码器」**（Windows 的样子）——`extaf.Open` 在 macOS 上
+// 永远成功，于是「平台不可用 → 落回 flacdec」那条路径在 macOS 上**一条都
+// 测不到**，而 macOS 恰恰是本仓库唯一能跑测试的平台。
+//
+// ⚠️ 它是**包级变量**：换掉它的那条测试必须自己串行（不要 `t.Parallel`），
+// 同包其它测试会看见换掉之后的值。
+var platformDecoderOpen = openWithPlatformDecoder
+
+// openWithPlatformDecoder 用平台自带的解码器打开 r。
+//
+// `extaf.Open` 在两个平台上的返回类型不一样（macOS 是 `*extaf.Decoder`，其它
+// 平台是 `mygoaudio.Decoder`），这里统一成接口再交给上面那个变量。
+func openWithPlatformDecoder(r io.ReadSeeker) (mygoaudio.Decoder, error) {
 	d, err := extaf.Open(r)
 	if err != nil {
 		return nil, err
 	}
 	return d, nil
+}
+
+// openExtAudioFile 是注册进 MyGo 格式表的那个入口。
+//
+// 它转手给 `platformDecoderOpen`（而不是自己调 `extaf.Open`），这样测试换掉
+// 平台解码器时，注册表这一条路也跟着换——落回逻辑断的正是这里。
+func openExtAudioFile(r io.ReadSeeker) (mygoaudio.Decoder, error) {
+	return platformDecoderOpen(r)
 }

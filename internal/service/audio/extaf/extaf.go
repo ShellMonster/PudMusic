@@ -11,7 +11,8 @@
 // 字节从哪来完全由我们说了算，AudioToolbox 只管解压。
 //
 // 这一层刻意不 import MyGo 的 audio 包之外的任何东西，测试时不碰音频设备。
-// 子包 `extaf` 之外的接线由 audio 包做（`audio/mp4.go`）。
+// 子包 `extaf` 之外的接线由 audio 包做（`internal/service/audio/containers.go`
+// 把它注册进 MyGo 的格式表）。
 //
 // 平台：只有 macOS 有这一层实现。其它系统上 Open 一律返回 ErrUnsupported。
 package extaf
