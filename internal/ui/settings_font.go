@@ -113,7 +113,8 @@ func (s *Shell) pickFont(c *ui.Context, st app.Settings, ro bool) {
 	// 任何东西了。那不是「点哪儿都行」的好心，是控件在替一整行的空间负责：
 	// 用户要按准那个 410 宽框的右下角才能展开它。
 	trigger := sel.Trigger.
-		Width(selectWidth).Radius(c.Theme().Radius).Border(1, c.Theme().Border).
+		Width(selectWidth).MinWidth(settingsControlMinW).
+		Radius(c.Theme().Radius).Border(1, c.Theme().Border).
 		Background(c.Theme().Surface).Padding(space.None, space.Px8).Disabled(ro).
 		Label("选择字体")
 	trigger.Children(func() {

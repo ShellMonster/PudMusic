@@ -26,6 +26,7 @@ package ui
 import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -46,8 +47,17 @@ func (s *Shell) displayView() list.View {
 // 预览摆在**切换控件底下**而不是右边：右边那格已经有一个 300 宽的切换了，而这一
 // 页的页面区最窄是 900（`WindowOptions.MinWidth`）减掉侧栏和内边距 ≈ 660——
 // 再挤一列预览会把「外观」那一段的每一行都顶到换行。
+//
+// ⚠️ **这一格跟着字号缩放走**（`scale.Font`）：切换控件是分段控件那一族的，宽度
+// 跟着缩放走（理由见 `settingsSegment`）；预览三张要是不跟着走，这一格的两行
+// 就一宽一窄，右边缘参差（票 #235 / F-04 刚消灭掉的那件事）。
 func (s *Shell) viewDisplayMode(c *ui.Context, st app.Settings, ro bool) {
-	ui.Column(c).Key("setting:displayMode").Width(settingsControlW).Gap(space.Px8).Children(func() {
+	// ⚠️ **宽度按内容区算**（`settingsControlFitW`）：这一格跟着字号缩放走
+	// （1.4 倍时 420），而内容区最窄的那一档（窗口 900 + 侧栏拉到 480）只有
+	// 364——不按内容区算，右边那一截会被窗口切掉。
+	colW := s.settingsControlFitW(c, scale.Font(c, settingsControlW))
+	ui.Column(c).Key("setting:displayMode").Width(colW).
+		MinWidth(settingsControlMinW).Gap(space.Px8).Children(func() {
 		s.pickDisplayMode(c, st, ro)
 		viewDisplayModePreview(c, list.ViewOf(st.DisplayMode))
 	})
@@ -103,10 +113,13 @@ const (
 // 和点上面那个有什么区别」，而答案是「没有区别」——同一件事两个控件，坏了一个另一
 // 个还在，用户会以为另一个也坏了。而只读保护（`ro`）灰的是**改不了的东西**：设置
 // 来自更新的版本时这一格动不了，预览照样看得见（它一个字都没改）。
+//
+// ⚠️ **宽度和缝都跟着字号缩放走**（`scale.Font`）：三张加两道缝要正好铺满控件列
+// 那一格（`settingsControlW` × 缩放），差一像素那一行的右边缘就又短了一格。
 func viewDisplayModePreview(c *ui.Context, chosen list.View) {
 	t := c.Theme()
-	ui.Row(c).Key("setting:displayModePreview").Width(settingsControlW).
-		Gap(previewGap).AlignItems(ui.Start).Children(func() {
+	ui.Row(c).Key("setting:displayModePreview").FillWidth().
+		Gap(scale.Font(c, previewGap)).AlignItems(ui.Start).Children(func() {
 		for v := list.View(0); v < list.ViewCount; v++ {
 			previewOne(c, t, v, v == chosen)
 		}
@@ -118,12 +131,12 @@ func previewOne(c *ui.Context, t *ui.Theme, v list.View, chosen bool) {
 	border := t.Border
 	if chosen {
 		// 选中的那一张描主色，和设置里其它「当前是这一档」的画法一样
-		//（`pickTheme` 给选中的按钮铺主色底）。
+		//（`settingsSegment` 给选中的那一档铺主色底）。
 		border = t.Accent
 	}
 
 	ui.Column(c).Label("预览："+v.String()).
-		Width(previewW).Height(previewH).Radius(t.Radius).
+		Grow(1).MaxWidth(scale.Font(c, previewW)).Height(previewH).Radius(t.Radius).
 		// 描边走 `Border` 的第二格（选中那一档给主色）：描 1 像素在缩略图上
 		// 足够认出来，而铺一整块主色会把里面那些色块盖住。
 		Border(1, border).Padding(space.Px6).Gap(space.Px3).Children(func() {

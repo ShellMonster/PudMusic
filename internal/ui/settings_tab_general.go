@@ -161,21 +161,28 @@ func (s *Shell) pickSwitch(c *ui.Context, title, key string, on bool, ro bool, s
 }
 
 // pickDisplayMode 是「数据显示样式」那三档。
+//
+// ⚠️ **它和「主题」「窗口关闭」那两处走同一个出口**（`settingsSegment`）：
+// 设置页只有一种分段控件（票 #240 / 报告 F-17）。
+//
+// 这一格此前是框架的 `ui.Segmented`（**灰底轨道 + 白色滑块**），而同一页的
+// 「主题」是自绘的三个按钮（**没有轨道，选中的那一档是实心主色底**）——两个并列的
+// 分段控件长得不一样。为什么归到实心主色底那一档而不是反过来，理由写在
+// `settingsSegment` 的注释里。
 func (s *Shell) pickDisplayMode(c *ui.Context, st app.Settings, ro bool) {
 	chosen := 0
+	labels := make([]string, len(displayModes))
 	for i, m := range displayModes {
+		labels[i] = m.label
 		if m.mode == st.DisplayMode {
 			chosen = i
 		}
 	}
-	labels := make([]string, len(displayModes))
-	for i, m := range displayModes {
-		labels[i] = m.label
-	}
-	if ui.Segmented(c, &chosen, labels...).Disabled(ro).Changed() {
-		mode := displayModes[chosen].mode
-		s.applySetting("数据显示样式", func(cur *app.Settings) { cur.DisplayMode = mode })
-	}
+	s.settingsSegment(c, "setting:displayModePick", "显示样式档位", 0,
+		labels, chosen, ro, func(i int) {
+			mode := displayModes[i].mode
+			s.applySetting("数据显示样式", func(cur *app.Settings) { cur.DisplayMode = mode })
+		})
 }
 
 // pickRadius 是全局圆角：一个滑块加一个 px 读数。
@@ -185,7 +192,8 @@ func (s *Shell) pickDisplayMode(c *ui.Context, st app.Settings, ro bool) {
 // 不是设置里还存着的旧值——慢一帧的话读数会一直追不上手指。
 func (s *Shell) pickRadius(c *ui.Context, st app.Settings, ro bool) {
 	v := st.BorderRadius
-	ui.Row(c).Key("setting:borderRadius").Width(settingsControlW).Gap(space.Px12).
+	ui.Row(c).Key("setting:borderRadius").Width(settingsControlW).
+		MinWidth(settingsControlMinW).Gap(space.Px12).
 		AlignItems(ui.Center).Children(func() {
 		sl := ui.Slider(c, &v, 0, app.MaxBorderRadius).Grow(1).Label("全局圆角").Disabled(ro)
 		if sl.Changed() {
@@ -204,7 +212,7 @@ func (s *Shell) pickAudioQuality(c *ui.Context, st app.Settings, ro bool) {
 	// 一帧一读的局部量：控件建的时候把新值写进 `quality`，紧接着这里读到的就是它。
 	// 存不进去（只读）时下一帧重新从设置里读，下拉自己弹回去。
 	quality := st.AudioQuality
-	enumSelect(c, &quality, items, "选择音质偏好", selectWidth, ro)
+	enumSelect(c, &quality, items, "选择音质偏好", selectWidth, settingsControlMinW, ro)
 	if quality != st.AudioQuality {
 		s.applySetting("音质偏好", func(cur *app.Settings) { cur.AudioQuality = quality })
 	}
@@ -217,7 +225,8 @@ func (s *Shell) pickAudioQuality(c *ui.Context, st app.Settings, ro bool) {
 // 用户最容易当成「设置没生效」的那一种形态。这一句说清两件事：下载记录页上
 // 写的就是它，下完的歌也放在那儿。
 func (s *Shell) pickDownloadPath(c *ui.Context, st app.Settings, ro bool) {
-	ui.Row(c).Key("setting:downloadPath").Width(settingsControlW).Gap(space.Px8).Children(func() {
+	ui.Row(c).Key("setting:downloadPath").Width(settingsControlW).
+		MinWidth(settingsControlMinW).Gap(space.Px8).Children(func() {
 		s.pathField(c, st.DownloadPath, "下载目录", ro)
 		if flatButton(c, "选择").Width(64).Disabled(ro).Clicked() {
 			s.pickPath("下载目录", true, func(path string) {
@@ -231,7 +240,8 @@ func (s *Shell) pickDownloadPath(c *ui.Context, st app.Settings, ro bool) {
 
 // pickFFmpegPath 是 FFmpeg 路径那一格，和下载目录同一套。
 func (s *Shell) pickFFmpegPath(c *ui.Context, st app.Settings, ro bool) {
-	ui.Row(c).Key("setting:ffmpegPath").Width(settingsControlW).Gap(space.Px8).Children(func() {
+	ui.Row(c).Key("setting:ffmpegPath").Width(settingsControlW).
+		MinWidth(settingsControlMinW).Gap(space.Px8).Children(func() {
 		s.pathField(c, st.FFmpegPath, "FFmpeg 路径", ro)
 		if flatButton(c, "选择").Width(64).Disabled(ro).Clicked() {
 			s.pickPath("FFmpeg 路径", false, func(path string) {
@@ -291,7 +301,8 @@ func (s *Shell) pickColors(c *ui.Context, st app.Settings, ro bool) {
 	// 「当前主题的背景色」就是这一帧真在画的那份——ApplyTheme 在 view 最开头
 	// 已经装好了，所以 `c.Theme()` 读到的就是它，不用再拼一遍。
 	dark := c.Theme().Dark
-	ui.Row(c).Key("setting:colors").Width(settingsControlW).Gap(colorItemGap).Children(func() {
+	ui.Row(c).Key("setting:colors").Width(settingsControlW).
+		MinWidth(settingsControlMinW).Gap(colorItemGap).Children(func() {
 		bg := pick(st.BackgroundColor != "", st.BackgroundColor, themeBackground(dark))
 		s.colorItem(c, "背景", bg, ro, st.BackgroundColor != "", func(col string) {
 			s.applySetting("背景色", func(cur *app.Settings) { cur.BackgroundColor = col })
@@ -321,7 +332,7 @@ func (s *Shell) pickColors(c *ui.Context, st app.Settings, ro bool) {
 func (s *Shell) colorItem(c *ui.Context, label, hex string, ro, overridden bool, set func(string), reset func()) {
 	t := c.Theme()
 	col := colorOfHex(hex)
-	ui.Column(c).Width(colorItemWidth).Gap(space.Px4).Children(func() {
+	ui.Column(c).Grow(1).MaxWidth(colorItemWidth).Gap(space.Px4).Children(func() {
 		// ⚠️ **那一圈影是上游给的**：Biu 那一格是
 		// `<Card as="div" isPressable radius="md" shadow="sm" className="border-default
 		// w-[100px] border">`（`pages/settings/color-settings.tsx:24`）——一张
@@ -330,7 +341,7 @@ func (s *Shell) colorItem(c *ui.Context, label, hex string, ro, overridden bool,
 		// HeroUI 的 `shadow="sm"` 深浅两套值不一样（见 `widgets/shadow` 的文件头）：
 		// 浅色那套是 1 像素的**外**黑边，深色那套是 1 像素的**内**白边——深底上黑边
 		// 看不见，那道白边就是这张卡和底下那一页之间的分界。
-		swatch := shadow.HeroSmall(ui.Box(c).Width(colorItemWidth).Height(colorItemHeight).
+		swatch := shadow.HeroSmall(ui.Box(c).FillWidth().Height(colorItemHeight).
 			Radius(t.Radius).Background(col).Border(1, t.Border), t)
 		swatch.Children(func() {
 			well := ui.ColorWell(c, &col).Fill().Disabled(ro).Label(label)
