@@ -294,7 +294,8 @@ func (s *Shell) viewLyricSearchDialog(c *ui.Context) {
 
 	ui.Modal(c, &l.open, func() {
 		ui.Column(c).Key("lyrics:search").Width(lyricSearchWidth).Gap(space.Px10).Children(func() {
-			ui.Text(c, lyricSearchHeading).FontSize(scale.Font(c, 14)).Bold()
+			// ⚠️ **字重不写**（400）：弹窗标题是 400（DESIGN.md §二）。
+			ui.Text(c, lyricSearchHeading).FontSize(scale.Font(c, 14))
 
 			// 关键词框 + 「搜索」按钮（上游 `index.tsx:153-161`）。
 			ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
@@ -568,7 +569,8 @@ func (s *Shell) viewLyricPreviewDialog(c *ui.Context, pv app.LyricPreviewState) 
 			if strings.TrimSpace(heading) == "" {
 				heading = lyricPreviewHeading
 			}
-			ui.Text(c, heading).FontSize(scale.Font(c, 14)).Bold().MaxLines(2).Ellipsis("…")
+			// ⚠️ **字重不写**（400）：弹窗标题是 400（DESIGN.md §二）。
+			ui.Text(c, heading).FontSize(scale.Font(c, 14)).MaxLines(2).Ellipsis("…")
 
 			// 「歌词原文 / 歌词翻译」两个 Tab（上游 `lyrics-preview-modal.tsx:53-56`）。
 			// ⚠️ **译文那一个只在真的有译文时才有**（上游是 `{Boolean(tlyrics) &&

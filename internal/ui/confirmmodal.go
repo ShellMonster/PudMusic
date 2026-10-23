@@ -226,7 +226,8 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 				ui.Row(c).Gap(space.Px4).AlignItems(ui.Center).Children(func() {
 					ui.Icon(c, icon(iconWarning)).FontSize(confirmIconSize).
 						TextColor(confirmIconColor(t, spec.tone))
-					ui.Text(c, spec.title).FontSize(scale.Font(c, 16)).Bold()
+					// ⚠️ **字重不写**（400）：弹窗标题是 16/400（DESIGN.md §二）。
+					ui.Text(c, spec.title).FontSize(scale.Font(c, 16))
 				})
 				if spec.body != "" {
 					// 正文是 `text-sm`（14），颜色是上游那个 `text-zinc-500`

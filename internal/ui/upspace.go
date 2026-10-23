@@ -493,7 +493,8 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 	case h.Err != "" && !h.Loaded:
 		ui.Column(c).Key(key).Height(upHeaderH).FillWidth().Center().Gap(space.Px10).
 			AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "打不开这个 UP 主的空间").FontSize(scale.Font(c, 16)).Bold()
+			// ⚠️ **字重不写**（400）：标题那一档是 400（DESIGN.md §二）。
+			ui.Text(c, "打不开这个 UP 主的空间").FontSize(scale.Font(c, 16))
 			ui.Text(c, h.Err).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(3)
 			// ⚠️ **失败之后只有人能让它再来一次**：上面那一行每帧都跑，
 			// 没有这道门就是一个每帧发一次请求的死循环（见那里的注释）。
