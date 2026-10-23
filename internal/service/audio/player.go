@@ -23,6 +23,14 @@ import (
 
 	// MP3 由 MyGo 自带，这里只需要它的注册副作用。
 	_ "github.com/egoist/mygo/audio/mp3"
+
+	// Ogg Vorbis 同理：`mygo/audio/vorbis` 靠 init 把 `OggS` 注册进 MyGo 的
+	// 格式表，解码器是 `github.com/jfreymuth/oggvorbis`（MIT）。
+	//
+	// ⚠️ **这一行不是可有可无的**：少了它 `.ogg` 在界面上照样显示「可放」
+	//（`localmusic` 的白名单里有它），点进去却报「不支持这个音频格式」——
+	// 那正是「界面说谎」。判据在 `internal/service/audio/vorbis_test.go`。
+	_ "github.com/egoist/mygo/audio/vorbis"
 )
 
 // Player 是一首歌的播放链路：解码器 + 变速层 + MyGo 的播放器。
