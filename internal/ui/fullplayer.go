@@ -661,7 +661,10 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 		// 原来这里是 `Grow(1)` + `MaxWidth(480)`：歌名框铺满 480，把齿轮顶到
 		// x=552（窗口 1200 宽的 **47%** 处），离歌名 421 像素——看起来像一个不属于
 		// 任何东西的浮标（审计 F-03）。
-		ui.Text(c, st.Title).FontSize(scale.Font(c, 20)).FontWeight(400).TextColor(on).
+		// ⚠️ **字重不写**（400 是框架的默认档）：写上 `FontWeight(400)` 也会被
+		// `TestPageTitlesAreNotBold` 拦下——那一条钉的是「拿标题那几个字号当字号
+		// 的那一句里不许出现字重」。
+		ui.Text(c, st.Title).FontSize(scale.Font(c, playerTitleSize)).TextColor(on).
 			MaxWidth(fullTitleMaxWidth(c)).SingleLine()
 
 		// 同上面那一条：提示不跟着顶栏一起藏起来，所以这里不给 `Tooltip`。
@@ -1062,7 +1065,9 @@ func (s *Shell) viewFullPartsPanel(c *ui.Context) {
 	panel.Children(func() {
 		ui.Row(c).FillWidth().Padding(10, 12).Gap(8).AlignItems(ui.Center).Children(func() {
 			// 字色跟着面板走（`TextColor(t.Text)`），这里不再自己定。
-			ui.Text(c, "分集").FontSize(scale.Font(c, 14)).Bold().Grow(1)
+			// ⚠️ **字重不写**（400）：面板标题那一档是 400（DESIGN.md §二），
+			// 层次靠字号拉开，不靠重量。
+			ui.Text(c, "分集").FontSize(scale.Font(c, 14)).Grow(1)
 			// 上游是一枚 `RiArrowRightSLine` 16 的扁平图标键（`page-list.tsx:47`）。
 			// 字色不用给：面板自己 `TextColor(t.Text)`，图标跟着它走。
 			if s.withTip(c, iconButton(c, iconSideExpand, "收起分集", 16).

@@ -257,7 +257,8 @@ func (s *Shell) viewPartDrawerHeader(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).FillWidth().Children(func() {
 		ui.Row(c).FillWidth().Height(partHeaderHeight).PaddingX(12).
 			AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "分集").FontSize(scale.Font(c, 14)).Bold().Grow(1)
+			// ⚠️ **字重不写**（400）：抽屉标题那一档是 400（DESIGN.md §二）。
+			ui.Text(c, "分集").FontSize(scale.Font(c, 14)).Grow(1)
 			if n := len(s.partRows); n > 0 {
 				ui.Text(c, "共 "+strconv.Itoa(n)+" 集").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
 			}

@@ -33,14 +33,72 @@ import (
 // 17.65（`TestEveryLoadingStateIsDrawnTheSameWay`），两者都是 1.1767。
 const textBoxPerSize = 1.1767
 
-// TestPageTitlesAreNotBold 钉住「页标题的字重是 400」。
+// titleSizes 是**标题类**文字用的那几个字号。
+//
+// ⚠️ **不止一个**：页标题 24（`pageTitleSize`）、空状态那一页的页面名 20
+// （`emptyPageTitle`）、播放器那一页的歌名 20（`playerTitleSize`）。
+//
+// 此前 `TestPageTitlesAreNotBold` 只钉了第一个——于是搜索页、收藏夹页、迷你
+// 播放器那几处的粗体一路漏到了今天（UI 报告 §2 的 F-07：21 处 `.Bold()` 不在
+// 刻度上）。**这条测试的覆盖面就是在这儿补上的**。
+var titleSizes = []string{"pageTitleSize", "emptyPageTitle", "playerTitleSize"}
+
+// stmtSpans 是这个文件里所有语句连同它们的范围。
+type stmtSpans struct {
+	stmts []ast.Stmt
+	lo    []int
+	hi    []int
+}
+
+// collectStmts 收下这个文件里所有的语句。
+func collectStmts(fset *token.FileSet, f *ast.File) stmtSpans {
+	var sp stmtSpans
+	ast.Inspect(f, func(n ast.Node) bool {
+		s, ok := n.(ast.Stmt)
+		if !ok {
+			return true
+		}
+		sp.stmts = append(sp.stmts, s)
+		sp.lo = append(sp.lo, fset.Position(s.Pos()).Offset)
+		sp.hi = append(sp.hi, fset.Position(s.End()).Offset)
+		return true
+	})
+	return sp
+}
+
+// innermost 找出罩着 offset 那个位置的**最里层**的那一句（范围最小的那一句）。
+//
+// ⚠️ **为什么要「最里层」**：view 的函数体外面通常还包着一句
+// `ui.Column(c)…Children(func(){…})`——而标题那句就在那个函数体里，于是外面
+// 那一句也「提到了标题」。拿外面那一句当判据的话，同一处粗体会被报两次
+// （一次报在函数体那一行，一次报在外层那一行）。
+//
+// 没有罩着它的句子就返回 -1。
+func (sp stmtSpans) innermost(offset int) int {
+	best := -1
+	for i := range sp.stmts {
+		if offset < sp.lo[i] || offset >= sp.hi[i] {
+			continue
+		}
+		if best < 0 || sp.hi[i]-sp.lo[i] < sp.hi[best]-sp.lo[best] {
+			best = i
+		}
+	}
+	return best
+}
+
+// TestPageTitlesAreNotBold 钉住「标题的字重是 400」。
 //
 // 上游的 `h1` 只写了 `text-2xl`，字重被 Tailwind 的 Preflight 重置成 inherit，
 // 也就是正文那一档——**不是加粗**（DESIGN.md 的 `typography.page_title`）。
 // 我们此前八处页标题全是 `.Bold()`（20/700），层次靠重量不靠字号。
 //
-// 判据是 AST：凡是拿 `pageTitleSize` 当字号的那一句，里面不许出现 `Bold()` 或
+// 判据是 AST：凡是拿**标题那几个字号**当字号的那一句，里面不许出现 `Bold()` 或
 // `FontWeight(...)`。字号的精确值由 `TestEveryPageTitleUsesTheSharedSize` 钉。
+//
+// ⚠️ **字重不许写，连 `FontWeight(400)` 也不许**：标题的层次靠字号拉开，
+// 不靠重量——把 400 写出来只是多一处会漂的地方（它和「不写」画出来一样，
+// 但两处写法会各自漂开）。
 func TestPageTitlesAreNotBold(t *testing.T) {
 	fset := token.NewFileSet()
 	matches, err := filepath.Glob("*.go")
@@ -55,37 +113,184 @@ func TestPageTitlesAreNotBold(t *testing.T) {
 		if err != nil {
 			t.Fatalf("解析 %s 失败：%v", name, err)
 		}
+		sp := collectStmts(fset, f)
 		ast.Inspect(f, func(n ast.Node) bool {
-			stmt, ok := n.(*ast.ExprStmt)
+			call, ok := n.(*ast.CallExpr)
 			if !ok {
 				return true
 			}
-			hasShared, heavy := false, ""
+			heavy := ""
+			switch callName(call) {
+			case "Bold":
+				heavy = "Bold()"
+			case "FontWeight":
+				heavy = "FontWeight(...)"
+			default:
+				return true
+			}
+			pos := fset.Position(call.Pos())
+			best := sp.innermost(pos.Offset)
+			if best < 0 {
+				return true
+			}
+			stmt := sp.stmts[best]
+			hasTitle := false
 			ast.Inspect(stmt, func(m ast.Node) bool {
-				call, ok := m.(*ast.CallExpr)
-				if !ok {
+				c, ok := m.(*ast.CallExpr)
+				if !ok || callName(c) != "FontSize" || len(c.Args) != 1 {
 					return true
 				}
-				switch callName(call) {
-				case "FontSize":
-					if len(call.Args) == 1 && mentionsIdent(call.Args[0], "pageTitleSize") {
-						hasShared = true
+				for _, size := range titleSizes {
+					if mentionsIdent(c.Args[0], size) {
+						hasTitle = true
 					}
-				case "Bold":
-					heavy = "Bold()"
-				case "FontWeight":
-					heavy = "FontWeight(...)"
 				}
 				return true
 			})
-			if hasShared && heavy != "" {
-				pos := fset.Position(stmt.Pos())
-				t.Errorf("%s:%d 的页标题调了 %s——页标题是 24/400，字重被上游的"+
-					" Preflight 重置成 inherit，不是加粗", pos.Filename, pos.Line, heavy)
+			if hasTitle {
+				where := fset.Position(stmt.Pos())
+				t.Errorf("%s:%d 的标题调了 %s——标题是 400，字重被上游的"+
+					" Preflight 重置成 inherit，不是加粗", where.Filename, where.Line, heavy)
 			}
 			return true
 		})
 	}
+}
+
+// boldOnScale 是**唯一**允许粗的那几处。
+//
+// DESIGN.md §二 的字重刻度里，每一条用途都标了字重（页标题 400、设置行标题
+// 500、正文 400……），粗体只有三处写在表里（品牌字、收藏夹那一页头图区的大标题、
+// 404 那个数字），另有一处是上游原样抄下来的（歌词浮层里那两个读数）。
+//
+// 每一条都写着**为什么它可以是粗的**——刻度上没写的事不许悄悄留着。
+var boldOnScale = []struct {
+	file string
+	// mark 是认出它的那一句：文件里提到它的那一句才算这一处。
+	mark string
+	// count 是这一处有几处（歌词浮层那两个读数是两处）。
+	count int
+	why   string
+}{
+	{
+		file: "collectionpage.go", mark: "collectionTitleSize", count: 1,
+		why: "收藏夹 / 合集 / 系列那一页头图区的大标题：上游 `text-3xl`（30）就是粗体" +
+			"（pagerhythm.go 里写着为什么）",
+	},
+	{
+		file: "sidebar.go", mark: "sideBrandNameSize", count: 1,
+		why: "品牌字（应用名）：DESIGN.md §二「品牌字 24 / 粗体 / 主色」",
+	},
+	{
+		file: "notfound.go", mark: "404", count: 1,
+		why: "404 那个数字：它是那一页上最大的一个字",
+	},
+	{
+		file: "lyrics_knobs.go", mark: "lyricValueSize", count: 2,
+		why: "歌词浮层里那两个读数：上游那两个 control 是 `text-[10px] font-bold`",
+	},
+}
+
+// TestOnlyTheScaleIsBold 钉住「粗体只出现在刻度写明的那几处」。
+//
+// 此前代码里有 **21 处 `.Bold()`**（= 700），其中约 20 处落在「按 DESIGN 应该是
+// 400/500」的位置上——页面标题、分组标题、弹窗标题、空状态标题、列表里的名字
+// 全是 700（UI 报告 §2 的 F-07）。
+//
+// 判据是 AST：扫 `internal/ui` 下每一个非测试文件，找 `.Bold()` 和
+// `FontWeight(700)`；每一处都必须落在 `boldOnScale` 那张表里，而表里的每一处
+// 都写着**为什么它可以是粗的**。
+//
+// ⚠️ **这张表是「白名单」，不是「黑名单」**：新增一处粗体要往表里加一条并写清
+// 理由——这样「为什么这一处可以粗」不会随着时间烂掉（注释说谎比没有注释更坏）。
+func TestOnlyTheScaleIsBold(t *testing.T) {
+	fset := token.NewFileSet()
+	matches, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	counts := make([]int, len(boldOnScale))
+	for _, name := range matches {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("解析 %s 失败：%v", name, err)
+		}
+
+		sp := collectStmts(fset, f)
+		ast.Inspect(f, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || !isHeavyWeight(call) {
+				return true
+			}
+			pos := fset.Position(call.Pos())
+			// 最里层的那一句 = 范围最小的那一句。
+			best := sp.innermost(pos.Offset)
+			hit := -1
+			if best >= 0 {
+				for i, a := range boldOnScale {
+					if a.file != name {
+						continue
+					}
+					if mentionsMark(sp.stmts[best], a.mark) {
+						hit = i
+						break
+					}
+				}
+			}
+			if hit < 0 {
+				t.Errorf("%s:%d 调了重字重——粗体只出现在刻度写明的那几处"+
+					"（DESIGN.md §二；UI 报告 §2 的 F-07）", pos.Filename, pos.Line)
+				return true
+			}
+			counts[hit]++
+			return true
+		})
+	}
+
+	// 表里的每一处都还要在（别留下写空了却还占着位的条目）。
+	for i, a := range boldOnScale {
+		if counts[i] != a.count {
+			t.Errorf("%s 里刻度写明的粗体有 %d 处，want %d——%s",
+				a.file, counts[i], a.count, a.why)
+		}
+	}
+}
+
+// isHeavyWeight 报这一次调用是不是「把字重调到 700」。
+func isHeavyWeight(call *ast.CallExpr) bool {
+	switch callName(call) {
+	case "Bold":
+		return true
+	case "FontWeight":
+		return len(call.Args) == 1 && mentionsFloat(call.Args[0], 700)
+	}
+	return false
+}
+
+// mentionsMark 报这一句里有没有那个标识符（或是那个字符串字面量）。
+//
+// ⚠️ **字符串字面量也算**：404 那个数字是 `ui.Text(c, "404")`——它没有名字，
+// 只有那句话本身。
+func mentionsMark(stmt ast.Stmt, mark string) bool {
+	found := false
+	ast.Inspect(stmt, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.Ident:
+			if v.Name == mark {
+				found = true
+			}
+		case *ast.BasicLit:
+			if v.Kind == token.STRING && strings.Trim(v.Value, `"`) == mark {
+				found = true
+			}
+		}
+		return true
+	})
+	return found
 }
 
 // mentionsIdent 报这个表达式里有没有那个标识符（往调用里找一层，

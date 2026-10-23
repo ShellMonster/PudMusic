@@ -189,7 +189,8 @@ func (s *Shell) viewCoverCrop(c *ui.Context, crop *cropState) {
 		return
 	}
 	modal := ui.Modal(c, &crop.open, func() {
-		ui.Text(c, "裁剪封面").FontSize(scale.Font(c, 15)).Bold()
+		// ⚠️ **字重不写**（400）：弹窗标题是 400（DESIGN.md §二）。
+		ui.Text(c, "裁剪封面").FontSize(scale.Font(c, 15))
 		s.viewCropStage(c, crop)
 		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
 			if ui.Button(c, "取消").Disabled(crop.uploading).Clicked() {

@@ -184,7 +184,7 @@ func (s *Shell) pickDisplayMode(c *ui.Context, st app.Settings, ro bool) {
 // 不是设置里还存着的旧值——慢一帧的话读数会一直追不上手指。
 func (s *Shell) pickRadius(c *ui.Context, st app.Settings, ro bool) {
 	v := st.BorderRadius
-	ui.Row(c).Key("setting:borderRadius").Width(radiusWidth).Gap(12).
+	ui.Row(c).Key("setting:borderRadius").Width(settingsControlW).Gap(12).
 		AlignItems(ui.Center).Children(func() {
 		sl := ui.Slider(c, &v, 0, app.MaxBorderRadius).Grow(1).Label("全局圆角").Disabled(ro)
 		if sl.Changed() {
@@ -216,7 +216,7 @@ func (s *Shell) pickAudioQuality(c *ui.Context, st app.Settings, ro bool) {
 // 用户最容易当成「设置没生效」的那一种形态。这一句说清两件事：下载记录页上
 // 写的就是它，下完的歌也放在那儿。
 func (s *Shell) pickDownloadPath(c *ui.Context, st app.Settings, ro bool) {
-	ui.Row(c).Key("setting:downloadPath").Width(radiusWidth).Gap(8).Children(func() {
+	ui.Row(c).Key("setting:downloadPath").Width(settingsControlW).Gap(8).Children(func() {
 		s.pathField(c, st.DownloadPath, "下载目录", ro)
 		if flatButton(c, "选择").Width(64).Disabled(ro).Clicked() {
 			s.pickPath("下载目录", true, func(path string) {
@@ -230,7 +230,7 @@ func (s *Shell) pickDownloadPath(c *ui.Context, st app.Settings, ro bool) {
 
 // pickFFmpegPath 是 FFmpeg 路径那一格，和下载目录同一套。
 func (s *Shell) pickFFmpegPath(c *ui.Context, st app.Settings, ro bool) {
-	ui.Row(c).Key("setting:ffmpegPath").Width(radiusWidth).Gap(8).Children(func() {
+	ui.Row(c).Key("setting:ffmpegPath").Width(settingsControlW).Gap(8).Children(func() {
 		s.pathField(c, st.FFmpegPath, "FFmpeg 路径", ro)
 		if flatButton(c, "选择").Width(64).Disabled(ro).Clicked() {
 			s.pickPath("FFmpeg 路径", false, func(path string) {
@@ -261,12 +261,26 @@ func (s *Shell) pathField(c *ui.Context, path, label string, ro bool) {
 
 // 色块多大。Biu 是 `w-[100px]` 加一个 `h-[40px]` 的上半截加一行字
 // （`color-settings.tsx:26-28`）。
+//
+// ⚠️ **宽度跟着控件列的基准走**（`settingsControlW`）：这一行里只有那两块色卡，
+// 它们不填满那一格的话，**这一行的右边缘就比上面那几行短一截**——那正是
+// 「控件列没有共同基准」的一半（UI 报告 §4 的 F-04：「右边空 91」）。
+//
+// 上游是 100：它那一行的格子也就是它自己的宽度，而**色块是纯色**——宽一点
+// 不损失任何信息（颜色还是那个颜色），换来的是这一行和上面几行一样齐。
 const (
-	colorItemWidth  = 100
+	colorItemGap    = 12
 	colorItemHeight = 40
 )
 
-// pickColors 是背景色和主色那两块。照 Biu 的 `ColorSettings`：两块并排，靠右。
+// colorItemWidth 是**一块**色卡多宽：那一格 300 宽，中间 12 的缝。
+const colorItemWidth = (settingsControlW - colorItemGap) / 2
+
+// pickColors 是背景色和主色那两块。照 Biu 的 `ColorSettings`：两块并排。
+//
+// ⚠️ **两块是并排铺满控件列那一格的**（各占一半，中间 12 的缝），不是上游那个
+// 100 宽各自一块：这一行里只有它们，不铺满的话这一行的右边缘就比上面那几行
+// 短一截（UI 报告 §4 的 F-04：「右边空 91」）。
 //
 // 背景色的默认值是**空串**，意思是「跟着主题走」。Biu 那一格在值为空时显示的是
 // 当前主题的背景色（`pickerValue = isHex(value) ? value : backgroundColor`），
@@ -276,7 +290,7 @@ func (s *Shell) pickColors(c *ui.Context, st app.Settings, ro bool) {
 	// 「当前主题的背景色」就是这一帧真在画的那份——ApplyTheme 在 view 最开头
 	// 已经装好了，所以 `c.Theme()` 读到的就是它，不用再拼一遍。
 	dark := c.Theme().Dark
-	ui.Row(c).Key("setting:colors").Width(segWidth + 12).Gap(12).Children(func() {
+	ui.Row(c).Key("setting:colors").Width(settingsControlW).Gap(colorItemGap).Children(func() {
 		bg := pick(st.BackgroundColor != "", st.BackgroundColor, themeBackground(dark))
 		s.colorItem(c, "背景", bg, ro, st.BackgroundColor != "", func(col string) {
 			s.applySetting("背景色", func(cur *app.Settings) { cur.BackgroundColor = col })

@@ -45,6 +45,16 @@ const (
 	// 用的就是它。
 	weightMedium = 500
 
+	// playerTitleSize 是**播放器（满屏 / 迷你播放器）那一页的歌名**的字号。
+	//
+	// 20，抄上游那个 `h2` 的 `text-xl`（`full-screen-player/index.tsx`）。
+	// ⚠️ **字重 400**（上游那个 `h2` 的字重被 Preflight 重置成 inherit）——
+	// 20 / 700 会让它变成「页头」，而这一行只是歌名。
+	//
+	// ⚠️ **满屏和迷你播放器必须是同一个数**：它们是同一首歌的两个地方，
+	// 字号不一样的话，从迷你窗点开满屏会看见那行字忽然变大。
+	playerTitleSize = 20
+
 	// collectionTitleSize 是收藏夹 / 合集 / 系列那一页**头图区**的大标题。
 	//
 	// 抄上游 `pages/video-collection/header/index.tsx:85` 的 `text-3xl`（30），

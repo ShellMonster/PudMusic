@@ -165,7 +165,8 @@ func (s *Shell) drawUpdateDialog(c *ui.Context, st app.UpdateState) {
 		// 症状是「看得见、点不动」）。
 		ui.Column(c).Key("dialog:update").Width(updateDialogWidth).Gap(dialogGap).
 			Children(func() {
-				ui.Text(c, updateDialogTitle).FontSize(scale.Font(c, 16)).Bold()
+				// ⚠️ **字重不写**（400）：弹窗标题是 16/400（DESIGN.md §二）。
+				ui.Text(c, updateDialogTitle).FontSize(scale.Font(c, 16))
 				s.updateVersionLine(c, st)
 				s.updateNotes(c, st)
 				if st.FellBack {

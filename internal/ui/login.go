@@ -327,7 +327,18 @@ func (s *Shell) viewLoginEntry(c *ui.Context) {
 		}
 		return
 	}
-	if s.withTip(c, iconButtonPrimary(c, iconLogin, "登录", iconMd).
+	// ⚠️ **和已登录那一支同形**（`iconButton`，无底色）：这一枚原来是一块
+	// **实心主色的方块**——墨迹 752 像素，是紧挨着它左边那几枚线框图标
+	// （140~152）的 **5.4 倍**，是整条顶栏视觉权重最高的元素，而「登录」是
+	// 一个低频次动作（UI 报告 §3 的 F-05）。
+	//
+	// 去掉底色之后它的墨迹就是那枚图标自己的（~150），和左边几枚同一档；
+	// 悬停时那一层淡底还在（`widgets/flat` 的配方），所以它照样点得动、
+	// 找得到。
+	//
+	// ⚠️ **上游的顶栏右侧根本没有这一枚**：Biu 把登录挂在头像下拉里
+	// （`navbar/login`），顶栏上从来没有一枚实心主色的登录方块。
+	if s.withTip(c, iconButton(c, iconLogin, "登录", iconMd).
 		Size(iconHitMd, iconHitMd).Padding(0, 7), "登录 B 站账号").Clicked() {
 		s.goLogin()
 	}
