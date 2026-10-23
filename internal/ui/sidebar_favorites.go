@@ -251,7 +251,7 @@ const favCollapsedName = "收藏夹"
 // 最窄是 900，那一栏右边有的是地方。
 const (
 	favPanelW    = 200
-	favPanelGap  = 6
+	favPanelGap  = space.Px6
 	favPanelItem = 13
 )
 

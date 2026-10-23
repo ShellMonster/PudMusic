@@ -28,12 +28,12 @@ func repoRoot(t *testing.T) string {
 
 // TestTheScaleValuesAreLocked 把每一档的像素值钉死。
 //
-// ⚠️ **这张表是「值只写一处」的地方**：改了 `Px8` 的值，全应用 68 处
+// ⚠️ **这张表是「值只写一处」的地方**：改了 `Px8` 的值，全应用 **104 处**
 // 「8 像素的缝」会一起变——那是这张表存在的意义，也是它危险的方。
 // 所以每一档的值都在这里写死一遍：谁想改一个数，得先改这里、并且想清楚
-// 那 68 处会跟着变。
+// 那 104 处会跟着变。
 //
-// 碎步（1/3/5/7/9）也在里面：**它们不是设计刻度**，但代码里在用，
+// 碎步（1/3/5/7/9/90）也在里面：**它们不是设计刻度**，但代码里在用，
 // 所以一样钉死——归一是另一票的事（那会改画面）。
 func TestTheScaleValuesAreLocked(t *testing.T) {
 	want := map[string]int{
@@ -52,17 +52,19 @@ func TestTheScaleValuesAreLocked(t *testing.T) {
 		"Px32": 32,
 		"Px48": 48,
 		// 碎步（不在刻度上）。
-		"Px1": 1,
-		"Px3": 3,
-		"Px5": 5,
-		"Px7": 7,
-		"Px9": 9,
+		"Px1":  1,
+		"Px3":  3,
+		"Px5":  5,
+		"Px7":  7,
+		"Px9":  9,
+		"Px90": 90,
 	}
 	got := map[string]int{
 		"None": None, "Px2": Px2, "Px4": Px4, "Px6": Px6, "Px8": Px8,
 		"Px10": Px10, "Px12": Px12, "Px16": Px16, "Px20": Px20,
 		"Px24": Px24, "Px28": Px28, "Px32": Px32, "Px48": Px48,
 		"Px1": Px1, "Px3": Px3, "Px5": Px5, "Px7": Px7, "Px9": Px9,
+		"Px90": Px90,
 	}
 	for name, w := range want {
 		g, ok := got[name]
@@ -166,13 +168,25 @@ func parseDesignSpacing(t *testing.T, root string) map[string]int {
 }
 
 // spacingMethods 是「间距」那一族方法名。
+//
+// ⚠️ **这份名单必须和框架对得上**（mygo v0.6.2）：框架里真有的是
+// `Gap` / `GapX` / `GapY` / `Padding` / `PaddingX` / `PaddingY` /
+// `PaddingStart` / `PaddingEnd` / `Margin` / `MarginX` / `MarginY` /
+// `MarginStart` / `MarginEnd`。
+//
+// **框架里没有** `PaddingTop` / `PaddingBottom` / `PaddingLeft` /
+// `PaddingRight` 和 `MarginTop` / `MarginBottom` / `MarginLeft` /
+// `MarginRight`——那几个名字写出来**根本编译不过**，所以把它们列进护栏名单
+// 等于给一份假名单壮胆：名字看着齐全，实际上一处也拦不住。
+//
+// 名单写窄了同样是漏：以后谁写一处 `.GapX(8)`，护栏不红，那条数就悄悄
+// 出了表。所以这份名单要**照着框架抄**，不是照着想象抄。
 var spacingMethods = map[string]bool{
-	"Gap": true, "Padding": true, "PaddingX": true, "PaddingY": true,
-	"PaddingStart": true, "PaddingEnd": true, "PaddingTop": true,
-	"PaddingBottom": true, "PaddingLeft": true, "PaddingRight": true,
-	"Margin": true, "MarginX": true, "MarginY": true, "MarginStart": true,
-	"MarginEnd": true, "MarginTop": true, "MarginBottom": true,
-	"MarginLeft": true, "MarginRight": true,
+	"Gap": true, "GapX": true, "GapY": true,
+	"Padding": true, "PaddingX": true, "PaddingY": true,
+	"PaddingStart": true, "PaddingEnd": true,
+	"Margin": true, "MarginX": true, "MarginY": true,
+	"MarginStart": true, "MarginEnd": true,
 }
 
 // TestNoSpacingLiteralIsLeft 把「间距字面量」这件事钉住：界面层里不许再
@@ -180,9 +194,21 @@ var spacingMethods = map[string]bool{
 //
 // # 为什么要有这一条
 //
-// 这一票把 277 个调用点、72 个本地常量收进了 `space` 那张表。**光做完不算是
+// 这一票把 310 个调用点、80 个本地常量收进了 `space` 那张表。**光做完不算是
 // 做完**——过两个月新写的一处 `.Padding(0, 8)` 又是一条没进表的数，而那一处
 // 谁都看不出来。这一条让「又漏了一个」变成**一条红**。
+//
+// # 它拦两种写法
+//
+//  1. **实参本身是裸数字**：`.Gap(8)`。
+//
+//  2. **实参是一个常量，而那个常量写着裸数字**：`const toastRight = 8` 之后
+//     `.Padding(0, toastRight)`。
+//
+//     ⚠️ **只查第 1 种是漏的**：实参是常量名时，`ast.BasicLit` 根本看不见它，
+//     护栏照样绿——而那个数字**照样在表外**。仓库里一度就摆着四个这样的反例
+//     （`playbarClearance` / `toastRight` / `suggestTermPadY` / `suggestTermPadX`
+//     / `favPanelGap`），报告却写着「0 个」。所以第 2 种也要拦。
 //
 // 只扫**非测试**文件：测试里的数字是**判据**（「这一行的右沿在 884」），
 // 拿表里的常量去写期望值的话，被测的常量一改，期望值跟着改，那条测试就白
@@ -206,6 +232,9 @@ func TestNoSpacingLiteralIsLeft(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		// 这个文件里「名字 → 裸数字」的表：包级 const/var、函数里的局部
+		// const/var、还有 `x := 8` 这种。
+		numbers := numericNames(file)
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok || len(call.Args) == 0 {
@@ -216,13 +245,21 @@ func TestNoSpacingLiteralIsLeft(t *testing.T) {
 				return true
 			}
 			for _, arg := range call.Args {
-				lit, ok := arg.(*ast.BasicLit)
-				if !ok || lit.Kind != token.INT {
-					continue
+				switch v := arg.(type) {
+				case *ast.BasicLit:
+					if v.Kind != token.INT && v.Kind != token.FLOAT {
+						continue
+					}
+					pos := fset.Position(v.Pos())
+					bad = append(bad, fmt.Sprintf("%s:%d: .%s(%s) —— 实参是裸数字",
+						pos.Filename, pos.Line, sel.Sel.Name, v.Value))
+				case *ast.Ident:
+					if lit, ok := numbers[v.Name]; ok {
+						pos := fset.Position(v.Pos())
+						bad = append(bad, fmt.Sprintf("%s:%d: .%s(%s) —— 实参是常量 %s = %s，那个数写在表外",
+							pos.Filename, pos.Line, sel.Sel.Name, v.Name, v.Name, lit))
+					}
 				}
-				pos := fset.Position(lit.Pos())
-				bad = append(bad, fmt.Sprintf("%s:%d: .%s(%s)",
-					pos.Filename, pos.Line, sel.Sel.Name, lit.Value))
 			}
 			return true
 		})
@@ -232,7 +269,57 @@ func TestNoSpacingLiteralIsLeft(t *testing.T) {
 		t.Fatalf("扫源码失败：%v", err)
 	}
 	if len(bad) > 0 {
-		t.Errorf("界面层里还有 %d 处裸的间距数字（间距一律走 space 那张表）：\n%s",
+		t.Errorf("界面层里还有 %d 处间距的数字没走 space 那张表：\n%s",
 			len(bad), strings.Join(bad, "\n"))
 	}
+}
+
+// numericNames 收一个文件里所有「名字 → 裸数字」的常量与变量。
+//
+// 包级 const/var、函数里的局部 const/var、`x := 8` 都算。
+func numericNames(file *ast.File) map[string]string {
+	out := map[string]string{}
+	add := func(name string, lit *ast.BasicLit) {
+		if _, err := strconv.ParseFloat(lit.Value, 64); err != nil {
+			return
+		}
+		out[name] = lit.Value
+	}
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.GenDecl:
+			if v.Tok != token.CONST && v.Tok != token.VAR {
+				return true
+			}
+			for _, spec := range v.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for i, name := range vs.Names {
+					if i >= len(vs.Values) {
+						continue
+					}
+					if lit, ok := vs.Values[i].(*ast.BasicLit); ok {
+						add(name.Name, lit)
+					}
+				}
+			}
+		case *ast.AssignStmt:
+			if v.Tok != token.DEFINE {
+				return true
+			}
+			for i, lhs := range v.Lhs {
+				id, ok := lhs.(*ast.Ident)
+				if !ok || i >= len(v.Rhs) {
+					continue
+				}
+				if lit, ok := v.Rhs[i].(*ast.BasicLit); ok {
+					add(id.Name, lit)
+				}
+			}
+		}
+		return true
+	})
+	return out
 }

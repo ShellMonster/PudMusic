@@ -41,7 +41,7 @@ const (
 	//
 	// ⚠️ **90 就是 90**：此前这里是 106（90+16），多出来的那 16 是「右边也留
 	// 16」时顺手一起加的——于是提示比上游高了 16（票 #180 的 G23）。
-	playbarClearance = 90
+	playbarClearance = space.Px90
 
 	// toastWidth 是卡片多宽（上游 `@heroui/theme` 的 toast：356）。
 	//
@@ -67,7 +67,7 @@ const (
 	//
 	// ⚠️ 上游是「4~8」（`@heroui/theme` 的 toast 与 `app.tsx:167-175` 的参数
 	// 一起算出来的那一档），取 **8**：宽一点的那一头，靠边一点更像上游。
-	toastRight = 8
+	toastRight = space.Px8
 
 	// toastGap 是两条提示之间的距离（上游那几条之间是 8）。
 	toastGap = space.Px8

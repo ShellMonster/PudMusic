@@ -61,7 +61,7 @@ const (
 	//
 	// 比 chip 那圈大一点：chip 是小圆角的小块，而联想词是**一整行**，行高小一点
 	// 的话指针扫过去时行与行之间几乎没有可停的地方。
-	suggestTermPadY, suggestTermPadX = 5, 8
+	suggestTermPadY, suggestTermPadX = space.Px5, space.Px8
 
 	// suggestTermsGap 是历史那一档和联想词那一档之间留的那一道空隙。
 	//
