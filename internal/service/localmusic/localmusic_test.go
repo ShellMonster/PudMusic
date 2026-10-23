@@ -552,8 +552,17 @@ func TestOggTitleComesFromTheFile(t *testing.T) {
 	if got := res.Tracks[0].Title; got != "Embedded Ogg Title" {
 		t.Errorf("标题是 %q（= 文件名），want 从 Ogg 注释里读出来的标题", got)
 	}
+	// ⚠️ 这里查的是**那张表**（`Playable`），不是「真放得出声」。
+	//
+	// 「真放得出声」在解码那一层验：`internal/service/audio/vorbis_test.go`
+	// 的 `TestOggVorbisReallyDecodes` 真的解了一份 .ogg，并量了它的音高
+	// （440 Hz 的正弦解出来还是 440 Hz）。
+	//
+	// 两半都要在，界面上的「可放」才是真话。**曾经只有前一半**：表上写着
+	// `.ogg` 可放，而 `mygo/audio/vorbis` 从来没被 import，点进去报的是
+	// 「不支持这个音频格式」——界面在骗人，而判据一路绿着。
 	if !res.Tracks[0].Playable() {
-		t.Error("Ogg 是放得出的（audio/vorbis 已注册），Playable 却是 false")
+		t.Error("Ogg 在「放不放得了」那张表上被判为放得了，Playable() 却是 false")
 	}
 }
 

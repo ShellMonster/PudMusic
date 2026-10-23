@@ -1195,6 +1195,14 @@ var Items = []Item{
 			"TestOnlyVideoAndAudioArePlayable",
 			"TestAnUnplayableFormatIsNamedAsSuch",
 			"TestWMAIsListedButNotPlayable",
+			// 本地音乐这一边的**另一半**：上面那几条钉的是「表上写着的和
+			// 界面上说的一致」，这一条钉的是「表上写着可放的**真的放得出声**」。
+			//
+			// ⚠️ 少了它，「界面说可放、实际报不支持」没人管：`.ogg` 在扫描
+			// 白名单里、也在「放不放得了」那张表里，而解码器从来没注册过——
+			// 判据一路绿，用户点进去才撞上「不支持这个音频格式」。
+			"TestOggVorbisReallyDecodes",
+			"TestTheOggDurationIsProbedFromItsOwnContainer",
 		},
 	},
 	{
