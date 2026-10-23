@@ -60,7 +60,10 @@ func TestRenderTicket241Shots(t *testing.T) {
 			saveRect(t, dir, "83-下载记录-状态列放大-"+name+".png", dtt, 760, 180, 170, 120)
 
 			// 84 确认弹窗：面板不再是 228 宽的一条。
-			_, cs, ctt := collectionShell(t, "12345",
+			//
+			// ⚠️ **深色那一套要真的深色**：`collectionShell` 不带 `systemIsDark` 的
+			// 话是浅色那一份，存出来的「深色」和「浅色」逐字节相同（评审查出来过）。
+			_, cs, ctt := collectionShellOpts(t, []shellOpt{systemIsDark(dark)}, "", "12345",
 				mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
 			waitSongs(t, ctt, cs, 3)
 			openBatchConfirm(t, ctt, "批量删除")

@@ -339,7 +339,7 @@ func (s *Shell) viewLoginEntry(c *ui.Context) {
 		}
 		return
 	}
-	if s.withTip(c, iconButton(c, iconLogin, "登录", iconMd).
+	if s.withTip(c, iconButton(c, iconLogin, "登录", iconLoginSize).
 		Size(iconHitMd, iconHitMd).Padding(0, 7), "登录 B 站账号").Clicked() {
 		s.goLogin()
 	}

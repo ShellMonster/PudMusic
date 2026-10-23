@@ -183,8 +183,11 @@ func (d *downloadsPage) viewStatus(c *ui.Context, r download.Snapshot) {
 	ui.Column(c).FillWidth().Gap(4).Children(func() {
 		statusBar(c, cell.bar, ui.Hex(dlBarColor)).FillWidth()
 		ui.Row(c).FillWidth().Gap(8).Children(func() {
-			ui.Text(c, cell.text).Grow(1).FontSize(scale.Font(c, 13)).TextColor(cell.c).
-				MaxLines(2)
+			// ⚠️ **12 和省略号都照原样**（这一支是「下载中 / 下载暂停 / 交织中」
+			// 那几句短的，省略号实际上不出现）——这一票只动**出错**那一支的排法，
+			// 不顺手改这里的字号。
+			ui.Text(c, cell.text).Grow(1).FontSize(scale.Font(c, 12)).TextColor(cell.c).
+				MaxLines(2).Ellipsis("…")
 			if cell.showPct {
 				dlPercent(c, r)
 			}

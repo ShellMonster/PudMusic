@@ -91,23 +91,27 @@ func TestTheTopBarEndsWithTwoLightControls(t *testing.T) {
 					"它比邻居重，用户的眼睛先落在它身上（框 %v）",
 					inks[avatarLabel], inks[lineIcons[0]], tier, rects[avatarLabel])
 			}
-			// 登录键：**它不是一块实心主色的方块**。
+			// 登录键：**和那四枚线框图标同一档**。
 			//
-			// ⚠️ **这一枚不按「和线框图标同档」量**：它的图形是票 #242 换过的
-			// **二维码**（`Device/qr-code-line.svg`）——二维码本来就是密的一块，
-			// 墨迹（191）比线框图标（137~141）高 1.36 倍。F-16 / F-05 说的是
-			// **那块实心底色**（778，是邻居的 5.4 倍），所以这里断的是「那一格里
-			// 没有主色像素」：图标是前景色画的，没有底。
+			// ⚠️ **这一枚的图形是二维码**（票 #242：登录是扫码登录，而「圆圈里一支
+			// 箭头」那一对在 18px 上分不清进出）。二维码**天生比线框图标密**：18px
+			// 下它那几块方块糊成一块（墨迹 191，是邻居的 1.36 倍——整排最重的一枚），
+			// 所以它画在 **16**（`iconLoginSize`）：那几块还是分得开的，墨迹 137，
+			// 和邻居**同一档**。
+			//
+			// 顺带断一句「它不是一块实心主色的方块」：F-16 / F-05 说的就是那块底
+			// （改之前 778 块主色像素），这一格现在一块主色像素都没有。
+			if inks["登录"] > tier*13/10 {
+				t.Errorf("登录键那一格的墨迹是 %d 像素，而左边那四枚线框图标是 %d~%d——"+
+					"它比邻居重，用户的眼睛先落在它身上（框 %v）",
+					inks["登录"], inks[lineIcons[0]], tier, rects["登录"])
+			}
 			loginRect := rects["登录"]
 			accent := hexColorOf(t, "#1ed760")
 			if n := countPixelsIn(t, tt, int(loginRect.X)-2, int(loginRect.Y)-2,
 				int(loginRect.X+loginRect.W)+2, int(loginRect.Y+loginRect.H)+2, accent); n > 0 {
 				t.Errorf("登录键那一格里有 %d 块主色像素——它不该再是一块实心主色的方块"+
 					"（改之前是 778，是相邻线框图标的 5.4 倍）", n)
-			}
-			if inks["登录"] > tier*2 {
-				t.Errorf("登录键那一格的墨迹是 %d 像素（旁边那四枚是 %d~%d）——"+
-					"它比邻居重太多了", inks["登录"], inks[lineIcons[0]], tier)
 			}
 			t.Logf("四枚线框图标 %v，末两枚 %v", inks, inks)
 		})
@@ -238,8 +242,23 @@ func TestTheSemanticColorsAsTextAreReadable(t *testing.T) {
 				{"警告", warningText(th), th.Warning},
 				{"成功", successText(th), th.Success},
 			} {
-				if r := ink.Ratio(c.got, th.Background); r < 4.5 {
-					t.Errorf("%s 当字色是 %.2f:1，want ≥4.5（色相不变，只压深）", c.what, r)
+				// ⚠️ **三个底都要够**：页面底色、控件那一层（`t.Surface`）、以及它
+				// hover 时的样子（`t.SurfaceHover`）——语义色当字色用的地方不止页面
+				// 底色（快捷键那一格就画在 `t.Surface` 上，评审查出来过：那一处只有
+				// 3.77:1）。这一档取的是**最严的那个底**（`SurfaceHover`），所以三个
+				// 一起达标。
+				for _, bg := range []struct {
+					what string
+					c    ui.Color
+				}{
+					{"页面底色", th.Background},
+					{"Surface", th.Surface},
+					{"SurfaceHover", th.SurfaceHover},
+				} {
+					if r := ink.Ratio(c.got, bg.c); r < 4.5 {
+						t.Errorf("%s 当字色是 %v，压在%s上只有 %.2f:1，want ≥4.5"+
+							"（色相不变，只压深）", c.what, c.got, bg.what, r)
+					}
 				}
 				// ⚠️ **主题里那三个值一个字节都没动**——这一档是「当字色用时另取
 				// 一档」，不是改主题（改主题就是「自己发明了一个上游没有的配色」）。
@@ -272,6 +291,80 @@ func TestTheDownloadDoneTextIsNotTheRawSuccess(t *testing.T) {
 		t.Errorf("「下载完成」那几个字里有 %d 块是上游那个绿（#17c964，浅色下压在白底上"+
 			"只有 2.19:1）——当字色要取压深过的那一档", n)
 	}
+}
+
+// TestTheShortcutConflictTextIsReadable 断「撞了的那一格」里的字读得出来。
+//
+// ⚠️ **这一格是画在 `Background(t.Surface)` 上的**，而语义色那一档（压深到
+// ≥4.5:1）原先只对着**页面底色**保证——于是浅色下原值 `#f31260` 压在那上面
+// 只有 **3.77:1**（评审查出来过：那一格里的字是原值，一个字节都没压深）。
+//
+// 判据是**画面上那一格里的字**：量出它最重的那一块像素（字的芯，就是它本身的
+// 颜色），再和那一格的底（`t.Surface`）算对比度。
+func TestTheShortcutConflictTextIsReadable(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), systemIsDark(dark))
+			openSettingsTab(t, tt, "快捷键设置")
+
+			// 造一个冲突：把「上一首」录成 ⌘P（和「播放/暂停」撞了）。
+			clickCell(t, tt, "应用内快捷键：上一首")
+			tt.Key(ui.Super, ui.KeyP)
+			tt.Frame()
+			if !tt.HasText("与「播放/暂停」冲突") {
+				t.Fatalf("没造出冲突，文字有 %q", tt.Texts())
+			}
+
+			cell, ok := tt.Find("应用内快捷键：上一首")
+			if !ok {
+				t.Fatalf("找不到那一格，文字有 %q", tt.Texts())
+			}
+			th := BuildTheme(app.DefaultSettings(""), dark)
+			// 那一格的底是 `t.Surface`（`shortcut_keys.go` 的 recorderCell）。
+			bg := rgb(th.Surface)
+			// 字在格的左边（右边那颗是「×」键，它的颜色不是危险色）。
+			x0, x1 := int(cell.X)+9, int(cell.X)+9+45
+			y0, y1 := int(cell.Y)+2, int(cell.Y+cell.H)-2
+			got, ok := darkestIn(tt, x0, y0, x1, y1, bg)
+			if !ok {
+				t.Fatalf("那一格左边没有找到字（框 %v）", cell)
+			}
+			if r := ink.Ratio(toUIColor(got), toUIColor(bg)); r < 4.5 {
+				t.Errorf("撞了的那一格里的字是 %v，压在格子的底 %v 上只有 %.2f:1，want ≥4.5——"+
+					"「这一格和别的键撞了」是最该读出来的一句话", got, bg, r)
+			}
+		})
+	}
+}
+
+// toUIColor 把画面上的颜色翻成 `ui.Color`（`ink.Ratio` 收那一种）。
+func toUIColor(c color.RGBA) ui.Color {
+	return ui.Color{R: c.R, G: c.G, B: c.B, A: c.A}
+}
+
+// darkestIn 找一块矩形里「离底色最远」的那个像素（字的芯）。
+//
+// ⚠️ **要的是最远的那一块，不是最暗的那一块**：字的笔画中间是它自己的颜色，
+// 边上那一圈抗锯齿是它和底的混合——所以「离底最远」才是它本身。
+func darkestIn(tt *ui.Tester, x0, y0, x1, y1 int, bg color.RGBA) (color.RGBA, bool) {
+	img := tt.Image()
+	best := bg
+	dist := -1
+	found := false
+	for y := max(y0, 0); y < min(y1, img.Rect.Max.Y); y++ {
+		for x := max(x0, 0); x < min(x1, img.Rect.Max.X); x++ {
+			p := img.RGBAAt(x, y)
+			d := maxDiff(p, bg)
+			if d > dist {
+				dist, best, found = d, p, true
+			}
+		}
+	}
+	return best, found
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

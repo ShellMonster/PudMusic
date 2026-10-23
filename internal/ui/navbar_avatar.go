@@ -345,12 +345,12 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 	ui.Column(c).Key("avatar").Children(func() {
 		hit := ui.Box(c).Size(iconHitMd, iconHitMd).Center().
 			Label(avatarLabel).Menu(func(m *ui.Menu) {
-				for _, item := range avatarMenuItems {
-					if m.Item(item.label).Chosen() {
-						item.run(s, c)
-					}
+			for _, item := range avatarMenuItems {
+				if m.Item(item.label).Chosen() {
+					item.run(s, c)
 				}
-			})
+			}
+		})
 		// ⚠️ **指针移上去时那个圆头像放大 5%**：上游顶栏那一枚是
 		// `<Avatar ... className="mr-4 cursor-pointer transition-transform
 		// hover:scale-105" />`（`layout/navbar/user/index.tsx:178`）。放大的是
