@@ -40,6 +40,7 @@ import (
 	"strings"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -66,8 +67,8 @@ const (
 	// 输入框之间的缝。上游 Input 的 md 档是 `px-3 gap-3`（12 / 12）——
 	// 12 + 18 的放大镜 + 12，输入框的字从框左边 42 起（上游的放大镜是 16，
 	// 我们这几枚图标统一 18，见 icons.go 的 iconMd）。
-	searchPadX = 12
-	searchGap  = 12
+	searchPadX = space.Px12
+	searchGap  = space.Px12
 
 	// 搜索框的底色：上游 `bg-default-400/20 dark:bg-default-500/20`
 	// （`search/index.tsx:97`），hover / focus 各抬到 30%。default-400 / 500
@@ -122,7 +123,7 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 	// 元素在 view 里改样式，画的是改完的那一份。
 	row := ui.Row(c).Key("search").Width(searchWidth).Height(searchHeight).
 		Radius(t.Radius).Background(searchFieldBg(t, false)).
-		Padding(0, searchPadX).Gap(searchGap).AlignItems(ui.Center)
+		Padding(space.None, searchPadX).Gap(searchGap).AlignItems(ui.Center)
 	row.Children(func() {
 		// 放大镜是**装饰**：它不可点，而输入框自己就带「搜索」这个无障碍名字
 		//（`searchLabel`），所以这里不加 Label——加了就是两个同名的，
@@ -256,7 +257,7 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 	ui.PopoverBase(c, field, &s.searchSuggest, func(panel ui.Element) {
 		// KeepFocus 的理由见文件头。少这一句，浮层里的条目点不到。
 		popupPanel(t, panel.KeepFocus().
-			Width(suggestWidth).Padding(8)).Children(func() {
+			Width(suggestWidth).Padding(space.Px8)).Children(func() {
 			// 🔴 **这一层 `Scroll` 是「最下面那几条点得着」的全部**：MaxHeight 把它
 			// 压在屏幕之内，超出去的部分靠滚。没有它，少掉的是「词看得见」——而用户
 			// 看到的是一个**列表突然断在屏幕边上**，既不知道下面还有，也不知道能滚。
@@ -269,7 +270,7 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 				// 一句提示：没有它时两栏连着排，看起来像一栏里混着两批词。
 				if showHistory {
 					s.viewSuggestHeader(c)
-					ui.Row(c).Key("suggest-history").Wrap().Gap(6).Children(func() {
+					ui.Row(c).Key("suggest-history").Wrap().Gap(space.Px6).Children(func() {
 						for _, item := range history {
 							s.viewHistoryChip(c, item)
 						}
@@ -347,8 +348,8 @@ func suggestPanelMaxH(winH float32) float32 {
 // 「清除全部」照 Biu 的 `clearSearchHistory`（`search/index.tsx:122-138`）。
 func (s *Shell) viewSuggestHeader(c *ui.Context) {
 	t := c.Theme()
-	ui.Row(c).Key("suggest-header").FillWidth().Gap(8).
-		AlignItems(ui.Center).Padding(2, 4, 6, 4).Children(func() {
+	ui.Row(c).Key("suggest-header").FillWidth().Gap(space.Px8).
+		AlignItems(ui.Center).Padding(space.Px2, space.Px4, space.Px6, space.Px4).Children(func() {
 		// 14/400（上游 `text-sm`，`search/index.tsx:126`）。**不许加粗**：
 		// 上游那一行是正文那一档，靠字号和上面那排 chip 分开，不靠字重。
 		ui.Text(c, "搜索历史").FontSize(scale.Font(c, 14)).Grow(1)
@@ -377,17 +378,17 @@ const (
 	historyChipLightR, historyChipLightG, historyChipLightB uint8 = 0xd4, 0xd4, 0xd8
 	historyChipDarkR, historyChipDarkG, historyChipDarkB    uint8 = 0x3f, 0x3f, 0x46
 
-	historyChipPadY     = 3
-	historyChipPadRight = 8
+	historyChipPadY     = space.Px3
+	historyChipPadRight = space.Px8
 	// historyChipLabelPadX 是标签按钮**左边**的内边距，也是 chip 左半圈那 8
 	// 像素的归属：指针落在上面点得中这条历史，而不是只有字本身可点。
 	// 右边只留 2，和 chip 的 gap 合起来是字到关闭键的 4（上游 px-2 + gap-1）。
-	historyChipLabelPadX   = 8
-	historyChipLabelPadEnd = 2
+	historyChipLabelPadX   = space.Px8
+	historyChipLabelPadEnd = space.Px2
 	// historyChipClose 是右边那个关闭键的点击区。18 = 12 的图标 + 每边 3；
 	// 再加 chip 上下各 3，整个 chip 正好 24 高（上游 h-6）。
 	historyChipClose = 18
-	historyChipGap   = 2
+	historyChipGap   = space.Px2
 )
 
 // historyChipBg 是那枚灰色 Chip 的底色。深浅两套是 HeroUI default 色阶的两头。
@@ -414,12 +415,12 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 		Background(historyChipBg(t)).
 		// 左边不留内边距：那 8 像素归标签按钮，点了才落在这一条上。右边留 8，
 		// 给关闭键一圈和左面对称的留白。
-		Padding(historyChipPadY, historyChipPadRight, historyChipPadY, 0).
+		Padding(historyChipPadY, historyChipPadRight, historyChipPadY, space.None).
 		Gap(historyChipGap).AlignItems(ui.Center).Children(func() {
 		// ⚠️ 标签按钮的上下内边距清零：`flatButton` 默认是 6，套在 chip 里会把
 		// 24 高撑到 30 以上，那就不再是 `h-6` 那种小块了。
 		if flatButton(c, label).FontSize(scale.Font(c, 12)).
-			Padding(0, historyChipLabelPadEnd, 0, historyChipLabelPadX).Clicked() {
+			Padding(space.None, historyChipLabelPadEnd, space.None, historyChipLabelPadX).Clicked() {
 			// ⚠️ **先把词填回框里**（Biu 的 `setValue(item.value)`，
 			// `search/index.tsx:154`）。不填的话用户点完历史，框里还是原来敲的
 			// 半截字，而页面那边搜的是这一条——两处对不上，按返回再回来还会
@@ -432,7 +433,7 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 		// ⚠️ 无障碍名字写全，别只留一个「×」：读屏软件念出来就是「乘号」，用户
 		// 根本不知道它在删哪一条。画面上是上游那枚叉图标。
 		if flatIconButton(c, iconClose, "删除「"+label+"」", iconCloseGlyph).
-			Size(historyChipClose, historyChipClose).Padding(0).
+			Size(historyChipClose, historyChipClose).Padding(space.None).
 			TextColor(t.TextMuted).Clicked() {
 			s.hist.remove(item.Value)
 		}
@@ -493,7 +494,7 @@ func (s *Shell) viewSearchClear(c *ui.Context) {
 		tip = "清空搜索"
 	}
 	if s.withTip(c, iconButton(c, iconClose, "清空", iconCloseGlyph).
-		Size(iconCloseHit, iconCloseHit).Padding(0, 7).
+		Size(iconCloseHit, iconCloseHit).Padding(space.None, space.Px7).
 		TextColor(c.Theme().TextMuted), tip).Clicked() {
 		s.searchKeyword = ""
 		s.searchKeywordFilled = false

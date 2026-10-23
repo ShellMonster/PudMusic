@@ -55,6 +55,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -264,7 +265,7 @@ func (s *Shell) viewDownloadList(c *ui.Context, _ *ui.Route) {
 	d := s.downloads
 
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
-	ui.Column(c).Key("page:"+downloadListPath).Grow(1).Padding(0, pagePadX).Gap(12).
+	ui.Column(c).Key("page:"+downloadListPath).Grow(1).Padding(space.None, pagePadX).Gap(space.Px12).
 		AlignItems(ui.Stretch).Children(func() {
 		d.viewToolbar(c, s)
 
@@ -452,11 +453,11 @@ func (d *downloadsPage) drawCell(c *ui.Context, s *Shell, row, col int) {
 	r := d.rows[row]
 	switch col {
 	case colFile:
-		ui.Row(c).Gap(8).AlignItems(ui.Center).FillWidth().Children(func() {
+		ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).FillWidth().Children(func() {
 			// 四态（没有地址 / 载入中 / 就绪 / 失败）由 imgcache.View 画，
 			// 这里不重复它的判断。
 			imgcache.View(c, s.images, r.Cover, dlCover, dlCover)
-			ui.Column(c).Grow(1).Gap(2).Children(func() {
+			ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
 				// 歌名那一行是**一个可点的块**：点它去浏览器里打开这一首的 B 站
 				// 页面，指针压上去时右边长出外链图标。出处是上游
 				// `download-list/index.tsx:166-178`——`group` 那一行
@@ -465,7 +466,7 @@ func (d *downloadsPage) drawCell(c *ui.Context, s *Shell, row, col int) {
 				// ⚠️ **图标不占位时是 width 0，展开时才加宽**（上游就是靠这个
 				// 让歌名不因为图标而变窄）；我们干脆**只在 hover 那一帧画它**，
 				// 一样的视觉，还少一个「宽度为 0 的图形」。
-				title := ui.Row(c).FillWidth().Gap(4).AlignItems(ui.Center).
+				title := ui.Row(c).FillWidth().Gap(space.Px4).AlignItems(ui.Center).
 					OnClick(func() { d.openBiliPage(r, s) })
 				onTitle := title.Hovered()
 				title.Children(func() {

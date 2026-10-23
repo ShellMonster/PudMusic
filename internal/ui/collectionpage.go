@@ -39,6 +39,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -413,7 +414,7 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 	// `pages/video-collection/favorites/index.tsx:436`）。
 	//
 	// 收到根上之后，这一页的每一样东西都从同一条左缘开始（票 #138）。
-	ui.Column(c).Key("page:collection:"+ref.Key()).Grow(1).Padding(0, pagePadX).Children(func() {
+	ui.Column(c).Key("page:collection:"+ref.Key()).Grow(1).Padding(space.None, pagePadX).Children(func() {
 		s.viewCollectionHeader(c, p)
 		s.viewCollectionOps(c, p)
 
@@ -564,7 +565,7 @@ const (
 	// 标题下面那三行字（简介 / 类型 + 条数 / 创建者）都是 `text-sm` = **14**，
 	// 行与行之间是 `space-y-4` = **16**（上游同一个文件 :53-113）。
 	collectionHeadCopySize = 14
-	collectionHeadGap      = 16
+	collectionHeadGap      = space.Px16
 
 	// 创建者是 `User` 组件那一枚圆头像。票面给的是 **24**。
 	collectionOwnerAvatarSize  = 24
@@ -586,7 +587,7 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 	info := s.app.Collection(p.ref)
 
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
-	ui.Row(c).Key("collection-header").Gap(16).Padding(20, 0, 8).
+	ui.Row(c).Key("collection-header").Gap(space.Px16).Padding(space.Px20, space.None, space.Px8).
 		Children(func() {
 			// ① 封面。空地址时 imgcache 画空框（没给封面的收藏夹真的有）。
 			imgcache.View(c, s.images, info.Cover, collectionCoverW, collectionCoverH)
@@ -613,7 +614,7 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 
 				// ④ 创建者：一枚 24 的圆头像 + 14 的昵称（上游是一个 `User`）。
 				if info.OwnerName != "" {
-					ui.Row(c).Gap(8).Center().Children(func() {
+					ui.Row(c).Gap(space.Px8).Center().Children(func() {
 						s.viewCollectionOwnerAvatar(c, info.OwnerFace)
 						ui.Text(c, info.OwnerName).FontSize(scale.Font(c, collectionHeadCopySize)).
 							LineHeight(smallCopyLeading).TextColor(t.TextMuted).
@@ -710,10 +711,10 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 	// 像素正好把搜索挤到下限以下（实测多出 8.6）。让右边那一组把剩下的空地
 	// 全吃掉、内容靠右，既不留缝，搜索框又有一个能长到 240 的地方。
 	ui.Row(c).Key("collection-ops").FillWidth().Center().
-		Padding(0, 0, 12).Children(func() {
+		Padding(space.None, space.None, space.Px12).Children(func() {
 		// ⚠️ **`Wrap` 是这一排的让位机制**（理由见文件头那两段）：这一组放不
 		// 下时它自己换行，而不是让内容溢出到右边那一组身上。
-		ui.Row(c).Gap(8).Center().Wrap().Children(func() {
+		ui.Row(c).Gap(space.Px8).Center().Wrap().Children(func() {
 			// 上游那枚主按钮是 `Button` 默认的 md 档：**40 高**。
 			if ui.PrimaryButton(c, "播放全部").Height(collectionOpsButtonH).Clicked() {
 				s.playWholeCollection(p)
@@ -721,7 +722,7 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 			// 上游是一枚 `size="md" variant="flat"` 的图标键
 			// （`operation/index.tsx:44`，tooltip「添加到播放列表」）。
 			if s.withTip(c, flatIconButton(c, iconEnqueue, "添加到播放列表", iconMd).
-				Size(iconHitMd, iconHitMd).Padding(0, 7), "添加到播放列表").Clicked() {
+				Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "添加到播放列表").Clicked() {
 				s.addWholeCollectionToQueue(p)
 			}
 			s.viewCollectionStar(c, p)
@@ -744,7 +745,7 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 		// ⚠️ **`Grow(1)` 是给搜索框留的那块地**：它自己上限 240，而 `Grow` 只
 		// 在有富余的父宽度里才长。少了这一句，输入框永远是 40 宽（实测截图里
 		// 一个字都填不满）。`Justify(End)` 让这一组贴着页边距。
-		ui.Row(c).Grow(1).Gap(8).Center().Justify(ui.End).Children(func() {
+		ui.Row(c).Grow(1).Gap(space.Px8).Center().Justify(ui.End).Children(func() {
 			s.viewCollectionSearch(c, p)
 			s.viewCollectionSort(c, p)
 		})
@@ -769,7 +770,7 @@ func (s *Shell) viewCollectionStar(c *ui.Context, p *collectionPage) {
 		tip = "取消收藏"
 	}
 	if s.withTip(c, flatIconButton(c, favIcon(info.Faved), tip, iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 7), tip).Clicked() {
+		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), tip).Clicked() {
 		s.setCollectionFav(p, !info.Faved)
 	}
 }
@@ -791,7 +792,7 @@ func (s *Shell) viewCollectionMore(c *ui.Context, p *collectionPage) {
 	// `ButtonBase` 拼的），所以扁平配方接得上——`ui.MenuButton` 那一版会自己
 	// 画一圈描边和一枚 ▾，放在这一排新扁平的三枚旁边就它一个不是。
 	s.withTip(c, flatIconButton(c, iconMore, "更多操作", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(0, 7), "更多").
+		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "更多").
 		Menu(func(m *ui.Menu) {
 			for _, item := range items {
 				if m.Item(item.label).Chosen() {
@@ -885,7 +886,7 @@ func (s *Shell) viewCollectionSort(c *ui.Context, p *collectionPage) {
 	t := c.Theme()
 	sel := ui.SelectBase[bili.CollectionSort](c, &p.sort)
 
-	trigger := sel.Trigger.Padding(4, 10).Radius(t.Radius).Border(1, t.Border).
+	trigger := sel.Trigger.Padding(space.Px4, space.Px10).Radius(t.Radius).Border(1, t.Border).
 		MinWidth(scale.Font(c, collectionSortMinW))
 	trigger.Children(func() {
 		ui.Text(c, p.sort.Label()).SingleLine()
@@ -896,9 +897,9 @@ func (s *Shell) viewCollectionSort(c *ui.Context, p *collectionPage) {
 	sel.Popup(func(panel ui.Element) {
 		// 外观走共享出口（`popupPanel`）：这一处原来只有底色和描边，没有
 		// 阴影——和旁边框架自己弹的浮层差一层影子。
-		popupPanel(t, panel.Padding(4))
+		popupPanel(t, panel.Padding(space.Px4))
 		for _, sort := range bili.CollectionSorts {
-			item := sel.Item(sort).Padding(6, 10).Radius(t.Radius)
+			item := sel.Item(sort).Padding(space.Px6, space.Px10).Radius(t.Radius)
 			switch {
 			case item.Highlighted():
 				// 高亮走「被选中的选项」那一个出口（实心主色底 + `t.AccentText`

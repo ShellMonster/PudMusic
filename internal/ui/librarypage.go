@@ -31,6 +31,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -179,7 +180,7 @@ func (p *libraryPage) viewKeywordBox(c *ui.Context) bool {
 // 像素（原来那两个框是 290）。
 func (p *libraryPage) viewFilters(c *ui.Context, now time.Time) bool {
 	changed := false
-	ui.Column(c).Key("filter:bar").FillWidth().Gap(8).Children(func() {
+	ui.Column(c).Key("filter:bar").FillWidth().Gap(space.Px8).Children(func() {
 		changed = p.dates.view(c, now)
 		p.submitted = p.viewKeywordBox(c)
 	})
@@ -246,9 +247,9 @@ func metricsOf(v list.View) listMetrics {
 // 紧凑那一档的行内尺寸。数在 `widgets/list/card.go` 那一组旁边，两个地方摆着同一个
 // 概念的两套数——那是因为这两页的行**多两列**（播放量 / 观看时间），列宽算得不一样。
 const (
-	compactListPadY = 4
-	compactListPadX = 6
-	compactRowGap   = 16
+	compactListPadY = space.Px4
+	compactListPadX = space.Px6
+	compactRowGap   = space.ListGap
 	compactColIndex = 32
 	// compactListRowHeight 是紧凑档那一行的高。定死的（同普通那一档），而这一档
 	// 没有封面撑着——40 是行里歌名 + UP 名那两块留得下的那个高度。
@@ -324,7 +325,7 @@ func viewLibraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, cover *imgcac
 		hover.RowCover(c, cover, m.Cover, mt.cover, onRow, m.Title, play)
 	}
 
-	ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).Children(func() {
+	ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px4).Children(func() {
 		ui.Text(c, m.Title).FontSize(scale.Font(c, mt.titleSize)).LineHeight(1.5).
 			TextColor(face.title).MaxLines(mt.titleLines).Ellipsis("…")
 		if m.Owner != "" {

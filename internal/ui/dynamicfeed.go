@@ -32,6 +32,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -172,7 +173,7 @@ func (s *Shell) viewDynamicFeed(c *ui.Context, _ *ui.Route) {
 		// 动态卡片左右各 32：上游是外层 `px-4` 再套一层 `px-4`
 		// （`index.tsx:142` 的 ScrollContainer + 里面那个 `px-4 py-4`），
 		// 16 + 16 = 32。卡自己那一条的左右内边距因此是 0。
-		ui.Column(c).Key("feed-items").Grow(1).FillHeight().PaddingX(32).Children(func() {
+		ui.Column(c).Key("feed-items").Grow(1).FillHeight().PaddingX(space.Px32).Children(func() {
 			s.viewFeedItems(c, f)
 		})
 	})
@@ -223,18 +224,18 @@ func (s *Shell) syncDynamicFeed(c *ui.Context) {
 func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 	t := c.Theme()
 	ui.Column(c).Key("feed-authors").Width(authorPaneW).FillHeight().
-		Padding(8, 8).Gap(4).
+		Padding(space.Px8, space.Px8).Gap(space.Px4).
 		BorderWidth(0, 1, 0, 0).BorderColor(t.Border.Alpha(paneDividerA)).Children(func() {
 		// 上游这一栏的标题就是「用户动态」（`author-list.tsx:126`），左右
 		// 再缩 16（`px-4`）；这一栏自己已经有 8 的横向内边距，所以这里
 		// 只再补 8。
-		ui.Text(c, "用户动态").FontSize(scale.Font(c, 14)).Bold().PaddingX(8)
+		ui.Text(c, "用户动态").FontSize(scale.Font(c, 14)).Bold().PaddingX(space.Px8)
 
 		if !s.app.LoggedIn() {
 			// 没登录**不假装有内容**：作者栏列的是「我关注的人」，没有登录态
 			// 就没有这个列表。给一句能指路的，比一个空列表有用。
 			ui.Text(c, "登录之后能看到你关注的人").FontSize(scale.Font(c, 12)).
-				TextColor(t.TextMuted).PaddingX(8)
+				TextColor(t.TextMuted).PaddingX(space.Px8)
 			return
 		}
 
@@ -352,7 +353,7 @@ func (s *Shell) viewAuthorRow(c *ui.Context, f *dynamicFeed, i int) {
 	}
 
 	box := ui.Row(c).Grow(1).Key("feed-author:" + strconv.FormatInt(mid, 10)).
-		Gap(12).Padding(8).Radius(6).AlignItems(ui.Center)
+		Gap(space.Px12).Padding(space.Px8).Radius(6).AlignItems(ui.Center)
 	// ⚠️ hover 要在 Children **之前**问（理由同 `widgets/list` 的 grid.go）。
 	on := box.Hovered()
 	if all {
@@ -528,7 +529,7 @@ func feedRowLabel(d bili.Dynamic) string {
 // 容器还没填满 → 又拉 → 又失败。
 func (s *Shell) viewFeedSentinel(c *ui.Context, p *upPager, hint, retryLabel string, retry func()) {
 	t := c.Theme()
-	ui.Row(c).Key("feed-sentinel").Center().Gap(8).Padding(12).Children(func() {
+	ui.Row(c).Key("feed-sentinel").Center().Gap(space.Px8).Padding(space.Px12).Children(func() {
 		switch {
 		case p.err != nil:
 			ui.Text(c, "加载失败："+p.err.Error()).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")

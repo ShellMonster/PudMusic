@@ -30,6 +30,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -146,7 +147,7 @@ func (s *Shell) viewHistory(c *ui.Context, _ *ui.Route) {
 	// 的（和设置页同一个理由，见 settings_page.go）。
 	ro := s.app.SettingsReadOnly()
 
-	ui.Column(c).Key("page:"+historyPath).Grow(1).Padding(0, pagePadX).Gap(8).
+	ui.Column(c).Key("page:"+historyPath).Grow(1).Padding(space.None, pagePadX).Gap(space.Px8).
 		Children(func() {
 			// 页头：标题在左，「记录播放历史」在右（上游是 `justify-between`）。
 			ui.Row(c).FillWidth().Center().Children(func() {
@@ -281,12 +282,12 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected boo
 		hover.CardCover(c, s.images, m.Cover, cell, laterCellCoverH, onCell,
 			"", clockText(m.Duration), m.Title, func() { rows.playFrom(i) })
 
-		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(4).PaddingY(cardGapForCell).Children(func() {
+		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px4).PaddingY(cardGapForCell).Children(func() {
 			// 歌名 16 / UP 名 14：和 `widgets/list` 的网格卡同一档
 			// （DESIGN.md「网格：歌名 16、UP 14」）。
 			ui.Text(c, m.Title).FontSize(scale.Font(c, 16)).LineHeight(1.5).
 				TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
-			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 				if m.Owner != "" {
 					ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, 14)).LineHeight(1).
 						TextColor(metaColor).MaxLines(1).Ellipsis("…")
@@ -298,7 +299,7 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected boo
 				ui.Text(c, clockText(m.Duration)).FontSize(scale.Font(c, 12)).
 					TextColor(metaColor).MaxLines(1)
 			})
-			ui.Row(c).Gap(6).FontSize(scale.Font(c, 11)).Children(func() {
+			ui.Row(c).Gap(space.Px6).FontSize(scale.Font(c, 11)).Children(func() {
 				ui.Text(c, progressText(m.Progress, m.Duration)).Grow(1).
 					TextColor(metaColor).MaxLines(1)
 				ui.Text(c, viewedAtText(m.ViewedAt)).TextColor(metaColor).MaxLines(1)

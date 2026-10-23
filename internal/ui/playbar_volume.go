@@ -32,6 +32,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -163,7 +164,7 @@ func (s *Shell) viewVolumeButton(c *ui.Context, st app.State) {
 	// 的那个 Tooltip **是竖滑块本身**。所以「按一下会静音」这件事靠的是
 	// **图标本身**（静音了它换成静音那张）加上这一枚的无障碍名字。
 	btn := iconKey(c, name, label, iconMd, false).
-		Size(iconHitMd, iconHitMd).Padding(0, 7).
+		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7).
 		TextColor(t.TextMuted)
 
 	// 悬停就浮出那根竖滑块——**但要停一会儿**（上游那个 Tooltip 的 `delay={300}`）。
@@ -242,7 +243,7 @@ func (s *Shell) viewVolumePanel(c *ui.Context, st app.State) {
 	//
 	// 定宽之后列宽恒定，居中的滑块也就恒定 ✓。上游那边也是这么做的：那个百分比
 	// 是个 `w-8`（32 像素）的定宽格子（`music-volume` 的 `endContent`）。
-	col := ui.Column(c).Key("playbar:volume").Padding(4).Gap(2).AlignItems(ui.Center).
+	col := ui.Column(c).Key("playbar:volume").Padding(space.Px4).Gap(space.Px2).AlignItems(ui.Center).
 		Width(volPanelW)
 	col.Children(func() {
 		sl := volumeSlider(c, &vol, 0, 1).Label("音量")

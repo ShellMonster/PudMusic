@@ -24,6 +24,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -114,7 +115,7 @@ func (s *Shell) viewFavoritesEmptyLine(c *ui.Context) {
 	// （默认 Stretch），量出来的 X 是 0，而字实际起头的位置是内边距那一份。
 	// 套一层壳，那一句的盒子就从内边距那儿起头——「它和标题对齐」这件事
 	// 才量得出来（测试就是这么量的）。
-	ui.Row(c).Padding(6, favIndent(t)).Children(func() {
+	ui.Row(c).Padding(space.Px6, favIndent(t)).Children(func() {
 		ui.Text(c, "还没有收藏夹").FontSize(scale.Font(c, 12)).
 			TextColor(t.TextMuted)
 	})
@@ -143,7 +144,7 @@ func (s *Shell) viewFavoritesRefreshing(c *ui.Context, st app.Settings, collapse
 		return
 	}
 	ui.Text(c, refreshLine).FontSize(scale.Font(c, 12)).
-		TextColor(c.Theme().TextMuted).Padding(4, 8)
+		TextColor(c.Theme().TextMuted).Padding(space.Px4, space.Px8)
 }
 
 // viewFavoriteGroup 是一组：折叠标题 + （展开时的）那一列。
@@ -160,7 +161,7 @@ func (s *Shell) viewFavoriteGroup(c *ui.Context, st app.Settings, g app.Favorite
 	folded := favoriteFolded(st, g)
 
 	// Key 是这一组的序号：两组各自独立，折叠/展开不会让另一组的状态串过来。
-	ui.Column(c).Key("fav-group:" + strconv.Itoa(int(g))).Gap(2).Children(func() {
+	ui.Column(c).Key("fav-group:" + strconv.Itoa(int(g))).Gap(space.Px2).Children(func() {
 		s.viewFavoriteHeader(c, g, folded)
 		if folded {
 			return
@@ -196,7 +197,7 @@ func (s *Shell) viewFavoriteHeader(c *ui.Context, g app.FavoriteGroup, folded bo
 	// ⚠️ **灰字**：上游的分组标题是弱化的（`layout/side/collection/index.tsx:425`
 	// 一带的次级文字），而菜单项和收藏夹名才是 `t.Text`。这一层要是和下面那些
 	// 一样黑，六个分组标题就会比六个名字还抢眼。
-	ui.Row(c).Gap(2).Center().Children(func() {
+	ui.Row(c).Gap(space.Px2).Center().Children(func() {
 		// ⚠️ **左对齐**（`Justify(Start)`）：框架的按钮把内容**居中**，而这一枚
 		// 是 `Grow(1)` 的（为了把「+」推到最右边）——于是两个分组标题**起头的
 		// 位置不一样**：「我创建的」那组右边多一个「+」，它的标题就往左挪了
@@ -250,7 +251,7 @@ const favCollapsedName = "收藏夹"
 // 最窄是 900，那一栏右边有的是地方。
 const (
 	favPanelW    = 200
-	favPanelGap  = 6
+	favPanelGap  = space.Px6
 	favPanelItem = 13
 )
 
@@ -290,7 +291,7 @@ func (s *Shell) viewFavoritesPanel(c *ui.Context, st app.Settings, anchor ui.Ele
 	ui.PopoverBase(c, anchor, &s.favPanelOpen, func(panel ui.Element) {
 		popupPanel(t, panel.
 			AttachTo(anchor, ui.AnchorEnd, ui.AnchorStart).MarginStart(favPanelGap).
-			Width(favPanelW).Padding(6)).
+			Width(favPanelW).Padding(space.Px6)).
 			Children(func() {
 				// ⚠️ **空状态也只有一句**（和侧栏那一句同一个道理，报告 C3）：
 				// 两组都空的时候摆两句一模一样的话，用户得自己判断那是说一组
@@ -305,13 +306,13 @@ func (s *Shell) viewFavoritesPanel(c *ui.Context, st app.Settings, anchor ui.Ele
 				}
 				for g := range favGroups {
 					ui.Text(c, app.FavoriteGroup(g).String()).FontSize(scale.Font(c, 12)).
-						TextColor(t.TextMuted).Padding(4, 8)
+						TextColor(t.TextMuted).Padding(space.Px4, space.Px8)
 					for _, f := range items[g] {
 						s.viewFavoritesPanelRow(c, f)
 					}
 					if g == lastEmpty {
 						ui.Text(c, "还没有收藏夹").FontSize(scale.Font(c, 12)).
-							TextColor(t.TextMuted).Padding(2, 8)
+							TextColor(t.TextMuted).Padding(space.Px2, space.Px8)
 					}
 				}
 			})
@@ -324,7 +325,7 @@ func (s *Shell) viewFavoritesPanelRow(c *ui.Context, f app.Favorite) {
 	if label == "" {
 		label = "（没名字）"
 	}
-	row := ui.Row(c).FillWidth().Padding(4, 8).Radius(6)
+	row := ui.Row(c).FillWidth().Padding(space.Px4, space.Px8).Radius(6)
 	row.Children(func() {
 		ui.Text(c, label).FontSize(scale.Font(c, favPanelItem)).Grow(1).
 			MaxLines(1).Ellipsis("…")
@@ -415,7 +416,7 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 	t := c.Theme()
 	cur := s.router.Path() == collectionPath(f.ID)
 
-	row := ui.Column(c).Key(favRowKey(g, f.ID)).Grow(1).Radius(6).Padding(6, 8)
+	row := ui.Column(c).Key(favRowKey(g, f.ID)).Grow(1).Radius(6).Padding(space.Px6, space.Px8)
 	switch {
 	case cur:
 		// 当前就在这一页：和侧栏菜单当前项**同一套**画法（`flatCurrent`——
