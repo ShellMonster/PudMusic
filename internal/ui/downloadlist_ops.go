@@ -98,7 +98,7 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 		}
 
 		// ⚠️ 没有目录时不摆这个按钮：按下去是打不开的。一个只会说「不行」的
-		// 按钮不如不摆（和首页不摆「全部播放」是同一个取舍）。
+		// 按钮不如不摆（和搜索页那一格「用户」不摆「全部播放」是同一个取舍）。
 		if dir != "" && flatButton(c, "打开文件夹").Width(dlOpenDirW).Clicked() {
 			d.openDownloadDir(dir, s)
 		}

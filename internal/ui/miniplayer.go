@@ -592,9 +592,15 @@ func (s *Shell) viewMiniTitleRow(c *ui.Context, st app.State, t *ui.Theme) {
 			// 一直是主色绿的实心填充——320×100 那扇窗里最大的一块颜色（0.97%），
 			// 比同窗那条播放位置（主要的）还响。现在填过的那一段平时是次要色，
 			// 悬停 / 按下才变主色（`knobMiniVolumeLook` 的那一层）。
+			//
+			// 🔴 **它有一枚悬停提示**（票 #244 / UX 报告 §2 的 B5）：这扇窗里
+			// 「音量」和「播放进度」长得几乎一样（都是 16 高的圆角条），而画面上
+			// 没有任何一个字说明哪一根是哪个——同一扇窗里「退出」那一枚倒是有
+			// 提示。提示说「音量 80%」，指针停上去就知道自己在拖什么。
 			vol := st.Volume
-			if selfSlider(c.Key("mini-volume"), &vol, 0, 1, knobMiniVolumeLook).Width(miniVolumeW).
-				Height(16).Label("音量").Changed() {
+			volSlider := selfSlider(c.Key("mini-volume"), &vol, 0, 1, knobMiniVolumeLook).Width(miniVolumeW).
+				Height(16).Label("音量")
+			if s.miniTip(c, volSlider, "音量 "+volPercent(st.Volume)).Changed() {
 				s.app.SetVolume(vol)
 			}
 
@@ -609,6 +615,25 @@ func (s *Shell) viewMiniTitleRow(c *ui.Context, st app.State, t *ui.Theme) {
 				}
 			}
 		})
+}
+
+// miniTip 是迷你窗第一行那些控件的悬停提示：**摆在下面**。
+//
+// 🔴 **默认那一位是「上面」**（`tooltip.go` 的 `tipAt`），而迷你窗只有 320×100：
+// 第一行在 y=14..30，摆在上面的话提示整个落在窗口之外——**一个字都看不见**，
+// 而「看不见的提示」和「没有提示」在画面上是一回事。
+//
+// 摆在下面的话它落在 y=30..50（盖住进度条那一段，但还在窗内）——指针停在音量
+// 滑块上的时候，用户要读的就是那一行。
+//
+// ⚠️ **不看按下**（`watchPress` = false）：框架那份提示是「按过它了就收起」
+// （上游的 closeOnClick），而这里拖的是一根滑块——按下去那一刻提示就收起来，
+// 用户正在拖的时候反而看不到自己拖到多少了。
+func (s *Shell) miniTip(c *ui.Context, anchor ui.Element, text string) ui.Element {
+	return s.tipAt(c, anchor, text, tipDefault, func(panel, anchor ui.Element, t *ui.Theme) {
+		panel.AttachTo(anchor, ui.AnchorBottom, ui.AnchorTop).
+			Margin(space.Px2, space.None, space.None, space.None)
+	}, false)
 }
 
 // viewMiniProgress 是第二行：那条进度条。

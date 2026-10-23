@@ -1,8 +1,10 @@
 package imgcache
 
 import (
+	"bytes"
 	"image"
 	"image/color"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -354,4 +356,71 @@ func sameColors(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// TestTheLoadedCoverHasAnEdgeOfItsOwn 钉住「有图那一档也描一圈边」
+// （票 #244 / UX 报告 §2 的 E2）。
+//
+// # 为什么要这一档也有边
+//
+// 原来四档里只有三档有边界：「正在加载」没有，「拉失败」「没有地址」有
+// （`drawPlaceholder` 的 `Border(1, t.Border)`）——**「图取到了、图本身是深色」
+// 那一档没有**。于是一张近黑的封面（`#12141a` 那一档）在深色底上和行的底色
+// 几乎一样，用户分不清那是「封面是黑的」还是「封面没加载出来」。
+//
+// # 判据是**顶边那一圈**
+//
+// `hasBorder` 量的是「最上面那一行和它下面一行不同」：有边时 y=0 是那条线、
+// y=1 是底色（这里是图）。而「正在加载」那一档**没有**边（骨架屏连它都不画——
+// 先给一圈线再撤掉会让那一格闪一下），所以这一条不会和骨架屏搞混。
+//
+// ⚠️ **深色主题**：浅色底下白封面和行底接近，深色底下近黑封面和行底接近——
+// 两套主题里各有一档最难分辨，而这一条量的是**边在不在**（不是边有多明显），
+// 所以两套主题里画法必须一样。
+func TestTheLoadedCoverHasAnEdgeOfItsOwn(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// 一张近黑的封面（深色底下最难分辨的那一档）。
+		w.Write(darkPNGBytes(t, 40, 40))
+	}))
+	defer srv.Close()
+
+	c := New(Options{})
+	t.Cleanup(c.Close)
+	url := srv.URL + "/cover.png"
+
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			tt := ui.NewTester(func(ctx *ui.Context) { View(ctx, c, url, 200, 120) }, 320, 200)
+			tt.SetDark(dark)
+			waitFor(t, 5*time.Second, "图换上来了，而且那一圈边在", func() bool {
+				tt.Frame()
+				return hasBorder(tt.Image(), 200, 120)
+			})
+			// ⚠️ **边在还不够**：那一格中间得是**图**，不是占位（占位那一档也有
+			// 边）。中间那一块是图的颜色就说明换上了。
+			if got := hexOf(tt.Image().At(100, 60)); got != "#12141a" {
+				t.Errorf("那一格中间是 %s，want #12141a（图换上来了吗）", got)
+			}
+		})
+	}
+}
+
+// darkPNGBytes 造一张近黑的纯色 PNG（深色底下最难分辨的那一档封面）。
+func darkPNGBytes(t *testing.T, w, h int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := range h {
+		for x := range w {
+			img.Set(x, y, color.RGBA{R: 0x12, G: 0x14, B: 0x1a, A: 0xff})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }

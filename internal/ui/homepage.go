@@ -235,7 +235,7 @@ func (h *homePage) view(c *ui.Context, s *Shell) {
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
 	ui.Column(c).Key("page:"+homePath).Grow(1).Padding(space.None, pagePadX).Gap(space.Px12).
 		AlignItems(ui.Stretch).Children(func() {
-		h.viewTabs(c)
+		h.viewTabs(c, s)
 
 		// 新歌速递只画在「流行」这一屏的顶部，别的地方一律不画（上游
 		// index.tsx:295）。它自己那三态（拉取中 / 拉不到 / 正常）是它内部
@@ -310,16 +310,29 @@ func (h *homePage) scrollTop() {
 	h.lists[h.tab].ScrollTo(0, ui.Start)
 }
 
-// viewTabs 画那三个 Tab。
+// viewTabs 画那三个 Tab 和「全部播放」。
 //
-// ⚠️ Biu 把 Tab 那一排和右边一个「全部播放」按钮放在同一个 `justify-between`
-// 的行里（`index.tsx:262-294`）。按钮**这一版不摆**：它是 `addList`（往播放
-// 列表里**追加**，不换队列也不起播，Biu 的 `handlePlayAll` 就是这么写的），而
-// 我们的队列只有「从这一首往后播」和「追加到末尾」（`app.Queue` 到今天只有
-// 那两条路）。要摆它就得先决定「全部播放」到底是哪一种——而那是另一个决定，
-// 不该在接数据源这一票里顺手定下来。摆一个连语义都还没定的按钮不如不摆。
-func (h *homePage) viewTabs(c *ui.Context) {
-	ui.Row(c).Key("home:tabbar").FillWidth().AlignItems(ui.Center).Children(func() {
+// # 「全部播放」现在摆了（票 #244 / UX 报告 §2 的 B6）
+//
+// 此前**只有搜索结果页有**这一枚，首页故意没有——理由是队列语义（追加 / 从
+// 这首开始）还没定下来（DESIGN.md §十第 3 条）。于是同一个动作在一个页面能按、
+// 在另一个页面找不到，用户会以为是两个不同的功能。
+//
+// 🔴 **这一票只统一画法，语义等裁决**：这一枚和搜索页那一枚是**同一枚**
+// （`playAllButton`）、走**同一个出口**（`playAllSongs`），语义沿用搜索页那一支
+// ——**只追加，不换队列、不起播**（票 #60 的验收第 1 条；上游的 `handlePlayAll`
+// 也是 `addList`）。「从这首开始」那一档仍然待人裁决：裁决之后改
+// `playAllSongs` **一处**，两个页面一起变。
+//
+// ⚠️ **位置和搜索页一样：紧跟在 Tab 那一排右边**（Biu 把 Tab 那一排和右边一个
+// 「全部播放」按钮放在同一个 `justify-between` 的行里，`index.tsx:262-294`——
+// 我们这一版是「跟着 Tab 那一排」，而搜索页那一枚也是紧跟着它自己那排排序
+// Tab）。两个页面上的同一个动作摆在同一个相对位置上，用户来回切页不用重新找。
+func (h *homePage) viewTabs(c *ui.Context, s *Shell) {
+	// ⚠️ **缝是 12**：和搜索页那一排一样（`viewSearchToolbar` 的 `Gap(space.Px12)`）——
+	// 同一个动作在两个页面上，**按钮和它左边那排 Tab 之间的缝也要一样**，不然
+	// 两处的画法还是差着一点。
+	ui.Row(c).Key("home:tabbar").FillWidth().Gap(space.Px12).AlignItems(ui.Center).Children(func() {
 		// 🔴 Key 要写在 Tab 的构造**之前**：Tab 里面是个 List，它的状态在
 		// 构造的时候就已经读过了，构造之后再 `.Key()` 会 panic（`ui/element.go`
 		// 的 Key 注释：自带输入的控件都不能构造后 Key，只能构造前 `Context.Key`）。
@@ -330,6 +343,15 @@ func (h *homePage) viewTabs(c *ui.Context) {
 		//
 		// 首页这一排上游是 `size="lg"`（44），其余三处是 md（40）。
 		mainTabs(c, &h.tab, tabLG, homeTabs[:]...)
+
+		// 「全部播放」：这一档的歌（**当前这一档 Tab 的**，不是三个 Tab 加起来）。
+		//
+		// ⚠️ **禁用的条件和搜索页那一枚一样**：正在装这一档，或者这一档一首都
+		// 没有时不让按（上游那一枚也是这个条件，`video-list/search-header.tsx:55`）。
+		songs := h.songs.tabs[h.tab]
+		if playAllButton(c, h.feed.loadingOf(h.tab) || len(songs) == 0).Clicked() {
+			s.playAllSongs(songs)
+		}
 	})
 }
 

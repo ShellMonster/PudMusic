@@ -81,6 +81,31 @@ const (
 	// （多了就省略号），而网格卡片那一格是两行（`titleLines`）。
 	listTitleLines = 1
 
+	// listTitleMaxW 是**歌名那一列最多占多宽**（票 #244 / UX 报告 §2 的 E1）。
+	//
+	// # 为什么歌名要有一个上限
+	//
+	// 那一列是 `Grow(1)`——它吃掉了整行剩下的宽，于是**一个 630 像素的歌名一路
+	// 长到离「播放量」那一列只差 31 像素**（实测：歌名 x=337..969，播放量
+	// x=1000）。于是：
+	//
+	//   - 省略号要等歌名长到 700 多像素才出现（列边界离得太远）；
+	//   - 这一行里「歌名 / 播放量 / 时长」被拉开 900 多像素——「一行一首歌」那个
+	//     紧凑的信息单元被拉散了。
+	//
+	// 420 是量出来的：默认窗口（1200）下那一列是 520~630，收到 420 之后歌名和
+	// 右边那几列之间**始终留着一段看得见的空**，而 420 仍然放得下二十来个汉字
+	//（歌名字号 16）。
+	//
+	// ⚠️ **上限加在「字」上，不加在「列」上**：框架的 flex **没有收缩**，而行里
+	// 歌名的宽度是**按内容算的**——给列加一个上限的话，长歌名那一行的歌名列会比
+	// 短歌名那一行窄，于是右边那几列**逐行错开**（而画面上只是「表头歪了一点」）。
+	// 字有上限、列照旧吃满剩下的宽，两边就都对得上。
+	//
+	// ⚠️ **UP 名用同一个数**：它和歌名在同一列里，不给它上限的话一行很长的
+	// UP 名照样会一路顶到右边那几列跟前（它字号更小，跑得更远）。
+	listTitleMaxW = 420
+
 	// titleLines 是**网格卡片**那一格歌名最多几行。2 是 Biu 的 `line-clamp-2`。
 	//
 	// ⚠️ **别拿它当列表那一行的行数**：那两处是两件事。网格那一格是方的，歌名
@@ -261,12 +286,16 @@ func (l *List) viewCard(r ui.ListRow) {
 		//
 		// ⚠️ 歌名**只占一行**（上游那一行是 `truncate`）：折行的话整张列表的行高
 		// 就跟着歌名长短跳（见文件头）。
+		//
+		// ⚠️ **歌名和 UP 名各有一个宽度上限**（`listTitleMaxW`）：这一列是
+		// `Grow(1)`，吃掉了整行剩下的宽，而字没有上限的话一个 630 像素的歌名
+		// 会一路长到离右边那几列只差 31 像素（理由见那个常量）。
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).Children(func() {
 			ui.Text(c, m.Title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
-				TextColor(titleColor).MaxLines(listTitleLines).Ellipsis("…")
+				TextColor(titleColor).MaxLines(listTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
 			if m.Owner != "" {
 				ui.Text(c, m.Owner).FontSize(scale.Font(c, scale.ListOwner)).LineHeight(leading.Owner).
-					TextColor(ownerColor).MaxLines(1).Ellipsis("…")
+					TextColor(ownerColor).MaxLines(1).Ellipsis("…").MaxWidth(listTitleMaxW)
 			}
 		})
 
@@ -340,10 +369,10 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px2).Children(func() {
 			ui.Text(c, m.Title).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Compact).
-				TextColor(titleColor).MaxLines(compactTitleLines).Ellipsis("…")
+				TextColor(titleColor).MaxLines(compactTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
 			if m.Owner != "" {
 				ui.Text(c, m.Owner).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Owner).
-					TextColor(ownerColor).MaxLines(1).Ellipsis("…")
+					TextColor(ownerColor).MaxLines(1).Ellipsis("…").MaxWidth(listTitleMaxW)
 			}
 		})
 
