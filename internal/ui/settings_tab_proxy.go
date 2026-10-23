@@ -54,7 +54,7 @@ func (s *Shell) settingsProxy(c *ui.Context, st app.Settings, ro bool) {
 		}
 		chosen := cur.Type
 		ui.Column(c).Width(proxySelectWidth).Children(func() {
-			ui.Text(c, "代理类型").FontSize(scale.Font(c, 16)).FontWeight(weightMedium)
+			ui.Text(c, "代理类型").FontSize(scale.Font(c, scale.Size16)).FontWeight(weightMedium)
 			enumSelect(c, &chosen, items, "选择代理类型", proxySelectWidth, 0, ro)
 		})
 		if chosen != cur.Type {
@@ -75,8 +75,8 @@ func (s *Shell) settingsProxy(c *ui.Context, st app.Settings, ro bool) {
 		}
 		ui.Column(c).FillWidth().Gap(space.Px6).Children(func() {
 			ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
-				ui.Text(c, "主机").FontSize(scale.Font(c, 12)).Grow(1)
-				ui.Text(c, "端口").FontSize(scale.Font(c, 12)).Grow(1)
+				ui.Text(c, "主机").FontSize(scale.Font(c, scale.Size12)).Grow(1)
+				ui.Text(c, "端口").FontSize(scale.Font(c, scale.Size12)).Grow(1)
 			})
 			ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
 				// ⚠️ **不许给输入框加 Key**：Key 只能挂在「创建时没有处理输入」的
@@ -106,9 +106,9 @@ func (s *Shell) settingsProxy(c *ui.Context, st app.Settings, ro bool) {
 		showPass := cur.Type == app.ProxyHTTP || cur.Type == app.ProxyHTTPS || cur.Type == app.ProxySOCKS5
 		ui.Column(c).FillWidth().Gap(space.Px6).Children(func() {
 			ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
-				ui.Text(c, "用户名").FontSize(scale.Font(c, 12)).Grow(1)
+				ui.Text(c, "用户名").FontSize(scale.Font(c, scale.Size12)).Grow(1)
 				if showPass {
-					ui.Text(c, "密码").FontSize(scale.Font(c, 12)).Grow(1)
+					ui.Text(c, "密码").FontSize(scale.Font(c, scale.Size12)).Grow(1)
 				}
 			})
 			ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
@@ -130,7 +130,7 @@ func (s *Shell) settingsProxy(c *ui.Context, st app.Settings, ro bool) {
 }
 
 func proxyHint(c *ui.Context, text string) {
-	ui.Text(c, text).FontSize(scale.Font(c, 12)).TextColor(c.Theme().TextMuted)
+	ui.Text(c, text).FontSize(scale.Font(c, scale.Size12)).TextColor(c.Theme().TextMuted)
 }
 
 // portOf 把设置里那个可选的端口变成输入框上摆的字符串。

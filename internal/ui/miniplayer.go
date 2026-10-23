@@ -577,8 +577,7 @@ func (s *Shell) viewMiniTitleRow(c *ui.Context, st app.State, t *ui.Theme) {
 			// ⚠️ **字重不写**（400）：歌名那一档是 400（DESIGN.md §二），
 			// 之前它是 700。
 			ui.Text(c, title).Key("mini-title").Grow(1).MinWidth(miniTitleMinW).
-				FontSize(scale.Font(c, 13)).MaxLines(1).Ellipsis("…").
-				TextColor(textColor(t, st.HasTrack))
+				FontSize(scale.Font(c, scale.Size13)).MaxLines(1).Ellipsis("…").TextColor(textColor(t, st.HasTrack))
 
 			// 音量在这一行而不是控制那一行：Biu 那边没有音量，而控制那一行只摆
 			// 三个键（上一首 / 播放 / 下一首），一行里再塞一根滑块会让那三个键

@@ -272,7 +272,7 @@ func (s *Shell) settingsContentInnerW(c *ui.Context, st app.Settings) float32 {
 // 300 在合法配置里放得下（最窄那一档是窗口 900 + 侧栏 480，内容区 364 >
 // 300 + 24 + 一个字）。
 func (s *Shell) settingsControlFitW(c *ui.Context, base float32) float32 {
-	descMin := scale.Font(c, 14) // 说明列的最小宽：一个字
+	descMin := scale.Font(c, scale.Size14) // 说明列的最小宽：一个字
 	if s.settings.descFloor > 0 {
 		descMin = s.settings.descFloor
 	}
@@ -394,11 +394,11 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 			ui.Column(c).FillWidth().MaxWidth(settingsContentMaxW).
 				Padding(space.None, settingsContentPad, settingsContentPad, settingsContentPad).
 				Gap(settingsGroupGap).Children(func() {
-				ui.Text(c, "设置").FontSize(scale.Font(c, pageTitleSize))
+				ui.Text(c, "设置").FontSize(scale.Font(c, scale.PageTitle))
 
 				if ro {
 					ui.Text(c, "设置只读：这份设置来自更新的版本，这一版一个字都不会写回去。").
-						FontSize(scale.Font(c, 12)).TextColor(dangerText(t))
+						FontSize(scale.Font(c, scale.Size12)).TextColor(dangerText(t))
 				}
 
 				// ⚠️ **主 Tab 用轨道 + 滑块那一种**（`mainTabs`，见 tabs.go）：
@@ -540,7 +540,7 @@ const settingsFocusTries = 3
 // ⚠️ 这一句原来写着「Biu 用的是 `<h2>`」就完了，既没写字号也没写字重，于是这一
 // 组标题在我们这边一路是 16/700：比上游小一档、还粗两档（票 #166 的 G06）。
 func (s *Shell) settingSection(c *ui.Context, title string) {
-	ui.Text(c, title).FontSize(scale.Font(c, 20)).Padding(space.None, space.None, space.Px4, space.None)
+	ui.Text(c, title).FontSize(scale.Font(c, scale.Size20)).Padding(space.None, space.None, space.Px4, space.None)
 }
 
 // settingSectionEnd 是两组设置之间那条分隔线。Biu 的 `<Divider />`。
@@ -568,7 +568,7 @@ func (s *Shell) settingRowAt(c *ui.Context, key, title, desc string, control fun
 	t := c.Theme()
 	focused := key != "" && s.settings.focus == settingsFocus(key)
 	s.settingRowElAt(c, focused, func() {
-		txt := ui.Text(c, title).FontSize(scale.Font(c, 16)).FontWeight(weightMedium)
+		txt := ui.Text(c, title).FontSize(scale.Font(c, scale.Size16)).FontWeight(weightMedium)
 		if focused {
 			// ⚠️ **主色当字色取 `ink.AccentOn`**：浅色下主色本身压在白底上读
 			// 不出来（flatbutton.go 那一大段），而「指着的那一行」恰恰是用户
@@ -621,7 +621,7 @@ func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc s
 		}
 		descCol.Children(func() {
 			title()
-			ui.Text(c, desc).FontSize(scale.Font(c, 14)).TextColor(t.TextMuted).Wrap()
+			ui.Text(c, desc).FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).Wrap()
 		})
 		control()
 	})
@@ -675,6 +675,7 @@ func (s *Shell) settingsSegment(c *ui.Context, key, group string, w float32, lab
 	// ⚠️ **那个 `Label(group)` 是给这一排起个组名**：读屏软件要知道这几个键是一组
 	// （互斥的几档），而 `Tester.Find` 也靠它量这一排的盒子——控件列的左边是不是
 	// 一条线，就靠它断（见 `TestTheSettingsControlsShareOneBaseline`）。
+	t := c.Theme()
 	row := ui.Row(c).Key(key).Label(group).Gap(space.Px4)
 	if w > 0 {
 		// ⚠️ **按内容区算宽度**（`settingsControlFitW`）：这一族的宽度跟着字号
@@ -690,7 +691,7 @@ func (s *Shell) settingsSegment(c *ui.Context, key, group string, w float32, lab
 	row = row.MinWidth(settingsControlMinW)
 	row.Children(func() {
 		for i, text := range labels {
-			b := flatButton(c, text).Grow(1).Radius(6).Disabled(ro)
+			b := flatButton(c, text).Grow(1).Radius(t.Radius).Disabled(ro)
 			if i == chosen {
 				b = s.pickSelected(c, b, ro)
 			}
@@ -820,7 +821,7 @@ func (s *Shell) pickTrayNote(c *ui.Context) {
 	// macOS 上没有托盘（与 Biu 一致），「隐藏到托盘」这一格在这儿是「收进 Dock」。
 	// 得说出来，不然用户以为 Biu 有而我们没做。
 	ui.Text(c, "macOS 上不建托盘图标（与 Biu 一致）：「隐藏到托盘」是收进程序坞，"+
-		"图标还在，点一下就回来。").FontSize(scale.Font(c, 12)).TextColor(c.Theme().TextMuted)
+		"图标还在，点一下就回来。").FontSize(scale.Font(c, scale.Size12)).TextColor(c.Theme().TextMuted)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

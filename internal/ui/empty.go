@@ -21,6 +21,7 @@
 package ui
 
 import (
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -110,15 +111,6 @@ const emptyIconSize = 32
 // 这里多一样东西（上游只有两样），照抄 8 的话三样会挤成一团。
 const emptyGap = space.Px8
 
-// emptyTitleSize 是空状态那一行「这里为什么空」的字号。**15**。
-//
-// ⚠️ **「正在加载」那一档不用这个数**（票 #178）：那一档画的是一枚转圈，
-// 没有字。改之前那一档是一行同样大小的淡字，而它现在是一个图形。
-const emptyTitleSize = 15
-
-// emptyHintSize 是空状态第二句「怎么才能不空」的字号。**12**。
-const emptyHintSize = 12
-
 // drawEmpty 是**唯一**的空状态画法。页面级（`viewEmpty`）和列表 / 网格那一块
 // （`pagedRows.viewEmptyState`）都走它——七页共用一套绘制入口就是指这个。
 //
@@ -160,7 +152,7 @@ func drawEmpty(c *ui.Context, key string, e emptyState, pad float32) {
 // `viewLibraryMissing`（插画 / 页面名 / 那一页的空文案 / 「没接上接口」的原因）。
 // 那三样各自是 `emptyArt` / 一句自定义 / `emptyCopy`，而字号和主次色只有这一份。
 //
-// ⚠️ **写新的一处空状态时也要走这几个函数**，别把 `FontSize(scale.Font(c, 15))` / `FontSize(scale.Font(c, 12))`
+// ⚠️ **写新的一处空状态时也要走这几个函数**，别把 `FontSize(scale.Font(c, scale.Size15))` / `FontSize(scale.Font(c, scale.Size12))`
 // 抄一遍过去：抄一遍就会漂开（改一次字号只改一处，另一处不动），而界面上看不出来。
 func emptyContent(c *ui.Context, e emptyState) {
 	emptyArt(c, e.Icon)
@@ -206,9 +198,9 @@ func emptyArt(c *ui.Context, name string) {
 // 读成「没有」。
 func emptyCopy(c *ui.Context, e emptyState) {
 	t := c.Theme()
-	ui.Text(c, e.Title).FontSize(scale.Font(c, emptyTitleSize)).TextColor(t.Text)
+	ui.Text(c, e.Title).FontSize(scale.Font(c, scale.EmptyTitle)).TextColor(t.Text)
 	if e.Hint != "" {
-		ui.Text(c, e.Hint).FontSize(scale.Font(c, emptyHintSize)).LineHeight(smallCopyLeading).
+		ui.Text(c, e.Hint).FontSize(scale.Font(c, scale.EmptyHint)).LineHeight(leading.Copy).
 			TextColor(t.TextMuted)
 	}
 }
@@ -292,20 +284,13 @@ func (s *Shell) viewPageEmptyWithReason(c *ui.Context, key, title string, e empt
 		emptyArt(c, e.Icon)
 		// ⚠️ **字重不写**（400）：这一句是「这一页叫什么」，页标题那一档是
 		// 400（DESIGN.md §二），层次靠字号拉开，不靠重量。
-		ui.Text(c, title).FontSize(scale.Font(c, emptyPageTitle))
+		ui.Text(c, title).FontSize(scale.Font(c, scale.EmptyPageTitle))
 		if e.Title != "" {
 			emptyCopy(c, e)
-			ui.Text(c, biliNotMounted).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+			ui.Text(c, biliNotMounted).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 		}
 	})
 }
-
-// emptyPageTitle 是上面那一页**页面名**的字号。
-//
-// 它比 `emptyCopy` 的标题大一号，因为它是**这一页叫什么**（一直都在），而
-// `emptyCopy` 那一句是**这里为什么空**（只在空着的时候有）。两句混成一个字号的话，
-// 用户分不出哪一句是导航、哪一句是状态。
-const emptyPageTitle = 20
 
 // emptyPagePad 是整页那一支的上下留白。20 ≈ 上游 `py-20` 的一半（上游那个
 // Tailwind 类是 5rem = 80，这里是紧凑桌面应用的窗口，取 20 上下留白就够了，
@@ -439,13 +424,13 @@ func (s *Shell) viewLoadError(c *ui.Context, key, where, retryLabel string, err 
 		// 插画用警告那一枚而**不是**空状态那一批：这一格说的是「没拉出来」，
 		// 不是「本来就没有」。
 		ui.Icon(c, icon(iconFailed)).FontSize(emptyIconSize).TextColor(t.Warning)
-		ui.Text(c, "这一块没拉出来").FontSize(scale.Font(c, 15)).TextColor(t.Text)
+		ui.Text(c, "这一块没拉出来").FontSize(scale.Font(c, scale.Size15)).TextColor(t.Text)
 		if where != "" {
 			// 主次和错误本身再分一档：这一行是给用户复现用的（说给开发者听），
 			// 而下面那行是原始错误。两者都别比标题更抢眼。
-			ui.Text(c, "没拉出来的是："+where).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+			ui.Text(c, "没拉出来的是："+where).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 		}
-		ui.Text(c, err.Error()).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(3)
+		ui.Text(c, err.Error()).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(3)
 		if retry != nil && ui.Button(c, retryLabel).Clicked() {
 			retry()
 		}

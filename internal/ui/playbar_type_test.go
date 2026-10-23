@@ -157,7 +157,11 @@ func TestThePlayBarTitleIsNotBold(t *testing.T) {
 				case "FontWeight":
 					t.Error("playbar.go 的歌名调了 FontWeight(...)——歌名是 16/400")
 				case "FontSize":
-					if len(c.call.Args) == 1 && !mentionsFloat(c.call.Args[0], 16) {
+					// ⚠️ **认刻度表里的那个名**（`scale.Size16`），不认裸数字：
+					// 字号的出处是 `widgets/scale` 那张表（票 #238），
+					// 代码里写的是 `scale.Size16`——只认裸数字的话，
+					// 这个判据会**静默地永远不成立**。
+					if len(c.call.Args) == 1 && !mentionsIdent(c.call.Args[0], "Size16") {
 						t.Errorf("playbar.go 的歌名是 %s，want 16",
 							goformat(fset, c.call.Args[0]))
 					}

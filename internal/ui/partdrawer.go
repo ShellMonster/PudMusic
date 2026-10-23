@@ -235,7 +235,7 @@ func (s *Shell) viewPartDrawer(c *ui.Context) {
 			case len(s.partRows) == 0:
 				// 一片空白在界面上和「这一首没有分集」长得一模一样。而分集是问 B 站
 				// 问来的，问不到是网络/风控的事，不是这一首没有分集——三句话说开。
-				ui.Text(c, s.partDrawerWhy()).FontSize(scale.Font(c, 12)).
+				ui.Text(c, s.partDrawerWhy()).FontSize(scale.Font(c, scale.Size12)).
 					TextColor(t.TextMuted).Padding(space.Px12)
 			default:
 				s.viewPartDrawerList(c, t)
@@ -259,9 +259,9 @@ func (s *Shell) viewPartDrawerHeader(c *ui.Context, t *ui.Theme) {
 		ui.Row(c).FillWidth().Height(partHeaderHeight).PaddingX(space.Px12).
 			AlignItems(ui.Center).Children(func() {
 			// ⚠️ **字重不写**（400）：抽屉标题那一档是 400（DESIGN.md §二）。
-			ui.Text(c, "分集").FontSize(scale.Font(c, 14)).Grow(1)
+			ui.Text(c, "分集").FontSize(scale.Font(c, scale.Size14)).Grow(1)
 			if n := len(s.partRows); n > 0 {
-				ui.Text(c, "共 "+strconv.Itoa(n)+" 集").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+				ui.Text(c, "共 "+strconv.Itoa(n)+" 集").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 			}
 		})
 		// 框架的 `ui.Divider`：1 DIP、无圆角、无内边距、取 `t.Border`——和原来
@@ -288,7 +288,7 @@ func (s *Shell) viewPartDrawerList(c *ui.Context, t *ui.Theme) {
 // （和 `queue_drawer.go` 的 `viewQueueRow` 同一个道理）。
 func (s *Shell) viewPartRow(c *ui.Context, r partRow, t *ui.Theme) {
 	row := ui.Row(c).Key(r.key).Grow(1).Height(partRowHeight).
-		PaddingX(space.Px12).Gap(space.Px8).AlignItems(ui.Center).Radius(6)
+		PaddingX(space.Px12).Gap(space.Px8).AlignItems(ui.Center).Radius(t.Radius)
 	switch {
 	case r.active:
 		// Biu 那一支正在放的那一行是 `variant="flat" color="primary"`，
@@ -301,9 +301,9 @@ func (s *Shell) viewPartRow(c *ui.Context, r partRow, t *ui.Theme) {
 	}
 
 	row.Children(func() {
-		ui.Text(c, strconv.Itoa(r.page)).Width(partNumW).FontSize(scale.Font(c, 12)).
+		ui.Text(c, strconv.Itoa(r.page)).Width(partNumW).FontSize(scale.Font(c, scale.Size12)).
 			TextColor(partRowText(t, r.active, true))
-		ui.Text(c, r.title).Grow(1).FontSize(scale.Font(c, 13)).
+		ui.Text(c, r.title).Grow(1).FontSize(scale.Font(c, scale.Size13)).
 			TextColor(partRowText(t, r.active, false)).SingleLine()
 	})
 

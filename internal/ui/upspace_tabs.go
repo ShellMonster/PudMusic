@@ -324,8 +324,8 @@ func (s *Shell) viewUpSentinel(c *ui.Context, sp *upSpace, tab int) {
 	ui.Row(c).Key("space-sentinel").Center().Gap(space.Px8).Padding(space.Px12).Children(func() {
 		switch {
 		case p.err != nil:
-			ui.Text(c, "加载失败："+p.err.Error()).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
-			if ui.Button(c, "重试加载"+upTabNames[tab]).FontSize(scale.Font(c, 13)).Clicked() {
+			ui.Text(c, "加载失败："+p.err.Error()).FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
+			if ui.Button(c, "重试加载"+upTabNames[tab]).FontSize(scale.Font(c, scale.Size13)).Clicked() {
 				p.err = nil
 				if ctx := p.begin(); ctx != nil {
 					go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
@@ -333,9 +333,9 @@ func (s *Shell) viewUpSentinel(c *ui.Context, sp *upSpace, tab int) {
 			}
 		case p.loading:
 			ui.Spinner(c)
-			ui.Text(c, "正在加载…").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
+			ui.Text(c, "正在加载…").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
 		default:
-			ui.Text(c, "继续往下滚，加载更多").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
+			ui.Text(c, "继续往下滚，加载更多").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
 		}
 	})
 }

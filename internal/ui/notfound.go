@@ -127,12 +127,12 @@ func (s *Shell) viewNotFound(c *ui.Context, path string) {
 	t := c.Theme()
 	ui.Column(c).Key("page:not-found").Grow(1).Center().Gap(space.Px8).Padding(space.Px20, space.Px28).
 		Children(func() {
-			ui.Text(c, "404").FontSize(scale.Font(c, 28)).Bold().TextColor(t.TextMuted)
+			ui.Text(c, "404").FontSize(scale.Font(c, scale.Size28)).Bold().TextColor(t.TextMuted)
 			// ⚠️ **限宽**：路径是用户敲进来的，长度不封顶——不限宽的话一条长
 			// 路径会把这一行撑出窗口，而 404 这一页上又没有别的东西能提示
 			// 「刚才敲的那一长串是个地址」。
-			ui.Text(c, "没有「"+path+"」这一页").FontSize(scale.Font(c, 15)).MaxWidth(520)
-			ui.Text(c, notFoundCountdown(s.notFoundLeft())).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+			ui.Text(c, "没有「"+path+"」这一页").FontSize(scale.Font(c, scale.Size15)).MaxWidth(520)
+			ui.Text(c, notFoundCountdown(s.notFoundLeft())).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 			if ui.PrimaryButton(c, "回到主页").Clicked() {
 				s.disarmNotFound()
 				s.navigate("/")

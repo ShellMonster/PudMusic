@@ -352,8 +352,8 @@ func (s *Shell) viewSuggestHeader(c *ui.Context) {
 		AlignItems(ui.Center).Padding(space.Px2, space.Px4, space.Px6, space.Px4).Children(func() {
 		// 14/400（上游 `text-sm`，`search/index.tsx:126`）。**不许加粗**：
 		// 上游那一行是正文那一档，靠字号和上面那排 chip 分开，不靠字重。
-		ui.Text(c, "搜索历史").FontSize(scale.Font(c, 14)).Grow(1)
-		if flatButton(c, "清除全部").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Clicked() {
+		ui.Text(c, "搜索历史").FontSize(scale.Font(c, scale.Size14)).Grow(1)
+		if flatButton(c, "清除全部").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Clicked() {
 			s.hist.clear()
 		}
 	})
@@ -419,7 +419,7 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 		Gap(historyChipGap).AlignItems(ui.Center).Children(func() {
 		// ⚠️ 标签按钮的上下内边距清零：`flatButton` 默认是 6，套在 chip 里会把
 		// 24 高撑到 30 以上，那就不再是 `h-6` 那种小块了。
-		if flatButton(c, label).FontSize(scale.Font(c, 12)).
+		if flatButton(c, label).FontSize(scale.Font(c, scale.Size12)).
 			Padding(space.None, historyChipLabelPadEnd, space.None, historyChipLabelPadX).Clicked() {
 			// ⚠️ **先把词填回框里**（Biu 的 `setValue(item.value)`，
 			// `search/index.tsx:154`）。不填的话用户点完历史，框里还是原来敲的

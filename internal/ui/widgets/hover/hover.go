@@ -34,6 +34,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -68,7 +69,7 @@ const (
 
 	// dimAlpha 是列表行封面上那层压暗。**35% 黑**，逐字抄上游
 	// （`music-list-item/index.tsx:100-107` 的 `bg-black/35`）。
-	dimAlpha = 0.35
+	dimAlpha = scrim.Overlay
 
 	// triSize 是列表行封面上那个播放三角的边长。上游是 20。
 	triSize = 20
@@ -93,7 +94,7 @@ const (
 
 	// triTint 是播放三角和封面底部那几个字的白。**带一点透明**：纯白压在一张浅色
 	// 封面上会看不见，而封面是什么颜色我们不知道。
-	triTint = 0.92
+	triTint = scrim.OnScrim
 )
 
 // PlayFrom 是「按下去从这一首往后听」这句话。
@@ -331,11 +332,11 @@ func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock, label, 
 			// 时它自己占满整行、仍然贴着右边。（第一版把它放在左边，于是没有播放量的
 			// 那一半——本地音乐和首页——时长浮在封面左下角，看着像另一个控件。）
 			if playCount != "" {
-				ui.Text(c, playCount).FontSize(scale.Font(c, 11)).
+				ui.Text(c, playCount).FontSize(scale.Font(c, scale.Size11)).
 					TextColor(ui.RGBA(255, 255, 255, triTint)).MaxLines(1)
 			}
 			if clock != "" {
-				ui.Text(c, clock).Grow(1).TextAlign(ui.End).FontSize(scale.Font(c, 11)).
+				ui.Text(c, clock).Grow(1).TextAlign(ui.End).FontSize(scale.Font(c, scale.Size11)).
 					TextColor(ui.RGBA(255, 255, 255, triTint)).MaxLines(1)
 			}
 		})

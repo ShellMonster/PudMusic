@@ -36,19 +36,19 @@ const textBoxPerSize = 1.1767
 
 // titleSizes 是**页标题**用的那几个字号：字重**一个字都不许写**。
 //
-// ⚠️ **页标题只有两个字号**：页标题 24（`pageTitleSize`）、空状态那一页的页面名
-// 20（`emptyPageTitle`）。
+// ⚠️ **页标题只有两个字号**：页标题 24（`scale.PageTitle`）、空状态那一页的
+// 页面名 20（`scale.EmptyPageTitle`）。
 //
 // 此前这一条只钉了第一个——于是搜索页、收藏夹页、迷你播放器那几处的粗体一路漏到
 // 了今天（UI 报告 §2 的 F-07：21 处 `.Bold()` 不在刻度上）。**这条测试的覆盖面
 // 就是在这儿补上的**（空状态那一页是第二档）。
 //
-// ⚠️ **播放器那一页的歌名（`playerTitleSize`）不在这张表里**：那一档是**歌名**，
+// ⚠️ **播放器那一页的歌名（`scale.PlayerTitle`）不在这张表里**：那一档是**歌名**，
 // 不是页标题，而票 #169 的 `TestTheFullPlayerTitleIsNotBold` 钉的是**满屏那一处
 // 要写 `.FontWeight(400)`**——两者的判据不是同一条（页标题一个字重都不写，
 // 歌名那一处写出来）。迷你播放器那一处（`nowplaying.go`）由
 // `TestOnlyTheScaleIsBold` 盖住——**任何一处 `.Bold()` 都不许有**，它管全局。
-var titleSizes = []string{"pageTitleSize", "emptyPageTitle"}
+var titleSizes = []string{"PageTitle", "EmptyPageTitle"}
 
 // stmtSpans 是这个文件里所有语句连同它们的范围。
 //
@@ -192,12 +192,12 @@ var boldOnScale = []struct {
 	why   string
 }{
 	{
-		file: "collectionpage.go", mark: "collectionTitleSize", count: 1,
+		file: "collectionpage.go", mark: "CollectionTitle", count: 1,
 		why: "收藏夹 / 合集 / 系列那一页头图区的大标题：上游 `text-3xl`（30）就是粗体" +
 			"（pagerhythm.go 里写着为什么）",
 	},
 	{
-		file: "sidebar.go", mark: "sideBrandNameSize", count: 1,
+		file: "sidebar.go", mark: "BrandName", count: 1,
 		why: "品牌字（应用名）：DESIGN.md §二「品牌字 24 / 粗体 / 主色」",
 	},
 	{
@@ -205,7 +205,7 @@ var boldOnScale = []struct {
 		why: "404 那个数字：它是那一页上最大的一个字",
 	},
 	{
-		file: "lyrics_knobs.go", mark: "lyricValueSize", count: 2,
+		file: "lyrics_knobs.go", mark: "LyricValue", count: 2,
 		why: "歌词浮层里那两个读数：上游那两个 control 是 `text-[10px] font-bold`",
 	},
 	{
@@ -493,6 +493,14 @@ func mentionsMark(stmt ast.Node, mark string) bool {
 			if v.Name == mark {
 				found = true
 			}
+		case *ast.SelectorExpr:
+			// ⚠️ **包名限定的写法也算**（`scale.CollectionTitle`）：字号的
+			// 出处是 `widgets/scale` 那张表（票 #238），代码里写的是
+			// `scale.CollectionTitle`——那是一个 `*ast.SelectorExpr`。
+			// 只认 `*ast.Ident` 的话这个判据会**静默地永远不成立**。
+			if v.Sel.Name == mark {
+				found = true
+			}
 		case *ast.BasicLit:
 			if v.Kind == token.STRING && strings.Trim(v.Value, `"`) == mark {
 				found = true
@@ -503,12 +511,35 @@ func mentionsMark(stmt ast.Node, mark string) bool {
 	return found
 }
 
+// mentionsFloat 报这个表达式里有没有那个数字（`scale.Font(c, 16)` 的 16）。
+func mentionsFloat(e ast.Expr, v float64) bool {
+	found := false
+	ast.Inspect(e, func(n ast.Node) bool {
+		if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.INT {
+			if got, err := strconv.Atoi(lit.Value); err == nil && float64(got) == v {
+				found = true
+			}
+		}
+		return true
+	})
+	return found
+}
+
 // mentionsIdent 报这个表达式里有没有那个标识符（往调用里找一层，
-// `scale.Font(c, pageTitleSize)` 中间还隔着一个调用）。
+// `scale.Font(c, scale.PageTitle)` 中间还隔着一个调用）。
+//
+// ⚠️ **包名限定的那种写法也算**（`scale.PageTitle`）：字号的出处现在是
+// `widgets/scale` 那张表，代码里写的是 `scale.PageTitle`——那是一个
+// `*ast.SelectorExpr`，不是 `*ast.Ident`。只认 `*ast.Ident` 的话，
+// 这个判据会**静默地永远不成立**（它匹配不到任何东西，于是「没有加粗」
+// 这一条对每一句都成立）。
 func mentionsIdent(e ast.Expr, name string) bool {
 	switch v := e.(type) {
 	case *ast.Ident:
 		return v.Name == name
+	case *ast.SelectorExpr:
+		// `scale.PageTitle` → 认它的末段名（`PageTitle`）。
+		return v.Sel.Name == name
 	case *ast.CallExpr:
 		for _, a := range v.Args {
 			if mentionsIdent(a, name) {
@@ -623,7 +654,11 @@ func TestTheSettingsRowTitleUsesTheMediumWeight(t *testing.T) {
 			}
 			switch callName(call) {
 			case "FontSize":
-				if len(call.Args) == 1 && mentionsFloat(call.Args[0], 16) {
+				// ⚠️ **认刻度表里的那个名**（`scale.Size16`），不认裸数字：
+				// 字号的出处是 `widgets/scale` 那张表（票 #238），代码里
+				// 写的是 `scale.Size16`——只认裸数字的话，这个判据会**静默地
+				// 永远不成立**。
+				if len(call.Args) == 1 && mentionsIdent(call.Args[0], "Size16") {
 					has16 = true
 				}
 			case "FontWeight":
@@ -642,20 +677,6 @@ func TestTheSettingsRowTitleUsesTheMediumWeight(t *testing.T) {
 		t.Error("settings_page.go 里没有一句同时写着 `FontSize(…16…)` 和 " +
 			"`FontWeight(weightMedium)`——设置页的行标题必须是 16/500")
 	}
-}
-
-// mentionsFloat 报这个表达式里有没有那个数字（`scale.Font(c, 16)` 的 16）。
-func mentionsFloat(e ast.Expr, v float64) bool {
-	found := false
-	ast.Inspect(e, func(n ast.Node) bool {
-		if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.INT {
-			if got, err := strconv.Atoi(lit.Value); err == nil && float64(got) == v {
-				found = true
-			}
-		}
-		return true
-	})
-	return found
 }
 
 // TestTheSettingsGroupsAre24Apart 钉住「设置分组之间是 24」。

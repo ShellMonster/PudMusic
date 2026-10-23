@@ -18,7 +18,9 @@
 // 边距由那一栏决定，不是这一页的页边距。但它的**上**边距同样收成 0（G40）。
 package ui
 
-import "github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+import (
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+)
 
 const (
 	// pagePadX 是内容区左右各留多少像素。**七页共用这一个数**：
@@ -29,16 +31,6 @@ const (
 	// 只有逐页量才量得出来。
 	pagePadX = space.PageHorizontal
 
-	// pageTitleSize 是页标题的字号。**同一个数**。上游的 `h1` 是 `text-2xl`
-	// （24），字重被 Preflight 重置为 inherit，也就是 400——**不是加粗**。
-	//
-	// ⚠️ 因此页标题那一句**不调 `.Bold()`**：标题的层次靠字号拉开，不靠重量
-	// （`TestPageTitlesAreNotBold` 钉着这一条）。
-	//
-	// ⚠️ **收藏夹那一页的大标题不走这个数**：它是 30（上游 `text-3xl`），见
-	// `collectionTitleSize`——那一页有头图，标题是头图的一部分，不是页标题。
-	pageTitleSize = 24
-
 	// weightMedium 是 500 那一档字重（上游的 `font-medium`，用了 26 处）。
 	//
 	// **它是一档正经的字重，不是「介于 400 和 600 之间随便选」**：框架的
@@ -46,39 +38,4 @@ const (
 	// `nsWeight`），500 画出来比 400 明显粗、比 700 明显细。设置页的行标题
 	// 用的就是它。
 	weightMedium = 500
-
-	// playerTitleSize 是**播放器（满屏 / 迷你播放器）那一页的歌名**的字号。
-	//
-	// 20，抄上游那个 `h2` 的 `text-xl`（`full-screen-player/index.tsx`）。
-	// ⚠️ **字重 400**（上游那个 `h2` 的字重被 Preflight 重置成 inherit）——
-	// 20 / 700 会让它变成「页头」，而这一行只是歌名。
-	//
-	// ⚠️ **满屏和迷你播放器必须是同一个数**：它们是同一首歌的两个地方，
-	// 字号不一样的话，从迷你窗点开满屏会看见那行字忽然变大。
-	playerTitleSize = 20
-
-	// collectionTitleSize 是收藏夹 / 合集 / 系列那一页**头图区**的大标题。
-	//
-	// 抄上游 `pages/video-collection/header/index.tsx:85` 的 `text-3xl`（30），
-	// 粗体。**它是唯一一个带头图的页面**，而头图区那个 22px 的标题和普通
-	// 列表页的页标题一样大——200×168 的封面顶着一条 22px 的字，头重脚轻。
-	//
-	// ⚠️ **封面高度写死 168**（`collectionCoverH`），改完这个字号要确认**两行
-	// 标题放得下**：30px 的两行约 72 高，加上简介 / 类型 / 创建者三行和间隙，
-	// 整列约 148 高，还在 168 之内。
-	collectionTitleSize = 30
-
-	// smallCopyLeading 是小字的行高倍数。**1.5**——和列表行标题那个行距同一个
-	// 数（`widgets/list` 的 `titleLeading`，那是 Tailwind 的默认行高）。
-	//
-	// ⚠️ **不写行高的话，这一行有多高是字体决定的**：同一个字号在不同字体下
-	// 差几个像素，而那几像素会让「一行小字和旁边那一行齐不齐」变成看运气。
-	smallCopyLeading = 1.5
-
-	// smallCopyHintLeading 是 11px 那一处提示的行高倍数。**1.7**。
-	//
-	// ⚠️ **为什么比别处大一点**：11 × 1.5 = 16.5，而旁边 12px 的那些是 18——
-	// 一行字的高度差两像素，弹窗里那几行看着就错开了。1.7 给到 18.7，和 12px
-	// 的那些齐。
-	smallCopyHintLeading = 1.7
 )

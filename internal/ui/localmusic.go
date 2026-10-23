@@ -45,6 +45,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrollbar"
@@ -531,7 +532,7 @@ func (p *localPage) cardsTop() { p.cards.ScrollTo(0, ui.Start) }
 // viewHead 是标题那一行：标题、展示样式切换、添加目录。
 func (p *localPage) viewHead(c *ui.Context) {
 	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(space.Px8).Children(func() {
-		ui.Text(c, "本地音乐").FontSize(scale.Font(c, pageTitleSize))
+		ui.Text(c, "本地音乐").FontSize(scale.Font(c, scale.PageTitle))
 
 		// 展示样式切换。⚠️ 用 `ui.Segmented` 而不是三个按钮：三档互斥、
 		// 当前位置一眼可见，三个按钮的话用户得靠猜哪个是按下去的。
@@ -610,7 +611,7 @@ func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
 func (p *localPage) viewWarnings(c *ui.Context, t *ui.Theme, st app.LocalMusicState) {
 	if st.Err != "" {
 		ui.Text(c, "有目录读不到："+st.Err).
-			FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
+			FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Copy).
 			TextColor(dangerText(t)).AlignSelf(ui.Stretch)
 	}
 	if names := unplayableFormats(st.Tracks); len(names) > 0 {
@@ -618,7 +619,7 @@ func (p *localPage) viewWarnings(c *ui.Context, t *ui.Theme, st app.LocalMusicSt
 		// 上游那个色相自带的代价，理由和数都在 `theme.go` 的语义色那一段。
 		ui.Text(c, "这个目录里有我们还放不出的格式（"+strings.Join(names, " ")+
 			"），它们会列出来但放不了。").
-			FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
+			FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Copy).
 			TextColor(warningText(t)).AlignSelf(ui.Stretch)
 	}
 }
@@ -865,21 +866,21 @@ func (p *localPage) viewCell(c *ui.Context, t *ui.Theme, row, col int) {
 	case 1:
 		ui.Text(c, tr.Title).SingleLine()
 	case 2:
-		ui.Text(c, fileSize(tr.Size)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+		ui.Text(c, fileSize(tr.Size)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 	case 3:
 		// 放不了的格式用警示色，而不是省略号或者别的字样：Biu 那一格画的是
 		// `data.format?.toUpperCase() || "-"`（`item.tsx:71`），我们多给一层
 		// 颜色，说的是同一件事（「列出来了，但这一格有毛病」）。
-		e := ui.Text(c, strings.ToUpper(strings.TrimPrefix(tr.Format, "."))).FontSize(scale.Font(c, 12))
+		e := ui.Text(c, strings.ToUpper(strings.TrimPrefix(tr.Format, "."))).FontSize(scale.Font(c, scale.Size12))
 		if tr.Playable() {
 			e.TextColor(t.TextMuted)
 		} else {
 			e.TextColor(warningText(t))
 		}
 	case 4:
-		ui.Text(c, durText(tr.Duration)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+		ui.Text(c, durText(tr.Duration)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 	case 5:
-		ui.Text(c, createdText(tr.Created)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+		ui.Text(c, createdText(tr.Created)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 	case 6:
 		p.viewRowOps(c, tr)
 	}
@@ -919,7 +920,7 @@ func (p *localPage) viewRowNumber(c *ui.Context, t *ui.Theme, row int) ui.Elemen
 			ui.Icon(c, icon(iconPlayFill)).FontSize(16).TextColor(t.Text).Label(localPlayIconLabel)
 			return
 		}
-		ui.Text(c, strconv.Itoa(row+1)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+		ui.Text(c, strconv.Itoa(row+1)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 	})
 	return cell
 }

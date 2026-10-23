@@ -73,6 +73,14 @@ const (
 	fullSettingsAlignPad = space.Px5
 )
 
+// colorSwatchRadius 是那枚 48×32 的色块的圆角。**16**——它是 32 的一半，
+// 所以那一块是**药丸**（胶囊）。
+//
+// ⚠️ **它不跟全局圆角令牌**：那一块是「用户挑的那个颜色」的样本，形状是
+// 固定的；跟着用户的圆角走的话，用户调到 24，色块就从一个药丸变成一个方块，
+// 而它旁边那圈描边还在。
+const colorSwatchRadius = 16
+
 // MountFullPlayerPrefs 把全屏播放器那份偏好挂到盘上。
 //
 // ⚠️ 读盘是阻塞 IO，所以要**在开窗口之前**调（`main.go` 里排在 `MountSettings`
@@ -203,7 +211,7 @@ func (s *Shell) viewFullSettingsPanel(c *ui.Context, panel, gear ui.Element) {
 // 齿轮在哪」的人留的出口（UX 报告 B4 的第二条：只能再点一次齿轮关掉）。
 func (s *Shell) fullSettingsHeader(c *ui.Context) {
 	ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, fullSettingsTitle).FontSize(scale.Font(c, 14)).FontWeight(500)
+		ui.Text(c, fullSettingsTitle).FontSize(scale.Font(c, scale.Size14)).FontWeight(500)
 		if flatIconButton(c, iconClose, "关闭设置", 16).
 			Size(24, 24).Padding(space.None, space.Px4).Clicked() {
 			s.full.settings = false
@@ -233,7 +241,7 @@ func (s *Shell) setFullPrefs(mut func(*app.FullPlayerPrefs)) {
 // 发生），读屏也会把同一个名字念两遍。这条约定和设置页的 `pickSwitch` 一致。
 func (s *Shell) fullSwitchRow(c *ui.Context, title string, on *bool, save func(bool)) {
 	ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, title).FontSize(scale.Font(c, 16)).FontWeight(500)
+		ui.Text(c, title).FontSize(scale.Font(c, scale.Size16)).FontWeight(500)
 		if staticSwitch(c, on).Label("开关：" + title).Changed() {
 			save(*on)
 		}
@@ -255,17 +263,17 @@ func (s *Shell) fullColorRow(c *ui.Context, title, hex, fallback string, overrid
 	col := colorOfHex(shown)
 
 	ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, title).FontSize(scale.Font(c, 16)).FontWeight(500)
+		ui.Text(c, title).FontSize(scale.Font(c, scale.Size16)).FontWeight(500)
 		ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
 			if overridden {
-				if flatButton(c, "用默认").FontSize(scale.Font(c, 12)).
+				if flatButton(c, "用默认").FontSize(scale.Font(c, scale.Size12)).
 					TextColor(t.TextMuted).Clicked() {
 					reset()
 				}
 			}
 			// 药丸：底色先铺成用户挑的那个颜色，再把 ColorWell 的底色/描边让掉，
 			// 让里面那块色片和外面同色、看起来就是一整块 48×32 的颜色。
-			ui.Box(c).Width(48).Height(32).Radius(16).Clip().
+			ui.Box(c).Width(48).Height(32).Radius(colorSwatchRadius).Clip().
 				Background(col).Border(1, t.Border).Children(func() {
 				if ui.ColorWell(c, &col).Fill().
 					Background(ui.Transparent).Border(0, ui.Transparent).

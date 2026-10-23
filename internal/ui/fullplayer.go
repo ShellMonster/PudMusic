@@ -37,6 +37,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/plugins/glass"
@@ -118,11 +119,17 @@ const (
 	fullBottomMaxW     = 1152
 	fullBottomGapY     = space.Px8
 
-	fullPartsWidth    = 280
-	fullPartsHeight   = 420
-	fullPartsTabW     = 26
-	fullPartsTabH     = 96
-	fullPartRowHeight = 32
+	fullPartsWidth = 280
+	// fullPartsPanelRadius 是分集面板那一块的圆角。**12**——它是**玻璃面板**，
+	// 走的是 HeroUI 那一档（`rounded-2xl`），**不跟全局圆角令牌**：这一块
+	// 是浮在满屏之上的一层玻璃，边缘要圆得比内容块明显，而内容块的圆角是
+	// 用户可调的（默认 8、上限 24）——跟着它走的话，用户把圆角调到 24，
+	// 这一块会变成一个「几乎不圆」的方块，玻璃那一层就看不出是浮着的了。
+	fullPartsPanelRadius = 12
+	fullPartsHeight      = 420
+	fullPartsTabW        = 26
+	fullPartsTabH        = 96
+	fullPartRowHeight    = 32
 )
 
 // fullScrim 是背景上那层压暗。
@@ -145,7 +152,7 @@ const (
 // 归**可及性**那一票（issue #139「接上系统的高对比度」：系统在「增加对比度」下
 // 另算一套颜色，比在这里硬调一个数对）。要让 12px 也到 4.5，压暗得加到 0.72，
 // 而那会让背景暗到看不出毛玻璃——这一屏的主角就没了。
-var fullScrim = ui.RGBA(0, 0, 0, 0.55)
+var fullScrim = ui.RGBA(0, 0, 0, scrim.Media)
 
 // fullBackdropScale 是背景那一层的画布缩到窗口的几分之一。
 //
@@ -452,8 +459,8 @@ func (s *Shell) viewFullEmpty(c *ui.Context) {
 				// （`fullForeground`），而不是主题的 Text / TextMuted——用主题
 				// 那两档的话，在浅色封面铺满的屏上这两行会糊进去。字号仍然是
 				// 15 / 12，和别处一样。
-				ui.Text(c, fullNothing.Title).FontSize(scale.Font(c, 15)).TextColor(on)
-				ui.Text(c, fullNothing.Hint).FontSize(scale.Font(c, 12)).TextColor(dim)
+				ui.Text(c, fullNothing.Title).FontSize(scale.Font(c, scale.Size15)).TextColor(on)
+				ui.Text(c, fullNothing.Hint).FontSize(scale.Font(c, scale.Size12)).TextColor(dim)
 			})
 		})
 
@@ -668,11 +675,10 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 		// `TestTheFullPlayerTitleIsNotBold` 钉的就是**这一句写着 400**（像素那一层
 		// 量不出 400 还是 700，能钉住的只有代码里那一个调用）。
 		//
-		// ⚠️ **别拿它当「页标题不写字重」那一档的样板**：页标题（`pageTitleSize`）
+		// ⚠️ **别拿它当「页标题不写字重」那一档的样板**：页标题（`scale.PageTitle`）
 		// 那一档一个字重都不写（`TestPageTitlesAreNotBold` 钉着），这里是**歌名**
 		// 那一档，两者的判据不是同一条。
-		ui.Text(c, st.Title).FontSize(scale.Font(c, playerTitleSize)).FontWeight(400).TextColor(on).
-			MaxWidth(fullTitleMaxWidth(c)).SingleLine()
+		ui.Text(c, st.Title).FontSize(scale.Font(c, scale.PlayerTitle)).FontWeight(400).TextColor(on).MaxWidth(fullTitleMaxWidth(c)).SingleLine()
 
 		// 同上面那一条：提示不跟着顶栏一起藏起来，所以这里不给 `Tooltip`。
 		gear := iconButton(c, iconSettings, "全屏设置", 22).
@@ -1008,7 +1014,7 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 func (s *Shell) viewFullProgress(c *ui.Context, st app.State, dim ui.Color) {
 	known := st.Duration > 0
 	ui.Row(c).FillWidth().Gap(space.Px10).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, 12)).TextColor(dim).
+		ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, scale.Size12)).TextColor(dim).
 			MinWidth(48).MaxLines(1)
 		sl := knobSlider(c, &s.fullScrub, 0, 1).Grow(1).Label("全屏播放进度").Disabled(!known)
 		switch held := sl.Pressed(); {
@@ -1022,7 +1028,7 @@ func (s *Shell) viewFullProgress(c *ui.Context, st app.State, dim ui.Color) {
 			s.fullScrub = float64(st.Position) / float64(st.Duration)
 		}
 		total := clockOrDash(st.Duration)
-		ui.Text(c, total).FontSize(scale.Font(c, 12)).TextColor(dim).MinWidth(48).MaxLines(1)
+		ui.Text(c, total).FontSize(scale.Font(c, scale.Size12)).TextColor(dim).MinWidth(48).MaxLines(1)
 	})
 }
 
@@ -1176,7 +1182,7 @@ func (s *Shell) viewFullPartsPanel(c *ui.Context) {
 	panel := shadow.Sheet(ui.Column(c).Key("full-parts-panel").
 		Absolute().Right(0).Top(winH/2-h/2).
 		Width(fullPartsWidth).Height(h).
-		Radius(12).Role(ui.RoleDialog).Label("分集列表").
+		Radius(fullPartsPanelRadius).Role(ui.RoleDialog).Label("分集列表").
 		Material(glass.Glass{Tint: t.Background.Alpha(0.96)}).
 		TextColor(t.Text).
 		Border(1, t.Background.Mix(t.Text, 0.25)),
@@ -1187,7 +1193,7 @@ func (s *Shell) viewFullPartsPanel(c *ui.Context) {
 			// 字色跟着面板走（`TextColor(t.Text)`），这里不再自己定。
 			// ⚠️ **字重不写**（400）：面板标题那一档是 400（DESIGN.md §二），
 			// 层次靠字号拉开，不靠重量。
-			ui.Text(c, "分集").FontSize(scale.Font(c, 14)).Grow(1)
+			ui.Text(c, "分集").FontSize(scale.Font(c, scale.Size14)).Grow(1)
 			// 上游是一枚 `RiArrowRightSLine` 16 的扁平图标键（`page-list.tsx:47`）。
 			// 字色不用给：面板自己 `TextColor(t.Text)`，图标跟着它走。
 			if s.withTip(c, iconButton(c, iconSideExpand, "收起分集", 16).
@@ -1202,7 +1208,7 @@ func (s *Shell) viewFullPartsPanel(c *ui.Context) {
 			if err := s.app.PartsErr(); err != nil {
 				why = "问不出分集：" + err.Error()
 			}
-			ui.Text(c, why).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Padding(space.Px12)
+			ui.Text(c, why).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Padding(space.Px12)
 		default:
 			s.viewFullPartsList(c)
 		}
@@ -1219,7 +1225,7 @@ func (s *Shell) viewFullPartsList(c *ui.Context) {
 	partsList := ui.List(c, &s.full.partsList, len(rows), func(i int) {
 		r := rows[i]
 		row := ui.Column(c).Key(r.key).Grow(1).Height(fullPartRowHeight).
-			PaddingX(space.Px12).Radius(6)
+			PaddingX(space.Px12).Radius(t.Radius)
 		switch {
 		case r.active:
 			// Biu 的 `data-[active=true]:bg-primary/20`。
@@ -1232,7 +1238,7 @@ func (s *Shell) viewFullPartsList(c *ui.Context) {
 		}
 		row.Children(func() {
 			// 字色跟着面板走（`TextColor(t.Text)`），这里不再自己定。
-			ui.Text(c, r.title).FontSize(scale.Font(c, 13)).SingleLine()
+			ui.Text(c, r.title).FontSize(scale.Font(c, scale.Size13)).SingleLine()
 		})
 		if row.Clicked() {
 			// 选完就收：Biu 的 PageList `onPressItem={onClose}`。

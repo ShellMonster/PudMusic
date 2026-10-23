@@ -41,7 +41,7 @@ func (s *Shell) settingsMenu(c *ui.Context, st app.Settings, ro bool) {
 		// ⚠️ **这一处是 16/500，不是分组标题那个 20/400**：它是左边那一列的
 		// 组名（上游 `text-medium`，位宽 100），不是整页的 `h2`。20px 的六
 		// 个汉字要 120 宽，在 100 的位宽里会折成「系统默认菜 / 单」（出图量过）。
-		ui.Text(c, menuGroupName).FontSize(scale.Font(c, 16)).FontWeight(weightMedium).
+		ui.Text(c, menuGroupName).FontSize(scale.Font(c, scale.Size16)).FontWeight(weightMedium).
 			Width(menuLabelWidth)
 		ui.Column(c).Grow(1).Gap(space.Px8).Children(func() {
 			s.pickMenuVisibility(c, st, ro)
@@ -201,13 +201,13 @@ func (s *Shell) pickSideMenu(c *ui.Context, st app.Settings, ro bool) {
 		})
 	w := st.SideMenuWidth
 	ui.Row(c).FillWidth().Gap(space.Px12).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "侧栏宽度").FontSize(scale.Font(c, 16)).FontWeight(weightMedium).Grow(1)
+		ui.Text(c, "侧栏宽度").FontSize(scale.Font(c, scale.Size16)).FontWeight(weightMedium).Grow(1)
 		sl := ui.Slider(c, &w, app.MinSideMenuWidth, app.MaxSideMenuWidth).
 			Grow(1).Label("侧栏宽度").Disabled(ro)
 		if sl.Changed() {
 			s.applySetting("侧栏宽度", func(cur *app.Settings) { cur.SideMenuWidth = w })
 		}
-		ui.Textf(c, "%.0fpx", w).FontSize(scale.Font(c, 12)).Width(radiusReadoutW)
+		ui.Textf(c, "%.0fpx", w).FontSize(scale.Font(c, scale.Size12)).Width(radiusReadoutW)
 	})
 }
 
@@ -235,8 +235,8 @@ func (s *Shell) pickLocalMusicDirs(c *ui.Context, st app.Settings, ro bool) {
 	s.settingSection(c, "音乐库")
 	ui.Row(c).FillWidth().Gap(space.Px24).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).Children(func() {
-			ui.Text(c, "本地音乐目录").FontSize(scale.Font(c, 16)).FontWeight(weightMedium)
-			ui.Text(c, "从这些文件夹里读取本地音乐").FontSize(scale.Font(c, 14)).TextColor(t.TextMuted).Wrap()
+			ui.Text(c, "本地音乐目录").FontSize(scale.Font(c, scale.Size16)).FontWeight(weightMedium)
+			ui.Text(c, "从这些文件夹里读取本地音乐").FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).Wrap()
 		})
 		if flatButton(c, "添加文件夹").Width(96).Disabled(ro).Clicked() {
 			s.pickPath("本地音乐目录", true, func(path string) {
@@ -251,7 +251,7 @@ func (s *Shell) pickLocalMusicDirs(c *ui.Context, st app.Settings, ro bool) {
 	})
 
 	if len(st.LocalMusicDirs) == 0 {
-		ui.Text(c, "还没有目录").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Padding(space.Px4, space.None, space.None, space.None)
+		ui.Text(c, "还没有目录").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Padding(space.Px4, space.None, space.None, space.None)
 		return
 	}
 	// ⚠️ **重复的目录只画一次**。设置文件是用户能直接编辑的（也能从 Biu 那边来），
@@ -272,9 +272,9 @@ func (s *Shell) pickLocalMusicDirs(c *ui.Context, st app.Settings, ro bool) {
 				// ⚠️ 这一行的 key 用的是**路径**，不是序号（🔴 铁律四）：删掉中间
 				// 那一条之后序号会整体前移一格，按序号排的身份就落到旁边那条上
 				// 了，而 × 删掉的是它自己那一格还是隔壁那一格，从画面上看不出来。
-				ui.Text(c, dir).FontSize(scale.Font(c, 13)).Grow(1).SingleLine()
+				ui.Text(c, dir).FontSize(scale.Font(c, scale.Size13)).Grow(1).SingleLine()
 				if flatButton(c, "×").Label("移除目录「" + dir + "」").
-					FontSize(scale.Font(c, 13)).TextColor(t.TextMuted).Disabled(ro).Clicked() {
+					FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted).Disabled(ro).Clicked() {
 					s.removeLocalMusicDir(i)
 				}
 			})

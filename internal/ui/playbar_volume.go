@@ -86,12 +86,6 @@ const (
 	// 换不换位置都不会挪。
 	volPanelW = 40
 
-	// volPercentFont 是浮层底下那个百分比的字号：**12**。
-	//
-	// 上游是 `endContent` 的 `text-xs`（12，`music-volume/index.tsx:126-149`），
-	// 我们原来写的是 11（票 #220 / 报告 §3.9 对齐上游）。
-	volPercentFont = 12
-
 	// volDefaultUnmute 是「压根没静音过（音量本来就是 0）」时取消静音放回去的值。
 	//
 	// 0.5 是一半——用户按了「取消静音」，听到的应该是一半声音，不是 0。
@@ -251,7 +245,7 @@ func (s *Shell) viewVolumePanel(c *ui.Context, st app.State) {
 			s.setVolume(vol)
 		}
 		// 百分比也定宽：不然它自己在那一格里靠左，字数一变位置就变。
-		ui.Text(c, volPercent(vol)).FontSize(scale.Font(c, volPercentFont)).
+		ui.Text(c, volPercent(vol)).FontSize(scale.Font(c, scale.VolPercentFont)).
 			TextColor(t.TextMuted).Width(volPanelW)
 	})
 

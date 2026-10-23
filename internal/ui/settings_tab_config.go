@@ -64,10 +64,10 @@ func (s *Shell) settingsConfig(c *ui.Context) {
 
 	ui.Column(c).FillWidth().Gap(space.Px8).Children(func() {
 		ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
-			if flatButton(c, "导出配置").FontSize(scale.Font(c, 13)).Clicked() {
+			if flatButton(c, "导出配置").FontSize(scale.Font(c, scale.Size13)).Clicked() {
 				s.exportConfig()
 			}
-			if flatButton(c, "导入配置").FontSize(scale.Font(c, 13)).Clicked() {
+			if flatButton(c, "导入配置").FontSize(scale.Font(c, scale.Size13)).Clicked() {
 				s.importConfig()
 			}
 		})
@@ -77,23 +77,23 @@ func (s *Shell) settingsConfig(c *ui.Context) {
 		// 摆一句说明，比摆一个必然失败的按钮诚实。
 		if rep.ReadOnly {
 			ui.Text(c, "数据目录来自更新的版本，这一版一个字都不会写回去，所以下面几样都没有带过来。").
-				FontSize(scale.Font(c, 12)).TextColor(dangerText(t)).Wrap()
+				FontSize(scale.Font(c, scale.Size12)).TextColor(dangerText(t)).Wrap()
 		} else if dirs := rep.BiuDirs; len(dirs) > 0 {
 			// 「从 Biu 导入」只在**找得到** Biu 的数据目录时才摆。摆一个点了必然说
 			// 「没找到 Biu」的按钮，等于让用户自己判断这台机器上有没有装过 Biu。
 			ui.Row(c).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-				if flatButton(c, "从 Biu 导入").FontSize(scale.Font(c, 13)).Clicked() {
+				if flatButton(c, "从 Biu 导入").FontSize(scale.Font(c, scale.Size13)).Clicked() {
 					s.importFromBiu(dirs)
 				}
 				ui.Text(c, "从 "+shortDir(dirs[0])+" 导入设置、快捷键、下载记录和歌词").
-					FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+					FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 			})
 		}
 
 		// 上一次启动做了什么，原样摆出来。用户看不见发生了什么的话，下次遇到
 		// 「我的设置怎么变了」没有任何线索——迁移是一条会改他数据的路。
 		if note := migrationNote(rep); note != "" {
-			ui.Text(c, note).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Wrap()
+			ui.Text(c, note).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Wrap()
 		}
 
 		// **「没带过来的」逐条摆出来**，这是这一段最要紧的部分。
@@ -119,9 +119,9 @@ func (s *Shell) importNotes(c *ui.Context, rep MigrationReport) {
 	t := c.Theme()
 	ui.Column(c).FillWidth().Gap(space.Px4).Children(func() {
 		// ⚠️ **字重不写**（400）：次要信息那一档是 12/400（DESIGN.md §二）。
-		ui.Text(c, "这次没有带过来的：").FontSize(scale.Font(c, 12))
+		ui.Text(c, "这次没有带过来的：").FontSize(scale.Font(c, scale.Size12))
 		for _, n := range rep.Imported.Notes {
-			ui.Text(c, "· "+n).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Wrap()
+			ui.Text(c, "· "+n).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Wrap()
 		}
 	})
 }

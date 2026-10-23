@@ -38,7 +38,9 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -191,7 +193,7 @@ func (s *Shell) viewCoverCrop(c *ui.Context, crop *cropState) {
 	}
 	modal := ui.Modal(c, &crop.open, func() {
 		// ⚠️ **字重不写**（400）：弹窗标题是 400（DESIGN.md §二）。
-		ui.Text(c, "裁剪封面").FontSize(scale.Font(c, 15))
+		ui.Text(c, "裁剪封面").FontSize(scale.Font(c, scale.Size15))
 		s.viewCropStage(c, crop)
 		ui.Row(c).Gap(space.Px8).Justify(ui.End).Children(func() {
 			if ui.Button(c, "取消").Disabled(crop.uploading).Clicked() {
@@ -235,7 +237,7 @@ func (s *Shell) viewCropStage(c *ui.Context, crop *cropState) {
 	iw, ih := crop.size()
 
 	stage := ui.Column(c).Key("crop-stage").Width(cropStageW).Height(cropStageH).
-		Radius(6).Clip().Background(t.Surface)
+		Radius(t.Radius).Clip().Background(t.Surface)
 	stage.DrawOver(func(p *ui.Painter, r ui.Rect) {
 		// DPR 只在绘制阶段拿得到（见包注释）。记的是上一帧那一趟，
 		// 一帧滞后在这里没有后果。
@@ -257,7 +259,7 @@ func drawCropStage(p *ui.Painter, r ui.Rect, crop *cropState, iw, ih int32, t *u
 	if crop.bitmap == nil || iw <= 0 {
 		return
 	}
-	dim := ui.RGBA(0, 0, 0, 0.55)
+	dim := ui.RGBA(0, 0, 0, scrim.Media)
 
 	// 图：按 fitImage 的结果等比缩放居中，和框用的是同一个函数——
 	// 两处各算一遍的话，框和图会差半个像素，而那个差值在拖到边上时看得见。
@@ -369,7 +371,7 @@ func (s *Shell) viewCoverPicker(c *ui.Context, e *folderEdit) {
 	t := c.Theme()
 
 	btn := ui.Button(c, "").Width(coverPreviewW).Height(coverPreviewH).
-		Radius(6).Background(t.SurfaceHover).Border(1, t.Border).
+		Radius(t.Radius).Background(t.SurfaceHover).Border(1, t.Border).
 		Disabled(e.submitting || e.crop.uploading)
 	btn.Children(func() {
 		if e.cover != "" {
@@ -378,13 +380,13 @@ func (s *Shell) viewCoverPicker(c *ui.Context, e *folderEdit) {
 			imgcache.View(c, s.images, e.cover, coverPreviewW, coverPreviewH)
 			return
 		}
-		ui.Text(c, "点击上传图片").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
+		ui.Text(c, "点击上传图片").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
 	})
 	if btn.Clicked() {
 		s.pickCover()
 	}
 
-	ui.Text(c, coverHint).FontSize(scale.Font(c, 11)).LineHeight(smallCopyHintLeading).
+	ui.Text(c, coverHint).FontSize(scale.Font(c, scale.Size11)).LineHeight(leading.Hint).
 		TextColor(t.TextMuted).MaxLines(1)
 }
 

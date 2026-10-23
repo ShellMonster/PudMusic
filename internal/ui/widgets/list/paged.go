@@ -657,7 +657,7 @@ func (p *PagedList) footerView(c *ui.Context) {
 			if p.blocked {
 				// 这是**行里的一句重试**，不是错误页上那颗主按钮：它跟着列表
 				// 最后一行出现，用扁平配方（无常驻底、无描边），悬停才有一层淡底。
-				if flat.Button(c, "加载失败，点此重试").FontSize(scale.Font(c, 13)).Clicked() {
+				if flat.Button(c, "加载失败，点此重试").FontSize(scale.Font(c, scale.Size13)).Clicked() {
 					p.blocked = false
 					p.load(trigRetry)
 				}
@@ -665,7 +665,7 @@ func (p *PagedList) footerView(c *ui.Context) {
 			}
 			if p.loading {
 				ui.Spinner(c).Label(footerLabel)
-				ui.Text(c, "正在加载…").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
+				ui.Text(c, "正在加载…").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
 			}
 		})
 }

@@ -618,7 +618,7 @@ func (l *List) View(c *ui.Context) {
 					return
 				}
 				if s := l.emptyText(); s != "" {
-					ui.Text(c, s).FontSize(scale.Font(c, 13)).
+					ui.Text(c, s).FontSize(scale.Font(c, scale.Size13)).
 						TextColor(c.Theme().TextMuted).Padding(space.Px16)
 				}
 			}
@@ -683,7 +683,7 @@ func (l *List) viewFooter(c *ui.Context) {
 
 // failedRowText 是「这一行画不出来」那一行的占位。
 func (l *List) failedRowText(c *ui.Context) {
-	ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).
+	ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, scale.Size13)).TextColor(c.Theme().TextMuted).
 		Padding(cardPadY, cardPadX).MaxLines(1)
 }
 

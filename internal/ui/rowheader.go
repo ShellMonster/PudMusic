@@ -126,5 +126,5 @@ func viewRowIndex(c *ui.Context, i int, playing bool, color ui.Color, id, title 
 		return
 	}
 	ui.Text(c, rowNumber(i)).Width(width).TextAlign(ui.Center).
-		FontSize(scale.Font(c, 12)).TextColor(c.Theme().TextMuted).MaxLines(1)
+		FontSize(scale.Font(c, scale.Size12)).TextColor(c.Theme().TextMuted).MaxLines(1)
 }

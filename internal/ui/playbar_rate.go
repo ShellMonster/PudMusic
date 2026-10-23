@@ -45,12 +45,6 @@ const (
 	// ⚠️ **播放条上那一枚按钮不用这个数**（它贴字宽，见 `viewRate`）：那一枚摆的是
 	// 当前这一档的字（「1x」两个字符），给它留 44 就是空着二十几像素。
 	rateBtnW = 44
-
-	// rateMenuFont 是浮层里那七行的字号：**12**。
-	//
-	// 上游那一列的按钮是 `size="sm"`，HeroUI 那个档的字是 `text-tiny`（12）。
-	// 字大一号，44 宽就装不下「0.75x」了（见上面那段）。
-	rateMenuFont = 12
 )
 
 // viewRate 是播放条右边的倍率按钮加上它弹出来的那一列档位。
@@ -85,7 +79,7 @@ func (s *Shell) viewRate(c *ui.Context, st app.State) {
 	//（上游 `size="sm"` 的 `text-tiny`）——「0.75x」在 12 下要 33 宽，44 装得下；
 	// 而这一枚要是也用 16，「0.75x」就要 39 宽，加上按钮自己的内边距就装不下了。
 	// 截掉的那一半恰恰是用户挑倍速的全部依据（见 `TestRateMenuLabelsAreNotTruncated`）。
-	btn := flatButton(c, rateLabel(st.Rate)).FontSize(scale.Font(c, 16)).
+	btn := flatButton(c, rateLabel(st.Rate)).FontSize(scale.Font(c, scale.Size16)).
 		Shrink(0).Label("播放速率")
 	if btn.Clicked() {
 		s.rateOpen = !s.rateOpen
@@ -125,8 +119,8 @@ func (s *Shell) viewRateMenu(c *ui.Context) {
 			//
 			// ⚠️ **字是 12**（上游 `size="sm"` 的 `text-tiny`）：字大一号，44 宽
 			// 就装不下了。
-			b := flatButton(c, rateLabel(r)).Width(rateBtnW).Radius(4).
-				Padding(t.Space(1.5), space.None).FontSize(scale.Font(c, rateMenuFont)).
+			b := flatButton(c, rateLabel(r)).Width(rateBtnW).Radius(t.Radius).
+				Padding(t.Space(1.5), space.None).FontSize(scale.Font(c, scale.RateMenuFont)).
 				Label("播放速率 " + rateLabel(r))
 			// 选中那一档是**一块实心主色**（上游 `color="primary" variant="solid"`），
 			// 字取 `t.AccentText`（主色底上该有的那一档黑白）。

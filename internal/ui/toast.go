@@ -54,11 +54,6 @@ const (
 	// 四边都是 12。
 	toastPad = space.Px12
 
-	// toastFont 是卡片上那行字的字号（上游 `text-sm` = 14）。
-	//
-	// 字重是 `weightMedium`（500，上游的 `font-medium`）——此前是 13/400。
-	toastFont = 14
-
 	// toastRadius 是卡片的圆角。**这一条上游没写死**（HeroUI 那个 toast 用
 	// 的是 `rounded-large`），而此前这一处是 10：不是本票要改的，就不动它。
 	toastRadius = 10
@@ -252,7 +247,7 @@ func (s *Shell) viewToast(c *ui.Context, t toast, theme *ui.Theme) {
 	card := ui.Column(c).Width(toastWidth).Radius(toastRadius).PassThrough().
 		Background(bg).Padding(toastPad).
 		Children(func() {
-			ui.Text(c, t.text).FontSize(scale.Font(c, toastFont)).
+			ui.Text(c, t.text).FontSize(scale.Font(c, scale.ToastFont)).
 				FontWeight(weightMedium).TextColor(fg).PassThrough()
 		})
 

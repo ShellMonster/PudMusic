@@ -18,6 +18,7 @@ package ui
 import (
 	"context"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	mygoui "github.com/egoist/mygo/ui"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -311,7 +312,7 @@ func libraryPageOpts(t *testing.T) []shellOpt {
 //
 // 像素那一层量的是「那一行字的墨迹有多高」，而汉字墨迹的高度和字号之间隔着
 // 一个随字体而异的系数（同一个字号换个字体差一两像素）——所以**精确的那个数**
-// 只能由代码里的一个调用来钉（`FontSize(pageTitleSize)`），而画面那一层
+// 只能由代码里的一个调用来钉（`FontSize(scale.PageTitle)`），而画面那一层
 // （`TestEveryPageTitleIsTheSameSizeOnScreen`）管的是「它们看起来一样」。
 //
 // ⚠️ **别把 `FontSize(22)` 抄回去**：那正是这一票要消掉的东西（22 不在
@@ -326,22 +327,22 @@ func TestEveryPageTitleUsesTheSharedSize(t *testing.T) {
 	titles := []string{"稍后再看", "历史记录", "本地音乐", "下载记录", "搜索", "设置", "扫码登录"}
 	for _, title := range titles {
 		if !titleUsesSharedSize(t, title) {
-			t.Errorf("页标题 %q 没有用 `FontSize(pageTitleSize)`——页标题的字号必须"+
-				"是同一个数（pageTitleSize = %d）", title, pageTitleSize)
+			t.Errorf("页标题 %q 没有用 `FontSize(scale.PageTitle)`——页标题的字号必须"+
+				"是同一个数（scale.PageTitle = %d）", title, scale.PageTitle)
 		}
 	}
 	// 那个数本身也钉住：24（上游 `h1` 的 `text-2xl`，见 pagerhythm.go 顶上那段）。
-	if pageTitleSize != 24 {
-		t.Errorf("pageTitleSize = %d，want 24——上游那一套里页标题取的是 `text-2xl`"+
-			"（24，DESIGN.md 的 `typography.page_title`）", pageTitleSize)
+	if scale.PageTitle != 24 {
+		t.Errorf("scale.PageTitle = %d，want 24——上游那一套里页标题取的是 `text-2xl`"+
+			"（24，DESIGN.md 的 `typography.page_title`）", scale.PageTitle)
 	}
 }
 
-// titleUsesSharedSize 报这一行字是不是用 `FontSize(pageTitleSize)` 画的。
+// titleUsesSharedSize 报这一行字是不是用 `FontSize(scale.PageTitle)` 画的。
 //
 // 判据是**那一句话**（一个 `ExprStmt`）：它长成
-// `ui.Text(c, "稍后再看").FontSize(pageTitleSize).Bold()`，所以在**同一句**里
-// 找那个 `FontSize(pageTitleSize)` 就够了——不用顺着调用链往上爬（那样要自己
+// `ui.Text(c, "稍后再看").FontSize(scale.PageTitle).Bold()`，所以在**同一句**里
+// 找那个 `FontSize(scale.PageTitle)` 就够了——不用顺着调用链往上爬（那样要自己
 // 建父节点表，而链上还有 `.Bold()` / `.Grow(1)` 那些，爬错了很难看出来）。
 func titleUsesSharedSize(t *testing.T, title string) bool {
 	t.Helper()
@@ -387,16 +388,22 @@ func titleUsesSharedSize(t *testing.T, title string) bool {
 					if len(call.Args) == 1 {
 						switch arg := call.Args[0].(type) {
 						case *ast.Ident:
-							if arg.Name == "pageTitleSize" {
+							if arg.Name == "PageTitle" {
+								hasShared = true
+							}
+						case *ast.SelectorExpr:
+							// `scale.PageTitle`：字号的出处是 `widgets/scale`
+							// 那张表（票 #238），写的是包名限定的那个名字。
+							if arg.Sel.Name == "PageTitle" {
 								hasShared = true
 							}
 						case *ast.CallExpr:
-							// `scale.Font(c, pageTitleSize)`：系统字号缩放那一层
+							// `scale.Font(c, scale.PageTitle)`：系统字号缩放那一层
 							//（票 #139）。里面那个数仍然必须是同一个常量——这一条
 							// 管的就是「七页用的是同一个数」，不是「没套缩放」。
 							if sel, ok := arg.Fun.(*ast.SelectorExpr); ok &&
 								sel.Sel.Name == "Font" && len(arg.Args) == 2 {
-								if id, ok := arg.Args[1].(*ast.Ident); ok && id.Name == "pageTitleSize" {
+								if mentionsIdent(arg.Args[1], "PageTitle") {
 									hasShared = true
 								}
 							}
@@ -480,7 +487,7 @@ func TestEveryPageTitleIsTheSameSizeOnScreen(t *testing.T) {
 				{name: ref, path: localMusicPath, chars: 4},
 				{name: "下载记录", path: downloadListPath, chars: 4},
 				{name: "搜索", path: searchPath + "?q=%E5%A4%9C%E7%A9%BA", chars: 2},
-				// 设置页和登录页也在这一族里：它们的页标题同样是 `pageTitleSize`
+				// 设置页和登录页也在这一族里：它们的页标题同样是 `scale.PageTitle`
 				// （票 #166——「所有页面的大标题 24/400」）。
 				{name: "设置", path: settingsPath, chars: 2},
 				{name: "扫码登录", path: loginPath, chars: 4},
@@ -872,8 +879,8 @@ func TestThePagesThatNeedLoginSaySo(t *testing.T) {
 //  3. 标题 / 简介 / 类型和条数 / 创建者四块**左缘对齐**，相邻两块之间 **16**
 //     （票 #175 的验收：14/14/14、竖距 16）。
 func TestTheCollectionTitleIsTheBigOne(t *testing.T) {
-	if collectionTitleSize != 30 {
-		t.Errorf("collectionTitleSize = %d，want 30（上游 `text-3xl`）", collectionTitleSize)
+	if scale.CollectionTitle != 30 {
+		t.Errorf("scale.CollectionTitle = %d，want 30（上游 `text-3xl`）", scale.CollectionTitle)
 	}
 	// 一个长到要折两行的名字。
 	long := "这是一个很长很长很长很长很长很长很长很长很长很长的收藏夹名字"
@@ -1025,21 +1032,21 @@ func TestTheSmallCopyHasAFixedLineHeight(t *testing.T) {
 		file string
 		// key 是那一行字在源码里的样子（`ui.Text` 的第一个参数）。
 		key string
-		// want 是那个 `LineHeight(...)` 该调用的常量。
+		// want 是那个 `LineHeight(...)` 该调用的档（`widgets/leading` 那张表里的名字）。
 		want string
 	}{
-		{file: "empty.go", key: "e.Hint", want: "smallCopyLeading"},
-		{file: "collectionpage.go", key: "info.Intro", want: "smallCopyLeading"},
-		{file: "collectionpage.go", key: "collectionKindText()", want: "smallCopyLeading"},
-		{file: "collectionpage.go", key: "info.OwnerName", want: "smallCopyLeading"},
+		{file: "empty.go", key: "e.Hint", want: "Copy"},
+		{file: "collectionpage.go", key: "info.Intro", want: "Copy"},
+		{file: "collectionpage.go", key: "collectionKindText()", want: "Copy"},
+		{file: "collectionpage.go", key: "info.OwnerName", want: "Copy"},
 		// ⚠️ **key 是「源码里那一行字长什么样」**：下载记录页头那一行路径以前
 		// 叫 `path`，而没有目录时它换成了一枚按钮，路径那一行直接用 `dir` 了
 		// （报告 C1）。
-		{file: "downloadlist_ops.go", key: "dir", want: "smallCopyLeading"},
-		{file: "localmusic.go", key: "有目录读不到：", want: "smallCopyLeading"},
-		{file: "localmusic.go", key: "这个目录里有我们还放不出的格式（", want: "smallCopyLeading"},
-		{file: "daterange.go", key: "f.summary()", want: "smallCopyLeading"},
-		{file: "covermodal.go", key: "coverHint", want: "smallCopyHintLeading"},
+		{file: "downloadlist_ops.go", key: "dir", want: "Copy"},
+		{file: "localmusic.go", key: "有目录读不到：", want: "Copy"},
+		{file: "localmusic.go", key: "这个目录里有我们还放不出的格式（", want: "Copy"},
+		{file: "daterange.go", key: "f.summary()", want: "Copy"},
+		{file: "covermodal.go", key: "coverHint", want: "Hint"},
 	} {
 		if !smallCopyHasLineHeight(t, place.file, place.key, place.want) {
 			t.Errorf("%s 的 %q 那一行字没有调 `LineHeight(%s)`——小字的行高必须是"+
@@ -1085,7 +1092,11 @@ func smallCopyHasLineHeight(t *testing.T, file, key, want string) bool {
 				}
 			case "LineHeight":
 				if len(call.Args) == 1 {
-					if id, ok := call.Args[0].(*ast.Ident); ok && id.Name == want {
+					// ⚠️ **认包名限定的那种写法**（`leading.Copy`）：行高的
+					// 出处现在是 `widgets/leading` 那张表，代码里写的是
+					// `leading.Copy`——那是一个 `*ast.SelectorExpr`，
+					// 只认 `*ast.Ident` 的话这个判据会**静默地永远不成立**。
+					if mentionsIdent(call.Args[0], want) {
 						hasLeading = true
 					}
 				}
@@ -1277,12 +1288,12 @@ func mentionsKey(e ast.Expr, key string) bool {
 // （同 `TestEveryPageTitleUsesTheSharedSize` 的理由）。票面给的是三个 14
 // （简介 / 类型和条数 / 创建者），精确的那个数只能由代码里的调用钉住。
 func TestTheCollectionHeaderCopyIsFourteen(t *testing.T) {
-	if collectionHeadCopySize != 14 {
-		t.Errorf("collectionHeadCopySize = %d，want 14（上游 `text-sm`）", collectionHeadCopySize)
+	if scale.CollectionCopy != 14 {
+		t.Errorf("scale.CollectionCopy = %d，want 14（上游 `text-sm`）", scale.CollectionCopy)
 	}
 	for _, key := range []string{"info.Intro", "collectionKindText()", "info.OwnerName"} {
-		if !textUsesFontSize(t, "collectionpage.go", key, "collectionHeadCopySize") {
-			t.Errorf("头图区的 %q 没有用 `FontSize(scale.Font(c, collectionHeadCopySize))`"+
+		if !textUsesFontSize(t, "collectionpage.go", key, "CollectionCopy") {
+			t.Errorf("头图区的 %q 没有用 `FontSize(scale.Font(c, scale.CollectionCopy))`"+
 				"——那三行小字必须是 14", key)
 		}
 	}
@@ -1328,7 +1339,10 @@ func textUsesFontSize(t *testing.T, file, key, want string) bool {
 					if inner, ok := call.Args[0].(*ast.CallExpr); ok {
 						if fn, ok := inner.Fun.(*ast.SelectorExpr); ok &&
 							fn.Sel.Name == "Font" && len(inner.Args) == 2 {
-							if id, ok := inner.Args[1].(*ast.Ident); ok && id.Name == want {
+							// ⚠️ **认包名限定的那种写法**（`scale.CollectionCopy`）：
+							// 字号的出处现在是 `widgets/scale` 那张表，写的是
+							// `scale.CollectionCopy`——那是一个 `*ast.SelectorExpr`。
+							if mentionsIdent(inner.Args[1], want) {
 								hasSize = true
 							}
 						}

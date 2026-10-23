@@ -28,6 +28,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
@@ -151,7 +152,7 @@ func (s *Shell) viewHistory(c *ui.Context, _ *ui.Route) {
 		Children(func() {
 			// 页头：标题在左，「记录播放历史」在右（上游是 `justify-between`）。
 			ui.Row(c).FillWidth().Center().Children(func() {
-				ui.Text(c, "历史记录").FontSize(scale.Font(c, pageTitleSize)).Grow(1)
+				ui.Text(c, "历史记录").FontSize(scale.Font(c, scale.PageTitle)).Grow(1)
 				s.viewReportHistory(c, st.ReportPlayHistory, ro)
 			})
 
@@ -226,9 +227,9 @@ func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 			func() { rows.playFrom(r.Index) })
 
 		ui.Text(c, progressText(m.Progress, m.Duration)).Width(mt.progress).
-			TextAlign(ui.End).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
+			TextAlign(ui.End).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 		ui.Text(c, viewedAtText(m.ViewedAt)).Width(mt.viewedAt).
-			TextAlign(ui.End).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
+			TextAlign(ui.End).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 
 		// 行尾那枚「⋯」。点开的是**这一行的菜单**，和右键同一份（理由同
 		// `drawLaterRow` 里那一处）。
@@ -285,21 +286,21 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected boo
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px4).PaddingY(cardGapForCell).Children(func() {
 			// 歌名 16 / UP 名 14：和 `widgets/list` 的网格卡同一档
 			// （DESIGN.md「网格：歌名 16、UP 14」）。
-			ui.Text(c, m.Title).FontSize(scale.Font(c, 16)).LineHeight(1.5).
+			ui.Text(c, m.Title).FontSize(scale.Font(c, scale.Size16)).LineHeight(leading.Title).
 				TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
 			ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 				if m.Owner != "" {
-					ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, 14)).LineHeight(1).
+					ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Owner).
 						TextColor(metaColor).MaxLines(1).Ellipsis("…")
 				}
 				if playing {
 					viewPlayingMark(c, t, m.Title)
 					return
 				}
-				ui.Text(c, clockText(m.Duration)).FontSize(scale.Font(c, 12)).
+				ui.Text(c, clockText(m.Duration)).FontSize(scale.Font(c, scale.Size12)).
 					TextColor(metaColor).MaxLines(1)
 			})
-			ui.Row(c).Gap(space.Px6).FontSize(scale.Font(c, 11)).Children(func() {
+			ui.Row(c).Gap(space.Px6).FontSize(scale.Font(c, scale.Size11)).Children(func() {
 				ui.Text(c, progressText(m.Progress, m.Duration)).Grow(1).
 					TextColor(metaColor).MaxLines(1)
 				ui.Text(c, viewedAtText(m.ViewedAt)).TextColor(metaColor).MaxLines(1)

@@ -37,6 +37,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
@@ -562,10 +563,9 @@ const (
 	collectionCoverW = 200
 	collectionCoverH = 168
 
-	// 标题下面那三行字（简介 / 类型 + 条数 / 创建者）都是 `text-sm` = **14**，
-	// 行与行之间是 `space-y-4` = **16**（上游同一个文件 :53-113）。
-	collectionHeadCopySize = 14
-	collectionHeadGap      = space.Px16
+	// collectionHeadGap 是那三行字之间的行距：`space-y-4` = **16**
+	// （上游同一个文件 :53-113）。
+	collectionHeadGap = space.Px16
 
 	// 创建者是 `User` 组件那一枚圆头像。票面给的是 **24**。
 	collectionOwnerAvatarSize  = 24
@@ -593,14 +593,14 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 			imgcache.View(c, s.images, info.Cover, collectionCoverW, collectionCoverH)
 
 			ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(collectionHeadGap).Children(func() {
-				// ⚠️ **这个标题是 30（`collectionTitleSize`），不是页标题那个数**：
+				// ⚠️ **这个标题是 30（`scale.CollectionTitle`），不是页标题那个数**：
 				// 头图区的大标题抄上游 `text-3xl`，见 pagerhythm.go 那段。
-				ui.Text(c, collectionTitleText(p.ref.Type, info)).FontSize(scale.Font(c, collectionTitleSize)).Bold().
+				ui.Text(c, collectionTitleText(p.ref.Type, info)).FontSize(scale.Font(c, scale.CollectionTitle)).Bold().
 					MaxLines(2).Ellipsis("…")
 
 				// ② 简介。Biu 是 `line-clamp-1`，有才画。
 				if info.Intro != "" {
-					ui.Text(c, info.Intro).FontSize(scale.Font(c, collectionHeadCopySize)).LineHeight(smallCopyLeading).
+					ui.Text(c, info.Intro).FontSize(scale.Font(c, scale.CollectionCopy)).LineHeight(leading.Copy).
 						TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 				}
 
@@ -609,15 +609,15 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 				// 上游连音频也是这么写的，这里照抄。
 				ui.Text(c, collectionKindText(p.ref.Type, info.Private)+" • "+
 					strconv.Itoa(info.MediaCount)+" 条视频").
-					FontSize(scale.Font(c, collectionHeadCopySize)).LineHeight(smallCopyLeading).
+					FontSize(scale.Font(c, scale.CollectionCopy)).LineHeight(leading.Copy).
 					TextColor(t.TextMuted).MaxLines(1)
 
 				// ④ 创建者：一枚 24 的圆头像 + 14 的昵称（上游是一个 `User`）。
 				if info.OwnerName != "" {
 					ui.Row(c).Gap(space.Px8).Center().Children(func() {
 						s.viewCollectionOwnerAvatar(c, info.OwnerFace)
-						ui.Text(c, info.OwnerName).FontSize(scale.Font(c, collectionHeadCopySize)).
-							LineHeight(smallCopyLeading).TextColor(t.TextMuted).
+						ui.Text(c, info.OwnerName).FontSize(scale.Font(c, scale.CollectionCopy)).
+							LineHeight(leading.Copy).TextColor(t.TextMuted).
 							MaxLines(1).Ellipsis("…")
 					})
 				}

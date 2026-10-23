@@ -55,6 +55,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -75,21 +76,17 @@ const (
 
 	// lyricsIdleOpacity / lyricsActiveOpacity 抄 `index.tsx:333` 的
 	// `isActive ? "opacity-100" : "opacity-60"`。
-	lyricsIdleOpacity    = 0.6
-	lyricsActiveOpacity  = 1.0
-	lyricsIdleWeight     = 400 // font-normal
-	lyricsActiveWeight   = 800 // font-extrabold
-	lyricsLineHeight     = 1.375
+	lyricsIdleOpacity   = 0.6
+	lyricsActiveOpacity = 1.0
+	lyricsIdleWeight    = 400 // font-normal
+	lyricsActiveWeight  = 800 // font-extrabold
+
 	lyricsLineGap        = space.Px8  // `space-y-2`：0.5rem
 	lyricsLinePadY       = space.Px8  // `py-2`：0.5rem
 	lyricsPadX           = space.Px12 // 我们自己加的：上游那一句靠容器边，这里留一点
 	lyricsMaxWidth       = 896        // `max-w-4xl`：56rem
 	lyricsTranslationGap = space.Px4  // `mt-1`：0.25rem
 
-	// lyricsTranslationSize 是译文那一行的字号，抄 `index.tsx:344` 的 `text-sm`
-	// （0.875rem = 14px）。**是死的**，不跟着原词那个字号走——上游的
-	// `text-sm` 就是绝对值，12px 的歌词配 14px 的翻译是 Biu 自己的样子。
-	lyricsTranslationSize = 14.0
 	// lyricsTranslationLineHeight 是译文那一行的高度，抄 `text-sm` 自带的
 	// `line-height: 1.25rem`（= 20px，绝对值）。原词那行用 `leading-snug`
 	// （1.375 倍），译文那行没有 `leading-*`，所以是 20px 而不是 1.375 倍。
@@ -686,15 +683,15 @@ func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyri
 	}
 	return line.Opacity(opacity).Children(func() {
 		ui.Text(c, row.Text).
-			FontSize(scale.Font(c, size)).FontWeight(weight).LineHeight(lyricsLineHeight).
+			FontSize(scale.Font(c, size)).FontWeight(weight).LineHeight(leading.Lyrics).
 			TextColor(st.color)
-		// 译文不是每行都有（`lyrics.Rows` 里 Translation 为空的那种，见那个
-		// 类型的注释），空的时候一个字都不画——留一个空行的话，上下两行
-		// 译文之间的缝会突然比别处大一倍。
+			// 译文不是每行都有（`lyrics.Rows` 里 Translation 为空的那种，见那个
+			// 类型的注释），空的时候一个字都不画——留一个空行的话，上下两行
+			// 译文之间的缝会突然比别处大一倍。
 		if row.Translation != "" {
 			ui.Text(c, row.Translation).
 				Margin(lyricsTranslationGap, space.None, space.None, space.None).
-				FontSize(scale.Font(c, lyricsTranslationSize)).
+				FontSize(scale.Font(c, scale.LyricsTranslation)).
 				FixedLineHeight(lyricsTranslationLineHeight).
 				Opacity(lyricsTranslationOpacity).
 				TextColor(st.color)

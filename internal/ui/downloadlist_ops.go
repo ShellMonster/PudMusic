@@ -21,6 +21,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo"
@@ -64,7 +65,7 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 	dir := s.app.DownloadDir()
 
 	ui.Row(c).FillWidth().Gap(space.Px10).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "下载记录").FontSize(scale.Font(c, pageTitleSize))
+		ui.Text(c, "下载记录").FontSize(scale.Font(c, scale.PageTitle))
 
 		// 路径。空串是「还没有下载目录」（设置里没选、系统目录也没拿到，
 		// 见 `app.Downloads.FallbackDir`）——那时候要说出来，不能画一段空白
@@ -91,8 +92,8 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 		} else {
 			// 超长被截掉的时候完整路径在 tooltip 里：用户不必去设置页才看得到它
 			// 落在哪儿。
-			d.tipWith(c, ui.Text(c, dir).Grow(1).FontSize(scale.Font(c, 12)).
-				LineHeight(smallCopyLeading).TextColor(t.TextMuted).MaxLines(1).
+			d.tipWith(c, ui.Text(c, dir).Grow(1).FontSize(scale.Font(c, scale.Size12)).
+				LineHeight(leading.Copy).TextColor(t.TextMuted).MaxLines(1).
 				Ellipsis("…"), dir)
 		}
 

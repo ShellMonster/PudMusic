@@ -58,7 +58,7 @@ func (s *Shell) viewCollectionBatchBar(c *ui.Context, p *collectionPage) {
 		if ui.Checkbox(c, &all, "全选").Label("全选").Changed() {
 			s.toggleSelectAll(p, !p.allSelected())
 		}
-		ui.Text(c, "已选 "+strconv.Itoa(chosen)+" 首").FontSize(scale.Font(c, 13)).
+		ui.Text(c, "已选 "+strconv.Itoa(chosen)+" 首").FontSize(scale.Font(c, scale.Size13)).
 			TextColor(t.TextMuted)
 
 		dl := ui.Button(c, "批量下载")

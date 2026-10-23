@@ -80,10 +80,6 @@ const (
 	// sideBrandLogo 是左上角那个 logo 的边长。上游
 	// `<LogoIcon className="h-10 w-10" />`（`biu/src/layout/side/logo/index.tsx`）。
 	sideBrandLogo = 40
-
-	// sideBrandNameSize 是品牌字（应用名）的字号。上游 `text-2xl` = 24
-	// （`DESIGN.md` 的排版表：品牌字 = 24 / 粗体 / 主色）。
-	sideBrandNameSize = 24
 )
 
 // viewSide 是左侧栏。
@@ -326,7 +322,7 @@ func (s *Shell) viewSideBrand(c *ui.Context, collapsed bool) {
 	row.Children(func() {
 		ui.Image(c, brandLogo()).Size(sideBrandLogo, sideBrandLogo)
 		if !collapsed {
-			ui.Text(c, appName).FontSize(scale.Font(c, sideBrandNameSize)).Bold().
+			ui.Text(c, appName).FontSize(scale.Font(c, scale.BrandName)).Bold().
 				TextColor(ink.AccentOn(t))
 		}
 	})
@@ -579,7 +575,7 @@ func loggedOutHint(hidden int) string {
 // 可点文字是同一套做法，见 `playbar.go`）。
 func (s *Shell) viewLoggedOutHint(c *ui.Context, hidden int) {
 	ui.Column(c).Key("side-logged-out").Children(func() {
-		hint := ui.Text(c, loggedOutHint(hidden)).FontSize(scale.Font(c, 12)).Wrap().
+		hint := ui.Text(c, loggedOutHint(hidden)).FontSize(scale.Font(c, scale.Size12)).Wrap().
 			TextColor(c.Theme().TextMuted).Padding(space.Px4, space.Px8).
 			OnClick(func() { s.goLogin() })
 		// 悬停才显出「点得动」：主色 + 下划线。

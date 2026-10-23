@@ -199,7 +199,7 @@ func (s *Shell) pickRadius(c *ui.Context, st app.Settings, ro bool) {
 		if sl.Changed() {
 			s.applySetting("圆角", func(cur *app.Settings) { cur.BorderRadius = v })
 		}
-		ui.Textf(c, "%.0fpx", v).FontSize(scale.Font(c, 12)).Width(radiusReadoutW)
+		ui.Textf(c, "%.0fpx", v).FontSize(scale.Font(c, scale.Size12)).Width(radiusReadoutW)
 	})
 }
 
@@ -357,9 +357,9 @@ func (s *Shell) colorItem(c *ui.Context, label, hex string, ro, overridden bool,
 				set(toHex(col))
 			}
 		})
-		ui.Text(c, label).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Center()
+		ui.Text(c, label).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Center()
 		if overridden && !ro {
-			if flatButton(c, "用默认").FontSize(scale.Font(c, 11)).TextColor(t.TextMuted).Clicked() {
+			if flatButton(c, "用默认").FontSize(scale.Font(c, scale.Size11)).TextColor(t.TextMuted).Clicked() {
 				reset()
 			}
 		}

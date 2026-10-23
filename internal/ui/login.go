@@ -72,7 +72,7 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 	loginScroll.Children(func() {
 		ui.Column(c).Key("page:"+loginPath).Grow(1).Padding(space.None, space.Px20).Gap(space.Px12).
 			AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "扫码登录").FontSize(scale.Font(c, pageTitleSize))
+			ui.Text(c, "扫码登录").FontSize(scale.Font(c, scale.PageTitle))
 
 			// **登录能换来什么**（票 #242，UX 报告 §3-A 的 A3）。
 			//
@@ -85,7 +85,7 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 			// 四处的接口全都要 Cookie，没登录时一律回 -101（见 loginprompt.go
 			// 的文件头）。
 			ui.Text(c, "登录之后可以看你的关注、收藏、历史记录和稍后再看").
-				FontSize(scale.Font(c, 14)).TextColor(t.TextMuted)
+				FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted)
 
 			switch {
 			case !st.Busy() && st.QR == nil:
@@ -93,11 +93,11 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 				// 不放二维码是因为还没有——凭空画一张占位图会让人以为
 				// 「点了没反应」。
 				ui.Text(c, "用 bilibili 手机客户端扫一扫就能登进来").
-					FontSize(scale.Font(c, 14)).TextColor(t.Text)
+					FontSize(scale.Font(c, scale.Size14)).TextColor(t.Text)
 
 			case st.Phase == app.LoginExpired:
 				s.qrImage(c, st.QR, true)
-				ui.Text(c, "这张二维码已经过期了，扫不了了").FontSize(scale.Font(c, 14)).TextColor(t.Text)
+				ui.Text(c, "这张二维码已经过期了，扫不了了").FontSize(scale.Font(c, scale.Size14)).TextColor(t.Text)
 
 			default:
 				// 这一支（等扫码 / 已扫待确认）**永远不盖灰**。
@@ -106,7 +106,7 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 				// 盖完的码手机扫不出来（实测 45% 压暗之后相当一部分 App 直接放弃），
 				// 用户看到的却是一张「正常」的二维码。
 				s.qrImage(c, st.QR, false)
-				ui.Text(c, st.Hint).FontSize(scale.Font(c, 14)).TextColor(qrHintColor(t, st.Phase))
+				ui.Text(c, st.Hint).FontSize(scale.Font(c, scale.Size14)).TextColor(qrHintColor(t, st.Phase))
 			}
 
 			s.qrActions(c, st)
@@ -234,7 +234,7 @@ func (s *Shell) qrActions(c *ui.Context, st app.LoginState) {
 				s.app.CancelLogin()
 			}
 		case app.LoginScanned:
-			ui.Text(c, "别关掉这一页").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+			ui.Text(c, "别关掉这一页").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 			if ui.Button(c, "取消").Clicked() {
 				s.app.CancelLogin()
 			}
@@ -270,15 +270,15 @@ func (s *Shell) viewAccountFooter(c *ui.Context, t *ui.Theme, st app.LoginState)
 	sess := s.app.Session()
 	ui.Row(c).Key("account-footer").Gap(space.Px10).AlignItems(ui.Center).Children(func() {
 		if uid := sess.DedeUserID; uid != "" {
-			ui.Text(c, "已登录（UID "+uid+"）").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+			ui.Text(c, "已登录（UID "+uid+"）").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 		} else {
-			ui.Text(c, "已登录").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+			ui.Text(c, "已登录").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 		}
 		// 登录态存不存得住，一眼就该看见：后端不可用时用户必须在这里
 		// 知道「关掉应用就白登了」，而不是重启之后才发现。
 		if backend := s.app.CredentialBackendName(); backend == "none" {
 			ui.Text(c, "凭据后端不可用，登录态关掉应用就没了").
-				FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+				FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 		}
 		if ui.Button(c, "退出登录").Clicked() {
 			s.logoutAndStartOver()

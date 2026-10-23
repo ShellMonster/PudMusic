@@ -110,8 +110,8 @@ func (s *Shell) viewFullLyricsEmpty(c *ui.Context, area ui.Rect) {
 		Label("满屏歌词").
 		Children(func() {
 			ui.Icon(c, icon(noLyrics.Icon)).FontSize(emptyIconSize).TextColor(dim)
-			ui.Text(c, noLyrics.Title).FontSize(scale.Font(c, emptyTitleSize)).TextColor(on)
-			ui.Text(c, noLyrics.Hint).FontSize(scale.Font(c, emptyHintSize)).TextColor(dim)
+			ui.Text(c, noLyrics.Title).FontSize(scale.Font(c, scale.EmptyTitle)).TextColor(on)
+			ui.Text(c, noLyrics.Hint).FontSize(scale.Font(c, scale.EmptyHint)).TextColor(dim)
 			// 字色给满屏那一档：这一枚是浮在糊过的封面上的，主题的字色在浅色
 			// 主题下是黑的（压在上面读不出来）。
 			if flatButton(c, lyricSearchKnobLabel).TextColor(on).Clicked() {

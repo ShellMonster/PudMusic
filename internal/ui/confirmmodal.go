@@ -67,6 +67,7 @@ package ui
 
 import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -199,7 +200,7 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 	// **自己把 `ui.Modal` 那套样子摆一遍**（下一段就是照抄 `coreModal` 的）。
 	m := ui.DialogBase(c, open, func(backdrop, panel ui.Element) {
 		w, h := c.Size()
-		backdrop.Background(ui.RGBA(0, 0, 0, 0.4))
+		backdrop.Background(ui.RGBA(0, 0, 0, scrim.Modal))
 		// ⚠️ **影的值从 `widgets/shadow` 取**（`shadow.Modal`）：值只写一处
 		// （DESIGN.md §四·五，票 #239 把这一处收进去了）。
 		panel = shadow.Modal(panel.Padding(t.Space(5)).Gap(t.Space(3)).Radius(t.Space(2.5)).
@@ -227,16 +228,16 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 					ui.Icon(c, icon(iconWarning)).FontSize(confirmIconSize).
 						TextColor(confirmIconColor(t, spec.tone))
 					// ⚠️ **字重不写**（400）：弹窗标题是 16/400（DESIGN.md §二）。
-					ui.Text(c, spec.title).FontSize(scale.Font(c, 16))
+					ui.Text(c, spec.title).FontSize(scale.Font(c, scale.Size16))
 				})
 				if spec.body != "" {
 					// 正文是 `text-sm`（14），颜色是上游那个 `text-zinc-500`
 					// ——而 `t.TextMuted` 浅色下正是 `#71717a`，逐字相同。
-					ui.Text(c, spec.body).FontSize(scale.Font(c, 14)).
+					ui.Text(c, spec.body).FontSize(scale.Font(c, scale.Size14)).
 						TextColor(t.TextMuted).Wrap()
 				}
 				if spec.detail != "" {
-					ui.Text(c, spec.detail).FontSize(scale.Font(c, 12)).
+					ui.Text(c, spec.detail).FontSize(scale.Font(c, scale.Size12)).
 						TextColor(t.TextMuted).Wrap()
 				}
 			})

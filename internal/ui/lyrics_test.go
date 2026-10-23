@@ -17,6 +17,8 @@ package ui
 
 import (
 	"fmt"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"image"
 	"math"
 	"os"
@@ -1116,7 +1118,7 @@ func TestTheOffsetMovesWhichLineIsSung(t *testing.T) {
 	seekTo(t, s, tt, 8)
 
 	big := lyricRowAt(t, tt, 8)
-	if math.Abs(float64(big.H)-(lyricsActiveScale*app.DefaultLyricsFontSize*lyricsLineHeight)) > 1 {
+	if math.Abs(float64(big.H)-(lyricsActiveScale*app.DefaultLyricsFontSize*leading.Lyrics)) > 1 {
 		t.Fatalf("第 8 句还没有被放大（高 %v），后面那一步就验不到", big.H)
 	}
 
@@ -1220,13 +1222,13 @@ func TestTheUpstreamNumbersAreTheOnesWeUse(t *testing.T) {
 		{"每句上下的留白 lyricsLinePadY", lyricsLinePadY, 8},
 		{"句与句之间的缝 lyricsLineGap", lyricsLineGap, 8},
 		// index.tsx:331 `leading-snug`
-		{"行高倍数 lyricsLineHeight", lyricsLineHeight, 1.375},
+		{"行高倍数 leading.Lyrics", leading.Lyrics, 1.375},
 		// index.tsx:355 `max-w-4xl`（56rem）
 		{"歌词区最宽 lyricsMaxWidth", lyricsMaxWidth, 896},
 		// index.tsx:344 `mt-1`（0.25rem）、`text-sm`（0.875rem / 1.25rem）、
 		// `text-white/80`
 		{"译文离原词 lyricsTranslationGap", lyricsTranslationGap, 4},
-		{"译文字号 lyricsTranslationSize", lyricsTranslationSize, 14},
+		{"译文字号 scale.LyricsTranslation", scale.LyricsTranslation, 14},
 		{"译文行高 lyricsTranslationLineHeight", lyricsTranslationLineHeight, 20},
 		{"译文不透明度 lyricsTranslationOpacity", lyricsTranslationOpacity, 0.8},
 		// index.tsx:358 那条 maskImage 的八个色标：上沿到 24%、下沿从 76% 起

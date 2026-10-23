@@ -93,13 +93,6 @@ const (
 	// newMusicGap 是格子之间的间距。上游是 `gap-3`（12 像素）。
 	newMusicGap = space.Px12
 
-	// newMusicTitleSize 是「新歌速递」那一行标题的字号。
-	//
-	// 上游那一处是整页唯一的 `<h1>`（`new-music-top.tsx:178`），字号照
-	// DESIGN.md 的「页标题 24/400」：24 号、**不加粗**（权重由 Preflight 重置成
-	// inherit）。这一块要「立得住」靠的是字号，不是字重。
-	newMusicTitleSize = 24
-
 	// newMusicEmptyH 是「暂无数据」那一块占多高。上游是 `h-[200px]`。
 	newMusicEmptyH = 200
 
@@ -394,8 +387,8 @@ func (g *newMusicGrid) view(c *ui.Context) {
 			// 的卡（关注卡、下载表那张），又有「亮一级」的板。
 			shadow.HeroSmall(ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
 				Background(t.Background).Center().Gap(space.Px8), t).Children(func() {
-				ui.Text(c, "新歌速递没拉出来").FontSize(scale.Font(c, 13)).TextColor(t.Text)
-				ui.Text(c, g.err.Error()).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(2)
+				ui.Text(c, "新歌速递没拉出来").FontSize(scale.Font(c, scale.Size13)).TextColor(t.Text)
+				ui.Text(c, g.err.Error()).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(2)
 				if g.retry != nil && flatButton(c, "重试加载新歌速递").Clicked() {
 					g.retry()
 				}
@@ -415,7 +408,7 @@ func (g *newMusicGrid) view(c *ui.Context) {
 			// 「暂无数据」。这里照它（那一句是上游的文案，别自己编）。
 			shadow.HeroSmall(ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
 				Background(t.Background).Center(), t).Children(func() {
-				ui.Text(c, "暂无数据").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
+				ui.Text(c, "暂无数据").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
 			})
 			return
 		}
@@ -446,7 +439,7 @@ func (g *newMusicGrid) view(c *ui.Context) {
 // 上摆一个 1 / 0 的读数和两个转不动的箭头，用户只会以为界面坏了。
 func (g *newMusicGrid) viewHeader(c *ui.Context, total int) {
 	ui.Row(c).Key("new-music:head").FillWidth().Gap(space.Px12).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "新歌速递").FontSize(scale.Font(c, newMusicTitleSize))
+		ui.Text(c, "新歌速递").FontSize(scale.Font(c, scale.NewMusicTitle))
 
 		if total == 0 {
 			return
@@ -463,7 +456,7 @@ func (g *newMusicGrid) viewHeader(c *ui.Context, total int) {
 			if prev.Clicked() {
 				g.page--
 			}
-			ui.Textf(c, "%d / %d", g.page, total).FontSize(scale.Font(c, 13)).Width(newMusicPageW).
+			ui.Textf(c, "%d / %d", g.page, total).FontSize(scale.Font(c, scale.Size13)).Width(newMusicPageW).
 				TextAlign(ui.Center).TextColor(c.Theme().TextMuted)
 			next := g.tipWith(c, flatIconButton(c, iconSideExpand, "下一页", 16).
 				Size(newMusicArrowW, newMusicArrowW).Padding(space.None, space.Px8).
@@ -535,9 +528,9 @@ func (g *newMusicGrid) viewCard(c *ui.Context, i int, coverSide float32) {
 			// 在下面那一排是深绿、在这一块是读不出来的亮绿。
 			titleColor = ink.AccentOn(t)
 		}
-		ui.Text(c, m.Title).FontSize(scale.Font(c, 16)).TextColor(titleColor).MaxLines(1).Ellipsis("…")
+		ui.Text(c, m.Title).FontSize(scale.Font(c, scale.Size16)).TextColor(titleColor).MaxLines(1).Ellipsis("…")
 		if m.Owner != "" {
-			ui.Text(c, m.Owner).FontSize(scale.Font(c, 14)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
+			ui.Text(c, m.Owner).FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 		}
 	})
 }

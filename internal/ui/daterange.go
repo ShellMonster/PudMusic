@@ -27,6 +27,7 @@ package ui
 import (
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -173,7 +174,7 @@ func (f *dateFilter) view(c *ui.Context, now time.Time) bool {
 		// 两句话互相打架。自己画这四个按钮就一个 if 的事（和设置页那三档
 		// 主题同一个写法）。
 		for i, p := range datePresets {
-			b := ui.Button(c, p.label).FontSize(scale.Font(c, 12)).Radius(6)
+			b := ui.Button(c, p.label).FontSize(scale.Font(c, scale.Size12)).Radius(t.Radius)
 			if i == f.tab {
 				b = b.Background(t.SurfaceHover)
 			}
@@ -185,7 +186,7 @@ func (f *dateFilter) view(c *ui.Context, now time.Time) bool {
 		// 手动挑区间：**双月日期选择器**（上游 `visibleMonths={2}`）。
 		f.viewRangePicker(c)
 
-		ui.Text(c, f.summary()).FontSize(scale.Font(c, 12)).LineHeight(smallCopyLeading).
+		ui.Text(c, f.summary()).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Copy).
 			TextColor(t.TextMuted)
 	})
 
