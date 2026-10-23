@@ -84,8 +84,8 @@ const (
 // 「忘了建某一页」这件事只有切过去看才知道。
 //
 // ⚠️ **用 `s.listActions()` 而不是 `list.AppActions(...)`**：那份里
-// `FavSelect` 是 nil，而这两页的行右键「收藏」会落到那句「还没接 B 站接口」
-// 上去——接口早就在了（`app.FavoriteSong`），那句是假的。
+// `FavSelect` 是 nil，而这两页的行右键「收藏」会落到那句「现在还不能用」
+// 上去——收藏早就能用了（`app.FavoriteSong`），那句话是假的。
 func (s *Shell) buildLibraryPages() {
 	acts := s.listActions()
 	s.laterPage.init(s.clock.Now(), s.drawLaterRow, s.laterMenu, s.fetchLater, acts, lookup(laterPath).Empty)

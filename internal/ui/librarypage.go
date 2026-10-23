@@ -344,7 +344,7 @@ func viewLibraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, cover *imgcac
 // 「下一首播放」和「添加到播放列表」**没有**：我们的队列只有「追加到末尾」和「从这
 // 一首往后接」（`app.Queue` 到现在只有 `Append`），摆一个没有的项等于骗用户。
 // 「下载音频 / 下载视频」也没有：要写盘、要选目录，是 PLAN 的 P-26，而摆一个按了
-// 只说「还没接」的项不如不摆——那两行和「在 B 站打开」长得一样。
+// 只说「现在还不能用」的项不如不摆——那两行和「在 B 站打开」长得一样。
 func libraryMenuItems(m *ui.Menu, row libraryRow, a RowActions, i int) bool {
 	switch {
 	case m.Item("播放").Disabled(!row.CanPlay).Chosen():

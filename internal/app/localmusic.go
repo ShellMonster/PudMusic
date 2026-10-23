@@ -38,7 +38,9 @@ import (
 )
 
 // errLocalMusicMissing 是「本地音乐还没挂上」。见 `LocalMusicMounted`。
-var errLocalMusicMissing = errors.New("本地音乐还没接上")
+//
+// ⚠️ **这句是给用户看的**，不许说「还没接上」（票 #242，UX 报告 §3-F 的 F2）。
+var errLocalMusicMissing = errors.New("本地音乐暂时用不了")
 
 // DirWatch 盯一个目录，目录里的东西变了就调 onChange。
 //

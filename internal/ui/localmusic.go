@@ -525,10 +525,28 @@ func (p *localPage) viewHead(c *ui.Context) {
 		ui.Segmented(c, &p.style, localStyles[:]...)
 
 		ui.Spacer(c)
-		// 上游是 `variant="flat"` 的一个文字键（`local-music/index.tsx:189`）。
-		// 它旁边那颗文件夹加的图标没画：`flat.Button` 只接管文字，图标 + 文字
-		// 要再开一个配方，而这一票要的是「把描边和常驻底去掉」，不是重画按钮。
-		flatButton(c, "添加目录").OnClick(p.addDirectory)
+		// ⚠️ **它旁边那一枚文件夹加的图标**：上游那一枚是「图标 + 文字」的
+		// flat 键（`local-music/index.tsx:189`），而 `flat.Button` 只接管文字
+		// ——图标一直没画（那一票要的是「把描边和常驻底去掉」，不是重画按钮）。
+		//
+		// 于是它在画面上就是**一行小字**，而空状态那句话让用户去点它：按提示
+		// 找过去，扫到右上角只看见一行说明文字，**很可能以为那不是能点的**
+		//（报告 C2：用户于是以为要去顶栏找「打开文件」，而那是另一件事）。
+		//
+		// 所以这里把上游那一枚图标补上——**同一个词、同一个动作**，而它一眼就
+		// 看得出是个入口。
+		//
+		// ⚠️ **它仍然是扁平的**（无描边、无常驻底）：那是全应用次级按钮的
+		// 规矩（`flatbutton.go` 的文件头），`flatspread_test.go` 逐页钉着。
+		// 「看得见」靠的是那枚图标和空状态里那枚实心主色按钮，不是给它描一圈边。
+		addDir := flatButton(c, "")
+		addDir.Children(func() {
+			ui.Icon(c, icon(iconFolderAdd)).FontSize(14)
+			ui.Text(c, "添加目录")
+		})
+		if addDir.Clicked() {
+			p.addDirectory()
+		}
 	})
 }
 
@@ -650,6 +668,16 @@ func (p *localPage) viewStyle() list.View {
 // 居中带插画的那一套了（票 #138）。
 func (p *localPage) viewEmpty(c *ui.Context, st app.LocalMusicState) {
 	e := localEmptyState(st)
+	// ⚠️ **一个目录都没加过时，这一格带一枚按钮**：空状态那句话让用户去点
+	// 右上角那枚按钮，而那一枚离这句话三百多像素、还只是一行小字（报告 C2：
+	// 「用户按提示找过去，扫到右上角只看见一行小字，很可能以为那只是说明文
+	// 字」）。
+	//
+	// 所以这里**同一个词、同一个动作**再摆一枚，就在那句话下面——用户读到
+	// 哪儿就在哪儿动手。
+	if len(st.Roots) == 0 {
+		e.Action = &emptyAction{Label: "添加目录", Do: p.addDirectory}
+	}
 	drawEmpty(c, "local:empty", e, emptyPagePad)
 }
 
@@ -661,7 +689,7 @@ func localEmptyState(st app.LocalMusicState) emptyState {
 	if len(st.Roots) == 0 {
 		return emptyState{
 			Title: "还没有添加音乐目录",
-			Hint:  "点右上角「添加目录」选一个文件夹，它的第一层里的歌会出现在这里。",
+			Hint:  "点下面的按钮选一个文件夹，它的第一层里的歌会出现在这里。",
 			Icon:  iconEmptyDisk,
 		}
 	}

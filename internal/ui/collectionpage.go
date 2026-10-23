@@ -397,7 +397,7 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 		// 为什么——「点了没反应」比「没做」更难解释。
 		s.viewEmpty(c, "collection:not-mounted", emptyState{
 			Title: "暂时打不开收藏夹",
-			Hint:  "这一页要 B 站接口，它还没挂上",
+			Hint:  "这一页现在打不开，稍后再试试",
 			// ⚠️ 走的是「拉不出来」那一支的插画（警告），不是空状态那一枚
 			// 收藏夹——接口没挂上是失败，不是「那个夹子本来就是空的」。
 			Icon: iconFailed,
@@ -867,7 +867,10 @@ func (s *Shell) collectionMoreAction(p *collectionPage, item collectionMenuItem)
 	case "forget-folder":
 		s.askConfirmAbout(p, confirmForgetFolder, 0, false, collectionTitleText(p.ref.Type, s.app.Collection(p.ref)))
 	default:
-		s.addToast("「"+item.label+"」还没接收藏夹接口", notice.Warning)
+		// ⚠️ **不许说「还没接接口」**（票 #242，UX 报告 §3-F 的 F2）：那是把
+		// 实现细节说给用户听。这一支是「按了一个我们还没接上的动作」，用户
+		// 需要知道的只是「这一下现在按不了」。
+		s.addToast("「"+item.label+"」现在还不能用", notice.Warning)
 	}
 }
 

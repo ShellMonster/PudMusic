@@ -68,7 +68,8 @@ func (s *Shell) openFolderSelect(item app.Item) {
 	// ⚠️ **没挂上就别开弹窗**：理由同 `openFolderEdit`（提交那一下会什么
 	// 都不发生，而用户看到的是「点了没反应」）。
 	if !s.app.CollectionsMounted() {
-		s.addToast("收藏夹还没接上：这一页要 B 站接口", notice.Warning)
+		// ⚠️ **不许说「还没接接口」**（票 #242，UX 报告 §3-F 的 F2）。
+		s.addToast("收藏夹现在打不开", notice.Warning)
 		return
 	}
 	if rid, typ, ok := favTarget(item); ok {

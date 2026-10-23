@@ -411,7 +411,9 @@ func playlistTextColor(t *ui.Theme, playing bool) ui.Color {
 func itemSubtitle(item app.Item) string {
 	switch item.Identity() {
 	case "":
-		return "来源还没接上"
+		// ⚠️ **不许说「还没接上」**（票 #242，UX 报告 §3-F 的 F2）：那一项确实
+		// 什么身份都没有，而用户要知道的只是「它的来源读不出来」。
+		return "来源未知"
 	}
 	switch {
 	case item.Source == "local" || item.Type == "local":
@@ -495,7 +497,8 @@ type queueMenuItem struct {
 // Biu 对本地项把前四项藏起来（`getMenus({isLogin, isLocal})` 里的 `hidden`）。
 // **这里不藏**：今天唯一把项放进队列的入口是 `enqueuePicked`（本地文件），藏起来的
 // 话普通用户看到的行菜单**永远只有「从列表删除」一项**，五项一条都见不到。摆出来
-// 按不动的那两项（见 `queueAction`）各自说清为什么，不是一句笼统的「还没接」。
+// 按不动的那两项（见 `queueAction`）各自说清为什么，不是一句笼统的
+// 「现在还不能用」。
 //
 // 第四项的字按这一项的来处换（本地项写「在访达中显示」），判断和内容列表那一套
 // 菜单共用一份（`list.OpenLabel`）。

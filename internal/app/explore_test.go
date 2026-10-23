@@ -156,7 +156,7 @@ func TestExploreIsMissingIsAnIdentifiableError(t *testing.T) {
 	sp := a.UpSpaceOf(1)
 	sp.Load()
 	if got := sp.Snapshot(); got.Err == "" {
-		t.Error("没挂上时头部的 Err 应该是「还没接上 B 站接口」")
+		t.Error("没挂上时头部的 Err 应该是「这一页暂时加载不出来」")
 	}
 }
 

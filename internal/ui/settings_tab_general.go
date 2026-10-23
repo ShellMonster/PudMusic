@@ -19,6 +19,7 @@ package ui
 
 import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
@@ -93,7 +94,10 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 
 	s.settingSectionEnd(c)
 	s.settingSection(c, "下载")
-	s.settingRow(c, "下载目录", "选择音视频保存的位置",
+	// ⚠️ **这一行有身份**（`settingRowAt`）：从下载记录页跳过来的时候要指着它
+	// （见 goToDownloadDirSetting）——设置页有四个 Tab、几十行，不指一下用户
+	// 还得自己找「下载目录」在哪儿。
+	s.settingRowAt(c, string(settingsFocusDownload), "下载目录", "选择音视频保存的位置",
 		func() { s.pickDownloadPath(c, st, ro) })
 	s.settingRow(c, "FFmpeg 路径", "手动指定 FFmpeg 可执行文件路径",
 		func() { s.pickFFmpegPath(c, st, ro) })
@@ -207,12 +211,19 @@ func (s *Shell) pickAudioQuality(c *ui.Context, st app.Settings, ro bool) {
 }
 
 // pickDownloadPath 是下载目录那一格：一个只读的路径 + 一个「选择」。
+//
+// ⚠️ **改完要说一声它管到哪儿去**（报告 D3）：设置页和下载记录页是**两页**，
+// 用户在这一页改完，看不见另一页变了——而「改了一个地方、另一个地方不变」是
+// 用户最容易当成「设置没生效」的那一种形态。这一句说清两件事：下载记录页上
+// 写的就是它，下完的歌也放在那儿。
 func (s *Shell) pickDownloadPath(c *ui.Context, st app.Settings, ro bool) {
 	ui.Row(c).Key("setting:downloadPath").Width(radiusWidth).Gap(space.Px8).Children(func() {
 		s.pathField(c, st.DownloadPath, "下载目录", ro)
 		if flatButton(c, "选择").Width(64).Disabled(ro).Clicked() {
 			s.pickPath("下载目录", true, func(path string) {
 				s.applySetting("下载目录", func(cur *app.Settings) { cur.DownloadPath = path })
+				s.addToast("下载目录已改：下载记录页上写的就是它，下完的歌放在那儿",
+					notice.Success)
 			})
 		}
 	})

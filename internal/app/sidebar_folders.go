@@ -80,7 +80,9 @@ func (a *App) EnqueueFolder(f Favorite, done func(string, notice.Tone)) {
 // 用户按下去之后什么也没发生（比说错一句话更难查）。
 func (a *App) withFolderItems(f Favorite, verb, able string, done func(string, notice.Tone), act func(items []Item) error) {
 	if a.collectionsSnapshot() == nil {
-		sayFolder(done, verb+"不了这个收藏夹：歌单接口还没挂上", notice.Danger)
+		// ⚠️ **不许说「接口」**（票 #242，UX 报告 §3-F 的 F2）：这句是弹给
+		// 用户看的。
+		sayFolder(done, verb+"不了这个收藏夹：收藏夹暂时打不开", notice.Danger)
 		return
 	}
 	ref := folderRef(f)
@@ -197,7 +199,7 @@ func (a *App) DeleteCollectionFolder(ref CollectionRef, title string, done func(
 func (a *App) deleteCreatedFolder(id int64, title string, done func(text string, ok bool, tone notice.Tone)) {
 	c := a.collectionsSnapshot()
 	if c == nil {
-		sayFolderDone(done, "删不掉这个收藏夹：歌单接口还没挂上", false, notice.Danger)
+		sayFolderDone(done, "删不掉这个收藏夹：收藏夹暂时打不开", false, notice.Danger)
 		return
 	}
 	go func() {
@@ -229,7 +231,7 @@ func (a *App) deleteCreatedFolder(id int64, title string, done func(text string,
 // 这件事变成看运气。
 func (a *App) ForgetCollectionFolder(ref CollectionRef, title string, done func(string, notice.Tone)) {
 	if a.collectionsSnapshot() == nil {
-		sayFolder(done, "移不了这个收藏夹：歌单接口还没挂上", notice.Danger)
+		sayFolder(done, "移不了这个收藏夹：收藏夹暂时打不开", notice.Danger)
 		return
 	}
 	a.forgetFavoriteGroup(ref.ID)
@@ -264,7 +266,7 @@ func (a *App) forgetFavoriteGroup(id int64) {
 func (a *App) UnfavoriteFolder(f Favorite, done func(string, notice.Tone)) {
 	c := a.collectionsSnapshot()
 	if c == nil {
-		sayFolder(done, "取消不了收藏：歌单接口还没挂上", notice.Danger)
+		sayFolder(done, "取消不了收藏：收藏夹暂时打不开", notice.Danger)
 		return
 	}
 	go func() {

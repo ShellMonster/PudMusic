@@ -225,7 +225,7 @@ func TestTheOwnerNameIsLeftAlignedWithTheTitle(t *testing.T) {
 // 这一条立刻红（54.7 > 30）。
 func TestTheQualityChipIsShortEnoughToSitNextToTheTitle(t *testing.T) {
 	for _, full := range []string{
-		"320K", "128K", "64K", "无损 FLAC", "杜比全景声", "杜比 Hi-Res", "未知音质",
+		"192K", "128K", "64K", "无损 FLAC", "Hi-Res 无损", "杜比全景声", "未知音质",
 	} {
 		t.Run(full, func(t *testing.T) {
 			tt, _ := metaBarTester(t, app.State{

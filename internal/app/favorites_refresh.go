@@ -85,7 +85,9 @@ func (a *App) RefreshFavorites() {
 	}
 	c := a.collectionsSnapshot()
 	if c == nil {
-		f.finishRefresh("刷不了收藏夹：这一摊还没接上 B 站接口", notice.Danger)
+		// ⚠️ **不许说「接口」**（票 #242，UX 报告 §3-F 的 F2）：这句是弹给
+		// 用户看的。
+		f.finishRefresh("刷不了收藏夹：这一摊暂时加载不出来", notice.Danger)
 		return
 	}
 	a.refreshCreatedFolders(f, c, mid)

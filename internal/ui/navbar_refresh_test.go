@@ -224,7 +224,7 @@ func TestRefreshingWithoutTheFoldersMountedSaysSo(t *testing.T) {
 	tt.Frame()
 
 	chooseRefresh(t, tt)
-	waitFrames(t, tt, "说清楚这一摊还没接上", func() bool {
-		return tt.HasText("刷不了收藏夹：这一摊还没接上 B 站接口")
+	waitFrames(t, tt, "说清楚这一摊暂时加载不出来", func() bool {
+		return tt.HasText("刷不了收藏夹：这一摊暂时加载不出来")
 	})
 }

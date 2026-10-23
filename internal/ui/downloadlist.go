@@ -283,7 +283,7 @@ func (s *Shell) viewDownloadList(c *ui.Context, _ *ui.Route) {
 		// ⚠️ 这一支是 return，不是少画表格：`ui.Table` 哪怕 n=0 也会画表头，
 		// 于是空着的时候页面上还杵着五个列名 —— 比空状态更让人以为这一页坏了。
 		if len(d.rows) == 0 {
-			s.viewEmpty(c, "downloads:empty", d.emptyState())
+			s.viewEmpty(c, "downloads:empty", s.downloadsEmptyState(d))
 			return
 		}
 		d.viewTable(c, s)
@@ -341,19 +341,30 @@ func (d *downloadsPage) scrollTop() {
 	d.state.ScrollTo(0, ui.Start)
 }
 
-// emptyState 是这一页空着的时候说的那两句话。
+// downloadsEmptyState 是这一页空着的时候说的那两句话。
 //
 // **两句话必须分得开**：真的没下载是「怎么才能不空」（`noDownloads`），筛完了
 // 没有是「你在看哪一档、换一档看看」（`dlEmptyAfterFilter`）。混成一句的话，用户
 // 在「视频」那一档看到「暂无内容」，会以为自己一首歌都没下过——而盘上明明躺着
 // 一整列表的音频。验收项点名要的就是这个分别。
-func (d *downloadsPage) emptyState() emptyState {
+//
+// ⚠️ **还有第三种**：**连落盘的地方都没有**（`App.DownloadDir()` 是空串）。那一档
+// 摆「搜一首歌…下完的会出现在这里」是骗人——用户照着做，下完发现没地方放，
+// 而页头那一行还写着「还没有下载目录」（报告 F3：两句提示互相打架）。那一档
+// 给的是**一条路**：去设置里选一个目录。
+func (s *Shell) downloadsEmptyState(d *downloadsPage) emptyState {
 	// 「全部」那一档空 = 真的没下载；队列整个是空的也是同一句（那时候筛选那一排
 	// 压根没摆，用户手上没有第三档可选，说「换一档看看」是骗他）。
-	if d.filter == dlFilterAll || len(d.all) == 0 {
-		return lookup(downloadListPath).Empty
+	if d.filter != dlFilterAll && len(d.all) > 0 {
+		return dlEmptyAfterFilter(d.filter)
 	}
-	return dlEmptyAfterFilter(d.filter)
+	// ⚠️ **先看有没有落盘的地方**：没有的话「搜一首歌」这一句是骗人的。
+	if s.app.DownloadDir() == "" {
+		e := noDownloadDir
+		e.Action = &emptyAction{Label: "去设置", Do: func() { s.goToDownloadDirSetting() }}
+		return e
+	}
+	return lookup(downloadListPath).Empty
 }
 
 // viewTable 画那张表格。

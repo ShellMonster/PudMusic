@@ -44,7 +44,10 @@ import (
 )
 
 // errRecommendMissing 是「首页还没挂上 B 站客户端」。
-var errRecommendMissing = errors.New("app: 首页还没挂上 B 站客户端")
+//
+// ⚠️ **后半句会原样弹到用户面前**（首页那一档的失败态走 `viewLoadError`，它
+// 画的就是 `err.Error()`），所以不许说「客户端」（票 #242，UX 报告 §3-F 的 F2）。
+var errRecommendMissing = errors.New("app: 首页暂时加载不出来")
 
 // Recommend 是首页要的接口的依赖。零值不挂——界面要判空。
 type Recommend struct {

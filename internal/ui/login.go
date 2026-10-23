@@ -74,6 +74,19 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 			AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "扫码登录").FontSize(scale.Font(c, pageTitleSize))
 
+			// **登录能换来什么**（票 #242，UX 报告 §3-A 的 A3）。
+			//
+			// 这一句**每一态都在**（不只是「还没点开始」那一态）：用户点进
+			// 登录页的时候，脑子里的问题是「登录了能干什么」——不说的话，登录
+			// 像一道没有说明书的考题，用户可能登录了才发现里面是空的（其实有，
+			// 只是他不知道）。
+			//
+			// 说的那几样都是**真的**：关注列表、收藏夹、历史记录、稍后再看这
+			// 四处的接口全都要 Cookie，没登录时一律回 -101（见 loginprompt.go
+			// 的文件头）。
+			ui.Text(c, "登录之后可以看你的关注、收藏、历史记录和稍后再看").
+				FontSize(scale.Font(c, 14)).TextColor(t.TextMuted)
+
 			switch {
 			case !st.Busy() && st.QR == nil:
 				// 一开始（还没点）或已经取消：给一个开始的地方。

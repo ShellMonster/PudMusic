@@ -445,6 +445,12 @@ func biuStatusOf(s string) download.Status {
 
 // biuQualityLabel 把 Biu 的 `audioCodecs` 翻成记录页上的徽章文字。
 //
+// ⚠️ **这里认的是 Biu 上游自己那个字段**，不是 B 站的音质 id：它的取值是
+// "320k" / "128k" / "flac" 这些字样，和 `bili.Quality` 那套编号（30216 /
+// 30280）是两回事。**投稿侧其实没有 320K**（最高是 192K，票 #255），但 Biu 的
+// 历史记录里就是有 "320k" ——那是它自己记下来的，照抄就行，别拿投稿侧的档位
+// 去套它。
+//
 // 认不出就留空：一个空的徽章只是不画那一格，一个猜错的徽章会让用户以为下的是
 // 另一档音质。
 func biuQualityLabel(codecs string) string {
