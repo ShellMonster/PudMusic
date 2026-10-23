@@ -443,14 +443,32 @@ func samePixel(a, b color.RGBA) bool {
 
 // fullCoverRect 是满屏上那张封面在画面上的框。
 //
-// 它是共享元素转场的**终点**，所以按满屏那几个数算：宽 `min(宽*0.7, 高*0.48)`
-// 夹在 260~520，高是宽的 0.75，居中。找元素不行——满屏上那个「当前封面」和
-// 播放条上那个同名，而播放条这时候压根没建。
+// 它是共享元素转场的**终点**：宽 `min(宽*0.7, 高*0.48)` 夹在 260~520（上游那个
+// 式子），高是宽的 0.75。找元素不行——满屏上那个「当前封面」和播放条上那个同名，
+// 而播放条这时候压根没建。
+//
+// ⚠️ **位置是我们自己的摆法**（票 #236）：歌词开着的时候满屏分两栏，封面在**左边
+// 那一栏**里居中（右边那一栏让给歌词，见 `viewFullStage`），竖直方向居中在顶栏
+// 与底栏之间那一段（底下那一段留给频谱）。三个数写死在这儿——布局和期望都用
+// 生产代码那个常量的话，常量一改两边一起变，测试就发现不了了。
 func fullCoverRect(t *testing.T, tt *mygoui.Tester) mygoui.Rect {
 	t.Helper()
 	winW, winH := float32(likeWinW), float32(likeWinH)
 	w := min(winW*0.7, winH*0.48)
 	w = min(max(w, 260), 520)
 	h := w * 0.75
-	return mygoui.Rect{X: (winW - w) / 2, Y: (winH - h) / 2, W: w, H: h}
+	const (
+		coverColRatio = 0.42 // 左边那一栏占窗口宽的几成
+		topBarH       = 64   // 顶上那一条的高
+		controlsH     = 92   // 底下那一条的高
+		spectrumBand  = 52   // 频谱那一条（40 + 12 的缝）
+	)
+	colW := winW * coverColRatio
+	top := float32(topBarH)
+	bottom := winH - float32(controlsH) - float32(spectrumBand)
+	return mygoui.Rect{
+		X: (colW - w) / 2,
+		Y: top + (bottom-top-h)/2,
+		W: w, H: h,
+	}
 }

@@ -308,6 +308,12 @@ func TestTheSharedDrawingEntryIsTheOnlyOne(t *testing.T) {
 		// 那个 15px 的「这里为什么空」），下面还跟着一个「去登录」按钮。
 		// 形状不同就是另一支，不是抄了一份。见 loginprompt.go。
 		"viewNeedsLogin": true,
+		// 满屏那一屏的歌词空状态（票 #236）：和 `viewFullEmpty` 同一个理由——
+		// 满屏压在**糊过的封面**上，主次色是满屏自己的前景色（白 92% /
+		// 黑 92%，跟着底走），而共享出口 `emptyCopy` 用的是主题的 Text /
+		// TextMuted（浅色主题下是黑的，压在浅色封面上会糊进去）。
+		// 见 fullplayer_lyrics.go 那一处的注释。
+		"viewFullLyricsEmpty": true,
 	}
 
 	matches, err := filepath.Glob("*.go")

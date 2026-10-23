@@ -203,6 +203,44 @@ var Items = []Item{
 	// 那一条里（`Play` 组，靠后）——它连着那张表一起钉，而那才是它该在的地方。
 	// 别在这里再抄一份：台账里有两条说同一句话的，读的人得自己猜哪条才是活的。
 
+	{
+		// 满屏接上歌词之后（票 #236，UX 报告 F-08 + B3）。这一条盯的是**两枚
+		// 开关不再是死的**：以前「显示歌词」和「歌词字体颜色」只改偏好里的值，
+		// 画面上什么都不会变——而用户看到的是「按了没反应」，症状与「整个设置
+		// 面板坏了」一模一样。
+		//
+		// 而「没有歌词」必须**说出口**：满屏开着、这一首没有歌词的时候，界面
+		// 上一个字都不说的话，用户分不清是「这一首没有」还是「这一版没做」
+		// （UX 报告 B3：「没有」和「没显示出来」在画面上长得一样）。
+		Category: Play,
+		Spec:     "满屏播放器接上歌词：「显示歌词」与「歌词字体颜色」两枚开关真的管画面；这一首没有歌词时是空状态（「暂无歌词」+ 一枚「找歌词」）而不是整屏空白；歌词让开分集面板，不被它从中间切断；关掉歌词时封面回到整窗居中；界面藏起来之后歌词还在；滚过去之后滚进视野的歌词看得见（渐隐按容器上下沿，不按离唱到哪一句多远）",
+		Tests: []string{
+			"TestTheFullPlayerShowsTheLyrics",
+			"TestTurningOffTheLyricsHidesThem",
+			"TestTheLyricsColorSwitchChangesTheLyrics",
+			"TestTheFullPlayerSaysWhenThereAreNoLyrics",
+			"TestTheLyricsStayClearOfThePartsPanel",
+			"TestTheCoverIsCentredInTheWindowWhenTheLyricsAreOff",
+			"TestTheLyricsStayWhenTheInterfaceHides",
+			"TestAShortLyricDoesNotFadeItsLastLine",
+			"TestTheLyricsStayVisibleWhenScrolled",
+			"TestTheLyricsDoNotJumpWhenTheInterfaceHides",
+			"TestTheLyricsTakeTheWholeWidthWhenTheCoverIsOff",
+		},
+	},
+	{
+		// 满屏那个偏好面板的三样（UX 报告 B4）：**有标题**（用户不用靠里面的
+		// 开关名猜这是什么面板）、**能关**（除了点外面和 Esc，还有一枚看得见的
+		// 「×」）、**和齿轮对齐**（面板的左沿对着齿轮的图形，不对着那枚键的
+		// 点击区）。
+		Category: Play,
+		Spec:     "满屏偏好面板：有标题（一个字都不多一个字都不少地画着）、能关、面板左沿和齿轮对齐",
+		Tests: []string{
+			"TestTheFullSettingsPanelHasATitleAndCanBeClosed",
+			"TestTheFullSettingsPanelLinesUpWithTheGear",
+		},
+	},
+
 	// ── 假时钟 ─────────────────────────────────────────────────────────────
 	{
 		Category: FakeClock,
