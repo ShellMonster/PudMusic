@@ -2,18 +2,36 @@ package audio
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 )
 
 // 这组测试盯的是「文件头 → 解码器」这条分派有没有接上，不是解码对不对
-// （对不对由 extaf 自己的测试管）。素材用系统自带的 afconvert / ffmpeg 现造，
-// 造不出来就跳过。
+// （对不对由 extaf 自己的测试管）。
+//
+// # 素材必须是仓库的一部分，不能「现造」
+//
+// 这一组以前用系统自带的 afconvert / ffmpeg 现造素材，造不出来就跳过。
+// 那样在 **Windows 上整组都是空的**：CI 的 windows-2022 runner 既没有
+// afconvert 也没有 ffmpeg，于是每一条都「跳过」——**绿是绿的，但一条也没
+// 测到**。而「Windows 上 .m4a 能不能放」恰恰是这一组最该在 Windows 上答的
+// 那个问题（Windows 的系统解码器是 Media Foundation，不是 AudioToolbox）。
+//
+// 所以素材改成仓库自带的那两份（`mfadec/testdata/`）：两个平台跑的是
+// **同一段字节**，判据可比，也不依赖任何系统工具。
 
-// TestOpenRoutesMP4ToTheSystemDecoder 确认 .m4a 真的走的是 ExtAudioFile 那条路。
+// TestOpenRoutesMP4ToTheSystemDecoder 确认 .m4a 真的走的是**系统解码器**
+// 那条路。
+//
+// 两个平台的系统解码器不是一个东西，而**都是系统解码器**：
+//
+//   - macOS：AudioToolbox（`extaf`）。
+//   - Windows：Media Foundation（`mfadec`）——Windows 自带的那个。
+//
+// 所以这条测试在两个平台上断的是同一件事：「.m4a 落到系统解码器上了，而且
+// 它报得出时长和采样率」。
 func TestOpenRoutesMP4ToTheSystemDecoder(t *testing.T) {
-	path := makeAAC(t, "m4a")
+	path := filepath.Join("mfadec", "testdata", "aaclc-stereo.m4a")
 
 	p, err := Open(path)
 	if err != nil {
@@ -32,14 +50,13 @@ func TestOpenRoutesMP4ToTheSystemDecoder(t *testing.T) {
 // TestOpenRoutesRawADTS 盯的是裸 ADTS（没有容器的 .aac）——
 // `verify-streaming.md` §1.1 说 macOS 打不开，本线程实测能开，
 // 这条测试就是为了不让它哪天悄悄退化回去。
+//
+// 两个平台各走各的系统解码器（macOS 是 AudioToolbox，Windows 是 Media
+// Foundation），但**都得开得了裸 ADTS**。
 func TestOpenRoutesRawADTS(t *testing.T) {
-	wav := makeTestWAV(t)
-	adts := filepath.Join(t.TempDir(), "raw.aac")
-	if err := run(t, "ffmpeg", "-v", "error", "-y", "-i", wav, "-c:a", "aac", "-b:a", "192k", "-f", "adts", adts); err != nil {
-		t.Skipf("造不出裸 ADTS 素材（需要 ffmpeg）: %v", err)
-	}
+	path := filepath.Join("mfadec", "testdata", "aaclc-stereo.aac")
 
-	p, err := Open(adts)
+	p, err := Open(path)
 	if err != nil {
 		t.Fatalf("裸 ADTS 打不开：%v", err)
 	}
@@ -93,45 +110,6 @@ func TestOpenRejectsSomethingThatIsNotAudio(t *testing.T) {
 	}
 }
 
-// ---- 素材 ----
-
-func makeAAC(t *testing.T, format string) string {
-	t.Helper()
-	if _, err := exec.LookPath("afconvert"); err != nil {
-		t.Skip("这台机器上没有 afconvert")
-	}
-	path := filepath.Join(t.TempDir(), "tone."+format)
-	if err := run(t, "afconvert", "-f", "m4af", "-d", "aac", "-b", "192000", makeTestWAV(t), path); err != nil {
-		t.Skipf("造不出素材: %v", err)
-	}
-	return path
-}
-
-// makeTestWAV 用系统的 Ping.aiff 转一段两秒的 44.1kHz 立体声 WAV。
-func makeTestWAV(t *testing.T) string {
-	t.Helper()
-	if _, err := exec.LookPath("afconvert"); err != nil {
-		t.Skip("这台机器上没有 afconvert")
-	}
-	path := filepath.Join(t.TempDir(), "tone.wav")
-	if err := run(t, "afconvert", "-f", "WAVE", "-d", "LEI16@44100", "-c", "2", "/System/Library/Sounds/Ping.aiff", path); err != nil {
-		t.Skipf("系统里没有 Ping.aiff: %v", err)
-	}
-	return path
-}
-
-func run(t *testing.T, name string, args ...string) error {
-	t.Helper()
-	out, err := exec.Command(name, args...).CombinedOutput()
-	if err != nil {
-		return &cmdErr{name: name, out: string(out), err: err}
-	}
-	return nil
-}
-
-type cmdErr struct {
-	name, out string
-	err       error
-}
-
-func (e *cmdErr) Error() string { return e.name + ": " + e.err.Error() + ": " + e.out }
+// 这一组没有「现造素材」那一步——素材是仓库自带的两份文件（见顶上那段）。
+// 以前这里有 `makeAAC` / `makeTestWAV`（用 afconvert 和 ffmpeg 现造），它们
+// 造出来的东西在 Windows 上根本造不出来，于是那一整组在 Windows 上全部跳过。

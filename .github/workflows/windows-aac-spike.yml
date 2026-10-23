@@ -16,10 +16,13 @@ name: Windows AAC spike
 #   - TestSpikeTheChannelsAreNotSwapped         —— 左右声道没调换
 #   - TestSpikeTheCOMApartmentSurvivesLoad      —— COM apartment 在负载下反复跑
 #
-# **外加**产品那一层（`./internal/service/audio/...`）：字节从 `openDecoder`
+# **外加**产品那一层（`./internal/service/audio/`）：字节从 `openDecoder`
 # 进、采样从 MyGo 的 `audio.Decoder` 接口出——认容器、截到容器说的呈现长度、
 # 丢掉编码器延迟，这三件事 spike 那几条碰不到。它顺带产出「B 站五档 ×
 # Windows」那张覆盖表。
+#
+# ⚠️ 那是**唯一一个包**，不是 `./internal/service/audio/...`——子包的取舍见
+# 「跑产品这一层的解码测试」那一步的注释（issue #258）。
 #
 # 答案全在 `t.Logf` 里，所以**必须 `-v`**，而且日志要存成 artifact——
 # 报告里引用的那些数字就是从这儿来的。
@@ -88,11 +91,67 @@ jobs:
       # 验的是解码器本身，碰不到这三件事。
       #
       # 它顺带产出「B 站五档 × Windows」那张覆盖表（`TestTheBilibiliQualityCoverage`）。
+      #
+      # ⚠️ **只跑这一个包，不跑 `...`**（子包）：
+      #
+      #   - `mfadec/` —— 上面两步已经跑过了（spike + COM apartment），再跑一遍
+      #     是白花时间，而且它没有 `-v` 就看不到那些数字；
+      #   - `flacdec/`、`mp3dec/` —— **纯 Go，平台无关**，macOS 上每天都在跑，
+      #     在 Windows 上再跑一遍买不到新东西（issue #258 的原话：「CI 时间是
+      #     这一条的代价，测什么要挑清楚」）；
+      #   - `extaf/` —— 在 Windows 上**没有测试文件**（它是 macOS 那一层）。
+      #
+      # 超时收到 10 分钟：这个包在 macOS 上跑 8 秒，Windows 上多出来的只是
+      # Media Foundation 的冷启动（加载 DLL + COM）和五轮首帧延迟测量。
       - name: 跑产品这一层的解码测试
         run: |
-          go test -v -count=1 -timeout 20m ./internal/service/audio/... 2>&1 |
+          go test -v -count=1 -timeout 10m ./internal/service/audio/ 2>&1 |
             Tee-Object -FilePath product.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          # ⚠️ **不许空转**。
+          #
+          # 这一步最坏的情形不是「红」，是「**绿**」——这个包在 Windows 上
+          # 一条都没跑（素材造不出来、平台分支跳过了、路径写错了……），于是
+          # CI 报绿，而「Windows 上有产品测试」这个洞**原封不动地留着**。
+          # 空转的绿比红的更坏：红的会被人看见。
+          #
+          # 所以这里点名查一遍：**下面这九条必须在日志里真的出现过**
+          # （PASS 或 FAIL 都算——FAIL 本来就会让上面那步红）。它们是
+          # 「Windows 上产品这一层真的能解」的证据：
+          #
+          #   - `.m4a` 和裸 `.aac` 各自落到系统解码器上（macOS 是
+          #     AudioToolbox，Windows 是 Media Foundation）；
+          #   - 解出来的 PCM 和另一个解码器**逐样本**对得上（两种容器都要）；
+          #   - 左右声道没调换；
+          #   - 开口到第一个采样在预算内；
+          #   - B 站五档的覆盖表；
+          #   - 在线的有损流放得出来；
+          #   - 无损那一档逐样本对得上（Windows 上它落回 `flacdec`）。
+          #
+          # 少一条就是「有一格是空的」，CI 报红——**那是这一格该被看见的时候**。
+          $mustRun = @(
+            'TestOpenRoutesMP4ToTheSystemDecoder',
+            'TestOpenRoutesRawADTS',
+            'TestTheProductPathDecodesAACSampleForSample',
+            'TestTheProductPathDecodesADTSSampleForSample',
+            'TestTheProductPathKeepsTheChannelsInPlace',
+            'TestTheFirstFrameComesOutFast',
+            'TestTheBilibiliQualityCoverage',
+            'TestTheAACOnlineStreamActuallyPlays',
+            'TestLosslessFLACFromTheStreamIsSampleForSample'
+          )
+          $log = Get-Content product.log -Raw
+          $missing = @()
+          foreach ($name in $mustRun) {
+            $pattern = "(?m)^--- (PASS|FAIL):\s+$([regex]::Escape($name))\b"
+            if ($log -notmatch $pattern) { $missing += $name }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Host ("::error::下面这些测试在 Windows 上没有真的跑到（跳过，或压根没出现）：" + ($missing -join ', '))
+            exit 1
+          }
+          Write-Host ("产品这一层在 Windows 上真的跑到了 " + $mustRun.Count + " 条关键测试。")
 
       # 报告里引用的数字就在这两个日志里，所以**失败也要存**。
       - name: 存下 spike 的输出

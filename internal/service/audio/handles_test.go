@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -21,6 +22,12 @@ import (
 //
 // 第二样曾经漏过：解码器被 closingDecoder 包着，只把文件收了进去，播放照常、
 // fd 数也不涨，切到几百首才崩。下面两条分别盯住一样。
+//
+// ⚠️ **第二样只有 macOS 有**：AudioToolbox 是 macOS 那一层，Windows 上的
+// 解码器是 Media Foundation，它不往进程里挂这种句柄。而数 fd 的办法
+// （`/dev/fd`）在 Windows 上也没有——所以那边只剩「第一样」可盯，而它靠
+// 另一个办法数（Win32 的 `GetProcessHandleCount`），那是另一件事，不归
+// 这一票管。两条在 Windows 上都会**明确地跳过**，不是碰巧跳过。
 
 // TestOwnedClosesTheDecoderAndItsFile 盯解码器和文件都要关，而且顺序要对
 // （解码器关自己时还要用到底下的文件）。
@@ -52,8 +59,18 @@ func TestOwnedClosesTheDecoderAndItsFile(t *testing.T) {
 
 // TestOpenAnMP4ReleasesTheAudioToolboxHandle 走真实的 Open 路径：打开一个
 // .m4a、关掉，extaf 那边的字节源必须回到 0。
+//
+// ⚠️ **这条只管 macOS**：它数的是 **AudioToolbox 的句柄**
+// （AudioFileID / ExtAudioFileRef）——那是 macOS 那一层特有的东西，Windows
+// 上根本没有这一层（它走 Media Foundation），数不到东西。
+//
+// 素材用仓库自带的那份 `.m4a`（不是现造的）：CI 的 Windows runner 没有
+// afconvert，现造出来的东西在那边根本造不出来。
 func TestOpenAnMP4ReleasesTheAudioToolboxHandle(t *testing.T) {
-	path := makeAAC(t, "m4a")
+	if runtime.GOOS != "darwin" {
+		t.Skip("这条断的是 AudioToolbox 的句柄，只有 macOS 有这一层")
+	}
+	path := filepath.Join("mfadec", "testdata", "aaclc-stereo.m4a")
 
 	p, err := Open(path)
 	if err != nil {
@@ -72,11 +89,15 @@ func TestOpenAnMP4ReleasesTheAudioToolboxHandle(t *testing.T) {
 
 // TestSwitchingTracksLeaksNoFileHandles 盯文件描述符那一半：连着开合几十次
 // 之后，进程打开的 fd 数不许涨。
+//
+// ⚠️ **数 fd 的办法是这台机器上的**（`/dev/fd`），所以在 Windows 上这条会
+// 跳过——那里数 fd 要走 Win32 的 `GetProcessHandleCount`，那是另一件事，
+// 不归这一票管。
 func TestSwitchingTracksLeaksNoFileHandles(t *testing.T) {
-	path := makeAAC(t, "m4a")
+	path := filepath.Join("mfadec", "testdata", "aaclc-stereo.m4a")
 
-	// 先开一轮把系统的延迟分配（AudioToolbox 第一次调用会起后台线程、
-	// 打开它自己的文件）付掉，再开始数。
+	// 先开一轮把系统的延迟分配（解码器第一次调用会起后台线程、打开它自己的
+	// 文件）付掉，再开始数。
 	p, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
