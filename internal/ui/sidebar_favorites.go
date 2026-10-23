@@ -254,7 +254,13 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 	row := ui.Column(c).Key(favRowKey(g, f.ID)).Grow(1).Radius(6).Padding(6, 8)
 	switch {
 	case cur:
-		row = row.Background(t.Accent)
+		// 当前就在这一页：和侧栏菜单当前项**同一套**画法（`flatCurrent`——
+		// 淡主色底 + 深色字 / 中性灰底 + 主色字）。
+		//
+		// ⚠️ **原来这里是实心主色**（`Background(t.Accent)`）：那是审计 F-02 /
+		// F-06 点名的那一处——同一个屏上（关注页、动态流页）左栏是实心绿大块、
+		// 侧栏是淡底，两种画法并排，而实心那一块比主操作还响。
+		row = flatCurrent(c, row)
 	case row.Hovered():
 		// 悬停要有反应：这一行点得动（进收藏夹页），没有反馈的话用户
 		// 不知道它是能点的。Biu 那边是 MenuItem 自带的 hover。
@@ -298,12 +304,13 @@ func favRowKey(g app.FavoriteGroup, id int64) string {
 	return "fav-row:" + strconv.Itoa(int(g)) + ":" + strconv.FormatInt(id, 10)
 }
 
-// rowTextColor 是收藏夹那一行的字色：当前所在页用主色上的反色，其余用正文色。
+// rowTextColor 是收藏夹那一行的字色。
+//
+// ⚠️ **和 `flatCurrent` 配的是同一档**（`flatCurrentText`）：这一行的字是**自己
+// 画的**（不是从父元素继承），所以底换了字也得跟着换——深色下当前那一行是
+// 主色字，浅色下是正文色（主色压在浅底上读不出来，见 flatbutton.go 那一段）。
 func rowTextColor(t *ui.Theme, current bool) ui.Color {
-	if current {
-		return t.AccentText
-	}
-	return t.Text
+	return flatCurrentText(t, current)
 }
 
 // favoriteMenu 建这一行的系统原生右键菜单。

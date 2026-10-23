@@ -646,6 +646,25 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
+		// Windows 上没有 AudioToolbox，`extaf.Open` 恒返回 `ErrUnsupported`。
+		// 而「**平台没有解码器**」和「**这个文件解不了**」是两回事：只有前者
+		// 才落回 `flacdec`（`openDecoder`），后者照旧报错——落回会把真错盖成
+		// 「不像 FLAC」，而真错才是用户该看到的那句。
+		//
+		// ⚠️ 这一条是**注入**验的（`internal/service/audio/fallback_test.go` 把
+		// 「平台解码器」换成测试自己给的）：真 Windows 上 `extaf` 恒不可用，
+		// 而 macOS 上它恒可用——不注入的话，这条路径在**能跑测试的这个平台上**
+		// 一条都走不到。
+		Spec: "平台解码器不可用时落回 flacdec：MP4 里的 FLAC 仍能解出来（逐样本）；平台解码器可用时不落回；「平台没解码器」和「文件解不了」分得清",
+		Tests: []string{
+			"TestOpenDecoderFallsBackToFLACWhenThePlatformDecoderIsUnavailable",
+			"TestThePlatformDecoderIsUsedWhenItIsAvailable",
+			"TestOpenDecoderDoesNotFallBackWhenTheFileItselfIsBroken",
+			"TestOpenDecoderSaysBothWhenThePlatformIsUnavailableAndTheFileIsNotFLAC",
+		},
+	},
+	{
+		Category: Platform,
 		Spec:     "异步结果**逐窗口**唤醒（只叫醒主窗口的话迷你窗口停在旧内容）",
 		Tests: []string{
 			"TestEveryWindowThatDrewItGetsWoken", "TestEveryWindowGetsWoken",
@@ -2169,7 +2188,7 @@ var Items = []Item{
 		// （上游那几页的首屏，见 `internal/ui/loading.go` 的文件头）。所以这一条
 		// 里关于加载态的两句都改了：不再是「同一个格子」，而是「同一枚转圈 +
 		// 40vh 那一格」。
-		Spec: "页面节奏：七页的横向页边距是同一个数、页标题是同一个字号（收藏夹那一页的大标题另算，是 30）；主 Tab 与次级排序不是同一个样子；搜索页的输入框里有当前关键词（且切页回来不覆盖用户正在敲的字）；「加载中」在每一页上都是**同一枚居中的转圈**（32，落在 40vh 那一格的正中），而它和「没有结果」是**两档**（转圈 vs 插画 + 两行字）；没登录时那一页说「先登录」而不摆空列表；小字的行高是定好的；搜索联想浮层里命中的那几个字被标出来",
+		Spec: "页面节奏：七页的横向页边距是同一个数、页标题是同一个字号（收藏夹那一页的大标题另算，是 30）；主 Tab 与次级排序不是同一个样子；搜索页**没有页内输入框**，当前关键词显示在**顶栏**那个框里（且切页回来不覆盖用户正在敲的字）；「加载中」在每一页上都是**同一枚居中的转圈**（32，落在 40vh 那一格的正中），而它和「没有结果」是**两档**（转圈 vs 插画 + 两行字）；没登录时那一页说「先登录」而不摆空列表；小字的行高是定好的；搜索联想浮层里命中的那几个字被标出来",
 		Tests: []string{
 			// 页边距（七页逐页量内容区最靠左的那一笔）+ 页标题（代码里同一个常量，
 			// 画面上墨迹一样宽）。
@@ -2402,6 +2421,32 @@ var Items = []Item{
 			"TestTheVolumePopoverMatchesTheUpstreamSizes",
 			// 两枚入口不是同一张图。
 			"TestThePlaylistKeyAndThePartKeyAreDifferentGlyphs",
+		},
+	},
+	{
+		// 归「双平台」那一组：这一票动的是**「当前在哪」的画法**、搜索页的减法、
+		// 满屏顶栏那一组的构图。
+		//
+		// 🔴 **这一族的错法全是「静默」的**：左栏当前项是一块实心主色大块、齿轮
+		// 浮在窗口中间、搜索页摆着第二个输入框——**没有一样会报错**，界面只是
+		// 「不太对」。而「同一屏上两种画法」那一类，用户不用比较两个界面就能看出
+		// 这个应用没做完。
+		Category: Platform,
+		// 票 #234（审计 F-01 / F-02 / F-03 / F-06 + UX B1 / B2）：视觉一致性第一批。
+		Spec: "「当前在哪」在应用里只有**一种底色**：侧栏菜单当前项、侧栏收藏夹当前项、关注页分组当前项、动态页作者栏当前项、队列抽屉「正在播放」那一行，五处的**底**都是 flat 那一档（淡主色底 / 中性灰底），**没有实心主色大块**；**字**分两档：左栏那四处是正文色（深色下是主色字），队列抽屉那一行是**主色当字**（`ink.AccentOn`，和列表行「正在播放」那一档同一个数）；搜索页**没有页内输入框**，也没有「搜索」那一行标题，顶上第一行就是「搜索【词】的结果」（24/400），当前搜的词显示在**顶栏**那个框里（填上去的那个词，用户点进去敲字是**替换**不是追加；在搜索页上按那枚「清空」清掉的是这一场搜索，不只是框里那几个字）；满屏播放器顶栏的设置齿轮**紧跟在歌名后面**（上游那一组的构图），不是浮在窗口中间",
+		Tests: []string{
+			// 五处「当前在哪」是同一个底色配方（深浅两套都量，底色和字色都量）。
+			"TestTheCurrentItemIsFlatEverywhere",
+			// 搜索页的减法，以及顶栏那个框显示当前关键词。
+			"TestTheSearchPageHasOneTitleAndNoSecondSearchBox",
+			"TestTheSearchPageShowsTheCurrentKeyword",
+			// 顶栏那个框的三个行为：填上去的词敲字是替换、「清空」清掉这一场搜索、
+			// 空词回车回到「还没输入」那一支。
+			"TestTheFilledSearchBoxReplacesItsWordWhenYouType",
+			"TestClearingTheSearchBoxOnTheSearchPageClearsTheResults",
+			"TestAnEmptySearchGoesBackToTheIdleState",
+			// 满屏顶栏那一组的构图（齿轮紧跟歌名）。
+			"TestTheFullPlayerGearSitsRightAfterTheTitle",
 		},
 	},
 }

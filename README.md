@@ -75,10 +75,10 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 | 边界 | 说明 |
 |---|---|
 | **本地音乐不支持 WMA** | **明确的功能缺口。** Biu 的本地扫描白名单里有 `.wma`，本项目解不了它（还没有能用的纯 Go WMA 解码器）。扫到 `.wma` 会列出来但**播不了**——页面顶上会明写「这个目录里有我们还放不出的格式（.wma），它们会列出来但放不了。」，行里的作者那一格也写着「这个格式我们放不了」，不会让人以为文件坏了。这条是「决定还没做，但当前边界清楚」，不是「没排期」。将来要不要做还没拍板。 |
-| **Windows 上解不了 AAC / ALAC / M4A / M4S** | 也就是 B 站的有损音质（`dash.audio`，最高 192K）那一档，以及所有 `.m4a` / `.m4s` / `.mp4`。这些格式走 macOS 自带的 AudioToolbox，**Windows 上没有对应的解码器**。这是一条**还没决定的路线选择**（走系统 MediaFoundation，还是换一个纯 Go 解码器），不是「来不及做」。⚠️ 后果要说明白：Windows 版目前只能播无损 FLAC、MP3、WAV、AIFF。 |
+| **Windows 上解不了 AAC / ALAC** | 也就是 B 站的有损音质（`dash.audio`，最高 192K）那一档，以及 `.m4a` / `.m4s` / `.mp4` 里装的**有损**音轨。这些走 macOS 自带的 AudioToolbox，**Windows 上没有对应的解码器**。这是一条**还没决定的路线选择**（走系统 MediaFoundation，还是换一个纯 Go 解码器），不是「来不及做」。⚠️ 后果要说明白：Windows 版目前只能播无损 FLAC、MP3、WAV、AIFF——**MP4 容器里的 FLAC 也算**（那档落回本仓库的 `flacdec`，不依赖系统解码器）。 |
 | **杜比音轨不能手动选** | 杜比全景声（`30250`）没有放进设置里的音质档位（只有 自动 / 无损 / 192K / 128K / 64K）。自动档在 B 站只给杜比时会取它，能不能解出取决于系统解码器。 |
 | **AIFF 只认未压缩的 PCM** | `internal/service/audio/aiff.go` 是本项目自己写的，只解未压缩的 PCM。AIFF 容器里的压缩编码（MAC3/IMA4 等）解不了。 |
-| **FLAC 解码器在本仓库里** | 裸 FLAC 走 `internal/service/audio/flacdec`（纯 Go，已逐样本验证）；**MP4 容器里的 FLAC 走系统解码器**（因为那条路是按容器认的）。 |
+| **FLAC 解码器在本仓库里** | 裸 FLAC 走 `internal/service/audio/flacdec`（纯 Go，已逐样本验证）；**MP4 容器里的 FLAC 在 macOS 上走系统解码器**（那条路是按容器认的），**在 Windows 上落回 `flacdec`**（那里没有系统解码器）。 |
 
 ### 登录
 
@@ -153,7 +153,7 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 
 ---
 
-## 支持哪些格式（macOS）
+## 支持哪些格式
 
 认容器的是**头几个字节**，不是扩展名——本地文件和 B 站在线流走的是同一个
 `openDecoder`（`internal/service/audio/player.go`）。
@@ -161,7 +161,7 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 | 容器 | 谁在解 | 备注 |
 |---|---|---|
 | 裸 FLAC（`.flac`） | `internal/service/audio/flacdec` | 自带解码器，已逐样本验证 |
-| MP4 家族（`.m4a` / `.m4s` / `.mp4`） | `internal/service/audio/extaf` | 走 macOS AudioToolbox；**MP4 里的 FLAC 也走这里**。⚠️ **Windows 上解不了** |
+| MP4 家族（`.m4a` / `.m4s` / `.mp4`） | `internal/service/audio/extaf` | 走 macOS AudioToolbox；**MP4 里的 FLAC 在 macOS 上也走这里**。⚠️ **Windows 上 AAC / ALAC 解不了**，而 **MP4 里的 FLAC 落回 `flacdec`** |
 | 裸 ADTS（`.aac`） | 同上 | 没有容器，头两字节就是同步字。⚠️ **Windows 上解不了** |
 | MP3 | `mygo/audio/mp3` | MyGo 自带，两个平台都能解 |
 | AIFF / AIFC | `internal/service/audio/aiff.go` | 本项目写的，只认未压缩的 PCM |
@@ -170,8 +170,11 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 注册表认不出来、而头几个字节是 `fLaC` 的，落回 `flacdec`——B 站的无损流就是
 裸 FLAC，而 MyGo 的表是对字面量做匹配的，给变长的 magic 注册不了。
 
-**Windows 上只有 MP3 / WAV / FLAC / AIFF 这四行能用**（后三行是纯 Go 的，
-不依赖系统解码器）。
+**这个平台没有系统解码器时**（Windows），认得出容器的也落回 `flacdec`——
+`flacdec` 能解 MP4 里的 FLAC，于是 B 站无损流在 Windows 上照样放得出来。
+
+**Windows 上 MP3 / WAV / FLAC / AIFF 和 MP4 里的 FLAC 能用**（除了 MP4 家族里
+的 AAC / ALAC，其余都不依赖系统解码器）。
 
 FLAC 解码器是 t-0017 验证过的实现，本仓库里带着它的 64 项测试和测试素材
 （`internal/service/audio/flacdec/`）。搬进来时只改了 import 路径，代码逐字未动。

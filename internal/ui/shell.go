@@ -89,19 +89,6 @@ type Shell struct {
 	scrollbarHot    bool
 	scrollbarHotNow bool
 
-	// searchDraft 是搜索框里正在敲的字。放在壳上而不是页面的局部变量：即时模式
-	// 每一帧都重画一遍，局部变量下一帧就没了（只有 view 里显式声明并被元素
-	// 认下的状态才留得住）。
-	searchDraft string
-	// searchDraftFor 是「`searchDraft` 是从哪个关键词填上去的」。
-	//
-	// ⚠️ **它是「切页回来时不覆盖用户正在敲的字」那一条的判据**（票 #138）：
-	// 草稿挂在壳上，所以它跨页活着——而路由上的关键词换了的时候，草稿里那个
-	// 就是上一个词留下的旧东西（用户从顶栏搜了另一个词，这一页的框里却还是
-	// 上一个词）。判据是「草稿是从哪个词填上去的」：路由上的词没变 → 草稿是
-	// 用户自己的（哪怕已经被他改得面目全非），不动；变了 → 换掉。
-	searchDraftFor string
-
 	// laterPage / historyPage 是「稍后再看」和「历史记录」这两页各自的状态
 	// （见 librarypage.go）。挂在壳上而不是页面的局部变量，理由同上。
 	laterPage   libraryPage
@@ -338,9 +325,34 @@ type Shell struct {
 	// ⚠️ 叫 searchKeyword 不叫 searchQuery：包级已经有一个 `searchQuery` 了
 	//（searchpage.go 的「URL 里搜索词那个键」，值是 "q"），两样东西没有关系，
 	// 同名却不同义最容易读错。
+	//
+	// ⚠️ **它挂在壳上而不是每帧的局部变量**：即时模式每一帧都重画一遍，局部变量
+	// 下一帧就没了（只有 view 里显式声明并被元素认下的状态才留得住）。壳上
+	// 好几处状态都是同一个理由（设置页那一摊、日期范围那个弹层……）。
 	searchKeyword string
-	searchSuggest bool
-	searchFocused bool
+	// searchKeywordFor 是「`searchKeyword` 是从哪个关键词填上去的」。
+	//
+	// ⚠️ **它是「不覆盖用户正在敲的字」那一条的判据**：框里那个字挂在壳上，
+	// 所以它跨页活着——而路由上的关键词换了的时候，框里那个就是上一个词留下的
+	// 旧东西（用户搜了另一个词，框里却还是上一个词）。判据是「框里那个字是从
+	// 哪个词填上去的」：路由上的词没变 → 框里的是用户自己的（哪怕已经被他改
+	// 得面目全非、或者删干净了），不动；变了 → 换掉。
+	//
+	// 页内那个输入框 2026-10-22 拍板删了之后，这一对是**顶栏那个框**和路由上
+	// 的关键词之间的关系（见 navbar_search.go 的 `syncSearchKeyword`）。
+	searchKeywordFor string
+	// searchKeywordFilled 是「框里那个词是**填上去的**，不是用户自己敲的」。
+	//
+	// 填上去的那一种（深链接进来的 /search?q=…、翻到另一条历史）有个陷阱：用户
+	// 点进框里敲一个字，期望的是「就搜这个字」，而实际得到的是「旧词 + 新字」。
+	// 所以用户刚拿到焦点的时候把整个词选上（见 navbar_search.go 的
+	// `viewSearchBox`）——接着敲的字就把它盖掉了。
+	//
+	// ⚠️ **用户自己敲的词不许全选**：他在框里敲到一半要改，替他全选上等于把他
+	// 敲的字吃掉。
+	searchKeywordFilled bool
+	searchSuggest       bool
+	searchFocused       bool
 	// tips 是带延迟的悬停提示的状态（tooltip.go），按元素 ID 记。
 	// **只由界面线程读写**，和上面那几位同一条规矩。
 	tips map[uint64]*tipState

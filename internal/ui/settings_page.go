@@ -39,7 +39,7 @@ const settingsPath = "/settings"
 // settingsPageState 是设置页自己那一摊，**只由 view 在主线程上读写**。
 type settingsPageState struct {
 	// tab 是切在第几个 Tab。建在 Shell 上而不是每帧的局部变量：即时模式每一帧
-	// 都重画一遍，局部变量下一帧就没了（见 Shell.searchDraft 的注释）。
+	// 都重画一遍，局部变量下一帧就没了（见 Shell.searchKeyword 的注释）。
 	tab int
 
 	// scroll 是这一页的滚动位置。按 Tab 时回到顶上——Biu 的 Tabs 换了面板就是

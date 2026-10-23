@@ -137,10 +137,34 @@ func flatIconCellButton(c *ui.Context, name, label string, font, cell float32) u
 // 反馈层按悬停 / 按下决定。
 func flatCurrent(c *ui.Context, e ui.Element) ui.Element {
 	t := c.Theme()
+	return e.Background(flatCurrentBg(t)).TextColor(flatCurrentText(t, true))
+}
+
+// flatCurrentBg 是 flatCurrent 那一层**底色**。
+//
+// 浅色那一档是**半透明**的（主色 14%）——屏幕上的数是它合到身下那块底板之后的
+// 结果，所以断言那一格的颜色时得先知道底板是谁（见 `currentitem_test.go`）。
+func flatCurrentBg(t *ui.Theme) ui.Color {
 	if t.Dark {
-		return e.Background(flatSelected(t)).TextColor(t.Accent)
+		return flatSelected(t)
 	}
-	return e.Background(t.Accent.Alpha(0.14))
+	return t.Accent.Alpha(0.14)
+}
+
+// flatCurrentText 是 flatCurrent 配的那一档**字色**。
+//
+// 之所以单列一个函数：有些地方的字是**自己画**的（不是从父元素继承）——
+// 收藏夹那一行的歌名就是（`sidebar_favorites.go` 的 `rowTextColor`）。那几处
+// 必须和这一档**同一个数**，否则「底换了、字没换」——浅色下就是一行绿底上的
+// 深色字和别处的主色字，深色下则是绿底上的黑字。
+//
+// ⚠️ **浅色那一支是正文色，不是主色**：主色（亮绿）压在浅底上不到 2:1，
+// 当字色等于把这一行读不出来（见上面那一大段）。
+func flatCurrentText(t *ui.Theme, current bool) ui.Color {
+	if current && t.Dark {
+		return t.Accent
+	}
+	return t.Text
 }
 
 // flatSolid 是「这一项正选中」的**另一种**画法：一块**实心主色**，字取

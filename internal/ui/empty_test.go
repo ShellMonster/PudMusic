@@ -163,7 +163,11 @@ func TestSearchingShowsTheNoResultsState(t *testing.T) {
 	}
 
 	// 点进搜索框，敲字 + 回车 → 到了「搜了没有结果」那一支。走的全是真实输入。
-	box, ok := tt.Find("搜索歌名或 UP 主")
+	//
+	// ⚠️ **框是顶栏那一个**（票 #234）：页内那个 420 宽的输入框 2026-10-22 拍板
+	// 删了（`DESIGN.md` §十.1），改词回顶栏——所以「用户能进入这个场景」这条路
+	// 走的也是顶栏。
+	box, ok := tt.Find(searchLabel)
 	if !ok {
 		t.Fatalf("搜索框没画出来，文字有 %q", tt.Texts())
 	}

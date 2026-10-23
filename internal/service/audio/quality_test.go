@@ -265,7 +265,8 @@ func TestContentDecidesTheContainerNotTheFileName(t *testing.T) {
 // WAV 本身就是参考。
 //
 // 两种容器都要断，因为它们走的**不是同一个解码器**：裸 FLAC 认不出来、
-// 落回 flacdec；MP4 里的 FLAC 认成 MP4、走系统解码器。B 站的无损流是哪一种
+// 落回 flacdec；MP4 里的 FLAC 在 macOS 上认成 MP4、走系统解码器，在**没有
+// 系统解码器**的平台上（Windows）落回 flacdec。B 站的无损流是哪一种
 // 没有实测过（要大会员），所以两种都得是逐位准的。
 //
 // 先断素材的左右声道不同：这两个声道是不同信号，接错了才测得出来。
@@ -282,9 +283,16 @@ func TestLosslessFLACFromTheStreamIsSampleForSample(t *testing.T) {
 		want[i] = expect(v, src.bits)
 	}
 
+	// MP4 里的 FLAC 走哪条路**要看平台**：macOS 上系统解码器（AudioToolbox）
+	// 能用，走它（容器名 mp4）；其它平台上没有系统解码器，`openDecoder`
+	// 落回 `flacdec`（容器名 flac）。这一条断言的就是这个分派。
+	wantMP4 := "mp4"
+	if runtime.GOOS != "darwin" {
+		wantMP4 = "flac"
+	}
 	for _, c := range []struct{ file, wantDecoder string }{
 		{"stereo16.flac", "flac"},
-		{"stereo16.mp4", "mp4"},
+		{"stereo16.mp4", wantMP4},
 	} {
 		t.Run(c.file, func(t *testing.T) {
 			d, name, err := openDecoder(newOnlineSource(t, newByteCDN(t, fixture(t, c.file))))

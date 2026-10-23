@@ -17,6 +17,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/service/audio/extaf"
 	"github.com/ShellMonster/Biu_Go/internal/service/audio/flacdec"
 	mygoaudio "github.com/egoist/mygo/audio"
 
@@ -121,12 +122,23 @@ func OpenStream(r CloserReadSeeker) (*Player, error) {
 // openDecoder 是**唯一**认容器的地方：`Open`（本地文件）和 `OpenStream`
 //（在线流）都调它。返回值第二项是认出来的容器名，只作记录和给测试看。
 //
-// 两步，顺序不能反过来：
+// 三步，顺序不能反过来：
 //
 //  1. MyGo 的格式表（`containers.go` 注册的 `????ftyp` / `????styp` / `\xff??`，
 //     加上 MP3 / WAV / AIFF 各自包的注册副作用）。
-//  2. 认不出来就试 `flacdec`——B 站的无损流是**裸 FLAC**，而 MyGo 的表是对
-//     字面量做匹配的，没法给变长的 magic（`fLaC` + STREAMINFO）注册一条。
+//  2. 认不出来（`ErrFormat`）就试 `flacdec`——B 站的无损流是**裸 FLAC**，
+//     而 MyGo 的表是对字面量做匹配的，没法给变长的 magic（`fLaC` +
+//     STREAMINFO）注册一条。
+//  3. **平台解码器不可用**（`extaf.ErrUnsupported`）也试 `flacdec`——
+//     Windows 上没有 AudioToolbox，而 `flacdec` 能解 MP4 里的 FLAC
+//     （`flacdec/mp4.go`：B 站无损流的那种形状）。不落回的话，Windows 上
+//     B 站在线音频**一档都放不出来**：MP4 家族先被格式表认成 mp4，交给
+//     `extaf` 拿到 `ErrUnsupported`，而 `ErrUnsupported` 不是 `ErrFormat`，
+//     于是这里就直接返回错误了。
+//
+// ⚠️ **只有「平台没有解码器」才落回。** `extaf` 报别的错（文件坏了、
+// AudioToolbox 打不开）时**不落回**：那是「这个文件解不了」，落回只会把它
+// 说成「不像 FLAC」，把真错盖掉——而真错才是用户该看到的那句。
 //
 // 反过来的话，MP4 里的 FLAC（头几个字节是 `ftyp`）会被 flacdec 当裸 FLAC 处理。
 func openDecoder(r io.ReadSeeker) (mygoaudio.Decoder, string, error) {
@@ -134,7 +146,7 @@ func openDecoder(r io.ReadSeeker) (mygoaudio.Decoder, string, error) {
 	if err == nil {
 		return d, name, nil
 	}
-	if !errors.Is(err, mygoaudio.ErrFormat) {
+	if !errors.Is(err, mygoaudio.ErrFormat) && !errors.Is(err, extaf.ErrUnsupported) {
 		return nil, "", err
 	}
 	fd, ferr := flacdec.Open(r)
@@ -142,6 +154,12 @@ func openDecoder(r io.ReadSeeker) (mygoaudio.Decoder, string, error) {
 		// 两个都不认：报告**第一个**错。那是「走完全套格式表都没认出来」，
 		// 比 flacdec 的那句「不像 FLAC」有用得多——后者会让人以为
 		// 文件损坏，而它可能只是一段还没下到的字节。
+		if errors.Is(err, extaf.ErrUnsupported) {
+			// ⚠️ 这一条要**两句**一起报：「这台机器没有系统解码器」和
+			// 「这也不像 FLAC」。只报一句的话，界面上会出现「文件坏了」这种
+			// **其实不是**的提示——那会把人引到完全错的方向上去查。
+			return nil, "", fmt.Errorf("%w: %w", extaf.ErrUnsupported, ferr)
+		}
 		return nil, "", err
 	}
 	return fd, "flac", nil
