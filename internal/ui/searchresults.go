@@ -93,8 +93,12 @@ const searchUserItemType = app.ItemTypeUser
 // errSearchNotMounted 是「还没挂上 B 站客户端」。
 //
 // 只在没走过 `MountLogin` 时出现（生产上 `main.go` 一定先挂），测试里不挂就是
-// 这一条。说清楚是「没接上」而不是「网络不通」，两种要办的事完全不一样。
-var errSearchNotMounted = errors.New("搜索还没接上 B 站客户端")
+// 这一条。
+//
+// ⚠️ **这句是给用户看的，不许说「客户端」「接口」**（票 #242，UX 报告 §3-F 的
+// F2）：用户不知道应用内部有没有挂上什么客户端，他只知道「搜不出来」。说成
+// 「网络不通」也不对——那会让用户去查自己的网，而实际上是他这个应用少了一块。
+var errSearchNotMounted = errors.New("搜索暂时用不了")
 
 // searchState 是搜索页记得的全部东西，一个窗口一份。
 //
@@ -454,7 +458,7 @@ func (s *Shell) searchUserActions() list.Actions {
 		},
 		// 「下一首播放」照实说一句为什么不**能用**：菜单是列表和网格共用的一份
 		// （`widgets/list` 的 menuItems），这一项在用户 Tab 照样摆着。给 nil
-		// 的话它会落到那句「还没接上」——而它其实早接上了（UP 主确实不是歌，
+		// 的话它会落到那句「现在还不能用」——而它其实早接上了（UP 主确实不是歌，
 		// 和上面两项是同一个理由）。
 		PlayNext: func(app.Item) {
 			s.addToast("UP 主不是歌，没有东西可排；进他的空间听他的歌", notice.Warning)
@@ -470,7 +474,7 @@ func (s *Shell) searchUserActions() list.Actions {
 			}
 		},
 		// ⚠️ 收藏 / 下载这两项**给的不是 nil**：给 nil 的话 `doAction` 会说
-		// 「还没接 B 站接口」——那是一句假话（接口早就在了），而用户会以为这
+		// 「现在还不能用」——那是一句假话（接口早就在了），而用户会以为这
 		// 个应用还没做完。UP 主不是歌，这两句是真的。
 		FavSelect: func(app.Item) {
 			s.addToast("UP 主不是歌，没有东西可收藏；进他的空间收藏他的歌", notice.Warning)

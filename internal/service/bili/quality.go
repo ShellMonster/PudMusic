@@ -286,10 +286,20 @@ type dashInfo struct {
 	Duration float64       `json:"duration"`
 	Video    []dashVideo   `json:"video"`
 	Audio    []audioStream `json:"audio"`
-	Flac     *struct {
+	// Flac 是**无损那一档**，它独立于 `Audio`（`dash.audio` 里根本不含 FLAC）。
+	//
+	// ⚠️ **实测形状（2026-10-23，issue #252）**：这一段里的流是
+	// **MP4 盒里的 FLAC**——`codecs` 是 `"fLaC"`（**首字母大写**），
+	// `mimeType` 是 `"audio/mp4"`，`id` 是 **30251**，而地址是 `.m4s`。
+	// **不是裸 FLAC**：头 16 字节是 `ftyp` 盒。素材见 `testdata/lossless/`。
+	Flac *struct {
 		Display bool         `json:"display"`
 		Audio   *audioStream `json:"audio"`
 	} `json:"flac"`
+	// Dolby 是杜比全景声那一档。
+	//
+	// ⚠️ **实测形状（同上）**：`codecs` 是 `"ec-3"`，`id` 是 **30250**，
+	// 容器也是 MP4 盒。
 	Dolby *struct {
 		Type  int           `json:"type"`
 		Audio []audioStream `json:"audio"`

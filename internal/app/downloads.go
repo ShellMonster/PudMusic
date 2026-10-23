@@ -34,7 +34,10 @@ import (
 )
 
 // errDownloadsMissing 是「下载没挂上」。见 `DownloadMounted`。
-var errDownloadsMissing = errors.New("下载还没接上")
+//
+// ⚠️ **这句是给用户看的**（下载失败时它就是失败原因），不许说「还没接上」
+// （票 #242，UX 报告 §3-F 的 F2）：用户不知道应用里哪一块没挂上。
+var errDownloadsMissing = errors.New("下载暂时用不了")
 
 // Downloads 是下载这一摊的依赖。
 type Downloads struct {
@@ -327,6 +330,11 @@ func (a *App) resolveDownload(ctx context.Context, want download.Identity) (*dow
 		// ⚠️ `ref.Container` 只作记录、播放那一侧不用它选解码器
 		// （`bili.StreamRef.Container` 的注释），但**落盘文件名**用它是对的：
 		// 它记的就是这一段字节的容器，而文件后缀要说的正是这件事。
+		//
+		// ⚠️ B 站投稿那一路**一律**是 `mp4`——**包括无损那条**：实测它就是
+		// MP4 盒里的 FLAC（2026-10-23，issue #252，见
+		// `internal/service/bili/testdata/lossless/`），所以无损下下来是
+		// `.m4a`，不是 `.flac`——而那是对的，后缀说的是容器。
 		Ext: extOfContainer(ref.Container),
 	}, nil
 }

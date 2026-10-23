@@ -1,0 +1,40 @@
+{
+  "audio": [
+    {
+      "bandwidth": 124129,
+      "baseUrl": "xy112x17x39x6xy.mcdn.bilivideo.cn:8082/v1/resource/upgcxcode/94/68/1361516894/1361516894-1-30232.m4s",
+      "codecs": "mp4a.40.2",
+      "id": 30232,
+      "mimeType": "audio/mp4"
+    },
+    {
+      "bandwidth": 238483,
+      "baseUrl": "xy39x184x180x143xy.mcdn.bilivideo.cn:8082/v1/resource/upgcxcode/94/68/1361516894/1361516894-1-30280.m4s",
+      "codecs": "mp4a.40.2",
+      "id": 30280,
+      "mimeType": "audio/mp4"
+    },
+    {
+      "bandwidth": 55233,
+      "baseUrl": "xy223x109x234x76xy.mcdn.bilivideo.cn:8082/v1/resource/upgcxcode/94/68/1361516894/1361516894-1-30216.m4s",
+      "codecs": "mp4a.40.5",
+      "id": 30216,
+      "mimeType": "audio/mp4"
+    }
+  ],
+  "dolby": {
+    "audio": null,
+    "type": 0
+  },
+  "duration": 225,
+  "flac": {
+    "audio": {
+      "bandwidth": 1541569,
+      "baseUrl": "cn-zjhz-cm-01-08.bilivideo.com/upgcxcode/94/68/1361516894/1361516894-1-30251.m4s",
+      "codecs": "fLaC",
+      "id": 30251,
+      "mimeType": "audio/mp4"
+    },
+    "display": true
+  }
+}

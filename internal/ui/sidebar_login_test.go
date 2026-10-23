@@ -115,3 +115,30 @@ func TestTheSidebarKeepsQuietWhenTheUserHidThoseEntriesThemselves(t *testing.T) 
 		t.Fatalf("连没藏的那些也不摆了，文字有 %q", tt.Texts())
 	}
 }
+
+// TestTheLoggedOutHintIsAWayIntoTheLoginPage 钉住「登录后可见」那一句**点得动**。
+//
+// # 为什么这一条要紧
+//
+// 原来它是一句纯文字：它解释了「侧栏上少了三行」，却**没给下一步**——用户读完
+// 只能自己去顶栏找那枚**没有文字**的图标（UX 报告 §3-A 的 A1，高）。
+//
+// 判据是**点下去之后落在哪一页**：光断言「画面上有这句话」的话，把那句换成一枚
+// 死物也照样绿。
+func TestTheLoggedOutHintIsAWayIntoTheLoginPage(t *testing.T) {
+	s, tt := newShell(t)
+	tt.Frame()
+
+	hint := loggedOutHint(len(loginOnlyTitles()))
+	if !tt.HasText(hint) {
+		t.Fatalf("侧栏上没有那句 %q，文字有 %q", hint, tt.Texts())
+	}
+	if err := tt.Click(hint); err != nil {
+		t.Fatalf("点不了那句 %q：%v", hint, err)
+	}
+	tt.Frame()
+
+	if got := s.router.Path(); got != loginPath {
+		t.Errorf("点了那句提示之后在 %q，want %q（扫码登录那一页）", got, loginPath)
+	}
+}

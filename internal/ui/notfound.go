@@ -2,10 +2,11 @@
 //
 // Biu 的 `src/pages/not-found/index.tsx` 就是一个 `<Empty />` 加一个从 3 数到
 // 0 的倒计时（`useState(3)` + 每秒 `useInterval(…, 1000)` 减 1），到 0 跳 `/`。
-// 当前 HEAD 上倒计时那一行已经没人渲染了——`<Empty />` 没传 title，落回共享
-// 默认的 `暂无内容`，于是这一页在屏幕上没有任何地方说要回首页，但代码确实还在
-// 跳。文案用上游删掉之前那一版（a6c48e1）的 `{count} 秒后回到主页...`：三个
-// 是 ASCII 的点，不是 `…`，别顺手改成省略号。
+// 我们这一页比上游多两样：**说清楚是哪条路径不存在**（上游只知道「没匹配上」），
+// 和**一枚立刻能按的「回到主页」**（上游只有那个倒计时，见 viewNotFound）。
+//
+// 倒计时那一行的文案用上游删掉之前那一版（a6c48e1）的 `{count} 秒后回到主页...`：
+// 三个是 ASCII 的点，不是 `…`，别顺手改成省略号。
 package ui
 
 import (
@@ -103,9 +104,21 @@ func (s *Shell) notFoundLeft() int {
 
 // viewNotFound 是 404 页。
 //
-// 三行：哪一页不存在（就是刚才敲进去的那个路径）、上游那句空状态、还剩几秒
-// 回首页。第一行是这里唯一非上游的字：上游那一页只知道「没匹配上」，不知道
-// 用户敲的是什么，404 不说清楚是哪一条就不成立。
+// 四样：哪一页不存在（就是刚才敲进去的那个路径）、上游那句空状态、还剩几秒
+// 回首页、以及**一枚立刻能按的「回到主页」**。第一行是这里唯一非上游的字：上游
+// 那一页只知道「没匹配上」，不知道用户敲的是什么，404 不说清楚是哪一条就不成立。
+//
+// # 为什么多一枚按钮（票 #242，UX 报告 §3-A 的 A4）
+//
+// 原来这一页**只有一条出路**：等 3 秒自动跳首页。而 404 一般是**用户点错了链接**
+// ——他多半想去别的页，不是主页。于是那个倒计时把他**丢到主页**，他刚才想找的
+// 东西没了；而如果那个钟没推进（框架的钟在某些路径下站着不动），他就**永远停
+// 在这一页**——页面上又没有按钮可以自救。
+//
+// 现在倒计时照旧走（上游那个行为不改），但**多一条立刻能走的路**。
+//
+// ⚠️ **按下去要先把倒计时收掉**：不收的话，那一秒恰好跨过 3 秒的话，倒计时会
+// 在用户已经回首页之后**再把他拽一次**（虽然拽去的还是首页，但那是第二次跳转）。
 func (s *Shell) viewNotFound(c *ui.Context, path string) {
 	// 和其它页面 view 一样，头一件正事是装主题（铁律二，见 viewEmpty）。
 	s.applyFrameTheme(c)
@@ -114,8 +127,15 @@ func (s *Shell) viewNotFound(c *ui.Context, path string) {
 	ui.Column(c).Key("page:not-found").Grow(1).Center().Gap(8).Padding(20, 28).
 		Children(func() {
 			ui.Text(c, "404").FontSize(scale.Font(c, 28)).Bold().TextColor(t.TextMuted)
-			ui.Text(c, "没有「"+path+"」这一页").FontSize(scale.Font(c, 15))
+			// ⚠️ **限宽**：路径是用户敲进来的，长度不封顶——不限宽的话一条长
+			// 路径会把这一行撑出窗口，而 404 这一页上又没有别的东西能提示
+			// 「刚才敲的那一长串是个地址」。
+			ui.Text(c, "没有「"+path+"」这一页").FontSize(scale.Font(c, 15)).MaxWidth(520)
 			ui.Text(c, notFoundCountdown(s.notFoundLeft())).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+			if ui.PrimaryButton(c, "回到主页").Clicked() {
+				s.disarmNotFound()
+				s.navigate("/")
+			}
 		})
 }
 
