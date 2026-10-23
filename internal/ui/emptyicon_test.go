@@ -90,7 +90,10 @@ func TestTheIllustrationIsActuallyPainted(t *testing.T) {
 		{"推荐音乐", "/", lookup("/").Empty.Title},
 		{"稍后再看", laterPath, lookup(laterPath).Empty.Title},
 		{"历史记录", historyPath, lookup(historyPath).Empty.Title},
-		{"下载记录", downloadListPath, lookup(downloadListPath).Empty.Title},
+		// ⚠️ **下载记录页画的是「没有下载目录」那一支**：这一组的外壳没挂下载
+		// （`DownloadDir()` 是空串），而没有目录时那一格说的是「去设置里选一
+		// 个」而不是「搜一首歌」（报告 F3）。两支的插画是同一枚。
+		{"下载记录", downloadListPath, noDownloadDir.Title},
 	} {
 		for _, dark := range []bool{false, true} {
 			name := "浅色"
@@ -124,10 +127,12 @@ func TestTheIllustrationIsFollowedByTheCopy(t *testing.T) {
 	s.navigate("/download-list")
 	tt.Frame()
 
-	rt := lookup(downloadListPath)
-	title := rt.Empty.Title
-	if rt.Empty.Icon == "" {
-		t.Fatalf("下载记录的空状态没有配图标（%v）", rt.Empty)
+	// ⚠️ **这一页有两种空**：没有下载目录（这一支画的是它）和真的没下载过。
+	// 这一组的外壳没挂下载，所以画出来的是前者（报告 F3）。
+	e := noDownloadDir
+	title := e.Title
+	if e.Icon == "" {
+		t.Fatalf("下载记录的空状态没有配图标（%v）", e)
 	}
 	tr, ok := tt.Find(title)
 	if !ok {
