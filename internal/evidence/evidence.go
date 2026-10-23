@@ -736,7 +736,7 @@ var Items = []Item{
 		// Windows 走 Media Foundation（FLAC 那一档落回 `flacdec`）。而 E-AC-3
 		// 那一档在 Windows 上是**划掉**的（授权限制 + Win11 24H2 移除了系统
 		// 自带的 AC-3 解码器），在 macOS 上 AudioToolbox 却解得了。
-		Spec: "B 站五档音质（64K / 128K / 192K / 杜比全景声 / Hi-Res 无损）在当前平台上逐档真解一遍，解不出来的把原因记下来",
+		Spec:  "B 站五档音质（64K / 128K / 192K / 杜比全景声 / Hi-Res 无损）在当前平台上逐档真解一遍，解不出来的把原因记下来",
 		Tests: []string{"TestTheBilibiliQualityCoverage"},
 	},
 	{
@@ -2662,8 +2662,17 @@ var Items = []Item{
 			// 三处分段控件的**选中档**底色都是实心主色、**没选中的那一档**都是
 			// 页面底色（深浅两套）。
 			"TestTheSettingsPageHasOnlyOneSegmentedControl",
-			// 说明列的宽（900 / 870 / 1200 三档窗口）与控件列让位。
+			// 说明列的宽（默认侧栏 + 1.0 倍字号）与「掉不超过 44%」。
 			"TestTheSettingsDescriptionColumnKeepsItsWidth",
+			// **控件列不会被推出内容区**（七档配置：900 / 1200 / 870 × 默认侧栏 /
+			// 侧栏 480 / 侧栏 320 / 字号 1.4 倍 / 侧栏 480 + 1.4 倍）。
+			// ⚠️ 这一条是评审之后加的：框架的 flex 没有收缩，放不下就是溢出，
+			// 而第一版给说明列的是**无条件**的下限——内容区窄过
+			// 「320 + 24 + 260」时控件列被顶出窗口右缘。
+			"TestTheSettingsControlColumnIsNeverCutOff",
+			// 代理页那个下拉还是 240 宽（上游的 `w-[240px]`）：它不归设置页那一列
+			// 的下限管。
+			"TestTheProxyTypeSelectKeepsItsOwnWidth",
 		},
 	},
 }
