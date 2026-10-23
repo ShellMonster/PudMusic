@@ -79,13 +79,22 @@ func run() error {
 	}
 	files = append(files, Package{Path: licensing.BiuLicenseRelPath, Content: biu})
 
-	// 资源的许可证（图标那一批）：它们不是构建依赖，所以不在上面那张表里，
-	// 但同样要随包发出去。**必须排进 files**——否则 prune 会把它们当过期文件
-	// 删掉，而删掉一份资源的许可证不会让任何构建失败。
+	// 资源的许可证（图标那一批）和 vendor 进来的第三方代码那份许可证：它们
+	// 不是构建依赖，所以不在上面那张表里，但同样要随包发出去。**必须排进
+	// files**——否则 prune 会把它们当过期文件删掉，而删掉一份资源的许可证不会
+	// 让任何构建失败。
+	//
+	// ⚠️ **源头要问对**：vendor 那一份的源头是仓库里 vendor 的那份原文
+	// （`AssetLicenseSources`），不是「发出去的那一份」自己。拿复制品复制
+	// 复制品的话，哪天手抄错了，没有任何东西会发现。
 	for _, rel := range licensing.AssetLicenseRelPaths {
-		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		src := licensing.AssetLicenseSources[rel]
+		if src == "" {
+			src = rel // 源头就是它自己（图标那一份）
+		}
+		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(src)))
 		if err != nil {
-			return fmt.Errorf("读 %s（资源的许可证原文）：%w", rel, err)
+			return fmt.Errorf("读 %s（%s 的原文）：%w", src, rel, err)
 		}
 		files = append(files, Package{Path: rel, Content: b})
 	}

@@ -61,6 +61,31 @@ const BiuLicenseRelPath = "resources/licenses/BIU-LICENSE.txt"
 // Remix Design）。取它的命令见本票的报告；换上游版本时连同这一份一起换。
 const IconLicenseRelPath = "resources/licenses/remixicon-LICENSE.txt"
 
+// VendoredGoMP3LicenseRelPath 是 **vendor 进仓库**的 MP3 解码器
+// （`tphakala/go-mp3`）那份许可证原文，随包发出去。
+//
+// ⚠️ **它和图标那一份是同一类东西，但原因不一样**：图标是「编进二进制的资源」，
+// 而它是一整份**第三方代码**——`internal/service/audio/mp3dec/gomp3/` 底下那些
+// `.go` 文件**静态链接进了可执行文件**。义务和模块依赖一样（MIT 要求
+// 「保留声明」）。
+//
+// 之所以 `go list -deps` 看不见它：vendor 进来的代码是**本仓库的一部分**，
+// 不是 Go 模块，`go list` 数的是模块。所以清单那张表里没有它，
+// `TestTheInventoryListsExactlyWhatGetsCompiled` 也不会因为它少了而红——
+// 而少了它的后果是「用户拿到的包里没有那份声明」，法律上已经不合规，
+// 而没有任何构建失败会提醒你。
+//
+// 所以它排进 `AssetLicenseRelPaths`（`gen-notices` 的 prune 才不会把它删掉），
+// 并且由 `TestTheShippedAssetLicensesExist` 盯着「发出去的和仓库里
+// vendor 那份一字不差」。
+const VendoredGoMP3LicenseRelPath = "resources/licenses/github.com-tphakala-go-mp3-LICENSE.txt"
+
+// VendoredGoMP3LicenseSource 是上面那一份的**源头**：仓库里 vendor 的那份原文。
+//
+// 发出去的必须和它**逐字一致**——MIT 的「保留声明」那一条要求随附的那份
+// 是真的那份，手抄一遍抄错一个字，那条声明就不成立了。
+const VendoredGoMP3LicenseSource = "internal/service/audio/mp3dec/gomp3/LICENSE"
+
 // AssetLicenseRelPaths 是**不是构建依赖、但同样要随包发出去**的许可证原文。
 //
 // 每一份都得排进 `gen-notices` 的输出列表，否则 prune 会把它删掉——而删掉一个
@@ -68,6 +93,35 @@ const IconLicenseRelPath = "resources/licenses/remixicon-LICENSE.txt"
 // 「包照发、DMG 照做，只是法律上已经不合规」，两边都不会有构建失败来提醒。
 var AssetLicenseRelPaths = []string{
 	IconLicenseRelPath,
+	VendoredGoMP3LicenseRelPath,
+}
+
+// AssetLicenseSources 是「随包发出去的那一份是从哪儿抄来的」。
+//
+// 键是 `AssetLicenseRelPaths` 里的路径，值是仓库里那份原文的路径。**空缺就是
+// 「发出去的和仓库里的是同一份」**——图标那一份就是（它的源头就是它自己）。
+//
+// 为什么要有这张表：vendor 进来的那份许可证，源头在
+// `internal/service/audio/mp3dec/gomp3/LICENSE`（那份才是上游的原文），
+// 随包发出去的那一份是从它**逐字复制**的。少这张表的话，生成器会拿
+// 「发出去的那份」当源头——也就是拿复制品复制复制品，哪天手抄错了，
+// 没有任何东西会发现。
+var AssetLicenseSources = map[string]string{
+	VendoredGoMP3LicenseRelPath: VendoredGoMP3LicenseSource,
+}
+
+// VendoredCodeLicenseRelPaths 是**vendor 进仓库的第三方代码**那几份许可证原文。
+//
+// 它和图标那一份的区别是：图标是**资源**（编进二进制的图片，Remix Icon
+// License 不是 SPDX 里那套），而这一份是一整份第三方**代码**——静态链接进
+// 可执行文件，义务和模块依赖一样，「一行 LGPL 都不用」那条不变量也照样
+// 约束它。
+//
+// 所以「不许有传染性许可」那道门要扫的是**这一份加上清单里那些模块**，
+// 不是「所有随包发出去的许可证」——后者会把图标那份也扫进来，而 Remix Icon
+// License 根本不是 SPDX 标识，认不出不等于有传染性。
+var VendoredCodeLicenseRelPaths = []string{
+	VendoredGoMP3LicenseRelPath,
 }
 
 // BiuRequiredNotice 是 PolyForm 要求**逐字**保留的那一行。
@@ -111,7 +165,7 @@ const noticesHeader = `# BiuGo 第三方许可清单
 # ── 不是 Go 模块的那几样 ─────────────────────────────────────────────────────
 #
 # 上面那张表只列**编进可执行文件的 Go 模块**（go list -deps 数得出来的那些）。
-# 这个目录里还有两份**不是模块**的，同样随包发出去：
+# 这个目录里还有三份**不是模块**的，同样随包发出去：
 #
 # BIU-LICENSE.txt          Biu 本体（PolyForm Noncommercial 1.0.0）。Biu 不是构建
 #                          依赖，它是这个项目的**上游**；PolyForm 的 Notices 一节
@@ -123,6 +177,14 @@ const noticesHeader = `# BiuGo 第三方许可清单
 #                          该许可证 §2.3 明确允许把图标当作产品里的功能组件使用、
 #                          §3.1 禁止把它们**单独当图标包卖**；本项目是前者：图标
 #                          随应用分发，不作为图标库单独提供。
+# github.com-tphakala-go-mp3-LICENSE.txt
+#                          MP3 解码器（tphakala/go-mp3，MIT）。它是 **vendor 进
+#                          仓库**的（internal/service/audio/mp3dec/gomp3/），所以
+#                          它是本仓库的一部分、不是 Go 模块，go list -deps 同样
+#                          看不见它——但它是一整份第三方代码，静态链接进了可执行
+#                          文件，义务和模块依赖一样。发出去的那一份是仓库里
+#                          vendor 那份的逐字副本，由 TestTheShippedAssetLicenses-
+#                          Exist 盯着。
 #
 # ── 用到系统组件的那几样（这里**没有**许可证可附）───────────────────────────
 #
