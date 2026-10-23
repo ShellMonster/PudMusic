@@ -121,7 +121,7 @@ func TestFavoritingAUserOnTheSearchPageSaysWhatIsWrong(t *testing.T) {
 
 	acts := s.searchUserActions()
 	if acts.FavSelect == nil || acts.Download == nil {
-		t.Fatal("用户那一 Tab 的收藏 / 下载是 nil，按下去会是「还没接 B 站接口」")
+		t.Fatal("用户那一 Tab 的收藏 / 下载是 nil，按下去会是「现在还不能用」")
 	}
 
 	acts.FavSelect(app.Item{Type: searchUserItemType, Bvid: "42"})

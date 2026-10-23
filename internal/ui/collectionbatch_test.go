@@ -357,7 +357,7 @@ func TestDownloadingSaysItIsNotWiredYet(t *testing.T) {
 		t.Fatal(err)
 	}
 	settleFrame(tt)
-	wantText(t, tt, "下载还没挂上：这个应用没把下载服务装进来")
+	wantText(t, tt, "下载暂时用不了")
 	dontWantText(t, tt, "下载任务已添加")
 }
 
@@ -507,7 +507,7 @@ func TestTheNotMountedPageSaysSo(t *testing.T) {
 	tt.Frame()
 	tt.Frame()
 	wantText(t, tt, "暂时打不开收藏夹")
-	wantText(t, tt, "这一页要 B 站接口，它还没挂上")
+	wantText(t, tt, "这一页现在打不开，稍后再试试")
 }
 
 func newEmptyFolderClient(t *testing.T) *bili.Client {

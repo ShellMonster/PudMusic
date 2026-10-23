@@ -365,7 +365,7 @@ func TestAnUnmountedLibraryStillShowsTheEmptyState(t *testing.T) {
 			if !tt.HasText(lookup(path).Empty.Title) {
 				t.Errorf("%s 没挂上接口时连「这里为什么空」都没说，文字有 %q", path, tt.Texts())
 			}
-			if !tt.HasText("还没接上 B 站接口") {
+			if !tt.HasText(biliNotMounted) {
 				t.Errorf("%s 没挂上接口时说清了为什么，文字有 %q", path, tt.Texts())
 			}
 		})

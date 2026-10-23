@@ -534,7 +534,9 @@ func (s *Shell) favoriteAction(f app.Favorite, item favMenuAction) {
 	case "unfavorite":
 		s.app.UnfavoriteFolder(f, s.sayFolderDone)
 	default:
-		s.addToast("「"+item.label+"」还没接收藏夹接口", notice.Warning)
+		// ⚠️ **不许说「还没接接口」**（票 #242，UX 报告 §3-F 的 F2）：那是把
+		// 实现细节说给用户听。
+		s.addToast("「"+item.label+"」现在还不能用", notice.Warning)
 	}
 }
 
