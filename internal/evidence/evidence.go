@@ -224,6 +224,8 @@ var Items = []Item{
 			"TestTheLyricsStayWhenTheInterfaceHides",
 			"TestAShortLyricDoesNotFadeItsLastLine",
 			"TestTheLyricsStayVisibleWhenScrolled",
+			"TestTheLyricsDoNotJumpWhenTheInterfaceHides",
+			"TestTheLyricsTakeTheWholeWidthWhenTheCoverIsOff",
 		},
 	},
 	{
@@ -232,7 +234,7 @@ var Items = []Item{
 		// 「×」）、**和齿轮对齐**（面板的左沿对着齿轮的图形，不对着那枚键的
 		// 点击区）。
 		Category: Play,
-		Spec:     "满屏偏好面板：有标题、能关、面板左沿和齿轮对齐",
+		Spec:     "满屏偏好面板：有标题（一个字都不多一个字都不少地画着）、能关、面板左沿和齿轮对齐",
 		Tests: []string{
 			"TestTheFullSettingsPanelHasATitleAndCanBeClosed",
 			"TestTheFullSettingsPanelLinesUpWithTheGear",

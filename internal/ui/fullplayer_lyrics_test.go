@@ -415,7 +415,11 @@ func TestTheFullSettingsPanelHasATitleAndCanBeClosed(t *testing.T) {
 	}
 	tt.Frame()
 
-	if !tt.HasText(fullSettingsTitle) {
+	// ⚠️ **必须用 `Find`（精确等于），不能用 `HasText`（子串匹配）**：
+	// 「显示」是「显示歌词」「显示频谱图」「显示封面」「显示虚化背景」这四行的
+	// **子串**——`HasText("显示")` 命中的是它们，标题整行删掉这条断言照样绿
+	// （评审抓到的那一条：这条断言本来是空的）。
+	if _, ok := tt.Find(fullSettingsTitle); !ok {
 		t.Errorf("偏好面板没有标题 %q，文字有 %q", fullSettingsTitle, tt.Texts())
 	}
 	if err := tt.Click("关闭设置"); err != nil {
@@ -428,6 +432,70 @@ func TestTheFullSettingsPanelHasATitleAndCanBeClosed(t *testing.T) {
 	// 关掉之后面板里那些开关也不在了。
 	if tt.HasText("显示频谱图") {
 		t.Errorf("面板关了，「显示频谱图」还在画面上，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheLyricsDoNotJumpWhenTheInterfaceHides 钉住「界面藏起来时歌词列不横向跳」。
+//
+// ⚠️ **这一条是评审抓出来的（major）**：分集面板开着的时候，歌词那一列的右边界
+// **让开面板**；而界面三秒不动自动隐藏的时候**面板不画了**（`viewFullParts` 见到
+// hidden 就返回），歌词却**还亮着**（歌词是内容不是控件）——那时候若把歌词列改回
+// 整宽，整列歌词就在界面淡出的那一刻**横向跳 128 像素**（实测：第一句从 x=681
+// 滑到 x=809），指针一动界面回来它又滑回去。
+//
+// 判据：藏起来前后，歌词那一列的**框**不许变。
+func TestTheLyricsDoNotJumpWhenTheInterfaceHides(t *testing.T) {
+	s, tt, fc := fullLyricsTester(t)
+	s.app.PutLyrics(fullTestLRC, "")
+	openFull(t, tt)
+	settleFull(t, tt)
+	// 开分集面板：歌词那一列要让开它。
+	s.full.partsOpen = true
+	tt.Frame()
+	settleFull(t, tt)
+	before, ok := tt.Find("满屏歌词")
+	if !ok {
+		t.Fatalf("画面上找不到歌词那一列，文字有 %q", tt.Texts())
+	}
+	// 推钟过三秒：界面藏起来。
+	advanceFull(s, tt, fc, biuHideSeconds*time.Second+time.Second)
+	if !s.fullHidden() {
+		t.Fatal("三秒过去了界面没有藏起来")
+	}
+	tt.Frame()
+	after, ok := tt.Find("满屏歌词")
+	if !ok {
+		t.Fatalf("界面藏起来之后歌词那一列不见了，文字有 %q", tt.Texts())
+	}
+	if after.X != before.X || after.W != before.W {
+		t.Errorf("界面藏起来之后，歌词那一列从 (x=%.1f, 宽 %.1f) 变成 (x=%.1f, 宽 %.1f)"+
+			"——整列歌词横向挪了 %.1f 像素、宽窄变了 %.1f（面板不画了，歌词却还亮着）",
+			before.X, before.W, after.X, after.W,
+			after.X-before.X, after.W-before.W)
+	}
+}
+
+// TestTheLyricsTakeTheWholeWidthWhenTheCoverIsOff 钉住「封面关着时左边不留空列」。
+//
+// ⚠️ **这一条是评审抓出来的（minor）**：分栏只按「显示歌词」分，不看「显示封面」——
+// 于是「关掉封面、留着歌词」这一种组合下，左边 42% 的窗宽整块空着（只有糊过
+// 的封面底），歌词从 x=809 才开始，像少画了一半。
+func TestTheLyricsTakeTheWholeWidthWhenTheCoverIsOff(t *testing.T) {
+	s, tt, _ := fullLyricsTester(t)
+	p := app.DefaultFullPlayerPrefs()
+	p.ShowCover = false
+	s.app.SetFullPlayerPrefs(p)
+	s.app.PutLyrics(fullTestLRC, "")
+	openFull(t, tt)
+	settleFull(t, tt)
+
+	col, ok := tt.Find("满屏歌词")
+	if !ok {
+		t.Fatalf("画面上找不到歌词那一列，文字有 %q", tt.Texts())
+	}
+	if col.X > 1 {
+		t.Errorf("封面关着，歌词那一列却从 x=%.1f 才开始——左边那一整块空着，"+
+			"歌词被挤到了右半边", col.X)
 	}
 }
 
