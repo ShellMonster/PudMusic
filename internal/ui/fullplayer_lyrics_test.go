@@ -566,6 +566,66 @@ func TestRenderFullPlayerLyricsAndPartsPanelShot(t *testing.T) {
 	}
 }
 
+// TestRenderFullPlayerLyricsScrolledShot 存图：满屏 + 歌词 + **滚下去之后**。
+//
+//	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderFullPlayerLyricsScrolledShot
+//
+// 这一张是「滚过去的歌词看得见」那一格的**现场**：十二句的歌词滚下去 400 像素
+// 之后，落在歌词区中间的那几句是全亮的（上游那条遮罩的语义），滚出容器的那
+// 几句淡掉。
+//
+// ⚠️ **这一张以前要靠评审自己写探针才出得来**（票 #236 的第 3 轮评审：它为了
+// 验「滚过去之后看得见」，自己写了一个量逐行亮度的探针 + 一张出图）。收进仓库
+// 之后，下一次要看这一格不用再写一遍。
+func TestRenderFullPlayerLyricsScrolledShot(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	body := splitCoverPNG(t, 1200, 1200)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			b := newTestShell(t, at(fullWinW, fullWinH), systemIsDark(dark),
+				withClock(newFakeClock(time.Unix(1_700_000_000, 0))))
+			item := app.LocalItem(flacPath(t))
+			item.Cover = srv.URL + "/cover.png"
+			if err := b.a.Enqueue(item); err != nil {
+				t.Fatalf("把歌放进队列：%v", err)
+			}
+			waitFrames(t, b.tt, "歌开起来了", func() bool {
+				return b.a.Snapshot().HasTrack
+			})
+			waitFrames(t, b.tt, "封面下回来了", func() bool {
+				return b.s.images.Get(item.Cover).Ready()
+			})
+			// ⚠️ **暂停**：位置一直在走的话「正在唱的是第几句」每隔一秒就换一句，
+			// 换一句就要重新对一次滚动的目标——界面永远在要帧（`settleFull` 等不到
+			// 它停）。
+			b.a.Pause()
+			b.a.PutLyrics(fullTestLRC12, "")
+			b.s.openFullPlayer()
+			waitFrames(t, b.tt, "满屏开出来了", func() bool {
+				return b.tt.HasText("关闭全屏")
+			})
+			settleFull(t, b.tt)
+			// 滚轮往下滚 400 像素：滚进视野的正是离正在唱那一句最远的那几句。
+			b.tt.Scroll(800, 400, 0, 400)
+			settleFull(t, b.tt)
+			save(t, dir, "66-满屏播放器-歌词滚下去之后-"+name+".png", b.tt)
+			b.Close()
+		})
+	}
+}
+
 // TestRenderFullPlayerNoLyricsShot 存图：满屏播放器**这一首没有歌词**的那一屏。
 //
 //	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderFullPlayerNoLyricsShot
