@@ -211,15 +211,22 @@ type lyricStyle struct {
 	// **满屏那一屏是居中**（那一列有六百多宽，左对齐的话字全贴在左边，右边空出
 	// 一大块，看着像没画完）。
 	center bool
-	// ramp 是「按离正在唱那一句的远近把两头的行压暗」那一档。
+	// mask 是「按上游那条遮罩的语义，**逐行**淡出」那一档。
 	//
-	// ⚠️ **它替代的是上下那两条遮罩**（`fade` 那一项）：上游那条 `maskImage`
-	// （`index.tsx:357-360`）是把内容变**透明**，而我们那一层是**盖一层底色**
-	// ——在迷你播放器那一页（底下就是主题的底色）两者是一回事，而在满屏那一屏
-	// （底下是糊过的封面）盖一层底色会在背景上留下一个看得见的方块。
+	// ⚠️ **上游那条 `maskImage` 是按容器的上下沿淡的**（`index.tsx:357-360`：
+	// `transparent 0% / black 24% / black 76% / transparent 100%`）——内容滑到
+	// 边缘时被淡掉，滑到中间时是全亮的。
 	//
-	// 满屏那一屏因此走这一档：两头的行淡进背景里，而背景一个像素都不动。
-	ramp bool
+	// ⚠️ **满屏那一屏不走「盖一层底色」那一支**（`lyrics.go` 的 `paintLyricFade`）：
+	// 那一支是**盖**一层底色，而满屏的底是糊过的封面——盖出来的是背景上一个
+	// 看得见的方块。框架没有遮罩那一层，于是这一档改成**逐行**按它在容器里的
+	// 位置算不透明度（`lyricMaskAlpha`）：效果与上游那条遮罩一样，而背景一个
+	// 像素都不动。
+	//
+	// ⚠️ **不是「离正在唱那一句多远」**：按那句算的话，滚过去以后**滚进视野的
+	// 正是离它最远的那几句**，而它们会被算成「远」而全灭——用户看到的是一整列
+	// 空白（评审抓到的那一条）。
+	mask bool
 }
 
 // lyricFadeStop 是渐变上的一个点：位置（在**那一条带子**里从 0 到 1）和盖住的
@@ -572,10 +579,11 @@ func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSna
 			// 和滚动条之后（`mygo/ui/paint.go:328`），而画成绝对定位的兄弟元素
 			// 会被容器的裁剪切掉。
 			//
-			// ⚠️ **满屏那一屏不画它**（它走 `ramp` 那一档，理由见 `lyricStyle`）：
+			// ⚠️ **满屏那一屏不画它**（它走 `mask` 那一档，理由见 `lyricStyle`）：
 			// 这一层是**盖一层底色**，而满屏的底是糊过的封面——盖出来的是背景上一个
-			// 看得见的方块。
-			if !st.ramp {
+			// 看得见的方块。满屏那一屏改走**逐行按位置**算的不透明度（上游那条遮罩
+			// 的语义），背景一个像素都不动。
+			if !st.mask {
 				scroll.DrawOver(func(p *ui.Painter, r ui.Rect) {
 					paintLyricFade(p, r, st.fade)
 				})
@@ -598,7 +606,7 @@ func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSna
 				}
 				content.Children(func() {
 					for i, row := range snap.Rows {
-						line := s.lyricLine(c, i, active, row, snap.FontSize, st)
+						line := s.lyricLine(c, lv, i, active, row, snap.FontSize, st)
 						if i == active {
 							lv.line = line.Bounds()
 						}
@@ -618,7 +626,7 @@ func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSna
 // 是不是在唱」：满屏那一屏还按「离它多远」把两头的行压暗（见 `lyricRamp`）。
 //
 // st 是这一屏的画法（字色、行键前缀、居中还是左对齐），见 `lyricStyle`。
-func (s *Shell) lyricLine(c *ui.Context, i, active int, row lyrics.Row, fontSize float32, st lyricStyle) ui.Element {
+func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyrics.Row, fontSize float32, st lyricStyle) ui.Element {
 	line := ui.Column(c).
 		Key(lyricLineKey{ns: st.ns, at: row.At, i: i}).
 		Padding(lyricsLinePadY, lyricsPadX)
@@ -667,13 +675,13 @@ func (s *Shell) lyricLine(c *ui.Context, i, active int, row lyrics.Row, fontSize
 	if i == active {
 		weight = lyricsActiveWeight
 	}
-	// 满屏那一屏：离正在唱的那一句越远，这一行越暗（见 `lyricRamp`）。
-	if st.ramp {
-		dist := i - active
-		if dist < 0 {
-			dist = -dist
-		}
-		opacity *= lyricRamp(dist)
+	// 满屏那一屏：这一行**在歌词区里的位置**决定它有多不透明（上游那条遮罩的
+	// 语义，理由见 `lyricStyle.mask` 与 `lyricMaskAlpha`）。
+	//
+	// ⚠️ **读的是上一帧的位置**（`Bounds()` 就是上一帧的）：淡出跟着「这一行现在
+	// 在容器的哪儿」走——行滑到边缘时被淡掉，滑到中间时全亮。
+	if st.mask {
+		opacity *= lyricMaskAlpha(lyricRelPos(lv.box, line.Bounds()))
 	}
 	return line.Opacity(opacity).Children(func() {
 		ui.Text(c, row.Text).
@@ -725,40 +733,71 @@ func lyricFade(bg ui.Color, stops []lyricFadeStop) ui.LinearGradient {
 	return g
 }
 
-// lyricRamp 是「离正在唱的那一句越远越暗」的那一档。
+// lyricMaskAlpha 是上游那条 maskImage 在歌词区里的某一处的 alpha。
 //
-// # 它替代的是上下那两条遮罩
+// ⚠️ **它是「行在容器里的位置」→ 「那一行有多不透明」**：上游那条渐变是
+// `transparent 0% / black 24% / black 76% / transparent 100%`（`index.tsx:357-360`），
+// **内容滑到边缘时被淡掉，滑到中间时是全亮的**。
 //
-// 上游那条 `maskImage`（`index.tsx:357-360`）是把**内容变透明**（两头的行淡进
-// 背景里），而我们那一层是**盖一层底色**——在迷你播放器那一页（底下就是主题的
-// 底色）两者是一回事，在满屏那一屏（底下是糊过的封面）却会在背景上留下一个
-// 看得见的方块。
+// ⚠️ **不是「离正在唱那一句多远」**：按那句算的话，用户滚过去以后**滚进视野的
+// 正是离它最远的那几句**，而它们会被算成「远」而全灭——用户看到的是一整列空白
+// （评审抓到的那一条）。
 //
-// 于是满屏那一屏走这一档：按**离正在唱那一句的远近**把两头的行压暗，而背景
-// 一个像素都不动。
-//
-// # ⚠️ **它和上游那条遮罩不是同一件事**（评审抓到的一条）
-//
-// 上游那条是按**容器上下沿**淡的（歌词滚出容器时被淡掉），这一档是按**离正在
-// 唱那一句多远**淡的。一屏十来行、正在唱的那一句在中间时两者看着接近；
-// **歌词很少的时候不一样**——上游那两条带子正好落在居中留白的空处（几行一样
-// 亮），而这一档会让最远的那一句无缘无故暗一截。
-//
-// 所以那两个数是照「短歌词也别暗」调的：近的三句全亮（`full`），再远一句暗
-// 45%（`step`），两步之后就看不见了。
-//
-//	full  这么近之内还是全亮（3）。
-//	step  每远一句暗多少（0.45）。
-func lyricRamp(dist int) float32 {
-	const (
-		full = 3
-		step = 0.45
-	)
-	d := float32(dist - full)
-	if d <= 0 {
+// 那两张「盖住的程度」的表（`lyricFadeTopStops` / `lyricFadeBottomStops`）就是上游
+// 那条渐变换算过来的（见它们上面的注释：上游那八个色标逐段换成四个点），所以这里
+// 取它的补——上游的 alpha 0 是透明、1 是不透明，我们的 cover 1 是盖住、0 是盖不住。
+func lyricMaskAlpha(rel float32) float32 {
+	switch {
+	case rel <= 0 || rel >= 1:
+		return 0
+	case rel < lyricsFadeTop:
+		return 1 - lyricCoverAt(lyricFadeTopStops, rel/lyricsFadeTop)
+	case rel > 1-lyricsFadeBottom:
+		return 1 - lyricCoverAt(lyricFadeBottomStops,
+			(rel-(1-lyricsFadeBottom))/lyricsFadeBottom)
+	default:
 		return 1
 	}
-	return max(0, 1-d*step)
+}
+
+// lyricCoverAt 是那张「盖住的程度」的表在 at（0..1）处的值（线性插值）。
+//
+// ⚠️ **名字带 `lyric` 前缀**：`coverAt` 那个名字在 `likefixture_test.go` 里已经
+// 有一个（播放条上那张封面的框），两个同名的东西在一个包里会撞。
+func lyricCoverAt(stops []lyricFadeStop, at float32) float32 {
+	if len(stops) == 0 {
+		return 0
+	}
+	if at <= stops[0].at {
+		return stops[0].cover
+	}
+	for i := 1; i < len(stops); i++ {
+		if at <= stops[i].at {
+			a, b := stops[i-1], stops[i]
+			if b.at == a.at {
+				return b.cover
+			}
+			return a.cover + (b.cover-a.cover)*(at-a.at)/(b.at-a.at)
+		}
+	}
+	return stops[len(stops)-1].cover
+}
+
+// lyricRelPos 是这一行在歌词区里的相对位置（0 = 顶沿，1 = 底沿）。
+//
+// ⚠️ **读的是上一帧的盒子**（`Bounds()` 就是上一帧的），而这正是要的：淡出跟着
+// 「这一行现在在容器的哪儿」走——行滑到边缘时被淡掉，滑到中间时全亮。
+//
+// ⚠️ **容器框也是上一帧的**（`lv.box`，见 `viewLyricLines`）——两者是同一帧的
+// 同一份数据，自洽。
+//
+// ⚠️ **量不到的时候按「在中间」算**：第一帧那些行还没有盒子（`Bounds()` 是空的），
+// 按「在顶沿」算的话它们一上来就是全透明的——于是歌词刚出现的那一帧是一片空白。
+func lyricRelPos(box, line ui.Rect) float32 {
+	if box.H <= 0 || line.H <= 0 {
+		return 0.5
+	}
+	return (line.Y - box.Y) / box.H
 }
 
 // lyricFontStep 是字号滑块的步长，抄 `font-size-control.tsx:16` 那一段的

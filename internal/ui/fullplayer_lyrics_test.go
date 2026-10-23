@@ -150,6 +150,79 @@ func TestTheCoverIsCentredInTheWindowWhenTheLyricsAreOff(t *testing.T) {
 	}
 }
 
+// fullTestLRC12 是十二句的那一份歌词（和 `budgetLRC` 一样多）。
+//
+// ⚠️ **十二句是「一屏放不下」的量**：歌词区的高度是窗口高减去顶栏底栏，一行
+// 二十来像素加上下留白，一屏十来行——所以十二句里**总有几行在容器外面**。
+// 「滚过去之后看得见」那一条要验的就是这种情形。
+const fullTestLRC12 = "[00:00.00]第一句\n[00:01.00]第二句\n[00:02.00]第三句\n" +
+	"[00:03.00]第四句\n[00:04.00]第五句\n[00:05.00]第六句\n" +
+	"[00:06.00]第七句\n[00:07.00]第八句\n[00:08.00]第九句\n" +
+	"[00:09.00]第十句\n[00:10.00]第十一句\n[00:11.00]第十二句\n"
+
+// fullTestLineNames 是上面那十二句的字（逐行量像素那一条要用）。
+var fullTestLineNames = []string{
+	"第一句", "第二句", "第三句", "第四句", "第五句", "第六句",
+	"第七句", "第八句", "第九句", "第十句", "第十一句", "第十二句",
+}
+
+// lyricReadableBright 是「这一行还在屏幕上」的亮度门槛。
+//
+// ⚠️ **100 是量出来的，不是拍的**：满屏那一屏的字是白 92%（235），没淡的那几句
+// 是 60% 的不透明度——压在糊过的封面上量到的最亮像素是 **146**；而淡到 4% 的话
+// 只剩 **11**。100 在两者中间，离两头都远。
+//
+// ⚠️ **不能用「== 0」当判据**：坏掉那一版不是让行全灭，而是让行淡到 11——
+// 「一个字都没有」测不出来，得测「还读不读得出来」。
+const lyricReadableBright = 100
+
+// TestTheLyricsStayVisibleWhenScrolled 钉住「滚过去的歌词看得见」。
+//
+// ⚠️ **这一条是评审抓出来的（critical）**：满屏那一屏的渐隐曾经按「离正在唱那
+// 一句多远」压暗——而用户滚过去以后**滚进视野的正是离它最远的那几句**，于是它们
+// 被算成「远」而全灭：十二句的歌有六句永远不显示，用户看到的是一整列空白。
+//
+// 判据：**滚下去之后，落在歌词区中间那一带（上游那条遮罩的全亮区）的行必须还有
+// 字**。边缘那几行淡掉是上游那条遮罩本来就有的（行滑到边缘时被淡掉），所以
+// 不在判据里。
+func TestTheLyricsStayVisibleWhenScrolled(t *testing.T) {
+	s, tt, _ := fullLyricsTester(t)
+	s.app.PutLyrics(fullTestLRC12, "")
+	openFull(t, tt)
+	settleFull(t, tt)
+
+	// 滚轮往下滚：滚过去之后，容器里换成的是**离正在唱那一句最远**的那几句。
+	tt.Scroll(800, 400, 0, 400)
+	settleFull(t, tt)
+
+	col, ok := tt.Find("满屏歌词")
+	if !ok {
+		t.Fatalf("画面上找不到歌词那一列，文字有 %q", tt.Texts())
+	}
+	img := tt.Image()
+	visible := 0
+	for _, name := range fullTestLineNames {
+		box, ok := tt.Find(name)
+		if !ok {
+			continue
+		}
+		rel := (box.Y + box.H/2 - col.Y) / col.H
+		// 边缘带（上游那条遮罩在那一带是淡的）不管。
+		if rel <= lyricsFadeTop || rel >= 1-lyricsFadeBottom {
+			continue
+		}
+		visible++
+		if got := maxBright(img, box); got < lyricReadableBright {
+			t.Errorf("%q 落在歌词区的中间（rel=%.2f）却几乎没有字（最亮 %d）——"+
+				"滚过去的歌词必须看得见", name, rel, got)
+		}
+	}
+	if visible == 0 {
+		t.Fatal("滚下去之后，歌词区中间那一带一行都没有——" +
+			"这一条量不到「滚过去的歌词看得见」")
+	}
+}
+
 // TestAShortLyricDoesNotFadeItsLastLine 钉住「短歌词不会无缘无故暗一截」。
 //
 // ⚠️ **这一条是评审抓出来的（minor）**：满屏的渐隐那一档是按「离正在唱的那一句
