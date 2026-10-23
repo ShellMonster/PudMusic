@@ -307,6 +307,9 @@ func (p *PagedList) ScrollTop() {
 // panic 会一路穿到 Cocoa 事件循环上去把整个进程带走。画在页面里时页级那道
 // Guard（`internal/ui` 的 `Shell.page`）也接得住，但这个控件不是只给页面用的
 // ——它自己这一道必须有，包一层是这里最便宜的保险。
+// TakeFocus 把键盘焦点交给底下那一对控件此刻画的那一档（票 #245 的 E4）。
+func (p *PagedList) TakeFocus() { p.surf.TakeFocus() }
+
 // Hot 报指针是不是压在底下那一对控件的滚动条上（见 `List.Hot`）。
 func (p *PagedList) Hot() bool { return p.surf.Hot() }
 

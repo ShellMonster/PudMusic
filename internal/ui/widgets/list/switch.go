@@ -142,6 +142,18 @@ func (s *SwitchView) View(c *ui.Context) {
 	s.list.View(c)
 }
 
+// TakeFocus 把键盘焦点交给**此刻画的那一档**（票 #245 的 E4）。
+//
+// ⚠️ **只交给此刻画的那一档**：另一档的元素这一帧根本没建，焦点给它等于
+// 给一个不在画面上的东西焦点。
+func (s *SwitchView) TakeFocus() {
+	if s.view == ViewCard {
+		s.grid.TakeFocus()
+		return
+	}
+	s.list.TakeFocus()
+}
+
 // Hot 报指针是不是压在底下这一对控件的滚动条上（见 `List.Hot`）。
 //
 // 两档各有一份滚动容器（同一份歌、两种摆法），所以问的是**这一帧画的那一档**。

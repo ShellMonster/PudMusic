@@ -449,7 +449,7 @@ func (s *Shell) searchActions(tab int) list.Actions {
 
 // searchUserActions 是用户 Tab 的那一份操作。
 func (s *Shell) searchUserActions() list.Actions {
-	return list.Actions{
+	acts := list.Actions{
 		// 双击 / 菜单「播放」= 进他的 UP 主空间（Biu 的
 		// `user-card.tsx:51`：`onPress={() => navigate(`/user/${u.mid}`)}`）。
 		Play: s.openSearchUser,
@@ -484,6 +484,11 @@ func (s *Shell) searchUserActions() list.Actions {
 		},
 		Notify: s.addToast,
 	}
+	// 焦点交接（票 #245 的 E4）：这一份是**另写**的（用户不是歌），所以焦点那
+	// 两项也得自己装——漏了的话用户 Tab 的列表就进不去焦点。
+	acts.Focus = s.registerContentFocus
+	acts.FocusOut = s.focusSide
+	return acts
 }
 
 // openSearchUser 跳到某个 UP 主的空间。

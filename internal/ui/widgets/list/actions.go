@@ -80,6 +80,22 @@ type Actions struct {
 	// `Music.ID` 是**行的**身份（铁律四），不是「这是不是同一首歌」。
 	// 真正的判据是 `app.App.IsPlaying`（按 `app.Item.Identity`）。
 	IsPlaying func(item app.Item) bool
+
+	// Focus 登记「**此刻内容区里是这一个列表**」。
+	//
+	// 界面层装一个进来（`internal/ui` 的 `listActions`）：每一帧，各个列表把
+	// 自己登记上去，于是「侧栏按 ↓ 把焦点交给内容区」有一个统一的目标——理由
+	// 见 `focus.go` 的文件头。
+	//
+	// ⚠️ **为 nil 时什么都不登记**：单独造这个包的测试没有界面层，那种情况下
+	// 「进内容区」这件事压根不发生（没有界面层就没有侧栏）。
+	Focus func(l Focusable)
+
+	// FocusOut 是「键盘往回走、列表已经在顶上一行了」时该做的事。
+	//
+	// 界面层装一个进来：把焦点交回侧栏（票 #245 的 E4 的另一半——能进也要能
+	// 出）。为 nil 时列表到了顶也不管，方向键继续由列表自己处理。
+	FocusOut func()
 }
 
 // AppActions 把 Actions 接在应用状态上，界面上真正用的那一份。
