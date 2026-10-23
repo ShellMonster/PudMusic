@@ -584,8 +584,14 @@ func (s *Shell) viewMiniTitleRow(c *ui.Context, st app.State, t *ui.Theme) {
 			// 的那一刻它的状态就初始化了，而 `Element.Key` 只认「还没初始化状态」的
 			// 元素（`mygo/ui/element.go:658` 直接 panic）。`Context.Key` 是为这类复合
 			// 控件准备的：它在控件被建出来**之前**把身份交给下一个。
+			//
+			// ⚠️ **走自绘那一颗（`selfSlider`），不走框架的 `ui.Slider`**（票 #241 /
+			// 报告 F-21）：框架那一颗把填充色写死成 `t.Accent`，于是这根音量滑块
+			// 一直是主色绿的实心填充——320×100 那扇窗里最大的一块颜色（0.97%），
+			// 比同窗那条播放位置（主要的）还响。现在填过的那一段平时是次要色，
+			// 悬停 / 按下才变主色（`knobMiniVolumeLook` 的那一层）。
 			vol := st.Volume
-			if ui.Slider(c.Key("mini-volume"), &vol, 0, 1).Width(miniVolumeW).
+			if selfSlider(c.Key("mini-volume"), &vol, 0, 1, knobMiniVolumeLook).Width(miniVolumeW).
 				Height(16).Label("音量").Changed() {
 				s.app.SetVolume(vol)
 			}

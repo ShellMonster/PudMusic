@@ -104,9 +104,20 @@ type confirmSpec struct {
 // ⚠️ **420 是本地音乐那一页原来那个数**（`localmusic.go` 的 `dialogWidth`）：
 // 路径那一行在 420 宽下大概能放 45 个字符，再窄就开始一行一截地断。
 //
-// 上游那个弹窗是**跟着内容走**的（HeroUI 的 `max-width` 只封上限，短标题就窄）。
-// 这里给一个上限而不是定宽：短标题的框窄一点、长标题的框宽一点，和上游一样。
+// ⚠️ **上限之外还有一个下限**（票 #241 / 报告 F-20）：原来这里**只有上限**，
+// 于是**框宽跟着内容走**——而内容最短的那一类弹窗（短标题）于是看着最小：
+// 「确认删除选中的 2 首吗？」那个框在 1200×800 的窗口里只有 **228 宽**，
+// 标题几乎顶到边。上游那个弹窗是 HeroUI 的 `max-w-lg`（**512**），短标题
+// 那一类在那边也是 512 宽——**上游也是「短标题也是宽框」**。
+//
+// 现在给一个**下限 300**（加上面板自己的内边距，面板是 **340 宽**，落在报告
+// 建议的 320~360 里）：短标题的框不再缩成一条，长内容仍然能长到 420。
+//
+// ⚠️ **为什么是「下限 + 上限」而不是「定宽」**：定宽的话长标题（本地音乐那个
+// 「删的是哪个文件」的完整路径）会被迫折行，而那一行折了之后用户认不出是哪个
+// 文件——上限是留给它的。
 const (
+	confirmMinW = 300
 	confirmMaxW = 420
 	// confirmGap 是面板里各行之间的距离。
 	//
@@ -202,7 +213,10 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 			Label(spec.title).
 			Description(spec.body)
 
-		ui.Column(c).Key("confirm:" + spec.title).MaxWidth(confirmMaxW).Gap(confirmGap).
+		ui.Column(c).Key("confirm:" + spec.title).
+			// ⚠️ **下限和上限都在**（理由见 `confirmMinW` 那段）：只有上限的话
+			// 短标题那一类弹窗会缩成 228 宽的一条。
+			MinWidth(confirmMinW).MaxWidth(confirmMaxW).Gap(confirmGap).
 			Children(func() {
 				// 标题那一行：按类型变色的警告图标 + 标题。
 				//

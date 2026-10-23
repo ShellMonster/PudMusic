@@ -96,6 +96,16 @@ func TestTheFinishedCellHasAGreenCheck(t *testing.T) {
 // ⚠️ **范围限在状态列里**（理由同 `progressWidth`）：整幅画面上别的地方也有
 // 主色（播放条上那条进度就是主色的），扫全图的话「不是主色」这一条永远是红
 // 的，而「是蓝的」会被别处的蓝骗过去。
+//
+// ⚠️ **条在哪儿，两支不一样**（票 #241 / 报告 F-19 之后）：
+//
+//   - **下载中**那一支照上游：条整宽占一行，状态文字和百分比在它**下面**一行
+//     （`flex justify-between`）——所以条在百分比**上面**。
+//   - **出错**那一支：条和百分比**并排**一行，错误原因独占下面一整行
+//     （那一格只有 150 宽，错误原因和百分比挤在一行的话，13 个字只剩 6 个，
+//     后面几个字被省略号吃掉——见 F-19）——所以条在百分比**左边**。
+//
+// 两条都扫，所以这个函数对两支都成立。
 func statusBarPixels(t *testing.T, tt *ui.Tester, pct string, want color.RGBA) int {
 	t.Helper()
 	txt, ok := tt.Find(pct)
@@ -107,16 +117,23 @@ func statusBarPixels(t *testing.T, tt *ui.Tester, pct string, want color.RGBA) i
 	right := int(txt.X + txt.W)
 	left := right - dlStatusW
 
-	// 条在百分比那一行**上面**。
 	img := tt.Image()
 	n := 0
-	for y := int(txt.Y) - 4; y > int(txt.Y)-24; y-- {
-		for x := max(left, 0); x < right; x++ {
-			if maxDiff(img.RGBAAt(x, y), want) <= 40 {
-				n++
+	count := func(x0, x1, y0, y1 int) {
+		for y := y0; y < y1; y++ {
+			for x := max(x0, 0); x < min(x1, img.Rect.Max.X); x++ {
+				if maxDiff(img.RGBAAt(x, y), want) <= 40 {
+					n++
+				}
 			}
 		}
 	}
+	// ① 条在百分比上面（下载中那一支）。
+	count(left, right, int(txt.Y)-24, int(txt.Y)-4)
+	// ② 条在百分比左边、同一行（出错那一支）。**只到百分比左边**：错误原因在
+	// 更下面一行，而它也是危险色——扫到它的话这一条就分不出「条是红的」和
+	// 「字是红的」了。
+	count(left, int(txt.X)-4, int(txt.Y), int(txt.Y+txt.H))
 	return n
 }
 
