@@ -204,6 +204,13 @@ type Grid struct {
 	// started 是「已经画过一帧」。头一帧没有上一帧的行高和滚动位置可依据，
 	// 头几帧也可能还没有，都不能拿来做锚点。
 	started bool
+
+	// keys 记「上一次输入是键盘还是指针」。
+	//
+	// ⚠️ **网格这一档还没有焦点环**（`List` 那一档有，见 `card.go` 的
+	// `SelectedRow`），所以它眼下只干一件事：知道「↑ 在顶上一行时把焦点交回
+	// 侧栏」（票 #245 的 E4）。焦点环那一档是另一张票的事。
+	keys KeyboardMode
 }
 
 // NewGrid 造一个网格。
@@ -212,7 +219,20 @@ type Grid struct {
 // 它上面取状态，nil 会让**带封面的每一格**画不出来（每格 recover 一次并记一行
 // 日志）。
 func NewGrid(cache *imgcache.Cache, acts Actions) *Grid {
-	return &Grid{cache: cache, acts: acts, sel: -1}
+	g := &Grid{cache: cache, acts: acts, sel: -1}
+	// 「↑ 到顶时把焦点交回侧栏」那一档（票 #245 的 E4）。理由同 `New`。
+	g.keys.upAtTop = acts.FocusOut
+	return g
+}
+
+// TakeFocus 把键盘焦点接到这个网格上，并把光标放到第一首。
+//
+// ⚠️ **理由和 `List.TakeFocus` 一样**（票 #245 的 E4）：走进来就在第一首上。
+func (g *Grid) TakeFocus() {
+	if len(g.songs) > 0 {
+		g.sel = 0
+	}
+	g.state.Handle.Focus()
 }
 
 // SetSongs 换掉网格里的歌。
@@ -387,6 +407,12 @@ func (g *Grid) ScrollToItem(item int, align ui.Align) {
 // 按窗口宽算是 5 列。TestColumnsFollowTheContainersWidthNotTheWindows 钉的就是
 // 这一条（别的用例里网格摆在根上，窗口就是容器，分不出这两种做法）。
 func (g *Grid) View(c *ui.Context) {
+	// 登记自己是「**此刻内容区里是这一个**」：界面层靠它把焦点交进来
+	// （票 #245 的 E4 的「进内容区」）。理由见 focus.go 的文件头。
+	if g.acts.Focus != nil {
+		g.acts.Focus(g)
+	}
+
 	w := g.width
 	if w <= 0 {
 		// 头一帧还没量出容器（Bounds 量的是上一帧的盒子），先拿窗口的宽顶着。
@@ -440,6 +466,10 @@ func (g *Grid) View(c *ui.Context) {
 	e := ui.List(c, &g.state, g.rows()).
 		Grow(1).
 		FillWidth().
+		// ⚠️ **听一听输入**：为了知道「键盘往回走到顶上了」（票 #245 的 E4）。
+		// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选格、
+		// Tab 换焦点都还在。
+		HandleInput(g.keys.Input).
 		// 没有歌时网格是空的，Children 里那一支就是它的空状态。
 		Children(func() {
 			if len(g.songs) == 0 {
