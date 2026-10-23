@@ -643,6 +643,10 @@ func TestTheLoginKeyIsNotASolidBlock(t *testing.T) {
 			if worst == 0 {
 				t.Fatal("相邻那几枚图标一格墨迹都没有——量不出基准，这条测试不算数")
 			}
+			// 把数打出来：这一条断的是**比值**，而比值随图标（矢量图形的栅格化）
+			// 变——出问题时得看得见那几个数。
+			t.Logf("登录键墨迹 %d，相邻最重的那枚 %d（比值 %.2f）",
+				loginInk, worst, float64(loginInk)/float64(worst))
 			if loginInk > worst*2 {
 				t.Errorf("登录键那一格有 %d 像素的墨迹，而相邻那几枚线框图标最重的"+
 					"那枚只有 %d（重 %.1f 倍）——它不该是整条顶栏最响的元素"+
