@@ -703,6 +703,96 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
+		// Windows 上没有 AudioToolbox，**有损那一档（AAC）**靠的是 Media
+		// Foundation（`internal/service/audio/mfadec`）。这一条盯的是接线：
+		// `openDecoder` 在「平台解码器不可用」时问 Media Foundation，问成了
+		// 就用它，问不成**才**落回 `flacdec`（MP4 里的 FLAC）。
+		//
+		// ⚠️ 这一条是**注入**验的（`internal/service/audio/fallback_test.go` 把
+		// 「平台解码器」和「Media Foundation」都换成测试自己给的）：真 Windows
+		// 上 Media Foundation 恒可用，macOS 上恒不可用——不注入的话，这条分支
+		// 在**能跑测试的这个平台上**一条都走不到。
+		//
+		// 真机上那一条（逐样本比）是另一条证据（下面那条，RealOnly）。
+		Spec: "平台解码器不可用时走 Media Foundation 解 AAC；平台解码器可用时不绕道；Media Foundation 认不出来时仍落回 flacdec",
+		Tests: []string{
+			"TestOpenDecoderUsesMediaFoundationWhenThePlatformDecoderIsUnavailable",
+			"TestOpenDecoderDoesNotUseMediaFoundationWhenThePlatformDecoderIsAvailable",
+			"TestOpenDecoderFallsBackToFLACWhenMediaFoundationCannotDecodeTheFile",
+			// 认容器那一步：按头几个字节认，而且**不把 MP3 认成 ADTS**
+			//（两者都以 FF 开头，只断同步位的话 MP3 也认得出来）。
+			"TestTheContainerIsRecognizedByItsHeader",
+			// **Media Foundation 的真实原因要进最终那句错**：Windows 上明明有
+			// 系统解码器，只报「这台机器没有系统解码器」是句假话。
+			"TestOpenDecoderSaysWhyMediaFoundationCouldNotDecodeIt",
+		},
+	},
+	{
+		Category: Platform,
+		// 「B 站五档音质在两个平台上各能解几档」——这张表是**跑出来的**，
+		// 每一格都真的解了一遍。
+		//
+		// ⚠️ 它在两个平台上跑出的是**两张不同的表**：macOS 走 AudioToolbox，
+		// Windows 走 Media Foundation（FLAC 那一档落回 `flacdec`）。而 E-AC-3
+		// 那一档在 Windows 上是**划掉**的（授权限制 + Win11 24H2 移除了系统
+		// 自带的 AC-3 解码器），在 macOS 上 AudioToolbox 却解得了。
+		Spec: "B 站五档音质（64K / 128K / 192K / 杜比全景声 / Hi-Res 无损）在当前平台上逐档真解一遍，解不出来的把原因记下来",
+		Tests: []string{"TestTheBilibiliQualityCoverage"},
+	},
+	{
+		Category: Platform,
+		// **产品这一层**解出来的 AAC 和 ffmpeg 的参考**逐样本**比（不是 RMS）。
+		//
+		// 这一层多做了三件事，每一件都可能把对的解码结果弄坏：认容器、截到
+		// 容器说的呈现长度、丢掉编码器延迟。所以它要**单独**验一遍——spike 那
+		// 几条验的是解码器本身，碰不到这三件事。
+		//
+		// ⚠️ 它在 macOS 和 Windows 上**各跑一遍**，走的是两个不同的解码器
+		// （AudioToolbox / Media Foundation），比的是同一份参考。而两条线是
+		// **不一样**的：Windows（Media Foundation）用票面定的 0.02，macOS
+		// 用实测出来的 0.1（AudioToolbox 在同一份素材上是 0.070597）。理由写
+		// 在 `internal/service/audio/aac_reference_test.go` 顶上。
+		Spec: "产品这一层解出来的 AAC 与另一个解码器**逐样本**对得上（不是 RMS），帧数落在 176400~178176 之间，左右声道没调换；**两种容器都要比**（只比 .m4a 的话 ADTS 那一路解错了也会通过）",
+		Tests: []string{
+			"TestTheProductPathDecodesAACSampleForSample",
+			"TestTheProductPathDecodesADTSSampleForSample",
+			"TestTheProductPathKeepsTheChannelsInPlace",
+			// ADTS 那一路**自己拼出来的** AudioSpecificConfig，必须和 MP4
+			// 那一路从容器读到的**核心部分**一致（拼错了会变调）。
+			"TestTheADTSPathDerivesTheSameAudioSpecificConfig",
+		},
+	},
+	{
+		Category: Platform,
+		// 「开口到第一个采样 ≤ 200 毫秒」——**只量解码那一侧**，不含下载等待
+		// （真网上 B 站的音频 60 秒才 1.2 MB，光下载就够这个数了）。
+		//
+		// 这一条量的是**产品这一层**：拆容器（go-m4a）、认容器、开解码器、解
+		// 第一帧，全在里面。口径是五轮里**最快**的一次（和
+		// `quality_test.go` 的 `TestAAC320FromTheStreamIsAudibleFast` 一样：
+		// 测的是解码器的能力，不是调度），而最慢的那一次照样打出来。
+		Spec: "产品这一层开口到第一个采样不超过 200 毫秒（不含下载等待）",
+		Tests: []string{
+			"TestTheFirstFrameComesOutFast",
+		},
+	},
+	{
+		Category: Platform,
+		// **编码器延迟不能丢两遍**。AAC 的 MDCT 有重叠，解码器**自己吞掉**它
+		// 输出的第一帧（那一帧是「重叠不完整」的冷启动帧 = 编码器的预热），
+		// 所以解码器的输出**本来就从呈现音频的开头起**。而 MP4 的编辑列表里
+		// 还写着同一个 `media_time = 1024`——那是给「不知道解码器会吞它」的
+		// 解码器用的（AudioToolbox / ffmpeg 都照它剪）。
+		//
+		// 再按 `EncoderDelay` 丢一遍就是**丢了两遍**：凭空砍掉 1024 个真实
+		// 采样（23 毫秒），比容器说的呈现长度少 272 个采样，**判据①会因此红**。
+		Spec: "解码器的输出本来就从呈现音频开头起：产品层不再按 EncoderDelay 丢一遍",
+		Tests: []string{
+			"TestTheDecoderDoesNotDropTheEncoderDelayTwice",
+		},
+	},
+	{
+		Category: Platform,
 		Spec:     "异步结果**逐窗口**唤醒（只叫醒主窗口的话迷你窗口停在旧内容）",
 		Tests: []string{
 			"TestEveryWindowThatDrewItGetsWoken", "TestEveryWindowGetsWoken",

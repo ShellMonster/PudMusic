@@ -43,8 +43,14 @@ import (
 //
 // ⚠️ 这一条曾经写的是「purego + mygo」：那是 `IMFSourceReader` 那条路
 // （BMG-68）的依赖。换成 `IMFTransform` 之后 purego 用不上了（COM 虚表
-// 走标准库的 `syscall.SyscallN`），mygo 也不在这一包里（spike 还没接进
-// 产品的解码器接口）——所以现在只剩 go-m4a。
+// 走标准库的 `syscall.SyscallN`）。
+//
+// mygo 也不在这一包里——**接进产品的解码器接口之后仍然不在**：那一层
+// （`internal/service/audio` 的 `openDecoder`）住在父包里，`mfadec` 只
+// 提供「认容器 + 解码」这一半。`mfadec.Open` 返回的 `*mfadec.Decoder`
+// 的方法集和 `audio.Decoder` **一模一样**，父包直接把它当 `audio.Decoder`
+// 用（Go 的接口是结构化的），两边不需要互相 import。所以引 mygo 进这一包
+// 没有任何好处，却要多一份许可证随包发出去。
 var windowsAudioAllowlist = []string{
 	"github.com/tphakala/go-m4a",
 }
