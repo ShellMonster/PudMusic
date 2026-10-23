@@ -195,6 +195,10 @@ func TestTheFullTopBarDragsWithoutStealingTheButtons(t *testing.T) {
 // 判据是按它**藏起来之前**那个坐标点下去。
 func TestTheHiddenTopBarTakesNoClicks(t *testing.T) {
 	s, tt, fc := fullTester(t)
+	// ⚠️ **歌词是内容，不是界面**：界面藏起来之后歌词还在（票 #236），而这一条
+	// 量的是「画面上还有没有亮像素」——歌词的字也在那儿。关掉歌词，量的就是
+	// 界面本身（歌词那一半见 `TestTheLyricsStayWhenTheInterfaceHides`）。
+	fullNoLyricsPrefs(t, s)
 	openFull(t, tt)
 	tt.Move(600, 400)
 	tt.Frame()
