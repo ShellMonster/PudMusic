@@ -2686,6 +2686,9 @@ var Items = []Item{
 		Tests: []string{
 			// 设置页那一段空档（1200 / 900 两档窗口，量的是画面上的字迹）。
 			"TestTheSettingsRowsDoNotStretchAcrossTheWindow",
+			// **字号放大时说明不折行**（1.0 / 1.25 / 1.4 / 1.5 / 1.75 五档）——
+			// 折行会让整行变高、右边那列控件往下挪半格。
+			"TestTheSettingsDescriptionDoesNotWrapAtBigTextScales",
 			// 迷你窗音量滑块那枚提示：它在，而且**在窗内**（窗只有 320×100，
 			// 而滑块在第一行——摆在上面的话整个提示落在窗外）。
 			"TestTheMiniVolumeSliderSaysWhatItIs",
@@ -2693,6 +2696,9 @@ var Items = []Item{
 			"TestThePlayAllButtonIsTheSameOnBothPages",
 			// 两个页面上按下去，进去队列的都是这一页的歌。
 			"TestThePlayAllButtonEnqueuesOnBothPages",
+			// **放不了的不要塞进队列**（判据 `app.CanPlay`，和右键菜单里那三个
+			// 入口是同一个）——而且跳过了几首要说一声。
+			"TestThePlayAllButtonSkipsTheUnplayableOnes",
 			// 超长歌名的墨迹有上限，不占满整行中段（量的是像素）。
 			"TestALongTitleDoesNotFillTheWholeRow",
 			// 短歌名一个字都不多让（上限不许反过来咬短歌名）。

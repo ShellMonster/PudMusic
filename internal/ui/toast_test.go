@@ -14,6 +14,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -348,27 +349,50 @@ func TestTheToastCardItselfDoesNotBlockClicks(t *testing.T) {
 	}
 
 	under := 0
-	for _, item := range defaultShortcutSettings().Shortcuts {
-		label := "清空「" + item.Name + "」的快捷键"
-		r, found := tt.Find(label)
-		if !found {
-			t.Fatalf("没有「%s」那个 ×，文字有 %q", label, tt.Texts())
+	def := defaultShortcutSettings()
+	// 🔴 **两列都看**（应用内 / 全局）：每一列的 × 都在**自己那个录制框的右端**，
+	// 而两列的 × **离内容段的右沿一样远**——内容段收窄之后（票 #244 的 D1：设置
+	// 页的内容段从 900 收到 780），「应用内」那一列的 × 挪出了卡片盖住的那一片，
+	// 而「全局」那一列的还在底下。
+	//
+	// ⚠️ **位置是算出来的，不是 `Find` 出来的**：两列的 × 叫**同一个名字**
+	// （「清空「X」的快捷键」），`Find` 只给第一个（应用内那一列的）。而 × 在录制
+	// 框的右端——框的内边距 8、× 自己 18 宽，所以它的中心在「框的右沿往左
+	// 8 + 9」。
+	for _, col := range []struct {
+		label  string
+		global bool
+		items  []shortcutItem
+	}{
+		{"应用内快捷键：", false, def.Shortcuts},
+		{"全局快捷键：", true, def.GlobalShortcuts},
+	} {
+		for _, item := range col.items {
+			cell, found := tt.Find(col.label + item.Name)
+			if !found {
+				t.Fatalf("没有「%s%s」那一格，文字有 %q", col.label, item.Name, tt.Texts())
+			}
+			cx := cell.X + cell.W - space.Px8 - clearButtonSize/2
+			cy := cell.Y + cell.H/2
+			if cx < stack.X || cx > stack.X+stack.W || cy < stack.Y || cy > stack.Y+stack.H {
+				continue // 这个 × 不在卡片底下
+			}
+			under++
+			tt.ClickAt(cx, cy)
+			tt.Frame()
+			list := s.keys.snapshot().Shortcuts
+			if col.global {
+				list = s.keys.snapshot().GlobalShortcuts
+			}
+			if it, _ := findShortcut(item.ID, list); it.Shortcut != "" {
+				t.Errorf("卡片压着的那一格点不动：%s 还是 %q（卡片把点击吃了）", item.Name, it.Shortcut)
+			}
+			// 摆回默认值，好让下一格有东西可清。
+			if err := s.keys.set(shortcutSlot{id: item.ID, global: col.global}, item.Shortcut); err != nil {
+				t.Fatal(err)
+			}
+			tt.Frame()
 		}
-		cx, cy := r.X+r.W/2, r.Y+r.H/2
-		if cx < stack.X || cx > stack.X+stack.W || cy < stack.Y || cy > stack.Y+stack.H {
-			continue // 这一格不在卡片底下
-		}
-		under++
-		tt.ClickAt(cx, cy)
-		tt.Frame()
-		if it, _ := findShortcut(item.ID, s.keys.snapshot().Shortcuts); it.Shortcut != "" {
-			t.Errorf("卡片压着的那一格点不动：%s 还是 %q（卡片把点击吃了）", item.Name, it.Shortcut)
-		}
-		// 摆回默认值，好让下一格有东西可清。
-		if err := s.keys.set(shortcutSlot{id: item.ID}, item.Shortcut); err != nil {
-			t.Fatal(err)
-		}
-		tt.Frame()
 	}
 	if under == 0 {
 		t.Fatalf("卡片底下一个 × 都没有（被压住的那一片在 %v，窗口 1200x800）："+

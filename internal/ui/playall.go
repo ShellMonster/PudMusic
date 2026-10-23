@@ -61,9 +61,19 @@ func playAllButton(c *ui.Context, disabled bool) ui.Element {
 //
 // 🔴 **说一句话**：按下去之后屏幕上本来什么都不会变（队列在播放条那儿，用户
 // 未必看得到），不说一声的话那枚按钮像是死的。
+//
+// 🔴 **放不了的不塞进队列**（票 #244 / 评审）：同一页每一行的右键菜单对那种行
+// 是**灰**的（「播放 / 下一首播放 / 添加到队列」三个入口都按不动，末尾还补一句
+// 为什么）。而这一枚是**整页一起加**——它要是把放不了的也加进去，用户就会在
+// 队列里撞上几首按不动的歌，而界面上一个字的解释都没有。
+//
+// ⚠️ **跳过了要说一声**：不然用户数不出「这一页有 30 首，而队列里只多了 25 首」。
 func (s *Shell) playAllSongs(songs []list.Music) {
-	items := playAllItems(songs)
+	items, skipped := playAllItems(songs)
 	if len(items) == 0 {
+		if skipped > 0 {
+			s.addToast("这一页的歌都放不了（没有可播的稿件）", notice.Warning)
+		}
 		return
 	}
 	if err := s.app.Enqueue(items...); err != nil {
@@ -71,22 +81,37 @@ func (s *Shell) playAllSongs(songs []list.Music) {
 		return
 	}
 	// 话照抄上游（`video-list/index.tsx:100`）。
-	s.addToast("已添加 "+strconv.Itoa(len(items))+" 首到播放列表", notice.Success)
+	msg := "已添加 " + strconv.Itoa(len(items)) + " 首到播放列表"
+	if skipped > 0 {
+		msg += "（有 " + strconv.Itoa(skipped) + " 首放不了，没加进去）"
+	}
+	s.addToast(msg, notice.Success)
 }
 
-// playAllItems 把这一页的行变成队列要的条目，**顺带去掉重复的**。
+// playAllItems 把这一页的行变成队列要的条目：去重，**并去掉放不了的那些**。
 //
 // ⚠️ **去重是必须的**：B 站翻页会重叠，同一个 bvid 落进 loaded 两次就是同一个
 // 条目进队列两次，用户按下一首会连着听到同一首。
-func playAllItems(songs []list.Music) []app.Item {
+//
+// 🔴 **放不了的（`app.CanPlay` 判的）要去掉**：判据和右键菜单里那三个入口
+// **是同一个**（`app.CanPlay`，见 `widgets/list` 的 `markUnplayable`）——
+// 菜单说「这一首按不动」，而「全部播放」把它加进队列，两边对不上。
+//
+// 第二个返回值是**跳过了几首**（去重之后、放不了的那种），用来把话说明白。
+func playAllItems(songs []list.Music) ([]app.Item, int) {
 	items := make([]app.Item, 0, len(songs))
 	seen := make(map[string]bool, len(songs))
+	skipped := 0
 	for _, m := range songs {
 		if seen[m.ID] {
 			continue
 		}
 		seen[m.ID] = true
+		if !app.CanPlay(m.Item) {
+			skipped++
+			continue
+		}
 		items = append(items, m.Item)
 	}
-	return items
+	return items, skipped
 }

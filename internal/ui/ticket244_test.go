@@ -10,6 +10,7 @@ package ui
 
 import (
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -100,6 +101,41 @@ func settingsInkRight(tt *mygoui.Tester, text mygoui.Rect, limit float32) float3
 	return right
 }
 
+// TestTheSettingsDescriptionDoesNotWrapAtBigTextScales 钉住「字号放大时说明
+// 不折行」。
+//
+// 🔴 **这一条是评审抓出来的回归**：内容段收窄（900 → 780，票 #244 的 D1）之后
+// **没有算系统字号**——1.5 倍时那句最长的说明就折成两行，而**说明折行会让整行
+// 变高、右边那列控件跟着往下挪半格**，一页设置于是参差不齐（`settingsDescMinW`
+// 的注释写着这一条要避免）。
+//
+// 修法是**内容段的上限跟着字号缩放走**（`settingsContentMaxWAt`）：1.4 倍时上限
+// 是 1092，而 1200 宽的窗口只有 1000 可视，于是那一档的内容段就是可视区那么宽
+// ——说明那一列因此还放得下那句话。
+//
+// # 判据是**说明那一格的高度**
+//
+// 一行字的高 ≈ 字号 × 1.18（框架的行高）。超过「一行半」就说明它折行了。
+func TestTheSettingsDescriptionDoesNotWrapAtBigTextScales(t *testing.T) {
+	for _, sc := range []float32{1, 1.25, 1.4, 1.5, 1.75} {
+		t.Run(fmt.Sprintf("%.2f倍", sc), func(t *testing.T) {
+			tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), at(1200, 800),
+				withPrefs(mygoui.Preferences{TextScale: sc}))
+			homeFrame(tt)
+			desc, ok := tt.Find(settingsLongestDesc)
+			if !ok {
+				t.Fatalf("设置页上没有 %q 那一句，文字有 %q", settingsLongestDesc, tt.Texts())
+			}
+			// 一行字的高 ≈ 14 × 缩放 × 1.18；一行半是「还没折」的宽限。
+			if line := 14 * sc * 1.18; desc.H > line*1.5 {
+				t.Errorf("%.2f 倍字号下那句说明折行了（高 %.1f，一行是 %.1f）——"+
+					"说明一折行，整行就变高，右边那列控件跟着往下挪半格",
+					sc, desc.H, line)
+			}
+		})
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // B5：迷你窗那根音量滑块要有一枚看得见的悬停提示
 // ─────────────────────────────────────────────────────────────────────────────
@@ -169,7 +205,7 @@ func TestThePlayAllButtonIsTheSameOnBothPages(t *testing.T) {
 	// 首页：摆三首歌，那一枚按钮才是可按的。
 	home := newTestShell(t, withSettings(app.DefaultSettings("")))
 	home.s.home.SetSongs(homeSongs{
-		tabs: [homeTabCount][]list.Music{0: homeSongsOf("a", 3)},
+		tabs: [homeTabCount][]list.Music{0: playableSongsOf("a", 3)},
 	})
 	homeFrame(home.tt)
 	homeBtn, ok := home.tt.Find(playAllLabel)
@@ -207,9 +243,16 @@ func TestThePlayAllButtonIsTheSameOnBothPages(t *testing.T) {
 // 还是从这首开始（那是待人裁决的那一条，DESIGN.md §十第 3 条）。
 func TestThePlayAllButtonEnqueuesOnBothPages(t *testing.T) {
 	// 首页：三首歌按下去，队列里就该多三首。
+	//
+	// ⚠️ **队列先放一首**：队列空着的时候 `App.Enqueue` 会**起播**第一首
+	// （`internal/app/queue.go:785`），而这一首是网络上的歌——测试里那一下就是
+	// 真打 B 站。先放一首本地文件，队列就不是空的了 ✓。
 	home := newTestShell(t, withSettings(app.DefaultSettings("")))
+	if err := home.s.app.Enqueue(app.LocalItem(flacPath(t))); err != nil {
+		t.Fatal(err)
+	}
 	home.s.home.SetSongs(homeSongs{
-		tabs: [homeTabCount][]list.Music{0: homeSongsOf("a", 3)},
+		tabs: [homeTabCount][]list.Music{0: playableSongsOf("a", 3)},
 	})
 	homeFrame(home.tt)
 	btn, ok := home.tt.Find(playAllLabel)
@@ -218,8 +261,10 @@ func TestThePlayAllButtonEnqueuesOnBothPages(t *testing.T) {
 	}
 	home.tt.ClickAt(btn.X+btn.W/2, btn.Y+btn.H/2)
 	home.tt.Frame()
-	if got := home.s.app.Queue().Len(); got != 3 {
-		t.Errorf("首页上按了 %q 之后队列里是 %d 首，want 3", playAllLabel, got)
+	// ⚠️ **队列里先有那一首本地文件**：所以按完之后是 1 + 3。
+	if got := home.s.app.Queue().Len(); got != 4 {
+		t.Errorf("首页上按了 %q 之后队列里是 %d 首，want 4（先放的那一首 + 这一页的三首）",
+			playAllLabel, got)
 	}
 
 	// 搜索页：同样按一下，进去的是这一页的结果。
@@ -239,5 +284,85 @@ func TestThePlayAllButtonEnqueuesOnBothPages(t *testing.T) {
 	if got := search.app.Queue().Len(); got <= before {
 		t.Errorf("搜索页上按了 %q 之后队列里还是 %d 首——那一枚按钮按了没反应",
 			playAllLabel, got)
+	}
+}
+
+// playableSongsOf 造 n 首**放得了**的歌（首页那一屏）。
+//
+// 🔴 **Item 得是放得了的**：票 #244 之后「全部播放」会跳过放不了的那些
+// （判据 `app.CanPlay`），而一个空的 `app.Item`（`Type` 是空串）在那个判据眼里
+// 就是「没有可播的稿件」——拿它当夹具，这一枚按钮按下去什么也不会加。
+func playableSongsOf(prefix string, n int) []list.Music {
+	out := make([]list.Music, n)
+	for i := range out {
+		title := prefix + " 的歌 " + strconv.Itoa(i+1)
+		out[i] = list.Music{
+			ID:    prefix + "-" + strconv.Itoa(i),
+			Title: title,
+			Owner: prefix + " 的 UP 主",
+			Item: app.Item{
+				Source: app.SourceOnline,
+				Type:   "mv",
+				Bvid:   "BV1" + prefix + strconv.Itoa(i),
+				Title:  title,
+			},
+		}
+	}
+	return out
+}
+
+// TestThePlayAllButtonSkipsTheUnplayableOnes 钉住「放不了的不要塞进队列」。
+//
+// # 为什么这一条要紧
+//
+// 首页「流行」那一档走音乐综合榜，而榜上**有些条目没有稿件**（纯音乐条目，
+// `related_archive` 是空的，`internal/app/recommend.go`）——那种行**画得出来**，
+// 但放不了。而同一页每一行的右键菜单对那种行是**灰**的（「播放 / 下一首播放 /
+// 添加到队列」三个入口都按不动，末尾还补一句为什么）。
+//
+// 「全部播放」是**整页一起加**的：它要是把放不了的也加进去，用户就会在队列里
+// 撞上几首按不动的歌，而界面上一个字的解释都没有。
+//
+// # 判据是**队列里那几项**
+//
+// 放得了的那一首进去了，放不了的那一首没进去；而且**跳过了几首要说一声**
+// （不然用户数不出「这一页有 2 首，队列里只多了 1 首」）。
+func TestThePlayAllButtonSkipsTheUnplayableOnes(t *testing.T) {
+	home := newTestShell(t, withSettings(app.DefaultSettings("")))
+	// 队列先放一首：队列空着的时候 Enqueue 会起播第一首（那是网络上的歌）。
+	if err := home.s.app.Enqueue(app.LocalItem(flacPath(t))); err != nil {
+		t.Fatal(err)
+	}
+	home.s.home.SetSongs(homeSongs{
+		tabs: [homeTabCount][]list.Music{0: {
+			{ID: "a", Title: "放得了的", Item: app.Item{
+				Source: app.SourceOnline, Type: "mv", Bvid: "BV1ok", Title: "放得了的",
+			}},
+			// 🔴 **这一首放不了**：`Type` 是 mv 而 `Bvid` 是空串——榜上没有稿件
+			// 的纯音乐条目就是这个样子（`app.playableOnline` 的最后那一支）。
+			{ID: "b", Title: "放不了的", Item: app.Item{
+				Source: app.SourceOnline, Type: "mv", Title: "放不了的",
+			}},
+		}},
+	})
+	homeFrame(home.tt)
+	btn, ok := home.tt.Find(playAllLabel)
+	if !ok {
+		t.Fatalf("首页上没有 %q 那一枚，文字有 %q", playAllLabel, home.tt.Texts())
+	}
+	home.tt.ClickAt(btn.X+btn.W/2, btn.Y+btn.H/2)
+	home.tt.Frame()
+
+	items := home.s.app.Queue().Items()
+	if len(items) != 2 {
+		t.Fatalf("队列里有 %d 项，want 2（原来那一首 + 放得了的那一首）——"+
+			"放不了的那一首不该被塞进队列", len(items))
+	}
+	if items[1].Title != "放得了的" {
+		t.Errorf("队列第 2 项是 %q，want 「放得了的」", items[1].Title)
+	}
+	// 跳过了几首要说一声。
+	if !home.tt.HasText("有 1 首放不了") {
+		t.Errorf("没有说跳过了几首，文字有 %q", home.tt.Texts())
 	}
 }

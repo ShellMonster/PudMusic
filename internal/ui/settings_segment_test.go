@@ -159,7 +159,7 @@ func TestTheSettingsControlColumnIsNeverCutOff(t *testing.T) {
 			homeFrame(tt)
 
 			ctrl := settingRect(t, tt, s, "主题模式")
-			right := settingsContentRight(sc.winW, sc.side)
+			right := settingsContentRight(sc.winW, sc.side, sc.scale)
 			if ctrl.X+ctrl.W > right+1 {
 				t.Errorf("控件列的右沿在 %.1f，而内容那一段的右沿是 %.1f——"+
 					"控件被推出内容区了（窗口 %d / 侧栏 %.0f / 字号 %.1f）",
@@ -236,9 +236,12 @@ func sideSceneSettings(side float64) app.Settings {
 // settingsContentRight 是内容那一段（**去掉左右内边距**）的右沿。
 //
 // ⚠️ **按窗口坐标算，不受滚动影响**（设置页滚的是纵向）。
-func settingsContentRight(winW int, side float64) float32 {
+//
+// ⚠️ **上限跟着字号缩放走**（`settingsContentMaxWAt`）：这里算的是**这一帧**的
+// 宽度，所以字号那一档也得算进去（`scale` 是系统的文本缩放，1 = 不缩放）。
+func settingsContentRight(winW int, side float64, scale float32) float32 {
 	avail := float32(winW) - float32(side)
-	block := float32(settingsContentMaxW)
+	block := settingsContentMaxW * scale
 	if avail < block {
 		block = avail
 	}

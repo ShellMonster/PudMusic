@@ -70,8 +70,11 @@ func TestRenderTicket244Shots(t *testing.T) {
 			saveHomeShot(t, dir, dark, name)
 
 			// ── B6：搜索页那一枚「全部播放」（和首页那一枚对比）────────
+			//
+			// ⚠️ **主题要真的跟着换**：上一版这一张「深色」和「浅色」逐字节相同
+			// （搜索页那一支没带主题入参）——那不是深色那一套，是同一张图存了两遍。
 			st := newSearchStub(10, 20)
-			_, searchTT := newSearchPage(t, "周杰伦", st)
+			_, searchTT := newSearchPage(t, "周杰伦", st, systemIsDark(dark))
 			waitFor(t, "搜索结果出来了", func() bool {
 				searchTT.Frame()
 				return searchTT.HasText(playAllLabel)
