@@ -485,7 +485,7 @@ func TestDownloadSaysItIsNotWiredYet(t *testing.T) {
 
 	err := a.DownloadMedias(t.Context(), testRef, []bili.Media{{ID: 1, Type: 2}})
 	if !DownloaderMissing(err) {
-		t.Fatalf("err = %v，want「下载服务还没接上」", err)
+		t.Fatalf("err = %v，want「下载服务暂时用不了」", err)
 	}
 	if err == nil {
 		t.Fatal("下载服务还没有实现，却报成功")

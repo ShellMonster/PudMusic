@@ -533,10 +533,31 @@ func loggedOutHint(hidden int) string {
 // ⚠️ **`Wrap()` 不能省**：侧栏拖到最窄是 160，而这一句在 12px 下差不多就要
 // 160——不换行的话它会被裁掉半句，而半句「还有 3 个入口，登录后可」比不摆更让人
 // 以为侧栏坏了。
+//
+// # 这一句**是能点的**（票 #242，UX 报告 §3-A 的 A1）
+//
+// 原来它是一句纯文字：它解释了「侧栏上少了三行」，却**没给下一步**——用户读完
+// 只能自己去顶栏找那枚没有文字的图标（而那一枚图形当时还和「退出」只差一个箭头
+// 方向，见 `icons.go` 的 `iconLogin`）。现在按它直接去扫码登录那一页。
+//
+// ⚠️ **别把它改成一枚按钮**：那一句的作用是「解释侧栏上少了什么」，做成药丸
+// 按钮会和旁边那些菜单项长得一样，而菜单项是「进去看看」——两件事不该长得一样。
+// 它保持成一行字，靠**悬停时变主色 + 下划线**告诉用户它点得动（上游歌名那处
+// 可点文字是同一套做法，见 `playbar.go`）。
 func (s *Shell) viewLoggedOutHint(c *ui.Context, hidden int) {
 	ui.Column(c).Key("side-logged-out").Children(func() {
-		ui.Text(c, loggedOutHint(hidden)).FontSize(scale.Font(c, 12)).Wrap().
-			TextColor(c.Theme().TextMuted).Padding(4, 8)
+		hint := ui.Text(c, loggedOutHint(hidden)).FontSize(scale.Font(c, 12)).Wrap().
+			TextColor(c.Theme().TextMuted).Padding(4, 8).
+			OnClick(func() { s.goLogin() })
+		// 悬停才显出「点得动」：主色 + 下划线。
+		//
+		// ⚠️ **主色当字色要取 `ink.AccentOn`**：浅色下主色是亮绿，压在浅底上
+		// 只有 1.9:1（读不出来），所以取那个「读得出来」的变体——理由和
+		// `flatbutton.go` 的 `flatCurrent` 是同一条。
+		if hint.Hovered() {
+			hint = hint.TextColor(ink.AccentOn(c.Theme())).Underline().
+				Cursor(ui.CursorPointer)
+		}
 	})
 }
 

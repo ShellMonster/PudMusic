@@ -249,7 +249,9 @@ type CollectionNotice struct {
 // ⚠️ 别拿 `errStreamingMissing`（在线播放那个）顶替：它那句文案是「在线播放
 // 还没接上」，而这一页跟在线播放一点关系没有——用户在歌单页看到一句「在线
 // 播放还没接上」会以为是播放坏了。
-var errCollectionsMissing = errors.New("biu: 歌单接口还没挂上")
+// ⚠️ **后半句是给用户看的**（收藏失败时它就是失败原因），不许说「接口」
+// （票 #242，UX 报告 §3-F 的 F2）。
+var errCollectionsMissing = errors.New("biu: 收藏夹暂时打不开")
 
 // collections 是 App 挂着的歌单这一摊。
 type collections struct {
@@ -579,7 +581,8 @@ func likeDone(done func(Item, error), it Item, err error) {
 // 正常情况下它不该出现（`ui.MountCollections` 挂的是 `App` 自己），但它是
 // **可能**的：没装下载服务的那一次启动、以及测试。所以它留着，界面也照它把
 // 按钮按成不可用——不能因为「正常路径不会走到」就删掉那条判断。
-var errDownloaderMissing = errors.New("biu: 下载服务还没挂上")
+// ⚠️ **后半句会原样弹到用户面前**（票 #242，UX 报告 §3-F 的 F2）。
+var errDownloaderMissing = errors.New("biu: 下载服务暂时用不了")
 
 // DownloaderMissing 报这个错是不是「下载服务还没接上」。
 func DownloaderMissing(err error) bool { return errors.Is(err, errDownloaderMissing) }
@@ -609,7 +612,7 @@ func (a *App) LoadCollectionPage(ctx context.Context, ref CollectionRef, sort bi
 // 所以这句话只在用户真的点了什么的时候才说。
 func (a *App) sayCollectionsMissing() {
 	if c := a.collectionsSnapshot(); c != nil {
-		c.notice.add(CollectionRef{}, "歌单接口还没挂上", NoticePlain, notice.Danger)
+		c.notice.add(CollectionRef{}, "收藏夹暂时打不开", NoticePlain, notice.Danger)
 	}
 	a.wakeUI()
 }

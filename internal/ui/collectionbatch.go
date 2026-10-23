@@ -476,7 +476,9 @@ func (s *Shell) takeLeave() {
 // false（把已经加载出来的全部）。
 func (s *Shell) startCollectionDownload(p *collectionPage, only bool) {
 	if !s.app.DownloaderMounted() {
-		s.addToast("下载还没挂上：这个应用没把下载服务装进来", notice.Danger)
+		// ⚠️ **不许说「没把下载服务装进来」**（票 #242，UX 报告 §3-F 的 F2）：
+		// 用户不知道应用里装了哪些零件，他只知道「这一下现在按不了」。
+		s.addToast("下载暂时用不了", notice.Danger)
 		return
 	}
 	medias := s.pickedMedias(p)
@@ -516,7 +518,7 @@ func downloadDoneText(err error) string {
 	case err == nil:
 		return "下载任务已添加"
 	case app.DownloaderMissing(err):
-		return "下载还没挂上：这个应用没把下载服务装进来"
+		return "下载暂时用不了"
 	}
 	return err.Error()
 }
