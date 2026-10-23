@@ -47,7 +47,7 @@ func (s *Shell) displayView() list.View {
 // 页的页面区最窄是 900（`WindowOptions.MinWidth`）减掉侧栏和内边距 ≈ 660——
 // 再挤一列预览会把「外观」那一段的每一行都顶到换行。
 func (s *Shell) viewDisplayMode(c *ui.Context, st app.Settings, ro bool) {
-	ui.Column(c).Key("setting:displayMode").Width(segWidth).Gap(space.Px8).Children(func() {
+	ui.Column(c).Key("setting:displayMode").Width(settingsControlW).Gap(space.Px8).Children(func() {
 		s.pickDisplayMode(c, st, ro)
 		viewDisplayModePreview(c, list.ViewOf(st.DisplayMode))
 	})
@@ -70,9 +70,16 @@ func (s *Shell) viewDisplayMode(c *ui.Context, st app.Settings, ro bool) {
 // 所以每一张有 `Label`（「预览：网格」这种带前缀的）而没有可见文字：读屏软件
 // 念得出它是哪一张，Tester 也认得出，可它和切换控件那几个「网格」撞不上。
 const (
-	previewW    = 88
+	// previewW 是**一张**缩略图多宽。三张加两道的缝正好铺满控件列那一格
+	// （`settingsControlW`）——此前是 88（3×88 + 2×10 = 284），右边空出 16，
+	// 那一行看上去比上面那行短一截（UI 报告 §4 的 F-04）。
+	//
+	// ⚠️ **92 和 12 都是整数**：它们加起来正好 300，而 93 会差一个像素
+	// （3×93 + 2×10 = 299），那一行的右边缘就又短了一格——差一个像素看不出来，
+	// 但**它会让「填满」这件事不再是事实**。
+	previewW    = 92
 	previewH    = 56
-	previewGap  = space.Px10
+	previewGap  = space.Px12
 	previewRows = 3 // 列表 / 网格预览里摆几行
 )
 
@@ -84,7 +91,7 @@ const (
 // 来自更新的版本时这一格动不了，预览照样看得见（它一个字都没改）。
 func viewDisplayModePreview(c *ui.Context, chosen list.View) {
 	t := c.Theme()
-	ui.Row(c).Key("setting:displayModePreview").Width(segWidth).
+	ui.Row(c).Key("setting:displayModePreview").Width(settingsControlW).
 		Gap(previewGap).AlignItems(ui.Start).Children(func() {
 		for v := list.View(0); v < list.ViewCount; v++ {
 			previewOne(c, t, v, v == chosen)

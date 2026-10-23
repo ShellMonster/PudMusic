@@ -47,7 +47,12 @@ func (s *Shell) settingsUpdate(c *ui.Context, st app.UpdateState) {
 // updateVersionTitle 是那一行的标题。
 //
 // 字号和字重跟着设置页的行标题走（16/500，票 #166 的 G06）；弹窗里那一行是
-// 另一档（13/700），所以这两样都从调用点传进 `versionLine`。
+// 另一档（13/400），所以这两样都从调用点传进 `versionLine`。
+//
+// ⚠️ **弹窗那一档是 400，不是 700**（票 #235）：它原来是 700（#166 留下的），
+// 而那时弹窗标题也是粗的（16/700），层次靠字号分；本票把标题改回 400 之后，
+// 那行更小的 13/700 成了整个弹窗里**唯一最粗的字**——层次被改反了。
+// 现在那一行是 13/400，比标题（16/400）小一号，层次重新由字号说话。
 func (s *Shell) updateVersionTitle(c *ui.Context, st app.UpdateState) {
 	s.versionLine(c, "setting:updateVersion", 16, weightMedium, st)
 }

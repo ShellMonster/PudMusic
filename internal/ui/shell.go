@@ -1501,7 +1501,8 @@ func (s *Shell) viewCrash(c *ui.Context) {
 		if v := errorArt; v != nil {
 			ui.Image(c, v).Height(errorArtHeight)
 		}
-		ui.Text(c, "界面出错了，播放器已经停在这一页").FontSize(scale.Font(c, 18)).Bold()
+		// ⚠️ **字重不写**（400）：标题那一档是 400（DESIGN.md §二）。
+		ui.Text(c, "界面出错了，播放器已经停在这一页").FontSize(scale.Font(c, 18))
 
 		// 「出错在哪一步」这一块：三行，各自说清一件事。
 		ui.Column(c).Key("crash-where").Gap(space.Px2).AlignItems(ui.Center).Children(func() {

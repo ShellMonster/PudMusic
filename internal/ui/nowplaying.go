@@ -76,7 +76,9 @@ func (s *Shell) viewNowPlaying(c *ui.Context, _ *ui.Route) {
 	// `app/lyrics` 的切歌先重置 / 偏移字号夹界 / 防抖落盘）负责「哪一句正在唱」
 	// 和「那两个旋钮能走到哪儿」，这一层只画。
 	ui.Column(c).Key("page:mini-player").Grow(1).Padding(space.Px28).Gap(space.Px12).Children(func() {
-		ui.Text(c, st.Title).FontSize(scale.Font(c, 20)).Bold()
+		// ⚠️ **字重不写**（400）：这一句和满屏播放器那一枚歌名是同一个数
+		// （`playerTitleSize`，20 / 400，DESIGN.md §二），之前它是 700。
+		ui.Text(c, st.Title).FontSize(scale.Font(c, playerTitleSize))
 		s.viewLyrics(c, s.app.Lyrics(), st.Position)
 	})
 }
