@@ -142,13 +142,19 @@ func likeFailText(like bool, err error) string {
 // 摆的是一格一格的封面卡（`user-profile/grid-card/index.tsx:26` 的
 // `group-hover:scale-105` + `transition-transform duration-300`）。放大的是
 // **框里那张图**，框不动——框要是自己长大，它就会压到旁边的标题上。
-func (s *Shell) viewCollectionRow(c *ui.Context, col bili.UpCollection) {
+func (s *Shell) viewCollectionRow(c *ui.Context, col bili.UpCollection, selected, ring bool) {
 	t := c.Theme()
 	box := ui.Row(c).Grow(1).Gap(10).Padding(8).AlignItems(ui.Center).
 		Key("coll:" + strconv.FormatInt(col.ID, 10))
 	// ⚠️ hover 要在 Children **之前**问（理由同 `widgets/list` 的 grid.go）：
 	// 它报的是这一帧指针在不在这一行上，而封面是在 Children 里画的。
 	on := box.Hovered()
+	// 选中那一层：盖掉框架那块实心主色底，键盘走到它上面时给它一圈焦点环
+	//（理由见 `widgets/list/selection.go`）。
+	//
+	// ⚠️ **必须盖**：框架给选中的行铺一整块实心主色底（`mygo/ui/table.go` 的
+	// `node.Selected`），而票 #197 拍板去掉它——那一层在库里改不动。
+	box = list.SelectedRow(box, t, selected, on, ring)
 	if box.Clicked() {
 		s.navigate(collectionPath(col.ID))
 	}
@@ -169,7 +175,7 @@ func (s *Shell) viewCollectionRow(c *ui.Context, col bili.UpCollection) {
 //
 // 🔴 **作者名可点进他的空间**（上游 `dynamic-feed/item.tsx:88-90` 跳
 // `/user/{mid}`）。这是「能点进对应 UP 空间」那条验收在卡片上的落点。
-func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic) {
+func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic, selected, ring bool) {
 	t := c.Theme()
 	// 卡片本身照上游 `border-default-100 mb-2 w-full rounded-none border-b
 	// bg-transparent pb-4`（`dynamic-feed/item.tsx:80`）：
@@ -177,10 +183,14 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic) {
 	//   - 距下一条 8（`mb-2`）；
 	//   - 卡内下边距 16（`pb-4`）、上边距 16（CardHeader 的 `pt-4`）；
 	//   - **左右 0**：那 32 由页面那一层给（动态流是 16+16，UP 空间是 `p-4`）。
-	ui.Column(c).Key("dyn:"+d.ID).Grow(1).
+	card := ui.Column(c).Key("dyn:"+d.ID).Grow(1).
 		Padding(16, 0, 16, 0).Margin(0, 0, 8, 0).
 		BorderWidth(0, 0, 1, 0).BorderColor(t.Border).
-		Gap(6).Children(func() {
+		Gap(6)
+	// 选中那一层：盖掉框架那块实心主色底，键盘走到它上面时给它一圈焦点环
+	//（理由见 `widgets/list/selection.go`）。
+	card = list.SelectedRow(card, t, selected, card.Hovered(), ring)
+	card.Children(func() {
 		// ① 头一行：头像 + 昵称（可点）+ 时间。
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			s.spaceAvatar(c, d.Author.Face, 32, false)

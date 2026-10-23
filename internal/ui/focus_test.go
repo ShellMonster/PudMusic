@@ -95,6 +95,64 @@ func TestTheArrowKeysWalkBetweenTheSidebarAndTheContent(t *testing.T) {
 	}
 }
 
+// TestTheArrowKeysWalkOutOfTheSelfDrawnContent 钉住「内容区是**自画列表**的那几页，
+// ↑ 回得到侧栏」。
+//
+// 🔴 **回归**（票 #245 的评审抓到的）：我的关注 / 用户动态 / UP 主空间的内容区是
+// **裸的 `ui.List`**（卡片是自己画的，走不了 `widgets/list` 那个包），所以：
+//
+//   - 没有 `ui.ListState.Selected` → 框架那一档**没有键盘游标** → 方向键在内容区
+//     里**只滚动、不选行**；
+//   - 没有「↑ 到顶交回侧栏」那一档 → 键盘用户**被留在内容区里**，回不去。
+//
+// 这一条走的是「我的关注」那一页（自画列表里最能代表的三页之一）。
+func TestTheArrowKeysWalkOutOfTheSelfDrawnContent(t *testing.T) {
+	b := newUIExplore(t)
+	uiFollowTags(b, map[int]any{-10: "特别关注", 0: "默认分组"})
+	// ⚠️ **要够几行**：这一页的内容区是**网格**，而框架的列表键盘导航挪的是
+	// **行**（格与格之间那一套要 `Selection`，那是多选态）。三个用户挤在一行里，
+	// 方向键在行之间挪不动 —— 所以这里给八个（几列一行就是几行）。
+	users := make([]any, 0, 8)
+	for i := range 8 {
+		users = append(users, uiFollowUser(int64(11+i), "第"+string(rune('A'+i))+"个 UP"))
+	}
+	uiFollowList(b, 8, users)
+	uiFollowSearch(b, "", nil)
+	fc := &focusCtx{}
+	s, tt, _ := newSpaceShell(t, b, true, "77", fc.opt())
+	tt.SetFocused(true)
+	s.navigate(followPath)
+	tt.Frame()
+	f := s.followPageOf()
+	waitFrames(t, tt, "关注的人到了", func() bool { return len(f.users) == 8 && f.tagStarted })
+
+	inSide := func() bool { return s.sideAnchor.Focused(fc.c) }
+	inContent := func() bool {
+		return f.keys.st != nil && f.keys.st.Handle.Focused(fc.c)
+	}
+
+	// 焦点交给侧栏的第一项。
+	s.sideAnchor.Focus()
+	tt.Frame()
+	waitFrames(t, tt, "焦点落到侧栏的第一项上", inSide)
+
+	// ↓：焦点进内容区。
+	tt.Key(0, mygoui.KeyDown)
+	tt.Frame()
+	waitFrames(t, tt, "焦点走进内容区", inContent)
+
+	// ↓：内容区里**方向键要能选行**（没有游标的话它只滚动）。
+	tt.Key(0, mygoui.KeyDown)
+	tt.Frame()
+	waitFrames(t, tt, "方向键在内容区里挪到第二行",
+		func() bool { return f.keys.sel == 1 })
+
+	// ↑：回侧栏（键盘用户不能被留在内容区里）。
+	tt.Key(0, mygoui.KeyUp)
+	tt.Frame()
+	waitFrames(t, tt, "焦点从内容区回到侧栏", inSide)
+}
+
 // TestTheContentPageRegistersItsOwnList 钉住「有内容的页登记了自己的列表」。
 //
 // 判据是 `s.contentFocus`：它是「这一帧内容区里登记的那一个列表」，为空就说明

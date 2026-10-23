@@ -116,7 +116,14 @@ type tipPhase struct {
 // 指针或焦点离开之后再来，这一枚才重新出提示。
 //
 // open / close 是这一档的两档时延。
-func (p *tipPhase) step(active bool, now time.Time, open, close time.Duration) bool {
+//
+// 🔴 **`c.After(wait)` 那两句不能少**（票 #245 的评审）：延时到了之后得**有人画
+// 那一帧**，提示才出得来 / 收得掉。界面在**空闲时是没有帧的**——没人安排的话，
+// 指针一离开，提示就赖在屏幕上直到下一次碰巧的帧（而 300ms 那一档则永远出不来）。
+//
+// 少了它的症状是「静默」：仓库自己的验收命令全绿，因为那些用例 `Advance` 之后
+// 又**手动画了一帧**，把缺的那一帧补上了。
+func (p *tipPhase) step(c *ui.Context, active bool, now time.Time, open, close time.Duration) bool {
 	lost := false
 	if active != p.active {
 		p.active = active
@@ -133,12 +140,16 @@ func (p *tipPhase) step(active bool, now time.Time, open, close time.Duration) b
 		if !p.shown {
 			if wait := open - now.Sub(p.activeSince); wait > 0 {
 				// 还没到出提示的时刻：这一帧不画，等到了再画。
+				// ⚠️ **这一句就是那一帧的安排**（理由见上面那段）。
+				c.After(wait)
 				return lost
 			}
 			p.shown = true
 		}
 	case p.shown:
 		if wait := close - now.Sub(p.inactiveSince); wait > 0 {
+			// 同上：收提示的那一帧也要有人安排。
+			c.After(wait)
 			return lost
 		}
 		p.shown = false
@@ -204,9 +215,9 @@ func (s *Shell) tipAt(c *ui.Context, anchor ui.Element, text string, timing tipT
 	focused := anchor.FocusVisible()
 
 	// 悬停那一档：走上游的时延（默认 0 出、500 收，菜单那几处 0/0）。
-	hoverLost := st.hover.step(hovered, now, timing.open, timing.close)
+	hoverLost := st.hover.step(c, hovered, now, timing.open, timing.close)
 	// 焦点那一档：**0 出、0 收**（理由见 tipFocusOpen 那两个常数的注释）。
-	focusLost := st.focus.step(focused, now, tipFocusOpen, tipFocusClose)
+	focusLost := st.focus.step(c, focused, now, tipFocusOpen, tipFocusClose)
 
 	// 指针或焦点离开之后，「按过它了就收起」那一档复位——再回来才重新出提示。
 	if hoverLost || focusLost {

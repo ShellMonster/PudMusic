@@ -286,7 +286,7 @@ func TestTheFollowCardHasAShadow(t *testing.T) {
 				s.viewFollowCard(c, bili.FollowUser{
 					Mid: 11, Name: "一个 UP 主", Sign: "签名",
 					Face: "https://f/author-11.jpg",
-				})
+				}, false, false)
 			})
 			img := tt.Image()
 			// 卡片是 Grow(1) 的，占满留白之后那一块。

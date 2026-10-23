@@ -2,6 +2,7 @@ package ui
 
 import (
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	mygoui "github.com/egoist/mygo/ui"
@@ -131,6 +132,51 @@ func TestTheHoveredTooltipGivesWayToTheFocusedOne(t *testing.T) {
 	if tt.HasText("提示第一枚") {
 		t.Errorf("指针那一枚的悬停提示还挂在屏幕上（文字有 %q）——"+
 			"它该给焦点那一枚让位", tt.Texts())
+	}
+}
+
+// TestTheTooltipSettlesOnItsOwn 钉住「延时到了之后，界面**自己**画那一帧」。
+//
+// 🔴 **这一条是回归**（票 #245 的评审抓到的）：把提示的「出/收」两档拆成状态机
+// 的时候，`c.After(wait)` 那两句被顺手删掉了——而那两句**就是那一帧的安排**。
+//
+// ⚠️ **界面在空闲时是没有帧的**：没人安排的话，指针一离开，提示就赖在屏幕上
+// 直到下一次碰巧的帧；而 300ms 那一档（出提示要等）则**永远出不来**。
+//
+// ⚠️ **仓库自己的验收命令抓不到**：那些用例 `Advance` 之后又**手动画了一帧**，
+// 把缺的那一帧补上了——所以「手动画一帧之后的状态」是对的，只有「**没人画帧
+// 的时候**」才露馅。
+//
+// 所以这一条的关键是：**推进时钟之后不主动画帧**，直接读画面。
+func TestTheTooltipSettlesOnItsOwn(t *testing.T) {
+	// ① 指针移开之后，提示自己收掉。
+	_, tt := tipProbe(t, "自己会收", tipDefault)
+	hoverOn(t, tt, "锚点")
+	if !tt.HasText("自己会收") {
+		t.Fatalf("指针停上去提示没出来（文字有 %q）", tt.Texts())
+	}
+	// 移开这一帧要画：提示的「收」是从这一帧开始算的（`c.After` 也是这一帧
+	// 安排的）。
+	tt.Move(1, 1)
+	tt.Frame()
+	// ⚠️ **只推进时钟，不画帧**：收提示的那一帧是提示自己安排的。
+	tt.Advance(501 * time.Millisecond)
+	if tt.HasText("自己会收") {
+		t.Errorf("指针离开 501ms 之后提示还挂在屏幕上（文字有 %q）——"+
+			"收提示的那一帧没人安排（`c.After`）", tt.Texts())
+	}
+
+	// ② 出提示要等 300ms 那一档：延时到了，提示自己出来。
+	_, tt2 := tipProbe(t, "自己会出", tipTiming{open: tipDelayVolume, close: tipDelayClose})
+	hoverOn(t, tt2, "锚点")
+	if tt2.HasText("自己会出") {
+		t.Fatalf("指针刚停上去提示就出来了——这一档的 open delay 是 300ms")
+	}
+	// ⚠️ **同样只推进时钟**：出提示的那一帧是提示自己安排的。
+	tt2.Advance(301 * time.Millisecond)
+	if !tt2.HasText("自己会出") {
+		t.Errorf("301ms 之后提示还没出来（文字有 %q）——"+
+			"出提示的那一帧没人安排（`c.After`）", tt2.Texts())
 	}
 }
 

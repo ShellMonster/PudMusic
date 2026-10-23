@@ -72,6 +72,12 @@ type dynamicFeed struct {
 	// MyGo 会在「同一个 ListState 被两个 List 显示」时 panic。
 	state     ui.ListState
 	authState ui.ListState
+	// keys 是右边那一栏的键盘接线（游标 + 「↑ 到顶回侧栏」）。
+	//
+	// ⚠️ **这一栏是裸的 `ui.List`**（卡片是自己画的，走不了 `widgets/list`
+	// 那个包），所以游标和那一档回调得自己接——不然方向键在内容区里只滚动
+	// 不选行，而 ↑ 也回不到侧栏（票 #245 的 E4）。
+	keys listKeys
 
 	// feed 是右边、auth 是左边的翻页闸门（upPager，见 upspace.go）。
 	feed upPager
@@ -451,9 +457,20 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 	// ⚠️ Key 挂在外面的 Column 上，理由见上面那一处。
 	ui.Column(c).Key("feed-dynamic-list").Grow(1).FillHeight().Children(func() {
 		// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
-		s.registerContentFocus(list.HandleFocus(&st.Handle))
+		//
+		// ⚠️ **登记的是 `&f.keys` 而不是裸的句柄**：这一份的 `TakeFocus` 还要
+		// 把游标摆到第一行（走进来就在第一条上）。
+		s.registerContentFocus(&f.keys)
+		// 键盘接线：游标 + 「↑ 到顶回侧栏」（票 #245 的 E4）。
+		f.keys.wire(c, st, s.focusSide)
 		dynList := ui.List(c, st, rows).
 			Grow(1).FillHeight().FillWidth().
+			// ⚠️ **听一听输入**：为了知道「键盘往回走到顶上了」。
+			// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选行、
+			// Tab 换焦点都还在。
+			HandleInput(f.keys.keys.Input).
+			// 焦点环只留在「还没选中任何一行」的时候（和 `widgets/list` 同一档）。
+			FocusRing(f.keys.sel < 0).
 			Rows(func(r ui.ListRow) {
 				defer func() {
 					if rec := recover(); rec != nil {
@@ -469,7 +486,8 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 					})
 					return
 				}
-				s.viewDynamicCard(r.Context, f.items[r.Index])
+				s.viewDynamicCard(r.Context, f.items[r.Index],
+					f.keys.selected(r.Index), f.keys.ring(r.Context))
 			})
 		s.trackScrollbar(dynList)
 	})

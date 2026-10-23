@@ -7,7 +7,6 @@ import (
 	"strconv"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
@@ -181,9 +180,20 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	ui.Column(c).Key("space-list:" + upTabNames[tab]).Grow(1).FillHeight().
 		PaddingX(upPad).Children(func() {
 		// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
-		s.registerContentFocus(list.HandleFocus(&st.Handle))
+		//
+		// ⚠️ **登记的是 `&sp.keys[tab]` 而不是裸的句柄**：这一份的
+		// `TakeFocus` 还要把游标摆到第一行（走进来就在第一条上）。
+		s.registerContentFocus(&sp.keys[tab])
+		// 键盘接线：游标 + 「↑ 到顶回侧栏」（票 #245 的 E4）。
+		sp.keys[tab].wire(c, st, s.focusSide)
 		spaceList := ui.List(c, st, rows).
 			Grow(1).FillHeight().FillWidth().
+			// ⚠️ **听一听输入**：为了知道「键盘往回走到顶上了」。
+			// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选行、
+			// Tab 换焦点都还在。
+			HandleInput(sp.keys[tab].keys.Input).
+			// 焦点环只留在「还没选中任何一行」的时候（和 `widgets/list` 同一档）。
+			FocusRing(sp.keys[tab].sel < 0).
 			Rows(func(r ui.ListRow) {
 				// 🔴 行里 panic 会一路穿出 Cocoa 事件循环把进程带走。每一行
 				// 自己兜一层，**只废掉这一行**（页级的 Shell.page 接的是整棵树，
@@ -332,10 +342,12 @@ func (s *Shell) viewUpSentinel(c *ui.Context, sp *upSpace, tab int) {
 // viewUpRow 画一行：动态卡片或者收藏夹卡片。
 func (s *Shell) viewUpRow(c *ui.Context, sp *upSpace, tab, i int) {
 	if tab == upTabDynamic {
-		s.viewDynamicCard(c, sp.dynItems[i])
+		s.viewDynamicCard(c, sp.dynItems[i],
+			sp.keys[tab].selected(i), sp.keys[tab].ring(c))
 		return
 	}
-	s.viewCollectionRow(c, sp.cols[tab][i])
+	s.viewCollectionRow(c, sp.cols[tab][i],
+		sp.keys[tab].selected(i), sp.keys[tab].ring(c))
 }
 
 // upLoadErrorKey 是「这一张 Tab 第一页就拉失败」那一支的 key。
