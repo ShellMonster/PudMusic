@@ -298,18 +298,26 @@ func (s *Shell) viewFavoritesPanel(c *ui.Context, st app.Settings, anchor ui.Ele
 			AttachTo(anchor, ui.AnchorEnd, ui.AnchorStart).MarginStart(favPanelGap).
 			Width(favPanelW).Padding(6)).
 			Children(func() {
+				// ⚠️ **空状态也只有一句**（和侧栏那一句同一个道理，报告 C3）：
+				// 两组都空的时候摆两句一模一样的话，用户得自己判断那是说一组
+				// 还是两组都没有。那一句落在**最后一个空的那一组**底下。
+				items := make([][]app.Favorite, favGroups)
+				lastEmpty := -1
 				for g := range favGroups {
-					grp := app.FavoriteGroup(g)
-					ui.Text(c, grp.String()).FontSize(scale.Font(c, 12)).
+					items[g] = visibleFavorites(s.app.SideFavorites(app.FavoriteGroup(g)), hidden)
+					if len(items[g]) == 0 {
+						lastEmpty = g
+					}
+				}
+				for g := range favGroups {
+					ui.Text(c, app.FavoriteGroup(g).String()).FontSize(scale.Font(c, 12)).
 						TextColor(t.TextMuted).Padding(4, 8)
-					items := visibleFavorites(s.app.SideFavorites(grp), hidden)
-					if len(items) == 0 {
+					for _, f := range items[g] {
+						s.viewFavoritesPanelRow(c, f)
+					}
+					if g == lastEmpty {
 						ui.Text(c, "还没有收藏夹").FontSize(scale.Font(c, 12)).
 							TextColor(t.TextMuted).Padding(2, 8)
-						continue
-					}
-					for _, f := range items {
-						s.viewFavoritesPanelRow(c, f)
 					}
 				}
 			})
