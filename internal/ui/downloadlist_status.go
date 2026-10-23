@@ -143,12 +143,12 @@ func (d *downloadsPage) viewStatus(c *ui.Context, r download.Snapshot) {
 	if cell.done {
 		ui.Row(c).Gap(dlDoneGap).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, icon(iconChecked)).FontSize(dlDoneIconSize).TextColor(c.Theme().Success)
-			ui.Text(c, cell.text).FontSize(scale.Font(c, 13)).TextColor(cell.c).MaxLines(2)
+			ui.Text(c, cell.text).FontSize(scale.Font(c, scale.Size13)).TextColor(cell.c).MaxLines(2)
 		})
 		return
 	}
 	if !cell.showBar {
-		ui.Text(c, cell.text).FontSize(scale.Font(c, 13)).TextColor(cell.c).MaxLines(2)
+		ui.Text(c, cell.text).FontSize(scale.Font(c, scale.Size13)).TextColor(cell.c).MaxLines(2)
 		return
 	}
 
@@ -175,7 +175,7 @@ func (d *downloadsPage) viewStatus(c *ui.Context, r download.Snapshot) {
 			})
 			// 三行是留给更长的原因的兜底：这一句**通常**两行就够（13 个字），
 			// 而省略号只在它真的超过三行时才出现。
-			ui.Text(c, cell.text).FillWidth().FontSize(scale.Font(c, 12)).TextColor(cell.c).
+			ui.Text(c, cell.text).FillWidth().FontSize(scale.Font(c, scale.Size12)).TextColor(cell.c).
 				MaxLines(3).Ellipsis("…")
 		})
 		return
@@ -187,7 +187,7 @@ func (d *downloadsPage) viewStatus(c *ui.Context, r download.Snapshot) {
 			// ⚠️ **12 和省略号都照原样**（这一支是「下载中 / 下载暂停 / 交织中」
 			// 那几句短的，省略号实际上不出现）——这一票只动**出错**那一支的排法，
 			// 不顺手改这里的字号。
-			ui.Text(c, cell.text).Grow(1).FontSize(scale.Font(c, 12)).TextColor(cell.c).
+			ui.Text(c, cell.text).Grow(1).FontSize(scale.Font(c, scale.Size12)).TextColor(cell.c).
 				MaxLines(2).Ellipsis("…")
 			if cell.showPct {
 				dlPercent(c, r)
@@ -202,7 +202,7 @@ func (d *downloadsPage) viewStatus(c *ui.Context, r download.Snapshot) {
 // 整个右边会跳一下。
 func dlPercent(c *ui.Context, r download.Snapshot) ui.Element {
 	return ui.Text(c, strconv.Itoa(r.Percent)+"%").Width(dlPctW).
-		TextAlign(ui.End).FontSize(scale.Font(c, 12)).TextColor(c.Theme().TextMuted).
+		TextAlign(ui.End).FontSize(scale.Font(c, scale.Size12)).TextColor(c.Theme().TextMuted).
 		MaxLines(1)
 }
 

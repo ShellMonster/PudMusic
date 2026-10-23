@@ -112,7 +112,7 @@ func (f *dateFilter) viewRangePicker(c *ui.Context) {
 	trig := ui.Button(c, "").Label(dateRangeLabel).
 		Width(dateRangeW).Justify(ui.SpaceBetween)
 	trig.Children(func() {
-		ui.Text(c, f.rangeText()).FontSize(scale.Font(c, 12)).SingleLine().Grow(1)
+		ui.Text(c, f.rangeText()).FontSize(scale.Font(c, scale.Size12)).SingleLine().Grow(1)
 		ui.Icon(c, icon(iconCalendar)).FontSize(iconMd).TextColor(t.TextMuted)
 	})
 	if trig.Clicked() {
@@ -179,12 +179,12 @@ func (f *dateFilter) viewMonth(c *ui.Context, month time.Time) {
 	first := startOfMonth(month)
 
 	ui.Column(c).Gap(dateGridGap).Children(func() {
-		ui.Text(c, first.Format("2006年1月")).FontSize(scale.Font(c, 13)).
+		ui.Text(c, first.Format("2006年1月")).FontSize(scale.Font(c, scale.Size13)).
 			TextColor(t.Text).TextAlign(ui.Center).Grow(1)
 		ui.Row(c).Children(func() {
 			for _, wd := range dateWeekdays {
 				ui.Text(c, wd).Width(dateCellW).TextAlign(ui.Center).
-					FontSize(scale.Font(c, 11)).TextColor(t.TextMuted)
+					FontSize(scale.Font(c, scale.Size11)).TextColor(t.TextMuted)
 			}
 		})
 		// 从「1 号所在那一周的周日开始」排 6 行 42 格——多出来的那几格是下
@@ -218,7 +218,7 @@ func (f *dateFilter) viewDay(c *ui.Context, day, month time.Time) {
 	// `i18n.FormatDate(locale, day, {Skeleton: "yMMMMd"})`）。
 	cell := flatButton(c, strconv.Itoa(day.Day())).
 		Label(day.Format("2006年1月2日")).
-		Width(dateCellW).Height(dateCellH).Padding(space.None, space.None).Radius(4)
+		Width(dateCellW).Height(dateCellH).Padding(space.None, space.None).Radius(t.Radius)
 
 	fg := t.Text
 	if day.Month() != month.Month() {

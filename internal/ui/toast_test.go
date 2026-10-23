@@ -679,7 +679,7 @@ func TestTheToastTextUsesTheMediumWeight(t *testing.T) {
 			}
 			switch callName(call) {
 			case "FontSize":
-				if len(call.Args) == 1 && mentionsIdent(call.Args[0], "toastFont") {
+				if len(call.Args) == 1 && mentionsIdent(call.Args[0], "ToastFont") {
 					has14 = true
 				}
 			case "FontWeight":
@@ -695,7 +695,7 @@ func TestTheToastTextUsesTheMediumWeight(t *testing.T) {
 		return true
 	})
 	if !found {
-		t.Error("toast.go 里没有一句同时写着 `FontSize(…toastFont…)` 和 " +
+		t.Error("toast.go 里没有一句同时写着 `FontSize(…scale.ToastFont…)` 和 " +
 			"`FontWeight(weightMedium)`——提示那行字必须是 14/500")
 	}
 }

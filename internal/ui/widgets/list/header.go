@@ -46,15 +46,6 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// headerFont 是表头上那几个字的字号。**14** 是上游那一行表头的数
-// （`music-list-item/header.tsx:22` 的 `text-sm`）。
-//
-// ⚠️ 原来是 12：那是行里**次要文字**（UP 名 / 时长 / 播放量）的号。列名用着和
-// 次要文字一样的号、一样的灰，竖着扫下去时它比下面那一列数字还弱——而数字列本来
-// 就是靠表头才对得齐的。上游那边列名 14、次要文字 14、播放量 / 时长 12，列名站在
-// 它们上面。
-const headerFont = 14
-
 // headerLineH 是表头底下那条分隔线的高。上游是 `border-b`（1px）。
 const headerLineH = 1
 
@@ -211,7 +202,7 @@ func Header(c *ui.Context, spec HeaderSpec) {
 						ui.Box(c).Width(col.Width).Height(0)
 						continue
 					}
-					e := ui.Text(c, col.Title).FontSize(scale.Font(c, headerFont)).
+					e := ui.Text(c, col.Title).FontSize(scale.Font(c, scale.HeaderFont)).
 						TextColor(t.TextMuted).MaxLines(1)
 					if col.Width > 0 {
 						e = e.Width(col.Width)

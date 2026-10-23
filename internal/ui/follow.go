@@ -51,6 +51,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
@@ -70,6 +71,13 @@ const followPaneW = 200
 
 // followCardSide 是一张卡上头像的边长。上游是 `h-32 w-32`（128）。
 const followCardSide = 128
+
+// followActionPillRadius 是「取消关注」那条药丸的圆角。**999**——
+// 药丸（胶囊）就是「圆角大于高度的一半」，999 是那个惯用的写法。
+//
+// ⚠️ **它不跟全局圆角令牌**：那一档是「用户可调的圆角」，而药丸是**形状**
+// ——跟着它走的话，用户把圆角调到 0，这条药丸就变成一个方块了。
+const followActionPillRadius = 999
 
 // followCardPad 是卡里那圈留白。上游是 `p-4`（16）。
 const followCardPad = space.Px16
@@ -459,15 +467,15 @@ func (s *Shell) viewFollowPane(c *ui.Context, f *followPage) {
 		// ⚠️ **失败也要说失败**：`tagErr` 有值的时候下面那一支已经把分组列表
 		// 换成了错误提示，而标题还在——用户点「重试」时看得出自己重试的是
 		// 哪一摊。
-		ui.Text(c, followPaneTitle(f)).FontSize(scale.Font(c, 14)).Bold().PaddingX(space.Px6)
+		ui.Text(c, followPaneTitle(f)).FontSize(scale.Font(c, scale.Size14)).Bold().PaddingX(space.Px6)
 
 		// ⚠️ **「拉失败了」必须排在「空」前面**：反过来的话第一页失败时左边
 		// 是一片「还没有分组」，而 `tagStarted` 仍是 false、`tagErr` 非 nil，
 		// 切走再切回来也不会重拉——用户会以为他真的一个分组都没建过。
 		if !f.tagStarted && f.tagErr != nil {
-			ui.Text(c, "分组没拉出来："+f.tagErr.Error()).FontSize(scale.Font(c, 12)).
+			ui.Text(c, "分组没拉出来："+f.tagErr.Error()).FontSize(scale.Font(c, scale.Size12)).
 				TextColor(t.TextMuted).PaddingX(space.Px6)
-			if flatButton(c, "重试拉分组").FontSize(scale.Font(c, 12)).Clicked() {
+			if flatButton(c, "重试拉分组").FontSize(scale.Font(c, scale.Size12)).Clicked() {
 				f.tagErr, f.tagLoading = nil, true
 				go s.fetchFollowTags(context.Background(), f)
 			}
@@ -476,7 +484,7 @@ func (s *Shell) viewFollowPane(c *ui.Context, f *followPage) {
 		// 🔴 **「没拉到」和「一个分组都没有」是两件事**，界面上是两句话：
 		// 前者要按重试，后者不用（那是真的没有分组，B 站那会儿返回空数组）。
 		if !f.tagStarted {
-			ui.Text(c, "正在加载分组…").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).PaddingX(space.Px6)
+			ui.Text(c, "正在加载分组…").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).PaddingX(space.Px6)
 			return
 		}
 
@@ -536,7 +544,7 @@ func (s *Shell) viewFollowPaneRow(c *ui.Context, f *followPage, i int) {
 		}
 	}
 
-	box := ui.Row(c).Grow(1).Key("follow-tab:" + tab).Gap(space.Px6).Padding(space.Px6).Radius(6).
+	box := ui.Row(c).Grow(1).Key("follow-tab:" + tab).Gap(space.Px6).Padding(space.Px6).Radius(t.Radius).
 		AlignItems(ui.Center)
 	if tab == f.tab {
 		// 当前正在看的那一格：和侧栏菜单当前项**同一套**画法（`flatCurrent`——
@@ -554,7 +562,7 @@ func (s *Shell) viewFollowPaneRow(c *ui.Context, f *followPage, i int) {
 		s.selectFollowTab(f, tab)
 	}
 	box.Children(func() {
-		ui.Text(c, label).Grow(1).FontSize(scale.Font(c, 13)).MaxLines(1).Ellipsis("…")
+		ui.Text(c, label).Grow(1).FontSize(scale.Font(c, scale.Size13)).MaxLines(1).Ellipsis("…")
 	})
 }
 
@@ -613,9 +621,9 @@ func (s *Shell) viewFollowSearch(c *ui.Context, f *followPage) {
 		// ⚠️ **清空按钮只在真的搜着的时候才在**：Biu 那个 `isClearable` 在框是空的
 		// 时候也画一颗，画出来按下去什么也没发生。
 		if f.applied != "" {
-			ui.Text(c, "正在搜「"+f.applied+"」").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).
+			ui.Text(c, "正在搜「"+f.applied+"」").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).
 				MaxLines(1).Ellipsis("…")
-			if ui.Button(c, "清空搜索").FontSize(scale.Font(c, 12)).Clicked() {
+			if ui.Button(c, "清空搜索").FontSize(scale.Font(c, scale.Size12)).Clicked() {
 				f.draft = ""
 				s.searchFollow(f, "")
 			}
@@ -849,7 +857,7 @@ func (s *Shell) viewFollowRow(c *ui.Context, f *followPage, i, cols int) {
 func (s *Shell) viewFollowCardGuarded(c *ui.Context, f *followPage, i int) {
 	u := f.users[i]
 	if f.failed[u.Mid] {
-		ui.Text(c, "这一格画不出来").FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).
+		ui.Text(c, "这一格画不出来").FontSize(scale.Font(c, scale.Size13)).TextColor(c.Theme().TextMuted).
 			Padding(followCardPad).MaxLines(1)
 		return
 	}
@@ -935,15 +943,15 @@ func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser, selected, ring 
 		// 而且它四态齐全、还带 Label——无头 Tester 量得到）。
 		s.spaceAvatar(c, u.Face, followCardSide, false)
 		// 名字 18、签名 14，照 `user-card.tsx:84-85` 的 `text-lg` / `text-sm`。
-		ui.Text(c, name).FontSize(scale.Font(c, 18)).MaxLines(1).Ellipsis("…")
+		ui.Text(c, name).FontSize(scale.Font(c, scale.Size18)).MaxLines(1).Ellipsis("…")
 		if u.Official != "" {
-			ui.Text(c, u.Official).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).
+			ui.Text(c, u.Official).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).
 				MaxLines(1).Ellipsis("…")
 		}
 		// ⚠️ **签名空的时候整块不画**：Biu 那一格是空的，我们这里留一个 6 的
 		// 间距 + 一段空白，看起来像卡少了一截（理由同 `list.Grid` 里时长那一列）。
 		if u.Sign != "" {
-			ui.Text(c, u.Sign).FontSize(scale.Font(c, 14)).LineHeight(1.4).TextColor(t.TextMuted).
+			ui.Text(c, u.Sign).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Signature).TextColor(t.TextMuted).
 				TextAlign(ui.Center).MaxLines(2).Ellipsis("…")
 		}
 		s.viewFollowActions(c, u, shown)
@@ -980,10 +988,10 @@ func (s *Shell) viewFollowActions(c *ui.Context, u bili.FollowUser, shown float3
 		// 原来这里是框架浮层那一档（`0 6 20 0` + 我们自己的浓度）——那是**面板**
 		// 的影（`popup.go` 那个出口），而这一条是**浮在卡片上面的一条药丸**，它
 		// 底下压着的是头像和名字。影淡了它就贴着卡片，而不是浮在上面。
-		bar := shadow.TailwindLG(ui.Row(c).Gap(space.Px2).Padding(space.Px4, space.Px8).Radius(999).
+		bar := shadow.TailwindLG(ui.Row(c).Gap(space.Px2).Padding(space.Px4, space.Px8).Radius(followActionPillRadius).
 			Background(t.Background).Border(1, t.Border))
 		bar.Children(func() {
-			if flatButton(c, "取消关注").FontSize(scale.Font(c, 13)).
+			if flatButton(c, "取消关注").FontSize(scale.Font(c, scale.Size13)).
 				TextColor(dangerText(t)).Clicked() {
 				s.unfollowFromFollowCard(u)
 			}
@@ -1044,9 +1052,9 @@ func (s *Shell) viewFollowSentinel(c *ui.Context, f *followPage) {
 	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(space.Px8).Padding(space.Px12).Children(func() {
 		switch {
 		case f.pager.err != nil:
-			ui.Text(c, "加载失败："+f.pager.err.Error()).FontSize(scale.Font(c, 13)).
+			ui.Text(c, "加载失败："+f.pager.err.Error()).FontSize(scale.Font(c, scale.Size13)).
 				TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
-			if flatButton(c, "重试加载关注的人").FontSize(scale.Font(c, 13)).Clicked() {
+			if flatButton(c, "重试加载关注的人").FontSize(scale.Font(c, scale.Size13)).Clicked() {
 				f.pager.err = nil
 				if ctx := f.pager.begin(); ctx != nil {
 					go s.fetchFollowUsers(context.Background(), f, f.gen, f.tab, f.applied,
@@ -1055,9 +1063,9 @@ func (s *Shell) viewFollowSentinel(c *ui.Context, f *followPage) {
 			}
 		case f.pager.loading:
 			ui.Spinner(c).Label("正在加载")
-			ui.Text(c, "正在加载…").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
+			ui.Text(c, "正在加载…").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
 		default:
-			ui.Text(c, "继续往下滚，加载更多关注的人").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
+			ui.Text(c, "继续往下滚，加载更多关注的人").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
 		}
 	})
 }

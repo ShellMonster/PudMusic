@@ -18,6 +18,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -180,11 +181,11 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 
 	ui.Row(c).Key("queue-header").Height(queueHeaderHeight).FillWidth().
 		PaddingY(space.Px10).PaddingX(space.Px12).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "播放列表").FontSize(scale.Font(c, 18)).TextColor(t.Text).Grow(1)
+		ui.Text(c, "播放列表").FontSize(scale.Font(c, scale.Size18)).TextColor(t.Text).Grow(1)
 		if len(rows) == 0 {
 			return
 		}
-		ui.Text(c, "("+strconv.Itoa(len(rows))+")").FontSize(scale.Font(c, 14)).TextColor(t.TextMuted)
+		ui.Text(c, "("+strconv.Itoa(len(rows))+")").FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted)
 
 		// 逐字照 Biu 那一段（`components/music-playlist-drawer/index.tsx:137-141`）：
 		// 两个 16px 的 `IconButton`（`RiFocus3Line` / `RiDeleteBinLine`）各带
@@ -293,7 +294,7 @@ func (s *Shell) playingIdentity() string {
 // 播放」会停在差几像素的地方——不难看出来，但用户每次按都差一点。
 func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Theme) {
 	rowEl := ui.Column(c).Key(row.key).Grow(1).Height(queueRowHeight).
-		Padding(queuePadY, queuePadX).Radius(6).AlignItems(ui.Stretch)
+		Padding(queuePadY, queuePadX).Radius(t.Radius).AlignItems(ui.Stretch)
 	// 悬停要读在 Children 之前：指针是在布局那一步才知道落在哪儿的。
 	hovered := rowEl.Hovered()
 	switch {
@@ -324,11 +325,11 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 			// 那一档（歌名 16 / UP 14）。这里原来是 15 / 12，副题比列表行的 UP 名
 			// 还小一档，同一列两种刻度。
 			ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
-				ui.Text(c, row.item.Title).FontSize(scale.Font(c, 16)).
+				ui.Text(c, row.item.Title).FontSize(scale.Font(c, scale.Size16)).
 					TextColor(playlistTextColor(t, playing)).SingleLine()
 				// 副题两态一样：次要色。**正在放那一行靠歌名说话**（主色当字），
 				// 副题再染一遍主色就成了两处都在喊。
-				ui.Text(c, itemSubtitle(row.item)).FontSize(scale.Font(c, 14)).
+				ui.Text(c, itemSubtitle(row.item)).FontSize(scale.Font(c, scale.Size14)).
 					TextColor(t.TextMuted).SingleLine()
 			})
 			// Biu 的那一颗「⋯」是个 DropdownTrigger。这里给它挂系统的菜单
@@ -366,6 +367,7 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 // 都由 imgcache.View 画，这里不重复它的判断。悬停时上面浮一枚 20 的播放三角
 // （Biu 那层蒙版 + `RiPlayFill`）；正在放的那首不浮——它已经在放了。
 func (s *Shell) viewQueueCover(c *ui.Context, item app.Item, playing, hovered bool) {
+	t := c.Theme()
 	ui.Row(c).Width(queueCoverSize).FillHeight().Children(func() {
 		imgcache.View(c, s.images, item.Cover, queueCoverSize, queueCoverSize)
 		if playing || !hovered {
@@ -381,10 +383,10 @@ func (s *Shell) viewQueueCover(c *ui.Context, item app.Item, playing, hovered bo
 		//
 		// PassThrough：**不让这一层吃掉点击**。它盖在封面上面，不放行的话
 		// 点它就不是「点这一行」了（那一行跳过去放歌正是要点封面附近的）。
-		ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Radius(6).
-			PassThrough().Center().Background(ui.RGBA(0, 0, 0, 0.35)).Children(func() {
+		ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Radius(t.Radius).
+			PassThrough().Center().Background(ui.RGBA(0, 0, 0, scrim.Overlay)).Children(func() {
 			ui.Icon(c, icon(iconPlayFill)).FontSize(20).
-				TextColor(ui.RGBA(255, 255, 255, 0.92))
+				TextColor(ui.RGBA(255, 255, 255, scrim.OnScrim))
 		})
 	})
 }

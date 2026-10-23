@@ -211,11 +211,11 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 			ui.Column(c).FillWidth().MaxWidth(settingsContentMaxW).
 				Padding(space.None, settingsContentPad, settingsContentPad, settingsContentPad).
 				Gap(settingsGroupGap).Children(func() {
-				ui.Text(c, "设置").FontSize(scale.Font(c, pageTitleSize))
+				ui.Text(c, "设置").FontSize(scale.Font(c, scale.PageTitle))
 
 				if ro {
 					ui.Text(c, "设置只读：这份设置来自更新的版本，这一版一个字都不会写回去。").
-						FontSize(scale.Font(c, 12)).TextColor(dangerText(t))
+						FontSize(scale.Font(c, scale.Size12)).TextColor(dangerText(t))
 				}
 
 				// ⚠️ **主 Tab 用轨道 + 滑块那一种**（`mainTabs`，见 tabs.go）：
@@ -357,7 +357,7 @@ const settingsFocusTries = 3
 // ⚠️ 这一句原来写着「Biu 用的是 `<h2>`」就完了，既没写字号也没写字重，于是这一
 // 组标题在我们这边一路是 16/700：比上游小一档、还粗两档（票 #166 的 G06）。
 func (s *Shell) settingSection(c *ui.Context, title string) {
-	ui.Text(c, title).FontSize(scale.Font(c, 20)).Padding(space.None, space.None, space.Px4, space.None)
+	ui.Text(c, title).FontSize(scale.Font(c, scale.Size20)).Padding(space.None, space.None, space.Px4, space.None)
 }
 
 // settingSectionEnd 是两组设置之间那条分隔线。Biu 的 `<Divider />`。
@@ -385,7 +385,7 @@ func (s *Shell) settingRowAt(c *ui.Context, key, title, desc string, control fun
 	t := c.Theme()
 	focused := key != "" && s.settings.focus == settingsFocus(key)
 	s.settingRowElAt(c, focused, func() {
-		txt := ui.Text(c, title).FontSize(scale.Font(c, 16)).FontWeight(weightMedium)
+		txt := ui.Text(c, title).FontSize(scale.Font(c, scale.Size16)).FontWeight(weightMedium)
 		if focused {
 			// ⚠️ **主色当字色取 `ink.AccentOn`**：浅色下主色本身压在白底上读
 			// 不出来（flatbutton.go 那一大段），而「指着的那一行」恰恰是用户
@@ -420,7 +420,7 @@ func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc s
 	row.Children(func() {
 		ui.Column(c).Grow(1).Children(func() {
 			title()
-			ui.Text(c, desc).FontSize(scale.Font(c, 14)).TextColor(t.TextMuted).Wrap()
+			ui.Text(c, desc).FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).Wrap()
 		})
 		control()
 	})
@@ -448,11 +448,12 @@ func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc s
 // 「数据显示样式」那三档一样）——F-17 一做，这一档就被推倒，而「被选中的选项」
 // 会变成**白色滑块**那一档。**F-17 没做之前，别把这一档当成定案。**
 func (s *Shell) pickTheme(c *ui.Context, st app.Settings, ro bool) {
+	t := c.Theme()
 	// ⚠️ 宽度跟着字号缩放走：1.4 倍时四个字要 106 像素，三个各 100 的格子
 	// 装不下，选中项会被裁成「跟随系…」（评审在 1.4 倍下量到过）。
 	ui.Row(c).Key("setting:themeMode").Width(scale.Font(c, segWidth)).Gap(space.Px4).Children(func() {
 		for _, opt := range themeModes {
-			b := flatButton(c, opt.label).Grow(1).Radius(6).Disabled(ro)
+			b := flatButton(c, opt.label).Grow(1).Radius(t.Radius).Disabled(ro)
 			if opt.mode == st.ThemeMode {
 				b = s.pickSelected(c, b, ro)
 			}
@@ -493,9 +494,10 @@ func (s *Shell) pickSelected(c *ui.Context, b ui.Element, ro bool) ui.Element {
 // pickCloseWindow 是窗口关闭那两档。照 Biu 用的是横排单选（RadioGroup
 // orientation="horizontal"），我们用同一排按钮，选中的那个上主色。
 func (s *Shell) pickCloseWindow(c *ui.Context, st app.Settings, ro bool) {
+	t := c.Theme()
 	ui.Row(c).Key("setting:closeWindowOption").Width(scale.Font(c, segWidth)).Gap(space.Px4).Children(func() {
 		for _, opt := range closeWindowOptions {
-			b := flatButton(c, opt.label).Grow(1).Radius(6).Disabled(ro)
+			b := flatButton(c, opt.label).Grow(1).Radius(t.Radius).Disabled(ro)
 			if opt.value == st.CloseWindowOption {
 				b = s.pickSelected(c, b, ro)
 			}
@@ -545,7 +547,7 @@ func (s *Shell) pickTrayNote(c *ui.Context) {
 	// macOS 上没有托盘（与 Biu 一致），「隐藏到托盘」这一格在这儿是「收进 Dock」。
 	// 得说出来，不然用户以为 Biu 有而我们没做。
 	ui.Text(c, "macOS 上不建托盘图标（与 Biu 一致）：「隐藏到托盘」是收进程序坞，"+
-		"图标还在，点一下就回来。").FontSize(scale.Font(c, 12)).TextColor(c.Theme().TextMuted)
+		"图标还在，点一下就回来。").FontSize(scale.Font(c, scale.Size12)).TextColor(c.Theme().TextMuted)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

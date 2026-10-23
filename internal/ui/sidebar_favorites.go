@@ -116,7 +116,7 @@ func (s *Shell) viewFavoritesEmptyLine(c *ui.Context) {
 	// 套一层壳，那一句的盒子就从内边距那儿起头——「它和标题对齐」这件事
 	// 才量得出来（测试就是这么量的）。
 	ui.Row(c).Padding(space.Px6, favIndent(t)).Children(func() {
-		ui.Text(c, "还没有收藏夹").FontSize(scale.Font(c, 12)).
+		ui.Text(c, "还没有收藏夹").FontSize(scale.Font(c, scale.Size12)).
 			TextColor(t.TextMuted)
 	})
 }
@@ -143,7 +143,7 @@ func (s *Shell) viewFavoritesRefreshing(c *ui.Context, st app.Settings, collapse
 	if collapsed || !s.app.FavoritesRefreshing() {
 		return
 	}
-	ui.Text(c, refreshLine).FontSize(scale.Font(c, 12)).
+	ui.Text(c, refreshLine).FontSize(scale.Font(c, scale.Size12)).
 		TextColor(c.Theme().TextMuted).Padding(space.Px4, space.Px8)
 }
 
@@ -250,9 +250,8 @@ const favCollapsedName = "收藏夹"
 // 在放不下的时候会翻到另一边（`mygo/ui/element.go` 的 `AttachTo`），而窗口
 // 最窄是 900，那一栏右边有的是地方。
 const (
-	favPanelW    = 200
-	favPanelGap  = space.Px6
-	favPanelItem = 13
+	favPanelW   = 200
+	favPanelGap = space.Px6
 )
 
 // viewFavoritesCollapsed 是**折叠态**下的收藏夹：一枚图标，点开是一层浮层。
@@ -305,13 +304,13 @@ func (s *Shell) viewFavoritesPanel(c *ui.Context, st app.Settings, anchor ui.Ele
 					}
 				}
 				for g := range favGroups {
-					ui.Text(c, app.FavoriteGroup(g).String()).FontSize(scale.Font(c, 12)).
+					ui.Text(c, app.FavoriteGroup(g).String()).FontSize(scale.Font(c, scale.Size12)).
 						TextColor(t.TextMuted).Padding(space.Px4, space.Px8)
 					for _, f := range items[g] {
 						s.viewFavoritesPanelRow(c, f)
 					}
 					if g == lastEmpty {
-						ui.Text(c, "还没有收藏夹").FontSize(scale.Font(c, 12)).
+						ui.Text(c, "还没有收藏夹").FontSize(scale.Font(c, scale.Size12)).
 							TextColor(t.TextMuted).Padding(space.Px2, space.Px8)
 					}
 				}
@@ -321,13 +320,14 @@ func (s *Shell) viewFavoritesPanel(c *ui.Context, st app.Settings, anchor ui.Ele
 
 // viewFavoritesPanelRow 是浮层里那一个收藏夹。
 func (s *Shell) viewFavoritesPanelRow(c *ui.Context, f app.Favorite) {
+	t := c.Theme()
 	label := f.Title
 	if label == "" {
 		label = "（没名字）"
 	}
-	row := ui.Row(c).FillWidth().Padding(space.Px4, space.Px8).Radius(6)
+	row := ui.Row(c).FillWidth().Padding(space.Px4, space.Px8).Radius(t.Radius)
 	row.Children(func() {
-		ui.Text(c, label).FontSize(scale.Font(c, favPanelItem)).Grow(1).
+		ui.Text(c, label).FontSize(scale.Font(c, scale.FavPanelItem)).Grow(1).
 			MaxLines(1).Ellipsis("…")
 	})
 	if row.Clicked() {
@@ -416,7 +416,7 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 	t := c.Theme()
 	cur := s.router.Path() == collectionPath(f.ID)
 
-	row := ui.Column(c).Key(favRowKey(g, f.ID)).Grow(1).Radius(6).Padding(space.Px6, space.Px8)
+	row := ui.Column(c).Key(favRowKey(g, f.ID)).Grow(1).Radius(t.Radius).Padding(space.Px6, space.Px8)
 	switch {
 	case cur:
 		// 当前就在这一页：和侧栏菜单当前项**同一套**画法（`flatCurrent`——
@@ -447,7 +447,7 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 		//
 		// 上游那边是 CSS 的 `truncate`（`biu/src/components/menu/menu-item.tsx:111`
 		// 的 `className="pointer-events-none truncate"`），那是同一个意思。
-		ui.Text(c, label).FontSize(scale.Font(c, 14)).TextColor(rowTextColor(t, cur)).Grow(1).
+		ui.Text(c, label).FontSize(scale.Font(c, scale.Size14)).TextColor(rowTextColor(t, cur)).Grow(1).
 			MaxLines(1).Ellipsis("…")
 	})
 

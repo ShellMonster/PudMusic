@@ -304,7 +304,7 @@ func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcut
 	field.Children(func() {
 		// `Grow(1)`：把 × 右边剩下的宽度全吃掉，于是 × 永远贴着右边，超长的键被
 		// `SingleLine` 截断而不是把 × 顶出框外（手改过的设置文件里可能有很长的值）。
-		ui.Text(c, text).FontSize(scale.Font(c, 13)).SingleLine().Grow(1).Shrink(0).TextColor(color)
+		ui.Text(c, text).FontSize(scale.Font(c, scale.Size13)).SingleLine().Grow(1).Shrink(0).TextColor(color)
 		// 清空。Biu 的 `endContent` 那个 ×（`shortcut-key-input/index.tsx:46`），
 		// 它的显示条件是「不是只读**且**有值」——**不是**「没在录」。
 		//
@@ -323,7 +323,7 @@ func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcut
 		// 格里上下各只让出 0.35 DIP，看上去就是「贴边的一个大方块」而不是一个 ×。
 		if !ro && item.Shortcut != "" &&
 			ui.Button(c, "×").Label("清空「"+item.Name+"」的快捷键").
-				FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).
+				FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).
 				Size(clearButtonSize, clearButtonSize).Padding(space.None).Radius(clearButtonSize/2).
 				Clicked() {
 			s.rejected = shortcutSlot{}

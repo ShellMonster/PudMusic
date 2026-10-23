@@ -68,10 +68,6 @@ const (
 	// lyricOffsetSliderH 是偏移那条滑块的高，抄 `offset-control.tsx` 里
 	// `className="h-32"`（8rem = 128px）。
 	lyricOffsetSliderH = 128.0
-
-	// lyricValueSize 是浮层里那个数值的字号，抄两个 control 里
-	// `text-[10px] font-bold`。
-	lyricValueSize = 10.0
 )
 
 // 这两个名字是给无障碍和测试用的：界面上摆的是「20px」这样的短标签，而
@@ -159,7 +155,7 @@ func (s *Shell) lyricFontPopover(c *ui.Context, anchor ui.Element, snap app.Lyri
 				s.app.SetLyricsFontSize(float32(v))
 			}
 			ui.Text(c, lyricFontValueLabel(snap.FontSize)).
-				FontSize(scale.Font(c, lyricValueSize)).FontWeight(700).TextColor(c.Theme().TextMuted)
+				FontSize(scale.Font(c, scale.LyricValue)).FontWeight(700).TextColor(c.Theme().TextMuted)
 		})
 	})
 }
@@ -178,7 +174,7 @@ func (s *Shell) lyricOffsetPopover(c *ui.Context, anchor ui.Element, snap app.Ly
 				s.app.SetLyricsOffset(int(v))
 			}
 			ui.Text(c, lyricOffsetValueLabel(snap.OffsetMS)).
-				FontSize(scale.Font(c, lyricValueSize)).FontWeight(700).TextColor(c.Theme().TextMuted)
+				FontSize(scale.Font(c, scale.LyricValue)).FontWeight(700).TextColor(c.Theme().TextMuted)
 		})
 	})
 }

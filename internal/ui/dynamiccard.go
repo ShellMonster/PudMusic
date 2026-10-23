@@ -17,6 +17,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
@@ -163,8 +164,8 @@ func (s *Shell) viewCollectionRow(c *ui.Context, col bili.UpCollection, selected
 		s.spaceThumbZoom(c, col.Cover, 48, 64,
 			"coll-zoom:"+strconv.FormatInt(col.ID, 10), on)
 		ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
-			ui.Text(c, col.Title).FontSize(scale.Font(c, 14)).MaxLines(2).Ellipsis("…")
-			ui.Text(c, fmt.Sprintf("%d 条", col.Count)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+			ui.Text(c, col.Title).FontSize(scale.Font(c, scale.Size14)).MaxLines(2).Ellipsis("…")
+			ui.Text(c, fmt.Sprintf("%d 条", col.Count)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 		})
 	})
 }
@@ -201,17 +202,17 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic, selected, ring bo
 			}
 			// 昵称是**链接**不是装饰：它是「从这条动态进他空间」这条路。
 			// 扁平配方（上游那一格是 `User` 的 `hover:underline`，没有按钮壳）。
-			if flatButton(c, name).FontSize(scale.Font(c, 14)).Clicked() && d.Author.Mid > 0 {
+			if flatButton(c, name).FontSize(scale.Font(c, scale.Size14)).Clicked() && d.Author.Mid > 0 {
 				s.navigate(upPathOf(d.Author.Mid))
 			}
 			if d.Time != "" {
-				ui.Text(c, d.Time).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
+				ui.Text(c, d.Time).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 			}
 		})
 
 		// ② 正文。
 		if d.Text != "" {
-			ui.Text(c, d.Text).FontSize(scale.Font(c, 13)).LineHeight(1.5).MaxLines(8)
+			ui.Text(c, d.Text).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Copy).MaxLines(8)
 		}
 
 		// ③ 内容：三种类型。
@@ -246,7 +247,7 @@ func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 		// 上游那一枚是 `variant="light"`（`dynamic-feed/item.tsx:112`）：图标 +
 		// 数字，无边框无底。我们这一枚还带着数字（「赞 12」），所以保留文字键的
 		// 形状，只换掉那层壳——图标化会丢掉「赞过几次」这个用户要看的数。
-		btn := flatButton(c, label).FontSize(scale.Font(c, 12))
+		btn := flatButton(c, label).FontSize(scale.Font(c, scale.Size12))
 		if liked {
 			// 点亮的那一下是**看得见的**（「我赞过了」不是数字变大）。
 			// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（理由见
@@ -262,15 +263,15 @@ func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 		if d.Kind != bili.DynamicVideo || d.Video == nil {
 			return
 		}
-		if flatButton(c, "下一首播放").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Clicked() {
+		if flatButton(c, "下一首播放").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Clicked() {
 			s.playNextFromDynamic(d.Video, d.Author)
 		}
 		// ⚠️ 下载走 `downloadLater`（异步补 cid）：动态接口给的稿件**不带
 		// cid**（`major.archive` 里没有这个字段），而下载按分 P 存文件。
-		if flatButton(c, "下载音频").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Clicked() {
+		if flatButton(c, "下载音频").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Clicked() {
 			s.downloadLater(dynVideoItem(d.Video, d.Author), false, "下载音频")
 		}
-		if flatButton(c, "下载视频").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Clicked() {
+		if flatButton(c, "下载视频").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Clicked() {
 			s.downloadLater(dynVideoItem(d.Video, d.Author), true, "下载视频")
 		}
 	})
@@ -322,7 +323,7 @@ func (s *Shell) viewDynamicPics(c *ui.Context, pics []string) {
 // 真放不了的时候说一句话（`list.Actions.Play` 里的 Toast），不装死。
 func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author bili.DynamicAuthor) {
 	t := c.Theme()
-	box := ui.Row(c).Grow(1).Gap(space.Px8).Padding(space.Px6).Radius(6).
+	box := ui.Row(c).Grow(1).Gap(space.Px8).Padding(space.Px6).Radius(t.Radius).
 		Background(t.Surface).AlignItems(ui.Center).Key("dynv:" + v.Bvid)
 	if box.Clicked() {
 		list.AppActions(s.app, s.addToast).Play([]app.Item{dynVideoItem(v, author)})
@@ -330,12 +331,12 @@ func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author b
 	box.Children(func() {
 		s.spaceThumb(c, v.Cover, dynamicCoverW, dynamicCoverH)
 		ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
-			ui.Text(c, v.Title).FontSize(scale.Font(c, 14)).MaxLines(2).Ellipsis("…")
+			ui.Text(c, v.Title).FontSize(scale.Font(c, scale.Size14)).MaxLines(2).Ellipsis("…")
 			if v.Desc != "" {
-				ui.Text(c, v.Desc).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
+				ui.Text(c, v.Desc).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 			}
 			if meta := dynVideoMeta(v); meta != "" {
-				ui.Text(c, meta).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
+				ui.Text(c, meta).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 			}
 		})
 	})

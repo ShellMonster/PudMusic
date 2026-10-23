@@ -33,6 +33,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
@@ -241,7 +242,7 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 
 	ui.Column(c).Key("page:"+laterPath).Grow(1).Padding(space.None, pagePadX).Gap(space.Px8).
 		Children(func() {
-			ui.Text(c, "稍后再看").FontSize(scale.Font(c, pageTitleSize))
+			ui.Text(c, "稍后再看").FontSize(scale.Font(c, scale.PageTitle))
 
 			// 换查询的位置在**画列表之前**：Reload 会把已加载的行清掉，放在后面
 			// 的话这一帧画的是清掉之前的样子，用户会先看到一屏旧的、再变成空、
@@ -313,13 +314,13 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 			func() { rows.playFrom(r.Index) })
 
 		ui.Text(c, playCountText(m.View)).Width(mt.count).TextAlign(ui.End).
-			FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
+			FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 		// 两个时间列放不放得下由 `laterTimeCols` 说（表头那一处读的是同一个
 		// 判据）：窄窗口先收「投稿时间」，连基线都放不下时再收「加入时间」。
 		pubDate, addTime := laterTimeCols(rows)
 		if addTime {
 			ui.Text(c, dayText(m.ViewedAt)).Width(mt.date).TextAlign(ui.End).
-				FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
+				FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 		}
 		// 投稿时间：上游这一页画的就是 `pubdate`（本文件头第一条）。
 		//
@@ -327,10 +328,10 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 		// 而「哪首是哪天发的」问的是 `pubdate`。
 		if pubDate {
 			ui.Text(c, list.PubTimeText(m.PubTime, s.now())).Width(mt.pubDate).
-				TextAlign(ui.End).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
+				TextAlign(ui.End).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 		}
 		ui.Text(c, clockText(m.Duration)).Width(mt.clock).TextAlign(ui.End).
-			FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
+			FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 
 		// 行尾那枚「⋯」。点开的是**这一行的菜单**，和右键同一份（`rows.menu`
 		// 就是右键那一条挂上去的那个函数）。
@@ -395,11 +396,11 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px4).PaddingY(cardGapForCell).Children(func() {
 			// 歌名 16 / UP 名 14：和 `widgets/list` 的网格卡同一档
 			// （DESIGN.md「网格：歌名 16、UP 14」）。
-			ui.Text(c, m.Title).FontSize(scale.Font(c, 16)).LineHeight(1.5).
+			ui.Text(c, m.Title).FontSize(scale.Font(c, scale.Size16)).LineHeight(leading.Title).
 				TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
 			ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 				if m.Owner != "" {
-					ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, 14)).LineHeight(1).
+					ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Owner).
 						TextColor(metaColor).MaxLines(1).Ellipsis("…")
 				}
 				// 「正在放」占时长那一格：两样都画必然把时长挤成「0:」，而用户读的
@@ -408,11 +409,11 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 					viewPlayingMark(c, t, m.Title)
 					return
 				}
-				ui.Text(c, clockText(m.Duration)).FontSize(scale.Font(c, 12)).
+				ui.Text(c, clockText(m.Duration)).FontSize(scale.Font(c, scale.Size12)).
 					TextColor(metaColor).MaxLines(1)
 			})
 			// 播放量 / 加入时间：列表里是右边两列，格子里放到最下面那一行。
-			ui.Row(c).Gap(space.Px6).FontSize(scale.Font(c, 11)).Children(func() {
+			ui.Row(c).Gap(space.Px6).FontSize(scale.Font(c, scale.Size11)).Children(func() {
 				ui.Text(c, playCountText(m.View)).Grow(1).TextColor(metaColor).MaxLines(1)
 				ui.Text(c, dayText(m.ViewedAt)).TextColor(metaColor).MaxLines(1)
 			})

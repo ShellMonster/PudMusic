@@ -107,7 +107,7 @@ func (s *Shell) viewFolderEdit(c *ui.Context) {
 	busy := e.busy()
 
 	modal := ui.Modal(c, &e.open, func() {
-		ui.Text(c, e.heading()).FontSize(scale.Font(c, 15)).Bold()
+		ui.Text(c, e.heading()).FontSize(scale.Font(c, scale.Size15)).Bold()
 		s.viewCoverPicker(c, e)
 
 		// 名称。⚠️ `Placeholder` 和 `Label` 不同时给：`Label` 是给读屏软件
@@ -130,7 +130,7 @@ func (s *Shell) viewFolderEdit(c *ui.Context) {
 
 		// ⚠️ **碰过之后才画**（理由见 touched 那个字段）。
 		if !e.valid() && !busy && e.touched {
-			ui.Text(c, "名称为必填项").FontSize(scale.Font(c, 11)).TextColor(dangerText(t))
+			ui.Text(c, "名称为必填项").FontSize(scale.Font(c, scale.Size11)).TextColor(dangerText(t))
 		}
 
 		ui.Row(c).Gap(space.Px8).Justify(ui.End).Children(func() {

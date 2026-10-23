@@ -12,6 +12,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -469,7 +470,7 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 			// 文件」：在线条目也可能没有稿件身份（既没有 bvid 也没有 sid），
 			// 那时候没有页面可跳——上游那边拼出来的是
 			// `bilibili.com/video/undefined`，那是个 404。
-			name := ui.Text(c, title).FontSize(scale.Font(c, 16)).
+			name := ui.Text(c, title).FontSize(scale.Font(c, scale.Size16)).
 				TextColor(textColor(t, st.HasTrack)).
 				MaxLines(1).Ellipsis("…")
 			if titleClickable(st) {
@@ -591,16 +592,16 @@ func (s *Shell) viewTrackError(c *ui.Context, st app.State, t *ui.Theme) {
 		// 而症状是「说了有话却看不见」（文本节点还在，测试也还找得到它）。
 		//
 		// 缩掉的那几个字用悬停补回来，和上面那个音质徽章同一个做法。
-		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, 12)).
+		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
 			TextColor(dangerText(t)).MaxLines(1).Ellipsis("…").Grow(1), msg)
 		switch {
 		case st.CanRetry:
-			if s.withTip(c, flatButton(c, "重试").FontSize(scale.Font(c, 12)),
+			if s.withTip(c, flatButton(c, "重试").FontSize(scale.Font(c, scale.Size12)),
 				"再试一次这一首").Clicked() {
 				s.retryPlay()
 			}
 		case st.BiliURL != "":
-			if s.withTip(c, flatButton(c, "在 B 站打开").FontSize(scale.Font(c, 12)),
+			if s.withTip(c, flatButton(c, "在 B 站打开").FontSize(scale.Font(c, scale.Size12)),
 				"在 B 站里听这一首").Clicked() {
 				s.openExternalURL(st.BiliURL)
 			}
@@ -665,7 +666,7 @@ func (s *Shell) viewArtist(c *ui.Context, st app.State, t *ui.Theme) {
 	if st.ArtistMid <= 0 {
 		// 没有编号时是**普通文字**：它在那一列里本来就是左对齐的（列是
 		// `AlignItems` 默认的 Stretch，文字从左沿起）。
-		ui.Text(c, st.Artist).Grow(1).MinWidth(artistMinW).FontSize(scale.Font(c, 14)).
+		ui.Text(c, st.Artist).Grow(1).MinWidth(artistMinW).FontSize(scale.Font(c, scale.Size14)).
 			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 		return
 	}
@@ -673,7 +674,7 @@ func (s *Shell) viewArtist(c *ui.Context, st app.State, t *ui.Theme) {
 	//（报告 §1.1 的 F1 证据：播放条上每一枚带描边的键）。它上面是 14px 的弱化
 	// 灰字，本来就不该配一块描边底。
 	if s.withTip(c, flatButton(c, st.Artist).Grow(1).MinWidth(artistMinW).
-		Justify(ui.Start).FontSize(scale.Font(c, 14)).Padding(space.None, space.None).TextColor(t.TextMuted).
+		Justify(ui.Start).FontSize(scale.Font(c, scale.Size14)).Padding(space.None, space.None).TextColor(t.TextMuted).
 		MaxLines(1).Ellipsis("…"), "打开 "+st.Artist+" 的空间").Clicked() {
 		s.navigate(upPathPrefix + strconv.FormatInt(st.ArtistMid, 10))
 	}
@@ -798,7 +799,7 @@ func (s *Shell) viewQualityBadge(c *ui.Context, st app.State, t *ui.Theme) {
 	// 收短之后各是几宽（1200 宽、多 P、实测）：192K → 歌名 42.0 / 徽章 28.0；
 	// 无损 → 歌名 48.1 / 徽章 21.9；杜比 → 歌名 48.1 / 徽章 21.9。
 	s.withTip(c, ui.Text(c, bili.ChipLabel(st.Quality)).
-		FontSize(scale.Font(c, 11)).TextColor(t.TextMuted).Shrink(0),
+		FontSize(scale.Font(c, scale.Size11)).TextColor(t.TextMuted).Shrink(0),
 		"音质："+st.Quality+"（点一下换）").
 		Menu(func(m *ui.Menu) {
 			for _, q := range qualityChoices {
@@ -977,7 +978,7 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 			//
 			// PassThrough：浮层这一层和里面那个图标都不接点击。
 			ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Radius(coverRadius).
-				PassThrough().Center().Background(ui.RGBA(0, 0, 0, 0.5)).Children(func() {
+				PassThrough().Center().Background(ui.RGBA(0, 0, 0, scrim.Cover)).Children(func() {
 				ui.Icon(c, icon(iconFullscreen)).FontSize(32).
 					TextColor(c.Theme().Accent).
 					PassThrough()
@@ -1148,7 +1149,7 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 	known := st.Duration > 0
 
 	ui.Row(c).Gap(space.Px10).AlignItems(ui.Center).WidthPercent(75).Children(func() {
-		ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, 14)).TextColor(c.Theme().TextMuted).
+		ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, scale.Size14)).TextColor(c.Theme().TextMuted).
 			MinWidth(48).MaxLines(1)
 
 		sl := playbarProgressSlider(c, &s.scrub, 0, 1).Grow(1).Label("播放进度").Disabled(!known)
@@ -1172,7 +1173,7 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 		}
 
 		total := clockOrDash(st.Duration)
-		ui.Text(c, total).FontSize(scale.Font(c, 14)).TextColor(c.Theme().TextMuted).
+		ui.Text(c, total).FontSize(scale.Font(c, scale.Size14)).TextColor(c.Theme().TextMuted).
 			MinWidth(48).MaxLines(1)
 	})
 }

@@ -74,6 +74,20 @@ const (
 	previewH    = 56
 	previewGap  = space.Px10
 	previewRows = 3 // 列表 / 网格预览里摆几行
+
+	// previewChipRadius 是预览缩略图里那些小色块的圆角。**1**——
+	// 那一块只有 6×6 像素，圆角 1 就已经能看出是个小方块而不是纯方了。
+	//
+	// ⚠️ **它不跟全局圆角令牌**：那不是控件，是**缩略图里画出来的一个假的**
+	// ——它画的是「真实的列表行长什么样」，而真实那一行的圆角是 6（上游
+	// `rounded-md`）。所以这里的数是「照着画」，不是「跟主题」。
+	previewChipRadius = 1
+	// previewCoverRadius 是预览里那个封面方块的圆角。**2**——
+	// 12×12 的方块，圆角 2。
+	//
+	// ⚠️ 同上：它是缩略图里画出来的**假封面**，照着上游 `rounded-md`（6）
+	// 缩小后的样子，不跟全局圆角令牌。
+	previewCoverRadius = 2
 )
 
 // viewDisplayModePreview 画那三张缩略图，选中的那张描一圈主色。
@@ -129,8 +143,8 @@ func previewRowsOf(c *ui.Context, t *ui.Theme, n int, tiny bool) {
 	ui.Column(c).Grow(1).Gap(space.Px3).Children(func() {
 		for range n {
 			ui.Row(c).Grow(1).Gap(space.Px3).AlignItems(ui.Center).Children(func() {
-				ui.Box(c).Width(6).Height(6).Radius(1).Background(t.SurfaceHover)
-				ui.Box(c).Grow(1).Height(barH).Radius(1).Background(t.SurfaceHover)
+				ui.Box(c).Width(6).Height(6).Radius(previewChipRadius).Background(t.SurfaceHover)
+				ui.Box(c).Grow(1).Height(barH).Radius(previewChipRadius).Background(t.SurfaceHover)
 			})
 		}
 	})
@@ -145,8 +159,8 @@ func previewGrid(c *ui.Context, t *ui.Theme) {
 	ui.Row(c).Grow(1).Gap(space.Px4).Children(func() {
 		for range cols {
 			ui.Column(c).Grow(1).Gap(space.Px3).Children(func() {
-				ui.Box(c).FillWidth().Height(12).Radius(2).Background(t.SurfaceHover)
-				ui.Box(c).FillWidth().Height(3).Radius(1).Background(t.SurfaceHover)
+				ui.Box(c).FillWidth().Height(12).Radius(previewCoverRadius).Background(t.SurfaceHover)
+				ui.Box(c).FillWidth().Height(3).Radius(previewChipRadius).Background(t.SurfaceHover)
 			})
 		}
 	})

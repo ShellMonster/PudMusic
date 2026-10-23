@@ -45,15 +45,15 @@ func (s *Shell) settingsShortcuts(c *ui.Context) {
 	ui.Column(c).FillWidth().Gap(space.Px12).Children(func() {
 		// 顶上那一行：Biu 的 `<h2>快捷键设置</h2>` 和右边的「恢复默认」。
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "快捷键设置").FontSize(scale.Font(c, 20)).Grow(1)
-			if flatButton(c, "恢复默认").FontSize(scale.Font(c, 12)).Disabled(ro).Clicked() {
+			ui.Text(c, "快捷键设置").FontSize(scale.Font(c, scale.Size20)).Grow(1)
+			if flatButton(c, "恢复默认").FontSize(scale.Font(c, scale.Size12)).Disabled(ro).Clicked() {
 				s.applyShortcutChange("快捷键", s.keys.reset)
 			}
 		})
 
 		if ro {
 			ui.Text(c, "快捷键只读：这份文件来自更新的版本，这一版一个字都不会写回去。").
-				FontSize(scale.Font(c, 12)).TextColor(dangerText(t))
+				FontSize(scale.Font(c, scale.Size12)).TextColor(dangerText(t))
 		}
 		// 这一页两列分别管两件事，写出来，不然用户会以为「全局」那一列只是应用内
 		// 那一列的备份。挂掉的时候另有提示（syncGlobalShortcuts 弹的那一句），
@@ -68,13 +68,13 @@ func (s *Shell) settingsShortcuts(c *ui.Context) {
 			"应用时按它也有用（底下那个开关关掉就一个都不登记；「切换mini/完整模式」"+
 			"那一条切的是窗口，所以别的应用在前台时它也管用）。焦点在搜索框这类"+
 			"输入框里时快捷键让路，打的字照常进去。").
-			FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+			FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 
 		// 三列的表头。Biu 的 `grid grid-cols-[1fr_200px_200px]`（`:102`）。
 		ui.Row(c).FillWidth().Gap(space.Px12).Children(func() {
-			ui.Text(c, "功能说明").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Grow(1)
-			ui.Text(c, "应用内快捷键").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Width(shortcutFieldWidth)
-			ui.Text(c, "全局快捷键").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Width(shortcutFieldWidth)
+			ui.Text(c, "功能说明").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Grow(1)
+			ui.Text(c, "应用内快捷键").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Width(shortcutFieldWidth)
+			ui.Text(c, "全局快捷键").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Width(shortcutFieldWidth)
 		})
 
 		// 焦点那一截在循环**之外**按，见 `keepRecordingFocus` 的注释。
@@ -111,7 +111,7 @@ func (s *Shell) shortcutRow(c *ui.Context, in, global shortcutItem, all shortcut
 	}
 
 	ui.Row(c).Key("shortcut:" + in.ID).FillWidth().Gap(space.Px12).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, name).FontSize(scale.Font(c, 14)).Grow(1)
+		ui.Text(c, name).FontSize(scale.Font(c, scale.Size14)).Grow(1)
 
 		inSlot := shortcutSlot{id: in.ID}
 		globalSlot := shortcutSlot{global: true, id: in.ID}
@@ -134,7 +134,7 @@ func (s *Shell) recorderCell(c *ui.Context, item shortcutItem, slot shortcutSlot
 	ui.Column(c).Width(shortcutFieldWidth).Gap(space.Px2).Children(func() {
 		rec = s.shortcutRecorder(c, item, slot, conflict, ro)
 		if conflict != "" {
-			ui.Text(c, conflict).FontSize(scale.Font(c, 11)).TextColor(dangerText(c.Theme()))
+			ui.Text(c, conflict).FontSize(scale.Font(c, scale.Size11)).TextColor(dangerText(c.Theme()))
 		}
 	})
 	return rec

@@ -23,6 +23,7 @@ package list
 import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -86,27 +87,8 @@ const (
 	// 折两行不影响别的；列表那一行折两行，整张列表的行高就跟着跳（文件头那一段）。
 	titleLines = 2
 
-	// listTitleSize / listOwnerSize 是列表那一行歌名和 UP 名的字号。
-	//
-	// 上游是 `text-base`（16，`music-list-item/index.tsx:111`）和 `text-sm`
-	// （14，同一行下面那个 UP 名）；DESIGN.md 的「列表歌名 16 / UP 名 14」就是
-	// 这两个数。**改之前是 14 / 12**——比上游小一档，远一点就读不清。
-	listTitleSize = 16
-	listOwnerSize = 14
-
 	// textGap 是歌名和 UP 名之间的距离。Biu 是 `mt-1`（4）。
 	textGap = space.Px4
-
-	// titleLeading 是歌名的行高倍数。1.5 是 Tailwind 的默认行高，也是 Biu 那边
-	// `text-base` 的行高。
-	//
-	// ⚠️ 列表那一行现在只有一行歌名了，这一条决定的是那一行**比 48 的封面矮多少**：
-	// 一行歌名 21 + 缝 4 + UP 名 12 = 37，比封面矮 11——所以行高由封面撑着，
-	// 歌名和 UP 名在那一行里居中（上游的 `items-center` 也是一个意思）。
-	titleLeading = 1.5
-
-	// ownerLeading 是 UP 名的行高倍数。1 是 Biu 那一行的 `leading-none`。
-	ownerLeading = 1
 )
 
 // 「紧凑」那一档的尺寸。和上面那一组**分开写**而不是给上面那几个加上「按档位取
@@ -280,10 +262,10 @@ func (l *List) viewCard(r ui.ListRow) {
 		// ⚠️ 歌名**只占一行**（上游那一行是 `truncate`）：折行的话整张列表的行高
 		// 就跟着歌名长短跳（见文件头）。
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).Children(func() {
-			ui.Text(c, m.Title).FontSize(scale.Font(c, listTitleSize)).LineHeight(titleLeading).
+			ui.Text(c, m.Title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
 				TextColor(titleColor).MaxLines(listTitleLines).Ellipsis("…")
 			if m.Owner != "" {
-				ui.Text(c, m.Owner).FontSize(scale.Font(c, listOwnerSize)).LineHeight(ownerLeading).
+				ui.Text(c, m.Owner).FontSize(scale.Font(c, scale.ListOwner)).LineHeight(leading.Owner).
 					TextColor(ownerColor).MaxLines(1).Ellipsis("…")
 			}
 		})
@@ -306,7 +288,7 @@ func (l *List) viewCard(r ui.ListRow) {
 		ui.Box(c).Width(durationWidth).Children(func() {
 			if s := formatDuration(m.Duration); s != "" {
 				ui.Text(c, s).Width(durationWidth).TextAlign(ui.End).
-					FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
+					FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 			}
 		})
 
@@ -357,10 +339,10 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 		l.viewIndex(c, i, playing, titleColor, m.Title, compactIndexWidth, 11)
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px2).Children(func() {
-			ui.Text(c, m.Title).FontSize(scale.Font(c, 13)).LineHeight(1.2).
+			ui.Text(c, m.Title).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Compact).
 				TextColor(titleColor).MaxLines(compactTitleLines).Ellipsis("…")
 			if m.Owner != "" {
-				ui.Text(c, m.Owner).FontSize(scale.Font(c, 12)).LineHeight(ownerLeading).
+				ui.Text(c, m.Owner).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Owner).
 					TextColor(ownerColor).MaxLines(1).Ellipsis("…")
 			}
 		})
@@ -373,7 +355,7 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 		ui.Box(c).Width(compactDurationWidth).Children(func() {
 			if s := formatDuration(m.Duration); s != "" {
 				ui.Text(c, s).Width(compactDurationWidth).TextAlign(ui.End).
-					FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
+					FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 			}
 		})
 

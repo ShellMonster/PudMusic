@@ -264,8 +264,11 @@ func TestTheQueueDrawerUsesTheUpstreamTypeScale(t *testing.T) {
 				}
 			case "FontSize":
 				if len(call.Args) == 1 {
-					has18 = has18 || mentionsFloat(call.Args[0], 18)
-					has16 = has16 || mentionsFloat(call.Args[0], 16)
+					// ⚠️ **认刻度表里的那个名**（`scale.Size18` /
+					// `scale.Size16`），不认裸数字：字号的出处是
+					// `widgets/scale` 那张表（票 #238）。
+					has18 = has18 || mentionsIdent(call.Args[0], "Size18")
+					has16 = has16 || mentionsIdent(call.Args[0], "Size16")
 				}
 			case "Bold":
 				heavy = "Bold()"

@@ -3,6 +3,7 @@ package list
 import (
 	"bytes"
 	"fmt"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"image"
 	"image/color"
 	"image/png"
@@ -224,11 +225,11 @@ func TestTheCoverSitsNextToTheTitle(t *testing.T) {
 // 谁大见 `TestTheRowTextIsBiggerThanTheNumbers`，序号居中见
 // `TestTheRowIndexIsCentredInItsColumn`。
 func TestTheRowScaleFollowsTheDesign(t *testing.T) {
-	if listTitleSize != 16 {
-		t.Errorf("列表歌名字号 %v，want 16（DESIGN.md「列表歌名 16」）", listTitleSize)
+	if scale.ListTitle != 16 {
+		t.Errorf("列表歌名字号 %v，want 16（DESIGN.md「列表歌名 16」）", scale.ListTitle)
 	}
-	if listOwnerSize != 14 {
-		t.Errorf("列表 UP 名字号 %v，want 14（DESIGN.md「列表 UP 名 14」）", listOwnerSize)
+	if scale.ListOwner != 14 {
+		t.Errorf("列表 UP 名字号 %v，want 14（DESIGN.md「列表 UP 名 14」）", scale.ListOwner)
 	}
 	if rowGap != 16 {
 		t.Errorf("列表列间距 %v，want 16（DESIGN.md「列表列间距 16」）", rowGap)

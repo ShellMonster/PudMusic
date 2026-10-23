@@ -575,7 +575,7 @@ func (s *Shell) viewMiniTitleRow(c *ui.Context, st app.State, t *ui.Theme) {
 				title = nothingPlaying.Title
 			}
 			ui.Text(c, title).Key("mini-title").Grow(1).MinWidth(miniTitleMinW).
-				FontSize(scale.Font(c, 13)).Bold().MaxLines(1).Ellipsis("…").
+				FontSize(scale.Font(c, scale.Size13)).Bold().MaxLines(1).Ellipsis("…").
 				TextColor(textColor(t, st.HasTrack))
 
 			// 音量在这一行而不是控制那一行：Biu 那边没有音量，而控制那一行只摆

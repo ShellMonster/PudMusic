@@ -650,7 +650,7 @@ func (p *pagedRows) viewGridRow(r ui.ListRow, cols int) {
 	}
 	m := p.rows[first]
 	if p.failed[m.ID] {
-		ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).
+		ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, scale.Size13)).TextColor(c.Theme().TextMuted).
 			Padding(space.Px8).MaxLines(1)
 		return
 	}
@@ -701,7 +701,7 @@ func (p *pagedRows) viewFooterCell(c *ui.Context) {
 func (p *pagedRows) viewCellGuarded(c *ui.Context, i int, cell float32) {
 	m := p.rows[i]
 	if p.failed[m.ID] {
-		ui.Text(c, "这一格画不出来").FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).
+		ui.Text(c, "这一格画不出来").FontSize(scale.Font(c, scale.Size13)).TextColor(c.Theme().TextMuted).
 			Padding(space.Px8).MaxLines(1)
 		return
 	}
@@ -736,7 +736,7 @@ func (p *pagedRows) viewRow(r ui.ListRow) {
 	}
 	m := p.rows[i]
 	if p.failed[m.ID] {
-		ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, 13)).TextColor(c.Theme().TextMuted).
+		ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, scale.Size13)).TextColor(c.Theme().TextMuted).
 			Padding(space.Px8).MaxLines(1)
 		return
 	}
@@ -768,7 +768,7 @@ func (p *pagedRows) viewFooter(c *ui.Context) {
 		Children(func() {
 			if p.blocked {
 				// 行里的重试（不是错误页上那颗主按钮）：扁平配方，悬停才有一层淡底。
-				if flatButton(c, "加载失败，点此重试").FontSize(scale.Font(c, 13)).Clicked() {
+				if flatButton(c, "加载失败，点此重试").FontSize(scale.Font(c, scale.Size13)).Clicked() {
 					p.blocked = false
 					p.load(trigRetry)
 				}
@@ -776,7 +776,7 @@ func (p *pagedRows) viewFooter(c *ui.Context) {
 			}
 			if p.loading {
 				ui.Spinner(c).Label("加载更多")
-				ui.Text(c, "正在加载…").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
+				ui.Text(c, "正在加载…").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
 			}
 		})
 }
@@ -827,7 +827,7 @@ func (p *pagedRows) isPlaying(m libraryRow) bool {
 func viewPlayingMark(c *ui.Context, t *ui.Theme, title string) {
 	// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（理由见 `widgets/ink`）。
 	ui.Text(c, playingMark).Label(title + " " + playingMark).
-		FontSize(scale.Font(c, 11)).TextColor(ink.AccentOn(t)).MaxLines(1)
+		FontSize(scale.Font(c, scale.Size11)).TextColor(ink.AccentOn(t)).MaxLines(1)
 }
 
 // playFrom 从第 i 行往后接进队列并开始播。

@@ -56,7 +56,7 @@ func enumSelect[T comparable](c *ui.Context, value *T, items []enumItem[T], labe
 	sel.Popup(func(panel ui.Element) {
 		popupPanel(t, panel.Grow(1).MaxWidth(width+24).Padding(space.Px4)).Children(func() {
 			for _, it := range items {
-				opt := sel.Item(it.value).Padding(space.Px6, space.Px10).Radius(6)
+				opt := sel.Item(it.value).Padding(space.Px6, space.Px10).Radius(t.Radius)
 				switch {
 				case opt.Highlighted():
 					// 高亮（指针 / 键盘游标在这一项）走「被选中的选项」那一个

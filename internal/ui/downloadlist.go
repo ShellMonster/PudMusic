@@ -432,7 +432,7 @@ type dlRowKey struct{}
 func (d *downloadsPage) viewCell(c *ui.Context, s *Shell, row, col int) {
 	id := fmt.Sprintf("%s#%d", d.rows[row].ID, col)
 	if d.failed[id] {
-		ui.Text(c, "画不出来").FontSize(scale.Font(c, 11)).TextColor(c.Theme().TextMuted)
+		ui.Text(c, "画不出来").FontSize(scale.Font(c, scale.Size11)).TextColor(c.Theme().TextMuted)
 		return
 	}
 	defer func() {
@@ -470,7 +470,7 @@ func (d *downloadsPage) drawCell(c *ui.Context, s *Shell, row, col int) {
 					OnClick(func() { d.openBiliPage(r, s) })
 				onTitle := title.Hovered()
 				title.Children(func() {
-					ui.Text(c, r.Title).FontSize(scale.Font(c, 14)).MaxLines(2).Ellipsis("…").Grow(1)
+					ui.Text(c, r.Title).FontSize(scale.Font(c, scale.Size14)).MaxLines(2).Ellipsis("…").Grow(1)
 					if onTitle {
 						ui.Icon(c, icon(iconExternal)).FontSize(16).TextColor(t.TextMuted).
 							Label(dlOpenBiliLabel)
@@ -478,7 +478,7 @@ func (d *downloadsPage) drawCell(c *ui.Context, s *Shell, row, col int) {
 				})
 				// 音质徽章，照上游 `index.tsx:179-183` 的 `Chip`。空串不画。
 				if r.Label != "" {
-					ui.Text(c, r.Label).FontSize(scale.Font(c, 11)).TextColor(t.TextMuted).MaxLines(1)
+					ui.Text(c, r.Label).FontSize(scale.Font(c, scale.Size11)).TextColor(t.TextMuted).MaxLines(1)
 				}
 			})
 		})
@@ -487,11 +487,11 @@ func (d *downloadsPage) drawCell(c *ui.Context, s *Shell, row, col int) {
 	case colSize:
 		// 上游是 `item.totalBytes ? filesize(item.totalBytes) : "-"`，只写
 		// 总大小（`index.tsx:190`）。已下了多少在状态那一列的进度条上。
-		ui.Text(c, fileSize(r.Total)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
+		ui.Text(c, fileSize(r.Total)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 	case colTime:
 		// `formatMillisecond` 是 `moment(s).format("YYYY-MM-DD")`
 		// （biu/src/common/utils/time.ts:20），没有时刻也没有「几天前」。
-		ui.Text(c, addedOn(r.AddedAt)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(1)
+		ui.Text(c, addedOn(r.AddedAt)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 	case colOps:
 		d.viewOps(c, s, r)
 	}

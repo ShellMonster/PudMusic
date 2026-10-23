@@ -19,7 +19,6 @@ import (
 	"image"
 	"math"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -39,7 +38,7 @@ const textBoxPerSize = 1.1767
 // 也就是正文那一档——**不是加粗**（DESIGN.md 的 `typography.page_title`）。
 // 我们此前八处页标题全是 `.Bold()`（20/700），层次靠重量不靠字号。
 //
-// 判据是 AST：凡是拿 `pageTitleSize` 当字号的那一句，里面不许出现 `Bold()` 或
+// 判据是 AST：凡是拿 `scale.PageTitle` 当字号的那一句，里面不许出现 `Bold()` 或
 // `FontWeight(...)`。字号的精确值由 `TestEveryPageTitleUsesTheSharedSize` 钉。
 func TestPageTitlesAreNotBold(t *testing.T) {
 	fset := token.NewFileSet()
@@ -68,7 +67,7 @@ func TestPageTitlesAreNotBold(t *testing.T) {
 				}
 				switch callName(call) {
 				case "FontSize":
-					if len(call.Args) == 1 && mentionsIdent(call.Args[0], "pageTitleSize") {
+					if len(call.Args) == 1 && mentionsIdent(call.Args[0], "PageTitle") {
 						hasShared = true
 					}
 				case "Bold":
@@ -89,11 +88,20 @@ func TestPageTitlesAreNotBold(t *testing.T) {
 }
 
 // mentionsIdent 报这个表达式里有没有那个标识符（往调用里找一层，
-// `scale.Font(c, pageTitleSize)` 中间还隔着一个调用）。
+// `scale.Font(c, scale.PageTitle)` 中间还隔着一个调用）。
+//
+// ⚠️ **包名限定的那种写法也算**（`scale.PageTitle`）：字号的出处现在是
+// `widgets/scale` 那张表，代码里写的是 `scale.PageTitle`——那是一个
+// `*ast.SelectorExpr`，不是 `*ast.Ident`。只认 `*ast.Ident` 的话，
+// 这个判据会**静默地永远不成立**（它匹配不到任何东西，于是「没有加粗」
+// 这一条对每一句都成立）。
 func mentionsIdent(e ast.Expr, name string) bool {
 	switch v := e.(type) {
 	case *ast.Ident:
 		return v.Name == name
+	case *ast.SelectorExpr:
+		// `scale.PageTitle` → 认它的末段名（`PageTitle`）。
+		return v.Sel.Name == name
 	case *ast.CallExpr:
 		for _, a := range v.Args {
 			if mentionsIdent(a, name) {
@@ -208,7 +216,11 @@ func TestTheSettingsRowTitleUsesTheMediumWeight(t *testing.T) {
 			}
 			switch callName(call) {
 			case "FontSize":
-				if len(call.Args) == 1 && mentionsFloat(call.Args[0], 16) {
+				// ⚠️ **认刻度表里的那个名**（`scale.Size16`），不认裸数字：
+				// 字号的出处是 `widgets/scale` 那张表（票 #238），代码里
+				// 写的是 `scale.Size16`——只认裸数字的话，这个判据会**静默地
+				// 永远不成立**。
+				if len(call.Args) == 1 && mentionsIdent(call.Args[0], "Size16") {
 					has16 = true
 				}
 			case "FontWeight":
@@ -227,20 +239,6 @@ func TestTheSettingsRowTitleUsesTheMediumWeight(t *testing.T) {
 		t.Error("settings_page.go 里没有一句同时写着 `FontSize(…16…)` 和 " +
 			"`FontWeight(weightMedium)`——设置页的行标题必须是 16/500")
 	}
-}
-
-// mentionsFloat 报这个表达式里有没有那个数字（`scale.Font(c, 16)` 的 16）。
-func mentionsFloat(e ast.Expr, v float64) bool {
-	found := false
-	ast.Inspect(e, func(n ast.Node) bool {
-		if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.INT {
-			if got, err := strconv.Atoi(lit.Value); err == nil && float64(got) == v {
-				found = true
-			}
-		}
-		return true
-	})
-	return found
 }
 
 // TestTheSettingsGroupsAre24Apart 钉住「设置分组之间是 24」。

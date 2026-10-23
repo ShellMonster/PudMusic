@@ -29,6 +29,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
@@ -326,11 +327,11 @@ func viewLibraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, cover *imgcac
 	}
 
 	ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px4).Children(func() {
-		ui.Text(c, m.Title).FontSize(scale.Font(c, mt.titleSize)).LineHeight(1.5).
+		ui.Text(c, m.Title).FontSize(scale.Font(c, mt.titleSize)).LineHeight(leading.Title).
 			TextColor(face.title).MaxLines(mt.titleLines).Ellipsis("…")
 		if m.Owner != "" {
 			// UP 名 14（DESIGN.md「列表 UP 名 14」；上游是 `text-sm`）。
-			ui.Text(c, m.Owner).FontSize(scale.Font(c, 14)).LineHeight(1).
+			ui.Text(c, m.Owner).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Owner).
 				TextColor(face.own).MaxLines(1).Ellipsis("…")
 		}
 	})

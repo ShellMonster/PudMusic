@@ -1501,11 +1501,11 @@ func (s *Shell) viewCrash(c *ui.Context) {
 		if v := errorArt; v != nil {
 			ui.Image(c, v).Height(errorArtHeight)
 		}
-		ui.Text(c, "界面出错了，播放器已经停在这一页").FontSize(scale.Font(c, 18)).Bold()
+		ui.Text(c, "界面出错了，播放器已经停在这一页").FontSize(scale.Font(c, scale.Size18)).Bold()
 
 		// 「出错在哪一步」这一块：三行，各自说清一件事。
 		ui.Column(c).Key("crash-where").Gap(space.Px2).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "出错的地方："+cr.where).FontSize(scale.Font(c, 13)).TextColor(t.Text)
+			ui.Text(c, "出错的地方："+cr.where).FontSize(scale.Font(c, scale.Size13)).TextColor(t.Text)
 			// 路径和页面名分开两行：用户在地址里看到的是路径，而跟开发者
 			// 说的时候说的是页面名（「下载记录那一页」）。只给一个的话，另一
 			// 边的人听不懂。
@@ -1517,15 +1517,15 @@ func (s *Shell) viewCrash(c *ui.Context) {
 			case cr.title == "" || cr.title == notFound.Title:
 				// 404 那一页没有「页面名」可言（`notFound` 的 Title 是兜底
 				// 的），只说路径。
-				ui.Text(c, "当时在看的路径："+cr.path).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+				ui.Text(c, "当时在看的路径："+cr.path).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 			default:
 				ui.Text(c, "当时在看的页面："+cr.title+"（"+cr.path+"）").
-					FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+					FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 			}
 		})
 
-		ui.Textf(c, "%v", cr.got).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).MaxLines(3)
-		ui.Text(c, "细节已经写进日志。点下面的按钮再试一次。").FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+		ui.Textf(c, "%v", cr.got).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(3)
+		ui.Text(c, "细节已经写进日志。点下面的按钮再试一次。").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 		ui.Row(c).Gap(space.Px10).Justify(ui.Center).Children(func() {
 			// 反馈是**描边**的那一枚、主操作是实心的那一枚：抄上游的
 			// `components/error-fallback/index.tsx:11-27`（「反馈」描边去

@@ -197,7 +197,7 @@ func (s *Shell) viewFolderSelect(c *ui.Context) {
 	t := c.Theme()
 
 	modal := ui.Modal(c, &f.open, func() {
-		ui.Text(c, f.title).FontSize(scale.Font(c, 14)).Bold().MaxLines(2).Ellipsis("…")
+		ui.Text(c, f.title).FontSize(scale.Font(c, scale.Size14)).Bold().MaxLines(2).Ellipsis("…")
 
 		// 「全选」那一行。⚠️ 判据是**当前列表里的每一行都勾上了**（严格长度
 		// 相等），理由和批量操作条那一处一样：`collectionbatch.go` 的
@@ -209,15 +209,15 @@ func (s *Shell) viewFolderSelect(c *ui.Context) {
 				f.toggleAll(!f.allSelected())
 			}
 			ui.Text(c, "已选 "+strconv.Itoa(len(f.picked))+" 个收藏夹").
-				FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+				FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 			ui.Spacer(c)
-			ui.Text(c, selectListHint(f)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+			ui.Text(c, selectListHint(f)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 		})
 
 		if !f.loaded && len(f.list) == 0 {
-			ui.Text(c, "正在拉收藏夹…").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted).Padding(space.Px12)
+			ui.Text(c, "正在拉收藏夹…").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted).Padding(space.Px12)
 		} else if len(f.list) == 0 {
-			ui.Text(c, "你还没有创建收藏夹").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted).Padding(space.Px12)
+			ui.Text(c, "你还没有创建收藏夹").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted).Padding(space.Px12)
 		} else {
 			pickScroll := ui.Scroll(c).Height(300).Children(func() {
 				ui.List(c, &f.ls, len(f.list), func(i int) { s.viewFolderPickRow(c, f, i) })
@@ -283,7 +283,7 @@ func (s *Shell) viewFolderPickRow(c *ui.Context, f *folderSelect, i int) {
 	item := f.list[i]
 
 	row := ui.Column(c).Key(favSelectRowKey(item.ID)).Grow(1).
-		Radius(6).Padding(space.Px6, space.Px8).Gap(space.Px2)
+		Radius(t.Radius).Padding(space.Px6, space.Px8).Gap(space.Px2)
 	if row.Hovered() {
 		row = row.Background(t.SurfaceHover)
 	}
@@ -294,7 +294,7 @@ func (s *Shell) viewFolderPickRow(c *ui.Context, f *folderSelect, i int) {
 			if ui.Checkbox(c, &on, item.Title).Disabled(f.submitting).Changed() {
 				f.toggle(item.ID)
 			}
-			ui.Text(c, selectRowSubtitle(item)).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted)
+			ui.Text(c, selectRowSubtitle(item)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 		})
 	})
 	if row.Clicked() {

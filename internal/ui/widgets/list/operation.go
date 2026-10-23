@@ -23,6 +23,7 @@ package list
 import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -100,11 +101,11 @@ func Operation(c *ui.Context, label string, color ui.Color, build func(m *ui.Men
 // 档的「⋯」在行尾（`Operation`），不占封面。
 func OperationCorner(c *ui.Context, label string, build func(m *ui.Menu)) ui.Element {
 	return ui.Box(c).Absolute().Top(operationHitInset).Right(operationHitInset).
-		Radius(c.Theme().Radius).Background(ui.RGBA(0, 0, 0, 0.35)).
+		Radius(c.Theme().Radius).Background(ui.RGBA(0, 0, 0, scrim.Overlay)).
 		Children(func() {
 			flat.IconButton(c, moreIcon, label, operationIconSize).
 				Padding(operationHitPad, operationHitPad).
-				TextColor(ui.RGBA(255, 255, 255, 0.92)).
+				TextColor(ui.RGBA(255, 255, 255, scrim.OnScrim)).
 				Menu(build)
 		})
 }

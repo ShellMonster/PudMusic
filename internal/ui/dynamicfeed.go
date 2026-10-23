@@ -236,12 +236,12 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 		// 上游这一栏的标题就是「用户动态」（`author-list.tsx:126`），左右
 		// 再缩 16（`px-4`）；这一栏自己已经有 8 的横向内边距，所以这里
 		// 只再补 8。
-		ui.Text(c, "用户动态").FontSize(scale.Font(c, 14)).Bold().PaddingX(space.Px8)
+		ui.Text(c, "用户动态").FontSize(scale.Font(c, scale.Size14)).Bold().PaddingX(space.Px8)
 
 		if !s.app.LoggedIn() {
 			// 没登录**不假装有内容**：作者栏列的是「我关注的人」，没有登录态
 			// 就没有这个列表。给一句能指路的，比一个空列表有用。
-			ui.Text(c, "登录之后能看到你关注的人").FontSize(scale.Font(c, 12)).
+			ui.Text(c, "登录之后能看到你关注的人").FontSize(scale.Font(c, scale.Size12)).
 				TextColor(t.TextMuted).PaddingX(space.Px8)
 			return
 		}
@@ -363,7 +363,7 @@ func (s *Shell) viewAuthorRow(c *ui.Context, f *dynamicFeed, i int) {
 	}
 
 	box := ui.Row(c).Grow(1).Key("feed-author:" + strconv.FormatInt(mid, 10)).
-		Gap(space.Px12).Padding(space.Px8).Radius(6).AlignItems(ui.Center)
+		Gap(space.Px12).Padding(space.Px8).Radius(t.Radius).AlignItems(ui.Center)
 	// ⚠️ hover 要在 Children **之前**问（理由同 `widgets/list` 的 grid.go）。
 	on := box.Hovered()
 	if all {
@@ -383,7 +383,7 @@ func (s *Shell) viewAuthorRow(c *ui.Context, f *dynamicFeed, i int) {
 	box.Children(func() {
 		if all {
 			// 「全部」没有头像。给一个方块底子，一眼能认出「这不是某个人」。
-			ui.Box(c).Size(authorAvatarS, authorAvatarS).Radius(6).Background(t.Surface)
+			ui.Box(c).Size(authorAvatarS, authorAvatarS).Radius(t.Radius).Background(t.Surface)
 		} else {
 			// ⚠️ **指针移上去时那个圆头像放大 5%**：上游作者栏那一行是
 			// `<Avatar className="h-9 w-9 shrink-0 rounded-full transition-transform
@@ -392,7 +392,7 @@ func (s *Shell) viewAuthorRow(c *ui.Context, f *dynamicFeed, i int) {
 			s.spaceAvatarZoom(c, face, authorAvatarS, false,
 				"feed-author-zoom:"+strconv.FormatInt(mid, 10), on)
 		}
-		ui.Text(c, name).Grow(1).FontSize(scale.Font(c, 14)).MaxLines(1).Ellipsis("…")
+		ui.Text(c, name).Grow(1).FontSize(scale.Font(c, scale.Size14)).MaxLines(1).Ellipsis("…")
 	})
 }
 
@@ -556,16 +556,16 @@ func (s *Shell) viewFeedSentinel(c *ui.Context, p *upPager, hint, retryLabel str
 	ui.Row(c).Key("feed-sentinel").Center().Gap(space.Px8).Padding(space.Px12).Children(func() {
 		switch {
 		case p.err != nil:
-			ui.Text(c, "加载失败："+p.err.Error()).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
+			ui.Text(c, "加载失败："+p.err.Error()).FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 			// 哨兵那一行上的重试：扁平（错误页那一档是 `viewLoadError`，不动）。
-			if retry != nil && flatButton(c, retryLabel).FontSize(scale.Font(c, 13)).Clicked() {
+			if retry != nil && flatButton(c, retryLabel).FontSize(scale.Font(c, scale.Size13)).Clicked() {
 				retry()
 			}
 		case p.loading:
 			ui.Spinner(c)
-			ui.Text(c, "正在加载…").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
+			ui.Text(c, "正在加载…").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
 		default:
-			ui.Text(c, hint).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)
+			ui.Text(c, hint).FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
 		}
 	})
 }
