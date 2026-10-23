@@ -23,32 +23,40 @@
 // ⚠️ **深浅两套不要自己合并成一套**：上游深色下卡片和背景几乎同色（`content1`
 // 与背景差 1~2 个色阶），**靠阴影分层**——深浅用同一个浓度的话，深色下那一圈
 // 影压在深底上根本看不出来（实测 18% 黑压 `#18181b` 上量不出差别）。
+//
+// # 这个包里只有**元素级**的影
+//
+// `Element.Shadow(...)` / `Element.InsetShadow(...)` 那一套（值在这里，调用处
+// 只说「要哪一档」）。
+//
+// ⚠️ **画笔级的影（`p.Shadow(rect, …)`，七个参数）不走这里**，而且**不是漏了**：
+// 那一套画的是**一枚控件自己的影**——旋钮的影跟着旋钮的半径、跟着它按下去几分
+// 变浓（`internal/ui/knobslider.go`）、开关那颗旋钮的影跟着开关的直径
+// （`internal/ui/static_switch.go`）。那些值不是「哪一档」，是**跟着那个控件
+// 算出来的一个数**，放进这里就得把控件的参数也搬进来，那这个包就变成第二个
+// `internal/ui` 了。值仍写在**画它的那一处**，理由和上面这一段一样，写在这里。
+//
+// # 死档不许留着
+//
+// ⚠️ **这个包里每一档都必须有调用点**。定义了没人用的档比没有档更坏：下一个人
+// 会以为「这一档可以用」，照着它抄一遍，而它画出来的东西上游从来没有过。
+// 没有调用点的档**删掉**（票 #239 把 `TailwindSM` / `TailwindXL` / `HeroLarge`
+// 三档删了）。
 package shadow
 
 import "github.com/egoist/mygo/ui"
 
-// Tailwind 的几档。**颜色是 Tailwind 默认的那档黑**（`sm` 是 5%、其余 10%、
-// `2xl` 25%）——上游那些 `shadow-*` 后面没有跟 `shadow-black/…`，用的就是默认色。
+// Tailwind 的几档。**颜色是 Tailwind 默认的那档黑**（其余 10%、`2xl` 25%）——
+// 上游那些 `shadow-*` 后面没有跟 `shadow-black/…`，用的就是默认色。
 //
 // ⚠️ 每个函数都往 e 上**加**影子（`Element.Shadow` 是累加的），所以拿到的还是
 // 同一个元素，可以继续链下去。
 const (
-	// tailwindBlack05 是 `shadow-sm` 的颜色：5% 黑。
-	//
-	// ⚠️ **它比其余几档淡一半**：Tailwind 的 `shadow-sm` 就是 5%，
-	// 拿 10% 去填会得到**两倍浓度**的影（而这一档画出来的是最淡的一圈，
-	// 差一倍一眼就看得出来）。
-	tailwindBlack05 = 0.05
 	// tailwindBlack10 是 Tailwind 默认的那档影子的颜色：10% 黑。
 	tailwindBlack10 = 0.1
 	// tailwindBlack25 是 `shadow-2xl` 的颜色：25% 黑。
 	tailwindBlack25 = 0.25
 )
-
-// TailwindSM 是上游的 `shadow-sm`：`0 1px 2px 0 rgb(0 0 0/0.05)`。
-func TailwindSM(e ui.Element) ui.Element {
-	return e.Shadow(0, 1, 2, 0, ui.RGBA(0, 0, 0, tailwindBlack05))
-}
 
 // TailwindMD 是上游的 `shadow-md`：
 // `0 4px 6px -1px rgb(0 0 0/0.1), 0 2px 4px -2px rgb(0 0 0/0.1)`。
@@ -68,13 +76,6 @@ func TailwindMD(e ui.Element) ui.Element {
 func TailwindLG(e ui.Element) ui.Element {
 	return e.Shadow(0, 10, 15, -3, ui.RGBA(0, 0, 0, tailwindBlack10)).
 		Shadow(0, 4, 6, -4, ui.RGBA(0, 0, 0, tailwindBlack10))
-}
-
-// TailwindXL 是上游的 `shadow-xl`：
-// `0 20px 25px -5px rgb(0 0 0/0.1), 0 8px 10px -6px rgb(0 0 0/0.1)`。
-func TailwindXL(e ui.Element) ui.Element {
-	return e.Shadow(0, 20, 25, -5, ui.RGBA(0, 0, 0, tailwindBlack10)).
-		Shadow(0, 8, 10, -6, ui.RGBA(0, 0, 0, tailwindBlack10))
 }
 
 // TailwindXLBlack30 是上游的 `shadow-xl shadow-black/30`——**回顶按钮那一枚**
@@ -176,19 +177,77 @@ func HeroInnerRim(e ui.Element, t *ui.Theme) ui.Element {
 	return e.InsetShadow(0, 0, 1, 0, ui.RGBA(255, 255, 255, 0.15))
 }
 
-// HeroLarge 是 HeroUI 的 `shadow="lg"`（`--heroui-box-shadow-large`）。
+// ─────────────────────────────────────────────────────────────────────────────
+// 我们自己挑的那几档面板影
 //
-// 浅色：`0 0 30px 0 rgb(0 0 0/0.04), 0 30px 60px 0 rgb(0 0 0/0.12),
-// 0 0 1px 0 rgb(0 0 0/0.3)`。
-// 深色：`0 0 30px 0 rgb(0 0 0/0.07), 0 30px 60px 0 rgb(0 0 0/0.26),
-// inset 0 0 1px 0 rgb(255 255 255/0.15)`。
-func HeroLarge(e ui.Element, t *ui.Theme) ui.Element {
+// ⚠️ **下面四档不是上游的数**：上游有对应物的是浮层（`shadow-2xl`）、提示和
+// 对话框（HeroUI 的 `<Tooltip>` / `<Modal>`），但**我们没照抄**——DESIGN.md
+// §四·五 写着「我们那几处的数是**自己挑的，不是上游那一档**，所以浮层
+// 「浮起来」的分界**和上游还不一样**」。
+//
+// 这一票（#239）只做**归档**：把那几个写在调用处的数搬进这个包，**数值一个
+// 不改**（画面必须和改之前逐像素相同）。「和上游对齐」是另一票的事。
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Popover 是**浮层面板**那一圈影：下拉、联想、日期面板、旋钮浮层。
+//
+// 浅色 18% 黑、深色 35% 黑（`ui.Color{A: 46}` / `{A: 90}`）。
+//
+// 浅色那一档是框架 `stylePanel` 的数（`mygo/ui/widgets.go:626`：18% 黑，
+// 模糊 20）——我们自拼的那些浮层照它来，两边挨着的时候才一样重。
+//
+// ⚠️ **深色那一档要更浓**：同一个 18% 压在 `#18181b` 上看不出边界，面板和底下
+// 的内容糊成一片。
+func Popover(e ui.Element, t *ui.Theme) ui.Element {
 	if t.Dark {
-		return e.Shadow(0, 0, 30, 0, ui.RGBA(0, 0, 0, 0.07)).
-			Shadow(0, 30, 60, 0, ui.RGBA(0, 0, 0, 0.26)).
-			InsetShadow(0, 0, 1, 0, ui.RGBA(255, 255, 255, 0.15))
+		return e.Shadow(0, 6, 20, 0, ui.Color{A: 90})
 	}
-	return e.Shadow(0, 0, 30, 0, ui.RGBA(0, 0, 0, 0.04)).
-		Shadow(0, 30, 60, 0, ui.RGBA(0, 0, 0, 0.12)).
-		Shadow(0, 0, 1, 0, ui.RGBA(0, 0, 0, 0.3))
+	return e.Shadow(0, 6, 20, 0, ui.Color{A: 46})
 }
+
+// Tooltip 是**提示**那一圈影：2 像素下移、8 像素模糊、20% 黑。
+//
+// 深浅同值——提示本来就小，一圈淡影够了；深色下它压的是自己的深底（提示的底
+// 是前景色），边界靠底色自己那一边。
+func Tooltip(e ui.Element, t *ui.Theme) ui.Element {
+	return e.Shadow(0, 2, 8, 0, ui.RGBA(0, 0, 0, 0.2))
+}
+
+// Modal 是**确认框**那一圈影：10 像素下移、30 像素模糊、30% 黑。
+//
+// 深浅同值：这一块底下压着 40% 的黑幕（`confirmmodal.go` 的 backdrop），幕本身
+// 已经把周围压暗了，面板这一圈影只需要把面板从幕上「抬起来」。
+func Modal(e ui.Element, t *ui.Theme) ui.Element {
+	return e.Shadow(0, 10, 30, 0, ui.RGBA(0, 0, 0, 0.3))
+}
+
+// Sheet 是**贴在背景上的那一块面板**（满屏播放器里那个分集面板）那一圈影。
+//
+// 8 像素下移、24 像素模糊、12% 黑。
+//
+// ⚠️ **偏移和模糊跟着主题的间距走**（`t.Space(2)` / `t.Space(6)`）：那一块是
+// 毛玻璃（底下还有一层模糊的封面影），影再重就糊成一片了。
+//
+// ⚠️ **这一档最贵**：模糊 24 的一圈影是**逐像素画**的，一块 280 宽的面板要
+// 多画约 280×24×2 ≈ 13 000 像素。软件渲染回退下这一笔是实打实的，所以
+// **别为了「更浮起来」把它调重**——要调重是另一票的事（而且要一起量帧耗时）。
+func Sheet(e ui.Element, t *ui.Theme) ui.Element {
+	return e.Shadow(0, t.Space(2), t.Space(6), 0, ui.RGBA(0, 0, 0, 0.12))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 已删的档
+//
+// 票 #239 删掉的三档（它们**一个调用点都没有**，而「定义了没人用的档比没有档
+// 更坏」——下一个人会以为「这一档可以用」）：
+//
+//   - `TailwindSM`（`shadow-sm`）：上游没有一处用它。
+//   - `TailwindXL`（`shadow-xl`）：上游只有回顶按钮那一枚用它，而那一枚是
+//     `shadow-black/30`（`TailwindXLBlack30`，还在）。
+//   - `HeroLarge`（`shadow="lg"`）：上游的分集那个 Popover 是这一档，但我们
+//     那一块用的是自己挑的一档更淡的影（`Sheet`）——毛玻璃底下还有一层模糊的
+//     封面影，再压一圈 30 像素的影就糊了。
+//
+// ⚠️ **上游那几个档的数在 DESIGN.md §四·五 的表里还留着**——那是**文档**（记着
+// 上游是哪些值），不是代码里有几档可调。
+// ─────────────────────────────────────────────────────────────────────────────

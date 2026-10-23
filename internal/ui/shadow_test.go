@@ -32,6 +32,8 @@ import (
 	"go/parser"
 	"go/token"
 	"image"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -536,4 +538,128 @@ func callsName(n ast.Node, name string) bool {
 		return !found
 	})
 	return found
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 票 #239：影子归档
+//
+// 判据是**源码**，不是画面：影的值只写在 `internal/ui/widgets/shadow` 里
+// （DESIGN.md §四·五「调用处不许现调 `Shadow(...)`」），而那个包里**每一档都必须
+// 有调用点**（「定义了没人用的档比没有档更坏」）。
+// ─────────────────────────────────────────────────────────────────────────────
+
+// uiGoFiles 是 `internal/ui` 下面要扫的那些文件（含 `widgets/` 里的）。
+//
+// ⚠️ **不含 `_test.go`**：测试自己会造元素、也会调框架那套 API，扫进去是噪音。
+func uiGoFiles(t *testing.T) []string {
+	t.Helper()
+	var out []string
+	for _, pat := range []string{"*.go", "widgets/*/*.go"} {
+		matches, err := filepath.Glob(pat)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range matches {
+			if strings.HasSuffix(m, "_test.go") {
+				continue
+			}
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// TestNoElementShadowIsWrittenAtTheCallSite 钉住「界面层不许现调元素级的影」。
+//
+// 影的**值**只写在 `internal/ui/widgets/shadow` 里，调用处只说「要哪一档」
+// （DESIGN.md §四·五）。改之前有四处绕过它（浮层面板 / 提示 / 确认框 /
+// 满屏那个分集面板），而那种绕法的症状是**静默**的：画面上只是「这一块看着
+// 比那一块平一点」，不会报错、不会崩、不会打日志。
+//
+// ⚠️ **认的是元素级那套 API**（`Shadow(x, y, blur, spread, c)`，五个参数）：
+// 画笔那一套是 `p.Shadow(rect, radius, x, y, blur, spread, c)`，七个参数——
+// 那是画一枚控件自己的影（旋钮、开关那颗旋钮），值跟着那个控件算，不归这个
+// 包管（理由写在 `widgets/shadow` 的文件头上）。
+func TestNoElementShadowIsWrittenAtTheCallSite(t *testing.T) {
+	fset := token.NewFileSet()
+	for _, name := range uiGoFiles(t) {
+		// 这个包**自己**就是那个「一处」，它当然要写。
+		if name == "widgets/shadow/shadow.go" {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("解析 %s 失败：%v", name, err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || len(call.Args) != 5 {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			if sel.Sel.Name == "Shadow" || sel.Sel.Name == "InsetShadow" {
+				t.Errorf("%s 里现调了 %s(...)——影的值只写在 "+
+					"`internal/ui/widgets/shadow` 里（DESIGN.md §四·五，票 #239）",
+					name, sel.Sel.Name)
+			}
+			return true
+		})
+	}
+}
+
+// TestEveryShadowTierHasACallSite 钉住「这个包里不许有死档」。
+//
+// 每一档都必须有调用点。**定义了没人用的档比没有档更坏**：下一个人会以为
+// 「这一档可以用」，照着它抄一遍，而它画出来的东西上游从来没有过。
+//
+// 票 #239 删掉了三档没有调用点的：`TailwindSM` / `TailwindXL` / `HeroLarge`。
+func TestEveryShadowTierHasACallSite(t *testing.T) {
+	fset := token.NewFileSet()
+	pkg, err := parser.ParseFile(fset, "widgets/shadow/shadow.go", nil, 0)
+	if err != nil {
+		t.Fatalf("解析 widgets/shadow/shadow.go 失败：%v", err)
+	}
+
+	// 包里那些导出的函数 = 那些档。
+	var tiers []string
+	for _, decl := range pkg.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil {
+			continue
+		}
+		if fn.Name.IsExported() {
+			tiers = append(tiers, fn.Name.Name)
+		}
+	}
+	if len(tiers) == 0 {
+		t.Fatal("widgets/shadow 里一个导出函数都没有——影子归档的出口不见了")
+	}
+
+	// 界面层哪些地方调了它们。
+	used := map[string]bool{}
+	for _, name := range uiGoFiles(t) {
+		if name == "widgets/shadow/shadow.go" {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("解析 %s 失败：%v", name, err)
+		}
+		for _, tier := range tiers {
+			if callsName(f, tier) {
+				used[tier] = true
+			}
+		}
+	}
+
+	for _, tier := range tiers {
+		if !used[tier] {
+			t.Errorf("widgets/shadow.%s 一个调用点都没有——**死档要删掉**"+
+				"（定义了没人用的档比没有档更坏：下一个人会以为「这一档可以用」，"+
+				"而它画出来的东西上游从来没有过）", tier)
+		}
+	}
 }

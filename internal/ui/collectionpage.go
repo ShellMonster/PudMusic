@@ -898,9 +898,12 @@ func (s *Shell) viewCollectionSort(c *ui.Context, p *collectionPage) {
 			item := sel.Item(sort).Padding(6, 10).Radius(t.Radius)
 			switch {
 			case item.Highlighted():
-				item.Background(t.Accent).TextColor(t.AccentText)
+				// 高亮走「被选中的选项」那一个出口（实心主色底 + `t.AccentText`
+				// 字，票 #239，审计 F-14）。
+				item = flatSolid(c, item)
 			case sort == p.sort:
-				item.Background(t.Surface)
+				// 当前值（不是「选中」）：淡底、没有主色。
+				item = item.Background(t.Surface)
 			}
 			item.Children(func() { ui.Text(c, sort.Label()).SingleLine() })
 		}

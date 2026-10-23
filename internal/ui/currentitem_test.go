@@ -1,4 +1,4 @@
-// 「当前在哪」在应用里只有一种画法（票 #234）。
+// 「当前在哪」在应用里只有一种画法（票 #234；票 #239 把它改成深浅同构）。
 //
 // 左栏三处（侧栏收藏夹 / 关注页分组 / 动态页作者栏）和队列抽屉的「正在播放」
 // 原来各画各的：左栏三处是**实心主色大块**（动态流那一处是 248×50），队列抽屉
@@ -9,14 +9,16 @@
 //
 // # 判据是**画面上那一格的底色**
 //
-// 每一处都和 `flatCurrent`（`flatbutton.go`）**同一个配方**：
+// 每一处都和 `flatCurrent`（`flatbutton.go`）**同一个配方**，而那个配方在票 #239
+// 之后**深浅两套是同一个东西**（审计 F-15：浅色下原来是「主色当底」、深色下是
+// 「主色当字」，主色的角色在两套里换了）：
 //
-//	浅色	主色很淡的一层底（14%） + 正文色
+//	浅色	中性灰底 + 主色压深的那一档字
 //	深色	中性灰底 + 主色字
 //
-// 底色是拿**旁边那一格**当参照量出来的——旁边那一格没有底，量到的那一层就是
-// 这一格身下的那块底板。于是判据不写死任何面板颜色：侧栏是 `t.Surface`、
-// 页面和抽屉是 `t.Background`，测出来的数自己会对上。
+// ⚠️ **浅色那一档的底不再合到「旁边那一格」身下的底板上**：以前它是**半透明**的
+// （主色 14%），屏幕上的数是它合出来的结果；现在是**不透明**的中性灰，直接就是
+// 那个数。
 //
 // ⚠️ **取的是那一块里的「众数」**，不是某一个像素：那一块里既有底也有字（深色下
 // 那一行连字都是主色），而底占绝大多数——众数才是底。
@@ -29,7 +31,6 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -40,10 +41,12 @@ type currentSpot struct {
 	name string
 	// ink 是那一格里的**字**该是什么色。
 	//
-	// ⚠️ **五处的字色不是同一个数**（票 #234 的评审抓出来的那一条）：左栏那四处
-	// 是正文色（深色下是主色字），队列抽屉那一行是**主色当字**
-	// （`ink.AccentOn`，和列表行「正在播放」那一档同一个数——DESIGN §四：「唯一
-	// 剩下的主色高亮是『正在播放』那一行：flat（主色当字）」）。
+	// ⚠️ **五处现在是同一个数**（票 #239 之后）：`flatCurrentText` 那一档——深色下
+	// 是主色，浅色下是从主色现算的、压到 ≥4.5:1 的那个变体。
+	//
+	// 改之前这里分两档（左栏那四处是正文色、队列抽屉那一行是 `ink.AccentOn`），
+	// 票 #239 把浅色下的底从「主色 14%」换成中性灰之后，那一档主色当字也得跟着
+	// 换成「按新底算」的那一档——否则底换了、字没换。
 	ink mygoui.Color
 }
 
@@ -53,8 +56,8 @@ type currentSpot struct {
 //
 //   - 「不是实心主色」——那是改之前的样子（F-06：248×50 的实心大块）；
 //   - 「底色就是 flatCurrent 那一档」——只断前一条的话，一块**别的**浅色也过；
-//   - 「字色是那一档该有的」——底换了字没换，浅色下就是一行淡绿底上的正文色而
-//     别处是主色字（深色下则是绿底上的黑字）。
+//   - 「字色是那一档该有的」——底换了字没换，浅色下就是一行灰底上的正文色而
+//     别处是主色字（深色下则是灰底上的黑字）。
 func assertCurrentIsFlat(t *testing.T, sp currentSpot, img *image.RGBA, dark bool) {
 	t.Helper()
 	curPx := bandPixels(img, sp.cur)
@@ -74,11 +77,10 @@ func assertCurrentIsFlat(t *testing.T, sp currentSpot, img *image.RGBA, dark boo
 	}
 
 	// 判据二：**底色就是 flatCurrent 那一档**。
+	//
+	// ⚠️ **深浅两套都是不透明的中性灰**（票 #239 之前浅色那档是半透明的主色 14%，
+	// 那时要合到旁边那一格身下的底板上才是屏幕上的数）。
 	want := flatCurrentBg(theme)
-	if !dark {
-		// 浅色那一档是半透明的：合到**旁边那一格**身下的底板上才是屏幕上的数。
-		want = want.Over(rgbaToColor(sib))
-	}
 	if !nearRGBA(cur, rgbaOf(want), 3) {
 		t.Errorf("%s：当前那一格的底色是 %v，want %v（flatCurrent 那一档）", sp.name, cur, want)
 	}
@@ -88,7 +90,7 @@ func assertCurrentIsFlat(t *testing.T, sp currentSpot, img *image.RGBA, dark boo
 	// ⚠️ **容差是 24**：字是抗锯齿画的，一个像素 rarely 是纯字色——13px 的汉字
 	// 笔画只有一两个像素宽，量到的那个「最远离底色的像素」是字色和底色的混合。
 	// 24 是从实测来的（实测差 0~12），而两档字色之间差着几十个通道（正文色
-	// #18181b 与主色压深那一档 #117936 差 90+），所以这个容差拦得住「字色换了」。
+	// #18181b 与主色压深那一档差 90+），所以这个容差拦得住「字色换了」。
 	if !nearRGBA(ink, rgbaOf(sp.ink), 24) {
 		t.Errorf("%s：当前那一格的字色是 %v，want %v", sp.name, ink, sp.ink)
 	}
@@ -231,10 +233,10 @@ func TestTheCurrentItemIsFlatEverywhere(t *testing.T) {
 				cur := mygoui.Rect{X: curRow.X + 60, Y: curRow.Y + 4, W: 200, H: 56}
 				sib := mygoui.Rect{X: sibRow.X + 60, Y: sibRow.Y + 4, W: 200, H: 56}
 				theme := BuildTheme(app.DefaultSettings(""), dark)
-				// 队列抽屉那一行的字是**主色当字**（`ink.AccentOn`）——和列表行
-				// 「正在播放」那一档同一个数（DESIGN §四）。
+				// 队列抽屉那一行的字是**主色当字**（`flatCurrentText` 那一档）——
+				// 它的底是中性灰（不是页面底色），所以字是按那个底算出来的那一档。
 				assertCurrentIsFlat(t, currentSpot{cur, sib, "队列抽屉",
-					ink.AccentOn(theme)}, h.tt.Image(), dark)
+					flatCurrentText(theme, true)}, h.tt.Image(), dark)
 			})
 		})
 	}
