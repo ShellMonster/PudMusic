@@ -34,7 +34,10 @@ import (
 )
 
 // errDownloadsMissing 是「下载没挂上」。见 `DownloadMounted`。
-var errDownloadsMissing = errors.New("下载还没接上")
+//
+// ⚠️ **这句是给用户看的**（下载失败时它就是失败原因），不许说「还没接上」
+// （票 #242，UX 报告 §3-F 的 F2）：用户不知道应用里哪一块没挂上。
+var errDownloadsMissing = errors.New("下载暂时用不了")
 
 // Downloads 是下载这一摊的依赖。
 type Downloads struct {

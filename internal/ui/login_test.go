@@ -657,3 +657,85 @@ func TestLoginPageSaysTheCredentialsCannotBeKept(t *testing.T) {
 		t.Errorf("没有显示已登录状态。\n画面上的字是：\n%s", words)
 	}
 }
+
+// TestTheLoginPageSaysWhatLoggingInGivesYou 钉住「登录能换来什么」。
+//
+// # 为什么这一条要紧
+//
+// 用户点进登录页的时候，脑子里的问题是「登录了能干什么」。原来这一页只说
+// 「扫码登录」「用 bilibili 手机客户端扫一扫就能登进来」，**一个字都没说收益**
+// ——登录像一道没有说明书的考题（UX 报告 §3-A 的 A3）。
+//
+// ⚠️ **每一态都要有**：二维码出来之后那一句也得在——用户是先扫了码才想起来
+// 「登进来能干什么」的，所以只在「还没点开始」那一态写它，等于只答了一半。
+func TestTheLoginPageSaysWhatLoggingInGivesYou(t *testing.T) {
+	const benefit = "登录之后可以看你的关注、收藏、历史记录和稍后再看"
+
+	t.Run("还没开始扫码", func(t *testing.T) {
+		b := newUIBili(t, 86101)
+		a := newLoginApp(t, b)
+		tt, _ := loginTester(t, a)
+		tt.Frame()
+
+		if !tt.HasText(benefit) {
+			t.Errorf("登录页没说清登录能换来什么，文字有 %q", tt.Texts())
+		}
+	})
+
+	t.Run("已经在等扫码", func(t *testing.T) {
+		b := newUIBili(t, 86101)
+		a := newLoginApp(t, b)
+		tt, _ := loginTester(t, a)
+		tt.Frame()
+
+		a.BeginLogin()
+		waitQRCode(t, a)
+		waitLogin(t, a, app.LoginWaiting)
+		tt.Frame()
+
+		if !tt.HasText(benefit) {
+			t.Errorf("二维码出来之后登录页反而不说收益了，文字有 %q", tt.Texts())
+		}
+	})
+}
+
+// TestTheNotLoggedInScreenHasItsOwnIllustration 钉住「没登录」那一屏有插画。
+//
+// # 为什么这一条要紧
+//
+// 应用里**每一个别的空状态都有一枚图标**（本地音乐是磁盘、下载记录是下载箭头、
+// 搜索是放大镜……），而「还没登录」那一支原来**光秃秃三行字**——偏偏它是用户
+// 第一次打开应用最常撞到的那一屏（UX 报告 §3-F 的 F1，中高）。
+//
+// 判据是**像素**：图标是装饰，元素树里查不到（`mygo/ui/svg.go`：「图标是装饰，
+// 辅助技术看不见它」），所以只能看标题上面那条带里有没有画上去的东西。
+//
+// ⚠️ **深浅两套都要断**：图标是单色的、跟着祖先的文字色走，浅色下看得清的那一
+// 枚，深色下可能糊成一团。
+func TestTheNotLoggedInScreenHasItsOwnIllustration(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			// ⚠️ **B 站客户端要挂着、但不登录**：那一页的检查顺序是「先『客户端
+			// 没挂上』，再『没登录』」（见 loginprompt.go 的文件头），而没挂客户端
+			// 时画的是**另一支**（空状态 + 「这一页暂时加载不出来」）——那不是
+			// 这一条要验的。
+			s, tt := newShell(t, systemIsDark(dark), mounted(func(_ *testing.T, a *app.App) {
+				cli := bili.NewClient(bili.Options{})
+				a.MountLogin(app.NewMemoryStore("test"), cli)
+				a.MountExplore(cli)
+			}))
+			s.navigate(followPath)
+			waitFrames(t, tt, "「还没登录」那一支画出来了", func() bool {
+				return tt.HasText("还没登录")
+			})
+			if n := paintedInBand(t, tt, "还没登录"); n < 20 {
+				t.Errorf("「还没登录」那一屏的插画那一带只画了 %d 个像素（want ≥ 20）——"+
+					"它和别页的空状态长得不一样（别的页都有一枚图标）", n)
+			}
+		})
+	}
+}
