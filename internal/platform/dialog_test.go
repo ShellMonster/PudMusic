@@ -43,9 +43,12 @@ type registryRow struct {
 // TestKnownDecodersCoversEveryRegistration 会发现漏了的那一行，
 // TestAudioFiltersCoverEveryDecodableExtension 会挡住补了行却忘了开白名单的那一半。
 var knownDecoders = []registryRow{
-	// MyGo 自带的（audio/wav.go、audio/mp3/mp3.go）。
+	// MyGo 自带的（audio/wav.go、audio/mp3/mp3.go、audio/vorbis/vorbis.go）。
 	{name: "wav", magic: "RIFF????WAVE", exts: []string{"wav"}},
 	{name: "mp3", magic: "ID3", exts: []string{"mp3"}},
+	// Ogg Vorbis：靠 `mygo/audio/vorbis` 的 init 注册（那一行 blank import 在
+	// `internal/service/audio/player.go`）。文件头就是 Ogg 的页头 "OggS"。
+	{name: "vorbis", magic: "OggS", exts: []string{"ogg"}},
 
 	// 本仓库注册的（internal/service/audio/aiff.go、containers.go）。
 	// .aif 不是第三种格式，只是 IFF 容器的另一个叫法：注册表认的是文件头，
@@ -233,7 +236,8 @@ func source(row registryRow) string {
 // 扫源码而不是问注册表，是因为 MyGo 把注册表关在包内，没有任何枚举接口
 // （audio.go 里只有 RegisterFormat 和 NewDecoder 两个入口）。子包不在范围内：
 // extaf 不注册任何格式，flacdec/mygoflac 那个注册只有它自己的测试在用。
-// MyGo 自带的 wav / mp3 同样不在扫出来的范围内，它们跟着 go.mod 里钉死的版本走。
+// MyGo 自带的 wav / mp3 / vorbis 同样不在扫出来的范围内，它们跟着 go.mod 里
+// 钉死的版本走。
 func registrationsInAppCode(t *testing.T) []registryRow {
 	t.Helper()
 	files, err := filepath.Glob(filepath.Join("..", "service", "audio", "*.go"))

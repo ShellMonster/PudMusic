@@ -292,7 +292,7 @@ type Task struct {
 
 	// Identity 是资源身份，见上面。
 	Identity Identity `json:"identity"`
-	// Label 是音质徽章文字（「无损 FLAC」/「320K」），纯给人看。
+	// Label 是音质徽章文字（「Hi-Res 无损」/「192K」），纯给人看。
 	Label string `json:"label,omitempty"`
 
 	// Dest 是最终落盘的完整路径。

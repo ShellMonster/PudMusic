@@ -23,7 +23,7 @@ import (
 func TestStopDiscardsAnOnlineLoadStillInFlight(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
-	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh320), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh192), 110836))
 
 	// 把 CDN 那一段卡住：请求发出去了、handler 停在这儿不动，于是取流那条线
 	// 真的停在「流还在建」的状态上。
