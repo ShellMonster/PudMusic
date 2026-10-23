@@ -14,8 +14,31 @@
 ## 1. 验收命令
 
 ```sh
-go build -p 4 ./... && go vet -p 4 ./... && go test -p 4 $(go list ./... | grep -v '/internal/ui$')
+go build -trimpath -p 4 ./... && go vet -trimpath -p 4 ./... && go test -p 4 $(go list ./... | grep -v '/internal/ui$')
 ```
+
+**`-trimpath` 是为了让编译缓存跨 worktree 命中。** 本板子上每个 agent 有自己的
+worktree，源码所在的**绝对路径每个 worktree 都不同**——而 Go 的编译缓存 key
+里带着「包所在目录」，路径一变，同一份源码在另一个 worktree 就是**另一个
+action**：于是 N 个 worktree 各编一遍、各存一份（实测：内容只差 1 个文件的
+两个副本，第二个要重编 **38** 个包；每多一个 worktree 缓存多占 **41 MB**）。
+`-trimpath` 把产物里的源码路径换成 **module 路径 + 相对路径**，路径不再进 key，
+缓存就能跨 worktree 共享（实测：38 → **4** 个包，41 MB → **0.85 MB**）。
+
+⚠️ **三个硬条件，踩了更糟**：
+
+1. **`test` 那一步不带 `-trimpath`**（票 #275 定下的口径，**别自己给 test 加上**）。
+   `-trimpath` 之下 `runtime.Caller` 给的是 **import 路径**而不是文件系统路径，
+   靠它定位文件的测试会红——`internal/ui/widgets/space` 那一处已经改成不依赖
+   编译期路径了（票 #275），但 `widgets/scale`、`widgets/leading`、`widgets/scrim`
+   三处还是老写法（`#276` 带进来的），所以**整仓的 `go test` 现在都不能带**。
+2. **不许用 `GOFLAGS=-trimpath`**——它对**所有** go 子命令生效（包括 `go test`），
+   同样打红。**只能写进命令行。**
+3. **所有 agent 必须一致**——半开半开会让缓存**翻倍到 518 MB**，比现状更糟。
+   所以改这条命令的票必须**在同一个提交里**改完 `AGENTS.md` + `DESIGN.md` +
+   全部 open 票面；**板子自己的 check 命令也是一处**
+   （`herdr-projects set check.command '…' --repo Biu_MyGo`）——它每个票都跑
+   一遍，不改就等于板子一直在半开半开。
 
 **`-p 4` 是限并发用的**：这台机器主人自己也要用，别把它调大、别去掉（并行度拉满
 会跟界面抢 CPU，机器一卡，界面测试自己也会飘）。
@@ -95,7 +118,7 @@ FAIL，逐个包看 `ok`。**它是默认不跑的**（见上），所以它绿�
   测出来的结果本身也不作数。**整包扫描是一次性的排查手段，不是每票的验收项。**
 
   ```sh
-  go build -p 4 ./... && go vet -p 4 ./... && go test -p 4 \
+  go build -trimpath -p 4 ./... && go vet -trimpath -p 4 ./... && go test -p 4 \
       $(go list ./... | grep -v '/internal/ui$')   # 默认一次，不跑界面整包
   GOGC=10 go test ./internal/ui/ -count=3 -timeout 5m \
       -run '你这次改动对应的用例名'   # 改了界面行为才加

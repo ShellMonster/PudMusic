@@ -16,14 +16,55 @@ import (
 // 这一组是这张表的**护栏**：表里的值不许漂，DESIGN.md 的令牌不许对不上，
 // 代码里也不许再出现裸的间距数字。
 
-// repoRoot 是仓库根（从本文件的路径往上三层）。
+// repoRoot 是仓库根。
+//
+// ⚠️ **这里原来靠 `runtime.Caller(0)` 推路径**（拿本文件的路径往上找）。
+// 那在 `-trimpath` 之下拿到的是 **import 路径**
+// （`github.com/ShellMonster/Biu_Go/internal/ui/widgets/space/space_test.go`）
+// 而不是文件系统路径——拼出来的 `DESIGN.md` 不存在，两条用例会红：
+// `open github.com/ShellMonster/Biu_Go/DESIGN.md: no such file or directory`。
+//
+// 而 `-trimpath` 是**编译缓存跨 worktree 命中的前提**（源码路径不再进哈希，
+// 产物才能被别的 worktree 复用），所以这里的定位必须**既不依赖编译期路径、
+// 也不依赖绝对路径**。
+//
+// 现在这样找：**先看 `runtime.Caller` 给的是不是绝对路径**（是，就从它那一层
+// 往上找；`-trimpath` 之下不是），**不是就回落 `go test` 的工作目录**——
+// `go test` 把工作目录设在包目录（go 工具保证的），从那里往上一样能到仓库根。
+//
+// 往上找的判据是「同一层里同时有 `go.mod` 和 `DESIGN.md`」，不是写死几层：
+// 这个包将来挪位置时不用改这里（要求两个文件都在，是为了让子模块那种
+// 「有自己的 go.mod、但没有 DESIGN.md」的目录被跳过）。
 func repoRoot(t *testing.T) string {
 	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("拿不到本测试文件的路径")
+	var starts []string
+	if _, thisFile, _, ok := runtime.Caller(0); ok && filepath.IsAbs(thisFile) {
+		starts = append(starts, filepath.Dir(thisFile))
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", "..", ".."))
+	if wd, err := os.Getwd(); err == nil {
+		starts = append(starts, wd)
+	}
+	for _, start := range starts {
+		for dir := start; ; {
+			if isRegularFile(filepath.Join(dir, "go.mod")) &&
+				isRegularFile(filepath.Join(dir, "DESIGN.md")) {
+				return dir
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	t.Fatalf("找不到仓库根：从 %v 往上都没有同时带 go.mod 和 DESIGN.md 的目录", starts)
+	return ""
+}
+
+// isRegularFile 报 path 是不是一个存在的普通文件。
+func isRegularFile(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.Mode().IsRegular()
 }
 
 // TestTheScaleValuesAreLocked 把每一档的像素值钉死。
