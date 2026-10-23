@@ -136,10 +136,51 @@ var settingsTabNames = []string{"常规设置", "菜单设置", "快捷键设置
 // ⚠️ **文本缩放大于 1 的时候，「主题」「窗口关闭」那两行会跟着变宽**
 // （它们里面的字要放得下，见 pickTheme 的注释）。那是这一列唯一的不齐，
 // 基准宽度说的是**缩放为 1 的时候**。
+//
+// ⚠️ **三处分段控件走同一个出口**（`settingsSegment`）：设置页只有一种分段控件
+// （票 #240 / 报告 §4 的 F-17）。
 const (
 	settingsControlW = 300
 	radiusReadoutW   = 48
 )
+
+// settingsDescMinW 是**说明列**的最小宽度（左边标题 + 那一句话）。
+//
+// # 为什么要有这个下限
+//
+// 每一行是「左边标题 + 一句说明，右边定宽控件」，**控件那一列是定宽的**，
+// 说明那一列吃剩下的——于是窗口越窄，说明被挤得越狠：
+// 1200 宽时那一列是 520，900 宽（`WindowOptions.MinWidth` 定的最小尺寸）
+// 时只剩 320，**掉掉 38%**；说明文字和控件之间的留白从 351 掉到 151
+// （UI 报告 §4 的 F-27）。
+//
+// 320 是量出来的：说明文字里最长的一句是「内容页排成列表、网格还是紧凑」
+// （15 个字，14px 下 210 像素），320 是它的 1.5 倍——再窄它就折行，而那一折
+// 让**整行**变高，右边那个控件也跟着往下挪半格，一页设置于是参差不齐。
+//
+// ⚠️ **这个下限不是白给的**：行放不下它的时候，**右边那列控件先收窄**
+// （框架的 flex 会先满足这里的 `MinWidth`），说明列不会被压到 320 以下。
+// 收窄也有下限（`settingsControlMinW`），不然「跟随系统」那一档会被裁成半个词。
+//
+// ⚠️ **报告 §4 那个「掉到 44%」是按一个算错的数算出来的**：它说 900 那一档的
+// 「设置栏宽」是 668，于是说明列是 290。真窗口那张 900×560 的截图上量出来的
+// 是**内容右沿在 872**（= 900 - 28 的内边距），也就是设置栏 700 宽——**滚动条
+// 是浮在上面的，不占宽度**（框架的 `scrollBars` 画在自己的盒子上，
+// `mygo/ui/paint.go:1039`）。于是那一档的说明列是 **320**，掉的是 **38%**，
+// 不是 44%。所以这一条现在**已经是达标的**，本票做的是**把它钉住**（下面那条
+// 测试钉着它），不是把一个已经达标的数再往上推。
+const settingsDescMinW = 320
+
+// settingsControlMinW 是**控件列**的最小宽度。
+//
+// ⚠️ **它是为了「跟随系统」那一档**：四个汉字 14px 下是 56 像素，加上按钮自己
+// 的内边距（`flat.Button` 的 14×2）要 84；三个格子加两道 4 的缝就是 260。
+// 控件列窄过这个数，「跟随系统」就被裁成「跟随系…」——用户看见半个词，第一反应
+// 是这个应用坏了，而不是「这个按钮窄了一点」。
+//
+// ⚠️ **只有窄到装不下说明列的下限时才会走到这里**：900 宽（最小尺寸）那一档
+// 刚好是 320 + 24 + 300 = 644（内容那一段的宽），控件列还是基准宽 300。
+const settingsControlMinW = 260
 
 // settingsContentPad 是设置的内容那一段左右与下边的内边距。
 //
@@ -440,7 +481,10 @@ func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc s
 		s.settings.focusEl = row
 	}
 	row.Children(func() {
-		ui.Column(c).Grow(1).Children(func() {
+		// ⚠️ **说明列有最小宽度**（`settingsDescMinW`）：控件那一列是定宽的，
+		// 说明这一列吃剩下的——没有这个下限，窗口一窄说明就被压扁（理由见那个
+		// 常量的注释）。
+		ui.Column(c).Grow(1).MinWidth(settingsDescMinW).Children(func() {
 			title()
 			ui.Text(c, desc).FontSize(scale.Font(c, 14)).TextColor(t.TextMuted).Wrap()
 		})
@@ -452,46 +496,105 @@ func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc s
 // 共用的控件
 // ─────────────────────────────────────────────────────────────────────────────
 
+// settingsSegment 是设置页的分段控件：一排互斥的档位，选中的那一档铺实心主色底。
+//
+// 🔴 **设置页只有这一种分段控件**（票 #240 / UI 报告 §4 的 F-17）。
+//
+// 此前同一页上有**两套**分段控件：框架的 `ui.Segmented`（**灰底轨道 + 白色滑块**，
+// 「数据显示样式」那一格）和自绘的三个按钮（**没有轨道，选中的那一档是实心主色底**，
+// 「主题」「窗口关闭」那两格）。两个并列的分段控件长得不一样，用户一眼看不出它们
+// 是同一类东西（Apple HIG「一致性：相同功能的控件外观相同」）。现在三处都走这里。
+//
+// # 为什么统一到「实心主色底」这一档，而不是换成框架的 `ui.Segmented`
+//
+//   - **「被选中的选项 = 实心主色底 + `t.AccentText` 字」是已经拍板的**
+//     （票 #239 / 审计 F-14，DESIGN.md §四）。那一节还明写「**F-17 没做之前，别把
+//     这一档当成定案**」——本票就是 F-17，本票来定案，而定案的方向是**沿用已定的
+//     那一档**，不是再添第三种。
+//   - **框架 `ui.Segmented` 没有滑块动画**：它的每一段各自换背景
+//     （`mygo@v0.6.2/ui/toggle.go` 的 `coreSegmented`），没有动画通道。有 250ms
+//     滑动动画的是**我们自己的 `mainTabs`**（票 #171），这一页从来没用过它。
+//   - **它填不满控件列那一格**：`ui.Segmented` 的宽度按内容算（`Shrink(0)`），
+//     换成它，那一列的左边缘就又落在两个位置上——那正是票 #235 刚消灭掉的那件事。
+//   - **「数据显示样式」那一格下面就是预览图**，选中的那张**描主色边**
+//     （`previewOne`）；换成白色滑块，同一格里就有两种「选中」信号。
+//
+// # 宽度跟着字号缩放走
+//
+// 「跟随系统」四个汉字最宽：1.4 倍时它连内边距要 106 像素，三个各 100 的格子
+// 装不下，选中项会被裁成「跟随系…」（评审在 1.4 倍下量到过）。所以这一族的宽度
+// 是 `scale.Font(c, settingsControlW)`，不是 `settingsControlW`。
+//
+// # 只读时
+//
+// 选中那一档换成中性灰（`pickSelected`），字换成禁用灰（`flat.Dimmed`）——
+// 实心主色底乘完框架的 50% 不透明度之后字压在上面只剩 2.6:1，只读时用户会以为
+// 「这几个选项消失了」（`pickSelected` 的注释写着整段来由）。
+//
+// # w 是这一排多宽
+//
+// 0 = **填满父那一格**：「数据显示样式」那一格外面还套着一列预览（切换在上、
+// 预览在下），两样东西必须同宽，而那一格收窄时预览要跟着收窄。别的两处给
+// 控件列的基准宽。
+func (s *Shell) settingsSegment(c *ui.Context, key, group string, w float32, labels []string, chosen int, ro bool, pick func(i int)) {
+	// ⚠️ **那个 `Label(group)` 是给这一排起个组名**：读屏软件要知道这几个键是一组
+	// （互斥的几档），而 `Tester.Find` 也靠它量这一排的盒子——控件列的左边是不是
+	// 一条线，就靠它断（见 `TestTheSettingsControlsShareOneBaseline`）。
+	row := ui.Row(c).Key(key).Label(group).Gap(space.Px4)
+	if w > 0 {
+		row = row.Width(w)
+	} else {
+		row = row.FillWidth()
+	}
+	// ⚠️ **下限**：行放不下说明列的最小宽度时，这一列先收窄（框架的 flex 会先
+	// 满足说明列那个 `MinWidth`）——但不低于 `settingsControlMinW`，不然「跟随
+	// 系统」那一档会被裁成半个词（那个常量的注释写着整段来由）。
+	row = row.MinWidth(scale.Font(c, settingsControlMinW))
+	row.Children(func() {
+		for i, text := range labels {
+			b := flatButton(c, text).Grow(1).Radius(6).Disabled(ro)
+			if i == chosen {
+				b = s.pickSelected(c, b, ro)
+			}
+			// ⚠️ 排在 `.Disabled(ro)` 和上面那一层 **之后**：禁用前那一档的字乘完
+			// 框架的 50% 只剩 2.6:1——只读时用户会以为这几个选项消失了。
+			// `flat.Dimmed` 里的注释写了整个来由。
+			b = flat.Dimmed(c, b)
+			if b.Clicked() {
+				pick(i)
+			}
+		}
+	})
+}
+
 // pickTheme 是主题那三档。
 //
 // 换完之后 `applyFrameTheme` 下一帧就装上新主题：改档位 → UpdateSettings →
 // invalidate → 重画，一帧之内的事。走 `applySetting` 而不是 `SetThemeMode`，
 // 是为了和另外十几项共用同一条报错提示。
 //
-// ⚠️ **选中的那一档是实心主色底**（`flatSolid`）：这是「被选中的选项」在应用里
-// **唯一**的画法（票 #239，审计 F-14）——下拉项的高亮也是它（`settings_enum.go`
-// / `settings_font.go` / `collectionpage.go` 三处都走同一个出口）。
+// ⚠️ **它和另外两处分段控件走同一个出口**（`settingsSegment`）：设置页只有一种
+// 分段控件（票 #240 / 报告 F-17）。选中的那一档是实心主色底（`flatSolid`）——
+// 这是「被选中的选项」在应用里**唯一**的画法（票 #239，审计 F-14）：下拉项的
+// 高亮也是它（`settings_enum.go` / `settings_font.go` / `collectionpage.go` 三处都走
+// 同一个出口）。
 //
 // 上游 Biu 这一排是 HeroUI 的 `RadioGroup`，而 HeroUI 的 `Radio` 选中项就是
 // `bg-primary` 实心底 + `text-primary-foreground`——所以这一档是照上游的。
-//
-// ⚠️ **和上游 F-17「设置页同页两种分段控件」互相拆台**（票 #239 记下来的）：
-// F-17 建议把这一排也换成框架 `ui.Segmented`（**灰轨 + 白色滑块**，和同一页
-// 「数据显示样式」那三档一样）——F-17 一做，这一档就被推倒，而「被选中的选项」
-// 会变成**白色滑块**那一档。**F-17 没做之前，别把这一档当成定案。**
 func (s *Shell) pickTheme(c *ui.Context, st app.Settings, ro bool) {
-	// ⚠️ 宽度跟着字号缩放走：1.4 倍时四个字要 106 像素，三个各 100 的格子
-	// 装不下，选中项会被裁成「跟随系…」（评审在 1.4 倍下量到过）。
-	// ⚠️ **那个 `Label("主题模式")` 是给这一排三个按钮起个组名**：读屏软件要
-	// 知道这三个键是一组（互斥的三档），而 `Tester.Find` 也靠它量这一排的盒子
-	// ——控件列的左边是不是一条线，就靠它断（见 `TestTheSettingsControlsShare
-	// OneBaseline`）。
-	ui.Row(c).Key("setting:themeMode").Width(scale.Font(c, settingsControlW)).
-		Label("主题模式").Gap(space.Px4).Children(func() {
-		for _, opt := range themeModes {
-			b := flatButton(c, opt.label).Grow(1).Radius(6).Disabled(ro)
-			if opt.mode == st.ThemeMode {
-				b = s.pickSelected(c, b, ro)
-			}
-			// ⚠️ 排在 `.Disabled(ro)` 和上面那一层 **之后**：禁用前那一档的字乘完
-			// 框架的 50% 只剩 2.6:1——只读时用户会以为这三个选项消失了。
-			// `flat.Dimmed` 里的注释写了整个来由。
-			b = flat.Dimmed(c, b)
-			if b.Clicked() {
-				s.applySetting("主题", func(cur *app.Settings) { cur.ThemeMode = opt.mode })
-			}
+	chosen := 0
+	labels := make([]string, len(themeModes))
+	for i, m := range themeModes {
+		labels[i] = m.label
+		if m.mode == st.ThemeMode {
+			chosen = i
 		}
-	})
+	}
+	s.settingsSegment(c, "setting:themeMode", "主题模式", scale.Font(c, settingsControlW),
+		labels, chosen, ro, func(i int) {
+			mode := themeModes[i].mode
+			s.applySetting("主题", func(cur *app.Settings) { cur.ThemeMode = mode })
+		})
 }
 
 // pickSelected 是「被选中的选项」那一档：**实心主色底 + `t.AccentText` 字**。
@@ -510,6 +613,9 @@ func (s *Shell) pickTheme(c *ui.Context, st app.Settings, ro bool) {
 //
 // ⚠️ **别照着「只读时是灰底 + 主色的字」去写文档**（评审抓出来过一条）：那一档
 // 的**底**是中性灰，**字**是禁用灰——主色在只读时**根本不出现**。
+//
+// ⚠️ **这一档是设置页三处分段控件共用的**（`settingsSegment`）：设置页只有一种
+// 分段控件（票 #240 / 报告 §4 的 F-17）。
 func (s *Shell) pickSelected(c *ui.Context, b ui.Element, ro bool) ui.Element {
 	if ro {
 		return flatCurrent(c, b)
@@ -519,19 +625,23 @@ func (s *Shell) pickSelected(c *ui.Context, b ui.Element, ro bool) ui.Element {
 
 // pickCloseWindow 是窗口关闭那两档。照 Biu 用的是横排单选（RadioGroup
 // orientation="horizontal"），我们用同一排按钮，选中的那个上主色。
+//
+// ⚠️ **它和「主题」「数据显示样式」那两处走同一个出口**（`settingsSegment`）：
+// 设置页只有一种分段控件（票 #240 / 报告 F-17）。
 func (s *Shell) pickCloseWindow(c *ui.Context, st app.Settings, ro bool) {
-	ui.Row(c).Key("setting:closeWindowOption").Width(scale.Font(c, settingsControlW)).Gap(space.Px4).Children(func() {
-		for _, opt := range closeWindowOptions {
-			b := flatButton(c, opt.label).Grow(1).Radius(6).Disabled(ro)
-			if opt.value == st.CloseWindowOption {
-				b = s.pickSelected(c, b, ro)
-			}
-			b = flat.Dimmed(c, b)
-			if b.Clicked() {
-				s.applySetting("窗口关闭", func(cur *app.Settings) { cur.CloseWindowOption = opt.value })
-			}
+	chosen := 0
+	labels := make([]string, len(closeWindowOptions))
+	for i, opt := range closeWindowOptions {
+		labels[i] = opt.label
+		if opt.value == st.CloseWindowOption {
+			chosen = i
 		}
-	})
+	}
+	s.settingsSegment(c, "setting:closeWindowOption", "窗口关闭方式", scale.Font(c, settingsControlW),
+		labels, chosen, ro, func(i int) {
+			v := closeWindowOptions[i].value
+			s.applySetting("窗口关闭", func(cur *app.Settings) { cur.CloseWindowOption = v })
+		})
 }
 
 // pickAutoStart 是开机自启那个开关。

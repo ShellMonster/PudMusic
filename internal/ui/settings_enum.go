@@ -45,7 +45,7 @@ func enumSelect[T comparable](c *ui.Context, value *T, items []enumItem[T], labe
 	}
 
 	sel := ui.SelectBase(c, value)
-	trigger := sel.Trigger.Width(width).Radius(t.Radius).
+	trigger := sel.Trigger.Width(width).MinWidth(settingsControlMinW).Radius(t.Radius).
 		Background(t.Surface).Border(1, t.Border).Padding(space.None, space.Px8).Disabled(ro).
 		Label(label)
 	trigger.Children(func() {

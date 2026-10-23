@@ -183,7 +183,9 @@ func flatCurrentText(t *ui.Theme, current bool) ui.Color {
 // 是压深的那一档）——侧栏菜单、左栏那三处、队列抽屉的「正在播放」都是它。
 //
 // 而 `flatSolid` 是「**被选中的选项**」那一档（实心主色底 + `AccentText` 字）——
-// 设置页那些**选项**（主题三档、窗口关闭两档、下拉项的高亮）都是它。
+// 设置页那些**选项**（主题三档、数据显示样式三档、窗口关闭两档、下拉项的高亮）都是它。
+// 注意设置页那三处分段控件是**同一个出口**（`settingsSegment`，票 #240 / 报告 §4 的
+// F-17）：设置页只有一种分段控件。
 //
 // 上游这两处都是实心的：`color="primary" variant="solid"`
 // （`components/music-rate/index.tsx:26-46`，票 #220 / 报告 §3.10；HeroUI 的
