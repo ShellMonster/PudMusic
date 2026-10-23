@@ -169,6 +169,16 @@ type upSpace struct {
 	// 「同一个 ListState 被两个 List 显示」时 panic（`ui/list.go` 的
 	// buildList），而共用还会把两张 Tab 的滚动位置搅在一起。
 	state [upTabCount]ui.ListState
+	// keys 是每一张 Tab 那张列表的键盘接线（游标 + 「↑ 到顶回侧栏」）。
+	//
+	// ⚠️ **一张 Tab 一份**：列表状态本来就是一张 Tab 一份的（`state` 那个
+	// 数组），而三张 Tab 的行数不一样——游标共用一份的话，切到行数少的那张
+	// 上就越界了。
+	//
+	// ⚠️ **这一栏是裸的 `ui.List`**（卡片是自己画的，走不了 `widgets/list`
+	// 那个包），所以游标和那一档回调得自己接——不然方向键在内容区里只滚动
+	// 不选行，而 ↑ 也回不到侧栏（票 #245 的 E4）。
+	keys [upTabCount]listKeys
 
 	// dropped 是三张 Tab 各丢了几条。**不画在界面上**，但它是「这一页
 	// 一个格子都没有」唯一能说清原因的东西：>0 是「他发的那些我们画不出
