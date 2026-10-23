@@ -29,6 +29,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -37,19 +38,32 @@ type currentSpot struct {
 	cur  mygoui.Rect
 	sib  mygoui.Rect
 	name string
+	// ink 是那一格里的**字**该是什么色。
+	//
+	// ⚠️ **五处的字色不是同一个数**（票 #234 的评审抓出来的那一条）：左栏那四处
+	// 是正文色（深色下是主色字），队列抽屉那一行是**主色当字**
+	// （`ink.AccentOn`，和列表行「正在播放」那一档同一个数——DESIGN §四：「唯一
+	// 剩下的主色高亮是『正在播放』那一行：flat（主色当字）」）。
+	ink mygoui.Color
 }
 
 // assertCurrentIsFlat 断「当前那一格是 flatCurrent 那一档，不是实心主色」。
 //
-// ⚠️ **两个判据缺一不可**：
+// ⚠️ **三个判据缺一不可**：
 //
 //   - 「不是实心主色」——那是改之前的样子（F-06：248×50 的实心大块）；
-//   - 「就是 flatCurrent 那一档」——只断前一条的话，一块**别的**浅色也过。
+//   - 「底色就是 flatCurrent 那一档」——只断前一条的话，一块**别的**浅色也过；
+//   - 「字色是那一档该有的」——底换了字没换，浅色下就是一行淡绿底上的正文色而
+//     别处是主色字（深色下则是绿底上的黑字）。
 func assertCurrentIsFlat(t *testing.T, sp currentSpot, img *image.RGBA, dark bool) {
 	t.Helper()
-	cur := modeOf(bandPixels(img, sp.cur))
+	curPx := bandPixels(img, sp.cur)
+	cur := modeOf(curPx)
 	sib := modeOf(bandPixels(img, sp.sib))
-	t.Logf("%s：当前那一格 %v %v，旁边那一格 %v %v", sp.name, sp.cur, cur, sp.sib, sib)
+	// 字是抗锯齿画的：那一块里离底色最远的那一个像素就是它（`farthestFrom`
+	// 那个共用工具）。
+	ink := farthestFrom(img, sp.cur, cur)
+	t.Logf("%s：当前那一格 底 %v 字 %v，旁边那一格 底 %v", sp.name, cur, ink, sib)
 
 	theme := BuildTheme(app.DefaultSettings(""), dark)
 
@@ -59,7 +73,7 @@ func assertCurrentIsFlat(t *testing.T, sp currentSpot, img *image.RGBA, dark boo
 			"实心大块，比主操作还响）", sp.name, cur)
 	}
 
-	// 判据二：**就是 flatCurrent 那一档**。
+	// 判据二：**底色就是 flatCurrent 那一档**。
 	want := flatCurrentBg(theme)
 	if !dark {
 		// 浅色那一档是半透明的：合到**旁边那一格**身下的底板上才是屏幕上的数。
@@ -68,7 +82,20 @@ func assertCurrentIsFlat(t *testing.T, sp currentSpot, img *image.RGBA, dark boo
 	if !nearRGBA(cur, rgbaOf(want), 3) {
 		t.Errorf("%s：当前那一格的底色是 %v，want %v（flatCurrent 那一档）", sp.name, cur, want)
 	}
+
+	// 判据三：**字色是那一档该有的**。
+	//
+	// ⚠️ **容差是 24**：字是抗锯齿画的，一个像素 rarely 是纯字色——13px 的汉字
+	// 笔画只有一两个像素宽，量到的那个「最远离底色的像素」是字色和底色的混合。
+	// 24 是从实测来的（实测差 0~12），而两档字色之间差着几十个通道（正文色
+	// #18181b 与主色压深那一档 #117936 差 90+），所以这个容差拦得住「字色换了」。
+	if !nearRGBA(ink, rgbaOf(sp.ink), 24) {
+		t.Errorf("%s：当前那一格的字色是 %v，want %v", sp.name, ink, sp.ink)
+	}
 }
+
+// farthestFrom 是那些像素里离 bg 最远的那一个——**字本身**（抗锯齿画出来的那一
+// 串过渡色里，它是离底色最远的那一头）。
 
 // bandPixels 是那一块里的像素。
 func bandPixels(img *image.RGBA, r mygoui.Rect) []color.RGBA {
@@ -127,7 +154,9 @@ func TestTheCurrentItemIsFlatEverywhere(t *testing.T) {
 				if !ok {
 					t.Fatalf("左栏没有「特别关注(1)」那一格，文字有 %q", tt.Texts())
 				}
-				assertCurrentIsFlat(t, currentSpot{cur, sib, "关注页分组"}, tt.Image(), dark)
+				theme := BuildTheme(app.DefaultSettings(""), dark)
+				assertCurrentIsFlat(t, currentSpot{cur, sib, "关注页分组",
+					flatCurrentText(theme, true)}, tt.Image(), dark)
 			})
 
 			t.Run("动态页作者栏", func(t *testing.T) {
@@ -156,7 +185,9 @@ func TestTheCurrentItemIsFlatEverywhere(t *testing.T) {
 				if !ok {
 					t.Fatalf("作者栏没有那个人，文字有 %q", tt.Texts())
 				}
-				assertCurrentIsFlat(t, currentSpot{cur, sib, "动态页作者栏"}, tt.Image(), dark)
+				theme := BuildTheme(app.DefaultSettings(""), dark)
+				assertCurrentIsFlat(t, currentSpot{cur, sib, "动态页作者栏",
+					flatCurrentText(theme, true)}, tt.Image(), dark)
 			})
 
 			t.Run("侧栏收藏夹", func(t *testing.T) {
@@ -172,7 +203,9 @@ func TestTheCurrentItemIsFlatEverywhere(t *testing.T) {
 				if !ok {
 					t.Fatalf("侧栏没有「我建的 2」那一行，文字有 %q", tt.Texts())
 				}
-				assertCurrentIsFlat(t, currentSpot{cur, sib, "侧栏收藏夹"}, tt.Image(), dark)
+				theme := BuildTheme(app.DefaultSettings(""), dark)
+				assertCurrentIsFlat(t, currentSpot{cur, sib, "侧栏收藏夹",
+					flatCurrentText(theme, true)}, tt.Image(), dark)
 			})
 
 			t.Run("队列抽屉", func(t *testing.T) {
@@ -181,18 +214,27 @@ func TestTheCurrentItemIsFlatEverywhere(t *testing.T) {
 				enqueue(t, h, copiesOf(t, 2)...)
 				openDrawer(t, h)
 
-				// ⚠️ **用行尾那颗「⋯」找正在放的那一行**：歌名「a」在**播放条上也有
-				// 一个**（正在放的就是它），而 `Find` 给的是头一个——播放条上那一个。
-				// 「这一首的操作」只有抽屉里有，而且第一处就是第一行（正在放的那一行）。
-				cur, ok := h.tt.Find("这一首的操作")
-				if !ok {
-					t.Fatalf("抽屉里没有那一行，文字有 %q", h.tt.Texts())
-				}
-				sib, ok := findRow(h, "b")
+				// ⚠️ **用「b」那一行推**：歌名「a」在**播放条上也有一个**（正在放的
+				// 就是它），而 `Find` 给的是头一个——播放条上那一个。「b」只有抽屉里
+				// 有，它的框是**整行**（383×64）。
+				sibRow, ok := findRow(h, "b")
 				if !ok {
 					t.Fatalf("抽屉里没有「b」那一行，文字有 %q", h.tt.Texts())
 				}
-				assertCurrentIsFlat(t, currentSpot{cur, sib, "队列抽屉"}, h.tt.Image(), dark)
+				// 「a」是上一行（行高 64）。
+				curRow := sibRow
+				curRow.Y -= queueRowHeight
+
+				// ⚠️ **取样取文字那一列**：行尾那颗「⋯」里面是图标，不是歌名的字。
+				// 那一列的左边是封面（行左 8 + 封面 48 = 行左 56），所以从行左 60
+				// 起取——歌名的字（行左 64 起）在里面，封面不在里面。
+				cur := mygoui.Rect{X: curRow.X + 60, Y: curRow.Y + 4, W: 200, H: 56}
+				sib := mygoui.Rect{X: sibRow.X + 60, Y: sibRow.Y + 4, W: 200, H: 56}
+				theme := BuildTheme(app.DefaultSettings(""), dark)
+				// 队列抽屉那一行的字是**主色当字**（`ink.AccentOn`）——和列表行
+				// 「正在播放」那一档同一个数（DESIGN §四）。
+				assertCurrentIsFlat(t, currentSpot{cur, sib, "队列抽屉",
+					ink.AccentOn(theme)}, h.tt.Image(), dark)
 			})
 		})
 	}

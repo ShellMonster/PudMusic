@@ -341,8 +341,18 @@ type Shell struct {
 	// 页内那个输入框 2026-10-22 拍板删了之后，这一对是**顶栏那个框**和路由上
 	// 的关键词之间的关系（见 navbar_search.go 的 `syncSearchKeyword`）。
 	searchKeywordFor string
-	searchSuggest    bool
-	searchFocused    bool
+	// searchKeywordFilled 是「框里那个词是**填上去的**，不是用户自己敲的」。
+	//
+	// 填上去的那一种（深链接进来的 /search?q=…、翻到另一条历史）有个陷阱：用户
+	// 点进框里敲一个字，期望的是「就搜这个字」，而实际得到的是「旧词 + 新字」。
+	// 所以用户刚拿到焦点的时候把整个词选上（见 navbar_search.go 的
+	// `viewSearchBox`）——接着敲的字就把它盖掉了。
+	//
+	// ⚠️ **用户自己敲的词不许全选**：他在框里敲到一半要改，替他全选上等于把他
+	// 敲的字吃掉。
+	searchKeywordFilled bool
+	searchSuggest       bool
+	searchFocused       bool
 	// tips 是带延迟的悬停提示的状态（tooltip.go），按元素 ID 记。
 	// **只由界面线程读写**，和上面那几位同一条规矩。
 	tips map[uint64]*tipState

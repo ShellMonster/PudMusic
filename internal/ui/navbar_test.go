@@ -9,6 +9,7 @@ package ui
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -382,6 +383,95 @@ func TestPickingAHistoryFillsTheBoxBack(t *testing.T) {
 	}
 	if got := s.router.Query(searchQuery); got != "林俊杰" {
 		t.Errorf("URL 上的 q 是 %q，want 林俊杰", got)
+	}
+}
+
+// TestTheFilledSearchBoxReplacesItsWordWhenYouType 钉住「填上去的那个词，敲字是
+// **替换**，不是追加」。
+//
+// 页内那个输入框 2026-10-22 删掉之后（票 #234），顶栏那个框显示当前这一页搜的
+// 词——有的时候那个词是**我们填上去的**（深链接进来的 /search?q=…、翻到另一条
+// 历史），不是用户自己敲的。那时候他点进框里敲一个字，期望的是「就搜这个字」，
+// 而实际得到的是「旧词 + 新字」（想搜「林」，搜出来的是「周杰伦林」）。
+//
+// 所以用户**刚拿到焦点**的时候整个词被选上：接着敲的字就把它盖掉了。
+//
+// ⚠️ **用户自己敲的词不许全选**（那是另一条）：他在框里敲到一半要改，替他全选
+// 上等于把他敲的字吃掉。
+func TestTheFilledSearchBoxReplacesItsWordWhenYouType(t *testing.T) {
+	s, tt := newShell(t)
+	tt.SetFocused(true)
+	// 深链接进搜索页：框里那个词是填上去的。
+	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("周杰伦"))
+	tt.Frame()
+	if s.searchKeyword != "周杰伦" {
+		t.Fatalf("顶栏框里是 %q，want 周杰伦", s.searchKeyword)
+	}
+
+	// 点进框里 → 整个词被选上。
+	tt.Click(searchLabel)
+	tt.Frame()
+
+	// 敲一个字 → 整个词被盖掉，不是追加。
+	tt.Type("林")
+	tt.Frame()
+	if s.searchKeyword != "林" {
+		t.Errorf("敲进去之后框里是 %q，want「林」——填上去的那个词要被**替换**，"+
+			"不是追加（想搜「林」却搜出来「周杰伦林」）", s.searchKeyword)
+	}
+}
+
+// TestClearingTheSearchBoxOnTheSearchPageClearsTheResults 钉住「在搜索页上按那枚
+// 「清空」，这一场搜索就没了」。
+//
+// 页内那个输入框删掉之后（票 #234），「清空」只剩这一个入口。清完框而下面还是
+// 「搜索【周杰伦】的结果」和一屏结果——那正是 F-01 要消掉的那种「框和结果对不上」。
+func TestClearingTheSearchBoxOnTheSearchPageClearsTheResults(t *testing.T) {
+	s, tt := newShell(t)
+	tt.SetFocused(true)
+	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("周杰伦"))
+	tt.Frame()
+
+	if err := tt.Click("清空"); err != nil {
+		t.Fatalf("点不了那枚「清空」：%v，文字有 %q", err, tt.Texts())
+	}
+	tt.Frame()
+
+	if got := s.router.Location(); strings.Contains(got, "q=") {
+		t.Errorf("按了「清空」之后 URL 上还有词：%q——这一场搜索应该没了", got)
+	}
+	if !tt.HasText(searchIdle.Hint) {
+		t.Errorf("没有回到「还没输入」那一支，文字有 %q", tt.Texts())
+	}
+}
+
+// TestAnEmptySearchGoesBackToTheIdleState 钉住「把框里的字删干净再回车 → 回到
+// 「还没输入」那一支」。
+//
+// 页内那个框还在的时候就是这个行为（清空之后回车回到「没搜」）；那个框删掉之后
+// 这条路就断了，用户回不到那一支。
+func TestAnEmptySearchGoesBackToTheIdleState(t *testing.T) {
+	s, tt := newShell(t)
+	tt.SetFocused(true)
+	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("周杰伦"))
+	tt.Frame()
+
+	tt.Click(searchLabel)
+	tt.Key(mygoui.Cmd, mygoui.KeyA) // 全选
+	tt.Key(0, mygoui.KeyBackspace)  // 删掉
+	tt.Frame()
+	if s.searchKeyword != "" {
+		t.Fatalf("框里的字没删干净：%q", s.searchKeyword)
+	}
+
+	tt.TypeKey(0, mygoui.KeyEnter, "\r")
+	tt.Frame()
+
+	if got := s.router.Location(); strings.Contains(got, "q=") {
+		t.Errorf("空词回车之后 URL 上还有词：%q", got)
+	}
+	if !tt.HasText(searchIdle.Hint) {
+		t.Errorf("空词回车之后没有回到「还没输入」那一支，文字有 %q", tt.Texts())
 	}
 }
 

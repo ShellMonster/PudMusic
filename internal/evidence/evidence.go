@@ -2379,13 +2379,18 @@ var Items = []Item{
 		// 这个应用没做完。
 		Category: Platform,
 		// 票 #234（审计 F-01 / F-02 / F-03 / F-06 + UX B1 / B2）：视觉一致性第一批。
-		Spec: "「当前在哪」在应用里只有**一种**画法：侧栏菜单当前项、侧栏收藏夹当前项、关注页分组当前项、动态页作者栏当前项、队列抽屉「正在播放」那一行，五处都是 flat（淡主色底 + 深色字 / 中性灰底 + 主色字），**没有实心主色大块**；搜索页**没有页内输入框**，也没有「搜索」那一行标题，顶上第一行就是「搜索【词】的结果」（24/400），当前搜的词显示在**顶栏**那个框里；满屏播放器顶栏的设置齿轮**紧跟在歌名后面**（上游那一组的构图），不是浮在窗口中间",
+		Spec: "「当前在哪」在应用里只有**一种底色**：侧栏菜单当前项、侧栏收藏夹当前项、关注页分组当前项、动态页作者栏当前项、队列抽屉「正在播放」那一行，五处的**底**都是 flat 那一档（淡主色底 / 中性灰底），**没有实心主色大块**；**字**分两档：左栏那四处是正文色（深色下是主色字），队列抽屉那一行是**主色当字**（`ink.AccentOn`，和列表行「正在播放」那一档同一个数）；搜索页**没有页内输入框**，也没有「搜索」那一行标题，顶上第一行就是「搜索【词】的结果」（24/400），当前搜的词显示在**顶栏**那个框里（填上去的那个词，用户点进去敲字是**替换**不是追加；在搜索页上按那枚「清空」清掉的是这一场搜索，不只是框里那几个字）；满屏播放器顶栏的设置齿轮**紧跟在歌名后面**（上游那一组的构图），不是浮在窗口中间",
 		Tests: []string{
-			// 五处「当前在哪」是同一个配方（深浅两套都量）。
+			// 五处「当前在哪」是同一个底色配方（深浅两套都量，底色和字色都量）。
 			"TestTheCurrentItemIsFlatEverywhere",
 			// 搜索页的减法，以及顶栏那个框显示当前关键词。
 			"TestTheSearchPageHasOneTitleAndNoSecondSearchBox",
 			"TestTheSearchPageShowsTheCurrentKeyword",
+			// 顶栏那个框的三个行为：填上去的词敲字是替换、「清空」清掉这一场搜索、
+			// 空词回车回到「还没输入」那一支。
+			"TestTheFilledSearchBoxReplacesItsWordWhenYouType",
+			"TestClearingTheSearchBoxOnTheSearchPageClearsTheResults",
+			"TestAnEmptySearchGoesBackToTheIdleState",
 			// 满屏顶栏那一组的构图（齿轮紧跟歌名）。
 			"TestTheFullPlayerGearSitsRightAfterTheTitle",
 		},
