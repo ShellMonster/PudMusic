@@ -353,6 +353,13 @@ type Shell struct {
 	searchKeywordFilled bool
 	searchSuggest       bool
 	searchFocused       bool
+	// tipFocusNow / tipFocusPrev 是「正拿着**焦点驱动**的那枚提示」的元素 ID。
+	//
+	// ⚠️ **每一遍 build 都要挪一次**（见 `Shell.View` 开头）：框架一帧跑好几遍
+	// view，真正留在画面上的是最后一遍，所以「这一遍有没有焦点提示」要问上一遍
+	// 登记的那一份——理由见 `tipFocusBusy`。
+	tipFocusNow  uint64
+	tipFocusPrev uint64
 	// tips 是带延迟的悬停提示的状态（tooltip.go），按元素 ID 记。
 	// **只由界面线程读写**，和上面那几位同一条规矩。
 	tips map[uint64]*tipState
@@ -1192,6 +1199,13 @@ type crashInfo struct {
 
 // View 画一帧，MyGo 在需要新画面的时候调它。
 func (s *Shell) View(c *ui.Context) {
+	// 提示的「焦点那一枚」登记，每一遍 build 挪一次（理由见 tipFocusBusy）。
+	//
+	// ⚠️ **挪在每一遍的开头，不是一帧的开头**：框架一帧跑好几遍 view，真正留在
+	// 画面上的是最后一遍，而「焦点提示有没有登记过」这件事在最后那一遍里要问
+	// 上一遍——指针悬停着的那一枚可能先被 build。
+	s.tipFocusPrev, s.tipFocusNow = s.tipFocusNow, 0
+
 	// 每帧重新登记：句柄内部是窗口的弱引用，窗口关了自动失效，关掉重开也不用管。
 	s.wake.set(c)
 

@@ -65,18 +65,85 @@ var (
 // tipFunc 是页面拿到的那份提示入口（Shell 把 `(*Shell).tip` 递进来）。
 type tipFunc func(c *ui.Context, anchor ui.Element, text string, timing tipTiming) ui.Element
 
+// 🔴 **焦点那一档的时延是 0 出、0 收**，和悬停那一档不一样。
+//
+// 为什么收也要 0：悬停那一档的 500ms 等的是「**指针**移开之后」——指针移开了，
+// 提示还挂一会儿，免得用户手一抖划过就看不见了。而键盘走位路过一枚控件时，
+// 焦点是**移开**的：等 500ms 的话，走过三枚控件就留下三条提示叠在屏幕右上角
+// （票 #245 的 E3，用户看到的是三句挤在一起的、读不出哪句对哪枚图标的字）。
+//
+// 键盘走位是**一格一格**的，每一格停留的时间本来就短，提示还赖着不走的话，
+// 叠起来的那几行就是纯噪声——而键盘用户恰恰是最需要那些提示的人。
+const (
+	tipFocusOpen  = time.Duration(0)
+	tipFocusClose = time.Duration(0)
+)
+
 // tipState 是一枚提示跨帧的状态。
+//
+// 🔴 **两个来源分开记**，不是合并成一个 `active`：
+//
+//   - `hover` 是「指针在锚点上」那一档：走上游 HeroUI 的时延（0 出、500 收）。
+//   - `focus` 是「锚点有键盘焦点」那一档：0 出、0 收（见上面那两个常数）。
+//
+// 分开是因为两件事：**出提示的时机不一样**（指针停着才出，焦点一到就出），
+// **收提示的时机也不一样**（指针移开还赖 500ms，焦点一走立刻收）。合成一档的
+// 时候，「键盘路过三枚控件留下三条提示」就是这么来的。
 type tipState struct {
 	text string
-	// active 是「指针在锚点上或者锚点有焦点」。
+	// hover 是「指针在锚点上」那一档的状态机。
+	hover tipPhase
+	// focus 是「锚点有键盘焦点」那一档的状态机。
+	focus tipPhase
+	// dismissed 是「按过它了」：指针 / 焦点离开之前不再出。
+	dismissed bool
+}
+
+// tipPhase 是一枚提示的一个来源的状态机。
+type tipPhase struct {
+	// active 是「这个来源现在指着这一枚」。
 	active bool
 	// activeSince / inactiveSince 是这一档开始 / 结束的时刻。
 	activeSince   time.Time
 	inactiveSince time.Time
-	// shown 是这一帧画不画。
+	// shown 是这一档这一帧画不画。
 	shown bool
-	// dismissed 是「按过它了」：指针 / 焦点离开之前不再出。
-	dismissed bool
+}
+
+// step 把这一档的状态机推进一步，并报「这一档是不是**刚刚**失去了 active」。
+//
+// 报这个是因为「按过它了就收起」那一档要靠它复位（上游的 closeOnClick）：
+// 指针或焦点离开之后再来，这一枚才重新出提示。
+//
+// open / close 是这一档的两档时延。
+func (p *tipPhase) step(active bool, now time.Time, open, close time.Duration) bool {
+	lost := false
+	if active != p.active {
+		p.active = active
+		if active {
+			p.activeSince = now
+			p.inactiveSince = time.Time{}
+		} else {
+			p.inactiveSince = now
+			lost = true
+		}
+	}
+	switch {
+	case p.active:
+		if !p.shown {
+			if wait := open - now.Sub(p.activeSince); wait > 0 {
+				// 还没到出提示的时刻：这一帧不画，等到了再画。
+				return lost
+			}
+			p.shown = true
+		}
+	case p.shown:
+		if wait := close - now.Sub(p.inactiveSince); wait > 0 {
+			return lost
+		}
+		p.shown = false
+	}
+	return lost
 }
 
 // withTip 是默认那一档（0 出、500 收）。界面上绝大多数提示走它。
@@ -133,48 +200,48 @@ func (s *Shell) tipAt(c *ui.Context, anchor ui.Element, text string, timing tipT
 	}
 
 	now := c.Now()
-	active := anchor.Hovered() || anchor.FocusVisible()
+	hovered := anchor.Hovered()
+	focused := anchor.FocusVisible()
 
-	// 指针/焦点进出的那一刻重新计时；离开时把「按过」也清掉，再回来才能出。
-	if active != st.active {
-		st.active = active
-		if active {
-			st.activeSince = now
-			st.dismissed = false
-			st.inactiveSince = time.Time{}
-		} else {
-			st.inactiveSince = now
-			st.dismissed = false
-		}
+	// 悬停那一档：走上游的时延（默认 0 出、500 收，菜单那几处 0/0）。
+	hoverLost := st.hover.step(hovered, now, timing.open, timing.close)
+	// 焦点那一档：**0 出、0 收**（理由见 tipFocusOpen 那两个常数的注释）。
+	focusLost := st.focus.step(focused, now, tipFocusOpen, tipFocusClose)
+
+	// 指针或焦点离开之后，「按过它了就收起」那一档复位——再回来才重新出提示。
+	if hoverLost || focusLost {
+		st.dismissed = false
 	}
 
 	// 按一下锚点就收起（上游 closeOnClick）。⚠️ 这两个查询会给元素打
 	// `flagClickable`，锚点是「别的按钮里面的子元素」时不能问——见 withQuietTip。
 	if watchPress && (anchor.Pressed() || anchor.Clicked()) {
 		st.dismissed = true
-		st.shown = false
+		st.hover.shown = false
+		st.focus.shown = false
 	}
 
-	switch {
-	case st.dismissed:
-		st.shown = false
-	case active:
-		if !st.shown {
-			if wait := timing.open - now.Sub(st.activeSince); wait > 0 {
-				c.After(wait)
-			} else {
-				st.shown = true
-			}
-		}
-	case st.shown:
-		if wait := timing.close - now.Sub(st.inactiveSince); wait > 0 {
-			c.After(wait)
-		} else {
-			st.shown = false
-		}
+	if st.dismissed {
+		st.hover.shown = false
+		st.focus.shown = false
 	}
 
-	if !st.shown {
+	// 🔴 **同一时刻只出一枚提示**（票 #245 的 E3）。
+	//
+	// 焦点驱动的提示先登记：别的提示（多半是指针正悬停着的那一枚）据此知道自己
+	// 该让位。登记的是**元素 ID**，所以一枚提示换了一个锚点就是另一枚。
+	if st.focus.shown {
+		s.tipFocusNow = id
+	}
+	// 悬停那一档在「有别的元素拿着焦点那一档的提示」时让位。
+	//
+	// ⚠️ **让位不是永久的**：焦点那一档一收（焦点走到别处去了），悬停的那一枚
+	// 下一帧就回来——指针还停在上面，提示就该在。
+	if st.hover.shown && s.tipFocusBusy() {
+		st.hover.shown = false
+	}
+
+	if !st.hover.shown && !st.focus.shown {
 		return anchor
 	}
 
@@ -203,11 +270,30 @@ func (s *Shell) tipAt(c *ui.Context, anchor ui.Element, text string, timing tipT
 				Margin(0, 0, t.Space(1.5), 0)
 		}
 		if panel.OverlayShortcut(0, ui.KeyEscape) {
-			st.shown = false
+			st.hover.shown = false
+			st.focus.shown = false
 			st.dismissed = true
 		}
 	})
 	return anchor
+}
+
+// tipFocusBusy 报「现在（或刚才那一遍）有一枚元素拿着焦点驱动的提示」。
+//
+// 🔴 **两个都要看**，因为提示是**逐个元素** build 的，而**焦点所在的那一枚
+// 不一定先被 build**：指针正悬停着的那一枚先被 build 时，它看不到「这一遍已经
+// 有焦点提示了」。
+//
+// 「刚才那一遍」那一项靠的是框架的**多遍 build**（`mygo/ui/runtime.go` 的
+// `for pass := 0; pass < 3`）：每一遍的开头都把上一遍登记的那一枚挪到
+// `tipFocusPrev`，于是**真正留在画面上的那一遍**（最后一遍）一定看得见焦点
+// 提示已经登记过了——它是在前面那遍里登记的。
+//
+// ⚠️ 代价是「焦点刚从一枚**没有**提示的元素移进来」的那一遍，悬停的那一枚
+// 还能和焦点的那一枚并存（十几毫秒，肉眼看不见）；而键盘走位走的那一路
+// （焦点一直在带提示的元素之间移动）从第二遍起就只剩一枚。
+func (s *Shell) tipFocusBusy() bool {
+	return s.tipFocusNow != 0 || s.tipFocusPrev != 0
 }
 
 // tipFrom 是给页面用的入口：页面拿到 `tipFunc`（可能为 nil——单独造这一页的
