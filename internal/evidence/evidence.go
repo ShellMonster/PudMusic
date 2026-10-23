@@ -1203,6 +1203,18 @@ var Items = []Item{
 			// 判据一路绿，用户点进去才撞上「不支持这个音频格式」。
 			"TestOggVorbisReallyDecodes",
 			"TestTheOggDurationIsProbedFromItsOwnContainer",
+			// MP3 这一边：换了解码器之后，「放得了」这件事要重新验一遍——
+			// 而且验的是**三件具体的事**，不是「注册表里有它」。
+			//
+			// ⚠️ 少了这几条，「MPEG-2.5 放不了」「编码器延迟留在歌的开头」
+			// 「打开一个 MP3 要把整个文件读一遍」这三件事**都不会有人知道**：
+			// 它们全都不报错，只是悄悄不对。
+			"TestMPEG25ReallyDecodes",
+			"TestTheLameGaplessTrimIsApplied",
+			"TestTheGaplessDecodeStartsWhereTheSourceStarts",
+			"TestOpeningAnMp3DoesNotReadTheWholeFile",
+			"TestTheMp3DurationIsProbedFromItsOwnContainer",
+			"TestTheMp3DecoderIsOurs",
 		},
 	},
 	{
