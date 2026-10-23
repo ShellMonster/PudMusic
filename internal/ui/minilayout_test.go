@@ -58,16 +58,26 @@ func TestTheMiniCoverColumnIsBiuWidth(t *testing.T) {
 	box := miniCoverBox(tt)
 
 	// 封面本身：100 − 左右各 6 = 88 的方图，落在卡片内边距之后。
-	if box.Dx() != 88 || box.Dy() != 88 {
-		t.Errorf("封面是 %dx%d，want 88x88（封面列 %d 减去左右各 %d 的内边距），画在 %v",
-			box.Dx(), box.Dy(), biuMiniCoverCol, miniPad, box)
+	//
+	// ⚠️ **画面上量到的是「图」，不是「那一格」**：那一格外面还有一圈 1 像素的
+	// 边（票 #244 / UX 报告 §2 的 E2：深色下一张近黑的封面和行的底色几乎一样，
+	// 「图取到了」那一档也要描一圈边），而**那一圈边是画在格子里面那一圈**——
+	// 所以格子还是 88×88、位置一点没动，图本身让出来 2 像素。
+	const frame = 1
+	if box.Dx() != 88-2*frame || box.Dy() != 88-2*frame {
+		t.Errorf("封面是 %dx%d，want %dx%d（封面列 %d 减去左右各 %d 的内边距，"+
+			"再减去那一圈 1 像素的边），画在 %v",
+			box.Dx(), box.Dy(), 88-2*frame, 88-2*frame, biuMiniCoverCol, miniPad, box)
 	}
-	if box.Min.X != miniPad || box.Min.Y != miniPad {
-		t.Errorf("封面的左上角在 (%d,%d)，want (%d,%d)：它没有贴着卡片内边距",
-			box.Min.X, box.Min.Y, miniPad, miniPad)
+	if box.Min.X != miniPad+frame || box.Min.Y != miniPad+frame {
+		t.Errorf("封面的左上角在 (%d,%d)，want (%d,%d)：它没有贴着卡片内边距（"+
+			"那一圈 1 像素的边算在里面）",
+			box.Min.X, box.Min.Y, miniPad+frame, miniPad+frame)
 	}
 	// 封面列 = 左边 6 + 封面 88 + 右边 6 = 100。
-	if got, want := box.Min.X+box.Dx()+miniPad, biuMiniCoverCol; got != want {
+	//
+	// ⚠️ **算的是「格子」**：格子的左边是图再往左 1 像素（那一圈边），右边也是。
+	if got, want := box.Min.X-frame+box.Dx()+2*frame+miniPad, biuMiniCoverCol; got != want {
 		t.Errorf("封面那一列是 %d 宽，want %d（Biu 的 `w-[100px]`）", got, want)
 	}
 	// 右边那一列从 106 起（封面列 100 + 那一列自己的 6 的内边距）。

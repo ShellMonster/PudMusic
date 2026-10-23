@@ -508,36 +508,18 @@ func (s *Shell) openSearchUser(items []app.Item) {
 
 // searchPlayAll 是「全部播放」。
 //
-// 🔴 **只追加，不替换**（验收第 1 条）。上游那一行的原话写在注释里：它把当前
+// ⚠️ **它和首页那一枚走同一个出口**（`playAllSongs`，票 #244 / UX 报告 §2 的
+// B6）：同一个动作在两个页面上各有一枚入口，而此前**只有搜索页有**——用户在
+// 一个页面能按、在另一个页面找不到，会以为是两个不同的功能。
+//
+// 🔴 **语义是「只追加，不替换」**（验收第 1 条，也是上游那一行的原话：它把当前
 // 已加载的列表全量映射之后调 `addList`，**不是 `playList`**
 // （`pages/search/video-list/index.tsx:89-101`）。本项目里这就是
 // `App.Enqueue`（往队尾追加）而不是 `App.PlayFrom`（换掉整个队列并从第一首
 // 起播）。差别在界面上看得见：按了之后正在放的那首**不换**，新的一首排在它后面。
+//
+// 「从这首开始」那一档仍然待人裁决（DESIGN.md §十第 3 条）——裁决之后改
+// `playAllSongs` 一处，两个页面一起变。
 func (s *Shell) searchPlayAll(t *searchTab) {
-	songs := t.snapshot()
-	if len(songs) == 0 {
-		return
-	}
-
-	// 去重：B 站翻页会重叠，同一个 bvid 落进 loaded 两次就是同一个条目进队列
-	// 两次，用户按下一首会连着听到同一首。
-	items := make([]app.Item, 0, len(songs))
-	seen := make(map[string]bool, len(songs))
-	for _, m := range songs {
-		if seen[m.ID] {
-			continue
-		}
-		seen[m.ID] = true
-		items = append(items, m.Item)
-	}
-	if len(items) == 0 {
-		return
-	}
-
-	if err := s.app.Enqueue(items...); err != nil {
-		s.addToast("加不进队列："+err.Error(), notice.Danger)
-		return
-	}
-	// 话照抄上游（`video-list/index.tsx:100`）。
-	s.addToast("已添加 "+strconv.Itoa(len(items))+" 首到播放列表", notice.Success)
+	s.playAllSongs(t.snapshot())
 }

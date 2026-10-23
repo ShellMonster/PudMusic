@@ -2675,4 +2675,36 @@ var Items = []Item{
 			"TestTheProxyTypeSelectKeepsItsOwnWidth",
 		},
 	},
+	{
+		// 🔴 **这一族的错法也全是「静默」的**：两端对齐空着三百像素、迷你窗里
+		// 两根滑块分不出哪个是哪个、同一个动作两个页面一个有一个没有、
+		// 超长歌名占满整行中段、深色下黑封面和底色融成一片——**没有一样会
+		// 报错**，界面只是「不好用」。
+		Category: Platform,
+		// 票 #244（UX 报告 §2 的 D1 / B5 / B6 / E1 / E2）。
+		Spec: "布局一批：设置页每一行的说明和控件之间**不空着几百像素**；迷你窗的音量滑块**有悬停提示**（而且那枚提示**看得见**）；「全部播放」在两个页面上是**同一枚**（语义待裁决，这一票只统一画法）；列表里的**超长歌名不占满整行中段**；**深色下的封面有边**（不再和行的底色融成一片）",
+		Tests: []string{
+			// 设置页那一段空档（1200 / 900 两档窗口，量的是画面上的字迹）。
+			"TestTheSettingsRowsDoNotStretchAcrossTheWindow",
+			// **字号放大时说明不折行**（1.0 / 1.25 / 1.4 / 1.5 / 1.75 五档）——
+			// 折行会让整行变高、右边那列控件往下挪半格。
+			"TestTheSettingsDescriptionDoesNotWrapAtBigTextScales",
+			// 迷你窗音量滑块那枚提示：它在，而且**在窗内**（窗只有 320×100，
+			// 而滑块在第一行——摆在上面的话整个提示落在窗外）。
+			"TestTheMiniVolumeSliderSaysWhatItIs",
+			// 两个页面上那两枚按钮是同一枚（盒子一模一样）。
+			"TestThePlayAllButtonIsTheSameOnBothPages",
+			// 两个页面上按下去，进去队列的都是这一页的歌。
+			"TestThePlayAllButtonEnqueuesOnBothPages",
+			// **放不了的不要塞进队列**（判据 `app.CanPlay`，和右键菜单里那三个
+			// 入口是同一个）——而且跳过了几首要说一声。
+			"TestThePlayAllButtonSkipsTheUnplayableOnes",
+			// 超长歌名的墨迹有上限，不占满整行中段（量的是像素）。
+			"TestALongTitleDoesNotFillTheWholeRow",
+			// 短歌名一个字都不多让（上限不许反过来咬短歌名）。
+			"TestAShortTitleIsNotAffected",
+			// 「图取到了」那一档也描一圈边（深浅两套）。
+			"TestTheLoadedCoverHasAnEdgeOfItsOwn",
+		},
+	},
 }

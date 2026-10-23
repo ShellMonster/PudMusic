@@ -171,9 +171,12 @@ func (st *searchStub) callsOf(tab int) []searchCall {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // newSearchPage 开一个跑到搜索页的外壳：假拉页器接上，然后搜 keyword。
-func newSearchPage(t *testing.T, keyword string, st *searchStub) (*Shell, *mygoui.Tester) {
+//
+// ⚠️ **opts 是给主题用的**（出图那一组要深浅两套：搜索页那一枚「全部播放」在
+// 深浅两套下必须**真的**不同——两套逐字节相同的图是「深色那一套是假的」）。
+func newSearchPage(t *testing.T, keyword string, st *searchStub, opts ...shellOpt) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	s, tt := newShell(t)
+	s, tt := newShell(t, opts...)
 	st.install(s)
 	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape(keyword))
 	return s, tt

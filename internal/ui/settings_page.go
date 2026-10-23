@@ -245,16 +245,42 @@ func (s *Shell) settingsDescFloor(c *ui.Context, st app.Settings) float32 {
 
 // settingsContentInnerW 是设置的内容那一段（**去掉左右内边距**）的宽。
 //
-// 可视区 = 窗口宽 - 侧栏宽；内容段收在 min(900, 可视区) 里（`MaxWidth` 是上限，
-// 居中）。
+// 可视区 = 窗口宽 - 侧栏宽；内容段收在 min(缩放后的上限, 可视区) 里（`MaxWidth`
+// 是上限，居中）。
 func (s *Shell) settingsContentInnerW(c *ui.Context, st app.Settings) float32 {
 	winW, _ := c.Size()
 	avail := winW - s.settingsSideWidth(st)
-	block := float32(settingsContentMaxW)
+	block := s.settingsContentMaxWAt(c)
 	if avail < block {
 		block = avail
 	}
 	return block - 2*settingsContentPad
+}
+
+// settingsContentMaxWAt 是**这一帧**内容段的上限（**跟着系统字号缩放走**）。
+//
+// 🔴 **为什么上限要跟着字号走**（票 #244 / 评审）：
+//
+// 每一行是「左边标题 + 一句说明，右边一枚控件」，而**说明那一句话本身是跟着字号
+// 缩放的**（`scale.Font`）。内容段不跟着长的话，字号一大说明就**折行**——而说明
+// 折行会让**整行**变高、右边那列控件跟着往下挪半格，一页设置于是参差不齐
+// （`settingsDescMinW` 的注释写着这一条要避免）。
+//
+// 实测（1200 窗口，那句最长的说明「内容页排成列表、网格还是紧凑」）：
+//
+//	内容段不缩放	1.00 倍 1 行 / 1.25 倍 1 行 / 1.40 倍 1 行 / 1.50 倍 **2 行**
+//	                1.75 倍 3 行 / 2.00 倍 5 行
+//	内容段跟着缩放	1.00 倍 1 行 / 1.25 倍 1 行 / 1.40 倍 1 行 / 1.50 倍 1 行
+//	                1.75 倍 1 行 / 2.00 倍 2 行
+//
+// 也就是：跟着缩放之后，只有**窗口本身已经不够宽**的那一档（2.0 倍）才折——
+// 而那一档在改动之前也折（2 行）✓。
+//
+// ⚠️ **缩放之后上限会超过可视区**：1.4 倍时上限是 1092，而 1200 宽的窗口只有
+// 1000 可视——`MaxWidth` 是上限不是定值，于是那一档的内容段就是**可视区那么
+// 宽**（页面左右不留白）。这是对的：字大了就得多给地方。
+func (s *Shell) settingsContentMaxWAt(c *ui.Context) float32 {
+	return scale.Font(c, settingsContentMaxW)
 }
 
 // settingsControlFitW 是控件列在**这一帧**能占的宽（上限）。
@@ -340,7 +366,7 @@ var closeWindowOptions = []struct {
 	{app.CloseWindowExit, "直接退出"},
 }
 
-// settingsContentMaxW 是设置的内容收在多宽里。
+// settingsContentMaxW 是设置的内容收在多宽里（**1.0 倍字号时**）。
 //
 // 🔴 **900 是量出来的**：Biu 那一页是 `m-auto mb-6 max-w-[900px] px-8 py-4`
 // （`biu/src/pages/settings/index.tsx:121`）。我们原来没有这一层：内容
@@ -353,7 +379,29 @@ var closeWindowOptions = []struct {
 //
 // ⚠️ 窄窗口上它**不会**顶到 900：`MaxWidth` 是上限不是定值，可视区多宽它就
 // 多宽（最小窗口 900 - 侧栏 200 = 700，两边还各留 28 的内边距）。
-const settingsContentMaxW = 900
+//
+// # 🔴 **780：两端对齐的那一段空档太长了**（票 #244 / UX 报告 §2 的 D1）
+//
+// 每一行是「左边标题 + 一句说明，右边一枚控件」，**两端对齐**——说明在左沿、
+// 控件钉在右沿，中间空着。900 那一档下实测：说明那句在 x=277..475，控件在
+// x=822..1123，**中间空 347 像素**（用户改一个设置，眼睛要在屏幕两端来回横跳
+// 300~640 像素；而设置页是最需要逐行读的一页）。
+//
+// 收到 780 之后：内容那一段（去掉左右内边距）从 844 变成 724，说明列从 520
+// 变成 400，那一段空档从 **347 降到 ~230**。
+//
+// ⚠️ **只改这一个数**：控件列的基准宽（300）、说明列的下限（320）、缝（24）
+// 三样都别动——它们是票 #240 钉着的（`settingsDescMinW` / `settingsControlMinW`），
+// 动了就把「控件列不会被推出内容区」那条验收弄坏了。
+//
+// ⚠️ **最窄那一档不受影响**：窗口 900 时可视区只有 700（900 - 侧栏 200），
+// 那一档的内容段本来就是 700（`MaxWidth` 是上限），所以 780 和 900 在那一档
+// 画出来**一模一样**——这一条收窄只作用在宽窗口上。
+//
+// ⚠️ **这一帧真正用的是 `settingsContentMaxWAt`**：它跟着系统字号缩放走
+// （1.4 倍时上限 1092）——不跟着走的话，字号一大说明就折行，而说明折行会让
+// **整行**变高、右边那列控件往下挪半格（那一段的来由见那个函数的注释）。
+const settingsContentMaxW = 780
 
 // viewSettings 是设置页本身：标题 + 只读提示 + 四个 Tab。
 //
@@ -391,7 +439,7 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 		// 这一层是 `m-auto`：Column 的横向对齐（跨轴），所以内容那一段在
 		// 可视区里居中，而可视区不满 900 时它就是满的（`MaxWidth` 是上限）。
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
-			ui.Column(c).FillWidth().MaxWidth(settingsContentMaxW).
+			ui.Column(c).FillWidth().MaxWidth(s.settingsContentMaxWAt(c)).
 				Padding(space.None, settingsContentPad, settingsContentPad, settingsContentPad).
 				Gap(settingsGroupGap).Children(func() {
 				ui.Text(c, "设置").FontSize(scale.Font(c, scale.PageTitle))

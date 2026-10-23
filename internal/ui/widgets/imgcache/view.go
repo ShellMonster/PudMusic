@@ -158,7 +158,23 @@ func drawCover(c *ui.Context, cache *Cache, url string, w, h, radius float32, em
 
 	switch st := cache.Get(url); {
 	case st.Ready():
-		ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(w, h)
+		// 🔴 **有图这一档也描一圈边**（票 #244 / UX 报告 §2 的 E2）。
+		//
+		// 原来四档里只有三档有边界：「正在加载」没有，「拉失败」「没有地址」有
+		// （`drawPlaceholder` 的 `Border(1, t.Border)`）——**「图取到了、图本身是
+		// 深色」那一档没有**。于是一张近黑的封面（`#12141a` 那一档）在深色底上
+		// 和行的底色几乎一样，用户分不清那是「封面是黑的」还是「封面没加载出来」。
+		//
+		// ⚠️ **描边加在图片自己身上，不另建一个盒子**：列表里每一行都有一张封面，
+		// 而多建一个元素就是每帧多一次分配（`internal/ui/framebudget_test.go`
+		// 那一组量的是**每帧建了多少个对象**——队列抽屉那一档的上限只比基线多
+		// 6 次，而一屏十来行封面就是十来次）。
+		//
+		// ⚠️ **描边是画在图片盒子里面那一圈**（框架的 border 在内容区之外、
+		// 内容区之内那一圈），所以图片自己小 2 像素——那 2 像素就是这一圈边。
+		// 圆角跟着外面那一层走（`radius`），于是这一圈边和占位那一档的边是同一档。
+		ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(w, h).
+			Border(1, c.Theme().Border).Radius(radius)
 	case st.Loading:
 		drawSkeleton(c, w, h)
 	default:

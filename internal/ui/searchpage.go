@@ -188,10 +188,12 @@ func (s *Shell) viewSearchToolbar(c *ui.Context, tab int) {
 		// 「全部播放」：Biu 的 `AsyncButton`（`video-list/search-header.tsx:55`），
 		// 它禁用的条件是 `initialLoading || list.length === 0`——正在装第一页
 		// 或者一首都没有时不让按。
+		//
+		// ⚠️ **这一枚和首页那一枚是同一枚**（`playAllButton`，票 #244 / UX 报告
+		// §2 的 B6）：同一个动作在两个页面上各有一枚入口，此前**只有搜索页有**——
+		// 用户在一个页面能按、在另一个页面找不到，会以为是两个不同的功能。
 		pg := st.lists[tab].list.Paged()
-		if ui.PrimaryButton(c, "全部播放").
-			Disabled(pg.Loading || pg.Loaded == 0).
-			Clicked() {
+		if playAllButton(c, pg.Loading || pg.Loaded == 0).Clicked() {
 			s.searchPlayAll(&st.lists[tab])
 		}
 	})

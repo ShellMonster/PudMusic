@@ -167,7 +167,9 @@ func TestPlayBarCoverShowsTheImageWhenItIsReady(t *testing.T) {
 		t.Fatalf("画面上找不到歌名，文字有 %q", tt.Texts())
 	}
 	box := paintedBox(t, tt, coverColor)
-	if gap := title.X - float32(box.Max.X); gap != biuCoverGap {
+	// ⚠️ **量的是「格子」到歌名的距离**：画面上量到的是图，而图比格子小 2 像素
+	// （那一圈 1 像素的边，见 `assertCoverGeometry`）——用图的右沿算就多了 1。
+	if gap := title.X - float32(box.Max.X) - 1; gap != biuCoverGap {
 		t.Errorf("封面到歌名之间是 %v，Biu 的 space-x-2 是 %d", gap, biuCoverGap)
 	}
 }
@@ -406,17 +408,24 @@ func assertCoverGeometry(t *testing.T, tt *mygoui.Tester, barTop int) {
 	// (88-56)/2 = 16：上下各留 16 就是这么来的。
 	mid := (biuPlaybarHeight - biuCoverSize) / 2
 
-	if box.Dx() != biuCoverSize || box.Dy() != biuCoverSize {
-		t.Errorf("封面是 %dx%d，Biu 是 %dx%d，画在 %v", box.Dx(), box.Dy(), biuCoverSize, biuCoverSize, box)
+	// ⚠️ **画面上量到的是「图」，不是「那一格」**：那一格外面还有一圈 1 像素的
+	// 边（票 #244 / UX 报告 §2 的 E2：深色下一张近黑的封面和播放条的底色几乎
+	// 一样，「图取到了」那一档也要描一圈边），而**那一圈边是画在格子里面那一圈**
+	// ——所以格子还是 56×56、位置一点没动，图本身让出来 2 像素。
+	const frame = 1
+	if box.Dx() != biuCoverSize-2*frame || box.Dy() != biuCoverSize-2*frame {
+		t.Errorf("封面是 %dx%d，Biu 是 %dx%d（那一格外面还有一圈 1 像素的边），画在 %v",
+			box.Dx(), box.Dy(), biuCoverSize, biuCoverSize, box)
 	}
-	if want := barTop + mid; box.Min.Y != want {
-		t.Errorf("封面的上边在 y=%d，按 %d 高的播放条该在 y=%d（上下留白 (88-56)/2 = 16）",
+	if want := barTop + mid + frame; box.Min.Y != want {
+		t.Errorf("封面的上边在 y=%d，按 %d 高的播放条该在 y=%d（上下留白 (88-56)/2 = 16，"+
+			"再减去那一圈 1 像素的边）",
 			box.Min.Y, biuPlaybarHeight, want)
 	}
-	if want := barTop + biuPlaybarHeight - mid; box.Max.Y != want {
+	if want := barTop + biuPlaybarHeight - mid - frame; box.Max.Y != want {
 		t.Errorf("封面的下边在 y=%d，离播放条底边 16 该是 y=%d", box.Max.Y, want)
 	}
-	if box.Min.X != biuPlaybarPadX {
+	if box.Min.X != biuPlaybarPadX+frame {
 		t.Errorf("封面的左边在 x=%d，Biu 的播放条内边距是 %d", box.Min.X, biuPlaybarPadX)
 	}
 }
