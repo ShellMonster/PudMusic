@@ -37,6 +37,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
@@ -1042,22 +1043,25 @@ func (s *Shell) viewFullPartsPanel(c *ui.Context) {
 	t := c.Theme()
 	_, winH := c.Size()
 	h := min(winH*0.6, fullPartsHeight)
-	panel := ui.Column(c).Key("full-parts-panel").
+	// 玻璃那一层：**票面「毛玻璃的 Tint 配方」那四样**，一样都不少。
+	//
+	// ⚠️ 原来这一格是 `ui.RGBA(255, 255, 255, 0.12)`——一层十二个百分点的白，
+	// 压在糊过的封面上，**白字读不出来**（封面一亮，字就没了）。
+	//
+	// 那四样各管一件事：`Tint` 管「字读不读得清」（掺 96% 背景色，底下透出
+	// 的是模糊的轮廓，不是内容的细节），`TextColor` 管「文字跟不跟主题走」，
+	// `Border` 管「玻璃的边在浅底上有没有」，`Shadow` 管「它浮不浮得起来」。
+	//
+	// ⚠️ **影的值从 `widgets/shadow` 取**（`shadow.Sheet`）：值只写一处
+	// （DESIGN.md §四·五，票 #239 把这一处收进去了）。
+	panel := shadow.Sheet(ui.Column(c).Key("full-parts-panel").
 		Absolute().Right(0).Top(winH/2-h/2).
 		Width(fullPartsWidth).Height(h).
 		Radius(12).Role(ui.RoleDialog).Label("分集列表").
-		// 玻璃那一层：**票面「毛玻璃的 Tint 配方」那四样**，一样都不少。
-		//
-		// ⚠️ 原来这一格是 `ui.RGBA(255, 255, 255, 0.12)`——一层十二个百分点的白，
-		// 压在糊过的封面上，**白字读不出来**（封面一亮，字就没了）。
-		//
-		// 那四样各管一件事：`Tint` 管「字读不读得清」（掺 96% 背景色，底下透出
-		// 的是模糊的轮廓，不是内容的细节），`TextColor` 管「文字跟不跟主题走」，
-		// `Border` 管「玻璃的边在浅底上有没有」，`Shadow` 管「它浮不浮得起来」。
 		Material(glass.Glass{Tint: t.Background.Alpha(0.96)}).
 		TextColor(t.Text).
-		Border(1, t.Background.Mix(t.Text, 0.25)).
-		Shadow(0, t.Space(2), t.Space(6), 0, ui.RGBA(0, 0, 0, 0.12))
+		Border(1, t.Background.Mix(t.Text, 0.25)),
+		t)
 
 	panel.Children(func() {
 		ui.Row(c).FillWidth().Padding(10, 12).Gap(8).AlignItems(ui.Center).Children(func() {

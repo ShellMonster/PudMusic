@@ -367,7 +367,7 @@ func (s *Shell) viewAuthorRow(c *ui.Context, f *dynamicFeed, i int) {
 	on := box.Hovered()
 	if all {
 		// 「全部」是**当前就在看的那一个**：和侧栏菜单当前项**同一套**画法
-		// （`flatCurrent`——淡主色底 + 深色字 / 中性灰底 + 主色字）。
+		// （`flatCurrent`——中性灰底 + 主色的字，深浅两套同一个数）。
 		//
 		// ⚠️ **原来这里是实心主色**（`Background(t.Accent)`，一块 248×50 的实心
 		// 绿）：那是审计 F-02 / F-06 点名的那一处——同一个屏上左栏是实心绿、

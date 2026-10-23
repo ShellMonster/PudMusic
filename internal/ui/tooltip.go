@@ -34,6 +34,7 @@ package ui
 import (
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -268,11 +269,12 @@ func (s *Shell) tipAt(c *ui.Context, anchor ui.Element, text string, timing tipT
 	}
 
 	ui.Overlay(c, func() {
-		panel := ui.Box(c).Absolute().PassThrough().Role(ui.RoleTooltip).
+		// ⚠️ **影的值从 `widgets/shadow` 取**（`shadow.Tooltip`）：值只写一处
+		// （DESIGN.md §四·五，票 #239 把这一处收进去了）。
+		panel := shadow.Tooltip(ui.Box(c).Absolute().PassThrough().Role(ui.RoleTooltip).
 			MaxWidth(t.Space(80)).Padding(t.Space(1.25), t.Space(2)).
 			Radius(t.Space(1.25)).
-			Background(fill).TextColor(fg).FontSize(t.FontSize-1).
-			Shadow(0, 2, 8, 0, ui.RGBA(0, 0, 0, 0.2))
+			Background(fill).TextColor(fg).FontSize(t.FontSize-1), t)
 		panel.Children(func() { ui.Text(c, text) })
 		if place != nil {
 			place(panel, anchor, t)
