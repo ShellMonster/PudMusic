@@ -110,5 +110,10 @@ func readFileLimited(path string, limit int64) ([]byte, error) {
 func (s *Shell) listActions() list.Actions {
 	acts := list.AppActions(s.app, s.addToast)
 	acts.FavSelect = s.openFolderSelect
+	// 焦点交接（票 #245 的 E4）：每一帧各个列表把自己登记上去，于是「侧栏按 ↓
+	// 把焦点交给内容区」有一个统一的目标——理由见 `widgets/list` 的 `focus.go`。
+	acts.Focus = s.registerContentFocus
+	// 反过来：内容区的列表在顶上一行时按 ↑，把焦点交回侧栏。
+	acts.FocusOut = s.focusSide
 	return acts
 }
