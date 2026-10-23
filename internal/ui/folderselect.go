@@ -27,6 +27,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -204,7 +205,7 @@ func (s *Shell) viewFolderSelect(c *ui.Context) {
 		// `allSelected`。在这里换成「有没有一个没勾」的话，用户勾到一半时
 		// 那一格会是「全不选」的样子，而不是「部分选中」。
 		all := f.allSelected()
-		ui.Row(c).Gap(10).Center().Children(func() {
+		ui.Row(c).Gap(space.Px10).Center().Children(func() {
 			if ui.Checkbox(c, &all, "全选").Label("全选").Disabled(f.submitting).Changed() {
 				f.toggleAll(!f.allSelected())
 			}
@@ -215,9 +216,9 @@ func (s *Shell) viewFolderSelect(c *ui.Context) {
 		})
 
 		if !f.loaded && len(f.list) == 0 {
-			ui.Text(c, "正在拉收藏夹…").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted).Padding(12)
+			ui.Text(c, "正在拉收藏夹…").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted).Padding(space.Px12)
 		} else if len(f.list) == 0 {
-			ui.Text(c, "你还没有创建收藏夹").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted).Padding(12)
+			ui.Text(c, "你还没有创建收藏夹").FontSize(scale.Font(c, 13)).TextColor(t.TextMuted).Padding(space.Px12)
 		} else {
 			pickScroll := ui.Scroll(c).Height(300).Children(func() {
 				ui.List(c, &f.ls, len(f.list), func(i int) { s.viewFolderPickRow(c, f, i) })
@@ -225,7 +226,7 @@ func (s *Shell) viewFolderSelect(c *ui.Context) {
 			s.trackScrollbar(pickScroll)
 		}
 
-		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+		ui.Row(c).Gap(space.Px8).Justify(ui.End).Children(func() {
 			if ui.Button(c, "取消").Disabled(f.submitting).Clicked() {
 				s.closeFolderSelect()
 			}
@@ -283,14 +284,14 @@ func (s *Shell) viewFolderPickRow(c *ui.Context, f *folderSelect, i int) {
 	item := f.list[i]
 
 	row := ui.Column(c).Key(favSelectRowKey(item.ID)).Grow(1).
-		Radius(6).Padding(6, 8).Gap(2)
+		Radius(6).Padding(space.Px6, space.Px8).Gap(space.Px2)
 	if row.Hovered() {
 		row = row.Background(t.SurfaceHover)
 	}
 
 	row.Children(func() {
 		on := f.picked[item.ID]
-		ui.Row(c).Gap(8).Center().Children(func() {
+		ui.Row(c).Gap(space.Px8).Center().Children(func() {
 			if ui.Checkbox(c, &on, item.Title).Disabled(f.submitting).Changed() {
 				f.toggle(item.ID)
 			}

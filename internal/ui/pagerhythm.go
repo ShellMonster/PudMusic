@@ -18,6 +18,8 @@
 // 边距由那一栏决定，不是这一页的页边距。但它的**上**边距同样收成 0（G40）。
 package ui
 
+import "github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+
 const (
 	// pagePadX 是内容区左右各留多少像素。**七页共用这一个数**：
 	// 首页 / 稍后再看 / 历史记录 / 本地音乐 / 下载记录 / 搜索 / 收藏夹。
@@ -25,7 +27,7 @@ const (
 	// ⚠️ **用这个常量，不要写字面量**：七页各写各的数，过两个月又漂开——而
 	// 「从首页点到本地音乐，内容区左右各退 4 像素」这件事在界面上看不出来，
 	// 只有逐页量才量得出来。
-	pagePadX = 16
+	pagePadX = space.PageHorizontal
 
 	// pageTitleSize 是页标题的字号。**同一个数**。上游的 `h1` 是 `text-2xl`
 	// （24），字重被 Preflight 重置为 inherit，也就是 400——**不是加粗**。

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -124,7 +125,7 @@ func (s *Shell) viewNotFound(c *ui.Context, path string) {
 	s.applyFrameTheme(c)
 
 	t := c.Theme()
-	ui.Column(c).Key("page:not-found").Grow(1).Center().Gap(8).Padding(20, 28).
+	ui.Column(c).Key("page:not-found").Grow(1).Center().Gap(space.Px8).Padding(space.Px20, space.Px28).
 		Children(func() {
 			ui.Text(c, "404").FontSize(scale.Font(c, 28)).Bold().TextColor(t.TextMuted)
 			// ⚠️ **限宽**：路径是用户敲进来的，长度不封顶——不限宽的话一条长

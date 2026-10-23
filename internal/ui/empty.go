@@ -22,6 +22,7 @@ package ui
 
 import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -107,7 +108,7 @@ const emptyIconSize = 32
 
 // emptyGap 是图标、标题、提示三样之间的间距。上游是 `space-y-2`（8），
 // 这里多一样东西（上游只有两样），照抄 8 的话三样会挤成一团。
-const emptyGap = 8
+const emptyGap = space.Px8
 
 // emptyTitleSize 是空状态那一行「这里为什么空」的字号。**15**。
 //
@@ -148,7 +149,7 @@ func drawEmpty(c *ui.Context, key string, e emptyState, pad float32) {
 		// ⚠️ Key 写在构造**之前**（铁律四的坑）：构造之后再 Key 等于没给。
 		col = col.Key(key)
 	}
-	col.Grow(1).Center().Gap(emptyGap).Padding(pad, 28).Children(func() {
+	col.Grow(1).Center().Gap(emptyGap).Padding(pad, space.Px28).Children(func() {
 		emptyContent(c, e)
 	})
 }
@@ -287,7 +288,7 @@ const biliNotMounted = "这一页暂时加载不出来。"
 // 说的是「这一次怎么了」——把原因摆在中间会让人以为它在解释插画。
 func (s *Shell) viewPageEmptyWithReason(c *ui.Context, key, title string, e emptyState) {
 	t := c.Theme()
-	ui.Column(c).Key(key).Grow(1).Center().Gap(emptyGap).Padding(emptyPagePad, 28).Children(func() {
+	ui.Column(c).Key(key).Grow(1).Center().Gap(emptyGap).Padding(emptyPagePad, space.Px28).Children(func() {
 		emptyArt(c, e.Icon)
 		// ⚠️ **字重不写**（400）：这一句是「这一页叫什么」，页标题那一档是
 		// 400（DESIGN.md §二），层次靠字号拉开，不靠重量。
@@ -309,11 +310,11 @@ const emptyPageTitle = 20
 // emptyPagePad 是整页那一支的上下留白。20 ≈ 上游 `py-20` 的一半（上游那个
 // Tailwind 类是 5rem = 80，这里是紧凑桌面应用的窗口，取 20 上下留白就够了，
 // 再多就只把两行字推离窗口中心）。
-const emptyPagePad = 20
+const emptyPagePad = space.Px20
 
 // emptyRowPad 是列表 / 网格那一块里的上下留白。比整页小一档：整页上下有筛选
 // 条和播放条，中间本来就空；列表里那一块四周全是行，留白大了就只剩字飘在当中。
-const emptyRowPad = 12
+const emptyRowPad = space.Px12
 
 // SPEC 点名的四个空状态场景（PLAN.md 的 C-02 / S-01）。四条各有各的一句上游
 // 文案和一句「怎么才能不空」，`TestSpecEmptyStates` 逐条渲染出来验。
@@ -434,7 +435,7 @@ func (s *Shell) viewLoadError(c *ui.Context, key, where, retryLabel string, err 
 	s.applyFrameTheme(c)
 
 	t := c.Theme()
-	ui.Column(c).Key(key).Grow(1).Center().Gap(emptyGap).Padding(emptyPagePad, 28).Children(func() {
+	ui.Column(c).Key(key).Grow(1).Center().Gap(emptyGap).Padding(emptyPagePad, space.Px28).Children(func() {
 		// 插画用警告那一枚而**不是**空状态那一批：这一格说的是「没拉出来」，
 		// 不是「本来就没有」。
 		ui.Icon(c, icon(iconFailed)).FontSize(emptyIconSize).TextColor(t.Warning)

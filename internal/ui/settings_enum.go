@@ -13,6 +13,7 @@ package ui
 import (
 	"fmt"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -45,7 +46,7 @@ func enumSelect[T comparable](c *ui.Context, value *T, items []enumItem[T], labe
 
 	sel := ui.SelectBase(c, value)
 	trigger := sel.Trigger.Width(width).Radius(t.Radius).
-		Background(t.Surface).Border(1, t.Border).Padding(0, 8).Disabled(ro).
+		Background(t.Surface).Border(1, t.Border).Padding(space.None, space.Px8).Disabled(ro).
 		Label(label)
 	trigger.Children(func() {
 		ui.Text(c, labelOf(*value)).SingleLine().Grow(1)
@@ -53,9 +54,9 @@ func enumSelect[T comparable](c *ui.Context, value *T, items []enumItem[T], labe
 	})
 
 	sel.Popup(func(panel ui.Element) {
-		popupPanel(t, panel.Grow(1).MaxWidth(width+24).Padding(4)).Children(func() {
+		popupPanel(t, panel.Grow(1).MaxWidth(width+24).Padding(space.Px4)).Children(func() {
 			for _, it := range items {
-				opt := sel.Item(it.value).Padding(6, 10).Radius(6)
+				opt := sel.Item(it.value).Padding(space.Px6, space.Px10).Radius(6)
 				switch {
 				case opt.Highlighted():
 					// 高亮（指针 / 键盘游标在这一项）走「被选中的选项」那一个

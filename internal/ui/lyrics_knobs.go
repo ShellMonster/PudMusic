@@ -36,21 +36,22 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
 const (
 	// lyricKnobInset 是那两个旋钮离歌词区右边和下边多远，抄 `index.tsx:381` 的
 	// `absolute right-6 bottom-6`（1.5rem = 24px）。
-	lyricKnobInset = 24.0
+	lyricKnobInset = space.Px24
 
 	// lyricKnobGap 是两个旋钮之间的缝，抄 `index.tsx:381` 的 `space-y-3`
 	// （0.75rem = 12px）。
-	lyricKnobGap = 12.0
+	lyricKnobGap = space.Px12
 
 	// lyricPopoverGap 是浮层和它那个旋钮之间的缝，抄 `offset-control.tsx` /
 	// `font-size-control.tsx` 里的 `offset={8}`。
-	lyricPopoverGap = 8.0
+	lyricPopoverGap = space.Px8
 
 	// lyricSliderW 是竖滑块的宽（含留白）。上游那两个是 `w-1` 的轨道加一个圆钮，
 	// 我们把整块做成钮那么宽。

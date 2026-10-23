@@ -33,6 +33,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -109,7 +110,7 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 	// + 每边 7 的内边距（那一圈留白就是 `TestTheHitAreaIsBiggerThanTheGlyph` 断的
 	// 「点击区比图形大」）。
 	btn := s.withTip(c, iconKey(c, iconPageList, "分集", iconMd, false).
-		Size(iconHitMd, iconHitMd).Padding(0, 7),
+		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
 		partEntryTooltip(parts, cur, s.app.PartsWorthAsking(), s.app.PartsErr()))
 	if btn.Clicked() {
 		s.partOpen = !s.partOpen
@@ -235,7 +236,7 @@ func (s *Shell) viewPartDrawer(c *ui.Context) {
 				// 一片空白在界面上和「这一首没有分集」长得一模一样。而分集是问 B 站
 				// 问来的，问不到是网络/风控的事，不是这一首没有分集——三句话说开。
 				ui.Text(c, s.partDrawerWhy()).FontSize(scale.Font(c, 12)).
-					TextColor(t.TextMuted).Padding(12)
+					TextColor(t.TextMuted).Padding(space.Px12)
 			default:
 				s.viewPartDrawerList(c, t)
 			}
@@ -255,7 +256,7 @@ func (s *Shell) partDrawerWhy() string {
 // 一打开用户第一眼要的就是「一共几个」——他好判断自己滑到哪里为止。
 func (s *Shell) viewPartDrawerHeader(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).FillWidth().Children(func() {
-		ui.Row(c).FillWidth().Height(partHeaderHeight).PaddingX(12).
+		ui.Row(c).FillWidth().Height(partHeaderHeight).PaddingX(space.Px12).
 			AlignItems(ui.Center).Children(func() {
 			// ⚠️ **字重不写**（400）：抽屉标题那一档是 400（DESIGN.md §二）。
 			ui.Text(c, "分集").FontSize(scale.Font(c, 14)).Grow(1)
@@ -287,7 +288,7 @@ func (s *Shell) viewPartDrawerList(c *ui.Context, t *ui.Theme) {
 // （和 `queue_drawer.go` 的 `viewQueueRow` 同一个道理）。
 func (s *Shell) viewPartRow(c *ui.Context, r partRow, t *ui.Theme) {
 	row := ui.Row(c).Key(r.key).Grow(1).Height(partRowHeight).
-		PaddingX(12).Gap(8).AlignItems(ui.Center).Radius(6)
+		PaddingX(space.Px12).Gap(space.Px8).AlignItems(ui.Center).Radius(6)
 	switch {
 	case r.active:
 		// Biu 那一支正在放的那一行是 `variant="flat" color="primary"`，

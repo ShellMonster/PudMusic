@@ -28,6 +28,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -67,7 +68,7 @@ var searchIdle = emptyState{
 
 // searchHeaderGap 是页头那几块（标题、Tab、排序）之间的距离。
 // Biu 那边是 `py-4`（`pages/search/index.tsx:26`）。
-const searchHeaderGap = 12
+const searchHeaderGap = space.Px12
 
 // viewSearch 是搜索页：当前状态该画的那一块。
 //
@@ -83,7 +84,7 @@ func (s *Shell) viewSearch(c *ui.Context, r *ui.Route) {
 	keyword := strings.TrimSpace(r.Query(searchQuery))
 
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
-	ui.Column(c).Key("page:/search").Grow(1).Padding(0, pagePadX).Gap(searchHeaderGap).
+	ui.Column(c).Key("page:/search").Grow(1).Padding(space.None, pagePadX).Gap(searchHeaderGap).
 		AlignItems(ui.Stretch).Children(func() {
 		if keyword == "" {
 			// 还没输入：上游 `pages/search/index.tsx:16` 的那一支。
@@ -177,7 +178,7 @@ func (s *Shell) viewSearchResults(c *ui.Context, keyword string) {
 func (s *Shell) viewSearchToolbar(c *ui.Context, tab int) {
 	st := &s.search
 
-	ui.Row(c).Key("search:toolbar:" + strconv.Itoa(tab)).FillWidth().Gap(12).
+	ui.Row(c).Key("search:toolbar:" + strconv.Itoa(tab)).FillWidth().Gap(space.Px12).
 		AlignItems(ui.Center).Children(func() {
 		ui.Tabs(c, &st.sorts[tab], searchSortLabels(tab)...)
 

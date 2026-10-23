@@ -26,6 +26,7 @@ package ui
 import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -46,7 +47,7 @@ func (s *Shell) displayView() list.View {
 // 页的页面区最窄是 900（`WindowOptions.MinWidth`）减掉侧栏和内边距 ≈ 660——
 // 再挤一列预览会把「外观」那一段的每一行都顶到换行。
 func (s *Shell) viewDisplayMode(c *ui.Context, st app.Settings, ro bool) {
-	ui.Column(c).Key("setting:displayMode").Width(settingsControlW).Gap(8).Children(func() {
+	ui.Column(c).Key("setting:displayMode").Width(settingsControlW).Gap(space.Px8).Children(func() {
 		s.pickDisplayMode(c, st, ro)
 		viewDisplayModePreview(c, list.ViewOf(st.DisplayMode))
 	})
@@ -78,7 +79,7 @@ const (
 	// 但**它会让「填满」这件事不再是事实**。
 	previewW    = 92
 	previewH    = 56
-	previewGap  = 12
+	previewGap  = space.Px12
 	previewRows = 3 // 列表 / 网格预览里摆几行
 )
 
@@ -111,7 +112,7 @@ func previewOne(c *ui.Context, t *ui.Theme, v list.View, chosen bool) {
 		Width(previewW).Height(previewH).Radius(t.Radius).
 		// 描边走 `Border` 的第二格（选中那一档给主色）：描 1 像素在缩略图上
 		// 足够认出来，而铺一整块主色会把里面那些色块盖住。
-		Border(1, border).Padding(6).Gap(3).Children(func() {
+		Border(1, border).Padding(space.Px6).Gap(space.Px3).Children(func() {
 		switch v {
 		case list.ViewCard:
 			previewGrid(c, t)
@@ -132,9 +133,9 @@ func previewRowsOf(c *ui.Context, t *ui.Theme, n int, tiny bool) {
 	if tiny {
 		barH = 2
 	}
-	ui.Column(c).Grow(1).Gap(3).Children(func() {
+	ui.Column(c).Grow(1).Gap(space.Px3).Children(func() {
 		for range n {
-			ui.Row(c).Grow(1).Gap(3).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).Grow(1).Gap(space.Px3).AlignItems(ui.Center).Children(func() {
 				ui.Box(c).Width(6).Height(6).Radius(1).Background(t.SurfaceHover)
 				ui.Box(c).Grow(1).Height(barH).Radius(1).Background(t.SurfaceHover)
 			})
@@ -148,9 +149,9 @@ func previewRowsOf(c *ui.Context, t *ui.Theme, n int, tiny bool) {
 // 缩略图上不把这一点画出来的话，三张图看着只差「几行」，而那不是它们真正的区别。
 func previewGrid(c *ui.Context, t *ui.Theme) {
 	const cols = 3
-	ui.Row(c).Grow(1).Gap(4).Children(func() {
+	ui.Row(c).Grow(1).Gap(space.Px4).Children(func() {
 		for range cols {
-			ui.Column(c).Grow(1).Gap(3).Children(func() {
+			ui.Column(c).Grow(1).Gap(space.Px3).Children(func() {
 				ui.Box(c).FillWidth().Height(12).Radius(2).Background(t.SurfaceHover)
 				ui.Box(c).FillWidth().Height(3).Radius(1).Background(t.SurfaceHover)
 			})

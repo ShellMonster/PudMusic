@@ -23,6 +23,7 @@ package list
 import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -52,13 +53,13 @@ const (
 	// 和上游那枚 `size="sm"` 的图标键（HeroUI 的 sm 是 `w-8 h-8`）一样。
 	// 扁平按钮那份配方默认给的是 6/14（横向 14），那一枚是 44 宽——塞进 32 那一列
 	// 就会把它顶出去，而顶出去之后表头和行又对不上了。
-	operationHitPad = 8
+	operationHitPad = space.Px8
 
 	// operationHitInset 是网格那一档里这枚「⋯」离格子边的距离。
 	//
 	// ⚠️ **它压在封面上**，所以给的是一点边距而不是贴着角：贴着角的话那三个点正好
 	// 落在封面的边沿上，抗锯齿把它切掉一半，看起来像「少了一个点」。
-	operationHitInset = 2
+	operationHitInset = space.Px2
 )
 
 // OperationLabel 是那枚「⋯」给无障碍（和 Tester）用的名字。

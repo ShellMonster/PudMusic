@@ -45,6 +45,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -61,8 +62,8 @@ func (s *Shell) settingsConfig(c *ui.Context) {
 	s.settingSection(c, "配置")
 	s.settingSectionEnd(c)
 
-	ui.Column(c).FillWidth().Gap(8).Children(func() {
-		ui.Row(c).FillWidth().Gap(8).Children(func() {
+	ui.Column(c).FillWidth().Gap(space.Px8).Children(func() {
+		ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
 			if flatButton(c, "导出配置").FontSize(scale.Font(c, 13)).Clicked() {
 				s.exportConfig()
 			}
@@ -80,7 +81,7 @@ func (s *Shell) settingsConfig(c *ui.Context) {
 		} else if dirs := rep.BiuDirs; len(dirs) > 0 {
 			// 「从 Biu 导入」只在**找得到** Biu 的数据目录时才摆。摆一个点了必然说
 			// 「没找到 Biu」的按钮，等于让用户自己判断这台机器上有没有装过 Biu。
-			ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
 				if flatButton(c, "从 Biu 导入").FontSize(scale.Font(c, 13)).Clicked() {
 					s.importFromBiu(dirs)
 				}
@@ -116,7 +117,7 @@ func (s *Shell) importNotes(c *ui.Context, rep MigrationReport) {
 		return
 	}
 	t := c.Theme()
-	ui.Column(c).FillWidth().Gap(4).Children(func() {
+	ui.Column(c).FillWidth().Gap(space.Px4).Children(func() {
 		// ⚠️ **字重不写**（400）：次要信息那一档是 12/400（DESIGN.md §二）。
 		ui.Text(c, "这次没有带过来的：").FontSize(scale.Font(c, 12))
 		for _, n := range rep.Imported.Notes {

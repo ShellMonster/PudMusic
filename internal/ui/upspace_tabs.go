@@ -8,6 +8,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -307,7 +308,7 @@ func upTabEmpty(tab int, dropped int) emptyState {
 func (s *Shell) viewUpSentinel(c *ui.Context, sp *upSpace, tab int) {
 	t := c.Theme()
 	p := sp.pagerOf(tab)
-	ui.Row(c).Key("space-sentinel").Center().Gap(8).Padding(12).Children(func() {
+	ui.Row(c).Key("space-sentinel").Center().Gap(space.Px8).Padding(space.Px12).Children(func() {
 		switch {
 		case p.err != nil:
 			ui.Text(c, "加载失败："+p.err.Error()).FontSize(scale.Font(c, 13)).TextColor(t.TextMuted)

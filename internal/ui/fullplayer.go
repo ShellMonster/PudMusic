@@ -38,6 +38,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
@@ -69,7 +70,7 @@ const (
 	fullSpectrumBarsLo = 48
 	fullSpectrumBarsHi = 128
 	fullSpectrumHeight = 40
-	fullSpectrumGapY   = 12
+	fullSpectrumGapY   = space.Px12
 	fullSpectrumEdge   = 24
 
 	// 满屏上播放/暂停那一枚的图标边长与点击区。
@@ -92,10 +93,10 @@ const (
 	// fullTopHeight 是它整条的高度：py-4 的上下两份（32）加最高的那个孩子
 	// （32 的图标键）。它同时是「藏起来时整条要移出窗口」那个位移量的一半。
 	fullTopHeight = 64
-	fullTopPadX   = 24
-	fullTopPadY   = 16
+	fullTopPadX   = space.Px24
+	fullTopPadY   = space.Px16
 	// fullTopGap 是关闭键 / 歌名 / 设置之间那道缝：上游的 `space-x-2` = 8。
-	fullTopGap = 8
+	fullTopGap = space.Px8
 	// fullTopKey 是满屏顶栏上那两枚图标键的点击区边长。
 	//
 	// 32 的框里，上游那两枚 28 / 22 的图标（`index.tsx:294,313`）每边分别留
@@ -112,10 +113,10 @@ const (
 	// + 离底 16（`mb-4`）
 	// = 92。藏起来的时候整条要移出窗口，靠的也是这个数。
 	fullControlsHeight = 92
-	fullBottomPadX     = 48
-	fullBottomMargin   = 16
+	fullBottomPadX     = space.Px48
+	fullBottomMargin   = space.Px16
 	fullBottomMaxW     = 1152
-	fullBottomGapY     = 8
+	fullBottomGapY     = space.Px8
 
 	fullPartsWidth    = 280
 	fullPartsHeight   = 420
@@ -445,7 +446,7 @@ func (s *Shell) viewFullEmpty(c *ui.Context) {
 			on, dim := s.fullForeground(c)
 			ui.Column(c).Key("full-empty").
 				Absolute().Left(0).Top(0).Right(0).Bottom(0).
-				Center().Gap(6).Children(func() {
+				Center().Gap(space.Px6).Children(func() {
 				// ⚠️ **这两行是故意的例外，不走 `emptyCopy`**：满屏这一屏压在
 				// 一块有底色的背板上，所以主次色是那块背板的 on / dim
 				// （`fullForeground`），而不是主题的 Text / TextMuted——用主题
@@ -644,7 +645,7 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 		// 于是界面藏好之后还留着一句悬空的话（实测：那一条「第二次没藏干净
 		// （138 个亮像素）」）。
 		if iconButton(c, iconChevronDown, "关闭全屏", 28).
-			Size(fullTopKey, fullTopKey).Padding(0, 2).
+			Size(fullTopKey, fullTopKey).Padding(space.None, space.Px2).
 			TextColor(on).Clicked() {
 			s.closeFullPlayer()
 		}
@@ -675,7 +676,7 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 
 		// 同上面那一条：提示不跟着顶栏一起藏起来，所以这里不给 `Tooltip`。
 		gear := iconButton(c, iconSettings, "全屏设置", 22).
-			Size(iconHit, iconHit).Padding(0, 5).
+			Size(iconHit, iconHit).Padding(space.None, space.Px5).
 			TextColor(on)
 		if gear.Clicked() {
 			s.full.settings = !s.full.settings
@@ -838,7 +839,7 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 		//	mb-4        离底 16（`fullBottomMargin`）
 		//	max-w-6xl   最宽 1152，窗口再宽也居中、不摊到两头（`fullBottomMaxW`）
 		ui.Column(c).FillWidth().MaxWidth(fullBottomMaxW).
-			Padding(0, fullBottomPadX, fullBottomMargin, fullBottomPadX).
+			Padding(space.None, fullBottomPadX, fullBottomMargin, fullBottomPadX).
 			Gap(fullBottomGapY).AlignItems(ui.Center).Children(func() {
 			s.viewFullProgress(c, st, dim)
 			// Biu 那一排是 `MusicPlayMode + MusicPlayControl + OpenPlaylistDrawerButton`
@@ -854,9 +855,9 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 			// `t.Text` 是黑的，模式/上下首/队列那四枚会一起消失在背景里。
 			// 哪一档配哪一张由 `transportIcon` / `playModeIcon` 说了算，这一行
 			// 不自己决定（守卫盯着）。
-			ui.Row(c).FillWidth().TextColor(on).Gap(16).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).FillWidth().TextColor(on).Gap(space.Px16).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
 				s.viewPlayMode(c, st)
-				ui.Row(c).Gap(24).AlignItems(ui.Center).Children(func() {
+				ui.Row(c).Gap(space.Px24).AlignItems(ui.Center).Children(func() {
 					s.viewPrevButton(c)
 					// 提示走 tooltip.go（时延照上游），不是框架那枚固定的 600ms。
 					//
@@ -869,7 +870,7 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 					// 播放条上那一枚一样（48×48、图形正好填满）。
 					if s.withTip(c, iconButton(c, transportIcon(st.Playing),
 						transportLabel(st.Playing), fullPlayGlyph).
-						Size(fullPlayHit, fullPlayHit).Padding(0, 0).
+						Size(fullPlayHit, fullPlayHit).Padding(space.None, space.None).
 						Disabled(!st.Playing && !st.HasTrack), transportLabel(st.Playing)).Clicked() {
 						s.app.Toggle()
 					}
@@ -877,7 +878,7 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 				})
 				// 同一处：队列开关的提示也走 tooltip.go。
 				if s.withTip(c, iconButton(c, iconQueue, "播放列表", iconMd).
-					Size(iconHitMd, iconHitMd).Padding(0, 7), drawerTip(s.drawerOpen)).Clicked() {
+					Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), drawerTip(s.drawerOpen)).Clicked() {
 					s.drawerOpen = !s.drawerOpen
 				}
 			})
@@ -896,7 +897,7 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 // 按住旋钮拖，旋钮反而不见了。
 func (s *Shell) viewFullProgress(c *ui.Context, st app.State, dim ui.Color) {
 	known := st.Duration > 0
-	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).FillWidth().Gap(space.Px10).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, 12)).TextColor(dim).
 			MinWidth(48).MaxLines(1)
 		sl := knobSlider(c, &s.fullScrub, 0, 1).Grow(1).Label("全屏播放进度").Disabled(!known)
@@ -1004,7 +1005,7 @@ func (s *Shell) viewFullParts(c *ui.Context, hidden bool) {
 		// 也不给 `Tooltip`：界面一藏，这条把手跟着不画，悬空的那句提示会留下来。
 		tab := iconButton(c, iconSideCollapse, "显示分集列表", 24).
 			Absolute().Right(0).Top(winH/2-fullPartsTabH/2).
-			Width(fullPartsTabW).Height(fullPartsTabH).Padding(0, 1).
+			Width(fullPartsTabW).Height(fullPartsTabH).Padding(space.None, space.Px1).
 			TextColor(dim)
 		if tab.Clicked() {
 			s.full.partsOpen = true
@@ -1072,7 +1073,7 @@ func (s *Shell) viewFullPartsPanel(c *ui.Context) {
 		t)
 
 	panel.Children(func() {
-		ui.Row(c).FillWidth().Padding(10, 12).Gap(8).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).FillWidth().Padding(space.Px10, space.Px12).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
 			// 字色跟着面板走（`TextColor(t.Text)`），这里不再自己定。
 			// ⚠️ **字重不写**（400）：面板标题那一档是 400（DESIGN.md §二），
 			// 层次靠字号拉开，不靠重量。
@@ -1080,7 +1081,7 @@ func (s *Shell) viewFullPartsPanel(c *ui.Context) {
 			// 上游是一枚 `RiArrowRightSLine` 16 的扁平图标键（`page-list.tsx:47`）。
 			// 字色不用给：面板自己 `TextColor(t.Text)`，图标跟着它走。
 			if s.withTip(c, iconButton(c, iconSideExpand, "收起分集", 16).
-				Size(24, 24).Padding(0, 4), "收起分集").Clicked() {
+				Size(24, 24).Padding(space.None, space.Px4), "收起分集").Clicked() {
 				s.full.partsOpen = false
 			}
 		})
@@ -1091,7 +1092,7 @@ func (s *Shell) viewFullPartsPanel(c *ui.Context) {
 			if err := s.app.PartsErr(); err != nil {
 				why = "问不出分集：" + err.Error()
 			}
-			ui.Text(c, why).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Padding(12)
+			ui.Text(c, why).FontSize(scale.Font(c, 12)).TextColor(t.TextMuted).Padding(space.Px12)
 		default:
 			s.viewFullPartsList(c)
 		}
@@ -1108,7 +1109,7 @@ func (s *Shell) viewFullPartsList(c *ui.Context) {
 	partsList := ui.List(c, &s.full.partsList, len(rows), func(i int) {
 		r := rows[i]
 		row := ui.Column(c).Key(r.key).Grow(1).Height(fullPartRowHeight).
-			PaddingX(12).Radius(6)
+			PaddingX(space.Px12).Radius(6)
 		switch {
 		case r.active:
 			// Biu 的 `data-[active=true]:bg-primary/20`。

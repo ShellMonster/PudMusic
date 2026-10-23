@@ -45,6 +45,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -79,7 +80,7 @@ func (s *Shell) viewFullSettings(c *ui.Context) {
 	showLyrics, showSpectrum := prefs.ShowLyrics, prefs.ShowSpectrum
 	showCover, blurred := prefs.ShowCover, prefs.ShowBlurredBackground
 
-	ui.Column(c).Width(320).Padding(16).Gap(16).Children(func() {
+	ui.Column(c).Width(320).Padding(space.Px16).Gap(space.Px16).Children(func() {
 		s.fullSwitchRow(c, "显示歌词", &showLyrics, func(on bool) {
 			s.setFullPrefs(func(p *app.FullPlayerPrefs) { p.ShowLyrics = on })
 		})
@@ -173,7 +174,7 @@ func (s *Shell) fullColorRow(c *ui.Context, title, hex, fallback string, overrid
 
 	ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, title).FontSize(scale.Font(c, 16)).FontWeight(500)
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
 			if overridden {
 				if flatButton(c, "用默认").FontSize(scale.Font(c, 12)).
 					TextColor(t.TextMuted).Clicked() {

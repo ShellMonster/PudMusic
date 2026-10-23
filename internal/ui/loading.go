@@ -40,6 +40,7 @@
 package ui
 
 import (
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -70,7 +71,7 @@ const busySpinnerSize = 14
 //
 // 上游 HeroUI 的按钮里那两样东西之间的缝是 `gap-2`（8）；这里取 6，因为按钮里
 // 的字是 13（上游是 14），而 6 是 `ui.Button` 自己的 `Gap`（`t.Space(1.5)`）。
-const busyGap = 6
+const busyGap = space.Px6
 
 // drawLoading 画「正在加载」那一档：一枚居中的转圈。
 //

@@ -68,6 +68,7 @@ package ui
 import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -124,7 +125,7 @@ const (
 	// ⚠️ **12 是仓库里那两个确认框原来的数**（本地音乐那一页的 `dialogGap`
 	// 和下载记录页那一行都是 12）——换过去之后两个地方和这里对得上，而用户
 	// 看过的那两个框就是这个疏密。
-	confirmGap = 12
+	confirmGap = space.Px12
 	// confirmIconSize 是警告图标的大小。
 	//
 	// 18 是上游那一枚的大小：`@remixicon/react` 的默认 size 是 `1em`，而
@@ -222,7 +223,7 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 				//
 				// ⚠️ 图标和标题**同一行**（上游的 `flex items-center gap-1`，
 				// gap-1 = 4）。
-				ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+				ui.Row(c).Gap(space.Px4).AlignItems(ui.Center).Children(func() {
 					ui.Icon(c, icon(iconWarning)).FontSize(confirmIconSize).
 						TextColor(confirmIconColor(t, spec.tone))
 					// ⚠️ **字重不写**（400）：弹窗标题是 16/400（DESIGN.md §二）。
@@ -242,7 +243,7 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 		// 按钮行。⚠️ **它是面板的直接子元素**（不是 Column 里的第三行）：
 		// 塞进 Column 的话这一行的宽度是 Column 的宽度，按钮靠右对齐也就跟着
 		// 面板走——那倒是想要的；可 `AlignSelf(End)` 才能让这一行**自己**贴右。
-		ui.Row(c).AlignSelf(ui.End).Gap(8).Children(func() {
+		ui.Row(c).AlignSelf(ui.End).Gap(space.Px8).Children(func() {
 			if cancelButton(c, spec).Clicked() {
 				pressed = spec.cancel
 			}
