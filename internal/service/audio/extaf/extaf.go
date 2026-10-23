@@ -19,8 +19,13 @@ package extaf
 
 import "errors"
 
-// ErrUnsupported 是「这个平台没有系统解码器」时 Open 返回的错误。
+// ErrUnsupported 是「这个平台没有 AudioToolbox」时 Open 返回的错误。
 //
 // 它和「文件解不了」是两回事：前者是平台没有能力，后者是文件本身不对，
 // 两者在界面上要显示不同的提示，所以分开。
-var ErrUnsupported = errors.New("extaf: this platform has no system audio decoder")
+//
+// ⚠️ **它说的是「没有 AudioToolbox」，不是「没有系统解码器」**：Windows 上
+// **有**系统解码器（Media Foundation），只是不走这一层。这句话是用户看得见
+// 的（它会进 `openDecoder` 的最终错误里），说成「没有系统解码器」就是一句
+// 假话——所以这里说的是**哪一层**没有。
+var ErrUnsupported = errors.New("extaf: this platform has no AudioToolbox (the macOS system audio decoder)")
