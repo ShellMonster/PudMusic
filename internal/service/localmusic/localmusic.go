@@ -79,9 +79,21 @@ var Extensions = []string{
 
 // playableExts 是「列进来了、而且真的放得出声」的扩展名。
 //
-// 判据是解码器注册表（`internal/service/audio` 里那些 `RegisterFormat`），
-// 不是这份白名单：WAV 和 MP3 由框架注册、FLAC 走 `flacdec`、MP4/AAC/AIFF
-// 各自注册、Ogg Vorbis 由 `audio/vorbis` 注册，WMA 什么也没有。
+// ⚠️ **判据不是上面那份扫描白名单**（`Extensions` 里有 `.wma`，我们放不了），
+// 而是「那边真的有一个解得了的解码器」。而这一条**要有人去核**，核的方式是
+// **真解一次**——不是看表上写着。「界面说可放、实际报不支持」这种错法只有
+// 真解才抓得住：它俩长得一模一样，判据自己一路绿着。
+//
+// 现在这一份每一项的来历：
+//
+//   - WAV / MP3：MyGo 自带（`mygo/audio`、`mygo/audio/mp3`）
+//   - 裸 FLAC：`internal/service/audio/flacdec`
+//   - MP4 / AAC：系统解码器（macOS 的 AudioToolbox）
+//   - AIFF / AIFC：`internal/service/audio/aiff.go`
+//   - Ogg Vorbis：`mygo/audio/vorbis`——那一行 blank import 在
+//     `internal/service/audio/player.go`，真解一次的判据在
+//     `internal/service/audio/vorbis_test.go`
+//   - WMA：什么也没有
 //
 // ⚠️ **列表里出现一个播不了的扩展名时，界面上必须说清楚**，不能让人以为
 // 文件坏了（PLAN §5.4 的原话：「不要含糊过去」）。
