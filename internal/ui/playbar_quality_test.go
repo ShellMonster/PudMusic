@@ -45,7 +45,7 @@ func qualityBarTester(t *testing.T, st app.State, width ...int) *mygoui.Tester {
 // 13.8：一个字，点击区只剩 14 像素）。短版就是**上游那一枚 chip 的形状**
 // （「无损」/「杜比」，`playbar/left/index.tsx:50-56`），全称在悬停提示里。
 func TestQualityBadgeShowsForAnOnlineTrack(t *testing.T) {
-	for _, badge := range []string{"无损 FLAC", "320K", "128K", "64K", "杜比全景声"} {
+	for _, badge := range []string{"无损 FLAC", "Hi-Res 无损", "192K", "128K", "64K", "杜比全景声"} {
 		chip := bili.ChipLabel(badge)
 		tt := qualityBarTester(t, app.State{HasTrack: true, Title: "在线的一首", Quality: badge})
 		if !tt.HasText(chip) {
@@ -57,10 +57,10 @@ func TestQualityBadgeShowsForAnOnlineTrack(t *testing.T) {
 // TestQualityBadgeFollowsTheRefresh 盯换流之后徽章会变。
 //
 // 徽章是**每帧从 State 现读**的，不是开歌那一刻定下来的。把它缓存住的话，
-// B 站把 320K 降成 128K 时用户看到的还是「320K」——无声地降级会让人以为
+// B 站把 192K 降成 128K 时用户看到的还是「192K」——无声地降级会让人以为
 // 自己还在听原来那一档。
 func TestQualityBadgeFollowsTheRefresh(t *testing.T) {
-	st := app.State{HasTrack: true, Title: "在线的一首", Quality: "320K"}
+	st := app.State{HasTrack: true, Title: "在线的一首", Quality: "192K"}
 	b := newTestShell(t, at(760, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
 		return func(c *mygoui.Context) {
 			s.wake.set(c)
@@ -71,13 +71,13 @@ func TestQualityBadgeFollowsTheRefresh(t *testing.T) {
 	tt := b.tt
 
 	tt.Frame()
-	if !tt.HasText("320K") {
+	if !tt.HasText("192K") {
 		t.Fatalf("一开始的徽章没画出来：%q", tt.Texts())
 	}
 
 	st.Quality = "128K"
 	tt.Frame()
-	if tt.HasText("320K") {
+	if tt.HasText("192K") {
 		t.Errorf("换流之后还在显示旧徽章：%q", tt.Texts())
 	}
 	if !tt.HasText("128K") {
@@ -101,7 +101,7 @@ func TestNoQualityBadgeForALocalFile(t *testing.T) {
 // TestNoQualityBadgeWhenThereIsNoTrack 盯没歌时不画。
 func TestNoQualityBadgeWhenThereIsNoTrack(t *testing.T) {
 	tt := qualityBarTester(t, app.State{})
-	if tt.HasText("320K") {
+	if tt.HasText("192K") {
 		t.Errorf("还没有歌就画出了徽章：%q", tt.Texts())
 	}
 }
@@ -194,7 +194,7 @@ func TestErrorShowsNextToTheTitle(t *testing.T) {
 	tt := qualityBarTester(t, app.State{
 		HasTrack: true,
 		Title:    "在线的一首",
-		Quality:  "320K",
+		Quality:  "192K",
 		Err:      "连不上 B 站这条音频流了（网络或地址的问题，不是歌坏了）",
 	})
 	if !tt.HasText("打不开：连不上 B 站这条音频流了（网络或地址的问题，不是歌坏了）") {
@@ -216,7 +216,7 @@ func TestErrorShowsNextToTheTitle(t *testing.T) {
 // 改的是「下一首」，改完当前这首纹丝不动，用户会以为没生效。
 //
 // 这条断的是「点了菜单那一项，App 的偏好真的变了」。换流、跳回原位置那些
-// 是 `internal/app` 那边的用例（那边能造出「B 站只给了 320K」这种界面造不
+// 是 `internal/app` 那边的用例（那边能造出「B 站只给了 192K」这种界面造不
 // 出来的 fixture）。
 func TestTheBadgeMenuSwitchesQuality(t *testing.T) {
 	a := streamingApp(t)
@@ -226,7 +226,7 @@ func TestTheBadgeMenuSwitchesQuality(t *testing.T) {
 	st := app.State{
 		HasTrack:    true,
 		Title:       "在线的一首",
-		Quality:     "320K",
+		Quality:     "192K",
 		QualityPref: app.AudioQualityAuto,
 	}
 	b := newTestShell(t, onApp(a), at(760, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
@@ -240,7 +240,7 @@ func TestTheBadgeMenuSwitchesQuality(t *testing.T) {
 	tt := b.tt
 	tt.Frame()
 
-	if err := tt.Click("320K"); err != nil {
+	if err := tt.Click("192K"); err != nil {
 		t.Fatalf("点不动徽章：%v（画面上的字：%q）", err, tt.Texts())
 	}
 	want := []string{"自动", "无损", "高音质", "标准", "省流量"}
@@ -259,7 +259,7 @@ func TestTheBadgeMenuSwitchesQuality(t *testing.T) {
 
 	// 菜单不是一次性的：换完一档之后还能接着换。菜单里勾中的那一项由这一帧
 	// 的状态说了算，所以它得是现读的——缓存住的话勾永远停在换之前那一档。
-	if err := tt.Click("320K"); err != nil {
+	if err := tt.Click("192K"); err != nil {
 		t.Fatalf("第二次点不动徽章：%v", err)
 	}
 	if got := tt.Menu(); !slices.Equal(got, want) {

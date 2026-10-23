@@ -652,8 +652,8 @@ func TestSameTierComparesBothNumberings(t *testing.T) {
 	if music.SameTier(&StreamRef{Sid: "1", MusicTier: MusicTierFLAC}) {
 		t.Error("320K 和 FLAC 被判成同一档")
 	}
-	mv := &StreamRef{Bvid: "BV1xx", Cid: "1", Quality: QualityHigh320}
-	if !mv.SameTier(&StreamRef{Bvid: "BV1yy", Cid: "2", Quality: QualityHigh320}) {
+	mv := &StreamRef{Bvid: "BV1xx", Cid: "1", Quality: QualityHigh192}
+	if !mv.SameTier(&StreamRef{Bvid: "BV1yy", Cid: "2", Quality: QualityHigh192}) {
 		t.Error("投稿那一路的 SameTier 变了")
 	}
 }

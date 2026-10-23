@@ -16,7 +16,6 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
@@ -306,7 +305,7 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 		// 高亮是『正在播放』那一行：flat（主色当字），不是实心」。
 		//
 		// 所以这里走 `flatCurrent`（和侧栏菜单当前项、左栏那三处同一套）：底是
-		// 淡主色一层（深色下是中性灰），字是主色（见下面 `playlistTextColor`）。
+		// 中性灰，字是主色（浅色下是压深的那一档，见下面 `playlistTextColor`）。
 		rowEl = flatCurrent(c, rowEl)
 	case hovered:
 		// 悬停要有反应：这一行点得动（跳过去放它），没有反馈用户不知道它是能点的。
@@ -391,15 +390,21 @@ func (s *Shell) viewQueueCover(c *ui.Context, item app.Item, playing, hovered bo
 
 // playlistTextColor 是正在放的那一行里**歌名**的颜色。
 //
-// 正在放的那一行是 **flat**（主色当字 + 一层很淡的主色底，见上面），所以歌名
-// 取的是「主色当字色」那一档：`ink.AccentOn`——浅色下主色是亮绿，压在浅底上
-// 只有 1.9:1（读不出来），所以取那个压深到 ≥4.5:1 的变体；深色下就是主色本身。
+// 正在放的那一行是 **flat**（中性灰底 + 主色当字，见上面），所以歌名取的是
+// `flatCurrentText` 那一档——**和那一格的底是同一个数**：深色下是主色本身，浅色下
+// 是从主色现算的、压到 ≥4.5:1 的那个变体（亮绿压浅底只有 1.4:1，读不出来）。
 //
-// ⚠️ **和列表行 / 网格卡片那一档是同一个数**（`widgets/list` 的 `rowColors`）：
-// 「正在播放」在应用里只有一种说法——主色当字，不是实心底。
+// ⚠️ **和列表行 / 网格卡片那一档不是同一个数**（`widgets/list` 的 `rowColors`
+// 那一档是 `ink.AccentOn`：它按**页面底色**算，浅色下更浅一点）。两处都是
+// 「主色当字，不是实心底」，但压深时按的底不同——这一行的底是**中性灰**，比
+// 页面底色暗一档，所以按页面底色算出来的那个变体（#117936）压在上面差一点
+// （4.03:1，差的那一档就是「按中性灰重算」的理由）。
+//
+// 差这一点不会有用户看得出来，但**判据要按各自的底算**：这一行的字是**自己
+// 画的**（不继承父元素），底换了字不跟着换就是「底换了、字没换」。
 func playlistTextColor(t *ui.Theme, playing bool) ui.Color {
 	if playing {
-		return ink.AccentOn(t)
+		return flatCurrentText(t, true)
 	}
 	return t.Text
 }

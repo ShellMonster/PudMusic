@@ -244,7 +244,7 @@ func (c *Client) PlayURL(ctx context.Context, bvid, cid string, pref AudioQualit
 // refFrom 把取流响应变成一个 StreamRef。
 //
 // 拆出来是因为「解析」这件事要能被 fixture 直接测：解析错了
-// （比如把 flac 段漏掉）在真网上表现为「音质徽章一直显示 320K」，
+// （比如把 flac 段漏掉）在真网上表现为「音质徽章一直显示 192K」，
 // 那种问题不拆出来就只能靠人眼发现。
 func refFrom(d *playurlData, bvid, cid string, pref AudioQuality) (*StreamRef, error) {
 	if d == nil || d.Dash == nil {

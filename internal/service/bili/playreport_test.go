@@ -100,7 +100,7 @@ func TestPlayReportOpenSendsEveryParam(t *testing.T) {
 //
 // `fnval` / `fnver` / `fourk` 是这一组里最要紧的三个：`fnval` 说「这一轮
 // 我放的是哪一类流」，写错了 B 站记下来的是一条和实际不符的播放记录
-// （说是无损、实际发的是 320K）。它们必须和我们取流时发的那个一样。
+// （说是无损、实际发的是 192K）。它们必须和我们取流时发的那个一样。
 func TestPlayReportBeatSendsEveryParam(t *testing.T) {
 	f := newFakeBili(t)
 	serveReport(t, f, playReportBeatPath)

@@ -13,7 +13,10 @@
 // `TestEveryHandMadePopupHasAShadow` 扫源码盯着这件事（#229）。
 package ui
 
-import "github.com/egoist/mygo/ui"
+import (
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
+	"github.com/egoist/mygo/ui"
+)
 
 // popupRadius 是浮层面板的圆角：**固定的 8**，不跟 `t.Radius` 走。
 //
@@ -30,20 +33,12 @@ const popupRadius = 8
 //
 // 参数和框架 `stylePanel` 一样（没有 Margin/Padding：各处的间距不一样，调用方
 // 自己给）。**别在调用处再抄一遍这几个字段**——漏一个就是下一处「有一处无」。
-func popupPanel(t *ui.Theme, panel ui.Element) ui.Element {
-	return panel.Radius(popupRadius).
-		Background(t.Background).Border(1, t.Border).
-		Shadow(0, 6, 20, 0, popupShadow(t))
-}
-
-// popupShadow 是浮层那圈影子的颜色。
 //
-// 浅色下取框架 `stylePanel` 那个 18%；深色下要更浓（90/255 ≈ 35%）——同一个
-// 18% 压在 `#18181b` 上看不出边界，面板和底下的内容糊成一片。上游 Biu 是
-// `shadow-2xl`，深浅两套本来就是两个浓度。
-func popupShadow(t *ui.Theme) ui.Color {
-	if t.Dark {
-		return ui.Color{A: 90}
-	}
-	return ui.Color{A: 46}
+// ⚠️ **影的值从 `widgets/shadow` 取**（`shadow.Popover`）：那一圈影的数不许写在
+// 调用处（DESIGN.md §四·五「值只写一处」），票 #239 把这一处收进去了。
+func popupPanel(t *ui.Theme, panel ui.Element) ui.Element {
+	return shadow.Popover(
+		panel.Radius(popupRadius).
+			Background(t.Background).Border(1, t.Border),
+		t)
 }
