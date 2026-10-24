@@ -185,13 +185,17 @@ func HomeRegionOf(tab int) int {
 	return bili.RegionMusic
 }
 
-// Feed 拉第 tab 个 Tab 的第一页推荐。
+// Feed 拉第 tab 个 Tab 的**第 page 页**推荐。
 //
 // ⚠️ **不重排**（理由在 `service/bili/recommend.go` 的文件头）：分区推荐是
 // 个性化的流，B 站给的顺序就是内容；音乐榜的名次就在顺序里。
 //
-// Page 是页码。首页只拉第一页（上游那一页的懒加载是滚到底再拉下一段，
-// 那是 `list.PagedList` 的活，见 `internal/ui/homepage_feed.go` 的注释）。
+// Page 是页码，从 1 起。首页滚到底会接着拉下一段（票 #370：首页那三张 Tab 是
+// 翻页列表），而这两个接口收的都是页码（分区推荐收在 `display_id` 上，音乐榜
+// 收在 `pn` 上）。
+//
+// ⚠️ **这一层不说「还有没有」**：B 站这两个接口都不给那一格，而「一页空的」
+// 就是到底了（界面那一层照这一句把哨兵收掉）。
 func (r *Recommend) Feed(ctx context.Context, tab, page int) ([]RecommendItem, int, error) {
 	if !r.Mounted() {
 		return nil, 0, errRecommendMissing

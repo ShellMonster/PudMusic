@@ -225,6 +225,11 @@ type List struct {
 	// 它不是歌，所以行身份是 footerKey：一个歌 ID 不可能撞上的类型。
 	footer func(c *ui.Context)
 
+	// footerLabel 是末尾那一行给无障碍和「打字选中」用的名字。空串是默认那句
+	// （`footerLabel`）。翻页那一层会按末尾那一行此刻的样子换它（转圈 / 重试
+	// / 「没有更多了」），见 `PagedList.syncList`。
+	footerLabel string
+
 	// scroll 是这个列表把滚动位置写回来的那个句柄，为 nil 时不写。
 	scroll *ui.ScrollState
 
@@ -239,6 +244,20 @@ type List struct {
 
 	// hot 是上一帧画完后量到的「指针压在滚动条那一带」（见 `Hot`）。
 	hot bool
+
+	// key 是这一份列表在树上认自己的名字。nil 是「不用」（框架按位置认）。
+	//
+	// ⚠️ **同一个位置上有几份列表轮流画时，要给它们各自的名字**：框架把滚动
+	// 状态记在**元素的位置**上（`ui.ScrollState` 挂在元素上，而元素的身份是
+	// 「父 ID + 兄弟序号」），而轮流占着同一个位置的几份列表会**抢同一份**——
+	// 切回来的那一档会被上一档留下的偏移拽走（实测：切回「音乐」落到第 6 首
+	// 而不是它原来的第 19 首）。首页那三个 Tab 就是这样（见
+	// `internal/ui/homepage.go`「切 Tab 的滚动位置」那一段）。
+	//
+	// ⚠️ **它是 `any` 不是 `string`**：装进去的时候就把字符串装箱好（那是
+	// 一次性的），而每帧 `c.Key(那个 any)` 不再装箱——现算的话每帧一次分配，
+	// 而这一屏有逐帧分配的预算（见 `internal/ui/framebudget_test.go`）。
+	key any
 
 	// view 是这一份歌此刻摆成什么样，见 SetView。
 	//
@@ -320,6 +339,16 @@ func (l *List) SetSongs(songs []Music) {
 //
 // ⚠️ 只能由界面线程调，同 SetSongs。
 func (l *List) SetFooter(fn func(c *ui.Context)) { l.footer = fn }
+
+// SetFooterLabel 换末尾那一行给无障碍和「打字选中」用的名字。传空串是退回
+// 默认那句（`footerLabel`）。
+//
+// ⚠️ **它换的是「那一行叫什么」，不是「那一行画什么」**：画法是 `SetFooter`
+// 那一件，而这一句是给读屏软件念的。末尾那一行有两种样子（还在拉 / 到头了），
+// 两种该念的名字不一样——见 `PagedList.syncList`。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (l *List) SetFooterLabel(s string) { l.footerLabel = s }
 
 // SetEmpty 换掉「没有歌时说的那句话」。
 //
@@ -454,6 +483,18 @@ func (l *List) now() time.Time {
 // ⚠️ 只能由界面线程调，同 SetSongs。
 func (l *List) SetScroll(s *ui.ScrollState) { l.scroll = s }
 
+// SetKey 换这一份列表在树上认自己的名字。传空串是「不用」（框架按位置认）。
+//
+// ⚠️ **同一个位置上有几份列表轮流画时，给它们各自的名字**（理由见 `List.key`
+// 那一段）：框架把滚动状态记在元素的位置上，而轮流占着同一个位置的几份列表
+// 会抢同一份——切回来的那一档会被上一档留下的偏移拽走。
+//
+// ⚠️ **名字要在画之前装好**（`SetKey` 在建列表之后调就行，但要在**第一次画**
+// 之前——画过一次之后元素的身份已经定了）。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (l *List) SetKey(k string) { l.key = k }
+
 // Selection 是「多选」那一摊接线。
 //
 // **零值就是没有多选**：勾选框一格都不画，列表回到只有单选的样子。
@@ -504,6 +545,13 @@ type footerKey struct{}
 // footerLabel 是末尾那一行给无障碍和「打字选中」用的名字。固定一句话，不跟着
 // 状态变（转圈 / 重试）——它在无障碍里念出来总比一句会变的话稳。
 const footerLabel = "加载更多"
+
+// EndLabel 是「没有更多了」那一行的字。
+//
+// ⚠️ **导出是因为界面层要画那一行**（`PagedList.SetEndView`）：免得两处各写一遍
+// 「没有更多了」，而其中一处改了之后另一处还在说旧的话——那样无障碍里念出来的
+// 和画面上写的对不上。
+const EndLabel = "没有更多了"
 
 // defaultEmpty 是一行歌都没有时默认说的话。
 const defaultEmpty = "这里还没有歌"
@@ -594,6 +642,9 @@ func (l *List) View(c *ui.Context) {
 	// Label 是这一行给无障碍和「打字选中」用的名字。
 	l.state.Label = func(i int) string {
 		if i >= len(l.songs) {
+			if l.footerLabel != "" {
+				return l.footerLabel
+			}
 			return footerLabel
 		}
 		return l.songs[i].Title
@@ -610,6 +661,14 @@ func (l *List) View(c *ui.Context) {
 	//
 	// ⚠️ **要在画行之前问**：焦点环是画在行上的，这一句晚了那一帧就少一圈环。
 	l.keys.Moved(l.sel)
+
+	// ⚠️ **Key 要写在构造之前**：框架读元素的身份是在它被建出来的那一刻，
+	// 而身份决定它记哪一份滚动状态（见 `List.key` 那一段）。
+	//
+	// 🔴 中间的语句会把它抢走，所以这两句要紧挨着。
+	if l.key != nil {
+		c.Key(l.key)
+	}
 
 	list := ui.List(c, &l.state, l.rows()).
 		Grow(1).

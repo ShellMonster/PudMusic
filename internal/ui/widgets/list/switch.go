@@ -107,11 +107,28 @@ func (s *SwitchView) SetFooter(fn func(c *ui.Context)) {
 	s.grid.SetFooter(fn)
 }
 
+// SetFooterLabel 换末尾那一行给无障碍和「打字选中」用的名字，两份都换。
+// 理由同 `SetFooter`（末尾那一行在两档里各有一份）。
+func (s *SwitchView) SetFooterLabel(name string) {
+	s.list.SetFooterLabel(name)
+	s.grid.SetFooterLabel(name)
+}
+
 // SetScroll 让两份都把滚动位置写进 s。同一份 `ScrollState` 只给正在画的那一个用
 // （没在画的那个压根不调 TrackScroll，见 `List.View` 末尾），所以不打架。
 func (s *SwitchView) SetScroll(st *ui.ScrollState) {
 	s.list.SetScroll(st)
 	s.grid.SetScroll(st)
+}
+
+// SetKey 让两份在树上各自认这个名字。传空串是「不用」（框架按位置认）。
+//
+// ⚠️ **同一个位置上有几份列表轮流画时，给它们各自的名字**（理由见
+// `List.SetKey`）：框架把滚动状态记在元素的位置上，而轮流占着同一个位置的
+// 几份列表会抢同一份——切回来的那一档会被上一档留下的偏移拽走。
+func (s *SwitchView) SetKey(k string) {
+	s.list.SetKey(k)
+	s.grid.SetKey(k)
 }
 
 // SetSelection 装多选那一摊接线，两份都装（理由见 `Grid.sel2`）。

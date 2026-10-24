@@ -128,6 +128,13 @@ type PagedList struct {
 	// ⚠️ **它只管「第一页在途」这一档**，别的一概不管（见 `syncList`）。
 	emptyView func(c *ui.Context)
 
+	// endView 是「**没有更多了**」那一行的画法（见 SetEndView）。nil 是没装——
+	// 那一行就不画（**别的页就是这样**：它们到底了就是到底了，界面上不多说一句）。
+	endView func(c *ui.Context)
+
+	// failureNotice 报「拉页失败时要不要说一句」（见 SetFailureNotice）。默认要。
+	failureNotice bool
+
 	// gen 是代次。每次换查询 +1：在途请求的结果回来时代次对不上就扔掉。
 	// 这是 PLAN 点名要补的「旧查询结果作废」——Biu 只靠组件重建挡着。
 	gen    uint64
@@ -137,7 +144,13 @@ type PagedList struct {
 
 	// scroll 是这个列表滚到哪儿了。TrackScroll 每帧把偏移写回来，我们要靠它
 	// 判断「滚过 400 像素没有」，也要靠它切路由时回顶。
+	//
+	// ⚠️ **它只在这一份挂了 ScrollState 时才有数**（见 SetScrollState）。
 	scroll ui.ScrollState
+
+	// scrollState 报这一份要不要挂那个 ScrollState（见 SetScrollState）。
+	// 默认要。
+	scrollState bool
 
 	// rev 是 items 每变一次 +1。View 只在它变了才 SetSongs（SetSongs 要扫一遍
 	// 查重复 ID，几千行每帧扫一遍是白花的开销）。
@@ -195,6 +208,10 @@ func NewPaged(cache *imgcache.Cache, acts Actions, fetch Fetcher) *PagedList {
 		// 会以为到底了，连页脚那一行都不画。
 		hasMore: true,
 		seen:    map[string]bool{},
+		// 失败要说一句（见 SetFailureNotice）：别的页就靠它告诉用户出了什么事。
+		failureNotice: true,
+		// 挂一个 ScrollState（见 SetScrollState）：回顶按钮靠它判「滚过多少」。
+		scrollState: true,
 	}
 	p.draw = guard.Wrap(p.view, p.onPanic)
 	return p
@@ -248,6 +265,87 @@ func (p *PagedList) SetColumns(c Columns) { p.surf.SetColumns(c) }
 // ⚠️ 只能由界面线程调。
 func (p *PagedList) SetEmptyView(fn func(c *ui.Context)) { p.emptyView = fn }
 
+// SetEndView 换掉「**没有更多了**」那一行的画法。
+//
+// ⚠️ **不装就没有那一行**：别的页（收藏夹、稍后再看、历史……）到底了就是到底了，
+// 界面上不多说一句话——而首页那一屏要说得清（票 #370 的验收第 2 条：「不是无限
+// 转圈、不是空白」）。
+//
+// ⚠️ **它只在「一行歌都没有」之外的那一档管用**：一行都没有的时候整份内容是
+// 空状态（由页面自己画），末尾那一行压根不画（见 `syncList`）。
+//
+// ⚠️ 只能由界面线程调。
+func (p *PagedList) SetEndView(fn func(c *ui.Context)) { p.endView = fn }
+
+// SetFailureNotice 装「拉页失败时要不要说一句」（Toast）。
+//
+// ⚠️ **默认要**：末尾那一行只说「加载失败，点此重试」，不说为什么——别的页
+// （收藏夹那一族）就靠这一句告诉用户出了什么事。
+//
+// 而**页面自己有一整块失败态**的页（首页那一屏：一句话 + 一个重试按钮）把
+// 它关掉：同一件事说两遍是噪音，而 Toast 那一句还带着 B 站的原始码。
+//
+// ⚠️ 只能由界面线程调。
+func (p *PagedList) SetFailureNotice(on bool) { p.failureNotice = on }
+
+// SetKey 换这一份列表在树上认自己的名字。传空串是「不用」（框架按位置认）。
+//
+// ⚠️ **同一个位置上有几份列表轮流画时，给它们各自的名字**（理由见
+// `List.SetKey`）：框架把滚动状态记在元素的位置上，而轮流占着同一个位置的
+// 几份列表会抢同一份——切回来的那一档会被上一档留下的偏移拽走。
+//
+// ⚠️ 只能由界面线程调。
+func (p *PagedList) SetKey(k string) { p.surf.SetKey(k) }
+
+// SetScrollState 装「这一份要不要挂一个 ScrollState」（滚动位置写进它）。
+//
+// ⚠️ **默认要**：回顶按钮靠它判「滚过 400 像素没有」——那是**精确的像素数**。
+//
+// ⚠️ **关掉它的场合：同一个位置上有几份列表轮流画，而它们的位置要各自记着**
+// （首页那三个 Tab）。挂着的时候，框架把滚动位置记在**元素的位置**上，而
+// 轮流占着同一个位置的几份列表会抢同一份：切回「音乐」落到第 6 首而不是它
+// 原来的第 19 首（实测，票 #370）。
+//
+// 关掉它之后，那几份列表各自按**自己的行锚点**记位置（`ui.ListState`，框架
+// 本来就是按行记的），互不干扰；而回顶那一枚的偏移改按行换算（列表那一档的
+// 行高是定死的 64，差不到一行——见 `SwitchView.ScrollOffset`）。
+//
+// ⚠️ 只能由界面线程调。
+func (p *PagedList) SetScrollState(on bool) { p.scrollState = on }
+
+// ScrollOffset 是这一屏滚过了多少像素。回顶按钮判断「滚过 400 像素没有」用它。
+//
+// ⚠️ **没挂 ScrollState 的那些（见 SetScrollState）按行换算**：列表那一档的
+// 行高是定死的 64，网格那一档是估的（见 `SwitchView.ScrollOffset`）。
+func (p *PagedList) ScrollOffset() float32 {
+	if p.scrollState {
+		return p.scroll.Y
+	}
+	return p.surf.ScrollOffset()
+}
+
+// SetSongs 直接把已经拿到的行换掉，**不拉页**。
+//
+// ⚠️ **它是「外面已经有内容」的场合用的**（首页那一屏被外面塞进来一批歌、
+// 测试）。装完之后这一份摆成「已经有一页、后面没有」的样子：下一次 Sync 不会
+// 再去拉第一页（`page` 不是 0）。
+//
+// ⚠️ **换查询的正路是 Reload**（清空 + 从第一页重来 + 当场拉）。
+//
+// ⚠️ 只能由界面线程调，同 Reload。
+func (p *PagedList) SetSongs(songs []Music) {
+	p.items = append([]Music(nil), songs...)
+	p.seen = make(map[string]bool, len(p.items))
+	for _, m := range p.items {
+		p.seen[m.ID] = true
+	}
+	p.page = 1
+	p.hasMore = false
+	p.err = nil
+	p.blocked = false
+	p.rev++
+}
+
 // Layout 返回此刻的摆法。测试照它断言「这一页真的换了视图」。
 func (p *PagedList) Layout() View { return p.surf.Layout() }
 
@@ -271,8 +369,28 @@ func (p *PagedList) Items() []Music { return append([]Music(nil), p.items...) }
 // 结果」）。光 cancel 是不够的——请求已经回来了、正在往信箱里投的时候，
 // cancel 拦不住它。
 //
+// ⚠️ **它当场拉第一页**：Reload 有可能是在 view 之外调的（比如后台事件），
+// 那时候不一定还有下一帧。要「清空但等这一份被画到时再拉」，用 Reset。
+//
 // ⚠️ 只能由界面线程调。
 func (p *PagedList) Reload() {
+	p.Reset()
+	// 当场拉第一页，不等下一帧：Reload 有可能是在 view 之外调的（比如后台
+	// 事件），那时候不一定还有下一帧。
+	p.load(trigFirstRender)
+}
+
+// Reset 清空已加载的行，让这一份从第一页重来——**但不当场拉**。
+//
+// ⚠️ **它和 Reload 的分界就在「当场拉不拉」**：Reload 当场拉（调用方知道要什么），
+// 而 Reset 只把状态摆回「一页都还没有」——**下一次 Sync（这一份被画到时）才拉
+// 第一页**。
+//
+// 首页换账号时三档都要重来，而**只有正在看的那一档该发请求**：另外两档等用户
+// 切过去再拉（那一档的 Sync 会替它拉第一页）。
+//
+// ⚠️ 只能由界面线程调。
+func (p *PagedList) Reset() {
 	p.stop() // 含 p.loading = false
 	p.gen++
 	p.items = nil
@@ -283,9 +401,6 @@ func (p *PagedList) Reload() {
 	p.blocked = false
 	p.rev++
 	p.ScrollTop()
-	// 当场拉第一页，不等下一帧：Reload 有可能是在 view 之外调的（比如后台
-	// 事件），那时候不一定还有下一帧。
-	p.load(trigFirstRender)
 }
 
 // ScrollTop 回到顶上。切路由和点回顶按钮都走它。
@@ -404,21 +519,35 @@ func (p *PagedList) syncList() {
 		p.surf.SetEmptyView(nil)
 		p.surf.SetEmpty("")
 		p.surf.SetFooter(p.footerView)
+		p.surf.SetFooterLabel(footerLabel)
 	default:
 		p.surf.SetEmptyView(nil)
 		p.surf.SetEmpty("")
 		// 末尾那一行**只在还有下一页（或刚失败要人重试）时才有**（Biu 的
 		// `count = hasMore ? items.length + 1 : items.length`）：拉到底之后它
 		// 就不该再占一行空白。
-		if p.hasMore || p.blocked {
+		//
+		// ⚠️ **到头了的那一行由外面递进来**（`SetEndView`）：没递就没有那一行
+		// （别的页到底了就是到底了），递了就把「没有更多了」说清楚——不然用户
+		// 只看到列表停在半截，不知道是加载坏了还是真的到头了。
+		switch {
+		case p.hasMore || p.blocked:
 			p.surf.SetFooter(p.footerView)
-		} else {
+			p.surf.SetFooterLabel(footerLabel)
+		case p.endView != nil:
+			p.surf.SetFooter(p.endView)
+			p.surf.SetFooterLabel(EndLabel)
+		default:
 			p.surf.SetFooter(nil)
 		}
 	}
 
 	// 滚动位置要写回来：回顶按钮靠它，三重保障里「在不在顶上」也靠它。
-	p.surf.SetScroll(&p.scroll)
+	//
+	// ⚠️ **没挂的那几份不写**（见 SetScrollState）：它们各自按行锚点记位置。
+	if p.scrollState {
+		p.surf.SetScroll(&p.scroll)
+	}
 }
 
 // adopt 取走信箱里的结果，一条一条落到界面的状态上。只能由界面线程调。
@@ -454,7 +583,11 @@ func (p *PagedList) apply(r pageResult) {
 		p.err = r.err
 		p.blocked = true
 		log.Printf("biu: 第 %d 页拉失败（%s）：%v", r.page, p.why, r.err)
-		notify(p.surf.List().acts, "加载更多失败："+r.err.Error(), notice.Danger)
+		// ⚠️ **说一声是可选的**（见 SetFailureNotice）：页面自己有一整块失败态的
+		// 页把它关掉——同一件事说两遍是噪音，而这一句还带着原始的错。
+		if p.failureNotice {
+			notify(p.surf.List().acts, "加载更多失败："+r.err.Error(), notice.Danger)
+		}
 		return
 	}
 
@@ -462,21 +595,29 @@ func (p *PagedList) apply(r pageResult) {
 	p.blocked = false
 	p.page = r.page
 	p.hasMore = r.pg.HasMore
-	if len(r.pg.Songs) == 0 {
-		// 一页空的还说「还有」：接口在骗人，或者已经到头了。再拉就是空转。
-		p.hasMore = false
-	}
 	// 🔴 铁律四：追加是**尾部**插 key（筛选后重建才是头部插，两条规则不一样），
 	// 尾部追加不动已有行的位置，所以「选中的那一首」翻完页还是它。
 	//
 	// 重了的在这里去掉：翻页重叠是常事（同一首歌挪了名次就会出现在两页里），
 	// 两个一样的 ID 就是两行共用一份状态——选中一个另一个也亮。
+	added := 0
 	for _, m := range r.pg.Songs {
 		if p.seen[m.ID] {
 			continue
 		}
 		p.seen[m.ID] = true
 		p.items = append(p.items, m)
+		added++
+	}
+	// ⚠️ **这一页没有带来新歌就是到底了**（两件事合成一条判据）：
+	//
+	//   - 一页空的还说「还有」：接口在骗人，或者已经到头了（原来的判据）。
+	//   - 一页**全是重样的**：接口在重复给同一批（翻页翻不动了），而「还有」
+	//     会让自动补屏一直拉下去——那是空转（而拉页器每一次都要一个往返）。
+	//
+	// 两条的坏处一样（转圈转到天荒地老），所以合成一条：**加不进去就是没有**。
+	if added == 0 {
+		p.hasMore = false
 	}
 	p.rev++
 }
@@ -601,17 +742,21 @@ func (p *PagedList) deliver(r pageResult) {
 
 // setWake 登记这一帧的窗口（每个窗口一条，见 wakes）。只能由界面线程调。
 func (p *PagedList) setWake(svc ui.Services) {
-	wake := svc.Invalidate // 方法值：一个窗口一条，所以每帧一个闭包不算多
-
 	p.wakeMu.Lock()
 	defer p.wakeMu.Unlock()
 	p.frame++
 	for i := range p.wakes {
 		if p.wakes[i].svc == svc {
-			p.wakes[i].wake, p.wakes[i].seen = wake, p.frame
+			// ⚠️ **那个方法值只在真的要登记的时候才做**（`svc.Invalidate` 是堆上
+			// 的一个闭包）：每帧都做一个就是每帧一次分配，而这一屏有逐帧分配的
+			// 预算（见 `internal/ui/framebudget_test.go`）。
+			p.wakes[i].seen = p.frame
 			return
 		}
 	}
+	// 一个窗口一条，所以这里每帧一个闭包不算多——**但它只在这一条真的登记
+	// 的时候才做**（见上面那一句）。
+	wake := svc.Invalidate
 	if len(p.wakes) >= maxWakes {
 		// 挤掉最久没画的那一个：那个窗口已经不画了，它的句柄留着是空转。
 		oldest := 0
@@ -679,9 +824,11 @@ func (p *PagedList) footerView(c *ui.Context) {
 // 这一份，和界面层那两页自己的分页列表），两份的数一样、代码不一样——改一份就有
 // 一页对不上。
 func (p *PagedList) viewBackToTop(c *ui.Context) {
-	// MaxY 是这一帧量出来的最大滚动量：0 就是内容还没列表高，压根滚不动。
-	if p.scroll.MaxY <= 0 {
+	// ⚠️ **偏移是 0 就是「压根没滚过」**：内容还没列表高的时候 `MaxY` 是 0，
+	// 而 `Y` 也是 0（见 `ScrollOffset`）——两种「没滚」在这里是同一件事。
+	off := p.ScrollOffset()
+	if off <= 0 {
 		return
 	}
-	BackToTop(c, p.scroll.Y, p.ScrollTop)
+	BackToTop(c, off, p.ScrollTop)
 }
