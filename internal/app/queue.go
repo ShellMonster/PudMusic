@@ -1524,6 +1524,18 @@ func (a *App) setErrTextDetail(msg, detail string, retryable bool) {
 	a.errRetryable = retryable
 	wake := a.wake
 	a.mu.Unlock()
+	// 🔴 **念出去（无障碍）**：播放条上那一行字**读屏软件用户看不见**——他们
+	// 不知道歌停了，更不知道是为什么停的。而这一句是「刚刚发生了什么」，
+	// 不是「这一枚是什么」。
+	//
+	// ⚠️ **空话不念**：`a.setErr("")` 是「把上一句错收掉」（见 online.go），
+	// 那一句话不该变成一句「播放失败：」。
+	//
+	// ⚠️ **排在解锁之后**：`Announce` 走的是自己那把锁，而这一段不该在握着
+	// `a.mu` 的时候去拿它（那把锁的规矩见 app.go 的 `wakeMu` 那段注释）。
+	if msg != "" {
+		a.announce("播放失败：" + msg)
+	}
 	if wake != nil {
 		wake()
 	}

@@ -125,6 +125,17 @@ type toast struct {
 // tone 是这句话的语义（成功 / 警告 / 失败 / 普通），**每个调用点都要给**：
 // 上游那 164 处调用是按调用给 `color` 的，而「下载失败」也是绿的正是这一条
 // 要收掉的毛病（票 #180）。
+//
+// 🔴 **它同时也是一句「刚刚发生了什么」的播报**（无障碍，见 announce.go）：右下角
+// 弹出来的那张卡片，**读屏软件用户看不见**——他们没有余光去扫右下角。所以这一句
+// 还要被**念出来**。
+//
+// ⚠️ **这一句是「发生了什么」，不是「这个元素是什么」**：卡片上写的是
+// 「下载完成」「收藏不了：…」这样一句话，而 `.Label(...)` 给的是「这一枚是什么」
+// （框架的 `Label` 是给读屏软件的名字，见 `flatbutton.go` 的警告）。两件事不许混。
+//
+// ⚠️ **后台那条线也调它**（比如 `download_mount.go` 的 `sayDownloadDone`），而播报
+// 那一头是带锁的（`announceQueue` 自己有锁），所以这里不用管自己在哪条线上。
 func (s *Shell) addToast(text string, tone notice.Tone) {
 	s.toastMu.Lock()
 	s.toastSeq++
@@ -139,6 +150,10 @@ func (s *Shell) addToast(text string, tone notice.Tone) {
 		s.toasts = s.toasts[1:]
 	}
 	s.toastMu.Unlock()
+
+	// 念出去（无障碍）。**排在解锁之后**：播报那一头有自己的锁，而这一段
+	// 不该在握着 toast 那把锁的时候去拿另一把。
+	s.announce(text)
 
 	go s.expire(t)
 }

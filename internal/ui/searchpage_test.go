@@ -104,9 +104,15 @@ func (st *searchStub) fetch(tab int, _ context.Context, page int) (list.Page, er
 
 	// 「全部播放」那份副本：和真的那一支走同一段逻辑，包括**代次对不上就整个丢掉**
 	// （见 fetchSearchTab）。这里抄的是真实现，测的才是真实现那条闸门。
+	//
+	// ⚠️ **`t.total` 也要写**：真实现每一趟都把 B 站给的命中总数记进去（见
+	// `fetchSearchTab`），而它就是「找到 N 个结果」那一句里的 N（无障碍）。这里
+	// 不写的话那条句子永远走「不知道总数」的回落分支，用例断言的就是**屏幕上
+	// 那几行**而不是真总数——钉的是另一条路（真总数那一半没被验过）。
 	t.mu.Lock()
 	if gen == t.gen {
 		t.loaded = append(t.loaded, rows...)
+		t.total = st.total
 	}
 	t.mu.Unlock()
 

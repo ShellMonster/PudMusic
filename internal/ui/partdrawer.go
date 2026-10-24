@@ -2,7 +2,8 @@
 //
 // 一个写着「分集」的键，点开是**向上弹**的浮层（那边是
 // `<Popover placement="top" offset={28}>`），头部固定「分集」两个字，下面一列
-// 分集，正在放的那一集整行染主色，点一行立刻切过去并收起——
+// 分集，正在放的那一集整行**淡主色底**（上游 `bg-primary/20`，见
+// `playingrow.go`），点一行立刻切过去并收起——
 // `onPressItem={onClose}`，一个字不差。
 //
 // 数据那一侧和满屏里那个分集面板**共用同一份**：`app.Parts()`、`partRowsFor`、
@@ -33,6 +34,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -296,11 +298,25 @@ func (s *Shell) viewPartRow(c *ui.Context, r partRow, t *ui.Theme) {
 		PaddingX(space.Px12).Gap(space.Px8).AlignItems(ui.Center).Radius(t.Radius)
 	switch {
 	case r.active:
-		// Biu 那一支正在放的那一行是 `variant="flat" color="primary"`，
-		// 全屏版是 `data-[active=true]:bg-primary/20`——都是「整行染主色」。
+		// 上游那一行走的是 `variant="flat" color="primary"`
+		// （`layout/playbar/left/page-list.tsx`）——HeroUI 的 flat+primary 展开是
+		// `bg-primary/20 text-primary-600`，也就是**主色 20% 那一层淡底**
+		// （浅色下落在面板底 #ffffff 上是 #d2f7df，上游实图那个数）。
+		//
+		// 上游**满屏**那个分集面板也是同一个数（`data-[active=true]:bg-primary/20`），
+		// 但**我们满屏那一处是另一档**（玻璃面板上的一层中性色，见 `viewFullPartsList`）
+		// ——那不是这一票管的事。
+		//
 		// 别的记号（左边一条色杠、单独一个图标）都没有用：这一列没有封面，
 		// 一行字加一个数字，靠底色认人最快。
-		row = row.Background(t.Accent)
+		//
+		// ⚠️ **之前这里是实心主色底**（票 #323）：改之前那一档和上游差着一个数，
+		// 而队列抽屉的「正在播放」那一行在票 #294 已经改回上游那一档了——同一件
+		// 事，两个抽屉差着两种画法。现在两个抽屉共用同一份配方（`playingrow.go`）。
+		//
+		// ⚠️ **不是实心主色底**：实心那一档是「被选中的选项」（`flatSolid`），
+		// 票 #197 刚把列表选中行的实心主色底去掉。这一档说的是「这一集在放」。
+		row = row.Background(playingRowBg(t))
 	case row.Hovered():
 		row = row.Background(t.SurfaceHover)
 	}
@@ -329,10 +345,22 @@ func (s *Shell) viewPartRow(c *ui.Context, r partRow, t *ui.Theme) {
 // numbered 那一位（编号）在非选中时比标题更弱：它是**定位**用的（找第几集），
 // 而标题才是**读**的那一句。把两者画成一个粗细，用户扫一列的时候先看到的是
 // 一排数字。
+//
+// ⚠️ **正在放的那一行按它自己那层淡底重算**（票 #323）：底从实心主色换成主色
+// 20% 那一层淡底之后，底上的字也得跟着换——
+//
+//   - **标题**：主色当字，按那层淡底算（`playingRowText`，浅色 #127d38）。
+//   - **编号**：次要色，按同一层淡底算（浅色 #6b6b74）——它跟没在放的那些行
+//     里的编号是同一档，只是底换了要重算。
+//
+// 换之前那一行是实心主色底 + `t.AccentText`（白）——白字压在淡底上读不出来，
+// 所以底和字必须一起换（见 `playingrow.go`）。
 func partRowText(t *ui.Theme, active, numbered bool) ui.Color {
 	switch {
+	case active && numbered:
+		return ink.Ensure(t.TextMuted, playingRowBg(t), 4.5)
 	case active:
-		return t.AccentText
+		return playingRowText(t)
 	case numbered:
 		return t.TextMuted
 	default:

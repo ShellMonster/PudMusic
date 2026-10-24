@@ -197,7 +197,7 @@ func TestTheReorderKeepsThePlayingSongInPlace(t *testing.T) {
 		t.Errorf("重排之后正在放的是 %q，want 乙（正在放的那首不能错位）", now.Title)
 	}
 	// 抽屉里高亮的那一行也是同一首：界面上的高亮认的是判重标识，不是下标。
-	if got := h.s.playingIdentity(); got != playing.Identity() {
+	if got := h.s.playingIdentity(h.app.Snapshot()); got != playing.Identity() {
 		t.Errorf("高亮的判重标识是 %q，want %q", got, playing.Identity())
 	}
 }
