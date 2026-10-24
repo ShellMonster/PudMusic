@@ -367,6 +367,29 @@ func (m *Manager) destToLand(id string) string {
 	return dest
 }
 
+// ensureDir 把落盘的那个目录建出来。
+//
+// ⚠️ **不建的话第一次下载会失败**：目录不存在时 `os.OpenFile` 报的是
+// 「no such file or directory」——用户看到的是一句他看不懂的话，实际原因只是
+// 「那个文件夹还没建」。
+//
+// ⚠️ **它建在真的要落盘的那一刻**，不是开应用的时候。默认落点是「音乐」目录下
+// 的应用子目录（`~/Music/BiuGo`），而开应用就把那个文件夹建出来的话，
+// **光是打开应用就会在用户的磁盘上留下一个文件夹**——测试里也一样（那不是
+// 临时的目录，是用户自己的）。
+func ensureDir(dest string) error {
+	dir := filepath.Dir(dest)
+	// 相对路径（`歌.m4a` → `.`）没有目录可建：那种落点本来就是错的
+	// （见 `app.errNoDownloadDir`），而这一层不替它兜底。
+	if dir == "" || dir == "." {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("download: 建目录 %s：%w", dir, err)
+	}
+	return nil
+}
+
 // prepare 探完长度之后要做的事：对身份、校验半成品、把文件铺到该有的长度。
 //
 // 返回 .part 的路径。任务在锁下现查现改——它同时是别的 goroutine
@@ -434,6 +457,13 @@ func (m *Manager) prepare(id string, src *Source, length int64) (string, error) 
 		}
 	}
 
+	// ⚠️ **落盘的目录要先建**：默认落点是「音乐」目录下的应用子目录
+	// （`~/Music/BiuGo`），它**不一定已经存在**——而目录不存在时
+	// `os.OpenFile` 报的是「no such file or directory」，用户看到的是一句他
+	// 看不懂的话，实际原因只是「那个文件夹还没建」。
+	if err := ensureDir(part); err != nil {
+		return "", err
+	}
 	f, err := os.OpenFile(part, os.O_WRONLY|os.O_CREATE, 0o644)
 	if err != nil {
 		return "", fmt.Errorf("download: 建 %s：%w", part, err)
@@ -484,6 +514,12 @@ func (m *Manager) prepareCompanion(id string, src *Source, length int64) (string
 
 	// 落盘名变了就删掉旧名字下的半成品——`prepare` 里那四步孤儿场景
 	// 在这儿一模一样地成立。
+	//
+	// ⚠️ **落盘的目录要先建**（理由见 `prepare` 里那一处）：伴流落的是同一个
+	// 目录，而那个目录**不一定已经存在**。
+	if err := ensureDir(part); err != nil {
+		return "", err
+	}
 	f, err := os.OpenFile(part, os.O_WRONLY|os.O_CREATE, 0o644)
 	if err != nil {
 		return "", fmt.Errorf("download: 建 %s：%w", part, err)

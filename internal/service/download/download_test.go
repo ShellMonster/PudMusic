@@ -807,3 +807,41 @@ func TestTheAbortErrorsAreIdentifiable(t *testing.T) {
 		}
 	}
 }
+
+// 落盘的目录**不存在时会建**。
+//
+// ⚠️ **这一条是默认落点那条路的一半**：默认落点是「音乐」目录下的应用子目录
+// （`~/Music/BiuGo`），而它**不一定已经存在**——不建的话第一次下载会失败，
+// 而失败是 `os.OpenFile` 报的「no such file or directory」，用户看到的是一句
+// 他看不懂的话，实际原因只是「那个文件夹还没建」。
+//
+// ⚠️ **它建在落盘的那一刻**，不是入队的时候：入队只是排个队，而那一首可能
+// 最后被删掉、被暂停、被清空——那时候那个文件夹就不该被建出来。
+func TestTheDownloadDirectoryIsCreatedWhenTheSongLands(t *testing.T) {
+	const size = 1024
+	h := newHarness(t, size, 30280)
+
+	// 那个目录**故意不存在**。
+	dir := filepath.Join(h.dir, "还没建", "BiuGo")
+	if _, err := os.Stat(dir); err == nil {
+		t.Fatalf("%q 本来就不该存在", dir)
+	}
+
+	snap, err := h.m.Enqueue(AddRequest{Bvid: bvid, Cid: cid, Title: "测试的歌", Dir: dir, Ext: ".m4a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := h.wait(snap.ID, StatusDone)
+
+	if filepath.Dir(got.Dest) != dir {
+		t.Fatalf("歌落到了 %q，期望 %q 下面", got.Dest, dir)
+	}
+	if fi, err := os.Stat(dir); err != nil {
+		t.Fatalf("落盘的那个目录没建出来：%v", err)
+	} else if !fi.IsDir() {
+		t.Fatalf("%q 不是目录", dir)
+	}
+	if _, err := os.Stat(got.Dest); err != nil {
+		t.Fatalf("歌没落到那儿：%v", err)
+	}
+}

@@ -41,6 +41,8 @@ func (q *Queue) MoveSongBefore(id, before string) bool {
 		// 队列的顺序变了：落盘那一格得跟着变（changed 必须在锁外面调，见
 		// Queue.changed 的注释）。
 		q.changed()
+		// 顺序变了 → **下一首是谁**可能变了，之前备好的那份地址作废。
+		q.invalidate()
 	}
 	return ok
 }
