@@ -112,8 +112,13 @@ func TestTheLyricsStayClearOfThePartsPanel(t *testing.T) {
 	if !ok {
 		t.Fatalf("画面上找不到歌词那一列，文字有 %q", tt.Texts())
 	}
-	// 歌词那一列的右边有 `fullLyricsPadX` 的留白，字到那儿为止。
-	textRight := lyrics.X + lyrics.W - fullLyricsPadX
+	// 「满屏歌词」那个名字在**内容盒**上（壳 → 内容盒 → 歌词），而字就画在内容盒
+	// 里——所以字最远能到的地方就是内容盒的右沿。
+	//
+	// ⚠️ **不能再减一份内边距**：以前那个名字在壳上，壳的右边有一份 48 的留白
+	// （`fullStagePadX`），字到「壳右沿 − 48」为止；现在名字在内容盒上，内容盒
+	// 本身就已经是去掉留白之后的那一块了。
+	textRight := lyrics.X + lyrics.W
 	if textRight > panel.X {
 		t.Errorf("歌词的字到 %.1f，分集面板从 %.1f 开始——面板会把歌词从中间切断",
 			textRight, panel.X)
@@ -493,8 +498,12 @@ func TestTheLyricsTakeTheWholeWidthWhenTheCoverIsOff(t *testing.T) {
 	if !ok {
 		t.Fatalf("画面上找不到歌词那一列，文字有 %q", tt.Texts())
 	}
-	if col.X > 1 {
-		t.Errorf("封面关着，歌词那一列却从 x=%.1f 才开始——左边那一整块空着，"+
+	// ⚠️ **判据是「左边那一半不留空列」**，不是「字从 x=0 开始」：上游的歌词
+	// 容器是 `px-12 py-24`（`full-screen-player/index.tsx:357`），所以**内容盒**
+	// 从 48 开始——封面关着的时候它占的是整窗（上游那个 `w-full` 的兄弟少了一个，
+	// 它就摊开成整窗），不是右边那一半。
+	if col.X > fullStagePadX {
+		t.Errorf("封面关着，歌词的内容盒却从 x=%.1f 才开始——左边那一整块空着，"+
 			"歌词被挤到了右半边", col.X)
 	}
 }
