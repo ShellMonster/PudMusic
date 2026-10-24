@@ -282,6 +282,27 @@ var Items = []Item{
 		},
 	},
 	{
+		// 票 #194：右下角那三枚旋钮改成**上游那三枚的样子**。
+		//
+		// 改的是**形状**，不是位置，也不是功能：位置（右沿 1128、底沿 680、每枚
+		// 32、中心间距 44）和三枚各自的动作一个字都没动。
+		//
+		// 而「图标化」最容易丢的是**名字**：钮上不再有「找歌词」三个字，可它
+		// 恰恰是**没有歌词时**唯一摆着的那个键——名字（`Label`）没了，读屏软件
+		// 念不出来，无头 Tester 也找不到了。所以这一条把「名字还在」和「当前值
+		// 在浮层里」都钉住：值不常驻钮上（上游那两个钮上就只有一个图标），但
+		// 展开浮层仍然看得见。
+		Category: Play,
+		Spec:     "右下角那三枚歌词旋钮是 ⌀32 的圆形图标钮（上游同一份组件挂两处：主窗口「正在播放」那一页与满屏那一屏）：圆里只有一枚图标（上游那三枚 Aa / 时钟 / T 形框）没有字；无障碍名与 Tester 名字都还在；点击行为不变（字号 / 偏移开浮层、找歌词开搜索弹窗）；当前值不常驻钮上、在浮层里看；位置与间距不变（右沿 1128、底沿 680、每枚 32、中心间距 44）",
+		Tests: []string{
+			"TestTheKnobIsARoundIconButtonWithTheValueInThePopover",
+			"TestTheTwoKnobsAreThereOnlyWithLyrics",
+			"TestTheFullPlayerHasTheThreeLyricKnobs",
+			"TestTheFullPlayerKnobsSitAtTheBottomRightOfTheLyrics",
+			"TestTheFullPlayerKnobsActuallyWork",
+		},
+	},
+	{
 		// 满屏那个偏好面板的三样（UX 报告 B4）：**有标题**（用户不用靠里面的
 		// 开关名猜这是什么面板）、**能关**（除了点外面和 Esc，还有一枚看得见的
 		// 「×」）、**和齿轮对齐**（面板的左沿对着齿轮的图形，不对着那枚键的
@@ -3194,6 +3215,49 @@ var Items = []Item{
 			"TestChoosingPlayNowHandsOverJustThatSong",
 			// **两枚入口都在**（少建一项那一项就永远点不到）。
 			"TestBothPlayEntriesAreOnTheRowMenu",
+		},
+	},
+	{
+		// 🔴 **这一条治的是「延迟」**：切歌到出声之间有一段空档——取流要跑一趟
+		// 带 WBI 签名的网络往返（实测 200~400ms），再叠上开解码器、等第一批样本。
+		// 用户听到的是「点下一首 → 空档 → 出声」。
+		//
+		// 提前备地址的那一趟**只解析地址、不预下载字节**：我们的 `StreamSource`
+		// 会**在盘上落一个临时文件**，预下载 = 占磁盘 + 多一条连接（那是另一件事）。
+		//
+		// ⚠️ **这一条的错法是「静悄悄白费」**：备错了（备的和真播的不是同一首）
+		// 的话，放出来的歌**还是对的**（对不上就重新取），而省下来的那几百毫秒
+		// 白费了——**界面上看不出任何异样**。
+		Category: Play,
+		// 票 #366（2026-10-24）。
+		Spec: "下一首的流地址在当前这首快结束时就备好（只解析地址，不预下载字节）；真播下一首不再重新取流；手动切歌重新取；队列一改就作废；预取失败无声退回且不重试；地址快过期就放弃；暂停时不预取；备的和真播的是同一首（含随机模式）",
+		Tests: []string{
+			// 主线：备好的那一份在切歌那一刻**被用掉**（取流接口的次数停在 2）。
+			"TestTheNextTrackIsPreparedBeforeTheSwitch",
+			// 手动切歌重新取地址（次数到 3）。
+			"TestAManualSwitchResolvesTheAddressAgain",
+			// 队列一改 → 已备好的立刻作废（会重新备一份）。
+			"TestReorderingTheQueueThrowsThePreparedAddressAway",
+			// 失败无声退回（真播时按正常路径取一次），且不会每 50ms 重试。
+			"TestAPrefetchThatFailsFallsBackSilently",
+			// 备好的地址快过期了就放弃。
+			"TestAPreparedAddressThatExpiresIsThrownAway",
+			// 暂停时不预取。
+			"TestNothingIsPreparedWhileTheTrackIsPaused",
+			// 随机模式：备的和真播的是同一首。
+			"TestThePreparedTrackIsTheOneThatActuallyPlays",
+			// 队列内部那两半：预告和真抽是同一件事、预告不动队列。
+			"TestPeekNextAgreesWithAdvance",
+			"TestPeekNextDoesNotTouchTheQueue",
+			// 只解析地址：备好了也是一个字节都没下（CDN 一次都没被碰）。
+			"TestThePrefetchDoesNotDownloadAnything",
+			// **提前量真的挂在「还剩多久」上**（这一票最核心的那条验收）：
+			// 歌长到 15 秒之后才放完，量的是「备地址那一刻还剩多少」。
+			"TestTheAddressIsPreparedWhileTheTrackStillHasTimeLeft",
+			// 音乐库那一路（sid）也备得到——那是**另一条取流接口**。
+			"TestAMusicLibraryEntryIsPreparedToo",
+			// 作废的**真正保证**：下一首换成谁就放谁，陈旧的那份一个字节都不下。
+			"TestAStaleAddressIsNeverPlayed",
 		},
 	},
 	{

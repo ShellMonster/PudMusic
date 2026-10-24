@@ -248,6 +248,29 @@ const (
 	iconEmptyFeed     = "User & Faces/team-line.svg"           // 动态：一群人在说话
 	iconEmptyDownload = "System/download-2-fill.svg"           // 下载记录：一只下箭头
 
+	// ── 歌词右下角那三枚旋钮 ────────────────────────────────────────────
+	//
+	// 逐字照上游 `components/lyrics/` 那一列（`index.tsx:380-398`、
+	// `font-size-control.tsx:39-48`、`offset-control.tsx:41-48`）：
+	//
+	//	字号   iconLyricFontSize  ← <RiFontSize size={16} />
+	//	偏移   iconLyricOffset    ← <RiTimeLine size={16} />
+	//	找歌词 iconLyricSearch   ← <RiTBoxLine size={16} />
+	//
+	// ⚠️ **找歌词那一枚上游用的是「T 形框」不是放大镜**（`index.tsx:394`）：
+	// 那一枚是**满屏歌词区里那枚 IconButton**，上游给它 `RiTBoxLine`。
+	// 放大镜（`System/search-line.svg`）是上游**搜索框**那一枚，别混。
+	//
+	// ⚠️ **两张图是这一票引进来的**（`iconset` 里原本没有它们）：
+	// `gh api repos/Remix-Design/RemixIcon/contents/icons/Editor/font-size.svg`、
+	// `gh api repos/Remix-Design/RemixIcon/contents/icons/Design/t-box-line.svg`。
+	// 目录结构照上游（`分类/文件名` 就是上游那个路径），所以**反查得回上游**。
+	// `System/time-line.svg` 早就在（空状态那个钟就是它）——**两个常量指同一个
+	// 文件是允许的**（`iconset_test.go` 的文件头写着这一条）。
+	iconLyricFontSize = "Editor/font-size.svg"  // 字号：Aa
+	iconLyricOffset   = "System/time-line.svg"  // 偏移：一个钟
+	iconLyricSearch   = "Design/t-box-line.svg" // 找歌词：一个 T 形框
+
 	// iconFailed 是「这一块拉失败了」那一支的插画位。
 	//
 	// 它和上面那一批**分开**：失败不是空（理由写在 `viewLoadError` 顶上），
@@ -412,6 +435,9 @@ var iconNames = []string{
 	iconFileSheet, iconDraft, iconDownloadLine, iconDownloadCloud,
 	iconShield, iconChecked, iconUnchecked, iconZoomIn, iconZoomOut,
 	iconInfo, iconCloseFilled, iconTip, iconUser, iconUserAdd, iconFeedback,
+
+	// 歌词右下角那三枚旋钮
+	iconLyricFontSize, iconLyricOffset, iconLyricSearch,
 }
 
 // icons 是上面那批图标**启动时一次解析好**的结果。

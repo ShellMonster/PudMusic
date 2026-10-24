@@ -328,6 +328,23 @@ type App struct {
 	// 错误、不自己清零，所以不比对的话每 50 ms 会重复报一次。
 	reportedErr error
 
+	// prefetch 这一摊，见 prefetch.go。挂上在线播放之前它一直是空的。
+	//
+	// ⚠️ **它有自己的锁，不在 `a.mu` 里**：写它的是后台那个预取 goroutine
+	// （网络那一趟回来的时候），而 `a.mu` 是界面**每帧**都要的。混进 `a.mu`
+	// 的话，界面那一帧的等待时间就变成了「网络那一趟」——理由同 `likeMu`
+	// / `partsMu`。
+	prefetchMu sync.Mutex
+	// prefetch 是「备好的下一首」。nil = 没有在备。
+	prefetch *prefetchEntry
+	// prefetchGen 是**预取代次**：每发起一趟就加一，迟到的结果对不上就丢掉
+	//（队列变了、换歌了、又发起了一趟——三种都会让上一趟没人要了）。
+	prefetchGen int
+	// prefetchOff 是「整个预取停掉」那一档：预取撞上了风控/限流那几类
+	// 「立刻再问一次也没用」的错（见 prefetch.go 的 prefetchFailed）。
+	// 到下一首开始为止（见 takePrefetch）。
+	prefetchOff bool
+
 	// 歌词这一摊，见 lyrics.go。挂上缓存之前 lyricCache 是 nil，那时就一直
 	// 「没有歌词」。
 	lyricCache *lyrics.Cache
@@ -538,6 +555,8 @@ func New() *App {
 	// ⚠️ **排在起后台时钟之前**：那个钩子会被后台那一拍读到，而 goroutine 的
 	// 创建就是一次同步——排在后面就是一次数据竞争。
 	a.queue.onChange = a.markPlaybackDirty
+	// 队列一变，**备好的下一首**就作废了（见 prefetch.go）。
+	a.queue.onInvalidate = a.invalidatePrefetch
 	go a.tick()
 	return a
 }
@@ -1285,6 +1304,8 @@ func (a *App) Close() {
 	// 而上面那句关的是**播放器**——关不到它。没有这一句的话，一次卡死的取流
 	// 会在应用退出之后还在下载（临时文件也一起留在盘上）。
 	a.abortPendingSource()
+	// 在途的那一趟**预取**也要掐：它还占着一条连接，而用户已经退出了。
+	a.invalidatePrefetch()
 	a.mu.Lock()
 	a.online = nil
 	a.mu.Unlock()
@@ -1330,6 +1351,7 @@ func (a *App) tick() {
 			a.mu.Lock()
 			p := a.player
 			live := a.wantPlay || a.playing
+			dur := a.duration
 			wake := a.wake
 			a.mu.Unlock()
 
@@ -1392,6 +1414,19 @@ func (a *App) tick() {
 				a.mediaAt = now
 			}
 			a.mu.Unlock()
+
+			// 「下一首的流地址提前备好」（见 prefetch.go）。
+			//
+			// ⚠️ **这一拍是天然的挂点**：进度条的位置只有这一拍知道，而「还剩
+			// 多久」就是从它算出来的。
+			//
+			// ⚠️ **放完的那一拍不备**：那一刻下一首马上就开始放了，而备它的
+			// 下一首（第三首）还早得很——备它只是白打一次请求。
+			//
+			// ⚠️ **暂停的那一拍不备**（`live` 是假）：用户停着，备好了也白备。
+			if p != nil && live && !finished {
+				a.maybePrefetch(pos, dur)
+			}
 
 			// 「上次听到哪儿」这一格：在放的时候位置一直在变，所以按节奏落一次
 			// （见 savePlaybackIfDue）。**不在放的时候它落得更勤**——用户按了

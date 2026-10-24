@@ -130,6 +130,8 @@ func (a *App) MountStreaming(s Streaming) {
 	a.streaming = &s
 	a.streamCache = map[string]*bili.StreamRef{}
 	a.mu.Unlock()
+	// 取流零件整个换掉了 → 备好的那一份地址也作废（它是在旧零件上备的）。
+	a.invalidatePrefetch()
 	// 播放记录上报**跟着在线播放起**：只有在线流才有得报（本地文件在 B 站
 	// 那边没有对应的东西），所以它挂在这一摊上而不是挂在登录上——挂登录
 	// 会让「没挂在线播放也照发」那条路变成真的。
@@ -166,6 +168,10 @@ func (a *App) SetAudioQuality(q bili.AudioQuality) {
 	pos, want, gen := a.position, a.wantPlay, a.onlineGen
 	wake := a.wake
 	a.mu.Unlock()
+
+	// 🔴 **备好的那一份也作废**：它是在**旧的那一档**上备的，而用户刚换了一档。
+	// 留着它的话，下一首会按旧的那一档放——而界面上写的是用户选的那一档。
+	a.invalidatePrefetch()
 
 	a.rememberAudioQuality(q)
 	if tr != nil {
@@ -1097,6 +1103,20 @@ func (a *App) resolve(ctx context.Context, s *Streaming, it Item, pref bili.Audi
 	a.streamCache = map[string]*bili.StreamRef{key: ref}
 	a.mu.Unlock()
 	return ref, nil
+}
+
+// putStreamCache 把一条流放进「播放前预判」那个缓存。
+//
+// **预取备好的地址走这里**（见 prefetch.go）：真播那一趟的 `resolve` 会先问
+// 这个缓存，命中了就**不再取流**——省下来的那几百毫秒就是这一票的收益。
+//
+// ⚠️ **只有自动切歌才走这里**：手动切歌（`App.step`）重新取流是这一票定下
+// 的规矩——用户自己按了下一首，他要的是**现在**这一首的新地址，而预取的那一
+// 份是几十秒前算的（见 prefetch.go 的「手动切歌重新取地址」）。
+func (a *App) putStreamCache(it Item, ref *bili.StreamRef) {
+	a.mu.Lock()
+	a.streamCache = map[string]*bili.StreamRef{streamKey(it): ref}
+	a.mu.Unlock()
 }
 
 // refetch 是**报错后换流重试**那一条路径的回调：源下不动了，用同一首
