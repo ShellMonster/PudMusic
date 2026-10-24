@@ -176,7 +176,13 @@ func (s *Shell) viewFavorites(c *ui.Context, st app.Settings, collapsed bool) {
 
 	// ⚠️ **Key 挂在这一层 Column 上**：它不是处理输入的控件（里面的按钮各自
 	// 有自己的 key），而挂在会处理输入的元素上会 panic（`ui/element.go:658`）。
+	//
+	// ⚠️ **整片上面留 12**（`favGroupGap`）：这一片是侧栏的**第三段**（前两段是
+	// 「发现」和「我的音乐」），而侧栏的分组标题上方留的就是 12——不留这一截，
+	// 第一组的标题就**紧贴着上面那一条**（实测只有 5.9 的缝，而组内是 7.9），
+	// 这一片看着像上一段的延续，而不是自己的一段。
 	ui.Column(c).Key("fav-area").
+		Margin(favGroupGap, space.None, space.None, space.None).
 		Padding(space.None, space.None, space.None, favIndent).
 		Children(func() {
 			s.viewFavoritesRefreshing(c)
@@ -541,9 +547,19 @@ func (s *Shell) viewFavoritesPanel(c *ui.Context, st app.Settings, anchor ui.Ele
 //
 // # 它和侧栏里那一行是**同一套**（票 #371）
 //
-// 字号（14）、圆角（`t.Radius`）、悬停（`flat.Feel`）、当前那一行的淡底
-// （`flatCurrent`）——侧栏里那一行怎么画，这里就怎么画。浮层是同一个入口的
-// 另一种展开方式，两处画得不一样的话，用户会以为它们是两样东西。
+// 字号（14）、圆角（`t.Radius`）、悬停（`flat.Feel`）——侧栏里那一行怎么画，
+// 这里就怎么画。浮层是同一个入口的另一种展开方式，两处画得不一样的话，用户
+// 会以为它们是两样东西。
+//
+// ⚠️ **这里不画「当前」那一行的淡底**（侧栏里那一行有）：两处都分不出组——
+// 同一个收藏夹完全可能既是自己建的、又是自己收藏的（B 站上很常见），而路由里
+// 只有 id（`/collection/{id}`），没有组——于是「当前」那一格会**两行同时亮**，
+// 那比不亮更糟。
+//
+// 而且这一层**开着的时候几乎不可能在收藏夹页上**：点一行就把它收掉
+// （`s.favPanelOpen = false`），唯一的来路是先在展开态点进收藏夹页、再折起侧栏
+// ——那时候浮层还没开。「当前在哪」在这一层里由**折叠侧栏上那枚图标**说
+// （见 viewFavoritesCollapsed）。
 func (s *Shell) viewFavoritesPanelRow(c *ui.Context, f app.Favorite) {
 	t := c.Theme()
 	label := f.Title
@@ -551,13 +567,6 @@ func (s *Shell) viewFavoritesPanelRow(c *ui.Context, f app.Favorite) {
 		label = "（没名字）"
 	}
 	row := ui.Row(c).FillWidth().Padding(space.Px4, space.Px8).Radius(t.Radius)
-	// ⚠️ **当前就在这一页时，那一行要亮起来**（和侧栏里那一行同一套）：浮层是
-	// 折叠侧栏时的入口，用户从这儿点进去之后，这一层多半还开着——不亮的话，
-	// 「我在哪一页」这件事在这一层里就彻底没了。
-	if s.router.Path() == collectionPath(f.ID) &&
-		s.router.Query(collectionTypeQuery) == collectionTypeQueryOf(f) {
-		row = flatCurrent(c, row)
-	}
 	row = flat.Feel(c, row)
 	row.Children(func() {
 		ui.Text(c, label).FontSize(scale.Font(c, scale.FavPanelItem)).Grow(1).

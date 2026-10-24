@@ -604,6 +604,10 @@ func favTitles(a *app.App, g app.FavoriteGroup) []string {
 // ⚠️ 认标题要认对：fixture 的标题是「我建的 1/2/3」（`favShell` 里带前缀），
 // 之前这里找的是「收藏 1」——那个串画面上从来没有过，所以折不折叠都通过，
 // 整条测试等于空跑，SD-09 一条证据也没有。
+//
+// ⚠️ **找的是组名，不是「箭头 + 组名」**（票 #371）：折叠指示从字符「▾/▸」换成
+// 图标之后，组名那一行字**不再随折叠状态变**——所以这里按组名找，折叠前后都
+// 找得到（而按整串找的话，折叠之后那个串根本不存在，测试会在第一步就 fatal）。
 func TestDragReorderIsOffWhenTheGroupIsFolded(t *testing.T) {
 	_, a, tt, _ := favShell(t, 3, 0)
 
@@ -613,7 +617,7 @@ func TestDragReorderIsOffWhenTheGroupIsFolded(t *testing.T) {
 	}
 	before := favTitles(a, app.FavoritesCreated)
 
-	if err := tt.Click("▾ 我创建的"); err != nil {
+	if err := tt.Click("我创建的"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -622,7 +626,7 @@ func TestDragReorderIsOffWhenTheGroupIsFolded(t *testing.T) {
 	}
 
 	// 在折叠标题上拖一次：不该有任何反应，也不该有顺序变化。
-	head, ok := tt.Find("▸ 我创建的")
+	head, ok := tt.Find("我创建的")
 	if !ok {
 		t.Fatalf("画面上找不到折叠标题，文字有 %q", tt.Texts())
 	}
@@ -636,7 +640,7 @@ func TestDragReorderIsOffWhenTheGroupIsFolded(t *testing.T) {
 	}
 
 	// 展开回来顺序还在——证明刚才不是「碰巧一样」。
-	if err := tt.Click("▸ 我创建的"); err != nil {
+	if err := tt.Click("我创建的"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()

@@ -3505,6 +3505,8 @@ var Items = []Item{
 			"TestTheCollapsedFavoritesIconLightsUpOnACollectionPage",
 			// 这一片的字在侧栏底上 ≥ 4.5:1（四个方案 × 深浅两套）。
 			"TestTheFavoritesTextIsReadableOnTheSidebar",
+			// 这一片上面留了一截（它是侧栏的第三段）。
+			"TestTheFavoritesAreaHasRoomAboveIt",
 			// 选中那一行是 accentSoft 淡底 + 按那层底现算的字（既有那条）。
 			"TestTheCurrentItemIsFlatEverywhere",
 		},

@@ -99,6 +99,36 @@ func TestTheFavoritesEmptyLineLinesUpWithTheNames(t *testing.T) {
 	}
 }
 
+// TestTheFavoritesAreaHasRoomAboveIt 断这一片**上面留了一截**。
+//
+// 这一片是侧栏的**第三段**（前两段是「发现」「我的音乐」），而侧栏的分组标题上方
+// 留的是 12——不留这一截，第一组的标题就**紧贴着上面那一条**，这一片看着像上
+// 一段的延续，而不是自己的一段（改造前那一条缝只有 16，而组内是 8 上下）。
+//
+// ⚠️ **量的是登录态**：未登录时侧栏里有一句「还有 3 个入口，登录后可见」挡在
+// 「设置」和这一片之间，那一句自己就占了一截——量它就量不到这一片头上的缝了。
+func TestTheFavoritesAreaHasRoomAboveIt(t *testing.T) {
+	f := newFolderBili(t, nil)
+	_, tt := refreshShell(t, f, "7")
+
+	above, ok := tt.Find("设置")
+	if !ok {
+		t.Fatalf("侧栏上没有「设置」那一项，文字有 %q", tt.Texts())
+	}
+	fold, ok := tt.Find("折叠 我创建的")
+	if !ok {
+		t.Fatalf("侧栏上没有「我创建的」那个折叠开关，文字有 %q", tt.Texts())
+	}
+	// ⚠️ **从「设置」那行字的底算起**：那一行是 40 高（上游 HeroUI 的 Button md），
+	// 而它的字在行里居中——所以「字的底到行的底」还有 12 上下，那是**上一段自
+	// 己的**留白。这一片头上的缝是从**行底**算的，而行底拿不到，只能从字底算，
+	// 于是阈值要算上那 12（实测：改之前 16、改之后 28）。
+	if gap := fold.Y - (above.Y + above.H); gap < 20 {
+		t.Errorf("「我创建的」那个折叠开关离上面那一条只有 %.1f 的缝——这一片头上没留白",
+			gap)
+	}
+}
+
 // TestTheFavoritesTextIsReadableOnTheSidebar 断这一片的字在侧栏底上
 // **≥ 4.5:1**。
 //
