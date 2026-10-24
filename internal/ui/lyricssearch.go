@@ -52,6 +52,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
@@ -163,6 +164,12 @@ type lyricSearchUI struct {
 	// ls 是候选表的 `ListState`（滚动位置、行身份）。**建在壳上而不是每帧新建**：
 	// 新建等于每帧回到顶上，用户往下翻两屏就白翻了。
 	ls ui.ListState
+	// rowKeys 记着候选表每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
+	// （票 #313）。**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头）：
+	// 换源、换一批候选——身份对不上就重算。
+	rowKeys rowkey.Memo[lyricRowIdent, any]
 	// previewScroll 是预览里正文那一段的滚动位置。换一份歌词要回到顶上。
 	previewScroll ui.ScrollState
 }
@@ -423,14 +430,16 @@ func (s *Shell) viewLyricCandidates(c *ui.Context, srcs []app.LyricSource, st ap
 
 	default:
 		// 🔴 铁律四：行身份是候选自己的 ID（`lyricCandidateRowKey`），不是下标。
+		//
+		// ⚠️ **身份是预先装箱好的那一份**（`l.rowKeys`）：理由见那个字段的注释。
 		l.ls.Key = func(i int) any {
-			return lyricCandidateRowKey(id, st.Candidates[i].ID)
+			return l.rowKeys.At(i, lyricRowIdent{src: id, cand: st.Candidates[i].ID}, lyricRowIdentity)
 		}
 		l.ls.Label = func(i int) string {
 			return lyricCell(st.Candidates[i].Title)
 		}
 		e := ui.List(c, &l.ls, len(st.Candidates), func(i int) {
-			s.viewLyricCandidateRow(c, id, st.Tab, st.Candidates[i])
+			s.viewLyricCandidateRow(c, i, id, st.Tab, st.Candidates[i])
 		}).FillWidth().Height(lyricSearchListH)
 		s.trackScrollbar(e)
 	}
@@ -478,9 +487,12 @@ func lyricSourceLabel(srcs []app.LyricSource, tab int) string {
 //
 // ⚠️ **点整行等于预览那一条**（上游 `netease-tab.tsx:71` 的 `onClick` 在
 // `TableRow` 上，而那一行就是「点开看看完整歌词再决定用哪版」的入口）。
-func (s *Shell) viewLyricCandidateRow(c *ui.Context, srcID string, tab int, item lyrics.Candidate) {
+func (s *Shell) viewLyricCandidateRow(c *ui.Context, i int, srcID string, tab int, item lyrics.Candidate) {
 	t := c.Theme()
-	row := ui.Column(c).Key(lyricCandidateRowKey(srcID, item.ID)).Grow(1).
+	// ⚠️ **这一行的元素键是记好的那一份**（`l.rowKeys`）：现算的话每帧每行一次
+	// 字符串拼接（票 #313）。它和上面那个 `ListState.Key` 是同一份身份。
+	row := ui.Column(c).Key(s.lyricSearch.rowKeys.At(i,
+		lyricRowIdent{src: srcID, cand: item.ID}, lyricRowIdentity)).Grow(1).
 		Radius(t.Radius).Padding(space.Px6, space.Px8).Gap(space.Px2)
 	if row.Hovered() {
 		row = row.Background(t.SurfaceHover)
@@ -514,7 +526,24 @@ func (s *Shell) viewLyricCandidateRow(c *ui.Context, srcID string, tab int, item
 // ⚠️ **带上源 id**：两个源的 id 都是十进制数字（网易云是歌曲 id，LRCLib 是它的
 // 数字 id），不加前缀的话理论上会撞；而 Tester 撞 key 是直接 panic 的。
 func lyricCandidateRowKey(srcID, candID string) string {
-	return "lyrics:row:" + srcID + ":" + candID
+	return lyricRowIdentity(lyricRowIdent{src: srcID, cand: candID}).(string)
+}
+
+// lyricRowIdent 是候选表一行的身份的原材。
+//
+// ⚠️ **可比较**：它要当「记着算好的那一份」那把钥匙（见 `rowkey.Memo` 的
+// 文件头），所以里面不能有切片。
+type lyricRowIdent struct {
+	src  string
+	cand string
+}
+
+// lyricRowIdentity 是候选表里一行的键（铁律四）。
+//
+// 这一步会分配（拼字符串 + 装箱）——所以它只在身份变了的时候才走
+// （见 `rowkey.Memo` 的文件头）。
+func lyricRowIdentity(k lyricRowIdent) any {
+	return "lyrics:row:" + k.src + ":" + k.cand
 }
 
 // lyricCell 是一个字段的空值写法，抄上游两个 tab 里那个 `--`

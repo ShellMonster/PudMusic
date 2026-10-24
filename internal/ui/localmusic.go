@@ -44,6 +44,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
@@ -200,6 +201,12 @@ type localPage struct {
 	// table 是表格那一档的 `ui.ListState`。**滚动位置和选中行就跟着它走**，
 	// 所以它建一次、存在这里，不每一帧新建。
 	table ui.ListState
+	// rowKeys 记着每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
+	// （票 #313）。**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头）：
+	// 重扫、换目录、换筛选——身份对不上就重算，不用记得重建。
+	rowKeys rowkey.Memo[string, any]
 	// sel 是表格里选中的那一行，-1 是没选。框架把点中的下标写进来。
 	sel int
 	// selID 是选中的**那一首**的身份（铁律四：行身份是 ID 不是下标）。
@@ -749,7 +756,8 @@ func (p *localPage) viewTable(c *ui.Context, t *ui.Theme) {
 	//
 	// 为什么这一页特别需要：往目录里加一个文件夹，列表前面就多出一整段，
 	// 后面所有行的下标全部错位。不按 ID 装的话，选中项会跳到旁边那一首。
-	p.table.Key = func(i int) any { return p.rows[i].ID }
+	// ⚠️ **身份是预先装箱好的那一份**（`p.rowKeys`）：理由见那个字段的注释。
+	p.table.Key = func(i int) any { return p.rowKeys.At(i, p.rows[i].ID, rowkey.Identity) }
 	p.table.Label = func(i int) string { return p.rows[i].Title }
 	p.table.Selected = &p.sel
 	// 装一份**永远是空的**选择集：框架于是不再给选中的行铺实心主色底（票 #197，
