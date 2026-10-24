@@ -6,7 +6,7 @@
 // 同一个动作（「把这一页的歌加进播放队列」）在两个页面上都有入口：
 //
 //	搜索结果页   排序那一行右边（`viewSearchToolbar`）
-//	首页         那一排 Tab 右边（`viewTabs`）
+//	首页         那一排 Tab 的**右沿**（`viewTabs`）
 //
 // 此前**只有搜索结果页有**：首页**故意没有**——理由是队列语义（追加 / 从这首
 // 开始）还没定下来（DESIGN.md §十第 3 条）。于是同一个动作在一个页面能按、在
@@ -30,6 +30,8 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -42,15 +44,77 @@ import (
 // 而且那两处的语义确实不同：本地音乐那枚是**从第一首开始播**）。
 const playAllLabel = "全部播放"
 
+// 那一枚按钮的尺寸。**照上游那一枚**（票 #288 / UX 报告 C-05）。
+//
+// 上游是 HeroUI 的 `Button size="md"`，实图逐像素量出来是 **114×40**：
+// 左右内边距 16（`px-4`）、图标 18（`<RiPlayFill size={18} />`）、图标和字之间
+// 的缝 8（`gap-2`）、字 14（`text-sm`，四个汉字正好 56）——
+//
+//	16 + 18 + 8 + 56 + 16 = 114
+//
+// ⚠️ **改之前那一枚是 79×28 的纯文字**（`ui.PrimaryButton` 的默认样子：
+// 内边距 6/14、字 13）。它矮一截（28 < 40）、窄一截（79 < 114），又没有那枚
+// ▶ ——而它是**首页和每一页列表上唯一的主色实心块**，用户第一眼先看它。
+//
+// ⚠️ **高不跟 Tab 那一排齐**：上游首页那一排 Tab 是 44 高（`size="lg"`），
+// 按钮是 40，两者在**中线**上对齐——上游那一行是 `items-center`。
+const (
+	// playAllH 是那一枚的高：上游 `h-10` = **40**。
+	//
+	// ⚠️ **和 `collectionOpsButtonH` 是同一个数**（合集那一页操作条上的主按钮），
+	// 两处都是上游 HeroUI 按钮的 md 档。
+	playAllH = 40
+	// playAllPadX 是左右内边距：上游 `px-4` = **16**。
+	playAllPadX = space.Px16
+	// playAllGap 是图标和字之间的缝：上游 `gap-2` = **8**。
+	playAllGap = space.Px8
+	// playAllIconSize 是那枚 ▶ 的边长：上游 `<RiPlayFill size={18} />` = **18**。
+	//
+	// ⚠️ **它不跟 `iconMd` 走**：那一档是「图标键」的边长（播放条、顶栏那些），
+	// 而这一枚是**按钮里的图标**，上游给的是 18，两件事各说各的。
+	playAllIconSize = 18
+)
+
 // playAllButton 是「全部播放」那一枚按钮。
 //
 // ⚠️ **两个页面走同一个出口**：搜索结果页和首页各摆一枚，而它们必须是**同一枚**
-// ——同一个字、同一颗实心主色、同一个禁用条件。分开画的话，两处迟早会长成两个
-// 样子（票 #235 消灭掉的「左边缘落在四个位置上」那类毛病就是这么来的）。
+// ——同一个字、同一颗实心主色、同一枚图标、同一个盒子、同一个禁用条件。分开画的
+// 话，两处迟早会长成两个样子（票 #235 消灭掉的「左边缘落在四个位置上」那类毛病
+// 就是这么来的）。
 //
 // disabled 是「现在按不了」：正在装第一页，或者这一页一首都没有。
+//
+// # 那枚 ▶ 图标
+//
+// 上游是 `<RiPlayFill size={18} />`（`startContent`），我们照抄：
+// `iconPlayFill` 就是那张 `RiPlayFill`（`icons.go` 里有出处）。
+//
+// ⚠️ **图标在字前面**（上游的 `startContent` 是**起头**那一块）：所以按钮要用
+// **空字**建（`ui.PrimaryButton(c, "")`），自己按「图标 → 字」的顺序摆孩子——
+// `ui.PrimaryButton(c, label)` 建出来的那一份字是**第一个**孩子，往后再加只会
+// 排在它后面（`mygo/ui/element.go` 的 `Children` 是**加**上去的，不是换掉原来
+// 那一份）。这和 `loading.go` 的 `busyPrimaryButton` 是同一个用法。
+//
+// ⚠️ **图标继承按钮的字色**（`mygo/ui/svg.go` 的 `coreIcon`：「its shapes in the
+// color of the text, which it takes from its ancestors」），而主色按钮的字色是
+// `t.AccentText`——主色是 `#1ed760` 那一档亮绿时它是**黑**，于是图标和字都是黑
+// 的，和上游一样（上游那枚也是 `dark:text-black`）。
 func playAllButton(c *ui.Context, disabled bool) ui.Element {
-	return ui.PrimaryButton(c, playAllLabel).Disabled(disabled)
+	// ⚠️ **宽是内容给的，不是写死的 114**：16 + 18 + 8 + 56 + 16 = 114，
+	// 而这几个数各自都有出处（上面那一段）。写死一个 114 的话，用户把字号调大
+	// 之后字会挤出那个盒子——上游那枚是跟着内容长的。
+	b := ui.PrimaryButton(c, "").
+		Height(playAllH).
+		Padding(space.None, playAllPadX).
+		Gap(playAllGap)
+	b.Children(func() {
+		ui.Icon(c, icon(iconPlayFill)).FontSize(playAllIconSize)
+		// ⚠️ **字是 14**（上游的 `text-sm`）：`scale.Size14` 是「正文 / 说明」
+		// 那一档（DESIGN.md §二）。此前这一枚用的是框架的默认字号（13），
+		// 于是它比上游窄 4 个像素。
+		ui.Text(c, playAllLabel).FontSize(scale.Font(c, scale.Size14)).SingleLine()
+	})
+	return b.Disabled(disabled)
 }
 
 // playAllSongs 把这一页的歌**追加**到播放队列末尾（不换队列、不起播）。
