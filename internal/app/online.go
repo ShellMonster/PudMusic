@@ -464,6 +464,9 @@ func (a *App) playOnline(it Item) error {
 	a.onlineGen++
 	gen := a.onlineGen
 	a.clearErrLocked()
+	// 🔴 **「正在重连」也收掉**（票 #315）：换歌 = 上一首的那场重连到此为止。
+	// 不收的话它会一直亮着，而新的一首压根没有在重连。
+	a.clearReconnectLocked()
 	// 🔴 **记下用户刚才按的是哪一首**：重试要放的是它，而不是队列里当前的
 	// 那一首——取流失败时队列常常已经滚回去了（见 `App.Retry`）。
 	a.pending = it
@@ -1095,7 +1098,7 @@ func (a *App) checkPlayback() {
 		// 换到了另一条流：字节偏移接不上，但**播放位置**还在原处。
 		// 从那儿重开就是「换流后从原来的位置继续」。
 		a.logf("biu: 播放中途换了流，准备从原位置重开：%v", err)
-		a.refreshOnlineNow()
+		a.refreshOnlineNow(err)
 	default:
 		// 🔴 **「能不能重试」跟着这句话一起落**：字节源拉不动多半是网络或
 		// 地址的问题（可重试），而「这一条压根没有音频流」重试也没用。
@@ -1180,11 +1183,26 @@ func (a *App) failPlay(gen int, it Item, branch string, err error) {
 //
 // 一首歌只重开一次（`onlineTrack.reopening`）。第二次还不行就该如实报错：
 // 用户听得到「这首歌放不了了」，比程序一直自己折腾强。
-func (a *App) refreshOnlineNow() {
+//
+// 🔴 **「重开不了」必须报错，不许一声不吭**（票 #315 的评审复现过）：以前
+// 这一支是直接 `return`——于是界面上「正在重连」那一档**永远亮着**、一句
+// 红字也没有，而歌早就停了。用户看到的「正在重连」是**假的**：它压根没有
+// 在重连，它是放弃了。
+func (a *App) refreshOnlineNow(cause error) {
 	a.mu.Lock()
 	tr := a.online
-	if tr == nil || tr.reopening {
+	if tr == nil {
 		a.mu.Unlock()
+		return
+	}
+	if tr.reopening {
+		// 已经重开过一次了：这一首救不回来了。老实报错。
+		it := tr.item
+		a.mu.Unlock()
+		a.logf("biu: 换流重开被作废了（这一首已经重开过一次）：%q：%v", it.Title, cause)
+		a.setErrTextDetail("这条流接不上了",
+			"这条流换了两次，接不上刚才播放的位置了。换一首放，或者点「重试」再取一次流。",
+			true)
 		return
 	}
 	tr.reopening = true
@@ -1217,6 +1235,7 @@ func (a *App) refreshOnlineNow() {
 			p.Close()
 			a.logf("biu: 换流重开被作废了（代次变了）：%q（来的代次 %d，现在的代次 %d）",
 				tr.item.Title, gen, cur)
+			a.endReconnect(gen)
 			return
 		}
 		old := a.player
@@ -1230,6 +1249,12 @@ func (a *App) refreshOnlineNow() {
 		a.pendingSrc = nil
 		a.reportedErr = nil
 		a.clearErrLocked()
+		// 🔴 **「正在从播放位置重开」这一档到此为止**（新播放器装上了）。
+		//
+		// ⚠️ **只收应用层那一半**：字节源可能**正在退避里等着**——歌停着、
+		// 位置不动、字节还没回来。源那一半归 `noteReconnected` 管（字节回来
+		// 才收），这里收了它，退避的那几秒就又变成静默的了。
+		a.setReconnectLocked(a.reconnecting, a.reconnectAttempt, false)
 		wake := a.wake
 		a.mu.Unlock()
 

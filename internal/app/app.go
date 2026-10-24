@@ -122,9 +122,9 @@ type State struct {
 	// 字」，等多久都像应用死了（票 #315）。加上退避之后更糟：那 7 秒的
 	// 等待原本是**完全静默**的。
 	//
-	// ⚠️ **它必须有上限**：退避最多等 7 秒（`audio` 的 `defaultBackoff`），
-	// 加上换流那一趟网络往返，总共十几秒。到点了就该报失败，不能一直亮着
-	// ——一直亮着就是另一种「什么都不说」。
+	// ⚠️ **它必须有上限**：退避最多等 7 秒（`audio` 的 `defaultBackoff` 按
+	// 默认的三次重试算），加上换流那一趟网络往返，总共十几秒。到点了就该
+	// 报失败，不能一直亮着——一直亮着就是另一种「什么都不说」。
 	Reconnecting bool
 	// ReconnectAttempt 是第几次重试（从 1 起）。0 = 不是「重试」那一档
 	// （比如应用层自己从播放位置重开）。
@@ -241,10 +241,17 @@ type App struct {
 	loading bool
 	// loadingTitle 是正在取的那一首的名字（见 State.LoadingTitle）。
 	loadingTitle string
-	// reconnecting 是「正在重连」（见 State.Reconnecting）。
+	// reconnecting 是「**字节源**正在重试」这一半（见 State.Reconnecting）。
 	reconnecting bool
 	// reconnectAttempt 是第几次重试（见 State.ReconnectAttempt）。
 	reconnectAttempt int
+	// reopenInFlight 是「**应用**正在从播放位置重开」那一半。
+	//
+	// ⚠️ **它和 `reconnecting` 是两件事，亮与灭各管各的**：源在退避里等着
+	// 的时候，播放器可能已经装好了（可字节还没回来）；而应用正在重开的时候，
+	// 源压根还没开始重试。混成一栏的话，装播放器那一下会把「正在重连」收掉，
+	// 退避的那一秒就又变成静默的了（票 #315 的评审复现过）。
+	reopenInFlight bool
 	// reconnectToken 是**当前这条在线字节源**的重连令牌，
 	// reconnectSeq 是发令牌的计数器。
 	//
@@ -595,7 +602,7 @@ func (a *App) Snapshot() State {
 		ErrDetail:        a.errDetail,
 		Loading:          a.loading,
 		LoadingTitle:     a.loadingTitle,
-		Reconnecting:     a.reconnecting,
+		Reconnecting:     a.reconnecting || a.reopenInFlight,
 		ReconnectAttempt: a.reconnectAttempt,
 		CanRetry:         a.errRetryable,
 		BiliURL:          a.biliURLLocked(),
@@ -722,6 +729,9 @@ func (a *App) Open(path string) error {
 	a.wantPlay, a.playing = true, true
 	a.stopped = false
 	a.clearErrLocked()
+	// 🔴 **「正在重连」也收掉**（票 #315）：放本地文件 = 上一首在线歌的那场
+	// 重连到此为止。不收的话那一行会一直亮着，而本地文件压根没有在重连。
+	a.clearReconnectLocked()
 	// ⚠️ **本地文件把 `pending` 让出来**：那一栏记的是「在线的那一首」，
 	// 而本地文件在 B 站上没有对应的东西。留着上一首在线歌的话，播放条上
 	// 那枚「在 B 站打开」会指向另一首歌。
@@ -899,6 +909,9 @@ func (a *App) ClearTrack() {
 	a.position, a.duration = 0, 0
 	a.wantPlay = false
 	a.clearErrLocked()
+	// 🔴 **「正在重连」也收掉**（票 #315）：清掉当前曲目 = 用户不要这一首了，
+	// 那场重连到此为止。
+	a.clearReconnectLocked()
 	// 什么都没有了：「当前这一首」也就没有了（不然播放条上那枚
 	// 「在 B 站打开」会指着上一首）。
 	a.pending = Item{}

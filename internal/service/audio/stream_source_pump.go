@@ -275,8 +275,12 @@ func (s *StreamSource) recover(from int64, cause error) bool {
 
 // backoffFor 报第 attempt 次重试要等多久（attempt 从 1 起）。
 //
-// 序列用完了就用**最后一个**：重试次数的上限是 `maxRefr`，过了那个上限
-// 源就报终态错误了，所以「用完」这个状态压根到不了。
+// ⚠️ **序列用完了用最后一个**（不是变成 0）：变成 0 就等于「后面几次不
+// 等了」，那还是瞬间打完，只是慢了一档。
+//
+// ⚠️ **这个状态真的到得了**：序列比 `MaxRefresh` 短的时候（`MaxRefresh`
+// 调大、或者调用方给了自己的短序列），第 N 次重试就落在「用完了」那一档
+// 上——`TestTheBackoffStopsAtItsLastValue` 造的就是它。
 func (s *StreamSource) backoffFor(attempt int) time.Duration {
 	list := s.backoff
 	if len(list) == 0 {
