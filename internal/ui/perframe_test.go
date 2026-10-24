@@ -206,7 +206,7 @@ func TestTheFullPlayerBackdropKeyIsNotRebuiltEveryFrame(t *testing.T) {
 // 换了封面、换了位图、换了尺寸 → 要重画；一样 → 不重画。
 //
 // ⚠️ **这一条是上一条的另一半**：零分配是手段，「该重画的时候重画」才是目的。
-// 而这一条是**满屏那一张画布**的命门——不重画的话，背景停在上���张封面上
+// 而这一条是**满屏那一张画布**的命门——不重画的话，背景停在上一张封面上
 // （换了歌也不换），而画面上看着只是「背景没跟着换」。
 func TestTheBackdropIsRedrawnExactlyWhenItShouldBe(t *testing.T) {
 	var f fullPlayer

@@ -1105,7 +1105,7 @@ func TestTheCollapsedSideMenuItemIsAFortySquareIconCell(t *testing.T) {
 		t.Error("折叠态那一格是空的——图标没画出来")
 	}
 	// ⚠️ **格子要居中**：侧栏折叠后是 72，而格子是 40——不居中的话它会贴在
-	// 左���沿上（上游那一格也是居中的）。
+	// 左边沿上（上游那一格也是居中的）。
 	if got := r.X; got < 4 || got > 24 {
 		t.Errorf("折叠态那一格的左边在 %.1f——它没有居中在 72 宽的侧栏里", got)
 	}

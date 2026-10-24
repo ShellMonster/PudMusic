@@ -396,7 +396,7 @@ func TestDirectoryLabelsAreAllDifferent(t *testing.T) {
 // 页面里切一下档就看见了。
 //
 // ⚠️ **判据是「主色像素多了几个」**：那一行本来就有别的东西（序号、标题、按钮），
-// 所以数的是**点之前和点之后那一行的主色像素差**，不是「那��行有没有主色」。
+// 所以数的是**点之前和点之后那一行的主色像素差**，不是「那一行有没有主色」。
 func TestTheLocalTableRowHasNoSolidAccentBlock(t *testing.T) {
 	dir := t.TempDir()
 	libSong(t, dir, "甲.mp3")

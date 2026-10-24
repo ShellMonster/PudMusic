@@ -324,7 +324,7 @@ func TestLoginWalksThroughTheThreeStates(t *testing.T) {
 	f := newBiliFixture(t)
 	// 还没扫 → 已扫待确认 → 成功
 	f.onScans(86101, 86090, 0)
-	// 一步步放行：三态是转瞬即逝的，不手动放行就只能看到其中���个。
+	// 一步步放行：三态是转瞬即逝的，不手动放行就只能看到其中一个。
 	f.stepByHand()
 
 	a := newTestApp(t, f, app.NewMemoryStore("test"))
