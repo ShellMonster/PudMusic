@@ -38,6 +38,13 @@ const dynamicPlayBtn = 36
 // dynamicPicSide 是图文里每张图的边长。
 const dynamicPicSide = 92
 
+// dynamicCardPadY 是动态条目上下的内边距：上游的 `pt-4`（CardHeader）和
+// `pb-4`（卡片自己），两个都是 16。
+//
+// ⚠️ **左右是 0**（上游那一档没有横向内边距）：那一段由页面那一层给——
+// 动态流那一页是 16+16 = 32，UP 空间那一页是 `p-4` 的 16。
+const dynamicCardPadY = space.Px16
+
 // maxDynamicPics 是图文最多画几张图。
 //
 // B 站一条图文最多九张。**超出的丢掉而不是缩小**：缩小到看不见的那几张
@@ -182,19 +189,47 @@ func (s *Shell) viewCollectionRow(c *ui.Context, col bili.UpCollection, selected
 // `/user/{mid}`）。这是「能点进对应 UP 空间」那条验收在卡片上的落点。
 func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic, selected, ring bool) {
 	t := c.Theme()
-	// 卡片本身照上游 `border-default-100 mb-2 w-full rounded-none border-b
-	// bg-transparent pb-4`（`dynamic-feed/item.tsx:80`）：
-	//   - 下边框一条；
-	//   - 距下一条 8（`mb-2`）；
-	//   - 卡内下边距 16（`pb-4`）、上边距 16（CardHeader 的 `pt-4`）；
-	//   - **左右 0**：那 32 由页面那一层给（动态流是 16+16，UP 空间是 `p-4`）。
+	// ⚠️ **通栏**：左右 0、只有一条下边框、透明底、直角。
+	//
+	// 上游 `border-default-100 mb-2 w-full rounded-none border-b bg-transparent
+	// pb-4`（`dynamic-feed/item.tsx:80`）+ CardHeader 的 `pt-4`：
+	//   - **左右 0**：那 16（动态流那一页是 16+16 = 32，UP 空间是 `p-4` 的 16）
+	//     由页面那一层给——卡片自己再缩 16 的话，同一份内容上游左右各多出一段，
+	//     而上游那边是「图左右略宽」的（用户 2026-10-25 说的）；
+	//   - 上下各 16（`pt-4` / `pb-4`）；
+	//   - **只有一条下边框**（`border-b`）、**透明底**（`bg-transparent`）、
+	//     **直角**（`rounded-none`）；
+	//   - 距下一条 8（`mb-2`）——**那一段由列表的行间距给**（`upspace_tabs.go`
+	//     和 `dynamicfeed.go` 里的 `GapY`）。不给的话卡片自己的下外边距会把
+	//     **框架那一层行悬停底**露在卡片底下（就是那条棕带，见下面那段）。
+	//
+	// # 底下那条棕带是怎么来的，怎么没的
+	//
+	// 框架给「指针压着的那一行」铺一层 `t.SurfaceHover`（`mygo/ui/list.go` 的
+	// styleFn：`w.bg = t.SurfaceHover`）。那一层铺的是**整行**的矩形，而**行比
+	// 卡片高**（差着卡片自己的下外边距）——于是卡片**底下**那一条露出了框架
+	// 那一层。暖纸主题下 `t.SurfaceHover` 是**淡棕**（`surface2` 往字色推 4%），
+	// 用户看到的就是「莫名其妙的一层棕色阴影」（2026-10-25）。
+	//
+	// ⚠️ **盖掉的是那一层，不是把主题里那一档调淡**：调淡 `t.SurfaceHover` 会
+	// 波及全应用（关注页的网格、收藏夹页、下载记录页…）。
+	//
+	// ⚠️ **盖的办法是「卡片自己刷页面底色」**：卡片现在左右 0、上下 16，正好
+	// 填满整行，于是它刷的底色把框架那一层整个盖住——**悬停反馈本身还在**
+	// （作者名、赞、下一首播放、下载音频那几个键各自有反馈）。
 	card := ui.Column(c).Key("dyn:"+d.ID).Grow(1).
-		Padding(space.Px16).Margin(space.None, space.None, space.Px12, space.None).
-		Background(s.cardBackground(t)).Radius(s.cardRadius(t)).Border(1, t.Border).
+		Padding(dynamicCardPadY, space.None, dynamicCardPadY, space.None).
+		// ⚠️ **底色刷成页面底色，是为了盖掉框架那一层悬停底**（见下面那段）。
+		Background(t.Background).
+		BorderWidth(0, 0, 1, 0).BorderColor(t.Border).
 		Gap(space.Px8)
 	// 选中那一层：盖掉框架那块实心主色底，键盘走到它上面时给它一圈焦点环
 	//（理由见 `widgets/list/selection.go`）。
-	card = list.SelectedRow(card, t, selected, card.Hovered(), ring)
+	//
+	// ⚠️ **`hovered` 传 false**：框架那一层悬停底**已经被卡片自己刷的页面底色
+	// 盖掉了**（下面那段），所以「盖上去的颜色」恒是页面底色——传 true 的话，
+	// 指针停在一张**被选中**的动态上时，整条卡片会变成淡棕。
+	card = list.SelectedRow(card, t, selected, false, ring)
 	card.Children(func() {
 		// ① 头一行：头像 + 昵称（可点）+ 时间。
 		ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).Children(func() {

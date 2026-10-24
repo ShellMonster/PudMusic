@@ -198,7 +198,12 @@ func (s *Shell) viewDynamicFeed(c *ui.Context, _ *ui.Route) {
 		// 动态卡片左右各 32：上游是外层 `px-4` 再套一层 `px-4`
 		// （`index.tsx:142` 的 ScrollContainer + 里面那个 `px-4 py-4`），
 		// 16 + 16 = 32。卡自己那一条的左右内边距因此是 0。
-		ui.Column(c).Key("feed-items").Grow(1).FillHeight().PaddingX(space.Px32).Children(func() {
+		//
+		// ⚠️ **上沿那 16 是同一个 `py-4`**：上游那一层 `px-4 py-4` 上下也是 16，
+		// 而 UP 空间那一页的 Tab 面板是 `px-0 py-4`——**两页内容离上一段的距离
+		// 是同一个数**（票 #416：「两页口径一致」）。
+		ui.Column(c).Key("feed-items").Grow(1).FillHeight().
+			Padding(space.Px16, space.Px32, space.None, space.Px32).Children(func() {
 			s.viewFeedItems(c, f)
 		})
 	})
@@ -534,6 +539,11 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 				s.viewDynamicCard(r.Context, f.items[r.Index],
 					f.keys.selected(r.Index), f.keys.ring(r.Context))
 			})
+		// ⚠️ **行间距由列表给**（上游 `mb-2` = 8）：卡片自己的下外边距**不能**
+		// 留着——那一段属于**行**（不在卡片里），而框架给「指针压着的那一行」铺
+		// 一层 `t.SurfaceHover`，留着它卡片底下就露出那一层（暖纸主题下是淡棕）。
+		// 理由和 `upspace_tabs.go` 里那一处一样（票 #416）。
+		dynList = dynList.GapY(space.Px8)
 		s.trackScrollbar(dynList)
 	})
 
