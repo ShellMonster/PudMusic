@@ -612,3 +612,68 @@ func TestOneEmptyTabDoesNotBlankOutTheOthers(t *testing.T) {
 		}
 	}
 }
+
+// TestTheLeadRowIsNeverTheCursor 钉住「页内头部那一行不是歌」。
+//
+// ⚠️ **基线上 Home 和 ↑ 都停在第一首歌上**（三档都一样）：页内头部占着框架的
+// **第 0 行**，而框架的游标记的是**行号**——于是 Home / ↑ 会把光标停在那一行上，
+// 而那一行不是歌：**选中项变成空**、**按 Enter 不放歌**、焦点环从「跟着那一行走」
+// 退回「画在整张列表上」，而票 #245 的 E4「↑ 在顶上一行时把焦点交回侧栏」在
+// 「流行」这一档也失效了（↑ 从第一首歌往上走会停在那一行上，而不是交回侧栏）。
+//
+// 所以逐键量：三档各按一次 Home 和一次 ↑，**光标都得停在第一首歌上**。
+func TestTheLeadRowIsNeverTheCursor(t *testing.T) {
+	// ⚠️ **窗口要有焦点**，否则框架的 `Focused()` 恒为假，「焦点在哪」这一整套
+	// 判据就全是假的（见 `focus_test.go` 那一条的注释）。
+	fc := &focusCtx{}
+	s, tt := newShell(t, fc.opt())
+	tt.SetFocused(true)
+	s.home.SetSongs(fullSongs())
+
+	for tab := range homeTabs {
+		clickTab(t, tt, tab)
+		// 把焦点交给这一档的列表，光标停在第一首歌上（和用户走进来时一样）。
+		s.home.lists[tab].TakeFocus()
+		homeFrame(tt)
+
+		// Home：光标该停在第一首歌上。
+		tt.Key(0, ui.KeyHome)
+		homeFrame(tt)
+		assertCursorOnFirstSong(t, s, tab, "Home")
+
+		// Enter：光标停在歌上时，它放的是**那一首**。
+		//
+		// ⚠️ **这里量的是「选中项」而不是队列**：测试里那些歌放不了（不是真的
+		// 音频），所以队列两种情况下都是空的 ✗ —— 区别在**光标停在哪一行**：
+		// 停在页内头部那一行时，`OnSubmit` 走 `playFrom(-1)`，**什么也不放**。
+		tt.Key(0, ui.KeyEnter)
+		homeFrame(tt)
+		assertCursorOnFirstSong(t, s, tab, "Enter")
+
+		// ↑：光标该**留在**第一首歌上（基线上 ↑ 在顶上一行时把焦点交回侧栏，
+		// 选中项不动；页内头部那一行不是歌，光标停上去的话选中项会变成空）。
+		s.home.lists[tab].TakeFocus()
+		homeFrame(tt)
+		tt.Key(0, ui.KeyUp)
+		homeFrame(tt)
+		assertCursorOnFirstSong(t, s, tab, "↑")
+
+		// ⚠️ **↑ 在顶上一行时把焦点交回侧栏**（票 #245 的 E4）：页内头部那一行
+		// 不是歌，光标停上去的话这一半就失效了——焦点既没交回侧栏，光标也空了。
+		if !s.sideAnchor.Focused(fc.c) {
+			t.Errorf("「%s」这一档在顶上一行按 ↑ 之后焦点没交回侧栏——"+
+				"光标大概停在页内头部那一行上了", homeTabs[tab])
+		}
+	}
+}
+
+// assertCursorOnFirstSong 断言这一档的光标停在**第一首歌**上。
+func assertCursorOnFirstSong(t *testing.T, s *Shell, tab int, key string) {
+	t.Helper()
+	m, ok := s.home.lists[tab].Selected()
+	want := songName(homeTabs[tab], 1)
+	if !ok || m.Title != want {
+		t.Errorf("「%s」这一档按 %s 之后选中的是 %q（ok=%v），want %q",
+			homeTabs[tab], key, m.Title, ok, want)
+	}
+}
