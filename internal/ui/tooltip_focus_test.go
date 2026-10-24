@@ -187,7 +187,7 @@ func TestTheNavBarTooltipsDoNotStackWhileTabbing(t *testing.T) {
 
 	// 顶栏那两枚带提示的图标键。
 	const openTip = "打开本地音频文件"
-	const pipTip = "缩成 320×100 的小窗贴边悬浮，音乐不停"
+	const pipTip = "缩成 320×84 的小窗贴边悬浮，音乐不停"
 
 	for i := range 10 {
 		tt.Key(0, ui.KeyTab)
