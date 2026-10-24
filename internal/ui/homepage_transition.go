@@ -17,8 +17,9 @@
 //	退场（homeFadeOut）	旧的那一块从满亮到全灭，**新的那一块还不建**
 //	进场（homeFadeIn）	旧的那一块已经没了，**新的那一块**从全灭到满亮
 //
-// ⚠️ **交接那一下两边都是 0**：那是这一条要付的代价（换来的是「中间不同时
-// 画两层」）。实测只空**一帧**（见 `homeFadeOutCurve` 那一段的实算）。
+// ⚠️ **交接那一下不空**：旧的那一块在那一帧**已经不建了**（它是被换掉的，不
+// 是被淡掉的），而**新的那一块在那一帧已经有四成**（进场那一段提前一帧起算，
+// 见 `homeFadeInLead`）——所以**任何一帧上只有一层，而内容那一块始终有东西**。
 //
 // # ⚠️ **退场那一段自己淡出，不靠框架的 `Exit`
 //
@@ -210,8 +211,8 @@ type homeSwap struct {
 // 屏幕上只剩底色）。
 //
 // 反过来走的话旧内容**一直亮到最后一刻**：100ms 的退场里，前 75ms 都在 80%
-// 以上（实算），交接处只空**一帧**——退场的最后 25ms 从 80% 掉到 0，而新的
-// 那一块进场 16ms 就到 40%（这条曲线前重后轻）。
+// 以上（实算），而新的那一块紧接着就顶上——退场的最后 25ms 从 80% 掉到 0，
+// 进场 16ms 就到 42%（这条曲线前重后轻；见 `homeFadeInLead`）。
 //
 // ⚠️ **这是同一条曲线**（`motion.Unified`），不是另立一条：差别只在**喂进去
 // 的那个数**是「走过的」还是「剩下的」。
@@ -237,15 +238,42 @@ func homeFadeInCurve(elapsed time.Duration) float32 {
 	return motion.Unified(float32(t) / float32(homeFadeIn))
 }
 
+// alphaAt 是切 Tab 那一段**此刻**的不透明度（1 = 满亮）。
+//
+// ⚠️ **它一律由曲线算出来**，不是「上一帧是多少」——这一点是这一票踩过的坑：
+// 阶段刚换的那一帧如果**忘了算**，不透明度就是**零值**，而 0 的意思是「整棵
+// 子树不画」（框架的 `mygo/ui/paint.go`：`opacity<=0.001` 就跳过）——于是那一帧
+// 屏幕上只剩页面底色，用户看见的是一下「闪」（真窗口里每次切 Tab 都有）。
+//
+// ⚠️ **退场那一段的第一帧是满亮**（`from * homeFadeOutCurve(0)` = 1）：旧的那一
+// 块在退场的第一帧**还是满亮的**，它从第二帧开始淡。
+func (s homeSwap) alphaAt(now time.Time) float32 {
+	switch s.phase {
+	case homeSwapOut:
+		return s.from * homeFadeOutCurve(now.Sub(s.at))
+	case homeSwapIn:
+		return homeFadeInCurve(now.Sub(s.at))
+	}
+	return 1
+}
+
 // syncSwap 推切 Tab 那一段的阶段机，返回**这一帧**内容那一块的不透明度。
 //
-// ⚠️ **它在 view 里跑**（同队列抽屉的 `syncDrawerPhase`，见 queue_drawer.go 的
+// ⚠️ **阶段机在 view 里跑**（同队列抽屉的 `syncDrawerPhase`，见 queue_drawer.go 的
 // `drawerPhase` 那一段）：这一段是**画面上的**事——什么时候换、这一刻有多透
 // 明——而它要看的是**这一帧**的时刻（`c.Now()`，框架的钟）。放在 sync 那一层
 // 就得另带一个钟（`s.clock`），而两个钟差一帧（测试里推一个不推另一个，那一
 // 帧的画面就对不上）。
 //
-// ⚠️ **它推着三样东西**：用户的意图（`h.tab`）、数据到没到（`tabPending`）、
+// ⚠️ **「换到哪一档」和「它到了没有」是 sync 层算的**（`h.want` / `h.wantReady`，
+// 见 homepage.go 的 `syncHome`）——**不是这里算的**：这里（view 层）看到的
+// `h.tab` 是**这一帧**才写下的（框架把点中的下标写在画 Tab 那一排的时候），
+// 而那一档的请求是**下一帧**才发出去的（`pull()` 在 sync 层里跑）——所以在
+// 这里判断「它到了没有」，那一刻 `loadingOf` 还是假，于是会以为「它已经有着落
+// 了」而立刻换过去，换过去之后屏幕上就是「正在加载 XXX 推荐」那一格（票 #368
+// 明令不许出现的）。
+//
+// ⚠️ **它推着三样东西**：用户的意图（`h.want`）、数据到没到（`h.wantReady`）、
 // 动画走没走完。**动画不会反过来推它**（那是「重入」，见 queue_drawer.go 的
 // `drawerPhase` 那一段）。
 //
@@ -254,63 +282,55 @@ func homeFadeInCurve(elapsed time.Duration) float32 {
 // `homeBodyTransition`），两半都听。
 func (h *homePage) syncSwap(c *ui.Context) float32 {
 	now := c.Now()
-	// 目标那一档：选中的那一档**有着落**（有歌 / 拉到了但是空的 / 拉失败）才
-	// 换；**还在拉**就留着旧的那一档（票 #368：「流行」切进去不闪）。
-	ready := !h.tabPending(h.tab)
 
 	switch h.swap.phase {
 	case homeSwapIdle:
-		if ready && h.tab != h.shown {
+		if h.wantReady && h.want != h.shown {
 			if c.Preferences().ReduceMotion {
 				// 减少动态效果：直接换，不淡。
-				h.shown = h.tab
+				h.shown = h.want
 				return 1
 			}
 			// 开始退场：旧的那一块从这一刻起淡出去（新的那一块还不建）。
-			h.swap = homeSwap{phase: homeSwapOut, to: h.tab, at: now, from: 1}
+			h.swap = homeSwap{phase: homeSwapOut, to: h.want, at: now, from: 1}
 		}
 	case homeSwapOut:
-		if ready && h.tab == h.shown {
+		if h.wantReady && h.want == h.shown {
 			// 用户又点回**原来那一档**：取消这一段。旧的那一块还在屏幕上（它
 			// 只是淡到一半），不该「淡出去又淡回来」——那是一下闪。
 			h.swap = homeSwap{}
 			break
 		}
-		if ready && h.tab != h.swap.to {
+		if h.wantReady && h.want != h.swap.to {
 			// 改主意了：还是退场，只是**退到另一档**去（`to` 换了，那一段接着走）。
-			h.swap.to = h.tab
+			h.swap.to = h.want
 		}
-		el := now.Sub(h.swap.at)
-		if el >= homeFadeOut {
+		if now.Sub(h.swap.at) >= homeFadeOut {
 			// 旧的那一块淡完了 → 换到新的那一块，开始进场。
 			h.shown = h.swap.to
-			h.swap = homeSwap{phase: homeSwapIn, at: now, from: 0}
-			// ⚠️ **交接那一帧不是空的**：新的一块一上来就有四成
-			// （`homeFadeInLead`）。不这么写的话这一帧是 0——屏幕上只剩页面底
-			// 色，用户看见的是一下「闪」。
-			h.swap.alpha = homeFadeInCurve(0)
+			h.swap = homeSwap{phase: homeSwapIn, at: now}
 		} else {
-			h.swap.alpha = h.swap.from * homeFadeOutCurve(el)
 			// 🔴 **这一段要一帧一帧地重画**：框架不知道我们在动（没有 `Exit`、
 			// 没有 `Enter` 在跑），不主动要下一帧的话画面就**停在这一帧**——
 			// 症状是「切 Tab 之后旧的那一块卡在那儿不动了」。
 			c.AnimationFrame()
 		}
 	case homeSwapIn:
-		if ready && h.tab != h.shown {
+		if h.wantReady && h.want != h.shown {
 			// 用户又切了：**打断**这一段（§五《规则》第 3 条：动画要可打断），
 			// 从当前的不透明度接着退（`from` 是当前值，不是 1）。
-			h.swap = homeSwap{phase: homeSwapOut, to: h.tab, at: now, from: h.swap.alpha}
+			h.swap = homeSwap{phase: homeSwapOut, to: h.want, at: now, from: h.swap.alpha}
 			break
 		}
-		el := now.Sub(h.swap.at)
-		if el >= homeFadeIn {
+		if now.Sub(h.swap.at) >= homeFadeIn {
 			h.swap = homeSwap{}
 		} else {
-			h.swap.alpha = homeFadeInCurve(el)
 			c.AnimationFrame()
 		}
 	}
+	// ⚠️ **不透明度一律由曲线算**（见 `alphaAt`）：阶段刚换的那一帧**忘了算**
+	// 就是零值，而 0 的意思是「整棵子树不画」——屏幕上只剩页面底色。
+	h.swap.alpha = h.swap.alphaAt(now)
 	if h.swap.phase == homeSwapIdle {
 		return 1
 	}
