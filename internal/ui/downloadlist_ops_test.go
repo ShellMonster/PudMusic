@@ -133,6 +133,30 @@ func TestPauseAndResumeActuallyMoveTheTask(t *testing.T) {
 	}
 }
 
+// TestAFailedDownloadThatCannotBeRetriedHasNoRetryButton 盯「重试」那一枚
+// 的**亮不亮**（票 #346）。
+//
+// 🔴 **这一条是这一票的主线**：下载记录页上那枚「重试」本来是**另一套机制**
+// （不走 `bili.Recoverable`），于是风控失败的那一项**仍然**给着一枚立刻
+// 重新取流的「重试」键——同一类「点一次撞一次」的循环留在下载页上。
+//
+// 现在两处用的是**同一张表**（`bili.Recoverable`），所以风控失败的那一项
+// **不摆**「重试」。
+func TestAFailedDownloadThatCannotBeRetriedHasNoRetryButton(t *testing.T) {
+	snap := dlSnapshot("歌 甲", download.StatusError, dlProgress, dlChunk)
+	snap.CanRetry = false
+	_, tt := newRows(t, snap)
+
+	if shows(tt, opRetry) {
+		t.Errorf("摆着一枚按下去只会再撞一次墙的「%s」，文字有 %q", opRetry, tt.Texts())
+	}
+	// ⚠️ **「删除」必须还在**：那是这一行用户唯一还能做的事——他不能重试，
+	// 但他得能把这一条从记录里拿走。
+	if !shows(tt, opDelete) {
+		t.Errorf("「%s」没了，文字有 %q", opDelete, tt.Texts())
+	}
+}
+
 // TestRetryOnAFailedTaskQueuesItAgain 断「重试」真的把出错的那一项重新排上
 // 队，而不只是把状态字段改了一下。
 //

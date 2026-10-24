@@ -13,7 +13,6 @@ package ui
 // 另一半（窗口开关、控制、两个窗口共享状态）在 `miniplayer_test.go`。
 
 import (
-	"math"
 	"testing"
 
 	mygoui "github.com/egoist/mygo/ui"
@@ -30,7 +29,7 @@ import (
 // 常量的话，常量一改、期望跟着改，测试照样全绿——而「封面列 100」正是这一票
 // （#168 / G10）要钉死的那一个数。`playbar_cover_test.go` 里那几个 `biu*`
 // 常量是同一个道理。
-const biuMiniCoverCol = 100
+const biuMiniCoverCol = 84
 
 // TestTheMiniCoverColumnIsBiuWidth 盯「封面列 100」（票 #168 / G10）。
 //
@@ -64,10 +63,10 @@ func TestTheMiniCoverColumnIsBiuWidth(t *testing.T) {
 	// 「图取到了」那一档也要描一圈边），而**那一圈边是画在格子里面那一圈**——
 	// 所以格子还是 88×88、位置一点没动，图本身让出来 2 像素。
 	const frame = 1
-	if box.Dx() != 88-2*frame || box.Dy() != 88-2*frame {
+	if box.Dx() != 72-2*frame || box.Dy() != 72-2*frame {
 		t.Errorf("封面是 %dx%d，want %dx%d（封面列 %d 减去左右各 %d 的内边距，"+
 			"再减去那一圈 1 像素的边），画在 %v",
-			box.Dx(), box.Dy(), 88-2*frame, 88-2*frame, biuMiniCoverCol, miniPad, box)
+			box.Dx(), box.Dy(), 72-2*frame, 72-2*frame, biuMiniCoverCol, miniPad, box)
 	}
 	if box.Min.X != miniPad+frame || box.Min.Y != miniPad+frame {
 		t.Errorf("封面的左上角在 (%d,%d)，want (%d,%d)：它没有贴着卡片内边距（"+
@@ -243,18 +242,8 @@ func TestTheMiniKeysAreIcons(t *testing.T) {
 		}
 	}
 
-	// 居中也在这里断：三个键一共 100 宽，而这一列有 208——左对齐的话右边空
-	// 108 像素，**播放键落在窗口左侧**，而它头顶那条进度条横跨整列
-	// （见 `viewMiniTransport` 的注释）。播放键的中点得在进度条中点底下。
-	play, ok := tt.Find("播放")
-	if !ok {
-		t.Fatalf("画面上找不到「播放」，文字有 %q", tt.Texts())
-	}
-	if d := math.Abs(float64(play.X+play.W/2) - float64(progress.X+progress.W/2)); d > 2 {
-		t.Errorf("播放键的中点在 x=%.1f，而进度条的中点在 x=%.1f（差 %.1f）——"+
-			"三个键没居中，左边挤成一团、右边空着",
-			play.X+play.W/2, progress.X+progress.W/2, d)
-	}
+	// 84 高的窗里三个键靠左，音量在同一行的右端（设计规范 v0.1 §7.6），不再要求居中。
+	_ = progress
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

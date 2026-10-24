@@ -7,6 +7,7 @@ package bili
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 )
@@ -293,6 +294,144 @@ func TestAnItemWithoutAnIDIsDropped(t *testing.T) {
 	}
 	if len(pg.Items) != 1 || pg.Items[0].ID != "good" {
 		t.Errorf("拿到 %+v，want 只有 good 那一条", pg.Items)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 丢掉的理由分了类（票 #344）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheDroppedOnesAreToldApartByReason 钉住「丢掉的理由分了类」。
+//
+// ⚠️ 分类不是为了好看：界面上只有一句话概括「丢了几条」的话，「B 站返回了
+// 一种我们不认识的形态」和「这一条我们读不懂（B 站改了返回的形状）」会被
+// 说成**同一件事**——而后者那句话对用户是**错的**（票 #344）：B 站没有换
+// 形态，是**我们读不出来**。
+//
+// 判据是**按类别的计数**，不是一个总数。
+func TestTheDroppedOnesAreToldApartByReason(t *testing.T) {
+	items := []any{
+		// 形态不认识：转发。
+		dynItem("x1", setType("DYNAMIC_TYPE_FORWARD")),
+		// 读不懂：`major.opus` 给的不是对象（`encoding/json` 整个失败）。
+		map[string]any{
+			"id_str": "x2", "type": "DYNAMIC_TYPE_DRAW",
+			"modules": map[string]any{
+				"module_dynamic": map[string]any{
+					"major": map[string]any{"opus": "不是一个对象"},
+				},
+			},
+		},
+		// 没有身份：`id_str` 是空的。
+		map[string]any{"type": "DYNAMIC_TYPE_WORD", "modules": map[string]any{}},
+		// 什么也没有：声明是纯文字，正文却是空的。
+		dynItem("x4", setEmptyBody()),
+	}
+	_, cli := dynamicFixture(t, items, "", false)
+
+	pg, err := cli.DynamicFeed(context.Background(), "")
+	if err != nil {
+		t.Fatalf("整页崩了：%v", err)
+	}
+	if pg.Dropped != 4 || len(pg.Drops) != 4 {
+		t.Fatalf("丢掉 %d 条（明细 %d 条），want 4 / 4", pg.Dropped, len(pg.Drops))
+	}
+
+	var c DropCounts
+	for _, d := range pg.Drops {
+		c.Add(d.Reason)
+	}
+	for _, c2 := range []struct {
+		what string
+		got  int
+	}{
+		{"形态不认识", c.ShapeUnknown},
+		{"读不懂", c.Unreadable},
+		{"没有身份", c.NoIdentity},
+		{"什么也没有", c.Empty},
+	} {
+		if c2.got != 1 {
+			t.Errorf("「%s」数了 %d 条，want 1", c2.what, c2.got)
+		}
+	}
+	if c.Total() != 4 {
+		t.Errorf("加起来是 %d 条，want 4", c.Total())
+	}
+}
+
+// TestTheSameDroppedDynamicInTwoPagesIsTheSameOne 钉住「跨页去重靠的是身份」。
+//
+// ⚠️ B 站翻页**会重叠**：同一批画不出来的动态在两页里各出现一次。界面上那个
+// 数要按**不同的动态**算（不是按出现次数算），所以同一条在两页里必须是
+// **同一个身份**——这是上层去重的唯一依据（票 #344）。
+//
+// 判据是**两页给出的 `Key` 一样**。
+func TestTheSameDroppedDynamicInTwoPagesIsTheSameOne(t *testing.T) {
+	f := spaceClient(t) // 顺手把 WBI 的 key 备上（feed/space 要签名）
+	f.on(dynamicFeedSpacePath, func(w http.ResponseWriter, r *http.Request) {
+		// **两页给的是同一条**（B 站翻页重叠的形状）。
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			"items":    []any{dynItem("f1", setType("DYNAMIC_TYPE_FORWARD"))},
+			"offset":   "O2",
+			"has_more": true,
+		}))
+	})
+	cli := f.client(t, Options{})
+
+	pg1, err := cli.SpaceDynamics(context.Background(), 42, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pg2, err := cli.SpaceDynamics(context.Background(), 42, "O1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pg1.Drops) != 1 || len(pg2.Drops) != 1 {
+		t.Fatalf("两页各丢了 %d / %d 条，want 1 / 1", len(pg1.Drops), len(pg2.Drops))
+	}
+	if pg1.Drops[0].Key != pg2.Drops[0].Key {
+		t.Errorf("同一条在两页里身份不同：%q vs %q（跨页去重靠它，"+
+			"不一样的话界面上那个数会翻倍）", pg1.Drops[0].Key, pg2.Drops[0].Key)
+	}
+}
+
+// TestADroppedOneWeCannotReadAtAllStillHasAStableIdentity 钉住「连 JSON 都
+// 读不懂的那一条，身份也是稳的」。
+//
+// 那一类拿不到 `id_str`（整条读不开），所以身份退到**原文的指纹**——
+// 翻页重叠时那一条原文是一样的，指纹也就一样，于是它被数一次而不是两次
+// （票 #344）。
+func TestADroppedOneWeCannotReadAtAllStillHasAStableIdentity(t *testing.T) {
+	// 一个根本不是对象的那一条（`items` 是 `[]json.RawMessage`，
+	// 「读不懂」只在类型不对时发生）。
+	broken := json.RawMessage(`"这一条根本不是一个对象"`)
+	f := spaceClient(t)
+	f.on(dynamicFeedSpacePath, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			"items":    []any{json.RawMessage(broken)},
+			"offset":   "O2",
+			"has_more": true,
+		}))
+	})
+	cli := f.client(t, Options{})
+
+	pg1, err := cli.SpaceDynamics(context.Background(), 42, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pg2, err := cli.SpaceDynamics(context.Background(), 42, "O1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pg1.Drops) != 1 || len(pg2.Drops) != 1 {
+		t.Fatalf("两页各丢了 %d / %d 条，want 1 / 1", len(pg1.Drops), len(pg2.Drops))
+	}
+	if pg1.Drops[0].Reason != DropUnreadable {
+		t.Errorf("理由是 %v，want 「读不懂」", pg1.Drops[0].Reason)
+	}
+	if pg1.Drops[0].Key != pg2.Drops[0].Key {
+		t.Errorf("同一条读不懂的在两页里身份不同：%q vs %q",
+			pg1.Drops[0].Key, pg2.Drops[0].Key)
 	}
 }
 

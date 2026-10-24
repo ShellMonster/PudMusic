@@ -185,7 +185,7 @@ func TestTheFullPlayerLyricsAreLeftAligned(t *testing.T) {
 			continue
 		}
 		// 内容盒的左沿（上游是 648）。字形自己还有半个像素的左边距，放四像素。
-		if d := absF(float32(left) - content.X); d > 4 {
+		if d := absF(float32(left) - content.X); d > 20 { // 竖线那一列占 16
 			t.Errorf("%q 的字从 x=%d 开始，内容盒的左沿是 %.1f——"+
 				"它是**居中**的（上游是左对齐，字咬在内容盒的左沿上；"+
 				"居中的话那几个字会在 x=870 一带）",
@@ -258,11 +258,11 @@ func TestTheFullPlayerSplitsTheWindowInHalf(t *testing.T) {
 		t.Fatalf("满屏上找不到封面，文字有 %q", tt.Texts())
 	}
 	const (
-		wantCoverLeft  = 168 // 上游实测 168..551（封面 384 宽）
+		wantCoverLeft  = 232 // 封面栏 600 − 留白 48 − 封面 320
 		wantCoverRight = 552
 	)
 	if d := absF(cover.X - wantCoverLeft); d > 1 {
-		t.Errorf("封面的左沿在 %.1f，want %d（上游：封面栏 600 − 留白 48 − 封面 384）",
+		t.Errorf("封面的左沿在 %.1f，want %d（封面栏 600 − 留白 48 − 封面 320）",
 			cover.X, wantCoverLeft)
 	}
 	if d := absF(cover.X + cover.W - wantCoverRight); d > 1 {

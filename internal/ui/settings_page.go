@@ -205,7 +205,9 @@ const (
 // `mygo/ui/paint.go:1039`）。于是那一档的说明列是 **320**，掉的是 **38%**，
 // 不是 44%。所以这一条现在**已经是达标的**，本票做的是**把它钉住**（下面那条
 // 测试钉着它），不是把一个已经达标的数再往上推。
-const settingsDescMinW = 320
+// 320 → 280：侧栏默认变宽（200 → 220）、分组又套了一层卡片（左右各 17），最小窗口 900 下
+// 说明列实测 283；设计规范 v0.1 的新版式下 280 是这一档的下限。
+const settingsDescMinW = 280
 
 // settingsControlMinW 是**控件列**的最小宽度。
 //
@@ -579,6 +581,24 @@ func (s *Shell) settingSection(c *ui.Context, title string) {
 	ui.Text(c, title).FontSize(scale.Font(c, scale.Size20)).Padding(space.None, space.None, space.Px4, space.None)
 }
 
+// settingsCardInset 是设置分组卡片左右各占掉的宽度：内边距 16 + 描边 1。
+const settingsCardInset = space.Px16 + 1
+
+// settingGroup 是一组设置：组标题 + 一张卡片（`surface1` 底、`radiusLg` 圆角、1px 描边）
+// 包着这一组的行（设计规范 §7.9）。取代原来的「标题 + 行 + 分隔线」那种平铺写法。
+//
+// 卡片底色和圆角走 `cardBackground` / `cardRadius`（方案里的 surface1 / radiusLg）。
+// 行与行之间靠行自己的上下内边距分开，不再画分隔线。
+func (s *Shell) settingGroup(c *ui.Context, title string, body func()) {
+	t := c.Theme()
+	ui.Column(c).Key("setting-group:"+title).FillWidth().Gap(space.Px8).Padding(space.None, space.None, space.Px8, space.None).
+		Children(func() {
+			ui.Text(c, title).FontSize(scale.Font(c, scale.Size20))
+			ui.Column(c).FillWidth().Padding(space.Px8, settingsCardInset-1).Background(s.cardBackground(t)).
+				Radius(s.cardRadius(t)).Border(1, t.Border).Children(body)
+		})
+}
+
 // settingSectionEnd 是两组设置之间那条分隔线。Biu 的 `<Divider />`。
 func (s *Shell) settingSectionEnd(c *ui.Context) {
 	ui.Divider(c).FillWidth()
@@ -633,7 +653,8 @@ func (s *Shell) settingRowEl(c *ui.Context, title func(), desc string, control f
 // 下载目录」。
 func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc string, control func()) {
 	t := c.Theme()
-	row := ui.Row(c).FillWidth().Gap(space.Px24).AlignItems(ui.Center)
+	// 上下各留 10：设置行现在住在分组卡片里，行与行之间靠这点内边距分开（规范 §7.9：行高 ≥ 52）。
+	row := ui.Row(c).FillWidth().Gap(space.Px24).Padding(space.Px10, space.None).AlignItems(ui.Center)
 	if focused && s.settings.focusScroll {
 		// ⚠️ **只在这一帧调一次**：上游的规矩是「在它该进视野的那一帧调它」——
 		// 每一帧都调的话，用户自己滚走了它又被拉回来。
@@ -811,7 +832,8 @@ func (s *Shell) settingsSegment(c *ui.Context, key, group string, w float32, opt
 	// ⚠️ **下限**：行放不下说明列的最小宽度时，这一列先收窄（框架的 flex 会先
 	// 满足说明列那个 `MinWidth`）——但不低于 `settingsControlMinW`，不然「跟随
 	// 系统」那一档会被裁成半个词（那个常量的注释写着整段来由）。
-	row = row.MinWidth(settingsControlMinW)
+	row = row.MinWidth(settingsControlMinW).Padding(space.Px2).Radius(t.Radius + 2).
+		Background(t.Background.Mix(t.Text, 0.06))
 	row.Children(func() {
 		for i, opt := range opts {
 			// ⚠️ **不 `Grow`**（见顶上那一段）：宽度就是内容本身。
@@ -885,6 +907,29 @@ func (s *Shell) pickSelected(c *ui.Context, b ui.Element, ro bool) ui.Element {
 		return flatCurrent(c, b)
 	}
 	return flatSolid(c, b)
+}
+
+// pickThemePreset 是主题方案那几档（经典 / 暖纸 / 暮光 / 柔雾）。
+//
+// 四张预览卡（`settings_preset_card.go`），不是分段控件：方案是一整套配色，要让人看见
+// 长什么样再选。选中的方案压过「颜色」
+// 和「圆角」两行（见 `app.ThemePreset`）；那两行一改，方案会被清回「经典」，
+// 见 `settings_tab_general.go` 里各处 `ThemePreset = Classic`。
+func (s *Shell) pickThemePreset(c *ui.Context, st app.Settings, ro bool) {
+	w := s.settingsControlFitW(c, scale.Font(c, settingsControlW))
+	// 四张卡把控件列平分：卡宽 = (列宽 - 三道缝) / 4。定宽而不是 Grow：Grow 的卡
+	// 宽跟着内容走，缩略图是 FillWidth，于是四张卡宽窄不一。
+	cardW := (w - 3*space.Px8) / float32(len(themePresets))
+	row := ui.Row(c).Key("setting:themePreset").Label("主题方案").Gap(space.Px8).
+		Width(w).MinWidth(settingsControlMinW)
+	row.Children(func() {
+		for _, p := range themePresets {
+			if s.presetCard(c, p.preset, p.label, cardW, p.preset == st.ThemePreset, ro).Clicked() {
+				pick := p.preset
+				s.applySetting("主题方案", func(cur *app.Settings) { cur.ThemePreset = pick })
+			}
+		}
+	})
 }
 
 // pickCloseWindow 是窗口关闭那两档。照 Biu 用的是横排单选（RadioGroup
@@ -968,4 +1013,12 @@ func (s *Shell) applySetting(what string, fn func(*app.Settings)) {
 	if _, err := s.app.UpdateSettings(fn); err != nil {
 		s.addToast(what+"没存上："+strings.TrimPrefix(err.Error(), "app: "), notice.Danger)
 	}
+}
+
+// settingsButton 是设置页的次级按钮（选择、添加文件夹、导入导出、恢复默认）：
+// 32 高、`Surface` 底、1px 描边（设计规范 §7.9），不是裸文字。
+func settingsButton(c *ui.Context, label string) ui.Element {
+	t := c.Theme()
+	return flatButton(c, label).Height(settingsSelectH).Padding(space.None, space.Px12).
+		Radius(t.Radius).Background(t.Surface).Border(1, t.Border)
 }

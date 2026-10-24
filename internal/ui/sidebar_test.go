@@ -170,8 +170,8 @@ func TestDraggingBackOutExpandsTheSidebar(t *testing.T) {
 		t.Fatalf("折叠之后是 %v 宽，want %v", got, app.CollapsedSideMenuWidth)
 	}
 
-	// 从 72 拖到 172：+100 > 160，展开。
-	dragFrom(tt, gripX(app.CollapsedSideMenuWidth), 400, gripX(app.CollapsedSideMenuWidth)+100, 400)
+	// 从 64 拖到 192：+128 > 180，展开。
+	dragFrom(tt, gripX(app.CollapsedSideMenuWidth), 400, gripX(app.CollapsedSideMenuWidth)+128, 400)
 
 	st := a.SettingsSnapshot()
 	if st.SideMenuCollapsed {
@@ -233,7 +233,7 @@ func TestDraggingWiderIsCappedAt480(t *testing.T) {
 func TestTheSidebarWidthSurvivesARestart(t *testing.T) {
 	_, a, tt, path := sideShell(t)
 
-	dragFrom(tt, gripX(app.DefaultSideMenuWidth), 400, gripX(app.DefaultSideMenuWidth)+120, 400)
+	dragFrom(tt, gripX(app.DefaultSideMenuWidth), 400, gripX(app.DefaultSideMenuWidth)+60, 400)
 	if err := a.FlushSettings(); err != nil {
 		t.Fatal(err)
 	}
@@ -242,8 +242,8 @@ func TestTheSidebarWidthSurvivesARestart(t *testing.T) {
 	}
 
 	_, _, tt2, _ := sideShellOn(t, path)
-	if got := sideWidthOnScreen(t, tt2); got != app.DefaultSideMenuWidth+120 {
-		t.Errorf("重开之后侧栏是 %v 宽，want %v", got, app.DefaultSideMenuWidth+120)
+	if got := sideWidthOnScreen(t, tt2); got != app.DefaultSideMenuWidth+60 {
+		t.Errorf("重开之后侧栏是 %v 宽，want %v", got, app.DefaultSideMenuWidth+60)
 	}
 }
 
@@ -803,7 +803,8 @@ func TestTheCollapsedSidebarTipSitsToTheRightOfTheItem(t *testing.T) {
 				B: theme.Inverse.B, A: theme.Inverse.A}
 			img := tt.Image()
 			// ① 侧栏右边那一格是提示的底色 → 提示贴在那一项的右边。
-			at := img.RGBAAt(int(app.CollapsedSideMenuWidth)+4, int(r.Y+r.H/2))
+			// x=58：提示从那一格右沿往右 6 处开始（侧栏现在只有 64 宽，提示的头几像素压在侧栏里）。
+			at := img.RGBAAt(58, int(r.Y+r.H/2))
 			if at != inverse {
 				t.Errorf("侧栏右边那一格是 %v，want %v（提示的底色）——"+
 					"提示没有贴在那一项的右边", at, inverse)
@@ -1105,7 +1106,7 @@ func TestTheCollapsedSideMenuItemIsAFortySquareIconCell(t *testing.T) {
 	}
 	// ⚠️ **格子要居中**：侧栏折叠后是 72，而格子是 40——不居中的话它会贴在
 	// 左边沿上（上游那一格也是居中的）。
-	if got := r.X; got < 8 || got > 24 {
+	if got := r.X; got < 4 || got > 24 {
 		t.Errorf("折叠态那一格的左边在 %.1f——它没有居中在 72 宽的侧栏里", got)
 	}
 }

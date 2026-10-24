@@ -70,6 +70,15 @@ type Options struct {
 	// ⚠️ **它在后台那条线上被调**（不是界面线程），所以它不许碰界面状态。
 	// 上层拿它做的是「说一句话」（见 `internal/app/announce.go`）。
 	OnDone func(Snapshot)
+	// CanRetry 判一次失败**能不能立刻再问一次**。
+	//
+	// ⚠️ **它由上层装**（app 层装的是 `bili.Recoverable`，见
+	// `app.MountDownloads`）：这一层不认识 B 站，而「风控/限流不该立刻再问」
+	// 是 B 站那边的知识——那张表的**唯一一处**在 `internal/service/bili/retry.go`。
+	//
+	// 不装就按「能重试」算（这一版之前的行为：每一项出错都给一枚「重试」），
+	// 而生产上一定装（app 层是唯一的构造点）。
+	CanRetry func(error) bool
 }
 
 // Manager 是下载队列。
@@ -83,6 +92,9 @@ type Manager struct {
 	client  *http.Client
 	resolve Resolver
 	now     func() int64
+
+	// canRetry 判一次失败能不能立刻再问一次（见 `Options.CanRetry`）。
+	canRetry func(error) bool
 
 	// wake 是「状态变了，要一帧」的回调，由界面层装。
 	wake func()
@@ -138,6 +150,8 @@ func New(opts Options, path string) (*Manager, error) {
 		resolve: opts.Resolve,
 		now:     now,
 		onDone:  opts.OnDone,
+		// nil 是允许的：没装判据就按「能重试」算（见 `Options.CanRetry`）。
+		canRetry: opts.CanRetry,
 		ctx:     ctx,
 		quit:    quit,
 		wakeup:  make(chan struct{}, 1),
@@ -215,6 +229,9 @@ func (m *Manager) Enqueue(req AddRequest) (Snapshot, error) {
 		if retry {
 			t.Status = StatusQueued
 			t.Err = ""
+			// ⚠️ **重新排上队就把上一轮那个判据扔掉**：这一轮会不会成功是另一件
+			// 事，而「该不该给「重试」键」是**这一轮失败之后**才判的。
+			t.noRetry = false
 			snap = SnapshotOf(t)
 		}
 		m.mu.Unlock()
@@ -295,6 +312,8 @@ func (m *Manager) Resume(id string) error {
 	}
 	t.Status = StatusQueued
 	t.Err = ""
+	// ⚠️ 同上：重新排上队就扔掉上一轮那个判据。
+	t.noRetry = false
 	m.mu.Unlock()
 
 	m.kick()
@@ -546,6 +565,8 @@ func (m *Manager) runOne(id string) {
 	ctx, cancel := context.WithCancel(m.ctx)
 	t.Status = StatusRunning
 	t.Err = ""
+	// ⚠️ 同上：这一轮重新开始了，上一轮那个判据就不作数了。
+	t.noRetry = false
 	m.cancels[id] = cancel
 	wake := m.wake
 	m.mu.Unlock()
@@ -606,6 +627,11 @@ func (m *Manager) runOne(id string) {
 		default:
 			t.Status = StatusError
 			t.Err = err.Error()
+			// 🔴 **「重试」那一枚键按不按得有用，在这里判**（票 #346）：判据和
+			// 播放条上那枚是**同一张表**（`bili.Recoverable` 那张表，由 app 层
+			// 装进来）。风控失败的那一项**不给**「重试」——那枚键是立刻重新
+			// 取流，按下去就是再撞一次墙。
+			t.noRetry = !m.retryable(err)
 			done = SnapshotOf(t)
 		}
 	}
@@ -624,6 +650,22 @@ func (m *Manager) runOne(id string) {
 	if onDone != nil && done.ID != "" {
 		onDone(done)
 	}
+}
+
+// retryable 报一次失败**能不能立刻再问一次**。
+//
+// ⚠️ **没装判据就按「能重试」算**：那是这一版之前的行为（每一项出错都给一枚
+// 「重试」键），而生产上一定装（`app.MountDownloads` 装的是
+// `bili.Recoverable`——那张表的唯一一处）。
+//
+// ⚠️ **判据不认得的错按「能重试」算**（`bili.Recoverable` 的兜底口径）：
+// 这一层自己造的错（拉字节断了、写文件失败）不认得 B 站的任何一个哨兵，
+// 而「用户宁可多点一次重试，也不要被一句「不可重试」堵死」在那张表上成立。
+func (m *Manager) retryable(err error) bool {
+	if m.canRetry == nil {
+		return true
+	}
+	return m.canRetry(err)
 }
 
 // waitIdle 等一个任务真的停下来（取消之后网络要断开、goroutine 要退出）。

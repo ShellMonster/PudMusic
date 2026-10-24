@@ -75,74 +75,75 @@ var audioQualityHint = map[app.AudioQuality]string{
 
 // settingsGeneral 是常规那一页。
 func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
-	s.settingSection(c, "外观")
-	// ⚠️ 这一格走 `viewDisplayMode`（切换 + 预览），不是光 `pickDisplayMode`：预览
-	// 是这一格的一部分，理由见 displaymode.go 的文件头。
-	s.settingRow(c, "数据显示样式", "内容页排成列表、网格还是紧凑",
-		func() { s.viewDisplayMode(c, st, ro) })
-	s.settingRow(c, "主题", "选择浅色或深色主题",
-		func() { s.pickTheme(c, st, ro) })
-	s.settingRow(c, "颜色", "背景色和主色，点色块挑颜色",
-		func() { s.pickColors(c, st, ro) })
-	s.settingRow(c, "字体", "选择界面显示的字体",
-		func() { s.pickFont(c, st, ro) })
-	s.settingRow(c, "圆角", "调整界面控件的圆角大小",
-		func() { s.pickRadius(c, st, ro) })
+	s.settingGroup(c, "外观", func() {
+		// ⚠️ 这一格走 `viewDisplayMode`（切换 + 预览），不是光 `pickDisplayMode`：预览
+		// 是这一格的一部分，理由见 displaymode.go 的文件头。
+		s.settingRow(c, "数据显示样式", "内容页排成列表、网格还是紧凑",
+			func() { s.viewDisplayMode(c, st, ro) })
+		s.settingRow(c, "主题方案", "选一套整体配色；改下面的颜色或圆角会回到经典",
+			func() { s.pickThemePreset(c, st, ro) })
+		s.settingRow(c, "主题", "选择浅色或深色主题",
+			func() { s.pickTheme(c, st, ro) })
+		s.settingRow(c, "颜色", "背景色和主色，点色块挑颜色",
+			func() { s.pickColors(c, st, ro) })
+		s.settingRow(c, "字体", "选择界面显示的字体",
+			func() { s.pickFont(c, st, ro) })
+		s.settingRow(c, "圆角", "调整界面控件的圆角大小",
+			func() { s.pickRadius(c, st, ro) })
 
-	s.settingSectionEnd(c)
-	s.settingSection(c, "播放")
-	s.settingRow(c, "音质偏好", audioQualityHint[st.AudioQuality],
-		func() { s.pickAudioQuality(c, st, ro) })
-	s.settingRow(c, "上报本机播放记录", "将播放进度同步到Bilibili服务器",
-		func() {
-			s.pickSwitch(c, "上报本机播放记录", "播放记录上报", st.ReportPlayHistory, ro,
-				func(cur *app.Settings, on bool) { cur.ReportPlayHistory = on })
-		})
+	})
+	s.settingGroup(c, "播放", func() {
+		s.settingRow(c, "音质偏好", audioQualityHint[st.AudioQuality],
+			func() { s.pickAudioQuality(c, st, ro) })
+		s.settingRow(c, "上报本机播放记录", "将播放进度同步到Bilibili服务器",
+			func() {
+				s.pickSwitch(c, "上报本机播放记录", "播放记录上报", st.ReportPlayHistory, ro,
+					func(cur *app.Settings, on bool) { cur.ReportPlayHistory = on })
+			})
 
-	s.settingSectionEnd(c)
-	s.settingSection(c, "下载")
-	// ⚠️ **这一行有身份**（`settingRowAt`）：从下载记录页跳过来的时候要指着它
-	// （见 goToDownloadDirSetting）——设置页有四个 Tab、几十行，不指一下用户
-	// 还得自己找「下载目录」在哪儿。
-	s.settingRowAt(c, string(settingsFocusDownload), "下载目录", "选择音视频保存的位置",
-		func() { s.pickDownloadPath(c, st, ro) })
-	s.settingRow(c, "FFmpeg 路径", "手动指定 FFmpeg 可执行文件路径",
-		func() { s.pickFFmpegPath(c, st, ro) })
+	})
+	s.settingGroup(c, "下载", func() {
+		// ⚠️ **这一行有身份**（`settingRowAt`）：从下载记录页跳过来的时候要指着它
+		// （见 goToDownloadDirSetting）——设置页有四个 Tab、几十行，不指一下用户
+		// 还得自己找「下载目录」在哪儿。
+		s.settingRowAt(c, string(settingsFocusDownload), "下载目录", "选择音频保存的位置",
+			func() { s.pickDownloadPath(c, st, ro) })
+		s.settingRow(c, "FFmpeg 路径", "手动指定 FFmpeg 可执行文件路径",
+			func() { s.pickFFmpegPath(c, st, ro) })
+	})
 
 	s.pickLocalMusicDirs(c, st, ro)
 
-	s.settingSectionEnd(c)
-	s.settingSection(c, "搜索")
-	s.settingRow(c, "显示搜索历史", "在搜索框中显示搜索历史记录",
-		func() {
-			s.pickSwitch(c, "显示搜索历史", "显示搜索历史", st.ShowSearchHistory, ro,
-				func(cur *app.Settings, on bool) { cur.ShowSearchHistory = on })
-		})
+	s.settingGroup(c, "搜索", func() {
+		s.settingRow(c, "显示搜索历史", "在搜索框中显示搜索历史记录",
+			func() {
+				s.pickSwitch(c, "显示搜索历史", "显示搜索历史", st.ShowSearchHistory, ro,
+					func(cur *app.Settings, on bool) { cur.ShowSearchHistory = on })
+			})
 
-	s.settingSectionEnd(c)
-	s.settingSection(c, "系统")
-	s.settingRow(c, "窗口关闭", "选择窗口关闭时的行为",
-		func() { s.pickCloseWindow(c, st, ro) })
-	s.pickTrayNote(c)
-	s.settingRow(c, "开机自启", "系统登录后自动启动应用",
-		func() { s.pickAutoStart(c, st, ro) })
+	})
+	s.settingGroup(c, "系统", func() {
+		s.settingRow(c, "窗口关闭", "选择窗口关闭时的行为",
+			func() { s.pickCloseWindow(c, st, ro) })
+		s.pickTrayNote(c)
+		s.settingRow(c, "开机自启", "系统登录后自动启动应用",
+			func() { s.pickAutoStart(c, st, ro) })
 
-	// 「关于应用」摆在最后，照 Biu 的 `system-settings.tsx` 那一段的顺序。
-	//
-	// ⚠️ 它**不是** `settingRow`，也不吃 `ro`：更新那一摊的状态在 `App` 上，不在
-	// 设置文件里，而「只读」保护的是**设置文件**——更新器写的是自己那一份
-	// （`app-update.json`），从没碰过用户的 `app-settings.json`。让这一格跟着
-	// `ro` 变灰，会在「设置来自更新的版本」这一个场景里，把一个本来完全可用的
-	// 更新入口关掉。
-	//
-	// ⚠️ 顺序：**在**「配置」段（导出 / 导入 / 从 Biu 导入）**之前**。Biu 那边
-	// 导入导出就是长在「关于应用」这一段里的——版本号 + 检查更新那一行之后
-	// 紧接着就是 `<ImportExport />`（`system-settings.tsx:388-402`）。两边各自
-	// 加了一段，谁在前谁在后没人对过，这里按 Biu 定下来。
-	s.settingSectionEnd(c)
+		// 「关于应用」摆在最后，照 Biu 的 `system-settings.tsx` 那一段的顺序。
+		//
+		// ⚠️ 它**不是** `settingRow`，也不吃 `ro`：更新那一摊的状态在 `App` 上，不在
+		// 设置文件里，而「只读」保护的是**设置文件**——更新器写的是自己那一份
+		// （`app-update.json`），从没碰过用户的 `app-settings.json`。让这一格跟着
+		// `ro` 变灰，会在「设置来自更新的版本」这一个场景里，把一个本来完全可用的
+		// 更新入口关掉。
+		//
+		// ⚠️ 顺序：**在**「配置」段（导出 / 导入 / 从 Biu 导入）**之前**。Biu 那边
+		// 导入导出就是长在「关于应用」这一段里的——版本号 + 检查更新那一行之后
+		// 紧接着就是 `<ImportExport />`（`system-settings.tsx:388-402`）。两边各自
+		// 加了一段，谁在前谁在后没人对过，这里按 Biu 定下来。
+	})
 	s.settingsUpdate(c, s.app.UpdateSnapshot())
 
-	s.settingSectionEnd(c)
 	// 「配置」段（导出 / 导入 / 从 Biu 导入），照 Biu 的位置。
 	s.settingsConfig(c)
 }
@@ -204,7 +205,7 @@ func (s *Shell) pickRadius(c *ui.Context, st app.Settings, ro bool) {
 		AlignItems(ui.Center).Children(func() {
 		sl := ui.Slider(c, &v, 0, app.MaxBorderRadius).Grow(1).Label("全局圆角").Disabled(ro)
 		if sl.Changed() {
-			s.applySetting("圆角", func(cur *app.Settings) { cur.BorderRadius = v })
+			s.applySetting("圆角", func(cur *app.Settings) { cur.BorderRadius, cur.ThemePreset = v, app.ThemePresetClassic })
 		}
 		ui.Textf(c, "%.0fpx", v).FontSize(scale.Font(c, scale.Size12)).Width(radiusReadoutW)
 	})
@@ -235,7 +236,7 @@ func (s *Shell) pickDownloadPath(c *ui.Context, st app.Settings, ro bool) {
 	ui.Row(c).Key("setting:downloadPath").Width(settingsControlW).
 		MinWidth(settingsControlMinW).Gap(space.Px8).Children(func() {
 		s.pathField(c, st.DownloadPath, "下载目录", ro)
-		if flatButton(c, "选择").Width(64).Disabled(ro).Clicked() {
+		if settingsButton(c, "选择").Width(72).Disabled(ro).Clicked() {
 			s.pickPath("下载目录", true, func(path string) {
 				s.applySetting("下载目录", func(cur *app.Settings) { cur.DownloadPath = path })
 				s.addToast("下载目录已改：下载记录页上写的就是它，下完的歌放在那儿",
@@ -250,7 +251,7 @@ func (s *Shell) pickFFmpegPath(c *ui.Context, st app.Settings, ro bool) {
 	ui.Row(c).Key("setting:ffmpegPath").Width(settingsControlW).
 		MinWidth(settingsControlMinW).Gap(space.Px8).Children(func() {
 		s.pathField(c, st.FFmpegPath, "FFmpeg 路径", ro)
-		if flatButton(c, "选择").Width(64).Disabled(ro).Clicked() {
+		if settingsButton(c, "选择").Width(72).Disabled(ro).Clicked() {
 			s.pickPath("FFmpeg 路径", false, func(path string) {
 				s.applySetting("FFmpeg 路径", func(cur *app.Settings) { cur.FFmpegPath = path })
 			})
@@ -270,7 +271,7 @@ func (s *Shell) pathField(c *ui.Context, path, label string, ro bool) {
 	}
 	// ⚠️ **不许给输入框加 Key**：Key 只能挂在「创建时没有处理输入」的控件上，
 	// 挂上去直接 panic（`ui/element.go:658`）。外面那一格有 Key 就够了。
-	ui.TextInput(c, &shown).Grow(1).Label(label).ReadOnly(true)
+	ui.TextInput(c, &shown).Grow(1).Height(settingsSelectH).Label(label).ReadOnly(true)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -311,19 +312,29 @@ func (s *Shell) pickColors(c *ui.Context, st app.Settings, ro bool) {
 	ui.Row(c).Key("setting:colors").Width(settingsControlW).
 		MinWidth(settingsControlMinW).Gap(colorItemGap).Children(func() {
 		bg := pick(st.BackgroundColor != "", st.BackgroundColor, themeBackground(dark))
+		// 套了方案时，色块要显示**方案真在画的色**，不是设置里那两个已被压过的值——
+		// 否则暖纸底上摆着一块白、一块 Biu 绿，用户以为那就是当前配色。
+		if st.ThemePreset != app.ThemePresetClassic {
+			bg = toHex(c.Theme().Background)
+		}
 		s.colorItem(c, "背景", bg, ro, st.BackgroundColor != "", func(col string) {
-			s.applySetting("背景色", func(cur *app.Settings) { cur.BackgroundColor = col })
+			s.applySetting("背景色", func(cur *app.Settings) { cur.BackgroundColor, cur.ThemePreset = col, app.ThemePresetClassic })
 		}, func() {
-			s.applySetting("背景色", func(cur *app.Settings) { cur.BackgroundColor = "" })
+			s.applySetting("背景色", func(cur *app.Settings) { cur.BackgroundColor, cur.ThemePreset = "", app.ThemePresetClassic })
 		})
 
 		primary := pick(st.PrimaryColor != app.DefaultPrimaryColor,
 			st.PrimaryColor, app.DefaultPrimaryColor)
+		if st.ThemePreset != app.ThemePresetClassic {
+			primary = toHex(c.Theme().Accent)
+		}
 		s.colorItem(c, "主色", primary, ro, st.PrimaryColor != app.DefaultPrimaryColor,
 			func(col string) {
-				s.applySetting("主色", func(cur *app.Settings) { cur.PrimaryColor = col })
+				s.applySetting("主色", func(cur *app.Settings) { cur.PrimaryColor, cur.ThemePreset = col, app.ThemePresetClassic })
 			}, func() {
-				s.applySetting("主色", func(cur *app.Settings) { cur.PrimaryColor = app.DefaultPrimaryColor })
+				s.applySetting("主色", func(cur *app.Settings) {
+					cur.PrimaryColor, cur.ThemePreset = app.DefaultPrimaryColor, app.ThemePresetClassic
+				})
 			})
 	})
 }

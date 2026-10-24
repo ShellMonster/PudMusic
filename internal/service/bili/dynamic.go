@@ -20,6 +20,16 @@
 // （`user-profile/dynamic-list/index.tsx:48`）——那是另一套取舍：那一页要的是
 // 「这个人发的视频」，这里要的是「这一条画得出来」。
 //
+// # 丢掉的理由**分了类**，而且每一条都带着**身份**
+//
+// 丢掉的理由不止一种（`DropReason`）：「B 站返回了一种我们不认识的形态」
+// 和「这一条我们读不懂（B 站改了返回的形状）」是**两回事**——后者是应用
+// 自己跟不上 B 站的返回。界面上要按类别说话（票 #344），所以这里分类。
+//
+// 而每一条丢掉的东西还带一个**身份**（`DroppedDynamic.Key`）：B 站翻页
+// **会重叠**，同一条画不出来的动态在两页里各出现一次——上层按身份去重，
+// 那个数才是「有几条不同的动态」而不是「出现过几次」。
+//
 // # 翻页是 offset，不是页码
 //
 // 动态接口下一页的入口是返回里的 `offset` 字段（一个不透明的串），不是
@@ -28,7 +38,10 @@
 package bili
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -160,6 +173,94 @@ type Dynamic struct {
 	LikeCount int
 }
 
+// DropReason 是「一条动态我们画不出来」的**那一类**理由。
+//
+// ⚠️ **分类是为了让界面上那句话说得对**（票 #344）：原来只有一个总数，
+// 于是「B 站返回了一种我们不认识的形态」和「这一条我们读不懂（B 站改了
+// 返回的形状）」在界面上被说成**同一件事**——而后者那句话对用户是错的：
+// B 站不是换了一种形态，是**它返回的形状变了**（那是应用自己的问题，
+// 不是那个 UP 主发了什么）。
+//
+// 界面上每一类各说一句（见 `internal/ui` 的 `dropPhrases`）。
+type DropReason uint8
+
+const (
+	// DropShapeUnknown 是「B 站返回了一种我们不认识的形态」：转发、剧集、
+	// 课程、直播、广告、还有未来新增的那些。
+	DropShapeUnknown DropReason = iota
+	// DropUnreadable 是「这一条我们读不懂」：`encoding/json` 整个失败
+	// （B 站改了返回的形状）。
+	DropUnreadable
+	// DropNoIdentity 是「没有身份」：`id_str` 是空的，画出来也点不开。
+	DropNoIdentity
+	// DropEmpty 是「这一条什么也没有」：既没有正文也没有图；投稿动态没有
+	// 稿件号。
+	DropEmpty
+)
+
+// String 是给日志看的名字。界面上显示的话另有各处自己的文案。
+func (r DropReason) String() string {
+	switch r {
+	case DropShapeUnknown:
+		return "形态不认识"
+	case DropUnreadable:
+		return "读不懂"
+	case DropNoIdentity:
+		return "没有身份"
+	case DropEmpty:
+		return "什么也没有"
+	}
+	return fmt.Sprintf("未知的丢弃理由 %d", uint8(r))
+}
+
+// DroppedDynamic 是一条被丢掉的动态。
+type DroppedDynamic struct {
+	// Reason 是丢掉的那**一类**理由。
+	Reason DropReason
+	// Key 是这一条的**身份**，用来跨页去重。
+	//
+	// ⚠️ **它必须是「同一条就是同一个」**：B 站翻页**会重叠**，同一条画不
+	// 出来的动态在两页里各出现一次——按出现次数记的话，界面上那个数会
+	// **偏大**（票 #344）。
+	Key string
+	// Why 是这一条的理由（人话）。**只进日志**，不进界面。
+	Why string
+}
+
+// DropCounts 是丢掉的理由按类别分的计数。
+//
+// ⚠️ **分类计数才是能说清原因的那个数**：总数只能说「丢了 N 条」，说不出
+// 「丢的是哪一种」（票 #344）。
+type DropCounts struct {
+	// ShapeUnknown 是「B 站返回了一种我们不认识的形态」的那些。
+	ShapeUnknown int
+	// Unreadable 是「这一条我们读不懂」的那些。
+	Unreadable int
+	// NoIdentity 是「没有身份」的那些。
+	NoIdentity int
+	// Empty 是「这一条什么也没有」的那些。
+	Empty int
+}
+
+// Add 记一条丢掉的东西。
+func (c *DropCounts) Add(r DropReason) {
+	switch r {
+	case DropShapeUnknown:
+		c.ShapeUnknown++
+	case DropUnreadable:
+		c.Unreadable++
+	case DropNoIdentity:
+		c.NoIdentity++
+	case DropEmpty:
+		c.Empty++
+	}
+}
+
+// Total 是丢掉的总条数。
+func (c DropCounts) Total() int {
+	return c.ShapeUnknown + c.Unreadable + c.NoIdentity + c.Empty
+}
+
 // DynamicPage 是一页动态。
 type DynamicPage struct {
 	Items []Dynamic
@@ -174,12 +275,24 @@ type DynamicPage struct {
 	// 「到底了」，于是后面的有效动态**永远不再加载**（实测：第一页一条转发
 	// + has_more=true，第二页有一条正常的，卡在第一页上不再翻）。
 	Raw int
-	// Dropped 是这一页里有几条我们画不出来、丢掉了。
+	// Dropped 是这一页里有几条我们画不出来、丢掉了（**这一页**的条数）。
 	//
-	// 它不进界面（用户不需要知道 B 站有多少种动态），但它是「这一页一个格子
-	// 都没有」这件事唯一能说清原因的东西：Dropped > 0 说明是他发的那些我们
-	// 都画不出来，而不是「他没发」。
+	// ⚠️ **它不是「一共有多少条不同的动态」**：B 站翻页会重叠，同一条在两页里
+	// 各出现一次——跨页去重是**上层**的事（它知道前面那几页已经数过谁了），
+	// 见 `Drops` 里的 `Key`。
+	//
+	// 它是为了让「这一页一个格子都没有」能说清是「他真的没发」还是「我们把
+	// 他发的那些全丢了」而存在的（用户不需要知道 B 站有多少种动态）。
 	Dropped int
+	// Drops 是这一页丢掉的那几条（带**类别**和**身份**）。
+	//
+	// ⚠️ **类别是给界面用的**（票 #344）：只有一个总数的话，「B 站返回了
+	// 一种我们不认识的形态」和「这一条我们读不懂」在界面上被说成同一件事，
+	// 而后者那句话对用户是错的。
+	//
+	// ⚠️ **`Key` 是给上层去重用的**：B 站翻页会重叠，同一条画不出来的动态
+	// 在两页里各出现一次——按「出现次数」记，那个数会偏大。
+	Drops []DroppedDynamic
 	// DropWhy 是丢掉的理由（人话），**一种一句**。
 	//
 	// ⚠️ **它不进界面，但进日志**：字段类型一变就是「整页一条都不剩」，
@@ -355,10 +468,11 @@ func dynamicPageFrom(raw []byte) (DynamicPage, error) {
 
 	pg := DynamicPage{Offset: env.Offset.String(), HasMore: env.HasMore.Bool(), Raw: len(env.Items)}
 	for _, item := range env.Items {
-		d, ok, why := parseDynamic(item)
+		d, drop, ok := parseDynamic(item)
 		if !ok {
 			pg.Dropped++
-			pg.noteDrop(why)
+			pg.Drops = append(pg.Drops, drop)
+			pg.noteDrop(drop.Why)
 			continue
 		}
 		pg.Items = append(pg.Items, d)
@@ -466,8 +580,8 @@ type rawDynamic struct {
 	} `json:"modules"`
 }
 
-// parseDynamic 把一条原始动态变成 Dynamic。第二个返回值是「画得出来吗」，
-// 第三个是**丢掉的理由**（画得出来时是空串）。
+// parseDynamic 把一条原始动态变成 Dynamic。第二个返回值是**丢掉的那一条**
+// 的信息（画得出来时是零值），第三个是「画得出来吗」。
 //
 // # 判类型按 major 装了什么，不按 `major.type` 的字符串
 //
@@ -492,21 +606,37 @@ type rawDynamic struct {
 // （同一个图文类型叫过 `MAJOR_TYPE_DRAW` 和 `MAJOR_TYPE_OPUS`），
 // 认错了会分叉成两种卡片。
 //
-// # 「丢掉」也要说得出理由
+// # 「丢掉」也要说得出理由，而且**说得准**
 //
-// 丢掉的**理由**不进界面（用户不需要知道 B 站有多少种动态），但它进**日志**：
-// 「整页一条都不剩」这种失败在界面上**完全看不出来**（只有一个空列表），
-// 不留下这句话，下一个人只能从头再猜一遍（票 #300）。
-func parseDynamic(raw json.RawMessage) (Dynamic, bool, string) {
+// 丢掉的**理由**进**日志**：「整页一条都不剩」这种失败在界面上**完全
+// 看不出来**（只有一个空列表），不留下这句话，下一个人只能从头再猜一遍
+// （票 #300）。
+//
+// 而界面上要的是**类别**（票 #344）：「B 站返回了一种我们不认识的形态」和
+// 「这一条我们读不懂（B 站改了返回的形状）」是**两回事**，说成同一句就是
+// 对用户说错话——后者是应用自己跟不上 B 站的返回，不是那个 UP 主发了什么。
+func parseDynamic(raw json.RawMessage) (Dynamic, DroppedDynamic, bool) {
 	var r rawDynamic
 	if err := json.Unmarshal(raw, &r); err != nil {
 		// 这一条的 JSON 读不懂。不算错——B 站的返回是整页一个数组，
 		// 一条坏掉不该让整页都没了。
-		return Dynamic{}, false, "这一条读不懂（B 站改了返回的形状）：" + err.Error()
+		//
+		// ⚠️ **这一类是「读不懂」，不是「形态不认识」**：B 站给的是它**一直
+		// 在给**的那种形态，是**我们读不出来**——界面上的话必须分开说
+		// （票 #344）。
+		return Dynamic{}, DroppedDynamic{
+			Reason: DropUnreadable,
+			Key:    dropKeyOf(&r, raw),
+			Why:    "这一条读不懂（B 站改了返回的形状）：" + err.Error(),
+		}, false
 	}
 	if r.IDStr == "" {
 		// 没有 id 的行没有身份（铁律四），画出来也点不开。
-		return Dynamic{}, false, "没有身份（id_str 是空的）"
+		return Dynamic{}, DroppedDynamic{
+			Reason: DropNoIdentity,
+			Key:    dropKeyOf(&r, raw),
+			Why:    "没有身份（id_str 是空的）",
+		}, false
 	}
 
 	// 🔴 闸门。**先判 type，再碰别的**。
@@ -516,7 +646,11 @@ func parseDynamic(raw json.RawMessage) (Dynamic, bool, string) {
 	default:
 		// 转发 / 剧集 / 课程 / 直播 / 广告 / 未来新增的形态……
 		// 一律丢掉，**哪怕它带着正文**（转发件就有 desc.text）。
-		return Dynamic{}, false, "不是这一版画得出的形态（" + r.Type.String() + "）"
+		return Dynamic{}, DroppedDynamic{
+			Reason: DropShapeUnknown,
+			Key:    dropKeyOf(&r, raw),
+			Why:    "不是这一版画得出的形态（" + r.Type.String() + "）",
+		}, false
 	}
 
 	d := Dynamic{
@@ -538,7 +672,11 @@ func parseDynamic(raw json.RawMessage) (Dynamic, bool, string) {
 	if string(r.Type) == dynamicTypeAv {
 		a := major.Archive
 		if a == nil || a.Bvid == "" {
-			return Dynamic{}, false, "投稿动态没有稿件号（bvid 是空的）"
+			return Dynamic{}, DroppedDynamic{
+				Reason: DropEmpty,
+				Key:    dropKeyOf(&r, raw),
+				Why:    "投稿动态没有稿件号（bvid 是空的）",
+			}, false
 		}
 		d.Kind = DynamicVideo
 		d.Video = &DynamicArchive{
@@ -548,7 +686,7 @@ func parseDynamic(raw json.RawMessage) (Dynamic, bool, string) {
 		if d.Text == "" {
 			d.Text = strings.TrimSpace(a.Desc.String())
 		}
-		return d, true, ""
+		return d, DroppedDynamic{}, true
 	}
 
 	// ② 图文（`DYNAMIC_TYPE_DRAW`）。正文**二选一**，不是两段拼起来。
@@ -565,21 +703,72 @@ func parseDynamic(raw json.RawMessage) (Dynamic, bool, string) {
 			}
 			if len(pics) == 0 && d.Text == "" {
 				// 声明是图文但既没图也没字：画出来是一个空卡片，比不画更糟。
-				return Dynamic{}, false, "图文动态既没有图也没有正文"
+				return Dynamic{}, DroppedDynamic{
+					Reason: DropEmpty,
+					Key:    dropKeyOf(&r, raw),
+					Why:    "图文动态既没有图也没有正文",
+				}, false
 			}
 			d.Kind = DynamicOpus
 			d.Pics = pics
-			return d, true, ""
+			return d, DroppedDynamic{}, true
 		}
 	}
 
 	// ③ 纯文字（`DYNAMIC_TYPE_WORD`）。
 	if d.Text == "" {
 		// 声明是文字但正文是空的：画出来是一个空卡片，比不画更糟。
-		return Dynamic{}, false, "文字动态没有正文"
+		return Dynamic{}, DroppedDynamic{
+			Reason: DropEmpty,
+			Key:    dropKeyOf(&r, raw),
+			Why:    "文字动态没有正文",
+		}, false
 	}
 	d.Kind = DynamicText
-	return d, true, ""
+	return d, DroppedDynamic{}, true
+}
+
+// dropKeyOf 是一条丢掉的东西的**身份**（跨页去重用的）。
+//
+// ⚠️ **它必须是「同一条就是同一个」**：B 站翻页**会重叠**，同一条画不出来
+// 的动态在两页里各出现一次——按「出现次数」记的话，界面上那个数会**偏大**
+// （票 #344）。
+//
+// 取的顺序是「`id_str` → 稿件号 → 原文的指纹」：
+//   - **`id_str` 是这一条动态自己的身份**（画得出来的那几条也是用它当身份
+//     的，见 `Dynamic.ID`），翻页重叠时它一样；
+//   - 没有 `id_str` 的那一条（本来就要因为「没有身份」被丢掉）退到稿件号；
+//   - 再没有（连 JSON 都读不开）就用**原文的指纹**——重叠时那一条原文也是
+//     一样的，指纹也就一样。
+//
+// ⚠️ **不要拿 bvid 当身份**：一条转发和它转的那条投稿**是两条动态**，而
+// 它们的稿件号是同一个——按 bvid 记会把两条数成一条。
+func dropKeyOf(r *rawDynamic, raw json.RawMessage) string {
+	if id := r.IDStr.String(); id != "" {
+		return "id:" + id
+	}
+	if a := r.Modules.Dynamic.Major.Archive; a != nil {
+		if bvid := a.Bvid.String(); bvid != "" {
+			return "bvid:" + bvid
+		}
+	}
+	return "raw:" + dropFingerprint(raw)
+}
+
+// dropFingerprint 是「连身份都读不出来」时用的指纹。
+//
+// 用**原文**（去掉空白后）的哈希：翻页重叠时同一条动态的原文是一样的，
+// 指纹也就一样——于是它被数一次，而不是两次。
+func dropFingerprint(raw json.RawMessage) string {
+	b := bytes.TrimSpace(raw)
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, b); err != nil {
+		// 原文本身不是合法 JSON（那正是「读不懂」的那一种）：就用它的字节。
+		buf.Reset()
+		buf.Write(b)
+	}
+	sum := sha256.Sum256(buf.Bytes())
+	return hex.EncodeToString(sum[:8])
 }
 
 // picsOf 取图文的图和摘要，**新旧两种格式都认**。

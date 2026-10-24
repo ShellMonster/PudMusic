@@ -159,7 +159,8 @@ func (s *Shell) drawUpdateDialog(c *ui.Context, st app.UpdateState) {
 	// 「下到一半不许关」要在**下一帧**把它画回来——用副本就是靠这个：这一帧
 	// 那个 false 只活到这一帧结束，s.update.wanted 仍然是 true。
 	open := s.update.wanted
-	m := ui.Modal(c, &open, func() {
+	m := ui.DialogBase(c, &open, func(backdrop, panel ui.Element) {
+		dialogPanel(c, backdrop, panel, updateDialogTitle)
 		// 和 confirmDialog 同一个摆法（`ui.Modal` 自己已经给面板上了内边距、
 		// 圆角和背景，里面再套一层 Column 当**内容**没问题，**按钮那一行必须是
 		// 面板的直接子元素**——套进 Column 的话按钮的命中区域和面板对不上，
