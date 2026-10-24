@@ -24,6 +24,8 @@
 // 不能是现拼的字符串——现拼的那一步本身就要分配，而它恰恰是要省掉的那一步。
 package rowkey
 
+import "fmt"
+
 // Memo 记着一批算好的值。
 //
 // K 是**原料**（必须可比较——比较一次不分配），V 是**算好的那一份**。
@@ -54,7 +56,20 @@ type memoRow[K comparable, V any] struct {
 //
 // ⚠️ **pack 必须是纯函数**：同样的原料必须给出同样的结果。理由是「拿原料当
 // 身份」——身份变了才重算，而身份就是原料本身。
+//
+// # 契约：下标必须非负
+//
+// **i 必须 ≥ 0**：负下标没有对应的行（它是「问不到」而不是「问错了行」），
+// 而这一族的所有调用方给的行下标都来自框架，永远非负。所以负下标是**调用方的
+// bug**，不是一种合法的问法。
+//
+// ⚠️ **这里明确 panic 一句能看懂的话**：不这么办的话它就是 `m.rows[i]` 越界，
+// 抛出来的是 `runtime error: index out of range [-1]`——那一句只说「越界了」，
+// 不说「哪一处越界」，下一个人得自己顺着调用栈找（本票就是被这个绊住的）。
 func (m *Memo[K, V]) At(i int, raw K, pack func(K) V) V {
+	if i < 0 {
+		panic(fmt.Sprintf("rowkey.Memo.At: 下标必须非负，拿到的是 %d", i))
+	}
 	if i < len(m.rows) && m.rows[i].set && m.rows[i].raw == raw {
 		return m.rows[i].val
 	}

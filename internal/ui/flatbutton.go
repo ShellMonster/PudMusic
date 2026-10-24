@@ -157,7 +157,10 @@ func flatCurrent(c *ui.Context, e ui.Element) ui.Element {
 // 颜色时得先知道底板是谁（见 `currentitem_test.go`）。现在是**不透明**的中性灰，
 // 断言时直接比那个数。
 func flatCurrentBg(t *ui.Theme) ui.Color {
-	return flatSelected(t)
+	// 设计规范 §2 的 `accentSoft`：强调色的淡底，不再是中性灰（`flatSelected`）。
+	// 字色仍由 `flatCurrentText` 按**这一层底**现算（`ink.Ensure` ≥ 4.5:1），
+	// 所以换底不会让字读不出来。上面那一大段关于「中性灰底」的历史说明是 Biu 时代的。
+	return accentSoft(t)
 }
 
 // flatCurrentText 是 flatCurrent 配的那一档**字色**。

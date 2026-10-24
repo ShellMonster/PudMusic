@@ -157,6 +157,13 @@ type VideoPage struct {
 	Hits []VideoHit
 	// HasMore 后面还有没有。翻到底之后是 false。
 	HasMore bool
+	// Total 是这一场搜索命中的**总数**（B 站给的 `numResults`）。
+	//
+	// ⚠️ **它不是「这一页有几条」**：翻页会一直加行，而这一场搜索一共就这么多。
+	// 它是给「说给用户听」用的（无障碍：读屏软件用户看不见屏幕上那几行，得有一句
+	// 「找到 N 个结果」），而那一句话里的 N 要是拿「屏幕上那几行」冒充，用户就知道
+	// 了个假数。
+	Total int
 }
 
 // UserPage 是一页用户结果。
@@ -164,6 +171,8 @@ type UserPage struct {
 	Hits []UserHit
 	// HasMore 后面还有没有。
 	HasMore bool
+	// Total 是这一场搜索命中的总数（理由同 `VideoPage.Total`）。
+	Total int
 }
 
 // searchRaw 是这个接口的 `data` 段。只声明用得着的字段：B 站的结果一项就有二十几个
@@ -245,6 +254,7 @@ func (c *Client) SearchVideos(ctx context.Context, q VideoQuery) (VideoPage, err
 		})
 	}
 	out.HasMore = searchHasMore(q.Page, len(out.Hits), raw.NumResults)
+	out.Total = raw.NumResults
 	return out, nil
 }
 
@@ -277,6 +287,7 @@ func (c *Client) SearchUsers(ctx context.Context, q UserQuery) (UserPage, error)
 		})
 	}
 	out.HasMore = searchHasMore(q.Page, len(out.Hits), raw.NumResults)
+	out.Total = raw.NumResults
 	return out, nil
 }
 

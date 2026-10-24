@@ -62,8 +62,11 @@ func pageBackground(img *image.RGBA, area image.Rectangle) (r, g, b, a uint8) {
 	count := map[uint32]int{}
 	var best uint32
 	bestN := -1
+	// 只数内容区最左边那一窄条（页面的左内边距，各页都是空的）：设置页的分组卡片铺满
+	// 内容宽度、底色和页面不同，整块数的话「最多的颜色」会是卡片底色。
+	left := min(area.Min.X+6, area.Max.X)
 	for y := area.Min.Y; y < area.Max.Y; y++ {
-		for x := area.Min.X; x < area.Max.X; x++ {
+		for x := area.Min.X; x < left; x++ {
 			c := img.RGBAAt(x, y)
 			k := uint32(c.R)<<24 | uint32(c.G)<<16 | uint32(c.B)<<8 | uint32(c.A)
 			count[k]++
@@ -502,6 +505,8 @@ func TestEveryPageTitleIsTheSameSizeOnScreen(t *testing.T) {
 				if !ok {
 					t.Fatalf("%s：内容区顶上一点墨都没有，文字有 %q", page.name, tt.Texts())
 				}
+				// 标题那一行最高也就几十行墨。设置页的分组现在是铺满宽度的卡片（底色和页面不同），
+				// 它们紧跟在标题下面，会把「第一段墨迹」接成一整条——所以只取头 40 行。
 				x0, x1, ok := firstRun(inkColumns(img, area, lo, hi))
 				if !ok {
 					t.Fatalf("%s：标题那一行里没有墨，文字有 %q", page.name, tt.Texts())

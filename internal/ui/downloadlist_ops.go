@@ -8,6 +8,10 @@
 //	重试   只在 failed             删除  一直在
 //	打开文件 只在 completed        清空  页头（上游是表格右上角那个垃圾桶）
 //
+// ⚠️ **「重试」还多一个条件**（票 #346）：只在**这一次失败可以再问一次**的时候
+// 才摆（`Snapshot.CanRetry`）。风控失败的那一项**不摆**——那枚键是立刻重新
+// 取流，按下去就是再撞一次墙。判据和播放条上那枚是同一张表（`bili.Recoverable`）。
+//
 // 上游每个按钮按下之后会锁 2000ms（`lockAction`，因为它每个操作都是
 // `await window.electron.*`）。这边**不锁**：五种操作全是同步改一份内存里的
 // 状态，改完这一帧就画出来了，没有等第二下的那个窗口期；锁上只会让用户按第二
@@ -132,6 +136,9 @@ const dlOpenDirW = 96
 // 哪一个亮着见文件头那张表。这里不判断「点了会怎样」——判断在 `download.Manager`
 // 那一侧（`Status.CanPause` / `CanResume` 就在状态类型上），这里只判断**摆不摆**
 // 这颗按钮。摆一颗按了没反应的按钮比不摆更糟。
+//
+// ⚠️ **「重试」还要问一次「这一次失败可以再问吗」**（`Snapshot.CanRetry`）：
+// 它和播放条上那枚是同一个判据（票 #346）。
 func (d *downloadsPage) viewOps(c *ui.Context, s *Shell, r download.Snapshot) {
 	ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 		// 打开文件所在文件夹：只在真的下完、文件已经在盘上的时候摆
@@ -147,7 +154,7 @@ func (d *downloadsPage) viewOps(c *ui.Context, s *Shell, r download.Snapshot) {
 		if r.Status == download.StatusPaused {
 			d.opButton(c, opResume, func() { d.resume(r, s) })
 		}
-		if r.Status == download.StatusError {
+		if r.Status == download.StatusError && r.CanRetry {
 			d.opButton(c, opRetry, func() { d.resume(r, s) })
 		}
 		d.opButton(c, opDelete, func() { d.askDeleteOne(r, s) })

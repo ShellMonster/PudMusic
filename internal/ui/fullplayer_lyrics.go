@@ -129,7 +129,8 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, area ui.Rect, hidden
 						center: centered,
 						// ⚠️ **0**：上游的行没有左右内边距，于是左对齐的那些句子
 						// 左沿就咬在内容盒的左沿上（1200 宽的窗口上是 x=648）。
-						padX: 0,
+						padX: fullLyricBarPad(centered),
+						bar:  !centered,
 						mask: true,
 						// ⚠️ **旋钮列画在滚动容器里面**（理由见 `lyricStyle.overlay`）：
 						// 挂在外面（滚动容器的兄弟）的话，滚轮落在它身上——包括两枚
@@ -210,4 +211,12 @@ func (s *Shell) fullLyricColor(c *ui.Context) ui.Color {
 		}
 	}
 	return on
+}
+
+// fullLyricBarPad 给左对齐的歌词让出竖线那一列（居中时不需要）。
+func fullLyricBarPad(centered bool) float32 {
+	if centered {
+		return 0
+	}
+	return 8
 }

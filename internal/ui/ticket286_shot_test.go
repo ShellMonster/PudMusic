@@ -1,7 +1,7 @@
 // 票 #286（板子任务 BMG-165）的逐页出图：**外壳布局（侧栏通栏 + 顶栏只盖内容区）**在每一页上
 // 长什么样，深浅各一套。
 //
-//	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderTicket165Shots
+//	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderTicket286Shots
 //
 // # 为什么逐页都要出
 //
@@ -31,8 +31,8 @@ import (
 	mygoui "github.com/egoist/mygo/ui"
 )
 
-// TestRenderTicket165Shots 把每一页存成 PNG，深浅各一套。
-func TestRenderTicket165Shots(t *testing.T) {
+// TestRenderTicket286Shots 把每一页存成 PNG，深浅各一套。
+func TestRenderTicket286Shots(t *testing.T) {
 	dir := os.Getenv("BIU_SHOT_DIR")
 	if dir == "" {
 		t.Skip("设 BIU_SHOT_DIR 才会存图")

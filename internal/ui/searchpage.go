@@ -126,6 +126,42 @@ func (s *Shell) syncSearch(c *ui.Context) {
 
 	// 收后台投回来的结果、起该起的那一拉。
 	st.lists[cur].list.Sync(c)
+
+	// 念出去：「这一场搜索出结果了」（无障碍，见 announce.go）。
+	s.announceSearchResults(cur)
+}
+
+// announceSearchResults 在「这一场搜索的结果出来了」的时候念一句。
+//
+// 🔴 **读屏软件用户看不见那些结果**：他在搜索页上，而结果是一屏列表——他得一行一行
+// 走才知道有什么。而「搜完了、一共 N 个」这件事本身**不是画面上的任何一行**
+// （页标题写的是「搜索【X】的结果」，那说的是搜的是啥，不是搜到了几个），所以
+// 得单独说一句。
+//
+// ⚠️ **一场只念一次**：翻页会一直加行，而每加一行都念一遍就成了报数。
+//
+// ⚠️ **报的是命中的总数，不是屏幕上那几行**：见 `searchTab.total` 的注释。
+//
+// ⚠️ **「一个都没有」不在这儿念**：那一刻（还没开始拉）界面上的状态和「搜完了
+// 一个都没有」**长得一模一样**（都是「没有结果」那一格），分不出来——所以这一句
+// 只在**拿到了结果**的时候说。
+func (s *Shell) announceSearchResults(tab int) {
+	t := &s.search.lists[tab]
+	pg := t.list.Paged()
+	if pg.Loading || pg.Loaded == 0 {
+		return
+	}
+	if t.announced {
+		return
+	}
+	t.announced = true
+	n := t.searchTotal()
+	if n == 0 {
+		// B 站没给总数（或者这一趟还没回来）：拿已经拿到的那些凑一个数，
+		// 宁可少说也别说错。
+		n = pg.Loaded
+	}
+	s.announce("找到 " + strconv.Itoa(n) + " 个结果")
 }
 
 // viewSearchResults 是搜了词之后的那一块：标题 + 三个 Tab + 排序行 + 结果。

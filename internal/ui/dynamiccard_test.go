@@ -450,11 +450,11 @@ func TestAFailedLikeGoesBackToWhatItWas(t *testing.T) {
 	}
 }
 
-// TestAVideoDynamicOffersBothDownloads 投稿型动态上才有「下载音频 / 下载视频」。
+// TestAVideoDynamicOffersBothDownloads 投稿型动态上才有「下载音频」（纯音频产品，没有「下载视频」）。
 func TestAVideoDynamicOffersBothDownloads(t *testing.T) {
 	_, tt, _ := dynamicCardShell(t, newUIExplore(t), uiDynamicArchive("v1", "BV1play"))
 
-	for _, want := range []string{"下载音频", "下载视频"} {
+	for _, want := range []string{"下载音频"} {
 		if !tt.HasText(want) {
 			t.Errorf("投稿型动态上没有 %q，文字有 %q", want, tt.Texts())
 		}

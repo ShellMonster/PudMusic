@@ -11,6 +11,9 @@ package bili
 //
 // 而「真没有音频流」和「没取到」这两类，用户做的动作正好相反：
 // 前者该换一首，后者该再试一次。混成一句的话，方向从头就是错的。
+//
+// 🔴 **这张表是全项目唯一的一处**（票 #346）：播放条上那枚「重试」和下载记录页
+// 那一枚是同一个动作，所以两处必须用同一张表。
 
 import (
 	"errors"
@@ -46,15 +49,28 @@ func TestRecoverableTellsWhatIsWorthRetryingAgain(t *testing.T) {
 		{"风控", ErrRiskControl, false},
 		{"风控的码", &APIError{Code: -352, Endpoint: "/x"}, false},
 		{"被拦的码", &APIError{Code: -412, Endpoint: "/x"}, false},
+		// 🔴 **限流也不可重试**（票 #346）：同一个判据同样适用于它——立刻再问
+		// 还是「太快了」，还是撞同一面墙。
+		{"限流", ErrTooFrequent, false},
+		{"限流的码", &APIError{Code: -509, Endpoint: "/x"}, false},
+		// 「压根不是 JSON」（多半是风控挡的一页 HTML）：和真风控**分开**，
+		// 但处置一样——立刻再问还是撞墙。
+		{"响应不是 JSON", ErrBadResponse, false},
 
 		// ── 可重试：再问一次，答案可能就变了 ──
 		{"网络没通", ErrNetwork, true},
 		{"超时", errors.New("context deadline exceeded"), true},
-		{"被限速", ErrTooFrequent, true},
-		{"被限速的码", &APIError{Code: -509, Endpoint: "/x"}, true},
+		// 🔴 **截断的响应是可重试的**（票 #346）：它多半是网络抖了一下，
+		// 响应没传完——再问一次有可能拿到完整的那一份。
+		{"响应被截断了", ErrTruncatedResponse, true},
 		{"问不出分 P", ErrNoPart, true},
 		{"地址过期", ErrStreamExpired, true},
 		{"字节源拉不动", audio.ErrStreamDead, true},
+		// 「这首音乐换了地址，已经跟不上了」——再问一次也许就是新地址。
+		{"音乐换了地址", &APIError{Code: 72010027, Endpoint: "/x"}, true},
+		// ⚠️ **不认识的错按「可重试」算**：用户宁可多点一次重试，也不要被一句
+		// 「不可重试」堵死——而这一句的文案本身已经说了出了什么事。
+		{"不认识的错", errors.New("别的错"), true},
 	} {
 		if got := Recoverable(c.err); got != c.want {
 			t.Errorf("%s：Recoverable = %v，want %v", c.what, got, c.want)
@@ -72,8 +88,9 @@ func TestRecoverableTellsWhatIsWorthRetryingAgain(t *testing.T) {
 // 可重试的话，用户点一次撞一次，点第二次再撞——他按两遍发现还是那样，
 // 就不再看这枚键了。
 //
-// ⚠️ **限流（-509）不能跟着一起改成不可重试**：那一个是「等一会儿就好」，
-// 和风控（「等一会儿也好，但**立刻**再问还是撞墙」）不是同一件事。
+// ⚠️ **限流（-509）跟着一起判死了**（票 #346）：同一个判据同样适用于它——
+// 立刻再问还是「太快了」，还是撞同一面墙。两者的**区别在话**上，不在
+// 「能不能立刻再问」上。
 func TestRiskControlIsNotWorthRetryingAgain(t *testing.T) {
 	for _, c := range []struct {
 		what string
@@ -88,12 +105,53 @@ func TestRiskControlIsNotWorthRetryingAgain(t *testing.T) {
 			t.Errorf("%s：判成了可重试——立刻再问一次还是撞同一面墙", c.what)
 		}
 	}
-	// 限流是另一回事：等一会儿就好，不许跟着风控一起被判死。
-	if !Recoverable(ErrTooFrequent) {
-		t.Error("限流被判成不可重试了——它是「等一会儿就好」，不是撞墙")
+	// 限流是另一回事：它也要等（等的是 B 站的限流窗口过去），所以同样
+	// 不给那枚「立刻重试」的键。
+	if Recoverable(ErrTooFrequent) {
+		t.Error("限流被判成可重试了——立刻再问还是太快，还是同一面墙")
 	}
-	if !Recoverable(&APIError{Code: -509, Endpoint: "/x"}) {
-		t.Error("限流的码（-509）被判成不可重试了")
+	if Recoverable(&APIError{Code: -509, Endpoint: "/x"}) {
+		t.Error("限流的码（-509）被判成可重试了")
+	}
+}
+
+// TestTheTruncatedResponseIsNotTheRiskControl 盯「截断」和「真风控」分得开
+// （票 #346）。
+//
+// 🔴 **为什么这一条要单独钉**：上一票（#316）把「风控不可重试」收窄的时候，
+// 「响应不是 JSON」被归到了 `ErrRiskControl` 里——于是**被截断的响应**（那
+// 是网络抖了一下，多半再问一次就好）跟着风控一起被判成不可重试，丢了「重试」
+// 键。那是收窄带出来的副作用，票里只说了「风控不该重试」。
+//
+// 所以这三件事必须各自分开：
+//
+//	真风控（-352/-412）	业务码，在 JSON 里面
+//	响应不是 JSON	压根没拿到 JSON（多半是风控挡的一页 HTML）
+//	响应被截断了	本来是 JSON，没传完 —— **可重试**
+func TestTheTruncatedResponseIsNotTheRiskControl(t *testing.T) {
+	truncated := fmt.Errorf("%w: GET /x: 响应被截断了", ErrTruncatedResponse)
+	notJSON := fmt.Errorf("%w: GET /x: 响应不是 JSON", ErrBadResponse)
+
+	if errors.Is(truncated, ErrRiskControl) {
+		t.Error("被截断的响应被认成了风控")
+	}
+	if errors.Is(notJSON, ErrRiskControl) {
+		t.Error("「响应不是 JSON」被认成了风控——它和真风控必须能分开")
+	}
+	if !errors.Is(truncated, ErrTruncatedResponse) {
+		t.Error("被截断的响应没有被认成它自己")
+	}
+	if !errors.Is(notJSON, ErrBadResponse) {
+		t.Error("「响应不是 JSON」没有被认成它自己")
+	}
+
+	// 判据那一份：截断可重试（多半是网络抖了一下），不是 JSON 不可重试
+	//（多半是风控挡的页，立刻再问还是撞墙）。
+	if !Recoverable(truncated) {
+		t.Error("被截断的响应被判成不可重试了——多半是网络抖了一下，再问一次有可能好")
+	}
+	if Recoverable(notJSON) {
+		t.Error("「响应不是 JSON」被判成可重试——多半是风控挡的页，立刻再问还是撞墙")
 	}
 }
 
