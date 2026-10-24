@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -184,8 +185,8 @@ func TestTheThreeTypesAreKeptAndTheRestAreDropped(t *testing.T) {
 	if len(pg.Items) != 3 {
 		t.Fatalf("留下了 %d 条，want 3（纯文字 / 图文 / 投稿）", len(pg.Items))
 	}
-	if pg.Dropped != 5 {
-		t.Errorf("丢掉 %d 条，want 5", pg.Dropped)
+	if len(pg.Drops) != 5 {
+		t.Errorf("丢掉 %d 条，want 5", len(pg.Drops))
 	}
 	kinds := map[DynamicKind]string{}
 	for _, d := range pg.Items {
@@ -249,8 +250,8 @@ func TestUnknownTypesWithTextAreStillDropped(t *testing.T) {
 			t.Errorf("%q 的类型是 %v，不在那三种里", d.ID, d.Kind)
 		}
 	}
-	if pg.Dropped != 4 {
-		t.Errorf("丢了 %d 条，want 4", pg.Dropped)
+	if len(pg.Drops) != 4 {
+		t.Errorf("丢了 %d 条，want 4", len(pg.Drops))
 	}
 }
 
@@ -272,8 +273,8 @@ func TestAnItemWeCannotReadAtAllIsDroppedToo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("一条坏掉就把整页带崩了：%v", err)
 	}
-	if len(pg.Items) != 2 || pg.Dropped != 1 {
-		t.Errorf("拿到 %d 条丢了 %d 条，want 2 / 1", len(pg.Items), pg.Dropped)
+	if len(pg.Items) != 2 || len(pg.Drops) != 1 {
+		t.Errorf("拿到 %d 条丢了 %d 条，want 2 / 1", len(pg.Items), len(pg.Drops))
 	}
 }
 
@@ -333,8 +334,8 @@ func TestTheDroppedOnesAreToldApartByReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("整页崩了：%v", err)
 	}
-	if pg.Dropped != 4 || len(pg.Drops) != 4 {
-		t.Fatalf("丢掉 %d 条（明细 %d 条），want 4 / 4", pg.Dropped, len(pg.Drops))
+	if len(pg.Drops) != 4 {
+		t.Fatalf("丢掉 %d 条，want 4", len(pg.Drops))
 	}
 
 	var c DropCounts
@@ -356,6 +357,83 @@ func TestTheDroppedOnesAreToldApartByReason(t *testing.T) {
 	}
 	if c.Total() != 4 {
 		t.Errorf("加起来是 %d 条，want 4", c.Total())
+	}
+}
+
+// 🔴 TestAnArchiveWithoutABvidIsItsOwnReason 钉住「投稿动态没有稿件号」是
+// **另一类**，不是「什么也没有」。
+//
+// ⚠️ **这一条带着正文**：UP 写的那段话就在 `desc.text` 里（B 站的投稿动态
+// 本来就带一段话），只是 `major.archive.bvid` 是空的——放不出来。而「什么也
+// 没有」那一档说的是「既没有正文也没有图」。
+//
+// ⚠️ **混进去的话，界面上那句话对用户是错的**：「有 1 条什么也没有，画不出来」
+// 说的是「他什么都没发」，而真相是「他发了一条投稿，我们放不出来」。
+func TestAnArchiveWithoutABvidIsItsOwnReason(t *testing.T) {
+	const spoken = "UP 写的那段话"
+	// 一条投稿动态：**有正文**，而稿件号是空的。
+	noBvid := dynItem("av1", setType("DYNAMIC_TYPE_AV"), setText(spoken))
+	majorOf(noBvid)["type"] = "MAJOR_TYPE_ARCHIVE"
+	majorOf(noBvid)["archive"] = map[string]any{"title": "一个标题"}
+	// 另一条**真的什么也没有**：纯文字，正文空的。
+	empty := dynItem("w1", setEmptyBody())
+	_, cli := dynamicFixture(t, []any{noBvid, empty}, "", false)
+
+	pg, err := cli.DynamicFeed(context.Background(), "")
+	if err != nil {
+		t.Fatalf("整页崩了：%v", err)
+	}
+	if len(pg.Drops) != 2 {
+		t.Fatalf("丢掉 %d 条，want 2", len(pg.Drops))
+	}
+
+	var c DropCounts
+	for _, d := range pg.Drops {
+		c.Add(d.Reason)
+	}
+	if c.NoArchive != 1 {
+		t.Errorf("「投稿没有稿件号」数了 %d 条，want 1", c.NoArchive)
+	}
+	if c.Empty != 1 {
+		t.Errorf("「什么也没有」数了 %d 条，want 1（投稿没有稿件号不该混进这一档）", c.Empty)
+	}
+	if c.Total() != 2 {
+		t.Errorf("加起来是 %d 条，want 2", c.Total())
+	}
+	// ⚠️ **正文是有还是没有，要看得见**：那一档说的是「什么也没有」，而这条
+	// 明明带着正文——所以它的理由里得留着那句「投稿动态没有稿件号」。
+	found := false
+	for _, d := range pg.Drops {
+		if d.Reason == DropNoArchive && strings.Contains(d.Why, "稿件号") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("没有一条的理由写着「投稿动态没有稿件号」：%+v", pg.Drops)
+	}
+}
+
+// TestAnUnknownDropReasonIsStillCounted 钉住「加了一类而忘了加一档」不会
+// **静默少一条**。
+//
+// ⚠️ **这是 `DropCounts.Add` 那个 `default` 那一档的用处**：将来加了第五类
+// 丢弃理由而 `Add` 忘了跟上，原来那个没有 `default` 的 switch 会把它**静默
+// 吞掉**——总数少了、界面上那句话少了，而**没有任何报错**。
+//
+// 判据是「总数不变」：还不认识的那一类落进 `Other`，而 `Total()` 把它算进去。
+func TestAnUnknownDropReasonIsStillCounted(t *testing.T) {
+	var c DropCounts
+	c.Add(DropReason(200))
+	if c.Other != 1 {
+		t.Errorf("还不认识的那一类数了 %d 条，want 1（它不许被静默吞掉）", c.Other)
+	}
+	if c.Total() != 1 {
+		t.Errorf("加起来是 %d 条，want 1", c.Total())
+	}
+	// 已知的那几档不受影响。
+	c.Add(DropShapeUnknown)
+	if c.Other != 1 || c.ShapeUnknown != 1 || c.Total() != 2 {
+		t.Errorf("加了一条已知理由之后数错了：%+v，总数 %d", c, c.Total())
 	}
 }
 
@@ -516,7 +594,7 @@ func TestTheLegacyDrawFormatStillShowsItsImages(t *testing.T) {
 			t.Fatal(err)
 		}
 		if len(pg.Items) != 1 || pg.Items[0].Kind != DynamicOpus {
-			t.Fatalf("旧格式的图文没被当成图文：%+v（dropped=%d）", pg.Items, pg.Dropped)
+			t.Fatalf("旧格式的图文没被当成图文：%+v（丢了 %d 条）", pg.Items, len(pg.Drops))
 		}
 		if len(pg.Items[0].Pics) != 2 {
 			t.Errorf("拿到 %d 张图，want 2（`major.draw.items[].src` 没解析）", len(pg.Items[0].Pics))
@@ -536,7 +614,7 @@ func TestTheLegacyDrawFormatStillShowsItsImages(t *testing.T) {
 			t.Fatal(err)
 		}
 		if len(pg.Items) != 1 {
-			t.Fatalf("旧格式的图文（只有图、没有正文）被整条丢掉了：dropped=%d", pg.Dropped)
+			t.Fatalf("旧格式的图文（只有图、没有正文）被整条丢掉了：丢了 %d 条", len(pg.Drops))
 		}
 		if len(pg.Items[0].Pics) != 1 || pg.Items[0].Pics[0] != "https://f/only.jpg" {
 			t.Errorf("拿到 %v，want 那一张图", pg.Items[0].Pics)
@@ -554,8 +632,8 @@ func TestAGraphicalPostWithNeitherTextNorPicsIsDropped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pg.Items) != 0 || pg.Dropped != 1 {
-		t.Errorf("拿到 %d 条丢了 %d 条，want 0 / 1（空卡片比不画更糟）", len(pg.Items), pg.Dropped)
+	if len(pg.Items) != 0 || len(pg.Drops) != 1 {
+		t.Errorf("拿到 %d 条丢了 %d 条，want 0 / 1（空卡片比不画更糟）", len(pg.Items), len(pg.Drops))
 	}
 }
 

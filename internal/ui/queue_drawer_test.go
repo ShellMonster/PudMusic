@@ -562,7 +562,7 @@ func TestQueueDrawerMarksTheSongBeingPlayed(t *testing.T) {
 //     这个 0×0 的样子——只断 `ok` 的话「滚到了旁边那一首」是绿的。
 //  2. **不在播放条那一带**：真放着的时候播放条上也是同一个歌名，而主布局先于浮层
 //     排版，`Find` 先撞上的是播放条上那几行字（它比抽屉里那一行窄得多）。
-//     抽屉是浮在播放条**上面**的（底边让开 88），所以 y >= 视口高 - 88 的不是抽屉。
+//     抽屉是浮在播放条**上面**的（底边让开 76），所以 y >= 视口高 - 76 的不是抽屉。
 func findRow(h *harness, title string) (mygoui.Rect, bool) {
 	r, ok := h.tt.Find(title)
 	if !ok || r.W <= 0 || r.H <= 0 || r.Y >= drawerBottom {

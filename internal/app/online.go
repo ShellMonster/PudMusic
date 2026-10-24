@@ -1379,8 +1379,13 @@ func (a *App) buildOnline(ctx context.Context, s *Streaming, it Item, gen int) (
 func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	ref *bili.StreamRef, run *loadRun,
 ) (*audio.StreamSource, *audio.Player, error) {
-	// 🔴 **每一段流一个重连令牌**：旧源的回调可能迟到（它还在退避里等着
-	// 的时候这一条已经换掉了），令牌对不上就不碰界面上的状态。
+	// 🔴 **`OnRetry` / `OnReconnected` 这两个回调只做一件事：叫醒界面**。
+	//
+	// ⚠️ **这里没有「重连令牌」**：旧源的回调可能迟到（它还在退避里等着的时候
+	// 这一条已经换掉了），而**这两个回调不碰任何状态**——它们只调 `a.wakeUp()`，
+	// 让界面重画一次。所以「回调来晚了」不会把状态改坏：那一档的状态**住在源
+	// 那边**（`StreamSource.Reconnecting()`），应用只**问**当前在管的那一条流
+	// （见 `reconnect.go` 的文件头）。
 	//
 	// 🔴 **`OnFirstBytes` 是「第②段」的计时点**（票 #220）：头几个字节落到
 	// 缓存里的那一刻，「等字节」这一段就结束了，剩下的全是「等解码器」。
