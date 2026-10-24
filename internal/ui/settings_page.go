@@ -887,6 +887,27 @@ func (s *Shell) pickSelected(c *ui.Context, b ui.Element, ro bool) ui.Element {
 	return flatSolid(c, b)
 }
 
+// pickThemePreset 是主题方案那几档（经典 / 暖纸 / 暮光 / 柔雾）。
+//
+// 走 `settingsSegment`：设置页只有一种分段控件（票 #240）。选中的方案压过「颜色」
+// 和「圆角」两行（见 `app.ThemePreset`）；那两行一改，方案会被清回「经典」，
+// 见 `settings_tab_general.go` 里各处 `ThemePreset = Classic`。
+func (s *Shell) pickThemePreset(c *ui.Context, st app.Settings, ro bool) {
+	chosen := 0
+	opts := make([]segmentOption, len(themePresets))
+	for i, p := range themePresets {
+		opts[i] = segmentOption{label: p.label}
+		if p.preset == st.ThemePreset {
+			chosen = i
+		}
+	}
+	s.settingsSegment(c, "setting:themePreset", "主题方案", scale.Font(c, settingsControlW),
+		opts, chosen, ro, func(i int) {
+			p := themePresets[i].preset
+			s.applySetting("主题方案", func(cur *app.Settings) { cur.ThemePreset = p })
+		})
+}
+
 // pickCloseWindow 是窗口关闭那两档。照 Biu 用的是横排单选（RadioGroup
 // orientation="horizontal"），我们用同一排按钮，选中的那个上主色。
 //

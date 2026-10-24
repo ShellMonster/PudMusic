@@ -151,6 +151,31 @@ const (
 	ThemeModeDark   ThemeMode = "dark"
 )
 
+// ThemePreset 是主题方案：设计规范里的三套整体配色（暖纸 / 暮光 / 柔雾），
+// 每套含浅色和深色各一份底色、文字色、强调色和圆角。
+//
+// ## 我们加的、Biu 没有的键
+//
+// Biu 只有 `themeMode`（浅 / 深 / 跟随系统）加一个主色一个底色，**没有「整套方案」
+// 这个概念**，所以 `themePreset` 是我们自己的键（见 `ourOwnKeys`）。Biu 读到
+// 我们的文件会把它当不认识的键，Biu 自己的设置一个键都没丢。
+//
+// ## 空串 = 「经典」，不是「未设置」
+//
+// 空串就是原来的外观（Biu 绿加框架默认底色），**不套任何方案**。它是零值，所以从
+// 旧设置升上来的用户、以及 Biu 导出的配置，读回来都是经典，**外观一个像素都不变**。
+// 套了方案之后，方案的底色、文字、强调色、圆角**压过**设置里的 `primaryColor` /
+// `backgroundColor` / `borderRadius`；用户在设置页改那三项时界面层会先把方案清回
+// 经典，免得「改了没反应」。
+type ThemePreset string
+
+const (
+	ThemePresetClassic   ThemePreset = ""
+	ThemePresetWarmPaper ThemePreset = "warm-paper"
+	ThemePresetDuskAmber ThemePreset = "dusk-amber"
+	ThemePresetSoftPeach ThemePreset = "soft-peach"
+)
+
 // 音质档位。Biu 的 `AudioQuality`。
 type AudioQuality string
 
@@ -299,6 +324,7 @@ type Settings struct {
 	DisplayMode              DisplayMode              `json:"displayMode"`
 	FFmpegPath               string                   `json:"ffmpegPath"`
 	ThemeMode                ThemeMode                `json:"themeMode"`
+	ThemePreset              ThemePreset              `json:"themePreset"`
 	PageTransition           PageTransition           `json:"pageTransition"`
 	ShowSearchHistory        bool                     `json:"showSearchHistory"`
 	ProxySettings            ProxySettings            `json:"proxySettings"`
@@ -678,6 +704,8 @@ func (s *Settings) normalize() {
 
 	s.ThemeMode = pickEnum(s.ThemeMode, ThemeModeSystem,
 		ThemeModeSystem, ThemeModeLight, ThemeModeDark)
+	s.ThemePreset = pickEnum(s.ThemePreset, ThemePresetClassic,
+		ThemePresetClassic, ThemePresetWarmPaper, ThemePresetDuskAmber, ThemePresetSoftPeach)
 	s.AudioQuality = pickEnum(s.AudioQuality, AudioQualityAuto,
 		AudioQualityAuto, AudioQualityLossless, AudioQualityHigh,
 		AudioQualityMedium, AudioQualityLow)

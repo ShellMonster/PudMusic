@@ -52,6 +52,8 @@ type themeKey struct {
 	radius float64
 	// font 是设置里的字体（空串或系统默认 = 不设）。
 	font string
+	// preset 是主题方案（空 = 经典）。
+	preset app.ThemePreset
 	// primary / background 是设置里的主色和底色（十六进制串）。
 	primary    string
 	background string
@@ -117,6 +119,7 @@ type themeCache struct {
 func (c *themeCache) of(s app.Settings, systemDark bool, p ui.Preferences) *ui.Theme {
 	key := themeKey{
 		mode:       s.ThemeMode,
+		preset:     s.ThemePreset,
 		radius:     s.BorderRadius,
 		font:       s.FontFamily,
 		primary:    s.PrimaryColor,
@@ -328,6 +331,10 @@ func buildTheme(s app.Settings, systemDark bool, p ui.Preferences) *ui.Theme {
 	t.Danger = ui.Hex(semanticDanger)
 	t.Warning = ui.Hex(semanticWarning)
 	t.Success = ui.Hex(semanticSuccess)
+
+	// 主题方案盖在最后：选了方案就压过上面的底色 / 主色 / 圆角；经典不动。
+	// ⚠️ 放在 Inverse 之前——Inverse 取的是 Text / Background / Surface，要取方案的。
+	applyPreset(t, s.ThemePreset)
 
 	// 🔴 Inverse / InverseText 留零的话，MyGo 的 inverse() 会退回
 	// 「fill=Text、text=Background」——深色下就是**一张白底卡片**，

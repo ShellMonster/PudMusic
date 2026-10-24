@@ -83,6 +83,18 @@ func (s *Shell) reportSettingsError() {
 	s.addToast("设置："+strings.TrimPrefix(err.Error(), "app: "), notice.Danger)
 }
 
+// themePresets 是主题方案那几档（含「经典」），顺序就是从左到右的顺序。
+// 名字照设计规范 v0.1：暖纸·赤陶 / 暮光·琥珀 / 柔雾·蜜桃，按钮上只放前两个字。
+var themePresets = []struct {
+	preset app.ThemePreset
+	label  string
+}{
+	{app.ThemePresetClassic, "经典"},
+	{app.ThemePresetWarmPaper, "暖纸"},
+	{app.ThemePresetDuskAmber, "暮光"},
+	{app.ThemePresetSoftPeach, "柔雾"},
+}
+
 // themeModes 是三档主题，顺序就是从左到右的顺序。设置页那三个按钮用。
 //
 // ⚠️ **每一档都带一枚图标**（上游那一排是「图标 + 文字」，`system-settings.tsx:

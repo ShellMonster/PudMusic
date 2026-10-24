@@ -80,6 +80,8 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 	// 是这一格的一部分，理由见 displaymode.go 的文件头。
 	s.settingRow(c, "数据显示样式", "内容页排成列表、网格还是紧凑",
 		func() { s.viewDisplayMode(c, st, ro) })
+	s.settingRow(c, "主题方案", "选一套整体配色；改下面的颜色或圆角会回到经典",
+		func() { s.pickThemePreset(c, st, ro) })
 	s.settingRow(c, "主题", "选择浅色或深色主题",
 		func() { s.pickTheme(c, st, ro) })
 	s.settingRow(c, "颜色", "背景色和主色，点色块挑颜色",
@@ -204,7 +206,7 @@ func (s *Shell) pickRadius(c *ui.Context, st app.Settings, ro bool) {
 		AlignItems(ui.Center).Children(func() {
 		sl := ui.Slider(c, &v, 0, app.MaxBorderRadius).Grow(1).Label("全局圆角").Disabled(ro)
 		if sl.Changed() {
-			s.applySetting("圆角", func(cur *app.Settings) { cur.BorderRadius = v })
+			s.applySetting("圆角", func(cur *app.Settings) { cur.BorderRadius, cur.ThemePreset = v, app.ThemePresetClassic })
 		}
 		ui.Textf(c, "%.0fpx", v).FontSize(scale.Font(c, scale.Size12)).Width(radiusReadoutW)
 	})
@@ -312,18 +314,20 @@ func (s *Shell) pickColors(c *ui.Context, st app.Settings, ro bool) {
 		MinWidth(settingsControlMinW).Gap(colorItemGap).Children(func() {
 		bg := pick(st.BackgroundColor != "", st.BackgroundColor, themeBackground(dark))
 		s.colorItem(c, "背景", bg, ro, st.BackgroundColor != "", func(col string) {
-			s.applySetting("背景色", func(cur *app.Settings) { cur.BackgroundColor = col })
+			s.applySetting("背景色", func(cur *app.Settings) { cur.BackgroundColor, cur.ThemePreset = col, app.ThemePresetClassic })
 		}, func() {
-			s.applySetting("背景色", func(cur *app.Settings) { cur.BackgroundColor = "" })
+			s.applySetting("背景色", func(cur *app.Settings) { cur.BackgroundColor, cur.ThemePreset = "", app.ThemePresetClassic })
 		})
 
 		primary := pick(st.PrimaryColor != app.DefaultPrimaryColor,
 			st.PrimaryColor, app.DefaultPrimaryColor)
 		s.colorItem(c, "主色", primary, ro, st.PrimaryColor != app.DefaultPrimaryColor,
 			func(col string) {
-				s.applySetting("主色", func(cur *app.Settings) { cur.PrimaryColor = col })
+				s.applySetting("主色", func(cur *app.Settings) { cur.PrimaryColor, cur.ThemePreset = col, app.ThemePresetClassic })
 			}, func() {
-				s.applySetting("主色", func(cur *app.Settings) { cur.PrimaryColor = app.DefaultPrimaryColor })
+				s.applySetting("主色", func(cur *app.Settings) {
+					cur.PrimaryColor, cur.ThemePreset = app.DefaultPrimaryColor, app.ThemePresetClassic
+				})
 			})
 	})
 }
