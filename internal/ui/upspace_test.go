@@ -1288,7 +1288,7 @@ func TestAnArchiveWithoutABvidIsNotCalledEmpty(t *testing.T) {
 	waitFrames(t, tt, "动态加载完", func() bool { return sp.dyn.started })
 	tt.Frame()
 
-	if !showsAnyText(tt, "放不出来") {
+	if !showsAnyText(tt, "有 1 条是投稿却放不出来（没有稿件号）") {
 		t.Errorf("没说清是「投稿放不出来」，文字有 %q", tt.Texts())
 	}
 	if showsAnyText(tt, "什么也没有") {
