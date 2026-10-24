@@ -453,4 +453,14 @@ func (s *Shell) applyShortcut(slot shortcutSlot, accel string) {
 		return
 	}
 	s.syncGlobalShortcuts()
+	// 念出去（无障碍）：**「录上了」这件事界面上一个字都没有**——那一格只是
+	// 多了一串键（读屏软件用户连那一格画的是什么键都听不出来），于是他不知道
+	// 「录上了」还是「没录上」。
+	//
+	// ⚠️ **说的是「刚刚发生了什么」**（这一格现在是什么），不是「这一枚是什么」。
+	if accel == "" {
+		s.announce("快捷键已清空")
+		return
+	}
+	s.announce("快捷键已改成 " + formatAccel(accelerator(accel)))
 }
