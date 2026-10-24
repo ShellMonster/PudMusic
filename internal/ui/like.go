@@ -394,12 +394,13 @@ func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 	btn := s.withTip(c, s.likeButton(c, name, label, color, rel.Liked),
 		likeStarTooltip(rel.Liked, s.app.LikeErr() != nil && !s.app.LikeAsked()))
 	if btn.Clicked() {
-		// 赞的那一下：图标层从**这一帧**开始弹，背景层晚 0.1s（那条通道的
-		// `Delay` 自己算）。
+		// 赞的那一下：图标层弹起来，背景层晚 0.1s（那条通道的 `Delay` 自己算）。
 		//
-		// ⚠️ **这一行必须在本帧的子元素建出来之前**：图标层那一弹的倍数是子元素
-		// 建的时候问的，而子元素是在这一行之后才建的（帧的末尾统一建）——所以
-		// 顺序反了的话，弹起来会晚一帧。
+		// ⚠️ **这一弹是从下一帧才开始的**：框架的 `Children` 是**同步跑回调**的
+		// （`mygo/ui/element.go` 的 `func (e *node) Children(fn func())` 里就是
+		// `fn()`），所以图标层在**上面那一句**里就已经建好了——它问到的
+		// `popUntil` 还是上一次的值。于是这一帧按完，这一弹要到下一帧才起步
+		// （下一帧由 `SetLike` 叫醒，所以墙钟上几乎看不出）。
 		s.like.popUntil = c.Now().Add(likePopUp)
 		s.app.SetLike(!rel.Liked, func(err error) {
 			if err != nil {
@@ -446,8 +447,10 @@ func (s *Shell) likeButton(c *ui.Context, name, label string, color ui.Color, li
 		if col, ok := flat.IconAccentOnHover(c, false, b.Hovered()); ok {
 			ic = ic.TextColor(col)
 		}
-		// ⚠️ **两个缩放要相乘，不能各写各的**：一个元素只有一份变换，后写的把先写
-		// 的顶掉（所以这里把「按下的那一档」和「赞的那一弹」乘起来再 Scale 一次）。
+		// ⚠️ **两个缩放要相乘**：框架的 `Scale` 本来就是「在已有变换之后再缩」
+		// （`mygo/ui/transform.go` 的 `e.transform.Then(Scaling(x, y))`），两次
+		// `Scale` 也就是乘在一起的——这里自己乘一次，是为了让「乘的是哪两个」在
+		// 一行里看得见（而且只留一份变换）。
 		v := flat.PressScaleValue(ic, b.Pressed(), true) * s.likeIconScale(c, ic)
 		ic = ic.Scale(v, v)
 	})

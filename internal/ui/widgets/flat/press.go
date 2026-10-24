@@ -77,7 +77,10 @@ const pressTime = 120 * time.Millisecond
 
 // pressKey 是「按下缩放」这条动画通道的键。
 //
-// ⚠️ **必须是常量**：理由见文件头那一段。
+// ⚠️ **必须是常量**：理由见文件头那一段——而且这不是洁癖：**一个变量的字符串**
+// 装进框架那个 `any` 形参要**每帧一次装箱分配**（实测：歌词区那三枚旋钮钉身份
+// 时，满屏播放器那一档每帧多 3 次——正是那三枚），而**常量**由编译器给一个静态
+// 的值，一次也不分配 ✓。
 const pressKey = "flat:press"
 
 // PressScaleValue 给出内容 e 这一帧该缩到多少（1 = 原样）。
@@ -106,9 +109,11 @@ func PressScaleValue(e ui.Element, pressed, grow bool) float32 {
 //
 // ⚠️ **e 要是按钮的**内容**（图标），不是按钮盒子**——理由见文件头。
 //
-// ⚠️ **这一档和别的缩放不能各写各的**：一个元素只能有一份变换，后写的把先写的
-// 顶掉。要跟别的缩放相乘（比如赞键那种「按下 + 弹跳」），用
-// `PressScaleValue` 拿到倍数，自己乘完再 `Scale` 一次。
+// ⚠️ **跟别的缩放要相乘**：框架的 `Scale` 是「在已有变换**之后**再缩」
+// （`mygo/ui/transform.go`：`e.transform = e.transform.Then(Scaling(x, y))`），
+// 所以两次 `Scale` 本身就是乘在一起的——但要跟别的一档相乘时（比如赞键那种
+// 「按下 + 弹跳」），用 `PressScaleValue` 拿到倍数，**自己乘完再 `Scale` 一次**：
+// 那样只有一份变换，读者一眼看得出乘的是哪两个。
 func PressScale(e ui.Element, pressed, grow bool) ui.Element {
 	v := PressScaleValue(e, pressed, grow)
 	return e.Scale(v, v)
