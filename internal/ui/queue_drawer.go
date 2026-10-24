@@ -50,12 +50,13 @@ const (
 // 每一处都滑一遍就成噪音了。
 //
 // ⚠️ **上游不是「全站都关了动画」**：上游那 43 处 `disableAnimation` 是**一件一件
-// 挂在具体组件上的**（Modal 10 处、Button 10 处、Tooltip 6 处、Popover 5 处、
-// Dropdown 4 处、Switch 3 处、Checkbox 3 处、Select 1 处、Drawer 1 处），
-// 而**上游自己在满屏播放器里做了一个从右边滑进去的抽屉**
+// 挂在具体组件上的**（Modal 10 处、Button 10 处、Popover 6 处、Switch 4 处、
+// Tooltip 4 处、Checkbox 3 处、Dropdown 3 处、Select 1 处、Slider 1 处、
+// Drawer 1 处），而**上游自己在满屏播放器里做了一个从右边滑进去的抽屉**
 // （`src/components/full-screen-player/index.tsx:421-422`：`transition-all
 // duration-300 ease-out` + `translate-x-full → translate-x-0`）。
-// 详见 DESIGN.md §九那一段的出处与范围。
+// 那一段的出处与逐处清单见 DESIGN.md §五「上游那 43 处 `disableAnimation` 的
+// 范围」；§九那一段记的是「小浮层不加、大面板加」这个拍板。
 
 // queueSlideDuration 是抽屉滑入滑出要走多久：200ms。
 //
