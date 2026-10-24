@@ -957,6 +957,23 @@ func (p *pagedRows) Remove(i int, del func(context.Context, string) error) {
 	}()
 }
 
+// ClearViewed 清掉**已看完**的那些（上游页头右上角那个「清除已看完」）。
+//
+// ⚠️ **请求跑在后台 goroutine 里**（和 `Remove` 同一个理由）：这是一次网络请求，
+// 界面线程等它的话窗口会卡住。
+//
+// ⚠️ **它清的是 B 站那边那一份清单**，界面上的行还在——所以清完之后要重新拉
+// 一遍（那件事在 `clearViewedResult.apply` 里做）。
+func (p *pagedRows) ClearViewed(del func(context.Context) error) {
+	if del == nil {
+		return
+	}
+	gen := p.gen
+	go func() {
+		p.deliver(clearViewedResult{gen: gen, err: del(context.Background())})
+	}()
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 三重保障
 // ─────────────────────────────────────────────────────────────────────────────

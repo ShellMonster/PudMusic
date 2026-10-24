@@ -1017,6 +1017,34 @@ var Items = []Item{
 	},
 	{
 		Category: Negative,
+		// 票 #282：「点了歌一直不开始、也不说为什么」。
+		//
+		// 那一首和别的歌不一样的地方在于**它的流一直没准备好**，而应用这一层
+		// 对「还在准备」和「已经完了」分都不分：既没有一句「正在取流」，也没有
+		// 一个「等够了就当它失败」的上限。于是用户面对的是一个不动的界面和
+		// 一片沉默——比「报错」更糟。
+		//
+		// 这一组盯三件事：**有反馈**（界面上说在取流）、**有上限**（超时按失败
+		// 处理，给一句能看懂的话）、**有痕迹**（代次变了和失败都写进日志，
+		// 而日志真的落在文件里）。
+		Spec: "点了歌一直不开始：界面上说在取流、超过阈值按失败处理、代次变了和失败都写进日志",
+		Tests: []string{
+			"TestAPlayThatNeverStartsTurnsIntoASentence",
+			"TestAnotherSongsFailureDoesNotCancelTheWatchdog",
+			"TestTheDiscardedPlayIsWrittenDown",
+			"TestTheFailureIsWrittenDown",
+			"TestThePlayBarSaysItIsLoading",
+			"TestTheLoadingLineHasASpinner",
+			"TestThePauseKeyIsStillThereWhileLoading",
+			"TestAFailedPlayGivesASentenceInsteadOfASpinner",
+			"TestTheFailureSentenceFitsOnOneLine",
+			"TestFriendlySaysTheFormatCannotBeDecoded",
+			"TestTheLogFileActuallyReceivesWhatIsLogged",
+			"TestTheLogFileIsAppendedTo",
+		},
+	},
+	{
+		Category: Negative,
 		Spec:     "重启：登录状态保持、设置落盘、搜索历史活下来",
 		Tests: []string{
 			"TestRestartKeepsTheLoginState",
@@ -2598,9 +2626,14 @@ var Items = []Item{
 		// 这个应用没做完。
 		Category: Platform,
 		// 票 #234（审计 F-01 / F-02 / F-03 / F-06 + UX B1 / B2）：视觉一致性第一批。
-		Spec: "「当前在哪」在应用里只有**一种底色**：侧栏菜单当前项、侧栏收藏夹当前项、关注页分组当前项、动态页作者栏当前项、队列抽屉「正在播放」那一行，五处的**底**都是 flat 那一档（淡主色底 / 中性灰底），**没有实心主色大块**；**字**分两档：左栏那四处是正文色（深色下是主色字），队列抽屉那一行是**主色当字**（`ink.AccentOn`，和列表行「正在播放」那一档同一个数）；搜索页**没有页内输入框**，也没有「搜索」那一行标题，顶上第一行就是「搜索【词】的结果」（24/400），当前搜的词显示在**顶栏**那个框里（填上去的那个词，用户点进去敲字是**替换**不是追加；在搜索页上按那枚「清空」清掉的是这一场搜索，不只是框里那几个字）；满屏播放器顶栏的设置齿轮**紧跟在歌名后面**（上游那一组的构图），不是浮在窗口中间",
+		//
+		// ⚠️ **队列抽屉「正在播放」那一行不在这条里了**（票 #294，2026-10-24）：
+		// 它后来单独改成了**淡主色底**（上游 `bg-primary/20`），见本表最后一条。
+		// 这一条说的是**左栏那四处**——侧栏菜单当前项、侧栏收藏夹当前项、关注页
+		// 分组当前项、动态页作者栏当前项。
+		Spec: "「当前在哪」在应用里只有**一种底色**：侧栏菜单当前项、侧栏收藏夹当前项、关注页分组当前项、动态页作者栏当前项，四处的**底**都是 flat 那一档（淡主色底 / 中性灰底），**没有实心主色大块**；**字**分两档：深色下是主色字、浅色下是正文色；搜索页**没有页内输入框**，也没有「搜索」那一行标题，顶上第一行就是「搜索【词】的结果」（24/400），当前搜的词显示在**顶栏**那个框里（填上去的那个词，用户点进去敲字是**替换**不是追加；在搜索页上按那枚「清空」清掉的是这一场搜索，不只是框里那几个字）；满屏播放器顶栏的设置齿轮**紧跟在歌名后面**（上游那一组的构图），不是浮在窗口中间",
 		Tests: []string{
-			// 五处「当前在哪」是同一个底色配方（深浅两套都量，底色和字色都量）。
+			// 左栏那四处「当前在哪」是同一个底色配方（深浅两套都量，底色和字色都量）。
 			"TestTheCurrentItemIsFlatEverywhere",
 			// 搜索页的减法，以及顶栏那个框显示当前关键词。
 			"TestTheSearchPageHasOneTitleAndNoSecondSearchBox",
@@ -2705,6 +2738,45 @@ var Items = []Item{
 			"TestAShortTitleIsNotAffected",
 			// 「图取到了」那一档也描一圈边（深浅两套）。
 			"TestTheLoadedCoverHasAnEdgeOfItsOwn",
+		},
+	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：那一枚按钮悬在 Tab 右边半截、
+		// 矮一截（28 而不是 40）、又没有那枚 ▶——**没有一样会报错**，界面
+		// 只是「不像这一页的操作，也不像全局操作」。
+		//
+		// 而它是首页和每一页列表上**唯一的主色实心块**，用户第一眼先看它。
+		Category: Platform,
+		// 票 #288（UX 报告 C-04 + C-05）。
+		Spec: "「全部播放」那一枚贴在内容区右沿、尺寸 114×40、带一枚 18 的 ▶ 图标（上游 HeroUI `Button size=\"md\"` 的逐像素实测值）",
+		Tests: []string{
+			// 右沿 = 内容区右沿、尺寸 114×40（1200 与 900 两档窗口，深浅两套）。
+			"TestThePlayAllButtonSitsAtTheRightEdgeOfTheContentArea",
+			// 那一枚里有一枚 18 的 ▶ 图标，而且它在字的**前面**（上游的
+			// `startContent`）。
+			"TestThePlayAllButtonHasThePlayIcon",
+		},
+	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：底色是中性灰而不是淡主色底，界面
+		// 不会报错、不会崩——只是「哪一首在放」少了一个一眼就认出来的信号。
+		//
+		// 而它是从**上游对齐审计**里查出来的一条（报告 §1 的 S-11）：上游那一行
+		// 是主色 20% 的淡绿底，我们一直是中性灰底。
+		Category: Platform,
+		// 票 #294（报告 §1 的 S-11，2026-10-24 拍板按上游改）。
+		//
+		// ⚠️ **DESIGN §七保护的是「主色当字色」的对比度，不是「主色当底色」**：
+		// §七 不该被扩大解释。淡主色底是**状态识别**，底上放的是普通文字。
+		Spec: "队列抽屉里「正在播放」那一行的**底色是主色 20% 那一层淡底**（浅色 #d2f7df / 深色 #193e29），**不是实心主色底**；底上的字（歌名 16 / 副题 14）**对比度都 ≥4.5:1**（深浅两套都量，且跟着用户自定义的主色重算）",
+		Tests: []string{
+			// 那一行的底就是那一层淡主色底（画面上量的，深浅两套），而且不是
+			// 实心主色底、也和旁边那一行不一样。
+			"TestTheQueuePlayingRowUsesAPalePrimaryBackground",
+			// 底上的字够读（歌名 + 副题，深浅两套 × 六种主色）。
+			"TestTheTextOnThePalePrimaryRowIsReadable",
+			// 那几个数钉死（浅 #d2f7df / 深 #193e29，底是不透明的）。
+			"TestThePalePrimaryRowKeepsItsNumbers",
 		},
 	},
 }

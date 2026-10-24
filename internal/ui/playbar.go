@@ -492,9 +492,49 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 		if st.HasTrack && st.Artist != "" {
 			s.viewArtist(c, st, t)
 		}
-		if st.Err != "" {
+		// 🔴 **出错和「正在取流」占同一个位置**（票 #282）：两者都是「这一句
+		// 说明现在怎么了」，而那一行只有一行宽。它们不会同时有——取流失败时
+		// 「正在取流」那一档已经收掉了（`failOnline` 先收它，再写这句话）。
+		// 万一同时有（将来加了别的路径），**错的那句优先**：一句错比一枚转圈
+		// 信息量大，而转圈还在转说明还有希望。
+		switch {
+		case st.Err != "":
 			s.viewTrackError(c, st, t)
+		case st.Loading:
+			s.viewTrackLoading(c, st, t)
 		}
+	})
+}
+
+// viewTrackLoading 是播放条上「正在取流」那一句话（前面带一枚转圈）。
+//
+// # 为什么要有这一句
+//
+// 在线流要跑一趟网络（取流 + 开解码器），那一趟里界面上什么都不会变——
+// 歌名还是上一首的，进度条不动，也没有声音。用户看到的就是「点了没反应」
+// （票 #282 的现象：一直转圈、也不说为什么）。
+//
+// 这一句说的是「**在准备了**」，而转圈说的是「**还在等**」。两句合起来用户
+// 才知道自己没有按错，也知道要等多久（超过阈值会换成一句失败的话）。
+//
+// ⚠️ **它是灰字，不是红字**：红字是「出错了」，而这一句是「还没好」。两者的
+// 语气不一样，用户读到红色会以为已经完了。
+//
+// 🔴 **那枚转圈在这里，不在播放/暂停那一枚上**（票 #282 的评审）：取流这一趟
+// 里**上一首还在放**，把那一枚换成转圈的话用户就按不了暂停了。
+func (s *Shell) viewTrackLoading(c *ui.Context, st app.State, t *ui.Theme) {
+	msg := "正在取流"
+	if st.LoadingTitle != "" {
+		msg += "：" + st.LoadingTitle
+	}
+	ui.Row(c).Gap(space.Px4).AlignItems(ui.Center).Children(func() {
+		// ⚠️ **转圈的无障碍名字就是「正在取流」**：转圈没有可见的字，而它是
+		// 唯一能认出「这里在等」的凭据（无头 Tester 也只认字和名字）。
+		ui.Spinner(c).Size(loadingLineSpinnerSize, loadingLineSpinnerSize).Label("正在取流")
+		// ⚠️ **一行 + 省略号，和错那一行同一个理由**（见 `viewTrackError`）：
+		// 88 高的播放条放不下两行，而超长的歌名会把这一行挤没。
+		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
+			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").Grow(1), msg)
 	})
 }
 
@@ -585,6 +625,14 @@ func (s *Shell) viewTrackActions(c *ui.Context, st app.State) {
 // 都不动（那一列的宽度、进度条的长度都不受影响）。
 func (s *Shell) viewTrackError(c *ui.Context, st app.State, t *ui.Theme) {
 	msg := "打不开：" + st.Err
+	// 🔴 **悬停提示里给的是完整那一句**（`State.ErrDetail`）：这一行只有 140
+	// 像素宽（1200 宽的窗口，实测），十二三个字就是它的全部——一句 50 个字的
+	// 话上屏只剩「打不开：取流…」这样的碎片（票 #282 的评审）。短的那句在
+	// 画面上，完整的那句在提示里，两边合起来才是一句能看懂的话。
+	tip := msg
+	if st.ErrDetail != "" && st.ErrDetail != st.Err {
+		tip = "打不开：" + st.ErrDetail
+	}
 	ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 		// 🔴 **一行 + 省略号，和歌名同一个理由**：这一列最窄的时候（760 宽
 		// 的测试窗口，比应用自己的下限 900 还窄）只剩 70，而这一句话有 14 个
@@ -593,7 +641,7 @@ func (s *Shell) viewTrackError(c *ui.Context, st app.State, t *ui.Theme) {
 		//
 		// 缩掉的那几个字用悬停补回来，和上面那个音质徽章同一个做法。
 		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
-			TextColor(dangerText(t)).MaxLines(1).Ellipsis("…").Grow(1), msg)
+			TextColor(dangerText(t)).MaxLines(1).Ellipsis("…").Grow(1), tip)
 		switch {
 		case st.CanRetry:
 			if s.withTip(c, flatButton(c, "重试").FontSize(scale.Font(c, scale.Size12)),
@@ -857,6 +905,11 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 	ui.Row(c).Gap(transportGap).AlignItems(ui.Center).Children(func() {
 		s.viewPrevButton(c)
 
+		// 🔴 **取流期间这一枚仍然是播放/暂停**（票 #282 的评审）：正在取流的
+		// 那一首**还没放起来**，而**上一首还在放**——把它换成一枚转圈，用户就
+		// 按不了暂停了（迷你窗和满屏播放器里还有，播放条上没有了）。
+		//
+		// 「正在取流」的那枚转圈在**第三行**（`viewTrackLoading`），不在这里。
 		if st.Playing {
 			if s.withTip(c, iconButtonPlay(c, transportIcon(true), "暂停", iconPlayBtn, false).
 				Size(iconHitPlay, iconHitPlay).Padding(space.None, space.None), "暂停").Clicked() {

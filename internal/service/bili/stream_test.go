@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 )
 
 // 这一组测的是「拿到取流响应之后」的那半：挑哪一条流、有效期怎么算、
@@ -596,6 +599,27 @@ func TestFriendlyHidesCancellation(t *testing.T) {
 	}
 	if got := Friendly(errors.New("client: 请求超时")); got == "" {
 		t.Error("超时没有话")
+	}
+}
+
+// TestFriendlySaysTheFormatCannotBeDecoded 盯「解不了」说人话（票 #282）。
+//
+// 底下是「OSStatus -11800」「不像 FLAC」这种行话——用户读不出来，也照着
+// 做不了任何事。界面上要说的是「解不了」，并且给出**还能怎么办**。
+//
+// ⚠️ **也不许给「重试」**：再取一次流拿回来的还是同一条，还是解不了。
+func TestFriendlySaysTheFormatCannotBeDecoded(t *testing.T) {
+	err := fmt.Errorf("%w: extaf: AudioFileOpenWithCallbacks: OSStatus -11800",
+		audio.ErrUnsupportedFormat)
+	got := Friendly(err)
+	if !strings.Contains(got, "解不了") {
+		t.Errorf("人话 = %q，没有说清是「解不了」", got)
+	}
+	if strings.Contains(got, "OSStatus") || strings.Contains(got, "-11800") {
+		t.Errorf("人话 = %q，把行话原样给用户了", got)
+	}
+	if Recoverable(err) {
+		t.Error("解不了的流给了「可重试」——重试一万次还是这一句")
 	}
 }
 
