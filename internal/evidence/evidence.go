@@ -3270,6 +3270,7 @@ var Items = []Item{
 			"TestThePlayAllButtonReplacesQueueAndStartsAtItsFirstSong",
 			"TestThePlayAllButtonReplacesQueueOnBothPages",
 			"TestPlayAllReplacesTheQueueWithSearchResults",
+			"TestTheUpSpacePlayAllReplacesTheQueue",
 			"TestOtherBatchEntriesReplaceQueueAndStartFirst",
 			"TestTheFourRowQueueActions",
 			"TestLibraryPlayNowPreservesTheQueue",

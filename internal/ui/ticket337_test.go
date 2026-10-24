@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"net/http"
 	"path/filepath"
 	"testing"
 
@@ -66,7 +67,7 @@ func queuePlus(old []app.Item, it app.Item) []app.Item {
 }
 
 // 批量入口里的另三处；首页、搜索页与 UP 空间共走 playAllSongs，在
-// ticket244 / ticket299 里点真实按钮验。
+// ticket244 / ticket299 里点真实按钮验（UP 空间那条在下面单独一条）。
 func TestOtherBatchEntriesReplaceQueueAndStartFirst(t *testing.T) {
 	t.Run("本地页", func(t *testing.T) {
 		songs := localSongs(t, 2)
@@ -110,6 +111,61 @@ func TestOtherBatchEntriesReplaceQueueAndStartFirst(t *testing.T) {
 		}
 		assertQueueAndPlaying(t, a, want, 0)
 	})
+}
+
+// TestTheUpSpacePlayAllReplacesTheQueue 钉住 UP 空间「全部播放」那一枚。
+//
+// ⚠️ **它与首页 / 搜索页共用 `playAllSongs` 那个出口**，所以语义天生一样；这一条
+// 单独写，是因为它是**另一个页面上的另一枚按钮**——共用出口的那一处改了，这个
+// 页面跟着变，而这一条保证它真的跟着变（没有哪一层把它单独绕过去）。
+//
+// ⚠️ **判据是队列内容与当前项，不等音频真响**：这一页的假 B 站（`uiExplore`）
+// 只伺服空间/投稿/动态那几个接口，**不伺服取流**（`/x/player/pagelist` 与
+// `/x/player/wbi/playurl` 它一律回 `{}`），所以这一页的在线歌在无头环境里
+// 本来就放不出来——等「真的开始播放」会等超时，而那说的不是这一条要验的东西。
+// 「换成这一批」这件事本身，队列内容与当前项就说得清。
+//
+// 判据：先排三首旧歌 → 按「全部播放」→ 队列**只剩**这一页的歌，当前项是第一首。
+func TestTheUpSpacePlayAllReplacesTheQueue(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "投稿的 UP", 0, 1)
+	b.on("/x/space/wbi/arc/search", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{
+			"list": map[string]any{"vlist": []any{
+				map[string]any{"bvid": "BVup1", "title": "投稿 一", "length": "3:20", "cid": "1"},
+				map[string]any{"bvid": "BVup2", "title": "投稿 二", "length": "4:20", "cid": "2"},
+			}},
+			"page": map[string]any{"count": 2},
+		})
+	})
+	s, tt, a := newSpaceShell(t, b, false, "")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+	sp.tab = upTabVideo
+	tt.Frame()
+	waitFrames(t, tt, "投稿加载完", func() bool { return sp.videos.Paged().Loaded > 0 })
+	tt.Frame()
+
+	old := seedThreeSongs(t, a)
+	if err := tt.Click("全部播放"); err != nil {
+		t.Fatalf("点不到「全部播放」：%v，文字有 %q", err, tt.Texts())
+	}
+	waitFrames(t, tt, "队列换成这一页的歌", func() bool {
+		got := a.Queue().Items()
+		return len(got) == 2 && got[0].Bvid == "BVup1" && got[1].Bvid == "BVup2"
+	})
+	got := a.Queue().Items()
+	if len(got) != 2 {
+		t.Fatalf("队列里有 %d 首，want 2（这一页的两首）——旧的 %d 首不该留着", len(got), len(old))
+	}
+	for i, want := range []string{"BVup1", "BVup2"} {
+		if got[i].Bvid != want {
+			t.Errorf("队列第 %d 首是 %q，want %q", i+1, got[i].Bvid, want)
+		}
+	}
+	if idx := a.Queue().CurrentIndex(); idx != 0 {
+		t.Errorf("当前项 = %d，want 0（这一批的第一首）", idx)
+	}
 }
 
 // 四档真实菜单从同样的三首旧歌出发；除立即播放外，另外三档必须保持既有行为。
