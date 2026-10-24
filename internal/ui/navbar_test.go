@@ -96,7 +96,7 @@ func fakeClockOn(s *Shell, t time.Time) *fakeClock {
 // 成立的前提——它得是**内容区顶上那一条**（x ≥ 侧栏宽），否则有一片窗口
 // 拖不动；而它**不该**再盖住侧栏那一段（那是侧栏的 logo 和菜单的地方）。
 //
-// ⚠️ **这一条跟着票 #165 改过**：顶栏原来横贯**整个窗口宽度**（后退键贴在
+// ⚠️ **这一条跟着票 #286 改过**：顶栏原来横贯**整个窗口宽度**（后退键贴在
 // 窗口左边 x=8），而现在是上游那种「侧栏通栏 + 顶栏只盖内容区」（上游
 // `biu/src/layout/index.tsx:36-47`，报告 C-01）。所以左边那一头量的是
 // **内容区的左沿**（侧栏的右沿），不再是窗口的左沿。
@@ -154,6 +154,68 @@ func TestTheTopBarCoversTheContentAreaOnly(t *testing.T) {
 	}
 	if s.router.Path() != "/" {
 		t.Errorf("看了一顶栏，路径变成了 %q", s.router.Path())
+	}
+}
+
+// TestTheTopBarDoesNotReserveRoomForTheWindowControls 钉住顶栏**左边不让出**
+// `bar.Left`（票 #286 / 报告 C-01）。
+//
+// # 为什么单独立一条
+//
+// `TestTheTopBarCoversTheContentAreaOnly` 量的是「后退键左边缘离内容区左沿不
+// 超过 32 像素」，而**无头 Tester 的 TitleBar 是零值**（`mygo/ui/headless.go`
+// 那张表默认没填，`bar.Left` 是 0）——于是「让出 `bar.Left+8`」和「不让出」
+// 两种写法量到的都是同一个数（X=208），**分不出来**。只有真窗口
+// （`bar.Left` = 66）才差那 66 像素。
+//
+// 所以这里显式装一个 macOS 那样的标题栏进去（`tt.SetTitleBar`，做法照
+// `fullplayer_review_test.go` 里那一条），量两遍：装之前和装之后，后退键的
+// 左边缘**一个像素都不许动**。
+//
+// # 断言为什么写成「不许动」而不是「等于某个数」
+//
+// 「等于某个数」会把这一条变成「顶栏左内边距是 8」那一条的另一份——内边距
+// 一改，断言跟着改。而这一条要钉的是**依赖关系**：顶栏左边那 8 像素**不随
+// `bar.Left` 变**。「预留」和「不预留」两种写法在这一条上分别是「动了 66」和
+// 「没动」，分得开。
+func TestTheTopBarDoesNotReserveRoomForTheWindowControls(t *testing.T) {
+	_, tt := newShell(t)
+	tt.SetFocused(true)
+
+	before, ok := tt.Find(navBackLabel)
+	if !ok {
+		t.Fatalf("顶栏上没有后退，文字有 %q", tt.Texts())
+	}
+
+	// macOS 那三枚窗口按钮在窗口左上角占掉的那一格：真窗口上 66 像素宽。
+	//
+	// ⚠️ **高度那一栏跟这一条无关**（顶栏高是 `max(bar.Height, navMinHeight)`，
+	// 38 那个数够不着 64），写上只是为了让这个标题栏像真窗口的那样。
+	const barLeft = float32(66)
+	tt.SetTitleBar(mygoui.TitleBar{Height: 38, Left: barLeft})
+	tt.Frame()
+
+	after, ok := tt.Find(navBackLabel)
+	if !ok {
+		t.Fatalf("装上标题栏之后顶栏上没有后退，文字有 %q", tt.Texts())
+	}
+	if after.X != before.X {
+		t.Errorf("装上 bar.Left=%v 的标题栏之后，后退键左边缘从 %v 挪到了 %v（+%v）——"+
+			"顶栏**不让出**窗口左上角那一格（票 #286）：macOS 的红黄绿在侧栏那一带，"+
+			"跟顶栏压根不在一块，让开它们的是侧栏的品牌块",
+			barLeft, before.X, after.X, after.X-before.X)
+	}
+	// 顺带断一次**绝对位置**：顶栏只盖内容区那一段，后退键仍然贴着内容区的
+	// 左沿（侧栏右沿），而不是被推到窗口按钮那一格后面。
+	//
+	// 这一句是给「整体挪位」兜底的：上面那句只说「没动」，而这一句说「动也不
+	// 许多」，两者的差别就在「顶栏整体挪到别处去了」这种改法上。
+	const slack = 32
+	contentLeft := float32(app.DefaultSideMenuWidth)
+	if after.X > contentLeft+slack {
+		t.Errorf("装上 bar.Left=%v 之后后退键左边缘是 %v，离内容区左沿（%v）有 %v"+
+			"（容差 %v）——它不在顶栏左端", barLeft, after.X, contentLeft,
+			after.X-contentLeft, slack)
 	}
 }
 
