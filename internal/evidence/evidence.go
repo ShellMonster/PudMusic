@@ -515,6 +515,51 @@ var Items = []Item{
 		},
 	},
 	{
+		// 归「播放」那一组：还是顶栏，但说的是头像**下面那一层**（票 #363）。
+		//
+		// 归这一组是因为它是**界面上的一处交互**（和满屏偏好面板那一条同一类），
+		// 而不是一个接口。
+		Category: Play,
+		// 这一层原来是**系统原生菜单**（`ui.Element.Menu`），这一票换成自绘的
+		// 浮层：样式跟设计规范对得上（surface1 / radiusLg / shadow.Modal /
+		// accentSoft），而系统菜单是系统外观；菜单项也要能带图标。
+		//
+		// 🔴 **换成自绘之后，系统菜单那四件好事一件都不能丢**（当初用系统菜单
+		// 就是为了它们）：点外面关、Esc 关、键盘能上下走、选中项有反馈。
+		//
+		// ⚠️ **指针和键盘混着来是最难的那一种**：两者共用「当前是第几项」，而
+		// 悬停每一帧都改它——不处理的话，键盘刚走的那一格会被指针改回去，
+		// 「键盘能上下走」只剩「指针不在菜单项上」的时候才成立。
+		Spec: "头像下拉是自绘浮层（不是系统菜单）：六项按上游的顺序、每一项带图标、锚在头像下面；点外面关、Esc 关、方向键走得动（指针停在菜单项上也走得动）、当前项有反馈；「退出登录」先问一句，取消什么都不做",
+		Tests: []string{
+			// 六项都在、顺序照上游、而且**不是系统菜单**。
+			"TestAvatarMenuHasBiuSixItems",
+			// 六项都按得动：换路由、去个人资料、去设置、退登（先问一句）。
+			"TestAvatarMenuGoesToItsRoute",
+			"TestAvatarMenuProfileUsesTheLoggedInMid",
+			"TestAvatarMenuWithoutALoginSaysSo",
+			"TestAvatarMenuLogoutActuallyLogsOut",
+			"TestAvatarMenuOpensTheIssuePage",
+			// 点外面关、Esc 关。
+			"TestTheAvatarMenuClosesOnEscape",
+			"TestTheAvatarMenuClosesWhenClickingOutside",
+			// 键盘那一半：方向键走得动（**指针停在菜单项上时也走得动**）、
+			// 回车选的是亮着的那一项。
+			"TestTheAvatarMenuWalksWithTheArrowKeys",
+			"TestTheAvatarMenuWalksWhileThePointerRestsOnAnItem",
+			"TestTheAvatarMenuSelectsWithTheKeyboard",
+			// 浮层的样子：锚在头像下面、右沿对齐、底色是 surface1 那一档。
+			"TestTheAvatarMenuHangsUnderTheAvatar",
+			"TestTheAvatarMenuPanelLooksLikeACard",
+			// 每一项前面都有图标。
+			"TestEveryAvatarMenuItemHasAnIcon",
+			// 当前那一项的危险字按那层底现算（底换了，字要跟着换）。
+			"TestTheDangerItemKeepsItsContrastOnTheHighlightedRow",
+			// 「退出登录」先问一句，取消什么都不做。
+			"TestTheAvatarMenuAsksBeforeLoggingOut",
+		},
+	},
+	{
 		Category: HTTP,
 		// 「刷新数据」那一项以前按下去只弹一句「还没有数据可刷新」——而接口一直
 		// 都在（`created/list`，收藏夹的新建 / 修改 / 拉全量都靠它）。这一条钉的是
@@ -529,6 +574,38 @@ var Items = []Item{
 			"TestRefreshingTwiceSendsOneRequestAndSaysItIsBusy",
 			"TestRefreshingWithoutALoginSaysSoAndSendsNothing",
 			"TestRefreshingWithoutTheFoldersMountedSaysSo",
+		},
+	},
+	{
+		Category: HTTP,
+		// 票 #362 的三件事：
+		//
+		//  1. **自动拉**：登录之后、开机时已经登录，各拉一次——用户不该为了
+		//     看见自己的收藏夹先去头像下拉里按「刷新数据」。而「一次自动拉
+		//     只发一次请求」是「不许每帧都拉」那条规矩的反面判据。
+		//  2. **空状态分得开**：「拉失败」和「真的一 个都没有」在画面上不是
+		//     同一句话——摆一句「还没有收藏夹」在拉失败的时候是撒谎，而用户
+		//     会据此以为自己一个收藏夹都没有。
+		//  3. **「我收藏的」那一组有源**：它走 `collected/list`（B 站「我收藏
+		//     了别人的哪些收藏夹」那个接口），而它以前在本项目里只有测试填
+		//     过——侧栏上那一组永远空着，而用户看到的是一个摆在那儿、永远
+		//     不动的分组。
+		Spec: "登录之后 / 开机时自动拉一次收藏夹（一次自动拉只发一次请求）；拉失败和「真的没有」在界面上分得开；「我收藏的」那一组有源",
+		Tests: []string{
+			"TestLoggingInPullsTheFavorites",
+			"TestAlreadyLoggedInPullsTheFavoritesAtStartup",
+			"TestAutoRefreshSendsNothingWhenLoggedOut",
+			"TestAutoRefreshSendsOnlyOneRequest",
+			"TestAFailedFetchIsNotAnEmptyList",
+			"TestAFetchThatFoundNothingIsStillLoaded",
+			"TestTheCollectedFoldersShowUpInTheSidebar",
+			"TestCollectedAlbumsAreNotPutInTheSidebar",
+			"TestLoggingOutClearsTheFavorites",
+			"TestARefreshThatComesBackAfterALogoutIsThrownAway",
+			"TestTheOldRefreshDoesNotStealTheNewAccountsRefreshState",
+			"TestTheSidebarSaysTheFetchFailedInsteadOfThereAreNoFavorites",
+			"TestTheSidebarDoesNotSayThereAreNoFavoritesBeforeAnythingWasFetched",
+			"TestRefreshingWithoutALoginDoesNotSayTheFetchFailed",
 		},
 	},
 
