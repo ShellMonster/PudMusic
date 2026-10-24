@@ -228,3 +228,36 @@ func TestThePresetCardsAreFourEqualCards(t *testing.T) {
 		}
 	}
 }
+
+// TestToastAndConfirmTextIsReadableOnEveryPresetColor：方案的语义色当底时（Toast、
+// 确认键），字色在每套、每档深浅下都 ≥ 3:1；经典的惯用字色不被换掉。
+func TestToastAndConfirmTextIsReadableOnEveryPresetColor(t *testing.T) {
+	for _, name := range append(append([]app.ThemePreset{}, allPresets...), app.ThemePresetClassic) {
+		for _, dark := range []bool{false, true} {
+			s := app.DefaultSettings("")
+			s.ThemePreset = name
+			s.ThemeMode = app.ThemeModeLight
+			if dark {
+				s.ThemeMode = app.ThemeModeDark
+			}
+			th := BuildTheme(s, false)
+			for tone, bg := range map[string]mygoui.Color{"success": th.Success, "warning": th.Warning, "danger": th.Danger} {
+				for _, pref := range []mygoui.Color{toastOnSemantic, toastOnDanger, confirmOnWarning, dialogOnDanger} {
+					got := readableOn(bg, pref)
+					if r := presetRatio(got, bg); r < 3 {
+						t.Errorf("%s dark=%v %s：字压在底上只有 %.2f:1", name, dark, tone, r)
+					}
+				}
+			}
+			if name == app.ThemePresetClassic {
+				for _, c := range []struct {
+					bg, pref mygoui.Color
+				}{{th.Success, toastOnSemantic}, {th.Warning, toastOnSemantic}, {th.Danger, toastOnDanger}} {
+					if readableOn(c.bg, c.pref) != c.pref {
+						t.Errorf("经典 dark=%v：惯用字色被换掉了（经典要一个像素不变）", dark)
+					}
+				}
+			}
+		}
+	}
+}

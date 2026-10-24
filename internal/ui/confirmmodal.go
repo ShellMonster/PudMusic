@@ -310,10 +310,10 @@ func confirmButton(c *ui.Context, spec confirmSpec) ui.Element {
 	switch spec.tone {
 	case toneDanger:
 		return flatButton(c, spec.confirm).Label(name).
-			Background(t.Danger).TextColor(dialogOnDanger)
+			Background(t.Danger).TextColor(readableOn(t.Danger, dialogOnDanger))
 	case toneWarning:
 		return flatButton(c, spec.confirm).Label(name).
-			Background(t.Warning).TextColor(confirmOnWarning)
+			Background(t.Warning).TextColor(readableOn(t.Warning, confirmOnWarning))
 	}
 	return ui.PrimaryButton(c, spec.confirm).Label(name)
 }

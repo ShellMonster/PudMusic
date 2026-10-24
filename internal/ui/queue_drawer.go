@@ -28,11 +28,11 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// 尺寸照 Biu：行高 64（`RowHeight`）、宽 384（HeroUI Drawer 的 size="sm"）、封面
+// 尺寸：行高 64（`RowHeight`）、宽 320（设计规范 v0.1 §4 的右侧 Inspector；上游 Biu 是 384）、封面
 // 48（`h-12 w-12`）、行内边距 8（`p-2`，48+8+8 正好 64）、顶上那条 52。
 const (
 	queueRowHeight    = 64
-	queueDrawerWidth  = 384
+	queueDrawerWidth  = 320
 	queueCoverSize    = 48
 	queuePadY         = space.Px8
 	queuePadX         = space.Px8
