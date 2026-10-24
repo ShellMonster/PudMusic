@@ -890,11 +890,10 @@ func (a *App) EnqueueAndPlayNow(item Item) error {
 	cur := a.queue.CurrentIndex()
 	start := a.queue.Len()
 	a.queue.Append(item)
-	it, ok := a.queue.selectAt(start)
-	if !ok {
-		return nil
-	}
-	if err := a.play(it); err != nil {
+	// 选中新加进去的那一项（它必然在 `start` 那个下标上：`Append` 刚把它放在
+	// 队尾，而 `selectAt` 只在下标越界时才失败）。
+	a.queue.selectAt(start)
+	if err := a.play(item); err != nil {
 		// 退回原来那一首：队列的下标要和正在放的那首对得上（和 `step` 同一个
 		// 道理——用户点的是这一首，不该因为放不开就被放到另一首上）。
 		a.queue.selectAt(cur)

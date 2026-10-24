@@ -354,23 +354,10 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected boo
 // 播放记录之后想把它收藏回来是办得到的（收藏夹里那份还在），而把收藏夹里的东西
 // 删了就没了。顺序摆在这里是因为它们属于「这一行是什么」，不属于「这一页怎么改」。
 //
-// ⚠️ **菜单本体在 `libraryMenuItems`**（两页共用一份，见那里的注释）：这里只
-// 定这一页自己的那一项——「删除」。
+// ⚠️ **菜单本体在 `Shell.libraryMenuItems`**（两页共用一份，见那里的注释）：这里
+// 只说这一页是「历史记录」——最后那一项因此是「删除」。
 func (s *Shell) historyMenu(m *ui.Menu, i int) {
-	p := &s.historyPage
-	row, ok := p.rows.Row(i)
-	if !ok {
-		return
-	}
-	acts := p.rows.actions()
-
-	libraryMenuItems(m, row, acts, i, "删除", func() {
-		p.rows.Remove(i, s.app.LibraryOf().RemoveHistory)
-	})
-	// 🔴 **按不动的那几项要说明为什么**：理由见 laterMenu 里同一段。
-	if row.CannotPlay != "" {
-		m.Item(row.CannotPlay).Disabled(true).Chosen()
-	}
+	s.libraryMenuItems(m, s.historyPage.rows, i, libraryHistory)
 }
 
 // rowNumber 是那一行前面的序号。Biu 是 1 起的（`#` 列）。

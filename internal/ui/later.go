@@ -534,27 +534,10 @@ const (
 // ⚠️ **每一项都要 Item 一遍**：菜单是这趟全部建出来的，只有被 Chosen 的那一项为
 // true（`ui/menu.go` 的 buildMenu）。少建一项，那一项就永远点不到。
 //
-// ⚠️ **菜单本体在 `libraryMenuItems`**（两页共用一份，见那里的注释）：这里只
-// 定这一页自己的那一项——「移除」。
+// ⚠️ **菜单本体在 `Shell.libraryMenuItems`**（两页共用一份，见那里的注释）：这里
+// 只说这一页是「稍后再看」——最后那一项因此是「移除」。
 func (s *Shell) laterMenu(m *ui.Menu, i int) {
-	p := &s.laterPage
-	row, ok := p.rows.Row(i)
-	if !ok {
-		return
-	}
-	acts := p.rows.actions()
-
-	libraryMenuItems(m, row, acts, i, "移除", func() {
-		p.rows.Remove(i, s.app.LibraryOf().RemoveLater)
-	})
-	// 🔴 **按不动的那几项要说明为什么**。
-	//
-	// 用户看到的是「一行灰的」，而他不知道灰的是哪一种、还能怎么办——
-	// 而他也不可能猜到「PGC」是什么。说明摆在菜单末尾（它不是动作，
-	// 只是给人看的一句话）。
-	if row.CannotPlay != "" {
-		m.Item(row.CannotPlay).Disabled(true).Chosen()
-	}
+	s.libraryMenuItems(m, s.laterPage.rows, i, libraryLater)
 }
 
 // playCountText 是播放量那一列的字。**折法的出处只有一处**：`list.PlayCountText`

@@ -2,9 +2,11 @@
 // P-04）。
 //
 // 两页在界面上是同一件事：**一个关键词框 + 一排日期筛选 + 下面一个会自己翻页
-// 的列表**。差的那部分只有三样——表头那一行、每一行长什么样、右键菜单里那几
-// 项——它们在各自的页面文件里（`later.go` / `history.go`）。这里放共享的那些，
-// 免得两页各写一份防抖、两份「换条件回第 1 页」，过两个月只改了一边。
+// 的列表**。差的那部分只有两样——表头那一行、每一行长什么样——它们在各自的
+// 页面文件里（`later.go` / `history.go`）。**右键菜单是共用的**（下面
+// `Shell.libraryMenuItems` 一份），只有最后那一项（「移除」/「删除」）归各页。
+// 这里放共享的那些，免得两页各写一份防抖、两份「换条件回第 1 页」，过两个月
+// 只改了一边。
 //
 // # 关键词的防抖是 500ms（抄上游）
 //
@@ -338,21 +340,39 @@ func viewLibraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, cover *imgcac
 	})
 }
 
+// libraryPageKind 是这两页是哪一页——它们菜单里**只有最后一项**不一样。
+//
+// 用一个类型而不是两个参数（标签 + 动作），是为了让「标签和动作配错了」在编译期
+// 就不可能发生：那种错在界面上是「菜单里写着「删除」而按下去移除的是稍后再看」。
+type libraryPageKind int
+
+const (
+	libraryLater libraryPageKind = iota
+	libraryHistory
+)
+
 // libraryMenuItems 是稍后再看 / 历史记录两页**共用**的那份行菜单。
 //
 // ⚠️ **每一项都要 Item 一遍**：菜单是这趟全部建出来的，只有被 Chosen 的那一项为
 // true（`ui/menu.go` 的 buildMenu）。少建一项，那一项就永远点不到。
 //
-// ⚠️ **四档的语义只写在这里一份**：两页各写一份的话，改漏一边的后果是「这一页
-// 的「立即播放」清了队列、那一页的没清」——那种错在界面上要对着两页比才看得出来。
-//
-// 参数 removeLabel / remove 定了两页各自的那一项（「移除」/「删除」）：那是**这一页
-// 自己的**动作，不属于共用的那几项。
+// ⚠️ **四档的语义在这两页之间只写一份**：两页各写一份的话，改漏一边的后果是
+// 「这一页的「立即播放」清了队列、那一页的没清」——那种错在界面上要对着两页比才
+// 看得出来。
 //
 // ⚠️ **「立即播放」和「从这一首往后听」是两件事**（票 #337，2026-10-24 拍板）：
 // 前者**把这一首加到队尾并立即打断播放**，后者换成从这一行往后的一整段。两枚
 // 名字只差几个字而做的事差着一个队列——所以那一项不叫「播放」。
-func libraryMenuItems(m *ui.Menu, row libraryRow, a RowActions, i int, removeLabel string, remove func()) bool {
+//
+// ⚠️ **「在 B 站打开」那一项的字用 `list.OpenLabel` 给**，不写死——写死的话
+// 将来这两页混进了本地项，菜单上就会写着「在 B 站打开」而按下去打开的是访达。
+func (s *Shell) libraryMenuItems(m *ui.Menu, p *pagedRows, i int, kind libraryPageKind) {
+	row, ok := p.Row(i)
+	if !ok {
+		return
+	}
+	a := p.actions()
+
 	switch {
 	case m.Item("立即播放").Disabled(!row.CanPlay).Chosen():
 		// ⚠️ 放不了的那一类**画成灰的而不是不画**：不画的话同一份列表里有的行能播
@@ -369,7 +389,7 @@ func libraryMenuItems(m *ui.Menu, row libraryRow, a RowActions, i int, removeLab
 		a.PlayNext(i)
 	case m.Item("添加到队列").Disabled(!row.CanPlay).Chosen():
 		a.Add(i)
-	case m.Item("在 B 站打开").Chosen():
+	case m.Item(list.OpenLabel(row.Item)).Chosen():
 		a.Open(i)
 	// 收藏 / 下载这两项和内容列表那套菜单是同一份（Biu 的
 	// `music-list-item` 菜单对每一行都一样），摆在这里而不是不摆：用户在一个
@@ -378,12 +398,29 @@ func libraryMenuItems(m *ui.Menu, row libraryRow, a RowActions, i int, removeLab
 		a.FavSelect(i)
 	case m.Item("下载音频").Chosen():
 		a.Download(i)
-	case m.Item(removeLabel).Chosen():
-		remove()
-	default:
-		return false
 	}
-	return true
+	// 🔴 **最后一项是这一页自己的**：稍后再看是「移除」，历史记录是「删除」。
+	//
+	// 标签和动作都按 kind 取（不靠调用方成对传进来）——传进来的一对参数配错了
+	// 在编译期看不出来，而症状是「菜单上写着「删除」而按下去动的是稍后再看」。
+	switch kind {
+	case libraryLater:
+		if m.Item("移除").Chosen() {
+			p.Remove(i, s.app.LibraryOf().RemoveLater)
+		}
+	case libraryHistory:
+		if m.Item("删除").Chosen() {
+			p.Remove(i, s.app.LibraryOf().RemoveHistory)
+		}
+	}
+	// 🔴 **按不动的那几项要说明为什么**。
+	//
+	// 用户看到的是「一行灰的」，而他不知道灰的是哪一种、还能怎么办——
+	// 而他也不可能猜到「PGC」是什么。说明摆在菜单末尾（它不是动作，
+	// 只是给人看的一句话）。
+	if row.CannotPlay != "" {
+		m.Item(row.CannotPlay).Disabled(true).Chosen()
+	}
 }
 
 // viewLibraryMissing 是「B 站客户端没挂上」时这两页画的东西。

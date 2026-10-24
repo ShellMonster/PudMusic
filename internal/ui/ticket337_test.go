@@ -21,6 +21,10 @@ func seedThreeSongs(t *testing.T, a *app.App) []app.Item {
 }
 
 // mountQueueStreaming 的客户端和媒体请求都指向本地夹具，不读真实账号。
+//
+// ⚠️ **另起一台夹具**：调用点的页面（搜索页）用的是自己的假拉页器，它不伺服
+// 取流与音频。页面**已经**挂好取流的地方（收藏夹侧栏、动态卡片）不要调这个
+// ——那会把页面正在用的那个客户端换掉。
 func mountQueueStreaming(t *testing.T, a *app.App) {
 	t.Helper()
 	f := newBiliFixture(t, 1)
@@ -54,6 +58,13 @@ func assertQueueAndPlaying(t *testing.T, a *app.App, want []app.Item, current in
 	}
 }
 
+// queuePlus 返回「原来的队列 + 追加这一首」——一份新的切片，不动 old 本身。
+func queuePlus(old []app.Item, it app.Item) []app.Item {
+	out := make([]app.Item, 0, len(old)+1)
+	out = append(out, old...)
+	return append(out, it)
+}
+
 // 批量入口里的另三处；首页、搜索页与 UP 空间共走 playAllSongs，在
 // ticket244 / ticket299 里点真实按钮验。
 func TestOtherBatchEntriesReplaceQueueAndStartFirst(t *testing.T) {
@@ -70,6 +81,8 @@ func TestOtherBatchEntriesReplaceQueueAndStartFirst(t *testing.T) {
 	})
 	t.Run("收藏夹页", func(t *testing.T) {
 		_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
+		// ⚠️ **取流要另挂**：这个收藏夹的夹具只伺服收藏夹内容，不伺服取流
+		// （`/x/player/pagelist` 那边它 404）。
 		mountQueueStreaming(t, s.app)
 		waitSongs(t, tt, s, 2)
 		seedThreeSongs(t, s.app)
@@ -80,6 +93,8 @@ func TestOtherBatchEntriesReplaceQueueAndStartFirst(t *testing.T) {
 		assertQueueAndPlaying(t, s.app, want, 0)
 	})
 	t.Run("侧栏收藏夹", func(t *testing.T) {
+		// ⚠️ **取流要另挂**：`favWireShell` 挂的那一份是收藏夹内容的客户端，
+		// 取流与音频它不伺服。
 		_, a, tt, _ := favWireShell(t, 2, 0)
 		mountQueueStreaming(t, a)
 		seedThreeSongs(t, a)
@@ -115,7 +130,7 @@ func TestTheFourRowQueueActions(t *testing.T) {
 			switch action {
 			case "立即播放":
 				// 队列变成四首：旧的三首 + 新点的那首（追加到队尾），正在放的是第四首。
-				assertQueueAndPlaying(t, b.a, append(append([]app.Item{}, old...), songs[1].Item), 3)
+				assertQueueAndPlaying(t, b.a, queuePlus(old, songs[1].Item), 3)
 			case "从这一首往后听":
 				// 换成从这一首到本页末尾那一段（两首），正在放的是第一首。
 				assertQueueAndPlaying(t, b.a, []app.Item{songs[1].Item, songs[2].Item}, 0)
@@ -124,7 +139,7 @@ func TestTheFourRowQueueActions(t *testing.T) {
 				assertQueueAndPlaying(t, b.a, []app.Item{old[0], songs[1].Item, old[1], old[2]}, 0)
 			case "添加到队列":
 				// 加到**队尾**，不打断：队列四首，当前项还是第一首。
-				assertQueueAndPlaying(t, b.a, append(append([]app.Item{}, old...), songs[1].Item), 0)
+				assertQueueAndPlaying(t, b.a, queuePlus(old, songs[1].Item), 0)
 			}
 		})
 	}
@@ -139,9 +154,11 @@ func TestSingleSongCardsPreserveTheQueue(t *testing.T) {
 		if err := tt.Click(songs[1].Title); err != nil {
 			t.Fatal(err)
 		}
-		assertQueueAndPlaying(t, b.a, append(append([]app.Item{}, old...), songs[1].Item), 3)
+		assertQueueAndPlaying(t, b.a, queuePlus(old, songs[1].Item), 3)
 	})
 	t.Run("动态视频", func(t *testing.T) {
+		// ⚠️ **取流要另挂**：`dynamicCardShell` 那个假 B 站不伺服取流与音频
+		// （分 P 列表那一条它返回的是数组，读不懂）。
 		_, tt, a := dynamicCardShell(t, newUIExplore(t), uiDynamicArchive("v1", "BV1play"))
 		mountQueueStreaming(t, a)
 		old := seedThreeSongs(t, a)
@@ -149,7 +166,7 @@ func TestSingleSongCardsPreserveTheQueue(t *testing.T) {
 			t.Fatal(err)
 		}
 		song := app.Item{Source: app.SourceOnline, Type: "mv", Bvid: "BV1play", Title: "投稿 BV1play"}
-		assertQueueAndPlaying(t, a, append(append([]app.Item{}, old...), song), 3)
+		assertQueueAndPlaying(t, a, queuePlus(old, song), 3)
 	})
 }
 
@@ -171,7 +188,7 @@ func TestLibraryPlayNowPreservesTheQueue(t *testing.T) {
 			if err := tt.ChooseMenuItem("立即播放"); err != nil {
 				t.Fatal(err)
 			}
-			assertQueueAndPlaying(t, s.app, append(append([]app.Item{}, old...), row.Item), 3)
+			assertQueueAndPlaying(t, s.app, queuePlus(old, row.Item), 3)
 		})
 	}
 }
