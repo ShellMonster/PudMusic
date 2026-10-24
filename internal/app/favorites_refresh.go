@@ -108,7 +108,8 @@ func (a *App) AutoRefreshFavorites() {
 func (a *App) refreshFavorites(announce bool) {
 	f := a.FavoritesOf()
 	// ⚠️ **代号先拿住**：这一趟跑完回来时要对一下（见 `Favorites.Commit`）——
-	// 中间退过登的话，这一趟带的是上一个账号的收藏夹，填回去就是泄露。
+	// 中间换过人（退登或者换账号）的话，这一趟带的是上一个账号的收藏夹，
+	// 填回去就是泄露。
 	gen, ok := f.tryBeginRefresh()
 	if !ok {
 		// ⚠️ **这句话不许和侧栏那一行「正在刷新收藏夹…」一样**：它们是屏幕上的
@@ -186,8 +187,9 @@ func (a *App) refuseRefresh(f *Favorites, gen uint64, text string, tone notice.T
 //
 // # ⚠️ **代号对不上就整趟丢掉**
 //
-// 这一趟在飞的时候用户可能退登了，而它带回来的是**上一个账号**的收藏夹。
-// `Commit` 会对一下代号（见 `Favorites.gen`）：对不上就什么都不写。
+// 这一趟在飞的时候用户可能换人了（退登，或者已登录时再扫一次码登录成另一个
+// 账号），而它带回来的是**上一个账号**的收藏夹。`Commit` 会对一下代号（见
+// `Favorites.gen`）：对不上就什么都不写。
 func (a *App) refreshFavoriteGroups(f *Favorites, c *collections, mid int64, announce bool, gen uint64) {
 	go func() {
 		// ⚠️ **不管哪条路都要叫醒界面**：这一趟跑完了，界面上「正在刷新…」
@@ -224,8 +226,8 @@ func (a *App) refreshFavoriteGroups(f *Favorites, c *collections, mid int64, ann
 		}
 
 		if !f.Commit(gen, u) {
-			// 退登了：这一份是上一个账号的，丢掉（见 `Favorites.Commit`）。
-			log.Printf("biu: 这一趟收藏夹回来时账号已经换了（多半是退登），这次结果作废")
+			// 换人了：这一份是上一个账号的，丢掉（见 `Favorites.Commit`）。
+			log.Printf("biu: 这一趟收藏夹回来时账号已经换了（退登或者换账号），这次结果作废")
 			f.finishQuietly(gen)
 			return
 		}
@@ -371,8 +373,9 @@ func (a *App) TakeFavoritesRefresh() (string, notice.Tone, bool) {
 // 返回的第二个值是**这一趟的代号**（见 `Favorites.gen`）：这一趟跑完回来
 // 时要拿它对一下——
 //
-//   - 中间退过登的话，这一趟带的是上一个账号的收藏夹，填回去就是泄露；
-//   - 退登之后新账号的那一趟已经在飞了，旧的那一趟回来时**不能**把
+//   - 中间换过人（退登或者换账号）的话，这一趟带的是上一个账号的收藏夹，
+//     填回去就是泄露；
+//   - 换人之后新账号的那一趟已经在飞了，旧的那一趟回来时**不能**把
 //     「正在刷新收藏夹…」那一行收掉（那一行是用户唯一看得见的在飞证据）。
 func (f *Favorites) tryBeginRefresh() (uint64, bool) {
 	f.mu.Lock()
@@ -390,7 +393,7 @@ func (f *Favorites) tryBeginRefresh() (uint64, bool) {
 // 要把侧栏上那行「正在刷新…」收掉的那一帧。顺序反了的话那一帧里两句话对着干，
 // 而留下的是「刷新完了，界面上还在转」的那一种。
 //
-// ⚠️ **代号对不上就什么都不做**：退登之后那一趟属于上一个账号，而新账号的
+// ⚠️ **代号对不上就什么都不做**：换人之后那一趟属于上一个账号，而新账号的
 // 那一趟已经在飞了——旧的那一趟要是把 busy 收掉，新账号那一趟的
 // 「正在刷新收藏夹…」那一行就凭空不见了。
 func (f *Favorites) finishRefresh(gen uint64, text string, tone notice.Tone) {
