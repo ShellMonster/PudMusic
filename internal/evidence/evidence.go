@@ -3537,6 +3537,9 @@ var Items = []Item{
 			// 「投稿没有稿件号」是**另一类**（它带着正文），服务层和画面上各一条。
 			"TestAnArchiveWithoutABvidIsItsOwnReason",
 			"TestAnArchiveWithoutABvidIsNotCalledEmpty",
+			// **正文也是空的那几条**仍算「什么也没有」（不算「投稿没有稿件号」）。
+			"TestAnArchiveWithoutABvidAndWithoutTextIsEmpty",
+			"TestAnArchiveWithoutABvidAndWithoutTextIsCalledEmpty",
 			// 加了一类而忘了加一档时，计数**不许静默少一条**。
 			"TestAnUnknownDropReasonIsStillCounted",
 			// 计数去重：两页里重叠的一条，计数是 1 不是 2。
