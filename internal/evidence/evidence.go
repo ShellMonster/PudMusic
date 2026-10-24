@@ -2591,21 +2591,10 @@ var Items = []Item{
 		// ⚠️ **这一条不放在表末尾**：表末尾那处已经撞过好几回（这一轮就是
 		// 第三次），挨着上面那条「收藏夹头图区」读得顺——两条讲的都是
 		// 「头图区」。
-		Spec: "UP 空间头图区：整块压一层黑蒙版（浅色 30% / 深色 50%，上游 `space-info.tsx:83-86`）；头图上的字是白字（次要的那一档 92% 的白），**两套主题一样**；有字的那一带再压一档（浅 40% / 深 15%），最坏情况（纯白头图）下白字 ≥4.5:1",
+		Spec: "UP 空间头图区（设计规范 v0.1 §7.18，取代上游压黑蒙版 + 白字的做法）：横幅 132 高、底部淡进页面底色；头像 88 压在横幅下沿；名字、签名、统计写在**页面底色**上，字色用主题自己的字色，不再依赖头图是什么图",
 		Tests: []string{
-			// 整块那一档的值（浅 30% / 深 50%，上游那一档）。
-			"TestTheSpaceHeaderMaskIsTheUpstreamOne",
-			// 画面上真的压着那两层（深浅两套，逐像素）。
-			"TestTheSpaceHeaderIsMaskedInBothThemes",
-			// 蒙版压在**真头图**上面（夹具里真的回一张纯白的 PNG——最坏情况）。
-			"TestTheSpaceHeaderMaskCoversARealBanner",
-			// **系统字号放大时名字仍然落在满档里**（1 倍到 2.25 倍，Windows 的
-			// 上限）——那一行是贴着底边的，字号一放大就往上长。
-			"TestTheSpaceHeaderTextStaysReadableAtEveryTextScale",
-			// 最坏情况（纯白头图 / 没有头图）下白字和 92% 的白都 ≥4.5:1。
-			"TestTheSpaceHeaderTextIsReadableOnAnyBanner",
-			// 昵称那一行真的是白字（不跟主题翻）。
-			"TestTheSpaceHeaderNameIsWhiteOnThePicture",
+			// 头像 88、左右留白 32、头像压在横幅下沿。
+			"TestTheSpaceAvatarIs88AndTheHeaderPads32",
 		},
 	},
 	{

@@ -399,8 +399,9 @@ func TestTheDynamicCardKeysAreFlat(t *testing.T) {
 			noPointer(tt)
 
 			// 作者名：`uiDynamic` 里叫「作者v1」。
-			assertTextKeysFlat(t, tt, flatPageBG(s, dark), "动态卡片",
-				"作者v1", "赞 12", "下一首播放", "下载音频", "下载视频")
+			// 卡片现在是一张 `surface1` 卡，键压在卡的底色上。
+			assertTextKeysFlat(t, tt, rgbaOf(s.cardBackground(BuildTheme(s.app.SettingsSnapshot(), dark))), "动态卡片",
+				"作者v1", "赞 12", "下一首播放", "下载音频")
 		})
 	}
 }
