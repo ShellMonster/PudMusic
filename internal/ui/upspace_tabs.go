@@ -180,6 +180,17 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	// 组件在两页就会缩成两个宽度。
 	ui.Column(c).Key("space-list:" + upTabNames[tab]).Grow(1).FillHeight().
 		PaddingX(upPad).Children(func() {
+		// 「有 N 条我们画不出来」那一行。
+		//
+		// ⚠️ **只在「一条都没画出来」时出现**：有内容的时候插一行字只是
+		// 噪音；而一条都没有的时候，用户看到的是**一片空白加一个转着的
+		// 圈**——像是坏了，而真相是「他发的那些我们画不出来」（票 #300）。
+		//
+		// ⚠️ **它不是空状态**：空状态会把整个列表换掉，而哨兵那一行还得
+		// 留着（翻页靠它）。
+		if upRowCount(sp, tab) == 0 && sp.dropped[tab] > 0 {
+			s.viewDroppedNote(c, sp.dropped[tab])
+		}
 		// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
 		//
 		// ⚠️ **登记的是 `&sp.keys[tab]` 而不是裸的句柄**：这一份的
@@ -252,15 +263,48 @@ func upRowKey(sp *upSpace, tab, i int) any {
 		if i >= len(sp.dynItems) {
 			return upSentinelKey{}
 		}
-		return sp.dynItems[i].ID
+		// ⚠️ **身份是预先装箱好的那一份**（`sp.rowKeys[tab]`）：理由见那个字段
+		// 的注释（票 #313）。
+		return sp.rowKeys[tab].At(i, upRowIdent{kind: 0, id: sp.dynItems[i].ID}, upRowIdentity)
 	case upTabCollection, upTabSeries:
 		if i >= len(sp.cols[tab]) {
 			return upSentinelKey{}
 		}
 		c := sp.cols[tab][i]
-		return fmt.Sprintf("coll:%d:%d", c.Type, c.ID)
+		// ⚠️ 理由同上面那一处。
+		return sp.rowKeys[tab].At(i, upRowIdent{kind: 1, typ: c.Type, num: c.ID}, upRowIdentity)
 	}
 	return upSentinelKey{}
+}
+
+// upRowIdent 是 UP 空间那一列行身份的原材（三个 Tab 同一把尺子）。
+//
+// ⚠️ **可比较**：它要当「记着算好的那一份」那把钥匙（见 `rowkey.Memo` 的
+// 文件头），所以里面不能有切片。
+type upRowIdent struct {
+	// kind 是哪一档：0 动态，1 收藏夹·合集·系列。
+	kind int
+	// id 是动态的 `id_str`。
+	id string
+	// typ / num 是收藏夹那一档的类型和 id。
+	typ int
+	num int64
+}
+
+// upRowIdentity 是 UP 空间那一列的行身份（铁律四）。
+//
+// ⚠️ **动态用 B 站的 `id_str`；收藏夹/合集用「类型 + id」**。加上类型是必须的：
+// 收藏夹的 id 和合集的 id 是两个不同的编号空间（B 站那边各自从 1 开始数），
+// 混进同一张列表就会撞上——撞上时 MyGo 在 Tester 里当场 panic，真窗口里则是
+// 那两行共用一份状态，选中一个另一个也亮。
+//
+// 这一步会分配（拼字符串 + 装箱）——所以它只在身份变了的时候才走
+// （见 `rowkey.Memo` 的文件头）。
+func upRowIdentity(k upRowIdent) any {
+	if k.kind == 0 {
+		return k.id
+	}
+	return fmt.Sprintf("coll:%d:%d", k.typ, k.num)
 }
 
 // upRowLabel 是第 tab 张 Tab 第 i 行给无障碍和「打字选中」用的名字。
@@ -287,7 +331,14 @@ func upRowLabel(sp *upSpace, tab, i int) string {
 }
 
 // upEmptyKey 是某张 Tab 空状态的 key。
+//
+// ⚠️ **带上「有没有丢弃」那一档**：同一个 key 上换文案，读屏软件读到的是
+// 同一句话，而「暂无动态」和「有 N 条没显示」必须被当成两件事（理由同
+// `feedEmptyKey`）。
 func upEmptyKey(sp *upSpace, tab int) string {
+	if sp.dropped[tab] > 0 {
+		return "space-dropped:" + strconv.FormatInt(sp.mid, 10) + ":" + upTabNames[tab]
+	}
 	return "space:" + strconv.FormatInt(sp.mid, 10) + ":" + upTabNames[tab]
 }
 
@@ -295,12 +346,14 @@ func upEmptyKey(sp *upSpace, tab int) string {
 //
 // ⚠️ **「有丢弃」和「真的没有」必须说两句话**：B 站的动态有二十多种形态，
 // 这一版只画三种。说成「暂无动态」的话，用户会以为他没发过。
+//
+// ⚠️ **那个数是累计的**：翻了好几页各丢几条就是几十条，说「有 N 条落在别的
+// 形态上了」比说「刚才那几条」诚实。
 func upTabEmpty(tab int, dropped int) emptyState {
 	if dropped > 0 {
 		return emptyState{
 			Title: "这里没有能显示的" + upTabNames[tab],
-			Hint: fmt.Sprintf("B 站的动态有好几种形态，这一版只画得出其中三种"+
-				"（纯文字、图文、投稿），刚才那 %d 条都落在别的形态上了", dropped),
+			Hint:  fmt.Sprintf("%s，有 %d 条落在别的形态上了", dynamicShapesNote, dropped),
 		}
 	}
 	switch tab {

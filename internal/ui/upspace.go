@@ -39,6 +39,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
@@ -213,6 +214,13 @@ type upSpace struct {
 	// 这一层原来没有，是这次评审的 fixture 撞出来的。
 	seen map[string]bool
 
+	// rowKeys 是一张 Tab 一份的「记着行身份那一份」（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
+	// （票 #313）。**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头）：
+	// 翻页追加、换 Tab——身份对不上就重算。
+	rowKeys [upTabCount]rowkey.Memo[upRowIdent, any]
+
 	// state 是一张 Tab 一份的列表状态。**不能共用**：MyGo 会在
 	// 「同一个 ListState 被两个 List 显示」时 panic（`ui/list.go` 的
 	// buildList），而共用还会把两张 Tab 的滚动位置搅在一起。
@@ -253,6 +261,12 @@ type upResult struct {
 	sent    int
 	hasMore bool
 	dropped int
+	// dropWhy 是丢掉的理由（人话，一种一句）。**只进日志**，不进界面。
+	//
+	// ⚠️ 「整页一条都不剩」这种失败在界面上完全看不出来（只有一个空列表
+	// 加一个转着的圈），不把理由写进日志，下一个人只能从头再猜一遍
+	// （票 #300 的实测就是 `pub_ts` 变成了字符串）。
+	dropWhy []string
 	err     error
 }
 

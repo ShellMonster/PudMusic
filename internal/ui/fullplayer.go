@@ -27,7 +27,6 @@
 package ui
 
 import (
-	"fmt"
 	"math"
 	"strconv"
 	"time"
@@ -35,6 +34,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
@@ -299,14 +299,24 @@ type fullPlayer struct {
 	// partsRows 是这一帧要画的那几行，partsList 是它们的列表状态。
 	partsRows []partRow
 	partsList ui.ListState
+	// partsRowKeys 记着分集面板里每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
+	// （票 #313）。**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头）。
+	partsRowKeys rowkey.Memo[string, any]
 
 	// bg 是背景那一层的画布：封面糊过一次画进去，稳态下每一帧只是一张图
 	// （见 viewFullBackdropCanvas 为什么是画布而不是一层材质）。
 	bg *ui.Canvas
 	// bgW/bgH 是这张画布的尺寸（窗口改了尺寸要重建）。
 	bgW, bgH int
-	// bgKey 是这张画布画的是哪一张封面（地址 + 位图 + 尺寸）。变了才重画。
-	bgKey string
+	// bgURL/bgBitmap 是这张画布画的是哪一张封面（地址 + 位图）。变了才重画。
+	//
+	// ⚠️ **两个字段分开比，不拼成一个字符串**：原先是一个 `fmt.Sprintf` 出来的
+	// 键（地址 + 位图指针 + 宽高），于是**每一帧**都要拼一次字符串（一次分配
+	// ＋一次格式化），而这一帧本来可以一个字节都不分配。
+	bgURL    string
+	bgBitmap *ui.Bitmap
 	// bgDirty 是「画布要重画」那一下（画它要一个 Painter，只有画的时候有）。
 	bgDirty bool
 	// bgDraws 是这张画布被重画了几次。**给测试看的**：毛玻璃每帧重渲一遍就是
@@ -540,6 +550,19 @@ func (s *Shell) viewFullBackdrop(c *ui.Context, url string) {
 		})
 }
 
+// backdropChanged 报「背景那张画布要不要重画」。
+//
+// 换了封面、换了位图、或者窗口改了尺寸（画布的大小跟着变），才重画。
+//
+// ## ⚠️ **四个判据分开比，不拼成一个字符串**
+//
+// 原先是一个 `fmt.Sprintf("%s|%p|%dx%d", …)` 拼出来的键，于是**每一帧**都要
+// 拼一次字符串（一次分配 ＋ 一次格式化）——而满屏开着的时候这一帧是**每一帧**
+// 都要走的，那一笔于是每帧都付一遍。分开比是零分配的。
+func (f *fullPlayer) backdropChanged(url string, bm *ui.Bitmap, w, h int) bool {
+	return f.bgURL != url || f.bgBitmap != bm || f.bgW != w || f.bgH != h
+}
+
 // viewFullBackdropCanvas 是背景那一层：封面糊过一次画进一张画布，之后每一帧
 // 只是把那张画布放大铺上去。
 //
@@ -572,13 +595,13 @@ func (s *Shell) viewFullBackdropCanvas(c *ui.Context, url string) {
 	cw := max(int(winW/fullBackdropScale), 1)
 	ch := max(int(winH/fullBackdropScale), 1)
 	// 换了封面、换了位图、或者窗口改了尺寸（画布的大小跟着变），才重画。
-	key := fmt.Sprintf("%s|%p|%dx%d", url, st.Bitmap, cw, ch)
-	if s.full.bgKey != key {
+	if s.full.backdropChanged(url, st.Bitmap, cw, ch) {
 		if s.full.bg == nil || s.full.bgW != cw || s.full.bgH != ch {
 			s.full.bg = ui.NewCanvas(cw, ch)
 			s.full.bgW, s.full.bgH = cw, ch
 		}
-		s.full.bgKey, s.full.bgDirty = key, true
+		s.full.bgURL, s.full.bgBitmap = url, st.Bitmap
+		s.full.bgDirty = true
 	}
 	if s.full.bg == nil {
 		return
@@ -1247,7 +1270,11 @@ func (s *Shell) viewFullPartsPanel(c *ui.Context) {
 func (s *Shell) viewFullPartsList(c *ui.Context) {
 	t := c.Theme()
 	rows := s.full.partsRows
-	s.full.partsList.Key = func(i int) any { return rows[i].key }
+	// ⚠️ **身份是预先装箱好的那一份**（`s.full.partsRowKeys`）：理由见
+	// `fullplayer.go` 里那个字段的注释（票 #313）。
+	s.full.partsList.Key = func(i int) any {
+		return s.full.partsRowKeys.At(i, rows[i].key, rowkey.Identity)
+	}
 	s.full.partsList.Label = func(i int) string { return rows[i].title }
 
 	partsList := ui.List(c, &s.full.partsList, len(rows), func(i int) {

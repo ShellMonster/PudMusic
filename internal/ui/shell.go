@@ -16,6 +16,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -89,6 +90,15 @@ type Shell struct {
 	// 出来。两个字段都是主线程单点写，和别的界面状态一样。
 	scrollbarHot    bool
 	scrollbarHotNow bool
+
+	// theme 是主题的缓存（见 theme.go 的 `themeCache`）。
+	//
+	// ⚠️ **逐窗口一份**：主题本身是全局的那一套（设置 + 系统深浅 + 桌面偏好），
+	// 但每一扇窗各自缓存一份更简单——迷你播放器换主窗口时外壳是新建的（见
+	// `toggleMiniPlayer`），而重建外壳本来就是「一切从零开始」的时候。
+	//
+	// **只由 view 在主线程上读写**，和别的界面状态同一条规矩。
+	theme themeCache
 
 	// laterPage / historyPage 是「稍后再看」和「历史记录」这两页各自的状态
 	// （见 librarypage.go）。挂在壳上而不是页面的局部变量，理由同上。
@@ -270,12 +280,10 @@ type Shell struct {
 	// ⚠️ **没有它浮层永远不会自己收掉**：不播放的时候没有任何东西在要帧，
 	// 「指针离开了」只在那一帧被算一次，浮层于是永远留在画面上。
 	volIdleStop func()
-	// volBeforeMute 是**最后一个不是 0 的音量**——取消静音的时候放回去的就是它。
 	//
-	// ⚠️ **它不跟着设置走**：音量是「这一刻的听感」，存进设置就意味着「这台机器
-	// 上静音过」会跨到另一台机器上去。设置里**没有**音量这一栏（音量只在应用
-	// 内存里，`app.App.volume`），所以这一份也是跟着窗口走的。
-	volBeforeMute float64
+	// ⚠️ **这里没有「静音之前的音量」了**：静音是应用层自己的一格
+	// （`app.App.ToggleMute`），而音量是要落盘的（票 #311）。以前这一份记在
+	// 壳上，跟着窗口走，进程一退就没了——落盘的音量不能是它。
 
 	// 侧栏这一摊。**只由 view 在主线程上读写**，不跨 goroutine。
 	//
@@ -292,6 +300,12 @@ type Shell struct {
 	// sideLists 是两组收藏夹各自的列表状态。拖拽排序靠它，
 	// 两组一份是因为两组各排各的（见 sidebar_favorites.go）。
 	sideLists [favGroups]ui.ListState
+	// sideRowKeys 记着侧栏收藏夹每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
+	// （票 #313）。**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头），
+	// 所以拖完排序、换收藏夹都不用记得重建。
+	sideRowKeys [favGroups]rowkey.Memo[int64, any]
 
 	// favPanelOpen 是**折叠态**那枚「收藏夹」图标点开之后的那层浮层开没开。
 	//
@@ -305,8 +319,17 @@ type Shell struct {
 	// 关掉窗口就该是关着的（Biu 那边的 modal store 也不持久化它）。
 	drawerOpen bool
 
+	// drawerPhase 是抽屉现在处在进场的哪一段。**和 drawerOpen 不是一回事**：
+	// 退场的那 200ms 里面板还在树上（滑出去了才拆），所以「关掉」不是「不建」。
+	// 理由和那一组状态机见 queue_drawer.go 的 drawerPhase。
+	drawerPhase drawerPhase
+
 	// queueList 是抽屉里那一列的列表状态：滚动位置、行身份、行高。
 	queueList ui.ListState
+	// queueRowKeys 记着抽屉里每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 理由同 `sideRowKeys`（票 #313）。
+	queueRowKeys rowkey.Memo[string, any]
 
 	// queueScroll 是那一列滚到哪儿了。**和 queueList 分开存**是因为「定位当前
 	// 播放」要的是一段动画：ListState.ScrollTo 是一跳到位（`mygo/ui/list.go`
@@ -327,6 +350,10 @@ type Shell struct {
 	// 各自记着自己滚到哪儿；行的**内容**是同一份（partRowsFor）。
 	partList ui.ListState
 	partRows []partRow
+	// partRowKeys 记着分集抽屉里每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 理由同 `sideRowKeys`（票 #313）。
+	partRowKeys rowkey.Memo[string, any]
 
 	// 顶栏这一摊。**同样只由 view 在主线程上读写**。
 	//

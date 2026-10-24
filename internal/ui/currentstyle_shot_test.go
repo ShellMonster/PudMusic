@@ -88,7 +88,7 @@ func TestRenderCurrentStyleShots(t *testing.T) {
 			// 淡底是 #d2f7df，票 #294 按上游改回来；最早是一整行 383×64 的实心
 			// 主色，票 #197 去掉过，票 #239 改成过中性灰底）。
 			b4 := newTestShell(t, at(winW, winH), systemIsDark(dark))
-			h := &harness{app: b4.a, tt: b4.tt}
+			h := &harness{app: b4.a, tt: b4.tt, s: b4.s}
 			enqueue(t, h, copiesOf(t, 3)...)
 			openDrawer(t, h)
 			h.tt.Move(1180, 300)
