@@ -618,10 +618,11 @@ func TestTheMenuGroupNameFitsOnOneLine(t *testing.T) {
 	if !ok {
 		t.Fatalf("菜单那一页上找不到组名「%s」，文字有 %q", menuGroupName, tt.Texts())
 	}
-	// 一行 16px 约 18.8 高；折成两行就是 37.7。
-	if oneLine := float32(16 * textBoxPerSize); r.H > oneLine+2 {
-		t.Errorf("组名「%s」画出来 %.1f 高（一行约 %.1f）——折行了：100 的位宽"+
-			"放不下 20px 的六个汉字", menuGroupName, r.H, oneLine)
+	// 现在它是整页宽卡片上的 20px 分组标题（设计规范 §7.9），不再是 100 宽的左列：
+	// 一行 20px 约 23.6 高；折成两行就是 47。
+	if oneLine := float32(20 * textBoxPerSize); r.H > oneLine+2 {
+		t.Errorf("组名「%s」画出来 %.1f 高（一行约 %.1f）——折行了"+
+			"", menuGroupName, r.H, oneLine)
 	}
 }
 
