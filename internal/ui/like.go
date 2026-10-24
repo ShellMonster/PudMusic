@@ -387,8 +387,8 @@ func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 
 	// 🔴 **身份要钉死**：这一段是「分集 / 收藏 / 赞」三枚并排，而「分集」是逐帧
 	// 问出来的（单 P 的稿子不摆，见 `viewPartButton`）——它一出现，后面几枚的
-	// **兄弟序号**就都变了，而**动画通道是存在身份里的**（见
-	// `widgets/flat/press.go` 的文件头）。所以这里给这一枚钉一个 key。
+	// **兄弟序号**就都变了，而**动画通道是存在身份里的**（理由见
+	// `playbar_keys.go`）。所以这里给这一枚钉一个 key。
 	c.Key(likeButtonKey)
 
 	btn := s.withTip(c, s.likeButton(c, name, label, color, rel.Liked),

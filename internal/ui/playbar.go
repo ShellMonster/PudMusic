@@ -527,24 +527,6 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 	})
 }
 
-// 播放条左边第三段那三枚键的 key。
-//
-// 🔴 **为什么要有**：这一段是「分集 / 收藏 / 赞」并排，而「分集」是**逐帧问出来**
-// 的（单 P 的稿子不摆，见 `viewPartButton`）——它一出现，后面几枚的**兄弟序号**
-// 就都变了，而框架给元素的默认身份就是「父 ID + 兄弟序号」。于是那一枚新来的键
-// 会**继承**上一枚留下的动画通道（画面上是「另一枚键莫名其妙缩着」——按下缩放
-// 和赞键那两档动效都存在通道里，见 `widgets/flat/press.go`）。
-//
-// 所以这三枚都用 `Context.Key` 钉住身份。
-const (
-	// partButtonKey 是「分集」那一枚。
-	partButtonKey = "playbar:part"
-	// favButtonKey 是「收藏」那一枚。
-	favButtonKey = "playbar:fav"
-	// likeButtonKey 是「赞」那一枚。
-	likeButtonKey = "playbar:like"
-)
-
 // viewTrackLoading 是播放条上「正在取流」那一句话（前面带一枚转圈）。
 //
 // # 为什么要有这一句
@@ -957,8 +939,8 @@ func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
 	// 而**播放条上全部图标键都是 18**。改之前是 14（`iconSm`）——比上游小 4 像素，
 	// 在 32 的盒子里每边留 9，看起来像「画糊了」。
 	// 🔴 **身份钉死**：这一段的兄弟是「逐帧问出来」的「分集」键（单 P 的稿子不
-	// 摆），它一出现，这一枚的兄弟序号就变了——而动画通道是存在身份里的（见上面
-	// 那三个 key 的注释）。
+	// 摆），它一出现，这一枚的兄弟序号就变了——而动画通道是存在身份里的（理由
+	// 见 `playbar_keys.go`）。
 	c.Key(favButtonKey)
 	btn := s.withTip(c, iconKey(c, favIcon(faved), "收藏", iconMd, false).
 		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), favTooltip(faved))
