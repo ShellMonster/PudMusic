@@ -115,3 +115,39 @@ func TestClickingTheOwnerNameInANewMusicCardGoesIntoThatSpace(t *testing.T) {
 		t.Errorf("点 UP 名进的是 %d/%q，want 4242/逃跑计划", gotMid, gotName)
 	}
 }
+
+// TestClickingTheOwnerNameInASearchResultGoesIntoThatSpace 钉住「搜索结果那一行的
+// UP 名点了进他的空间」。
+//
+// ⚠ **搜索页那一列画的是 UP 名**（不是「用户」那一档的个性签名）——那一档的接线
+// 没装 `OpenOwner`，签名点了跳空间是错的。
+func TestClickingTheOwnerNameInASearchResultGoesIntoThatSpace(t *testing.T) {
+	st := newSearchStub(2, 4)
+	s, tt := newSearchPage(t, "周杰伦", st)
+	waitFrames(t, tt, "结果出来了", func() bool {
+		return tt.HasText("搜索【周杰伦】的结果")
+	})
+	waitFrames(t, tt, "第一页进来了", func() bool { return loadedTo(s, searchTabSong, 1)() })
+
+	if err := tt.Click("某UP"); err != nil {
+		t.Fatalf("点不到结果那一行的 UP 名：%v，文字有 %q", err, tt.Texts())
+	}
+	if got, want := s.router.Path(), upPathOf(stubMid(1, 0)); got != want {
+		t.Errorf("点了 UP 名跳到了 %q，want %q", got, want)
+	}
+}
+
+// TestClickingTheOwnerNameInACollectionRowGoesIntoThatSpace 钉住「收藏夹 / 合集
+// 那一行的 UP 名点了进他的空间」。
+func TestClickingTheOwnerNameInACollectionRowGoesIntoThatSpace(t *testing.T) {
+	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
+	waitSongs(t, tt, s, 2)
+
+	if err := tt.Click("UP 2"); err != nil {
+		t.Fatalf("点不到那一行的 UP 名：%v，文字有 %q", err, tt.Texts())
+	}
+	// 夹具里那条的 upper.mid 是 2（`mediaOf`）。
+	if got, want := s.router.Path(), upPathOf(2); got != want {
+		t.Errorf("点了 UP 名跳到了 %q，want %q", got, want)
+	}
+}
