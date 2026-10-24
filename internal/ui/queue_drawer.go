@@ -159,8 +159,10 @@ type queueRow struct {
 	// （队列里可能有同一首的多份，抽屉只画一行）。
 	//
 	// 它在 queueRowsFor 里就**算好了**（那一处本来就要算，见去重那段）——存下来
-	// 是为了拖动重排不用再算一遍（那一遍是要分配的：Identity 拼的是一个新
-	// 字符串）。
+	// 是为了别处不用再算一遍（现算一遍是要分配的：Identity 拼的是一个新字符串）。
+	//
+	// ⚠️ **而且它是记好的那一份**（票 #339）：`queueRowsFor` 拿
+	// `s.queueRowIDs` 那个 memo 换来的，所以每帧每行不再现拼一次。
 	id string
 	// state 是这一行处在哪一档（见 queueRowState）。**每帧重算**：这些行是
 	// `viewQueueDrawer` 每帧现造的（`queueRowsFor`），所以写在上面的状态不会
@@ -195,22 +197,68 @@ func queueRowKey(id string, at int) string {
 	return "queue-row!" + strconv.Itoa(at)
 }
 
+// queueRowIdentity 是抽屉里那一行的**两串身份**：判重标识和行身份。
+//
+// ⚠️ **两串都是每帧每行都要的**，而现拼一次就是一个新字符串（`Item.Identity()`
+// 拼的是「local:」+ 路径，`queueRowKey` 拼的是「queue-row:」+ 标识）——
+// 认得出身份的那些行每帧每行两次，二十首的队列就是四十来次（认不出的那一支
+// 只有行身份那一次：判重标识是空串，不拼）。
+type queueRowIdentity struct {
+	// id 是这一首的判重标识（`Item.Identity()`）。
+	id string
+	// key 是这一行的身份（铁律四）。见 queueRowKey。
+	key string
+}
+
+// queueRowRaw 是「那两串身份」的**原料**。
+//
+// ⚠️ **取得它不能分配**：所以它记的是 Item 本身（现成的字段）加上这一项在队列里
+// 的位置，而**不是**那两串身份——那两串恰恰是要省掉的那一步（`rowkey.Memo` 的
+// 文件头：「现拼的那一步本身就要分配，而它恰恰是要省掉的那一步」）。
+//
+// ⚠️ **Item 整个当原料**：它认得出身份靠的就是那几个字段（`Source` / `Type` /
+// `Path` / `Bvid` / `Sid`），而比较一个 Item 不分配（字段全是现成的字符串，
+// 同一个字符串的指针一样，比较是 O(1)）。
+type queueRowRaw struct {
+	item app.Item
+	// at 是这一项在队列里的位置。认不出是哪一首时行身份退回按下标（见
+	// queueRowKey），所以位置也是原料的一部分。
+	at int
+}
+
+// packQueueRowIdentity 是「原料 → 那两串身份」的那一步。
+//
+// ⚠️ **纯函数**：同样的原料必须给出同样的结果（`rowkey.Memo` 的契约——它拿
+// 原料当身份，身份变了才重算）。
+//
+// ⚠️ **它只在原料变了的时候才走**（见 `rowkey.Memo`）：那一档每帧每行问一次，
+// 而快的那条路上零分配。
+func packQueueRowIdentity(r queueRowRaw) queueRowIdentity {
+	id := r.item.Identity()
+	return queueRowIdentity{id: id, key: queueRowKey(id, r.at)}
+}
+
 // queueRowsFor 是抽屉这一帧要画的那几行：队列按判重标识去重之后的样子。
 //
 // **保留第一次出现的**（`uniqBy` 的语义）：那一行在队列里的位置（`at`）也还是
 // 第一次入队那个，播放条和「下一首」走的是队列，抽屉跟着走同一个才不至于各说各话。
-func queueRowsFor(items []app.Item) []queueRow {
+//
+// ⚠️ **那两串身份是记好的那一份**（`ids`）：现拼的话每帧每行一到两次分配（票 #339）。
+func queueRowsFor(items []app.Item, ids *rowkey.Memo[queueRowRaw, queueRowIdentity]) []queueRow {
 	rows := make([]queueRow, 0, len(items))
 	seen := make(map[string]bool, len(items))
 	for i, it := range items {
-		id := it.Identity()
-		if id != "" {
-			if seen[id] {
+		// ⚠️ **按「第几项」记**：这一格的原料是这一项自己（Item + 队列里的位置），
+		// 所以队列一改（加歌、删歌、重排）它自己就看得出「数据换了」——调用方
+		// 一处都不用记得重建（理由见 `rowkey.Memo` 的文件头）。
+		ident := ids.At(i, queueRowRaw{item: it, at: i}, packQueueRowIdentity)
+		if ident.id != "" {
+			if seen[ident.id] {
 				continue
 			}
-			seen[id] = true
+			seen[ident.id] = true
 		}
-		rows = append(rows, queueRow{item: it, at: i, key: queueRowKey(id, i), id: id})
+		rows = append(rows, queueRow{item: it, at: i, key: ident.key, id: ident.id})
 	}
 	return rows
 }
@@ -235,7 +283,7 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 	// 的话这里会是 2——而画面上看着没差。
 	s.builds.drawer++
 	t := c.Theme()
-	s.queueRows = queueRowsFor(s.app.Queue().Items())
+	s.queueRows = queueRowsFor(s.app.Queue().Items(), &s.queueRowIDs)
 
 	ui.Overlay(c, func() {
 		// ⚠️ 底边留出底下那一条的高度（Biu 的 `data-[placement=right]:mb-22` 就是
@@ -569,7 +617,10 @@ func currentRow(rows []queueRow, playing string) int {
 		return -1
 	}
 	for i, r := range rows {
-		if id := r.item.Identity(); id != "" && id == playing {
+		// ⚠️ **用行上记好的那一份**（`r.id`）：现算的话每帧每一行一次字符串拼接
+		// （`Item.Identity()` 拼的是「local:」+ 路径），而这一份在 `queueRowsFor`
+		// 里已经算好、而且是记好的（票 #339）。
+		if id := r.id; id != "" && id == playing {
 			return i
 		}
 	}

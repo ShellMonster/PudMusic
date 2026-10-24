@@ -76,9 +76,11 @@ func (s *Shell) queueDrop(v *queueDragValue) {
 	}
 	before := ""
 	if s.queueDropUpper {
-		before = s.queueRows[at].item.Identity()
+		// ⚠️ **用行上记好的那一份**（`row.id`）：它是同一首歌的判重标识，而现算
+		// 的话要拼一次字符串（理由同 `currentRow` 里那一处，票 #339）。
+		before = s.queueRows[at].id
 	} else if at+1 < len(s.queueRows) {
-		before = s.queueRows[at+1].item.Identity()
+		before = s.queueRows[at+1].id
 	}
 	// before 是空串 = 挪到队尾（落在最后一行的下半）。
 	if before == v.id {

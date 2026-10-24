@@ -339,7 +339,12 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected boo
 					viewPlayingMark(c, t, m.Title)
 					return
 				}
-				ui.Text(c, clockText(m.Duration)).FontSize(scale.Font(c, scale.Size12)).
+				// ⚠️ **时长是记好的那一份**（`rows.durText`）：现算的话每帧每格一次
+				// 字符串格式化（票 #339）。
+				//
+				// ⚠️ **和封面浮层上那一份共用同一个 memo**：理由同 `later.go` 的
+				// `drawLaterCell` 里那一处——同一个 memo 只盖住了一半。
+				ui.Text(c, rows.durText.At(i, m.Duration, clockText)).FontSize(scale.Font(c, scale.Size12)).
 					TextColor(metaColor).MaxLines(1)
 			})
 			ui.Row(c).Gap(space.Px6).FontSize(scale.Font(c, scale.Size11)).Children(func() {
