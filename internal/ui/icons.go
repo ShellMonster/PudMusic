@@ -156,9 +156,29 @@ const (
 	iconLogout = "System/logout-circle-r-line.svg" // 退出登录
 
 	// iconLoginCircle / iconLogoutCircle 是上游原来那**一对**（圆圈里一支箭头，
-	// 一个朝右一个朝左）。界面现在不用它们——理由在上面那一段——但资源留着。
+	// 一个朝右一个朝左）。顶栏上那两枚**不用**它们——理由在上面那一段——但
+	// **头像下拉里那两项用的正是它们**（上游 `user/index.tsx` 的「登录」是
+	// `RiLoginCircleLine`、「退出登录」是 `RiLogoutCircleLine`）。
+	//
+	// ⚠️ 那一对在 18px 上分不清进出（票 #242），所以**顶栏那两枚**换成了
+	// 二维码和朝外的箭头；头像下拉里它们是**带文字的**（左边还有一枚图标、
+	// 右边写着「登录」/「退出登录」），认得出来——所以那一处照上游用这一对。
 	iconLoginCircle  = "System/login-circle-line.svg"
 	iconLogoutCircle = "System/logout-circle-line.svg"
+
+	// iconProfile 是头像下拉里「个人资料」那一项的图标。
+	//
+	// 逐字照上游：`RiProfileLine`（`biu/src/layout/navbar/user/index.tsx:101`
+	// 的 `startContent: <RiProfileLine size={18}/>`）。
+	//
+	// ⚠️ **它在 `Business/` 分类里，不在 `User & Faces/`**：RemixIcon 把
+	// 「个人资料」那一枚归到 Business（`icons/Business/profile-line.svg`），
+	// 而「用户」那一族在 `User & Faces/`。目录照上游分类放，别按名字猜
+	// （见文件头那一段）。
+	//
+	// ⚠️ **这一张是这一票引进来的**（之前 `iconset` 里没有它）：
+	// `gh api repos/Remix-Design/RemixIcon/contents/icons/Business/profile-line.svg`。
+	iconProfile = "Business/profile-line.svg"
 
 	// ── 播放条右边那一组 ──
 	// ⚠️ 「播放列表」原来在顶栏那一列里，票 #127 跟着上游搬到了播放条
@@ -227,6 +247,29 @@ const (
 	iconEmptySearch   = "System/search-line.svg"               // 搜索：一只放大镜
 	iconEmptyFeed     = "User & Faces/team-line.svg"           // 动态：一群人在说话
 	iconEmptyDownload = "System/download-2-fill.svg"           // 下载记录：一只下箭头
+
+	// ── 歌词右下角那三枚旋钮 ────────────────────────────────────────────
+	//
+	// 逐字照上游 `components/lyrics/` 那一列（`index.tsx:380-398`、
+	// `font-size-control.tsx:39-48`、`offset-control.tsx:41-48`）：
+	//
+	//	字号   iconLyricFontSize  ← <RiFontSize size={16} />
+	//	偏移   iconLyricOffset    ← <RiTimeLine size={16} />
+	//	找歌词 iconLyricSearch   ← <RiTBoxLine size={16} />
+	//
+	// ⚠️ **找歌词那一枚上游用的是「T 形框」不是放大镜**（`index.tsx:394`）：
+	// 那一枚是**满屏歌词区里那枚 IconButton**，上游给它 `RiTBoxLine`。
+	// 放大镜（`System/search-line.svg`）是上游**搜索框**那一枚，别混。
+	//
+	// ⚠️ **两张图是这一票引进来的**（`iconset` 里原本没有它们）：
+	// `gh api repos/Remix-Design/RemixIcon/contents/icons/Editor/font-size.svg`、
+	// `gh api repos/Remix-Design/RemixIcon/contents/icons/Design/t-box-line.svg`。
+	// 目录结构照上游（`分类/文件名` 就是上游那个路径），所以**反查得回上游**。
+	// `System/time-line.svg` 早就在（空状态那个钟就是它）——**两个常量指同一个
+	// 文件是允许的**（`iconset_test.go` 的文件头写着这一条）。
+	iconLyricFontSize = "Editor/font-size.svg"  // 字号：Aa
+	iconLyricOffset   = "System/time-line.svg"  // 偏移：一个钟
+	iconLyricSearch   = "Design/t-box-line.svg" // 找歌词：一个 T 形框
 
 	// iconFailed 是「这一块拉失败了」那一支的插画位。
 	//
@@ -355,10 +398,12 @@ var iconNames = []string{
 	// 顶栏
 	iconSettings, iconFolder, iconQueue,
 	iconSearch, iconClose, iconFeed, iconLogin, iconLogout,
-	// 上游原来的那一对登录 / 退出（圆圈 + 一个向左、一个向右的箭头）。界面
-	// 现在不用它们了（18px 上分不清，票 #242），但**资源留着**：这一份图标
-	// 是照上游备齐的，「备齐」和「接上去」是两件事（见文件头）。
+	// 上游原来的那一对登录 / 退出（圆圈 + 一个向左、一个向右的箭头）。顶栏上
+	// 那两枚**不用**它们（18px 上分不清，票 #242），**头像下拉里那两项用的
+	// 就是它们**（上游那六项逐字照抄）。
 	iconLoginCircle, iconLogoutCircle,
+	// 头像下拉里「个人资料」那一枚。
+	iconProfile,
 	// 队列抽屉头与行
 	iconLocate, iconDelete, iconPlayFill, iconPauseFill,
 
@@ -390,6 +435,9 @@ var iconNames = []string{
 	iconFileSheet, iconDraft, iconDownloadLine, iconDownloadCloud,
 	iconShield, iconChecked, iconUnchecked, iconZoomIn, iconZoomOut,
 	iconInfo, iconCloseFilled, iconTip, iconUser, iconUserAdd, iconFeedback,
+
+	// 歌词右下角那三枚旋钮
+	iconLyricFontSize, iconLyricOffset, iconLyricSearch,
 }
 
 // icons 是上面那批图标**启动时一次解析好**的结果。
