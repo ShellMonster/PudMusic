@@ -172,6 +172,35 @@ var Items = []Item{
 		},
 	},
 	{
+		// 🔴 **这一条治的是「静默卡住」**（票 #352）：按过一次暂停再恢复之后，
+		// 队列**不往下走**，而整窗画面上**一句话都没有**——既不是「已停止」，
+		// 也不是「这一串放完了」。
+		//
+		// 根因在 `App.Toggle` 的「按回来」那一半：它没把 `wantPlay` 记回 true，
+		// 而 `onTrackFinished` 拿它当「要不要往下走」的判据——于是那一行早退，
+		// 队列停在那儿，`QueueFinished` 也永远出不来。
+		//
+		// 另一半是**两处说的话要一致**：队列走完时播放条说「这一串放完了」，
+		// 而抽屉里当前那一行的副题原来写「已停止」——**同一屏上两句不同的话**。
+		Category: Play,
+		Spec:     "按过一次暂停再恢复之后队列照常往下走；队列走完时播放条和队列抽屉说的是同一句（「用户按了停止」和「队列自己走完了」分得开）",
+		Tests: []string{
+			// 接线（App 那一层）：暂停再恢复之后队列照常往下走，而且队尾那一句
+			// 说得出来。
+			"TestTogglingPauseDoesNotStallTheQueue",
+			"TestTheQueueFinishesAfterAToggleSaysSo",
+			// 对照组：快捷键那条路（`App.Pause` / `App.Play`）行为不变。
+			"TestPauseAndPlayStillMoveTheQueueOn",
+			// 反面：**还停着**的时候不许自己往下走（只钉前半条的话，把
+			// `onTrackFinished` 的早退条件整个删掉也照样绿）。
+			"TestAPausedSongStaysPutAfterAToggle",
+			// 画面（UI 那一层）：抽屉里那一行分得清两种停住，且和播放条不矛盾。
+			"TestTheQueueDrawerSaysTheQueueIsDone",
+			"TestTheQueueDrawerStillSaysStoppedWhenTheUserStops",
+			"TestThePlayBarAndTheDrawerDoNotContradictEachOther",
+		},
+	},
+	{
 		Category: Play,
 		// 播放模式四档（顺序/循环/随机/单曲，BMG-47 A5）。「放完下一首是哪首」
 		// 这一句是**四档各有一条**——顺序停在队尾、循环绕回队尾、随机真的打乱、
