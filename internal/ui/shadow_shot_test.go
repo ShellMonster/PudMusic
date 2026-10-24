@@ -53,7 +53,9 @@ func shotQueueDrawer(t *testing.T, dir, name string, dark bool) {
 	t.Helper()
 	s, tt := shotSpaceShell(t, newUIExplore(t), dark, true, "77")
 	s.drawerOpen = true
-	tt.Frame()
+	// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在窗口外面
+	//（它从右边滑进来），存下来的图是空的右半边。
+	settleDrawer(t, s, tt)
 	save(t, dir, "50-"+name+"-队列抽屉.png", tt)
 }
 

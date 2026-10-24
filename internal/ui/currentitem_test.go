@@ -212,7 +212,7 @@ func TestTheCurrentItemIsFlatEverywhere(t *testing.T) {
 
 			t.Run("队列抽屉", func(t *testing.T) {
 				b := newTestShell(t, at(winW, winH), systemIsDark(dark))
-				h := &harness{app: b.a, tt: b.tt}
+				h := &harness{app: b.a, tt: b.tt, s: b.s}
 				enqueue(t, h, copiesOf(t, 2)...)
 				openDrawer(t, h)
 

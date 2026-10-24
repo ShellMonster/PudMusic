@@ -695,6 +695,48 @@ func filesInThisPackage(t *testing.T) []string {
 // 上必挂——因为它赌的是「上一条提示已经过期」，而提示活多久是墙钟说了算）。
 const waitBudget = 10 * time.Second
 
+// settleDrawer 推钟直到队列抽屉的进出场走完（面板滑到位）。
+//
+// # 为什么需要它
+//
+// ⚠️ **Tester 的钟站着不动**：不推它，抽屉就永远停在「刚打开」那一帧——而那一帧
+// 面板**还在窗口外面**（它要从右边滑进来，见 queue_drawer.go）。于是「按名字找
+// 抽屉里的东西」「量面板那一块的颜色」「存图」全都量的是**空的右半边**，而症状是
+// 「找不到」「颜色没变」「图是空的」——**没有一条报错说是因为动画没走完**。
+//
+// # 为什么推钟而不是数帧
+//
+// 动画走的是**时间**（`c.Now()`），数帧那种等法会**静默失效**：不报错、不超时、
+// 直接放行（AGENTS.md §2）。框架文档给的写法也是 `tt.Advance(d)`。
+//
+// # 判据是**阶段**，不是时间
+//
+// 「到位了没有」看的是 `drawerPhase`：开着是 `drawerShown`，关掉了（滑完了、
+// 面板拆了）是 `drawerGone`。那是一个**状态**，不是「过了多少毫秒」——所以这一条
+// 在快机器和慢机器上读的是同一个。
+func settleDrawer(t *testing.T, s *Shell, tt *mygoui.Tester) {
+	t.Helper()
+	const step = 16 * time.Millisecond
+	// 先画一帧：阶段机是在 view 里跑的，不画一帧它还没从 `drawerGone` 动。
+	tt.Frame()
+	for range 40 {
+		switch s.drawerPhase {
+		case drawerShown:
+			return
+		case drawerGone:
+			// ⚠️ **再画一帧**：拆掉面板的那一帧里，面板**还在树上**（阶段是在
+			// 建它的过程里改的），所以画面上还有它——下一帧才真的没了。
+			//
+			// 不画这一帧的话，「抽屉没了」这件事在画面上要晚一帧才成立，
+			// 而量画面的用例会读到**上一帧**（抽屉还在）。
+			tt.Frame()
+			return
+		}
+		tt.Advance(step)
+	}
+	t.Fatalf("推了 %v 的钟，抽屉还没停（阶段 %d）", 40*step, s.drawerPhase)
+}
+
 // waitFor 等一个后台结果。**不要**在里面画帧——那是 waitFrames 的活。
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()

@@ -87,7 +87,7 @@ func TestRenderCurrentStyleShots(t *testing.T) {
 			// 73 队列抽屉：正在放的那一行是**主色当字 + 一层很淡的主色底**
 			// （原来是一整行 383×64 的实心主色）。
 			b4 := newTestShell(t, at(winW, winH), systemIsDark(dark))
-			h := &harness{app: b4.a, tt: b4.tt}
+			h := &harness{app: b4.a, tt: b4.tt, s: b4.s}
 			enqueue(t, h, copiesOf(t, 3)...)
 			openDrawer(t, h)
 			h.tt.Move(1180, 300)

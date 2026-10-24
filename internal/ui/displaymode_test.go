@@ -257,9 +257,9 @@ func TestThePagesThatDeliberatelyDoNotFollowIt(t *testing.T) {
 			open: func(t *testing.T) (*mygoui.Tester, *Shell) {
 				s, tt := newShell(t)
 				s.drawerOpen = true
-				for range 3 {
-					tt.Frame()
-				}
+				// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板
+				// 还在窗口外面（它从右边滑进来）。
+				settleDrawer(t, s, tt)
 				return tt, s
 			},
 			why:     "它不是一页，是播放时拉出来的一个抽屉；而且它的**行高定死在 64**（Biu 的 RowHeight）——「定位当前播放」是 `targetIndex*64`，改了行高那个按钮每次都停在差几像素的地方",

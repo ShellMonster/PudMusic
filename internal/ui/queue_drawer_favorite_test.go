@@ -22,7 +22,7 @@ import (
 )
 
 // favTester 装一个真的 App + Shell：在线播放的 client 指着假 B 站，下载也挂上。
-func favTester(t *testing.T, f *biliFixture) (*app.App, *ui.Tester) {
+func favTester(t *testing.T, f *biliFixture) (*app.App, *ui.Tester, *Shell) {
 	t.Helper()
 	a := app.New()
 	// ⚠️ 下载队列要在 App 关掉之前清空：`download` 的后台线在队列里还排着队时关
@@ -48,11 +48,11 @@ func favTester(t *testing.T, f *biliFixture) (*app.App, *ui.Tester) {
 		}
 	}))
 	b.tt.Frame()
-	return a, b.tt
+	return a, b.tt, b.s
 }
 
 // openQueueWithOneSong 摆一个只有一首在线歌的队列，并把抽屉拉出来。
-func openQueueWithOneSong(t *testing.T, a *app.App, tt *ui.Tester) {
+func openQueueWithOneSong(t *testing.T, a *app.App, s *Shell, tt *ui.Tester) {
 	t.Helper()
 	a.Queue().Append(app.Item{
 		Source: "online", Type: "mv", Bvid: "BV1xx", Cid: "c1", Title: "在线那一首",
@@ -65,6 +65,9 @@ func openQueueWithOneSong(t *testing.T, a *app.App, tt *ui.Tester) {
 	if !tt.HasText("定位当前播放") {
 		t.Fatalf("抽屉没开（文字：%q）", tt.Texts())
 	}
+	// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在窗口外面
+	//（它从右边滑进来）——而下面要**右键那一行**，行在窗口外面点不着。
+	settleDrawer(t, s, tt)
 }
 
 // pickMenu 右键那一行，再从菜单里选 label。
@@ -86,8 +89,8 @@ func pickMenu(t *testing.T, tt *ui.Tester, row, label string) {
 // 「收藏不了：xxx」的失败分支也能把它凑出来。
 func TestTheRowMenuReallyFavoritesTheSong(t *testing.T) {
 	f := newBiliFixture(t, 1)
-	a, tt := favTester(t, f)
-	openQueueWithOneSong(t, a, tt)
+	a, tt, s := favTester(t, f)
+	openQueueWithOneSong(t, a, s, tt)
 
 	pickMenu(t, tt, "在线那一首", "收藏")
 
@@ -122,8 +125,8 @@ func TestTheRowMenuSaysSoWhenTheSongIsAlreadyFavorited(t *testing.T) {
 	f.favoritedIn = []int64{fixtureAid}
 	f.mu.Unlock()
 
-	a, tt := favTester(t, f)
-	openQueueWithOneSong(t, a, tt)
+	a, tt, s := favTester(t, f)
+	openQueueWithOneSong(t, a, s, tt)
 
 	pickMenu(t, tt, "在线那一首", "收藏")
 	waitFrames(t, tt, "画面上说了已经收藏过", func() bool { return tt.HasText("已经收藏过了") })
@@ -142,8 +145,8 @@ func TestTheRowMenuSaysSoWhenTheSongIsAlreadyFavorited(t *testing.T) {
 // 东西，只断「队列里有一个」的话，接错了也绿。
 func TestTheRowMenuReallyDownloadsTheVideo(t *testing.T) {
 	f := newBiliFixture(t, 1)
-	a, tt := favTester(t, f)
-	openQueueWithOneSong(t, a, tt)
+	a, tt, s := favTester(t, f)
+	openQueueWithOneSong(t, a, s, tt)
 
 	pickMenu(t, tt, "在线那一首", "下载视频")
 

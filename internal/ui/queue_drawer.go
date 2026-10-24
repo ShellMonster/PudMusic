@@ -11,6 +11,7 @@ package ui
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
@@ -33,6 +34,81 @@ const (
 	queuePadY         = space.Px8
 	queuePadX         = space.Px8
 	queueHeaderHeight = 52
+)
+
+// ---- 进出场（票 #298） ----
+//
+// # 为什么大面板加、小浮层不加
+//
+// **大面板（队列抽屉）加进出场**：从右侧滑入，200ms + CubicBezier(0.16, 0.9,
+// 0.21, 0.98)，**不做回弹**。理由见 DESIGN.md §九（2026-10-24 拍板）。
+//
+// **菜单 / 小浮层 / 确认框 / Toast 不加**：那些是高频操作，一秒好几次，
+// 每一处都滑一遍就成噪音了。
+//
+// ⚠️ **上游不是「全站都关了动画」**：上游那 43 处 `disableAnimation` 是**一件一件
+// 挂在具体组件上的**（Modal 10 处、Button 10 处、Tooltip 6 处、Popover 5 处、
+// Dropdown 4 处、Switch 3 处、Checkbox 3 处、Select 1 处、Drawer 1 处），
+// 而**上游自己在满屏播放器里做了一个从右边滑进去的抽屉**
+// （`src/components/full-screen-player/index.tsx:421-422`：`transition-all
+// duration-300 ease-out` + `translate-x-full → translate-x-0`）。
+// 详见 DESIGN.md §九那一段的出处与范围。
+
+// queueSlideDuration 是抽屉滑入滑出要走多久：200ms。
+//
+// 取 200ms 是因为它是**大面板**：面板一开就占住半屏，滑得慢会显得「来得很重」；
+// 而它又是高频开关（播放条上那枚），滑得慢会让人觉得「按了没反应」。
+const queueSlideDuration = 200 * time.Millisecond
+
+// queueSlideEase 是抽屉进出场的那条曲线：CubicBezier(0.16, 0.9, 0.21, 0.98)。
+//
+// ⚠️ **它必须是包级变量，不能每帧现调**：CubicBezier 返回的是一个闭包，
+// 每帧调一次就是**每帧一个分配**——而每帧分配是我们唯一的性能判据
+// （`internal/ui/framebudget_test.go`）。
+var queueSlideEase = ui.CubicBezier(0.16, 0.9, 0.21, 0.98)
+
+// queueSlideAnim 是抽屉进出场那一段动画。
+//
+// ⚠️ **走曲线那一支，不做回弹**：回弹只留给「奖励动量」（甩动落位那种
+// 「给了一下奖励」的动作），**点击触发的过渡不弹**（报告 164 §3.0 引的
+// 《Web 流畅界面建议》：「小心地尝试带回弹效果的动画…Start simple, not springy」）。
+//
+// ⚠️ **Duration > 0 才是曲线那一支**：Duration == 0 会落进弹簧那一支，
+// 而弹簧那一支的兜底值是 500ms（`mygo/ui/motion.go` 的 defaultSpringDuration）。
+// 「零值 = 500ms 弹簧」不是「没动画」。
+var queueSlideAnim = ui.Animation{Duration: queueSlideDuration, Ease: queueSlideEase}
+
+// queueSlideKey 是这一段动画在面板那个元素上的键。
+//
+// ⚠️ **键必须是常量字符串**：框架把动画的值记在元素的 state 里，键是 `any`，
+// 而非常量字符串每帧装箱一次就是每帧一个分配（同上）。
+const queueSlideKey = "queue-drawer:slide"
+
+// drawerPhase 是播放列表抽屉现在处在进场的哪一段。
+//
+// # 为什么不是一个 bool
+//
+// 「开没开」和「在画面上的哪一段」是**两件事**：退场的那 200ms 里抽屉**还在树上**
+// （它滑到窗口外面去了，但还没拆），所以「关掉」不是「不建」，是「建着，滑出去，
+// 滑完了才拆」。这就是「开合的状态要和动画对齐」那一句。
+//
+// # 推它的是两样东西，只有两样
+//
+//	用户的意图（`drawerOpen`）	点那枚键、按 Esc、点外面
+//	动画自己走没走完	面板到位了 / 滑到头了
+//
+// **动画不会反过来推它**——那是「重入」，而重入是这类状态机最容易出的 bug。
+type drawerPhase uint8
+
+const (
+	// drawerGone 是「抽屉不在树上」：没开，也没在退场。
+	drawerGone drawerPhase = iota
+	// drawerIn 是「正在滑进来」：面板已经在树上，正从窗口外面往右沿走。
+	drawerIn
+	// drawerShown 是「开着，而且已经到位」。
+	drawerShown
+	// drawerOut 是「正在滑出去」：面板还在树上，正往窗口外面走。
+	drawerOut
 )
 
 // queueRow 是抽屉里画出来的一行。
@@ -96,7 +172,9 @@ func queueRowsFor(items []app.Item) []queueRow {
 //
 // ⚠️ 外面那层 `Guard` 是 `viewMain` 加的（铁律三）：抽屉一崩，崩掉的是**整个窗口**。
 func (s *Shell) viewQueueDrawer(c *ui.Context) {
-	if !s.drawerOpen {
+	// 阶段先推，**建不建后说**：退场的那一段面板还在树上，所以「关掉」不是「不建」。
+	justIn := s.syncDrawerPhase()
+	if s.drawerPhase == drawerGone {
 		return
 	}
 	// 记一笔「抽屉建了一遍」——给「一帧建了几遍」那条测试数（见 builds.go）。
@@ -122,7 +200,6 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 		}
 		back := ui.Row(c).Key("queue-backdrop").
 			Absolute().Left(0).Top(0).Right(0).Bottom(bottomInset).
-			Justify(ui.End).AlignItems(ui.Stretch).
 			// 没有底色：Biu 的 `backdrop="transparent"`，底下那一层照旧看得见。
 			Modal()
 		back.Children(func() {
@@ -141,14 +218,61 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 			//
 			// 之前这里取 `t.Surface`（深色下 #27272a）——那正是 DESIGN.md §四说的
 			// 「比背景亮一级的板」。
+			//
+			// ⚠️ **面板是绝对定位的**（原来它是在这一行 flex 里靠 `Justify(End)`
+			// 贴右沿的）：进出场要动的是**布局位置**，而 flex 那一套摆不出
+			// 「从右边滑进来」——`justify-content: flex-end` 溢出时是往**左**溢出
+			// （`mygo/ui/layout.go` 的 flexLayout：`free := max(contentMain-ln.main, 0)`，
+			// 剩下的地方被夹成 0，条目落在起点）。绝对定位按 **inset** 摆，
+			// 那才是「从窗口右边挪进来」能用的那一套。
 			panel := shadow.HeroMedium(ui.Column(c).Key("queue-drawer").
-				Width(queueDrawerWidth).FillHeight().
+				Absolute().Top(0).Bottom(0).Width(queueDrawerWidth).
 				Background(t.Background).BorderStartWidth(1).BorderColor(t.Border), t)
 			panel.Role(ui.RoleDialog).Label("播放列表").
 				Children(func() {
 					s.viewQueueHeader(c, t)
 					s.viewQueueBody(c, t)
 				})
+
+			// ---- 进出场 ----
+			//
+			// 动的是面板的**右边距**：0 = 贴住窗口右沿（到位了），
+			// -queueDrawerWidth = 整个面板在窗口外面（还没进来）。
+			//
+			// ⚠️ **动的是布局位置，不是 transform**（DESIGN.md §五：「动画不要用
+			// transform 动大子树……要动就动**布局位置**」）。软件渲染回退时
+			// transform 会让整棵子树逐像素重绘。
+			//
+			// ⚠️ **第一次建要 Jump 一下**：框架的规矩是「一个值从它的第一个目标开始」
+			// （`mygo/ui/motion.go` 的 channel：第一次 `AnimateTo` 直接把值给成
+			// 目标），所以不先 Jump 的话面板会**直接出现在**右沿上，没有滑入。
+			if justIn {
+				panel.Jump(queueSlideKey, -queueDrawerWidth)
+			}
+			// 目标：开着就贴住右沿（0），关着就整个在窗口外面。
+			target := float32(0)
+			if s.drawerPhase == drawerOut {
+				target = -queueDrawerWidth
+			}
+			slide := panel.AnimateTo(queueSlideKey, target, queueSlideAnim)
+			panel = panel.Right(slide)
+
+			// 到位了 / 滑到头了：换一段。
+			//
+			// ⚠️ **用 Settled 不用 Arrived**：Settled 是「停在那儿了」，退场这一段
+			// 要的是「滑到头了就把面板拆掉」——拆之前那一帧面板还在树上
+			//（它在窗口外面，看不见），下一帧才真的没了。
+			//
+			// ⚠️ **这一句不会重入**：它只在阶段是 in/out 时才改阶段，而阶段只被
+			// 意图和动画推着走（见 drawerPhase 那一段）。
+			if panel.Settled(queueSlideKey) {
+				switch s.drawerPhase {
+				case drawerIn:
+					s.drawerPhase = drawerShown
+				case drawerOut:
+					s.drawerPhase = drawerGone
+				}
+			}
 		})
 
 		// 关抽屉的两条路：点底下那一层、按 Esc。少一条的表现是「我明明点了外面，
@@ -163,10 +287,45 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 		// 蒙版也是这样，它只是看不见，不是空的。这和上面那个 Modal 是同一件事。
 		//
 		// ⚠️ 按下 Esc 时焦点得在抽屉里才轮得到它（Modal 把焦点关进来了）。
+		//
+		// ⚠️ **这里是「=false」不是「= !drawerOpen」**：关的动作是幂等的——
+		// 退场那 200ms 里用户再点一次外面，不该把抽屉又打开。
 		if back.Clicked() || back.OverlayShortcut(0, ui.KeyEscape) {
 			s.drawerOpen = false
 		}
 	})
+}
+
+// syncDrawerPhase 推一遍抽屉的阶段机，返回这一帧是不是「刚打开」。
+//
+// ⚠️ **它只被两样东西推着走**：用户的意图（`drawerOpen`）和动画走没走完
+// （`viewQueueDrawer` 里那一句 Settled）。**动画不会反过来推它**。
+//
+// ⚠️ **「关」是幂等的**：`drawerOpen = false` 连按几次都是「关」，
+// 而 `drawerOpen = !drawerOpen` 那样写在关的动作上就是「开」——
+// 退场那 200ms 里用户再点一次外面，抽屉会弹回来。
+//
+// ⚠️ **退场途中又打开**：阶段退回 `drawerIn`，而面板**从当前位置接着滑回去**
+// （框架的曲线分支被打断时是从当前值接着走的，`mygo/ui/motion.go` 的 retarget）。
+func (s *Shell) syncDrawerPhase() bool {
+	switch s.drawerPhase {
+	case drawerGone:
+		if !s.drawerOpen {
+			return false
+		}
+		// 刚开：面板从窗口外面滑进来。
+		s.drawerPhase = drawerIn
+		return true
+	case drawerIn, drawerShown:
+		if !s.drawerOpen {
+			s.drawerPhase = drawerOut
+		}
+	case drawerOut:
+		if s.drawerOpen {
+			s.drawerPhase = drawerIn
+		}
+	}
+	return false
 }
 
 // viewQueueHeader 是顶上那一条：标题 + 条数 + 定位 + 清空。两个键只在队列非空时才摆
