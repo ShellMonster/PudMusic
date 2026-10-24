@@ -1072,3 +1072,141 @@ func TestThePageStillShowsItsOwnTitle(t *testing.T) {
 		})
 	}
 }
+
+// TestTheTopBarHasNoSettingsKey 钉住「顶栏上没有『设置』这一枚」。
+//
+// 票 #289 / 报告 C-02：上游的设置在**侧栏菜单**和**头像下拉**里
+// （`biu/src/layout/navbar/user/index.tsx:107`），**顶栏没有**。我们原来三处
+// 都有：侧栏一条、头像下拉一条、顶栏一条——同一个动作三个入口，而它们**会不
+// 一致**（侧栏那一条能被「菜单设置」里的「隐藏菜单项」藏掉，另外两处不能）。
+//
+// 断的是**画面**：顶栏那一块上不得有叫「设置」的东西。
+//
+// ⚠️ **用 `navBarTester` 而不是整窗**：它 `withView` 只画顶栏那一块，所以
+// `Texts()` 里**只有**顶栏上的字。整窗上量的话，侧栏那一项和设置页自己的
+// 标题都混在里面，「顶栏有没有」这件事就量不出来了。
+func TestTheTopBarHasNoSettingsKey(t *testing.T) {
+	tt := navBarTester(t, false)
+	if _, ok := tt.Find("设置"); ok {
+		t.Errorf("顶栏上还有一枚「设置」——侧栏里有一条、头像下拉里也有第三条，"+
+			"同一个动作三个入口，而它们会不一致（顶栏上的字：%q）", tt.Texts())
+	}
+}
+
+// TestTheTopBarKeepsItsOtherEntries 钉住「这一票只拿掉了『设置』那一枚」。
+//
+// 报告 C-02 说我们右边比上游多几枚（上游未登录时只有一枚头像）。**多出来的那
+// 几枚各有各的理由**，挪不挪是另一票的事（挪入口不是纯对齐，要人拍板）——这一
+// 票只动**纯冗余**的那一枚（设置），所以剩下这几枚必须**原样还在**。
+//
+// ⚠️ **断的是「还在」，不是「只有这些」**：顶栏右边到底该摆几枚，那是人拍板的
+// 事；这一条只保证这一票没有顺手把别的也拿掉。
+func TestTheTopBarKeepsItsOtherEntries(t *testing.T) {
+	tt := navBarTester(t, false)
+	for _, label := range []string{"打开文件", "迷你", "动态", avatarLabel, "登录"} {
+		if _, ok := tt.Find(label); !ok {
+			t.Errorf("顶栏上找不到 %q（顶栏上的字：%q）——这一票只该拿掉「设置」"+
+				"那一枚，别的入口没动", label, tt.Texts())
+		}
+	}
+}
+
+// TestTheSettingsIsStillReachableFromTheSidebarAndTheAvatar 钉住「拿掉顶栏那一枚
+// 之后，设置还够得着」。
+//
+// 顶栏那一枚是**第三个**入口，前两个都还在：侧栏菜单里那一条（我们自己的，
+// DESIGN.md §九「侧栏多一条设置」）、头像下拉里那第三条（上游自己的位置）。
+//
+// ⚠️ **侧栏那一条要认得出是侧栏的**：整窗上「设置」这两个字可能出现在好几个
+// 地方，所以这里断的是**位置**——侧栏那一列在左边 200 像素之内。
+func TestTheSettingsIsStillReachableFromTheSidebarAndTheAvatar(t *testing.T) {
+	_, tt := newShell(t)
+	tt.SetFocused(true)
+
+	r, ok := tt.Find("设置")
+	if !ok {
+		t.Fatalf("画面上找不到「设置」，文字有 %q——设置进不去了", tt.Texts())
+	}
+	if r.X >= 200 {
+		t.Errorf("那个「设置」在 x=%.0f，不在侧栏那一列（200 宽）里——"+
+			"顶栏那一枚拿掉之后，侧栏那一条得还在", r.X)
+	}
+
+	// 头像下拉里那第三条。
+	if err := tt.Click(avatarLabel); err != nil {
+		t.Fatalf("点不到头像：%v，文字有 %q", err, tt.Texts())
+	}
+	got := tt.Menu()
+	found := false
+	for _, item := range got {
+		if item == "设置" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("头像下拉里没有「设置」了，菜单是 %q", got)
+	}
+}
+
+// TestTheNavArrowsAreBiuSizedAndUnbordered 钉住顶栏左边那两个箭头的**盒子**和
+// **描边**。
+//
+// 票 #289 / 报告 C-03：上游那一枚后退是 **32×40、无描边**
+// （`biu/src/layout/navbar/navigation/index.tsx:15-24`：`isIconOnly
+// variant="flat" radius="md" className="w-8 min-w-8"`；实图逐像素量出来
+// x=216..247、y=12..51、底色 `#f7f7f7`、**无描边**）。
+//
+// 我们原来是 **34×30、带一圈 1 像素描边**——那 2 像素是框架 `ui.Button` 的默认
+// 描边（`mygo/ui/widgets.go` 的 `styleButton` 给的是 `t.Border`），而「描边药
+// 丸」正是这一轮要收掉的毛病（`flatbutton.go:8-14` 记的就是这个）。
+//
+// # 为什么描边要断在**像素**上
+//
+// 「盒子 32×40」量得到（`Tester.Find` 给的是按钮自己的框），「有没有描边」量不
+// 到——除非去看**最左边那一列**：
+//
+//   - **有描边**：最左边那一列是描边色（浅色下 #ebebeb），紧挨着里面那一列是
+//     按钮的底色（#f9f9fa）——两个颜色**不一样**。
+//   - **无描边**：最左边那一列就是底色，和里面那一列**一样**。
+//
+// 所以这一条比的是这两列的颜色相不相等。取**中间那一行**（y = 顶 + 一半高）：
+// 那一行是直的，不受圆角影响。
+//
+// ⚠️ **深浅两套都要试**：描边在深色下是「15% 白叠在底色上」那一档，和底色的
+// 差比浅色下小（浅色下差 14，深色下差 10），但仍然是两个不同的颜色。
+func TestTheNavArrowsAreBiuSizedAndUnbordered(t *testing.T) {
+	// 上游那一枚的尺寸：**写死**，不拿常量当判据（常量一改断言跟着改，等于没
+	// 断言）。32×40 是逐像素量出来的，见上面那段。
+	const wantW, wantH = 32, 40
+
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			tt := navBarTester(t, dark)
+			img := tt.Image()
+			for _, label := range []string{navBackLabel, navForwardLabel} {
+				r, ok := tt.Find(label)
+				if !ok {
+					t.Fatalf("顶栏上没有 %q，文字有 %q", label, tt.Texts())
+				}
+				if r.W != wantW || r.H != wantH {
+					t.Errorf("%q 那一枚是 %.0f×%.0f，want %d×%d（上游那枚是 32×40，"+
+						"无描边）", label, r.W, r.H, wantW, wantH)
+				}
+				// 最左边那一列 vs 紧挨着里面那一列。
+				x := round32(r.X)
+				y := round32(r.Y + r.H/2)
+				edge := img.RGBAAt(clampX(img, x), clampY(img, y))
+				inside := img.RGBAAt(clampX(img, x+1), clampY(img, y))
+				if edge != inside {
+					t.Errorf("%q 那一枚最左边那一列是 %v、紧挨着里面那一列是 %v——"+
+						"那一圈 1 像素的描边还在（上游那枚无描边，框 %v）",
+						label, edge, inside, r)
+				}
+			}
+		})
+	}
+}

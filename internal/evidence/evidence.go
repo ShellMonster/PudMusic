@@ -1017,6 +1017,34 @@ var Items = []Item{
 	},
 	{
 		Category: Negative,
+		// 票 #282：「点了歌一直不开始、也不说为什么」。
+		//
+		// 那一首和别的歌不一样的地方在于**它的流一直没准备好**，而应用这一层
+		// 对「还在准备」和「已经完了」分都不分：既没有一句「正在取流」，也没有
+		// 一个「等够了就当它失败」的上限。于是用户面对的是一个不动的界面和
+		// 一片沉默——比「报错」更糟。
+		//
+		// 这一组盯三件事：**有反馈**（界面上说在取流）、**有上限**（超时按失败
+		// 处理，给一句能看懂的话）、**有痕迹**（代次变了和失败都写进日志，
+		// 而日志真的落在文件里）。
+		Spec: "点了歌一直不开始：界面上说在取流、超过阈值按失败处理、代次变了和失败都写进日志",
+		Tests: []string{
+			"TestAPlayThatNeverStartsTurnsIntoASentence",
+			"TestAnotherSongsFailureDoesNotCancelTheWatchdog",
+			"TestTheDiscardedPlayIsWrittenDown",
+			"TestTheFailureIsWrittenDown",
+			"TestThePlayBarSaysItIsLoading",
+			"TestTheLoadingLineHasASpinner",
+			"TestThePauseKeyIsStillThereWhileLoading",
+			"TestAFailedPlayGivesASentenceInsteadOfASpinner",
+			"TestTheFailureSentenceFitsOnOneLine",
+			"TestFriendlySaysTheFormatCannotBeDecoded",
+			"TestTheLogFileActuallyReceivesWhatIsLogged",
+			"TestTheLogFileIsAppendedTo",
+		},
+	},
+	{
+		Category: Negative,
 		Spec:     "重启：登录状态保持、设置落盘、搜索历史活下来",
 		Tests: []string{
 			"TestRestartKeepsTheLoginState",
@@ -2705,6 +2733,23 @@ var Items = []Item{
 			"TestAShortTitleIsNotAffected",
 			// 「图取到了」那一档也描一圈边（深浅两套）。
 			"TestTheLoadedCoverHasAnEdgeOfItsOwn",
+		},
+	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：那一枚按钮悬在 Tab 右边半截、
+		// 矮一截（28 而不是 40）、又没有那枚 ▶——**没有一样会报错**，界面
+		// 只是「不像这一页的操作，也不像全局操作」。
+		//
+		// 而它是首页和每一页列表上**唯一的主色实心块**，用户第一眼先看它。
+		Category: Platform,
+		// 票 #288（UX 报告 C-04 + C-05）。
+		Spec: "「全部播放」那一枚贴在内容区右沿、尺寸 114×40、带一枚 18 的 ▶ 图标（上游 HeroUI `Button size=\"md\"` 的逐像素实测值）",
+		Tests: []string{
+			// 右沿 = 内容区右沿、尺寸 114×40（1200 与 900 两档窗口，深浅两套）。
+			"TestThePlayAllButtonSitsAtTheRightEdgeOfTheContentArea",
+			// 那一枚里有一枚 18 的 ▶ 图标，而且它在字的**前面**（上游的
+			// `startContent`）。
+			"TestThePlayAllButtonHasThePlayIcon",
 		},
 	},
 }
