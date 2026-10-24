@@ -460,6 +460,25 @@ var Items = []Item{
 			"TestACorruptFileNeverLooksLikeItFinished",
 		},
 	},
+	{
+		Category: PCM,
+		// 上一条的另一面：**完整的**短文件不是「截断的输入」，不许报错。
+		//
+		// macOS 上 AudioToolbox 探容器时第一次就要 8192 字节，而整个文件
+		// 不足 8192——字节源读到的是「没凑齐就到了头」，那不是失败，是
+		// 「流到头了」。以前把它当成了硬错误，于是**总长不足 8192 字节**
+		// 的文件（秒开片段、缓存碎片、测试素材）一个样本都解不出来，
+		// 界面上是「这歌放不出来」（#312）。
+		//
+		// 这条证据是 macOS 专属的（`extaf` 只在 macOS 上存在）。
+		Spec: "总长不足 8192 字节的**完整**文件也能解出来：样本数与时长都对、样本值对得上、读到头是干净的 EOF（末尾短读不算错）",
+		Tests: []string{
+			"TestAShortFileStillDecodes",
+			"TestAShortFileKeepsItsSamples",
+			"TestAShortFileEndsAtEOF",
+			"TestAShortCompressedFileStillDecodes",
+		},
+	},
 
 	// ── 分页与路由 ─────────────────────────────────────────────────────────
 	{
@@ -2584,6 +2603,25 @@ var Items = []Item{
 			"TestTheToastTextUsesTheMediumWeight",
 			// 提示那句话没缺字（改写调用点时少打一个字符，用户看到的是半截话）。
 			"TestTheToastMessagesKeepTheirBrackets",
+		},
+	},
+	{
+		// 这一族动的是**过渡本身**：曲线、时长、位移与淡入的错开。
+		//
+		// 🔴 **这一族的错法全是「静默」的**：曲线换了没有任何东西会报错，界面
+		// 只是「不太顺」；滑块退回定时长曲线也不报错，只是连点三个 Tab 时
+		// 顿一下；淡入和位移又同步了也不报错，只是「啪」地一下出现。
+		Category: Platform,
+		// 票 #292（DESIGN.md §五）：一条统一曲线 + 主 Tab 滑块换成弹簧。
+		Spec: "所有过渡走同一条曲线 `CubicBezier(0.16, 0.9, 0.21, 0.98)`（DESIGN.md §五《一条统一曲线》）；主 Tab 滑块走**弹簧**（ζ=0.9923，接近临界阻尼；不是定时长曲线）；Toast 入场的**淡入与位移错开**（位移先走、淡入后到）",
+		Tests: []string{
+			// 曲线和弹簧的值不许漂（唯一出处就是那一个包）。
+			"TestTheUnifiedCurveIsTheOneWeCopied",
+			"TestTheTabSlideIsASpring",
+			// 滑块走的是弹簧：100ms 时只走到约一半（定时长曲线那时已经 78%）。
+			"TestTheTabSliderFollowsTheSpring",
+			// 淡入与位移错开：同一时刻量到的两个进度，淡入那个明显更小。
+			"TestTheToastFadesInAfterItSlides",
 		},
 	},
 	{

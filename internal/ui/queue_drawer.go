@@ -19,6 +19,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
@@ -61,14 +62,15 @@ const (
 // 而它又是高频开关（播放条上那枚），滑得慢会让人觉得「按了没反应」。
 const queueSlideDuration = 200 * time.Millisecond
 
-// queueSlideEase 是抽屉进出场的那条曲线：CubicBezier(0.16, 0.9, 0.21, 0.98)。
+// queueSlideAnim 是抽屉进出场那一段动画。
 //
-// ⚠️ **它必须是包级变量，不能每帧现调**：CubicBezier 返回的是一个闭包，
+// ⚠️ **曲线走全应用那一条统一曲线**（`motion.Unified`，值在
+// `internal/ui/widgets/motion` 里）：`CubicBezier(0.16, 0.9, 0.21, 0.98)`——
+// 全应用只写这一处，抽屉跟别处走的是同一条曲线。
+//
+// ⚠️ **它是包级变量，不能每帧现造**：CubicBezier 返回的是一个闭包，
 // 每帧调一次就是**每帧一个分配**——而每帧分配是我们唯一的性能判据
 // （`internal/ui/framebudget_test.go`）。
-var queueSlideEase = ui.CubicBezier(0.16, 0.9, 0.21, 0.98)
-
-// queueSlideAnim 是抽屉进出场那一段动画。
 //
 // ⚠️ **走曲线那一支，不做回弹**：回弹只留给「奖励动量」（甩动落位那种
 // 「给了一下奖励」的动作），**点击触发的过渡不弹**（报告 164 §3.0 引的
@@ -77,7 +79,7 @@ var queueSlideEase = ui.CubicBezier(0.16, 0.9, 0.21, 0.98)
 // ⚠️ **Duration > 0 才是曲线那一支**：Duration == 0 会落进弹簧那一支，
 // 而弹簧那一支的兜底值是 500ms（`mygo/ui/motion.go` 的 defaultSpringDuration）。
 // 「零值 = 500ms 弹簧」不是「没动画」。
-var queueSlideAnim = ui.Animation{Duration: queueSlideDuration, Ease: queueSlideEase}
+var queueSlideAnim = ui.Animation{Duration: queueSlideDuration, Ease: motion.Unified}
 
 // queueSlideKey 是这一段动画在面板那个元素上的键。
 //

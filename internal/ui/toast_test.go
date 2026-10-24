@@ -610,6 +610,74 @@ func TestTheToastSlidesIn(t *testing.T) {
 	}
 }
 
+// TestTheToastFadesInAfterItSlides 钉住「**淡入与位移错开**」。
+//
+// 《Functional Motion》：「动画的**透明度与位移应该是不同步的**」「**在添加时，
+// 透明度应该是后变化的**」——所以入场的 250ms 里，**位移那条线在前面、淡入
+// 那条线在后面**：同一时刻量到的两个进度，淡入那个必须明显更小。
+//
+// ⚠️ **两个进度都要量，只量一个等于没量**：
+//   - **位移**：卡片从右边滑 16 进来——量滑块（卡片）**中线**离最终位置还差
+//     多少；
+//   - **淡入**：采卡片上那个点的颜色——它离「刚出现时」那个颜色（= 窗口底色）
+//     近了多少，就是不透明度走了多少（底色与卡片底色一混就是线性关系）。
+//
+// ⚠️ **采样的点每一帧都要重算**：卡片在动，采样的点跟着卡片走（采窗口上的
+// 固定坐标的话，量到的是「卡片不在那儿」的那一片底色）。
+func TestTheToastFadesInAfterItSlides(t *testing.T) {
+	s, tt := newShell(t)
+	shortToasts(t, time.Minute)
+
+	const text = "它先滑进来，再淡入"
+	s.addToast(text, notice.Plain)
+	tt.Frame()
+
+	r, ok := tt.Find(text)
+	if !ok {
+		t.Fatalf("提示没画出来，文字有 %q", tt.Texts())
+	}
+	x, y := toastSampleAt(r)
+	start := tt.Image().RGBAAt(x, y)
+
+	// 入场 60ms（全程的 24%）：位移按统一曲线已经走了八成多，淡入才三成。
+	tt.Advance(60 * time.Millisecond)
+	tt.Frame()
+	midRect, ok := tt.Find(text)
+	if !ok {
+		t.Fatalf("提示不见了，文字有 %q", tt.Texts())
+	}
+	mx, my := toastSampleAt(midRect)
+	mid := tt.Image().RGBAAt(mx, my)
+
+	// 走完：卡片到最终位置、满色。
+	settleToast(t, tt)
+	endRect, ok := tt.Find(text)
+	if !ok {
+		t.Fatalf("提示不见了，文字有 %q", tt.Texts())
+	}
+	ex, ey := toastSampleAt(endRect)
+	full := tt.Image().RGBAAt(ex, ey)
+
+	// 位移走了多少（卡片从右边滑 toastEnterShift 进来，所以中间那一帧在**右边**）。
+	rest := float64(midRect.X - endRect.X)
+	if rest <= 0 {
+		t.Fatalf("卡片没有往左滑（中间 %.1f、终点 %.1f）", midRect.X, endRect.X)
+	}
+	moved := 1 - rest/float64(toastEnterShift)
+	// 淡入走了多少：离「刚出现时」那个颜色近了多少（= 不透明度）。
+	den := colorDistance(start, full)
+	if den <= 0 {
+		t.Fatalf("起点和满色一样（%v）——这一帧根本量不到", start)
+	}
+	faded := float64(colorDistance(start, mid)) / float64(den)
+
+	t.Logf("入场 60ms 时位移走了 %.0f%%、淡入走了 %.0f%%", moved*100, faded*100)
+	if faded >= moved-0.2 {
+		t.Errorf("入场 60ms 时位移走了 %.0f%%、淡入走了 %.0f%%——"+
+			"两条线是同步的，不是「错开」", moved*100, faded*100)
+	}
+}
+
 // TestTheToastEnterHonoursReduceMotion 「减少动态效果」时提示一次到位。
 //
 // DESIGN.md 的「减少动态效果」那一节：所有自己写的过渡都要听系统偏好，为真
