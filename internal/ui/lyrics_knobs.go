@@ -1,6 +1,21 @@
 // 右下角浮着的那一列旋钮：歌词偏移、字号，和「找歌词」（上游 `index.tsx:380-398`
 // 那三个图标）。
 //
+// # 两条路各画一份
+//
+// 这一列现在画在**两处**：
+//
+//	主窗口「正在播放」那一页   `lyrics.go` 的 `viewLyrics`
+//	满屏播放器那一屏           `fullplayer_lyrics.go` 的 `viewFullLyrics`
+//
+// 上游是同一份组件挂两处（`components/full-screen-player/index.tsx:361` 把
+// `<Lyrics showControls>` 挂上去），所以满屏那一屏**本来就有**这三枚——
+// 之前我们满屏这一屏一枚都没有（票 #166 / 报告 S-19）。
+//
+// ⚠️ **两处各记各的浮层状态**（`s.lyric` / `s.fullLyric`）和**各用各的键**
+// （`lyricKnobPage` / `lyricKnobFull`）：满屏是浮在主布局上面的一层，底下那一层
+// 照旧建，两处的旋钮会在同一帧里同时存在。
+//
 // # 第三个旋钮（找歌词）是 BMG-66 加进来的
 //
 // 上游那儿的第三个是一个放大镜，按下去开「歌词搜索弹窗」（`index.tsx:389-397`）。
@@ -49,6 +64,15 @@ const (
 	// （0.75rem = 12px）。
 	lyricKnobGap = space.Px12
 
+	// lyricKnobSize 是每一枚旋钮**多高**。
+	//
+	// ⚠️ **32 是上游那一枚圆钮的直径**（上游那三枚是 `rounded-full` 的 ⌀32 圆键，
+	// 报告 S-19 实测）。我们这三枚是**带字的**（钮上写着当前值，见
+	// `viewLyricKnobs` 顶上那一条），所以形状不是圆的——但**高度照上游那个数**：
+	// 那一列于是和上游占一样的地方（顶沿 560、底沿 680、中心间距 44 =
+	// 32 + `space-y-3` 的 12）。
+	lyricKnobSize = 32.0
+
 	// lyricPopoverGap 是浮层和它那个旋钮之间的缝，抄 `offset-control.tsx` /
 	// `font-size-control.tsx` 里的 `offset={8}`。
 	lyricPopoverGap = space.Px8
@@ -76,6 +100,11 @@ const (
 const (
 	lyricFontKnobName   = "歌词字号"
 	lyricOffsetKnobName = "歌词偏移"
+	// lyricKnobColumnName 是**那一列**的名字。
+	//
+	// ⚠️ **它给的是那一列（不是某一枚）**：无头 Tester 要量的是这一列在画面上
+	// 的框——它挂在歌词区右下角，右沿 / 底沿都是上游那两个数（票 #166）。
+	lyricKnobColumnName = "歌词旋钮"
 )
 
 // 浮层里那两行的键，和旋钮分开，免得两个元素抢同一个身份。
@@ -89,7 +118,45 @@ const (
 	lyricKnobColumnKey = "lyrics:knob:column"
 )
 
-// viewLyricKnobColumn 画右下角浮着的那一列旋钮。
+// lyricKnobIDs 是「右下角那一列旋钮」这一族控件的**身份**。
+//
+// # 为什么满屏那一处要自己的一份
+//
+// 满屏播放器是**浮在主布局上面的一层**，底下那一层照旧建——于是「正在播放」
+// 那一页的旋钮和满屏那一屏的旋钮会在**同一帧里同时存在**。键是按**父节点的
+// id**算的（`mygo/ui/context.go` 的 `keyedID`），所以同一个键挂在两个不同的
+// 父节点下面本来也不会撞；但浮层（字号 / 偏移那两条滑块）是在**浮层根**底下
+// 建的，两处各建各的、靠「父节点不同」兜底——那件事太脆了。
+//
+// 所以两处各给一份：主窗口那一页一份，满屏那一屏一份（见 `lyricKnobPage` /
+// `lyricKnobFull`）。
+type lyricKnobIDs struct {
+	// column 是那一列自己的键。
+	column string
+	// font / offset 是两个浮层里那两条滑块的键。
+	font   string
+	offset string
+}
+
+var (
+	// lyricKnobPage 是主窗口「正在播放」那一页那一列旋钮的身份。
+	lyricKnobPage = lyricKnobIDs{
+		column: lyricKnobColumnKey,
+		font:   lyricFontSliderKey,
+		offset: lyricOffsetSliderKey,
+	}
+	// lyricKnobFull 是**满屏播放器**那一屏那一列旋钮的身份。
+	//
+	// ⚠️ **前缀是 `full:`**：满屏那一列是满屏自己的一族控件，和主窗口那一列
+	// 不是同一件事（满屏的旋钮跟着满屏的歌词状态走，见 `s.fullLyric`）。
+	lyricKnobFull = lyricKnobIDs{
+		column: "full:lyrics:knob:column",
+		font:   "full:lyrics:knob:font",
+		offset: "full:lyrics:knob:offset",
+	}
+)
+
+// viewLyricKnobColumn 画右下角浮着的那一列旋钮（主窗口「正在播放」那一页）。
 //
 // ⚠️ 它们是**绝对定位**的兄弟元素，不是 `ui.Overlay`：要贴着的是**歌词区**的
 // 右下角，不是窗口的右下角——迷你播放器那一页底下还压着播放条，按窗口摆的话
@@ -100,54 +167,71 @@ const (
 // 用户点它的时机恰恰是**没有歌词**的时候，而没有歌词时那两个旋钮无处可附
 // （见 lyrics.go 上面那一支）。
 func (s *Shell) viewLyricKnobColumn(c *ui.Context, snap app.LyricsSnapshot, adjustable bool) {
-	ui.Column(c).Key(lyricKnobColumnKey).Absolute().Right(lyricKnobInset).
+	s.viewLyricKnobColumnWith(c, snap, adjustable, &s.lyric, lyricKnobPage)
+}
+
+// viewLyricKnobColumnWith 是那一列旋钮的**通用画法**（两处共用）。
+//
+// lv 是这一列跟着走的那份歌词状态（浮层开着没有记在它里面）：主窗口那一页是
+// `s.lyric`，满屏那一屏是 `s.fullLyric`——两处各记各的，浮层才不会互相抢。
+//
+// ids 是这一列的身份（见 `lyricKnobIDs`）。
+//
+// 返回的是那一列本身：满屏那一屏要给它**自己的字色**（满屏的前景色，见
+// `fullForeground`）——那一列压在糊过的封面上，主题的字色在浅色主题下是黑的。
+func (s *Shell) viewLyricKnobColumnWith(c *ui.Context, snap app.LyricsSnapshot, adjustable bool, lv *lyricsView, ids lyricKnobIDs) ui.Element {
+	col := ui.Column(c).Key(ids.column).Absolute().Right(lyricKnobInset).
 		Bottom(lyricKnobInset).Gap(lyricKnobGap).AlignItems(ui.End).
-		Children(func() {
-			if adjustable {
-				s.viewLyricKnobs(c, snap)
-			}
-			// 上游那一枚是 `isIconOnly` 的圆钮（`components/lyrics/index.tsx:389-397`），
-			// 我们这一枚带着「找歌词」三个字——图标化会把这个动作的唯一说明
-			// 一起拿掉，而它恰恰是**没有歌词时**唯一摆着的那个键。
-			if flatButton(c, lyricSearchKnobLabel).Clicked() {
-				s.openLyricSearch()
-			}
-		})
+		// 名字：这一组是「歌词旋钮」，读屏软件念得出；无头 Tester 也靠它量这一列
+		// 在画面上的框（票 #166 要钉住它在歌词区右下角）。
+		Label(lyricKnobColumnName)
+	col.Children(func() {
+		if adjustable {
+			s.viewLyricKnobs(c, snap, lv, ids)
+		}
+		// 上游那一枚是 `isIconOnly` 的圆钮（`components/lyrics/index.tsx:389-397`），
+		// 我们这一枚带着「找歌词」三个字——图标化会把这个动作的唯一说明
+		// 一起拿掉，而它恰恰是**没有歌词时**唯一摆着的那个键。
+		if flatButton(c, lyricSearchKnobLabel).Height(lyricKnobSize).Clicked() {
+			s.openLyricSearch()
+		}
+	})
+	return col
 }
 
 // viewLyricKnobs 画右下角浮着的字号与偏移两个旋钮。
-func (s *Shell) viewLyricKnobs(c *ui.Context, snap app.LyricsSnapshot) {
-	lv := &s.lyric
-
+func (s *Shell) viewLyricKnobs(c *ui.Context, snap app.LyricsSnapshot, lv *lyricsView, ids lyricKnobIDs) {
 	// 字号在上面、偏移在下面（`index.tsx:382-388` 的次序）。
 	//
 	// ⚠️ **这一枚上留着数字**（「20px」「+50ms」）：上游那两个圆钮只画一枚图标
 	// （`font-size-control.tsx:39-48`），当前值要打开浮层才看得到；我们把它写在
 	// 钮上，用户不点开就知道现在调到了多少。要改的只是那层描边和常驻底。
-	font := flatButton(c, lyricFontLabel(snap.FontSize)).Label(lyricFontKnobName)
+	font := flatButton(c, lyricFontLabel(snap.FontSize)).Height(lyricKnobSize).
+		Label(lyricFontKnobName)
 	if font.Clicked() {
 		lv.fontOpen = !lv.fontOpen
 	}
-	s.lyricFontPopover(c, font, snap)
+	s.lyricFontPopover(c, font, snap, lv, ids)
 
-	offset := flatButton(c, lyricOffsetLabel(snap.OffsetMS)).Label(lyricOffsetKnobName)
+	offset := flatButton(c, lyricOffsetLabel(snap.OffsetMS)).Height(lyricKnobSize).
+		Label(lyricOffsetKnobName)
 	if offset.Clicked() {
 		lv.offsetOpen = !lv.offsetOpen
 	}
-	s.lyricOffsetPopover(c, offset, snap)
+	s.lyricOffsetPopover(c, offset, snap, lv, ids)
 }
 
 // lyricFontPopover 画字号那个浮层：一条竖滑块加一个当前值。
-func (s *Shell) lyricFontPopover(c *ui.Context, anchor ui.Element, snap app.LyricsSnapshot) {
+func (s *Shell) lyricFontPopover(c *ui.Context, anchor ui.Element, snap app.LyricsSnapshot, lv *lyricsView, ids lyricKnobIDs) {
 	// ⚠️ **这里收的是存下来的那个字号，不是缩放后画出来的那个**：滑块的值、
 	// `SetLyricsFontSize` 写回去的值、底下的标签都是同一个数。混进 TextScale 的话
 	// 一次拖动会把 20 存成 26，下一帧实际画 32.5、拇指跳过去，而标签还写着 26
 	//（评审在 1.25 倍下量到过）。
 	v := float64(app.ClampLyricsFontSize(snap.FontSize))
-	ui.PopoverBase(c, anchor, &s.lyric.fontOpen, func(panel ui.Element) {
+	ui.PopoverBase(c, anchor, &lv.fontOpen, func(panel ui.Element) {
 		lyricPanelStyle(c, panel, anchor)
 		panel.Children(func() {
-			sl := lyricSlider(c, lyricFontSliderKey, &v,
+			sl := lyricSlider(c, ids.font, &v,
 				app.MinLyricsFontSize, app.MaxLyricsFontSize, lyricFontStep,
 				lyricSliderW, lyricFontSliderH)
 			if sl.Changed() {
@@ -161,12 +245,12 @@ func (s *Shell) lyricFontPopover(c *ui.Context, anchor ui.Element, snap app.Lyri
 }
 
 // lyricOffsetPopover 画偏移那个浮层。同上，一个竖滑块加一个当前值。
-func (s *Shell) lyricOffsetPopover(c *ui.Context, anchor ui.Element, snap app.LyricsSnapshot) {
+func (s *Shell) lyricOffsetPopover(c *ui.Context, anchor ui.Element, snap app.LyricsSnapshot, lv *lyricsView, ids lyricKnobIDs) {
 	v := float64(snap.OffsetMS)
-	ui.PopoverBase(c, anchor, &s.lyric.offsetOpen, func(panel ui.Element) {
+	ui.PopoverBase(c, anchor, &lv.offsetOpen, func(panel ui.Element) {
 		lyricPanelStyle(c, panel, anchor)
 		panel.Children(func() {
-			sl := lyricSlider(c, lyricOffsetSliderKey, &v,
+			sl := lyricSlider(c, ids.offset, &v,
 				float64(app.MinLyricsOffsetMS), float64(app.MaxLyricsOffsetMS),
 				float64(app.LyricsOffsetStepMS),
 				lyricSliderW, lyricOffsetSliderH)
