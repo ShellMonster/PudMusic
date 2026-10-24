@@ -191,6 +191,7 @@ func (s *Shell) applyFrameTheme(c *ui.Context) {
 		t = s.theme.hot()
 	}
 	c.SetTheme(t)
+	s.publishCard(t)
 }
 
 // BuildTheme 按设置拼出这一帧要用的主题。

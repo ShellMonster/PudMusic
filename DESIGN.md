@@ -45,6 +45,9 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 - **登录页**内容收在一张居中的卡片里（宽 420、`surface1`、`radiusLg`、1px 描边）；卡片底色和圆角
   走 `Shell.cardBackground` / `Shell.cardRadius`（方案里的 `surface1` / `radiusLg`，经典用控件层和 1.5 倍圆角），
   以后别的卡片、弹层沿用这两个出口。
+- **弹窗面板**（确认框、更新、裁剪封面）统一走 `dialogPanel`：底色 `surface1`、圆角 `radiusLg`、
+  `shadow.Modal`；方案的值由 `applyFrameTheme` 每帧发布（`frameCard`），经典保持原样。
+  删除类确认框一出来按回车**不会**确认。
 - **「赞」仍是 B 站的点赞（拇指）**，没有换成「喜欢」心形。
 
 ---

@@ -14,6 +14,8 @@
 package ui
 
 import (
+	"sync/atomic"
+
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/egoist/mygo/ui"
 )
@@ -145,4 +147,35 @@ func (s *Shell) cardRadius(t *ui.Theme) float32 {
 		return shape.radiusLg
 	}
 	return t.Radius * 1.5
+}
+
+// cardStyle 是这一帧弹窗面板用的底色和圆角。
+type cardStyle struct {
+	bg     ui.Color
+	radius float32
+}
+
+// frameCard 是「这一帧的弹窗面板长什么样」：`applyFrameTheme` 每帧开头发布，
+// 弹窗（`confirmModal` 那类不挂在 Shell 上的自由函数）读。
+//
+// 为什么要发布：`ui.Theme` 里没有「卡片底色」这个字段，而自由函数拿不到 Shell。
+// 同一个进程里所有窗口共用同一份设置，所以这是一份全局值而不是每窗口一份。
+var frameCard atomic.Pointer[cardStyle]
+
+// publishCard 在每帧开头算好弹窗面板的样子并发布。方案里的 `surface1` / `radiusLg`；
+// 经典保持原样（底色 = Background，圆角 = 2.5 个间距单位），一个像素不动。
+func (s *Shell) publishCard(t *ui.Theme) {
+	cs := cardStyle{bg: t.Background, radius: t.Space(2.5)}
+	if sk, shape, ok := presetSkinFor(s.app.SettingsSnapshot().ThemePreset, t.Dark); ok {
+		cs = cardStyle{bg: ui.Hex(sk.surface1), radius: shape.radiusLg}
+	}
+	frameCard.Store(&cs)
+}
+
+// dialogCard 读这一帧发布的弹窗面板样子；还没发布过（测试里直接画一块）就用经典那份。
+func dialogCard(t *ui.Theme) cardStyle {
+	if p := frameCard.Load(); p != nil {
+		return *p
+	}
+	return cardStyle{bg: t.Background, radius: t.Space(2.5)}
 }
