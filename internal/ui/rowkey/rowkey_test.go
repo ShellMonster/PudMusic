@@ -1,6 +1,8 @@
 package rowkey
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -133,6 +135,40 @@ func TestTheFastPathDoesNotAllocate(t *testing.T) {
 		t.Errorf("问一次记着的那一份要分配 %.0f 次，want 0——"+
 			"这一票省的就是这个（每帧每行一次）", allocs)
 	}
+}
+
+// TestANegativeIndexPanicsWithAMessageYouCanRead 盯「负下标不许变成天书」。
+//
+// 契约是「下标必须非负」（见 `Memo.At` 的注释）：负下标没有对应的行，它是
+// **调用方的 bug**，不是「问不到」。
+//
+// ⚠️ **判据是「panic 的话能不能看懂」**，不是「有没有 panic」：不这么写的话，
+// 负下标会变成 `m.rows[-1]` 越界，抛出来的是
+// `runtime error: index out of range [-1]`——那一句只说「越界了」，不说
+// 「哪一处越界」，下一个人得自己顺着调用栈找（本票就是被这个绊住的）。
+//
+// 所以这里断两件事：话里**带上那个下标**，而且**说得出是「非负」**这件事。
+func TestANegativeIndexPanicsWithAMessageYouCanRead(t *testing.T) {
+	var m Memo[string, string]
+
+	defer func() {
+		rec := recover()
+		if rec == nil {
+			t.Fatalf("负下标既没 panic 也没报错——它要么悄悄算错，要么变成天书")
+		}
+		msg := fmt.Sprint(rec)
+		if !strings.Contains(msg, "-1") {
+			t.Errorf("panic 的话里没有那个下标：%q", msg)
+		}
+		if !strings.Contains(msg, "非负") {
+			t.Errorf("panic 的话没说出「下标必须非负」：%q", msg)
+		}
+		if strings.Contains(msg, "index out of range") {
+			t.Errorf("panic 的话是运行时的天书（%q）——那正是这一条要挡的东西", msg)
+		}
+	}()
+
+	m.At(-1, "a", func(s string) string { return "[" + s + "]" })
 }
 
 // TestIdentityBoxesTheStringItself 盯「装箱的那一份和原来那个是同一个意思」。

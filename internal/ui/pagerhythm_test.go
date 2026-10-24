@@ -52,7 +52,7 @@ func contentArea(sideW float64) image.Rectangle {
 
 // pageBackground 是内容区里的底色。
 //
-// ⚠️ **取的是这一块里出现最多的那个颜色**，不是某一个采样点：顶栏下缘有��道
+// ⚠️ **取的是这一块里出现最多的那个颜色**，不是某一个采样点：顶栏下缘有一道
 // 分隔线、侧栏右缘有另一道，而「内容区左上角那一个像素」正好落在其中一道上
 // （第一版就是这么写的，七页一律报 204——那是那道线的位置）。
 //
@@ -62,8 +62,11 @@ func pageBackground(img *image.RGBA, area image.Rectangle) (r, g, b, a uint8) {
 	count := map[uint32]int{}
 	var best uint32
 	bestN := -1
+	// 只数内容区最左边那一窄条（页面的左内边距，各页都是空的）：设置页的分组卡片铺满
+	// 内容宽度、底色和页面不同，整块数的话「最多的颜色」会是卡片底色。
+	left := min(area.Min.X+6, area.Max.X)
 	for y := area.Min.Y; y < area.Max.Y; y++ {
-		for x := area.Min.X; x < area.Max.X; x++ {
+		for x := area.Min.X; x < left; x++ {
 			c := img.RGBAAt(x, y)
 			k := uint32(c.R)<<24 | uint32(c.G)<<16 | uint32(c.B)<<8 | uint32(c.A)
 			count[k]++
@@ -502,6 +505,8 @@ func TestEveryPageTitleIsTheSameSizeOnScreen(t *testing.T) {
 				if !ok {
 					t.Fatalf("%s：内容区顶上一点墨都没有，文字有 %q", page.name, tt.Texts())
 				}
+				// 标题那一行最高也就几十行墨。设置页的分组现在是铺满宽度的卡片（底色和页面不同），
+				// 它们紧跟在标题下面，会把「第一段墨迹」接成一整条——所以只取头 40 行。
 				x0, x1, ok := firstRun(inkColumns(img, area, lo, hi))
 				if !ok {
 					t.Fatalf("%s：标题那一行里没有墨，文字有 %q", page.name, tt.Texts())

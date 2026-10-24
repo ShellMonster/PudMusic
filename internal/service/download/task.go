@@ -329,6 +329,19 @@ type Task struct {
 
 	// AddedAt 是入队时刻（Unix 毫秒），记录页按它排序。
 	AddedAt int64 `json:"addedAt"`
+
+	// noRetry 记这一项失败之后**不该再立刻重试**。
+	//
+	// ⚠️ **它不落盘**（未导出字段不进 JSON）：判据是「**现在**立刻再问一次有
+	// 没有用」，而落盘的是**上一次**失败时的判据——重开应用之后那一项已经被
+	// `Restore` 读成「没有错误原因」了（`store.go` 里 `t.Err = ""`），那时候
+	// 我们根本不知道它当初为什么坏，所以按「可以重试」算（未知 → 可重试，
+	// 那是 `bili.Recoverable` 的兜底口径）。
+	//
+	// ⚠️ **为什么字段名是反过来的**：零值必须是「可以重试」。正着写
+	// （`Retryable`）的话零值是 false，于是从旧队列文件读回来的失败记录会
+	// **集体丢掉「重试」键**——而升级不该悄悄拿走用户已经在用的东西。
+	noRetry bool
 }
 
 // totalChunks 是主那条流一共几块。
@@ -442,6 +455,15 @@ type Snapshot struct {
 	// 也不许从 `Dest` 的扩展名猜：`.mp4` 现在只来自视频那一路，可那是一条
 	// 巧合而不是约定，而巧合迟早会被人「顺手统一」掉。
 	Video bool
+	// CanRetry 报这一项**再试一次有没有用**。
+	//
+	// ⚠️ **只有出错那一格才有意义**：别的状态上这一位恒为「真」（见
+	// `Task.noRetry` 的零值），而界面上只有出错那一行会摆「重试」那一枚键。
+	//
+	// 🔴 **它和播放条上那枚「重试」是同一个判据**（票 #346）：两处都是
+	// 「再问一次 B 站」，所以一个错在两处的答案必须一样——各判各的的话，同一个
+	// 错会在播放条上给「重试」、在记录页上不给。
+	CanRetry bool
 	// Percent 是 0~100 的整数进度。总长还不知道时是 -1，界面据此显示
 	// 「准备中」而不是一个假的 0%。
 	Percent int
@@ -453,6 +475,9 @@ func SnapshotOf(t *Task) Snapshot {
 		ID: t.ID, Title: t.Title, Cover: t.Cover, Label: t.Label,
 		Dest: t.Dest, Status: t.Status, Err: t.Err, AddedAt: t.AddedAt,
 		Video: t.Video, Total: t.Total(), Percent: -1,
+		// ⚠️ 零值是「可以重试」，所以这里取反（`Task.noRetry` 的注释里写了
+		// 为什么字段名是反过来的）。
+		CanRetry: !t.noRetry,
 	}
 	s.Done = t.Done()
 	if s.Total > 0 {
@@ -472,7 +497,7 @@ func SnapshotOf(t *Task) Snapshot {
 // **音质不在键里**：入队的那一刻还不知道 B 站会给哪一档（要问一次网络，
 // 而入队是在界面线程上调的）。音质在续传那一步会单独比（`Identity`），
 // 对不上就重下——那才是真正要拦住「两段不同字节拼在一起」的地方。
-// TaskID 是队列里一项的身份（也���落盘队列文件当键用）。
+// TaskID 是队列里一项的身份（也是落盘队列文件当键用）。
 //
 // 🔴 **音频和视频是两项**：同一首歌的音频（.m4a/.flac）和视频（交织出来的 .mp4）
 // 是两个文件、两次下载，判重不能只看 `bvid|cid`。少了这一位的后果是「先点下载音频、

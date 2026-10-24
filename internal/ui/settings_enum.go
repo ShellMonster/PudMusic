@@ -51,7 +51,7 @@ func enumSelect[T comparable](c *ui.Context, value *T, items []enumItem[T], labe
 
 	sel := ui.SelectBase(c, value)
 	trigger := sel.Trigger.Width(width).MinWidth(minW).Radius(t.Radius).
-		Background(t.Surface).Border(1, t.Border).Padding(space.None, space.Px8).Disabled(ro).
+		Background(t.Surface).Border(1, t.Border).Padding(space.None, space.Px10).Height(settingsSelectH).AlignItems(ui.Center).Disabled(ro).
 		Label(label)
 	trigger.Children(func() {
 		ui.Text(c, labelOf(*value)).SingleLine().Grow(1)
@@ -89,3 +89,6 @@ func chevronIcon() *ui.SVG {
 		`fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" ` +
 		`stroke-linejoin="round">` + shape + `</svg>`))
 }
+
+// settingsSelectH 是设置页下拉收起时的高度（设计规范 §7.9：控件 32 高）。
+const settingsSelectH = 32

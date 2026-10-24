@@ -578,7 +578,7 @@ func TestTheTestSuiteDoesNotGrowASecondWayToDoEitherThing(t *testing.T) {
 		// 现在那四个文件都已经搬进 `package ui` 了，所以这里改成**报错**：再有
 		// 一个 `package ui_test` 的文件进来，那就是绕过收尾保证，当场指出来。
 		if pkgClause(src) == "package ui_test" {
-			t.Errorf("%s 是 package ui_test——它用不了基座，于是成���这个包里唯一不收"+
+			t.Errorf("%s 是 package ui_test——它用不了基座，于是成了这个包里唯一不收"+
 				"尾的地方（%s 起的后台写循环和定时器没人收）。搬进 package ui，"+
 				"造外壳走 newTestShell。", name, pkgClause(src))
 			continue

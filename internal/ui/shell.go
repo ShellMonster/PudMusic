@@ -369,6 +369,13 @@ type Shell struct {
 	// ⚠️ 理由同 `sideRowKeys`（票 #313）。
 	partRowKeys rowkey.Memo[string, any]
 
+	// errDetailOpen 是「错误详情」那块面板开着没有（票 #320，见 playbar_err.go）。
+	// **同样只由 view 在主线程上读写**。
+	//
+	// ⚠️ **它跟着错误一起收**：错没了（下一首放起来了）而它还开着的话，下一句
+	// 错一上来，面板是开着的——用户会看到一块不属于这句错的浮层。
+	errDetailOpen bool
+
 	// 顶栏这一摊。**同样只由 view 在主线程上读写**。
 	//
 	// searchFocused 是搜索框有没有焦点，顶栏用它把输入区的底色抬到 30%
@@ -599,20 +606,6 @@ type Shell struct {
 	// 界面状态是主线程单点写入的（铁律一），后台那一条线只往 upSpace.box
 	// 那个**带锁的信箱**里投，不碰这张表。
 	upSpaces map[int64]*upSpace
-
-	// upHeaderTop 是 UP 空间头图区里「信息那一行的上沿」（算出来的，见
-	// `upspace.go` 的 `upHeaderTextTop`），加上算它时的那几个输入。
-	//
-	// ⚠️ **它是缓存**：那一列的高度要量三次字（`c.MeasureText`），而这一页
-	// 每帧都画一次。输入（字号 / 名字 / 认证 / 签名）变了才重算。
-	//
-	// **只由 view 读写**（view 永远跑在主线程上），所以没有锁。
-	upHeaderTop         float32
-	upHeaderTopScale    float32
-	upHeaderTopName     string
-	upHeaderTopOfficial string
-	upHeaderTopSign     string
-	upHeaderTopValid    bool
 
 	// feedPage 是「用户动态」那一页的状态（见 dynamicfeed.go）。只有一个，
 	// 因为这一页没有参数。
@@ -1156,6 +1149,22 @@ func Run(a *app.App, sess *media.Session) error {
 	// 菜单、退出、第二个实例、deep link 全在这里装。必须在 Run 之前，
 	// 否则启动命令行里的 biu:// 会在回调装好之前就被交付掉。
 	s.installLifecycle()
+
+	// 「上次听到哪儿」恢复：队列、当前项和播放位置都从上次退出时的那份恢复，
+	// 恢复出来是**暂停**的（启动时不该突然出声——上游 Biu 和 Dopamine 都这样）。
+	//
+	// ⚠️ **排在 `New(a)` 之后**：播报句柄是 `New` 装的（见它那儿的
+	// `AddAnnounce`），排在它前面的话，那句「已恢复上次的位置」送不出去——
+	// 恢复是启动时唯一会用它的地方。
+	//
+	// ⚠️ **排在开窗口之前**：恢复完的第一帧就该是恢复后的样子（歌名和进度条
+	// 都在那儿），而不是先画一帧空的再换掉。读盘 / 开解码器是阻塞 IO，排在
+	// 建窗口之前也是为了这个（理由同上面那句 `mountSearchHistory`）。
+	//
+	// 失败不挡启动：恢复不出来就照常开一个空队列的应用。
+	if err := a.RestorePlayback(); err != nil {
+		log.Printf("biu: 恢复上次播放的状态失败：%v", err)
+	}
 
 	mygo.App.WhenReady(func() {
 		// scheme 在这里登记而不是 Run 之前：登记要走系统 API，事件循环起来

@@ -128,7 +128,7 @@ var routes = []Route{
 	}},
 	{Match: historyPath, Title: "历史记录", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Icon: iconMenuHistory, ActiveIcon: iconMenuHistoryOn, Empty: emptyState{
 		Title: "暂无历史记录",
-		Hint:  "登录之后听过的歌会出现在这里，也可以「清空历史记录」",
+		Hint:  "登录之后听过的歌会出现在这里",
 		Icon:  iconEmptyHistory,
 	}},
 	// 上游：`pages/local-music/index.tsx:263`。

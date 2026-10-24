@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/ShellMonster/Biu_Go/internal/app"
 )
 
 // 这一份是 `internal/ui` 的**磁盘护栏**：跑之前先看一眼临时目录所在的文件系统
@@ -71,6 +73,8 @@ func TestMain(m *testing.M) {
 	if !run {
 		os.Exit(1)
 	}
+	// 本包的老用例量的是经典外观（见 `app.DefaultThemePreset` 的说明）。
+	app.DefaultThemePreset = app.ThemePresetClassic
 	os.Exit(m.Run())
 }
 

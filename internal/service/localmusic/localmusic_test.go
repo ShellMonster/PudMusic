@@ -20,7 +20,7 @@ import (
 //
 // 这是任务里点名的一条，也是 Biu 上游的行为（`local-music.ts:20` 的
 // `if (entry.isDirectory()) continue`）。少这一条的症状很隐蔽：音乐目录里
-// 有个 `专辑/` 子目录（很多��的收藏都是这么放的），然后扫几千个文件扫半天，
+// 有个 `专辑/` 子目录（很多人的收藏都是这么放的），然后扫几千个文件扫半天，
 // 界面上还多出几百行用户没说要的。
 func TestScanOnlyReadsOneLevel(t *testing.T) {
 	root := t.TempDir()
@@ -466,7 +466,7 @@ func TestMissingRootIsReportedButTheOthersStillScan(t *testing.T) {
 // TestIdentityIsStableAcrossRescans 钉住身份那条真正要的东西。
 //
 // 文件监听每有一个变动就重扫一遍（见 app 层的 LocalMusic），所以身份必须
-// **在重扫之间不变**。变了的话用户选中��那一行每次刷新都跳走——而症状是
+// **在重扫之间不变**。变了的话用户选中的那一行每次刷新都跳走——而症状是
 // 「有时候点一下会选到别的歌」，极难查。
 //
 // 拿掉修复的方式：身份里掺一个每次都不同的东西（扫描序号、时间戳）。

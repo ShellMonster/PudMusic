@@ -186,6 +186,16 @@ func TestEveryEpisodeRowCarriesItsNumber(t *testing.T) {
 //
 // ⚠️ **深浅两套都量**：淡底在深色下是 #193e29，压在 #18181b 上只差十几个通道，
 // 只量浅色的话深色下那一层根本看不出来。
+//
+// ⚠️ **判据有「两半」，少一半等于没断**：
+//
+//   - **正在放的那一行要的是那一层淡主色底**；
+//   - **没在放的那一行不许是实心主色底**——把兄弟行也刷成实心主色底的话，
+//     「哪一集在放」就说不清了，而只断前一半的话那一条照样绿。
+//
+// 改之前那一版（票 #323 之前）断的是**两半都有**：它逐行量「框里主色像素占
+// 多少」，没在放的那些行有上限。换成淡底之后判据换了，可**后一半不能跟着
+// 一起丢**——它就是从那一版搬过来的。
 func TestTheDrawerMarksTheEpisodeThatIsPlaying(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -227,6 +237,16 @@ func TestTheDrawerMarksTheEpisodeThatIsPlaying(t *testing.T) {
 			if nearRGBA(got, sibBg, 3) {
 				t.Errorf("%s：正在放那一行和旁边那一行是同一个底色 %v——"+
 					"「哪一集在放」就看不出来了", name, got)
+			}
+			// ⚠️ **后一半**：没在放的那一行**不许**是实心主色底。
+			//
+			// 这一条是从改之前那一版搬过来的（那一版逐行量「框里主色像素占多少」，
+			// 没在放的那些行有上限）。少了它，把兄弟行也刷成实心主色底这一条照样
+			// 绿——而那时两行长得一样，「哪一集在放」已经说不清了。
+			if nearRGBA(sibBg, rgbaOf(theme.Accent), 2) {
+				t.Errorf("%s：没在放的那一行是**实心主色底** %v——"+
+					"「哪一集在放」就说不清了（上游是 bg-primary/20 的那一层淡底）",
+					name, sibBg)
 			}
 		})
 	}

@@ -89,7 +89,7 @@ func TestTheSelectedOptionLooksTheSameEverywhere(t *testing.T) {
 			// `Scroll`，这一项在第一屏之外，而 `tt.Find` 找到的东西**可能在
 			// 屏幕外**——那样量出来的是空的（第一版就这么写，量到 0 个像素）。
 			//
-			// ⚠️ **每一段都自己造一个外壳**：滚���是**往下**滚的，而「音质偏好」
+			// ⚠️ **每一段都自己造一个外壳**：滚动是**往下**滚的，而「音质偏好」
 			// 那个下拉在「隐藏到托盘」**上面**——同一个外壳里滚不过去。
 			t.Run("窗口关闭那两档", func(t *testing.T) {
 				tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))

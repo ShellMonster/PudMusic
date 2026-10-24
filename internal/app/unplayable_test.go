@@ -125,8 +125,9 @@ func TestANetworkFailureIsOfferedARetryThatActuallyWorks(t *testing.T) {
 // 退避），所以按下去就是**再撞一次风控**。用户按一次撞一次，按第二次
 // 再撞，于是他不再信这枚键了。
 //
-// ⚠️ **限流（-509）是另一回事**：它是「等一会儿就好」，所以仍然是可重试的
-// （`bili.Recoverable` 那张表上分开判，这里不重复验）。
+// ⚠️ **限流（-509）也是同一档**（票 #346）：它同样要等时间才成，所以同样
+// 不给那枚「立刻重试」的键（判据在 `bili.Recoverable` 那张表上，那里分开
+// 判，这里不重复验）。
 func TestARiskControlFailureIsNotOfferedARetryThatWouldHitTheWallAgain(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)

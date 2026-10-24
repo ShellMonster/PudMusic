@@ -216,7 +216,7 @@ func RowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 	//
 	// `Clip()` 不能省：封面是圆角的，压暗那一层不裁就会在四个角上盖出方的黑边。
 	ui.Box(c).Size(size, size).Radius(t.Radius).Clip().Children(func() {
-		imgcache.View(c, cache, url, size, size)
+		imgcache.ViewTitled(c, cache, url, title, size, size)
 
 		// ⚠️ **压暗和三角是这一层的两个兄弟，不是一个套一个**：`Attach` 贴在**直接
 		// 那个父**的盒子上，而套一层时内层贴到的是**外层自己那个盒子**——而外层刚
@@ -306,7 +306,7 @@ func cardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 		cover = shadow.TailwindMD(cover)
 	}
 	cover.Children(func() {
-		imgcache.View(c, cache, url, w, h)
+		imgcache.ViewTitled(c, cache, url, label, w, h)
 		cardOverlay(c, w, h, on, playCount, clock, label, tip, play)
 	})
 }
