@@ -69,7 +69,7 @@ func TestClickingTheStarLikesTheSong(t *testing.T) {
 //	歌名那一行被挤成竖条  左边那一块只有 `Grow(1)`，歌名和第二行吃的是**同一块**
 //	                    宽度。而**挤没了之后界面上看不出坏了**——字还在那儿，只是
 //	                    一个字一行（`playbar_meta_test.go` 的注释里有完整的事故）
-//	键跑出窗口          三个键都是写死的宽度，最后一个跑出去会被 88 高的播放条裁掉
+//	键跑出窗口          三个键都是写死的宽度，最后一个跑出去会被 76 高的播放条裁掉
 //
 // 宽度取 760（比窗口下限 900 还窄）到 1200。UP 名给的是最长的那个（见 `likeItem`）。
 func TestTheLikeRowFitsInThePlaybar(t *testing.T) {

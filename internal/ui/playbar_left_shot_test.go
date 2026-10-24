@@ -28,7 +28,7 @@ import (
 // ⚠️ **用的是多 P 那一份**：分集那一枚只在多 P 时摆（`viewPartButton`），而
 // 「三枚横排」这句话要三枚都在才看得出「横排」。
 //
-// ⚠️ **只存播放条那 88 高**：整窗的截图在 `chrome_shot_test.go` 的 01-整窗-
+// ⚠️ **只存播放条那 76 高**：整窗的截图在 `chrome_shot_test.go` 的 01-整窗-
 // 那一族里已经有了，这一族看的是播放条**自己**。
 func TestRenderPlayBarLeftShots(t *testing.T) {
 	dir := os.Getenv("BIU_SHOT_DIR")

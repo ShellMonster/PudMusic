@@ -243,7 +243,7 @@ func TestTheKeepPagesOrderSwitchOnlyShowsUpWhileShuffling(t *testing.T) {
 // TestThePlayModeButtonDoesNotSquashTheTitle 盯这个按钮没有把歌名挤没。
 //
 // 这一条是这一票里唯一一条「新控件把老控件挤坏」的防线。挤坏了之后**界面看不出
-// 坏了**：字还在那儿，只是一个字一行、或者被 88 高的播放条裁掉半个。
+// 坏了**：字还在那儿，只是一个字一行、或者被 76 高的播放条裁掉半个。
 //
 // 它把 760 也算进来——比窗口下限（`WindowOptions` 里的 `MinWidth: 900`）还窄。
 // 那一档是这个播放条最紧的状态。⚠️ **这里曾经写着右边那一行只有「音量 120 +

@@ -13,10 +13,11 @@
 //     → `parseDynamic` 返回 ok=false，调用方跳过它，页面上什么都不说。
 //   - 只有**整个 data 段读不懂**（协议真的变了）才算错，往上抛。
 //
-// 丢掉的条数记在 `DynamicPage.Dropped` 里：它不是为了给用户看的，是为了
-// 「界面上一个格子都没有」这件事能说清是「他真的没发」还是「我们把他的
-// 转发全丢了」。上游在 `dynamic-feed` 那一页**没有**按类型过滤（它整页都
-// 按视频画），本项目在 UP 空间里过滤了 `DYNAMIC_TYPE_AV`
+// 丢掉的那一条**带着理由**（`Drops` 里的 `DroppedDynamic`）：「界面上一个格子
+// 都没有」这件事要能说清是「他真的没发」还是「我们把他发的那些全丢了」——而
+// 「全丢了」还有好几种丢法，界面上**每一类各说一句**（见下面那一节）。
+// 上游在 `dynamic-feed` 那一页**没有**按类型过滤（它整页都按视频画），本项目
+// 在 UP 空间里过滤了 `DYNAMIC_TYPE_AV`
 // （`user-profile/dynamic-list/index.tsx:48`）——那是另一套取舍：那一页要的是
 // 「这个人发的视频」，这里要的是「这一条画得出来」。
 //
@@ -193,9 +194,25 @@ const (
 	DropUnreadable
 	// DropNoIdentity 是「没有身份」：`id_str` 是空的，画出来也点不开。
 	DropNoIdentity
-	// DropEmpty 是「这一条什么也没有」：既没有正文也没有图；投稿动态没有
-	// 稿件号。
+	// DropEmpty 是「这一条什么也没有」：既没有正文也没有图。
+	//
+	// ⚠️ **它只管「真的什么也没有」那几条**：正文有的那些**不算**在这儿
+	// （投稿动态没有稿件号是**另一类**，见 `DropNoArchive`）——说成「什么也没有」
+	// 就是**对用户说错话**：那一条明明带着正文。
+	//
+	// ⚠️ **投稿动态也要看正文**：稿件号和正文**都是空的**时，它算这一档
+	// （见 `parseDynamic` 的投稿分支）。
 	DropEmpty
+	// DropNoArchive 是「投稿动态没有稿件号」：**正文有，稿件号没有**。
+	//
+	// ⚠️ **它和「什么也没有」是两回事**（票 #344 的评审）：这一条**带着正文**
+	// （UP 写的那段话就在 `desc.text` 里），只是 `major.archive.bvid` 是空的
+	// ——放不出来。混进「什么也没有」里的话，界面上那句话对用户是错的。
+	//
+	// ⚠️ **正文也是空的那几条不算这一档**——它们是「什么也没有」
+	// （见 `DropEmpty`）：这一类的名字里带着「投稿」，而界面上那句话说的是
+	// 「他发了东西，只是放不出来」。
+	DropNoArchive
 )
 
 // String 是给日志看的名字。界面上显示的话另有各处自己的文案。
@@ -209,6 +226,8 @@ func (r DropReason) String() string {
 		return "没有身份"
 	case DropEmpty:
 		return "什么也没有"
+	case DropNoArchive:
+		return "投稿没有稿件号"
 	}
 	return fmt.Sprintf("未知的丢弃理由 %d", uint8(r))
 }
@@ -240,9 +259,21 @@ type DropCounts struct {
 	NoIdentity int
 	// Empty 是「这一条什么也没有」的那些。
 	Empty int
+	// NoArchive 是「投稿动态没有稿件号」的那些（正文有，稿件号没有）。
+	NoArchive int
+	// Other 是**还不认识的类别**的那些。
+	//
+	// ⚠️ **它是为了让「加了一类而忘了加一档」不变成静默的**：将来加了第五类
+	// 丢弃理由而 `Add` 忘了跟上，那一条**不许凭空消失**——它落进这里，
+	// 界面上和日志里都看得见（而 `Add` 原来那个没有 `default` 的 switch
+	// 会把它**静默少一档**：总数少了、界面上那句话少了，没有任何报错）。
+	Other int
 }
 
 // Add 记一条丢掉的东西。
+//
+// ⚠️ **default 那一档不是「忽略」**：它把还不认识的那一类记进 `Other`——
+// 宁可界面上多一句「还不认识的类别」，也不要**静默少一档**（见 `Other`）。
 func (c *DropCounts) Add(r DropReason) {
 	switch r {
 	case DropShapeUnknown:
@@ -253,12 +284,16 @@ func (c *DropCounts) Add(r DropReason) {
 		c.NoIdentity++
 	case DropEmpty:
 		c.Empty++
+	case DropNoArchive:
+		c.NoArchive++
+	default:
+		c.Other++
 	}
 }
 
 // Total 是丢掉的总条数。
 func (c DropCounts) Total() int {
-	return c.ShapeUnknown + c.Unreadable + c.NoIdentity + c.Empty
+	return c.ShapeUnknown + c.Unreadable + c.NoIdentity + c.Empty + c.NoArchive + c.Other
 }
 
 // DynamicPage 是一页动态。
@@ -275,15 +310,6 @@ type DynamicPage struct {
 	// 「到底了」，于是后面的有效动态**永远不再加载**（实测：第一页一条转发
 	// + has_more=true，第二页有一条正常的，卡在第一页上不再翻）。
 	Raw int
-	// Dropped 是这一页里有几条我们画不出来、丢掉了（**这一页**的条数）。
-	//
-	// ⚠️ **它不是「一共有多少条不同的动态」**：B 站翻页会重叠，同一条在两页里
-	// 各出现一次——跨页去重是**上层**的事（它知道前面那几页已经数过谁了），
-	// 见 `Drops` 里的 `Key`。
-	//
-	// 它是为了让「这一页一个格子都没有」能说清是「他真的没发」还是「我们把
-	// 他发的那些全丢了」而存在的（用户不需要知道 B 站有多少种动态）。
-	Dropped int
 	// Drops 是这一页丢掉的那几条（带**类别**和**身份**）。
 	//
 	// ⚠️ **类别是给界面用的**（票 #344）：只有一个总数的话，「B 站返回了
@@ -470,7 +496,9 @@ func dynamicPageFrom(raw []byte) (DynamicPage, error) {
 	for _, item := range env.Items {
 		d, drop, ok := parseDynamic(item)
 		if !ok {
-			pg.Dropped++
+			// ⚠️ **这里不再记「这一页丢了几个」**：那个数是**死的**——没有人读它
+			// （上层按 `Drops` 里的 `Key` 跨页去重、按 `DropCounts` 分类说话）。
+			// 留着它就是「一个注释说它有用、其实没人读」的字段（票 #344 的评审）。
 			pg.Drops = append(pg.Drops, drop)
 			pg.noteDrop(drop.Why)
 			continue
@@ -672,8 +700,30 @@ func parseDynamic(raw json.RawMessage) (Dynamic, DroppedDynamic, bool) {
 	if string(r.Type) == dynamicTypeAv {
 		a := major.Archive
 		if a == nil || a.Bvid == "" {
+			// 🔴 **有没有正文，决定它是哪一类**（票 #344 的评审）：
+			//
+			//	正文**也是空的**	→ 它**什么也没有**（`DropEmpty`）：那一档说的是
+			//			「他什么都没发」；
+			//	正文**有**	→ 它是「投稿没有稿件号」（`DropNoArchive`）：他发了
+			//			东西，只是我们放不出来。
+			//
+			// ⚠️ **正文的口径和画得出来的那一支是同一个**：`desc.text`，空了
+			// 再退到视频的简介（`archive.desc`）——见下面 `d.Text` 那两句。
+			// 不看正文就说「带着正文」的话，一条**什么也没有**的投稿动态也会被
+			// 说成「是投稿却放不出来」（票 #344 的评审查出来的）。
+			text := d.Text
+			if text == "" && a != nil {
+				text = strings.TrimSpace(a.Desc.String())
+			}
+			if text == "" {
+				return Dynamic{}, DroppedDynamic{
+					Reason: DropEmpty,
+					Key:    dropKeyOf(&r, raw),
+					Why:    "投稿动态既没有稿件号也没有正文",
+				}, false
+			}
 			return Dynamic{}, DroppedDynamic{
-				Reason: DropEmpty,
+				Reason: DropNoArchive,
 				Key:    dropKeyOf(&r, raw),
 				Why:    "投稿动态没有稿件号（bvid 是空的）",
 			}, false
