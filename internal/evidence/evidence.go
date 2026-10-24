@@ -460,6 +460,25 @@ var Items = []Item{
 			"TestACorruptFileNeverLooksLikeItFinished",
 		},
 	},
+	{
+		Category: PCM,
+		// 上一条的另一面：**完整的**短文件不是「截断的输入」，不许报错。
+		//
+		// macOS 上 AudioToolbox 探容器时第一次就要 8192 字节，而整个文件
+		// 不足 8192——字节源读到的是「没凑齐就到了头」，那不是失败，是
+		// 「流到头了」。以前把它当成了硬错误，于是**总长不足 8192 字节**
+		// 的文件（秒开片段、缓存碎片、测试素材）一个样本都解不出来，
+		// 界面上是「这歌放不出来」（#312）。
+		//
+		// 这条证据是 macOS 专属的（`extaf` 只在 macOS 上存在）。
+		Spec: "总长不足 8192 字节的**完整**文件也能解出来：样本数与时长都对、样本值对得上、读到头是干净的 EOF（末尾短读不算错）",
+		Tests: []string{
+			"TestAShortFileStillDecodes",
+			"TestAShortFileKeepsItsSamples",
+			"TestAShortFileEndsAtEOF",
+			"TestAShortCompressedFileStillDecodes",
+		},
+	},
 
 	// ── 分页与路由 ─────────────────────────────────────────────────────────
 	{
