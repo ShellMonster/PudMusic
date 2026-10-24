@@ -40,19 +40,22 @@ const (
 // ⚠️ 和 `newSpaceShell` 同一个形状：`MountLogin` 建**那一个**客户端，然后把它
 // 递给 `MountRecommend`。建第二个客户端的话登录态、WBI 密钥、请求头都不是同一
 // 份，而症状是「首页一直 -101」——那句话读起来像是「你没权限看推荐」。
-func newHomeShell(t *testing.T, b *uiExplore) (*Shell, *mygoui.Tester, *app.App) {
+func newHomeShell(t *testing.T, b *uiExplore, opts ...shellOpt) (*Shell, *mygoui.Tester, *app.App) {
 	t.Helper()
 	// ⚠️ 和 `newSpaceShell` 同一个形状，所以也走同一个基座：Mount* 都要在建外壳
 	// **之前**挂上，而收尾（四个定时器、封面缓存、应用、设置/历史/快捷键的落盘）
 	// 由 `newTestShell` 无条件挂上。少挂一次就是一组挂到测试二进制结束的 goroutine。
-	sh := newTestShell(t, at(homeW, homeH), mounted(func(_ *testing.T, a *app.App) {
+	//
+	// ⚠️ **opts 排在最后**：出图的那几组要换深浅（`systemIsDark`），而换主题
+	// 预设要挂一份带方案名的设置（`withSettings`）——那两样都是基座的活。
+	sh := newTestShell(t, append([]shellOpt{at(homeW, homeH), mounted(func(_ *testing.T, a *app.App) {
 		transport := &app.CredentialTransport{Base: b.Server.Client().Transport, Policy: app.DefaultInjectPolicy()}
 		cli := bili.NewClient(bili.Options{Transport: transport})
 		cli.TestOnlyPointHostsAtFixture(b.URL)
 		a.MountLogin(app.NewMemoryStore("home-test"), cli)
 		a.MountRecommend(cli)
 		a.MountStreaming(app.Streaming{Client: cli, Media: b.Server.Client()})
-	}))
+	})}, opts...)...)
 	return sh.s, sh.tt, sh.a
 }
 

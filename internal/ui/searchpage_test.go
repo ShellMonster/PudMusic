@@ -142,7 +142,13 @@ func (st *searchStub) rows(tab, page int) []list.Music {
 	}
 	hits := make([]bili.VideoHit, n)
 	for i := range hits {
-		hits[i] = bili.VideoHit{Bvid: stubBvid(page, i), Title: stubTitle(page, i), Owner: "某UP"}
+		// ⚠ **编号要给上**：B 站真的给了（`search.go` 的 `mid`），而界面上「点 UP 名
+		// 进他的空间」靠的就是它（票 #360）。这一份夹具原来没给，于是搜索页上
+		// 那一列 UP 名是点不动的——而真实返回里它点得动。
+		hits[i] = bili.VideoHit{
+			Bvid: stubBvid(page, i), Title: stubTitle(page, i), Owner: "某UP",
+			Mid: stubMid(page, i),
+		}
 	}
 	if st.overlap && page > 1 {
 		// 第 2 页的头一行重复上一页的最后一行。

@@ -398,7 +398,7 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 		rows.keys.On() && list.Focused(c, &rows.state))
 
 	return row.Children(func() {
-		viewLibraryRowHead(c, r, m, s.images, mt, face, onRow,
+		viewLibraryRowHead(c, r, m, rows, s.images, mt, face, onRow,
 			func() { rows.playFrom(r.Index) })
 
 		// ⚠️ **播放量是记好的那一份**（`rows.countText`）：现算的话每帧每行一次
@@ -497,8 +497,12 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 				TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
 			ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 				if m.Owner != "" {
-					ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Owner).
-						TextColor(metaColor).MaxLines(1).Ellipsis("…")
+					// ⚠ **点它进他的空间**（票 #360）：和列表里那一枚是同一件事
+					// （`list.OwnerName`）——有编号时可点，没有时照旧是普通字。
+					list.OwnerName(c, m.Owner, m.Owner,
+						rows.ownerTip.At(i, m.Owner, list.OwnerTipText),
+						m.Item.ArtistMid, scale.Font(c, scale.Size14), leading.Owner,
+						metaColor, rows.acts).Grow(1)
 				}
 				// 「正在放」占时长那一格：两样都画必然把时长挤成「0:」，而用户读的
 				// 是「正在放」（理由见 `widgets/list/grid.go` 那一处）。
