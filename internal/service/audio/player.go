@@ -15,6 +15,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/audio/extaf"
@@ -54,7 +55,19 @@ type Player struct {
 	// speed 永远是 1，变速全在这一层里做。
 	vs   *varispeed
 	play *mygoaudio.Player
-	vol  float64
+
+	// gainMu 护着下面这一摊：目标音量、当前生效的增益、正在跑的那一趟斜坡。
+	//
+	// ⚠️ **它不是 dec / tap / play 那几把锁**：调音量的地方在界面线程，而斜坡
+	// 那一趟是后台 goroutine（见 fade.go）。
+	gainMu sync.Mutex
+	// vol 是**目标**音量（用户设的那一档）。
+	vol float64
+	// gain 是**当前生效**的增益。渐变的时候它从当前值往上（往下）走，走到位
+	// 之后才等于 vol。
+	gain float64
+	// fadeStop 停掉正在跑的那一趟斜坡（nil = 没有在跑）。
+	fadeStop chan struct{}
 
 	// closers 是这个播放器**自己**占着的资源，目前只有在线字节源。
 	//
@@ -102,7 +115,7 @@ func New(d mygoaudio.Decoder) *Player {
 	ed := &errorDecoder{Decoder: d}
 	tp := newTap(ed)
 	vs := newVarispeed(tp)
-	return &Player{dec: ed, tap: tp, vs: vs, play: mygoaudio.NewPlayer(vs), vol: 1}
+	return &Player{dec: ed, tap: tp, vs: vs, play: mygoaudio.NewPlayer(vs), vol: 1, gain: 1}
 }
 
 // CloserReadSeeker 是「既是字节来源、又必须被一起关掉」的那一类东西。
@@ -301,7 +314,23 @@ func (c *closingDecoder) Close() error {
 }
 
 // Play 从当前位置继续播；已经播到头的从头再来。
-func (p *Player) Play() { p.play.Play() }
+//
+// ⚠️ **开始放的那一下是淡入的**（见 fade.go）：增益从 0 平滑地走到目标音量，
+// 不是一上来就全速。
+//
+// ⚠️ **已经在放的时候不淡**：拖进度条松手那一下也会调 Play（`App.ScrubEnd`），
+// 那时候淡一下是「拖一下声音就没了」。
+func (p *Player) Play() {
+	if p.play.Playing() {
+		p.play.Play()
+		return
+	}
+	// ⚠️ **先把增益按到 0，再让播放器开口**：MyGo 的播放器一开口就是第一帧，
+	// 那一帧必须是静的——否则「一上来就全速」照旧（斜坡是之后才走的）。
+	p.setGain(0)
+	p.startRamp(p.Volume(), rampDuration)
+	p.play.Play()
+}
 
 // Pause 暂停在原地。
 func (p *Player) Pause() { p.play.Pause() }
@@ -338,17 +367,34 @@ func framesToTime(frames int64, rate int) time.Duration {
 // Duration 返回这首歌有多长；文件没写时长时是 0。
 func (p *Player) Duration() time.Duration { return p.play.Duration() }
 
-// SetVolume 设音量增益，1 是解码出来的原样，0 静音。改动会自己淡入淡出，不咔哒。
+// SetVolume 设音量增益，1 是解码出来的原样，0 静音。
+//
+// ⚠️ **它不立刻生效**：增益从当前值**渐变**到新值（150ms，见 fade.go）——拖滑块
+// 拖到最后那一下是「炸」着出来的，而渐变就没有那一下（报告 §3.3 的 C2）。
+//
+// ⚠️ **没有在放的时候是立刻的**：那一段没有声音，而「开始放」那一下是淡入
+// （见 Play），在这儿慢慢爬等于白爬。
+//
+// ⚠️ **它会顶掉正在跑的那一趟斜坡**：用户连着动音量的时候，两趟斜坡同时写增益
+// 的话，听感上是「音量自己往回爬」。
 func (p *Player) SetVolume(v float64) *Player {
+	p.gainMu.Lock()
 	p.vol = v
-	// 频谱挂点也拿一份：它挂在解码器上，看不见播放器这一层的音量（见 tap.go）。
-	p.tap.SetVolume(float32(v))
-	p.play.SetVolume(v)
+	p.gainMu.Unlock()
+	if !p.play.Playing() {
+		p.setGain(v)
+		return p
+	}
+	p.startRamp(v, rampDuration)
 	return p
 }
 
-// Volume 返回音量增益。
-func (p *Player) Volume() float64 { return p.vol }
+// Volume 返回音量增益（目标值，不是渐变途中那一瞬间的值）。
+func (p *Player) Volume() float64 {
+	p.gainMu.Lock()
+	defer p.gainMu.Unlock()
+	return p.vol
+}
 
 // SetRate 设播放倍率，夹在 [MinRate, MaxRate]（0.5~2.0）。1 是原速。
 //
@@ -367,6 +413,8 @@ func (p *Player) Rate() float64 { return p.vs.rate() }
 
 // Close 停掉并释放解码器、字节源和文件句柄。可以重复调用。
 func (p *Player) Close() {
+	// 正在跑的那一趟斜坡先停掉：它还在往一个已经关掉的播放器上写增益。
+	p.stopRamp()
 	// 先放字节源，再停 MyGo：反过来的话，MyGo 那边的解码 goroutine 还会
 	// 阻塞在 Read 上，而它退出与否取决于字节源。
 	for i := len(p.closers) - 1; i >= 0; i-- {

@@ -8,7 +8,7 @@ package ui
 // 加起来有一二十个字——写在那里必然被截掉一半，而截掉的那一半恰恰是
 // **用户下一步要做的事**。所以：
 //
-//	能重试	「重试」——网络断了、风控拦了、地址过期了，再试一次就有可能好
+//	能重试	「重试」——网络断了、地址过期了，再试一次就有可能好
 //	不能重试但有 B 站地址	「在 B 站打开」——B 站说这一条没有音频流，
 //	                    用户能做的就是去 B 站里听它
 //
@@ -77,4 +77,36 @@ func TestThePlayBarDoesNotOfferARetryThatWouldDoNothing(t *testing.T) {
 		tt.Frame()
 		return showsText(tt, "在 B 站打开")
 	})
+}
+
+// TestThePlayBarDoesNotOfferARetryThatWouldHitTheRiskControlAgain 盯风控
+// 那一类（票 #316）。
+//
+// 🔴 **这一条钉的是「不给」**：假 B 站对取流那一趟回 `{"code":-352}`（风控），
+// 而那枚「重试」是**立刻**再取一次流（`App.Retry` 里没有退避）——所以按下去
+// 就是**再撞一次风控**。用户点一次撞一次，点第二次再撞，于是他不再信这枚键。
+//
+// ⚠️ **限流（-509）不在这一类里**：它是「等一会儿就好」，所以仍然是可重试的
+// （判据在 `bili.Recoverable`，那里分开判）。
+func TestThePlayBarDoesNotOfferARetryThatWouldHitTheRiskControlAgain(t *testing.T) {
+	b := newUIExplore(t)
+	b.on("/x/player/wbi/playurl", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, -352, nil)
+	})
+	s, tt, a := newSpaceShell(t, b, true, "77")
+	defer func() { _ = s.hist.Close() }()
+
+	if err := a.PlayFrom(app.Item{
+		Source: "online", Type: "mv", Bvid: "BV1riskTest", Cid: "1", Title: "这一首",
+	}); err != nil {
+		t.Fatalf("放不进去：%v", err)
+	}
+
+	waitFor(t, "播放条上出现那句话", func() bool {
+		tt.Frame()
+		return showsText(tt, "打不开：被 B 站的风控拦下了，等一会儿再试")
+	})
+	if showsText(tt, "重试") {
+		t.Error("给了一枚按下去只会再撞一次风控的「重试」")
+	}
 }

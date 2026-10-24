@@ -40,17 +40,21 @@ func TestRecoverableTellsWhatIsWorthRetryingAgain(t *testing.T) {
 		{"稿件不存在", &APIError{Code: 10003, Endpoint: "/x"}, false},
 		{"稿件私密", &APIError{Code: 62012, Endpoint: "/x"}, false},
 		{"没有权限", &APIError{Code: -403, Endpoint: "/x"}, false},
+		// 🔴 **风控不可重试**（票 #316）：界面上那枚「重试」是**立刻**再取一次
+		// 流（`App.Retry` 里没有退避），所以判成可重试的话，用户点一次撞
+		// 一次风控。它和文件头 `:44-50` 写的那句是同一件事，两边必须一致。
+		{"风控", ErrRiskControl, false},
+		{"风控的码", &APIError{Code: -352, Endpoint: "/x"}, false},
+		{"被拦的码", &APIError{Code: -412, Endpoint: "/x"}, false},
 
 		// ── 可重试：再问一次，答案可能就变了 ──
 		{"网络没通", ErrNetwork, true},
 		{"超时", errors.New("context deadline exceeded"), true},
-		{"风控", ErrRiskControl, true},
 		{"被限速", ErrTooFrequent, true},
+		{"被限速的码", &APIError{Code: -509, Endpoint: "/x"}, true},
 		{"问不出分 P", ErrNoPart, true},
 		{"地址过期", ErrStreamExpired, true},
 		{"字节源拉不动", audio.ErrStreamDead, true},
-		{"风控的码", &APIError{Code: -352, Endpoint: "/x"}, true},
-		{"被拦的码", &APIError{Code: -412, Endpoint: "/x"}, true},
 	} {
 		if got := Recoverable(c.err); got != c.want {
 			t.Errorf("%s：Recoverable = %v，want %v", c.what, got, c.want)
@@ -58,6 +62,38 @@ func TestRecoverableTellsWhatIsWorthRetryingAgain(t *testing.T) {
 	}
 	if Recoverable(nil) {
 		t.Error("nil 也说成可以重试")
+	}
+}
+
+// TestRiskControlIsNotWorthRetryingAgain 盯「风控不可重试」这一条（票 #316）。
+//
+// 🔴 **为什么这一条要单独钉**：界面上那枚「重试」是**立刻**再问一次 B 站
+// （`App.Retry` 里没有退避），而 B 站的风控要等的是**时间**。所以风控判成
+// 可重试的话，用户点一次撞一次，点第二次再撞——他按两遍发现还是那样，
+// 就不再看这枚键了。
+//
+// ⚠️ **限流（-509）不能跟着一起改成不可重试**：那一个是「等一会儿就好」，
+// 和风控（「等一会儿也好，但**立刻**再问还是撞墙」）不是同一件事。
+func TestRiskControlIsNotWorthRetryingAgain(t *testing.T) {
+	for _, c := range []struct {
+		what string
+		err  error
+	}{
+		{"风控（哨兵）", ErrRiskControl},
+		{"风控包在别的错里", fmt.Errorf("%w: 取流那一趟被挡了", ErrRiskControl)},
+		{"风控的码", &APIError{Code: -352, Endpoint: "/x"}},
+		{"被拦的码", &APIError{Code: -412, Endpoint: "/x"}},
+	} {
+		if Recoverable(c.err) {
+			t.Errorf("%s：判成了可重试——立刻再问一次还是撞同一面墙", c.what)
+		}
+	}
+	// 限流是另一回事：等一会儿就好，不许跟着风控一起被判死。
+	if !Recoverable(ErrTooFrequent) {
+		t.Error("限流被判成不可重试了——它是「等一会儿就好」，不是撞墙")
+	}
+	if !Recoverable(&APIError{Code: -509, Endpoint: "/x"}) {
+		t.Error("限流的码（-509）被判成不可重试了")
 	}
 }
 

@@ -61,10 +61,18 @@ var biuKeys = []string{
 // **收藏夹的顺序弹回 Biu 给的那个顺序**、以及**播放模式回到 Biu 那边记的
 // 那一档**，Biu 自己的设置一个键都没丢。
 // 这条取舍记在这里，想改主意时先看这一段。
+//
+// ⚠️ **音量和静音（`volume` / `isMuted`）也在这一栏里**，理由同上：它们是 Biu
+// 那个 `play-list` store 里的字段（`biu/src/store/play-list.ts:70,369`），
+// **不在 app-settings.json 里**。而我们**必须**落盘它——不落盘的话，用户为了
+// 不吵把音量调到 20%，重启之后又是 100%（耳机上那是真的惊吓）。
+// 键名照 Biu 的字段名逐字抄（`volume` / `isMuted`）。
 var ourOwnKeys = []string{
 	"sideMenuCollectionOrder",
 	"playMode",
 	"shouldKeepPagesOrderInRandomPlayMode",
+	"volume",
+	"isMuted",
 }
 
 // TestSettingsKeysMatchBiu 逐字比对键名。
@@ -934,7 +942,9 @@ func mustMarshal(t *testing.T, s app.Settings) string {
 const ourOwnKeysJSON = `{
 	"sideMenuCollectionOrder": {"created": [], "collected": []},
 	"playMode": "loop",
-	"shouldKeepPagesOrderInRandomPlayMode": false
+	"shouldKeepPagesOrderInRandomPlayMode": false,
+	"volume": 1,
+	"isMuted": false
 }`
 
 // wantSettings 是「读完一份 Biu 的文件之后应该拿到的那份设置」。
