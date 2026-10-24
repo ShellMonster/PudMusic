@@ -267,6 +267,17 @@ func newTestShell(t *testing.T, opts ...shellOpt) *testShell {
 	view := s.View
 	if sp.view != nil {
 		view = sp.view(s)
+		// ⚠️ **提示要在这一遍 build 走完之后才画**（票 #420，`tooltip.go` 的
+		// `drawTip`）：生产路上那一句在 `Shell.View` 里，而 `withView` 换掉了
+		// 整支 view，`Shell.View` 不会被调到——所以这里补上。
+		//
+		// ⚠️ **补在 `inner` 之后**：挑出该画哪一枚要看得见这一遍登记的**全部**
+		// 候选，而候选是 `inner` build 的时候登记的。
+		inner := view
+		view = func(c *mygoui.Context) {
+			inner(c)
+			s.drawTip(c)
+		}
 	}
 	if !sp.noTester {
 		tt := mygoui.NewTester(view, w, h)

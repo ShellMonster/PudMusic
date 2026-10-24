@@ -49,6 +49,15 @@ const (
 	presetWarningLight, presetWarningDark = "#9A5B06", "#F2B04A"
 )
 
+// 方案里控件那三档的比例（`applyPreset`）：悬停往文字色推 4%、按下推 8%。
+//
+// ⚠️ **卡片那一档的悬停推的量也是这 4%**（`cardHoverBackground`）——所以这
+// 两个数是一对，别在别处另写。
+const (
+	presetHoverMix   = 0.04
+	presetPressedMix = 0.08
+)
+
 var presets = map[app.ThemePreset]preset{
 	app.ThemePresetWarmPaper: {
 		light: presetSkin{"#F8F4ED", "#EFE9DE", "#FDFBF7", "#F1EBE0", "#2A2420", "#6B6158", "#A8552E", "#FFFFFF", 0.14, 0.12, 0.60, presetDangerLight, presetSuccessLight, presetWarningLight},
@@ -101,8 +110,8 @@ func applyPreset(t *ui.Theme, name app.ThemePreset) {
 	t.Background = hex(sk.bg)
 	t.Text, t.TextMuted = hex(sk.text1), hex(sk.text2)
 	t.Surface = hex(sk.surface2)
-	t.SurfaceHover = t.Surface.Mix(t.Text, 0.04)
-	t.SurfacePressed = t.Surface.Mix(t.Text, 0.08)
+	t.SurfaceHover = t.Surface.Mix(t.Text, presetHoverMix)
+	t.SurfacePressed = t.Surface.Mix(t.Text, presetPressedMix)
 	t.Border = t.Text.Alpha(sk.borderA)
 
 	acc := hex(sk.accent)
@@ -147,6 +156,48 @@ func (s *Shell) cardRadius(t *ui.Theme) float32 {
 		return shape.radiusLg
 	}
 	return t.Radius * 1.5
+}
+
+// cardHoverBackground 是「一张卡片被指针压着」那一档底色：从**卡片自己的底**
+// 出发，往文字色推一档。
+//
+// # 为什么基数是卡片底，而不是页面底或控件层
+//
+// 常态底是**卡片那一档**（`cardBackground`），于是悬停那一档必须**从它出发**
+// 推——推出来的两档在**同一条色阶**上（卡片底 → 卡片底的悬停）。而「常态在
+// 页面底、悬停跳到控件层」那一种，悬停看着像是**换了一张卡**，不是这张卡被
+// 按住了。
+//
+// # 推多少：对着上游 `content1 → content2` 那一档
+//
+// 上游那张关注卡是 HeroUI 的 `<Card isHoverable>`（`follow-list/user-card.tsx:60`），
+// 常态 `bg-content1`、悬停 `bg-content2`。HeroUI 的 content1 → content2 是
+// **zinc 的一格**：浅色 zinc-0 → zinc-100（#ffffff → #f4f4f5）、深色
+// zinc-900 → zinc-800（#18181b → #27272a）。
+//
+// 而那正好就是我们主题里 `Background → Surface` 走的那一档（`applyBackground`
+// 的 `surfaceStep`：浅色往黑 4.3%、深色往白 6.5%）——所以这里用的是**那一
+// 档的比例**，基数换成卡片底。经典那一支推出来的值和主题自己的 `SurfaceHover`
+// 逐字节相同（浅色 #e9e9ec），因为经典里卡片那一档就是 `Surface`。
+//
+// ⚠️ **不是 `SurfaceHover` 那一档**：那是**两档**（浅色 8.6%、深色 11.3%），
+// 推过去比上游大了一倍，悬停会跳得太远。
+//
+// # 两支各按各的算法（和主题自己算 `SurfaceHover` 时一样）
+//
+//   - 经典：底色往黑/白推 `surfaceStep`（`applyBackground` 那个算法）；
+//   - 方案：往文字色推 `presetHoverMix`（`applyPreset` 那个算法）。
+func (s *Shell) cardHoverBackground(t *ui.Theme, cardBg ui.Color) ui.Color {
+	if _, _, ok := presetSkinFor(s.app.SettingsSnapshot().ThemePreset, t.Dark); ok {
+		return cardBg.Mix(t.Text, presetHoverMix)
+	}
+	mix := ui.Color{A: 255} // 黑
+	step := surfaceStepLight
+	if t.Dark {
+		mix = ui.Color{R: 255, G: 255, B: 255, A: 255}
+		step = surfaceStepDark
+	}
+	return cardBg.Mix(mix, step)
 }
 
 // cardStyle 是这一帧弹窗面板用的底色和圆角。
