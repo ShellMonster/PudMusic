@@ -220,8 +220,9 @@ func TestTheMiniWindowKeepsUpWhileTheMainWindowIsUnseen(t *testing.T) {
 //
 // 满屏的频谱是第二处「只要在放就每帧要下一帧」的地方（另一处是列表里的波形）。
 // 两个都得门控：只挡住 `App.tick` 的唤醒是不够的——这一点上框架的持有帧
-// （`host.occluded`）也帮不上忙，它只挡**自发**动画，而失焦的窗口在框架眼里
-// 仍是可见的。
+// （`host.occluded`）也帮不上忙：**它挡的是「窗口不可见」**（含被别的窗口盖住、
+// 最小化、隐藏），而**失焦**的窗口在框架眼里仍是可见的（`NSWindow.occlusionState`
+// 还在 visible 位上——见 presence.go 里 `watchWindow` 那一段）。
 func TestTheSpectrumStopsAndResumesWithTheWindow(t *testing.T) {
 	s, tt, _ := fullTester(t)
 	s.app.SetFullPlayerPrefs(app.FullPlayerPrefs{ShowSpectrum: true})
