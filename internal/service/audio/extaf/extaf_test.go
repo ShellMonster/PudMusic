@@ -219,6 +219,227 @@ func TestOpenRejectsSomethingThatIsNotAudio(t *testing.T) {
 	}
 }
 
+// ---- 总长不足 8192 字节的文件 ----
+//
+// # 现象
+//
+// AudioToolbox 探容器时**第一次就要 8192 字节**，而整个文件不足 8192。
+// 字节源于是交出「没凑齐就到了头」（io.ReadFull 给的是 io.ErrUnexpectedEOF），
+// 以前那被当成了硬错误：Decoder.Read 一读到它就返回，**一个样本都解不出来**，
+// 界面上是「这歌放不出来」（#312）。
+//
+// 受影响的是**总长**不足 8192 的那一种东西：秒开片段、缓存碎片、测试素材。
+// 「歌短」**不受影响**——文件总长够就行（短前奏没关系）。
+//
+// # 为什么短读不是错
+//
+// AudioToolbox 的读回调只有一个出口：「这次要到了几个字节」。它把「少于
+// 我要的」当成流到头了——所以短读正是要告诉它的话。见 `source.readAt`。
+
+// TestAShortFileStillDecodes 盯「总长不足 8192 字节的完整文件能解出来」。
+//
+// 素材是自己写的 WAV（不转系统素材）：这条要验的是「文件总长够不够」，
+// 素材必须**恰好**短到能触发那个 8192 字节的探测读，而且每次都一样。
+// 自己写字节就没有 afconvert / ffmpeg 的版本浮动，也不用在没装转换器的
+// 机器上跳过——这一条要一直绿着。
+func TestAShortFileStillDecodes(t *testing.T) {
+	path, want := tinyWAVIn(t, 8000, 400)
+
+	// 素材本身必须短到能触发那个探测读，否则这条测的就不是这一格。
+	if st, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	} else if st.Size() >= 8192 {
+		t.Fatalf("素材有 %d 字节，不小于 8192，这条用例测不到目标", st.Size())
+	}
+
+	d := openPath(t, path)
+	if d.SampleRate() != 8000 {
+		t.Errorf("SampleRate() = %d, want 8000", d.SampleRate())
+	}
+	if d.Channels() != 1 {
+		t.Errorf("Channels() = %d, want 1", d.Channels())
+	}
+	if d.Len() != int64(len(want)) {
+		t.Errorf("Len() = %d, want %d", d.Len(), len(want))
+	}
+
+	frames, rms, peak := decodeAll(t, d)
+	if frames != int64(len(want)) {
+		t.Fatalf("解出 %d 帧，文件里只有 %d 帧", frames, len(want))
+	}
+	if peak <= 0 {
+		t.Error("解出来的是一片静音")
+	}
+	if rms <= 0 {
+		t.Error("RMS 是 0，解出来的不是声音")
+	}
+}
+
+// TestAShortFileKeepsItsSamples 盯短文件解出来的**内容**。
+//
+// 帧数对不等于内容对：末尾短读处理错了的时候有可能凑出一个「帧数正好、
+// 内容是零」的假象。这一条把每一个样本都和文件里写的比一遍。
+func TestAShortFileKeepsItsSamples(t *testing.T) {
+	path, want := tinyWAVIn(t, 8000, 400)
+	d := openPath(t, path)
+
+	buf := make([]float32, len(want))
+	got := 0
+	for got < len(buf) {
+		n, err := d.Read(buf[got:])
+		got += n
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("第 %d 个样本之后: %v", got, err)
+		}
+		if n == 0 {
+			t.Fatalf("第 %d 个样本: 一帧没要到又没有错", got)
+		}
+	}
+	if got != len(want) {
+		t.Fatalf("读出 %d 个样本，want %d", got, len(want))
+	}
+	for i, v := range buf {
+		if math.Abs(float64(v-want[i])) > 1e-6 {
+			t.Fatalf("第 %d 个样本是 %v，文件里是 %v", i, v, want[i])
+		}
+	}
+}
+
+// TestAShortFileEndsAtEOF 盯短文件的另外两半。
+//
+// 一半是「读完仍然是干净的 EOF」——末尾短读被归到「读完」那一边之后，
+// 不能把真的读完也弄丢（那样歌永远放不完）。
+//
+// 另一半是「字节源身上没有记下错」：末尾短读以前是被当成硬错误记下去的，
+// 那一条正是这个 bug 的病根。
+func TestAShortFileEndsAtEOF(t *testing.T) {
+	path, want := tinyWAVIn(t, 8000, 400)
+	d := openPath(t, path)
+
+	buf := make([]float32, 512)
+	var got int
+	for {
+		n, err := d.Read(buf)
+		got += n
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("第 %d 个样本之后: %v", got, err)
+		}
+		if n == 0 {
+			t.Fatalf("第 %d 个样本: 一帧没要到又没有错", got)
+		}
+	}
+	if got != len(want) {
+		t.Errorf("一共解出 %d 个样本，want %d", got, len(want))
+	}
+
+	// 读完了再读还是 EOF，不该崩、不该报错。
+	if n, err := d.Read(buf); n != 0 || !errors.Is(err, io.EOF) {
+		t.Errorf("读完再读 = (%d, %v)，want (0, EOF)", n, err)
+	}
+
+	if err := d.readSourceErr(); err != nil {
+		t.Errorf("字节源记下了一个错: %v（末尾短读不算错）", err)
+	}
+}
+
+// TestAShortCompressedFileStillDecodes 盯压缩容器那一条路。
+//
+// 上两条用的是自己写的 WAV（PCM，位深浅）。生产里中招的是**压缩**的容器：
+// 秒开片段、缓存碎片多半是 AAC / MP4。两条路的探测读是同一处，所以这里
+// 再验一次压缩的：素材由 ffmpeg 现切 0.3 秒，长度必然小于 8192。
+//
+// 帧数不写死值：不同 ffmpeg 版本的编码器延迟略有不同，写死会飘。真正的
+// 判据是「解出来的帧数 == 文件自己说的帧数」，那一条对任何版本都成立。
+func TestAShortCompressedFileStillDecodes(t *testing.T) {
+	wav := testLongWAV(t)
+	dir := filepath.Dir(wav)
+
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"short.aac", []string{"-c:a", "aac", "-b:a", "48k", "-f", "adts"}},
+		{"short.m4a", []string{"-c:a", "aac", "-b:a", "48k"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := filepath.Join(dir, tc.name)
+			args := append([]string{"-v", "error", "-y", "-i", wav, "-t", "0.3"}, tc.args...)
+			if err := run("ffmpeg", append(args, src)...); err != nil {
+				if errors.Is(err, errNoTool) {
+					t.Skipf("造不出短素材（需要 ffmpeg）: %v", err)
+				}
+				t.Fatalf("造短素材: %v", err)
+			}
+
+			st, err := os.Stat(src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if st.Size() >= 8192 {
+				t.Fatalf("素材有 %d 字节，不小于 8192，这条用例测不到目标", st.Size())
+			}
+
+			d := openPath(t, src)
+			frames, rms, peak := decodeAll(t, d)
+			if frames == 0 {
+				t.Fatal("一个样本都没解出来")
+			}
+			if frames != d.Len() {
+				t.Errorf("解出 %d 帧，Len() 说有 %d 帧", frames, d.Len())
+			}
+			if peak <= 0 || rms <= 0 {
+				t.Errorf("解出来的是静音（rms=%.6f peak=%.6f）", rms, peak)
+			}
+			if err := d.readSourceErr(); err != nil {
+				t.Errorf("字节源记下了一个错: %v（末尾短读不算错）", err)
+			}
+		})
+	}
+}
+
+// tinyWAVIn 造一个总长不足 8192 字节的 WAV（16 位单声道 PCM），返回它的路径
+// 和它里面每一个样本解出来应该是什么值。
+//
+// 返回的期望值是按「16 位有符号整数除以 32768」算的——那是 AudioToolbox 把
+// 定点 PCM 转成 float32 的算法（客户端格式要的是 float32）。
+func tinyWAVIn(t *testing.T, rate, samples int) (path string, want []float32) {
+	t.Helper()
+	var b bytes.Buffer
+	dataLen := samples * 2
+	b.WriteString("RIFF")
+	binary.Write(&b, binary.LittleEndian, uint32(36+dataLen))
+	b.WriteString("WAVE")
+	b.WriteString("fmt ")
+	binary.Write(&b, binary.LittleEndian, uint32(16)) // fmt 块的长度
+	binary.Write(&b, binary.LittleEndian, uint16(1))  // PCM
+	binary.Write(&b, binary.LittleEndian, uint16(1))  // 单声道
+	binary.Write(&b, binary.LittleEndian, uint32(rate))
+	binary.Write(&b, binary.LittleEndian, uint32(rate*2)) // 每秒字节数
+	binary.Write(&b, binary.LittleEndian, uint16(2))      // 块对齐
+	binary.Write(&b, binary.LittleEndian, uint16(16))     // 位深
+	b.WriteString("data")
+	binary.Write(&b, binary.LittleEndian, uint32(dataLen))
+
+	want = make([]float32, samples)
+	for i := range samples {
+		v := int16(20000 * math.Sin(2*math.Pi*440*float64(i)/float64(rate)))
+		binary.Write(&b, binary.LittleEndian, v)
+		want[i] = float32(v) / 32768
+	}
+
+	path = filepath.Join(t.TempDir(), "tiny.wav")
+	if err := os.WriteFile(path, b.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path, want
+}
+
 // ---- 工具 ----
 
 // openPath 打开一个本地文件解起来，测试结束时连句柄一起收掉。
