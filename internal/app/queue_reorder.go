@@ -35,7 +35,18 @@ package app
 // 动（它记的是项，项不会因为别人挪了位置而变样）。
 func (q *Queue) MoveSongBefore(id, before string) bool {
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	ok := q.moveSongBeforeLocked(id, before)
+	q.mu.Unlock()
+	if ok {
+		// 队列的顺序变了：落盘那一格得跟着变（changed 必须在锁外面调，见
+		// Queue.changed 的注释）。
+		q.changed()
+	}
+	return ok
+}
+
+// moveSongBeforeLocked 是 MoveSongBefore 的那一份（锁已经拿好了）。
+func (q *Queue) moveSongBeforeLocked(id, before string) bool {
 
 	n := len(q.items)
 	if n == 0 || id == "" || id == before {

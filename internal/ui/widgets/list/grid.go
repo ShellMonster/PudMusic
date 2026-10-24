@@ -787,14 +787,14 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 		// 的**，歌名折行时那一行就高一点（上游的 music-card 是 `line-clamp-2`，两行）。
 		// 列表那一档的行高是定死的（`card.go` 的文件头），网格这一档不是——两处是
 		// 两件事，别把一边改成另一边的做法。
+		sh := showOf(m)
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).PaddingY(cardGap).
 			Children(func() {
-				ui.Text(c, m.Title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
+				ui.Text(c, sh.title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
 					TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
 				ui.Row(c).Gap(cardGap).Children(func() {
-					if m.Owner != "" {
-						ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, scale.ListOwner)).LineHeight(leading.Owner).
-							TextColor(metaColor).MaxLines(1).Ellipsis("…")
+					if sh.owner != "" || sh.live {
+						ownerLine(c, sh, scale.Font(c, scale.ListOwner), leading.Owner, metaColor, 0, true)
 					}
 					// 正在放的那一格：时长换成一句「正在播放」。
 					//

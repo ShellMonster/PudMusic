@@ -25,14 +25,15 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+	tclean "github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
 	"github.com/egoist/mygo/ui"
 )
 
-// 尺寸照 Biu：行高 64（`RowHeight`）、宽 384（HeroUI Drawer 的 size="sm"）、封面
+// 尺寸：行高 64（`RowHeight`）、宽 320（设计规范 v0.1 §4 的右侧 Inspector；上游 Biu 是 384）、封面
 // 48（`h-12 w-12`）、行内边距 8（`p-2`，48+8+8 正好 64）、顶上那条 52。
 const (
 	queueRowHeight    = 64
-	queueDrawerWidth  = 384
+	queueDrawerWidth  = 320
 	queueCoverSize    = 48
 	queuePadY         = space.Px8
 	queuePadX         = space.Px8
@@ -231,7 +232,7 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 		// 88）。这一层是吃点击的（见下面 back.Clicked 那段），不留出这一条播放条
 		// 就**整个被它盖住**：抽屉开着时按播放、上一首、下一首都按不动。
 		//
-		// 满屏开着的时候底下那一条是满屏的底栏（进度 + 控制键，92 高，见
+		// 满屏开着的时候底下那一条是满屏的底栏（进度 + 控制键，108 高，见
 		// `fullControlsHeight`），不是播放条——让出的高度要跟着它，否则进度条
 		// 上面那十几像素会被蒙版盖住、点一下就变成「关抽屉」。
 		bottomInset := float32(playbarHeight)
@@ -659,7 +660,7 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 			// 那一档（歌名 16 / UP 14）。这里原来是 15 / 12，副题比列表行的 UP 名
 			// 还小一档，同一列两种刻度。
 			ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
-				ui.Text(c, row.item.Title).FontSize(scale.Font(c, scale.Size16)).
+				ui.Text(c, tclean.Clean(row.item.Title).Title).FontSize(scale.Font(c, scale.Size16)).
 					TextColor(playlistTextColor(t, state)).SingleLine()
 				// 副题两态不一样：正在放那一行按**它自己那层淡底**重算（见
 				// `playlistSubtitleColor`），别的行是次要色。
@@ -706,7 +707,7 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 func (s *Shell) viewQueueCover(c *ui.Context, item app.Item, playing, hovered bool) {
 	t := c.Theme()
 	ui.Row(c).Width(queueCoverSize).FillHeight().Children(func() {
-		imgcache.View(c, s.images, item.Cover, queueCoverSize, queueCoverSize)
+		imgcache.ViewTitled(c, s.images, item.Cover, item.Title, queueCoverSize, queueCoverSize)
 		if playing || !hovered {
 			return
 		}

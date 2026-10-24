@@ -221,10 +221,19 @@ type localPage struct {
 	// `widgets/list/selection.go` 的 KeyboardMode）。
 	keys list.KeyboardMode
 	// tableEl 是表格那个元素（画焦点环要拿它的盒子）。
-	tableEl ui.Element
+	//
+	// ⚠️ **它是一个 `ui.Handle`，不是一个 `ui.Element`**：元素只活在建它的那一遍
+	// （上游的 `ui/element.go`：「An element only lives during the build pass that
+	// created it. Do not keep it in app state」），而**同一遍也不安全**——存储会
+	// 被复用给别的元素。真出问题时**不报错，只是悄悄算错**（焦点环画在别人的
+	// 盒子上）。所以这里记的是**身份**，用的时候再 `c.Resolve` 换回**这一遍**的
+	// 那个元素（`resolve` 拿不到就是「这一帧没有它」）。
+	tableEl ui.Handle
 	// cursorCell 是**游标那一行**序号那一格的盒子：它撑满那一格（见
 	// `viewRowNumber`），所以它的盒子就是那一行的位置——焦点环按它算。
-	cursorCell ui.Element
+	//
+	// ⚠️ **理由同 `tableEl`**：它也是每帧重新绑的一个身份。
+	cursorCell ui.Handle
 	// showCursorRing 报「要不要给游标那一行画焦点环」。
 	showCursorRing bool
 	// tableSel 是表格那一档的「选择集」，**它永远是空的**——而它正是那一块实心
@@ -306,10 +315,9 @@ type localPage struct {
 	// 指针在不在表里，序号那一格的 `PointerPosition()` 给出指针在行里的纵向
 	// 位置。见 `viewRowNumber` / `tableRowHovered`。
 	//
-	// ⚠️ **它每一帧在建表格之前重新赋值**：`ui.Element` 属于建它的那一遍，
-	// 跨帧留着的话下一帧 `Valid()` 就是 false（框架的「keep a ui.Handle
-	// instead」那一条）。这里只在**同一帧**里用，所以没问题。
-	tableBox ui.Element
+	// ⚠️ **它是一个 `ui.Handle`**（理由同 `tableEl`）：指针位置只有元素问得到，
+	// 而元素不能存进应用状态——所以存身份，用的时候 `c.Resolve` 换回来。
+	tableBox ui.Handle
 
 	// askOpen 是删文件那道确认开着没有，askTrack 是它要删的那一项。
 	askOpen  bool
@@ -785,11 +793,10 @@ func (p *localPage) viewTable(c *ui.Context, t *ui.Theme) {
 	// 外面这一层是「表格的那一块」：`PointerPosition` 拿它判指针在不在表里
 	//（见 tableBox 的注释）。它自己什么也不画，尺寸跟着里面的表格走。
 	box := ui.Column(c).Grow(1).FillWidth()
-	p.tableBox = box
+	// ⚠️ **绑身份，不是留元素**：这一层每一帧都是新元素，而元素不能存进应用
+	// 状态（见 `tableBox` 的注释）。
+	box.Bind(&p.tableBox)
 	box.Children(func() {
-		// ⚠️ **游标那一行的盒子每帧要重新记**：游标不在画面上时没有那一格，
-		// 留着上一次的那个会让环画在老地方。
-		p.cursorCell = ui.Element{}
 		table := ui.Table(c, &p.table, localColumns, len(p.rows), func(row, col int) {
 			p.viewCell(c, t, row, col)
 		}).
@@ -801,7 +808,7 @@ func (p *localPage) viewTable(c *ui.Context, t *ui.Theme) {
 			// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选行、双击
 			// 播放都还在。
 			HandleInput(p.keys.Input)
-		p.tableEl = table
+		table.Bind(&p.tableEl)
 		// 焦点环画不画：**键盘在管**而且**表格有焦点**。
 		//
 		// ⚠️ **表格有焦点是第二半**：方向键挪的是表格的游标，焦点不在表格上时按
@@ -816,7 +823,7 @@ func (p *localPage) viewTable(c *ui.Context, t *ui.Theme) {
 		// `Padding(Space(1.5), Space(2.5))`）是**行元素**的地盘——画在格子里会被
 		// 裁掉，而框架把主色刷在行元素上（那一块实心主色底票 #197 去掉了）。
 		table.DrawOver(func(cp *ui.Painter, r ui.Rect) {
-			p.drawCursorRing(cp, r, t)
+			p.drawCursorRing(c, cp, r, t)
 		})
 		if p.noteScrollbar != nil {
 			p.noteScrollbar(scrollbar.Hot(table))
@@ -843,21 +850,27 @@ func (p *localPage) viewTable(c *ui.Context, t *ui.Theme) {
 //
 // **键盘在管的时候**：指针点过之后那一行什么标记都没有（上游点一行不改变它的样子），
 // 但**再按方向键走位时环要回来**。
-func (p *localPage) drawCursorRing(cp *ui.Painter, r ui.Rect, t *ui.Theme) {
-	if !p.showCursorRing || !p.cursorCell.Valid() || !p.tableEl.Valid() {
+func (p *localPage) drawCursorRing(c *ui.Context, cp *ui.Painter, r ui.Rect, t *ui.Theme) {
+	if !p.showCursorRing {
 		return
 	}
-	cell := p.cursorCell.Bounds()
-	tb := p.tableEl.Bounds()
+	// ⚠️ **这两个是这一遍的那两个元素**：`c.Resolve` 换回来的正是**建它们的那
+	// 一遍**里的那一个（句柄只记身份，元素每遍都是新的——换不回来就是「这一遍
+	// 没有它」，于是不画）。
+	cellEl, tableEl := c.Resolve(p.cursorCell), c.Resolve(p.tableEl)
+	if !cellEl.Valid() || !tableEl.Valid() {
+		return
+	}
+	cell, table := cellEl.Bounds(), tableEl.Bounds()
 	// 框架给每一格左右留的内边距（`mygo/ui/table.go` 的 `Padding(Space(1.5),
 	// Space(2.5))`）：行是那些格子的地盘，环要贴着行的边。
 	padX := t.Space(2.5)
 	// 表格的盒子在它**父元素**的空间里（`DrawOver` 给的 `r`），而盒子的
 	// `Bounds()` 是**窗口**坐标——两者的差就是「相对表格左上角的位置」。
 	rect := ui.Rect{
-		X: r.X + cell.X - tb.X - padX,
-		Y: r.Y + cell.Y - tb.Y - localTableRowPad,
-		W: tb.W - 2*padX,
+		X: r.X + cell.X - table.X - padX,
+		Y: r.Y + cell.Y - table.Y - localTableRowPad,
+		W: table.W - 2*padX,
 		H: localTableRowPx,
 	}
 	// 往里收 3 像素，和框架画行焦点环时同一个数（`mygo/ui/list.go`）。
@@ -916,13 +929,17 @@ const localPlayIconLabel = "播放这首"
 func (p *localPage) viewRowNumber(c *ui.Context, t *ui.Theme, row int) ui.Element {
 	h := float32(localTableRowPx - 2*localTableRowPad)
 	cell := ui.Row(c).FillWidth().Height(h).Center().Justify(ui.Center)
-	onRow := p.tableRowHovered(cell)
 	// ⚠️ **游标那一行的盒子要留着**：焦点环按它算出那一行的位置（理由见
 	// `drawCursorRing`）。它是**撑满那一格**的（`FillWidth` + `Height`），所以它的
 	// 盒子就是那一行的位置。
+	//
+	// ⚠️ **留的是身份不是元素**（见 `cursorCell` 的注释）：游标不在画面上时这一
+	// 格不建，句柄换不回这一遍的元素，于是焦点环不画——和从前「每帧清空」是
+	// 同一个结果。
 	if row == p.sel {
-		p.cursorCell = cell
+		cell.Bind(&p.cursorCell)
 	}
+	onRow := p.tableRowHovered(c, cell)
 	cell.Children(func() {
 		if onRow {
 			ui.Icon(c, icon(iconPlayFill)).FontSize(16).TextColor(t.Text).Label(localPlayIconLabel)
@@ -938,11 +955,14 @@ func (p *localPage) viewRowNumber(c *ui.Context, t *ui.Theme, row int) ui.Elemen
 // 判据分两半：**指针在表格里**（否则页面左边、侧栏里同一条横线上的那一格也会
 // 亮）和**指针在这一格的高度之内**。两样读的都是上一帧的盒子——即时模式里
 // 布局是这一帧开头量完的，`Bounds` / `PointerPosition` 给的正是它。
-func (p *localPage) tableRowHovered(cell ui.Element) bool {
-	if !p.tableBox.Valid() {
+func (p *localPage) tableRowHovered(c *ui.Context, cell ui.Element) bool {
+	// ⚠️ **指针位置只有元素问得到**，而元素不能存进应用状态（见 `tableBox`）：
+	// 所以存的是身份，用的时候 `c.Resolve` 换回**这一遍**的那一个。
+	box := c.Resolve(p.tableBox)
+	if !box.Valid() {
 		return false
 	}
-	if _, _, over := p.tableBox.PointerPosition(); !over {
+	if _, _, over := box.PointerPosition(); !over {
 		return false
 	}
 	_, y, _ := cell.PointerPosition()

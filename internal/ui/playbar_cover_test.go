@@ -48,9 +48,9 @@ func hexOf(c color.Color) string {
 // 照样全绿。而这几条正是本任务要钉死的东西（「总高 88px，封面上下各 16」），
 // 它们的真值只来自 Biu 的源码，不来自我们的常量。
 const (
-	biuPlaybarHeight = 88 // layout/index.tsx:48 的 h-[88px]
+	biuPlaybarHeight = 76 // 设计规范 v0.1 §4：播放条高 76（原 Biu 是 88，应用未发版，改按规范）
 	biuPlaybarPadX   = 16 // playbar/index.tsx:23-31 的 px-4
-	biuCoverSize     = 56 // playbar/left/index.tsx:29-45 的 width={56} height={56}
+	biuCoverSize     = 52 // 设计规范 v0.1 §7.1：封面 52×52（原 Biu 是 56）
 	biuCoverGap      = 8  // playbar/left/index.tsx 的 space-x-2
 )
 
@@ -65,9 +65,9 @@ func TestPlayBarUsesBiuNumbers(t *testing.T) {
 		got, want float32
 		fromBiuAt string
 	}{
-		{"播放条总高", playbarHeight, biuPlaybarHeight, "layout/index.tsx:48 的 h-[88px]"},
+		{"播放条总高", playbarHeight, biuPlaybarHeight, "设计规范 §4 播放条高 76"},
 		{"左右内边距", playbarPadX, biuPlaybarPadX, "playbar/index.tsx 的 px-4"},
-		{"封面边长", coverSize, biuCoverSize, "playbar/left 的 width={56} height={56}"},
+		{"封面边长", coverSize, biuCoverSize, "设计规范 §7.1 封面 52×52"},
 		{"封面与歌名的间距", coverGap, biuCoverGap, "playbar/left 的 space-x-2"},
 	} {
 		if c.got != c.want {
@@ -159,7 +159,7 @@ func TestPlayBarCoverShowsTheImageWhenItIsReady(t *testing.T) {
 		return equalStrings(coverColors(t, tt, 4), []string{coverHex})
 	})
 
-	// 只画播放条时它贴在画面顶上：封面该落在 y=16..72，上下各 16。
+	// 只画播放条时它贴在画面顶上：封面该落在 y=12..64，上下各 12。
 	assertCoverGeometry(t, tt, 0)
 
 	title, ok := tt.Find("在线的一首歌")
@@ -294,8 +294,8 @@ func TestPlayBarCoverWakeRedrawsTheWindow(t *testing.T) {
 	if tt.HasText("载入中") {
 		t.Errorf("没人叫醒窗口，画面停在占位，文字有 %q", tt.Texts())
 	}
-	// 整窗里播放条是最后一个孩子、整条贴底，所以条顶在 coverWinH-88；封面该落在
-	// 那 88 的正中间（上下各 16）。条一高封面就往上跑，这里立刻挂。
+	// 整窗里播放条是最后一个孩子、整条贴底，所以条顶在 coverWinH-76；封面该落在
+	// 那 76 的正中间（上下各 12）。条一高封面就往上跑，这里立刻挂。
 	assertCoverGeometry(t, tt, coverWinH-biuPlaybarHeight)
 }
 
@@ -397,15 +397,15 @@ func equalStrings(a, b []string) bool {
 // assertCoverGeometry 量封面在整张画面上的位置。
 //
 // barTop 是播放条顶边在画面上的 y。播放条是 88 高的一行、封面 56 在行内垂直居中，
-// 所以封面该落在 [barTop+16, barTop+72]：上下各 16 是怎么来的——(88-56)/2。
+// 所以封面该落在 [barTop+12, barTop+64]：上下各 12 是怎么来的——(76-52)/2。
 //
-// 这几条一起断的是「总高 88 + 上下各 16」。播放条一高封面就跟着往上跑，底边那条
+// 这几条一起断的是「总高 76 + 上下各 12」。播放条一高封面就跟着往上跑，底边那条
 // 先挂；上下留白不对，中间那条挂。只画播放条时它贴在画面顶上，barTop 就是 0；
-// 走整窗时它是最后一个孩子、整条贴底，barTop 就是 winH-88。
+// 走整窗时它是最后一个孩子、整条贴底，barTop 就是 winH-76。
 func assertCoverGeometry(t *testing.T, tt *mygoui.Tester, barTop int) {
 	t.Helper()
 	box := paintedBox(t, tt, coverColor)
-	// (88-56)/2 = 16：上下各留 16 就是这么来的。
+	// (76-52)/2 = 12：上下各留 16 就是这么来的。
 	mid := (biuPlaybarHeight - biuCoverSize) / 2
 
 	// ⚠️ **画面上量到的是「图」，不是「那一格」**：那一格外面还有一圈 1 像素的
@@ -418,12 +418,12 @@ func assertCoverGeometry(t *testing.T, tt *mygoui.Tester, barTop int) {
 			box.Dx(), box.Dy(), biuCoverSize, biuCoverSize, box)
 	}
 	if want := barTop + mid + frame; box.Min.Y != want {
-		t.Errorf("封面的上边在 y=%d，按 %d 高的播放条该在 y=%d（上下留白 (88-56)/2 = 16，"+
+		t.Errorf("封面的上边在 y=%d，按 %d 高的播放条该在 y=%d（上下留白 (76-52)/2 = 12，"+
 			"再减去那一圈 1 像素的边）",
 			box.Min.Y, biuPlaybarHeight, want)
 	}
 	if want := barTop + biuPlaybarHeight - mid - frame; box.Max.Y != want {
-		t.Errorf("封面的下边在 y=%d，离播放条底边 16 该是 y=%d", box.Max.Y, want)
+		t.Errorf("封面的下边在 y=%d，离播放条底边留白该是 y=%d", box.Max.Y, want)
 	}
 	if box.Min.X != biuPlaybarPadX+frame {
 		t.Errorf("封面的左边在 x=%d，Biu 的播放条内边距是 %d", box.Min.X, biuPlaybarPadX)

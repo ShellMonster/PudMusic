@@ -121,10 +121,11 @@ const (
 // 放在这一层而不是界面层，是因为 normalize 也要用：设置文件是用户能直接编辑的，
 // 一个 `sideMenuWidth: 99999` 不该一路穿到画界面的那一行。
 const (
-	CollapsedSideMenuWidth = 72.0
-	MinSideMenuWidth       = 160.0
-	MaxSideMenuWidth       = 480.0
-	DefaultSideMenuWidth   = 200.0
+	// 设计规范 v0.1 §4：展开 220（可拖 180 到 300），折叠 64 仅图标。上游 Biu 是 72 / 160~480 / 200。
+	CollapsedSideMenuWidth = 64.0
+	MinSideMenuWidth       = 180.0
+	MaxSideMenuWidth       = 300.0
+	DefaultSideMenuWidth   = 220.0
 )
 
 // ClampSideMenuWidth 把一个宽度拉进 [MinSideMenuWidth, MaxSideMenuWidth]。
@@ -150,6 +151,40 @@ const (
 	ThemeModeLight  ThemeMode = "light"
 	ThemeModeDark   ThemeMode = "dark"
 )
+
+// ThemePreset 是主题方案：设计规范里的三套整体配色（暖纸 / 暮光 / 柔雾），
+// 每套含浅色和深色各一份底色、文字色、强调色和圆角。
+//
+// ## 我们加的、Biu 没有的键
+//
+// Biu 只有 `themeMode`（浅 / 深 / 跟随系统）加一个主色一个底色，**没有「整套方案」
+// 这个概念**，所以 `themePreset` 是我们自己的键（见 `ourOwnKeys`）。Biu 读到
+// 我们的文件会把它当不认识的键，Biu 自己的设置一个键都没丢。
+//
+// ## 默认是「暖纸」，「经典」是显式的一档
+//
+// 「经典」就是原来的外观（Biu 绿加框架默认底色），不套任何方案，值是 `"classic"`。
+// 默认（包括键缺失、空串、不认识的值）一律是暖纸：应用还没发版，没有需要保住的
+// 旧外观；Biu 导出的配置里没有这个键，导入后也拿到暖纸。
+// 套了方案之后，方案的底色、文字、强调色、圆角**压过**设置里的 `primaryColor` /
+// `backgroundColor` / `borderRadius`；用户在设置页改那三项时界面层会先把方案清成
+// 经典，免得「改了没反应」。
+type ThemePreset string
+
+const (
+	ThemePresetWarmPaper ThemePreset = "warm-paper"
+	ThemePresetDuskAmber ThemePreset = "dusk-amber"
+	ThemePresetSoftPeach ThemePreset = "soft-peach"
+	ThemePresetClassic   ThemePreset = "classic"
+)
+
+// DefaultThemePreset 是新设置的默认方案。
+//
+// ⚠️ **只给测试改**（`internal/ui` 的 TestMain 把它设成经典）：界面层有一大批
+// 「和 Biu 逐像素对照」的用例，量的是经典外观（Biu 绿、框架底色）；它们量的是
+// 控件的几何和状态，不是配色，不该跟着默认方案一起重写。新方案自己有专门的用例
+// （`themepreset_test.go`），而「生产默认是暖纸」由 `app` 包里的测试盯着。
+var DefaultThemePreset = ThemePresetWarmPaper
 
 // 音质档位。Biu 的 `AudioQuality`。
 type AudioQuality string
@@ -299,6 +334,7 @@ type Settings struct {
 	DisplayMode              DisplayMode              `json:"displayMode"`
 	FFmpegPath               string                   `json:"ffmpegPath"`
 	ThemeMode                ThemeMode                `json:"themeMode"`
+	ThemePreset              ThemePreset              `json:"themePreset"`
 	PageTransition           PageTransition           `json:"pageTransition"`
 	ShowSearchHistory        bool                     `json:"showSearchHistory"`
 	ProxySettings            ProxySettings            `json:"proxySettings"`
@@ -352,6 +388,19 @@ type Settings struct {
 	//
 	// 键名照 Biu 的 `play-list` 那个 zustand 字段（`isMuted`）。
 	Muted bool `json:"isMuted"`
+
+	// Playback 是「上次听到哪儿」那一格：队列、当前项、播放位置。
+	//
+	// ⚠️ **它和音量、播放模式在同一个文件里，是有意的**：同一次原子写里落盘，
+	// 它们之间就没有「谁先谁后」的竞态（见 playback_state.go 文件头那张表）。
+	//
+	// 键名是我们自己的（Biu 那边没有这一个键，它把队列放在 `play-list` store
+	// 里）。Biu 读到它会当不认识的键——最坏的结果是**它自己的队列不受影响**
+	//（那是另一个文件里的事）。
+	//
+	// 加键不用涨 SchemaVersion（见 SchemaVersion 的注释：只加新的可选键不用
+	// 涨）：读不到就是空的，等于「没有上次听到哪儿」。
+	Playback PlaybackSnapshot `json:"playback"`
 
 	// extra 是这个版本的代码不认识的键，原样带着走。
 	//
@@ -450,6 +499,7 @@ func DefaultSettings(downloadPath string) Settings {
 		DisplayMode:       DisplayModeList,
 		FFmpegPath:        "",
 		ThemeMode:         ThemeModeSystem,
+		ThemePreset:       DefaultThemePreset,
 		PageTransition:    PageTransitionNone,
 		ShowSearchHistory: true,
 		ProxySettings:     ProxySettings{Type: ProxyNone},
@@ -465,6 +515,13 @@ func DefaultSettings(downloadPath string) Settings {
 		// 音量：默认 100%（老版本每一次启动都是这一档，见 DefaultVolume）。
 		Volume: &vol,
 		Muted:  false,
+
+		// 「上次听到哪儿」那一格：默认是空的（= 没有上次听到哪儿）。
+		//
+		// ⚠️ **`Items` 给空序列而不是 nil**：nil 和空序列在 JSON 里差一个
+		// `null`，写出去会让「还没存过」和「存过、当时队列是空的」看起来是两
+		// 回事。统一成空序列。
+		Playback: PlaybackSnapshot{Items: []PlaybackEntry{}},
 
 		// 播放模式的两个默认值都照 Biu 的初始状态（`play-list.ts:370,373`）：
 		// 默认循环播放（不是顺序播放——「放完就停住」正是这一票要治的症状，
@@ -658,6 +715,8 @@ func (s *Settings) normalize() {
 
 	s.ThemeMode = pickEnum(s.ThemeMode, ThemeModeSystem,
 		ThemeModeSystem, ThemeModeLight, ThemeModeDark)
+	s.ThemePreset = pickEnum(s.ThemePreset, DefaultThemePreset,
+		ThemePresetWarmPaper, ThemePresetDuskAmber, ThemePresetSoftPeach, ThemePresetClassic)
 	s.AudioQuality = pickEnum(s.AudioQuality, AudioQualityAuto,
 		AudioQualityAuto, AudioQualityLossless, AudioQualityHigh,
 		AudioQualityMedium, AudioQualityLow)
@@ -713,6 +772,10 @@ func (s *Settings) normalize() {
 	}
 	if s.SideMenuCollectionOrder.Collected == nil {
 		s.SideMenuCollectionOrder.Collected = []int64{}
+	}
+	// 「上次听到哪儿」那一格，同一个理由（见 DefaultSettings 里那一句）。
+	if s.Playback.Items == nil {
+		s.Playback.Items = []PlaybackEntry{}
 	}
 }
 

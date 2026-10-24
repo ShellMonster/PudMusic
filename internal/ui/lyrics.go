@@ -242,6 +242,8 @@ type lyricStyle struct {
 	// 正是离它最远的那几句**，而它们会被算成「远」而全灭——用户看到的是一整列
 	// 空白（评审抓到的那一条）。
 	mask bool
+	// bar 是正在唱那一句左边的强调色竖线（设计规范 v0.1 §7.5），只在左对齐时画。
+	bar bool
 	// overlay 是画在**滚动容器里面**的那一层（满屏那一屏右下角那三枚旋钮）。
 	//
 	// ⚠️ **它必须在滚动容器里面，不能是它的兄弟**：框架认「滚轮滚哪一层」是
@@ -656,6 +658,9 @@ func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSna
 		})
 }
 
+// lyricBarW 是当前句左竖线的宽度。
+const lyricBarW = 3
+
 // lyricLine 画一句歌词，和叠在它下面的那句翻译。
 //
 // 返回这一句的元素：调用方拿它的 `Bounds()` 量出这一句有多高、在哪儿
@@ -719,6 +724,12 @@ func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyri
 	// 在容器的哪儿」走——行滑到边缘时被淡掉，滑到中间时全亮。
 	if st.mask {
 		opacity *= lyricMaskAlpha(lyricRelPos(lv.box, line.Bounds()))
+	}
+	if st.bar && presence > 0 {
+		acc := c.Theme().Accent.Alpha(presence)
+		line.DrawOver(func(p *ui.Painter, r ui.Rect) {
+			p.Fill(ui.Rect{X: r.X, Y: r.Y + lyricsLinePadY, W: lyricBarW, H: r.H - 2*lyricsLinePadY}, acc, 1.5)
+		})
 	}
 	return line.Opacity(opacity).Children(func() {
 		ui.Text(c, row.Text).

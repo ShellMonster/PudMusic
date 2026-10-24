@@ -259,6 +259,9 @@ func (p *PagedList) Paged() Paged {
 	}
 }
 
+// Items 返回已经拿到的全部行的一份拷贝（给「播放全部」这类整页动作用）。
+func (p *PagedList) Items() []Music { return append([]Music(nil), p.items...) }
+
 // Reload 换查询：关键词变了、筛选变了、或者整页换了一个路由。
 //
 // 停掉在途请求、清空已加载的行、回顶，然后从第 1 页重来。
