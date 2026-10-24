@@ -87,10 +87,16 @@ func TestTheSettingsPageHasOnlyOneSegmentedControl(t *testing.T) {
 	}
 }
 
-// buttonPadSpot 是「文字左边那一小块内边距」——纯底色，没有字。
+// buttonPadSpot 是「文字右边那一小块内边距」——纯底色，没有字。
+//
+// ⚠️ **取样点挪到了文字右边**（票 #297 之前取的是左边）：那一排现在每一档都带
+// 一枚 18px 图标，而图标在**文字左边**——左边那一段量到的是图标的墨迹，不是
+// 底色（墨迹和底色的差是「图标深浅」那件事，量出来就废了）。
+// 右边那一段是按钮自己的内边距（图标那一档 10 像素，纯文字那一档 14 像素），
+// 是纯底色。
 func buttonPadSpot(text mygoui.Rect) mygoui.Rect {
 	return mygoui.Rect{
-		X: text.X - 12,
+		X: text.X + text.W + 2,
 		Y: text.Y + text.H/4,
 		W: 6,
 		H: text.H / 2,

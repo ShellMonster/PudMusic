@@ -36,6 +36,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
@@ -75,6 +76,16 @@ func shadowScene(t *testing.T, dark bool, draw func(s *Shell, c *mygoui.Context)
 			}
 		}))
 	b.tt.Frame()
+	// ⚠️ **推钟直到界面不再要帧**：动画走的是时间，而 Tester 的钟站着不动——
+	// 不推它的话，画面停在动画的第一帧上（那一帧元素还在它出发的地方）。
+	// 这一族里只有「队列抽屉」那一档会动（它有进出场），别的都是画完就完，
+	// 所以对它们来说这一段是空转。
+	for range 40 {
+		if !b.tt.FramePending() {
+			break
+		}
+		b.tt.Advance(16 * time.Millisecond)
+	}
 	return b.tt
 }
 

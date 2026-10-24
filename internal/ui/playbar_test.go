@@ -31,6 +31,10 @@ func flac(t *testing.T) string {
 type harness struct {
 	app *app.App
 	tt  *mygoui.Tester
+	// s 是那副外壳。**它是为了推钟用的**：抽屉的进出场走的是时间，而
+	// Tester 的钟站着不动——不推它的话抽屉永远停在「刚打开」那一帧，
+	// 而那一帧面板还在窗口外面（见 `settleDrawer`）。
+	s *Shell
 }
 
 // 走基座（`newTestShell`），所以收尾是无条件挂上的。`New(a)` 会起
@@ -41,7 +45,7 @@ type harness struct {
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	b := newTestShell(t, at(winW, winH))
-	return &harness{app: b.a, tt: b.tt}
+	return &harness{app: b.a, tt: b.tt, s: b.s}
 }
 
 func (h *harness) open(t *testing.T) {

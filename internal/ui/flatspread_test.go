@@ -512,9 +512,9 @@ func TestTheTwoRulesAreDrawnAsOnePixelLines(t *testing.T) {
 			tt.SetDark(dark)
 			// 队列抽屉。
 			s.drawerOpen = true
-			for range 3 {
-				tt.Frame()
-			}
+			// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在
+			// 窗口外面（它从右边滑进来），量到的是空的右半边。
+			settleDrawer(t, s, tt)
 			img := tt.Image()
 			border := flatColor(BuildTheme(s.app.SettingsSnapshot(), dark).Border)
 			x0 := img.Rect.Max.X - queueDrawerWidth

@@ -56,10 +56,9 @@ func TestRenderChromeShots(t *testing.T) {
 
 			// 02 播放列表抽屉开着：面板要和背景分得开（`Surface` vs `Background`）。
 			s.drawerOpen = true
-			waitFrames(t, tt, "抽屉开出来了", func() bool {
-				_, ok := tt.Find("播放列表")
-				return ok
-			})
+			// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在
+			// 窗口外面（它从右边滑进来），存下来的图是空的右半边。
+			settleDrawer(t, s, tt)
 			tt.Move(600, 300)
 			homeFrame(tt)
 			save(t, dir, "02-抽屉-"+name+".png", tt)

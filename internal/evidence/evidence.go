@@ -557,13 +557,17 @@ var Items = []Item{
 	},
 	{
 		Category: Paging,
-		// 设置那一格旁边的预览：三张缩略图各画各的形状，选中的那一张用主色描边。
+		// 设置那一格旁边的预览：三张缩略图各画各的形状，**三张都不带选中信号**
+		// （票 #297：那一格里的选中信号只有药丸一个——预览再描一圈主色，同一格里
+		// 就是两种「选中」信号了）。
+		//
 		// 判据是「描边里离主色更近」而不是「有几个主色像素」——边框是圆角加抗锯齿
 		// 画出来的，逐字比颜色永远是 0 个（见那条测试的注释）。
-		Spec: "「数据显示样式」旁边有预览：选哪一档一眼看得出来",
+		Spec: "「数据显示样式」旁边有预览：三张缩略图各画各的形状，而「现在是哪一档」只由药丸说（预览不带第二重选中信号）",
 		Tests: []string{
 			"TestTheDisplayStyleSettingShowsAPreviewOfEachStyle",
-			"TestThePreviewHighlightsTheChosenStyle",
+			"TestThePreviewCarriesNoSelectionSignal",
+			"TestTheDisplayModeCellHasOnlyOneSelectedSignal",
 		},
 	},
 	{
@@ -2860,6 +2864,46 @@ var Items = []Item{
 			"TestTheTextOnThePalePrimaryRowIsReadable",
 			// 那几个数钉死（浅 #d2f7df / 深 #193e29，底是不透明的）。
 			"TestThePalePrimaryRowKeepsItsNumbers",
+		},
+	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：抽屉「啪」地一下出现、或者弹到窗口
+		// 外面去就再也不回来——界面不报错、不崩，只是「来得很生硬」。
+		//
+		// 而「动的是布局位置、不是 transform」那一条在**软件渲染回退**时会差两个
+		// 数量级（DESIGN §五），所以这一条把它一起钉住。
+		Category: Platform,
+		// 票 #298（2026-10-24 拍板：**分两类，不一刀切**）。
+		//
+		// ⚠️ **「小浮层不加」说的是这一票不加**：Toast 那 250ms 的入场是 #207
+		// 自己定的（票 #180「Toast 语义色与入场」），而 #292 还要改它的曲线——
+		// 本票没动它（下面最后一条证据把它钉住）。
+		Spec: "队列抽屉从**右侧滑入**、往右滑出，**200ms** + `CubicBezier(0.16, 0.9, 0.21, 0.98)`，**不做回弹**；**开的时候先建面板再动，关的时候动完再拆**（退场那 200ms 里面板还在树上，滑完了才拆）；动画**不挡交互**（滑进去那 200ms 里面板和底下那片蒙版都点得动，退场途中再点一次外面**不会**把抽屉弹回来，而**退场那 200ms 里底下那片蒙版不吃点击**——它是透明的，看不见的东西吃点击就是「点不动」）；**动的是布局位置，不是 transform**；**每帧分配不涨**；菜单 / 小浮层 / 确认框 / Toast **不加**进出场",
+		Tests: []string{
+			// 方向和终点（画面上量的：面板左缘那道 1 像素的边线）。
+			"TestTheQueueDrawerSlidesInFromTheRight",
+			// 曲线和时长（滑到 100ms 时面板已经走完 95.4%）+ 不做回弹
+			//（整条轨迹单调、不越过终点）。
+			"TestTheQueueDrawerSlidesInOnThatCurveInThatTime",
+			"TestTheQueueDrawerDoesNotBounce",
+			// 开合和动画对齐：关掉之后**动完才拆**。
+			"TestTheQueueDrawerIsTornDownOnlyAfterItSlidOut",
+			// 退场那条曲线和时长（退到一半时退到 1182.5）——进场那一侧量了，
+			// 退场这一侧也得量：不然「退场瞬移」测试照样绿。
+			"TestTheQueueDrawerSlidesOutOnThatCurveInThatTime",
+			// 动画不挡交互 + 关是幂等的（退场途中再点外面不弹回来）。
+			"TestTheQueueDrawerDoesNotBlockClicksWhileItSlides",
+			// 退场那 200ms 里底下那片蒙版**不吃点击**（它是透明的，看不见的
+			// 东西吃点击就是「点不动」）。
+			"TestTheQueueDrawerBackdropStopsEatingClicksWhileItSlidesOut",
+			// 每帧分配没涨（进场那 200ms 和稳态一个数）。
+			"TestTheQueueDrawerSlideDoesNotAllocatePerFrame",
+			// 小浮层不加进出场（读语法树：确认框 / 菜单 / 弹窗 / 浮层那一批，
+			// 一个动画调用都没有）。
+			"TestTheSmallOverlaysHaveNoEnterOrExitAnimation",
+			// Toast 那 250ms 的入场**没被这一票动过**（它是 #207 定的，#292 要改
+			// 的是它的曲线不是它的时长）。
+			"TestTheToastKeepsItsOwnEntryAnimation",
 		},
 	},
 }
