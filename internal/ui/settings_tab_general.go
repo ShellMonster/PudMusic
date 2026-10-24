@@ -106,7 +106,7 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 		// ⚠️ **这一行有身份**（`settingRowAt`）：从下载记录页跳过来的时候要指着它
 		// （见 goToDownloadDirSetting）——设置页有四个 Tab、几十行，不指一下用户
 		// 还得自己找「下载目录」在哪儿。
-		s.settingRowAt(c, string(settingsFocusDownload), "下载目录", "选择音视频保存的位置",
+		s.settingRowAt(c, string(settingsFocusDownload), "下载目录", "选择音频保存的位置",
 			func() { s.pickDownloadPath(c, st, ro) })
 		s.settingRow(c, "FFmpeg 路径", "手动指定 FFmpeg 可执行文件路径",
 			func() { s.pickFFmpegPath(c, st, ro) })
@@ -236,7 +236,7 @@ func (s *Shell) pickDownloadPath(c *ui.Context, st app.Settings, ro bool) {
 	ui.Row(c).Key("setting:downloadPath").Width(settingsControlW).
 		MinWidth(settingsControlMinW).Gap(space.Px8).Children(func() {
 		s.pathField(c, st.DownloadPath, "下载目录", ro)
-		if flatButton(c, "选择").Width(64).Disabled(ro).Clicked() {
+		if settingsButton(c, "选择").Width(72).Disabled(ro).Clicked() {
 			s.pickPath("下载目录", true, func(path string) {
 				s.applySetting("下载目录", func(cur *app.Settings) { cur.DownloadPath = path })
 				s.addToast("下载目录已改：下载记录页上写的就是它，下完的歌放在那儿",
@@ -251,7 +251,7 @@ func (s *Shell) pickFFmpegPath(c *ui.Context, st app.Settings, ro bool) {
 	ui.Row(c).Key("setting:ffmpegPath").Width(settingsControlW).
 		MinWidth(settingsControlMinW).Gap(space.Px8).Children(func() {
 		s.pathField(c, st.FFmpegPath, "FFmpeg 路径", ro)
-		if flatButton(c, "选择").Width(64).Disabled(ro).Clicked() {
+		if settingsButton(c, "选择").Width(72).Disabled(ro).Clicked() {
 			s.pickPath("FFmpeg 路径", false, func(path string) {
 				s.applySetting("FFmpeg 路径", func(cur *app.Settings) { cur.FFmpegPath = path })
 			})
@@ -271,7 +271,7 @@ func (s *Shell) pathField(c *ui.Context, path, label string, ro bool) {
 	}
 	// ⚠️ **不许给输入框加 Key**：Key 只能挂在「创建时没有处理输入」的控件上，
 	// 挂上去直接 panic（`ui/element.go:658`）。外面那一格有 Key 就够了。
-	ui.TextInput(c, &shown).Grow(1).Label(label).ReadOnly(true)
+	ui.TextInput(c, &shown).Grow(1).Height(settingsSelectH).Label(label).ReadOnly(true)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

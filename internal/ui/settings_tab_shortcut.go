@@ -82,7 +82,7 @@ func (s *Shell) settingsShortcuts(c *ui.Context) {
 
 			// 底下一行：恢复默认在左，全局开关在右（Biu 放在右下角，`:134-136`）。
 			ui.Row(c).FillWidth().Gap(space.Px12).AlignItems(ui.Center).Padding(space.Px8, space.None).Children(func() {
-				if flatButton(c, "恢复默认").FontSize(scale.Font(c, scale.Size12)).Disabled(ro).Clicked() {
+				if settingsButton(c, "恢复默认").FontSize(scale.Font(c, scale.Size12)).Disabled(ro).Clicked() {
 					s.applyShortcutChange("快捷键", s.keys.reset)
 				}
 				ui.Spacer(c).Grow(1)

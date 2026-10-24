@@ -75,12 +75,14 @@ func TestTheSettingsPageHasOnlyOneSegmentedControl(t *testing.T) {
 						spot.what, spot.chosen, got, rgbaOf(theme.Accent))
 				}
 
-				// 没选中的那一档：**没有底色**，就是页面底色。
+				// 没选中的那一档：自己**没有底色**，露出的是这一排共用的那条轨道
+				// （设计规范 §7.9：轨道 = 背景色混 6% 的文字色）。三处走同一个出口，
+				// 所以轨道色也只有一种；框架 `ui.Segmented` 的白色滑块不回到设置页。
+				track := theme.Background.Mix(theme.Text, 0.06)
 				gotOther := modeOf(bandPixels(tt.Image(), buttonPadSpot(other)))
-				if !nearRGBA(gotOther, rgbaOf(s.cardBackground(theme)), 3) {
-					t.Errorf("「%s」没选中的那一档（%q）底色是 %v，want %v（页面底色）——"+
-						"框架 `ui.Segmented` 那种灰底轨道不许回到设置页来",
-						spot.what, spot.notChos, gotOther, rgbaOf(s.cardBackground(theme)))
+				if !nearRGBA(gotOther, rgbaOf(track), 3) {
+					t.Errorf("「%s」没选中的那一档（%q）底色是 %v，want %v（轨道色）",
+						spot.what, spot.notChos, gotOther, rgbaOf(track))
 				}
 			}
 		})

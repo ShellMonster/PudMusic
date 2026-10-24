@@ -832,7 +832,8 @@ func (s *Shell) settingsSegment(c *ui.Context, key, group string, w float32, opt
 	// ⚠️ **下限**：行放不下说明列的最小宽度时，这一列先收窄（框架的 flex 会先
 	// 满足说明列那个 `MinWidth`）——但不低于 `settingsControlMinW`，不然「跟随
 	// 系统」那一档会被裁成半个词（那个常量的注释写着整段来由）。
-	row = row.MinWidth(settingsControlMinW)
+	row = row.MinWidth(settingsControlMinW).Padding(space.Px2).Radius(t.Radius + 2).
+		Background(t.Background.Mix(t.Text, 0.06))
 	row.Children(func() {
 		for i, opt := range opts {
 			// ⚠️ **不 `Grow`**（见顶上那一段）：宽度就是内容本身。
@@ -1012,4 +1013,12 @@ func (s *Shell) applySetting(what string, fn func(*app.Settings)) {
 	if _, err := s.app.UpdateSettings(fn); err != nil {
 		s.addToast(what+"没存上："+strings.TrimPrefix(err.Error(), "app: "), notice.Danger)
 	}
+}
+
+// settingsButton 是设置页的次级按钮（选择、添加文件夹、导入导出、恢复默认）：
+// 32 高、`Surface` 底、1px 描边（设计规范 §7.9），不是裸文字。
+func settingsButton(c *ui.Context, label string) ui.Element {
+	t := c.Theme()
+	return flatButton(c, label).Height(settingsSelectH).Padding(space.None, space.Px12).
+		Radius(t.Radius).Background(t.Surface).Border(1, t.Border)
 }
