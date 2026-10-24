@@ -223,6 +223,10 @@ type App struct {
 	// wantPlay 是用户的意图（按过播放），playing 是播放器此刻的实际状态。
 	// 两者分开是因为一首歌播完之后 wantPlay 还是 true，而 playing 变回 false；
 	// 进度条拖回中间时靠 wantPlay 才能接着播。
+	//
+	// ⚠️ **两个方向都要记**（票 #352）：按了暂停落 false，**按回来记回 true**。
+	// 只落不记的话它会一直 false，而 `onTrackFinished` 拿它当「要不要往下走」
+	// 的判据 → 队列卡住 → 而界面上一个字都没有。
 	wantPlay bool
 	playing  bool
 	errText  string
@@ -933,9 +937,15 @@ func (a *App) Toggle() {
 		// 那次暂停把它落成了 false。它要是留在 false，两处会跟着坏：
 		//
 		//   - 这一首放完之后**队列不会往下走**（`onTrackFinished` 认的就是
-		//     wantPlay，用户按了播放却停在原地）。
+		//     wantPlay，用户按了播放却停在原地）。而那一句是**静默**的：队列
+		//     不往下走，而界面上一个字都没有——既不是「已停止」，也不是
+		//     「这一串放完了」（票 #352；回归测试在
+		//     `internal/app/toggle_resume_test.go`）。
 		//   - 拖了进度条之后不会接着播（「往回拖必须能接着播」是验收项 5，
 		//     `internal/app/app.go` 的 ScrubEnd 那段注释写着这一句）。
+		//
+		// ⚠️ **别把它当成「播放器此刻在不在响」**：那一栏是 `playing`。这一栏
+		// 答的是「用户想不想听」——两者分开正是为了分清「暂停」和「放完了」。
 		a.wantPlay = true
 	}
 	// 按播放把一首停住的歌放起来时，「停过」这件事就过去了。
@@ -1367,8 +1377,13 @@ func (a *App) tick() {
 			//     是显式地把两件事都摆出来，省得读代码的人去推「Ended 为真
 			//     时 Err 是不是一定为 nil」。
 			//
-			// 用户按暂停/停止走不到这里：`Toggle`/`Pause`/`Stop` 都把
-			// wantPlay 落成 false，下一次 tick 的 `live` 已经是 false。
+			// 用户按暂停/停止走不到这里：`Toggle` 的**暂停那一半**、`Pause`、
+			// `Stop` 都把 wantPlay 落成 false，下一次 tick 的 `live` 已经是 false。
+			//
+			// ⚠️ **而 `Toggle` 的「按回来」那一半要把 wantPlay 记回 true**
+			// （票 #352）：只落 false 不记回来的话，这一栏就一直 false，而
+			// `onTrackFinished` 拿它当「要不要往下走」的判据 → 队列不往下走 →
+			// 界面上什么话都没有。
 			//
 			// 放在锁外面调：那两样要拿解码器自己的锁，还可能去碰字节源。
 			if ended && p != nil && p.Ended() && p.Err() == nil {
