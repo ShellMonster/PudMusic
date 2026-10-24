@@ -2741,6 +2741,29 @@ var Items = []Item{
 		},
 	},
 	{
+		// 归「双平台」那一组：这一票动的是**名字型可点击元素**的样子。
+		//
+		// 🔴 **判据是像素**：那个名字被一个**胶囊**包着（左右各 14 像素的内边距
+		// + 圆角，指针落上去时再压一层半透明前景色），改完是**一句话字 +
+		// 悬停时一道下划线**——而「胶囊」这件事在代码里看不出来，换一种写法
+		// 一样编译得过、点得动、无障碍名字也还叫得出来，只有画面上才差得出来。
+		//
+		// ⚠️ **反面也断**：同一张卡片上那几枚**动作键**（赞 / 下一首播放 /
+		// 下载音频）悬停时**仍然要**有那一层淡底——它们是按钮，不是名字链接。
+		// 把它们一起拍平的话，「哪一个是动作」就没有了。
+		Category: Platform,
+		// issue 417：名字型可点击元素改成下划线（上游是 `hover:underline`）。
+		Spec: "名字型可点击元素（动态条目上的作者名、播放条上的 UP 名、列表行里的 UP 名）是一句话字，悬停时带一道下划线，没有胶囊底；下划线的颜色是主题算出来的那一档主色，深浅两套都读得出来；它仍然点得动、键盘走得到；同一处的动作键仍然是按钮",
+		Tests: []string{
+			"TestTheDynamicAuthorNameIsALinkNotAPill",
+			"TestThePlaybarOwnerNameIsALinkNotAPill",
+			"TestTheListOwnerNameIsALinkNotAPill",
+			"TestTheActionButtonsAreStillButtons",
+			"TestTheNameLinkIsKeyboardReachable",
+			"TestTheUnderlineColorFollowsTheTheme",
+		},
+	},
+	{
 		// 归「分页与路由」那一组：按歌名找是**接口**筛的（词发给
 		// `/x/v3/fav/resource/list`），而列表是按那个词重新拉的。
 		Category: Paging,
