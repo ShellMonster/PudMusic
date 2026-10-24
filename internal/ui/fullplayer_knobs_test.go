@@ -90,6 +90,18 @@ func TestTheFullPlayerKnobsSitAtTheBottomRightOfTheLyrics(t *testing.T) {
 			"（上游 ⌀32 + `space-y-3` 的 12）",
 			font.Y, offset.Y, offset.Y-font.Y, wantStep)
 	}
+	// 每一枚都是 32×32 的一个**正方**（上游 ⌀32 的圆钮：圆角半径 = 直径的一半，
+	// 所以画出来是一个正圆，票 #194）。
+	for _, name := range []string{lyricFontKnobName, lyricOffsetKnobName, lyricSearchKnobLabel} {
+		r, ok := tt.Find(name)
+		if !ok {
+			t.Errorf("画面上找不到 %q，文字有 %q", name, tt.Texts())
+			continue
+		}
+		if r.W != 32 || r.H != 32 {
+			t.Errorf("%q 是 %.0f×%.0f，want 32×32（上游 ⌀32 的圆钮）", name, r.W, r.H)
+		}
+	}
 }
 
 // TestTheFullPlayerKnobsActuallyWork 断那三枚**真的能用**。
@@ -170,11 +182,11 @@ func TestTheFullPlayerLyricsAreLeftAligned(t *testing.T) {
 			t.Fatalf("找不到 %q，文字有 %q", name, tt.Texts())
 		}
 		// ⚠️ **只量左半边**：右下角那三枚旋钮浮在歌词区里（上游也是浮在那儿），
-		// 最下面那一句的框和旋钮那一列**重叠**——而旋钮上的字是全亮的（235），
+		// 最下面那一句的框和旋钮那一列**重叠**——而旋钮上那枚图标是全亮的（235），
 		// 比歌词那几句（60% 的不透明度，最亮 146）亮得多，整框一起量的话门槛会被
-		// 旋钮抬上去，量到的就成了旋钮上的字。
+		// 旋钮抬上去，量到的就成了旋钮上的图形。
 		//
-		// 左半边没有旋钮（它们在 x=1060 那一带），而「字该落在哪儿」这件事在
+		// 左半边没有旋钮（它们在 x=1096 那一带），而「字该落在哪儿」这件事在
 		// 左半边就说得清：左对齐的话字从内容盒的左沿开始，居中的话左半边一个字
 		// 都没有。
 		half := mygoui.Rect{X: line.X, Y: line.Y, W: line.W / 2, H: line.H}

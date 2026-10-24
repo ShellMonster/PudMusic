@@ -96,6 +96,28 @@ func (q *Queue) bagNextLocked() (int, bool) {
 	}
 }
 
+// bagPeekLocked 报「下一次会抽到哪一首」，**不抽走**。
+//
+// 它是 `bagNextLocked` 的那一份「只看不拿」（预取用这一支，见
+// `Queue.PeekNext`）：预取要知道下一首是谁，但它**不能替真抽把袋子抽走**
+// ——抽走了的话，真播那一趟抽到的就不是这一首了。
+//
+// ⚠️ **袋空的时候答不出来**（答 false）：真抽的时候袋空会**重装**一袋，而
+// 重装要洗牌（要消耗随机源）——预取不该替真抽把随机源用掉。所以随机那一档
+// 每轮里总有一首（袋空的那一首）备不上，代价只是那一首没有无缝。
+//
+// ⚠️ **已经不在队列里的那些要跳过**：和 `bagNextLocked` 一样（那一格作废，
+// 接着看下一格）。这里**不把作废的那些抽掉**——真抽的时候才抽。
+func (q *Queue) bagPeekLocked() (int, bool) {
+	for _, id := range q.bag {
+		at := q.indexOfIdentityLocked(id)
+		if at >= 0 {
+			return at, true
+		}
+	}
+	return 0, false
+}
+
 // bagMoveToEndLocked 把 id 从袋子里挪到最后（它不在袋子里时什么都不做）。
 //
 // 「正在放的那首」和「刚被点过去的那首」都归它管：它们已经在放了，这一轮最后

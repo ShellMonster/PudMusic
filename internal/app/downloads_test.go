@@ -608,3 +608,72 @@ func readQueueFile(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+// 下载目录**没选过时**落的是默认落点，选过之后是用户选的那个。
+//
+// ⚠️ **默认落点是什么不是这一层的事**：真机上它是「音乐」目录下的应用子目录
+// （`~/Music/BiuGo`），那是界面层算出来递进来的（`Downloads.FallbackDir`，见
+// `platform.DefaultDownloadsDir`）。这一层只管**优先级**：设置里的那个说了算，
+// 没设置才是兜底。
+//
+// ⚠️ **老歌不搬家**：已经在旧目录（系统下载目录）下的歌留在原地——这一层只决定
+// **新**下载落到哪儿，不搬、不删。
+func TestTheDownloadDirectoryIsTheDefaultOneUntilTheUserPicksAnother(t *testing.T) {
+	a := app.New()
+	t.Cleanup(a.Close)
+
+	// 设置得挂上：下载目录是从设置里读的（`Settings.DownloadPath`）。
+	if err := a.MountSettings(filepath.Join(t.TempDir(), app.SettingsFileName)); err != nil {
+		t.Fatalf("挂设置：%v", err)
+	}
+	t.Cleanup(func() { _ = a.CloseSettings() })
+
+	fallback := t.TempDir()
+	if err := a.MountDownloads(app.Downloads{
+		Media: http.DefaultClient, FallbackDir: fallback,
+	}); err != nil {
+		t.Fatalf("挂下载：%v", err)
+	}
+
+	if got := a.DownloadDir(); got != fallback {
+		t.Errorf("没选过下载目录时歌落的是 %q，want 默认落点 %q", got, fallback)
+	}
+
+	picked := t.TempDir()
+	if _, err := a.UpdateSettings(func(s *app.Settings) { s.DownloadPath = picked }); err != nil {
+		t.Fatalf("改设置：%v", err)
+	}
+	if got := a.DownloadDir(); got != picked {
+		t.Errorf("用户选过之后歌落的是 %q，want 用户选的那个 %q", got, picked)
+	}
+}
+
+// 没有落盘的地方时**不入队**。
+//
+// ⚠️ **这一条挡的是「静默落到一个诡异的目录里」**：目录是空串时
+// `filepath.Join("", "歌.m4a")` 出来的是一个**相对路径**，歌会落到进程的当前
+// 工作目录里（双击图标启动的 macOS 应用那是 `/`）——用户在自己的下载目录里
+// 找不到它，而界面上**没有一句话**说它去哪儿了。
+//
+// 宁可让用户看见一句「先去设置里选一个」。
+func TestTheDownloadIsRefusedWhenThereIsNowhereToPutIt(t *testing.T) {
+	f := newStreamFixture(t)
+
+	a := app.New()
+	t.Cleanup(a.Close)
+	// 挂下载，但**不给**默认落点（`FallbackDir` 是空串）。
+	if err := a.MountDownloads(app.Downloads{Media: f.Client()}); err != nil {
+		t.Fatalf("挂下载：%v", err)
+	}
+
+	_, err := a.Download(onlineItem("BV1", "c1", "第一首"))
+	if err == nil {
+		t.Fatal("没有下载目录时不该把这一首收进队列")
+	}
+	if !strings.Contains(err.Error(), "下载目录") {
+		t.Errorf("失败原因是 %q，want 一句说「还没有下载目录」的话", err)
+	}
+	if n := len(a.DownloadSnapshots()); n != 0 {
+		t.Errorf("队列里有 %d 条，want 0（没地方放就不该收进去）", n)
+	}
+}
