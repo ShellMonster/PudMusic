@@ -224,3 +224,49 @@ func TestTheNavbarAvatarGrowsOnHover(t *testing.T) {
 	}
 	assertGrew(t, before, after, wantZoom, "顶栏那个头像")
 }
+
+// TestTheHoverZoomCurveIsNotTheUpstreamOne 钉住「我们这条曲线**不是**上游那条」。
+//
+// ⚠️ **这一条是修一句说谎的注释**：DESIGN.md §五 与 `hoverzoom.go` 的注释曾写着
+// 「上游那条 `cubic-bezier(0.4, 0, 0.2, 1)` 也就是 `ui.EaseInOut`，视觉上没有
+// 区别」——**那是假的**：两条曲线差得很远（实算见下）。
+//
+// 照着那句注释去「精确复刻上游」，观感会明显不一样；反过来，以为现在已经等于
+// 上游、以后就不再过问，也不对。
+//
+// 实算（同一个 mygo v0.6.2）：
+//
+//	t      ui.EaseInOut    上游 cubic-bezier(0.4, 0, 0.2, 1)
+//	0.25       0.0625                   0.2366
+//	0.50       0.5000                   0.7756
+//	0.75       0.9375                   0.9594
+//
+// 我们的 hover 放大走的是**左边那一列**（`ui.EaseInOut`）——见 `hoverZoom`。
+//
+// ⚠️ **这一条量不到元素本身**：那一格放大 5%，两条曲线在半程上差的那 1.5% 只有
+// 28 像素的头像上 0.4 个像素——量不出来。所以它钉的是**曲线本身**（也就是文档
+// 里引用的那几个数），元素那一侧由 `TestTheNavbarAvatarGrowsOnHover` 那一族钉。
+func TestTheHoverZoomCurveIsNotTheUpstreamOne(t *testing.T) {
+	upstream := mygoui.CubicBezier(0.4, 0, 0.2, 1)
+	for _, p := range []struct {
+		at        float32
+		easeInOut float32
+		upstream  float32
+	}{
+		{0.25, 0.0625, 0.2366},
+		{0.50, 0.5000, 0.7756},
+		{0.75, 0.9375, 0.9594},
+	} {
+		if got := mygoui.EaseInOut(p.at); got != p.easeInOut {
+			t.Errorf("ui.EaseInOut(%.2f) = %.4f，want %.4f", p.at, got, p.easeInOut)
+		}
+		if got := upstream(p.at); got < p.upstream-0.002 || got > p.upstream+0.002 {
+			t.Errorf("上游那条 cubic-bezier(0.4,0,0.2,1) 在 %.2f 处是 %.4f，want %.4f",
+				p.at, got, p.upstream)
+		}
+		if mygoui.EaseInOut(p.at) == upstream(p.at) {
+			t.Errorf("两条曲线在 %.2f 处相等了——文档里写着它们差得很远（%.4f vs %.4f）",
+				p.at, mygoui.EaseInOut(p.at), upstream(p.at))
+		}
+	}
+}
