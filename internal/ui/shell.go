@@ -358,6 +358,25 @@ type Shell struct {
 	//
 	// ⚠️ 理由同 `sideRowKeys`（票 #313）。
 	queueRowKeys rowkey.Memo[string, any]
+	// queueDrags 记着每一行那个**拖动值**（拖拽重排用的）。
+	//
+	// ⚠️ **它记的是指针**：框架把拖动值装进 `any`，装指针不分配——而每一行
+	// 每帧都要传一次拖动值（见 queue_drag.go 的说明）。
+	queueDrags rowkey.Memo[string, *queueDragValue]
+
+	// queueDropAt 是**落点那一行**在抽屉里的行号（-1 = 没有落点）。
+	//
+	// ⚠️ **它由每一行自己记**（见 queue_drawer.go 的 viewQueueRow）：每一行都
+	// 知道指针是不是在它身上、在它的哪一半——指针在谁身上，谁就是落点。
+	queueDropAt int
+	// queueDropUpper 是落点在那一行的**上半**（true）还是下半（false）。
+	queueDropUpper bool
+	// queueDragging 是「有东西正被拖着经过这一列」。
+	//
+	// ⚠️ **它比指针慢一帧**：它是上一帧问出来的（框架的 DragOver 只能在列表
+	// 建完之后问，见 viewQueueList）。差一帧看不出来——插入线晚一帧出现，
+	// 而拖动本来就不是一帧的事。
+	queueDragging bool
 
 	// queueScroll 是那一列滚到哪儿了。**和 queueList 分开存**是因为「定位当前
 	// 播放」要的是一段动画：ListState.ScrollTo 是一跳到位（`mygo/ui/list.go`
@@ -382,6 +401,13 @@ type Shell struct {
 	//
 	// ⚠️ 理由同 `sideRowKeys`（票 #313）。
 	partRowKeys rowkey.Memo[string, any]
+
+	// errDetailOpen 是「错误详情」那块面板开着没有（票 #320，见 playbar_err.go）。
+	// **同样只由 view 在主线程上读写**。
+	//
+	// ⚠️ **它跟着错误一起收**：错没了（下一首放起来了）而它还开着的话，下一句
+	// 错一上来，面板是开着的——用户会看到一块不属于这句错的浮层。
+	errDetailOpen bool
 
 	// 顶栏这一摊。**同样只由 view 在主线程上读写**。
 	//

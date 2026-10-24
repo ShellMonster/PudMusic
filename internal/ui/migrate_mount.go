@@ -95,7 +95,7 @@ var migration struct {
 // MountMigration 跑一次数据升级与首次导入。**必须在所有 Mount 之前调。**
 //
 // 返回的 error 是「有东西没办成」——升级失败、导入有跳过的项。它**不阻止程序
-// 起���**：拿不到目录就什么都不做，用户照常用这个应用（设置存不住这件事界面上会
+// 起来**：拿不到目录就什么都不做，用户照常用这个应用（设置存不住这件事界面上会
 // 另有提示，见 `reportSettingsError`）。
 func MountMigration() error {
 	dir, err := mygo.App.Path(mygo.PathUserData)

@@ -495,7 +495,7 @@ func TestTheAvatarSaysNobodyIsLoggedIn(t *testing.T) {
 // 总量（**211** 对 **50**）再补一刀，防的是「又宽又细」那种改法。
 //
 // 深浅两套主题各跑一遍：数字量出来一模一样（17/211 与 7/50），而只跑浅色的话
-// 有人改了深色的那套颜色，这一���还是绿的。
+// 有人改了深色的那套颜色，这一枚还是绿的。
 func TestTheAvatarShowsAPersonAndNotALetterWhenNobodyIsLoggedIn(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"

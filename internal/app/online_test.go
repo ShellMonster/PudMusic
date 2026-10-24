@@ -229,7 +229,7 @@ func (f *streamFixture) serveMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Content-Length 写的是**这一次实际会发多少**，不是整段长度。写成总长的���，
+	// Content-Length 写的是**这一次实际会发多少**，不是整段长度。写成总长的话，
 	// 声明和实际对不上，客户端读到的是 unexpected EOF。
 	w.Header().Set("Content-Length", fmt.Sprint(len(data)-start))
 	if start > 0 {

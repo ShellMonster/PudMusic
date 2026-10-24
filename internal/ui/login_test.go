@@ -225,7 +225,7 @@ func TestLoginPageShowsTheThreeStatesEachWithItsOwnWords(t *testing.T) {
 			// ⚠️ 不能直接等 Phase：`beginLogin` 一上来就把 Phase 设成
 			// LoginWaiting（提示是「正在向 B 站申请二维码…」），
 			// 只等 Phase 的话会在二维码到位**之前**就取样，
-			// 拿到的提示自然是错的。���种测试失败是 flaky 的经典形态。
+			// 拿到的提示自然是错的。这种测试失败是 flaky 的经典形态。
 			waitQRCode(t, a)
 			waitLogin(t, a, c.want)
 			tt.Frame()
@@ -432,7 +432,7 @@ func TestQRCodeReachesThePixels(t *testing.T) {
 	//
 	// 这一步是真的在验「画到屏幕上的那张 = B 站给的那条地址编码出来的」，
 	// 而不是「画面上有黑白像素」。尺寸算错、缩放错、错位、反色、
-	// 画了一半——任何一种都会在这里露出��来。
+	// 画了一半——任何一种都会在这里露出来。
 	code := a.LoginState().QR
 	total := code.Size() + 2*4 // 含留白
 	per := float64(side) / float64(total)
