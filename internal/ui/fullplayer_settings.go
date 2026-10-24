@@ -183,8 +183,12 @@ func (s *Shell) viewFullSettingsPopover(c *ui.Context, gear ui.Element) {
 // （理由见 popup.go；`popup_test.go` 的 `TestEveryHandMadePopupHasAShadow` 盯着
 // 这一条）。
 //
-// 而「点外面关掉」和「Esc 关掉」是框架那个浮层自己管的，`PopoverBase` 一样有
-// （`mygo/ui/base.go` 的 `popover`）——换成自己拼并不会丢掉那两个手势。
+// 而「点外面关掉」是框架那个浮层自己管的，`PopoverBase` 一样有
+// （`mygo/ui/base.go` 的 `popover`）——换成自己拼并不会丢掉那个手势。
+//
+// ⚠️ **「Esc 关掉」有条件**：框架把键先给焦点链，它们都不处理才轮到浮层
+// （`mygo/ui/input.go` 的 `routeKeys`）——焦点在一个自己吃 Esc 的控件里时，
+// 它关不掉（理由见 `playbar.go` 里 `viewTrackError` 那处注释）。
 func (s *Shell) viewFullSettingsPanel(c *ui.Context, panel, gear ui.Element) {
 	t := c.Theme()
 	popupPanel(t, panel.

@@ -486,7 +486,7 @@ func TestTheSpectrumIsActuallyPaintedWithThatColor(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	if bars := s.app.SpectrumBars(48, 40); bars[0] == 0 {
-		t.Fatalf("两秒了还是一条基线：%v", bars[:4])
+		t.Fatalf("两秒了还是一排 0（画面上什么都画不出来）：%v", bars[:4])
 	}
 
 	// 只在**频谱自己那个框**里数：整个窗口里别处也有 #666 一族的主题色（按钮

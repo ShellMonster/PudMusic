@@ -140,7 +140,7 @@ func TestAPureToneLandsOnItsOwnBin(t *testing.T) {
 	}
 }
 
-// TestSilenceIsSilence 断「没在放的时候画出来的是一条基线，而不是一片噪声」。
+// TestSilenceIsSilence 断「没在放的时候给的是一排 0，而不是一片噪声」。
 func TestSilenceIsSilence(t *testing.T) {
 	a := New(1)
 	mag := a.Magnitudes(make([]float32, FFTSize*2), 2, make([]float32, Bins))

@@ -399,7 +399,7 @@ func TestTheFullPlayerBottomBarHasPlayModeAndQueue(t *testing.T) {
 		}
 	}
 
-	// 抽屉底下让出来的是**满屏的底栏**（108 高），不是播放条那 88：进度条整条
+	// 抽屉底下让出来的是**满屏的底栏**（108 高），不是播放条那 76：进度条整条
 	// 都该按得着。点它一下，抽屉不该被当成「点了蒙版」关掉。
 	prog, ok := tt.Find("全屏播放进度")
 	if !ok {
