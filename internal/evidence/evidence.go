@@ -954,6 +954,7 @@ var Items = []Item{
 			"TestTheMiniMuteStateSurvivesARestart",
 			"TestTheMiniMuteIconIsThereWithoutATrack",
 			"TestTheMiniVolumeTipSaysItIsMuted",
+			"TestTheMiniMuteIconSaysCancelMuteWhenThereIsNoSound",
 			// 小窗里认的是**用户配的那一份**而不是出厂默认值；以及在小窗里按
 			//「切换mini/完整模式」是关掉而不是再开一个。
 			// （设置页写着「窗口在前台时按它就有用」，而小窗是最常停在前面的那一扇。）
@@ -978,9 +979,9 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
-		Spec:     "迷你播放器这一块本身：装得下 320×100、那四个键是图标键（框对、图形在）、控件身份稳（铁律四）",
+		Spec:     "迷你播放器这一块本身：装得下 320×84、那几枚键是图标键（框对、图形在）、控件身份稳（铁律四）",
 		Tests: []string{
-			"TestTheMiniCardFitsInThreeHundredAndTwentyByOneHundred",
+			"TestTheMiniCardFitsInThreeHundredAndTwentyByEightyFour",
 			"TestTheMiniKeysAreIcons",
 			"TestTheMiniControlsKeepTheirIdentityWhenTheLabelChanges",
 		},

@@ -708,8 +708,18 @@ func (s *Shell) viewMiniVolume(c *ui.Context, st app.State) {
 	// ⚠️ **图标是「音量三档」而不是一枚专门的静音图**：那是 DESIGN.md
 	// §六 播放条那一节定的画法（上游 `music-volume` 同一套），而这张
 	// 图标**在主窗口已经画了**——两扇窗用同一个 `volumeIcon`，不另起一套。
+	//
+	// ⚠️ **「现在没声」的判据要和播放条那枚一样**（`st.Muted || st.Volume <= 0`）：
+	// 「音量 0」在听感上也是没声（`App.SetVolume` 把 0 记成静音，而老设置文件
+	// 里只有 `volume: 0` 没有 `isMuted`——两格分开恢复，于是那种文件恢复出来
+	// 是**音量 0 且没静音**）。
+	//
+	// 只看 `st.Muted` 的话，这一档下这一枚会叫「静音」（可按下去实际是
+	// **取消**静音、音量放回一半），而播放条那枚叫「取消静音」——**两扇窗
+	// 对同一个状态说两个话**，读屏软件读到的名字和按下去的结果也相反。
+	muted := st.Muted || st.Volume <= 0
 	muteLabel := "静音"
-	if st.Muted {
+	if muted {
 		muteLabel = "取消静音"
 	}
 	muteIcon := volumeIcon(st.Volume, st.Muted)

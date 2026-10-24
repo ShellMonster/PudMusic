@@ -17,6 +17,7 @@ package ui
 
 import (
 	"image/color"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -538,5 +539,67 @@ func TestTheMiniVolumeTipSaysItIsMuted(t *testing.T) {
 	tt.Frame()
 	if _, ok := tt.Find("已静音（音量 20%）"); !ok {
 		t.Errorf("静音时滑块上没有 %q 那一枚提示，文字有 %q", "已静音（音量 20%）", tt.Texts())
+	}
+}
+
+// TestTheMiniMuteIconSaysCancelMuteWhenThereIsNoSound 钉住「没声的时候名字要说
+// 「取消静音」」。
+//
+// # 这一条治的是**名字和动作相反**
+//
+// 「音量 0」在听感上也是没声，而**老设置文件里只有 `volume` 没有 `isMuted`**
+// （`isMuted` 是票 #311 才加的那一格）——那种文件恢复出来是**音量 0 且
+// 没静音**（`App.MountSettings` 把两格分开恢复，见 `settings_mount.go`）。
+//
+// 这一档下：
+//   - 播放条那枚叫「**取消静音**」（`playbar_volume.go` 的判据是
+//     `st.Muted || st.Volume <= 0`）；
+//   - 按下去的实际动作是**取消静音**（`App.ToggleMute` 的 `volume <= 0` 分支把
+//     音量放回一半）。
+//
+// ⚠️ **只按 `st.Muted` 判的话，这一档下迷你窗那枚会叫「静音」**：名字说
+// 「按下去会静音」，实际却是「取消静音」——**读屏软件读到的名字和按下去的结果
+// 相反**，而两扇窗对同一个状态说了两个话。
+func TestTheMiniMuteIconSaysCancelMuteWhenThereIsNoSound(t *testing.T) {
+	// 造出那个状态：**老设置文件**（只有 `volume`，没有 `isMuted`）。
+	dir := writableTempDir(t, "settings")
+	path := filepath.Join(dir, app.SettingsFileName)
+	if err := os.WriteFile(path, []byte(`{"volume":0}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := app.New()
+	t.Cleanup(a.Close)
+	if err := a.MountSettings(path); err != nil {
+		t.Fatal(err)
+	}
+	st := a.Snapshot()
+	if st.Volume != 0 || st.Muted {
+		t.Fatalf("造不出那个状态：Volume=%v Muted=%v（要的是音量 0 且没静音）",
+			st.Volume, st.Muted)
+	}
+	s := NewMini(a, newTestShell(t, onApp(a)).s, nil)
+	t.Cleanup(s.closePerWindow)
+	s.router.Transition = mygoui.TransitionNone
+	tt := miniTester(s)
+	tt.Frame()
+
+	// 迷你窗：叫「取消静音」。
+	if _, ok := tt.Find(miniMuteIconLabelMuted); !ok {
+		t.Errorf("音量 0 且没静音的时候，迷你窗那枚不叫 %q，文字有 %q",
+			miniMuteIconLabelMuted, tt.Texts())
+	}
+	if _, ok := tt.Find(miniMuteIconLabel); ok {
+		t.Errorf("音量 0 且没静音的时候，迷你窗那枚**还**叫 %q——名字和按下去的动作相反",
+			miniMuteIconLabel)
+	}
+
+	// **主窗口播放条那枚叫同一个名字**：两扇窗对同一个状态得说同一句话。
+	bar := playBarTester(t, st, 1200, false)
+	if _, ok := volumeKeyOnTheBar(bar); !ok {
+		t.Fatalf("播放条上找不到音量那一枚，文字有 %q", bar.Texts())
+	}
+	if _, ok := bar.Find(miniMuteIconLabelMuted); !ok {
+		t.Errorf("播放条那枚不叫 %q，而迷你窗那枚叫 %q——两扇窗对同一个状态说了两个话",
+			miniMuteIconLabelMuted, miniMuteIconLabel)
 	}
 }
