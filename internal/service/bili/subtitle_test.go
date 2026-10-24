@@ -61,6 +61,17 @@ func subtitleClient(t *testing.T, body string) *Client {
 // ⚠️ **这就是这一票的根因**：B 站在取流的返回里就带着字幕的地址，而 `playurlData`
 // 以前只声明了三个字段，于是那一段**静悄悄地**被丢了——歌词只能靠用户在
 // 「找歌词」里搜。
+//
+// 🔴 **两个地址都要留着**：B 站给同一份字幕两个（不带鉴权参数的那个、和带
+// `auth_key` 的那个），而**不带鉴权的那个可能要登录态**——拿它去请求会 403，
+// 而登录态在字幕那条路上根本到不了（cookie 的域是 `.bilibili.com`，字幕文件在
+// `.hdslb.com`）。所以**只给第一个**的话，「取到了地址但下载 403」就变成
+// 「这一整条自动歌词静悄悄地不出现」。
+//
+// 上游那个 `||` 兜底只管「地址为空」那一种（`get-lyrics.ts`）：
+// `subtitles[0].subtitle_url || subtitles[0].subtitle_url_v2`——两个都有的时候
+// 它只给第一个。**所以兜底必须落在下载那一层**（见
+// `lyrics.FetchBiliSubtitle`）。
 func TestPlayURLHandsBackTheSubtitleItWasGiven(t *testing.T) {
 	exp := time.Unix(1702204169+7200, 0)
 	c := subtitleClient(t, playurlWithSubtitle(map[string]any{
@@ -81,18 +92,26 @@ func TestPlayURLHandsBackTheSubtitleItWasGiven(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "https://aisubtitle.hdslb.com/bfs/ai_subtitle/prod/one.json"
-	if ref.SubtitleURL != want {
-		t.Errorf("字幕地址 = %q，want %q", ref.SubtitleURL, want)
+	want := []string{
+		"https://aisubtitle.hdslb.com/bfs/ai_subtitle/prod/one.json",
+		"https://aisubtitle.hdslb.com/bfs/ai_subtitle/prod/one.json?auth_key=abc",
+	}
+	if len(ref.SubtitleURLs) != len(want) {
+		t.Fatalf("字幕地址有 %d 个，want %d 个：%q", len(ref.SubtitleURLs), len(want), ref.SubtitleURLs)
+	}
+	for i, w := range want {
+		if ref.SubtitleURLs[i] != w {
+			t.Errorf("第 %d 个字幕地址 = %q，want %q", i, ref.SubtitleURLs[i], w)
+		}
 	}
 }
 
-// TestTheSubtitleFallsBackToTheSecondURL 盯「`subtitle_url` 没有就取
-// `subtitle_url_v2`」。
+// TestTheSecondSubtitleAddressIsKeptToo 盯「只有 v2 那一个地址」那一支。
 //
-// 上游 `get-lyrics.ts` 就是 `subtitle_url || subtitle_url_v2`——两个给的是同一份
-// JSON，v2 那个多带一段鉴权参数。
-func TestTheSubtitleFallsBackToTheSecondURL(t *testing.T) {
+// ⚠️ **它不是「v1 兜底」**（上游的 `||` 是「v1 空了就用 v2」），而是**两个都在
+// 列表里、按该试的顺序排**——下载失败时要改试下一个（见
+// `lyrics.FetchBiliSubtitle`）。
+func TestTheSecondSubtitleAddressIsKeptToo(t *testing.T) {
 	exp := time.Unix(1702204169+7200, 0)
 	c := subtitleClient(t, playurlWithSubtitle(map[string]any{
 		"duration": 100,
@@ -110,15 +129,15 @@ func TestTheSubtitleFallsBackToTheSecondURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "https://aisubtitle.hdslb.com/bfs/ai_subtitle/prod/two.json?auth_key=abc"
-	if ref.SubtitleURL != want {
-		t.Errorf("字幕地址 = %q，want %q", ref.SubtitleURL, want)
+	want := []string{"https://aisubtitle.hdslb.com/bfs/ai_subtitle/prod/two.json?auth_key=abc"}
+	if len(ref.SubtitleURLs) != len(want) || ref.SubtitleURLs[0] != want[0] {
+		t.Errorf("字幕地址 = %q，want %q", ref.SubtitleURLs, want)
 	}
 }
 
 // TestNoSubtitleMeansNoAddress 盯「B 站没给字幕」那一支。
 //
-// ⚠️ **空地址不是错误**：很多歌压根没有字幕，而那是**正常**的一种——界面上照旧
+// ⚠️ **空列表不是错误**：很多歌压根没有字幕，而那是**正常**的一种——界面上照旧
 // 是「暂无歌词」加一个「找歌词」的入口。
 func TestNoSubtitleMeansNoAddress(t *testing.T) {
 	exp := time.Unix(1702204169+7200, 0)
@@ -150,8 +169,8 @@ func TestNoSubtitleMeansNoAddress(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if ref.SubtitleURL != "" {
-			t.Errorf("%s：字幕地址 = %q，want 空", c.what, ref.SubtitleURL)
+		if len(ref.SubtitleURLs) != 0 {
+			t.Errorf("%s：字幕地址 = %q，want 空", c.what, ref.SubtitleURLs)
 		}
 	}
 }
@@ -175,18 +194,18 @@ func TestAnAddressThatIsNotAnAddressIsIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ref.SubtitleURL != "" {
-		t.Errorf("字幕地址 = %q，want 空", ref.SubtitleURL)
+	if len(ref.SubtitleURLs) != 0 {
+		t.Errorf("字幕地址 = %q，want 空", ref.SubtitleURLs)
 	}
 }
 
-// TestSubtitleURLAsksTheSameEndpoint 盯「音乐库那一路问字幕」用的是**同一个**
+// TestSubtitleURLsAsksTheSameEndpoint 盯「音乐库那一路问字幕」用的是**同一个**
 // 取流接口。
 //
 // ⚠️ 音乐库的取流走的是另一个接口（`/audio/music-service-c/url`），那个返回里
 // **没有**字幕——所以要问它背后那个投稿一次（同一个取流接口，只看 `subtitle`
 // 那一段）。
-func TestSubtitleURLAsksTheSameEndpoint(t *testing.T) {
+func TestSubtitleURLsAsksTheSameEndpoint(t *testing.T) {
 	exp := time.Unix(1702204169+7200, 0)
 	f := newFakeBili(t)
 	f.on(pathNav, func(w http.ResponseWriter, r *http.Request) {
@@ -211,21 +230,21 @@ func TestSubtitleURLAsksTheSameEndpoint(t *testing.T) {
 	})
 	c := f.client(t, Options{Now: func() time.Time { return time.Unix(1702204169, 0) }})
 
-	url, err := c.SubtitleURL(context.Background(), testBvid, testCid)
+	urls, err := c.SubtitleURLs(context.Background(), testBvid, testCid)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "https://aisubtitle.hdslb.com/bfs/ai_subtitle/prod/three.json"
-	if url != want {
-		t.Errorf("字幕地址 = %q，want %q", url, want)
+	want := []string{"https://aisubtitle.hdslb.com/bfs/ai_subtitle/prod/three.json"}
+	if len(urls) != len(want) || urls[0] != want[0] {
+		t.Errorf("字幕地址 = %q，want %q", urls, want)
 	}
 
 	// 身份不全的时候**不发请求**：问不出这一集是哪一集，重试一万次还是这一句。
 	f.mu.Lock()
 	before := len(f.seen)
 	f.mu.Unlock()
-	if url, err := c.SubtitleURL(context.Background(), "", testCid); err != nil || url != "" {
-		t.Errorf("没有 bvid 时不该问：%q %v", url, err)
+	if urls, err := c.SubtitleURLs(context.Background(), "", testCid); err != nil || len(urls) != 0 {
+		t.Errorf("没有 bvid 时不该问：%q %v", urls, err)
 	}
 	f.mu.Lock()
 	after := len(f.seen)

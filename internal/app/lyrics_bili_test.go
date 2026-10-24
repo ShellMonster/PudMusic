@@ -185,6 +185,50 @@ func TestAMusicLibraryEntryAlsoGetsItsLyrics(t *testing.T) {
 	})
 }
 
+// TestTheBiliSubtitleFallsBackToTheSecondAddress 盯「第一个地址 403 时改试第二个」。
+//
+// 🔴 **这一条是这一整条自动歌词的生死线**：B 站给同一份字幕两个地址，而**不带
+// 鉴权参数的那个可能要登录态**——拿它去请求会 403。而登录态在字幕那条路上根本
+// 到不了（cookie 的域是 `.bilibili.com`，字幕文件在 `.hdslb.com`；上游那个
+// Electron 客户端也一样，浏览器的 cookie 同样按域匹配）。
+//
+// 所以**唯一能授权这一趟的就是地址自己带的那段 `auth_key`**——也就是第二个地址。
+// 只试第一个的话，「取到了地址但下载 403」就变成「这一整条自动歌词静悄悄地不
+// 出现」（界面上照旧是「暂无歌词」，日志里只有一行）。
+//
+// ⚠️ **夹具必须真的会 403**：仓库里别的夹具永远回 200，于是这一档一次都没被
+// 跑到过。
+func TestTheBiliSubtitleFallsBackToTheSecondAddress(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = readFlac(t)
+	f.subtitleBody = subtitleFixtureBody
+	// 第一个地址：**403**（模拟「它要登录态」）。第二个：给的是正文。
+	f.subtitleURL = f.URL + "/subtitle-need-login.json"
+	f.subtitleURLV2 = f.URL + "/subtitle.json"
+	f.on("/subtitle-need-login.json", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "没有登录态", http.StatusForbidden)
+	})
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), 30280, 110836))
+
+	a := newOnlineApp(t, f, t.TempDir())
+	a.MountLyrics(lyrics.NewCache(t.TempDir()))
+	if err := a.Enqueue(onlineItem("BV1xx", "123", "在线的一首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "在线的一首")
+
+	waitFor(t, 15*time.Second, "歌词从第二个地址来了", func() bool {
+		return a.Lyrics().HasLyrics
+	})
+	snap := a.Lyrics()
+	if len(snap.Rows) != 2 || snap.Rows[0].Text != "第二句" {
+		t.Errorf("歌词是 %+v", snap.Rows)
+	}
+	if snap.Origin != lyrics.OriginBili {
+		t.Errorf("来路 = %q，want %q", snap.Origin, lyrics.OriginBili)
+	}
+}
+
 // TestNoSubtitleMeansTheSearchStaysAvailable 盯「B 站没给字幕」那一支。
 //
 // ⚠️ **那不是错误**：很多歌压根没有字幕，而用户还有另一条路——「找歌词」那个

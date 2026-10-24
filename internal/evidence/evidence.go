@@ -1715,7 +1715,7 @@ var Items = []Item{
 		Spec: "B 站那一份歌词自己来：取流响应里的字幕地址被读出来、后台下载并按上游的判据解析、存进缓存（键与别的歌词缓存一致）、界面上说清它是自动来的",
 		Tests: []string{
 			"TestPlayURLHandsBackTheSubtitleItWasGiven",
-			"TestTheSubtitleFallsBackToTheSecondURL",
+			"TestTheSecondSubtitleAddressIsKeptToo",
 			"TestTheBiliSubtitleIsParsedTheWayUpstreamDoes",
 			"TestTheBiliSubtitleTimeIsRoundedToMilliseconds",
 			"TestTheBiliSubtitleSurvivesTheRoundTripThroughLRC",
@@ -1723,6 +1723,24 @@ var Items = []Item{
 			"TestTheBiliSubtitleSurvivesARestart",
 			"TestTheSubtitleIsFetchedInTheBackground",
 			"TestTheLyricsSayWhereTheyCameFrom",
+			"TestTheOriginLineSitsWhereTheLyricsSit",
+		},
+	},
+	{
+		Category: Negative,
+		// 🔴 **「取到了地址但下载 403」这一档**：B 站给同一份字幕两个地址，而
+		// **不带鉴权参数的那个可能要登录态**——拿它去请求会 403。而登录态在字幕
+		// 那条路上根本到不了（cookie 的域是 `.bilibili.com`，字幕文件在
+		// `.hdslb.com`）。所以**唯一能授权这一趟的就是地址自己带的那段
+		// `auth_key`**——也就是第二个地址。
+		//
+		// 只试第一个地址的话，这一整条自动歌词就**静悄悄地不出现**（界面上照旧是
+		// 「暂无歌词」，日志里只有一行）。上游那个 `||` 兜底只管「地址为空」那一种，
+		// 所以兜底必须落在**下载**那一层。
+		Spec: "字幕的第一个地址下载失败时改试第二个（B 站给同一份字幕两个地址，带 auth_key 的那个才是能下的）",
+		Tests: []string{
+			"TestTheSecondAddressIsTriedWhenTheFirstOneFails",
+			"TestTheBiliSubtitleFallsBackToTheSecondAddress",
 		},
 	},
 	{

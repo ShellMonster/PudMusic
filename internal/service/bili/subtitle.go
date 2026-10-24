@@ -1,4 +1,4 @@
-// B 站那一份字幕：**它就藏在取流响应里**。
+// B 站那一份字幕：它就**藏在取流响应里**。
 //
 // # 为什么不用另外的接口
 //
@@ -25,6 +25,26 @@
 // 凭据边界那边它是 **referer 档**（`.hdslb.com` 在白名单里，见
 // `app.DefaultInjectPolicy`）——拿得到 Referer、拿不到 Cookie，与 CDN 音频
 // 那一档是同一条规则。
+//
+// # 🔴 **两个地址是一个一个试的，不是「取一个」**
+//
+// B 站给同一份字幕**两个**地址：`subtitle_url`（不带鉴权参数）与
+// `subtitle_url_v2`（带一段 `auth_key`）。而**不带鉴权的那个可能要登录态**——
+// 拿它去请求会 403。
+//
+// ⚠️ **而登录态在这一条路上根本到不了**：`SESSDATA` 的域是 `.bilibili.com`，
+// 而字幕文件在 `.hdslb.com`——jar 按域匹配（cookie 发不过去），凭据边界也
+// 明确只给 referer 档（`app.DefaultInjectPolicy` 的 `biliSuffixes` 只有
+// `.bilibili.com`）。上游那个 Electron 客户端也一样：浏览器的 cookie 同样
+// 按域匹配，发不到 `aisubtitle.hdslb.com` 上。
+//
+// 所以**唯一能授权这一趟的就是地址自己带的那段 `auth_key`**——也就是
+// `subtitle_url_v2`。只试第一个地址的话，「取到了地址但下载 403」这一档就变成
+// 「这一整条自动歌词静悄悄地不出现」（界面上照旧是「暂无歌词」，日志里只有一行）。
+//
+// 而**上游的 `||` 兜底只管「地址为空」那一种**：两个地址都有的时候它只给第一个。
+// 所以「取地址」和「下载」必须分开——**这里给的是一个列表，下载的时候一个不行
+// 就换下一个**（见 `lyrics.FetchBiliSubtitle`）。
 package bili
 
 import (
@@ -44,29 +64,37 @@ type subtitleBlock struct {
 // subtitleItem 是其中一份。
 type subtitleItem struct {
 	// SubtitleURL 是那份字幕的地址（**协议相对**的）。
-	SubtitleURL string `json:"subtitle_url"`
-	// SubtitleURLV2 是同一个地址的另一个形状（多带一段鉴权参数）。
 	//
-	// ⚠️ **它是备胎**：上游先取 `subtitle_url`、取不到才取它（`get-lyrics.ts`）。
-	// 两个给的是同一份 JSON。
+	// ⚠️ **它可能不带鉴权参数**，而那一个可能要登录态（见文件头「两个地址是一个
+	// 一个试的」）。所以它**不是**唯一的那一个地址。
+	SubtitleURL string `json:"subtitle_url"`
+	// SubtitleURLV2 是同一个地址的另一个形状（多带一段鉴权参数 `auth_key`）。
+	//
+	// ⚠️ **两个给的是同一份 JSON**，而**带鉴权的那个才是能下的那一个**。
 	SubtitleURLV2 string `json:"subtitle_url_v2"`
 }
 
-// subtitleURLOf 从取流响应里找出 B 站给的那份字幕地址。空串 = 这一条没有字幕。
+// subtitleURLsOf 从取流响应里找出 B 站给的那份字幕的地址。空列表 = 这一条没有字幕。
 //
 // ⚠️ **只看 `subtitles[0]`**（上游 `get-lyrics.ts` 就是这么取的）：
 // `subtitles[0].subtitle_url || subtitles[0].subtitle_url_v2`。往后翻是为了在
 // 头一份没有地址时还能找到一份——而那已经是**另一份**字幕（多半是另一种语言），
 // 拿来当这一首的词，用户看到的是一段对不上的字。
-func subtitleURLOf(d *playurlData) string {
+//
+// ⚠️ **两个都留着，按该试的顺序**：第一个是不带鉴权的那个，第二个是带
+// `auth_key` 的那个（见文件头）。**只给一个**的话，下载 403 就没有下一趟了。
+func subtitleURLsOf(d *playurlData) []string {
 	if d == nil || d.Subtitle == nil || len(d.Subtitle.Subtitles) == 0 {
-		return ""
+		return nil
 	}
 	s := d.Subtitle.Subtitles[0]
-	if u := absoluteSubtitleURL(s.SubtitleURL); u != "" {
-		return u
+	var out []string
+	for _, raw := range []string{s.SubtitleURL, s.SubtitleURLV2} {
+		if u := absoluteSubtitleURL(raw); u != "" {
+			out = append(out, u)
+		}
 	}
-	return absoluteSubtitleURL(s.SubtitleURLV2)
+	return out
 }
 
 // absoluteSubtitleURL 把协议相对的地址补成完整的 https 地址。
@@ -88,7 +116,7 @@ func absoluteSubtitleURL(raw string) string {
 	return raw
 }
 
-// SubtitleURL 问 B 站要一个 bvid+cid 的字幕地址。
+// SubtitleURLs 问 B 站要一个 bvid+cid 的字幕地址（**按该试的顺序**）。
 //
 // ⚠️ **它是给「音乐库那一路」用的**：音乐库的取流走的是另一个接口
 // （`/audio/music-service-c/url`，见 `audio.go`），那个返回里**没有**字幕。
@@ -96,15 +124,18 @@ func absoluteSubtitleURL(raw string) string {
 // 字幕就是这一首的词——所以这里替它问一次**同一个**取流接口，只看 `subtitle`
 // 那一段。
 //
-// 投稿那一路**不用**这个方法：取流的那一趟已经带回来了（见 `StreamRef.SubtitleURL`）。
-func (c *Client) SubtitleURL(ctx context.Context, bvid, cid string) (string, error) {
+// 投稿那一路**不用**这个方法：取流的那一趟已经带回来了（见
+// `StreamRef.SubtitleURLs`）。
+//
+// 空列表 = 那一投稿没有字幕（**不是错误**）。
+func (c *Client) SubtitleURLs(ctx context.Context, bvid, cid string) ([]string, error) {
 	if bvid == "" || cid == "" {
 		// 不是网络错也不是重试能救的：调用方没给全。
-		return "", nil
+		return nil, nil
 	}
 	d, err := c.fetchPlayurl(ctx, bvid, cid, VideoQualityUnknown)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return subtitleURLOf(d), nil
+	return subtitleURLsOf(d), nil
 }

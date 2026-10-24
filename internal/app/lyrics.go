@@ -462,29 +462,33 @@ func (a *App) fetchBiliSubtitle(ctx context.Context, it Item, ref *bili.StreamRe
 			}
 		}
 
-		url := ""
+		urls := []string(nil)
 		if ref != nil {
-			url = ref.SubtitleURL
+			urls = ref.SubtitleURLs
 		}
-		if url == "" && it.SubtitleBvid != "" && it.SubtitleCid != "" {
+		if len(urls) == 0 && it.SubtitleBvid != "" && it.SubtitleCid != "" {
 			// 音乐库那一路：它的取流接口（`/audio/music-service-c/url`）的返回里
 			// **没有**字幕，所以要问它背后那个投稿一次（同一个取流接口，只看
 			// `subtitle` 那一段）。
 			//
 			// ⚠️ **这一次往返在后台**：它不挡播放，歌已经在放了。
-			u, err := s.Client.SubtitleURL(ctx, it.SubtitleBvid, it.SubtitleCid)
+			u, err := s.Client.SubtitleURLs(ctx, it.SubtitleBvid, it.SubtitleCid)
 			if err != nil {
 				log.Printf("biu: 问不出这一首的字幕地址：%v", err)
 				return
 			}
-			url = u
+			urls = u
 		}
-		if url == "" {
+		if len(urls) == 0 {
 			// B 站没有给这一首字幕。**不是错误**：界面上照旧是「暂无歌词」。
 			return
 		}
 
-		lines, err := lyrics.FetchBiliSubtitle(ctx, s.Media, url)
+		// ⚠️ **几个地址是一个一个试的**（见 `lyrics.FetchBiliSubtitle`）：B 站给
+		// 同一份字幕两个地址，而不带鉴权参数的那个可能要登录态——而登录态在
+		// 这一条路上到不了（cookie 的域是 `.bilibili.com`，字幕文件在
+		// `.hdslb.com`）。所以带 `auth_key` 的那个才是能下的那一个。
+		lines, err := lyrics.FetchBiliSubtitle(ctx, s.Media, urls)
 		if err != nil {
 			log.Printf("biu: B 站那份歌词拉不到：%v", err)
 			return

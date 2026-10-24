@@ -9,6 +9,7 @@
 package ui
 
 import (
+	"math"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
@@ -48,6 +49,30 @@ func TestTheFullPlayerAlsoSaysWhereTheyCameFrom(t *testing.T) {
 
 	if !tt.HasText("歌词来自 B 站") {
 		t.Fatalf("满屏上没有 %q，文字有 %q", "歌词来自 B 站", tt.Texts())
+	}
+}
+
+// TestTheOriginLineSitsWhereTheLyricsSit 盯说明句与歌词**对齐**。
+//
+// ⚠️ **歌词的行有两层横向留白**（内容列自己的 + 每一行自己的），所以**字**是从
+// 两倍 `padX` 之后开始的。说明句只加一层的话，它会比歌词的字偏左一个 `padX`
+// （迷你播放器那页 12px、满屏那一屏 8px）——而这一处的注释说的是「跟着一边儿」。
+func TestTheOriginLineSitsWhereTheLyricsSit(t *testing.T) {
+	s, tt := lyricShell(t)
+	s.app.PutLyricsFrom(lyrics.OriginBili, lyricsOfN(20), "")
+	settleLyrics(t, s, tt)
+
+	origin, ok := tt.Find("歌词来自 B 站")
+	if !ok {
+		t.Fatalf("歌词区上没有那句话，文字有 %q", tt.Texts())
+	}
+	line, ok := tt.Find("第0句")
+	if !ok {
+		t.Fatalf("歌词区上没有词，文字有 %q", tt.Texts())
+	}
+	if d := math.Abs(float64(origin.X - line.X)); d > 0.5 {
+		t.Errorf("说明句在 x=%.1f，歌词在 x=%.1f，差 %.1f —— 它们没有对齐",
+			origin.X, line.X, d)
 	}
 }
 

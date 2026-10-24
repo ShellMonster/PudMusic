@@ -699,13 +699,19 @@ func lyricOriginText(origin string) string {
 // ⚠️ **它的宽度和左右留白都跟着歌词那一列走**（`lyricsMaxWidth` 与 `st.padX`）：
 // 左对齐的那一份词是从那一列的左沿开始的，而居中的那一份是从中间开始的——
 // 说明句要跟着一边儿，不然它会飘在词的上面正中，而词在左边。
+//
+// 🔴 **左右留白是歌词那一份的**两倍**：歌词的行有**两层**横向留白——内容列
+// 自己的（`viewLyricLines` 里那个 `Padding(pad, st.padX, pad, st.padX)`）和每一行
+// 自己的（`lyricLine` 的 `Padding(lyricsLinePadY, st.padX)`）——所以**字**是从
+// 两倍留白之后开始的。说明句只加一层的话，它会比歌词的字偏左**一个 `padX`**
+// （迷你播放器那页 12px、满屏那一屏 8px），而这一处的注释说的是「跟着一边儿」。
 func (s *Shell) viewLyricOrigin(c *ui.Context, snap app.LyricsSnapshot, st lyricStyle) {
 	text := lyricOriginText(snap.Origin)
 	if text == "" {
 		return
 	}
 	col := ui.Column(c).FillWidth().MaxWidth(lyricsMaxWidth).
-		Padding(space.None, st.padX, space.None, st.padX).
+		Padding(space.None, st.padX*2, space.None, st.padX*2).
 		// 说明句与词之间留一道缝：它们是两件事，贴在一起看着像同一段。
 		Margin(space.None, space.None, space.Px8, space.None)
 	if st.center {

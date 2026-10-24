@@ -92,11 +92,17 @@ type streamFixture struct {
 	// forbidden 的 CDN 路径一律回 403（模拟「这条地址过期了」）。
 	forbidden map[string]bool
 
-	// subtitleURL 是取流响应里带的那份字幕的地址。空 = B 站没给字幕。
+	// subtitleURL 是取流响应里带的那份字幕的**第一个**地址。空 = B 站没给字幕。
 	//
 	// ⚠️ **默认是空的**：绝大多数用例要的就是「B 站没给字幕」这一支，而给了它
 	// 的话每一条在线用例都会多发一次请求。
 	subtitleURL string
+	// subtitleURLV2 是**第二个**地址（B 站给同一份字幕两个：一个不带鉴权参数、
+	// 一个带 `auth_key`）。空 = 只有第一个。
+	//
+	// ⚠️ 它是**兜底**：第一个 403 时会改试它（见 `lyrics_bili_test.go` 的
+	// `TestTheBiliSubtitleFallsBackToTheSecondAddress`）。
+	subtitleURLV2 string
 	// subtitleBody 是那份字幕的内容。
 	subtitleBody string
 
@@ -221,17 +227,19 @@ func (f *streamFixture) servePlayURL(w http.ResponseWriter, q url.Values) {
 	if n >= 0 {
 		dash = f.playURLs[n]
 	}
-	sub := f.subtitleURL
+	sub, subV2 := f.subtitleURL, f.subtitleURLV2
 	f.mu.Unlock()
 
 	data := map[string]any{"timelength": 1000, "dash": dash}
 	// B 站在取流的返回里就带着字幕的地址（上游 Biu 走的就是这一段）。
 	if sub != "" {
+		item := map[string]any{"id": 1, "lan": "zh-CN", "subtitle_url": sub}
+		if subV2 != "" {
+			item["subtitle_url_v2"] = subV2
+		}
 		data["subtitle"] = map[string]any{
 			"allow_submit": false,
-			"subtitles": []any{map[string]any{
-				"id": 1, "lan": "zh-CN", "subtitle_url": sub,
-			}},
+			"subtitles":    []any{item},
 		}
 	}
 	writeStreamJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1, "data": data})

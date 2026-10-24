@@ -35,6 +35,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"slices"
@@ -148,16 +149,49 @@ var ErrNoSubtitle = errors.New("lyrics: B 站这一条没有字幕")
 
 // FetchBiliSubtitle 下载并解析 B 站那一份字幕。
 //
-// ⚠️ **地址空就是没有字幕**（不是错误）：B 站给这一条没带字幕的时候，
+// urls 是那份字幕的**几个地址，按该试的顺序**（`bili.StreamRef.SubtitleURLs`）。
+//
+// # 🔴 **一个地址不行就换下一个**
+//
+// B 站给同一份字幕两个地址：不带鉴权参数的那个，和带 `auth_key` 的那个。
+// 而**不带鉴权的那个可能要登录态**——拿它去请求会 403。
+//
+// ⚠️ **而登录态在这一条路上到不了**：字幕文件在 `aisubtitle.hdslb.com`，而
+// `SESSDATA` 的域是 `.bilibili.com`——cookie jar 按域匹配（发不过去），凭据
+// 边界也只给 `.hdslb.com` referer 档（`app.DefaultInjectPolicy`）。上游那个
+// Electron 客户端也一样：浏览器的 cookie 同样按域匹配。
+//
+// 所以**唯一能授权这一趟的就是地址自己带的那段 `auth_key`**——也就是第二个地址。
+// 只试第一个的话，「取到了地址但下载 403」这一档就变成「这一整条自动歌词静悄悄
+// 地不出现」（界面上照旧是「暂无歌词」，日志里只有一行）。
+//
+// ⚠️ **一个地址空就是没有字幕**（不是错误）：B 站给这一条没带字幕的时候，
 // 调用方压根不该发这个请求。
 //
 // ⚠️ **超时在这一层的 ctx 上**（10 秒，和两个歌词源那一份一样，见 `search.go` 的
 // `requestTimeout`），而不是 `http.Client.Timeout`——那样的话两个超时哪一个先到
 // 说不清，而「说不清」的那一种最难复现。
-func FetchBiliSubtitle(ctx context.Context, client *http.Client, rawURL string) ([]Line, error) {
-	if strings.TrimSpace(rawURL) == "" {
+func FetchBiliSubtitle(ctx context.Context, client *http.Client, urls []string) ([]Line, error) {
+	var tried []string
+	for _, u := range urls {
+		if strings.TrimSpace(u) == "" {
+			continue
+		}
+		tried = append(tried, u)
+		lines, err := fetchBiliSubtitleFrom(ctx, client, u)
+		if err == nil {
+			return lines, nil
+		}
+		log.Printf("biu: 那份字幕拉不到（%s）：%v", u, err)
+	}
+	if len(tried) == 0 {
 		return nil, ErrNoSubtitle
 	}
+	return nil, fmt.Errorf("lyrics: B 站那份字幕拉不到（试了 %d 个地址）", len(tried))
+}
+
+// fetchBiliSubtitleFrom 从**一个**地址下载并解析那份字幕。
+func fetchBiliSubtitleFrom(ctx context.Context, client *http.Client, rawURL string) ([]Line, error) {
 	if client == nil {
 		return nil, errors.New("lyrics: 没有网络层")
 	}
@@ -176,7 +210,7 @@ func FetchBiliSubtitle(ctx context.Context, client *http.Client, rawURL string) 
 		_ = resp.Body.Close()
 	}()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("lyrics: B 站字幕返回 %s", resp.Status)
+		return nil, fmt.Errorf("B 站字幕返回 %s", resp.Status)
 	}
 	// 限长：见 maxResponseBytes 的注释（这一份文件其实只有几 KB）。
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
@@ -184,7 +218,7 @@ func FetchBiliSubtitle(ctx context.Context, client *http.Client, rawURL string) 
 		return nil, err
 	}
 	if len(body) > maxResponseBytes {
-		return nil, fmt.Errorf("lyrics: B 站字幕超过 %d 字节", maxResponseBytes)
+		return nil, fmt.Errorf("B 站字幕超过 %d 字节", maxResponseBytes)
 	}
 	return ParseBiliSubtitle(body)
 }

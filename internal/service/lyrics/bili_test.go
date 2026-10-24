@@ -1,6 +1,10 @@
 package lyrics
 
 import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"testing"
 	"time"
@@ -164,6 +168,59 @@ func TestANewlineInTheContentIsFlattened(t *testing.T) {
 	}
 	if got[0].Text != "前半句 后半句" {
 		t.Errorf("那一句是 %q，want 「前半句 后半句」", got[0].Text)
+	}
+}
+
+// TestTheSecondAddressIsTriedWhenTheFirstOneFails 盯「下载失败就换下一个地址」。
+//
+// 🔴 **这一条是这一整条自动歌词的生死线**：B 站给同一份字幕两个地址，而**不带
+// 鉴权参数的那个可能要登录态**——拿它去请求会 403。而登录态在字幕那条路上
+// 根本到不了（cookie 的域是 `.bilibili.com`，字幕文件在 `.hdslb.com`；上游那个
+// Electron 客户端也一样，浏览器的 cookie 同样按域匹配）。
+//
+// 所以**唯一能授权这一趟的就是地址自己带的那段 `auth_key`**——也就是第二个地址。
+// 只试第一个的话，「取到了地址但下载 403」就变成「这一整条自动歌词静悄悄地不
+// 出现」（界面上照旧是「暂无歌词」，日志里只有一行）。
+//
+// ⚠️ **夹具必须真的会 403**：仓库里别的夹具永远回 200，于是这一档一次都没被
+// 跑到过。
+func TestTheSecondAddressIsTriedWhenTheFirstOneFails(t *testing.T) {
+	var hits []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits = append(hits, r.URL.Path)
+		switch r.URL.Path {
+		case "/one.json":
+			// 不带鉴权参数的那一个：403。
+			http.Error(w, "没有登录态", http.StatusForbidden)
+		case "/two.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"body":[{"from":1,"content":"词"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	lines, err := FetchBiliSubtitle(context.Background(), srv.Client(),
+		[]string{srv.URL + "/one.json", srv.URL + "/two.json"})
+	if err != nil {
+		t.Fatalf("第二个地址该兜住：%v", err)
+	}
+	if len(lines) != 1 || lines[0].Text != "词" {
+		t.Fatalf("解析出 %+v", lines)
+	}
+	if len(hits) != 2 || hits[0] != "/one.json" || hits[1] != "/two.json" {
+		t.Errorf("试过的地址是 %q，want 先 one 后 two", hits)
+	}
+}
+
+// TestNoAddressMeansNoSubtitle 盯「一个地址都没有」那一支。
+//
+// ⚠️ **那不是错误**：B 站给这一条没带字幕的时候，调用方压根不该发这个请求。
+func TestNoAddressMeansNoSubtitle(t *testing.T) {
+	_, err := FetchBiliSubtitle(context.Background(), http.DefaultClient, nil)
+	if !errors.Is(err, ErrNoSubtitle) {
+		t.Errorf("没有地址时的错 = %v，want ErrNoSubtitle", err)
 	}
 }
 
