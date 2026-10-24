@@ -11,7 +11,7 @@
 //
 // # 落在哪
 //
-// `mygo.App.Path(mygo.PathLogs)`——框架自己的约定（`mygo@v0.6.2/paths.go:96`）：
+// `mygo.App.Path(mygo.PathLogs)`——框架自己的约定（`mygo@v0.6.3/paths.go:96`）：
 //
 //	macOS	~/Library/Logs/<应用名>/
 //	其它	<用户配置目录>/<应用名>/logs/

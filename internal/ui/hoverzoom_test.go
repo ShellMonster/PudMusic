@@ -234,7 +234,7 @@ func TestTheNavbarAvatarGrowsOnHover(t *testing.T) {
 // 照着那句注释去「精确复刻上游」，观感会明显不一样；反过来，以为现在已经等于
 // 上游、以后就不再过问，也不对。
 //
-// 实算（同一个 mygo v0.6.2）：
+// 实算（同一个 mygo v0.6.3）：
 //
 //	t      ui.EaseInOut    上游 cubic-bezier(0.4, 0, 0.2, 1)
 //	0.25       0.0625                   0.2366

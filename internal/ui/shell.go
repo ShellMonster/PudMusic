@@ -208,7 +208,7 @@ type Shell struct {
 	// fullScreen 是主窗口此刻是不是全屏。
 	//
 	// ⚠️ **它由窗口的回调推过来，不在 view 里问**：`win.IsFullScreen()`
-	// 每帧问一次是跨一次 ObjC 调用（`mygo@v0.6.2/window.go:764` 的 `get`），
+	// 每帧问一次是跨一次 ObjC 调用（`mygo@v0.6.3/window.go:764` 的 `get`），
 	// 而答案在**进全屏那一刻**就定了——事件推过来既省事又准。
 	//
 	// 它只给侧栏那个品牌块用（macOS 非全屏时要多留一格，见 `sidebar.go` 的
@@ -1455,7 +1455,7 @@ func (s *Shell) viewMain(c *ui.Context) {
 // pageJustShown 报「这一帧是刚进这一页的第一帧」。
 //
 // 路由切走再切回来时，框架会把焦点还给「离开这一页时有焦点的那个元素」
-// （`Router.focusPage`，`mygo@v0.6.2/ui/router.go:726`）。收藏夹/local 那一页
+// （`Router.focusPage`，`mygo@v0.6.3/ui/router.go:726`）。收藏夹/local 那一页
 // 的「会展开的搜索」正好是那个元素——于是用户回来的时候，键盘焦点被塞进一个
 // 他没打开过的框里，他在别处敲的字就落进那里（评审第 5 条）。
 //

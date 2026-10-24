@@ -188,7 +188,7 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 	//
 	// 系统原生那一份（`ui.AlertDialog`）建面板时是
 	// `Role(RoleAlertDialog)` + `panel.Label(title)` + `panel.description = message`
-	//（mygo v0.6.2 的 `ui/feedback.go:186-188`），所以读屏软件报得出「删除确认吗？」
+	//（mygo v0.6.3 的 `ui/feedback.go:186-188`），所以读屏软件报得出「删除确认吗？」
 	// 和它下面那一句正文。
 	//
 	// 而 `ui.Modal`（`coreDialogBase`，`ui/base.go:486`）只给
@@ -328,7 +328,7 @@ func confirmButton(c *ui.Context, spec confirmSpec) ui.Element {
 //
 // ⚠️ **#176 把两处系统原生 `ui.AlertDialog` 换成自绘模态的时候，把这一件一起
 // 丢了**：系统原生那一份的取消键是 `coreButton`
-// （`mygo@v0.6.2/ui/feedback.go:201`），也就是 `t.Surface` 的常驻底 + 一圈
+// （`mygo@v0.6.3/ui/feedback.go:201`），也就是 `t.Surface` 的常驻底 + 一圈
 // `t.Border`——**带壳**。换成自绘之后它变成了 `flatButton`，那一层底和那一圈
 // 描边就都没了（票 #228）。
 //
