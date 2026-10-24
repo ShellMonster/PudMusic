@@ -525,6 +525,9 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 		//
 		// ⚠️ **这一格不走 `flatCurrent`**：那个是「当前在哪」（侧栏菜单当前项、
 		// 左栏那三处）共用的中性灰底，改它会把侧栏一起改掉。
+		//
+		// 配方在 `playingrow.go`（**两个抽屉共用一份**：分集抽屉的「正在放」那一
+		// 行是同一档，见 `partdrawer.go` 的 `viewPartRow`）。
 		rowEl = rowEl.Background(playingRowBg(t)).TextColor(playingRowText(t))
 	case hovered:
 		// 悬停要有反应：这一行点得动（跳过去放它），没有反馈用户不知道它是能点的。
@@ -611,55 +614,10 @@ func (s *Shell) viewQueueCover(c *ui.Context, item app.Item, playing, hovered bo
 	})
 }
 
-// playingRowBgAlpha 是「正在播放」那一行底上主色的浓度。
-//
-// 20% 是上游那个数：HeroUI 的 `bg-primary/20`
-// （`music-playlist-drawer/list-item.tsx:32` 的 `variant="flat" color="primary"`
-// 展开成 `bg-primary/20 text-primary-600`）。
-const playingRowBgAlpha = 0.2
-
-// playingRowBg 是队列抽屉里「正在播放」那一行的**底色**：主色 20% 那一层淡底。
-//
-// 浅色下落在抽屉面板底（`t.Background` = #ffffff）上是 **#d2f7df**——上游实图
-// 那个数（票 #294 / 报告 §1 的 S-11）。深色下落在 #18181b 上是 **#193e29**。
-//
-// ⚠️ **主色是用户可设的**：所以这里是「当前主色的 20%」，没有一个写死的绿。
-//
-// ⚠️ **这一格不走 `flatCurrent`**：那个是「当前在哪」（侧栏菜单当前项、左栏那
-// 三处）共用的中性灰底——改它会把侧栏一起改掉。
-func playingRowBg(t *ui.Theme) ui.Color {
-	return t.Accent.Alpha(playingRowBgAlpha).Over(playingRowBase(t))
-}
-
-// playingRowBase 是那一层淡底**身下那块底板**（不透明的那一份）。
-//
-// 抽屉面板底是 `t.Background`（上游那一枚 Drawer 走 `bg-background`），而用户
-// 可以挑一个带透明度的底色——那时候面板本身也是半透明的。取它压在白底上的
-// 那个数（窗口底色是白的），免得这一格算出来的数和画出来的不一样。
-func playingRowBase(t *ui.Theme) ui.Color {
-	if t.Background.A == 255 {
-		return t.Background
-	}
-	return t.Background.Over(ui.Color{R: 255, G: 255, B: 255, A: 255})
-}
-
-// playingRowText 是「正在播放」那一行里**歌名**的颜色。
-//
-// 主色当字，**按那一层淡底算**：浅色下主色（#1ed760）压淡绿底只有 1.65:1，
-// 直接用等于把这一行读不出来——所以从主色现算一个压深的变体（`ink.Ensure`，
-// ≥4.5:1；默认主色下算出 #127d38）。深色下主色压淡底是 6.21:1，原样就够。
-//
-// ⚠️ **深浅两套都走同一个算法**：默认主色下深色那一支算出来就是主色本身
-// （`ink.Ensure` 达标时原样返回），而用户在深色下挑了一个偏暗的主色时，这一档
-// 会把它往白里拉一点——总比那一行读不出来强。
-func playingRowText(t *ui.Theme) ui.Color {
-	return ink.Ensure(t.Accent, playingRowBg(t), 4.5)
-}
-
 // playlistTextColor 是正在放的那一行里**歌名**的颜色。
 //
-// 正在放的那一行是**淡主色底 + 主色当字**（见上面），所以歌名取的是
-// `playingRowText` 那一档——**和那一格的底是同一个数**。
+// 正在放的那一行是**淡主色底 + 主色当字**（配方见 `playingrow.go`），所以歌名
+// 取的是 `playingRowText` 那一档——**按那一格的底算出来的那一档**。
 //
 // ⚠️ **和列表行 / 网格卡片那一档不是同一个数**（`widgets/list` 的 `rowColors`
 // 那一档是 `ink.AccentOn`：它按**页面底色**算，浅色下更浅一点）。两处都是
