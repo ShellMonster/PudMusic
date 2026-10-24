@@ -27,14 +27,124 @@ import (
 // systemDark 是「系统现在是不是深色」。传 `c.Theme().Dark` 即可——那是在
 // ApplyTheme 之前读的、MyGo 刚重置好的那份跟随系统的主题，正好是系统外观。
 // **必须先读再设**，反过来的话读到的是自己上一帧设的值。
+//
+// ⚠️ **这一份不缓存**：它是给测试和预览用的（`grep ApplyTheme` 只有定义和测试
+// 文件），而它们**不是每帧调**。生产上每帧调的那一处是 `Shell.applyFrameTheme`，
+// 那里有缓存（见 `themeCache`）。
 func ApplyTheme(c *ui.Context, s app.Settings, systemDark bool) {
 	c.SetTheme(buildTheme(s, systemDark, c.Preferences()))
 }
 
+// themeKey 是决定主题的那几样东西。
+//
+// ## ⚠️ **只放真正影响主题的字段**
+//
+// 设置里还有别的（下载目录、隐藏的菜单项、播放模式……），那些跟主题无关。
+// 放进来会让「设置改了」变成「设置里任何一格变了都重算」——而重算是每帧一次
+// 的事，于是缓存就白做了。
+//
+// 这一份是**可比较的**（几个字符串 ＋ 几个数），所以判「变了没有」就是一次
+// `==`，不分配任何东西。
+type themeKey struct {
+	// mode 是设置里的那一档（跟随系统 / 浅色 / 深色）。
+	mode app.ThemeMode
+	// radius 是设置里的圆角。
+	radius float64
+	// font 是设置里的字体（空串或系统默认 = 不设）。
+	font string
+	// primary / background 是设置里的主色和底色（十六进制串）。
+	primary    string
+	background string
+	// dark 是这份主题**实际要的那一档深浅**（见 `effectiveDark`）。
+	//
+	// ⚠️ **不是「系统是不是深色」**：档位是浅色/深色时，主题跟系统深浅无关，
+	// 而 MyGo 一帧要跑两遍 view（第二遍读到的 `c.Theme()` 是**我们自己**装上去
+	// 的那一份，见 `applyFrameTheme` 的注释）——于是按「系统深浅」做键的话，
+	// 档位压过系统时两遍的键不一样，缓存每一帧都要重算，白做了。
+	dark bool
+	// contrast / textScale 是桌面偏好（高对比度、字号缩放）。
+	contrast  bool
+	textScale float32
+}
+
+// effectiveDark 是这份设置实际要的那一档深浅。
+//
+// 档位是浅色/深色时由档位说了算；「跟随系统」时才看系统。
+//
+// ⚠️ **这是 `buildTheme` 判深浅的唯一出处**——缓存的键也用它，两边必须一致，
+// 否则会出现「键变了但主题没变」（白重算）或「主题变了但键没变」（主题不更新）。
+func effectiveDark(s app.Settings, systemDark bool) bool {
+	switch s.ThemeMode {
+	case app.ThemeModeLight:
+		return false
+	case app.ThemeModeDark:
+		return true
+	}
+	return systemDark
+}
+
+// themeCache 是主题的缓存：设置没变就复用同一份。
+//
+// ## 为什么能缓存
+//
+// 主题只在**设置变了 / 系统深浅变了 / 桌面偏好变了**的时候才变——而那三样
+// 全在 `themeKey` 里，于是「键一样就复用」就等于「变了立刻生效」（下一帧
+// 就是新的）。
+//
+// ## 为什么备两份（热 / 不热）
+//
+// 滚动条的悬停档是**装上去之前**改一个字段的（`scrollbarHot`，见
+// `applyFrameTheme`），而缓存下来的那份是**跨帧共用**的——在它身上改字段的话，
+// 改的是缓存本身，下一帧「不热」的那一档也变成热的了（滚动条一直是深的那一档，
+// 而且没有症状：只是深了一档）。
+//
+// 所以热的那一档是**另建的一份**（值拷贝一份，字段改在那一份上）。
+type themeCache struct {
+	// key 是这一份是按哪几样拼出来的。
+	key themeKey
+	// base 是不热的那一份。
+	base *ui.Theme
+	// hotTheme 是指针压在滚动条上的那一档。
+	hotTheme *ui.Theme
+	// valid 是「这一份是真的」（零值的那一份是空的）。
+	valid bool
+}
+
+// of 取出这一帧该用的那一份主题，必要时重算。
+//
+// ⚠️ **重算只发生在键变了的时候**：设置改了、系统深浅变了、桌面偏好变了——
+// 三样都在键里。
+func (c *themeCache) of(s app.Settings, systemDark bool, p ui.Preferences) *ui.Theme {
+	key := themeKey{
+		mode:       s.ThemeMode,
+		radius:     s.BorderRadius,
+		font:       s.FontFamily,
+		primary:    s.PrimaryColor,
+		background: s.BackgroundColor,
+		dark:       effectiveDark(s, systemDark),
+		contrast:   p.HighContrast,
+		textScale:  p.TextScale,
+	}
+	if !c.valid || c.key != key {
+		base := buildTheme(s, systemDark, p)
+		// 热的那一档是**值拷贝**一份：改的是拷贝，缓存里那一份不动。
+		hot := *base
+		hot.Scrollbar = scrollbarHot(&hot)
+		c.key, c.base, c.hotTheme, c.valid = key, base, &hot, true
+	}
+	return c.base
+}
+
+// hot 取出「指针压在滚动条上」的那一档。
+//
+// ⚠️ **它必须是另建的一份**：见 `themeCache` 顶上那一段——在缓存的那一份上
+// 改字段的话，改的是缓存本身。
+func (c *themeCache) hot() *ui.Theme { return c.hotTheme }
+
 // applyFrameTheme 是**每帧开头装主题**的那一处，生产上唯一会走到的入口。
 //
-// ⚠️ 它直接调 `buildTheme` + `c.SetTheme`，不再转一手 `ApplyTheme`：滚动条的
-// 悬停档要在装上去之前改一个字段（`scrollbarHot`），而那个状态只在 Shell 上。
+// ⚠️ 它直接调 `themeCache.of` + `c.SetTheme`，不再转一手 `ApplyTheme`：滚动条的
+// 悬停档要在装上去之前换一份（`scrollbarHot`），而那个状态只在 Shell 上。
 // `ApplyTheme` 因此只剩测试和预览在用（`grep ApplyTheme` 只有定义和测试文件），
 // **改 `ApplyTheme` 不会影响外壳**——要改生产行为，改这里和 `buildTheme`。
 //
@@ -57,16 +167,25 @@ func ApplyTheme(c *ui.Context, s app.Settings, systemDark bool) {
 // （这两条曾经被写反过一次：一版注释说「一帧只能调一次，重复调会把跟随系统
 // 搞反」，还为此加了个 `s.themed` 守卫。枚举了（系统深浅 × 三档）八种组合，
 // 删掉守卫全绿——那个失败模式不存在。）
+//
+// ## ⚠️ 主题是**缓存**着的（见 `themeCache`）
+//
+// 原先这一帧要 `buildTheme` 一次：新建一份 `*ui.Theme`，并且**每帧重新解析**
+// 用户设置里的颜色串（`parseHexColor` 每帧两个切片）。而主题只在设置变了、
+// 系统深浅变了、桌面偏好变了的时候才变——于是那三样做成一个键，键一样就复用。
+//
+// 缓存的是**值**（一份 `*ui.Theme`），不是「装不装」——铁律一那条「每帧开头
+// 都要装」照样成立：每帧还是调 `SetTheme`，只是装上去的是同一份。
 func (s *Shell) applyFrameTheme(c *ui.Context) {
 	systemDark := c.Theme().Dark
-	t := buildTheme(s.app.SettingsSnapshot(), systemDark, c.Preferences())
+	t := s.theme.of(s.app.SettingsSnapshot(), systemDark, c.Preferences())
 	// 指针压在滚动条上时深一档（上游 `--os-handle-bg-hover`）。框架的绘制
 	// 只在**指针落在容器上**时画滚动条，所以这里只管「出现之后更明显」。
 	//
 	// ⚠️ 读的是**上一帧**量到的状态（`scrollbarHot`）：这一帧的容器还没建出来，
 	// 问不到。指针一移动就会有一帧，所以看上去是「移上去就变深」，不会晚。
 	if s.scrollbarHot {
-		t.Scrollbar = scrollbarHot(t)
+		t = s.theme.hot()
 	}
 	c.SetTheme(t)
 }
@@ -162,13 +281,9 @@ func dividerColor(t *ui.Theme) ui.Color {
 // 高对比度那几行照 `mygo/ui/preferences.go:69-74` 逐条来（Border / TextMuted /
 // Focus / Scrollbar），字号缩放照 `:75-77`（`t.FontSize *= TextScale`）。
 func buildTheme(s app.Settings, systemDark bool, p ui.Preferences) *ui.Theme {
-	dark := systemDark
-	switch s.ThemeMode {
-	case app.ThemeModeLight:
-		dark = false
-	case app.ThemeModeDark:
-		dark = true
-	}
+	// ⚠️ **深浅由 `effectiveDark` 判**（档位压过系统）——而缓存的键也用它
+	// （见 `themeKey`），两边必须一致。
+	dark := effectiveDark(s, systemDark)
 
 	var t *ui.Theme
 	if dark {
