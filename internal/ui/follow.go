@@ -51,6 +51,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
@@ -208,6 +209,11 @@ type followPage struct {
 	// 显示」时 panic，而共用还会把两边的滚动位置搅在一起。
 	state     ui.ListState
 	paneState ui.ListState
+	// rowKeys 记着网格每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
+	// （票 #313）。**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头）。
+	rowKeys rowkey.Memo[int64, any]
 
 	// scroll 是右边那一格（那些用户卡片）滚到哪儿了。
 	//
@@ -708,7 +714,17 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 		if i >= rows {
 			return upSentinelKey{}
 		}
-		return followRowKey(f.users, i, cols)
+		k := i * cols
+		if k >= len(f.users) {
+			// 到不了（`rows` 是按列数算出来的，i < rows 就保证 k < len(users)）。
+			// 留着是为了不给一个越界的下标。
+			return followRowKey(f.users, i, cols)
+		}
+		// ⚠️ **身份是预先装箱好的那一份**（`f.rowKeys`）：理由见那个字段的注释。
+		//
+		// ⚠️ **按「第几个人」记而不是按「第几行」**：行号是布局算出来的，换一次
+		// 列数全变；而 mid 不会变——同一个人换一档列数之后还是那一份记好的身份。
+		return f.rowKeys.At(k, f.users[k].Mid, followIdentity)
 	}
 	st.Label = func(i int) string {
 		if i >= rows {
@@ -770,8 +786,20 @@ func followRowKey(users []bili.FollowUser, i, cols int) string {
 	if k >= len(users) {
 		return "follow:empty-row"
 	}
-	return "follow:" + strconv.FormatInt(users[k].Mid, 10)
+	return followKeyOf(users[k].Mid)
 }
+
+// followKeyOf 是「mid → 关注的人那一列的行身份」。
+func followKeyOf(mid int64) string { return "follow:" + strconv.FormatInt(mid, 10) }
+
+// followIdentity 是关注的人那一列的行身份（铁律四）。
+//
+// ⚠️ **是 mid 不是行号**：行号是布局算出来的，换一次列数全变；而用户盯着的那
+// 一张卡是跟着 mid 走的。
+//
+// 这一步会分配（拼字符串 + 装箱）——所以它只在 mid 变了的时候才走
+// （见 `rowkey.Memo` 的文件头）。
+func followIdentity(mid int64) any { return followKeyOf(mid) }
 
 // followRowLabel 是第 i 行给无障碍和「打字选中」用的名字。
 func followRowLabel(users []bili.FollowUser, i, cols int) string {

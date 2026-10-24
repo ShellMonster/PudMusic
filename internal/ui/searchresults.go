@@ -453,6 +453,13 @@ func (s *Shell) searchUserActions() list.Actions {
 		// 双击 / 菜单「播放」= 进他的 UP 主空间（Biu 的
 		// `user-card.tsx:51`：`onPress={() => navigate(`/user/${u.mid}`)}`）。
 		Play: s.openSearchUser,
+		// 「立即播放」照实说一句为什么不**能用**：菜单是列表和网格共用的一份
+		// （`widgets/list` 的 menuItems），这一项在用户 Tab 照样摆着。给 nil
+		// 的话它会落到那句「现在还不能用」——而它其实早接上了（UP 主确实不是歌，
+		// 和下面几项是同一个理由）。
+		PlayNow: func(app.Item) {
+			s.addToast("UP 主不是歌，没有东西能立即播放；进他的空间听他的歌", notice.Warning)
+		},
 		Add: func([]app.Item) {
 			s.addToast("UP 主不是歌，加不进队列；进他的空间听他的歌", notice.Warning)
 		},
