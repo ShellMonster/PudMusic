@@ -692,16 +692,16 @@ type segmentOption struct {
 
 // segmentButton 画分段控件的一档：一枚 18px 图标 + 一个标签。
 //
-// ⚠️ **图标那一档的内边距比纯文字那一档小**（10 而不是 14）：加了图标之后
-// 「跟随系统」那一档要 18 + 6 + 56 + 20 = **100 像素**，而控件列在
-// 「窗口 900 + 侧栏拉到 480 + 字号 1.4 倍」那一档只有 320 宽——三档加起来
-// **320.8，差 0.8 像素就溢出**（溢出的症状是右边那一档被推出内容区，见
-// `settingsControlFitW` 的注释）。内边距收到 10 之后那一档是 296.8。
-//
 // ⚠️ **图标是 18，不跟字号缩放走**：上游那两排的图标是写死的 `size={18}`
 // （`system-settings.tsx:77` / `:127`），而字是跟系统缩放走的——照上游就
 // 18 不动。跟着缩放的话 1.4 倍时那枚图标是 25，而「跟随系统」那一档本来
 // 就最宽。
+//
+// ⚠️ **图标那一档的内边距比纯文字那一档小**（10 而不是 14）：加了图标之后
+// 「跟随系统」那一档要 18 + 6 + 56 + 20 = **100 像素**，而控件列在
+// 「窗口 900 + 侧栏拉到 480」那一档只有 300 宽——三档**等分**下来每一格
+// 只有 97.3（见 `settingsSegment` 顶上那一段），不收内边距的话那一档就
+// 装不下，标签会被裁成「跟随…」。
 func segmentButton(c *ui.Context, opt segmentOption) ui.Element {
 	if opt.icon == "" {
 		return flatButton(c, opt.label)
@@ -760,6 +760,28 @@ func segmentButton(c *ui.Context, opt segmentOption) ui.Element {
 // 实心主色底乘完框架的 50% 不透明度之后字压在上面只剩 2.6:1，只读时用户会以为
 // 「这几个选项消失了」（`pickSelected` 的注释写着整段来由）。
 //
+// # 每一档的宽度是**它自己的内容**，不是三等分
+//
+// ⚠️ **三等分装不下「图标 + 四个汉字」**：这一排的宽度是控件列那一格，而
+// `Grow(1)` 在框架里是**三等分**（`mygo/ui/layout.go` 的 `resolveFlexible`：
+// `Grow` 把基准宽设成 0，于是每一格分到的是**整排的等份**，不是「内容 +
+// 一份余量」）。三等分在「窗口 900 + 侧栏拉到 480 + 字号 1.4 倍」那一档
+// 是 (318.7 − 8) / 3 = **103.6**，而「跟随系统」那一档要
+// 18(图标) + 6(缝) + 72.2(字) + 20(内边距) = **116.2**——差 12.6 像素，
+// 于是那个字被裁成「跟随…」。
+//
+// 以这一排**不 `Grow`**：每一档的宽度就是它自己的内容，剩下的空档由
+// `Justify(SpaceBetween)` 分到档与档之间（上游那一排也是内容宽的——
+// `system-settings.tsx` 的 Tabs 就是按内容排的）。
+//
+// ⚠️ **于是「三档等分」那个旧画法没有了**：三档的位置随内容变（多两个字
+// 的那一档就宽一点）。这和上游一致，而「控件列的左右边缘齐在一条线上」
+// 那一条仍然成立（那一排的盒子还是控件列那一格，空档分在中间）。
+//
+// ⚠️ **`Shrink(1)` 是留给放不下那一档的**：真挤不下时（字号再大），按钮
+// 收缩、标签裁成「跟随…」，而**不是**把这一排顶出内容区（框架的 flex
+// 不会收缩——`shrink` 的零值就是 0，见 `settingsControlFitW` 的注释）。
+//
 // # w 是这一排多宽
 //
 // 0 = **填满父那一格**：「数据显示样式」那一格外面还套着一列预览（切换在上、
@@ -770,7 +792,10 @@ func (s *Shell) settingsSegment(c *ui.Context, key, group string, w float32, opt
 	// （互斥的几档），而 `Tester.Find` 也靠它量这一排的盒子——控件列的左边是不是
 	// 一条线，就靠它断（见 `TestTheSettingsControlsShareOneBaseline`）。
 	t := c.Theme()
-	row := ui.Row(c).Key(key).Label(group).Gap(space.Px4)
+	// ⚠️ **`SpaceBetween`**：空档分在档与档之间，于是这一排的左右两端仍然
+	// 齐在控件列那一格的两条边上（`Justify(Start)` 的话右边会空出一截，
+	// 那一列看上去就参差了——票 #235 的 F-04）。
+	row := ui.Row(c).Key(key).Label(group).Gap(space.Px4).Justify(ui.SpaceBetween)
 	if w > 0 {
 		// ⚠️ **按内容区算宽度**（`settingsControlFitW`）：这一族的宽度跟着字号
 		// 缩放走（1.4 倍时 420），而内容区最窄的那一档（窗口 900 + 侧栏拉到
@@ -785,7 +810,9 @@ func (s *Shell) settingsSegment(c *ui.Context, key, group string, w float32, opt
 	row = row.MinWidth(settingsControlMinW)
 	row.Children(func() {
 		for i, opt := range opts {
-			b := segmentButton(c, opt).Grow(1).Radius(t.Radius).Disabled(ro)
+			// ⚠️ **不 `Grow`**（见顶上那一段）：宽度就是内容本身。
+			// `Shrink(1)` 是为了放不下时收缩而不是溢出。
+			b := segmentButton(c, opt).Shrink(1).Radius(t.Radius).Disabled(ro)
 			if i == chosen {
 				b = s.pickSelected(c, b, ro)
 			}

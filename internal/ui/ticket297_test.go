@@ -207,6 +207,99 @@ func TestTheSettingsSegmentIconsSitRightNextToTheirLabel(t *testing.T) {
 	}
 }
 
+// TestTheSettingsSegmentLabelsAreNeverTruncated 钉住「分段控件的标签不会被裁」。
+//
+// # 哪一档最容易裁
+//
+// 「跟随系统」是那一排最宽的一档：18(图标) + 6(缝) + 四个字 + 20(内边距)。
+// 在「窗口 900 + 侧栏拉到 480 + 字号 1.4 倍」那一档，控件列只有 **318.7**
+// 宽——**三等分**的话每一格只有 (318.7 − 8) / 3 = **103.6**，而那一档要
+// **116.2**，差 12.6 像素，于是那四个字被裁成「跟随…」。
+//
+// （`Grow(1)` 在框架里是**三等分**：`mygo/ui/layout.go` 的 `Grow` 把基准宽设成
+// 0，于是每一格分到的是整排的等份，不是「内容 + 一份余量」。）
+//
+// # 判据是**同一个标签在两档配置下一样宽**
+//
+// 被裁的标签**宽度会变小**（裁成「跟随…」），而没裁的宽度就是那几个字本身
+// 的长度——所以拿同一个标签在「放得下」的那一档比一比就知道它被裁没有。
+//
+// ⚠️ **两档的字号必须一样**（1.4 倍）：字跟着字号缩放，宽度自然不一样。
+//
+// ⚠️ **比的是宽度，不是「有没有省略号」**：省略号那三个点会落在字的后头，
+// 像素上认得出来，可它认的是「这一段的墨迹」——而字的位置差半个像素，
+// 那几个字本身的墨迹就会时而连成一段、时而断开（实测同一段字有时是 3 段、
+// 有时是 4 段）。宽度是稳的。
+func TestTheSettingsSegmentLabelsAreNeverTruncated(t *testing.T) {
+	// 三排分段控件，每一档的标签。
+	rows := []struct {
+		group  string
+		labels []string
+	}{
+		{"显示样式档位", []string{"列表", "网格", "紧凑"}},
+		{"主题模式", []string{"跟随系统", "浅色", "深色"}},
+		{"窗口关闭方式", []string{"隐藏到托盘", "直接退出"}},
+	}
+
+	// 放得下的一档：同样的 1.4 倍字号，侧栏没拉到最大（控件列 420 宽）。
+	wideTT, wideS := settingsScene(t, app.DefaultSideMenuWidth, 1.4)
+	// 放不下的一档：侧栏拉到 480（控件列 318.7 宽），字号同样是 1.4 倍。
+	narrowTT, narrowS := settingsScene(t, app.MaxSideMenuWidth, 1.4)
+
+	for _, row := range rows {
+		for _, label := range row.labels {
+			wide := settingsLabelWidth(t, wideTT, wideS, row.group, label)
+			narrow := settingsLabelWidth(t, narrowTT, narrowS, row.group, label)
+			if absF(narrow-wide) > 1 {
+				t.Errorf("「%s」那一档的标签在最坏配置下是 %.1f 宽，而放得下的时候是 %.1f——"+
+					"它被裁了（控件列只有 318.7 宽，三等分装不下「图标 + 四个字」）",
+					label, narrow, wide)
+			}
+		}
+	}
+}
+
+// settingsScene 造一个停在设置页上的外壳（某一档侧栏宽 + 某一档字号）。
+func settingsScene(t *testing.T, side float64, scale float32) (*mygoui.Tester, *Shell) {
+	t.Helper()
+	tt, s, _, _ := shellOnSettings(t, sideSceneSettings(side), at(900, 800),
+		withPrefs(mygoui.Preferences{TextScale: scale}))
+	// 侧栏宽度有 200ms 的过渡（`saveNarrowSettingsShot` 的注释写着这一条）。
+	for range 4 {
+		tt.Advance(200 * time.Millisecond)
+		tt.Frame()
+	}
+	homeFrame(tt)
+	return tt, s
+}
+
+// settingsLabelWidth 量设置页上某一档标签的宽（那一排先滚进可视区）。
+//
+// ⚠️ **自己滚，不复用 `settingRect`**：那一只往下滚 24 步（1440 像素）就
+// 收手，而「1.4 倍字号 + 侧栏 480」那一档的页面**长得离谱**（说明列被挤到
+// 一个字宽，每一行的标题都折成好几行）——「窗口关闭」那一排在它下面很远
+// 的地方，滚 24 步到不了。
+//
+// ⚠️ **量宽度不需要它可见，但需要它被排过版**：滚动只改 y、不改宽，可滚过去
+// 之后这一格就不在可视区了，而框架给滚出可视区的元素**不排版**（量出来是
+// 0 宽）。所以每一档都要先滚到**它自己那一排**再量。
+func settingsLabelWidth(t *testing.T, tt *mygoui.Tester, s *Shell, group, label string) float32 {
+	t.Helper()
+	for range 120 {
+		if r, ok := tt.Find(label); ok && r.H > 0 && r.Y >= pageTop && r.Y+r.H <= pageBottom {
+			return r.W
+		}
+		before := s.settings.scroll.Y
+		s.settings.scroll.Y = before + 100
+		tt.Frame()
+		if s.settings.scroll.Y == before {
+			break // 已经到底了，再滚也不动
+		}
+	}
+	t.Fatalf("设置页上滚不到 %q 那一排里的 %q，文字有 %q", group, label, tt.Texts())
+	return 0
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 二、「数据显示样式」那一行只剩一组选中信号
 // ─────────────────────────────────────────────────────────────────────────────
@@ -423,7 +516,13 @@ func TestRenderTicket297Shots(t *testing.T) {
 					x0, int(head.Y)-12, winW-x0-8, 300)
 				b.Close()
 			}
-			// 最坏的那两档。
+			// 最坏的那几档。
+			//
+			// ⚠️ **「侧栏 480 + 字号 1.4 倍」那一档是真正最坏的那一档**：控件列
+			// 只有 318.7 宽，而「跟随系统」那一档要 116.2（18 图标 + 6 缝 +
+			// 72.2 字 + 20 内边距）——**三等分**的话每一格只有 103.6，那个字
+			// 会被裁成「跟随…」。前两档各占一头（侧栏最宽、字号最大），合起来
+			// 才是最坏的那一档，出图必须出它。
 			for _, sc := range []struct {
 				name  string
 				side  float64
@@ -431,6 +530,7 @@ func TestRenderTicket297Shots(t *testing.T) {
 			}{
 				{"侧栏480", app.MaxSideMenuWidth, 1},
 				{"字号1.4倍", app.DefaultSideMenuWidth, 1.4},
+				{"侧栏480+字号1.4倍", app.MaxSideMenuWidth, 1.4},
 			} {
 				saveNarrowSettingsShot297(t, dir, sc.name, sc.side, sc.scale, name)
 			}
@@ -441,6 +541,10 @@ func TestRenderTicket297Shots(t *testing.T) {
 // saveNarrowSettingsShot297 出一张**最坏配置**的设置页。
 //
 // ⚠️ **侧栏宽度有 200ms 的过渡**：不推钟的话图上是动画中间那一档。
+//
+// ⚠️ **「侧栏 480 + 字号 1.4 倍」那一档还要多出一张**：那一档的说明列被挤到
+// 一个字宽，每一行的标题都折成好几行，于是「主题」那一排在**第一屏下面**
+// ——整窗那张图上看不见那一排（而那一排正是这一票的判据所在）。
 func saveNarrowSettingsShot297(t *testing.T, dir, tag string, side float64, scale float32, name string) {
 	t.Helper()
 	st := app.DefaultSettings("")
@@ -457,5 +561,26 @@ func saveNarrowSettingsShot297(t *testing.T, dir, tag string, side float64, scal
 	homeFrame(tt)
 
 	save(t, dir, "97-设置-最坏-"+tag+"-"+name+".png", tt)
+
+	// 再出一张滚到「主题」那一排的：那一排才是这一票的判据所在。
+	scrollSettingsTo(t, tt, b.s, "主题模式")
+	save(t, dir, "98-设置-最坏主题段-"+tag+"-"+name+".png", tt)
 	b.Close()
+}
+
+// scrollSettingsTo 把设置页滚到某一排可见为止（组名在可视区里）。
+func scrollSettingsTo(t *testing.T, tt *mygoui.Tester, s *Shell, group string) {
+	t.Helper()
+	for range 120 {
+		if r, ok := tt.Find(group); ok && r.H > 0 && r.Y >= pageTop && r.Y+r.H <= pageBottom {
+			return
+		}
+		before := s.settings.scroll.Y
+		s.settings.scroll.Y = before + 100
+		tt.Frame()
+		if s.settings.scroll.Y == before {
+			break // 已经到底了，再滚也不动
+		}
+	}
+	t.Fatalf("设置页上滚不到 %q 那一排，文字有 %q", group, tt.Texts())
 }
