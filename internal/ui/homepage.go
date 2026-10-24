@@ -22,6 +22,18 @@
 // （防重入、取消、旧结果作废、容器没填满自动续拉）**在那一层里**，界面层不
 // 另写一份。
 //
+// ## 「正在加载」那一格什么时候才出现（票 #368）
+//
+// **只有屏幕上真的没内容可画的时候**。切到一档而它还在拉的时候，画面上留着
+// **上一档**的内容——所以那一格轮到的次数，比以前少得多（见
+// homepage_transition.go 的 `syncShown`）。
+//
+// ## 切 Tab 有过渡（票 #368）
+//
+// 内容是单独一个元素（`viewBody`），切 Tab 时它整个换掉，框架按
+// `ElementTransition` 的 `Enter` / `Exit` 走一遍——旧的那一块退、新的那一块进。
+// 形式和那几个数写在 homepage_transition.go 顶上。
+//
 // 🔴 铁律二：这一页的 view **不许**把 `SetTheme` 放到别的地方调，见
 // `viewHome` 开头那一行和 theme.go。
 //
@@ -121,6 +133,13 @@ type homePage struct {
 	// ⚠️ 它就是 `ui.Tabs` 直接写的那一个 int——框架把点中的下标写进来，我们不再
 	// 另记一份，也就不会有「两处说的不是同一个」那种错。
 	tab int
+
+	// shown 是「此刻画面上画的是哪一档的内容」（票 #368）。
+	//
+	// ⚠️ **它和 tab 不是同一件事**：切到一档而它还在拉的时候，画面上留着**上一
+	// 档**的内容（那就是「流行切进去不闪」那一条，见 homepage_transition.go 的
+	// `syncShown`）。它只在那一档有着落了之后才跟上 `tab`。
+	shown int
 }
 
 // newHomePage 建首页这一摊状态。
@@ -150,14 +169,14 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 		// ⚠️ **失败不另说一句**：这一屏自己有一整块失败态（一句人话 + 一个重试
 		// 按钮），再说一遍是噪音，而那一句还带着 B 站的原始码。
 		l.SetFailureNotice(false)
-		// 🔴 **三档各自认自己的名字**（`list.SetKey`）：它们轮流画在内容区的
-		// 同一个位置上，而框架把滚动状态记在**元素的位置**上——不认名字的话
-		// 三档抢同一份，切回「音乐」落到第 6 首而不是它原来的第 19 首（实测）。
-		l.SetKey("home:list:" + strconv.Itoa(i))
+		// ⚠️ **三档落在不同的位置上**（票 #368 的内容块按档分了 key，见
+		// homepage_transition.go 的 `homeBodyKeys`）：框架把滚动状态记在**元素的
+		// 位置**上，而同一个位置轮流画的几份列表会**抢同一份**——切回「音乐」
+		// 会落到第 6 首而不是它原来的第 19 首（实测）。
+		//
 		// 🔴 **不挂 ScrollState**（`list.PagedList.SetScrollState`）：挂着的时候
-		// 滚动位置由它记，而它记的是「元素那个位置」的——三档轮流占着同一个
-		// 位置，于是上一档留下的偏移会拽走这一档（同一件事的另一面，见上面
-		// 那一条）。
+		// 滚动位置由它记，而它记的是「元素那个位置」的——于是上一档留下的偏移
+		// 会拽走这一档（同一件事的另一面，见上面那一条）。
 		//
 		// 不挂它，那三档就各自按**自己的行锚点**记位置（`ui.ListState`，框架
 		// 本来就是按行记的）——而回顶那一枚的偏移改按行换算（列表那一档的行高
@@ -242,20 +261,32 @@ func (s *Shell) syncHome(c *ui.Context) {
 		l.SetView(view)
 	}
 
-	// 🔴 **只同步正在看的那一档**：另外两档等用户切过去再拉（那一档的 Sync 会
+	// 🔴 **只同步选中那一档**：另外两档等用户切过去再拉（那一档的 Sync 会
 	// 替它拉第一页）。
 	//
 	// ⚠️ **这一句必须在画之前**：画的时候读到的是 `PagedList.Paged()`，而那是
 	// **收完后台结果之后**的数——晚一步的话，这一帧画的是上一帧的状态（第一帧
 	// 是「正在加载」，而其实歌已经回来了）。
+	//
+	// ⚠️ **选中那一档不一定画在画面上**（票 #368：切过去而它还在拉的时候，
+	// 画面上留着上一档）——但**它得有人收结果、有人起第一拉**，所以同步的是
+	// 它，而画出来的那一档由它自己的 `View` 同步（见 `PagedList.view`）。
 	h.lists[h.tab].Sync(c)
+
+	// 算「此刻画面上画的是哪一档」（票 #368）。**排在上面那一句之后**：那一拉
+	// 就是这一帧发出去的，而「还在拉」这件事要等它发出去才知道（见 `syncShown`）。
+	h.syncShown()
 }
 
 // view 画首页的内容。
 //
-// 摆法是「一列三块」：Tab 那一排 →（只在流行上）新歌速递 → 选中那一屏的列表。
-// 下面那一块给了 Grow(1) 的是列表，`list.List` 自己就占了 Grow(1)（见
-// widgets/list 的 List.View），所以它拿走了剩下的高度。
+// 摆法是「一列两块」：Tab 那一排 → 内容那一块。内容那一块里面是
+// （只在流行上）新歌速递 + 那一档的列表。
+//
+// ⚠️ **内容是单独一个元素**（`viewBody`，票 #368）：切 Tab 时它整个换掉，
+// 框架靠这个认出「旧的退了、新的进了」，于是有过渡；而它换的是**画面上那一
+// 档**（`h.shown`），不一定是选中那一档（`h.tab`）——选中那一档还在拉的时候，
+// 画面上留着上一档的内容（见 `syncShown`）。
 //
 // 头两句是取数：**先收**后台投回来的结果（铁律三：不收的话这一帧画的是
 // 旧内容，而唤醒只有「结果到了」那一次），**再发**该发的那一摊（画之前
@@ -273,19 +304,15 @@ func (h *homePage) view(c *ui.Context, s *Shell) {
 		AlignItems(ui.Stretch).Children(func() {
 		h.viewTabs(c, s)
 
-		// 新歌速递只画在「流行」这一屏的顶部，别的地方一律不画（上游
-		// index.tsx:295）。它自己那三态（拉取中 / 拉不到 / 正常）是它内部
-		// 的事，这里只把这一摊的状态递过去。
-		if h.tab == homePopTab {
-			h.newGrid.SetStatus(h.feed.newTab.loading, h.feed.newTab.err)
-			h.newGrid.View(c)
-		}
-
-		h.viewTabBody(c, s)
+		// ⚠️ **内容是单独一个元素**（`viewBody`，票 #368）：切 Tab 时它整个换掉，
+		// 框架靠这个认出「旧的退了、新的进了」，于是有过渡；而它换的是**画面上
+		// 那一档**（`h.shown`），不一定是选中那一档（`h.tab`）——选中那一档还在
+		// 拉的时候，画面上留着上一档的内容（见 `syncShown`）。
+		h.viewBody(c, s)
 	})
 }
 
-// viewTabBody 画选中那一档的内容。四种状态四种样子。
+// viewTabBody 画**那一档**的内容。四种状态四种样子。
 //
 // ⚠️ **「没拉到」和「没有内容」是两件事，界面上必须分开**：
 //
@@ -300,8 +327,12 @@ func (h *homePage) view(c *ui.Context, s *Shell) {
 //
 // ⚠️ **状态是翻页列表自己说的**（`list.PagedList.Paged()`）：拉页、防重入、
 // 取消都在那一层里，而这一层只管「此刻画面上该是什么样子」。
-func (h *homePage) viewTabBody(c *ui.Context, s *Shell) {
-	pg := h.lists[h.tab].Paged()
+//
+// ⚠️ **tab 是「画面上画的是哪一档」，不一定等于选中那一档**（票 #368）：选中那
+// 一档还在拉的时候，画面上画的是上一档（见 `syncShown`）——所以这一段里
+// 列表、表头、滚动条**全都按 tab 取**，不能按 `h.tab` 取。
+func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
+	pg := h.lists[tab].Paged()
 	switch {
 	case pg.Err != nil && pg.Loaded == 0:
 		// ⚠️ `pg.Loaded == 0` 那一半：手上已经有歌的时候不画失败（那会把
@@ -310,14 +341,17 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell) {
 		//
 		// 用共用的 `viewLoadError`（不是 `viewEmpty` 的一个空状态），理由在
 		// empty.go 那一段：失败必须有重试按钮，而且不能被「暂无内容」盖住。
-		tab := h.tab
 		s.viewLoadError(c, "home:fail:"+homeTabs[tab], homeTabs[tab]+"推荐", "重试加载"+homeTabs[tab]+"推荐",
 			pg.Err, func() { h.retryTab(tab) })
 	case pg.Loading && pg.Loaded == 0:
 		// ⚠️ 走**共用**的那一格（`drawLoading`）：上游首页那一屏也是
 		// `h-[40vh]` 那一格里的转圈（`src/pages/music-recommend/index.tsx:319`），
 		// 而这一票把其余几页也统一成那一格（票 #178，见 `loading.go`）。
-		drawLoading(c, "home:loading", "正在加载"+homeTabs[h.tab]+"推荐")
+		//
+		// ⚠️ **这一格只在真的没内容可画时才出现**（票 #368）：切到一档而它还在
+		// 拉的时候，画面上留着**上一档**的内容（见 `syncShown`），所以这里轮到
+		// 「正在加载」的时候，屏幕上确实一首歌都没有。
+		drawLoading(c, "home:loading", "正在加载"+homeTabs[tab]+"推荐")
 	case pg.Loaded == 0:
 		// ⚠️ 走 `viewEmpty`（`routes` 表里 `/` 那一条，出处和其余 13 条写在
 		// 一起），不是让 `list.List` 说它自己那句「这里还没有歌」：那句只说
@@ -326,17 +360,18 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell) {
 	default:
 		// ⚠️ **表头在列表外面**（`rowheader.go` 文件头）：它是 `View` 的兄弟，所以列表往
 		// 下滚它不动，宽屏下滚到右边列名也还在。
-		h.lists[h.tab].Header(c, "home:header:"+strconv.Itoa(h.tab))
-		h.lists[h.tab].View(c)
-		s.noteScrollbar(h.lists[h.tab].Hot())
+		h.lists[tab].Header(c, "home:header:"+strconv.Itoa(tab))
+		h.lists[tab].View(c)
+		s.noteScrollbar(h.lists[tab].Hot())
 
 		// 「回到顶部」那一枚**由翻页列表自己画**（`list.PagedList` 里面那一份
 		// `BackToTop`）：滚过 400 像素才出现，浮在整窗右下（上游的数，见
 		// `widgets/list` 的 `BackToTop`）。
 		//
-		// ⚠️ **别在这里再画一枚**：三档各有一份翻页列表，而这一枚该跟着
-		// **正在看的那一档**走（按了回的是当前这一档自己的位置）——画在页面
-		// 这一层的话，给的是「三档里当前那一档」的数，而按钮是三枚一起出现的。
+		// ⚠️ **别在这里再画一枚**：这一枚**由画着的那一档的翻页列表自己画**
+		// （`list.PagedList` 里面那一份 `BackToTop`）——画出来的那一枚给的是
+		// 「这一档」的数，而三档一起画的话按钮就是三枚。按它回的是**画面上画着
+		// 那一档**自己的位置（见 `PagedList.ScrollTop`）。
 	}
 }
 
@@ -429,10 +464,15 @@ func (h *homePage) viewTabs(c *ui.Context, s *Shell) {
 // 去，两个数换算的那一帧里锚点被拽偏了。
 //
 // 🔴 **而这一页那三档偏偏都不挂 ScrollState**（`list.PagedList.SetScrollState`）：
-// 挂上它的时候滚动位置由它记，而它记的是「**元素那个位置**」的——三档轮流占
-// 同一个位置，于是上一档留下的偏移会拽走这一档（实测：切回「音乐」落到第 6 首
-// 而不是它原来的第 19 首）。不挂它，三档就各自按**自己的行锚点**记位置
-// （`ui.ListState`，框架本来就是按行记的）——互不干扰。
+// 挂上它的时候滚动位置由它记，而它记的是「**元素那个位置**」的——于是上一档
+// 留下的偏移会拽走这一档（实测：切回「音乐」落到第 6 首而不是它原来的第 19 首）。
+// 不挂它，三档就各自按**自己的行锚点**记位置（`ui.ListState`，框架本来就是按行
+// 记的）——互不干扰。
+//
+// ⚠️ **三档落在不同的元素位置上**（票 #368 的内容块按档分了 key，见
+// `homepage_transition.go` 的 `homeBodyKeys`）：框架把滚动状态记在**元素的位置**
+// 上，而同一个位置轮流画的几份列表会**抢同一份**。这一条是上面那条的前提——
+// 两档抢同一份的话，不挂 ScrollState 也一样会被拽走。
 //
 // ⚠️ **代价是回顶那一枚的偏移改按行换算**（列表那一档的行高是定死的 64，
 // 所以差不到一行；网格那一档是估的，见 `list.Grid.ScrollOffset`）。而这一页

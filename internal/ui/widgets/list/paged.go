@@ -288,15 +288,6 @@ func (p *PagedList) SetEndView(fn func(c *ui.Context)) { p.endView = fn }
 // ⚠️ 只能由界面线程调。
 func (p *PagedList) SetFailureNotice(on bool) { p.failureNotice = on }
 
-// SetKey 换这一份列表在树上认自己的名字。传空串是「不用」（框架按位置认）。
-//
-// ⚠️ **同一个位置上有几份列表轮流画时，给它们各自的名字**（理由见
-// `List.SetKey`）：框架把滚动状态记在元素的位置上，而轮流占着同一个位置的
-// 几份列表会抢同一份——切回来的那一档会被上一档留下的偏移拽走。
-//
-// ⚠️ 只能由界面线程调。
-func (p *PagedList) SetKey(k string) { p.surf.SetKey(k) }
-
 // SetScrollState 装「这一份要不要挂一个 ScrollState」（滚动位置写进它）。
 //
 // ⚠️ **默认要**：回顶按钮靠它判「滚过 400 像素没有」——那是**精确的像素数**。

@@ -297,7 +297,19 @@ func (l *List) viewCard(r ui.ListRow) {
 			ui.Text(c, sh.title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
 				TextColor(titleColor).MaxLines(listTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
 			if sh.owner != "" || sh.live {
-				ownerLine(c, sh, scale.Font(c, scale.ListOwner), leading.Owner, ownerColor, listTitleMaxW, false)
+				ownerLine(c, ownerRow{
+					shown: sh,
+					name:  m.Owner,
+					mid:   m.Item.ArtistMid,
+					// ⚠ **提示是记好的那一份**（`l.ownerTip`）：现算的话每帧
+					// 每一行一次字符串拼接（票 #313 那一类）。
+					tip:   l.ownerTip.At(i, m.Owner, OwnerTipText),
+					size:  scale.Font(c, scale.ListOwner),
+					lh:    leading.Owner,
+					color: ownerColor,
+					maxW:  listTitleMaxW,
+					acts:  l.acts,
+				})
 			}
 		})
 
@@ -378,7 +390,18 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 			ui.Text(c, sh.title).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Compact).
 				TextColor(titleColor).MaxLines(compactTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
 			if sh.owner != "" || sh.live {
-				ownerLine(c, sh, scale.Font(c, scale.Size12), leading.Owner, ownerColor, listTitleMaxW, false)
+				ownerLine(c, ownerRow{
+					shown: sh,
+					name:  m.Owner,
+					mid:   m.Item.ArtistMid,
+					// ⚠ **提示是记好的那一份**：理由同上面那一处。
+					tip:   l.ownerTip.At(i, m.Owner, OwnerTipText),
+					size:  scale.Font(c, scale.Size12),
+					lh:    leading.Owner,
+					color: ownerColor,
+					maxW:  listTitleMaxW,
+					acts:  l.acts,
+				})
 			}
 		})
 

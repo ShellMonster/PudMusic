@@ -121,16 +121,6 @@ func (s *SwitchView) SetScroll(st *ui.ScrollState) {
 	s.grid.SetScroll(st)
 }
 
-// SetKey 让两份在树上各自认这个名字。传空串是「不用」（框架按位置认）。
-//
-// ⚠️ **同一个位置上有几份列表轮流画时，给它们各自的名字**（理由见
-// `List.SetKey`）：框架把滚动状态记在元素的位置上，而轮流占着同一个位置的
-// 几份列表会抢同一份——切回来的那一档会被上一档留下的偏移拽走。
-func (s *SwitchView) SetKey(k string) {
-	s.list.SetKey(k)
-	s.grid.SetKey(k)
-}
-
 // SetSelection 装多选那一摊接线，两份都装（理由见 `Grid.sel2`）。
 func (s *SwitchView) SetSelection(sel Selection) {
 	s.list.SetSelection(sel)

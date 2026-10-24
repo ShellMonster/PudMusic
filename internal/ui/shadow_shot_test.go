@@ -115,6 +115,9 @@ func shotNewMusicCover(t *testing.T, dir, name string, dark bool) {
 	s, tt := shotHomeShell(t, dark, app.DisplayModeCard)
 	s.home.tab = homePopTab
 	tt.Frame()
+	// ⚠️ **推钟**：切 Tab 有过渡（票 #368），而 Tester 的钟站着不动——不推钟
+	// 的话存出来的是过渡的第一帧（内容还在淡入）。
+	settleHome(tt)
 	save(t, dir, "53-"+name+"-新歌速递封面.png", tt)
 }
 

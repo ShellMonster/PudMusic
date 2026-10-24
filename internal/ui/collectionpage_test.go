@@ -188,7 +188,10 @@ func mediaOf(id int, title string) map[string]any {
 	return map[string]any{
 		"id": id, "type": 2, "title": title, "bvid": "BV1" + strconv.Itoa(id),
 		"cover": "", "duration": 185, "attr": 0, "page": 1,
-		"upper": map[string]any{"name": "UP " + strconv.Itoa(id)},
+		// ⚠ **编号要给上**：B 站真的给了（`upper.mid`），而界面上「点 UP 名进他的
+		// 空间」靠的就是它（票 #360）。这一份夹具原来没给，于是收藏夹上那一列
+		// UP 名是点不动的——而真实返回里它点得动。
+		"upper": map[string]any{"name": "UP " + strconv.Itoa(id), "mid": id},
 	}
 }
 

@@ -97,6 +97,10 @@ func TestTheHomeCoversDoNotGoBackToPlaceholder(t *testing.T) {
 	// 切到「流行」那一档：新歌速递那一块网格只在这一档上（上游也是这么摆的）。
 	s.home.tab = homePopTab
 	homeFrame(tt)
+	// ⚠️ **推钟**：切 Tab 有过渡（票 #368），而 Tester 的钟站着不动——不推钟
+	// 的话这一屏停在过渡的第一帧上（内容还在淡入、封面画不出来），而这一条
+	// 量的是画面上那一格画的是图还是骨架。
+	settleHome(tt)
 
 	urls := make([]string, 0, len(songs.tabs[homePopTab])+len(songs.new))
 	for _, m := range append(songs.tabs[homePopTab], songs.new...) {
