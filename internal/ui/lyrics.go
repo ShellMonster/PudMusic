@@ -232,6 +232,17 @@ type lyricStyle struct {
 	// 正是离它最远的那几句**，而它们会被算成「远」而全灭——用户看到的是一整列
 	// 空白（评审抓到的那一条）。
 	mask bool
+	// overlay 是画在**滚动容器里面**的那一层（满屏那一屏右下角那三枚旋钮）。
+	//
+	// ⚠️ **它必须在滚动容器里面，不能是它的兄弟**：框架认「滚轮滚哪一层」是
+	// 顺着**命中链**（指针底下的那个元素，再一层往上）找第一个能滚的——链上没有
+	// 滚动容器，滚轮就什么也不做。挂在兄弟上时，链上是「旋钮列 → 歌词区」，
+	// 滚轮落在旋钮列上（包括两枚之间的缝）就**滚不动歌词**了。
+	//
+	// ⚠️ **绝对定位的孩子不跟着内容滚**（`mygo/ui/layout.go` 的 `layoutScroll`：
+	// 绝对定位的孩子按父节点的原点摆，不加滚动偏移），所以它挂在滚动容器里面
+	// 也不会被歌词带着走。
+	overlay func(c *ui.Context)
 }
 
 // lyricFadeStop 是渐变上的一个点：位置（在**那一条带子**里从 0 到 1）和盖住的
@@ -600,13 +611,19 @@ func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSna
 				// 的 CSS 那一套）。写成 `Padding(0, padX, pad, pad)` 的话上面那份
 				// 居中留白跑到**左**边去了：第一句贴在顶上，而且越往下越往左缩。
 				//
-				// ⚠️ **`AlignItems(ui.Center)` 只在满屏那一屏给**：迷你播放器那一页
+				// ⚠️ **每一行都收成字那么宽**（`AlignItems(ui.Start)`）：不收的话
+				// 那一行永远是整列那么宽——**框**铺满，于是「量这一行有多亮」量到的
+				// 是框里的一切（浮在上面的旋钮、别的控件…），而不是那一句字。满屏
+				// 那一屏右下角浮着三枚旋钮（白的，236），框一铺满就量进那一行里去了。
+				//
+				// ⚠️ **`AlignItems(ui.Center)` 只在居中那一支给**：迷你播放器那一页
 				// 的歌词是**左对齐**的（一页那么宽，左对齐读起来是一张歌词纸），
 				// 而满屏那一屏的歌词**跟着上游**（封面开着时左对齐、关掉时居中）。
 				// 居中的是**每一行**（不是那一列）：正在唱的那一句放大 1.5 倍，
 				// 它在中间那一条上。
 				content := ui.Column(c).Gap(lyricsLineGap).
-					Padding(pad, st.padX, pad, st.padX)
+					Padding(pad, st.padX, pad, st.padX).
+					AlignItems(ui.Start)
 				if st.center {
 					content = content.AlignItems(ui.Center)
 				}
@@ -618,6 +635,12 @@ func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSna
 						}
 					}
 				})
+
+				// 浮在歌词上面、但**在滚动容器里面**的那一层（满屏那一屏右下角
+				// 那三枚旋钮）。理由见 `lyricStyle.overlay`。
+				if st.overlay != nil {
+					st.overlay(c)
+				}
 			})
 			s.trackScrollbar(scroll)
 		})
@@ -636,12 +659,10 @@ func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyri
 	line := ui.Column(c).
 		Key(lyricLineKey{ns: st.ns, at: row.At, i: i}).
 		Padding(lyricsLinePadY, st.padX)
-	// ⚠️ **居中那一支不铺满**：铺满了那一行就永远是整列那么宽，字还是左对齐
-	// （`AlignItems` 管的是**行**的位置，不是行**里面**的字）。不铺满的话这一行
-	// 收成字那么宽，于是能被居中。
-	if !st.center {
-		line = line.FillWidth()
-	}
+	// ⚠️ **这一行不铺满**：铺满了那一行就永远是整列那么宽——**框**里除了那一句
+	// 字还有别的东西（浮在上面的旋钮…），量「这一行有多亮」就量到了它们。
+	// 内容那一列用 `AlignItems(ui.Start)`（左对齐）或 `AlignItems(ui.Center)`
+	//（居中）摆这些行，于是每一行都收成字那么宽（见 `viewLyricLines`）。
 
 	// 「这一句正在唱」这件事在这一行上是一个 0/1 的值，换句时由 300ms 的
 	// ease-out 推过去（`lyricLineAnim`）。

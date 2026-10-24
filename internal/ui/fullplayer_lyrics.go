@@ -115,39 +115,31 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, area ui.Rect, hidden
 				Label("满屏歌词").
 				Children(func() {
 					if active < 0 {
+						// 空状态：没有滚动容器，旋钮列就挂在内容盒上（位置一样）。
 						s.viewFullLyricsEmpty(c)
-					} else {
-						s.viewLyricLines(c, lv, snap, active, lyricStyle{
-							color:  s.fullLyricColor(c),
-							area:   fullLyricsAreaKey,
-							ns:     lyricNSFull,
-							center: centered,
-							// ⚠️ **0**：上游的行没有左右内边距，于是左对齐的那些句子
-							// 左沿就咬在内容盒的左沿上（1200 宽的窗口上是 x=648）。
-							padX: 0,
-							mask: true,
-						})
+						if !hidden {
+							s.viewFullLyricKnobs(c, snap, lv)
+						}
+						return
 					}
-
-					// 右下角浮着的那三枚旋钮（上游 `index.tsx:380-398` 那三枚）。
-					//
-					// ⚠️ **它们挂在内容盒里**（不是壳上）：上游那个 `right-6` 是相对
-					// 内容盒算的，挂在壳上会差那一份左右留白（见文件头）。
-					//
-					// ⚠️ **它们是控件，界面藏起来的时候不画**（上游
-					// `showControls={isUiVisible}`）：指针不动三秒之后整屏的控件都收
-					// 走，而歌词留着（歌词是内容）。
-					//
-					// ⚠️ **没有歌词时只画「找歌词」那一枚**（上游那两个在没歌词时也
-					// 摆着，我们不摆——它们无处可附，见 `lyrics_knobs.go` 顶上那一条）。
-					//
-					// ⚠️ **字色给满屏那一档**：这一列压在糊过的封面上，主题的字色
-					// 在浅色主题下是黑的（压在那块灰底上只有 3.8:1，读不出来）。
-					if !hidden {
-						on, _ := s.fullForeground(c)
-						s.viewLyricKnobColumnWith(c, snap, active >= 0, lv, lyricKnobFull).
-							TextColor(on)
-					}
+					s.viewLyricLines(c, lv, snap, active, lyricStyle{
+						color:  s.fullLyricColor(c),
+						area:   fullLyricsAreaKey,
+						ns:     lyricNSFull,
+						center: centered,
+						// ⚠️ **0**：上游的行没有左右内边距，于是左对齐的那些句子
+						// 左沿就咬在内容盒的左沿上（1200 宽的窗口上是 x=648）。
+						padX: 0,
+						mask: true,
+						// ⚠️ **旋钮列画在滚动容器里面**（理由见 `lyricStyle.overlay`）：
+						// 挂在外面（滚动容器的兄弟）的话，滚轮落在它身上——包括两枚
+						// 之间的缝——就滚不动歌词了。
+						overlay: func(c *ui.Context) {
+							if !hidden {
+								s.viewFullLyricKnobs(c, snap, lv)
+							}
+						},
+					})
 				})
 		})
 
@@ -159,18 +151,42 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, area ui.Rect, hidden
 	lv.centre(c, active, lyricShapeOf(snap.Rows), snap.FontSize, s.snapScroll)
 }
 
+// viewFullLyricKnobs 画满屏那一屏右下角浮着的那三枚旋钮。
+//
+// ⚠️ **它们是控件，界面藏起来的时候不画**（上游 `showControls={isUiVisible}`）：
+// 指针不动三秒之后整屏的控件都收走，而歌词留着（歌词是内容）。
+//
+// ⚠️ **字色给满屏那一档**：这一列压在糊过的封面上，主题的字色在浅色主题下是
+// 黑的（压在那块灰底上只有 3.8:1，读不出来）。
+//
+// ⚠️ **三枚都画**（上游 `index.tsx:380-398` 那一层在没歌词时也摆）：字号和偏移
+// 改的是**存下来的那个值**，下一首歌有歌词时就按新的画了——它们无处可附，可
+// 它们也不是死的。
+func (s *Shell) viewFullLyricKnobs(c *ui.Context, snap app.LyricsSnapshot, lv *lyricsView) {
+	on, _ := s.fullForeground(c)
+	s.viewLyricKnobColumnWith(c, snap, true, lv, lyricKnobFull).
+		TextColor(on)
+}
+
 // viewFullLyricsEmpty 是「这一首没有歌词」那一句。
 //
 // ⚠️ **它不走 `viewEmpty`**：那一处用的是主题的正文色与次要色，而满屏这一屏
 // 压在**糊过的封面**上——浅色主题下主题的正文色是黑的，压在浅色封面上会糊
 // 进去。满屏这一屏的字色是 `fullForeground` 那一档（白 92% / 黑 92%，跟着底走）。
 //
-// 而**「怎么才能不空」那一句必须兑现得了**：这里摆一枚「找歌词」的键，按下去
-// 开的就是歌词搜索弹窗（`lyricssearch.go`，那个弹窗画在满屏**上面**，见
-// `shell.go` 里 `viewLyricDialogs` 的次序）。
-//
 // ⚠️ **它画在内容盒里**（壳 → 内容盒 → 这一块），所以它居中的那个点是内容盒的
 // 中心（1200 宽的窗口上是 900）——上游那个「暂无歌词」也是居中在内容盒里的。
+//
+// # 这里**不再摆**一枚「找歌词」
+//
+// 「怎么才能不空」那一句必须兑现得了——找歌词的入口**有**，就是右下角那一列
+// 旋钮里的「找歌词」（按下去开的就是歌词搜索弹窗，`lyricssearch.go`，那个弹窗
+// 画在满屏**上面**，见 `shell.go` 里 `viewLyricDialogs` 的次序）。
+//
+// ⚠️ **两个一模一样的「找歌词」摆在同一屏上是噪音**（评审抓到的那一条）：中间
+// 一个、右下角一个，用户会以为是两个不同的动作。上游那一屏只有一个入口
+// （右下角那一枚），而主窗口「正在播放」那一页也是同一个样子（那一列旋钮是它
+// 唯一的入口）——所以这里跟上游、跟自己那一页都一致。
 func (s *Shell) viewFullLyricsEmpty(c *ui.Context) {
 	on, dim := s.fullForeground(c)
 	ui.Box(c).Key(fullLyricsEmptyKey).
@@ -179,11 +195,6 @@ func (s *Shell) viewFullLyricsEmpty(c *ui.Context) {
 			ui.Icon(c, icon(noLyrics.Icon)).FontSize(emptyIconSize).TextColor(dim)
 			ui.Text(c, noLyrics.Title).FontSize(scale.Font(c, scale.EmptyTitle)).TextColor(on)
 			ui.Text(c, noLyrics.Hint).FontSize(scale.Font(c, scale.EmptyHint)).TextColor(dim)
-			// 字色给满屏那一档：这一枚是浮在糊过的封面上的，主题的字色在浅色
-			// 主题下是黑的（压在上面读不出来）。
-			if flatButton(c, lyricSearchKnobLabel).TextColor(on).Clicked() {
-				s.openLyricSearch()
-			}
 		})
 }
 

@@ -194,6 +194,52 @@ func TestTheFullPlayerLyricsAreLeftAligned(t *testing.T) {
 	}
 }
 
+// TestTheWheelStillScrollsTheLyricsOverTheKnobs 断**指针落在旋钮列上时滚轮照样
+// 滚歌词**。
+//
+// ⚠️ **这一条是评审抓出来的（minor）**：那一列旋钮浮在歌词区里，而它原来是
+// **滚动容器的兄弟**——框架认「滚轮滚哪一层」是顺着**命中链**（指针底下的元素
+// 再一层往上）找第一个能滚的，链上没有滚动容器，滚轮就什么也不做。于是右下角
+// 一条 66×120 的带子（旋钮列，连两枚之间的缝）**滚不动歌词**——那一块在这一票
+// 之前是能滚的（那时候满屏一枚旋钮也没有）。
+//
+// ⚠️ **上游那一层是 `pointer-events-none`**（只有三枚圆钮 `pointer-events-auto`），
+// 缝是透着的，滚轮照旧往上冒。我们这边对应的做法是**把旋钮列画进滚动容器里面**
+// （`lyricStyle.overlay`）：那样命中链上是「旋钮 → 滚动容器」，滚轮就滚得动。
+//
+// 判据是**滚动位置真的动了**（`s.fullLyric.scroll.Y`），不是「看起来动了」。
+func TestTheWheelStillScrollsTheLyricsOverTheKnobs(t *testing.T) {
+	s, tt, _ := fullLyricsTester(t)
+	s.app.PutLyrics(fullTestLRC12, "")
+	openFull(t, tt)
+	settleFull(t, tt)
+
+	col, ok := tt.Find(lyricKnobColumnName)
+	if !ok {
+		t.Fatalf("画面上找不到那一列旋钮，文字有 %q", tt.Texts())
+	}
+	// 三个采样点：两枚之间的缝（第一枚与第二枚之间）、第二枚与第三枚之间、
+	// 以及一枚旋钮自己身上（上游那一枚是 `pointer-events-auto`，滚轮照样往上冒）。
+	x := col.X + col.W/2
+	for _, y := range []float32{
+		col.Y + 32 + 6, // 第一枚与第二枚之间
+		col.Y + 32 + 12 + 32 + 6,
+		col.Y + 16, // 一枚旋钮自己身上
+	} {
+		// ⚠️ **先往下滚一段**：那样上面一定有地方（滚轮往上滚才动得了），
+		// 而判据是「位置变了」——已经在最下头的时候，往下滚是不动的。
+		tt.Scroll(x, y, 0, 400)
+		settleFull(t, tt)
+		before := s.fullLyric.scroll.Y
+		tt.Scroll(x, y, 0, -200)
+		settleFull(t, tt)
+		if s.fullLyric.scroll.Y == before {
+			t.Errorf("指针落在旋钮列上（x=%.1f, y=%.1f）滚了一下，歌词没动"+
+				"（滚动位置还是 %.1f）——那一块滚不动了", x, y, before)
+		}
+	}
+}
+
 // TestTheFullPlayerSplitsTheWindowInHalf 断满屏**两栏 50/50，封面靠右沿**。
 //
 // ⚠️ **这一条是报告 S-22（P2）**：上游那两栏是硬 50/50（封面栏 0..600、歌词栏
