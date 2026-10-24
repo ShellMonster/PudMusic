@@ -671,16 +671,16 @@ func TestTheFailureSaysWhatActuallyHappened(t *testing.T) {
 	if err := a.Enqueue(onlineItem("BV1", "1", "下到一半卡住的那一首")); err != nil {
 		t.Fatal(err)
 	}
-	// ⚠️ **等的是「那 64 KB 真的被读走了」**，不是「文件里有字节了」。
-	//
-	// 下面那句断言查的是失败那一刻**已经下到多少**（得是 64 KB）——而那个数
-	// 是**字节源自己**报的（`Filled()`），不是文件的大小。只等「文件里有字节
-	// 了」的话，机器一忙那一下就停在几 KB 上（传输那一头已经写下去几十 KB，
-	// 而读它的那一头还没被调度到），于是失败的那句照实说「已经下了 4 KB」，
-	// 而断言要的是「64 KB」——这条就在满载的 CI 上飘（实测 2026-10-25 在
-	// 负载 40 上下飘过一回）。
-	waitFor(t, 15*time.Second, "字节源收到字节了", func() bool {
-		return a.LoadedBytesForTest() >= 64<<10
+	// ⚠️ **等的是「那 64 KB 全到了盘上」，不是「有字节了」**：失败那句话里
+	// 写的字节数是**第一次闹钟时量到的那个数**（`loadFilled`，见
+	// `downloadProgressLocked`），而夹具只保证「服务器把 64 KB 发出去了」——
+	// **客户端收到几 KB 是另一回事**（机器一忙，socket 里那 64 KB 一次只
+	// 读到 4 KB）。那时候那句话**如实**说「已经下了 4 KB」，于是下面那句
+	// 断言（要说「64 KB」）就成了一条**竞态**：机器一忙就红。
+	// （2026-10-25 在板上验收时红过一次：load 30+，报的是「已经下了 4 KB」
+	// ——是这条竞态，不是产品的问题。）
+	waitFor(t, 15*time.Second, "那 64 KB 全到了", func() bool {
+		return downloadedBytes(t, dir) >= 64<<10
 	})
 	waitFor(t, 15*time.Second, "状态里说在取流", func() bool {
 		return a.Snapshot().Loading

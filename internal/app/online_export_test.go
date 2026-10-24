@@ -31,24 +31,6 @@ const LoadPlayTimeout = onlinePlayTimeout
 // 并行跑（同一个 App 实例上的）。
 func (a *App) SetAfterForTest(f func(time.Duration, func()) func()) { a.after = f }
 
-// LoadedBytesForTest 报「这一趟取流的字节源已经下到多少字节」（给测试用）。
-//
-// ⚠️ **它报的是字节源自己那份数**（`Filled()`），不是缓存文件的大小：失败
-// 那句话里写的就是这个数（见 `online.go` 的「已经下了 %s」），而文件可能
-// 比它大——传输那一头写得快，读它的那一头慢（满载的时候差得出来）。
-//
-// ⚠️ **读 `loadSrc` 要持锁**（看门狗也是这么读的，见 `online.go` 的
-// `downloadProgressLocked`）。
-func (a *App) LoadedBytesForTest() int64 {
-	a.mu.Lock()
-	src := a.loadSrc
-	a.mu.Unlock()
-	if src == nil {
-		return 0
-	}
-	return src.Filled()
-}
-
 // CapturePlayLog 把**播放路径**的日志收进一个切片，返回还原函数。
 //
 // 为什么需要它：播放路径的日志是「点了歌不播」这类问题**唯一**能查的东西
