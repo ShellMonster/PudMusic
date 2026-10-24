@@ -32,6 +32,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -273,7 +274,11 @@ func (s *Shell) viewPartDrawerHeader(c *ui.Context, t *ui.Theme) {
 // viewPartDrawerList 是浮层里那一列。
 func (s *Shell) viewPartDrawerList(c *ui.Context, t *ui.Theme) {
 	rows := s.partRows
-	s.partList.Key = func(i int) any { return rows[i].key }
+	// ⚠️ **身份是预先装箱好的那一份**（`s.partRowKeys`）：理由见
+	// `shell.go` 里那个字段的注释（票 #313）。
+	s.partList.Key = func(i int) any {
+		return s.partRowKeys.At(i, rows[i].key, rowkey.Identity)
+	}
 	s.partList.Label = func(i int) string { return rows[i].title }
 
 	e := ui.List(c, &s.partList, len(rows), func(i int) {

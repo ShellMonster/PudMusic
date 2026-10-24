@@ -252,15 +252,48 @@ func upRowKey(sp *upSpace, tab, i int) any {
 		if i >= len(sp.dynItems) {
 			return upSentinelKey{}
 		}
-		return sp.dynItems[i].ID
+		// ⚠️ **身份是预先装箱好的那一份**（`sp.rowKeys[tab]`）：理由见那个字段
+		// 的注释（票 #313）。
+		return sp.rowKeys[tab].At(i, upRowIdent{kind: 0, id: sp.dynItems[i].ID}, upRowIdentity)
 	case upTabCollection, upTabSeries:
 		if i >= len(sp.cols[tab]) {
 			return upSentinelKey{}
 		}
 		c := sp.cols[tab][i]
-		return fmt.Sprintf("coll:%d:%d", c.Type, c.ID)
+		// ⚠️ 理由同上面那一处。
+		return sp.rowKeys[tab].At(i, upRowIdent{kind: 1, typ: c.Type, num: c.ID}, upRowIdentity)
 	}
 	return upSentinelKey{}
+}
+
+// upRowIdent 是 UP 空间那一列行身份的原材（三个 Tab 同一把尺子）。
+//
+// ⚠️ **可比较**：它要当「记着算好的那一份」那把钥匙（见 `rowkey.Memo` 的
+// 文件头），所以里面不能有切片。
+type upRowIdent struct {
+	// kind 是哪一档：0 动态，1 收藏夹·合集·系列。
+	kind int
+	// id 是动态的 `id_str`。
+	id string
+	// typ / num 是收藏夹那一档的类型和 id。
+	typ int
+	num int64
+}
+
+// upRowIdentity 是 UP 空间那一列的行身份（铁律四）。
+//
+// ⚠️ **动态用 B 站的 `id_str`；收藏夹/合集用「类型 + id」**。加上类型是必须的：
+// 收藏夹的 id 和合集的 id 是两个不同的编号空间（B 站那边各自从 1 开始数），
+// 混进同一张列表就会撞上——撞上时 MyGo 在 Tester 里当场 panic，真窗口里则是
+// 那两行共用一份状态，选中一个另一个也亮。
+//
+// 这一步会分配（拼字符串 + 装箱）——所以它只在身份变了的时候才走
+// （见 `rowkey.Memo` 的文件头）。
+func upRowIdentity(k upRowIdent) any {
+	if k.kind == 0 {
+		return k.id
+	}
+	return fmt.Sprintf("coll:%d:%d", k.typ, k.num)
 }
 
 // upRowLabel 是第 tab 张 Tab 第 i 行给无障碍和「打字选中」用的名字。

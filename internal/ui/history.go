@@ -267,7 +267,9 @@ func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 		// 行尾那枚「⋯」。点开的是**这一行的菜单**，和右键同一份（理由同
 		// `drawLaterRow` 里那一处）。
 		ui.Box(c).Width(list.OperationColWidth).Children(func() {
-			list.Operation(c, list.OperationLabel(m.Title), face.title,
+			// ⚠️ **无障碍名字是记好的那一份**（`rows.opText`）：理由同
+			// `later.go` 的 `drawLaterRow` 里那一处（票 #313）。
+			list.Operation(c, rows.opText.At(r.Index, m.Title, list.OperationLabel), face.title,
 				func(m *ui.Menu) { rows.menu(m, r.Index) })
 		})
 	})
@@ -306,7 +308,8 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected boo
 	return box.Children(func() {
 		// 格子右上角那枚「⋯」。点开的是**这一格的菜单**，和右键同一份
 		//（理由见 `drawLaterCell` 里那一处）。
-		list.OperationCorner(c, list.OperationLabel(m.Title), func(m *ui.Menu) {
+		// ⚠️ **无障碍名字是记好的那一份**（`rows.opText`）：理由同上面那一处。
+		list.OperationCorner(c, rows.opText.At(i, m.Title, list.OperationLabel), func(m *ui.Menu) {
 			rows.menu(m, i)
 		})
 
@@ -314,7 +317,9 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected boo
 		// black/90 的渐变。**左边那一半空着**：历史记录的接口不给播放量（见
 		// `libraryRow.View` 的注释），画一列空白比不画更难看。
 		hover.CardCover(c, s.images, m.Cover, cell, laterCellCoverH, onCell,
-			"", clockText(m.Duration), m.Title, func() { rows.playFrom(i) })
+			"",
+			rows.durText.At(i, m.Duration, clockText),
+			m.Title, func() { rows.playFrom(i) })
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px4).PaddingY(cardGapForCell).Children(func() {
 			// 歌名 16 / UP 名 14：和 `widgets/list` 的网格卡同一档
