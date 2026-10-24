@@ -53,7 +53,7 @@ func TestRenderFocusShots(t *testing.T) {
 						// 「一直按 Tab，按到那枚的提示出来为止」——不数次数
 						// （waitFrames 的保险丝兜底）。
 						tt.Key(0, mygoui.KeyTab)
-						return tt.HasText("缩成 320×100 的小窗贴边悬浮，音乐不停")
+						return tt.HasText("缩成 320×84 的小窗贴边悬浮，音乐不停")
 					})
 				save(t, dir, "01-键盘走位-只有一条提示-"+name+".png", tt)
 				b.Close()

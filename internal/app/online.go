@@ -266,6 +266,17 @@ type onlineTrack struct {
 	reopening bool
 	// quality 是当前这条流的音质徽章。换流之后要跟着更新。
 	quality string
+	// gen 是**装上这条流的那一趟**的代次（`App.onlineGen`）。
+	//
+	// 🔴 **它是「这一条流的状态归不归当前这一趟」的判据**（票 #378）：
+	// 切歌之后 `a.online` 还是**旧那一首**（新播放器要等取流完了才装上，
+	// 那之前旧的一直在放），而旧那条流**可能正在重连**——那时候界面上
+	// 「正在重连」亮着的是**旧那一首**的状态，它把这一趟该说的
+	// 「正在取流：新的一首」盖掉了。
+	//
+	// 有了这一栏：那一条源的状态只在 `gen` 还是当前代次的时候才算数
+	// （见 `reconnect.go` 的 `reconnectingLocked`）。
+	gen int
 }
 
 // streamKey 是取流缓存的键。
@@ -412,6 +423,9 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 		a.online = &onlineTrack{
 			item: tr.item, ref: ref, source: src,
 			quality: ref.Label,
+			// 🔴 **代次记在这一条流上**（票 #378）：它是「这一条流的状态归不归
+			// 当前这一趟」的判据（见 `reconnect.go`）。
+			gen: gen,
 		}
 		// 源归播放器管了（见 App.pendingSrc）。
 		a.pendingSrc = nil
@@ -851,6 +865,13 @@ func (a *App) loadTimedOut(gen int, title, stage string) {
 		}
 	}
 	a.onlineGen++
+	// 🔴 **活下来的那一首还是当前这一首**（票 #378）：这一趟取流失败了，
+	// 但**上一首还在放**（播放器压根没动过）。所以它那一栏的代次要跟着
+	// 加——不加的话，它之后断流时的「正在重连」会被当成「别的歌的事」
+	// 藏起来（见 `reconnect.go` 的 `reconnectingLocked`）。
+	if a.online != nil {
+		a.online.gen = a.onlineGen
+	}
 	stage = a.loadingStage
 	// ⚠️ **失败那一刻已经下到多少字节**：判据是「这一段没有进展」，而
 	// 「没进展」**不等于**「一个字节都没到」——下到一半卡住时字节明明已经
@@ -1167,7 +1188,7 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	}
 	a.stopped = false
 	a.quality = ref.Label
-	a.online = &onlineTrack{item: it, ref: ref, source: src, quality: ref.Label}
+	a.online = &onlineTrack{item: it, ref: ref, source: src, quality: ref.Label, gen: gen}
 	// 源归播放器管了（`audio.Player` 的 closers 会关它），App 这一栏清空。
 	a.pendingSrc = nil
 	// 🔴 **「这一趟自己的那一条」也清掉**（票 #220）：这一趟到这儿就完了，
@@ -1946,7 +1967,7 @@ func (a *App) refreshOnlineNow(cause error) {
 		a.position = pos
 		a.quality = ref.Label
 		a.online = &onlineTrack{item: tr.item, ref: ref, source: src, quality: ref.Label,
-			reopening: true}
+			reopening: true, gen: gen}
 		// 源归播放器管了（见 App.pendingSrc）。
 		a.pendingSrc = nil
 		a.reportedErr = nil
