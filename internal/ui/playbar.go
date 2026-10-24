@@ -497,6 +497,13 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 		// 「正在取流」那一档已经收掉了（`failOnline` 先收它，再写这句话）。
 		// 万一同时有（将来加了别的路径），**错的那句优先**：一句错比一枚转圈
 		// 信息量大，而转圈还在转说明还有希望。
+		//
+		// 🔴 **错一收，「详情」面板也得收**（票 #320）：**在 switch 之前**判——
+		// 错收掉之后紧接着来的可能是「正在取流」那一档，而那块面板说的是上一句
+		// 错的话，它自己不会走。
+		if st.Err == "" {
+			s.errDetailOpen = false
+		}
 		switch {
 		case st.Err != "":
 			s.viewTrackError(c, st, t)
@@ -623,15 +630,38 @@ func (s *Shell) viewTrackActions(c *ui.Context, st app.State) {
 //
 // ⚠️ 这一行**只在出错的时候才有这一枚键**，所以平时播放条的布局一个像素
 // 都不动（那一列的宽度、进度条的长度都不受影响）。
+//
+// # 「详情」层（票 #320）
+//
+// 这一行是**一行 + 省略号**（理由见下面那段注释），而 `bili.Friendly` 那张表
+// 里的话信息量很大——「B 站没有给这一条单独的音频流（歌单、活动那一种多半是
+// 这样）。在 B 站里打开它听，或者换一首放」四十来个字，压成一行之后用户常常
+// 只读到半句话。
+//
+// 所以完整那一句有**两个去处**：
+//
+//	悬停	提示框（这一层早就有，票 #282 的评审加的）
+//	点它	播放条**上方**那块小面板（`playbar_err.go`）——完整那一句、多行
+//	        排开、**能选中复制**（用户要拿它去提 issue）
+//
+// ⚠️ **面板是浮层**：88 高那一行一个字都不多（票 #320 的验收盯的就是这个）。
+//
+// ⚠️ **每帧多一次分配**：那个 `OnClick` 的闭包（和歌名那一处一个道理——它也
+// 是每帧一个闭包）。**平时（没有错）一个字都没多**：`framebudget_test.go`
+// 量的是「一首 B 站的歌」那一副（12 次 / 578 字节，实测不变）；出错的那一
+// 副本来就多花钱（那句话的字要排版），这一条不改变量级。
 func (s *Shell) viewTrackError(c *ui.Context, st app.State, t *ui.Theme) {
 	msg := "打不开：" + st.Err
-	// 🔴 **悬停提示里给的是完整那一句**（`State.ErrDetail`）：这一行只有 140
-	// 像素宽（1200 宽的窗口，实测），十二三个字就是它的全部——一句 50 个字的
-	// 话上屏只剩「打不开：取流…」这样的碎片（票 #282 的评审）。短的那句在
-	// 画面上，完整的那句在提示里，两边合起来才是一句能看懂的话。
-	tip := msg
-	if st.ErrDetail != "" && st.ErrDetail != st.Err {
-		tip = "打不开：" + st.ErrDetail
+	// 🔴 **提示框里给的是完整那一句**：这一行只有 140 像素宽（1200 宽的窗口，
+	// 实测），十二三个字就是它的全部——一句 50 个字的话上屏只剩「打不开：取流…」
+	// 这样的碎片（票 #282 的评审）。短的那句在画面上，完整的那句在提示里，
+	// 两边合起来才是一句能看懂的话。
+	tip := "打不开：" + errFullBody(st)
+	// ⚠️ **面板开着的时候不挂提示框**：提示框和那块面板**摆在同一个位置**
+	//（都在这一行的上面），而它们说的是同一句话——指针移开又移回来的时候，
+	// 两块叠在一起，屏幕上就是一块小提示盖着一块面板。
+	if s.errDetailOpen {
+		tip = ""
 	}
 	ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 		// 🔴 **一行 + 省略号，和歌名同一个理由**：这一列最窄的时候（760 宽
@@ -639,9 +669,30 @@ func (s *Shell) viewTrackError(c *ui.Context, st app.State, t *ui.Theme) {
 		// 字——换成两行就是四行，**88 高的播放条装不下，最后一行被裁掉**，
 		// 而症状是「说了有话却看不见」（文本节点还在，测试也还找得到它）。
 		//
-		// 缩掉的那几个字用悬停补回来，和上面那个音质徽章同一个做法。
-		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
-			TextColor(dangerText(t)).MaxLines(1).Ellipsis("…").Grow(1), tip)
+		// 缩掉的那几个字在提示框和「详情」面板里补回来（见上面那段说明）。
+		//
+		// 🔴 **这一句是「详情层」的入口**（票 #320）：它点得开。
+		line := ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
+			TextColor(dangerText(t)).MaxLines(1).Ellipsis("…").Grow(1).
+			OnClick(func() { s.errDetailOpen = !s.errDetailOpen })
+		line = s.withTip(c, line, tip)
+		// ⚠️ **悬停才显出「点得动」**：一道下划线 + 一只指针手
+		//（侧栏那个登录提示是一个做法，`sidebar.go`）。
+		//
+		// ⚠️ **问的是 `line` 自己**（元素建好之后）：`Hovered` 要元素在命中列表
+		// 里，而那要它已经建好（`OnClick` 之后才算）。
+		if line.Hovered() {
+			line = line.Underline().Cursor(ui.CursorPointer)
+		}
+		// Popover 自己处理「点外面关掉」和 Escape，所以这里只管开关本身
+		//（和 `viewRate` / `viewPartButton` 同一个写法）。
+		//
+		// ⚠️ 浮层那一层外面包一层 Guard（铁律三）：它是在**播放条这一层的布局
+		// 之外**单独建的，它一崩坏掉的是整块浮层，而报错的地方在播放条上——
+		// 两者对不上，极难查。
+		ui.Popover(c, line, &s.errDetailOpen, func() {
+			s.guardAt("错误详情", func(c *ui.Context) { s.viewErrorDetail(c, st) })(c)
+		})
 		switch {
 		case st.CanRetry:
 			if s.withTip(c, flatButton(c, "重试").FontSize(scale.Font(c, scale.Size12)),
