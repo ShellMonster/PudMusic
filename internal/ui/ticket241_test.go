@@ -31,14 +31,17 @@ import (
 // F-16　顶栏末两枚的视觉重量
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheTopBarEndsWithTwoLightControls 钉住「顶栏最右那两枚和左边四枚线框图标
+// TestTheTopBarEndsWithTwoLightControls 钉住「顶栏最右那两枚和左边三枚线框图标
 // 同一档」。
 //
 // 判据是**墨迹像素数**：报告那一份就是这么量的（每枚取「图标 ±6 像素」的框，
 // 背景采样在框左上，数和底色差 > 12 的像素）。
 //
-// ⚠️ **量的是图标键自己的框**（32×32），所以六枚是同一块面积上的墨迹——
-// 可比。改之前：头像 608、登录方块 752，而那四枚是 140~152。
+// ⚠️ **量的是图标键自己的框**（32×32），所以五枚是同一块面积上的墨迹——
+// 可比。改之前：头像 608、登录方块 752，而那几枚是 140~152。
+//
+// ⚠️ **左边那三枚**（打开文件 / 迷你 / 动态）：原来有四枚，票 #289 拿掉了顶栏
+// 那一枚「设置」（侧栏和头像下拉里都有同一个动作）。
 func TestTheTopBarEndsWithTwoLightControls(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -57,8 +60,8 @@ func TestTheTopBarEndsWithTwoLightControls(t *testing.T) {
 			th := BuildTheme(app.DefaultSettings(""), dark)
 			bg := rgb(th.Background)
 
-			// 前面四枚线框图标，和末两枚（头像 / 登录键）。
-			lineIcons := []string{"打开文件", "迷你", "设置", "动态"}
+			// 前面三枚线框图标，和末两枚（头像 / 登录键）。
+			lineIcons := []string{"打开文件", "迷你", "动态"}
 			tail := []string{avatarLabel, "登录"}
 
 			inks := map[string]int{}
@@ -72,7 +75,7 @@ func TestTheTopBarEndsWithTwoLightControls(t *testing.T) {
 				rects[label] = r
 			}
 
-			// 四枚线框图标之间没有差别（报告实测 140~152），取它们的最大值当
+			// 那三枚线框图标之间没有差别（报告实测 140~152），取它们的最大值当
 			// 「这一档」的尺子。
 			tier := 0
 			for _, label := range lineIcons {
@@ -80,18 +83,18 @@ func TestTheTopBarEndsWithTwoLightControls(t *testing.T) {
 					tier = inks[label]
 				}
 			}
-			// 头像：和那四枚线框图标**同一档**。
+			// 头像：和那三枚线框图标**同一档**。
 			//
 			// ⚠️ **上限给到 1.3 倍**：那一档不是「一模一样」（头像有一圈 1 像素的描
-			// 边，四枚线框图标没有），而是「同一档」——报告的原话。实测：头像
-			// 152~160、那四枚 137~141，也就是 1.08~1.14 倍（那四枚彼此之间也有
+			// 边，那三枚线框图标没有），而是「同一档」——报告的原话。实测：头像
+			// 152~160、那三枚 137~141，也就是 1.08~1.14 倍（那三枚彼此之间也有
 			// 1.03 倍的差别）。改之前是 608（4.3 倍）。
 			if inks[avatarLabel] > tier*13/10 {
-				t.Errorf("头像那一格的墨迹是 %d 像素，而左边那四枚线框图标是 %d~%d——"+
+				t.Errorf("头像那一格的墨迹是 %d 像素，而左边那三枚线框图标是 %d~%d——"+
 					"它比邻居重，用户的眼睛先落在它身上（框 %v）",
 					inks[avatarLabel], inks[lineIcons[0]], tier, rects[avatarLabel])
 			}
-			// 登录键：**和那四枚线框图标同一档**。
+			// 登录键：**和那三枚线框图标同一档**。
 			//
 			// ⚠️ **这一枚的图形是二维码**（票 #242：登录是扫码登录，而「圆圈里一支
 			// 箭头」那一对在 18px 上分不清进出）。二维码**天生比线框图标密**：18px
@@ -102,7 +105,7 @@ func TestTheTopBarEndsWithTwoLightControls(t *testing.T) {
 			// 顺带断一句「它不是一块实心主色的方块」：F-16 / F-05 说的就是那块底
 			// （改之前 778 块主色像素），这一格现在一块主色像素都没有。
 			if inks["登录"] > tier*13/10 {
-				t.Errorf("登录键那一格的墨迹是 %d 像素，而左边那四枚线框图标是 %d~%d——"+
+				t.Errorf("登录键那一格的墨迹是 %d 像素，而左边那三枚线框图标是 %d~%d——"+
 					"它比邻居重，用户的眼睛先落在它身上（框 %v）",
 					inks["登录"], inks[lineIcons[0]], tier, rects["登录"])
 			}
@@ -113,7 +116,7 @@ func TestTheTopBarEndsWithTwoLightControls(t *testing.T) {
 				t.Errorf("登录键那一格里有 %d 块主色像素——它不该再是一块实心主色的方块"+
 					"（改之前是 778，是相邻线框图标的 5.4 倍）", n)
 			}
-			t.Logf("四枚线框图标 %v，末两枚 %v", inks, inks)
+			t.Logf("三枚线框图标 %v，末两枚 %v", inks, inks)
 		})
 	}
 }
