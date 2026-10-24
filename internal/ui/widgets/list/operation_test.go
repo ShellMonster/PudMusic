@@ -55,7 +55,7 @@ func TestTheOperationButtonActsOnTheSongItSitsOn(t *testing.T) {
 	if err := tt.Click(OperationLabel("在线的歌 C")); err != nil {
 		t.Fatalf("点不到行尾那枚「⋯」：%v", err)
 	}
-	if err := tt.ChooseMenuItem("播放"); err != nil {
+	if err := tt.ChooseMenuItem("从这一首往后听"); err != nil {
 		t.Fatal(err)
 	}
 	if len(rec.played) != 1 {

@@ -795,6 +795,45 @@ func (a *App) Enqueue(items ...Item) error {
 	return a.play(item)
 }
 
+// EnqueueAndPlay 把几项**按顺序追加**到队列末尾，并从**追加的第一项**开始播。
+//
+// 这是「全部播放」那一枚的语义（票 #299，2026-10-24 人定的）：**这一页的歌
+// 按顺序加进队列并播放**。
+//
+// # 和 Enqueue 的差别只有一处：起播的那一首
+//
+// `Enqueue` 只在队列原本是空的时候起播第一项（那是「加歌」：用户加了几首，
+// 队列空着就顺手放起来）；这一条**总是**从这一批的第一项开始播——用户按的是
+// 「把这一页放一遍」，不是「往队尾塞几首」。
+//
+// ⚠️ **追加在队尾，播放从这一批的第一项开始**：所以这一页的歌放完之后，队列
+// 会绕回前面那几首（队列两端绕回，见 `Queue.Move`）。这是「追加」+「从这一页的
+// 第一首开始」这两句话的字面意思——**别偷偷改成插到当前那一首后面**，那是
+// 「下一首播放」那一档的事。
+//
+// 打头这一项打不开就把错误记在播放条上并返回，**队列留着**（用户要的就是
+// 它们），播放条退回原来那一首：歌已经进队列了，不该因为第一首放不开就当
+// 没发生过。
+func (a *App) EnqueueAndPlay(items ...Item) error {
+	if len(items) == 0 {
+		return nil
+	}
+	cur := a.queue.CurrentIndex()
+	start := a.queue.Len()
+	a.queue.Append(items...)
+	item, ok := a.queue.selectAt(start)
+	if !ok {
+		return nil
+	}
+	if err := a.play(item); err != nil {
+		// 退回原来那一首：队列的下标要和正在放的那首对得上（和 `step` 同一个
+		// 道理——用户点的是这一页，不该因为放不开就被放到另一首上）。
+		a.queue.selectAt(cur)
+		return err
+	}
+	return nil
+}
+
 // EnqueueNext 把一项排在**正在放的那首后面**（「下一首播放」）。
 //
 // 和 `Enqueue` 的分界只在插的位置：那个接在队尾，这一个接在当前的下一位。

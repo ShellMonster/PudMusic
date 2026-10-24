@@ -517,8 +517,8 @@ const (
 	cardGapForCell  = space.Px8
 )
 
-// laterMenu 是这一行的右键菜单，七项：播放 / 下一首播放 / 添加到队列 /
-// 在 B 站打开 / 收藏 / 下载音频 / 移除。
+// laterMenu 是这一行的右键菜单，八项：立即播放 / 从这一首往后听 / 下一首播放 /
+// 添加到队列 / 在 B 站打开 / 收藏 / 下载音频 / 移除。
 //
 // ⚠️ **每一项都要 Item 一遍**：菜单是这趟全部建出来的，只有被 Chosen 的那一项为
 // true（`ui/menu.go` 的 buildMenu）。少建一项，那一项就永远点不到。
@@ -531,7 +531,11 @@ func (s *Shell) laterMenu(m *ui.Menu, i int) {
 	acts := p.rows.actions()
 
 	switch {
-	case m.Item("播放").Disabled(!row.CanPlay).Chosen():
+	case m.Item("立即播放").Disabled(!row.CanPlay).Chosen():
+		// 「立即播放」= **只放这一首**（票 #299）：队列被换成这一首，不是把这一
+		// 页剩下的歌一起排上。
+		acts.PlayNow(i)
+	case m.Item("从这一首往后听").Disabled(!row.CanPlay).Chosen():
 		// ⚠️ PGC（番剧 / 纪录片）放不了：取流那一套对 PGC 不通（见
 		// `app.playableOnline`），上游也是不给这一类入口（`cannotPlay = is_pgc`）。
 		// **画成灰的而不是不画**：不画的话同一份列表里有的行能播有的不能，用户会

@@ -38,10 +38,30 @@ func TestBothLibraryPagesOfferPlayNextInTheRowMenu(t *testing.T) {
 			if !slices.Contains(got, "下一首播放") {
 				t.Errorf("%s 的行菜单里没有「下一首播放」：%q", c.title, got)
 			}
-			// 它和「播放」「添加到队列」是同一件事的三档，得挨着摆
-			// （Biu 的 `music-recommend/index.tsx:204-213` 就是这个顺序）。
-			if i, j, k := slices.Index(got, "播放"), slices.Index(got, "下一首播放"), slices.Index(got, "添加到队列"); !(i < j && j < k) {
-				t.Errorf("「下一首播放」不在「播放」和「添加到队列」之间：%q", got)
+			// ⚠️ **四档挨着摆**（票 #299）：立即播放 / 从这一首往后听 / 下一首
+			// 播放 / 添加到队列——四件事是同一个动作的四档（现在就放这一首 /
+			// 从这一首接到这一页末尾 / 排在当前后面 / 排到队尾），摆在一起用户
+			// 才看得出这是个梯度（Biu 的 `music-recommend/index.tsx:204-213` 就是
+			// 这个顺序）。
+			//
+			// ⚠️ **判的是下标不是「在不在」**：少了哪一档，`Index` 回来的是 -1，
+			// 而 -1 比谁都小——那样这条断言会**假装通过**。
+			idx := map[string]int{}
+			for _, want := range []string{"立即播放", "从这一首往后听", "下一首播放", "添加到队列"} {
+				i := slices.Index(got, want)
+				if i < 0 {
+					t.Errorf("%s 的行菜单里没有 %q：%q", c.title, want, got)
+					continue
+				}
+				idx[want] = i
+			}
+			if len(idx) == 4 {
+				order := []string{"立即播放", "从这一首往后听", "下一首播放", "添加到队列"}
+				for k := 1; k < len(order); k++ {
+					if idx[order[k-1]] > idx[order[k]] {
+						t.Errorf("「%s」不在「%s」前面：%q", order[k], order[k-1], got)
+					}
+				}
 			}
 		})
 	}
