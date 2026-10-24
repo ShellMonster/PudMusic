@@ -640,6 +640,17 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 		a.failPlay(gen, it, "取流", err)
 		return
 	}
+	// 🔴 **代次变了就别再往下走**（和上面那一次同一个道理）：取流也是**一次网络
+	// 往返**，等它的时候用户完全可能已经切了歌、或者**应用已经退出**了。
+	//
+	// ⚠️ **这一处不是可有可无的**：下面 `buildFromRef` 建字节源是要**在盘上落一
+	// 个临时文件**的，而代次变了之后没人要这一趟——那个文件于是落在一个已经不
+	// 会有人收拾的目录里（应用退出之后落，测试里就是落在已经被删掉的临时目录
+	// 里，于是那条用例的收尾报「directory not empty」）。
+	if a.genStale(gen) {
+		a.failPlay(gen, it, "取流", errStaleGen)
+		return
+	}
 	// 🔴 **再起算一次**：从这儿往后等的是 CDN 的头几个字节（字节源自己的
 	// 卡死判定是 20 秒）。
 	a.rearmLoading(gen, it.Title)
