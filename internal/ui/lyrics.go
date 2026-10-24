@@ -206,9 +206,16 @@ type lyricStyle struct {
 	// center 是「每一行**居中**」还是「每一行左对齐」。
 	//
 	// ⚠️ **迷你播放器那一页是左对齐**（一页那么宽，左对齐读起来是一张歌词纸），
-	// **满屏那一屏是居中**（那一列有六百多宽，左对齐的话字全贴在左边，右边空出
-	// 一大块，看着像没画完）。
+	// **满屏那一屏跟着上游**：封面开着的时候左对齐（上游 `centered={!showCover}`），
+	// 封面关掉的时候居中（那一栏是整窗宽，居中才不空）。
 	center bool
+	// padX 是歌词那一列左右那一份内边距（内容盒与每一行各一份）。
+	//
+	// ⚠️ **满屏那一屏给 0**：上游的歌词容器是 `px-12 py-24`，行本身**没有**左右
+	// 内边距（`components/lyrics/index.tsx:331` 只有 `py-2`），于是左对齐的那些
+	// 句**左沿就咬在内容盒的左沿**（1200 宽的窗口上是 x=648）。
+	// 迷你播放器那一页给 `lyricsPadX`（12）——那一页是我们自己的排版（歌词纸）。
+	padX float32
 	// mask 是「按上游那条遮罩的语义，**逐行**淡出」那一档。
 	//
 	// ⚠️ **上游那条 `maskImage` 是按容器的上下沿淡的**（`index.tsx:357-360`：
@@ -529,6 +536,7 @@ func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Dura
 		fade:  t.Background,
 		area:  lyricsAreaKey,
 		ns:    lyricNSPage,
+		padX:  lyricsPadX,
 	})
 
 	// 右下角浮着的那一列旋钮。⚠️ **偏移与字号画在没有歌词的时候不画**（传下去的
@@ -594,11 +602,11 @@ func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSna
 				//
 				// ⚠️ **`AlignItems(ui.Center)` 只在满屏那一屏给**：迷你播放器那一页
 				// 的歌词是**左对齐**的（一页那么宽，左对齐读起来是一张歌词纸），
-				// 而满屏那一屏的歌词那一列有六百多宽——左对齐的话字全贴在左边，
-				// 右边空出一大块，看着像没画完。居中的是**每一行**（不是那一列）：
-				// 正在唱的那一句放大 1.5 倍，它在中间那一条上。
+				// 而满屏那一屏的歌词**跟着上游**（封面开着时左对齐、关掉时居中）。
+				// 居中的是**每一行**（不是那一列）：正在唱的那一句放大 1.5 倍，
+				// 它在中间那一条上。
 				content := ui.Column(c).Gap(lyricsLineGap).
-					Padding(pad, lyricsPadX, pad, lyricsPadX)
+					Padding(pad, st.padX, pad, st.padX)
 				if st.center {
 					content = content.AlignItems(ui.Center)
 				}
@@ -627,7 +635,7 @@ func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSna
 func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyrics.Row, fontSize float32, st lyricStyle) ui.Element {
 	line := ui.Column(c).
 		Key(lyricLineKey{ns: st.ns, at: row.At, i: i}).
-		Padding(lyricsLinePadY, lyricsPadX)
+		Padding(lyricsLinePadY, st.padX)
 	// ⚠️ **居中那一支不铺满**：铺满了那一行就永远是整列那么宽，字还是左对齐
 	// （`AlignItems` 管的是**行**的位置，不是行**里面**的字）。不铺满的话这一行
 	// 收成字那么宽，于是能被居中。
