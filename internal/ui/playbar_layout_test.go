@@ -861,9 +861,10 @@ func TestTheVolumePopoverHasAVerticalSlider(t *testing.T) {
 
 // TestClickingTheVolumeIconMutes 断「点图标静音」真的接上了。
 //
-// ⚠️ **静音 = 音量 0**：播放器那边压根没有静音这一档，而应用层也只有音量
-// （`App.SetVolume`）。所以这一条断的是**应用里的音量真的变成了 0**，而不是
-// 「图标换了张」。
+// ⚠️ **静音是它自己的一格**（票 #311 / 报告 §3.3 的 B2）：静音的时候**音量那一格
+// 一动不动**——取消静音放回去的就是它（落盘的也是它）。而「真正没声」靠的是
+// 那一格布尔，不是把音量改成 0：合成一档的话，落盘之后「静音后退出再启动，
+// 音量变成 0」就成了必然（Clementine 的老毛病）。
 //
 // 再点一下要**放回去**：放回去的是静音之前那个音量（80%），不是 50%。
 func TestClickingTheVolumeIconMutes(t *testing.T) {
@@ -879,8 +880,13 @@ func TestClickingTheVolumeIconMutes(t *testing.T) {
 		t.Fatalf("点不动音量那一枚：%v（文字：%q）", err, h.tt.Texts())
 	}
 	h.tt.Frame()
-	if got := h.app.Snapshot().Volume; got != 0 {
-		t.Errorf("点了音量图标之后音量是 %v，want 0——它没有静音", got)
+	st := h.app.Snapshot()
+	if !st.Muted {
+		t.Error("点了音量图标之后没有静音")
+	}
+	if st.Volume != before {
+		t.Errorf("点了音量图标之后音量变成了 %v，want %v——静音不该动音量那一格",
+			st.Volume, before)
 	}
 
 	// 静音了之后那一枚换了个名字（上游的 `aria-label={isMuted ? "取消静音" : "静音"}`）。
@@ -888,9 +894,39 @@ func TestClickingTheVolumeIconMutes(t *testing.T) {
 		t.Fatalf("点不动「取消静音」：%v（文字：%q）", err, h.tt.Texts())
 	}
 	h.tt.Frame()
-	if got := h.app.Snapshot().Volume; got != before {
+	st = h.app.Snapshot()
+	if st.Muted {
+		t.Error("再点一下还是静音的")
+	}
+	if st.Volume != before {
 		t.Errorf("取消静音之后音量是 %v，want %v——它没有放回静音之前那个音量",
-			got, before)
+			st.Volume, before)
+	}
+}
+
+// TestAMutedPlayerStillKeepsItsVolume 断「静音的时候那一格音量还在」。
+//
+// ⚠️ **这一条是「静音独立成布尔」在画面上的样子**：用户为了不吵把音量调到 20%，
+// 按了静音——取消静音放回去的必须是 20%，而不是「不知道是多少」。
+//
+// 而图标那一枚说的是「按下去会怎样」：静音的时候它是「取消静音」。
+func TestAMutedPlayerStillKeepsItsVolume(t *testing.T) {
+	h := newHarness(t)
+	h.open(t)
+
+	h.app.SetVolume(0.2)
+	h.tt.Frame()
+
+	if err := h.tt.Click("静音"); err != nil {
+		t.Fatalf("点不动音量那一枚：%v（文字：%q）", err, h.tt.Texts())
+	}
+	h.tt.Frame()
+
+	if _, ok := volumeKeyOnTheBar(h.tt); !ok {
+		t.Fatalf("播放条上找不到音量那一枚，文字有 %q", h.tt.Texts())
+	}
+	if got := h.app.Snapshot().Volume; got != 0.2 {
+		t.Errorf("静音之后音量是 %v，want 0.2——静音把音量吃掉了", got)
 	}
 }
 

@@ -353,6 +353,14 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// 风控**不判成「可重试」**：界面上那枚「重试」是立刻再问一次（没有退避），
+		// 而风控要等的是时间——判成可重试的话用户点一次撞一次（票 #316）。
+		// 限流（-509）是另一回事：等一会儿就好，所以仍然是可重试的。
+		Spec:  "风控不可重试（立刻再问还是撞墙），限流可重试（等一会儿就好）",
+		Tests: []string{"TestRiskControlIsNotWorthRetryingAgain"},
+	},
+	{
+		Category: HTTP,
 		Spec:     "取流超时会回来，不是挂着",
 		Tests:    []string{"TestSlowServerIsCutOffByTheTimeout", "TestALateStarterDoesNotWaitForTheTimeout"},
 	},
@@ -1073,6 +1081,43 @@ var Items = []Item{
 			"TestRestartKeepsTheLoginState",
 			"TestMountedSettingsSurviveAProcessRestart",
 			"TestSearchHistorySurvivesRestart",
+		},
+	},
+	{
+		Category: Negative,
+		// 音量三件套（票 #311）。这一组盯的是三件**静默**的事：
+		//
+		//  1. 音量不落盘 → 每次启动回到 100%。用户为了不吵把音量调到 20%，
+		//     重启之后突然全速——耳机上那是真的惊吓。
+		//  2. 静音还是「音量 0」的话，一旦开始落盘音量，「静音后退出再启动，
+		//     音量永远是 0」就成了必然（Clementine 的老毛病）。所以静音是它
+		//     自己的一格，而音量那一格记的是用户设的值。
+		//  3. 「这份设置里没有音量这一格」（老版本写的文件）和「用户自己把音量
+		//     拉到 0」分不开的话，升级上来的用户打开应用是**一点声都没有**，
+		//     而界面上不会说任何一个字。
+		//
+		// 第四件是「音量不一步跳过去」：开始放 / 恢复时从 0 走到那一档（淡入），
+		// 调音量和按静音时从当前值渐变到新值（渐变 / 淡出）。
+		Spec: "音量：落盘记住（重启还是上次那一档）；静音是独立的一格（静音后退出再启动，音量不是 0）；开始放 / 恢复时淡入，调音量时渐变，不是瞬间跳",
+		Tests: []string{
+			// 落盘与读回。
+			"TestTheVolumeSurvivesARestart",
+			"TestMuteIsItsOwnFlag",
+			// 「没有这一格」和「这一格是 0」分得开。
+			"TestAnOldSettingsFileGetsTheDefaultVolume",
+			"TestAVolumeOfZeroIsNotTheSameAsNoVolume",
+			// 静音那一格自己的语义。
+			"TestUnmutingRestoresTheVolume",
+			"TestSettingANonZeroVolumeUnmutes",
+			"TestDraggingTheVolumeToZeroIsMute",
+			"TestAMutedPlayerStillKeepsItsVolume",
+			"TestMutedAlwaysDrawsTheMuteIcon",
+			// 淡入 / 渐变 / 淡出。
+			"TestTheVolumeFadesInOnStart",
+			"TestSettingTheVolumeRamps",
+			"TestMutingFadesOut",
+			"TestSettingTheVolumeRetargetsTheRamp",
+			"TestCloseStopsTheRamp",
 		},
 	},
 	{
