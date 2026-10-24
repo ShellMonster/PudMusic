@@ -63,9 +63,6 @@ const fullHideDelay = 3 * time.Second
 //	分集面板 宽 280，高 min(60vh, 420)                     index.tsx:424-426
 //	分集行高 32                                             page-list.tsx:35
 const (
-	fullMinCoverWidth  = 260
-	fullMaxCoverWidth  = 520
-	fullCoverAspect    = 0.75
 	fullSpectrumMinW   = 400
 	fullSpectrumMaxW   = 640
 	fullSpectrumBarPx  = 7.5
@@ -966,14 +963,25 @@ func coverIdentity(s *Shell, st app.State) string {
 // 而上游那个式子算出来的宽度（最多 520）可能比那一列还宽——那就压到歌词上去了。
 // 夹一下之后窄窗口里的封面跟着那一列一起变小，而宽高的比例不变。
 func fullCoverSize(c *ui.Context, maxW float32) (float32, float32) {
-	winW, winH := c.Size()
-	w := min(winW*0.7, winH*0.48)
-	w = min(max(w, fullMinCoverWidth), fullMaxCoverWidth)
+	winW, _ := c.Size()
+	// 设计规范 v0.1 §7.5：正方形封面，320（窗口宽 < 1000 时 240）。原来是上游 Biu 的 4:3、
+	// 最宽 520 的算法。
+	w := float32(fullCoverSide)
+	if winW < fullCoverNarrowWin {
+		w = fullCoverSideNarrow
+	}
 	if maxW > 0 {
 		w = min(w, maxW)
 	}
-	return w, w * fullCoverAspect
+	return w, w
 }
+
+// 满屏封面的边长（设计规范 v0.1 §7.5）。
+const (
+	fullCoverSide       = 320
+	fullCoverSideNarrow = 240
+	fullCoverNarrowWin  = 1000
+)
 
 // ---- 底下那一条 ----
 
