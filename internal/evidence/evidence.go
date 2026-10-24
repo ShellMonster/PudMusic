@@ -3106,4 +3106,27 @@ var Items = []Item{
 			"TestTheToastKeepsItsOwnEntryAnimation",
 		},
 	},
+	{
+		// 归「分页与路由」那一组：这一票动的是**翻页的闸门**。
+		//
+		// 🔴 **三个症状全是静默的**：页面停住不动、那个数偏大、界面上说一句
+		// **对用户是错的**话——没有一样会报错，界面只是「不太对」。
+		Category: Paging,
+		// 票 #344（issue #344，BMG-179 / PR #330 的评审留的三条 minor）。
+		Spec: "UP 空间「动态」那一页：丢掉的理由**分了类**（界面按类别说，「读不懂」不说成「形态不认识」）；丢掉的计数**按不同的动态算**（B 站翻页重叠时同一条只算一次）；**「到底了」看入口有没有前进**——0 条 + 入口前进了 = 继续拉下一页，0 条 + 入口没前进 = 到底",
+		Tests: []string{
+			// 分类（服务层那一层）：四类各数各的。
+			"TestTheDroppedOnesAreToldApartByReason",
+			// 分类（画面上那句话）：「读不懂」不许被说成「形态不认识」。
+			"TestWhatWeCannotReadIsNotCalledAnUnknownShape",
+			// 计数去重：两页里重叠的一条，计数是 1 不是 2。
+			"TestTheDroppedCountCountsDifferentDynamicsNotHowManyTimesTheyAppear",
+			// 跨页去重靠的是**身份**（服务层那一层）。
+			"TestTheSameDroppedDynamicInTwoPagesIsTheSameOne",
+			"TestADroppedOneWeCannotReadAtAllStillHasAStableIdentity",
+			// 闸门：0 条 + 入口前进了 → 继续拉；0 条 + 入口没前进 → 到底。
+			"TestAnEmptyPageWhoseOffsetMovesStillLoadsTheNextPage",
+			"TestAnEmptyPageWhoseOffsetStaysIsTheEnd",
+		},
+	},
 }

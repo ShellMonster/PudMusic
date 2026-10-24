@@ -309,6 +309,21 @@ func uiDynamicUnrenderable(id, kind string, withText ...string) map[string]any {
 	return m
 }
 
+// uiDynamicUnreadable 造一条**我们读不懂**的动态（B 站改了返回的形状）。
+//
+// ⚠️ `major.opus` 给的不是对象，而 `parseDynamic` 把 `opus` 声明成结构体
+// ——`encoding/json` 遇到类型对不上会让**整条**读不出来（票 #300 踩过的那
+// 一类）。这一条是「读不懂」，**不是**「形态不认识」：B 站给的是它一直在给
+// 的那种形态，是我们读不出来（票 #344）。
+func uiDynamicUnreadable(id string) map[string]any {
+	m := uiDynamic(id, "正文")
+	mods := m["modules"].(map[string]any)
+	mods["module_dynamic"].(map[string]any)["major"] = map[string]any{
+		"type": "MAJOR_TYPE_OPUS", "opus": "不是一个对象",
+	}
+	return m
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 头部
 // ─────────────────────────────────────────────────────────────────────────────
@@ -762,9 +777,9 @@ func TestAFailedTabSaysItFailedAndOffersARetry(t *testing.T) {
 		})
 		tt.Frame()
 
-		if showsText(tt, upTabEmpty(tab, 0).Title) {
+		if showsText(tt, upTabEmpty(tab, bili.DropCounts{}).Title) {
 			t.Errorf("%s 拉失败了，界面上却是空状态 %q——用户会以为他真的没有",
-				upTabNames[tab], upTabEmpty(tab, 0).Title)
+				upTabNames[tab], upTabEmpty(tab, bili.DropCounts{}).Title)
 		}
 		if !showsText(tt, "这一块没拉出来") {
 			t.Errorf("%s 拉失败了却没说失败，文字有 %q", upTabNames[tab], tt.Texts())
@@ -1179,6 +1194,171 @@ func TestAPageOfOnlyUnrenderableOnesStillLoadsTheNextPage(t *testing.T) {
 	}
 	if len(asked) < 2 || asked[1] != "NEXT" {
 		t.Errorf("offset 没被原样带回去问第二页（问过 %v）", asked)
+	}
+}
+
+// TestTheDroppedCountCountsDifferentDynamicsNotHowManyTimesTheyAppear 钉住
+// 「丢掉的计数按**不同的动态**算」。
+//
+// ⚠️ B 站翻页**会重叠**：同一批画不出来的动态在两页里各出现一次。按**出现
+// 次数**记的话，界面上那个数会**偏大**——这里是 2，而真相是 1（票 #344）。
+//
+// 判据是**界面上那句话里的数**，不是「内部记了多少次」。
+func TestTheDroppedCountCountsDifferentDynamicsNotHowManyTimesTheyAppear(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "两页重叠的 UP", 0, 1)
+	var mu sync.Mutex
+	var asked []string
+	b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		off := r.URL.Query().Get("offset")
+		mu.Lock()
+		asked = append(asked, off)
+		mu.Unlock()
+		// ⚠️ **两页给的是同一条**（B 站翻页重叠的形状）：同一批画不出来的
+		// 动态在两页里各出现一次。
+		items := []any{uiDynamicUnrenderable("f1", "forward", "转发正文")}
+		if off == "" {
+			uiExploreJSON(w, 0, map[string]any{"items": items, "offset": "P2", "has_more": true})
+			return
+		}
+		uiExploreJSON(w, 0, map[string]any{"items": items, "offset": "", "has_more": false})
+	})
+	s, tt, _ := newSpaceShell(t, b, false, "")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+
+	// 两页都到齐（第二页是哨兵自己叫起来的：这一页一行都没画出来）。
+	waitFrames(t, tt, "两页都到了", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(asked) >= 2
+	})
+	waitFrames(t, tt, "第二页被收下了", func() bool { return !sp.dyn.hasMore })
+	tt.Frame()
+
+	if got := sp.drops[upTabDynamic].total(); got != 1 {
+		t.Errorf("丢掉 %d 条，want 1（同一条在两页里各出现一次，只算一条）", got)
+	}
+	if !showsAnyText(tt, "有 1 条落在别的形态上了") {
+		t.Errorf("界面上那个数不是 1，文字有 %q", tt.Texts())
+	}
+	if showsAnyText(tt, "有 2 条落在别的形态上了") {
+		t.Errorf("同一条被数了两遍，文字有 %q", tt.Texts())
+	}
+}
+
+// TestWhatWeCannotReadIsNotCalledAnUnknownShape 钉住「读不懂的形状**不**被说成
+// 「形态不认识」。
+//
+// ⚠️ 这两件事是**两回事**：B 站给的是它一直在给的那种形态，是**我们读不出来**
+// ——说成「落在别的形态上了」就是**对用户说错话**（那听起来像是那个 UP 主
+// 发了我们画不出来的东西，票 #344）。
+//
+// 判据是**画面上有没有那句话**：说「我们读不懂」，而且**不许**说「落在别的
+// 形态上了」。
+func TestWhatWeCannotReadIsNotCalledAnUnknownShape(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "发了一条我们读不懂的 UP", 0, 1)
+	b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{
+			"items": []any{uiDynamicUnreadable("u1")}, "offset": "", "has_more": false,
+		})
+	})
+	s, tt, _ := newSpaceShell(t, b, false, "")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+	waitFrames(t, tt, "动态加载完", func() bool { return sp.dyn.started })
+	tt.Frame()
+
+	if !showsAnyText(tt, "我们读不懂") {
+		t.Errorf("没说清是「我们读不懂」，文字有 %q", tt.Texts())
+	}
+	if showsAnyText(tt, "落在别的形态上了") {
+		t.Errorf("把「读不懂」说成了「形态不认识」，文字有 %q", tt.Texts())
+	}
+	if got := sp.drops[upTabDynamic].counts.Unreadable; got != 1 {
+		t.Errorf("「读不懂」那一类数了 %d 条，want 1", got)
+	}
+	if got := sp.drops[upTabDynamic].counts.ShapeUnknown; got != 0 {
+		t.Errorf("「形态不认识」那一类数了 %d 条，want 0（这一条是读不懂）", got)
+	}
+}
+
+// TestAnEmptyPageWhoseOffsetMovesStillLoadsTheNextPage 钉住「0 条 + 入口前进
+// 了 = 继续拉下一页」。
+//
+// 🔴 旧闸门在这一页就收口了：B 站发了 0 条就当「到底了」，**哪怕它给的入口
+// 前进了**——后面那一页永远不会被拉（票 #344）。
+//
+// 判据是**第二页那条真的画出来了**。
+func TestAnEmptyPageWhoseOffsetMovesStillLoadsTheNextPage(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "第一页空的 UP", 0, 1)
+	var mu sync.Mutex
+	var asked []string
+	b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		off := r.URL.Query().Get("offset")
+		mu.Lock()
+		asked = append(asked, off)
+		mu.Unlock()
+		if off == "" {
+			// **0 条，但入口前进了**（B 站说后面还有）。
+			uiExploreJSON(w, 0, map[string]any{"items": []any{}, "offset": "O1", "has_more": true})
+			return
+		}
+		uiExploreJSON(w, 0, map[string]any{
+			"items": []any{uiDynamic("d1", "第二页的有效动态")}, "offset": "", "has_more": false,
+		})
+	})
+	s, tt, _ := newSpaceShell(t, b, false, "")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+
+	waitFrames(t, tt, "第二页拉到了", func() bool { return len(sp.dynItems) == 1 })
+	tt.Frame()
+
+	if !showsText(tt, "第二页的有效动态") {
+		t.Errorf("0 条 + 入口前进了却停住了，文字有 %q", tt.Texts())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(asked) < 2 || asked[1] != "O1" {
+		t.Errorf("第二页没被问（问过 %v）", asked)
+	}
+}
+
+// TestAnEmptyPageWhoseOffsetStaysIsTheEnd 钉住「0 条 + 入口没前进 = 到底了」。
+//
+// ⚠️ 这是上一条的反证：入口没前进的时候**必须收手**——再问一次问回来的是
+// 同一页，于是那个圈会一直转下去（实测：60 帧发了 40 次请求，票 #300）。
+//
+// 判据是**请求次数**：画几十帧，只该问一次。
+func TestAnEmptyPageWhoseOffsetStaysIsTheEnd(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "空的 UP", 0, 1)
+	var mu sync.Mutex
+	asked := 0
+	b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		asked++
+		mu.Unlock()
+		// **0 条，而且入口没给**（B 站说「还有」，但没给下一次要问的入口）。
+		uiExploreJSON(w, 0, map[string]any{"items": []any{}, "offset": "", "has_more": true})
+	})
+	s, tt, _ := newSpaceShell(t, b, false, "")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+
+	waitFrames(t, tt, "第一页到了", func() bool { return sp.dyn.started })
+	for range 40 {
+		tt.Frame()
+	}
+	mu.Lock()
+	n := asked
+	mu.Unlock()
+	if n != 1 {
+		t.Errorf("画了 40 帧，那个动态接口被问了 %d 次，want 1"+
+			"（入口没前进就是到底，再问是问同一页）", n)
 	}
 }
 
