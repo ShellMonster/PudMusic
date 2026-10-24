@@ -1,7 +1,12 @@
 package imgcache
 
 import (
+	"hash/fnv"
+	"unicode/utf8"
+
 	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -50,8 +55,58 @@ func ViewRadius(c *ui.Context, cache *Cache, url string, w, h, radius float32) u
 // （`drawCover` 的 `default` 那一支），不跟着这个参数走——那是我们比上游多
 // 分出来的一档（上游失败和空地址是同一个分支）。
 func ViewPlaceholder(c *ui.Context, cache *Cache, url string, w, h, radius float32, empty *ui.SVG) ui.Element {
+	return ViewPlaceholderTitled(c, cache, url, "", w, h, radius, empty)
+}
+
+// ViewTitled 是 View 加上歌名：**没有封面地址**时画「歌名首字 + 主题色渐变」，而不是一枚
+// 灰色图标（设计规范 §7.3）。有地址的三档（载入中 / 就绪 / 失败）和 View 完全一样。
+func ViewTitled(c *ui.Context, cache *Cache, url, label string, w, h float32) ui.Element {
+	return ViewPlaceholderTitled(c, cache, url, label, w, h, c.Theme().Radius, placeholderIcon)
+}
+
+// ViewPlaceholderTitled 是 ViewPlaceholder 加上歌名。label 为空就和 ViewPlaceholder 一样
+// （画 empty 那枚图形）；不空且没有地址，就画首字渐变。
+func ViewPlaceholderTitled(c *ui.Context, cache *Cache, url, label string, w, h, radius float32, empty *ui.SVG) ui.Element {
 	return ui.Box(c).Size(w, h).Radius(radius).Clip().Children(func() {
+		if url == "" && label != "" {
+			drawGlyphCover(c, label, w, h, radius)
+			return
+		}
 		drawCover(c, cache, url, w, h, radius, empty)
+	})
+}
+
+// glyphRatio 是首字占封面较短边的比例。
+const glyphRatio = 0.44
+
+// glyphOf 取歌名的首字：先清洗（`【4K】晴天` 的首字是「晴」，不是「【」），再取第一个
+// 字符；英文字母转大写；清洗后空了就用音符。
+func glyphOf(label string) string {
+	r, n := utf8.DecodeRuneInString(title.Clean(label).Title)
+	if n == 0 || r == utf8.RuneError {
+		return "♪"
+	}
+	if r >= 'a' && r <= 'z' {
+		r -= 'a' - 'A'
+	}
+	return string(r)
+}
+
+// drawGlyphCover 画「首字 + 渐变」：渐变从 Background 往强调色推两档（每首歌按标题的哈希
+// 在 22%~38% 之间取一档、角度在 120°~150° 之间取一个，于是一屏占位封面不是同一块色，
+// 又都在主题的强调色相里）；字取强调色压深到 ≥ 4.5:1 的那一档。
+func drawGlyphCover(c *ui.Context, label string, w, h, radius float32) {
+	t := c.Theme()
+	hs := fnv.New32a()
+	_, _ = hs.Write([]byte(label))
+	v := hs.Sum32()
+	lo := 0.22 + float32(v%17)/100    // 0.22 ~ 0.38
+	angle := 120 + float32((v/17)%31) // 120° ~ 150°
+	from, to := t.Background.Mix(t.Accent, lo), t.Background.Mix(t.Accent, lo+0.18)
+	text := ink.Ensure(t.Accent, from.Mix(to, 0.5), 4.5)
+	ui.Column(c).Size(w, h).Gradient(from, to, angle).Border(1, t.Border).Radius(radius).Center().Children(func() {
+		ui.Text(c, glyphOf(label)).FontSize(glyphRatio * min32(w, h)).FontWeight(600).
+			TextColor(text).SingleLine()
 	})
 }
 

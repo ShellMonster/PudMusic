@@ -500,19 +500,62 @@ func TestUnknownCodeIsJustAnAPIError(t *testing.T) {
 	}
 }
 
-// TestNonJSONResponseIsRiskControl 验被风控时的形态。
+// TestANonJSONResponseIsNotTheRiskControl 验「压根不是 JSON」的形态。
 //
 // B 站被风控会返回一页 HTML。报成「网络错误」的话用户会去查网线，
 // 而真实原因是「等一会儿再试」。
-func TestNonJSONResponseIsRiskControl(t *testing.T) {
+//
+// 🔴 **它不是 `ErrRiskControl`**（票 #346）：真风控是 -352/-412（业务码，在
+// JSON 里面），而这一档是压根没拿到 JSON。混成一处的话，被截断的响应会
+// 跟着风控一起被判成不可重试（那正是 #316 收窄带出来的副作用）。
+func TestANonJSONResponseIsNotTheRiskControl(t *testing.T) {
 	f := newFakeBili(t)
 	f.on(pathNav, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = w.Write([]byte("<html><body>412 Precondition Failed</body></html>"))
 	})
 	_, err := f.client(t, Options{}).Nav(context.Background())
-	if !errors.Is(err, ErrRiskControl) {
-		t.Errorf("拿到 HTML 时返回 %v，want ErrRiskControl", err)
+	if !errors.Is(err, ErrBadResponse) {
+		t.Errorf("拿到 HTML 时返回 %v，want ErrBadResponse", err)
+	}
+	if errors.Is(err, ErrRiskControl) {
+		t.Error("「响应不是 JSON」被归到了真风控——它和真风控必须能分开")
+	}
+}
+
+// TestATruncatedResponseIsNotTheRiskControl 验「传了一半」的形态。
+//
+// 🔴 **这一档是可重试的**（票 #346）：响应本来是 JSON，但没传完——多半是网络
+// 抖了一下，再问一次有可能拿到完整的那一份。报成风控的话用户就丢了那枚
+// 「重试」键。
+func TestATruncatedResponseIsNotTheRiskControl(t *testing.T) {
+	for _, c := range []struct {
+		what string
+		body string
+	}{
+		{"传了一半的 JSON", `{"code":0,"message":"0","data":{"wbi`},
+		// 一个字节都没有：连接在第一个字节之前就断了——那也是没传完。
+		{"空的", ""},
+	} {
+		f := newFakeBili(t)
+		f.on(pathNav, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(c.body))
+		})
+		_, err := f.client(t, Options{}).Nav(context.Background())
+		if !errors.Is(err, ErrTruncatedResponse) {
+			t.Errorf("%s：返回 %v，want ErrTruncatedResponse", c.what, err)
+			continue
+		}
+		if errors.Is(err, ErrRiskControl) {
+			t.Errorf("%s：被归到了真风控", c.what)
+		}
+		if errors.Is(err, ErrBadResponse) {
+			t.Errorf("%s：被归到了「压根不是 JSON」", c.what)
+		}
+		if !Recoverable(err) {
+			t.Errorf("%s：被判成不可重试了——多半是网络抖了一下，再问一次有可能好", c.what)
+		}
 	}
 }
 

@@ -133,6 +133,10 @@ func main() {
 	// 所以这里拿到的是会话本身，绑窗口那一下交给 ui.Run。
 	sess := ui.MountMedia(a)
 
+	// ⚠️ **「上次听到哪儿」的恢复在 `ui.Run` 里做**（见 internal/ui/shell.go）：
+	// 它要排在播报句柄装好之后（那句「已恢复上次的位置」才送得出去），又要
+	// 排在开窗口之前（恢复完的第一帧就该是恢复后的样子）。`ui.Run` 是这里
+	// 唯一同时满足这两样的地方——它排在所有 Mount 之后，在线的歌取得到流。
 	if err := ui.Run(a, sess); err != nil {
 		log.Fatal(err)
 	}

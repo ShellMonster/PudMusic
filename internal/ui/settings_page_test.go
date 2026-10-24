@@ -422,7 +422,7 @@ func TestTogglingAutoStartGoesThroughTheSystem(t *testing.T) {
 // 一个死数」——`MaxWidth` 是上限，可视区多窄它就多窄，最小窗口（900 - 侧栏
 // 200 = 700）上照抄一个固定 900 会把右边推出去。
 func TestTheSettingsContentIsCappedAndCentered(t *testing.T) {
-	const sideW = 200 // 默认侧栏宽（app.DefaultSideMenuWidth）
+	const sideW = int(app.DefaultSideMenuWidth) // 默认侧栏宽
 
 	for _, winW := range []int{1200, 1400, 1000} {
 		tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), at(winW, 800))
@@ -439,7 +439,8 @@ func TestTheSettingsContentIsCappedAndCentered(t *testing.T) {
 
 		// 内容那一段：左右各留一份内边距（settingsContentPad）。
 		blockLeft := left.X - settingsContentPad
-		blockRight := right.X + right.W + settingsContentPad
+		// 控件在分组卡片里：右边还隔着卡片的内边距加描边。
+		blockRight := right.X + right.W + settingsContentPad + settingsCardInset
 		avail := float32(winW - sideW)
 
 		want := float32(settingsContentMaxW)
@@ -494,7 +495,8 @@ func TestTheSettingsControlsShareOneBaseline(t *testing.T) {
 	if !ok {
 		t.Fatalf("设置页上没有「外观」那个分组标题，文字有 %q", tt.Texts())
 	}
-	baseline := head.X + head.W - settingsControlW
+	// 控件在分组卡片里，右沿比标题行往里缩一个卡片的内边距加描边。
+	baseline := head.X + head.W - settingsControlW - settingsCardInset
 
 	for _, c := range []struct {
 		label string

@@ -171,7 +171,7 @@ func TestThePlayBarAsksForTheMusicNote(t *testing.T) {
 			return true
 		}
 		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || sel.Sel.Name != "ViewPlaceholder" {
+		if !ok || sel.Sel.Name != "ViewPlaceholder" && sel.Sel.Name != "ViewPlaceholderTitled" {
 			return true
 		}
 		// 最后一个实参是那一格摆的图形（上游的 `emptyPlaceholder`）。

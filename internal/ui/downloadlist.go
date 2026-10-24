@@ -479,7 +479,7 @@ func (d *downloadsPage) drawCell(c *ui.Context, s *Shell, row, col int) {
 		ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).FillWidth().Children(func() {
 			// 四态（没有地址 / 载入中 / 就绪 / 失败）由 imgcache.View 画，
 			// 这里不重复它的判断。
-			imgcache.View(c, s.images, r.Cover, dlCover, dlCover)
+			imgcache.ViewTitled(c, s.images, r.Cover, r.Title, dlCover, dlCover)
 			ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
 				// 歌名那一行是**一个可点的块**：点它去浏览器里打开这一首的 B 站
 				// 页面，指针压上去时右边长出外链图标。出处是上游

@@ -321,11 +321,11 @@ func (s *Shell) viewToast(c *ui.Context, t toast, theme *ui.Theme) {
 func toastColors(tone notice.Tone, theme *ui.Theme) (bg, fg ui.Color) {
 	switch tone {
 	case notice.Success:
-		return theme.Success, toastOnSemantic
+		return theme.Success, readableOn(theme.Success, toastOnSemantic)
 	case notice.Warning:
-		return theme.Warning, toastOnSemantic
+		return theme.Warning, readableOn(theme.Warning, toastOnSemantic)
 	case notice.Danger:
-		return theme.Danger, toastOnDanger
+		return theme.Danger, readableOn(theme.Danger, toastOnDanger)
 	}
 	return theme.Accent, theme.AccentText
 }

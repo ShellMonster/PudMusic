@@ -89,6 +89,20 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 	ui.Column(c).Grow(1).FillHeight().Children(func() {
 		// 表头**在列表外面**（`rowheader.go` 文件头）：列表往下滚它不动，宽屏下滚到
 		// 右边列名也还在。
+		// 工具条：全部播放 + 共几首（设计规范 §7.18，和首页、搜索页同一枚主按钮）。
+		ui.Row(c).Key("upspace:toolbar").FillWidth().Gap(space.Px12).AlignItems(ui.Center).
+			Padding(space.Px4, upPad, space.Px8, upPad).Children(func() {
+			if playAllButton(c, p.Loading || p.Loaded == 0).Clicked() {
+				s.playAllSongs(sp.videos.Items())
+			}
+			if p.Loaded > 0 {
+				n := fmt.Sprintf("已加载 %d 首", p.Loaded)
+				if !p.HasMore {
+					n = fmt.Sprintf("共 %d 首", p.Loaded)
+				}
+				ui.Text(c, n).FontSize(scale.Font(c, scale.Size14)).TextColor(c.Theme().TextMuted)
+			}
+		})
 		sp.videos.Header(c, "upspace:header")
 		sp.videos.View(c)
 	})

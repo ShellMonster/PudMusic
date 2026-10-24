@@ -85,9 +85,6 @@ func TestThePlayBarDoesNotOfferARetryThatWouldDoNothing(t *testing.T) {
 // 🔴 **这一条钉的是「不给」**：假 B 站对取流那一趟回 `{"code":-352}`（风控），
 // 而那枚「重试」是**立刻**再取一次流（`App.Retry` 里没有退避）——所以按下去
 // 就是**再撞一次风控**。用户点一次撞一次，点第二次再撞，于是他不再信这枚键。
-//
-// ⚠️ **限流（-509）不在这一类里**：它是「等一会儿就好」，所以仍然是可重试的
-// （判据在 `bili.Recoverable`，那里分开判）。
 func TestThePlayBarDoesNotOfferARetryThatWouldHitTheRiskControlAgain(t *testing.T) {
 	b := newUIExplore(t)
 	b.on("/x/player/wbi/playurl", func(w http.ResponseWriter, r *http.Request) {
@@ -108,5 +105,35 @@ func TestThePlayBarDoesNotOfferARetryThatWouldHitTheRiskControlAgain(t *testing.
 	})
 	if showsText(tt, "重试") {
 		t.Error("给了一枚按下去只会再撞一次风控的「重试」")
+	}
+}
+
+// TestThePlayBarDoesNotOfferARetryThatWouldHitTheRateLimitAgain 盯限流
+// 那一类（票 #346）。
+//
+// 🔴 **限流和风控是同一档**：那枚「重试」是**立刻**再取一次流（没有退避），
+// 而限流要等的是 B 站的限流窗口过去——立刻再问还是「太快了」，还是撞同一
+// 面墙。上一票（#316）只收窄了风控，限流留在「可重试」那一档，于是「点一次
+// 撞一次」的循环原样留着。
+func TestThePlayBarDoesNotOfferARetryThatWouldHitTheRateLimitAgain(t *testing.T) {
+	b := newUIExplore(t)
+	b.on("/x/player/wbi/playurl", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, -509, nil)
+	})
+	s, tt, a := newSpaceShell(t, b, true, "77")
+	defer func() { _ = s.hist.Close() }()
+
+	if err := a.PlayFrom(app.Item{
+		Source: "online", Type: "mv", Bvid: "BV1rateTest", Cid: "1", Title: "这一首",
+	}); err != nil {
+		t.Fatalf("放不进去：%v", err)
+	}
+
+	waitFor(t, "播放条上出现那句话", func() bool {
+		tt.Frame()
+		return showsText(tt, "打不开：操作太快了，等一会儿再试")
+	})
+	if showsText(tt, "重试") {
+		t.Error("给了一枚按下去只会再撞一次限流的「重试」")
 	}
 }
