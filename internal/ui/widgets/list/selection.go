@@ -313,7 +313,8 @@ func rowCover(t *ui.Theme, hovered bool) ui.Color {
 // `#e9e9ec`**（深色下 `#323236`），上游那一块是纯白。
 //
 // 所以那种行自己刷一层**页面底色**把它盖掉：悬停反馈落在**卡**上（卡自己刷
-// `t.Surface`，见 `internal/ui/follow.go` 的 `viewFollowCard`），不落在行上。
+// **卡片那一档**的悬停，见 `internal/ui/follow.go` 的 `viewFollowCard`），不落
+// 在行上。
 //
 // # 为什么是页面底色而不是「没有底色」
 //

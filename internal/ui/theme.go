@@ -409,14 +409,36 @@ func applyBackground(t *ui.Theme) {
 	if !t.Dark {
 		mix = black
 	}
-	surface, hover, pressed := float32(0.043), float32(0.086), float32(0.137)
+	surface, hover, pressed := surfaceStepLight, hoverStepLight, pressedStepLight
 	if t.Dark {
-		surface, hover, pressed = 0.065, 0.113, 0.156
+		surface, hover, pressed = surfaceStepDark, hoverStepDark, pressedStepDark
 	}
 	t.Surface = t.Background.Mix(mix, surface)
 	t.SurfaceHover = t.Background.Mix(mix, hover)
 	t.SurfacePressed = t.Background.Mix(mix, pressed)
 }
+
+// 控件那三档的比例（浅色往黑推、深色往白推；推的量是 `applyBackground` 里那
+// 一份）。
+//
+// ⚠️ **别在别处另抄一份**：卡片那一档的悬停要从**卡片自己的底**出发推同样
+// 的一档（`themepreset.go` 的 `cardHoverBackground`），推的量就是这里的
+// `surfaceStep`——写死颜色、或者另抄一个看起来差不多的数，两处就会对不上，
+// 而对不上的症状是「悬停那一档比别处的悬停深一点/浅一点」，没人查得出原因。
+const (
+	// surfaceStep 是「控件那一层」的比例：浅色 4.3%、深色 6.5%。
+	//
+	// ⚠️ **这一档就是上游 `content1 → content2` 的差**（浅色 zinc-0 → zinc-100、
+	// 深色 zinc-900 → zinc-800，见 `themepreset.go` 的 `cardHoverBackground`）。
+	surfaceStepLight float32 = 0.043
+	surfaceStepDark  float32 = 0.065
+	// hoverStep 是「悬停那一档」的比例：浅色 8.6%、深色 11.3%。
+	hoverStepLight float32 = 0.086
+	hoverStepDark  float32 = 0.113
+	// pressedStep 是「按下那一档」的比例：浅色 13.7%、深色 15.6%。
+	pressedStepLight float32 = 0.137
+	pressedStepDark  float32 = 0.156
+)
 
 // radiusOf 是全局圆角，夹在 0~24。
 //
