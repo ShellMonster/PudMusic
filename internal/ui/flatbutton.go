@@ -75,18 +75,6 @@ func flatIconButtonAccent(c *ui.Context, name, label string, font float32, disab
 	return flat.IconButtonAccent(c, icon(name), label, font, disabled)
 }
 
-// flatSpinnerButton 是一个**里面画一枚转圈**的扁平按钮（没有字）。
-//
-// 🔴 **label 不许省**：转圈对辅助技术不可见，而这一枚按钮再没有字可念。
-// 它同时也是无头 Tester 认得这枚按钮的唯一凭据。
-//
-// size 是那枚转圈的直径。按钮本身的盒子由调用方的 `Size` / `Padding` 撑。
-func flatSpinnerButton(c *ui.Context, label string, size float32) ui.Element {
-	b := flat.Button(c, "").Label(label)
-	b.Children(func() { ui.Spinner(c).Size(size, size) })
-	return b
-}
-
 // flatIconLabelButton 是一个「图标 + 文字」的扁平按钮：图标在一个 cell×cell 的
 // 格子里，文字在格子右边，内容**左对齐**。
 //

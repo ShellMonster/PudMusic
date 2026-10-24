@@ -1030,13 +1030,17 @@ var Items = []Item{
 		Spec: "点了歌一直不开始：界面上说在取流、超过阈值按失败处理、代次变了和失败都写进日志",
 		Tests: []string{
 			"TestAPlayThatNeverStartsTurnsIntoASentence",
+			"TestAnotherSongsFailureDoesNotCancelTheWatchdog",
 			"TestTheDiscardedPlayIsWrittenDown",
 			"TestTheFailureIsWrittenDown",
 			"TestThePlayBarSaysItIsLoading",
-			"TestTheLoadingKeyIsASpinner",
+			"TestTheLoadingLineHasASpinner",
+			"TestThePauseKeyIsStillThereWhileLoading",
 			"TestAFailedPlayGivesASentenceInsteadOfASpinner",
+			"TestTheFailureSentenceFitsOnOneLine",
 			"TestFriendlySaysTheFormatCannotBeDecoded",
 			"TestTheLogFileActuallyReceivesWhatIsLogged",
+			"TestTheLogFileIsAppendedTo",
 		},
 	},
 	{

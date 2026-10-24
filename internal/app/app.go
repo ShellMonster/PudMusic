@@ -84,6 +84,16 @@ type State struct {
 	Rate float64
 	// Err 是最近一次打开文件的失败原因，显示在播放条上，直到下一次打开成功。
 	Err string
+	// ErrDetail 是那一句错误的**完整说明**（界面上只显示 `Err`，完整的挂在
+	// 悬停提示上）。
+	//
+	// 🔴 **为什么要有两栏**：播放条上那一行只有 140 像素宽（1200 宽的窗口，
+	// 实测），12 号字放得下十来个字——一句 50 个字的话在屏幕上只剩
+	// 「打不开：取流…」这样的碎片，那不是「一句能看懂的话」（票 #282 的
+	// 评审）。所以**短的那句上屏，长的那句进悬停提示**。
+	//
+	// 空串 = 和 `Err` 一样（绝大多数错都是这样）。
+	ErrDetail string
 
 	// Loading 是「**正在取流**」：用户刚点了一首，在途的那一次播放还没装上
 	// 播放器。
@@ -181,6 +191,8 @@ type App struct {
 	wantPlay bool
 	playing  bool
 	errText  string
+	// errDetail 是那一句错误的完整说明（悬停提示里给的是它，见 State.ErrDetail）。
+	errDetail string
 	// errRetryable 说的是当前那一句错误**再试一次有没有用**。
 	//
 	// 界面上据此决定给不给「重试」那一枚键：给一个按了也没用的重试比不给
@@ -550,6 +562,7 @@ func (a *App) Snapshot() State {
 		Volume:       a.volume,
 		Rate:         a.rate,
 		Err:          a.errText,
+		ErrDetail:    a.errDetail,
 		Loading:      a.loading,
 		LoadingTitle: a.loadingTitle,
 		CanRetry:     a.errRetryable,
@@ -629,6 +642,8 @@ func (a *App) Open(path string) error {
 	if err != nil {
 		a.mu.Lock()
 		a.errText = err.Error()
+		// 悬停提示里给的是完整那一句（见 State.ErrDetail）。
+		a.errDetail = err.Error()
 		// 🔴 **本地文件打不开是不可重试的**：重试是「再取一次流」，而这一首
 		// 连流都没有（它在你的磁盘上，坏了就是坏了）。留着上一句的
 		// `errRetryable` 的话，界面上会给出一枚按了也没用的「重试」。

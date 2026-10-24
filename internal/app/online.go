@@ -41,30 +41,35 @@ import (
 // （票 #242，UX 报告 §3-F 的 F2）。
 var errStreamingMissing = errors.New("在线播放暂时用不了")
 
-// onlinePlayTimeout 是「点了歌之后多久还没开始出声，就当它失败了」。
+// onlinePlayTimeout 是「**这一段**网络最多等多久」，超过就当它失败了。
 //
-// # 为什么是 15 秒
+// # 为什么是 20 秒
 //
-// 三个数摆在一起看：
+// 20 秒不是随手挑的：它是**字节源自己的「这条流拉不动了」判定**
+// （`service/audio/stream_source.go` 的 `defaultStallTimeout`）。
 //
-//	B 站接口自己的超时	10 秒（`service/bili/client.go` 的 defaultTimeout）
-//	这一层的取流超时	15 秒（就是它）
-//	字节源的卡死判定	20 秒（`service/audio/stream_source.go` 的 defaultStallTimeout）
+// 关键性质是**不比它早**：比它早的话，应用会在一条**慢而没死**的流上先动手——
 //
-// 取 15 秒有两条理由：
+//	接口慢 8 秒（还在 B 站接口那一头）+ CDN 的头几个字节 8 秒 = 16 秒
 //
-//  1. **比接口自己的 10 秒长**：接口慢到 10 秒还没答，那一句「等 B 站回应超时
-//     了」已经先到了（`bili.Friendly` 认得它）。这一层管的是**接口答了、而流
-//     还没到**的那一段——再短就会把「接口刚好慢一点」误判成失败。
-//  2. **比字节源的 20 秒短**：字节源自己也要 20 秒才肯承认「这条流拉不动」。
-//     提前 5 秒给用户一句能看懂的话，比让他对着一个不动的界面再等 5 秒好。
+// 这一条本来是放得出来的，而一个 15 秒的闹钟会在它放出来之前就把它掐了
+// （票 #282 的评审指出来的）。所以判据是「**不比下面那一层更早放弃**」。
 //
-// 而正常的取流是 200~400 毫秒（B 站那边一次带签名的往返），15 秒是它的几十倍——
-// 正常的慢网踩不到这条线，而踩到的那一条基本已经是死的了。
+// # 🔴 **每一段都重新起算**，不是「从点下去起算 20 秒」
 //
-// ⚠️ **它是「还没开始出声」的上限，不是「这一首还没播完」的上限**：歌放完了
-// 或者放了一半都不归它管（那一段是解码器和字节源自己的事，见 `checkPlayback`）。
-const onlinePlayTimeout = 15 * time.Second
+// 取流这一趟是**三段**串行的网络往返：
+//
+//	问哪一集 / 补元信息	最多 10 秒（`bili.Client` 自己的超时）
+//	取流接口		最多 10 秒（同上）
+//	CDN 的头几个字节	最多 20 秒（字节源的卡死判定）
+//
+// 一次性的闹钟会把**前两段**的时间算进去：接口慢 10 秒（到顶）+ CDN 的头
+// 11 秒 = 21 秒，本来放得出来，却在一个 20 秒的闹钟上先响了。所以每一段
+// 结束都**重新起算**——判据是「**这一段**最多等 20 秒」。
+//
+// 最坏情况因此是 10 + 20 = **30 秒**（接口那一段自己封顶 10 秒），而用户
+// 从头到尾看得见「正在取流：<歌名>」——不是一片沉默。
+const onlinePlayTimeout = 20 * time.Second
 
 // defaultPlayLog 是播放路径的默认日志出口（**每个 App 一份**，见 App.playLog）。
 //
@@ -493,6 +498,22 @@ func (a *App) beginLoadingLocked(gen int, title string) {
 	a.loadStop = a.after(onlinePlayTimeout, func() { a.loadTimedOut(gen, title) })
 }
 
+// rearmLoading 重新起算「这一段最多等多久」。**必须在持锁时调**。
+//
+// 🔴 **它不碰「正在取流」那一档**，只重挂闹钟：那一档从头到尾都是「这一首
+// 正在准备」，而闹钟量的是「**这一段**网络还没回」。
+//
+// ⚠️ **代次不对就不动**：那一趟已经被取代了（切歌 / 超时），它的闹钟早就
+// 被收掉了，别去动**新的**那一趟的。
+func (a *App) rearmLoading(gen int, title string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.onlineGen != gen || a.closed || !a.loading {
+		return
+	}
+	a.beginLoadingLocked(gen, title)
+}
+
 // endLoadingLocked 把「正在取流」这一档收掉，并把闹钟停掉。
 // **必须在持锁时调**。
 func (a *App) endLoadingLocked() {
@@ -528,9 +549,15 @@ func (a *App) loadTimedOut(gen int, title string) {
 	// 这一次「已经判它失败」的取流会一直下到天亮。
 	a.abortPendingSource()
 
-	a.logf("biu: 取流超时：%q（代次 %d，%v 内没有开始出声）", title, gen, onlinePlayTimeout)
-	a.setErrText(fmt.Sprintf("取流超时了（%v 内没有开始出声）。可能是网络慢，或者这一首的流取不到——换一首放，或者点重试再试一次。",
-		onlinePlayTimeout), true)
+	a.logf("biu: 取流超时：%q（代次 %d，%v 内这一段还没回）", title, gen, onlinePlayTimeout)
+	// 🔴 **上屏的那一句必须短**（票 #282 的评审）：播放条上那一行只有 140 像素宽
+	// （1200 宽的窗口，实测），12 号字放得下十来个字，而前面还顶着「打不开：」
+	// 四个字。一句 50 个字的话在屏幕上只剩「打不开：取流…」这样的碎片——
+	// 那不是「一句能看懂的话」。所以**短的那句上屏，长的那句进悬停提示**
+	// （`State.ErrDetail`）。
+	a.setErrTextDetail("取流超时了",
+		fmt.Sprintf("取流超时了（%v 内这一段网络没回）。可能是网络慢，也可能是这一首的流取不到——换一首放，或者点重试再试一次。",
+			onlinePlayTimeout), true)
 	if wake != nil {
 		wake()
 	}
@@ -540,7 +567,7 @@ func (a *App) loadTimedOut(gen int, title string) {
 func (a *App) runOnline(it Item, gen int) {
 	s := a.streamingSnapshot()
 	if s == nil {
-		a.failOnline(gen, it, "取流零件没挂", errStreamingMissing)
+		a.failPlay(gen, it, "取流零件没挂", errStreamingMissing)
 		return
 	}
 
@@ -560,28 +587,35 @@ func (a *App) runOnline(it Item, gen int) {
 	// 音乐库条目走的是另一半（补元信息）：它没有 cid 要补，见 `withSource`。
 	it, err := a.withSource(context.Background(), s, it)
 	if err != nil {
-		a.failOnline(gen, it, "问哪一集/补元信息", err)
+		a.failPlay(gen, it, "问哪一集/补元信息", err)
 		return
 	}
-	// 🔴 **代次变了就别再往下走**：问分 P / 补元信息是**一次网络往返**，这一趟
+	// 🔴 **代次变了就别再往下走**：问分 P / 元信息是**一次网络往返**，这一趟
 	// 等它的时候用户完全可能已经切了歌、或者超时闹钟已经响了。那就没人要这
 	// 个结果了——继续往下走只会白花一次取流（票 #282）。
 	if a.genStale(gen) {
-		a.failOnline(gen, it, "问哪一集/补元信息", errStaleGen)
+		a.failPlay(gen, it, "问哪一集/补元信息", errStaleGen)
 		return
 	}
+	// 🔴 **这一段过了，闹钟重新起算**：取流这一趟是三段串行的网络往返，
+	// 判据是「**这一段**最多等 20 秒」，不是「从点下去起 20 秒」——
+	// 理由见 `onlinePlayTimeout` 那段注释。
+	a.rearmLoading(gen, it.Title)
 
 	// 🔴 **取流和开播放器是分开报的**：两者坏法不一样，用户要做的下一件事也
 	// 不一样（取流失败是网络/地址，开不了播放器是这一条的格式/这台机器解不了）。
 	// 合成一句「取流失败」的话，用户分不出该换网还是该换歌。
 	ref, err := a.resolve(context.Background(), s, it, s.Quality)
 	if err != nil {
-		a.failOnline(gen, it, "取流", err)
+		a.failPlay(gen, it, "取流", err)
 		return
 	}
+	// 🔴 **再起算一次**：从这儿往后等的是 CDN 的头几个字节（字节源自己的
+	// 卡死判定是 20 秒）。
+	a.rearmLoading(gen, it.Title)
 	src, p, err := a.buildFromRef(context.Background(), s, it, gen, ref)
 	if err != nil {
-		a.failOnline(gen, it, "开播放器", err)
+		a.failPlay(gen, it, "开播放器", err)
 		return
 	}
 
@@ -1083,6 +1117,11 @@ func (a *App) checkPlayback() {
 //
 // 🔴 **日志里写清是哪一条、走的哪一段、错在哪**（票 #282）：应用日志以前
 // 一个字都不写播放路径，于是「点了不播」这件事事后完全查不了。
+//
+// 🔴 **它不管「正在取流」那一档**——那一档是**某一次播放**的，而这一条
+// 也会被换音质 / 换流重开那些**别的**路调用（它们拿的是当前代次）：
+// 「别的歌的失败把这一首的看门狗取消掉」那个洞就是这么来的（票 #282 的
+// 评审）。收那一档是 `failPlay` 的事。
 func (a *App) failOnline(gen int, it Item, branch string, err error) {
 	a.mu.Lock()
 	stale := a.onlineGen != gen
@@ -1099,16 +1138,30 @@ func (a *App) failOnline(gen int, it Item, branch string, err error) {
 		}
 		return
 	}
-	// 「正在取流」这一档收掉：失败了就该有一句话，而不是转圈继续转。
-	a.mu.Lock()
-	a.endLoadingLocked()
-	a.mu.Unlock()
-
 	a.logf("biu: 播放失败：%q（%s，代次 %d）：%v", it.Title, branch, gen, err)
 	// ⚠️ **`setErrText` 自己会叫醒界面**（它把新的话写进去之后才醒），所以这里
 	// 不要再叫一次——两次唤醒只是多一帧，而顺序写错会让界面先画出「转圈停了」
 	// 再画出那句话，中间那一帧是「既没有转圈也没有话」。
 	a.setErrText(bili.Friendly(err), bili.Recoverable(err))
+}
+
+// failPlay 报一次「**这一趟播放**」的失败，并把「正在取流」那一档收掉。
+//
+// 🔴 **它和 `failOnline` 的区别就是收不收「正在取流」**：那一档是**这一趟
+// 播放**的（`playOnline` 挂上去的），而 `failOnline` 也会被换音质 / 换流
+// 重开那些**别的**路调用——它们要是顺手把它收掉，正在加载的那首歌就
+// **永远等不到超时**了：用户点的那一首既不转圈也不报错，闹钟还被人替它
+// 取消了（票 #282 的评审写的那条探针）。
+//
+// ⚠️ **只在「这一趟还是当前这一趟」时才收**：已经被取代的那一趟（用户切歌了、
+// 超时了）不能去动**新的**那一趟的看门狗。
+func (a *App) failPlay(gen int, it Item, branch string, err error) {
+	a.mu.Lock()
+	if a.onlineGen == gen && !a.closed {
+		a.endLoadingLocked()
+	}
+	a.mu.Unlock()
+	a.failOnline(gen, it, branch, err)
 }
 
 // refreshOnlineNow 从当前的播放位置重开一首。

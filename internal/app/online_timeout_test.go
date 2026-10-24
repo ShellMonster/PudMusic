@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -144,6 +145,90 @@ func TestAPlayThatNeverStartsTurnsIntoASentence(t *testing.T) {
 	}
 	if !st.CanRetry {
 		t.Error("超时是可以再试一次的（网络慢），界面上却没有「重试」那一枚键")
+	}
+}
+
+// TestAnotherSongsFailureDoesNotCancelTheWatchdog 盯「别的歌的失败不许把这一首的看门狗取消掉」。
+//
+// 🔴 **这是票 #282 评审写的那条探针**：歌 A 在放 → 点歌 B（CDN 挂住，取流卡
+// 在代次 2）→ 这期间换音质、而换音质失败（B 站回 -404）→ `failOnline` 拿
+// 代次 2 判「不是陈旧的」。
+//
+// 改之前 `failOnline` 会顺手把「正在取流」和它的闹钟一起收掉——于是 B
+// **既不转圈也不报错，闹钟还被人替它取消了**：用户点了歌，什么都没发生，
+// 也永远不会有人再问（票面「不许无限转圈」的那条保证在这条路上失效）。
+func TestAnotherSongsFailureDoesNotCancelTheWatchdog(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = readFlac(t)
+	// CDN：第一次请求给歌 A，后面的都挂住（歌 B 卡在「头几个字节还没到」）。
+	// `arrived` 是「歌 B 的请求真的到了 CDN」的信号——不等它就换音质的话，
+	// 换音质那一次失败会和歌 B 自己那一次取流失败混在一起。
+	var cdnCalls int32
+	var arrivedOnce sync.Once
+	arrived := make(chan struct{})
+	f.on("/cdn/x.m4s", func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&cdnCalls, 1) == 1 {
+			f.serveMedia(w, r)
+			return
+		}
+		arrivedOnce.Do(func() { close(arrived) })
+		<-r.Context().Done()
+	})
+	// 取流接口：默认给一条流；`failNext` 立起来之后的那一次回 -404
+	// （换音质那一次）。用开关而不是「数第几次」——后台的换流（refetch）也会
+	// 打这个接口，数次数会把它的往返算进来。
+	var failNext atomic.Bool
+	f.on("/x/player/wbi/playurl", func(w http.ResponseWriter, r *http.Request) {
+		if failNext.Load() {
+			writeStreamJSON(w, map[string]any{"code": -404, "message": "稿件不可见", "ttl": 1})
+			return
+		}
+		writeStreamJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
+			"data": map[string]any{"timelength": 1, "dash": dashFor(
+				cdnURL(f.URL, "x.m4s", 2*time.Hour), int(bili.QualityHigh192), 110836)}})
+	})
+
+	a := newOnlineApp(t, f, t.TempDir())
+	clock := &fakeClock{}
+	a.SetAfterForTest(clock.after)
+
+	// 一、歌 A 在放。
+	if err := a.Enqueue(onlineItem("BV1", "1", "在放的那一首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "在放的那一首")
+
+	// 二、点歌 B：CDN 挂住，B 卡在取流。
+	if err := a.PlayFrom(onlineItem("BV2", "1", "取不来的那一首")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 15*time.Second, "第二首开始取流", func() bool { return a.Snapshot().Loading })
+	// 等它真的卡在 CDN 那一层（那时候它正等「头几个字节」）。
+	select {
+	case <-arrived:
+	case <-time.After(30 * time.Second):
+		t.Fatal("歌 B 的取流一直没到 CDN：这一条测的不是「在途的那一趟」")
+	}
+
+	// 三、这期间换音质，而换音质失败。
+	failNext.Store(true)
+	a.SetAudioQuality(bili.AudioHigh)
+	waitFor(t, 15*time.Second, "换音质的失败报出来了", func() bool {
+		return a.Snapshot().Err != ""
+	})
+
+	// 🔴 **关键**：歌 B 的「正在取流」和它的闹钟都得还在。
+	if st := a.Snapshot(); !st.Loading {
+		t.Fatalf("别的歌的失败把这一首的「正在取流」收掉了（%q）——"+
+			"用户点的那一首从此既不转圈也不报错", st.Err)
+	}
+	// 点火闹钟：歌 B 的超时必须响。
+	clock.fire()
+	waitFor(t, 15*time.Second, "歌 B 超时了", func() bool {
+		return strings.Contains(a.Snapshot().Err, "超时")
+	})
+	if st := a.Snapshot(); st.Loading {
+		t.Error("超时之后还在转圈")
 	}
 }
 
