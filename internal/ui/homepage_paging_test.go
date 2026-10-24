@@ -195,11 +195,10 @@ func TestTheHomeBackToTopGoesBackToThatTab(t *testing.T) {
 	}
 
 	// 先滑出好几屏：每一屏到底都拉下一段，列表就长起来了。
-	for range 3 {
-		tt.Scroll(homeW/2, homeH/2, 0, 100000)
-		homeFrame(tt)
-	}
-	waitFrames(t, tt, "第三页到了", func() bool {
+	//
+	// ⚠️ **等条件，不数次数**（同这一包里的规矩）：数次数赌的是「滚完那几下
+	// 的时候下一页已经回来了」，而那是后台一趟 HTTP，满载时回来不了那么快。
+	scrollToEnd(t, tt, homeW/2, homeH/2, "第三页到了", func() bool {
 		return s.home.lists[0].Paged().Loaded >= 3*homePageSize
 	})
 
