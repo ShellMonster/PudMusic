@@ -593,6 +593,10 @@ func dlSnapshot(title string, st download.Status, total, done int64) download.Sn
 	}
 	if st == download.StatusError {
 		s.Err = dlErrText
+		// 🔴 **默认是「可以重试」**（票 #346）：出错那一行的「重试」键按
+		// `Snapshot.CanRetry` 亮不亮，而这一位默认是真的（引擎那边没装判据
+		// 时的旧行为）。「不能重试」那一档由它自己的一条用例钉住。
+		s.CanRetry = true
 	}
 	return s
 }

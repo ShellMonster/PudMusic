@@ -28,7 +28,7 @@ func mentionsString(e ast.Expr, want string) bool {
 // 播放列表抽屉的验收：行高 64、按判重标识去重、「定位当前播放」平滑滚过去、
 // 行菜单那五项。
 //
-// 窗口是 760×460（winW / winH），抽屉是 384 宽、到播放条上沿为止，所以：
+// 窗口是 760×460（winW / winH），抽屉是 320 宽、到播放条上沿为止，所以：
 // y < 372 是抽屉那一层（点它关抽屉），y >= 372 是播放条（照常用）。
 //
 // 「定位当前播放」那一条钉的是**平滑**：钟没走的时候那一行还看不见，走够了才
@@ -483,8 +483,8 @@ func TestQueueDrawerRowIsSixtyFourTall(t *testing.T) {
 	if r.H != 64 {
 		t.Errorf("一行高 %v，want 64", r.H)
 	}
-	if r.W != 383 {
-		t.Errorf("一行宽 %v，want 383（抽屉 384 减去左边那一线）", r.W)
+	if r.W != 319 {
+		t.Errorf("一行宽 %v，want 319（抽屉 320 减去左边那一线）", r.W)
 	}
 }
 

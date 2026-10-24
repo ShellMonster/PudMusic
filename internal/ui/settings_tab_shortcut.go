@@ -43,14 +43,6 @@ func (s *Shell) settingsShortcuts(c *ui.Context) {
 	s.recorderShown = true
 
 	ui.Column(c).FillWidth().Gap(space.Px12).Children(func() {
-		// 顶上那一行：Biu 的 `<h2>快捷键设置</h2>` 和右边的「恢复默认」。
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "快捷键设置").FontSize(scale.Font(c, scale.Size20)).Grow(1)
-			if flatButton(c, "恢复默认").FontSize(scale.Font(c, scale.Size12)).Disabled(ro).Clicked() {
-				s.applyShortcutChange("快捷键", s.keys.reset)
-			}
-		})
-
 		if ro {
 			ui.Text(c, "快捷键只读：这份文件来自更新的版本，这一版一个字都不会写回去。").
 				FontSize(scale.Font(c, scale.Size12)).TextColor(dangerText(t))
@@ -60,41 +52,47 @@ func (s *Shell) settingsShortcuts(c *ui.Context) {
 		// 写在这一页的是常态。
 		//
 		// ⚠️ 「切换mini/完整模式」那一条要在括号里说清楚：它切的是**两个窗口**
-		// （主窗口收起来 + 开一个 320×100 的小窗），所以从别的应用按它同样有
-		// 用——而别的几条应用内快捷键（下一首、暂停）不行，它们只是往这个进程
-		// 的状态里写一笔，界面上看不出变化。理由见 `shortcut_dispatch.go` 里
-		// `toggleMiniPlayer` 的注释。
+		// （主窗口收起来 + 开一个小窗），所以从别的应用按它同样有用——而别的几条
+		// 应用内快捷键（下一首、暂停）不行，它们只是往这个进程的状态里写一笔，
+		// 界面上看不出变化。理由见 `shortcut_dispatch.go` 里 `toggleMiniPlayer` 的注释。
 		ui.Text(c, "应用内那一列：窗口在前台时按它就有用。全局那一列：切到别的"+
 			"应用时按它也有用（底下那个开关关掉就一个都不登记；「切换mini/完整模式」"+
 			"那一条切的是窗口，所以别的应用在前台时它也管用）。焦点在搜索框这类"+
 			"输入框里时快捷键让路，打的字照常进去。").
 			FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 
-		// 三列的表头。Biu 的 `grid grid-cols-[1fr_200px_200px]`（`:102`）。
-		ui.Row(c).FillWidth().Gap(space.Px12).Children(func() {
-			ui.Text(c, "功能说明").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Grow(1)
-			ui.Text(c, "应用内快捷键").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Width(shortcutFieldWidth)
-			ui.Text(c, "全局快捷键").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Width(shortcutFieldWidth)
-		})
+		s.settingGroup(c, "快捷键设置", func() {
+			// 三列的表头。Biu 的 `grid grid-cols-[1fr_200px_200px]`（`:102`），
+			// 右边那个「恢复默认」是 Biu 同一行里的按钮。
+			ui.Row(c).FillWidth().Gap(space.Px12).AlignItems(ui.Center).Padding(space.Px4, space.None).Children(func() {
+				ui.Text(c, "功能说明").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Grow(1)
+				ui.Text(c, "应用内快捷键").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Width(shortcutFieldWidth)
+				ui.Text(c, "全局快捷键").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Width(shortcutFieldWidth)
+			})
 
-		// 焦点那一截在循环**之外**按，见 `keepRecordingFocus` 的注释。
-		var rec ui.Element
-		for _, in := range cur.Shortcuts {
-			global, _ := findShortcut(in.ID, cur.GlobalShortcuts)
-			if r := s.shortcutRow(c, in, global, cur, ro); r.Valid() {
-				rec = r
+			// 焦点那一截在循环**之外**按，见 `keepRecordingFocus` 的注释。
+			var rec ui.Element
+			for _, in := range cur.Shortcuts {
+				global, _ := findShortcut(in.ID, cur.GlobalShortcuts)
+				if r := s.shortcutRow(c, in, global, cur, ro); r.Valid() {
+					rec = r
+				}
 			}
-		}
-		s.keepRecordingFocus(rec)
+			s.keepRecordingFocus(rec)
 
-		// 底下那个开关。Biu 放在右下角（`:134-136`）。
-		ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
-			on := cur.EnableGlobalShortcuts
-			if ui.Checkbox(c, &on, enableGlobalLabel).Disabled(ro).Changed() {
-				s.applyShortcutChange(enableGlobalLabel, func() error {
-					return s.keys.setEnableGlobal(on)
-				})
-			}
+			// 底下一行：恢复默认在左，全局开关在右（Biu 放在右下角，`:134-136`）。
+			ui.Row(c).FillWidth().Gap(space.Px12).AlignItems(ui.Center).Padding(space.Px8, space.None).Children(func() {
+				if settingsButton(c, "恢复默认").FontSize(scale.Font(c, scale.Size12)).Disabled(ro).Clicked() {
+					s.applyShortcutChange("快捷键", s.keys.reset)
+				}
+				ui.Spacer(c).Grow(1)
+				on := cur.EnableGlobalShortcuts
+				if ui.Checkbox(c, &on, enableGlobalLabel).Disabled(ro).Changed() {
+					s.applyShortcutChange(enableGlobalLabel, func() error {
+						return s.keys.setEnableGlobal(on)
+					})
+				}
+			})
 		})
 	})
 }
@@ -110,7 +108,7 @@ func (s *Shell) shortcutRow(c *ui.Context, in, global shortcutItem, all shortcut
 		name = global.Name
 	}
 
-	ui.Row(c).Key("shortcut:" + in.ID).FillWidth().Gap(space.Px12).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Key("shortcut:"+in.ID).FillWidth().Gap(space.Px12).Padding(space.Px6, space.None).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, name).FontSize(scale.Font(c, scale.Size14)).Grow(1)
 
 		inSlot := shortcutSlot{id: in.ID}

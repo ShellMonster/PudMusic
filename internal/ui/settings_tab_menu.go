@@ -32,27 +32,11 @@ const menuGroupName = "系统默认菜单"
 
 // settingsMenu 是菜单那一页。
 func (s *Shell) settingsMenu(c *ui.Context, st app.Settings, ro bool) {
-	// ⚠️ **只摆一个标题**。Biu 那一页把同一个词写了两遍——`<h2>设置侧边菜单项显示和
-	// 隐藏</h2>` 之后，分栏左边那个 `text-medium` 又是「系统默认菜单」
-	// （`menu-settings.tsx:23-38`）。那边第一句是**整页**的标题、第二句是**这一组**
-	// 的名字，所以不算重复；我们这一页还摆着侧栏折叠和侧栏宽度，「整页的标题」
-	// 用在这里就不对了，于是只剩「这一组的名字」——所以只摆它一次。
-	ui.Row(c).FillWidth().Gap(space.Px24).AlignItems(ui.Start).Children(func() {
-		// ⚠️ **这一处是 16/500，不是分组标题那个 20/400**：它是左边那一列的
-		// 组名（上游 `text-medium`，位宽 100），不是整页的 `h2`。20px 的六
-		// 个汉字要 120 宽，在 100 的位宽里会折成「系统默认菜 / 单」（出图量过）。
-		ui.Text(c, menuGroupName).FontSize(scale.Font(c, scale.Size16)).FontWeight(weightMedium).
-			Width(menuLabelWidth)
-		ui.Column(c).Grow(1).Gap(space.Px8).Children(func() {
-			s.pickMenuVisibility(c, st, ro)
-			ui.Divider(c).FillWidth()
-			s.pickSideMenu(c, st, ro)
-		})
-	})
+	// 两张分组卡片：「系统默认菜单」（哪些入口看得见）和「侧栏」（折叠、宽度），
+	// 和常规页同一套写法（设计规范 §7.9）。
+	s.settingGroup(c, menuGroupName, func() { s.pickMenuVisibility(c, st, ro) })
+	s.settingGroup(c, "侧栏", func() { s.pickSideMenu(c, st, ro) })
 }
-
-// menuLabelWidth 是左边那个标题占多宽。Biu 是 `space-x-[100px]`。
-const menuLabelWidth = 100
 
 // pickMenuVisibility 是「哪些菜单项看得见」那一组勾选框。
 //
@@ -72,20 +56,27 @@ func (s *Shell) pickMenuVisibility(c *ui.Context, st app.Settings, ro bool) {
 	allOn := all
 	// ⚠️ 那个 `Label` 不能省，而且**不能只写标题**：左边侧栏上有一列同名菜单项，
 	// 界面上是「稍后再看」的那一行；不给名字的话读屏软件念出来只有「复选框」。
-	if ui.Checkbox(c, &allOn, "全选").Label("全选：" + menuGroupName).
-		Disabled(ro || len(keys) == 0).Changed() {
-		// 全选勾上 = `keys` 一个都不藏；全选取消 = 全部藏起来。Biu 是
-		// `onSelectionChange(checked ? groupKeys : [])`（`select-all-checkbox-group`）。
-		s.setHiddenMenuKeys(keys, pick(allOn, keys, nil))
+	row := func(body func()) {
+		ui.Row(c).FillWidth().Padding(space.Px8, space.None).AlignItems(ui.Center).Children(body)
 	}
+	row(func() {
+		if ui.Checkbox(c, &allOn, "全选").Label("全选：" + menuGroupName).
+			Disabled(ro || len(keys) == 0).Changed() {
+			// 全选勾上 = `keys` 一个都不藏；全选取消 = 全部藏起来。Biu 是
+			// `onSelectionChange(checked ? groupKeys : [])`（`select-all-checkbox-group`）。
+			s.setHiddenMenuKeys(keys, pick(allOn, keys, nil))
+		}
+	})
 	// 勾选框的 `*bool` 是**一帧一读的局部量**：Changed 之后立刻写进设置，下一帧
 	// 再从设置里读回来。写不进去（只读）时读回旧值，勾自己弹回去。
 	for _, k := range keys {
 		on := slices.Contains(visible, k)
-		if ui.Checkbox(c, &on, menuTitle(k)).
-			Label("在侧栏里显示「" + menuTitle(k) + "」").Disabled(ro).Changed() {
-			s.setHiddenMenuKeys(keys, withChecked(visible, k, on))
-		}
+		row(func() {
+			if ui.Checkbox(c, &on, menuTitle(k)).
+				Label("在侧栏里显示「" + menuTitle(k) + "」").Disabled(ro).Changed() {
+				s.setHiddenMenuKeys(keys, withChecked(visible, k, on))
+			}
+		})
 	}
 }
 
@@ -200,14 +191,16 @@ func (s *Shell) pickSideMenu(c *ui.Context, st app.Settings, ro bool) {
 				func(cur *app.Settings, on bool) { cur.SideMenuCollapsed = on })
 		})
 	w := st.SideMenuWidth
-	ui.Row(c).FillWidth().Gap(space.Px12).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "侧栏宽度").FontSize(scale.Font(c, scale.Size16)).FontWeight(weightMedium).Grow(1)
-		sl := ui.Slider(c, &w, app.MinSideMenuWidth, app.MaxSideMenuWidth).
-			Grow(1).Label("侧栏宽度").Disabled(ro)
-		if sl.Changed() {
-			s.applySetting("侧栏宽度", func(cur *app.Settings) { cur.SideMenuWidth = w })
-		}
-		ui.Textf(c, "%.0fpx", w).FontSize(scale.Font(c, scale.Size12)).Width(radiusReadoutW)
+	s.settingRow(c, "侧栏宽度", "拖动调整，也可以直接拖侧栏的右边缘", func() {
+		ui.Row(c).Key("setting:sideMenuWidth").Width(settingsControlW).MinWidth(settingsControlMinW).
+			Gap(space.Px12).AlignItems(ui.Center).Children(func() {
+			sl := ui.Slider(c, &w, app.MinSideMenuWidth, app.MaxSideMenuWidth).
+				Grow(1).Label("侧栏宽度").Disabled(ro)
+			if sl.Changed() {
+				s.applySetting("侧栏宽度", func(cur *app.Settings) { cur.SideMenuWidth = w })
+			}
+			ui.Textf(c, "%.0fpx", w).FontSize(scale.Font(c, scale.Size12)).Width(radiusReadoutW)
+		})
 	})
 }
 
@@ -232,53 +225,54 @@ func (s *Shell) pickSideMenu(c *ui.Context, st app.Settings, ro bool) {
 // 一件该改的事，但它不是「因为那一页还没接上」。
 func (s *Shell) pickLocalMusicDirs(c *ui.Context, st app.Settings, ro bool) {
 	t := c.Theme()
-	s.settingSection(c, "音乐库")
-	ui.Row(c).FillWidth().Gap(space.Px24).AlignItems(ui.Center).Children(func() {
-		ui.Column(c).Grow(1).Children(func() {
-			ui.Text(c, "本地音乐目录").FontSize(scale.Font(c, scale.Size16)).FontWeight(weightMedium)
-			ui.Text(c, "从这些文件夹里读取本地音乐").FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).Wrap()
+	s.settingGroup(c, "音乐库", func() {
+		ui.Row(c).FillWidth().Gap(space.Px24).AlignItems(ui.Center).Children(func() {
+			ui.Column(c).Grow(1).Children(func() {
+				ui.Text(c, "本地音乐目录").FontSize(scale.Font(c, scale.Size16)).FontWeight(weightMedium)
+				ui.Text(c, "从这些文件夹里读取本地音乐").FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).Wrap()
+			})
+			if settingsButton(c, "添加文件夹").Width(104).Disabled(ro).Clicked() {
+				s.pickPath("本地音乐目录", true, func(path string) {
+					s.applySetting("本地音乐目录", func(cur *app.Settings) {
+						// 不加重复的：同一个目录摆两遍，音乐列表里也会出现两遍。
+						if !slices.Contains(cur.LocalMusicDirs, path) {
+							cur.LocalMusicDirs = append(slices.Clone(cur.LocalMusicDirs), path)
+						}
+					})
+				})
+			}
 		})
-		if flatButton(c, "添加文件夹").Width(96).Disabled(ro).Clicked() {
-			s.pickPath("本地音乐目录", true, func(path string) {
-				s.applySetting("本地音乐目录", func(cur *app.Settings) {
-					// 不加重复的：同一个目录摆两遍，音乐列表里也会出现两遍。
-					if !slices.Contains(cur.LocalMusicDirs, path) {
-						cur.LocalMusicDirs = append(slices.Clone(cur.LocalMusicDirs), path)
+
+		if len(st.LocalMusicDirs) == 0 {
+			ui.Text(c, "还没有目录").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Padding(space.Px4, space.None, space.None, space.None)
+			return
+		}
+		// ⚠️ **重复的目录只画一次**。设置文件是用户能直接编辑的（也能从 Biu 那边来），
+		// 两个一模一样的目录在文件里完全合法——而这一行的 key 就是路径：MyGo 在同一层里
+		// 拿到两个一样的 key 会**当场 panic**（`ui/context.go` 的 duplicateKey），那一格
+		// 带着整个设置页换成错误页，用户之前改好的设置全看不见。
+		//
+		// 这里去重而不是去改设置：写设置是 `internal/app` 那一层的事，那份文件不是这一票
+		// 的；而重复的目录本来就该只出现一遍（Biu 的 local-music 页也是这么去的）。
+		seen := make(map[string]bool, len(st.LocalMusicDirs))
+		ui.Column(c).FillWidth().Gap(space.Px4).Children(func() {
+			for i, dir := range st.LocalMusicDirs {
+				if seen[dir] {
+					continue
+				}
+				seen[dir] = true
+				ui.Row(c).Key("local-dir:" + dir).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
+					// ⚠️ 这一行的 key 用的是**路径**，不是序号（🔴 铁律四）：删掉中间
+					// 那一条之后序号会整体前移一格，按序号排的身份就落到旁边那条上
+					// 了，而 × 删掉的是它自己那一格还是隔壁那一格，从画面上看不出来。
+					ui.Text(c, dir).FontSize(scale.Font(c, scale.Size13)).Grow(1).SingleLine()
+					if flatButton(c, "×").Label("移除目录「" + dir + "」").
+						FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted).Disabled(ro).Clicked() {
+						s.removeLocalMusicDir(i)
 					}
 				})
-			})
-		}
-	})
-
-	if len(st.LocalMusicDirs) == 0 {
-		ui.Text(c, "还没有目录").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Padding(space.Px4, space.None, space.None, space.None)
-		return
-	}
-	// ⚠️ **重复的目录只画一次**。设置文件是用户能直接编辑的（也能从 Biu 那边来），
-	// 两个一模一样的目录在文件里完全合法——而这一行的 key 就是路径：MyGo 在同一层里
-	// 拿到两个一样的 key 会**当场 panic**（`ui/context.go` 的 duplicateKey），那一格
-	// 带着整个设置页换成错误页，用户之前改好的设置全看不见。
-	//
-	// 这里去重而不是去改设置：写设置是 `internal/app` 那一层的事，那份文件不是这一票
-	// 的；而重复的目录本来就该只出现一遍（Biu 的 local-music 页也是这么去的）。
-	seen := make(map[string]bool, len(st.LocalMusicDirs))
-	ui.Column(c).FillWidth().Gap(space.Px4).Children(func() {
-		for i, dir := range st.LocalMusicDirs {
-			if seen[dir] {
-				continue
 			}
-			seen[dir] = true
-			ui.Row(c).Key("local-dir:" + dir).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-				// ⚠️ 这一行的 key 用的是**路径**，不是序号（🔴 铁律四）：删掉中间
-				// 那一条之后序号会整体前移一格，按序号排的身份就落到旁边那条上
-				// 了，而 × 删掉的是它自己那一格还是隔壁那一格，从画面上看不出来。
-				ui.Text(c, dir).FontSize(scale.Font(c, scale.Size13)).Grow(1).SingleLine()
-				if flatButton(c, "×").Label("移除目录「" + dir + "」").
-					FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted).Disabled(ro).Clicked() {
-					s.removeLocalMusicDir(i)
-				}
-			})
-		}
+		})
 	})
 }
 

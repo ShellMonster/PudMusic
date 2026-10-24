@@ -21,7 +21,6 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -43,83 +42,58 @@ var proxyTypeOptions = []struct {
 // proxySelectWidth 是那几栏下拉多宽。Biu 是 `w-[240px]`（`:43`）。
 const proxySelectWidth = 240
 
-// settingsProxy 是代理那一页。
+// settingsProxy 是代理那一页：一张「代理」分组卡片，每个字段一行（设计规范 §7.21）。
 func (s *Shell) settingsProxy(c *ui.Context, st app.Settings, ro bool) {
 	cur := st.ProxySettings
-
-	ui.Column(c).FillWidth().Gap(space.Px16).Children(func() {
+	s.settingGroup(c, "代理", func() {
 		items := make([]enumItem[app.ProxyType], len(proxyTypeOptions))
 		for i, o := range proxyTypeOptions {
 			items[i] = enumItem[app.ProxyType]{value: o.value, label: o.label}
 		}
 		chosen := cur.Type
-		ui.Column(c).Width(proxySelectWidth).Children(func() {
-			ui.Text(c, "代理类型").FontSize(scale.Font(c, scale.Size16)).FontWeight(weightMedium)
+		s.settingRow(c, "代理类型", "选一种协议；不使用代理就直连", func() {
 			enumSelect(c, &chosen, items, "选择代理类型", proxySelectWidth, 0, ro)
 		})
 		if chosen != cur.Type {
 			s.applySetting("代理类型", func(s *app.Settings) { s.ProxySettings.Type = chosen })
 		}
-
-		// 主机 / 端口。选了「不使用代理」就不画——Biu 是
-		// `(value.type === "http" || ... ) && (...)`（`:61`）。
+		// 选了「不使用代理」就不画地址那几行——Biu 是 `(value.type === "http" || ...) && (...)`（`:61`）。
 		if cur.Type == app.ProxyNone {
 			proxyHint(c, "现在不走代理。选了上面那一档才填地址。")
 			return
 		}
 
 		host := cur.Host
-		port := ""
-		if cur.Port != nil {
-			port = strconv.Itoa(*cur.Port)
-		}
-		ui.Column(c).FillWidth().Gap(space.Px6).Children(func() {
-			ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
-				ui.Text(c, "主机").FontSize(scale.Font(c, scale.Size12)).Grow(1)
-				ui.Text(c, "端口").FontSize(scale.Font(c, scale.Size12)).Grow(1)
-			})
-			ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
-				// ⚠️ **不许给输入框加 Key**：Key 只能挂在「创建时没有处理输入」的
-				// 控件上，挂上去直接 panic（`ui/element.go:658`）。
-				ui.TextInput(c, &host).Grow(1).Label("代理主机").
-					Placeholder("例如 127.0.0.1").Disabled(ro)
-				ui.TextInput(c, &port).Grow(1).Label("代理端口").
-					Placeholder("例如 7890").Disabled(ro)
-			})
+		port := portOf(cur.Port)
+		user, pass := cur.Username, cur.Password
+		showPass := cur.Type == app.ProxyHTTP || cur.Type == app.ProxyHTTPS || cur.Type == app.ProxySOCKS5
+		// ⚠️ **不许给输入框加 Key**：Key 只能挂在「创建时没有处理输入」的
+		// 控件上，挂上去直接 panic（`ui/element.go:658`）。
+		s.settingRow(c, "主机", "代理服务器的地址", func() {
+			ui.TextInput(c, &host).Width(settingsControlW).Label("代理主机").Placeholder("例如 127.0.0.1").Disabled(ro)
 		})
+		s.settingRow(c, "端口", "只填数字；不是数字就当没设", func() {
+			ui.TextInput(c, &port).Width(settingsControlW).Label("代理端口").Placeholder("例如 7890").Disabled(ro)
+		})
+		s.settingRow(c, "用户名", "没有就留空", func() {
+			ui.TextInput(c, &user).Width(settingsControlW).Label("代理用户名").Placeholder("没有就留空").Disabled(ro)
+		})
+		if showPass {
+			s.settingRow(c, "密码", "没有就留空", func() {
+				ui.TextInput(c, &pass).Width(settingsControlW).Label("代理密码").Placeholder("没有就留空").Password().Disabled(ro)
+			})
+		}
 		if ro {
 			proxyHint(c, "设置只读，这一格改不了。")
 		}
-		// 主机和端口各自改完立刻写。端口写的是数字：不是数字就当成「没设」
-		// （`port` 在设置里是 `*int`，Biu 也是这么分的），于是输入框下一帧回到
-		// 它最后一个合法的样子——和 Biu 一样（`:73-79`）。
+		// 端口写的是数字：不是数字就当成「没设」（`port` 在设置里是 `*int`，Biu 也是这么分的），
+		// 于是输入框下一帧回到它最后一个合法的样子——和 Biu 一样（`:73-79`）。
 		if host != cur.Host {
 			s.applySetting("代理主机", func(s *app.Settings) { s.ProxySettings.Host = host })
 		}
 		if port != portOf(cur.Port) {
 			s.applySetting("代理端口", func(s *app.Settings) { s.ProxySettings.Port = parsePort(port) })
 		}
-
-		// 用户名 / 密码。
-		user := cur.Username
-		pass := cur.Password
-		showPass := cur.Type == app.ProxyHTTP || cur.Type == app.ProxyHTTPS || cur.Type == app.ProxySOCKS5
-		ui.Column(c).FillWidth().Gap(space.Px6).Children(func() {
-			ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
-				ui.Text(c, "用户名").FontSize(scale.Font(c, scale.Size12)).Grow(1)
-				if showPass {
-					ui.Text(c, "密码").FontSize(scale.Font(c, scale.Size12)).Grow(1)
-				}
-			})
-			ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
-				ui.TextInput(c, &user).Grow(1).Label("代理用户名").
-					Placeholder("没有就留空").Disabled(ro)
-				if showPass {
-					ui.TextInput(c, &pass).Grow(1).Label("代理密码").
-						Placeholder("没有就留空").Password().Disabled(ro)
-				}
-			})
-		})
 		if user != cur.Username {
 			s.applySetting("代理用户名", func(s *app.Settings) { s.ProxySettings.Username = user })
 		}

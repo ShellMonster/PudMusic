@@ -46,7 +46,8 @@ import (
 
 const (
 	// searchWidth 是搜索框多宽。Biu 是 `w-[280px]`（`search/index.tsx:73`）。
-	searchWidth = 280
+	// 设计规范 v0.1 §7.4：宽 240、高 28、胶囊形（原 Biu 是 280 / 40 / 主题圆角）。
+	searchWidth = 240
 
 	// suggestWidth 是建议浮层多宽。Biu 是 `w-[360px]`（同文件 :101）。
 	//
@@ -61,7 +62,11 @@ const (
 	// searchHeight 是搜索框多高。Biu 那个 Input 是 md 档（`h-10`，
 	// `search/index.tsx:72-96`；Tailwind 1 单位 = 4px）——40，顶栏 64 高，
 	// 上下各留 12。
-	searchHeight = 40
+	searchHeight = 28
+
+	// searchRadius 是搜索框的圆角：胶囊（高度的一半）。刻意不跟主题圆角走——胶囊是这个框的形状，
+	// 用户把全局圆角拖到 0 它也还是胶囊。
+	searchRadius = searchHeight / 2
 
 	// searchPadX / searchGap 是搜索框里那三样之间的留白：左右内边距、放大镜与
 	// 输入框之间的缝。上游 Input 的 md 档是 `px-3 gap-3`（12 / 12）——
@@ -137,7 +142,7 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 	// 只在**放不下**的时候才让）。
 	row := ui.Row(c).Key("search").Width(searchWidth).Height(searchHeight).
 		MinWidth(0).
-		Radius(t.Radius).Background(searchFieldBg(t, false)).
+		Radius(searchRadius).Background(searchFieldBg(t, false)).
 		Padding(space.None, searchPadX).Gap(searchGap).AlignItems(ui.Center)
 	row.Children(func() {
 		// 放大镜是**装饰**：它不可点，而输入框自己就带「搜索」这个无障碍名字

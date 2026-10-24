@@ -107,6 +107,12 @@ func (a *App) MountDownloads(d Downloads) error {
 	m, err := download.New(download.Options{
 		Client:  d.Media,
 		Resolve: a.resolveDownload,
+		OnDone:  a.downloadFinished,
+		// 🔴 **判据是同一张表**（票 #346）：下载记录页上那枚「重试」和播放条上
+		// 那枚是同一个动作（再问一次 B 站），所以两处必须用同一个判据。
+		// 不装的话下载那一路会按旧行为「每一项出错都给一枚重试」——风控失败的
+		// 下载于是又有了那枚「点一次撞一次」的键。
+		CanRetry: bili.Recoverable,
 	}, d.QueueFile)
 	if err != nil {
 		return err
@@ -133,6 +139,27 @@ func (a *App) MountDownloads(d Downloads) error {
 
 // DownloadMounted 报告下载挂上没有。
 func (a *App) DownloadMounted() bool { return a.downloadsSnapshot() != nil }
+
+// downloadFinished 是「一项下载有结果了」（下完了，或者下坏了）。
+//
+// ⚠️ **它在后台那条线上被调**（下载队列自己那条线），所以它不碰界面状态——
+// 它只是**说一句话**，由界面层念给读屏软件听（见 `announce.go`）。
+//
+// 🔴 **「下载完成」这件事界面上几乎没有声音**：记录页上那一列变成「下载完成」加
+// 一枚绿勾，而用户多半在别的页——**他既看不见那个勾，也听不见任何动静**。
+//
+// ⚠️ **暂停和取消不在这儿**：那不是「下完了」，用户还要接着下（见
+// `service/download/queue.go` 里 `runOne` 的那一支）。
+func (a *App) downloadFinished(s download.Snapshot) {
+	switch s.Status {
+	case download.StatusDone:
+		a.announce("《" + s.Title + "》下载完成")
+	case download.StatusError:
+		// ⚠️ **剥掉内部前缀**（"download: "）：那是我们自己的说法，读屏软件
+		// 是逐字念的（理由见 `announce.go` 的 `announceErrTextOf`）。
+		a.announce("《" + s.Title + "》下载失败：" + announceErrTextOf(s.Err))
+	}
+}
 
 // Download 把一首加进下载队列，返回它的快照。
 //
