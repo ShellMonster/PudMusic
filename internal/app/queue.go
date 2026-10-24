@@ -1227,8 +1227,22 @@ func (a *App) setErr(msg string) { a.setErrText(msg, false) }
 // 是**同一件事的两半**。只落前一半的话，界面上要么给一个按了也没用的
 // 重试，要么把「网络断了」说成死路。
 func (a *App) setErrText(msg string, retryable bool) {
+	a.setErrTextDetail(msg, msg, retryable)
+}
+
+// setErrTextDetail 在播放条上显示一句错误，**短的��屏、长的进悬停提示**。
+//
+// 🔴 **为什么要分两栏**（票 #282 的评审）：播放条上那一行只有 140 像素宽
+// （1200 宽的窗口，实测），12 号字放得下十来个字——一句 50 个字的话在屏幕
+// 上只剩「打不开：取流…」这样的碎片，那不是「一句能看懂的话」。
+//
+// 三个值必须一起落：界面上「打不开：……」这句话、「给不给重试那一枚键」
+// 和「悬停提示里那一句」是**同一件事的三半**。只落前一半的话，界面上要么
+// 给一个按了也没用的重试，要么把「网络断了」说成死路。
+func (a *App) setErrTextDetail(msg, detail string, retryable bool) {
 	a.mu.Lock()
 	a.errText = msg
+	a.errDetail = detail
 	a.errRetryable = retryable
 	wake := a.wake
 	a.mu.Unlock()
@@ -1239,11 +1253,12 @@ func (a *App) setErrText(msg string, retryable bool) {
 
 // clearErrLocked 清掉播放条上那一句错误。**必须在持锁时调**。
 //
-// 🔴 **两个值一起清**：只清 `errText` 而留着 `errRetryable`，界面上就变成
+// 🔴 **三个值一起清**：只清 `errText` 而留着 `errRetryable`，界面上就变成
 // 「没有错误了，但重试那一枚键还亮着」——而那枚键按下去会重放上一首，
 // 用户会以为是自己按错了。
 func (a *App) clearErrLocked() {
 	a.errText = ""
+	a.errDetail = ""
 	a.errRetryable = false
 }
 

@@ -1017,6 +1017,34 @@ var Items = []Item{
 	},
 	{
 		Category: Negative,
+		// 票 #282：「点了歌一直不开始、也不说为什么」。
+		//
+		// 那一首和别的歌不一样的地方在于**它的流一直没准备好**，而应用这一层
+		// 对「还在准备」和「已经完了」分都不分：既没有一句「正在取流」，也没有
+		// 一个「等够了就当它失败」的上限。于是用户面对的是一个不动的界面和
+		// 一片沉默——比「报错」更糟。
+		//
+		// 这一组盯三件事：**有反馈**（界面上说在取流）、**有上限**（超时按失败
+		// 处理，给一句能看懂的话）、**有痕迹**（代次变了和失败都写进日志，
+		// 而日志真的落在文件里）。
+		Spec: "点了歌一直不开始：界面上说在取流、超过阈值按失败处理、代次变了和失败都写进日志",
+		Tests: []string{
+			"TestAPlayThatNeverStartsTurnsIntoASentence",
+			"TestAnotherSongsFailureDoesNotCancelTheWatchdog",
+			"TestTheDiscardedPlayIsWrittenDown",
+			"TestTheFailureIsWrittenDown",
+			"TestThePlayBarSaysItIsLoading",
+			"TestTheLoadingLineHasASpinner",
+			"TestThePauseKeyIsStillThereWhileLoading",
+			"TestAFailedPlayGivesASentenceInsteadOfASpinner",
+			"TestTheFailureSentenceFitsOnOneLine",
+			"TestFriendlySaysTheFormatCannotBeDecoded",
+			"TestTheLogFileActuallyReceivesWhatIsLogged",
+			"TestTheLogFileIsAppendedTo",
+		},
+	},
+	{
+		Category: Negative,
 		Spec:     "重启：登录状态保持、设置落盘、搜索历史活下来",
 		Tests: []string{
 			"TestRestartKeepsTheLoginState",
