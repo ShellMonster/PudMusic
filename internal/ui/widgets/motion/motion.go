@@ -35,7 +35,8 @@ import "github.com/egoist/mygo/ui"
 // 是**一对**，不要只改其中一个。
 var Unified = ui.CubicBezier(0.16, 0.9, 0.21, 0.98)
 
-// TabSlide 是主 Tab 滑块那一下的动画：**临界阻尼弹簧**，不是定时长曲线。
+// TabSlide 是主 Tab 滑块那一下的动画：**一条接近临界阻尼的弹簧**（ζ=0.9923），
+// 不是定时长曲线。
 //
 // 出处：《使用 AI 制作交互动画的建议》内嵌 demo 的 Tab 指示器
 // （`useSpring(targetX, { stiffness: 260, damping: 26 })`，

@@ -76,7 +76,8 @@ var (
 	tabLG = tabSize{track: 44, block: 36, font: 16}
 )
 
-// tabSlide 是滑块那一下的动画：**临界阻尼弹簧**，不是定时长曲线。
+// tabSlide 是滑块那一下的动画：**一条接近临界阻尼的弹簧**（ζ=0.9923），
+// 不是定时长曲线。
 //
 // 出处、阻尼为什么从 26 上调到 32、以及那几个数实算是多少，都写在
 // `internal/ui/widgets/motion` 的 `TabSlide` 那里——值只写一处。

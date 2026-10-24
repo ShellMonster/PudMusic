@@ -2761,11 +2761,11 @@ var Items = []Item{
 		// 顿一下；淡入和位移又同步了也不报错，只是「啪」地一下出现。
 		Category: Platform,
 		// 票 #292（DESIGN.md §五）：一条统一曲线 + 主 Tab 滑块换成弹簧。
-		Spec: "所有过渡走同一条曲线 `CubicBezier(0.16, 0.9, 0.21, 0.98)`（DESIGN.md §五《一条统一曲线》）；主 Tab 滑块走**临界阻尼弹簧**（不是定时长曲线）；Toast 入场的**淡入与位移错开**（位移先走、淡入后到）",
+		Spec: "所有过渡走同一条曲线 `CubicBezier(0.16, 0.9, 0.21, 0.98)`（DESIGN.md §五《一条统一曲线》）；主 Tab 滑块走**弹簧**（ζ=0.9923，接近临界阻尼；不是定时长曲线）；Toast 入场的**淡入与位移错开**（位移先走、淡入后到）",
 		Tests: []string{
 			// 曲线和弹簧的值不许漂（唯一出处就是那一个包）。
 			"TestTheUnifiedCurveIsTheOneWeCopied",
-			"TestTheTabSlideIsACriticalSpring",
+			"TestTheTabSlideIsASpring",
 			// 滑块走的是弹簧：100ms 时只走到约一半（定时长曲线那时已经 78%）。
 			"TestTheTabSliderFollowsTheSpring",
 			// 淡入与位移错开：同一时刻量到的两个进度，淡入那个明显更小。
