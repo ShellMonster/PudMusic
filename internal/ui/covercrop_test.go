@@ -107,7 +107,7 @@ func TestMovingTheBoxFollowsThePointer(t *testing.T) {
 func TestTheCornersBeatTheInside(t *testing.T) {
 	// 40,20,80,60 是一个框；左上角把手就在 (40,20)。
 	if got := cornerAt(41, 21, 40, 20, 80, 60); got != cornerTL {
-		t.Errorf("左���角上 = %v，want cornerTL", got)
+		t.Errorf("左上角上 = %v，want cornerTL", got)
 	}
 	if got := cornerAt(119, 79, 40, 20, 80, 60); got != cornerBR {
 		t.Errorf("右下角上 = %v，want cornerBR", got)

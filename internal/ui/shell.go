@@ -388,6 +388,13 @@ type Shell struct {
 	// ⚠️ 理由同 `sideRowKeys`（票 #313）。
 	partRowKeys rowkey.Memo[string, any]
 
+	// errDetailOpen 是「错误详情」那块面板开着没有（票 #320，见 playbar_err.go）。
+	// **同样只由 view 在主线程上读写**。
+	//
+	// ⚠️ **它跟着错误一起收**：错没了（下一首放起来了）而它还开着的话，下一句
+	// 错一上来，面板是开着的——用户会看到一块不属于这句错的浮层。
+	errDetailOpen bool
+
 	// 顶栏这一摊。**同样只由 view 在主线程上读写**。
 	//
 	// searchFocused 是搜索框有没有焦点，顶栏用它把输入区的底色抬到 30%

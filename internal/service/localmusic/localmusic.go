@@ -116,7 +116,7 @@ type Track struct {
 	//
 	//   - **重扫之间不变。** 文件没动，重扫多少次身份都一样——而这才是界面
 	//     上要紧的那一条：文件监听每有一个变动就重扫一遍，身份要是跟着变，
-	//     用户选中��那一行每次刷新都跳走。（`TestIdentityIsStableAcrossRescans`）
+	//     用户选中的那一行每次刷新都跳走。（`TestIdentityIsStableAcrossRescans`）
 	//   - **两个路径指向同一个文件时是同一个 ID。** 那种情况由 Scan 去重，
 	//     列表里只会剩一行，所以不会出现两行共用一个身份。
 	//
@@ -217,7 +217,7 @@ func Scan(roots []string, prev map[string]Meta) Result {
 	for _, root := range uniqueRoots(roots) {
 		dir, err := readDir(root)
 		if err != nil {
-			// 收拢而不是立刻返回：另一个目录可能好好地��着。
+			// 收拢而不是立刻返回：另一个目录可能好好地开着。
 			//
 			// 用 errors.Join 是因为它保得住每一个：`errors.Is(err, fs.ErrNotExist)`
 			// 对合并后的错照样答得上来，界面上就能分「外接盘没插」和「没权限」。

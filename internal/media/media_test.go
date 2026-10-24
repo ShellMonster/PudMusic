@@ -137,7 +137,7 @@ func TestEveryVisibleFieldCountsAsAChange(t *testing.T) {
 	}
 }
 
-// TestSmallPositionMovesAreLeftToTheSystem 盯「位置往前挪一点点不���」。
+// TestSmallPositionMovesAreLeftToTheSystem 盯「位置往前挪一点点不动」。
 //
 // 系统会从上一次报的位置和播放速率**自己外推**进度（Apple 头文件原话）。
 // App 每 50ms 写一次位置，全报过去就是在白重建字典。
