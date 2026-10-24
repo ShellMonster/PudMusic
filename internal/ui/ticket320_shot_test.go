@@ -38,7 +38,7 @@ func TestRenderTicket320Shots(t *testing.T) {
 			st := app.State{Err: errLongSentence}
 
 			// 一、播放条上那一句错：**一行 + 省略号**（它就该是这样——
-			// 88 高的播放条装不下两行，完整那一句在详情层里）。
+			// 76 高的播放条装不下两行，完整那一句在详情层里）。
 			tt, _ := errBarTester(t, &st, 1200, 320, dark)
 			// 指针停在窗口中间那块空地上：它一悬停到那一句上，提示框就出来了，
 			// 而这一张要看的是「播放条上那一句长什么样」。
