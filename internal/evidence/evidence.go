@@ -1682,6 +1682,43 @@ var Items = []Item{
 		},
 	},
 	{
+		Category: HTTP,
+		// B 站那一份歌词是**取流那一趟顺带回来的**（响应里的 `data.subtitle`）——
+		// 以前 `playurlData` 只声明了三个字段，那一段被**静悄悄地**丢掉了，于是
+		// 歌词只能靠用户在「找歌词」里搜（上游 Biu 走的就是这一段，
+		// `get-lyrics.ts` 的 `getLyricsByBili`）。
+		//
+		// ⚠️ 判据是**解析**那几项：时间 `round(from*1000)` 毫秒、文字去掉首尾的
+		// `♪♫`、空的丢掉、按时间排序。抄错时间那一项的症状是「歌词整体早/晚
+		// 几秒」，而歌词本身看着完全正常——用户只会以为「这首歌的词对不上」。
+		Spec: "B 站那一份歌词自己来：取流响应里的字幕地址被读出来、后台下载并按上游的判据解析、存进缓存（键与别的歌词缓存一致）、界面上说清它是自动来的",
+		Tests: []string{
+			"TestPlayURLHandsBackTheSubtitleItWasGiven",
+			"TestTheSubtitleFallsBackToTheSecondURL",
+			"TestTheBiliSubtitleIsParsedTheWayUpstreamDoes",
+			"TestTheBiliSubtitleTimeIsRoundedToMilliseconds",
+			"TestTheBiliSubtitleSurvivesTheRoundTripThroughLRC",
+			"TestTheBiliSubtitleComesOnItsOwn",
+			"TestTheBiliSubtitleSurvivesARestart",
+			"TestTheSubtitleIsFetchedInTheBackground",
+			"TestTheLyricsSayWhereTheyCameFrom",
+		},
+	},
+	{
+		Category: Negative,
+		// 「B 站没给字幕」是**正常**的一种（很多歌压根没有），不是错误：歌照放，
+		// 歌词区照旧是「暂无歌词」加一个「找歌词」的入口——那一条路留着。
+		//
+		// ⚠️ 少了这一条，界面上的「暂无歌词」就会变成一句**兑现不了的承诺**：
+		// 用户按了「找歌词」，而 B 站那份自动的其实没来。
+		Spec: "B 站没给字幕时照旧走搜索：歌词区是「暂无歌词」加一个「找歌词」的入口，那两个搜索源还在",
+		Tests: []string{
+			"TestNoSubtitleMeansNoAddress",
+			"TestNoSubtitleMeansTheSearchStaysAvailable",
+			"TestAnUnknownOriginSaysNothing",
+		},
+	},
+	{
 		Category: Negative,
 		// 搜/预览都在后台，而用户在那几百毫秒里会切源、关弹窗、换歌。少了代次守卫的症状
 		// 是「我搜的是乙，弹出来的是甲的歌」，而按多少次搜索都一样。

@@ -101,6 +101,10 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, area ui.Rect, hidden
 	// 封面关掉的时候歌词占满整窗，于是居中。
 	centered := !s.app.FullPlayerPrefs().ShowCover
 
+	// ⚠️ **说明句用满屏自己的第二档色**（`fullForeground` 的那个 dim），不用主题的
+	// 次要色：这一屏压在糊过的封面上，主题的次要色在浅色封面上会糊进去。
+	_, dim := s.fullForeground(c)
+
 	ui.Box(c).Key(fullLyricsBoxKey).
 		Absolute().Left(area.X).Top(area.Y).Width(area.W).Height(area.H).
 		Padding(fullLyricsPadY, fullStagePadX).
@@ -124,6 +128,7 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, area ui.Rect, hidden
 					}
 					s.viewLyricLines(c, lv, snap, active, lyricStyle{
 						color:  s.fullLyricColor(c),
+						muted:  dim,
 						area:   fullLyricsAreaKey,
 						ns:     lyricNSFull,
 						center: centered,

@@ -345,6 +345,13 @@ type App struct {
 	// lyricEntry 是缓存里这一条原文+译文的**内容**（不含偏移和字号那两个
 	// 用户值，那两个在 flushLyrics 里现填）。写盘和换源都靠它。
 	lyricEntry lyrics.Entry
+	// lyricOrigin 是当前这一份歌词的**来路**（`lyrics.OriginBili` /
+	// `lyrics.OriginSearch` / 空串 = 不知道）。界面上那句话靠它说清「这份歌词
+	// 是自动来的还是搜来的」（见 `lyrics.go` 的 `LyricsSnapshot`）。
+	//
+	// ⚠️ **它跟着 `lyricEntry` 一起换**：换一份歌词就要换它的来路，而
+	// `lyricEntry` 是从缓存里读回来的（那一栏也在缓存里，见 `lyrics.Entry`）。
+	lyricOrigin string
 	// lyricStopTimer 是偏移/字号落盘那个防抖窗口的「停掉它」。每次重新排窗口都会
 	// 先调上一次那个（理由见 armLyricsSaveLocked）。它是**函数**而不是
 	// `*time.Timer`，是为了让测试能换成一个手动推进的假钟。

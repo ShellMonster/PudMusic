@@ -92,6 +92,14 @@ type streamFixture struct {
 	// forbidden 的 CDN 路径一律回 403（模拟「这条地址过期了」）。
 	forbidden map[string]bool
 
+	// subtitleURL 是取流响应里带的那份字幕的地址。空 = B 站没给字幕。
+	//
+	// ⚠️ **默认是空的**：绝大多数用例要的就是「B 站没给字幕」这一支，而给了它
+	// 的话每一条在线用例都会多发一次请求。
+	subtitleURL string
+	// subtitleBody 是那份字幕的内容。
+	subtitleBody string
+
 	// failMediaAfter > 0 时，发到这个字节就掐断连接（模拟地址中途失效）。
 	failMediaAfter int
 	// mediaGate 关掉之后才真的掐断。理由见 audio 包里同名 helper。
@@ -139,6 +147,13 @@ func (f *streamFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	case strings.HasPrefix(r.URL.Path, "/cdn/"):
 		f.serveMedia(w, r)
+
+	case r.URL.Path == "/subtitle.json":
+		f.mu.Lock()
+		body := f.subtitleBody
+		f.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
 
 	default:
 		http.NotFound(w, r)
@@ -206,10 +221,20 @@ func (f *streamFixture) servePlayURL(w http.ResponseWriter, q url.Values) {
 	if n >= 0 {
 		dash = f.playURLs[n]
 	}
+	sub := f.subtitleURL
 	f.mu.Unlock()
 
-	writeStreamJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
-		"data": map[string]any{"timelength": 1000, "dash": dash}})
+	data := map[string]any{"timelength": 1000, "dash": dash}
+	// B 站在取流的返回里就带着字幕的地址（上游 Biu 走的就是这一段）。
+	if sub != "" {
+		data["subtitle"] = map[string]any{
+			"allow_submit": false,
+			"subtitles": []any{map[string]any{
+				"id": 1, "lan": "zh-CN", "subtitle_url": sub,
+			}},
+		}
+	}
+	writeStreamJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1, "data": data})
 }
 
 func (f *streamFixture) serveMedia(w http.ResponseWriter, r *http.Request) {
@@ -1186,7 +1211,14 @@ func TestAMusicLibraryEntryActuallyPlays(t *testing.T) {
 		t.Errorf("音质徽章 = %q，want 192K", st.Quality)
 	}
 	if n := f.playCalls.Load(); n != 0 {
-		t.Errorf("投稿那条取流接口被打了 %d 次，want 0（音乐库不走它）", n)
+		// ⚠️ **音乐库的「流」不走投稿那个取流接口**：它走的是
+		// `/audio/music-service-c/url`（另一个接口、另一套档位编号）。
+		//
+		// （**歌词**那一趟是另一回事：音乐库的取流返回里没有字幕，所以要问它背后
+		// 那个投稿一次——上游 Biu 也是这么做的。那一趟在后台，见
+		// `lyrics_bili_test.go` 的 `TestAMusicLibraryEntryAlsoGetsItsLyrics`。
+		// 这一条里元信息没给出那个投稿，所以它一趟也没打。）
+		t.Errorf("投稿那条取流接口被打了 %d 次，want 0（音乐库的流不走它）", n)
 	}
 	if n := f.songInfoCalls.Load(); n != 1 {
 		t.Errorf("元信息接口被打了 %d 次，want 1（放歌之前问一次）", n)

@@ -108,6 +108,20 @@ type Item struct {
 	// 就得让每一集各占一项，于是上面那条 `Identity` 和抽屉的去重才真的要改）。
 	PageIndex int
 	TotalPage int
+
+	// SubtitleBvid / SubtitleCid 是「这一条背后那个投稿」的身份。
+	//
+	// ⚠️ **只有音乐库条目有值**，而且**只在放它的那一趟里有**（`withSongInfo`
+	// 补的，队列里那一项是空的）：音乐库的取流走的是另一个接口
+	// （`/audio/music-service-c/url`），那个返回里**没有字幕**；而音乐库条目
+	// 背后多半有一个投稿（`SongInfo` 里的 `Bvid` / `Cid`），那份投稿的字幕
+	// 就是这一首的词（见 `lyrics.go` 的 `fetchBiliSubtitle`）。
+	//
+	// ⚠️ **它们不是上面那两栏 `Bvid` / `Cid`**：那两栏是「这一条自己的身份」，
+	// 而歌词缓存键靠它们（`lyricKeyOf`）——音乐库条目的键是 `bili-audio-<sid>`，
+	// 把投稿的编号填进 `Bvid`/`Cid` 的话键就变了，用户已有的缓存全部作废。
+	SubtitleBvid string
+	SubtitleCid  string
 }
 
 // LocalItem 把一个本地音频文件包成一项。

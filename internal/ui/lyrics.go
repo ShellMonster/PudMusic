@@ -207,6 +207,13 @@ const (
 type lyricStyle struct {
 	// color 是歌词的字色。正在唱的那一句也是它，只是字号和不透明度不同。
 	color ui.Color
+	// muted 是**说明性文字**的字色（那一句「歌词来自 B 站」）。
+	//
+	// ⚠️ **它不是 `color` 的淡版**：满屏那一屏的字色是满屏自己的前景色
+	// （白 92% / 黑 92%，跟着底走），而淡一档的那个是 `fullForeground` 给的
+	// 第二档（见 `fullplayer_lyrics.go`）。用正文色画说明句的话，满屏那一屏
+	// 上它是**最亮**的一行——比正在唱的那一句还抢眼。
+	muted ui.Color
 	// fade 是上下那两条遮罩渐隐到的颜色。
 	fade ui.Color
 	// area 是歌词区那一块的键（铁律四）。
@@ -556,6 +563,7 @@ func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Dura
 	t := c.Theme()
 	s.viewLyricLines(c, lv, snap, active, lyricStyle{
 		color: t.Text,
+		muted: t.TextMuted,
 		fade:  t.Background,
 		area:  lyricsAreaKey,
 		ns:    lyricNSPage,
@@ -595,6 +603,8 @@ func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSna
 
 	ui.Column(c).Key(st.area).Grow(1).FillWidth().AlignItems(ui.Center).
 		Children(func() {
+			// 这一份歌词是**自动来的**还是**搜来的**：一句说明（见 lyricOriginText）。
+			s.viewLyricOrigin(c, snap, st)
 			// 上游那一条 `max-w-4xl` + 居中（`index.tsx:352-355`）：歌词不贴着
 			// 窗口边，中间空出一段。
 			scroll := ui.Scroll(c).Grow(1).FillWidth().MaxWidth(lyricsMaxWidth).
@@ -660,6 +670,53 @@ func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSna
 
 // lyricBarW 是当前句左竖线的宽度。
 const lyricBarW = 3
+
+// lyricOriginText 是那一句「这份歌词是**怎么来的**」。
+//
+// # 为什么要有这一句
+//
+// 歌词有两处来路：B 站自己带出来的（取流那一趟顺带回来的）和用户在「找歌词」
+// 里搜来的。用户分不清这两者时，看到一份词会以为「这是应用找来的」——而他下一
+// 次换一首歌时就会去点「找歌词」，尽管这一首**根本不用点**。
+//
+// ⚠️ **空串 = 不知道来路**（老缓存里没有那一栏，见 `lyrics.Entry`），那就不画
+// 这一句——**不知道不该被说成「搜索来的」**，那句话是错的。
+func lyricOriginText(origin string) string {
+	switch origin {
+	case lyrics.OriginBili:
+		return "歌词来自 B 站"
+	case lyrics.OriginSearch:
+		return "歌词来自搜索"
+	}
+	return ""
+}
+
+// viewLyricOrigin 画那一句「这份歌词是怎么来的」。
+//
+// ⚠️ **它画在歌词区的顶上，在滚动容器外面**：放进去的话它会跟着词滚走，而用户
+// 要看的是「这一份」（换歌之后它才变）。
+//
+// ⚠️ **它的宽度和左右留白都跟着歌词那一列走**（`lyricsMaxWidth` 与 `st.padX`）：
+// 左对齐的那一份词是从那一列的左沿开始的，而居中的那一份是从中间开始的——
+// 说明句要跟着一边儿，不然它会飘在词的上面正中，而词在左边。
+func (s *Shell) viewLyricOrigin(c *ui.Context, snap app.LyricsSnapshot, st lyricStyle) {
+	text := lyricOriginText(snap.Origin)
+	if text == "" {
+		return
+	}
+	col := ui.Column(c).FillWidth().MaxWidth(lyricsMaxWidth).
+		Padding(space.None, st.padX, space.None, st.padX).
+		// 说明句与词之间留一道缝：它们是两件事，贴在一起看着像同一段。
+		Margin(space.None, space.None, space.Px8, space.None)
+	if st.center {
+		col = col.AlignItems(ui.Center)
+	} else {
+		col = col.AlignItems(ui.Start)
+	}
+	col.Children(func() {
+		ui.Text(c, text).FontSize(scale.Font(c, scale.Size12)).TextColor(st.muted)
+	})
+}
 
 // lyricLine 画一句歌词，和叠在它下面的那句翻译。
 //
