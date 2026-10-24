@@ -586,6 +586,20 @@ type Shell struct {
 	// 那个**带锁的信箱**里投，不碰这张表。
 	upSpaces map[int64]*upSpace
 
+	// upHeaderTop 是 UP 空间头图区里「信息那一行的上沿」（算出来的，见
+	// `upspace.go` 的 `upHeaderTextTop`），加上算它时的那几个输入。
+	//
+	// ⚠️ **它是缓存**：那一列的高度要量三次字（`c.MeasureText`），而这一页
+	// 每帧都画一次。输入（字号 / 名字 / 认证 / 签名）变了才重算。
+	//
+	// **只由 view 读写**（view 永远跑在主线程上），所以没有锁。
+	upHeaderTop         float32
+	upHeaderTopScale    float32
+	upHeaderTopName     string
+	upHeaderTopOfficial string
+	upHeaderTopSign     string
+	upHeaderTopValid    bool
+
 	// feedPage 是「用户动态」那一页的状态（见 dynamicfeed.go）。只有一个，
 	// 因为这一页没有参数。
 	feedPage *dynamicFeed

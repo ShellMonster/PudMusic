@@ -1,4 +1,4 @@
-// 票 #165 的逐页出图：**外壳布局（侧栏通栏 + 顶栏只盖内容区）**在每一页上
+// 票 #286（板子任务 BMG-165）的逐页出图：**外壳布局（侧栏通栏 + 顶栏只盖内容区）**在每一页上
 // 长什么样，深浅各一套。
 //
 //	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderTicket165Shots

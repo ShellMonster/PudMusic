@@ -1283,10 +1283,14 @@ func (s *Shell) viewFullPartsList(c *ui.Context) {
 			PaddingX(space.Px12).Radius(t.Radius)
 		switch {
 		case r.active:
-			// Biu 的 `data-[active=true]:bg-primary/20`。
+			// ⚠️ **这一处和上游还差着一个数**（票 #323 只管播放条上那个分集抽屉）：
+			// 上游是 `data-[active=true]:bg-primary/20`——**主色 20% 那一层淡底**；
+			// 我们这里是**一层中性色**（跟着主题的字色走，不是写死白）：面板那一层
+			// 是玻璃，玻璃在深浅两套下是不同的底，白底和黑底要反过来。
 			//
-			// ⚠️ 底色跟着**主题的字色**走（不是写死白）：面板那一层是玻璃，玻璃
-			// 在深浅两套下是不同的底，白底和黑底要反过来。
+			// 播放条上那个分集抽屉已经按上游改成淡主色底了（`partdrawer.go` 的
+			// `viewPartRow`，配方见 `playingrow.go`）；这一处还欠着——**别把这两处
+			// 当成同一档**。
 			row = row.Background(t.Text.Alpha(0.22))
 		case row.Hovered():
 			row = row.Background(t.Text.Alpha(0.10))
