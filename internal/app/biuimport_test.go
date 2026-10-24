@@ -353,7 +353,7 @@ func TestNoChunkBookkeepingComesOverBecauseThoseBytesAreNotOnOurDisk(t *testing.
 	}
 	for _, task := range tasks {
 		if len(task.Chunks) != 0 {
-			t.Errorf("「%s」带了一���分块记账 %v，而盘上那些字节并不存在", task.Title, task.Chunks)
+			t.Errorf("「%s」带了一份分块记账 %v，而盘上那些字节并不存在", task.Title, task.Chunks)
 		}
 	}
 	// 记录本身带过来了——路径、标题、状态、身份全在。

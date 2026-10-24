@@ -657,7 +657,7 @@ func TestTheHeaderInfoCarriesWhatDeletionJudgesOn(t *testing.T) {
 // TestClearingInvalidAsksTheServerToDoIt 「清除失效内容」是一个请求。
 //
 // 🔴 这里量的是**发出去的那一个请求**，不是界面刷新：B 站返回的是「清干净了」
-// 而不���「清掉了几个」，所以本地能验的只有「我们没有自己在本地挑一遍再删」
+// 而不说「清掉了几个」，所以本地能验的只有「我们没有自己在本地挑一遍再删」
 // ——那条路的症状是清完还剩几个，而剩下的那几个在界面上和别的失效条目一模一样。
 func TestClearingInvalidAsksTheServerToDoIt(t *testing.T) {
 	f := newCollectionFixture(t)

@@ -163,7 +163,7 @@ func TestTheDividerMatchesUpstream(t *testing.T) {
 //
 // 取的是**队列抽屉左缘那条 1 像素的描边**（`BorderStartWidth(1)` +
 // `BorderColor(t.Border)`）：它就是分隔线那一个颜色本身，不是别的什么近似色，
-// 而且是一条**竖直的直线**——采样点好定，��用躲开圆角那一段。
+// 而且是一条**竖直的直线**——采样点好定，不用躲开圆角那一段。
 func TestTheDividerReachesThePixels(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
