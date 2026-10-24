@@ -103,9 +103,9 @@ func TestTheDownloadDirectoryIsScrolledIntoView(t *testing.T) {
 	})
 	// ⚠️ **说明那一行也得整个在视野里**：它比标题低一截，标题还在而它被切了，
 	// 用户看见的就是「设置项的名字在，说明只剩半行」。
-	desc, ok := tt.Find("选择音视频保存的位置")
+	desc, ok := tt.Find("选择音频保存的位置")
 	if !ok {
-		t.Fatalf("设置页上没有「选择音视频保存的位置」这一句说明，文字有 %q", tt.Texts())
+		t.Fatalf("设置页上没有「选择音频保存的位置」这一句说明，文字有 %q", tt.Texts())
 	}
 	if desc.Y+desc.H > pageBottom {
 		t.Errorf("「下载目录」那一行的说明被切了：它的下沿 %.1f 在可视区下沿 %.1f 之下",

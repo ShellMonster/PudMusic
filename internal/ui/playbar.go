@@ -15,6 +15,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+	tclean "github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -38,9 +39,9 @@ import (
 // 那一行**（和 UP 名并排），于是它们和「歌名/UP 名」是**上下**的关系；上游是
 // **左右**的关系（见 `viewTrackActions`）。
 const (
-	playbarHeight = 88
+	playbarHeight = 76
 	playbarPadX   = space.Px16
-	coverSize     = 56
+	coverSize     = 52
 	coverGap      = space.Px8
 
 	// coverRadius 是播放条上那张封面（和它悬停时那层黑罩）的圆角：**6**。
@@ -436,7 +437,8 @@ func drawerTip(open bool) string {
 // 徽章是**在 Column 里面**跟歌名并排的：外层永远是竖着堆的行，徽章只占第一行
 // 里的右边一小块。
 func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
-	title := st.Title
+	// 显示的是清洗过的歌名（去视频宣传标签，见 `widgets/title`）；st.Title 本身不动。
+	title := tclean.Clean(st.Title).Title
 	if !st.HasTrack {
 		title = "还没有打开文件"
 	}
@@ -957,16 +959,14 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 		//
 		// 「正在取流」的那枚转圈在**第三行**（`viewTrackLoading`），不在这里。
 		if st.Playing {
-			if s.withTip(c, iconButtonPlay(c, transportIcon(true), "暂停", iconPlayBtn, false).
-				Size(iconHitPlay, iconHitPlay).Padding(space.None, space.None), "暂停").Clicked() {
+			if s.withTip(c, iconButtonPlay(c, iconPauseFill, "暂停", iconHitPlay, iconPlayBtn, false), "暂停").Clicked() {
 				s.app.Toggle()
 			}
 		} else {
 			// ⚠️ **禁不启用由这里给**（`iconButtonPlay` 的 `disabled`）：那一枚的
 			// 颜色是**建元素时**定的，「悬停变主色」要在**禁用之后**才问——问早了
 			// 一枚禁用的键会用主色告诉用户「这里点得动」（理由见那个函数）。
-			if s.withTip(c, iconButtonPlay(c, transportIcon(false), "播放", iconPlayBtn, !st.HasTrack).
-				Size(iconHitPlay, iconHitPlay).Padding(space.None, space.None), "播放").Clicked() {
+			if s.withTip(c, iconButtonPlay(c, iconPlayFill, "播放", iconHitPlay, iconPlayBtn, !st.HasTrack), "播放").Clicked() {
 				s.app.Toggle()
 			}
 		}
@@ -1049,7 +1049,7 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 		// （`layout/playbar/left/index.tsx:40`），而我们原来摆的是一枚图片图标。
 		// 本地文件**永远**没有封面（见 `State.CoverURL`），所以这一档在播放条上
 		// 是常客——摆成音符才说得清「这是一首歌，只是它没有封面」。
-		imgcache.ViewPlaceholder(c, s.images, st.CoverURL, coverSize, coverSize, coverRadius,
+		imgcache.ViewPlaceholderTitled(c, s.images, st.CoverURL, st.Title, coverSize, coverSize, coverRadius,
 			icon(iconEmptyMusic)).
 			Label("当前封面").
 			Transition(coverTransition(coverIdentity(s, st)))

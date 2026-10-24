@@ -80,6 +80,7 @@ var ourOwnKeys = []string{
 	"volume",
 	"isMuted",
 	"playback",
+	"themePreset",
 }
 
 // TestSettingsKeysMatchBiu 逐字比对键名。
@@ -952,7 +953,8 @@ const ourOwnKeysJSON = `{
 	"shouldKeepPagesOrderInRandomPlayMode": false,
 	"volume": 1,
 	"isMuted": false,
-	"playback": {"items": [], "current": "", "positionMs": 0}
+	"playback": {"items": [], "current": "", "positionMs": 0},
+	"themePreset": "warm-paper"
 }`
 
 // wantSettings 是「读完一份 Biu 的文件之后应该拿到的那份设置」。

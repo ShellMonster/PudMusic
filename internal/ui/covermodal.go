@@ -191,7 +191,8 @@ func (s *Shell) viewCoverCrop(c *ui.Context, crop *cropState) {
 	if !crop.open || crop.src == nil {
 		return
 	}
-	modal := ui.Modal(c, &crop.open, func() {
+	modal := ui.DialogBase(c, &crop.open, func(backdrop, panel ui.Element) {
+		dialogPanel(c, backdrop, panel, "裁剪封面")
 		// ⚠️ **字重不写**（400）：弹窗标题是 400（DESIGN.md §二）。
 		ui.Text(c, "裁剪封面").FontSize(scale.Font(c, scale.Size15))
 		s.viewCropStage(c, crop)

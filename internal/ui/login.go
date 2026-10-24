@@ -70,50 +70,64 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 
 	loginScroll := ui.Scroll(c).Key("login-scroll").Grow(1)
 	loginScroll.Children(func() {
-		ui.Column(c).Key("page:"+loginPath).Grow(1).Padding(space.None, space.Px20).Gap(space.Px12).
-			AlignItems(ui.Center).Children(func() {
+		// 设计规范 §7.11：内容收在一张居中的卡片里（`surface1`、`radiusLg`、1px 描边），
+		// 四种状态都在这张卡里变，卡的位置不动。
+		ui.Column(c).Key("page:"+loginPath).Grow(1).Padding(space.None, space.Px20).Gap(space.Px16).AlignItems(ui.Center).Children(func() {
+			// 页标题留在卡片外面、页面最顶上：整个应用每一页的标题都是这个位置和字号
+			// （`TestEveryPageTitleIsTheSameSizeOnScreen` / `TestPagesStartAtTheTop` 钉着）。
 			ui.Text(c, "扫码登录").FontSize(scale.Font(c, scale.PageTitle))
-
-			// **登录能换来什么**（票 #242，UX 报告 §3-A 的 A3）。
-			//
-			// 这一句**每一态都在**（不只是「还没点开始」那一态）：用户点进
-			// 登录页的时候，脑子里的问题是「登录了能干什么」——不说的话，登录
-			// 像一道没有说明书的考题，用户可能登录了才发现里面是空的（其实有，
-			// 只是他不知道）。
-			//
-			// 说的那几样都是**真的**：关注列表、收藏夹、历史记录、稍后再看这
-			// 四处的接口全都要 Cookie，没登录时一律回 -101（见 loginprompt.go
-			// 的文件头）。
-			ui.Text(c, "登录之后可以看你的关注、收藏、历史记录和稍后再看").
-				FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted)
-
-			switch {
-			case !st.Busy() && st.QR == nil:
-				// 一开始（还没点）或已经取消：给一个开始的地方。
-				// 不放二维码是因为还没有——凭空画一张占位图会让人以为
-				// 「点了没反应」。
-				ui.Text(c, "用 bilibili 手机客户端扫一扫就能登进来").
-					FontSize(scale.Font(c, scale.Size14)).TextColor(t.Text)
-
-			case st.Phase == app.LoginExpired:
-				s.qrImage(c, st.QR, true)
-				ui.Text(c, "这张二维码已经过期了，扫不了了").FontSize(scale.Font(c, scale.Size14)).TextColor(t.Text)
-
-			default:
-				// 这一支（等扫码 / 已扫待确认）**永远不盖灰**。
-				//
-				// 写成 `st.Phase != LoginScanned` 的话，等扫码这一态也被盖上了——
-				// 盖完的码手机扫不出来（实测 45% 压暗之后相当一部分 App 直接放弃），
-				// 用户看到的却是一张「正常」的二维码。
-				s.qrImage(c, st.QR, false)
-				ui.Text(c, st.Hint).FontSize(scale.Font(c, scale.Size14)).TextColor(qrHintColor(t, st.Phase))
-			}
-
-			s.qrActions(c, st)
-			s.viewAccountFooter(c, t, st)
+			ui.Column(c).Key("login-card").Width(loginCardW).Padding(space.Px32, space.Px24).Gap(space.Px12).
+				AlignItems(ui.Center).Background(s.cardBackground(t)).Radius(s.cardRadius(t)).
+				Border(1, t.Border).Children(func() {
+				s.viewLoginBody(c, t, st)
+			})
 		})
 	})
 	s.trackScrollbar(loginScroll)
+}
+
+// loginCardW 是登录卡片的宽（规范 §7.11）。
+const loginCardW = 420
+
+// viewLoginBody 是登录卡片里的内容：说明、二维码 / 状态、按钮。
+func (s *Shell) viewLoginBody(c *ui.Context, t *ui.Theme, st app.LoginState) {
+	// **登录能换来什么**（票 #242，UX 报告 §3-A 的 A3）。
+	//
+	// 这一句**每一态都在**（不只是「还没点开始」那一态）：用户点进
+	// 登录页的时候，脑子里的问题是「登录了能干什么」——不说的话，登录
+	// 像一道没有说明书的考题，用户可能登录了才发现里面是空的（其实有，
+	// 只是他不知道）。
+	//
+	// 说的那几样都是**真的**：关注列表、收藏夹、历史记录、稍后再看这
+	// 四处的接口全都要 Cookie，没登录时一律回 -101（见 loginprompt.go
+	// 的文件头）。
+	ui.Text(c, "登录之后可以看你的关注、收藏、历史记录和稍后再看").
+		FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted)
+
+	switch {
+	case !st.Busy() && st.QR == nil:
+		// 一开始（还没点）或已经取消：给一个开始的地方。
+		// 不放二维码是因为还没有——凭空画一张占位图会让人以为
+		// 「点了没反应」。
+		ui.Text(c, "用 bilibili 手机客户端扫一扫就能登进来").
+			FontSize(scale.Font(c, scale.Size14)).TextColor(t.Text)
+
+	case st.Phase == app.LoginExpired:
+		s.qrImage(c, st.QR, true)
+		ui.Text(c, "这张二维码已经过期了，扫不了了").FontSize(scale.Font(c, scale.Size14)).TextColor(t.Text)
+
+	default:
+		// 这一支（等扫码 / 已扫待确认）**永远不盖灰**。
+		//
+		// 写成 `st.Phase != LoginScanned` 的话，等扫码这一态也被盖上了——
+		// 盖完的码手机扫不出来（实测 45% 压暗之后相当一部分 App 直接放弃），
+		// 用户看到的却是一张「正常」的二维码。
+		s.qrImage(c, st.QR, false)
+		ui.Text(c, st.Hint).FontSize(scale.Font(c, scale.Size14)).TextColor(qrHintColor(t, st.Phase))
+	}
+
+	s.qrActions(c, st)
+	s.viewAccountFooter(c, t, st)
 }
 
 // syncLogin 是登录页每帧的副作用。**这一页没有**。
