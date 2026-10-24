@@ -1459,8 +1459,14 @@ func (s *Shell) viewMain(c *ui.Context) {
 	//
 	// 排在最后是安全的：这一帧的页面已经画完了（那一格已经被指着画过一次），
 	// 而设置页自己那一格是**切走**才清的（见 syncSettings）。
-	if s.lastPath != settingsPath && s.settings.focus != settingsFocusNone {
-		s.settings.focus = settingsFocusNone
+	if s.lastPath != settingsPath {
+		if s.settings.focus != settingsFocusNone {
+			s.settings.focus = settingsFocusNone
+		}
+		// ⚠️ **那 16 像素的留白也别留着**：它是给「刚跳过来」这件事的——用户
+		// 跳过来之后立刻走掉的话，下一次进设置页时它补在别的地方，页面就无故
+		// 差了 16 像素（见 syncSettings）。
+		s.settings.focusMargin = false
 	}
 }
 

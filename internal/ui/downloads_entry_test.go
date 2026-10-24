@@ -113,6 +113,45 @@ func TestTheDownloadDirectoryIsScrolledIntoView(t *testing.T) {
 	}
 }
 
+// TestTheFocusedSettingDoesNotPushTheRowsBelowIt 断「指着的那一行」**不会**把
+// 设置页里它下面的每一行压低。
+//
+// ⚠️ **它是怎么坏过的**：为了补上那 16 像素的留白，曾经给被指着的那一行垫了
+// 16 像素的**下内边距**——而那 16 像素是**内容高度**的一部分，于是它下面每一行
+// 都低了 16 像素（「下载目录」到「FFmpeg 路径」的行距从 24 变成 40）。落地那一
+// 帧看不出来（用户看见的还是同一行被指着），**往下滚一屏就看得见**。
+//
+// 判据：**指着的那一行不许把这一页的内容撑高**——两个外壳，一份没指着、一份
+// 指着了，内容总高必须一样（`ScrollState.MaxY` 是内容高度减去可视区高度，
+// 与滚到哪儿无关）。
+func TestTheFocusedSettingDoesNotPushTheRowsBelowIt(t *testing.T) {
+	// 外壳一：直接进设置页，什么也没指着。
+	s1, tt1 := newRows(t)
+	s1.navigate(settingsPath)
+	for range 3 {
+		tt1.Frame()
+	}
+	plain := s1.settings.scroll.MaxY
+
+	// 外壳二：从下载记录页跳过来，「下载目录」那一行被指着。
+	s2, tt2 := newRows(t)
+	if err := tt2.Click("还没有下载目录"); err != nil {
+		t.Fatalf("点页头那一句：%v", err)
+	}
+	for range 8 {
+		tt2.Frame()
+	}
+	if s2.settings.focus != settingsFocusDownload {
+		t.Fatalf("没有指着「下载目录」那一行，focus=%q", s2.settings.focus)
+	}
+	focused := s2.settings.scroll.MaxY
+
+	if focused != plain {
+		t.Errorf("指着「下载目录」那一行把设置页的内容撑高了 %.3f 像素（%.3f → %.3f）——"+
+			"它下面每一行都被压低了", focused-plain, plain, focused)
+	}
+}
+
 // TestChangingTheDownloadDirectorySaysWhereItTakesEffect 断改完下载目录之后
 // **说一声它在哪儿生效**。
 //

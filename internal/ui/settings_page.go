@@ -88,6 +88,19 @@ type settingsPageState struct {
 	// 元素属于建它的那一遍，跨帧读是拿旧把手）。
 	focusScroll bool
 
+	// focusScrollFrom 记「滚进视野之前」的滚动位置。
+	//
+	// ⚠️ **它只用来判方向**：上游滚完之后那 16 像素的留白往哪边补，要看它是
+	// 往下滚的还是往上滚的（见 `syncSettings`）。
+	focusScrollFrom float32
+
+	// focusMargin 记「上游滚完之后那 16 像素的留白还没补上」。
+	//
+	// ⚠️ **补在下一帧**：上游那一行是在**布局完**之后才滚的（`reveal`），所以
+	// 滚完之后的位置要到下一帧才看得见——那 16 像素也就只能在那时候补
+	// （见 `syncSettings`）。
+	focusMargin bool
+
 	// descFloor 是说明列这一帧的**下限**（0 = 不给下限）。
 	//
 	// ⚠️ **每帧算一次**，不是每一行算一次：它取决于**内容区有多宽**
@@ -485,6 +498,33 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 // 而这一句原来也在 `mainTabs` 之前——所以挪过来之后读到的还是同一个值，行为
 // 一模一样。
 func (s *Shell) syncSettings(c *ui.Context) {
+	// ⚠️ **补上「指着的那一行」离边的那 16 像素**（`settingsFocusMargin`）。
+	//
+	// 上游的 `Element.ScrollIntoView()` 滚的是「**刚好露出这一行的盒子**」，
+	// 而我们从前自己滚的时候滚完留 16 像素（贴着边的那一行看起来像是被切掉了）。
+	// 上游没有「留白」这一说，所以这 16 像素我们自己补。
+	//
+	// ⚠️ **方向靠「滚之前的位置」判**：上游滚的是内容里的绝对位置，所以往下滚
+	// 和往上滚都要补，只是补的方向相反（`focusScrollFrom` 是滚之前那个位置）。
+	//
+	// ⚠️ **必须排在页面建之前**：滚动容器建的时候就把滚动位置拿走了
+	// （`TrackScroll` → `adoptScroll`）。而 `syncSettings` 正好排在页面建之前
+	// （见 `underlay.go`：副作用在前、画在后）。
+	//
+	// ⚠️ **补在下一帧**：上游那一行是在**布局完**之后才滚的（`reveal`），所以
+	// 滚完之后的位置要到下一帧才看得见——那 16 像素也就只能在那时候补。
+	if s.settings.focusMargin {
+		s.settings.focusMargin = false
+		switch {
+		case s.settings.scroll.Y > s.settings.focusScrollFrom:
+			// 往下滚的：再往下 16 像素。
+			s.settings.scroll.Y += settingsFocusMargin
+		case s.settings.scroll.Y < s.settings.focusScrollFrom:
+			// 往上滚的：再往上 16 像素。
+			s.settings.scroll.Y -= settingsFocusMargin
+		}
+	}
+
 	// 切走就停录：`FocusBind` 的「焦点在哪一格」在控件没建出来时会一直等下去，
 	// 切回来时焦点又回到那一格，用户在还没准备好的时候敲的第一下键就被录进去了。
 	if s.settings.tab != settingsTabShortcut {
@@ -518,9 +558,12 @@ func (s *Shell) syncSettings(c *ui.Context) {
 // 16 是「贴着边的那一行看起来像是被切掉了」和「别把无关的东西滚走太多」之间
 // 的那个数。
 //
-// ⚠️ **它垫在被指着的那一行的盒子里**（见 `settingRowElAt`）：上游的
-// `ScrollIntoView()` 滚的是「刚好露出这个盒子」，盒子高 16，那 16 像素就成了
-// 内容离边的留白——滚到的位置和从前我们自己滚的那个位置**一模一样**。
+// ⚠️ **它是我们自己在上游滚完之后补上的**（见 `syncSettings`）：上游的
+// `ScrollIntoView()` 滚的是「刚好露出这一行的盒子」，没有「留白」这一说。
+//
+// ⚠️ **它垫的是滚动位置，不是那一行的盒子**：盒子还是原来那么高（标题 + 说明
+// 三十几像素），多出来的这 16 像素是**离可视区下沿的那一段空隙**——所以设置页
+// 里被指着那一行**下面**的每一行都还在原来的位置（内容总高也不变）。
 //
 // ⚠️ **数走 `space` 那张表**（界面层里不许出现表外的间距数字，见
 // `internal/ui/widgets/space`）：`Px16` 就是 16 像素那一档。
@@ -591,18 +634,6 @@ func (s *Shell) settingRowEl(c *ui.Context, title func(), desc string, control f
 func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc string, control func()) {
 	t := c.Theme()
 	row := ui.Row(c).FillWidth().Gap(space.Px24).AlignItems(ui.Center)
-	if focused {
-		// ⚠️ **被指着的那一行底下多留 16 像素**。
-		//
-		// 上游的 `ScrollIntoView()` 滚的是「**刚好露出这一行的盒子**」——而盒子
-		// 贴着边的话，那一行看起来像是被切掉了（说明那一行只剩半截）。从前我们
-		// 自己滚，滚完留 16 像素；现在交给上游，那 16 像素就**垫在盒子里**：
-		// 盒子高 16，滚到「盒子刚好露出来」时，**内容**离边正好 16 像素。
-		//
-		// ⚠️ **只多这 16 像素在下面**：上面不加——加了的话这一行的字会整体低
-		// 16 像素，而它是看得见的。
-		row = row.Padding(space.None, space.None, settingsFocusMargin, space.None)
-	}
 	if focused && s.settings.focusScroll {
 		// ⚠️ **只在这一帧调一次**：上游的规矩是「在它该进视野的那一帧调它」——
 		// 每一帧都调的话，用户自己滚走了它又被拉回来。
@@ -611,7 +642,14 @@ func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc s
 		// 周围的容器滚到刚好露出它」，而「这一帧新建的元素这一帧就跟着进来」——
 		// 所以不必再「量上一帧的盒子、量不到就再要一帧」（那一套量的元素属于建
 		// 它的那一遍，跨帧读是拿旧把手，而 `mygo vet` 报的就是这个）。
+		//
+		// ⚠️ **上游滚的是「刚好露出这一行的盒子」**：我们从前滚完留 16 像素
+		// （贴着边的那一行看起来像是被切掉了），上游没有「留白」这一说——那
+		// 16 像素在下一帧我们自己补（见 `syncSettings`）。
 		s.settings.focusScroll = false
+		// 记下滚之前的那个位置：补留白要靠它判方向（见 `syncSettings`）。
+		s.settings.focusScrollFrom = s.settings.scroll.Y
+		s.settings.focusMargin = true
 		row.ScrollIntoView()
 	}
 	row.Children(func() {
