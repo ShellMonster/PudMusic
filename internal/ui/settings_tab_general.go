@@ -235,7 +235,7 @@ func (s *Shell) pickAudioQuality(c *ui.Context, st app.Settings, ro bool) {
 func (s *Shell) pickDownloadPath(c *ui.Context, st app.Settings, ro bool) {
 	ui.Row(c).Key("setting:downloadPath").Width(settingsControlW).
 		MinWidth(settingsControlMinW).Gap(space.Px8).Children(func() {
-		s.pathField(c, st.DownloadPath, "下载目录", ro)
+		s.pathField(c, s.downloadDirShown(st), "下载目录", ro)
 		if settingsButton(c, "选择").Width(72).Disabled(ro).Clicked() {
 			s.pickPath("下载目录", true, func(path string) {
 				s.applySetting("下载目录", func(cur *app.Settings) { cur.DownloadPath = path })
@@ -244,6 +244,26 @@ func (s *Shell) pickDownloadPath(c *ui.Context, st app.Settings, ro bool) {
 			})
 		}
 	})
+}
+
+// downloadDirShown 是设置页上那一格显示的路径。
+//
+// ⚠️ **显示的是「歌真正落下来的地方」，不是设置里存的那个原始值**：设置里
+// `downloadPath` 的默认值是**空串**（`DefaultSettings("")`），而绝大多数用户
+// 走的正是这一条——空串显示成「未设置」，而歌其实落到了「音乐」目录下的应用
+// 子目录里。用户看到的和实际发生的对不上，而这一格恰恰是回答「我的歌下到哪儿
+// 了」的那一格。
+//
+// 所以没选过时显示**默认落点**（`App.DownloadDir()`，也就是
+// `~/Music/BiuGo` 那条路），选过就显示选过的那个。
+//
+// ⚠️ **它和下载记录页页头上写的那条路径是同一个字符串**：按钮上写的、按下去
+// 打开的、歌真正落下来的地方，必须是同一个（见 `app.DownloadDir` 的注释）。
+func (s *Shell) downloadDirShown(st app.Settings) string {
+	if p := st.DownloadPath; p != "" {
+		return p
+	}
+	return s.app.DownloadDir()
 }
 
 // pickFFmpegPath 是 FFmpeg 路径那一格，和下载目录同一套。

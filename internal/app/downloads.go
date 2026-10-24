@@ -39,6 +39,17 @@ import (
 // （票 #242，UX 报告 §3-F 的 F2）：用户不知道应用里哪一块没挂上。
 var errDownloadsMissing = errors.New("下载暂时用不了")
 
+// errNoDownloadDir 是「没有落盘的地方」。
+//
+// ⚠️ **这一条挡的是「静默落到一个诡异的目录里」**：目录是空串时
+// `filepath.Join("", "歌.m4a")` 出来的是一个**相对路径**，歌会落到进程的当前
+// 工作目录里（双击图标启动的 macOS 应用那是 `/`）——用户在自己的下载目录里
+// 找不到它，而界面上**没有一句话**说它去哪儿了。
+//
+// 所以这一条是**不入队**：宁可让用户看见一句「先去设置里选一个」，也不要让歌
+// 悄悄落到别处去。
+var errNoDownloadDir = errors.New("还没有下载目录：先在设置里选一个，歌才有地方放")
+
 // Downloads 是下载这一摊的依赖。
 type Downloads struct {
 	// Media 是拉音频字节用的 http.Client。
@@ -59,6 +70,11 @@ type Downloads struct {
 	// `filepath.Join("", "歌.m4a")` 出来的是一个**相对路径**——歌会落到
 	// 进程的当前工作目录里。对一个双击图标启动的 macOS 应用来说那是
 	// `/`，用户不会在那儿找歌，而在 Finder 里也看不见。
+	//
+	// 真机上它是**「音乐」目录下的应用子目录**（macOS `~/Music/BiuGo`，
+	// Windows `音乐\BiuGo`）——见 `platform.DefaultDownloadsDir` 和
+	// `ui.downloadsDir`。系统下载目录（`~/Downloads`）是**旧**落点：那儿是
+	// 浏览器和安装包的地方，歌和那些东西混在一起，用户找不到。
 	FallbackDir string
 }
 
@@ -216,11 +232,17 @@ func (a *App) download(it Item, req download.AddRequest) (download.Snapshot, err
 	if m == nil {
 		return download.Snapshot{}, errDownloadsMissing
 	}
+	// ⚠️ **没有落盘的地方就不入队**（理由见 `errNoDownloadDir`）：空目录会让
+	// 歌落到进程的当前工作目录里，而界面上没有一句话说它去哪儿了。
+	dir := a.downloadDir()
+	if dir == "" {
+		return download.Snapshot{}, errNoDownloadDir
+	}
 	req.Bvid = it.Bvid
 	req.Cid = it.Cid
 	req.Title = it.Title
 	req.Cover = it.Cover
-	req.Dir = a.downloadDir()
+	req.Dir = dir
 	return m.Enqueue(req)
 }
 
@@ -234,8 +256,9 @@ func (a *App) DownloadDir() string { return a.downloadDir() }
 
 // downloadDir 是这一首该下到哪儿。
 //
-// 设置里的 `DownloadPath` 为空时退回 `FallbackDir`（系统下载目录）——
-// 见 `Downloads.FallbackDir` 的注释，那条路走过一次歌就落到 `/` 里去了。
+// 设置里的 `DownloadPath` 为空时退回 `FallbackDir`（默认是「音乐」目录下的
+// 应用子目录）——见 `Downloads.FallbackDir` 的注释，那条路走过一次歌就落到
+// `/` 里去了。
 //
 // 每次入队时读一次设置：用户在设置页换了下载目录之后点下载，下的就该是
 // 新的那个。

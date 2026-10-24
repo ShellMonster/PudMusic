@@ -11,6 +11,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/egoist/mygo"
@@ -56,17 +57,32 @@ func MountDownloads(a *app.App) error {
 
 // downloadsDir 是「用户还没选过下载目录」时的去处。
 //
-// 设置里 `downloadPath` 的默认值是空串，而 `filepath.Join("", "歌.m4a")」
+// 设置里 `downloadPath` 的默认值是空串，而 `filepath.Join("", "歌.m4a")`
 // 出来的是**相对路径**——歌会落到进程的当前工作目录里（双击图标启动时
 // 那是 `/`），用户在 Finder 里根本看不见，也永远不会去那儿找。
 //
-// 拿不到就返回空串：`MountDownloads` 不因这个失败，而真的下下去时
-// `os.Create` 会因为目录不存在而报错，用户在记录页上看到的是一句人话，
-// 比悄悄落到一个诡异的目录里好。
+// # 落在「音乐」目录下的应用子目录
+//
+// 原来是系统下载目录（macOS 上是 `~/Downloads`）——那儿是浏览器和安装包的地方，
+// 歌和一堆 `.dmg` 混在一起，用户在自己的下载目录里翻不到刚下的那几首。
+// 同类音乐软件都不往那儿扔（网易云、QQ 音乐、Spotify 都是「音乐目录 +
+// 以应用命名的子目录」），所以这里也那么放：macOS 是 `~/Music/BiuGo`，
+// Windows 是 `音乐\BiuGo`（理由见 `platform/downloadsdir.go` 顶上那一节）。
+//
+// ⚠️ **目录不存在要建**（`platform.EnsureDefaultDownloadsDir`）：不建的话第一次
+// 下载会失败，而失败是 `os.Create` 报的「no such file or directory」——用户看到
+// 的是一句他看不懂的话，实际原因只是「那个文件夹还没建」。
+//
+// ⚠️ **设置里手动选过的目录照旧**：这一条只是「没选过」时的兜底，选过的走
+// `Settings.DownloadPath`（见 `app.downloadDir`）。
+//
+// 拿不到就返回空串：`MountDownloads` 不因这个失败。而空串**不会再让歌落到一个
+// 诡异的目录里**——应用层会**拒绝下载**并说一句人话（见 `app.errNoDownloadDir`），
+// 界面上说「还没有下载目录」，用户照着做就是去设置里选一个。
 func downloadsDir() string {
-	dir, err := mygo.App.Path(mygo.PathDownloads)
+	dir, err := platform.EnsureDefaultDownloadsDir()
 	if err != nil {
-		log.Printf("biu: 拿不到系统下载目录，下载没地方落：%v", err)
+		log.Printf("biu: 拿不到默认下载目录，下载没地方落：%v", err)
 		return ""
 	}
 	return dir

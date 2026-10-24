@@ -441,7 +441,8 @@ type App struct {
 	downloads *download.Manager
 	// downloadQueueFile 是队列落盘的位置。退出时写、重开时读。
 	downloadQueueFile string
-	// downloadFallbackDir 是设置里没选过下载目录时的去处（系统下载目录）。
+	// downloadFallbackDir 是设置里没选过下载目录时的去处（默认是「音乐」目录下的
+	// 应用子目录）。
 	downloadFallbackDir string
 
 	// updates 是自动更新那一摊，见 update.go。挂上去之前是 nil，界面要判空。
