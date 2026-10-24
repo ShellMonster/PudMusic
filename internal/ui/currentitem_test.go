@@ -1,11 +1,14 @@
 // 「当前在哪」在应用里只有一种画法（票 #234；票 #239 把它改成深浅同构）。
 //
-// 左栏三处（侧栏收藏夹 / 关注页分组 / 动态页作者栏）和队列抽屉的「正在播放」
-// 原来各画各的：左栏三处是**实心主色大块**（动态流那一处是 248×50），队列抽屉
-// 那一行是**整行实心主色**，而同一屏上的侧栏菜单当前项是「淡主色底 + 深色字」
-// （深色下是中性灰底 + 主色字）。
+// 左栏三处（侧栏收藏夹 / 关注页分组 / 动态页作者栏）原来各画各的：左栏三处是
+// **实心主色大块**（动态流那一处是 248×50），而同一屏上的侧栏菜单当前项是
+// 「淡主色底 + 深色字」（深色下是中性灰底 + 主色字）。
 //
 // 用户不用比较两个界面就能看出「这个应用没做完」（审计 F-02 / F-06、UX B2）。
+//
+// ⚠️ **队列抽屉的「正在播放」那一行不在这条里**（票 #294，2026-10-24）：它后来
+// 单独改成了**淡主色底**（上游 `bg-primary/20`）——那一层淡底是**状态识别**，
+// 一眼看出哪一首在放。它有自己的判据，见 `queue_playing_test.go`。
 //
 // # 判据是**画面上那一格的底色**
 //
@@ -127,8 +130,12 @@ func rgbaToColor(c color.RGBA) mygoui.Color {
 
 // TestTheCurrentItemIsFlatEverywhere 钉住「当前在哪」只有一种画法。
 //
-// 四处：关注页的分组、动态页的作者栏、侧栏的收藏夹、队列抽屉的「正在播放」。
+// 三处：关注页的分组、动态页的作者栏、侧栏的收藏夹。
 // 深浅两套都跑（DESIGN §八：深色下差距更明显）。
+//
+// ⚠️ **队列抽屉的「正在播放」不在这儿**（票 #294）：它走的是**淡主色底**，判据
+// 在 `queue_playing_test.go` 里。把它塞回这一条的话，这一条就会同时要求「同一个
+// 底色」和「淡主色底」——两条互相打起来，红的永远是其中一条。
 func TestTheCurrentItemIsFlatEverywhere(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -208,35 +215,6 @@ func TestTheCurrentItemIsFlatEverywhere(t *testing.T) {
 				theme := BuildTheme(app.DefaultSettings(""), dark)
 				assertCurrentIsFlat(t, currentSpot{cur, sib, "侧栏收藏夹",
 					flatCurrentText(theme, true)}, tt.Image(), dark)
-			})
-
-			t.Run("队列抽屉", func(t *testing.T) {
-				b := newTestShell(t, at(winW, winH), systemIsDark(dark))
-				h := &harness{app: b.a, tt: b.tt}
-				enqueue(t, h, copiesOf(t, 2)...)
-				openDrawer(t, h)
-
-				// ⚠️ **用「b」那一行推**：歌名「a」在**播放条上也有一个**（正在放的
-				// 就是它），而 `Find` 给的是头一个——播放条上那一个。「b」只有抽屉里
-				// 有，它的框是**整行**（383×64）。
-				sibRow, ok := findRow(h, "b")
-				if !ok {
-					t.Fatalf("抽屉里没有「b」那一行，文字有 %q", h.tt.Texts())
-				}
-				// 「a」是上一行（行高 64）。
-				curRow := sibRow
-				curRow.Y -= queueRowHeight
-
-				// ⚠️ **取样取文字那一列**：行尾那颗「⋯」里面是图标，不是歌名的字。
-				// 那一列的左边是封面（行左 8 + 封面 48 = 行左 56），所以从行左 60
-				// 起取——歌名的字（行左 64 起）在里面，封面不在里面。
-				cur := mygoui.Rect{X: curRow.X + 60, Y: curRow.Y + 4, W: 200, H: 56}
-				sib := mygoui.Rect{X: sibRow.X + 60, Y: sibRow.Y + 4, W: 200, H: 56}
-				theme := BuildTheme(app.DefaultSettings(""), dark)
-				// 队列抽屉那一行的字是**主色当字**（`flatCurrentText` 那一档）——
-				// 它的底是中性灰（不是页面底色），所以字是按那个底算出来的那一档。
-				assertCurrentIsFlat(t, currentSpot{cur, sib, "队列抽屉",
-					flatCurrentText(theme, true)}, h.tt.Image(), dark)
 			})
 		})
 	}

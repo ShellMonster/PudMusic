@@ -84,8 +84,9 @@ func TestRenderCurrentStyleShots(t *testing.T) {
 			homeFrame(tt3)
 			save(t, dir, "72-用户动态-"+name+".png", tt3)
 
-			// 73 队列抽屉：正在放的那一行是**主色当字 + 一层很淡的主色底**
-			// （原来是一整行 383×64 的实心主色）。
+			// 73 队列抽屉：正在放的那一行是**淡主色底 + 主色当字**（浅色下那一层
+			// 淡底是 #d2f7df，票 #294 按上游改回来；最早是一整行 383×64 的实心
+			// 主色，票 #197 去掉过，票 #239 改成过中性灰底）。
 			b4 := newTestShell(t, at(winW, winH), systemIsDark(dark))
 			h := &harness{app: b4.a, tt: b4.tt}
 			enqueue(t, h, copiesOf(t, 3)...)

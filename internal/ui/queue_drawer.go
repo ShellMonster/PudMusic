@@ -16,6 +16,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
@@ -299,16 +300,21 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 	hovered := rowEl.Hovered()
 	switch {
 	case playing:
-		// Biu 的 `variant="flat" color="primary"`——**flat，不是实心**。
+		// 上游那一行走的是 `variant="flat" color="primary"`
+		// （`music-playlist-drawer/list-item.tsx:32`）——HeroUI 的 flat+primary
+		// 展开是 `bg-primary/20 text-primary-600`，也就是**主色 20% 那一层淡底**
+		// （浅色下落在面板底 #ffffff 上是 #d2f7df，上游实图那个数）。
 		//
-		// ⚠️ **这一段原来是 `Background(t.Accent)`**（一整块实心主色，383×64），
-		// 而紧挨着的注释写着上游是 flat：注释和代码对不上（AGENTS §7）。实心那一版
-		// 也和 `DESIGN.md` §四 2026-10-22 拍板的那一条相反——「唯一剩下的主色
-		// 高亮是『正在播放』那一行：flat（主色当字），不是实心」。
+		// 那一层淡底是**状态识别**：一眼看出哪一首在放，比中性灰好认（票 #294 /
+		// 报告 §1 的 S-11，2026-10-24 拍板按上游改）。DESIGN §七保护的是「**主色
+		// 当字色**的对比度」，不是「主色当底色」——§七 不该被扩大解释。
 		//
-		// 所以这里走 `flatCurrent`（和侧栏菜单当前项、左栏那三处同一套）：底是
-		// 中性灰，字是主色（浅色下是压深的那一档，见下面 `playlistTextColor`）。
-		rowEl = flatCurrent(c, rowEl)
+		// ⚠️ **不是实心主色底**：实心那一档是「被选中的选项」（`flatSolid`），
+		// 票 #197 刚把列表选中行的实心主色底去掉。这一档说的是「这一首在放」。
+		//
+		// ⚠️ **这一格不走 `flatCurrent`**：那个是「当前在哪」（侧栏菜单当前项、
+		// 左栏那三处）共用的中性灰底，改它会把侧栏一起改掉。
+		rowEl = rowEl.Background(playingRowBg(t)).TextColor(playingRowText(t))
 	case hovered:
 		// 悬停要有反应：这一行点得动（跳过去放它），没有反馈用户不知道它是能点的。
 		rowEl = rowEl.Background(t.SurfaceHover)
@@ -327,10 +333,13 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 			ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
 				ui.Text(c, row.item.Title).FontSize(scale.Font(c, scale.Size16)).
 					TextColor(playlistTextColor(t, playing)).SingleLine()
-				// 副题两态一样：次要色。**正在放那一行靠歌名说话**（主色当字），
-				// 副题再染一遍主色就成了两处都在喊。
+				// 副题两态不一样：正在放那一行按**它自己那层淡底**重算（见
+				// `playlistSubtitleColor`），别的行是次要色。
+				//
+				// ⚠️ **正在放那一行不跟着染主色**：主色当字是**歌名**那一档的活
+				// （上游 `text-primary-600`），副题再染一遍就成了两处都在喊。
 				ui.Text(c, itemSubtitle(row.item)).FontSize(scale.Font(c, scale.Size14)).
-					TextColor(t.TextMuted).SingleLine()
+					TextColor(playlistSubtitleColor(t, playing)).SingleLine()
 			})
 			// Biu 的那一颗「⋯」是个 DropdownTrigger。这里给它挂系统的菜单
 			// （Element.Menu），点它和右键这一行是同一份菜单——`queueMenu` 只
@@ -391,25 +400,85 @@ func (s *Shell) viewQueueCover(c *ui.Context, item app.Item, playing, hovered bo
 	})
 }
 
+// playingRowBgAlpha 是「正在播放」那一行底上主色的浓度。
+//
+// 20% 是上游那个数：HeroUI 的 `bg-primary/20`
+// （`music-playlist-drawer/list-item.tsx:32` 的 `variant="flat" color="primary"`
+// 展开成 `bg-primary/20 text-primary-600`）。
+const playingRowBgAlpha = 0.2
+
+// playingRowBg 是队列抽屉里「正在播放」那一行的**底色**：主色 20% 那一层淡底。
+//
+// 浅色下落在抽屉面板底（`t.Background` = #ffffff）上是 **#d2f7df**——上游实图
+// 那个数（票 #294 / 报告 §1 的 S-11）。深色下落在 #18181b 上是 **#193e29**。
+//
+// ⚠️ **主色是用户可设的**：所以这里是「当前主色的 20%」，没有一个写死的绿。
+//
+// ⚠️ **这一格不走 `flatCurrent`**：那个是「当前在哪」（侧栏菜单当前项、左栏那
+// 三处）共用的中性灰底——改它会把侧栏一起改掉。
+func playingRowBg(t *ui.Theme) ui.Color {
+	return t.Accent.Alpha(playingRowBgAlpha).Over(playingRowBase(t))
+}
+
+// playingRowBase 是那一层淡底**身下那块底板**（不透明的那一份）。
+//
+// 抽屉面板底是 `t.Background`（上游那一枚 Drawer 走 `bg-background`），而用户
+// 可以挑一个带透明度的底色——那时候面板本身也是半透明的。取它压在白底上的
+// 那个数（窗口底色是白的），免得这一格算出来的数和画出来的不一样。
+func playingRowBase(t *ui.Theme) ui.Color {
+	if t.Background.A == 255 {
+		return t.Background
+	}
+	return t.Background.Over(ui.Color{R: 255, G: 255, B: 255, A: 255})
+}
+
+// playingRowText 是「正在播放」那一行里**歌名**的颜色。
+//
+// 主色当字，**按那一层淡底算**：浅色下主色（#1ed760）压淡绿底只有 1.65:1，
+// 直接用等于把这一行读不出来——所以从主色现算一个压深的变体（`ink.Ensure`，
+// ≥4.5:1；默认主色下算出 #127d38）。深色下主色压淡底是 6.21:1，原样就够。
+//
+// ⚠️ **深浅两套都走同一个算法**：默认主色下深色那一支算出来就是主色本身
+// （`ink.Ensure` 达标时原样返回），而用户在深色下挑了一个偏暗的主色时，这一档
+// 会把它往白里拉一点——总比那一行读不出来强。
+func playingRowText(t *ui.Theme) ui.Color {
+	return ink.Ensure(t.Accent, playingRowBg(t), 4.5)
+}
+
 // playlistTextColor 是正在放的那一行里**歌名**的颜色。
 //
-// 正在放的那一行是 **flat**（中性灰底 + 主色当字，见上面），所以歌名取的是
-// `flatCurrentText` 那一档——**和那一格的底是同一个数**：深色下是主色本身，浅色下
-// 是从主色现算的、压到 ≥4.5:1 的那个变体（亮绿压浅底只有 1.4:1，读不出来）。
+// 正在放的那一行是**淡主色底 + 主色当字**（见上面），所以歌名取的是
+// `playingRowText` 那一档——**和那一格的底是同一个数**。
 //
 // ⚠️ **和列表行 / 网格卡片那一档不是同一个数**（`widgets/list` 的 `rowColors`
 // 那一档是 `ink.AccentOn`：它按**页面底色**算，浅色下更浅一点）。两处都是
-// 「主色当字，不是实心底」，但压深时按的底不同——这一行的底是**中性灰**，比
-// 页面底色暗一档，所以按页面底色算出来的那个变体（#117936）压在上面差一点
-// （4.03:1，差的那一档就是「按中性灰重算」的理由）。
+// 「主色当字，不是实心底」，但压深时按的底不同——这一行的底是**淡主色**，
+// 比页面底色暗，所以按页面底色算出来的那个变体压在上面差一点（4.03:1）。
 //
 // 差这一点不会有用户看得出来，但**判据要按各自的底算**：这一行的字是**自己
 // 画的**（不继承父元素），底换了字不跟着换就是「底换了、字没换」。
 func playlistTextColor(t *ui.Theme, playing bool) ui.Color {
 	if playing {
-		return flatCurrentText(t, true)
+		return playingRowText(t)
 	}
 	return t.Text
+}
+
+// playlistSubtitleColor 是歌名下面那一行（来源）的颜色。
+//
+// 不是正在放的那一行：次要色（`t.TextMuted`）。
+//
+// 正在放的那一行：**按它自己那层淡底重算**——淡绿底比中性灰亮，次要色原样
+// 压上去只有 4.17:1（不到 WCAG 正文的 4.5:1；改之前那块中性灰底上更只有
+// 3.53:1）。重算之后是 **4.55:1**（浅色 #6b6b74），深色下原样就够（4.65:1）。
+//
+// ⚠️ **不是主色**：主色当字是**歌名**那一档的活（上游 `text-primary-600` 只
+// 管那一个），副题再染一遍就成了两处都在喊。
+func playlistSubtitleColor(t *ui.Theme, playing bool) ui.Color {
+	if playing {
+		return ink.Ensure(t.TextMuted, playingRowBg(t), 4.5)
+	}
+	return t.TextMuted
 }
 
 // itemSubtitle 是歌名下面那一行。Biu 摆的是 UP 主名，我们这一层还没有那个字段，
