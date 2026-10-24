@@ -497,11 +497,17 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 		// 「正在取流」那一档已经收掉了（`failOnline` 先收它，再写这句话）。
 		// 万一同时有（将来加了别的路径），**错的那句优先**：一句错比一枚转圈
 		// 信息量大，而转圈还在转说明还有希望。
+		//
+		// ⚠️ **「停住了」也占这一格**（票 #319）：它同样是一句「此刻怎么了」，
+		// 而这一格本来就是留给这句话的。三者不会同时有——出错时播放器压根没有、
+		// 正在取流时上一首还在放、而停住了说明播放器在、只是不响了。
 		switch {
 		case st.Err != "":
 			s.viewTrackError(c, st, t)
 		case st.Loading:
 			s.viewTrackLoading(c, st, t)
+		case st.Stopped:
+			s.viewTrackStopped(c, st, t)
 		}
 	})
 }
@@ -536,6 +542,39 @@ func (s *Shell) viewTrackLoading(c *ui.Context, st app.State, t *ui.Theme) {
 		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
 			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").Grow(1), msg)
 	})
+}
+
+// viewTrackStopped 是播放条上「停住了」那一句话（票 #319）。
+//
+// # 它说的是哪一件
+//
+// 「停住了」有两种，而用户要分得开：
+//
+//	用户按了停止 —— **「已停止」**：这一首到此为止，**队列里还有歌**
+//	顺序播放走到队尾 —— **「这一串放完了」**：**没有下一首了**
+//
+// ⚠️ **判据是 `State.QueueFinished`**（见 `app.State` 的说明）：那才是「队列
+// 自己走完了」的那一种，而 `State.Stopped` 是两种都有。只看 `Stopped` 的话，
+// 用户按了停止也会被告知「这一串放完了」——而队列里明明还有十几首。
+//
+// # 为什么它占的是「出错 / 正在取流」那一格
+//
+// 那一格本来就是「**此刻怎么了**」那一行（见 `viewTrackText` 的注释），而
+// 「停住了」正是这样一句话。
+//
+// ⚠️ **它是灰字**：它是「现在停着」，不是「出了事」——红字那一档是留给出错的
+// （`viewTrackError`）。而「正在取流」也是灰字，那一句前面有一枚转圈、这一句
+// 没有，两者不会看混。
+//
+// ⚠️ **别给它挂悬停提示**：那一句只有六个字，而那一格只有 140 像素宽
+// （1200 宽的窗口，实测），放得下。
+func (s *Shell) viewTrackStopped(c *ui.Context, st app.State, t *ui.Theme) {
+	msg := "已停止"
+	if st.QueueFinished {
+		msg = "这一串放完了"
+	}
+	ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
+		TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 }
 
 // viewTrackActions 是左边那一块的**第三段**：分集 / 收藏 / 赞，
