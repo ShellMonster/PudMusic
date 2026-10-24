@@ -581,7 +581,11 @@ func TestTheNavBarDrawsAnIconForEveryAction(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			tt := navBarTester(t, dark)
-			for _, label := range []string{"后退", "前进", "打开文件", "设置", "动态", "登录"} {
+			// ⚠️ **「设置」不在这一列里**（票 #289）：顶栏那一枚拿掉了——侧栏和
+			// 头像下拉里都有同一个动作，三个入口会不一致。设置还在不在、够不够
+			// 得着，由 `navbar_test.go` 的 `TestTheTopBarHasNoSettingsKey` 和
+			// 侧栏那一条（`sidebar_test.go`）管。
+			for _, label := range []string{"后退", "前进", "打开文件", "动态", "登录"} {
 				assertGlyphPainted(t, tt, label)
 			}
 		})
