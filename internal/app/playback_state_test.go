@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,9 +57,23 @@ func playbackRestart(t *testing.T, a *app.App, path string) *app.App {
 // playbackStored 读设置文件里落盘的那一格。
 func playbackStored(t *testing.T, path string) app.PlaybackSnapshot {
 	t.Helper()
-	b, err := os.ReadFile(path)
+	s, err := playbackStoredRaw(path)
 	if err != nil {
 		t.Fatal(err)
+	}
+	return s
+}
+
+// playbackStoredRaw 读设置文件里落盘的那一格，**读不出来的错一起给回来**。
+//
+// 轮询落盘的时候用这个（不是 playbackStored）：设置文件在**第一次落盘之前
+// 根本不存在**（见 LoadSettings——文件不在就按默认值开起来，不建文件），
+// 而 playbackStored 读不到就 t.Fatal——拿它轮询会在第一次落盘之前把测试
+// 判死。
+func playbackStoredRaw(path string) (app.PlaybackSnapshot, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return app.PlaybackSnapshot{}, err
 	}
 	var f struct {
 		AppSettings struct {
@@ -66,9 +81,9 @@ func playbackStored(t *testing.T, path string) app.PlaybackSnapshot {
 		} `json:"appSettings"`
 	}
 	if err := json.Unmarshal(b, &f); err != nil {
-		t.Fatalf("设置文件读不出来：%v", err)
+		return app.PlaybackSnapshot{}, fmt.Errorf("设置文件读不出来：%w", err)
 	}
-	return f.AppSettings.Playback
+	return f.AppSettings.Playback, nil
 }
 
 // playbackStoredSettings 读设置文件里的 appSettings 那一段（原始的那几格）。
@@ -578,7 +593,8 @@ func TestASettingChangeWhilePausedStillLandsOnDisk(t *testing.T) {
 
 // TestAScrubWhilePlayingIsSavedPromptly 钉住那张表里「用户动了一下就尽快写」。
 //
-// 拖了进度条之后不用等 5 秒那个窗口：半秒之内就该落盘。
+// 拖了进度条之后不用等 5 秒那个窗口：落盘走的是「尽快写」那条路（它自己的
+// 下限间隔是半秒；判据放宽到 3 秒，理由见下面那段注释）。
 func TestAScrubWhilePlayingIsSavedPromptly(t *testing.T) {
 	paths := copies(t, 1)
 	a, path := playbackMount(t)
@@ -592,8 +608,30 @@ func TestAScrubWhilePlayingIsSavedPromptly(t *testing.T) {
 	a.ScrubEnd(0.8) // 4 秒的歌 → 3.2 秒
 
 	// 半秒之内就该落盘（那一格走的是「尽快写」那条路）。
-	time.Sleep(700 * time.Millisecond)
-	pos := playbackStored(t, path).Position
+	//
+	// ⚠️ **等条件，不等死时间**：这一格是后台时钟那一拍写的（tick 每 50ms
+	// 一次，见 app.go 的 tick），机器忙的时候那一拍会被拖后——这里原来写死
+	// 700ms，满载时飘过（2026-10-25 在板子上：落盘的位置还是拖之前的 53ms）。
+	// 给死时间量到的是「当天机器有多闲」，不是「走的是哪条路」——这一族等
+	// 异步的东西一律等条件（见 app_test.go 的 waitFor）。
+	//
+	// 3 秒是**判据**不是时间预算：那一格的下限间隔是半秒（下一拍最多再晚
+	// 50ms），3 秒给机器留了余量；而 5 秒那个窗口是「只是歌在往前走」才走
+	// 的路——3 秒内落下来，就说明走的是「尽快写」那条。
+	//
+	// （没直接用 `waitFor`：它失败时只说「还没发生」，这里还要把**落到了多少**
+	// 一起说出来——见下面那句报错。）
+	var pos int64
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if s, err := playbackStoredRaw(path); err == nil {
+			pos = s.Position
+			if pos >= 2000 {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	if pos < 2000 {
 		t.Errorf("落盘的位置是 %d ms，want ≥ 2000（拖完就该落，不用等 5 秒那个窗口）", pos)
 	}

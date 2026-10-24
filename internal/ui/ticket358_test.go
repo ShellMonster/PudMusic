@@ -47,11 +47,10 @@ import (
 // ⚠️ **位图也钉住**：占位退回又回来时位图是**换了一个对象**的——
 // 「不是每帧新建对象」这条票面要的就是它。
 func TestOpeningTheQueueDrawerDoesNotMakeTheListCoversFlash(t *testing.T) {
-	// ⚠️ **主题方案要各跑一遍**：这一包的测试默认量的是**经典**外观
-	// （`app.DefaultThemePreset` 在 `diskguard_test.go` 的 TestMain 里被改成
-	// 经典），而**真程序的默认是暖纸**——用户看见的那一版界面是暖纸。
-	// 挤缓存这件事与配色无关，但「占位那一档」的颜色跟着主题走，所以两套
-	// 都跑（票面点名要「至少再验一套非经典的」）。
+	// ⚠️ **主题方案要各跑一遍**：这一包的测试默认量的是**默认方案（暖纸）**——
+	// 那才是用户看见的那一版界面；而**经典**是另一个用户选项，它有自己那套
+	// 配色（`themepreset_test.go` 盯着），挤缓存这件事与配色无关，但「占位那一档」
+	// 的颜色跟着主题走，所以两套都跑（票面点名要「至少再验一套非经典的」）。
 	for _, preset := range []app.ThemePreset{app.ThemePresetClassic, app.ThemePresetWarmPaper} {
 		t.Run(string(preset), func(t *testing.T) {
 			openingTheQueueDrawerDoesNotMakeTheListCoversFlash(t, preset)
