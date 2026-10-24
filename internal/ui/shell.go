@@ -208,7 +208,7 @@ type Shell struct {
 	// fullScreen 是主窗口此刻是不是全屏。
 	//
 	// ⚠️ **它由窗口的回调推过来，不在 view 里问**：`win.IsFullScreen()`
-	// 每帧问一次是跨一次 ObjC 调用（`mygo@v0.6.3/window.go:764` 的 `get`），
+	// 每帧问一次是跨一次 ObjC 调用（`mygo@v0.6.3/window.go:766` 的 `get`），
 	// 而答案在**进全屏那一刻**就定了——事件推过来既省事又准。
 	//
 	// 它只给侧栏那个品牌块用（macOS 非全屏时要多留一格，见 `sidebar.go` 的
