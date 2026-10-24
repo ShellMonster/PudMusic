@@ -369,6 +369,17 @@ type Shell struct {
 	//
 	// ⚠️ 理由同 `sideRowKeys`（票 #313）。
 	queueRowKeys rowkey.Memo[string, any]
+	// queueRowIDs 记着抽屉里每一行的**那两串身份**：判重标识（`Item.Identity()`）
+	// 和行身份（`queueRowKey` 拼出来的那一份）。
+	//
+	// ⚠️ **它们每帧每一行都要，而现拼每帧每行两次**（票 #339）：判重标识是
+	// 「local:」+ 路径，行身份是「queue-row:」+ 标识——二十首的队列就是四十来次
+	// 分配。而 `queueRowKeys` 记着的那一份只是**装进 `any` 的那一步**（装箱），
+	// 拼字符串那一步它没省。
+	//
+	// ⚠️ **它自己看得出「数据换了」**（见 `rowkey.Memo` 的文件头）：队列一改
+	// （加歌、删歌、重排）它自己就重算，调用方一处都不用记得重建。
+	queueRowIDs rowkey.Memo[queueRowRaw, queueRowIdentity]
 	// queueDrags 记着每一行那个**拖动值**（拖拽重排用的）。
 	//
 	// ⚠️ **它记的是指针**：框架把拖动值装进 `any`，装指针不分配——而每一行
