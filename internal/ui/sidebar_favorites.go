@@ -5,12 +5,18 @@
 // 删除 / 取消收藏）在 `app/sidebar_folders.go` 里——那一层认识 B 站，这一层
 // 不认识。
 //
-// ⚠️ **只有「我创建的」那一组有数据源**：它由头像下拉里「刷新数据」真的从
-// B 站拉下来（见 `app/favorites_refresh.go`）。「我收藏的」那一组本项目还没接
-// 那个接口，条目由谁调 `SetFavorites` 谁负责——所以它空的时候两组照画标题和
-// 折叠开关，**两组的空状态合成一句**「还没有收藏夹」（见 viewFavorites），
-// 不假装有内容；而「新建收藏夹」建出来的那一行是立刻进侧栏的
-// （`app.CreateFolder` 会 `Upsert`），所以菜单里那几件事并不是只有测试走得到。
+// ⚠️ **两组都有数据源**：都由 `app.RefreshFavorites` 从 B 站拉下来（见
+// `app/favorites_refresh.go`），而登录之后 / 开机时还会**自动**拉一次
+// （`app.AutoRefreshFavorites`）——用户不该为了看见自己的收藏夹，先去头像
+// 下拉里按「刷新数据」。
+//
+// 空的时候两组照画标题和折叠开关，**两组的空状态合成一句**（见
+// `viewFavorites`），而那一句说的是**这一片**的状态：「还没拉过」/「拉失败了」
+// /「真的一个都没有」三句话各说各的（见 `favEmptyText`）——它们在画面上
+// 长得一样的话，用户会把「我们没拉到」当成「B 站那边确实空着」。
+//
+// 「新建收藏夹」建出来的那一行是立刻进侧栏的（`app.CreateFolder` 会
+// `Upsert`），所以菜单里那几件事并不是只有测试走得到。
 //
 // ⚠️ **整个侧栏折叠起来的时候，收藏夹换成一枚图标 + 一层浮层**（见
 // viewFavoritesCollapsed）：折叠态原来干脆不画收藏夹，而折叠侧栏是给屏幕小
@@ -23,6 +29,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
@@ -69,10 +76,13 @@ func favMenuItems(g app.FavoriteGroup) []favMenuAction {
 // （见 viewFavoritesRefreshing）。它排在两组**外面**而不是某一组底下：刷的是
 // 这一片，不是其中一组——摆在某一组底下的话，另一组会像是也在动。
 //
-// ⚠️ **空状态只有一句**（报告 C3）：两组各顶一句一模一样的「还没有收藏夹」的
-// 话，用户读到两句一样的话，得自己判断「这是说一组还是两组都没有」。所以那
-// 一句**只落在最后一个空的那一组底下**——一组有内容、另一组空的时候落在空的
-// 那一组底下，两组都空的时候落在下面那一组底下。
+// ⚠️ **空状态只有一句**（报告 C3）：两组各顶一句**一模一样**的话，用户读到两句
+// 一样的话，得自己判断「这是说一组还是两组都没有」。所以那一句**只落在最后
+// 一个空的那一组底下**——一组有内容、另一组空的时候落在空的那一组底下，
+// 两组都空的时候落在下面那一组底下。
+//
+// ⚠️ **那一句是**这一片**收藏夹的状态，不是一组的**（见 `favEmptyText`）：
+// 两组的空状态合成一句，而合成的那一句得站在最要紧的那一档上。
 func (s *Shell) viewFavorites(c *ui.Context, st app.Settings, collapsed bool) {
 	hidden := hiddenMenuKeys(st)
 	s.viewFavoritesRefreshing(c, st, collapsed)
@@ -83,24 +93,77 @@ func (s *Shell) viewFavorites(c *ui.Context, st app.Settings, collapsed bool) {
 
 	// 先算一遍：哪几组是空的、那一句落在哪一组底下。
 	items := make([][]app.Favorite, favGroups)
-	showEmpty := make([]bool, favGroups)
 	lastEmpty := -1
+	loggedIn := s.app.LoggedIn()
 	for g := range favGroups {
 		grp := app.FavoriteGroup(g)
 		items[g] = visibleFavorites(s.app.SideFavorites(grp), hidden)
 		// ⚠️ **折叠着的那一组不算空**：用户自己把它折起来了，这时候在它底下
 		// 摆一句「还没有收藏夹」是在说一件他刚刚自己决定不看的事。
-		showEmpty[g] = !favoriteFolded(st, grp) && len(items[g]) == 0
-		if showEmpty[g] {
-			lastEmpty = g
+		if favoriteFolded(st, grp) || len(items[g]) > 0 {
+			continue
 		}
+		lastEmpty = g
 	}
 	for g := range favGroups {
-		s.viewFavoriteGroup(c, st, app.FavoriteGroup(g), items[g], g == lastEmpty)
+		text := ""
+		if g == lastEmpty {
+			text = s.favEmptyText(loggedIn)
+		}
+		s.viewFavoriteGroup(c, st, app.FavoriteGroup(g), items[g], text)
 	}
 }
 
-// favEmptyLine 是侧栏里那一句「还没有收藏夹」。
+// favEmptyText 是侧栏里那一句空状态。
+//
+// ⚠️ **三档三句话，缺一句就是撒谎**（AGENTS.md §4：「没有」和「没显示出来」
+// 在画面上长得一样）：空列表有三种来由，而只有一种能被说成「还没有收藏夹」。
+//
+//   - **真的一 个都没有**（拉成功、B 站那边确实没有）→ 「还没有收藏夹」。
+//   - **还没拉**（没登录、刚启动还没轮到）→ 不能说「还没有」——那是在替
+//     B 站回答一个我们还没问过的问题。
+//   - **拉失败了**（断网、登录态过期）→ 更不能说「还没有」：用户读到它就会
+//     以为 B 站那边确实空着，而真相是我们没拉到。**这一档必须说得出
+//     「可以重试」**——那是用户知道自己该怎么办的唯一线索。
+//
+// ⚠️ **它说的是这一片收藏夹，不是一组**：两组的空状态合成一句（报告 C3），
+// 而合成的那一句得站在**最要紧的那一档**上——有一组拉失败了就是「拉不到」，
+// 哪怕另一组拉到了而且是空的。
+func (s *Shell) favEmptyText(loggedIn bool) string {
+	loaded, failed := s.favAreaState()
+	switch {
+	case failed:
+		return "拉不到收藏夹，可以重试"
+	case !loaded && !loggedIn:
+		return "登录后能看到收藏夹"
+	case !loaded:
+		return "还没拉收藏夹"
+	default:
+		return "还没有收藏夹"
+	}
+}
+
+// favAreaState 报这一片收藏夹此刻的状态。
+//
+// 第一项是「都拉到了吗」，第二项是「有哪一组拉失败了吗」。
+//
+// ⚠️ **失败优先于「都拉到了」**：一组成功了、另一组失败了的时候，
+// 「还没有收藏夹」是撒谎——真相是有一组我们没拉到，而用户看到的是空的。
+func (s *Shell) favAreaState() (loaded, failed bool) {
+	loaded = true
+	for g := range favGroups {
+		st := s.app.FavoriteState(app.FavoriteGroup(g))
+		if st.Err != "" {
+			failed = true
+		}
+		if !st.Loaded {
+			loaded = false
+		}
+	}
+	return loaded, failed
+}
+
+// favEmptyLine 是侧栏里那一句空状态。
 //
 // ⚠️ **它左边缩进和分组标题对齐**：原来它顶格在侧栏最左边（x=0），而分组
 // 标题在 x=43 / x=65（**两个还不一样**——因为标题那一枚是 Grow(1) 的按钮，
@@ -110,14 +173,14 @@ func (s *Shell) viewFavorites(c *ui.Context, st app.Settings, collapsed bool) {
 //
 // 现在分组标题**左对齐**（`Justify(Start)`，和菜单项那一列一样），而这一句
 // 跟着它缩进——于是这一片是一个整块。
-func (s *Shell) viewFavoritesEmptyLine(c *ui.Context) {
+func (s *Shell) viewFavoritesEmptyLine(c *ui.Context, text string) {
 	t := c.Theme()
 	// ⚠️ **内边距在「壳」上，不在字上**：字那一格的盒子被 Column 拉满宽
 	// （默认 Stretch），量出来的 X 是 0，而字实际起头的位置是内边距那一份。
 	// 套一层壳，那一句的盒子就从内边距那儿起头——「它和标题对齐」这件事
 	// 才量得出来（测试就是这么量的）。
 	ui.Row(c).Padding(space.Px6, favIndent(t)).Children(func() {
-		ui.Text(c, "还没有收藏夹").FontSize(scale.Font(c, scale.Size12)).
+		ui.Text(c, text).FontSize(scale.Font(c, scale.Size12)).
 			TextColor(t.TextMuted)
 	})
 }
@@ -154,11 +217,14 @@ func (s *Shell) viewFavoritesRefreshing(c *ui.Context, st app.Settings, collapse
 // 折叠态下的拖拽也一起禁掉了——列表根本没建，「禁用」是自然发生的，
 // 不需要另写一条分支（SD-09 要的就是这个结果）。
 //
+// emptyText 是空状态那一句；**空串表示这一组底下不摆那一句**（空状态只有
+// 一句，而它落在最后一个空的那一组底下，见 viewFavorites）。
+//
 // ⚠️ **折叠态（整个侧栏折起来）不在这儿**：那一档走的是一枚「收藏夹」图标 +
 // 一层浮层（见 viewFavoritesCollapsed）——整组收藏夹在折叠态**整个不见**的话，
 // 用户会以为收藏夹没了（报告 C4）。
 func (s *Shell) viewFavoriteGroup(c *ui.Context, st app.Settings, g app.FavoriteGroup,
-	items []app.Favorite, showEmpty bool) {
+	items []app.Favorite, emptyText string) {
 	folded := favoriteFolded(st, g)
 
 	// Key 是这一组的序号：两组各自独立，折叠/展开不会让另一组的状态串过来。
@@ -168,8 +234,8 @@ func (s *Shell) viewFavoriteGroup(c *ui.Context, st app.Settings, g app.Favorite
 			return
 		}
 		if len(items) == 0 {
-			if showEmpty {
-				s.viewFavoritesEmptyLine(c)
+			if emptyText != "" {
+				s.viewFavoritesEmptyLine(c, emptyText)
 			}
 			return
 		}
@@ -296,13 +362,24 @@ func (s *Shell) viewFavoritesPanel(c *ui.Context, st app.Settings, anchor ui.Ele
 				// ⚠️ **空状态也只有一句**（和侧栏那一句同一个道理，报告 C3）：
 				// 两组都空的时候摆两句一模一样的话，用户得自己判断那是说一组
 				// 还是两组都没有。那一句落在**最后一个空的那一组**底下。
+				//
+				// ⚠️ **它说的和侧栏那一句是同一句**（`favEmptyText`）：浮层是
+				// 侧栏的另一个入口，两处说的话不一样的话，用户会以为收藏夹
+				// 在两个地方的状态不一样。
 				items := make([][]app.Favorite, favGroups)
 				lastEmpty := -1
+				loggedIn := s.app.LoggedIn()
 				for g := range favGroups {
-					items[g] = visibleFavorites(s.app.SideFavorites(app.FavoriteGroup(g)), hidden)
-					if len(items[g]) == 0 {
-						lastEmpty = g
+					grp := app.FavoriteGroup(g)
+					items[g] = visibleFavorites(s.app.SideFavorites(grp), hidden)
+					if len(items[g]) > 0 {
+						continue
 					}
+					lastEmpty = g
+				}
+				emptyText := ""
+				if lastEmpty >= 0 {
+					emptyText = s.favEmptyText(loggedIn)
 				}
 				for g := range favGroups {
 					ui.Text(c, app.FavoriteGroup(g).String()).FontSize(scale.Font(c, scale.Size12)).
@@ -311,7 +388,7 @@ func (s *Shell) viewFavoritesPanel(c *ui.Context, st app.Settings, anchor ui.Ele
 						s.viewFavoritesPanelRow(c, f)
 					}
 					if g == lastEmpty {
-						ui.Text(c, "还没有收藏夹").FontSize(scale.Font(c, scale.Size12)).
+						ui.Text(c, emptyText).FontSize(scale.Font(c, scale.Size12)).
 							TextColor(t.TextMuted).Padding(space.Px2, space.Px8)
 					}
 				}
@@ -335,7 +412,7 @@ func (s *Shell) viewFavoritesPanelRow(c *ui.Context, f app.Favorite) {
 		// ⚠️ **进去之后要把浮层收掉**：它开着的话会盖在收藏夹那一页上面，
 		// 而用户已经到那一页了。
 		s.favPanelOpen = false
-		s.navigate(collectionPath(f.ID))
+		s.navigate(collectionPathOf(f))
 	}
 }
 
@@ -416,10 +493,46 @@ func (s *Shell) reorderFavorite(g app.FavoriteGroup, items []app.Favorite, rows 
 	}
 }
 
+// collectionPathOf 是「侧栏上这一行点进去」那个地址。
+//
+// ⚠️ **类型要带上**：收藏夹（11）、合集（21）、系列（31）是三个不同的东西，
+// 而 `collectionPath` 只给 id——于是点一个合集会**按收藏夹打开**：打不开，
+// 或者打开的是另一个容器。
+//
+// ⚠️ **今天侧栏上只有收藏夹那一种行**（合集 / 系列被 `app.collectedFavorites`
+// 滤掉了——它们的内容列表本项目还没接）。这一条是**路由本身**认得出类型：
+// 等那一行放开时，地址已经是对的。
+//
+// ⚠️ **收藏夹（11）那一档 URL 上不写 `?type=`**：那是默认值，而 Biu 的地址
+// 也是不带的那一种（`/collection/{id}`）——两边的地址长得一样，导来导去才对得上。
+func collectionPathOf(f app.Favorite) string {
+	q := collectionTypeQueryOf(f)
+	if q == "" {
+		return collectionPath(f.ID)
+	}
+	return collectionPath(f.ID) + "?" + collectionTypeQuery + "=" + q
+}
+
+// collectionTypeQueryOf 是这一行的类型在 URL 上写成什么。
+//
+// 认不出来的类型（别的页面填的）当成收藏夹，而收藏夹**不写**——
+// 见 `collectionPathOf` 的注释。
+func collectionTypeQueryOf(f app.Favorite) string {
+	t := bili.CollectionType(f.Type)
+	if !t.Valid() || t == bili.CollectionFavorite {
+		return ""
+	}
+	return strconv.Itoa(int(t))
+}
+
 // viewFavoriteRow 是侧栏里的一行。
 func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favorite) {
 	t := c.Theme()
-	cur := s.router.Path() == collectionPath(f.ID)
+	// ⚠️ **当前项要连类型一起比**：合集（21）和收藏夹（11）是两个不同的容器，
+	// 而 id 各自一套——只比路径的话，在合集那一页上，同号的收藏夹也会被
+	// 画成「当前」。
+	cur := s.router.Path() == collectionPath(f.ID) &&
+		s.router.Query(collectionTypeQuery) == collectionTypeQueryOf(f)
 
 	row := ui.Column(c).Key(favRowKey(g, f.ID)).Grow(1).Radius(t.Radius).Padding(space.Px6, space.Px8)
 	switch {
@@ -457,7 +570,7 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 	})
 
 	if row.Clicked() {
-		s.navigate(collectionPath(f.ID))
+		s.navigate(collectionPathOf(f))
 	}
 
 	// 右键菜单挂在**行**上，不是列上：MyGo 取的是最里层那个带菜单的元素

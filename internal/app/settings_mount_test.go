@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/testproc"
 )
 
 // 这些测试盯的是「设置挂在 App 上」这一层：读盘、给快照、改、落盘、退出前
@@ -329,7 +330,7 @@ func mountChildRoundTrip(t *testing.T) {
 // runMountChild 拉起一次本测试二进制自己。-test.run 让它只跑这一条。
 func runMountChild(t *testing.T, path, mode string) {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=TestMountedSettingsSurviveAProcessRestart", "-test.count=1")
+	cmd := exec.Command(testproc.Path(t), "-test.run=TestMountedSettingsSurviveAProcessRestart", "-test.count=1")
 	cmd.Env = append(os.Environ(),
 		mountChildEnv+"=1",
 		"BIU_MOUNT_PATH="+path,

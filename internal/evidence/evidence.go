@@ -510,6 +510,38 @@ var Items = []Item{
 			"TestRefreshingWithoutTheFoldersMountedSaysSo",
 		},
 	},
+	{
+		Category: HTTP,
+		// 票 #362 的三件事：
+		//
+		//  1. **自动拉**：登录之后、开机时已经登录，各拉一次——用户不该为了
+		//     看见自己的收藏夹先去头像下拉里按「刷新数据」。而「一次自动拉
+		//     只发一次请求」是「不许每帧都拉」那条规矩的反面判据。
+		//  2. **空状态分得开**：「拉失败」和「真的一 个都没有」在画面上不是
+		//     同一句话——摆一句「还没有收藏夹」在拉失败的时候是撒谎，而用户
+		//     会据此以为自己一个收藏夹都没有。
+		//  3. **「我收藏的」那一组有源**：它走 `collected/list`（B 站「我收藏
+		//     了别人的哪些收藏夹」那个接口），而它以前在本项目里只有测试填
+		//     过——侧栏上那一组永远空着，而用户看到的是一个摆在那儿、永远
+		//     不动的分组。
+		Spec: "登录之后 / 开机时自动拉一次收藏夹（一次自动拉只发一次请求）；拉失败和「真的没有」在界面上分得开；「我收藏的」那一组有源",
+		Tests: []string{
+			"TestLoggingInPullsTheFavorites",
+			"TestAlreadyLoggedInPullsTheFavoritesAtStartup",
+			"TestAutoRefreshSendsNothingWhenLoggedOut",
+			"TestAutoRefreshSendsOnlyOneRequest",
+			"TestAFailedFetchIsNotAnEmptyList",
+			"TestAFetchThatFoundNothingIsStillLoaded",
+			"TestTheCollectedFoldersShowUpInTheSidebar",
+			"TestCollectedAlbumsAreNotPutInTheSidebar",
+			"TestLoggingOutClearsTheFavorites",
+			"TestARefreshThatComesBackAfterALogoutIsThrownAway",
+			"TestTheOldRefreshDoesNotStealTheNewAccountsRefreshState",
+			"TestTheSidebarSaysTheFetchFailedInsteadOfThereAreNoFavorites",
+			"TestTheSidebarDoesNotSayThereAreNoFavoritesBeforeAnythingWasFetched",
+			"TestRefreshingWithoutALoginDoesNotSayTheFetchFailed",
+		},
+	},
 
 	// ── PCM ────────────────────────────────────────────────────────────────
 	{
@@ -1273,8 +1305,16 @@ var Items = []Item{
 		// 挤不掉），挤的循环于是最后把整张表清空还挤不下——之后每来一张图就把
 		// 表里剩下的全挤掉。
 		//
+		// 票 #358 补了第三条：**画面上正画着的那一张也不许挤**。开队列抽屉的
+		// 时候，抽屉里那二十几行第一次露出来、全都要封面，字节上限一下子超了，
+		// 挤的循环一路挤到画面上正画着的那几张——挤掉的那一张下一帧就退回占位，
+		// 于是「开抽屉时中间那一列的封面来回闪」。
+		//
+		// **同一件事的另一个表现是「历史记录页一直闪」**：那一页自己的一屏封面
+		// 就把上限顶破了，于是挤 → 退占位 → 重新下 → 又被挤……一直循环。
+		//
 		// 全部用 `httptest` 验（假图床 + 假 B 站接口），不连真网。
-		Spec: "首页推荐的封面不再在有图和占位之间反复切换：一屏封面按显示尺寸存得下、字节账不漏、还在下的那一张不参与淘汰",
+		Spec: "封面不再在有图和占位之间反复切换：一屏封面按显示尺寸存得下、字节账不漏、还在下的那一张不参与淘汰、画面上正画着的那一张不参与淘汰（首页、历史记录、稍后再看三处）",
 		Tests: []string{
 			"TestTheSameCoverStaysReadyAcrossFrames",
 			"TestTheHomeCoversDoNotGoBackToPlaceholder",
@@ -1283,6 +1323,11 @@ var Items = []Item{
 			"TestTheEvictionSkipsEntriesThatHaveNoBytesYet",
 			"TestACoverThatIsStillLoadingIsNotEvicted",
 			"TestTheByteAccountDoesNotLeak",
+			"TestTheCoverOnScreenIsNotEvicted",
+			"TestACoverThatIsNoLongerOnScreenIsEvicted",
+			"TestOpeningTheQueueDrawerDoesNotMakeTheListCoversFlash",
+			"TestTheHistoryPageCoversDoNotKeepFlashing",
+			"TestTheLaterPageCoversDoNotKeepFlashing",
 		},
 	},
 	{

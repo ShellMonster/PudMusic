@@ -344,6 +344,25 @@ type Shell struct {
 	//
 	// ⚠️ 理由同 `sideRowKeys`（票 #313）。
 	queueRowKeys rowkey.Memo[string, any]
+	// queueDrags 记着每一行那个**拖动值**（拖拽重排用的）。
+	//
+	// ⚠️ **它记的是指针**：框架把拖动值装进 `any`，装指针不分配——而每一行
+	// 每帧都要传一次拖动值（见 queue_drag.go 的说明）。
+	queueDrags rowkey.Memo[string, *queueDragValue]
+
+	// queueDropAt 是**落点那一行**在抽屉里的行号（-1 = 没有落点）。
+	//
+	// ⚠️ **它由每一行自己记**（见 queue_drawer.go 的 viewQueueRow）：每一行都
+	// 知道指针是不是在它身上、在它的哪一半——指针在谁身上，谁就是落点。
+	queueDropAt int
+	// queueDropUpper 是落点在那一行的**上半**（true）还是下半（false）。
+	queueDropUpper bool
+	// queueDragging 是「有东西正被拖着经过这一列」。
+	//
+	// ⚠️ **它比指针慢一帧**：它是上一帧问出来的（框架的 DragOver 只能在列表
+	// 建完之后问，见 viewQueueList）。差一帧看不出来——插入线晚一帧出现，
+	// 而拖动本来就不是一帧的事。
+	queueDragging bool
 
 	// queueScroll 是那一列滚到哪儿了。**和 queueList 分开存**是因为「定位当前
 	// 播放」要的是一段动画：ListState.ScrollTo 是一跳到位（`mygo/ui/list.go`
@@ -1189,6 +1208,21 @@ func Run(a *app.App, sess *media.Session) error {
 		// 在应用还没 ready 的时候调会 panic（框架的 `needsApp`，
 		// `mygo/app.go:128`），而 `Run` 之前是那一刻。
 		a.StartLocalMusicWatch()
+		// 开机时如果已经登录，顺手把侧栏的收藏夹拉一次。
+		//
+		// 用户不该为了看见自己的收藏夹，先去头像下拉里按「刷新数据」——那是一
+		// 个没人会自己想到的操作，而侧栏上长期空着会被当成「我没有收藏夹」。
+		//
+		// ⚠️ **排在单实例锁之后**（锁在 `Run` 的第一句）：锁没拿到的话这个进程
+		// 马上就要退出，而这一趟是往 B 站发请求——第二个实例白发两次请求，
+		// 而用户那边什么也看不出来。
+		//
+		// ⚠️ **排在开窗口之前**：拉回来赶得上的话，第一帧上就有收藏夹；
+		// 赶不上的话那一行「正在刷新收藏夹…」会在（见 `viewFavoritesRefreshing`），
+		// 回来之后界面会被叫醒。
+		//
+		// ⚠️ **没登录时它一个请求都不发**（见 `app.AutoRefreshFavorites`）。
+		a.AutoRefreshFavorites()
 		// 后台自动查更新。**必须在 `WhenReady` 里**：第一次查询要走网络，而
 		// `WhenReady` 之前事件循环还没转起来，那时候发请求等于在一条还没开始
 		// 跑的路上走（框架自己也把「需要事件循环」的 API 挡在 ready 之前，见
@@ -1432,6 +1466,12 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 它之后创建的控件。不装的话 MyGo 在帧开头重置好的那份跟随系统的主题
 	// 就是这一帧真正用的那份，用户选了深色也只在这一帧是对的。
 	s.applyFrameTheme(c)
+	// 封面缓存要知道「新的一帧开始了」——挤缓存时**画面上正画着**的那几张
+	// 不许挤（票 #358：开队列抽屉时中间那一列的封面来回闪）。
+	//
+	// ⚠️ **给的是 `c.Now()` 而不是帧号**：一帧要跑好几遍 view，而同一帧的
+	// 几遍给的是同一个时刻，缓存那边靠它认出「这是不是新的一帧」。
+	s.images.BeginFrame(c.Now())
 	// 应用内快捷键：登记这一帧窗口要处理哪些组合键，同时也就知道了这一帧有没有
 	// 键打中（`Context.Shortcut` 命中就是「按了」）。见 shortcut_dispatch.go。
 	//
