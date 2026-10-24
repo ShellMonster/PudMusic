@@ -133,6 +133,25 @@ type StreamRef struct {
 	// 两套编号不合并，理由见 `quality.go` 的文件头。判断「换回来的还是不是
 	// 同一档」用 `SameTier`，它两边都认。
 	MusicTier MusicTier
+
+	// SubtitleURLs 是**B 站自己带的那份字幕**的地址，**按该试的顺序**。
+	// 空列表 = 这一条没有字幕。
+	//
+	// ⚠️ **它跟着取流那一趟回来**（`data.subtitle.subtitles[0].subtitle_url`），
+	// 所以它**不多花一次网络往返**——上游 Biu 走的就是这一段
+	// （`get-lyrics.ts` 的 `getLyricsByBili`），见 `subtitle.go`。
+	//
+	// ⚠️ **它是一个列表，不是一个地址**：B 站给同一份字幕两个（不带鉴权参数的
+	// 那个、和带 `auth_key` 的那个），而**不带鉴权的那个可能要登录态**——而登录态
+	// 在这条路上到不了（`.bilibili.com` 的 cookie 发不到 `.hdslb.com`）。所以
+	// **下载的时候一个不行就换下一个**（见 `lyrics.FetchBiliSubtitle`）。
+	//
+	// ⚠️ **音乐库那一路是空的**：那个接口（`/audio/music-service-c/url`）的
+	// 返回里没有字幕。那一路要字幕得另外问一次（`Client.SubtitleURLs`）。
+	//
+	// ⚠️ **它不是凭据，但别把它写进日志**：地址上带着 B 站给的那一段参数，
+	// 而它是**这一首歌的字幕**——记下来就等于把歌词记在了日志里。
+	SubtitleURLs []string
 }
 
 // SameTrack 报告 ref 说的是不是同一首。
@@ -210,6 +229,13 @@ type playurlData struct {
 	Timelength int       `json:"timelength"` // 毫秒
 	Quality    int       `json:"quality"`
 	Dash       *dashInfo `json:"dash"`
+	// Subtitle 是**B 站自己带的那份字幕**。
+	//
+	// ⚠️ **它以前被丢掉了**（这一段以前只有上面三个字段）：B 站在取流的返回里
+	// 就带着字幕的地址，而我们没读，于是歌词只能靠用户在「找歌词」里搜。
+	// 上游 Biu 走的就是这一段（`get-lyrics.ts` 的 `getLyricsByBili`），
+	// 见 `subtitle.go` 的文件头。
+	Subtitle *subtitleBlock `json:"subtitle"`
 }
 
 // PlayURL 问 B 站要一条音频流。
@@ -284,6 +310,9 @@ func refFrom(d *playurlData, bvid, cid string, pref AudioQuality) (*StreamRef, e
 		ExpiresAt: expiryOf(urls, 0, time.Now()),
 		Bvid:      bvid,
 		Cid:       cid,
+		// 🔴 **字幕地址**（票 #373 / #402）：取流那一趟顺带把 B 站的字幕
+		// 地址带回来，歌词自动获取就不用再问一次。
+		SubtitleURLs: subtitleURLsOf(d),
 	}
 	ref.Label = ref.Quality.Label(ref.Bitrate)
 	return ref, nil

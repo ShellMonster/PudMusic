@@ -1,7 +1,6 @@
 package app_test
 
 import (
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -546,67 +545,6 @@ func rateCDN(data []byte, bytesPerSec int) http.HandlerFunc {
 	}
 }
 
-// armableCDN 是一台「按指令卡住**下一次**请求」的 CDN。
-//
-// 🔴 **为什么要有「指令」而不是「数第几次」**：复现「别的路把源顶掉」要三笔
-// 请求——「上一首的取流」「正在下的那一首」「换音质那一趟」——而后台的重连
-// 也会打同一个地址，靠数次数来认太脆。「卡住**下一次**」正好对着「正在下的
-// 那一首」那一笔。
-type armableCDN struct {
-	mu      sync.Mutex
-	armed   bool
-	hits    int
-	arrived chan struct{}
-	release chan struct{}
-	once    sync.Once
-	trace   func(string)
-}
-
-// arm 让**下一次**请求卡住（只卡一次）。
-func (c *armableCDN) arm() {
-	c.mu.Lock()
-	c.armed = true
-	c.mu.Unlock()
-}
-
-// handler 造出那台 CDN：被 arm 的那一次请求只给 first 个字节然后卡住，
-// 其余的请求一次给全。
-func (c *armableCDN) handler(data []byte, first int) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		c.mu.Lock()
-		stall := c.armed
-		c.armed = false
-		c.hits++
-		n, trace := c.hits, c.trace
-		c.mu.Unlock()
-		if trace != nil {
-			trace(fmt.Sprintf("CDN 第 %d 次请求：卡住=%v", n, stall))
-		}
-
-		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-		w.WriteHeader(http.StatusOK)
-		fl, _ := w.(http.Flusher)
-		if !stall {
-			w.Write(data)
-			return
-		}
-		if _, err := w.Write(data[:first]); err != nil {
-			return
-		}
-		if fl != nil {
-			fl.Flush()
-		}
-		c.once.Do(func() { close(c.arrived) })
-		<-c.release
-		if _, err := w.Write(data[first:]); err != nil {
-			return
-		}
-		if fl != nil {
-			fl.Flush()
-		}
-	}
-}
-
 // TestAnotherLaneMustNotStealTheProgressWatchdog 盯「别的路不许把这一趟的
 // 进度看门狗顶掉」（票 #220 的评审复现的那一条）。
 //
@@ -625,17 +563,30 @@ func (c *armableCDN) handler(data []byte, first int) http.HandlerFunc {
 func TestAnotherLaneMustNotStealTheProgressWatchdog(t *testing.T) {
 	f := newStreamFixture(t)
 	dir := t.TempDir()
-	cdn := &armableCDN{arrived: make(chan struct{}), release: make(chan struct{}), trace: func(m string) { t.Log(m) }}
-	t.Cleanup(func() { close(cdn.release) })
-	// ⚠️ **用 moov 在末尾的那份 MP4**：卡住的那一次只给 12 KB——解码器
-	// 开不起来（它要等文件末尾那个 moov），于是这一趟停在「下音频」那一段。
-	f.on("/cdn/x.m4s", cdn.handler(readMP4(t, "stereo16.mp4"), 12<<10))
-	// ⚠️ **两次取流给不同的档**：换音质那一趟（第三次取流）拿到的档和前面
-	// 不同，于是「换音质走完了」这件事**看得见**（音质徽章变了）。
-	f.onPlayURL(dashFor(cdnURL(f.URL, "x.m4s", 2*time.Hour),
-		int(bili.QualityHigh192), 110836))
-	f.onPlayURL(dashFor(cdnURL(f.URL, "x.m4s", 2*time.Hour),
-		int(bili.QualityLow64), 30216))
+	arrived := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	// ⚠️ **用 moov 在末尾的那份 MP4**：卡住的那一条只给 12 KB——解码器开不起来
+	// （它要等文件末尾那个 moov），于是那一趟停在「下音频」那一段。
+	//
+	// 🔴 **「哪一条卡住」是按地址定的，不是按「第几次请求」**（后者会飘：
+	// 后台的预取 / 重连也会打这个地址，谁抢到算谁的）。
+	f.on("/cdn/slow.m4s", gatedCDN(readMP4(t, "stereo16.mp4"), 12<<10, arrived, release))
+	f.on("/cdn/fast.m4s", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(readMP4(t, "stereo16.mp4"))))
+		w.Write(readMP4(t, "stereo16.mp4"))
+	})
+	// 🔴 **取流接口按 bvid 给不同的地址**：歌 B 的流走那条会卡住的地址，
+	// 别的（**包括换音质那一趟**——它换的是歌 A）走会一次给全的那条。
+	f.on("/x/player/wbi/playurl", func(w http.ResponseWriter, r *http.Request) {
+		name := "fast.m4s"
+		if r.URL.Query().Get("bvid") == "BV2" {
+			name = "slow.m4s"
+		}
+		writeStreamJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
+			"data": map[string]any{"timelength": 1000,
+				"dash": twoTierDash(cdnURL(f.URL, name, 2*time.Hour))}})
+	})
 
 	a := newOnlineApp(t, f, dir)
 	clock := &fakeClock{}
@@ -650,9 +601,8 @@ func TestAnotherLaneMustNotStealTheProgressWatchdog(t *testing.T) {
 	}
 	playing(t, a, "在放的那一首")
 
-	// 二、**点第二首**，而它的 CDN 卡住（arm 一下下一次请求）——于是
-	// 这一趟停在「下音频」那一段里，而 `a.online` 还是**上一首**。
-	cdn.arm()
+	// 二、**点第二首**，而它的流卡住——于是这一趟停在「下音频」那一段里，
+	// 而 `a.online` 还是**上一首**。
 	if err := a.PlayFrom(onlineItem("BV2", "1", "正在下的那一首")); err != nil {
 		t.Fatal(err)
 	}
@@ -669,9 +619,12 @@ func TestAnotherLaneMustNotStealTheProgressWatchdog(t *testing.T) {
 	//
 	// ⚠️ **它换的是「上一首」的流**（`a.online` 还是上一首）——而用户此刻
 	// 在等的是**第二首**。这一下正好把两件事搅在一起。
-	a.SetAudioQuality(bili.AudioLow)
+	a.SetAudioQuality(bili.AudioMedium)
+	// 换音质那一趟拿到的档是 128K（它点的是中档，而 dash 里有两档——
+	// 见 `online_quality_test.go` 里那个 `twoTierDash`）——于是「它走完了」
+	// 这件事**看得见**（徽章变了）。
 	waitFor(t, 15*time.Second, "换音质那一条路走完了", func() bool {
-		return a.Snapshot().Quality == "64K"
+		return a.Snapshot().Quality == "128K"
 	})
 
 	// 现在点火的闹钟问的是「这一段还有没有进展」。
