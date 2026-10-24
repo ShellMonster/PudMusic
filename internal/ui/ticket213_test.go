@@ -63,6 +63,24 @@ func uiFollowTagsOrdered(b *uiExplore, tags []followTagSpec) {
 	})
 }
 
+// followPaneSettings 是这一组测试用的那份设置。
+//
+// ⚠️ **方案要显式写暖纸，不能用 `app.DefaultSettings("")` 那一份**：
+// 界面这一包的 `TestMain` 把 `app.DefaultThemePreset` 按成了**经典**
+// （`internal/ui/diskguard_test.go` 的 `TestMain`），而**经典那一套的 `sidebar`
+// 就是页面底色**（两个都是白）——于是「这一列的底 == 方案的 `sidebar`」这条判据
+// 在测试环境里**恒真**：把这一列的底整个删掉，测试照样绿（2026-10-25 的评审
+// 抓出来的）。
+//
+// 暖纸那一套的 `sidebar`（#EFE9DE）和页面底色（#F8F4ED）**不是一个色**，判据
+// 才立得住——`TestTheFollowPaneAndTheSidebarAreOneFamily` 里还有一条专门盯
+// 「这一套方案里这两个色不是同一个」。
+func followPaneSettings() app.Settings {
+	st := app.DefaultSettings("")
+	st.ThemePreset = app.ThemePresetWarmPaper
+	return st
+}
+
 // followPaneShell 造一个停在「我的关注」那一页的壳（暖纸方案——默认那一套）。
 //
 // 分组用 `followPaneTags`（顺序固定），关注对象三个。
@@ -76,7 +94,7 @@ func followPaneShell(t *testing.T, dark bool) (*Shell, *mygoui.Tester) {
 	})
 	uiFollowSearch(b, "", nil)
 	s, tt, _ := newSpaceShell(t, b, true, "77", systemIsDark(dark),
-		withSettings(app.DefaultSettings("")))
+		withSettings(followPaneSettings()))
 	s.navigate(followPath)
 	tt.Frame()
 	f := s.followPageOf()
@@ -87,12 +105,14 @@ func followPaneShell(t *testing.T, dark bool) (*Shell, *mygoui.Tester) {
 
 // TestTheFollowPaneAndTheSidebarAreOneFamily 钉住「这一列和侧栏是同一片」。
 //
-// 两条判据：
+// 三条判据：
 //
 //  1. **底色是同一片**——侧栏那一栏和这一列都是方案的 `sidebar`（和内容区不同色）。
 //     改之前这一列是页面底色，于是它和内容区是一体的，而旁边的侧栏是另一片：
 //     两片导航区夹着一片内容区，中间那道界是内容区的边。
-//  2. **选中那一格是同一层淡底**——两列都用 `flatCurrent`（`accentSoft` 淡底 +
+//  2. **这一套方案里 `sidebar` 和页面底色不是同一个色**——不然第一条**恒真**
+//     （经典那一套的 `sidebar` 就是页面底色，见 `followPaneSettings` 的注释）。
+//  3. **选中那一格是同一层淡底**——两列都用 `flatCurrent`（`accentSoft` 淡底 +
 //     按那层底现算的字），所以两个色值逐字节相同。
 func TestTheFollowPaneAndTheSidebarAreOneFamily(t *testing.T) {
 	for _, dark := range []bool{false, true} {
@@ -102,15 +122,27 @@ func TestTheFollowPaneAndTheSidebarAreOneFamily(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			s, tt := followPaneShell(t, dark)
-			theme := BuildTheme(app.DefaultSettings(""), dark)
+			theme := BuildTheme(followPaneSettings(), dark)
 			img := tt.Image()
+
+			// 判据二：**这一套方案里，方案的 `sidebar` 和页面底色不是同一个色**。
+			//
+			// ⚠️ **这一条是前一条的前提**：两个色一样的话，「这一列的底 == 侧栏的底
+			// == 方案的 `sidebar`」恒成立——把这一列的底整个删掉，测试也绿
+			//（2026-10-25 的评审抓出来的）。
+			sidebar := s.sidebarBackground(theme)
+			if nearRGBA(rgbaOf(sidebar), rgbaOf(theme.Background), 3) {
+				t.Fatalf("这一套方案里 sidebar（%v）和页面底色（%v）是同一个色——"+
+					"「这一列的底是方案的 sidebar」这条判据在它下面恒真，换一套方案",
+					sidebar, theme.Background)
+			}
 
 			// 判据一：**底色同一片**。
 			//
 			// ⚠️ **取样点都在两栏的空处**（侧栏 x=190、这一列 x=390，都在底下那
 			// 一段空白里）：取在菜单项上会量到那一项的底，取在收藏夹上会量到别
 			// 的东西。
-			want := rgbaOf(s.sidebarBackground(theme))
+			want := rgbaOf(sidebar)
 			sidePx := pixelAt(img, 190, 650)
 			panePx := pixelAt(img, 390, 650)
 			if !nearRGBA(sidePx, want, 3) {
@@ -120,8 +152,13 @@ func TestTheFollowPaneAndTheSidebarAreOneFamily(t *testing.T) {
 				t.Errorf("分组那一列的底色是 %v，want %v——它要和侧栏是同一片"+
 					"（方案里的 `sidebar`）", panePx, want)
 			}
+			// 顺带钉住「内容区是另一片」：内容区的底是**页面底色**，不是 `sidebar`。
+			bodyPx := pixelAt(img, 500, 650)
+			if !nearRGBA(bodyPx, rgbaOf(theme.Background), 3) {
+				t.Errorf("内容区的底色是 %v，want %v（页面底色）", bodyPx, theme.Background)
+			}
 
-			// 判据二：**选中那一格是同一层淡底**。
+			// 判据三：**选中那一格是同一层淡底**。
 			sideCur, ok := tt.Find("我的关注")
 			if !ok {
 				t.Fatalf("侧栏上没有「我的关注」那一项，文字有 %q", tt.Texts())
@@ -163,7 +200,7 @@ func TestTheFollowPaneSelectedRowIsReadable(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			_, tt := followPaneShell(t, dark)
-			theme := BuildTheme(app.DefaultSettings(""), dark)
+			theme := BuildTheme(followPaneSettings(), dark)
 			img := tt.Image()
 
 			cur, ok := tt.Find("全部关注(3)")
@@ -225,7 +262,7 @@ func TestTheFollowPaneSeparatesAllFromTheGroups(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			s, tt := followPaneShell(t, dark)
-			theme := BuildTheme(app.DefaultSettings(""), dark)
+			theme := BuildTheme(followPaneSettings(), dark)
 			img := tt.Image()
 
 			cur, ok := tt.Find("全部关注(3)")
@@ -244,8 +281,11 @@ func TestTheFollowPaneSeparatesAllFromTheGroups(t *testing.T) {
 			paneBg := rgbaOf(s.sidebarBackground(theme))
 			// 线的颜色：主题的分隔线压在这一列的底上。
 			line := rgbaOf(theme.Border.Over(rgbaToColor(paneBg)))
+			// 选中那一格（全部关注）的淡底——**它是这一带另一种「不是线」的色**，
+			// 判据必须把它排除掉（理由见 findSeparator）。
+			selBg := rgbaOf(flatCurrentBg(theme))
 
-			y := findSeparator(img, cur.X, cur.X+cur.W, cur.Y+cur.H, first.Y, paneBg, line)
+			y := findSeparator(img, cur.X, cur.X+cur.W, cur.Y+cur.H, first.Y, paneBg, selBg, line)
 			if y < 0 {
 				t.Errorf("「全部关注(3)」和「特别关注(1)」之间没有分界——"+
 					"那一格（全部关注）和后面那些（分组）不是一伙的")
@@ -254,9 +294,25 @@ func TestTheFollowPaneSeparatesAllFromTheGroups(t *testing.T) {
 			// ⚠️ **分界只在第一格和分组之间**：分组和分组之间**不该**有线，
 			// 否则那一列看起来像一列表格。
 			if y2 := findSeparator(img, first.X, first.X+first.W, first.Y+first.H, second.Y,
-				paneBg, line); y2 >= 0 {
+				paneBg, selBg, line); y2 >= 0 {
 				t.Errorf("「特别关注(1)」和「默认分组(1)」之间也有一道线（y=%d）——"+
 					"分组和分组之间不该有线", y2)
+			}
+
+			// 🔴 **另一条独立的判据：分界那一带比别处宽**。
+			//
+			// 「全部关注」那一格和第一个分组之间要留出分界线自己的上下留白
+			// （4 + 4），而分组和分组之间只有行与行之间那 2 的缝。所以前者的
+			// 字距**明显更大**——线被删掉（或者被换成一段空隙）的话，这一条
+			// 也会红。
+			//
+			// ⚠️ **量的是「字」之间的距离**：行之间那 2 的缝在两处都有，只有
+			// 分界那一带多出分界线自己的留白。
+			gapFirst := first.Y - (cur.Y + cur.H)
+			gapSecond := second.Y - (first.Y + first.H)
+			if gapFirst < gapSecond+4 {
+				t.Errorf("「全部关注(3)」和「特别关注(1)」之间只隔 %.1f，而两个分组"+
+					"之间隔 %.1f——分界线自己的留白没了", gapFirst, gapSecond)
 			}
 		})
 	}
@@ -264,16 +320,30 @@ func TestTheFollowPaneSeparatesAllFromTheGroups(t *testing.T) {
 
 // findSeparator 找 y0~y1 之间那道横线，返回它在 y 上的位置；找不到是 -1。
 //
+// # 一行要算「那道线」，得同时满足三样
+//
+//  1. **不是这一列的底色**（`bg`）——底色的行不是线；
+//  2. **不是选中那一格的淡底**（`sel`）——⚠️ **这一条是必需的**（2026-10-25
+//     的评审抓出来的）：「全部关注」那一格就铺着淡底，而暖纸浅色下那层淡底
+//     （#E0F9E9）离那道线（#DBDBDB）**比离底色还近**——只判「离线更近」的
+//     话，淡底自己会被当成线，于是**把线删掉测试照样绿**。
+//  3. **离那道线更近**（或者至少不比离底色远）——线的那一档压上去的。
+//
 // ⚠️ **判据是「更靠近线那一档」，不是「等于线那个色」**：那一行的位置是算出来
 // 的，可能是半个像素，于是那一道线被摊到两行上，每一行都是线和底的混合。
 // 「更靠近线」这个判据两种情形都过，而「等于」那种过不了。
-func findSeparator(img *image.RGBA, x0, x1, y0, y1 float32, bg, line color.RGBA) int {
+func findSeparator(img *image.RGBA, x0, x1, y0, y1 float32, bg, sel, line color.RGBA) int {
 	for y := int(y0); y < int(y1); y++ {
 		run := 0
 		for x := int(x0); x < int(x1); x++ {
 			p := img.RGBAAt(x, y)
 			if maxDiff(p, bg) < 6 {
 				// 和底色一样 → 这一行上没有线。
+				run = 0
+				continue
+			}
+			if maxDiff(p, sel) < 6 {
+				// 和选中那一格的淡底一样 → 那是那一格的底，不是线。
 				run = 0
 				continue
 			}

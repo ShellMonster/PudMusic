@@ -532,8 +532,6 @@ func (s *Shell) viewFollowPane(c *ui.Context, f *followPage) {
 		if len(f.tags) > 0 {
 			groups = groups.Grow(1).FillHeight()
 		}
-		// 这一列的底色算一次就够了（`sidebarBackground` 要读一次设置快照）。
-		paneBg := s.sidebarBackground(t)
 		groups.Children(func() {
 			// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
 			// ⚠️ **分组栏先登记、网格后登记**，于是网格赢——它是这一页的主内容。
@@ -542,7 +540,7 @@ func (s *Shell) viewFollowPane(c *ui.Context, f *followPage) {
 			// （`sidebar.go` / `sidebar_favorites.go` 的 `Gap(space.Px2)`）。
 			pane := ui.List(c, &f.paneState, len(f.tags)+1).
 				Grow(1).FillHeight().Gap(space.Px2).
-				Rows(func(r ui.ListRow) { s.viewFollowPaneRow(r.Context, f, r.Index, paneBg) })
+				Rows(func(r ui.ListRow) { s.viewFollowPaneRow(r.Context, f, r.Index) })
 			s.trackScrollbar(pane)
 		})
 		// 🔴 **「一个分组都没有」要有一句话**：什么都不摆的话用户以为这一列
@@ -630,7 +628,7 @@ func followPaneTitle(f *followPage) string {
 //   - 选中 → `flatCurrent`（`accentSoft` 淡底 + 按那层底现算的字）；
 //   - 没选中 → 次要色；
 //   - 悬停 / 按下 → `flat.Feel`（压一层半透明的前景色，和侧栏菜单项同一档）。
-func (s *Shell) viewFollowPaneRow(c *ui.Context, f *followPage, i int, paneBg ui.Color) {
+func (s *Shell) viewFollowPaneRow(c *ui.Context, f *followPage, i int) {
 	t := c.Theme()
 
 	tab, label := followTabAll, fmt.Sprintf("全部关注%s", countSuffix(f.total))
@@ -663,14 +661,12 @@ func (s *Shell) viewFollowPaneRow(c *ui.Context, f *followPage, i int, paneBg ui
 
 	// ⚠️ **内边距是侧栏收藏夹那一行的那一份**（上下 6 / 左右 8）：这一列和
 	// 侧栏是邻居，行高和缩进得是一套。
+	//
+	// ⚠️ **这一行自己不铺底色**：没选中的那些行是**透**的——底是这一列的底。
+	// （框架那一层行悬停底在这一列里**不存在**：它只在「列表有游标」时才铺，
+	// 而这一列的列表没有游标，见下面 `flat.Feel` 那一段。）
 	box := ui.Row(c).Grow(1).Key("follow-tab:" + tab).Padding(space.Px6, space.Px8).Radius(t.Radius).
 		AlignItems(ui.Center)
-	// 🔴 **这一行自己刷一层这一列的底色**：框架给「指针压着的那一行」铺一层
-	// `t.SurfaceHover`（`mygo/ui/list.go` 的 styleFn），而那一层是照**页面底色**
-	// 算的——这一列的底是方案的 `sidebar`，两个不是一回事。刷上自己这一层的底
-	// 就把它盖掉（和 `widgets/list` 的 `LayoutRow` 同一个做法），于是悬停反馈
-	// 只剩下面那一份（`flat.Feel`），和侧栏菜单项一模一样。
-	box = box.Background(paneBg)
 	if tab == f.tab {
 		// 当前正在看的那一格：和侧栏菜单当前项**同一套**画法（`flatCurrent`——
 		// 强调色淡底 + 按那层底现算的字，深浅两套同一个数）。
@@ -686,6 +682,11 @@ func (s *Shell) viewFollowPaneRow(c *ui.Context, f *followPage, i int, paneBg ui
 		box = box.TextColor(t.TextMuted)
 	}
 	// 悬停 / 按下的反馈：和侧栏菜单项同一档（`flat.Feel`——压一层半透明的前景色）。
+	//
+	// ⚠️ **这一层是这一列唯一的悬停反馈**：框架给「指针压着的那一行」铺的那层
+	// `t.SurfaceHover`（`mygo/ui/list.go` 的 styleFn）**只在「列表有游标」时
+	// 才铺**（`s.cursor() != nil`），而这一列的列表没有游标（`f.paneState` 的
+	// `Selected` / `Selection` 从头到尾没设过）——所以这里没有第二层要盖。
 	//
 	// ⚠️ **悬停那一层是「压」不是「换」**：换成 `t.SurfaceHover` 的话，指针一落到
 	// 选中那一格上，淡底就被整块顶掉——「当前在哪」是这一列里唯一的方向标，
