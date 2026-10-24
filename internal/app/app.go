@@ -459,6 +459,14 @@ type App struct {
 	wakeMu  sync.Mutex
 	wakes   []wakeEntry
 	wakeSeq uint64
+
+	// announces 是**逐窗口**的那一份播报句柄，见 AddAnnounce。
+	//
+	// ⚠️ **它也有自己的锁，不在 `a.mu` 里**：理由同上——`Announce` 是从后台
+	// 那条线（取流回来了、下载下完了）调进来的，而那条线上可能正拿着别的锁。
+	announceMu  sync.Mutex
+	announces   []announceEntry
+	announceSeq uint64
 }
 
 // wakeEntry 是一个窗口的唤醒句柄，外加一个用来摘掉它的号。
@@ -710,6 +718,12 @@ func (a *App) Open(path string) error {
 		a.pending = Item{}
 		wake := a.wake
 		a.mu.Unlock()
+		// 念出去（无障碍）：本地文件打不开这件事，**读屏软件用户看不见**——
+		// 播放条上那一行字他们看不到。
+		//
+		// ⚠️ **说人话，不念英文系统错**：读屏软件是**逐字念**的，而
+		// `err.Error()` 是 "open /Users/x/a.m4a: no such file or directory"。
+		a.announce("播放失败：" + announceErrText(err))
 		if wake != nil {
 			wake()
 		}
@@ -753,8 +767,19 @@ func (a *App) Open(path string) error {
 	// 而本地文件在 B 站上没有对应的东西。留着上一首在线歌的话，播放条上
 	// 那枚「在 B 站打开」会指向另一首歌。
 	a.pending = Item{}
+	title := a.title
 	wake := a.wake
 	a.mu.Unlock()
+
+	// 念出去（无障碍）：**换了一首**这件事读屏软件用户看不见——他们没有耳朵
+	// 去等歌响起来，而界面上那行歌名在播放条上，不在焦点上。
+	//
+	// ⚠️ **本地文件不说「加载完成」**：它是同步开的，没有「还在准备」那一段
+	// （见上面 `endLoadingLocked` 那句注释），而在线那一段是有的（见 online.go）。
+	//
+	// ⚠️ **歌名是解锁前拿的**：解锁之后再读 `a.title` 是竞态（别的 goroutine
+	// 可能正在换歌）。
+	a.announce("正在放《" + title + "》")
 
 	// 在途的那条在线流也掐掉（代次加了，那一头会自己走人——但它自己走人要等
 	// 网络那一头先回话，而这里可以立刻停）。

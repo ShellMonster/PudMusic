@@ -2936,6 +2936,54 @@ var Items = []Item{
 		},
 	},
 	{
+		// 🔴 **这一条的错法也是「静默」的**：读屏软件用户**听不见**任何东西——
+		// 界面画得出来、测试全绿，而「下载下完了」「这一首放起来了」「搜出结果
+		// 了」这些事**一句也没有人告诉他**。
+		//
+		// 而它们在画面上**一个字都不占**：下载完成只是下载记录页上那一列多了一
+		// 枚绿勾，「这一首放起来了」只是播放条上多了一行歌名——而焦点不在那儿。
+		//
+		// 框架给的那个口子就是 `Context.Announce`（MyGo 自己的 toast 会自动念
+		// 一句，但我们用的是自己那套 toast，见 `internal/ui/toast.go`），而我们
+		// 此前**一个都没用**。
+		Category: Platform,
+		// 票 #321（2026-10-24）。
+		//
+		// ⚠️ **念和看是两件事**：`.Label(...)` 给的是「**这一枚是什么**」（那一枚
+		// 按钮叫什么、那一行是谁），播报给的是「**刚刚发生了什么**」。`internal/ui`
+		// 里那 95 处 `.Label`（带参数的那些才是给读屏软件的名字）一处都不许改成
+		// 播报——那会让读屏软件用户听到一屏控件名字，而**一件正在发生的事一句
+		// 也没有**。
+		Spec: "状态变化被接到平台的无障碍播报上：加载完成、下载完成、播放失败、搜索完成各念一遍；同一件事一帧里只念一遍；`.Label`（这一枚是什么）一处都没改成播报",
+		Tests: []string{
+			// 加载完成（在线那一段真的走完了取流 + 开解码器）和播放失败。
+			"TestALoadedTrackIsReadOut",
+			"TestAPlaybackFailureIsReadOut",
+			// 下载完成：下载队列那一头报一声，应用层念一句。
+			"TestTheCallbackIsToldWhenAnItemIsDone",
+			"TestADownloadThatFinishedIsReadOut",
+			// 搜索完成（**真的那一支**：B 站给的命中总数，不是屏幕上那几行）。
+			"TestASearchThatFoundSomethingIsReadOut",
+			"TestTheSearchTotalIsTheOneThatIsAnnounced",
+			// 快捷键录上了（界面上一个字都没有的那一种）。
+			"TestARecordedShortcutIsReadOut",
+			// 「一句只念一遍」（一帧建好几遍视图）+ 「提示也念一遍」。
+			"TestTheSameThingIsNotReadOutTwice",
+			"TestAToastIsAlsoReadOut",
+			// **接线那一条**：应用层发生了一件事 → 界面层念出来（中间就靠
+			// `AddAnnounce` 那一行，删掉它编译照样过、别的用例照样绿）。
+			"TestAPlayingFailureReachesTheScreenReaderThroughTheRealWiring",
+			// 看不见的那一扇窗不攒着；攒着的那几摊**有上限也有过期**。
+			"TestAnAnnouncementIsNotKeptWhileTheWindowIsInvisible",
+			"TestAnOldAnnouncementIsNotReadOut",
+			"TestAtMostThreeAnnouncementsAreKept",
+			// 念出去的是**人话**，不是英文系统错（读屏软件是逐字念的）。
+			"TestTheAnnouncedErrorIsNotTheRawGoError",
+			// **`.Label` 一处都没动**（这是这一票的另一半）。
+			"TestTheLabelsAreNotTurnedIntoAnnouncements",
+		},
+	},
+	{
 		// 🔴 **这一条的错法也是「静默」的**：页头右侧那枚开关**一个字都没有**
 		// （`Label` 是给读屏和测试器找它用的名字，屏幕上不画），于是用户看见
 		// 一枚绿绿的旋钮，却不知道拨它会不会把自己的播放记录报上去——那是**写
