@@ -183,6 +183,13 @@ func TestTheKeyboardRingComesBackAfterAMouseClickOnThePage(t *testing.T) {
 //
 // ⚠️ **不看「离主色多近」**：焦点环是半透明的，它离底色比离主色近；而主色换一个
 // 色相（绿的、黄的）那一套判据就飘了。这里量的是「和底色差了多少」。
+//
+// ⚠️ **行的上沿要**取整**（`round32`），不是截断**（`int`）：行的 Y 可能是小数
+// （列表容器在页面里的位置是算出来的，票 #290 给稍后再看页头加了一枚 32 高的
+// 按钮之后，那一页的行就落在 286.8 这样的位置上）。截断取到的是**行上面**那一
+// 像素（上一行的底色），于是「没有环」的那一行也会被当成有环——判据就废了。
+// 取整取到的是行自己的上沿：没有环时那两处是同一个底色，有环时上沿那一处是
+// 环的那条线。
 func rowHasRing(t *testing.T, tt *ui.Tester, title string) bool {
 	t.Helper()
 	r, ok := tt.Find(title)
@@ -190,7 +197,7 @@ func rowHasRing(t *testing.T, tt *ui.Tester, title string) bool {
 		t.Fatalf("画面上找不到「%s」，文字有 %q", title, tt.Texts())
 	}
 	x := int(r.X + r.W/2)
-	y := int(r.Y)
+	y := round32(r.Y)
 	if x < 0 || x >= 1200 || y < 0 || y+6 >= 800 {
 		t.Fatalf("「%s」那一行在画面外", title)
 	}

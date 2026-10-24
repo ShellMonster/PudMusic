@@ -170,23 +170,42 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 	})
 }
 
-// viewQueueHeader 是顶上那一条：标题 + 定位 + 清空。两个键只在队列非空时才摆
+// viewQueueHeader 是顶上那一条：标题 + 条数 + 定位 + 清空。两个键只在队列非空时才摆
 // （Biu 的 `Boolean(pureList?.length) && …`）。
 //
 // 字号照上游（`music-playlist-drawer/index.tsx:131-133`）：标题是 `h3`，也就是
 // `text-lg` = 18 / 400（Preflight 把标题字重重置成 inherit，不是加粗）；条数是
 // 同一处的 `text-sm` = 14。原来这里是 15 / 700 和 12——标题小一号还重两档，读起来
 // 像一句标语。
+//
+// ⚠️ **条数要紧跟标题**（上游那是一个 `h3` 里的 `span`，中间没有空隙）：原来
+// 它是标题旁边一个独立的 Text，而标题那一格 `.Grow(1)`——于是它被推到面板最右边，
+// 离标题 192 px，读起来像「播放列表」和另一个控件各说各的。
 func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 	rows := s.queueRows
 
 	ui.Row(c).Key("queue-header").Height(queueHeaderHeight).FillWidth().
 		PaddingY(space.Px10).PaddingX(space.Px12).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "播放列表").FontSize(scale.Font(c, scale.Size18)).TextColor(t.Text).Grow(1)
+		// 标题和条数是**一个**东西：上游是 `<h3>播放列表<span …>({n})</span></h3>`
+		// （`music-playlist-drawer/index.tsx:131-133`），条数紧跟在标题后面、
+		// 中间没有空隙，读起来是「播放列表(3)」。
+		//
+		// ⚠️ **原来条数是标题旁边一个独立的 Text，而标题那一格 `.Grow(1)`**——
+		// 标题把剩下的地方吃掉，条数于是被推到面板最右边（实测离标题 192 px，
+		// 紧挨着「定位 / 清空」两枚图标）。这里把两样摆进**同一格**：基线对齐
+		// （上游那是同一行文字里的一个 span，基线本来就齐），字号还是 18 / 14。
+		ui.Row(c).AlignItems(ui.Baseline).Gap(space.None).Children(func() {
+			ui.Text(c, "播放列表").FontSize(scale.Font(c, scale.Size18)).TextColor(t.Text)
+			if len(rows) == 0 {
+				return
+			}
+			ui.Text(c, "("+strconv.Itoa(len(rows))+")").FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted)
+		})
 		if len(rows) == 0 {
 			return
 		}
-		ui.Text(c, "("+strconv.Itoa(len(rows))+")").FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted)
+		// 剩下的地方让给两枚图标——上游是 `justify-between` 的右半边。
+		ui.Spacer(c)
 
 		// 逐字照 Biu 那一段（`components/music-playlist-drawer/index.tsx:137-141`）：
 		// 两个 16px 的 `IconButton`（`RiFocus3Line` / `RiDeleteBinLine`）各带

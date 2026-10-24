@@ -269,20 +269,14 @@ func (s *Shell) viewDownloadList(c *ui.Context, _ *ui.Route) {
 		AlignItems(ui.Stretch).Children(func() {
 		d.viewToolbar(c, s)
 
-		// 筛选那一排。⚠️ **整个队列都是空的时候不摆**：那时候它只能筛出一个空
-		// 列表，而下面那句话（`noDownloads`）已经说清了「怎么才能不空」——
-		// 在一排开关前面加一句「这排开关什么也筛不出来」是白占一行。
-		if len(d.all) > 0 {
-			d.viewFilter(c)
-		}
-
-		// 一条记录都没有时画的是**这一页**的空状态（routes 表里
-		// `/download-list` 那一条，出处和其余 13 条写在一起）。不用表格自己的
-		// 空行：那一行只有一句「暂无内容」，说不了「怎么才能不空」。
+		// ⚠️ **整个队列都是空的时候**：没有筛选排，也没有卡片。那一格是**这一页**
+		// 的空状态（「怎么才能不空」，见 `downloadsEmptyState`）——而筛选排在队列
+		// 空的时候只能筛出一个空列表，在它前面加一句「这排开关什么也筛不出来」
+		// 是白占一行。
 		//
-		// ⚠️ 这一支是 return，不是少画表格：`ui.Table` 哪怕 n=0 也会画表头，
-		// 于是空着的时候页面上还杵着五个列名 —— 比空状态更让人以为这一页坏了。
-		if len(d.rows) == 0 {
+		// ⚠️ **队列不空、但筛完这一档是空的时候，筛选排仍然要摆**（它在卡片
+		// 里面，见 `viewTable`）：用户得能换回「全部」去。
+		if len(d.all) == 0 {
 			s.viewEmpty(c, "downloads:empty", s.downloadsEmptyState(d))
 			return
 		}
@@ -399,6 +393,11 @@ func (d *downloadsPage) viewTable(c *ui.Context, s *Shell) {
 	// 没有它的话整张表直接铺在页面底色上，一眼就是「裸表格」——验收项点名的
 	// 就是这一层。
 	//
+	// ⚠️ **筛选排在卡片里面**（上游 `download-list/index.tsx:113-135`：筛选排是
+	// `Table` 的 `topContent`，而那张 `Table` 在 `Card` 里——所以它必然在卡片
+	// 里面）。原来筛选排摆在卡片**外面**：卡片的边线在 y=135、筛选排在
+	// y=108..123，两样是分开的；而上游卡片包住的是「筛选 + 表头 + 表体」三样。
+	//
 	// ⚠️ **底色取 `t.Background`**（上游 HeroUI 的 `bg-content1`）：`content1` 是
 	// **#FFFFFF（浅）/ #18181b（深）**——正好是我们 `t.Background` 的两个值。
 	// 于是**深色下这张卡和页面底色几乎同色，靠那圈影分层**（DESIGN.md §四：
@@ -415,6 +414,22 @@ func (d *downloadsPage) viewTable(c *ui.Context, s *Shell) {
 	card := shadow.HeroSmall(ui.Column(c).Grow(1).FillWidth().Radius(t.Radius).
 		Background(t.Background).Padding(t.Space(4)), t)
 	card.Children(func() {
+		// ⚠️ **筛选排在卡片里面**（理由见上面那段）：原来它在卡片外面，于是
+		// 「全部 / 音频 / 视频」那一排和它下面那张卡看着是两块不相干的东西。
+		//
+		// ⚠️ **队列整个是空的时候这一排不摆**（那一支在 `viewDownloadList` 里就
+		// 走空状态了，压根到不了这里）。
+		d.viewFilter(c)
+
+		// 筛完了这一档什么都没有：空状态**在卡片里面**（上游的 `emptyContent`
+		// 也在表格里，而表格在卡片里）。
+		//
+		// ⚠️ **不用表格自己的空行**：那一行只有一句「暂无内容」，说不了「怎么
+		// 才能不空」。
+		if len(d.rows) == 0 {
+			s.viewEmpty(c, "downloads:empty", s.downloadsEmptyState(d))
+			return
+		}
 		e := ui.Table(c, &d.state, downloadColumns, len(d.rows), func(row, col int) {
 			d.viewCell(c, s, row, col)
 		}).Grow(1)
