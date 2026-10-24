@@ -679,6 +679,44 @@ func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc s
 // 共用的控件
 // ─────────────────────────────────────────────────────────────────────────────
 
+// segmentOption 是分段控件的一档：一个标签 + 一枚图标。
+//
+// ⚠️ **图标名是 `icons.go` 里的常量**，不是随手写的路径：名字写错时 `icon()`
+// 返回 nil，而 `ui.Icon(nil)` 画出来是一格空白——画面上和「这一档本来就没有
+// 图标」**一模一样**（`icons_test.go` 那两条钉着每一个名字都在）。
+type segmentOption struct {
+	label string
+	// icon 是那一档的图标名（`icons.go` 的常量）。**空串 = 不画图标**。
+	icon string
+}
+
+// segmentButton 画分段控件的一档：一枚 18px 图标 + 一个标签。
+//
+// ⚠️ **图标那一档的内边距比纯文字那一档小**（10 而不是 14）：加了图标之后
+// 「跟随系统」那一档要 18 + 6 + 56 + 20 = **100 像素**，而控件列在
+// 「窗口 900 + 侧栏拉到 480 + 字号 1.4 倍」那一档只有 320 宽——三档加起来
+// **320.8，差 0.8 像素就溢出**（溢出的症状是右边那一档被推出内容区，见
+// `settingsControlFitW` 的注释）。内边距收到 10 之后那一档是 296.8。
+//
+// ⚠️ **图标是 18，不跟字号缩放走**：上游那两排的图标是写死的 `size={18}`
+// （`system-settings.tsx:77` / `:127`），而字是跟系统缩放走的——照上游就
+// 18 不动。跟着缩放的话 1.4 倍时那枚图标是 25，而「跟随系统」那一档本来
+// 就最宽。
+func segmentButton(c *ui.Context, opt segmentOption) ui.Element {
+	if opt.icon == "" {
+		return flatButton(c, opt.label)
+	}
+	t := c.Theme()
+	b := flatButton(c, "").Padding(t.Space(1.5), t.Space(2.5))
+	// ⚠️ **图标和字是按钮的两个孩子**（不是一个「图标 + 字」的复合控件）：
+	// 图标的颜色从祖先的文字色继承（`mygo/ui/svg.go` 的 `coreIcon`），而
+	// 选中那一档是 `flatSolid` 铺的实心主色底 + `t.AccentText` 字——于是
+	// 图标也跟着变成 `AccentText`（压在主色底上一定读得出来）。
+	b.Children(func() { ui.Icon(c, icon(opt.icon)).FontSize(iconMd) })
+	b.Children(func() { ui.Text(c, opt.label).SingleLine() })
+	return b
+}
+
 // settingsSegment 是设置页的分段控件：一排互斥的档位，选中的那一档铺实心主色底。
 //
 // 🔴 **设置页只有这一种分段控件**（票 #240 / UI 报告 §4 的 F-17）。
@@ -699,8 +737,16 @@ func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc s
 //     滑动动画的是**我们自己的 `mainTabs`**（票 #171），这一页从来没用过它。
 //   - **它填不满控件列那一格**：`ui.Segmented` 的宽度按内容算（`Shrink(0)`），
 //     换成它，那一列的左边缘就又落在两个位置上——那正是票 #235 刚消灭掉的那件事。
-//   - **「数据显示样式」那一格下面就是预览图**，选中的那张**描主色边**
-//     （`previewOne`）；换成白色滑块，同一格里就有两种「选中」信号。
+//   - **「数据显示样式」那一格下面就是预览图**，选中的那张**不再描主色边**
+//     （`previewOne`）：药丸已经是那一格里的选中信号了，预览再描一圈主色，
+//     **同一格里就有两种「选中」信号**（票 #240 记过同一件事的另一半）。
+//
+// # 图标
+//
+// 每一档都带一枚 18px 图标（上游那两排就是「图标 + 文字」，见
+// `system-settings.tsx:56-153`）。**图标由这一处统一画**（`segmentButton`），
+// 档位表里只写名字——两排要是各画各的，过一阵子就分叉成两种样子，而那种分叉
+// 在界面上只是「这一枚比旁边那枚淡一点」，没人当它坏了。
 //
 // # 宽度跟着字号缩放走
 //
@@ -719,7 +765,7 @@ func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc s
 // 0 = **填满父那一格**：「数据显示样式」那一格外面还套着一列预览（切换在上、
 // 预览在下），两样东西必须同宽，而那一格收窄时预览要跟着收窄。别的两处给
 // 控件列的基准宽。
-func (s *Shell) settingsSegment(c *ui.Context, key, group string, w float32, labels []string, chosen int, ro bool, pick func(i int)) {
+func (s *Shell) settingsSegment(c *ui.Context, key, group string, w float32, opts []segmentOption, chosen int, ro bool, pick func(i int)) {
 	// ⚠️ **那个 `Label(group)` 是给这一排起个组名**：读屏软件要知道这几个键是一组
 	// （互斥的几档），而 `Tester.Find` 也靠它量这一排的盒子——控件列的左边是不是
 	// 一条线，就靠它断（见 `TestTheSettingsControlsShareOneBaseline`）。
@@ -738,8 +784,8 @@ func (s *Shell) settingsSegment(c *ui.Context, key, group string, w float32, lab
 	// 系统」那一档会被裁成半个词（那个常量的注释写着整段来由）。
 	row = row.MinWidth(settingsControlMinW)
 	row.Children(func() {
-		for i, text := range labels {
-			b := flatButton(c, text).Grow(1).Radius(t.Radius).Disabled(ro)
+		for i, opt := range opts {
+			b := segmentButton(c, opt).Grow(1).Radius(t.Radius).Disabled(ro)
 			if i == chosen {
 				b = s.pickSelected(c, b, ro)
 			}
@@ -770,15 +816,15 @@ func (s *Shell) settingsSegment(c *ui.Context, key, group string, w float32, lab
 // `bg-primary` 实心底 + `text-primary-foreground`——所以这一档是照上游的。
 func (s *Shell) pickTheme(c *ui.Context, st app.Settings, ro bool) {
 	chosen := 0
-	labels := make([]string, len(themeModes))
+	opts := make([]segmentOption, len(themeModes))
 	for i, m := range themeModes {
-		labels[i] = m.label
+		opts[i] = segmentOption{label: m.label, icon: m.icon}
 		if m.mode == st.ThemeMode {
 			chosen = i
 		}
 	}
 	s.settingsSegment(c, "setting:themeMode", "主题模式", scale.Font(c, settingsControlW),
-		labels, chosen, ro, func(i int) {
+		opts, chosen, ro, func(i int) {
 			mode := themeModes[i].mode
 			s.applySetting("主题", func(cur *app.Settings) { cur.ThemeMode = mode })
 		})
@@ -817,15 +863,22 @@ func (s *Shell) pickSelected(c *ui.Context, b ui.Element, ro bool) ui.Element {
 // 设置页只有一种分段控件（票 #240 / 报告 F-17）。
 func (s *Shell) pickCloseWindow(c *ui.Context, st app.Settings, ro bool) {
 	chosen := 0
-	labels := make([]string, len(closeWindowOptions))
+	opts := make([]segmentOption, len(closeWindowOptions))
 	for i, opt := range closeWindowOptions {
-		labels[i] = opt.label
+		// ⚠️ **这一排没有图标**：那两档没有配得上语义的图标——「隐藏到托盘」
+		// 在 macOS 上根本不是托盘（那边不建托盘图标，见 `pickTrayNote`），
+		// 画一个托盘图形就是**画了一件不会发生的事**；而「直接退出」能配
+		// 退出那一枚，可这一排只有它有图标的话，另一档空着更难看。
+		//
+		// 上游那两档本来也没有图标（`settings/index.tsx` 里那一行是横排单选，
+		// 只有文字），所以这不是「跟上游不一样」，是「上游也就这样」。
+		opts[i] = segmentOption{label: opt.label}
 		if opt.value == st.CloseWindowOption {
 			chosen = i
 		}
 	}
 	s.settingsSegment(c, "setting:closeWindowOption", "窗口关闭方式", scale.Font(c, settingsControlW),
-		labels, chosen, ro, func(i int) {
+		opts, chosen, ro, func(i int) {
 			v := closeWindowOptions[i].value
 			s.applySetting("窗口关闭", func(cur *app.Settings) { cur.CloseWindowOption = v })
 		})
