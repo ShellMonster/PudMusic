@@ -22,7 +22,9 @@ package ui
 import (
 	"image"
 	"image/color"
+	"math"
 	"net/http"
+	"runtime"
 	"testing"
 	"time"
 
@@ -156,7 +158,7 @@ func TestSwitchingToATabThatIsStillLoadingKeepsTheOldContentOnScreen(t *testing.
 
 	// 放它过去：那一屏自己换掉（这一次**有**过渡，见上面那一条）。
 	close(gate)
-	waitFrames(t, tt, "「流行」那一档拉回来了", func() bool {
+	waitFramesClock(t, tt, "「流行」那一档拉回来了", func() bool {
 		return showsText(tt, "流行 榜上的歌")
 	})
 	if showsText(tt, "音乐 推的第一首") {
@@ -236,6 +238,273 @@ func TestTheTransitionDoesNotCostAFrameEveryFrame(t *testing.T) {
 	if tt.FramePending() {
 		t.Error("稳态下还在要帧")
 	}
+}
+
+// TestTheOldContentLeavesBeforeTheNewOneArrives 钉住**中间不同时画两层**
+// （票 #238 的 F1：交叉淡入淡出在头两三帧把旧内容和新内容同时画在画面上）。
+//
+// # 判据是**画面上有什么**
+//
+// 切 Tab 之后：旧的那一档的字**还在**，新的一档的字**不在**。
+//
+// ⚠️ **旧的那一块必须还在**（而不只是「新的不在」）：交叉淡入淡出的时候，旧的
+// 那一块变成了框架**复制出来的那一份**（`mygo/ui/transition.go` 的 `ghostOf`），
+// 而那一份是**不可见的**（`flagInert`）——所以它的字**不在画面上**，而新的那一
+// 块**已经在**（只是淡入）。那个实现在「新的不在」这一条上是绿的，所以这一条
+// 少不得。
+//
+// ⚠️ **一路推到过渡走完**：每一帧都查一遍「两块不在同一帧里」。判据是**状态**
+// （哪一档的字在画面上），不是时间。
+func TestTheOldContentLeavesBeforeTheNewOneArrives(t *testing.T) {
+	_, tt := newHome(t, fullSongs())
+	old := songName(homeTabs[0], 1)
+	fresh := songName(homeTabs[1], 1)
+
+	if err := tt.Click(homeTabs[1]); err != nil {
+		t.Fatalf("点不到 %q 那一档：%v，文字有 %q", homeTabs[1], err, tt.Texts())
+	}
+	// 切之后的第一帧：旧的那一块还在（它在淡出），新的那一块**还没建**。
+	tt.Frame()
+	if !shows(tt, old) {
+		t.Errorf("切 Tab 之后的第一帧上旧的那一块（%q）不在画面上了——\n"+
+			"它应该**先淡出**，新的那一块后进（DESIGN.md §五《规则》第 10 条：\n"+
+			"删除时透明度先变、添加时透明度后变）", old)
+	}
+	if shows(tt, fresh) {
+		t.Errorf("切 Tab 之后的第一帧上新的那一块（%q）已经在画面上了——\n"+
+			"旧的和新的**同时**画着，那就是重影", fresh)
+	}
+
+	// 一路推到过渡走完：任何一帧上都不能两块同时在。
+	for i := range 40 {
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+		oldShown, newShown := shows(tt, old), shows(tt, fresh)
+		if oldShown && newShown {
+			t.Fatalf("第 %d 帧上旧的那一块（%q）和新的那一块（%q）**同时**在画面上——\n"+
+				"那是重影（DESIGN.md §五《规则》第 10 条）", i, old, fresh)
+		}
+		if !oldShown && newShown {
+			// 换完了：旧的那一块没了，新的那一块在。
+			return
+		}
+	}
+	t.Fatalf("推了 40 帧（640ms），过渡还没走完：旧的那一块 %q 和新的那一块 %q "+
+		"都不在画面上，文字有 %q", old, fresh, tt.Texts())
+}
+
+// TestThePopTabAppearsWhileTheNewMusicIsStillLoading 钉住**「流行」那一档在
+// 「新歌速递」还在拉的时候就出现**（票 #238 的 F3）。
+//
+// # 走的是真路子
+//
+// 假 B 站把**新歌速递**那一趟按在门口不放，而**音乐榜**那一趟放行——于是「流行」
+// 自己的歌到了，新歌速递还在拉。此前这一档**整档都不出现**（新歌速递也算进了
+// 「这一档齐了没有」），屏幕上一直是上一档的内容，而**全程没有任何反馈**。
+//
+// # 两件事
+//
+//  1. **「流行」那一档出现了**（它自己的歌在画面上）；
+//  2. **新歌速递那一块自己说它在拉**（"正在加载新歌速递"）——用户看得见**哪一
+//     块在等**。
+func TestThePopTabAppearsWhileTheNewMusicIsStillLoading(t *testing.T) {
+	b := newUIExplore(t)
+	homeArchives(b)
+
+	// 把「新歌速递」那一趟按住在门口（**不是**音乐榜那一趟——那一趟到了，「流行」
+	// 自己的歌也就到了）。
+	gate := make(chan struct{})
+	b.mu.Lock()
+	newMusic := b.handlers[uiHomeNewMusic]
+	b.mu.Unlock()
+	b.on(uiHomeNewMusic, func(w http.ResponseWriter, r *http.Request) {
+		<-gate
+		newMusic(w, r)
+	})
+	t.Cleanup(func() {
+		select {
+		case <-gate:
+		default:
+			close(gate)
+		}
+	})
+
+	_, tt, _ := newHomeShell(t, b)
+	waitFrames(t, tt, "第一档拉回来了", func() bool { return showsText(tt, "音乐 推的第一首") })
+
+	if err := tt.Click(homeTabs[homePopTab]); err != nil {
+		t.Fatalf("点不到 %q 那一档：%v，文字有 %q", homeTabs[homePopTab], err, tt.Texts())
+	}
+	// ⚠️ **推着钟等**：切 Tab 那一段过渡是按钟走的（旧的先淡出、新的后淡进），
+	// 而新歌速递还在拉的时候那一档**照样出现**——它不等新歌速递。
+	waitFramesClock(t, tt, "「流行」那一档出现了", func() bool {
+		return showsText(tt, "流行 榜上的歌")
+	})
+	// 而新歌速递那一块**自己说它在拉**——用户看得见哪一块在等。
+	if !showsText(tt, "正在加载新歌速递") {
+		t.Errorf("切到「流行」而新歌速递还在拉的时候，界面上没有说哪一块在等，文字有 %q",
+			tt.Texts())
+	}
+	// ⚠️ **旧的那一档不许还在**：这一档已经出现了，屏幕上不该还有上一档的歌。
+	if showsText(tt, "音乐 推的第一首") {
+		t.Errorf("「流行」那一档已经出现了，画面上还留着上一档的歌，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheFirstFrameAfterSwitchingTabsCostsNoMoreThanTheSteadyState 钉住
+// **切 Tab 的第一帧没有多分配一笔**（票 #238 的 F4）。
+//
+// # 盯的是哪一笔
+//
+// 框架的 `Exit` 那一半是**复制一份上一帧的样子**（`mygo/ui/transition.go` 的
+// `ghostOf`），而那份复制品要**重新排一遍旧列表的文字**——实测那一下是
+// **204 KB / 335 次**（稳态是 6.8 KB / 205 次，差 30 倍）。现在退场那一段**不写
+// `Exit`**（旧的那一块照常建，淡出是它自己的不透明度），所以那一笔没了。
+//
+// ⚠️ **判据是分配，不是时间**（AGENTS.md §2）：每帧分配多少次是「这一帧建了
+// 多少个对象」的计数，不受机器快慢影响。
+//
+// ⚠️ **量的是「点完之后的下一帧」**：点一下那一下本身要处理输入、要起主 Tab
+// 滑块那个弹簧，量它的话数字被别的东西带着走（那一笔两个实现都有）。
+func TestTheFirstFrameAfterSwitchingTabsCostsNoMoreThanTheSteadyState(t *testing.T) {
+	s, tt := newHome(t, fullSongs())
+	// 稳态：先量几帧（量之前先画几帧，把「只有头几帧才有」的一次性开销付掉）。
+	for range 8 {
+		tt.Frame()
+	}
+	steady, _ := measureHomeFrameCost(t, s, tt, 10, false)
+
+	// ⚠️ **切三次，取最小的那一次**：测量窗口里可能有别的线程的一次性开销
+	// （音频解码器那一笔约 130 KB，见 framebudget_test.go 那一段），而那种开销
+	// **只会加不会减**——取最小就把它挡在外面了。
+	first := homeFirstFrameCost(t, s, tt, []int{1, 2, 1})
+
+	// ⚠️ **上限给得宽**：分配次数有 ±1 的后台噪声（别的线程偶尔分一点），而
+	// 这一帧本来就会因为主 Tab 滑块那个弹簧多几个。
+	//
+	// ⚠️ **上限是照着旧实现量的**：旧的那一帧是 536 次 / 204.5 KB（稳态的 2.6
+	// 倍 / 30 倍），所以这两个上限（2 倍 / 10 倍）都拦得住它。
+	const allocsFactor = 2.0
+	const bytesFactor = 10.0
+	if first.allocs > steady.allocs*allocsFactor {
+		t.Errorf("切 Tab 的第一帧分配了 %.0f 次，稳态是 %.0f 次（上限 %.1f 倍）——\n"+
+			"那一帧里**复制了一份上一帧的样子**（框架的 `Exit` 那一半），\n"+
+			"而那份复制品要重新排一遍旧列表的文字",
+			first.allocs, steady.allocs, allocsFactor)
+	}
+	if first.bytes > steady.bytes*bytesFactor {
+		t.Errorf("切 Tab 的第一帧分配了 %.0f 字节，稳态是 %.0f 字节（上限 %.0f 倍）——\n"+
+			"那一帧里**复制了一份上一帧的样子**（框架的 `Exit` 那一半），\n"+
+			"而那份复制品要重新排一遍旧列表的文字（实测那一笔是 204 KB）",
+			first.bytes, steady.bytes, bytesFactor)
+	}
+}
+
+// TestTheBodyTransitionDoesNotCopyTheOldContent 钉住**退场那一段不复制旧内容**
+// （票 #238 的 F4 的根因）。
+//
+// ⚠️ **这是白盒**：它盯的是那个过渡本身写没写 `Exit`。
+//
+// 框架的 `Exit` 那一半是**复制一份上一帧的样子**再让它走完（`mygo/ui/
+// transition.go` 的 `ghostOf`），而那份复制品要**重新排一遍旧列表的文字**——
+// 实测那一下是 **204 KB**（切 Tab 之后的第一帧）。不写 `Exit`，退场那一段里旧
+// 的那一块**照常建**（它就是屏幕上那一块），淡出是**它自己的不透明度**。
+//
+// ⚠️ **`Enter` 的不透明度是 1 而不是 0**：淡入是**我们自己**算的（见
+// homepage_transition.go 的 `homeFadeInCurve`），而框架这一半只管**位置**
+// （升上来 8 DIP）。写成 0 的话两边的淡入会**叠乘**——新的那一块会淡入两遍。
+func TestTheBodyTransitionDoesNotCopyTheOldContent(t *testing.T) {
+	if homeBodyTransition.Exit != nil {
+		t.Errorf("内容那一块的过渡还写着 `Exit`——框架会复制一份上一帧的样子，\n"+
+			"而那份复制品要重新排一遍旧列表的文字（实测 204 KB），\n"+
+			"而且它和新的那一块**同时在画面上**（重影）。\n"+
+			"退场那一段要改成**旧的那一块自己的不透明度**（见 homepage_transition.go）")
+	}
+	if homeBodyTransition.Enter == nil {
+		t.Fatal("内容那一块的过渡没有 `Enter`——新的那一块不会升上来")
+	}
+	if homeBodyTransition.Enter.Opacity != 1 {
+		t.Errorf("内容那一块的 `Enter` 不透明度是 %v（want 1）——\n"+
+			"淡入是**我们自己**算的（`homeFadeInCurve`），框架这一半只管位置；\n"+
+			"写成 0 的话两边的淡入会叠乘，新的那一块会淡入两遍",
+			homeBodyTransition.Enter.Opacity)
+	}
+}
+
+// homeFirstFrameCost 量「点一下之后的下一帧」的分配，取几次里**最小**的那个。
+//
+// ⚠️ **每次切换之间都把那一段过渡走完**：不然第二次切换会落在上一次的中途，
+// 量到的是「交接那一帧」（新的那一块第一次建，1.28 MB），不是「第一帧」。
+func homeFirstFrameCost(t *testing.T, s *Shell, tt *mygoui.Tester, tabs []int) homeFrameCost {
+	t.Helper()
+	best := homeFrameCost{allocs: math.MaxFloat64, bytes: math.MaxFloat64}
+	for _, tab := range tabs {
+		if err := tt.Click(homeTabs[tab]); err != nil {
+			t.Fatalf("点不到 %q 那一档：%v", homeTabs[tab], err)
+		}
+		cost, frames := measureHomeFrameCost(t, s, tt, 1, true)
+		// ⚠️ **必须正好是一帧**：Tester 的 `Frame()` 在界面还在要帧的时候会一次画
+		// 二十帧（`mygo/ui/headless.go` 的 `settle`），而那一段过渡正在要帧——
+		// 摊平了的话，那一笔**一次性的**开销就被摊薄成二十分之一，量不出来。
+		if frames != 1 {
+			t.Fatalf("这一批画了 %.0f 帧（want 1）——量不到「第一帧」那一下", frames)
+		}
+		if cost.allocs < best.allocs {
+			best.allocs = cost.allocs
+		}
+		if cost.bytes < best.bytes {
+			best.bytes = cost.bytes
+		}
+		// 把那一段过渡走完，再切下一档。
+		tt.Advance(homeFadeOut + homeFadeIn + 100*time.Millisecond)
+		tt.Frame()
+	}
+	return best
+}
+
+// homeFrameCost 是量出来的一帧的分配。
+type homeFrameCost struct {
+	allocs float64
+	bytes  float64
+}
+
+// measureHomeFrameCost 量 n 帧的平均分配，返回这一批画了几帧。
+//
+// ⚠️ **单核**（`GOMAXPROCS=1`）：免得后台线程在测量窗口里被调度到，把**别的
+// 线程**的分配记到界面这一帧的账上（同 framebudget_test.go 的那三条约定）。
+//
+// ⚠️ **按「画了几遍首页」摊平**：Tester 的 `Frame()` 在界面还在要帧的时候会
+// **一次画二十帧**（`mygo/ui/headless.go` 的 `settle`）——稳态下界面不要帧，
+// 那是「一帧就是一帧」，而切 Tab 那一段过渡正在要帧。
+//
+// ⚠️ **advance 是「推钟画一帧」**：Tester 的钟站着不动，而 `Advance` 要等钟走到
+// **下一个刷新时刻**才画那一帧（`mygo/ui/headless.go` 的 `due`）——推 20ms 正好
+// 画一帧（刷新是 60Hz，也就是 16.7ms 一帧）。
+func measureHomeFrameCost(t *testing.T, s *Shell, tt *mygoui.Tester, n int, advance bool) (homeFrameCost, float64) {
+	t.Helper()
+	old := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(old)
+
+	s.builds = buildTally{}
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	for range n {
+		if advance {
+			tt.Advance(20 * time.Millisecond)
+		} else {
+			tt.Frame()
+		}
+	}
+	runtime.ReadMemStats(&after)
+	frames := float64(s.builds.home)
+	if frames <= 0 {
+		t.Fatalf("这一批里首页一帧都没建——量不到东西")
+	}
+	return homeFrameCost{
+		allocs: float64(after.Mallocs-before.Mallocs) / frames,
+		bytes:  float64(after.TotalAlloc-before.TotalAlloc) / frames,
+	}, frames
 }
 
 // 免得「这一组用不到」被当成「没写」：那个 `snapshot` 是满屏那一族留下的
