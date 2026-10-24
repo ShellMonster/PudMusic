@@ -27,6 +27,11 @@ import (
 //
 // ⚠️ 被 mock 掉的是「B 站什么时候让地址失效」，**不是**换流逻辑本身：
 // 续传、Range、备份地址轮换、长度比对都在真的跑。
+//
+// ⚠️ **走重试路径的用例都挂了 `Backoff: fastBackoff()`**：默认的退避是
+// 1 秒 / 2 秒 / 4 秒（见 `stream_source_backoff_test.go`），用它的话这一包
+// 会慢二十多秒——而这一包要验的是「重试之后接得上」，不是「等了多久」。
+// 「等了多久」由那一组单独钉。
 
 // payload 造一段确定内容的字节。
 func payload(n int) []byte {
@@ -191,6 +196,7 @@ func TestRefetchContinuesFromTheSameByte(t *testing.T) {
 		URLs:    []string{srv.URL + "/v1.m4a"},
 		Client:  srv.Client(),
 		TempDir: t.TempDir(),
+		Backoff: fastBackoff(),
 		Refetch: func(_ context.Context, from int64) *StreamReply {
 			mu.Lock()
 			refetchAt, refetches = from, refetches+1
@@ -264,6 +270,7 @@ func TestRefetchTriesBackupURLsFirst(t *testing.T) {
 		URLs:    []string{srv.URL + "/main", srv.URL + "/backup"},
 		Client:  srv.Client(),
 		TempDir: t.TempDir(),
+		Backoff: fastBackoff(),
 		Refetch: func(context.Context, int64) *StreamReply {
 			refetches++
 			return nil
@@ -305,6 +312,7 @@ func TestRefetchRefusesAStreamOfAnotherLength(t *testing.T) {
 		Size:    total,
 		Client:  srv.Client(),
 		TempDir: t.TempDir(),
+		Backoff: fastBackoff(),
 		Refetch: func(context.Context, int64) *StreamReply {
 			return &StreamReply{URLs: []string{srv.URL + "/v2"}, Size: 9 << 10}
 		},
@@ -351,6 +359,7 @@ func TestSourceRecoversWhenTheServerIgnoresRange(t *testing.T) {
 		URLs:    []string{srv.URL},
 		Client:  srv.Client(),
 		TempDir: t.TempDir(),
+		Backoff: fastBackoff(),
 		Refetch: func(context.Context, int64) *StreamReply {
 			return &StreamReply{URLs: []string{srv.URL}, Size: total}
 		},
@@ -390,6 +399,7 @@ func TestAnExpiredURLSaysSoRatherThanTalkingAboutRanges(t *testing.T) {
 		URLs:    []string{srv.URL},
 		Client:  srv.Client(),
 		TempDir: t.TempDir(),
+		Backoff: fastBackoff(),
 		Refetch: func(context.Context, int64) *StreamReply { return nil },
 	})
 	if err != nil {
@@ -428,6 +438,7 @@ func TestTheStreamSaysWhyItStopped(t *testing.T) {
 		URLs:    []string{srv.URL},
 		Client:  srv.Client(),
 		TempDir: t.TempDir(),
+		Backoff: fastBackoff(),
 		Refetch: func(context.Context, int64) *StreamReply {
 			return &StreamReply{URLs: []string{srv.URL + "/again"}}
 		},
@@ -520,6 +531,7 @@ func TestRefetchRefusesAStreamOfAnotherLengthEvenWhenNobodySaidItsSize(t *testin
 			return &StreamReply{URLs: []string{srv.URL + "/v2"}}
 		},
 		TempDir: t.TempDir(),
+		Backoff: fastBackoff(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -587,6 +599,7 @@ func TestTheLengthGuardSurvivesASecondRefresh(t *testing.T) {
 		Size:       int64(len(first)),
 		Client:     srv.Client(),
 		TempDir:    t.TempDir(),
+		Backoff:    fastBackoff(),
 		MaxRefresh: 3,
 		Refetch: func(context.Context, int64) *StreamReply {
 			refetches.Add(1)
@@ -769,6 +782,7 @@ func TestWatchdogCutsADownloadThatStopsMakingProgress(t *testing.T) {
 		URLs:         []string{srv.URL},
 		Client:       srv.Client(),
 		TempDir:      t.TempDir(),
+		Backoff:      fastBackoff(),
 		StallTimeout: 300 * time.Millisecond,
 		MaxRefresh:   1,
 	})
@@ -852,6 +866,7 @@ func TestRefetchReportsTheNewQuality(t *testing.T) {
 		Size:    total,
 		Client:  srv.Client(),
 		TempDir: t.TempDir(),
+		Backoff: fastBackoff(),
 		Refetch: func(context.Context, int64) *StreamReply {
 			return &StreamReply{URLs: []string{srv.URL}, Size: total, Quality: "128K"}
 		},

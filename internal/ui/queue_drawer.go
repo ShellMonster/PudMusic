@@ -51,12 +51,13 @@ const (
 // 每一处都滑一遍就成噪音了。
 //
 // ⚠️ **上游不是「全站都关了动画」**：上游那 43 处 `disableAnimation` 是**一件一件
-// 挂在具体组件上的**（Modal 10 处、Button 10 处、Tooltip 6 处、Popover 5 处、
-// Dropdown 4 处、Switch 3 处、Checkbox 3 处、Select 1 处、Drawer 1 处），
-// 而**上游自己在满屏播放器里做了一个从右边滑进去的抽屉**
+// 挂在具体组件上的**（Modal 10 处、Button 10 处、Popover 6 处、Switch 4 处、
+// Tooltip 4 处、Checkbox 3 处、Dropdown 3 处、Select 1 处、Slider 1 处、
+// Drawer 1 处），而**上游自己在满屏播放器里做了一个从右边滑进去的抽屉**
 // （`src/components/full-screen-player/index.tsx:421-422`：`transition-all
 // duration-300 ease-out` + `translate-x-full → translate-x-0`）。
-// 详见 DESIGN.md §九那一段的出处与范围。
+// 那一段的出处与逐处清单见 DESIGN.md §五「上游那 43 处 `disableAnimation` 的
+// 范围」；§九那一段记的是「小浮层不加、大面板加」这个拍板。
 
 // queueSlideDuration 是抽屉滑入滑出要走多久：200ms。
 //
@@ -116,12 +117,13 @@ const (
 	drawerOut
 )
 
-// queueRowState 是抽屉里那一行**处在哪一档**（票 #319）。
+// queueRowState 是抽屉里那一行**处在哪一档**（票 #319，票 #352 补上一档）。
 //
-// 三档，因为「当前这一首」有两种状态，而用户要分得开：
+// 四档，因为「当前这一首」有三种状态，而用户要分得开：
 //
 //	正在放 / 暂停着 —— 高亮成「正在播放」（上游那一档）
-//	停住了 —— 说的是「停住了」，**不高亮**（见 `viewQueueList`）
+//	用户按了停止 —— 说的是「已停止」，**不高亮**（见 `viewQueueList`）
+//	队列自己走完了 —— 说的是「这一串放完了」，**不高亮**（同上）
 type queueRowState int
 
 const (
@@ -129,9 +131,17 @@ const (
 	queueRowPlain queueRowState = iota
 	// queueRowCurrent 是「当前这一首」：在放，或者暂停着。
 	queueRowCurrent
-	// queueRowStopped 是「当前这一首，但它停住了」：用户按了停止，或者顺序
-	// 播放走到队尾（那一句「这一串放完了」在播放条上，见 `app.State`）。
+	// queueRowStopped 是「当前这一首，**用户按了停止**」：这一首到此为止，
+	// 而**队列里还有歌**。
 	queueRowStopped
+	// queueRowDrained 是「当前这一首，**队列自己走完了**」：顺序播放走到队尾，
+	// **没有下一首了**（票 #352）。
+	//
+	// ⚠️ 它和 `queueRowStopped` **画面上一模一样**（都不高亮、字都取次要色），
+	// 差的是**副题那一句**：前者说「已停止」，这一档说「这一串放完了」——
+	// 同一屏上对同一件事不许说两句不同的话（播放条上那一句就是这么分的，
+	// 判据是同一个 `app.State.QueueFinished`）。
+	queueRowDrained
 )
 
 // queueRow 是抽屉里画出来的一行。
@@ -494,6 +504,15 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme) {
 		rows[cur].state = queueRowCurrent
 		if st.Stopped {
 			rows[cur].state = queueRowStopped
+			// ⚠️ **两种停住要分得开**（票 #352）：「用户按了停止」和「队列自己
+			// 走完了」在播放器那一边落在**同一档**上，而用户要分的是两件事——
+			// 队列里还有歌，还是没有下一首了。
+			//
+			// 判据和播放条上那一句是**同一个**（`app.State.QueueFinished`），
+			// 所以两处不会对同一件事说两句不同的话。
+			if st.QueueFinished {
+				rows[cur].state = queueRowDrained
+			}
 		}
 	}
 
@@ -749,7 +768,7 @@ func playlistTextColor(t *ui.Theme, state queueRowState) ui.Color {
 	switch state {
 	case queueRowCurrent:
 		return playingRowText(t)
-	case queueRowStopped:
+	case queueRowStopped, queueRowDrained:
 		return t.TextMuted
 	}
 	return t.Text
@@ -772,16 +791,24 @@ func playlistSubtitleColor(t *ui.Theme, state queueRowState) ui.Color {
 	return t.TextMuted
 }
 
-// queueRowSubtitle 是歌名下面那一行（票 #319）。
+// queueRowSubtitle 是歌名下面那一行（票 #319，票 #352 补上「两种停住」）。
 //
 // ⚠️ **停住的那一行说的是「停住了」，不是它的来源**：来源是这一首的属性，
 // 而「停住了」是**此刻的状态**——而这一行此刻正被用户盯着看「为什么没声了」。
 // 来源在别的行上还在，而这一刻用户要的是状态。
 //
 // ⚠️ **普通那一行仍然是来源**：那一行没在放，「停住了」对它没有意义。
+//
+// ⚠️ **两种停住说得不一样**（票 #352）：用户按了停止说「已停止」，队列自己走完
+// 了说「这一串放完了」——**和播放条上那一句是同一套判据**
+// （`app.State.QueueFinished`）。原来这一档一律说「已停止」，于是队列走完时
+// 同一屏上两句不同的话：播放条说「这一串放完了」，抽屉里说「已停止」。
 func queueRowSubtitle(item app.Item, state queueRowState) string {
-	if state == queueRowStopped {
+	switch state {
+	case queueRowStopped:
 		return "已停止"
+	case queueRowDrained:
+		return "这一串放完了"
 	}
 	return itemSubtitle(item)
 }

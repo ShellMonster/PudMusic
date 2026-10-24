@@ -140,6 +140,24 @@ type State struct {
 	// ⚠️ **它不是 `Title`**：`Title` 是「正在放的那首」，而取流这一趟里正在放
 	// 的还是上一首。用户要知道的是「我刚才点的那一首在准备」，不是上一首。
 	LoadingTitle string
+	// Reconnecting 是「**正在重连**」：断流之后应用在救这一首。
+	//
+	// 🔴 **它和 `Loading` 是两件事**，用户看到的差别很大：
+	//
+	//	Loading		这一首**还没放起来**（第一次点它）
+	//	Reconnecting	这一首**响过一半**，流断了，正在换地址 / 换流重开
+	//
+	// 后者以前界面上一个字都没有——用户看到的是「歌停着、界面不动、没有
+	// 字」，等多久都像应用死了（票 #315）。加上退避之后更糟：那 7 秒的
+	// 等待原本是**完全静默**的。
+	//
+	// ⚠️ **它必须有上限**：退避最多等 7 秒（`audio` 的 `defaultBackoff` 按
+	// 默认的三次重试算），加上换流那一趟网络往返，总共十几秒。到点了就该
+	// 报失败，不能一直亮着——一直亮着就是另一种「什么都不说」。
+	Reconnecting bool
+	// ReconnectAttempt 是第几次重试（从 1 起）。0 = 不是「重试」那一档
+	// （比如应用层自己从播放位置重开）。
+	ReconnectAttempt int
 	// CanRetry 报当前那一句错误**再试一次有没有用**。
 	//
 	// ⚠️ **它和 `Err` 是一对**：Err 说「出了什么事」，CanRetry 说「还能不能
@@ -223,6 +241,10 @@ type App struct {
 	// wantPlay 是用户的意图（按过播放），playing 是播放器此刻的实际状态。
 	// 两者分开是因为一首歌播完之后 wantPlay 还是 true，而 playing 变回 false；
 	// 进度条拖回中间时靠 wantPlay 才能接着播。
+	//
+	// ⚠️ **两个方向都要记**（票 #352）：按了暂停落 false，**按回来记回 true**。
+	// 只落不记的话它会一直 false，而 `onTrackFinished` 拿它当「要不要往下走」
+	// 的判据 → 队列卡住 → 而界面上一个字都没有。
 	wantPlay bool
 	playing  bool
 	errText  string
@@ -273,6 +295,13 @@ type App struct {
 	loading bool
 	// loadingTitle 是正在取的那一首的名字（见 State.LoadingTitle）。
 	loadingTitle string
+	// reopenInFlight 是「**应用**正在从播放位置重开」那一半。
+	//
+	// ⚠️ **源那一半不住在这儿**（它住在 `audio.StreamSource` 那边，见
+	// `reconnect.go`）：在这儿存一栏的话，一条**建出来又被丢掉**（代次过期）
+	// 的源会把那一栏抢走——那时正在放的那首断流，界面上「正在重连」一次都
+	// 不亮（票 #315 的评审复现过）。
+	reopenInFlight bool
 	// loadStop 是「取流超时」那个闹钟的停掉函数。nil = 没挂。
 	//
 	// ⚠️ **它和 `lyricStopTimer` 不是一个东西**：那一个管歌词偏移的防抖写盘，
@@ -623,6 +652,9 @@ func (a *App) Snapshot() State {
 	if a.streaming != nil {
 		pref = BiliToPref(a.streaming.Quality)
 	}
+	// 🔴 **「正在重连」那一档要去问源**（见 `reconnect.go`）：源那一半住在
+	// 源那边，应用只问当前在管的那一两条流——所以一条被丢掉的源抢不走它。
+	attempt, retrying := a.reconnectingLocked()
 	return State{
 		HasTrack: a.player != nil,
 		Title:    a.title,
@@ -649,12 +681,16 @@ func (a *App) Snapshot() State {
 		ErrDetail:     a.errDetail,
 		Loading:       a.loading,
 		LoadingTitle:  a.loadingTitle,
-		CanRetry:      a.errRetryable,
-		BiliURL:       a.biliURLLocked(),
-		Quality:       a.quality,
-		QualityPref:   pref,
-		Artist:        a.artist,
-		ArtistMid:     a.artistMid,
+		// 🔴 **「正在重连」那一档要去问源**（见 `reconnect.go`）：源那一半住在
+		// 源那边，应用只问当前在管的那一两条流——所以一条被丢掉的源抢不走它。
+		Reconnecting:     a.reopenInFlight || retrying,
+		ReconnectAttempt: attempt,
+		CanRetry:         a.errRetryable,
+		BiliURL:          a.biliURLLocked(),
+		Quality:          a.quality,
+		QualityPref:      pref,
+		Artist:           a.artist,
+		ArtistMid:        a.artistMid,
 
 		// 播放模式在队列自己的锁里，不在 `a.mu` 里——它是队列的形状，不是
 		// 播放器的状态。顺着一句一句取：`a.mu` 已经拿在手里，而 `a.queue`
@@ -854,6 +890,9 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	}
 	a.stopped = false
 	a.clearErrLocked()
+	// 🔴 **「正在重连」也收掉**（票 #315）：放本地文件 = 上一首在线歌的那场
+	// 重连到此为止。不收的话那一行会一直亮着，而本地文件压根没有在重连。
+	a.clearReconnectLocked()
 	// ⚠️ **本地文件把 `pending` 让出来**：那一栏记的是「在线的那一首」，
 	// 而本地文件在 B 站上没有对应的东西。留着上一首在线歌的话，播放条上
 	// 那枚「在 B 站打开」会指向另一首歌。
@@ -933,9 +972,15 @@ func (a *App) Toggle() {
 		// 那次暂停把它落成了 false。它要是留在 false，两处会跟着坏：
 		//
 		//   - 这一首放完之后**队列不会往下走**（`onTrackFinished` 认的就是
-		//     wantPlay，用户按了播放却停在原地）。
+		//     wantPlay，用户按了播放却停在原地）。而那一句是**静默**的：队列
+		//     不往下走，而界面上一个字都没有——既不是「已停止」，也不是
+		//     「这一串放完了」（票 #352；回归测试在
+		//     `internal/app/toggle_resume_test.go`）。
 		//   - 拖了进度条之后不会接着播（「往回拖必须能接着播」是验收项 5，
 		//     `internal/app/app.go` 的 ScrubEnd 那段注释写着这一句）。
+		//
+		// ⚠️ **别把它当成「播放器此刻在不在响」**：那一栏是 `playing`。这一栏
+		// 答的是「用户想不想听」——两者分开正是为了分清「暂停」和「放完了」。
 		a.wantPlay = true
 	}
 	// 按播放把一首停住的歌放起来时，「停过」这件事就过去了。
@@ -1153,6 +1198,9 @@ func (a *App) ClearTrack() {
 	a.position, a.duration = 0, 0
 	a.wantPlay = false
 	a.clearErrLocked()
+	// 🔴 **「正在重连」也收掉**（票 #315）：清掉当前曲目 = 用户不要这一首了，
+	// 那场重连到此为止。
+	a.clearReconnectLocked()
 	// 什么都没有了：「当前这一首」也就没有了（不然播放条上那枚
 	// 「在 B 站打开」会指着上一首）。
 	a.pending = Item{}
@@ -1380,8 +1428,13 @@ func (a *App) tick() {
 			//     是显式地把两件事都摆出来，省得读代码的人去推「Ended 为真
 			//     时 Err 是不是一定为 nil」。
 			//
-			// 用户按暂停/停止走不到这里：`Toggle`/`Pause`/`Stop` 都把
-			// wantPlay 落成 false，下一次 tick 的 `live` 已经是 false。
+			// 用户按暂停/停止走不到这里：`Toggle` 的**暂停那一半**、`Pause`、
+			// `Stop` 都把 wantPlay 落成 false，下一次 tick 的 `live` 已经是 false。
+			//
+			// ⚠️ **而 `Toggle` 的「按回来」那一半要把 wantPlay 记回 true**
+			// （票 #352）：只落 false 不记回来的话，这一栏就一直 false，而
+			// `onTrackFinished` 拿它当「要不要往下走」的判据 → 队列不往下走 →
+			// 界面上什么话都没有。
 			//
 			// 放在锁外面调：那两样要拿解码器自己的锁，还可能去碰字节源。
 			if ended && p != nil && p.Ended() && p.Err() == nil {

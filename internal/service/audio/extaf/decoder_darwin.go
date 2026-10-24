@@ -93,7 +93,10 @@ type source struct {
 	r    io.ReadSeeker
 	size int64
 
-	// err 是字节源身上出的**第一条**非 EOF 的错误（比如网络断了）。
+	// err 是字节源身上出的**第一条**真错（比如网络断了）。
+	//
+	// ⚠️ **「真错」不含 io.EOF 和 io.ErrUnexpectedEOF**：那两个是「流到头了」，
+	// 不是失败（`noteReadError` 那一段写着为什么）。所以这一格记的是**硬错**。
 	//
 	// 为什么需要它：AudioToolbox 的读回调只有「要到了几个字节」这一个出口，
 	// 读失败在回调里只能变成 0，而 0 在它眼里和「干净地读到末尾」是**同一个
@@ -143,7 +146,10 @@ func (s *source) readErr() error {
 // 「到头了」有两个出口，**都要当成读完，不能记成错**：
 //
 //	读到 0 字节       → io.ReadFull 给 io.EOF
-//	读到 1~8191 字节  → io.ReadFull 给 io.ErrUnexpectedEOF（没凑齐就到了头）
+//	读到 1..n-1 字节  → io.ReadFull 给 io.ErrUnexpectedEOF（没凑齐就到了头）
+//
+// ⚠️ **上界是 n-1，n 是这一次要的那个数**——不是某个写死的字节数（实测
+// AudioToolbox 请求过 11288 字节，所以「8191」那个上界是错的）。
 //
 // AudioToolbox 的读回调只有一个出口（「这次要到了几个字节」），它把「少于
 // 我要的」当成流到头了——所以短读正是要告诉它的话。noteReadError 负责把这

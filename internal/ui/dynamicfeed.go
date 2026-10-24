@@ -95,9 +95,13 @@ type dynamicFeed struct {
 	// seen 是**已经收进来的身份**，挡翻页重叠（和 `upSpace.seen` 同一个理由：
 	// 两个一模一样的行身份会让那几行共用一份状态）。
 	seen map[string]bool
-	// dropped 是右边丢掉的动态条数。不画在界面上，只用来让「一个格子都没有」
-	// 能说清是「真的没有」还是「他发的那些我们画不出来」。
-	dropped int
+	// drops 是右边丢掉的那几条（**按不同的动态记**，见 drops.go）。不画在
+	// 界面上，只用来让「一个格子都没有」能说清是「真的没有」还是「他发的
+	// 那些我们画不出来」。
+	//
+	// ⚠️ **按类别分开记**：界面上那句话要按类别说，「读不懂」不能被说成
+	// 「形态不认识」（票 #344）。
+	drops dropTally
 	// started 是右边已经拉过至少一页了。
 	started bool
 	// selfMid 是**这份缓存是为哪个账号拉的**。作者栏和「关注的动态」都是
@@ -121,7 +125,11 @@ type feedResult struct {
 	// sent 是 B 站这一页发了几条（过滤之前）。见 upPager.adopt。
 	sent    int
 	hasMore bool
-	dropped int
+	// drops 是这一页丢掉的那几条（带类别和身份）。
+	//
+	// ⚠️ **身份是给上层去重用的**：B 站翻页会重叠，同一条画不出来的动态在
+	// 两页里各出现一次——按出现次数记，那个数会偏大（票 #344）。
+	drops []bili.DroppedDynamic
 	// dropWhy 是丢掉的理由（人话，一种一句）。**只进日志**，不进界面。
 	dropWhy []string
 	err     error
@@ -161,7 +169,7 @@ func (s *Shell) resetIfAccountChanged(f *dynamicFeed) {
 	f.feed = upPager{}
 	f.authors = nil
 	f.items = nil
-	f.dropped = 0
+	f.drops = dropTally{}
 	f.started = false
 	f.seen = nil
 }
@@ -331,17 +339,15 @@ func authRowKey(f *dynamicFeed, i int) any {
 	return f.authRowKeys.At(i-1, f.authors[i-1].Mid, authIdentity)
 }
 
-// authIdentity 是作者栏一行的身份（铁律四）。
+// authIdentity 是作者栏一行的身份（铁律四）：`auth:<mid>`。
 //
-// ⚠️ **mid == 0 是「全部」那一行**：B 站的 mid 不会是 0（撞不上），而这一行的
-// 身份固定是 "auth:0"。所以一个 mid 就够当「记着算好的那一份」那把钥匙。
+// ⚠️ **「全部」那一行不走这里**：它的身份是 "auth:0"，而那一行在
+// `authRowKey` 的 `i <= 0` 那一支就直接给了——**压根不进 memo**。所以这里
+// 的 raw 永远是「某一个人」的 mid，而 B 站的 mid 不会是 0（撞不上 "auth:0"）。
 //
 // 这一步会分配（拼字符串 + 装箱）——所以它只在 mid 变了的时候才走
 // （见 `rowkey.Memo` 的文件头）。
 func authIdentity(mid int64) any {
-	if mid == 0 {
-		return "auth:0"
-	}
 	return "auth:" + strconv.FormatInt(mid, 10)
 }
 
@@ -492,8 +498,8 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 		// ⚠️ **只在「一条都没画出来」时出现**：有内容的时候插一行字只是
 		// 噪音；而一条都没有的时候，用户看到的是**一片空白加一个转着的
 		// 圈**——像是坏了，而真相是「他们发的那些我们画不出来」。
-		if len(f.items) == 0 && f.dropped > 0 {
-			s.viewDroppedNote(c, f.dropped)
+		if len(f.items) == 0 && f.drops.total() > 0 {
+			s.viewDroppedNote(c, f.drops.counts)
 		}
 		// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
 		//
@@ -544,7 +550,7 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 // feedEmptyKey 是空状态的 key。带上「有没有丢弃」那一档，所以两句话不共用
 // 一个 key——同一个 key 上换文案，读屏软件读到的是同一句话。
 func feedEmptyKey(f *dynamicFeed) string {
-	if f.dropped > 0 {
+	if f.drops.total() > 0 {
 		return "dropped"
 	}
 	return "none"
@@ -557,12 +563,14 @@ func feedEmptyKey(f *dynamicFeed) string {
 //
 // ⚠️ **「有丢弃」和「真的没有」必须说两句话**：B 站的动态有二十多种形态，
 // 这一版只画三种。说成「暂无动态」的话，用户会以为关注的人都没发过。
+//
+// ⚠️ **按类别说**（票 #344）：「形态不认识」和「我们读不懂」是**两回事**。
 func feedEmpty(f *dynamicFeed) emptyState {
-	if f.dropped > 0 {
+	if f.drops.total() > 0 {
 		return emptyState{
 			Title: "这里没有能显示的动态",
 			Icon:  iconEmptyFeed,
-			Hint:  fmt.Sprintf("%s，有 %d 条落在别的形态上了", dynamicShapesNote, f.dropped),
+			Hint:  dropSentence(f.drops.counts),
 		}
 	}
 	return lookup(dynamicFeedPath).Empty
@@ -640,16 +648,20 @@ func (s *Shell) fetchFeed(ctx context.Context, f *dynamicFeed, which int, cursor
 		r.err, r.authors, r.hasMore, r.sent = err, pg.Authors, pg.HasMore, len(pg.Authors)
 	default:
 		pg, err := s.app.DynamicFeed(ctx, cursor)
-		r.err, r.dyns, r.hasMore, r.dropped = err, pg.Items, pg.HasMore, pg.Dropped
+		r.err, r.dyns, r.hasMore, r.drops = err, pg.Items, pg.HasMore, pg.Drops
 		r.cursor, r.sent = pg.Offset, pg.Raw
 		r.dropWhy = pg.DropWhy
 	}
 
 	// 🔴 **每一趟都留一句计数**（理由同 upspace_fetch.go 那一处）：界面上那个
 	// 转着的圈**分不出**是「同一页被反复要了」还是「真的在翻页」（票 #300）。
+	//
+	// ⚠️ **丢掉的那几条要按类别分开写**（票 #344）：「形态不认识」和「读不懂」
+	// 是两回事，合在一起就看不出是 B 站换了形态还是我们读不懂。
 	if r.err == nil {
-		log.Printf("biu: 拉动态流：B 站发了 %d 条，留下 %d 条，丢掉 %d 条，还有下一页=%v",
-			r.sent, len(r.dyns)+len(r.authors), r.dropped, r.hasMore)
+		log.Printf("biu: 拉动态流：B 站发了 %d 条，留下 %d 条，丢掉 %d 条（%s），还有下一页=%v",
+			r.sent, len(r.dyns)+len(r.authors), len(r.drops),
+			dropCountText(dropCountsOf(r.drops)), r.hasMore)
 		for _, why := range r.dropWhy {
 			log.Printf("biu: 拉动态流丢掉一条：%s", why)
 		}
@@ -704,7 +716,11 @@ func (s *Shell) adoptFeed(f *dynamicFeed) {
 		if r.which == feedItems {
 			// ⚠️ **丢掉的是累计的，不是这一页的**：翻了好几页各丢几条就是几十条，
 			// 界面上那句话说的是「一共有多少条没显示」。
-			f.dropped += r.dropped
+			//
+			// ⚠️ **而且是按「不同的动态」累计的**（票 #344）：B 站翻页会重叠，
+			// 同一批画不出来的动态在两页里各出现一次——按出现次数记的话，那个
+			// 数会**偏大**。
+			f.drops.add(r.drops)
 			f.started = true
 		}
 		// ⚠️ 传的是**这一页**返回了几行，不是累计的：累计的数在「第一页就空」

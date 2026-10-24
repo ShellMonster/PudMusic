@@ -172,6 +172,35 @@ var Items = []Item{
 		},
 	},
 	{
+		// 🔴 **这一条治的是「静默卡住」**（票 #352）：按过一次暂停再恢复之后，
+		// 队列**不往下走**，而整窗画面上**一句话都没有**——既不是「已停止」，
+		// 也不是「这一串放完了」。
+		//
+		// 根因在 `App.Toggle` 的「按回来」那一半：它没把 `wantPlay` 记回 true，
+		// 而 `onTrackFinished` 拿它当「要不要往下走」的判据——于是那一行早退，
+		// 队列停在那儿，`QueueFinished` 也永远出不来。
+		//
+		// 另一半是**两处说的话要一致**：队列走完时播放条说「这一串放完了」，
+		// 而抽屉里当前那一行的副题原来写「已停止」——**同一屏上两句不同的话**。
+		Category: Play,
+		Spec:     "按过一次暂停再恢复之后队列照常往下走；队列走完时播放条和队列抽屉说的是同一句（「用户按了停止」和「队列自己走完了」分得开）",
+		Tests: []string{
+			// 接线（App 那一层）：暂停再恢复之后队列照常往下走，而且队尾那一句
+			// 说得出来。
+			"TestTogglingPauseDoesNotStallTheQueue",
+			"TestTheQueueFinishesAfterAToggleSaysSo",
+			// 对照组：快捷键那条路（`App.Pause` / `App.Play`）行为不变。
+			"TestPauseAndPlayStillMoveTheQueueOn",
+			// 反面：**还停着**的时候不许自己往下走（只钉前半条的话，把
+			// `onTrackFinished` 的早退条件整个删掉也照样绿）。
+			"TestAPausedSongStaysPutAfterAToggle",
+			// 画面（UI 那一层）：抽屉里那一行分得清两种停住，且和播放条不矛盾。
+			"TestTheQueueDrawerSaysTheQueueIsDone",
+			"TestTheQueueDrawerStillSaysStoppedWhenTheUserStops",
+			"TestThePlayBarAndTheDrawerDoNotContradictEachOther",
+		},
+	},
+	{
 		Category: Play,
 		// 播放模式四档（顺序/循环/随机/单曲，BMG-47 A5）。「放完下一首是哪首」
 		// 这一句是**四档各有一条**——顺序停在队尾、循环绕回队尾、随机真的打乱、
@@ -1089,6 +1118,40 @@ var Items = []Item{
 		Category: Negative,
 		Spec:     "播放中断网/恢复：换流之后从原来的位置继续播",
 		Tests:    []string{"TestStreamCutMidwayRefetchesAndKeepsPlaying", "TestRefetchContinuesFromTheSameByte"},
+	},
+	{
+		Category: Negative,
+		// 票 #315：CDN 抖一下的时候三次重试是**瞬间打完**的（`recover` 里
+		// 一个 sleep 都没有），用户只看到一句红字；而重连的那几秒里界面上
+		// **一个字也没有**——「歌停着、界面不动、没有字」。
+		//
+		// 这一组盯三件事：**退避是真的**（重试之间隔了、随次数变长、关掉
+		// 能打断）、**「正在重连」看得见**（它住在源那边、应用问的是**当前
+		// 在管的那一条**——一条被丢掉的源抢不走它）、以及**失败有交代**
+		// （第二次重开被挡掉时必须报错，不许一声不吭地亮着）。
+		//
+		// 🔴 **端到端那四条在 `internal/app/reconnect_e2e_test.go`**：手工调
+		// 应用的内部函数证明不了「源→应用层→界面」这条接线。
+		Spec: "断流重连：重试之间有退避（1 秒 / 2 秒 / 4 秒，总 ≤ 7 秒），重连期间界面上说「正在重连」，成功或失败都有明确结果",
+		Tests: []string{
+			"TestTheDefaultBackoffIsOneTwoFour",
+			"TestARetryWaitsBeforeItRetries",
+			"TestTheBackoffGrowsWithEveryRetry",
+			"TestTheBackoffStopsAtItsLastValue",
+			"TestTheSourceGivesUpAfterTheBackoffIsUsedUp",
+			"TestCloseCancelsTheBackoffWait",
+			"TestTheReconnectingFlagReachesTheSnapshot",
+			"TestOnlyTheSourceTheAppCaresAboutCounts",
+			"TestAStalePendingSourceDoesNotCount",
+			"TestTheReopenFromThePlaybackPositionSaysSo",
+			"TestClearingTheErrorDoesNotClearTheReconnecting",
+			"TestTheSecondReopenSaysItGaveUp",
+			"TestTheStreamBreakShowsUpAsReconnecting",
+			"TestTheBreakDuringTheFirstLoadIsStillVisible",
+			"TestAStaleSourceDoesNotStealTheReconnectState",
+			"TestThePlayBarSaysItIsReconnecting",
+			"TestTheErrorWinsOverTheReconnectingLine",
+		},
 	},
 	{
 		Category: Negative,
@@ -3122,6 +3185,29 @@ var Items = []Item{
 			// Toast 那 250ms 的入场**没被这一票动过**（它是 #207 定的，#292 要改
 			// 的是它的曲线不是它的时长）。
 			"TestTheToastKeepsItsOwnEntryAnimation",
+		},
+	},
+	{
+		// 归「分页与路由」那一组：这一票动的是**翻页的闸门**。
+		//
+		// 🔴 **三个症状全是静默的**：页面停住不动、那个数偏大、界面上说一句
+		// **对用户是错的**话——没有一样会报错，界面只是「不太对」。
+		Category: Paging,
+		// 票 #344（issue #344，BMG-179 / PR #330 的评审留的三条 minor）。
+		Spec: "UP 空间「动态」那一页：丢掉的理由**分了类**（界面按类别说，「读不懂」不说成「形态不认识」）；丢掉的计数**按不同的动态算**（B 站翻页重叠时同一条只算一次）；**「到底了」看入口有没有前进**——0 条 + 入口前进了 = 继续拉下一页，0 条 + 入口没前进 = 到底",
+		Tests: []string{
+			// 分类（服务层那一层）：四类各数各的。
+			"TestTheDroppedOnesAreToldApartByReason",
+			// 分类（画面上那句话）：「读不懂」不许被说成「形态不认识」。
+			"TestWhatWeCannotReadIsNotCalledAnUnknownShape",
+			// 计数去重：两页里重叠的一条，计数是 1 不是 2。
+			"TestTheDroppedCountCountsDifferentDynamicsNotHowManyTimesTheyAppear",
+			// 跨页去重靠的是**身份**（服务层那一层）。
+			"TestTheSameDroppedDynamicInTwoPagesIsTheSameOne",
+			"TestADroppedOneWeCannotReadAtAllStillHasAStableIdentity",
+			// 闸门：0 条 + 入口前进了 → 继续拉；0 条 + 入口没前进 → 到底。
+			"TestAnEmptyPageWhoseOffsetMovesStillLoadsTheNextPage",
+			"TestAnEmptyPageWhoseOffsetStaysIsTheEnd",
 		},
 	},
 }
