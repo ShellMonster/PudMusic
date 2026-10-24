@@ -46,6 +46,10 @@ var codeMessages = map[int]string{
 
 	// 风控与限流。这三个的处置完全不同，所以话也不同：
 	// 风控不该重试（重试就是继续撞墙），限流可以等。
+	//
+	// 🔴 **这一段和 `Recoverable` 的判据必须对得上**（票 #316）：这儿写着
+	// 「风控不该重试」而那边判成可重试的话，用户点一次「重试」就撞一次风控。
+	// 现在的口径是：**风控（-352/-412）不可重试，限流（-509）可重试**。
 	-352: "被 B 站的风控拦下了，等一会儿再试",
 	-412: "请求被 B 站拦下了，换个网络或者等一会儿",
 	-509: "操作太快了，等一会儿再试",
@@ -196,14 +200,21 @@ func trimStreamPrefix(s string) string {
 
 // Recoverable 报这个错**再试一次有没有用**。
 //
-// 判据只有一条：「再问一次 B 站，会不会给出不一样的答案」。
+// 判据只有一条：「**现在**再问一次 B 站，会不会给出不一样的答案」。
 //
-//	网络断了、超时了、风控拦了、地址过期了	会变 → 可重试
+//	网络断了、超时了、地址过期了	会变 → 可重试
 //	B 站说没有音频流、稿件被删了、要大会员	不会变 → 不可重试
+//	风控拦下了（-352/-412）	立刻再问还是撞墙 → 不可重试
+//
+// 🔴 **风控不判成可重试**（票 #316）：界面上那枚「重试」是**立刻**再取一次流
+// （`App.Retry` 里没有退避），所以判成可重试的话，用户点一次撞一次风控，
+// 点第二次再撞——而 B 站的风控要等的是**时间**，不是「再问一次」。
+// 那一句文案已经说了「等一会儿再试」：**过一会儿用户自己再放一次**，
+// 那是他的动作，不是应用替他按的。
 //
 // 界面上据此决定给不给「重试」。**给一个按了也没用的重试比不给更糟**——
 // 用户按两次发现还是那样，就不再信这个应用了；而「不可重试」那一句自己
-// 已经说了还能怎么办（换一档音质 / 去 B 站里打开它听）。
+// 已经说了还能怎么办（换一档音质 / 去 B 站里打开它听 / 等一会儿再放一次）。
 func Recoverable(err error) bool {
 	if err == nil {
 		return false
@@ -221,8 +232,12 @@ func Recoverable(err error) bool {
 	// 没登录：重试还是没登录，要的是重新登录（那句话已经说了）。
 	case errors.Is(err, ErrNoLoginForOnline), errors.Is(err, ErrNotLoggedIn):
 		return false
-	// 风控和限流：等一会儿会变（`Friendly` 已经说了「等一会儿再试」）。
-	case errors.Is(err, ErrRiskControl), errors.Is(err, ErrTooFrequent):
+	// 风控：**立刻**再试就是再撞一次墙（`Friendly` 已经说了「等一会儿再试」——
+	// 那句话说的是「过一会儿你自己再放一次」，不是「现在按一下重试」）。
+	case errors.Is(err, ErrRiskControl):
+		return false
+	// 限流：等一会儿会变（`Friendly` 已经说了「等一会儿再试」）。
+	case errors.Is(err, ErrTooFrequent):
 		return true
 	// 问不出分 P：底下多半是网络抖了一下。
 	case errors.Is(err, ErrNoPart):
@@ -242,11 +257,18 @@ func Recoverable(err error) bool {
 		return true
 	}
 	// B 站的业务错误：逐个码判。
+	//
+	// ⚠️ **-352/-412/-509 这三个上面已经各自判过了**（`APIError.Is` 把它们
+	// 映射成 `ErrRiskControl` / `ErrTooFrequent`，而上面按哨兵判）——这里再写
+	// 一遍是**双保险**：哪天那条映射没了，这几个码仍然是对的那一个。
 	var api *APIError
 	if errors.As(err, &api) {
 		switch api.Code {
-		case -352, -412, -509:
-			// 风控 / 被拦 / 太快：等一会儿再来。
+		case -352, -412:
+			// 风控 / 被拦：立刻再问还是撞墙。
+			return false
+		case -509:
+			// 太快了：等一会儿再来。
 			return true
 		case 72010027:
 			// 「这首音乐换了地址，已经跟不上了」——再问一次也许就是新地址。
