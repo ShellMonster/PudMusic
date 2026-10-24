@@ -375,7 +375,22 @@ func (c *Cache) Get(url string) State {
 //
 // 帧号停在 0，**挤的行为和从前一模一样**（库自己的老测试、还没接上这一句的
 // 调用方都是这样）。所以这一句是「加了更好」而不是「必须加」。
+//
+// # ⚠️ **缓存是 nil 时这一句什么都不做**
+//
+// 真窗口上缓存从来不是 nil（`Shell` 一定建一个），但**测试会把它摘掉**：
+// `downloadlist_ops_test.go` 的 `TestOneBrokenCellDoesNotBlankOutThePage`
+// 摘掉它是为了让「有封面的那一格」崩在**格子里**（而不是崩在整页上）。
+//
+// 而这一句在 `Shell.viewMain` 里、**每一帧**都调——缓存是 nil 的话它会**先**
+// 把整页带崩（nil 接收者上的字段访问），于是那一格还没画就被页级那道 Guard
+// 接走了，而那条用例要的正是「一格崩、整页不崩」。
+//
+// 所以这里先判一次 nil：**这一句是「让挤缓存更准」的，不是「这一句不许崩」**。
 func (c *Cache) BeginFrame(now time.Time) {
+	if c == nil {
+		return
+	}
 	if c.frameToken.Equal(now) {
 		return
 	}
