@@ -99,6 +99,17 @@ type Actions struct {
 	// 真正的判据是 `app.App.IsPlaying`（按 `app.Item.Identity`）。
 	IsPlaying func(item app.Item) bool
 
+	// OpenOwner 进那个 UP 主的空间（`/user/{mid}`）。
+	//
+	// ⚠ **给的是 mid 和名字两样**：名字是**那个人**的名字——提示里说的是
+	// 他（「打开 X 的空间」），而界面上画出来的那一句可能是**清洗过的**
+	// （「歌手 · UP 名」，见 `titleline.go` 的 `showOf`）。两样不是一回事。
+	//
+	// ⚠ **为 nil 时列表里的 UP 名照旧显示，只是点不动**：B 站有的接口只给
+	// 名字不给编号（见 `app.Item.ArtistMid`）。**把名字藏起来是另一种撒谎**
+	// ——用户看到的是「这一首没有 UP 主」。
+	OpenOwner func(mid int64, name string)
+
 	// Focus 登记「**此刻内容区里是这一个列表**」。
 	//
 	// 界面层装一个进来（`internal/ui` 的 `listActions`）：每一帧，各个列表把

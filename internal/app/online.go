@@ -790,6 +790,12 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	// 放在换上播放器**之后**——歌词区问的是「现在放的是哪一首」，那一刻
 	// 播放器已经换成新的了。
 	a.setLyricTrack(it)
+	// B 站自己带出来的那一份歌词：取流那一趟已经带回了它的地址，这里去下载、
+	// 存进缓存、装到界面上（见 lyrics.go 的 `fetchBiliSubtitle`）。
+	//
+	// ⚠️ **整个过程在后台**，而且**它不拦播放**：没有字幕的那一首歌，界面照旧
+	// 是「暂无歌词」加一个「找歌词」的入口。
+	a.fetchBiliSubtitle(context.Background(), it, ref, s)
 	if wake != nil {
 		wake()
 	}
@@ -847,6 +853,13 @@ func (a *App) withSongInfo(ctx context.Context, s *Streaming, it Item) (Item, er
 			it.Artist = info.Uname
 		}
 	}
+	// 🔴 **它背后那个投稿的身份也记下来**：音乐库的取流接口不带字幕，而这一条
+	// 的词多半在那个投稿的字幕里（见 `lyrics.go` 的 `fetchBiliSubtitle`）。
+	//
+	// ⚠️ **记在 `SubtitleBvid`/`SubtitleCid` 上，不记在 `Bvid`/`Cid` 上**：
+	// 后两栏是「这一条自己的身份」，歌词缓存键靠它们（`lyricKeyOf`）——
+	// 音乐库条目的键是 `bili-audio-<sid>`，填错了键就变了。
+	it.SubtitleBvid, it.SubtitleCid = info.Bvid, info.Cid
 	return it, nil
 }
 
