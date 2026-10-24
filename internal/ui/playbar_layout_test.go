@@ -377,7 +377,7 @@ func TestTheLeftColumnKeysAreNotCoveredByTheMiddleColumn(t *testing.T) {
 // ⚠️ **断的是「最右边那枚键的右沿 == 内容区的右沿」**：内容区的右沿是窗口宽
 // 减去右边那 16 的内边距（`playbarPadX`）。
 //
-// ⚠️ **竖直方向也断**：那一组在 88 高的播放条里**上下居中**（上游
+// ⚠️ **竖直方向也断**：那一组在 76 高的播放条里**上下居中**（上游
 // `playbar/right/index.tsx:13` 的 `items-center`）——它现在是绝对定位的，
 // 高度得自己给，给歪了就会贴着上沿或下沿。
 func TestTheRightGroupHugsTheRightEdge(t *testing.T) {
@@ -895,7 +895,7 @@ func TestTheWheelOverTheVolumeIconChangesTheVolume(t *testing.T) {
 // （`t.Background` = `#ffffff`）——浅色那一套才看得出「一颗白旋钮落在白底上」
 // 那种坏（那正是旋钮不能画成白色的原因）。
 //
-// ⚠️ **窗口只留 88 高**（播放条那一行）：整窗的截图在 #127 那一族里已经有了
+// ⚠️ **窗口只留 76 高**（播放条那一行）：整窗的截图在 #127 那一族里已经有了
 // （`chrome_shot_test.go` 的 01-整窗-），这一族看的是播放条**自己**。
 func TestRenderPlayBarRedoShots(t *testing.T) {
 	dir := os.Getenv("BIU_SHOT_DIR")
@@ -956,7 +956,7 @@ func TestRenderPlayBarRedoShots(t *testing.T) {
 // 那一张**根本不存在**。这一条现在每一张的名字里都有状态。
 //
 // ⚠️ **窗口留 160 高、指针停在中段**：这一族只画播放条（`playbarTester`），而它
-// 摆在窗口的**顶上**（那 88 高），所以窗口的中段是空的——指针要停在那儿才算
+// 摆在窗口的**顶上**（那 76 高），所以窗口的中段是空的——指针要停在那儿才算
 // 「不在任何一枚键上」（三键是居中的，x=600 就是中间那一枚）。
 func TestRenderPlayKeyShots(t *testing.T) {
 	dir := os.Getenv("BIU_SHOT_DIR")

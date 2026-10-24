@@ -430,7 +430,7 @@ func TestQueueDrawerClosesOnAClickOutside(t *testing.T) {
 // TestQueueDrawerLeavesThePlaybarUsable 钉住抽屉那一层**不盖播放条**。
 //
 // 差一格的表现是「按了下一首，抽屉跟着关了」——用户明明只想换歌。
-// Biu 那边是 `data-[placement=right]:mb-22`，88 就是播放条的高。
+// Biu 那边是 `data-[placement=right]:mb-22`（上游的 88），我们的是 `playbarHeight`（76）。
 func TestQueueDrawerLeavesThePlaybarUsable(t *testing.T) {
 	h := newHarness(t)
 	enqueue(t, h, copiesOf(t, 2)...)
@@ -562,7 +562,7 @@ func TestQueueDrawerMarksTheSongBeingPlayed(t *testing.T) {
 //     这个 0×0 的样子——只断 `ok` 的话「滚到了旁边那一首」是绿的。
 //  2. **不在播放条那一带**：真放着的时候播放条上也是同一个歌名，而主布局先于浮层
 //     排版，`Find` 先撞上的是播放条上那几行字（它比抽屉里那一行窄得多）。
-//     抽屉是浮在播放条**上面**的（底边让开 88），所以 y >= 视口高 - 88 的不是抽屉。
+//     抽屉是浮在播放条**上面**的（底边让开 76），所以 y >= 视口高 - 76 的不是抽屉。
 func findRow(h *harness, title string) (mygoui.Rect, bool) {
 	r, ok := h.tt.Find(title)
 	if !ok || r.W <= 0 || r.H <= 0 || r.Y >= drawerBottom {
@@ -571,9 +571,13 @@ func findRow(h *harness, title string) (mygoui.Rect, bool) {
 	return r, true
 }
 
-// drawerBottom 是抽屉的底边：视口高减掉播放条那 88（playbar.go 的
-// playbarHeight）。抽屉浮在播放条上面，y 到这儿为止。
-const drawerBottom = winH - 88
+// drawerBottom 是抽屉的底边：视口高减掉播放条那一条（`playbar.go` 的
+// `playbarHeight`）。抽屉浮在播放条上面，y 到这儿为止。
+//
+// ⚠️ **跟着那个常量走，不写死 88**：2026-10-24 那次重设计把播放条从 88
+// 改成 76，写死的那个数于是比真的底边**高了 12**——落在那一条带子上的行
+// 会被当成「不在抽屉里」。
+const drawerBottom = winH - playbarHeight
 
 // TestLocateCurrentGlidesToTheCurrentSong 是验收里「定位当前播放能平滑滚过去」。
 //
