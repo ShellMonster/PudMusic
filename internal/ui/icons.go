@@ -271,6 +271,7 @@ const (
 	iconFollowDone = "System/check-line.svg"         // 已关注
 	iconMoon       = "Weather/moon-line.svg"         // 深色
 	iconSun        = "Weather/sun-line.svg"          // 浅色
+	iconComputer   = "Device/computer-line.svg"      // 跟随系统（一台显示器）
 	iconDisk       = "Device/hard-drive-2-line.svg"  // 磁盘
 	iconDeleteBin5 = "System/delete-bin-5-line.svg"  // 删除（另一版）
 	iconBookmark   = "Business/bookmark-line.svg"    // 书签
@@ -370,7 +371,7 @@ var iconNames = []string{
 	iconExpand, iconShrinkBack, iconPiP, iconRefresh, iconExternal,
 	iconEye, iconEyeOff, iconWarning, iconQuestion,
 	iconImport, iconExport, iconAdd, iconFollowDone,
-	iconMoon, iconSun, iconDisk, iconDeleteBin5,
+	iconMoon, iconSun, iconComputer, iconDisk, iconDeleteBin5,
 	iconBookmark, iconInbox, iconChart,
 
 	// 导航、方向、展开收起

@@ -557,13 +557,17 @@ var Items = []Item{
 	},
 	{
 		Category: Paging,
-		// 设置那一格旁边的预览：三张缩略图各画各的形状，选中的那一张用主色描边。
+		// 设置那一格旁边的预览：三张缩略图各画各的形状，**三张都不带选中信号**
+		// （票 #297：那一格里的选中信号只有药丸一个——预览再描一圈主色，同一格里
+		// 就是两种「选中」信号了）。
+		//
 		// 判据是「描边里离主色更近」而不是「有几个主色像素」——边框是圆角加抗锯齿
 		// 画出来的，逐字比颜色永远是 0 个（见那条测试的注释）。
-		Spec: "「数据显示样式」旁边有预览：选哪一档一眼看得出来",
+		Spec: "「数据显示样式」旁边有预览：三张缩略图各画各的形状，而「现在是哪一档」只由药丸说（预览不带第二重选中信号）",
 		Tests: []string{
 			"TestTheDisplayStyleSettingShowsAPreviewOfEachStyle",
-			"TestThePreviewHighlightsTheChosenStyle",
+			"TestThePreviewCarriesNoSelectionSignal",
+			"TestTheDisplayModeCellHasOnlyOneSelectedSignal",
 		},
 	},
 	{
