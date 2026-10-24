@@ -14,15 +14,18 @@
 // 进度条该有的空间：那一档右边那一组是 362 宽，而窗口下限是 900。收成图标之后
 // 右边那组窄了 141（362 → 221），中间那一列（进度条）拿得回来的宽度更多。
 //
-// ## 「静音」是**音量 0**，不是播放器的一个开关
+// ## 「静音」是**它自己的一档**，不是「音量 0」
 //
-// 播放器那边压根没有静音这一档（`audio.Player.SetVolume` 的 0 就是静音），
-// 应用层也只有音量（`App.SetVolume`）。所以「静音」在这里是**把音量设成 0**
-// 加一个「记着静音之前是多少」的头（`volBeforeMute`）。
+// 播放器那边只有增益（`audio.Player.SetVolume`），应用层多了一格静音
+// （`App.ToggleMute`）：静音的时候**音量那一格一动不动**——取消静音放回去的
+// 就是它，落盘的也是它。
 //
-// 这么做有一个好处：静音之后**别处看到的也是 0**——迷你播放器上那根音量滑块
-// 立刻变成 0，锁屏上的媒体会话也是 0。而如果静音只是界面上的一个标记，
-// 那些地方会继续显示原来的音量。
+// ⚠️ **合成一档（静音 = 音量 0）会踩一个落盘的坑**（票 #311）：音量一旦开始
+// 落盘，「静音后退出再启动，音量变成 0」就成了必然（Clementine 的老毛病）。
+//
+// 画面上分两处：那一枚**图标**跟着静音那一格走（静音的时候画的是「取消静音」
+// 那张，和上游 `aria-label={isMuted ? "取消静音" : "静音"}` 一个做法）；而**滑块
+// 照旧显示用户设的那一档**——静音的时候它停在 20%，取消静音放回去的就是 20%。
 package ui
 
 import (
@@ -85,11 +88,6 @@ const (
 	// 里面那个百分比是**定宽**的一格（`Width(volPanelW)`），所以「100%」三个字
 	// 换不换位置都不会挪。
 	volPanelW = 40
-
-	// volDefaultUnmute 是「压根没静音过（音量本来就是 0）」时取消静音放回去的值。
-	//
-	// 0.5 是一半——用户按了「取消静音」，听到的应该是一半声音，不是 0。
-	volDefaultUnmute = 0.5
 )
 
 // volSliderLook 是浮层里那根竖滑块的样子。
@@ -137,14 +135,17 @@ func volumeSlider(c *ui.Context, value *float64, lo, hi float64) ui.Element {
 // 见文件头：图标能按（静音 / 取消静音）、悬停浮出竖滑块、滚轮 ±0.05。
 func (s *Shell) viewVolumeButton(c *ui.Context, st app.State) {
 	t := c.Theme()
-	muted := st.Volume <= 0
+	// 静音是它自己的一格（`st.Muted`），而「音量是 0」在听感上也是没声——
+	// 那一枚键说的是「按下去会怎样」，所以两样都得算进去。
+	muted := st.Muted || st.Volume <= 0
 
-	// 画的是哪一档看音量本身（Biu 的 music-volume 三档同一个做法）。
+	// 画的是哪一档看音量本身（Biu 的 music-volume 三档同一个做法），
+	// 静音是它自己的一格（`st.Muted`）。
 	//
 	// ⚠️ **图标只能从 `volumeIcon` 出去**：哪一档配哪一张由那个函数独家说了算
 	// （`icons_test.go` 的 `TestTheStateIconsOnlyReachTheScreenThroughTheirFunction`
-	// 盯着这一条），而它对 0 已经返回静音那张了。
-	name := volumeIcon(st.Volume)
+	// 盯着这一条）。
+	name := volumeIcon(st.Volume, st.Muted)
 	label := "静音"
 	if muted {
 		label = "取消静音"
@@ -314,33 +315,20 @@ func (s *Shell) disarmVolIdle() {
 	}
 }
 
-// setVolume 设音量，并且记住「不是静音的那个音量」。
+// setVolume 设音量。
 //
-// ⚠️ **记的是「最后一个不是 0 的音量」**：取消静音要放回去的就是它。音量是 0
-// 的时候不记——否则「静音之前是多少」会被静音之后的 0 顶掉。
+// ⚠️ **「静音之前是多少」不用这一层记**：那是应用层的事（`App.SetVolume` 记的是
+// 用户设的那一档，静音那一档是它自己的一格）。这一层以前有个 `volBeforeMute`
+// ——它跟着窗口走，进程一退就没了，而音量是要落盘的（票 #311）。
 func (s *Shell) setVolume(v float64) {
-	v = max(0, min(1, v))
-	if v > 0 {
-		s.volBeforeMute = v
-	}
 	s.app.SetVolume(v)
 }
 
 // toggleMute 静音 / 取消静音。
 //
-// 静音 = 音量 0（见文件头）。取消静音 = 放回静音之前那个音量。
+// 静音 = 按下静音键（音量那一格不动）；取消静音 = 放回用户设的那一档。
 func (s *Shell) toggleMute() {
-	cur := s.app.Snapshot().Volume
-	if cur > 0 {
-		s.volBeforeMute = cur
-		s.setVolume(0)
-		return
-	}
-	back := s.volBeforeMute
-	if back <= 0 {
-		back = volDefaultUnmute
-	}
-	s.setVolume(back)
+	s.app.ToggleMute()
 }
 
 // volPercent 是浮层底下那个百分比。

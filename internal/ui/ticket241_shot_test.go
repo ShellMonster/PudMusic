@@ -72,7 +72,9 @@ func TestRenderTicket241Shots(t *testing.T) {
 			// 85 队列抽屉的空状态：提示句折两行，**末行不是孤字**。
 			qb := newTestShell(t, systemIsDark(dark))
 			qb.s.drawerOpen = true
-			qb.tt.Frame()
+			// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在
+			// 窗口外面（它从右边滑进来），存下来的图是空的右半边。
+			settleDrawer(t, qb.s, qb.tt)
 			homeFrame(qb.tt)
 			save(t, dir, "85-队列抽屉空状态-"+name+".png", qb.tt)
 			saveRect(t, dir, "86-队列抽屉空状态放大-"+name+".png", qb.tt, 820, 280, 380, 120)
