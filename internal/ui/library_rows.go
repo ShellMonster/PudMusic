@@ -35,6 +35,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -178,6 +179,26 @@ type pagedRows struct {
 	// failed 是画崩了的行（按 ID 记），下一帧不重试：同一行每帧崩一次会刷爆日志、
 	// 拖垮帧率，比「这一行画不出来」糟得多。
 	failed map[string]bool
+
+	// rowKeys 记着每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
+	// （票 #313）。而**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头）：
+	// 翻页追加、删掉一行、换查询——身份对不上就重算，所以这里不用记得重建
+	// （那是最容易漏的一步，漏了就是铁律四的回归）。
+	rowKeys rowkey.Memo[string, any]
+
+	// opText / countText / durText 记着几处「每帧每行算一遍、结果不变」的
+	// 显示文字：行尾那枚「⋯」的无障碍名字、播放量、时长。
+	//
+	// ⚠️ **为什么不塞进 `libraryRow` 里算好**：那样每一个造行的地方都得记得填，
+	// **漏一个就是那一格空着**（看得见的坏）。而这几处的原料本来就在行上。
+	//
+	// ⚠️ **「投稿时间」不在这里**：它那一列的字（今天 / 昨天 / N天前）**跨零点
+	// 会过期**，缓存了就对不上（见 `widgets/list/pubtime.go` 的文件头）。
+	opText    rowkey.Memo[string, string]
+	countText rowkey.Memo[int64, string]
+	durText   rowkey.Memo[time.Duration, string]
 
 	// keys 记「上一次输入是键盘还是指针」（理由见 `widgets/list/selection.go` 的
 	// KeyboardMode）。
@@ -435,7 +456,13 @@ func (p *pagedRows) syncState(cols int) {
 		if j >= len(p.rows) {
 			return footerIdentity{}
 		}
-		return p.rows[j].ID
+		// ⚠️ **身份是预先装箱好的那一份**（`p.rowKeys`）：现算的话每帧每行一次
+		// 分配，而这一页一屏十来行（票 #313）。
+		//
+		// ⚠️ **按「第几首」记而不是按「第几行」**：网格那一档的行号会随列数变
+		// （`first(i)` 是 `i*cols`），而歌的下标不会——同一首歌在两种摆法下
+		// 记的是同一格，改列数时就不用重新装箱。
+		return p.rowKeys.At(j, p.rows[j].ID, rowkey.Identity)
 	}
 	p.state.Label = func(i int) string {
 		j := first(i)
@@ -852,6 +879,11 @@ func (p *pagedRows) playFrom(i int) {
 // 网格里放不出来」那种最难查的错（BMG-10 的收尾说明点名过同一件事）。
 type RowActions struct {
 	Play func(i int) // 从第 i 行往后接进队列并开始播
+	// PlayNow **只放第 i 行那一首**——菜单里那枚「立即播放」。
+	//
+	// 🔴 **语义是拍板定的**（票 #299，2026-10-24，人定的）：「立即播放」=
+	// 只放当前这一首。队列被换成这一首，不是「从这一行往后」的那一批。
+	PlayNow func(i int)
 	// PlayNext 把第 i 行排在**正在放的那首后面**（「下一首播放」）。
 	//
 	// 和 Add 的分界就是插在哪：Add 接在队尾（得等整张列表放完），这一条接在
@@ -869,6 +901,7 @@ type RowActions struct {
 func (p *pagedRows) actions() RowActions {
 	return RowActions{
 		Play:      p.playFrom,
+		PlayNow:   p.playNowOne,
 		PlayNext:  p.playNextOne,
 		Add:       p.addOne,
 		Open:      p.openOne,
@@ -890,6 +923,18 @@ func (p *pagedRows) addOne(i int) {
 	row, ok := p.Row(i)
 	if ok && p.acts.Add != nil {
 		p.acts.Add([]app.Item{row.Item})
+	}
+}
+
+// playNowOne 只放第 i 行那一首（队列被换成这一首）。
+//
+// ⚠️ **底下那一层可能是 nil**：和 `playNextOne` 同一个理由——测试里那份
+// `list.Actions{}` 什么都没有，调一个 nil 函数会一路穿出 Cocoa 事件循环把
+// 进程带走（铁律四）。
+func (p *pagedRows) playNowOne(i int) {
+	row, ok := p.Row(i)
+	if ok && p.acts.PlayNow != nil {
+		p.acts.PlayNow(row.Item)
 	}
 }
 

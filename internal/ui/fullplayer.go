@@ -34,6 +34,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
@@ -298,6 +299,11 @@ type fullPlayer struct {
 	// partsRows 是这一帧要画的那几行，partsList 是它们的列表状态。
 	partsRows []partRow
 	partsList ui.ListState
+	// partsRowKeys 记着分集面板里每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
+	// （票 #313）。**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头）。
+	partsRowKeys rowkey.Memo[string, any]
 
 	// bg 是背景那一层的画布：封面糊过一次画进去，稳态下每一帧只是一张图
 	// （见 viewFullBackdropCanvas 为什么是画布而不是一层材质）。
@@ -1264,7 +1270,11 @@ func (s *Shell) viewFullPartsPanel(c *ui.Context) {
 func (s *Shell) viewFullPartsList(c *ui.Context) {
 	t := c.Theme()
 	rows := s.full.partsRows
-	s.full.partsList.Key = func(i int) any { return rows[i].key }
+	// ⚠️ **身份是预先装箱好的那一份**（`s.full.partsRowKeys`）：理由见
+	// `fullplayer.go` 里那个字段的注释（票 #313）。
+	s.full.partsList.Key = func(i int) any {
+		return s.full.partsRowKeys.At(i, rows[i].key, rowkey.Identity)
+	}
 	s.full.partsList.Label = func(i int) string { return rows[i].title }
 
 	partsList := ui.List(c, &s.full.partsList, len(rows), func(i int) {

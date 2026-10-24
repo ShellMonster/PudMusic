@@ -51,6 +51,7 @@ import (
 	"runtime/debug"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -154,6 +155,12 @@ var downloadColumns = []ui.TableColumn{
 type downloadsPage struct {
 	// state 是那张表格的状态：滚动位置、行身份、无障碍名字。
 	state ui.ListState
+	// rowKeys 记着每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
+	// （票 #313）。**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头）：
+	// 筛选一变、下载记录多一条少一条——身份对不上就重算，不用记得重建。
+	rowKeys rowkey.Memo[string, any]
 
 	// filter 是那一排「全部 / 音频 / 视频」现在选的是哪一档。见 downloadFilter。
 	//
@@ -385,7 +392,8 @@ func (d *downloadsPage) viewTable(c *ui.Context, s *Shell) {
 			// 比返回下标安全：返回下标会让它看起来像「行 0」。
 			return dlRowKey{}
 		}
-		return d.rows[i].ID
+		// ⚠️ **身份是预先装箱好的那一份**（`d.rowKeys`）：理由见那个字段的注释。
+		return d.rowKeys.At(i, d.rows[i].ID, rowkey.Identity)
 	}
 
 	// 表格外面那一张**卡片底**：上游是 `Card radius="md" shadow="sm"` 包着

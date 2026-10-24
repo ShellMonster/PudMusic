@@ -15,6 +15,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
@@ -255,7 +256,11 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme) {
 	// 🔴 铁律四：Key 每一帧都重装，装的是这一首自己的判重标识。
 	// ⚠️ 别改成行号：那正是实测踩过的坑（前面删掉一行，后面所有行的状态整体
 	// 错配，抽屉上表现为「正在播的那首」高亮到了旁边那一行）。
-	s.queueList.Key = func(i int) any { return rows[i].key }
+	// ⚠️ **身份是预先装箱好的那一份**（`s.queueRowKeys`）：理由见
+	// `shell.go` 里那个字段的注释（票 #313）。
+	s.queueList.Key = func(i int) any {
+		return s.queueRowKeys.At(i, rows[i].key, rowkey.Identity)
+	}
 	// Label 是这一行给无障碍和「打字选中」用的名字。
 	s.queueList.Label = func(i int) string { return rows[i].item.Title }
 
