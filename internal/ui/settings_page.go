@@ -889,23 +889,25 @@ func (s *Shell) pickSelected(c *ui.Context, b ui.Element, ro bool) ui.Element {
 
 // pickThemePreset 是主题方案那几档（经典 / 暖纸 / 暮光 / 柔雾）。
 //
-// 走 `settingsSegment`：设置页只有一种分段控件（票 #240）。选中的方案压过「颜色」
+// 四张预览卡（`settings_preset_card.go`），不是分段控件：方案是一整套配色，要让人看见
+// 长什么样再选。选中的方案压过「颜色」
 // 和「圆角」两行（见 `app.ThemePreset`）；那两行一改，方案会被清回「经典」，
 // 见 `settings_tab_general.go` 里各处 `ThemePreset = Classic`。
 func (s *Shell) pickThemePreset(c *ui.Context, st app.Settings, ro bool) {
-	chosen := 0
-	opts := make([]segmentOption, len(themePresets))
-	for i, p := range themePresets {
-		opts[i] = segmentOption{label: p.label}
-		if p.preset == st.ThemePreset {
-			chosen = i
+	w := s.settingsControlFitW(c, scale.Font(c, settingsControlW))
+	// 四张卡把控件列平分：卡宽 = (列宽 - 三道缝) / 4。定宽而不是 Grow：Grow 的卡
+	// 宽跟着内容走，缩略图是 FillWidth，于是四张卡宽窄不一。
+	cardW := (w - 3*space.Px8) / float32(len(themePresets))
+	row := ui.Row(c).Key("setting:themePreset").Label("主题方案").Gap(space.Px8).
+		Width(w).MinWidth(settingsControlMinW)
+	row.Children(func() {
+		for _, p := range themePresets {
+			if s.presetCard(c, p.preset, p.label, cardW, p.preset == st.ThemePreset, ro).Clicked() {
+				pick := p.preset
+				s.applySetting("主题方案", func(cur *app.Settings) { cur.ThemePreset = pick })
+			}
 		}
-	}
-	s.settingsSegment(c, "setting:themePreset", "主题方案", scale.Font(c, settingsControlW),
-		opts, chosen, ro, func(i int) {
-			p := themePresets[i].preset
-			s.applySetting("主题方案", func(cur *app.Settings) { cur.ThemePreset = p })
-		})
+	})
 }
 
 // pickCloseWindow 是窗口关闭那两档。照 Biu 用的是横排单选（RadioGroup

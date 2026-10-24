@@ -313,6 +313,11 @@ func (s *Shell) pickColors(c *ui.Context, st app.Settings, ro bool) {
 	ui.Row(c).Key("setting:colors").Width(settingsControlW).
 		MinWidth(settingsControlMinW).Gap(colorItemGap).Children(func() {
 		bg := pick(st.BackgroundColor != "", st.BackgroundColor, themeBackground(dark))
+		// 套了方案时，色块要显示**方案真在画的色**，不是设置里那两个已被压过的值——
+		// 否则暖纸底上摆着一块白、一块 Biu 绿，用户以为那就是当前配色。
+		if st.ThemePreset != app.ThemePresetClassic {
+			bg = toHex(c.Theme().Background)
+		}
 		s.colorItem(c, "背景", bg, ro, st.BackgroundColor != "", func(col string) {
 			s.applySetting("背景色", func(cur *app.Settings) { cur.BackgroundColor, cur.ThemePreset = col, app.ThemePresetClassic })
 		}, func() {
@@ -321,6 +326,9 @@ func (s *Shell) pickColors(c *ui.Context, st app.Settings, ro bool) {
 
 		primary := pick(st.PrimaryColor != app.DefaultPrimaryColor,
 			st.PrimaryColor, app.DefaultPrimaryColor)
+		if st.ThemePreset != app.ThemePresetClassic {
+			primary = toHex(c.Theme().Accent)
+		}
 		s.colorItem(c, "主色", primary, ro, st.PrimaryColor != app.DefaultPrimaryColor,
 			func(col string) {
 				s.applySetting("主色", func(cur *app.Settings) { cur.PrimaryColor, cur.ThemePreset = col, app.ThemePresetClassic })

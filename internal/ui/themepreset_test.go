@@ -205,3 +205,26 @@ func TestTheSelectedSideItemUsesTheAccentSoftBase(t *testing.T) {
 		}
 	}
 }
+
+// TestThePresetCardsAreFourEqualCards：设置页「主题方案」是四张等宽的预览卡
+// （暖纸 / 暮光 / 柔雾 / 经典），名字都画得出来、没被省略号吃掉。
+func TestThePresetCardsAreFourEqualCards(t *testing.T) {
+	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	var xs []float32
+	for _, p := range themePresets {
+		r := settingRect(t, tt, s, p.label)
+		xs = append(xs, r.X+r.W/2)
+	}
+	if len(xs) != 4 {
+		t.Fatalf("方案卡有 %d 张，want 4", len(xs))
+	}
+	step := xs[1] - xs[0]
+	if step < 40 {
+		t.Fatalf("相邻两张卡的中心只差 %.1f，卡片被挤扁了", step)
+	}
+	for i := 2; i < len(xs); i++ {
+		if d := xs[i] - xs[i-1] - step; d > 1 || d < -1 {
+			t.Errorf("第 %d 张和前一张的间距是 %.1f，其余是 %.1f——四张卡不等宽", i, xs[i]-xs[i-1], step)
+		}
+	}
+}
