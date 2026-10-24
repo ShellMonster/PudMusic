@@ -107,7 +107,10 @@ func (a *App) AutoRefreshFavorites() {
 // `AutoRefreshFavorites`）。
 func (a *App) refreshFavorites(announce bool) {
 	f := a.FavoritesOf()
-	if !f.tryBeginRefresh() {
+	// ⚠️ **代号先拿住**：这一趟跑完回来时要对一下（见 `Favorites.Commit`）——
+	// 中间退过登的话，这一趟带的是上一个账号的收藏夹，填回去就是泄露。
+	gen, ok := f.tryBeginRefresh()
+	if !ok {
 		// ⚠️ **这句话不许和侧栏那一行「正在刷新收藏夹…」一样**：它们是屏幕上的
 		// 两个不同位置，而字一样的话，读画面的测试分不出「侧栏上那行还在」和
 		// 「右下角那条提示还没过期」——等错一个就要多等两秒，而那两秒会把真正
@@ -130,9 +133,9 @@ func (a *App) refreshFavorites(announce bool) {
 		// 所以这里只说一句话（手动按的那一下要说：用户按了按钮，不说话就是
 		// 「按下去没反应」），**不动那一组的状态**。
 		if announce {
-			f.finishRefresh("还没登录，登录之后才能刷新收藏夹", notice.Warning)
+			f.finishRefresh(gen, "还没登录，登录之后才能刷新收藏夹", notice.Warning)
 		} else {
-			f.finishQuietly()
+			f.finishQuietly(gen)
 		}
 		return
 	}
@@ -140,10 +143,10 @@ func (a *App) refreshFavorites(announce bool) {
 	if c == nil {
 		// ⚠️ **不许说「接口」**（票 #242，UX 报告 §3-F 的 F2）：这句是弹给
 		// 用户看的。
-		a.refuseRefresh(f, "刷不了收藏夹：这一摊暂时加载不出来", notice.Danger, announce)
+		a.refuseRefresh(f, gen, "刷不了收藏夹：这一摊暂时加载不出来", notice.Danger, announce)
 		return
 	}
-	a.refreshFavoriteGroups(f, c, mid, announce)
+	a.refreshFavoriteGroups(f, c, mid, announce, gen)
 }
 
 // refuseRefresh 是「这一趟压根发不出去」的那一档。
@@ -152,13 +155,13 @@ func (a *App) refreshFavorites(announce bool) {
 // 收藏夹」，而真相是「我们压根没拉成」——那是撒谎（AGENTS.md §4）。
 //
 // ⚠️ **「没登录」那一档不走这里**（见调用处）：那是「没去拉」，不是「拉失败」。
-func (a *App) refuseRefresh(f *Favorites, text string, tone notice.Tone, announce bool) {
-	f.markFailed(FavoritesCreated, text)
+func (a *App) refuseRefresh(f *Favorites, gen uint64, text string, tone notice.Tone, announce bool) {
+	f.markFailed(gen, FavoritesCreated, text)
 	if announce {
-		f.finishRefresh(text, tone)
+		f.finishRefresh(gen, text, tone)
 		return
 	}
-	f.finishQuietly()
+	f.finishQuietly(gen)
 }
 
 // refreshFavoriteGroups 是真的那一趟：翻完 B 站那些页，换掉侧栏那两组。
@@ -177,49 +180,66 @@ func (a *App) refuseRefresh(f *Favorites, text string, tone notice.Tone, announc
 //
 //   - **两组都拉**，即使第一组已经失败了——另一组的数据是好的，而「因为一个
 //     失败就都不拉」的话，用户要等下一次刷新才看得见它。
-//   - **条目先摆、状态后记，中间不叫醒界面**：有一帧是「有条目、状态还停在
-//     没拉过」的话，界面上那句话会从「还没拉收藏夹」跳到「还没有收藏夹」——
+//   - **一次 `Commit` 换掉**：分两次换的话，中间那一帧是「有条目、状态还停在
+//     没拉过」——界面上那句话会从「还没拉收藏夹」跳到「还没有收藏夹」，
 //     而这一跳用户看得见。
-func (a *App) refreshFavoriteGroups(f *Favorites, c *collections, mid int64, announce bool) {
+//
+// # ⚠️ **代号对不上就整趟丢掉**
+//
+// 这一趟在飞的时候用户可能退登了，而它带回来的是**上一个账号**的收藏夹。
+// `Commit` 会对一下代号（见 `Favorites.gen`）：对不上就什么都不写。
+func (a *App) refreshFavoriteGroups(f *Favorites, c *collections, mid int64, announce bool, gen uint64) {
 	go func() {
+		// ⚠️ **不管哪条路都要叫醒界面**：这一趟跑完了，界面上「正在刷新…」
+		// 那一行就该收掉（而退登把它提前收掉的话，也得有一帧把新样子画出来）。
+		defer a.wakeUI()
+
 		created, errCreated := a.fetchCreatedFolders(c, 0)
 		collected, errCollected := a.fetchCollectedFolders(c, mid)
 
-		// 走 `SetFavorites`（不是 `FavoritesOf().Replace`）：它顺手按设置里存的
-		// 顺序排好，而**顺序不是接口给的，是用户拖出来的**（见 favorites.go 文件头）。
-		// 少走这一步的话每刷一次，用户整理好的顺序就被接口的顺序顶掉。
-		if errCreated == nil {
-			a.SetFavorites(FavoritesCreated, createdFavorites(created, mid))
+		// ⚠️ **顺序按存下的那份排**（见 `applySavedOrder`）：顺序不是接口给的，
+		// 是用户拖出来的。忘了排就等于每次刷新都把用户的排序冲掉。
+		order := a.SettingsSnapshot().SideMenuCollectionOrder
+		u := FavoriteGroupsUpdate{
+			Order: [favoriteGroupCount][]int64{
+				order.list(FavoritesCreated),
+				order.list(FavoritesCollected),
+			},
 		}
-		if errCollected == nil {
-			a.SetFavorites(FavoritesCollected, collectedFavorites(collected))
-		}
-		// ⚠️ **一个都没有也是「拉到了」**（见 `markLoaded` 的注释）：那正是
-		// 「B 站那边确实没有」这个结论本身，界面上该说的是「还没有收藏夹」。
+		// ⚠️ **一个都没有也是「拉到了」**：那正是「B 站那边确实没有」这个结论
+		// 本身，界面上该说的是「还没有收藏夹」。
 		if errCreated == nil {
-			f.markLoaded(FavoritesCreated)
+			u.Items[FavoritesCreated] = createdFavorites(created, mid)
+			u.States[FavoritesCreated] = FavoriteState{Loaded: true}
 		} else {
 			log.Printf("biu: 刷新「我创建的」失败：%v", errCreated)
-			f.markFailed(FavoritesCreated, favErrText(FavoritesCreated, errCreated))
+			u.States[FavoritesCreated] = FavoriteState{Err: favErrText(FavoritesCreated, errCreated)}
 		}
 		if errCollected == nil {
-			f.markLoaded(FavoritesCollected)
+			u.Items[FavoritesCollected] = collectedFavorites(collected)
+			u.States[FavoritesCollected] = FavoriteState{Loaded: true}
 		} else {
 			log.Printf("biu: 刷新「我收藏的」失败：%v", errCollected)
-			f.markFailed(FavoritesCollected, favErrText(FavoritesCollected, errCollected))
+			u.States[FavoritesCollected] = FavoriteState{Err: favErrText(FavoritesCollected, errCollected)}
+		}
+
+		if !f.Commit(gen, u) {
+			// 退登了：这一份是上一个账号的，丢掉（见 `Favorites.Commit`）。
+			log.Printf("biu: 这一趟收藏夹回来时账号已经换了（多半是退登），这次结果作废")
+			f.finishQuietly(gen)
+			return
 		}
 
 		switch {
 		case errCreated != nil:
-			f.finishRefresh(favErrText(FavoritesCreated, errCreated), notice.Danger)
+			f.finishRefresh(gen, favErrText(FavoritesCreated, errCreated), notice.Danger)
 		case errCollected != nil:
-			f.finishRefresh(favErrText(FavoritesCollected, errCollected), notice.Danger)
+			f.finishRefresh(gen, favErrText(FavoritesCollected, errCollected), notice.Danger)
 		case announce:
-			f.finishRefresh(refreshDoneText(len(created), len(collected)), notice.Success)
+			f.finishRefresh(gen, refreshDoneText(len(created), len(collected)), notice.Success)
 		default:
-			f.finishQuietly()
+			f.finishQuietly(gen)
 		}
-		a.wakeUI()
 	}()
 }
 
@@ -276,11 +296,26 @@ func (a *App) fetchCollectedFolders(c *collections, mid int64) ([]bili.Collected
 
 // collectedFavorites 把 B 站那份翻成侧栏要的那一种。
 //
-// ⚠️ **Type 原样带过去**（11 收藏夹 / 21 合集 / 31 系列）：「我收藏的」那一组
-// 三种都有，而类型决定点进去是哪一个页面（见 `ui.collectionPathOf`）。
+// ⚠️ **合集 / 系列（21 / 31）在这里被丢掉**：它们的内容列表是**另一套接口**
+// （`/x/polymer/web-space/seasons/season_info`、`/x/series/archives`），
+// 本项目没接——而侧栏那一行的类型决定点进去是哪一个容器。摆一行合集在
+// 侧栏上，用户点进去看到的是**空的**（合集的 id 被发到了收藏夹那两个接口
+// 上），右键「播放」「取消收藏」走的也是同一条错接口（B 站那边合集是
+// 「订阅」，取消订阅是 `/x/v3/fav/season/unfav` 那一套）。
+//
+// **摆一组点不动的行比不摆更坏**——所以这一组只收**收藏夹**。等歌单页接上
+// 合集内容了，把这一道放开就行（`bili.CollectedFolders` 那边已经把类型
+// 原样带过来了）。
+//
+// ⚠️ **认不出来的类型留着**：B 站的官方文档里**没有** `type` 那一格（见
+// `bili/collected.go` 的文件头），所以线上万一不发它，那些行也得摆得出来
+// ——`bili.collectedType` 已经把它们归一成收藏夹了。
 func collectedFavorites(list []bili.CollectedFolder) []Favorite {
 	out := make([]Favorite, 0, len(list))
 	for _, it := range list {
+		if it.Type != int(bili.CollectionFavorite) {
+			continue
+		}
 		out = append(out, Favorite{
 			ID: it.ID, Title: it.Title, Mid: it.Mid, Type: it.Type,
 		})
@@ -332,14 +367,21 @@ func (a *App) TakeFavoritesRefresh() (string, notice.Tone, bool) {
 // ── 那一小份状态的方法（都在 `Favorites.mu` 里） ─────────────────────────────
 
 // tryBeginRefresh 立起「正在刷」，已经有一趟在飞时返回 false。
-func (f *Favorites) tryBeginRefresh() bool {
+//
+// 返回的第二个值是**这一趟的代号**（见 `Favorites.gen`）：这一趟跑完回来
+// 时要拿它对一下——
+//
+//   - 中间退过登的话，这一趟带的是上一个账号的收藏夹，填回去就是泄露；
+//   - 退登之后新账号的那一趟已经在飞了，旧的那一趟回来时**不能**把
+//     「正在刷新收藏夹…」那一行收掉（那一行是用户唯一看得见的在飞证据）。
+func (f *Favorites) tryBeginRefresh() (uint64, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.refresh.busy {
-		return false
+		return 0, false
 	}
 	f.refresh.busy = true
-	return true
+	return f.gen, true
 }
 
 // finishRefresh 收掉「正在刷」，并攒下要说的那句话。
@@ -347,10 +389,17 @@ func (f *Favorites) tryBeginRefresh() bool {
 // ⚠️ **busy 一定要在说话之前清掉**：界面拿到那句话弹提示的那一帧，正好也是它
 // 要把侧栏上那行「正在刷新…」收掉的那一帧。顺序反了的话那一帧里两句话对着干，
 // 而留下的是「刷新完了，界面上还在转」的那一种。
-func (f *Favorites) finishRefresh(text string, tone notice.Tone) {
+//
+// ⚠️ **代号对不上就什么都不做**：退登之后那一趟属于上一个账号，而新账号的
+// 那一趟已经在飞了——旧的那一趟要是把 busy 收掉，新账号那一趟的
+// 「正在刷新收藏夹…」那一行就凭空不见了。
+func (f *Favorites) finishRefresh(gen uint64, text string, tone notice.Tone) {
 	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.gen != gen {
+		return
+	}
 	f.refresh.busy, f.refresh.have, f.refresh.text, f.refresh.tone = false, true, text, tone
-	f.mu.Unlock()
 }
 
 // finishQuietly 收掉「正在刷」，**不攒下任何话**。
@@ -360,10 +409,15 @@ func (f *Favorites) finishRefresh(text string, tone notice.Tone) {
 //
 // ⚠️ **它不清 `have`**：信箱里要是还攒着一句别的话（用户自己按的那一下刚
 // 攒下的），那句话得留着给界面取走。
-func (f *Favorites) finishQuietly() {
+//
+// ⚠️ **代号对不上就什么都不做**（理由同 `finishRefresh`）。
+func (f *Favorites) finishQuietly(gen uint64) {
 	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.gen != gen {
+		return
+	}
 	f.refresh.busy = false
-	f.mu.Unlock()
 }
 
 // setRefreshResult 只攒下那句话，不碰 busy。

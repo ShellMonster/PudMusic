@@ -13,6 +13,7 @@ import (
 	"context"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -308,17 +309,179 @@ func TestTheCollectedFoldersShowUpInTheSidebar(t *testing.T) {
 	a.AutoRefreshFavorites()
 
 	waitFor(t, waitTimeout, "「我收藏的」那一组拉回来了", func() bool {
-		return len(a.SideFavorites(app.FavoritesCollected)) == 2
+		return len(a.SideFavorites(app.FavoritesCollected)) >= 1
 	})
 	got := a.SideFavorites(app.FavoritesCollected)
 	if got[0].Title != "入站必刷" || got[0].Mid != 77 {
 		t.Errorf("第一条是 %+v，want 入站必刷（mid 77）", got[0])
 	}
-	// ⚠️ **类型要原样带过来**：合集（21）点进去是另一个页面，
-	// 而类型认错了的话点进去会按收藏夹打开（见 `ui.collectionPathOf`）。
-	if got[1].Type != 21 {
-		t.Errorf("合集那一条的类型是 %d，want 21", got[1].Type)
+	// ⚠️ **主人的 mid 要带过来**：「我收藏的」那一组里的收藏夹全是别人的，
+	// 而跳 `/collection/{id}?mid=` 要的就是主人的那个。
+	if got[0].Mid != 77 {
+		t.Errorf("mid 是 %d，want 77（收藏夹主人的）", got[0].Mid)
 	}
+}
+
+// TestCollectedAlbumsAreNotPutInTheSidebar 钉**合集 / 系列不进侧栏**。
+//
+// ⚠️ **摆一行点不动的行比不摆更坏**：合集（21）/ 系列（31）的内容列表是
+// **另一套接口**（`/x/polymer/web-space/seasons/season_info`、
+// `/x/series/archives`），本项目没接——于是点进去那一页是空的（合集的 id
+// 被发到了收藏夹那两个接口上），右键「播放」「取消收藏」走的也是同一条错接口。
+//
+// 所以这一组**只收收藏夹**（见 `collectedFavorites`）。
+func TestCollectedAlbumsAreNotPutInTheSidebar(t *testing.T) {
+	f := newBiliFixture(t)
+	hits := &favHits{}
+	onFavList(t, f, hits, nil, false)
+	onFavCollected(t, f, hits, []map[string]any{
+		{"id": 900, "title": "入站必刷", "mid": 77, "type": 11, "state": 0},
+		{"id": 901, "title": "合集 甲", "mid": 78, "type": 21, "state": 0},
+		{"id": 902, "title": "系列 乙", "mid": 79, "type": 31, "state": 0},
+	}, false)
+
+	a := favApp(t, f, favStore(t, "7"))
+	a.AutoRefreshFavorites()
+
+	waitFor(t, waitTimeout, "「我收藏的」那一组拉回来了", func() bool {
+		return len(a.SideFavorites(app.FavoritesCollected)) >= 1
+	})
+	got := a.SideFavorites(app.FavoritesCollected)
+	for _, f := range got {
+		if f.Type != 11 {
+			t.Errorf("侧栏上有一条类型是 %d 的（%q）——合集 / 系列的内容本项目"+
+				"拉不出来，摆进去是死的路", f.Type, f.Title)
+		}
+	}
+	if len(got) != 1 {
+		t.Errorf("「我收藏的」那一组有 %d 条，want 1（只有那个收藏夹）", len(got))
+	}
+}
+
+// TestARefreshThatComesBackAfterALogoutIsThrownAway 钉「退登时在飞的那一趟
+// 回来之后**不能**把上一个账号的收藏夹填回去」。
+//
+// ⚠️ **这是这一票新加的自动拉带来的窗口**：刚开机 / 刚登录一两秒内退登，
+// 那一趟就还在飞；而它带回来的是**上一个账号**的收藏夹——填回侧栏就是把它
+// 泄露给下一个登录的人。
+//
+// 做法：把 created/list 那一趟**卡在飞** → 退登 → 放行 → 侧栏上必须仍然是
+// 空的（而且状态也要复位成「没拉过」）。
+func TestARefreshThatComesBackAfterALogoutIsThrownAway(t *testing.T) {
+	f := newBiliFixture(t)
+	gate := make(chan struct{})
+	release := sync.OnceFunc(func() { close(gate) })
+	// ⚠️ **必须放走**：测试收尾时 `httptest.Server.Close` 要等在途的请求回来，
+	// 不放就是整个测试挂到 go test 的上限。
+	defer release()
+
+	hits := &favHits{}
+	f.on(favListPath, func(w http.ResponseWriter, r *http.Request) {
+		hits.add()
+		<-gate
+		writeFixtureJSON(t, w, 0, "0", map[string]any{
+			"count": 1, "has_more": false,
+			"list": []map[string]any{{"id": 11, "title": "通勤路上", "attr": 0}},
+		})
+	})
+	onFavCollected(t, f, nil, nil, false)
+
+	a := favApp(t, f, favStore(t, "7"))
+
+	// 「叫醒界面」的那一支当「那一趟回来了」的信号：后台那一趟跑完会调它。
+	var wakes atomic.Int64
+	a.SetWake(func() { wakes.Add(1) })
+
+	a.AutoRefreshFavorites()
+	waitFor(t, waitTimeout, "那一趟到了假服务器", func() bool { return hits.count() == 1 })
+
+	// 退登：它把侧栏那两组清掉（**并且代号 +1**）。
+	if err := a.Logout(); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(a.SideFavorites(app.FavoritesCreated)); got != 0 {
+		t.Fatalf("退登之后侧栏上还有 %d 条", got)
+	}
+	// 退登自己也会叫醒界面（界面要重画成登出的样子），所以从这儿开始数。
+	base := wakes.Load()
+
+	// 放行那一趟。
+	release()
+	waitFor(t, waitTimeout, "那一趟回来了", func() bool { return wakes.Load() > base })
+
+	if got := len(a.SideFavorites(app.FavoritesCreated)); got != 0 {
+		t.Errorf("退登之后那一趟回来，把上一个账号的收藏夹填回去了 %d 条", got)
+	}
+	if st := a.FavoriteState(app.FavoritesCreated); st.Loaded || st.Err != "" {
+		t.Errorf("退登之后状态是 %+v，应该复位成「没拉过」", st)
+	}
+}
+
+// TestTheOldRefreshDoesNotStealTheNewAccountsRefreshState 钉「旧的那一趟回来
+// 的时候不能把新账号那一趟的「正在刷新…」收掉」。
+//
+// 场景：退登 → 换个人登录 → 新账号的那一趟在飞 → 旧的那一趟这时候才回来。
+// 旧的那一趟要是把 busy 收掉，新账号那一趟的「正在刷新收藏夹…」那一行
+// 就凭空不见了——而那一行是用户**唯一**看得见的「在飞」证据。
+//
+// ⚠️ **代号是跟着那一趟走的**（见 `Favorites.gen`）：旧的那一趟带的是旧代号，
+// 收尾那一下对不上就什么也不做。
+func TestTheOldRefreshDoesNotStealTheNewAccountsRefreshState(t *testing.T) {
+	f := newBiliFixture(t)
+	// 两个闸门：第一个卡住旧的那一趟，第二个卡住新账号的那一趟。
+	gateOld := make(chan struct{})
+	gateNew := make(chan struct{})
+	releaseOld := sync.OnceFunc(func() { close(gateOld) })
+	releaseNew := sync.OnceFunc(func() { close(gateNew) })
+	defer releaseOld()
+	defer releaseNew()
+
+	var reqs atomic.Int64
+	f.on(favListPath, func(w http.ResponseWriter, r *http.Request) {
+		switch reqs.Add(1) {
+		case 1:
+			<-gateOld
+		case 2:
+			<-gateNew
+		}
+		writeFixtureJSON(t, w, 0, "0", map[string]any{
+			"count": 1, "has_more": false,
+			"list": []map[string]any{{"id": 11, "title": "通勤路上", "attr": 0}},
+		})
+	})
+	onFavCollected(t, f, nil, nil, false)
+
+	a := favApp(t, f, favStore(t, "7"))
+
+	var wakes atomic.Int64
+	a.SetWake(func() { wakes.Add(1) })
+
+	// 旧账号的那一趟。
+	a.AutoRefreshFavorites()
+	waitFor(t, waitTimeout, "旧的那一趟到了假服务器", func() bool { return reqs.Load() == 1 })
+
+	// 退登，然后**换个人登录**：登录成功会自动拉一次（`AutoRefreshFavorites`）。
+	if err := a.Logout(); err != nil {
+		t.Fatal(err)
+	}
+	f.onScans(0)
+	a.BeginLogin()
+	defer a.CancelLogin()
+	waitFor(t, waitTimeout, "登录成功", func() bool { return a.LoginState().Phase == app.LoginDone })
+	waitFor(t, waitTimeout, "新账号的那一趟到了假服务器", func() bool { return reqs.Load() == 2 })
+
+	// 放行旧的那一趟：它回来之后**不能**把新账号那一趟的 busy 收掉。
+	base := wakes.Load()
+	releaseOld()
+	waitFor(t, waitTimeout, "旧的那一趟回来了", func() bool { return wakes.Load() > base })
+	if !a.FavoritesRefreshing() {
+		t.Error("旧的那一趟回来之后，「正在刷新收藏夹…」那一行不见了——" +
+			"而新账号的那一趟还在飞")
+	}
+
+	// 放行新账号的那一趟：它跑完之后那一行才收掉。
+	releaseNew()
+	waitFor(t, waitTimeout, "新账号的那一趟回来了", func() bool { return !a.FavoritesRefreshing() })
 }
 
 // TestAFetchThatFoundNothingIsStillLoaded 钉「拉到了，一个都没有」这一档。

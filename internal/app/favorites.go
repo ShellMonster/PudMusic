@@ -23,7 +23,8 @@
 //     那一条都在那儿）。
 //
 // 两组都由 `App.RefreshFavorites` / `App.AutoRefreshFavorites` 拉，
-// 拉回来过 `SetFavorites`。
+// 拉回来的东西一次 `Favorites.Commit` 换进去（条目和状态一起换，见它的
+// 注释）。
 //
 // ## 空列表有三种来由，界面上必须说得清是哪一种
 //
@@ -72,13 +73,19 @@ func (g FavoriteGroup) Valid() bool { return g >= 0 && g < favoriteGroupCount }
 // 字段只留现在画得出来的那些（标题 + 跳转要用的 id / 账号 / 类型）。
 // 封面那一格等 imgcache 接上再补——**先立字段、后接数据**，和
 // `State.CoverURL` 是同一个理由：本地文件永远没有封面，但字段先立着。
+//
+// ⚠️ **今天侧栏上只有收藏夹那一种行**：合集 / 系列的内容列表是另一套接口
+// （本项目没接），摆进去是死的路，所以 `app.collectedFavorites` 那一道把
+// 它们滤掉了。类型这个字段留着——它本来就属于这一行，而等合集内容接上了，
+// 那一行放开时地址和播放都已经是对的。
 type Favorite struct {
 	ID    int64
 	Title string
 	// Mid 是这个收藏夹属于哪个账号。跳转 `/collection/{id}?mid=` 要用。
 	Mid int64
 	// Type 是 B 站那边的类型：收藏夹 / 合集 / 系列不一样。
-	// 「我创建的」全是收藏夹，「我收藏的」三种都有（见 collection/index.tsx:327）。
+	// 「我创建的」全是收藏夹；「我收藏的」那边接口也会给合集 / 系列，
+	// 但它们被滤掉了（见上面的注释）。
 	Type int
 }
 
@@ -96,6 +103,14 @@ type Favorites struct {
 	// 和**压根没拉**。而「拉失败」是第三种（列表可能还是上一次的）。
 	// 三者在画面上必须长得不一样，所以状态单独存着，不靠 `len(groups[g])` 推。
 	states [favoriteGroupCount]FavoriteState
+
+	// gen 是「这一摊属于哪一次登录」的代号。
+	//
+	// ⚠️ **退登时它 +1**（见 `clear`）：退登之后可能**还有一趟刷新在飞**，
+	// 而那一趟回来时带着的是**上一个账号**的收藏夹——填回侧栏就是把它泄露
+	// 给下一个登录的人。所以刷新那一趟开始时记下代号，回来时对一下：
+	// 对不上就整趟丢掉（见 `Commit`）。
+	gen uint64
 
 	// refresh 是「正在重新拉一次」那一趟的状态，跑完攒下的话也算在里面。
 	// 见 favorites_refresh.go——和上面那两组是同一份侧栏收藏夹的两种状态，
@@ -122,9 +137,63 @@ type FavoriteState struct {
 	Loaded bool
 	// Err 是最近一次拉失败的话。空串 = 没失败。
 	//
-	// ⚠️ **它是给人看的句子，不是 `error`**：这一句会被原样摆到侧栏上，
-	// 所以得是人话（服务层那几句已经是翻好的，见 `bili.Friendly`）。
+	// ⚠️ **它不摆到界面上**：界面只判它是不是空串（那一句要短——侧栏最窄
+	// 160，摆不下细节）；带细节的那一句走提示（见 `favErrText`）。
+	//
+	// 所以它在这儿的作用是**一个标记**，不是一句话。存的是人话而不是
+	// `error`，是为了日志和调试时能直接读懂（服务层那几句已经是翻好的，
+	// 见 `bili.Friendly`）。
 	Err string
+}
+
+// FavoriteGroupsUpdate 是一次「把两组一起换掉」要写进去的东西。
+//
+// ⚠️ **两组和它们的状态一起换**：分两次换的话，中间那一帧是「有条目、
+// 状态还停在没拉过」——界面上那一句会从「还没拉收藏夹」跳到「还没有收藏夹」，
+// 而这一跳用户看得见。
+type FavoriteGroupsUpdate struct {
+	// Items 是两组的新条目。
+	//
+	// ⚠️ **nil 是「这一组这一次没拿到」**（拉失败了），而**空但不是 nil**
+	// 是「这一组确实一个都没有」——这两个在界面上说的不是同一句话。
+	Items [favoriteGroupCount][]Favorite
+	// Order 是两组各自的保存顺序（见 `applySavedOrder`）。
+	Order [favoriteGroupCount][]int64
+	// States 是两组的状态（见 `FavoriteState`）。**两组都要给**。
+	States [favoriteGroupCount]FavoriteState
+}
+
+// Commit 把这一次更新写进去。**但只在代号还是 gen 的时候。**
+//
+// 返回 false = 代号变了（退登了），**什么都没写**。
+//
+// ⚠️ **代号变了就是退登了**：退登之后可能还有一趟刷新在飞，而那一趟回来
+// 时带着的是**上一个账号**的收藏夹——填回侧栏就是把它泄露给下一个登录
+// 的人。清掉的那一次（`clear`）把代号 +1，所以那一趟回来时对不上，
+// 整趟丢掉。
+//
+// ⚠️ **这一道是「检查」和「写」一起做的**：分两步的话，退登正好卡在两步
+// 之间的话，那一趟还是会把上一个账号的填回去——而退登清掉的那一次已经
+// 过去了。
+func (f *Favorites) Commit(gen uint64, u FavoriteGroupsUpdate) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.gen != gen {
+		return false
+	}
+	for g := range favoriteGroupCount {
+		if u.Items[g] != nil {
+			f.groups[g] = applySavedOrder(u.Items[g], u.Order[g])
+		}
+		st := u.States[g]
+		// ⚠️ **失败不清掉 Loaded**：上一次拉成功过的话，那一份列表还在界面上，
+		// 而它仍然是「上一次拉到的」——把它说成「从没拉过」是另一句谎。
+		if st.Err != "" && f.states[g].Loaded {
+			st.Loaded = true
+		}
+		f.states[g] = st
+	}
+	return true
 }
 
 // state 读这一组此刻的加载状态。
@@ -137,34 +206,28 @@ func (f *Favorites) state(g FavoriteGroup) FavoriteState {
 	return f.states[g]
 }
 
-// markLoaded 记下「这一组成功拉过一次」。
-//
-// ⚠️ **一次都没有也是「拉到了」**：那正是「B 站那边确实没有」这个结论。
-func (f *Favorites) markLoaded(g FavoriteGroup) {
-	if !g.Valid() {
-		return
-	}
-	f.mu.Lock()
-	f.states[g] = FavoriteState{Loaded: true}
-	f.mu.Unlock()
-}
-
-// markFailed 记下「这一组最近一次拉失败了」。
+// markFailed 记下「这一组最近一次拉失败了」，**但只在代号还是 gen 的时候**。
 //
 // ⚠️ **不清掉 Loaded**：上一次拉成功过的话，那一份列表还在界面上，
 // 而它仍然是「上一次拉到的」——把它说成「从没拉过」是另一句谎。
-func (f *Favorites) markFailed(g FavoriteGroup, reason string) {
+//
+// ⚠️ **代号对不上就什么都不写**：那说明中间退过登，而这一句说的是上一个
+// 账号的事（见 `Favorites.gen`）。
+func (f *Favorites) markFailed(gen uint64, g FavoriteGroup, reason string) {
 	if !g.Valid() {
 		return
 	}
 	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.gen != gen {
+		return
+	}
 	st := f.states[g]
 	st.Err = reason
 	f.states[g] = st
-	f.mu.Unlock()
 }
 
-// clear 把两组的条目和状态都清掉。
+// clear 把两组的条目和状态都清掉，并把代号 +1。
 //
 // 用在**退登**那一下：侧栏那两组是上一个账号的，而用户退登之后不该还看得见
 // （换人登录时那几秒尤其明显——新账号的收藏夹还没拉回来，旧账号的还摆着）。
@@ -172,10 +235,20 @@ func (f *Favorites) markFailed(g FavoriteGroup, reason string) {
 // ⚠️ **状态也要清**：不清的话「拉到了、一个都没有」那个结论会留在那儿，
 // 而新账号登录之后那一组是空的——用户读到的是「还没有收藏夹」，而真相是
 // 「这个账号的还没拉过」。
+//
+// ⚠️ **代号 +1 是这一件里最要紧的**：退登的时候可能**还有一趟刷新在飞**，
+// 而那一趟回来时带着的是上一个账号的收藏夹。代号 +1 之后，那一趟回来时
+// 对不上，整趟丢掉（见 `Commit`）——不然 `clear` 就被绕过了。
+//
+// ⚠️ **「正在刷新…」那一行也收掉**：在飞的那一趟属于上一个账号，而新账号
+// 登录之后会重新拉一趟（那一趟才是屏幕上该转的那一个）。
 func (f *Favorites) clear() {
 	f.mu.Lock()
+	f.gen++
 	f.groups = [favoriteGroupCount][]Favorite{}
 	f.states = [favoriteGroupCount]FavoriteState{}
+	f.refresh.busy = false
+	f.refresh.have = false
 	f.mu.Unlock()
 }
 
@@ -191,8 +264,12 @@ func (f *Favorites) Snapshot(g FavoriteGroup) []Favorite {
 
 // Replace 把这一组换成 items，并按存下的 order 排好。
 //
-// **每次从接口拿到新条目都要过这里**：顺序不是接口给的，是用户拖出来的，
+// **从接口拿到新条目时按它排好**：顺序不是接口给的，是用户拖出来的，
 // 忘了排就等于每次刷新都把用户的排序冲掉。
+//
+// ⚠️ **刷新那一趟不走它**：那一趟要一次把两组的条目和状态一起换掉，还要
+// 对一下账号有没有换过（见 `Favorites.Commit`）。这一条是「只换一组」
+// 那一档（`SetFavorites` 用的）。
 func (f *Favorites) Replace(g FavoriteGroup, items []Favorite, order []int64) {
 	if !g.Valid() {
 		return
@@ -374,6 +451,12 @@ func (a *App) FavoritesOf() *Favorites {
 }
 
 // SetFavorites 把某一组换成 items，顺序按设置里存的那份排。
+//
+// ⚠️ **它只换条目，不动加载状态**：加载状态（见 `FavoriteState`）是「拉过
+// 没有、拉成了没有」那一层的事，而这一条是「把这一组摆成什么样」。
+//
+// **刷新那一趟不走它**：那一趟要一次把两组的条目和状态一起换掉，还要对一下
+// 账号有没有换过（见 `Favorites.Commit`）。
 //
 // 服务层接到收藏夹接口之后调它；调完之后不用再管顺序，拖一次存一次。
 func (a *App) SetFavorites(g FavoriteGroup, items []Favorite) {

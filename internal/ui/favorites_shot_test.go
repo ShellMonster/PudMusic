@@ -80,12 +80,16 @@ func TestRenderFavoritesShots(t *testing.T) {
 			}
 
 			// 83 **两组都有条目**：自动拉回来的那一份直接摆在那儿。
+			//
+			// ⚠️ **「我收藏的」那一组只有收藏夹**：合集 / 系列被
+			// `app.collectedFavorites` 滤掉了（它们的内容列表是另一套接口，
+			// 本项目没接，摆进去是死的路）。
 			{
 				f := newFolderBili(t, nil)
 				f.pages = [][]map[string]any{folderPage(1, 2)}
 				f.setCollected([]map[string]any{
 					{"id": 900, "title": "入站必刷", "mid": 77, "type": 11, "state": 0},
-					{"id": 901, "title": "合集 甲", "mid": 78, "type": 21, "state": 0},
+					{"id": 902, "title": "鬼畜小课堂", "mid": 79, "type": 11, "state": 0},
 				})
 				s, tt := refreshShellOpts(t, f, "7", systemIsDark(dark))
 				s.app.RefreshFavorites()
