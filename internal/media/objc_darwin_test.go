@@ -176,7 +176,7 @@ func TestNowPlayingInfoRoundTrip(t *testing.T) {
 // TestThePlaybackRateFollowsTheState 盯速率跟着状态走。
 //
 // 暂停/停止时必须是 0：非 0 的话控制中心会以为歌还在放，进度条自己往前
-// 爬，而歌是停着的——用户看锁屏就能看出���不对。
+// 爬，而歌是停着的——用户看锁屏就能看出劲不对。
 func TestThePlaybackRateFollowsTheState(t *testing.T) {
 	p := mpTestPlatform(t)
 	center := nowPlayingCenter()
@@ -675,7 +675,7 @@ func TestTheMediaTypeIsAnEnumNotAString(t *testing.T) {
 // TestTheArtworkRepushCannotResurrectAPause 盯「封面补推不会把暂停按回在放」。
 //
 // 评审第二轮指出的第二个问题：补推原本是「在锁里取一份快照 → 解锁 → 排队写」。
-// 排队和执行之间有���隙，用户在这空隙里按了暂停，apply 先跑完（系统已经是
+// 排队和执行之间有间隙，用户在这空隙里按了暂停，apply 先跑完（系统已经是
 // 暂停），补推随后把**过期的「在放」快照**整体写回去——暂停被按掉了。
 //
 // 串行化只挡住了「两次 push 各自的两条 setter 互相穿插」，没挡住「旧快照晚写」。

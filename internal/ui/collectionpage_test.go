@@ -1008,7 +1008,7 @@ func TestTheCollectionHeaderShowsTheCreatorAvatar(t *testing.T) {
 	if r.W < 23 || r.W > 25 || r.H < 23 || r.H > 25 {
 		t.Errorf("创建者头像是 %.0f×%.0f，want 24×24（票面）", r.W, r.H)
 	}
-	// 等那张图到（封面缓存是后台抓的，到���会叫醒界面）。
+	// 等那张图到（封面缓存是后台抓的，到了会叫醒界面）。
 	waitFrames(t, tt, "头像图到了", func() bool {
 		c := tt.Image().RGBAAt(round32(r.X+r.W/2), round32(r.Y+r.H/2))
 		return c.R > 200 && c.G < 80 && c.B < 80

@@ -124,7 +124,7 @@ func streamKey(it Item) string {
 }
 
 // MountStreaming 挂上在线播放。**在开窗口之前调**（它自己不读盘，但让
-// 第一���点歌不要替「开窗」买单）。
+// 第一次点歌不要替「开窗」买单）。
 func (a *App) MountStreaming(s Streaming) {
 	a.mu.Lock()
 	a.streaming = &s
@@ -1164,7 +1164,7 @@ func (a *App) checkPlayback() {
 	// ⚠️ **在线流要看字节源自己的错，不要看解码器的**。解码器看到的是**后果**：
 	// 字节断了之后它多半先报「这一帧的 CRC 对不上」，而真正的原因是网络断了
 	// 或者地址失效了。把后果说给用户听，用户会以为歌坏了、缓存坏了，
-	// 于是去清缓存重下——而正确���反应是「换个网」。
+	// 于是去清缓存重下——而正确的反应是「换个网」。
 	if tr != nil && tr.source != nil {
 		if srcErr := tr.source.Err(); srcErr != nil && !errors.Is(srcErr, io.EOF) {
 			err = srcErr

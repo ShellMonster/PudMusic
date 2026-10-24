@@ -268,7 +268,7 @@ func coverCornerX(img *image.RGBA, box mygoui.Rect, bg, border color.RGBA) int {
 	return -1
 }
 
-// frac8 是「从 from 走到 to 走了整段的多���」。
+// frac8 是「从 from 走到 to 走了整段的多少」。
 func frac8(v, from, to uint8) float64 {
 	span := int(to) - int(from)
 	if span == 0 {
