@@ -11,10 +11,19 @@
 // **非有这一列不可**：没有它用户看到的是一列标题，得自己回想看过多少。「听了一半」
 // 这个状态在界面上完全看不出来，于是每一首都得从头听或者拖进度条试一遍。
 //
-// 另外两处：页头右上角的「清空历史记录」是批量删除、而本项目还没有一份**共用**
-// 的确认弹窗（PLAN 的 C-43 / L-05：收藏夹批量删、本地音乐删文件/删目录、下载
-// 记录删/清空各自有一份，这一页是剩下那几处之一），所以**不摆**；「记录播放
-// 历史」那个开关改的是设置里已有的 `reportPlayHistory`（`app.Settings`），摆上
+// 另外两处：页头右上角是「开关 + 「记录播放历史」文案 + 清空键」三样（上游
+// `src/pages/history/index.tsx:258-275`），我们摆的是**前两样**：文案照抄上游
+// 原文（票 #296），**清空键不摆**——那是 2026-10-24 拍板的取舍（上游有是上游的
+// 选择，不是我们漏了），而要摆它得先接一整条链：B 站那个清空历史的
+// `/x/v2/history/clear` 在 `internal/service/bili/history.go` 里**只有一句路径
+// 常量，没有方法调它**（接好的只有 `HistoryDelete`），app 层也没有对应的方法。
+//
+// ⚠️ **别把理由记成「我们没有共用的确认弹窗」**：那份弹窗**已经有了**
+// （`internal/ui/confirmmodal.go`，643cb3f / #176 / #204，2026-10-22），收藏夹
+// 批量删、本地音乐删文件/删目录、下载记录删/清空、清除已看完用的都是它。
+// 缺的是**接口**，不是弹窗。
+//
+// 那个开关改的是设置里已有的 `reportPlayHistory`（`app.Settings`），摆在页面上
 // 用户就不用去设置页里找。
 //
 // 🔴 本文件里的 view **不许**调 `c.SetTheme`（铁律二，见 theme.go）。
@@ -37,6 +46,15 @@ import (
 
 // historyPath 是历史记录那条路由，和 routes 表里登记的是同一个字符串。
 const historyPath = "/history"
+
+// reportHistoryLabel 是页头右侧那一句说明的字。
+//
+// ⚠️ **上游原文照抄**（票 #296），一个字都不改——上游那一行就是这句
+// （`src/pages/history/index.tsx:258-275`）。
+//
+// 它有**两个**用处，所以只有一个常量：开关的无障碍名字（`Label`，给读屏和测试器
+// 找它用的，**屏幕上不画**）和那一句**看得见**的字。
+const reportHistoryLabel = "记录播放历史"
 
 // 历史记录那一行的列宽。播放进度要放得下「12:34 / 45:00」，观看时间要放得下
 // 「2026-10-16 21:04」——都是定死的，不然上下两行的这两列会左右跳。
@@ -178,23 +196,38 @@ func (s *Shell) syncHistory(c *ui.Context) {
 	s.syncLibraryPage(historyPath, &s.historyPage, c)
 }
 
-// viewReportHistory 是那个「记录播放历史」的开关，改的是**盘上已经有的键**
+// viewReportHistory 是页头右侧那一个「开关 + 文案」，改的是**盘上已经有的键**
 // （`app.Settings.ReportPlayHistory`）。至于「改了之后真的少记一条历史吗」——那是
 // 播放器上报那一票的活儿；那一票没做之前它只是一个开关，摆在页面上比藏在设置里
 // 好找。
+//
+// # 那句文案是给人看的（票 #296）
+//
+// 上游那一行是三样：开关 + 「记录播放历史」+ 一枚清空键。我们摆**前两样**：
+// 文案照抄上游原文，**清空键不摆**（那是 2026-10-24 拍板的取舍：要摆它得先把
+// `/x/v2/history/clear` 那条接口链接上——见文件头那一段）。
+//
+// ⚠️ **顺序和上游一样：开关在左，文案在右**（上游 `src/pages/history/index.tsx:258-275`
+// 是 `Switch` 后面跟着那句话）。这一条不只是好看：它还决定无头 Tester 的
+// `Find("记录播放历史")` 先找到哪一个——先找到开关，于是点它就是拨开关。
 func (s *Shell) viewReportHistory(c *ui.Context, on, ro bool) {
-	// ⚠️ 这里**不能** .Key()：Switch 的旋钮有动画，动画状态记在控件节点上，
-	// 每帧换一个新节点等于动画每帧从头开始（见 settings_page.go 的 pickAutoStart）。
-	sw := ui.Switch(c, &on).Label("记录播放历史").Disabled(ro)
-	// 🔴 **按下去要真的写设置**。`on` 是这一帧的局部变量：框架只把用户拨的那一下
-	// 写进它，下一帧 view 又从设置里读一遍填回来。只绑定不写，用户按了开关弹回去，
-	// 而界面上看不出任何异样——这是「按了没反应」里最难查的一种。
-	//
-	// 写不出去（没挂设置、只读）走 `applySetting` 那一句提示，和设置页同一套。
-	if !sw.Changed() {
-		return
-	}
-	s.applySetting("记录播放历史", func(cur *app.Settings) { cur.ReportPlayHistory = on })
+	t := c.Theme()
+	ui.Row(c).Gap(space.Px10).AlignItems(ui.Center).Children(func() {
+		// ⚠️ 这里**不能** .Key()：Switch 的旋钮有动画，动画状态记在控件节点上，
+		// 每帧换一个新节点等于动画每帧从头开始（见 settings_page.go 的 pickAutoStart）。
+		sw := ui.Switch(c, &on).Label(reportHistoryLabel).Disabled(ro)
+		// 14 字（上游 `text-sm`），颜色是正文色——上游那句话就是默认的前景色。
+		ui.Text(c, reportHistoryLabel).FontSize(scale.Font(c, scale.Size14)).TextColor(t.Text)
+		// 🔴 **按下去要真的写设置**。`on` 是这一帧的局部变量：框架只把用户拨的那一下
+		// 写进它，下一帧 view 又从设置里读一遍填回来。只绑定不写，用户按了开关弹回去，
+		// 而界面上看不出任何异样——这是「按了没反应」里最难查的一种。
+		//
+		// 写不出去（没挂设置、只读）走 `applySetting` 那一句提示，和设置页同一套。
+		if !sw.Changed() {
+			return
+		}
+		s.applySetting("记录播放历史", func(cur *app.Settings) { cur.ReportPlayHistory = on })
+	})
 }
 
 // drawHistoryRow 画第 r 行。行首和稍后再看共用（`libraryRowHead`），右边那两列
@@ -326,7 +359,10 @@ func (s *Shell) historyMenu(m *ui.Menu, i int) {
 	switch {
 	// 直播、专栏那几类在 B 站那边也放不了（上游的 `canPlay = business ===
 	// "archive"`，这里由 app 层判好传下来）。
-	case m.Item("播放").Disabled(!row.CanPlay).Chosen():
+	case m.Item("立即播放").Disabled(!row.CanPlay).Chosen():
+		// 「立即播放」= **只放这一首**（票 #299）：队列被换成这一首。
+		acts.PlayNow(i)
+	case m.Item("从这一首往后听").Disabled(!row.CanPlay).Chosen():
 		acts.Play(i)
 	// 「下一首播放」判的是同一个 CanPlay，理由见 laterMenu 里那一项。
 	case m.Item("下一首播放").Disabled(!row.CanPlay).Chosen():

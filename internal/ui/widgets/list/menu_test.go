@@ -19,7 +19,8 @@ import (
 
 // recorded 是记动作的桩：菜单项接的是什么操作，全记在这儿。
 type recorded struct {
-	played  [][]app.Item // 每次「播放」收到的队列
+	played  [][]app.Item // 每次「从这一首往后听」收到的队列
+	nowed   []app.Item   // 每次「立即播放」收到的那一首
 	added   [][]app.Item // 每次「添加到队列」收到的
 	nexted  []app.Item   // 每次「下一首播放」收到的
 	opened  []app.Item   // 每次「在…打开」收到的
@@ -29,6 +30,7 @@ type recorded struct {
 func (r *recorded) actions() Actions {
 	return Actions{
 		Play:     func(items []app.Item) { r.played = append(r.played, items) },
+		PlayNow:  func(item app.Item) { r.nowed = append(r.nowed, item) },
 		Add:      func(items []app.Item) { r.added = append(r.added, items) },
 		PlayNext: func(item app.Item) { r.nexted = append(r.nexted, item) },
 		Open:     func(item app.Item) { r.opened = append(r.opened, item) },
@@ -62,9 +64,41 @@ func TestRightClickOpensTheBiuMenu(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := tt.Menu()
-	want := []string{"播放", "下一首播放", "添加到队列", "-", "在 B 站打开", "-", "收藏", "下载音频"}
+	want := []string{"立即播放", "从这一首往后听", "下一首播放", "添加到队列", "-", "在 B 站打开", "-", "收藏", "下载音频"}
 	if !slices.Equal(got, want) {
 		t.Errorf("菜单上有 %q，want %q", got, want)
+	}
+}
+
+// TestChoosingPlayNowHandsOverJustThatSong 钉住「立即播放」的**那一句字**说的是
+// 什么：**只放当前这一首**（票 #299，2026-10-24 拍板）。
+//
+// ⚠️ 它和「从这一首往后听」差在**带过去几首**：那一枚带的是从这一首到这一页
+// 末尾的那一整段，这一枚**只带它自己**。多带一首就是「按了一首把整页都排上了」——
+// 而「只放这一首」这句话许诺的恰恰相反。
+func TestChoosingPlayNowHandsOverJustThatSong(t *testing.T) {
+	rec := &recorded{}
+	_, tt := newList(t, rec.actions(), onlineSongs(5))
+
+	if err := tt.RightClick("在线的歌 C"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("立即播放"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(rec.nowed) != 1 {
+		t.Fatalf("收到 %d 次「立即播放」，want 1 次", len(rec.nowed))
+	}
+	if got := rec.nowed[0].Bvid; got != "BV3" {
+		t.Errorf("立即播放的是 %q，want BV3", got)
+	}
+	// ⚠️ **不能顺手把队列换一遍**：那一手是「从这一首往后听」的活。
+	if len(rec.played) != 0 {
+		t.Errorf("「立即播放」顺手换了一次队列：%v", rec.played)
+	}
+	if len(rec.added) != 0 {
+		t.Errorf("「立即播放」顺手接了一次队尾：%v", rec.added)
 	}
 }
 
@@ -82,7 +116,7 @@ func TestChoosingPlayQueuesThisSongAndTheRestAfterIt(t *testing.T) {
 	if err := tt.RightClick("在线的歌 B"); err != nil {
 		t.Fatal(err)
 	}
-	if err := tt.ChooseMenuItem("播放"); err != nil {
+	if err := tt.ChooseMenuItem("从这一首往后听"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -257,7 +291,7 @@ func TestTheMenuActsOnTheSongThatWasClicked(t *testing.T) {
 	l.SetSongs(append([]Music{{ID: "bv-new", Title: "新来的一首"}}, songs...))
 	frame(tt)
 
-	if err := tt.ChooseMenuItem("播放"); err != nil {
+	if err := tt.ChooseMenuItem("从这一首往后听"); err != nil {
 		t.Fatal(err)
 	}
 	if len(rec.played) != 1 {
@@ -301,7 +335,7 @@ func TestTheMenuIsWiredToTheRealQueue(t *testing.T) {
 	if err := tt.RightClick("第二首"); err != nil {
 		t.Fatal(err)
 	}
-	if err := tt.ChooseMenuItem("播放"); err != nil {
+	if err := tt.ChooseMenuItem("从这一首往后听"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -403,8 +437,11 @@ func TestAnUnplayableSongHasNoPlayEntryBeforeYouPressIt(t *testing.T) {
 	if err := tt.RightClick("没挂稿件的那一条"); err != nil {
 		t.Fatal(err)
 	}
-	if err := tt.ChooseMenuItem("播放"); err == nil {
-		t.Error("放不了的条目，「播放」竟然能按")
+	if err := tt.ChooseMenuItem("从这一首往后听"); err == nil {
+		t.Error("放不了的条目，「从这一首往后听」竟然能按")
+	}
+	if err := tt.ChooseMenuItem("立即播放"); err == nil {
+		t.Error("放不了的条目，「立即播放」竟然能按")
 	}
 	items := tt.Menu()
 	last := items[len(items)-1]
@@ -430,13 +467,13 @@ func TestALocalSongStillHasAPlayEntry(t *testing.T) {
 	// ⚠️ **菜单项要在点之前数**：点完菜单就关了，而 `tt.Menu()` 读的是
 	// **当前开着的那一份**。
 	items := tt.Menu()
-	if len(items) != 8 {
+	if len(items) != 9 {
 		t.Errorf("菜单上有 %d 项：%q", len(items), items)
 	}
-	if err := tt.ChooseMenuItem("播放"); err != nil {
-		t.Errorf("本地文件的「播放」按不动：%v", err)
+	if err := tt.ChooseMenuItem("从这一首往后听"); err != nil {
+		t.Errorf("本地文件的「从这一首往后听」按不动：%v", err)
 	}
 	if len(rec.played) != 1 {
-		t.Errorf("本地文件的「播放」没接上（动作记了 %d 次）", len(rec.played))
+		t.Errorf("本地文件的「从这一首往后听」没接上（动作记了 %d 次）", len(rec.played))
 	}
 }
