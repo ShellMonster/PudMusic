@@ -3,6 +3,16 @@
 // 结构照 `biu/src/layout/navbar/index.tsx`：左（Navigation + Search）、
 // 右（AppUpdateNotify + Dev + UserFeed + UserCard）。
 //
+// ## 右边那一排：我们比上游多几枚（票 #289）
+//
+// 上游未登录时右边**只有一枚头像**，登录后多一枚「动态」；我们这边是
+// 打开文件 / 迷你 / 动态红点 / 头像 / 登录入口。**多出来的那几枚各有各的
+// 理由**（理由写在每一处代码旁边），而**唯一纯冗余的那一枚是「设置」**——
+// 侧栏里有一条、头像下拉里也有第三条（上游把设置收进头像菜单，
+// `biu/src/layout/navbar/user/index.tsx:107`）。那一枚在票 #289 里去掉了：
+// **同一个动作三个入口，而三个入口会不一致**。剩下几枚要不要挪，是另一票
+// 的事（挪入口不是纯对齐，要人拍板）。
+//
 // ## 整条是拖动区，这件事落在**外层 Row** 上，不是一个空的占位列
 //
 // Biu 是在那个 `div` 上按状态挂 `window-drag` / `window-no-drag`
@@ -56,12 +66,36 @@ const (
 // 那一块系统自己留的高度比 64 大的话，得让开它，不然字会压在红黄绿底下。
 const navMinHeight = 64
 
-// viewNav 是顶部导航栏：后退/前进 + 搜索框 + 打开文件 + 迷你 + 设置 + 动态红点 + 头像。
+// navArrowW / navArrowH 是顶栏左边那两个箭头的**盒子**尺寸。
+//
+// 🔴 **32×40 是照上游量出来的**（票 #289 / 报告 C-03）：上游只有一枚后退，
+// 盒 32×40、**无描边**（`biu/src/layout/navbar/navigation/index.tsx:15-24`：
+// `isIconOnly variant="flat" radius="md" className="w-8 min-w-8"`，实图逐像素
+// 量出来 32×40、底色 `#f7f7f7`、无描边）。
+//
+// 我们原来是 **34×30、带一圈 1 像素描边**——那 2 像素是框架 `ui.Button` 的
+// 默认描边（`mygo/ui/widgets.go:152-168` 的 `styleButton`），而「描边药丸」
+// 正是这一轮要收掉的那类毛病（`flatbutton.go:8-14` 记的就是这个）。
+//
+// ⚠️ **盒高 40 是上游的形状，不是我们的**：顶栏本身 64 高，一枚 40 高的键
+// 在里面是**居中**的（`viewNav` 的 `AlignItems(ui.Center)`），上下各留 12。
+// 改成 30（我们原来的高）反而比上游矮一截。
+const (
+	navArrowW = 32
+	navArrowH = 40
+)
+
+// viewNav 是顶部导航栏：后退/前进 + 搜索框 + 打开文件 + 迷你 + 动态红点 + 头像 +
+// 登录入口。
 //
 // ⚠️ **这里没有页名**（票 #127）。每一页自己写着标题，顶栏再写一遍就是同一个词在
 // 屏幕上出现两次；上游的顶栏也没有（`layout/navbar/index.tsx:31-34`）。
 // ⚠️ **这里也没有播放列表开关**：它在播放条右边那一组（`playbar.go` 的
 // `viewPlayBarRight`）。理由见 Children 里那两条注释。
+// ⚠️ **这里也没有「设置」**（票 #289）：侧栏里有一条、头像下拉里也有第三条
+// （上游就是把设置收进头像菜单的，`biu/src/layout/navbar/user/index.tsx:107`），
+// 顶栏这一枚是**同一个动作的第三个入口**，而三个入口会不一致。理由见 Children
+// 里那一段。
 func (s *Shell) viewNav(c *ui.Context) {
 	// 后退/前进也是换页：上一页的提示同样不该留着，崩过的状态同样该复位。
 	back := func() { s.clearToasts(); s.crash = nil }
@@ -109,31 +143,40 @@ func (s *Shell) viewNav(c *ui.Context) {
 		//     而它们会不一致（顶栏那枚在播放条被满屏盖住时还点得到）。
 		// 迷你播放器的开关。Biu 那边在窗口按钮那一排里（`components/window-action/
 		// index.tsx:46` 的 PictureInPicture 图标），而我们那条顶栏是自己画的，
-		// 所以摆在右边这一列末尾——和「窗口变小了」这件事一样是窗口级动作。
+		// 所以摆在右边这一列里——和「窗口变小了」这件事一样是窗口级动作。
 		//
 		// ⚠️ **顶栏是拖动区**（`nav.DragWindow()`），而这一句在它的 Children
 		// 里，所以按它就是按它、不会变成拖窗口（见本文件文件头那一段）。
 		//
 		// ⚠️ **它原来是文字键**（「迷你」）。图标集补齐之后这一格接上了
-		// `iconPiP`——同一排里左边三枚都是图标键，只有这一枚是两个字，看上去像
-		// 忘了换（#134 的第七单元点名了这个）。文字没有消失：`Label` 和悬停提示
+		// `iconPiP`——**那时候这一排里只有它不是图标键**，看上去像忘了换
+		// （#134 的第七单元点名了这个）。文字没有消失：`Label` 和悬停提示
 		// 说的是同一件事，读屏软件和测试都还叫得出它。
+		//
+		// （票 #289 拿掉顶栏那一枚「设置」之后，这一排**全是图标键**了。）
 		if s.withTip(c, iconButton(c, iconPiP, "迷你", iconMd).
 			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
 			"缩成 320×100 的小窗贴边悬浮，音乐不停").Clicked() {
 			s.toggleMiniPlayer()
 		}
-		// 设置。Biu 的设置在侧栏菜单和头像下拉里（`layout/side/index.tsx`、
-		// `navbar/user/index.tsx`），顶栏没有。⚠️ **这一段原来拿「顶栏收着播放条
-		// 放不下的控件（播放列表开关就在这儿）」当理由**——票 #127 把那个开关搬回
-		// 播放条之后，这一条论证就落空了，而它说的话**本身仍然成立**：设置是用户
-		// 改任何东西都要走一遍的那个入口，藏在头像下拉第三项里是两级。
-		// 侧栏里也有一条「设置」（那是我们自己多摆的，见 routes 表），顶栏这一枚
-		// 是给已经在别的页上、不想先回侧栏的人用的。
-		if s.withTip(c, iconButton(c, iconSettings, "设置", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "设置").Clicked() {
-			s.navigate(settingsPath)
-		}
+		// ⚠️ **这里原来还有一枚「设置」，票 #289 拿掉了**（报告 C-02）。
+		//
+		// **为什么它是纯冗余**：上游的设置在**侧栏菜单**和**头像下拉**里
+		// （`biu/src/layout/side/index.tsx`、`biu/src/layout/navbar/user/
+		// index.tsx:107`），**顶栏没有**。我们这边侧栏有一条（我们自己多摆的，
+		// DESIGN.md §九「侧栏多一条设置」）、头像下拉里也有第三条
+		// （`navbar_avatar.go` 的 `avatarMenuItems`，第三项就是「设置」），
+		// 顶栏这一枚是**同一个动作的第三个入口**。
+		//
+		// **三个入口为什么是坏事**：它们会**不一致**——侧栏那一条会被「菜单设置」
+		// 里的「隐藏菜单项」藏起来（`sidebar.go` 的 `hiddenMenuKeys`），头像下拉
+		// 那一条不会；而顶栏这一枚谁也藏不掉。用户按「设置」能到设置页，可他在
+		// 侧栏上找不到那一行，于是以为侧栏坏了。
+		//
+		// ⚠️ **这一票只拿掉重复的那一份**：侧栏那一条**留着**（DESIGN.md §九
+		// 已经拍板「侧栏多一条设置」，那是我们的入口，不是上游那一套），
+		// 头像下拉那一条也留着（那是上游自己的位置）。想改入口位置是另一票的
+		// 事——**挪入口不是纯对齐，要人拍板**。
 		s.viewDynamicDot(c)
 		s.viewAvatar(c)
 		// 登录 / 退出登录那个入口（login.go 的 viewLoginEntry）。它在 router.go
@@ -159,14 +202,40 @@ func (s *Shell) viewNav(c *ui.Context) {
 //
 // 这里改的只有**名字**：框架给的是英文的 "Back" / "Forward"，中文界面里读屏
 // 念出来是英文。
+//
+// ## 形状：照上游的 32×40、无描边（票 #289 / 报告 C-03）
+//
+// 框架那一支出来是 **34×30、带一圈 1 像素描边**（`styleButton` 给的是
+// `t.Border` + `t.Surface`）。上游那一枚是 **32×40、无描边**。所以这里在框架
+// 那一支上覆盖两样：**盒子钉成 32×40**、**描边去掉**。
+//
+// ⚠️ **前进键留着**（上游没有前进键）：砍掉它就是拿功能换样式——框架那一支
+// 挂着 `r.Go(1)` 和它的「去过那些页」列表，而上游没有前进键是**上游自己的
+// 浏览器历史模型**决定的，不是我们该抄的那一半。剩下的差别写在这一票的收尾
+// 说明里，等人拍板。
 func (s *Shell) viewNavBack(c *ui.Context, back func()) {
-	if s.withTip(c, ui.BackButton(c, s.router).Label(navBackLabel), navBackLabel).Clicked() {
+	if s.withTip(c, navArrowStyle(ui.BackButton(c, s.router).Label(navBackLabel)),
+		navBackLabel).Clicked() {
 		back()
 	}
 }
 
 func (s *Shell) viewNavForward(c *ui.Context, back func()) {
-	if s.withTip(c, ui.ForwardButton(c, s.router).Label(navForwardLabel), navForwardLabel).Clicked() {
+	if s.withTip(c, navArrowStyle(ui.ForwardButton(c, s.router).Label(navForwardLabel)),
+		navForwardLabel).Clicked() {
 		back()
 	}
+}
+
+// navArrowStyle 把框架那一支后退/前进改成上游的样子：**盒 32×40、无描边**。
+//
+// ⚠️ **只改外观，不改行为**：框架那一支还挂着 `r.Go(±1)` 和右键的「去过那些页」
+// 历史列表（理由见 viewNavBack 顶上那段）。
+//
+// ⚠️ **描边是「去掉」而不是「换成别的颜色」**：`Border(0, …)` 把宽度钉成 0，
+// 框架就不画它了（`mygo/ui/paint.go:471` 的 `scene.HasBorder`）。留一个宽度
+// 0 的描边和一个没有描边，在画面上一模一样，但在**布局**上差 2 像素——
+// 描边是「占在盒子里面」的（CSS 的 border-box），留着它盒子就变成 34×42。
+func navArrowStyle(e ui.Element) ui.Element {
+	return e.Size(navArrowW, navArrowH).Border(0, ui.Color{})
 }
