@@ -1384,33 +1384,6 @@ func sameSong(x, y Item) bool {
 	return id != "" && id == y.Identity()
 }
 
-// syncQueueItem 把队列里**当前那一项**缺的 cid 补上（预取问出来的那一个）。
-//
-// 为什么要有这一步：队列里那一项可能是**搜索结果**——它只有 bvid，cid 是
-// 「放哪一集」要问一次才知道（见 online.go 的 withCid）。预取把那一集问出来
-// 了，而真在放的那一首用的是问出来的 cid。不补的话，队列里那一项和真在放的
-// 那一首对不上：
-//
-//   - 分集抽屉的高亮指错（它比的是当前项的 cid）；
-//   - 「换集」会把正在放的那一集重开一遍（`PlayPart` 认的是 `cur.Cid`）。
-//
-// ⚠️ **只补 cid，不换别的**：标题、封面那些都是这一项自己的，不动。
-func (a *App) syncQueueItem(it Item) {
-	if it.Cid == "" {
-		return
-	}
-	i := a.queue.CurrentIndex()
-	if i < 0 {
-		return
-	}
-	cur, ok := a.queue.itemAt(i)
-	if !ok || cur.Cid != "" || cur.Bvid != it.Bvid {
-		return
-	}
-	cur.Cid = it.Cid
-	a.queue.replaceAt(i, cur)
-}
-
 // IsPlaying 报这一项是不是**正在放的那首**。
 //
 // 列表上「正在播放」的高亮认的就是它（见 `widgets/list` 的 Actions.IsPlaying）。
@@ -1659,15 +1632,18 @@ func (a *App) onTrackFinished() {
 		//
 		// ⚠️ **备失败时无声退回**：备不出来的那一份在 `takePrefetch` 里被丢掉，
 		// 这一趟走正常路径重新取一次。
+		//
+		// ⚠️ **队列里那一项的 cid 不动**：预取问出来的是**本地的一份**（带 cid），
+		// 而队列里那一项还是原来那个（搜索结果那样没有 cid）——这跟正常播放
+		// 那条路一模一样（`runOnline` 的 `withSource` 也只补在本地副本上）。
+		// 两边一致才不会「同一个动作两种表现」（「换集」和分集高亮读的都是
+		// 队列里那一项）。
 		item := d.Item
 		if hasRef {
 			item = prepared
 			// 放进「播放前预判」那个缓存：真播这一趟的 `resolve` 会先问它，
 			// 命中了就**不再取流**。
 			a.putStreamCache(item, ref)
-			// 队列里那一项可能缺 cid（搜索结果就是这样），而预取问出来了——
-			// 补上它，队列和真在放的那一首才对得上（见 syncQueueItem）。
-			a.syncQueueItem(item)
 		}
 		if err := a.play(item); err != nil {
 			a.queue.UndoStep()

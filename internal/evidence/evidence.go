@@ -3116,6 +3116,13 @@ var Items = []Item{
 			"TestPeekNextDoesNotTouchTheQueue",
 			// 只解析地址：备好了也是一个字节都没下（CDN 一次都没被碰）。
 			"TestThePrefetchDoesNotDownloadAnything",
+			// **提前量真的挂在「还剩多久」上**（这一票最核心的那条验收）：
+			// 歌长到 15 秒之后才放完，量的是「备地址那一刻还剩多少」。
+			"TestTheAddressIsPreparedWhileTheTrackStillHasTimeLeft",
+			// 音乐库那一路（sid）也备得到——那是**另一条取流接口**。
+			"TestAMusicLibraryEntryIsPreparedToo",
+			// 作废的**真正保证**：下一首换成谁就放谁，陈旧的那份一个字节都不下。
+			"TestAStaleAddressIsNeverPlayed",
 		},
 	},
 	{

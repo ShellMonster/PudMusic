@@ -85,6 +85,9 @@ type prefetchState int
 
 const (
 	// prefetchIdle：没有在备，也没有备好。
+	//
+	// ⚠️ **它只是零值**（iota 的头一个）：入口总是先落成「正在备」，而
+	// 「压根没有在备」在 App 上是 `a.prefetch == nil`。
 	prefetchIdle prefetchState = iota
 	// prefetchRunning：正在备（后台那一趟网络往返还没回来）。
 	prefetchRunning
@@ -141,6 +144,20 @@ func (a *App) maybePrefetch(pos, dur time.Duration) {
 		return
 	}
 
+	// 🔴 **先问「手上有没有」再问「下一首是谁」**。
+	//
+	// 预告（`Queue.PeekNext`）在随机那一档是 **O(队列长度) 次字符串分配**
+	// （每一项的判重标识都要拼一遍，见 `Item.Identity`），而这一拍每 50ms
+	// 来一次——歌单长的话那是一笔看不见的开销（它在后台时钟里，不进
+	// framebudget 的判据，所以量不出来）。
+	//
+	// 而「手上那份还对不对」有保证：**队列一变就作废**（见 invalidatePrefetch），
+	// 所以手上还留着它，就说明队列没变 → 那一份一直是对的 → 不用再预告一次。
+	// （真要换下一首的时候，队列一定也变了 → 那一份会被作废 → 下一拍重新预告。）
+	if a.prefetchSettled() {
+		return
+	}
+
 	// 下一首是谁——**和真播的那一首同一个来源**（见 Queue.PeekNext）。
 	d, known := a.queue.PeekNext()
 	if !known || d.Kind != AdvancePlay {
@@ -164,6 +181,17 @@ func (a *App) maybePrefetch(pos, dur time.Duration) {
 	a.startPrefetch(next)
 }
 
+// prefetchSettled 报「现在没什么可做的」：手上已经有一份（备好的 / 在备的 /
+// 黑名单里的），或者整个预取停着（风控、限流那几类）。
+//
+// ⚠️ **它是「不用再问下一首是谁」的依据**：队列一变就作废，所以手上还留着
+// 一份，就说明队列没变（见 maybePrefetch 里那段）。
+func (a *App) prefetchSettled() bool {
+	a.prefetchMu.Lock()
+	defer a.prefetchMu.Unlock()
+	return a.prefetch != nil || a.prefetchOff
+}
+
 // startPrefetch 发起一趟预取。
 //
 // ⚠️ **它在锁外面调网络**：这一层绝不占着 `a.mu` 跑网络（那是界面每帧都要
@@ -175,28 +203,14 @@ func (a *App) startPrefetch(it Item) {
 		a.prefetchMu.Unlock()
 		return
 	}
-	if e := a.prefetch; e != nil {
-		switch e.state {
-		case prefetchIdle:
-			// 没有在备（这一档实际上不会出现——入口总是先落成「正在备」），
-			// 落到下面那一段去发起一趟。
-		case prefetchRunning:
-			// 已经在备了：不重复发起。
-			a.prefetchMu.Unlock()
-			return
-		case prefetchReady:
-			// 备好了：还是这一首、而且地址还没过期 → 就用它。
-			if sameStreamTarget(e.item, it) && e.ref.Usable(time.Now()) {
-				a.prefetchMu.Unlock()
-				return
-			}
-		case prefetchFailed:
-			// 黑名单：这一首不重试（直到下一首开始，见 takePrefetch）。
-			if sameStreamTarget(e.item, it) {
-				a.prefetchMu.Unlock()
-				return
-			}
-		}
+	if a.prefetch != nil {
+		// 手上已经有一份了（这一拍刚被别人填上的）：不重复发起。
+		//
+		// ⚠️ **「哪一份」在这里不重要**：只要有一份在，就说明队列没变
+		// （队列变了会作废，见 invalidatePrefetch），而下一首是谁也已经
+		// 算过了（见 maybePrefetch）。
+		a.prefetchMu.Unlock()
+		return
 	}
 	a.prefetchGen++
 	gen := a.prefetchGen
@@ -263,12 +277,20 @@ func (a *App) runPrefetch(gen int, ctx context.Context, it Item) {
 		a.prefetchFailed(gen, it, fmt.Errorf("%w：取流接口给了一个空的地址", bili.ErrNoStream))
 		return
 	}
-	// 🔴 **地址要真的是这一首的**：取流接口在稿件被删、被替换成别的内容时会
-	// **静默**给一条看着完全正常的流（见 `sameItem` 的注释——那是「取回来的
-	// 这条是不是用户点的那个」的最后一道闸）。备一份这样的地址而照用，用户会
-	// 在毫无提示的情况下听到**另一首歌**。
+	// 🔴 **地址要真的是这一首的**——但**只有音乐库那一路查得了**：
 	//
-	// ⚠️ **宁可不备**：备不出来只是「这一首没有无缝」，而放错歌是放错歌。
+	//   - 音乐库（sid）：`ref.Sid` 填的是**接口回来的那个**（见
+	//     `bili.refFromSongURL`——它拿返回里的 sid 填，拿不到才退回请求里那个）。
+	//     版权曲换了地址、接口给回另一首的流，这一比就拦住了。
+	//   - 投稿（bvid/cid）：**接口不回身份**。`bili.PlayURL` 是拿**请求里的**
+	//     bvid/cid 填 `StreamRef` 的（见 `bili.refFrom`），所以这一比是**拿请求
+	//     和它自己比**——结构上不可能为假，**那一路这里是一道空闸**。
+	//
+	// ⚠️ **所以别把这一比当成投稿那一路的防线**：那一路「静默给另一首的流」
+	// 挡不住（**正常播放那条路也挡不住**——那边压根没有这道比）。真要挡，得等
+	// B 站把身份放进响应里，或者从 CDN 地址上认。
+	//
+	// ⚠️ 留着它是为了音乐库那一路：那一路的身份是**接口给的**，比得了。
 	if !sameItem(ref, resolved) {
 		a.prefetchFailed(gen, it, fmt.Errorf("%w：取回来的这条流不是这一首的", bili.ErrNoStream))
 		return

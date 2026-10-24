@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"math"
 	"net/http"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -461,4 +462,160 @@ func TestThePrefetchDoesNotDownloadAnything(t *testing.T) {
 	waitFor(t, 15*time.Second, "第二首真的开始出声", func() bool {
 		return second.Load() > 0
 	})
+}
+
+// TestTheAddressIsPreparedWhileTheTrackStillHasTimeLeft 盯「提前量真的挂在
+// 「还剩多久」上」。
+//
+// 这一条是这一票**最核心**的验收：「取流请求在还剩 N 秒时就发出，而不是切歌
+// 那一刻才发」。
+//
+// ⚠️ **歌必须比提前量长**：这一首要长到 15 秒之后才放完，否则「还剩多久」
+// 这个条件从一开始就成立，量不出「提前量」是多少。
+func TestTheAddressIsPreparedWhileTheTrackStillHasTimeLeft(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = shortWav(18.0)
+	playURLBySong(f, 2*time.Hour)
+
+	a := newOnlineApp(t, f, t.TempDir())
+	if err := a.Enqueue(onlineItem("BV1", "1", "第一首"), onlineItem("BV2", "2", "第二首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "第一首")
+
+	// 刚开播：这一首还剩 18 秒 > 15 秒 → **不该**已经备好了。
+	time.Sleep(300 * time.Millisecond)
+	if n := f.playCalls.Load(); n != 1 {
+		t.Fatalf("一开播就备了（取流接口被打了 %d 次，want 1）——提前量没生效", n)
+	}
+
+	// 盯着取流接口，看它第一次被第二次打是在**还剩多久**的时候。
+	var at atomic.Value
+	waitFor(t, 20*time.Second, "下一首的地址备好了", func() bool {
+		if f.playCalls.Load() < 2 {
+			return false
+		}
+		st := a.Snapshot()
+		at.Store(st.Duration - st.Position)
+		return true
+	})
+	left := at.Load().(time.Duration)
+	if left > 16*time.Second {
+		t.Errorf("备得太早了：那一刻还剩 %v（提前量是 15 秒）", left)
+	}
+	if left < 5*time.Second {
+		t.Errorf("备得太晚了：那一刻还剩 %v（提前量是 15 秒）", left)
+	}
+}
+
+// TestAMusicLibraryEntryIsPreparedToo 盯**音乐库那一路**也预取得到。
+//
+// 投稿那一路（bvid/cid）和音乐库那一路（sid）是**两条不同的取流接口**
+// （见 `bili.streamFor`），而预取那一层是两边都走的——所以这一条要单独验：
+// 音乐库那一路的 sid 是**接口给的**（`bili.refFromSongURL`），预取拿它去比
+// 也比得了。
+func TestAMusicLibraryEntryIsPreparedToo(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = shortWav(1.0)
+
+	// 取流接口回**要的那一首**的 sid（夹具默认永远回 1293494，那样两首会认成
+	// 同一首 —— 而预取要比身份，比错了就不备了）。
+	f.on("/audio/music-service-c/url", func(w http.ResponseWriter, r *http.Request) {
+		f.songCalls.Add(1)
+		sid := r.URL.Query().Get("songid")
+		writeStreamJSON(w, map[string]any{"code": 0, "msg": "success", "ttl": 1,
+			"data": map[string]any{
+				"sid":     mustAtoi(t, sid),
+				"type":    2,
+				"timeout": 10800,
+				"cdns":    []string{cdnURL(f.URL, "song-"+sid, 2*time.Hour)},
+				"qualities": []any{
+					map[string]any{"type": 3, "require": 1},
+					map[string]any{"type": 2, "require": 0},
+					map[string]any{"type": 1, "require": 0},
+					map[string]any{"type": 0, "require": 0},
+				},
+			}})
+	})
+	f.on("/audio/music-service-c/web/song/info", func(w http.ResponseWriter, r *http.Request) {
+		f.songInfoCalls.Add(1)
+		sid := r.URL.Query().Get("sid")
+		writeStreamJSON(w, map[string]any{"code": 0, "msg": "success", "ttl": 1,
+			"data": map[string]any{
+				"id": mustAtoi(t, sid), "uid": 900, "uname": "某某音乐台",
+				"author": "夜灯", "title": "歌" + sid, "cover": "", "duration": 1,
+				"bvid": "", "cid": 0, "collectIds": []int{},
+			}})
+	})
+
+	a := newOnlineApp(t, f, t.TempDir())
+	song := func(sid, title string) app.Item {
+		return app.Item{Source: "online", Type: "audio", Sid: sid, Title: title}
+	}
+	if err := a.Enqueue(song("111", "第一首"), song("222", "第二首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "第一首")
+
+	waitFor(t, 15*time.Second, "第二首的地址备好了", func() bool {
+		return f.songCalls.Load() >= 2
+	})
+	if st := a.Snapshot(); st.Title != "第一首" {
+		t.Fatalf("备地址的时候当前这一首已经换了：%q", st.Title)
+	}
+	// 真播第二首时不再取流。
+	playing(t, a, "第二首")
+	if n := f.songCalls.Load(); n != 2 {
+		t.Errorf("音乐库那一路真播时又取了一次流（取流接口一共被打了 %d 次，want 2）", n)
+	}
+}
+
+// TestAStaleAddressIsNeverPlayed 盯「队列改了之后，陈旧的那份地址**不会被播
+// 出去**」。
+//
+// 这是「作废」那一条**真正要保证的东西**：作废不是「把那份地址扔掉」这么一句
+// 话，而是**下一首换成谁，就放谁**——陈旧的那一份（第二首的地址）一个字节都
+// 不许下。
+//
+// 判据是 **CDN 被打了哪一条**：预取只解析地址、不碰 CDN，所以 CDN 被打了 =
+// 真的在放它。
+func TestAStaleAddressIsNeverPlayed(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = shortWav(3.0)
+	playURLBySong(f, 2*time.Hour)
+	second := watchCDN(f, "/cdn/BV2-2")
+	third := watchCDN(f, "/cdn/BV3-3")
+
+	a := newOnlineApp(t, f, t.TempDir())
+	if err := a.Enqueue(onlineItem("BV1", "1", "第一首"), onlineItem("BV2", "2", "第二首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "第一首")
+	waitFor(t, 15*time.Second, "第二首的地址备好了", func() bool {
+		return f.playCalls.Load() >= 2
+	})
+
+	// 队列变了：下一首从「第二首」变成「第三首」。
+	if err := a.EnqueueNext(onlineItem("BV3", "3", "第三首")); err != nil {
+		t.Fatal(err)
+	}
+
+	// 这一首放完 → 自动切歌 → 放的一定是**第三首**。
+	playing(t, a, "第三首")
+	if n := second.Load(); n != 0 {
+		t.Errorf("陈旧的那份地址被播出去了（第二首的 CDN 被打了 %d 次，want 0）", n)
+	}
+	if n := third.Load(); n == 0 {
+		t.Errorf("第三首压根没被播（CDN 一次都没被碰）")
+	}
+}
+
+// mustAtoi 解析一个十进制数（夹具里回 sid 要用）。
+func mustAtoi(t *testing.T, s string) int64 {
+	t.Helper()
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		t.Fatalf("解析 %q 失败：%v", s, err)
+	}
+	return n
 }
