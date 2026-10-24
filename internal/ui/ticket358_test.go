@@ -45,6 +45,21 @@ import (
 // ⚠️ **位图也钉住**：占位退回又回来时位图是**换了一个对象**的——
 // 「不是每帧新建对象」这条票面要的就是它。
 func TestOpeningTheQueueDrawerDoesNotMakeTheListCoversFlash(t *testing.T) {
+	// ⚠️ **主题方案要各跑一遍**：这一包的测试默认量的是**经典**外观
+	// （`app.DefaultThemePreset` 在 `diskguard_test.go` 的 TestMain 里被改成
+	// 经典），而**真程序的默认是暖纸**——用户看见的那一版界面是暖纸。
+	// 挤缓存这件事与配色无关，但「占位那一档」的颜色跟着主题走，所以两套
+	// 都跑（票面点名要「至少再验一套非经典的」）。
+	for _, preset := range []app.ThemePreset{app.ThemePresetClassic, app.ThemePresetWarmPaper} {
+		t.Run(string(preset), func(t *testing.T) {
+			openingTheQueueDrawerDoesNotMakeTheListCoversFlash(t, preset)
+		})
+	}
+}
+
+// openingTheQueueDrawerDoesNotMakeTheListCoversFlash 是上面那条的本体（按主题
+// 方案各跑一遍）。
+func openingTheQueueDrawerDoesNotMakeTheListCoversFlash(t *testing.T, preset app.ThemePreset) {
 	body := coverJPEG(t, 1920, 1080)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write(body)
@@ -68,7 +83,12 @@ func TestOpeningTheQueueDrawerDoesNotMakeTheListCoversFlash(t *testing.T) {
 		new:  withCovers("新歌", 12),
 	}
 
-	s, tt := newHome(t, songs)
+	// 主题方案：**挂一份带方案名的设置**（设置要先挂上，`UpdateSettings` 才
+	// 有地方落——「app: 还没有挂上设置，先调 MountSettings」）。
+	st := app.DefaultSettings("")
+	st.ThemePreset = preset
+	s, tt := newShell(t, withSettings(st))
+	s.home.SetSongs(songs)
 	// 切到「流行」那一档：新歌速递那一块网格只在这一档上（上游也是这么摆的）。
 	s.home.tab = homePopTab
 	homeFrame(tt)
@@ -164,8 +184,8 @@ func TestOpeningTheQueueDrawerDoesNotMakeTheListCoversFlash(t *testing.T) {
 	if shotDir == "" {
 		return
 	}
-	save(t, shotDir, "81-浅色-开抽屉封面不闪.png", tt)
+	save(t, shotDir, "81-浅色-开抽屉封面不闪-"+string(preset)+".png", tt)
 	tt.SetDark(true)
 	tt.Frame()
-	save(t, shotDir, "81-深色-开抽屉封面不闪.png", tt)
+	save(t, shotDir, "81-深色-开抽屉封面不闪-"+string(preset)+".png", tt)
 }
