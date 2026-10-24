@@ -15,9 +15,12 @@ import (
 // `SelectBase` / `PopoverBase` 自己拼面板的几处**只抄了前三件**——于是同一屏上
 // 框架自己弹的浮层有影子、我们抄的那几个没有。
 //
-// 判据是代码：自己拼的面板必须走 `popupPanel`（`popup.go`）。这一层验不了像素
-// ——阴影是一圈往外淡的模糊，采样点差几个像素就量不到；而「有没有调那个出口」
-// 是一句能对上号的事实。
+// 判据是代码：自己拼的面板必须走 `popupPanel`（`popup.go`）或者
+// `popupPanelCard`（同一档料的卡片版）。这一层验不了像素——阴影是一圈往外淡的
+// 模糊，采样点差几个像素就量不到；而「有没有调那个出口」是一句能对上号的事实。
+//
+// ⚠️ **两个出口都要带影**：出口分两档（浮层那一档 / 卡片那一档），而这条要防的
+// 是「漏影」，不是「档位」。
 func TestEveryHandMadePopupHasAShadow(t *testing.T) {
 	matches, err := filepath.Glob("*.go")
 	if err != nil {
@@ -37,8 +40,9 @@ func TestEveryHandMadePopupHasAShadow(t *testing.T) {
 		// （`stylePanel` 里已经有阴影）。
 		handMade := strings.Contains(text, ".Popup(func(") ||
 			strings.Contains(text, "PopoverBase(c,")
-		if handMade && !strings.Contains(text, "popupPanel(") {
-			t.Errorf("%s 自己拼了一个浮层面板，却没有走 `popupPanel`——"+
+		if handMade && !strings.Contains(text, "popupPanel(") &&
+			!strings.Contains(text, "popupPanelCard(") {
+			t.Errorf("%s 自己拼了一个浮层面板，却没有走 `popupPanel` / `popupPanelCard`——"+
 				"漏掉的那件是阴影（框架的 `stylePanel` 有）", name)
 		}
 	}

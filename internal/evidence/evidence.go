@@ -494,6 +494,51 @@ var Items = []Item{
 		},
 	},
 	{
+		// 归「播放」那一组：还是顶栏，但说的是头像**下面那一层**（票 #363）。
+		//
+		// 归这一组是因为它是**界面上的一处交互**（和满屏偏好面板那一条同一类），
+		// 而不是一个接口。
+		Category: Play,
+		// 这一层原来是**系统原生菜单**（`ui.Element.Menu`），这一票换成自绘的
+		// 浮层：样式跟设计规范对得上（surface1 / radiusLg / shadow.Modal /
+		// accentSoft），而系统菜单是系统外观；菜单项也要能带图标。
+		//
+		// 🔴 **换成自绘之后，系统菜单那四件好事一件都不能丢**（当初用系统菜单
+		// 就是为了它们）：点外面关、Esc 关、键盘能上下走、选中项有反馈。
+		//
+		// ⚠️ **指针和键盘混着来是最难的那一种**：两者共用「当前是第几项」，而
+		// 悬停每一帧都改它——不处理的话，键盘刚走的那一格会被指针改回去，
+		// 「键盘能上下走」只剩「指针不在菜单项上」的时候才成立。
+		Spec: "头像下拉是自绘浮层（不是系统菜单）：六项按上游的顺序、每一项带图标、锚在头像下面；点外面关、Esc 关、方向键走得动（指针停在菜单项上也走得动）、当前项有反馈；「退出登录」先问一句，取消什么都不做",
+		Tests: []string{
+			// 六项都在、顺序照上游、而且**不是系统菜单**。
+			"TestAvatarMenuHasBiuSixItems",
+			// 六项都按得动：换路由、去个人资料、去设置、退登（先问一句）。
+			"TestAvatarMenuGoesToItsRoute",
+			"TestAvatarMenuProfileUsesTheLoggedInMid",
+			"TestAvatarMenuWithoutALoginSaysSo",
+			"TestAvatarMenuLogoutActuallyLogsOut",
+			"TestAvatarMenuOpensTheIssuePage",
+			// 点外面关、Esc 关。
+			"TestTheAvatarMenuClosesOnEscape",
+			"TestTheAvatarMenuClosesWhenClickingOutside",
+			// 键盘那一半：方向键走得动（**指针停在菜单项上时也走得动**）、
+			// 回车选的是亮着的那一项。
+			"TestTheAvatarMenuWalksWithTheArrowKeys",
+			"TestTheAvatarMenuWalksWhileThePointerRestsOnAnItem",
+			"TestTheAvatarMenuSelectsWithTheKeyboard",
+			// 浮层的样子：锚在头像下面、右沿对齐、底色是 surface1 那一档。
+			"TestTheAvatarMenuHangsUnderTheAvatar",
+			"TestTheAvatarMenuPanelLooksLikeACard",
+			// 每一项前面都有图标。
+			"TestEveryAvatarMenuItemHasAnIcon",
+			// 当前那一项的危险字按那层底现算（底换了，字要跟着换）。
+			"TestTheDangerItemKeepsItsContrastOnTheHighlightedRow",
+			// 「退出登录」先问一句，取消什么都不做。
+			"TestTheAvatarMenuAsksBeforeLoggingOut",
+		},
+	},
+	{
 		Category: HTTP,
 		// 「刷新数据」那一项以前按下去只弹一句「还没有数据可刷新」——而接口一直
 		// 都在（`created/list`，收藏夹的新建 / 修改 / 拉全量都靠它）。这一条钉的是
