@@ -320,9 +320,6 @@ type fullPlayer struct {
 	// bgDraws 是这张画布被重画了几次。**给测试看的**：毛玻璃每帧重渲一遍就是
 	// 这里在涨（那在软件渲染上是 80~100 毫秒一帧）。
 	bgDraws int
-
-	// spec 是频谱那一块复用的中间量（见 fullplayer_spectrum.go）。
-	spec spectrumBuffers
 }
 
 // partRow 是分集列表里的一行。
