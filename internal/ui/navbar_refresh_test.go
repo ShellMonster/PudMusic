@@ -27,7 +27,14 @@ import (
 // 这一句在 `Shell.Attach` 里。测试不走 Attach。
 func refreshShell(t *testing.T, f *folderBili, mid string) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	s, tt := newShell(t, mounted(func(t *testing.T, a *app.App) {
+	return refreshShellOpts(t, f, mid)
+}
+
+// refreshShellOpts 是 refreshShell 加上「再多几个外壳选项」（深浅两套出图
+// 要的就是 `systemIsDark`）。
+func refreshShellOpts(t *testing.T, f *folderBili, mid string, opts ...shellOpt) (*Shell, *mygoui.Tester) {
+	t.Helper()
+	mount := mounted(func(t *testing.T, a *app.App) {
 		cli := fixtureClient(t, f)
 		if mid != "" {
 			store := app.NewMemoryStore("test")
@@ -47,7 +54,8 @@ func refreshShell(t *testing.T, f *folderBili, mid string) (*Shell, *mygoui.Test
 			t.Fatal(err)
 		}
 		a.MountCollections(app.CollectionRefs{Client: cli, Settle: 0})
-	}))
+	})
+	s, tt := newShell(t, append([]shellOpt{mount}, opts...)...)
 	s.app.SetWake(s.wake.invalidate)
 	return s, tt
 }
@@ -101,7 +109,7 @@ func TestRefreshingReallyPullsTheFoldersAgain(t *testing.T) {
 	})
 	// 顺带把「刷新完了有一句话」钉住——一句都不说的话，用户不知道到底成了没有。
 	waitFrames(t, tt, "刷新完的那句话", func() bool {
-		return tt.HasText("已刷新「我创建的」：2 个")
+		return tt.HasText("已刷新收藏夹：「我创建的」2 个，「我收藏的」0 个")
 	})
 
 	// 换一个**内容完全不同**的数据源，再刷一次。B 站网页上改收藏夹是这件事的
@@ -173,7 +181,7 @@ func TestRefreshingTwiceSendsOneRequestAndSaysItIsBusy(t *testing.T) {
 	// 而那一行要等那条「已经在刷了」过期才真的从画面上消失——反过来等的话，
 	// 那两秒会把要看的这句吃掉，实测 6 次里飘 1 次。
 	waitFrames(t, tt, "刷完的那句话", func() bool {
-		return tt.HasText("已刷新「我创建的」：2 个")
+		return tt.HasText("已刷新收藏夹：「我创建的」2 个，「我收藏的」0 个")
 	})
 	waitFrames(t, tt, "刷完之后进行中那一行收掉", func() bool {
 		return !tt.HasText(refreshLine)

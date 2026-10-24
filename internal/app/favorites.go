@@ -14,15 +14,25 @@
 //
 // ## 数据从哪儿来
 //
-// **「我创建的」那一组现在是真的从 B 站拉的**：头像下拉里「刷新数据」那一项
-// 调的就是 `App.RefreshFavorites`（见 favorites_refresh.go），它翻完
-// `created/list` 之后过 `SetFavorites`。
+// **两组现在都有源了**：
 //
-// **「我收藏的」那一组仍然没有数据源**——B 站「我收藏了别人的哪些收藏夹」那个
-// 接口本项目还没接，填它的只有测试。那一组的几件事（播放整个收藏夹、取消收藏、
-// 拖拽排序）动的是内存里已经在的那一份，照常能用。
+//   - 「我创建的」走 `created/list`（`bili.CreatedFolders`）；
+//   - 「我收藏的」走 `collected/list`（`bili.CollectedFolders`）——
+//     B 站「我收藏了别人的哪些收藏夹」那个接口**是有的**，本项目已经接上
+//     （见 `bili/collected.go` 的文件头：参数、返回字段、`platform=web`
+//     那一条都在那儿）。
 //
-// 空列表时两组只画标题和一行「还没有收藏夹」，不会假装有内容。
+// 两组都由 `App.RefreshFavorites` / `App.AutoRefreshFavorites` 拉，
+// 拉回来过 `SetFavorites`。
+//
+// ## 空列表有三种来由，界面上必须说得清是哪一种
+//
+// 「真的一个都没有」「还没拉过」「拉失败了」在画面上不能长得一样——
+// 「还没有收藏夹」只说得清第一种，在另外两种上它是在替 B 站回答一个
+// 我们还没问过的问题（AGENTS.md §4）。所以加载状态单独存着，
+// 见 `FavoriteState`。
+//
+// 空列表时两组只画标题和那一句空状态，不会假装有内容。
 package app
 
 import (
@@ -80,10 +90,93 @@ type Favorites struct {
 	mu     sync.Mutex
 	groups [favoriteGroupCount][]Favorite
 
+	// states 是两组的**加载状态**（见 FavoriteState）。
+	//
+	// ⚠️ **它和 `groups` 是两件事**：空列表有两种——拉成功而 B 站那边确实没有，
+	// 和**压根没拉**。而「拉失败」是第三种（列表可能还是上一次的）。
+	// 三者在画面上必须长得不一样，所以状态单独存着，不靠 `len(groups[g])` 推。
+	states [favoriteGroupCount]FavoriteState
+
 	// refresh 是「正在重新拉一次」那一趟的状态，跑完攒下的话也算在里面。
 	// 见 favorites_refresh.go——和上面那两组是同一份侧栏收藏夹的两种状态，
 	// 所以它们共用这一把锁，不另起一张包级的表。
 	refresh favRefresh
+}
+
+// FavoriteState 是侧栏那一组收藏夹的加载状态。
+//
+// # 为什么它是独立的一份，而不是从「有几条」推出来的
+//
+// 空列表有三种来由，而它们在界面上必须长得**不一样**：
+//
+//   - **真的一 个都没有**：B 站那边确实没有。
+//   - **还没拉**：压根没去拉（没登录、刚启动还没轮到）。
+//   - **拉失败了**：拉过，但没拉到（断网、登录态过期、B 站在风控）。
+//
+// 只看 `len(items) == 0` 的话，后两种都长得和第一种一样——而「还没有收藏夹」
+// 那句话在后两种上是**撒谎**（AGENTS.md §4：「没有」和「没显示出来」长得
+// 一样，就是把没显示出来说成了没有）。
+type FavoriteState struct {
+	// Loaded 是「成功拉过一次」。**一个都没有也是 true**——那正是「B 站那边
+	// 确实没有」这个结论本身。
+	Loaded bool
+	// Err 是最近一次拉失败的话。空串 = 没失败。
+	//
+	// ⚠️ **它是给人看的句子，不是 `error`**：这一句会被原样摆到侧栏上，
+	// 所以得是人话（服务层那几句已经是翻好的，见 `bili.Friendly`）。
+	Err string
+}
+
+// state 读这一组此刻的加载状态。
+func (f *Favorites) state(g FavoriteGroup) FavoriteState {
+	if !g.Valid() {
+		return FavoriteState{}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.states[g]
+}
+
+// markLoaded 记下「这一组成功拉过一次」。
+//
+// ⚠️ **一次都没有也是「拉到了」**：那正是「B 站那边确实没有」这个结论。
+func (f *Favorites) markLoaded(g FavoriteGroup) {
+	if !g.Valid() {
+		return
+	}
+	f.mu.Lock()
+	f.states[g] = FavoriteState{Loaded: true}
+	f.mu.Unlock()
+}
+
+// markFailed 记下「这一组最近一次拉失败了」。
+//
+// ⚠️ **不清掉 Loaded**：上一次拉成功过的话，那一份列表还在界面上，
+// 而它仍然是「上一次拉到的」——把它说成「从没拉过」是另一句谎。
+func (f *Favorites) markFailed(g FavoriteGroup, reason string) {
+	if !g.Valid() {
+		return
+	}
+	f.mu.Lock()
+	st := f.states[g]
+	st.Err = reason
+	f.states[g] = st
+	f.mu.Unlock()
+}
+
+// clear 把两组的条目和状态都清掉。
+//
+// 用在**退登**那一下：侧栏那两组是上一个账号的，而用户退登之后不该还看得见
+// （换人登录时那几秒尤其明显——新账号的收藏夹还没拉回来，旧账号的还摆着）。
+//
+// ⚠️ **状态也要清**：不清的话「拉到了、一个都没有」那个结论会留在那儿，
+// 而新账号登录之后那一组是空的——用户读到的是「还没有收藏夹」，而真相是
+// 「这个账号的还没拉过」。
+func (f *Favorites) clear() {
+	f.mu.Lock()
+	f.groups = [favoriteGroupCount][]Favorite{}
+	f.states = [favoriteGroupCount]FavoriteState{}
+	f.mu.Unlock()
 }
 
 // Snapshot 返回这一组当前的全部条目，按当前顺序。返回的是拷贝。
@@ -290,6 +383,14 @@ func (a *App) SetFavorites(g FavoriteGroup, items []Favorite) {
 // SideFavorites 是这一帧侧栏要画的那一组条目，按当前顺序。
 func (a *App) SideFavorites(g FavoriteGroup) []Favorite {
 	return a.FavoritesOf().Snapshot(g)
+}
+
+// FavoriteState 是这一组此刻的加载状态。
+//
+// 界面拿它决定空状态那一句说什么（见 `FavoriteState` 的注释）：**空列表和
+// 「没拉到」在画面上必须长得不一样**，而这一份就是那个区别。
+func (a *App) FavoriteState(g FavoriteGroup) FavoriteState {
+	return a.FavoritesOf().state(g)
 }
 
 // ReorderFavorite 把一组里的 id 挪到 before 那一行的**前面**，并**立刻落盘**。
