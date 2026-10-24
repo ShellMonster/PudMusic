@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/testproc"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -352,7 +353,7 @@ func pageChildRoundTrip(t *testing.T) {
 // runPageChild 拉起一次本测试二进制自己。-test.run 让它只跑这一条。
 func runPageChild(t *testing.T, path, mode string) {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=TestSettingsMadeOnThePageSurviveAProcessRestart", "-test.count=1")
+	cmd := exec.Command(testproc.Path(t), "-test.run=TestSettingsMadeOnThePageSurviveAProcessRestart", "-test.count=1")
 	cmd.Env = append(os.Environ(),
 		pageChildEnv+"=1",
 		"BIU_PAGE_PATH="+path,
