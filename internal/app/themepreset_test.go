@@ -8,14 +8,14 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 )
 
-// TestThemePresetDefaultsToClassic：没设过 = 经典（空串），旧设置升上来外观不变。
-func TestThemePresetDefaultsToClassic(t *testing.T) {
-	if got := app.DefaultSettings("").ThemePreset; got != app.ThemePresetClassic {
-		t.Fatalf("默认方案是 %q，想要经典（空串）", got)
+// TestThemePresetDefaultsToWarmPaper：默认是暖纸。
+func TestThemePresetDefaultsToWarmPaper(t *testing.T) {
+	if got := app.DefaultSettings("").ThemePreset; got != app.ThemePresetWarmPaper {
+		t.Fatalf("默认方案是 %q，想要暖纸", got)
 	}
 }
 
-// TestThemePresetLoad：认识的三套原样读回，不认识的退回经典而不是报错。
+// TestThemePresetLoad：认识的三套原样读回，不认识的、空的退回默认暖纸而不是报错。
 func TestThemePresetLoad(t *testing.T) {
 	cases := []struct {
 		raw  string
@@ -24,8 +24,9 @@ func TestThemePresetLoad(t *testing.T) {
 		{`"warm-paper"`, app.ThemePresetWarmPaper},
 		{`"dusk-amber"`, app.ThemePresetDuskAmber},
 		{`"soft-peach"`, app.ThemePresetSoftPeach},
-		{`""`, app.ThemePresetClassic},
-		{`"neon"`, app.ThemePresetClassic},
+		{`"classic"`, app.ThemePresetClassic},
+		{`""`, app.ThemePresetWarmPaper},
+		{`"neon"`, app.ThemePresetWarmPaper},
 	}
 	for _, c := range cases {
 		path := filepath.Join(t.TempDir(), "settings.json")

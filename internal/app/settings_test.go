@@ -954,7 +954,7 @@ const ourOwnKeysJSON = `{
 	"volume": 1,
 	"isMuted": false,
 	"playback": {"items": [], "current": "", "positionMs": 0},
-	"themePreset": ""
+	"themePreset": "warm-paper"
 }`
 
 // wantSettings 是「读完一份 Biu 的文件之后应该拿到的那份设置」。

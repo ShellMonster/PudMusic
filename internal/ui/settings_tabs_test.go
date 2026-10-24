@@ -235,7 +235,10 @@ func TestTheGeneralTabStoresEachOfItsChoices(t *testing.T) {
 		t.Errorf("数据显示样式是 %q，want card", got)
 	}
 
-	// 音质偏好（下拉）
+	// 音质偏好（下拉）。
+	// 先滚进可视区：外观组多了「主题方案」一行，这一格被挤到了窗口下沿以外，
+	// 点屏幕外面的东西不会弹出下拉。
+	settingRect(t, tt, s, "选择音质偏好")
 	openSelect(t, tt, "选择音质偏好")
 	if err := tt.Click("无损"); err != nil {
 		t.Fatalf("下拉里点不到「无损」：%v，文字有 %q", err, tt.Texts())

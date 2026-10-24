@@ -29,18 +29,19 @@ func presetRatio(a, b mygoui.Color) float64 {
 	return (x + 0.05) / (y + 0.05)
 }
 
-// TestClassicPresetChangesNothing：空方案和没有这个功能时拼出来的主题一字不差。
+// TestClassicPresetChangesNothing：经典方案和没有这个功能时拼出来的主题一字不差
+// （那份「没有方案」的主题就是 classic）。
 func TestClassicPresetChangesNothing(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		s := app.DefaultSettings("")
+		s.ThemePreset = app.ThemePresetClassic
 		got := BuildTheme(s, dark)
 		s.ThemePreset = app.ThemePreset("不存在的方案")
 		if *BuildTheme(s, dark) != *got {
-			t.Errorf("dark=%v：不认识的方案改动了主题", dark)
+			t.Errorf("dark=%v：不认识的方案改动了主题（该和经典一样不套方案）", dark)
 		}
-		s.ThemePreset = app.ThemePresetClassic
-		if *BuildTheme(s, dark) != *got {
-			t.Errorf("dark=%v：经典方案改动了主题", dark)
+		if got.Accent != mygoui.Hex(app.DefaultPrimaryColor) {
+			t.Errorf("dark=%v：经典的强调色不是 Biu 绿：%v", dark, got.Accent)
 		}
 	}
 }
@@ -99,6 +100,7 @@ func TestPresetContrast(t *testing.T) {
 func TestPresetIsInTheThemeCacheKey(t *testing.T) {
 	var c themeCache
 	s := app.DefaultSettings("")
+	s.ThemePreset = app.ThemePresetClassic
 	a := c.of(s, false, mygoui.Preferences{})
 	s.ThemePreset = app.ThemePresetDuskAmber
 	b := c.of(s, false, mygoui.Preferences{})
@@ -113,10 +115,12 @@ func TestPresetIsInTheThemeCacheKey(t *testing.T) {
 // TestPickingAPresetOnTheSettingsPage：设置页点一档方案 → 设置里变了、主题下一帧换了；
 // 再去拖圆角滑块，方案被清回经典（改了就得有反应，不能被方案压住）。
 func TestPickingAPresetOnTheSettingsPage(t *testing.T) {
-	tt, s, a, _ := shellOnSettings(t, app.DefaultSettings(""))
+	start := app.DefaultSettings("")
+	start.ThemePreset = app.ThemePresetWarmPaper
+	tt, s, a, _ := shellOnSettings(t, start)
 
-	if got := a.SettingsSnapshot().ThemePreset; got != app.ThemePresetClassic {
-		t.Fatalf("起点方案是 %q，want 经典", got)
+	if got := a.SettingsSnapshot().ThemePreset; got != app.ThemePresetWarmPaper {
+		t.Fatalf("起点方案是 %q，want 暖纸", got)
 	}
 	clickSetting(t, tt, s, "暮光")
 	tt.Frame()

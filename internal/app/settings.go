@@ -160,21 +160,30 @@ const (
 // 这个概念**，所以 `themePreset` 是我们自己的键（见 `ourOwnKeys`）。Biu 读到
 // 我们的文件会把它当不认识的键，Biu 自己的设置一个键都没丢。
 //
-// ## 空串 = 「经典」，不是「未设置」
+// ## 默认是「暖纸」，「经典」是显式的一档
 //
-// 空串就是原来的外观（Biu 绿加框架默认底色），**不套任何方案**。它是零值，所以从
-// 旧设置升上来的用户、以及 Biu 导出的配置，读回来都是经典，**外观一个像素都不变**。
+// 「经典」就是原来的外观（Biu 绿加框架默认底色），不套任何方案，值是 `"classic"`。
+// 默认（包括键缺失、空串、不认识的值）一律是暖纸：应用还没发版，没有需要保住的
+// 旧外观；Biu 导出的配置里没有这个键，导入后也拿到暖纸。
 // 套了方案之后，方案的底色、文字、强调色、圆角**压过**设置里的 `primaryColor` /
-// `backgroundColor` / `borderRadius`；用户在设置页改那三项时界面层会先把方案清回
+// `backgroundColor` / `borderRadius`；用户在设置页改那三项时界面层会先把方案清成
 // 经典，免得「改了没反应」。
 type ThemePreset string
 
 const (
-	ThemePresetClassic   ThemePreset = ""
 	ThemePresetWarmPaper ThemePreset = "warm-paper"
 	ThemePresetDuskAmber ThemePreset = "dusk-amber"
 	ThemePresetSoftPeach ThemePreset = "soft-peach"
+	ThemePresetClassic   ThemePreset = "classic"
 )
+
+// DefaultThemePreset 是新设置的默认方案。
+//
+// ⚠️ **只给测试改**（`internal/ui` 的 TestMain 把它设成经典）：界面层有一大批
+// 「和 Biu 逐像素对照」的用例，量的是经典外观（Biu 绿、框架底色）；它们量的是
+// 控件的几何和状态，不是配色，不该跟着默认方案一起重写。新方案自己有专门的用例
+// （`themepreset_test.go`），而「生产默认是暖纸」由 `app` 包里的测试盯着。
+var DefaultThemePreset = ThemePresetWarmPaper
 
 // 音质档位。Biu 的 `AudioQuality`。
 type AudioQuality string
@@ -489,6 +498,7 @@ func DefaultSettings(downloadPath string) Settings {
 		DisplayMode:       DisplayModeList,
 		FFmpegPath:        "",
 		ThemeMode:         ThemeModeSystem,
+		ThemePreset:       DefaultThemePreset,
 		PageTransition:    PageTransitionNone,
 		ShowSearchHistory: true,
 		ProxySettings:     ProxySettings{Type: ProxyNone},
@@ -704,8 +714,8 @@ func (s *Settings) normalize() {
 
 	s.ThemeMode = pickEnum(s.ThemeMode, ThemeModeSystem,
 		ThemeModeSystem, ThemeModeLight, ThemeModeDark)
-	s.ThemePreset = pickEnum(s.ThemePreset, ThemePresetClassic,
-		ThemePresetClassic, ThemePresetWarmPaper, ThemePresetDuskAmber, ThemePresetSoftPeach)
+	s.ThemePreset = pickEnum(s.ThemePreset, DefaultThemePreset,
+		ThemePresetWarmPaper, ThemePresetDuskAmber, ThemePresetSoftPeach, ThemePresetClassic)
 	s.AudioQuality = pickEnum(s.AudioQuality, AudioQualityAuto,
 		AudioQualityAuto, AudioQualityLossless, AudioQualityHigh,
 		AudioQualityMedium, AudioQualityLow)
