@@ -350,3 +350,61 @@ issue 的验收标准**（`gh issue edit`，见 `docs/agents/issue-tracker.md`�
   规格」当成可以自行发挥的理由。⚠️ 那条规则**只认 `docs/research/` 这一个路径**，
   所以别把 SPEC.md / PLAN.md 挪到别处再提交——换个位置就不再被忽略了，`git add`
   会照常把它列成待提交。
+
+## 10. 收尾：把自己起的 gopls 停掉
+
+**收尾的最后一步：把自己工作区里那个 gopls 停掉。**
+
+### 为什么
+
+板子清理一张票的时候，要那个 agent 的 herdr 面板「除了前台进程没有别的活进程」。
+插件源码（`~/.config/herdr/plugins/github-installations/herdr-projects-*/checkout/`
+下，可以自己核实）：
+
+- `crates/core/src/herdr/api.rs:92` 的 `pane_childless(id)`：面板里除了前台进程，
+  不能有别的活进程（**前台进程自己也不能有子进程**）；
+- `crates/flow/src/land/cleanup.rs:32` 的 `cleanup_with`：清理要 `at_rest`（里面就是
+  `pane_childless`）才继续，否则**推迟**（`retry`），并把「空间还在用」写进板子的话里。
+
+gopls 是 Claude Code 自己起的 Go 语言服务器（实测：gopls 的父进程就是那个 claude
+进程），**claude 退出之后它还活着**（成了孤儿，被 init 收养）——所以它正好是那个
+「赖着不走的进程」。**插件的规则是对的**（它不想在别人的进程还活着的时候把空间
+拆了，拆了会把那个进程一起带走）：**该走的是把那个进程收掉。**
+
+不收的后果：agent 做完了，**herdr-projects 不关那个窗口**（侧边栏里一直留着），
+板子的话里一直写着「Kept: … (its space is in use beside its agent: gopls …)」，
+**工作区也删不掉**。
+
+⚠️ **gopls 只是最常见的一个**：插件拦的是**任何**留在面板里的后台进程（一个没关的
+`go test`、一个 `node` 服务器……）。这一条治的是 gopls 这个大头。
+
+### 怎么做
+
+**按 cwd 认领，只杀自己那个**：
+
+```sh
+# $PWD 就是自己的工作区（自己的 worktree）
+for p in $(pgrep -x gopls); do
+  cwd=$(lsof -a -p "$p" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')
+  [ "$cwd" = "$PWD" ] && kill "$p"
+done
+```
+
+- **按 cwd 认领**：`lsof -a -p <pid> -d cwd` 看它的工作区是不是自己那个。
+  **别人的 gopls 一个别动**（别的 agent 还在用）。
+- ⚠️ **别写成 `pkill -f gopls`**——那会杀掉别的 agent 的。
+- **放在收尾的最后**：**最后改完文件之后再杀**。在那之前杀，LSP 会再起一个
+  （Claude Code 的 LSP 一碰到 Go 文件就再拉一个 gopls 起来）。
+- 杀完确认一下：`pgrep -fl gopls` 里自己那个没了没有（gopls 还有一个同名的遥测
+  子进程 `gopls ** telemetry **`，它跟着 gopls 一起死；真还在就 `kill -9`）。
+
+### 清理的顺序
+
+省得下一个人重新推（**只有第 1 步是你的**，其余是板子做的）：
+
+1. **杀自己工作区里的残留进程**（上面那条就是它）——**这一步不做，第 3 步就推不动**：
+   你的 gopls 还在面板里，`pane_childless` 就是 false，清理一直 `retry`；
+2. **归档任务**（板子把任务收进归档，`herdr-projects archive <id>`）：它自己的 herdr
+   空间关掉、临时文件清掉；
+3. **删工作区**：板子的清理（`cleanup_with`）把 worktree 删掉；
+4. **修剪 worktree 登记**：`git worktree prune`——清理里紧跟着 `worktree remove` 做。
