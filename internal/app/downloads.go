@@ -108,6 +108,11 @@ func (a *App) MountDownloads(d Downloads) error {
 		Client:  d.Media,
 		Resolve: a.resolveDownload,
 		OnDone:  a.downloadFinished,
+		// 🔴 **判据是同一张表**（票 #346）：下载记录页上那枚「重试」和播放条上
+		// 那枚是同一个动作（再问一次 B 站），所以两处必须用同一个判据。
+		// 不装的话下载那一路会按旧行为「每一项出错都给一枚重试」——风控失败的
+		// 下载于是又有了那枚「点一次撞一次」的键。
+		CanRetry: bili.Recoverable,
 	}, d.QueueFile)
 	if err != nil {
 		return err

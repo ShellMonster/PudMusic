@@ -372,16 +372,32 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
-		Spec:     "风控响应（非 JSON）被认出来，不当普通错误",
-		Tests:    []string{"TestNonJSONResponseIsRiskControl"},
+		// 🔴 **「压根不是 JSON」和真风控必须分得开**（票 #346）：真风控是
+		// -352/-412（业务码，在 JSON 里面），而这一档是压根没拿到 JSON
+		// （多半是风控挡的一页 HTML）。混成一处的话，被截断的响应会跟着风控
+		// 一起被判成不可重试。
+		Spec: "响应不是 JSON 被认出来，而且和真风控分得开",
+		Tests: []string{
+			"TestANonJSONResponseIsNotTheRiskControl",
+			"TestATruncatedResponseIsNotTheRiskControl",
+		},
 	},
 	{
 		Category: HTTP,
-		// 风控**不判成「可重试」**：界面上那枚「重试」是立刻再问一次（没有退避），
-		// 而风控要等的是时间——判成可重试的话用户点一次撞一次（票 #316）。
-		// 限流（-509）是另一回事：等一会儿就好，所以仍然是可重试的。
-		Spec:  "风控不可重试（立刻再问还是撞墙），限流可重试（等一会儿就好）",
+		// 风控和限流**都不判成「可重试」**：界面上那枚「重试」是立刻再问一次
+		// （没有退避），而这两样要等的是时间——判成可重试的话用户点一次撞一次
+		// （票 #316 收窄了风控，票 #346 把限流收到同一档）。
+		//
+		// 而**截断的响应判成可重试**：它多半是网络抖了一下，再问一次有可能好。
+		Spec:  "风控和限流都不可重试（立刻再问还是撞墙），截断的响应可重试",
 		Tests: []string{"TestRiskControlIsNotWorthRetryingAgain"},
+	},
+	{
+		Category: HTTP,
+		// 「能不能重试」这张表是**全项目唯一的一处**（票 #346）：播放条上那枚
+		// 「重试」和下载记录页上那枚是同一个动作，两处必须用同一张表。
+		Spec:  "「可重试」的判据收在一处（表在那儿）",
+		Tests: []string{"TestRecoverableTellsWhatIsWorthRetryingAgain"},
 	},
 	{
 		Category: HTTP,
@@ -1030,6 +1046,20 @@ var Items = []Item{
 			"TestACorruptPrefsFileIsIgnoredNotFatal",
 			"TestAPrefsFileFromANewerVersionIsLeftAlone",
 			"TestNoUserDataDirMeansMemoryOnly",
+		},
+	},
+	{
+		Category: Negative,
+		// 🔴 **两处界面的「重试」用同一张表**（票 #346）：播放条上那枚和下载
+		// 记录页上那枚是**同一个动作**（立刻再问一次 B 站），所以风控和限流
+		// 在两处都**不给**那枚键——按下去就是再撞一次墙。
+		Spec: "「重试」键按同一张判据给：风控和限流两处都不给，被截断的响应给",
+		Tests: []string{
+			"TestThePlayBarDoesNotOfferARetryThatWouldHitTheRateLimitAgain",
+			"TestARateLimitedFailureIsNotOfferedARetry",
+			"TestARiskControlDownloadIsNotOfferedARetry",
+			"TestAFailedDownloadThatCannotBeRetriedHasNoRetryButton",
+			"TestATruncatedResponseIsOfferedARetry",
 		},
 	},
 	{

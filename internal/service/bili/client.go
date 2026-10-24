@@ -31,8 +31,10 @@
 //
 //	ErrNotLoggedIn  -101，登录态没了。该提示用户重新登录。
 //	ErrRiskControl  -352/-412，B 站的风控。该提示但不该重试。
-//	ErrTooFrequent  -509，被限速。该退避后重试。
+//	ErrTooFrequent  -509，被限速。该提示，同样不该**立刻**重试。
 //	其它非 0 code  → *APIError，调用方自己判。
+//
+// 「能不能重试」那张表在 `retry.go`（唯一的一处），这里只管分类。
 package bili
 
 import (
@@ -60,6 +62,19 @@ var (
 	ErrCSRF = errors.New("bili: CSRF 校验没过")
 	// ErrNetwork 是根本没拿到 HTTP 响应（断网、超时、DNS）。
 	ErrNetwork = errors.New("bili: 网络没通")
+	// ErrTruncatedResponse 是「响应本来是 JSON，但没传完」。
+	//
+	// 🔴 **它和 `ErrBadResponse` 必须分开**（票 #346）：一个是网络抖了一下
+	// （再问一次有可能好），一个是回了一页压根不是 JSON 的东西（多半是风控
+	// 挡的，立刻再问还是撞同一面墙）。混成一个的话，被截断的响应会被判成
+	// 不可重试，用户按一次撞一次。
+	ErrTruncatedResponse = errors.New("bili: 响应被截断了")
+	// ErrBadResponse 是「B 站这次回的不是 JSON」。
+	//
+	// ⚠️ **它不是 `ErrRiskControl`**：真风控是 -352/-412（业务码，在 JSON
+	// 里面），而这一档是**压根没拿到 JSON**——多半是风控挡下来的一页 HTML，
+	// 也可能是网关回了个错页。判据在 `retry.go` 那张表里。
+	ErrBadResponse = errors.New("bili: 响应不是 JSON")
 )
 
 // APIError 是 B 站返回的业务错误。
@@ -408,7 +423,11 @@ func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
 
 	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
-		return nil, fmt.Errorf("bili: 读响应: %w", err)
+		// 🔴 **读一半断了 = 响应没传完**（票 #346）：那是网络层的事（抖了一下、
+		// 连接被掐了），**再问一次有可能好**——所以它归「可重试」那一档，
+		// 不跟「压根不是 JSON」混在一起。
+		return nil, fmt.Errorf("%w: %s %s: 响应没读全: %w",
+			ErrTruncatedResponse, method, endpoint.Path, err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -419,9 +438,20 @@ func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
 
 	var env envelope
 	if err := json.Unmarshal(bodyBytes, &env); err != nil {
-		// 拿到的是 HTML 或空页。B 站在被风控时会给一页 HTML，
-		// 而那正是 ErrRiskControl 最典型的形态。
-		return nil, fmt.Errorf("%w: %s %s: 响应不是 JSON（多半是被风控挡了）", ErrRiskControl, method, endpoint.Path)
+		// 🔴 **「不是 JSON」要分成两种**（票 #346）：
+		//
+		//	截断   响应本来是 JSON，但没传完（网络抖了一下）→ 再问一次有可能好
+		//	不是   回的是一页 HTML —— 多半是风控挡的 → 立刻再问还是撞同一面墙
+		//
+		// ⚠️ **它们都不能归到 `ErrRiskControl`**：真风控是 -352/-412（业务码，
+		// 在 JSON 里面），而这一档是压根没拿到 JSON。混成一处的话，被截断的
+		// 响应会跟着风控一起被判成不可重试（票 #316 收窄的那一档）。
+		if !looksLikeHTML(bodyBytes) {
+			return nil, fmt.Errorf("%w: %s %s: 响应被截断了: %w",
+				ErrTruncatedResponse, method, endpoint.Path, err)
+		}
+		return nil, fmt.Errorf("%w: %s %s: 响应不是 JSON（多半是被风控挡了）: %w",
+			ErrBadResponse, method, endpoint.Path, err)
 	}
 	if env.Code != 0 {
 		return nil, &APIError{
@@ -432,6 +462,22 @@ func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
 		}
 	}
 	return env.Data, nil
+}
+
+// looksLikeHTML 报这个响应体是不是**一页 HTML**（而不是 JSON）。
+//
+// 判据是**头一个非空白字符**：B 站的业务响应一定是 `{` 开头，而风控挡下来的
+// 那一页是 HTML（`<` 开头）。所以「不是 HTML」= 它本来是 JSON，只是没传完
+// （或者是空的——连接在第一个字节之前就断了，那也是没传完）。
+//
+// ⚠️ 别拿 `json.Unmarshal` 的那句错来判（"unexpected end of JSON input"）：
+// 那是 Go 的内部措辞，改一次就变，而这里判的是**响应本身**。
+func looksLikeHTML(body []byte) bool {
+	t := bytes.TrimLeft(body, " \t\r\n")
+	if len(t) == 0 {
+		return false // 空的：连接在第一个字节之前就断了
+	}
+	return t[0] != '{' && t[0] != '['
 }
 
 // setHeaders 装上每个请求都要带的头。
