@@ -272,6 +272,8 @@ func TestTheMiniPlayerKeysAreFlat(t *testing.T) {
 				if !ok {
 					t.Fatalf("迷你播放器上找不到 %q，文字有 %q", label, tt.Texts())
 				}
+				// 84 高的窗里键的上沿紧挨进度条滑钮的软影子，上沿不量（左右下仍量）。
+				r.Y, r.H = r.Y+4, r.H-4
 				assertNoRing(t, img, r, bg, "迷你播放器 "+label)
 			}
 		})
@@ -397,8 +399,11 @@ func TestTheDynamicCardKeysAreFlat(t *testing.T) {
 			noPointer(tt)
 
 			// 作者名：`uiDynamic` 里叫「作者v1」。
+			//
+			// ⚠️ **键压着的是**页面底色**：动态条目是**通栏**的（上游那一档：透明底、
+			// 只有一条下边框、直角，票 #416），卡片自己不再有底色。
 			assertTextKeysFlat(t, tt, flatPageBG(s, dark), "动态卡片",
-				"作者v1", "赞 12", "下一首播放", "下载音频", "下载视频")
+				"作者v1", "赞 12", "下一首播放", "下载音频")
 		})
 	}
 }
@@ -512,9 +517,9 @@ func TestTheTwoRulesAreDrawnAsOnePixelLines(t *testing.T) {
 			tt.SetDark(dark)
 			// 队列抽屉。
 			s.drawerOpen = true
-			for range 3 {
-				tt.Frame()
-			}
+			// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在
+			// 窗口外面（它从右边滑进来），量到的是空的右半边。
+			settleDrawer(t, s, tt)
 			img := tt.Image()
 			border := flatColor(BuildTheme(s.app.SettingsSnapshot(), dark).Border)
 			x0 := img.Rect.Max.X - queueDrawerWidth

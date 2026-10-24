@@ -11,28 +11,137 @@ package ui
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+	tclean "github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
 	"github.com/egoist/mygo/ui"
 )
 
-// 尺寸照 Biu：行高 64（`RowHeight`）、宽 384（HeroUI Drawer 的 size="sm"）、封面
+// 尺寸：行高 64（`RowHeight`）、宽 320（设计规范 v0.1 §4 的右侧 Inspector；上游 Biu 是 384）、封面
 // 48（`h-12 w-12`）、行内边距 8（`p-2`，48+8+8 正好 64）、顶上那条 52。
 const (
 	queueRowHeight    = 64
-	queueDrawerWidth  = 384
+	queueDrawerWidth  = 320
 	queueCoverSize    = 48
 	queuePadY         = space.Px8
 	queuePadX         = space.Px8
 	queueHeaderHeight = 52
+)
+
+// ---- 进出场（票 #298） ----
+//
+// # 为什么大面板加、小浮层不加
+//
+// **大面板（队列抽屉）加进出场**：从右侧滑入，200ms + CubicBezier(0.16, 0.9,
+// 0.21, 0.98)，**不做回弹**。理由见 DESIGN.md §九（2026-10-24 拍板）。
+//
+// **菜单 / 小浮层 / 确认框 / Toast 不加**：那些是高频操作，一秒好几次，
+// 每一处都滑一遍就成噪音了。
+//
+// ⚠️ **上游不是「全站都关了动画」**：上游那 43 处 `disableAnimation` 是**一件一件
+// 挂在具体组件上的**（Modal 10 处、Button 10 处、Popover 6 处、Switch 4 处、
+// Tooltip 4 处、Checkbox 3 处、Dropdown 3 处、Select 1 处、Slider 1 处、
+// Drawer 1 处），而**上游自己在满屏播放器里做了一个从右边滑进去的抽屉**
+// （`src/components/full-screen-player/index.tsx:421-422`：`transition-all
+// duration-300 ease-out` + `translate-x-full → translate-x-0`）。
+// 那一段的出处与逐处清单见 DESIGN.md §五「上游那 43 处 `disableAnimation` 的
+// 范围」；§九那一段记的是「小浮层不加、大面板加」这个拍板。
+
+// queueSlideDuration 是抽屉滑入滑出要走多久：200ms。
+//
+// 取 200ms 是因为它是**大面板**：面板一开就占住半屏，滑得慢会显得「来得很重」；
+// 而它又是高频开关（播放条上那枚），滑得慢会让人觉得「按了没反应」。
+const queueSlideDuration = 200 * time.Millisecond
+
+// queueSlideAnim 是抽屉进出场那一段动画。
+//
+// ⚠️ **曲线走全应用那一条统一曲线**（`motion.Unified`，值在
+// `internal/ui/widgets/motion` 里）：`CubicBezier(0.16, 0.9, 0.21, 0.98)`——
+// 全应用只写这一处，抽屉跟别处走的是同一条曲线。
+//
+// ⚠️ **它是包级变量，不能每帧现造**：CubicBezier 返回的是一个闭包，
+// 每帧调一次就是**每帧一个分配**——而每帧分配是我们唯一的性能判据
+// （`internal/ui/framebudget_test.go`）。
+//
+// ⚠️ **走曲线那一支，不做回弹**：回弹只留给「奖励动量」（甩动落位那种
+// 「给了一下奖励」的动作），**点击触发的过渡不弹**（报告 164 §3.0 引的
+// 《Web 流畅界面建议》：「小心地尝试带回弹效果的动画…Start simple, not springy」）。
+//
+// ⚠️ **Duration > 0 才是曲线那一支**：Duration == 0 会落进弹簧那一支，
+// 而弹簧那一支的兜底值是 500ms（`mygo/ui/motion.go` 的 defaultSpringDuration）。
+// 「零值 = 500ms 弹簧」不是「没动画」。
+var queueSlideAnim = ui.Animation{Duration: queueSlideDuration, Ease: motion.Unified}
+
+// queueSlideKey 是这一段动画在面板那个元素上的键。
+//
+// ⚠️ **键必须是常量字符串**：框架把动画的值记在元素的 state 里，键是 `any`，
+// 而非常量字符串每帧装箱一次就是每帧一个分配（同上）。
+const queueSlideKey = "queue-drawer:slide"
+
+// drawerPhase 是播放列表抽屉现在处在进场的哪一段。
+//
+// # 为什么不是一个 bool
+//
+// 「开没开」和「在画面上的哪一段」是**两件事**：退场的那 200ms 里抽屉**还在树上**
+// （它滑到窗口外面去了，但还没拆），所以「关掉」不是「不建」，是「建着，滑出去，
+// 滑完了才拆」。这就是「开合的状态要和动画对齐」那一句。
+//
+// # 推它的是两样东西，只有两样
+//
+//	用户的意图（`drawerOpen`）	点那枚键、按 Esc、点外面
+//	动画自己走没走完	面板到位了 / 滑到头了
+//
+// **动画不会反过来推它**——那是「重入」，而重入是这类状态机最容易出的 bug。
+type drawerPhase uint8
+
+const (
+	// drawerGone 是「抽屉不在树上」：没开，也没在退场。
+	drawerGone drawerPhase = iota
+	// drawerIn 是「正在滑进来」：面板已经在树上，正从窗口外面往右沿走。
+	drawerIn
+	// drawerShown 是「开着，而且已经到位」。
+	drawerShown
+	// drawerOut 是「正在滑出去」：面板还在树上，正往窗口外面走。
+	drawerOut
+)
+
+// queueRowState 是抽屉里那一行**处在哪一档**（票 #319，票 #352 补上一档）。
+//
+// 四档，因为「当前这一首」有三种状态，而用户要分得开：
+//
+//	正在放 / 暂停着 —— 高亮成「正在播放」（上游那一档）
+//	用户按了停止 —— 说的是「已停止」，**不高亮**（见 `viewQueueList`）
+//	队列自己走完了 —— 说的是「这一串放完了」，**不高亮**（同上）
+type queueRowState int
+
+const (
+	// queueRowPlain 是普通的行：不是当前这一首。
+	queueRowPlain queueRowState = iota
+	// queueRowCurrent 是「当前这一首」：在放，或者暂停着。
+	queueRowCurrent
+	// queueRowStopped 是「当前这一首，**用户按了停止**」：这一首到此为止，
+	// 而**队列里还有歌**。
+	queueRowStopped
+	// queueRowDrained 是「当前这一首，**队列自己走完了**」：顺序播放走到队尾，
+	// **没有下一首了**（票 #352）。
+	//
+	// ⚠️ 它和 `queueRowStopped` **画面上一模一样**（都不高亮、字都取次要色），
+	// 差的是**副题那一句**：前者说「已停止」，这一档说「这一串放完了」——
+	// 同一屏上对同一件事不许说两句不同的话（播放条上那一句就是这么分的，
+	// 判据是同一个 `app.State.QueueFinished`）。
+	queueRowDrained
 )
 
 // queueRow 是抽屉里画出来的一行。
@@ -44,6 +153,26 @@ type queueRow struct {
 	at   int
 	// key 是这一行的身份（铁律四）。见 queueRowKey。
 	key string
+	// id 是这一首的**判重标识**（Item.Identity）。
+	//
+	// ⚠️ **它和 key 不是一回事**：key 是「这一行」（铁律四），id 是「这一首」
+	// （队列里可能有同一首的多份，抽屉只画一行）。
+	//
+	// 它在 queueRowsFor 里就**算好了**（那一处本来就要算，见去重那段）——存下来
+	// 是为了别处不用再算一遍（现算一遍是要分配的：Identity 拼的是一个新字符串）。
+	//
+	// ⚠️ **而且它是记好的那一份**（票 #339）：`queueRowsFor` 拿
+	// `s.queueRowIDs` 那个 memo 换来的，所以每帧每行不再现拼一次。
+	id string
+	// state 是这一行处在哪一档（见 queueRowState）。**每帧重算**：这些行是
+	// `viewQueueDrawer` 每帧现造的（`queueRowsFor`），所以写在上面的状态不会
+	// 留到下一帧。
+	//
+	// ⚠️ **状态写在行自己身上，不另开一个变量**：画这一列的那个闭包每帧建一次，
+	// 而它捕获的每一个变量都占闭包结构体的一个位置——多一个变量就是多一个
+	// 指针，尺寸类跳一级，**每帧多 16 个字节**（票 #319 的验收：每帧分配不许
+	// 涨）。状态跟着行走，这一条就不用多捕获任何东西。
+	state queueRowState
 }
 
 // queueRowKey 是这一行的 key。
@@ -68,22 +197,68 @@ func queueRowKey(id string, at int) string {
 	return "queue-row!" + strconv.Itoa(at)
 }
 
+// queueRowIdentity 是抽屉里那一行的**两串身份**：判重标识和行身份。
+//
+// ⚠️ **两串都是每帧每行都要的**，而现拼一次就是一个新字符串（`Item.Identity()`
+// 拼的是「local:」+ 路径，`queueRowKey` 拼的是「queue-row:」+ 标识）——
+// 认得出身份的那些行每帧每行两次，二十首的队列就是四十来次（认不出的那一支
+// 只有行身份那一次：判重标识是空串，不拼）。
+type queueRowIdentity struct {
+	// id 是这一首的判重标识（`Item.Identity()`）。
+	id string
+	// key 是这一行的身份（铁律四）。见 queueRowKey。
+	key string
+}
+
+// queueRowRaw 是「那两串身份」的**原料**。
+//
+// ⚠️ **取得它不能分配**：所以它记的是 Item 本身（现成的字段）加上这一项在队列里
+// 的位置，而**不是**那两串身份——那两串恰恰是要省掉的那一步（`rowkey.Memo` 的
+// 文件头：「现拼的那一步本身就要分配，而它恰恰是要省掉的那一步」）。
+//
+// ⚠️ **Item 整个当原料**：它认得出身份靠的就是那几个字段（`Source` / `Type` /
+// `Path` / `Bvid` / `Sid`），而比较一个 Item 不分配（字段全是现成的字符串，
+// 同一个字符串的指针一样，比较是 O(1)）。
+type queueRowRaw struct {
+	item app.Item
+	// at 是这一项在队列里的位置。认不出是哪一首时行身份退回按下标（见
+	// queueRowKey），所以位置也是原料的一部分。
+	at int
+}
+
+// packQueueRowIdentity 是「原料 → 那两串身份」的那一步。
+//
+// ⚠️ **纯函数**：同样的原料必须给出同样的结果（`rowkey.Memo` 的契约——它拿
+// 原料当身份，身份变了才重算）。
+//
+// ⚠️ **它只在原料变了的时候才走**（见 `rowkey.Memo`）：那一档每帧每行问一次，
+// 而快的那条路上零分配。
+func packQueueRowIdentity(r queueRowRaw) queueRowIdentity {
+	id := r.item.Identity()
+	return queueRowIdentity{id: id, key: queueRowKey(id, r.at)}
+}
+
 // queueRowsFor 是抽屉这一帧要画的那几行：队列按判重标识去重之后的样子。
 //
 // **保留第一次出现的**（`uniqBy` 的语义）：那一行在队列里的位置（`at`）也还是
 // 第一次入队那个，播放条和「下一首」走的是队列，抽屉跟着走同一个才不至于各说各话。
-func queueRowsFor(items []app.Item) []queueRow {
+//
+// ⚠️ **那两串身份是记好的那一份**（`ids`）：现拼的话每帧每行一到两次分配（票 #339）。
+func queueRowsFor(items []app.Item, ids *rowkey.Memo[queueRowRaw, queueRowIdentity]) []queueRow {
 	rows := make([]queueRow, 0, len(items))
 	seen := make(map[string]bool, len(items))
 	for i, it := range items {
-		id := it.Identity()
-		if id != "" {
-			if seen[id] {
+		// ⚠️ **按「第几项」记**：这一格的原料是这一项自己（Item + 队列里的位置），
+		// 所以队列一改（加歌、删歌、重排）它自己就看得出「数据换了」——调用方
+		// 一处都不用记得重建（理由见 `rowkey.Memo` 的文件头）。
+		ident := ids.At(i, queueRowRaw{item: it, at: i}, packQueueRowIdentity)
+		if ident.id != "" {
+			if seen[ident.id] {
 				continue
 			}
-			seen[id] = true
+			seen[ident.id] = true
 		}
-		rows = append(rows, queueRow{item: it, at: i, key: queueRowKey(id, i)})
+		rows = append(rows, queueRow{item: it, at: i, key: ident.key, id: ident.id})
 	}
 	return rows
 }
@@ -96,7 +271,9 @@ func queueRowsFor(items []app.Item) []queueRow {
 //
 // ⚠️ 外面那层 `Guard` 是 `viewMain` 加的（铁律三）：抽屉一崩，崩掉的是**整个窗口**。
 func (s *Shell) viewQueueDrawer(c *ui.Context) {
-	if !s.drawerOpen {
+	// 阶段先推，**建不建后说**：退场的那一段面板还在树上，所以「关掉」不是「不建」。
+	justIn := s.syncDrawerPhase()
+	if s.drawerPhase == drawerGone {
 		return
 	}
 	// 记一笔「抽屉建了一遍」——给「一帧建了几遍」那条测试数（见 builds.go）。
@@ -106,14 +283,14 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 	// 的话这里会是 2——而画面上看着没差。
 	s.builds.drawer++
 	t := c.Theme()
-	s.queueRows = queueRowsFor(s.app.Queue().Items())
+	s.queueRows = queueRowsFor(s.app.Queue().Items(), &s.queueRowIDs)
 
 	ui.Overlay(c, func() {
 		// ⚠️ 底边留出底下那一条的高度（Biu 的 `data-[placement=right]:mb-22` 就是
 		// 88）。这一层是吃点击的（见下面 back.Clicked 那段），不留出这一条播放条
 		// 就**整个被它盖住**：抽屉开着时按播放、上一首、下一首都按不动。
 		//
-		// 满屏开着的时候底下那一条是满屏的底栏（进度 + 控制键，92 高，见
+		// 满屏开着的时候底下那一条是满屏的底栏（进度 + 控制键，108 高，见
 		// `fullControlsHeight`），不是播放条——让出的高度要跟着它，否则进度条
 		// 上面那十几像素会被蒙版盖住、点一下就变成「关抽屉」。
 		bottomInset := float32(playbarHeight)
@@ -121,10 +298,28 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 			bottomInset = fullControlsHeight
 		}
 		back := ui.Row(c).Key("queue-backdrop").
-			Absolute().Left(0).Top(0).Right(0).Bottom(bottomInset).
-			Justify(ui.End).AlignItems(ui.Stretch).
+			Absolute().Left(0).Top(0).Right(0).Bottom(bottomInset)
+		if s.drawerPhase == drawerOut {
+			// ⚠️ **退场那 200ms 里，这片蒙版不吃点击**。
+			//
+			// 改动之前关掉抽屉是**整个浮层都不建**（`viewQueueDrawer` 第一句
+			// `if !s.drawerOpen { return }`），蒙版立刻消失，下一次点击直接落在
+			// 页面上。现在面板还要滑 200ms 才拆，而面板在 ~100ms 时就已经 95%
+			// 滑出屏幕了——「看上去已经关好」的那段时间，底下那一页（侧栏、页面）
+			// 却点不动：那一下点击被这片**看不见的**蒙版吃掉，只会把 drawerOpen
+			// 又设成 false。
+			//
+			// 所以退场一开始，蒙版就**让开指针**（`PassThrough`）：它是透明的，
+			// 用户看不见它，而它盖住整页——看不见的东西吃点击，就是「点不动」。
+			back = back.PassThrough()
+		} else {
 			// 没有底色：Biu 的 `backdrop="transparent"`，底下那一层照旧看得见。
-			Modal()
+			//
+			// ⚠️ **开着的时候它是模态**：Modal 把焦点关进抽屉、外面那些快捷键
+			// 让路，而底下那一页在它开着的时候点不动（Biu 的透明蒙版也是这样，
+			// 它只是看不见，不是空的）。
+			back = back.Modal()
+		}
 		back.Children(func() {
 			// ⚠️ **那一圈影是上游给的**：Biu 那一枚是 HeroUI 的
 			// `<Drawer radius="md" shadow="md">`（`components/music-playlist-drawer/
@@ -141,14 +336,68 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 			//
 			// 之前这里取 `t.Surface`（深色下 #27272a）——那正是 DESIGN.md §四说的
 			// 「比背景亮一级的板」。
+			//
+			// ⚠️ **面板是绝对定位的**（原来它是在这一行 flex 里靠 `Justify(End)`
+			// 贴右沿的）：进出场要动的是**布局位置**，而 flex 那一套摆不出
+			// 「从右边滑进来」——`justify-content: flex-end` 溢出时是往**左**溢出
+			// （`mygo/ui/layout.go` 的 flexLayout：`free := max(contentMain-ln.main, 0)`，
+			// 剩下的地方被夹成 0，条目落在起点）。绝对定位按 **inset** 摆，
+			// 那才是「从窗口右边挪进来」能用的那一套。
 			panel := shadow.HeroMedium(ui.Column(c).Key("queue-drawer").
-				Width(queueDrawerWidth).FillHeight().
+				Absolute().Top(0).Bottom(0).Width(queueDrawerWidth).
 				Background(t.Background).BorderStartWidth(1).BorderColor(t.Border), t)
+			// ⚠️ **面板在退场时照旧接点击**：它还在屏幕上（滑出去那一段看得见），
+			// 而「看不见的东西吃点击」才是坏的（那是底下那片蒙版，见上面）。
+			// 面板看得见，所以点它就是点它。
+			//
+			// ⚠️ **别用 `Disabled` 关它**：框架把禁用画成**半透明**
+			// （`mygo/ui/paint.go`：`if e.flags&flagDisabled != 0 { p.opacity *= 0.5 }`），
+			// 那会让面板一边滑一边淡——变成「淡出」而不是「滑出」了。
 			panel.Role(ui.RoleDialog).Label("播放列表").
 				Children(func() {
 					s.viewQueueHeader(c, t)
 					s.viewQueueBody(c, t)
 				})
+
+			// ---- 进出场 ----
+			//
+			// 动的是面板的**右边距**：0 = 贴住窗口右沿（到位了），
+			// -queueDrawerWidth = 整个面板在窗口外面（还没进来）。
+			//
+			// ⚠️ **动的是布局位置，不是 transform**（DESIGN.md §五：「动画不要用
+			// transform 动大子树……要动就动**布局位置**」）。软件渲染回退时
+			// transform 会让整棵子树逐像素重绘。
+			//
+			// ⚠️ **第一次建要 Jump 一下**：框架的规矩是「一个值从它的第一个目标开始」
+			// （`mygo/ui/motion.go` 的 channel：第一次 `AnimateTo` 直接把值给成
+			// 目标），所以不先 Jump 的话面板会**直接出现在**右沿上，没有滑入。
+			if justIn {
+				panel.Jump(queueSlideKey, -queueDrawerWidth)
+			}
+			// 目标：开着就贴住右沿（0），关着就整个在窗口外面。
+			target := float32(0)
+			if s.drawerPhase == drawerOut {
+				target = -queueDrawerWidth
+			}
+			slide := panel.AnimateTo(queueSlideKey, target, queueSlideAnim)
+			panel = panel.Right(slide)
+
+			// 到位了 / 滑到头了：换一段。
+			//
+			// ⚠️ **用 Settled 不用 Arrived**：Settled 是「停在那儿了」，退场这一段
+			// 要的是「滑到头了就把面板拆掉」——拆之前那一帧面板还在树上
+			//（它在窗口外面，看不见），下一帧才真的没了。
+			//
+			// ⚠️ **这一句不会重入**：它只在阶段是 in/out 时才改阶段，而阶段只被
+			// 意图和动画推着走（见 drawerPhase 那一段）。
+			if panel.Settled(queueSlideKey) {
+				switch s.drawerPhase {
+				case drawerIn:
+					s.drawerPhase = drawerShown
+				case drawerOut:
+					s.drawerPhase = drawerGone
+				}
+			}
 		})
 
 		// 关抽屉的两条路：点底下那一层、按 Esc。少一条的表现是「我明明点了外面，
@@ -163,29 +412,83 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 		// 蒙版也是这样，它只是看不见，不是空的。这和上面那个 Modal 是同一件事。
 		//
 		// ⚠️ 按下 Esc 时焦点得在抽屉里才轮得到它（Modal 把焦点关进来了）。
+		//
+		// ⚠️ **这里是「=false」不是「= !drawerOpen」**：关的动作是幂等的——
+		// 退场那 200ms 里用户再点一次外面，不该把抽屉又打开。
 		if back.Clicked() || back.OverlayShortcut(0, ui.KeyEscape) {
 			s.drawerOpen = false
 		}
 	})
 }
 
-// viewQueueHeader 是顶上那一条：标题 + 定位 + 清空。两个键只在队列非空时才摆
+// syncDrawerPhase 推一遍抽屉的阶段机，返回这一帧是不是「刚打开」。
+//
+// ⚠️ **它只被两样东西推着走**：用户的意图（`drawerOpen`）和动画走没走完
+// （`viewQueueDrawer` 里那一句 Settled）。**动画不会反过来推它**。
+//
+// ⚠️ **「关」是幂等的**：`drawerOpen = false` 连按几次都是「关」，
+// 而 `drawerOpen = !drawerOpen` 那样写在关的动作上就是「开」——
+// 退场那 200ms 里用户再点一次外面，抽屉会弹回来。
+//
+// ⚠️ **退场途中又打开**：阶段退回 `drawerIn`，而面板**从当前位置接着滑回去**
+// （框架的曲线分支被打断时是从当前值接着走的，`mygo/ui/motion.go` 的 retarget）。
+func (s *Shell) syncDrawerPhase() bool {
+	switch s.drawerPhase {
+	case drawerGone:
+		if !s.drawerOpen {
+			return false
+		}
+		// 刚开：面板从窗口外面滑进来。
+		s.drawerPhase = drawerIn
+		return true
+	case drawerIn, drawerShown:
+		if !s.drawerOpen {
+			s.drawerPhase = drawerOut
+		}
+	case drawerOut:
+		if s.drawerOpen {
+			s.drawerPhase = drawerIn
+		}
+	}
+	return false
+}
+
+// viewQueueHeader 是顶上那一条：标题 + 条数 + 定位 + 清空。两个键只在队列非空时才摆
 // （Biu 的 `Boolean(pureList?.length) && …`）。
 //
 // 字号照上游（`music-playlist-drawer/index.tsx:131-133`）：标题是 `h3`，也就是
 // `text-lg` = 18 / 400（Preflight 把标题字重重置成 inherit，不是加粗）；条数是
 // 同一处的 `text-sm` = 14。原来这里是 15 / 700 和 12——标题小一号还重两档，读起来
 // 像一句标语。
+//
+// ⚠️ **条数要紧跟标题**（上游那是一个 `h3` 里的 `span`，中间没有空隙）：原来
+// 它是标题旁边一个独立的 Text，而标题那一格 `.Grow(1)`——于是它被推到面板最右边，
+// 离标题 192 px，读起来像「播放列表」和另一个控件各说各的。
 func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 	rows := s.queueRows
 
 	ui.Row(c).Key("queue-header").Height(queueHeaderHeight).FillWidth().
 		PaddingY(space.Px10).PaddingX(space.Px12).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "播放列表").FontSize(scale.Font(c, scale.Size18)).TextColor(t.Text).Grow(1)
+		// 标题和条数是**一个**东西：上游是 `<h3>播放列表<span …>({n})</span></h3>`
+		// （`music-playlist-drawer/index.tsx:131-133`），条数紧跟在标题后面、
+		// 中间没有空隙，读起来是「播放列表(3)」。
+		//
+		// ⚠️ **原来条数是标题旁边一个独立的 Text，而标题那一格 `.Grow(1)`**——
+		// 标题把剩下的地方吃掉，条数于是被推到面板最右边（实测离标题 192 px，
+		// 紧挨着「定位 / 清空」两枚图标）。这里把两样摆进**同一格**：基线对齐
+		// （上游那是同一行文字里的一个 span，基线本来就齐），字号还是 18 / 14。
+		ui.Row(c).AlignItems(ui.Baseline).Gap(space.None).Children(func() {
+			ui.Text(c, "播放列表").FontSize(scale.Font(c, scale.Size18)).TextColor(t.Text)
+			if len(rows) == 0 {
+				return
+			}
+			ui.Text(c, "("+strconv.Itoa(len(rows))+")").FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted)
+		})
 		if len(rows) == 0 {
 			return
 		}
-		ui.Text(c, "("+strconv.Itoa(len(rows))+")").FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted)
+		// 剩下的地方让给两枚图标——上游是 `justify-between` 的右半边。
+		ui.Spacer(c)
 
 		// 逐字照 Biu 那一段（`components/music-playlist-drawer/index.tsx:137-141`）：
 		// 两个 16px 的 `IconButton`（`RiFocus3Line` / `RiDeleteBinLine`）各带
@@ -227,25 +530,82 @@ func (s *Shell) viewQueueBody(c *ui.Context, t *ui.Theme) {
 // 「定位当前播放」滚到的 `targetIndex * 64` 靠的就是这个定值。
 func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme) {
 	rows := s.queueRows
-	playing := s.playingIdentity()
+	// ⚠️ **这一帧只取一次快照**（`viewMain` 那条规矩：两次取的话两者之间状态
+	// 可能变了，而画出来的是两份不同的状态）。「当前这一首」和「停住了」都从
+	// 这一份里读。
+	st := s.app.Snapshot()
+	playing := s.playingIdentity(st)
 	// 「正在放的那一行」在**建列表之前**找出来，不要在每一行的回调里找：那是一帧
 	// 里 len(rows) 次全表扫，队列长一点就是几万次判重标识的比较，而每帧都来一遍。
 	cur := currentRow(rows, playing)
+	// ⚠️ **状态写在那一行自己身上**（`queueRow.state`），不另开一个变量：这个
+	// 闭包每帧建一次，而它捕获的每一个变量都占闭包结构体的一个位置——多一个
+	// 变量就是多一个指针，尺寸类跳一级，**每帧多 16 个字节**（票 #319 的验收：
+	// 每帧分配不许涨）。
+	//
+	// ⚠️ **「停住了」压过「当前」**：当前那一行停住之后，它要说的话是「停住了」，
+	// 不是「正在放」——那正是这一票要治的那一处（停住之后那一行仍高亮成
+	// 「正在播放」，和暂停**一模一样**，用户在界面上分不出这两件事）。
+	//
+	// ⚠️ **别的行谈不上停住**：它们压根没在放，所以只有当前那一行会被改。
+	if cur >= 0 {
+		rows[cur].state = queueRowCurrent
+		if st.Stopped {
+			rows[cur].state = queueRowStopped
+			// ⚠️ **两种停住要分得开**（票 #352）：「用户按了停止」和「队列自己
+			// 走完了」在播放器那一边落在**同一档**上，而用户要分的是两件事——
+			// 队列里还有歌，还是没有下一首了。
+			//
+			// 判据和播放条上那一句是**同一个**（`app.State.QueueFinished`），
+			// 所以两处不会对同一件事说两句不同的话。
+			if st.QueueFinished {
+				rows[cur].state = queueRowDrained
+			}
+		}
+	}
 
 	// 🔴 铁律四：Key 每一帧都重装，装的是这一首自己的判重标识。
 	// ⚠️ 别改成行号：那正是实测踩过的坑（前面删掉一行，后面所有行的状态整体
 	// 错配，抽屉上表现为「正在播的那首」高亮到了旁边那一行）。
-	s.queueList.Key = func(i int) any { return rows[i].key }
+	// ⚠️ **身份是预先装箱好的那一份**（`s.queueRowKeys`）：理由见
+	// `shell.go` 里那个字段的注释（票 #313）。
+	s.queueList.Key = func(i int) any {
+		return s.queueRowKeys.At(i, rows[i].key, rowkey.Identity)
+	}
 	// Label 是这一行给无障碍和「打字选中」用的名字。
 	s.queueList.Label = func(i int) string { return rows[i].item.Title }
 
+	// 落点先清掉：**每一行自己记**（见下面 viewQueueRow 里那几句
+	// PointerPosition），指针不在任何一行上时它就该是「没有落点」。
+	s.queueDropAt = -1
+
 	e := ui.List(c, &s.queueList, len(rows), func(i int) {
-		s.viewQueueRow(c, rows[i], i == cur, t)
+		s.viewQueueRow(c, rows[i], i, t)
 	}).
 		// 滚动位置写进自己的句柄，「定位当前播放」改的就是它（ScrollTo 带动画）。
 		TrackScroll(&s.queueScroll).
 		Grow(1).FillWidth()
 	s.trackScrollbar(e)
+
+	// 这一列是**拖动的落点**（框架把落点交给指针底下最里层那个肯收拖动值的
+	// 元素——行里的封面、字、⋯ 都不收，所以收到的是这一列）。
+	//
+	// ⚠️ **问一次，不要每行问一次**：框架那两样（Drop / DragOver）每问一次都
+	// 要新建一个闭包（那个闭包要抓住类型），而队列抽屉一屏有十来行——每行每帧
+	// 问一次就是每帧二十几次分配（见 framebudget_test.go，那一档的上限是 50
+	// 次）。问一次是两次（这里两行），问每一行就是二十六次。
+	//
+	// ⚠️ **Drop 读到的是「刚刚落下」那一次**：这一句在列表建完之后才问，而框架
+	// 是在建列表的过程中把落点交给这一列的——问得晚一帧没关系，落下那一次
+	// 记在元素的状态里，下一帧还在。
+	if v, ok := ui.Drop[*queueDragValue](e); ok {
+		s.queueDrop(v)
+	}
+	// 有东西正被拖着经过这一列：拖着的时候要画那条插入线。
+	s.queueDragging = false
+	if _, ok := ui.DragOver[*queueDragValue](e); ok {
+		s.queueDragging = true
+	}
 }
 
 // currentRow 是「正在放的那一首」在抽屉里的行号，没有是 -1。
@@ -257,7 +617,10 @@ func currentRow(rows []queueRow, playing string) int {
 		return -1
 	}
 	for i, r := range rows {
-		if id := r.item.Identity(); id != "" && id == playing {
+		// ⚠️ **用行上记好的那一份**（`r.id`）：现算的话每帧每一行一次字符串拼接
+		// （`Item.Identity()` 拼的是「local:」+ 路径），而这一份在 `queueRowsFor`
+		// 里已经算好、而且是记好的（票 #339）。
+		if id := r.id; id != "" && id == playing {
 			return i
 		}
 	}
@@ -268,7 +631,7 @@ func currentRow(rows []queueRow, playing string) int {
 // 时都是空串——这两个情形必须一样：认不出的项之间身份都是空串，拿它去比会让抽屉
 // 一开就有一行莫名高亮。
 //
-// ⚠️ 判据是**队列的当前项 **加**「确实有歌在放」**（`Snapshot().HasTrack`），
+// ⚠️ 判据是**队列的当前项 **加**「确实有歌在放」**（`State.HasTrack`），
 // 不是光看队列的当前项。光看当前项的话：删掉正在放的那首、而下一首打不开时
 // （`App.playNextAfterCurrent` 会停掉播放，但队列的当前项已经落到下一首了），抽屉
 // 会把**一首放不出来、也没在放**的歌涂成正在放，播放条上却是空的——界面说的和它做
@@ -276,8 +639,12 @@ func currentRow(rows []queueRow, playing string) int {
 //
 // 队列的**下标**不动是有意的：停在那儿之后按「下一首」能从它后面接着走，点那一行
 // 也能重试（`App.PlayAt`）。丢的是「它在放」这件事，不是「我们走到哪儿了」。
-func (s *Shell) playingIdentity() string {
-	if !s.app.Snapshot().HasTrack {
+//
+// ⚠️ **它认的是「当前这一首」，不是「此刻在响」**：暂停着的那一首照样认得出
+// （上游 `isSame(playItem, item)` 也是这么认的）。「停住了」是另一档，见
+// `queueRowState`。
+func (s *Shell) playingIdentity(st app.State) string {
+	if !st.HasTrack {
 		return ""
 	}
 	cur, ok := s.app.Queue().Current()
@@ -292,31 +659,69 @@ func (s *Shell) playingIdentity() string {
 // ⚠️ 行高定在 64（Biu 的 RowHeight），**内容按封面 48 + 上下各 8 摆进去**。
 // 别在这里改内边距：改了的话行高和 `targetIndex*64` 就不一样了，「定位当前
 // 播放」会停在差几像素的地方——不难看出来，但用户每次按都差一点。
-func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Theme) {
+func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
+	// 那一行处在哪一档（正在放 / 停住了 / 普通）——写在行自己身上，见
+	// `queueRow.state`。
+	state := row.state
 	rowEl := ui.Column(c).Key(row.key).Grow(1).Height(queueRowHeight).
 		Padding(queuePadY, queuePadX).Radius(t.Radius).AlignItems(ui.Stretch)
 	// 悬停要读在 Children 之前：指针是在布局那一步才知道落在哪儿的。
 	hovered := rowEl.Hovered()
 	switch {
-	case playing:
-		// Biu 的 `variant="flat" color="primary"`——**flat，不是实心**。
+	case state == queueRowCurrent:
+		// 上游那一行走的是 `variant="flat" color="primary"`
+		// （`music-playlist-drawer/list-item.tsx:32`）——HeroUI 的 flat+primary
+		// 展开是 `bg-primary/20 text-primary-600`，也就是**主色 20% 那一层淡底**
+		// （浅色下落在面板底 #ffffff 上是 #d2f7df，上游实图那个数）。
 		//
-		// ⚠️ **这一段原来是 `Background(t.Accent)`**（一整块实心主色，383×64），
-		// 而紧挨着的注释写着上游是 flat：注释和代码对不上（AGENTS §7）。实心那一版
-		// 也和 `DESIGN.md` §四 2026-10-22 拍板的那一条相反——「唯一剩下的主色
-		// 高亮是『正在播放』那一行：flat（主色当字），不是实心」。
+		// 那一层淡底是**状态识别**：一眼看出哪一首在放，比中性灰好认（票 #294 /
+		// 报告 §1 的 S-11，2026-10-24 拍板按上游改）。DESIGN §七保护的是「**主色
+		// 当字色**的对比度」，不是「主色当底色」——§七 不该被扩大解释。
 		//
-		// 所以这里走 `flatCurrent`（和侧栏菜单当前项、左栏那三处同一套）：底是
-		// 中性灰，字是主色（浅色下是压深的那一档，见下面 `playlistTextColor`）。
-		rowEl = flatCurrent(c, rowEl)
+		// ⚠️ **不是实心主色底**：实心那一档是「被选中的选项」（`flatSolid`），
+		// 票 #197 刚把列表选中行的实心主色底去掉。这一档说的是「这一首在放」。
+		//
+		// ⚠️ **这一格不走 `flatCurrent`**：那个是「当前在哪」（侧栏菜单当前项、
+		// 左栏那三处）共用的中性灰底，改它会把侧栏一起改掉。
+		//
+		// 配方在 `playingrow.go`（**两个抽屉共用一份**：分集抽屉的「正在放」那一
+		// 行是同一档，见 `partdrawer.go` 的 `viewPartRow`）。
+		rowEl = rowEl.Background(playingRowBg(t)).TextColor(playingRowText(t))
 	case hovered:
 		// 悬停要有反应：这一行点得动（跳过去放它），没有反馈用户不知道它是能点的。
 		rowEl = rowEl.Background(t.SurfaceHover)
 	}
+	// 这一行是**拖动源**：拖它就是重排队列（见 queue_drag.go）。
+	//
+	// ⚠️ **拖动值是指针**：框架把拖动值装进 `any`，装指针不分配。
+	rowEl = rowEl.Drag(s.queueDragFor(at, row))
+	// 拖着的那一行半透明——框架那一套也是这么画的（见 mygo/ui/list.go 的
+	// reorder）：行还在原处，而跟着指针走的是另一份拷贝。
+	if rowEl.Dragging() {
+		rowEl = rowEl.Opacity(0.4)
+	}
+	// 指针在这一行上吗？落点就记在这儿。
+	//
+	// ⚠️ **用 PointerPosition 而不是框架的 DragOver**：DragOver 每问一次都要
+	// 新建一个闭包，而每一行每帧都要问一次（见上面那段）。
+	//
+	// ⚠️ **记的是「指针在这一行的哪一半」**：上半是「挪到这一行之前」，下半是
+	// 「挪到下一行之前」（最后一行就是队尾）。
+	if _, py, over := rowEl.PointerPosition(); over {
+		s.queueDropAt = at
+		s.queueDropUpper = py < rowEl.Bounds().H/2
+	}
+	// 拖着的时候在落点那一行画一条插入线：挪到哪儿得看得见。
+	//
+	// ⚠️ **只在拖着的时候画**：那个闭包是每帧一次分配（它要抓住「上半还是
+	// 下半」），而没在拖的时候它没有用。
+	if s.queueDragging && s.queueDropAt == at {
+		s.queueDropLine(at, rowEl, t.Accent)
+	}
 
 	rowEl.Children(func() {
 		ui.Row(c).Grow(1).FillHeight().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-			s.viewQueueCover(c, row.item, playing, hovered)
+			s.viewQueueCover(c, row.item, state == queueRowCurrent, hovered)
 			// 歌名和来源两行（Biu 的 `space-y-1`，这里 Gap(2)）竖着堆，居中放在
 			// 48 那张封面旁边。
 			//
@@ -325,12 +730,15 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 			// 那一档（歌名 16 / UP 14）。这里原来是 15 / 12，副题比列表行的 UP 名
 			// 还小一档，同一列两种刻度。
 			ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
-				ui.Text(c, row.item.Title).FontSize(scale.Font(c, scale.Size16)).
-					TextColor(playlistTextColor(t, playing)).SingleLine()
-				// 副题两态一样：次要色。**正在放那一行靠歌名说话**（主色当字），
-				// 副题再染一遍主色就成了两处都在喊。
-				ui.Text(c, itemSubtitle(row.item)).FontSize(scale.Font(c, scale.Size14)).
-					TextColor(t.TextMuted).SingleLine()
+				ui.Text(c, tclean.Clean(row.item.Title).Title).FontSize(scale.Font(c, scale.Size16)).
+					TextColor(playlistTextColor(t, state)).SingleLine()
+				// 副题两态不一样：正在放那一行按**它自己那层淡底**重算（见
+				// `playlistSubtitleColor`），别的行是次要色。
+				//
+				// ⚠️ **正在放那一行不跟着染主色**：主色当字是**歌名**那一档的活
+				// （上游 `text-primary-600`），副题再染一遍就成了两处都在喊。
+				ui.Text(c, queueRowSubtitle(row.item, state)).FontSize(scale.Font(c, scale.Size14)).
+					TextColor(playlistSubtitleColor(t, state)).SingleLine()
 			})
 			// Biu 的那一颗「⋯」是个 DropdownTrigger。这里给它挂系统的菜单
 			// （Element.Menu），点它和右键这一行是同一份菜单——`queueMenu` 只
@@ -369,7 +777,7 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, playing bool, t *ui.Th
 func (s *Shell) viewQueueCover(c *ui.Context, item app.Item, playing, hovered bool) {
 	t := c.Theme()
 	ui.Row(c).Width(queueCoverSize).FillHeight().Children(func() {
-		imgcache.View(c, s.images, item.Cover, queueCoverSize, queueCoverSize)
+		imgcache.ViewTitled(c, s.images, item.Cover, item.Title, queueCoverSize, queueCoverSize)
 		if playing || !hovered {
 			return
 		}
@@ -391,25 +799,69 @@ func (s *Shell) viewQueueCover(c *ui.Context, item app.Item, playing, hovered bo
 	})
 }
 
-// playlistTextColor 是正在放的那一行里**歌名**的颜色。
+// playlistTextColor 是那一行里**歌名**的颜色。
 //
-// 正在放的那一行是 **flat**（中性灰底 + 主色当字，见上面），所以歌名取的是
-// `flatCurrentText` 那一档——**和那一格的底是同一个数**：深色下是主色本身，浅色下
-// 是从主色现算的、压到 ≥4.5:1 的那个变体（亮绿压浅底只有 1.4:1，读不出来）。
+// 正在放的那一行是**淡主色底 + 主色当字**（配方见 `playingrow.go`），所以歌名
+// 取的是 `playingRowText` 那一档——**按那一格的底算出来的那一档**。
+//
+// ⚠️ **停住的那一行取次要色**（票 #319）：它已经不高亮了（不高亮才成其为
+// 「停住了」），而歌名再是主色的话，那一行看上去仍像在放——那正是这一票要
+// 治的那一处。
 //
 // ⚠️ **和列表行 / 网格卡片那一档不是同一个数**（`widgets/list` 的 `rowColors`
 // 那一档是 `ink.AccentOn`：它按**页面底色**算，浅色下更浅一点）。两处都是
-// 「主色当字，不是实心底」，但压深时按的底不同——这一行的底是**中性灰**，比
-// 页面底色暗一档，所以按页面底色算出来的那个变体（#117936）压在上面差一点
-// （4.03:1，差的那一档就是「按中性灰重算」的理由）。
+// 「主色当字，不是实心底」，但压深时按的底不同——这一行的底是**淡主色**，
+// 比页面底色暗，所以按页面底色算出来的那个变体压在上面差一点（4.03:1）。
 //
 // 差这一点不会有用户看得出来，但**判据要按各自的底算**：这一行的字是**自己
 // 画的**（不继承父元素），底换了字不跟着换就是「底换了、字没换」。
-func playlistTextColor(t *ui.Theme, playing bool) ui.Color {
-	if playing {
-		return flatCurrentText(t, true)
+func playlistTextColor(t *ui.Theme, state queueRowState) ui.Color {
+	switch state {
+	case queueRowCurrent:
+		return playingRowText(t)
+	case queueRowStopped, queueRowDrained:
+		return t.TextMuted
 	}
 	return t.Text
+}
+
+// playlistSubtitleColor 是歌名下面那一行（来源）的颜色。
+//
+// 不是正在放的那一行：次要色（`t.TextMuted`）。
+//
+// 正在放的那一行：**按它自己那层淡底重算**——淡绿底比中性灰亮，次要色原样
+// 压上去只有 4.17:1（不到 WCAG 正文的 4.5:1；改之前那块中性灰底上更只有
+// 3.53:1）。重算之后是 **4.55:1**（浅色 #6b6b74），深色下原样就够（4.65:1）。
+//
+// ⚠️ **不是主色**：主色当字是**歌名**那一档的活（上游 `text-primary-600` 只
+// 管那一个），副题再染一遍就成了两处都在喊。
+func playlistSubtitleColor(t *ui.Theme, state queueRowState) ui.Color {
+	if state == queueRowCurrent {
+		return ink.Ensure(t.TextMuted, playingRowBg(t), 4.5)
+	}
+	return t.TextMuted
+}
+
+// queueRowSubtitle 是歌名下面那一行（票 #319，票 #352 补上「两种停住」）。
+//
+// ⚠️ **停住的那一行说的是「停住了」，不是它的来源**：来源是这一首的属性，
+// 而「停住了」是**此刻的状态**——而这一行此刻正被用户盯着看「为什么没声了」。
+// 来源在别的行上还在，而这一刻用户要的是状态。
+//
+// ⚠️ **普通那一行仍然是来源**：那一行没在放，「停住了」对它没有意义。
+//
+// ⚠️ **两种停住说得不一样**（票 #352）：用户按了停止说「已停止」，队列自己走完
+// 了说「这一串放完了」——**和播放条上那一句是同一套判据**
+// （`app.State.QueueFinished`）。原来这一档一律说「已停止」，于是队列走完时
+// 同一屏上两句不同的话：播放条说「这一串放完了」，抽屉里说「已停止」。
+func queueRowSubtitle(item app.Item, state queueRowState) string {
+	switch state {
+	case queueRowStopped:
+		return "已停止"
+	case queueRowDrained:
+		return "这一串放完了"
+	}
+	return itemSubtitle(item)
 }
 
 // itemSubtitle 是歌名下面那一行。Biu 摆的是 UP 主名，我们这一层还没有那个字段，

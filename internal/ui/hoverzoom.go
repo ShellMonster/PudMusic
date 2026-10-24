@@ -47,7 +47,12 @@ const (
 	// `duration-300`（`user-profile/grid-card/index.tsx:26`）。
 	//
 	// 另两处没写时长，走的是 Tailwind `transition-transform` 的默认那一档
-	// （`cubic-bezier(0.4, 0, 0.2, 1)`，也就是 `EaseInOut`）。
+	// （`cubic-bezier(0.4, 0, 0.2, 1)`）。
+	//
+	// ⚠️ **那条曲线不是 `ui.EaseInOut`**：实算（同一个 mygo v0.6.3）——
+	// t=0.25 时上游那条走 23.7%、`ui.EaseInOut` 只走 6.3%；t=0.5 时是
+	// 77.6% 对 50.0%。**差得很远**（这条由 `hoverzoom_test.go` 的
+	// `TestTheHoverZoomCurveIsNotTheUpstreamOne` 钉着）。
 	hoverZoomTime = 300 * time.Millisecond
 )
 
@@ -56,9 +61,25 @@ const (
 // on 是**这一帧**指针在不在它上面。key 是这一格的身份：**每一处都要给自己的**
 // ——两处用同一个 key 的话它们会共用一份动画状态（一个放大另一个跟着放大）。
 //
-// ⚠️ **缓动用 EaseInOut**：Tailwind 的 `transition-transform` 默认那一档就是
-// `cubic-bezier(0.4, 0, 0.2, 1)`（先慢—快—慢）。框架 `AnimateTo` 的默认是
-// ease-out（先快后慢），那一档在这儿看着是「弹」一下而不是「涨」上去。
+// ⚠️ **缓动用 EaseInOut**：框架 `AnimateTo` 的默认是 ease-out（先快后慢），
+// 那一档在这儿看着是「弹」一下而不是「涨」上去——所以这一处用起步慢、收尾稳
+// 的 ease-in-out。
+//
+// ⚠️ **这一处不跟统一曲线**（票 #292 定的，DESIGN.md §五 那一节记着）：它是
+// **指针跟随**的连续动画，不是点击触发的过渡——手册⓪ 反对 ease-in 的是
+// 「我不再是被动的观看者，而是主动的操作者」那一种（关弹窗、点按钮）；指针停
+// 上去时放大属于「非交互动画」，手册自己写着「交互动画和非交互（视觉）动画
+// 是有差异的」。ease-in-out 那个起步慢、收尾稳的手感正好跟住指针。
+//
+// （另外两处也不跟统一曲线：主 Tab 滑块走弹簧、音量旋钮那两处 150ms 的交叉
+// 淡入走框架默认的 `EaseOut`——见 DESIGN.md §五《逐处》表外那一段。）
+//
+// ⚠️ **我们这条也不是上游那条**：上游那两处没写时长，走的是 Tailwind
+// `transition-transform` 的默认档 `cubic-bezier(0.4, 0, 0.2, 1)`，而我们用的是
+// `ui.EaseInOut`（框架那条对称三次曲线）——**两者差得很远**（t=0.5 时 77.6% 对
+// 50.0%，见上面 `hoverZoomTime` 那一段）。**这是一个已知偏离**：票 #292 裁决
+// 这一处不动（理由如上），但要「精确复刻上游」的话写的是
+// `ui.CubicBezier(0.4, 0, 0.2, 1)`，**观感会明显不一样**。
 func hoverZoom(c *ui.Context, e ui.Element, key string, on bool) ui.Element {
 	target := float32(1)
 	if on {

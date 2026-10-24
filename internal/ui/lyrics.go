@@ -56,6 +56,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -140,13 +141,22 @@ const lyricLineTransition = 300 * time.Millisecond
 // lyricLineAnim 就是那段过渡。
 //
 // ⚠️ **Ease 留空 = `ui.EaseOut`**（`mygo/ui/motion.go:17` 与 `widgets.go:98`），
-// 和上游那个 `ease-out` 是同一条三次曲线。写成 `ui.Smooth`（零值）会变成 500ms
+// 那是框架那条三次曲线 `1-(1-t)³`。写成 `ui.Smooth`（零值）会变成 500ms
 // 的弹簧——那是滚到中间那段用的东西，不是行样式这段。
+//
+// ⚠️ **它也不是上游那个 `ease-out`**：上游（CSS）那个是
+// `cubic-bezier(0, 0, 0.58, 1)`，实算 t=0.25 时一条走 57.8%、另一条走 37.8%
+// ——**两条不是一个东西**（框架里 `ui.EaseInOut` 与上游那条
+// `cubic-bezier(0.4,0,0.2,1)` 的差别更大，见 `hoverzoom.go` 那儿记着）。
+//
+// ⚠️ **这里显式写了曲线**（票 #292）：全应用走**一条统一曲线**
+// （`motion.Unified`），上游那个 `ease-out` 只是上游的默认值，不是这一处的
+// 出处。时长 300ms 仍然抄上游。
 //
 // 「减少动态效果」不用在这里判：`AnimateTo` 自己读 `Preferences.ReduceMotion`，
 // 为真时第一帧就落到目标上（`mygo/ui/motion.go:322-330`）。DESIGN.md 的
 // 「减少动态效果」那一节要的就是这个。
-var lyricLineAnim = ui.Animation{Duration: lyricLineTransition}
+var lyricLineAnim = ui.Animation{Duration: lyricLineTransition, Ease: motion.Unified}
 
 // lyricPresenceKey 是每一行那个 0/1 的「在唱」值在节点上的键。
 //
@@ -197,6 +207,13 @@ const (
 type lyricStyle struct {
 	// color 是歌词的字色。正在唱的那一句也是它，只是字号和不透明度不同。
 	color ui.Color
+	// muted 是**说明性文字**的字色（那一句「歌词来自 B 站」）。
+	//
+	// ⚠️ **它不是 `color` 的淡版**：满屏那一屏的字色是满屏自己的前景色
+	// （白 92% / 黑 92%，跟着底走），而淡一档的那个是 `fullForeground` 给的
+	// 第二档（见 `fullplayer_lyrics.go`）。用正文色画说明句的话，满屏那一屏
+	// 上它是**最亮**的一行——比正在唱的那一句还抢眼。
+	muted ui.Color
 	// fade 是上下那两条遮罩渐隐到的颜色。
 	fade ui.Color
 	// area 是歌词区那一块的键（铁律四）。
@@ -206,9 +223,16 @@ type lyricStyle struct {
 	// center 是「每一行**居中**」还是「每一行左对齐」。
 	//
 	// ⚠️ **迷你播放器那一页是左对齐**（一页那么宽，左对齐读起来是一张歌词纸），
-	// **满屏那一屏是居中**（那一列有六百多宽，左对齐的话字全贴在左边，右边空出
-	// 一大块，看着像没画完）。
+	// **满屏那一屏跟着上游**：封面开着的时候左对齐（上游 `centered={!showCover}`），
+	// 封面关掉的时候居中（那一栏是整窗宽，居中才不空）。
 	center bool
+	// padX 是歌词那一列左右那一份内边距（内容盒与每一行各一份）。
+	//
+	// ⚠️ **满屏那一屏给 0**：上游的歌词容器是 `px-12 py-24`，行本身**没有**左右
+	// 内边距（`components/lyrics/index.tsx:331` 只有 `py-2`），于是左对齐的那些
+	// 句**左沿就咬在内容盒的左沿**（1200 宽的窗口上是 x=648）。
+	// 迷你播放器那一页给 `lyricsPadX`（12）——那一页是我们自己的排版（歌词纸）。
+	padX float32
 	// mask 是「按上游那条遮罩的语义，**逐行**淡出」那一档。
 	//
 	// ⚠️ **上游那条 `maskImage` 是按容器的上下沿淡的**（`index.tsx:357-360`：
@@ -225,6 +249,19 @@ type lyricStyle struct {
 	// 正是离它最远的那几句**，而它们会被算成「远」而全灭——用户看到的是一整列
 	// 空白（评审抓到的那一条）。
 	mask bool
+	// bar 是正在唱那一句左边的强调色竖线（设计规范 v0.1 §7.5），只在左对齐时画。
+	bar bool
+	// overlay 是画在**滚动容器里面**的那一层（满屏那一屏右下角那三枚旋钮）。
+	//
+	// ⚠️ **它必须在滚动容器里面，不能是它的兄弟**：框架认「滚轮滚哪一层」是
+	// 顺着**命中链**（指针底下的那个元素，再一层往上）找第一个能滚的——链上没有
+	// 滚动容器，滚轮就什么也不做。挂在兄弟上时，链上是「旋钮列 → 歌词区」，
+	// 滚轮落在旋钮列上（包括两枚之间的缝）就**滚不动歌词**了。
+	//
+	// ⚠️ **绝对定位的孩子不跟着内容滚**（`mygo/ui/layout.go` 的 `layoutScroll`：
+	// 绝对定位的孩子按父节点的原点摆，不加滚动偏移），所以它挂在滚动容器里面
+	// 也不会被歌词带着走。
+	overlay func(c *ui.Context)
 }
 
 // lyricFadeStop 是渐变上的一个点：位置（在**那一条带子**里从 0 到 1）和盖住的
@@ -526,9 +563,11 @@ func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Dura
 	t := c.Theme()
 	s.viewLyricLines(c, lv, snap, active, lyricStyle{
 		color: t.Text,
+		muted: t.TextMuted,
 		fade:  t.Background,
 		area:  lyricsAreaKey,
 		ns:    lyricNSPage,
+		padX:  lyricsPadX,
 	})
 
 	// 右下角浮着的那一列旋钮。⚠️ **偏移与字号画在没有歌词的时候不画**（传下去的
@@ -564,6 +603,8 @@ func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSna
 
 	ui.Column(c).Key(st.area).Grow(1).FillWidth().AlignItems(ui.Center).
 		Children(func() {
+			// 这一份歌词是**自动来的**还是**搜来的**：一句说明（见 lyricOriginText）。
+			s.viewLyricOrigin(c, snap, st)
 			// 上游那一条 `max-w-4xl` + 居中（`index.tsx:352-355`）：歌词不贴着
 			// 窗口边，中间空出一段。
 			scroll := ui.Scroll(c).Grow(1).FillWidth().MaxWidth(lyricsMaxWidth).
@@ -592,13 +633,19 @@ func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSna
 				// 的 CSS 那一套）。写成 `Padding(0, padX, pad, pad)` 的话上面那份
 				// 居中留白跑到**左**边去了：第一句贴在顶上，而且越往下越往左缩。
 				//
-				// ⚠️ **`AlignItems(ui.Center)` 只在满屏那一屏给**：迷你播放器那一页
+				// ⚠️ **每一行都收成字那么宽**（`AlignItems(ui.Start)`）：不收的话
+				// 那一行永远是整列那么宽——**框**铺满，于是「量这一行有多亮」量到的
+				// 是框里的一切（浮在上面的旋钮、别的控件…），而不是那一句字。满屏
+				// 那一屏右下角浮着三枚旋钮（白的，236），框一铺满就量进那一行里去了。
+				//
+				// ⚠️ **`AlignItems(ui.Center)` 只在居中那一支给**：迷你播放器那一页
 				// 的歌词是**左对齐**的（一页那么宽，左对齐读起来是一张歌词纸），
-				// 而满屏那一屏的歌词那一列有六百多宽——左对齐的话字全贴在左边，
-				// 右边空出一大块，看着像没画完。居中的是**每一行**（不是那一列）：
-				// 正在唱的那一句放大 1.5 倍，它在中间那一条上。
+				// 而满屏那一屏的歌词**跟着上游**（封面开着时左对齐、关掉时居中）。
+				// 居中的是**每一行**（不是那一列）：正在唱的那一句放大 1.5 倍，
+				// 它在中间那一条上。
 				content := ui.Column(c).Gap(lyricsLineGap).
-					Padding(pad, lyricsPadX, pad, lyricsPadX)
+					Padding(pad, st.padX, pad, st.padX).
+					AlignItems(ui.Start)
 				if st.center {
 					content = content.AlignItems(ui.Center)
 				}
@@ -610,9 +657,71 @@ func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSna
 						}
 					}
 				})
+
+				// 浮在歌词上面、但**在滚动容器里面**的那一层（满屏那一屏右下角
+				// 那三枚旋钮）。理由见 `lyricStyle.overlay`。
+				if st.overlay != nil {
+					st.overlay(c)
+				}
 			})
 			s.trackScrollbar(scroll)
 		})
+}
+
+// lyricBarW 是当前句左竖线的宽度。
+const lyricBarW = 3
+
+// lyricOriginText 是那一句「这份歌词是**怎么来的**」。
+//
+// # 为什么要有这一句
+//
+// 歌词有两处来路：B 站自己带出来的（取流那一趟顺带回来的）和用户在「找歌词」
+// 里搜来的。用户分不清这两者时，看到一份词会以为「这是应用找来的」——而他下一
+// 次换一首歌时就会去点「找歌词」，尽管这一首**根本不用点**。
+//
+// ⚠️ **空串 = 不知道来路**（老缓存里没有那一栏，见 `lyrics.Entry`），那就不画
+// 这一句——**不知道不该被说成「搜索来的」**，那句话是错的。
+func lyricOriginText(origin string) string {
+	switch origin {
+	case lyrics.OriginBili:
+		return "歌词来自 B 站"
+	case lyrics.OriginSearch:
+		return "歌词来自搜索"
+	}
+	return ""
+}
+
+// viewLyricOrigin 画那一句「这份歌词是怎么来的」。
+//
+// ⚠️ **它画在歌词区的顶上，在滚动容器外面**：放进去的话它会跟着词滚走，而用户
+// 要看的是「这一份」（换歌之后它才变）。
+//
+// ⚠️ **它的宽度和左右留白都跟着歌词那一列走**（`lyricsMaxWidth` 与 `st.padX`）：
+// 左对齐的那一份词是从那一列的左沿开始的，而居中的那一份是从中间开始的——
+// 说明句要跟着一边儿，不然它会飘在词的上面正中，而词在左边。
+//
+// 🔴 **左右留白是歌词那一份的**两倍**：歌词的行有**两层**横向留白——内容列
+// 自己的（`viewLyricLines` 里那个 `Padding(pad, st.padX, pad, st.padX)`）和每一行
+// 自己的（`lyricLine` 的 `Padding(lyricsLinePadY, st.padX)`）——所以**字**是从
+// 两倍留白之后开始的。说明句只加一层的话，它会比歌词的字偏左**一个 `padX`**
+// （迷你播放器那页 12px、满屏那一屏 8px），而这一处的注释说的是「跟着一边儿」。
+func (s *Shell) viewLyricOrigin(c *ui.Context, snap app.LyricsSnapshot, st lyricStyle) {
+	text := lyricOriginText(snap.Origin)
+	if text == "" {
+		return
+	}
+	col := ui.Column(c).FillWidth().MaxWidth(lyricsMaxWidth).
+		Padding(space.None, st.padX*2, space.None, st.padX*2).
+		// 说明句与词之间留一道缝：它们是两件事，贴在一起看着像同一段。
+		Margin(space.None, space.None, space.Px8, space.None)
+	if st.center {
+		col = col.AlignItems(ui.Center)
+	} else {
+		col = col.AlignItems(ui.Start)
+	}
+	col.Children(func() {
+		ui.Text(c, text).FontSize(scale.Font(c, scale.Size12)).TextColor(st.muted)
+	})
 }
 
 // lyricLine 画一句歌词，和叠在它下面的那句翻译。
@@ -627,13 +736,11 @@ func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSna
 func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyrics.Row, fontSize float32, st lyricStyle) ui.Element {
 	line := ui.Column(c).
 		Key(lyricLineKey{ns: st.ns, at: row.At, i: i}).
-		Padding(lyricsLinePadY, lyricsPadX)
-	// ⚠️ **居中那一支不铺满**：铺满了那一行就永远是整列那么宽，字还是左对齐
-	// （`AlignItems` 管的是**行**的位置，不是行**里面**的字）。不铺满的话这一行
-	// 收成字那么宽，于是能被居中。
-	if !st.center {
-		line = line.FillWidth()
-	}
+		Padding(lyricsLinePadY, st.padX)
+	// ⚠️ **这一行不铺满**：铺满了那一行就永远是整列那么宽——**框**里除了那一句
+	// 字还有别的东西（浮在上面的旋钮…），量「这一行有多亮」就量到了它们。
+	// 内容那一列用 `AlignItems(ui.Start)`（左对齐）或 `AlignItems(ui.Center)`
+	//（居中）摆这些行，于是每一行都收成字那么宽（见 `viewLyricLines`）。
 
 	// 「这一句正在唱」这件事在这一行上是一个 0/1 的值，换句时由 300ms 的
 	// ease-out 推过去（`lyricLineAnim`）。
@@ -680,6 +787,12 @@ func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyri
 	// 在容器的哪儿」走——行滑到边缘时被淡掉，滑到中间时全亮。
 	if st.mask {
 		opacity *= lyricMaskAlpha(lyricRelPos(lv.box, line.Bounds()))
+	}
+	if st.bar && presence > 0 {
+		acc := c.Theme().Accent.Alpha(presence)
+		line.DrawOver(func(p *ui.Painter, r ui.Rect) {
+			p.Fill(ui.Rect{X: r.X, Y: r.Y + lyricsLinePadY, W: lyricBarW, H: r.H - 2*lyricsLinePadY}, acc, 1.5)
+		})
 	}
 	return line.Opacity(opacity).Children(func() {
 		ui.Text(c, row.Text).

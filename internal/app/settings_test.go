@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/testproc"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -61,10 +62,26 @@ var biuKeys = []string{
 // **收藏夹的顺序弹回 Biu 给的那个顺序**、以及**播放模式回到 Biu 那边记的
 // 那一档**，Biu 自己的设置一个键都没丢。
 // 这条取舍记在这里，想改主意时先看这一段。
+//
+// ⚠️ **音量和静音（`volume` / `isMuted`）也在这一栏里**，理由同上：它们是 Biu
+// 那个 `play-list` store 里的字段（`biu/src/store/play-list.ts:70,369`），
+// **不在 app-settings.json 里**。而我们**必须**落盘它——不落盘的话，用户为了
+// 不吵把音量调到 20%，重启之后又是 100%（耳机上那是真的惊吓）。
+// 键名照 Biu 的字段名逐字抄（`volume` / `isMuted`）。
+//
+// ⚠️ **「上次听到哪儿」（`playback`）也在这一栏里**，理由同上（它在 Biu 那边是
+// `play-list` store 的 `list` / `playId` 和 `play-progress` 的
+// `localStorage["play-current-time"]`）。而它**尤其**该跟着设置走：它和音量、
+// 播放模式在**同一次原子写**里落盘，三者之间才没有「谁先谁后」的竞态
+// （见 `internal/app/playback_state.go` 文件头那张表）。键名是我们自己的。
 var ourOwnKeys = []string{
 	"sideMenuCollectionOrder",
 	"playMode",
 	"shouldKeepPagesOrderInRandomPlayMode",
+	"volume",
+	"isMuted",
+	"playback",
+	"themePreset",
 }
 
 // TestSettingsKeysMatchBiu 逐字比对键名。
@@ -686,7 +703,7 @@ func childRoundTrip(t *testing.T) {
 // runChild 拉起一次本测试二进制自己。-test.run 让它只跑这一条。
 func runChild(t *testing.T, path, mode string) {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=TestSettingsSurviveAProcessRestart", "-test.count=1")
+	cmd := exec.Command(testproc.Path(t), "-test.run=TestSettingsSurviveAProcessRestart", "-test.count=1")
 	cmd.Env = append(os.Environ(),
 		childEnv+"=1",
 		"BIU_SETTINGS_PATH="+path,
@@ -934,7 +951,11 @@ func mustMarshal(t *testing.T, s app.Settings) string {
 const ourOwnKeysJSON = `{
 	"sideMenuCollectionOrder": {"created": [], "collected": []},
 	"playMode": "loop",
-	"shouldKeepPagesOrderInRandomPlayMode": false
+	"shouldKeepPagesOrderInRandomPlayMode": false,
+	"volume": 1,
+	"isMuted": false,
+	"playback": {"items": [], "current": "", "positionMs": 0},
+	"themePreset": "warm-paper"
 }`
 
 // wantSettings 是「读完一份 Biu 的文件之后应该拿到的那份设置」。

@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 )
 
 // 抽屉那一列的**行身份**（铁律四），在数据这一层钉住。
@@ -27,8 +29,12 @@ func mv(bvid, title string) app.Item {
 func TestQueueRowKeysFollowTheSongNotItsPlace(t *testing.T) {
 	b, c := mv("BV2", "第二首"), mv("BV3", "第三首")
 
-	before := queueRowsFor([]app.Item{b, c})
-	after := queueRowsFor([]app.Item{mv("BV1", "第一首"), b, c})
+	// ⚠️ **两趟共用同一个 memo**：这正是抽屉那一档每帧做的事（队列没变，
+	// memo 自己看得出「数据没换」）。而这里队列变了（队头插了一首），
+	// memo 也自己看得出——**调用方一处都不用记得重建**（票 #339）。
+	ids := &rowkey.Memo[queueRowRaw, queueRowIdentity]{}
+	before := queueRowsFor([]app.Item{b, c}, ids)
+	after := queueRowsFor([]app.Item{mv("BV1", "第一首"), b, c}, ids)
 
 	if len(before) != 2 || len(after) != 3 {
 		t.Fatalf("去重之后 %d 行 / 插了一首之后 %d 行，want 2 / 3", len(before), len(after))
@@ -54,7 +60,8 @@ func TestQueueRowKeysFollowTheSongNotItsPlace(t *testing.T) {
 // at 必须是队里那个位置：点一行、删一行用的都是它，拿行号去调队列就是删错那一首。
 func TestQueueRowsKeepTheFirstOfADuplicate(t *testing.T) {
 	dup := mv("BV1", "第一首")
-	rows := queueRowsFor([]app.Item{mv("BV2", "第二首"), dup, dup})
+	rows := queueRowsFor([]app.Item{mv("BV2", "第二首"), dup, dup},
+		&rowkey.Memo[queueRowRaw, queueRowIdentity]{})
 
 	if len(rows) != 2 {
 		t.Fatalf("去重之后 %d 行，want 2", len(rows))
@@ -73,7 +80,8 @@ func TestQueueRowsKeepTheFirstOfADuplicate(t *testing.T) {
 // 两个空串在 Tester 里当场 panic（重复的 key），真窗口里是两行的状态串在
 // 一处、删一行连着删掉两首。它们的身份退回队列下标。
 func TestQueueRowsGiveUnidentifiableItemsDistinctKeys(t *testing.T) {
-	rows := queueRowsFor([]app.Item{{Title: "还没接来源"}, {Title: "也还没接来源"}})
+	rows := queueRowsFor([]app.Item{{Title: "还没接来源"}, {Title: "也还没接来源"}},
+		&rowkey.Memo[queueRowRaw, queueRowIdentity]{})
 
 	if len(rows) != 2 {
 		t.Fatalf("认不出的项被并成了 %d 行，want 2", len(rows))
@@ -84,6 +92,40 @@ func TestQueueRowsGiveUnidentifiableItemsDistinctKeys(t *testing.T) {
 	// 但它们照样能被认出来是自己那一行：两个不同的键。
 	if rows[0].key != queueRowKey("", 0) || rows[1].key != queueRowKey("", 1) {
 		t.Errorf("身份是 %q / %q，want 按队列下标退回去", rows[0].key, rows[1].key)
+	}
+}
+
+// TestQueueRowsDoNotRebuildTheirIdentityEveryFrame 盯「数据没换就别再算」。
+//
+// 抽屉每一帧都要重建那一列行（`queueRowsFor`），而那一列行带着**两串身份**：
+// 判重标识（`Item.Identity()`）和行身份（`queueRowKey`）。现拼的话每帧每行
+// 两次分配——二十首的队列就是四十来次（票 #339）。
+//
+// 判据是**分配次数**（不是时间）：分配次数不受机器快慢影响（见
+// `internal/ui/framebudget_test.go` 的文件头）。
+//
+// ⚠️ **判据是「比行数还少」，不是「等于几」**：那一遍固定要建的是「一份行 +
+// 一张去重的表」（三两次），而每行那两次是**按行数涨的**。所以「比行数少」
+// 就是「没有每行分配」，而具体是三还是四不写死（map 那几笔是标准库内部的，
+// 换个 Go 版本会变）。
+func TestQueueRowsDoNotRebuildTheirIdentityEveryFrame(t *testing.T) {
+	items := make([]app.Item, 20)
+	for i := range items {
+		items[i] = mv(fmt.Sprintf("BV%d", i+1), fmt.Sprintf("第 %d 首", i+1))
+	}
+	ids := &rowkey.Memo[queueRowRaw, queueRowIdentity]{}
+
+	// 先问一遍：那是冷的（每行的两串身份都要拼一次）。
+	queueRowsFor(items, ids)
+
+	allocs := testing.AllocsPerRun(20, func() {
+		queueRowsFor(items, ids)
+	})
+	t.Logf("热的那一遍：%.0f 次分配（二十行）", allocs)
+	if allocs >= float64(len(items)) {
+		t.Errorf("队列没变的那一遍要分配 %.0f 次，want 少于 %d 次——"+
+			"每一行的身份字符串还在每帧重拼（每行两次：判重标识 + 行身份）",
+			allocs, len(items))
 	}
 }
 

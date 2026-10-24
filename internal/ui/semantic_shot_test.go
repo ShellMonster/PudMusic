@@ -41,7 +41,9 @@ func TestRenderSemanticShots(t *testing.T) {
 			// ② 队列抽屉：左缘那条分隔线，和面板那一层底色。
 			s, dt := shotSpaceShell(t, newUIExplore(t), dark, true, "77")
 			s.drawerOpen = true
-			dt.Frame()
+			// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在
+			// 窗口外面（它从右边滑进来），存下来的图是空的右半边。
+			settleDrawer(t, s, dt)
 			save(t, dir, "71-"+name+"-队列抽屉-分隔线.png", dt)
 
 			// ③ 关注那一页：一张**卡**（上游的 `bg-content1` + `shadow="md"`）——

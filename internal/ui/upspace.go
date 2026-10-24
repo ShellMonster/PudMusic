@@ -39,6 +39,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
@@ -70,24 +71,27 @@ var upTabNames = []string{"动态", "投稿", "收藏夹", "合集"}
 // upSeriesPageSize 是「合集」Tab 一页几条。上游 `series/index.tsx:41` 是 20。
 const upSeriesPageSize = 20
 
-// 头图区的尺寸。Biu 那边是 `h-[200px]`，头图是 200 高那一份
-// （`space-info.tsx:83` 用的 `top_photo_v2.l_200h_img`）。
-// 200 正好塞得下头图 + 头像 + 昵称 + 签名 + 三个统计。
+// 头图区的尺寸（设计规范 v0.1 §7.18，取代上游 Biu 那块压黑的 200 高大头图）：
+// 上面一条横幅（有头图就用头图，没有就是主题色渐变），横幅底部淡进页面底色；
+// 头像压在横幅下沿，名字、签名、统计都写在**页面底色**上，所以字色就是主题的
+// 字色，不再需要为「任意照片 + 白字」算蒙版。
 const (
-	// upHeaderH 是头图区一共多高。Biu 那边是 `h-[200px]`（`space-info.tsx:83`）。
-	upHeaderH = 200
-	// upAvatarS 是头像边长。Biu 那边是 `h-[140px] w-[140px] flex-none shadow-lg`
-	// （`user-profile/space-info.tsx:89`）——**140 是上游的尺寸**，不是「比原来
-	// 大一点」估出来的。
-	upAvatarS = 140
-	// upPad 是头图区的**纵向**内边距，也是 Tab 那一条的左右内边距。Biu 是
-	// `py-4`（`space-info.tsx:83`）和内容区那一圈 `p-4`（`user-profile/index.tsx:130`）。
+	// upHeaderH 是头图区一共多高。
+	upHeaderH = 216
+	// upBannerH 是横幅那一条的高。
+	upBannerH = 132
+	// upAvatarS 是头像边长（外面再套一圈 3px 的页面底色环）。
+	upAvatarS = 88
+	// upAvatarRing 是头像外那圈底色环的宽。
+	upAvatarRing = 3
+	// upAvatarTop 是头像（含环）上沿离头图区上沿的距离：压住横幅下沿 44。
+	upAvatarTop = upBannerH - 44
+	// upPad 是 Tab 那一条的左右内边距（内容区那一圈 `p-4`）。
 	upPad = space.Px16
-	// upPadX 是头图区的**左右**内边距。Biu 是 `px-8`（`space-info.tsx:83`）。
-	//
-	// ⚠️ **不要拿它去改 Tab 那一条**：上游 Tab 外面是 `p-4`（16），头图才是
-	// 32。两处共用一个数的话，Tab 会跟着头图一起往中间缩。
+	// upPadX 是头图区的左右内边距。
 	upPadX = space.Px32
+	// upTextTop 是名字那一列的上沿：横幅下沿再往下 8。
+	upTextTop = upBannerH + 8
 )
 
 // upPathOf 是 mid 这个 UP 的空间地址。
@@ -165,6 +169,13 @@ type upSpace struct {
 	// 这一层原来没有，是这次评审的 fixture 撞出来的。
 	seen map[string]bool
 
+	// rowKeys 是一张 Tab 一份的「记着行身份那一份」（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
+	// （票 #313）。**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头）：
+	// 翻页追加、换 Tab——身份对不上就重算。
+	rowKeys [upTabCount]rowkey.Memo[upRowIdent, any]
+
 	// state 是一张 Tab 一份的列表状态。**不能共用**：MyGo 会在
 	// 「同一个 ListState 被两个 List 显示」时 panic（`ui/list.go` 的
 	// buildList），而共用还会把两张 Tab 的滚动位置搅在一起。
@@ -180,10 +191,15 @@ type upSpace struct {
 	// 不选行，而 ↑ 也回不到侧栏（票 #245 的 E4）。
 	keys [upTabCount]listKeys
 
-	// dropped 是三张 Tab 各丢了几条。**不画在界面上**，但它是「这一页
-	// 一个格子都没有」唯一能说清原因的东西：>0 是「他发的那些我们画不出
-	// 来」，0 是「真的没有」（见 bili/dynamic.go 的文件头）。
-	dropped [upTabCount]int
+	// drops 是三张 Tab 各丢掉的那几条（**按不同的动态记**，见 drops.go）。
+	//
+	// ⚠️ **它不画在界面上**（只有「一个格子都没有」的时候才画一句），但它是
+	// 「这一页一个格子都没有」唯一能说清原因的东西：>0 是「他发的那些我们
+	// 画不出来」，0 是「真的没有」（见 bili/dynamic.go 的文件头）。
+	//
+	// ⚠️ **按类别分开记**：界面上那句话要按类别说，「读不懂」不能被说成
+	// 「形态不认识」（票 #344）。
+	drops [upTabCount]dropTally
 
 	// ── 跨 goroutine 的只有下面这一小摊 ──
 	//
@@ -204,7 +220,17 @@ type upResult struct {
 	// 「这一页全是画不出来的」和「这一页真的没有」靠它分开。
 	sent    int
 	hasMore bool
-	dropped int
+	// drops 是这一页丢掉的那几条（带类别和身份）。
+	//
+	// ⚠️ **身份是给上层去重用的**：B 站翻页会重叠，同一条画不出来的动态在
+	// 两页里各出现一次——按出现次数记，那个数会偏大（票 #344）。
+	drops []bili.DroppedDynamic
+	// dropWhy 是丢掉的理由（人话，一种一句）。**只进日志**，不进界面。
+	//
+	// ⚠️ 「整页一条都不剩」这种失败在界面上完全看不出来（只有一个空列表
+	// 加一个转着的圈），不把理由写进日志，下一个人只能从头再猜一遍
+	// （票 #300 的实测就是 `pub_ts` 变成了字符串）。
+	dropWhy []string
 	err     error
 }
 
@@ -333,19 +359,32 @@ func (p *upPager) stop() {
 // sent 是**这一页 B 站发了几条**（过滤**之前**的条数），hasMore 是它说的
 // 「后面还有」。
 //
-// ⚠️ **「这一页是空的」要按 `sent` 判，不能按「留下了几条」判**：实测踩过——
-// 一页里全是转发的动态（全被丢弃）时留下 0 条，拿 0 去判就成了「到底了」，
-// 后面那一页**永远不会加载**（第二页有一条正常的，卡在第一页上不动了）。
+// # 🔴 「到底了」看的是**入口有没有前进**，不是「这一页有没有东西」
 //
-// 用 `sent` 就分开了：`sent == 0` 是真的没有下一页（再拉是空转，界面永远
-// 转圈），`sent > 0` 而留下 0 条是「这一页我们画不出来，去问下一页」。
+// ⚠️ **一条也不能按「留下 0 条」判到底**（票 #344）：实测踩过——一页里全是
+// 转发的动态（全被丢弃）时留下 0 条，拿 0 去判就成了「到底了」，后面那一页
+// **永远不会加载**（第二页有一条正常的，卡在第一页上不动了）。
+//
+// ⚠️ **反过来，「0 条」也不等于到底**：B 站这一页发了 0 条、而它给的**入口
+// 前进了**，说明后面还有——那就要**继续拉下一页**（票 #344）。真正到底的是
+// 「0 条 + 入口没前进」：再问一次问回来的是同一页（见
+// `bili.DynamicPage.MoreAfter`）。
+//
+// 所以判据是这两个的**或**：「这一页有东西」或者「入口前进了」。
+//
+// ⚠️ **收藏夹 / 合集那两张 Tab 的入口是空的**（它们按页码翻，不给入口），所以
+// 它们仍然靠 `sent > 0` 收口——空页再问是空转。而动态那一张 Tab 的入口是 B 站
+// 给的 offset，`advanced` 就是「它有没有前进」。
 func (p *upPager) adopt(cursor string, sent int, hasMore bool) {
 	p.started = true
 	p.page++
+	// ⚠️ **入口有没有前进**：它是「下一页」的入口，**不透明的串**，不能解析
+	// 也不能数（见 `upPager.cursor` 的注释）。
+	advanced := cursor != "" && cursor != p.cursor
 	if cursor != "" {
 		p.cursor = cursor
 	}
-	p.hasMore = hasMore && sent > 0
+	p.hasMore = hasMore && (sent > 0 || advanced)
 	p.err = nil
 }
 
@@ -518,43 +557,52 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 		return
 	}
 
-	// 头图铺满整块 200 高（上游就是这一块自己的 `bg-cover`，不是「上面一条
-	// 横幅 + 下面一块底色」），头像和信息压在底边。
+	// 横幅 + 压在它下沿的头像 + 写在页面底色上的信息。
 	//
-	// ⚠️ **信息那一行必须是 `Absolute`**：放进 Column 的流里的话，它和头图
-	// 各占一份高度——头像 140 + 上下 16 就是 172，头图只剩 28，画出来是
-	// 一条缝。Absolute 让它压在同一块 200 高上，和上游 `items-end` 一致。
+	// ⚠️ **横幅和信息行都是 `Absolute`**：框架的 Box 是一列，非绝对的子元素往下排；
+	// 不绝对定位的话它们各占一份高度，头像就掉到横幅下面去了。
 	ui.Box(c).Key(key).Height(upHeaderH).FillWidth().Clip().Children(func() {
-		// ① 头图。没设头图的 UP 主占大多数（B 站这时候给的是空对象而不是
-		// 一张空白图），画一块纯色——**别去画 B 站的占位图**，那看着像加载失败。
-		if h.User.Banner != "" {
-			s.spaceFill(c, h.User.Banner, upHeaderH)
-		} else {
-			ui.Box(c).Height(upHeaderH).FillWidth().Background(t.Surface)
-		}
-		// ② 头像 + 昵称 + 签名 + 右边那一排关注和统计。圆角留白与间距照上游：
-		// `px-8 py-4`、头像和文字 `space-x-4`、文字两行 `space-y-2`。
-		ui.Row(c).Key("space-head-info").Absolute().Left(0).Right(0).Bottom(0).
-			Padding(upPad, upPadX).Gap(space.Px16).AlignItems(ui.Center).Children(func() {
-			// 头像带 `shadow-lg`（上游 `space-info.tsx:89` 的 `shadow-lg`）。
-			s.spaceAvatar(c, h.User.Face, upAvatarS, true)
-			ui.Column(c).Gap(space.Px8).Children(func() {
-				// ⚠️ **字重是 500（`weightMedium`），不是 600**（票 #241 / 报告
-				// F-26）：600 在 `DESIGN.md` §二 的刻度里有那一档却没有用途，
-				// 而这三个数字 / 名字正是「比正文重一档」的那一档。理由同
-				// `spaceStat` 那处的注释。
-				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, scale.Size20)).FontWeight(weightMedium).MaxLines(1).Ellipsis("…")
+		// ① 横幅。没设头图的 UP 主占大多数（B 站给的是空对象）：画主题色渐变，
+		// 不画 B 站的占位图（那看着像加载失败）。
+		ui.Box(c).Absolute().Left(0).Right(0).Top(0).Height(upBannerH).Clip().Children(func() {
+			if h.User.Banner != "" {
+				s.spaceFill(c, h.User.Banner, upBannerH)
+			} else {
+				ui.Box(c).Height(upBannerH).FillWidth().LinearGradient(ui.LinearGradient{Angle: 135, Stops: []ui.GradientStop{
+					{Color: t.Background.Mix(t.Accent, 0.7), At: 0},
+					{Color: t.Background.Mix(t.Accent, 0.35), At: 1},
+				}})
+			}
+			// 底部淡进页面底色：横幅不是一块硬边的方块，头像压在上面也不突兀。
+			ui.Box(c).Absolute().Left(0).Right(0).Top(0).Bottom(0).
+				LinearGradient(ui.LinearGradient{Angle: 180, Stops: []ui.GradientStop{
+					{Color: ui.Transparent, At: 0.6},
+					{Color: t.Background, At: 1},
+				}})
+		})
+		// ② 头像 + 名字 + 签名，右边关注和统计。
+		ui.Row(c).Key("space-head-info").Absolute().Left(0).Right(0).Top(upAvatarTop).
+			Padding(space.None, upPadX).Gap(space.Px16).AlignItems(ui.Start).Children(func() {
+			ui.Box(c).Size(upAvatarS+2*upAvatarRing, upAvatarS+2*upAvatarRing).
+				Radius((upAvatarS + 2*upAvatarRing) / 2).Background(t.Background).Center().Children(func() {
+				s.spaceAvatar(c, h.User.Face, upAvatarS, true)
+			})
+			ui.Column(c).Grow(1).Shrink(1).Gap(space.Px4).
+				Margin(upTextTop-upAvatarTop, space.None, space.None, space.None).Children(func() {
+				// ⚠️ **字重是 500（`weightMedium`）**，不是 600（票 #241 / 报告 F-26）。
+				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, scale.Size20)).FontWeight(weightMedium).
+					MaxLines(1).Ellipsis("…")
 				if h.User.Official != "" {
-					ui.Text(c, "认证："+h.User.Official).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+					ui.Text(c, "认证："+h.User.Official).FontSize(scale.Font(c, scale.Size12)).
+						TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 				}
 				if h.User.Sign != "" {
-					// 上游是 `text-sm text-white/80`（`space-info.tsx:110`）：
-					// 14，不是 13。
 					ui.Text(c, h.User.Sign).FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).MaxLines(2)
 				}
 			})
-			ui.Box(c).Grow(1)
-			s.viewSpaceActions(c, sp, h)
+			ui.Box(c).Margin(upTextTop-upAvatarTop, space.None, space.None, space.None).Children(func() {
+				s.viewSpaceActions(c, sp, h)
+			})
 		})
 	})
 }
@@ -569,7 +617,6 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 // ⚠️ 上游的统计**只有这三个**——没有获赞数、没有播放数（`space-info.tsx:31-45`
 // 的 `stats` 表就三行）。这一版照它，不自己加。
 func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
-	t := c.Theme()
 	isSelf := s.app.SelfMid() == sp.mid
 
 	ui.Row(c).Key("space-actions").Gap(space.Px16).AlignItems(ui.Center).Children(func() {
@@ -593,8 +640,8 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 				// 🔴 **没查到就说没查到**。画一个能按的「关注」比不画更糟：
 				// 用户按下去是一次**取关**（B 站对没关注过的人「取关」是成功的），
 				// 于是他更确信自己关注过——而真相是我们压根没读到。
-				ui.Text(c, "关注状态没读到").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-				if flatButton(c, "重试").FontSize(scale.Font(c, scale.Size12)).Clicked() {
+				ui.Text(c, "关注状态没读到").FontSize(scale.Font(c, scale.Size12)).TextColor(c.Theme().TextMuted)
+				if flatButton(c, "重试").FontSize(scale.Font(c, scale.Size12)).TextColor(c.Theme().TextMuted).Clicked() {
 					sp.header.RetryRelation()
 					sp.header.Load()
 				}
@@ -620,8 +667,8 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 				}
 				spaceDivider(c)
 			} else if h.StatFailed() {
-				ui.Text(c, "粉丝数没读到").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-				if flatButton(c, "重试").FontSize(scale.Font(c, scale.Size12)).Clicked() {
+				ui.Text(c, "粉丝数没读到").FontSize(scale.Font(c, scale.Size12)).TextColor(c.Theme().TextMuted)
+				if flatButton(c, "重试").FontSize(scale.Font(c, scale.Size12)).TextColor(c.Theme().TextMuted).Clicked() {
 					sp.header.RetryRelation()
 					sp.header.Load()
 				}
@@ -650,16 +697,23 @@ func (sp *upSpace) follow(yes bool) {
 // 上游是 `font-semibold`，而 600 在 `DESIGN.md` §二 的刻度里**有这一档却没有
 // 用途**——「600 是无主」：没有人能说出这三个数字为什么该是 600。500 才是
 // 仓库里唯一被命名的字重，用途正是「比正文重一档但不到标题那么重」。
+//
+// ⚠️ **字色是白字**（`upHeaderText` / `upHeaderTextDim`）：这一块压在头图区
+// 那张照片上，而头图区**永远是深底**——用主题的正文色的话，浅色主题下就是
+// 深字压深底。
 func spaceStat(c *ui.Context, label, value string) {
-	t := c.Theme()
 	ui.Column(c).Key("space-stat:" + label).Gap(space.Px2).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, value).FontSize(scale.Font(c, scale.Size18)).FontWeight(weightMedium)
-		ui.Text(c, label).FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted)
+		ui.Text(c, label).FontSize(scale.Font(c, scale.Size14)).TextColor(c.Theme().TextMuted)
 	})
 }
 
 // spaceDivider 是统计之间那条竖线：上游 `Divider orientation="vertical"
 // className="h-4"`（`space-info.tsx:136-137`），高 16。
+//
+// ⚠️ **它也是白字那一族**：主题那一档分隔线在浅色下是 #dbdbdb（亮）、在深色下
+// 是 #3f3f46（暗）——后者压在头图区那块深底上几乎看不见。这里是 35% 的白，
+// 两套主题下都看得见（图形只要 3:1）。
 func spaceDivider(c *ui.Context) {
 	ui.Box(c).Width(1).Height(16).Background(c.Theme().Border)
 }
@@ -679,8 +733,25 @@ func spaceName(u app.User) string {
 // `0 4px 6px -4px`，都是 10% 黑）。**只有大号头像带**——上游给 UP 空间头像
 // 那一处写了 `shadow-lg`（`space-info.tsx:89`），列表里那些小头像没有；
 // 全都加上去的话，一排动态的作者头像会各带一圈影，看起来像浮在卡片上。
+//
+// ⚠️ **占位圆是控件那一层**（`t.Surface`）：它画在**页面底**上，而那个底比
+// 页面底暗一档（浅色）/ 亮一档（深色）——占位的头像是一个「洞」。画在**卡片
+// 上**的头像要走 `spaceAvatarWith` 自己给占位色（理由见那里）。
 func (s *Shell) spaceAvatar(c *ui.Context, face string, side float32, withShadow bool) {
 	s.spaceAvatarZoom(c, face, side, withShadow, "", false)
+}
+
+// spaceAvatarWith 是头像，**占位圆的颜色由调用方给**。
+//
+// ⚠️ **画在卡片上的头像要自己给**：卡片那一档（`cardBackground`）在**经典**里
+// 就是 `t.Surface`——占位圆和卡片同一个底，那个圆就**整个看不见**（关注卡的
+// 头像就是这样：卡片底改成卡片那一档之后，占位那个圆不见了，卡片看着是空的）。
+//
+// 给一个「和它所在的那个底差得开」的色就看得见了：关注卡给的是**页面底色**
+//（卡片底下那一层 = 卡片上开了一个洞），而页面底上的那些头像仍然是
+// `t.Surface`（那正是「页面底往文字色推一档」）。
+func (s *Shell) spaceAvatarWith(c *ui.Context, face string, side float32, withShadow bool, placeholder ui.Color) {
+	s.spaceAvatarOn(c, face, side, withShadow, "", false, placeholder)
 }
 
 // spaceAvatarZoom 是 spaceAvatar 加一个「指针移上去放大」。
@@ -693,7 +764,11 @@ func (s *Shell) spaceAvatar(c *ui.Context, face string, side float32, withShadow
 // `hover:scale-105`，加在 `<Avatar>` 上（`dynamic-feed/user.tsx:46`），而 Avatar
 // 整个是圆的——所以圆自己长大 5%。图在框里放大是另一回事（那是封面那一处）。
 func (s *Shell) spaceAvatarZoom(c *ui.Context, face string, side float32, withShadow bool, zoomKey string, on bool) {
-	t := c.Theme()
+	s.spaceAvatarOn(c, face, side, withShadow, zoomKey, on, c.Theme().Surface)
+}
+
+// spaceAvatarOn 是头像的画法本身：占位圆的颜色由调用方给。
+func (s *Shell) spaceAvatarOn(c *ui.Context, face string, side float32, withShadow bool, zoomKey string, on bool, placeholder ui.Color) {
 	box := ui.Box(c).Size(side, side).Radius(side / 2).Clip().Label(face)
 	if withShadow {
 		box = shadow.TailwindLG(box)
@@ -706,7 +781,7 @@ func (s *Shell) spaceAvatarZoom(c *ui.Context, face string, side float32, withSh
 			ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(side, side)
 			return
 		}
-		ui.Box(c).Size(side, side).Radius(side / 2).Background(t.Surface)
+		ui.Box(c).Size(side, side).Radius(side / 2).Background(placeholder)
 	})
 }
 

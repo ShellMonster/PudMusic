@@ -111,11 +111,47 @@ FAIL，逐个包看 `ok`。**它是默认不跑的**（见上），所以它绿�
   ——整包 10 次挂 3 次、单独跑 0 次，差别就在「整包那些堆和 GC 压力」。
   `GOGC=10` 直接造那个压力，一次顶十次。
 - **加压只跑自己改的那几处**（`-run` 过滤），**不要整包跑**。整包 3 次在这台
-  机器上单轮就要 62~298 秒，跑的是同一批既有测试，飘的也是那几条固定的
-  （`TestTheHoverLayerCoversOnlyTheCover`、
-  `TestEveryRouteShowsARealRowOrSaysWhichTicketIsMissing//follow`），
+  机器上单轮就要 62~298 秒，跑的是同一批既有测试，飘的也是那几条固定的，
   **跟这一票的改动无关**；而且同时有几个 agent 在跑的时候机器被占满，
   测出来的结果本身也不作数。**整包扫描是一次性的排查手段，不是每票的验收项。**
+
+  **已知会飘的那几条**（整包跑出来的 FAIL 落在这份名单里的，**不能当回归的
+  证据**；每条后面一句是它为什么飘）：
+
+  - `TestTheSearchBoxSaysThreeDifferentThings`——歌词搜索的**异步态**：源那边
+    真睡 **300ms**，界面这边画一帧就断言「正在搜」，机器一慢那 300ms 先走完，
+    「正在搜」已经不见了（2026-10-24 在本票 HEAD 上亲眼见过一次，机器忙的时候）。
+  - `TestChangingTheDownloadDirectorySaysWhereItTakesEffect`——等的是「改完
+    下载目录之后，界面说出它在哪儿生效」，用的是**共用的那个 10 秒**保险丝，
+    机器一慢就超。**低负载下也复现过**：2026-10-24 整包跑的一轮里（那一轮
+    load 最高 7.04），它就是那一句「等了 10s，说清楚它在哪儿生效 还没发生」。
+
+  **待低负载复核的一条**（看到它红先别当回归，**也别当定论**）：
+
+  - `TestTheQueueDrawerSlideDoesNotAllocatePerFrame`——2026-10-24 在 load 9~21
+    下整包跑，10 轮里飘了 2 次：进场那 12 帧的每帧分配 14.7~15.2，稳态 11.0，
+    超了 **20%** 的余量；**单独跑是绿的**（`-run` 过滤 10 次全绿）。那两遍不
+    满足「load 8 以下才作数」，**低负载下跑过 20 轮也没复现**，所以它只是
+    「待低负载复核」。
+
+  ⚠️ **「飘」和「一直红」是两回事**：这份名单只管**有时红有时绿**的那些。一条
+  **每次都红**的用例是**确定性回归**，**按回归查**——本仓库有过两条（整包 105
+  遍全红的 `TestTheDialogButtonsStayOutlined` 和 `TestEveryHandMadePopupHasAShadow`，
+  票 #228/#229），它们当时**不在**名单里才查得出来。**「在名单里」不等于
+  「不用查」。**
+
+  **曾经记过、现在划掉的两条**：`TestTheHoverLayerCoversOnlyTheCover` 和
+  `TestEveryRouteShowsARealRowOrSaysWhichTicketIsMissing//follow`——2026-10-23
+  核过：105 遍整包（load1 12.1~112.5）+ 两条各 50 遍单独跑 + 320 个子测试，
+  **一条没红**；本票又在低负载下跑了 20 遍，全绿。⚠️ 悬停浮层那条当年的理由
+  （播放键那两个字换图夹在两帧之间）是 **2026-10-21（`f777bc5`）就已经去掉的
+  机制**——那一测现在先把歌按停，而记下它的那次观察在那道保护之后，所以那个
+  理由从一开始就不成立。**这两条别再往名单里加，除非它们真的红过。**
+
+  想自己核这份名单：**盯住负载**——一轮整包从头到尾 load 最高不超过 8，那一轮
+  才算数；超了就不算（`GOGC=10 go test ./internal/ui/ -count=1 -timeout 15m`
+  一轮一轮往下数）。**别用 `-run` 过滤**——这几条**单独跑都是绿的**，飘的是整包
+  那些堆和 GC 压力。
 
   ```sh
   go build -trimpath -p 4 ./... && go vet -trimpath -p 4 ./... && go test -p 4 \
@@ -229,7 +265,7 @@ issue 的验收标准**（`gh issue edit`，见 `docs/agents/issue-tracker.md`�
    每次打包前都会跑一遍并检查 `git diff`。
 9. **用户数据目录的名字不跟显示名走。** 应用 2026-10 从 `Biu MyGo` 改名成
    `BiuGo`，而 `mygo.App.Path(mygo.PathUserData)` 默认是 `os.UserConfigDir()`
-   **拼应用名**（`mygo@v0.6.2/paths.go:90-93`）。所以 `internal/platform/datadir.go`
+   **拼应用名**（`mygo@v0.6.3/paths.go:90-93`）。所以 `internal/platform/datadir.go`
    的 `PinUserDataDir()` 把目录**钉死**在旧名字上，`main()` 的第一句就调它——
    必须排在所有 `Mount*` 之前，因为「读不到设置」的默认处理是**安静地按第一次运行
    开起来**，晚一步的症状是「设置一直存不住」而不是任何一句报错。
@@ -261,6 +297,24 @@ issue 的验收标准**（`gh issue edit`，见 `docs/agents/issue-tracker.md`�
 - **动 macOS 那条音频路径之前，先读 `internal/service/audio/extaf/` 的注释。**
   纯 Go 绑 AudioToolbox，坑全在「哪个参数是哪个四字符码、哪一版签名不一样」
   这一层，踩过一次就写在那儿了。
+- **还没发版给别的用户用过，别为「我们自己的老状态」写兼容逻辑。** 默认口径：老的
+  外观、老的目录、老的设置值、老的测试期望——**改了就是改了**，不迁、不兜底、不留
+  双份。
+
+  **判据一句话：要兼容的是「别的用户的老数据」吗？不是 ⇒ 别写兼容。**
+
+  后果：**改动不需要迁移步骤、不需要双份格式、不需要兜底分支**；**老的那份数据直接
+  作废**（用户自己的老数据也作废——反正就他一个人，重新登录、重新导一次就完了）；
+  **测试要对着新样子写**，不要为了保住老的断言把新方案改回去。
+
+  ⚠️ **下面这三样不是「兼容逻辑」，是另外三件事，照旧留着，别一起删**：
+
+  1. **从上游 Biu 导入**配置 / 快捷键 / 歌词 / 下载记录（`internal/ui/migrate_*.go`、
+     `internal/app/biuimport*.go`）——那是**功能**：用户自己电脑上装着 Biu，要能把
+     设置搬过来。
+  2. **用户数据目录钉死在 `Biu MyGo`**（§4 第 9 条）——那是**他自己**的数据（登录态、
+     设置、歌词缓存、下载记录、历史），不钉死他**自己**升级就丢。
+  3. **钥匙串里的登录态**（§6、§5）——那也是**他**的。
 
 ## 6. 别打真 B 站
 
@@ -314,3 +368,115 @@ issue 的验收标准**（`gh issue edit`，见 `docs/agents/issue-tracker.md`�
   规格」当成可以自行发挥的理由。⚠️ 那条规则**只认 `docs/research/` 这一个路径**，
   所以别把 SPEC.md / PLAN.md 挪到别处再提交——换个位置就不再被忽略了，`git add`
   会照常把它列成待提交。
+
+## 10. 收尾：把自己起的 gopls 停掉
+
+**收尾的最后一步：把自己工作区里那个 gopls 停掉。**
+
+### 为什么
+
+板子清理一张票的时候，要那个 agent 的 herdr 面板「除了前台进程没有别的活进程」。
+插件源码（`~/.config/herdr/plugins/github-installations/herdr-projects-*/checkout/`
+下，可以自己核实）：
+
+- `crates/core/src/herdr/api.rs:92` 的 `pane_childless(id)`：面板里除了前台进程，
+  不能有别的活进程（**前台进程自己也不能有子进程**）；
+- `crates/flow/src/land/cleanup.rs:32` 的 `cleanup_with`：清理要 `at_rest`（里面就是
+  `pane_childless`）才继续，否则**推迟**（`retry`），并把「空间还在用」写进板子的话里。
+
+gopls 是 Claude Code 自己起的 Go 语言服务器（实测：gopls 的父进程就是那个 claude
+进程），**claude 退出之后它还活着**（成了孤儿，被 init 收养）——所以它正好是那个
+「赖着不走的进程」。**插件的规则是对的**（它不想在别人的进程还活着的时候把空间
+拆了，拆了会把那个进程一起带走）：**该走的是把那个进程收掉。**
+
+不收的后果：agent 做完了，**herdr-projects 不关那个窗口**（侧边栏里一直留着），
+板子的话里一直写着「Kept: … (its space is in use beside its agent: gopls …)」，
+**工作区也删不掉**。
+
+⚠️ **gopls 只是最常见的一个**：插件拦的是**任何**留在面板里的后台进程（一个没关的
+`go test`、一个 `node` 服务器……）。这一条治的是 gopls 这个大头。
+
+### 怎么做
+
+**按 cwd 认领，只杀自己那个**：
+
+```sh
+# $PWD 就是自己的工作区（自己的 worktree）
+for p in $(pgrep -x gopls); do
+  cwd=$(lsof -a -p "$p" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')
+  [ "$cwd" = "$PWD" ] && kill "$p"
+done
+```
+
+- **按 cwd 认领**：`lsof -a -p <pid> -d cwd` 看它的工作区是不是自己那个。
+  **别人的 gopls 一个别动**（别的 agent 还在用）。
+- ⚠️ **别写成 `pkill -f gopls`**——那会杀掉别的 agent 的。
+- **放在收尾的最后**：**最后改完文件之后再杀**。在那之前杀，LSP 会再起一个
+  （Claude Code 的 LSP 一碰到 Go 文件就再拉一个 gopls 起来）。
+- 杀完确认一下：`pgrep -fl gopls` 里自己那个没了没有（gopls 还有一个同名的遥测
+  子进程 `gopls ** telemetry **`，它跟着 gopls 一起死；真还在就 `kill -9`）。
+
+### 清理的顺序
+
+省得下一个人重新推（**只有第 1 步是你的**，其余是板子做的）：
+
+1. **杀自己工作区里的残留进程**（上面那条就是它）——**这一步不做，第 3 步就推不动**：
+   你的 gopls 还在面板里，`pane_childless` 就是 false，清理一直 `retry`；
+2. **归档任务**（板子把任务收进归档，`herdr-projects archive <id>`）：它自己的 herdr
+   空间关掉、临时文件清掉；
+3. **删工作区**：板子的清理（`cleanup_with`）把 worktree 删掉；
+4. **修剪 worktree 登记**：`git worktree prune`——清理里紧跟着 `worktree remove` 做。
+
+## 11. 文件怎么组织
+
+仓库里从前没有「一个文件该多大」的规矩，于是 agent 只会往上加：`internal/ui/shell.go`
+在 #357 那次重设计之后的 8 个提交里从 **1697 行涨到 1798 行**（#357 自己动了它
+-14 行，其他票又加回来）；`internal/app/queue.go` 1866 行、
+`internal/evidence/evidence.go` 3502 行。
+
+> 下面的行数是 **2026-10-25 量的一次快照**。这一节看的是**职责和耦合**，不是
+> 这个数——数会过期，判断不会。
+
+### 什么时候该拆
+
+**一个文件超过 ~1200 行、并且能按职责说清两三块的时候。**
+
+- 「**能按职责说清**」是前提：**说得清**才拆得动；说不清就是**一团**，拆了只是
+  把一团分成几团，反而更难找。
+- **行数只是信号，不是判据**——见下面「什么时候别拆」。
+
+`internal/ui/shell.go` 是能说清的那种：它同时装着**窗口生命周期**（`Attach`、
+`Close`、`bindMedia`、`Run`）、**画法**（`View`、`viewMain`、`viewFolderDialogs`）、
+**崩溃兜底**（`Guard`、`onPanicAt`、`newCrashInfo`、`viewCrash`）和**挂载**
+（`mountSearchHistory`、`mountShortcuts`）四块——四块之间没有互相依赖的顺序，
+搬开就是四个文件。
+
+### 怎么拆：优先「纯搬文件」
+
+**把方法搬到按职责命名的文件里，字段和引用一处都不改。**
+
+```
+internal/ui/shell.go  →  shell_window.go   窗口生命周期
+                        shell_view.go     画法
+                        shell_crash.go    崩溃兜底
+                        shell_mount.go    挂载
+```
+
+- **Go 编译器保证行为不变 → 风险几乎为零**：搬完 `go build` 绿、测试绿，就是搬对
+  了。同一包内搬方法不需要改任何调用点。
+- ⚠️ **不要为了「struct 好看」把字段拆成子结构**：那要改**所有**引用点。队列抽屉
+  那一块的状态（`drawerOpen`、`queueScroll`、`queueRowKeys`……）现在散在
+  `internal/ui` 的 **6 个文件**里、**85 处**引用；把它挪进子结构就是这 85 处都要
+  跟着改。收益是「结构体小一点」，代价是**每次改那块状态都要跨两个 struct**——
+  **不值**。
+
+### 什么时候别拆
+
+- **一张表的文件**：`internal/evidence/evidence.go`（3502 行）里 **3436 行**是
+  `var Items = []Item{` 那一张台账——它是**台账不是逻辑**（§9：回归证据是**代码**，
+  不是文档）。**行多不代表耦合多**，拆了反而破坏「一张台账」这个概念：读者要的
+  是「这一条证据在哪儿」，拆成三个文件就得先知道它归哪一组。
+- **正在被连续改的那一块**：等这波改完再动（比如队列那一摊——`internal/app/queue.go`
+  和队列抽屉正是最近几票在改的地方；这波改到一半拆文件，两拨改动会撞在一起）。
+- **生成物**：`go generate` 造出来的那些（§4 第 8 条：图标和第三方许可清单）——
+  改了图案却忘了重新生成，仓库里躺着的是旧文件，而**没有任何一处会报错**。

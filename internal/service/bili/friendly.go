@@ -44,8 +44,12 @@ var codeMessages = map[int]string{
 	-403: "没有权限看这一项",
 	-404: "这个稿件已经不在了",
 
-	// 风控与限流。这三个的处置完全不同，所以话也不同：
-	// 风控不该重试（重试就是继续撞墙），限流可以等。
+	// 风控与限流。这两个**都不给**「立刻重试」那枚键（判据见 `retry.go`）：
+	// 界面上那枚「重试」是立刻再问一次，而它们要等的是**时间**——立刻再问
+	// 还是撞同一面墙（票 #316 收窄了风控，票 #346 把限流收到同一档）。
+	//
+	// 话还是要分开：一个是「被挡下了」，一个是「太快了」——用户照着做的
+	// 下一步不一样。
 	-352: "被 B 站的风控拦下了，等一会儿再试",
 	-412: "请求被 B 站拦下了，换个网络或者等一会儿",
 	-509: "操作太快了，等一会儿再试",
@@ -85,6 +89,15 @@ func Friendly(err error) string {
 		return codeMessages[-509]
 	case errors.Is(err, ErrCSRF):
 		return codeMessages[-111]
+	// 🔴 **「响应不是 JSON」和真风控是两件事**（票 #346）：真风控是 -352/-412
+	// （业务码，在 JSON 里面），这一档是压根没拿到 JSON——多半是风控挡下来的
+	// 一页 HTML。它和真风控**处置一样**（立刻再问还是撞墙），但**话要分开**：
+	// 用户看到「回的不是预期的内容」才知道自己可以换个网络再试。
+	case errors.Is(err, ErrBadResponse):
+		return "B 站这次回的不是预期的内容（多半是被挡下了），等一会儿再试"
+	// 截断：多半是网络抖了一下，响应没传完。**再问一次有可能好**。
+	case errors.Is(err, ErrTruncatedResponse):
+		return "B 站这次只回了一半（多半是网络抖了一下），再试一次就好"
 	}
 
 	// 取流自己的几种。
@@ -118,6 +131,15 @@ func Friendly(err error) string {
 			return "B 站换了这条流，正在从刚才的位置重开"
 		}
 		return "连不上 B 站这条音频流了（网络或地址的问题，不是歌坏了）"
+	}
+
+	// 🔴 **「这一条解不了」要说人话**（票 #282）。
+	//
+	// 底下是「OSStatus -11800」「不像 FLAC」这种行话——用户读不出来，也照着
+	// 做不了任何事（换网？换歌？他不知道）。这一条说的是「这台机器解不了它」
+	// 并且给出**还能怎么办**。
+	if errors.Is(err, audio.ErrUnsupportedFormat) {
+		return "这一条的音频解不了（这台机器的解码器认不出它）。换一档音质试试，或者在 B 站里听它"
 	}
 
 	// B 站的业务错误：查表。
@@ -183,75 +205,6 @@ func trimStreamPrefix(s string) string {
 		s = strings.TrimSpace(strings.TrimPrefix(s, p))
 	}
 	return s
-}
-
-// Recoverable 报这个错**再试一次有没有用**。
-//
-// 判据只有一条：「再问一次 B 站，会不会给出不一样的答案」。
-//
-//	网络断了、超时了、风控拦了、地址过期了	会变 → 可重试
-//	B 站说没有音频流、稿件被删了、要大会员	不会变 → 不可重试
-//
-// 界面上据此决定给不给「重试」。**给一个按了也没用的重试比不给更糟**——
-// 用户按两次发现还是那样，就不再信这个应用了；而「不可重试」那一句自己
-// 已经说了还能怎么办（换一档音质 / 去 B 站里打开它听）。
-func Recoverable(err error) bool {
-	if err == nil {
-		return false
-	}
-	switch {
-	// 「压根没有音频流」：B 站这么说了，再问一次还是这一句。
-	case errors.Is(err, ErrNoAudioFlow):
-		return false
-	// 「查到了但没得放」：换一档音质、换个账号也许有戏，但**原样重试**没有用。
-	case errors.Is(err, ErrNoStream):
-		return false
-	// 要会员才有完整版：等不来。
-	case errors.Is(err, ErrPreviewOnly):
-		return false
-	// 没登录：重试还是没登录，要的是重新登录（那句话已经说了）。
-	case errors.Is(err, ErrNoLoginForOnline), errors.Is(err, ErrNotLoggedIn):
-		return false
-	// 风控和限流：等一会儿会变（`Friendly` 已经说了「等一会儿再试」）。
-	case errors.Is(err, ErrRiskControl), errors.Is(err, ErrTooFrequent):
-		return true
-	// 问不出分 P：底下多半是网络抖了一下。
-	case errors.Is(err, ErrNoPart):
-		return true
-	// 地址过期：换一条新的就好。
-	case errors.Is(err, ErrStreamExpired):
-		return true
-	// 字节源拉不动：网络或地址的问题，换张网 / 再试一次。
-	case errors.Is(err, audio.ErrStreamDead):
-		return true
-	// 没拿到 HTTP 响应（断网、超时、DNS）。
-	case errors.Is(err, ErrNetwork):
-		return true
-	}
-	// B 站的业务错误：逐个码判。
-	var api *APIError
-	if errors.As(err, &api) {
-		switch api.Code {
-		case -352, -412, -509:
-			// 风控 / 被拦 / 太快：等一会儿再来。
-			return true
-		case 72010027:
-			// 「这首音乐换了地址，已经跟不上了」——再问一次也许就是新地址。
-			return true
-		default:
-			// -101（登录过期）、-111、-400、-403、-404、10003、62002、
-			// 62004、62012、11010、7201006、72000000 ……：重试多少次都一样。
-			return false
-		}
-	}
-	// 超时那一类（不是 ErrNetwork 包住的）。
-	if strings.Contains(err.Error(), "timeout") ||
-		strings.Contains(err.Error(), "deadline exceeded") {
-		return true
-	}
-	// ⚠️ **不认识的错按「可重试」算**：用户宁可多点一次重试，也不要被一句
-	// 「不可重试」堵死——而这一句的文案本身已经说了出了什么事，用户看得见。
-	return true
 }
 
 // cleanMessage 把 B 站给的消息收拾干净再用。

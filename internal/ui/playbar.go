@@ -11,10 +11,12 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+	tclean "github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -38,9 +40,9 @@ import (
 // 那一行**（和 UP 名并排），于是它们和「歌名/UP 名」是**上下**的关系；上游是
 // **左右**的关系（见 `viewTrackActions`）。
 const (
-	playbarHeight = 88
+	playbarHeight = 76
 	playbarPadX   = space.Px16
-	coverSize     = 56
+	coverSize     = 52
 	coverGap      = space.Px8
 
 	// coverRadius 是播放条上那张封面（和它悬停时那层黑罩）的圆角：**6**。
@@ -436,7 +438,8 @@ func drawerTip(open bool) string {
 // 徽章是**在 Column 里面**跟歌名并排的：外层永远是竖着堆的行，徽章只占第一行
 // 里的右边一小块。
 func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
-	title := st.Title
+	// 显示的是清洗过的歌名（去视频宣传标签，见 `widgets/title`）；st.Title 本身不动。
+	title := tclean.Clean(st.Title).Title
 	if !st.HasTrack {
 		title = "还没有打开文件"
 	}
@@ -492,8 +495,34 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 		if st.HasTrack && st.Artist != "" {
 			s.viewArtist(c, st, t)
 		}
-		if st.Err != "" {
+		// 🔴 **出错、「正在重连」、「正在取流」和「停住了」占同一个位置**
+		// （票 #282、#315、#319）：四者都是「这一句说明现在怎么了」，而那一行
+		// 只有一行宽。
+		//
+		// 🔴 **错一收，「详情」面板也得收**（票 #320）：**在 switch 之前**判——
+		// 错收掉之后紧接着来的可能是「正在重连」「正在取流」「停住了」那几档
+		// （票 #315 / #282 / #319），而那块面板说的是上一句错的话，它自己不会走。
+		if st.Err == "" {
+			s.errDetailOpen = false
+		}
+		// 它们的优先级是**错 > 重连 > 取流 > 停住**：
+		//
+		//	出错		一句错比一枚转圈信息量大，而转圈还在转说明还有希望
+		//	正在重连	这一首断了，我在救它——比笼统的「在准备」具体
+		//	正在取流	这一首还没放起来（上一首还在放）
+		//	停住了	播放器在、只是不响了
+		//
+		// 它们不会同时有——出错时播放器压根没有、正在取流时上一首还在放、
+		// 而停住了说明播放器在、只是不响了。
+		switch {
+		case st.Err != "":
 			s.viewTrackError(c, st, t)
+		case st.Reconnecting:
+			s.viewTrackReconnecting(c, st, t)
+		case st.Loading:
+			s.viewTrackLoading(c, st, t)
+		case st.Stopped:
+			s.viewTrackStopped(c, st, t)
 		}
 	})
 }
@@ -515,6 +544,148 @@ const (
 	// likeButtonKey 是「赞」那一枚。
 	likeButtonKey = "playbar:like"
 )
+
+// viewTrackLoading 是播放条上「正在取流」那一句话（前面带一枚转圈）。
+//
+// # 为什么要有这一句
+//
+// 在线流要跑一趟网络（取流 + 开解码器），那一趟里界面上什么都不会变——
+// 歌名还是上一首的，进度条不动，也没有声音。用户看到的就是「点了没反应」
+// （票 #282 的现象：一直转圈、也不说为什么）。
+//
+// 这一句说的是「**在准备了**」，而转圈说的是「**还在等**」。两句合起来用户
+// 才知道自己没有按错，也知道要等多久（超过阈值会换成一句失败的话）。
+//
+// ⚠️ **它是灰字，不是红字**：红字是「出错了」，而这一句是「还没好」。两者的
+// 语气不一样，用户读到红色会以为已经完了。
+//
+// 🔴 **那枚转圈在这里，不在播放/暂停那一枚上**（票 #282 的评审）：取流这一趟
+// 里**上一首还在放**，把那一枚换成转圈的话用户就按不了暂停了。
+//
+// # 🔴 **慢的时候换一句**（票 #220）
+//
+// 「正在取流：<歌名>」说的是「**在准备**」，而用户抱怨的是「**非常慢**」——
+// 那一句从头到尾不变，他等三秒和等三十秒看到的都是同一句，于是「慢」这件事
+// 在界面上**根本不存在**。
+//
+// 所以慢的时候屏幕上换成「取流很慢：<歌名>」：
+//
+//	一样长	「正在取流：」和「取流很慢：」都是五个字，歌名那一截的长度不变
+//	多一件事	用户第一次知道「它慢」——而他等下去是有理由的
+//
+// ⚠️ **完整那一句在悬停提示里**（和错误那一栏同一个做法）：那里说清
+// **卡在哪一步**（「问地址」/「下音频」/「解码」）和**等了多久**——那才是
+// 用户能据此判断「再等等」还是「换一首」的东西。
+func (s *Shell) viewTrackLoading(c *ui.Context, st app.State, t *ui.Theme) {
+	msg := "正在取流"
+	if st.LoadingSlow {
+		msg = "取流很慢"
+	}
+	if st.LoadingTitle != "" {
+		msg += "：" + st.LoadingTitle
+	}
+	// 悬停提示里说清**卡在哪一步**、**等了多久**。
+	tip := msg
+	if st.LoadingStage != "" {
+		tip = fmt.Sprintf("正在取流《%s》：现在卡在「%s」这一步，已经等了 %s。网络慢的时候先等等，或者点「重试」再试一次。",
+			st.LoadingTitle, st.LoadingStage, loadingWaitText(st.LoadingWait))
+	}
+	ui.Row(c).Gap(space.Px4).AlignItems(ui.Center).Children(func() {
+		// ⚠️ **转圈的无障碍名字就是「正在取流」**：转圈没有可见的字，而它是
+		// 唯一能认出「这里在等」的凭据（无头 Tester 也只认字和名字）。
+		ui.Spinner(c).Size(loadingLineSpinnerSize, loadingLineSpinnerSize).Label("正在取流")
+		// ⚠️ **一行 + 省略号，和错那一行同一个理由**（见 `viewTrackError`）：
+		// 88 高的播放条放不下两行，而超长的歌名会把这一行挤没。
+		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
+			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").Grow(1), tip)
+	})
+}
+
+// loadingWaitText 把「等了多久」说成一句人话。
+//
+// ⚠️ **不足一秒说「不到 1 秒」而不是「0 秒」**：「0 秒」读起来像「没等」，
+// 而那一刻用户其实已经等了一会儿了。
+func loadingWaitText(d time.Duration) string {
+	if d < time.Second {
+		return "不到 1 秒"
+	}
+	return fmt.Sprintf("%d 秒", int(d.Round(time.Second)/time.Second))
+}
+
+// viewTrackReconnecting 是播放条上「正在重连」那一句话（前面带一枚转圈）。
+//
+// # 为什么要有这一句
+//
+// 断流之后应用要做的事有两条：字节源换地址 / 换流（`internal/service/audio`
+// 的 `recover`），以及从播放位置重开一首（`refreshOnlineNow`）。两条都要跑
+// 网络，而这一档以前界面上**一个字都没有**——用户看到的是「歌停着、界面
+// 不动、没有字」，等多久都像应用死了（票 #315）。
+//
+// 加上退避之后更糟：那 7 秒的等待原本是**完全静默**的。
+//
+// # 它和「正在取流」不是同一件事
+//
+//	正在取流	这一首**还没放起来**（第一次点它）
+//	正在重连	这一首**响过一半**，流断了，正在救
+//
+// 用户看到的差别很大：前者歌压根没响过，后者是听着听着停住了。
+//
+// ⚠️ **它是灰字，不是红字**：红字是「出错了」，而这一句是「还在救」。两者的
+// 语气不一样，用户读到红色会以为已经完了。
+//
+// 🔴 **屏幕上的那句话要短**：播放条上那一行只有 140 像素宽（1200 宽的窗口，
+// 实测），12 号字放得下十来个字——「网络不稳，正在重连（第 2 次）」这样的
+// 一句话上屏只剩「网络不稳，正在…」，那不是「一句能看懂的话」。完整那一句
+// 进悬停提示（和错误那一栏一个做法，见 `viewTrackError`）。
+func (s *Shell) viewTrackReconnecting(c *ui.Context, st app.State, t *ui.Theme) {
+	msg := "正在重连"
+	tip := "网络不稳，正在重连"
+	if st.ReconnectAttempt > 0 {
+		tip += fmt.Sprintf("（第 %d 次）", st.ReconnectAttempt)
+	}
+	tip += "…"
+	ui.Row(c).Gap(space.Px4).AlignItems(ui.Center).Children(func() {
+		// ⚠️ **转圈的无障碍名字就是「正在重连」**：转圈没有可见的字，而它是
+		// 唯一能认出「这里在等」的凭据（无头 Tester 也只认字和名字）。
+		ui.Spinner(c).Size(loadingLineSpinnerSize, loadingLineSpinnerSize).Label("正在重连")
+		// ⚠️ **一行 + 省略号，和「正在取流」那一句同一个理由**。
+		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
+			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").Grow(1), tip)
+	})
+}
+
+// viewTrackStopped 是播放条上「停住了」那一句话（票 #319）。
+//
+// # 它说的是哪一件
+//
+// 「停住了」有两种，而用户要分得开：
+//
+//	用户按了停止 —— **「已停止」**：这一首到此为止，**队列里还有歌**
+//	顺序播放走到队尾 —— **「这一串放完了」**：**没有下一首了**
+//
+// ⚠️ **判据是 `State.QueueFinished`**（见 `app.State` 的说明）：那才是「队列
+// 自己走完了」的那一种，而 `State.Stopped` 是两种都有。只看 `Stopped` 的话，
+// 用户按了停止也会被告知「这一串放完了」——而队列里明明还有十几首。
+//
+// # 为什么它占的是「出错 / 正在取流」那一格
+//
+// 那一格本来就是「**此刻怎么了**」那一行（见 `viewTrackText` 的注释），而
+// 「停住了」正是这样一句话。
+//
+// ⚠️ **它是灰字**：它是「现在停着」，不是「出了事」——红字那一档是留给出错的
+// （`viewTrackError`）。而「正在取流」也是灰字，那一句前面有一枚转圈、这一句
+// 没有，两者不会看混。
+//
+// ⚠️ **别给它挂悬停提示**：那一句只有六个字，而那一格只有 140 像素宽
+// （1200 宽的窗口，实测），放得下。
+func (s *Shell) viewTrackStopped(c *ui.Context, st app.State, t *ui.Theme) {
+	msg := "已停止"
+	if st.QueueFinished {
+		msg = "这一串放完了"
+	}
+	ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
+		TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
+}
 
 // viewTrackActions 是左边那一块的**第三段**：分集 / 收藏 / 赞，
 // **横着并排的一行**。
@@ -590,7 +761,7 @@ func (s *Shell) viewTrackActions(c *ui.Context, st app.State) {
 // 有一二十个字——写在这里必然被截掉一半，而截掉的那一半恰恰是**用户下一步
 // 要做的事**。所以那句话留在悬停提示里（全文），旁边给一枚**动作**：
 //
-//	能重试	「重试」——网络断了、风控拦了、地址过期了，再试一次就有可能好
+//	能重试	「重试」——网络断了、地址过期了，再试一次就有可能好
 //	不能重试但有 B 站地址	「在 B 站打开」——B 站说这一条没有音频流，
 //	                    用户能做的就是去 B 站里听它
 //
@@ -599,19 +770,78 @@ func (s *Shell) viewTrackActions(c *ui.Context, st app.State) {
 // ⚠️ **不能重试的时候不给「重试」**：给一个按了也没用的重试比不给更糟——
 // 用户按两次发现还是那样，就不再信这个应用了。
 //
+// ⚠️ **风控和限流也不算「能重试」**（票 #316 / #346）：那枚「重试」是**立刻**
+// 再取一次流（没有退避），所以这两类按下去就是再撞一次墙。它们落进「不能
+// 重试」那一边，界面上给的是「在 B 站打开」。
+//
+// ⚠️ **判据只有一处**（`bili.Recoverable`，见 `service/bili/retry.go`）：
+// 下载记录页上那枚「重试」用的是同一张表。
+//
 // ⚠️ 这一行**只在出错的时候才有这一枚键**，所以平时播放条的布局一个像素
 // 都不动（那一列的宽度、进度条的长度都不受影响）。
+//
+// # 「详情」层（票 #320）
+//
+// 这一行是**一行 + 省略号**（理由见下面那段注释），而 `bili.Friendly` 那张表
+// 里的话信息量很大——「B 站没有给这一条单独的音频流（歌单、活动那一种多半是
+// 这样）。在 B 站里打开它听，或者换一首放」四十来个字，压成一行之后用户常常
+// 只读到半句话。
+//
+// 所以完整那一句有**两个去处**：
+//
+//	悬停	提示框（这一层早就有，票 #282 的评审加的）
+//	点它	播放条**上方**那块小面板（`playbar_err.go`）——完整那一句、多行
+//	        排开、**能选中复制**（用户要拿它去提 issue）
+//
+// ⚠️ **面板是浮层**：88 高那一行一个字都不多（票 #320 的验收盯的就是这个）。
+//
+// ⚠️ **每帧多一次分配**：那个 `OnClick` 的闭包（和歌名那一处一个道理——它也
+// 是每帧一个闭包）。**平时（没有错）一个字都没多**：`framebudget_test.go`
+// 量的是「一首 B 站的歌」那一副（12 次 / 578 字节，实测不变）；出错的那一
+// 副本来就多花钱（那句话的字要排版），这一条不改变量级。
 func (s *Shell) viewTrackError(c *ui.Context, st app.State, t *ui.Theme) {
 	msg := "打不开：" + st.Err
+	// 🔴 **提示框里给的是完整那一句**：这一行只有 140 像素宽（1200 宽的窗口，
+	// 实测），十二三个字就是它的全部——一句 50 个字的话上屏只剩「打不开：取流…」
+	// 这样的碎片（票 #282 的评审）。短的那句在画面上，完整的那句在提示里，
+	// 两边合起来才是一句能看懂的话。
+	tip := "打不开：" + errFullBody(st)
+	// ⚠️ **面板开着的时候不挂提示框**：提示框和那块面板**摆在同一个位置**
+	//（都在这一行的上面），而它们说的是同一句话——指针移开又移回来的时候，
+	// 两块叠在一起，屏幕上就是一块小提示盖着一块面板。
+	if s.errDetailOpen {
+		tip = ""
+	}
 	ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 		// 🔴 **一行 + 省略号，和歌名同一个理由**：这一列最窄的时候（760 宽
 		// 的测试窗口，比应用自己的下限 900 还窄）只剩 70，而这一句话有 14 个
 		// 字——换成两行就是四行，**88 高的播放条装不下，最后一行被裁掉**，
 		// 而症状是「说了有话却看不见」（文本节点还在，测试也还找得到它）。
 		//
-		// 缩掉的那几个字用悬停补回来，和上面那个音质徽章同一个做法。
-		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
-			TextColor(dangerText(t)).MaxLines(1).Ellipsis("…").Grow(1), msg)
+		// 缩掉的那几个字在提示框和「详情」面板里补回来（见上面那段说明）。
+		//
+		// 🔴 **这一句是「详情层」的入口**（票 #320）：它点得开。
+		line := ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
+			TextColor(dangerText(t)).MaxLines(1).Ellipsis("…").Grow(1).
+			OnClick(func() { s.errDetailOpen = !s.errDetailOpen })
+		line = s.withTip(c, line, tip)
+		// ⚠️ **悬停才显出「点得动」**：一道下划线 + 一只指针手
+		//（侧栏那个登录提示是一个做法，`sidebar.go`）。
+		//
+		// ⚠️ **问的是 `line` 自己**（元素建好之后）：`Hovered` 要元素在命中列表
+		// 里，而那要它已经建好（`OnClick` 之后才算）。
+		if line.Hovered() {
+			line = line.Underline().Cursor(ui.CursorPointer)
+		}
+		// Popover 自己处理「点外面关掉」和 Escape，所以这里只管开关本身
+		//（和 `viewRate` / `viewPartButton` 同一个写法）。
+		//
+		// ⚠️ 浮层那一层外面包一层 Guard（铁律三）：它是在**播放条这一层的布局
+		// 之外**单独建的，它一崩坏掉的是整块浮层，而报错的地方在播放条上——
+		// 两者对不上，极难查。
+		ui.Popover(c, line, &s.errDetailOpen, func() {
+			s.guardAt("错误详情", func(c *ui.Context) { s.viewErrorDetail(c, st) })(c)
+		})
 		switch {
 		case st.CanRetry:
 			if s.withTip(c, flatButton(c, "重试").FontSize(scale.Font(c, scale.Size12)),
@@ -691,9 +921,13 @@ func (s *Shell) viewArtist(c *ui.Context, st app.State, t *ui.Theme) {
 	// 扁平按钮：UP 名这一格是**播放条上一枚按钮**，而调研点名的描边药丸里就有它
 	//（报告 §1.1 的 F1 证据：播放条上每一枚带描边的键）。它上面是 14px 的弱化
 	// 灰字，本来就不该配一块描边底。
+	//
+	// ⚠ **那句话是 `list.OwnerTipText` 给的**（票 #360）：列表里的 UP 名是同一
+	// 件事的另一个地方，两处各写一遍的话，改了一处另一处就安静地变成另一句
+	// 话——而那种错在画面上只是「提示里那句话怪怪的」。
 	if s.withTip(c, flatButton(c, st.Artist).Grow(1).MinWidth(artistMinW).
 		Justify(ui.Start).FontSize(scale.Font(c, scale.Size14)).Padding(space.None, space.None).TextColor(t.TextMuted).
-		MaxLines(1).Ellipsis("…"), "打开 "+st.Artist+" 的空间").Clicked() {
+		MaxLines(1).Ellipsis("…"), list.OwnerTipText(st.Artist)).Clicked() {
 		s.navigate(upPathPrefix + strconv.FormatInt(st.ArtistMid, 10))
 	}
 }
@@ -879,17 +1113,20 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 	ui.Row(c).Gap(transportGap).AlignItems(ui.Center).Children(func() {
 		s.viewPrevButton(c)
 
+		// 🔴 **取流期间这一枚仍然是播放/暂停**（票 #282 的评审）：正在取流的
+		// 那一首**还没放起来**，而**上一首还在放**——把它换成一枚转圈，用户就
+		// 按不了暂停了（迷你窗和满屏播放器里还有，播放条上没有了）。
+		//
+		// 「正在取流」的那枚转圈在**第三行**（`viewTrackLoading`），不在这里。
 		if st.Playing {
-			if s.withTip(c, iconButtonPlay(c, transportIcon(true), "暂停", iconPlayBtn, false).
-				Size(iconHitPlay, iconHitPlay).Padding(space.None, space.None), "暂停").Clicked() {
+			if s.withTip(c, iconButtonPlay(c, iconPauseFill, "暂停", iconHitPlay, iconPlayBtn, false), "暂停").Clicked() {
 				s.app.Toggle()
 			}
 		} else {
 			// ⚠️ **禁不启用由这里给**（`iconButtonPlay` 的 `disabled`）：那一枚的
 			// 颜色是**建元素时**定的，「悬停变主色」要在**禁用之后**才问——问早了
 			// 一枚禁用的键会用主色告诉用户「这里点得动」（理由见那个函数）。
-			if s.withTip(c, iconButtonPlay(c, transportIcon(false), "播放", iconPlayBtn, !st.HasTrack).
-				Size(iconHitPlay, iconHitPlay).Padding(space.None, space.None), "播放").Clicked() {
+			if s.withTip(c, iconButtonPlay(c, iconPlayFill, "播放", iconHitPlay, iconPlayBtn, !st.HasTrack), "播放").Clicked() {
 				s.app.Toggle()
 			}
 		}
@@ -972,7 +1209,7 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 		// （`layout/playbar/left/index.tsx:40`），而我们原来摆的是一枚图片图标。
 		// 本地文件**永远**没有封面（见 `State.CoverURL`），所以这一档在播放条上
 		// 是常客——摆成音符才说得清「这是一首歌，只是它没有封面」。
-		imgcache.ViewPlaceholder(c, s.images, st.CoverURL, coverSize, coverSize, coverRadius,
+		imgcache.ViewPlaceholderTitled(c, s.images, st.CoverURL, st.Title, coverSize, coverSize, coverRadius,
 			icon(iconEmptyMusic)).
 			Label("当前封面").
 			Transition(coverTransition(coverIdentity(s, st)))

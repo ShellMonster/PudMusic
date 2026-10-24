@@ -7,6 +7,7 @@ package bili
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 )
@@ -293,6 +294,144 @@ func TestAnItemWithoutAnIDIsDropped(t *testing.T) {
 	}
 	if len(pg.Items) != 1 || pg.Items[0].ID != "good" {
 		t.Errorf("拿到 %+v，want 只有 good 那一条", pg.Items)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 丢掉的理由分了类（票 #344）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheDroppedOnesAreToldApartByReason 钉住「丢掉的理由分了类」。
+//
+// ⚠️ 分类不是为了好看：界面上只有一句话概括「丢了几条」的话，「B 站返回了
+// 一种我们不认识的形态」和「这一条我们读不懂（B 站改了返回的形状）」会被
+// 说成**同一件事**——而后者那句话对用户是**错的**（票 #344）：B 站没有换
+// 形态，是**我们读不出来**。
+//
+// 判据是**按类别的计数**，不是一个总数。
+func TestTheDroppedOnesAreToldApartByReason(t *testing.T) {
+	items := []any{
+		// 形态不认识：转发。
+		dynItem("x1", setType("DYNAMIC_TYPE_FORWARD")),
+		// 读不懂：`major.opus` 给的不是对象（`encoding/json` 整个失败）。
+		map[string]any{
+			"id_str": "x2", "type": "DYNAMIC_TYPE_DRAW",
+			"modules": map[string]any{
+				"module_dynamic": map[string]any{
+					"major": map[string]any{"opus": "不是一个对象"},
+				},
+			},
+		},
+		// 没有身份：`id_str` 是空的。
+		map[string]any{"type": "DYNAMIC_TYPE_WORD", "modules": map[string]any{}},
+		// 什么也没有：声明是纯文字，正文却是空的。
+		dynItem("x4", setEmptyBody()),
+	}
+	_, cli := dynamicFixture(t, items, "", false)
+
+	pg, err := cli.DynamicFeed(context.Background(), "")
+	if err != nil {
+		t.Fatalf("整页崩了：%v", err)
+	}
+	if pg.Dropped != 4 || len(pg.Drops) != 4 {
+		t.Fatalf("丢掉 %d 条（明细 %d 条），want 4 / 4", pg.Dropped, len(pg.Drops))
+	}
+
+	var c DropCounts
+	for _, d := range pg.Drops {
+		c.Add(d.Reason)
+	}
+	for _, c2 := range []struct {
+		what string
+		got  int
+	}{
+		{"形态不认识", c.ShapeUnknown},
+		{"读不懂", c.Unreadable},
+		{"没有身份", c.NoIdentity},
+		{"什么也没有", c.Empty},
+	} {
+		if c2.got != 1 {
+			t.Errorf("「%s」数了 %d 条，want 1", c2.what, c2.got)
+		}
+	}
+	if c.Total() != 4 {
+		t.Errorf("加起来是 %d 条，want 4", c.Total())
+	}
+}
+
+// TestTheSameDroppedDynamicInTwoPagesIsTheSameOne 钉住「跨页去重靠的是身份」。
+//
+// ⚠️ B 站翻页**会重叠**：同一批画不出来的动态在两页里各出现一次。界面上那个
+// 数要按**不同的动态**算（不是按出现次数算），所以同一条在两页里必须是
+// **同一个身份**——这是上层去重的唯一依据（票 #344）。
+//
+// 判据是**两页给出的 `Key` 一样**。
+func TestTheSameDroppedDynamicInTwoPagesIsTheSameOne(t *testing.T) {
+	f := spaceClient(t) // 顺手把 WBI 的 key 备上（feed/space 要签名）
+	f.on(dynamicFeedSpacePath, func(w http.ResponseWriter, r *http.Request) {
+		// **两页给的是同一条**（B 站翻页重叠的形状）。
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			"items":    []any{dynItem("f1", setType("DYNAMIC_TYPE_FORWARD"))},
+			"offset":   "O2",
+			"has_more": true,
+		}))
+	})
+	cli := f.client(t, Options{})
+
+	pg1, err := cli.SpaceDynamics(context.Background(), 42, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pg2, err := cli.SpaceDynamics(context.Background(), 42, "O1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pg1.Drops) != 1 || len(pg2.Drops) != 1 {
+		t.Fatalf("两页各丢了 %d / %d 条，want 1 / 1", len(pg1.Drops), len(pg2.Drops))
+	}
+	if pg1.Drops[0].Key != pg2.Drops[0].Key {
+		t.Errorf("同一条在两页里身份不同：%q vs %q（跨页去重靠它，"+
+			"不一样的话界面上那个数会翻倍）", pg1.Drops[0].Key, pg2.Drops[0].Key)
+	}
+}
+
+// TestADroppedOneWeCannotReadAtAllStillHasAStableIdentity 钉住「连 JSON 都
+// 读不懂的那一条，身份也是稳的」。
+//
+// 那一类拿不到 `id_str`（整条读不开），所以身份退到**原文的指纹**——
+// 翻页重叠时那一条原文是一样的，指纹也就一样，于是它被数一次而不是两次
+// （票 #344）。
+func TestADroppedOneWeCannotReadAtAllStillHasAStableIdentity(t *testing.T) {
+	// 一个根本不是对象的那一条（`items` 是 `[]json.RawMessage`，
+	// 「读不懂」只在类型不对时发生）。
+	broken := json.RawMessage(`"这一条根本不是一个对象"`)
+	f := spaceClient(t)
+	f.on(dynamicFeedSpacePath, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			"items":    []any{json.RawMessage(broken)},
+			"offset":   "O2",
+			"has_more": true,
+		}))
+	})
+	cli := f.client(t, Options{})
+
+	pg1, err := cli.SpaceDynamics(context.Background(), 42, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pg2, err := cli.SpaceDynamics(context.Background(), 42, "O1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pg1.Drops) != 1 || len(pg2.Drops) != 1 {
+		t.Fatalf("两页各丢了 %d / %d 条，want 1 / 1", len(pg1.Drops), len(pg2.Drops))
+	}
+	if pg1.Drops[0].Reason != DropUnreadable {
+		t.Errorf("理由是 %v，want 「读不懂」", pg1.Drops[0].Reason)
+	}
+	if pg1.Drops[0].Key != pg2.Drops[0].Key {
+		t.Errorf("同一条读不懂的在两页里身份不同：%q vs %q",
+			pg1.Drops[0].Key, pg2.Drops[0].Key)
 	}
 }
 
@@ -600,11 +739,124 @@ func TestAnEmptyFirstPageStopsTheList(t *testing.T) {
 	if len(pg.Items) != 0 {
 		t.Fatalf("空页里有 %d 条", len(pg.Items))
 	}
-	// has_more 由 B 站说了算；这一层不替它改（`upPager.adopt` 那一支
-	// 看到 n==0 会自己收口）。断言它**没丢**信息。
-	if !pg.HasMore {
-		t.Log("B 站说没有下一页 —— 这一版照它的话")
+	// ⚠️ **B 站说「还有」也不作数**：这一页既没有东西，也没有**下一次要问的
+	// 入口**（offset 是空串），于是「再问一页」问回来的是同一页——那个圈
+	// 会一直转下去（票 #300 的实测：60 帧发了 40 次请求）。
+	if pg.HasMore {
+		t.Error("空页又没给下一次的口令，却说「还有下一页」——会一直问同一页")
 	}
+}
+
+// TestTheOffsetThatDoesNotMoveEndsTheList 钉住「入口没前进就是到底了」。
+//
+// ⚠️ **B 站的 `has_more` 和 `offset` 不是一起可信的**：它有时候会回一个和
+// 上一次**一模一样**的 offset（或者干脆空串）而 `has_more` 仍然是 true。
+// 拿着那个 offset 再问一次，问回来的是**同一页**——于是「再问一页」永远
+// 问不完（实测：一页全是转发动态时 60 帧发了 40 次请求，界面上一直转圈，
+// 一条内容都出不来）。
+//
+// 判据是「下一次要问的入口和这一次的**是不是同一个**」。
+func TestTheOffsetThatDoesNotMoveEndsTheList(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		used   string
+		offset string
+	}{
+		{"同一个 offset", "O1", "O1"},
+		{"空的 offset", "O1", ""},
+		{"第一页就给空串", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, cli := dynamicFixture(t, []any{dynItem("d")}, tc.offset, true)
+			pg, err := cli.DynamicFeed(context.Background(), tc.used)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if pg.HasMore {
+				t.Errorf("入口没有前进（问的是 %q，回来的是 %q），却还说「还有下一页」",
+					tc.used, tc.offset)
+			}
+		})
+	}
+}
+
+// TestTheOffsetThatMovesKeepsTheNextPage 钉住上一条的反面：入口**动了**就
+// 还有下一页。
+//
+// 少了这一条，上一条那个「一律收口」就能把正常的翻页也掐死——而症状是
+// 「翻不到第二页」，比「一直翻同一页」更难一眼看出来。
+func TestTheOffsetThatMovesKeepsTheNextPage(t *testing.T) {
+	_, cli := dynamicFixture(t, []any{dynItem("d")}, "O2", true)
+	pg, err := cli.DynamicFeed(context.Background(), "O1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pg.HasMore {
+		t.Error("入口前进了（O1 → O2），却把「还有下一页」收掉了——翻页被掐死了")
+	}
+}
+
+// TestAFieldThatChangedItsTypeDoesNotTakeThePageDown 钉住「一个字段改了
+// 类型不能把整页带走」。
+//
+// 🔴 **实测踩过的坑**（票 #300，2026-10-24）：B 站把 `module_author.pub_ts`
+// 从 Unix 秒（数字）改成了**字符串**（`"1792720812"`），而 `encoding/json`
+// 遇到类型对不上会让**整个反序列化失败**——于是那一页 12 条动态**全部**被
+// 当成「读不懂」丢掉，UP 空间的「动态」那一格永远转圈、永远拿不到内容，
+// 而界面上**一个字都不提**。
+//
+// 判据是「这些字段换成另一种写法，那一条**照样留下**」。
+func TestAFieldThatChangedItsTypeDoesNotTakeThePageDown(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		wantID string
+		mutate func(m map[string]any)
+	}{
+		{"pub_ts 是字符串", "d1", func(m map[string]any) {
+			authorOf(m)["pub_ts"] = "1792720812"
+		}},
+		{"pub_ts 是数字", "d1", func(m map[string]any) {
+			authorOf(m)["pub_ts"] = 1792720812
+		}},
+		// ⚠️ **id 变成数字时身份就是那个数字的字面量**——不能走一遍 float
+		// （19 位的大整数过一趟 float 就掉精度了）。
+		{"id_str 是数字", "1261627848475541545", func(m map[string]any) {
+			m["id_str"] = 1261627848475541545
+		}},
+		{"mid 是字符串", "d1", func(m map[string]any) {
+			authorOf(m)["mid"] = "42"
+		}},
+		{"赞的数是字符串", "d1", func(m map[string]any) {
+			mods := m["modules"].(map[string]any)
+			mods["module_stat"] = map[string]any{
+				"like": map[string]any{"count": "367309", "status": 1},
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pg, err := dynamicPageOf(t, dynItem("d1", tc.mutate))
+			if err != nil {
+				t.Fatalf("这一条把整页带崩了：%v", err)
+			}
+			if len(pg.Items) != 1 {
+				t.Fatalf("留下了 %d 条，want 1（字段换了写法不该让这一条消失）", len(pg.Items))
+			}
+			if pg.Items[0].ID != tc.wantID {
+				t.Errorf("留下的是 %q，want %q", pg.Items[0].ID, tc.wantID)
+			}
+		})
+	}
+}
+
+// authorOf 拿到（并造出）module_author 那一段。
+func authorOf(m map[string]any) map[string]any {
+	mods := m["modules"].(map[string]any)
+	a, ok := mods["module_author"].(map[string]any)
+	if !ok {
+		a = map[string]any{}
+		mods["module_author"] = a
+	}
+	return a
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

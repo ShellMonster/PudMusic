@@ -46,7 +46,8 @@ import (
 
 const (
 	// searchWidth 是搜索框多宽。Biu 是 `w-[280px]`（`search/index.tsx:73`）。
-	searchWidth = 280
+	// 设计规范 v0.1 §7.4：宽 240、高 28、胶囊形（原 Biu 是 280 / 40 / 主题圆角）。
+	searchWidth = 240
 
 	// suggestWidth 是建议浮层多宽。Biu 是 `w-[360px]`（同文件 :101）。
 	//
@@ -61,7 +62,11 @@ const (
 	// searchHeight 是搜索框多高。Biu 那个 Input 是 md 档（`h-10`，
 	// `search/index.tsx:72-96`；Tailwind 1 单位 = 4px）——40，顶栏 64 高，
 	// 上下各留 12。
-	searchHeight = 40
+	searchHeight = 28
+
+	// searchRadius 是搜索框的圆角：胶囊（高度的一半）。刻意不跟主题圆角走——胶囊是这个框的形状，
+	// 用户把全局圆角拖到 0 它也还是胶囊。
+	searchRadius = searchHeight / 2
 
 	// searchPadX / searchGap 是搜索框里那三样之间的留白：左右内边距、放大镜与
 	// 输入框之间的缝。上游 Input 的 md 档是 `px-3 gap-3`（12 / 12）——
@@ -121,8 +126,23 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 	// Children 里才量到的（`field.Focused()`），而指针那一位要等这一格建出来
 	// 才能问（`row.Hovered()`）。先铺一层静止档，再按这一帧的实况盖上去——
 	// 元素在 view 里改样式，画的是改完的那一份。
+	//
+	// ⚠️ **`MinWidth(0)` 不能省**（票 #286）：顶栏现在只盖内容区，而内容区最窄
+	// 那一档是「窗口 900 − 侧栏 480 = 420」——那一排控件（两个箭头 + 右边五枚
+	// 键 + 间隙）要 320，剩下给搜索框的只有八十来像素。
+	//
+	// **而 flex 的默认最小宽度是「内容的最小宽度」**：搜索框写死了
+	// `Width(280)`，于是它的最小宽度也是 280（`mygo/ui/layout.go` 的
+	// `intrinsic`：宽度写死时，内容多小都按那个宽度算）——它一步都不肯让，
+	// 右边那几枚键于是被挤出窗口（实测「迷你」「动态」「头像」「登录」四枚
+	// 落在 x=904 之后，而窗口只有 900 宽）。
+	//
+	// 钉成 0 之后它能缩到八十来像素（放大镜和字都还在），右边那几枚键留在
+	// 窗口里。平时不受影响：内容区够宽时它还是 280（`Width` 写死的那个宽
+	// 只在**放不下**的时候才让）。
 	row := ui.Row(c).Key("search").Width(searchWidth).Height(searchHeight).
-		Radius(t.Radius).Background(searchFieldBg(t, false)).
+		MinWidth(0).
+		Radius(searchRadius).Background(searchFieldBg(t, false)).
 		Padding(space.None, searchPadX).Gap(searchGap).AlignItems(ui.Center)
 	row.Children(func() {
 		// 放大镜是**装饰**：它不可点，而输入框自己就带「搜索」这个无障碍名字

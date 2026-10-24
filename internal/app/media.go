@@ -188,6 +188,8 @@ func (a *App) Pause() {
 	a.playing, a.wantPlay = false, false
 	wake := a.wake
 	a.mu.Unlock()
+	// 用户动了一下 → 落盘那一格该跟着变（见 playback_state.go）。
+	a.markPlaybackDirty()
 	if wake != nil {
 		wake()
 	}
@@ -213,6 +215,13 @@ func (a *App) Stop() {
 	a.position = 0
 	wake := a.wake
 	a.mu.Unlock()
+
+	// 用户动了一下 → 落盘那一格该跟着变（见 playback_state.go）。
+	//
+	// ⚠️ **位置清零也是要落的**：用户按了停止就是「回到开头」，而恢复出来的
+	// 位置要是还停在停止前那一个，重启之后会从那儿接着放——和用户按的
+	// 「停止」不是一回事。
+	a.markPlaybackDirty()
 
 	// 「停止」是**终止**：这一轮到此为止，会话要结掉（见 playreport.go 的
 	// 「一、什么时候发」）。暂停留会话、停止结会话，靠的就是这一句——

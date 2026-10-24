@@ -73,13 +73,13 @@ func TestTheConfirmDialogHasAToneColoredWarningIcon(t *testing.T) {
 //
 // 🔴 **这一条是换掉系统原生那一份时丢掉的**：原生那个 `ui.AlertDialog` 建面板
 // 时是 `Role(RoleAlertDialog)` + `panel.Label(title)` +
-// `panel.description = message`（mygo v0.6.2 的 `ui/feedback.go:186-188`），
+// `panel.description = message`（mygo v0.6.3 的 `ui/feedback.go:186-188`），
 // 所以读屏软件报得出「删除确认吗？」和它下面那一句正文。而 `ui.Modal`
 // （`coreDialogBase`）只给 `Role(RoleDialog)`——**既没有名字也没有描述**，
 // 于是读屏软件只报「一个对话框」。
 //
 // 判据：**那个标题在 `Texts()` 里出现两次**——一次是面板的无障碍名字，一次是
-// 那个标题字本身（原生那一份也是这样：它也是 `Label` + 一个同名��字）。
+// 那个标题字本身（原生那一份也是这样：它也是 `Label` + 一个同名文字）。
 func TestTheConfirmDialogHasANameInTheAccessibilityTree(t *testing.T) {
 	_, s, tt := collectionShell(t, "12345",
 		mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
@@ -154,7 +154,7 @@ func TestTheConfirmButtonTakesTheToneColor(t *testing.T) {
 // ⚠️ **不能拿标题当尺子**：面板自己带着标题（`Label`，见
 // `TestTheConfirmDialogHasANameInTheAccessibilityTree`），而面板是标题那行字的
 // **父**——父先被遍历，所以 `Find(标题)` 给的是**面板**那个框（高 126），不是
-// 标题字的高（19）。拿它当尺子，这一���会量出「正文的行高是标题的 87%」而
+// 标题字的高（19）。拿它当尺子，这一次会量出「正文的行高是标题的 87%」而
 // 判据写的是 14/16 ——差得远。
 //
 // ⚠️ **也不能拿宽度当判据**：中文标点在系统字体里是**半宽**的（实测「。」占

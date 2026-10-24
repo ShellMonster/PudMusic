@@ -19,9 +19,9 @@ import (
 // 为什么不用那边的常量：布局和期望都用它的话，常量一改两边一起跟着变，测试就
 // 发现不了了。它们的真值只来自 Biu 的源码，不来自我们的常量。
 const (
-	biuRowCoverSize = 56  // layout/playbar/left/index.tsx:29-45 的 width/height
-	biuFullCoverW   = 384 // max(260, min(1200*0.7, 800*0.48, 520)) = min(840,384,520)
-	biuFullCoverH   = 288 // 封面宽 * 0.75
+	biuRowCoverSize = 52  // 设计规范 v0.1 §7.1：播放条封面 52×52（原 Biu 是 56）
+	biuFullCoverW   = 320 // 设计规范 v0.1 §7.5：正方形 320（窗口宽 < 1000 用 240）
+	biuFullCoverH   = 320 // 正方形
 	biuHideSeconds  = 3   // index.tsx:132 的 scheduleHideUi(3000)
 )
 
@@ -208,15 +208,28 @@ func TestTheCoverFliesFromTheRowIntoTheFullScreenBackground(t *testing.T) {
 		t.Errorf("满屏的封面是 %vx%v，Biu 的是 %dx%d（1200×800 的窗口）",
 			end.W, end.H, biuFullCoverW, biuFullCoverH)
 	}
-	// 居中：它在**左边那一栏**里居中（票 #236：歌词开着的时候满屏分两栏，
-	// 右边那一栏让给歌词，见 `viewFullStage`）。
+	// 落位：它**靠左边那一栏的右沿**（上游 `justify-end` + `px-12`，
+	// `full-screen-player/index.tsx:331-332`）。
 	//
-	// ⚠️ **0.42 写死在这儿**：布局和期望都用生产代码那个常量的话，常量一改
+	// ⚠️ **这些数写死在这儿**：布局和期望都用生产代码那个常量的话，常量一改
 	// 两边一起变，测试就发现不了了（这个文件的规矩）。
-	const wantCoverColRatio = 0.42
-	midX := float32(fullWinW) * wantCoverColRatio / 2
-	if d := abs32(end.X + end.W/2 - midX); d > 1 {
-		t.Errorf("满屏封面的中心在 x=%v，左边那一栏的中线是 %v", end.X+end.W/2, midX)
+	//
+	//	左边那一栏   600（上游 50/50，1200 的一半）
+	//	右边留白     48（上游 `px-12`）
+	//	封面         384 宽 → 右沿 552、左沿 168、中心 360
+	//
+	// 上游实图量出来的是 x=168..551（报告 S-22）。
+	const (
+		wantCoverColW = 600
+		wantCoverPad  = 48
+	)
+	wantCenter := float32(wantCoverColW - wantCoverPad - biuFullCoverW/2)
+	if d := abs32(end.X + end.W/2 - wantCenter); d > 1 {
+		t.Errorf("满屏封面的中心在 x=%v，want %v（左边那一栏 %d 宽，右边留 %d）",
+			end.X+end.W/2, wantCenter, wantCoverColW, wantCoverPad)
+	}
+	if d := abs32(end.X - (wantCenter - biuFullCoverW/2)); d > 1 {
+		t.Errorf("满屏封面的左沿在 x=%v，want %v", end.X, wantCenter-biuFullCoverW/2)
 	}
 }
 

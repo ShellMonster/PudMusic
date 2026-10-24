@@ -8,6 +8,7 @@ package ui
 
 import (
 	"fmt"
+	tclean "github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,18 +25,25 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// dynamicCoverW / dynamicCoverH 是投稿那一块的封面尺寸。
-//
-// Biu 那边是 `h-32 w-48`（`dynamic-feed/item.tsx:156`），Tailwind 的
-// 32 × 4 = 128 高、48 × 4 = 192 宽，比例 1.5:1。**不是 132×88**——那是
-// 早一版自己缩过的尺寸，卡片左右两侧因此空出一大块。
+// dynamicCoverW / dynamicCoverH 是投稿那一块的封面尺寸：纯音频产品，封面是**方的**
+// （设计规范 v0.1 §7.17，取代上游 Biu 的 192×128 横图缩略图）。
 const (
-	dynamicCoverW = 192
-	dynamicCoverH = 128
+	dynamicCoverW = 96
+	dynamicCoverH = 96
 )
+
+// dynamicPlayBtn 是投稿卡右边那枚播放键的直径；它是正圆，所以圆角是直径的一半，不跟主题圆角走。
+const dynamicPlayBtn = 36
 
 // dynamicPicSide 是图文里每张图的边长。
 const dynamicPicSide = 92
+
+// dynamicCardPadY 是动态条目上下的内边距：上游的 `pt-4`（CardHeader）和
+// `pb-4`（卡片自己），两个都是 16。
+//
+// ⚠️ **左右是 0**（上游那一档没有横向内边距）：那一段由页面那一层给——
+// 动态流那一页是 16+16 = 32，UP 空间那一页是 `p-4` 的 16。
+const dynamicCardPadY = space.Px16
 
 // maxDynamicPics 是图文最多画几张图。
 //
@@ -146,7 +154,9 @@ func likeFailText(like bool, err error) string {
 // **框里那张图**，框不动——框要是自己长大，它就会压到旁边的标题上。
 func (s *Shell) viewCollectionRow(c *ui.Context, col bili.UpCollection, selected, ring bool) {
 	t := c.Theme()
-	box := ui.Row(c).Grow(1).Gap(space.Px10).Padding(space.Px8).AlignItems(ui.Center).
+	box := ui.Row(c).Grow(1).Gap(space.Px12).Padding(space.Px12).AlignItems(ui.Center).
+		Margin(space.None, space.None, space.Px8, space.None).
+		Background(s.cardBackground(t)).Radius(s.cardRadius(t)).Border(1, t.Border).
 		Key("coll:" + strconv.FormatInt(col.ID, 10))
 	// ⚠️ hover 要在 Children **之前**问（理由同 `widgets/list` 的 grid.go）：
 	// 它报的是这一帧指针在不在这一行上，而封面是在 Children 里画的。
@@ -161,11 +171,11 @@ func (s *Shell) viewCollectionRow(c *ui.Context, col bili.UpCollection, selected
 		s.navigate(collectionPath(col.ID))
 	}
 	box.Children(func() {
-		s.spaceThumbZoom(c, col.Cover, 48, 64,
+		s.spaceThumbZoom(c, col.Cover, 72, 72,
 			"coll-zoom:"+strconv.FormatInt(col.ID, 10), on)
 		ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
-			ui.Text(c, col.Title).FontSize(scale.Font(c, scale.Size14)).MaxLines(2).Ellipsis("…")
-			ui.Text(c, fmt.Sprintf("%d 条", col.Count)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+			ui.Text(c, col.Title).FontSize(scale.Font(c, scale.Size16)).MaxLines(2).Ellipsis("…")
+			ui.Text(c, fmt.Sprintf("%d 首", col.Count)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 		})
 	})
 }
@@ -179,23 +189,51 @@ func (s *Shell) viewCollectionRow(c *ui.Context, col bili.UpCollection, selected
 // `/user/{mid}`）。这是「能点进对应 UP 空间」那条验收在卡片上的落点。
 func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic, selected, ring bool) {
 	t := c.Theme()
-	// 卡片本身照上游 `border-default-100 mb-2 w-full rounded-none border-b
-	// bg-transparent pb-4`（`dynamic-feed/item.tsx:80`）：
-	//   - 下边框一条；
-	//   - 距下一条 8（`mb-2`）；
-	//   - 卡内下边距 16（`pb-4`）、上边距 16（CardHeader 的 `pt-4`）；
-	//   - **左右 0**：那 32 由页面那一层给（动态流是 16+16，UP 空间是 `p-4`）。
+	// ⚠️ **通栏**：左右 0、只有一条下边框、透明底、直角。
+	//
+	// 上游 `border-default-100 mb-2 w-full rounded-none border-b bg-transparent
+	// pb-4`（`dynamic-feed/item.tsx:80`）+ CardHeader 的 `pt-4`：
+	//   - **左右 0**：那 16（动态流那一页是 16+16 = 32，UP 空间是 `p-4` 的 16）
+	//     由页面那一层给——卡片自己再缩 16 的话，同一份内容上游左右各多出一段，
+	//     而上游那边是「图左右略宽」的（用户 2026-10-25 说的）；
+	//   - 上下各 16（`pt-4` / `pb-4`）；
+	//   - **只有一条下边框**（`border-b`）、**透明底**（`bg-transparent`）、
+	//     **直角**（`rounded-none`）；
+	//   - 距下一条 8（`mb-2`）——**那一段由列表的行间距给**（`upspace_tabs.go`
+	//     和 `dynamicfeed.go` 里的 `GapY`）。不给的话卡片自己的下外边距会把
+	//     **框架那一层行悬停底**露在卡片底下（就是那条棕带，见下面那段）。
+	//
+	// # 底下那条棕带是怎么来的，怎么没的
+	//
+	// 框架给「指针压着的那一行」铺一层 `t.SurfaceHover`（`mygo/ui/list.go` 的
+	// styleFn：`w.bg = t.SurfaceHover`）。那一层铺的是**整行**的矩形，而**行比
+	// 卡片高**（差着卡片自己的下外边距）——于是卡片**底下**那一条露出了框架
+	// 那一层。暖纸主题下 `t.SurfaceHover` 是**淡棕**（`surface2` 往字色推 4%），
+	// 用户看到的就是「莫名其妙的一层棕色阴影」（2026-10-25）。
+	//
+	// ⚠️ **盖掉的是那一层，不是把主题里那一档调淡**：调淡 `t.SurfaceHover` 会
+	// 波及全应用（关注页的网格、收藏夹页、下载记录页…）。
+	//
+	// ⚠️ **盖的办法是「卡片自己刷页面底色」**：卡片现在左右 0、上下 16，正好
+	// 填满整行，于是它刷的底色把框架那一层整个盖住——**悬停反馈本身还在**
+	// （作者名、赞、下一首播放、下载音频那几个键各自有反馈）。
 	card := ui.Column(c).Key("dyn:"+d.ID).Grow(1).
-		Padding(space.Px16, space.None, space.Px16, space.None).Margin(space.None, space.None, space.Px8, space.None).
+		Padding(dynamicCardPadY, space.None, dynamicCardPadY, space.None).
+		// ⚠️ **底色刷成页面底色，是为了盖掉框架那一层悬停底**（见下面那段）。
+		Background(t.Background).
 		BorderWidth(0, 0, 1, 0).BorderColor(t.Border).
-		Gap(space.Px6)
+		Gap(space.Px8)
 	// 选中那一层：盖掉框架那块实心主色底，键盘走到它上面时给它一圈焦点环
 	//（理由见 `widgets/list/selection.go`）。
-	card = list.SelectedRow(card, t, selected, card.Hovered(), ring)
+	//
+	// ⚠️ **`hovered` 传 false**：框架那一层悬停底**已经被卡片自己刷的页面底色
+	// 盖掉了**（下面那段），所以「盖上去的颜色」恒是页面底色——传 true 的话，
+	// 指针停在一张**被选中**的动态上时，整条卡片会变成淡棕。
+	card = list.SelectedRow(card, t, selected, false, ring)
 	card.Children(func() {
 		// ① 头一行：头像 + 昵称（可点）+ 时间。
 		ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-			s.spaceAvatar(c, d.Author.Face, 32, false)
+			s.spaceAvatar(c, d.Author.Face, 40, false)
 			name := d.Author.Name
 			if name == "" {
 				name = "这个 UP 主"
@@ -206,7 +244,11 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic, selected, ring bo
 				s.navigate(upPathOf(d.Author.Mid))
 			}
 			if d.Time != "" {
-				ui.Text(c, d.Time).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
+				when := d.Time
+				if d.Kind == bili.DynamicVideo && d.Video != nil {
+					when += " · 发布了音乐"
+				}
+				ui.Text(c, when).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 			}
 		})
 
@@ -271,9 +313,6 @@ func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 		if flatButton(c, "下载音频").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Clicked() {
 			s.downloadLater(dynVideoItem(d.Video, d.Author), false, "下载音频")
 		}
-		if flatButton(c, "下载视频").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Clicked() {
-			s.downloadLater(dynVideoItem(d.Video, d.Author), true, "下载视频")
-		}
 	})
 }
 
@@ -323,21 +362,25 @@ func (s *Shell) viewDynamicPics(c *ui.Context, pics []string) {
 // 真放不了的时候说一句话（`list.Actions.Play` 里的 Toast），不装死。
 func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author bili.DynamicAuthor) {
 	t := c.Theme()
-	box := ui.Row(c).Grow(1).Gap(space.Px8).Padding(space.Px6).Radius(t.Radius).
+	box := ui.Row(c).Grow(1).Gap(space.Px12).Padding(space.Px8).Radius(t.Radius).
 		Background(t.Surface).AlignItems(ui.Center).Key("dynv:" + v.Bvid)
 	if box.Clicked() {
 		list.AppActions(s.app, s.addToast).Play([]app.Item{dynVideoItem(v, author)})
 	}
 	box.Children(func() {
 		s.spaceThumb(c, v.Cover, dynamicCoverW, dynamicCoverH)
-		ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
-			ui.Text(c, v.Title).FontSize(scale.Font(c, scale.Size14)).MaxLines(2).Ellipsis("…")
+		ui.Column(c).Grow(1).Gap(space.Px4).Children(func() {
+			ui.Text(c, tclean.Clean(v.Title).Title).FontSize(scale.Font(c, scale.Size14)).MaxLines(2).Ellipsis("…")
 			if v.Desc != "" {
 				ui.Text(c, v.Desc).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 			}
 			if meta := dynVideoMeta(v); meta != "" {
 				ui.Text(c, meta).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 			}
+		})
+		// 右边一枚实心强调色圆的播放键（整块也可点，这一枚是看得见的入口）。
+		ui.Box(c).Size(dynamicPlayBtn, dynamicPlayBtn).Radius(dynamicPlayBtn / 2).Background(t.Accent).Center().Children(func() {
+			ui.Icon(c, icon(iconPlayFill)).FontSize(18).TextColor(t.AccentText)
 		})
 	})
 }
@@ -346,7 +389,7 @@ func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author b
 func dynVideoMeta(v *bili.DynamicArchive) string {
 	meta := ""
 	if v.Play != "" {
-		meta = v.Play + "观看"
+		meta = v.Play + "收听"
 	}
 	if v.Duration != "" {
 		if meta != "" {

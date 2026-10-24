@@ -86,8 +86,9 @@ func (s *Shell) fetchUp(ctx context.Context, sp *upSpace, tab int, cursor string
 	switch tab {
 	case upTabDynamic:
 		pg, err := s.app.UpDynamics(ctx, sp.mid, cursor)
-		r.err, r.dyns, r.hasMore, r.dropped = err, pg.Items, pg.HasMore, pg.Dropped
+		r.err, r.dyns, r.hasMore, r.drops = err, pg.Items, pg.HasMore, pg.Drops
 		r.cursor, r.sent = pg.Offset, pg.Raw
+		r.dropWhy = pg.DropWhy
 	case upTabCollection:
 		// 收藏夹那个接口是**分页**的（pn/ps，默认 20；见 bili.SpaceFavFolders）。
 		pg, err := s.app.UpCollections(ctx, sp.mid, page+1)
@@ -95,6 +96,24 @@ func (s *Shell) fetchUp(ctx context.Context, sp *upSpace, tab int, cursor string
 	case upTabSeries:
 		pg, err := s.app.UpSeries(ctx, sp.mid, page+1, upSeriesPageSize)
 		r.err, r.cols, r.hasMore, r.sent = err, pg.Collections, pg.HasMore, len(pg.Collections)
+	}
+
+	// 🔴 **每一趟都留一句计数**：这一页 B 站发了几条、留下几条、丢掉几条、
+	// 还有没有下一页。
+	//
+	// 「一直刷」这个症状要靠它才看得见：界面上那个转着的圈**分不出**是
+	// 「同一页被反复要了」还是「真的在翻页」（票 #300）。而丢掉的理由更要
+	// 留着——「整页一条都不剩」在界面上完全看不出来（只有一个空列表）。
+	//
+	// ⚠️ **丢掉的那几条要按类别分开写**（票 #344）：「形态不认识」和「读不懂」
+	// 是两回事，合在一起就看不出是 B 站换了形态还是我们读不懂。
+	if r.err == nil {
+		log.Printf("biu: 拉 UP 空间的「%s」：B 站发了 %d 条，留下 %d 条，丢掉 %d 条（%s），还有下一页=%v",
+			upTabNames[tab], r.sent, len(r.dyns)+len(r.cols), len(r.drops),
+			dropCountText(dropCountsOf(r.drops)), r.hasMore)
+		for _, why := range r.dropWhy {
+			log.Printf("biu: 拉 UP 空间的「%s」丢掉一条：%s", upTabNames[tab], why)
+		}
 	}
 }
 
@@ -142,7 +161,14 @@ func (s *Shell) adoptUp(sp *upSpace) {
 			sp.seen[k] = true
 			sp.cols[r.tab] = append(sp.cols[r.tab], col)
 		}
-		sp.dropped[r.tab] = r.dropped
+		// ⚠️ **丢掉的是累计的，不是这一页的**：翻了三页各丢 5 条就是 15 条，
+		// 界面上那句话说的是「一共有多少条没显示」——说「刚才那 5 条」会让
+		// 用户以为只有 5 条。
+		//
+		// ⚠️ **而且是按「不同的动态」累计的**（票 #344）：B 站翻页会重叠，
+		// 同一批画不出来的动态在两页里各出现一次——按出现次数记的话，那个
+		// 数会**偏大**（翻了三页就可能是同一个数的三倍）。
+		sp.drops[r.tab].add(r.drops)
 		p.adopt(r.cursor, r.sent, r.hasMore)
 	}
 }

@@ -147,7 +147,11 @@ const (
 	// 字重是 `weightMedium`（500，上游的 `font-medium`）——此前是 13/400。
 	ToastFont = Size14
 	// FavPanelItem 是收藏夹浮层里那一项的字。
-	FavPanelItem = Size13
+	//
+	// ⚠️ **14（票 #371）**：这一层是折叠侧栏时的收藏夹入口，而它列的是**收藏
+	// 夹名**——和侧栏里那几行是同一样东西，就得是同一个号（正文 14）。原来是
+	// 13（副题那一档），于是同一个名字在两个地方是两种大小。
+	FavPanelItem = Size14
 	// RateMenuFont 是浮层里那七行的字号：**12**。
 	//
 	// 上游那一列的按钮是 `size="sm"`，HeroUI 那个档的字是 `text-tiny`（12）。

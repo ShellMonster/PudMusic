@@ -104,9 +104,15 @@ func (st *searchStub) fetch(tab int, _ context.Context, page int) (list.Page, er
 
 	// 「全部播放」那份副本：和真的那一支走同一段逻辑，包括**代次对不上就整个丢掉**
 	// （见 fetchSearchTab）。这里抄的是真实现，测的才是真实现那条闸门。
+	//
+	// ⚠️ **`t.total` 也要写**：真实现每一趟都把 B 站给的命中总数记进去（见
+	// `fetchSearchTab`），而它就是「找到 N 个结果」那一句里的 N（无障碍）。这里
+	// 不写的话那条句子永远走「不知道总数」的回落分支，用例断言的就是**屏幕上
+	// 那几行**而不是真总数——钉的是另一条路（真总数那一半没被验过）。
 	t.mu.Lock()
 	if gen == t.gen {
 		t.loaded = append(t.loaded, rows...)
+		t.total = st.total
 	}
 	t.mu.Unlock()
 
@@ -136,7 +142,13 @@ func (st *searchStub) rows(tab, page int) []list.Music {
 	}
 	hits := make([]bili.VideoHit, n)
 	for i := range hits {
-		hits[i] = bili.VideoHit{Bvid: stubBvid(page, i), Title: stubTitle(page, i), Owner: "某UP"}
+		// ⚠ **编号要给上**：B 站真的给了（`search.go` 的 `mid`），而界面上「点 UP 名
+		// 进他的空间」靠的就是它（票 #360）。这一份夹具原来没给，于是搜索页上
+		// 那一列 UP 名是点不动的——而真实返回里它点得动。
+		hits[i] = bili.VideoHit{
+			Bvid: stubBvid(page, i), Title: stubTitle(page, i), Owner: "某UP",
+			Mid: stubMid(page, i),
+		}
 	}
 	if st.overlap && page > 1 {
 		// 第 2 页的头一行重复上一页的最后一行。
@@ -233,19 +245,24 @@ func queueOneSong(t *testing.T, s *Shell, tt *mygoui.Tester) app.Item {
 // 三个反直觉行为
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestPlayAllOnlyAppendsToTheQueue 是验收第 1 条，也是最容易被做反的一条：
-// 「全部播放」**不替换**当前队列。
+// TestPlayAllAppendsToTheQueueWithoutDroppingWhatIsThere 是验收第 1 条，也是最
+// 容易被做反的一条：「全部播放」**不替换**当前队列。
 //
 // 上游的原话就在那儿（`video-list/index.tsx:89-101`）：它把当前已加载的列表全量
 // 映射之后调 `addList`，**不是 `playList`**。做成了 `PlayFrom`（换掉整个队列、
 // 从第一首起播）的表现是：用户正听着歌，按一下按钮，正在放的那首立刻被换掉，
 // 队列里前面放的那些全没了。
-func TestPlayAllOnlyAppendsToTheQueue(t *testing.T) {
+//
+// ⚠️ **这一条只判队列，不判正在放的是哪一首**：票 #299 之后这一枚**也开始播**
+// （从这一页的第一首开始），而这一页的歌是**在线的**——测试环境里没挂取流那一段
+// （`internal/app` 的 `StreamingMounted`），按下去只会得到一句「在线播放暂时用不了」。
+// 「开始播」那一条用**本地歌**钉：`ticket299_test.go` 的那两条，还有
+// `internal/app` 的 `TestEnqueueAndPlayAppendsInOrderAndStartsAtTheFirst`。
+func TestPlayAllAppendsToTheQueueWithoutDroppingWhatIsThere(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
 	settleText(t, tt, "第 1 页 第 1 首")
 
 	queueOneSong(t, s, tt)
-	playing := s.app.Snapshot().Title
 	before := s.app.Queue().Items()
 	if len(before) != 1 {
 		t.Fatalf("测试自己出了问题：队列里有 %d 项", len(before))
@@ -257,10 +274,6 @@ func TestPlayAllOnlyAppendsToTheQueue(t *testing.T) {
 	tt.Frame()
 	tt.Frame()
 
-	// 🔴 正在放的那一首不能换。
-	if got := s.app.Snapshot().Title; got != playing {
-		t.Errorf("按了「全部播放」之后正在放的是 %q，want 还是 %q", got, playing)
-	}
 	after := s.app.Queue().Items()
 	if len(after) != len(before)+24 {
 		t.Fatalf("队列里有 %d 项，want %d（原来 1 + 追加 24）", len(after), len(before)+24)
@@ -270,10 +283,6 @@ func TestPlayAllOnlyAppendsToTheQueue(t *testing.T) {
 		if after[i] != it {
 			t.Errorf("队列第 %d 项被换了：%+v，want %+v", i, after[i], it)
 		}
-	}
-	// 话照抄上游（`video-list/index.tsx:100`）。
-	if !tt.HasText("已添加 24 首到播放列表") {
-		t.Errorf("没有说加了几首，文字有 %q", tt.Texts())
 	}
 }
 

@@ -5,7 +5,7 @@
 // 上游的滚动条是 `overlayscrollbars` 的默认样式：10 像素宽，指针放上去
 // `--os-handle-bg-hover` 比默认那一档深一点（`biu/src/app.css:55-61`），提示
 // 「这根能拖」。MyGo 的滚动条只有 `Theme.Scrollbar` **一个**颜色，没有悬停档
-// （`mygo/ui/paint.go:970-1012` 的 `scrollbars`），所以这一层只能我们自己接：
+// （`mygo/ui/paint.go:975-1020` 的 `scrollbars`），所以这一层只能我们自己接：
 // 在 view 里量出「指针在滚动条上」，由界面层在下一帧把主题那个颜色换深一档
 // （见 `internal/ui/scrollbar.go`）。
 //
@@ -25,7 +25,7 @@ const Width = 10
 
 // HotZone 是「算压在滚动条上」的那一条竖带的宽。
 //
-// 等于滚动条本身 + 框架在它左边留的 6 像素（`mygo/ui/paint.go:995-999` 的
+// 等于滚动条本身 + 框架在它左边留的 6 像素（`mygo/ui/paint.go:1056-1058` 的
 // `vTrack`：`X = 右边 - width - 6`，宽 `width + 6`）。用整条轨道而不是精确到
 // 那个 thumb：上游的 `:hover` 是 handle 上的，但轨道上任何一处都离 handle
 // 不远，而用户要的提示是「能拖」——多出来的那几像素只会让提示早一点出现。

@@ -31,6 +31,7 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
@@ -73,6 +74,13 @@ type dynamicFeed struct {
 	// MyGo 会在「同一个 ListState 被两个 List 显示」时 panic。
 	state     ui.ListState
 	authState ui.ListState
+	// itemRowKeys / authRowKeys 记着两栏每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
+	// （票 #313）。**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头）：
+	// 翻页追加、刷新时新的动态插到前面——身份对不上就重算。
+	itemRowKeys rowkey.Memo[string, any]
+	authRowKeys rowkey.Memo[int64, any]
 	// keys 是右边那一栏的键盘接线（游标 + 「↑ 到顶回侧栏」）。
 	//
 	// ⚠️ **这一栏是裸的 `ui.List`**（卡片是自己画的，走不了 `widgets/list`
@@ -87,9 +95,13 @@ type dynamicFeed struct {
 	// seen 是**已经收进来的身份**，挡翻页重叠（和 `upSpace.seen` 同一个理由：
 	// 两个一模一样的行身份会让那几行共用一份状态）。
 	seen map[string]bool
-	// dropped 是右边丢掉的动态条数。不画在界面上，只用来让「一个格子都没有」
-	// 能说清是「真的没有」还是「他发的那些我们画不出来」。
-	dropped int
+	// drops 是右边丢掉的那几条（**按不同的动态记**，见 drops.go）。不画在
+	// 界面上，只用来让「一个格子都没有」能说清是「真的没有」还是「他发的
+	// 那些我们画不出来」。
+	//
+	// ⚠️ **按类别分开记**：界面上那句话要按类别说，「读不懂」不能被说成
+	// 「形态不认识」（票 #344）。
+	drops dropTally
 	// started 是右边已经拉过至少一页了。
 	started bool
 	// selfMid 是**这份缓存是为哪个账号拉的**。作者栏和「关注的动态」都是
@@ -113,7 +125,13 @@ type feedResult struct {
 	// sent 是 B 站这一页发了几条（过滤之前）。见 upPager.adopt。
 	sent    int
 	hasMore bool
-	dropped int
+	// drops 是这一页丢掉的那几条（带类别和身份）。
+	//
+	// ⚠️ **身份是给上层去重用的**：B 站翻页会重叠，同一条画不出来的动态在
+	// 两页里各出现一次——按出现次数记，那个数会偏大（票 #344）。
+	drops []bili.DroppedDynamic
+	// dropWhy 是丢掉的理由（人话，一种一句）。**只进日志**，不进界面。
+	dropWhy []string
 	err     error
 }
 
@@ -151,7 +169,7 @@ func (s *Shell) resetIfAccountChanged(f *dynamicFeed) {
 	f.feed = upPager{}
 	f.authors = nil
 	f.items = nil
-	f.dropped = 0
+	f.drops = dropTally{}
 	f.started = false
 	f.seen = nil
 }
@@ -180,7 +198,12 @@ func (s *Shell) viewDynamicFeed(c *ui.Context, _ *ui.Route) {
 		// 动态卡片左右各 32：上游是外层 `px-4` 再套一层 `px-4`
 		// （`index.tsx:142` 的 ScrollContainer + 里面那个 `px-4 py-4`），
 		// 16 + 16 = 32。卡自己那一条的左右内边距因此是 0。
-		ui.Column(c).Key("feed-items").Grow(1).FillHeight().PaddingX(space.Px32).Children(func() {
+		//
+		// ⚠️ **上沿那 16 是同一个 `py-4`**：上游那一层 `px-4 py-4` 上下也是 16，
+		// 而 UP 空间那一页的 Tab 面板是 `px-0 py-4`——**两页内容离上一段的距离
+		// 是同一个数**（票 #416：「两页口径一致」）。
+		ui.Column(c).Key("feed-items").Grow(1).FillHeight().
+			Padding(space.Px16, space.Px32, space.None, space.Px32).Children(func() {
 			s.viewFeedItems(c, f)
 		})
 	})
@@ -273,6 +296,7 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 		st := &f.authState
 		// 🔴 铁律四：行身份是「这一行是谁」，不是序号。「全部」是
 		// `auth:0`，关注的人是 `auth:<mid>`（B 站的 mid 不会是 0，撞不上）。
+		// ⚠️ 身份在 `authRowKey` 里算——它自己记着那一份（见那个函数的注释）。
 		st.Key = func(i int) any { return authRowKey(f, i) }
 		st.Label = func(i int) string { return authRowLabel(f, i) }
 
@@ -313,7 +337,23 @@ func authRowKey(f *dynamicFeed, i int) any {
 	if i-1 >= len(f.authors) {
 		return upSentinelKey{}
 	}
-	return "auth:" + strconv.FormatInt(f.authors[i-1].Mid, 10)
+	// ⚠️ **身份是预先装箱好的那一份**（`f.authRowKeys`）：理由见那个字段的注释。
+	//
+	// ⚠️ **按「第几个人」记**：那一行的身份跟着 mid 走，而 mid 不会因为多了一个
+	// 人而变——只有换了人才变。
+	return f.authRowKeys.At(i-1, f.authors[i-1].Mid, authIdentity)
+}
+
+// authIdentity 是作者栏一行的身份（铁律四）：`auth:<mid>`。
+//
+// ⚠️ **「全部」那一行不走这里**：它的身份是 "auth:0"，而那一行在
+// `authRowKey` 的 `i <= 0` 那一支就直接给了——**压根不进 memo**。所以这里
+// 的 raw 永远是「某一个人」的 mid，而 B 站的 mid 不会是 0（撞不上 "auth:0"）。
+//
+// 这一步会分配（拼字符串 + 装箱）——所以它只在 mid 变了的时候才走
+// （见 `rowkey.Memo` 的文件头）。
+func authIdentity(mid int64) any {
+	return "auth:" + strconv.FormatInt(mid, 10)
 }
 
 // authRowLabel 是作者栏第 i 行给无障碍用的名字。
@@ -446,7 +486,8 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 		if i >= len(f.items) {
 			return upSentinelKey{}
 		}
-		return f.items[i].ID
+		// ⚠️ **身份是预先装箱好的那一份**（`f.itemRowKeys`）：理由见那个字段的注释。
+		return f.itemRowKeys.At(i, f.items[i].ID, rowkey.Identity)
 	}
 	st.Label = func(i int) string {
 		if i >= len(f.items) {
@@ -457,6 +498,14 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 
 	// ⚠️ Key 挂在外面的 Column 上，理由见上面那一处。
 	ui.Column(c).Key("feed-dynamic-list").Grow(1).FillHeight().Children(func() {
+		// 「有 N 条我们画不出来」那一行（理由同 upspace_tabs.go 那一处）。
+		//
+		// ⚠️ **只在「一条都没画出来」时出现**：有内容的时候插一行字只是
+		// 噪音；而一条都没有的时候，用户看到的是**一片空白加一个转着的
+		// 圈**——像是坏了，而真相是「他们发的那些我们画不出来」。
+		if len(f.items) == 0 && f.drops.total() > 0 {
+			s.viewDroppedNote(c, f.drops.counts)
+		}
 		// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
 		//
 		// ⚠️ **登记的是 `&f.keys` 而不是裸的句柄**：这一份的 `TakeFocus` 还要
@@ -490,6 +539,11 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 				s.viewDynamicCard(r.Context, f.items[r.Index],
 					f.keys.selected(r.Index), f.keys.ring(r.Context))
 			})
+		// ⚠️ **行间距由列表给**（上游 `mb-2` = 8）：卡片自己的下外边距**不能**
+		// 留着——那一段属于**行**（不在卡片里），而框架给「指针压着的那一行」铺
+		// 一层 `t.SurfaceHover`，留着它卡片底下就露出那一层（暖纸主题下是淡棕）。
+		// 理由和 `upspace_tabs.go` 里那一处一样（票 #416）。
+		dynList = dynList.GapY(space.Px8)
 		s.trackScrollbar(dynList)
 	})
 
@@ -506,7 +560,7 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 // feedEmptyKey 是空状态的 key。带上「有没有丢弃」那一档，所以两句话不共用
 // 一个 key——同一个 key 上换文案，读屏软件读到的是同一句话。
 func feedEmptyKey(f *dynamicFeed) string {
-	if f.dropped > 0 {
+	if f.drops.total() > 0 {
 		return "dropped"
 	}
 	return "none"
@@ -519,13 +573,14 @@ func feedEmptyKey(f *dynamicFeed) string {
 //
 // ⚠️ **「有丢弃」和「真的没有」必须说两句话**：B 站的动态有二十多种形态，
 // 这一版只画三种。说成「暂无动态」的话，用户会以为关注的人都没发过。
+//
+// ⚠️ **按类别说**（票 #344）：「形态不认识」和「我们读不懂」是**两回事**。
 func feedEmpty(f *dynamicFeed) emptyState {
-	if f.dropped > 0 {
+	if f.drops.total() > 0 {
 		return emptyState{
 			Title: "这里没有能显示的动态",
 			Icon:  iconEmptyFeed,
-			Hint: fmt.Sprintf("B 站的动态有好几种形态，这一版只画得出其中三种"+
-				"（纯文字、图文、投稿），刚才那 %d 条都落在别的形态上了", f.dropped),
+			Hint:  dropSentence(f.drops.counts),
 		}
 	}
 	return lookup(dynamicFeedPath).Empty
@@ -603,8 +658,23 @@ func (s *Shell) fetchFeed(ctx context.Context, f *dynamicFeed, which int, cursor
 		r.err, r.authors, r.hasMore, r.sent = err, pg.Authors, pg.HasMore, len(pg.Authors)
 	default:
 		pg, err := s.app.DynamicFeed(ctx, cursor)
-		r.err, r.dyns, r.hasMore, r.dropped = err, pg.Items, pg.HasMore, pg.Dropped
+		r.err, r.dyns, r.hasMore, r.drops = err, pg.Items, pg.HasMore, pg.Drops
 		r.cursor, r.sent = pg.Offset, pg.Raw
+		r.dropWhy = pg.DropWhy
+	}
+
+	// 🔴 **每一趟都留一句计数**（理由同 upspace_fetch.go 那一处）：界面上那个
+	// 转着的圈**分不出**是「同一页被反复要了」还是「真的在翻页」（票 #300）。
+	//
+	// ⚠️ **丢掉的那几条要按类别分开写**（票 #344）：「形态不认识」和「读不懂」
+	// 是两回事，合在一起就看不出是 B 站换了形态还是我们读不懂。
+	if r.err == nil {
+		log.Printf("biu: 拉动态流：B 站发了 %d 条，留下 %d 条，丢掉 %d 条（%s），还有下一页=%v",
+			r.sent, len(r.dyns)+len(r.authors), len(r.drops),
+			dropCountText(dropCountsOf(r.drops)), r.hasMore)
+		for _, why := range r.dropWhy {
+			log.Printf("biu: 拉动态流丢掉一条：%s", why)
+		}
 	}
 }
 
@@ -654,7 +724,13 @@ func (s *Shell) adoptFeed(f *dynamicFeed) {
 			f.authors = append(f.authors, a)
 		}
 		if r.which == feedItems {
-			f.dropped = r.dropped
+			// ⚠️ **丢掉的是累计的，不是这一页的**：翻了好几页各丢几条就是几十条，
+			// 界面上那句话说的是「一共有多少条没显示」。
+			//
+			// ⚠️ **而且是按「不同的动态」累计的**（票 #344）：B 站翻页会重叠，
+			// 同一批画不出来的动态在两页里各出现一次——按出现次数记的话，那个
+			// 数会**偏大**。
+			f.drops.add(r.drops)
 			f.started = true
 		}
 		// ⚠️ 传的是**这一页**返回了几行，不是累计的：累计的数在「第一页就空」

@@ -26,7 +26,15 @@ func (s *Shell) viewSpaceTabs(c *ui.Context, sp *upSpace) {
 	// 的那一类控件（Checkbox/Radio/Slider/List/TextInput 都一样），框架造它
 	// 的时候就把状态建好了，事后再挂 key 会 panic（`ui/element.go` 的 `Key`）。
 	// 给他外面套一层是最省事的做法。
-	ui.Column(c).Key("space-tabs").PaddingX(upPad).Children(func() {
+	// ⚠️ **下面那 16 是四张 Tab 共用的那一段**：Tab 那一条和内容之间留一段
+	// （上游那个 Tab 的**内容面板**是 `px-0 py-4`——上下各 16，左右那 16 由页面
+	// 外层给）。原来一点都没有，于是「动态」两个字底下一张卡片就顶上来
+	// （用户 2026-10-25 说的）。
+	//
+	// ⚠️ **这一段给在 Tab 那一条上，不在内容面板里**：四张 Tab 的内容都摆在
+	// 下面那一个 `space-body` 里（`viewUpSpace`），所以这一段是**四张一起**的
+	// ——「一页两套口径」这件事从根上就不可能再有。
+	ui.Column(c).Key("space-tabs").Padding(space.None, upPad, space.Px16, upPad).Children(func() {
 		// ⚠️ **主 Tab 用轨道 + 滑块那一种**（`mainTabs`，见 tabs.go）：这一排
 		// 和次级排序那几排不是同一个样子（票 #138）。
 		//
@@ -89,6 +97,24 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 	ui.Column(c).Grow(1).FillHeight().Children(func() {
 		// 表头**在列表外面**（`rowheader.go` 文件头）：列表往下滚它不动，宽屏下滚到
 		// 右边列名也还在。
+		// 工具条：全部播放 + 共几首（设计规范 §7.18，和首页、搜索页同一枚主按钮）。
+		//
+		// ⚠️ **上边那一格是 0**：Tab 那一条和这一段之间那 16 已经给了（上面
+		// `viewSpaceTabs` 那一层），工具条自己再给一份的话，这一张 Tab 的间距就
+		// 和另外三张不是同一个数了。
+		ui.Row(c).Key("upspace:toolbar").FillWidth().Gap(space.Px12).AlignItems(ui.Center).
+			Padding(space.None, upPad, space.Px8, upPad).Children(func() {
+			if playAllButton(c, p.Loading || p.Loaded == 0).Clicked() {
+				s.playAllSongs(sp.videos.Items())
+			}
+			if p.Loaded > 0 {
+				n := fmt.Sprintf("已加载 %d 首", p.Loaded)
+				if !p.HasMore {
+					n = fmt.Sprintf("共 %d 首", p.Loaded)
+				}
+				ui.Text(c, n).FontSize(scale.Font(c, scale.Size14)).TextColor(c.Theme().TextMuted)
+			}
+		})
 		sp.videos.Header(c, "upspace:header")
 		sp.videos.View(c)
 	})
@@ -149,7 +175,7 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	//     永远不再加载。
 	keepLooking := p.started && p.hasMore
 	if upRowCount(sp, tab) == 0 && !keepLooking {
-		s.viewEmpty(c, upEmptyKey(sp, tab), upTabEmpty(tab, sp.dropped[tab]))
+		s.viewEmpty(c, upEmptyKey(sp, tab), upTabEmpty(tab, sp.drops[tab].counts))
 		return
 	}
 
@@ -174,12 +200,24 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	//   - 滚动容器**直接**当别的容器的下一层时，它里面文字的盒子量出来是
 	//     0×0（BMG-16 记着的 Tester 那个坑），套一层就正常。
 	//
-	// ⚠️ **左右 16 是这一层给的，不在卡片里**：上游这三张 Tab 的内容摆在
+	// ⚠️ **左右 16 是这一层给的，上下那一段不在这一层**（在上面 Tab 那一条的
+	// 下内边距里，理由见 `viewSpaceTabs`）：上游那三张 Tab 的内容摆在
 	// `user-profile/index.tsx:130` 那个 `p-4` 里，而动态卡片自己左右是 0
 	// （动态流那一页的 32 是另一层 16+16）。卡片自己做内边距的话，同一个
 	// 组件在两页就会缩成两个宽度。
 	ui.Column(c).Key("space-list:" + upTabNames[tab]).Grow(1).FillHeight().
 		PaddingX(upPad).Children(func() {
+		// 「有 N 条我们画不出来」那一行。
+		//
+		// ⚠️ **只在「一条都没画出来」时出现**：有内容的时候插一行字只是
+		// 噪音；而一条都没有的时候，用户看到的是**一片空白加一个转着的
+		// 圈**——像是坏了，而真相是「他发的那些我们画不出来」（票 #300）。
+		//
+		// ⚠️ **它不是空状态**：空状态会把整个列表换掉，而哨兵那一行还得
+		// 留着（翻页靠它）。
+		if upRowCount(sp, tab) == 0 && sp.drops[tab].total() > 0 {
+			s.viewDroppedNote(c, sp.drops[tab].counts)
+		}
 		// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
 		//
 		// ⚠️ **登记的是 `&sp.keys[tab]` 而不是裸的句柄**：这一份的
@@ -211,6 +249,18 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 				}
 				s.viewUpRow(r.Context, sp, tab, r.Index)
 			})
+		// ⚠️ **动态那一张 Tab 的行间距由列表给**（上游 `mb-2` = 8）。
+		//
+		// 卡片自己的下外边距**不能**留着：那一段属于**行**（不在卡片里），而
+		// 框架给「指针压着的那一行」铺一层 `t.SurfaceHover`——留着它，卡片底下
+		// 就露出那一层（暖纸主题下是淡棕，用户 2026-10-25 说的那条带子）。
+		// 改成列表的行间距之后，行和卡片一样高，那一层被卡片自己盖住了。
+		//
+		// ⚠️ **收藏夹 / 合集那两张 Tab 不给**：它们那一行是**卡片**（自己的底色、
+		// 圆角、描边），行间距还是它自己的下外边距 8（画面不变）。
+		if tab == upTabDynamic {
+			spaceList = spaceList.GapY(space.Px8)
+		}
 		s.trackScrollbar(spaceList)
 	})
 
@@ -252,15 +302,48 @@ func upRowKey(sp *upSpace, tab, i int) any {
 		if i >= len(sp.dynItems) {
 			return upSentinelKey{}
 		}
-		return sp.dynItems[i].ID
+		// ⚠️ **身份是预先装箱好的那一份**（`sp.rowKeys[tab]`）：理由见那个字段
+		// 的注释（票 #313）。
+		return sp.rowKeys[tab].At(i, upRowIdent{kind: 0, id: sp.dynItems[i].ID}, upRowIdentity)
 	case upTabCollection, upTabSeries:
 		if i >= len(sp.cols[tab]) {
 			return upSentinelKey{}
 		}
 		c := sp.cols[tab][i]
-		return fmt.Sprintf("coll:%d:%d", c.Type, c.ID)
+		// ⚠️ 理由同上面那一处。
+		return sp.rowKeys[tab].At(i, upRowIdent{kind: 1, typ: c.Type, num: c.ID}, upRowIdentity)
 	}
 	return upSentinelKey{}
+}
+
+// upRowIdent 是 UP 空间那一列行身份的原材（三个 Tab 同一把尺子）。
+//
+// ⚠️ **可比较**：它要当「记着算好的那一份」那把钥匙（见 `rowkey.Memo` 的
+// 文件头），所以里面不能有切片。
+type upRowIdent struct {
+	// kind 是哪一档：0 动态，1 收藏夹·合集·系列。
+	kind int
+	// id 是动态的 `id_str`。
+	id string
+	// typ / num 是收藏夹那一档的类型和 id。
+	typ int
+	num int64
+}
+
+// upRowIdentity 是 UP 空间那一列的行身份（铁律四）。
+//
+// ⚠️ **动态用 B 站的 `id_str`；收藏夹/合集用「类型 + id」**。加上类型是必须的：
+// 收藏夹的 id 和合集的 id 是两个不同的编号空间（B 站那边各自从 1 开始数），
+// 混进同一张列表就会撞上——撞上时 MyGo 在 Tester 里当场 panic，真窗口里则是
+// 那两行共用一份状态，选中一个另一个也亮。
+//
+// 这一步会分配（拼字符串 + 装箱）——所以它只在身份变了的时候才走
+// （见 `rowkey.Memo` 的文件头）。
+func upRowIdentity(k upRowIdent) any {
+	if k.kind == 0 {
+		return k.id
+	}
+	return fmt.Sprintf("coll:%d:%d", k.typ, k.num)
 }
 
 // upRowLabel 是第 tab 张 Tab 第 i 行给无障碍和「打字选中」用的名字。
@@ -287,7 +370,14 @@ func upRowLabel(sp *upSpace, tab, i int) string {
 }
 
 // upEmptyKey 是某张 Tab 空状态的 key。
+//
+// ⚠️ **带上「有没有丢弃」那一档**：同一个 key 上换文案，读屏软件读到的是
+// 同一句话，而「暂无动态」和「有 N 条没显示」必须被当成两件事（理由同
+// `feedEmptyKey`）。
 func upEmptyKey(sp *upSpace, tab int) string {
+	if sp.drops[tab].total() > 0 {
+		return "space-dropped:" + strconv.FormatInt(sp.mid, 10) + ":" + upTabNames[tab]
+	}
 	return "space:" + strconv.FormatInt(sp.mid, 10) + ":" + upTabNames[tab]
 }
 
@@ -295,12 +385,18 @@ func upEmptyKey(sp *upSpace, tab int) string {
 //
 // ⚠️ **「有丢弃」和「真的没有」必须说两句话**：B 站的动态有二十多种形态，
 // 这一版只画三种。说成「暂无动态」的话，用户会以为他没发过。
-func upTabEmpty(tab int, dropped int) emptyState {
-	if dropped > 0 {
+//
+// ⚠️ **那个数是累计的，而且按「不同的动态」算**：翻了好几页各丢几条就是几十
+// 条，说「有 N 条落在别的形态上了」比说「刚才那几条」诚实；而 B 站翻页会
+// 重叠，同一条在两页里各出现一次——按出现次数记的话那个数会偏大（票 #344）。
+//
+// ⚠️ **按类别说**（票 #344）：「形态不认识」和「我们读不懂」是**两回事**，
+// 合成一句就是把「B 站改了返回的形状」说成「他发了我们画不出来的形态」。
+func upTabEmpty(tab int, counts bili.DropCounts) emptyState {
+	if counts.Total() > 0 {
 		return emptyState{
 			Title: "这里没有能显示的" + upTabNames[tab],
-			Hint: fmt.Sprintf("B 站的动态有好几种形态，这一版只画得出其中三种"+
-				"（纯文字、图文、投稿），刚才那 %d 条都落在别的形态上了", dropped),
+			Hint:  dropSentence(counts),
 		}
 	}
 	switch tab {

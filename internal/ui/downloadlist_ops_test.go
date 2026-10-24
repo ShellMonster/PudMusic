@@ -133,6 +133,30 @@ func TestPauseAndResumeActuallyMoveTheTask(t *testing.T) {
 	}
 }
 
+// TestAFailedDownloadThatCannotBeRetriedHasNoRetryButton 盯「重试」那一枚
+// 的**亮不亮**（票 #346）。
+//
+// 🔴 **这一条是这一票的主线**：下载记录页上那枚「重试」本来是**另一套机制**
+// （不走 `bili.Recoverable`），于是风控失败的那一项**仍然**给着一枚立刻
+// 重新取流的「重试」键——同一类「点一次撞一次」的循环留在下载页上。
+//
+// 现在两处用的是**同一张表**（`bili.Recoverable`），所以风控失败的那一项
+// **不摆**「重试」。
+func TestAFailedDownloadThatCannotBeRetriedHasNoRetryButton(t *testing.T) {
+	snap := dlSnapshot("歌 甲", download.StatusError, dlProgress, dlChunk)
+	snap.CanRetry = false
+	_, tt := newRows(t, snap)
+
+	if shows(tt, opRetry) {
+		t.Errorf("摆着一枚按下去只会再撞一次墙的「%s」，文字有 %q", opRetry, tt.Texts())
+	}
+	// ⚠️ **「删除」必须还在**：那是这一行用户唯一还能做的事——他不能重试，
+	// 但他得能把这一条从记录里拿走。
+	if !shows(tt, opDelete) {
+		t.Errorf("「%s」没了，文字有 %q", opDelete, tt.Texts())
+	}
+}
+
 // TestRetryOnAFailedTaskQueuesItAgain 断「重试」真的把出错的那一项重新排上
 // 队，而不只是把状态字段改了一下。
 //
@@ -562,6 +586,80 @@ func TestOneBrokenCellDoesNotBlankOutThePage(t *testing.T) {
 	}
 	if !shows(tt, "下载记录") {
 		t.Errorf("画崩了一格之后连页头都没了，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheBrokenCellSettlesByItself 断「一格画崩了之后，那一格**自己**就换成
+// 「画不出来」」。
+//
+// 崩掉的那一帧里那一格只建了一半（封面那一格是个空盒子）：recover 接住的是
+// build pass 中间，而 MyGo 一帧只跑一遍 view（除非这一帧里有事件改了状态）。
+// 界面又是**按需绘制**的——没人要下一帧，那个空盒子就一直留在画面上，用户看到
+// 的是一个空框，而不是「画不出来」。
+//
+// 所以崩了要**再要一帧**（和 `Shell.onPanic` 补 Invalidate 是同一个道理，只是
+// 那一处是整页版、这一处是格子版）。
+func TestTheBrokenCellSettlesByItself(t *testing.T) {
+	restore := logOutput(&bytes.Buffer{})
+	t.Cleanup(restore)
+
+	withCover := newTask("歌 甲", download.StatusRunning, dlProgress, 50)
+	withCover.Cover = "http://example.invalid/a.jpg"
+	s, tt := newDownloads(t, withCover,
+		newTask("歌 乙", download.StatusDone, dlChunk, 100))
+
+	// 把封面缓存摘掉，让「有封面的那一格」崩在格子里（理由见上面那一条）。
+	//
+	// ⚠️ 摘掉之后**要还回去**：收尾走的是 `Shell.Close`，它在**调用那一刻**才读
+	// `s.images` 这个字段。所以这一句得排在基座挂的那次收尾**前面**跑：
+	// `t.Cleanup` 是后挂的先跑。
+	keepImages := s.images
+	t.Cleanup(func() { s.images = keepImages })
+	s.images = nil
+
+	// **只画一帧**：Tester 的 `Frame` 会一直画到界面不再要帧为止（mygo 的
+	// `Tester.settle`），所以「那一格自己换成占位」必须在这一帧里就做完——
+	// 靠「下一帧才画出来」的话，中间那一帧上那一格是空的，而按需绘制的界面
+	// 未必有那一帧。
+	tt.Frame()
+
+	if s.crash != nil {
+		t.Fatalf("一格画崩了，整页被换成了错误页：%v", s.crash)
+	}
+	if !tt.HasText("画不出来") {
+		t.Errorf("画崩的那一格没有自己换成占位，文字有 %q", tt.Texts())
+	}
+	// 别的行照画：这就是「只废掉那一格」。
+	if !shows(tt, "歌 乙") {
+		t.Errorf("画崩了一格之后整张表空了，文字有 %q", tt.Texts())
+	}
+	// ⚠️ **不许一直在要帧**：要一帧是为了补上那一格，不是让界面一直重画。
+	if tt.FramePending() {
+		t.Error("画崩了一格之后界面一直在要帧")
+	}
+}
+
+// TestACellOutOfRangeDoesNotBlankOutThePage 断「行下标越界也只是那一格画不出来」。
+//
+// 表格是按 `len(d.rows)` 建的，所以越界这一支不该走到（`d.state.Key` 和
+// `d.state.Label` 那两处也各自判了一次）。但**万一**走到了，它崩的地方是
+// 「这一格的身份」那一行——而那一行在兜底**外面**：崩了就是整页变成错误页。
+//
+// 这一条钉住的是：越界也是「这一格画不出来」，整页照常。
+func TestACellOutOfRangeDoesNotBlankOutThePage(t *testing.T) {
+	s, tt := newDownloads(t, newTask("歌 甲", download.StatusDone, dlChunk, 100))
+
+	// 换掉画页面内容的那一支，只画一格——而且是越界的那一格。
+	s.pageBody = func(c *ui.Context, _ *ui.Route, _ Route) {
+		s.downloads.viewCell(c, s, 999, 0)
+	}
+	tt.Frame()
+
+	if s.crash != nil {
+		t.Fatalf("一格越界，整页被换成了错误页：%v", s.crash)
+	}
+	if !tt.HasText("画不出来") {
+		t.Errorf("越界的那一格没有画成占位，文字有 %q", tt.Texts())
 	}
 }
 

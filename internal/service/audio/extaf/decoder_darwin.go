@@ -93,7 +93,10 @@ type source struct {
 	r    io.ReadSeeker
 	size int64
 
-	// err 是字节源身上出的**第一条**非 EOF 的错误（比如网络断了）。
+	// err 是字节源身上出的**第一条**真错（比如网络断了）。
+	//
+	// ⚠️ **「真错」不含 io.EOF 和 io.ErrUnexpectedEOF**：那两个是「流到头了」，
+	// 不是失败（`noteReadError` 那一段写着为什么）。所以这一格记的是**硬错**。
 	//
 	// 为什么需要它：AudioToolbox 的读回调只有「要到了几个字节」这一个出口，
 	// 读失败在回调里只能变成 0，而 0 在它眼里和「干净地读到末尾」是**同一个
@@ -106,9 +109,16 @@ type source struct {
 	err error
 }
 
-// noteReadError 记下第一次真错。EOF 不算错——那是读完。
+// noteReadError 记下第一次真错。读到字节源末尾不算错——那是读完。
+//
+// ⚠️ **io.ErrUnexpectedEOF 也要算「读完」**：io.ReadFull 读到了字节、只是没凑齐
+// 被要的那么多就撞上了 EOF，于是交出这个错。它不是失败，是「流到头了」。
+// 以前这里只过滤 io.EOF（一个字节都没读到时 io.ReadFull 给的就是它），
+// 于是「末尾短读」被当成了硬错误——而 AudioToolbox 第一次读就要 8192 字节，
+// **总长不足 8192 字节**的文件（秒开片段、缓存碎片、测试素材）因此一个样本
+// 都解不出来，界面上的表现是「这歌放不出来」（#312）。
 func (s *source) noteReadError(err error) {
-	if err == nil || errors.Is(err, io.EOF) {
+	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return
 	}
 	s.mu.Lock()
@@ -127,10 +137,23 @@ func (s *source) readErr() error {
 
 // readAt 把 [position, position+n) 交给 dst，返回真的读到的字节数。
 //
-// ⚠️ 这里**只**在真正读到文件末尾时才会短读。短读在中途发生是要出事的：
-// 实测 ExtAudioFileRead 碰到中途短读一律返回 -50，整个解码就断了
+// ⚠️ 短读只可能意味着「字节源到头了」：io.ReadFull 会一直读到凑齐 n 字节，
+// 只有字节源真的没有了才交出少于 n 的字节。中途短读是要出事的：实测
+// ExtAudioFileRead 碰到中途短读一律返回 -50，整个解码就断了
 // （`verify-streaming.md` §3.3）。所以字节源必须阻塞到凑齐为止；本地文件
 // 天然凑得齐，将来接网络流时「等下载追上」的责任也在这一层。
+//
+// 「到头了」有两个出口，**都要当成读完，不能记成错**：
+//
+//	读到 0 字节       → io.ReadFull 给 io.EOF
+//	读到 1..n-1 字节  → io.ReadFull 给 io.ErrUnexpectedEOF（没凑齐就到了头）
+//
+// ⚠️ **上界是 n-1，n 是这一次要的那个数**——不是某个写死的字节数（实测
+// AudioToolbox 请求过 11288 字节，所以「8191」那个上界是错的）。
+//
+// AudioToolbox 的读回调只有一个出口（「这次要到了几个字节」），它把「少于
+// 我要的」当成流到头了——所以短读正是要告诉它的话。noteReadError 负责把这
+// 两种都归到「读完」那一边。
 func (s *source) readAt(position int64, n int, dst []byte) int {
 	if position < 0 {
 		return 0

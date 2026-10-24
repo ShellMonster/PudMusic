@@ -115,7 +115,7 @@ func (s *Shell) pickFont(c *ui.Context, st app.Settings, ro bool) {
 	trigger := sel.Trigger.
 		Width(selectWidth).MinWidth(settingsControlMinW).
 		Radius(c.Theme().Radius).Border(1, c.Theme().Border).
-		Background(c.Theme().Surface).Padding(space.None, space.Px8).Disabled(ro).
+		Background(c.Theme().Surface).Padding(space.None, space.Px10).Height(settingsSelectH).AlignItems(ui.Center).Disabled(ro).
 		Label("选择字体")
 	trigger.Children(func() {
 		// ⚠️ 触发器上显示的那一行也用它自己的字体画，不然「我选了圆体」在收起

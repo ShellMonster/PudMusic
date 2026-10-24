@@ -339,7 +339,7 @@ func TestTheCoverHoverArrowIsBigEnough(t *testing.T) {
 //
 // ⚠️ **图形的大小只能量墨迹**：那两枚是 SVG，元素框恒是 32，而 22 的图形画在
 // 32 的框里。22 的图标有 142 个墨迹像素（13 宽 × 16 高），18 的那枚只有 94
-// （11 × 12）——门槛放在 120，两头都离得开。
+// （11 × 12）——门槛放在 70（17 的图标约 85，14 的约 60），两头都离得开。
 //
 // ⚠️ **量的是「不是底色的那些像素」**：播放条的底是 `t.Background`，而那两枚
 // 图形是 `t.Text`——深浅两套都分得开。
@@ -362,10 +362,10 @@ func TestTheSkipKeysDrawBiggerGlyphs(t *testing.T) {
 						"上游的图标键恒是 `w-[2rem] h-[2rem]`", label, r.W, r.H)
 				}
 				n, w, h := inkExtent2(tt.Image(), r, bg)
-				const wantPixels = 120
+				const wantPixels = 70
 				if n < wantPixels {
 					t.Errorf("「%s」画出来的图形只有 %d 个墨迹像素（%.0f×%.0f），"+
-						"want ≥ %d——图标是 18（上游那一枚是 22）", label, n, w, h, wantPixels)
+						"want ≥ %d——图标是 17（设计规范 §5；比 14 的小图标大）", label, n, w, h, wantPixels)
 				}
 			}
 		})

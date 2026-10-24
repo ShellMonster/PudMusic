@@ -16,11 +16,14 @@
 //     拿一个顶另一个，总有一半问题没答案。**窄窗口下它们依次让位**给标题和
 //     行尾的「⋯」（`laterTimeCols`）——窗口够宽时两列都在。
 //
-//   - **页头右上角那个「清除已看完」不摆**（上游 `later/index.tsx:221`）。它是
-//     **批量删除**，而本项目还没有一份**共用**的确认弹窗：收藏夹批量删、本地音乐
-//     删文件/删目录、下载记录删/清空各自有一份（PLAN 的 C-43 / L-05 那一格就写
-//     「6 处危险操作」，现在是 3 处），这一页是剩下那几处之一。没有确认就删，点错
-//     了没法找回；不摆用户不会以为它坏了（它压根没在那儿），摆一个一按就真删的会。
+//   - **页头右上角那个「清除已看完」摆出来了**（上游 `later/index.tsx:218-224`）。
+//     原来不摆的理由是「它是批量删除，而这一页没有确认弹窗」——现在**有**了：
+//     `internal/ui/confirmmodal.go` 那一套是共用的（下载记录删/清空、本地音乐
+//     删文件/删目录都走它），这一页也走同一套。⚠️ **确认之后请求跑在后台**，
+//     清完了重新拉一遍列表（界面上的行还摆着，而 B 站那边已经没了）。
+//
+//     ⚠️ **它清的是 B 站那边那一份清单**：`POST /x/v2/history/toview/del` 带
+//     `viewed=true`（上游 `service/history-toview-del.ts`），B 站那边**没有撤销**。
 //
 // 🔴 本文件里的 view **不许**调 `c.SetTheme`（铁律二，见 theme.go）。
 package ui
@@ -242,7 +245,7 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 
 	ui.Column(c).Key("page:"+laterPath).Grow(1).Padding(space.None, pagePadX).Gap(space.Px8).
 		Children(func() {
-			ui.Text(c, "稍后再看").FontSize(scale.Font(c, scale.PageTitle))
+			s.viewLaterHeader(c)
 
 			// 换查询的位置在**画列表之前**：Reload 会把已加载的行清掉，放在后面
 			// 的话这一帧画的是清掉之前的样子，用户会先看到一屏旧的、再变成空、
@@ -266,6 +269,91 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 			p.rows.View(c)
 			s.noteScrollbar(p.rows.Hot())
 		})
+
+	// 弹窗画在这一列**外面**：它盖的是整个窗口，一个 `Grow(1)` 的页面列里放它
+	// 的话面板会跟着页面走位（和下载记录那一页同一件事，见 `downloadlist.go`）。
+	s.viewLaterClearConfirm(c)
+}
+
+// viewLaterHeader 是页头那一行：标题在左，「清除已看完」在右。
+//
+// 上游是 `flex items-center justify-between`（`later/index.tsx:218-224`）：左边一个
+// `h1`，右边一枚 110×32 的按钮「🗑 清除已看完」。我们原来右边**整块空白**——
+// 少了一个能清掉已看完视频的入口。
+//
+// ⚠️ **它一直摆着**（上游也是）：队列空的时候按它不报错，只是没什么可清。
+func (s *Shell) viewLaterHeader(c *ui.Context) {
+	ui.Row(c).Key("later:page-title").FillWidth().AlignItems(ui.Center).Children(func() {
+		ui.Text(c, "稍后再看").FontSize(scale.Font(c, scale.PageTitle))
+
+		// 上游是 `justify-between`：标题在左、按钮在右。中间的空白是 `Spacer`
+		// 吃掉的。
+		ui.Spacer(c)
+
+		// ⚠️ **按下不直接清**：那是一次不可恢复的批量删除（B 站那边没有撤销），
+		// 所以先弹一道确认（`viewLaterClearConfirm`）。
+		if s.viewClearViewedButton(c).Clicked() {
+			s.laterClearOpen = true
+		}
+	})
+}
+
+// 那一枚按钮的尺寸。抄上游 `<Button variant="flat" size="sm">`：HeroUI 的 sm 是
+// 32 高，图标 18，文字 14（`text-sm`）。
+//
+// ⚠️ **上游那一枚是 110 宽**（实测 x=1074..1183），那是「8 内边距 + 18 图标 +
+// 8 缝 + 5 个字 + 8 内边距」——我们照抄这几样，别自己另定一个宽度。
+const (
+	clearViewedH    = 32
+	clearViewedIcon = 18
+)
+
+// viewClearViewedButton 是页头右上角那枚「清除已看完」。
+//
+// 上游：`variant="flat" size="sm" startContent={<RiDeleteBinLine size={18}/>}`。
+//
+// ⚠️ **上游那一枚有一层常驻的淡灰底**（HeroUI 的 flat + 默认色 =
+// `bg-default-100`），我们**不留那一层底**：仓库里这一族动作键的规矩是「无描边、
+// 无常驻底色，悬停才上一层淡色」（`flatbutton.go` 的文件头，BMG-70 那一票量的），
+// 而这一页页头右边没有别的东西要跟它分主次。悬停 / 按下的反馈照旧在。
+func (s *Shell) viewClearViewedButton(c *ui.Context) ui.Element {
+	b := flatButton(c, "").Height(clearViewedH).Padding(space.None, space.Px8).Gap(space.Px8)
+	b.Children(func() {
+		ui.Icon(c, icon(iconDelete)).FontSize(clearViewedIcon)
+		ui.Text(c, "清除已看完").FontSize(scale.Font(c, scale.Size14))
+	})
+	return b
+}
+
+// viewLaterClearConfirm 画「清除已看完」之前那道确认。
+//
+// ⚠️ **一定要问**：B 站那边没有「撤销」，清掉的就再也回不来（只有用户自己在
+// B 站 APP 里加回来的那条路）。上游也问（`later/index.tsx:196-211`），标题是
+// 「删除已观看完的视频？」、确认键上是「删除」——这里逐字照抄。
+//
+// ⚠️ **确认之后不直接清**：请求跑在后台（`pagedRows.ClearViewed`），清完了重新
+// 拉一遍列表——界面上的行还摆着，而 B 站那边已经没了。
+func (s *Shell) viewLaterClearConfirm(c *ui.Context) {
+	if !s.laterClearOpen {
+		return
+	}
+	switch confirmModal(c, &s.laterClearOpen, confirmSpec{
+		// ⚠️ **danger（红）**：上游那一份没写 `type`，而它的默认值就是
+		// `danger`（`components/confirm-modal/index.tsx:31`）。删掉的是一整批
+		// 已看完的视频，红是对的。
+		tone:    toneDanger,
+		title:   "删除已观看完的视频？",
+		confirm: "删除",
+		cancel:  "取消",
+	}) {
+	case confirmAccepted:
+		// 先关弹窗再发请求：请求回来之后要弹一句提示，而弹窗还开着的话提示就
+		// 压在弹窗底下（同一件事见 `downloadlist_ops.go` 的 `viewConfirm`）。
+		s.laterClearOpen = false
+		s.laterPage.rows.ClearViewed(s.app.LibraryOf().ClearViewedLater)
+	case confirmCancelled:
+		s.laterClearOpen = false
+	}
 }
 
 // syncLater 是「稍后再看」这一页每帧的副作用。
@@ -310,10 +398,13 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 		rows.keys.On() && list.Focused(c, &rows.state))
 
 	return row.Children(func() {
-		viewLibraryRowHead(c, r, m, s.images, mt, face, onRow,
+		viewLibraryRowHead(c, r, m, rows, s.images, mt, face, onRow,
 			func() { rows.playFrom(r.Index) })
 
-		ui.Text(c, playCountText(m.View)).Width(mt.count).TextAlign(ui.End).
+		// ⚠️ **播放量是记好的那一份**（`rows.countText`）：现算的话每帧每行一次
+		// 字符串格式化（票 #313）。
+		ui.Text(c, rows.countText.At(r.Index, m.View, playCountText)).Width(mt.count).
+			TextAlign(ui.End).
 			FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 		// 两个时间列放不放得下由 `laterTimeCols` 说（表头那一处读的是同一个
 		// 判据）：窄窗口先收「投稿时间」，连基线都放不下时再收「加入时间」。
@@ -330,7 +421,9 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 			ui.Text(c, list.PubTimeText(m.PubTime, s.now())).Width(mt.pubDate).
 				TextAlign(ui.End).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 		}
-		ui.Text(c, clockText(m.Duration)).Width(mt.clock).TextAlign(ui.End).
+		// ⚠️ **时长是记好的那一份**（`rows.durText`）：理由同上面那一处。
+		ui.Text(c, rows.durText.At(r.Index, m.Duration, clockText)).Width(mt.clock).
+			TextAlign(ui.End).
 			FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 
 		// 行尾那枚「⋯」。点开的是**这一行的菜单**，和右键同一份（`rows.menu`
@@ -339,7 +432,8 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 		// ⚠️ **表头照它留了同样宽的空位**（`widgets/list` 的 `Header` 末尾那一个），
 		// 两边一样宽表头和行才对得上。
 		ui.Box(c).Width(list.OperationColWidth).Children(func() {
-			list.Operation(c, list.OperationLabel(m.Title), face.title,
+			// ⚠️ **无障碍名字是记好的那一份**（`rows.opText`）：理由同上面那两处。
+			list.Operation(c, rows.opText.At(r.Index, m.Title, list.OperationLabel), face.title,
 				func(m *ui.Menu) { rows.menu(m, r.Index) })
 		})
 	})
@@ -378,7 +472,9 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 	return box.Children(func() {
 		// 格子右上角那枚「⋯」。点开的是**这一格的菜单**，和右键同一份
 		//（理由见 `widgets/list` 的 `operation.go`）。
-		list.OperationCorner(c, list.OperationLabel(m.Title), func(m *ui.Menu) {
+		// ⚠️ **无障碍名字是记好的那一份**（`rows.opText`）：理由同 `drawLaterRow`
+		// 里那一处。
+		list.OperationCorner(c, rows.opText.At(i, m.Title, list.OperationLabel), func(m *ui.Menu) {
 			rows.menu(m, i)
 		})
 
@@ -390,7 +486,8 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 		// 的渐变（**左边播放量右边时长**——这一页的播放量是有的，见 `libraryRow.View`，
 		// 而 `widgets/list` 那一派本地音乐没有，所以那边那一半空着）。
 		hover.CardCover(c, s.images, m.Cover, cell, laterCellCoverH, onCell,
-			playCountText(m.View), clockText(m.Duration), m.Title,
+			rows.countText.At(i, m.View, playCountText),
+			rows.durText.At(i, m.Duration, clockText), m.Title,
 			func() { rows.playFrom(i) })
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px4).PaddingY(cardGapForCell).Children(func() {
@@ -400,8 +497,12 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 				TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
 			ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 				if m.Owner != "" {
-					ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Owner).
-						TextColor(metaColor).MaxLines(1).Ellipsis("…")
+					// ⚠ **点它进他的空间**（票 #360）：和列表里那一枚是同一件事
+					// （`list.OwnerName`）——有编号时可点，没有时照旧是普通字。
+					list.OwnerName(c, m.Owner, m.Owner,
+						rows.ownerTip.At(i, m.Owner, list.OwnerTipText),
+						m.Item.ArtistMid, scale.Font(c, scale.Size14), leading.Owner,
+						metaColor, rows.acts).Grow(1)
 				}
 				// 「正在放」占时长那一格：两样都画必然把时长挤成「0:」，而用户读的
 				// 是「正在放」（理由见 `widgets/list/grid.go` 那一处）。
@@ -409,12 +510,20 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 					viewPlayingMark(c, t, m.Title)
 					return
 				}
-				ui.Text(c, clockText(m.Duration)).FontSize(scale.Font(c, scale.Size12)).
+				// ⚠️ **时长是记好的那一份**（`rows.durText`）：现算的话每帧每格一次
+				// 字符串格式化（票 #339）。
+				//
+				// ⚠️ **和封面浮层上那一份共用同一个 memo**：那一处早就是记好的
+				// （见上面 `hover.CardCover` 那一句），而这一处还是现拼的——
+				// 同一个 memo 只盖住了一半，另一半每帧还在分配。
+				ui.Text(c, rows.durText.At(i, m.Duration, clockText)).FontSize(scale.Font(c, scale.Size12)).
 					TextColor(metaColor).MaxLines(1)
 			})
 			// 播放量 / 加入时间：列表里是右边两列，格子里放到最下面那一行。
 			ui.Row(c).Gap(space.Px6).FontSize(scale.Font(c, scale.Size11)).Children(func() {
-				ui.Text(c, playCountText(m.View)).Grow(1).TextColor(metaColor).MaxLines(1)
+				// ⚠️ 理由同上面那几处（`rows.countText`）。
+				ui.Text(c, rows.countText.At(i, m.View, playCountText)).Grow(1).
+					TextColor(metaColor).MaxLines(1)
 				ui.Text(c, dayText(m.ViewedAt)).TextColor(metaColor).MaxLines(1)
 			})
 		})
@@ -429,8 +538,8 @@ const (
 	cardGapForCell  = space.Px8
 )
 
-// laterMenu 是这一行的右键菜单，七项：播放 / 下一首播放 / 添加到队列 /
-// 在 B 站打开 / 收藏 / 下载音频 / 移除。
+// laterMenu 是这一行的右键菜单，八项：立即播放 / 从这一首往后听 / 下一首播放 /
+// 添加到队列 / 在 B 站打开 / 收藏 / 下载音频 / 移除。
 //
 // ⚠️ **每一项都要 Item 一遍**：菜单是这趟全部建出来的，只有被 Chosen 的那一项为
 // true（`ui/menu.go` 的 buildMenu）。少建一项，那一项就永远点不到。
@@ -443,7 +552,11 @@ func (s *Shell) laterMenu(m *ui.Menu, i int) {
 	acts := p.rows.actions()
 
 	switch {
-	case m.Item("播放").Disabled(!row.CanPlay).Chosen():
+	case m.Item("立即播放").Disabled(!row.CanPlay).Chosen():
+		// 「立即播放」= **只放这一首**（票 #299）：队列被换成这一首，不是把这一
+		// 页剩下的歌一起排上。
+		acts.PlayNow(i)
+	case m.Item("从这一首往后听").Disabled(!row.CanPlay).Chosen():
 		// ⚠️ PGC（番剧 / 纪录片）放不了：取流那一套对 PGC 不通（见
 		// `app.playableOnline`），上游也是不给这一类入口（`cannotPlay = is_pgc`）。
 		// **画成灰的而不是不画**：不画的话同一份列表里有的行能播有的不能，用户会

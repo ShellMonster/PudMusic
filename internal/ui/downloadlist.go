@@ -51,6 +51,7 @@ import (
 	"runtime/debug"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -154,6 +155,12 @@ var downloadColumns = []ui.TableColumn{
 type downloadsPage struct {
 	// state 是那张表格的状态：滚动位置、行身份、无障碍名字。
 	state ui.ListState
+	// rowKeys 记着每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
+	// （票 #313）。**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头）：
+	// 筛选一变、下载记录多一条少一条——身份对不上就重算，不用记得重建。
+	rowKeys rowkey.Memo[string, any]
 
 	// filter 是那一排「全部 / 音频 / 视频」现在选的是哪一档。见 downloadFilter。
 	//
@@ -269,20 +276,14 @@ func (s *Shell) viewDownloadList(c *ui.Context, _ *ui.Route) {
 		AlignItems(ui.Stretch).Children(func() {
 		d.viewToolbar(c, s)
 
-		// 筛选那一排。⚠️ **整个队列都是空的时候不摆**：那时候它只能筛出一个空
-		// 列表，而下面那句话（`noDownloads`）已经说清了「怎么才能不空」——
-		// 在一排开关前面加一句「这排开关什么也筛不出来」是白占一行。
-		if len(d.all) > 0 {
-			d.viewFilter(c)
-		}
-
-		// 一条记录都没有时画的是**这一页**的空状态（routes 表里
-		// `/download-list` 那一条，出处和其余 13 条写在一起）。不用表格自己的
-		// 空行：那一行只有一句「暂无内容」，说不了「怎么才能不空」。
+		// ⚠️ **整个队列都是空的时候**：没有筛选排，也没有卡片。那一格是**这一页**
+		// 的空状态（「怎么才能不空」，见 `downloadsEmptyState`）——而筛选排在队列
+		// 空的时候只能筛出一个空列表，在它前面加一句「这排开关什么也筛不出来」
+		// 是白占一行。
 		//
-		// ⚠️ 这一支是 return，不是少画表格：`ui.Table` 哪怕 n=0 也会画表头，
-		// 于是空着的时候页面上还杵着五个列名 —— 比空状态更让人以为这一页坏了。
-		if len(d.rows) == 0 {
+		// ⚠️ **队列不空、但筛完这一档是空的时候，筛选排仍然要摆**（它在卡片
+		// 里面，见 `viewTable`）：用户得能换回「全部」去。
+		if len(d.all) == 0 {
 			s.viewEmpty(c, "downloads:empty", s.downloadsEmptyState(d))
 			return
 		}
@@ -391,13 +392,19 @@ func (d *downloadsPage) viewTable(c *ui.Context, s *Shell) {
 			// 比返回下标安全：返回下标会让它看起来像「行 0」。
 			return dlRowKey{}
 		}
-		return d.rows[i].ID
+		// ⚠️ **身份是预先装箱好的那一份**（`d.rowKeys`）：理由见那个字段的注释。
+		return d.rowKeys.At(i, d.rows[i].ID, rowkey.Identity)
 	}
 
 	// 表格外面那一张**卡片底**：上游是 `Card radius="md" shadow="sm"` 包着
 	// `CardBody`（`download-list/index.tsx:104-107`），表格本身 `removeWrapper`。
 	// 没有它的话整张表直接铺在页面底色上，一眼就是「裸表格」——验收项点名的
 	// 就是这一层。
+	//
+	// ⚠️ **筛选排在卡片里面**（上游 `download-list/index.tsx:113-135`：筛选排是
+	// `Table` 的 `topContent`，而那张 `Table` 在 `Card` 里——所以它必然在卡片
+	// 里面）。原来筛选排摆在卡片**外面**：卡片的边线在 y=135、筛选排在
+	// y=108..123，两样是分开的；而上游卡片包住的是「筛选 + 表头 + 表体」三样。
 	//
 	// ⚠️ **底色取 `t.Background`**（上游 HeroUI 的 `bg-content1`）：`content1` 是
 	// **#FFFFFF（浅）/ #18181b（深）**——正好是我们 `t.Background` 的两个值。
@@ -415,6 +422,22 @@ func (d *downloadsPage) viewTable(c *ui.Context, s *Shell) {
 	card := shadow.HeroSmall(ui.Column(c).Grow(1).FillWidth().Radius(t.Radius).
 		Background(t.Background).Padding(t.Space(4)), t)
 	card.Children(func() {
+		// ⚠️ **筛选排在卡片里面**（理由见上面那段）：原来它在卡片外面，于是
+		// 「全部 / 音频 / 视频」那一排和它下面那张卡看着是两块不相干的东西。
+		//
+		// ⚠️ **队列整个是空的时候这一排不摆**（那一支在 `viewDownloadList` 里就
+		// 走空状态了，压根到不了这里）。
+		d.viewFilter(c)
+
+		// 筛完了这一档什么都没有：空状态**在卡片里面**（上游的 `emptyContent`
+		// 也在表格里，而表格在卡片里）。
+		//
+		// ⚠️ **不用表格自己的空行**：那一行只有一句「暂无内容」，说不了「怎么
+		// 才能不空」。
+		if len(d.rows) == 0 {
+			s.viewEmpty(c, "downloads:empty", s.downloadsEmptyState(d))
+			return
+		}
 		e := ui.Table(c, &d.state, downloadColumns, len(d.rows), func(row, col int) {
 			d.viewCell(c, s, row, col)
 		}).Grow(1)
@@ -427,12 +450,24 @@ type dlRowKey struct{}
 
 // viewCell 画一格，外包一层 panic 兜底。
 //
-// 页级那道 Guard（`Shell.page`）兜的是**整页**：一格画崩了，用户看到的是整个
-// 下载记录页变成一张错误页，而出错的地方在一格进度条上。这一层只废掉那一格。
+// 🔴 **这一格自己兜住自己**：页级那道 Guard（`Shell.page`）兜的是**整页**——
+// 一格画崩了要是冒到页级，用户看到的就是整个下载记录页变成一张错误页，而出错
+// 的地方只是一格封面。所以崩了只废掉那一格：那一格写「画不出来」，别的格子
+// 照画，整页照常。
+//
+// ⚠️ **越界也是「这一格画不出来」**：这一格的身份是「行 id + 列号」，而越界的
+// 时候没有行 id 可用——所以直接画占位，不记 `failed`（没有 id 可记）。这里
+// **不许崩**：崩了就是整页变成错误页，那正是这一格要防的那件事（表格是按
+// `len(d.rows)` 建的，所以这一支不该走到；`d.state.Key` / `d.state.Label`
+// 那两处也各自判了一次，理由一样）。
 func (d *downloadsPage) viewCell(c *ui.Context, s *Shell, row, col int) {
+	if row < 0 || row >= len(d.rows) {
+		dlBrokenCellText(c)
+		return
+	}
 	id := fmt.Sprintf("%s#%d", d.rows[row].ID, col)
 	if d.failed[id] {
-		ui.Text(c, "画不出来").FontSize(scale.Font(c, scale.Size11)).TextColor(c.Theme().TextMuted)
+		dlBrokenCellText(c)
 		return
 	}
 	defer func() {
@@ -442,9 +477,26 @@ func (d *downloadsPage) viewCell(c *ui.Context, s *Shell, row, col int) {
 			}
 			d.failed[id] = true
 			log.Printf("biu: 下载记录的一格画崩了（%s）：%v\n%s", id, rec, debug.Stack())
+			// 🔴 **崩了要再要一帧**：recover 接住的是 build pass **中间**，那一格
+			// 剩下的部分没建（封面那一格是个空盒子），画出来是半张。下一帧那一格
+			// 才画得出「画不出来」——而界面是**按需绘制**的：没人要帧，那一格就
+			// 一直空着，用户看到的是一个空框而不是「画不出来」。
+			//
+			// ⚠️ **下一帧不会自己来**：MyGo 一帧只跑一遍 view（除非这一帧里有
+			// 事件改了状态，见 mygo 的 `runtime.go` 那个 pass 循环），所以光靠
+			// 「下一遍会从头重建」是不够的——得有人要那一帧。和 `Shell.onPanic`
+			// 补 Invalidate 是同一个道理（那一处是整页版，这一处是格子版）。
+			s.wake.invalidate()
 		}
 	}()
 	d.drawCell(c, s, row, col)
+}
+
+// dlBrokenCellText 是「这一格画不出来」那一行字。
+//
+// 单独立一个：崩过的那一格和下标越界的那一格画的是同一句话（见 `viewCell`）。
+func dlBrokenCellText(c *ui.Context) {
+	ui.Text(c, "画不出来").FontSize(scale.Font(c, scale.Size11)).TextColor(c.Theme().TextMuted)
 }
 
 // drawCell 是真的画一格。
@@ -456,7 +508,7 @@ func (d *downloadsPage) drawCell(c *ui.Context, s *Shell, row, col int) {
 		ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).FillWidth().Children(func() {
 			// 四态（没有地址 / 载入中 / 就绪 / 失败）由 imgcache.View 画，
 			// 这里不重复它的判断。
-			imgcache.View(c, s.images, r.Cover, dlCover, dlCover)
+			imgcache.ViewTitled(c, s.images, r.Cover, r.Title, dlCover, dlCover)
 			ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
 				// 歌名那一行是**一个可点的块**：点它去浏览器里打开这一首的 B 站
 				// 页面，指针压上去时右边长出外链图标。出处是上游

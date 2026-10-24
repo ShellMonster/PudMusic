@@ -18,6 +18,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -33,6 +34,9 @@ const (
 
 	// sideWidthTransition 是折叠、展开和拖完松手时的过渡时长。Biu 的
 	// `transition-[width] duration-200`，逐字抄。
+	//
+	// ⚠️ **时长抄上游，曲线不抄**：上游那一档是 Tailwind 默认的 `ease-out`，
+	// 我们走全应用的**统一曲线**（`motion.Unified`，理由见 DESIGN.md §五）。
 	sideWidthTransition = 200 * time.Millisecond
 
 	// sideWidthKey 是宽度动画在 MyGo 里的键。同一个元素上同一个键的动画值
@@ -122,7 +126,10 @@ func (s *Shell) viewSide(c *ui.Context) {
 	if s.sideDragging {
 		w = side.Jump(sideWidthKey, float32(s.sideWidth))
 	} else {
-		w = side.AnimateTo(sideWidthKey, float32(target), ui.Animation{Duration: sideWidthTransition})
+		w = side.AnimateTo(sideWidthKey, float32(target), ui.Animation{
+			Duration: sideWidthTransition,
+			Ease:     motion.Unified,
+		})
 	}
 
 	// 🔴 底色取 **`Background` 而不是 `Surface`**，右缘一条 1px 的分隔线。
@@ -136,7 +143,7 @@ func (s *Shell) viewSide(c *ui.Context) {
 	// 三处底色统一到 `t.Background` 之后，这一栏的边界就全靠这条线了——
 	// 去掉它，侧栏和内容区在浅色下会**完全一样**（两个都是 `#ffffff`），
 	// 于是「统一底色」就变成了「抹掉层次」，那正是这一票要避开的反面。
-	side.Width(w).AlignSelf(ui.Stretch).Background(c.Theme().Background).
+	side.Width(w).AlignSelf(ui.Stretch).Background(s.sidebarBackground(c.Theme())).
 		BorderWidth(0, sideDividerW, 0, 0).
 		BorderColor(c.Theme().Border.Alpha(sideDividerA)).
 		Children(func() {
@@ -334,10 +341,14 @@ func (s *Shell) viewSideBrand(c *ui.Context, collapsed bool) {
 // 给红黄绿让开的：上游的侧栏从窗口最上头就开始（`layout/index.tsx` 的
 // `flex h-full`），红黄绿浮在它左上角，所以 logo 得往下挪一格。
 //
-// ⚠️ **我们这边的侧栏在顶栏下面**（`drawUnderlay` 是「顶栏 / 侧栏+内容区 /
-// 播放条」三层），红黄绿在**顶栏那一带**，够不着品牌——所以这 32 是**照上游
-// 抄下来的数**，不是这里非留不可的。票面明写「mac 非全屏时顶部留白照上游」，
-// 就照它来；要改的话是改布局（把侧栏挪成上游那种通栏），那是另一张票的事。
+// ⚠️ **这一格现在真的在给红黄绿让位了**（票 #286 / 报告 C-01）：侧栏改成
+// **从窗口顶端贯到底**（上游那种通栏），而顶栏只盖内容区那一段——于是红黄绿
+// 落在**侧栏这一带**，logo 正好在它们下面。之前侧栏在顶栏下面，红黄绿够不着
+// 品牌，这一格是照上游抄下来的数；现在它是那件事本身。
+//
+// ⚠️ **红黄绿的位置**：`internal/ui/shell.go` 那一处把 `TrafficLightPosition`
+// 钉在 `{X: 14, Y: 18}`，所以它们占着窗口左上角 y=18..30 那一段，而 logo 的
+// 上沿在 y=32——**差 2 像素**。别把这一格调小：调小 logo 就压在红黄绿底下了。
 func (s *Shell) sideBrandTopPad() float32 {
 	if runtime.GOOS == "darwin" && !s.fullScreen {
 		return 32
@@ -430,6 +441,8 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings, collapsed bool) {
 	// first 是「这一帧第一个画出来的菜单项」——它登记成「焦点回侧栏时落回的那
 	// 一项」（票 #245 的 E4）。理由见下面那一处。
 	first := true
+	// lastGroup 是上一个画出来的项所在的分组（空串 = 还没画过）。
+	lastGroup := ""
 
 	// ⚠️ Key 给的是包在外面的这一格，不是 Button 本身：`Key` 挂在「创建时
 	// 就处理了输入」的控件上会 panic（`ui/element.go:658`），要给就包一层。
@@ -450,6 +463,12 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings, collapsed bool) {
 			//
 			// ⚠️ **展开态别给 Button 补 `Label(rt.Title)`**：可见的字就是名字，
 			// 补上去会多出一个同样文字的无障碍节点，画面上出现两份。
+			// 分组标题（设计规范 §7.23 / 概念图 G16）：发现 / 我的音乐，设置另起一段不带标题。
+			// 画在**这一组第一个真画出来的项**前面——藏掉的项不算，所以一组全被藏了标题也不出现。
+			if g := sideGroupOf(rt.Match); g != lastGroup {
+				s.viewSideGroupTitle(c, g, lastGroup == "" && first, collapsed)
+				lastGroup = g
+			}
 			ui.Column(c).Key("side-item:" + rt.Match).Children(func() {
 				item := s.sideMenuItem(c, rt, rt.Match == cur, collapsed)
 				if item.Clicked() {
@@ -472,6 +491,53 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings, collapsed bool) {
 		if hidden > 0 && !collapsed {
 			s.viewLoggedOutHint(c, hidden)
 		}
+	})
+}
+
+// 侧栏的分组（设计规范 §7.23）。菜单名以仓库为准，分组只决定标题。
+const (
+	sideGroupDiscover = "发现"
+	sideGroupMine     = "我的音乐"
+	// sideGroupSystem 是设置那一段：**不带标题**，只是和上面隔开一截（设计稿里设置在底部）。
+	sideGroupSystem = "\x00system"
+)
+
+// sideGroupOf 是一条菜单路由属于哪一组。不认识的路由归「我的音乐」。
+func sideGroupOf(match string) string {
+	switch match {
+	case homePath:
+		return sideGroupDiscover
+	case settingsPath:
+		return sideGroupSystem
+	}
+	return sideGroupMine
+}
+
+// sideGroupTitleGap 是分组标题上下的留白：标题上方 12（第一组只留 4）、下方 4。
+const (
+	sideGroupGapTop    = space.Px12
+	sideGroupGapTopTop = space.Px4
+	sideGroupGapBottom = space.Px4
+)
+
+// viewSideGroupTitle 画一个分组标题。
+//
+// 展开态：`caption` 号、`TextMuted`、Medium，左内缩和菜单项的图标对齐；设置那一段
+// （`sideGroupSystem`）不带字，只留上方的缝。折叠态没有地方写字，只留一道同样高的缝。
+// 标题是纯装饰：不可点、不抢焦点，`PassThrough` 让点击落到下面的东西上。
+func (s *Shell) viewSideGroupTitle(c *ui.Context, group string, firstOfAll, collapsed bool) {
+	t := c.Theme()
+	top := float32(sideGroupGapTop)
+	if firstOfAll {
+		top = sideGroupGapTopTop
+	}
+	ui.Column(c).Key("side-group:"+group).FillWidth().PassThrough().
+		Padding(top, space.Px16, sideGroupGapBottom, space.Px16).Children(func() {
+		if collapsed || group == sideGroupSystem {
+			return
+		}
+		ui.Text(c, group).FontSize(scale.Font(c, scale.Size12)).FontWeight(weightMedium).
+			TextColor(t.TextMuted).SingleLine().PassThrough()
 	})
 }
 

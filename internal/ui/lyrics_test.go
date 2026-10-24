@@ -573,9 +573,12 @@ func TestTheSungLineStaysCentredAfterTheFontKnob(t *testing.T) {
 				row.Y >= box.Y && row.Y+row.H <= box.Y+box.H)
 		}
 	}
-	// 旋钮上写的那个数要跟着一起变——不然这一条就只是在验「旋钮没断电」。
-	if !tt.HasText(lyricFontLabel(40)) {
-		t.Errorf("旋钮上没有 %q，文字有 %q", lyricFontLabel(40), tt.Texts())
+	// 浮层里那一行要跟着一起变——不然这一条就只是在验「滑块没断电」。
+	//
+	// ⚠️ **钮上不再写那个数**（上游那两个钮上只有一个图标，票 #194），当前值在
+	// 浮层里那一行。
+	if !tt.HasText(lyricFontValueLabel(40)) {
+		t.Errorf("浮层里没有 %q，文字有 %q", lyricFontValueLabel(40), tt.Texts())
 	}
 }
 
@@ -934,7 +937,8 @@ func TestSwitchingSongsLeavesNothingOfTheLastOne(t *testing.T) {
 //
 // 换歌时是**先重置成默认值、再从缓存恢复**（internal/app/lyrics.go 的
 // `setLyricTrack`；顺序反了的症状见那个文件头）。这一条从界面上钉住「回来的时候
-// 那一首还在自己那个位置上」——因为界面上看得到的就是那两个旋钮上写的数。
+// 那一首还在自己那个位置上」——因为界面上看得到的就是浮层里那两个数（钮上不写
+// 值了，票 #194）。
 //
 // ⚠️ 这一条要挂一个**真的**缓存（`lyrics.NewCache`），不然调过的偏移和字号压根
 // 落不下去（`App.flushLyrics` 拿不到缓存就什么都不写），回来的时候自然也没有
@@ -953,9 +957,12 @@ func TestTheSongBeforeTheOneYouGoBackTo(t *testing.T) {
 	putLyrics(s, lyricsOfN(20), "")
 
 	first := s.app.Lyrics().Key
-	if !tt.HasText(lyricOffsetLabel(app.LyricsOffsetStepMS * 4)) {
-		t.Errorf("第一首的偏移旋钮上不是 %q，文字有 %q",
-			lyricOffsetLabel(app.LyricsOffsetStepMS*4), tt.Texts())
+	// ⚠️ **旋钮上不再写那个数**（上游那两个钮上只有一个图标，票 #194）——当前值
+	// 在浮层里那一行，所以这里要展开浮层才看得见它。
+	openLyricPopover(t, s, tt, lyricOffsetKnobName)
+	if !tt.HasText(lyricOffsetValueLabel(app.LyricsOffsetStepMS * 4)) {
+		t.Errorf("第一首的偏移浮层里没有 %q，文字有 %q",
+			lyricOffsetValueLabel(app.LyricsOffsetStepMS*4), tt.Texts())
 	}
 
 	// 换到第二首：没有缓存，于是两个旋钮都回到默认值。
@@ -1038,18 +1045,50 @@ func TestTheTwoKnobsAreThereOnlyWithLyrics(t *testing.T) {
 	}
 }
 
-// TestTheKnobShowsTheCurrentValue 旋钮上写的就是当前那个值。
-func TestTheKnobShowsTheCurrentValue(t *testing.T) {
+// TestTheKnobIsARoundIconButtonWithTheValueInThePopover 钮是 ⌀32 的圆钮，圆里
+// 只有图标，当前值在浮层里。
+//
+// ⚠️ **钮上那个数是这一票拿掉的**（票 #194）：上游那两个钮上只有一个图标
+// （`font-size-control.tsx:39-48` 的 `<RiFontSize size={16} />`），图标化只是把
+// 「看得见的字」换成「看得见的图形」。所以这一条钉的是四件事：
+//
+//	钮上     没有那个数（那两个串找不到了）
+//	名字     还在（`Find` 找得到，读屏软件念得出）
+//	形状     32×32 的一个正方（圆角半径 = 直径的一半 = 正圆）
+//	当前值   在浮层里那一行
+func TestTheKnobIsARoundIconButtonWithTheValueInThePopover(t *testing.T) {
 	s, tt := lyricShell(t)
 	putLyrics(s, lyricsOfN(20), "")
 	settleLyrics(t, s, tt)
 
-	if !tt.HasText(lyricFontLabel(app.DefaultLyricsFontSize)) {
-		t.Errorf("字号旋钮上没有 %q，文字有 %q",
-			lyricFontLabel(app.DefaultLyricsFontSize), tt.Texts())
+	// ⚠️ 这两个串是**钮上原来写的那两个数**（这一票拿掉了）：它们要是又出现在
+	// 画面上，就说明有人把字加回钮上了。
+	if _, ok := tt.Find("20px"); ok {
+		t.Errorf("字号钮上还有 %q，钮上只该有图标，文字有 %q", "20px", tt.Texts())
 	}
-	if !tt.HasText(lyricOffsetLabel(0)) {
-		t.Errorf("偏移旋钮上没有 %q，文字有 %q", lyricOffsetLabel(0), tt.Texts())
+	if _, ok := tt.Find("+0ms"); ok {
+		t.Errorf("偏移钮上还有 %q，钮上只该有图标，文字有 %q", "+0ms", tt.Texts())
+	}
+
+	// 名字还在，钮是 32×32（上游 ⌀32 的圆钮：圆角半径 = 直径的一半）。
+	knob, ok := tt.Find(lyricFontKnobName)
+	if !ok {
+		t.Fatalf("画面上找不到字号旋钮，文字有 %q", tt.Texts())
+	}
+	if knob.W != 32 || knob.H != 32 {
+		t.Errorf("字号旋钮是 %.0f×%.0f，want 32×32（上游 ⌀32 的圆钮）",
+			knob.W, knob.H)
+	}
+
+	// 当前值在浮层里那一行。
+	openLyricPopover(t, s, tt, lyricFontKnobName)
+	if !tt.HasText(lyricFontValueLabel(app.DefaultLyricsFontSize)) {
+		t.Errorf("字号浮层里没有 %q，文字有 %q",
+			lyricFontValueLabel(app.DefaultLyricsFontSize), tt.Texts())
+	}
+	openLyricPopover(t, s, tt, lyricOffsetKnobName)
+	if !tt.HasText(lyricOffsetValueLabel(0)) {
+		t.Errorf("偏移浮层里没有 %q，文字有 %q", lyricOffsetValueLabel(0), tt.Texts())
 	}
 }
 

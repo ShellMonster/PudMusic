@@ -369,16 +369,26 @@ func musicRankPage(d musicRankData) []RecommendItem {
 			if ra.Cover != "" {
 				item.Cover = normalizeImageURL(ra.Cover)
 			}
-			if ra.Username != "" {
-				item.Owner = ra.Username
-			}
 			if ra.Bvid != "" {
 				item.Bvid = ra.Bvid
 			}
 			if ra.Cid != 0 {
 				item.Cid = int64(ra.Cid)
 			}
-			item.OwnerMid = int64(ra.UID)
+			// 🔴 **UP 名和它的编号必须来自同一处**（票 #360 的评审）。
+			//
+			// 榜上那一条的顶层 `author` 和挂着的那条稿件的 `username` **可能是
+			// 两个人**（榜上有些条目挂的是别人的稿件）。而编号只有稿件那一处给
+			// （`uid`）。名字取顶层的、编号取稿件的，界面上点那个名字就会跳到
+			// **另一个人的空间**——而画面上看不出任何异样（那行字还是那个字）。
+			//
+			// 所以：**名字换成稿件那一处的，编号也跟着换**；换不了（稿件没给名字）
+			// 就**两个都不取**——那一行照样显示顶层那个 UP 名，只是**点不动**
+			//（`app.Item.ArtistMid` 的注释写着这一条：没有编号时名字照样有值）。
+			if ra.Username != "" {
+				item.Owner = ra.Username
+				item.OwnerMid = int64(ra.UID)
+			}
 			item.View = ra.VvCount
 			item.Duration = seconds(ra.Duration)
 		}

@@ -10,7 +10,7 @@
 // （数在 `internal/ui/theme.go` 的语义色那一段。）
 //
 // **色值本身不能改**——改了就是「自己发明了一个上游没有的配色」，而
-// `semantic_test.go` 那一组就盯着这三个值���。但**当字色用的时候可以另取一档**：
+// `semantic_test.go` 那一组就盯着这三个值。但**当字色用的时候可以另取一档**：
 // 色相不变，只压深——这正是主色那一档（`widgets/ink` 的 `AccentOn`）一直在做的事，
 // 语义色这一票（票 #241 / 报告 F-22）跟进的就是同一件事。
 //
@@ -39,3 +39,21 @@ func warningText(t *ui.Theme) ui.Color { return ink.SemanticOn(t, t.Warning) }
 
 // successText 是成功色当**字色**用时该取的那一档（压深到与底色 ≥4.5:1）。
 func successText(t *ui.Theme) ui.Color { return ink.SemanticOn(t, t.Success) }
+
+// readableOn 是「压在语义色底上的字」：先用惯用的那个字色（`preferred`），读不出来
+// （对比度 < 3:1）才换成白 / 近黑里更清楚的那一个。
+//
+// 为什么要有它：主题方案（暖纸 / 暮光 / 柔雾）的语义色和经典那三个上游色不是一个深浅——
+// 浅色下的警告是深棕 `#9A5B06`、成功是深绿 `#2E7D4F`（惯用的近黑字压上去不到 3:1），
+// 深色下的危险是浅红 `#F0716B`（惯用的白字压上去不到 3:1）。经典那三个色配惯用字色都
+// ≥ 4.15:1，**不会触发换色**，所以经典的 Toast / 确认键一个像素不变。
+func readableOn(bg, preferred ui.Color) ui.Color {
+	if ink.Ratio(preferred, bg) >= 3 {
+		return preferred
+	}
+	white, dark := ui.RGB(255, 255, 255), ui.RGB(24, 24, 27)
+	if ink.Ratio(white, bg) >= ink.Ratio(dark, bg) {
+		return white
+	}
+	return dark
+}

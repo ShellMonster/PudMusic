@@ -170,8 +170,8 @@ func TestDraggingBackOutExpandsTheSidebar(t *testing.T) {
 		t.Fatalf("折叠之后是 %v 宽，want %v", got, app.CollapsedSideMenuWidth)
 	}
 
-	// 从 72 拖到 172：+100 > 160，展开。
-	dragFrom(tt, gripX(app.CollapsedSideMenuWidth), 400, gripX(app.CollapsedSideMenuWidth)+100, 400)
+	// 从 64 拖到 192：+128 > 180，展开。
+	dragFrom(tt, gripX(app.CollapsedSideMenuWidth), 400, gripX(app.CollapsedSideMenuWidth)+128, 400)
 
 	st := a.SettingsSnapshot()
 	if st.SideMenuCollapsed {
@@ -233,7 +233,7 @@ func TestDraggingWiderIsCappedAt480(t *testing.T) {
 func TestTheSidebarWidthSurvivesARestart(t *testing.T) {
 	_, a, tt, path := sideShell(t)
 
-	dragFrom(tt, gripX(app.DefaultSideMenuWidth), 400, gripX(app.DefaultSideMenuWidth)+120, 400)
+	dragFrom(tt, gripX(app.DefaultSideMenuWidth), 400, gripX(app.DefaultSideMenuWidth)+60, 400)
 	if err := a.FlushSettings(); err != nil {
 		t.Fatal(err)
 	}
@@ -242,8 +242,8 @@ func TestTheSidebarWidthSurvivesARestart(t *testing.T) {
 	}
 
 	_, _, tt2, _ := sideShellOn(t, path)
-	if got := sideWidthOnScreen(t, tt2); got != app.DefaultSideMenuWidth+120 {
-		t.Errorf("重开之后侧栏是 %v 宽，want %v", got, app.DefaultSideMenuWidth+120)
+	if got := sideWidthOnScreen(t, tt2); got != app.DefaultSideMenuWidth+60 {
+		t.Errorf("重开之后侧栏是 %v 宽，want %v", got, app.DefaultSideMenuWidth+60)
 	}
 }
 
@@ -359,22 +359,27 @@ func testFavorites(prefix string, n int) []app.Favorite {
 //
 // 两组折叠态存在设置的同一个结构体里（`{created, collected}`），写错格子的
 // 表现是「折了一组、另一组的收藏夹凭空不见了」，而且界面上看不出是谁的问题。
+//
+// ⚠️ **折叠的证据是「那一组的内容不见了」**（票 #371）：分组标题上的折叠指示
+// 从字符「▾/▸」换成了图标（`iconChevronDown` / `iconChevronUp`），而**组名那一
+// 行字不再随折叠状态变**——所以不能再靠「标题长什么样」判断，只能看它底下的
+// 收藏夹还在不在。
 func TestBothCollectionGroupsFold(t *testing.T) {
 	_, a, tt, _ := favShell(t, 3, 2)
 
-	if err := tt.Click("▾ 我创建的"); err != nil {
+	if err := tt.Click("我创建的"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 
-	if _, ok := tt.Find("▸ 我创建的"); !ok {
-		t.Errorf("第一组没有折起来，文字有 %q", tt.Texts())
+	if tt.HasText("我建的 1") {
+		t.Errorf("第一组折起来了，它底下的收藏夹还摆着，文字有 %q", tt.Texts())
 	}
-	if _, ok := tt.Find("▾ 我收藏的"); !ok {
-		t.Errorf("第二组跟着折了，文字有 %q", tt.Texts())
+	if !tt.HasText("我收藏的") {
+		t.Errorf("第二组的标题不见了，文字有 %q", tt.Texts())
 	}
 	if !tt.HasText("我收的 2") {
-		t.Errorf("第二组的收藏夹不见了，文字有 %q", tt.Texts())
+		t.Errorf("第二组跟着折了，文字有 %q", tt.Texts())
 	}
 
 	folded := a.SettingsSnapshot().SideMenuCollectionFolded
@@ -383,11 +388,11 @@ func TestBothCollectionGroupsFold(t *testing.T) {
 	}
 
 	// 展开回来。
-	if err := tt.Click("▸ 我创建的"); err != nil {
+	if err := tt.Click("我创建的"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if _, ok := tt.Find("▾ 我创建的"); !ok {
+	if !tt.HasText("我建的 1") {
 		t.Errorf("没有展开回来，文字有 %q", tt.Texts())
 	}
 	if a.SettingsSnapshot().SideMenuCollectionFolded.Created {
@@ -599,6 +604,10 @@ func favTitles(a *app.App, g app.FavoriteGroup) []string {
 // ⚠️ 认标题要认对：fixture 的标题是「我建的 1/2/3」（`favShell` 里带前缀），
 // 之前这里找的是「收藏 1」——那个串画面上从来没有过，所以折不折叠都通过，
 // 整条测试等于空跑，SD-09 一条证据也没有。
+//
+// ⚠️ **找的是组名，不是「箭头 + 组名」**（票 #371）：折叠指示从字符「▾/▸」换成
+// 图标之后，组名那一行字**不再随折叠状态变**——所以这里按组名找，折叠前后都
+// 找得到（而按整串找的话，折叠之后那个串根本不存在，测试会在第一步就 fatal）。
 func TestDragReorderIsOffWhenTheGroupIsFolded(t *testing.T) {
 	_, a, tt, _ := favShell(t, 3, 0)
 
@@ -608,7 +617,7 @@ func TestDragReorderIsOffWhenTheGroupIsFolded(t *testing.T) {
 	}
 	before := favTitles(a, app.FavoritesCreated)
 
-	if err := tt.Click("▾ 我创建的"); err != nil {
+	if err := tt.Click("我创建的"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -617,7 +626,7 @@ func TestDragReorderIsOffWhenTheGroupIsFolded(t *testing.T) {
 	}
 
 	// 在折叠标题上拖一次：不该有任何反应，也不该有顺序变化。
-	head, ok := tt.Find("▸ 我创建的")
+	head, ok := tt.Find("我创建的")
 	if !ok {
 		t.Fatalf("画面上找不到折叠标题，文字有 %q", tt.Texts())
 	}
@@ -631,7 +640,7 @@ func TestDragReorderIsOffWhenTheGroupIsFolded(t *testing.T) {
 	}
 
 	// 展开回来顺序还在——证明刚才不是「碰巧一样」。
-	if err := tt.Click("▸ 我创建的"); err != nil {
+	if err := tt.Click("我创建的"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -803,7 +812,8 @@ func TestTheCollapsedSidebarTipSitsToTheRightOfTheItem(t *testing.T) {
 				B: theme.Inverse.B, A: theme.Inverse.A}
 			img := tt.Image()
 			// ① 侧栏右边那一格是提示的底色 → 提示贴在那一项的右边。
-			at := img.RGBAAt(int(app.CollapsedSideMenuWidth)+4, int(r.Y+r.H/2))
+			// x=58：提示从那一格右沿往右 6 处开始（侧栏现在只有 64 宽，提示的头几像素压在侧栏里）。
+			at := img.RGBAAt(58, int(r.Y+r.H/2))
 			if at != inverse {
 				t.Errorf("侧栏右边那一格是 %v，want %v（提示的底色）——"+
 					"提示没有贴在那一项的右边", at, inverse)
@@ -1104,8 +1114,8 @@ func TestTheCollapsedSideMenuItemIsAFortySquareIconCell(t *testing.T) {
 		t.Error("折叠态那一格是空的——图标没画出来")
 	}
 	// ⚠️ **格子要居中**：侧栏折叠后是 72，而格子是 40——不居中的话它会贴在
-	// 左���沿上（上游那一格也是居中的）。
-	if got := r.X; got < 8 || got > 24 {
+	// 左边沿上（上游那一格也是居中的）。
+	if got := r.X; got < 4 || got > 24 {
 		t.Errorf("折叠态那一格的左边在 %.1f——它没有居中在 72 宽的侧栏里", got)
 	}
 }
@@ -1129,6 +1139,10 @@ func TestTheCollapsedSideMenuItemIsAFortySquareIconCell(t *testing.T) {
 // 上游是 `pt-8`（`biu/src/layout/side/logo/index.tsx`），为的是给红黄绿让开。
 // 这里量的是 **logo 那一块墨的上沿**：它等于「侧栏的上沿 + 顶部留白 +
 // 图标自己的那点留白」。
+//
+// ⚠️ **侧栏的上沿现在就是窗口的上沿**（票 #286 / 报告 C-01）：侧栏改成从
+// 窗口顶端贯到底（上游那种通栏），顶栏只盖内容区那一段——于是红黄绿落在
+// 侧栏那一带，而 logo 正好在它们下面，那 32 留白是**真的在给它们让位**。
 func TestTheBrandIsALogoAndTheAppName(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -1148,20 +1162,21 @@ func TestTheBrandIsALogoAndTheAppName(t *testing.T) {
 				t.Fatalf("侧栏上没有 %q 那一行，文字有 %q", appName, tt.Texts())
 			}
 
-			// 侧栏的底色：侧栏**右边**那一列（x = 190）、品牌那一块的高度上
-			// 取的众数。
+			// 侧栏的底色：侧栏**右边**那一列（x = 190）上、从顶到底的众数。
 			//
-			// ⚠️ **别取菜单那一段**：选中的那一行有一层很淡的底（上游的
-			// `variant="flat"`），拿它当底色的话整块都成了「墨」。
+			// ⚠️ **取整列的众数**：侧栏那一列上除了底色，还有选中那一行的
+			// 很淡的底（上游的 `variant="flat"`）——拿它当底色的话整块都成了
+			// 「墨」。而这一列的高度覆盖了整栏，所以那一行淡底只占几十个
+			// 像素，众数仍然是底色。
 			var col []color.RGBA
-			for y := 90; y < 140; y++ {
+			for y := 0; y < 700; y++ {
 				col = append(col, img.RGBAAt(190, y))
 			}
 			bg := modeOf(col)
 
 			// ① logo：品牌字左边那一块（x < 62）里的墨。
 			minX, minY, maxX, maxY := 9999, 9999, -1, -1
-			for y := 64; y < int(text.Y+text.H); y++ {
+			for y := 0; y < int(text.Y+text.H); y++ {
 				for x := 0; x < 62; x++ {
 					if maxDiff(img.RGBAAt(x, y), bg) <= 12 {
 						continue
@@ -1185,14 +1200,14 @@ func TestTheBrandIsALogoAndTheAppName(t *testing.T) {
 
 			// ④ 顶部留白：logo 的上沿 = 侧栏的上沿 + 留白 + 图标自己的留白。
 			//
-			// 侧栏的上沿就是顶栏的高度：Tester 没有标题栏，所以顶栏正好是
-			// `navMinHeight`（64）。
+			// ⚠️ **侧栏的上沿 = 窗口的上沿 = 0**（票 #286 / 报告 C-01）：侧栏
+			// 从窗口顶端贯到底，所以这里量的是「离窗口上沿多远」。
 			wantTop := 12
 			if runtime.GOOS == "darwin" {
 				wantTop = 32 // 上游的 `pt-8`
 			}
-			if got := minY - navMinHeight; got < wantTop-1 || got > wantTop+7 {
-				t.Errorf("logo 的上沿离侧栏上沿 %d，want ≈ %d"+
+			if got := minY; got < wantTop-1 || got > wantTop+7 {
+				t.Errorf("logo 的上沿离窗口上沿 %d，want ≈ %d"+
 					"（上游 macOS 非全屏时是 `pt-8`）", got, wantTop)
 			}
 

@@ -188,7 +188,7 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 	//
 	// 系统原生那一份（`ui.AlertDialog`）建面板时是
 	// `Role(RoleAlertDialog)` + `panel.Label(title)` + `panel.description = message`
-	//（mygo v0.6.2 的 `ui/feedback.go:186-188`），所以读屏软件报得出「删除确认吗？」
+	//（mygo v0.6.3 的 `ui/feedback.go:186-188`），所以读屏软件报得出「删除确认吗？」
 	// 和它下面那一句正文。
 	//
 	// 而 `ui.Modal`（`coreDialogBase`，`ui/base.go:486`）只给
@@ -203,8 +203,10 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 		backdrop.Background(ui.RGBA(0, 0, 0, scrim.Modal))
 		// ⚠️ **影的值从 `widgets/shadow` 取**（`shadow.Modal`）：值只写一处
 		// （DESIGN.md §四·五，票 #239 把这一处收进去了）。
-		panel = shadow.Modal(panel.Padding(t.Space(5)).Gap(t.Space(3)).Radius(t.Space(2.5)).
-			Background(t.Background).
+		// 底色和圆角是方案里的 `surface1` / `radiusLg`（`dialogCard`），经典不变。
+		card := dialogCard(t)
+		panel = shadow.Modal(panel.Padding(t.Space(5)).Gap(t.Space(3)).Radius(card.radius).
+			Background(card.bg).
 			MaxWidth(w-t.Space(10)).MaxHeight(h-t.Space(10)),
 			t).
 			// 🔴 **这三样是「读屏软件报得出这个框是什么」**：角色、名字、描述。
@@ -308,10 +310,10 @@ func confirmButton(c *ui.Context, spec confirmSpec) ui.Element {
 	switch spec.tone {
 	case toneDanger:
 		return flatButton(c, spec.confirm).Label(name).
-			Background(t.Danger).TextColor(dialogOnDanger)
+			Background(t.Danger).TextColor(readableOn(t.Danger, dialogOnDanger))
 	case toneWarning:
 		return flatButton(c, spec.confirm).Label(name).
-			Background(t.Warning).TextColor(confirmOnWarning)
+			Background(t.Warning).TextColor(readableOn(t.Warning, confirmOnWarning))
 	}
 	return ui.PrimaryButton(c, spec.confirm).Label(name)
 }
@@ -328,7 +330,7 @@ func confirmButton(c *ui.Context, spec confirmSpec) ui.Element {
 //
 // ⚠️ **#176 把两处系统原生 `ui.AlertDialog` 换成自绘模态的时候，把这一件一起
 // 丢了**：系统原生那一份的取消键是 `coreButton`
-// （`mygo@v0.6.2/ui/feedback.go:201`），也就是 `t.Surface` 的常驻底 + 一圈
+// （`mygo@v0.6.3/ui/feedback.go:201`），也就是 `t.Surface` 的常驻底 + 一圈
 // `t.Border`——**带壳**。换成自绘之后它变成了 `flatButton`，那一层底和那一圈
 // 描边就都没了（票 #228）。
 //
@@ -359,4 +361,20 @@ func confirmIconColor(t *ui.Theme, tone confirmTone) ui.Color {
 		return t.Danger
 	}
 	return t.Text
+}
+
+// dialogPanel 是弹窗面板的统一外观：遮罩、内边距、圆角、底色、阴影。
+//
+// `confirmModal` 的那一套抽出来给「更新」「裁剪封面」两个弹窗共用（它们原来走框架的
+// `ui.Modal`，面板样式写死成框架那份，拿不到方案里的 `surface1` / `radiusLg`）。
+// 角色用 `RoleDialog`，名字用 label；`ui.DialogBase` 的回调拿得到面板，所以能挂名字。
+func dialogPanel(c *ui.Context, backdrop, panel ui.Element, label string) {
+	t := c.Theme()
+	w, h := c.Size()
+	card := dialogCard(t)
+	backdrop.Background(ui.RGBA(0, 0, 0, scrim.Modal))
+	shadow.Modal(panel.Padding(t.Space(5)).Gap(t.Space(3)).Radius(card.radius).
+		Background(card.bg).
+		MaxWidth(w-t.Space(10)).MaxHeight(h-t.Space(10)), t).
+		Role(ui.RoleDialog).Label(label)
 }

@@ -22,6 +22,12 @@
 //     （90+16）、离右边 16。
 //   - **250ms 入场**（上游的 `appearance-in 250ms ease-out`）：淡入 + 从右边
 //     滑进来。此前是「啪」地一下出现。
+//
+// # 票 #292：曲线与错开
+//
+// 时长没变（250ms），**曲线改成全应用的统一曲线**，而且**淡入和位移错开**
+// （位移先走、淡入后到）。出处和理由在 DESIGN.md §五，代码在
+// `internal/ui/widgets/motion`（曲线）与 `toastFadeDelay`（错开多少）。
 package ui
 
 import (
@@ -29,6 +35,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -70,6 +77,19 @@ const (
 	// toastEnterTime 是入场动画的时长（DESIGN.md「动效」：Toast 入场 250ms；
 	// 上游是 `appearance-in 250ms ease-out`）。
 	toastEnterTime = 250 * time.Millisecond
+
+	// toastFadeDelay 是**淡入比位移晚开始**的那一段，占整段入场的比例。
+	//
+	// ⚠️ **淡入和位移不是同一条时间线**：《Functional Motion》
+	// （https://wxad.design/abc/functional-motion）——「动画的**透明度与位移应该
+	// 是不同步的**」「**在添加时，透明度应该是后变化的**」。手册⓪ 也写着同一句
+	// （「不透明度与位移应该是不同步的」）。合成一条线的话，位移到位时透明度
+	// 早就满了——那一帧看起来是「啪地出现」，而那一段位移是白走的。
+	//
+	// **20% 是暂定的**：那两篇只给了原则（「后变化」），没给数字。取 20% 是因为
+	// 统一曲线前重后轻（50% 的时间走完 95%），延迟再大就「滑进来」看不见了，
+	// 再小就看不出错开。
+	toastFadeDelay = 0.2
 
 	// toastEnterShift 是入场时卡片从右边滑进来的距离（上游那一档是 100，
 	// 但那是在屏幕中间弹的；我们这一条贴着右边，从右边滑 16 就够看出来）。
@@ -116,6 +136,17 @@ type toast struct {
 // tone 是这句话的语义（成功 / 警告 / 失败 / 普通），**每个调用点都要给**：
 // 上游那 164 处调用是按调用给 `color` 的，而「下载失败」也是绿的正是这一条
 // 要收掉的毛病（票 #180）。
+//
+// 🔴 **它同时也是一句「刚刚发生了什么」的播报**（无障碍，见 announce.go）：右下角
+// 弹出来的那张卡片，**读屏软件用户看不见**——他们没有余光去扫右下角。所以这一句
+// 还要被**念出来**。
+//
+// ⚠️ **这一句是「发生了什么」，不是「这个元素是什么」**：卡片上写的是
+// 「下载完成」「收藏不了：…」这样一句话，而 `.Label(...)` 给的是「这一枚是什么」
+// （框架的 `Label` 是给读屏软件的名字，见 `flatbutton.go` 的警告）。两件事不许混。
+//
+// ⚠️ **后台那条线也调它**（比如 `download_mount.go` 的 `sayDownloadDone`），而播报
+// 那一头是带锁的（`announceQueue` 自己有锁），所以这里不用管自己在哪条线上。
 func (s *Shell) addToast(text string, tone notice.Tone) {
 	s.toastMu.Lock()
 	s.toastSeq++
@@ -130,6 +161,10 @@ func (s *Shell) addToast(text string, tone notice.Tone) {
 		s.toasts = s.toasts[1:]
 	}
 	s.toastMu.Unlock()
+
+	// 念出去（无障碍）。**排在解锁之后**：播报那一头有自己的锁，而这一段
+	// 不该在握着 toast 那把锁的时候去拿另一把。
+	s.announce(text)
 
 	go s.expire(t)
 }
@@ -339,12 +374,18 @@ func (s *Shell) viewToast(c *ui.Context, t toast, theme *ui.Theme) {
 
 	// 入场：250ms 的一段（DESIGN.md「动效」）。淡入 + 从右边滑进来。
 	//
+	// ⚠️ **淡入和位移错开**（位移先走、淡入后到）：两段进度分开算，
+	// 理由见 `toastFadeDelay`。
+	//
 	// ⚠️ **卡片是「画」上去的，位置是「排」上去的**：滑动用的是 `Translate`
 	// （视觉上的位移），而**布局不动**——于是「离右边 8、抬过底部 90」这一档
 	// 在动画的每一帧都是真的（量元素框量到的是布局框）。
-	k := s.toastEnterProgress(c, t)
-	if k < 1 {
-		card = card.Opacity(k).Translate((1-k)*toastEnterShift, 0)
+	move, fade := s.toastEnterProgress(c, t)
+	if fade < 1 {
+		card = card.Opacity(fade)
+	}
+	if move < 1 {
+		card = card.Translate((1-move)*toastEnterShift, 0)
 	}
 }
 
@@ -366,11 +407,11 @@ func (s *Shell) viewToast(c *ui.Context, t toast, theme *ui.Theme) {
 func toastColors(tone notice.Tone, theme *ui.Theme) (bg, fg ui.Color) {
 	switch tone {
 	case notice.Success:
-		return theme.Success, toastOnSemantic
+		return theme.Success, readableOn(theme.Success, toastOnSemantic)
 	case notice.Warning:
-		return theme.Warning, toastOnSemantic
+		return theme.Warning, readableOn(theme.Warning, toastOnSemantic)
 	case notice.Danger:
-		return theme.Danger, toastOnDanger
+		return theme.Danger, readableOn(theme.Danger, toastOnDanger)
 	}
 	return theme.Accent, theme.AccentText
 }
@@ -384,13 +425,18 @@ var toastOnSemantic = ui.RGB(24, 24, 27)
 // toastOnDanger 是压在危险红上的字色：白。
 var toastOnDanger = ui.RGB(255, 255, 255)
 
-// toastEnterProgress 是这一条入场走到哪儿了：0 = 刚出现，1 = 到位。
+// toastEnterProgress 是这一条入场走到哪儿了：**位移**和**淡入分开**算。
+//
+// 返回的两个数都是 0~1：move 是位移走到哪儿了，fade 是透明度走到哪儿了。
+//
+// ⚠️ **两个不是同一条线**：位移先走、淡入后到（理由见 `toastFadeDelay`）。
+// 合成一条线的话，位移到位时透明度早就满了——那一帧看起来是「啪地出现」。
 //
 // ⚠️ **「减少动态效果」时直接到终点**（DESIGN.md §五）：系统开着那个偏好时
 // 一点都不动——所以这一档返回 1，而且**不请求下一帧**（请求了就是白画）。
-func (s *Shell) toastEnterProgress(c *ui.Context, t toast) float32 {
+func (s *Shell) toastEnterProgress(c *ui.Context, t toast) (move, fade float32) {
 	if c.Preferences().ReduceMotion {
-		return 1
+		return 1, 1
 	}
 	now := c.Now()
 	age := now.Sub(s.toastEnterAt(t.id, now))
@@ -398,7 +444,7 @@ func (s *Shell) toastEnterProgress(c *ui.Context, t toast) float32 {
 		age = 0
 	}
 	if age >= toastEnterTime {
-		return 1
+		return 1, 1
 	}
 	// 动画还没走完：这一帧画完还要再画一帧。
 	//
@@ -406,5 +452,14 @@ func (s *Shell) toastEnterProgress(c *ui.Context, t toast) float32 {
 	// 时候要帧，动画就停在那儿——而那一帧是「刚出现」（几乎全透明），于是
 	// 提示看上去一直没出来。
 	c.AnimationFrame()
-	return ui.EaseOut(float32(age) / float32(toastEnterTime))
+	p := float32(age) / float32(toastEnterTime)
+	// 位移：全程 250ms，走统一曲线。
+	move = motion.Unified(p)
+	// 淡入：晚 `toastFadeDelay` 开始，但**和位移同时结束**（总时长不变）。
+	q := (p - toastFadeDelay) / (1 - toastFadeDelay)
+	if q < 0 {
+		q = 0
+	}
+	fade = motion.Unified(q)
+	return move, fade
 }

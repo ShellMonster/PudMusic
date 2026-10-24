@@ -36,6 +36,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
@@ -75,6 +76,16 @@ func shadowScene(t *testing.T, dark bool, draw func(s *Shell, c *mygoui.Context)
 			}
 		}))
 	b.tt.Frame()
+	// ⚠️ **推钟直到界面不再要帧**：动画走的是时间，而 Tester 的钟站着不动——
+	// 不推它的话，画面停在动画的第一帧上（那一帧元素还在它出发的地方）。
+	// 这一族里只有「队列抽屉」那一档会动（它有进出场），别的都是画完就完，
+	// 所以对它们来说这一段是空转。
+	for range 40 {
+		if !b.tt.FramePending() {
+			break
+		}
+		b.tt.Advance(16 * time.Millisecond)
+	}
 	return b.tt
 }
 
@@ -103,7 +114,7 @@ func assertShadow(t *testing.T, img *image.RGBA, band, control mygoui.Rect, tol 
 // ⚠️ **为什么有一处要用这个而不是上一条那个**：深色下背景是 `#18181b`，而
 // Tailwind 那一档影只有 **10% 黑**——压在深底上只差**一个色阶**（实测 24 → 23）。
 // 「比远处那块暗」那种比法在深色下要一个色阶以上才数得出来，于是那一处明明画了
-// 影却说它没画。**两��画法差的那一点就是影本身**，量它就量得到。
+// 影却说它没画。**两种画法差的那一点就是影本身**，量它就量得到。
 func assertShadowDarker(t *testing.T, with, without *image.RGBA, band mygoui.Rect, what string) {
 	t.Helper()
 	n := 0

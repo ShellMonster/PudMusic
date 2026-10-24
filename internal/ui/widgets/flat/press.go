@@ -52,6 +52,7 @@ package flat
 import (
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -98,7 +99,7 @@ func PressScaleValue(e ui.Element, pressed, grow bool) float32 {
 			target = PressShrink
 		}
 	}
-	return e.AnimateWith(pressKey, target, pressTime, ui.EaseOut)
+	return e.AnimateWith(pressKey, target, pressTime, motion.Unified)
 }
 
 // PressScale 给内容 e 装上「按下时缩到 0.96（放则 1.04）」这一层，返回同一个 e。

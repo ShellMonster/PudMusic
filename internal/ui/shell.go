@@ -16,6 +16,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -90,10 +91,24 @@ type Shell struct {
 	scrollbarHot    bool
 	scrollbarHotNow bool
 
+	// theme 是主题的缓存（见 theme.go 的 `themeCache`）。
+	//
+	// ⚠️ **逐窗口一份**：主题本身是全局的那一套（设置 + 系统深浅 + 桌面偏好），
+	// 但每一扇窗各自缓存一份更简单——迷你播放器换主窗口时外壳是新建的（见
+	// `toggleMiniPlayer`），而重建外壳本来就是「一切从零开始」的时候。
+	//
+	// **只由 view 在主线程上读写**，和别的界面状态同一条规矩。
+	theme themeCache
+
 	// laterPage / historyPage 是「稍后再看」和「历史记录」这两页各自的状态
 	// （见 librarypage.go）。挂在壳上而不是页面的局部变量，理由同上。
 	laterPage   libraryPage
 	historyPage libraryPage
+	// laterClearOpen 是「清除已看完」那道确认开着没有（页头右上角那一枚按钮，
+	// 见 `later.go` 的 `viewLaterHeader`）。
+	//
+	// ⚠️ **它得跨帧活着**：即时模式每一帧都重画一遍，局部变量下一帧就没了。
+	laterClearOpen bool
 	// searchWatchStop 是那个 500ms 关键词防抖的钟。醒着的时候只有一个，
 	// 两页共用——用户一次只能在一页上敲字。
 	searchWatchStop func()
@@ -160,6 +175,31 @@ type Shell struct {
 	// 新建等于每帧都当成没问过——那是一帧一个请求。
 	avatar avatarState
 
+	// avatarMenuOpen 是头像下面那一层下拉开着没有（见 navbar_avatar.go）。
+	//
+	// ⚠️ **它是跨帧的**：即时模式每一帧都重画一遍，局部变量下一帧就没了。
+	avatarMenuOpen bool
+	// avatarMenuIndex 是「当前是第几项」（键盘走到的 / 鼠标悬停的那一项）。
+	//
+	// ⚠️ **鼠标和键盘共用这一个下标**：两个下标的话，画面上会有两项同时亮着
+	// （鼠标移到第三项上的那一帧，键盘那一项还亮着）。
+	//
+	// ⚠️ **-1 = 什么也没选中**：上游 HeroUI 打开下拉时不高亮任何一项，而
+	// 「一打开就亮着第一项」会让回车直接进扫码登录页（那一下用户根本不是
+	// 想登录）。
+	avatarMenuIndex int
+	// avatarMenuHover 是**上一帧**指针停在第几项（-1 = 不在菜单项上）。
+	//
+	// ⚠️ **它是为了让「指针不动的时候键盘说了算」**：每一帧都让悬停改一遍
+	// 「当前是第几项」的话，键盘刚走的那一格会被指针改回去——「键盘能上下
+	// 走」于是只在指针不在菜单项上的时候才成立。框架自己那个下拉也是这么
+	// 做的（`mygo/ui/base.go` 的 `selectParts.Item`）。
+	avatarMenuHover int
+	// avatarLogoutAsk 是「退出登录」那道确认开着没有。
+	//
+	// ⚠️ **跨帧**：确认框要活过一帧（用户得看着它按「确认」或「取消」）。
+	avatarLogoutAsk bool
+
 	// local 是本地音乐那一页自己的一摊状态：表格 / 列表 / 网格三档的控件、
 	// 筛选条件、两道确认弹窗、以及**逐窗口**的唤醒句柄表。见 localmusic.go。
 	//
@@ -191,6 +231,20 @@ type Shell struct {
 	toasts   []toast
 	toastSeq uint64
 
+	// announcements 是攒着待播报的那些句子（无障碍），见 announce.go。
+	//
+	// ⚠️ **它和 toasts 是两件事**：toast 是**画出来**的那张卡片（看得见的），
+	// 而这一栏是**念出来**的那些话（读屏软件听得见的）。两者碰巧常常是同一句
+	// ——提示弹出来的时候也念一遍——但「下载完成」那类**根本没有卡片**的事
+	// 只有这一栏说得出去。
+	announcements announceQueue
+
+	// announceRemove 是摘掉这一扇窗在应用层那条播报登记的动作。
+	//
+	// 摘掉的那一半在 `closePerWindow` 里调：不摘的话「进迷你 / 退出迷你」来回
+	// 十次之后应用层那个列表就有十条，每发生一件事就多走十趟空转。
+	announceRemove func()
+
 	// migrationAnnounced 是「启动时的迁移/导入结果已经弹过一次 toast 了」。
 	//
 	// 只由界面线程读写（`viewMain` 第一帧），所以不需要锁。挂在 Shell 上而不是
@@ -202,7 +256,7 @@ type Shell struct {
 	// fullScreen 是主窗口此刻是不是全屏。
 	//
 	// ⚠️ **它由窗口的回调推过来，不在 view 里问**：`win.IsFullScreen()`
-	// 每帧问一次是跨一次 ObjC 调用（`mygo@v0.6.2/window.go:764` 的 `get`），
+	// 每帧问一次是跨一次 ObjC 调用（`mygo@v0.6.3/window.go:766` 的 `get`），
 	// 而答案在**进全屏那一刻**就定了——事件推过来既省事又准。
 	//
 	// 它只给侧栏那个品牌块用（macOS 非全屏时要多留一格，见 `sidebar.go` 的
@@ -265,12 +319,10 @@ type Shell struct {
 	// ⚠️ **没有它浮层永远不会自己收掉**：不播放的时候没有任何东西在要帧，
 	// 「指针离开了」只在那一帧被算一次，浮层于是永远留在画面上。
 	volIdleStop func()
-	// volBeforeMute 是**最后一个不是 0 的音量**——取消静音的时候放回去的就是它。
 	//
-	// ⚠️ **它不跟着设置走**：音量是「这一刻的听感」，存进设置就意味着「这台机器
-	// 上静音过」会跨到另一台机器上去。设置里**没有**音量这一栏（音量只在应用
-	// 内存里，`app.App.volume`），所以这一份也是跟着窗口走的。
-	volBeforeMute float64
+	// ⚠️ **这里没有「静音之前的音量」了**：静音是应用层自己的一格
+	// （`app.App.ToggleMute`），而音量是要落盘的（票 #311）。以前这一份记在
+	// 壳上，跟着窗口走，进程一退就没了——落盘的音量不能是它。
 
 	// 侧栏这一摊。**只由 view 在主线程上读写**，不跨 goroutine。
 	//
@@ -287,6 +339,12 @@ type Shell struct {
 	// sideLists 是两组收藏夹各自的列表状态。拖拽排序靠它，
 	// 两组一份是因为两组各排各的（见 sidebar_favorites.go）。
 	sideLists [favGroups]ui.ListState
+	// sideRowKeys 记着侧栏收藏夹每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
+	// （票 #313）。**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头），
+	// 所以拖完排序、换收藏夹都不用记得重建。
+	sideRowKeys [favGroups]rowkey.Memo[int64, any]
 
 	// favPanelOpen 是**折叠态**那枚「收藏夹」图标点开之后的那层浮层开没开。
 	//
@@ -300,8 +358,47 @@ type Shell struct {
 	// 关掉窗口就该是关着的（Biu 那边的 modal store 也不持久化它）。
 	drawerOpen bool
 
+	// drawerPhase 是抽屉现在处在进场的哪一段。**和 drawerOpen 不是一回事**：
+	// 退场的那 200ms 里面板还在树上（滑出去了才拆），所以「关掉」不是「不建」。
+	// 理由和那一组状态机见 queue_drawer.go 的 drawerPhase。
+	drawerPhase drawerPhase
+
 	// queueList 是抽屉里那一列的列表状态：滚动位置、行身份、行高。
 	queueList ui.ListState
+	// queueRowKeys 记着抽屉里每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 理由同 `sideRowKeys`（票 #313）。
+	queueRowKeys rowkey.Memo[string, any]
+	// queueRowIDs 记着抽屉里每一行的**那两串身份**：判重标识（`Item.Identity()`）
+	// 和行身份（`queueRowKey` 拼出来的那一份）。
+	//
+	// ⚠️ **它们每帧每一行都要，而现拼每帧每行两次**（票 #339）：判重标识是
+	// 「local:」+ 路径，行身份是「queue-row:」+ 标识——二十首的队列就是四十来次
+	// 分配。而 `queueRowKeys` 记着的那一份只是**装进 `any` 的那一步**（装箱），
+	// 拼字符串那一步它没省。
+	//
+	// ⚠️ **它自己看得出「数据换了」**（见 `rowkey.Memo` 的文件头）：队列一改
+	// （加歌、删歌、重排）它自己就重算，调用方一处都不用记得重建。
+	queueRowIDs rowkey.Memo[queueRowRaw, queueRowIdentity]
+	// queueDrags 记着每一行那个**拖动值**（拖拽重排用的）。
+	//
+	// ⚠️ **它记的是指针**：框架把拖动值装进 `any`，装指针不分配——而每一行
+	// 每帧都要传一次拖动值（见 queue_drag.go 的说明）。
+	queueDrags rowkey.Memo[string, *queueDragValue]
+
+	// queueDropAt 是**落点那一行**在抽屉里的行号（-1 = 没有落点）。
+	//
+	// ⚠️ **它由每一行自己记**（见 queue_drawer.go 的 viewQueueRow）：每一行都
+	// 知道指针是不是在它身上、在它的哪一半——指针在谁身上，谁就是落点。
+	queueDropAt int
+	// queueDropUpper 是落点在那一行的**上半**（true）还是下半（false）。
+	queueDropUpper bool
+	// queueDragging 是「有东西正被拖着经过这一列」。
+	//
+	// ⚠️ **它比指针慢一帧**：它是上一帧问出来的（框架的 DragOver 只能在列表
+	// 建完之后问，见 viewQueueList）。差一帧看不出来——插入线晚一帧出现，
+	// 而拖动本来就不是一帧的事。
+	queueDragging bool
 
 	// queueScroll 是那一列滚到哪儿了。**和 queueList 分开存**是因为「定位当前
 	// 播放」要的是一段动画：ListState.ScrollTo 是一跳到位（`mygo/ui/list.go`
@@ -322,6 +419,17 @@ type Shell struct {
 	// 各自记着自己滚到哪儿；行的**内容**是同一份（partRowsFor）。
 	partList ui.ListState
 	partRows []partRow
+	// partRowKeys 记着分集抽屉里每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 理由同 `sideRowKeys`（票 #313）。
+	partRowKeys rowkey.Memo[string, any]
+
+	// errDetailOpen 是「错误详情」那块面板开着没有（票 #320，见 playbar_err.go）。
+	// **同样只由 view 在主线程上读写**。
+	//
+	// ⚠️ **它跟着错误一起收**：错没了（下一首放起来了）而它还开着的话，下一句
+	// 错一上来，面板是开着的——用户会看到一块不属于这句错的浮层。
+	errDetailOpen bool
 
 	// 顶栏这一摊。**同样只由 view 在主线程上读写**。
 	//
@@ -360,13 +468,19 @@ type Shell struct {
 	searchKeywordFilled bool
 	searchSuggest       bool
 	searchFocused       bool
-	// tipHoverNow / tipHoverPrev 是「正拿着**悬停驱动**的那枚提示」的元素 ID。
+	// tipCandidates 是这一遍 build 里登记下来的那些提示（tooltip.go）。
 	//
-	// ⚠️ **每一遍 build 都要挪一次**（见 `Shell.View` 开头）：框架一帧跑好几遍
-	// view，真正留在画面上的是最后一遍，所以「这一遍有没有悬停提示」要问上一遍
-	// 登记的那一份——理由见 `tipHoverBusy`。
-	tipHoverNow  uint64
-	tipHoverPrev uint64
+	// 🔴 **同一时刻只出一枚提示**（票 #420）：登记的是「有可能要画的」，整遍
+	// build 走完之后才挑出那一枚（见 `pickTip`）。
+	//
+	// ⚠️ **它按元素 ID 记的那一份状态在 `tips` 里**（下一条），而这里记的是
+	// 「这一遍谁登记过」。
+	tipCandidates []tipCandidate
+	// tipPanel 是这一遍 build 出来的那一块提示面板（还没填内容）。
+	//
+	// ⚠️ **建在「第一个要出提示的那一处」**，不是最后——理由见 `tooltip.go` 的
+	// `newTipPanel`：浮层按键的优先级是「最后建的先拿到」。
+	tipPanel ui.Element
 	// contentFocus 是「内容区里当前那一个能被方向键走位的」。
 	//
 	// **每帧开头清空**，每一帧由各个列表的登记重新填（见 focus.go 的
@@ -773,6 +887,12 @@ func (s *Shell) closePerWindow() {
 		s.wakeRemove = nil
 	}
 
+	// 摘掉这一扇窗在应用层那条播报登记（理由同上面那条唤醒句柄）。
+	if s.announceRemove != nil {
+		s.announceRemove()
+		s.announceRemove = nil
+	}
+
 	// 封面缓存：先摘掉这一扇窗的唤醒登记（借来的那一份活得比这一扇窗久），
 	// 再放开自己那一份使用权。
 	//
@@ -953,6 +1073,12 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	// 摘掉它的那一支存在 `localWakeRemove` 上，由 `closePerWindow` 调——迷你窗口
 	// 「进/退」每回来回新建一个外壳，不摘的话那个列表单调增长。
 	s.localWakeRemove = a.AddLocalWake(s.local.invalidate)
+	// 播报也是**逐窗口**的一条登记：应用层那几件「后台发生了一件事」（播放失败、
+	// 下载完成、歌放起来了）要把话送到每一扇窗，让它念给读屏软件听。
+	//
+	// ⚠️ **每个窗口建外壳都要登记一次**（和上面那条唤醒一样），而摘掉的那一支
+	// 由 `closePerWindow` 调。
+	s.announceRemove = a.AddAnnounce(s.announce)
 	return s
 }
 
@@ -1085,6 +1211,22 @@ func Run(a *app.App, sess *media.Session) error {
 	// 否则启动命令行里的 biu:// 会在回调装好之前就被交付掉。
 	s.installLifecycle()
 
+	// 「上次听到哪儿」恢复：队列、当前项和播放位置都从上次退出时的那份恢复，
+	// 恢复出来是**暂停**的（启动时不该突然出声——上游 Biu 和 Dopamine 都这样）。
+	//
+	// ⚠️ **排在 `New(a)` 之后**：播报句柄是 `New` 装的（见它那儿的
+	// `AddAnnounce`），排在它前面的话，那句「已恢复上次的位置」送不出去——
+	// 恢复是启动时唯一会用它的地方。
+	//
+	// ⚠️ **排在开窗口之前**：恢复完的第一帧就该是恢复后的样子（歌名和进度条
+	// 都在那儿），而不是先画一帧空的再换掉。读盘 / 开解码器是阻塞 IO，排在
+	// 建窗口之前也是为了这个（理由同上面那句 `mountSearchHistory`）。
+	//
+	// 失败不挡启动：恢复不出来就照常开一个空队列的应用。
+	if err := a.RestorePlayback(); err != nil {
+		log.Printf("biu: 恢复上次播放的状态失败：%v", err)
+	}
+
 	mygo.App.WhenReady(func() {
 		// scheme 在这里登记而不是 Run 之前：登记要走系统 API，事件循环起来
 		// 之后才接得住；而它又必须早于框架那次启动参数的交付——handleReady
@@ -1108,6 +1250,21 @@ func Run(a *app.App, sess *media.Session) error {
 		// 在应用还没 ready 的时候调会 panic（框架的 `needsApp`，
 		// `mygo/app.go:128`），而 `Run` 之前是那一刻。
 		a.StartLocalMusicWatch()
+		// 开机时如果已经登录，顺手把侧栏的收藏夹拉一次。
+		//
+		// 用户不该为了看见自己的收藏夹，先去头像下拉里按「刷新数据」——那是一
+		// 个没人会自己想到的操作，而侧栏上长期空着会被当成「我没有收藏夹」。
+		//
+		// ⚠️ **排在单实例锁之后**（锁在 `Run` 的第一句）：锁没拿到的话这个进程
+		// 马上就要退出，而这一趟是往 B 站发请求——第二个实例白发两次请求，
+		// 而用户那边什么也看不出来。
+		//
+		// ⚠️ **排在开窗口之前**：拉回来赶得上的话，第一帧上就有收藏夹；
+		// 赶不上的话那一行「正在刷新收藏夹…」会在（见 `viewFavoritesRefreshing`），
+		// 回来之后界面会被叫醒。
+		//
+		// ⚠️ **没登录时它一个请求都不发**（见 `app.AutoRefreshFavorites`）。
+		a.AutoRefreshFavorites()
 		// 后台自动查更新。**必须在 `WhenReady` 里**：第一次查询要走网络，而
 		// `WhenReady` 之前事件循环还没转起来，那时候发请求等于在一条还没开始
 		// 跑的路上走（框架自己也把「需要事件循环」的 API 挡在 ready 之前，见
@@ -1235,12 +1392,13 @@ type crashInfo struct {
 
 // View 画一帧，MyGo 在需要新画面的时候调它。
 func (s *Shell) View(c *ui.Context) {
-	// 提示的「悬停那一枚」登记，每一遍 build 挪一次（理由见 tipHoverBusy）。
+	// 提示的候选，每一遍 build 重新攒（理由见 tooltip.go 的 tipCandidate）。
 	//
-	// ⚠️ **挪在每一遍的开头，不是一帧的开头**：框架一帧跑好几遍 view，真正留在
-	// 画面上的是最后一遍，而「悬停提示有没有登记过」这件事在最后那一遍里要问
-	// 上一遍——焦点所在的那一枚可能先被 build。
-	s.tipHoverPrev, s.tipHoverNow = s.tipHoverNow, 0
+	// ⚠️ **清空是保险**：正常路径上 `drawTip` 画完就清了（那儿清才是准的——
+	// 见 drawTip 的注释），这里再清一次是为了「这一遍 build 崩在中途」那种
+	// 情况：崩了的那一遍不会走到 drawTip，候选就留在了壳上。
+	s.tipCandidates = s.tipCandidates[:0]
+	s.tipPanel = ui.Element{}
 
 	// 「内容区里当前那一个列表」每帧重新登记：这一遍开头先清空，登记的那几
 	// 个会在这一遍 build 里重新填（见 focus.go 的 `registerContentFocus`）。
@@ -1277,6 +1435,17 @@ func (s *Shell) View(c *ui.Context) {
 	}
 	s.draw(c)
 
+	// 提示：**这一遍 build 走完之后**才画（票 #420）。
+	//
+	// ⚠️ **排在 draw 之后**：提示是逐个元素登记的，而「指针刚离开的那一枚先被
+	// build」——挑出该画哪一枚要看得见这一遍登记的**全部**候选（见 pickTip）。
+	//
+	// ⚠️ **崩了这一帧就不画**：崩的时候树是半截的，画上去的面板会挂在一个
+	// 不知道在哪儿的锚点上。
+	if s.crash == nil {
+		s.drawTip(c)
+	}
+
 	// 兑现「把焦点交给内容区」这个请求（票 #245 的 E4）。
 	//
 	// ⚠️ **排在 draw 之后**：内容区在 draw 里画，各张列表的登记也在那儿——
@@ -1285,6 +1454,16 @@ func (s *Shell) View(c *ui.Context) {
 	// ⚠️ **每一遍 build 都会走到这里**：兑现一次就把请求清掉（见
 	// `applyContentFocus`），所以只有第一遍真的兑现。
 	s.applyContentFocus()
+
+	// 把攒着的那些状态变化念给读屏软件听（无障碍，见 announce.go）。
+	//
+	// ⚠️ **排在最后**：这一句要念的是「刚刚发生了什么」，而刚刚发生的那些事
+	// 有一部分是**这一遍建视图的时候才知道的**（按了下载、按了收藏——那些话
+	// 是提示，提示也是要念的）。排在前面的话它们要等到下一帧才念出去，而下一帧
+	// 未必来得快（界面是按需绘制的）。
+	//
+	// ⚠️ **一帧建好几遍视图，这里只念一遍**：`take` 是有破坏性的（见 announce.go）。
+	s.flushAnnouncements(c)
 }
 
 // guardAt 给一层 view 包 Guard，并记住**它是界面的哪一块**。
@@ -1341,6 +1520,12 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 它之后创建的控件。不装的话 MyGo 在帧开头重置好的那份跟随系统的主题
 	// 就是这一帧真正用的那份，用户选了深色也只在这一帧是对的。
 	s.applyFrameTheme(c)
+	// 封面缓存要知道「新的一帧开始了」——挤缓存时**画面上正画着**的那几张
+	// 不许挤（票 #358：开队列抽屉时中间那一列的封面来回闪）。
+	//
+	// ⚠️ **给的是 `c.Now()` 而不是帧号**：一帧要跑好几遍 view，而同一帧的
+	// 几遍给的是同一个时刻，缓存那边靠它认出「这是不是新的一帧」。
+	s.images.BeginFrame(c.Now())
 	// 应用内快捷键：登记这一帧窗口要处理哪些组合键，同时也就知道了这一帧有没有
 	// 键打中（`Context.Shortcut` 命中就是「按了」）。见 shortcut_dispatch.go。
 	//
@@ -1427,15 +1612,21 @@ func (s *Shell) viewMain(c *ui.Context) {
 	//
 	// 排在最后是安全的：这一帧的页面已经画完了（那一格已经被指着画过一次），
 	// 而设置页自己那一格是**切走**才清的（见 syncSettings）。
-	if s.lastPath != settingsPath && s.settings.focus != settingsFocusNone {
-		s.settings.focus = settingsFocusNone
+	if s.lastPath != settingsPath {
+		if s.settings.focus != settingsFocusNone {
+			s.settings.focus = settingsFocusNone
+		}
+		// ⚠️ **那 16 像素的留白也别留着**：它是给「刚跳过来」这件事的——用户
+		// 跳过来之后立刻走掉的话，下一次进设置页时它补在别的地方，页面就无故
+		// 差了 16 像素（见 syncSettings）。
+		s.settings.focusMargin = false
 	}
 }
 
 // pageJustShown 报「这一帧是刚进这一页的第一帧」。
 //
 // 路由切走再切回来时，框架会把焦点还给「离开这一页时有焦点的那个元素」
-// （`Router.focusPage`，`mygo@v0.6.2/ui/router.go:726`）。收藏夹/local 那一页
+// （`Router.focusPage`，`mygo@v0.6.3/ui/router.go:726`）。收藏夹/local 那一页
 // 的「会展开的搜索」正好是那个元素——于是用户回来的时候，键盘焦点被塞进一个
 // 他没打开过的框里，他在别处敲的字就落进那里（评审第 5 条）。
 //

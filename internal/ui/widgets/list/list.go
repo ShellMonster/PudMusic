@@ -43,6 +43,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrollbar"
@@ -173,6 +174,37 @@ func (c Columns) pubTimeTitle() string {
 type List struct {
 	songs []Music
 	state ui.ListState
+
+	// rowKeys 记着每一行的身份（**预先装箱好的那一份**）。
+	//
+	// 🔴 铁律四要的是「行身份是这一首的 ID」，而「把一个 string 装进 `any`」
+	// 是要分配的（`runtime.convTstring`）——现算的话**每帧每行一次**，
+	// 一屏十来行就是十来次（实测见票 #313）。
+	//
+	// ⚠️ **它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头）：换歌之后
+	// 身份对不上就重算。所以这里**不用记得重建**——那是最容易漏的一步，
+	// 漏了就是铁律四的回归（前面插一行，后面所有行的状态整体错配）。
+	rowKeys rowkey.Memo[string, any]
+
+	// durText / countText / opText 记着三处「每帧每行算一遍、结果不变」的
+	// 显示文字：时长、播放量、行尾那枚「⋯」的无障碍名字。
+	//
+	// ⚠️ 为什么不把它们塞进 `Music` 里算好：那样每一个造 `Music` 的地方都得
+	// 记得填，**漏一个就是那一格空着**（看得见的坏）。而这三处的原料
+	// （时长 / 播放量 / 歌名）本来就在行上，记一份就够。
+	//
+	// ⚠️ **「投稿时间」不在这里**：它那一列的字（今天 / 昨天 / N天前）**跨零点
+	// 会过期**，缓存了就对不上（见 `pubtime.go` 的文件头）。
+	durText   rowkey.Memo[time.Duration, string]
+	countText rowkey.Memo[int64, string]
+	opText    rowkey.Memo[string, string]
+
+	// ownerTip 记着每一行那句「打开 X 的空间」（票 #360）。
+	//
+	// ⚠ **它是「每帧每行算一遍、结果不变」的那一种**：提示里那个名字是行上的
+	// UP 名，而那一句是拼出来的。现算的话每帧每一行一次字符串拼接，一屏十来行
+	// 就是十来次（理由和上面那三个一模一样，见 `rowkey.Memo` 的文件头）。
+	ownerTip rowkey.Memo[string, string]
 
 	// sel 是选中的行，-1 是没选。帧里的点击由 ui.List 自己写进来。
 	sel int
@@ -562,7 +594,9 @@ func (l *List) View(c *ui.Context) {
 		if i >= len(l.songs) {
 			return footerKey{}
 		}
-		return l.songs[i].ID
+		// ⚠️ **身份是预先装箱好的那一份**（`l.rowKeys`）：现算的话每帧每行一次
+		// 分配，而这一屏十来行就是十来次（票 #313）。
+		return l.rowKeys.At(i, l.songs[i].ID, rowkey.Identity)
 	}
 	// Label 是这一行给无障碍和「打字选中」用的名字。
 	l.state.Label = func(i int) string {

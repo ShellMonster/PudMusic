@@ -206,7 +206,7 @@ type sideRun struct{ y0, y1 int }
 // sideScanY 是侧栏那一列从哪儿扫到哪儿。
 //
 // ⚠️ **上下都留了富余**（品牌那一行到折叠按钮那一行）：扫的范围里除了菜单行，还有
-// 「还没有收藏夹」那一句提示和两个分组标题，而它们也都在左边 8 像素处起头——范围
+// 收藏夹那一片（两个分组标题 + 那一句空状态），而它们也都在左边 8 像素处起头——范围
 // 收窄到菜单那几行，就得靠 `Tester.Find` 去量它们的框，而 `Find` 认不出「侧栏里
 // 那个和内容区标题同名的那一个」（见下面那个 ⚠️）。宁可多扫：多出来的那些像素上
 // 同样只该有侧栏底色，一并断掉。
@@ -218,7 +218,7 @@ const (
 // sideScanX 是扫侧栏的第几像素。
 //
 // ⚠️ **4，不是 8**：菜单行的描边在 x=0、按钮通栏，所以 4 那一列既在按钮之内、又能
-// 吃到上下那两条横描边。而「Biu」那个品牌字、下面「还没有收藏夹」那一句提示都是
+// 吃到上下那两条横描边。而「Biu」那个品牌字、下面收藏夹那一句空状态都是
 // `Padding(…, 8, …)` 从第 8 像素起头的——扫 8 会扫到它们身上去。
 const sideScanX = 4
 
@@ -529,7 +529,7 @@ func hoverDelta(t *testing.T, tt *mygoui.Tester, label string) int {
 //
 // 判据是**画面上那一格的两个色**：底取众数、字取离底最远的那一个（落在实心笔画上），
 // 再算 WCAG 2.x 的对比度。深浅两套主题都跑——深色那一档本来就过，而浅色那一档
-// 曾经不���。
+// 曾经不是。
 //
 // 4.5 是 WCAG AA 对**普通正文**的门槛（侧栏菜单项是 13px 的正文，不是大字）。
 func TestTheSelectedRowKeepsItsContrast(t *testing.T) {
@@ -685,9 +685,9 @@ func TestTheQueueHeaderKeysAreIconButtonsWithNames(t *testing.T) {
 	s, tt := newShell(t)
 	s.app.Queue().Reset(app.Item{Source: "local", Type: "audio", Title: "第一首"})
 	s.drawerOpen = true
-	for range 3 {
-		tt.Frame()
-	}
+	// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在窗口外面，
+	// 按名字找「清空」会找不到（它在窗口外）。
+	settleDrawer(t, s, tt)
 	for _, name := range []string{"定位当前播放", "清空"} {
 		r, ok := tt.Find(name)
 		if !ok {
@@ -757,9 +757,9 @@ func TestRenderFlatShots(t *testing.T) {
 				app.Item{Source: "local", Type: "audio", Title: "晴天", Artist: "周杰伦"},
 			)
 			s.drawerOpen = true
-			for range 3 {
-				tt.Frame()
-			}
+			// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在
+			// 窗口外面（它从右边滑进来），存下来的图是空的右半边。
+			settleDrawer(t, s, tt)
 			tt.Move(away[0], away[1])
 			tt.Frame()
 			save(t, dir, "21-"+name+"-队列抽屉.png", tt)

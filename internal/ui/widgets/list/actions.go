@@ -20,6 +20,24 @@ type Actions struct {
 	// Play 从这一首往后接进队列并开始播。给的是从这一首起的全部。
 	Play func(items []app.Item)
 
+	// PlayNow **只放当前这一首**——菜单里那枚「立即播放」。
+	//
+	// # 和 Play 的分界在**队列里剩下什么**
+	//
+	// Play 接的是「从这一首往后」的那一批（这一页剩下的歌），而这一条接的
+	// **只有它自己**：队列被换成这一首，正在放的就是这一首，下一首是什么
+	// 由这一首放完之后队列里还剩什么决定（没有了就停在那儿）。
+	//
+	// ⚠️ **语义是拍板定的**（票 #299，2026-10-24，人定的）：「立即播放」=
+	// 只放当前这一首。上游那一枚（老版本的歌单行菜单，`PlayList/index.tsx:68`）
+	// 也是这个意思——「立刻放这一首」，不是「把这一页都排上」。
+	//
+	// ⚠️ **和「全部播放」是两件事**：那一枚是**页级**的（把这一页的歌按顺序
+	// 加进队列并播放），这一枚是**歌级**的（只放这一首）。两枚的名字只差
+	// 两个字，而它们做的事差着一个队列——所以菜单里这一枚摆在那儿时，写的是
+	// 「立即播放」而不是「播放」。
+	PlayNow func(item app.Item)
+
 	// Add 把这一首追加到队列末尾，不打断正在放的那首。
 	Add func(items []app.Item)
 
@@ -81,6 +99,17 @@ type Actions struct {
 	// 真正的判据是 `app.App.IsPlaying`（按 `app.Item.Identity`）。
 	IsPlaying func(item app.Item) bool
 
+	// OpenOwner 进那个 UP 主的空间（`/user/{mid}`）。
+	//
+	// ⚠ **给的是 mid 和名字两样**：名字是**那个人**的名字——提示里说的是
+	// 他（「打开 X 的空间」），而界面上画出来的那一句可能是**清洗过的**
+	// （「歌手 · UP 名」，见 `titleline.go` 的 `showOf`）。两样不是一回事。
+	//
+	// ⚠ **为 nil 时列表里的 UP 名照旧显示，只是点不动**：B 站有的接口只给
+	// 名字不给编号（见 `app.Item.ArtistMid`）。**把名字藏起来是另一种撒谎**
+	// ——用户看到的是「这一首没有 UP 主」。
+	OpenOwner func(mid int64, name string)
+
 	// Focus 登记「**此刻内容区里是这一个列表**」。
 	//
 	// 界面层装一个进来（`internal/ui` 的 `listActions`）：每一帧，各个列表把
@@ -113,6 +142,13 @@ func AppActions(a *app.App, notify func(string, notice.Tone)) Actions {
 	return Actions{
 		Play: func(items []app.Item) {
 			if err := a.PlayFrom(items...); err != nil && notify != nil {
+				notify("放不了这一首："+err.Error(), notice.Danger)
+			}
+		},
+		// ⚠️ **只放这一首**：队列被换成这一首（`PlayFrom` 给一项就是换队列 +
+		// 从这一首起播），不是把这一页剩下的歌一起排上——那是上面那个 `Play`。
+		PlayNow: func(item app.Item) {
+			if err := a.PlayFrom(item); err != nil && notify != nil {
 				notify("放不了这一首："+err.Error(), notice.Danger)
 			}
 		},

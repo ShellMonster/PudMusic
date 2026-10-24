@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/color"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -55,6 +56,12 @@ type libFake struct {
 type libSeen struct {
 	path  string
 	query url.Values
+	// body 是 POST 的请求体（表单）。空串 = 这一次没有请求体（GET）。
+	//
+	// ⚠️ **「清除已看完」要认的就是它**：`POST /x/v2/history/toview/del` 带的是
+	// `viewed=true`，而路径和查询串上什么都没有——不记请求体就分不出「删一条」
+	// 和「清已看完」这两种请求。
+	body string
 }
 
 func newLibFake(t *testing.T) *libFake {
@@ -62,7 +69,14 @@ func newLibFake(t *testing.T) *libFake {
 	f := &libFake{later: map[int]string{}, history: map[int]string{}}
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		f.seen = append(f.seen, libSeen{path: r.URL.Path, query: r.URL.Query()})
+		seen := libSeen{path: r.URL.Path, query: r.URL.Query()}
+		// ⚠️ **请求体要读出来**：删除那一类请求（`/x/v2/history/toview/del`）
+		// 的参数在体里，路径和查询串上什么都没有。
+		if r.Body != nil {
+			raw, _ := io.ReadAll(r.Body)
+			seen.body = string(raw)
+		}
+		f.seen = append(f.seen, seen)
 		var body string
 		switch r.URL.Path {
 		case laterPathAPI:
@@ -126,6 +140,21 @@ func (f *libFake) queriesOf(path string) []url.Values {
 
 // callsOf 是打给某一条路径的请求数。
 func (f *libFake) callsOf(path string) int { return len(f.queriesOf(path)) }
+
+// bodyOf 是打给某一条路径的**最后一个**请求的请求体。
+//
+// 空串 = 没有请求，或者那一次没有体（GET）。
+func (f *libFake) bodyOf(path string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	body := ""
+	for _, s := range f.seen {
+		if s.path == path {
+			body = s.body
+		}
+	}
+	return body
+}
 
 // laterBody 造一页稍后再看的返回。**seed 让每一页的行身份互不相同**——翻页撞了身份
 // 会被去重吃掉，而那在测试里表现为「第二页明明有内容却没加上」。

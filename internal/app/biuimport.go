@@ -95,7 +95,7 @@ type BiuScan struct {
 
 	// Lyrics 是从 `lyrics-cache.json` 读到的歌词，逐条翻译成了我们自己的形状。
 	// 空的（既没有原文也没有翻译）已经在读的时候丢掉了——写一个空文件下去只会
-	// 占地方，还会���歌词页以为「缓存过了，别去搜了」。
+	// 占地方，还会让歌词页以为「缓存过了，别去搜了」。
 	Lyrics []LyricsEntry
 
 	// LoggedIn 报 Biu 那边有没有登录态（那份加密文件在不在、有没有内容）。
@@ -418,7 +418,7 @@ func biuCidString(v any) string {
 //
 // Biu 有九个状态，我们有六个（`download/task.go`）。「在飞」的那几个
 // （`downloading` / `merging` / `converting`）**都落成暂停**，不是 running——
-// 迁移完���那个在飞的请求早就不在了，记成 running 会让界面上**永远转圈**
+// 迁移完成后那个在飞的请求早就不在了，记成 running 会让界面上**永远转圈**
 // （`store.go` 的 `Restore` 为这件事专门有一段注释）。
 //
 // 表里没有的（未来 Biu 加了新的、或者文件里是空串）一律落成暂停：那是一个用户

@@ -98,6 +98,18 @@ const (
 	DefaultBorderRadius = 8.0
 	// MaxBorderRadius 是圆角的上限，也是 Biu 设置页滑块的右端点。
 	MaxBorderRadius = 24.0
+	// DefaultVolume 是「用户没设过音量」时给的默认音量（1 = 100%）。
+	//
+	// ⚠️ **它是 1 而不是 Biu 的 0.5**：Biu 那边 0.5 是 `play-list` store 的初值，
+	// 而我们**老版本每一次启动都是 100%**（音量压根没落盘）——老用户升级上来
+	// 看到的还是他一直习惯的那一档，不该在升级的那一次突然变成一半。
+	//
+	// 上游那 0.5 的出处见报告 §4.4（`biu/src/store/play-list.ts:369`）。
+	DefaultVolume = 1.0
+	// DefaultUnmuteVolume 是「压根没有音量可放回去」时取消静音放回去的值。
+	//
+	// 0.5 是一半——用户按了「取消静音」，听到的应该是一半声音，不是 0。
+	DefaultUnmuteVolume = 0.5
 )
 
 // 侧栏宽度的三个数，抄 Biu `src/layout/side/index.tsx:15-17`：
@@ -109,10 +121,11 @@ const (
 // 放在这一层而不是界面层，是因为 normalize 也要用：设置文件是用户能直接编辑的，
 // 一个 `sideMenuWidth: 99999` 不该一路穿到画界面的那一行。
 const (
-	CollapsedSideMenuWidth = 72.0
-	MinSideMenuWidth       = 160.0
-	MaxSideMenuWidth       = 480.0
-	DefaultSideMenuWidth   = 200.0
+	// 设计规范 v0.1 §4：展开 220（可拖 180 到 300），折叠 64 仅图标。上游 Biu 是 72 / 160~480 / 200。
+	CollapsedSideMenuWidth = 64.0
+	MinSideMenuWidth       = 180.0
+	MaxSideMenuWidth       = 300.0
+	DefaultSideMenuWidth   = 220.0
 )
 
 // ClampSideMenuWidth 把一个宽度拉进 [MinSideMenuWidth, MaxSideMenuWidth]。
@@ -138,6 +151,47 @@ const (
 	ThemeModeLight  ThemeMode = "light"
 	ThemeModeDark   ThemeMode = "dark"
 )
+
+// ThemePreset 是主题方案：设计规范里的三套整体配色（暖纸 / 暮光 / 柔雾），
+// 每套含浅色和深色各一份底色、文字色、强调色和圆角。
+//
+// ## 我们加的、Biu 没有的键
+//
+// Biu 只有 `themeMode`（浅 / 深 / 跟随系统）加一个主色一个底色，**没有「整套方案」
+// 这个概念**，所以 `themePreset` 是我们自己的键（见 `ourOwnKeys`）。Biu 读到
+// 我们的文件会把它当不认识的键，Biu 自己的设置一个键都没丢。
+//
+// ## 默认是「暖纸」，「经典」是显式的一档
+//
+// 「经典」就是原来的外观（Biu 绿加框架默认底色），不套任何方案，值是 `"classic"`。
+// 默认（包括键缺失、空串、不认识的值）一律是暖纸：应用还没发版，没有需要保住的
+// 旧外观；Biu 导出的配置里没有这个键，导入后也拿到暖纸。
+// 套了方案之后，方案的底色、文字、强调色、圆角**压过**设置里的 `primaryColor` /
+// `backgroundColor` / `borderRadius`；用户在设置页改那三项时界面层会先把方案清成
+// 经典，免得「改了没反应」。
+type ThemePreset string
+
+const (
+	ThemePresetWarmPaper ThemePreset = "warm-paper"
+	ThemePresetDuskAmber ThemePreset = "dusk-amber"
+	ThemePresetSoftPeach ThemePreset = "soft-peach"
+	ThemePresetClassic   ThemePreset = "classic"
+)
+
+// DefaultThemePreset 是新设置的默认方案。
+//
+// 它是**生产默认**：应用还没发版，没有需要保住的旧外观，所以默认一律是暖纸
+// （缺键、空串、不认识的值都落到这里，见 `pickEnum`）。
+//
+// ⚠️ **这是一个变量而不是常量，是为了留一扇门**：老界面那一批「和 Biu 逐像素
+// 对照」的用例曾经在这里被按成经典，好让它们继续绿。票 #406 把那一层去掉
+// （`internal/ui` 的 `TestMain` 不再改它），界面那一包的测试现在量的是**暖纸**
+// ——那才是用户看见的那一版。
+//
+// 「经典」这个**用户选项**照旧保留（设置页四张预览卡里有它），它自己那套配色有
+// 专门的用例盯着（`internal/ui/themepreset_test.go` 及那几处按方案各跑一遍的
+// 截图用例）。而「生产默认是暖纸」由本包里的测试盯着（`themepreset_test.go`）。
+var DefaultThemePreset = ThemePresetWarmPaper
 
 // 音质档位。Biu 的 `AudioQuality`。
 type AudioQuality string
@@ -287,6 +341,7 @@ type Settings struct {
 	DisplayMode              DisplayMode              `json:"displayMode"`
 	FFmpegPath               string                   `json:"ffmpegPath"`
 	ThemeMode                ThemeMode                `json:"themeMode"`
+	ThemePreset              ThemePreset              `json:"themePreset"`
 	PageTransition           PageTransition           `json:"pageTransition"`
 	ShowSearchHistory        bool                     `json:"showSearchHistory"`
 	ProxySettings            ProxySettings            `json:"proxySettings"`
@@ -317,6 +372,42 @@ type Settings struct {
 	// 那一项的 Cid**，不插新的项（见 `App.PlayPart` 与 `Item.PageIndex` 那段
 	// 注释）。要让这个开关真的有话可说，得让每一集各占一项，那是另一件事。
 	ShouldKeepPagesOrderInRandomPlayMode bool `json:"shouldKeepPagesOrderInRandomPlayMode"`
+
+	// Volume 是用户设的音量（0..1），1 是解码出来的原样。
+	//
+	// ⚠️ **用指针**：「这份设置里没有这一格」（老版本写的文件）和「用户把音量
+	// 拉到 0」必须分得开——前者该给默认值（100%），后者该给 0（真的没声）。
+	// 用 float64 的话两者读出来都是 0，而「启动时突然没声」和「用户自己拉到 0」
+	// 是两回事：前者是 bug，后者是用户要的。
+	//
+	// （和 `ProxySettings.Port` 同一个理由——那份也是 Biu 那边用 `?:` 表达的
+	// 「没设过」。）
+	//
+	// 键名照 Biu 的 `play-list` 那个 zustand 字段（`volume`），位置换了——
+	// 和 `PlayMode` / `ShouldKeepPagesOrderInRandomPlayMode` 同一段理由。
+	Volume *float64 `json:"volume"`
+
+	// Muted 是静音标志。**它和音量分开存**（票 #311 / 报告 §3.3 的 B2）。
+	//
+	// ⚠️ **别再用「音量 0」顶替静音**：落盘之后那就是个坑——静音之后退出再
+	// 启动，音量变成 0（Clementine 的老毛病）。静音是它自己的一格，而音量那一
+	// 格记的是「用户设的是多少」。
+	//
+	// 键名照 Biu 的 `play-list` 那个 zustand 字段（`isMuted`）。
+	Muted bool `json:"isMuted"`
+
+	// Playback 是「上次听到哪儿」那一格：队列、当前项、播放位置。
+	//
+	// ⚠️ **它和音量、播放模式在同一个文件里，是有意的**：同一次原子写里落盘，
+	// 它们之间就没有「谁先谁后」的竞态（见 playback_state.go 文件头那张表）。
+	//
+	// 键名是我们自己的（Biu 那边没有这一个键，它把队列放在 `play-list` store
+	// 里）。Biu 读到它会当不认识的键——最坏的结果是**它自己的队列不受影响**
+	//（那是另一个文件里的事）。
+	//
+	// 加键不用涨 SchemaVersion（见 SchemaVersion 的注释：只加新的可选键不用
+	// 涨）：读不到就是空的，等于「没有上次听到哪儿」。
+	Playback PlaybackSnapshot `json:"playback"`
 
 	// extra 是这个版本的代码不认识的键，原样带着走。
 	//
@@ -396,9 +487,16 @@ type settingsFile struct {
 	AppSettings   Settings `json:"appSettings"`
 }
 
-// DefaultSettings 返回 Biu 的默认设置。downloadPath 传系统下载目录，
+// DefaultSettings 返回 Biu 的默认设置。downloadPath 传默认下载目录，
 // 对应 Biu 的 `electron/store.ts:18`（那里注入 `app.getPath("downloads")`）。
+//
+// ⚠️ **我们这边传的是空串**：默认落点由 `platform.DefaultDownloadsDir` 算出来
+// （「音乐」目录下的应用子目录），不是系统下载目录——见
+// `platform/downloadsdir.go` 顶上那一节。
 func DefaultSettings(downloadPath string) Settings {
+	// 音量那一格是**指针**，所以每一次调用都要新的一份——共用同一个指针的话，
+	// 有人改了 `*s.Volume` 就把全局的默认值改了。
+	vol := DefaultVolume
 	return Settings{
 		AutoStart:         false,
 		CloseWindowOption: CloseWindowHide,
@@ -412,6 +510,7 @@ func DefaultSettings(downloadPath string) Settings {
 		DisplayMode:       DisplayModeList,
 		FFmpegPath:        "",
 		ThemeMode:         ThemeModeSystem,
+		ThemePreset:       DefaultThemePreset,
 		PageTransition:    PageTransitionNone,
 		ShowSearchHistory: true,
 		ProxySettings:     ProxySettings{Type: ProxyNone},
@@ -423,6 +522,17 @@ func DefaultSettings(downloadPath string) Settings {
 		},
 		ReportPlayHistory: true,
 		LocalMusicDirs:    []string{},
+
+		// 音量：默认 100%（老版本每一次启动都是这一档，见 DefaultVolume）。
+		Volume: &vol,
+		Muted:  false,
+
+		// 「上次听到哪儿」那一格：默认是空的（= 没有上次听到哪儿）。
+		//
+		// ⚠️ **`Items` 给空序列而不是 nil**：nil 和空序列在 JSON 里差一个
+		// `null`，写出去会让「还没存过」和「存过、当时队列是空的」看起来是两
+		// 回事。统一成空序列。
+		Playback: PlaybackSnapshot{Items: []PlaybackEntry{}},
 
 		// 播放模式的两个默认值都照 Biu 的初始状态（`play-list.ts:370,373`）：
 		// 默认循环播放（不是顺序播放——「放完就停住」正是这一票要治的症状，
@@ -616,6 +726,8 @@ func (s *Settings) normalize() {
 
 	s.ThemeMode = pickEnum(s.ThemeMode, ThemeModeSystem,
 		ThemeModeSystem, ThemeModeLight, ThemeModeDark)
+	s.ThemePreset = pickEnum(s.ThemePreset, DefaultThemePreset,
+		ThemePresetWarmPaper, ThemePresetDuskAmber, ThemePresetSoftPeach, ThemePresetClassic)
 	s.AudioQuality = pickEnum(s.AudioQuality, AudioQualityAuto,
 		AudioQualityAuto, AudioQualityLossless, AudioQualityHigh,
 		AudioQualityMedium, AudioQualityLow)
@@ -648,6 +760,22 @@ func (s *Settings) normalize() {
 	if s.LocalMusicDirs == nil {
 		s.LocalMusicDirs = []string{}
 	}
+	// 音量：钳进 [0, 1]。
+	//
+	// ⚠️ **「这一格不存在」和「这一格是 0」必须分开**：前者是老版本写的文件
+	// （那时候音量压根不落盘，每一次启动都是 100%），该给**默认值**；后者是用户
+	// 自己把滑块拉到最下（= 静音），该给 0。用 float64 的话两者读出来都是 0，
+	// 而「启动时突然没声」是最难查的一类回归——所以这一格是指针（见
+	// `Settings.Volume` 的注释）。
+	//
+	// 而 0 本身是合法的：用户把滑块拉到最下就是 0（= 静音，见 `App.SetVolume`）。
+	if s.Volume == nil {
+		v := DefaultVolume
+		s.Volume = &v
+	} else {
+		v := min(max(*s.Volume, 0), 1)
+		s.Volume = &v
+	}
 	// nil 和空序列在 JSON 里差一个 `null`，写出去会让「还没排过序」和
 	// 「排过序，排出来是空的」看起来是两回事。统一成空序列。
 	if s.SideMenuCollectionOrder.Created == nil {
@@ -655,6 +783,10 @@ func (s *Settings) normalize() {
 	}
 	if s.SideMenuCollectionOrder.Collected == nil {
 		s.SideMenuCollectionOrder.Collected = []int64{}
+	}
+	// 「上次听到哪儿」那一格，同一个理由（见 DefaultSettings 里那一句）。
+	if s.Playback.Items == nil {
+		s.Playback.Items = []PlaybackEntry{}
 	}
 }
 

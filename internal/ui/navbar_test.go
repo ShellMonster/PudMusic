@@ -89,13 +89,18 @@ func fakeClockOn(s *Shell, t time.Time) *fakeClock {
 	return c
 }
 
-// TestNavBarSpansTheTopOfTheWindow 验顶栏真的横贯窗口顶上的一条。
+// TestTheTopBarCoversTheContentAreaOnly 验顶栏**只盖内容区那一段**。
 //
 // 「整条是拖动区」这件事本身无头**验不了**：MyGo 无头宿主的 `startDrag` 是空
 // 实现（`ui/headless.go:90`），拖没拖窗口在画面上看不出来。这条能验的是拖动区
-// 成立的前提——它得是**顶上那一条、并且横贯整个窗口宽度**，否则有一片窗口
-// 拖不动。
-func TestNavBarSpansTheTopOfTheWindow(t *testing.T) {
+// 成立的前提——它得是**内容区顶上那一条**（x ≥ 侧栏宽），否则有一片窗口
+// 拖不动；而它**不该**再盖住侧栏那一段（那是侧栏的 logo 和菜单的地方）。
+//
+// ⚠️ **这一条跟着票 #286 改过**：顶栏原来横贯**整个窗口宽度**（后退键贴在
+// 窗口左边 x=8），而现在是上游那种「侧栏通栏 + 顶栏只盖内容区」（上游
+// `biu/src/layout/index.tsx:36-47`，报告 C-01）。所以左边那一头量的是
+// **内容区的左沿**（侧栏的右沿），不再是窗口的左沿。
+func TestTheTopBarCoversTheContentAreaOnly(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
 
@@ -123,16 +128,25 @@ func TestNavBarSpansTheTopOfTheWindow(t *testing.T) {
 	if login.Y < 0 || login.Y+login.H > navMinHeight {
 		t.Errorf("登录入口在 %v，不在顶上那 %v 高里", login, navMinHeight)
 	}
-	// 左边贴着窗口左边、右边贴着窗口右边 = 这一条横贯整个宽度。
+	// 左边：**内容区的左沿**（侧栏的右沿），右边：窗口的右边。
 	//
-	// 留出来的 slack 是：顶栏自己的右内边距（8，见 viewNav 的 Padding）
-	// 加那个控件自己的内边距。**Tester 只能量到文字/名字那一小块**，
-	// 量不到按钮本身——`Find` 给的是标签节点的框（`ui/runtime.go:1056`）。
-	// 所以这里量的是「顶栏那一组控件顶到了窗口右边附近」，不是「按钮的边缘
-	// 正好等于窗口边缘」。
+	// ⚠️ **左边量的是「顶栏那一组控件顶到内容区左边附近」**，不是「按钮的边缘
+	// 正好等于内容区的边缘」：**Tester 只能量到文字/名字那一小块**，量不到按钮
+	// 本身（`Find` 给的是标签节点的框，`ui/runtime.go:1056`）。顶栏自己的左
+	// 内边距是 8（`viewNav` 的 Padding），而框架那一支后退键自己还有 8 的
+	// 内边距（`mygo/ui/widgets.go` 的 `Padding(Space(1.5), Space(2))`）——
+	// 所以量到的是 200 + 8 + 8 那一带。
+	//
+	// 右边留出来的 slack 是：顶栏自己的右内边距（8）加那个控件自己的内边距。
 	const slack = 32
-	if back.X < 8 {
-		t.Errorf("后退按钮左边缘 %v，快贴到窗口外了", back.X)
+	contentLeft := float32(app.DefaultSideMenuWidth)
+	if back.X < contentLeft {
+		t.Errorf("后退按钮左边缘 %v，在内容区左沿（%v）**左边**——顶栏又盖到侧栏上去了",
+			back.X, contentLeft)
+	}
+	if back.X > contentLeft+slack {
+		t.Errorf("后退按钮左边缘 %v，离内容区左沿（%v）有 %v（容差 %v）——它不在顶栏左端",
+			back.X, contentLeft, back.X-contentLeft, slack)
 	}
 	if right := login.X + login.W; float32(1200)-right > slack {
 		t.Errorf("登录入口右边缘 %v，离窗口右边还有 %v（容差 %v），顶栏没顶满",
@@ -140,6 +154,68 @@ func TestNavBarSpansTheTopOfTheWindow(t *testing.T) {
 	}
 	if s.router.Path() != "/" {
 		t.Errorf("看了一顶栏，路径变成了 %q", s.router.Path())
+	}
+}
+
+// TestTheTopBarDoesNotReserveRoomForTheWindowControls 钉住顶栏**左边不让出**
+// `bar.Left`（票 #286 / 报告 C-01）。
+//
+// # 为什么单独立一条
+//
+// `TestTheTopBarCoversTheContentAreaOnly` 量的是「后退键左边缘离内容区左沿不
+// 超过 32 像素」，而**无头 Tester 的 TitleBar 是零值**（`mygo/ui/headless.go`
+// 那张表默认没填，`bar.Left` 是 0）——于是「让出 `bar.Left+8`」和「不让出」
+// 两种写法量到的都是同一个数（X=208），**分不出来**。只有真窗口
+// （`bar.Left` = 66）才差那 66 像素。
+//
+// 所以这里显式装一个 macOS 那样的标题栏进去（`tt.SetTitleBar`，做法照
+// `fullplayer_review_test.go` 里那一条），量两遍：装之前和装之后，后退键的
+// 左边缘**一个像素都不许动**。
+//
+// # 断言为什么写成「不许动」而不是「等于某个数」
+//
+// 「等于某个数」会把这一条变成「顶栏左内边距是 8」那一条的另一份——内边距
+// 一改，断言跟着改。而这一条要钉的是**依赖关系**：顶栏左边那 8 像素**不随
+// `bar.Left` 变**。「预留」和「不预留」两种写法在这一条上分别是「动了 66」和
+// 「没动」，分得开。
+func TestTheTopBarDoesNotReserveRoomForTheWindowControls(t *testing.T) {
+	_, tt := newShell(t)
+	tt.SetFocused(true)
+
+	before, ok := tt.Find(navBackLabel)
+	if !ok {
+		t.Fatalf("顶栏上没有后退，文字有 %q", tt.Texts())
+	}
+
+	// macOS 那三枚窗口按钮在窗口左上角占掉的那一格：真窗口上 66 像素宽。
+	//
+	// ⚠️ **高度那一栏跟这一条无关**（顶栏高是 `max(bar.Height, navMinHeight)`，
+	// 38 那个数够不着 64），写上只是为了让这个标题栏像真窗口的那样。
+	const barLeft = float32(66)
+	tt.SetTitleBar(mygoui.TitleBar{Height: 38, Left: barLeft})
+	tt.Frame()
+
+	after, ok := tt.Find(navBackLabel)
+	if !ok {
+		t.Fatalf("装上标题栏之后顶栏上没有后退，文字有 %q", tt.Texts())
+	}
+	if after.X != before.X {
+		t.Errorf("装上 bar.Left=%v 的标题栏之后，后退键左边缘从 %v 挪到了 %v（+%v）——"+
+			"顶栏**不让出**窗口左上角那一格（票 #286）：macOS 的红黄绿在侧栏那一带，"+
+			"跟顶栏压根不在一块，让开它们的是侧栏的品牌块",
+			barLeft, before.X, after.X, after.X-before.X)
+	}
+	// 顺带断一次**绝对位置**：顶栏只盖内容区那一段，后退键仍然贴着内容区的
+	// 左沿（侧栏右沿），而不是被推到窗口按钮那一格后面。
+	//
+	// 这一句是给「整体挪位」兜底的：上面那句只说「没动」，而这一句说「动也不
+	// 许多」，两者的差别就在「顶栏整体挪到别处去了」这种改法上。
+	const slack = 32
+	contentLeft := float32(app.DefaultSideMenuWidth)
+	if after.X > contentLeft+slack {
+		t.Errorf("装上 bar.Left=%v 之后后退键左边缘是 %v，离内容区左沿（%v）有 %v"+
+			"（容差 %v）——它不在顶栏左端", barLeft, after.X, contentLeft,
+			after.X-contentLeft, slack)
 	}
 }
 
@@ -477,18 +553,17 @@ func TestAnEmptySearchGoesBackToTheIdleState(t *testing.T) {
 
 // TestAvatarMenuHasBiuSixItems 验头像下拉就是 Biu 那六项，顺序也一样。
 //
-// ⚠️ 菜单是**开的时候才建**的，`Chosen()` 又是在选完之后的下一帧才报
-// （`ui/menu.go:76-99`），两次都不在 view 里。想数菜单项，用无头 Tester 的
-// `tt.Menu()`——它读的是系统菜单真正摆出来的那一份。
+// ⚠️ **这一层现在是自绘的浮层**（原来是系统菜单），所以数菜单项不用
+// `tt.Menu()`——那个读的是系统菜单真正摆出来的那一份，而现在压根没有系统
+// 菜单。改成读浮层里的字：浮层自己的名字（`avatarMenuLabel`）之后就是那
+// 六项，顺序即 Biu 的顺序。
 func TestAvatarMenuHasBiuSixItems(t *testing.T) {
 	_, tt := newShell(t)
 	tt.SetFocused(true)
 
-	if err := tt.Click(avatarLabel); err != nil {
-		t.Fatalf("点不到头像：%v，文字有 %q", err, tt.Texts())
-	}
+	openAvatarMenu(t, tt)
 	want := []string{"登录", "个人资料", "设置", "刷新数据", "问题反馈", "退出登录"}
-	got := tt.Menu()
+	got := avatarMenuLabels(tt)
 	if len(got) != len(want) {
 		t.Fatalf("头像下拉有 %d 项 %q，want %d 项 %q", len(got), got, len(want), want)
 	}
@@ -497,6 +572,11 @@ func TestAvatarMenuHasBiuSixItems(t *testing.T) {
 			t.Errorf("第 %d 项是 %q，want %q（整个是 %q）", i+1, got[i], w, got)
 		}
 	}
+	// ⚠️ **而且它不是系统菜单**：系统菜单是系统外观，跟设计规范不搭，
+	// 而换掉它就是这一票要办的事。
+	if m := tt.Menu(); len(m) != 0 {
+		t.Errorf("头像点开之后弹的是系统菜单 %q——这一票要的是自绘浮层", m)
+	}
 }
 
 // TestAvatarMenuGoesToItsRoute 验菜单项接到了对应的路由。
@@ -504,23 +584,15 @@ func TestAvatarMenuGoesToItsRoute(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
 
-	if err := tt.Click(avatarLabel); err != nil {
-		t.Fatal(err)
-	}
-	if err := tt.ChooseMenuItem("设置"); err != nil {
-		t.Fatal(err)
-	}
+	openAvatarMenu(t, tt)
+	clickAvatarMenuItem(t, tt, avatarMenuIndexOf("设置"))
 	if got := s.router.Path(); got != settingsPath {
 		t.Errorf("选了「设置」之后在 %q，want %q", got, settingsPath)
 	}
 
 	// 「登录」接的是扫码登录页。
-	if err := tt.Click(avatarLabel); err != nil {
-		t.Fatal(err)
-	}
-	if err := tt.ChooseMenuItem("登录"); err != nil {
-		t.Fatal(err)
-	}
+	openAvatarMenu(t, tt)
+	clickAvatarMenuItem(t, tt, avatarMenuIndexOf("登录"))
 	if got := s.router.Path(); got != loginPath {
 		t.Errorf("选了「登录」之后在 %q，want %q", got, loginPath)
 	}
@@ -535,12 +607,8 @@ func TestAvatarMenuProfileUsesTheLoggedInMid(t *testing.T) {
 	s, tt := newLoggedInShell(t, "2")
 	tt.SetFocused(true)
 
-	if err := tt.Click(avatarLabel); err != nil {
-		t.Fatal(err)
-	}
-	if err := tt.ChooseMenuItem("个人资料"); err != nil {
-		t.Fatal(err)
-	}
+	openAvatarMenu(t, tt)
+	clickAvatarMenuItem(t, tt, avatarMenuIndexOf("个人资料"))
 	if got := s.router.Path(); got != "/user/2" {
 		t.Errorf("选了「个人资料」之后在 %q，want /user/2", got)
 	}
@@ -550,28 +618,34 @@ func TestAvatarMenuProfileUsesTheLoggedInMid(t *testing.T) {
 //
 // Biu 那两条是按登录态隐藏掉的。我们六项一直都在（见 navbar_avatar.go 文件头），
 // 于是「个人资料」和「退出登录」在没登录时必须有话说。
+//
+// ⚠️ **「退出登录」在没登录时不问**：没有可退的，问一句「确认退出登录？」
+// 再答「确认」是一趟没有意义的往返——它直接说一句。
 func TestAvatarMenuWithoutALoginSaysSo(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
 
 	for _, item := range []string{"个人资料", "退出登录", "刷新数据"} {
 		s.clearToasts()
-		if err := tt.Click(avatarLabel); err != nil {
-			t.Fatal(err)
-		}
-		if err := tt.ChooseMenuItem(item); err != nil {
-			t.Fatalf("选 %q 失败：%v", item, err)
-		}
+		openAvatarMenu(t, tt)
+		clickAvatarMenuItem(t, tt, avatarMenuIndexOf(item))
 		if got := toastTexts(s.visibleToasts()); len(got) != 1 {
 			t.Fatalf("选了 %q 之后有 %d 条提示 %q，want 1 条", item, len(got), got)
 		}
 		if got := s.router.Path(); got != "/" {
 			t.Errorf("选了 %q 之后却切到了 %q", item, got)
 		}
+		// ⚠️ **而且没有弹确认框**：没登录就没有可退的。
+		if tt.HasText("确认退出登录？") {
+			t.Errorf("没登录时选了 %q 也弹了确认框", item)
+		}
 	}
 }
 
 // TestAvatarMenuLogoutActuallyLogsOut 验「退出登录」是真退，不是弹一句话。
+//
+// ⚠️ **中间多了一步确认**（上游有，我们原来没有）：先问「确认退出登录？」，
+// 答「确认」才真的退。
 func TestAvatarMenuLogoutActuallyLogsOut(t *testing.T) {
 	s, tt := newLoggedInShell(t, "2")
 	tt.SetFocused(true)
@@ -579,14 +653,20 @@ func TestAvatarMenuLogoutActuallyLogsOut(t *testing.T) {
 	if !s.app.LoggedIn() {
 		t.Fatal("装上去的登录态没生效")
 	}
-	if err := tt.Click(avatarLabel); err != nil {
-		t.Fatal(err)
+	openAvatarMenu(t, tt)
+	clickAvatarMenuItem(t, tt, avatarMenuIndexOf("退出登录"))
+	if !tt.HasText("确认退出登录？") {
+		t.Fatalf("选了「退出登录」之后没有确认框，文字有 %q", tt.Texts())
 	}
-	if err := tt.ChooseMenuItem("退出登录"); err != nil {
-		t.Fatal(err)
+	if !s.app.LoggedIn() {
+		t.Error("确认框还开着就已经退登了")
+	}
+	// 答「确认」。
+	if err := tt.Click("确认退出登录"); err != nil {
+		t.Fatalf("点不到确认键：%v，文字有 %q", err, tt.Texts())
 	}
 	if s.app.LoggedIn() {
-		t.Error("选了「退出登录」之后还是登录态")
+		t.Error("确认之后还是登录态")
 	}
 }
 
@@ -595,12 +675,8 @@ func TestAvatarMenuOpensTheIssuePage(t *testing.T) {
 	_, tt := newShell(t)
 	tt.SetFocused(true)
 
-	if err := tt.Click(avatarLabel); err != nil {
-		t.Fatal(err)
-	}
-	if err := tt.ChooseMenuItem("问题反馈"); err != nil {
-		t.Fatal(err)
-	}
+	openAvatarMenu(t, tt)
+	clickAvatarMenuItem(t, tt, avatarMenuIndexOf("问题反馈"))
 	if got := tt.OpenedURLs(); len(got) != 1 || got[0] != feedbackURL {
 		t.Errorf("「问题反馈」打开的是 %q，want [%s]", got, feedbackURL)
 	}
@@ -1133,10 +1209,8 @@ func TestTheSettingsIsStillReachableFromTheSidebarAndTheAvatar(t *testing.T) {
 	}
 
 	// 头像下拉里那第三条。
-	if err := tt.Click(avatarLabel); err != nil {
-		t.Fatalf("点不到头像：%v，文字有 %q", err, tt.Texts())
-	}
-	got := tt.Menu()
+	openAvatarMenu(t, tt)
+	got := avatarMenuLabels(tt)
 	found := false
 	for _, item := range got {
 		if item == "设置" {
@@ -1144,7 +1218,7 @@ func TestTheSettingsIsStillReachableFromTheSidebarAndTheAvatar(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("头像下拉里没有「设置」了，菜单是 %q", got)
+		t.Errorf("头像下拉里没有「设置」了，下拉里是 %q", got)
 	}
 }
 

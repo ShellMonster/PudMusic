@@ -295,6 +295,58 @@ func TestTheSelectedBlockSlidesWithTheChoice(t *testing.T) {
 	}
 }
 
+// TestTheTabSliderFollowsTheSpring 钉住「滑块走的是**弹簧**，不是定时长曲线」。
+//
+// 弹簧和曲线的差别在**中途**看得见：定时长曲线是「从当前值重新起速」，
+// 而弹簧保留速度（`mygo/ui/motion.go` 的 `channel.retarget`）——所以
+// 「滑过去一半要多久」这两者完全不同。
+//
+// ⚠️ **必须量中间态**：终点两者都是 100%，量终点什么也量不出来。
+//
+// 判据（实算，`Stiffness: 260 / Damping: 32` 那条弹簧）：
+//   - **100ms 时滑块只走到约一半**（48%）：弹簧从静止起步；
+//   - 旧的 250ms `EaseOut` 曲线那时已经走了 **78%**，统一曲线是 **92%**。
+//
+// ⚠️ **量的是滑块自己的中线**（起点 / 中间 / 终点三处都量），不是标签文字的
+// 中线：滑块的**宽度**也在变（每一格宽度不同），按文字中线算会掺进宽度的
+// 变化。四条通道（x/y/w/h）用的是同一条弹簧，所以中线走的是同一条进度线。
+func TestTheTabSliderFollowsTheSpring(t *testing.T) {
+	_, tt := newSettingsTabShell(t, false, false)
+	labels := settingsTabNames
+	from := tabBarAt(t, tt, labels, false).centerX()
+
+	if err := tt.Click(labels[1]); err != nil {
+		t.Fatalf("点不到 %q：%v", labels[1], err)
+	}
+	tt.Frame()
+
+	tt.Advance(100 * time.Millisecond)
+	tt.Frame()
+	mid := tabBarAt(t, tt, labels, false).centerX()
+
+	// 走完。
+	for range 100 {
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+		if !tt.FramePending() {
+			break
+		}
+	}
+	end := tabBarAt(t, tt, labels, false).centerX()
+
+	span := float64(end - from)
+	if span <= 0 {
+		t.Fatalf("滑块没有动（起点 %.1f、终点 %.1f）", from, end)
+	}
+	frac := float64(mid-from) / span
+	t.Logf("滑块在 100ms 时走了 %.0f%%（起点 %.1f、中间 %.1f、终点 %.1f）", frac*100, from, mid, end)
+	if frac < 0.35 || frac > 0.65 {
+		t.Errorf("滑块在 100ms 时走了 %.0f%%（起点 %.1f、中间 %.1f、终点 %.1f）——"+
+			"弹簧那时约 48%%，250ms 的 ease-out 曲线是 78%%、统一曲线是 92%%",
+			frac*100, from, mid, end)
+	}
+}
+
 // TestReduceMotionPutsTheBlockAtTheEndAtOnce 钉住「系统开着减少动态效果时，
 // 第一帧就在终点」。
 //

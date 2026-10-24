@@ -20,6 +20,9 @@
 package list
 
 import (
+	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
@@ -128,6 +131,26 @@ func cellWidth(w float32, cols int) float32 {
 type Grid struct {
 	songs []Music
 	state ui.ListState
+
+	// rowKeys 记着每一**行**的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 网格的行身份是「这一行第一首的 ID」（理由见 View），而装箱那一步
+	// 是要分配的——现算的话每帧每行一次，一屏几行就是几次（票 #313）。
+	//
+	// ⚠️ **它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头），所以这里
+	// 不用记得重建。列数变了也自动跟上：换列数之后同一行第一首换了，身份
+	// 对不上就重算（而重算出来的是新那一首的 ID——那正是要的）。
+	rowKeys rowkey.Memo[string, any]
+
+	// durText / countText / opText 记着三处「每帧每格算一遍、结果不变」的
+	// 显示文字。理由和 `List` 那三个一模一样（见 list.go 的同名三个字段）。
+	durText   rowkey.Memo[time.Duration, string]
+	countText rowkey.Memo[int64, string]
+	opText    rowkey.Memo[string, string]
+
+	// ownerTip 记着每一格那句「打开 X 的空间」（票 #360）。理由和 `List` 那一个
+	// 一模一样（见 list.go 的同名字段）。
+	ownerTip rowkey.Memo[string, string]
 
 	// sel 是选中的那一**首**，-1 是没选。帧里的点击由每一格自己写进来。
 	//
@@ -444,7 +467,9 @@ func (g *Grid) View(c *ui.Context) {
 		if i >= len(g.songs) {
 			return footerKey{}
 		}
-		return g.songs[i].ID
+		// ⚠️ **身份是预先装箱好的那一份**（`g.rowKeys`）：理由同 `List` 那
+		// 一处（票 #313）。
+		return g.rowKeys.At(row, g.songs[i].ID, rowkey.Identity)
 	}
 	g.state.Label = func(row int) string {
 		i := first(row)
@@ -748,14 +773,16 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 		//
 		// ⚠️ **它压在封面上**（右上角那一块），所以自带一层半透明的深底——理由见
 		// `OperationCorner`。
-		OperationCorner(c, OperationLabel(m.Title), func(m *ui.Menu) {
+		// ⚠️ **无障碍名字是记好的那一份**（`g.opText`）：理由同 `List` 那处。
+		OperationCorner(c, g.opText.At(i, m.Title, OperationLabel), func(m *ui.Menu) {
 			buildSongMenu(m, g.songs, g.acts, i, g.playFrom)
 		})
 
 		// ① 封面 + 它上面那圈 hover 反馈：右下角一个 40 的主色圆播放钮，封面底部
 		// 一条 black/90 的渐变（左播放量 / 右时长），都 200ms 淡入。
 		hover.CardCover(c, g.cache, m.Cover, cell, gridCoverH, onCell,
-			PlayCountText(m.View), formatDuration(m.Duration), m.Title,
+			g.countText.At(i, m.View, PlayCountText),
+			g.durText.At(i, m.Duration, formatDuration), m.Title,
 			func() { g.playFrom(i) })
 
 		// ② 歌名 + UP 名/时长。
@@ -764,14 +791,26 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 		// 的**，歌名折行时那一行就高一点（上游的 music-card 是 `line-clamp-2`，两行）。
 		// 列表那一档的行高是定死的（`card.go` 的文件头），网格这一档不是——两处是
 		// 两件事，别把一边改成另一边的做法。
+		sh := showOf(m)
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).PaddingY(cardGap).
 			Children(func() {
-				ui.Text(c, m.Title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
+				ui.Text(c, sh.title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
 					TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
 				ui.Row(c).Gap(cardGap).Children(func() {
-					if m.Owner != "" {
-						ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, scale.ListOwner)).LineHeight(leading.Owner).
-							TextColor(metaColor).MaxLines(1).Ellipsis("…")
+					if sh.owner != "" || sh.live {
+						ownerLine(c, ownerRow{
+							shown: sh,
+							name:  m.Owner,
+							mid:   m.Item.ArtistMid,
+							// ⚠ **提示是记好的那一份**（`g.ownerTip`）：现算的
+							// 话每帧每一格一次字符串拼接（票 #313 那一类）。
+							tip:   g.ownerTip.At(i, m.Owner, OwnerTipText),
+							size:  scale.Font(c, scale.ListOwner),
+							lh:    leading.Owner,
+							color: metaColor,
+							grow:  true,
+							acts:  g.acts,
+						})
 					}
 					// 正在放的那一格：时长换成一句「正在播放」。
 					//
@@ -786,7 +825,7 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 					}
 					// 时长没有就不画（Biu 的 `durationText` 为空时那一块
 					// 整个不渲染）。
-					if s := formatDuration(m.Duration); s != "" {
+					if s := g.durText.At(i, m.Duration, formatDuration); s != "" {
 						ui.Text(c, s).FontSize(scale.Font(c, scale.Size12)).TextColor(metaColor).MaxLines(1)
 					}
 				})

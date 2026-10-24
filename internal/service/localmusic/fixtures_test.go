@@ -213,7 +213,7 @@ func pathsOf(ts []Track) []string {
 // oggWith 造一个带 Vorbis 注释标题的 .ogg。
 //
 // 手拼的是一个**真的** Ogg 页：27 字节页头 + 分段表 + 数据。页头里的校验和
-// 我们不算（读取那一侧也不验它），其余每���字段都按规范摆。
+// 我们不算（读取那一侧也不验它），其余每个字段都按规范摆。
 func oggWith(t *testing.T, path, title string) string {
 	// 包 0：识别头 \x01vorbis。
 	id := append([]byte{1}, []byte("vorbis")...)

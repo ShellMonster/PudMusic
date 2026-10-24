@@ -45,6 +45,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -155,9 +156,29 @@ const (
 	iconLogout = "System/logout-circle-r-line.svg" // 退出登录
 
 	// iconLoginCircle / iconLogoutCircle 是上游原来那**一对**（圆圈里一支箭头，
-	// 一个朝右一个朝左）。界面现在不用它们——理由在上面那一段——但资源留着。
+	// 一个朝右一个朝左）。顶栏上那两枚**不用**它们——理由在上面那一段——但
+	// **头像下拉里那两项用的正是它们**（上游 `user/index.tsx` 的「登录」是
+	// `RiLoginCircleLine`、「退出登录」是 `RiLogoutCircleLine`）。
+	//
+	// ⚠️ 那一对在 18px 上分不清进出（票 #242），所以**顶栏那两枚**换成了
+	// 二维码和朝外的箭头；头像下拉里它们是**带文字的**（左边还有一枚图标、
+	// 右边写着「登录」/「退出登录」），认得出来——所以那一处照上游用这一对。
 	iconLoginCircle  = "System/login-circle-line.svg"
 	iconLogoutCircle = "System/logout-circle-line.svg"
+
+	// iconProfile 是头像下拉里「个人资料」那一项的图标。
+	//
+	// 逐字照上游：`RiProfileLine`（`biu/src/layout/navbar/user/index.tsx:101`
+	// 的 `startContent: <RiProfileLine size={18}/>`）。
+	//
+	// ⚠️ **它在 `Business/` 分类里，不在 `User & Faces/`**：RemixIcon 把
+	// 「个人资料」那一枚归到 Business（`icons/Business/profile-line.svg`），
+	// 而「用户」那一族在 `User & Faces/`。目录照上游分类放，别按名字猜
+	// （见文件头那一段）。
+	//
+	// ⚠️ **这一张是这一票引进来的**（之前 `iconset` 里没有它）：
+	// `gh api repos/Remix-Design/RemixIcon/contents/icons/Business/profile-line.svg`。
+	iconProfile = "Business/profile-line.svg"
 
 	// ── 播放条右边那一组 ──
 	// ⚠️ 「播放列表」原来在顶栏那一列里，票 #127 跟着上游搬到了播放条
@@ -185,6 +206,9 @@ const (
 	// ⚠️ **不是播放条那一枚** `play-circle-fill`：那一枚带着一圈圆底，缩到 20
 	// 像素再压在 35% 的黑色蒙层上会糊成一团；上游这里用的就是一枚光三角。
 	iconPlayFill = "Media/play-fill.svg"
+	// iconPauseFill 是主播放键在「正在放」时画的那一枚暂停（两道竖条）。
+	// 设计规范 §5：主播放键是实心强调色圆形，里面是实心的 `play.fill` / `pause.fill`。
+	iconPauseFill = "Media/pause-fill.svg"
 
 	// ⚠️ **头像那一格故意不在这一列。** #115（真实头像与未登录形态）把它整个
 	// 重做成了三档——真图 / 出问题的人形 / 等着的人形——而那个人形是
@@ -223,6 +247,29 @@ const (
 	iconEmptySearch   = "System/search-line.svg"               // 搜索：一只放大镜
 	iconEmptyFeed     = "User & Faces/team-line.svg"           // 动态：一群人在说话
 	iconEmptyDownload = "System/download-2-fill.svg"           // 下载记录：一只下箭头
+
+	// ── 歌词右下角那三枚旋钮 ────────────────────────────────────────────
+	//
+	// 逐字照上游 `components/lyrics/` 那一列（`index.tsx:380-398`、
+	// `font-size-control.tsx:39-48`、`offset-control.tsx:41-48`）：
+	//
+	//	字号   iconLyricFontSize  ← <RiFontSize size={16} />
+	//	偏移   iconLyricOffset    ← <RiTimeLine size={16} />
+	//	找歌词 iconLyricSearch   ← <RiTBoxLine size={16} />
+	//
+	// ⚠️ **找歌词那一枚上游用的是「T 形框」不是放大镜**（`index.tsx:394`）：
+	// 那一枚是**满屏歌词区里那枚 IconButton**，上游给它 `RiTBoxLine`。
+	// 放大镜（`System/search-line.svg`）是上游**搜索框**那一枚，别混。
+	//
+	// ⚠️ **两张图是这一票引进来的**（`iconset` 里原本没有它们）：
+	// `gh api repos/Remix-Design/RemixIcon/contents/icons/Editor/font-size.svg`、
+	// `gh api repos/Remix-Design/RemixIcon/contents/icons/Design/t-box-line.svg`。
+	// 目录结构照上游（`分类/文件名` 就是上游那个路径），所以**反查得回上游**。
+	// `System/time-line.svg` 早就在（空状态那个钟就是它）——**两个常量指同一个
+	// 文件是允许的**（`iconset_test.go` 的文件头写着这一条）。
+	iconLyricFontSize = "Editor/font-size.svg"  // 字号：Aa
+	iconLyricOffset   = "System/time-line.svg"  // 偏移：一个钟
+	iconLyricSearch   = "Design/t-box-line.svg" // 找歌词：一个 T 形框
 
 	// iconFailed 是「这一块拉失败了」那一支的插画位。
 	//
@@ -271,6 +318,7 @@ const (
 	iconFollowDone = "System/check-line.svg"         // 已关注
 	iconMoon       = "Weather/moon-line.svg"         // 深色
 	iconSun        = "Weather/sun-line.svg"          // 浅色
+	iconComputer   = "Device/computer-line.svg"      // 跟随系统（一台显示器）
 	iconDisk       = "Device/hard-drive-2-line.svg"  // 磁盘
 	iconDeleteBin5 = "System/delete-bin-5-line.svg"  // 删除（另一版）
 	iconBookmark   = "Business/bookmark-line.svg"    // 书签
@@ -350,12 +398,14 @@ var iconNames = []string{
 	// 顶栏
 	iconSettings, iconFolder, iconQueue,
 	iconSearch, iconClose, iconFeed, iconLogin, iconLogout,
-	// 上游原来的那一对登录 / 退出（圆圈 + 一个向左、一个向右的箭头）。界面
-	// 现在不用它们了（18px 上分不清，票 #242），但**资源留着**：这一份图标
-	// 是照上游备齐的，「备齐」和「接上去」是两件事（见文件头）。
+	// 上游原来的那一对登录 / 退出（圆圈 + 一个向左、一个向右的箭头）。顶栏上
+	// 那两枚**不用**它们（18px 上分不清，票 #242），**头像下拉里那两项用的
+	// 就是它们**（上游那六项逐字照抄）。
 	iconLoginCircle, iconLogoutCircle,
+	// 头像下拉里「个人资料」那一枚。
+	iconProfile,
 	// 队列抽屉头与行
-	iconLocate, iconDelete, iconPlayFill,
+	iconLocate, iconDelete, iconPlayFill, iconPauseFill,
 
 	// 空状态插画位
 	iconEmptyDefault, iconEmptyMusic, iconEmptyGroup, iconEmptyLater,
@@ -370,7 +420,7 @@ var iconNames = []string{
 	iconExpand, iconShrinkBack, iconPiP, iconRefresh, iconExternal,
 	iconEye, iconEyeOff, iconWarning, iconQuestion,
 	iconImport, iconExport, iconAdd, iconFollowDone,
-	iconMoon, iconSun, iconDisk, iconDeleteBin5,
+	iconMoon, iconSun, iconComputer, iconDisk, iconDeleteBin5,
 	iconBookmark, iconInbox, iconChart,
 
 	// 导航、方向、展开收起
@@ -385,6 +435,9 @@ var iconNames = []string{
 	iconFileSheet, iconDraft, iconDownloadLine, iconDownloadCloud,
 	iconShield, iconChecked, iconUnchecked, iconZoomIn, iconZoomOut,
 	iconInfo, iconCloseFilled, iconTip, iconUser, iconUserAdd, iconFeedback,
+
+	// 歌词右下角那三枚旋钮
+	iconLyricFontSize, iconLyricOffset, iconLyricSearch,
 }
 
 // icons 是上面那批图标**启动时一次解析好**的结果。
@@ -450,7 +503,7 @@ const (
 	// 紧挨着最大的那一枚**，中间空着一圈，而用户要找的是中间那一枚。
 	//
 	// 命中区仍然是 32（`iconHitMd`）——所以是「每边 5 的留白」，不是 7。
-	iconSkip = 22
+	iconSkip = 17
 	// iconPlayBtn 是播放/暂停那一枚。Biu 是 48（`music-play-control` 的
 	// `<RiPlayCircleFill size={48} />`），我们照抄。
 	//
@@ -458,7 +511,7 @@ const (
 	// 而那个理由是假的：88 高装得下 48（48 + 2 的缝 + 20 的进度行 = 70）。
 	// 30 的真正后果是**它成了全条上最小的一枚**，而 18 的上下首和它挤成一小堆，
 	// 一眼看过去中间是空的——用户要找的那枚键反而不显眼。
-	iconPlayBtn = 48
+	iconPlayBtn = 20
 )
 
 // 点击区比图标大出来的那一圈。**靠内边距，不靠资源**（见文件头）。
@@ -498,7 +551,13 @@ const (
 	// ⚠️ **别又给它加回留白**：留白不是「好按」，是「图形没填满盒子」——
 	// 上游那一枚的图形自己就带着 4 像素（圆占画布 20/24），那 4 像素才是留白。
 	// 而 48×48 这一格本来就是全条上最大的一枚命中区（别的是 32）。
-	iconHitPlay = 48
+	iconHitPlay = 44
+	// loadingLineSpinnerSize 是播放条上「正在取流」那一行里那枚转圈的直径。
+	//
+	// ⚠️ **它是 12，不是页面级那一枚的 32**（`loading.go` 的
+	// `loadingSpinnerSize`）：那一行是 12 号字、只有 14 高，一枚 32 的转圈
+	// 会比那一行还高，把上下两行挤开。
+	loadingLineSpinnerSize = 12
 )
 
 // iconButton 造一个**只画一个图标**的扁平按钮。
@@ -539,58 +598,51 @@ func iconKey(c *ui.Context, name, label string, font float32, disabled bool) ui.
 	return flatIconButtonAccent(c, name, label, font, disabled)
 }
 
-// iconButtonPlay 是播放/暂停那一枚：**上游那一枚**。
+// iconButtonPlay 是播放/暂停那一枚：**设计规范的主播放键**。
 //
-// 上游（`components/music-play-control/index.tsx:23-25`）：
+// 规范 §5：实心强调色圆形，里面是实心的播放 / 暂停图形，字色是 `AccentText`
+// （方案里的 onAccent）。它是全应用最醒目的一枚，和旁边无底的 17 号上一首 /
+// 下一首差一个量级。
 //
-//	<IconButton isDisabled={…} radius="full" onPress={togglePlay} className="size-12 min-w-12">
-//	  {isPlaying ? <RiPauseCircleFill size={48}/> : <RiPlayCircleFill size={48}/>}
-//	</IconButton>
+// ⚠️ **这是一次有意的反转**：这一枚原来照上游 Biu 画成「一枚无底的 `play-circle-fill`
+// 图形，悬停变主色」，旧注释还写着「别把它改回实心主色」。那是照着 Biu 的形状写的；
+// 应用还没发版，产品定了新的视觉（设计规范 v0.1），所以现在就是实心圆。
+// 旧的判据（「播放条底色上那一片墨迹」）随之换成「圆底的直径 + 图形在圆里居中」，
+// 见 `playbar_layout_test.go` 的 `TestThePlayKeyIsBigEnoughToHit`。
 //
-// 而那个 `IconButton`（`src/components/icon-button/index.tsx:11-19`）是
-// `Button isIconOnly radius="md" size="sm" variant="light" className="hover:text-primary text-inherit"`
-// ——**无底色、无描边，图形用前景色画**，悬停时变主色。
+// 状态（规范 §5）：
 //
-// 所以这一枚是四件事：
+//	normal   底 Accent，图形 AccentText
+//	hover    底 AccentHover
+//	pressed  底 AccentPressed
+//	disabled 底 TextMuted @60%（框架对禁用元素再乘 50%，合起来约 30%）
 //
-//  1. **没有实心底色**。原来是 `ui.PrimaryButton`：一块 58×58 的**主色圆角方块**
-//     （主题圆角 8，不是药丸），里面一枚**深色**的圆——**明暗正好和上游反过来**，
-//     一眼就看不出是同一个东西。
-//  2. **图形是前景色**（深色下白、浅色下近黑），不是主色。
-//  3. **盒子 48×48，图形正好填满**（`iconHitPlay`）。
-//  4. **悬停时图形变主色**（上游的 `hover:text-primary`）。
+// ⚠️ **禁不启用由调用方给**（`disabled`）：悬停和按下是**建元素时**问的，禁用的
+// 键 `Hovered()` 恒为 false，但链式 `.Disabled()` 在返回之后才生效——问早了会让
+// 一枚禁用的键用「悬停色」告诉用户这里点得动（票 #217 同款）。
 //
-// ⚠️ **主色当字色那一档取 `ink.AccentOn`**：浅色下主色是 #1ed760，压在白底上
-// 只有 1.9:1（`widgets/ink` 的文件头写着这件事），所以取那个「读得出来」的变体；
-// 深色下就是主色本身。理由和 `flatbutton.go` 的 `flatCurrent` 是同一条：
-// **主色当底和主色当字是两件事**。
-//
-// 🔴 **这一档只给「底是应用底色」的地方用**：满屏播放器那一枚的底是**压暗过的
-// 封面**，不是应用底色——主色当字色那一档压在那上面只有 1.0:1（实测），而且
-// 那一行其余四枚图标都是满屏自己的前景色，一枚变绿另外四枚不变，一眼就不成套。
-// 所以满屏那一枚走 `iconButton`（见 `fullplayer.go` 的 `viewFullControls`）。
-//
-// ⚠️ **别把它改回实心主色**：那一版（「实心主色是强调色，主操作的重量必须
-// 留着」）是照着**旧形状**写的（我们是一块圆底，上游是一枚圆图形），而上游
-// 那一枚改过来之后，这条理由自己就不成立了（上游那一枚同样是强调色的播放键，
-// 只是它靠的是 `RiPlayCircleFill` 那张实心图形，而不是一块底）。
-//
-// ⚠️ 顶栏那个**登录**键原来也有一份实心主色的按钮（`iconButtonPrimary`），
-// 票 #241 把它去掉了——**那个函数已经删了**，别再加回来：顶栏那一排的视觉
-// 重量由图标说话，理由见 `login.go` 的 `viewLoginEntry`。
-// **现在整条顶栏没有一枚实心底色的方块**——这一枚也不能例外。
-//
-// 判据在 `playbar_layout_test.go` 的 `TestThePlayKeyIsBigEnoughToHit`：
-// 那一枚现在量的是「播放条底色上那一片墨迹」，不再是「主色底上那一片墨迹」。
-func iconButtonPlay(c *ui.Context, name, label string, font float32, disabled bool) ui.Element {
-	// ⚠️ **它就是 `iconKey`**：悬停变主色、禁用的状态由这里给，两条都在那边写着。
-	// 写成两个是因为这一枚的**形状**（48×48、图形正好填满、底下什么都没有）是
-	// 它自己的事，而「悬停变主色」是所有图标键共有的那一条。
-	//
-	// ⚠️ **禁不启用由调用方给**（`disabled` 那一栏）：那是**状态**决定的（没歌的
-	// 时候那一枚是禁用的），而它必须在**问悬停之前**就定下来——问早了，一枚禁用
-	// 的键会用主色告诉用户「这里点得动」（见 `iconKey` 那段）。
-	return iconKey(c, name, label, font, disabled)
+// name 是图形名（`iconPlayFill` / `iconPauseFill`），box 是圆的直径，font 是图形边长。
+func iconButtonPlay(c *ui.Context, name, label string, box, font float32, disabled bool) ui.Element {
+	t := c.Theme()
+	fill := t.Accent
+	if disabled {
+		fill = t.TextMuted.Alpha(0.6)
+	}
+	b := ui.ButtonBase(c).Label(label).Disabled(disabled).
+		Size(box, box).Padding(space.None, space.None).Radius(box / 2)
+	if !disabled {
+		switch {
+		case b.Pressed():
+			fill = t.AccentPressed
+		case b.Hovered():
+			fill = t.AccentHover
+		}
+	}
+	b = b.Background(fill)
+	b.Children(func() {
+		ui.Icon(c, icon(name)).FontSize(font).TextColor(t.AccentText)
+	})
+	return b
 }
 
 // 下面这四个是「哪个状态配哪一张」的唯一出口。
@@ -668,9 +720,13 @@ func playModeIcon(m app.PlayMode) string {
 // 三档和阈值逐字照 Biu 的 `music-volume/index.tsx:159-164`：`volume > 0.5`
 // 是「响」，以下是「小」，0 是「静音」。抄它的阈值而不是自己分档，是因为
 // 用户在 Biu 那边习惯的是那道分界。
-func volumeIcon(v float64) string {
+//
+// ⚠️ **静音是它自己的一格**（票 #311）：静音的时候音量那一格记的还是用户设的
+// 值（20%），而画面上要画的是静音那张——所以静音由参数说了算，不靠「音量是不是
+// 0」去猜（用户自己把滑块拉到 0 也是静音，但不是「按了静音」）。
+func volumeIcon(v float64, muted bool) string {
 	switch {
-	case v <= 0:
+	case muted || v <= 0:
 		return iconVolumeMute
 	case v > 0.5:
 		return iconVolumeUp

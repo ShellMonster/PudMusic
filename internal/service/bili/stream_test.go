@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 )
 
 // 这一组测的是「拿到取流响应之后」的那半：挑哪一条流、有效期怎么算、
@@ -599,6 +602,27 @@ func TestFriendlyHidesCancellation(t *testing.T) {
 	}
 }
 
+// TestFriendlySaysTheFormatCannotBeDecoded 盯「解不了」说人话（票 #282）。
+//
+// 底下是「OSStatus -11800」「不像 FLAC」这种行话——用户读不出来，也照着
+// 做不了任何事。界面上要说的是「解不了」，并且给出**还能怎么办**。
+//
+// ⚠️ **也不许给「重试」**：再取一次流拿回来的还是同一条，还是解不了。
+func TestFriendlySaysTheFormatCannotBeDecoded(t *testing.T) {
+	err := fmt.Errorf("%w: extaf: AudioFileOpenWithCallbacks: OSStatus -11800",
+		audio.ErrUnsupportedFormat)
+	got := Friendly(err)
+	if !strings.Contains(got, "解不了") {
+		t.Errorf("人话 = %q，没有说清是「解不了」", got)
+	}
+	if strings.Contains(got, "OSStatus") || strings.Contains(got, "-11800") {
+		t.Errorf("人话 = %q，把行话原样给用户了", got)
+	}
+	if Recoverable(err) {
+		t.Error("解不了的流给了「可重试」——重试一万次还是这一句")
+	}
+}
+
 // TestFriendlyDoesNotLeakSignedURLs 盯别把带签名的地址打出去。
 //
 // `APIError.Error()` 里带了 Endpoint（已经脱敏过），但 `Message` 是 B 站给的，
@@ -714,4 +738,52 @@ func TestAgainstTheRealBiliStreamingAPIIsNotCovered(t *testing.T) {
 	t.Log("  6. playurl 接口带不带 WBI 签名都能通（实测不带也通，本实现仍然签）")
 	t.Log("  7. 多个 P 时不给 cid 会取到第一集，且 code 仍是 0")
 	t.Log("  8. 取到的地址从 CDN 拉要带 Referer（不给直接 403）")
+}
+
+// TestTheExpiryRuleIsOneRule 盯**两条取流路径用同一套有效期口径**（票 #220）。
+//
+// 投稿那一路（`/x/player/wbi/playurl`）和音乐库那一路（`sid`）问的是两个
+// 接口，而它们的地址**从哪来**不一样：
+//
+//	投稿	地址上的 `deadline` 查询参数
+//	音乐库	接口给的 `timeout`（有效秒数，一般三小时）
+//
+// ⚠️ **但判据必须是同一条**：地址上的 `deadline` 优先（最准），没有就用
+// 接口给的秒数，都没有就**当成立刻失效**。而「当成立刻失效」这个方向是
+// **保守的**——提前换流，而不是拿一条死地址放到歌播到一半。
+//
+// 这一条钉住那个**公共函数**：两路各写一份的话，迟早有一处漂移，而漂移的
+// 那一处症状是「有时候放得出来、有时候放不出来」。
+func TestTheExpiryRuleIsOneRule(t *testing.T) {
+	base := time.Unix(1702204169, 0)
+	// 地址上那个 deadline 是 1702208369 = base + 4200 秒。
+	withDeadline := base.Add(4200 * time.Second)
+
+	t.Run("地址上带 deadline 就用它", func(t *testing.T) {
+		got := expiryOf([]string{"https://cdn/x/a.m4s?deadline=1702208369"}, 10800, base)
+		if !got.Equal(withDeadline) {
+			t.Errorf("失效时刻 = %v，want %v", got, withDeadline)
+		}
+	})
+
+	t.Run("只有接口给的秒数就用它", func(t *testing.T) {
+		got := expiryOf([]string{"https://cdn/x/a.m4a?upsig=1"}, 10800, base)
+		if !got.Equal(base.Add(10800 * time.Second)) {
+			t.Errorf("失效时刻 = %v，want %v", got, base.Add(10800*time.Second))
+		}
+	})
+
+	t.Run("两个都没有就是立刻失效", func(t *testing.T) {
+		got := expiryOf([]string{"https://cdn/x/a.m4a?upsig=1"}, 0, base)
+		if !got.IsZero() {
+			t.Errorf("失效时刻 = %v，want 零值（立刻失效）", got)
+		}
+	})
+
+	t.Run("地址上没有 deadline 的那种也是立刻失效", func(t *testing.T) {
+		got := expiryOf([]string{"https://cdn/x/a.m4a"}, 0, base)
+		if !got.IsZero() {
+			t.Errorf("失效时刻 = %v，want 零值（立刻失效）", got)
+		}
+	})
 }

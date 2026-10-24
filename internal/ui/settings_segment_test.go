@@ -75,22 +75,30 @@ func TestTheSettingsPageHasOnlyOneSegmentedControl(t *testing.T) {
 						spot.what, spot.chosen, got, rgbaOf(theme.Accent))
 				}
 
-				// 没选中的那一档：**没有底色**，就是页面底色。
+				// 没选中的那一档：自己**没有底色**，露出的是这一排共用的那条轨道
+				// （设计规范 §7.9：轨道 = 背景色混 6% 的文字色）。三处走同一个出口，
+				// 所以轨道色也只有一种；框架 `ui.Segmented` 的白色滑块不回到设置页。
+				track := theme.Background.Mix(theme.Text, 0.06)
 				gotOther := modeOf(bandPixels(tt.Image(), buttonPadSpot(other)))
-				if !nearRGBA(gotOther, rgbaOf(theme.Background), 3) {
-					t.Errorf("「%s」没选中的那一档（%q）底色是 %v，want %v（页面底色）——"+
-						"框架 `ui.Segmented` 那种灰底轨道不许回到设置页来",
-						spot.what, spot.notChos, gotOther, rgbaOf(theme.Background))
+				if !nearRGBA(gotOther, rgbaOf(track), 3) {
+					t.Errorf("「%s」没选中的那一档（%q）底色是 %v，want %v（轨道色）",
+						spot.what, spot.notChos, gotOther, rgbaOf(track))
 				}
 			}
 		})
 	}
 }
 
-// buttonPadSpot 是「文字左边那一小块内边距」——纯底色，没有字。
+// buttonPadSpot 是「文字右边那一小块内边距」——纯底色，没有字。
+//
+// ⚠️ **取样点挪到了文字右边**（票 #297 之前取的是左边）：那一排现在每一档都带
+// 一枚 18px 图标，而图标在**文字左边**——左边那一段量到的是图标的墨迹，不是
+// 底色（墨迹和底色的差是「图标深浅」那件事，量出来就废了）。
+// 右边那一段是按钮自己的内边距（图标那一档 10 像素，纯文字那一档 14 像素），
+// 是纯底色。
 func buttonPadSpot(text mygoui.Rect) mygoui.Rect {
 	return mygoui.Rect{
-		X: text.X - 12,
+		X: text.X + text.W + 2,
 		Y: text.Y + text.H/4,
 		W: 6,
 		H: text.H / 2,

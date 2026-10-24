@@ -165,7 +165,17 @@ func (f *dateFilter) view(c *ui.Context, now time.Time) bool {
 	// Reload，而界面看上去只是那一句变了、列表没重拉。
 	picked := -1
 
-	ui.Row(c).Key("filter:dateRange").FillWidth().Center().Gap(space.Px6).Children(func() {
+	// ⚠️ **这一排靠左，不居中**（上游 `later/search.tsx:25` 的
+	// `flex w-full items-center justify-between`，日期那一组是它的**左半边**，
+	// 所以它贴内容区的左缘）。
+	//
+	// 原来这里写的是 `.Center()`，于是整排被推到中间：596 宽的一排落在
+	// x=402..997，内容区（216..1184）左边空出 186、右边空出 187。
+	//
+	// ⚠️ **别再把它居中**：上游那一排是「日期在左、搜索框在右」的两头对齐，
+	// 我们把搜索框拆到了第二行（理由在 `librarypage.go` 的 `viewFilters`），
+	// 日期这一组于是仍然是上游那个位置——贴左缘。
+	ui.Row(c).Key("filter:dateRange").FillWidth().Gap(space.Px6).Children(func() {
 		// 四个预设。为什么是四个按钮而不是 `ui.Tabs`：上游用的是 Tab，而**用户
 		// 手动在日历上挑过之后，上游把四个 Tab 全取消选中**
 		//（`setSelectedKey("")`），表示「这不是任何一个预设」。`ui.Tabs` 表达不了

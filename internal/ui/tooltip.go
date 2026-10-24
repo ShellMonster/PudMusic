@@ -4,7 +4,7 @@
 //
 // # 为什么不用框架的 `Element.Tooltip`
 //
-// 框架的时延是**包级固定的 600ms**（`mygo@v0.6.2/ui/tooltip.go:12` 的
+// 框架的时延是**包级固定的 600ms**（`mygo@v0.6.3/ui/tooltip.go:12` 的
 // `tooltipDelay`），`Tooltip` / `TooltipBase` 的公开 API 里没有按调用点改的
 // 参数；离开时则是下一帧立刻收。上游 Biu 用的是 HeroUI 的 `Tooltip`，两个
 // props 分三档：
@@ -29,6 +29,30 @@
 //
 // 面板是 `Overlay` + `PassThrough` + `RoleTooltip`：它画在最上面，但不挡指针
 // （否则指针落在提示上，锚点就「离开」了，提示会自己闪掉）。面板上按 Esc 收起。
+//
+// ⚠️ **面板建在这一遍的**第一个**「要出提示的」那儿**，不是最后（见
+// `newTipPanel`）：浮层按键的优先级是「**最后建的那个先拿到**」，提示要是最后
+// 建的，它就把 Esc 抢走了——抽屉开着的时候按 Esc 收的该是**抽屉**。
+//
+// # 同一时刻只出一枚提示（票 #420）
+//
+// 提示是**逐个元素** build 的：每个带提示的元素在自己的 build 里**登记**一份，
+// **这一遍 build 走完之后**才挑出该画的那一枚（见 `pickTip` / `drawTip`）。
+//
+// ⚠️ **为什么不能就地决定「谁画」**：**指针刚离开的那一枚先被 build**（它就在
+// 按钮条的左边）——它 build 的时候还不知道右边那一枚马上要出。两枚悬停提示
+// 各自 `shown`，谁也不让谁，于是两枚一起挂在画面上（用户 2026-10-25 报的：
+// 「移动到播放循环按钮，再移动到下载，两个 hover 会有重叠」）。
+//
+// 挑的时候按三档（理由都在 `pickTip` 那里）：
+//
+//  1. 指针**正停着**的那一枚——它挤掉别的；
+//  2. 指针**已经移开、还在收尾期里**的最近那一枚——上游 `closeDelay` 的语义；
+//  3. 焦点那一枚——键盘走位来的，指针那一档在的时候它让位（票 #245 的 E3）。
+//
+// ⚠️ **第 1 档和第 2 档是两回事**：指针落到另一枚上时，上一枚**立刻**走（不用
+// 等它那 500ms）；而指针移开、**没有新的提示来**时，上一枚**赖够那 500ms**
+// 才走。删掉那 500ms 的话，扫过一排按钮时提示会一闪一闪的。
 package ui
 
 import (
@@ -174,7 +198,7 @@ func (s *Shell) withMenuTip(c *ui.Context, anchor ui.Element, text string) ui.El
 // 时用它（头像那一格里面的画法）。
 //
 // ⚠️ 理由：`Pressed()` / `Clicked()` 给元素打 `flagClickable`
-// （`mygo/ui/input.go:1040-1050,1150-1160`），而命中时最内层的可点元素才是
+// （`mygo/ui/input.go:1042-1052,1152-1162`），而命中时最内层的可点元素才是
 // target。给「菜单按钮里面的子元素」打上这个标志，点下去的目标就从按钮变成了
 // 子元素——实测头像下拉直接不开（`TestAvatarMenuHasBiuSixItems`）。这种锚点
 // 只跟悬停/离开走，按下由外面那个真按钮自己处理。
@@ -239,28 +263,42 @@ func (s *Shell) tipAt(c *ui.Context, anchor ui.Element, text string, timing tipT
 		st.focus.shown = false
 	}
 
-	// 🔴 **同一时刻只出一枚提示**（票 #245 的 E3）。
+	// 🔴 **这里只登记，不决定画哪一枚**（票 #420）：画哪一枚要等这一遍 build
+	// 走完才知道。
 	//
-	// ⚠️ **指针优先于键盘焦点**（票 #245 的评审）：焦点那一枚的提示，在**别处**
-	// 有悬停提示时让位——**指针是比键盘焦点更贴近当下操作的信号**：鼠标停在
-	// 「迷你」那一枚上，用户要的就是「迷你」那一句说明，而屏幕上留着「打开文件」
-	// 那一句（焦点还停在那儿）是在讲一件用户当下没在做的事。
+	// ⚠️ **不能就地决定**：**指针刚离开的那一枚先被 build**（它就在按钮条的左
+	// 边）——它 build 的时候还不知道右边那一枚马上要出。两枚悬停提示各自
+	// `shown`，就地画就是两枚一起挂在画面上。理由见文件头上那一节。
 	//
-	// ⚠️ **「别处」不含自己**：指针正停在焦点那一枚上时，那一枚的提示两个来源
-	// 都指着它——它当然显示（而且显示的是同一枚）。
+	// 🔴 **面板在这一遍的**第一个**「要出提示的」那儿建**（不是最后建，也不是
+	// 在「该画的那一枚」那儿建）：
 	//
-	// ⚠️ **登记的是元素 ID**：一枚提示换了一个锚点就是另一枚。
-	if st.hover.shown {
-		s.tipHoverNow = id
+	//   - **不在最后建**：面板是**浮层**，而浮层按键的优先级是「**最后建的那个
+	//     先拿到**」（`mygo/ui/input.go:882` 的 `r.serial >= top`，serial 是节点
+	//     建出来的次序）。提示要是最后建的，它就把 Esc 抢走了——抽屉开着的时候
+	//     按 Esc 收的该是**抽屉**，不是那一枚提示（`queue_drawer.go` 的
+	//     `back.OverlayShortcut(0, ui.KeyEscape)`）。
+	//   - **不在「该画的那一枚」那儿建**：那一枚要等整遍 build 走完才知道（见
+	//     `pickTip`）。所以建在「第一个要出提示的」那儿，**内容**（那句话、摆在
+	//     哪儿）留到最后填（见 `drawTip`）——面板在浮层里的位置和按键优先级都跟
+	//     从前一样。
+	if (st.hover.shown || st.focus.shown) && !s.tipPanel.Valid() {
+		s.tipPanel = s.newTipPanel(c)
 	}
-	if st.focus.shown && s.tipHoverBusy(id) {
-		st.focus.shown = false
-	}
+	s.tipCandidates = append(s.tipCandidates, tipCandidate{
+		anchor: anchor,
+		text:   text,
+		st:     st,
+		place:  place,
+	})
+	return anchor
+}
 
-	if !st.hover.shown && !st.focus.shown {
-		return anchor
-	}
-
+// newTipPanel 建提示面板（**内容还空着**）。
+//
+// ⚠️ **它建在 `tipAt` 里（第一个要出提示的那一处）**，理由见那里那一段。
+// 内容（那句话、摆在哪儿）由 `drawTip` 在整遍 build 之后填。
+func (s *Shell) newTipPanel(c *ui.Context) ui.Element {
 	t := c.Theme()
 	// 反色兜底照框架 `Theme.inverse()`（`mygo/ui/theme.go:71-79`）：那一对留空
 	// 时提示会是一块透明的底。
@@ -271,46 +309,119 @@ func (s *Shell) tipAt(c *ui.Context, anchor ui.Element, text string, timing tipT
 	if fg == ui.Transparent {
 		fg = t.Background
 	}
-
+	var panel ui.Element
 	ui.Overlay(c, func() {
 		// ⚠️ **影的值从 `widgets/shadow` 取**（`shadow.Tooltip`）：值只写一处
 		// （DESIGN.md §四·五，票 #239 把这一处收进去了）。
-		panel := shadow.Tooltip(ui.Box(c).Absolute().PassThrough().Role(ui.RoleTooltip).
+		panel = shadow.Tooltip(ui.Box(c).Absolute().PassThrough().Role(ui.RoleTooltip).
 			MaxWidth(t.Space(80)).Padding(t.Space(1.25), t.Space(2)).
 			Radius(t.Space(1.25)).
 			Background(fill).TextColor(fg).FontSize(t.FontSize-1), t)
-		panel.Children(func() { ui.Text(c, text) })
-		if place != nil {
-			place(panel, anchor, t)
-		} else {
-			panel.AttachTo(anchor, ui.AnchorTop, ui.AnchorBottom).
-				Margin(space.None, space.None, t.Space(1.5), space.None)
-		}
-		if panel.OverlayShortcut(0, ui.KeyEscape) {
-			st.hover.shown = false
-			st.focus.shown = false
-			st.dismissed = true
-		}
 	})
-	return anchor
+	return panel
 }
 
-// tipHoverBusy 报「**别处**有悬停着的提示」（self 是这一枚自己的元素 ID）。
+// tipCandidate 是这一遍 build 里登记下来的一份「有可能要画的提示」。
 //
-// 🔴 **两个都要看**，因为提示是**逐个元素** build 的，而**指针悬停着的那一枚
-// 不一定先被 build**：焦点所在的那一枚先被 build 时，它看不到「这一遍已经有
-// 悬停提示了」。
+// ⚠️ **不是「要画的那些」**：每一个带提示的元素都会登记一份，最后只挑一枚
+// （见 `pickTip`）。
+type tipCandidate struct {
+	// anchor 是锚点本身——面板要挂在它上面。
+	anchor ui.Element
+	// text 是提示那句话。
+	text string
+	// st 是这一枚跨帧的状态（`tipState`）。
+	st *tipState
+	// place 是「提示摆哪儿」（nil = 摆在锚点上方居中，框架那一份的位置）。
+	place func(panel, anchor ui.Element, t *ui.Theme)
+}
+
+// pickTip 挑出该画的那一枚，返回它在那一份里的下标（没有就 -1）。
 //
-// 「刚才那一遍」那一项靠的是框架的**多遍 build**（`mygo/ui/runtime.go` 的
-// `for pass := 0; pass < 3`）：每一遍的开头都把上一遍登记的那一枚挪到
-// `tipHoverPrev`，于是**真正留在画面上的那一遍**（最后一遍）一定看得见悬停
-// 提示已经登记过了——它是在前面那遍里登记的。
+// 🔴 **同一时刻只出一枚提示**（票 #420）。三档，按先后：
 //
-// ⚠️ 代价是「指针**刚刚**移到别处」的那一遍，焦点那一枚的提示还亮着（十几
-// 毫秒，肉眼看不见）；而「指针停着不动」的那一路从第二遍起就只剩一枚。
-func (s *Shell) tipHoverBusy(self uint64) bool {
-	return (s.tipHoverNow != 0 && s.tipHoverNow != self) ||
-		(s.tipHoverPrev != 0 && s.tipHoverPrev != self)
+//  1. **指针正停着的那一枚**。它是「用户当下指着的东西」，别的给它让位。
+//  2. **指针已经移开、还在收尾期里的最近那一枚**。上游 `closeDelay=500` 的
+//     语义：指针移开后提示还赖一会儿（手一抖划过时不至于看不见）。
+//  3. **焦点那一枚**。键盘走位来的；指针那一档在的时候它让位（票 #245 的 E3）。
+//
+// ⚠️ **第 1 档和第 2 档分开，是这一票的要害**：指针落到另一枚上时，上一枚
+// **立刻**走（不用等它那 500ms）；指针移开、**没有新的提示来**时，上一枚
+// **赖够那 500ms** 才走。合成一档的话，要么两枚叠着，要么扫过一排按钮时
+// 提示一闪一闪。
+//
+// ⚠️ **第 2 档取「最近的那一枚」**：指针从 A 挪到 B 再挪走，该赖着的是 B
+// （它是最后被指到的那一枚）。
+//
+// ⚠️ **第 1 档取「第一个」**：同一时刻**只可能有一枚**被指着，除非一枚套着
+// 另一枚（头像那一格就是：外面是菜单按钮，里面那一格自己带提示）。那时里面
+// 那一枚更贴切——而它**先被登记**（外面那一枚的提示是它整个子树建完之后才
+// 登记的）。
+func pickTip(list []tipCandidate) int {
+	hoverNow, linger, focus := -1, -1, -1
+	for i := range list {
+		st := list[i].st
+		switch {
+		case st.hover.shown && st.hover.active:
+			// 指针正停在它上面。
+			if hoverNow < 0 {
+				hoverNow = i
+			}
+		case st.hover.shown:
+			// 指针已经移开，它还在收尾期里。
+			if linger < 0 || st.hover.activeSince.After(list[linger].st.hover.activeSince) {
+				linger = i
+			}
+		}
+		if st.focus.shown && focus < 0 {
+			focus = i
+		}
+	}
+	switch {
+	case hoverNow >= 0:
+		return hoverNow
+	case linger >= 0:
+		return linger
+	default:
+		return focus
+	}
+}
+
+// drawTip 填面板、挑出该画的那一枚。
+//
+// ⚠️ **排在整遍 build 之后**（见 `Shell.View` 和 `shelltest_test.go` 的
+// `withView`）：挑的那一下要看得见这一遍登记的**全部**候选。
+//
+// ⚠️ **面板是 `tipAt` 建好的**（见那一段）：这里只填内容（那句话、摆在哪儿）。
+// 建在最后的话，浮层按键的优先级会反过来（见 `tipAt` 里那一段）。
+//
+// ⚠️ **画完就把候选清空**：这样同一个函数可以被两处调用（生产路和测试路）而
+// 不会画两遍——第二遍看到的是空的那一份。
+func (s *Shell) drawTip(c *ui.Context) {
+	list := s.tipCandidates
+	s.tipCandidates = s.tipCandidates[:0]
+	panel := s.tipPanel
+	s.tipPanel = ui.Element{}
+	i := pickTip(list)
+	if i < 0 || !panel.Valid() {
+		return
+	}
+	p := list[i]
+	st := p.st
+
+	t := c.Theme()
+	panel.Children(func() { ui.Text(c, p.text) })
+	if p.place != nil {
+		p.place(panel, p.anchor, t)
+	} else {
+		panel.AttachTo(p.anchor, ui.AnchorTop, ui.AnchorBottom).
+			Margin(space.None, space.None, t.Space(1.5), space.None)
+	}
+	if panel.OverlayShortcut(0, ui.KeyEscape) {
+		st.hover.shown = false
+		st.focus.shown = false
+		st.dismissed = true
+	}
 }
 
 // tipFrom 是给页面用的入口：页面拿到 `tipFunc`（可能为 nil——单独造这一页的

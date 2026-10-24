@@ -12,6 +12,8 @@
 //	网格卡：右下角浮出 40px 主色圆播放钮，封面底部一条 black/90 渐变（左播放量右时长）
 //	淡入淡出 200ms（上游两处都是 `transition-opacity duration-200`）
 //
+// ⚠️ **时长抄上游，曲线是全应用那条统一的**（`motion.Unified`，票 #292）。
+//
 // # ⚠️ 反馈是**每一帧都建**的，指针不在也建
 //
 // 这是这一包唯一一处要动脑的地方。淡入要跨帧：三角画出来那一帧不透明，它得从
@@ -33,6 +35,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
@@ -141,11 +144,15 @@ func PlayingLabel(title string) string { return title + " " + PlayingMark }
 // ⚠️ MyGo 的 `Animate` 在系统开着「减少动态效果」时直接给目标值（`motion.go` 里
 // `rt.preferences().ReduceMotion`），那是系统设置而不是我们这一层的判断，别在这里
 // 自己绕过去。
+//
+// ⚠️ **曲线是全应用那条统一的**（`motion.Unified`），不是 `Animate` 的默认
+// `EaseOut`——`Animate` 就是 `AnimateWith(..., EaseOut)`，所以这里要显式写
+// `AnimateWith`。理由见 DESIGN.md §五。
 func fade(e ui.Element, key string, on bool) float32 {
 	if on {
-		return e.Animate(key, 1, Fade)
+		return e.AnimateWith(key, 1, Fade, motion.Unified)
 	}
-	return e.Animate(key, 0, Fade)
+	return e.AnimateWith(key, 0, Fade, motion.Unified)
 }
 
 // show 收掉一层：完全透明时把这一层**藏掉**。
@@ -209,7 +216,7 @@ func RowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 	//
 	// `Clip()` 不能省：封面是圆角的，压暗那一层不裁就会在四个角上盖出方的黑边。
 	ui.Box(c).Size(size, size).Radius(t.Radius).Clip().Children(func() {
-		imgcache.View(c, cache, url, size, size)
+		imgcache.ViewTitled(c, cache, url, title, size, size)
 
 		// ⚠️ **压暗和三角是这一层的两个兄弟，不是一个套一个**：`Attach` 贴在**直接
 		// 那个父**的盒子上，而套一层时内层贴到的是**外层自己那个盒子**——而外层刚
@@ -299,7 +306,7 @@ func cardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 		cover = shadow.TailwindMD(cover)
 	}
 	cover.Children(func() {
-		imgcache.View(c, cache, url, w, h)
+		imgcache.ViewTitled(c, cache, url, label, w, h)
 		cardOverlay(c, w, h, on, playCount, clock, label, tip, play)
 	})
 }
@@ -418,7 +425,7 @@ const (
 // ⚠️ **标签必须带歌名**（`PlayingLabel`）：理由同文件头那一段——读屏软件读的是标签。
 func Wave(c *ui.Context, key string, width float32, color ui.Color, title string) {
 	wave := ui.Box(c).Key(key).Size(width, waveH).Label(PlayingLabel(title))
-	phase := wavePhase(c, wave, key)
+	phase := wavePhase(c, wave)
 	wave.Draw(func(p *ui.Painter, r ui.Rect) {
 		// 竖条整体居中：4×2 + 3×2 = 14 宽，在 32 宽的序号那一列里两边各空 9。
 		x0 := r.X + (r.W-float32(waveBars*waveBarW+(waveBars-1)*waveGap))/2
@@ -433,6 +440,35 @@ func Wave(c *ui.Context, key string, width float32, color ui.Color, title string
 		}
 	})
 }
+
+// waveState 是波形那一格跨帧要留的两样东西。
+//
+// ⚠️ **合成一个结构体，而不是两个 `ui.Local`**：本地存储是**每个元素一份**的
+// map，而问一次相位就要查一次 map——两份就是两次查、两个键。
+type waveState struct {
+	// started 是「相位的零点定下了没有」。
+	started bool
+	// start 是这一格**第一次出现**的那一刻（相位的零点）。
+	start time.Time
+	// seen 是上一次要帧时那一刻的时刻。零值 = 从来没要过，于是第一帧一定会要。
+	seen time.Time
+}
+
+// waveStateKey 是 waveState 在元素的本地存储（`ui.Local`）里的键。
+//
+// ## ⚠️ 它**不带歌名**
+//
+// 本地存储是**每个元素一份**的，而波形那一格本身就是**按歌名分开的元素**
+// （调用方给它的元素键是「wave:」加歌名）——所以这个键只要在这一格里唯一
+// 就够了。原先那两个键是 `歌名+":start"` / `歌名+":seen"`，于是**每一帧**都要
+// 拼两次字符串、再装箱两次。
+//
+// ## ⚠️ 为什么是**零大小的结构体**而不是字符串
+//
+// `ui.Local` 的键是 `any`，而 `string → any` 的装箱每次都要在堆上分配一次
+// （`runtime.convTstring`）——这一格每一帧都要问一次相位，于是那一次分配
+// 每一帧都付一遍。零大小的结构体装箱走 `runtime.zerobase`，**一次都不分配**。
+type waveStateKey struct{}
 
 // wavePhase 是此刻的相位（0~1），并且在**钟走了、窗口也看得见的时候**要下一帧。
 //
@@ -464,13 +500,35 @@ func Wave(c *ui.Context, key string, width float32, color ui.Color, title string
 // ⚠️ **判据不是「相位有没有变」**：那样它在 Tester 里会**彻底不动**——因为没有下一帧
 // 就没人问「相位变没变」，而没有下一帧就没人看（死锁）。问钟不会：那一次 `Advance` 推了
 // 钟，就有一帧跑起来，帧里钟和上一帧不一样，于是它又能要下一帧。
-func wavePhase(c *ui.Context, wave ui.Element, key string) float32 {
+//
+// ## ⚠️ **那个 init 闭包不捕获任何东西**
+//
+// 而「起始时刻」并不需要靠 init 带进来——下面那句「零点还没定过」就能定它，
+// 于是这个闭包是**静态**的（编译成一个常量符号），每帧零分配。
+//
+// ⚠️ **「捕获了变量」本身不是分配的原因**（这一条实测出来的，别再写回去）：
+// 决定分配的是**闭包有没有逃出去**。`ui.Local` 的 `init` 参数**只被调用一次**
+// （`mygo/ui/context.go` 的 `coreLocal`：`v := new(T); *v = init()`），于是
+// 编译器可以把它**内联掉**——逃逸分析实测：`wavePhase.func1` 是
+// 「can inline … with cost 2」，而**捕获了变量**的同一形状的闭包，分配数与
+// 不捕获的**一模一样**（都是 0 次）。
+//
+// 真正让那一票之前每帧付钱的是**键**（`key+":start"` 那个字符串）：它既要在
+// 运行期**拼出来**，又要**装箱进 `any`**（`ui.Local` 的键是 `any`），两次
+// 分配。闭包只是顺带被算在了头上。
+func wavePhase(c *ui.Context, wave ui.Element) float32 {
 	now := c.Now()
-	start := ui.Local(wave, key+":start", func() time.Time { return now })
-	// seen 是上一次要帧时那一刻的时刻。零值 = 从来没要过，于是第一帧一定会要。
-	seen := ui.Local(wave, key+":seen", func() time.Time { return time.Time{} })
-	if !now.Equal(*seen) {
-		*seen = now
+	st := ui.Local(wave, waveStateKey{}, func() waveState { return waveState{} })
+	if !st.started {
+		// 第一次看见这一格：相位的零点就是此刻。
+		//
+		// ⚠️ **判据是 `started` 而不是「seen 是不是零值」**：无头 Tester 的钟
+		// 起点可能正好是零时刻（`time.Time{}`），那时「seen 是零值」就分不出
+		// 「第一次」和「钟没走过」。
+		st.started, st.start = true, now
+	}
+	if !now.Equal(st.seen) {
+		st.seen = now
 		// 看不见的窗口不要再要帧（票 #156）：它每帧都请求下一帧，而
 		// `App.tick` 又在放歌时每 50ms 叫醒每个窗口一次——两条链合起来，
 		// 一扇收在后台的窗口会一直按帧重画，用户能感到的是风扇和电池。
@@ -478,7 +536,7 @@ func wavePhase(c *ui.Context, wave ui.Element, key string) float32 {
 			c.AnimationFrame()
 		}
 	}
-	return float32(now.Sub(*start)%wavePeriod) / float32(wavePeriod)
+	return float32(now.Sub(st.start)%wavePeriod) / float32(wavePeriod)
 }
 
 // waveHeight 是某一根竖条此刻多高。

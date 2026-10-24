@@ -27,7 +27,6 @@
 package ui
 
 import (
-	"fmt"
 	"math"
 	"strconv"
 	"time"
@@ -35,11 +34,13 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+	tclean "github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
 	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
@@ -62,9 +63,6 @@ const fullHideDelay = 3 * time.Second
 //	分集面板 宽 280，高 min(60vh, 420)                     index.tsx:424-426
 //	分集行高 32                                             page-list.tsx:35
 const (
-	fullMinCoverWidth  = 260
-	fullMaxCoverWidth  = 520
-	fullCoverAspect    = 0.75
 	fullSpectrumMinW   = 400
 	fullSpectrumMaxW   = 640
 	fullSpectrumBarPx  = 7.5
@@ -86,8 +84,8 @@ const (
 	// 有主角；而被切的原因是**底栏高度没跟着它重算**（当时是 80）。票 #169 把
 	// 底栏按上游重排（进度 20 + 缝 8 + 播放键 + 底边距 16），48 完全
 	// 放得下。**改底栏的留白时这个高度要一起重算**，别再让它去迁就一个旧框。
-	fullPlayGlyph = iconPlayBtn
-	fullPlayHit   = iconHitPlay
+	fullPlayGlyph = 28
+	fullPlayHit   = 64
 
 	// 顶栏：上游 `px-6 py-4`（`index.tsx:291`）——左右 24、上下 16。
 	//
@@ -110,10 +108,10 @@ const (
 	// fullControlsHeight 是整条底栏的高度，**由内容算出来**：
 	// 进度行 20（`knobFullLook` 那个 `Height(t.Space(5))`）
 	// + 缝 8（`gap-2`）
-	// + 播放键 48（`fullPlayHit`，这一行最高的那一个）
+	// + 播放键 64（`fullPlayHit`，这一行最高的那一个；设计规范 §5）
 	// + 离底 16（`mb-4`）
-	// = 92。藏起来的时候整条要移出窗口，靠的也是这个数。
-	fullControlsHeight = 92
+	// = 108。藏起来的时候整条要移出窗口，靠的也是这个数。
+	fullControlsHeight = 108
 	fullBottomPadX     = space.Px48
 	fullBottomMargin   = space.Px16
 	fullBottomMaxW     = 1152
@@ -299,22 +297,29 @@ type fullPlayer struct {
 	// partsRows 是这一帧要画的那几行，partsList 是它们的列表状态。
 	partsRows []partRow
 	partsList ui.ListState
+	// partsRowKeys 记着分集面板里每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
+	// （票 #313）。**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头）。
+	partsRowKeys rowkey.Memo[string, any]
 
 	// bg 是背景那一层的画布：封面糊过一次画进去，稳态下每一帧只是一张图
 	// （见 viewFullBackdropCanvas 为什么是画布而不是一层材质）。
 	bg *ui.Canvas
 	// bgW/bgH 是这张画布的尺寸（窗口改了尺寸要重建）。
 	bgW, bgH int
-	// bgKey 是这张画布画的是哪一张封面（地址 + 位图 + 尺寸）。变了才重画。
-	bgKey string
+	// bgURL/bgBitmap 是这张画布画的是哪一张封面（地址 + 位图）。变了才重画。
+	//
+	// ⚠️ **两个字段分开比，不拼成一个字符串**：原先是一个 `fmt.Sprintf` 出来的
+	// 键（地址 + 位图指针 + 宽高），于是**每一帧**都要拼一次字符串（一次分配
+	// ＋一次格式化），而这一帧本来可以一个字节都不分配。
+	bgURL    string
+	bgBitmap *ui.Bitmap
 	// bgDirty 是「画布要重画」那一下（画它要一个 Painter，只有画的时候有）。
 	bgDirty bool
 	// bgDraws 是这张画布被重画了几次。**给测试看的**：毛玻璃每帧重渲一遍就是
 	// 这里在涨（那在软件渲染上是 80~100 毫秒一帧）。
 	bgDraws int
-
-	// spec 是频谱那一块复用的中间量（见 fullplayer_spectrum.go）。
-	spec spectrumBuffers
 }
 
 // partRow 是分集列表里的一行。
@@ -540,6 +545,19 @@ func (s *Shell) viewFullBackdrop(c *ui.Context, url string) {
 		})
 }
 
+// backdropChanged 报「背景那张画布要不要重画」。
+//
+// 换了封面、换了位图、或者窗口改了尺寸（画布的大小跟着变），才重画。
+//
+// ## ⚠️ **四个判据分开比，不拼成一个字符串**
+//
+// 原先是一个 `fmt.Sprintf("%s|%p|%dx%d", …)` 拼出来的键，于是**每一帧**都要
+// 拼一次字符串（一次分配 ＋ 一次格式化）——而满屏开着的时候这一帧是**每一帧**
+// 都要走的，那一笔于是每帧都付一遍。分开比是零分配的。
+func (f *fullPlayer) backdropChanged(url string, bm *ui.Bitmap, w, h int) bool {
+	return f.bgURL != url || f.bgBitmap != bm || f.bgW != w || f.bgH != h
+}
+
 // viewFullBackdropCanvas 是背景那一层：封面糊过一次画进一张画布，之后每一帧
 // 只是把那张画布放大铺上去。
 //
@@ -572,13 +590,13 @@ func (s *Shell) viewFullBackdropCanvas(c *ui.Context, url string) {
 	cw := max(int(winW/fullBackdropScale), 1)
 	ch := max(int(winH/fullBackdropScale), 1)
 	// 换了封面、换了位图、或者窗口改了尺寸（画布的大小跟着变），才重画。
-	key := fmt.Sprintf("%s|%p|%dx%d", url, st.Bitmap, cw, ch)
-	if s.full.bgKey != key {
+	if s.full.backdropChanged(url, st.Bitmap, cw, ch) {
 		if s.full.bg == nil || s.full.bgW != cw || s.full.bgH != ch {
 			s.full.bg = ui.NewCanvas(cw, ch)
 			s.full.bgW, s.full.bgH = cw, ch
 		}
-		s.full.bgKey, s.full.bgDirty = key, true
+		s.full.bgURL, s.full.bgBitmap = url, st.Bitmap
+		s.full.bgDirty = true
 	}
 	if s.full.bg == nil {
 		return
@@ -678,7 +696,7 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 		// ⚠️ **别拿它当「页标题不写字重」那一档的样板**：页标题（`scale.PageTitle`）
 		// 那一档一个字重都不写（`TestPageTitlesAreNotBold` 钉着），这里是**歌名**
 		// 那一档，两者的判据不是同一条。
-		ui.Text(c, st.Title).FontSize(scale.Font(c, scale.PlayerTitle)).FontWeight(400).TextColor(on).MaxWidth(fullTitleMaxWidth(c)).SingleLine()
+		ui.Text(c, tclean.Clean(st.Title).Title).FontSize(scale.Font(c, scale.PlayerTitle)).FontWeight(400).TextColor(on).MaxWidth(fullTitleMaxWidth(c)).SingleLine()
 
 		// 同上面那一条：提示不跟着顶栏一起藏起来，所以这里不给 `Tooltip`。
 		gear := iconButton(c, iconSettings, "全屏设置", 22).
@@ -736,34 +754,47 @@ func fullTitleMaxWidth(c *ui.Context) float32 {
 
 // ---- 中间那一块：封面（左边）与歌词（右边） ----
 
+// fullStagePadX 是满屏那两栏各自的**左右留白**。
+//
+// ⚠️ **48 是上游的 `px-12`**：封面那一栏是 `flex h-full w-full items-center px-12`
+// （`full-screen-player/index.tsx:331`），歌词那一栏是 `px-12 py-24`
+// （`:357`）。两处共用一个数——上游那两行写的是同一个类。
+const fullStagePadX = space.Px48
+
 // fullCoverColRatio 是左边那一列（封面）占窗口宽的几成。
 //
-// ⚠️ **0.42 是「封面 + 留白」那一块**：上游那个封面宽度式子（`fullCoverSize`）
-// 算出来最多 520，而窗口 1200 宽时右边要留给歌词——两样各占一半的话封面会被
-// 压到 520 以下（上游那个数就白抄了）。0.42 的话 1200 宽的窗口上左边那一列是
-// 504，封面 384 摆得下（两边各留 60），右边 696 留给歌词。
-const fullCoverColRatio = 0.42
-
-// fullStageRect 是中间那一块的区域：顶栏与底栏之间那一段。
+// ⚠️ **0.5 是上游那个数**：`full-screen-player/index.tsx:331-332` 里封面栏和
+// 歌词栏是两个 `w-full` 的兄弟，在 flex 行里**各占一半**（1200 宽的窗口上
+// 封面栏 0..600、歌词栏 600..1200）。
 //
-// ⚠️ **底下那一条给频谱留了位置**（`fullSpectrumHeight + fullSpectrumGapY`）：
-// 频谱是画在底栏正上方那一段的（`viewFullSpectrum` 的 `Bottom(...)`），而歌词
-// 那一列要是铺到那儿，频谱就压在歌词上——一堆每帧重画的条从字上穿过去，
-// 两样都读不出来。
+// 之前这里是 0.42，理由写的是「怕 520 的封面被歌词挤掉」——而**上游那个尺寸式子
+// 在 1200×800 上算出来就是 384**（`fullCoverSize`），压根挤不掉：上游敢 50/50
+// 是因为它把歌词栏压到 504 净宽也没关系（票 #166 / 报告 S-22）。
+const fullCoverColRatio = 0.5
+
+// fullStageRect 是中间那一块的区域：**整窗**。
+//
+// ⚠️ **上游那两栏是 `h-full`**（`full-screen-player/index.tsx:330-331`），也就是
+// 从窗口最上头贯到底——所以封面是**在整窗里垂直居中**的（1200×800 上是
+// y=256..543），而歌词那一栏的内容盒是 `py-24` 去掉之后的那一段（96..704），
+// **正在唱的那一句落在窗口的正中**（400）。
+//
+// ⚠️ **底下那一条给频谱留了位置**这件事因此变了：频谱是画在底栏正上方那一段
+// 的（`viewFullSpectrum` 的 `Bottom(...)`，656..696），而歌词内容盒一直铺到
+// 704——两者在 x=648..900 那一段重叠。**那一段正好是歌词的淡出带**
+// （上游那条遮罩 88% 起淡，655..704），所以字已经淡没了，频谱穿过去看不出来。
+// 上游是同一个位置关系（它的频谱 670..710、歌词内容盒 96..704）。
 func fullStageRect(c *ui.Context) ui.Rect {
 	winW, winH := c.Size()
-	top := float32(fullTopHeight)
-	bottom := winH - float32(fullControlsHeight) -
-		float32(fullSpectrumHeight+fullSpectrumGapY)
-	return ui.Rect{X: 0, Y: top, W: winW, H: max(bottom-top, 0)}
+	return ui.Rect{X: 0, Y: 0, W: winW, H: winH}
 }
 
 // fullWindowRect 是**整窗**。
 //
 // ⚠️ **它只给「歌词关着」那一条路径用**：那一路径上封面必须和这一票之前
-// **逐像素一样**（整窗居中），而中间那一段（`fullStageRect`）的上边界是顶栏
-// （64）、下边界是给频谱留的那一截（656）——拿它给封面居中，封面会**上移 40
-// 像素**（评审抓到的那一条：注释写着「和这一票之前一模一样」，而画面上不是）。
+// **逐像素一样**（整窗居中）。现在它和 `fullStageRect` 是同一块——两栏是
+// `h-full`（上游那样），歌词那一栏的内容盒靠 `py-24` 收进去，而封面在整窗里
+// 居中。
 func fullWindowRect(c *ui.Context) ui.Rect {
 	winW, winH := c.Size()
 	return ui.Rect{X: 0, Y: 0, W: winW, H: winH}
@@ -791,8 +822,8 @@ const fullLyricsPartsGap = space.Px24
 // 在中间那一段里居中：那一段的上边界是顶栏（64），拿它居中封面会**上移 40
 // 像素**（评审抓到的那一条：注释写着「一模一样」，而画面上不是）。
 //
-// 歌词开着的时候封面挪到左边那一列（纵向在中间那一段里居中，与歌词那一列
-// 同一个中线），右边让给歌词。
+// 歌词开着的时候封面挪到左边那一列（**靠那一栏的右沿**，上游 `justify-end`），
+// 右边让给歌词。
 //
 // # 三件事各自独立
 //
@@ -809,11 +840,11 @@ const fullLyricsPartsGap = space.Px24
 func (s *Shell) viewFullStage(c *ui.Context, st app.State, hidden bool) {
 	prefs := s.app.FullPlayerPrefs()
 	if !prefs.ShowLyrics {
-		s.viewFullCover(c, st, hidden, fullWindowRect(c))
+		s.viewFullCover(c, st, hidden, fullWindowRect(c), false)
 		return
 	}
 	stage := fullStageRect(c)
-	// 左边那一列：封面关着就不留（否则左边 42% 的窗宽整块空着）。
+	// 左边那一列：封面关着就不留（否则左边半边的窗宽整块空着）。
 	colW := float32(0)
 	if prefs.ShowCover {
 		colW = stage.W * fullCoverColRatio
@@ -825,17 +856,22 @@ func (s *Shell) viewFullStage(c *ui.Context, st app.State, hidden bool) {
 		right = stage.X + stage.W - fullPartsWidth + fullLyricsPartsGap
 	}
 	if prefs.ShowCover {
+		// ⚠️ **靠那一栏的右沿**（上游 `justify-end`）：封面右边留 48（上游
+		// `px-12`），于是 1200 宽的窗口上封面是 x=168..552——上游是 168..551。
 		s.viewFullCover(c, st, hidden,
-			ui.Rect{X: stage.X, Y: stage.Y, W: colW, H: stage.H})
+			ui.Rect{X: stage.X, Y: stage.Y, W: colW, H: stage.H}, true)
 	}
 	s.viewFullLyrics(c, st, ui.Rect{
 		X: stage.X + colW, Y: stage.Y, W: right - (stage.X + colW), H: stage.H,
-	})
+	}, hidden)
 }
 
 // viewFullCover 是满屏那张封面——**和播放条上那一张是同一个元素**。
 //
 // area 是它待的那一块：歌词开着的时候是左边那一列，关着的时候是整窗。
+//
+// rightAlign 是「靠那一块的右沿」还是「在那一块里居中」（上游
+// `showLyrics ? "justify-end" : "justify-center"`，`index.tsx:332`）。
 //
 // 🔴 这里的 `Match` 就是 SwiftUI `matchedGeometryEffect` 的等价物，见 coverMatch。
 // 它和 `viewCover`（播放条那一张）轮流带同一个 `coverTransition(id)`。
@@ -850,20 +886,30 @@ func (s *Shell) viewFullStage(c *ui.Context, st app.State, hidden bool) {
 // 于是它是接点击的那一个——指针落在封面正中时 `CursorNone` 根本轮不到探针。
 // 实测：满屏指针放在封面正中（600,400）推进 3 秒，光标是箭头而不是 none。
 // 照抄探针那一支（`viewFullPlayer` 里 `probe.Cursor(ui.CursorNone)`）就对了。
-func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.Rect) {
+func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.Rect, rightAlign bool) {
 	// 「显示封面」关掉就一个字都不建（Biu 的 `{!isLocal && showCover && <Image …>}`
 	// ——`index.tsx:328`）。本地那一半的判据（`!isLocal`）不在这一层：本地文件
 	// 没有封面时画的是占位图，关掉它照样是「中间不摆东西」，和上游同一个结果。
 	if !s.app.FullPlayerPrefs().ShowCover {
 		return
 	}
-	w, h := fullCoverSize(c, area.W)
+	// 靠右沿摆的时候，封面得**装得进那一栏减去左右留白**（上游那一栏是
+	// `px-12`，封面窄窗口里被 flex 压窄的也是压到内容盒那么宽）。
+	avail := area.W
+	if rightAlign {
+		avail = area.W - 2*fullStagePadX
+	}
+	w, h := fullCoverSize(c, avail)
 	// ⚠️ **自己算位置**，不要用 `Absolute().Center()`：那个 `Center` 是「把**子**
 	// 元素沿着主轴居中」（`mygo/ui/api_gen.go:3006`），不是「把这个元素摆到中间」。
 	// 这么写的后果是外层那个 Box 宽高就是封面本身、贴在**它待的那一块的最左边**
 	// （x=0），而转场的终点也跟着错。
+	x := area.X + (area.W-w)/2
+	if rightAlign {
+		x = area.X + area.W - fullStagePadX - w
+	}
 	box := ui.Box(c).Key("full-cover").
-		Absolute().Left(area.X+(area.W-w)/2).Top(area.Y+(area.H-h)/2).Size(w, h)
+		Absolute().Left(x).Top(area.Y+(area.H-h)/2).Size(w, h)
 	if hidden {
 		box = box.Cursor(ui.CursorNone)
 	}
@@ -914,14 +960,25 @@ func coverIdentity(s *Shell, st app.State) string {
 // 而上游那个式子算出来的宽度（最多 520）可能比那一列还宽——那就压到歌词上去了。
 // 夹一下之后窄窗口里的封面跟着那一列一起变小，而宽高的比例不变。
 func fullCoverSize(c *ui.Context, maxW float32) (float32, float32) {
-	winW, winH := c.Size()
-	w := min(winW*0.7, winH*0.48)
-	w = min(max(w, fullMinCoverWidth), fullMaxCoverWidth)
+	winW, _ := c.Size()
+	// 设计规范 v0.1 §7.5：正方形封面，320（窗口宽 < 1000 时 240）。原来是上游 Biu 的 4:3、
+	// 最宽 520 的算法。
+	w := float32(fullCoverSide)
+	if winW < fullCoverNarrowWin {
+		w = fullCoverSideNarrow
+	}
 	if maxW > 0 {
 		w = min(w, maxW)
 	}
-	return w, w * fullCoverAspect
+	return w, w
 }
+
+// 满屏封面的边长（设计规范 v0.1 §7.5）。
+const (
+	fullCoverSide       = 320
+	fullCoverSideNarrow = 240
+	fullCoverNarrowWin  = 1000
+)
 
 // ---- 底下那一条 ----
 
@@ -944,7 +1001,7 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 		Justify(ui.Center).AlignItems(ui.End)
 	bar = bar.Opacity(bar.AnimateTo("full-controls:o", shown, ui.Smooth))
 	// ⚠️ 位移**不跟着淡入一起动**（顶栏也是这么写的）：藏起来的时候这一条要真的
-	// 移出窗口，不然停在窗口底下那 92 像素里的控件仍然接得到点击。
+	// 移出窗口，不然停在窗口底下那 108 像素里的控件仍然接得到点击。
 	bar = bar.Translate(0, (1-shown)*fullControlsHeight)
 
 	bar.Children(func() {
@@ -977,17 +1034,17 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 					s.viewPrevButton(c)
 					// 提示走 tooltip.go（时延照上游），不是框架那枚固定的 600ms。
 					//
-					// 🔴 **这一枚不走 `iconButtonPlay`**（那一枚带「悬停变主色」）：
-					// 满屏的底是**压暗过的封面**，不是应用底色——主色当字色那一档
-					// 压在那上面只有 1.0:1（实测：浅色主题下悬停后变成 rgb(18,114,52)
-					// 的深绿，比底色还暗），而且那一行其余四枚图标都是满屏自己的
-					// 前景色（白 92%），**一枚变绿另外四枚不变，一眼就不成套**。
-					// 所以这一枚就是那一行里的一枚图标键（图形是前景色），形状和
-					// 播放条上那一枚一样（48×48、图形正好填满）。
-					if s.withTip(c, iconButton(c, transportIcon(st.Playing),
-						transportLabel(st.Playing), fullPlayGlyph).
-						Size(fullPlayHit, fullPlayHit).Padding(space.None, space.None).
-						Disabled(!st.Playing && !st.HasTrack), transportLabel(st.Playing)).Clicked() {
+					// 满屏上这一枚和播放条上是同一枚实心强调色圆（规范 §5：64×64，图形 28）。
+					// 实心圆的底是强调色、字是 `AccentText`，压在糊过的封面上也读得出来——
+					// 旧的「悬停变主色」那一档按应用底色算，在封面上会掉到 1.0:1，所以旧版
+					// 才特意不走 `iconButtonPlay`；现在这一枚自己带底，没有那个问题。
+					glyph := iconPlayFill
+					if st.Playing {
+						glyph = iconPauseFill
+					}
+					if s.withTip(c, iconButtonPlay(c, glyph, transportLabel(st.Playing),
+						fullPlayHit, fullPlayGlyph, !st.Playing && !st.HasTrack),
+						transportLabel(st.Playing)).Clicked() {
 						s.app.Toggle()
 					}
 					s.viewNextButton(c)
@@ -1219,7 +1276,11 @@ func (s *Shell) viewFullPartsPanel(c *ui.Context) {
 func (s *Shell) viewFullPartsList(c *ui.Context) {
 	t := c.Theme()
 	rows := s.full.partsRows
-	s.full.partsList.Key = func(i int) any { return rows[i].key }
+	// ⚠️ **身份是预先装箱好的那一份**（`s.full.partsRowKeys`）：理由见
+	// `fullplayer.go` 里那个字段的注释（票 #313）。
+	s.full.partsList.Key = func(i int) any {
+		return s.full.partsRowKeys.At(i, rows[i].key, rowkey.Identity)
+	}
 	s.full.partsList.Label = func(i int) string { return rows[i].title }
 
 	partsList := ui.List(c, &s.full.partsList, len(rows), func(i int) {
@@ -1228,10 +1289,14 @@ func (s *Shell) viewFullPartsList(c *ui.Context) {
 			PaddingX(space.Px12).Radius(t.Radius)
 		switch {
 		case r.active:
-			// Biu 的 `data-[active=true]:bg-primary/20`。
+			// ⚠️ **这一处和上游还差着一个数**（票 #323 只管播放条上那个分集抽屉）：
+			// 上游是 `data-[active=true]:bg-primary/20`——**主色 20% 那一层淡底**；
+			// 我们这里是**一层中性色**（跟着主题的字色走，不是写死白）：面板那一层
+			// 是玻璃，玻璃在深浅两套下是不同的底，白底和黑底要反过来。
 			//
-			// ⚠️ 底色跟着**主题的字色**走（不是写死白）：面板那一层是玻璃，玻璃
-			// 在深浅两套下是不同的底，白底和黑底要反过来。
+			// 播放条上那个分集抽屉已经按上游改成淡主色底了（`partdrawer.go` 的
+			// `viewPartRow`，配方见 `playingrow.go`）；这一处还欠着——**别把这两处
+			// 当成同一档**。
 			row = row.Background(t.Text.Alpha(0.22))
 		case row.Hovered():
 			row = row.Background(t.Text.Alpha(0.10))

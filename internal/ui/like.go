@@ -34,6 +34,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -434,9 +435,9 @@ func (s *Shell) likeButton(c *ui.Context, name, label string, color ui.Color, li
 		// 不透明度那一档在「没赞」时是 0（所以看不见），而缩放那一档是 0.5 而不是
 		// 0（手册 ⓪ ②：带透明度的缩放不要以 0 作为开始和结束的值）。
 		bgScale := bg.AnimateTo(likeBgScaleKey, likeBgScaleTarget(liked),
-			ui.Animation{Duration: likeBgTime, Delay: likeBgDelay})
+			ui.Animation{Duration: likeBgTime, Delay: likeBgDelay, Ease: motion.Unified})
 		bgAlpha := bg.AnimateTo(likeBgAlphaKey, likeBgAlphaTarget(liked),
-			ui.Animation{Duration: likeBgTime, Delay: likeBgDelay})
+			ui.Animation{Duration: likeBgTime, Delay: likeBgDelay, Ease: motion.Unified})
 		bg = bg.Scale(bgScale, bgScale).Opacity(bgAlpha)
 		s.like.bgScale, s.like.bgAlpha = bgScale, bgAlpha
 
@@ -463,7 +464,7 @@ func (s *Shell) likeIconScale(c *ui.Context, ic ui.Element) float32 {
 	if popping {
 		target, d = likePopScale, likePopUp
 	}
-	v := ic.AnimateTo(likeIconKey, target, ui.Animation{Duration: d})
+	v := ic.AnimateTo(likeIconKey, target, ui.Animation{Duration: d, Ease: motion.Unified})
 	s.like.iconScale = v
 	return v
 }

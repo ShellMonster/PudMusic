@@ -88,6 +88,33 @@ const (
 	copyBufSize = 64 << 10
 )
 
+// defaultBackoff 是**默认的退避序列**：1 秒、2 秒、4 秒。
+//
+// # 为什么是这三个数
+//
+//	1 秒	CDN 抖一下（地铁进隧道、Wi-Fi 换信道）通常一秒之内就缓过来了
+//	2 秒	再宽一档，覆盖「刚被风控挡了一下」那种一秒不够的情况
+//	4 秒	最后一次，给它一个真有可能会成功的窗口
+//
+// # 为什么**总时长封顶在 7 秒**
+//
+// 再长用户就走了。他看到的是「歌不动了」，而「等 20 秒」和「等 4 秒」
+// 在他的感受里没有区别——他只会以为应用死了，然后去按暂停。
+//
+// ⚠️ **「7 秒」是按默认的 `MaxRefresh`（3 次）算的**：1+2+4。`MaxRefresh`
+// 调大时最后一档会**重复**（1+2+4+4+…），总等待跟着变长——那句话是关于
+// **默认配置**的，不是关于这个序列本身的。生产代码不调 `MaxRefresh`
+// （`internal/app` 建源时不填），所以线上就是 7 秒。
+//
+// ⚠️ **这是「指数退避 + 封顶」**，不是「固定间隔」也不是「随机抖动」：
+// 市面上量级相近的几种做法是 mpv 的 FFmpeg 后端（0/1/3/7 秒）、
+// Nuclear 的换源退避（1 秒起、×2、封顶 30 秒，但只用于换源）、
+// VLC 的 EOS 突发退避（100ms→3.2 秒）。我们取最保守的那一档：**总等待
+// 不超过 7 秒**，而退避期间界面上一直写着「正在重连」（票 #315）。
+func defaultBackoff() []time.Duration {
+	return []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
+}
+
 // StreamReply 是换流之后拿到的新一条流。
 //
 // 刻意**不**用 `bili.StreamRef`：服务层之间不互相认识（`spec.md` 的四层
@@ -126,6 +153,54 @@ type StreamSourceOptions struct {
 
 	// OnRefresh 每次换流成功后调一次，让上层把音质徽章更新掉。
 	OnRefresh func(*StreamReply)
+
+	// OnRetry 每次**准备重试**时调一次。
+	//
+	// 🔴 **它在退避开始之前调**：界面上的「正在重连」得从**第一秒**就亮着，
+	// 而不是等到重试真的跑起来了才说——等到那时候用户已经对着一个不动的
+	// 界面等了好几秒了（票 #315）。
+	//
+	// 参数是「第几次重试」（从 1 起）和「这一次要等多久」。
+	//
+	// ⚠️ **那个「第几次」是「这一轮断流里的第几次」**（票 #378）：字节回来
+	// 之后这一轮就结束了，下一次断流从第 1 次重新数。
+	OnRetry func(attempt int, wait time.Duration)
+
+	// OnReconnected 重试之后**字节又开始来了**时调一次。
+	//
+	// 第一次就下成功的话不调——那时候压根没有重连过。
+	//
+	// ⚠️ **它报的是「数据回来了」，不是「这一趟成功了」**：换流可能换到了
+	// 另一条流（那要上层重新开解码器并跳回播放位置），而数据回来只说明
+	// 连接恢复了。
+	OnReconnected func()
+
+	// OnFirstBytes 在**头几个字节落到缓存里**的时候调一次。
+	//
+	// 它是「下载首段字节」那一段的计时点（票 #220）：上层要把「等字节」
+	// 和「等解码器」**分开量**——而这两段的快慢完全不是一回事：前者是
+	// 网络，后者是这台机器的解码器。混在一起就分不出「慢的是网络」还是
+	// 「慢的是解码」。
+	//
+	// ⚠️ **只调一次**（第一次有字节的时候）。参数是那一刻已经下到的字节数。
+	OnFirstBytes func(n int64)
+
+	// Backoff 是**每一次重试之前要等的时长**序列。
+	//
+	// 零值用默认：1 秒、2 秒、4 秒（见 `defaultBackoff`）。
+	//
+	// 为什么要有它：CDN 抖一下的时候三次重试在几毫秒里就打完了一——那不叫
+	// 「重试」，那是连着撞了同一堵墙三次。中间等一等，网络缓过来了就救得
+	// 回来；网络没缓过来，等下去也只是把同一堵墙多撞两次。
+	//
+	// ⚠️ **序列用完了用最后一个**（不是变成 0）：变成 0 就等于「后面几次
+	// 不等了」，那还是瞬间打完，只是慢了一档。
+	//
+	// ⚠️ **总等待跟着 `MaxRefresh` 走**：默认的 `MaxRefresh` 是 3，于是总
+	// 等待是 1+2+4 = **7 秒**；把它调大时最后一档会重复（1+2+4+4+…），
+	// 总等待跟着变长。**生产代码不调 `MaxRefresh`**（`internal/app` 建源
+	// 时不填），所以线上就是 7 秒。
+	Backoff []time.Duration
 
 	// Client 是取字节用的客户端。
 	//
@@ -193,6 +268,41 @@ type StreamSource struct {
 	now     func() time.Time
 	stall   time.Duration
 
+	// backoff 是**每一次重试之前要等的时长**序列（见 `defaultBackoff`）。
+	backoff []time.Duration
+	// onRetry / onReconn 是「正在重试」和「字节又回来了」这两个回调
+	// （见 `StreamSourceOptions`）。它们给上层一个能显示在界面上的状态。
+	onRetry  func(attempt int, wait time.Duration)
+	onReconn func()
+	// onFirstBytes 是「头几个字节到了」那个回调（见 `StreamSourceOptions`）。
+	// 它给上层一个把「等字节」和「等解码器」分开量的计时点。
+	onFirstBytes func(n int64)
+	// firstBytesSeen 是「已经报过第一次了」——那个回调只该调一次。
+	firstBytesSeen bool
+	// retryPending 是「上一次是重试来的，字节还没回来」。
+	//
+	// 字节回来的那一刻（`append`）就报一次「恢复了」——判据是**真的有
+	// 字节到了**，不是「请求没报错」：连上了却一个字节都下不动（半死不活
+	// 的连接）在用户听来和没恢复一样。
+	//
+	// 🔴 **泵退出时收掉**（见 `stream_source_pump.go` 的 `pump`）：源放弃了
+	// 或者被关了之后，它就不再是「正在重试」——不收的话上层会拿着一盏
+	// **永久亮着的假指示灯**。
+	retryPending bool
+	// retryAttempt 是「**这一轮断流**里的第几次重试」（从 1 起）。
+	//
+	// 🔴 **它的口径是「这一轮」，不是「这条源一辈子」**（票 #378）：字节
+	// 回来了（`append`）这一轮就结束了，下一次断流**从第 1 次重新数**。
+	// 界面上写的是「正在重连（第 N 次）」，而那个 N 说的是「**这一次断流**
+	// 我重试了几次」——一次断流恢复之后，下一轮的第一次重试要是还写着
+	// 「第 2 次」，用户读到的是「我刚才已经重试过一次了」，而实际上这一轮
+	// 是第一次。
+	//
+	// ⚠️ **它和 `refreshes` 是两回事**：`refreshes` 是这条源**累计**换过
+	// 几次流（上限 `maxRefr` 用它），而这一栏是**用户眼前这一轮**的次数。
+	// 拿累计的那一个当界面上那个数，就是上面说的那个错。
+	retryAttempt int
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -227,20 +337,24 @@ func NewStreamSource(o StreamSourceOptions) (*StreamSource, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &StreamSource{
-		file:      f,
-		path:      f.Name(),
-		size:      o.Size,
-		urls:      append([]string(nil), o.URLs...),
-		quality:   "",
-		maxRefr:   orDefaultInt(o.MaxRefresh, defaultMaxRefresh),
-		expiresAt: o.ExpiresAt,
-		client:    o.Client,
-		refetch:   o.Refetch,
-		onRefr:    o.OnRefresh,
-		now:       o.Now,
-		stall:     orDefaultDuration(o.StallTimeout, defaultStallTimeout),
-		ctx:       ctx,
-		cancel:    cancel,
+		file:         f,
+		path:         f.Name(),
+		size:         o.Size,
+		urls:         append([]string(nil), o.URLs...),
+		quality:      "",
+		maxRefr:      orDefaultInt(o.MaxRefresh, defaultMaxRefresh),
+		expiresAt:    o.ExpiresAt,
+		client:       o.Client,
+		refetch:      o.Refetch,
+		onRefr:       o.OnRefresh,
+		onRetry:      o.OnRetry,
+		onReconn:     o.OnReconnected,
+		onFirstBytes: o.OnFirstBytes,
+		backoff:      append([]time.Duration(nil), o.Backoff...),
+		now:          o.Now,
+		stall:        orDefaultDuration(o.StallTimeout, defaultStallTimeout),
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 	// Options.Size 的 0 和 -1 都表示「还不知道」。不归一的话 size 会停在 0，
 	// 于是 Seek(0, SeekEnd) 立刻答 0——extaf 拿到的 AudioFileID 长度是 0，
@@ -276,6 +390,37 @@ func (s *StreamSource) Quality() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.quality
+}
+
+// Reconnecting 报「这条流现在是不是在等字节回来」，以及这是第几次。
+//
+// ok = false 表示没在等：要么从来没失败过，要么已经放弃了（泵退出），要么
+// 字节已经回来了。
+//
+// ⚠️ **那个「第几次」是「这一轮断流里的第几次重试」**（从 1 起）：字节回来
+// 之后这一轮就结束了，下一次断流从第 1 次重新数（票 #378）。界面上那个
+// 「正在重连（第 N 次）」的 N 就是它——它得说「**这一次**断流我重试了几次」，
+// 而不是「这条流一辈子换过几次流」。
+//
+// # 为什么这一档住在**源**这边，而不是上层存一栏
+//
+// 上层（`internal/app`）要拿这一档去显示「正在重连」，而**上层的「当前这条
+// 流」随时会换**：换歌、换音质、代次过期被丢掉……
+//
+// ⚠️ **上层自己存一栏的话，一条「建出来又被丢掉」的源会把那一栏抢走**
+// （票 #315 的评审复现过）：那时正在放的那首断流，它的重试被当成「别的流
+// 的事」丢掉，界面上「正在重连」**一次都不亮**——正是这一票要消灭的
+// 「歌停着、界面不动、没有字」。
+//
+// 住在源这边就没有「抢」这回事：上层只**问**自己当前在管的那一两条流，
+// 压根不读那条被丢掉的源的状态。
+func (s *StreamSource) Reconnecting() (attempt int, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.retryPending {
+		return 0, false
+	}
+	return s.retryAttempt, true
 }
 
 // Size 返回总长。还不知道时是 -1。

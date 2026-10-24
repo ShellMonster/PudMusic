@@ -1,10 +1,10 @@
-// 迷你播放器窗口（SPEC 需求 43~46）：320×100 的透明置顶小窗，贴边悬浮。
+// 迷你播放器窗口（SPEC 需求 43~46）：320×84 的透明置顶小窗，贴边悬浮。
 //
 // # 和 `/mini-player` 那一条路由是两件事
 //
 // `nowplaying.go` 的 `viewNowPlaying` 是**主窗口里的一页**（歌名 + 歌词），
 // 它在路由表里占一条（`router.go` 的第 13 条）。这一票要的是 Biu 的
-// `electron/mini-player.ts`：**另一个窗口**——320×100、无边框、透明、置顶，
+// `electron/mini-player.ts`：**另一个窗口**——无边框、透明、置顶，
 // 停在屏幕一角，音乐还在放，界面上还控制得了。
 //
 // Biu 的切法是「主窗口 hide() + 开一个 mini 窗口」，两个窗口互斥
@@ -39,33 +39,34 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+	tclean "github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
-// 迷你播放器窗口的尺寸，照 Biu 的 `electron/mini-player.ts:16-17`：
-//
-//	width: 320, height: 100
+// 迷你播放器窗口的尺寸：Biu 那边是 `electron/mini-player.ts:16-17` 的
+// `width: 320, height: 100`，而票 #357 的重设计（DESIGN.md §零）把它压成了
+// **320×84**——封面 72、右列三行（歌名 / 进度 / 控制）。
 //
 // ⚠️ **不许放大**：它要的是「不占屏幕但还能控制播放」（SPEC 需求 43），而 320
 // 正是 Biu 把封面和右边那一列塞下之后仍然不显挤的宽度。
 const (
 	miniWidth  = 320
-	miniHeight = 100
+	miniHeight = 84
 
 	// miniPad 是外圈留白。Biu 那边留白来自圆角那一圈，这里留 6：让圆角那半圈
 	// 透明边看得出来（否则「窗口是透明的」这件事在画面上一点都看不出来）。
 	miniPad = space.Px6
 
 	// miniCoverCol 是封面那一列的宽。Biu 那边是 100（`CoverView` 的 `w-[100px]`），
-	// 现在也是 100（票 #168 / G10），右边那一列剩 220。
+	// 票 #357 的重设计把它收窄到 **84**（封面 72），右边那一列剩 224。
 	//
-	// ⚠️ **100 是算得出来的那一档**：封面 88 = 100 − 左右各一个 miniPad，而窗高
-	// 100 − 上下各一个 miniPad 也正好是 88——**封面把这一列的高度填满**，上下
-	// 各留 6 的卡片内边距。上一版这一列是 64（封面 52），那是「320 宽塞不下
+	// ⚠️ **84 也是算得出来的那一档**：封面 72 = 84 − 左右各一个 miniPad，而窗高
+	// 84 − 上下各一个 miniPad 也正好是 72——**封面把这一列的高度填满**，上下
+	// 各留 6 的卡片内边距。再早一版这一列是 64（封面 52），那是「320 宽塞不下
 	// 100 宽的封面、还得给歌名留地方」时的将就；控制键图标化之后那笔账已经勾销
-	// （三个键一共 100 宽，见 `viewMiniTransport`）。
-	miniCoverCol = 100
+	// （三个键一共 84 宽，见 `viewMiniTransport`）。
+	miniCoverCol = 84
 	// miniCover 是封面本身的边长 = miniCoverCol - 左右各一个 miniPad
 	//（封面那一列的内边距是 `Padding(miniPad, miniPad, miniPad, miniPad)`——
 	// 四边一样，封面正好填满那个内容框）。
@@ -73,21 +74,34 @@ const (
 
 	// miniTitleMinW 是歌名那一格最少留多宽。
 	//
-	// ⚠️ **没有它，歌名会被挤成 0 宽**：右边那一列的宽是 320 - 100（封面）-
-	// 12（列的内边距）= 208，扣掉音量 80、退出那个键 28 和两道 6 的缝之后剩 88。
-	// 够画七八个字，而**界面上看不出坏了**（字还在那儿，只是没了）。60 是「还
+	// ⚠️ **没有它，歌名会被挤成 0 宽**：右边那一列的宽是 320 - 84（封面）-
+	// 12（列的内边距）= 224，扣掉退出那个键 22 和一道 6 的缝之后剩 196。
+	// 够画一串字，而**界面上看不出坏了**（字还在那儿，只是没了）。60 是「还
 	// 认得出是哪首」的下限——留到 60 是给更窄的窗口兜底。
 	miniTitleMinW = 60
 
 	// miniVolumeW 是音量条的宽度。拿 80 是「还能看出音量是一到几成」的下限。
 	miniVolumeW = 80
 
+	// miniMuteIconW 是音量图标那一枚的点击区边长。
+	//
+	// ⚠️ **它和另外三枚键一样是 28**（图形 18 + 每边 5）：控制那一行是
+	// 「上一首 / 播放 / 下一首 / 静音图标 / 音量滑块」，右边那一列 224 宽，
+	// 三枚键 84 + 静音图标 28 + 音量滑块 80 + 五道 6 的缝 30 = 222 —— **剩
+	// 2 像素**。所以这一枚只能是 28，再宽就挤掉了（挤掉的是音量滑块，而它
+	// 80 宽是票 #168 定的：「还能看出音量是一到几成」的下限）。
+	//
+	// ⚠️ **它在第三行（音量滑块旁边），不在第一行**：静音图标说的是**音量**，
+	// 而音量滑块在第三行右端——图标和它隔了一行，就成了「窗里有个喇叭，
+	// 不知道管谁」。
+	miniMuteIconW = 28
+
 	// miniBackBtnW 是「回到主窗口」那个键（`iconExpand`）的点击区边长：
-	// 18 的图标 + 每边 5。
+	// **14 的图标 + 每边 4**。
 	//
 	// 上游那一枚是 16 的 `RiExpandDiagonalLine`（`pages/mini-player/index.tsx:203-212`），
-	// 我们取 18 是为了和旁边那两个同尺寸——同一行里的图标键忽大忽小，看着像漏画了。
-	miniBackBtnW = 28
+	// 票 #357 的重设计把它收成 14——它跟歌名挤在同一行，宽了就顶掉歌名。
+	miniBackBtnW = 22
 
 	// miniStepW 是上一首 / 下一首的点击区边长：18 的图标 + 每边 5
 	// （上游 `size={18}`，`pages/mini-player/index.tsx:176,189`）。
@@ -97,12 +111,14 @@ const (
 	// 不再有「被截成偏旁」这回事（见 `TestTheMiniKeysAreIcons`）。
 	miniStepW = 28
 
-	// miniPlayW 是播放 / 暂停那个键的点击区边长：28 的图标 + 每边 2
-	// （上游 `size={28}`，`pages/mini-player/index.tsx:186`）。
+	// miniPlayW 是播放 / 暂停那个键的点击区边长：**24 的图标 + 每边 2**
+	// （上游那个图标是 28 的，`pages/mini-player/index.tsx:186`；票 #357 的
+	// 重设计把它和左右那两枚拉平到 28）。
 	//
-	// 它是这一行里最大的一枚，在 320×100 那个小窗里当视觉重心——和播放条上
-	// 那一枚（48）是同一个安排，只是尺寸照上游的迷你播放器。
-	miniPlayW = 32
+	// 它和另外三枚键一样是 28 的点击区，但**画的是实心圆**（`transportIcon`），
+	// 所以仍然是这一行的视觉重心——和播放条上那一枚（44×44 的实心强调色圆）是
+	// 同一个安排，只是尺寸照上游的迷你播放器。
+	miniPlayW = 28
 )
 
 // MiniWindowOptions 是迷你播放器窗口的样子。view 是这个窗口每帧要画的界面。
@@ -153,7 +169,11 @@ const (
 //	Frameless + DisableResize        IsMaximized=true    ← 存不下来
 //	Frameless + 去掉 DisableResize   IsMaximized=false   ← 存得下来
 //	不 Frameless + DisableResize     IsMaximized=true    ← 与无边框无关
-//	min==max==320×100（钉死大小）     IsMaximized=true    ← 也钉不住
+//	min==max（钉死大小）             IsMaximized=true    ← 也钉不住
+//
+// ⚠️ 最后一行的结论**与具体数值无关**（那一轮量的是当时那扇窗的尺寸，票 #357
+// 之后窗是 320×84）：钉死大小就是「不可缩放」，而不可缩放的窗口 `isZoomed`
+// 恒为真——机制一样，结论一样。
 //
 // 另外两条试过也没用：`w.Unmaximize()` 对不可缩放的窗口是空操作；建完再
 // `SetResizable(true) → Unmaximize() → SetResizable(false)`，改回去的那一下
@@ -203,7 +223,7 @@ func MiniWindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 		// ⚠️ **这里故意不给 `DisableResize`，而 Biu 那边是 `resizable: false`
 		// ——照抄它会让「拖到哪就记到哪」整个失效。** 机制见函数上面那一段。
 		//
-		// 「不能缩」改用 **MinWidth/MinHeight** 保证：用户永远缩不到比 320×100
+		// 「不能缩」改用 **MinWidth/MinHeight** 保证：用户永远缩不到比 320×84
 		// 更小，那三行控件也就永远不会被裁掉。能往大拖——那没有后果，右边那一列
 		// 是 `Grow(1)`，宽出来的部分全给歌名。
 		MinWidth:  miniWidth,
@@ -481,6 +501,9 @@ func (s *Shell) releaseMini() {
 // 控件，而 MyGo 每帧开头把主题重置成跟随系统那份，见 theme.go）。
 func (s *Shell) viewMini(c *ui.Context) {
 	s.applyFrameTheme(c)
+	// 封面缓存要知道「新的一帧开始了」——理由见 `Shell.viewMain` 里那一句
+	// （票 #358）。迷你窗口和主窗口共用一份缓存，两边各数各的帧。
+	s.images.BeginFrame(c.Now())
 	// 应用内快捷键：**和主窗口走同一条**（`viewShortcuts`），次序也一样（主题之后、
 	// 其它每帧钩子之前）。
 	//
@@ -524,13 +547,13 @@ func (s *Shell) viewMini(c *ui.Context) {
 // viewMiniCover 是左边那一列封面。
 //
 // Biu 那边那一列是 `h-full w-[100px]`，封面**顶到窗口上下边**（`pages/mini-player/
-// index.tsx:28`）。这里是同样的形状——列占满整窗高——而封面是 88×88 的方图
-// （`miniCoverCol` 100 减去左右各一个 `miniPad`），在列里垂直居中。
+// index.tsx:28`）。这里是同样的形状——列占满整窗高——而封面是 72×72 的方图
+// （`miniCoverCol` 84 减去左右各一个 `miniPad`），在列里垂直居中。
 //
-// ⚠️ **88 正好也是窗高减去上下各 6**：封面把这一列的高度填满，上下各留 6 的
+// ⚠️ **72 正好也是窗高减去上下各 6**：封面把这一列的高度填满，上下各留 6 的
 // 卡片内边距（那一圈透出桌面去，圆角才看得出来，见 `MiniWindowOptions` 的
-// `Transparent` 那一段）。上一版是 52×52（列 64），小得看不出是哪首歌——
-// 票 #168 / G10 要的是上游那个 100。
+// `Transparent` 那一段）。票 #168 / G10 要的是上游那个 100，票 #357 的重设计
+// 收窄到 72——再早一版是 52×52（列 64），小得看不出是哪首歌。
 //
 // ⚠️ 有封面才画。没歌时 Biu 那边是 `if (!cover) return null`——右边那一列铺满
 // 整窗。一个空框在那儿比没有更让人以为图加载坏了。
@@ -540,7 +563,7 @@ func (s *Shell) viewMiniCover(c *ui.Context, st app.State) {
 	}
 	ui.Row(c).Key("mini-cover-col").Width(miniCoverCol).Height(miniHeight).
 		Padding(miniPad, miniPad, miniPad, miniPad).AlignItems(ui.Center).Children(func() {
-		imgcache.View(c, s.images, st.CoverURL, miniCover, miniCover)
+		imgcache.ViewTitled(c, s.images, st.CoverURL, st.Title, miniCover, miniCover)
 	})
 }
 
@@ -552,13 +575,14 @@ func (s *Shell) viewMiniCover(c *ui.Context, st app.State) {
 // 位置的「退出」。没有 key 的话这些换位会让后面每个控件的状态整体错配一格
 // ——而**界面上看不出坏了**：按钮都还在那儿，只是按「上一首」按到了「下一首」。
 func (s *Shell) viewMiniControls(c *ui.Context, st app.State, t *ui.Theme) {
-	// ⚠️ **垂直居中**而不是顶对齐：三行的内容一共 84 高（标题行 28 + 进度 16 +
-	// 控制 32 + 两道 4 的缝），而这一列有 88（100 减去上下各 6）——居中之后上下
-	// 各空 2。顶对齐的话底下空 10、上面空 6，整块看上去是往下坠的——而它贴在
-	// 屏幕边上，那 10 像素的空白会显得像没画完。
+	// ⚠️ **垂直居中**而不是顶对齐：三行的内容一共 72 高（标题行 20 + 进度 12 +
+	// 控制 28 + 两道 6 的缝），而这一列也有 72（84 减去上下各 6）——**一点不剩**。
+	// 今天居中和顶对齐画出来一样，但内容一旦多出几像素（多一行、字号放大），
+	// 居中就是那几像素分摊到上下，而顶对齐全堆在底下——整块看上去是往下坠的，
+	// 而它贴在屏幕边上，那几像素的空白会显得像没画完。
 	ui.Column(c).Key("mini-controls").Grow(1).
 		Padding(miniPad, miniPad, miniPad, miniPad).Justify(ui.Center).
-		Gap(space.Px4).Children(func() {
+		Gap(space.Px6).Children(func() {
 		s.viewMiniTitleRow(c, st, t)
 		s.viewMiniProgress(c, st)
 		s.viewMiniTransport(c, st)
@@ -567,9 +591,9 @@ func (s *Shell) viewMiniControls(c *ui.Context, st app.State, t *ui.Theme) {
 
 // viewMiniTitleRow 是第一行：歌名、音量、回到主窗口。
 func (s *Shell) viewMiniTitleRow(c *ui.Context, st app.State, t *ui.Theme) {
-	ui.Row(c).Key("mini-title-row").FillWidth().Gap(space.Px6).AlignItems(ui.Center).
+	ui.Row(c).Key("mini-title-row").FillWidth().Height(20).Gap(space.Px6).AlignItems(ui.Center).
 		Children(func() {
-			title := st.Title
+			title := tclean.Clean(st.Title).Title
 			if !st.HasTrack {
 				// 抄 Biu 的 `暂无播放内容`（`pages/mini-player/index.tsx:128`）。
 				title = nothingPlaying.Title
@@ -579,36 +603,11 @@ func (s *Shell) viewMiniTitleRow(c *ui.Context, st app.State, t *ui.Theme) {
 			ui.Text(c, title).Key("mini-title").Grow(1).MinWidth(miniTitleMinW).
 				FontSize(scale.Font(c, scale.Size13)).MaxLines(1).Ellipsis("…").TextColor(textColor(t, st.HasTrack))
 
-			// 音量在这一行而不是控制那一行：Biu 那边没有音量，而控制那一行只摆
-			// 三个键（上一首 / 播放 / 下一首），一行里再塞一根滑块会让那三个键
-			// 和它挤成一团（账在 `viewMiniTransport`）。
-			// ⚠️ **key 装在 `c` 上、不是装在 `Slider` 返回的那个元素上**：滑块建出来
-			// 的那一刻它的状态就初始化了，而 `Element.Key` 只认「还没初始化状态」的
-			// 元素（`mygo/ui/element.go:658` 直接 panic）。`Context.Key` 是为这类复合
-			// 控件准备的：它在控件被建出来**之前**把身份交给下一个。
-			//
-			// ⚠️ **走自绘那一颗（`selfSlider`），不走框架的 `ui.Slider`**（票 #241 /
-			// 报告 F-21）：框架那一颗把填充色写死成 `t.Accent`，于是这根音量滑块
-			// 一直是主色绿的实心填充——320×100 那扇窗里最大的一块颜色（0.97%），
-			// 比同窗那条播放位置（主要的）还响。现在填过的那一段平时是次要色，
-			// 悬停 / 按下才变主色（`knobMiniVolumeLook` 的那一层）。
-			//
-			// 🔴 **它有一枚悬停提示**（票 #244 / UX 报告 §2 的 B5）：这扇窗里
-			// 「音量」和「播放进度」长得几乎一样（都是 16 高的圆角条），而画面上
-			// 没有任何一个字说明哪一根是哪个——同一扇窗里「退出」那一枚倒是有
-			// 提示。提示说「音量 80%」，指针停上去就知道自己在拖什么。
-			vol := st.Volume
-			volSlider := selfSlider(c.Key("mini-volume"), &vol, 0, 1, knobMiniVolumeLook).Width(miniVolumeW).
-				Height(16).Label("音量")
-			if s.miniTip(c, volSlider, "音量 "+volPercent(st.Volume)).Changed() {
-				s.app.SetVolume(vol)
-			}
-
 			// 回到主窗口。上游是同一样东西的「展开」图标
 			// （`RiExpandDiagonalLine`，`pages/mini-player/index.tsx:203-212`）——
 			// 迷你 ↔ 主窗口是同一个开关的两头，图标说的是那件事。
-			if s.withTip(c, flatIconButton(c, iconExpand, "退出", 18).
-				Key("mini-back").Size(miniBackBtnW, miniBackBtnW).Padding(space.None, space.Px5),
+			if s.withTip(c, flatIconButton(c, iconExpand, "退出", 14).
+				Key("mini-back").Size(miniBackBtnW, miniBackBtnW).Padding(space.None, space.Px4),
 				"关掉迷你播放器，回到主窗口").Clicked() {
 				if s.toggleMini != nil {
 					s.toggleMini()
@@ -617,14 +616,18 @@ func (s *Shell) viewMiniTitleRow(c *ui.Context, st app.State, t *ui.Theme) {
 		})
 }
 
-// miniTip 是迷你窗第一行那些控件的悬停提示：**摆在下面**。
+// miniTip 是迷你窗**最下面那一行**那两枚（静音键、音量滑块）的悬停提示：
+// **请求摆在下面**（框架默认那一位是「上面」，`tooltip.go` 的 `drawTip`）。
 //
-// 🔴 **默认那一位是「上面」**（`tooltip.go` 的 `tipAt`），而迷你窗只有 320×100：
-// 第一行在 y=14..30，摆在上面的话提示整个落在窗口之外——**一个字都看不见**，
-// 而「看不见的提示」和「没有提示」在画面上是一回事。
-//
-// 摆在下面的话它落在 y=30..50（盖住进度条那一段，但还在窗内）——指针停在音量
-// 滑块上的时候，用户要读的就是那一行。
+// ⚠️ **「摆在下面」这个请求，框架多半会翻过来**：MyGo 把摆不下的提示翻到锚点
+// 的另一边（`mygo/ui/layout.go` 的 `alongTarget`：「on the other side of
+// target, or the other way along it, where that overflows the window less」）。
+// 这一列下面只剩 84 − 78 = 6 像素，于是它翻上去、**落在锚点的上沿之上**——
+// **还在窗内**（实测画面上那一块深色底：静音键那枚在 y=24..47、音量滑块那枚
+// 在 y=30..53），盖住的是进度条那一段。
+// ⚠️ **别照字面读「摆在下面」**：在默认那个 320×84 的窗里，它其实落在**上面**。
+// 而窗口被用户拖大之后下面就摆得下了，那时候它才真的落在锚点下面——那一段
+// 是空的（迷你窗的内容只有三行，下面留着白）。
 //
 // ⚠️ **不看按下**（`watchPress` = false）：框架那份提示是「按过它了就收起」
 // （上游的 closeOnClick），而这里拖的是一根滑块——按下去那一刻提示就收起来，
@@ -650,7 +653,7 @@ func (s *Shell) viewMiniProgress(c *ui.Context, st app.State) {
 
 	// key 装在 `c` 上：滑块的状态是建出来那一刻就初始化的（见上面那一条）。
 	sl := ui.Slider(c.Key("mini-progress"), &s.miniScrub, 0, 1).Grow(1).
-		Height(16).Label("播放进度").Disabled(!known)
+		Height(12).Label("播放进度").Disabled(!known)
 	switch held := sl.Pressed(); {
 	case held && !s.miniHeld:
 		s.miniHeld = true
@@ -665,9 +668,11 @@ func (s *Shell) viewMiniProgress(c *ui.Context, st app.State) {
 
 // viewMiniTransport 是第三行：上一首、播放/暂停、下一首。
 //
-// ⚠️ **这一行是 320 宽那一笔账的全部**：三个键 28 + 32 + 28 = 88，两道 6 的
-// 缝 12，一共 100，而右边那一列的宽是 320 - 100（封面列）- 12（列的内边距）
-// = 208。余量 108。
+// ⚠️ **这一行是 320 宽那一笔账的全部**：这一列的宽是 320 - 84（封面列）-
+// 12（列的内边距）= 224，而这一行里摆着六样东西——上一首 / 播放 / 下一首各
+// 28、静音图标 28、音量滑块 80，加五道 6 的缝 30，一共 222——**只剩 2 像素**
+// 给中间那个撑开的空隙（`ui.Spacer(c).Grow(1)`）。这一笔账的另一头在
+// `miniMuteIconW` 的注释里。
 //
 // ⚠️ **这一行以前是一笔紧账**：三个汉字键 64 + 72 + 64 = 200，余量只有 32，
 // 再窄一点就有一个键被画成「上一…」——而**无头 Tester 读的是控件的文本**，被截
@@ -675,14 +680,15 @@ func (s *Shell) viewMiniProgress(c *ui.Context, st app.State) {
 // 会再被裁成偏旁），`TestTheMiniKeysAreIcons` 断的是「这三个键的框就是图标键的
 // 框，不是被挤扁的文字键」。
 //
-// ⚠️ **余量出来了就得居中**（`Justify(ui.Center)`）：左对齐的话这三个键挤在
-// 208 宽的左边 100 像素里、右边空 108，**播放键落在窗口左侧**，而它上面那条进度
-// 条横跨整列——两颗「中心」对不上，一眼就是「没排过版」。上游那一行是
-// `justify-between`，因为它那三组（模式 / 控制 / 展开）各占一头；我们这一行只有
-// 中间那一组，居中就是同一个意思：播放键在进度条中点底下。
+// ⚠️ **那个空隙是「音量靠右」的那一半**（票 #357 之后）：上游那一行是
+// `justify-between`，它那三组（模式 / 控制 / 展开）各占一头；我们这一行左边
+// 三枚控制键、右边音量滑块，中间靠那个空隙分开。
+//
+// ⚠️ **别拿「播放键在进度条中点底下」当判据**：进度条横跨 90..314，而播放键
+// 在 x=124..152——**偏左**（上游的迷你播放器没有音量那一段，它的播放键是在
+// 中间的）。视觉重心靠的是它那枚**实心圆**图形，不是它的位置。
 func (s *Shell) viewMiniTransport(c *ui.Context, st app.State) {
 	ui.Row(c).Key("mini-transport").FillWidth().Gap(space.Px6).AlignItems(ui.Center).
-		Justify(ui.Center).
 		Children(func() {
 			// 能不能按看的是队列，和播放条上那两个键是同一个判据（`viewStepButtons`）。
 			if s.withTip(c, flatIconButton(c, iconPrev, "上一首", 18).
@@ -696,7 +702,88 @@ func (s *Shell) viewMiniTransport(c *ui.Context, st app.State) {
 				Disabled(!s.app.CanNext()), "下一首").Clicked() {
 				s.app.Next()
 			}
+			ui.Spacer(c).Grow(1)
+			s.viewMiniVolume(c, st)
 		})
+}
+
+// viewMiniVolume 是控制那一行右端的音量滑块（84 高的窗里放不下第四行，设计规范 v0.1 §7.6）。
+func (s *Shell) viewMiniVolume(c *ui.Context, st app.State) {
+	// 音量图标：和播放条上那一枚**同一套画法**（`volumeIcon` 三档），
+	// 所以静音的时候两扇窗画的是同一张图。
+	//
+	// 🔴 **它必须在这儿，而不能只靠滑块**（票 #345 / BMG-180 评审）：
+	// 静音是**它自己的一格**，音量那一格一动不动（用户设 20%，静音之后
+	// 滑块仍然停在 20%）——于是「滑块停在 20%」这件事**既可能是音量
+	// 20%，也可能是静音**，光看滑块分不出来。而这扇窗里原来**一个字**
+	// 都不说静音（音量滑块那枚提示写的是「音量 20%」）。
+	//
+	// 图标这一枚同时是**可点的**：点了就是静音 / 取消静音（和播放条那枚
+	// 同一个动作，`aria-label` 也一样——上游 `isMuted ? "取消静音" : "静音"`）。
+	// 不做可点的话，这扇窗里就**没法取消静音**了（滑块只改音量，改不了
+	// 静音那一格）。
+	//
+	// ⚠️ **图标是「音量三档」而不是一枚专门的静音图**：那是 DESIGN.md
+	// §六 播放条那一节定的画法（上游 `music-volume` 同一套），而这张
+	// 图标**在主窗口已经画了**——两扇窗用同一个 `volumeIcon`，不另起一套。
+	//
+	// ⚠️ **「现在没声」的判据要和播放条那枚一样**（`st.Muted || st.Volume <= 0`）：
+	// 「音量 0」在听感上也是没声（`App.SetVolume` 把 0 记成静音，而老设置文件
+	// 里只有 `volume: 0` 没有 `isMuted`——两格分开恢复，于是那种文件恢复出来
+	// 是**音量 0 且没静音**）。
+	//
+	// 只看 `st.Muted` 的话，这一档下这一枚会叫「静音」（可按下去实际是
+	// **取消**静音、音量放回一半），而播放条那枚叫「取消静音」——**两扇窗
+	// 对同一个状态说两个话**，读屏软件读到的名字和按下去的结果也相反。
+	muted := st.Muted || st.Volume <= 0
+	muteLabel := "静音"
+	if muted {
+		muteLabel = "取消静音"
+	}
+	muteIcon := volumeIcon(st.Volume, st.Muted)
+	if s.miniTip(c, flatIconButton(c, muteIcon, muteLabel, 18).
+		Key("mini-mute").Size(miniMuteIconW, miniMuteIconW).Padding(space.None, space.Px5),
+		muteLabel).Clicked() {
+		s.toggleMute()
+	}
+
+	// 音量在这一行而不是控制那一行：Biu 那边没有音量，而控制那一行只摆
+	// 三个键（上一首 / 播放 / 下一首），一行里再塞一根滑块会让那三个键
+	// 和它挤成一团（账在 `viewMiniTransport`）。
+	// ⚠️ **key 装在 `c` 上、不是装在 `Slider` 返回的那个元素上**：滑块建出来
+	// 的那一刻它的状态就初始化了，而 `Element.Key` 只认「还没初始化状态」的
+	// 元素（`mygo/ui/element.go:658` 直接 panic）。`Context.Key` 是为这类复合
+	// 控件准备的：它在控件被建出来**之前**把身份交给下一个。
+	//
+	// ⚠️ **走自绘那一颗（`selfSlider`），不走框架的 `ui.Slider`**（票 #241 /
+	// 报告 F-21）：框架那一颗把填充色写死成 `t.Accent`，于是这根音量滑块
+	// 一直是主色绿的实心填充——320×84 那扇窗里最大的一块颜色（0.97%），
+	// 比同窗那条播放位置（主要的）还响。现在填过的那一段平时是次要色，
+	// 悬停 / 按下才变主色（`knobMiniVolumeLook` 的那一层）。
+	//
+	// 🔴 **它有一枚悬停提示**（票 #244 / UX 报告 §2 的 B5）：这扇窗里
+	// 「音量」和「播放进度」长得几乎一样（一根 16 高、一根 12 高的圆角条，
+	// 都在最后一行），而画面上没有任何一个字说明哪一根是哪个——同一扇窗里
+	// 「退出」那一枚倒是有提示。提示说「音量 80%」，指针停上去就知道自己在
+	// 拖什么。
+	//
+	// ⚠️ **提示在静音时要改口**：「音量 20%」这句话在静音时是**误导**——
+	// 那一格记的是用户设的音量，可现在**一点声都没有**。图标已经说了
+	// 「静音」，而提示是**指针停在滑块上**时读的那一句，它也得说真话。
+	//
+	// ⚠️ **主窗口那一侧不改**（播放条音量浮层里的百分比照旧是那一档）：
+	// 那一扇窗的图标就在浮层旁边，说的是同一件事；这里这扇窗的滑块是
+	// **常驻**的，提示是唯一能读到「现在没声」的一行字。
+	vol := st.Volume
+	volTip := "音量 " + volPercent(st.Volume)
+	if st.Muted {
+		volTip = "已静音（音量 " + volPercent(st.Volume) + "）"
+	}
+	volSlider := selfSlider(c.Key("mini-volume"), &vol, 0, 1, knobMiniVolumeLook).Width(miniVolumeW).
+		Height(16).Label("音量")
+	if s.miniTip(c, volSlider, volTip).Changed() {
+		s.app.SetVolume(vol)
+	}
 }
 
 // viewMiniPlay 是播放 / 暂停。
@@ -715,7 +802,7 @@ func (s *Shell) viewMiniPlay(c *ui.Context, st app.State) {
 	const style = miniPlayW
 
 	if st.Playing {
-		if s.withTip(c, flatIconButton(c, transportIcon(true), transportLabel(true), 28).
+		if s.withTip(c, flatIconButton(c, transportIcon(true), transportLabel(true), 24).
 			Key("mini-play").Size(style, style).Padding(space.None, space.Px2), "暂停").Clicked() {
 			s.app.Toggle()
 		}
@@ -724,7 +811,7 @@ func (s *Shell) viewMiniPlay(c *ui.Context, st app.State) {
 	// 没歌时「播放」是灰的：Biu 那边是 `isDisabled={!title}`
 	// （`pages/mini-player/index.tsx:139`）。一个亮着而按了没反应的键比一个灰的
 	// 键更容易让人以为坏了。
-	if s.withTip(c, flatIconButton(c, transportIcon(false), transportLabel(false), 28).
+	if s.withTip(c, flatIconButton(c, transportIcon(false), transportLabel(false), 24).
 		Key("mini-play").Size(style, style).Padding(space.None, space.Px2).
 		Disabled(!st.HasTrack), "播放").Clicked() {
 		s.app.Toggle()

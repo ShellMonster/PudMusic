@@ -38,6 +38,14 @@ func MountSettings(a *app.App) error {
 	// 挂在最前面，下面拿不到目录直接返回时它照样兜着：那时没有 store，
 	// FlushSettings 什么都不做。
 	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
+		// 「上次听到哪儿」这一格：**退出前强制落一次**（见
+		// `internal/app/playback_state.go`）。
+		//
+		// ⚠️ **它排在 flush 前面**：flush 落的是「此刻设置里是什么」，而这一格
+		// 是刚刚才写进去的——顺序反了的话，退出时最后那一下就丢了。
+		//
+		// 丢了的症状是「重启之后回到空队列」，用户只会觉得「这应用记不住东西」。
+		a.SavePlayback()
 		if err := a.FlushSettings(); err != nil {
 			log.Printf("biu: 退出时保存设置失败：%v", err)
 		}
@@ -75,12 +83,31 @@ func (s *Shell) reportSettingsError() {
 	s.addToast("设置："+strings.TrimPrefix(err.Error(), "app: "), notice.Danger)
 }
 
+// themePresets 是主题方案那几档（含显式的「经典」，放最后），顺序就是从左到右的顺序。
+// 名字照设计规范 v0.1：暖纸·赤陶 / 暮光·琥珀 / 柔雾·蜜桃，按钮上只放前两个字。
+var themePresets = []struct {
+	preset app.ThemePreset
+	label  string
+}{
+	{app.ThemePresetWarmPaper, "暖纸"},
+	{app.ThemePresetDuskAmber, "暮光"},
+	{app.ThemePresetSoftPeach, "柔雾"},
+	{app.ThemePresetClassic, "经典"},
+}
+
 // themeModes 是三档主题，顺序就是从左到右的顺序。设置页那三个按钮用。
+//
+// ⚠️ **每一档都带一枚图标**（上游那一排是「图标 + 文字」，`system-settings.tsx:
+// 105-153`：跟随系统 `RiComputerLine`、浅色 `RiSunLine`、深色 `RiMoonLine`，
+// 都是 `size={18}`）。图标名是 `icons.go` 里的常量——「跟随系统」那一枚是
+// 这一票新加的资源（`Device/computer-line.svg`），照上游 RemixIcon 的目录
+// 放进去，许可证那一份没变（还是 Remix Icon License，见 `internal/licensing`）。
 var themeModes = []struct {
 	mode  app.ThemeMode
 	label string
+	icon  string
 }{
-	{app.ThemeModeSystem, "跟随系统"},
-	{app.ThemeModeLight, "浅色"},
-	{app.ThemeModeDark, "深色"},
+	{app.ThemeModeSystem, "跟随系统", iconComputer},
+	{app.ThemeModeLight, "浅色", iconSun},
+	{app.ThemeModeDark, "深色", iconMoon},
 }

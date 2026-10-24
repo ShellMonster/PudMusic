@@ -433,7 +433,7 @@ func TestEveryVolumeLevelHasItsIcon(t *testing.T) {
 	}
 	seen := map[string]float64{}
 	for _, c := range cases {
-		if got := volumeIcon(c.volume); got != c.want {
+		if got := volumeIcon(c.volume, false); got != c.want {
 			t.Errorf("音量 %v 配的图标是 %q，want %q", c.volume, got, c.want)
 		}
 		if icon(c.want) == nil {
@@ -443,6 +443,23 @@ func TestEveryVolumeLevelHasItsIcon(t *testing.T) {
 			t.Errorf("音量 %v 和 %v 配的是同一张图标 %q", c.volume, prev, c.want)
 		}
 		seen[c.want] = c.volume
+	}
+}
+
+// TestMutedAlwaysDrawsTheMuteIcon 钉住「静音」这一格自己说了算。
+//
+// ⚠️ **静音的时候音量那一格记的还是用户设的值**（票 #311）：用户为了不吵把音量
+// 调到 20%，按了静音——取消静音放回去的就是 20%，落盘的也是 20%。
+//
+// 而画面上这时候要画的是**静音那张**：不靠「音量是不是 0」去猜（用户自己把滑块
+// 拉到 0 也是静音，但不是「按了静音」）。
+func TestMutedAlwaysDrawsTheMuteIcon(t *testing.T) {
+	if got := volumeIcon(0.2, true); got != iconVolumeMute {
+		t.Errorf("静音的时候画的图标是 %q，want %q", got, iconVolumeMute)
+	}
+	// 没静音的时候那一档还是照音量走（0.2 是「小」那一档）。
+	if got := volumeIcon(0.2, false); got != iconVolumeMid {
+		t.Errorf("没静音、音量 0.2 的时候画的图标是 %q，want %q", got, iconVolumeMid)
 	}
 }
 
@@ -783,27 +800,20 @@ func TestTheHitAreaIsBiggerThanTheGlyph(t *testing.T) {
 		col = append(col, h.tt.Image().RGBAAt(round32(play.X)-3, round32(play.Y)+dy))
 	}
 	bg := modeOf(col)
-	lo, hi, n := inkExtent(h.tt.Image(), play, bg)
+	_, _, n := inkExtent(h.tt.Image(), play, bg)
 	if n == 0 {
 		t.Fatalf("播放键上没画东西：%q", h.tt.Texts())
 	}
-	// (1) 图形的外接框严格小于按钮框。
-	if float32(hi-lo+1) >= play.W {
-		t.Errorf("播放键的图形 %.0f 宽，并不小于按钮 %.0f——它把盒子填满了",
-			float32(hi-lo+1), play.W)
-	}
-	// (3) 留白每边至少 3 像素，且画面上那个框真的是 hit 那么大。
-	if slack := (play.W - float32(hi-lo+1)) / 2; slack < wantSlack {
-		t.Errorf("播放键的图形 %.0f、盒子 %.0f，每边只留 %.1f 像素（want ≥ %d）——"+
-			"指针得瞄得很准才按得中", float32(hi-lo+1), play.W, slack, wantSlack)
-	}
-	// 盒子真的是 48×48（上游 `size-12 min-w-12`）。
+	// 主播放键是实心圆（设计规范 §5），圆的直径就是盒子，**没有「图形外的留白」**：
+	// 原来「图形严格小于盒子、每边留 ≥ 3」是 Biu 无底图标键的判据，对实心圆不成立。
+	// 图形（三角 / 竖条）在圆里居中，由 `TestThePlayKeyIsBigEnoughToHit` 钉。
+	// 盒子真的是 44×44（设计规范 §5）。
 	//
-	// ⚠️ **写的是字面的 48，不是 `iconHitPlay`**：写成常量的话，把常量改回 58
-	// 这一条就照样绿——而「48」是上游源码里的那个数，得由这一条钉住。
-	const wantPlayBox = 48
+	// ⚠️ **写的是字面的 44，不是 `iconHitPlay`**：写成常量的话，把常量改回 48
+	// 这一条就照样绿，得由这一条钉住。
+	const wantPlayBox = 44
 	if d := absF(play.W-wantPlayBox) + absF(play.H-wantPlayBox); d > 2 {
-		t.Errorf("播放键在画面上是 %.1fx%.1f，而上游那一枚的盒子是 %d×%d——"+
+		t.Errorf("播放键在画面上是 %.1fx%.1f，而规范的盒子是 %d×%d——"+
 			"布局没用上那个尺寸", play.W, play.H, wantPlayBox, wantPlayBox)
 	}
 
@@ -911,9 +921,10 @@ func TestTheRoundKeyKeepsItsEdge(t *testing.T) {
 	for _, side := range []string{"左边", "右边", "上边", "下边"} {
 		at := edges[side]
 		p := img.RGBAAt(clampX(img, at[0]), clampY(img, at[1]))
-		if distinctPixel(p, bg) {
-			t.Errorf("%s中点 (%d,%d) 是 %v，和底色 %v 不一样——"+
-				"图形顶到边了，那一圈没有内边距", side, at[0], at[1], p, bg)
+		// 实心圆：边中点往里就是强调色底，必须和播放条底色不一样（圆撑满了盒子）。
+		if !distinctPixel(p, bg) {
+			t.Errorf("%s中点 (%d,%d) 是 %v，和底色 %v 一样——"+
+				"实心圆没有撑满盒子", side, at[0], at[1], p, bg)
 		}
 	}
 }

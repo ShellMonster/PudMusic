@@ -257,9 +257,9 @@ func TestThePagesThatDeliberatelyDoNotFollowIt(t *testing.T) {
 			open: func(t *testing.T) (*mygoui.Tester, *Shell) {
 				s, tt := newShell(t)
 				s.drawerOpen = true
-				for range 3 {
-					tt.Frame()
-				}
+				// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板
+				// 还在窗口外面（它从右边滑进来）。
+				settleDrawer(t, s, tt)
 				return tt, s
 			},
 			why:     "它不是一页，是播放时拉出来的一个抽屉；而且它的**行高定死在 64**（Biu 的 RowHeight）——「定位当前播放」是 `targetIndex*64`，改了行高那个按钮每次都停在差几像素的地方",
@@ -313,6 +313,10 @@ func TestThePagesThatDeliberatelyDoNotFollowIt(t *testing.T) {
 				for range 3 {
 					tt.Frame()
 				}
+				// ⚠️ **推钟**：切 Tab 有过渡（票 #368），而 Tester 的钟站着不动——
+				// 不推钟的话这一屏停在过渡的第一帧上（内容还在淡入），而这一档
+				// 量的正是新歌速递那一块的几何。
+				settleHome(tt)
 				return tt, s
 			},
 			why:     "它是首页顶部的一块**横向推荐位**，行数是按窗口高和格子宽算出来的（`newMusicRowsAt`），翻页是两枚图标箭头——它有自己的几何，跟「一屏能看到更多歌」没关系",
@@ -522,13 +526,23 @@ func TestTheDisplayStyleSettingShowsAPreviewOfEachStyle(t *testing.T) {
 	}
 }
 
-// TestThePreviewHighlightsTheChosenStyle 钉住预览上「哪一张是现在这一档」。
+// TestThePreviewCarriesNoSelectionSignal 钉住预览上**没有**「哪一张是现在
+// 这一档」的那一层。
+//
+// # 这一条是反过来写的（票 #297）
+//
+// 此前这一格里有**两个**选中信号：药丸（实心主色底，说「现在是列表」）**加上**
+// 选中那张预览的主色描边（也说「现在是列表」）。同一格里两种信号，用户会以为
+// 预览也是能点的（而它不是——预览不可点，见 `displaymode.go` 的注释）。
+//
+// 票 #297 裁掉的是后者：**预览是示意图**（那三档长什么样），现在是哪一档由
+// 药丸说。
 //
 // ⚠️ **不数「主色像素有几个」**：边框那一圈是圆角 + 抗锯齿画出来的，量出来的是
 // {87 225 136} 这种混了白边的颜色，一个像素都对不上主色（实测三档都是 0 个）——
 // 那是判据不对，不是没画。改成「这一格的边框里离主色最近的像素，比离普通边框色
 // 更近」：抗锯齿只影响「有几个」，不影响「哪边更近」。
-func TestThePreviewHighlightsTheChosenStyle(t *testing.T) {
+func TestThePreviewCarriesNoSelectionSignal(t *testing.T) {
 	for _, mode := range []app.DisplayMode{
 		app.DisplayModeList, app.DisplayModeCard, app.DisplayModeCompact,
 	} {
@@ -539,20 +553,15 @@ func TestThePreviewHighlightsTheChosenStyle(t *testing.T) {
 				return st
 			}())
 			th := BuildTheme(a.SettingsSnapshot(), false)
-			chosen := list.ViewOf(mode)
 
 			for v := list.View(0); v < list.ViewCount; v++ {
 				r, ok := tt.Find("预览：" + v.String())
 				if !ok || r.W <= 0 {
 					t.Fatalf("「预览：%s」没画出来", v.String())
 				}
-				got := borderLeansToAccent(tt, r, th.Accent, th.Border)
-				if v == chosen && !got {
-					t.Errorf("选中的是「%s」，而那一张的描边不是主色——预览指着错的",
-						chosen.String())
-				}
-				if v != chosen && got {
-					t.Errorf("没选中的「%s」描边也是主色——三张分不出哪一档是现在这一档",
+				if borderLeansToAccent(tt, r, th.Accent, th.Border) {
+					t.Errorf("「预览：%s」那一张描的是主色边——那一格里就有**两种**"+
+						"选中信号了（药丸 + 预览的绿框），票 #297 裁掉的就是这个",
 						v.String())
 				}
 			}

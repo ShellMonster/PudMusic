@@ -148,6 +148,59 @@ var Items = []Item{
 		Tests:    []string{"TestPlaybackStateMapping", "TestSmtcStatusIsNotTheMacNumber"},
 	},
 	{
+		// 🔴 **这一条的错法也是「静默」的**：暂停和停止在界面上**长得一模一样**
+		//（都是「播放」那一枚按钮、进度条都停在原地），而顺序播放走到队尾时
+		// 界面**一句话都没有**——用户分不出「这一串放完了」和「暂停在开头」。
+		//
+		// 而「暂停」和「停止」在播放器那一边落在**同一档**上（进度回到开头、
+		// 不在放），所以**一栏判据不够**：得把「用户按了停止」和「队列自己走完
+		// 了」分开说（票 #319）。
+		Category: Play,
+		Spec:     "界面上分得出「暂停」和「停止」，而顺序播放走到队尾要说出「这一串放完了」",
+		Tests: []string{
+			// 快照上的两栏（暂停 / 用户叫停 / 队列走完，三种各一条）。
+			"TestPausingIsNotStopping",
+			"TestStoppingIsNotTheQueueRunningOut",
+			"TestTheQueueRunningOutSaysSo",
+			// 播放条上那一句（画面上的字）。
+			"TestThePlayBarSaysTheTrackIsStopped",
+			"TestThePlayBarSaysTheQueueIsDone",
+			"TestAPausedTrackIsNotSaidToBeStopped",
+			// 抽屉里那一行：说的是「已停止」，而且不再高亮成「正在播放」。
+			"TestTheQueueDrawerSaysTheTrackIsStopped",
+			"TestTheStoppedRowIsNotHighlightedLikeAPlayingOne",
+		},
+	},
+	{
+		// 🔴 **这一条治的是「静默卡住」**（票 #352）：按过一次暂停再恢复之后，
+		// 队列**不往下走**，而整窗画面上**一句话都没有**——既不是「已停止」，
+		// 也不是「这一串放完了」。
+		//
+		// 根因在 `App.Toggle` 的「按回来」那一半：它没把 `wantPlay` 记回 true，
+		// 而 `onTrackFinished` 拿它当「要不要往下走」的判据——于是那一行早退，
+		// 队列停在那儿，`QueueFinished` 也永远出不来。
+		//
+		// 另一半是**两处说的话要一致**：队列走完时播放条说「这一串放完了」，
+		// 而抽屉里当前那一行的副题原来写「已停止」——**同一屏上两句不同的话**。
+		Category: Play,
+		Spec:     "按过一次暂停再恢复之后队列照常往下走；队列走完时播放条和队列抽屉说的是同一句（「用户按了停止」和「队列自己走完了」分得开）",
+		Tests: []string{
+			// 接线（App 那一层）：暂停再恢复之后队列照常往下走，而且队尾那一句
+			// 说得出来。
+			"TestTogglingPauseDoesNotStallTheQueue",
+			"TestTheQueueFinishesAfterAToggleSaysSo",
+			// 对照组：快捷键那条路（`App.Pause` / `App.Play`）行为不变。
+			"TestPauseAndPlayStillMoveTheQueueOn",
+			// 反面：**还停着**的时候不许自己往下走（只钉前半条的话，把
+			// `onTrackFinished` 的早退条件整个删掉也照样绿）。
+			"TestAPausedSongStaysPutAfterAToggle",
+			// 画面（UI 那一层）：抽屉里那一行分得清两种停住，且和播放条不矛盾。
+			"TestTheQueueDrawerSaysTheQueueIsDone",
+			"TestTheQueueDrawerStillSaysStoppedWhenTheUserStops",
+			"TestThePlayBarAndTheDrawerDoNotContradictEachOther",
+		},
+	},
+	{
 		Category: Play,
 		// 播放模式四档（顺序/循环/随机/单曲，BMG-47 A5）。「放完下一首是哪首」
 		// 这一句是**四档各有一条**——顺序停在队尾、循环绕回队尾、随机真的打乱、
@@ -226,6 +279,27 @@ var Items = []Item{
 			"TestTheLyricsStayVisibleWhenScrolled",
 			"TestTheLyricsDoNotJumpWhenTheInterfaceHides",
 			"TestTheLyricsTakeTheWholeWidthWhenTheCoverIsOff",
+		},
+	},
+	{
+		// 票 #194：右下角那三枚旋钮改成**上游那三枚的样子**。
+		//
+		// 改的是**形状**，不是位置，也不是功能：位置（右沿 1128、底沿 680、每枚
+		// 32、中心间距 44）和三枚各自的动作一个字都没动。
+		//
+		// 而「图标化」最容易丢的是**名字**：钮上不再有「找歌词」三个字，可它
+		// 恰恰是**没有歌词时**唯一摆着的那个键——名字（`Label`）没了，读屏软件
+		// 念不出来，无头 Tester 也找不到了。所以这一条把「名字还在」和「当前值
+		// 在浮层里」都钉住：值不常驻钮上（上游那两个钮上就只有一个图标），但
+		// 展开浮层仍然看得见。
+		Category: Play,
+		Spec:     "右下角那三枚歌词旋钮是 ⌀32 的圆形图标钮（上游同一份组件挂两处：主窗口「正在播放」那一页与满屏那一屏）：圆里只有一枚图标（上游那三枚 Aa / 时钟 / T 形框）没有字；无障碍名与 Tester 名字都还在；点击行为不变（字号 / 偏移开浮层、找歌词开搜索弹窗）；当前值不常驻钮上、在浮层里看；位置与间距不变（右沿 1128、底沿 680、每枚 32、中心间距 44）",
+		Tests: []string{
+			"TestTheKnobIsARoundIconButtonWithTheValueInThePopover",
+			"TestTheTwoKnobsAreThereOnlyWithLyrics",
+			"TestTheFullPlayerHasTheThreeLyricKnobs",
+			"TestTheFullPlayerKnobsSitAtTheBottomRightOfTheLyrics",
+			"TestTheFullPlayerKnobsActuallyWork",
 		},
 	},
 	{
@@ -348,8 +422,32 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
-		Spec:     "风控响应（非 JSON）被认出来，不当普通错误",
-		Tests:    []string{"TestNonJSONResponseIsRiskControl"},
+		// 🔴 **「压根不是 JSON」和真风控必须分得开**（票 #346）：真风控是
+		// -352/-412（业务码，在 JSON 里面），而这一档是压根没拿到 JSON
+		// （多半是风控挡的一页 HTML）。混成一处的话，被截断的响应会跟着风控
+		// 一起被判成不可重试。
+		Spec: "响应不是 JSON 被认出来，而且和真风控分得开",
+		Tests: []string{
+			"TestANonJSONResponseIsNotTheRiskControl",
+			"TestATruncatedResponseIsNotTheRiskControl",
+		},
+	},
+	{
+		Category: HTTP,
+		// 风控和限流**都不判成「可重试」**：界面上那枚「重试」是立刻再问一次
+		// （没有退避），而这两样要等的是时间——判成可重试的话用户点一次撞一次
+		// （票 #316 收窄了风控，票 #346 把限流收到同一档）。
+		//
+		// 而**截断的响应判成可重试**：它多半是网络抖了一下，再问一次有可能好。
+		Spec:  "风控和限流都不可重试（立刻再问还是撞墙），截断的响应可重试",
+		Tests: []string{"TestRiskControlIsNotWorthRetryingAgain"},
+	},
+	{
+		Category: HTTP,
+		// 「能不能重试」这张表是**全项目唯一的一处**（票 #346）：播放条上那枚
+		// 「重试」和下载记录页上那枚是同一个动作，两处必须用同一张表。
+		Spec:  "「可重试」的判据收在一处（表在那儿）",
+		Tests: []string{"TestRecoverableTellsWhatIsWorthRetryingAgain"},
 	},
 	{
 		Category: HTTP,
@@ -417,6 +515,51 @@ var Items = []Item{
 		},
 	},
 	{
+		// 归「播放」那一组：还是顶栏，但说的是头像**下面那一层**（票 #363）。
+		//
+		// 归这一组是因为它是**界面上的一处交互**（和满屏偏好面板那一条同一类），
+		// 而不是一个接口。
+		Category: Play,
+		// 这一层原来是**系统原生菜单**（`ui.Element.Menu`），这一票换成自绘的
+		// 浮层：样式跟设计规范对得上（surface1 / radiusLg / shadow.Modal /
+		// accentSoft），而系统菜单是系统外观；菜单项也要能带图标。
+		//
+		// 🔴 **换成自绘之后，系统菜单那四件好事一件都不能丢**（当初用系统菜单
+		// 就是为了它们）：点外面关、Esc 关、键盘能上下走、选中项有反馈。
+		//
+		// ⚠️ **指针和键盘混着来是最难的那一种**：两者共用「当前是第几项」，而
+		// 悬停每一帧都改它——不处理的话，键盘刚走的那一格会被指针改回去，
+		// 「键盘能上下走」只剩「指针不在菜单项上」的时候才成立。
+		Spec: "头像下拉是自绘浮层（不是系统菜单）：六项按上游的顺序、每一项带图标、锚在头像下面；点外面关、Esc 关、方向键走得动（指针停在菜单项上也走得动）、当前项有反馈；「退出登录」先问一句，取消什么都不做",
+		Tests: []string{
+			// 六项都在、顺序照上游、而且**不是系统菜单**。
+			"TestAvatarMenuHasBiuSixItems",
+			// 六项都按得动：换路由、去个人资料、去设置、退登（先问一句）。
+			"TestAvatarMenuGoesToItsRoute",
+			"TestAvatarMenuProfileUsesTheLoggedInMid",
+			"TestAvatarMenuWithoutALoginSaysSo",
+			"TestAvatarMenuLogoutActuallyLogsOut",
+			"TestAvatarMenuOpensTheIssuePage",
+			// 点外面关、Esc 关。
+			"TestTheAvatarMenuClosesOnEscape",
+			"TestTheAvatarMenuClosesWhenClickingOutside",
+			// 键盘那一半：方向键走得动（**指针停在菜单项上时也走得动**）、
+			// 回车选的是亮着的那一项。
+			"TestTheAvatarMenuWalksWithTheArrowKeys",
+			"TestTheAvatarMenuWalksWhileThePointerRestsOnAnItem",
+			"TestTheAvatarMenuSelectsWithTheKeyboard",
+			// 浮层的样子：锚在头像下面、右沿对齐、底色是 surface1 那一档。
+			"TestTheAvatarMenuHangsUnderTheAvatar",
+			"TestTheAvatarMenuPanelLooksLikeACard",
+			// 每一项前面都有图标。
+			"TestEveryAvatarMenuItemHasAnIcon",
+			// 当前那一项的危险字按那层底现算（底换了，字要跟着换）。
+			"TestTheDangerItemKeepsItsContrastOnTheHighlightedRow",
+			// 「退出登录」先问一句，取消什么都不做。
+			"TestTheAvatarMenuAsksBeforeLoggingOut",
+		},
+	},
+	{
 		Category: HTTP,
 		// 「刷新数据」那一项以前按下去只弹一句「还没有数据可刷新」——而接口一直
 		// 都在（`created/list`，收藏夹的新建 / 修改 / 拉全量都靠它）。这一条钉的是
@@ -431,6 +574,38 @@ var Items = []Item{
 			"TestRefreshingTwiceSendsOneRequestAndSaysItIsBusy",
 			"TestRefreshingWithoutALoginSaysSoAndSendsNothing",
 			"TestRefreshingWithoutTheFoldersMountedSaysSo",
+		},
+	},
+	{
+		Category: HTTP,
+		// 票 #362 的三件事：
+		//
+		//  1. **自动拉**：登录之后、开机时已经登录，各拉一次——用户不该为了
+		//     看见自己的收藏夹先去头像下拉里按「刷新数据」。而「一次自动拉
+		//     只发一次请求」是「不许每帧都拉」那条规矩的反面判据。
+		//  2. **空状态分得开**：「拉失败」和「真的一 个都没有」在画面上不是
+		//     同一句话——摆一句「还没有收藏夹」在拉失败的时候是撒谎，而用户
+		//     会据此以为自己一个收藏夹都没有。
+		//  3. **「我收藏的」那一组有源**：它走 `collected/list`（B 站「我收藏
+		//     了别人的哪些收藏夹」那个接口），而它以前在本项目里只有测试填
+		//     过——侧栏上那一组永远空着，而用户看到的是一个摆在那儿、永远
+		//     不动的分组。
+		Spec: "登录之后 / 开机时自动拉一次收藏夹（一次自动拉只发一次请求）；拉失败和「真的没有」在界面上分得开；「我收藏的」那一组有源",
+		Tests: []string{
+			"TestLoggingInPullsTheFavorites",
+			"TestAlreadyLoggedInPullsTheFavoritesAtStartup",
+			"TestAutoRefreshSendsNothingWhenLoggedOut",
+			"TestAutoRefreshSendsOnlyOneRequest",
+			"TestAFailedFetchIsNotAnEmptyList",
+			"TestAFetchThatFoundNothingIsStillLoaded",
+			"TestTheCollectedFoldersShowUpInTheSidebar",
+			"TestCollectedAlbumsAreNotPutInTheSidebar",
+			"TestLoggingOutClearsTheFavorites",
+			"TestARefreshThatComesBackAfterALogoutIsThrownAway",
+			"TestTheOldRefreshDoesNotStealTheNewAccountsRefreshState",
+			"TestTheSidebarSaysTheFetchFailedInsteadOfThereAreNoFavorites",
+			"TestTheSidebarDoesNotSayThereAreNoFavoritesBeforeAnythingWasFetched",
+			"TestRefreshingWithoutALoginDoesNotSayTheFetchFailed",
 		},
 	},
 
@@ -458,6 +633,25 @@ var Items = []Item{
 			"TestTruncated",
 			"TestAReadFailureIsNotAnEndOfFile",
 			"TestACorruptFileNeverLooksLikeItFinished",
+		},
+	},
+	{
+		Category: PCM,
+		// 上一条的另一面：**完整的**短文件不是「截断的输入」，不许报错。
+		//
+		// macOS 上 AudioToolbox 探容器时第一次就要 8192 字节，而整个文件
+		// 不足 8192——字节源读到的是「没凑齐就到了头」，那不是失败，是
+		// 「流到头了」。以前把它当成了硬错误，于是**总长不足 8192 字节**
+		// 的文件（秒开片段、缓存碎片、测试素材）一个样本都解不出来，
+		// 界面上是「这歌放不出来」（#312）。
+		//
+		// 这条证据是 macOS 专属的（`extaf` 只在 macOS 上存在）。
+		Spec: "总长不足 8192 字节的**完整**文件也能解出来：样本数与时长都对、样本值对得上、读到头是干净的 EOF（末尾短读不算错）",
+		Tests: []string{
+			"TestAShortFileStillDecodes",
+			"TestAShortFileKeepsItsSamples",
+			"TestAShortFileEndsAtEOF",
+			"TestAShortCompressedFileStillDecodes",
 		},
 	},
 
@@ -538,13 +732,17 @@ var Items = []Item{
 	},
 	{
 		Category: Paging,
-		// 设置那一格旁边的预览：三张缩略图各画各的形状，选中的那一张用主色描边。
+		// 设置那一格旁边的预览：三张缩略图各画各的形状，**三张都不带选中信号**
+		// （票 #297：那一格里的选中信号只有药丸一个——预览再描一圈主色，同一格里
+		// 就是两种「选中」信号了）。
+		//
 		// 判据是「描边里离主色更近」而不是「有几个主色像素」——边框是圆角加抗锯齿
 		// 画出来的，逐字比颜色永远是 0 个（见那条测试的注释）。
-		Spec: "「数据显示样式」旁边有预览：选哪一档一眼看得出来",
+		Spec: "「数据显示样式」旁边有预览：三张缩略图各画各的形状，而「现在是哪一档」只由药丸说（预览不带第二重选中信号）",
 		Tests: []string{
 			"TestTheDisplayStyleSettingShowsAPreviewOfEachStyle",
-			"TestThePreviewHighlightsTheChosenStyle",
+			"TestThePreviewCarriesNoSelectionSignal",
+			"TestTheDisplayModeCellHasOnlyOneSelectedSignal",
 		},
 	},
 	{
@@ -843,6 +1041,18 @@ var Items = []Item{
 			"TestTheMiniWindowStepsThroughTheQueue",
 			"TestDraggingTheMiniProgressSeeksOnlyOnRelease",
 			"TestTheMiniVolumeSliderSetsTheVolume",
+			// 静音在小窗里**看得出来**（票 #345）：滑块停在用户设的那一档
+			// （静音是它自己的一格），所以能说明「现在是静音」的只有那枚图标。
+			"TestTheMiniWindowShowsTheMuteState",
+			"TestClickingTheMiniMuteIconUnmutes",
+			"TestTheMiniMuteIconFollowsTheApp",
+			"TestTheMiniMuteIconSaysItIsMuted",
+			"TestTheMiniMuteIconMatchesThePlayBar",
+			"TestTheMuteGlyphDiffersFromTheLoudOne",
+			"TestTheMiniMuteStateSurvivesARestart",
+			"TestTheMiniMuteIconIsThereWithoutATrack",
+			"TestTheMiniVolumeTipSaysItIsMuted",
+			"TestTheMiniMuteIconSaysCancelMuteWhenThereIsNoSound",
 			// 小窗里认的是**用户配的那一份**而不是出厂默认值；以及在小窗里按
 			//「切换mini/完整模式」是关掉而不是再开一个。
 			// （设置页写着「窗口在前台时按它就有用」，而小窗是最常停在前面的那一扇。）
@@ -867,9 +1077,9 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
-		Spec:     "迷你播放器这一块本身：装得下 320×100、那四个键是图标键（框对、图形在）、控件身份稳（铁律四）",
+		Spec:     "迷你播放器这一块本身：装得下 320×84、那几枚键是图标键（框对、图形在）、控件身份稳（铁律四）",
 		Tests: []string{
-			"TestTheMiniCardFitsInThreeHundredAndTwentyByOneHundred",
+			"TestTheMiniCardFitsInThreeHundredAndTwentyByEightyFour",
 			"TestTheMiniKeysAreIcons",
 			"TestTheMiniControlsKeepTheirIdentityWhenTheLabelChanges",
 		},
@@ -979,6 +1189,20 @@ var Items = []Item{
 	},
 	{
 		Category: Negative,
+		// 🔴 **两处界面的「重试」用同一张表**（票 #346）：播放条上那枚和下载
+		// 记录页上那枚是**同一个动作**（立刻再问一次 B 站），所以风控和限流
+		// 在两处都**不给**那枚键——按下去就是再撞一次墙。
+		Spec: "「重试」键按同一张判据给：风控和限流两处都不给，被截断的响应给",
+		Tests: []string{
+			"TestThePlayBarDoesNotOfferARetryThatWouldHitTheRateLimitAgain",
+			"TestARateLimitedFailureIsNotOfferedARetry",
+			"TestARiskControlDownloadIsNotOfferedARetry",
+			"TestAFailedDownloadThatCannotBeRetriedHasNoRetryButton",
+			"TestATruncatedResponseIsOfferedARetry",
+		},
+	},
+	{
+		Category: Negative,
 		Spec:     "快速切歌 5 首：只有最后一首，旧的不留句柄和 goroutine",
 		Tests: []string{
 			"TestOnlyTheLastTrackWinsWhenSwitchingFast",
@@ -1007,6 +1231,47 @@ var Items = []Item{
 	},
 	{
 		Category: Negative,
+		// 票 #315：CDN 抖一下的时候三次重试是**瞬间打完**的（`recover` 里
+		// 一个 sleep 都没有），用户只看到一句红字；而重连的那几秒里界面上
+		// **一个字也没有**——「歌停着、界面不动、没有字」。
+		//
+		// 这一组盯三件事：**退避是真的**（重试之间隔了、随次数变长、关掉
+		// 能打断）、**「正在重连」看得见**（它住在源那边、应用问的是**当前
+		// 在管的那一条**——一条被丢掉的源抢不走它）、以及**失败有交代**
+		// （第二次重开被挡掉时必须报错，不许一声不吭地亮着）。
+		//
+		// 🔴 **端到端那四条在 `internal/app/reconnect_e2e_test.go`**：手工调
+		// 应用的内部函数证明不了「源→应用层→界面」这条接线。
+		//
+		// 票 #378 补了两条：**每一段流的状态各归各**（切歌之后旧那一首的
+		// 重连状态不许留在新歌上——代次守卫），以及**「第 N 次」的 N 是
+		// 「这一轮里的次数」**（一次断流恢复之后，下一轮从第 1 次重新数）。
+		Spec: "断流重连：重试之间有退避（1 秒 / 2 秒 / 4 秒，总 ≤ 7 秒），重连期间界面上说「正在重连」，成功或失败都有明确结果",
+		Tests: []string{
+			"TestTheDefaultBackoffIsOneTwoFour",
+			"TestARetryWaitsBeforeItRetries",
+			"TestTheBackoffGrowsWithEveryRetry",
+			"TestTheBackoffStopsAtItsLastValue",
+			"TestTheSourceGivesUpAfterTheBackoffIsUsedUp",
+			"TestCloseCancelsTheBackoffWait",
+			"TestTheReconnectingFlagReachesTheSnapshot",
+			"TestOnlyTheSourceTheAppCaresAboutCounts",
+			"TestAStalePendingSourceDoesNotCount",
+			"TestTheReopenFromThePlaybackPositionSaysSo",
+			"TestClearingTheErrorDoesNotClearTheReconnecting",
+			"TestTheSecondReopenSaysItGaveUp",
+			"TestTheStreamBreakShowsUpAsReconnecting",
+			"TestTheBreakDuringTheFirstLoadIsStillVisible",
+			"TestAStaleSourceDoesNotStealTheReconnectState",
+			"TestThePlayBarSaysItIsReconnecting",
+			"TestTheErrorWinsOverTheReconnectingLine",
+			"TestTheRetryNumberCountsThisRoundOnly",
+			"TestTheOldSongsReconnectStateDoesNotStayOnTheNewSong",
+			"TestTheOldSongsReconnectStateDoesNotStealTheNewOnesLine",
+		},
+	},
+	{
+		Category: Negative,
 		Spec:     "扫码中途断网：不算失败，网络回来自己走完",
 		Tests:    []string{"TestScanningSurvivesTheNetworkGoingAway", "TestLogoutSurvivesAnUnreachableBilibili"},
 	},
@@ -1017,11 +1282,76 @@ var Items = []Item{
 	},
 	{
 		Category: Negative,
+		// 票 #282：「点了歌一直不开始、也不说为什么」。
+		//
+		// 那一首和别的歌不一样的地方在于**它的流一直没准备好**，而应用这一层
+		// 对「还在准备」和「已经完了」分都不分：既没有一句「正在取流」，也没有
+		// 一个「等够了就当它失败」的上限。于是用户面对的是一个不动的界面和
+		// 一片沉默——比「报错」更糟。
+		//
+		// 这一组盯三件事：**有反馈**（界面上说在取流）、**有上限**（超时按失败
+		// 处理，给一句能看懂的话）、**有痕迹**（代次变了和失败都写进日志，
+		// 而日志真的落在文件里）。
+		Spec: "点了歌一直不开始：界面上说在取流、超过阈值按失败处理、代次变了和失败都写进日志",
+		Tests: []string{
+			"TestAPlayThatNeverStartsTurnsIntoASentence",
+			"TestAnotherSongsFailureDoesNotCancelTheWatchdog",
+			"TestTheDiscardedPlayIsWrittenDown",
+			"TestTheFailureIsWrittenDown",
+			"TestThePlayBarSaysItIsLoading",
+			"TestTheLoadingLineHasASpinner",
+			"TestThePauseKeyIsStillThereWhileLoading",
+			"TestAFailedPlayGivesASentenceInsteadOfASpinner",
+			"TestTheFailureSentenceFitsOnOneLine",
+			"TestFriendlySaysTheFormatCannotBeDecoded",
+			"TestTheLogFileActuallyReceivesWhatIsLogged",
+			"TestTheLogFileIsAppendedTo",
+		},
+	},
+	{
+		Category: Negative,
 		Spec:     "重启：登录状态保持、设置落盘、搜索历史活下来",
 		Tests: []string{
 			"TestRestartKeepsTheLoginState",
 			"TestMountedSettingsSurviveAProcessRestart",
 			"TestSearchHistorySurvivesRestart",
+		},
+	},
+	{
+		Category: Negative,
+		// 音量三件套（票 #311）。这一组盯的是三件**静默**的事：
+		//
+		//  1. 音量不落盘 → 每次启动回到 100%。用户为了不吵把音量调到 20%，
+		//     重启之后突然全速——耳机上那是真的惊吓。
+		//  2. 静音还是「音量 0」的话，一旦开始落盘音量，「静音后退出再启动，
+		//     音量永远是 0」就成了必然（Clementine 的老毛病）。所以静音是它
+		//     自己的一格，而音量那一格记的是用户设的值。
+		//  3. 「这份设置里没有音量这一格」（老版本写的文件）和「用户自己把音量
+		//     拉到 0」分不开的话，升级上来的用户打开应用是**一点声都没有**，
+		//     而界面上不会说任何一个字。
+		//
+		// 第四件是「音量不一步跳过去」：开始放 / 恢复时从 0 走到那一档（淡入），
+		// 调音量和按静音时从当前值渐变到新值（渐变 / 淡出）。
+		Spec: "音量：落盘记住（重启还是上次那一档）；静音是独立的一格（静音后退出再启动，音量不是 0）；开始放 / 恢复时淡入，调音量时渐变，不是瞬间跳",
+		Tests: []string{
+			// 落盘与读回。
+			"TestTheVolumeSurvivesARestart",
+			"TestMuteIsItsOwnFlag",
+			// 「没有这一格」和「这一格是 0」分得开。
+			"TestAnOldSettingsFileGetsTheDefaultVolume",
+			"TestAVolumeOfZeroIsNotTheSameAsNoVolume",
+			// 静音那一格自己的语义。
+			"TestUnmutingRestoresTheVolume",
+			"TestSettingANonZeroVolumeUnmutes",
+			"TestDraggingTheVolumeToZeroIsMute",
+			"TestAMutedPlayerStillKeepsItsVolume",
+			"TestMutedAlwaysDrawsTheMuteIcon",
+			// 淡入 / 渐变 / 淡出。
+			"TestTheVolumeFadesInOnStart",
+			"TestSettingTheVolumeRamps",
+			"TestMutingFadesOut",
+			"TestSettingTheVolumeRetargetsTheRamp",
+			"TestCloseStopsTheRamp",
 		},
 	},
 	{
@@ -1060,8 +1390,16 @@ var Items = []Item{
 		// 挤不掉），挤的循环于是最后把整张表清空还挤不下——之后每来一张图就把
 		// 表里剩下的全挤掉。
 		//
+		// 票 #358 补了第三条：**画面上正画着的那一张也不许挤**。开队列抽屉的
+		// 时候，抽屉里那二十几行第一次露出来、全都要封面，字节上限一下子超了，
+		// 挤的循环一路挤到画面上正画着的那几张——挤掉的那一张下一帧就退回占位，
+		// 于是「开抽屉时中间那一列的封面来回闪」。
+		//
+		// **同一件事的另一个表现是「历史记录页一直闪」**：那一页自己的一屏封面
+		// 就把上限顶破了，于是挤 → 退占位 → 重新下 → 又被挤……一直循环。
+		//
 		// 全部用 `httptest` 验（假图床 + 假 B 站接口），不连真网。
-		Spec: "首页推荐的封面不再在有图和占位之间反复切换：一屏封面按显示尺寸存得下、字节账不漏、还在下的那一张不参与淘汰",
+		Spec: "封面不再在有图和占位之间反复切换：一屏封面按显示尺寸存得下、字节账不漏、还在下的那一张不参与淘汰、画面上正画着的那一张不参与淘汰（首页、历史记录、稍后再看三处）",
 		Tests: []string{
 			"TestTheSameCoverStaysReadyAcrossFrames",
 			"TestTheHomeCoversDoNotGoBackToPlaceholder",
@@ -1070,6 +1408,11 @@ var Items = []Item{
 			"TestTheEvictionSkipsEntriesThatHaveNoBytesYet",
 			"TestACoverThatIsStillLoadingIsNotEvicted",
 			"TestTheByteAccountDoesNotLeak",
+			"TestTheCoverOnScreenIsNotEvicted",
+			"TestACoverThatIsNoLongerOnScreenIsEvicted",
+			"TestOpeningTheQueueDrawerDoesNotMakeTheListCoversFlash",
+			"TestTheHistoryPageCoversDoNotKeepFlashing",
+			"TestTheLaterPageCoversDoNotKeepFlashing",
 		},
 	},
 	{
@@ -1376,6 +1719,61 @@ var Items = []Item{
 			"TestTheCacheIsKeyedBySourceAndByWord",
 			"TestAFailedSearchIsNotRemembered",
 			"TestEmptyingTheBoxClearsTheList",
+		},
+	},
+	{
+		Category: HTTP,
+		// B 站那一份歌词是**取流那一趟顺带回来的**（响应里的 `data.subtitle`）——
+		// 以前 `playurlData` 只声明了三个字段，那一段被**静悄悄地**丢掉了，于是
+		// 歌词只能靠用户在「找歌词」里搜（上游 Biu 走的就是这一段，
+		// `get-lyrics.ts` 的 `getLyricsByBili`）。
+		//
+		// ⚠️ 判据是**解析**那几项：时间 `round(from*1000)` 毫秒、文字去掉首尾的
+		// `♪♫`、空的丢掉、按时间排序。抄错时间那一项的症状是「歌词整体早/晚
+		// 几秒」，而歌词本身看着完全正常——用户只会以为「这首歌的词对不上」。
+		Spec: "B 站那一份歌词自己来：取流响应里的字幕地址被读出来、后台下载并按上游的判据解析、存进缓存（键与别的歌词缓存一致）、界面上说清它是自动来的",
+		Tests: []string{
+			"TestPlayURLHandsBackTheSubtitleItWasGiven",
+			"TestTheSecondSubtitleAddressIsKeptToo",
+			"TestTheBiliSubtitleIsParsedTheWayUpstreamDoes",
+			"TestTheBiliSubtitleTimeIsRoundedToMilliseconds",
+			"TestTheBiliSubtitleSurvivesTheRoundTripThroughLRC",
+			"TestTheBiliSubtitleComesOnItsOwn",
+			"TestTheBiliSubtitleSurvivesARestart",
+			"TestTheSubtitleIsFetchedInTheBackground",
+			"TestTheLyricsSayWhereTheyCameFrom",
+			"TestTheOriginLineSitsWhereTheLyricsSit",
+		},
+	},
+	{
+		Category: Negative,
+		// 🔴 **「取到了地址但下载 403」这一档**：B 站给同一份字幕两个地址，而
+		// **不带鉴权参数的那个可能要登录态**——拿它去请求会 403。而登录态在字幕
+		// 那条路上根本到不了（cookie 的域是 `.bilibili.com`，字幕文件在
+		// `.hdslb.com`）。所以**唯一能授权这一趟的就是地址自己带的那段
+		// `auth_key`**——也就是第二个地址。
+		//
+		// 只试第一个地址的话，这一整条自动歌词就**静悄悄地不出现**（界面上照旧是
+		// 「暂无歌词」，日志里只有一行）。上游那个 `||` 兜底只管「地址为空」那一种，
+		// 所以兜底必须落在**下载**那一层。
+		Spec: "字幕的第一个地址下载失败时改试第二个（B 站给同一份字幕两个地址，带 auth_key 的那个才是能下的）",
+		Tests: []string{
+			"TestTheSecondAddressIsTriedWhenTheFirstOneFails",
+			"TestTheBiliSubtitleFallsBackToTheSecondAddress",
+		},
+	},
+	{
+		Category: Negative,
+		// 「B 站没给字幕」是**正常**的一种（很多歌压根没有），不是错误：歌照放，
+		// 歌词区照旧是「暂无歌词」加一个「找歌词」的入口——那一条路留着。
+		//
+		// ⚠️ 少了这一条，界面上的「暂无歌词」就会变成一句**兑现不了的承诺**：
+		// 用户按了「找歌词」，而 B 站那份自动的其实没来。
+		Spec: "B 站没给字幕时照旧走搜索：歌词区是「暂无歌词」加一个「找歌词」的入口，那两个搜索源还在",
+		Tests: []string{
+			"TestNoSubtitleMeansNoAddress",
+			"TestNoSubtitleMeansTheSearchStaysAvailable",
+			"TestAnUnknownOriginSaysNothing",
 		},
 	},
 	{
@@ -1802,8 +2200,9 @@ var Items = []Item{
 		//
 		//   · 编号是**画出来的字**——量的是 `Texts()` 里有一条逐字等于 "1"/"2"/"3"，
 		//     不是字段里有 page（`partRowsFor` 填对了而 view 没画，别条照样绿）。
-		//   · 正在放那一集**整行染主色**，而没在放的不许染——两半都钉，染了这一半
-		//     而不钉另一半的话，「标出来」就只是「有一行不一样」。
+		//   · 正在放那一集**整行淡主色底**（上游 `bg-primary/20`，票 #323），而没在放
+		//     的不许染——两半都钉，染了这一半而不钉另一半的话，「标出来」就只是
+		//     「有一行不一样」。
 		//   · **单 P 不摆入口**：摆一个点了没反应的键，用户会以为应用坏了。
 		//   · 问不到时说「问不出分集」而不是留一片空白——空白在界面上和「这一首
 		//     没有分集」一模一样，而空列表**进都进不去**（入口在「没问到」时也得
@@ -2043,23 +2442,22 @@ var Items = []Item{
 		// 归「双平台」那一组：还是播放条那一块，但说的是**播放键那一枚的形状**
 		//（issue 217 / BMG-129，票 B）。
 		Category: Platform,
-		// issue 217：播放键改成**上游那一枚**——48×48 的盒子、**底下什么都没有**、
-		// 图形是**前景色**（深色下白、浅色下近黑），悬停时图形变主色。
+		// issue 217 原来把播放键做成上游那一枚（无底、前景色图形）。设计规范 v0.1 §5
+		// 之后（应用未发版）改成**实心强调色圆**：播放条 44×44、满屏 64×64，图形用
+		// AccentText，悬停 AccentHover、按下 AccentPressed，禁用不变色。
 		//
-		// 🔴 **判据全是画面上的像素**：改之前那一枚是「一块 58×58 的实心主色
-		// 圆角方块，里面一枚深色的圆」，改之后是「底色上的一枚圆」——**明暗正好
-		// 反过来**，而「还是那枚键」这件事在代码里看不出来（签名一个字没改）。
-		//
-		// ⚠️ **「正在播放」那一档也要对**（形状换成 `RiPauseCircleFill`）：两档
-		// 都断，「只改了播放那一档」这种坏法就抓得住。
-		Spec: "播放键是上游那一枚：48×48 的盒子、图形正好填满、底下没有实色、图形是前景色（不是主色）、悬停时图形变主色；「正在播放」那一档一样",
+		// 🔴 **判据全是画面上的像素**（圆边缘、方盒角、图形色），播放 / 暂停两档、
+		// 浅深两套都断。
+		Spec: "播放键是实心强调色圆（播放条 44、满屏 64）：圆边缘是强调色、方盒角是底色、图形是 AccentText、悬停与按下换底色、禁用时悬停不变；「正在播放」那一档一样",
 		Tests: []string{
-			// 盒子是 48×48、图形本身够大、图形落在盒子中间。
+			// 盒子 44×44、圆本身够大、图形落在圆心。
 			"TestThePlayKeyIsBigEnoughToHit",
-			// 底下没有压着实色、图形是前景色（深浅两套 × 播放/暂停两档）。
-			"TestThePlayKeyHasNoSolidBackground",
-			// 悬停时图形变主色（上游的 `hover:text-primary`）。
-			"TestThePlayKeyTurnsAccentOnHover",
+			// 圆是实心强调色、图形是 AccentText（深浅 × 播放/暂停）。
+			"TestThePlayKeyIsASolidAccentCircle",
+			// 悬停 → AccentHover，按下 → AccentPressed。
+			"TestThePlayKeyFillShiftsOnHoverAndPress",
+			// 满屏那一枚同一种，64×64。
+			"TestTheFullPlayerPlayKeyIsTheSolidAccentCircle",
 		},
 	},
 	{
@@ -2177,6 +2575,36 @@ var Items = []Item{
 			"TestHoveringTheTitleUnderlinesIt",
 			// 快照里的来源和正在放的那一首对得上（界面以前判不出来源）。
 			"TestTheSnapshotTellsTheSource",
+		},
+	},
+	{
+		// 归「双平台」那一组：还是播放条那一块，但说的是它上面那一句**错**
+		// （票 #320）。
+		Category: Platform,
+		// 票 #320：播放条上那一句错被压成**一行 + 省略号**（88 高的播放条装不
+		// 下两行——这是布局的账），而 `bili.Friendly` 那张表里的话信息量很大
+		//（「B 站没有给这一条单独的音频流（歌单、活动那一种多半是这样）。在 B 站
+		// 里打开它听，或者换一首放」四十来个字）——用户常常只读到半句话。
+		//
+		// 🔴 **这一族的坏法全是静默的**：完整那一句拿不到，界面上看不出坏了
+		// （那一行的**文本节点里**就是完整那一句，只是画的时候被截了——所以
+		// 「它在树上」证明不了任何事）；而播放条要是被撑成两行，最后一行会被
+		// 88 高裁掉，**界面上也看不出坏了**。
+		//
+		// ⚠️ **判据要分两半**：一是「完整那一句拿得到」（排开了、不止一行），
+		// 二是「播放条一个像素都没动」（打开详情前后那一行的框一模一样）。
+		Spec: "播放条上那一句错：屏幕上还是一行 + 省略号（88 高的播放条装不下两行），完整那一句在悬停提示和点开的详情层里都拿得到（详情层多行排开、能选中复制），打开详情时播放条一个像素都不动，错没了详情层就收",
+		Tests: []string{
+			// 详情层里是**完整那一句**，而且**排开了**（不止一行）。
+			"TestClickingTheErrorOpensTheWholeSentence",
+			// 打开详情前后，播放条上那一句的框**一模一样**。
+			"TestThePlayBarDoesNotMoveWhenTheDetailOpens",
+			// 错没了，详情层就收（不然它写着「打不开」而其实能播了）。
+			"TestTheDetailClosesWhenTheErrorIsGone",
+			// 悬停那一条路没被弄坏（提示框里也是完整那一句）。
+			"TestHoveringTheErrorStillShowsTheWholeSentence",
+			// 面板开着的时候提示框不挂（两块摆在同一个位置，叠在一起像坏了）。
+			"TestTheTooltipDoesNotStackOnTopOfTheDetail",
 		},
 	},
 	{
@@ -2427,6 +2855,27 @@ var Items = []Item{
 		},
 	},
 	{
+		// 🔴 **这一条的错法是「静默」里最静的那种**：少一层蒙版、字色跟着
+		// 主题翻——**没有一样会报错**，界面只是「有时候读不清」。而头图是
+		// **用户上传的任意图片**：用户传一张白底图，浅色主题下白字就化在
+		// 白底里（上游靠 `drop-shadow` 补，我们没有那一层）。
+		Category: Platform,
+		// 票 #295（UI 审计 L-13）：UP 空间头图区那一层黑蒙版。
+		//
+		// ⚠️ **上游那一档是平的**（浅 30% / 深 50%）：压在**纯白**头图上，
+		// 白字只有 2.1:1（浅色）/ 4.0:1（深色）——所以有字的那一带**再压
+		// 一档**，压到最坏情况也有 4.5:1（WCAG 正文 AA）。
+		//
+		// ⚠️ **这一条不放在表末尾**：表末尾那处已经撞过好几回（这一轮就是
+		// 第三次），挨着上面那条「收藏夹头图区」读得顺——两条讲的都是
+		// 「头图区」。
+		Spec: "UP 空间头图区（设计规范 v0.1 §7.18，取代上游压黑蒙版 + 白字的做法）：横幅 132 高、底部淡进页面底色；头像 88 压在横幅下沿；名字、签名、统计写在**页面底色**上，字色用主题自己的字色，不再依赖头图是什么图",
+		Tests: []string{
+			// 头像 88、左右留白 32、头像压在横幅下沿。
+			"TestTheSpaceAvatarIs88AndTheHeaderPads32",
+		},
+	},
+	{
 		// 归「双平台」那一组：这一票动的是**播放条自己的刻度**，而播放条是
 		// **每一屏都在**的那一条（理由同 issue 127 那一条）。
 		Category: Platform,
@@ -2559,6 +3008,25 @@ var Items = []Item{
 		},
 	},
 	{
+		// 这一族动的是**过渡本身**：曲线、时长、位移与淡入的错开。
+		//
+		// 🔴 **这一族的错法全是「静默」的**：曲线换了没有任何东西会报错，界面
+		// 只是「不太顺」；滑块退回定时长曲线也不报错，只是连点三个 Tab 时
+		// 顿一下；淡入和位移又同步了也不报错，只是「啪」地一下出现。
+		Category: Platform,
+		// 票 #292（DESIGN.md §五）：一条统一曲线 + 主 Tab 滑块换成弹簧。
+		Spec: "所有过渡走同一条曲线 `CubicBezier(0.16, 0.9, 0.21, 0.98)`（DESIGN.md §五《一条统一曲线》）；主 Tab 滑块走**弹簧**（ζ=0.9923，接近临界阻尼；不是定时长曲线）；Toast 入场的**淡入与位移错开**（位移先走、淡入后到）",
+		Tests: []string{
+			// 曲线和弹簧的值不许漂（唯一出处就是那一个包）。
+			"TestTheUnifiedCurveIsTheOneWeCopied",
+			"TestTheTabSlideIsASpring",
+			// 滑块走的是弹簧：100ms 时只走到约一半（定时长曲线那时已经 78%）。
+			"TestTheTabSliderFollowsTheSpring",
+			// 淡入与位移错开：同一时刻量到的两个进度，淡入那个明显更小。
+			"TestTheToastFadesInAfterItSlides",
+		},
+	},
+	{
 		// 归「双平台」那一组：这一票动的是**播放条上那些控件的颜色与反馈**
 		// （悬停、圆角、倍速浮层、音量浮层、两枚图形的区别）。
 		//
@@ -2598,9 +3066,20 @@ var Items = []Item{
 		// 这个应用没做完。
 		Category: Platform,
 		// 票 #234（审计 F-01 / F-02 / F-03 / F-06 + UX B1 / B2）：视觉一致性第一批。
-		Spec: "「当前在哪」在应用里只有**一种底色**：侧栏菜单当前项、侧栏收藏夹当前项、关注页分组当前项、动态页作者栏当前项、队列抽屉「正在播放」那一行，五处的**底**都是 flat 那一档（淡主色底 / 中性灰底），**没有实心主色大块**；**字**分两档：左栏那四处是正文色（深色下是主色字），队列抽屉那一行是**主色当字**（`ink.AccentOn`，和列表行「正在播放」那一档同一个数）；搜索页**没有页内输入框**，也没有「搜索」那一行标题，顶上第一行就是「搜索【词】的结果」（24/400），当前搜的词显示在**顶栏**那个框里（填上去的那个词，用户点进去敲字是**替换**不是追加；在搜索页上按那枚「清空」清掉的是这一场搜索，不只是框里那几个字）；满屏播放器顶栏的设置齿轮**紧跟在歌名后面**（上游那一组的构图），不是浮在窗口中间",
+		//
+		// ⚠️ **队列抽屉「正在播放」那一行不在这条里了**（票 #294，2026-10-24）：
+		// 它后来单独改成了**淡主色底**（上游 `bg-primary/20`），见本表里票 #294
+		// 那一条（分集抽屉那一行是票 #323 那一条）。
+		// 这一条说的是**左栏那四处**——侧栏菜单当前项、侧栏收藏夹当前项、关注页
+		// 分组当前项、动态页作者栏当前项。
+		//
+		// ⚠️ **「字」那一档是压深的主色，不是正文色**（票 #323 改对）：票 #239 把浅色
+		// 下的底从「主色 14%」换成中性灰之后，主色当字也得跟着换成「按新底算」的
+		// 那一档（默认主色下 #107032）——代码里 `flatbutton.go` 的 `flatCurrentText`
+		// 自己写着「**不是正文色**」。
+		Spec: "「当前在哪」在应用里只有**一种底色**：侧栏菜单当前项、侧栏收藏夹当前项、关注页分组当前项、动态页作者栏当前项，四处的**底**都是 flat 那一档的**中性灰底**（深浅两套是同一个数：浅色 #dcdcdf / 深色 #3e3e41），**没有实心主色大块**；**字**分两档：深色下是主色字、浅色下是**从主色现算的、压到 ≥4.5:1 的那一档**（默认主色下 #107032，**不是正文色**）；搜索页**没有页内输入框**，也没有「搜索」那一行标题，顶上第一行就是「搜索【词】的结果」（24/400），当前搜的词显示在**顶栏**那个框里（填上去的那个词，用户点进去敲字是**替换**不是追加；在搜索页上按那枚「清空」清掉的是这一场搜索，不只是框里那几个字）；满屏播放器顶栏的设置齿轮**紧跟在歌名后面**（上游那一组的构图），不是浮在窗口中间",
 		Tests: []string{
-			// 五处「当前在哪」是同一个底色配方（深浅两套都量，底色和字色都量）。
+			// 左栏那四处「当前在哪」是同一个底色配方（深浅两套都量，底色和字色都量）。
 			"TestTheCurrentItemIsFlatEverywhere",
 			// 搜索页的减法，以及顶栏那个框显示当前关键词。
 			"TestTheSearchPageHasOneTitleAndNoSecondSearchBox",
@@ -2676,13 +3155,74 @@ var Items = []Item{
 		},
 	},
 	{
+		// 🔴 **这一族的错法是「静默」的**：跳过去了可那一行还在视野外（用户
+		// 看见的是「设置页打开了，可这里没有下载目录」）、或者那一行被切掉半截、
+		// 或者**设置页的行距被改了**（往下滚一屏就看得见）。
+		Category: Platform,
+		// 票 #318（把设置页那段手写的跨帧「滚进视野」换成上游那一行
+		// `Element.ScrollIntoView()`）+ UX 报告 C1（那一行要指、要滚进视野）。
+		//
+		// ⚠️ **「指着一行」不许改这一页的排版**：上游滚的是「刚好露出这一行的
+		// 盒子」，我们从前滚完留 16 像素——那 16 像素**只能补在滚动位置上**，
+		// 补在盒子上（垫内边距）的话就是**内容高度**的一部分，被指着那一行下面
+		// 每一行都低了 16 像素。
+		Spec: "从下载记录页跳到设置页的「下载目录」那一项：切到「常规设置」那一格、**指**着那一行（标题是主色）、**把那一行滚进视野**（标题与说明都整个在可视区里，离下沿还留着 16 像素）；而**指着一行不许改这一页的排版**——被指着那一行下面每一行的位置与内容总高都和没指着时一样",
+		Tests: []string{
+			// 点得动、跳得到那一格、指得着那一行。
+			"TestTheMissingDownloadDirectoryTakesYouToTheSetting",
+			// 那一行真的滚进视野了，而且**说明那一行也整个在可视区里**。
+			"TestTheDownloadDirectoryIsScrolledIntoView",
+			// ⚠️ **指着那一行不许把这一页的内容撑高**（垫内边距那一种做法就是
+			// 撑高了 16 像素，于是下面每一行都被压低）。
+			"TestTheFocusedSettingDoesNotPushTheRowsBelowIt",
+		},
+	},
+	{
+		// 🔴 **这一族的错法是「静默」的**：默认落点算错的时候，歌**照样下得完**，
+		// 界面上**每一句话都是真的**，只是它们说的不是同一个地方——用户在自己的
+		// 下载目录里翻不到刚下的那几首，而设置页上那一格写着「未设置」。
+		//
+		// 票 #361：默认落点从**系统下载目录**（`~/Downloads`，那儿是浏览器和
+		// 安装包的地方）改成**「音乐」目录下的应用子目录**（macOS `~/Music/BiuGo`，
+		// Windows `C:\Users\<用户名>\Music\BiuGo`——框架的 `PathMusic` 只把
+		// 英文名拼在家目录下面）——同类音乐软件（网易云、QQ 音乐、Spotify）都是
+		// 这么放的。
+		//
+		// ⚠️ **「老歌不搬家」也是这一条的一部分**：已经在 `~/Downloads` 下的歌留在
+		// 原地（迁移是另一件事，要人拍板），而这一条只改**新**下载的落点。
+		Category: Platform,
+		Spec:     "默认下载目录是「音乐」目录下的应用子目录（macOS ~/Music/BiuGo、Windows C:\\Users\\<用户名>\\Music\\BiuGo），落盘那一刻目录不存在会建；**查路径的那一层不建目录**（开应用不会在用户磁盘上留下文件夹）；设置页和下载记录页上显示的是**歌真正落下来的地方**而不是空串；用户在设置里手动选过的目录照旧；已经在旧目录下的老歌不搬家",
+		Tests: []string{
+			// 路径本身：它在音乐目录下面，子目录名是显示名（不是用户数据目录那个
+			// 老名字），拿不到家目录时退回系统下载目录而不是给一个相对路径。
+			"TestTheDefaultDownloadDirectoryIsTheAppFolderUnderTheMusicDirectory",
+			"TestTheDownloadDirectoryIsNamedAfterTheAppNotAfterTheLegacyUserDataDirectory",
+			"TestTheDefaultDownloadDirectoryIsNotARelativePath",
+			// ⚠️ **查路径这一层不建目录**：它被开应用时和设置页读着，而它一旦
+			// 建目录，光是打开应用（或者跑一条 internal/ui 的测试）就会在**用户
+			// 自己的** ~/Music 里留下一个文件夹。
+			"TestTheDefaultDownloadDirectoryIsNotCreatedJustForLooking",
+			// 建目录是**落盘那一刻**的事。
+			"TestTheDownloadDirectoryIsCreatedWhenTheSongLands",
+			// 优先级：设置里没选过是默认落点，选过的是用户选的那个。
+			"TestTheDownloadDirectoryIsTheDefaultOneUntilTheUserPicksAnother",
+			// ⚠️ **一个目录都没有时不许入队**：空目录会让歌落到进程的当前工作
+			// 目录里（相对路径），而界面上没有一句话说它去哪儿了。
+			"TestTheDownloadIsRefusedWhenThereIsNowhereToPutIt",
+			// 界面上显示的那条路径（两页说的是同一个字符串）。
+			"TestTheSettingsPageShowsWhereTheSongsWillLand",
+			"TestTheSettingsPageStillShowsTheDirectoryTheUserPicked",
+			"TestTheDownloadPageShowsWhereTheSongsWillLand",
+		},
+	},
+	{
 		// 🔴 **这一族的错法也全是「静默」的**：两端对齐空着三百像素、迷你窗里
 		// 两根滑块分不出哪个是哪个、同一个动作两个页面一个有一个没有、
 		// 超长歌名占满整行中段、深色下黑封面和底色融成一片——**没有一样会
 		// 报错**，界面只是「不好用」。
 		Category: Platform,
 		// 票 #244（UX 报告 §2 的 D1 / B5 / B6 / E1 / E2）。
-		Spec: "布局一批：设置页每一行的说明和控件之间**不空着几百像素**；迷你窗的音量滑块**有悬停提示**（而且那枚提示**看得见**）；「全部播放」在两个页面上是**同一枚**（语义待裁决，这一票只统一画法）；列表里的**超长歌名不占满整行中段**；**深色下的封面有边**（不再和行的底色融成一片）",
+		Spec: "布局一批：设置页每一行的说明和控件之间**不空着几百像素**；迷你窗的音量滑块**有悬停提示**（而且那枚提示**看得见**）；「全部播放」在两个页面上是**同一枚**（画法统一；语义是票 #299 拍板的那一条）；列表里的**超长歌名不占满整行中段**；**深色下的封面有边**（不再和行的底色融成一片）",
 		Tests: []string{
 			// 设置页那一段空档（1200 / 900 两档窗口，量的是画面上的字迹）。
 			"TestTheSettingsRowsDoNotStretchAcrossTheWindow",
@@ -2705,6 +3245,300 @@ var Items = []Item{
 			"TestAShortTitleIsNotAffected",
 			// 「图取到了」那一档也描一圈边（深浅两套）。
 			"TestTheLoadedCoverHasAnEdgeOfItsOwn",
+		},
+	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：那一枚按钮悬在 Tab 右边半截、
+		// 矮一截（28 而不是 40）、又没有那枚 ▶——**没有一样会报错**，界面
+		// 只是「不像这一页的操作，也不像全局操作」。
+		//
+		// 而它是首页和每一页列表上**唯一的主色实心块**，用户第一眼先看它。
+		Category: Platform,
+		// 票 #288（UX 报告 C-04 + C-05）。
+		Spec: "「全部播放」那一枚贴在内容区右沿、尺寸 114×40、带一枚 18 的 ▶ 图标（上游 HeroUI `Button size=\"md\"` 的逐像素实测值）",
+		Tests: []string{
+			// 右沿 = 内容区右沿、尺寸 114×40（1200 与 900 两档窗口，深浅两套）。
+			"TestThePlayAllButtonSitsAtTheRightEdgeOfTheContentArea",
+			// 那一枚里有一枚 18 的 ▶ 图标，而且它在字的**前面**（上游的
+			// `startContent`）。
+			"TestThePlayAllButtonHasThePlayIcon",
+		},
+	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：按了「全部播放」而正在放的那首
+		// 不换（用户以为按钮是死的）、或者把这一页的歌**换掉**了用户原来的队列
+		// （他正听着的那几首不见了）——**没有一样会报错**，界面只是「不按他
+		// 以为的那样」。
+		//
+		// 而这两枚入口（页级的「全部播放」、行级的「立即播放」）只差几个字，
+		// 做的事差着一个队列——所以它们各自叫什么、做什么，都得钉住。
+		Category: Play,
+		// 票 #299（2026-10-24 人定的）。
+		Spec: "「全部播放」= 把这一页的歌按顺序加进队列并播放（从这一页的第一首开始）；「立即播放」= 只放当前这一首",
+		Tests: []string{
+			// 队列里多了这一页的歌（**按顺序**）、旧的那几首还在、正在放的是
+			// 这一页的**第一首**（夹具是本地歌：在线的那些在无头环境里放不了，
+			// 而真网络是**真账号**）。
+			"TestThePlayAllButtonAppendsThePageAndStartsAtItsFirstSong",
+			// 应用层那一条：追加 + 从这一批的第一首开始播（队列里原来有的那几首
+			// 不动）。
+			"TestEnqueueAndPlayAppendsInOrderAndStartsAtTheFirst",
+			// 「立即播放」**只放当前这一首**：队列里只有它，正在放的是它。
+			"TestThePlayNowEntryPlaysOnlyThatSong",
+			// 菜单那一层：交给接线的是**只有这一首**，不是「从这一首往后」的那
+			// 一整段。
+			"TestChoosingPlayNowHandsOverJustThatSong",
+			// **两枚入口都在**（少建一项那一项就永远点不到）。
+			"TestBothPlayEntriesAreOnTheRowMenu",
+		},
+	},
+	{
+		// 🔴 **这一条治的是「延迟」**：切歌到出声之间有一段空档——取流要跑一趟
+		// 带 WBI 签名的网络往返（实测 200~400ms），再叠上开解码器、等第一批样本。
+		// 用户听到的是「点下一首 → 空档 → 出声」。
+		//
+		// 提前备地址的那一趟**只解析地址、不预下载字节**：我们的 `StreamSource`
+		// 会**在盘上落一个临时文件**，预下载 = 占磁盘 + 多一条连接（那是另一件事）。
+		//
+		// ⚠️ **这一条的错法是「静悄悄白费」**：备错了（备的和真播的不是同一首）
+		// 的话，放出来的歌**还是对的**（对不上就重新取），而省下来的那几百毫秒
+		// 白费了——**界面上看不出任何异样**。
+		Category: Play,
+		// 票 #366（2026-10-24）。
+		Spec: "下一首的流地址在当前这首快结束时就备好（只解析地址，不预下载字节）；真播下一首不再重新取流；手动切歌重新取；队列一改就作废；预取失败无声退回且不重试；地址快过期就放弃；暂停时不预取；备的和真播的是同一首（含随机模式）",
+		Tests: []string{
+			// 主线：备好的那一份在切歌那一刻**被用掉**（取流接口的次数停在 2）。
+			"TestTheNextTrackIsPreparedBeforeTheSwitch",
+			// 手动切歌重新取地址（次数到 3）。
+			"TestAManualSwitchResolvesTheAddressAgain",
+			// 队列一改 → 已备好的立刻作废（会重新备一份）。
+			"TestReorderingTheQueueThrowsThePreparedAddressAway",
+			// 失败无声退回（真播时按正常路径取一次），且不会每 50ms 重试。
+			"TestAPrefetchThatFailsFallsBackSilently",
+			// 备好的地址快过期了就放弃。
+			"TestAPreparedAddressThatExpiresIsThrownAway",
+			// 暂停时不预取。
+			"TestNothingIsPreparedWhileTheTrackIsPaused",
+			// 随机模式：备的和真播的是同一首。
+			"TestThePreparedTrackIsTheOneThatActuallyPlays",
+			// 队列内部那两半：预告和真抽是同一件事、预告不动队列。
+			"TestPeekNextAgreesWithAdvance",
+			"TestPeekNextDoesNotTouchTheQueue",
+			// 只解析地址：备好了也是一个字节都没下（CDN 一次都没被碰）。
+			"TestThePrefetchDoesNotDownloadAnything",
+			// **提前量真的挂在「还剩多久」上**（这一票最核心的那条验收）：
+			// 歌长到 15 秒之后才放完，量的是「备地址那一刻还剩多少」。
+			"TestTheAddressIsPreparedWhileTheTrackStillHasTimeLeft",
+			// 音乐库那一路（sid）也备得到——那是**另一条取流接口**。
+			"TestAMusicLibraryEntryIsPreparedToo",
+			// 作废的**真正保证**：下一首换成谁就放谁，陈旧的那份一个字节都不下。
+			"TestAStaleAddressIsNeverPlayed",
+		},
+	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：读屏软件用户**听不见**任何东西——
+		// 界面画得出来、测试全绿，而「下载下完了」「这一首放起来了」「搜出结果
+		// 了」这些事**一句也没有人告诉他**。
+		//
+		// 而它们在画面上**一个字都不占**：下载完成只是下载记录页上那一列多了一
+		// 枚绿勾，「这一首放起来了」只是播放条上多了一行歌名——而焦点不在那儿。
+		//
+		// 框架给的那个口子就是 `Context.Announce`（MyGo 自己的 toast 会自动念
+		// 一句，但我们用的是自己那套 toast，见 `internal/ui/toast.go`），而我们
+		// 此前**一个都没用**。
+		Category: Platform,
+		// 票 #321（2026-10-24）。
+		//
+		// ⚠️ **念和看是两件事**：`.Label(...)` 给的是「**这一枚是什么**」（那一枚
+		// 按钮叫什么、那一行是谁），播报给的是「**刚刚发生了什么**」。`internal/ui`
+		// 里那 95 处 `.Label`（带参数的那些才是给读屏软件的名字）一处都不许改成
+		// 播报——那会让读屏软件用户听到一屏控件名字，而**一件正在发生的事一句
+		// 也没有**。
+		Spec: "状态变化被接到平台的无障碍播报上：加载完成、下载完成、播放失败、搜索完成各念一遍；同一件事一帧里只念一遍；`.Label`（这一枚是什么）一处都没改成播报",
+		Tests: []string{
+			// 加载完成（在线那一段真的走完了取流 + 开解码器）和播放失败。
+			"TestALoadedTrackIsReadOut",
+			"TestAPlaybackFailureIsReadOut",
+			// 下载完成：下载队列那一头报一声，应用层念一句。
+			"TestTheCallbackIsToldWhenAnItemIsDone",
+			"TestADownloadThatFinishedIsReadOut",
+			// 搜索完成（**真的那一支**：B 站给的命中总数，不是屏幕上那几行）。
+			"TestASearchThatFoundSomethingIsReadOut",
+			"TestTheSearchTotalIsTheOneThatIsAnnounced",
+			// 快捷键录上了（界面上一个字都没有的那一种）。
+			"TestARecordedShortcutIsReadOut",
+			// 「一句只念一遍」（一帧建好几遍视图）+ 「提示也念一遍」。
+			"TestTheSameThingIsNotReadOutTwice",
+			"TestAToastIsAlsoReadOut",
+			// **接线那一条**：应用层发生了一件事 → 界面层念出来（中间就靠
+			// `AddAnnounce` 那一行，删掉它编译照样过、别的用例照样绿）。
+			"TestAPlayingFailureReachesTheScreenReaderThroughTheRealWiring",
+			// 看不见的那一扇窗不攒着；攒着的那几摊**有上限也有过期**。
+			"TestAnAnnouncementIsNotKeptWhileTheWindowIsInvisible",
+			"TestAnOldAnnouncementIsNotReadOut",
+			"TestAtMostThreeAnnouncementsAreKept",
+			// 念出去的是**人话**，不是英文系统错（读屏软件是逐字念的）。
+			"TestTheAnnouncedErrorIsNotTheRawGoError",
+			// **`.Label` 一处都没动**（这是这一票的另一半）。
+			"TestTheLabelsAreNotTurnedIntoAnnouncements",
+		},
+	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：页头右侧那枚开关**一个字都没有**
+		// （`Label` 是给读屏和测试器找它用的名字，屏幕上不画），于是用户看见
+		// 一枚绿绿的旋钮，却不知道拨它会不会把自己的播放记录报上去——那是**写
+		// 操作**，是隐私。界面上没有任何一样东西会报错。
+		Category: Platform,
+		// 票 #296（UX 报告 L-05）。
+		Spec: "历史记录页头右侧是「开关 + 「记录播放历史」文案」，文案照抄上游原文；**没有清空键**（2026-10-24 拍板的取舍：要摆它得先把 `/x/v2/history/clear` 那条接口链接上）",
+		Tests: []string{
+			// 那句话**看得见**（画面上有两处叫这句话的节点，而且开关右边
+			// 那一段真的有深色的字——只判 `HasText` 的话，开关自己的 `Label`
+			// 就够数了）。
+			"TestTheHistoryHeaderSaysWhatTheSwitchIs",
+			// **没有**清空键（守成：别有一天顺手把它加回来）。
+			"TestTheHistoryHeaderHasNoClearKey",
+		},
+	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：底色是中性灰而不是淡主色底，界面
+		// 不会报错、不会崩——只是「哪一首在放」少了一个一眼就认出来的信号。
+		//
+		// 而它是从**上游对齐审计**里查出来的一条（报告 §1 的 S-11）：上游那一行
+		// 是主色 20% 的淡绿底，我们一直是中性灰底。
+		Category: Platform,
+		// 票 #294（报告 §1 的 S-11，2026-10-24 拍板按上游改）。
+		//
+		// ⚠️ **DESIGN §七保护的是「主色当字色」的对比度，不是「主色当底色」**：
+		// §七 不该被扩大解释。淡主色底是**状态识别**，底上放的是普通文字。
+		Spec: "队列抽屉里「正在播放」那一行的**底色是主色 20% 那一层淡底**（浅色 #d2f7df / 深色 #193e29），**不是实心主色底**；底上的字（歌名 16 / 副题 14）**对比度都 ≥4.5:1**（深浅两套都量，且跟着用户自定义的主色重算）",
+		Tests: []string{
+			// 那一行的底就是那一层淡主色底（画面上量的，深浅两套），而且不是
+			// 实心主色底、也和旁边那一行不一样。
+			"TestTheQueuePlayingRowUsesAPalePrimaryBackground",
+			// 底上的字够读（歌名 + 副题，深浅两套 × 六种主色）。
+			"TestTheTextOnThePalePrimaryRowIsReadable",
+			// 那几个数钉死（浅 #d2f7df / 深 #193e29，底是不透明的）。
+			"TestThePalePrimaryRowKeepsItsNumbers",
+		},
+	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：那一行是实心主色底，界面不报错、不崩
+		// ——只是「哪一集在放」和上游差着一个数，而**队列抽屉的「正在播放」那一行
+		// 早就按上游改过了**（票 #294）：同一件事，两个抽屉差着两种画法。
+		Category: Platform,
+		// 票 #323（2026-10-24；BMG-173 的评审留的小账）。
+		//
+		// ⚠️ **它和票 #294 那一条是同一档**：上游那两处都是 HeroUI 的
+		// `variant="flat" color="primary"`，展开成 `bg-primary/20 text-primary-600`。
+		// 两个抽屉现在**共用同一份配方**（`internal/ui/playingrow.go`）。
+		Spec: "分集抽屉里「正在放」的那一集的**底色是主色 20% 那一层淡底**（浅色 #d2f7df / 深色 #193e29），**不是实心主色底**；底上的字（标题 13 / 编号 12）**对比度都 ≥4.5:1**（深浅两套都量，且跟着用户自定义的主色重算）",
+		Tests: []string{
+			// 那一行的底就是那一层淡主色底（画面上量的，深浅两套），而且不是
+			// 实心主色底、也和旁边那一行不一样。
+			"TestTheDrawerMarksTheEpisodeThatIsPlaying",
+			// 底上的字够读（标题 + 编号，深浅两套 × 六种主色）。
+			"TestTheTextOnThePalePartRowIsReadable",
+			// 那几个数钉死（浅 #d2f7df / 深 #193e29，标题 #127d38 / 编号 #6b6b74）。
+			"TestThePartDrawerPlayingRowKeepsItsNumbers",
+		},
+	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：抽屉「啪」地一下出现、或者弹到窗口
+		// 外面去就再也不回来——界面不报错、不崩，只是「来得很生硬」。
+		//
+		// 而「动的是布局位置、不是 transform」那一条在**软件渲染回退**时会差两个
+		// 数量级（DESIGN §五），所以这一条把它一起钉住。
+		Category: Platform,
+		// 票 #298（2026-10-24 拍板：**分两类，不一刀切**）。
+		//
+		// ⚠️ **「小浮层不加」说的是这一票不加**：Toast 那 250ms 的入场是 #207
+		// 自己定的（票 #180「Toast 语义色与入场」），而 #292 还要改它的曲线——
+		// 本票没动它（下面最后一条证据把它钉住）。
+		Spec: "队列抽屉从**右侧滑入**、往右滑出，**200ms** + `CubicBezier(0.16, 0.9, 0.21, 0.98)`，**不做回弹**；**开的时候先建面板再动，关的时候动完再拆**（退场那 200ms 里面板还在树上，滑完了才拆）；动画**不挡交互**（滑进去那 200ms 里面板和底下那片蒙版都点得动，退场途中再点一次外面**不会**把抽屉弹回来，而**退场那 200ms 里底下那片蒙版不吃点击**——它是透明的，看不见的东西吃点击就是「点不动」）；**动的是布局位置，不是 transform**；**每帧分配不涨**；菜单 / 小浮层 / 确认框 / Toast **不加**进出场",
+		Tests: []string{
+			// 方向和终点（画面上量的：面板左缘那道 1 像素的边线）。
+			"TestTheQueueDrawerSlidesInFromTheRight",
+			// 曲线和时长（滑到 100ms 时面板已经走完 95.4%）+ 不做回弹
+			//（整条轨迹单调、不越过终点）。
+			"TestTheQueueDrawerSlidesInOnThatCurveInThatTime",
+			"TestTheQueueDrawerDoesNotBounce",
+			// 开合和动画对齐：关掉之后**动完才拆**。
+			"TestTheQueueDrawerIsTornDownOnlyAfterItSlidOut",
+			// 退场那条曲线和时长（退到一半时退到 1182.5）——进场那一侧量了，
+			// 退场这一侧也得量：不然「退场瞬移」测试照样绿。
+			"TestTheQueueDrawerSlidesOutOnThatCurveInThatTime",
+			// 动画不挡交互 + 关是幂等的（退场途中再点外面不弹回来）。
+			"TestTheQueueDrawerDoesNotBlockClicksWhileItSlides",
+			// 退场那 200ms 里底下那片蒙版**不吃点击**（它是透明的，看不见的
+			// 东西吃点击就是「点不动」）。
+			"TestTheQueueDrawerBackdropStopsEatingClicksWhileItSlidesOut",
+			// 每帧分配没涨（进场那 200ms 和稳态一个数）。
+			"TestTheQueueDrawerSlideDoesNotAllocatePerFrame",
+			// 小浮层不加进出场（读语法树：确认框 / 菜单 / 弹窗 / 浮层那一批，
+			// 一个动画调用都没有）。
+			"TestTheSmallOverlaysHaveNoEnterOrExitAnimation",
+			// Toast 那 250ms 的入场**没被这一票动过**（它是 #207 定的，#292 要改
+			// 的是它的曲线不是它的时长）。
+			"TestTheToastKeepsItsOwnEntryAnimation",
+		},
+	},
+	{
+		// 归「播放」那一组：还是侧栏，但说的是**两组收藏夹**（票 #371）。
+		//
+		// 归这一组是因为它是**界面上的一处交互**（和头像下拉那一层同一类），
+		// 而不是一个接口。
+		Category: Play,
+		// 这一片是 2026-10-24 那次界面重设计（PR #357）之后**没跟上的一处**：
+		// 重设计改了侧栏本身（底色用方案的 sidebar、选中项底是 accentSoft 淡底），
+		// 而这一片还是老样子——它跟同一根侧栏里的菜单项放在一起是两套风格。
+		//
+		// ⚠️ **这一票只动样式**：取数、刷新、拖拽排序那一摊一个字没改（那是
+		// #362 的地盘）。
+		//
+		// 🔴 **判据是「和同一根侧栏里的参照物对齐」，不是「某个具体的数」**：
+		// 方案换了、主题的间距变了，那些数会跟着变，而「是不是一套」不会。
+		Spec: "侧栏里那两组收藏夹按当前风格画：左缩进和侧栏分组标题同一列、这一片的字都在同一列；分组标题和侧栏分组标题同一档（12 / 500 / 次要色）；收藏夹名 14 的正文色、选中那一行是 accentSoft 淡底、悬停是 flat.Feel；折叠态那枚图标在收藏夹页上亮起来，点开的那层浮层是卡片那一档（surface1 / radiusLg）",
+		Tests: []string{
+			// 这一片和侧栏是同一块：左沿一样、字在同一列。
+			"TestTheFavoritesAreaLinesUpWithTheSidebar",
+			// 空状态那句也在那一列（它替下面那些收藏夹名说话）。
+			"TestTheFavoritesEmptyLineLinesUpWithTheNames",
+			// 分组标题和侧栏的分组标题是同一档（字号 + 字色）。
+			"TestTheFavoritesGroupTitleIsTheSameKindOfTitleAsTheSidebarOne",
+			// 折叠态那层浮层是**卡片**那一档（底 surface1，不是页面底）。
+			"TestTheCollapsedFavoritesPanelIsACard",
+			// 折叠态那枚图标在收藏夹页上要亮（当前在哪唯一的指示）。
+			"TestTheCollapsedFavoritesIconLightsUpOnACollectionPage",
+			// 这一片的字在侧栏底上 ≥ 4.5:1（四个方案 × 深浅两套）。
+			"TestTheFavoritesTextIsReadableOnTheSidebar",
+			// 这一片上面留了一截（它是侧栏的第三段）。
+			"TestTheFavoritesAreaHasRoomAboveIt",
+			// 选中那一行是 accentSoft 淡底 + 按那层底现算的字（既有那条）。
+			"TestTheCurrentItemIsFlatEverywhere",
+		},
+	},
+	{
+		// 归「分页与路由」那一组：这一票动的是**翻页的闸门**。
+		//
+		// 🔴 **三个症状全是静默的**：页面停住不动、那个数偏大、界面上说一句
+		// **对用户是错的**话——没有一样会报错，界面只是「不太对」。
+		Category: Paging,
+		// 票 #344（issue #344，BMG-179 / PR #330 的评审留的三条 minor）。
+		Spec: "UP 空间「动态」那一页：丢掉的理由**分了类**（界面按类别说，「读不懂」不说成「形态不认识」）；丢掉的计数**按不同的动态算**（B 站翻页重叠时同一条只算一次）；**「到底了」看入口有没有前进**——0 条 + 入口前进了 = 继续拉下一页，0 条 + 入口没前进 = 到底",
+		Tests: []string{
+			// 分类（服务层那一层）：四类各数各的。
+			"TestTheDroppedOnesAreToldApartByReason",
+			// 分类（画面上那句话）：「读不懂」不许被说成「形态不认识」。
+			"TestWhatWeCannotReadIsNotCalledAnUnknownShape",
+			// 计数去重：两页里重叠的一条，计数是 1 不是 2。
+			"TestTheDroppedCountCountsDifferentDynamicsNotHowManyTimesTheyAppear",
+			// 跨页去重靠的是**身份**（服务层那一层）。
+			"TestTheSameDroppedDynamicInTwoPagesIsTheSameOne",
+			"TestADroppedOneWeCannotReadAtAllStillHasAStableIdentity",
+			// 闸门：0 条 + 入口前进了 → 继续拉；0 条 + 入口没前进 → 到底。
+			"TestAnEmptyPageWhoseOffsetMovesStillLoadsTheNextPage",
+			"TestAnEmptyPageWhoseOffsetStaysIsTheEnd",
 		},
 	},
 }

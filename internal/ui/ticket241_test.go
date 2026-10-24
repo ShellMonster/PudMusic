@@ -176,7 +176,7 @@ func TestTheConfirmPanelIsWideEnough(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// F-21　迷你窗的音量滑块不再���主色
+// F-21　迷你窗的音量滑块不再用主色
 // ─────────────────────────────────────────────────────────────────────────────
 
 // TestTheMiniVolumeIsNotTheAccent 钉住「迷你窗里那根音量滑块不是主色绿的」。
@@ -383,7 +383,9 @@ func darkestIn(tt *ui.Tester, x0, y0, x1, y1 int, bg color.RGBA) (color.RGBA, bo
 func TestTheQueueEmptyHintHasNoOrphan(t *testing.T) {
 	b := newTestShell(t)
 	b.s.drawerOpen = true
-	b.tt.Frame()
+	// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在窗口外面
+	//（它从右边滑进来），量墨迹量的是空的右半边。
+	settleDrawer(t, b.s, b.tt)
 	homeFrame(b.tt)
 
 	lines := inkLines(t, b.tt, queueEmpty.Hint, rgb(BuildTheme(app.DefaultSettings(""), false).Background))

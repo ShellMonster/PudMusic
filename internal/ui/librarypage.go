@@ -175,10 +175,11 @@ func (p *libraryPage) viewKeywordBox(c *ui.Context) bool {
 //
 // 拆两行是唯一在**每一个**宽度上都对的排法，代价是竖着多一行的位置。
 //
-// ⚠️ **这一段在票 #176 之后量过**：900 宽下四个预设从 X=267 起，双月选择器
-// （256 宽）在 X=527..783，那一句「不按日期筛」在 789..848——**都在页面区
-// （216..884）里面**。换掉两个 130 宽的日期输入框之后，那一排反而窄了 100 多
-// 像素（原来那两个框是 290）。
+// ⚠️ **这一段在票 #176 之后量过，票 #290 又量了一遍**：900 宽下四个预设从
+// **X=216 起**（贴内容区左缘——那一排原来是被居中的，票 #290 拿掉了那个
+// `.Center()`），双月选择器（256 宽）在 X=491..747，那一句「不按日期筛」在
+// 753..813——**都在页面区（216..884）里面**。换掉两个 130 宽的日期输入框之后，
+// 那一排反而窄了 100 多像素（原来那两个框是 290）。
 func (p *libraryPage) viewFilters(c *ui.Context, now time.Time) bool {
 	changed := false
 	ui.Column(c).Key("filter:bar").FillWidth().Gap(space.Px8).Children(func() {
@@ -312,8 +313,12 @@ func libraryRowFace(t *ui.Theme, playing bool) rowFace {
 // 画行首那几块，行高由**外面那一行**定死（`mt.height`）——所以这里不用管折行，
 // 而折行本来也不该发生（折了的话整张列表的行高就跟着歌名长短跳，理由见
 // `widgets/list/card.go` 的文件头）。
-func viewLibraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, cover *imgcache.Cache,
-	mt listMetrics, face rowFace, onRow bool, play func()) {
+//
+// ⚠️ **rows 是给「UP 名那一枚」用的**（票 #360）：它是这一份翻页列表自己的状态，
+// 而 UP 名要「点它进他的空间」得从它那儿拿两样——**那份操作接线**
+// （`rows.acts.OpenOwner`）和**那句记好的提示**（`rows.ownerTip`）。
+func viewLibraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, rows *pagedRows,
+	cover *imgcache.Cache, mt listMetrics, face rowFace, onRow bool, play func()) {
 	// 序号；正在放的那一行换成一段跳动的波形（上游 `music-list-item`）。
 	viewRowIndex(c, r.Index, face.playing, face.title, m.ID, m.Title, mt.index)
 
@@ -331,13 +336,18 @@ func viewLibraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, cover *imgcac
 			TextColor(face.title).MaxLines(mt.titleLines).Ellipsis("…")
 		if m.Owner != "" {
 			// UP 名 14（DESIGN.md「列表 UP 名 14」；上游是 `text-sm`）。
-			ui.Text(c, m.Owner).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Owner).
-				TextColor(face.own).MaxLines(1).Ellipsis("…")
+			//
+			// ⚠️ **点它进他的空间**（票 #360）：这一枚和列表里那一枚是同一件事
+			// （`list.OwnerName`）——有编号时可点，没有时照旧是普通字。
+			list.OwnerName(c, m.Owner, m.Owner,
+				rows.ownerTip.At(r.Index, m.Owner, list.OwnerTipText),
+				m.Item.ArtistMid, scale.Font(c, scale.Size14), leading.Owner,
+				face.own, rows.acts)
 		}
 	})
 }
 
-// libraryMenuItems 是两页共用的那三项菜单。
+// libraryMenuItems 是两页共用的那几项菜单。
 //
 // ⚠️ **每一项都要 Item 一遍**：菜单是这趟全部建出来的，只有被 Chosen 的那一项为
 // true（`ui/menu.go` 的 buildMenu）。少建一项，那一项就永远点不到。
@@ -346,11 +356,17 @@ func viewLibraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, cover *imgcac
 // 一首往后接」（`app.Queue` 到现在只有 `Append`），摆一个没有的项等于骗用户。
 // 「下载音频 / 下载视频」也没有：要写盘、要选目录，是 PLAN 的 P-26，而摆一个按了
 // 只说「现在还不能用」的项不如不摆——那两行和「在 B 站打开」长得一样。
+//
+// ⚠️ **「立即播放」和「从这一首往后听」是两件事**（票 #299，2026-10-24 拍板）：
+// 前者**只放这一首**（队列被换成这一首），后者是从这一行往后接一整段。两枚名字
+// 只差几个字而做的事差着一个队列——所以那一项不叫「播放」。
 func libraryMenuItems(m *ui.Menu, row libraryRow, a RowActions, i int) bool {
 	switch {
-	case m.Item("播放").Disabled(!row.CanPlay).Chosen():
+	case m.Item("立即播放").Disabled(!row.CanPlay).Chosen():
 		// ⚠️ 放不了的那一类**画成灰的而不是不画**：不画的话同一份列表里有的行能播
 		// 有的不能，用户会以为是坏的。PGC / 直播放不了（见 `app.playableOnline`）。
+		a.PlayNow(i)
+	case m.Item("从这一首往后听").Disabled(!row.CanPlay).Chosen():
 		a.Play(i)
 	case m.Item("添加到队列").Disabled(!row.CanPlay).Chosen():
 		a.Add(i)

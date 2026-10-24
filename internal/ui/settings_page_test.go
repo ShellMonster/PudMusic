@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/testproc"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -26,7 +27,7 @@ import (
 // 从 32 抬到 64（Biu 的 `h-16`）之后，写死的 40 就**比顶栏矮**了——于是一个
 // y=45 的控件（也就是压在顶栏底下那一行的）会被 `settingRect` 当成「已在可视区里」
 // 直接点下去，而点下去什么也不会发生。按 `navMinHeight` 算，顶栏再抬一次这里
-// 跟着抬，而���条那条断言仍然是「别点在顶栏上」。
+// 跟着抬，而**那条断言**仍然是「别点在顶栏上」。
 const (
 	pageTop    = navMinHeight + 8
 	pageBottom = 800 - playbarHeight - 8
@@ -352,7 +353,7 @@ func pageChildRoundTrip(t *testing.T) {
 // runPageChild 拉起一次本测试二进制自己。-test.run 让它只跑这一条。
 func runPageChild(t *testing.T, path, mode string) {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=TestSettingsMadeOnThePageSurviveAProcessRestart", "-test.count=1")
+	cmd := exec.Command(testproc.Path(t), "-test.run=TestSettingsMadeOnThePageSurviveAProcessRestart", "-test.count=1")
 	cmd.Env = append(os.Environ(),
 		pageChildEnv+"=1",
 		"BIU_PAGE_PATH="+path,
@@ -422,7 +423,7 @@ func TestTogglingAutoStartGoesThroughTheSystem(t *testing.T) {
 // 一个死数」——`MaxWidth` 是上限，可视区多窄它就多窄，最小窗口（900 - 侧栏
 // 200 = 700）上照抄一个固定 900 会把右边推出去。
 func TestTheSettingsContentIsCappedAndCentered(t *testing.T) {
-	const sideW = 200 // 默认侧栏宽（app.DefaultSideMenuWidth）
+	const sideW = int(app.DefaultSideMenuWidth) // 默认侧栏宽
 
 	for _, winW := range []int{1200, 1400, 1000} {
 		tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), at(winW, 800))
@@ -439,7 +440,8 @@ func TestTheSettingsContentIsCappedAndCentered(t *testing.T) {
 
 		// 内容那一段：左右各留一份内边距（settingsContentPad）。
 		blockLeft := left.X - settingsContentPad
-		blockRight := right.X + right.W + settingsContentPad
+		// 控件在分组卡片里：右边还隔着卡片的内边距加描边。
+		blockRight := right.X + right.W + settingsContentPad + settingsCardInset
 		avail := float32(winW - sideW)
 
 		want := float32(settingsContentMaxW)
@@ -494,7 +496,8 @@ func TestTheSettingsControlsShareOneBaseline(t *testing.T) {
 	if !ok {
 		t.Fatalf("设置页上没有「外观」那个分组标题，文字有 %q", tt.Texts())
 	}
-	baseline := head.X + head.W - settingsControlW
+	// 控件在分组卡片里，右沿比标题行往里缩一个卡片的内边距加描边。
+	baseline := head.X + head.W - settingsControlW - settingsCardInset
 
 	for _, c := range []struct {
 		label string

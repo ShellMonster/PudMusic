@@ -108,8 +108,11 @@ type StreamRef struct {
 
 	// ExpiresAt 是地址的失效时刻。
 	//
-	// 两条取流路径的来源不一样：投稿那路从地址上的 `deadline` 读
-	// （`deadlineOf`），音乐库那路用接口给的 `timeout` 秒数（`songExpiry`）。
+	// 🔴 **两条取流路径用的是同一个口径**（票 #220）：见 `expiryOf`——
+	// 「地址上的 `deadline` 优先，否则用接口给的有效秒数，都没有就当成立刻
+	// 失效」。投稿那路（`deadlineOf`）和音乐库那路（`songExpiry`）走的是
+	// **同一个函数**，而音乐库那一路多一个「接口给的有效秒数」的分支
+	// （`timeout`，一般三小时）——因为**只有那个接口给这个字段**。
 	ExpiresAt time.Time
 
 	// Bvid / Cid 是这条流属于哪个稿件的哪一集。换流之后拿它们比对，
@@ -130,6 +133,25 @@ type StreamRef struct {
 	// 两套编号不合并，理由见 `quality.go` 的文件头。判断「换回来的还是不是
 	// 同一档」用 `SameTier`，它两边都认。
 	MusicTier MusicTier
+
+	// SubtitleURLs 是**B 站自己带的那份字幕**的地址，**按该试的顺序**。
+	// 空列表 = 这一条没有字幕。
+	//
+	// ⚠️ **它跟着取流那一趟回来**（`data.subtitle.subtitles[0].subtitle_url`），
+	// 所以它**不多花一次网络往返**——上游 Biu 走的就是这一段
+	// （`get-lyrics.ts` 的 `getLyricsByBili`），见 `subtitle.go`。
+	//
+	// ⚠️ **它是一个列表，不是一个地址**：B 站给同一份字幕两个（不带鉴权参数的
+	// 那个、和带 `auth_key` 的那个），而**不带鉴权的那个可能要登录态**——而登录态
+	// 在这条路上到不了（`.bilibili.com` 的 cookie 发不到 `.hdslb.com`）。所以
+	// **下载的时候一个不行就换下一个**（见 `lyrics.FetchBiliSubtitle`）。
+	//
+	// ⚠️ **音乐库那一路是空的**：那个接口（`/audio/music-service-c/url`）的
+	// 返回里没有字幕。那一路要字幕得另外问一次（`Client.SubtitleURLs`）。
+	//
+	// ⚠️ **它不是凭据，但别把它写进日志**：地址上带着 B 站给的那一段参数，
+	// 而它是**这一首歌的字幕**——记下来就等于把歌词记在了日志里。
+	SubtitleURLs []string
 }
 
 // SameTrack 报告 ref 说的是不是同一首。
@@ -207,6 +229,13 @@ type playurlData struct {
 	Timelength int       `json:"timelength"` // 毫秒
 	Quality    int       `json:"quality"`
 	Dash       *dashInfo `json:"dash"`
+	// Subtitle 是**B 站自己带的那份字幕**。
+	//
+	// ⚠️ **它以前被丢掉了**（这一段以前只有上面三个字段）：B 站在取流的返回里
+	// 就带着字幕的地址，而我们没读，于是歌词只能靠用户在「找歌词」里搜。
+	// 上游 Biu 走的就是这一段（`get-lyrics.ts` 的 `getLyricsByBili`），
+	// 见 `subtitle.go` 的文件头。
+	Subtitle *subtitleBlock `json:"subtitle"`
 }
 
 // PlayURL 问 B 站要一条音频流。
@@ -276,9 +305,14 @@ func refFrom(d *playurlData, bvid, cid string, pref AudioQuality) (*StreamRef, e
 		Bitrate:   s.Bandwidth,
 		Codecs:    s.Codecs,
 		Container: containerOf(s),
-		ExpiresAt: deadlineOf(urls[0]),
+		// 🔴 **和音乐库那一路同一个口径**（票 #220）：见 `expiryOf`。
+		// 投稿这一路的接口**不给**有效秒数，所以只有 `deadline` 那个分支。
+		ExpiresAt: expiryOf(urls, 0, time.Now()),
 		Bvid:      bvid,
 		Cid:       cid,
+		// 🔴 **字幕地址**（票 #373 / #402）：取流那一趟顺带把 B 站的字幕
+		// 地址带回来，歌词自动获取就不用再问一次。
+		SubtitleURLs: subtitleURLsOf(d),
 	}
 	ref.Label = ref.Quality.Label(ref.Bitrate)
 	return ref, nil
@@ -330,4 +364,33 @@ func deadlineOf(raw string) time.Time {
 		return time.Time{}
 	}
 	return time.Unix(sec, 0)
+}
+
+// expiryOf 算这组地址什么时候失效。**两条取流路径用的是同一个口径**
+// （票 #220）。
+//
+//	地址上带 `deadline`	用它——最准，那是 B 站给这条地址的失效时刻
+//	接口另给了有效秒数	用它——音乐库那一路（`timeout`，一般三小时）
+//	都没有		**当成立刻失效**
+//
+// ⚠️ **投稿那一路没有「接口给的有效秒数」**：它的返回里没有那个字段，
+// 所以它只有第一个和第三个分支。于是**投稿那一路拿不到 `deadline` 的地址会
+// 被当成立刻失效**——而那个后果是**保守的**（提前换流，而不是拿一条死地址
+// 放到歌播到一半）。
+//
+// ⚠️ **都没有时不当成「永不过期」**（理由同 `deadlineOf`）：误判成永不过期
+// 会让换流那几条路径一次都不跑，而那种症状（歌播到一半静默停住）比提前
+// 换流难查得多。
+//
+// now 是时钟：走 `Client.now`（和 WBI 签名同一个钟）是为了假时钟下算得准。
+func expiryOf(urls []string, timeout int, now time.Time) time.Time {
+	if len(urls) > 0 {
+		if d := deadlineOf(urls[0]); !d.IsZero() {
+			return d
+		}
+	}
+	if timeout <= 0 {
+		return time.Time{}
+	}
+	return now.Add(time.Duration(timeout) * time.Second)
 }

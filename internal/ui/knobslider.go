@@ -65,6 +65,8 @@ type sliderLook struct {
 
 	// trackW 是轨道粗。
 	trackW float32
+	// hotTrackW 非 0 时，悬停 / 按下 / 有焦点的轨道粗从 trackW 长到它（设计规范 v0.1：4 → 6）。
+	hotTrackW float32
 
 	// knobW / knobH 是旋钮的宽和高（横着的时候宽是直径，高是胶囊的高）。
 	knobW, knobH float32
@@ -135,6 +137,7 @@ var knobFullLook = sliderLook{
 // `thumb: "w-4 h-4"`。
 var knobHoverLook = sliderLook{
 	trackW:       4,
+	hotTrackW:    6,
 	knobW:        16,
 	knobH:        16,
 	knobWhenIdle: false,
@@ -162,7 +165,7 @@ var knobHoverLook = sliderLook{
 // ⚠️ **它和框架那一颗唯一的不同是填充色**：框架的 `ui.Slider` 把填充色**写死**
 // 成 `t.Accent`（`mygo/ui/widgets.go` 的 `coreSlider`：`p.Fill(…, t.Accent, …)`），
 // 元素上没有换色的方法——所以迷你窗里那根音量滑块一直是**主色绿的实心填充**，
-// 而那是 320×100 那扇窗里**最大的一块颜色**（占 0.97%），比同窗那条播放位置
+// 而那是 320×84 那扇窗里**最大的一块颜色**（占 0.97%），比同窗那条播放位置
 // （主要）还响。
 //
 // 现在：**填过的那一段平时是次要色（中性灰），悬停 / 按下才变主色**——和播放条
@@ -281,6 +284,10 @@ func selfSlider(c *ui.Context, value *float64, lo, hi float64, look sliderLook) 
 			hot = 0
 		}
 		fill := idleFill.Mix(hotFill, hot)
+		trackW := look.trackW
+		if look.hotTrackW > 0 {
+			trackW += (look.hotTrackW - look.trackW) * hot
+		}
 
 		if look.vertical {
 			// 竖着：值从下往上（框架的映射：`1-(y-cy)/ch`，见 value_input.go）。
@@ -307,13 +314,13 @@ func selfSlider(c *ui.Context, value *float64, lo, hi float64, look sliderLook) 
 				fill, look.trackW/2)
 		} else {
 			cy = r.Y + r.H/2
-			track = ui.Rect{X: r.X, Y: cy - look.trackW/2, W: r.W, H: look.trackW}
+			track = ui.Rect{X: r.X, Y: cy - trackW/2, W: r.W, H: trackW}
 			// 旋钮的中心：frac=0 时压在轨道最左边，frac=1 时在最右边，半个旋钮留在
 			// 轨道里（那个 `PaddingX` 就是为它留的）。
 			cx = r.X + look.knobW/2 + (r.W-look.knobW)*frac
-			p.Fill(track, t.Border, look.trackW/2)
-			p.Fill(ui.Rect{X: track.X, Y: track.Y, W: cx - track.X, H: look.trackW},
-				fill, look.trackW/2)
+			p.Fill(track, t.Border, trackW/2)
+			p.Fill(ui.Rect{X: track.X, Y: track.Y, W: cx - track.X, H: trackW},
+				fill, trackW/2)
 		}
 
 		// 🔴 **键盘焦点也要画旋钮**（评审指出来的）：框架那一颗旋钮是**一直**画着的，

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/testproc"
 )
 
 // TestRouteFromURL 验 deep link 到路由的那一步。
@@ -94,7 +96,7 @@ const lockStayEnv = "BIU_TEST_LOCK_STAY"
 //
 // 为什么单开这个模式：另外两条并发测试靠的是框架的 unix socket，而那条路在
 // Windows 上能不能走要看系统（AF_UNIX，Win10 1703+ 才有）。而 `lockExclusive`
-// 本身在三个平台上都要验——Windows 那份是一个独立的实���（LockFileEx），上一轮
+// 本身在三个平台上都要验——Windows 那份是一个独立的实例（LockFileEx），上一轮
 // review 就抓到过它只在 darwin 上跑过、逻辑错了没人发现。这个模式不依赖任何
 // socket，所以**每个平台都会跑**。
 const lockProbeEnv = "BIU_TEST_LOCK_PROBE"
@@ -166,6 +168,22 @@ func releaseTestLock() {
 	}
 }
 
+// selfBinary 是本测试二进制**自己**的路径——子进程跑的就是它。
+//
+// ⚠️ **用 `internal/testproc` 那份副本**，不用 `os.Args[0]`：后者指向 `go test`
+// 的工作目录里那一份，而**那一份的寿命不是我们的**（别的 `go` 进程会把那些
+// 工作目录清掉——本机实测 2026-10-24：子进程起不来，红在
+// `fork/exec /tmp/go-build…: no such file or directory`）。
+//
+// 备不出副本时退回 `os.Args[0]`（从前那份做法）：那份起不来就是起不来，
+// 而这条用例要量的东西与副本无关。
+func selfBinary() string {
+	if p, err := testproc.Self(); err == nil {
+		return p
+	}
+	return os.Args[0]
+}
+
 // helperCmd 造一个「去抢锁、把答案写到 file」的子进程。
 //
 // ⚠️ 输出接缓冲区而不是用 CombinedOutput：那是拿 os.Pipe 再开 goroutine 抄的，
@@ -188,7 +206,7 @@ func helperProbeCmd(file string, sink *bytes.Buffer, stay bool) *exec.Cmd {
 }
 
 func helperCmdMode(file string, sink *bytes.Buffer, stay, probe bool) *exec.Cmd {
-	cmd := exec.Command(os.Args[0], "-test.run=^TestLockHelper$")
+	cmd := exec.Command(selfBinary(), "-test.run=^TestLockHelper$")
 	cmd.Env = append(os.Environ(), lockAnswerEnv+"="+file)
 	if stay {
 		cmd.Env = append(cmd.Env, lockStayEnv+"=1")
@@ -260,7 +278,7 @@ func TestLockRejectsASecondProcess(t *testing.T) {
 	var out bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), lockChildTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestLockHelper$")
+	cmd := exec.CommandContext(ctx, selfBinary(), "-test.run=^TestLockHelper$")
 	cmd.Env = append(os.Environ(), lockAnswerEnv+"="+answer)
 	cmd.Stdout, cmd.Stderr = &out, &out
 	cmd.WaitDelay = lockChildTimeout

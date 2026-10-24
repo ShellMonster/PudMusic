@@ -290,12 +290,26 @@ func (l *List) viewCard(r ui.ListRow) {
 		// ⚠️ **歌名和 UP 名各有一个宽度上限**（`listTitleMaxW`）：这一列是
 		// `Grow(1)`，吃掉了整行剩下的宽，而字没有上限的话一个 630 像素的歌名
 		// 会一路长到离右边那几列只差 31 像素（理由见那个常量）。
+		// 显示的字是清洗过的（`showOf`）：去掉视频宣传标签，歌手 / 专辑名挪到副标题，
+		// 现场版在副标题前加一枚「现场」小标签。
+		sh := showOf(m)
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).Children(func() {
-			ui.Text(c, m.Title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
+			ui.Text(c, sh.title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
 				TextColor(titleColor).MaxLines(listTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
-			if m.Owner != "" {
-				ui.Text(c, m.Owner).FontSize(scale.Font(c, scale.ListOwner)).LineHeight(leading.Owner).
-					TextColor(ownerColor).MaxLines(1).Ellipsis("…").MaxWidth(listTitleMaxW)
+			if sh.owner != "" || sh.live {
+				ownerLine(c, ownerRow{
+					shown: sh,
+					name:  m.Owner,
+					mid:   m.Item.ArtistMid,
+					// ⚠ **提示是记好的那一份**（`l.ownerTip`）：现算的话每帧
+					// 每一行一次字符串拼接（票 #313 那一类）。
+					tip:   l.ownerTip.At(i, m.Owner, OwnerTipText),
+					size:  scale.Font(c, scale.ListOwner),
+					lh:    leading.Owner,
+					color: ownerColor,
+					maxW:  listTitleMaxW,
+					acts:  l.acts,
+				})
 			}
 		})
 
@@ -315,7 +329,9 @@ func (l *List) viewCard(r ui.ListRow) {
 		// 而表头那一列是永远在的（表头只说这一页真有的列）。少留的话「⋯」在有
 		// 时长的行上靠右、在没有的靠左——而表头上那个空位对着的是一个固定位置。
 		ui.Box(c).Width(durationWidth).Children(func() {
-			if s := formatDuration(m.Duration); s != "" {
+			// ⚠️ **时长是记好的那一份**（`l.durText`）：现算的话每帧每行一次
+			// `fmt.Sprintf`，一屏十来行就是十来次（票 #313）。
+			if s := l.durText.At(i, m.Duration, formatDuration); s != "" {
 				ui.Text(c, s).Width(durationWidth).TextAlign(ui.End).
 					FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 			}
@@ -324,7 +340,9 @@ func (l *List) viewCard(r ui.ListRow) {
 		// ⑦ 行尾那枚「⋯」。点开的是**这一行的菜单**，和右键同一份
 		//（`operation.go` 的文件头）。
 		ui.Box(c).Width(OperationColWidth).Children(func() {
-			Operation(c, OperationLabel(m.Title), titleColor,
+			// ⚠️ **无障碍名字是记好的那一份**（`l.opText`）：现算的话每帧每行
+			// 一次字符串拼接（票 #313）。
+			Operation(c, l.opText.At(i, m.Title, OperationLabel), titleColor,
 				func(m *ui.Menu) { l.buildMenu(m, i) })
 		})
 	})
@@ -367,12 +385,23 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 		l.viewCheckbox(c, i, m.Title)
 		l.viewIndex(c, i, playing, titleColor, m.Title, compactIndexWidth, 11)
 
+		sh := showOf(m)
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px2).Children(func() {
-			ui.Text(c, m.Title).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Compact).
+			ui.Text(c, sh.title).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Compact).
 				TextColor(titleColor).MaxLines(compactTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
-			if m.Owner != "" {
-				ui.Text(c, m.Owner).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Owner).
-					TextColor(ownerColor).MaxLines(1).Ellipsis("…").MaxWidth(listTitleMaxW)
+			if sh.owner != "" || sh.live {
+				ownerLine(c, ownerRow{
+					shown: sh,
+					name:  m.Owner,
+					mid:   m.Item.ArtistMid,
+					// ⚠ **提示是记好的那一份**：理由同上面那一处。
+					tip:   l.ownerTip.At(i, m.Owner, OwnerTipText),
+					size:  scale.Font(c, scale.Size12),
+					lh:    leading.Owner,
+					color: ownerColor,
+					maxW:  listTitleMaxW,
+					acts:  l.acts,
+				})
 			}
 		})
 
@@ -382,7 +411,8 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 		l.viewPlayCount(c, i, t, cols, compactPlayCountWidth, 12)
 		l.viewPubTime(c, i, t, cols, compactPubTimeWidth, 12)
 		ui.Box(c).Width(compactDurationWidth).Children(func() {
-			if s := formatDuration(m.Duration); s != "" {
+			// 理由同上面那一处（`l.durText`）。
+			if s := l.durText.At(i, m.Duration, formatDuration); s != "" {
 				ui.Text(c, s).Width(compactDurationWidth).TextAlign(ui.End).
 					FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 			}
@@ -390,7 +420,9 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 
 		// 行尾那枚「⋯」，理由同普通那一行。
 		ui.Box(c).Width(OperationColWidth).Children(func() {
-			Operation(c, OperationLabel(m.Title), titleColor,
+			// ⚠️ **无障碍名字是记好的那一份**（`l.opText`）：现算的话每帧每行
+			// 一次字符串拼接（票 #313）。
+			Operation(c, l.opText.At(i, m.Title, OperationLabel), titleColor,
 				func(m *ui.Menu) { l.buildMenu(m, i) })
 		})
 	})
@@ -442,7 +474,8 @@ func (l *List) viewPlayCount(c *ui.Context, i int, t *ui.Theme, cols Columns, wi
 		return
 	}
 	ui.Box(c).Width(width).Children(func() {
-		if s := PlayCountText(l.songs[i].View); s != "" {
+		// ⚠️ **播放量是记好的那一份**（`l.countText`）：理由同上面那两处。
+		if s := l.countText.At(i, l.songs[i].View, PlayCountText); s != "" {
 			ui.Text(c, s).Width(width).TextAlign(ui.End).
 				FontSize(scale.Font(c, font)).TextColor(t.TextMuted).MaxLines(1)
 		}
