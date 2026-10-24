@@ -72,6 +72,11 @@ type biliFixture struct {
 	// nav 是 nav 接口那一支回的 data。nil = 回一个空对象（B 站说「没登录」
 	// 时的形状，见 `bili.Nav`）。
 	nav map[string]any
+	// loginUID 是扫码成功时下发的那个 uid（DedeUserID）。
+	//
+	// 空串 = 用默认那个（"424242"）。**换账号**那一组用例要的是「扫出来的是
+	// 另一个人」，所以给它一个可改的口子（见 `onScanAs`）。
+	loginUID string
 	// handlers 是**别的**接口各自的回答（收藏夹那两个，见 `on`）。
 	//
 	// ⚠️ 它和 `nav` 分开是因为那一格是「登录这一整件事」自己要问的，
@@ -184,6 +189,10 @@ func newBiliFixture(t *testing.T) *biliFixture {
 			scan = f.scans[0]
 			f.scans = f.scans[1:]
 		}
+		uid := f.loginUID
+		if uid == "" {
+			uid = "424242"
+		}
 		f.mu.Unlock()
 
 		switch r.URL.Path {
@@ -198,7 +207,7 @@ func newBiliFixture(t *testing.T) *biliFixture {
 			case 0:
 				http.SetCookie(w, &http.Cookie{Name: "SESSDATA", Value: "sess-from-fixture", Path: "/"})
 				http.SetCookie(w, &http.Cookie{Name: "bili_jct", Value: "jct-from-fixture", Path: "/"})
-				http.SetCookie(w, &http.Cookie{Name: "DedeUserID", Value: "424242", Path: "/"})
+				http.SetCookie(w, &http.Cookie{Name: "DedeUserID", Value: uid, Path: "/"})
 			}
 			writeFixtureJSON(t, w, 0, "0", map[string]any{
 				"code":          scan,
@@ -234,6 +243,18 @@ func (f *biliFixture) onScans(codes ...int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.scans = codes
+}
+
+// onScanAs 设好「接下来扫成功的是这个 uid」。
+//
+// 换账号那一组用例要的就是这个：已登录的时候再扫一次码，扫出来的是**另一个人**
+// ——于是登录态换人了（见 `app.accountChanged`）。
+//
+// ⚠️ **只影响扫码**：启动时读回来的登录态是另一个口子（`favStore`）。
+func (f *biliFixture) onScanAs(uid string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.loginUID = uid
 }
 
 // stepByHand 改成每次轮询都要测试放行。
