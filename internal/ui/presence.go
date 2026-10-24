@@ -125,11 +125,77 @@ func (s *Shell) noteWindow(apply func(*windowPresence)) {
 // 看不见的时候没有帧可以轮询（这正是这一票要达到的效果），所以「回来了」只能
 // 靠系统推过来。
 //
-// ⚠️ **没覆盖「被别的应用完全盖住」**：框架的 `host.occluded()` 只对**自发**
-// 的动画帧生效（`mygo/ui/runtime.go` 的 `next()`），而外部 `Invalidate` 照样
-// 会画；而 `mygo` 没有把「这个窗口被遮住了」暴露给应用层。真机上的表现是：
-// 窗口被完全盖住、又没失焦时仍会按 tick 画帧。票面验收列的是失焦/最小化/隐藏
-// 三条，这一条留待框架给出 API 之后再补。
+// # 这一层补的是「失焦」——框架管的是「不可见」
+//
+// 上面三个维度里，**最小化和隐藏框架也管**（`NSWindow.occlusionState` 在这两
+// 档不是 visible），**失焦框架不管**：窗口还在屏幕上，只是没有焦点，
+// `occlusionState` 仍然是 visible。**失焦这一档是框架管不了的，是这一层补的。**
+//
+// # 「被别的窗口完全盖住」：框架在帧那一层已经管了，MyGo 不用管
+//
+// ⚠️ **这里曾经写反了**（票 #393 订正）。原文写的是「框架的 `host.occluded()`
+// 只对**自发**的动画帧生效，而外部 `Invalidate` 照样会画」——**与框架的实际
+// 行为相反**。框架的真实行为（mygo v0.6.3）：
+//
+//   - `mygo/ui/runtime.go:685-688`：`surfaceFrame()` 的**第一句**就是
+//     `if rt.holdFrame() { return }`——**每一帧**都要先过 `holdFrame()`，不管
+//     这一帧是谁要来的。
+//   - `mygo/ui/runtime.go:704-717` `holdFrame()`：`rt.host.occluded()` 为真就把
+//     这一帧扣住（`rt.held = true`，并把 `rt.redraw` / `rt.repaintDue` 清掉）。
+//     **外部 `Invalidate()` 要来的帧同样被扣掉**——「自发动画」和「外面要来的」
+//     在这里没有区别。
+//   - `mygo/ui/window.go:296-306` `windowHost.occluded()` →
+//     `mygo/internal/darwin/surface.go:302-308` `Occluded()`：用的是
+//     **`NSWindow.occlusionState`** 的 `occlusionStateVisible` 位——「被完全盖住」
+//     「最小化」「隐藏」都不在这一位里。
+//   - 唯一的例外：`holdFrame()` 里 `rt.input` 为真时不扣——输入法和无障碍需要
+//     那一帧（`mygo/ui/runtime.go:706`）。
+//
+// 所以「被盖住」这一档**不用在这里加任何代码**：帧在进到 `Shell.View` 之前就被
+// 扣住了，这一扇窗连「被叫醒」的机会都没有。**这一层（`presence.go`）补的是
+// 框架管不了的那一档：失焦。**
+//
+// # 停帧之后：框架自己把图形内存还回去（trim）
+//
+// 帧停了，图形内存不会一直占着。`mygo/internal/gpu/metal/metal.go:1836-1893`：
+// 每次 present 之后 `armTrim()`；窗口**连续 2 秒没画**就 `trim()`——
+// `releaseTextures()` 把 Metal 纹理全释放，再把 layer 的 `setDrawableSize:` 改成
+// 1×1（`trimAfter = 2 * time.Second`）。
+//
+// ⚠️ **所以「画着的时候占用高」是框架的设计，不是泄漏**：#364 / BMG-211 实测
+// **画着时 160~166 MB，停帧 2 秒后 74~79 MB**（三步：`releaseTextures()` 把
+// Dirty 变成 Reclaimable → `setDrawableSize: 1×1` 把 IOSurface 缩下去 → 系统
+// 逐步回收 Reclaimable）。**别去查「为什么画着的时候 160 MB」——那正是「画着
+// 的时候留着、不画了还回去」。**
+//
+// # 本地怎么验（真窗口，CI 跑不了）
+//
+// 无头 Tester 造不出「被盖住」：`mygo/ui/headless.go:88` 的 `occluded()` 只看
+// `h.hidden`，而它没有对外的开关；而且 Tester 走的是软件渲染器
+// （`renderOffscreen`），**根本不经过 Metal**，也就没有 trim。
+//
+// 真窗口的验法：起两个窗口，一个盖住另一个 → 数帧 → 再用
+// `footprint -p <pid>` 看图形侧。⚠️ **footprint 的读数对机器负载敏感**
+// （footprint 自己也要占内存），低负载（load 8 以下）才有数；**而帧计数不受
+// 负载影响**——所以判据是帧数，footprint 只看**相对变化**。
+//
+// 本票本地实测（2026-10-25，macOS；纯 mygo 探针，两扇窗 900×650 / 1100×850，
+// 一张 1024×1024 的图撑住图形侧）：
+//
+//	被完全盖住 4 秒（从窗口出现起就盖着）→ 那扇窗一共画了 1 帧
+//	露出来 4 秒                          → 画了 180 帧（60 fps）
+//	再被盖住 9 秒                        → 头 ~3 秒还在画（macOS 更新
+//	                                        `occlusionState` 有延迟），
+//	                                        之后一帧都没多画
+//
+// trim 也确实把图形侧还回去了：`footprint` 的 `IOAccelerator (graphics)` 从
+// Dirty 6784 KB 降到 2352 KB（那张图被 `releaseTextures()` 释放了），
+// `Owned physical footprint (unmapped) (graphics)` 的 Reclaimable 从 54 MB
+// 归零。⚠️ **绝对值跟 MyGo 真实界面的 160 MB 不可比**（探针的界面简单得多），
+// **可比的是机制**：画着的时候留着，不画了还回去。
+//
+// CI 能钉的只有这条链的第一环（「窗口不可见 → 不画帧」），见
+// `presence_frames_test.go`。
 func (s *Shell) watchWindow(w *mygo.Window) {
 	if w == nil {
 		return
