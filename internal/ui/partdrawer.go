@@ -123,8 +123,12 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 	if btn.Clicked() {
 		s.partOpen = !s.partOpen
 	}
-	// Popover 自己处理「点外面关掉」和 Escape，所以这里只管开关本身
-	// （和 `viewRate` 同一个写法）。
+	// 「点外面关掉」是框架那个浮层自己管的（`mygo/ui/base.go` 的 `popover`），
+	// 所以这里只管开关本身（和 `viewRate` 同一个写法）。
+	//
+	// ⚠️ **Escape 那一条有条件**：框架把键先给焦点链，它们都不处理才轮到浮层
+	// （`mygo/ui/input.go` 的 `routeKeys`）——焦点在一个自己吃 Esc 的控件里时，
+	// 这一块关不掉（理由见 `playbar.go` 里 `viewTrackError` 那处注释）。
 	//
 	// ⚠️ 浮层那一层外面包一层 Guard（铁律三）：它是在**播放条这一层的布局之外**
 	// 单独建的，它一崩坏掉的是整块浮层，而报错的地方在播放条上——两者对不上，

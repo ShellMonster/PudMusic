@@ -76,11 +76,14 @@ func homeFrame(tt *ui.Tester) {
 // 那 8 DIP），而逐像素的断言量到的就是那一帧（一个「切过去就换内容」的硬切
 // 实现也是那种画面，所以那样的断言断不出「有没有过渡」）。
 //
-// ⚠️ **推 250ms**：过渡本身是 200ms（`homeBodyDuration`），留 50ms 余量。
-// 主 Tab 那个滑块的弹簧（`tabs.go` 的 `TabSlide`，实测 453ms 才收手）**不在
-// 这条的范围里**——它在 Tab 那一排上，而这一组要量的是内容那一块。
+// ⚠️ **推的是整段过渡**（票 #238）：那一段现在是**两段**——旧的先淡出
+// （`homeFadeOut`）、新的后淡进（`homeFadeIn`）——所以要推的是**两段加起来**
+// 再留一点余量。
+//
+// ⚠️ **主 Tab 那个滑块的弹簧**（`tabs.go` 的 `TabSlide`，实测 453ms 才收手）
+// **不在这条的范围里**——它在 Tab 那一排上，而这一组要量的是内容那一块。
 func settleHome(tt *ui.Tester) {
-	tt.Advance(homeBodyDuration + 50*time.Millisecond)
+	tt.Advance(homeFadeOut + homeFadeIn + 50*time.Millisecond)
 	tt.Frame()
 }
 

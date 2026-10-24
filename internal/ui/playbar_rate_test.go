@@ -158,7 +158,7 @@ func TestClickingAStepSetsTheRate(t *testing.T) {
 
 // TestTheRateButtonDoesNotSquashTheTitle 盯多出来的 64px 没有把歌名挤没。
 //
-// 播放条是固定 88 高的一行，右边多一格就往左挤。挤掉的正是歌名——而歌名挤没了
+// 播放条是固定 76 高的一行，右边多一格就往左挤。挤掉的正是歌名——而歌名挤没了
 // 之后**界面看不出坏了**：字还在那儿，只是一个字一行、或者被裁掉半个。
 func TestTheRateButtonDoesNotSquashTheTitle(t *testing.T) {
 	for _, width := range []int{760, 900, 1000, 1200, 1280} {

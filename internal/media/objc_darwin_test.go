@@ -176,7 +176,7 @@ func TestNowPlayingInfoRoundTrip(t *testing.T) {
 // TestThePlaybackRateFollowsTheState 盯速率跟着状态走。
 //
 // 暂停/停止时必须是 0：非 0 的话控制中心会以为歌还在放，进度条自己往前
-// 爬，而歌是停着的——用户看锁屏就能看出劲不对。
+// 爬，而歌是停着的——用户看锁屏就能看出不对劲。
 func TestThePlaybackRateFollowsTheState(t *testing.T) {
 	p := mpTestPlatform(t)
 	center := nowPlayingCenter()

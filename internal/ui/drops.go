@@ -67,8 +67,9 @@ func dropCountsOf(drops []bili.DroppedDynamic) bili.DropCounts {
 
 // dropCountText 是按类别的计数（给日志看的一行字）。
 func dropCountText(c bili.DropCounts) string {
-	return fmt.Sprintf("形态不认识 %d、读不懂 %d、没有身份 %d、什么也没有 %d",
-		c.ShapeUnknown, c.Unreadable, c.NoIdentity, c.Empty)
+	return fmt.Sprintf("形态不认识 %d、读不懂 %d、没有身份 %d、什么也没有 %d、"+
+		"投稿没有稿件号 %d、还不认识的类别 %d",
+		c.ShapeUnknown, c.Unreadable, c.NoIdentity, c.Empty, c.NoArchive, c.Other)
 }
 
 // dropPhrases 是「丢掉的那几条」按类别说的话，**一类一句**。
@@ -77,8 +78,12 @@ func dropCountText(c bili.DropCounts) string {
 // 说成「落在别的形态上了」，而那句话对用户是**错的**——B 站不是换了一种
 // 形态，是**它返回的形状变了**。
 //
-// 返回的顺序是固定的（形态 → 读不懂 → 没有身份 → 什么也没有），所以同一份
-// 计数每次说出来都是同一句。
+// ⚠️ **「投稿没有稿件号」不许混进「什么也没有」**（票 #344 的评审）：那一类
+// **带着正文**（UP 写的那段话就在里面），只是稿件号是空的、放不出来。
+// 说成「什么也没有」就是**对用户说错话**——听起来像「他什么都没发」。
+//
+// 返回的顺序是固定的（形态 → 读不懂 → 没有身份 → 什么也没有 → 投稿没有稿件号
+// → 还不认识的类别），所以同一份计数每次说出来都是同一句。
 func dropPhrases(c bili.DropCounts) []string {
 	var out []string
 	if c.ShapeUnknown > 0 {
@@ -92,6 +97,12 @@ func dropPhrases(c bili.DropCounts) []string {
 	}
 	if c.Empty > 0 {
 		out = append(out, fmt.Sprintf("有 %d 条什么也没有，画不出来", c.Empty))
+	}
+	if c.NoArchive > 0 {
+		out = append(out, fmt.Sprintf("有 %d 条是投稿却放不出来（没有稿件号）", c.NoArchive))
+	}
+	if c.Other > 0 {
+		out = append(out, fmt.Sprintf("有 %d 条属于还不认识的类别", c.Other))
 	}
 	return out
 }

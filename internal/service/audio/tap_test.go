@@ -184,7 +184,7 @@ func TestEachBlockIsTaggedWithItsSourceFrames(t *testing.T) {
 	if got := tp.At(999999); got == nil || &got[0] != &second[0] {
 		t.Error("问一个还没解到的位置时没有回最新的一段")
 	}
-	// 比留着的最老一段还早：回空。宁可画一条基线，也不要拿错的顶上。
+	// 比留着的最老一段还早：回空。宁可**什么都不画**，也不要拿错的顶上。
 	if got := tp.At(-1); got != nil {
 		t.Error("问一个比历史还早的位置时给了结果")
 	}

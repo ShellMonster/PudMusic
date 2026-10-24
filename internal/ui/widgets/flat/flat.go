@@ -10,6 +10,12 @@
 // 这和 `widgets/iconset` 是同一个解法（那里也是因为 `widgets/imgcache` 要图标、
 // `internal/ui` 又 import `imgcache` 才把资源挪出去的）。
 //
+// # 这一族里也有「名字型链接」那一档
+//
+// `Link` 是同一个配方的另一个变体：**一句话字 + 悬停下划线**，**没有按钮壳**
+// （上游 Biu 的作者名就是 `hover:underline`）。它和 `Button` 分开，是因为
+// `Button` 有二十几处调用方（全应用的按钮），动它就是动全应用。
+//
 // # ⚠️ 别在别处再写一份「无描边按钮」
 //
 // 这份配方是 BMG-70 那份视觉调研（`~/.herdr-projects/reports/Biu_MyGo/70/`）的
@@ -68,6 +74,72 @@ func Button(c *ui.Context, label string) ui.Element {
 		b.Children(func() { ui.Text(c, label).SingleLine() })
 	}
 	return feel(c, b)
+}
+
+// Link 是「名字型链接」那一档：**一句话字**，指针落上去时底下长出一道**下划线**，
+// **没有按钮壳**——没有底色、没有描边、没有圆角、没有胶囊。
+//
+// # 它和 `Button` 的差别就是那三层壳
+//
+// `Button` 是「左右各留一段内边距 + 圆角」：名字因此被一个**胶囊**包着，
+// 而指针落上去时 `feel` 再往那个胶囊上压一层半透明前景色——**悬停时那块底牌
+// 才显出来**。用户 2026-10-25 说的就是这一处：「那个可点击的效果的不要做成
+// 一个胶囊一样的包着那个名称的，用正常的下划线就行，像 biu 里的那样」。
+//
+// 上游 Biu 的作者名是 `hover:underline`（动态流条目上的 `User` 那一格）——
+// **没有按钮壳、没有底色、没有胶囊**，指针落上去时名字底下长出一道下划线。
+//
+// # 为什么还是一枚**按钮**（`ui.ButtonBase`），而不是一段文字
+//
+// 「点得动」得**真的能点**：命中区、无障碍名字、键盘可达三样都还在。
+// `ui.ButtonBase` 给的就是这三样——它 `Focusable`（Tab 能走到、回车 / 空格能
+// 按下去）、`Clicked()` 认指针也认键盘，而辅助技术从它里面的字读出名字
+// （`RoleLink` 是叶子角色，名字取自 `innerText`）。
+//
+// 而它**自己不带任何外观**：底色 / 描边 / 圆角全是 `ui.Button`（框架的
+// `styleButton`）加的，`ButtonBase` 一样都没有。
+//
+// ⚠️ **别用 `ui.Text(...).OnClick(...)` 那一套**：那样的一段字**拿不到键盘焦点**
+// （`Focusable` 没设），于是它只能用鼠标点——而「键盘可达」是这一档要保住的东西。
+//
+// # 悬停反馈是「一道下划线」，颜色跟着主题走
+//
+// 下划线画在 `ink.AccentOn(theme)` 那一档主色上：它**从当前主色现算**
+// （主色是用户可设的），深浅两套都 ≥4.5:1（`widgets/ink` 的 `AccentOn` 保证），
+// 而主题方案换了它跟着换——**这里没有一个写死的绿**。
+//
+// ⚠️ **下划线的颜色和字自己的颜色是两回事**：字色由调用方给（正文色 / 次要色），
+// 而下划线走 `DecorationColor`——那是节点上另一个字段。所以调用方在 `Link` 之后
+// 链一个 `.TextColor(...)` **不会**把悬停时那道下划线改掉。
+//
+// 🔴 **别动 `Button` 的本体**：它有二十几处调用方（全应用的按钮），改它就是改
+// 全应用。**这一档是另开的一个变体**，不是把 `Button` 改掉。
+func Link(c *ui.Context, label string) ui.Element {
+	// `ui.ButtonBase` = 一行、内容居中、能拿焦点、能点——**没有底色 / 描边 / 圆角**。
+	//
+	// ⚠️ **内容左对齐**（`Justify(ui.Start)`）：名字都在左对齐的那一列里，而框架
+	// 的按钮内容默认居中——居中的话那句话会飘到那一列的中间（理由和
+	// `internal/ui/playbar.go` 的 `viewArtist` 顶上那一段一样）。
+	b := ui.ButtonBase(c).
+		Padding(space.None, space.None).
+		Justify(ui.Start).
+		Cursor(ui.CursorPointer).
+		Role(ui.RoleLink)
+	if label != "" {
+		b.Children(func() { ui.Text(c, label).SingleLine() })
+	}
+	return linkFeel(c, b)
+}
+
+// linkFeel 铺上「悬停时那道下划线」。
+//
+// ⚠️ **「铺不铺」在建元素时问**（理由同 `feel`）：指针位置不进事件循环就不变，
+// 而 `Element` 上没有 `styleFn`，挂不进 paint 回调。
+func linkFeel(c *ui.Context, e ui.Element) ui.Element {
+	if e.Hovered() {
+		e = e.Underline().DecorationColor(ink.AccentOn(c.Theme()))
+	}
+	return e
 }
 
 // IconButton 是一个**只画一个图标**的扁平按钮。

@@ -222,10 +222,10 @@ func TestTheOwnerIsNeverSqueezedOutOfExistence(t *testing.T) {
 // 票 #219 之后**没有了**——三枚键搬到了**封面右边第三段**，而 UP 名是那一列
 // 自己的第二行。
 //
-// 这一票之前踩过同一个坑：为了塞下一个控件把歌名挤成 20px 宽、88px 高的竖条，
+// 这一票之前踩过同一个坑：为了塞下一个控件把歌名挤成 20px 宽、76px 高的竖条，
 // 而**界面上看不出坏了**——字还在那儿，只是一个字一行。
 //
-// 断的是两件事：歌名横向要占得开（不能被压成竖排），三行都要留在 88 高的
+// 断的是两件事：歌名横向要占得开（不能被压成竖排），三行都要留在 76 高的
 // 播放条里（不能被裁）。
 func TestTheTextColumnDoesNotSquashTheTitle(t *testing.T) {
 	for _, width := range []int{760, 900, 1000, 1200, 1280} {
@@ -252,7 +252,7 @@ func TestTheTextColumnDoesNotSquashTheTitle(t *testing.T) {
 					width, title.Y, title.H, playbarHeight)
 			}
 			// 三行都得在播放条里：UP 名那一行和错误那一行是这一票新加的，
-			// 它们被 88 高裁掉的话用户看到的是「有话说了却看不见」。
+			// 它们被 76 高裁掉的话用户看到的是「有话说了却看不见」。
 			for _, text := range []string{"一个名字很长的 UP 主名字", "打不开：连不上 B 站这条音频流了"} {
 				r, ok := tt.Find(text)
 				if !ok {
