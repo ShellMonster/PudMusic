@@ -313,8 +313,12 @@ func libraryRowFace(t *ui.Theme, playing bool) rowFace {
 // 画行首那几块，行高由**外面那一行**定死（`mt.height`）——所以这里不用管折行，
 // 而折行本来也不该发生（折了的话整张列表的行高就跟着歌名长短跳，理由见
 // `widgets/list/card.go` 的文件头）。
-func viewLibraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, cover *imgcache.Cache,
-	mt listMetrics, face rowFace, onRow bool, play func()) {
+//
+// ⚠️ **rows 是给「UP 名那一枚」用的**（票 #360）：它是这一份翻页列表自己的状态，
+// 而 UP 名要「点它进他的空间」得从它那儿拿两样——**那份操作接线**
+// （`rows.acts.OpenOwner`）和**那句记好的提示**（`rows.ownerTip`）。
+func viewLibraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, rows *pagedRows,
+	cover *imgcache.Cache, mt listMetrics, face rowFace, onRow bool, play func()) {
 	// 序号；正在放的那一行换成一段跳动的波形（上游 `music-list-item`）。
 	viewRowIndex(c, r.Index, face.playing, face.title, m.ID, m.Title, mt.index)
 
@@ -332,8 +336,13 @@ func viewLibraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, cover *imgcac
 			TextColor(face.title).MaxLines(mt.titleLines).Ellipsis("…")
 		if m.Owner != "" {
 			// UP 名 14（DESIGN.md「列表 UP 名 14」；上游是 `text-sm`）。
-			ui.Text(c, m.Owner).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Owner).
-				TextColor(face.own).MaxLines(1).Ellipsis("…")
+			//
+			// ⚠️ **点它进他的空间**（票 #360）：这一枚和列表里那一枚是同一件事
+			// （`list.OwnerName`）——有编号时可点，没有时照旧是普通字。
+			list.OwnerName(c, m.Owner, m.Owner,
+				rows.ownerTip.At(r.Index, m.Owner, list.OwnerTipText),
+				m.Item.ArtistMid, scale.Font(c, scale.Size14), leading.Owner,
+				face.own, rows.acts)
 		}
 	})
 }

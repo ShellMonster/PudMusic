@@ -148,6 +148,10 @@ type Grid struct {
 	countText rowkey.Memo[int64, string]
 	opText    rowkey.Memo[string, string]
 
+	// ownerTip 记着每一格那句「打开 X 的空间」（票 #360）。理由和 `List` 那一个
+	// 一模一样（见 list.go 的同名字段）。
+	ownerTip rowkey.Memo[string, string]
+
 	// sel 是选中的那一**首**，-1 是没选。帧里的点击由每一格自己写进来。
 	//
 	// ⚠️ 是「第几首」不是「第几格」：格子是布局，插入一首歌之后同一首歌的
@@ -794,7 +798,19 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 					TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
 				ui.Row(c).Gap(cardGap).Children(func() {
 					if sh.owner != "" || sh.live {
-						ownerLine(c, sh, scale.Font(c, scale.ListOwner), leading.Owner, metaColor, 0, true)
+						ownerLine(c, ownerRow{
+							shown: sh,
+							name:  m.Owner,
+							mid:   m.Item.ArtistMid,
+							// ⚠ **提示是记好的那一份**（`g.ownerTip`）：现算的
+							// 话每帧每一格一次字符串拼接（票 #313 那一类）。
+							tip:   g.ownerTip.At(i, m.Owner, OwnerTipText),
+							size:  scale.Font(c, scale.ListOwner),
+							lh:    leading.Owner,
+							color: metaColor,
+							grow:  true,
+							acts:  g.acts,
+						})
 					}
 					// 正在放的那一格：时长换成一句「正在播放」。
 					//
