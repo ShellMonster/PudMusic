@@ -166,7 +166,7 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// （票 #289 拿掉顶栏那一枚「设置」之后，这一排**全是图标键**了。）
 		if s.withTip(c, iconButton(c, iconPiP, "迷你", iconMd).
 			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
-			"缩成 320×100 的小窗贴边悬浮，音乐不停").Clicked() {
+			"缩成 320×84 的小窗贴边悬浮，音乐不停").Clicked() {
 			s.toggleMiniPlayer()
 		}
 		// ⚠️ **这里原来还有一枚「设置」，票 #289 拿掉了**（报告 C-02）。
