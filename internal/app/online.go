@@ -118,12 +118,18 @@ const onlineLoadTotalTimeout = 120 * time.Second
 // 「在等 B 站给地址」，用户能对上自己遇到的事（网络慢、B 站慢）；
 // 而「playurl」这种词他读不出来。
 const (
-	// loadStagePart 是「问哪一集 / 补元信息」那一次往返。
+	// loadStagePart 是「问哪一集」那一次往返（投稿那一路）。
 	//
 	// ⚠️ **它不是取流接口那一次**：投稿那一路要先问一次分 P（搜索结果
 	// 全都没有 cid），音乐库那一路要先问一次元信息。两次都是网络往返，
 	// 都可能慢。
 	loadStagePart = "问分集"
+	// loadStageInfo 是「补元信息」那一次往返（音乐库那一路）。
+	//
+	// ⚠️ **它和 `loadStagePart` 是两件事**：投稿那一路问的是「放哪一集」，
+	// 音乐库那一路问的是「作者名 / 封面」——**问不出来也不挡播放**
+	//（见 `withSongInfo`），而问分集问不出来是要报错的。
+	loadStageInfo = "问资料"
 	// loadStageURL 是「问 playurl 拿地址」那一次往返（票 #220 的第①段）。
 	loadStageURL = "问地址"
 	// loadStageBytes 是「从 CDN 取字节 + 解码第一帧」（票 #220 的第②③段）。
@@ -136,6 +142,17 @@ const (
 	// 解得慢**——而真相是「还在下」。
 	loadStageBytes = "下音频"
 )
+
+// loadStageAsk 是「开头那一次问」的阶段名，**按这一项的类型**。
+//
+// 投稿那一路问的是「放哪一集」（缺 cid 要补），音乐库那一路问的是
+// 「作者名 / 封面」（`withSongInfo`）——**两件事不一样，说的词也不一样**。
+func loadStageAsk(it Item) string {
+	if it.Type == "audio" {
+		return loadStageInfo
+	}
+	return loadStagePart
+}
 
 // loadTiming 是「这一趟取流」的分段耗时（票 #220）。
 //
@@ -599,7 +616,7 @@ func (a *App) playOnlineFrom(it Item, at time.Duration, paused bool) error {
 	// 🔴 **「正在取流」从这一刻开始**（票 #282）：取流要跑一趟网络，而那一趟
 	// 里界面上什么都不会变——不说这一句，用户看到的就是「点了没反应」。
 	// 超时由 `loadTimedOut` 兜着，不让它变成另一种「什么都不说」。
-	a.beginLoadingLocked(gen, it.Title, loadStagePart)
+	a.beginLoadingLocked(gen, it.Title, loadStageAsk(it))
 	// 🔴 **这一趟是「恢复」**：它放不起来的时候**不许**在播放条上冒一句红字
 	// ——启动时用户什么都没做就被骂一句「打不开」，那是应用在说自己，不是在
 	// 说给用户听。见 `failOnline` 里认这一代次的那一处。
