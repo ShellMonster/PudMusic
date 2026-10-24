@@ -64,6 +64,10 @@ type folderBili struct {
 	covers []string
 	// dealt 记下 deal 那一次的 add / del。
 	dealt []urlValues
+	// failList 让 created/list 回一个业务错误（造「拉失败」那一种）。
+	failList bool
+	// collected 是 collected/list（「我收藏的」那一组）回的那几条。
+	collected []map[string]any
 
 	// gate 让**写接口**那一趟卡住，直到测试把它放走。
 	//
@@ -127,12 +131,22 @@ func newFolderBili(t *testing.T, gate <-chan struct{}) *folderBili {
 			page, _ := strconv.Atoi(r.URL.Query().Get("pn"))
 			f.ps = append(f.ps, r.URL.Query().Get("ps"))
 			f.pn = append(f.pn, r.URL.Query().Get("pn"))
+			if f.failList {
+				// 业务错误（-500）：造「拉失败」那一种。
+				writeFolderJSON(w, -500, "服务器开小差了", nil)
+				return
+			}
 			list := []map[string]any{}
 			if page >= 1 && page <= len(f.pages) {
 				list = f.pages[page-1]
 			}
 			writeFolderJSON(w, 0, "0", map[string]any{
 				"count": 200, "list": list, "has_more": page < len(f.pages),
+			})
+		case "/x/v3/fav/folder/collected/list":
+			// 「我收藏的」那一组。默认是空的（多数测试只关心「我创建的」）。
+			writeFolderJSON(w, 0, "0", map[string]any{
+				"count": len(f.collected), "list": f.collected,
 			})
 		case "/x/v3/fav/resource/list":
 			writeFolderJSON(w, 0, "0", map[string]any{
@@ -206,6 +220,20 @@ func folderPage(from, n int) []map[string]any {
 
 func (f *folderBili) lock()   { f.mu.Lock() }
 func (f *folderBili) unlock() { f.mu.Unlock() }
+
+// failTheList 让「我创建的」那个接口回一个业务错误（造「拉失败」那一种）。
+func (f *folderBili) failTheList() {
+	f.lock()
+	defer f.unlock()
+	f.failList = true
+}
+
+// setCollected 装好「我收藏的」那一组回什么。
+func (f *folderBili) setCollected(list []map[string]any) {
+	f.lock()
+	defer f.unlock()
+	f.collected = list
+}
 
 func (f *folderBili) asks() (ps, pn []string) {
 	f.lock()
