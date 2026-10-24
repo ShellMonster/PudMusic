@@ -468,13 +468,19 @@ type Shell struct {
 	searchKeywordFilled bool
 	searchSuggest       bool
 	searchFocused       bool
-	// tipHoverNow / tipHoverPrev 是「正拿着**悬停驱动**的那枚提示」的元素 ID。
+	// tipCandidates 是这一遍 build 里登记下来的那些提示（tooltip.go）。
 	//
-	// ⚠️ **每一遍 build 都要挪一次**（见 `Shell.View` 开头）：框架一帧跑好几遍
-	// view，真正留在画面上的是最后一遍，所以「这一遍有没有悬停提示」要问上一遍
-	// 登记的那一份——理由见 `tipHoverBusy`。
-	tipHoverNow  uint64
-	tipHoverPrev uint64
+	// 🔴 **同一时刻只出一枚提示**（票 #420）：登记的是「有可能要画的」，整遍
+	// build 走完之后才挑出那一枚（见 `pickTip`）。
+	//
+	// ⚠️ **它按元素 ID 记的那一份状态在 `tips` 里**（下一条），而这里记的是
+	// 「这一遍谁登记过」。
+	tipCandidates []tipCandidate
+	// tipPanel 是这一遍 build 出来的那一块提示面板（还没填内容）。
+	//
+	// ⚠️ **建在「第一个要出提示的那一处」**，不是最后——理由见 `tooltip.go` 的
+	// `newTipPanel`：浮层按键的优先级是「最后建的先拿到」。
+	tipPanel ui.Element
 	// contentFocus 是「内容区里当前那一个能被方向键走位的」。
 	//
 	// **每帧开头清空**，每一帧由各个列表的登记重新填（见 focus.go 的
@@ -1386,12 +1392,13 @@ type crashInfo struct {
 
 // View 画一帧，MyGo 在需要新画面的时候调它。
 func (s *Shell) View(c *ui.Context) {
-	// 提示的「悬停那一枚」登记，每一遍 build 挪一次（理由见 tipHoverBusy）。
+	// 提示的候选，每一遍 build 重新攒（理由见 tooltip.go 的 tipCandidate）。
 	//
-	// ⚠️ **挪在每一遍的开头，不是一帧的开头**：框架一帧跑好几遍 view，真正留在
-	// 画面上的是最后一遍，而「悬停提示有没有登记过」这件事在最后那一遍里要问
-	// 上一遍——焦点所在的那一枚可能先被 build。
-	s.tipHoverPrev, s.tipHoverNow = s.tipHoverNow, 0
+	// ⚠️ **清空是保险**：正常路径上 `drawTip` 画完就清了（那儿清才是准的——
+	// 见 drawTip 的注释），这里再清一次是为了「这一遍 build 崩在中途」那种
+	// 情况：崩了的那一遍不会走到 drawTip，候选就留在了壳上。
+	s.tipCandidates = s.tipCandidates[:0]
+	s.tipPanel = ui.Element{}
 
 	// 「内容区里当前那一个列表」每帧重新登记：这一遍开头先清空，登记的那几
 	// 个会在这一遍 build 里重新填（见 focus.go 的 `registerContentFocus`）。
@@ -1427,6 +1434,17 @@ func (s *Shell) View(c *ui.Context) {
 		return
 	}
 	s.draw(c)
+
+	// 提示：**这一遍 build 走完之后**才画（票 #420）。
+	//
+	// ⚠️ **排在 draw 之后**：提示是逐个元素登记的，而「指针刚离开的那一枚先被
+	// build」——挑出该画哪一枚要看得见这一遍登记的**全部**候选（见 pickTip）。
+	//
+	// ⚠️ **崩了这一帧就不画**：崩的时候树是半截的，画上去的面板会挂在一个
+	// 不知道在哪儿的锚点上。
+	if s.crash == nil {
+		s.drawTip(c)
+	}
 
 	// 兑现「把焦点交给内容区」这个请求（票 #245 的 E4）。
 	//
