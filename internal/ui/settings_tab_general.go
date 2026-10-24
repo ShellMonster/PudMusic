@@ -29,17 +29,24 @@ import (
 // displayModes 是「数据显示样式」那三档，顺序就是从左到右的顺序。
 //
 // Biu 那一格是三个带图标的 Tab（列表 / 网格 / 紧凑，`system-settings.tsx:65-101`）。
-// ⚠️ **这一格还没换成图标**：图标资源里列表 / 网格那两枚已经备齐（`iconViewList` /
-// `iconViewGrid`，见 `icons.go`），而**紧凑那一档上游用的是哪一枚还没抄**——三档
-// 各配一枚，配错了用户切档时看到的是同一张图。用同一个控件摆三个字的话，值和
-// 顺序一字不差。
+//
+// ✅ **这一格已经换成图标了**（票 #297）：三档各配一枚 18px 的图标，语义对得上：
+//
+//   - 列表 → `Editor/list-check-2.svg`（`iconViewList`，一份清单）
+//   - 网格 → `Design/layout-grid-line.svg`（`iconViewGrid`，一格一格）
+//   - 紧凑 → `Document/file-list-2-line.svg`（`iconFileList`，**上游那一档用的
+//     正是它**：`RiFileListLine`，`system-settings.tsx:94`）
+//
+// ⚠️ **三档必须各有各的图标**：配错了用户切档时看到的是同一张图，而那一格
+// 的选中信号只有一个（药丸），图形是它唯一的补充。
 var displayModes = []struct {
 	mode  app.DisplayMode
 	label string
+	icon  string
 }{
-	{app.DisplayModeList, "列表"},
-	{app.DisplayModeCard, "网格"},
-	{app.DisplayModeCompact, "紧凑"},
+	{app.DisplayModeList, "列表", iconViewList},
+	{app.DisplayModeCard, "网格", iconViewGrid},
+	{app.DisplayModeCompact, "紧凑", iconFileList},
 }
 
 // audioQualities 是音质那五档。Biu 用的是 `w-[180px]` 的下拉（`:247`），
@@ -171,15 +178,15 @@ func (s *Shell) pickSwitch(c *ui.Context, title, key string, on bool, ro bool, s
 // `settingsSegment` 的注释里。
 func (s *Shell) pickDisplayMode(c *ui.Context, st app.Settings, ro bool) {
 	chosen := 0
-	labels := make([]string, len(displayModes))
+	opts := make([]segmentOption, len(displayModes))
 	for i, m := range displayModes {
-		labels[i] = m.label
+		opts[i] = segmentOption{label: m.label, icon: m.icon}
 		if m.mode == st.DisplayMode {
 			chosen = i
 		}
 	}
 	s.settingsSegment(c, "setting:displayModePick", "显示样式档位", 0,
-		labels, chosen, ro, func(i int) {
+		opts, chosen, ro, func(i int) {
 			mode := displayModes[i].mode
 			s.applySetting("数据显示样式", func(cur *app.Settings) { cur.DisplayMode = mode })
 		})
