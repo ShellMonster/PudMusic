@@ -100,6 +100,11 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 		return
 	}
 
+	// 🔴 **身份钉死**：这一枚是**逐帧问出来**的（单 P 的稿子不摆），它一出现，
+	// 后面几枚的兄弟序号就都变了——而动画通道是存在身份里的（理由见
+	// `playbar_keys.go`）。
+	c.Key(partButtonKey)
+
 	// ⚠️ **图标不是装饰，是它唯一能被认出来的东西**：`ui.Icon` 对辅助技术是不可见
 	// 的（`mygo/ui/svg.go`），所以 `Label("分集")` 不许省——它既是无障碍名字，也是
 	// 无头 Tester 认得这个按钮的唯一凭据（`Find` 按 label 找）。
