@@ -610,7 +610,16 @@ func (g *Grid) keepAnchor(cols int) {
 		}
 		g.anchorID = g.songs[j].ID
 	}
-	g.state.ScrollTo(j/cols+lead, ui.Start)
+	// ⚠️ **页内头部还在画面上的时候，滚到第 0 行**（别滚到它下面那一行去）。
+	//
+	// 换列数时这一段要重新落位，而「锚点那一首」在页内头部**下面**——滚到它那
+	// 一行，页内头部就被滚出画面了。而这一档刚切进来时锚点就是第一首歌，于是症状是
+	// 「顶图一进来就不见了」（票 #369 的网格那一档）。
+	row := j/cols + lead
+	if first < lead {
+		row = 0
+	}
+	g.state.ScrollTo(row, ui.Start)
 }
 
 // viewRow 画一行：一行 cols 首歌。
