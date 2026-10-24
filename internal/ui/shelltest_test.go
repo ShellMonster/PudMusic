@@ -716,6 +716,11 @@ const waitBudget = 10 * time.Second
 // 在快机器和慢机器上读的是同一个。
 func settleDrawer(t *testing.T, s *Shell, tt *mygoui.Tester) {
 	t.Helper()
+	// ⚠️ **外壳不能是 nil**：判据是那副外壳上的阶段（抽屉走到哪一段了）。
+	// 手搭 harness 的时候漏了 `s` 那一栏，这里说清楚，而不是让它空指针崩。
+	if s == nil {
+		t.Fatal("settleDrawer 要那副外壳（判据是抽屉的阶段）——手搭 harness 的时候漏了 s 那一栏")
+	}
 	const step = 16 * time.Millisecond
 	// 先画一帧：阶段机是在 view 里跑的，不画一帧它还没从 `drawerGone` 动。
 	tt.Frame()

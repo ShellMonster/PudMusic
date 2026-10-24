@@ -490,7 +490,7 @@ func TestRenderQueueDrawerSlideShots(t *testing.T) {
 			s, tt := drawerTester(t, dark)
 			tt.Frame()
 			tt.Advance(100 * time.Millisecond)
-			save(t, dir, "90-"+name+"-队列抽屉-滑到一半.png", tt)
+			save(t, dir, "91-"+name+"-队列抽屉-滑到一半.png", tt)
 			_ = s
 		})
 	}
