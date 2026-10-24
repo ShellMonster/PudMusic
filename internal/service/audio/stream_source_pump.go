@@ -4,6 +4,16 @@
 // 跟 `stream_source.go` 分开是因为那一半讲的是**接口**（能读、能 seek、能
 // 关、能取消），这一半讲的是**网络**（会 403、会卡死、会中途断）。两者的
 // 契约只在 `recover()` 那一个函数上交叉。
+//
+// # 退避
+//
+// 「这条地址读不动了」之后的每一次重试之前都要**等一等**（1 秒、2 秒、
+// 4 秒，见 `defaultBackoff`）。以前这里是立刻重试：CDN 抖一下，三次重试
+// 在几毫秒里就打完，用户只看到一句红字——那不叫重试，那是连着撞了同一堵
+// 墙三次（票 #315）。
+//
+// ⚠️ **这个等待必须可取消**：切歌、退出、换音质都要能立刻把它掐掉，不然
+// 用户已经走了而后台还在那儿数着秒。
 
 package audio
 
@@ -26,6 +36,12 @@ import (
 // 和「切歌」而不是「出错」对得上）。
 func (s *StreamSource) pump() {
 	defer s.wg.Done()
+	// 🔴 **泵退出 = 这条流不再「正在重试」**：它要么下完了、要么放弃了
+	// （换不动了）、要么被关了（切歌 / 退出）。
+	//
+	// ⚠️ **不收这一档的话，上层会拿着一盏永久亮着的假指示灯**（票 #315 的
+	// 评审复现过）：源放弃了，而界面上还写着「正在重连」，一句红字也没有。
+	defer s.clearRetrying()
 	buf := make([]byte, copyBufSize)
 
 	for {
@@ -147,8 +163,16 @@ func (s *StreamSource) append(b []byte) error {
 	if s.size >= 0 && s.filled > s.size {
 		s.size = s.filled
 	}
+	// 🔴 **字节回来了就说一声**（票 #315）：这是「重连成功」的唯一判据——
+	// 请求没报错不算，连上了却一个字节都不下也不算（那种连接在用户听来
+	// 和没恢复一样）。
+	recovered := s.retryPending
+	s.retryPending = false
 	s.cond.Broadcast()
 	s.mu.Unlock()
+	if recovered && s.onReconn != nil {
+		s.onReconn()
+	}
 	return nil
 }
 
@@ -191,13 +215,18 @@ var errSourceStopping = errors.New("audio: 字节源正在关闭")
 
 // recover 处理「这条地址读不动了」。
 //
-// 顺序是：**先换备用地址，再换流**。换备用地址只是一次不带签名的普通
-// 请求，换流要调一次带 WBI 签名的接口——后者更贵，能用前者解决就别用。
+// 顺序是：**先退避，再换备用地址，最后换流**。换备用地址只是一次不带签名
+// 的普通请求，换流要调一次带 WBI 签名的接口——后者更贵，能用前者解决就
+// 别用前者。
 //
 // 返回 false 表示「实在没辙了」。**这时候终态错误由 recover 自己记**，
 // 调用方直接返回就行：不同的放弃原因要报不同的话（「换到别的流了」和
 // 「这条流下到一半断了」对用户是两件事），把 cause 原样报出去等于把
 // 这个判断又推回给调用方。
+//
+// 🔴 **退避在换地址之前**（票 #315）：CDN 抖一下的时候三次重试在几毫秒里
+// 就打完，用户只看到一句红字。中间等一等（1 秒 / 2 秒 / 4 秒），网络缓过来
+// 就救得回来；界面上的「正在重连」也是从这儿开始亮的（`OnRetry`）。
 func (s *StreamSource) recover(from int64, cause error) bool {
 	s.mu.Lock()
 	if s.refreshes >= s.maxRefr {
@@ -206,7 +235,26 @@ func (s *StreamSource) recover(from int64, cause error) bool {
 		return false
 	}
 	s.refreshes++
+	attempt := s.refreshes
+	// 「字节还没回来」这一档从现在开始记着：等一会儿字节真的回来了
+	// （`append`）就报一次「恢复了」；放弃了（泵退出）就收掉。
+	s.retryPending = true
+	s.retryAttempt = attempt
+	s.mu.Unlock()
 
+	// 🔴 **先等，再重试**。等待期间源是可以被关掉的（切歌、退出）。
+	wait := s.backoffFor(attempt)
+	if s.onRetry != nil {
+		s.onRetry(attempt, wait)
+	}
+	if !s.waitBackoff(wait) {
+		// 被 Close 掐掉了：那不是「拉不动了」，是这一趟结束了。
+		// 报一个错的话，用户会看到一句「拉不下来了」，而他明明是自己
+		// 切了歌。
+		return false
+	}
+
+	s.mu.Lock()
 	// 换备用地址：还有没用过的就换一个，同一条流换个 CDN 节点。
 	if s.urlIdx+1 < len(s.urls) {
 		s.urlIdx++
@@ -230,6 +278,58 @@ func (s *StreamSource) recover(from int64, cause error) bool {
 		return false
 	}
 	return true
+}
+
+// clearRetrying 收掉「正在等字节回来」那一档。
+//
+// ⚠️ **泵退出时必须收**：源放弃了（换不动了）或者被关了（切歌 / 退出）之后，
+// 它就不再是「正在重试」——不收的话，上层会拿着一盏**永久亮着的假指示灯**
+// （票 #315 的评审复现过）。
+func (s *StreamSource) clearRetrying() {
+	s.mu.Lock()
+	s.retryPending = false
+	s.mu.Unlock()
+}
+
+// backoffFor 报第 attempt 次重试要等多久（attempt 从 1 起）。
+//
+// ⚠️ **序列用完了用最后一个**（不是变成 0）：变成 0 就等于「后面几次不
+// 等了」，那还是瞬间打完，只是慢了一档。
+//
+// ⚠️ **这个状态真的到得了**：序列比 `MaxRefresh` 短的时候（`MaxRefresh`
+// 调大、或者调用方给了自己的短序列），第 N 次重试就落在「用完了」那一档
+// 上——`TestTheBackoffStopsAtItsLastValue` 造的就是它。
+func (s *StreamSource) backoffFor(attempt int) time.Duration {
+	list := s.backoff
+	if len(list) == 0 {
+		list = defaultBackoff()
+	}
+	i := attempt - 1
+	if i < 0 {
+		i = 0
+	}
+	if i >= len(list) {
+		i = len(list) - 1
+	}
+	return list[i]
+}
+
+// waitBackoff 等这一次的退避。**可取消**：源被关了立刻返回 false。
+//
+// 返回 false 表示「等不下去了」（源被关了），调用方要**当作这一趟结束
+// 走人**，而不是报一个错——用户是自己切的歌，不是歌拉不下来了。
+func (s *StreamSource) waitBackoff(d time.Duration) bool {
+	if d <= 0 {
+		return !s.stopped()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-s.ctx.Done():
+		return false
+	case <-t.C:
+		return !s.stopped()
+	}
 }
 
 // adopt 换上一条新流。
