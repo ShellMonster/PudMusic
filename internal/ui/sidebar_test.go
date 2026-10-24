@@ -1129,6 +1129,10 @@ func TestTheCollapsedSideMenuItemIsAFortySquareIconCell(t *testing.T) {
 // 上游是 `pt-8`（`biu/src/layout/side/logo/index.tsx`），为的是给红黄绿让开。
 // 这里量的是 **logo 那一块墨的上沿**：它等于「侧栏的上沿 + 顶部留白 +
 // 图标自己的那点留白」。
+//
+// ⚠️ **侧栏的上沿现在就是窗口的上沿**（票 #165 / 报告 C-01）：侧栏改成从
+// 窗口顶端贯到底（上游那种通栏），顶栏只盖内容区那一段——于是红黄绿落在
+// 侧栏那一带，而 logo 正好在它们下面，那 32 留白是**真的在给它们让位**。
 func TestTheBrandIsALogoAndTheAppName(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -1148,20 +1152,21 @@ func TestTheBrandIsALogoAndTheAppName(t *testing.T) {
 				t.Fatalf("侧栏上没有 %q 那一行，文字有 %q", appName, tt.Texts())
 			}
 
-			// 侧栏的底色：侧栏**右边**那一列（x = 190）、品牌那一块的高度上
-			// 取的众数。
+			// 侧栏的底色：侧栏**右边**那一列（x = 190）上、从顶到底的众数。
 			//
-			// ⚠️ **别取菜单那一段**：选中的那一行有一层很淡的底（上游的
-			// `variant="flat"`），拿它当底色的话整块都成了「墨」。
+			// ⚠️ **取整列的众数**：侧栏那一列上除了底色，还有选中那一行的
+			// 很淡的底（上游的 `variant="flat"`）——拿它当底色的话整块都成了
+			// 「墨」。而这一列的高度覆盖了整栏，所以那一行淡底只占几十个
+			// 像素，众数仍然是底色。
 			var col []color.RGBA
-			for y := 90; y < 140; y++ {
+			for y := 0; y < 700; y++ {
 				col = append(col, img.RGBAAt(190, y))
 			}
 			bg := modeOf(col)
 
 			// ① logo：品牌字左边那一块（x < 62）里的墨。
 			minX, minY, maxX, maxY := 9999, 9999, -1, -1
-			for y := 64; y < int(text.Y+text.H); y++ {
+			for y := 0; y < int(text.Y+text.H); y++ {
 				for x := 0; x < 62; x++ {
 					if maxDiff(img.RGBAAt(x, y), bg) <= 12 {
 						continue
@@ -1185,14 +1190,14 @@ func TestTheBrandIsALogoAndTheAppName(t *testing.T) {
 
 			// ④ 顶部留白：logo 的上沿 = 侧栏的上沿 + 留白 + 图标自己的留白。
 			//
-			// 侧栏的上沿就是顶栏的高度：Tester 没有标题栏，所以顶栏正好是
-			// `navMinHeight`（64）。
+			// ⚠️ **侧栏的上沿 = 窗口的上沿 = 0**（票 #165 / 报告 C-01）：侧栏
+			// 从窗口顶端贯到底，所以这里量的是「离窗口上沿多远」。
 			wantTop := 12
 			if runtime.GOOS == "darwin" {
 				wantTop = 32 // 上游的 `pt-8`
 			}
-			if got := minY - navMinHeight; got < wantTop-1 || got > wantTop+7 {
-				t.Errorf("logo 的上沿离侧栏上沿 %d，want ≈ %d"+
+			if got := minY; got < wantTop-1 || got > wantTop+7 {
+				t.Errorf("logo 的上沿离窗口上沿 %d，want ≈ %d"+
 					"（上游 macOS 非全屏时是 `pt-8`）", got, wantTop)
 			}
 

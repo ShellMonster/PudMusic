@@ -2587,6 +2587,25 @@ var Items = []Item{
 		},
 	},
 	{
+		// 这一族动的是**过渡本身**：曲线、时长、位移与淡入的错开。
+		//
+		// 🔴 **这一族的错法全是「静默」的**：曲线换了没有任何东西会报错，界面
+		// 只是「不太顺」；滑块退回定时长曲线也不报错，只是连点三个 Tab 时
+		// 顿一下；淡入和位移又同步了也不报错，只是「啪」地一下出现。
+		Category: Platform,
+		// 票 #292（DESIGN.md §五）：一条统一曲线 + 主 Tab 滑块换成弹簧。
+		Spec: "所有过渡走同一条曲线 `CubicBezier(0.16, 0.9, 0.21, 0.98)`（DESIGN.md §五《一条统一曲线》）；主 Tab 滑块走**弹簧**（ζ=0.9923，接近临界阻尼；不是定时长曲线）；Toast 入场的**淡入与位移错开**（位移先走、淡入后到）",
+		Tests: []string{
+			// 曲线和弹簧的值不许漂（唯一出处就是那一个包）。
+			"TestTheUnifiedCurveIsTheOneWeCopied",
+			"TestTheTabSlideIsASpring",
+			// 滑块走的是弹簧：100ms 时只走到约一半（定时长曲线那时已经 78%）。
+			"TestTheTabSliderFollowsTheSpring",
+			// 淡入与位移错开：同一时刻量到的两个进度，淡入那个明显更小。
+			"TestTheToastFadesInAfterItSlides",
+		},
+	},
+	{
 		// 归「双平台」那一组：这一票动的是**播放条上那些控件的颜色与反馈**
 		// （悬停、圆角、倍速浮层、音量浮层、两枚图形的区别）。
 		//
@@ -2755,6 +2774,23 @@ var Items = []Item{
 			// 那一枚里有一枚 18 的 ▶ 图标，而且它在字的**前面**（上游的
 			// `startContent`）。
 			"TestThePlayAllButtonHasThePlayIcon",
+		},
+	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：页头右侧那枚开关**一个字都没有**
+		// （`Label` 是给读屏和测试器找它用的名字，屏幕上不画），于是用户看见
+		// 一枚绿绿的旋钮，却不知道拨它会不会把自己的播放记录报上去——那是**写
+		// 操作**，是隐私。界面上没有任何一样东西会报错。
+		Category: Platform,
+		// 票 #296（UX 报告 L-05）。
+		Spec: "历史记录页头右侧是「开关 + 「记录播放历史」文案」，文案照抄上游原文；**没有清空键**（2026-10-24 拍板的取舍：要摆它得先把 `/x/v2/history/clear` 那条接口链接上）",
+		Tests: []string{
+			// 那句话**看得见**（画面上有两处叫这句话的节点，而且开关右边
+			// 那一段真的有深色的字——只判 `HasText` 的话，开关自己的 `Label`
+			// 就够数了）。
+			"TestTheHistoryHeaderSaysWhatTheSwitchIs",
+			// **没有**清空键（守成：别有一天顺手把它加回来）。
+			"TestTheHistoryHeaderHasNoClearKey",
 		},
 	},
 	{

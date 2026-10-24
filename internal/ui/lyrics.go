@@ -56,6 +56,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -140,13 +141,22 @@ const lyricLineTransition = 300 * time.Millisecond
 // lyricLineAnim 就是那段过渡。
 //
 // ⚠️ **Ease 留空 = `ui.EaseOut`**（`mygo/ui/motion.go:17` 与 `widgets.go:98`），
-// 和上游那个 `ease-out` 是同一条三次曲线。写成 `ui.Smooth`（零值）会变成 500ms
+// 那是框架那条三次曲线 `1-(1-t)³`。写成 `ui.Smooth`（零值）会变成 500ms
 // 的弹簧——那是滚到中间那段用的东西，不是行样式这段。
+//
+// ⚠️ **它也不是上游那个 `ease-out`**：上游（CSS）那个是
+// `cubic-bezier(0, 0, 0.58, 1)`，实算 t=0.25 时一条走 57.8%、另一条走 37.8%
+// ——**两条不是一个东西**（框架里 `ui.EaseInOut` 与上游那条
+// `cubic-bezier(0.4,0,0.2,1)` 的差别更大，见 `hoverzoom.go` 那儿记着）。
+//
+// ⚠️ **这里显式写了曲线**（票 #292）：全应用走**一条统一曲线**
+// （`motion.Unified`），上游那个 `ease-out` 只是上游的默认值，不是这一处的
+// 出处。时长 300ms 仍然抄上游。
 //
 // 「减少动态效果」不用在这里判：`AnimateTo` 自己读 `Preferences.ReduceMotion`，
 // 为真时第一帧就落到目标上（`mygo/ui/motion.go:322-330`）。DESIGN.md 的
 // 「减少动态效果」那一节要的就是这个。
-var lyricLineAnim = ui.Animation{Duration: lyricLineTransition}
+var lyricLineAnim = ui.Animation{Duration: lyricLineTransition, Ease: motion.Unified}
 
 // lyricPresenceKey 是每一行那个 0/1 的「在唱」值在节点上的键。
 //

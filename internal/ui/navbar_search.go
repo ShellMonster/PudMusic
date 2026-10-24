@@ -121,7 +121,22 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 	// Children 里才量到的（`field.Focused()`），而指针那一位要等这一格建出来
 	// 才能问（`row.Hovered()`）。先铺一层静止档，再按这一帧的实况盖上去——
 	// 元素在 view 里改样式，画的是改完的那一份。
+	//
+	// ⚠️ **`MinWidth(0)` 不能省**（票 #165）：顶栏现在只盖内容区，而内容区最窄
+	// 那一档是「窗口 900 − 侧栏 480 = 420」——那一排控件（两个箭头 + 右边五枚
+	// 键 + 间隙）要 320，剩下给搜索框的只有八十来像素。
+	//
+	// **而 flex 的默认最小宽度是「内容的最小宽度」**：搜索框写死了
+	// `Width(280)`，于是它的最小宽度也是 280（`mygo/ui/layout.go` 的
+	// `intrinsic`：宽度写死时，内容多小都按那个宽度算）——它一步都不肯让，
+	// 右边那几枚键于是被挤出窗口（实测「迷你」「动态」「头像」「登录」四枚
+	// 落在 x=904 之后，而窗口只有 900 宽）。
+	//
+	// 钉成 0 之后它能缩到八十来像素（放大镜和字都还在），右边那几枚键留在
+	// 窗口里。平时不受影响：内容区够宽时它还是 280（`Width` 写死的那个宽
+	// 只在**放不下**的时候才让）。
 	row := ui.Row(c).Key("search").Width(searchWidth).Height(searchHeight).
+		MinWidth(0).
 		Radius(t.Radius).Background(searchFieldBg(t, false)).
 		Padding(space.None, searchPadX).Gap(searchGap).AlignItems(ui.Center)
 	row.Children(func() {
