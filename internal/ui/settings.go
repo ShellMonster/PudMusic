@@ -76,11 +76,18 @@ func (s *Shell) reportSettingsError() {
 }
 
 // themeModes 是三档主题，顺序就是从左到右的顺序。设置页那三个按钮用。
+//
+// ⚠️ **每一档都带一枚图标**（上游那一排是「图标 + 文字」，`system-settings.tsx:
+// 105-153`：跟随系统 `RiComputerLine`、浅色 `RiSunLine`、深色 `RiMoonLine`，
+// 都是 `size={18}`）。图标名是 `icons.go` 里的常量——「跟随系统」那一枚是
+// 这一票新加的资源（`Device/computer-line.svg`），照上游 RemixIcon 的目录
+// 放进去，许可证那一份没变（还是 Remix Icon License，见 `internal/licensing`）。
 var themeModes = []struct {
 	mode  app.ThemeMode
 	label string
+	icon  string
 }{
-	{app.ThemeModeSystem, "跟随系统"},
-	{app.ThemeModeLight, "浅色"},
-	{app.ThemeModeDark, "深色"},
+	{app.ThemeModeSystem, "跟随系统", iconComputer},
+	{app.ThemeModeLight, "浅色", iconSun},
+	{app.ThemeModeDark, "深色", iconMoon},
 }

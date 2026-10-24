@@ -59,7 +59,7 @@ func (s *Shell) viewDisplayMode(c *ui.Context, st app.Settings, ro bool) {
 	ui.Column(c).Key("setting:displayMode").Width(colW).
 		MinWidth(settingsControlMinW).Gap(space.Px8).Children(func() {
 		s.pickDisplayMode(c, st, ro)
-		viewDisplayModePreview(c, list.ViewOf(st.DisplayMode))
+		viewDisplayModePreview(c)
 	})
 }
 
@@ -107,7 +107,15 @@ const (
 	previewCoverRadius = 2
 )
 
-// viewDisplayModePreview 画那三张缩略图，选中的那张描一圈主色。
+// viewDisplayModePreview 画那三张缩略图。
+//
+// 🔴 **三张都不描主色边**（票 #297）：那一格里的选中信号**只有药丸**一个。
+//
+// 此前选中的那张描一圈主色，于是「同一格里两种选中信号」——药丸说「现在是
+// 列表」，预览的绿框又说一遍（票 #240 拿这一层当过「不换成白滑块」的理由，
+// 票 #297 把它当成真问题裁掉了：那一格里只该有一个信号）。现在三张是同样
+// 的中性描边，是**示意图**——「这一格底下那三张小图是那三档长什么样」，
+// 现在是哪一档由上面那个药丸说。
 //
 // ⚠️ **不可点，也不可灰**。它是预览，不是第二个入口：摆一个能点的，用户会问「点它
 // 和点上面那个有什么区别」，而答案是「没有区别」——同一件事两个控件，坏了一个另一
@@ -116,30 +124,23 @@ const (
 //
 // ⚠️ **宽度和缝都跟着字号缩放走**（`scale.Font`）：三张加两道缝要正好铺满控件列
 // 那一格（`settingsControlW` × 缩放），差一像素那一行的右边缘就又短了一格。
-func viewDisplayModePreview(c *ui.Context, chosen list.View) {
+func viewDisplayModePreview(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).Key("setting:displayModePreview").FillWidth().
 		Gap(scale.Font(c, previewGap)).AlignItems(ui.Start).Children(func() {
 		for v := list.View(0); v < list.ViewCount; v++ {
-			previewOne(c, t, v, v == chosen)
+			previewOne(c, t, v)
 		}
 	})
 }
 
 // previewOne 画一张缩略图。
-func previewOne(c *ui.Context, t *ui.Theme, v list.View, chosen bool) {
-	border := t.Border
-	if chosen {
-		// 选中的那一张描主色，和设置里其它「当前是这一档」的画法一样
-		//（`settingsSegment` 给选中的那一档铺主色底）。
-		border = t.Accent
-	}
-
+func previewOne(c *ui.Context, t *ui.Theme, v list.View) {
 	ui.Column(c).Label("预览："+v.String()).
 		Grow(1).MaxWidth(scale.Font(c, previewW)).Height(previewH).Radius(t.Radius).
-		// 描边走 `Border` 的第二格（选中那一档给主色）：描 1 像素在缩略图上
-		// 足够认出来，而铺一整块主色会把里面那些色块盖住。
-		Border(1, border).Padding(space.Px6).Gap(space.Px3).Children(func() {
+		// ⚠️ **描边是中性色**：选中的那一张 formerly 描主色边，而那一格里的
+		// 选中信号只有药丸一个（见 `viewDisplayModePreview` 顶上那一段）。
+		Border(1, t.Border).Padding(space.Px6).Gap(space.Px3).Children(func() {
 		switch v {
 		case list.ViewCard:
 			previewGrid(c, t)

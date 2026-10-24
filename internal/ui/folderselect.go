@@ -26,6 +26,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -57,6 +58,12 @@ type folderSelect struct {
 
 	// ls 是这个列表的 `ListState`。**每行一个 key**（见 `onList`）。
 	ls ui.ListState
+	// rowKeys 记着每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
+	// （票 #313）。**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头）：
+	// 收藏夹换了、勾了别的——身份对不上就重算。
+	rowKeys rowkey.Memo[int64, any]
 }
 
 // openFolderSelect 是「把这一首放进哪些收藏夹」那个入口。
@@ -446,6 +453,7 @@ func (s *Shell) syncFolderList(f *folderSelect) {
 			}
 		}
 	}
-	f.ls.Key = func(i int) any { return list[i].ID }
+	// ⚠️ **身份是预先装箱好的那一份**（`f.rowKeys`）：理由见那个字段的注释。
+	f.ls.Key = func(i int) any { return f.rowKeys.At(i, list[i].ID, rowkey.Identity64) }
 	f.ls.Label = func(i int) string { return list[i].Title }
 }
