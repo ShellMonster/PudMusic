@@ -90,23 +90,41 @@ const (
 	// 32。两处共用一个数的话，Tab 会跟着头图一起往中间缩。
 	upPadX = space.Px32
 
+	// upHeaderRowTop 是「信息那一行」（头像 + 名字 + 签名 + 统计）的**上沿**
+	// 在头图区自己的坐标（28）。
+	//
+	// 它 = 头图区 200 - 那一行默认的高（头像 140 + 上下各 16 = 172）。
+	//
+	// 🔴 **这一行是「贴着上沿」摆的**（`Absolute().Top(upHeaderRowTop)`），
+	// **不是贴着下沿**：它一高（**系统字号一放大它就高**）就往下长，而上面的
+	// 字因此**不会再往上跑**——上面那一段是留给「整块那一档黑」的
+	// （`spaceTextScrim`）。贴着下沿的话，字号一放大名字就跑到那一段里去了
+	// （票 #295 的评审在 225% 那档量到的就是它：名字上沿只剩 2.12:1）。
+	//
+	// ⚠️ **默认字号下画面一个字都不变**：那一行默认 172 高，上沿 28 +
+	// 高 172 = 下沿 200 —— 和贴着下沿时落在同一个位置。
+	upHeaderRowTop = upHeaderH - upAvatarS - 2*upPad
+
+	// upHeaderTextTop 是「有字的那一带」那一层黑**满档**的高度（44）——
+	// 也就是信息那一行的**内容**上沿（上面那一行 + 上面那一格内边距）。
+	//
+	// ⚠️ **它是一个常数，不是一个算出来的数**：那一行贴着上沿摆（见
+	// `upHeaderRowTop`），所以**里面的字永远在 44 以下**——名字是那一列的
+	// 第一件东西，而那一列在内容框里是**居中**的，于是它的上沿 ≥ 44。
+	// 「算出来」的那一版（量文字的高度推位置）在两处不成立：行高是**字体
+	// 自己的事**（换一款字体就差一截），而框架把行与行之间的行距算在
+	// **摆出来的那一行**里、不在 `MeasureText` 给的那一档里。
+	upHeaderTextTop = upHeaderRowTop + upPad
+
 	// upHeaderScrimFade 是头图区里「有字的那一带」那一层黑**渐变**有多高（12）。
 	//
 	// ⚠️ **它不是「那一档黑盖住哪一块」**：盖住的是「信息那一行」那一块
-	// （`upHeaderTextTopOf` 算出来的），渐变只是从**满档**的位置往上淡 12 像素。
+	// （从 `upHeaderTextTop` 往下），渐变只是从**满档**的位置往上淡 12 像素。
 	// 上面那一段（头图区最上面）**不蒙**——那里就是「整块那一档黑」的原样，
 	// 也就是上游那一层本身（浅色 30% → #b2b2b2、深色 50% → #7f7f7f）。
 	//
 	// 「整块那一档黑在位」那一条量的就是**头图区最上面**那一段。
 	upHeaderScrimFade = 12
-
-	// upHeaderTextMargin 是「文字那一列」那个上界上留的余量（6 像素）。
-	//
-	// ⚠️ **为什么要有它**：`c.MeasureText` 给的是**第一行**的行高，而控件
-	// 摆出来的那一列里，**折行的行与行之间还有一次行距**（实测签名折两行
-	// 时差 5.3 像素）。余量少了这一份，名字的上沿就会比算出来的位置高那么
-	// 几像素——落进渐变的淡区（票 #295 的评审在 225% 那档量到的就是它）。
-	upHeaderTextMargin = 6
 
 	// spaceDividerAlpha 是统计之间那条竖线的 alpha（35% 白）。
 	//
@@ -578,10 +596,18 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 		ui.Box(c).Absolute().Left(0).Right(0).Top(0).Bottom(0).
 			Background(ui.RGBA(0, 0, 0, upHeaderMask(t.Dark)))
 		// ③ 文字那一带再压一档（理由和数值的算法见 `spaceTextScrim`）。
-		s.spaceTextScrim(c, h)
+		s.spaceTextScrim(c)
 		// ④ 头像 + 昵称 + 签名 + 右边那一排关注和统计。圆角留白与间距照上游：
 		// `px-8 py-4`、头像和文字 `space-x-4`、文字两行 `space-y-2`。
-		ui.Row(c).Key("space-head-info").Absolute().Left(0).Right(0).Bottom(0).
+		//
+		// 🔴 **这一行是「贴着上沿」摆的，不是「贴着下沿」**（`upHeaderRowTop`）：
+		// 它一高（**系统字号一放大它就高**）就往下长，而**上面的字因此不会
+		// 再往上跑**——上面那一段是留给「整块那一档黑」的（`spaceTextScrim`）。
+		//
+		// ⚠️ **贴着上沿时，默认字号下的画面一个字都不变**：那一行默认就是
+		// 172 高（头像 140 + 上下各 16），上沿 28 + 高 172 = 下沿 200 —— 和
+		// 「贴着下沿」时落在同一个位置。
+		ui.Row(c).Key("space-head-info").Absolute().Left(0).Right(0).Top(upHeaderRowTop).
 			Padding(upPad, upPadX).Gap(space.Px16).AlignItems(ui.Center).Children(func() {
 			// 头像带 `shadow-lg`（上游 `space-info.tsx:89` 的 `shadow-lg`）。
 			s.spaceAvatar(c, h.User.Face, upAvatarS, true)
@@ -593,8 +619,9 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, scale.Size20)).FontWeight(weightMedium).MaxLines(1).Ellipsis("…").TextColor(upHeaderText())
 				if h.User.Official != "" {
 					// ⚠️ **限成一行**（上游那一行没限，但上游的头图区是**固定
-					// 200 高**的，认证那一行一多就把名字顶出去了）：那也是
-					// 「文字那一列有多高」算得准的前提（`upHeaderColumnH`）。
+					// 200 高**的，认证那一行一多就把下面那一行顶出画面）：那一行
+					// 限成一行，那一列的高度就有个上限，头图区在最大的字号下也
+					// 放得下。
 					ui.Text(c, "认证："+h.User.Official).FontSize(scale.Font(c, scale.Size12)).
 						TextColor(upHeaderTextDim()).MaxLines(1).Ellipsis("…")
 				}
@@ -667,28 +694,28 @@ func upHeaderTextDim() ui.Color {
 // **只盖住有字的那一带**——所以「蒙版在位（浅 30% / 深 50%）」那一条量的是
 // 头图区**最上面**那一段（那里没有这一档）。
 //
-// ## 满档落在**信息那一行的上沿**，不是落在一个固定的数上
+// ## 满档落在**信息那一行的内容上沿**（一个常数）
 //
-// 那一行（头像 + 名字 + 签名 + 统计）是**贴着底边**的，而**系统字号一放大
-// 它就往上长**——名字的上沿跟着跑（实测：字号 1 倍时在头图区里 71 的地方，
-// 1.75 倍 → 44，2 倍 → 27，**2.25 倍（Windows 文本大小的上限）→ 9**）。
-// 满档落在那一条上，名字就**永远**落在满档里。
+// 那一行（头像 + 名字 + 签名 + 统计）是**贴着上沿**摆的（`upHeaderRowTop`），
+// 所以**它一高就往下长**，而**里面的字永远在 44 以下**——名字是那一列的第一件
+// 东西，那一列在内容框里是**居中**的，于是它的上沿 ≥ 44。
 //
-// ⚠️ **满档落在那一条「里面」就是这一票评审查出来的那一条**：名字的上沿
-// 会落进渐变的淡区，白字压着的底色从 #6b6b6b 变回 #a8a8a8，对比度掉到
-// 2.4:1——而那正是这张票要防的那件事。
-func (s *Shell) spaceTextScrim(c *ui.Context, h app.SpaceHeader) {
+// ⚠️ **贴着下沿摆的时候，名字会被顶进渐变的淡区**：那一行贴着下沿，字号一
+// 放大就**往上**长——名字的上沿跟着跑（实测：字号 1 倍时在头图区里 71 的
+// 地方，1.75 倍 → 44，2 倍 → 27，**2.25 倍（Windows 文本大小的上限）→ 9**），
+// 于是它跑进上面那一段（那是「整块那一档黑」，#b2b2b2）里，白字压着它只有
+// **2.12:1**——而那正是这张票要防的那件事（票 #295 的评审在 225% 那档量到的
+// 就是它）。
+//
+// ⚠️ **「算出来」的那一版也不行**：行高是**字体自己的事**（换一款字体就差一
+// 截），而框架把行与行之间的行距算在**摆出来的那一行**里、不在
+// `c.MeasureText` 给的那一档里——按量出来的数推位置，两处都不准。
+func (s *Shell) spaceTextScrim(c *ui.Context) {
 	alpha := upHeaderTextScrim(c.Theme().Dark)
-	// 满档的高度（头图区自己的坐标）。
-	top := s.upHeaderTextTop(c, h)
-	// 渐变往上是 12 像素；再往上**不蒙**（那是「整块那一档黑」的原样）。
+	// 满档的高度（头图区自己的坐标），渐变往上是 12 像素；
+	// 再往上**不蒙**（那是「整块那一档黑」的原样）。
+	top := float32(upHeaderTextTop)
 	plain := top - upHeaderScrimFade
-	if plain < 0 {
-		plain = 0
-	}
-	if top < 0 {
-		top = 0
-	}
 	ui.Box(c).Absolute().Left(0).Right(0).Top(0).Bottom(0).
 		LinearGradient(ui.LinearGradient{Angle: 180, Stops: []ui.GradientStop{
 			{Color: ui.Transparent, At: 0},
@@ -696,70 +723,6 @@ func (s *Shell) spaceTextScrim(c *ui.Context, h app.SpaceHeader) {
 			{Color: ui.RGBA(0, 0, 0, alpha), At: top / float32(upHeaderH)},
 			{Color: ui.RGBA(0, 0, 0, alpha), At: 1},
 		}})
-}
-
-// upHeaderTextTop 是「信息那一行」的**上沿**在头图区自己的坐标（从 0 数）。
-//
-// 那一行是**贴着底边**的（上游 `items-end`），高度 = 头像 140 与**文字那一列**
-// 里更高的那个 + 上下各 16。**系统字号一放大，文字那一列就变高**，那一行于是
-// 往上长——名字的上沿跟着跑（实测：字号 1 倍 → 71，1.75 倍 → 44，2 倍 → 27，
-// **2.25 倍（Windows 文本大小的上限）→ 9**）。
-//
-// ⚠️ **这里量的是那一列的高度**（`c.MeasureText`），不是估的：估错了就是
-// 「名字被顶进渐变的淡区」，而那正是票 #295 的评审查出来的那一条。
-//
-// ⚠️ **它要缓存**：那一列的高度要量三次字，而这一页每帧都画一次。钥匙是
-// 「字号 + 名字 + 认证 + 签名」——它们变了才重算。
-func (s *Shell) upHeaderTextTop(c *ui.Context, h app.SpaceHeader) float32 {
-	scale := c.Preferences().TextScale
-	name, official, sign := spaceName(h.User), h.User.Official, h.User.Sign
-	if s.upHeaderTopValid && s.upHeaderTopScale == scale &&
-		s.upHeaderTopName == name && s.upHeaderTopOfficial == official &&
-		s.upHeaderTopSign == sign {
-		return s.upHeaderTop
-	}
-	// 那一列有多高（**上界**：签名按两行算，认证按一行算）。
-	col := upHeaderColumnH(c, name, official, sign) + upHeaderTextMargin
-	// 那一行有多高：头像 140 与那一列里更高的那个。
-	row := float32(upAvatarS)
-	if col > row {
-		row = col
-	}
-	// 上沿 = 头图区 200 - 那一行的高 - 下面那一格内边距。
-	top := float32(upHeaderH) - row - float32(upPad)
-
-	s.upHeaderTop, s.upHeaderTopScale = top, scale
-	s.upHeaderTopName, s.upHeaderTopOfficial, s.upHeaderTopSign = name, official, sign
-	s.upHeaderTopValid = true
-	return top
-}
-
-// upHeaderColumnH 是头图区里**文字那一列**的高度（一个上界）。
-//
-// ⚠️ **签名按两行算**（`MaxLines(2)`），**认证按一行算**（那一行也限成一行，
-// 见 `viewSpaceHeader`）——所以这个数是**上界**：真值只会更小，而偏小会让
-// 满档落得太低（名字被顶进淡区），偏大只是让满档提前一点（安全）。
-func upHeaderColumnH(c *ui.Context, name, official, sign string) float32 {
-	col := upHeaderLineH(c, name, scale.Font(c, scale.Size20), weightMedium)
-	if official != "" {
-		col += float32(space.Px8) + upHeaderLineH(c, "认证："+official, scale.Font(c, scale.Size12), weightRegular)
-	}
-	if sign != "" {
-		col += float32(space.Px8) + 2*upHeaderLineH(c, sign, scale.Font(c, scale.Size14), weightRegular)
-	}
-	return col
-}
-
-// upHeaderLineH 是一行字有多高。
-//
-// ⚠️ **用框架自己的度量**（`c.MeasureText`）：行高是**字体自己的事**（不同
-// 平台的系统字体差着一截），估一个系数出来早晚会在某个字号上对不上——而
-// 对不上的后果是「名字被顶进渐变的淡区」。
-func upHeaderLineH(c *ui.Context, text string, size float32, weight int) float32 {
-	_, h := c.MeasureText(0, ui.Span{
-		Text: text, Size: size, Weight: weight, Font: c.Theme().Font,
-	})
-	return h
 }
 
 // viewSpaceActions 是右边那一排：关注按钮 + 粉丝数 + 等级。

@@ -117,7 +117,7 @@ func TestTheSpaceHeaderMaskCoversARealBanner(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			b := newUIExplore(t)
 			banner := serveWhitePNG(b, "/banner.png")
-			uiSpaceBannerData(b, "真头图的 UP 主", banner)
+			uiSpaceBannerData(b, "真头图的 UP 主", banner, uiSpaceLongSign, "")
 			s, tt, _ := newSpaceShell(t, b, true, "77", systemIsDark(dark))
 			openSpace(t, s, tt, 42)
 			waitFor(t, "头图下下来了", func() bool {
@@ -170,34 +170,65 @@ func TestTheSpaceHeaderMaskCoversARealBanner(t *testing.T) {
 // ⚠️ **量的是名字上沿那一行的底色**（不是名字中间那一行）：名字的**上沿**
 // 才是先落进淡区的那一处。
 func TestTheSpaceHeaderTextStaysReadableAtEveryTextScale(t *testing.T) {
-	for _, sc := range []float32{1, 1.5, 1.75, 2, 2.25} {
-		t.Run(fmt.Sprintf("字号%.2f", sc), func(t *testing.T) {
-			b := newUIExplore(t)
-			banner := serveWhitePNG(b, "/banner.png")
-			// **最坏情况**：长签名（折两行）+ 认证那一行——那一列最高，
-			// 名字被顶得最高。
-			uiSpaceBannerData(b, "名字很长很长的 UP 主", banner)
-			s, tt, _ := newSpaceShell(t, b, true, "77", systemIsDark(false),
-				withPrefs(mygoui.Preferences{TextScale: sc}))
-			openSpace(t, s, tt, 42)
-			waitFor(t, "头图下下来了", func() bool {
-				return s.images.Get(banner).Ready()
-			})
-			tt.Frame()
+	for _, fx := range uiSpaceFixtures {
+		for _, sc := range []float32{1, 1.5, 1.75, 2, 2.25} {
+			t.Run(fmt.Sprintf("%s/字号%.2f", fx.name, sc), func(t *testing.T) {
+				b := newUIExplore(t)
+				banner := serveWhitePNG(b, "/banner.png")
+				uiSpaceBannerData(b, "名字很长很长的 UP 主", banner, fx.sign, fx.official)
+				s, tt, _ := newSpaceShell(t, b, true, "77", systemIsDark(false),
+					withPrefs(mygoui.Preferences{TextScale: sc}))
+				openSpace(t, s, tt, 42)
+				waitFor(t, "头图下下来了", func() bool {
+					return s.images.Get(banner).Ready()
+				})
+				tt.Frame()
 
-			img := tt.Image()
-			nameBox, ok := tt.Find("名字很长很长的 UP 主")
-			if !ok {
-				t.Fatalf("画面上找不到昵称，文字有 %q", tt.Texts())
-			}
-			// 名字**上沿**那一行的底色（名字左边 4 像素 = 头像和名字之间的空地）。
-			bg := img.RGBAAt(int(nameBox.X)-4, int(nameBox.Y)+1)
-			if r := ink.Ratio(mygoui.RGB(255, 255, 255), colorOf(bg)); r < 4.5 {
-				t.Errorf("字号 %.2f 时昵称上沿的对比度只有 %.2f:1（< 4.5），底色 %v"+
-					"——名字被顶进渐变的淡区了", sc, r, bg)
-			}
-		})
+				img := tt.Image()
+				nameBox, ok := tt.Find("名字很长很长的 UP 主")
+				if !ok {
+					t.Fatalf("画面上找不到昵称，文字有 %q", tt.Texts())
+				}
+				// ① 名字**上沿**那一行（名字左边 4 像素 = 头像和名字之间的空地）。
+				bg := img.RGBAAt(int(nameBox.X)-4, int(nameBox.Y)+1)
+				if r := ink.Ratio(mygoui.RGB(255, 255, 255), colorOf(bg)); r < 4.5 {
+					t.Errorf("%s、字号 %.2f 时昵称上沿的对比度只有 %.2f:1（< 4.5），"+
+						"底色 %v——名字被顶进渐变的淡区了", fx.name, sc, r, bg)
+				}
+				// ② **最靠上的实心墨**那一行：字有抗锯齿，第一行往往只有半个
+				// 像素的墨，而用户读到的是**第一行实打实的墨**——它压着的底色
+				// 才算数。
+				row, ok := firstInkRow(img, nameBox)
+				if !ok {
+					t.Fatalf("%s、字号 %.2f 时昵称那一行没有墨", fx.name, sc)
+				}
+				inkBg := img.RGBAAt(int(nameBox.X)-4, row)
+				if r := ink.Ratio(mygoui.RGB(255, 255, 255), colorOf(inkBg)); r < 4.5 {
+					t.Errorf("%s、字号 %.2f 时昵称第一行实墨的对比度只有 %.2f:1"+
+						"（< 4.5），底色 %v", fx.name, sc, r, inkBg)
+				}
+			})
+		}
 	}
+}
+
+// firstInkRow 是那一段文字里**第一行有实打实的墨**的那一行（返回 y）。
+//
+// ⚠️ **为什么要找「实心墨」那一行而不是用文字框的上沿**：字有抗锯齿，框的
+// 上沿那几行往往只有半个墨点，而用户读到的是**第一行实打实的墨**——它压着
+// 的底色才是判据（票 #295 的评审量的是这一行）。
+//
+// 判据是「这一行里有比底色明显亮的像素」——头图上的字是白的 ✓。
+func firstInkRow(img *image.RGBA, box mygoui.Rect) (int, bool) {
+	for y := int(box.Y); y < int(box.Y+box.H); y++ {
+		for x := int(box.X); x < int(box.X+box.W); x++ {
+			c := img.RGBAAt(x, y)
+			if c.R > 200 && c.G > 200 && c.B > 200 {
+				return y, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // TestTheSpaceHeaderTextIsReadableOnAnyBanner 钉住「头图上的字在两层主题下
@@ -314,28 +345,45 @@ func serveWhitePNG(b *uiExplore, path string) string {
 	return b.URL + path
 }
 
-// uiSpaceBannerData 是 `uiSpaceData` 加两个东西：**真头图**和一个**最高的那
-// 一列**（长签名折两行 + 认证那一行）。
+// uiSpaceBannerData 是 `uiSpaceData` 加一个**真头图**地址。
 //
-// ⚠️ **「最高的那一列」是故意的**：那一列越高，头图区里那一行就往上长得越
-// 厉害，名字被顶得越高——而名字的上沿落进渐变的淡区时，白字压着的底色就
-// 从 #6b6b6b 变回 #a8a8a8（对比度 5.33:1 → 2.4:1）。所以验「字号放大时
-// 读得出来」必须用**这一份**，不是随便一份。
-func uiSpaceBannerData(b *uiExplore, name, banner string) {
+// `sign` 是签名那一行（空串 = 没有签名），`official` 是认证那一行（空串 =
+// 没认证）。
+func uiSpaceBannerData(b *uiExplore, name, banner, sign, official string) {
 	uiSpaceData(b, name, 0, 123456)
 	b.on("/x/space/wbi/acc/info", func(w http.ResponseWriter, r *http.Request) {
+		off := map[string]any{"role": 0}
+		if official != "" {
+			off = map[string]any{"role": 1, "title": official}
+		}
 		uiExploreJSON(w, 0, map[string]any{
-			"mid": 42, "name": name, "level": 4,
-			"sign": "这是一个很长的签名，签名的内容长到要折成两行才放得下，" +
-				"所以它一定折行了，一定折行了，一定折行了。",
+			"mid": 42, "name": name, "level": 4, "sign": sign,
 			"face":         "https://f/face-42.jpg",
 			"top_photo_v2": map[string]string{"l_200h_img": banner},
-			// ⚠️ **role 不能是 0**：role 是 0 时 B 站那一档是「没认证」，那一行
-			// 压根不画（`bili/space.go` 的 `officialOf`）——而那一行正是把
-			// 名字顶得最高的那一行。
-			"official": map[string]any{"role": 1, "title": "认证信息"},
+			"official":     off,
 		})
 	})
+}
+
+// uiSpaceLongSign 是那份「长到要折两行」的签名。
+const uiSpaceLongSign = "这是一个很长的签名，签名的内容长到要折成两行才放得下，" +
+	"所以它一定折行了，一定折行了，一定折行了。"
+
+// uiSpaceFixtures 是验「系统字号放大时也读得出来」要用的**几种 UP**。
+//
+// ⚠️ **每一支都要验**：那一列（名字 + 认证 + 签名）有多高，取决于这个 UP 有
+// 没有认证、有没有签名——而**名字在那一列里的位置**也跟着变（那一列在内容框
+// 里是居中的）。只验一种就是把另外几种挪开了（票 #295 的评审那一轮正是这么
+// 漏掉的：夹具多画了一行「认证」，把问题挪开了，另一种 UP 仍然是坏的）。
+var uiSpaceFixtures = []struct {
+	name     string
+	sign     string
+	official string
+}{
+	{"有签名、没有认证", uiSpaceLongSign, ""},
+	{"有签名、有认证", uiSpaceLongSign, "认证信息"},
+	{"没有签名、没有认证", "", ""},
+	{"短签名、有认证", "一句话的签名", "认证信息"},
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
