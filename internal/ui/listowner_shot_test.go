@@ -1,4 +1,9 @@
-// 票 #360 的画面验收：列表行里的 UP 名是一枚**可点的**扁平按钮。
+// 票 #360 的画面验收：列表行里的 UP 名是一枚**可点的**名字型链接。
+//
+// ⚠️ **票 #417（2026-10-25）之后它不再是「扁平按钮」**：那一档换成了
+// 「一句话字 + 悬停时一道下划线」（`widgets/flat` 的 `Link`）——见
+// `DESIGN.md` §六 的「名字型链接」。可点、能进他的空间、提示还是那句，
+// 都跟票 #360 说的一样；**变的是那一枚的样子**。
 //
 //	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderListOwnerShots
 //
@@ -42,7 +47,8 @@ func TestRenderListOwnerShots(t *testing.T) {
 			// ① 平常的样子：一列 UP 名（次要色，无描边）。
 			save(t, dir, "360-列表里的UP名-"+name+".png", tt)
 
-			// ② 指针停在第二行的 UP 名上：那一枚要显出扁平按钮的悬停反馈。
+			// ② 指针停在第二行的 UP 名上：那一枚要显出**名字型链接**的悬停反馈
+			// （一道下划线，票 #417）。
 			//
 			// ⚠ **推钟要按 AGENTS §2**：提示是延时的（框架那份 600ms 出），
 			// 所以推钟而不是数帧。这一张**不推钟**——推了就出提示，而提示正好
@@ -61,7 +67,7 @@ func TestRenderListOwnerShots(t *testing.T) {
 			save(t, dir, "360-列表里的UP名-提示-"+name+".png", tt)
 
 			// ④ 稍后再看那一页：它**自己画行**（不走 widgets/list），UP 名同样是
-			// 一枚可点的扁平按钮（票 #360 的评审：只改 widgets/list 的话这一页
+			// 一枚可点的名字型链接（票 #360 的评审：只改 widgets/list 的话这一页
 			// 走不到）。
 			f := newLibFake(t).withLater(1, 3, "甲", "乙", "丙")
 			tt2, s2 := libraryShellOpts(t, f, laterPath, systemIsDark(dark))
