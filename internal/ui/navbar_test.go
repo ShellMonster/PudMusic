@@ -89,13 +89,18 @@ func fakeClockOn(s *Shell, t time.Time) *fakeClock {
 	return c
 }
 
-// TestNavBarSpansTheTopOfTheWindow 验顶栏真的横贯窗口顶上的一条。
+// TestTheTopBarCoversTheContentAreaOnly 验顶栏**只盖内容区那一段**。
 //
 // 「整条是拖动区」这件事本身无头**验不了**：MyGo 无头宿主的 `startDrag` 是空
 // 实现（`ui/headless.go:90`），拖没拖窗口在画面上看不出来。这条能验的是拖动区
-// 成立的前提——它得是**顶上那一条、并且横贯整个窗口宽度**，否则有一片窗口
-// 拖不动。
-func TestNavBarSpansTheTopOfTheWindow(t *testing.T) {
+// 成立的前提——它得是**内容区顶上那一条**（x ≥ 侧栏宽），否则有一片窗口
+// 拖不动；而它**不该**再盖住侧栏那一段（那是侧栏的 logo 和菜单的地方）。
+//
+// ⚠️ **这一条跟着票 #165 改过**：顶栏原来横贯**整个窗口宽度**（后退键贴在
+// 窗口左边 x=8），而现在是上游那种「侧栏通栏 + 顶栏只盖内容区」（上游
+// `biu/src/layout/index.tsx:36-47`，报告 C-01）。所以左边那一头量的是
+// **内容区的左沿**（侧栏的右沿），不再是窗口的左沿。
+func TestTheTopBarCoversTheContentAreaOnly(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
 
@@ -123,16 +128,25 @@ func TestNavBarSpansTheTopOfTheWindow(t *testing.T) {
 	if login.Y < 0 || login.Y+login.H > navMinHeight {
 		t.Errorf("登录入口在 %v，不在顶上那 %v 高里", login, navMinHeight)
 	}
-	// 左边贴着窗口左边、右边贴着窗口右边 = 这一条横贯整个宽度。
+	// 左边：**内容区的左沿**（侧栏的右沿），右边：窗口的右边。
 	//
-	// 留出来的 slack 是：顶栏自己的右内边距（8，见 viewNav 的 Padding）
-	// 加那个控件自己的内边距。**Tester 只能量到文字/名字那一小块**，
-	// 量不到按钮本身——`Find` 给的是标签节点的框（`ui/runtime.go:1056`）。
-	// 所以这里量的是「顶栏那一组控件顶到了窗口右边附近」，不是「按钮的边缘
-	// 正好等于窗口边缘」。
+	// ⚠️ **左边量的是「顶栏那一组控件顶到内容区左边附近」**，不是「按钮的边缘
+	// 正好等于内容区的边缘」：**Tester 只能量到文字/名字那一小块**，量不到按钮
+	// 本身（`Find` 给的是标签节点的框，`ui/runtime.go:1056`）。顶栏自己的左
+	// 内边距是 8（`viewNav` 的 Padding），而框架那一支后退键自己还有 8 的
+	// 内边距（`mygo/ui/widgets.go` 的 `Padding(Space(1.5), Space(2))`）——
+	// 所以量到的是 200 + 8 + 8 那一带。
+	//
+	// 右边留出来的 slack 是：顶栏自己的右内边距（8）加那个控件自己的内边距。
 	const slack = 32
-	if back.X < 8 {
-		t.Errorf("后退按钮左边缘 %v，快贴到窗口外了", back.X)
+	contentLeft := float32(app.DefaultSideMenuWidth)
+	if back.X < contentLeft {
+		t.Errorf("后退按钮左边缘 %v，在内容区左沿（%v）**左边**——顶栏又盖到侧栏上去了",
+			back.X, contentLeft)
+	}
+	if back.X > contentLeft+slack {
+		t.Errorf("后退按钮左边缘 %v，离内容区左沿（%v）有 %v（容差 %v）——它不在顶栏左端",
+			back.X, contentLeft, back.X-contentLeft, slack)
 	}
 	if right := login.X + login.W; float32(1200)-right > slack {
 		t.Errorf("登录入口右边缘 %v，离窗口右边还有 %v（容差 %v），顶栏没顶满",
