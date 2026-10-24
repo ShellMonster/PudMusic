@@ -395,10 +395,17 @@ type Shell struct {
 	queueDropUpper bool
 	// queueDragging 是「有东西正被拖着经过这一列」。
 	//
-	// ⚠️ **它比指针慢一帧**：它是上一帧问出来的（框架的 DragOver 只能在列表
-	// 建完之后问，见 viewQueueList）。差一帧看不出来——插入线晚一帧出现，
-	// 而拖动本来就不是一帧的事。
+	// ⚠️ **它比指针慢一帧**：它是**上一帧**的结论——插入线是在建行的时候画的
+	// （见 viewQueueRow），而这一帧的结论要等这一列的行都建完才知道。差一帧
+	// 看不出来——插入线晚一帧出现，而拖动本来就不是一帧的事。
 	queueDragging bool
+	// queueDraggingNow 是「**这一帧**有没有行是拖动源」。
+	//
+	// ⚠️ **每一行自己报**（见 viewQueueRow）：那一行本来就在问自己是不是拖动
+	// 源（`rowEl.Dragging()`，拖着的那一行要画成半透明），拿它报「有东西正被
+	// 拖着」不花钱——而框架的 `DragOver` 每问一次都要新建一个闭包（每帧一次
+	// 分配，见 queue_drawer.go 里那一句）。
+	queueDraggingNow bool
 
 	// queueScroll 是那一列滚到哪儿了。**和 queueList 分开存**是因为「定位当前
 	// 播放」要的是一段动画：ListState.ScrollTo 是一跳到位（`mygo/ui/list.go`
