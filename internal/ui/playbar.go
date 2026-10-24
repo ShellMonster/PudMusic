@@ -889,14 +889,13 @@ func (s *Shell) openExternalURL(url string) {
 // 🔴 **左对齐**（票 #219，报告 §2.9）：上游那一句是**普通 `span`**，而它那一列
 // 是 `items-start`——所以那句话紧跟在歌名下面、**和歌名同一个左沿**。
 //
-// 我们这里是**一枚按钮**（点它进那个 UP 的空间），而**框架的按钮内容默认居中**
-// （`internal/ui/widgets/flat/flat.go` 没设 `Justify`）——不改的话那句话会
-// **飘到那一列的中间**：实测歌名在 x=80，而 UP 名在 x=219（改之前那一列有
-// 180 宽，那句话被居中到了 219）。
+// 我们这里是**一枚「名字型链接」**（点它进那个 UP 的空间，票 #417）：一句话字，
+// 指针落上去时底下长出一道下划线，**没有按钮壳**——上游那一处也是
+// `hover:underline`。
 //
-// ⚠️ **所以这里要显式 `Justify(ui.Start)`**，而且**内边距清零**（`Padding(0,0)`）：
-// 按钮的内容框从内边距之后开始算，留 2 的话那句话会比歌名**右移 2 像素**，
-// 而「和歌名对齐」是这一条要的东西（上游那一列里两句话的左沿分毫不差）。
+// ⚠️ **左对齐 + 内边距清零**是这一档配方（`widgets/flat` 的 `Link`）里定死的：
+// 框架的按钮内容默认居中、内边距默认 6/14——不改的话那句话会**飘到那一列的
+// 中间**（实测歌名在 x=80，而 UP 名在 x=219）或者比歌名**右移 14 像素**。
 //
 // ⚠️ **有名字、没有编号时照样显示，只是点不动**：B 站有的接口只给名字不给
 // mid（见 `app.Item.ArtistMid`）。把名字藏起来是另一种撒谎——用户看到的是
@@ -916,15 +915,20 @@ func (s *Shell) viewArtist(c *ui.Context, st app.State, t *ui.Theme) {
 			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 		return
 	}
-	// 扁平按钮：UP 名这一格是**播放条上一枚按钮**，而调研点名的描边药丸里就有它
-	//（报告 §1.1 的 F1 证据：播放条上每一枚带描边的键）。它上面是 14px 的弱化
-	// 灰字，本来就不该配一块描边底。
+	// **名字型链接**：UP 名这一格是**一句话字**，指针落上去时底下长出一道下划线。
+	//
+	// ⚠️ **它不是一枚按钮**（票 #417）：改之前这里画的是扁平按钮——左右各留一段
+	// 内边距 + 圆角，于是那个名字被一个**胶囊**包着，而指针落上去时胶囊才显
+	// 出来（像一块底牌）。上游那一处是 `hover:underline`，**没有按钮壳**。
+	//
+	// ⚠️ **左对齐 + 内边距清零**（理由见 `flat.Link`）：名字要跟上面那句歌名
+	// 同一个左沿，而框架的按钮内容默认居中、内边距默认 6/14。
 	//
 	// ⚠ **那句话是 `list.OwnerTipText` 给的**（票 #360）：列表里的 UP 名是同一
 	// 件事的另一个地方，两处各写一遍的话，改了一处另一处就安静地变成另一句
 	// 话——而那种错在画面上只是「提示里那句话怪怪的」。
-	if s.withTip(c, flatButton(c, st.Artist).Grow(1).MinWidth(artistMinW).
-		Justify(ui.Start).FontSize(scale.Font(c, scale.Size14)).Padding(space.None, space.None).TextColor(t.TextMuted).
+	if s.withTip(c, flatLink(c, st.Artist).Grow(1).MinWidth(artistMinW).
+		FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).
 		MaxLines(1).Ellipsis("…"), list.OwnerTipText(st.Artist)).Clicked() {
 		s.navigate(upPathPrefix + strconv.FormatInt(st.ArtistMid, 10))
 	}

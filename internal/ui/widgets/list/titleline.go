@@ -96,7 +96,7 @@ func OwnerTipText(name string) string { return "打开 " + name + " 的空间" }
 
 // ownerLine 画副标题那一行：现场标签（有就画）+ 副标题文字。
 //
-// 🔴 **有编号时 UP 名是一枚可点的扁平按钮**（票 #360）：点了进那个 UP 的空间。
+// 🔴 **有编号时 UP 名是一枚可点的名字型链接**（票 #360）：点了进那个 UP 的空间。
 // **没有编号时照旧画成普通字**——名字照样显示，只是点不动（B 站有些接口只给
 // 名字不给编号，见 `app.Item.ArtistMid`）。
 func ownerLine(c *ui.Context, o ownerRow) {
@@ -118,8 +118,8 @@ func ownerLine(c *ui.Context, o ownerRow) {
 	})
 }
 
-// OwnerName 画那一行的 UP 名：有编号时是一枚**可点的**扁平按钮，点了走
-// `acts.OpenOwner`；没有时是**普通字**。
+// OwnerName 画那一行的 UP 名：有编号时是一枚**可点的名字型链接**（点了走
+// `acts.OpenOwner`）；没有时是**普通字**。
 //
 // # ⚠ 「画出来的那一句」和「那个人」是两样
 //
@@ -167,13 +167,21 @@ func OwnerName(c *ui.Context, text, name, tip string, mid int64,
 
 // ownerButton 画那一枚**可点的** UP 名。
 //
-// # ⚠ 照播放条上那一枚画
+// # 它是「名字型链接」，不是一枚按钮（票 #417）
+//
+// **没有按钮壳、没有底色、没有胶囊**——指针落上去时名字底下长出一道下划线
+// （上游那一处是 `hover:underline`）。
+//
+// 改之前这里画的是扁平按钮（`flat.Button`）：左右各留一段内边距 + 圆角，
+// 于是那个名字被一个**胶囊**包着，而指针落上去时胶囊才显出来——像一块底牌。
+// 列表里一屏十几行，每一行都顶着那么一块底牌，一眼就是「另一种控件库」。
+//
+// ⚠️ **照播放条上那一枚画**
 //
 // `internal/ui/playbar.go` 的 `viewArtist` 是同一件事的另一个地方：有编号时
-// 播放条上那个 UP 名是一枚**扁平按钮**（无描边、无常驻底色），字色还是
-// **次要色**那一档。**别为了「可点」就把它画成主色实心块**——上游那一枚是
-// `text-sm` 的弱化灰字（见 playbar.go 顶上那一段），而列表里每一行都多一块
-// 绿的话，一屏就是十几块。
+// 播放条上那个 UP 名也是一枚**名字型链接**。**别为了「可点」就把它画成主色
+// 实心块**——上游那一枚是 `text-sm` 的弱化灰字（见 playbar.go 顶上那一段），
+// 而列表里每一行都多一块绿的话，一屏就是十几块。
 //
 // # ⚠ 内边距清零、内容左对齐
 //
@@ -181,6 +189,8 @@ func OwnerName(c *ui.Context, text, name, tip string, mid int64,
 // 那句话会比同列的字**右移 14 像素**，而这一列的字是从左沿起的（上游那一列是
 // `items-start`）。框架的按钮内容默认居中，所以还要 `Justify(ui.Start)`——
 // 理由和播放条上那一枚一模一样（见 playbar.go 的 `viewArtist` 顶上）。
+//
+// 这两样现在由**「名字型链接」那一档的配方**（`widgets/flat` 的 `Link`）给死了。
 //
 // # ⚠ 宽度上限**不在这里**
 //
@@ -194,9 +204,7 @@ func OwnerName(c *ui.Context, text, name, tip string, mid int64,
 func ownerButton(c *ui.Context, text, tip string, size, lh float32, color ui.Color) ui.Element {
 	// ⚠ **空标签**：那份配方默认给它建一个字，而这里要的是**自己**建那个字
 	// （字号 / 行高 / 字色 / 省略号都跟这一列的字一模一样，见 `ownerLine`）。
-	b := flat.Button(c, "").
-		Padding(space.None, space.None).
-		Justify(ui.Start)
+	b := flat.Link(c, "")
 	b = b.Children(func() {
 		t := ui.Text(c, text).FontSize(size).TextColor(color).MaxLines(1).Ellipsis("…")
 		// ⚠ **行高是 0 就不设**（理由同 `OwnerName` 的那一句）。

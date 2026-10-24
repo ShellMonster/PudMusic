@@ -54,6 +54,19 @@ func flatButton(c *ui.Context, label string) ui.Element {
 	return flat.Button(c, label)
 }
 
+// flatLink 是「名字型链接」那一档：**一句话字**，悬停时底下长出一道下划线，
+// **没有按钮壳**（没有底色、没有胶囊、没有描边）。
+//
+// 上游 Biu 的作者名是 `hover:underline`——用户 2026-10-25 说的「不要做成一个
+// 胶囊一样的包着那个名称的，用正常的下划线就行」就是这一档。
+//
+// 🔴 **别给它补 `Label(label)`**：可见的字就是它的无障碍名字（同 `flatButton`）。
+//
+// 配方、理由、键盘可达那一段，都在 `widgets/flat` 的 `Link` 上面写着。
+func flatLink(c *ui.Context, label string) ui.Element {
+	return flat.Link(c, label)
+}
+
 // flatIconButton 是一个**只画一个图标**的扁平按钮。
 //
 // 🔴 **label 不许省**，理由和 `icons.go` 的 `iconButton` 一字不差：图标对辅助技术
