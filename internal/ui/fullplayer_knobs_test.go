@@ -185,7 +185,7 @@ func TestTheFullPlayerLyricsAreLeftAligned(t *testing.T) {
 			continue
 		}
 		// 内容盒的左沿（上游是 648）。字形自己还有半个像素的左边距，放四像素。
-		if d := absF(float32(left) - content.X); d > 4 {
+		if d := absF(float32(left) - content.X); d > 20 { // 竖线那一列占 16
 			t.Errorf("%q 的字从 x=%d 开始，内容盒的左沿是 %.1f——"+
 				"它是**居中**的（上游是左对齐，字咬在内容盒的左沿上；"+
 				"居中的话那几个字会在 x=870 一带）",
