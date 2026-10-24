@@ -364,14 +364,13 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		h.lists[tab].View(c)
 		s.noteScrollbar(h.lists[tab].Hot())
 
-		// 「回到顶部」那一枚**由翻页列表自己画**（`list.PagedList` 里面那一份
-		// `BackToTop`）：滚过 400 像素才出现，浮在整窗右下（上游的数，见
+		// 「回到顶部」那一枚**由画着的那一档自己画**（`list.PagedList` 里面那
+		// 一份 `BackToTop`）：滚过 400 像素才出现，浮在整窗右下（上游的数，见
 		// `widgets/list` 的 `BackToTop`）。
 		//
-		// ⚠️ **别在这里再画一枚**：这一枚**由画着的那一档的翻页列表自己画**
-		// （`list.PagedList` 里面那一份 `BackToTop`）——画出来的那一枚给的是
-		// 「这一档」的数，而三档一起画的话按钮就是三枚。按它回的是**画面上画着
-		// 那一档**自己的位置（见 `PagedList.ScrollTop`）。
+		// ⚠️ **别在这里再画一枚**：画出来的那一枚给的是「这一档」的数，而三档
+		// 一起画的话按钮就是三枚。按它回的是**画面上画着那一档**自己的位置
+		// （见 `PagedList.ScrollTop`）——这正好是票面要的那一条。
 	}
 }
 
