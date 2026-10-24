@@ -124,7 +124,7 @@ func streamKey(it Item) string {
 }
 
 // MountStreaming 挂上在线播放。**在开窗口之前调**（它自己不读盘，但让
-// 第一���点歌不要替「开窗」买单）。
+// 第一次点歌不要替「开窗」买单）。
 func (a *App) MountStreaming(s Streaming) {
 	a.mu.Lock()
 	a.streaming = &s
@@ -641,6 +641,17 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	ref, err := a.resolve(context.Background(), s, it, s.Quality)
 	if err != nil {
 		a.failPlay(gen, it, "取流", err)
+		return
+	}
+	// 🔴 **代次变了就别再往下走**（和上面那一次同一个道理）：取流也是**一次网络
+	// 往返**，等它的时候用户完全可能已经切了歌、或者**应用已经退出**了。
+	//
+	// ⚠️ **这一处不是可有可无的**：下面 `buildFromRef` 建字节源是要**在盘上落一
+	// 个临时文件**的，而代次变了之后没人要这一趟——那个文件于是落在一个已经不
+	// 会有人收拾的目录里（应用退出之后落，测试里就是落在已经被删掉的临时目录
+	// 里，于是那条用例的收尾报「directory not empty」）。
+	if a.genStale(gen) {
+		a.failPlay(gen, it, "取流", errStaleGen)
 		return
 	}
 	// 🔴 **再起算一次**：从这儿往后等的是 CDN 的头几个字节（字节源自己的
@@ -1164,7 +1175,7 @@ func (a *App) checkPlayback() {
 	// ⚠️ **在线流要看字节源自己的错，不要看解码器的**。解码器看到的是**后果**：
 	// 字节断了之后它多半先报「这一帧的 CRC 对不上」，而真正的原因是网络断了
 	// 或者地址失效了。把后果说给用户听，用户会以为歌坏了、缓存坏了，
-	// 于是去清缓存重下——而正确���反应是「换个网」。
+	// 于是去清缓存重下——而正确的反应是「换个网」。
 	if tr != nil && tr.source != nil {
 		if srcErr := tr.source.Err(); srcErr != nil && !errors.Is(srcErr, io.EOF) {
 			err = srcErr

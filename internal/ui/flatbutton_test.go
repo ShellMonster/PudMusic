@@ -529,7 +529,7 @@ func hoverDelta(t *testing.T, tt *mygoui.Tester, label string) int {
 //
 // 判据是**画面上那一格的两个色**：底取众数、字取离底最远的那一个（落在实心笔画上），
 // 再算 WCAG 2.x 的对比度。深浅两套主题都跑——深色那一档本来就过，而浅色那一档
-// 曾经不���。
+// 曾经不是。
 //
 // 4.5 是 WCAG AA 对**普通正文**的门槛（侧栏菜单项是 13px 的正文，不是大字）。
 func TestTheSelectedRowKeepsItsContrast(t *testing.T) {

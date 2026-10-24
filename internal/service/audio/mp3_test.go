@@ -465,7 +465,7 @@ func mp3Frames(t *testing.T, data []byte) [][]byte {
 	return frames
 }
 
-// onsetOf 找第一��超过阈值的样本（下标）。全都在阈值以下是 -1。
+// onsetOf 找第一个超过阈值的样本（下标）。全都在阈值以下是 -1。
 func onsetOf(samples []float32) int {
 	const threshold = 0.01 // 幅度 1 是满刻度，0.01 是 -40 dB
 	for i, v := range samples {
