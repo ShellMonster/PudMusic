@@ -2475,6 +2475,11 @@ var Items = []Item{
 			"TestTheSpaceHeaderMaskIsTheUpstreamOne",
 			// 画面上真的压着那两层（深浅两套，逐像素）。
 			"TestTheSpaceHeaderIsMaskedInBothThemes",
+			// 蒙版压在**真头图**上面（夹具里真的回一张纯白的 PNG——最坏情况）。
+			"TestTheSpaceHeaderMaskCoversARealBanner",
+			// **系统字号放大时名字仍然落在满档里**（1 倍到 2.25 倍，Windows 的
+			// 上限）——那一行是贴着底边的，字号一放大就往上长。
+			"TestTheSpaceHeaderTextStaysReadableAtEveryTextScale",
 			// 最坏情况（纯白头图 / 没有头图）下白字和 92% 的白都 ≥4.5:1。
 			"TestTheSpaceHeaderTextIsReadableOnAnyBanner",
 			// 昵称那一行真的是白字（不跟主题翻）。
