@@ -43,7 +43,7 @@ import (
 func TestTheMiniWindowIsAtBiuNumbers(t *testing.T) {
 	const (
 		biuWidth  = 320 // electron/mini-player.ts:16
-		biuHeight = 100 // electron/mini-player.ts:17
+		biuHeight = 84 // electron/mini-player.ts:17
 	)
 	opts := MiniWindowOptions(nil)
 

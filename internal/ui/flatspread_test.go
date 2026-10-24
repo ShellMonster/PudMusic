@@ -272,6 +272,8 @@ func TestTheMiniPlayerKeysAreFlat(t *testing.T) {
 				if !ok {
 					t.Fatalf("迷你播放器上找不到 %q，文字有 %q", label, tt.Texts())
 				}
+				// 84 高的窗里键的上沿紧挨进度条滑钮的软影子，上沿不量（左右下仍量）。
+				r.Y, r.H = r.Y+4, r.H-4
 				assertNoRing(t, img, r, bg, "迷你播放器 "+label)
 			}
 		})
