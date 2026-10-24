@@ -59,6 +59,17 @@ func TestRenderListOwnerShots(t *testing.T) {
 			tt.Advance(700 * time.Millisecond)
 			tt.Frame()
 			save(t, dir, "360-列表里的UP名-提示-"+name+".png", tt)
+
+			// ④ 稍后再看那一页：它**自己画行**（不走 widgets/list），UP 名同样是
+			// 一枚可点的扁平按钮（票 #360 的评审：只改 widgets/list 的话这一页
+			// 走不到）。
+			f := newLibFake(t).withLater(1, 3, "甲", "乙", "丙")
+			tt2, s2 := libraryShellOpts(t, f, laterPath, systemIsDark(dark))
+			waitFrames(t, tt2, "把内容拉回来", func() bool {
+				return rowsShown(s2.pageOf(laterPath)) == 3
+			})
+			tt2.Frame()
+			save(t, dir, "360-稍后再看里的UP名-"+name+".png", tt2)
 		})
 	}
 }

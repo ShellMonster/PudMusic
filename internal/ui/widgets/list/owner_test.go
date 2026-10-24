@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/egoist/mygo/ui"
@@ -205,6 +206,67 @@ func TestTheOwnerNameSitsWhereItSat(t *testing.T) {
 	}
 	if btn.W != plain.W {
 		t.Errorf("可点的那一枚占了 %.1f 宽，普通字占了 %.1f 宽", btn.W, plain.W)
+	}
+}
+
+// TestAnOwnerNameThatIsOnlyTheTitlesArtistIsNotALink 钉住「只有标题里挪过来的
+// 那个歌手名时**不是**链接」。
+//
+// ⚠ **这一条是票 #360 的评审查出来的**：UP 空间「投稿」那一档每一行画的是
+// 「周杰倫」这种（标题里【】挪过来的），而那一页**压根没有 UP 名**（名字在
+// 页头，每一行都是同一个 UP）。
+//
+// 把它画成可点的，提示就成了「打开 的空间」（名字空着），点它还会跳到
+// **编号指的那个人**——而那一页就是那个人的空间：**标签和目的地对不上**。
+func TestAnOwnerNameThatIsOnlyTheTitlesArtistIsNotALink(t *testing.T) {
+	var got []string
+	_, tt := newList(t, ownerActs(&got), []Music{
+		// ⚠ **Owner 是空的，而编号有**（投稿那一档就是这样）。
+		{ID: "a", Title: "【周杰倫】某首歌", Item: app.Item{ArtistMid: 42}},
+	})
+
+	if !tt.HasText("周杰倫") {
+		t.Fatalf("那个歌手名没画出来，文字有 %q", tt.Texts())
+	}
+	if err := tt.Click("周杰倫"); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("点了那个歌手名却进了空间：%v——它不是 UP 名", got)
+	}
+
+	// 悬停上去也**不该有那句提示**（「打开 的空间」——名字空着）。
+	r, ok := tt.Find("周杰倫")
+	if !ok {
+		t.Fatalf("画面上找不到那个歌手名，文字有 %q", tt.Texts())
+	}
+	tt.Move(r.X+r.W/2, r.Y+r.H/2)
+	tt.Advance(700 * time.Millisecond)
+	tt.Frame()
+	if tt.HasText("的空间") {
+		t.Errorf("悬停出了那句提示，文字有 %q——它不是 UP 名", tt.Texts())
+	}
+}
+
+// TestTheOwnerNameSaysWhichSpaceItOpens 钉住「悬停上去那句话说的是**那个人**」。
+//
+// ⚠ **提示里是那个人的名字**，不是画出来的那一句（画出来的那一句可能是清洗过
+// 的「歌手 · UP 名」，见 `showOf`）。
+func TestTheOwnerNameSaysWhichSpaceItOpens(t *testing.T) {
+	var got []string
+	_, tt := newList(t, ownerActs(&got), []Music{
+		ownerSong("a", "夜空中最亮的星", "逃跑计划"),
+	})
+
+	r, ok := tt.Find("逃跑计划")
+	if !ok {
+		t.Fatalf("画面上找不到那个 UP 名，文字有 %q", tt.Texts())
+	}
+	tt.Move(r.X+r.W/2, r.Y+r.H/2)
+	tt.Advance(700 * time.Millisecond)
+	tt.Frame()
+	if !tt.HasText("打开 逃跑计划 的空间") {
+		t.Errorf("悬停上去没有那句话，文字有 %q", tt.Texts())
 	}
 }
 

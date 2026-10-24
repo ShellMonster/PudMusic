@@ -200,6 +200,12 @@ type pagedRows struct {
 	countText rowkey.Memo[int64, string]
 	durText   rowkey.Memo[time.Duration, string]
 
+	// ownerTip 记着每一行那句「打开 X 的空间」（票 #360）。
+	//
+	// ⚠ **理由和上面那三个一模一样**：它是「每帧每行算一遍、结果不变」的那一种
+	// （现算的话每帧每行一次字符串拼接，见 `rowkey.Memo` 的文件头）。
+	ownerTip rowkey.Memo[string, string]
+
 	// keys 记「上一次输入是键盘还是指针」（理由见 `widgets/list/selection.go` 的
 	// KeyboardMode）。
 	//

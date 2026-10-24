@@ -104,21 +104,55 @@ func ownerLine(c *ui.Context, o ownerRow) {
 		if o.shown.owner == "" {
 			return
 		}
-		// 没有编号（或者这一页没接上导航）：**普通字**。
-		//
-		// ⚠ **不许因为「点不动」就把名字藏起来**（AGENTS.md §4）：用户看到的
-		// 是「这一行没有 UP 名」，而真实原因是这一页没给编号。
-		if o.mid <= 0 || o.acts.OpenOwner == nil {
-			ui.Text(c, o.shown.owner).FontSize(o.size).LineHeight(o.lh).
-				TextColor(o.color).MaxLines(1).Ellipsis("…")
-			return
-		}
-		// 可点的那一枚：扁平、无描边、字色还是次要色（理由见 `ownerButton`）。
-		b := ownerButton(c, o.shown.owner, o.tip, o.size, o.lh, o.color)
-		if b.Clicked() {
-			o.acts.OpenOwner(o.mid, o.name)
-		}
+		OwnerName(c, o.shown.owner, o.name, o.tip, o.mid, o.size, o.lh, o.color, o.acts)
 	})
+}
+
+// OwnerName 画那一行的 UP 名：有编号时是一枚**可点的**扁平按钮，点了走
+// `acts.OpenOwner`；没有时是**普通字**。
+//
+// # ⚠ 「画出来的那一句」和「那个人」是两样
+//
+// text 是**画出来**的那一句（可能是清洗过的「歌手 · UP 名」，见 `showOf`），
+// 而 name 是**那个人**的名字——提示里说的是他（「打开 X 的空间」），不是
+// 那一行拼出来的字。
+//
+// # 🔴 **name 为空时不是可点的**（票 #360 的评审）
+//
+// 那一行画的有时**只是标题里挪过来的那个歌手名**（「周杰倫」这种），而那不是
+// UP 主：那一页压根没有 UP 名（UP 空间「投稿」那一档每一行都是同一个 UP，
+// 名字在页头；首页「音乐榜」那一支也可能只给编号不给名字）。
+//
+// 把它画成可点的，提示就成了「打开 的空间」（名字空着），点它还会跳到
+// **编号指的那个人**——而那一页就是那个人的空间：**标签和目的地对不上**。
+//
+// # ⚠ tip 是记好的那一份
+//
+// 现算的话每帧每行一次字符串拼接（票 #313 那一类）——见 `rowkey.Memo`。
+//
+// # ⚠ lh 不给就是「不设行高」
+//
+// 那一列的字本来就没有行高的时候（首页「新歌速递」那一块的卡片），传 0 ——
+// `LineHeight(0)` 是**真的把行高设成 0**，那会把那一行压扁。
+func OwnerName(c *ui.Context, text, name, tip string, mid int64,
+	size, lh float32, color ui.Color, acts Actions) ui.Element {
+	// 没有编号、没接上导航、**或者压根没有那个人**：**普通字**。
+	//
+	// ⚠ **不许因为「点不动」就把名字藏起来**（AGENTS.md §4）：用户看到的
+	// 是「这一行没有 UP 名」，而真实原因是这一页没给编号。
+	if name == "" || mid <= 0 || acts.OpenOwner == nil {
+		t := ui.Text(c, text).FontSize(size).TextColor(color).MaxLines(1).Ellipsis("…")
+		if lh > 0 {
+			t = t.LineHeight(lh)
+		}
+		return t
+	}
+	// 可点的那一枚：扁平、无描边、字色还是次要色（理由见 `ownerButton`）。
+	b := ownerButton(c, text, tip, size, lh, color)
+	if b.Clicked() {
+		acts.OpenOwner(mid, name)
+	}
+	return b
 }
 
 // ownerButton 画那一枚**可点的** UP 名。
@@ -154,8 +188,11 @@ func ownerButton(c *ui.Context, text, tip string, size, lh float32, color ui.Col
 		Padding(space.None, space.None).
 		Justify(ui.Start)
 	b = b.Children(func() {
-		ui.Text(c, text).FontSize(size).LineHeight(lh).TextColor(color).
-			MaxLines(1).Ellipsis("…")
+		t := ui.Text(c, text).FontSize(size).TextColor(color).MaxLines(1).Ellipsis("…")
+		// ⚠ **行高是 0 就不设**（理由同 `OwnerName` 的那一句）。
+		if lh > 0 {
+			t = t.LineHeight(lh)
+		}
 	})
 	return b.Tooltip(tip)
 }

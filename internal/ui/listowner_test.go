@@ -56,3 +56,62 @@ func TestClickingTheOwnerNameInAListRowGoesIntoThatSpace(t *testing.T) {
 		t.Errorf("点了第二行的 UP 名跳到了 %q，want %q", got, want)
 	}
 }
+
+// TestClickingTheOwnerNameInALibraryRowGoesIntoThatSpace 钉住「历史记录 / 稍后再看
+// 那一行的 UP 名点了进他的空间」。
+//
+// ⚠ **这两页自己画行**（`viewLibraryRowHead`，见 `internal/ui/librarypage.go`），
+// **不走 widgets/list** ——所以只改 widgets/list 那一层的话它们走不到（票 #360
+// 的评审查出来的：点完之后路径还是那一页，而选中的是那一行——点击确实落到了
+// 那一行上，只是那个名字不是链接）。
+func TestClickingTheOwnerNameInALibraryRowGoesIntoThatSpace(t *testing.T) {
+	for _, c := range []struct{ path, title string }{
+		{laterPath, "稍后再看"},
+		{historyPath, "历史记录"},
+	} {
+		t.Run(c.title, func(t *testing.T) {
+			f := newLibFake(t).
+				withLater(1, 3, "甲", "乙", "丙").
+				withHistory(1, 754, 2700, "甲", "乙", "丙")
+			tt, s := libraryShell(t, f, c.path)
+			waitFrames(t, tt, "把内容拉回来", func() bool {
+				return rowsShown(s.pageOf(c.path)) == 3
+			})
+
+			if err := tt.Click("UP 乙"); err != nil {
+				t.Fatalf("点不到那一行的 UP 名：%v，文字有 %q", err, tt.Texts())
+			}
+			// 假 B 站给的那几行 mid 都是 11（`laterBody` / `historyBody`）。
+			if got, want := s.router.Path(), upPathOf(11); got != want {
+				t.Errorf("点了 UP 名跳到了 %q，want %q", got, want)
+			}
+		})
+	}
+}
+
+// TestClickingTheOwnerNameInANewMusicCardGoesIntoThatSpace 钉住「首页「新歌速递」
+// 那一块的 UP 名点了进他的空间」。
+//
+// ⚠ **那一块自己画卡片**（`internal/ui/homepage_newmusic.go` 的 `viewCard`），
+// 不走 widgets/list ——同一页里两处 UP 名一处能点一处不能，是票 #360 的评审
+// 点出来的那处不一致。
+func TestClickingTheOwnerNameInANewMusicCardGoesIntoThatSpace(t *testing.T) {
+	var gotMid int64
+	var gotName string
+	acts := list.Actions{OpenOwner: func(mid int64, name string) {
+		gotMid, gotName = mid, name
+	}}
+	_, tt := newGridTester(t, acts, []list.Music{{
+		ID:    "n1",
+		Title: "夜空中最亮的星",
+		Owner: "逃跑计划",
+		Item:  app.Item{ArtistMid: 4242},
+	}}, 800, 900)
+
+	if err := tt.Click("逃跑计划"); err != nil {
+		t.Fatal(err)
+	}
+	if gotMid != 4242 || gotName != "逃跑计划" {
+		t.Errorf("点 UP 名进的是 %d/%q，want 4242/逃跑计划", gotMid, gotName)
+	}
+}
