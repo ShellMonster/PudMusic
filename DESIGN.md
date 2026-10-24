@@ -169,7 +169,7 @@ structural:
   window: { width: 1200, height: 800, min_width: 900, min_height: 560 }
   sidebar: { expanded: 200, collapsed: 72, min: 160, max: 480 }
   navbar_height: 64
-  playbar: { height: 88, padding_x: 16, cover: 56 }
+  playbar: { height: 76, padding_x: 16, cover: 52 }
   list_row: { height: 64, cover: 48, compact_cover: 0 }
   grid: { cover: 140, gap: 16, breakpoints: [1536, 1280, 1024, 768], columns: [6, 5, 4, 3, 2] }
   queue_drawer: { width: 384, row: 64 }
@@ -292,7 +292,7 @@ structural:
 | 侧栏行高 | **40**（不是 28） |
 | 顶栏高 | 64 |
 | 顶栏搜索框 | 280 × **40**，无边框 |
-| 播放条 | 高 88 / 左右 16 / 封面 56 |
+| 播放条 | 高 **76** / 左右 16 / 封面 **52**（不是 88 / 56） |
 | 列表行 | 高 64 / 封面 48；**紧凑档没有封面** |
 | 网格 | 封面 140、格间距 16、断点 1536/1280/1024/768 → 6/5/4/3/2 |
 | 队列抽屉 | 宽 384、行 64 |

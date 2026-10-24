@@ -199,12 +199,19 @@ const (
 	// ⚠️ **它只管「真的什么也没有」那几条**：正文有的那些**不算**在这儿
 	// （投稿动态没有稿件号是**另一类**，见 `DropNoArchive`）——说成「什么也没有」
 	// 就是**对用户说错话**：那一条明明带着正文。
+	//
+	// ⚠️ **投稿动态也要看正文**：稿件号和正文**都是空的**时，它算这一档
+	// （见 `parseDynamic` 的投稿分支）。
 	DropEmpty
 	// DropNoArchive 是「投稿动态没有稿件号」：**正文有，稿件号没有**。
 	//
 	// ⚠️ **它和「什么也没有」是两回事**（票 #344 的评审）：这一条**带着正文**
 	// （UP 写的那段话就在 `desc.text` 里），只是 `major.archive.bvid` 是空的
 	// ——放不出来。混进「什么也没有」里的话，界面上那句话对用户是错的。
+	//
+	// ⚠️ **正文也是空的那几条不算这一档**——它们是「什么也没有」
+	// （见 `DropEmpty`）：这一类的名字里带着「投稿」，而界面上那句话说的是
+	// 「他发了东西，只是放不出来」。
 	DropNoArchive
 )
 
@@ -693,10 +700,28 @@ func parseDynamic(raw json.RawMessage) (Dynamic, DroppedDynamic, bool) {
 	if string(r.Type) == dynamicTypeAv {
 		a := major.Archive
 		if a == nil || a.Bvid == "" {
-			// 🔴 **它是「投稿没有稿件号」，不是「什么也没有」**：这一条**带着
-			// 正文**（UP 写的那段话就在 `desc.text` 里），只是稿件号是空的
-			// ——放不出来。混进「什么也没有」里的话，界面上那句话对用户是错的
-			// （票 #344 的评审）。
+			// 🔴 **有没有正文，决定它是哪一类**（票 #344 的评审）：
+			//
+			//	正文**也是空的**	→ 它**什么也没有**（`DropEmpty`）：那一档说的是
+			//			「他什么都没发」；
+			//	正文**有**	→ 它是「投稿没有稿件号」（`DropNoArchive`）：他发了
+			//			东西，只是我们放不出来。
+			//
+			// ⚠️ **正文的口径和画得出来的那一支是同一个**：`desc.text`，空了
+			// 再退到视频的简介（`archive.desc`）——见下面 `d.Text` 那两句。
+			// 不看正文就说「带着正文」的话，一条**什么也没有**的投稿动态也会被
+			// 说成「是投稿却放不出来」（票 #344 的评审查出来的）。
+			text := d.Text
+			if text == "" && a != nil {
+				text = strings.TrimSpace(a.Desc.String())
+			}
+			if text == "" {
+				return Dynamic{}, DroppedDynamic{
+					Reason: DropEmpty,
+					Key:    dropKeyOf(&r, raw),
+					Why:    "投稿动态既没有稿件号也没有正文",
+				}, false
+			}
 			return Dynamic{}, DroppedDynamic{
 				Reason: DropNoArchive,
 				Key:    dropKeyOf(&r, raw),

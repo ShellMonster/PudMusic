@@ -1303,6 +1303,42 @@ func TestAnArchiveWithoutABvidIsNotCalledEmpty(t *testing.T) {
 	}
 }
 
+// TestAnArchiveWithoutABvidAndWithoutTextIsCalledEmpty 钉住「投稿动态**既**没有
+// 稿件号**又**没有正文」说成「什么也没有」。
+//
+// ⚠️ **它是上一条的那一半**：上一条量的是「有正文的投稿没有稿件号」；这一条量
+// 的是**正文也是空的**那一种——它什么也没有，说成「是投稿却放不出来」是**错的**
+// （那一句话说的是「他发了东西，只是我们放不出来」）。
+func TestAnArchiveWithoutABvidAndWithoutTextIsCalledEmpty(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "发了一条空投稿的 UP", 0, 1)
+	b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{
+			"items": []any{uiDynamicArchiveWithoutBvid("av1", "")},
+			"offset": "", "has_more": false,
+		})
+	})
+	s, tt, _ := newSpaceShell(t, b, false, "")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+	waitFrames(t, tt, "动态加载完", func() bool { return sp.dyn.started })
+	tt.Frame()
+
+	if !showsAnyText(tt, "有 1 条什么也没有") {
+		t.Errorf("没说清是「什么也没有」，文字有 %q", tt.Texts())
+	}
+	if showsAnyText(tt, "放不出来") {
+		t.Errorf("把「什么也没有」说成了「是投稿却放不出来」——"+
+			"这一条连正文都没有，文字有 %q", tt.Texts())
+	}
+	if got := sp.drops[upTabDynamic].counts.Empty; got != 1 {
+		t.Errorf("「什么也没有」那一类数了 %d 条，want 1", got)
+	}
+	if got := sp.drops[upTabDynamic].counts.NoArchive; got != 0 {
+		t.Errorf("「投稿没有稿件号」那一类数了 %d 条，want 0（这一条什么也没有）", got)
+	}
+}
+
 // TestWhatWeCannotReadIsNotCalledAnUnknownShape 钉住「读不懂的形状**不**被说成
 // 「形态不认识」。
 //

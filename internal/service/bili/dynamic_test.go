@@ -413,6 +413,42 @@ func TestAnArchiveWithoutABvidIsItsOwnReason(t *testing.T) {
 	}
 }
 
+// 🔴 TestAnArchiveWithoutABvidAndWithoutTextIsEmpty 钉住「投稿动态**既**没有
+// 稿件号**又**没有正文」算「什么也没有」，**不算**「投稿没有稿件号」。
+//
+// ⚠️ **这一条是评审查出来的那处**（票 #344 的评审）：新加的那一类说「正文有，
+// 稿件号没有」，而代码**从头到尾没看正文**——一条正文也是空的投稿型动态照样
+// 被记成「投稿没有稿件号」。而界面上那句话是「有 N 条**是投稿却放不出来**」，
+// 对一条**什么也没有**的动态来说，那句话是错的。
+func TestAnArchiveWithoutABvidAndWithoutTextIsEmpty(t *testing.T) {
+	// 稿件号是空的，**正文也是空的**。
+	noBvidNoText := dynItem("av2", setType("DYNAMIC_TYPE_AV"), setEmptyBody())
+	majorOf(noBvidNoText)["type"] = "MAJOR_TYPE_ARCHIVE"
+	majorOf(noBvidNoText)["archive"] = map[string]any{"title": "一个标题"}
+	_, cli := dynamicFixture(t, []any{noBvidNoText}, "", false)
+
+	pg, err := cli.DynamicFeed(context.Background(), "")
+	if err != nil {
+		t.Fatalf("整页崩了：%v", err)
+	}
+	if len(pg.Drops) != 1 {
+		t.Fatalf("丢掉 %d 条，want 1", len(pg.Drops))
+	}
+	if got := pg.Drops[0].Reason; got != DropEmpty {
+		t.Errorf("理由是 %v，want 「什么也没有」——它既没有稿件号也没有正文", got)
+	}
+	var c DropCounts
+	for _, d := range pg.Drops {
+		c.Add(d.Reason)
+	}
+	if c.Empty != 1 {
+		t.Errorf("「什么也没有」数了 %d 条，want 1", c.Empty)
+	}
+	if c.NoArchive != 0 {
+		t.Errorf("「投稿没有稿件号」数了 %d 条，want 0（这一条什么也没有）", c.NoArchive)
+	}
+}
+
 // TestAnUnknownDropReasonIsStillCounted 钉住「加了一类而忘了加一档」不会
 // **静默少一条**。
 //
