@@ -1182,7 +1182,7 @@ func TestAPageOfOnlyUnrenderableOnesStillLoadsTheNextPage(t *testing.T) {
 	}
 }
 
-// TestTheListDoesNotPullEveryPageWithoutScrolling 钉住「滚���哨兵真的限流」。
+// TestTheListDoesNotPullEveryPageWithoutScrolling 钉住「滚动哨兵真的限流」。
 //
 // 🔴 实测踩过的坑：首屏那一拉写在 view 的开头、每一帧都跑，而闸门只判
 // 「不是在拉、后面还有」——于是第一页一落地，下一帧就又发一页，**用户什么都

@@ -658,7 +658,7 @@ func TestTheOffsetThatMovesKeepsTheNextPage(t *testing.T) {
 }
 
 // TestAFieldThatChangedItsTypeDoesNotTakeThePageDown 钉住「一个字段改了
-// 类型不能��整页带走」。
+// 类型不能把整页带走」。
 //
 // 🔴 **实测踩过的坑**（票 #300，2026-10-24）：B 站把 `module_author.pub_ts`
 // 从 Unix 秒（数字）改成了**字符串**（`"1792720812"`），而 `encoding/json`

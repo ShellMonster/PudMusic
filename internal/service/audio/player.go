@@ -194,7 +194,7 @@ func openDecoder(r io.ReadSeeker) (mygoaudio.Decoder, string, error) {
 		return d, name, nil
 	}
 	// 🔴 **字节源出的错不是「解不了」**（票 #282）：源被关了（用户切歌了、
-	// 超时了、退出��）或者拉不动了（网络断了、地址过期了）——那两件事跟
+	// 超时了、退出了）或者拉不动了（网络断了、地址过期了）——那两件事跟
 	// 「这个格式认不出来」是两回事，说错了会把用户引到错的方向（去换音质），
 	// 而真因是网络、或者他自己按了别的歌。
 	if errors.Is(err, ErrSourceClosed) || errors.Is(err, ErrStreamDead) {

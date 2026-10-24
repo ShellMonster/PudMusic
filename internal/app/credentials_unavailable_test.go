@@ -36,7 +36,7 @@ func TestMountLoginWithoutABackendDoesNotPanic(t *testing.T) {
 
 // TestLogoutAlwaysSucceedsWithoutABackend 退登必须永远能成功。
 //
-// 本来就没有东西存，清不清是一回事——报错的��候用户会被卡在「退不出去」
+// 本来就没有东西存，清不清是一回事——报错的时候用户会被卡在「退不出去」
 // 的状态里，而实际上凭据压根不在任何地方。
 func TestLogoutAlwaysSucceedsWithoutABackend(t *testing.T) {
 	a := app.New()
