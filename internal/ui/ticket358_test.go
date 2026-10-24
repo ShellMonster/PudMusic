@@ -94,6 +94,10 @@ func openingTheQueueDrawerDoesNotMakeTheListCoversFlash(t *testing.T, preset app
 	// 切到「流行」那一档：新歌速递那一块网格只在这一档上（上游也是这么摆的）。
 	s.home.tab = homePopTab
 	homeFrame(tt)
+	// ⚠️ **推钟**：切 Tab 有过渡（票 #368），而 Tester 的钟站着不动——不推钟
+	// 的话这一屏停在过渡的第一帧上（内容还在淡入），而这一条量的是封面上墙
+	// 之后画面上还有没有占位。
+	settleHome(tt)
 
 	// 缓存的字节上限压到「一屏装不下」——真机上是**加上抽屉那二十几行**才超的，
 	// 而那二十几张原图解码后每张 11MB（存下来缩到 768 边长，约 1.8MB），

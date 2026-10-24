@@ -313,6 +313,10 @@ func TestThePagesThatDeliberatelyDoNotFollowIt(t *testing.T) {
 				for range 3 {
 					tt.Frame()
 				}
+				// ⚠️ **推钟**：切 Tab 有过渡（票 #368），而 Tester 的钟站着不动——
+				// 不推钟的话这一屏停在过渡的第一帧上（内容还在淡入），而这一档
+				// 量的正是新歌速递那一块的几何。
+				settleHome(tt)
 				return tt, s
 			},
 			why:     "它是首页顶部的一块**横向推荐位**，行数是按窗口高和格子宽算出来的（`newMusicRowsAt`），翻页是两枚图标箭头——它有自己的几何，跟「一屏能看到更多歌」没关系",
