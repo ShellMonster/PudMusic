@@ -72,6 +72,14 @@ type biliFixture struct {
 	served int
 	media  []byte
 
+	// searchTotal 是搜索那一次回包里的**命中总数**（B 站的 `numResults`）。
+	// 零 = 1（默认那一份）。
+	//
+	// ⚠️ **它是「一共多少个」**：默认那一份回的是 1 个结果、总数也是 1，于是
+	// 「总数」和「这一页有几行」分不开——而「找到 N 个结果」那一句里的 N 要是
+	// 拿「这一页有几行」冒充，用户就知道了个假数。
+	searchTotal int
+
 	// favoritedIn 是「这一首已经在哪些收藏夹里」；favoriteCalls 记下每一次写。
 	favoritedIn   []int64
 	favoriteCalls []url.Values
@@ -200,13 +208,17 @@ func (f *biliFixture) serveSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	f.served++
+	total := f.searchTotal
 	f.mu.Unlock()
+	if total <= 0 {
+		total = 1
+	}
 
 	// 一页一条。bvid **不带 cid**：这正是搜索结果的形状。
 	writeBiliJSON(w, map[string]any{
 		"code": 0, "message": "0", "ttl": 1,
 		"data": map[string]any{
-			"numResults": 1, "numPages": 1,
+			"numResults": total, "numPages": 1,
 			"result": []any{map[string]any{
 				"type": "video", "bvid": testSearchBvid,
 				"title":    "只有 bvid 的<em class=\"keyword\">结果</em>",
@@ -415,6 +427,13 @@ func (f *biliFixture) cids() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.searchCids...)
+}
+
+// setSearchTotal 设搜索那一次回包里的命中总数。
+func (f *biliFixture) setSearchTotal(n int) {
+	f.mu.Lock()
+	f.searchTotal = n
+	f.mu.Unlock()
 }
 
 // client 建一个指着这台服务器的 B 站客户端。

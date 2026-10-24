@@ -206,6 +206,20 @@ type Shell struct {
 	toasts   []toast
 	toastSeq uint64
 
+	// announcements 是攒着待播报的那些句子（无障碍），见 announce.go。
+	//
+	// ⚠️ **它和 toasts 是两件事**：toast 是**画出来**的那张卡片（看得见的），
+	// 而这一栏是**念出来**的那些话（读屏软件听得见的）。两者碰巧常常是同一句
+	// ——提示弹出来的时候也念一遍——但「下载完成」那类**根本没有卡片**的事
+	// 只有这一栏说得出去。
+	announcements announceQueue
+
+	// announceRemove 是摘掉这一扇窗在应用层那条播报登记的动作。
+	//
+	// 摘掉的那一半在 `closePerWindow` 里调：不摘的话「进迷你 / 退出迷你」来回
+	// 十次之后应用层那个列表就有十条，每发生一件事就多走十趟空转。
+	announceRemove func()
+
 	// migrationAnnounced 是「启动时的迁移/导入结果已经弹过一次 toast 了」。
 	//
 	// 只由界面线程读写（`viewMain` 第一帧），所以不需要锁。挂在 Shell 上而不是
@@ -819,6 +833,12 @@ func (s *Shell) closePerWindow() {
 		s.wakeRemove = nil
 	}
 
+	// 摘掉这一扇窗在应用层那条播报登记（理由同上面那条唤醒句柄）。
+	if s.announceRemove != nil {
+		s.announceRemove()
+		s.announceRemove = nil
+	}
+
 	// 封面缓存：先摘掉这一扇窗的唤醒登记（借来的那一份活得比这一扇窗久），
 	// 再放开自己那一份使用权。
 	//
@@ -999,6 +1019,12 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	// 摘掉它的那一支存在 `localWakeRemove` 上，由 `closePerWindow` 调——迷你窗口
 	// 「进/退」每回来回新建一个外壳，不摘的话那个列表单调增长。
 	s.localWakeRemove = a.AddLocalWake(s.local.invalidate)
+	// 播报也是**逐窗口**的一条登记：应用层那几件「后台发生了一件事」（播放失败、
+	// 下载完成、歌放起来了）要把话送到每一扇窗，让它念给读屏软件听。
+	//
+	// ⚠️ **每个窗口建外壳都要登记一次**（和上面那条唤醒一样），而摘掉的那一支
+	// 由 `closePerWindow` 调。
+	s.announceRemove = a.AddAnnounce(s.announce)
 	return s
 }
 
@@ -1331,6 +1357,16 @@ func (s *Shell) View(c *ui.Context) {
 	// ⚠️ **每一遍 build 都会走到这里**：兑现一次就把请求清掉（见
 	// `applyContentFocus`），所以只有第一遍真的兑现。
 	s.applyContentFocus()
+
+	// 把攒着的那些状态变化念给读屏软件听（无障碍，见 announce.go）。
+	//
+	// ⚠️ **排在最后**：这一句要念的是「刚刚发生了什么」，而刚刚发生的那些事
+	// 有一部分是**这一遍建视图的时候才知道的**（按了下载、按了收藏——那些话
+	// 是提示，提示也是要念的）。排在前面的话它们要等到下一帧才念出去，而下一帧
+	// 未必来得快（界面是按需绘制的）。
+	//
+	// ⚠️ **一帧建好几遍视图，这里只念一遍**：`take` 是有破坏性的（见 announce.go）。
+	s.flushAnnouncements(c)
 }
 
 // guardAt 给一层 view 包 Guard，并记住**它是界面的哪一块**。
@@ -1473,8 +1509,14 @@ func (s *Shell) viewMain(c *ui.Context) {
 	//
 	// 排在最后是安全的：这一帧的页面已经画完了（那一格已经被指着画过一次），
 	// 而设置页自己那一格是**切走**才清的（见 syncSettings）。
-	if s.lastPath != settingsPath && s.settings.focus != settingsFocusNone {
-		s.settings.focus = settingsFocusNone
+	if s.lastPath != settingsPath {
+		if s.settings.focus != settingsFocusNone {
+			s.settings.focus = settingsFocusNone
+		}
+		// ⚠️ **那 16 像素的留白也别留着**：它是给「刚跳过来」这件事的——用户
+		// 跳过来之后立刻走掉的话，下一次进设置页时它补在别的地方，页面就无故
+		// 差了 16 像素（见 syncSettings）。
+		s.settings.focusMargin = false
 	}
 }
 

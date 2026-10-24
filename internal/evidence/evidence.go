@@ -148,6 +148,30 @@ var Items = []Item{
 		Tests:    []string{"TestPlaybackStateMapping", "TestSmtcStatusIsNotTheMacNumber"},
 	},
 	{
+		// 🔴 **这一条的错法也是「静默」的**：暂停和停止在界面上**长得一模一样**
+		//（都是「播放」那一枚按钮、进度条都停在原地），而顺序播放走到队尾时
+		// 界面**一句话都没有**——用户分不出「这一串放完了」和「暂停在开头」。
+		//
+		// 而「暂停」和「停止」在播放器那一边落在**同一档**上（进度回到开头、
+		// 不在放），所以**一栏判据不够**：得把「用户按了停止」和「队列自己走完
+		// 了」分开说（票 #319）。
+		Category: Play,
+		Spec:     "界面上分得出「暂停」和「停止」，而顺序播放走到队尾要说出「这一串放完了」",
+		Tests: []string{
+			// 快照上的两栏（暂停 / 用户叫停 / 队列走完，三种各一条）。
+			"TestPausingIsNotStopping",
+			"TestStoppingIsNotTheQueueRunningOut",
+			"TestTheQueueRunningOutSaysSo",
+			// 播放条上那一句（画面上的字）。
+			"TestThePlayBarSaysTheTrackIsStopped",
+			"TestThePlayBarSaysTheQueueIsDone",
+			"TestAPausedTrackIsNotSaidToBeStopped",
+			// 抽屉里那一行：说的是「已停止」，而且不再高亮成「正在播放」。
+			"TestTheQueueDrawerSaysTheTrackIsStopped",
+			"TestTheStoppedRowIsNotHighlightedLikeAPlayingOne",
+		},
+	},
+	{
 		Category: Play,
 		// 播放模式四档（顺序/循环/随机/单曲，BMG-47 A5）。「放完下一首是哪首」
 		// 这一句是**四档各有一条**——顺序停在队尾、循环绕回队尾、随机真的打乱、
@@ -2835,6 +2859,29 @@ var Items = []Item{
 		},
 	},
 	{
+		// 🔴 **这一族的错法是「静默」的**：跳过去了可那一行还在视野外（用户
+		// 看见的是「设置页打开了，可这里没有下载目录」）、或者那一行被切掉半截、
+		// 或者**设置页的行距被改了**（往下滚一屏就看得见）。
+		Category: Platform,
+		// 票 #318（把设置页那段手写的跨帧「滚进视野」换成上游那一行
+		// `Element.ScrollIntoView()`）+ UX 报告 C1（那一行要指、要滚进视野）。
+		//
+		// ⚠️ **「指着一行」不许改这一页的排版**：上游滚的是「刚好露出这一行的
+		// 盒子」，我们从前滚完留 16 像素——那 16 像素**只能补在滚动位置上**，
+		// 补在盒子上（垫内边距）的话就是**内容高度**的一部分，被指着那一行下面
+		// 每一行都低了 16 像素。
+		Spec: "从下载记录页跳到设置页的「下载目录」那一项：切到「常规设置」那一格、**指**着那一行（标题是主色）、**把那一行滚进视野**（标题与说明都整个在可视区里，离下沿还留着 16 像素）；而**指着一行不许改这一页的排版**——被指着那一行下面每一行的位置与内容总高都和没指着时一样",
+		Tests: []string{
+			// 点得动、跳得到那一格、指得着那一行。
+			"TestTheMissingDownloadDirectoryTakesYouToTheSetting",
+			// 那一行真的滚进视野了，而且**说明那一行也整个在可视区里**。
+			"TestTheDownloadDirectoryIsScrolledIntoView",
+			// ⚠️ **指着那一行不许把这一页的内容撑高**（垫内边距那一种做法就是
+			// 撑高了 16 像素，于是下面每一行都被压低）。
+			"TestTheFocusedSettingDoesNotPushTheRowsBelowIt",
+		},
+	},
+	{
 		// 🔴 **这一族的错法也全是「静默」的**：两端对齐空着三百像素、迷你窗里
 		// 两根滑块分不出哪个是哪个、同一个动作两个页面一个有一个没有、
 		// 超长歌名占满整行中段、深色下黑封面和底色融成一片——**没有一样会
@@ -2909,6 +2956,54 @@ var Items = []Item{
 			"TestChoosingPlayNowHandsOverJustThatSong",
 			// **两枚入口都在**（少建一项那一项就永远点不到）。
 			"TestBothPlayEntriesAreOnTheRowMenu",
+		},
+	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：读屏软件用户**听不见**任何东西——
+		// 界面画得出来、测试全绿，而「下载下完了」「这一首放起来了」「搜出结果
+		// 了」这些事**一句也没有人告诉他**。
+		//
+		// 而它们在画面上**一个字都不占**：下载完成只是下载记录页上那一列多了一
+		// 枚绿勾，「这一首放起来了」只是播放条上多了一行歌名——而焦点不在那儿。
+		//
+		// 框架给的那个口子就是 `Context.Announce`（MyGo 自己的 toast 会自动念
+		// 一句，但我们用的是自己那套 toast，见 `internal/ui/toast.go`），而我们
+		// 此前**一个都没用**。
+		Category: Platform,
+		// 票 #321（2026-10-24）。
+		//
+		// ⚠️ **念和看是两件事**：`.Label(...)` 给的是「**这一枚是什么**」（那一枚
+		// 按钮叫什么、那一行是谁），播报给的是「**刚刚发生了什么**」。`internal/ui`
+		// 里那 95 处 `.Label`（带参数的那些才是给读屏软件的名字）一处都不许改成
+		// 播报——那会让读屏软件用户听到一屏控件名字，而**一件正在发生的事一句
+		// 也没有**。
+		Spec: "状态变化被接到平台的无障碍播报上：加载完成、下载完成、播放失败、搜索完成各念一遍；同一件事一帧里只念一遍；`.Label`（这一枚是什么）一处都没改成播报",
+		Tests: []string{
+			// 加载完成（在线那一段真的走完了取流 + 开解码器）和播放失败。
+			"TestALoadedTrackIsReadOut",
+			"TestAPlaybackFailureIsReadOut",
+			// 下载完成：下载队列那一头报一声，应用层念一句。
+			"TestTheCallbackIsToldWhenAnItemIsDone",
+			"TestADownloadThatFinishedIsReadOut",
+			// 搜索完成（**真的那一支**：B 站给的命中总数，不是屏幕上那几行）。
+			"TestASearchThatFoundSomethingIsReadOut",
+			"TestTheSearchTotalIsTheOneThatIsAnnounced",
+			// 快捷键录上了（界面上一个字都没有的那一种）。
+			"TestARecordedShortcutIsReadOut",
+			// 「一句只念一遍」（一帧建好几遍视图）+ 「提示也念一遍」。
+			"TestTheSameThingIsNotReadOutTwice",
+			"TestAToastIsAlsoReadOut",
+			// **接线那一条**：应用层发生了一件事 → 界面层念出来（中间就靠
+			// `AddAnnounce` 那一行，删掉它编译照样过、别的用例照样绿）。
+			"TestAPlayingFailureReachesTheScreenReaderThroughTheRealWiring",
+			// 看不见的那一扇窗不攒着；攒着的那几摊**有上限也有过期**。
+			"TestAnAnnouncementIsNotKeptWhileTheWindowIsInvisible",
+			"TestAnOldAnnouncementIsNotReadOut",
+			"TestAtMostThreeAnnouncementsAreKept",
+			// 念出去的是**人话**，不是英文系统错（读屏软件是逐字念的）。
+			"TestTheAnnouncedErrorIsNotTheRawGoError",
+			// **`.Label` 一处都没动**（这是这一票的另一半）。
+			"TestTheLabelsAreNotTurnedIntoAnnouncements",
 		},
 	},
 	{

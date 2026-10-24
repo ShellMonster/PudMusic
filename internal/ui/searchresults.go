@@ -163,6 +163,22 @@ type searchTab struct {
 	// ⚠️ 为什么不问分页列表要：它只报 `Paged().Loaded`，不给行本身，而这一层
 	// **只读不改**那个包。
 	loaded []list.Music
+	// total 是这一场搜索命中的**总数**（B 站给的 `numResults`）。
+	//
+	// ⚠️ **它不是「现在拿到手几行」**：翻页会一直加行，而这一场一共就这么多。
+	// 它是给「说给用户听」用的（无障碍，见 `announce.go`）：读屏软件用户看不见
+	// 屏幕上那十几行，得有一句「找到 N 个结果」，而那个 N 拿「屏幕上那几行」冒充
+	// 就是说了一个假数。
+	//
+	// 零 = 不知道（B 站没给，或者这一趟还没回来）。
+	total int
+	// announced 是「这一场搜索的结果已经念过了没有」（无障碍）。
+	//
+	// ⚠️ **按查询**的：换查询时清零（见 `current`）。
+	//
+	// ⚠️ **只由界面线程读写**（和 `tab` / `sorts` 一样）：念不念是界面这一侧
+	// 的决定，而后台那条线管不着。
+	announced bool
 }
 
 // searchQuerySpec 是一次查询的两样东西：词和排序。
@@ -210,6 +226,7 @@ func (s *Shell) fetchSearchTab(tab int, ctx context.Context, page int) (list.Pag
 	var (
 		songs   []list.Music
 		hasMore bool
+		total   int
 		err     error
 	)
 	if tab == searchTabUser {
@@ -217,13 +234,13 @@ func (s *Shell) fetchSearchTab(tab int, ctx context.Context, page int) (list.Pag
 		ask.Page = page
 		var pg bili.UserPage
 		pg, err = cli.SearchUsers(ctx, ask)
-		songs, hasMore = searchUserMusics(pg.Hits), pg.HasMore
+		songs, hasMore, total = searchUserMusics(pg.Hits), pg.HasMore, pg.Total
 	} else {
 		ask := searchVideoQueryOf(tab, q)
 		ask.Page = page
 		var pg bili.VideoPage
 		pg, err = cli.SearchVideos(ctx, ask)
-		songs, hasMore = searchVideoMusics(pg.Hits), pg.HasMore
+		songs, hasMore, total = searchVideoMusics(pg.Hits), pg.HasMore, pg.Total
 	}
 	if err != nil {
 		return list.Page{}, err
@@ -238,6 +255,7 @@ func (s *Shell) fetchSearchTab(tab int, ctx context.Context, page int) (list.Pag
 	if gen == t.gen {
 		// B 站翻页会重叠，同一个 bvid 落进两页里是常事，原样收着、按下去那一刻再去重。
 		t.loaded = append(t.loaded, songs...)
+		t.total = total
 	}
 	t.mu.Unlock()
 
@@ -319,8 +337,19 @@ func (t *searchTab) current(q searchQuerySpec) {
 	t.mu.Lock()
 	t.gen++ // 作废旧查询在途的那几趟，见上面 gen 的注释
 	t.query, t.loaded = q, nil
+	t.total = 0
+	// 换查询 = 换一场搜索，而「这一场已经念过了」是**按场**记的（见
+	// `announced` 的注释）。不清零的话，新一场搜完了也不会念。
+	t.announced = false
 	t.mu.Unlock()
 	t.list.Reload()
+}
+
+// searchTotal 是这一场搜索命中的总数。零 = 还不知道。
+func (t *searchTab) searchTotal() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.total
 }
 
 // snapshot 是已经拿到的全部行，一份拷贝。「全部播放」按的正是它。

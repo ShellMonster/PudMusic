@@ -97,7 +97,14 @@ func Open(path string) (*Player, error) {
 	if err != nil {
 		f.Close()
 		if errors.Is(err, mygoaudio.ErrFormat) {
-			return nil, fmt.Errorf("%s: unsupported audio format", path)
+			// ⚠️ **消息一个字都不改**（还是 "…: unsupported audio format"）：
+			// 界面上显示的就是这一句（`App.Open` 把它写进 `errText`），改了它
+			// 就是改画面上的一句话。
+			//
+			// 而**多一个 sentinel** 是为了上面那一层能认出它：「这一条放不了」
+			// 得说人话（见 `internal/app/announce.go` 的 `announceErrText`），
+			// 而认一个英文句子不如认一个类型。
+			return nil, fmt.Errorf("%s: %w", path, ErrLocalFormat)
 		}
 		return nil, err
 	}
@@ -254,6 +261,17 @@ func openDecoder(r io.ReadSeeker) (mygoaudio.Decoder, string, error) {
 	}
 	return fd, "flac", nil
 }
+
+// ErrLocalFormat 是「这个**本地文件**的格式放不了」。
+//
+// ⚠️ **它和 `ErrUnsupportedFormat` 是两件事**：那一个是**在线流**（换一档音质
+// 或者在 B 站里听它），而本地文件没有「换音质」这一说——它就是「这个文件这台
+// 机器放不了」。
+//
+// ⚠️ **它的话是英文的**：这一句是给日志和界面上的红字用的，而**说给用户听的
+// 那一句在上一层**（`internal/app/announce.go` 的 `announceErrText`）——
+// 读屏软件是逐字念的，不能念英文系统错。
+var ErrLocalFormat = errors.New("unsupported audio format")
 
 // ErrUnsupportedFormat 是「这一条解不了」（格式不对，或者这台机器的解码器
 // 认不出来）。
