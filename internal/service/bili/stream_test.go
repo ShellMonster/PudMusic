@@ -739,3 +739,51 @@ func TestAgainstTheRealBiliStreamingAPIIsNotCovered(t *testing.T) {
 	t.Log("  7. 多个 P 时不给 cid 会取到第一集，且 code 仍是 0")
 	t.Log("  8. 取到的地址从 CDN 拉要带 Referer（不给直接 403）")
 }
+
+// TestTheExpiryRuleIsOneRule 盯**两条取流路径用同一套有效期口径**（票 #220）。
+//
+// 投稿那一路（`/x/player/wbi/playurl`）和音乐库那一路（`sid`）问的是两个
+// 接口，而它们的地址**从哪来**不一样：
+//
+//	投稿	地址上的 `deadline` 查询参数
+//	音乐库	接口给的 `timeout`（有效秒数，一般三小时）
+//
+// ⚠️ **但判据必须是同一条**：地址上的 `deadline` 优先（最准），没有就用
+// 接口给的秒数，都没有就**当成立刻失效**。而「当成立刻失效」这个方向是
+// **保守的**——提前换流，而不是拿一条死地址放到歌播到一半。
+//
+// 这一条钉住那个**公共函数**：两路各写一份的话，迟早有一处漂移，而漂移的
+// 那一处症状是「有时候放得出来、有时候放不出来」。
+func TestTheExpiryRuleIsOneRule(t *testing.T) {
+	base := time.Unix(1702204169, 0)
+	// 地址上那个 deadline 是 1702208369 = base + 4200 秒。
+	withDeadline := base.Add(4200 * time.Second)
+
+	t.Run("地址上带 deadline 就用它", func(t *testing.T) {
+		got := expiryOf([]string{"https://cdn/x/a.m4s?deadline=1702208369"}, 10800, base)
+		if !got.Equal(withDeadline) {
+			t.Errorf("失效时刻 = %v，want %v", got, withDeadline)
+		}
+	})
+
+	t.Run("只有接口给的秒数就用它", func(t *testing.T) {
+		got := expiryOf([]string{"https://cdn/x/a.m4a?upsig=1"}, 10800, base)
+		if !got.Equal(base.Add(10800 * time.Second)) {
+			t.Errorf("失效时刻 = %v，want %v", got, base.Add(10800*time.Second))
+		}
+	})
+
+	t.Run("两个都没有就是立刻失效", func(t *testing.T) {
+		got := expiryOf([]string{"https://cdn/x/a.m4a?upsig=1"}, 0, base)
+		if !got.IsZero() {
+			t.Errorf("失效时刻 = %v，want 零值（立刻失效）", got)
+		}
+	})
+
+	t.Run("地址上没有 deadline 的那种也是立刻失效", func(t *testing.T) {
+		got := expiryOf([]string{"https://cdn/x/a.m4a"}, 0, base)
+		if !got.IsZero() {
+			t.Errorf("失效时刻 = %v，want 零值（立刻失效）", got)
+		}
+	})
+}
