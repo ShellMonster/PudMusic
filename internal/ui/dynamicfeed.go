@@ -339,17 +339,15 @@ func authRowKey(f *dynamicFeed, i int) any {
 	return f.authRowKeys.At(i-1, f.authors[i-1].Mid, authIdentity)
 }
 
-// authIdentity 是作者栏一行的身份（铁律四）。
+// authIdentity 是作者栏一行的身份（铁律四）：`auth:<mid>`。
 //
-// ⚠️ **mid == 0 是「全部」那一行**：B 站的 mid 不会是 0（撞不上），而这一行的
-// 身份固定是 "auth:0"。所以一个 mid 就够当「记着算好的那一份」那把钥匙。
+// ⚠️ **「全部」那一行不走这里**：它的身份是 "auth:0"，而那一行在
+// `authRowKey` 的 `i <= 0` 那一支就直接给了——**压根不进 memo**。所以这里
+// 的 raw 永远是「某一个人」的 mid，而 B 站的 mid 不会是 0（撞不上 "auth:0"）。
 //
 // 这一步会分配（拼字符串 + 装箱）——所以它只在 mid 变了的时候才走
 // （见 `rowkey.Memo` 的文件头）。
 func authIdentity(mid int64) any {
-	if mid == 0 {
-		return "auth:0"
-	}
 	return "auth:" + strconv.FormatInt(mid, 10)
 }
 
