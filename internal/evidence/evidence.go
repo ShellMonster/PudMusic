@@ -148,6 +148,30 @@ var Items = []Item{
 		Tests:    []string{"TestPlaybackStateMapping", "TestSmtcStatusIsNotTheMacNumber"},
 	},
 	{
+		// 🔴 **这一条的错法也是「静默」的**：暂停和停止在界面上**长得一模一样**
+		//（都是「播放」那一枚按钮、进度条都停在原地），而顺序播放走到队尾时
+		// 界面**一句话都没有**——用户分不出「这一串放完了」和「暂停在开头」。
+		//
+		// 而「暂停」和「停止」在播放器那一边落在**同一档**上（进度回到开头、
+		// 不在放），所以**一栏判据不够**：得把「用户按了停止」和「队列自己走完
+		// 了」分开说（票 #319）。
+		Category: Play,
+		Spec:     "界面上分得出「暂停」和「停止」，而顺序播放走到队尾要说出「这一串放完了」",
+		Tests: []string{
+			// 快照上的两栏（暂停 / 用户叫停 / 队列走完，三种各一条）。
+			"TestPausingIsNotStopping",
+			"TestStoppingIsNotTheQueueRunningOut",
+			"TestTheQueueRunningOutSaysSo",
+			// 播放条上那一句（画面上的字）。
+			"TestThePlayBarSaysTheTrackIsStopped",
+			"TestThePlayBarSaysTheQueueIsDone",
+			"TestAPausedTrackIsNotSaidToBeStopped",
+			// 抽屉里那一行：说的是「已停止」，而且不再高亮成「正在播放」。
+			"TestTheQueueDrawerSaysTheTrackIsStopped",
+			"TestTheStoppedRowIsNotHighlightedLikeAPlayingOne",
+		},
+	},
+	{
 		Category: Play,
 		// 播放模式四档（顺序/循环/随机/单曲，BMG-47 A5）。「放完下一首是哪首」
 		// 这一句是**四档各有一条**——顺序停在队尾、循环绕回队尾、随机真的打乱、
