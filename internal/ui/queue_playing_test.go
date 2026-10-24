@@ -48,7 +48,10 @@ func TestTheQueuePlayingRowUsesAPalePrimaryBackground(t *testing.T) {
 			}
 
 			b := newTestShell(t, at(winW, winH), systemIsDark(dark))
-			h := &harness{app: b.a, tt: b.tt}
+			// ⚠️ **s 那一栏不能少**：抽屉的进出场要走完才量得到底色
+			//（Tester 的钟站着不动，不推它的话面板还在窗口外面），
+			// 而「走完了没有」的判据是那副外壳上的阶段（见 `settleDrawer`）。
+			h := &harness{app: b.a, tt: b.tt, s: b.s}
 			enqueue(t, h, copiesOf(t, 2)...)
 			openDrawer(t, h)
 

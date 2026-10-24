@@ -425,7 +425,7 @@ const (
 // ⚠️ **标签必须带歌名**（`PlayingLabel`）：理由同文件头那一段——读屏软件读的是标签。
 func Wave(c *ui.Context, key string, width float32, color ui.Color, title string) {
 	wave := ui.Box(c).Key(key).Size(width, waveH).Label(PlayingLabel(title))
-	phase := wavePhase(c, wave, key)
+	phase := wavePhase(c, wave)
 	wave.Draw(func(p *ui.Painter, r ui.Rect) {
 		// 竖条整体居中：4×2 + 3×2 = 14 宽，在 32 宽的序号那一列里两边各空 9。
 		x0 := r.X + (r.W-float32(waveBars*waveBarW+(waveBars-1)*waveGap))/2
@@ -440,6 +440,35 @@ func Wave(c *ui.Context, key string, width float32, color ui.Color, title string
 		}
 	})
 }
+
+// waveState 是波形那一格跨帧要留的两样东西。
+//
+// ⚠️ **合成一个结构体，而不是两个 `ui.Local`**：本地存储是**每个元素一份**的
+// map，而问一次相位就要查一次 map——两份就是两次查、两个键。
+type waveState struct {
+	// started 是「相位的零点定下了没有」。
+	started bool
+	// start 是这一格**第一次出现**的那一刻（相位的零点）。
+	start time.Time
+	// seen 是上一次要帧时那一刻的时刻。零值 = 从来没要过，于是第一帧一定会要。
+	seen time.Time
+}
+
+// waveStateKey 是 waveState 在元素的本地存储（`ui.Local`）里的键。
+//
+// ## ⚠️ 它**不带歌名**
+//
+// 本地存储是**每个元素一份**的，而波形那一格本身就是**按歌名分开的元素**
+// （调用方给它的元素键是「wave:」加歌名）——所以这个键只要在这一格里唯一
+// 就够了。原先那两个键是 `歌名+":start"` / `歌名+":seen"`，于是**每一帧**都要
+// 拼两次字符串、再装箱两次。
+//
+// ## ⚠️ 为什么是**零大小的结构体**而不是字符串
+//
+// `ui.Local` 的键是 `any`，而 `string → any` 的装箱每次都要在堆上分配一次
+// （`runtime.convTstring`）——这一格每一帧都要问一次相位，于是那一次分配
+// 每一帧都付一遍。零大小的结构体装箱走 `runtime.zerobase`，**一次都不分配**。
+type waveStateKey struct{}
 
 // wavePhase 是此刻的相位（0~1），并且在**钟走了、窗口也看得见的时候**要下一帧。
 //
@@ -471,13 +500,25 @@ func Wave(c *ui.Context, key string, width float32, color ui.Color, title string
 // ⚠️ **判据不是「相位有没有变」**：那样它在 Tester 里会**彻底不动**——因为没有下一帧
 // 就没人问「相位变没变」，而没有下一帧就没人看（死锁）。问钟不会：那一次 `Advance` 推了
 // 钟，就有一帧跑起来，帧里钟和上一帧不一样，于是它又能要下一帧。
-func wavePhase(c *ui.Context, wave ui.Element, key string) float32 {
+//
+// ## ⚠️ **那个 init 闭包不捕获任何东西**
+//
+// 捕获了 `now` 的闭包每一帧都要把捕获的变量拷进闭包对象里（堆上一次分配）。
+// 而「起始时刻」并不需要靠 init 带进来——下面那句「零点还没定过」就能定它，
+// 于是这个闭包是**静态**的（编译成一个常量符号），每帧零分配。
+func wavePhase(c *ui.Context, wave ui.Element) float32 {
 	now := c.Now()
-	start := ui.Local(wave, key+":start", func() time.Time { return now })
-	// seen 是上一次要帧时那一刻的时刻。零值 = 从来没要过，于是第一帧一定会要。
-	seen := ui.Local(wave, key+":seen", func() time.Time { return time.Time{} })
-	if !now.Equal(*seen) {
-		*seen = now
+	st := ui.Local(wave, waveStateKey{}, func() waveState { return waveState{} })
+	if !st.started {
+		// 第一次看见这一格：相位的零点就是此刻。
+		//
+		// ⚠️ **判据是 `started` 而不是「seen 是不是零值」**：无头 Tester 的钟
+		// 起点可能正好是零时刻（`time.Time{}`），那时「seen 是零值」就分不出
+		// 「第一次」和「钟没走过」。
+		st.started, st.start = true, now
+	}
+	if !now.Equal(st.seen) {
+		st.seen = now
 		// 看不见的窗口不要再要帧（票 #156）：它每帧都请求下一帧，而
 		// `App.tick` 又在放歌时每 50ms 叫醒每个窗口一次——两条链合起来，
 		// 一扇收在后台的窗口会一直按帧重画，用户能感到的是风扇和电池。
@@ -485,7 +526,7 @@ func wavePhase(c *ui.Context, wave ui.Element, key string) float32 {
 			c.AnimationFrame()
 		}
 	}
-	return float32(now.Sub(*start)%wavePeriod) / float32(wavePeriod)
+	return float32(now.Sub(st.start)%wavePeriod) / float32(wavePeriod)
 }
 
 // waveHeight 是某一根竖条此刻多高。

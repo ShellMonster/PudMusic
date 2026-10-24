@@ -21,6 +21,8 @@
 package ui
 
 import (
+	"fmt"
+
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
@@ -256,6 +258,26 @@ func loadingCell(text string) func(c *ui.Context) {
 	return func(c *ui.Context) {
 		drawEmpty(c, "", loadingState(text), emptyRowPad)
 	}
+}
+
+// dynamicShapesNote 是「我们只画得出三种形态」那句话。
+//
+// ⚠️ **别说成「B 站坏了」**：那些动态是好的，只是**这一版画不出来**——B 站的
+// 动态有二十多种形态，这一版只画三种（见 `bili/dynamic.go` 的文件头）。
+const dynamicShapesNote = "B 站的动态有好几种形态，这一版只画得出其中三种（纯文字、图文、投稿）"
+
+// viewDroppedNote 是「有 N 条我们画不出来」那一行小字。
+//
+// ⚠️ **它不是空状态**：空状态会把整个列表换掉，而哨兵那一行还得留着
+// （翻页靠它）。所以它是**列表上面的一行小字**。
+//
+// ⚠️ **只在「一条都没画出来」时出现**（调用方自己判）：有内容的时候插一行
+// 字只是噪音；而一条都没有的时候，用户看到的是**一片空白加一个转着的圈**
+// ——像是坏了，而真相是「他发的那些我们画不出来」（票 #300）。
+func (s *Shell) viewDroppedNote(c *ui.Context, dropped int) {
+	t := c.Theme()
+	ui.Text(c, fmt.Sprintf("有 %d 条我们画不出来：%s", dropped, dynamicShapesNote)).
+		FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
 }
 
 // biliNotMounted 是「B 站客户端没挂上」这一次的特别原因，那三页共用同一句。

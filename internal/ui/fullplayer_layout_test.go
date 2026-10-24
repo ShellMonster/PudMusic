@@ -400,6 +400,9 @@ func TestTheFullPlayerBottomBarHasPlayModeAndQueue(t *testing.T) {
 	if !s.drawerOpen {
 		t.Fatal("按了「播放列表」，抽屉的状态没有开")
 	}
+	// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在窗口外面
+	//（它从右边滑进来），那一块量到的还是满屏的底。
+	settleDrawer(t, s, tt)
 	if after := tt.Image().RGBAAt(int(probeX), int(probeY)); after == before {
 		t.Error("抽屉开了，可它那一块的颜色没变——它画在满屏底下，用户看不见")
 	}
@@ -427,6 +430,12 @@ func TestTheFullPlayerBottomBarHasPlayModeAndQueue(t *testing.T) {
 	tt.Frame()
 	if s.drawerOpen {
 		t.Error("点了抽屉外面，它没有关")
+	}
+	// ⚠️ **关掉是「动完再拆」**：滑出去的那 200ms 里面板还在树上（它在窗口
+	// 外面，看不见），滑完了才真的没了。
+	settleDrawer(t, s, tt)
+	if s.drawerPhase != drawerGone {
+		t.Errorf("抽屉关掉之后阶段是 %d，want %d（面板该拆了）", s.drawerPhase, drawerGone)
 	}
 }
 

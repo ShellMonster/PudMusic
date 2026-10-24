@@ -675,9 +675,13 @@ func playModeIcon(m app.PlayMode) string {
 // 三档和阈值逐字照 Biu 的 `music-volume/index.tsx:159-164`：`volume > 0.5`
 // 是「响」，以下是「小」，0 是「静音」。抄它的阈值而不是自己分档，是因为
 // 用户在 Biu 那边习惯的是那道分界。
-func volumeIcon(v float64) string {
+//
+// ⚠️ **静音是它自己的一格**（票 #311）：静音的时候音量那一格记的还是用户设的
+// 值（20%），而画面上要画的是静音那张——所以静音由参数说了算，不靠「音量是不是
+// 0」去猜（用户自己把滑块拉到 0 也是静音，但不是「按了静音」）。
+func volumeIcon(v float64, muted bool) string {
 	switch {
-	case v <= 0:
+	case muted || v <= 0:
 		return iconVolumeMute
 	case v > 0.5:
 		return iconVolumeUp
