@@ -2524,6 +2524,38 @@ var Items = []Item{
 		},
 	},
 	{
+		// 🔴 **这一条的错法是「静默」里最静的那种**：少一层蒙版、字色跟着
+		// 主题翻——**没有一样会报错**，界面只是「有时候读不清」。而头图是
+		// **用户上传的任意图片**：用户传一张白底图，浅色主题下白字就化在
+		// 白底里（上游靠 `drop-shadow` 补，我们没有那一层）。
+		Category: Platform,
+		// 票 #295（UI 审计 L-13）：UP 空间头图区那一层黑蒙版。
+		//
+		// ⚠️ **上游那一档是平的**（浅 30% / 深 50%）：压在**纯白**头图上，
+		// 白字只有 2.1:1（浅色）/ 4.0:1（深色）——所以有字的那一带**再压
+		// 一档**，压到最坏情况也有 4.5:1（WCAG 正文 AA）。
+		//
+		// ⚠️ **这一条不放在表末尾**：表末尾那处已经撞过好几回（这一轮就是
+		// 第三次），挨着上面那条「收藏夹头图区」读得顺——两条讲的都是
+		// 「头图区」。
+		Spec: "UP 空间头图区：整块压一层黑蒙版（浅色 30% / 深色 50%，上游 `space-info.tsx:83-86`）；头图上的字是白字（次要的那一档 92% 的白），**两套主题一样**；有字的那一带再压一档（浅 40% / 深 15%），最坏情况（纯白头图）下白字 ≥4.5:1",
+		Tests: []string{
+			// 整块那一档的值（浅 30% / 深 50%，上游那一档）。
+			"TestTheSpaceHeaderMaskIsTheUpstreamOne",
+			// 画面上真的压着那两层（深浅两套，逐像素）。
+			"TestTheSpaceHeaderIsMaskedInBothThemes",
+			// 蒙版压在**真头图**上面（夹具里真的回一张纯白的 PNG——最坏情况）。
+			"TestTheSpaceHeaderMaskCoversARealBanner",
+			// **系统字号放大时名字仍然落在满档里**（1 倍到 2.25 倍，Windows 的
+			// 上限）——那一行是贴着底边的，字号一放大就往上长。
+			"TestTheSpaceHeaderTextStaysReadableAtEveryTextScale",
+			// 最坏情况（纯白头图 / 没有头图）下白字和 92% 的白都 ≥4.5:1。
+			"TestTheSpaceHeaderTextIsReadableOnAnyBanner",
+			// 昵称那一行真的是白字（不跟主题翻）。
+			"TestTheSpaceHeaderNameIsWhiteOnThePicture",
+		},
+	},
+	{
 		// 归「双平台」那一组：这一票动的是**播放条自己的刻度**，而播放条是
 		// **每一屏都在**的那一条（理由同 issue 127 那一条）。
 		Category: Platform,
