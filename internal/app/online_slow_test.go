@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -541,6 +542,258 @@ func rateCDN(data []byte, bytesPerSec int) http.HandlerFunc {
 				fl.Flush()
 			}
 			time.Sleep(per)
+		}
+	}
+}
+
+// armableCDN 是一台「按指令卡住**下一次**请求」的 CDN。
+//
+// 🔴 **为什么要有「指令」而不是「数第几次」**：复现「别的路把源顶掉」要三笔
+// 请求——「上一首的取流」「正在下的那一首」「换音质那一趟」——而后台的重连
+// 也会打同一个地址，靠数次数来认太脆。「卡住**下一次**」正好对着「正在下的
+// 那一首」那一笔。
+type armableCDN struct {
+	mu      sync.Mutex
+	armed   bool
+	hits    int
+	arrived chan struct{}
+	release chan struct{}
+	once    sync.Once
+	trace   func(string)
+}
+
+// arm 让**下一次**请求卡住（只卡一次）。
+func (c *armableCDN) arm() {
+	c.mu.Lock()
+	c.armed = true
+	c.mu.Unlock()
+}
+
+// handler 造出那台 CDN：被 arm 的那一次请求只给 first 个字节然后卡住，
+// 其余的请求一次给全。
+func (c *armableCDN) handler(data []byte, first int) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		c.mu.Lock()
+		stall := c.armed
+		c.armed = false
+		c.hits++
+		n, trace := c.hits, c.trace
+		c.mu.Unlock()
+		if trace != nil {
+			trace(fmt.Sprintf("CDN 第 %d 次请求：卡住=%v", n, stall))
+		}
+
+		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		if !stall {
+			w.Write(data)
+			return
+		}
+		if _, err := w.Write(data[:first]); err != nil {
+			return
+		}
+		if fl != nil {
+			fl.Flush()
+		}
+		c.once.Do(func() { close(c.arrived) })
+		<-c.release
+		if _, err := w.Write(data[first:]); err != nil {
+			return
+		}
+		if fl != nil {
+			fl.Flush()
+		}
+	}
+}
+
+// TestAnotherLaneMustNotStealTheProgressWatchdog 盯「别的路不许把这一趟的
+// 进度看门狗顶掉」（票 #220 的评审复现的那一条）。
+//
+// # 复现的是什么
+//
+// 「这一段还有没有进展」判的是**字节源已经下到多少字节**——而那一栏要是
+// **App 上共享的那一条源**（`pendingSrc`），那么**换音质**（`restreamOnline`）
+// 和**换流重开**（`refreshOnlineNow`）那两条路建源时就会把它顶掉：它们建的是
+// **它们自己的**源，而用户此刻在等的**不是**那一条。
+//
+// 于是：一条正在好好下、进度一直在涨的流，被判成「一个字节都没来」，
+// 然后被掐掉——**正是这一票要消灭的那一种症状**。
+//
+// 🔴 **判据是「别的路换过源之后，这一趟还在不在」**：不是「转圈停没停」
+// （那一条别的用例已经钉了），而是「**这一趟没被误判成失败**」。
+func TestAnotherLaneMustNotStealTheProgressWatchdog(t *testing.T) {
+	f := newStreamFixture(t)
+	dir := t.TempDir()
+	cdn := &armableCDN{arrived: make(chan struct{}), release: make(chan struct{}), trace: func(m string) { t.Log(m) }}
+	t.Cleanup(func() { close(cdn.release) })
+	// ⚠️ **用 moov 在末尾的那份 MP4**：卡住的那一次只给 12 KB——解码器
+	// 开不起来（它要等文件末尾那个 moov），于是这一趟停在「下音频」那一段。
+	f.on("/cdn/x.m4s", cdn.handler(readMP4(t, "stereo16.mp4"), 12<<10))
+	// ⚠️ **两次取流给不同的档**：换音质那一趟（第三次取流）拿到的档和前面
+	// 不同，于是「换音质走完了」这件事**看得见**（音质徽章变了）。
+	f.onPlayURL(dashFor(cdnURL(f.URL, "x.m4s", 2*time.Hour),
+		int(bili.QualityHigh192), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "x.m4s", 2*time.Hour),
+		int(bili.QualityLow64), 30216))
+
+	a := newOnlineApp(t, f, dir)
+	clock := &fakeClock{}
+	a.SetAfterForTest(clock.after)
+
+	// 一、**先放上一首**：`a.online` 得是**非空的**，换音质那条路才走得起来
+	// （`SetAudioQuality` 里 `if tr != nil` 才去 `restreamOnline`）——而
+	// **`a.online` 在新的一首还在取流的时候是上一首的**（它要等新播放器
+	// 装上才被换掉）。
+	if err := a.Enqueue(onlineItem("BV1", "1", "在放的那一首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "在放的那一首")
+
+	// 二、**点第二首**，而它的 CDN 卡住（arm 一下下一次请求）——于是
+	// 这一趟停在「下音频」那一段里，而 `a.online` 还是**上一首**。
+	cdn.arm()
+	if err := a.PlayFrom(onlineItem("BV2", "1", "正在下的那一首")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 15*time.Second, "第二首开始取流", func() bool {
+		return a.Snapshot().Loading
+	})
+	waitFor(t, 15*time.Second, "字节源收到字节了", func() bool {
+		return downloadedBytes(t, dir) > 0
+	})
+
+	// 三、🔴 **别的路来换源了**：换音质会走 `restreamOnline` → `buildFromRef`
+	// → `setPendingSource`，把 App 上那个**共享的**源换成它自己的；而它
+	// 走完之后那条源就归播放器管了——**共享的那一栏于是空了**。
+	//
+	// ⚠️ **它换的是「上一首」的流**（`a.online` 还是上一首）——而用户此刻
+	// 在等的是**第二首**。这一下正好把两件事搅在一起。
+	a.SetAudioQuality(bili.AudioLow)
+	waitFor(t, 15*time.Second, "换音质那一条路走完了", func() bool {
+		return a.Snapshot().Quality == "64K"
+	})
+
+	// 现在点火的闹钟问的是「这一段还有没有进展」。
+	clock.fireAt(app.LoadPlayTimeout)
+
+	// 🔴 **关键**：第二首还在好好下 → 不许被判成失败。
+	waitFor(t, 15*time.Second, "这一趟还在取流", func() bool {
+		return a.Snapshot().Loading
+	})
+	if st := a.Snapshot(); st.Err != "" {
+		t.Fatalf("别的路换了源，这一趟就被误判成失败了：%q（%q）", st.Err, st.ErrDetail)
+	}
+}
+
+// TestTheFailureSaysWhatActuallyHappened 盯**失败的那句话说的理由是真的**
+// （票 #220 的评审）。
+//
+// 判据是「这一段**没有进展**」——而「没进展」**不等于**「一个字节都没到」：
+// 下到一半卡住时（网络断了）字节明明已经到了，而那句话里写「一个字节都没到」
+// 是在骗用户。
+//
+// 🔴 **夹具**：一台先给 64 KB 再卡住的 CDN。第一次闹钟：有进展，不判失败；
+// 第二次：没有进展了 → 判失败，而失败那句话**必须说出真实的情况**。
+func TestTheFailureSaysWhatActuallyHappened(t *testing.T) {
+	f := newStreamFixture(t)
+	dir := t.TempDir()
+	arrived := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	// ⚠️ **用 moov 在末尾的那份 MP4**（243 KB）：先给 64 KB（够多，所以
+	// 「已经下到一半」这句话成立），然后卡住——而**解码器开不起来**
+	//（它要等文件末尾那个 moov），于是这一趟停在「下音频」那一段里。
+	//
+	// 用 FLAC 是不行的：FLAC 的头在前面，几十个字节就够解码器开口了，
+	// 那一趟当场就放完了，根本没有「下到一半」这一段。
+	f.on("/cdn/x.m4s", gatedCDN(readMP4(t, "stereo16.mp4"), 64<<10, arrived, release))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "x.m4s", 2*time.Hour),
+		int(bili.QualityHigh192), 110836))
+
+	a := newOnlineApp(t, f, dir)
+	clock := &fakeClock{}
+	a.SetAfterForTest(clock.after)
+
+	if err := a.Enqueue(onlineItem("BV1", "1", "下到一半卡住的那一首")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 15*time.Second, "字节源收到字节了", func() bool {
+		return downloadedBytes(t, dir) > 0
+	})
+	waitFor(t, 15*time.Second, "状态里说在取流", func() bool {
+		return a.Snapshot().Loading
+	})
+
+	// 第一次闹钟：**有进展** → 不判失败。
+	clock.fireAt(app.LoadPlayTimeout)
+	waitFor(t, 15*time.Second, "还在取流", func() bool {
+		return a.Snapshot().Loading
+	})
+	if st := a.Snapshot(); st.Err != "" {
+		t.Fatalf("还在好好下就判失败了：%q", st.Err)
+	}
+
+	// 第二次闹钟：**没有进展**了 → 判失败。
+	clock.fireAt(app.LoadPlayTimeout)
+	waitFor(t, 15*time.Second, "卡住之后有一句话", func() bool {
+		return a.Snapshot().Err != ""
+	})
+	st := a.Snapshot()
+	if st.Loading {
+		t.Error("卡住之后还在转圈")
+	}
+	// 🔴 **理由要按实际说**：字节明明已经到了（64 KB）。
+	if strings.Contains(st.ErrDetail, "一个字节都没到") {
+		t.Errorf("失败的理由是假的（明明已经下了 64 KB）：%q", st.ErrDetail)
+	}
+	if !strings.Contains(st.ErrDetail, "64 KB") {
+		t.Errorf("失败的理由里没有说清已经下了多少：%q", st.ErrDetail)
+	}
+}
+
+// TestTheTimingIsWrittenDownEvenWhenItFails 盯**失败的那几趟也写分段耗时**
+// （票 #220 的评审）。
+//
+// 🔴 **用户会来抱怨的正是失败的那些**（「点了歌一直没反应」）——只在成功时
+// 写日志，等于把最需要查的那一类漏掉（票 #282 说的「事后查得到」）。
+func TestTheTimingIsWrittenDownEvenWhenItFails(t *testing.T) {
+	f := newStreamFixture(t)
+	arrived := make(chan struct{})
+	f.on("/cdn/hang.m4s", hangingCDN(arrived))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "hang.m4s", 2*time.Hour),
+		int(bili.QualityHigh192), 110836))
+
+	a := newOnlineApp(t, f, t.TempDir())
+	lines, restore := app.CapturePlayLog(a)
+	t.Cleanup(restore)
+	clock := &fakeClock{}
+	a.SetAfterForTest(clock.after)
+
+	if err := a.Enqueue(onlineItem("BV1", "1", "取不来的那一首")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-arrived:
+	case <-time.After(30 * time.Second):
+		t.Fatal("取流一直没到 CDN")
+	}
+	waitFor(t, 15*time.Second, "状态里说在取流", func() bool {
+		return a.Snapshot().Loading
+	})
+
+	clock.fireAt(app.LoadPlayTimeout)
+	waitFor(t, 15*time.Second, "超时之后有一句话", func() bool {
+		return a.Snapshot().Err != ""
+	})
+
+	waitFor(t, 15*time.Second, "日志里写了分段耗时", func() bool {
+		return strings.Contains(strings.Join(*lines, "\n"), "取流分段耗时")
+	})
+	joined := strings.Join(*lines, "\n")
+	for _, want := range []string{"① 问地址", "② 下音频", "③ 解码"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("失败那一趟的日志里没有 %q：\n%s", want, joined)
 		}
 	}
 }

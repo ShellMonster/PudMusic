@@ -352,6 +352,31 @@ type App struct {
 	//
 	// -1 = 还没有字节源（这一段还在问地址）。
 	loadFilled int64
+	// loadSrc 是「**这一趟取流**」自己的那条字节源——**看门狗的那一份**。
+	//
+	// 🔴 **它和 `pendingSrc` 是两栏，不能混**（票 #220 的评审复现过）：
+	//
+	//	pendingSrc	「当前在管的那条源」。换音质（`restreamOnline`）和
+	//			换流重开（`refreshOnlineNow`）都会建**它们自己的**源并
+	//			**顶掉这一栏**
+	//	loadSrc		「用户此刻在等的那一条」。只有「开新歌」那一趟
+	//			会写它
+	//
+	// 混了的后果正是这一票要消灭的那种症状：看门狗问的是「这一趟还在下吗」，
+	// 而它问的却是**别的路换上去的那一条**——于是一条正在好好下、进度一直在
+	// 涨的流被判成「一个字节都没来」，然后被掐掉。
+	//
+	// ⚠️ **它的命和 `pendingSrc` 不一样**：`pendingSrc` 在播放器装上之后
+	// 就交出去了（源归播放器管），而 `loadSrc` 要到**这一趟结束**才清——
+	// 中途被顶掉的那一条也得由看门狗自己关掉（见 `abortPendingSource`）。
+	loadSrc *audio.StreamSource
+	// loadSrcGen 是 loadSrc 属于哪一趟（见上）。
+	loadSrcGen int
+	// loadTripSince 是**这一趟取流**从点下去开始的时刻。
+	//
+	// ⚠️ **它和 `loadingSince` 是两件事**：`loadingSince` 是「当前这一段」
+	// （换段就重置），而这一栏是「整趟」（不重置）——总闸量的是整趟。
+	loadTripSince time.Time
 	// reopenInFlight 是「**应用**正在从播放位置重开」那一半。
 	//
 	// ⚠️ **源那一半不住在这儿**（它住在 `audio.StreamSource` 那边，见

@@ -101,6 +101,11 @@ const loadSlowAfter = 5 * time.Second
 
 // onlineLoadTotalTimeout 是「这一趟取流」**不管有没有进展**最多等多久。
 //
+// ⚠️ **它从「点下去」起算，不是从「当前这一段」起算**（`loadTripSince`）——
+// 「这一趟最多等多久」这句话要真的管住**这一趟**（票 #220 的评审指出来的：
+// 量的是「这一段」的话，最坏值是 120+20+20 ≈ 170 秒，而那句话说的是
+// 「这一趟」）。
+//
 // ⚠️ **它管的是「永远转圈」那件事**：下载那一段的判据是「还有没有进展」
 // （见 `loadTimedOut`），而一个每 19 秒吐一个字节的地址能让那个判据一直
 // 为真——于是转圈就永远不停。这一栏是那道**总闸**。
@@ -152,6 +157,27 @@ func loadStageAsk(it Item) string {
 		return loadStageInfo
 	}
 	return loadStagePart
+}
+
+// loadRun 是「**开新歌**」那一趟的凭据：分段计时 + 「这一趟自己的那条源」。
+//
+// # 为什么它是一个东西
+//
+// 「这一趟」有两样东西要归它所有：
+//
+//	分段耗时	写进日志（事后查得到，票 #282）
+//	那一条源	看门狗问「这一段还有没有进展」时要看的是**它**
+//
+// 而第二样**必须**是这一趟自己的：App 上那个共享的 `pendingSrc` 会被换音质
+// / 换流重开那两条路顶掉（理由见 App 里 `loadSrc` 那段注释）——而看门狗问的
+// 是「**这一趟**还在下吗」。
+//
+// ⚠️ **只有「开新歌」那一路有它**：换音质 / 换流重开传 nil——它们量的是
+// 「换流花了多久」，不是「从点歌到出声花了多久」，而它们的源也不是用户
+// 此刻在等的那一条。
+type loadRun struct {
+	// timing 是这一趟的分段耗时。
+	timing loadTiming
 }
 
 // loadTiming 是「这一趟取流」的分段耗时（票 #220）。
@@ -616,6 +642,9 @@ func (a *App) playOnlineFrom(it Item, at time.Duration, paused bool) error {
 	// 🔴 **「正在取流」从这一刻开始**（票 #282）：取流要跑一趟网络，而那一趟
 	// 里界面上什么都不会变——不说这一句，用户看到的就是「点了没反应」。
 	// 超时由 `loadTimedOut` 兜着，不让它变成另一种「什么都不说」。
+	// 🔴 **整趟从这一刻开始算**（票 #220）：总闸量的是「这一趟」，而
+	// `loadingSince` 是「当前这一段」（换段就重置）——两栏不是一回事。
+	a.loadTripSince = time.Now()
 	a.beginLoadingLocked(gen, it.Title, loadStageAsk(it))
 	// 🔴 **这一趟是「恢复」**：它放不起来的时候**不许**在播放条上冒一句红字
 	// ——启动时用户什么都没做就被骂一句「打不开」，那是应用在说自己，不是在
@@ -700,7 +729,36 @@ func (a *App) endLoadingLocked() {
 	a.loadingStage = ""
 	a.loadingSlow = false
 	a.loadFilled = -1
+	// 🔴 **整趟的起点也收掉**：这一趟到这儿就完了，下一趟会重新起算
+	// （见 `playOnlineFrom` 里那一处）。
+	a.loadTripSince = time.Time{}
 	a.stopLoadTimersLocked()
+}
+
+// tripWaitLocked 报「这一趟取流从点下去到现在的多久」。**必须在持锁时调**。
+//
+// ⚠️ **它和 `loadingWaitLocked` 是两件事**：那一栏是「当前这一段」（换段就
+// 重置），这一栏是「整趟」（不重置）——总闸量的是整趟（票 #220 的评审）。
+func (a *App) tripWaitLocked() time.Duration {
+	if a.loadTripSince.IsZero() {
+		return 0
+	}
+	return time.Since(a.loadTripSince)
+}
+
+// humanBytes 把字节数说成一句人话。
+//
+// ⚠️ **它是给用户看的**（失败那句话的详情里），所以用 KB / MB——
+// 「65536 字节」用户读不出那是多少。
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/float64(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.0f KB", float64(n)/float64(1<<10))
+	default:
+		return fmt.Sprintf("%d 字节", n)
+	}
 }
 
 // loadingWaitLocked 报「当前这一段已经等了多久」。**必须在持锁时调**。
@@ -764,10 +822,14 @@ func (a *App) loadTimedOut(gen int, title, stage string) {
 		a.mu.Unlock()
 		return
 	}
+	// ⚠️ **总闸量的是「整趟」**（`tripWaitLocked`），不是「当前这一段」
+	// （`loadingSince` 换段就重置）——「这一趟最多等多久」这句话要真的
+	// 管住这一趟（票 #220 的评审指出来的：注释说「这一趟」，而代码量的是
+	// 「这一段」，于是最坏值是 120+20+20 ≈ 170 秒）。
+	trip := a.tripWaitLocked()
 	// 🔴 **下载那两段：先问「还有没有进展」**。
 	if stage == loadStageBytes {
-		waited := a.loadingWaitLocked()
-		if a.downloadProgressLocked() && waited < onlineLoadTotalTimeout {
+		if a.downloadProgressLocked() && trip < onlineLoadTotalTimeout {
 			// 还在动：这一段慢，但不是死了。
 			//
 			// 🔴 **「慢」这一档在这里也置上**：能撑到 20 秒还活着，
@@ -790,7 +852,10 @@ func (a *App) loadTimedOut(gen int, title, stage string) {
 	}
 	a.onlineGen++
 	stage = a.loadingStage
-	waited := a.loadingWaitLocked()
+	// ⚠️ **失败那一刻已经下到多少字节**：判据是「这一段没有进展」，而
+	// 「没进展」**不等于**「一个字节都没到」——下到一半卡住时字节明明已经
+	// 到了，而那句话里写「一个字节都没到」是**错的**（票 #220 的评审）。
+	got := a.loadFilled
 	a.endLoadingLocked()
 	restore := a.restoreGen == gen
 	wake := a.wake
@@ -827,16 +892,25 @@ func (a *App) loadTimedOut(gen int, title, stage string) {
 		"取流超时了（%v 内这一段网络没回）。可能是网络慢，也可能是这一首的流取不到——换一首放，或者点重试再试一次。",
 		onlinePlayTimeout)
 	if stage == loadStageBytes {
-		if waited >= onlineLoadTotalTimeout {
+		if trip >= onlineLoadTotalTimeout {
 			short = "取流太慢了"
 			detail = fmt.Sprintf(
-				"这一首取流太慢了（已经等了 %v，再等下去也来不及）。可能是网络特别慢，也可能是这一首特别大——换一首放，或者点重试再试一次。",
-				waited.Round(time.Second))
+				"这一首取流太慢了（整趟已经等了 %v，再等下去也来不及）。可能是网络特别慢，也可能是这一首特别大——换一首放，或者点重试再试一次。",
+				trip.Round(time.Second))
 		} else {
 			short = "下载超时了"
-			detail = fmt.Sprintf(
-				"这条音频一直没下下来（%v 内一个字节都没到）。多半是网络断了，或者这条地址失效了——换个网络，或者点重试再试一次。",
-				onlinePlayTimeout)
+			// 🔴 **理由要按实际说**（票 #220 的评审）：判据是「这一段没有
+			// 进展」，而「没进展」**不等于**「一个字节都没到」——下到一半
+			// 卡住时字节明明已经到了。写「一个字节都没到」是在骗用户。
+			if got > 0 {
+				detail = fmt.Sprintf(
+					"这条音频下到一半停住了（已经下了 %s，但 %v 内没有新的字节了）。多半是网络断了，或者这条地址失效了——换个网络，或者点重试再试一次。",
+					humanBytes(got), onlinePlayTimeout)
+			} else {
+				detail = fmt.Sprintf(
+					"这条音频一个字节都没下下来（%v 内什么都没到）。多半是网络断了，或者这条地址失效了——换个网络，或者点重试再试一次。",
+					onlinePlayTimeout)
+			}
 		}
 	}
 	a.setErrTextDetail(short, detail, true)
@@ -845,14 +919,38 @@ func (a *App) loadTimedOut(gen int, title, stage string) {
 	}
 }
 
-// setLoadBaseline 把「进度」的基准记成「一个字节都还没到」。
+// setLoadSource 记下「这一趟取流」自己的那条字节源（看门狗的那一份）。
 //
-// ⚠️ **代次要对**：别把**别的**那一趟的源算进来（理由见 `buildFromRef` 里
-// 那一处）。
-func (a *App) setLoadBaseline(gen int) {
+// ⚠️ **它和 `setPendingSource` 是两件事**：`pendingSrc` 是「当前在管的那条」
+// （谁都在写），而这一栏是「用户此刻在等的那一条」（只有「开新歌」那一趟
+// 写它）。理由见 App 里 `loadSrc` 那段注释。
+//
+// ⚠️ **同时把进度的基准归零**：这一段从「一个字节都还没到」开始，而「没下到」
+// 和「下到了一点」在 `Filled()` 上分别是 0 和 n——基准必须是 0，不然「一个
+// 字节都不来」会被判成「还在走」。
+func (a *App) setLoadSource(src *audio.StreamSource, gen int) {
 	a.mu.Lock()
-	if a.onlineGen == gen {
-		a.loadFilled = 0
+	old := a.loadSrc
+	if old != nil && old != src {
+		a.loadSrc = nil
+	} else {
+		old = nil
+	}
+	a.loadSrc = src
+	a.loadSrcGen = gen
+	a.loadFilled = 0
+	a.mu.Unlock()
+	if old != nil {
+		old.Close()
+	}
+}
+
+// dropLoadSource 把「这一趟自己的那一条」摘掉（它已经归播放器管了，或者
+// 已经被关掉了）。
+func (a *App) dropLoadSource(src *audio.StreamSource) {
+	a.mu.Lock()
+	if a.loadSrc == src {
+		a.loadSrc = nil
 	}
 	a.mu.Unlock()
 }
@@ -871,8 +969,12 @@ func (a *App) setLoadBaseline(gen int) {
 // ⚠️ **代次要对**：上一趟留下的那条源（切歌了还没建好新的）说的不是这一趟
 // 的进度。
 func (a *App) downloadProgressLocked() bool {
-	src := a.pendingSrc
-	if src == nil || a.pendingSrcGen != a.onlineGen {
+	// 🔴 **读的是「这一趟自己的那一条」**（`loadSrc`），**不是共享的那一栏**
+	// （`pendingSrc`）：换音质 / 换流重开那两条路会把 `pendingSrc` 换成它们
+	// 自己的源，于是读它会读到**另一条**流的进度——于是一条正在好好下的流
+	// 被判成「没进展」，然后被掐掉（票 #220 的评审复现过）。
+	src := a.loadSrc
+	if src == nil || a.loadSrcGen != a.onlineGen {
 		// 还没有字节源（还在问地址那几段）：这一段压根不适用进度判据。
 		return false
 	}
@@ -940,12 +1042,26 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	// 的网络往返，而它们的快慢完全不是一回事——混在一起只有一个「等了多久」，
 	// 那个数说不出慢的是哪一段。
 	t0 := time.Now()
+	// 🔴 **分段耗时写进日志**（票 #220）：这三段是「点一首歌 → 出声」的全部
+	// 成本，而事后能查到的只有这一句——用户能描述的只有「它不响」。
+	//
+	// ⚠️ **失败的那几趟也要写**（用 `defer` 而不是写在成功那一支后面）：
+	// **用户会来抱怨的正是失败的那些**（「点了歌一直没反应」）——只在成功
+	// 时写，等于把最需要查的那一类漏掉（票 #220 的评审指出来的）。
+	run := &loadRun{}
+	defer func() {
+		if run.timing.Total() == 0 {
+			// 连第一段都没走完（取流零件没挂）：没什么可量的。
+			return
+		}
+		a.logf("biu: 取流分段耗时：%q（代次 %d）%s", it.Title, gen, run.timing.String())
+	}()
 	it, err := a.withSource(context.Background(), s, it)
 	if err != nil {
 		a.failPlay(gen, it, "问哪一集/补元信息", err)
 		return
 	}
-	tim := loadTiming{Part: time.Since(t0)}
+	run.timing.Part = time.Since(t0)
 	// 🔴 **代次变了就别再往下走**：问分 P / 元信息是**一次网络往返**，这一趟
 	// 等它的时候用户完全可能已经切了歌、或者超时闹钟已经响了。那就没人要这
 	// 个结果了——继续往下走只会白花一次取流（票 #282）。
@@ -966,7 +1082,7 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	// 签名的接口往返，而它是**两条取流路径（投稿 / 音乐库）唯一的共同段**。
 	tURL := time.Now()
 	ref, err := a.resolve(context.Background(), s, it, s.Quality)
-	tim.URL = time.Since(tURL)
+	run.timing.URL = time.Since(tURL)
 	if err != nil {
 		a.failPlay(gen, it, "取流", err)
 		return
@@ -988,14 +1104,11 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	// ⚠️ **这一段的判据是「还有没有进展」**，不是「一共等了多久」——
 	// 理由见 `loadTimedOut` 那段注释（票 #220）。
 	a.rearmLoading(gen, it.Title, loadStageBytes)
-	src, p, err := a.buildFromRef(context.Background(), s, it, gen, ref, &tim)
+	src, p, err := a.buildFromRef(context.Background(), s, it, gen, ref, run)
 	if err != nil {
 		a.failPlay(gen, it, "开播放器", err)
 		return
 	}
-	// 🔴 **分段耗时写进日志**（票 #220）：这三段是「点一首歌 → 出声」的全部
-	// 成本，而事后能查到的只有这一句——用户能描述的只有「它不响」。
-	a.logf("biu: 取流分段耗时：%q（代次 %d）%s", it.Title, gen, tim.String())
 
 	a.mu.Lock()
 	if a.onlineGen != gen || a.closed {
@@ -1057,6 +1170,10 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	a.online = &onlineTrack{item: it, ref: ref, source: src, quality: ref.Label}
 	// 源归播放器管了（`audio.Player` 的 closers 会关它），App 这一栏清空。
 	a.pendingSrc = nil
+	// 🔴 **「这一趟自己的那一条」也清掉**（票 #220）：这一趟到这儿就完了，
+	// 而它的源已经归播放器管了——留着它的话，**下一次**超时会把正在放着的
+	// 那一条的源关掉。
+	a.loadSrc = nil
 	a.reportedErr = nil
 	a.clearErrLocked()
 	// 「正在取流」到此为止：播放器装上了，歌开始放了。
@@ -1243,11 +1360,11 @@ func (a *App) buildOnline(ctx context.Context, s *Streaming, it Item, gen int) (
 // 音量和倍率在这里**现读**（`buildOnline` 那段注释说了为什么）。三条建播放
 // 链路的路——开新歌、换流重开、换音质——都走这里，所以三处一处都不会漏。
 //
-// tim 是**分段耗时**的收口（票 #220）：nil = 不量（换音质 / 换流重开那两条路
-// 不量——它们量的是「换流花了多久」，不是「从点歌到出声花了多久」，混进
-// 同一个口径里会让那个数没法读）。
+// run 是「**开新歌**」那一趟的凭据：nil = 不是那一趟（换音质 / 换流重开
+// 那两条路）。它管两件事：分段耗时（写日志）和「这一趟自己的那条源」
+// （看门狗看的就是它，理由见 `loadRun`）。
 func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
-	ref *bili.StreamRef, tim *loadTiming,
+	ref *bili.StreamRef, run *loadRun,
 ) (*audio.StreamSource, *audio.Player, error) {
 	// 🔴 **每一段流一个重连令牌**：旧源的回调可能迟到（它还在退避里等着
 	// 的时候这一条已经换掉了），令牌对不上就不碰界面上的状态。
@@ -1296,16 +1413,15 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	// 🔴 **把源记在 App 上**：建播放器的这一段里源已经在下载了，而播放器还没
 	// 建起来——「超时」和「退出」都要能把它掐掉（见 App.pendingSrc）。
 	a.setPendingSource(src, gen)
-	// 🔴 **进度的基准归零**（票 #220）：这一段从「一个字节都还没到」开始，
-	// 而「没下到」和「下到了一点」在 `Filled()` 上分别是 0 和 n——基准必须是
-	// 0，不然「一个字节都不来」会被判成「还在走」（理由见
-	// `downloadProgressLocked`）。
+	// 🔴 **「这一趟自己的那一条」**（票 #220）：看门狗问「这一段还有没有
+	// 进展」时要看的是**它**，不是上面那个共享的 `pendingSrc`——
+	// 换音质 / 换流重开那两条路会把 `pendingSrc` 顶掉（理由见 App 里
+	// `loadSrc` 那段注释）。
 	//
-	// ⚠️ **只有「开新歌」那一趟才归零**（`tim != nil`）：换音质 / 换流重开
-	// 那两条路也会建源，而它们**不是**用户此刻在等的那一趟——它们要是顺手
-	// 把基准改了，正在下着的那一首会被判成「没进展」。
-	if tim != nil {
-		a.setLoadBaseline(gen)
+	// ⚠️ **只有「开新歌」那一趟才记**：那两条路建的源不是用户此刻在等的
+	// 那一条，记上去只会让看门狗盯着别人的流。
+	if run != nil {
+		a.setLoadSource(src, gen)
 	}
 	// 🔴 **建源的这一小段时间里代次也可能变了**（用户切歌、或者超时闹钟响了）。
 	// 那就没人要这条流了——立刻关掉，别让它下到天亮。
@@ -1325,14 +1441,14 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	opened := time.Now()
 	// 🔴 **分段耗时落地**（票 #220）：② 是「建源 → 头几个字节到」，
 	// ③ 是「头几个字节到 → 解码器开好」。
-	if tim != nil {
+	if run != nil {
 		if ns := firstAt.Load(); ns > 0 {
-			tim.Bytes = time.Unix(0, ns).Sub(srcStart)
-			tim.Decode = opened.Sub(time.Unix(0, ns))
+			run.timing.Bytes = time.Unix(0, ns).Sub(srcStart)
+			run.timing.Decode = opened.Sub(time.Unix(0, ns))
 		} else {
 			// 一个字节都没到：② 是「白等的那段时间」，而③压根没发生。
-			tim.Bytes = opened.Sub(srcStart)
-			tim.Decode = 0
+			run.timing.Bytes = opened.Sub(srcStart)
+			run.timing.Decode = 0
 		}
 	}
 	if err != nil {
@@ -1391,10 +1507,17 @@ func (a *App) setPendingSource(src *audio.StreamSource, gen int) {
 
 // clearPendingSource 把在途的那一条从 App 上摘掉（它已经归播放器管了，或者
 // 已经被关掉了）。
+//
+// ⚠️ **它也摘「这一趟自己的那一条」**（`loadSrc`）：那一条和它是同一个源的
+// 时候（正常路径）摘一次就够；而**换了音质 / 换流重开**那两条路建的是**另一条**
+// 源，所以摘的时候要分别判（理由见 `loadSrc` 那段注释）。
 func (a *App) clearPendingSource(src *audio.StreamSource) {
 	a.mu.Lock()
 	if a.pendingSrc == src {
 		a.pendingSrc = nil
+	}
+	if a.loadSrc == src {
+		a.loadSrc = nil
 	}
 	a.mu.Unlock()
 }
@@ -1404,13 +1527,29 @@ func (a *App) clearPendingSource(src *audio.StreamSource) {
 // **锁外面关**：字节源的 `Close` 要等它的下载 goroutine 退出来，而那个
 // goroutine 可能正拿着 `a.mu`（换流那条路上它会回调 `noteQuality`）。锁里面
 // 等就是死等。
+//
+// 🔴 **它要关的不止 `pendingSrc` 那一栏**：还有「这一趟取流」自己的那一条
+// （`loadSrc`，见那一段的注释）——换音质 / 换流重开那两条路会把 `pendingSrc`
+// 换成**它们自己的**源，于是只关 `pendingSrc` 关不到这一趟真正在下的那一条
+// （票 #220 的评审复现过：那一条会一直下到天亮，而它的临时文件也一起
+// 留在盘上）。
 func (a *App) abortPendingSource() {
 	a.mu.Lock()
-	src := a.pendingSrc
-	a.pendingSrc = nil
+	var srcs []*audio.StreamSource
+	if a.pendingSrc != nil {
+		srcs = append(srcs, a.pendingSrc)
+		a.pendingSrc = nil
+	}
+	if a.loadSrc != nil {
+		srcs = append(srcs, a.loadSrc)
+		a.loadSrc = nil
+	}
 	a.mu.Unlock()
-	if src != nil {
-		src.Close()
+	// ⚠️ **同一个源可能被列两次**（正常路径上 `pendingSrc` 和 `loadSrc`
+	// 是同一条）——`StreamSource.Close` 可以重复调（它自己判 `closed`），
+	// 所以重复关是安全的。
+	for _, s := range srcs {
+		s.Close()
 	}
 }
 
