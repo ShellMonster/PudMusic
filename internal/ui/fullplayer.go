@@ -40,6 +40,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+	tclean "github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
 	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
@@ -701,7 +702,7 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 		// ⚠️ **别拿它当「页标题不写字重」那一档的样板**：页标题（`scale.PageTitle`）
 		// 那一档一个字重都不写（`TestPageTitlesAreNotBold` 钉着），这里是**歌名**
 		// 那一档，两者的判据不是同一条。
-		ui.Text(c, st.Title).FontSize(scale.Font(c, scale.PlayerTitle)).FontWeight(400).TextColor(on).MaxWidth(fullTitleMaxWidth(c)).SingleLine()
+		ui.Text(c, tclean.Clean(st.Title).Title).FontSize(scale.Font(c, scale.PlayerTitle)).FontWeight(400).TextColor(on).MaxWidth(fullTitleMaxWidth(c)).SingleLine()
 
 		// 同上面那一条：提示不跟着顶栏一起藏起来，所以这里不给 `Tooltip`。
 		gear := iconButton(c, iconSettings, "全屏设置", 22).

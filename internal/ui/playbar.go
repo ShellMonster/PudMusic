@@ -15,6 +15,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+	tclean "github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -436,7 +437,8 @@ func drawerTip(open bool) string {
 // 徽章是**在 Column 里面**跟歌名并排的：外层永远是竖着堆的行，徽章只占第一行
 // 里的右边一小块。
 func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
-	title := st.Title
+	// 显示的是清洗过的歌名（去视频宣传标签，见 `widgets/title`）；st.Title 本身不动。
+	title := tclean.Clean(st.Title).Title
 	if !st.HasTrack {
 		title = "还没有打开文件"
 	}

@@ -39,6 +39,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+	tclean "github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -569,7 +570,7 @@ func (s *Shell) viewMiniControls(c *ui.Context, st app.State, t *ui.Theme) {
 func (s *Shell) viewMiniTitleRow(c *ui.Context, st app.State, t *ui.Theme) {
 	ui.Row(c).Key("mini-title-row").FillWidth().Gap(space.Px6).AlignItems(ui.Center).
 		Children(func() {
-			title := st.Title
+			title := tclean.Clean(st.Title).Title
 			if !st.HasTrack {
 				// 抄 Biu 的 `暂无播放内容`（`pages/mini-player/index.tsx:128`）。
 				title = nothingPlaying.Title

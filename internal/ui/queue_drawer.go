@@ -25,6 +25,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+	tclean "github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -599,7 +600,7 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, t *ui.Theme) {
 			// 那一档（歌名 16 / UP 14）。这里原来是 15 / 12，副题比列表行的 UP 名
 			// 还小一档，同一列两种刻度。
 			ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
-				ui.Text(c, row.item.Title).FontSize(scale.Font(c, scale.Size16)).
+				ui.Text(c, tclean.Clean(row.item.Title).Title).FontSize(scale.Font(c, scale.Size16)).
 					TextColor(playlistTextColor(t, state)).SingleLine()
 				// 副题两态不一样：正在放那一行按**它自己那层淡底**重算（见
 				// `playlistSubtitleColor`），别的行是次要色。

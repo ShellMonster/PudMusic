@@ -166,7 +166,7 @@ func TestTheSidebarTakesThePresetsOwnColor(t *testing.T) {
 		tt, _, _, _ := shellOnSettings(t, st)
 		sk, _, _ := presetSkinFor(tc.preset, tc.dark)
 		want := rgb(mygoui.Hex(sk.sidebar))
-		if got := tt.Image().RGBAAt(3, 300); !sameColor(got, want) {
+		if got := tt.Image().RGBAAt(3, 560); !sameColor(got, want) {
 			t.Errorf("%s dark=%v：侧栏底是 %v，该是方案的 sidebar %v", tc.preset, tc.dark, got, want)
 		}
 		if mygoui.Hex(sk.sidebar) == mygoui.Hex(sk.bg) {
@@ -179,7 +179,7 @@ func TestTheSidebarTakesThePresetsOwnColor(t *testing.T) {
 	st.ThemeMode = app.ThemeModeLight
 	tt, _, _, _ := shellOnSettings(t, st)
 	bg := rgb(BuildTheme(st, false).Background)
-	if got := tt.Image().RGBAAt(3, 300); !sameColor(got, bg) {
+	if got := tt.Image().RGBAAt(3, 560); !sameColor(got, bg) {
 		t.Errorf("经典：侧栏底是 %v，该沿用 Background %v", got, bg)
 	}
 }
@@ -258,6 +258,21 @@ func TestToastAndConfirmTextIsReadableOnEveryPresetColor(t *testing.T) {
 					}
 				}
 			}
+		}
+	}
+}
+
+// TestThePlaybarShowsACleanTitle：播放条上的歌名是清洗过的，原始的视频标签不出现。
+func TestThePlaybarShowsACleanTitle(t *testing.T) {
+	st := barState()
+	st.Title = "【4K修复】晴天 (官方MV)"
+	tt, _ := playbarTester(t, st, 1200, 0, false)
+	if !tt.HasText("晴天") {
+		t.Fatalf("播放条上没有清洗后的歌名「晴天」，文字有 %q", tt.Texts())
+	}
+	for _, bad := range []string{"4K修复", "官方MV"} {
+		if tt.HasText("【" + bad + "】晴天 (官方MV)") {
+			t.Errorf("播放条上还画着没清洗的标题")
 		}
 	}
 }

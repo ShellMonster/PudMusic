@@ -441,6 +441,8 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings, collapsed bool) {
 	// first 是「这一帧第一个画出来的菜单项」——它登记成「焦点回侧栏时落回的那
 	// 一项」（票 #245 的 E4）。理由见下面那一处。
 	first := true
+	// lastGroup 是上一个画出来的项所在的分组（空串 = 还没画过）。
+	lastGroup := ""
 
 	// ⚠️ Key 给的是包在外面的这一格，不是 Button 本身：`Key` 挂在「创建时
 	// 就处理了输入」的控件上会 panic（`ui/element.go:658`），要给就包一层。
@@ -461,6 +463,12 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings, collapsed bool) {
 			//
 			// ⚠️ **展开态别给 Button 补 `Label(rt.Title)`**：可见的字就是名字，
 			// 补上去会多出一个同样文字的无障碍节点，画面上出现两份。
+			// 分组标题（设计规范 §7.23 / 概念图 G16）：发现 / 我的音乐，设置另起一段不带标题。
+			// 画在**这一组第一个真画出来的项**前面——藏掉的项不算，所以一组全被藏了标题也不出现。
+			if g := sideGroupOf(rt.Match); g != lastGroup {
+				s.viewSideGroupTitle(c, g, lastGroup == "" && first, collapsed)
+				lastGroup = g
+			}
 			ui.Column(c).Key("side-item:" + rt.Match).Children(func() {
 				item := s.sideMenuItem(c, rt, rt.Match == cur, collapsed)
 				if item.Clicked() {
@@ -483,6 +491,53 @@ func (s *Shell) viewSideMenu(c *ui.Context, st app.Settings, collapsed bool) {
 		if hidden > 0 && !collapsed {
 			s.viewLoggedOutHint(c, hidden)
 		}
+	})
+}
+
+// 侧栏的分组（设计规范 §7.23）。菜单名以仓库为准，分组只决定标题。
+const (
+	sideGroupDiscover = "发现"
+	sideGroupMine     = "我的音乐"
+	// sideGroupSystem 是设置那一段：**不带标题**，只是和上面隔开一截（设计稿里设置在底部）。
+	sideGroupSystem = "\x00system"
+)
+
+// sideGroupOf 是一条菜单路由属于哪一组。不认识的路由归「我的音乐」。
+func sideGroupOf(match string) string {
+	switch match {
+	case homePath:
+		return sideGroupDiscover
+	case settingsPath:
+		return sideGroupSystem
+	}
+	return sideGroupMine
+}
+
+// sideGroupTitleGap 是分组标题上下的留白：标题上方 12（第一组只留 4）、下方 4。
+const (
+	sideGroupGapTop    = space.Px12
+	sideGroupGapTopTop = space.Px4
+	sideGroupGapBottom = space.Px4
+)
+
+// viewSideGroupTitle 画一个分组标题。
+//
+// 展开态：`caption` 号、`TextMuted`、Medium，左内缩和菜单项的图标对齐；设置那一段
+// （`sideGroupSystem`）不带字，只留上方的缝。折叠态没有地方写字，只留一道同样高的缝。
+// 标题是纯装饰：不可点、不抢焦点，`PassThrough` 让点击落到下面的东西上。
+func (s *Shell) viewSideGroupTitle(c *ui.Context, group string, firstOfAll, collapsed bool) {
+	t := c.Theme()
+	top := float32(sideGroupGapTop)
+	if firstOfAll {
+		top = sideGroupGapTopTop
+	}
+	ui.Column(c).Key("side-group:"+group).FillWidth().PassThrough().
+		Padding(top, space.Px16, sideGroupGapBottom, space.Px16).Children(func() {
+		if collapsed || group == sideGroupSystem {
+			return
+		}
+		ui.Text(c, group).FontSize(scale.Font(c, scale.Size12)).FontWeight(weightMedium).
+			TextColor(t.TextMuted).SingleLine().PassThrough()
 	})
 }
 

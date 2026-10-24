@@ -708,6 +708,12 @@ func TestTheFullPlayerTitleIsNotBold(t *testing.T) {
 					if x, ok := s.X.(*ast.Ident); ok && x.Name == "st" && s.Sel.Name == "Title" {
 						mentionsTitle = true
 					}
+					// 歌名现在是清洗过的：`tclean.Clean(st.Title).Title`。
+					if cl, ok := s.X.(*ast.CallExpr); ok && s.Sel.Name == "Title" && len(cl.Args) == 1 {
+						if a, ok := cl.Args[0].(*ast.SelectorExpr); ok && a.Sel.Name == "Title" {
+							mentionsTitle = true
+						}
+					}
 				}
 			}
 			return true
