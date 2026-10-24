@@ -105,3 +105,161 @@ func TestTheWaveDoesNotRebuildItsStateEveryFrame(t *testing.T) {
 	}
 	t.Logf("波形那一帧：每帧 %.2f 次分配", got)
 }
+
+// TestTheCoverIdentitiesAreNotRecomputedEveryFrame 钉住「那一圈反馈的**身份**
+// 不是每帧重算的」（票 #407）。
+//
+// ## 它挡的是什么
+//
+// 那一圈反馈（压暗 / 三角 / 渐变条 / 播放钮）每一帧每一行都要建，而它建出来的
+// 那几样东西**带着身份**：节点键（`Key`）和动画键（`AnimateWith`）——淡入要
+// 跨帧，节点的身份不变才有那份状态（见 hover.go 的文件头）。
+//
+// 现算的话，每一帧每一行要：
+//
+//   - 拼四个字符串（标签、`:dim`、`:fade`、`:tri`）：**四次分配**；
+//   - 把其中三个**装箱进 `any`**（`Key` 和 `AnimateWith` 的参数是 `any`，而
+//     `string → any` 的装箱每次都要在堆上分配一次）：**又三次**。
+//
+// 一屏十三行就是**九十一次**——实测那是首页那一屏每帧 137 次分配里的 91 次
+// （见 `internal/ui/framebudget_test.go` 里「首页列表」那一档）。
+//
+// ## 判据是**零分配**，不是「少一点」
+//
+// 那几个身份**只跟着歌名变**：歌名不变它们就不变，于是算一次、记下来，之后
+// 每帧拿现成的（**零分配**）。
+//
+// ⚠️ **记下来的是「已经装箱好的那一份」**：只把字符串记下来、每帧再装箱一次，
+// 等于只省了七次里的四次——装箱那三次还在。
+func TestTheCoverIdentitiesAreNotRecomputedEveryFrame(t *testing.T) {
+	// 第一遍要算（要分配），所以先算一遍再量。
+	const title = "甲乙丙丁"
+	idsOf(title, idsRow)
+	idsOf(title, idsCard)
+	idsOf(title, idsCardOne)
+
+	for _, c := range []struct {
+		name string
+		kind idsKind
+	}{
+		{"列表行", idsRow},
+		{"网格卡片", idsCard},
+		{"网格卡片（只放这一首）", idsCardOne},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := testing.AllocsPerRun(100, func() {
+				_ = idsOf(title, c.kind)
+			})
+			if got != 0 {
+				t.Errorf("那一圈反馈的身份每帧重算了一遍（%.0f 次分配）。\n"+
+					"那套身份**只跟着歌名变**，算一次记下来就够：\n"+
+					"  · 查表不分配（键是结构体，不装箱）；\n"+
+					"  · 记下来的是**已经装箱进 `any` 的那一份**（`Key` 和\n"+
+					"    `AnimateWith` 的参数都是 `any`，而 `string → any` 的装箱\n"+
+					"    每次都要在堆上分配一次）。\n"+
+					"（现算的话是每帧每行七次：一屏十三行就是九十一次。）",
+					got)
+			}
+		})
+	}
+}
+
+// TestTheCoverIdentitiesAreDistinctPerKind 钉住「那几种反馈的身份互不重」。
+//
+// ⚠️ **同一个盒子里的节点键不能重**（框架按「父 + 键」认节点，重了就是两个
+// 元素抢一个身份）。所以「从这一首往后听」和「只放这一首」那两种卡片反馈
+// 必须各有一套自己的键。
+func TestTheCoverIdentitiesAreDistinctPerKind(t *testing.T) {
+	const title = "甲乙丙丁"
+	row := idsOf(title, idsRow)
+	card := idsOf(title, idsCard)
+	one := idsOf(title, idsCardOne)
+
+	if card.label == one.label {
+		t.Errorf("两种卡片反馈的无障碍名字一样（%q）——"+
+			"「从这一首往后听」和「只放这一首」读出来的话得不一样", card.label)
+	}
+	if card.bar == one.bar || card.btn == one.btn {
+		t.Errorf("两种卡片反馈的节点键重了（%v / %v）——"+
+			"同一个盒子里的两个节点抢一个身份，框架会当成重复键", card.bar, one.bar)
+	}
+	if row.dim == row.tri || row.dim == row.fade || row.tri == row.fade {
+		t.Errorf("列表行那一圈的身份重了（%v / %v / %v）——"+
+			"压暗、三角和淡入动画各自要一个", row.dim, row.tri, row.fade)
+	}
+}
+
+// TestTheCoverIdentitiesAreTheOnesTheOldCodeBuilt 钉住「身份的值**本身**」
+// （票 #407）。
+//
+// ## 为什么「零分配」那条不够
+//
+// 「算一次就记下来」这个改法只改「**算几次**」，**不改「算什么**」——键和值
+// 都和改之前逐位相同，所以节点的 id（`keyedID` 对字符串走 `maphash.String`）
+// 和改之前一样：淡入的状态、跨帧的身份一样都不差。
+//
+// 而这件事**光靠「零分配」那条测不出来**：把 `packIDs` 的后缀改掉
+// （`:dim` 改成 `:dim2`），零分配那条照样绿——而**屏幕阅读器读到的那个标签**
+// 和节点的跨帧身份就悄悄变了（框架按「父 + 键」认节点，键变了就是另一个
+// 节点，淡入的动画状态跟着重来）。
+//
+// 所以这一条把**改之前的算法原样再算一遍**，逐项比：行那一圈三样、卡片那一
+// 圈三样、两种卡片的无障碍名字、以及空歌名和重复歌名。
+func TestTheCoverIdentitiesAreTheOnesTheOldCodeBuilt(t *testing.T) {
+	// 改之前的算法（原样照抄，`RowCover` / `cardOverlay` 那一版）：
+	// 标签是「歌名 + 空格 + 那句话」，节点键和动画键是「标签 + 后缀」。
+	oldRow := func(title string) (label, dim, fade, tri string) {
+		label = title + " " + PlayFrom
+		return label, label + ":dim", label + ":fade", label + ":tri"
+	}
+	oldCard := func(label string) (bar, fade, btn string) {
+		return label + ":bar", label + ":fade", label + ":btn"
+	}
+
+	// ⚠️ **歌名取样含空串和重复歌名**：空串是「这一首歌没有名字」（标签就只剩
+	// 那半句），重复歌名是两张列表里同名的两首（它们要拿到**同一套**身份，
+	// 而那是对的——键一样，节点身份也一样）。
+	titles := []string{"", "甲", "晴天", "晴天 甲", "甲", "【周杰伦】晴天"}
+
+	for _, title := range titles {
+		wantLabel, wantDim, wantFade, wantTri := oldRow(title)
+
+		row := idsOf(title, idsRow)
+		assertSame(t, "列表行的标签", row.label, wantLabel)
+		assertSame(t, "列表行压暗那一层的键", row.dim, wantDim)
+		assertSame(t, "列表行淡入动画的键", row.fade, wantFade)
+		assertSame(t, "列表行三角那一层的键", row.tri, wantTri)
+
+		card := idsOf(title, idsCard)
+		assertSame(t, "卡片的无障碍名字", card.label, wantLabel)
+		wantBar, wantCardFade, wantBtn := oldCard(wantLabel)
+		assertSame(t, "卡片渐变条的键", card.bar, wantBar)
+		assertSame(t, "卡片淡入动画的键", card.fade, wantCardFade)
+		assertSame(t, "卡片播放钮的键", card.btn, wantBtn)
+
+		one := idsOf(title, idsCardOne)
+		wantOneLabel := title + " " + PlayNow
+		assertSame(t, "「只放这一首」那张卡的无障碍名字", one.label, wantOneLabel)
+		wantBar, wantCardFade, wantBtn = oldCard(wantOneLabel)
+		assertSame(t, "「只放这一首」那张卡的渐变条的键", one.bar, wantBar)
+		assertSame(t, "「只放这一首」那张卡的淡入动画的键", one.fade, wantCardFade)
+		assertSame(t, "「只放这一首」那张卡的播放钮的键", one.btn, wantBtn)
+	}
+}
+
+// assertSame 比一个身份和期望值（身份是 `any`，期望是字符串）。
+func assertSame(t *testing.T, what string, got any, want string) {
+	t.Helper()
+	s, ok := got.(string)
+	if !ok {
+		t.Errorf("%s 是 %T（want 字符串）——身份必须是装好字符串的那一份 `any`", what, got)
+		return
+	}
+	if s != want {
+		t.Errorf("%s 是 %q，want %q——\n"+
+			"「算一次就记下来」只改「算几次」，**不改「算什么」**：身份的值和改之前\n"+
+			"逐位相同，节点的 id（`keyedID` 对字符串走 `maphash.String`）才一样——\n"+
+			"而淡入的动画状态、屏幕阅读器读到的标签，都跟着它。",
+			what, s, want)
+	}
+}

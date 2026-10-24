@@ -104,11 +104,11 @@ var homeBodyTransition = ui.ElementTransition{
 //
 // ⚠️ **存成 `any` 是为了一个分配都不多**：key 是 `any`，而把一个字符串装进
 // `any` 要一次堆分配（`runtime.convTstring`）——每帧一次就是首页那一档每帧
-// 多一次分配，而那一档的预算**只剩一次**（`framebudget_test.go`：实测 137 次
-// / 上限 138 次）。初始化的时候装好，每帧只是取一个。
+// 多一次分配，而那一档的预算是有数的余量（`framebudget_test.go`：实测 46 次
+// / 上限 54 次）。初始化的时候装好，每帧只是取一个。
 //
 // ⚠️ **别改回 `strconv.Itoa` 拼出来的那种**：那一下是两次分配（拼字符串 +
-// 装箱），首页那一档立刻超预算。
+// 装箱），首页那一档每一帧都多两次——而那一档的余量只有八次。
 var homeBodyKeys = [homeTabCount]any{
 	"home:body:0",
 	"home:body:1",
