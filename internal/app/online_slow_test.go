@@ -671,8 +671,16 @@ func TestTheFailureSaysWhatActuallyHappened(t *testing.T) {
 	if err := a.Enqueue(onlineItem("BV1", "1", "下到一半卡住的那一首")); err != nil {
 		t.Fatal(err)
 	}
+	// ⚠️ **等的是「那 64 KB 真的被读走了」**，不是「文件里有字节了」。
+	//
+	// 下面那句断言查的是失败那一刻**已经下到多少**（得是 64 KB）——而那个数
+	// 是**字节源自己**报的（`Filled()`），不是文件的大小。只等「文件里有字节
+	// 了」的话，机器一忙那一下就停在几 KB 上（传输那一头已经写下去几十 KB，
+	// 而读它的那一头还没被调度到），于是失败的那句照实说「已经下了 4 KB」，
+	// 而断言要的是「64 KB」——这条就在满载的 CI 上飘（实测 2026-10-25 在
+	// 负载 40 上下飘过一回）。
 	waitFor(t, 15*time.Second, "字节源收到字节了", func() bool {
-		return downloadedBytes(t, dir) > 0
+		return a.LoadedBytesForTest() >= 64<<10
 	})
 	waitFor(t, 15*time.Second, "状态里说在取流", func() bool {
 		return a.Snapshot().Loading
