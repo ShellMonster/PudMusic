@@ -1242,6 +1242,10 @@ var Items = []Item{
 		//
 		// 🔴 **端到端那四条在 `internal/app/reconnect_e2e_test.go`**：手工调
 		// 应用的内部函数证明不了「源→应用层→界面」这条接线。
+		//
+		// 票 #378 补了两条：**每一段流的状态各归各**（切歌之后旧那一首的
+		// 重连状态不许留在新歌上——代次守卫），以及**「第 N 次」的 N 是
+		// 「这一轮里的次数」**（一次断流恢复之后，下一轮从第 1 次重新数）。
 		Spec: "断流重连：重试之间有退避（1 秒 / 2 秒 / 4 秒，总 ≤ 7 秒），重连期间界面上说「正在重连」，成功或失败都有明确结果",
 		Tests: []string{
 			"TestTheDefaultBackoffIsOneTwoFour",
@@ -1261,6 +1265,9 @@ var Items = []Item{
 			"TestAStaleSourceDoesNotStealTheReconnectState",
 			"TestThePlayBarSaysItIsReconnecting",
 			"TestTheErrorWinsOverTheReconnectingLine",
+			"TestTheRetryNumberCountsThisRoundOnly",
+			"TestTheOldSongsReconnectStateDoesNotStayOnTheNewSong",
+			"TestTheOldSongsReconnectStateDoesNotStealTheNewOnesLine",
 		},
 	},
 	{

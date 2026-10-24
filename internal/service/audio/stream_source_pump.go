@@ -168,6 +168,12 @@ func (s *StreamSource) append(b []byte) error {
 	// 和没恢复一样）。
 	recovered := s.retryPending
 	s.retryPending = false
+	// 🔴 **这一轮到此为止**（票 #378）：字节回来了 = 这一次断流已经过去。
+	// 「第几次重试」从下一轮重新数——不然一次断流恢复之后的第一次重试会
+	// 显示「第 2 次」，而用户读到的是「我刚才已经重试过一次了」。
+	if recovered {
+		s.retryAttempt = 0
+	}
 	// 🔴 **「头几个字节到了」只报一次**（票 #220）：那是「下载首段字节」
 	// 那一段的计时点，报一次就够——上层要的是「等字节等了多久」，不是
 	// 「每一个块到了都报一次」。
@@ -243,11 +249,17 @@ func (s *StreamSource) recover(from int64, cause error) bool {
 		return false
 	}
 	s.refreshes++
-	attempt := s.refreshes
+	// 🔴 **界面上那个「第几次」是「这一轮里的第几次」**（票 #378）：字节回来
+	// 之后这一轮就结束了（`append` 把它归零），下一次断流从第 1 次重新数。
+	//
+	// ⚠️ **别拿 `s.refreshes` 当它**：那是这条源**累计**换过几次流（上限
+	// `maxRefr` 用它），拿它当界面上那个数的话，一次断流恢复之后的第一次
+	// 重试会显示「第 2 次」——用户读到的是「我刚才已经重试过一次了」。
+	s.retryAttempt++
+	attempt := s.retryAttempt
 	// 「字节还没回来」这一档从现在开始记着：等一会儿字节真的回来了
 	// （`append`）就报一次「恢复了」；放弃了（泵退出）就收掉。
 	s.retryPending = true
-	s.retryAttempt = attempt
 	s.mu.Unlock()
 
 	// 🔴 **先等，再重试**。等待期间源是可以被关掉的（切歌、退出）。
@@ -296,6 +308,9 @@ func (s *StreamSource) recover(from int64, cause error) bool {
 func (s *StreamSource) clearRetrying() {
 	s.mu.Lock()
 	s.retryPending = false
+	// 🔴 **这一轮也结束了**（票 #378）：源放弃了、或者被关了，这条流不会再
+	// 重试了——留着上一个数的话，界面上那个「第几次」是上一轮的事。
+	s.retryAttempt = 0
 	s.mu.Unlock()
 }
 
