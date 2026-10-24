@@ -45,15 +45,14 @@ const settingsPath = "/settings"
 // 记录页的一句话」翻译成「设置页第 N 个 Tab 的第 M 行」（报告 C1）。
 //
 // 所以这里三件事一起做：切到那一格、**指**着那一行（标题是主色）、让那一页
-// 把它滚进视野（见 settingsScrollFocusIntoView）。
+// 把它滚进视野（见 settingRowElAt）。
 //
 // ⚠️ **它是从别的页面调过来的**：调用方是下载记录页（那一句「还没有下载
 // 目录」）。设置页自己不会指着谁——`settingsFocusNone` 就是「没指」。
 func (s *Shell) goToDownloadDirSetting() {
 	s.settings.tab = settingsTabGeneral
 	s.settings.focus = settingsFocusDownload
-	s.settings.focusScrolled = false
-	s.settings.focusTries = 0
+	s.settings.focusScroll = true
 	s.navigate(settingsPath)
 }
 
@@ -78,19 +77,29 @@ type settingsPageState struct {
 	// 第 N 个 Tab 的第 M 行』」）。
 	focus settingsFocus
 
-	// focusEl 是被指着的**那一行**的盒子，focusScrolled 记「滚进视野」这件事
-	// 做了没有。
+	// focusScroll 记「把指着的那一行滚进视野」这件事**还没做**。
 	//
-	// ⚠️ **滚进视野要跨两帧**：量的是**上一帧**的盒子（`Element.Bounds()` 的
-	// 规矩），而刚跳过来那一帧画的是别的页——所以量不到的时候要**再要一帧**。
-	focusEl       ui.Element
-	focusScrolled bool
-	// focusTries 是「量不到、再要一帧」已经试了几次。
-	focusTries int
+	// ⚠️ **只做一次**：上游的 `Element.ScrollIntoView()` 说的是「在它该进视野的
+	// 那一帧调它」——每一帧都调的话，用户自己滚走了它又被拉回来。
+	//
+	// ⚠️ **它不需要跨帧地等**：上游那一行是「布局完就把周围的容器滚到刚好露出
+	// 它」，而「这一帧新建的元素这一帧就跟着进来」——所以从前那套「量不到就再要
+	// 一帧、最多试三次」的跨帧逻辑整个删掉了（那一套量的是**上一帧**的盒子，而
+	// 元素属于建它的那一遍，跨帧读是拿旧把手）。
+	focusScroll bool
 
-	// scrollEl 是这一页那个滚动容器（`ui.Scroll`）的盒子：量「视野」要靠它
-	// （行的盒子是窗口坐标，容器的盒子也是，两个一比就知道它在不在视野里）。
-	scrollEl ui.Element
+	// focusScrollFrom 记「滚进视野之前」的滚动位置。
+	//
+	// ⚠️ **它只用来判方向**：上游滚完之后那 16 像素的留白往哪边补，要看它是
+	// 往下滚的还是往上滚的（见 `syncSettings`）。
+	focusScrollFrom float32
+
+	// focusMargin 记「上游滚完之后那 16 像素的留白还没补上」。
+	//
+	// ⚠️ **补在下一帧**：上游那一行是在**布局完**之后才滚的（`reveal`），所以
+	// 滚完之后的位置要到下一帧才看得见——那 16 像素也就只能在那时候补
+	// （见 `syncSettings`）。
+	focusMargin bool
 
 	// descFloor 是说明列这一帧的**下限**（0 = 不给下限）。
 	//
@@ -196,7 +205,9 @@ const (
 // `mygo/ui/paint.go:1039`）。于是那一档的说明列是 **320**，掉的是 **38%**，
 // 不是 44%。所以这一条现在**已经是达标的**，本票做的是**把它钉住**（下面那条
 // 测试钉着它），不是把一个已经达标的数再往上推。
-const settingsDescMinW = 320
+// 320 → 280：侧栏默认变宽（200 → 220）、分组又套了一层卡片（左右各 17），最小窗口 900 下
+// 说明列实测 283；设计规范 v0.1 的新版式下 280 是这一档的下限。
+const settingsDescMinW = 280
 
 // settingsControlMinW 是**控件列**的最小宽度。
 //
@@ -432,9 +443,6 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 	s.settings.contentW = s.settingsContentInnerW(c, st)
 
 	scroll := ui.Scroll(c).Key("settings-scroll").Grow(1).TrackScroll(&s.settings.scroll)
-	// 记下这个滚动容器的盒子：把指着的那一行滚进视野时要拿它当「视野」（见
-	// settingsScrollFocusIntoView）。
-	s.settings.scrollEl = scroll
 	scroll.Children(func() {
 		// 这一层是 `m-auto`：Column 的横向对齐（跨轴），所以内容那一段在
 		// 可视区里居中，而可视区不满 900 时它就是满的（`MaxWidth` 是上限）。
@@ -474,10 +482,6 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 	})
 	s.trackScrollbar(scroll)
 
-	// 把「指着的那一行」滚进视野。⚠️ **排在内容建完之后**：它量的是上一帧的
-	// 盒子，而那个盒子属于这一帧建出来的那个元素（见 settingsScrollFocusIntoView）。
-	s.settingsScrollFocusIntoView()
-
 	// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见 `widgets/list` 的
 	// `BackToTop`）。
 	//
@@ -496,6 +500,33 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 // 而这一句原来也在 `mainTabs` 之前——所以挪过来之后读到的还是同一个值，行为
 // 一模一样。
 func (s *Shell) syncSettings(c *ui.Context) {
+	// ⚠️ **补上「指着的那一行」离边的那 16 像素**（`settingsFocusMargin`）。
+	//
+	// 上游的 `Element.ScrollIntoView()` 滚的是「**刚好露出这一行的盒子**」，
+	// 而我们从前自己滚的时候滚完留 16 像素（贴着边的那一行看起来像是被切掉了）。
+	// 上游没有「留白」这一说，所以这 16 像素我们自己补。
+	//
+	// ⚠️ **方向靠「滚之前的位置」判**：上游滚的是内容里的绝对位置，所以往下滚
+	// 和往上滚都要补，只是补的方向相反（`focusScrollFrom` 是滚之前那个位置）。
+	//
+	// ⚠️ **必须排在页面建之前**：滚动容器建的时候就把滚动位置拿走了
+	// （`TrackScroll` → `adoptScroll`）。而 `syncSettings` 正好排在页面建之前
+	// （见 `underlay.go`：副作用在前、画在后）。
+	//
+	// ⚠️ **补在下一帧**：上游那一行是在**布局完**之后才滚的（`reveal`），所以
+	// 滚完之后的位置要到下一帧才看得见——那 16 像素也就只能在那时候补。
+	if s.settings.focusMargin {
+		s.settings.focusMargin = false
+		switch {
+		case s.settings.scroll.Y > s.settings.focusScrollFrom:
+			// 往下滚的：再往下 16 像素。
+			s.settings.scroll.Y += settingsFocusMargin
+		case s.settings.scroll.Y < s.settings.focusScrollFrom:
+			// 往上滚的：再往上 16 像素。
+			s.settings.scroll.Y -= settingsFocusMargin
+		}
+	}
+
 	// 切走就停录：`FocusBind` 的「焦点在哪一格」在控件没建出来时会一直等下去，
 	// 切回来时焦点又回到那一格，用户在还没准备好的时候敲的第一下键就被录进去了。
 	if s.settings.tab != settingsTabShortcut {
@@ -517,8 +548,7 @@ func (s *Shell) syncSettings(c *ui.Context) {
 	if last, tab := s.settings.shownTab, s.settings.tab; last != tab {
 		s.settings.shownTab, s.settings.scroll.Y = tab, 0
 		// ⚠️ **指着的那一项只在它所在的那一格**：换到别的 Tab 就没东西可指了，
-		// 而留着它会让下一次跳过来以为已经指过（settingsScrollFocusIntoView
-		// 直接跳过）。
+		// 而留着它会让下一次跳过来以为已经指过（那一行不会再滚进视野）。
 		if s.settings.focus != settingsFocusNone && tab != settingsTabGeneral {
 			s.settings.focus = settingsFocusNone
 		}
@@ -529,57 +559,17 @@ func (s *Shell) syncSettings(c *ui.Context) {
 //
 // 16 是「贴着边的那一行看起来像是被切掉了」和「别把无关的东西滚走太多」之间
 // 的那个数。
-const settingsFocusMargin = 16
-
-// settingsScrollFocusIntoView 把「指着的那一行」滚进视野。
 //
-// ⚠️ **它必须在这一页的内容建完之后调**：它量的是**上一帧**的盒子
-// （`Element.Bounds()` 的规矩），而那个盒子属于**这一帧建出来的那个元素**
-// ——跨帧去读上一帧的元素是**用旧把手**（框架会当它过期，详见
-// `mygo/ui/frame.go` 的 `expired`）。
+// ⚠️ **它是我们自己在上游滚完之后补上的**（见 `syncSettings`）：上游的
+// `ScrollIntoView()` 滚的是「刚好露出这一行的盒子」，没有「留白」这一说。
 //
-// ⚠️ **它要跨两帧**：刚跳过来那一帧，上一帧画的是**别的页**，那一行压根没有
-// 盒子。所以第一帧量不到，要**再要一帧**——不然就没有下一帧，那一行就永远停在
-// 视野外，而用户看到的是「设置页打开了，可这里没有下载目录」。
+// ⚠️ **它垫的是滚动位置，不是那一行的盒子**：盒子还是原来那么高（标题 + 说明
+// 三十几像素），多出来的这 16 像素是**离可视区下沿的那一段空隙**——所以设置页
+// 里被指着那一行**下面**的每一行都还在原来的位置（内容总高也不变）。
 //
-// ⚠️ **最多再要三帧**：万一那一行一直没量到（它不在这一格、或者这一页被换掉
-// 了），别把它变成一个每帧都要一帧的死循环。
-func (s *Shell) settingsScrollFocusIntoView() {
-	st := &s.settings
-	if st.focus == settingsFocusNone || st.focusScrolled {
-		return
-	}
-	row, view := st.focusEl, st.scrollEl
-	// ⚠️ `Valid()` 读的是「这个把手属于这一帧吗」：不属于就是**上一帧**留下的
-	// 那个（这一帧没画那一行），那个盒子不能用来算。
-	if !row.Valid() || !view.Valid() || row.Bounds().H <= 0 || view.Bounds().H <= 0 {
-		st.focusTries++
-		if st.focusTries > settingsFocusTries {
-			// 量不到了：放弃，别再要帧（死循环比滚不到更糟）。
-			st.focusScrolled = true
-			return
-		}
-		s.wake.invalidate()
-		return
-	}
-	rb, vb := row.Bounds(), view.Bounds()
-	// 差多少：上面露出去就往上滚，下面露出去就往下滚。
-	need := float32(0)
-	if rb.Y < vb.Y {
-		need = rb.Y - vb.Y
-	} else if rb.Y+rb.H > vb.Y+vb.H {
-		need = rb.Y + rb.H - (vb.Y + vb.H)
-	}
-	if need > 0 {
-		st.scroll.Y += need + settingsFocusMargin
-	} else if need < 0 {
-		st.scroll.Y += need - settingsFocusMargin
-	}
-	st.focusScrolled = true
-}
-
-// settingsFocusTries 是「量不到就再要一帧」的次数上限。
-const settingsFocusTries = 3
+// ⚠️ **数走 `space` 那张表**（界面层里不许出现表外的间距数字，见
+// `internal/ui/widgets/space`）：`Px16` 就是 16 像素那一档。
+const settingsFocusMargin = space.Px16
 
 // settingSection 是一组设置上面的那个标题。Biu 用的是 `<h2>`（system-settings.tsx
 // 的「外观」「播放」「下载」…），`text-xl` 也就是 **20px**，字重同样被 Preflight
@@ -589,6 +579,24 @@ const settingsFocusTries = 3
 // 组标题在我们这边一路是 16/700：比上游小一档、还粗两档（票 #166 的 G06）。
 func (s *Shell) settingSection(c *ui.Context, title string) {
 	ui.Text(c, title).FontSize(scale.Font(c, scale.Size20)).Padding(space.None, space.None, space.Px4, space.None)
+}
+
+// settingsCardInset 是设置分组卡片左右各占掉的宽度：内边距 16 + 描边 1。
+const settingsCardInset = space.Px16 + 1
+
+// settingGroup 是一组设置：组标题 + 一张卡片（`surface1` 底、`radiusLg` 圆角、1px 描边）
+// 包着这一组的行（设计规范 §7.9）。取代原来的「标题 + 行 + 分隔线」那种平铺写法。
+//
+// 卡片底色和圆角走 `cardBackground` / `cardRadius`（方案里的 surface1 / radiusLg）。
+// 行与行之间靠行自己的上下内边距分开，不再画分隔线。
+func (s *Shell) settingGroup(c *ui.Context, title string, body func()) {
+	t := c.Theme()
+	ui.Column(c).Key("setting-group:"+title).FillWidth().Gap(space.Px8).Padding(space.None, space.None, space.Px8, space.None).
+		Children(func() {
+			ui.Text(c, title).FontSize(scale.Font(c, scale.Size20))
+			ui.Column(c).FillWidth().Padding(space.Px8, settingsCardInset-1).Background(s.cardBackground(t)).
+				Radius(s.cardRadius(t)).Border(1, t.Border).Children(body)
+		})
 }
 
 // settingSectionEnd 是两组设置之间那条分隔线。Biu 的 `<Divider />`。
@@ -640,13 +648,30 @@ func (s *Shell) settingRowEl(c *ui.Context, title func(), desc string, control f
 
 // settingRowElAt 是 settingRowEl 加上「这一行正被指着」。
 //
-// ⚠️ **被指着的时候这一行的盒子要留下来**（`focusEl`）：滚进视野要量它
-// （见 settingsScrollFocusIntoView）。
+// ⚠️ **被指着的时候这一行要滚进视野**（上游那一行 `Element.ScrollIntoView()`）：
+// 「下载目录」在第三段里，不滚过去用户看见的就是「设置页打开了，可这里没有
+// 下载目录」。
 func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc string, control func()) {
 	t := c.Theme()
-	row := ui.Row(c).FillWidth().Gap(space.Px24).AlignItems(ui.Center)
-	if focused {
-		s.settings.focusEl = row
+	// 上下各留 10：设置行现在住在分组卡片里，行与行之间靠这点内边距分开（规范 §7.9：行高 ≥ 52）。
+	row := ui.Row(c).FillWidth().Gap(space.Px24).Padding(space.Px10, space.None).AlignItems(ui.Center)
+	if focused && s.settings.focusScroll {
+		// ⚠️ **只在这一帧调一次**：上游的规矩是「在它该进视野的那一帧调它」——
+		// 每一帧都调的话，用户自己滚走了它又被拉回来。
+		//
+		// ⚠️ **上游那一行替掉了我们从前那套跨帧的「滚进视野」**：它「布局完就把
+		// 周围的容器滚到刚好露出它」，而「这一帧新建的元素这一帧就跟着进来」——
+		// 所以不必再「量上一帧的盒子、量不到就再要一帧」（那一套量的元素属于建
+		// 它的那一遍，跨帧读是拿旧把手，而 `mygo vet` 报的就是这个）。
+		//
+		// ⚠️ **上游滚的是「刚好露出这一行的盒子」**：我们从前滚完留 16 像素
+		// （贴着边的那一行看起来像是被切掉了），上游没有「留白」这一说——那
+		// 16 像素在下一帧我们自己补（见 `syncSettings`）。
+		s.settings.focusScroll = false
+		// 记下滚之前的那个位置：补留白要靠它判方向（见 `syncSettings`）。
+		s.settings.focusScrollFrom = s.settings.scroll.Y
+		s.settings.focusMargin = true
+		row.ScrollIntoView()
 	}
 	row.Children(func() {
 		// ⚠️ **说明列有最小宽度**（`settingsDescMinW`）：控件那一列是定宽的，
@@ -807,7 +832,8 @@ func (s *Shell) settingsSegment(c *ui.Context, key, group string, w float32, opt
 	// ⚠️ **下限**：行放不下说明列的最小宽度时，这一列先收窄（框架的 flex 会先
 	// 满足说明列那个 `MinWidth`）——但不低于 `settingsControlMinW`，不然「跟随
 	// 系统」那一档会被裁成半个词（那个常量的注释写着整段来由）。
-	row = row.MinWidth(settingsControlMinW)
+	row = row.MinWidth(settingsControlMinW).Padding(space.Px2).Radius(t.Radius + 2).
+		Background(t.Background.Mix(t.Text, 0.06))
 	row.Children(func() {
 		for i, opt := range opts {
 			// ⚠️ **不 `Grow`**（见顶上那一段）：宽度就是内容本身。
@@ -881,6 +907,29 @@ func (s *Shell) pickSelected(c *ui.Context, b ui.Element, ro bool) ui.Element {
 		return flatCurrent(c, b)
 	}
 	return flatSolid(c, b)
+}
+
+// pickThemePreset 是主题方案那几档（经典 / 暖纸 / 暮光 / 柔雾）。
+//
+// 四张预览卡（`settings_preset_card.go`），不是分段控件：方案是一整套配色，要让人看见
+// 长什么样再选。选中的方案压过「颜色」
+// 和「圆角」两行（见 `app.ThemePreset`）；那两行一改，方案会被清回「经典」，
+// 见 `settings_tab_general.go` 里各处 `ThemePreset = Classic`。
+func (s *Shell) pickThemePreset(c *ui.Context, st app.Settings, ro bool) {
+	w := s.settingsControlFitW(c, scale.Font(c, settingsControlW))
+	// 四张卡把控件列平分：卡宽 = (列宽 - 三道缝) / 4。定宽而不是 Grow：Grow 的卡
+	// 宽跟着内容走，缩略图是 FillWidth，于是四张卡宽窄不一。
+	cardW := (w - 3*space.Px8) / float32(len(themePresets))
+	row := ui.Row(c).Key("setting:themePreset").Label("主题方案").Gap(space.Px8).
+		Width(w).MinWidth(settingsControlMinW)
+	row.Children(func() {
+		for _, p := range themePresets {
+			if s.presetCard(c, p.preset, p.label, cardW, p.preset == st.ThemePreset, ro).Clicked() {
+				pick := p.preset
+				s.applySetting("主题方案", func(cur *app.Settings) { cur.ThemePreset = pick })
+			}
+		}
+	})
 }
 
 // pickCloseWindow 是窗口关闭那两档。照 Biu 用的是横排单选（RadioGroup
@@ -964,4 +1013,12 @@ func (s *Shell) applySetting(what string, fn func(*app.Settings)) {
 	if _, err := s.app.UpdateSettings(fn); err != nil {
 		s.addToast(what+"没存上："+strings.TrimPrefix(err.Error(), "app: "), notice.Danger)
 	}
+}
+
+// settingsButton 是设置页的次级按钮（选择、添加文件夹、导入导出、恢复默认）：
+// 32 高、`Surface` 底、1px 描边（设计规范 §7.9），不是裸文字。
+func settingsButton(c *ui.Context, label string) ui.Element {
+	t := c.Theme()
+	return flatButton(c, label).Height(settingsSelectH).Padding(space.None, space.Px12).
+		Radius(t.Radius).Background(t.Surface).Border(1, t.Border)
 }

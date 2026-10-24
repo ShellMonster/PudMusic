@@ -157,24 +157,5 @@ func TestTheStoppedRowIsNotHighlightedLikeAPlayingOne(t *testing.T) {
 // 在 Tester 里**不重画**（理由同 `playbar_state_shot_test.go`）。
 func queueDrawerTester(t *testing.T, dark bool) (*mygoui.Tester, *Shell) {
 	t.Helper()
-	b := newTestShell(t, at(winW, winH), systemIsDark(dark),
-		withView(func(s *Shell) func(*mygoui.Context) {
-			return func(c *mygoui.Context) {
-				s.wake.set(c)
-				s.applyFrameTheme(c)
-				s.viewQueueDrawer(c)
-			}
-		}))
-	tt := b.tt
-	if err := b.a.Enqueue(copiesOf(t, 2)...); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, "队列里的歌开始播", func() bool {
-		tt.Frame()
-		return b.a.Snapshot().HasTrack
-	})
-	b.s.drawerOpen = true
-	tt.Frame()
-	settleDrawer(t, b.s, tt)
-	return tt, b.s
+	return queueDrawerTesterWith(t, dark, copiesOf(t, 2)...)
 }

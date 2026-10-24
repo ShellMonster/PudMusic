@@ -290,12 +290,14 @@ func (l *List) viewCard(r ui.ListRow) {
 		// ⚠️ **歌名和 UP 名各有一个宽度上限**（`listTitleMaxW`）：这一列是
 		// `Grow(1)`，吃掉了整行剩下的宽，而字没有上限的话一个 630 像素的歌名
 		// 会一路长到离右边那几列只差 31 像素（理由见那个常量）。
+		// 显示的字是清洗过的（`showOf`）：去掉视频宣传标签，歌手 / 专辑名挪到副标题，
+		// 现场版在副标题前加一枚「现场」小标签。
+		sh := showOf(m)
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).Children(func() {
-			ui.Text(c, m.Title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
+			ui.Text(c, sh.title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
 				TextColor(titleColor).MaxLines(listTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
-			if m.Owner != "" {
-				ui.Text(c, m.Owner).FontSize(scale.Font(c, scale.ListOwner)).LineHeight(leading.Owner).
-					TextColor(ownerColor).MaxLines(1).Ellipsis("…").MaxWidth(listTitleMaxW)
+			if sh.owner != "" || sh.live {
+				ownerLine(c, sh, scale.Font(c, scale.ListOwner), leading.Owner, ownerColor, listTitleMaxW, false)
 			}
 		})
 
@@ -371,12 +373,12 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 		l.viewCheckbox(c, i, m.Title)
 		l.viewIndex(c, i, playing, titleColor, m.Title, compactIndexWidth, 11)
 
+		sh := showOf(m)
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px2).Children(func() {
-			ui.Text(c, m.Title).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Compact).
+			ui.Text(c, sh.title).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Compact).
 				TextColor(titleColor).MaxLines(compactTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
-			if m.Owner != "" {
-				ui.Text(c, m.Owner).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Owner).
-					TextColor(ownerColor).MaxLines(1).Ellipsis("…").MaxWidth(listTitleMaxW)
+			if sh.owner != "" || sh.live {
+				ownerLine(c, sh, scale.Font(c, scale.Size12), leading.Owner, ownerColor, listTitleMaxW, false)
 			}
 		})
 

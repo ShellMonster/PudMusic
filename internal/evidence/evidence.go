@@ -172,6 +172,35 @@ var Items = []Item{
 		},
 	},
 	{
+		// 🔴 **这一条治的是「静默卡住」**（票 #352）：按过一次暂停再恢复之后，
+		// 队列**不往下走**，而整窗画面上**一句话都没有**——既不是「已停止」，
+		// 也不是「这一串放完了」。
+		//
+		// 根因在 `App.Toggle` 的「按回来」那一半：它没把 `wantPlay` 记回 true，
+		// 而 `onTrackFinished` 拿它当「要不要往下走」的判据——于是那一行早退，
+		// 队列停在那儿，`QueueFinished` 也永远出不来。
+		//
+		// 另一半是**两处说的话要一致**：队列走完时播放条说「这一串放完了」，
+		// 而抽屉里当前那一行的副题原来写「已停止」——**同一屏上两句不同的话**。
+		Category: Play,
+		Spec:     "按过一次暂停再恢复之后队列照常往下走；队列走完时播放条和队列抽屉说的是同一句（「用户按了停止」和「队列自己走完了」分得开）",
+		Tests: []string{
+			// 接线（App 那一层）：暂停再恢复之后队列照常往下走，而且队尾那一句
+			// 说得出来。
+			"TestTogglingPauseDoesNotStallTheQueue",
+			"TestTheQueueFinishesAfterAToggleSaysSo",
+			// 对照组：快捷键那条路（`App.Pause` / `App.Play`）行为不变。
+			"TestPauseAndPlayStillMoveTheQueueOn",
+			// 反面：**还停着**的时候不许自己往下走（只钉前半条的话，把
+			// `onTrackFinished` 的早退条件整个删掉也照样绿）。
+			"TestAPausedSongStaysPutAfterAToggle",
+			// 画面（UI 那一层）：抽屉里那一行分得清两种停住，且和播放条不矛盾。
+			"TestTheQueueDrawerSaysTheQueueIsDone",
+			"TestTheQueueDrawerStillSaysStoppedWhenTheUserStops",
+			"TestThePlayBarAndTheDrawerDoNotContradictEachOther",
+		},
+	},
+	{
 		Category: Play,
 		// 播放模式四档（顺序/循环/随机/单曲，BMG-47 A5）。「放完下一首是哪首」
 		// 这一句是**四档各有一条**——顺序停在队尾、循环绕回队尾、随机真的打乱、
@@ -372,16 +401,32 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
-		Spec:     "风控响应（非 JSON）被认出来，不当普通错误",
-		Tests:    []string{"TestNonJSONResponseIsRiskControl"},
+		// 🔴 **「压根不是 JSON」和真风控必须分得开**（票 #346）：真风控是
+		// -352/-412（业务码，在 JSON 里面），而这一档是压根没拿到 JSON
+		// （多半是风控挡的一页 HTML）。混成一处的话，被截断的响应会跟着风控
+		// 一起被判成不可重试。
+		Spec: "响应不是 JSON 被认出来，而且和真风控分得开",
+		Tests: []string{
+			"TestANonJSONResponseIsNotTheRiskControl",
+			"TestATruncatedResponseIsNotTheRiskControl",
+		},
 	},
 	{
 		Category: HTTP,
-		// 风控**不判成「可重试」**：界面上那枚「重试」是立刻再问一次（没有退避），
-		// 而风控要等的是时间——判成可重试的话用户点一次撞一次（票 #316）。
-		// 限流（-509）是另一回事：等一会儿就好，所以仍然是可重试的。
-		Spec:  "风控不可重试（立刻再问还是撞墙），限流可重试（等一会儿就好）",
+		// 风控和限流**都不判成「可重试」**：界面上那枚「重试」是立刻再问一次
+		// （没有退避），而这两样要等的是时间——判成可重试的话用户点一次撞一次
+		// （票 #316 收窄了风控，票 #346 把限流收到同一档）。
+		//
+		// 而**截断的响应判成可重试**：它多半是网络抖了一下，再问一次有可能好。
+		Spec:  "风控和限流都不可重试（立刻再问还是撞墙），截断的响应可重试",
 		Tests: []string{"TestRiskControlIsNotWorthRetryingAgain"},
+	},
+	{
+		Category: HTTP,
+		// 「能不能重试」这张表是**全项目唯一的一处**（票 #346）：播放条上那枚
+		// 「重试」和下载记录页上那枚是同一个动作，两处必须用同一张表。
+		Spec:  "「可重试」的判据收在一处（表在那儿）",
+		Tests: []string{"TestRecoverableTellsWhatIsWorthRetryingAgain"},
 	},
 	{
 		Category: HTTP,
@@ -1030,6 +1075,20 @@ var Items = []Item{
 			"TestACorruptPrefsFileIsIgnoredNotFatal",
 			"TestAPrefsFileFromANewerVersionIsLeftAlone",
 			"TestNoUserDataDirMeansMemoryOnly",
+		},
+	},
+	{
+		Category: Negative,
+		// 🔴 **两处界面的「重试」用同一张表**（票 #346）：播放条上那枚和下载
+		// 记录页上那枚是**同一个动作**（立刻再问一次 B 站），所以风控和限流
+		// 在两处都**不给**那枚键——按下去就是再撞一次墙。
+		Spec: "「重试」键按同一张判据给：风控和限流两处都不给，被截断的响应给",
+		Tests: []string{
+			"TestThePlayBarDoesNotOfferARetryThatWouldHitTheRateLimitAgain",
+			"TestARateLimitedFailureIsNotOfferedARetry",
+			"TestARiskControlDownloadIsNotOfferedARetry",
+			"TestAFailedDownloadThatCannotBeRetriedHasNoRetryButton",
+			"TestATruncatedResponseIsOfferedARetry",
 		},
 	},
 	{
@@ -2164,23 +2223,22 @@ var Items = []Item{
 		// 归「双平台」那一组：还是播放条那一块，但说的是**播放键那一枚的形状**
 		//（issue 217 / BMG-129，票 B）。
 		Category: Platform,
-		// issue 217：播放键改成**上游那一枚**——48×48 的盒子、**底下什么都没有**、
-		// 图形是**前景色**（深色下白、浅色下近黑），悬停时图形变主色。
+		// issue 217 原来把播放键做成上游那一枚（无底、前景色图形）。设计规范 v0.1 §5
+		// 之后（应用未发版）改成**实心强调色圆**：播放条 44×44、满屏 64×64，图形用
+		// AccentText，悬停 AccentHover、按下 AccentPressed，禁用不变色。
 		//
-		// 🔴 **判据全是画面上的像素**：改之前那一枚是「一块 58×58 的实心主色
-		// 圆角方块，里面一枚深色的圆」，改之后是「底色上的一枚圆」——**明暗正好
-		// 反过来**，而「还是那枚键」这件事在代码里看不出来（签名一个字没改）。
-		//
-		// ⚠️ **「正在播放」那一档也要对**（形状换成 `RiPauseCircleFill`）：两档
-		// 都断，「只改了播放那一档」这种坏法就抓得住。
-		Spec: "播放键是上游那一枚：48×48 的盒子、图形正好填满、底下没有实色、图形是前景色（不是主色）、悬停时图形变主色；「正在播放」那一档一样",
+		// 🔴 **判据全是画面上的像素**（圆边缘、方盒角、图形色），播放 / 暂停两档、
+		// 浅深两套都断。
+		Spec: "播放键是实心强调色圆（播放条 44、满屏 64）：圆边缘是强调色、方盒角是底色、图形是 AccentText、悬停与按下换底色、禁用时悬停不变；「正在播放」那一档一样",
 		Tests: []string{
-			// 盒子是 48×48、图形本身够大、图形落在盒子中间。
+			// 盒子 44×44、圆本身够大、图形落在圆心。
 			"TestThePlayKeyIsBigEnoughToHit",
-			// 底下没有压着实色、图形是前景色（深浅两套 × 播放/暂停两档）。
-			"TestThePlayKeyHasNoSolidBackground",
-			// 悬停时图形变主色（上游的 `hover:text-primary`）。
-			"TestThePlayKeyTurnsAccentOnHover",
+			// 圆是实心强调色、图形是 AccentText（深浅 × 播放/暂停）。
+			"TestThePlayKeyIsASolidAccentCircle",
+			// 悬停 → AccentHover，按下 → AccentPressed。
+			"TestThePlayKeyFillShiftsOnHoverAndPress",
+			// 满屏那一枚同一种，64×64。
+			"TestTheFullPlayerPlayKeyIsTheSolidAccentCircle",
 		},
 	},
 	{
@@ -2592,21 +2650,10 @@ var Items = []Item{
 		// ⚠️ **这一条不放在表末尾**：表末尾那处已经撞过好几回（这一轮就是
 		// 第三次），挨着上面那条「收藏夹头图区」读得顺——两条讲的都是
 		// 「头图区」。
-		Spec: "UP 空间头图区：整块压一层黑蒙版（浅色 30% / 深色 50%，上游 `space-info.tsx:83-86`）；头图上的字是白字（次要的那一档 92% 的白），**两套主题一样**；有字的那一带再压一档（浅 40% / 深 15%），最坏情况（纯白头图）下白字 ≥4.5:1",
+		Spec: "UP 空间头图区（设计规范 v0.1 §7.18，取代上游压黑蒙版 + 白字的做法）：横幅 132 高、底部淡进页面底色；头像 88 压在横幅下沿；名字、签名、统计写在**页面底色**上，字色用主题自己的字色，不再依赖头图是什么图",
 		Tests: []string{
-			// 整块那一档的值（浅 30% / 深 50%，上游那一档）。
-			"TestTheSpaceHeaderMaskIsTheUpstreamOne",
-			// 画面上真的压着那两层（深浅两套，逐像素）。
-			"TestTheSpaceHeaderIsMaskedInBothThemes",
-			// 蒙版压在**真头图**上面（夹具里真的回一张纯白的 PNG——最坏情况）。
-			"TestTheSpaceHeaderMaskCoversARealBanner",
-			// **系统字号放大时名字仍然落在满档里**（1 倍到 2.25 倍，Windows 的
-			// 上限）——那一行是贴着底边的，字号一放大就往上长。
-			"TestTheSpaceHeaderTextStaysReadableAtEveryTextScale",
-			// 最坏情况（纯白头图 / 没有头图）下白字和 92% 的白都 ≥4.5:1。
-			"TestTheSpaceHeaderTextIsReadableOnAnyBanner",
-			// 昵称那一行真的是白字（不跟主题翻）。
-			"TestTheSpaceHeaderNameIsWhiteOnThePicture",
+			// 头像 88、左右留白 32、头像压在横幅下沿。
+			"TestTheSpaceAvatarIs88AndTheHeaderPads32",
 		},
 	},
 	{
@@ -2889,6 +2936,29 @@ var Items = []Item{
 		},
 	},
 	{
+		// 🔴 **这一族的错法是「静默」的**：跳过去了可那一行还在视野外（用户
+		// 看见的是「设置页打开了，可这里没有下载目录」）、或者那一行被切掉半截、
+		// 或者**设置页的行距被改了**（往下滚一屏就看得见）。
+		Category: Platform,
+		// 票 #318（把设置页那段手写的跨帧「滚进视野」换成上游那一行
+		// `Element.ScrollIntoView()`）+ UX 报告 C1（那一行要指、要滚进视野）。
+		//
+		// ⚠️ **「指着一行」不许改这一页的排版**：上游滚的是「刚好露出这一行的
+		// 盒子」，我们从前滚完留 16 像素——那 16 像素**只能补在滚动位置上**，
+		// 补在盒子上（垫内边距）的话就是**内容高度**的一部分，被指着那一行下面
+		// 每一行都低了 16 像素。
+		Spec: "从下载记录页跳到设置页的「下载目录」那一项：切到「常规设置」那一格、**指**着那一行（标题是主色）、**把那一行滚进视野**（标题与说明都整个在可视区里，离下沿还留着 16 像素）；而**指着一行不许改这一页的排版**——被指着那一行下面每一行的位置与内容总高都和没指着时一样",
+		Tests: []string{
+			// 点得动、跳得到那一格、指得着那一行。
+			"TestTheMissingDownloadDirectoryTakesYouToTheSetting",
+			// 那一行真的滚进视野了，而且**说明那一行也整个在可视区里**。
+			"TestTheDownloadDirectoryIsScrolledIntoView",
+			// ⚠️ **指着那一行不许把这一页的内容撑高**（垫内边距那一种做法就是
+			// 撑高了 16 像素，于是下面每一行都被压低）。
+			"TestTheFocusedSettingDoesNotPushTheRowsBelowIt",
+		},
+	},
+	{
 		// 🔴 **这一族的错法也全是「静默」的**：两端对齐空着三百像素、迷你窗里
 		// 两根滑块分不出哪个是哪个、同一个动作两个页面一个有一个没有、
 		// 超长歌名占满整行中段、深色下黑封面和底色融成一片——**没有一样会
@@ -3111,6 +3181,29 @@ var Items = []Item{
 			// Toast 那 250ms 的入场**没被这一票动过**（它是 #207 定的，#292 要改
 			// 的是它的曲线不是它的时长）。
 			"TestTheToastKeepsItsOwnEntryAnimation",
+		},
+	},
+	{
+		// 归「分页与路由」那一组：这一票动的是**翻页的闸门**。
+		//
+		// 🔴 **三个症状全是静默的**：页面停住不动、那个数偏大、界面上说一句
+		// **对用户是错的**话——没有一样会报错，界面只是「不太对」。
+		Category: Paging,
+		// 票 #344（issue #344，BMG-179 / PR #330 的评审留的三条 minor）。
+		Spec: "UP 空间「动态」那一页：丢掉的理由**分了类**（界面按类别说，「读不懂」不说成「形态不认识」）；丢掉的计数**按不同的动态算**（B 站翻页重叠时同一条只算一次）；**「到底了」看入口有没有前进**——0 条 + 入口前进了 = 继续拉下一页，0 条 + 入口没前进 = 到底",
+		Tests: []string{
+			// 分类（服务层那一层）：四类各数各的。
+			"TestTheDroppedOnesAreToldApartByReason",
+			// 分类（画面上那句话）：「读不懂」不许被说成「形态不认识」。
+			"TestWhatWeCannotReadIsNotCalledAnUnknownShape",
+			// 计数去重：两页里重叠的一条，计数是 1 不是 2。
+			"TestTheDroppedCountCountsDifferentDynamicsNotHowManyTimesTheyAppear",
+			// 跨页去重靠的是**身份**（服务层那一层）。
+			"TestTheSameDroppedDynamicInTwoPagesIsTheSameOne",
+			"TestADroppedOneWeCannotReadAtAllStillHasAStableIdentity",
+			// 闸门：0 条 + 入口前进了 → 继续拉；0 条 + 入口没前进 → 到底。
+			"TestAnEmptyPageWhoseOffsetMovesStillLoadsTheNextPage",
+			"TestAnEmptyPageWhoseOffsetStaysIsTheEnd",
 		},
 	},
 }

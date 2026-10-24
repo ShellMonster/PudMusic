@@ -123,6 +123,21 @@ func LocalItem(path string) Item {
 	}
 }
 
+// 判重标识的三个前缀。**和 `Item.Identity()` 认的完全一样**，而落盘那一格
+// （`playback.items`）也用它们——所以「落盘时写的」和「恢复时认的」永远是同一
+// 个东西。
+//
+// ⚠️ **前缀不是多余的**：bvid / sid / 路径三样都是用户数据，不加前缀的话一个
+// 叫 `1293494` 的 sid 和一个叫 `1293494` 的本地文件名会认成同一首。
+const (
+	// playbackIDLocal 是本地文件那一档：`local:<完整路径>`。
+	playbackIDLocal = "local:"
+	// playbackIDMV 是投稿那一档：`mv:<bvid>`。
+	playbackIDMV = "mv:"
+	// playbackIDAudio 是音乐库那一档：`audio:<sid>`。
+	playbackIDAudio = "audio:"
+)
+
 // Identity 是这一项的判重标识，也就是 Biu 那个抽屉用来去重的那个键
 // （`biu/src/components/music-playlist-drawer/index.tsx` 的 uniqBy）：
 //
@@ -146,17 +161,17 @@ func (it Item) Identity() string {
 		if it.Path == "" {
 			return ""
 		}
-		return "local:" + it.Path
+		return playbackIDLocal + it.Path
 	case it.Type == "mv":
 		if it.Bvid == "" {
 			return ""
 		}
-		return "mv:" + it.Bvid
+		return playbackIDMV + it.Bvid
 	case it.Type == "audio":
 		if it.Sid == "" {
 			return ""
 		}
-		return "audio:" + it.Sid
+		return playbackIDAudio + it.Sid
 	}
 	return ""
 }
@@ -187,6 +202,20 @@ type Queue struct {
 	items []Item
 	cur   int // 当前项的下标；-1 是还没开始
 
+	// onChange 是「队列变了」的钩子。
+	//
+	// 它由 App 装上（见 New）：队列的形状一变，落盘那一格就得跟着变
+	// （见 playback_state.go）。
+	//
+	// ⚠️ **它是在 `q.mu` 外面调的**：它要拿 App 那把锁，而 App 那边有别的路
+	// 是「先拿 App 的锁再拿队列的锁」（见 `Snapshot`），凑齐了就是一次死锁。
+	//
+	// ⚠️ **装上之后不许再换**：换了就有一处读到的是旧的。
+	//
+	// ⚠️ **后来加的「改队列」的方法也要调 `changed()`**：漏掉一个的后果是
+	// 「用户拖过的队列没存下来」（重启之后回到旧的顺序）。
+	onChange func()
+
 	// mode 和 keepPages 归**这把锁**管，不归 App 的 `a.mu` 管：它们是队列的
 	// 形状（下一首是谁要靠它们算），而 `a.mu` 管的是播放器。界面每帧读的
 	// `State` 因此只是多拿一把互不相干的锁，不会把播放器那一趟（它可能正
@@ -215,14 +244,24 @@ func NewQueueWithRand(r RandSource) *Queue {
 	return &Queue{cur: -1, mode: DefaultPlayMode, keepPages: true, rnd: r}
 }
 
+// changed 告诉外面「队列变了」。**必须在 `q.mu` 外面调**（理由见 onChange）。
+//
+// 它只是通知，不改队列——所以「通知」和「改动」之间没有半途改完的状态。
+func (q *Queue) changed() {
+	if q.onChange != nil {
+		q.onChange()
+	}
+}
+
 // Append 往队列尾部追加，不动当前项。
 func (q *Queue) Append(items ...Item) {
 	if len(items) == 0 {
 		return
 	}
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	q.items = append(q.items, items...)
+	q.mu.Unlock()
+	q.changed()
 }
 
 // InsertNext 把一项插到**正在放的那首后面**——「下一首播放」那一下。
@@ -240,11 +279,12 @@ func (q *Queue) Append(items ...Item) {
 // 起播是 `App.EnqueueNext` 的事（它照 `App.Enqueue` 那样判「队列原本空不空」）。
 func (q *Queue) InsertNext(item Item) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 
 	if len(q.items) == 0 {
 		q.items = []Item{item}
 		q.cur = 0
+		q.mu.Unlock()
+		q.changed()
 		return
 	}
 	at := 0
@@ -252,6 +292,8 @@ func (q *Queue) InsertNext(item Item) {
 		at = min(q.cur+1, len(q.items))
 	}
 	q.items = slices.Insert(q.items, at, item)
+	q.mu.Unlock()
+	q.changed()
 }
 
 // Len 返回队列里有多少项。
@@ -314,9 +356,9 @@ func (q *Queue) CurrentIndex() int {
 // 而不是直接跳到第二首。
 func (q *Queue) Move(delta int) (Item, bool) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	n := len(q.items)
 	if n == 0 {
+		q.mu.Unlock()
 		return Item{}, false
 	}
 	if q.cur < 0 || q.cur >= n {
@@ -325,23 +367,33 @@ func (q *Queue) Move(delta int) (Item, bool) {
 		} else {
 			q.cur = 0
 		}
-		return q.items[q.cur], true
+		it := q.items[q.cur]
+		q.mu.Unlock()
+		q.changed()
+		return it, true
 	}
 	q.cur = ((q.cur+delta)%n + n) % n
-	return q.items[q.cur], true
+	it := q.items[q.cur]
+	q.mu.Unlock()
+	q.changed()
+	return it, true
 }
 
 // Reset 把队列换成给定的几项并从第一首开始，返回第一项。给空就是清空。
 func (q *Queue) Reset(items ...Item) (Item, bool) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	q.items = items
 	q.cur = -1
 	if len(items) == 0 {
+		q.mu.Unlock()
+		q.changed()
 		return Item{}, false
 	}
 	q.cur = 0
-	return items[0], true
+	it := items[0]
+	q.mu.Unlock()
+	q.changed()
+	return it, true
 }
 
 // RemoveAt 把第 i 项从队列里删掉，返回删掉的是哪一项。下标越界时是 false。
@@ -357,8 +409,8 @@ func (q *Queue) Reset(items ...Item) (Item, bool) {
 // 那边的事（要开播放器），见 App.RemoveAt。
 func (q *Queue) RemoveAt(i int) (Item, bool) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	if i < 0 || i >= len(q.items) {
+		q.mu.Unlock()
 		return Item{}, false
 	}
 	it := q.items[i]
@@ -376,6 +428,8 @@ func (q *Queue) RemoveAt(i int) (Item, bool) {
 			q.cur = 0
 		}
 	}
+	q.mu.Unlock()
+	q.changed()
 	return it, true
 }
 
@@ -421,11 +475,13 @@ func (q *Queue) RemoveIdentity(id string) (removed []Item, wasCurrent, ok bool) 
 // 能把队列和播放器对不上的地方。i 越界是 false 且什么都不动。
 func (q *Queue) replaceAt(i int, item Item) bool {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	if i < 0 || i >= len(q.items) {
+		q.mu.Unlock()
 		return false
 	}
 	q.items[i] = item
+	q.mu.Unlock()
+	q.changed()
 	return true
 }
 
@@ -439,16 +495,21 @@ func (q *Queue) replaceAt(i int, item Item) bool {
 // 把队列和播放器对不上的地方。回滚也走它（i 传 -1 就是退回「还没开始」）。
 func (q *Queue) selectAt(i int) (Item, bool) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	if i < 0 {
 		q.cur = -1
+		q.mu.Unlock()
+		q.changed()
 		return Item{}, false
 	}
 	if i >= len(q.items) {
+		q.mu.Unlock()
 		return Item{}, false
 	}
 	q.cur = i
-	return q.items[i], true
+	it := q.items[i]
+	q.mu.Unlock()
+	q.changed()
+	return it, true
 }
 
 // ---- 播放模式 ----
@@ -607,14 +668,15 @@ type Advance struct {
 // 一步都不动。放失败要退回原来那首——`App.onTrackFinished` 拿 prev 回滚。
 func (q *Queue) Advance() Advance {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 
 	n := len(q.items)
 	// 队列是空的、或者压根没开始放：没有「下一首」这件事可决定。
 	if n == 0 || q.cur < 0 || q.cur >= n {
+		q.mu.Unlock()
 		return Advance{Kind: AdvanceStop}
 	}
 
+	var d Advance
 	switch q.mode {
 	case PlayModeSequence:
 		// 顺序播放：往后挪一格，**走到队尾就停**。
@@ -626,36 +688,45 @@ func (q *Queue) Advance() Advance {
 		//
 		// 队列里只有一首歌时它就是队尾，所以也是停（和 Biu 一致）。
 		if q.cur == n-1 {
-			return Advance{Kind: AdvanceStop}
+			d = Advance{Kind: AdvanceStop}
+			break
 		}
 		q.cur++
-		return Advance{Kind: AdvancePlay, Item: q.items[q.cur]}
+		d = Advance{Kind: AdvancePlay, Item: q.items[q.cur]}
 
 	case PlayModeSingle:
 		// 单曲循环：一步都不挪，同一首从头再来。
-		return Advance{Kind: AdvanceReplay, Item: q.items[q.cur]}
+		d = Advance{Kind: AdvanceReplay, Item: q.items[q.cur]}
 
 	case PlayModeRandom:
 		if next, ok := q.nextPageLocked(); ok {
 			q.cur = next
-			return Advance{Kind: AdvancePlay, Item: q.items[q.cur]}
+			d = Advance{Kind: AdvancePlay, Item: q.items[q.cur]}
+			break
 		}
 		if n == 1 {
-			return Advance{Kind: AdvanceReplay, Item: q.items[q.cur]}
+			d = Advance{Kind: AdvanceReplay, Item: q.items[q.cur]}
+			break
 		}
 		q.cur = q.pickOtherLocked(q.cur, n)
-		return Advance{Kind: AdvancePlay, Item: q.items[q.cur]}
+		d = Advance{Kind: AdvancePlay, Item: q.items[q.cur]}
 
 	default:
 		// 循环播放（列表循环）：往后挪一格，**走到队尾绕回第一首**。
 		next := (q.cur + 1) % n
 		if next == q.cur {
 			// 绕回的还是它（队列里只有一首歌）：这一步没有挪，重头再放。
-			return Advance{Kind: AdvanceReplay, Item: q.items[q.cur]}
+			d = Advance{Kind: AdvanceReplay, Item: q.items[q.cur]}
+			break
 		}
 		q.cur = next
-		return Advance{Kind: AdvancePlay, Item: q.items[q.cur]}
+		d = Advance{Kind: AdvancePlay, Item: q.items[q.cur]}
 	}
+
+	q.mu.Unlock()
+	// 当前项变了（或者至少「结论」变了），落盘那一格得跟着变。
+	q.changed()
+	return d
 }
 
 // nextPageLocked 找「同一个视频的下一分集」在队列里的下标，没有是 false。
@@ -1117,6 +1188,19 @@ func (a *App) onTrackFinished() {
 	a.mu.Lock()
 	p, want := a.player, a.wantPlay
 	a.mu.Unlock()
+	// ⚠️ **`want` 是「用户现在想不想听」**：用户按了暂停 → 不往下走（这一句
+	// 是对的，别删）。
+	//
+	// 🔴 **而 `want` 只有在「按回来」那一下被记回 true 之后才说得准**
+	// （票 #352）：`App.Toggle` 的「恢复」那一半**漏过**这一记——漏的时候它
+	// 就一直 false，于是这一行早退 → 队列不往下走 → 而界面上**一句话都没有**
+	// （既不是「已停止」也不是「这一串放完了」）。回归测试在
+	// `internal/app/toggle_resume_test.go`。
+	//
+	// ⚠️ **别把这两件事混成一件**：「队列该不该往前走」和「用户现在想不想听」
+	// 在**这一行**上是同一件事（用户不想听就不往下走），而在**别处**不是——
+	// 比如「用户按了停止」之后队列里还有歌，但那时这一首已经停了，走不走都
+	// 不影响界面上那句话（那是 `Stop` 那一档的事）。
 	if p == nil || !want {
 		return
 	}
@@ -1321,9 +1405,9 @@ func (a *App) clearErrLocked() {
 // ⚠️ **不可重试的失败界面上不给这一枚键**：B 站说这一条没有音频流的时候，
 // 重试一万次还是那一句，而用户按了两次发现还是那样，就不再信这个应用了。
 //
-// 🔴 **风控也不给这一枚键**（票 #316）：它是**立刻**再取一次流（这里没有
-// 退避），所以按下去就是再撞一次风控——风控要等的是时间，不是「再问一次」。
-// 那一句文案说了「等一会儿再试」：**过一会儿用户自己再放一次**。
+// 🔴 **风控和限流也不给这一枚键**（票 #316 / #346）：它是**立刻**再取一次流
+// （这里没有退避），所以按下去就是再撞一次墙——风控和限流要等的是时间，不是
+// 「再问一次」。那一句文案说了「等一会儿再试」：**过一会儿用户自己再放一次**。
 //
 // 放的还是**用户刚才按的那一首**（`pending`），不是队列里当前的那一首——
 // 取流失败时队列常常已经滚回去了，而用户想重试的是他刚才点的那首。

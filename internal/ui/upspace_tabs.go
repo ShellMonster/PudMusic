@@ -89,6 +89,20 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 	ui.Column(c).Grow(1).FillHeight().Children(func() {
 		// 表头**在列表外面**（`rowheader.go` 文件头）：列表往下滚它不动，宽屏下滚到
 		// 右边列名也还在。
+		// 工具条：全部播放 + 共几首（设计规范 §7.18，和首页、搜索页同一枚主按钮）。
+		ui.Row(c).Key("upspace:toolbar").FillWidth().Gap(space.Px12).AlignItems(ui.Center).
+			Padding(space.Px4, upPad, space.Px8, upPad).Children(func() {
+			if playAllButton(c, p.Loading || p.Loaded == 0).Clicked() {
+				s.playAllSongs(sp.videos.Items())
+			}
+			if p.Loaded > 0 {
+				n := fmt.Sprintf("已加载 %d 首", p.Loaded)
+				if !p.HasMore {
+					n = fmt.Sprintf("共 %d 首", p.Loaded)
+				}
+				ui.Text(c, n).FontSize(scale.Font(c, scale.Size14)).TextColor(c.Theme().TextMuted)
+			}
+		})
 		sp.videos.Header(c, "upspace:header")
 		sp.videos.View(c)
 	})
@@ -149,7 +163,7 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	//     永远不再加载。
 	keepLooking := p.started && p.hasMore
 	if upRowCount(sp, tab) == 0 && !keepLooking {
-		s.viewEmpty(c, upEmptyKey(sp, tab), upTabEmpty(tab, sp.dropped[tab]))
+		s.viewEmpty(c, upEmptyKey(sp, tab), upTabEmpty(tab, sp.drops[tab].counts))
 		return
 	}
 
@@ -188,8 +202,8 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 		//
 		// ⚠️ **它不是空状态**：空状态会把整个列表换掉，而哨兵那一行还得
 		// 留着（翻页靠它）。
-		if upRowCount(sp, tab) == 0 && sp.dropped[tab] > 0 {
-			s.viewDroppedNote(c, sp.dropped[tab])
+		if upRowCount(sp, tab) == 0 && sp.drops[tab].total() > 0 {
+			s.viewDroppedNote(c, sp.drops[tab].counts)
 		}
 		// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
 		//
@@ -336,7 +350,7 @@ func upRowLabel(sp *upSpace, tab, i int) string {
 // 同一句话，而「暂无动态」和「有 N 条没显示」必须被当成两件事（理由同
 // `feedEmptyKey`）。
 func upEmptyKey(sp *upSpace, tab int) string {
-	if sp.dropped[tab] > 0 {
+	if sp.drops[tab].total() > 0 {
 		return "space-dropped:" + strconv.FormatInt(sp.mid, 10) + ":" + upTabNames[tab]
 	}
 	return "space:" + strconv.FormatInt(sp.mid, 10) + ":" + upTabNames[tab]
@@ -347,13 +361,17 @@ func upEmptyKey(sp *upSpace, tab int) string {
 // ⚠️ **「有丢弃」和「真的没有」必须说两句话**：B 站的动态有二十多种形态，
 // 这一版只画三种。说成「暂无动态」的话，用户会以为他没发过。
 //
-// ⚠️ **那个数是累计的**：翻了好几页各丢几条就是几十条，说「有 N 条落在别的
-// 形态上了」比说「刚才那几条」诚实。
-func upTabEmpty(tab int, dropped int) emptyState {
-	if dropped > 0 {
+// ⚠️ **那个数是累计的，而且按「不同的动态」算**：翻了好几页各丢几条就是几十
+// 条，说「有 N 条落在别的形态上了」比说「刚才那几条」诚实；而 B 站翻页会
+// 重叠，同一条在两页里各出现一次——按出现次数记的话那个数会偏大（票 #344）。
+//
+// ⚠️ **按类别说**（票 #344）：「形态不认识」和「我们读不懂」是**两回事**，
+// 合成一句就是把「B 站改了返回的形状」说成「他发了我们画不出来的形态」。
+func upTabEmpty(tab int, counts bili.DropCounts) emptyState {
+	if counts.Total() > 0 {
 		return emptyState{
 			Title: "这里没有能显示的" + upTabNames[tab],
-			Hint:  fmt.Sprintf("%s，有 %d 条落在别的形态上了", dynamicShapesNote, dropped),
+			Hint:  dropSentence(counts),
 		}
 	}
 	switch tab {
