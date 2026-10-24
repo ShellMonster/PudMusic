@@ -506,7 +506,13 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 					viewPlayingMark(c, t, m.Title)
 					return
 				}
-				ui.Text(c, clockText(m.Duration)).FontSize(scale.Font(c, scale.Size12)).
+				// ⚠️ **时长是记好的那一份**（`rows.durText`）：现算的话每帧每格一次
+				// 字符串格式化（票 #339）。
+				//
+				// ⚠️ **和封面浮层上那一份共用同一个 memo**：那一处早就是记好的
+				// （见上面 `hover.CardCover` 那一句），而这一处还是现拼的——
+				// 同一个 memo 只盖住了一半，另一半每帧还在分配。
+				ui.Text(c, rows.durText.At(i, m.Duration, clockText)).FontSize(scale.Font(c, scale.Size12)).
 					TextColor(metaColor).MaxLines(1)
 			})
 			// 播放量 / 加入时间：列表里是右边两列，格子里放到最下面那一行。
