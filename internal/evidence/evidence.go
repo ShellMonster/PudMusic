@@ -1210,8 +1210,13 @@ var Items = []Item{
 		// 挤不掉），挤的循环于是最后把整张表清空还挤不下——之后每来一张图就把
 		// 表里剩下的全挤掉。
 		//
+		// 票 #358 补了第三条：**画面上正画着的那一张也不许挤**。开队列抽屉的
+		// 时候，抽屉里那二十几行第一次露出来、全都要封面，字节上限一下子超了，
+		// 挤的循环一路挤到画面上正画着的那几张——挤掉的那一张下一帧就退回占位，
+		// 于是「开抽屉时中间那一列的封面来回闪」。
+		//
 		// 全部用 `httptest` 验（假图床 + 假 B 站接口），不连真网。
-		Spec: "首页推荐的封面不再在有图和占位之间反复切换：一屏封面按显示尺寸存得下、字节账不漏、还在下的那一张不参与淘汰",
+		Spec: "首页推荐的封面不再在有图和占位之间反复切换：一屏封面按显示尺寸存得下、字节账不漏、还在下的那一张不参与淘汰、画面上正画着的那一张不参与淘汰",
 		Tests: []string{
 			"TestTheSameCoverStaysReadyAcrossFrames",
 			"TestTheHomeCoversDoNotGoBackToPlaceholder",
@@ -1220,6 +1225,9 @@ var Items = []Item{
 			"TestTheEvictionSkipsEntriesThatHaveNoBytesYet",
 			"TestACoverThatIsStillLoadingIsNotEvicted",
 			"TestTheByteAccountDoesNotLeak",
+			"TestTheCoverOnScreenIsNotEvicted",
+			"TestACoverThatIsNoLongerOnScreenIsEvicted",
+			"TestOpeningTheQueueDrawerDoesNotMakeTheListCoversFlash",
 		},
 	},
 	{
