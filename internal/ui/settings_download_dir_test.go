@@ -3,9 +3,9 @@ package ui
 // 这一组盯的是**用户看到的下载目录是哪一条**。
 //
 // 设置里 `downloadPath` 的默认值是**空串**（`DefaultSettings("")`），而绝大多数
-// 用户走的正是这一条——设置页上那一格显示成「未设置」，而歌其实落到了「音乐」
-// 目录下的应用子目录里。用户看到的和实际发生的对不上，而这一格恰恰是回答「我
-// 的歌下到哪儿了」的那一格。
+// 用户走的正是这一条——它显示成「未设置」，而歌其实落到了「音乐」目录下的应用
+// 子目录里。用户看到的和实际发生的对不上，而这一格恰恰是回答「我的歌下到哪儿
+// 了」的那一格。
 //
 // 出处：issue #361（默认落点从系统下载目录改成「音乐」目录下的应用子目录）。
 
@@ -22,13 +22,16 @@ import (
 
 // withMusicDir 把「音乐」目录指到一个临时目录上。
 //
-// ⚠️ **测试不许往用户真的 ~/Music 里建东西**：默认下载目录是要建出来的，而建在
-// 真的音乐目录里就是往用户的目录里塞一个文件夹。
+// ⚠️ **测试不许往用户真的 ~/Music 里建东西**：默认下载目录是用户自己的目录。
+// 整个包已经被 `TestMain` 换成了临时目录（见 `musicdir_test.go`），这一条是
+// 再换一层：**每条测试一个自己的**，免得两条测试共用一个落点。
+//
+// 收尾回到**包那个**临时目录，不是空串（空串 = 用户真的 `~/Music`）。
 func withMusicDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	mygo.App.SetPath(mygo.PathMusic, dir)
-	t.Cleanup(func() { mygo.App.SetPath(mygo.PathMusic, "") })
+	t.Cleanup(func() { mygo.App.SetPath(mygo.PathMusic, pkgMusicDir) })
 	return dir
 }
 
@@ -52,22 +55,44 @@ func withDownloadDir(fallback string) shellOpt {
 	})
 }
 
+// shownPath 替掉设置页那个路径输入框，抓住**哪一格拿到了哪条路径**。
+//
+// ⚠️ **为什么只能从这一层钉**：只读输入框里的那个值是**框架画上去的**，不进
+// 渲染树（`Tester.Texts()` 里没有它，`HasText` 也量不到）——所以「那一格显示的
+// 是哪条路径」量画面量不出来，只能看**那一格拿到的是什么**。
+//
+// ⚠️ **它要钉的是「接线」**：把 `pickDownloadPath` 改回
+// `pathField(c, st.DownloadPath, ...)`（也就是「设置里没选过就显示未设置」那个
+// 改法之前的样子），这一条必须红——不然用户看到的就是「未设置」，而歌其实落
+// 在别处。
+func shownPath(t *testing.T, label string) *string {
+	t.Helper()
+	got := new(string)
+	orig := pathField
+	pathField = func(c *ui.Context, path, lbl string, ro bool) {
+		if lbl == label {
+			*got = path
+		}
+		orig(c, path, lbl, ro)
+	}
+	t.Cleanup(func() { pathField = orig })
+	return got
+}
+
 // TestTheSettingsPageShowsWhereTheSongsWillLand 断设置页上「下载目录」那一格
 // 显示的是**歌真正落下来的地方**，而不是一个空串。
 //
 // ⚠️ **反面的那一半也要断**：显示成「未设置」比显示错更坏——用户看到的是
-// 「我还没设过下载目录」，于是他跑去设一个，而默认落点其实一直在生效。
-//
-// ⚠️ **判据是那一格拿到的路径**（`downloadDirShown`），不是画面上的字：只读的
-// 输入框里那个值是**画上去的**，不进渲染树（`Tester.Texts()` 里没有它），
-// 所以量画面上的字量不到它。
+// 「我还没设过下载目录」，于是他跑去设一个，而默认落点（`~/Music/BiuGo`）其实
+// 一直在生效。
 func TestTheSettingsPageShowsWhereTheSongsWillLand(t *testing.T) {
 	want := defaultDownloadsDir(t)
+	got := shownPath(t, "下载目录")
 
-	_, s, _, _ := shellOnSettings(t, app.DefaultSettings(""), withDownloadDir(want))
+	shellOnSettings(t, app.DefaultSettings(""), withDownloadDir(want))
 
-	if got := s.downloadDirShown(s.app.SettingsSnapshot()); got != want {
-		t.Errorf("设置页上「下载目录」那一格显示的是 %q，want 默认落点 %q", got, want)
+	if *got != want {
+		t.Errorf("设置页上「下载目录」那一格拿到的是 %q，want 默认落点 %q", *got, want)
 	}
 }
 
@@ -76,12 +101,12 @@ func TestTheSettingsPageShowsWhereTheSongsWillLand(t *testing.T) {
 func TestTheSettingsPageStillShowsTheDirectoryTheUserPicked(t *testing.T) {
 	fallback := defaultDownloadsDir(t)
 	picked := filepath.Join(filepath.Dir(fallback), "我自己的")
+	got := shownPath(t, "下载目录")
 
-	st := app.DefaultSettings(picked)
-	_, s, _, _ := shellOnSettings(t, st, withDownloadDir(fallback))
+	shellOnSettings(t, app.DefaultSettings(picked), withDownloadDir(fallback))
 
-	if got := s.downloadDirShown(s.app.SettingsSnapshot()); got != picked {
-		t.Errorf("设置页上「下载目录」那一格显示的是 %q，want 用户选的那个 %q", got, picked)
+	if *got != picked {
+		t.Errorf("设置页上「下载目录」那一格拿到的是 %q，want 用户选的那个 %q", *got, picked)
 	}
 }
 

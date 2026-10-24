@@ -9,11 +9,10 @@
 // 同类音乐软件都不往那儿扔：
 //
 //	网易云音乐（桌面）  音乐/网易云音乐/CloudMusic/Music
-//	QQ 音乐            音乐/QQMusic
+//	QQ音乐            音乐/QQMusic
 //	Spotify            ~/Music/Spotify/Downloads
 //
-// 规律是同一条：**「音乐」目录 + 以应用命名的子目录**。所以这里也那么放：
-// macOS 是 `~/Music/BiuGo`，Windows 是 `音乐\BiuGo`。
+// 规律是同一条：**「音乐」目录 + 以应用命名的子目录**。所以这里也那么放。
 //
 // # 老歌不搬家
 //
@@ -24,7 +23,6 @@ package platform
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/egoist/mygo"
@@ -43,18 +41,54 @@ const DownloadsDirName = "BiuGo"
 
 // DefaultDownloadsDir 返回默认下载目录的路径：**音乐**目录下的应用子目录。
 //
-// macOS 是 `~/Music/BiuGo`，Windows 是 `音乐\BiuGo`（`mygo` 的 `PathMusic`
-// 在两个平台上就是「音乐」目录；Linux 上按 XDG 的 `XDG_MUSIC_DIR`）。
+// # 各平台上它是哪一条路径
 //
-// ⚠️ **只算路径，不碰文件系统**：建目录是碰磁盘的事，只在**开应用时**做一次
-// （`ui.downloadsDir` 调的是 `EnsureDefaultDownloadsDir`）。落点算完就交出去了
-// （`app.Downloads.FallbackDir`），设置页上那一格读的是**交出去的那一份**。
+//	macOS    ~/Music/BiuGo
+//	Windows  C:\Users\<用户名>\Music\BiuGo
+//	Linux    $XDG_MUSIC_DIR/BiuGo（退回 ~/Music/BiuGo）
+//
+// ⚠️ **Windows 上那条路径是「英文名的 Music」，不是「音乐」**：框架的
+// `PathMusic` 只把一张写死的英文名表拼在家目录下面（`mygo@v0.6.2/paths.go`
+// 的 `userDir()`），**不走系统的已知文件夹 API**——而中文 Windows 上真正的
+// 那个文件夹叫 `C:\Users\<用户名>\音乐`。所以在中文 Windows 上，应用会**另造**
+// 一个 `Music` 文件夹，资源管理器里它**不是**「音乐」那一栏（见下面那条）。
+//
+// ⚠️ **macOS 上也是拼出来的 `~/Music`，不查用户改过位置的「音乐」文件夹**：
+// macOS 允许在「系统设置 → 通用 → 储存空间 → 位置」里把「音乐」挪走，而框架
+// 不走 `NSFileManager` 的 `URLForDirectory:`——那种用户的歌会落在一个新造的
+// `~/Music/BiuGo` 里，访达里它不是「音乐」那一栏。票面点名的是
+// `mygo.App.Path(mygo.PathMusic)`，所以这就是这一条路的窄口子：**要在这两个
+// 平台上做对，得改走系统的已知文件夹 API**（那是另一票的事）。
+//
+// # 这一层**只算路径，不碰文件系统**
+//
+// 建目录是碰磁盘的事，而它**建在真的要落盘的那一刻**（`service/download` 的
+// `ensureDir`）——不是开应用的时候。开应用就建的话，**光是打开应用就会在用户
+// 的磁盘上留下一个文件夹**，测试里也一样（那不是临时的目录，是用户自己的）。
 func DefaultDownloadsDir() (string, error) {
-	music, err := musicRoot()
-	if err != nil {
-		return "", err
+	music, musicErr := musicRoot()
+	if musicErr == nil {
+		return filepath.Join(music, DownloadsDirName), nil
 	}
-	return filepath.Join(music, DownloadsDirName), nil
+
+	// ⚠️ **音乐目录用不了时退回系统下载目录**：家目录拿不到时框架给的是
+	// `"Music"` 这样的**相对**路径，而那种落点会让歌落进进程的当前工作目录
+	// ——双击图标启动的 macOS 应用那是 `/`，用户在 Finder 里看不见，也永远
+	// 不会去那儿找。系统下载目录是**绝对**的（家目录正常时它就是
+	// `~/Downloads`），也是歌以前落的地方——退回它比让歌落进一个诡异的目录强。
+	//
+	// ⚠️ **退回而不是「返回空串」**：空串会让 `filepath.Join("", "歌.m4a")` 出来
+	// 一个**相对路径**（见 `app.Downloads.FallbackDir` 的注释）。真的两个都拿不到
+	// 时才返回错误，由调用方记一条日志——那时候应用层会**拒绝下载**并说一句
+	// 人话（见 `app.errNoDownloadDir`），而不是把歌写到别处去。
+	dl, err := mygo.App.Path(mygo.PathDownloads)
+	if err != nil {
+		return "", fmt.Errorf("%w；系统下载目录也拿不到：%v", musicErr, err)
+	}
+	if !filepath.IsAbs(dl) {
+		return "", fmt.Errorf("%w；系统下载目录也不是绝对路径（%q）", musicErr, dl)
+	}
+	return dl, nil
 }
 
 // musicRoot 是「音乐」目录本身。
@@ -72,43 +106,4 @@ func musicRoot() (string, error) {
 		return "", fmt.Errorf("音乐目录不是绝对路径（%q），不知道该往哪儿放", music)
 	}
 	return music, nil
-}
-
-// EnsureDefaultDownloadsDir 是「默认下载目录」这条路的最终答案：算出来，
-// 并且**建出来**。
-//
-// ⚠️ **目录不存在要建**：不建的话第一次下载会失败，而失败是 `os.Create` 报的
-// 「no such file or directory」——用户看到的是一句他看不懂的话，实际原因只是
-// 「那个文件夹还没建」。
-//
-// ⚠️ **音乐目录用不了时退回系统下载目录**：家目录拿不到时框架给的是相对
-// 路径，那种目录建出来只会让歌落进进程的当前工作目录。系统下载目录是
-// **绝对**的（家目录正常时它就是 `~/Downloads`），也是歌以前落的地方——
-// 退回它比让歌落进一个诡异的目录强。
-//
-// ⚠️ **退回而不是「返回空串」**：空串会让 `filepath.Join("", "歌.m4a")` 出来
-// 一个**相对路径**（见 `app.Downloads.FallbackDir` 的注释）。真的两个都拿不到
-// 时才返回错误，由调用方记一条日志——那时候应用层会**拒绝下载**并说一句人话
-// （见 `app.errNoDownloadDir`），而不是把歌写到别处去。
-func EnsureDefaultDownloadsDir() (string, error) {
-	dir, musicErr := DefaultDownloadsDir()
-	if musicErr == nil {
-		err := os.MkdirAll(dir, 0o755)
-		if err == nil {
-			return dir, nil
-		}
-		musicErr = fmt.Errorf("建下载目录 %s：%w", dir, err)
-	}
-
-	dl, err := mygo.App.Path(mygo.PathDownloads)
-	if err != nil {
-		return "", fmt.Errorf("%w；系统下载目录也拿不到：%v", musicErr, err)
-	}
-	if !filepath.IsAbs(dl) {
-		return "", fmt.Errorf("%w；系统下载目录也不是绝对路径（%q）", musicErr, dl)
-	}
-	if err := os.MkdirAll(dl, 0o755); err != nil {
-		return "", fmt.Errorf("%w；系统下载目录也建不出来：%v", musicErr, err)
-	}
-	return dl, nil
 }

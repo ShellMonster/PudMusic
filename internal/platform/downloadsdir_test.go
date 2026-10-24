@@ -10,8 +10,9 @@ import (
 
 // withMusicDir 把「音乐」目录指到一个临时目录上。
 //
-// ⚠️ **测试不许往用户真的 ~/Music 里建东西**：默认下载目录是要建出来的，而建在
-// 真的音乐目录里就是往用户的目录里塞一个文件夹。
+// ⚠️ **测试不许往用户真的 ~/Music 里建东西**：默认下载目录是用户自己的目录，
+// 而这一层**只查路径**——可测试要是顺手建了它，那是在用户的磁盘上留下一个
+// 文件夹。
 //
 // 收尾把这一格放回空串（`Path` 见到空串就走默认那一条），所以这一组跑完之后
 // 别的测试拿到的还是系统真的那个音乐目录。
@@ -45,26 +46,31 @@ func TestTheDefaultDownloadDirectoryIsTheAppFolderUnderTheMusicDirectory(t *test
 	}
 }
 
-// TestTheDefaultDownloadDirectoryIsCreatedIfItIsMissing 断目录不存在时**会建**。
+// TestTheDefaultDownloadDirectoryIsNotCreatedJustForLooking 断**这一层不建
+// 目录**。
 //
-// ⚠️ 不建的话第一次下载会失败，而失败是 `os.Create` 报的「no such file or
-// directory」——用户看到的是一句他看不懂的话，实际原因只是「那个文件夹还没建」。
-func TestTheDefaultDownloadDirectoryIsCreatedIfItIsMissing(t *testing.T) {
+// ⚠️ 这一条是「测试不许往用户真的 ~/Music 里写东西」的那一半：这一层被
+// `ui.downloadsDir`（开应用时）和设置页读着，而它一旦建目录，**光是打开应用
+// 就会在用户的磁盘上留下一个文件夹**（测试里跑一次 `internal/ui` 也是一样）。
+// 建目录是**落盘那一刻**的事（`service/download` 的 `ensureDir`）。
+func TestTheDefaultDownloadDirectoryIsNotCreatedJustForLooking(t *testing.T) {
 	music := withMusicDir(t)
 
-	dir, err := EnsureDefaultDownloadsDir()
+	dir, err := DefaultDownloadsDir()
 	if err != nil {
-		t.Fatalf("准备默认下载目录：%v", err)
+		t.Fatalf("算默认下载目录：%v", err)
 	}
-	fi, err := os.Stat(dir)
+	if _, err := os.Stat(dir); err == nil {
+		t.Errorf("只是查了一下路径，%q 却已经建出来了", dir)
+	}
+	// ⚠️ **音乐目录里面也不该多出那个子目录**：它就是上面那个 `dir`，
+	// 这条断的是「查路径」这个动作本身没有碰文件系统。
+	entries, err := os.ReadDir(music)
 	if err != nil {
-		t.Fatalf("默认下载目录没建出来：%v", err)
+		t.Fatalf("读音乐目录：%v", err)
 	}
-	if !fi.IsDir() {
-		t.Errorf("%q 不是目录", dir)
-	}
-	if filepath.Dir(dir) != music {
-		t.Errorf("建出来的 %q 不在音乐目录 %q 下面", dir, music)
+	if len(entries) != 0 {
+		t.Errorf("只是查了一下路径，音乐目录 %q 里却多了 %d 个东西", music, len(entries))
 	}
 }
 
@@ -94,12 +100,12 @@ func TestTheDownloadDirectoryIsNamedAfterTheAppNotAfterTheLegacyUserDataDirector
 // 落到进程的当前工作目录里。
 //
 // ⚠️ 框架的 `PathMusic` 在拿不到家目录时给的是 `"Music"` 这样的相对路径——
-// 建它就会在当前工作目录里造出一个 `Music` 文件夹，而歌会落到那儿（双击图标
-// 启动的 macOS 应用那是 `/`），用户在 Finder 里看不见，也永远不会去那儿找
-// （同一个坑见 `app.Downloads.FallbackDir` 的注释）。
+// 那种落点会让歌落进进程的当前工作目录（双击图标启动的 macOS 应用那是 `/`），
+// 用户在 Finder 里看不见，也永远不会去那儿找（同一个坑见
+// `app.Downloads.FallbackDir` 的注释）。
 //
 // 所以那一条**退回系统下载目录**（它是绝对的，也是歌以前落的地方），而不是
-// 就地建一个。
+// 就地给一个相对路径。
 func TestTheDefaultDownloadDirectoryIsNotARelativePath(t *testing.T) {
 	mygo.App.SetPath(mygo.PathMusic, "Music")
 	t.Cleanup(func() { mygo.App.SetPath(mygo.PathMusic, "") })
@@ -109,15 +115,15 @@ func TestTheDefaultDownloadDirectoryIsNotARelativePath(t *testing.T) {
 	mygo.App.SetPath(mygo.PathDownloads, dl)
 	t.Cleanup(func() { mygo.App.SetPath(mygo.PathDownloads, "") })
 
-	if _, err := DefaultDownloadsDir(); err == nil {
-		t.Error("音乐目录是相对路径时不该给出一个下载目录")
-	}
-	got, err := EnsureDefaultDownloadsDir()
+	got, err := DefaultDownloadsDir()
 	if err != nil {
 		t.Fatalf("音乐目录用不了时该退回系统下载目录：%v", err)
 	}
 	if got != dl {
 		t.Errorf("退回的下载目录是 %q，want 系统下载目录 %q", got, dl)
+	}
+	if !filepath.IsAbs(got) {
+		t.Errorf("退回的下载目录 %q 不是绝对路径", got)
 	}
 	// ⚠️ **别在当前工作目录里留下一个 Music 文件夹**：那正是这一条要挡的
 	// 「歌落到一个诡异的目录里」。

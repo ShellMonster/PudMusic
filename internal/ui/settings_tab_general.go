@@ -235,7 +235,7 @@ func (s *Shell) pickAudioQuality(c *ui.Context, st app.Settings, ro bool) {
 func (s *Shell) pickDownloadPath(c *ui.Context, st app.Settings, ro bool) {
 	ui.Row(c).Key("setting:downloadPath").Width(settingsControlW).
 		MinWidth(settingsControlMinW).Gap(space.Px8).Children(func() {
-		s.pathField(c, s.downloadDirShown(st), "下载目录", ro)
+		pathField(c, s.downloadDirShown(st), "下载目录", ro)
 		if settingsButton(c, "选择").Width(72).Disabled(ro).Clicked() {
 			s.pickPath("下载目录", true, func(path string) {
 				s.applySetting("下载目录", func(cur *app.Settings) { cur.DownloadPath = path })
@@ -270,7 +270,7 @@ func (s *Shell) downloadDirShown(st app.Settings) string {
 func (s *Shell) pickFFmpegPath(c *ui.Context, st app.Settings, ro bool) {
 	ui.Row(c).Key("setting:ffmpegPath").Width(settingsControlW).
 		MinWidth(settingsControlMinW).Gap(space.Px8).Children(func() {
-		s.pathField(c, st.FFmpegPath, "FFmpeg 路径", ro)
+		pathField(c, st.FFmpegPath, "FFmpeg 路径", ro)
 		if settingsButton(c, "选择").Width(72).Disabled(ro).Clicked() {
 			s.pickPath("FFmpeg 路径", false, func(path string) {
 				s.applySetting("FFmpeg 路径", func(cur *app.Settings) { cur.FFmpegPath = path })
@@ -284,7 +284,14 @@ func (s *Shell) pickFFmpegPath(c *ui.Context, st app.Settings, ro bool) {
 // Biu 那边用的是 `isDisabled`（`system-settings.tsx:295`），连字一起灰掉，用户
 // 看不出那里本来摆着一条路径。这里用 `ReadOnly`：字还能被选中复制（「这个目录
 // 到底是哪儿」是用户真会问的问题），要改只能走「选择」。
-func (s *Shell) pathField(c *ui.Context, path, label string, ro bool) {
+//
+// ⚠️ **它是包级变量而不是方法**：设置页上那一格显示的**是哪条路径**，是
+// 「用户看到的当前下载目录」这件事的全部，而只读输入框里的那个值**不在渲染树
+// 里**——`Tester.Texts()` 量不到它（那是框架画的，不是元素）。所以「那一格拿到
+// 了哪条路径」只能从**这一层**钉，而这一层要能替身，替身就得是个变量。
+//
+// （跟 `userDataDir`（用户数据目录）、`coverCacheDir`（封面缓存）是同一类接缝。）
+var pathField = func(c *ui.Context, path, label string, ro bool) {
 	shown := path
 	if shown == "" {
 		shown = "未设置"

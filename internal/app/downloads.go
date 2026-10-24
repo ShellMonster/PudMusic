@@ -72,9 +72,10 @@ type Downloads struct {
 	// `/`，用户不会在那儿找歌，而在 Finder 里也看不见。
 	//
 	// 真机上它是**「音乐」目录下的应用子目录**（macOS `~/Music/BiuGo`，
-	// Windows `音乐\BiuGo`）——见 `platform.DefaultDownloadsDir` 和
-	// `ui.downloadsDir`。系统下载目录（`~/Downloads`）是**旧**落点：那儿是
-	// 浏览器和安装包的地方，歌和那些东西混在一起，用户找不到。
+	// Windows `C:\Users\<用户名>\Music\BiuGo`）——见
+	// `platform.DefaultDownloadsDir` 和 `ui.downloadsDir`。系统下载目录
+	// （`~/Downloads`）是**旧**落点：那儿是浏览器和安装包的地方，歌和那些东西
+	// 混在一起，用户找不到。
 	FallbackDir string
 }
 

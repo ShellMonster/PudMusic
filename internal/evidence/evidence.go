@@ -2999,20 +2999,26 @@ var Items = []Item{
 		//
 		// 票 #361：默认落点从**系统下载目录**（`~/Downloads`，那儿是浏览器和
 		// 安装包的地方）改成**「音乐」目录下的应用子目录**（macOS `~/Music/BiuGo`，
-		// Windows `音乐\BiuGo`）——同类音乐软件（网易云、QQ 音乐、Spotify）都是
+		// Windows `C:\Users\<用户名>\Music\BiuGo`——框架的 `PathMusic` 只把
+		// 英文名拼在家目录下面）——同类音乐软件（网易云、QQ 音乐、Spotify）都是
 		// 这么放的。
 		//
 		// ⚠️ **「老歌不搬家」也是这一条的一部分**：已经在 `~/Downloads` 下的歌留在
 		// 原地（迁移是另一件事，要人拍板），而这一条只改**新**下载的落点。
 		Category: Platform,
-		Spec:     "默认下载目录是「音乐」目录下的应用子目录（macOS ~/Music/BiuGo、Windows 音乐\\BiuGo），目录不存在会建；设置页和下载记录页上显示的是**歌真正落下来的地方**而不是空串；用户在设置里手动选过的目录照旧；已经在旧目录下的老歌不搬家",
+		Spec:     "默认下载目录是「音乐」目录下的应用子目录（macOS ~/Music/BiuGo、Windows C:\\Users\\<用户名>\\Music\\BiuGo），落盘那一刻目录不存在会建；**查路径的那一层不建目录**（开应用不会在用户磁盘上留下文件夹）；设置页和下载记录页上显示的是**歌真正落下来的地方**而不是空串；用户在设置里手动选过的目录照旧；已经在旧目录下的老歌不搬家",
 		Tests: []string{
 			// 路径本身：它在音乐目录下面，子目录名是显示名（不是用户数据目录那个
-			// 老名字），目录不存在会建。
+			// 老名字），拿不到家目录时退回系统下载目录而不是给一个相对路径。
 			"TestTheDefaultDownloadDirectoryIsTheAppFolderUnderTheMusicDirectory",
-			"TestTheDefaultDownloadDirectoryIsCreatedIfItIsMissing",
 			"TestTheDownloadDirectoryIsNamedAfterTheAppNotAfterTheLegacyUserDataDirectory",
 			"TestTheDefaultDownloadDirectoryIsNotARelativePath",
+			// ⚠️ **查路径这一层不建目录**：它被开应用时和设置页读着，而它一旦
+			// 建目录，光是打开应用（或者跑一条 internal/ui 的测试）就会在**用户
+			// 自己的** ~/Music 里留下一个文件夹。
+			"TestTheDefaultDownloadDirectoryIsNotCreatedJustForLooking",
+			// 建目录是**落盘那一刻**的事。
+			"TestTheDownloadDirectoryIsCreatedWhenTheSongLands",
 			// 优先级：设置里没选过是默认落点，选过的是用户选的那个。
 			"TestTheDownloadDirectoryIsTheDefaultOneUntilTheUserPicksAnother",
 			// ⚠️ **一个目录都没有时不许入队**：空目录会让歌落到进程的当前工作

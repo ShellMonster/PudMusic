@@ -67,11 +67,13 @@ func MountDownloads(a *app.App) error {
 // 歌和一堆 `.dmg` 混在一起，用户在自己的下载目录里翻不到刚下的那几首。
 // 同类音乐软件都不往那儿扔（网易云、QQ 音乐、Spotify 都是「音乐目录 +
 // 以应用命名的子目录」），所以这里也那么放：macOS 是 `~/Music/BiuGo`，
-// Windows 是 `音乐\BiuGo`（理由见 `platform/downloadsdir.go` 顶上那一节）。
+// Windows 是 `C:\Users\<用户名>\Music\BiuGo`（理由与那两个平台的窄口子见
+// `platform/downloadsdir.go` 顶上那一节）。
 //
-// ⚠️ **目录不存在要建**（`platform.EnsureDefaultDownloadsDir`）：不建的话第一次
-// 下载会失败，而失败是 `os.Create` 报的「no such file or directory」——用户看到
-// 的是一句他看不懂的话，实际原因只是「那个文件夹还没建」。
+// ⚠️ **这一层只查路径，不建目录**：目录是**真的要落盘的那一刻**才建的
+// （`service/download` 的 `ensureDir`）。开应用就建的话，**光是打开应用就会
+// 在用户的磁盘上留下一个文件夹**——测试里也一样（那不是临时的目录，是用户
+// 自己的）。所以「目录不存在会建」这条由落盘那一层管。
 //
 // ⚠️ **设置里手动选过的目录照旧**：这一条只是「没选过」时的兜底，选过的走
 // `Settings.DownloadPath`（见 `app.downloadDir`）。
@@ -80,7 +82,7 @@ func MountDownloads(a *app.App) error {
 // 诡异的目录里**——应用层会**拒绝下载**并说一句人话（见 `app.errNoDownloadDir`），
 // 界面上说「还没有下载目录」，用户照着做就是去设置里选一个。
 func downloadsDir() string {
-	dir, err := platform.EnsureDefaultDownloadsDir()
+	dir, err := platform.DefaultDownloadsDir()
 	if err != nil {
 		log.Printf("biu: 拿不到默认下载目录，下载没地方落：%v", err)
 		return ""
