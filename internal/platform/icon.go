@@ -13,7 +13,7 @@
 //
 // MyGo 的 `mygo build` 从 `resources/icon.png`（1024×1024）出发，自己把 macOS 的
 // `.icns`（8 个尺寸）和 Windows 的 `.ico`（7 个尺寸）都渲出来，见
-// `mygo@v0.6.2/cmd/mygo/icon.go` 的 `pngToICNS` / `pngToICO`。而 `resources/icon.png`
+// `mygo@v0.6.3/cmd/mygo/icon.go` 的 `pngToICNS` / `pngToICO`。而 `resources/icon.png`
 // 是 `go generate ./internal/platform/` 从本文件生成的——**它和托盘上那一张是同一段
 // 代码出来的**，所以两边不可能漂移（改一张忘另一张的症状是「Dock 上是新图标、
 // 通知区域还是旧图案」，而没有任何一处会报错）。
