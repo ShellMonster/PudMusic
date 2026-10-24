@@ -60,6 +60,9 @@ type Shell struct {
 	// ⚠️ **它逐窗口一份**：主窗口失焦不等于迷你播放器看不见（见 presence.go）。
 	// ⚠️ **它是活的**：波形在**画的时候**读它（那一帧只重画、不重建，票 #392），
 	// 所以窗口失焦的那一刻就得改它——`noteWindow` 那条路改的就是它。
+	//
+	// ⚠️ **零值是 nil，而零值 Shell 也得能用**：仓库里有几处手搓 `&Shell{}`
+	// （测试里）。所以**别直接解引用它**——用 `visibleFlag()`（见下）。
 	visible *atomic.Bool
 
 	// snapScroll 是「这一帧是从看不见恢复过来的那一帧」，snapAt 是它的时刻。
@@ -1101,6 +1104,21 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 // 的——传值的话「今天 / 昨天」那一档永远跟着墙钟走。
 func (s *Shell) now() time.Time { return s.clock.Now() }
 
+// visibleFlag 是「这一扇窗看不看得见」那一个活的开关，**建好了就返回它**。
+//
+// ⚠️ **零值 Shell 也要能用**：仓库里有几处手搓 `&Shell{}`（测试里），而那一处
+// 以前是能用的——所以这里**不假设它已经建好**：缺了就现建一个「看得见」的
+// （零值必须是「看得见」，理由见 `hover` 那一包的 `frameVisible`）。
+//
+// ⚠️ **只在这一条路上建**（主线程）：`View` 和 `noteWindow` 都在主线程上
+// （铁律一），而那两处是仅有的两个调用者。
+func (s *Shell) visibleFlag() *atomic.Bool {
+	if s.visible == nil {
+		s.visible = hover.NewVisibleFlag()
+	}
+	return s.visible
+}
+
 // pickDir 是本地音乐页「添加目录」要用的那一次系统对话框。
 //
 // 界面上没有它就进不去任何一个目录，而这一页的第一句空状态就是「点右上角
@@ -1434,8 +1452,9 @@ func (s *Shell) View(c *ui.Context) {
 	// ⚠️ **顺带把答案刷成此刻的**：那个开关是**活的**（波形在画的时候读它），
 	// 而可见性有可能是在两次 build 之间变的（`noteWindow` 那一条路也会改它，
 	// 但这里再刷一次是保险——`presence` 是唯一的事实来源）。
-	s.visible.Store(s.presence.seen())
-	hover.SetVisibleFlag(s.visible)
+	visible := s.visibleFlag()
+	visible.Store(s.presence.seen())
+	hover.SetVisibleFlag(visible)
 
 	// 从看不见恢复过来的那一帧：让那些「有中间状态」的动画一次到位（见
 	// snapScroll 的注释：同一时刻的两遍 view 都算这一帧）。

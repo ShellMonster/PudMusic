@@ -75,7 +75,7 @@ func TestAnUnseenWindowDrawsTheFrameItGetsButAsksForNoMore(t *testing.T) {
 	// 直接叫 `Services.Invalidate`。
 	//
 	// ⚠️ 生产里真有这样的路径（本地库扫完那一支直接调 `Services.Invalidate`
-	// ——见 shell.go 里 `hover.SetFrameVisible` 那一段的注释），所以这一档不是
+	// ——见 shell.go 里 `hover.SetVisibleFlag` 那一段的注释），所以这一档不是
 	// 假想的。
 	before = *frames
 	beforeBar := s.builds.playbar
@@ -108,11 +108,11 @@ func TestAnUnseenWindowDrawsTheFrameItGetsButAsksForNoMore(t *testing.T) {
 			beforeBar, s.builds.playbar)
 	}
 
-	// 而它**不再要下一帧**：`hover.SetFrameVisible(false)` 挡住了自发动画
-	// （波形、频谱），所以这一帧画完就停。
+	// 而它**不再要下一帧**：`hover.SetVisibleFlag` 装的那一个开关（这一扇窗
+	// 看不见时是 false）挡住了自发动画（波形、频谱），所以这一帧画完就停。
 	if tt.FramePending() {
 		t.Errorf("看不见的窗口画完这一帧之后还在请求下一帧——"+
-			"这一帧画完就该停（`hover.SetFrameVisible` 挡住了自发动画）")
+			"这一帧画完就该停（`hover.SetVisibleFlag` 装的那一个开关挡住了自发动画）")
 	}
 
 	// 而那一帧没有引出下一帧：往后一秒，一帧都不画、一次界面都不建。

@@ -39,20 +39,32 @@ func TestTheWaveDoesNotRebuildTheWindowEveryFrame(t *testing.T) {
 
 	// ⚠️ **先钉住「那个波形真的在要下一帧」**：不然下面那条「重建得少」可能是
 	// 因为根本没有动画在跑，绿得毫无意义。
+	//
+	// ⚠️ **判据是 `FramePending`，不是「重建了几次」**：波形要的那些帧现在走
+	// **局部重绘**（不重建），数重建是数不出来的。而这一档里**没有别的人
+	// 要帧**——`countingShell` 只摆队列不起播（`App` 的 `live` 为假），
+	// 于是 `App.tick` 从不叫醒窗口。所以 `FramePending` 为真就是波形要的。
 	if !s.wake.invalidateIf(true) {
 		t.Fatal("看得见的窗口却把唤醒丢掉了")
 	}
 	before := *frames
 	tt.Advance(500 * time.Millisecond)
-	if *frames <= before {
-		t.Fatalf("看得见、有歌在放，推进半秒却一帧都没画——"+
-			"跳动波形没有在要下一帧，下面那条就验不到东西")
+	if !tt.FramePending() {
+		t.Fatal("推进了半秒，画面却没有在要下一帧——"+
+			"跳动波形没有在逐帧动画，下面那条「重建得少」就验不到东西")
 	}
 
 	// 500 毫秒是 30 帧（60Hz）。**改之前**这 30 帧每一帧都是一次重建
 	//（波形要的那一帧是 `c.AnimationFrame()`，框架于是重建整棵树）；
-	// **改之后**只有开头那一次唤醒带来的重建（它要的是「画出来的新样子」），
-	// 后面那些帧走的是局部重绘——视图不重建。
+	// **改之后**只有开头那一次重建——**而那一次是测试自己叫醒带来的**
+	//（`s.wake.invalidateIf(true)`，模拟 `App.tick`），波形要的那 29 帧走的是
+	// **局部重绘**：视图不重建。
+	//
+	// ⚠️ **真应用里不是 1 次**：放歌时 `App.tick` 每 50ms 叫醒每个窗口一次，
+	// 而**那每一次叫醒都是一次全量重建**（`Services.Invalidate` → `engine.changed`
+	// → `rt.redraw = false`）——所以真应用里是**每秒 20 次**，不是 1 次。
+	// 这一档之所以只有 1 次，是因为 `countingShell` 只摆队列**不起播**
+	//（`App` 的 `live` 为假），于是 `App.tick` 从不叫醒窗口。
 	//
 	// ⚠️ **上限给到 3**：机器慢的时候帧率会掉（那是好事，方向是同一个），
 	// 而偶尔一次别的路径送来一帧重建也不该红。
@@ -60,7 +72,8 @@ func TestTheWaveDoesNotRebuildTheWindowEveryFrame(t *testing.T) {
 	t.Logf("推进 500 毫秒（30 帧）重建了 %d 次整棵元素树", got)
 	if got > 3 {
 		t.Errorf("推进 500 毫秒重建了 %d 次整棵元素树，want ≤ 3。\n"+
-			"那 30 帧里只有开头那一次该重建——波形要的那些帧走的是**局部重绘**"+
+			"那 30 帧里只有开头那一次该重建（测试自己叫醒的那一次）——"+
+			"波形要的那些帧走的是**局部重绘**"+
 			"（`p.AnimationFrame()`，框架的 `repaintFrame`：视图不重建、布局不重排）。\n"+
 			"（改之前是 `c.AnimationFrame()`：每一帧都要一帧，而那一帧是**整棵元素树"+
 			"重建一遍**——放歌时每秒 60 次，那就是这一票要省的那笔 CPU 和电。）",

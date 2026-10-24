@@ -122,7 +122,7 @@ func (s *Shell) noteWindow(apply func(*windowPresence)) {
 	resumed := s.presence.update(apply)
 	// ⚠️ **先刷开关，再决定要不要补帧**：那个开关是「这一帧要不要继续要下一帧」
 	// 的唯一判据，而它得在任何一帧画出来之前就是对的。
-	s.visible.Store(s.presence.seen())
+	s.visibleFlag().Store(s.presence.seen())
 	if !resumed {
 		return
 	}
