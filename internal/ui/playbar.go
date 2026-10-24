@@ -11,6 +11,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
@@ -817,9 +818,13 @@ func (s *Shell) viewArtist(c *ui.Context, st app.State, t *ui.Theme) {
 	// 扁平按钮：UP 名这一格是**播放条上一枚按钮**，而调研点名的描边药丸里就有它
 	//（报告 §1.1 的 F1 证据：播放条上每一枚带描边的键）。它上面是 14px 的弱化
 	// 灰字，本来就不该配一块描边底。
+	//
+	// ⚠ **那句话是 `list.OwnerTipText` 给的**（票 #360）：列表里的 UP 名是同一
+	// 件事的另一个地方，两处各写一遍的话，改了一处另一处就安静地变成另一句
+	// 话——而那种错在画面上只是「提示里那句话怪怪的」。
 	if s.withTip(c, flatButton(c, st.Artist).Grow(1).MinWidth(artistMinW).
 		Justify(ui.Start).FontSize(scale.Font(c, scale.Size14)).Padding(space.None, space.None).TextColor(t.TextMuted).
-		MaxLines(1).Ellipsis("…"), "打开 "+st.Artist+" 的空间").Clicked() {
+		MaxLines(1).Ellipsis("…"), list.OwnerTipText(st.Artist)).Clicked() {
 		s.navigate(upPathPrefix + strconv.FormatInt(st.ArtistMid, 10))
 	}
 }
