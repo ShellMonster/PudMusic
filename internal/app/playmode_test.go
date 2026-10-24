@@ -155,13 +155,16 @@ func TestLoopWithOneSongReplaysIt(t *testing.T) {
 //   - 抽出来的是**另一首**，不是当前这一首。图省事写成「往后随机若干首」
 //     （`cur+1+rand(n-1)` 再对 n 取模）的话它**抽得到当前这一首**——连着放两遍
 //     同一首，用户第一反应是「卡住了」，而随机这一档最该保证的就是这件事不会发生。
-//   - **每一首都一样可能被抽中**：在除掉当前首剩下的 n-1 首里抽，而不是在
-//     整列里抽。后者会让当前这一首比别的歌多一次机会，于是有一首会被反复选中。
+//   - **每一首都一样可能被抽中**：洗牌袋把每一首都洗进一列，抽的次序是随机的。
 //   - **抽得到第一首**（下面那条固定的抽取序列里它出现了两次）。
 //
 // 这一条用的是注入的固定源，所以那一串「下一首是谁」是**确定的**：它不只是
 // 「跑到过所有歌」，而是逐个钉住了从当前下标映射到被抽中下标的那个算法。生产
 // 那一路按时间播种，所以用户每次听到的乱序都不一样，而这一条永远绿。
+//
+// ⚠️ **这一串是洗牌袋的算法**（见 queue_shuffle.go）：四首歌洗成一列，一首一首
+// 地发，发完一列再洗一列。所以**头四发正好是四首不同的歌**（一列发完才重复），
+// 而第二列里已经可能出现第一列发过的歌——那是下一列，不是这一列里重复。
 func TestRandomReallyShuffles(t *testing.T) {
 	q := app.NewQueueWithRand(&steppingRand{})
 	q.SetPlayMode(app.PlayModeRandom)
@@ -169,7 +172,7 @@ func TestRandomReallyShuffles(t *testing.T) {
 	at(q, 0)
 
 	got, _ := playOut(q, 8)
-	want := []string{"b", "c", "d", "a", "c", "d", "a", "c"}
+	want := []string{"c", "d", "b", "a", "c", "b", "d", "a"}
 	if len(got) != len(want) {
 		t.Fatalf("抽了 %d 次 = %q，want %d 次", len(got), got, len(want))
 	}
@@ -195,6 +198,40 @@ func TestRandomReallyShuffles(t *testing.T) {
 	}
 	if len(seen) != 4 {
 		t.Errorf("只抽到过 %d 首（%v），want 四首都抽到过", len(seen), seen)
+	}
+}
+
+// TestRandomDoesNotRepeatWithinACycle 盯洗牌袋最要紧的那一条：
+// **一列里每一首恰好发一次**——不重复，也不遗漏。
+//
+// 重复和遗漏都是用户听得出来的：「随机播了一晚上，同一首听了三遍，另一首一首
+// 没放过」。均匀随机（我们原来那个）两样都犯。
+//
+// 这一条不钉死是哪一首——那由上面那条钉。这里钉的是**性质**：连着发 n 次，
+// n 首不同的歌，一首都不多、一首都不少。种子多跑几个，免得算法碰巧对。
+func TestRandomDoesNotRepeatWithinACycle(t *testing.T) {
+	for _, seed := range []int{0, 1, 2, 3, 7} {
+		q := app.NewQueueWithRand(&fixedRand{n: seed})
+		q.SetPlayMode(app.PlayModeRandom)
+		q.Append(items("a.mp3", "b.mp3", "c.mp3", "d.mp3", "e.mp3")...)
+		at(q, 0)
+
+		seen := map[string]int{}
+		for range 5 {
+			d := q.Advance()
+			if d.Kind != app.AdvancePlay {
+				t.Fatalf("种子 %d：结论是 %v，want AdvancePlay", seed, d.Kind)
+			}
+			seen[d.Item.Title]++
+		}
+		if len(seen) != 5 {
+			t.Errorf("种子 %d：五首发过 %d 首（%v），want 五首都发过", seed, len(seen), seen)
+		}
+		for title, n := range seen {
+			if n != 1 {
+				t.Errorf("种子 %d：%q 发了 %d 次，want 1 次（一列里一首只发一次）", seed, title, n)
+			}
+		}
 	}
 }
 
@@ -256,7 +293,11 @@ func page(bvid string, idx, total int) app.Item {
 // 是最后一集 → 也回到真的随机（后面没有下一集可跟）。
 func TestRandomKeepsThePageOrderWhenAskedTo(t *testing.T) {
 	build := func() *app.Queue {
-		q := app.NewQueueWithRand(&fixedRand{n: 0})
+		// ⚠️ **这个源挑的是 2，不是 0**：洗牌袋洗出来的一列由它决定，而「关掉
+		// 之后落到哪一首」要**和跟着分集走的答案不同**，否则那条断言分不出
+		// 「真随机」和「还在跟着分集走」。2 洗出来的一列头一个是 BV1x，和
+		// 分集规则的答案（BV2y 第2集）不是同一首。
+		q := app.NewQueueWithRand(&fixedRand{n: 2})
 		q.SetPlayMode(app.PlayModeRandom)
 		q.SetKeepPagesOrderInRandom(true)
 		q.Append(
