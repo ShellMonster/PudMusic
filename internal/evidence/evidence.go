@@ -3477,6 +3477,41 @@ var Items = []Item{
 		},
 	},
 	{
+		// 归「播放」那一组：还是侧栏，但说的是**两组收藏夹**（票 #371）。
+		//
+		// 归这一组是因为它是**界面上的一处交互**（和头像下拉那一层同一类），
+		// 而不是一个接口。
+		Category: Play,
+		// 这一片是 2026-10-24 那次界面重设计（PR #357）之后**没跟上的一处**：
+		// 重设计改了侧栏本身（底色用方案的 sidebar、选中项底是 accentSoft 淡底），
+		// 而这一片还是老样子——它跟同一根侧栏里的菜单项放在一起是两套风格。
+		//
+		// ⚠️ **这一票只动样式**：取数、刷新、拖拽排序那一摊一个字没改（那是
+		// #362 的地盘）。
+		//
+		// 🔴 **判据是「和同一根侧栏里的参照物对齐」，不是「某个具体的数」**：
+		// 方案换了、主题的间距变了，那些数会跟着变，而「是不是一套」不会。
+		Spec: "侧栏里那两组收藏夹按当前风格画：左缩进和侧栏分组标题同一列、这一片的字都在同一列；分组标题和侧栏分组标题同一档（12 / 500 / 次要色）；收藏夹名 14 的正文色、选中那一行是 accentSoft 淡底、悬停是 flat.Feel；折叠态那枚图标在收藏夹页上亮起来，点开的那层浮层是卡片那一档（surface1 / radiusLg）",
+		Tests: []string{
+			// 这一片和侧栏是同一块：左沿一样、字在同一列。
+			"TestTheFavoritesAreaLinesUpWithTheSidebar",
+			// 空状态那句也在那一列（它替下面那些收藏夹名说话）。
+			"TestTheFavoritesEmptyLineLinesUpWithTheNames",
+			// 分组标题和侧栏的分组标题是同一档（字号 + 字色）。
+			"TestTheFavoritesGroupTitleIsTheSameKindOfTitleAsTheSidebarOne",
+			// 折叠态那层浮层是**卡片**那一档（底 surface1，不是页面底）。
+			"TestTheCollapsedFavoritesPanelIsACard",
+			// 折叠态那枚图标在收藏夹页上要亮（当前在哪唯一的指示）。
+			"TestTheCollapsedFavoritesIconLightsUpOnACollectionPage",
+			// 这一片的字在侧栏底上 ≥ 4.5:1（四个方案 × 深浅两套）。
+			"TestTheFavoritesTextIsReadableOnTheSidebar",
+			// 这一片上面留了一截（它是侧栏的第三段）。
+			"TestTheFavoritesAreaHasRoomAboveIt",
+			// 选中那一行是 accentSoft 淡底 + 按那层底现算的字（既有那条）。
+			"TestTheCurrentItemIsFlatEverywhere",
+		},
+	},
+	{
 		// 归「分页与路由」那一组：这一票动的是**翻页的闸门**。
 		//
 		// 🔴 **三个症状全是静默的**：页面停住不动、那个数偏大、界面上说一句

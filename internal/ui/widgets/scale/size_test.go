@@ -66,7 +66,7 @@ func TestTheRoleAliasesPointAtTheRightSize(t *testing.T) {
 		"NewMusicTitle": 24, "BrandName": 24, "ListTitle": 16, "ListOwner": 14,
 		"CollectionCopy": 14, "LyricsTranslation": 14, "EmptyTitle": 15,
 		"EmptyHint": 12, "EmptyPageTitle": 20, "LyricValue": 10,
-		"HeaderFont": 14, "ToastFont": 14, "FavPanelItem": 13,
+		"HeaderFont": 14, "ToastFont": 14, "FavPanelItem": 14,
 		"RateMenuFont": 12, "VolPercentFont": 12,
 	}
 	got := map[string]int{
