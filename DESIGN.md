@@ -372,7 +372,7 @@ structural:
     此前「数据显示样式」那一格是框架的 `ui.Segmented`（**灰轨 + 白色滑块**），和另外
     两处长得不一样（UI 报告 §4 的 F-17）。
     - **不改成白滑块**（那是上游报告 F-17 的推荐）：框架 `ui.Segmented` **没有**滑块
-      动画（`mygo@v0.6.2/ui/toggle.go` 的 `coreSegmented` 是每段各自换背景，没有动画
+      动画（`mygo@v0.6.3/ui/toggle.go` 的 `coreSegmented` 是每段各自换背景，没有动画
       通道；250ms 滑动那一份是我们自己的 `mainTabs`，票 #171）；它的宽度还**按内容算**
       （`Shrink(0)`），填不满控件列那一格——那正是票 #235 刚消灭掉的「左边缘落在四个
       位置上」。
@@ -602,7 +602,7 @@ motion.Unified  // = ui.CubicBezier(0.16, 0.9, 0.21, 0.98)
 ⚠️ **我们这条曲线也不是上游那条——这是已知偏离**：上游那两处没写时长，走的是
 Tailwind `transition-transform` 的默认档 `cubic-bezier(0.4, 0, 0.2, 1)`；我们用的
 是 `ui.EaseInOut`（框架那条对称三次曲线）。**两者差得很远**（实算，同一个
-mygo v0.6.2）：
+mygo v0.6.3）：
 
 | t | `ui.EaseInOut`（我们的） | 上游 `cubic-bezier(0.4,0,0.2,1)` |
 |---|---|---|
