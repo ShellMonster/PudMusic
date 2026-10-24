@@ -334,3 +334,88 @@ func TestCancelFreesTheInflightSlot(t *testing.T) {
 	waitFor(t, 5*time.Second, "在途名额放出来", func() bool { return len(c.inflight) == 0 })
 	close(block)
 }
+
+// ---- 票 #358：画面上正画着的封面不许被挤掉 ----
+
+// oneCover 是**记账**上一张 200×200 封面占多少字节（RGBA 加 mipmap 链）。
+//
+// 200*200*4 = 160000，加 mipmap 那 1/3，约 213333（和 TestLRUEvictsByBytes
+// 用的是同一个数）。
+const oneCover = 213333
+
+// coverServer 起一个只发封面的服务器，顺带数命中次数。
+func coverServer(t *testing.T) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var hits atomic.Int32
+	body := pngBytes(t, 200, 200)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &hits
+}
+
+// TestTheCoverOnScreenIsNotEvicted 钉住票 #358 的头一半：画面上正画着的那一张
+// 封面不许被挤掉。
+//
+// 挤掉之后它下一帧就退回「正在加载」的占位——用户看见的就是那一格闪一下。
+// 开队列抽屉的时候正好会撞上：抽屉里那二十四行同时要封面，字节上限立刻超了。
+//
+// 判据是**位图还是不是那一个**：挤掉了就得重新下一次（位图换了）。
+func TestTheCoverOnScreenIsNotEvicted(t *testing.T) {
+	srv, hits := coverServer(t)
+	// 预算只够一张：再来一张就得挤。
+	c := New(Options{MaxBytes: oneCover})
+	t.Cleanup(c.Close)
+
+	now := time.Now()
+	c.BeginFrame(now)
+	onScreen := srv.URL + "/on.png"
+	st := waitState(t, c, onScreen, 5*time.Second, loaded)
+	first := st.Bitmap
+
+	// 第二张：预算超了 → 挤。
+	c.BeginFrame(now.Add(time.Millisecond))
+	other := srv.URL + "/other.png"
+	waitState(t, c, other, 5*time.Second, loaded)
+
+	// 🔴 **画面上那一张还在**：位图是**同一个对象**，没有重新下过。
+	if st := c.Get(onScreen); !st.Ready() {
+		t.Fatalf("画面上正画着的那一张被挤掉了：Loading=%v Err=%v", st.Loading, st.Err)
+	} else if st.Bitmap != first {
+		t.Errorf("画面上那一张换了位图（%p → %p）——它被挤掉又下一次了", first, st.Bitmap)
+	}
+	if n := hits.Load(); n < 2 {
+		t.Errorf("只下了 %d 次，挤掉的那张没有重新下——判据不灵", n)
+	}
+}
+
+// TestACoverThatIsNoLongerOnScreenIsEvicted 钉住票 #358 的后一半：**不在画面上**
+// 的那一张照旧挤掉。
+//
+// 这一条是上一条的下半截——「不许挤画面上那几张」不能变成「谁都不挤」，
+// 那一份缓存就再也不封顶了。
+func TestACoverThatIsNoLongerOnScreenIsEvicted(t *testing.T) {
+	srv, hits := coverServer(t)
+	c := New(Options{MaxBytes: oneCover})
+	t.Cleanup(c.Close)
+
+	now := time.Now()
+	c.BeginFrame(now)
+	gone := srv.URL + "/gone.png"
+	waitState(t, c, gone, 5*time.Second, loaded)
+
+	// 帧走远：这一张不再画着了（滚动走了、换页了）。
+	for i := 1; i <= visibleFrames+1; i++ {
+		c.BeginFrame(now.Add(time.Duration(i) * time.Millisecond))
+	}
+
+	other := srv.URL + "/other.png"
+	waitState(t, c, other, 5*time.Second, loaded)
+
+	// 不在画面上的那一张被挤掉了：再要它就得重新下一次。
+	before := hits.Load()
+	c.Get(gone)
+	waitFor(t, 5*time.Second, "被挤掉的那张重新下了一次", func() bool { return hits.Load() > before })
+}

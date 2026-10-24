@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/testproc"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -702,7 +703,7 @@ func childRoundTrip(t *testing.T) {
 // runChild 拉起一次本测试二进制自己。-test.run 让它只跑这一条。
 func runChild(t *testing.T, path, mode string) {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=TestSettingsSurviveAProcessRestart", "-test.count=1")
+	cmd := exec.Command(testproc.Path(t), "-test.run=TestSettingsSurviveAProcessRestart", "-test.count=1")
 	cmd.Env = append(os.Environ(),
 		childEnv+"=1",
 		"BIU_SETTINGS_PATH="+path,
