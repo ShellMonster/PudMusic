@@ -82,6 +82,7 @@ import (
 	"strconv"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -245,7 +246,7 @@ func (s *Shell) viewLyricKnobColumnWith(c *ui.Context, snap app.LyricsSnapshot, 
 		//
 		// ⚠️ **名字要留着**：钮上不再有「找歌词」三个字，而它恰恰是**没有歌词
 		// 时**唯一摆着的那个键——读屏软件得念得出它，无头 Tester 也得找得到它。
-		search := lyricKnobButton(c, iconLyricSearch, lyricSearchKnobLabel, fg)
+		search := lyricKnobButton(c, lyricSearchKnobKey, iconLyricSearch, lyricSearchKnobLabel, fg)
 		if search.Clicked() {
 			s.openLyricSearch()
 		}
@@ -260,18 +261,34 @@ func (s *Shell) viewLyricKnobs(c *ui.Context, snap app.LyricsSnapshot, lv *lyric
 	// ⚠️ **钮上不写当前值**（上游那两个钮上就只有一个图标，
 	// `font-size-control.tsx:39-48`）：当前值在浮层里那一行（`lyricFontValueLabel`
 	// / `lyricOffsetValueLabel`），要看得展开浮层。
-	font := lyricKnobButton(c, iconLyricFontSize, lyricFontKnobName, fg)
+	font := lyricKnobButton(c, lyricFontKnobKey, iconLyricFontSize, lyricFontKnobName, fg)
 	if font.Clicked() {
 		lv.fontOpen = !lv.fontOpen
 	}
 	s.lyricFontPopover(c, font, snap, lv, ids)
 
-	offset := lyricKnobButton(c, iconLyricOffset, lyricOffsetKnobName, fg)
+	offset := lyricKnobButton(c, lyricOffsetKnobKey, iconLyricOffset, lyricOffsetKnobName, fg)
 	if offset.Clicked() {
 		lv.offsetOpen = !lv.offsetOpen
 	}
 	s.lyricOffsetPopover(c, offset, snap, lv, ids)
 }
+
+// 歌词区右下角那三枚旋钮的 key。
+//
+// 🔴 **为什么要有**：那一列是**逐帧问出来的**（`adjustable` 为假的时候字号与
+// 偏移那两枚**不摆**，见 `viewLyricKnobColumnWith`）——于是三枚的**兄弟序号**
+// 会变，而框架给元素的默认身份就是「父 ID + 兄弟序号」。按压缩放那条动画通道
+// 是存在身份里的（见 `widgets/flat/press.go`），所以不钉住身份的话，某一枚会
+// **继承**旁边那枚留下的通道（画面上是「另一枚钮莫名其妙缩着」）。
+const (
+	// lyricSearchKnobKey 是「找歌词」那一枚。
+	lyricSearchKnobKey = "lyric:knob-search"
+	// lyricFontKnobKey 是「字号」那一枚。
+	lyricFontKnobKey = "lyric:knob-font"
+	// lyricOffsetKnobKey 是「偏移」那一枚。
+	lyricOffsetKnobKey = "lyric:knob-offset"
+)
 
 // lyricKnobButton 造一枚 ⌀32 的**圆形图标钮**（上游那种）。
 //
@@ -301,7 +318,13 @@ func (s *Shell) viewLyricKnobs(c *ui.Context, snap app.LyricsSnapshot, lv *lyric
 // 档是按「底是应用底色」算的（`widgets/flat` 的 `IconButtonAccent` 顶上写着这
 // 一条）——满屏那一列压在糊过的封面上，浅色下那一档压在上面只有 1.0:1，等于
 // 看不见（票 #217）。所以这里只照抄上游的 `hover:bg-foreground/30`。
-func lyricKnobButton(c *ui.Context, name, label string, fg ui.Color) ui.Element {
+// ⚠️ **key 的类型是 `any`，不是 `string`**：框架的 `Context.Key` 收的就是 `any`，
+// 而一个**变量**的字符串装进 `any` 要**每帧一次装箱分配**（实测：满屏播放器那一
+// 档每帧多 3 次——正是这三枚）。**常量**则由编译器给一个静态的值，一次也不分配
+// ——所以三个调用点传的都是常量 ✓。
+func lyricKnobButton(c *ui.Context, key any, name, label string, fg ui.Color) ui.Element {
+	// 🔴 **身份钉死**：理由见上面那三个 key 的注释。
+	c.Key(key)
 	b := ui.ButtonBase(c).Label(label).
 		Size(lyricKnobSize, lyricKnobSize).
 		Radius(lyricKnobRadius).
@@ -313,7 +336,15 @@ func lyricKnobButton(c *ui.Context, name, label string, fg ui.Color) ui.Element 
 		disc = lyricKnobDiscHover
 	}
 	b.Background(ui.RGBA(fg.R, fg.G, fg.B, disc))
-	b.Children(func() { ui.Icon(c, icon(name)).FontSize(lyricKnobIconSize) })
+	b.Children(func() {
+		ic := ui.Icon(c, icon(name)).FontSize(lyricKnobIconSize)
+		// ⚠️ **按下时图形缩到 0.96**（`widgets/flat` 的 `PressScale`）——这三枚
+		// 也是图标键（DESIGN.md §六「图标键」里「歌词区右下角那三枚是 16」）。
+		//
+		// ⚠️ **缩的是图形，不是那一枚底盘**：底盘是按钮自己的背景，缩它会把
+		// **命中区**一起缩掉 4%（理由见 `widgets/flat/press.go`）。
+		ic = flat.PressScale(ic, b.Pressed(), false)
+	})
 	return b
 }
 
