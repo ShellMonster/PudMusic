@@ -59,52 +59,51 @@ import (
 func (s *Shell) settingsConfig(c *ui.Context) {
 	t := c.Theme()
 	rep := LastMigration()
-	s.settingSection(c, "配置")
-	s.settingSectionEnd(c)
-
-	ui.Column(c).FillWidth().Gap(space.Px8).Children(func() {
-		ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
-			if flatButton(c, "导出配置").FontSize(scale.Font(c, scale.Size13)).Clicked() {
-				s.exportConfig()
-			}
-			if flatButton(c, "导入配置").FontSize(scale.Font(c, scale.Size13)).Clicked() {
-				s.importConfig()
-			}
-		})
-
-		// 数据目录来自更新的版本：整个目录一个字都不写，**导入按钮也就没有意义**
-		// ——按下去每一样都会被各自的只读判断挡掉，用户只会看到四句「没带过来」。
-		// 摆一句说明，比摆一个必然失败的按钮诚实。
-		if rep.ReadOnly {
-			ui.Text(c, "数据目录来自更新的版本，这一版一个字都不会写回去，所以下面几样都没有带过来。").
-				FontSize(scale.Font(c, scale.Size12)).TextColor(dangerText(t)).Wrap()
-		} else if dirs := rep.BiuDirs; len(dirs) > 0 {
-			// 「从 Biu 导入」只在**找得到** Biu 的数据目录时才摆。摆一个点了必然说
-			// 「没找到 Biu」的按钮，等于让用户自己判断这台机器上有没有装过 Biu。
-			ui.Row(c).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-				if flatButton(c, "从 Biu 导入").FontSize(scale.Font(c, scale.Size13)).Clicked() {
-					s.importFromBiu(dirs)
+	s.settingGroup(c, "配置", func() {
+		ui.Column(c).FillWidth().Gap(space.Px8).Children(func() {
+			ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
+				if flatButton(c, "导出配置").FontSize(scale.Font(c, scale.Size13)).Clicked() {
+					s.exportConfig()
 				}
-				ui.Text(c, "从 "+shortDir(dirs[0])+" 导入设置、快捷键、下载记录和歌词").
-					FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+				if flatButton(c, "导入配置").FontSize(scale.Font(c, scale.Size13)).Clicked() {
+					s.importConfig()
+				}
 			})
-		}
 
-		// 上一次启动做了什么，原样摆出来。用户看不见发生了什么的话，下次遇到
-		// 「我的设置怎么变了」没有任何线索——迁移是一条会改他数据的路。
-		if note := migrationNote(rep); note != "" {
-			ui.Text(c, note).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Wrap()
-		}
+			// 数据目录来自更新的版本：整个目录一个字都不写，**导入按钮也就没有意义**
+			// ——按下去每一样都会被各自的只读判断挡掉，用户只会看到四句「没带过来」。
+			// 摆一句说明，比摆一个必然失败的按钮诚实。
+			if rep.ReadOnly {
+				ui.Text(c, "数据目录来自更新的版本，这一版一个字都不会写回去，所以下面几样都没有带过来。").
+					FontSize(scale.Font(c, scale.Size12)).TextColor(dangerText(t)).Wrap()
+			} else if dirs := rep.BiuDirs; len(dirs) > 0 {
+				// 「从 Biu 导入」只在**找得到** Biu 的数据目录时才摆。摆一个点了必然说
+				// 「没找到 Biu」的按钮，等于让用户自己判断这台机器上有没有装过 Biu。
+				ui.Row(c).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
+					if flatButton(c, "从 Biu 导入").FontSize(scale.Font(c, scale.Size13)).Clicked() {
+						s.importFromBiu(dirs)
+					}
+					ui.Text(c, "从 "+shortDir(dirs[0])+" 导入设置、快捷键、下载记录和歌词").
+						FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+				})
+			}
 
-		// **「没带过来的」逐条摆出来**，这是这一段最要紧的部分。
-		//
-		// 任务书明写「凭据可以不迁，要提示重新登录」——那句提示就在这里。
-		// 不摆的后果不是「少一句话」：用户导完之后发现要重新登录，而界面上从头到尾
-		// 没提过，他会以为是应用把他踢下线了，或者干脆不知道发生过一次导入。
-		//
-		// 之前这里写的是「见下方清单」而下方**什么都没有**（`Imported.Notes` 全程
-		// 没被读过），那句话是纯骗人的。
-		s.importNotes(c, rep)
+			// 上一次启动做了什么，原样摆出来。用户看不见发生了什么的话，下次遇到
+			// 「我的设置怎么变了」没有任何线索——迁移是一条会改他数据的路。
+			if note := migrationNote(rep); note != "" {
+				ui.Text(c, note).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Wrap()
+			}
+
+			// **「没带过来的」逐条摆出来**，这是这一段最要紧的部分。
+			//
+			// 任务书明写「凭据可以不迁，要提示重新登录」——那句提示就在这里。
+			// 不摆的后果不是「少一句话」：用户导完之后发现要重新登录，而界面上从头到尾
+			// 没提过，他会以为是应用把他踢下线了，或者干脆不知道发生过一次导入。
+			//
+			// 之前这里写的是「见下方清单」而下方**什么都没有**（`Imported.Notes` 全程
+			// 没被读过），那句话是纯骗人的。
+			s.importNotes(c, rep)
+		})
 	})
 }
 

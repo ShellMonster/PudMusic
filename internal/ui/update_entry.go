@@ -38,9 +38,10 @@ func (s *Shell) settingsUpdate(c *ui.Context, st app.UpdateState) {
 		// 自己查出来，前者他会到处问人。
 		return
 	}
-	s.settingSection(c, updateSection)
-	s.settingRowEl(c, func() { s.updateVersionTitle(c, st) }, s.updateHint(st),
-		func() { s.settingsUpdateButton(c, st) })
+	s.settingGroup(c, updateSection, func() {
+		s.settingRowEl(c, func() { s.updateVersionTitle(c, st) }, s.updateHint(st),
+			func() { s.settingsUpdateButton(c, st) })
+	})
 	s.viewUpdateDialog(c, st)
 }
 

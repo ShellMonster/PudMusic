@@ -439,7 +439,8 @@ func TestTheSettingsContentIsCappedAndCentered(t *testing.T) {
 
 		// 内容那一段：左右各留一份内边距（settingsContentPad）。
 		blockLeft := left.X - settingsContentPad
-		blockRight := right.X + right.W + settingsContentPad
+		// 控件在分组卡片里：右边还隔着卡片的内边距加描边。
+		blockRight := right.X + right.W + settingsContentPad + settingsCardInset
 		avail := float32(winW - sideW)
 
 		want := float32(settingsContentMaxW)
@@ -494,7 +495,8 @@ func TestTheSettingsControlsShareOneBaseline(t *testing.T) {
 	if !ok {
 		t.Fatalf("设置页上没有「外观」那个分组标题，文字有 %q", tt.Texts())
 	}
-	baseline := head.X + head.W - settingsControlW
+	// 控件在分组卡片里，右沿比标题行往里缩一个卡片的内边距加描边。
+	baseline := head.X + head.W - settingsControlW - settingsCardInset
 
 	for _, c := range []struct {
 		label string

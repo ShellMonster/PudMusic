@@ -582,7 +582,7 @@ func TestTheSettingsPageUsesTheTypographicScale(t *testing.T) {
 				// 元素盒子，分组标题自己垫了 4（标题与第一行之间的那一点空）。
 				padBottom float32
 			}{
-				{text: "外观", size: 20, what: "分组标题", padBottom: 4},
+				{text: "外观", size: 20, what: "分组标题"},
 				{text: "主题", size: 16, what: "行标题"},
 				{text: "选择浅色或深色主题", size: 14, what: "说明"},
 			} {

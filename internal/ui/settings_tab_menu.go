@@ -232,53 +232,54 @@ func (s *Shell) pickSideMenu(c *ui.Context, st app.Settings, ro bool) {
 // 一件该改的事，但它不是「因为那一页还没接上」。
 func (s *Shell) pickLocalMusicDirs(c *ui.Context, st app.Settings, ro bool) {
 	t := c.Theme()
-	s.settingSection(c, "音乐库")
-	ui.Row(c).FillWidth().Gap(space.Px24).AlignItems(ui.Center).Children(func() {
-		ui.Column(c).Grow(1).Children(func() {
-			ui.Text(c, "本地音乐目录").FontSize(scale.Font(c, scale.Size16)).FontWeight(weightMedium)
-			ui.Text(c, "从这些文件夹里读取本地音乐").FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).Wrap()
+	s.settingGroup(c, "音乐库", func() {
+		ui.Row(c).FillWidth().Gap(space.Px24).AlignItems(ui.Center).Children(func() {
+			ui.Column(c).Grow(1).Children(func() {
+				ui.Text(c, "本地音乐目录").FontSize(scale.Font(c, scale.Size16)).FontWeight(weightMedium)
+				ui.Text(c, "从这些文件夹里读取本地音乐").FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).Wrap()
+			})
+			if flatButton(c, "添加文件夹").Width(96).Disabled(ro).Clicked() {
+				s.pickPath("本地音乐目录", true, func(path string) {
+					s.applySetting("本地音乐目录", func(cur *app.Settings) {
+						// 不加重复的：同一个目录摆两遍，音乐列表里也会出现两遍。
+						if !slices.Contains(cur.LocalMusicDirs, path) {
+							cur.LocalMusicDirs = append(slices.Clone(cur.LocalMusicDirs), path)
+						}
+					})
+				})
+			}
 		})
-		if flatButton(c, "添加文件夹").Width(96).Disabled(ro).Clicked() {
-			s.pickPath("本地音乐目录", true, func(path string) {
-				s.applySetting("本地音乐目录", func(cur *app.Settings) {
-					// 不加重复的：同一个目录摆两遍，音乐列表里也会出现两遍。
-					if !slices.Contains(cur.LocalMusicDirs, path) {
-						cur.LocalMusicDirs = append(slices.Clone(cur.LocalMusicDirs), path)
+
+		if len(st.LocalMusicDirs) == 0 {
+			ui.Text(c, "还没有目录").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Padding(space.Px4, space.None, space.None, space.None)
+			return
+		}
+		// ⚠️ **重复的目录只画一次**。设置文件是用户能直接编辑的（也能从 Biu 那边来），
+		// 两个一模一样的目录在文件里完全合法——而这一行的 key 就是路径：MyGo 在同一层里
+		// 拿到两个一样的 key 会**当场 panic**（`ui/context.go` 的 duplicateKey），那一格
+		// 带着整个设置页换成错误页，用户之前改好的设置全看不见。
+		//
+		// 这里去重而不是去改设置：写设置是 `internal/app` 那一层的事，那份文件不是这一票
+		// 的；而重复的目录本来就该只出现一遍（Biu 的 local-music 页也是这么去的）。
+		seen := make(map[string]bool, len(st.LocalMusicDirs))
+		ui.Column(c).FillWidth().Gap(space.Px4).Children(func() {
+			for i, dir := range st.LocalMusicDirs {
+				if seen[dir] {
+					continue
+				}
+				seen[dir] = true
+				ui.Row(c).Key("local-dir:" + dir).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
+					// ⚠️ 这一行的 key 用的是**路径**，不是序号（🔴 铁律四）：删掉中间
+					// 那一条之后序号会整体前移一格，按序号排的身份就落到旁边那条上
+					// 了，而 × 删掉的是它自己那一格还是隔壁那一格，从画面上看不出来。
+					ui.Text(c, dir).FontSize(scale.Font(c, scale.Size13)).Grow(1).SingleLine()
+					if flatButton(c, "×").Label("移除目录「" + dir + "」").
+						FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted).Disabled(ro).Clicked() {
+						s.removeLocalMusicDir(i)
 					}
 				})
-			})
-		}
-	})
-
-	if len(st.LocalMusicDirs) == 0 {
-		ui.Text(c, "还没有目录").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Padding(space.Px4, space.None, space.None, space.None)
-		return
-	}
-	// ⚠️ **重复的目录只画一次**。设置文件是用户能直接编辑的（也能从 Biu 那边来），
-	// 两个一模一样的目录在文件里完全合法——而这一行的 key 就是路径：MyGo 在同一层里
-	// 拿到两个一样的 key 会**当场 panic**（`ui/context.go` 的 duplicateKey），那一格
-	// 带着整个设置页换成错误页，用户之前改好的设置全看不见。
-	//
-	// 这里去重而不是去改设置：写设置是 `internal/app` 那一层的事，那份文件不是这一票
-	// 的；而重复的目录本来就该只出现一遍（Biu 的 local-music 页也是这么去的）。
-	seen := make(map[string]bool, len(st.LocalMusicDirs))
-	ui.Column(c).FillWidth().Gap(space.Px4).Children(func() {
-		for i, dir := range st.LocalMusicDirs {
-			if seen[dir] {
-				continue
 			}
-			seen[dir] = true
-			ui.Row(c).Key("local-dir:" + dir).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-				// ⚠️ 这一行的 key 用的是**路径**，不是序号（🔴 铁律四）：删掉中间
-				// 那一条之后序号会整体前移一格，按序号排的身份就落到旁边那条上
-				// 了，而 × 删掉的是它自己那一格还是隔壁那一格，从画面上看不出来。
-				ui.Text(c, dir).FontSize(scale.Font(c, scale.Size13)).Grow(1).SingleLine()
-				if flatButton(c, "×").Label("移除目录「" + dir + "」").
-					FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted).Disabled(ro).Clicked() {
-					s.removeLocalMusicDir(i)
-				}
-			})
-		}
+		})
 	})
 }
 

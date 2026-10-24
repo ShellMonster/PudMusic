@@ -579,6 +579,24 @@ func (s *Shell) settingSection(c *ui.Context, title string) {
 	ui.Text(c, title).FontSize(scale.Font(c, scale.Size20)).Padding(space.None, space.None, space.Px4, space.None)
 }
 
+// settingsCardInset 是设置分组卡片左右各占掉的宽度：内边距 16 + 描边 1。
+const settingsCardInset = space.Px16 + 1
+
+// settingGroup 是一组设置：组标题 + 一张卡片（`surface1` 底、`radiusLg` 圆角、1px 描边）
+// 包着这一组的行（设计规范 §7.9）。取代原来的「标题 + 行 + 分隔线」那种平铺写法。
+//
+// 卡片底色和圆角走 `cardBackground` / `cardRadius`（方案里的 surface1 / radiusLg）。
+// 行与行之间靠行自己的上下内边距分开，不再画分隔线。
+func (s *Shell) settingGroup(c *ui.Context, title string, body func()) {
+	t := c.Theme()
+	ui.Column(c).Key("setting-group:"+title).FillWidth().Gap(space.Px8).Padding(space.None, space.None, space.Px8, space.None).
+		Children(func() {
+			ui.Text(c, title).FontSize(scale.Font(c, scale.Size20))
+			ui.Column(c).FillWidth().Padding(space.Px8, settingsCardInset-1).Background(s.cardBackground(t)).
+				Radius(s.cardRadius(t)).Border(1, t.Border).Children(body)
+		})
+}
+
 // settingSectionEnd 是两组设置之间那条分隔线。Biu 的 `<Divider />`。
 func (s *Shell) settingSectionEnd(c *ui.Context) {
 	ui.Divider(c).FillWidth()
@@ -633,7 +651,8 @@ func (s *Shell) settingRowEl(c *ui.Context, title func(), desc string, control f
 // 下载目录」。
 func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc string, control func()) {
 	t := c.Theme()
-	row := ui.Row(c).FillWidth().Gap(space.Px24).AlignItems(ui.Center)
+	// 上下各留 10：设置行现在住在分组卡片里，行与行之间靠这点内边距分开（规范 §7.9：行高 ≥ 52）。
+	row := ui.Row(c).FillWidth().Gap(space.Px24).Padding(space.Px10, space.None).AlignItems(ui.Center)
 	if focused && s.settings.focusScroll {
 		// ⚠️ **只在这一帧调一次**：上游的规矩是「在它该进视野的那一帧调它」——
 		// 每一帧都调的话，用户自己滚走了它又被拉回来。
