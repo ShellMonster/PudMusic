@@ -59,6 +59,14 @@ const (
 // ⚠️ **缓动用 EaseInOut**：Tailwind 的 `transition-transform` 默认那一档就是
 // `cubic-bezier(0.4, 0, 0.2, 1)`（先慢—快—慢）。框架 `AnimateTo` 的默认是
 // ease-out（先快后慢），那一档在这儿看着是「弹」一下而不是「涨」上去。
+//
+// ⚠️ **这一处是全应用唯一不跟统一曲线的地方**（票 #171 定的，DESIGN.md §五
+// 那一节记着）：它是**指针跟随**的连续动画，不是点击触发的过渡——
+// 手册⓪ 反对 ease-in 的是「我不再是被动的观看者，而是主动的操作者」那一种
+// （关弹窗、点按钮）；指针停上去时放大属于「非交互动画」，ease-in-out 那个
+// 起步慢、收尾稳的手感正好跟住指针。要「精确复刻上游曲线」的话就是
+// `ui.CubicBezier(0.4, 0, 0.2, 1)`——但那和上游的差别只剩一个函数调用，
+// 视觉上没有区别，所以照 `ui.EaseInOut` 走。
 func hoverZoom(c *ui.Context, e ui.Element, key string, on bool) ui.Element {
 	target := float32(1)
 	if on {

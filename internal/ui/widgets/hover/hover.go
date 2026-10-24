@@ -12,6 +12,8 @@
 //	网格卡：右下角浮出 40px 主色圆播放钮，封面底部一条 black/90 渐变（左播放量右时长）
 //	淡入淡出 200ms（上游两处都是 `transition-opacity duration-200`）
 //
+// ⚠️ **时长抄上游，曲线是全应用那条统一的**（`motion.Unified`，票 #171）。
+//
 // # ⚠️ 反馈是**每一帧都建**的，指针不在也建
 //
 // 这是这一包唯一一处要动脑的地方。淡入要跨帧：三角画出来那一帧不透明，它得从
@@ -33,6 +35,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
@@ -141,11 +144,15 @@ func PlayingLabel(title string) string { return title + " " + PlayingMark }
 // ⚠️ MyGo 的 `Animate` 在系统开着「减少动态效果」时直接给目标值（`motion.go` 里
 // `rt.preferences().ReduceMotion`），那是系统设置而不是我们这一层的判断，别在这里
 // 自己绕过去。
+//
+// ⚠️ **曲线是全应用那条统一的**（`motion.Unified`），不是 `Animate` 的默认
+// `EaseOut`——`Animate` 就是 `AnimateWith(..., EaseOut)`，所以这里要显式写
+// `AnimateWith`。理由见 DESIGN.md §五。
 func fade(e ui.Element, key string, on bool) float32 {
 	if on {
-		return e.Animate(key, 1, Fade)
+		return e.AnimateWith(key, 1, Fade, motion.Unified)
 	}
-	return e.Animate(key, 0, Fade)
+	return e.AnimateWith(key, 0, Fade, motion.Unified)
 }
 
 // show 收掉一层：完全透明时把这一层**藏掉**。

@@ -16,6 +16,9 @@
 // 首页那一排是 `size="lg"`（44），搜索 / 设置 / UP 空间是默认的 `md`（40）——
 // 上游那四处就是这么分的。
 //
+// ⚠️ **动效那一行是上游的，我们没抄**：滑块走的是**弹簧**（`motion.TabSlide`），
+// 理由是「打断时接着走」，那是定时长曲线给不了的。详见下面 `tabSlide` 那段。
+//
 // # 为什么滑块不是子控件
 //
 // 它要**压在轨道上、文字下**。子控件的画法在文字之后，铺上去就把字盖住了；
@@ -50,9 +53,8 @@
 package ui
 
 import (
-	"time"
-
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
@@ -74,11 +76,15 @@ var (
 	tabLG = tabSize{track: 44, block: 36, font: 16}
 )
 
-// tabSlideTime 是滑块滑过去的时间（DESIGN.md「动效」：主 Tab 滑块 250ms）。
-const tabSlideTime = 250 * time.Millisecond
-
-// tabSlide 是滑块那一条曲线：250ms、ease-out，和上游 `duration-250 ease-out` 一样。
-var tabSlide = ui.Animation{Duration: tabSlideTime, Ease: ui.EaseOut}
+// tabSlide 是滑块那一下的动画：**临界阻尼弹簧**，不是定时长曲线。
+//
+// 出处、阻尼为什么从 26 上调到 32、以及那几个数实算是多少，都写在
+// `internal/ui/widgets/motion` 的 `TabSlide` 那里——值只写一处。
+//
+// ⚠️ **上游那一档是 250ms `ease-out`**（`@heroui/theme@2.4.25` 的
+// `components/tabs.ts`），我们**故意不抄**：曲线中途换目标会从当前值重新起速
+// （顿一下），弹簧保留速度——连点三个 Tab 时滑块是接着走的。
+var tabSlide = motion.TabSlide
 
 // mainTabs 画一排主 Tab。selected 是当前选中的下标，size 决定 40 / 44 那一档。
 //

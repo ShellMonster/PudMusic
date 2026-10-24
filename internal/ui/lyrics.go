@@ -56,6 +56,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -143,10 +144,14 @@ const lyricLineTransition = 300 * time.Millisecond
 // 和上游那个 `ease-out` 是同一条三次曲线。写成 `ui.Smooth`（零值）会变成 500ms
 // 的弹簧——那是滚到中间那段用的东西，不是行样式这段。
 //
+// ⚠️ **但这里显式写了曲线**（票 #171）：全应用走**一条统一曲线**
+// （`motion.Unified`），上游那个 `ease-out` 只是默认值，不是这一处的出处。
+// 时长 300ms 仍然抄上游。
+//
 // 「减少动态效果」不用在这里判：`AnimateTo` 自己读 `Preferences.ReduceMotion`，
 // 为真时第一帧就落到目标上（`mygo/ui/motion.go:322-330`）。DESIGN.md 的
 // 「减少动态效果」那一节要的就是这个。
-var lyricLineAnim = ui.Animation{Duration: lyricLineTransition}
+var lyricLineAnim = ui.Animation{Duration: lyricLineTransition, Ease: motion.Unified}
 
 // lyricPresenceKey 是每一行那个 0/1 的「在唱」值在节点上的键。
 //

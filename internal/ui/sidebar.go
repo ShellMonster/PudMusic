@@ -18,6 +18,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -33,6 +34,9 @@ const (
 
 	// sideWidthTransition 是折叠、展开和拖完松手时的过渡时长。Biu 的
 	// `transition-[width] duration-200`，逐字抄。
+	//
+	// ⚠️ **时长抄上游，曲线不抄**：上游那一档是 Tailwind 默认的 `ease-out`，
+	// 我们走全应用的**统一曲线**（`motion.Unified`，理由见 DESIGN.md §五）。
 	sideWidthTransition = 200 * time.Millisecond
 
 	// sideWidthKey 是宽度动画在 MyGo 里的键。同一个元素上同一个键的动画值
@@ -122,7 +126,10 @@ func (s *Shell) viewSide(c *ui.Context) {
 	if s.sideDragging {
 		w = side.Jump(sideWidthKey, float32(s.sideWidth))
 	} else {
-		w = side.AnimateTo(sideWidthKey, float32(target), ui.Animation{Duration: sideWidthTransition})
+		w = side.AnimateTo(sideWidthKey, float32(target), ui.Animation{
+			Duration: sideWidthTransition,
+			Ease:     motion.Unified,
+		})
 	}
 
 	// 🔴 底色取 **`Background` 而不是 `Surface`**，右缘一条 1px 的分隔线。
