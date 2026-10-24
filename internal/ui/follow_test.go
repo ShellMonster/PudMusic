@@ -9,6 +9,7 @@
 package ui
 
 import (
+	"image/color"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1180,7 +1181,8 @@ func TestUnfollowingFromTheCardRemovesIt(t *testing.T) {
 // 卡右边空出来的那一块会整块变成悬停底（浅色 `#e9e9ec`、深色 `#323236`），
 // 而那里**什么都没有**。上游那一块是纯白。
 //
-// 悬停反馈是**卡**的事（卡自己刷 `t.Surface`，见 `viewFollowCard`），不是行的事。
+// 悬停反馈是**卡**的事（卡自己刷**卡片那一档**的悬停，见 `viewFollowCard`），
+// 不是行的事。
 //
 // # 判据是「两帧一模一样」
 //
@@ -1299,4 +1301,115 @@ func TestTheFollowSentinelRowHasNoHoverSlab(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 那张卡看得出是一张卡（票 #244）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheFollowCardSitsOnItsOwnBackground 钉住「我的关注」右栏那些 UP 主
+// **看得出是一张一张的方块小卡片**。
+//
+// # 三条判据
+//
+//  1. **卡片底 ≠ 页面底**：卡片底走**卡片那一档**（`Shell.cardBackground`）——
+//     那一档和页面底差得开，那一片才看得出是一张一张的卡。原来那张卡取的是
+//     `t.Background`（和页面底同一个底），于是整片 UP 主看着是**一整块**。
+//  2. **悬停那一档从卡片自己的底出发**：常态和悬停在**同一条色阶**上（悬停是
+//     卡片底往文字色推一档），不是跳到控件那一层去。
+//  3. **推的量是「一档」**：对着上游 `content1 → content2`（zinc 的一格）——
+//     推成两档就跳得太远了。
+//
+// # 为什么要量像素
+//
+// 卡片底是**画出来**的，代码里写的那个色和画面上那个色中间隔着主题的装配
+// （方案 / 深浅 / 用户挑的底色）。量像素量的是**画面上真正画出来的那个色**。
+//
+// ⚠️ **量的是头像左边那一小块**：卡里的内容是**居中**的（`AlignItems(Center)`），
+// 所以头像左边那一块除了底色什么也没有——而头像的**圆**在那一列上，圆外的那
+// 一圈还是卡片的底。
+func TestTheFollowCardSitsOnItsOwnBackground(t *testing.T) {
+	for _, preset := range []app.ThemePreset{app.ThemePresetClassic, app.ThemePresetWarmPaper} {
+		for _, dark := range []bool{false, true} {
+			shade := "浅色"
+			if dark {
+				shade = "深色"
+			}
+			t.Run(string(preset)+"-"+shade, func(t *testing.T) {
+				st := app.DefaultSettings("")
+				st.ThemePreset = preset
+				st.ThemeMode = app.ThemeModeLight
+				if dark {
+					st.ThemeMode = app.ThemeModeDark
+				}
+				b := newUIExplore(t)
+				uiFollowTags(b, map[int]any{0: "默认分组"})
+				uiFollowList(b, 2, []any{
+					uiFollowUser(11, "第一个 UP"), uiFollowUser(12, "第二个 UP"),
+				})
+				uiFollowSearch(b, "", nil)
+				uiFollowTag(b, 0, []any{})
+
+				s, tt, _ := newSpaceShell(t, b, true, "77", withSettings(st))
+				s.navigate(followPath)
+				tt.Frame()
+				f := s.followPageOf()
+				waitFrames(t, tt, "人到了", func() bool { return len(f.users) == 2 && f.tagStarted })
+				tt.Frame()
+
+				th := s.theme.base
+				av, ok := tt.Find(f.users[1].Face)
+				if !ok {
+					t.Fatalf("第二张卡的头像没画出来，文字有 %q", tt.Texts())
+				}
+				px, py := int(av.X-20), int(av.Y+av.H/2)
+				resting := tt.Image().RGBAAt(px, py)
+
+				// ① 卡片底 = 卡片那一档，且 ≠ 页面底。
+				if want := toRGBA(s.cardBackground(th)); resting != want {
+					t.Fatalf("卡片的底色是 %v，该是卡片那一档 %v", resting, want)
+				}
+				if resting == toRGBA(th.Background) {
+					t.Fatalf("卡片的底色和页面底色一样（%v）——整片 UP 主会看着连成一块", resting)
+				}
+
+				// ② 悬停那一档：看得见、不是控件那一层、是从卡片底推的。
+				tt.Move(av.X+av.W/2, av.Y+av.H/2)
+				tt.Frame()
+				hovered := tt.Image().RGBAAt(px, py)
+				if hovered == resting {
+					t.Fatalf("指针压在卡上，底色没变（%v）——悬停看不出来", hovered)
+				}
+				if hovered == toRGBA(th.Surface) {
+					t.Errorf("悬停那一档是控件那一层 %v——常态和悬停不在同一条色阶上", hovered)
+				}
+
+				// ③ 推的量是「一档」：离卡片底近，离文字色还远（上游 content1 →
+				// content2 是 zinc 的一格，也就是百分之几）。
+				step := colorGap(hovered, resting)
+				full := colorGap(toRGBA(th.Text), resting)
+				if full == 0 {
+					t.Fatalf("卡片底和文字色一个色（%v）", resting)
+				}
+				if step*12 > full {
+					t.Errorf("悬停那一档推了 %v（离卡片底），而卡片底到文字色一共 %v——"+
+						"推得比上游 content1 → content2 那一档远", step, full)
+				}
+			})
+		}
+	}
+}
+
+// colorGap 是两个颜色差多少（三个通道的平均差）。
+//
+// ⚠️ **不用亮度差**：亮度差会把「差一点点」和「差很多」混在一起（深色下尤
+// 其如此），而这一条要判的是「有没有推一档」。
+func colorGap(a, b color.RGBA) int {
+	d := func(x, y uint8) int {
+		if x > y {
+			return int(x - y)
+		}
+		return int(y - x)
+	}
+	return (d(a.R, b.R) + d(a.G, b.G) + d(a.B, b.B)) / 3
 }

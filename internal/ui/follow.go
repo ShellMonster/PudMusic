@@ -1012,7 +1012,8 @@ func (s *Shell) viewFollowRow(c *ui.Context, f *followPage, i, cols int) {
 	// 🔴 **这一行是布局，所以它自己刷底色**（理由见 `list.LayoutRow`）：框架给
 	// 「指针压着的那一行」铺一层 `t.SurfaceHover`，而这一行是**一排卡**、比卡宽——
 	// 卡右边空出来的那一块会整块变成悬停底（实测 522×233 的 `#e9e9ec`），而那里
-	// 什么都没有。悬停反馈是**卡**的事（卡自己刷 `t.Surface`）。
+	// 什么都没有。悬停反馈是**卡**的事（卡自己刷**卡片那一档**的悬停，见
+	// `viewFollowCard`）。
 	grid = list.LayoutRow(grid, t)
 	grid.Children(func() {
 		for k := range cols {
@@ -1079,17 +1080,29 @@ func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser, selected, ring 
 	// `defaultVariants.shadow = "md"`），所以上游那些没写 `shadow=` 的卡片带的是
 	// 那一档。
 	//
-	// 底色取 **`t.Background`**：上游的 `content1` 是 **#FFFFFF（浅）/ #18181b
-	// （深）**——**正好是我们 `t.Background` 的两个值**。所以这张卡在深色下和页面
-	// 底色几乎同色，**靠那圈影分层**（DESIGN.md §4：「不要用『比背景亮一级』的
-	// 板」）。
+	// # 底色取**卡片那一档**（`cardBackground`），不是页面底色
 	//
-	// hover 那一档取 `t.Surface`：上游 `isHoverable` 是 `data-[hover=true]:bg-
-	// content2`，而 `content2` 是 **zinc[100] #f4f4f5（浅）/ zinc[800] #27272a
-	// （深）**——也正好是 `t.Surface` 的两个值。
-	card := ui.Column(c).Grow(1).Radius(t.Radius).AlignSelf(ui.Stretch).Clip().
+	// 原来这里取的是 `t.Background`——**和页面底色同一个底**，于是整片 UP 主看着
+	// 是**一整块**，只靠那圈很淡的影撑着（浅色下那圈影几乎看不见）。用户说的
+	// 「现在是整个的卡片连着的」就是这一档。
+	//
+	// 卡片那一档（方案里的 `surface1`；经典是控件那一层）是**这个仓库里卡片那一族
+	// 已经在用的一档**——动态卡片、登录页那一块、弹窗面板、头像菜单都是它
+	// （`themepreset.go` 的 `cardBackground`）。这一张卡原来没用它，于是它和
+	// 那一族长得不一样。
+	//
+	// 圆角也跟着那一族走（`cardRadius`）：经典是主题圆角的 1.5 倍（默认 8 → 12），
+	// 方案是 `radiusLg`——**12 正好是上游 HeroUI `radius="md"` 的值**。
+	//
+	// # 留白和格子之间的缝，对着上游核过（一个数都没改）
+	//
+	//   - 卡里那圈留白 **16**（上游 `CardBody` 的 `p-4`，见 `followCardPad`）；
+	//   - 卡片之间的缝 **16**（上游 `virtual-grid-page-list` 的 `ROW_GAP = 16`，
+	//     走的是 `list.GridGap`——首页和这一页共用那一份）。
+	cardBg := s.cardBackground(t)
+	card := ui.Column(c).Grow(1).Radius(s.cardRadius(t)).AlignSelf(ui.Stretch).Clip().
 		AlignItems(ui.Center).Gap(space.Px6).Padding(followCardPad).
-		Background(t.Background).
+		Background(cardBg).
 		OnClick(func() { s.navigate(upPathOf(u.Mid)) })
 	// 选中那一层：盖掉框架那块实心主色底，键盘走到它上面时给它一圈焦点环
 	//（理由见 `widgets/list/selection.go`）。
@@ -1097,9 +1110,16 @@ func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser, selected, ring 
 	// ⚠️ **环落在「格」上而不是「行」上**：这一页是网格，而用户认的是「我选的是
 	// 这张卡」（理由同上面那句「格子的底色跟着这一格自己」）。
 	card = list.SelectedRow(card, t, selected, card.Hovered(), ring)
+	// ⚠️ **卡片自己的底要盖过「选中」那一层**：那一层刷的是**页面底色**
+	//（`rowCover`），而这张卡的常态底是**卡片那一档**——让那一层赢的话，选中的
+	// 那张卡就变成「页面底上的一个洞」，用户看到的是「点一下这张卡就变了」。
+	// 所以先把框架那一层盖掉，再把卡片自己的底刷回去。
+	card = card.Background(cardBg)
 	card = shadow.HeroMedium(card, t)
 	if card.Hovered() {
-		card = card.Background(t.Surface)
+		// ⚠️ **悬停那一档从卡片自己的底出发**（`cardHoverBackground`），不是跳到
+		// 控件那一层去——那样常态和悬停不在同一条色阶上。
+		card = card.Background(s.cardHoverBackground(t, cardBg))
 	}
 
 	// 🔴 **每帧都问一次**（理由见 `followActionBarKey`）：指针在卡上时目标是 1，
@@ -1117,7 +1137,16 @@ func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser, selected, ring 
 	card.Children(func() {
 		// 头像。上游是 `rounded-full`，所以是圆的（`spaceAvatar` 画的也是圆的，
 		// 而且它四态齐全、还带 Label——无头 Tester 量得到）。
-		s.spaceAvatar(c, u.Face, followCardSide, false)
+		//
+		// ⚠️ **占位圆用页面底色**：卡片那一档在经典里也是 `t.Surface`，而
+		// `spaceAvatar` 的占位圆正是那一档——两者同一个底，那个圆就整个不见了
+		//（卡片看着是空的）。
+		//
+		// 用**页面底色**（卡片底下那一层）：卡片是盖在页面底上的，占位圆用底下
+		// 那一层的色 = 卡片上开了一个洞。而它**和悬停那一档也差得开**（悬停是
+		// 卡片底再往文字色推一档，比页面底暗），所以指针压上去的时候那个洞
+		// 不会跟着卡片一起变没。
+		s.spaceAvatarWith(c, u.Face, followCardSide, false, t.Background)
 		// 名字 18、签名 14，照 `user-card.tsx:84-85` 的 `text-lg` / `text-sm`。
 		ui.Text(c, name).FontSize(scale.Font(c, scale.Size18)).MaxLines(1).Ellipsis("…")
 		if u.Official != "" {

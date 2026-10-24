@@ -733,8 +733,25 @@ func spaceName(u app.User) string {
 // `0 4px 6px -4px`，都是 10% 黑）。**只有大号头像带**——上游给 UP 空间头像
 // 那一处写了 `shadow-lg`（`space-info.tsx:89`），列表里那些小头像没有；
 // 全都加上去的话，一排动态的作者头像会各带一圈影，看起来像浮在卡片上。
+//
+// ⚠️ **占位圆是控件那一层**（`t.Surface`）：它画在**页面底**上，而那个底比
+// 页面底暗一档（浅色）/ 亮一档（深色）——占位的头像是一个「洞」。画在**卡片
+// 上**的头像要走 `spaceAvatarWith` 自己给占位色（理由见那里）。
 func (s *Shell) spaceAvatar(c *ui.Context, face string, side float32, withShadow bool) {
 	s.spaceAvatarZoom(c, face, side, withShadow, "", false)
+}
+
+// spaceAvatarWith 是头像，**占位圆的颜色由调用方给**。
+//
+// ⚠️ **画在卡片上的头像要自己给**：卡片那一档（`cardBackground`）在**经典**里
+// 就是 `t.Surface`——占位圆和卡片同一个底，那个圆就**整个看不见**（关注卡的
+// 头像就是这样：卡片底改成卡片那一档之后，占位那个圆不见了，卡片看着是空的）。
+//
+// 给一个「和它所在的那个底差得开」的色就看得见了：关注卡给的是**页面底色**
+//（卡片底下那一层 = 卡片上开了一个洞），而页面底上的那些头像仍然是
+// `t.Surface`（那正是「页面底往文字色推一档」）。
+func (s *Shell) spaceAvatarWith(c *ui.Context, face string, side float32, withShadow bool, placeholder ui.Color) {
+	s.spaceAvatarOn(c, face, side, withShadow, "", false, placeholder)
 }
 
 // spaceAvatarZoom 是 spaceAvatar 加一个「指针移上去放大」。
@@ -747,7 +764,11 @@ func (s *Shell) spaceAvatar(c *ui.Context, face string, side float32, withShadow
 // `hover:scale-105`，加在 `<Avatar>` 上（`dynamic-feed/user.tsx:46`），而 Avatar
 // 整个是圆的——所以圆自己长大 5%。图在框里放大是另一回事（那是封面那一处）。
 func (s *Shell) spaceAvatarZoom(c *ui.Context, face string, side float32, withShadow bool, zoomKey string, on bool) {
-	t := c.Theme()
+	s.spaceAvatarOn(c, face, side, withShadow, zoomKey, on, c.Theme().Surface)
+}
+
+// spaceAvatarOn 是头像的画法本身：占位圆的颜色由调用方给。
+func (s *Shell) spaceAvatarOn(c *ui.Context, face string, side float32, withShadow bool, zoomKey string, on bool, placeholder ui.Color) {
 	box := ui.Box(c).Size(side, side).Radius(side / 2).Clip().Label(face)
 	if withShadow {
 		box = shadow.TailwindLG(box)
@@ -760,7 +781,7 @@ func (s *Shell) spaceAvatarZoom(c *ui.Context, face string, side float32, withSh
 			ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(side, side)
 			return
 		}
-		ui.Box(c).Size(side, side).Radius(side / 2).Background(t.Surface)
+		ui.Box(c).Size(side, side).Radius(side / 2).Background(placeholder)
 	})
 }
 
