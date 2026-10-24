@@ -806,6 +806,43 @@ func waitFramesFor(t *testing.T, tt *mygoui.Tester, d time.Duration, what string
 	}
 }
 
+// waitFramesClock 等一个**要画帧、而且要推钟**才成立的条件。
+//
+// # 什么时候用它，而不是 `waitFrames`
+//
+// **切 Tab 那一段过渡是按钟走的**（票 #238：旧的先淡出、新的后淡进，中间不同时
+// 画两层），而 `waitFrames` **不推钟**——Tester 的钟站着不动（AGENTS.md §2）。
+// 所以「切过去之后新那一档的内容出现」这件事**光画帧是等不到的**：得推钟把
+// 那一段过渡走完（退场 `homeFadeOut` + 进场 `homeFadeIn`）。
+//
+// ⚠️ **推的步长是 16ms**（一帧）：推进那一段过渡要 300ms 上下（见
+// `settleHome`），而一步推完的话中间那一段就**看不见**了——那正是这一条要断的
+// 东西（「中间不同时画两层」）。
+//
+// ⚠️ **别拿它去代替 `waitFrames` 到处用**：推钟会动**整个窗口**的动画（提示的
+// 延迟、Toast 的停留），而这一条只给「切 Tab 那一段」用。
+func waitFramesClock(t *testing.T, tt *mygoui.Tester, what string, cond func() bool) {
+	t.Helper()
+	waitFramesClockFor(t, tt, waitBudget, what, cond)
+}
+
+// waitFramesClockFor 是 waitFramesClock 加一个「等多久」。
+func waitFramesClockFor(t *testing.T, tt *mygoui.Tester, d time.Duration, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for {
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+		if cond() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("等了 %v，推着钟画了多少帧都还没：%s，文字有 %q", d, what, tt.Texts())
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
 // scrollFar 一次滚到头的距离。
 //
 // ⚠️ **正的 DY 是往下滚**（`platform/surface.go` 的 PointerScroll 注释）。

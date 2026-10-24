@@ -2581,7 +2581,7 @@ var Items = []Item{
 		// 归「双平台」那一组：还是播放条那一块，但说的是它上面那一句**错**
 		// （票 #320）。
 		Category: Platform,
-		// 票 #320：播放条上那一句错被压成**一行 + 省略号**（88 高的播放条装不
+		// 票 #320：播放条上那一句错被压成**一行 + 省略号**（76 高的播放条装不
 		// 下两行——这是布局的账），而 `bili.Friendly` 那张表里的话信息量很大
 		//（「B 站没有给这一条单独的音频流（歌单、活动那一种多半是这样）。在 B 站
 		// 里打开它听，或者换一首放」四十来个字）——用户常常只读到半句话。
@@ -2589,11 +2589,11 @@ var Items = []Item{
 		// 🔴 **这一族的坏法全是静默的**：完整那一句拿不到，界面上看不出坏了
 		// （那一行的**文本节点里**就是完整那一句，只是画的时候被截了——所以
 		// 「它在树上」证明不了任何事）；而播放条要是被撑成两行，最后一行会被
-		// 88 高裁掉，**界面上也看不出坏了**。
+		// 76 高裁掉，**界面上也看不出坏了**。
 		//
 		// ⚠️ **判据要分两半**：一是「完整那一句拿得到」（排开了、不止一行），
 		// 二是「播放条一个像素都没动」（打开详情前后那一行的框一模一样）。
-		Spec: "播放条上那一句错：屏幕上还是一行 + 省略号（88 高的播放条装不下两行），完整那一句在悬停提示和点开的详情层里都拿得到（详情层多行排开、能选中复制），打开详情时播放条一个像素都不动，错没了详情层就收",
+		Spec: "播放条上那一句错：屏幕上还是一行 + 省略号（76 高的播放条装不下两行），完整那一句在悬停提示和点开的详情层里都拿得到（详情层多行排开、能选中复制），打开详情时播放条一个像素都不动，错没了详情层就收",
 		Tests: []string{
 			// 详情层里是**完整那一句**，而且**排开了**（不止一行）。
 			"TestClickingTheErrorOpensTheWholeSentence",
@@ -2605,6 +2605,9 @@ var Items = []Item{
 			"TestHoveringTheErrorStillShowsTheWholeSentence",
 			// 面板开着的时候提示框不挂（两块摆在同一个位置，叠在一起像坏了）。
 			"TestTheTooltipDoesNotStackOnTopOfTheDetail",
+			// 那块面板**关得掉**：按 Esc、点外面（浮层自己管那两个手势）。
+			"TestTheDetailClosesWhenTheUserPressesEscape",
+			"TestTheDetailClosesWhenTheUserClicksOutside",
 		},
 	},
 	{
@@ -2745,6 +2748,29 @@ var Items = []Item{
 			"TestTheMiniKeysAreIcons",
 			// 两处手搓的分割线换成了框架的 `ui.Divider`，画出来还得是那一条线。
 			"TestTheTwoRulesAreDrawnAsOnePixelLines",
+		},
+	},
+	{
+		// 归「双平台」那一组：这一票动的是**名字型可点击元素**的样子。
+		//
+		// 🔴 **判据是像素**：那个名字被一个**胶囊**包着（左右各 14 像素的内边距
+		// + 圆角，指针落上去时再压一层半透明前景色），改完是**一句话字 +
+		// 悬停时一道下划线**——而「胶囊」这件事在代码里看不出来，换一种写法
+		// 一样编译得过、点得动、无障碍名字也还叫得出来，只有画面上才差得出来。
+		//
+		// ⚠️ **反面也断**：同一张卡片上那几枚**动作键**（赞 / 下一首播放 /
+		// 下载音频）悬停时**仍然要**有那一层淡底——它们是按钮，不是名字链接。
+		// 把它们一起拍平的话，「哪一个是动作」就没有了。
+		Category: Platform,
+		// issue 417：名字型可点击元素改成下划线（上游是 `hover:underline`）。
+		Spec: "名字型可点击元素（动态条目上的作者名、播放条上的 UP 名、列表行里的 UP 名）是一句话字，悬停时带一道下划线，没有胶囊底；下划线的颜色是主题算出来的那一档主色，深浅两套都读得出来；它仍然点得动、键盘走得到；同一处的动作键仍然是按钮",
+		Tests: []string{
+			"TestTheDynamicAuthorNameIsALinkNotAPill",
+			"TestThePlaybarOwnerNameIsALinkNotAPill",
+			"TestTheListOwnerNameIsALinkNotAPill",
+			"TestTheActionButtonsAreStillButtons",
+			"TestTheNameLinkIsKeyboardReachable",
+			"TestTheUnderlineColorFollowsTheTheme",
 		},
 	},
 	{
@@ -3525,12 +3551,20 @@ var Items = []Item{
 		// **对用户是错的**话——没有一样会报错，界面只是「不太对」。
 		Category: Paging,
 		// 票 #344（issue #344，BMG-179 / PR #330 的评审留的三条 minor）。
-		Spec: "UP 空间「动态」那一页：丢掉的理由**分了类**（界面按类别说，「读不懂」不说成「形态不认识」）；丢掉的计数**按不同的动态算**（B 站翻页重叠时同一条只算一次）；**「到底了」看入口有没有前进**——0 条 + 入口前进了 = 继续拉下一页，0 条 + 入口没前进 = 到底",
+		Spec: "UP 空间「动态」那一页：丢掉的理由**分了类**（界面按类别说，「读不懂」不说成「形态不认识」，「投稿没有稿件号」不说成「什么也没有」）；丢掉的计数**按不同的动态算**（B 站翻页重叠时同一条只算一次）；**「到底了」看入口有没有前进**——0 条 + 入口前进了 = 继续拉下一页，0 条 + 入口没前进 = 到底",
 		Tests: []string{
 			// 分类（服务层那一层）：四类各数各的。
 			"TestTheDroppedOnesAreToldApartByReason",
 			// 分类（画面上那句话）：「读不懂」不许被说成「形态不认识」。
 			"TestWhatWeCannotReadIsNotCalledAnUnknownShape",
+			// 「投稿没有稿件号」是**另一类**（它带着正文），服务层和画面上各一条。
+			"TestAnArchiveWithoutABvidIsItsOwnReason",
+			"TestAnArchiveWithoutABvidIsNotCalledEmpty",
+			// **正文也是空的那几条**仍算「什么也没有」（不算「投稿没有稿件号」）。
+			"TestAnArchiveWithoutABvidAndWithoutTextIsEmpty",
+			"TestAnArchiveWithoutABvidAndWithoutTextIsCalledEmpty",
+			// 加了一类而忘了加一档时，计数**不许静默少一条**。
+			"TestAnUnknownDropReasonIsStillCounted",
 			// 计数去重：两页里重叠的一条，计数是 1 不是 2。
 			"TestTheDroppedCountCountsDifferentDynamicsNotHowManyTimesTheyAppear",
 			// 跨页去重靠的是**身份**（服务层那一层）。
@@ -3539,6 +3573,9 @@ var Items = []Item{
 			// 闸门：0 条 + 入口前进了 → 继续拉；0 条 + 入口没前进 → 到底。
 			"TestAnEmptyPageWhoseOffsetMovesStillLoadsTheNextPage",
 			"TestAnEmptyPageWhoseOffsetStaysIsTheEnd",
+			// 闸门的**界面那一半**：「0 条 + 入口没前进」要从界面这一侧也收手
+			//（入口前进了的那一次必须问出去，入口没前进就停）。
+			"TestThePagerStopsWhenAnEmptyPageKeepsTheSameOffset",
 		},
 	},
 }
