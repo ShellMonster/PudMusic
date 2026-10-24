@@ -140,6 +140,27 @@ type State struct {
 	// ⚠️ **它不是 `Title`**：`Title` 是「正在放的那首」，而取流这一趟里正在放
 	// 的还是上一首。用户要知道的是「我刚才点的那一首在准备」，不是上一首。
 	LoadingTitle string
+	// LoadingStage 是这一趟取流**现在卡在哪一段**（票 #220）。
+	//
+	// 取值是那几个短词（见 `internal/app/online.go` 的 `loadStage*`）：
+	// 「问分集」/「问地址」/「下音频」/「解码」。
+	//
+	// 🔴 **它是为「慢」准备的**：界面上说一句「卡在『下音频』这一步」，
+	// 比一枚不说话的转圈有用得多——而分不清「网络慢」和「解码慢」的
+	// 话，用户只会觉得应用坏了。
+	LoadingStage string
+	// LoadingSlow 是「这一段已经慢到该说出来了」（票 #220）。
+	//
+	// ⚠️ **它和 `Loading` 是两件事**：`Loading` 说「还在准备」，
+	// 这一栏说「**准备得慢**」——后者要换一句**不一样的话**上屏，
+	// 否则用户看到的还是那一句「正在取流」，而他等的那个「非常慢」
+	// 一句话都没说。
+	LoadingSlow bool
+	// LoadingWait 是**当前这一段**已经等了多久。
+	//
+	// ⚠️ **它记的是「这一段」**：取流是三段串行的网络往返，每一段都
+	// 重新起算——所以这一栏是「用户此刻正在等的那一件事」。
+	LoadingWait time.Duration
 	// Reconnecting 是「**正在重连**」：断流之后应用在救这一首。
 	//
 	// 🔴 **它和 `Loading` 是两件事**，用户看到的差别很大：
@@ -295,6 +316,67 @@ type App struct {
 	loading bool
 	// loadingTitle 是正在取的那一首的名字（见 State.LoadingTitle）。
 	loadingTitle string
+	// loadingStage 是这一趟取流**现在卡在哪一段**（见 State.LoadingStage）。
+	//
+	// 🔴 **它是为「慢」准备的**：用户说「取流非常慢」的时候，他看得见的
+	// 只有一枚转圈——而「慢」有两种完全不同的病：网络慢（等字节）和
+	// 这一台机器解得慢（等解码器）。界面上说一句「卡在『下音频』这一步」
+	// 比一枚转圈有用得多（票 #220）。
+	//
+	// 取值是那几个 `loadStage*` 常量（见 online.go）——它们是**给人看的**，
+	// 所以要短。
+	loadingStage string
+	// loadingSince 是**当前这一段**开始的时刻。
+	//
+	// ⚠️ **它记的是「这一段」，不是「这一趟」**：取流是三段串行的网络
+	// 往返（见 `onlinePlayTimeout` 那段注释），每一段都重新起算——所以
+	// 「这一段等了多久」才是用户此刻真正在等的那件事。
+	loadingSince time.Time
+	// loadingSlow 是「这一段已经慢到该说出来了」（见 State.LoadingSlow）。
+	//
+	// ⚠️ **它是一个闹钟的结果，不是一个比较的结果**：界面是**按需绘制**
+	// 的（见 AGENTS.md「静默出错的几条铁律」第 3 条），所以「刚刚变慢」
+	// 这一刻必须有人去叫醒界面——比较出来的值在界面不动的时候不会变。
+	loadingSlow bool
+	// loadSlowStop 是「变慢」那个闹钟的停掉函数。
+	//
+	// ⚠️ **它和 `loadStop` 各存各的**：那一个管「这一段超时了判失败」，
+	// 这一个管「这一段慢到要告诉用户」。共用一个字段的话，先停掉另一个
+	// 就把另一个的闹钟弄丢了（那一个丢了 = 永远转圈，这一个丢了 =
+	// 慢了也不说）。
+	loadSlowStop func()
+	// loadFilled 是**上一次检查时**字节源已经下到的字节数。
+	//
+	// ⚠️ **它是「下载那一段还有没有进展」的比对基准**（见 `downloadProgressLocked`）：
+	// 拿「这一次下到多少」和「上一次下到多少」比，变大了就是「网络还在动」。
+	//
+	// -1 = 还没有字节源（这一段还在问地址）。
+	loadFilled int64
+	// loadSrc 是「**这一趟取流**」自己的那条字节源——**看门狗的那一份**。
+	//
+	// 🔴 **它和 `pendingSrc` 是两栏，不能混**（票 #220 的评审复现过）：
+	//
+	//	pendingSrc	「当前在管的那条源」。换音质（`restreamOnline`）和
+	//			换流重开（`refreshOnlineNow`）都会建**它们自己的**源并
+	//			**顶掉这一栏**
+	//	loadSrc		「用户此刻在等的那一条」。只有「开新歌」那一趟
+	//			会写它
+	//
+	// 混了的后果正是这一票要消灭的那种症状：看门狗问的是「这一趟还在下吗」，
+	// 而它问的却是**别的路换上去的那一条**——于是一条正在好好下、进度一直在
+	// 涨的流被判成「一个字节都没来」，然后被掐掉。
+	//
+	// ⚠️ **它的命和 `pendingSrc` 不一样**：`pendingSrc` 在播放器装上之后
+	// 就交出去了（源归播放器管），而 `loadSrc` 要到**这一趟结束**才清——
+	// 中途被顶掉的那一条也得由看门狗自己关掉（见 `abortPendingSource`）。
+	loadSrc *audio.StreamSource
+	// loadSrcGen 是 loadSrc 属于哪一趟（见上）。
+	loadSrcGen int
+	// loadTripSince 是**这一趟取流**从点下去开始的时刻。
+	//
+	// ⚠️ **它和 `loadingSince` 是两件事**：`loadingSince` 是「当前这一段」
+	// （换段就重置），而这一栏是「整趟」（不重置）——总闸量的是整趟。
+	loadTripSince time.Time
 	// reopenInFlight 是「**应用**正在从播放位置重开」那一半。
 	//
 	// ⚠️ **源那一半不住在这儿**（它住在 `audio.StreamSource` 那边，见
@@ -708,6 +790,13 @@ func (a *App) Snapshot() State {
 		ErrDetail:     a.errDetail,
 		Loading:       a.loading,
 		LoadingTitle:  a.loadingTitle,
+		// 🔴 **「慢」这一档是三样东西**：卡在哪一段、够不够慢、等了多久。
+		// 「够了多久」用**这一段开始的时刻**现算（见 App 里 loadingSince
+		// 那段注释）——界面每一帧都要读这一栏，而现算比另外存一栏更不容易
+		// 走偏（那一栏要跟着每一次「重新起算」一起改）。
+		LoadingStage: a.loadingStage,
+		LoadingSlow:  a.loadingSlow,
+		LoadingWait:  a.loadingWaitLocked(),
 		// 🔴 **「正在重连」那一档要去问源**（见 `reconnect.go`）：源那一半住在
 		// 源那边，应用只问当前在管的那一两条流——所以一条被丢掉的源抢不走它。
 		Reconnecting:     a.reopenInFlight || retrying,

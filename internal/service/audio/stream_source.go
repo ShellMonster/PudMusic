@@ -172,6 +172,16 @@ type StreamSourceOptions struct {
 	// 连接恢复了。
 	OnReconnected func()
 
+	// OnFirstBytes 在**头几个字节落到缓存里**的时候调一次。
+	//
+	// 它是「下载首段字节」那一段的计时点（票 #220）：上层要把「等字节」
+	// 和「等解码器」**分开量**——而这两段的快慢完全不是一回事：前者是
+	// 网络，后者是这台机器的解码器。混在一起就分不出「慢的是网络」还是
+	// 「慢的是解码」。
+	//
+	// ⚠️ **只调一次**（第一次有字节的时候）。参数是那一刻已经下到的字节数。
+	OnFirstBytes func(n int64)
+
 	// Backoff 是**每一次重试之前要等的时长**序列。
 	//
 	// 零值用默认：1 秒、2 秒、4 秒（见 `defaultBackoff`）。
@@ -261,6 +271,11 @@ type StreamSource struct {
 	// （见 `StreamSourceOptions`）。它们给上层一个能显示在界面上的状态。
 	onRetry  func(attempt int, wait time.Duration)
 	onReconn func()
+	// onFirstBytes 是「头几个字节到了」那个回调（见 `StreamSourceOptions`）。
+	// 它给上层一个把「等字节」和「等解码器」分开量的计时点。
+	onFirstBytes func(n int64)
+	// firstBytesSeen 是「已经报过第一次了」——那个回调只该调一次。
+	firstBytesSeen bool
 	// retryPending 是「上一次是重试来的，字节还没回来」。
 	//
 	// 字节回来的那一刻（`append`）就报一次「恢复了」——判据是**真的有
@@ -308,23 +323,24 @@ func NewStreamSource(o StreamSourceOptions) (*StreamSource, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &StreamSource{
-		file:      f,
-		path:      f.Name(),
-		size:      o.Size,
-		urls:      append([]string(nil), o.URLs...),
-		quality:   "",
-		maxRefr:   orDefaultInt(o.MaxRefresh, defaultMaxRefresh),
-		expiresAt: o.ExpiresAt,
-		client:    o.Client,
-		refetch:   o.Refetch,
-		onRefr:    o.OnRefresh,
-		onRetry:   o.OnRetry,
-		onReconn:  o.OnReconnected,
-		backoff:   append([]time.Duration(nil), o.Backoff...),
-		now:       o.Now,
-		stall:     orDefaultDuration(o.StallTimeout, defaultStallTimeout),
-		ctx:       ctx,
-		cancel:    cancel,
+		file:         f,
+		path:         f.Name(),
+		size:         o.Size,
+		urls:         append([]string(nil), o.URLs...),
+		quality:      "",
+		maxRefr:      orDefaultInt(o.MaxRefresh, defaultMaxRefresh),
+		expiresAt:    o.ExpiresAt,
+		client:       o.Client,
+		refetch:      o.Refetch,
+		onRefr:       o.OnRefresh,
+		onRetry:      o.OnRetry,
+		onReconn:     o.OnReconnected,
+		onFirstBytes: o.OnFirstBytes,
+		backoff:      append([]time.Duration(nil), o.Backoff...),
+		now:          o.Now,
+		stall:        orDefaultDuration(o.StallTimeout, defaultStallTimeout),
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 	// Options.Size 的 0 和 -1 都表示「还不知道」。不归一的话 size 会停在 0，
 	// 于是 Seek(0, SeekEnd) 立刻答 0——extaf 拿到的 AudioFileID 长度是 0，
