@@ -898,6 +898,17 @@ var Items = []Item{
 			"TestTheMiniWindowStepsThroughTheQueue",
 			"TestDraggingTheMiniProgressSeeksOnlyOnRelease",
 			"TestTheMiniVolumeSliderSetsTheVolume",
+			// 静音在小窗里**看得出来**（票 #345）：滑块停在用户设的那一档
+			// （静音是它自己的一格），所以能说明「现在是静音」的只有那枚图标。
+			"TestTheMiniWindowShowsTheMuteState",
+			"TestClickingTheMiniMuteIconUnmutes",
+			"TestTheMiniMuteIconFollowsTheApp",
+			"TestTheMiniMuteIconSaysItIsMuted",
+			"TestTheMiniMuteIconMatchesThePlayBar",
+			"TestTheMuteGlyphDiffersFromTheLoudOne",
+			"TestTheMiniMuteStateSurvivesARestart",
+			"TestTheMiniMuteIconIsThereWithoutATrack",
+			"TestTheMiniVolumeTipSaysItIsMuted",
 			// 小窗里认的是**用户配的那一份**而不是出厂默认值；以及在小窗里按
 			//「切换mini/完整模式」是关掉而不是再开一个。
 			// （设置页写着「窗口在前台时按它就有用」，而小窗是最常停在前面的那一扇。）

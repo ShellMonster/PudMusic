@@ -82,6 +82,19 @@ const (
 	// miniVolumeW 是音量条的宽度。拿 80 是「还能看出音量是一到几成」的下限。
 	miniVolumeW = 80
 
+	// miniVolumeIconW 是音量图标那一枚的点击区边长。
+	//
+	// ⚠️ **它比另外三枚键（28）窄 6**：320×100 那一行是「歌名 + 音量图标 +
+	// 音量滑块 + 退出」，右边那一列只有 208 宽（320 - 100 封面列 - 12 列内边距），
+	// 而歌名的下限是 60（`miniTitleMinW`：再窄就认不出是哪首了）。
+	// 账：60 + 22 + 80 + 28 + 三道 6 的缝 = 208 —— **正好是那一列的宽**。
+	// 图形还是 18（和另外三枚一样大），只有点击区窄一圈。
+	//
+	// ⚠️ **别为了「凑齐 28」去挤别的东西**：滑块 80 是票 #168 定的（「音量保留，
+	// 行为不变」），歌名 60 是同一票定的下限，退出键 28 是上游那一枚的规格。
+	// 三样都不动，这一枚就只有 22。
+	miniVolumeIconW = 22
+
 	// miniBackBtnW 是「回到主窗口」那个键（`iconExpand`）的点击区边长：
 	// 18 的图标 + 每边 5。
 	//
@@ -579,6 +592,34 @@ func (s *Shell) viewMiniTitleRow(c *ui.Context, st app.State, t *ui.Theme) {
 			ui.Text(c, title).Key("mini-title").Grow(1).MinWidth(miniTitleMinW).
 				FontSize(scale.Font(c, scale.Size13)).MaxLines(1).Ellipsis("…").TextColor(textColor(t, st.HasTrack))
 
+			// 音量图标：和播放条上那一枚**同一套画法**（`volumeIcon` 三档），
+			// 所以静音的时候两扇窗画的是同一张图。
+			//
+			// 🔴 **它必须在这儿，而不能只靠滑块**（票 #345 / BMG-180 评审）：
+			// 静音是**它自己的一格**，音量那一格一动不动（用户设 20%，静音之后
+			// 滑块仍然停在 20%）——于是「滑块停在 20%」这件事**既可能是音量
+			// 20%，也可能是静音**，光看滑块分不出来。而这扇窗里原来**一个字**
+			// 都不说静音（音量滑块那枚提示写的是「音量 20%」）。
+			//
+			// 图标这一枚同时是**可点的**：点了就是静音 / 取消静音（和播放条那枚
+			// 同一个动作，`aria-label` 也一样——上游 `isMuted ? "取消静音" : "静音"`）。
+			// 不做可点的话，这扇窗里就**没法取消静音**了（滑块只改音量，改不了
+			// 静音那一格）。
+			//
+			// ⚠️ **图标是「音量三档」而不是一枚专门的静音图**：那是 DESIGN.md
+			// §六 播放条那一节定的画法（上游 `music-volume` 同一套），而这张
+			// 图标**在主窗口已经画了**——两扇窗用同一个 `volumeIcon`，不另起一套。
+			muteLabel := "静音"
+			if st.Muted {
+				muteLabel = "取消静音"
+			}
+			muteIcon := volumeIcon(st.Volume, st.Muted)
+			if s.miniTip(c, flatIconButton(c, muteIcon, muteLabel, 18).
+				Key("mini-mute").Size(miniVolumeIconW, miniVolumeIconW).Padding(space.None, space.Px2),
+				muteLabel).Clicked() {
+				s.toggleMute()
+			}
+
 			// 音量在这一行而不是控制那一行：Biu 那边没有音量，而控制那一行只摆
 			// 三个键（上一首 / 播放 / 下一首），一行里再塞一根滑块会让那三个键
 			// 和它挤成一团（账在 `viewMiniTransport`）。
@@ -597,10 +638,25 @@ func (s *Shell) viewMiniTitleRow(c *ui.Context, st app.State, t *ui.Theme) {
 			// 「音量」和「播放进度」长得几乎一样（都是 16 高的圆角条），而画面上
 			// 没有任何一个字说明哪一根是哪个——同一扇窗里「退出」那一枚倒是有
 			// 提示。提示说「音量 80%」，指针停上去就知道自己在拖什么。
+			//
+			// ⚠️ **提示里不提静音**：它说的是**音量那一格**的值，而那一格在
+			// 静音时**一动不动**（用户设 20%，静音后还是 20%）。静音由**左边
+			// 那一枚图标**说（和播放条上的做法一样：图标说静音，滑块说音量）。
+			// ⚠️ **提示在静音时要改口**：「音量 20%」这句话在静音时是**误导**——
+			// 那一格记的是用户设的音量，可现在**一点声都没有**。图标已经说了
+			// 「静音」，而提示是**指针停在滑块上**时读的那一句，它也得说真话。
+			//
+			// ⚠️ **主窗口那一侧不改**（播放条音量浮层里的百分比照旧是那一档）：
+			// 那一扇窗的图标就在浮层旁边，说的是同一件事；这里这扇窗的滑块是
+			// **常驻**的，提示是唯一能读到「现在没声」的一行字。
 			vol := st.Volume
+			volTip := "音量 " + volPercent(st.Volume)
+			if st.Muted {
+				volTip = "已静音（音量 " + volPercent(st.Volume) + "）"
+			}
 			volSlider := selfSlider(c.Key("mini-volume"), &vol, 0, 1, knobMiniVolumeLook).Width(miniVolumeW).
 				Height(16).Label("音量")
-			if s.miniTip(c, volSlider, "音量 "+volPercent(st.Volume)).Changed() {
+			if s.miniTip(c, volSlider, volTip).Changed() {
 				s.app.SetVolume(vol)
 			}
 

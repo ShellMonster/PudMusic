@@ -503,9 +503,19 @@ type waveStateKey struct{}
 //
 // ## ⚠️ **那个 init 闭包不捕获任何东西**
 //
-// 捕获了 `now` 的闭包每一帧都要把捕获的变量拷进闭包对象里（堆上一次分配）。
 // 而「起始时刻」并不需要靠 init 带进来——下面那句「零点还没定过」就能定它，
 // 于是这个闭包是**静态**的（编译成一个常量符号），每帧零分配。
+//
+// ⚠️ **「捕获了变量」本身不是分配的原因**（这一条实测出来的，别再写回去）：
+// 决定分配的是**闭包有没有逃出去**。`ui.Local` 的 `init` 参数**只被调用一次**
+// （`mygo/ui/context.go` 的 `coreLocal`：`v := new(T); *v = init()`），于是
+// 编译器可以把它**内联掉**——逃逸分析实测：`wavePhase.func1` 是
+// 「can inline … with cost 2」，而**捕获了变量**的同一形状的闭包，分配数与
+// 不捕获的**一模一样**（都是 0 次）。
+//
+// 真正让那一票之前每帧付钱的是**键**（`key+":start"` 那个字符串）：它既要在
+// 运行期**拼出来**，又要**装箱进 `any`**（`ui.Local` 的键是 `any`），两次
+// 分配。闭包只是顺带被算在了头上。
 func wavePhase(c *ui.Context, wave ui.Element) float32 {
 	now := c.Now()
 	st := ui.Local(wave, waveStateKey{}, func() waveState { return waveState{} })

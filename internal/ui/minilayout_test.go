@@ -151,12 +151,15 @@ func TestTheMiniCardFitsInThreeHundredAndTwentyByOneHundred(t *testing.T) {
 
 	// 账一：控制那一行。三个键 + 两道缝。
 	transport := 2*miniStepW + miniPlayW + 2*gap
-	// 账二：标题那一行。歌名有下限（`MinWidth`，再窄就一个字都不剩）、音量、退出。
-	titleRow := miniTitleMinW + miniVolumeW + miniBackBtnW + 2*gap
+	// 账二：标题那一行。歌名有下限（`MinWidth`，再窄就一个字都不剩）、音量图标、
+	// 音量、退出。
+	//
+	// ⚠️ **三道缝不是两道**：静音图标加进来之后那一行是四样东西（票 #345）。
+	titleRow := miniTitleMinW + miniVolumeIconW + miniVolumeW + miniBackBtnW + 3*gap
 	for _, b := range []struct {
 		what string
 		need float32
-	}{{"上一首 + 播放 + 下一首", float32(transport)}, {"歌名 + 音量 + 退出", float32(titleRow)}} {
+	}{{"上一首 + 播放 + 下一首", float32(transport)}, {"歌名 + 音量图标 + 音量 + 退出", float32(titleRow)}} {
 		if progress.W+0.5 < b.need {
 			t.Errorf("%s 要 %.0f 宽，而右边那一列只有 %.0f：版面引擎会把挤不下的控件"+
 				"按比例缩掉（控件还在、文本也还在，只是画出来的那几个字被裁了）",
@@ -166,8 +169,11 @@ func TestTheMiniCardFitsInThreeHundredAndTwentyByOneHundred(t *testing.T) {
 
 	// 另外两条：都掉到窗口外面去了，或者互相压着（命中链只认最上面那个，被压住的
 	// 那个永远按不到，而 Find 照样找得到它的名字）。
+	//
+	// ⚠️ **静音图标也在这一列里**（票 #345 加的）：它和滑块挨着，两边挨着的
+	// 控件压在一起就是「点得到名字、按不到」。
 	w, h := float32(miniWidth), float32(miniHeight)
-	names := []string{"上一首", "播放", "下一首", "退出", "音量", "播放进度"}
+	names := []string{"上一首", "播放", "下一首", "退出", "音量", "播放进度", "静音"}
 	rects := make(map[string]mygoui.Rect, len(names))
 	for _, n := range names {
 		r, ok := tt.Find(n)
