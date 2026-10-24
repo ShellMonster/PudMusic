@@ -45,10 +45,10 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
@@ -229,6 +229,12 @@ type newMusicGrid struct {
 
 	// acts 是点一下那一格会做的事（放队列）。见 actions.go。
 	acts list.Actions
+
+	// ownerTip 记着每一格那句「打开 X 的空间」（票 #360）。
+	//
+	// ⚠ **理由和 `widgets/list` 那几个一模一样**：它是「每帧每格算一遍、结果
+	// 不变」的那一种（现算的话每帧每格一次字符串拼接，见 `rowkey.Memo`）。
+	ownerTip rowkey.Memo[string, string]
 
 	// draw 是包了 recover 的画法，见 View。建的时候包一次就够，每帧包一次是
 	// 白花开闭包。
@@ -554,7 +560,18 @@ func (g *newMusicGrid) viewCard(c *ui.Context, i int, coverSide float32) {
 		}
 		ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size16)).TextColor(titleColor).MaxLines(1).Ellipsis("…")
 		if sh.Owner != "" || sh.Live {
-			list.OwnerLine(c, sh, scale.Font(c, scale.ListOwner), leading.Owner, t.TextMuted, 0, false)
+			// ⚠ **副标题那一行和列表里是同一套**（`list.OwnerLine`）：现场标签（有就
+			// 画）+ UP 名——有编号时那一枚**可点**，点了进他的空间（票 #360），没有
+			// 时照旧是普通字（名字照样显示，只是点不动）。
+			//
+			// ⚠ **提示是记好的那一份**（`g.ownerTip`）：现算的话每帧每一格一次字符串
+			// 拼接（票 #313 那一类）。
+			//
+			// ⚠ **这一块原来没有设行高**：所以 `lh` 传 0（`list.OwnerLine` 的
+			// 约定是「不给就不设」，而 `LineHeight(0)` 是真的把行高设成 0）。
+			list.OwnerLine(c, sh, m,
+				g.ownerTip.At(i, m.Owner, list.OwnerTipText),
+				scale.Font(c, scale.Size14), 0, t.TextMuted, g.acts)
 		}
 	})
 }

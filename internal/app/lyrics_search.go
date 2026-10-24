@@ -477,7 +477,7 @@ func (a *App) AdoptLyricPreview() string {
 	a.lyricPreview.open = false
 	a.lyricPreview.lrc = ""
 	a.lyricPreview.translated = ""
-	entry, c := a.putLyricsLocked(key, lrc, translated)
+	entry, c := a.putLyricsLocked(key, lrc, translated, lyrics.OriginSearch)
 	wake := a.wake
 	hook := a.hookBetweenAdoptStateAndSave
 	a.mu.Unlock()
