@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	mygoui "github.com/egoist/mygo/ui"
 )
 
 // 这一组是票 #358：**开右侧的队列抽屉时，中间那一列的封面来回闪**。
@@ -145,36 +147,8 @@ func openingTheQueueDrawerDoesNotMakeTheListCoversFlash(t *testing.T, preset app
 	// 在这一刻超的。
 	s.drawerOpen = true
 
-	// 记下每一张就绪的封面**是哪一个位图对象**：闪一次就是换了一个对象。
-	bitmaps := map[string]any{}
-	for _, u := range urls {
-		if st := s.images.Get(u); st.Ready() {
-			bitmaps[u] = st.Bitmap
-		}
-	}
-
 	// 连着画一百帧：这一屏的封面不许退回占位（那正是「闪」）。
-	for frame := range 100 {
-		tt.Advance(16 * time.Millisecond)
-		tt.Frame()
-		for _, u := range urls {
-			st := s.images.Get(u)
-			if st.Ready() {
-				if old, ok := bitmaps[u]; ok && old != any(st.Bitmap) {
-					t.Fatalf("开抽屉之后第 %d 帧：%s 的封面**换了位图对象**"+
-						"（%v → %v）——它被挤掉又下一次了（这就是「闪」）",
-						frame, u, old, st.Bitmap)
-				}
-				continue
-			}
-			if _, ok := bitmaps[u]; ok {
-				t.Fatalf("开抽屉之后第 %d 帧：%s 从有图退回占位了（Loading=%v Err=%v）——\n"+
-					"这就是「开抽屉时中间那一列的封面来回闪」（票 #358）。\n"+
-					"（内存账 %d 字节，缓存上限 %d 字节）",
-					frame, u, st.Loading, st.Err, s.images.UsedBytes(), imgcache.DefaultMaxBytes/8)
-			}
-		}
-	}
+	coversStayPut(t, tt, s, urls, "开抽屉之后")
 
 	// 出图：深浅两套各存一张（`BIU_SHOT_DIR` 不设就跳过）。
 	//
@@ -188,4 +162,273 @@ func openingTheQueueDrawerDoesNotMakeTheListCoversFlash(t *testing.T, preset app
 	tt.SetDark(true)
 	tt.Frame()
 	save(t, shotDir, "81-深色-开抽屉封面不闪-"+string(preset)+".png", tt)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 历史记录页：**它一直闪**（用户 2026-10-24 报的**第二处**）
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// # 现象
+//
+// 用户原话：「**历史记录 页的icon一直在闪动**」——**不是点开抽屉才闪，是一直闪**。
+//
+// # 根因：和抽屉那一处**是同一个**
+//
+// 历史记录页的行也走 `widgets/list` 的封面那一路（`hover.RowCover` →
+// `imgcache.ViewTitled`），所以它的封面也是**缓存里的一条**。而那一页一屏就有
+// 十几张封面，缓存的字节上限（96MB）一超，LRU 就开始挤——**挤掉的正是画面上
+// 正画着的那几张**，于是它们退回占位、重新下一次、再解一次码……
+//
+// **于是它一直闪**：挤 → 退占位 → 重新下 → 到了 → 又被挤 → ……（这一条就是
+// issue #208 说的「有图 ↔ 占位反复切换」，只是那一页的封面更多、更容易超）。
+//
+// 抽屉那一处是「**一开抽屉**才闪」——因为是抽屉那十几行**同时**要封面把上限
+// 顶破了；历史记录这一页是「**它自己那一屏**就把上限顶破了」。
+//
+// ⚠️ **所以修法是同一处**（`widgets/imgcache` 的挤的循环跳过画面上正画着的
+// 那几张），而这一条把它**钉住**：将来动 `visibleFrames` 或 `BeginFrame` 的
+// 接线，这一页会悄悄闪回去。
+func TestTheHistoryPageCoversDoNotKeepFlashing(t *testing.T) {
+	// 一个假图床：封面从这儿下（**不打真 B 站**）。
+	imgSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(coverJPEG(t, 1920, 1080))
+	}))
+	defer imgSrv.Close()
+
+	// 假 B 站：一页历史记录，每一条都带封面地址。
+	f := newLibFake(t)
+	f.mu.Lock()
+	f.history[1] = historyBodyWithCovers(20, imgSrv.URL)
+	f.mu.Unlock()
+
+	tt, s := libraryShell(t, f, historyPath)
+	// 缓存的字节上限压到「一屏装不下」——真机上是这一页自己的封面把它顶破的。
+	s.images.SetMaxBytes(imgcache.DefaultMaxBytes / 8)
+
+	// 这一屏的封面地址。
+	urls := historyCoverURLs(20, imgSrv.URL)
+
+	// 等这一页的封面都到齐（到齐之前退回占位是正常的：那一张还没下完）。
+	ready := map[string]bool{}
+	for range 600 {
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+		for _, u := range urls {
+			if s.images.Get(u).Ready() {
+				ready[u] = true
+			}
+		}
+		if len(ready) >= 10 {
+			break
+		}
+	}
+	if len(ready) == 0 {
+		t.Fatalf("一帧都没画到封面——这一页根本没画封面（文字有 %q）", tt.Texts())
+	}
+	t.Logf("这一屏画到了 %d 张封面，内存账 %d 字节（上限 %d）",
+		len(ready), s.images.UsedBytes(), imgcache.DefaultMaxBytes/8)
+
+	// 记下每一张就绪的封面**是哪一个位图对象**：闪一次就是换了一个对象。
+	bitmaps := map[string]any{}
+	for _, u := range urls {
+		if st := s.images.Get(u); st.Ready() {
+			bitmaps[u] = st.Bitmap
+		}
+	}
+
+	// **再开队列抽屉**：抽屉里那二十行又来一批新封面——真机上「一开抽屉就闪」
+	// 就是这么来的。历史记录这一页不需要它（它自己那一屏就超了），但走一遍
+	// 更接近用户看到的那个局面。
+	items := make([]app.Item, 0, 20)
+	for i := range 20 {
+		items = append(items, app.Item{
+			Source: "local", Type: "audio",
+			Title: "队列 " + strconv.Itoa(i),
+			Cover: imgSrv.URL + "/q" + strconv.Itoa(i) + ".jpg",
+		})
+	}
+	s.app.Queue().Reset(items...)
+	s.drawerOpen = true
+
+	// 连着画一百帧：这一页的封面不许退回占位（那正是「一直闪」）。
+	for frame := range 100 {
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+		for _, u := range urls {
+			st := s.images.Get(u)
+			if st.Ready() {
+				if old, ok := bitmaps[u]; ok && old != any(st.Bitmap) {
+					t.Fatalf("第 %d 帧：%s 的封面**换了位图对象**"+
+						"（%v → %v）——它被挤掉又下一次了（这就是「一直闪」）",
+						frame, u, old, st.Bitmap)
+				}
+				continue
+			}
+			if _, ok := bitmaps[u]; ok {
+				t.Fatalf("第 %d 帧：%s 从有图退回占位了（Loading=%v Err=%v）——\n"+
+					"这就是「历史记录页的 icon 一直在闪」（票 #358）。\n"+
+					"（内存账 %d 字节，缓存上限 %d 字节）",
+					frame, u, st.Loading, st.Err, s.images.UsedBytes(), imgcache.DefaultMaxBytes/8)
+			}
+		}
+	}
+}
+
+// coversStayPut 断「这一屏的封面不许来回切」——首页、历史记录、稍后再看三处
+// 共用这一副尺子。
+//
+// what 是这一页的名字（报错时用）。
+func coversStayPut(t *testing.T, tt *mygoui.Tester, s *Shell, urls []string, what string) {
+	t.Helper()
+	// 记下每一张就绪的封面**是哪一个位图对象**：闪一次就是换了一个对象。
+	bitmaps := map[string]any{}
+	for _, u := range urls {
+		if st := s.images.Get(u); st.Ready() {
+			bitmaps[u] = st.Bitmap
+		}
+	}
+	for frame := range 100 {
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+		for _, u := range urls {
+			st := s.images.Get(u)
+			if st.Ready() {
+				if old, ok := bitmaps[u]; ok && old != any(st.Bitmap) {
+					t.Fatalf("%s 第 %d 帧：%s 的封面**换了位图对象**"+
+						"（%v → %v）——它被挤掉又下一次了（这就是「闪」）",
+						what, frame, u, old, st.Bitmap)
+				}
+				continue
+			}
+			if _, ok := bitmaps[u]; ok {
+				t.Fatalf("%s 第 %d 帧：%s 从有图退回占位了（Loading=%v Err=%v）——\n"+
+					"这就是「封面在有图和占位之间来回切」（票 #358）。\n"+
+					"（内存账 %d 字节，缓存上限 %d 字节）",
+					what, frame, u, st.Loading, st.Err, s.images.UsedBytes(), imgcache.DefaultMaxBytes/8)
+			}
+		}
+	}
+}
+
+// historyBodyWithCovers 装一页历史记录，每一条都带封面地址（封面在那个假图床上）。
+//
+// ⚠️ **和 `historyBody` 差在封面地址上**：那一份把封面写成空串（于是界面上是
+// 「没有地址」那一档，不进缓存）；这一份给真的地址，于是封面走缓存——
+// 而闪的就是缓存里那一条。
+func historyBodyWithCovers(count int, coverURL string) string {
+	items := make([]map[string]any, 0, count)
+	for i := range count {
+		items = append(items, map[string]any{
+			"title":       "看过 " + strconv.Itoa(i),
+			"cover":       historyCoverURL(coverURL, i),
+			"author_name": "UP " + strconv.Itoa(i),
+			"author_mid":  11,
+			"view_at":     now.Add(-time.Duration(i) * time.Hour).Unix(),
+			"progress":    10,
+			"duration":    100,
+			"kid":         float64(170001 + i),
+			"history": map[string]any{
+				"bvid": "BVSAME", "cid": 4001 + i, "business": "archive",
+			},
+		})
+	}
+	return biliOK(map[string]any{
+		"has_more": false,
+		"page":     map[string]any{"pn": 1},
+		"list":     items,
+	})
+}
+
+// historyCoverURL 是第 i 条历史记录的封面地址。
+func historyCoverURL(base string, i int) string {
+	return base + "/h" + strconv.Itoa(i) + ".jpg"
+}
+
+// historyCoverURLs 是那一页所有封面的地址。
+func historyCoverURLs(count int, base string) []string {
+	urls := make([]string, 0, count)
+	for i := range count {
+		urls = append(urls, historyCoverURL(base, i))
+	}
+	return urls
+}
+
+// TestTheLaterPageCoversDoNotKeepFlashing 普查的第三页：**稍后再看**。
+//
+// 它和历史记录走的是**同一套行**（`internal/ui/librarypage.go` 的
+// `viewLibraryRowHead` → `hover.RowCover` → 同一个 `imgcache`），所以它也是
+// 「一屏封面把缓存的字节上限顶破 → 挤掉画面上正画着的那几张 → 一直闪」。
+//
+// **这一条把「同一套代码路径 ⇒ 同一个修法」这件事量出来**：三页（首页、
+// 历史记录、稍后再看）量过，其余画封面的画面按同一条路径推。
+func TestTheLaterPageCoversDoNotKeepFlashing(t *testing.T) {
+	imgSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(coverJPEG(t, 1920, 1080))
+	}))
+	defer imgSrv.Close()
+
+	f := newLibFake(t)
+	f.mu.Lock()
+	f.later[1] = laterBodyWithCovers(20, imgSrv.URL)
+	f.mu.Unlock()
+
+	tt, s := libraryShell(t, f, laterPath)
+	s.images.SetMaxBytes(imgcache.DefaultMaxBytes / 8)
+
+	urls := laterCoverURLs(20, imgSrv.URL)
+	ready := map[string]bool{}
+	for range 600 {
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+		for _, u := range urls {
+			if s.images.Get(u).Ready() {
+				ready[u] = true
+			}
+		}
+		if len(ready) >= 10 {
+			break
+		}
+	}
+	if len(ready) == 0 {
+		t.Fatalf("一帧都没画到封面——这一页根本没画封面（文字有 %q）", tt.Texts())
+	}
+	t.Logf("这一屏画到了 %d 张封面，内存账 %d 字节（上限 %d）",
+		len(ready), s.images.UsedBytes(), imgcache.DefaultMaxBytes/8)
+
+	coversStayPut(t, tt, s, urls, "稍后再看页")
+}
+
+// laterBodyWithCovers 装一页「稍后再看」，每一条都带封面地址。
+//
+// ⚠️ **和 `laterBody` 差在 `pic` 上**：那一份把封面写成空串（于是界面上是
+// 「没有地址」那一档，不进缓存）；这一份给真的地址。
+func laterBodyWithCovers(count int, coverURL string) string {
+	items := make([]map[string]any, 0, count)
+	for i := range count {
+		items = append(items, map[string]any{
+			"aid": int64(170001 + i), "bvid": fmt.Sprintf("BVlater%02d", i),
+			"cid":      int64(3001 + i),
+			"title":    "稍后 " + strconv.Itoa(i),
+			"pic":      laterCoverURL(coverURL, i),
+			"duration": 185, "progress": 0,
+			"pubdate": int64(1700000000), "add_at": now.AddDate(0, 0, -i).Unix(), "is_pgc": false,
+			"owner": map[string]any{"mid": 11, "name": "UP " + strconv.Itoa(i)},
+			"stat":  map[string]any{"view": int64(1000 * (i + 1))},
+		})
+	}
+	return biliOK(map[string]any{"count": count, "list": items})
+}
+
+// laterCoverURL 是第 i 条「稍后再看」的封面地址。
+func laterCoverURL(base string, i int) string {
+	return base + "/l" + strconv.Itoa(i) + ".jpg"
+}
+
+// laterCoverURLs 是那一页所有封面的地址。
+func laterCoverURLs(count int, base string) []string {
+	urls := make([]string, 0, count)
+	for i := range count {
+		urls = append(urls, laterCoverURL(base, i))
+	}
+	return urls
 }
