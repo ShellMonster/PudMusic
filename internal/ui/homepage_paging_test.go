@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
@@ -99,7 +100,7 @@ func homePagedPos(tt *ui.Tester, prefix string) []rowPos {
 		if a.y != b.y {
 			return cmpFloat(a.y, b.y)
 		}
-		return cmpFloat(a.y, b.y)
+		return strings.Compare(a.title, b.title)
 	})
 	return out
 }
