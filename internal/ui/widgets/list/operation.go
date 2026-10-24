@@ -73,7 +73,8 @@ func OperationLabel(title string) string { return "「" + title + "」的操作"
 // Operation 画行尾那枚「⋯」。
 //
 // build 是**这一行的菜单怎么建**——和右键这一行走的是同一个函数（`menu.go` 的
-// `buildSongMenu`，界面层那两页是它们自己的 `libraryMenuItems`）。
+// `buildSongMenu`；界面层那两页——稍后再看 / 历史记录——是它们自己的
+// `laterMenu` / `historyMenu`，因为它们多两项「移除 / 删除」）。
 //
 // color 是这枚「⋯」的字色：它跟着这一行歌名的颜色走（`card.go` 的 `rowColors`），
 // 所以「正在放」那一行的这枚「⋯」也是主色的。

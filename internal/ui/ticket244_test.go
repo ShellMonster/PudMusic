@@ -239,20 +239,21 @@ func TestThePlayAllButtonIsTheSameOnBothPages(t *testing.T) {
 // TestThePlayAllButtonEnqueuesOnBothPages 钉住「两个页面上按『全部播放』，
 // 进去队列的是同一批歌」。
 //
-// ⚠️ **不判语义**：只判「按下去之后队列里多了这一页的歌」，**不判**它是追加
-// 还是从这首开始（那是待人裁决的那一条，DESIGN.md §十第 3 条）。
+// ⚠️ **只判「队列里多了这一页的歌」**：这一枚的**语义**（追加 + 从这一页的第一
+// 首开始播）是票 #299 拍板定的，钉在 `ticket299_test.go` 那两条里；这里只管
+// **两个页面是同一个出口**（改了一边忘了另一边，这一页就少一半功能）。
 func TestThePlayAllButtonEnqueuesOnBothPages(t *testing.T) {
 	// 首页：三首歌按下去，队列里就该多三首。
 	//
-	// ⚠️ **队列先放一首**：队列空着的时候 `App.Enqueue` 会**起播**第一首
-	// （`internal/app/queue.go:785`），而这一首是网络上的歌——测试里那一下就是
-	// 真打 B 站。先放一首本地文件，队列就不是空的了 ✓。
+	// ⚠️ **这一页的歌用本地文件**：票 #299 之后「全部播放」会**真的开始播**这一页
+	// 的第一首，而在线的那些在测试里放不了（在线取流要真网络，而真网络是**真
+	// 账号**——铁律：不打真 B 站）。本地歌走的是开文件那一路，放得起来。
 	home := newTestShell(t, withSettings(app.DefaultSettings("")))
 	if err := home.s.app.Enqueue(app.LocalItem(flacPath(t))); err != nil {
 		t.Fatal(err)
 	}
 	home.s.home.SetSongs(homeSongs{
-		tabs: [homeTabCount][]list.Music{0: playableSongsOf("a", 3)},
+		tabs: [homeTabCount][]list.Music{0: localSongs(t, 3)},
 	})
 	homeFrame(home.tt)
 	btn, ok := home.tt.Find(playAllLabel)
@@ -317,8 +318,9 @@ func playableSongsOf(prefix string, n int) []list.Music {
 //
 // 首页「流行」那一档走音乐综合榜，而榜上**有些条目没有稿件**（纯音乐条目，
 // `related_archive` 是空的，`internal/app/recommend.go`）——那种行**画得出来**，
-// 但放不了。而同一页每一行的右键菜单对那种行是**灰**的（「播放 / 下一首播放 /
-// 添加到队列」三个入口都按不动，末尾还补一句为什么）。
+// 但放不了。而同一页每一行的右键菜单对那种行是**灰**的（「立即播放 /
+// 从这一首往后听 / 下一首播放 / 添加到队列」四个入口都按不动，末尾还补一句
+// 为什么）。
 //
 // 「全部播放」是**整页一起加**的：它要是把放不了的也加进去，用户就会在队列里
 // 撞上几首按不动的歌，而界面上一个字的解释都没有。
@@ -329,15 +331,17 @@ func playableSongsOf(prefix string, n int) []list.Music {
 // （不然用户数不出「这一页有 2 首，队列里只多了 1 首」）。
 func TestThePlayAllButtonSkipsTheUnplayableOnes(t *testing.T) {
 	home := newTestShell(t, withSettings(app.DefaultSettings("")))
-	// 队列先放一首：队列空着的时候 Enqueue 会起播第一首（那是网络上的歌）。
+	// 队列先放一首。
 	if err := home.s.app.Enqueue(app.LocalItem(flacPath(t))); err != nil {
 		t.Fatal(err)
 	}
+	// ⚠️ **「放得了的」那一首用本地文件**：这一票之后「全部播放」会**真的开始播**
+	// 这一页的第一首（票 #299），而在线的那些在测试里放不了（在线取流要真网络，
+	// 真网络是**真账号**——铁律：不打真 B 站）。本地歌走的是开文件那一路。
+	playable := writeCopy(t, t.TempDir(), "放得了的.flac")
 	home.s.home.SetSongs(homeSongs{
 		tabs: [homeTabCount][]list.Music{0: {
-			{ID: "a", Title: "放得了的", Item: app.Item{
-				Source: app.SourceOnline, Type: "mv", Bvid: "BV1ok", Title: "放得了的",
-			}},
+			{ID: "a", Title: "放得了的", Item: app.LocalItem(playable)},
 			// 🔴 **这一首放不了**：`Type` 是 mv 而 `Bvid` 是空串——榜上没有稿件
 			// 的纯音乐条目就是这个样子（`app.playableOnline` 的最后那一支）。
 			{ID: "b", Title: "放不了的", Item: app.Item{

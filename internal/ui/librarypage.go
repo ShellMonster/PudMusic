@@ -338,7 +338,7 @@ func viewLibraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, cover *imgcac
 	})
 }
 
-// libraryMenuItems 是两页共用的那三项菜单。
+// libraryMenuItems 是两页共用的那几项菜单。
 //
 // ⚠️ **每一项都要 Item 一遍**：菜单是这趟全部建出来的，只有被 Chosen 的那一项为
 // true（`ui/menu.go` 的 buildMenu）。少建一项，那一项就永远点不到。
@@ -347,11 +347,17 @@ func viewLibraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, cover *imgcac
 // 一首往后接」（`app.Queue` 到现在只有 `Append`），摆一个没有的项等于骗用户。
 // 「下载音频 / 下载视频」也没有：要写盘、要选目录，是 PLAN 的 P-26，而摆一个按了
 // 只说「现在还不能用」的项不如不摆——那两行和「在 B 站打开」长得一样。
+//
+// ⚠️ **「立即播放」和「从这一首往后听」是两件事**（票 #299，2026-10-24 拍板）：
+// 前者**只放这一首**（队列被换成这一首），后者是从这一行往后接一整段。两枚名字
+// 只差几个字而做的事差着一个队列——所以那一项不叫「播放」。
 func libraryMenuItems(m *ui.Menu, row libraryRow, a RowActions, i int) bool {
 	switch {
-	case m.Item("播放").Disabled(!row.CanPlay).Chosen():
+	case m.Item("立即播放").Disabled(!row.CanPlay).Chosen():
 		// ⚠️ 放不了的那一类**画成灰的而不是不画**：不画的话同一份列表里有的行能播
 		// 有的不能，用户会以为是坏的。PGC / 直播放不了（见 `app.playableOnline`）。
+		a.PlayNow(i)
+	case m.Item("从这一首往后听").Disabled(!row.CanPlay).Chosen():
 		a.Play(i)
 	case m.Item("添加到队列").Disabled(!row.CanPlay).Chosen():
 		a.Add(i)
