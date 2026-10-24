@@ -75,6 +75,30 @@ func (c *fakeClock) fire() {
 	}
 }
 
+// fireAt 只点燃期限**正好是 d** 的那些还活着的定时器。
+//
+// 🔴 **为什么需要它**：「正在取流」那一摊有两个闹钟——「慢到该说了」
+// （`loadSlowAfter`）和「超时了判失败」（`onlinePlayTimeout`）。`fire()`
+// 会把两个一起点，而**先点的是超时的那个**：它一响就重新起算（把慢的那
+// 一个收掉、另挂一个新的），于是慢那一档永远点不着。
+//
+// 这一条让测试能**分开**点这两个闹钟——而分开点才是真的：生产上慢那一档
+// 在 5 秒响、超时那一档在 20 秒响，两者是先后两件事。
+func (c *fakeClock) fireAt(d time.Duration) {
+	c.mu.Lock()
+	timers := append([]*fakeTimer(nil), c.timers...)
+	c.mu.Unlock()
+	for _, tm := range timers {
+		c.mu.Lock()
+		dead := tm.dead
+		c.mu.Unlock()
+		if dead || tm.d != d {
+			continue
+		}
+		tm.fn()
+	}
+}
+
 // hangingCDN 是一台「接了连接但一个字节都不给」的 CDN。
 //
 // 它等的是**请求上下文被取消**——客户端（字节源）掐断请求的那一刻。

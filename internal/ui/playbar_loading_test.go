@@ -2,6 +2,7 @@ package ui
 
 import (
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -125,5 +126,53 @@ func TestTheFailureSentenceFitsOnOneLine(t *testing.T) {
 	if measured > box.W {
 		t.Errorf("「打不开：%s」宽 %.1f，而那一格只有 %.1f——放不下，屏幕上只剩碎片",
 			short, measured, box.W)
+	}
+}
+
+// TestTheSlowLoadingLineSaysItIsSlow 盯「慢的时候界面上有一句能看懂的话」
+// （票 #220）。
+//
+// 🔴 **这是这一票的验收项**：用户抱怨的是「取流非常慢」——而「正在取流：
+// <歌名>」那句话从头到尾不变，他等三秒和等三十秒看到的都是同一句，于是
+// 「慢」这件事在界面上**根本不存在**。
+//
+// 慢的时候屏幕上换成「取流很慢：<歌名>」：一样长（歌名那一截不变），但
+// 多了一件**新**的事——用户第一次知道「它慢」。
+func TestTheSlowLoadingLineSaysItIsSlow(t *testing.T) {
+	tt, _ := metaBarTester(t, app.State{
+		Loading: true, LoadingTitle: "取不来的那一首",
+		LoadingSlow: true, LoadingStage: "下音频", LoadingWait: 12 * time.Second,
+	}, 1000)
+
+	if !tt.HasText("取流很慢") {
+		t.Errorf("慢的时候界面上没有说「慢」：%q", tt.Texts())
+	}
+	// 🔴 **歌名不许丢**：用户要知道自己在等的是哪一首。
+	if !tt.HasText("取不来的那一首") {
+		t.Errorf("慢的时候不知道在等哪一首：%q", tt.Texts())
+	}
+	// 🔴 **转圈还得在**：它还是「还在等」的凭据。
+	if _, ok := tt.Find("正在取流"); !ok {
+		t.Errorf("「正在取流」那一行里没有转圈：%q", tt.Texts())
+	}
+}
+
+// TestTheSlowLineIsNoLongerThanTheNormalOne 盯**慢的那一句不比正常那句长**。
+//
+// 🔴 **播放条上那一行只有 140 像素宽**（1200 宽的窗口，实测），12 号字放得下
+// 十来个字。「取流很慢：」和「正在取流：」一样是五个字——所以换成「慢」的
+// 那一版**不花掉歌名那截的任何宽度**。要是慢的那句更长，挤掉的就是歌名，
+// 而用户恰恰在等的时候最需要知道自己在等哪一首。
+func TestTheSlowLineIsNoLongerThanTheNormalOne(t *testing.T) {
+	var slow, normal float32
+	mygoui.NewTester(func(c *mygoui.Context) {
+		slow, _ = c.MeasureText(0, mygoui.Span{
+			Text: "取流很慢：那一首", Size: scale.Font(c, scale.Size12)})
+		normal, _ = c.MeasureText(0, mygoui.Span{
+			Text: "正在取流：那一首", Size: scale.Font(c, scale.Size12)})
+	}, 300, 60).Frame()
+
+	if slow > normal {
+		t.Errorf("慢的那一句更宽（%.1f > %.1f）——挤掉的是歌名那截", slow, normal)
 	}
 }
