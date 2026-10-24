@@ -192,6 +192,10 @@ func (s *Shell) viewSearchToolbar(c *ui.Context, tab int) {
 		// ⚠️ **这一枚和首页那一枚是同一枚**（`playAllButton`，票 #244 / UX 报告
 		// §2 的 B6）：同一个动作在两个页面上各有一枚入口，此前**只有搜索页有**——
 		// 用户在一个页面能按、在另一个页面找不到，会以为是两个不同的功能。
+		//
+		// ⚠️ **位置和首页不一样是跟上游一致**：上游搜索页那一行右边还有一个
+		// 「仅音乐分区」的开关（`justify-between` 把它们推到两头），我们没有那个
+		// 开关，所以这一枚留在排序 Tab 右边（票 #288 只点了首页那一行）。
 		pg := st.lists[tab].list.Paged()
 		if playAllButton(c, pg.Loading || pg.Loaded == 0).Clicked() {
 			s.searchPlayAll(&st.lists[tab])

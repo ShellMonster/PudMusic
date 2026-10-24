@@ -839,6 +839,7 @@ func followIndexOfMid(users []bili.FollowUser, mid int64) int {
 // Cocoa 事件循环把整个进程带走。按行兜的话一行有六格，一张坏头像要带走五张
 // 好的（理由同 `widgets/list/grid.go` 的 `viewRow`）。
 func (s *Shell) viewFollowRow(c *ui.Context, f *followPage, i, cols int) {
+	t := c.Theme()
 	first := i * cols
 	if first >= len(f.users) {
 		s.viewFollowSentinel(c, f)
@@ -846,7 +847,13 @@ func (s *Shell) viewFollowRow(c *ui.Context, f *followPage, i, cols int) {
 	}
 	// ⚠️ **Stretch**：格子要撑满这一行的高，卡的留白才跟着这一行算而不是自己
 	// 缩成 0（理由同 `list.Grid.viewRow`）。
-	ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(list.GridGap).Children(func() {
+	grid := ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(list.GridGap)
+	// 🔴 **这一行是布局，所以它自己刷底色**（理由见 `list.LayoutRow`）：框架给
+	// 「指针压着的那一行」铺一层 `t.SurfaceHover`，而这一行是**一排卡**、比卡宽——
+	// 卡右边空出来的那一块会整块变成悬停底（实测 522×233 的 `#e9e9ec`），而那里
+	// 什么都没有。悬停反馈是**卡**的事（卡自己刷 `t.Surface`）。
+	grid = list.LayoutRow(grid, t)
+	grid.Children(func() {
 		for k := range cols {
 			j := first + k
 			if j >= len(f.users) {
@@ -1057,7 +1064,12 @@ func (f *followPage) removeFollowUser(mid int64) {
 // viewFollowSentinel 是末尾那一行：还有就拉，拉失败让人点重试。
 func (s *Shell) viewFollowSentinel(c *ui.Context, f *followPage) {
 	t := c.Theme()
-	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(space.Px8).Padding(space.Px12).Children(func() {
+	// 🔴 **这一行也自己刷底色**（理由见 `list.LayoutRow`）：哨兵这一行装的是一句
+	// 「继续往下滚」，指针压在它上面时框架那一层行悬停底会铺满整行——而这一行是
+	// 布局，不是条目（上游那一块是纯白）。
+	row := ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(space.Px8).Padding(space.Px12)
+	row = list.LayoutRow(row, t)
+	row.Children(func() {
 		switch {
 		case f.pager.err != nil:
 			ui.Text(c, "加载失败："+f.pager.err.Error()).FontSize(scale.Font(c, scale.Size13)).

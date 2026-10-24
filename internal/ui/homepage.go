@@ -324,15 +324,26 @@ func (h *homePage) scrollTop() {
 // 也是 `addList`）。「从这首开始」那一档仍然待人裁决：裁决之后改
 // `playAllSongs` **一处**，两个页面一起变。
 //
-// ⚠️ **位置和搜索页一样：紧跟在 Tab 那一排右边**（Biu 把 Tab 那一排和右边一个
-// 「全部播放」按钮放在同一个 `justify-between` 的行里，`index.tsx:262-294`——
-// 我们这一版是「跟着 Tab 那一排」，而搜索页那一枚也是紧跟着它自己那排排序
-// Tab）。两个页面上的同一个动作摆在同一个相对位置上，用户来回切页不用重新找。
+// ⚠️ **「全部播放」贴在内容区的右沿**（票 #288 / UX 报告 C-04）。
+//
+// 上游那一行是 `flex items-center justify-between`（`index.tsx:262-294`）：Tab
+// 靠左、「全部播放」靠右，**右沿=x=1184**（1200 宽的窗、内容区右边距 16）。
+// 我们此前是「紧跟在 Tab 后面」（x=419），右半屏空着——同一个动作既不像「这一页
+// 的操作」也不像「全局操作」。
+//
+// 🔴 **右沿靠 `Justify(SpaceBetween)`，不是靠算像素**：那一行是 `FillWidth()` 的，
+// 它有多宽是内容区说了算（`pagePadX` = 16 是七页共用的那一个数），于是
+// 「贴在右沿」这件事跟着内容区走，窗口一改它跟着改。
 func (h *homePage) viewTabs(c *ui.Context, s *Shell) {
 	// ⚠️ **缝是 12**：和搜索页那一排一样（`viewSearchToolbar` 的 `Gap(space.Px12)`）——
-	// 同一个动作在两个页面上，**按钮和它左边那排 Tab 之间的缝也要一样**，不然
-	// 两处的画法还是差着一点。
-	ui.Row(c).Key("home:tabbar").FillWidth().Gap(space.Px12).AlignItems(ui.Center).Children(func() {
+	// 那是两样东西之间的**最小**缝；这一行靠 `SpaceBetween` 撑开，所以实际隔着
+	// 整个右半屏（上游那一行也是 `justify-between`）。
+	//
+	// ⚠️ **搜索页那一枚是「紧跟着排序 Tab」**（上游搜索页那一行右边还有一个「仅
+	// 音乐分区」的开关，我们没有，所以它不贴右沿）——两个页面上的同一个动作，
+	// 位置不一样是**跟上游一致**的，不是漏改。
+	ui.Row(c).Key("home:tabbar").FillWidth().Gap(space.Px12).AlignItems(ui.Center).
+		Justify(ui.SpaceBetween).Children(func() {
 		// 🔴 Key 要写在 Tab 的构造**之前**：Tab 里面是个 List，它的状态在
 		// 构造的时候就已经读过了，构造之后再 `.Key()` 会 panic（`ui/element.go`
 		// 的 Key 注释：自带输入的控件都不能构造后 Key，只能构造前 `Context.Key`）。
