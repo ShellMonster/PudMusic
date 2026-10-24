@@ -488,12 +488,12 @@ func TestASongWithoutAnOwnerDoesNotDrawOne(t *testing.T) {
 
 // TestClickingANewMusicCardQueuesExactlyThatSong 验点一下那一格会做的事：**放
 // 这一首**（上游 `new-music-top.tsx:22-36` 的 `handlePlay` 走
-// `usePlayList.play({…})`，换掉整个队列从这一首开始），不是「从它往后」。
+// `usePlayList.play({…})`，追加这一首并立即播），不是「从它往后」。
 //
 // 判据是**真的被要求放的那几项**，不是「调了哪个函数」。
 func TestClickingANewMusicCardQueuesExactlyThatSong(t *testing.T) {
 	var got [][]app.Item
-	acts := list.Actions{Play: func(items []app.Item) { got = append(got, items) }}
+	acts := list.Actions{PlayNow: func(item app.Item) { got = append(got, []app.Item{item}) }}
 	_, tt := newGridTester(t, acts, homeSongsOf("新歌", 8), 800, 900)
 
 	if err := tt.Click(songName("新歌", 3)); err != nil {
@@ -615,10 +615,10 @@ func TestHoveringANewMusicCardShowsThePlayButtonTheGradientAndTheAccentTitle(t *
 }
 
 // TestClickingTheHoverPlayButtonQueuesExactlyThatSong 钉住 hover 播放钮的语义：
-// 和点卡片一样，**只放这一首**（不是网格卡片那枚「从这一首往后接」）。
+// 和点卡片一样，**加这一首并立即播**（不是网格卡片那枚「从这一首往后接」）。
 func TestClickingTheHoverPlayButtonQueuesExactlyThatSong(t *testing.T) {
 	var got [][]app.Item
-	acts := list.Actions{Play: func(items []app.Item) { got = append(got, items) }}
+	acts := list.Actions{PlayNow: func(item app.Item) { got = append(got, []app.Item{item}) }}
 	songs := homeSongsOf("新歌", 8)
 	_, tt := newGridTester(t, acts, songs, 800, 900)
 

@@ -714,7 +714,7 @@ func (l *List) failedRowText(c *ui.Context) {
 		Padding(cardPadY, cardPadX).MaxLines(1)
 }
 
-// playFrom 从第 i 首往后接进队列并开始播。
+// playFrom 把队列**换成**第 i 首往后的那一段并开始播。
 //
 // 给的是**从这一首起的全部**，和 Biu 的「在 B 站打开这一首从这儿听」一致：
 // 点了一首，接下来的队列就应该是它和它后面那些，不是整个歌单从头。

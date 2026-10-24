@@ -338,31 +338,48 @@ func viewLibraryRowHead(c *ui.Context, r ui.ListRow, m libraryRow, cover *imgcac
 	})
 }
 
-// libraryMenuItems 是两页共用的那几项菜单。
+// libraryMenuItems 是稍后再看 / 历史记录两页**共用**的那份行菜单。
 //
 // ⚠️ **每一项都要 Item 一遍**：菜单是这趟全部建出来的，只有被 Chosen 的那一项为
 // true（`ui/menu.go` 的 buildMenu）。少建一项，那一项就永远点不到。
 //
-// 「下一首播放」和「添加到播放列表」**没有**：我们的队列只有「追加到末尾」和「从这
-// 一首往后接」（`app.Queue` 到现在只有 `Append`），摆一个没有的项等于骗用户。
-// 「下载音频 / 下载视频」也没有：要写盘、要选目录，是 PLAN 的 P-26，而摆一个按了
-// 只说「现在还不能用」的项不如不摆——那两行和「在 B 站打开」长得一样。
+// ⚠️ **四档的语义只写在这里一份**：两页各写一份的话，改漏一边的后果是「这一页
+// 的「立即播放」清了队列、那一页的没清」——那种错在界面上要对着两页比才看得出来。
 //
-// ⚠️ **「立即播放」和「从这一首往后听」是两件事**（票 #299，2026-10-24 拍板）：
-// 前者**只放这一首**（队列被换成这一首），后者是从这一行往后接一整段。两枚名字
-// 只差几个字而做的事差着一个队列——所以那一项不叫「播放」。
-func libraryMenuItems(m *ui.Menu, row libraryRow, a RowActions, i int) bool {
+// 参数 removeLabel / remove 定了两页各自的那一项（「移除」/「删除」）：那是**这一页
+// 自己的**动作，不属于共用的那几项。
+//
+// ⚠️ **「立即播放」和「从这一首往后听」是两件事**（票 #337，2026-10-24 拍板）：
+// 前者**把这一首加到队尾并立即打断播放**，后者换成从这一行往后的一整段。两枚
+// 名字只差几个字而做的事差着一个队列——所以那一项不叫「播放」。
+func libraryMenuItems(m *ui.Menu, row libraryRow, a RowActions, i int, removeLabel string, remove func()) bool {
 	switch {
 	case m.Item("立即播放").Disabled(!row.CanPlay).Chosen():
 		// ⚠️ 放不了的那一类**画成灰的而不是不画**：不画的话同一份列表里有的行能播
 		// 有的不能，用户会以为是坏的。PGC / 直播放不了（见 `app.playableOnline`）。
 		a.PlayNow(i)
 	case m.Item("从这一首往后听").Disabled(!row.CanPlay).Chosen():
+		// ⚠️ PGC（番剧 / 纪录片）放不了：取流那一套对 PGC 不通（见
+		// `app.playableOnline`），上游也是不给这一类入口（`cannotPlay = is_pgc`）。
 		a.Play(i)
+	case m.Item("下一首播放").Disabled(!row.CanPlay).Chosen():
+		// 和「从这一首往后听」同样判 `CanPlay`：插进队列的那一首照样要放得了，
+		// 而队列里插一首放不了的歌，下一首就会停在那里一声不响
+		// （`App.step` 退回上一首并说一句）。
+		a.PlayNext(i)
 	case m.Item("添加到队列").Disabled(!row.CanPlay).Chosen():
 		a.Add(i)
 	case m.Item("在 B 站打开").Chosen():
 		a.Open(i)
+	// 收藏 / 下载这两项和内容列表那套菜单是同一份（Biu 的
+	// `music-list-item` 菜单对每一行都一样），摆在这里而不是不摆：用户在一个
+	// 列表上收藏了某一首，切到收藏夹页再收藏一次是白折腾。
+	case m.Item("收藏").Chosen():
+		a.FavSelect(i)
+	case m.Item("下载音频").Chosen():
+		a.Download(i)
+	case m.Item(removeLabel).Chosen():
+		remove()
 	default:
 		return false
 	}

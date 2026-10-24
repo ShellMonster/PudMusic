@@ -9,8 +9,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -215,69 +213,23 @@ const searchScrollX, searchScrollY float32 = 700, 400
 // 的 PointerScroll 注释）。
 func scrollSearchList(tt *mygoui.Tester) { tt.Scroll(searchScrollX, searchScrollY, 0, 100000) }
 
-// queueOneSong 先往队列里放一首**真的能放**的歌，这样「只追加」才有
-// 「正在放的那首」可对照。
-func queueOneSong(t *testing.T, s *Shell, tt *mygoui.Tester) app.Item {
-	t.Helper()
-	src := filepath.Join("..", "service", "audio", "flacdec", "testdata", "stereo16.flac")
-	b, err := os.ReadFile(src)
-	if err != nil {
-		t.Skipf("找不到 FLAC 测试素材：%v", err)
-	}
-	dst := filepath.Join(t.TempDir(), "正在放.flac")
-	if err := os.WriteFile(dst, b, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.app.Enqueue(app.LocalItem(dst)); err != nil {
-		t.Fatal(err)
-	}
-	waitFrames(t, tt, "第一首开始播", func() bool { return s.app.Snapshot().HasTrack })
-	return s.app.Queue().Items()[0]
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 三个反直觉行为
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestPlayAllAppendsToTheQueueWithoutDroppingWhatIsThere 是验收第 1 条，也是最
-// 容易被做反的一条：「全部播放」**不替换**当前队列。
-//
-// 上游的原话就在那儿（`video-list/index.tsx:89-101`）：它把当前已加载的列表全量
-// 映射之后调 `addList`，**不是 `playList`**。做成了 `PlayFrom`（换掉整个队列、
-// 从第一首起播）的表现是：用户正听着歌，按一下按钮，正在放的那首立刻被换掉，
-// 队列里前面放的那些全没了。
-//
-// ⚠️ **这一条只判队列，不判正在放的是哪一首**：票 #299 之后这一枚**也开始播**
-// （从这一页的第一首开始），而这一页的歌是**在线的**——测试环境里没挂取流那一段
-// （`internal/app` 的 `StreamingMounted`），按下去只会得到一句「在线播放暂时用不了」。
-// 「开始播」那一条用**本地歌**钉：`ticket299_test.go` 的那两条，还有
-// `internal/app` 的 `TestEnqueueAndPlayAppendsInOrderAndStartsAtTheFirst`。
-func TestPlayAllAppendsToTheQueueWithoutDroppingWhatIsThere(t *testing.T) {
-	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
-	settleText(t, tt, "第 1 页 第 1 首")
-
-	queueOneSong(t, s, tt)
-	before := s.app.Queue().Items()
-	if len(before) != 1 {
-		t.Fatalf("测试自己出了问题：队列里有 %d 项", len(before))
-	}
-
+// TestPlayAllReplacesTheQueueWithSearchResults 验搜索批量入口会替换原来的三首。
+// 取流和音频都走 HTTP fixture，不能用「队列增加了」代替起播成功。
+func TestPlayAllReplacesTheQueueWithSearchResults(t *testing.T) {
+	st := newSearchStub(24, 24)
+	s, tt := newSearchPage(t, "周杰伦", st)
+	mountQueueStreaming(t, s.app)
+	settleText(t, tt, stubTitle(1, 0))
+	seedThreeSongs(t, s.app)
 	if err := tt.Click("全部播放"); err != nil {
-		t.Fatalf("点不到「全部播放」：%v，文字有 %q", err, tt.Texts())
+		t.Fatal(err)
 	}
-	tt.Frame()
-	tt.Frame()
-
-	after := s.app.Queue().Items()
-	if len(after) != len(before)+24 {
-		t.Fatalf("队列里有 %d 项，want %d（原来 1 + 追加 24）", len(after), len(before)+24)
-	}
-	// 前面那些一个字都不许动。
-	for i, it := range before {
-		if after[i] != it {
-			t.Errorf("队列第 %d 项被换了：%+v，want %+v", i, after[i], it)
-		}
-	}
+	want, _ := playAllItems(st.rows(searchTabSong, 1))
+	assertQueueAndPlaying(t, s.app, want, 0)
 }
 
 // TestPlayAllIsDisabledWhenThereIsNothingToPlay 盯那个按钮的禁用条件：Biu 是
@@ -684,7 +636,7 @@ func TestTheSearchPageHasOneTitleAndNoSecondSearchBox(t *testing.T) {
 
 	// ① 页内那个输入框没了。
 	if _, ok := tt.Find("搜索歌名或 UP 主"); ok {
-		t.Errorf("搜索页上还有那个 420 宽的页内输入框——2026-10-22 拍板不加"+
+		t.Errorf("搜索页上还有那个 420 宽的页内输入框——2026-10-22 拍板不加" +
 			"（DESIGN.md §十.1），改词回顶栏")
 	}
 
@@ -769,6 +721,7 @@ func TestStaleResponseDoesNotReachPlayAll(t *testing.T) {
 		t.Fatalf("「全部播放」那份副本里有 %d 行，want 1（迟到的旧响应漏进来了）", got)
 	}
 
+	mountQueueStreaming(t, s.app)
 	if err := tt.Click("全部播放"); err != nil {
 		t.Fatalf("点不到「全部播放」：%v，文字有 %q", err, tt.Texts())
 	}

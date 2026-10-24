@@ -585,6 +585,7 @@ func TestStaleResponseDoesNotReachPlayAllOnTheRealPath(t *testing.T) {
 	if got := len(s.search.lists[searchTabSong].snapshot()); got != 1 {
 		t.Fatalf("「全部播放」那份副本里有 %d 行，want 1（迟到的旧响应漏进来了）", got)
 	}
+	mountQueueStreaming(t, s.app)
 	if err := tt.Click("全部播放"); err != nil {
 		t.Fatalf("点不到「全部播放」：%v，文字有 %q", err, tt.Texts())
 	}

@@ -817,7 +817,7 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 	})
 }
 
-// playFrom 从第 i 首往后接进队列并开始播。菜单的「播放」和双击这一格都用它。
+// playFrom 把队列**换成**第 i 首往后的那一段并开始播。菜单的「播放」和双击这一格都用它。
 func (g *Grid) playFrom(i int) { playFrom(g.songs, g.acts, i) }
 
 // gridRowHeight 是网格那一行**大概**多高。

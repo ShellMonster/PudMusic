@@ -353,6 +353,9 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected boo
 // ⚠️ 「收藏 / 下载音频」排在**删除之前**，而不是像上游那样排在最后——删掉一条
 // 播放记录之后想把它收藏回来是办得到的（收藏夹里那份还在），而把收藏夹里的东西
 // 删了就没了。顺序摆在这里是因为它们属于「这一行是什么」，不属于「这一页怎么改」。
+//
+// ⚠️ **菜单本体在 `libraryMenuItems`**（两页共用一份，见那里的注释）：这里只
+// 定这一页自己的那一项——「删除」。
 func (s *Shell) historyMenu(m *ui.Menu, i int) {
 	p := &s.historyPage
 	row, ok := p.rows.Row(i)
@@ -361,29 +364,9 @@ func (s *Shell) historyMenu(m *ui.Menu, i int) {
 	}
 	acts := p.rows.actions()
 
-	switch {
-	// 直播、专栏那几类在 B 站那边也放不了（上游的 `canPlay = business ===
-	// "archive"`，这里由 app 层判好传下来）。
-	case m.Item("立即播放").Disabled(!row.CanPlay).Chosen():
-		// 「立即播放」= **只放这一首**（票 #299）：队列被换成这一首。
-		acts.PlayNow(i)
-	case m.Item("从这一首往后听").Disabled(!row.CanPlay).Chosen():
-		acts.Play(i)
-	// 「下一首播放」判的是同一个 CanPlay，理由见 laterMenu 里那一项。
-	case m.Item("下一首播放").Disabled(!row.CanPlay).Chosen():
-		acts.PlayNext(i)
-	case m.Item("添加到队列").Disabled(!row.CanPlay).Chosen():
-		acts.Add(i)
-	case m.Item("在 B 站打开").Chosen():
-		acts.Open(i)
-	// 收藏 / 下载：和稍后再看那一页摆的是同两项，理由见 laterMenu 的注释。
-	case m.Item("收藏").Chosen():
-		acts.FavSelect(i)
-	case m.Item("下载音频").Chosen():
-		acts.Download(i)
-	case m.Item("删除").Chosen():
+	libraryMenuItems(m, row, acts, i, "删除", func() {
 		p.rows.Remove(i, s.app.LibraryOf().RemoveHistory)
-	}
+	})
 	// 🔴 **按不动的那几项要说明为什么**：理由见 laterMenu 里同一段。
 	if row.CannotPlay != "" {
 		m.Item(row.CannotPlay).Disabled(true).Chosen()
