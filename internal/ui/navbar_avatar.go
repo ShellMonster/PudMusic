@@ -62,6 +62,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -435,7 +436,13 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 		// 而键盘那一半正是靠这个焦点（见 `viewAvatarMenuKeys`）。
 		if hit.Clicked() {
 			s.avatarMenuOpen = !s.avatarMenuOpen
-			s.avatarMenuIndex = 0
+			// ⚠️ **打开的时候从「什么也没选中」开始**：上游 HeroUI 打开下拉时
+			// 不高亮任何一项。而「一打开就亮着第一项」的话，回车直接进扫码
+			// 登录页——那一下用户根本不是想登录。
+			s.avatarMenuIndex = -1
+			// ⚠️ **指针停在第几项也要清掉**：留着上一次那一份的话，浮层刚
+			// 打开时指针明明停在一项上，却因为「和上一帧一样」而不亮。
+			s.avatarMenuHover = -1
 		}
 		// ⚠️ **键盘那一半排在浮层前面**：方向键改的是「当前是第几项」，而浮层
 		// 里那几行是照着那个下标画亮底的——键盘在前、浮层在后的话，按下 ↓ 的
@@ -477,29 +484,51 @@ func (s *Shell) viewAvatarMenu(c *ui.Context, anchor ui.Element) {
 	})
 }
 
+// avatarMenuMark 是菜单里那一项的「图标 + 名字」两个元素。
+//
+// ⚠️ **留着它们是为了在「当前是第几项」定下来之后再铺底和字色**：悬停是在建
+// 那一行的时候才发现的，而底色和字色都要按「当前是第几项」算——先铺后问的
+// 话，鼠标移过去的那一帧会有两项都亮着，而危险色的字压在淡底上会掉到 4.5:1
+// 以下。
+type avatarMenuMark struct {
+	icon ui.Element
+	text ui.Element
+}
+
 // viewAvatarMenuItems 是浮层里那六项。
 //
 // ⚠️ **每一项都是一整行按钮**（不是一枚图标键）：上游 HeroUI 的 DropdownItem
 // 是「图标 + 名字」的一行，`startContent` 在左、`endContent` 在右。
+//
+// # 🔴 指针和键盘**共用一个下标**，但**指针不动的时候键盘说了算**
+//
+// 两条各自都会改「当前是第几项」：指针停在某一项上是悬停，方向键是键盘。
+// 每一帧都让悬停改一遍下标的话，**键盘刚走的那一格会被指针改回去**——
+// 「键盘能上下走」于是只在指针不在菜单项上的时候才成立（而那恰恰是键盘用户
+// 和鼠标混着来时最常遇到的两种情形）。
+//
+// 所以悬停**只在指针移到另一项上时**才改下标（`avatarMenuHover` 记着上一帧
+// 指针停在哪一项）。这正是框架自己那个下拉的做法（`mygo/ui/base.go` 的
+// `selectParts.Item`：`item.Hovered() && p != *s.pointer`——指针不动，方向键
+// 说了算）。
 func (s *Shell) viewAvatarMenuItems(c *ui.Context) {
 	t := c.Theme()
+	panelBG := s.cardBackground(t)
 	rows := make([]ui.Element, 0, len(avatarMenuItems))
+	marks := make([]avatarMenuMark, 0, len(avatarMenuItems))
+	hovered := -1
 	for i, item := range avatarMenuItems {
 		row := ui.ButtonBase(c).Key("avatar-menu:" + item.label).
 			FillWidth().Height(avatarMenuRowH).
 			Padding(space.None, space.Px12).Gap(space.Px8).
 			Justify(ui.Start).Radius(t.Radius)
-		// ⚠️ **悬停把「当前是第几项」也改了**：鼠标和键盘共用同一个下标，
-		// 于是画面上永远只有一项是亮的（两个下标的话，鼠标移到第三项上的
-		// 那一帧会有两项都亮着）。
 		if row.Hovered() {
-			s.avatarMenuIndex = i
+			hovered = i
 		}
+		var ic, tx ui.Element
 		row.Children(func() {
-			ui.Icon(c, icon(item.icon)).FontSize(avatarMenuIconSize).
-				TextColor(avatarMenuIconColor(t, item))
-			ui.Text(c, item.label).FontSize(scale.Font(c, scale.Size14)).
-				TextColor(avatarMenuTextColor(t, item)).Grow(1)
+			ic = ui.Icon(c, icon(item.icon)).FontSize(avatarMenuIconSize)
+			tx = ui.Text(c, item.label).FontSize(scale.Font(c, scale.Size14)).Grow(1)
 			if item.end != "" {
 				ui.Icon(c, icon(item.end)).FontSize(avatarMenuIconSize).TextColor(t.TextMuted)
 			}
@@ -508,36 +537,55 @@ func (s *Shell) viewAvatarMenuItems(c *ui.Context) {
 			s.runAvatarMenuItem(c, item)
 		}
 		rows = append(rows, row)
+		marks = append(marks, avatarMenuMark{icon: ic, text: tx})
 	}
-	// 当前那一项：底是强调色的淡底（规范 §2 的 `accentSoft`）。
+	// ⚠️ **指针移到新的一项上时，当前项跟着它走；指针不动的时候，键盘说了算**。
+	if hovered >= 0 && hovered != s.avatarMenuHover {
+		s.avatarMenuIndex = hovered
+	}
+	s.avatarMenuHover = hovered
+
+	// 当前那一项：底是强调色的淡底（规范 §2 的 `accentSoft`），而**字要按
+	// 这层底现算**（仓库的规矩：「底换了，字按这层底现算」，见 `flatbutton.go`
+	// 的 `flatCurrentText`）。
 	//
-	// ⚠️ **底是这一轮建完之后才铺的**：悬停是在建这一行的时候才发现的，
+	// ⚠️ **底和字都在这一轮建完之后才定**：悬停是在建这一行的时候才发现的，
 	// 而「当前是第几项」要到那一刻才知道——边建边问边铺的话，鼠标移过去的
 	// 那一帧会有两项都亮着（上一项还带着上一帧的亮底）。
-	if s.avatarMenuIndex >= 0 && s.avatarMenuIndex < len(rows) {
-		rows[s.avatarMenuIndex] = rows[s.avatarMenuIndex].Background(accentSoft(t))
+	for i := range rows {
+		current := i == s.avatarMenuIndex
+		bg := panelBG
+		if current {
+			bg = accentSoft(t)
+			rows[i] = rows[i].Background(bg)
+		}
+		col := avatarMenuTextColor(t, avatarMenuItems[i], bg, current)
+		marks[i].icon = marks[i].icon.TextColor(col)
+		marks[i].text = marks[i].text.TextColor(col)
 	}
 }
 
 // avatarMenuTextColor 是那一项的字色。
 //
+// bg 是这一行**实际的底色**，current 是「它是不是当前那一项」。
+//
 // ⚠️ **危险色当字色要压深那一档**（`dangerText`）：主题给的 `t.Danger` 在浅色
 // 下只有 4.14:1，达不到正文的 4.5:1（DESIGN.md §四 那张表）。上游那一项是
 // `text-danger`，而我们这一档是仓库自己的规矩（票 #241 / 报告 F-22）。
-func avatarMenuTextColor(t *ui.Theme, item avatarMenuItem) ui.Color {
-	if item.danger {
-		return dangerText(t)
-	}
-	return t.Text
-}
-
-// avatarMenuIconColor 是那一项左边那一枚图标的颜色。
 //
-// ⚠️ **它跟着字走**：上游那六项的图标是 `startContent`，颜色继承那一行的
-// 文字色（危险那一项于是也是红的）。而右边那一枚（外链记号）是**次要的**，
-// 它走 `t.TextMuted`。
-func avatarMenuIconColor(t *ui.Theme, item avatarMenuItem) ui.Color {
-	return avatarMenuTextColor(t, item)
+// ⚠️ **当前那一项的危险字要按那层底现算**（仓库的规矩：「底换了，字按这层底
+// 现算」，见 `flatbutton.go` 的 `flatCurrentText`）：同一个危险字压在**面板底**
+// 上是 4.97~5.75:1，而压在当前项那层 `accentSoft` 淡底上只有 **4.34~4.45:1**
+// ——差一点点到不了 4.5。而那一档正是「键盘走到退出登录」或者「鼠标悬停它」
+// 的那一瞬。
+func avatarMenuTextColor(t *ui.Theme, item avatarMenuItem, bg ui.Color, current bool) ui.Color {
+	if !item.danger {
+		return t.Text
+	}
+	if current {
+		return ink.Ensure(t.Danger, bg, 4.5)
+	}
+	return dangerText(t)
 }
 
 // viewAvatarMenuKeys 是那一层浮层的**键盘那一半**：上下走、回车选中。
@@ -568,10 +616,15 @@ func (s *Shell) viewAvatarMenuKeys(c *ui.Context, anchor ui.Element) {
 	space := anchor.Shortcut(0, ui.KeySpace)
 	switch {
 	case down:
+		// ⚠️ **-1（什么也没选中）往下走一步就是第一项**。
 		s.avatarMenuIndex = min(s.avatarMenuIndex+1, len(avatarMenuItems)-1)
 	case up:
+		// ⚠️ **往上不越过第一项**（菜单的老规矩：不在顶上绕回去）。
 		s.avatarMenuIndex = max(s.avatarMenuIndex-1, 0)
 	case enter, space:
+		// ⚠️ **没有当前项的时候回车什么都不做**：浮层刚打开时是什么也没选中
+		// （上游 HeroUI 也是这样），而回车的作用是「做当前那一项」——
+		// 没有当前项就没有可做的。
 		if s.avatarMenuIndex >= 0 && s.avatarMenuIndex < len(avatarMenuItems) {
 			s.runAvatarMenuItem(c, avatarMenuItems[s.avatarMenuIndex])
 		}
@@ -584,7 +637,10 @@ func (s *Shell) viewAvatarMenuKeys(c *ui.Context, anchor ui.Element) {
 //（「还没登录，个人资料用不了」），浮层还开着的话提示压在浮层底下。
 func (s *Shell) runAvatarMenuItem(c *ui.Context, item avatarMenuItem) {
 	s.avatarMenuOpen = false
-	s.avatarMenuIndex = 0
+	// ⚠️ **下标回到「什么也没选中」**：浮层下一次打开时是从零开始的
+	// （见 `viewAvatar` 里那一句），而这一项刚被按过——留着它的下标的话，
+	// 下一次打开时那一项会**亮着**，而用户已经不在那一项上了。
+	s.avatarMenuIndex = -1
 	item.run(s, c)
 }
 

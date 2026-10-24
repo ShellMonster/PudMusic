@@ -52,6 +52,17 @@ func TestRenderAvatarMenuShots(t *testing.T) {
 				tt.Move(600, 400)
 				tt.Frame()
 				save(t, dir, "头像下拉-"+name+".png", tt)
+
+				// 指针停在最后一项（「退出登录」）上：当前项铺的是 accentSoft
+				// 淡底，而**那一项的危险字要按这层底现算**——这一张就是看
+				// 那两个字在淡底上还读不读得出来。
+				row, ok := avatarMenuRow(tt, len(avatarMenuItems)-1)
+				if !ok {
+					t.Fatalf("画面上找不到下拉里最后一项")
+				}
+				tt.Move(row.X+row.W/2, row.Y+row.H/2)
+				tt.Frame()
+				save(t, dir, "头像下拉-悬停-"+name+".png", tt)
 			})
 		}
 	}

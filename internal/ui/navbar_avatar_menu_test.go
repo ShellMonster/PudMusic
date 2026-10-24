@@ -22,6 +22,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -183,6 +185,9 @@ func TestTheAvatarMenuClosesWhenClickingOutside(t *testing.T) {
 // ⚠️ **这一条量的是「画面上亮着的是哪一项」**：状态字段（下标）只用来定位，
 // 判据是那一项**真的铺了淡底**——「下标变了而底没跟着变」是这一类改动最
 // 常见的坏法（底是照着一个已经过期的下标铺的）。
+//
+// ⚠️ **刚打开时什么也没选中**（上游 HeroUI 就是这样）：浮层亮着第一项的话，
+// 回车直接进扫码登录页——那一下用户根本不是想登录。
 func TestTheAvatarMenuWalksWithTheArrowKeys(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
@@ -192,32 +197,95 @@ func TestTheAvatarMenuWalksWithTheArrowKeys(t *testing.T) {
 	lit := toRGBA(accentSoft(th))
 	plain := toRGBA(s.cardBackground(th))
 
-	// 刚打开的时候亮着的是第一项。
+	// 刚打开的时候**什么也没亮**（上游 HeroUI 打开时也不高亮任何一项）。
+	for i := range avatarMenuItems {
+		if got, _ := avatarMenuRowBG(tt, i); got != plain {
+			t.Fatalf("刚打开时第 %d 项的底是 %v，want 普通底 %v（刚打开不该高亮任何一项）",
+				i+1, got, plain)
+		}
+	}
+
+	// 按一下 ↓：亮的是**第一项**。
+	tt.Key(0, mygoui.KeyDown)
+	tt.Frame()
 	if got, _ := avatarMenuRowBG(tt, 0); got != lit {
-		t.Fatalf("刚打开时第一项的底是 %v，want 亮底 %v", got, lit)
+		t.Errorf("按了一下 ↓ 之后第一项的底是 %v，want 亮底 %v", got, lit)
 	}
 	if got, _ := avatarMenuRowBG(tt, 1); got != plain {
-		t.Fatalf("刚打开时第二项的底是 %v，want 普通底 %v", got, plain)
+		t.Errorf("按了一下 ↓ 之后第二项的底是 %v，want 普通底 %v", got, plain)
 	}
 
-	// 按两下 ↓：亮的那一项往下走两格。
+	// 再按一下 ↓：往下走一格。
 	tt.Key(0, mygoui.KeyDown)
 	tt.Frame()
-	tt.Key(0, mygoui.KeyDown)
-	tt.Frame()
-
-	if got, _ := avatarMenuRowBG(tt, 2); got != lit {
-		t.Errorf("按了两下 ↓ 之后第三项的底是 %v，want 亮底 %v", got, lit)
+	if got, _ := avatarMenuRowBG(tt, 1); got != lit {
+		t.Errorf("按了两下 ↓ 之后第二项的底是 %v，want 亮底 %v", got, lit)
 	}
 	if got, _ := avatarMenuRowBG(tt, 0); got != plain {
 		t.Errorf("按了两下 ↓ 之后第一项还亮着（底 %v），want 普通底 %v", got, plain)
 	}
 
-	// 按一下 ↑：回到第二项。
+	// 按一下 ↑：回到第一项。
 	tt.Key(0, mygoui.KeyUp)
 	tt.Frame()
+	if got, _ := avatarMenuRowBG(tt, 0); got != lit {
+		t.Errorf("按了一下 ↑ 之后第一项的底是 %v，want 亮底 %v", got, lit)
+	}
+}
+
+// TestTheAvatarMenuWalksWhileThePointerRestsOnAnItem 验**指针停在菜单项上**的
+// 时候方向键照样走得了。
+//
+// ⚠️ **这是这一票评审抓出来的那一条**：指针和键盘共用「当前是第几项」这一个
+// 下标，而悬停**每一帧**都改它——于是键盘刚走的那一格被指针改回去，
+// 「键盘能上下走」只在指针不在菜单项上的时候才成立。
+//
+// 判据是**画面**：按 ↓ 之后第二项得铺上亮底，而第一项（指针还停在那儿）得
+// 回到普通底。改之前的症状是「按了 ↓ 之后画面逐像素没有变化」。
+func TestTheAvatarMenuWalksWhileThePointerRestsOnAnItem(t *testing.T) {
+	s, tt := newShell(t)
+	tt.SetFocused(true)
+
+	openAvatarMenu(t, tt)
+	th := avatarMenuTheme(s)
+	lit := toRGBA(accentSoft(th))
+	plain := toRGBA(s.cardBackground(th))
+
+	// 指针挪到第一项上（**停在那儿不动**）。
+	row, ok := avatarMenuRow(tt, 0)
+	if !ok {
+		t.Fatal("画面上找不到下拉里第一项")
+	}
+	tt.Move(row.X+row.W/2, row.Y+row.H/2)
+	tt.Frame()
+	if got, _ := avatarMenuRowBG(tt, 0); got != lit {
+		t.Fatalf("指针停在第一项上时它的底是 %v，want 亮底 %v", got, lit)
+	}
+
+	// 指针**不动**，按 ↓：亮的那一项要往下走。
+	tt.Key(0, mygoui.KeyDown)
+	tt.Frame()
 	if got, _ := avatarMenuRowBG(tt, 1); got != lit {
-		t.Errorf("按了一下 ↑ 之后第二项的底是 %v，want 亮底 %v", got, lit)
+		t.Errorf("指针停在第一项上按 ↓ 之后第二项的底是 %v，want 亮底 %v——"+
+			"悬停把键盘走的那一格改回去了", got, lit)
+	}
+	if got, _ := avatarMenuRowBG(tt, 0); got != plain {
+		t.Errorf("指针停在第一项上按 ↓ 之后第一项还亮着（底 %v），want 普通底 %v——"+
+			"画面上两项同时亮着", got, plain)
+	}
+
+	// ⚠️ **指针挪到第三项上时，指针说了算**：它一动，亮的那一项就跟过去。
+	row2, ok := avatarMenuRow(tt, 2)
+	if !ok {
+		t.Fatal("画面上找不到下拉里第三项")
+	}
+	tt.Move(row2.X+row2.W/2, row2.Y+row2.H/2)
+	tt.Frame()
+	if got, _ := avatarMenuRowBG(tt, 2); got != lit {
+		t.Errorf("指针挪到第三项上之后它的底是 %v，want 亮底 %v", got, lit)
+	}
+	if got, _ := avatarMenuRowBG(tt, 1); got != plain {
+		t.Errorf("指针挪到第三项上之后第二项还亮着（底 %v），want 普通底 %v", got, plain)
 	}
 }
 
@@ -225,12 +293,17 @@ func TestTheAvatarMenuWalksWithTheArrowKeys(t *testing.T) {
 //
 // ⚠️ 这一条钉的是「键盘走到哪儿、回车就做哪一项」：走神了做另一项
 // （比如走到「退出登录」却把登录给做了）是这一类改动最贵的那种错。
+//
+// ⚠️ **浮层刚打开时什么也没选中**（上游 HeroUI 就是这样），所以这里要先按
+// 两下 ↓ 走到第二项「个人资料」。
 func TestTheAvatarMenuSelectsWithTheKeyboard(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
 
 	openAvatarMenu(t, tt)
-	// ↓ 走到第二项「个人资料」。
+	// ↓ ↓ 走到第二项「个人资料」。
+	tt.Key(0, mygoui.KeyDown)
+	tt.Frame()
 	tt.Key(0, mygoui.KeyDown)
 	tt.Frame()
 	// 没登录时那一项会说一句「还没登录」——这一条要的是「走对了那一项」。
@@ -355,6 +428,46 @@ func TestEveryAvatarMenuItemHasAnIcon(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 //  退出登录那一项
 // ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheDangerItemKeepsItsContrastOnTheHighlightedRow 验「退出登录」那一项
+// **被高亮的时候**字还读得出来。
+//
+// ⚠️ **底换了，字要按这层底现算**（仓库的规矩，见 `flatbutton.go` 的
+// `flatCurrentText`）：同一个危险字压在**面板底**上是 4.97~5.75:1，而压在
+// 当前项那层 `accentSoft` 淡底上只有 **4.34~4.45:1**——差一点点到不了 4.5。
+// 而那一档正是「键盘走到退出登录」或者「鼠标悬停它」的那一瞬。
+//
+// ⚠️ **四个方案 × 深浅两套都要过**：那一层淡底是每个方案自己的
+// `accentSoft`（浅色 14%、深色 18%），对比度也跟着方案走。
+func TestTheDangerItemKeepsItsContrastOnTheHighlightedRow(t *testing.T) {
+	danger := avatarMenuItem{label: "退出登录", danger: true}
+	for _, preset := range []app.ThemePreset{
+		app.ThemePresetClassic, app.ThemePresetWarmPaper,
+		app.ThemePresetDuskAmber, app.ThemePresetSoftPeach,
+	} {
+		for _, dark := range []bool{false, true} {
+			shade := "浅色"
+			if dark {
+				shade = "深色"
+			}
+			st := app.DefaultSettings("")
+			st.ThemePreset = preset
+			st.ThemeMode = app.ThemeModeLight
+			if dark {
+				st.ThemeMode = app.ThemeModeDark
+			}
+			tt, s, _, _ := shellOnSettings(t, st)
+			th := avatarMenuTheme(s)
+			bg := accentSoft(th)
+			col := avatarMenuTextColor(th, danger, bg, true)
+			if got := ink.Ratio(col, bg); got < 4.5 {
+				t.Errorf("%s %s：当前那一项的危险字在淡底上是 %.2f:1，want ≥4.5——"+
+					"底换了，字要按这层底现算", preset, shade, got)
+			}
+			_ = tt
+		}
+	}
+}
 
 // TestTheAvatarMenuAsksBeforeLoggingOut 验「退出登录」先问一句。
 //
