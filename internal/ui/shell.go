@@ -91,6 +91,15 @@ type Shell struct {
 	scrollbarHot    bool
 	scrollbarHotNow bool
 
+	// theme 是主题的缓存（见 theme.go 的 `themeCache`）。
+	//
+	// ⚠️ **逐窗口一份**：主题本身是全局的那一套（设置 + 系统深浅 + 桌面偏好），
+	// 但每一扇窗各自缓存一份更简单——迷你播放器换主窗口时外壳是新建的（见
+	// `toggleMiniPlayer`），而重建外壳本来就是「一切从零开始」的时候。
+	//
+	// **只由 view 在主线程上读写**，和别的界面状态同一条规矩。
+	theme themeCache
+
 	// laterPage / historyPage 是「稍后再看」和「历史记录」这两页各自的状态
 	// （见 librarypage.go）。挂在壳上而不是页面的局部变量，理由同上。
 	laterPage   libraryPage

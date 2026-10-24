@@ -353,6 +353,14 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// 风控**不判成「可重试」**：界面上那枚「重试」是立刻再问一次（没有退避），
+		// 而风控要等的是时间——判成可重试的话用户点一次撞一次（票 #316）。
+		// 限流（-509）是另一回事：等一会儿就好，所以仍然是可重试的。
+		Spec:  "风控不可重试（立刻再问还是撞墙），限流可重试（等一会儿就好）",
+		Tests: []string{"TestRiskControlIsNotWorthRetryingAgain"},
+	},
+	{
+		Category: HTTP,
 		Spec:     "取流超时会回来，不是挂着",
 		Tests:    []string{"TestSlowServerIsCutOffByTheTimeout", "TestALateStarterDoesNotWaitForTheTimeout"},
 	},

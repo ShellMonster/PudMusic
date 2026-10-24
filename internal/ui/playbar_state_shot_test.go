@@ -79,6 +79,22 @@ func TestRenderPlayBarStateShots(t *testing.T) {
 				hovered.Frame()
 			}
 			save(t, dir, "05-播放条-歌名悬停-"+name+".png", hovered)
+
+			// 06 **风控**：那一行**没有「重试」**，只有「在 B 站打开」。
+			//
+			// 🔴 **这一档是票 #316 的样子**：风控判成**不可重试**（立刻再问一次
+			// 还是撞同一面墙，而那枚「重试」没有退避），所以播放条上不许给
+			// 它——给了用户就是点一次撞一次。
+			risk := playBarTester(t, app.State{
+				HasTrack: true, Title: "一首歌", Source: app.SourceOnline,
+				BiliURL:   "https://www.bilibili.com/video/BV1xx411c7mD",
+				Err:       "被 B 站的风控拦下了，等一会儿再试",
+				ErrDetail: "被 B 站的风控拦下了，等一会儿再试",
+				CanRetry:  false,
+				Duration:  3 * time.Minute, Position: 42 * time.Second,
+				Rate: 1, Volume: 0.8, PlayMode: app.PlayModeLoop,
+			}, 1200, dark)
+			save(t, dir, "06-播放条-风控-不给重试-"+name+".png", risk)
 		})
 	}
 }
