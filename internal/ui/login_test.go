@@ -630,8 +630,11 @@ func TestTheLoginKeyIsNotASolidBlock(t *testing.T) {
 			loginInk := inkPixels(img, login, back)
 
 			// 相邻那几枚线框图标：同一栏、同样大小（`iconHitMd` 见方）。
+			//
+			// ⚠️ **「设置」不在这一列里**（票 #289）：顶栏那一枚拿掉了——侧栏和
+			// 头像下拉里都有同一个动作，三个入口会不一致。
 			worst := 0
-			for _, label := range []string{"打开文件", "迷你", "设置"} {
+			for _, label := range []string{"打开文件", "迷你"} {
 				r, ok := tt.Find(label)
 				if !ok {
 					t.Fatalf("顶栏上找不到 %q，文字有 %q", label, tt.Texts())
