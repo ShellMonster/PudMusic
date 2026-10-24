@@ -111,11 +111,39 @@ FAIL，逐个包看 `ok`。**它是默认不跑的**（见上），所以它绿�
   ——整包 10 次挂 3 次、单独跑 0 次，差别就在「整包那些堆和 GC 压力」。
   `GOGC=10` 直接造那个压力，一次顶十次。
 - **加压只跑自己改的那几处**（`-run` 过滤），**不要整包跑**。整包 3 次在这台
-  机器上单轮就要 62~298 秒，跑的是同一批既有测试，飘的也是那几条固定的
-  （`TestTheHoverLayerCoversOnlyTheCover`、
-  `TestEveryRouteShowsARealRowOrSaysWhichTicketIsMissing//follow`），
+  机器上单轮就要 62~298 秒，跑的是同一批既有测试，飘的也是那几条固定的，
   **跟这一票的改动无关**；而且同时有几个 agent 在跑的时候机器被占满，
   测出来的结果本身也不作数。**整包扫描是一次性的排查手段，不是每票的验收项。**
+
+  **已知会飘的那几条**（整包跑出来的 FAIL 落在这份名单里的，**不能当回归的
+  证据**；每条后面一句是它为什么飘）。**这四条是机器忙的时候飘过的**——负载
+  降下来多半是绿的，所以「我这儿绿」不是反证，「我这儿红」也不是回归：
+
+  - `TestTheHoverLayerCoversOnlyTheCover`——比的是**两帧之间变了哪些像素**，
+    满屏底下那个播放键画的是「播放 / 暂停」两个字，那一换落在封面**外面**，
+    机器忙的时候正好夹在两帧之间，于是报出来的是「浮层盖过了封面」（真因离
+    症状隔了三层）。
+  - `TestEveryRouteShowsARealRowOrSaysWhichTicketIsMissing//follow`——关注页
+    那一支等的是「接口回来了、把那一行画上去了」，而 `realDataWait` 的硬期限
+    只有 **3 秒**，机器一慢就超。
+  - `TestTheSearchBoxSaysThreeDifferentThings`——歌词搜索的**异步态**：源那边
+    真睡 **300ms**，界面这边画一帧就断言「正在搜」，机器一慢那 300ms 先走完，
+    「正在搜」已经不见了。
+  - `TestChangingTheDownloadDirectorySaysWhereItTakesEffect`——等的是「改完
+    下载目录之后，界面说出它在哪儿生效」，用的是**共用的那个 10 秒**保险丝，
+    机器一慢就超。
+
+  **待低负载复核的一条**（看到它红先别当回归，**也别当定论**）：
+
+  - `TestTheQueueDrawerSlideDoesNotAllocatePerFrame`——2026-10-24 在 load 9~21
+    下整包跑，10 轮里飘了 2 次：进场那 12 帧的每帧分配 14.7~15.2，稳态 11.0，
+    超了 **20%** 的余量；**单独跑是绿的**（`-run` 过滤 10 次全绿）。那两遍不
+    满足「load 8 以下才作数」，所以它**还没在低负载下复现过**。
+
+  想自己核这份名单：**盯住负载**——一轮整包从头到尾 load 最高不超过 8，那一轮
+  才算数；超了就不算（`GOGC=10 go test ./internal/ui/ -count=1 -timeout 15m`
+  一轮一轮往下数）。**别用 `-run` 过滤**——这几条**单独跑都是绿的**，飘的是整包
+  那些堆和 GC 压力。
 
   ```sh
   go build -trimpath -p 4 ./... && go vet -trimpath -p 4 ./... && go test -p 4 \
