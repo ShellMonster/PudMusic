@@ -21,16 +21,41 @@
 // ⚠️ **整个侧栏折叠起来的时候，收藏夹换成一枚图标 + 一层浮层**（见
 // viewFavoritesCollapsed）：折叠态原来干脆不画收藏夹，而折叠侧栏是给屏幕小
 // 的人用的——恰恰是这类用户最常去收藏夹。
+//
+// # 这一片的画法（票 #371）
+//
+// 这一片是 2026-10-24 那次界面重设计（PR #357）之后**没跟上的一处**：重设计
+// 改了侧栏本身（展开 220 / 折叠 64、底色用方案的 `sidebar`、选中项底是
+// `accentSoft` 淡底），而这一片还是老样子——于是它跟同一根侧栏里的菜单项放
+// 在一起是两套风格。
+//
+// 现在这一片**整块**都按设计规范 §零 的当前风格画：
+//
+//   - **左缩进 16**：和侧栏的品牌 logo、侧栏分组标题（「发现」「我的音乐」）
+//     同一列——这一片是侧栏里的一块，缩进到别处就像是另外贴上去的一件东西。
+//   - **一个字都起在同一列**（36）：分组标题的字、收藏夹名的字、空状态那句、
+//     在飞状态那句，全都在这一列上（见 `favTextPad`）。
+//   - **分组标题**：一枚 14 的箭头图标 + 12 / 500 / 次要色的组名（和侧栏分组
+//     标题同一档）。
+//   - **收藏夹名**：14 的正文色；选中那一行是 `accentSoft` 淡底 + 按那层底
+//     现算的字（`flatCurrent`）；悬停 / 按下是 `flat.Feel`（压一层半透明的前
+//     景色，和侧栏菜单项同一档）。
+//   - **折叠态那一层浮层**：底 `surface1`、圆角 `radiusLg`、影 `shadow.Modal`
+//     （`popupPanelCard`）。
+//
+// ⚠️ **颜色和圆角一个都不写死**：底色走方案，文字走主题，圆角走 `t.Radius`。
 package ui
 
 import (
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -38,6 +63,43 @@ import (
 
 // favGroups 是侧栏上有几组收藏夹。app 那边也是两组（见 app.FavoriteGroup）。
 const favGroups = 2
+
+// 这一片的版式（票 #371）。
+//
+// ⚠️ **三个数是一套**：左边距 → 图标 → 缝 → 文字列。改一个，另外两个要跟着
+// 重新算——而算错了的样子是「标题的字和收藏夹名的字不在一条竖线上」，那个
+// 差别一眼看不出来，得靠量。
+const (
+	// favIndent 是这一片（两组收藏夹 + 空状态 + 在飞状态）的左缩进。
+	//
+	// ⚠️ **16 是侧栏那一列的位置**：品牌 logo（`viewSideBrand`）、侧栏分组标题
+	// 「发现」「我的音乐」（`viewSideGroupTitle`）都起在这儿——这一片是侧栏里的
+	// 一块，缩进到别的地方，就像是另外贴上去的一件东西。
+	favIndent = space.Px16
+
+	// favIconW 是折叠指示那一枚图标的边长。**14**（`iconSm` 那一档）。
+	//
+	// ⚠️ 别拿 18（`iconMd`）那一档：那一档是「菜单项那一枚图标」的号，而这一枚
+	// 挨着的是 12 的组名——图标比字大一号，那一枚就比它旁边的字还重。
+	favIconW = iconSm
+
+	// favIconGap 是图标和组名之间的缝（6）。
+	favIconGap = space.Px6
+
+	// favTextPad 是这一片里**文字列**相对整片左沿的偏移：图标 + 缝 = 20。
+	//
+	// ⚠️ **分组标题的字、收藏夹名的字、空状态那句、在飞状态那句，都起在这一列
+	// 上**（绝对位置 36）。它们不在一条竖线上的时候，这一片看着就是两段东西
+	// （报告 C3 那条理由）：一句话顶格在最左边，像一句不属于任何一组的说明。
+	favTextPad = favIconW + favIconGap
+
+	// favGroupGap 是两组收藏夹之间留的那一截（12）。
+	//
+	// ⚠️ **和侧栏分组标题上面那一截是同一个数**（`viewSideGroupTitle` 的
+	// `sideGroupGapTop`）：两个分组标题之间要有一道呼吸，不然第二组的标题紧贴
+	// 着上一组最后一条，看着像上一组多出来的一个条目。
+	favGroupGap = space.Px12
+)
 
 // favMenuAction 是右键菜单里的一项。
 type favMenuAction struct {
@@ -83,10 +145,16 @@ func favMenuItems(g app.FavoriteGroup) []favMenuAction {
 //
 // ⚠️ **那一句是**这一片**收藏夹的状态，不是一组的**（见 `favEmptyText`）：
 // 两组的空状态合成一句，而合成的那一句得站在最要紧的那一档上。
+//
+// # 这一片是**一个块**（票 #371）
+//
+// 外面套的那一层只做两件事：把左缩进钉在侧栏那一列（`favIndent`），以及让这
+// 一片里的字都起在同一列上（`favTextPad`）。
 func (s *Shell) viewFavorites(c *ui.Context, st app.Settings, collapsed bool) {
 	hidden := hiddenMenuKeys(st)
-	s.viewFavoritesRefreshing(c, st, collapsed)
 	if collapsed {
+		// ⚠️ 折叠态**不画这一片**（只画那一枚图标 + 浮层），所以在飞状态那句
+		// 也不画——理由见 viewFavoritesRefreshing。
 		s.viewFavoritesCollapsed(c, st)
 		return
 	}
@@ -105,13 +173,29 @@ func (s *Shell) viewFavorites(c *ui.Context, st app.Settings, collapsed bool) {
 		}
 		lastEmpty = g
 	}
-	for g := range favGroups {
-		text := ""
-		if g == lastEmpty {
-			text = s.favEmptyText(loggedIn)
-		}
-		s.viewFavoriteGroup(c, st, app.FavoriteGroup(g), items[g], text)
-	}
+
+	// ⚠️ **Key 挂在这一层 Column 上**：它不是处理输入的控件（里面的按钮各自
+	// 有自己的 key），而挂在会处理输入的元素上会 panic（`ui/element.go:658`）。
+	ui.Column(c).Key("fav-area").
+		Padding(space.None, space.None, space.None, favIndent).
+		Children(func() {
+			s.viewFavoritesRefreshing(c)
+			for g := range favGroups {
+				text := ""
+				if g == lastEmpty {
+					text = s.favEmptyText(loggedIn)
+				}
+				// ⚠️ **组与组之间要分开**（`favGroupGap`）：两组是**两伙**收藏夹
+				// （自己建的 / 别人建的），而组内那一条缝只有 2——不额外留一截的
+				// 话，第二组的标题紧贴着第一组最后一条，看着像第一组多出来的一个
+				// 条目。
+				top := float32(space.None)
+				if g > 0 {
+					top = favGroupGap
+				}
+				s.viewFavoriteGroup(c, st, app.FavoriteGroup(g), items[g], text, top)
+			}
+		})
 }
 
 // favEmptyText 是侧栏里那一句空状态。
@@ -165,31 +249,29 @@ func (s *Shell) favAreaState() (loaded, failed bool) {
 
 // favEmptyLine 是侧栏里那一句空状态。
 //
-// ⚠️ **它左边缩进和分组标题对齐**：原来它顶格在侧栏最左边（x=0），而分组
-// 标题在 x=43 / x=65（**两个还不一样**——因为标题那一枚是 Grow(1) 的按钮，
+// ⚠️ **它左边缩进和分组标题对齐**：它原来顶格在侧栏最左边（x=0），而那时的
+// 分组标题在 x=43 / x=65（**两个还不一样**——标题那一枚是 Grow(1) 的按钮，
 // 框架的按钮把内容居中，于是「我创建的」那组右边多一个「+」，标题就往左挪
 // 22 像素）。一句话顶格在最左边，看着像侧栏底部的一句独立说明，而不属于
 // 任何一组（报告 C3）。
 //
-// 现在分组标题**左对齐**（`Justify(Start)`，和菜单项那一列一样），而这一句
-// 跟着它缩进——于是这一片是一个整块。
+// 现在这一句和这一片里其他的字**都在同一列**（`favTextPad`，票 #371）：分组
+// 标题的**字**（标题左边那一枚箭头图标在 16）、收藏夹名的字，都在这一列。
+//
+// ⚠️ **对齐的是「标题那一块」的字**，不是那枚图标：这一句是替下面那些**收藏
+// 夹名**说话的（名字也起在 `favTextPad` 上），而跟图标同列的话，这一句会比
+// 下面那些名字更靠左，看着像是另一个层级的东西。
 func (s *Shell) viewFavoritesEmptyLine(c *ui.Context, text string) {
 	t := c.Theme()
 	// ⚠️ **内边距在「壳」上，不在字上**：字那一格的盒子被 Column 拉满宽
 	// （默认 Stretch），量出来的 X 是 0，而字实际起头的位置是内边距那一份。
 	// 套一层壳，那一句的盒子就从内边距那儿起头——「它和标题对齐」这件事
 	// 才量得出来（测试就是这么量的）。
-	ui.Row(c).Padding(space.Px6, favIndent(t)).Children(func() {
+	ui.Row(c).Padding(space.Px6, favTextPad).Children(func() {
 		ui.Text(c, text).FontSize(scale.Font(c, scale.Size12)).
 			TextColor(t.TextMuted)
 	})
 }
-
-// favIndent 是侧栏收藏夹这一片的缩进：分组标题的左内边距（`flat.Button` 的
-// 那个 `t.Space(3.5)`，也就是 14）。
-//
-// ⚠️ **它跟着主题的间距走**，不是写死的 14：主题的间距变了，两处要一起变。
-func favIndent(t *ui.Theme) float32 { return t.Space(3.5) }
 
 // refreshLine 是「正在刷」那一行的字。
 //
@@ -200,15 +282,20 @@ const refreshLine = "正在刷新收藏夹…"
 
 // viewFavoritesRefreshing 是那一行。
 //
-// 折叠态不画，理由同 viewLoggedOutHint：72 宽摆不下，而且整个收藏夹那一块
-// 在折叠态压根不画（`viewFavoriteGroup` 第一行就 return 了）——单独留一句悬在
+// 折叠态不画，理由同 viewLoggedOutHint：64 宽摆不下，而且整个收藏夹那一块
+// 在折叠态压根不画（`viewFavoritesCollapsed` 那一支）——单独留一句悬在
 // 空侧栏里，用户会以为收藏夹跑到别处去了。
-func (s *Shell) viewFavoritesRefreshing(c *ui.Context, st app.Settings, collapsed bool) {
-	if collapsed || !s.app.FavoritesRefreshing() {
+//
+// ⚠️ **它缩在这一片的文字列上**（`favTextPad`，票 #371）：这一句说的是「这一
+// 片」，而它摆在最上面——缩进和下面那些字不一样的话，它像是一句悬在上面的
+// 说明，而不是这一片的状态。
+func (s *Shell) viewFavoritesRefreshing(c *ui.Context) {
+	if !s.app.FavoritesRefreshing() {
 		return
 	}
+	t := c.Theme()
 	ui.Text(c, refreshLine).FontSize(scale.Font(c, scale.Size12)).
-		TextColor(c.Theme().TextMuted).Padding(space.Px4, space.Px8)
+		TextColor(t.TextMuted).Padding(space.Px4, favTextPad)
 }
 
 // viewFavoriteGroup 是一组：折叠标题 + （展开时的）那一列。
@@ -220,25 +307,31 @@ func (s *Shell) viewFavoritesRefreshing(c *ui.Context, st app.Settings, collapse
 // emptyText 是空状态那一句；**空串表示这一组底下不摆那一句**（空状态只有
 // 一句，而它落在最后一个空的那一组底下，见 viewFavorites）。
 //
+// top 是这一组**上面**留的那一截（组与组之间要分开，见 `favGroupGap`）。
+//
 // ⚠️ **折叠态（整个侧栏折起来）不在这儿**：那一档走的是一枚「收藏夹」图标 +
 // 一层浮层（见 viewFavoritesCollapsed）——整组收藏夹在折叠态**整个不见**的话，
 // 用户会以为收藏夹没了（报告 C4）。
 func (s *Shell) viewFavoriteGroup(c *ui.Context, st app.Settings, g app.FavoriteGroup,
-	items []app.Favorite, emptyText string) {
+	items []app.Favorite, emptyText string, top float32) {
 	folded := favoriteFolded(st, g)
 
 	// Key 是这一组的序号：两组各自独立，折叠/展开不会让另一组的状态串过来。
-	ui.Column(c).Key("fav-group:" + strconv.Itoa(int(g))).Gap(space.Px2).Children(func() {
-		s.viewFavoriteHeader(c, g, folded)
-		if folded {
-			return
-		}
-		if len(items) == 0 {
-			if emptyText != "" {
-				s.viewFavoritesEmptyLine(c, emptyText)
+	//
+	// ⚠️ **上边距用 `Margin(top, …)`**（不是 `MarginY`）：`MarginY` 设的是上下
+	// 两个，而这里要的是**上面**那一截——下面那一截由这一组自己的内容决定。
+	ui.Column(c).Key("fav-group:" + strconv.Itoa(int(g))).Gap(space.Px2).
+		Margin(top, space.None, space.None, space.None).Children(func() {
+			s.viewFavoriteHeader(c, g, folded)
+			if folded {
+				return
 			}
-			return
-		}
+			if len(items) == 0 {
+				if emptyText != "" {
+					s.viewFavoritesEmptyLine(c, emptyText)
+				}
+				return
+			}
 		s.viewFavoriteList(c, g, items)
 	})
 }
@@ -249,32 +342,8 @@ func (s *Shell) viewFavoriteGroup(c *ui.Context, st app.Settings, g app.Favorite
 // + 号是 `renderFavoriteGroup` 的 `titleExtra`，只有 created 那一组传了它）。
 // 「我收藏的」里新建出来的东西属于**别人**，自己建的会出现在上面那一组。
 func (s *Shell) viewFavoriteHeader(c *ui.Context, g app.FavoriteGroup, folded bool) {
-	arrow := "▾"
-	if folded {
-		arrow = "▸"
-	}
-
-	// 不补 `Label(g.String())`：可见的字已经说了它是什么，再补一份只会让
-	// 画面上出现两份同样的文字（无障碍节点也算一份）。
-	//
-	// 也不写 `Grow(1)`：Column 默认就把子元素拉满宽（`docs/ui/layout.md`），
-	// 而 Grow 是纵向的「吃掉剩下的空间」——写在这里，它在折叠的那一组里
-	// 会把下面的东西顶没了。
-	//
-	// ⚠️ **灰字**：上游的分组标题是弱化的（`layout/side/collection/index.tsx:425`
-	// 一带的次级文字），而菜单项和收藏夹名才是 `t.Text`。这一层要是和下面那些
-	// 一样黑，六个分组标题就会比六个名字还抢眼。
 	ui.Row(c).Gap(space.Px2).Center().Children(func() {
-		// ⚠️ **左对齐**（`Justify(Start)`）：框架的按钮把内容**居中**，而这一枚
-		// 是 `Grow(1)` 的（为了把「+」推到最右边）——于是两个分组标题**起头的
-		// 位置不一样**：「我创建的」那组右边多一个「+」，它的标题就往左挪了
-		// 22 像素（实测 x=43 和 x=65）。同一个侧栏里两个标题不在一条竖线上，
-		// 而它们下面的内容（收藏夹名）又都在最左边。
-		//
-		// 左对齐之后，两个标题都在 `favIndent` 那一列上，下面那一句话也跟着
-		// 那一列——这一片是一个整块（报告 C3）。
-		fold := flatButton(c, arrow+" "+g.String()).Grow(1).
-			Justify(ui.Start).TextColor(c.Theme().TextMuted)
+		fold := s.favoriteFoldButton(c, g, folded).Grow(1)
 		if fold.Clicked() {
 			s.toggleFavoriteFolded(g, folded)
 		}
@@ -287,6 +356,50 @@ func (s *Shell) viewFavoriteHeader(c *ui.Context, g app.FavoriteGroup, folded bo
 			s.viewNewFavoriteButton(c)
 		}
 	})
+}
+
+// favoriteFoldButton 是那一组的折叠开关：一枚箭头图标 + 组名。
+//
+// # 箭头是**图标**，不是字符（票 #371）
+//
+// 原来摆的是字符「▾」「▸」。而同一个侧栏里别的东西（菜单项、图标键、折叠
+// 键）都是 RemixIcon 的图——一个字符摆在那一列里，它和邻居不是一套，而且它
+// 是**字**：字会跟着字号缩放、跟着字体渲染，而图标的边长是画出来的那一个。
+//
+// ⚠️ **朝下 = 展开着，朝上 = 折起来了**：和 `iconChevronDown` /
+// `iconChevronUp` 这两枚图自己的形状对得上（展开的那一支是「可以往下收起」
+// 的那一枚）。
+//
+// # 组名是 **12 / 500 / 次要色**（票 #371）
+//
+// 和侧栏的分组标题（「发现」「我的音乐」）**同一档**（`viewSideGroupTitle`）。
+// 上游的分组标题是弱化的次级文字（`layout/side/collection/index.tsx:425` 一带
+// 的次级文字），而菜单项和收藏夹名才是正文色——这一层要是和下面那些一样黑，
+// 六个分组标题就会比六个名字还抢眼。
+//
+// # 无障碍名字说的是「按下去会发生什么」
+//
+// 「折叠 我创建的」/「展开 我创建的」。画面上只有一枚箭头和一个组名，念不出
+// 它是干什么的；而读屏软件念的是这个名字（`Label`），画面上不多画一个字。
+func (s *Shell) favoriteFoldButton(c *ui.Context, g app.FavoriteGroup, folded bool) ui.Element {
+	t := c.Theme()
+	name, tip := iconChevronDown, "折叠 "+g.String()
+	if folded {
+		name, tip = iconChevronUp, "展开 "+g.String()
+	}
+	// ⚠️ **不补可见文字以外的名字**：画面上那两个字就是组名，而箭头是图标
+	// （图标对辅助技术是不可见的，`mygo/ui/svg.go` 的 Icon 文档）。
+	btn := ui.ButtonBase(c).Justify(ui.Start).Gap(favIconGap).Radius(t.Radius).
+		Padding(space.Px2, space.None).Label(tip)
+	btn.Children(func() {
+		ui.Icon(c, icon(name)).FontSize(favIconW).TextColor(t.TextMuted)
+		ui.Text(c, g.String()).FontSize(scale.Font(c, scale.Size12)).
+			FontWeight(weightMedium).TextColor(t.TextMuted)
+	})
+	// ⚠️ **悬停 / 按下是 `flat.Feel`**（压一层半透明的前景色）：和侧栏菜单项
+	// 同一档（`widgets/flat` 的文件头写着为什么是「压」不是「换」——换底会把
+	// 别的底整块顶掉）。
+	return flat.Feel(c, btn)
 }
 
 // viewNewFavoriteButton 是「我创建的」那一组标题右边那个「加」。
@@ -330,14 +443,30 @@ const (
 // 用户会以为收藏夹没了（报告 C4）。
 //
 // 所以折叠态留一枚图标：点了弹一层浮层，列出两组收藏夹，点一个就进去。
+//
+// ⚠️ **当前就在某个收藏夹页上时，那一枚要亮起来**（票 #371）：和侧栏菜单项在
+// 折叠态里的画法一样（`flatCurrent`——强调色淡底 + 按那层底现算的字）。折叠
+// 起来之后侧栏里只剩这一枚图标，它就是「当前在哪」唯一的指示——不亮的话用户
+// 在收藏夹那一页上，却看不出来自己在哪一页。
 func (s *Shell) viewFavoritesCollapsed(c *ui.Context, st app.Settings) {
 	anchor := flatIconCellButton(c, iconEmptyFolder, favCollapsedName, sideIconSize, sideIconCell).
 		AlignSelf(ui.Center)
+	if s.onCollectionPage() {
+		anchor = flatCurrent(c, anchor)
+	}
 	s.sideItemTip(c, anchor, favCollapsedName)
 	if anchor.Clicked() {
 		s.favPanelOpen = !s.favPanelOpen
 	}
 	s.viewFavoritesPanel(c, st, anchor)
+}
+
+// onCollectionPage 报「当前就在某个收藏夹页上」。
+//
+// ⚠️ **认的是路径前缀**：收藏夹页的地址是 `/collection/{id}`（`collectionPath`），
+// 而合集 / 系列也是同一个前缀（类型在查询参数里）。
+func (s *Shell) onCollectionPage() bool {
+	return strings.HasPrefix(s.router.Path(), collectionPathPrefix)
 }
 
 // viewFavoritesPanel 是折叠态那枚图标点开之后的那层浮层。
@@ -348,6 +477,15 @@ func (s *Shell) viewFavoritesCollapsed(c *ui.Context, st app.Settings) {
 //
 // ⚠️ **它不建在侧栏那个滚动容器里**：`PopoverBase` 的面板建在**浮层那一层**
 // （`mygo/ui/base.go` 的 `popover`），所以它不会被侧栏的滚动裁掉。
+//
+// # 这一层是**卡片那一档**（票 #371）
+//
+// 底色 `surface1`、圆角 `radiusLg`、影 `shadow.Modal`——走 `popupPanelCard`
+// 这一个出口（设计规范 §零「侧栏收藏夹」那一条：折叠态那层浮层是卡片那一档）。
+//
+// ⚠️ **别用 `popupPanel` 那一档**（底 = 页面底、圆角写死的 8、影是
+// `shadow.Popover`）：那是「贴着一层底的小浮层」，而这一层是一张浮在侧栏旁边
+// 的卡片——头像下拉是同一块料。
 func (s *Shell) viewFavoritesPanel(c *ui.Context, st app.Settings, anchor ui.Element) {
 	if !s.favPanelOpen {
 		return
@@ -355,9 +493,9 @@ func (s *Shell) viewFavoritesPanel(c *ui.Context, st app.Settings, anchor ui.Ele
 	t := c.Theme()
 	hidden := hiddenMenuKeys(st)
 	ui.PopoverBase(c, anchor, &s.favPanelOpen, func(panel ui.Element) {
-		popupPanel(t, panel.
+		popupPanelCard(s, t, panel.
 			AttachTo(anchor, ui.AnchorEnd, ui.AnchorStart).MarginStart(favPanelGap).
-			Width(favPanelW).Padding(space.Px6)).
+			Width(favPanelW).Padding(space.Px4)).
 			Children(func() {
 				// ⚠️ **空状态也只有一句**（和侧栏那一句同一个道理，报告 C3）：
 				// 两组都空的时候摆两句一模一样的话，用户得自己判断那是说一组
@@ -382,8 +520,11 @@ func (s *Shell) viewFavoritesPanel(c *ui.Context, st app.Settings, anchor ui.Ele
 					emptyText = s.favEmptyText(loggedIn)
 				}
 				for g := range favGroups {
+					// ⚠️ **组名是 12 / 500 / 次要色**（票 #371）：和侧栏那两枚
+					// 分组标题、关注页那一列的顶上那一行，同一档。
 					ui.Text(c, app.FavoriteGroup(g).String()).FontSize(scale.Font(c, scale.Size12)).
-						TextColor(t.TextMuted).Padding(space.Px4, space.Px8)
+						FontWeight(weightMedium).TextColor(t.TextMuted).
+						Padding(space.Px4, space.Px8)
 					for _, f := range items[g] {
 						s.viewFavoritesPanelRow(c, f)
 					}
@@ -397,6 +538,12 @@ func (s *Shell) viewFavoritesPanel(c *ui.Context, st app.Settings, anchor ui.Ele
 }
 
 // viewFavoritesPanelRow 是浮层里那一个收藏夹。
+//
+// # 它和侧栏里那一行是**同一套**（票 #371）
+//
+// 字号（14）、圆角（`t.Radius`）、悬停（`flat.Feel`）、当前那一行的淡底
+// （`flatCurrent`）——侧栏里那一行怎么画，这里就怎么画。浮层是同一个入口的
+// 另一种展开方式，两处画得不一样的话，用户会以为它们是两样东西。
 func (s *Shell) viewFavoritesPanelRow(c *ui.Context, f app.Favorite) {
 	t := c.Theme()
 	label := f.Title
@@ -404,6 +551,14 @@ func (s *Shell) viewFavoritesPanelRow(c *ui.Context, f app.Favorite) {
 		label = "（没名字）"
 	}
 	row := ui.Row(c).FillWidth().Padding(space.Px4, space.Px8).Radius(t.Radius)
+	// ⚠️ **当前就在这一页时，那一行要亮起来**（和侧栏里那一行同一套）：浮层是
+	// 折叠侧栏时的入口，用户从这儿点进去之后，这一层多半还开着——不亮的话，
+	// 「我在哪一页」这件事在这一层里就彻底没了。
+	if s.router.Path() == collectionPath(f.ID) &&
+		s.router.Query(collectionTypeQuery) == collectionTypeQueryOf(f) {
+		row = flatCurrent(c, row)
+	}
+	row = flat.Feel(c, row)
 	row.Children(func() {
 		ui.Text(c, label).FontSize(scale.Font(c, scale.FavPanelItem)).Grow(1).
 			MaxLines(1).Ellipsis("…")
@@ -534,21 +689,36 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 	cur := s.router.Path() == collectionPath(f.ID) &&
 		s.router.Query(collectionTypeQuery) == collectionTypeQueryOf(f)
 
-	row := ui.Column(c).Key(favRowKey(g, f.ID)).Grow(1).Radius(t.Radius).Padding(space.Px6, space.Px8)
+	// ⚠️ **左内边距是 `favTextPad`**（票 #371）：收藏夹名的字和分组标题的**字**
+	// 同列（36），而标题左边那一枚箭头图标在 16——名字和箭头不是一列，名字和
+	// 标题的字是一列。名字比标题的字更靠左的话，这一片看着是「标题缩进了一
+	// 格」，而不是「标题 + 它下面的东西」。
+	//
+	// ⚠️ **右边还是 8**：那一头留白和左边那一列对称（右 8 对上侧栏右缘那条
+	// 分隔线），而收藏夹名很长（上游那种「【长期主义】2026 年度歌单合集·最终
+	// 版」），右边多留一点白是有用的。
+	row := ui.Column(c).Key(favRowKey(g, f.ID)).Grow(1).Radius(t.Radius).
+		Padding(space.Px6, space.Px8, space.Px6, favTextPad)
 	switch {
 	case cur:
 		// 当前就在这一页：和侧栏菜单当前项**同一套**画法（`flatCurrent`——
-		// 中性灰底 + 主色的字，深浅两套同一个数）。
+		// 强调色淡底 + 按那层底现算的字，深浅两套同一个数）。
 		//
 		// ⚠️ **原来这里是实心主色**（`Background(t.Accent)`）：那是审计 F-02 /
 		// F-06 点名的那一处——同一个屏上（关注页、动态流页）左栏是实心绿大块、
 		// 侧栏是淡底，两种画法并排，而实心那一块比主操作还响。
 		row = flatCurrent(c, row)
-	case row.Hovered():
-		// 悬停要有反应：这一行点得动（进收藏夹页），没有反馈的话用户
-		// 不知道它是能点的。Biu 那边是 MenuItem 自带的 hover。
-		row = row.Background(t.Surface.Mix(t.Text, 0.08))
 	}
+	// ⚠️ **悬停 / 按下是 `flat.Feel`**（压一层半透明的前景色），和侧栏菜单项、
+	// 关注页那一列同一档（票 #371）。
+	//
+	// ⚠️ **原来这里是「换成 `t.Surface.Mix(t.Text, 0.08)`」**：那是换底，而换底
+	// 会把选中那一层的淡底整块顶掉——「当前在哪」是这一列里唯一的方向标，被
+	// 一次悬停盖掉比多画一层底更坏（`widgets/flat` 的文件头写着同一件事）。
+	//
+	// ⚠️ **压在选中那一层上面是故意的**：压一层前景色在任何底上都成立（透
+	// 明底上是变灰，淡底上是变深），而换底只在前一种底上成立。
+	row = flat.Feel(c, row)
 
 	row.Children(func() {
 		label := f.Title

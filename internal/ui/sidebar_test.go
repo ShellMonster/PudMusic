@@ -359,22 +359,27 @@ func testFavorites(prefix string, n int) []app.Favorite {
 //
 // 两组折叠态存在设置的同一个结构体里（`{created, collected}`），写错格子的
 // 表现是「折了一组、另一组的收藏夹凭空不见了」，而且界面上看不出是谁的问题。
+//
+// ⚠️ **折叠的证据是「那一组的内容不见了」**（票 #371）：分组标题上的折叠指示
+// 从字符「▾/▸」换成了图标（`iconChevronDown` / `iconChevronUp`），而**组名那一
+// 行字不再随折叠状态变**——所以不能再靠「标题长什么样」判断，只能看它底下的
+// 收藏夹还在不在。
 func TestBothCollectionGroupsFold(t *testing.T) {
 	_, a, tt, _ := favShell(t, 3, 2)
 
-	if err := tt.Click("▾ 我创建的"); err != nil {
+	if err := tt.Click("我创建的"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 
-	if _, ok := tt.Find("▸ 我创建的"); !ok {
-		t.Errorf("第一组没有折起来，文字有 %q", tt.Texts())
+	if tt.HasText("我建的 1") {
+		t.Errorf("第一组折起来了，它底下的收藏夹还摆着，文字有 %q", tt.Texts())
 	}
-	if _, ok := tt.Find("▾ 我收藏的"); !ok {
-		t.Errorf("第二组跟着折了，文字有 %q", tt.Texts())
+	if !tt.HasText("我收藏的") {
+		t.Errorf("第二组的标题不见了，文字有 %q", tt.Texts())
 	}
 	if !tt.HasText("我收的 2") {
-		t.Errorf("第二组的收藏夹不见了，文字有 %q", tt.Texts())
+		t.Errorf("第二组跟着折了，文字有 %q", tt.Texts())
 	}
 
 	folded := a.SettingsSnapshot().SideMenuCollectionFolded
@@ -383,11 +388,11 @@ func TestBothCollectionGroupsFold(t *testing.T) {
 	}
 
 	// 展开回来。
-	if err := tt.Click("▸ 我创建的"); err != nil {
+	if err := tt.Click("我创建的"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if _, ok := tt.Find("▾ 我创建的"); !ok {
+	if !tt.HasText("我建的 1") {
 		t.Errorf("没有展开回来，文字有 %q", tt.Texts())
 	}
 	if a.SettingsSnapshot().SideMenuCollectionFolded.Created {

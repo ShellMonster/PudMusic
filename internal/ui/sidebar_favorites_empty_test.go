@@ -77,13 +77,13 @@ func TestTheSidebarSaysThereAreNoFavoritesOnlyOnce(t *testing.T) {
 // ——标题那一枚是 Grow(1) 的按钮，框架把按钮内容居中，于是「我创建的」那组
 // 右边多一个「+」，标题就往左挪 22 像素）。一句话顶格在最左边，看着像侧栏
 // 底部的一句独立说明，而不属于任何一组（报告 C3）。
+//
+// ⚠️ **对齐的是标题的「字」那一列**（票 #371）：分组标题左边还有一枚箭头图标，
+// 而这一句是替下面那些**收藏夹名**说话的——名字和标题的字同列，它也同列。
 func TestTheEmptyFavoritesLineIsIndentedLikeItsGroup(t *testing.T) {
 	_, tt := favEmptyShell(t)
 
-	title, ok := tt.Find("▾ 我创建的")
-	if !ok {
-		title, ok = tt.Find("▸ 我创建的")
-	}
+	title, ok := tt.Find("我创建的")
 	if !ok {
 		t.Fatalf("侧栏上没有「我创建的」那一组，文字有 %q", tt.Texts())
 	}
@@ -107,14 +107,8 @@ func TestBothFavoriteGroupTitlesStartAtTheSamePlace(t *testing.T) {
 	_, tt := newShell(t, withSettings(app.DefaultSettings("")))
 	tt.Frame()
 
-	created, ok1 := tt.Find("▾ 我创建的")
-	if !ok1 {
-		created, ok1 = tt.Find("▸ 我创建的")
-	}
-	collected, ok2 := tt.Find("▾ 我收藏的")
-	if !ok2 {
-		collected, ok2 = tt.Find("▸ 我收藏的")
-	}
+	created, ok1 := tt.Find("我创建的")
+	collected, ok2 := tt.Find("我收藏的")
 	if !ok1 || !ok2 {
 		t.Fatalf("侧栏上没有那两个分组标题，文字有 %q", tt.Texts())
 	}
