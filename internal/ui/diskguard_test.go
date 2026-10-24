@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/testproc"
 )
 
@@ -82,8 +81,16 @@ func TestMain(m *testing.M) {
 		reportTempMusicDirFailure(err)
 		os.Exit(1)
 	}
-	// 本包的老用例量的是经典外观（见 `app.DefaultThemePreset` 的说明）。
-	app.DefaultThemePreset = app.ThemePresetClassic
+	// 方案**不钉**：这一包的测试跑在**默认方案（暖纸）**上——那才是用户看见的
+	// 界面（应用还没发版，没有要保住的旧外观，见 `app.DefaultThemePreset`）。
+	//
+	// 这一行以前在这儿（把 `app.DefaultThemePreset` 按成经典），好让一批量老样子的
+	// 老断言继续绿；它把**整个包**的用例都圈进了「经典」那一档，是「为了未发版的
+	// 老外观留的一整套兼容逻辑」。票 #406 把那一行去掉，并量出哪些老断言要跟着
+	// 改成量新样子。
+	//
+	// ⚠️ **「经典」那一档自己仍然要有测试**：`themepreset_test.go` 那几处直接点名
+	// 经典，不受这里影响。
 	code := m.Run()
 	// 收掉「子进程跑本测试自己」的那份副本（理由见 `internal/testproc`）。
 	//
