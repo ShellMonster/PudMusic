@@ -543,10 +543,34 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 //
 // 🔴 **那枚转圈在这里，不在播放/暂停那一枚上**（票 #282 的评审）：取流这一趟
 // 里**上一首还在放**，把那一枚换成转圈的话用户就按不了暂停了。
+//
+// # 🔴 **慢的时候换一句**（票 #220）
+//
+// 「正在取流：<歌名>」说的是「**在准备**」，而用户抱怨的是「**非常慢**」——
+// 那一句从头到尾不变，他等三秒和等三十秒看到的都是同一句，于是「慢」这件事
+// 在界面上**根本不存在**。
+//
+// 所以慢的时候屏幕上换成「取流很慢：<歌名>」：
+//
+//	一样长	「正在取流：」和「取流很慢：」都是五个字，歌名那一截的长度不变
+//	多一件事	用户第一次知道「它慢」——而他等下去是有理由的
+//
+// ⚠️ **完整那一句在悬停提示里**（和错误那一栏同一个做法）：那里说清
+// **卡在哪一步**（「问地址」/「下音频」/「解码」）和**等了多久**——那才是
+// 用户能据此判断「再等等」还是「换一首」的东西。
 func (s *Shell) viewTrackLoading(c *ui.Context, st app.State, t *ui.Theme) {
 	msg := "正在取流"
+	if st.LoadingSlow {
+		msg = "取流很慢"
+	}
 	if st.LoadingTitle != "" {
 		msg += "：" + st.LoadingTitle
+	}
+	// 悬停提示里说清**卡在哪一步**、**等了多久**。
+	tip := msg
+	if st.LoadingStage != "" {
+		tip = fmt.Sprintf("正在取流《%s》：现在卡在「%s」这一步，已经等了 %s。网络慢的时候先等等，或者点「重试」再试一次。",
+			st.LoadingTitle, st.LoadingStage, loadingWaitText(st.LoadingWait))
 	}
 	ui.Row(c).Gap(space.Px4).AlignItems(ui.Center).Children(func() {
 		// ⚠️ **转圈的无障碍名字就是「正在取流」**：转圈没有可见的字，而它是
@@ -555,8 +579,19 @@ func (s *Shell) viewTrackLoading(c *ui.Context, st app.State, t *ui.Theme) {
 		// ⚠️ **一行 + 省略号，和错那一行同一个理由**（见 `viewTrackError`）：
 		// 88 高的播放条放不下两行，而超长的歌名会把这一行挤没。
 		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
-			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").Grow(1), msg)
+			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").Grow(1), tip)
 	})
+}
+
+// loadingWaitText 把「等了多久」说成一句人话。
+//
+// ⚠️ **不足一秒说「不到 1 秒」而不是「0 秒」**：「0 秒」读起来像「没等」，
+// 而那一刻用户其实已经等了一会儿了。
+func loadingWaitText(d time.Duration) string {
+	if d < time.Second {
+		return "不到 1 秒"
+	}
+	return fmt.Sprintf("%d 秒", int(d.Round(time.Second)/time.Second))
 }
 
 // viewTrackReconnecting 是播放条上「正在重连」那一句话（前面带一枚转圈）。

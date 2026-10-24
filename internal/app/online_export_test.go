@@ -13,6 +13,15 @@ import (
 // **外部**测试包。测试接缝只能从里面导出给外面用（Go 的惯例：
 // `export_test.go` 里的导出只在测试构建里存在）。
 
+// LoadSlowAfter 是「这一段慢到该告诉用户了」那个门槛（给测试用）。
+//
+// ⚠️ **给测试看的是它「小于超时那个」**：慢那一档必须在超时之前就说话，
+// 否则用户白等 20 秒才等到一句「超时」。
+const LoadSlowAfter = loadSlowAfter
+
+// LoadPlayTimeout 是「这一段超时了判失败」那个门槛（给测试用）。
+const LoadPlayTimeout = onlinePlayTimeout
+
 // SetAfterForTest 换掉「排定时器」那一个入口（给测试用）。
 //
 // 生产上它是 `time.AfterFunc`；换成假的之后，「取流超时」那个闹钟由测试

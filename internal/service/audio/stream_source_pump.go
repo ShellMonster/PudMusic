@@ -168,10 +168,18 @@ func (s *StreamSource) append(b []byte) error {
 	// 和没恢复一样）。
 	recovered := s.retryPending
 	s.retryPending = false
+	// 🔴 **「头几个字节到了」只报一次**（票 #220）：那是「下载首段字节」
+	// 那一段的计时点，报一次就够——上层要的是「等字节等了多久」，不是
+	// 「每一个块到了都报一次」。
+	first := !s.firstBytesSeen
+	s.firstBytesSeen = true
 	s.cond.Broadcast()
 	s.mu.Unlock()
 	if recovered && s.onReconn != nil {
 		s.onReconn()
+	}
+	if first && s.onFirstBytes != nil {
+		s.onFirstBytes(s.Filled())
 	}
 	return nil
 }
