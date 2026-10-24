@@ -45,15 +45,14 @@ const settingsPath = "/settings"
 // 记录页的一句话」翻译成「设置页第 N 个 Tab 的第 M 行」（报告 C1）。
 //
 // 所以这里三件事一起做：切到那一格、**指**着那一行（标题是主色）、让那一页
-// 把它滚进视野（见 settingsScrollFocusIntoView）。
+// 把它滚进视野（见 settingRowElAt）。
 //
 // ⚠️ **它是从别的页面调过来的**：调用方是下载记录页（那一句「还没有下载
 // 目录」）。设置页自己不会指着谁——`settingsFocusNone` 就是「没指」。
 func (s *Shell) goToDownloadDirSetting() {
 	s.settings.tab = settingsTabGeneral
 	s.settings.focus = settingsFocusDownload
-	s.settings.focusScrolled = false
-	s.settings.focusTries = 0
+	s.settings.focusScroll = true
 	s.navigate(settingsPath)
 }
 
@@ -78,19 +77,16 @@ type settingsPageState struct {
 	// 第 N 个 Tab 的第 M 行』」）。
 	focus settingsFocus
 
-	// focusEl 是被指着的**那一行**的盒子，focusScrolled 记「滚进视野」这件事
-	// 做了没有。
+	// focusScroll 记「把指着的那一行滚进视野」这件事**还没做**。
 	//
-	// ⚠️ **滚进视野要跨两帧**：量的是**上一帧**的盒子（`Element.Bounds()` 的
-	// 规矩），而刚跳过来那一帧画的是别的页——所以量不到的时候要**再要一帧**。
-	focusEl       ui.Element
-	focusScrolled bool
-	// focusTries 是「量不到、再要一帧」已经试了几次。
-	focusTries int
-
-	// scrollEl 是这一页那个滚动容器（`ui.Scroll`）的盒子：量「视野」要靠它
-	// （行的盒子是窗口坐标，容器的盒子也是，两个一比就知道它在不在视野里）。
-	scrollEl ui.Element
+	// ⚠️ **只做一次**：上游的 `Element.ScrollIntoView()` 说的是「在它该进视野的
+	// 那一帧调它」——每一帧都调的话，用户自己滚走了它又被拉回来。
+	//
+	// ⚠️ **它不需要跨帧地等**：上游那一行是「布局完就把周围的容器滚到刚好露出
+	// 它」，而「这一帧新建的元素这一帧就跟着进来」——所以从前那套「量不到就再要
+	// 一帧、最多试三次」的跨帧逻辑整个删掉了（那一套量的是**上一帧**的盒子，而
+	// 元素属于建它的那一遍，跨帧读是拿旧把手）。
+	focusScroll bool
 
 	// descFloor 是说明列这一帧的**下限**（0 = 不给下限）。
 	//
@@ -432,9 +428,6 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 	s.settings.contentW = s.settingsContentInnerW(c, st)
 
 	scroll := ui.Scroll(c).Key("settings-scroll").Grow(1).TrackScroll(&s.settings.scroll)
-	// 记下这个滚动容器的盒子：把指着的那一行滚进视野时要拿它当「视野」（见
-	// settingsScrollFocusIntoView）。
-	s.settings.scrollEl = scroll
 	scroll.Children(func() {
 		// 这一层是 `m-auto`：Column 的横向对齐（跨轴），所以内容那一段在
 		// 可视区里居中，而可视区不满 900 时它就是满的（`MaxWidth` 是上限）。
@@ -473,10 +466,6 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 		})
 	})
 	s.trackScrollbar(scroll)
-
-	// 把「指着的那一行」滚进视野。⚠️ **排在内容建完之后**：它量的是上一帧的
-	// 盒子，而那个盒子属于这一帧建出来的那个元素（见 settingsScrollFocusIntoView）。
-	s.settingsScrollFocusIntoView()
 
 	// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见 `widgets/list` 的
 	// `BackToTop`）。
@@ -517,8 +506,7 @@ func (s *Shell) syncSettings(c *ui.Context) {
 	if last, tab := s.settings.shownTab, s.settings.tab; last != tab {
 		s.settings.shownTab, s.settings.scroll.Y = tab, 0
 		// ⚠️ **指着的那一项只在它所在的那一格**：换到别的 Tab 就没东西可指了，
-		// 而留着它会让下一次跳过来以为已经指过（settingsScrollFocusIntoView
-		// 直接跳过）。
+		// 而留着它会让下一次跳过来以为已经指过（那一行不会再滚进视野）。
 		if s.settings.focus != settingsFocusNone && tab != settingsTabGeneral {
 			s.settings.focus = settingsFocusNone
 		}
@@ -529,57 +517,14 @@ func (s *Shell) syncSettings(c *ui.Context) {
 //
 // 16 是「贴着边的那一行看起来像是被切掉了」和「别把无关的东西滚走太多」之间
 // 的那个数。
-const settingsFocusMargin = 16
-
-// settingsScrollFocusIntoView 把「指着的那一行」滚进视野。
 //
-// ⚠️ **它必须在这一页的内容建完之后调**：它量的是**上一帧**的盒子
-// （`Element.Bounds()` 的规矩），而那个盒子属于**这一帧建出来的那个元素**
-// ——跨帧去读上一帧的元素是**用旧把手**（框架会当它过期，详见
-// `mygo/ui/frame.go` 的 `expired`）。
+// ⚠️ **它垫在被指着的那一行的盒子里**（见 `settingRowElAt`）：上游的
+// `ScrollIntoView()` 滚的是「刚好露出这个盒子」，盒子高 16，那 16 像素就成了
+// 内容离边的留白——滚到的位置和从前我们自己滚的那个位置**一模一样**。
 //
-// ⚠️ **它要跨两帧**：刚跳过来那一帧，上一帧画的是**别的页**，那一行压根没有
-// 盒子。所以第一帧量不到，要**再要一帧**——不然就没有下一帧，那一行就永远停在
-// 视野外，而用户看到的是「设置页打开了，可这里没有下载目录」。
-//
-// ⚠️ **最多再要三帧**：万一那一行一直没量到（它不在这一格、或者这一页被换掉
-// 了），别把它变成一个每帧都要一帧的死循环。
-func (s *Shell) settingsScrollFocusIntoView() {
-	st := &s.settings
-	if st.focus == settingsFocusNone || st.focusScrolled {
-		return
-	}
-	row, view := st.focusEl, st.scrollEl
-	// ⚠️ `Valid()` 读的是「这个把手属于这一帧吗」：不属于就是**上一帧**留下的
-	// 那个（这一帧没画那一行），那个盒子不能用来算。
-	if !row.Valid() || !view.Valid() || row.Bounds().H <= 0 || view.Bounds().H <= 0 {
-		st.focusTries++
-		if st.focusTries > settingsFocusTries {
-			// 量不到了：放弃，别再要帧（死循环比滚不到更糟）。
-			st.focusScrolled = true
-			return
-		}
-		s.wake.invalidate()
-		return
-	}
-	rb, vb := row.Bounds(), view.Bounds()
-	// 差多少：上面露出去就往上滚，下面露出去就往下滚。
-	need := float32(0)
-	if rb.Y < vb.Y {
-		need = rb.Y - vb.Y
-	} else if rb.Y+rb.H > vb.Y+vb.H {
-		need = rb.Y + rb.H - (vb.Y + vb.H)
-	}
-	if need > 0 {
-		st.scroll.Y += need + settingsFocusMargin
-	} else if need < 0 {
-		st.scroll.Y += need - settingsFocusMargin
-	}
-	st.focusScrolled = true
-}
-
-// settingsFocusTries 是「量不到就再要一帧」的次数上限。
-const settingsFocusTries = 3
+// ⚠️ **数走 `space` 那张表**（界面层里不许出现表外的间距数字，见
+// `internal/ui/widgets/space`）：`Px16` 就是 16 像素那一档。
+const settingsFocusMargin = space.Px16
 
 // settingSection 是一组设置上面的那个标题。Biu 用的是 `<h2>`（system-settings.tsx
 // 的「外观」「播放」「下载」…），`text-xl` 也就是 **20px**，字重同样被 Preflight
@@ -640,13 +585,34 @@ func (s *Shell) settingRowEl(c *ui.Context, title func(), desc string, control f
 
 // settingRowElAt 是 settingRowEl 加上「这一行正被指着」。
 //
-// ⚠️ **被指着的时候这一行的盒子要留下来**（`focusEl`）：滚进视野要量它
-// （见 settingsScrollFocusIntoView）。
+// ⚠️ **被指着的时候这一行要滚进视野**（上游那一行 `Element.ScrollIntoView()`）：
+// 「下载目录」在第三段里，不滚过去用户看见的就是「设置页打开了，可这里没有
+// 下载目录」。
 func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc string, control func()) {
 	t := c.Theme()
 	row := ui.Row(c).FillWidth().Gap(space.Px24).AlignItems(ui.Center)
 	if focused {
-		s.settings.focusEl = row
+		// ⚠️ **被指着的那一行底下多留 16 像素**。
+		//
+		// 上游的 `ScrollIntoView()` 滚的是「**刚好露出这一行的盒子**」——而盒子
+		// 贴着边的话，那一行看起来像是被切掉了（说明那一行只剩半截）。从前我们
+		// 自己滚，滚完留 16 像素；现在交给上游，那 16 像素就**垫在盒子里**：
+		// 盒子高 16，滚到「盒子刚好露出来」时，**内容**离边正好 16 像素。
+		//
+		// ⚠️ **只多这 16 像素在下面**：上面不加——加了的话这一行的字会整体低
+		// 16 像素，而它是看得见的。
+		row = row.Padding(space.None, space.None, settingsFocusMargin, space.None)
+	}
+	if focused && s.settings.focusScroll {
+		// ⚠️ **只在这一帧调一次**：上游的规矩是「在它该进视野的那一帧调它」——
+		// 每一帧都调的话，用户自己滚走了它又被拉回来。
+		//
+		// ⚠️ **上游那一行替掉了我们从前那套跨帧的「滚进视野」**：它「布局完就把
+		// 周围的容器滚到刚好露出它」，而「这一帧新建的元素这一帧就跟着进来」——
+		// 所以不必再「量上一帧的盒子、量不到就再要一帧」（那一套量的元素属于建
+		// 它的那一遍，跨帧读是拿旧把手，而 `mygo vet` 报的就是这个）。
+		s.settings.focusScroll = false
+		row.ScrollIntoView()
 	}
 	row.Children(func() {
 		// ⚠️ **说明列有最小宽度**（`settingsDescMinW`）：控件那一列是定宽的，
