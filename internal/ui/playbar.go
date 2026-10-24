@@ -492,9 +492,43 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 		if st.HasTrack && st.Artist != "" {
 			s.viewArtist(c, st, t)
 		}
-		if st.Err != "" {
+		// 🔴 **出错和「正在取流」占同一个位置**（票 #282）：两者都是「这一句
+		// 说明现在怎么了」，而那一行只有一行宽。它们不会同时有——取流失败时
+		// 「正在取流」那一档已经收掉了（`failOnline` 先收它，再写这句话）。
+		// 万一同时有（将来加了别的路径），**错的那句优先**：一句错比一枚转圈
+		// 信息量大，而转圈还在转说明还有希望。
+		switch {
+		case st.Err != "":
 			s.viewTrackError(c, st, t)
+		case st.Loading:
+			s.viewTrackLoading(c, st, t)
 		}
+	})
+}
+
+// viewTrackLoading 是播放条上「正在取流」那一句话。
+//
+// # 为什么要有这一句
+//
+// 在线流要跑一趟网络（取流 + 开解码器），那一趟里界面上什么都不会变——
+// 歌名还是上一首的，进度条不动，也没有声音。用户看到的就是「点了没反应」
+// （票 #282 的现象：一直转圈、也不说为什么）。
+//
+// 这一句说的是「**在准备了**」，而转圈说的是「**还在等**」。两句合起来用户
+// 才知道自己没有按错，也知道要等多久（超过阈值会换成一句失败的话）。
+//
+// ⚠️ **它是灰字，不是红字**：红字是「出错了」，而这一句是「还没好」。两者的
+// 语气不一样，用户读到红色会以为已经完了。
+func (s *Shell) viewTrackLoading(c *ui.Context, st app.State, t *ui.Theme) {
+	msg := "正在取流"
+	if st.LoadingTitle != "" {
+		msg += "：" + st.LoadingTitle
+	}
+	ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
+		// ⚠️ **一行 + 省略号，和错那一行同一个理由**（见 `viewTrackError`）：
+		// 88 高的播放条放不下两行，而超长的歌名会把这一行挤没。
+		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
+			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").Grow(1), msg)
 	})
 }
 
@@ -857,12 +891,23 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 	ui.Row(c).Gap(transportGap).AlignItems(ui.Center).Children(func() {
 		s.viewPrevButton(c)
 
-		if st.Playing {
+		switch {
+		case st.Loading:
+			// 🔴 **正在取流：那一枚变成一枚转圈**（票 #282）。
+			//
+			// 用户点了歌之后什么也没发生，而界面上一动也不动——那和「按了没
+			// 反应」在用户眼里是同一件事。转圈是最直接的那句「它在动，在等」。
+			//
+			// ⚠️ **它占的是同一枚键的位置**：那一列的宽度是算过的（32 + 24 +
+			// 48 + 24 + 32），换成别的宽度整条播放条会挪。
+			s.withTip(c, transportSpinner(c).Size(iconHitPlay, iconHitPlay).
+				Padding(space.None, space.None), "正在取流")
+		case st.Playing:
 			if s.withTip(c, iconButtonPlay(c, transportIcon(true), "暂停", iconPlayBtn, false).
 				Size(iconHitPlay, iconHitPlay).Padding(space.None, space.None), "暂停").Clicked() {
 				s.app.Toggle()
 			}
-		} else {
+		default:
 			// ⚠️ **禁不启用由这里给**（`iconButtonPlay` 的 `disabled`）：那一枚的
 			// 颜色是**建元素时**定的，「悬停变主色」要在**禁用之后**才问——问早了
 			// 一枚禁用的键会用主色告诉用户「这里点得动」（理由见那个函数）。
@@ -874,6 +919,18 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 
 		s.viewNextButton(c)
 	})
+}
+
+// transportSpinner 是「正在取流」时播放/暂停那一枚的样子：一枚转圈。
+//
+// ⚠️ **它没有字**：那一枚是三枚键中间的一枚，字会让它比邻居宽，而那一列的
+// 宽度是算过的（见 `viewTransport`）。
+//
+// ⚠️ **它不是禁用的**：正在取流的时候按它没有意义（播放器还不存在），但把
+// 它画成禁用态等于说「这里点不动」——而用户真正想按的是**取消**，那在别处。
+// 这一枚在取流期间不响应点击（`Toggle` 里没有播放器时就是空操作）。
+func transportSpinner(c *ui.Context) ui.Element {
+	return flatSpinnerButton(c, "正在取流", transportSpinnerSize)
 }
 
 // viewCover 是播放条左边那张封面。**点它开全屏播放器**。

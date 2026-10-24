@@ -174,7 +174,14 @@ func openDecoder(r io.ReadSeeker) (mygoaudio.Decoder, string, error) {
 		return d, name, nil
 	}
 	if !errors.Is(err, mygoaudio.ErrFormat) && !errors.Is(err, extaf.ErrUnsupported) {
-		return nil, "", err
+		// 🔴 **「这台机器解不了这一条」也是「解不了」**（票 #282）：界面上要说的
+		// 是「这个格式解不了」，而不是「OSStatus -11800」——后者用户读不出来，
+		// 也照着做不了任何事（换网？换歌？它不知道）。
+		//
+		// ⚠️ **原来的错用 `%w` 包着**：底下那些判据（`mygoaudio.ErrFormat`、
+		// `extaf.ErrUnsupported`）还得认得出来——`Open` 里那个「unsupported
+		// audio format」就是靠 `errors.Is` 判的。
+		return nil, "", fmt.Errorf("%w: %w", ErrUnsupportedFormat, err)
 	}
 	// mfErr 是 Media Foundation 那边的真实原因。
 	//
@@ -208,15 +215,32 @@ func openDecoder(r io.ReadSeeker) (mygoaudio.Decoder, string, error) {
 			// 只报一句的话，界面上会出现「文件坏了」这种**其实不是**的提示——
 			// 而把 Media Foundation 的原因漏掉更糟：Windows 上明明有系统
 			// 解码器，界面上却说「没有」。
+			//
+			// 🔴 **外面还包一层 `ErrUnsupportedFormat`**（票 #282）：界面上那句
+			// 要说的是「这个格式解不了」，而这一长串是给日志和诊断看的。
 			if mfErr != nil {
-				return nil, "", fmt.Errorf("%w: %w: %w", extaf.ErrUnsupported, mfErr, ferr)
+				return nil, "", fmt.Errorf("%w: %w: %w: %w", ErrUnsupportedFormat,
+					extaf.ErrUnsupported, mfErr, ferr)
 			}
-			return nil, "", fmt.Errorf("%w: %w", extaf.ErrUnsupported, ferr)
+			return nil, "", fmt.Errorf("%w: %w: %w", ErrUnsupportedFormat,
+				extaf.ErrUnsupported, ferr)
 		}
-		return nil, "", err
+		return nil, "", fmt.Errorf("%w: %w", ErrUnsupportedFormat, err)
 	}
 	return fd, "flac", nil
 }
+
+// ErrUnsupportedFormat 是「这一条解不了」（格式不对，或者这台机器的解码器
+// 认不出来）。
+//
+// 🔴 **它是给界面那一层认的**（票 #282）：播放器报的是「OSStatus -11800」
+// 或者「不像 FLAC」这种**行话**，用户读不出来，也照着做不了任何事。界面上
+// 要说的是「这个格式解不了，换一档音质或者在 B 站里听它」——
+// `bili.Friendly` 认这个哨兵。
+//
+// ⚠️ **它不取代底下那些错**：`openDecoder` 用 `%w` 把它们一起包着，所以
+// `errors.Is(err, mygoaudio.ErrFormat)` 那些判据还认得出来。
+var ErrUnsupportedFormat = errors.New("audio: 这个音频流解不了")
 
 // Err 返回这一路播放里的第一条错误，播完或只是暂停过的话是 nil。
 //
