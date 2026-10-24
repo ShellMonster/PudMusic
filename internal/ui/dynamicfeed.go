@@ -31,6 +31,7 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
@@ -73,6 +74,13 @@ type dynamicFeed struct {
 	// MyGo 会在「同一个 ListState 被两个 List 显示」时 panic。
 	state     ui.ListState
 	authState ui.ListState
+	// itemRowKeys / authRowKeys 记着两栏每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
+	// （票 #313）。**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头）：
+	// 翻页追加、刷新时新的动态插到前面——身份对不上就重算。
+	itemRowKeys rowkey.Memo[string, any]
+	authRowKeys rowkey.Memo[int64, any]
 	// keys 是右边那一栏的键盘接线（游标 + 「↑ 到顶回侧栏」）。
 	//
 	// ⚠️ **这一栏是裸的 `ui.List`**（卡片是自己画的，走不了 `widgets/list`
@@ -275,6 +283,7 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 		st := &f.authState
 		// 🔴 铁律四：行身份是「这一行是谁」，不是序号。「全部」是
 		// `auth:0`，关注的人是 `auth:<mid>`（B 站的 mid 不会是 0，撞不上）。
+		// ⚠️ 身份在 `authRowKey` 里算——它自己记着那一份（见那个函数的注释）。
 		st.Key = func(i int) any { return authRowKey(f, i) }
 		st.Label = func(i int) string { return authRowLabel(f, i) }
 
@@ -315,7 +324,25 @@ func authRowKey(f *dynamicFeed, i int) any {
 	if i-1 >= len(f.authors) {
 		return upSentinelKey{}
 	}
-	return "auth:" + strconv.FormatInt(f.authors[i-1].Mid, 10)
+	// ⚠️ **身份是预先装箱好的那一份**（`f.authRowKeys`）：理由见那个字段的注释。
+	//
+	// ⚠️ **按「第几个人」记**：那一行的身份跟着 mid 走，而 mid 不会因为多了一个
+	// 人而变——只有换了人才变。
+	return f.authRowKeys.At(i-1, f.authors[i-1].Mid, authIdentity)
+}
+
+// authIdentity 是作者栏一行的身份（铁律四）。
+//
+// ⚠️ **mid == 0 是「全部」那一行**：B 站的 mid 不会是 0（撞不上），而这一行的
+// 身份固定是 "auth:0"。所以一个 mid 就够当「记着算好的那一份」那把钥匙。
+//
+// 这一步会分配（拼字符串 + 装箱）——所以它只在 mid 变了的时候才走
+// （见 `rowkey.Memo` 的文件头）。
+func authIdentity(mid int64) any {
+	if mid == 0 {
+		return "auth:0"
+	}
+	return "auth:" + strconv.FormatInt(mid, 10)
 }
 
 // authRowLabel 是作者栏第 i 行给无障碍用的名字。
@@ -448,7 +475,8 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 		if i >= len(f.items) {
 			return upSentinelKey{}
 		}
-		return f.items[i].ID
+		// ⚠️ **身份是预先装箱好的那一份**（`f.itemRowKeys`）：理由见那个字段的注释。
+		return f.itemRowKeys.At(i, f.items[i].ID, rowkey.Identity)
 	}
 	st.Label = func(i int) string {
 		if i >= len(f.items) {

@@ -401,7 +401,10 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 		viewLibraryRowHead(c, r, m, s.images, mt, face, onRow,
 			func() { rows.playFrom(r.Index) })
 
-		ui.Text(c, playCountText(m.View)).Width(mt.count).TextAlign(ui.End).
+		// ⚠️ **播放量是记好的那一份**（`rows.countText`）：现算的话每帧每行一次
+		// 字符串格式化（票 #313）。
+		ui.Text(c, rows.countText.At(r.Index, m.View, playCountText)).Width(mt.count).
+			TextAlign(ui.End).
 			FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 		// 两个时间列放不放得下由 `laterTimeCols` 说（表头那一处读的是同一个
 		// 判据）：窄窗口先收「投稿时间」，连基线都放不下时再收「加入时间」。
@@ -418,7 +421,9 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 			ui.Text(c, list.PubTimeText(m.PubTime, s.now())).Width(mt.pubDate).
 				TextAlign(ui.End).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 		}
-		ui.Text(c, clockText(m.Duration)).Width(mt.clock).TextAlign(ui.End).
+		// ⚠️ **时长是记好的那一份**（`rows.durText`）：理由同上面那一处。
+		ui.Text(c, rows.durText.At(r.Index, m.Duration, clockText)).Width(mt.clock).
+			TextAlign(ui.End).
 			FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 
 		// 行尾那枚「⋯」。点开的是**这一行的菜单**，和右键同一份（`rows.menu`
@@ -427,7 +432,8 @@ func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
 		// ⚠️ **表头照它留了同样宽的空位**（`widgets/list` 的 `Header` 末尾那一个），
 		// 两边一样宽表头和行才对得上。
 		ui.Box(c).Width(list.OperationColWidth).Children(func() {
-			list.Operation(c, list.OperationLabel(m.Title), face.title,
+			// ⚠️ **无障碍名字是记好的那一份**（`rows.opText`）：理由同上面那两处。
+			list.Operation(c, rows.opText.At(r.Index, m.Title, list.OperationLabel), face.title,
 				func(m *ui.Menu) { rows.menu(m, r.Index) })
 		})
 	})
@@ -466,7 +472,9 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 	return box.Children(func() {
 		// 格子右上角那枚「⋯」。点开的是**这一格的菜单**，和右键同一份
 		//（理由见 `widgets/list` 的 `operation.go`）。
-		list.OperationCorner(c, list.OperationLabel(m.Title), func(m *ui.Menu) {
+		// ⚠️ **无障碍名字是记好的那一份**（`rows.opText`）：理由同 `drawLaterRow`
+		// 里那一处。
+		list.OperationCorner(c, rows.opText.At(i, m.Title, list.OperationLabel), func(m *ui.Menu) {
 			rows.menu(m, i)
 		})
 
@@ -478,7 +486,8 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 		// 的渐变（**左边播放量右边时长**——这一页的播放量是有的，见 `libraryRow.View`，
 		// 而 `widgets/list` 那一派本地音乐没有，所以那边那一半空着）。
 		hover.CardCover(c, s.images, m.Cover, cell, laterCellCoverH, onCell,
-			playCountText(m.View), clockText(m.Duration), m.Title,
+			rows.countText.At(i, m.View, playCountText),
+			rows.durText.At(i, m.Duration, clockText), m.Title,
 			func() { rows.playFrom(i) })
 
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px4).PaddingY(cardGapForCell).Children(func() {
@@ -502,7 +511,9 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 			})
 			// 播放量 / 加入时间：列表里是右边两列，格子里放到最下面那一行。
 			ui.Row(c).Gap(space.Px6).FontSize(scale.Font(c, scale.Size11)).Children(func() {
-				ui.Text(c, playCountText(m.View)).Grow(1).TextColor(metaColor).MaxLines(1)
+				// ⚠️ 理由同上面那几处（`rows.countText`）。
+				ui.Text(c, rows.countText.At(i, m.View, playCountText)).Grow(1).
+					TextColor(metaColor).MaxLines(1)
 				ui.Text(c, dayText(m.ViewedAt)).TextColor(metaColor).MaxLines(1)
 			})
 		})
@@ -517,8 +528,8 @@ const (
 	cardGapForCell  = space.Px8
 )
 
-// laterMenu 是这一行的右键菜单，七项：播放 / 下一首播放 / 添加到队列 /
-// 在 B 站打开 / 收藏 / 下载音频 / 移除。
+// laterMenu 是这一行的右键菜单，八项：立即播放 / 从这一首往后听 / 下一首播放 /
+// 添加到队列 / 在 B 站打开 / 收藏 / 下载音频 / 移除。
 //
 // ⚠️ **每一项都要 Item 一遍**：菜单是这趟全部建出来的，只有被 Chosen 的那一项为
 // true（`ui/menu.go` 的 buildMenu）。少建一项，那一项就永远点不到。
@@ -531,7 +542,11 @@ func (s *Shell) laterMenu(m *ui.Menu, i int) {
 	acts := p.rows.actions()
 
 	switch {
-	case m.Item("播放").Disabled(!row.CanPlay).Chosen():
+	case m.Item("立即播放").Disabled(!row.CanPlay).Chosen():
+		// 「立即播放」= **只放这一首**（票 #299）：队列被换成这一首，不是把这一
+		// 页剩下的歌一起排上。
+		acts.PlayNow(i)
+	case m.Item("从这一首往后听").Disabled(!row.CanPlay).Chosen():
 		// ⚠️ PGC（番剧 / 纪录片）放不了：取流那一套对 PGC 不通（见
 		// `app.playableOnline`），上游也是不给这一类入口（`cannotPlay = is_pgc`）。
 		// **画成灰的而不是不画**：不画的话同一份列表里有的行能播有的不能，用户会

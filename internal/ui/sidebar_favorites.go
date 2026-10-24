@@ -23,6 +23,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -369,7 +370,11 @@ func (s *Shell) viewFavoriteList(c *ui.Context, g app.FavoriteGroup, items []app
 	// 序号」那一套，在前面插一条、或者拖完顺序变了，后面所有行的状态
 	// （选中、正在被拖、焦点）会整个串到别的收藏夹上——实测就是「拖完选中
 	// 的那一首变成了旁边另一首」。
-	ls.Key = func(i int) any { return items[i].ID }
+	// ⚠️ **身份是预先装箱好的那一份**（`s.sideRowKeys[g]`）：装箱那一步要
+	// 分配，现算的话每帧每行一次（票 #313）。
+	ls.Key = func(i int) any {
+		return s.sideRowKeys[g].At(i, items[i].ID, rowkey.Identity64)
+	}
 	ls.Label = func(i int) string { return items[i].Title }
 	ls.Reorder = func(rows []int, to int) {
 		s.reorderFavorite(g, items, rows, to)

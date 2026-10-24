@@ -16,6 +16,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -292,6 +293,12 @@ type Shell struct {
 	// sideLists 是两组收藏夹各自的列表状态。拖拽排序靠它，
 	// 两组一份是因为两组各排各的（见 sidebar_favorites.go）。
 	sideLists [favGroups]ui.ListState
+	// sideRowKeys 记着侧栏收藏夹每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
+	// （票 #313）。**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头），
+	// 所以拖完排序、换收藏夹都不用记得重建。
+	sideRowKeys [favGroups]rowkey.Memo[int64, any]
 
 	// favPanelOpen 是**折叠态**那枚「收藏夹」图标点开之后的那层浮层开没开。
 	//
@@ -305,8 +312,17 @@ type Shell struct {
 	// 关掉窗口就该是关着的（Biu 那边的 modal store 也不持久化它）。
 	drawerOpen bool
 
+	// drawerPhase 是抽屉现在处在进场的哪一段。**和 drawerOpen 不是一回事**：
+	// 退场的那 200ms 里面板还在树上（滑出去了才拆），所以「关掉」不是「不建」。
+	// 理由和那一组状态机见 queue_drawer.go 的 drawerPhase。
+	drawerPhase drawerPhase
+
 	// queueList 是抽屉里那一列的列表状态：滚动位置、行身份、行高。
 	queueList ui.ListState
+	// queueRowKeys 记着抽屉里每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 理由同 `sideRowKeys`（票 #313）。
+	queueRowKeys rowkey.Memo[string, any]
 
 	// queueScroll 是那一列滚到哪儿了。**和 queueList 分开存**是因为「定位当前
 	// 播放」要的是一段动画：ListState.ScrollTo 是一跳到位（`mygo/ui/list.go`
@@ -327,6 +343,10 @@ type Shell struct {
 	// 各自记着自己滚到哪儿；行的**内容**是同一份（partRowsFor）。
 	partList ui.ListState
 	partRows []partRow
+	// partRowKeys 记着分集抽屉里每一行的身份（**预先装箱好的那一份**）。
+	//
+	// ⚠️ 理由同 `sideRowKeys`（票 #313）。
+	partRowKeys rowkey.Memo[string, any]
 
 	// 顶栏这一摊。**同样只由 view 在主线程上读写**。
 	//

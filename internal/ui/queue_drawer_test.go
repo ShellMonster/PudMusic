@@ -133,6 +133,9 @@ func openDrawer(t *testing.T, h *harness) {
 	if !h.tt.HasText("播放列表") {
 		t.Fatalf("点了播放列表，抽屉没开（画面上的字：%q）", h.tt.Texts())
 	}
+	// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在窗口外面
+	//（它从右边滑进来）——于是「按名字找抽屉里的东西」量到的是空的右半边。
+	settleDrawer(t, h.s, h.tt)
 }
 
 func TestQueueDrawerOpensFromThePlaybar(t *testing.T) {
@@ -158,6 +161,9 @@ func TestQueueDrawerOpensFromThePlaybar(t *testing.T) {
 	// Esc 关掉。少这一条的表现是「按了 Esc 什么都没发生」。
 	h.tt.Key(0, mygoui.KeyEscape)
 	h.tt.Frame()
+	// ⚠️ **要让退场走完**：抽屉是「动完再拆」的——那 200ms 里面板还在树上
+	//（它滑到窗口外面去了，但还没拆），所以「抽屉没了」要等它滑完。
+	settleDrawer(t, h.s, h.tt)
 	if h.tt.HasText(queueEmptyHint) {
 		t.Error("按了 Esc 抽屉还开着")
 	}
@@ -414,6 +420,8 @@ func TestQueueDrawerClosesOnAClickOutside(t *testing.T) {
 
 	h.tt.ClickAt(40, 120) // 抽屉那一层上、面板左边
 	h.tt.Frame()
+	// ⚠️ **要让退场走完**：抽屉是「动完再拆」的（见上面那一条）。
+	settleDrawer(t, h.s, h.tt)
 	if h.tt.HasText("定位当前播放") {
 		t.Error("点了抽屉外面，抽屉还开着")
 	}
