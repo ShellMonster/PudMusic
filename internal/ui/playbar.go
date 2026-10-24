@@ -494,18 +494,24 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 		if st.HasTrack && st.Artist != "" {
 			s.viewArtist(c, st, t)
 		}
-		// 🔴 **出错和「正在取流」占同一个位置**（票 #282）：两者都是「这一句
-		// 说明现在怎么了」，而那一行只有一行宽。它们不会同时有——取流失败时
-		// 「正在取流」那一档已经收掉了（`failOnline` 先收它，再写这句话）。
-		// 万一同时有（将来加了别的路径），**错的那句优先**：一句错比一枚转圈
-		// 信息量大，而转圈还在转说明还有希望。
+		// 🔴 **出错、「正在重连」、「正在取流」和「停住了」占同一个位置**
+		// （票 #282、#315、#319）：四者都是「这一句说明现在怎么了」，而那一行
+		// 只有一行宽。
 		//
-		// ⚠️ **「停住了」也占这一格**（票 #319）：它同样是一句「此刻怎么了」，
-		// 而这一格本来就是留给这句话的。三者不会同时有——出错时播放器压根没有、
-		// 正在取流时上一首还在放、而停住了说明播放器在、只是不响了。
+		// 它们的优先级是**错 > 重连 > 取流 > 停住**：
+		//
+		//	出错		一句错比一枚转圈信息量大，而转圈还在转说明还有希望
+		//	正在重连	这一首断了，我在救它——比笼统的「在准备」具体
+		//	正在取流	这一首还没放起来（上一首还在放）
+		//	停住了	播放器在、只是不响了
+		//
+		// 它们不会同时有——出错时播放器压根没有、正在取流时上一首还在放、
+		// 而停住了说明播放器在、只是不响了。
 		switch {
 		case st.Err != "":
 			s.viewTrackError(c, st, t)
+		case st.Reconnecting:
+			s.viewTrackReconnecting(c, st, t)
 		case st.Loading:
 			s.viewTrackLoading(c, st, t)
 		case st.Stopped:
@@ -543,6 +549,48 @@ func (s *Shell) viewTrackLoading(c *ui.Context, st app.State, t *ui.Theme) {
 		// 88 高的播放条放不下两行，而超长的歌名会把这一行挤没。
 		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
 			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").Grow(1), msg)
+	})
+}
+
+// viewTrackReconnecting 是播放条上「正在重连」那一句话（前面带一枚转圈）。
+//
+// # 为什么要有这一句
+//
+// 断流之后应用要做的事有两条：字节源换地址 / 换流（`internal/service/audio`
+// 的 `recover`），以及从播放位置重开一首（`refreshOnlineNow`）。两条都要跑
+// 网络，而这一档以前界面上**一个字都没有**——用户看到的是「歌停着、界面
+// 不动、没有字」，等多久都像应用死了（票 #315）。
+//
+// 加上退避之后更糟：那 7 秒的等待原本是**完全静默**的。
+//
+// # 它和「正在取流」不是同一件事
+//
+//	正在取流	这一首**还没放起来**（第一次点它）
+//	正在重连	这一首**响过一半**，流断了，正在救
+//
+// 用户看到的差别很大：前者歌压根没响过，后者是听着听着停住了。
+//
+// ⚠️ **它是灰字，不是红字**：红字是「出错了」，而这一句是「还在救」。两者的
+// 语气不一样，用户读到红色会以为已经完了。
+//
+// 🔴 **屏幕上的那句话要短**：播放条上那一行只有 140 像素宽（1200 宽的窗口，
+// 实测），12 号字放得下十来个字——「网络不稳，正在重连（第 2 次）」这样的
+// 一句话上屏只剩「网络不稳，正在…」，那不是「一句能看懂的话」。完整那一句
+// 进悬停提示（和错误那一栏一个做法，见 `viewTrackError`）。
+func (s *Shell) viewTrackReconnecting(c *ui.Context, st app.State, t *ui.Theme) {
+	msg := "正在重连"
+	tip := "网络不稳，正在重连"
+	if st.ReconnectAttempt > 0 {
+		tip += fmt.Sprintf("（第 %d 次）", st.ReconnectAttempt)
+	}
+	tip += "…"
+	ui.Row(c).Gap(space.Px4).AlignItems(ui.Center).Children(func() {
+		// ⚠️ **转圈的无障碍名字就是「正在重连」**：转圈没有可见的字，而它是
+		// 唯一能认出「这里在等」的凭据（无头 Tester 也只认字和名字）。
+		ui.Spinner(c).Size(loadingLineSpinnerSize, loadingLineSpinnerSize).Label("正在重连")
+		// ⚠️ **一行 + 省略号，和「正在取流」那一句同一个理由**。
+		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
+			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").Grow(1), tip)
 	})
 }
 
