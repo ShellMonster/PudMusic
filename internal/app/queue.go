@@ -108,6 +108,20 @@ type Item struct {
 	// 就得让每一集各占一项，于是上面那条 `Identity` 和抽屉的去重才真的要改）。
 	PageIndex int
 	TotalPage int
+
+	// SubtitleBvid / SubtitleCid 是「这一条背后那个投稿」的身份。
+	//
+	// ⚠️ **只有音乐库条目有值**，而且**只在放它的那一趟里有**（`withSongInfo`
+	// 补的，队列里那一项是空的）：音乐库的取流走的是另一个接口
+	// （`/audio/music-service-c/url`），那个返回里**没有字幕**；而音乐库条目
+	// 背后多半有一个投稿（`SongInfo` 里的 `Bvid` / `Cid`），那份投稿的字幕
+	// 就是这一首的词（见 `lyrics.go` 的 `fetchBiliSubtitle`）。
+	//
+	// ⚠️ **它们不是上面那两栏 `Bvid` / `Cid`**：那两栏是「这一条自己的身份」，
+	// 而歌词缓存键靠它们（`lyricKeyOf`）——音乐库条目的键是 `bili-audio-<sid>`，
+	// 把投稿的编号填进 `Bvid`/`Cid` 的话键就变了，用户已有的缓存全部作废。
+	SubtitleBvid string
+	SubtitleCid  string
 }
 
 // LocalItem 把一个本地音频文件包成一项。
@@ -216,6 +230,20 @@ type Queue struct {
 	// 「用户拖过的队列没存下来」（重启之后回到旧的顺序）。
 	onChange func()
 
+	// onInvalidate 是「下一首变了，之前备好的那份作废」的钩子。
+	//
+	// ⚠️ **它和 onChange 不是一件事**：onChange 说的是「落盘那一格得跟着变」，
+	// 而这一条说的是「**下一首是谁**可能变了，之前备好的流地址不能再用」。
+	// 两者碰巧重合的地方很多（重排、切歌、换档），但不是同一件事——
+	// 比如「指针挪一格」（`Move`）不改队列的形状，却实实在在改了下一首。
+	//
+	// ⚠️ **`Advance` 不调它**：自动切歌那一趟是**先消费预取、再作废**的
+	// （见 App.onTrackFinished）——顺序反了的话，刚备好的那一份就被自己
+	// 作废掉了，而那正是这一票要省下来的那几百毫秒。
+	//
+	// 它由 App 装上（见 New）。
+	onInvalidate func()
+
 	// mode 和 keepPages 归**这把锁**管，不归 App 的 `a.mu` 管：它们是队列的
 	// 形状（下一首是谁要靠它们算），而 `a.mu` 管的是播放器。界面每帧读的
 	// `State` 因此只是多拿一把互不相干的锁，不会把播放器那一趟（它可能正
@@ -226,6 +254,27 @@ type Queue struct {
 	// rnd 是随机模式挑歌用的随机源。见 RandSource 的注释——为什么不能
 	// 用包级的那个。
 	rnd RandSource
+
+	// bag 和 history 是**随机模式那两样**，见 queue_shuffle.go：
+	//
+	//	bag     洗牌袋——「下一首是谁」。一列打乱过的歌，一首一首地发。
+	//	history 历史栈——「上一首是谁」。放过的那些首，倒着退回来用。
+	//
+	// **不在随机模式时它们是空的**（换档时清掉，见 SetPlayMode）：其余三档的
+	// 「下一首是谁」是纯按索引算的（见 Queue.Advance），这两样在那些档位上
+	// 没有读者。
+	//
+	// ⚠️ **它们记的是判重标识（`Item.Identity`），不是下标**：下标会随着队列
+	// 的改动（加歌、删歌、重排）全变，而判重标识不会。将来队列要落盘时，落盘
+	// 的键也是判重标识——两边对得上，这两样不用推倒重来。
+	bag     []string
+	history []string
+
+	// undo 记着上一次「挪动」是怎么做的，好退回去（见 stepUndo 和 UndoStep）。
+	//
+	// 放失败的时候要退：挪过去了却放不了，就退回原来那一首——界面上仍然停在
+	// 原来那首，播放条上也不该在用户眼皮底下换成另一首。
+	undo stepUndo
 }
 
 // NewQueue 建一个空队列，随机源按当前时间播种。
@@ -253,6 +302,17 @@ func (q *Queue) changed() {
 	}
 }
 
+// invalidate 告诉外面「下一首变了，那份预取作废」。**必须在 `q.mu` 外面调**。
+//
+// ⚠️ **它和 `changed()` 分开是有原因的**：`changed()` 说的是「落盘那一格得
+// 跟着变」，这一条说的是「备好的地址不能再用了」。合成一条的话，自动切歌
+// 那一趟（`Advance`）也会把它叫醒——而那一趟恰恰是**要消费**那份预取的。
+func (q *Queue) invalidate() {
+	if q.onInvalidate != nil {
+		q.onInvalidate()
+	}
+}
+
 // Append 往队列尾部追加，不动当前项。
 func (q *Queue) Append(items ...Item) {
 	if len(items) == 0 {
@@ -262,6 +322,8 @@ func (q *Queue) Append(items ...Item) {
 	q.items = append(q.items, items...)
 	q.mu.Unlock()
 	q.changed()
+	// 队尾多了一首：下一首可能变了（顺序播放走到队尾那一档时，下一首就是它）。
+	q.invalidate()
 }
 
 // InsertNext 把一项插到**正在放的那首后面**——「下一首播放」那一下。
@@ -292,8 +354,12 @@ func (q *Queue) InsertNext(item Item) {
 		at = min(q.cur+1, len(q.items))
 	}
 	q.items = slices.Insert(q.items, at, item)
+	// ⚠️ **袋子不用动**：它记的是判重标识，而插一首歌不改别的歌的身份
+	// （见 Queue 里 bag 那段注释）。
 	q.mu.Unlock()
 	q.changed()
+	// 插在正在放的那首后面 → **下一首就是它**了：之前备好的那份作废。
+	q.invalidate()
 }
 
 // Len 返回队列里有多少项。
@@ -354,11 +420,29 @@ func (q *Queue) CurrentIndex() int {
 // 两端都绕回，和 Biu 一样。队列空时返回 false。还没开始播（cur 是 -1）时，
 // 正向落在第一首、反向落在最后一首——用户第一次按下一首，看到的应该是第一首
 // 而不是直接跳到第二首。
+//
+// ⚠️ **它只挪播放指针，不管随机模式那两样**（洗牌袋、历史栈）。按「下一首 /
+// 上一首」要走 MoveNext / MovePrev——那两条才看播放模式（见它们的注释）。
+// 这个裸的挪法留给「把当前项指到队列里的第几项」那种用法（见 App.PlayFrom
+// 的回滚）。
 func (q *Queue) Move(delta int) (Item, bool) {
 	q.mu.Lock()
+	it, ok := q.moveIndexLocked(delta)
+	q.mu.Unlock()
+	if ok {
+		q.changed()
+		// 指针挪了 → 下一首变了。
+		q.invalidate()
+	}
+	return it, ok
+}
+
+// moveIndexLocked 是 Move 的那一份（锁已经拿好了）。
+//
+// ⚠️ **不动随机模式那两样**：它挪的是**指针**，不是「下一首是谁」。
+func (q *Queue) moveIndexLocked(delta int) (Item, bool) {
 	n := len(q.items)
 	if n == 0 {
-		q.mu.Unlock()
 		return Item{}, false
 	}
 	if q.cur < 0 || q.cur >= n {
@@ -367,16 +451,213 @@ func (q *Queue) Move(delta int) (Item, bool) {
 		} else {
 			q.cur = 0
 		}
-		it := q.items[q.cur]
-		q.mu.Unlock()
-		q.changed()
-		return it, true
+		return q.items[q.cur], true
 	}
 	q.cur = ((q.cur+delta)%n + n) % n
-	it := q.items[q.cur]
+	return q.items[q.cur], true
+}
+
+// ---- 「下一首 / 上一首」那两条路（看播放模式） ----
+//
+// 「按下一首」和「按上一首」这两个按钮**不是**「指针挪一格」：
+//
+//   - 顺序 / 循环 / 单曲三档：确实是挪一格（见 moveIndexLocked）。
+//   - **随机那一档**：下一首是**从洗牌袋里抽**（不重复、不遗漏），上一首是
+//     **从历史栈里退**（回到刚才放过的那首）。这两样见 queue_shuffle.go。
+//
+// 为什么随机那一档不能按索引走：按索引走的话「下一首」永远是队列里的下一项，
+// 而这一档是用户**特意挑**的——它得真的随机。而「上一首」按索引退一格退回去的
+// 是队列里的上一项，可能根本没放过（随机模式下用户听到的次序和队列的次序是
+// 两件事）。
+//
+// ⚠️ **这两条和 Move 的差别不只是随机模式**：它们会把「刚才那首」记进历史栈，
+// 所以放失败的时候要能退回去（见 UndoStep）。
+
+// MoveNext 是「按下一首」。
+//
+// 随机那一档**从洗牌袋里抽**（不重复、不遗漏），其余各档按索引往后挪一格。
+//
+// 抽到的那一首会把**刚才那首压进历史栈**——于是「上一首」能回到它（见
+// MovePrev）。队列里只有一首歌时没有第二首可抽，重放它。
+func (q *Queue) MoveNext() (Item, bool) {
+	q.mu.Lock()
+	it, ok := q.moveNextLocked()
 	q.mu.Unlock()
-	q.changed()
-	return it, true
+	if ok {
+		// 当前项变了：落盘那一格得跟着变（changed 必须在锁外面调，见它的注释）。
+		q.changed()
+		// 手动切歌 → 下一首变了，之前备好的那份作废。
+		q.invalidate()
+	}
+	return it, ok
+}
+
+// moveNextLocked 是 MoveNext 的那一份（锁已经拿好了）。
+func (q *Queue) moveNextLocked() (Item, bool) {
+	n := len(q.items)
+	if n == 0 {
+		return Item{}, false
+	}
+	prevCur := q.cur
+	if q.mode != PlayModeRandom {
+		it, ok := q.moveIndexLocked(1)
+		q.undo = stepUndo{ok: ok, prevCur: prevCur}
+		return it, ok
+	}
+	if n == 1 {
+		// 只有一首歌：没有第二首可抽，重放它。
+		if q.cur < 0 {
+			q.cur = 0
+		}
+		q.undo = stepUndo{ok: true, prevCur: prevCur}
+		return q.items[q.cur], true
+	}
+	i, ok := q.bagNextLocked()
+	if !ok {
+		q.undo = stepUndo{}
+		return Item{}, false
+	}
+	pushed := q.setCurLocked(i, true)
+	q.undo = stepUndo{ok: true, prevCur: prevCur, drawn: q.items[i].Identity(), popHist: pushed}
+	return q.items[i], true
+}
+
+// MovePrev 是「按上一首」。
+//
+// 随机那一档**走历史栈**（回到刚才放过的那首），其余各档按索引往前退一格。
+//
+// 历史栈是空的（刚切到随机模式、或者还没放过任何一首）时退回按索引退一格：
+// 那是「上一首」本来就没有的样子，不该什么都不做——用户按了按钮没反应，
+// 而界面上也没有任何一句话说「没有上一首」。
+func (q *Queue) MovePrev() (Item, bool) {
+	q.mu.Lock()
+	it, ok := q.movePrevLocked()
+	q.mu.Unlock()
+	if ok {
+		// 当前项变了：落盘那一格得跟着变（changed 必须在锁外面调，见它的注释）。
+		q.changed()
+		// 手动切歌 → 下一首变了，之前备好的那份作废。
+		q.invalidate()
+	}
+	return it, ok
+}
+
+// movePrevLocked 是 MovePrev 的那一份（锁已经拿好了）。
+func (q *Queue) movePrevLocked() (Item, bool) {
+	n := len(q.items)
+	if n == 0 {
+		return Item{}, false
+	}
+	prevCur := q.cur
+	if q.mode == PlayModeRandom {
+		if it, at, ok := q.historyPopLocked(); ok {
+			q.setCurLocked(at, false)
+			q.undo = stepUndo{ok: true, prevCur: prevCur, pushHist: true, histIt: it.Identity()}
+			return it, true
+		}
+	}
+	it, ok := q.moveIndexLocked(-1)
+	q.undo = stepUndo{ok: ok, prevCur: prevCur}
+	return it, ok
+}
+
+// stepUndo 记着上一次「挪动」是怎么做的，好退回去。
+//
+// 放失败的时候要退（见 App.step 和 App.onTrackFinished）：挪过去了却放不了，
+// 就退回原来那一首——界面上仍然停在原来那首，播放条上也不该在用户眼皮底下
+// 换成另一首。
+//
+// 三条路的退法不一样（随机抽的、随机退的、按索引挪的），所以这里把「退回去
+// 要做什么」一件件记下来，而不是「再挪回去」——随机那一档没有「再挪回去」
+// 这回事。
+type stepUndo struct {
+	// ok 是「上一次挪动可以退」。挪不动（队列是空的）时是 false。
+	ok bool
+	// prevCur 是挪之前的当前下标（-1 是「还没开始」）。
+	prevCur int
+	// drawn 是从洗牌袋里抽出来的那一首的**判重标识**（空串 = 不是随机抽的）。
+	//
+	// 退的时候它要**放回袋子头**：它这一轮还没轮到。
+	drawn string
+	// popHist 是「历史栈顶上多压了一首」——退的时候要拿走。
+	popHist bool
+	// pushHist 是「历史栈顶上少了一首」——退的时候要放回去。
+	pushHist bool
+	// histIt 是放回去的那一首的判重标识（pushHist 时才有意义）。
+	histIt string
+}
+
+// UndoStep 把上一次 MoveNext / MovePrev / Advance / 跳过去放退回去。
+//
+// 放失败时用（见 App.step、App.onTrackFinished 和 App.PlayAt）。返回有没有
+// 退成——退不成说明上一次根本没有可退的挪动。
+func (q *Queue) UndoStep() bool {
+	q.mu.Lock()
+	ok := q.undoStepLocked()
+	q.mu.Unlock()
+	if ok {
+		// 当前项退回去了：落盘那一格得跟着变（changed 必须在锁外面调）。
+		q.changed()
+		// 退回去了 → 下一首又变了。
+		q.invalidate()
+	}
+	return ok
+}
+
+// undoStepLocked 是 UndoStep 的那一份（锁已经拿好了）。
+func (q *Queue) undoStepLocked() bool {
+	u := q.undo
+	if !u.ok {
+		return false
+	}
+	q.undo = stepUndo{}
+	q.cur = u.prevCur
+	if u.drawn != "" {
+		// 抽出来的那一首放回袋子头。
+		q.bag = append(q.bag, "")
+		copy(q.bag[1:], q.bag)
+		q.bag[0] = u.drawn
+	}
+	if u.popHist && len(q.history) > 0 {
+		q.history = q.history[:len(q.history)-1]
+	}
+	if u.pushHist {
+		q.historyPushLocked(u.histIt)
+	}
+	return true
+}
+
+// setCurLocked 把当前项挪到第 i 项，顺带把随机模式那两样对齐。
+//
+// 随机模式里当前项变了要说两件事：
+//
+//   - **历史栈**：刚才那首压进去（于是「上一首」能回到它）。pushHist 是 false
+//     的时候不压——「上一首」自己就是从历史栈里取出来的，那时候再压回去就成
+//     了栈在来回弹（退一次前进一次，永远退不回原处）。
+//   - **洗牌袋**：新的一首挪到袋尾（它已经在放了，这一轮最后再放它；不挪的话
+//     这一轮的头一个可能就是它，用户听到的是「刚放完又放一遍」）。
+//
+// 返回「有没有往历史栈里压过一项」——调用方要把它记进 undo（退的时候要拿走）。
+func (q *Queue) setCurLocked(i int, pushHist bool) bool {
+	old := q.cur
+	if old == i {
+		return false
+	}
+	pushed := false
+	if q.mode == PlayModeRandom {
+		oldID, newID := q.identityAtLocked(old), q.identityAtLocked(i)
+		// ⚠️ **同一首的另一份不算「放过一首歌」**：队列里同一首排了两遍时，用户
+		// 点抽屉里那一行（画的是第一份，而正在放的是第二份），指针挪过去了，
+		// 歌还是那一首——压进历史栈的话，「上一首」退回来的是同一首，用户会
+		// 以为按钮坏了。
+		if pushHist && oldID != "" && oldID != newID {
+			q.historyPushLocked(oldID)
+			pushed = true
+		}
+		q.bagMoveToEndLocked(newID)
+	}
+	q.cur = i
+	return pushed
 }
 
 // Reset 把队列换成给定的几项并从第一首开始，返回第一项。给空就是清空。
@@ -384,15 +665,22 @@ func (q *Queue) Reset(items ...Item) (Item, bool) {
 	q.mu.Lock()
 	q.items = items
 	q.cur = -1
+	// 队列整个换掉了：洗牌袋里那些歌不再是这一列的，历史栈里那些也不再是
+	// 「刚放过的」。
+	q.bag = nil
+	q.history = q.history[:0]
+	q.undo = stepUndo{}
 	if len(items) == 0 {
 		q.mu.Unlock()
 		q.changed()
+		q.invalidate()
 		return Item{}, false
 	}
 	q.cur = 0
 	it := items[0]
 	q.mu.Unlock()
 	q.changed()
+	q.invalidate()
 	return it, true
 }
 
@@ -415,6 +703,9 @@ func (q *Queue) RemoveAt(i int) (Item, bool) {
 	}
 	it := q.items[i]
 	q.items = slices.Delete(q.items, i, i+1)
+	// ⚠️ **袋子不用动**：它记的是判重标识，而删掉一首歌不改别的歌的身份
+	// （被删掉的那一首在袋子里还留着，抽到它时对不上队列，跳过就是——见
+	// queue_shuffle.go 的 bagNextLocked）。
 
 	switch {
 	case len(q.items) == 0:
@@ -430,6 +721,8 @@ func (q *Queue) RemoveAt(i int) (Item, bool) {
 	}
 	q.mu.Unlock()
 	q.changed()
+	// 删掉一首 → 下一首可能变了。
+	q.invalidate()
 	return it, true
 }
 
@@ -482,6 +775,8 @@ func (q *Queue) replaceAt(i int, item Item) bool {
 	q.items[i] = item
 	q.mu.Unlock()
 	q.changed()
+	// 就地换掉一项 → 下一首可能变了。
+	q.invalidate()
 	return true
 }
 
@@ -491,24 +786,33 @@ func (q *Queue) replaceAt(i int, item Item) bool {
 // **不走 Move 的取模**：Move 两端绕回（那是「上一首 / 下一首」要的），而这里
 // 用户指着队列里的某一行，放到别的行上去就是错的那一行。
 //
+// ⚠️ **随机模式里这一跳也算「放过一首歌」**：刚才那首压进历史栈，于是「上一首」
+// 能回到它（见 setCurLocked）。
+//
 // 不导出：设 cur 只有「跳过去放」这一条路（App.PlayAt），多导出一个就多一处能
 // 把队列和播放器对不上的地方。回滚也走它（i 传 -1 就是退回「还没开始」）。
 func (q *Queue) selectAt(i int) (Item, bool) {
 	q.mu.Lock()
 	if i < 0 {
 		q.cur = -1
+		q.undo = stepUndo{}
 		q.mu.Unlock()
 		q.changed()
+		q.invalidate()
 		return Item{}, false
 	}
 	if i >= len(q.items) {
 		q.mu.Unlock()
 		return Item{}, false
 	}
-	q.cur = i
+	prevCur := q.cur
+	pushed := q.setCurLocked(i, true)
+	q.undo = stepUndo{ok: true, prevCur: prevCur, popHist: pushed}
 	it := q.items[i]
 	q.mu.Unlock()
 	q.changed()
+	// 跳到别的一首 → 下一首变了。
+	q.invalidate()
 	return it, true
 }
 
@@ -545,8 +849,8 @@ func (q *Queue) selectAt(i int) (Item, bool) {
 //     「从 0 开始放」。
 //   - Biu 的随机是每次 `shuffle(整个列表)` 再找当前那首在洗过之后的位置、
 //     取它后面那一首。它依赖「上一次洗出来的顺序」，所以同一首歌连着两次
-//     放完可能落到同一首上。我们是在**除掉当前首**剩下的歌里直接抽一个
-//     （见 pickOtherLocked），每一首都一样可能被抽中，也不会连着两首。
+//     放完可能落到同一首上。**我们用洗牌袋**（见 queue_shuffle.go）：一列
+//     打乱过的歌，一首一首地发，发完一列再打乱一列——不重复、不遗漏。
 
 // PlayMode 是播放模式。
 //
@@ -668,12 +972,36 @@ type Advance struct {
 // 一步都不动。放失败要退回原来那首——`App.onTrackFinished` 拿 prev 回滚。
 func (q *Queue) Advance() Advance {
 	q.mu.Lock()
+	d, _ := q.advanceLocked(true)
+	q.mu.Unlock()
+	// 当前项变了（或者至少「结论」变了），落盘那一格得跟着变。
+	q.changed()
+	return d
+}
 
+// advanceLocked 是 Advance 的那一份（锁已经拿好了）。
+//
+// commit 为假时**只算不动**——指针不动、洗牌袋不抽、历史栈不压（见
+// `PeekNext`）。commit 为真时才是「真放下一首」。
+//
+// 🔴 **判据只有这一份**：预取要知道「下一首是谁」才能去备地址，而它算的
+// 和真播的那一次必须是**同一个答案**。两处各算一遍的话，随机那一档迟早
+// 对不上——而对不上的症状是「备好的地址是另一首的」，界面上完全看不出来
+// （放出来的歌还是对的，只是「无缝」白做了）。
+func (q *Queue) advanceLocked(commit bool) (Advance, bool) {
 	n := len(q.items)
 	// 队列是空的、或者压根没开始放：没有「下一首」这件事可决定。
 	if n == 0 || q.cur < 0 || q.cur >= n {
-		q.mu.Unlock()
-		return Advance{Kind: AdvanceStop}
+		if commit {
+			q.undo = stepUndo{}
+		}
+		return Advance{Kind: AdvanceStop}, true
+	}
+	// oldCur 是挪之前的当前下标：放失败要退回它（见 UndoStep）。
+	oldCur := q.cur
+	// 这一次 Advance 之前的挪动已经退不掉了（那是上一次的账）。
+	if commit {
+		q.undo = stepUndo{}
 	}
 
 	var d Advance
@@ -691,8 +1019,12 @@ func (q *Queue) Advance() Advance {
 			d = Advance{Kind: AdvanceStop}
 			break
 		}
-		q.cur++
-		d = Advance{Kind: AdvancePlay, Item: q.items[q.cur]}
+		next := q.cur + 1
+		if commit {
+			q.cur = next
+			q.undo = stepUndo{ok: true, prevCur: oldCur}
+		}
+		d = Advance{Kind: AdvancePlay, Item: q.items[next]}
 
 	case PlayModeSingle:
 		// 单曲循环：一步都不挪，同一首从头再来。
@@ -700,16 +1032,40 @@ func (q *Queue) Advance() Advance {
 
 	case PlayModeRandom:
 		if next, ok := q.nextPageLocked(); ok {
-			q.cur = next
-			d = Advance{Kind: AdvancePlay, Item: q.items[q.cur]}
+			// 跟着分集走（见 nextPageLocked）。这一首也算「放过」：压进历史栈，
+			// 「上一首」才回得去。
+			if commit {
+				pushed := q.setCurLocked(next, true)
+				q.undo = stepUndo{ok: true, prevCur: oldCur, popHist: pushed}
+			}
+			d = Advance{Kind: AdvancePlay, Item: q.items[next]}
 			break
 		}
 		if n == 1 {
 			d = Advance{Kind: AdvanceReplay, Item: q.items[q.cur]}
 			break
 		}
-		q.cur = q.pickOtherLocked(q.cur, n)
-		d = Advance{Kind: AdvancePlay, Item: q.items[q.cur]}
+		// 从洗牌袋里抽：不重复、不遗漏（见 queue_shuffle.go）。
+		var i int
+		var ok bool
+		if commit {
+			i, ok = q.bagNextLocked()
+		} else {
+			i, ok = q.bagPeekLocked()
+			if !ok {
+				// 袋空 → 答不出来（见 bagPeekLocked 的注释）。
+				return Advance{}, false
+			}
+		}
+		if !ok {
+			d = Advance{Kind: AdvanceReplay, Item: q.items[q.cur]}
+			break
+		}
+		if commit {
+			pushed := q.setCurLocked(i, true)
+			q.undo = stepUndo{ok: true, prevCur: oldCur, drawn: q.items[i].Identity(), popHist: pushed}
+		}
+		d = Advance{Kind: AdvancePlay, Item: q.items[i]}
 
 	default:
 		// 循环播放（列表循环）：往后挪一格，**走到队尾绕回第一首**。
@@ -719,14 +1075,30 @@ func (q *Queue) Advance() Advance {
 			d = Advance{Kind: AdvanceReplay, Item: q.items[q.cur]}
 			break
 		}
-		q.cur = next
-		d = Advance{Kind: AdvancePlay, Item: q.items[q.cur]}
+		if commit {
+			q.cur = next
+			q.undo = stepUndo{ok: true, prevCur: oldCur}
+		}
+		d = Advance{Kind: AdvancePlay, Item: q.items[next]}
 	}
 
+	return d, true
+}
+
+// PeekNext 报「这一首放完之后下一首是谁」，**不动队列**。
+//
+// 它是 `Advance` 的那一份「只算不动」（见 advanceLocked）：预取要知道下一首
+// 是谁才能去备地址，而它**不能**动指针、不能抽洗牌袋——那些是「真放下一首」
+// 才做的事。
+//
+// ⚠️ **第二个返回值是「这个结论靠不靠得住」**：随机那一档的洗牌袋空着的时候
+// 答不出来（真抽的时候袋空会重装一袋，而预取不该替真抽把随机源用掉）。
+// 答不出来的时候第一个返回值是**空的**，调用方必须先看第二个返回值。
+func (q *Queue) PeekNext() (Advance, bool) {
+	q.mu.Lock()
+	d, known := q.advanceLocked(false)
 	q.mu.Unlock()
-	// 当前项变了（或者至少「结论」变了），落盘那一格得跟着变。
-	q.changed()
-	return d
+	return d, known
 }
 
 // nextPageLocked 找「同一个视频的下一分集」在队列里的下标，没有是 false。
@@ -758,23 +1130,6 @@ func (q *Queue) nextPageLocked() (int, bool) {
 	return 0, false
 }
 
-// pickOtherLocked 在 n 首里挑一个不是 cur 的下标。**真的打乱。**
-//
-// 为什么不能图省事写成 `cur + 1 + rnd(n-1)` 再对 n 取模：那样得到的是
-// 「往后随机若干首」，**第一首永远轮不到**（从最后一首往前数，最多只能走回
-// 第一首的位置——而它在 n=2 时能中、在 n=5 时几乎中不了）。用户听得出来：
-// 「随机播了一晚上，一首歌没放过」。
-//
-// 这里是在**除掉当前首**剩下的 n-1 首里均匀抽一个，再把它映回 0..n-1：
-// 每一首（含第一首、含队尾）被抽中的机会一样大。
-func (q *Queue) pickOtherLocked(cur, n int) int {
-	k := q.rnd.Intn(n - 1) // 0..n-2，那 n-1 首里的第几个
-	if k >= cur {
-		k++ // 把当前首那一格跳过去
-	}
-	return k
-}
-
 // PlayMode 是当前档位。
 func (q *Queue) PlayMode() PlayMode {
 	q.mu.Lock()
@@ -788,13 +1143,25 @@ func (q *Queue) PlayMode() PlayMode {
 // 认不出的档位落到默认档（和设置文件里手写错的值一个待遇，见 normalize）：
 // 认不出的档位如果原样留着，随机那一支会掉进 `Advance` 的 default（循环），
 // 界面上却显示着一句空的话——用户看到的是「按钮上是空的，行为是循环」。
+//
+// ⚠️ **换档时随机模式那两样都清掉**（洗牌袋、历史栈）：它们只在随机模式下
+// 有读者，而「刚才放过谁」在别的档位下是按索引算的（见 MoveNext / MovePrev）。
+// 不清的话用户从随机切回循环、再切回随机，会看到一袋上一轮剩的歌。
 func (q *Queue) SetPlayMode(m PlayMode) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	if !slices.Contains(PlayModes, m) {
 		m = DefaultPlayMode
 	}
 	q.mode = m
+	q.bagClearLocked()
+	q.historyClearLocked()
+	q.undo = stepUndo{}
+	q.mu.Unlock()
+	// ⚠️ **换档之后「下一首是谁」整个变了**（随机那一档是从洗牌袋里抽的），
+	// 之前备好的那份地址必须作废。
+	//
+	// ⚠️ **它在锁外面调**（和 `changed()` 同一条规矩，见 onChange 的注释）。
+	q.invalidate()
 }
 
 // KeepPagesOrderInRandom 报「随机时保持分集顺序」是不是开着。
@@ -887,7 +1254,6 @@ func (a *App) Enqueue(items ...Item) error {
 // 是**选中已有那一份**（`existItem`），本项目跟它不一样，理由见 `DESIGN.md`
 // §十第 4 条。
 func (a *App) EnqueueAndPlayNow(item Item) error {
-	cur := a.queue.CurrentIndex()
 	start := a.queue.Len()
 	a.queue.Append(item)
 	// 选中新加进去的那一项（它必然在 `start` 那个下标上：`Append` 刚把它放在
@@ -896,7 +1262,10 @@ func (a *App) EnqueueAndPlayNow(item Item) error {
 	if err := a.play(item); err != nil {
 		// 退回原来那一首：队列的下标要和正在放的那首对得上（和 `step` 同一个
 		// 道理——用户点的是这一首，不该因为放不开就被放到另一首上）。
-		a.queue.selectAt(cur)
+		//
+		// ⚠️ 退的是**刚才那一跳**（UndoStep），不是「再指回去」：随机模式里这
+		// 一跳把刚才那首压进了历史栈。
+		a.queue.UndoStep()
 		return err
 	}
 	return nil
@@ -1005,7 +1374,12 @@ func (a *App) PlayAt(i int) error {
 	}
 	item, _ := a.queue.selectAt(i)
 	if err := a.play(item); err != nil {
-		a.queue.selectAt(cur) // cur 是 -1 时就是退回「还没开始」
+		// 退回刚才那一首（cur 是 -1 时就是退回「还没开始」）。
+		//
+		// ⚠️ 退的是**刚才那一跳**（UndoStep），不是「再指回去」：随机模式里这一
+		// 跳把刚才那首压进了历史栈，再指回去会把它留在栈里——「上一首」就会
+		// 退到一首用户根本没在听的歌上。
+		a.queue.UndoStep()
 		return err
 	}
 	return nil
@@ -1100,18 +1474,28 @@ func (a *App) Prev() { a.step(-1) }
 //
 // 挪过去了却放不了，就退回原来那一首：界面上仍然停在原来那首，按钮也不该在
 // 用户眼皮底下换成另一首，而队列的下标要和正在播的那首对得上。
+//
+// ⚠️ **随机那一档不走「指针挪一格」**：下一首从洗牌袋里抽、上一首走历史栈
+// （见 Queue.MoveNext / MovePrev）。退回去也是退那一次挪动（UndoStep），不是
+// 「再挪回去」——随机那一档没有「再挪回去」这回事。
 func (a *App) step(delta int) {
-	item, ok := a.queue.Move(delta)
+	var item Item
+	var ok bool
+	if delta < 0 {
+		item, ok = a.queue.MovePrev()
+	} else {
+		item, ok = a.queue.MoveNext()
+	}
 	if !ok {
 		return
 	}
 	if item.Path == "" && !item.isOnline() {
-		a.queue.Move(-delta)
+		a.queue.UndoStep()
 		a.setErr(errNoSource.Error())
 		return
 	}
 	if err := a.play(item); err != nil {
-		a.queue.Move(-delta)
+		a.queue.UndoStep()
 	}
 }
 
@@ -1174,8 +1558,8 @@ func (a *App) rememberPlayMode() {
 // 三种结论（`Queue.Advance` 给的）分别落在三件事上：
 //
 //   - 放下一个：走 `play`，和 `step` 一样是换播放器。放不开就把队列指针退回
-//     放完那首（随机那一档尤其需要退回：挪回去的路是 `selectAt`，不是
-//     `Move`）。
+//     放完那首（随机那一档尤其需要退回：退回去的路是 `UndoStep`，不是
+//     `Move`——随机那一档是从洗牌袋里抽的，退回去要把抽出来的那首放回袋子里）。
 //   - 重放当前这首：同一个播放器 `Seek(0)` + `Play`。**不开播放器上的循环**
 //     （见 PlayMode 那节的说明）——决定权在这一层，不在音频引擎里。
 //   - 停下来：`Seek(0)` + `Pause`，停在开头等用户。这抄的是 Biu 的
@@ -1201,8 +1585,15 @@ func (a *App) onTrackFinished() {
 		return
 	}
 
-	prev := a.queue.CurrentIndex()
-	switch d := a.queue.Advance(); d.Kind {
+	d := a.queue.Advance()
+	// 🔴 **下一首开始了**：备好的那一份（不管成没成）到此为止。
+	//
+	// ⚠️ **它在 switch 外面**：黑名单（备失败的那一首）到下一首开始就该到头
+	// ——「这一首失败就不重试」说的是这一首，不是以后每一首。而这一句在
+	// `AdvanceReplay` / `AdvanceStop` 那两支上也要走（那一档下压根没有备）。
+	prepared, ref, hasRef := a.takePrefetch(d.Item)
+
+	switch d.Kind {
 	case AdvanceReplay:
 		// MyGo 的 `Play()` 对一个放完的播放器就是从头开始（它自己会 seek(0)），
 		// 这里再显式 seek 一次：界面上的进度条读的是 `a.position`，不等解码
@@ -1242,12 +1633,30 @@ func (a *App) onTrackFinished() {
 
 	case AdvancePlay:
 		if d.Item.Path == "" && !d.Item.isOnline() {
-			a.queue.selectAt(prev)
+			a.queue.UndoStep()
 			a.setErr(errNoSource.Error())
 			return
 		}
-		if err := a.play(d.Item); err != nil {
-			a.queue.selectAt(prev)
+		// 🔴 **自动切歌用备好的那份地址**（见 prefetch.go）：这一趟已经提前
+		// 备好了，真播它就**不再取流**——省下来的就是「切歌到出声」的那段空档。
+		//
+		// ⚠️ **备失败时无声退回**：备不出来的那一份在 `takePrefetch` 里被丢掉，
+		// 这一趟走正常路径重新取一次。
+		//
+		// ⚠️ **队列里那一项的 cid 不动**：预取问出来的是**本地的一份**（带 cid），
+		// 而队列里那一项还是原来那个（搜索结果那样没有 cid）——这跟正常播放
+		// 那条路一模一样（`runOnline` 的 `withSource` 也只补在本地副本上）。
+		// 两边一致才不会「同一个动作两种表现」（「换集」和分集高亮读的都是
+		// 队列里那一项）。
+		item := d.Item
+		if hasRef {
+			item = prepared
+			// 放进「播放前预判」那个缓存：真播这一趟的 `resolve` 会先问它，
+			// 命中了就**不再取流**。
+			a.putStreamCache(item, ref)
+		}
+		if err := a.play(item); err != nil {
+			a.queue.UndoStep()
 			a.setErr(fmt.Sprintf("接不上下一首：%v", err))
 			return
 		}
@@ -1349,7 +1758,7 @@ func (a *App) setErrText(msg string, retryable bool) {
 	a.setErrTextDetail(msg, msg, retryable)
 }
 
-// setErrTextDetail 在播放条上显示一句错误，**短的满屏、长的进悬停提示**。
+// setErrTextDetail 在播放条上显示一句错误，**短的上屏、长的进悬停提示**。
 //
 // 🔴 **为什么要分两栏**（票 #282 的评审）：播放条上那一行只有 140 像素宽
 // （1200 宽的窗口，实测），12 号字放得下十来个字——一句 50 个字的话在屏幕

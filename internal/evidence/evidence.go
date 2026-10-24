@@ -282,6 +282,27 @@ var Items = []Item{
 		},
 	},
 	{
+		// 票 #194：右下角那三枚旋钮改成**上游那三枚的样子**。
+		//
+		// 改的是**形状**，不是位置，也不是功能：位置（右沿 1128、底沿 680、每枚
+		// 32、中心间距 44）和三枚各自的动作一个字都没动。
+		//
+		// 而「图标化」最容易丢的是**名字**：钮上不再有「找歌词」三个字，可它
+		// 恰恰是**没有歌词时**唯一摆着的那个键——名字（`Label`）没了，读屏软件
+		// 念不出来，无头 Tester 也找不到了。所以这一条把「名字还在」和「当前值
+		// 在浮层里」都钉住：值不常驻钮上（上游那两个钮上就只有一个图标），但
+		// 展开浮层仍然看得见。
+		Category: Play,
+		Spec:     "右下角那三枚歌词旋钮是 ⌀32 的圆形图标钮（上游同一份组件挂两处：主窗口「正在播放」那一页与满屏那一屏）：圆里只有一枚图标（上游那三枚 Aa / 时钟 / T 形框）没有字；无障碍名与 Tester 名字都还在；点击行为不变（字号 / 偏移开浮层、找歌词开搜索弹窗）；当前值不常驻钮上、在浮层里看；位置与间距不变（右沿 1128、底沿 680、每枚 32、中心间距 44）",
+		Tests: []string{
+			"TestTheKnobIsARoundIconButtonWithTheValueInThePopover",
+			"TestTheTwoKnobsAreThereOnlyWithLyrics",
+			"TestTheFullPlayerHasTheThreeLyricKnobs",
+			"TestTheFullPlayerKnobsSitAtTheBottomRightOfTheLyrics",
+			"TestTheFullPlayerKnobsActuallyWork",
+		},
+	},
+	{
 		// 满屏那个偏好面板的三样（UX 报告 B4）：**有标题**（用户不用靠里面的
 		// 开关名猜这是什么面板）、**能关**（除了点外面和 Esc，还有一枚看得见的
 		// 「×」）、**和齿轮对齐**（面板的左沿对着齿轮的图形，不对着那枚键的
@@ -494,6 +515,51 @@ var Items = []Item{
 		},
 	},
 	{
+		// 归「播放」那一组：还是顶栏，但说的是头像**下面那一层**（票 #363）。
+		//
+		// 归这一组是因为它是**界面上的一处交互**（和满屏偏好面板那一条同一类），
+		// 而不是一个接口。
+		Category: Play,
+		// 这一层原来是**系统原生菜单**（`ui.Element.Menu`），这一票换成自绘的
+		// 浮层：样式跟设计规范对得上（surface1 / radiusLg / shadow.Modal /
+		// accentSoft），而系统菜单是系统外观；菜单项也要能带图标。
+		//
+		// 🔴 **换成自绘之后，系统菜单那四件好事一件都不能丢**（当初用系统菜单
+		// 就是为了它们）：点外面关、Esc 关、键盘能上下走、选中项有反馈。
+		//
+		// ⚠️ **指针和键盘混着来是最难的那一种**：两者共用「当前是第几项」，而
+		// 悬停每一帧都改它——不处理的话，键盘刚走的那一格会被指针改回去，
+		// 「键盘能上下走」只剩「指针不在菜单项上」的时候才成立。
+		Spec: "头像下拉是自绘浮层（不是系统菜单）：六项按上游的顺序、每一项带图标、锚在头像下面；点外面关、Esc 关、方向键走得动（指针停在菜单项上也走得动）、当前项有反馈；「退出登录」先问一句，取消什么都不做",
+		Tests: []string{
+			// 六项都在、顺序照上游、而且**不是系统菜单**。
+			"TestAvatarMenuHasBiuSixItems",
+			// 六项都按得动：换路由、去个人资料、去设置、退登（先问一句）。
+			"TestAvatarMenuGoesToItsRoute",
+			"TestAvatarMenuProfileUsesTheLoggedInMid",
+			"TestAvatarMenuWithoutALoginSaysSo",
+			"TestAvatarMenuLogoutActuallyLogsOut",
+			"TestAvatarMenuOpensTheIssuePage",
+			// 点外面关、Esc 关。
+			"TestTheAvatarMenuClosesOnEscape",
+			"TestTheAvatarMenuClosesWhenClickingOutside",
+			// 键盘那一半：方向键走得动（**指针停在菜单项上时也走得动**）、
+			// 回车选的是亮着的那一项。
+			"TestTheAvatarMenuWalksWithTheArrowKeys",
+			"TestTheAvatarMenuWalksWhileThePointerRestsOnAnItem",
+			"TestTheAvatarMenuSelectsWithTheKeyboard",
+			// 浮层的样子：锚在头像下面、右沿对齐、底色是 surface1 那一档。
+			"TestTheAvatarMenuHangsUnderTheAvatar",
+			"TestTheAvatarMenuPanelLooksLikeACard",
+			// 每一项前面都有图标。
+			"TestEveryAvatarMenuItemHasAnIcon",
+			// 当前那一项的危险字按那层底现算（底换了，字要跟着换）。
+			"TestTheDangerItemKeepsItsContrastOnTheHighlightedRow",
+			// 「退出登录」先问一句，取消什么都不做。
+			"TestTheAvatarMenuAsksBeforeLoggingOut",
+		},
+	},
+	{
 		Category: HTTP,
 		// 「刷新数据」那一项以前按下去只弹一句「还没有数据可刷新」——而接口一直
 		// 都在（`created/list`，收藏夹的新建 / 修改 / 拉全量都靠它）。这一条钉的是
@@ -508,6 +574,38 @@ var Items = []Item{
 			"TestRefreshingTwiceSendsOneRequestAndSaysItIsBusy",
 			"TestRefreshingWithoutALoginSaysSoAndSendsNothing",
 			"TestRefreshingWithoutTheFoldersMountedSaysSo",
+		},
+	},
+	{
+		Category: HTTP,
+		// 票 #362 的三件事：
+		//
+		//  1. **自动拉**：登录之后、开机时已经登录，各拉一次——用户不该为了
+		//     看见自己的收藏夹先去头像下拉里按「刷新数据」。而「一次自动拉
+		//     只发一次请求」是「不许每帧都拉」那条规矩的反面判据。
+		//  2. **空状态分得开**：「拉失败」和「真的一 个都没有」在画面上不是
+		//     同一句话——摆一句「还没有收藏夹」在拉失败的时候是撒谎，而用户
+		//     会据此以为自己一个收藏夹都没有。
+		//  3. **「我收藏的」那一组有源**：它走 `collected/list`（B 站「我收藏
+		//     了别人的哪些收藏夹」那个接口），而它以前在本项目里只有测试填
+		//     过——侧栏上那一组永远空着，而用户看到的是一个摆在那儿、永远
+		//     不动的分组。
+		Spec: "登录之后 / 开机时自动拉一次收藏夹（一次自动拉只发一次请求）；拉失败和「真的没有」在界面上分得开；「我收藏的」那一组有源",
+		Tests: []string{
+			"TestLoggingInPullsTheFavorites",
+			"TestAlreadyLoggedInPullsTheFavoritesAtStartup",
+			"TestAutoRefreshSendsNothingWhenLoggedOut",
+			"TestAutoRefreshSendsOnlyOneRequest",
+			"TestAFailedFetchIsNotAnEmptyList",
+			"TestAFetchThatFoundNothingIsStillLoaded",
+			"TestTheCollectedFoldersShowUpInTheSidebar",
+			"TestCollectedAlbumsAreNotPutInTheSidebar",
+			"TestLoggingOutClearsTheFavorites",
+			"TestARefreshThatComesBackAfterALogoutIsThrownAway",
+			"TestTheOldRefreshDoesNotStealTheNewAccountsRefreshState",
+			"TestTheSidebarSaysTheFetchFailedInsteadOfThereAreNoFavorites",
+			"TestTheSidebarDoesNotSayThereAreNoFavoritesBeforeAnythingWasFetched",
+			"TestRefreshingWithoutALoginDoesNotSayTheFetchFailed",
 		},
 	},
 
@@ -943,6 +1041,18 @@ var Items = []Item{
 			"TestTheMiniWindowStepsThroughTheQueue",
 			"TestDraggingTheMiniProgressSeeksOnlyOnRelease",
 			"TestTheMiniVolumeSliderSetsTheVolume",
+			// 静音在小窗里**看得出来**（票 #345）：滑块停在用户设的那一档
+			// （静音是它自己的一格），所以能说明「现在是静音」的只有那枚图标。
+			"TestTheMiniWindowShowsTheMuteState",
+			"TestClickingTheMiniMuteIconUnmutes",
+			"TestTheMiniMuteIconFollowsTheApp",
+			"TestTheMiniMuteIconSaysItIsMuted",
+			"TestTheMiniMuteIconMatchesThePlayBar",
+			"TestTheMuteGlyphDiffersFromTheLoudOne",
+			"TestTheMiniMuteStateSurvivesARestart",
+			"TestTheMiniMuteIconIsThereWithoutATrack",
+			"TestTheMiniVolumeTipSaysItIsMuted",
+			"TestTheMiniMuteIconSaysCancelMuteWhenThereIsNoSound",
 			// 小窗里认的是**用户配的那一份**而不是出厂默认值；以及在小窗里按
 			//「切换mini/完整模式」是关掉而不是再开一个。
 			// （设置页写着「窗口在前台时按它就有用」，而小窗是最常停在前面的那一扇。）
@@ -967,9 +1077,9 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
-		Spec:     "迷你播放器这一块本身：装得下 320×100、那四个键是图标键（框对、图形在）、控件身份稳（铁律四）",
+		Spec:     "迷你播放器这一块本身：装得下 320×84、那几枚键是图标键（框对、图形在）、控件身份稳（铁律四）",
 		Tests: []string{
-			"TestTheMiniCardFitsInThreeHundredAndTwentyByOneHundred",
+			"TestTheMiniCardFitsInThreeHundredAndTwentyByEightyFour",
 			"TestTheMiniKeysAreIcons",
 			"TestTheMiniControlsKeepTheirIdentityWhenTheLabelChanges",
 		},
@@ -1273,8 +1383,16 @@ var Items = []Item{
 		// 挤不掉），挤的循环于是最后把整张表清空还挤不下——之后每来一张图就把
 		// 表里剩下的全挤掉。
 		//
+		// 票 #358 补了第三条：**画面上正画着的那一张也不许挤**。开队列抽屉的
+		// 时候，抽屉里那二十几行第一次露出来、全都要封面，字节上限一下子超了，
+		// 挤的循环一路挤到画面上正画着的那几张——挤掉的那一张下一帧就退回占位，
+		// 于是「开抽屉时中间那一列的封面来回闪」。
+		//
+		// **同一件事的另一个表现是「历史记录页一直闪」**：那一页自己的一屏封面
+		// 就把上限顶破了，于是挤 → 退占位 → 重新下 → 又被挤……一直循环。
+		//
 		// 全部用 `httptest` 验（假图床 + 假 B 站接口），不连真网。
-		Spec: "首页推荐的封面不再在有图和占位之间反复切换：一屏封面按显示尺寸存得下、字节账不漏、还在下的那一张不参与淘汰",
+		Spec: "封面不再在有图和占位之间反复切换：一屏封面按显示尺寸存得下、字节账不漏、还在下的那一张不参与淘汰、画面上正画着的那一张不参与淘汰（首页、历史记录、稍后再看三处）",
 		Tests: []string{
 			"TestTheSameCoverStaysReadyAcrossFrames",
 			"TestTheHomeCoversDoNotGoBackToPlaceholder",
@@ -1283,6 +1401,11 @@ var Items = []Item{
 			"TestTheEvictionSkipsEntriesThatHaveNoBytesYet",
 			"TestACoverThatIsStillLoadingIsNotEvicted",
 			"TestTheByteAccountDoesNotLeak",
+			"TestTheCoverOnScreenIsNotEvicted",
+			"TestACoverThatIsNoLongerOnScreenIsEvicted",
+			"TestOpeningTheQueueDrawerDoesNotMakeTheListCoversFlash",
+			"TestTheHistoryPageCoversDoNotKeepFlashing",
+			"TestTheLaterPageCoversDoNotKeepFlashing",
 		},
 	},
 	{
@@ -1589,6 +1712,61 @@ var Items = []Item{
 			"TestTheCacheIsKeyedBySourceAndByWord",
 			"TestAFailedSearchIsNotRemembered",
 			"TestEmptyingTheBoxClearsTheList",
+		},
+	},
+	{
+		Category: HTTP,
+		// B 站那一份歌词是**取流那一趟顺带回来的**（响应里的 `data.subtitle`）——
+		// 以前 `playurlData` 只声明了三个字段，那一段被**静悄悄地**丢掉了，于是
+		// 歌词只能靠用户在「找歌词」里搜（上游 Biu 走的就是这一段，
+		// `get-lyrics.ts` 的 `getLyricsByBili`）。
+		//
+		// ⚠️ 判据是**解析**那几项：时间 `round(from*1000)` 毫秒、文字去掉首尾的
+		// `♪♫`、空的丢掉、按时间排序。抄错时间那一项的症状是「歌词整体早/晚
+		// 几秒」，而歌词本身看着完全正常——用户只会以为「这首歌的词对不上」。
+		Spec: "B 站那一份歌词自己来：取流响应里的字幕地址被读出来、后台下载并按上游的判据解析、存进缓存（键与别的歌词缓存一致）、界面上说清它是自动来的",
+		Tests: []string{
+			"TestPlayURLHandsBackTheSubtitleItWasGiven",
+			"TestTheSecondSubtitleAddressIsKeptToo",
+			"TestTheBiliSubtitleIsParsedTheWayUpstreamDoes",
+			"TestTheBiliSubtitleTimeIsRoundedToMilliseconds",
+			"TestTheBiliSubtitleSurvivesTheRoundTripThroughLRC",
+			"TestTheBiliSubtitleComesOnItsOwn",
+			"TestTheBiliSubtitleSurvivesARestart",
+			"TestTheSubtitleIsFetchedInTheBackground",
+			"TestTheLyricsSayWhereTheyCameFrom",
+			"TestTheOriginLineSitsWhereTheLyricsSit",
+		},
+	},
+	{
+		Category: Negative,
+		// 🔴 **「取到了地址但下载 403」这一档**：B 站给同一份字幕两个地址，而
+		// **不带鉴权参数的那个可能要登录态**——拿它去请求会 403。而登录态在字幕
+		// 那条路上根本到不了（cookie 的域是 `.bilibili.com`，字幕文件在
+		// `.hdslb.com`）。所以**唯一能授权这一趟的就是地址自己带的那段
+		// `auth_key`**——也就是第二个地址。
+		//
+		// 只试第一个地址的话，这一整条自动歌词就**静悄悄地不出现**（界面上照旧是
+		// 「暂无歌词」，日志里只有一行）。上游那个 `||` 兜底只管「地址为空」那一种，
+		// 所以兜底必须落在**下载**那一层。
+		Spec: "字幕的第一个地址下载失败时改试第二个（B 站给同一份字幕两个地址，带 auth_key 的那个才是能下的）",
+		Tests: []string{
+			"TestTheSecondAddressIsTriedWhenTheFirstOneFails",
+			"TestTheBiliSubtitleFallsBackToTheSecondAddress",
+		},
+	},
+	{
+		Category: Negative,
+		// 「B 站没给字幕」是**正常**的一种（很多歌压根没有），不是错误：歌照放，
+		// 歌词区照旧是「暂无歌词」加一个「找歌词」的入口——那一条路留着。
+		//
+		// ⚠️ 少了这一条，界面上的「暂无歌词」就会变成一句**兑现不了的承诺**：
+		// 用户按了「找歌词」，而 B 站那份自动的其实没来。
+		Spec: "B 站没给字幕时照旧走搜索：歌词区是「暂无歌词」加一个「找歌词」的入口，那两个搜索源还在",
+		Tests: []string{
+			"TestNoSubtitleMeansNoAddress",
+			"TestNoSubtitleMeansTheSearchStaysAvailable",
+			"TestAnUnknownOriginSaysNothing",
 		},
 	},
 	{
@@ -2393,6 +2571,36 @@ var Items = []Item{
 		},
 	},
 	{
+		// 归「双平台」那一组：还是播放条那一块，但说的是它上面那一句**错**
+		// （票 #320）。
+		Category: Platform,
+		// 票 #320：播放条上那一句错被压成**一行 + 省略号**（88 高的播放条装不
+		// 下两行——这是布局的账），而 `bili.Friendly` 那张表里的话信息量很大
+		//（「B 站没有给这一条单独的音频流（歌单、活动那一种多半是这样）。在 B 站
+		// 里打开它听，或者换一首放」四十来个字）——用户常常只读到半句话。
+		//
+		// 🔴 **这一族的坏法全是静默的**：完整那一句拿不到，界面上看不出坏了
+		// （那一行的**文本节点里**就是完整那一句，只是画的时候被截了——所以
+		// 「它在树上」证明不了任何事）；而播放条要是被撑成两行，最后一行会被
+		// 88 高裁掉，**界面上也看不出坏了**。
+		//
+		// ⚠️ **判据要分两半**：一是「完整那一句拿得到」（排开了、不止一行），
+		// 二是「播放条一个像素都没动」（打开详情前后那一行的框一模一样）。
+		Spec: "播放条上那一句错：屏幕上还是一行 + 省略号（88 高的播放条装不下两行），完整那一句在悬停提示和点开的详情层里都拿得到（详情层多行排开、能选中复制），打开详情时播放条一个像素都不动，错没了详情层就收",
+		Tests: []string{
+			// 详情层里是**完整那一句**，而且**排开了**（不止一行）。
+			"TestClickingTheErrorOpensTheWholeSentence",
+			// 打开详情前后，播放条上那一句的框**一模一样**。
+			"TestThePlayBarDoesNotMoveWhenTheDetailOpens",
+			// 错没了，详情层就收（不然它写着「打不开」而其实能播了）。
+			"TestTheDetailClosesWhenTheErrorIsGone",
+			// 悬停那一条路没被弄坏（提示框里也是完整那一句）。
+			"TestHoveringTheErrorStillShowsTheWholeSentence",
+			// 面板开着的时候提示框不挂（两块摆在同一个位置，叠在一起像坏了）。
+			"TestTheTooltipDoesNotStackOnTopOfTheDetail",
+		},
+	},
+	{
 		// 归「双平台」那一组，和上面 issue 127 那一条是同一件事的两半：那一票动的是
 		// 外壳（侧栏 / 顶栏 / 播放条），这一票动的是**内容那一块**（列表与网格）。
 		Category: Platform,
@@ -2963,6 +3171,44 @@ var Items = []Item{
 		},
 	},
 	{
+		// 🔴 **这一族的错法是「静默」的**：默认落点算错的时候，歌**照样下得完**，
+		// 界面上**每一句话都是真的**，只是它们说的不是同一个地方——用户在自己的
+		// 下载目录里翻不到刚下的那几首，而设置页上那一格写着「未设置」。
+		//
+		// 票 #361：默认落点从**系统下载目录**（`~/Downloads`，那儿是浏览器和
+		// 安装包的地方）改成**「音乐」目录下的应用子目录**（macOS `~/Music/BiuGo`，
+		// Windows `C:\Users\<用户名>\Music\BiuGo`——框架的 `PathMusic` 只把
+		// 英文名拼在家目录下面）——同类音乐软件（网易云、QQ 音乐、Spotify）都是
+		// 这么放的。
+		//
+		// ⚠️ **「老歌不搬家」也是这一条的一部分**：已经在 `~/Downloads` 下的歌留在
+		// 原地（迁移是另一件事，要人拍板），而这一条只改**新**下载的落点。
+		Category: Platform,
+		Spec:     "默认下载目录是「音乐」目录下的应用子目录（macOS ~/Music/BiuGo、Windows C:\\Users\\<用户名>\\Music\\BiuGo），落盘那一刻目录不存在会建；**查路径的那一层不建目录**（开应用不会在用户磁盘上留下文件夹）；设置页和下载记录页上显示的是**歌真正落下来的地方**而不是空串；用户在设置里手动选过的目录照旧；已经在旧目录下的老歌不搬家",
+		Tests: []string{
+			// 路径本身：它在音乐目录下面，子目录名是显示名（不是用户数据目录那个
+			// 老名字），拿不到家目录时退回系统下载目录而不是给一个相对路径。
+			"TestTheDefaultDownloadDirectoryIsTheAppFolderUnderTheMusicDirectory",
+			"TestTheDownloadDirectoryIsNamedAfterTheAppNotAfterTheLegacyUserDataDirectory",
+			"TestTheDefaultDownloadDirectoryIsNotARelativePath",
+			// ⚠️ **查路径这一层不建目录**：它被开应用时和设置页读着，而它一旦
+			// 建目录，光是打开应用（或者跑一条 internal/ui 的测试）就会在**用户
+			// 自己的** ~/Music 里留下一个文件夹。
+			"TestTheDefaultDownloadDirectoryIsNotCreatedJustForLooking",
+			// 建目录是**落盘那一刻**的事。
+			"TestTheDownloadDirectoryIsCreatedWhenTheSongLands",
+			// 优先级：设置里没选过是默认落点，选过的是用户选的那个。
+			"TestTheDownloadDirectoryIsTheDefaultOneUntilTheUserPicksAnother",
+			// ⚠️ **一个目录都没有时不许入队**：空目录会让歌落到进程的当前工作
+			// 目录里（相对路径），而界面上没有一句话说它去哪儿了。
+			"TestTheDownloadIsRefusedWhenThereIsNowhereToPutIt",
+			// 界面上显示的那条路径（两页说的是同一个字符串）。
+			"TestTheSettingsPageShowsWhereTheSongsWillLand",
+			"TestTheSettingsPageStillShowsTheDirectoryTheUserPicked",
+			"TestTheDownloadPageShowsWhereTheSongsWillLand",
+		},
+	},
+	{
 		// 🔴 **这一族的错法也全是「静默」的**：两端对齐空着三百像素、迷你窗里
 		// 两根滑块分不出哪个是哪个、同一个动作两个页面一个有一个没有、
 		// 超长歌名占满整行中段、深色下黑封面和底色融成一片——**没有一样会
@@ -3042,6 +3288,49 @@ var Items = []Item{
 			// 各自最后那一项（移除 / 删除）仍各归各的。
 			"TestBothLibraryPagesOfferTheirOwnLastMenuItem",
 			"TestBothLibraryPagesOfferPlayNextInTheRowMenu",
+		},
+	},
+	{
+		// 🔴 **这一条治的是「延迟」**：切歌到出声之间有一段空档——取流要跑一趟
+		// 带 WBI 签名的网络往返（实测 200~400ms），再叠上开解码器、等第一批样本。
+		// 用户听到的是「点下一首 → 空档 → 出声」。
+		//
+		// 提前备地址的那一趟**只解析地址、不预下载字节**：我们的 `StreamSource`
+		// 会**在盘上落一个临时文件**，预下载 = 占磁盘 + 多一条连接（那是另一件事）。
+		//
+		// ⚠️ **这一条的错法是「静悄悄白费」**：备错了（备的和真播的不是同一首）
+		// 的话，放出来的歌**还是对的**（对不上就重新取），而省下来的那几百毫秒
+		// 白费了——**界面上看不出任何异样**。
+		Category: Play,
+		// 票 #366（2026-10-24）。
+		Spec: "下一首的流地址在当前这首快结束时就备好（只解析地址，不预下载字节）；真播下一首不再重新取流；手动切歌重新取；队列一改就作废；预取失败无声退回且不重试；地址快过期就放弃；暂停时不预取；备的和真播的是同一首（含随机模式）",
+		Tests: []string{
+			// 主线：备好的那一份在切歌那一刻**被用掉**（取流接口的次数停在 2）。
+			"TestTheNextTrackIsPreparedBeforeTheSwitch",
+			// 手动切歌重新取地址（次数到 3）。
+			"TestAManualSwitchResolvesTheAddressAgain",
+			// 队列一改 → 已备好的立刻作废（会重新备一份）。
+			"TestReorderingTheQueueThrowsThePreparedAddressAway",
+			// 失败无声退回（真播时按正常路径取一次），且不会每 50ms 重试。
+			"TestAPrefetchThatFailsFallsBackSilently",
+			// 备好的地址快过期了就放弃。
+			"TestAPreparedAddressThatExpiresIsThrownAway",
+			// 暂停时不预取。
+			"TestNothingIsPreparedWhileTheTrackIsPaused",
+			// 随机模式：备的和真播的是同一首。
+			"TestThePreparedTrackIsTheOneThatActuallyPlays",
+			// 队列内部那两半：预告和真抽是同一件事、预告不动队列。
+			"TestPeekNextAgreesWithAdvance",
+			"TestPeekNextDoesNotTouchTheQueue",
+			// 只解析地址：备好了也是一个字节都没下（CDN 一次都没被碰）。
+			"TestThePrefetchDoesNotDownloadAnything",
+			// **提前量真的挂在「还剩多久」上**（这一票最核心的那条验收）：
+			// 歌长到 15 秒之后才放完，量的是「备地址那一刻还剩多少」。
+			"TestTheAddressIsPreparedWhileTheTrackStillHasTimeLeft",
+			// 音乐库那一路（sid）也备得到——那是**另一条取流接口**。
+			"TestAMusicLibraryEntryIsPreparedToo",
+			// 作废的**真正保证**：下一首换成谁就放谁，陈旧的那份一个字节都不下。
+			"TestAStaleAddressIsNeverPlayed",
 		},
 	},
 	{

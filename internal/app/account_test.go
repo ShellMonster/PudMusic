@@ -72,6 +72,30 @@ type biliFixture struct {
 	// nav 是 nav 接口那一支回的 data。nil = 回一个空对象（B 站说「没登录」
 	// 时的形状，见 `bili.Nav`）。
 	nav map[string]any
+	// loginUID 是扫码成功时下发的那个 uid（DedeUserID）。
+	//
+	// 空串 = 用默认那个（"424242"）。**换账号**那一组用例要的是「扫出来的是
+	// 另一个人」，所以给它一个可改的口子（见 `onScanAs`）。
+	loginUID string
+	// handlers 是**别的**接口各自的回答（收藏夹那两个，见 `on`）。
+	//
+	// ⚠️ 它和 `nav` 分开是因为那一格是「登录这一整件事」自己要问的，
+	// 而这一张是给别的测试用的——`nav` 每一处都要手动填一遍，而收藏夹
+	// 那两个接口只有收藏夹那些用例要问。
+	handlers map[string]http.HandlerFunc
+}
+
+// on 装好某个路径回什么。
+//
+// 用来回答那些**不是登录流程本身**的接口（收藏夹列表那一族）。
+// 没装过的路径仍然是 404。
+func (f *biliFixture) on(path string, h http.HandlerFunc) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.handlers == nil {
+		f.handlers = map[string]http.HandlerFunc{}
+	}
+	f.handlers[path] = h
 }
 
 // onNav 装好 nav 接口回什么。
@@ -165,6 +189,10 @@ func newBiliFixture(t *testing.T) *biliFixture {
 			scan = f.scans[0]
 			f.scans = f.scans[1:]
 		}
+		uid := f.loginUID
+		if uid == "" {
+			uid = "424242"
+		}
 		f.mu.Unlock()
 
 		switch r.URL.Path {
@@ -179,7 +207,7 @@ func newBiliFixture(t *testing.T) *biliFixture {
 			case 0:
 				http.SetCookie(w, &http.Cookie{Name: "SESSDATA", Value: "sess-from-fixture", Path: "/"})
 				http.SetCookie(w, &http.Cookie{Name: "bili_jct", Value: "jct-from-fixture", Path: "/"})
-				http.SetCookie(w, &http.Cookie{Name: "DedeUserID", Value: "424242", Path: "/"})
+				http.SetCookie(w, &http.Cookie{Name: "DedeUserID", Value: uid, Path: "/"})
 			}
 			writeFixtureJSON(t, w, 0, "0", map[string]any{
 				"code":          scan,
@@ -195,6 +223,14 @@ func newBiliFixture(t *testing.T) *biliFixture {
 			f.mu.Unlock()
 			writeFixtureJSON(t, w, 0, "0", nav)
 		default:
+			// 别的接口（收藏夹那一族）各有各的回答；没装过的仍然是 404。
+			f.mu.Lock()
+			h := f.handlers[r.URL.Path]
+			f.mu.Unlock()
+			if h != nil {
+				h(w, r)
+				return
+			}
 			http.NotFound(w, r)
 		}
 	}))
@@ -207,6 +243,18 @@ func (f *biliFixture) onScans(codes ...int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.scans = codes
+}
+
+// onScanAs 设好「接下来扫成功的是这个 uid」。
+//
+// 换账号那一组用例要的就是这个：已登录的时候再扫一次码，扫出来的是**另一个人**
+// ——于是登录态换人了（见 `app.accountChanged`）。
+//
+// ⚠️ **只影响扫码**：启动时读回来的登录态是另一个口子（`favStore`）。
+func (f *biliFixture) onScanAs(uid string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.loginUID = uid
 }
 
 // stepByHand 改成每次轮询都要测试放行。
@@ -274,6 +322,16 @@ func newTestApp(t *testing.T, f *biliFixture, store app.Store) *app.App {
 // 的时候把一个会失败的传输层递进来——白名单、CSRF、cookie jar 这些中间层
 // 一个都不少，断网才断在真的那一层上。
 func newTestAppWithBase(t *testing.T, f *biliFixture, store app.Store, base http.RoundTripper) *app.App {
+	a, _ := newTestAppAndClient(t, f, store, base)
+	return a
+}
+
+// newTestAppAndClient 是 newTestAppWithBase 加上「把那个客户端也给你」。
+//
+// 别的测试要它是因为**收藏夹那一摊用的就是同一个客户端**（见
+// `app.MountCollections` 的注释：全项目一个 `bili` 客户端），而自己再造一个
+// 的话登录态、请求头、WBI 密钥就不是同一份了。
+func newTestAppAndClient(t *testing.T, f *biliFixture, store app.Store, base http.RoundTripper) (*app.App, *bili.Client) {
 	t.Helper()
 	a := app.New()
 	t.Cleanup(a.Close)
@@ -300,7 +358,7 @@ func newTestAppWithBase(t *testing.T, f *biliFixture, store app.Store, base http
 	cli.TestOnlyPointHostsAtFixture(f.URL)
 	a.MountLogin(store, cli)
 	a.SetLoginPollInterval(2 * time.Millisecond)
-	return a
+	return a, cli
 }
 
 func hostOf(raw string) string {
@@ -324,7 +382,7 @@ func TestLoginWalksThroughTheThreeStates(t *testing.T) {
 	f := newBiliFixture(t)
 	// 还没扫 → 已扫待确认 → 成功
 	f.onScans(86101, 86090, 0)
-	// 一步步放行：三态是转瞬即逝的，不手动放行就只能看到其中���个。
+	// 一步步放行：三态是转瞬即逝的，不手动放行就只能看到其中一个。
 	f.stepByHand()
 
 	a := newTestApp(t, f, app.NewMemoryStore("test"))

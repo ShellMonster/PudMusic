@@ -175,6 +175,31 @@ type Shell struct {
 	// 新建等于每帧都当成没问过——那是一帧一个请求。
 	avatar avatarState
 
+	// avatarMenuOpen 是头像下面那一层下拉开着没有（见 navbar_avatar.go）。
+	//
+	// ⚠️ **它是跨帧的**：即时模式每一帧都重画一遍，局部变量下一帧就没了。
+	avatarMenuOpen bool
+	// avatarMenuIndex 是「当前是第几项」（键盘走到的 / 鼠标悬停的那一项）。
+	//
+	// ⚠️ **鼠标和键盘共用这一个下标**：两个下标的话，画面上会有两项同时亮着
+	// （鼠标移到第三项上的那一帧，键盘那一项还亮着）。
+	//
+	// ⚠️ **-1 = 什么也没选中**：上游 HeroUI 打开下拉时不高亮任何一项，而
+	// 「一打开就亮着第一项」会让回车直接进扫码登录页（那一下用户根本不是
+	// 想登录）。
+	avatarMenuIndex int
+	// avatarMenuHover 是**上一帧**指针停在第几项（-1 = 不在菜单项上）。
+	//
+	// ⚠️ **它是为了让「指针不动的时候键盘说了算」**：每一帧都让悬停改一遍
+	// 「当前是第几项」的话，键盘刚走的那一格会被指针改回去——「键盘能上下
+	// 走」于是只在指针不在菜单项上的时候才成立。框架自己那个下拉也是这么
+	// 做的（`mygo/ui/base.go` 的 `selectParts.Item`）。
+	avatarMenuHover int
+	// avatarLogoutAsk 是「退出登录」那道确认开着没有。
+	//
+	// ⚠️ **跨帧**：确认框要活过一帧（用户得看着它按「确认」或「取消」）。
+	avatarLogoutAsk bool
+
 	// local 是本地音乐那一页自己的一摊状态：表格 / 列表 / 网格三档的控件、
 	// 筛选条件、两道确认弹窗、以及**逐窗口**的唤醒句柄表。见 localmusic.go。
 	//
@@ -231,7 +256,7 @@ type Shell struct {
 	// fullScreen 是主窗口此刻是不是全屏。
 	//
 	// ⚠️ **它由窗口的回调推过来，不在 view 里问**：`win.IsFullScreen()`
-	// 每帧问一次是跨一次 ObjC 调用（`mygo@v0.6.2/window.go:764` 的 `get`），
+	// 每帧问一次是跨一次 ObjC 调用（`mygo@v0.6.3/window.go:766` 的 `get`），
 	// 而答案在**进全屏那一刻**就定了——事件推过来既省事又准。
 	//
 	// 它只给侧栏那个品牌块用（macOS 非全屏时要多留一格，见 `sidebar.go` 的
@@ -344,6 +369,36 @@ type Shell struct {
 	//
 	// ⚠️ 理由同 `sideRowKeys`（票 #313）。
 	queueRowKeys rowkey.Memo[string, any]
+	// queueRowIDs 记着抽屉里每一行的**那两串身份**：判重标识（`Item.Identity()`）
+	// 和行身份（`queueRowKey` 拼出来的那一份）。
+	//
+	// ⚠️ **它们每帧每一行都要，而现拼每帧每行两次**（票 #339）：判重标识是
+	// 「local:」+ 路径，行身份是「queue-row:」+ 标识——二十首的队列就是四十来次
+	// 分配。而 `queueRowKeys` 记着的那一份只是**装进 `any` 的那一步**（装箱），
+	// 拼字符串那一步它没省。
+	//
+	// ⚠️ **它自己看得出「数据换了」**（见 `rowkey.Memo` 的文件头）：队列一改
+	// （加歌、删歌、重排）它自己就重算，调用方一处都不用记得重建。
+	queueRowIDs rowkey.Memo[queueRowRaw, queueRowIdentity]
+	// queueDrags 记着每一行那个**拖动值**（拖拽重排用的）。
+	//
+	// ⚠️ **它记的是指针**：框架把拖动值装进 `any`，装指针不分配——而每一行
+	// 每帧都要传一次拖动值（见 queue_drag.go 的说明）。
+	queueDrags rowkey.Memo[string, *queueDragValue]
+
+	// queueDropAt 是**落点那一行**在抽屉里的行号（-1 = 没有落点）。
+	//
+	// ⚠️ **它由每一行自己记**（见 queue_drawer.go 的 viewQueueRow）：每一行都
+	// 知道指针是不是在它身上、在它的哪一半——指针在谁身上，谁就是落点。
+	queueDropAt int
+	// queueDropUpper 是落点在那一行的**上半**（true）还是下半（false）。
+	queueDropUpper bool
+	// queueDragging 是「有东西正被拖着经过这一列」。
+	//
+	// ⚠️ **它比指针慢一帧**：它是上一帧问出来的（框架的 DragOver 只能在列表
+	// 建完之后问，见 viewQueueList）。差一帧看不出来——插入线晚一帧出现，
+	// 而拖动本来就不是一帧的事。
+	queueDragging bool
 
 	// queueScroll 是那一列滚到哪儿了。**和 queueList 分开存**是因为「定位当前
 	// 播放」要的是一段动画：ListState.ScrollTo 是一跳到位（`mygo/ui/list.go`
@@ -368,6 +423,13 @@ type Shell struct {
 	//
 	// ⚠️ 理由同 `sideRowKeys`（票 #313）。
 	partRowKeys rowkey.Memo[string, any]
+
+	// errDetailOpen 是「错误详情」那块面板开着没有（票 #320，见 playbar_err.go）。
+	// **同样只由 view 在主线程上读写**。
+	//
+	// ⚠️ **它跟着错误一起收**：错没了（下一首放起来了）而它还开着的话，下一句
+	// 错一上来，面板是开着的——用户会看到一块不属于这句错的浮层。
+	errDetailOpen bool
 
 	// 顶栏这一摊。**同样只由 view 在主线程上读写**。
 	//
@@ -1182,6 +1244,21 @@ func Run(a *app.App, sess *media.Session) error {
 		// 在应用还没 ready 的时候调会 panic（框架的 `needsApp`，
 		// `mygo/app.go:128`），而 `Run` 之前是那一刻。
 		a.StartLocalMusicWatch()
+		// 开机时如果已经登录，顺手把侧栏的收藏夹拉一次。
+		//
+		// 用户不该为了看见自己的收藏夹，先去头像下拉里按「刷新数据」——那是一
+		// 个没人会自己想到的操作，而侧栏上长期空着会被当成「我没有收藏夹」。
+		//
+		// ⚠️ **排在单实例锁之后**（锁在 `Run` 的第一句）：锁没拿到的话这个进程
+		// 马上就要退出，而这一趟是往 B 站发请求——第二个实例白发两次请求，
+		// 而用户那边什么也看不出来。
+		//
+		// ⚠️ **排在开窗口之前**：拉回来赶得上的话，第一帧上就有收藏夹；
+		// 赶不上的话那一行「正在刷新收藏夹…」会在（见 `viewFavoritesRefreshing`），
+		// 回来之后界面会被叫醒。
+		//
+		// ⚠️ **没登录时它一个请求都不发**（见 `app.AutoRefreshFavorites`）。
+		a.AutoRefreshFavorites()
 		// 后台自动查更新。**必须在 `WhenReady` 里**：第一次查询要走网络，而
 		// `WhenReady` 之前事件循环还没转起来，那时候发请求等于在一条还没开始
 		// 跑的路上走（框架自己也把「需要事件循环」的 API 挡在 ready 之前，见
@@ -1425,6 +1502,12 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 它之后创建的控件。不装的话 MyGo 在帧开头重置好的那份跟随系统的主题
 	// 就是这一帧真正用的那份，用户选了深色也只在这一帧是对的。
 	s.applyFrameTheme(c)
+	// 封面缓存要知道「新的一帧开始了」——挤缓存时**画面上正画着**的那几张
+	// 不许挤（票 #358：开队列抽屉时中间那一列的封面来回闪）。
+	//
+	// ⚠️ **给的是 `c.Now()` 而不是帧号**：一帧要跑好几遍 view，而同一帧的
+	// 几遍给的是同一个时刻，缓存那边靠它认出「这是不是新的一帧」。
+	s.images.BeginFrame(c.Now())
 	// 应用内快捷键：登记这一帧窗口要处理哪些组合键，同时也就知道了这一帧有没有
 	// 键打中（`Context.Shortcut` 命中就是「按了」）。见 shortcut_dispatch.go。
 	//
@@ -1525,7 +1608,7 @@ func (s *Shell) viewMain(c *ui.Context) {
 // pageJustShown 报「这一帧是刚进这一页的第一帧」。
 //
 // 路由切走再切回来时，框架会把焦点还给「离开这一页时有焦点的那个元素」
-// （`Router.focusPage`，`mygo@v0.6.2/ui/router.go:726`）。收藏夹/local 那一页
+// （`Router.focusPage`，`mygo@v0.6.3/ui/router.go:726`）。收藏夹/local 那一页
 // 的「会展开的搜索」正好是那个元素——于是用户回来的时候，键盘焦点被塞进一个
 // 他没打开过的框里，他在别处敲的字就落进那里（评审第 5 条）。
 //

@@ -101,6 +101,10 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, area ui.Rect, hidden
 	// 封面关掉的时候歌词占满整窗，于是居中。
 	centered := !s.app.FullPlayerPrefs().ShowCover
 
+	// ⚠️ **说明句用满屏自己的第二档色**（`fullForeground` 的那个 dim），不用主题的
+	// 次要色：这一屏压在糊过的封面上，主题的次要色在浅色封面上会糊进去。
+	_, dim := s.fullForeground(c)
+
 	ui.Box(c).Key(fullLyricsBoxKey).
 		Absolute().Left(area.X).Top(area.Y).Width(area.W).Height(area.H).
 		Padding(fullLyricsPadY, fullStagePadX).
@@ -124,6 +128,7 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, area ui.Rect, hidden
 					}
 					s.viewLyricLines(c, lv, snap, active, lyricStyle{
 						color:  s.fullLyricColor(c),
+						muted:  dim,
 						area:   fullLyricsAreaKey,
 						ns:     lyricNSFull,
 						center: centered,
@@ -157,16 +162,16 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, area ui.Rect, hidden
 // ⚠️ **它们是控件，界面藏起来的时候不画**（上游 `showControls={isUiVisible}`）：
 // 指针不动三秒之后整屏的控件都收走，而歌词留着（歌词是内容）。
 //
-// ⚠️ **字色给满屏那一档**：这一列压在糊过的封面上，主题的字色在浅色主题下是
-// 黑的（压在那块灰底上只有 3.8:1，读不出来）。
+// ⚠️ **前景色给满屏那一档**：这一列压在糊过的封面上，主题的字色在浅色主题下是
+// 黑的（压在那块灰底上只有 3.8:1，读不出来）。那枚图标是这一档，那层圆底是
+// 它的 20%（上游 `bg-foreground/20`）。
 //
 // ⚠️ **三枚都画**（上游 `index.tsx:380-398` 那一层在没歌词时也摆）：字号和偏移
 // 改的是**存下来的那个值**，下一首歌有歌词时就按新的画了——它们无处可附，可
 // 它们也不是死的。
 func (s *Shell) viewFullLyricKnobs(c *ui.Context, snap app.LyricsSnapshot, lv *lyricsView) {
 	on, _ := s.fullForeground(c)
-	s.viewLyricKnobColumnWith(c, snap, true, lv, lyricKnobFull).
-		TextColor(on)
+	s.viewLyricKnobColumnWith(c, snap, true, lv, lyricKnobFull, on)
 }
 
 // viewFullLyricsEmpty 是「这一首没有歌词」那一句。

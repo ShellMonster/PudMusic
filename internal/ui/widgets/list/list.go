@@ -199,6 +199,13 @@ type List struct {
 	countText rowkey.Memo[int64, string]
 	opText    rowkey.Memo[string, string]
 
+	// ownerTip 记着每一行那句「打开 X 的空间」（票 #360）。
+	//
+	// ⚠ **它是「每帧每行算一遍、结果不变」的那一种**：提示里那个名字是行上的
+	// UP 名，而那一句是拼出来的。现算的话每帧每一行一次字符串拼接，一屏十来行
+	// 就是十来次（理由和上面那三个一模一样，见 `rowkey.Memo` 的文件头）。
+	ownerTip rowkey.Memo[string, string]
+
 	// sel 是选中的行，-1 是没选。帧里的点击由 ui.List 自己写进来。
 	sel int
 

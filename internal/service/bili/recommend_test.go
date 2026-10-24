@@ -327,6 +327,51 @@ func TestMusicRankPrefersTheRelatedArchive(t *testing.T) {
 	}
 }
 
+// TestMusicRankKeepsTheNameAndTheMidFromTheSamePlace 盯「UP 名和它的编号来自
+// 同一处」。
+//
+// 🔴 **榜上那一条的顶层 `author` 和挂着的那条稿件的 `username` 可能是两个人**
+// （榜上有些条目挂的是别人的稿件），而编号只有稿件那一处给（`uid`）。名字取
+// 顶层的、编号取稿件的，界面上点那个名字就会跳到**另一个人的空间**——而画面上
+// 看不出任何异样（那行字还是那个字，票 #360 的评审）。
+//
+// 所以稿件没给名字时，**编号也不取**：那一行照样显示顶层那个 UP 名，只是**点不动**
+// （`app.Item.ArtistMid` 的注释写着这一条：没有编号时名字照样有值）。
+func TestMusicRankKeepsTheNameAndTheMidFromTheSamePlace(t *testing.T) {
+	raw, err := json.Marshal(map[string]any{"list": []map[string]any{{
+		"id": int64(1), "music_title": "一首歌", "author": "榜上作者",
+		"related_archive": map[string]any{
+			"bvid": "BV1arc", "cid": int64(99), "title": "一首歌",
+			// ⚠ **有编号、没名字**：B 站真会这么发。
+			"uid": int64(777), "username": "",
+		},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newFakeBili(t)
+	f.on(musicRankPath, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", json.RawMessage(raw)))
+	})
+	c := f.client(t, Options{})
+
+	items, err := c.MusicRank(context.Background(), MusicRankQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("解出来 %d 条，want 1", len(items))
+	}
+	got := items[0]
+	if got.Owner != "榜上作者" {
+		t.Errorf("UP 名 = %q，want 榜上作者（顶层那个）", got.Owner)
+	}
+	if got.OwnerMid != 0 {
+		t.Errorf("UP 编号 = %d，want 0——编号只跟着稿件那个名字走，"+
+			"名字没换而编号换了的话，界面上点它会跳到另一个人的空间", got.OwnerMid)
+	}
+}
+
 // TestTheIDsAlsoComeAsNumbers 盯「两种形态都认」。
 //
 // ⚠️ 这一条和上一条是一对：B 站在这几个 id 上混着发两种形态，所以**不能**照着

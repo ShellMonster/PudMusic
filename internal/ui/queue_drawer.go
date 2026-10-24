@@ -153,6 +153,17 @@ type queueRow struct {
 	at   int
 	// key 是这一行的身份（铁律四）。见 queueRowKey。
 	key string
+	// id 是这一首的**判重标识**（Item.Identity）。
+	//
+	// ⚠️ **它和 key 不是一回事**：key 是「这一行」（铁律四），id 是「这一首」
+	// （队列里可能有同一首的多份，抽屉只画一行）。
+	//
+	// 它在 queueRowsFor 里就**算好了**（那一处本来就要算，见去重那段）——存下来
+	// 是为了别处不用再算一遍（现算一遍是要分配的：Identity 拼的是一个新字符串）。
+	//
+	// ⚠️ **而且它是记好的那一份**（票 #339）：`queueRowsFor` 拿
+	// `s.queueRowIDs` 那个 memo 换来的，所以每帧每行不再现拼一次。
+	id string
 	// state 是这一行处在哪一档（见 queueRowState）。**每帧重算**：这些行是
 	// `viewQueueDrawer` 每帧现造的（`queueRowsFor`），所以写在上面的状态不会
 	// 留到下一帧。
@@ -186,22 +197,68 @@ func queueRowKey(id string, at int) string {
 	return "queue-row!" + strconv.Itoa(at)
 }
 
+// queueRowIdentity 是抽屉里那一行的**两串身份**：判重标识和行身份。
+//
+// ⚠️ **两串都是每帧每行都要的**，而现拼一次就是一个新字符串（`Item.Identity()`
+// 拼的是「local:」+ 路径，`queueRowKey` 拼的是「queue-row:」+ 标识）——
+// 认得出身份的那些行每帧每行两次，二十首的队列就是四十来次（认不出的那一支
+// 只有行身份那一次：判重标识是空串，不拼）。
+type queueRowIdentity struct {
+	// id 是这一首的判重标识（`Item.Identity()`）。
+	id string
+	// key 是这一行的身份（铁律四）。见 queueRowKey。
+	key string
+}
+
+// queueRowRaw 是「那两串身份」的**原料**。
+//
+// ⚠️ **取得它不能分配**：所以它记的是 Item 本身（现成的字段）加上这一项在队列里
+// 的位置，而**不是**那两串身份——那两串恰恰是要省掉的那一步（`rowkey.Memo` 的
+// 文件头：「现拼的那一步本身就要分配，而它恰恰是要省掉的那一步」）。
+//
+// ⚠️ **Item 整个当原料**：它认得出身份靠的就是那几个字段（`Source` / `Type` /
+// `Path` / `Bvid` / `Sid`），而比较一个 Item 不分配（字段全是现成的字符串，
+// 同一个字符串的指针一样，比较是 O(1)）。
+type queueRowRaw struct {
+	item app.Item
+	// at 是这一项在队列里的位置。认不出是哪一首时行身份退回按下标（见
+	// queueRowKey），所以位置也是原料的一部分。
+	at int
+}
+
+// packQueueRowIdentity 是「原料 → 那两串身份」的那一步。
+//
+// ⚠️ **纯函数**：同样的原料必须给出同样的结果（`rowkey.Memo` 的契约——它拿
+// 原料当身份，身份变了才重算）。
+//
+// ⚠️ **它只在原料变了的时候才走**（见 `rowkey.Memo`）：那一档每帧每行问一次，
+// 而快的那条路上零分配。
+func packQueueRowIdentity(r queueRowRaw) queueRowIdentity {
+	id := r.item.Identity()
+	return queueRowIdentity{id: id, key: queueRowKey(id, r.at)}
+}
+
 // queueRowsFor 是抽屉这一帧要画的那几行：队列按判重标识去重之后的样子。
 //
 // **保留第一次出现的**（`uniqBy` 的语义）：那一行在队列里的位置（`at`）也还是
 // 第一次入队那个，播放条和「下一首」走的是队列，抽屉跟着走同一个才不至于各说各话。
-func queueRowsFor(items []app.Item) []queueRow {
+//
+// ⚠️ **那两串身份是记好的那一份**（`ids`）：现拼的话每帧每行一到两次分配（票 #339）。
+func queueRowsFor(items []app.Item, ids *rowkey.Memo[queueRowRaw, queueRowIdentity]) []queueRow {
 	rows := make([]queueRow, 0, len(items))
 	seen := make(map[string]bool, len(items))
 	for i, it := range items {
-		id := it.Identity()
-		if id != "" {
-			if seen[id] {
+		// ⚠️ **按「第几项」记**：这一格的原料是这一项自己（Item + 队列里的位置），
+		// 所以队列一改（加歌、删歌、重排）它自己就看得出「数据换了」——调用方
+		// 一处都不用记得重建（理由见 `rowkey.Memo` 的文件头）。
+		ident := ids.At(i, queueRowRaw{item: it, at: i}, packQueueRowIdentity)
+		if ident.id != "" {
+			if seen[ident.id] {
 				continue
 			}
-			seen[id] = true
+			seen[ident.id] = true
 		}
-		rows = append(rows, queueRow{item: it, at: i, key: queueRowKey(id, i)})
+		rows = append(rows, queueRow{item: it, at: i, key: ident.key, id: ident.id})
 	}
 	return rows
 }
@@ -226,7 +283,7 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 	// 的话这里会是 2——而画面上看着没差。
 	s.builds.drawer++
 	t := c.Theme()
-	s.queueRows = queueRowsFor(s.app.Queue().Items())
+	s.queueRows = queueRowsFor(s.app.Queue().Items(), &s.queueRowIDs)
 
 	ui.Overlay(c, func() {
 		// ⚠️ 底边留出底下那一条的高度（Biu 的 `data-[placement=right]:mb-22` 就是
@@ -518,13 +575,37 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme) {
 	// Label 是这一行给无障碍和「打字选中」用的名字。
 	s.queueList.Label = func(i int) string { return rows[i].item.Title }
 
+	// 落点先清掉：**每一行自己记**（见下面 viewQueueRow 里那几句
+	// PointerPosition），指针不在任何一行上时它就该是「没有落点」。
+	s.queueDropAt = -1
+
 	e := ui.List(c, &s.queueList, len(rows), func(i int) {
-		s.viewQueueRow(c, rows[i], t)
+		s.viewQueueRow(c, rows[i], i, t)
 	}).
 		// 滚动位置写进自己的句柄，「定位当前播放」改的就是它（ScrollTo 带动画）。
 		TrackScroll(&s.queueScroll).
 		Grow(1).FillWidth()
 	s.trackScrollbar(e)
+
+	// 这一列是**拖动的落点**（框架把落点交给指针底下最里层那个肯收拖动值的
+	// 元素——行里的封面、字、⋯ 都不收，所以收到的是这一列）。
+	//
+	// ⚠️ **问一次，不要每行问一次**：框架那两样（Drop / DragOver）每问一次都
+	// 要新建一个闭包（那个闭包要抓住类型），而队列抽屉一屏有十来行——每行每帧
+	// 问一次就是每帧二十几次分配（见 framebudget_test.go，那一档的上限是 50
+	// 次）。问一次是两次（这里两行），问每一行就是二十六次。
+	//
+	// ⚠️ **Drop 读到的是「刚刚落下」那一次**：这一句在列表建完之后才问，而框架
+	// 是在建列表的过程中把落点交给这一列的——问得晚一帧没关系，落下那一次
+	// 记在元素的状态里，下一帧还在。
+	if v, ok := ui.Drop[*queueDragValue](e); ok {
+		s.queueDrop(v)
+	}
+	// 有东西正被拖着经过这一列：拖着的时候要画那条插入线。
+	s.queueDragging = false
+	if _, ok := ui.DragOver[*queueDragValue](e); ok {
+		s.queueDragging = true
+	}
 }
 
 // currentRow 是「正在放的那一首」在抽屉里的行号，没有是 -1。
@@ -536,7 +617,10 @@ func currentRow(rows []queueRow, playing string) int {
 		return -1
 	}
 	for i, r := range rows {
-		if id := r.item.Identity(); id != "" && id == playing {
+		// ⚠️ **用行上记好的那一份**（`r.id`）：现算的话每帧每一行一次字符串拼接
+		// （`Item.Identity()` 拼的是「local:」+ 路径），而这一份在 `queueRowsFor`
+		// 里已经算好、而且是记好的（票 #339）。
+		if id := r.id; id != "" && id == playing {
 			return i
 		}
 	}
@@ -575,7 +659,7 @@ func (s *Shell) playingIdentity(st app.State) string {
 // ⚠️ 行高定在 64（Biu 的 RowHeight），**内容按封面 48 + 上下各 8 摆进去**。
 // 别在这里改内边距：改了的话行高和 `targetIndex*64` 就不一样了，「定位当前
 // 播放」会停在差几像素的地方——不难看出来，但用户每次按都差一点。
-func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, t *ui.Theme) {
+func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 	// 那一行处在哪一档（正在放 / 停住了 / 普通）——写在行自己身上，见
 	// `queueRow.state`。
 	state := row.state
@@ -606,6 +690,33 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, t *ui.Theme) {
 	case hovered:
 		// 悬停要有反应：这一行点得动（跳过去放它），没有反馈用户不知道它是能点的。
 		rowEl = rowEl.Background(t.SurfaceHover)
+	}
+	// 这一行是**拖动源**：拖它就是重排队列（见 queue_drag.go）。
+	//
+	// ⚠️ **拖动值是指针**：框架把拖动值装进 `any`，装指针不分配。
+	rowEl = rowEl.Drag(s.queueDragFor(at, row))
+	// 拖着的那一行半透明——框架那一套也是这么画的（见 mygo/ui/list.go 的
+	// reorder）：行还在原处，而跟着指针走的是另一份拷贝。
+	if rowEl.Dragging() {
+		rowEl = rowEl.Opacity(0.4)
+	}
+	// 指针在这一行上吗？落点就记在这儿。
+	//
+	// ⚠️ **用 PointerPosition 而不是框架的 DragOver**：DragOver 每问一次都要
+	// 新建一个闭包，而每一行每帧都要问一次（见上面那段）。
+	//
+	// ⚠️ **记的是「指针在这一行的哪一半」**：上半是「挪到这一行之前」，下半是
+	// 「挪到下一行之前」（最后一行就是队尾）。
+	if _, py, over := rowEl.PointerPosition(); over {
+		s.queueDropAt = at
+		s.queueDropUpper = py < rowEl.Bounds().H/2
+	}
+	// 拖着的时候在落点那一行画一条插入线：挪到哪儿得看得见。
+	//
+	// ⚠️ **只在拖着的时候画**：那个闭包是每帧一次分配（它要抓住「上半还是
+	// 下半」），而没在拖的时候它没有用。
+	if s.queueDragging && s.queueDropAt == at {
+		s.queueDropLine(at, rowEl, t.Accent)
 	}
 
 	rowEl.Children(func() {

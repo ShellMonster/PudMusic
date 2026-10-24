@@ -256,7 +256,7 @@ func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
 		rows.keys.On() && list.Focused(c, &rows.state))
 
 	return row.Children(func() {
-		viewLibraryRowHead(c, r, m, s.images, mt, face, onRow,
+		viewLibraryRowHead(c, r, m, rows, s.images, mt, face, onRow,
 			func() { rows.playFrom(r.Index) })
 
 		ui.Text(c, progressText(m.Progress, m.Duration)).Width(mt.progress).
@@ -328,14 +328,23 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected boo
 				TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
 			ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 				if m.Owner != "" {
-					ui.Text(c, m.Owner).Grow(1).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Owner).
-						TextColor(metaColor).MaxLines(1).Ellipsis("…")
+					// ⚠ **点它进他的空间**（票 #360）：和列表里那一枚是同一件事
+					// （`list.OwnerName`）——有编号时可点，没有时照旧是普通字。
+					list.OwnerName(c, m.Owner, m.Owner,
+						rows.ownerTip.At(i, m.Owner, list.OwnerTipText),
+						m.Item.ArtistMid, scale.Font(c, scale.Size14), leading.Owner,
+						metaColor, rows.acts).Grow(1)
 				}
 				if playing {
 					viewPlayingMark(c, t, m.Title)
 					return
 				}
-				ui.Text(c, clockText(m.Duration)).FontSize(scale.Font(c, scale.Size12)).
+				// ⚠️ **时长是记好的那一份**（`rows.durText`）：现算的话每帧每格一次
+				// 字符串格式化（票 #339）。
+				//
+				// ⚠️ **和封面浮层上那一份共用同一个 memo**：理由同 `later.go` 的
+				// `drawLaterCell` 里那一处——同一个 memo 只盖住了一半。
+				ui.Text(c, rows.durText.At(i, m.Duration, clockText)).FontSize(scale.Font(c, scale.Size12)).
 					TextColor(metaColor).MaxLines(1)
 			})
 			ui.Row(c).Gap(space.Px6).FontSize(scale.Font(c, scale.Size11)).Children(func() {

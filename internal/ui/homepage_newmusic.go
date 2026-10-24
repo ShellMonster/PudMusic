@@ -35,6 +35,7 @@ import (
 	"runtime/debug"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
+	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
@@ -218,6 +219,12 @@ type newMusicGrid struct {
 
 	// acts 是点一下那一格会做的事（放队列）。见 actions.go。
 	acts list.Actions
+
+	// ownerTip 记着每一格那句「打开 X 的空间」（票 #360）。
+	//
+	// ⚠ **理由和 `widgets/list` 那几个一模一样**：它是「每帧每格算一遍、结果
+	// 不变」的那一种（现算的话每帧每格一次字符串拼接，见 `rowkey.Memo`）。
+	ownerTip rowkey.Memo[string, string]
 
 	// draw 是包了 recover 的画法，见 View。建的时候包一次就够，每帧包一次是
 	// 白花开闭包。
@@ -529,7 +536,14 @@ func (g *newMusicGrid) viewCard(c *ui.Context, i int, coverSide float32) {
 		}
 		ui.Text(c, m.Title).FontSize(scale.Font(c, scale.Size16)).TextColor(titleColor).MaxLines(1).Ellipsis("…")
 		if m.Owner != "" {
-			ui.Text(c, m.Owner).FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
+			// ⚠ **点它进他的空间**（票 #360）：和列表里那一枚是同一件事
+			// （`list.OwnerName`）——有编号时可点，没有时照旧是普通字。
+			//
+			// ⚠ **这一块原来没有设行高**：所以 `lh` 传 0（`list.OwnerName` 的
+			// 约定是「不给就不设」，而 `LineHeight(0)` 是真的把行高设成 0）。
+			list.OwnerName(c, m.Owner, m.Owner,
+				g.ownerTip.At(i, m.Owner, list.OwnerTipText),
+				m.Item.ArtistMid, scale.Font(c, scale.Size14), 0, t.TextMuted, g.acts)
 		}
 	})
 }

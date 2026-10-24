@@ -65,6 +65,22 @@ const DefaultMaxBytes int64 = 96 << 20
 // 设上限不是为了省这 256MB，是为了给「一直滚下去」一个确定的终点。
 const DefaultDiskMaxBytes int64 = 256 << 20
 
+// visibleFrames 是**画面上正画着的**那几张图能活多久（以帧计）。
+//
+// 挤缓存（LRU）的时候正画着的那几张是**不许挤**的（票 #358）：挤掉之后它
+// 下一帧就退回「正在加载」的占位，于是那一格闪一下。
+//
+// 为什么是 4 而不是 1：
+//
+//   - **一帧要跑好几遍 build**（框架最多跑三遍），而「画过」是每一遍都记的，
+//     所以按遍数算的话 1 帧就有好几遍；
+//   - **两扇窗共用一份缓存**（主窗口和迷你播放器），各自的帧各数各的，
+//     而迷你窗口在放歌时每 50ms 醒一次——它数的那些帧也占着这几个名额。
+//
+// 4 帧在 60fps 下是 60 多毫秒（三四帧画面），够覆盖上面那两样；而再多也没有
+// 意思——用户眼睛盯着的就是当前这一帧。
+const visibleFrames = 4
+
 // defaultMaxInflight 是同时在途的下载数。B 站图床对同一个 IP 的并发是有限
 // 的，歌单一次几十张全放出去会被拒。
 const defaultMaxInflight = 6
@@ -174,6 +190,15 @@ type Cache struct {
 
 	mu  sync.Mutex
 	lru *lru
+
+	// frame 是**画到第几帧**了，0 = 还没开始数（`BeginFrame` 一次都没调过）。
+	//
+	// ⚠️ **后台线程要读它**（挤缓存的那一处在解码 worker 上），所以它是原子的。
+	frame atomic.Uint64
+	// frameToken 是上一帧的时刻，用来判「这是不是新的一帧」。
+	//
+	// ⚠️ **只有界面线程动它**（`BeginFrame` 只在 view 里调），所以不用锁。
+	frameToken time.Time
 
 	// failed 是失败条目的账：失败不占字节，LRU 挤不掉，所以单独有一道上限
 	// （maxFailed）。failOrder 老的在前，超限时从老的开始忘。
@@ -307,6 +332,9 @@ func (c *Cache) notify() {
 // 暂时失败排着退避重试时，这里照样只报失败态：Get 自己**从不**发起请求，
 // 重试由后台定时器到点后重新入队。所以滚列表时一帧里掉多少张失败封面，
 // 这一帧都不会多做一次网络或磁盘 I/O。
+//
+// ⚠️ **每一次 Get 都是「这一张正画在画面上」**：挤缓存时正画着的那几张不许
+// 挤（票 #358，理由见 `entry.drawn`）。
 func (c *Cache) Get(url string) State {
 	if url == "" {
 		return State{}
@@ -316,6 +344,9 @@ func (c *Cache) Get(url string) State {
 
 	c.mu.Lock()
 	c.lru.touch(e)
+	// 记一笔「这一张这一帧画着」：挤缓存时正画着的那几张不许挤（票 #358，
+	// 理由见 `entry.drawn`）。
+	e.drawn = c.frame.Load()
 	c.mu.Unlock()
 
 	if !loaded && !c.start(e) {
@@ -323,6 +354,65 @@ func (c *Cache) Get(url string) State {
 		return State{Err: ErrClosed}
 	}
 	return e.state()
+}
+
+// BeginFrame 告诉缓存「新的一帧开始了」。
+//
+// now 是**这一帧的时刻**（`c.Now()`）：同一帧的几次 build pass 给的是同一个
+// 时刻，所以一帧只算一次——框架一帧最多跑三遍 view，三遍都调 BeginFrame
+// 的话，帧号会多跳两跳，「画面上正画着」那几个名额就不够了。
+//
+// # 为什么要有它
+//
+// 挤缓存（LRU）不能挤掉**画面上正画着**的那一张：挤掉之后它下一帧就退回
+// 「正在加载」的占位，于是那一格闪一下（票 #358：开队列抽屉的时候，中间
+// 那一列的封面来回闪——抽屉里那十几行第一次露出来时全都要封面，字节上限
+// 立刻超了，挤的循环一路挤到画面上正画着的那几张）。
+//
+// 有了帧号，缓存就知道「哪几张是这一帧画着的」，挤的时候跳过它们。
+//
+// # 不调会怎样
+//
+// 帧号停在 0，**挤的行为和从前一模一样**（库自己的老测试、还没接上这一句的
+// 调用方都是这样）。所以这一句是「加了更好」而不是「必须加」。
+//
+// # ⚠️ **缓存是 nil 时这一句什么都不做**
+//
+// 真窗口上缓存从来不是 nil（`Shell` 一定建一个），但**测试会把它摘掉**：
+// `downloadlist_ops_test.go` 的 `TestOneBrokenCellDoesNotBlankOutThePage`
+// 摘掉它是为了让「有封面的那一格」崩在**格子里**（而不是崩在整页上）。
+//
+// 而这一句在 `Shell.viewMain` 里、**每一帧**都调——缓存是 nil 的话它会**先**
+// 把整页带崩（nil 接收者上的字段访问），于是那一格还没画就被页级那道 Guard
+// 接走了，而那条用例要的正是「一格崩、整页不崩」。
+//
+// 所以这里先判一次 nil：**这一句是「让挤缓存更准」的，不是「这一句不许崩」**。
+func (c *Cache) BeginFrame(now time.Time) {
+	if c == nil {
+		return
+	}
+	if c.frameToken.Equal(now) {
+		return
+	}
+	c.frameToken = now
+	c.frame.Add(1)
+}
+
+// SetMaxBytes 改这份缓存的字节上限。
+//
+// 改小之后**下一次记账**（有一张图解码完）就会按新的上限挤——已经记好的账
+// 不动，所以它不是「立刻把缓存缩到那个数」。
+//
+// 为什么要有这一句：**测试要能造出「字节不够」的局面**。票 #358 那个闪，
+// 要复现就得让缓存**装不下**——而那个上限是 96MB，测试里造不出那么多张
+// 封面（造得出来也是几十兆的解码和下载，几秒钟）。
+func (c *Cache) SetMaxBytes(n int64) {
+	if n <= 0 {
+		n = DefaultMaxBytes
+	}
+	c.mu.Lock()
+	c.lru.max = n
+	c.mu.Unlock()
 }
 
 // start 起一次后台下载。已经关掉了就返回 false。由 LoadOrStore 的赢家
@@ -454,6 +544,27 @@ type entry struct {
 	cancel   context.CancelFunc
 	failures int   // 连续失败了几次（含第一次），成功就归零
 	timer    Timer // 排着的下一次重试；nil 表示没排
+
+	// drawn 是**最后一次被画到是在第几帧**（见 `Cache.BeginFrame`）。
+	//
+	// 挤缓存的时候要认出「画面上正画着」的那几张——挤掉它们，用户看见的就是
+	// 那一格闪一下（票 #358）。
+	//
+	// ⚠️ **零是「没被画过」**：帧号从 1 起数（`BeginFrame` 第一次调用之后），
+	// 所以零和「第一帧之前」是同一件事——那时候没有「画面上」这一说，挤的
+	// 行为和从前一模一样。
+	drawn uint64
+}
+
+// onScreen 报这一张**是不是画面上正画着的**（frame 是这一帧的号）。
+//
+// ⚠️ **帧号还没开始数的时候（frame == 0）一律报 false**：那是没有 `BeginFrame`
+// 的用法（库自己的老测试、别的调用方），挤的行为和从前一样。
+func (e *entry) onScreen(frame uint64) bool {
+	if frame == 0 || e.drawn == 0 {
+		return false
+	}
+	return frame >= e.drawn && frame-e.drawn <= visibleFrames
 }
 
 // isDropped 报这个条目是不是已经被取消/挤掉了。晚到的结果不用再管它。
@@ -679,7 +790,7 @@ func (c *Cache) finish(e *entry, bm *ui.Bitmap, err error) {
 // account 把一张图的字节数记进 LRU，并把超预算的挤掉。
 func (c *Cache) account(e *entry, bm *ui.Bitmap) {
 	c.mu.Lock()
-	evicted := c.lru.resize(e, bytesOf(bm))
+	evicted := c.lru.resize(e, bytesOf(bm), c.frame.Load())
 	for _, victim := range evicted {
 		c.entries.CompareAndDelete(victim.url, victim)
 	}

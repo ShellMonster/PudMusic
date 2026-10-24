@@ -124,12 +124,14 @@ func streamKey(it Item) string {
 }
 
 // MountStreaming 挂上在线播放。**在开窗口之前调**（它自己不读盘，但让
-// 第一���点歌不要替「开窗」买单）。
+// 第一次点歌不要替「开窗」买单）。
 func (a *App) MountStreaming(s Streaming) {
 	a.mu.Lock()
 	a.streaming = &s
 	a.streamCache = map[string]*bili.StreamRef{}
 	a.mu.Unlock()
+	// 取流零件整个换掉了 → 备好的那一份地址也作废（它是在旧零件上备的）。
+	a.invalidatePrefetch()
 	// 播放记录上报**跟着在线播放起**：只有在线流才有得报（本地文件在 B 站
 	// 那边没有对应的东西），所以它挂在这一摊上而不是挂在登录上——挂登录
 	// 会让「没挂在线播放也照发」那条路变成真的。
@@ -166,6 +168,10 @@ func (a *App) SetAudioQuality(q bili.AudioQuality) {
 	pos, want, gen := a.position, a.wantPlay, a.onlineGen
 	wake := a.wake
 	a.mu.Unlock()
+
+	// 🔴 **备好的那一份也作废**：它是在**旧的那一档**上备的，而用户刚换了一档。
+	// 留着它的话，下一首会按旧的那一档放——而界面上写的是用户选的那一档。
+	a.invalidatePrefetch()
 
 	a.rememberAudioQuality(q)
 	if tr != nil {
@@ -643,6 +649,17 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 		a.failPlay(gen, it, "取流", err)
 		return
 	}
+	// 🔴 **代次变了就别再往下走**（和上面那一次同一个道理）：取流也是**一次网络
+	// 往返**，等它的时候用户完全可能已经切了歌、或者**应用已经退出**了。
+	//
+	// ⚠️ **这一处不是可有可无的**：下面 `buildFromRef` 建字节源是要**在盘上落一
+	// 个临时文件**的，而代次变了之后没人要这一趟——那个文件于是落在一个已经不
+	// 会有人收拾的目录里（应用退出之后落，测试里就是落在已经被删掉的临时目录
+	// 里，于是那条用例的收尾报「directory not empty」）。
+	if a.genStale(gen) {
+		a.failPlay(gen, it, "取流", errStaleGen)
+		return
+	}
 	// 🔴 **再起算一次**：从这儿往后等的是 CDN 的头几个字节（字节源自己的
 	// 卡死判定是 20 秒）。
 	a.rearmLoading(gen, it.Title)
@@ -773,6 +790,12 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	// 放在换上播放器**之后**——歌词区问的是「现在放的是哪一首」，那一刻
 	// 播放器已经换成新的了。
 	a.setLyricTrack(it)
+	// B 站自己带出来的那一份歌词：取流那一趟已经带回了它的地址，这里去下载、
+	// 存进缓存、装到界面上（见 lyrics.go 的 `fetchBiliSubtitle`）。
+	//
+	// ⚠️ **整个过程在后台**，而且**它不拦播放**：没有字幕的那一首歌，界面照旧
+	// 是「暂无歌词」加一个「找歌词」的入口。
+	a.fetchBiliSubtitle(context.Background(), it, ref, s)
 	if wake != nil {
 		wake()
 	}
@@ -830,6 +853,13 @@ func (a *App) withSongInfo(ctx context.Context, s *Streaming, it Item) (Item, er
 			it.Artist = info.Uname
 		}
 	}
+	// 🔴 **它背后那个投稿的身份也记下来**：音乐库的取流接口不带字幕，而这一条
+	// 的词多半在那个投稿的字幕里（见 `lyrics.go` 的 `fetchBiliSubtitle`）。
+	//
+	// ⚠️ **记在 `SubtitleBvid`/`SubtitleCid` 上，不记在 `Bvid`/`Cid` 上**：
+	// 后两栏是「这一条自己的身份」，歌词缓存键靠它们（`lyricKeyOf`）——
+	// 音乐库条目的键是 `bili-audio-<sid>`，填错了键就变了。
+	it.SubtitleBvid, it.SubtitleCid = info.Bvid, info.Cid
 	return it, nil
 }
 
@@ -1075,6 +1105,20 @@ func (a *App) resolve(ctx context.Context, s *Streaming, it Item, pref bili.Audi
 	return ref, nil
 }
 
+// putStreamCache 把一条流放进「播放前预判」那个缓存。
+//
+// **预取备好的地址走这里**（见 prefetch.go）：真播那一趟的 `resolve` 会先问
+// 这个缓存，命中了就**不再取流**——省下来的那几百毫秒就是这一票的收益。
+//
+// ⚠️ **只有自动切歌才走这里**：手动切歌（`App.step`）重新取流是这一票定下
+// 的规矩——用户自己按了下一首，他要的是**现在**这一首的新地址，而预取的那一
+// 份是几十秒前算的（见 prefetch.go 的「手动切歌重新取地址」）。
+func (a *App) putStreamCache(it Item, ref *bili.StreamRef) {
+	a.mu.Lock()
+	a.streamCache = map[string]*bili.StreamRef{streamKey(it): ref}
+	a.mu.Unlock()
+}
+
 // refetch 是**报错后换流重试**那一条路径的回调：源下不动了，用同一首
 // 重新取一条流，源会从它给的那个字节偏移接着下。
 //
@@ -1164,7 +1208,7 @@ func (a *App) checkPlayback() {
 	// ⚠️ **在线流要看字节源自己的错，不要看解码器的**。解码器看到的是**后果**：
 	// 字节断了之后它多半先报「这一帧的 CRC 对不上」，而真正的原因是网络断了
 	// 或者地址失效了。把后果说给用户听，用户会以为歌坏了、缓存坏了，
-	// 于是去清缓存重下——而正确���反应是「换个网」。
+	// 于是去清缓存重下——而正确的反应是「换个网」。
 	if tr != nil && tr.source != nil {
 		if srcErr := tr.source.Err(); srcErr != nil && !errors.Is(srcErr, io.EOF) {
 			err = srcErr

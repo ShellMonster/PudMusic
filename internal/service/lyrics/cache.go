@@ -46,6 +46,17 @@ type Entry struct {
 	OffsetMS int `json:"offset,omitempty"`
 	// FontSize 是字号（像素）。
 	FontSize float32 `json:"fontSize,omitempty"`
+	// Origin 是这份歌词的**来路**：`bili`（B 站自动带出来的）/ `search`
+	// （用户在歌词搜索里找来的）。空串 = 不知道。
+	//
+	// ⚠️ **它不是 Biu 那边那几个键之一**：Biu 的歌词缓存只有
+	// `lyrics` / `tLyrics` / `offset` / `fontSize` 四个（见 `biuimport.go`），
+	// 而这一栏是我们自己加的——它要回答的是「界面上那句话说的是哪一种」，
+	// 而那一句在 Biu 那边不存在（上游的歌词只有一种来路）。
+	//
+	// ⚠️ **空串是合法的**：从 Biu 导入的老记录没有这一栏，而**不知道来路**
+	// 不该被当成「搜索来的」——界面那句话会因此说错。
+	Origin string `json:"origin,omitempty"`
 }
 
 // Cache 是歌词缓存。目录为空的那一份只读不写（测试和「没挂上」时用）。

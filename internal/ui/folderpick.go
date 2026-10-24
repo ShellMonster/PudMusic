@@ -115,5 +115,15 @@ func (s *Shell) listActions() list.Actions {
 	acts.Focus = s.registerContentFocus
 	// 反过来：内容区的列表在顶上一行时按 ↑，把焦点交回侧栏。
 	acts.FocusOut = s.focusSide
+	// 点列表里的 UP 名进他的空间（票 #360）。
+	//
+	// ⚠ **走 `upPathOf` 而不是写死 `"/user/"`**：路由表里那一条改了的话，写死
+	// 的会安静地退回占位页（理由见 `upspace.go` 的 `upPathPrefix`）。
+	//
+	// ⚠ **别在列表里再加第二套导航**：那是「同一条路两套写法」，改一处就会
+	// 有一处安静地走错。
+	acts.OpenOwner = func(mid int64, _ string) {
+		s.navigate(upPathOf(mid))
+	}
 	return acts
 }

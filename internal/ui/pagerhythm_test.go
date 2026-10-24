@@ -52,7 +52,7 @@ func contentArea(sideW float64) image.Rectangle {
 
 // pageBackground 是内容区里的底色。
 //
-// ⚠️ **取的是这一块里出现最多的那个颜色**，不是某一个采样点：顶栏下缘有��道
+// ⚠️ **取的是这一块里出现最多的那个颜色**，不是某一个采样点：顶栏下缘有一道
 // 分隔线、侧栏右缘有另一道，而「内容区左上角那一个像素」正好落在其中一道上
 // （第一版就是这么写的，七页一律报 204——那是那道线的位置）。
 //
@@ -680,7 +680,7 @@ func TestEveryLoadingStateIsDrawnTheSameWay(t *testing.T) {
 // # 判据是像素：那一排下面有没有那条主色的横条
 //
 // 框架的 `ui.Tabs` 是**下划线**（选中那一项底下画一条主色的横条，
-// `mygo@v0.6.2/ui/tabs.go` 的 `coreTabs`），而主 Tab 用的是我们自己那一套
+// `mygo@v0.6.3/ui/tabs.go` 的 `coreTabs`），而主 Tab 用的是我们自己那一套
 // **灰底轨道 + 白色滑块**（`tabs.go` 的 `mainTabs`）——那条横条**没有**。
 //
 // 搜索页正好两种都有：上面那一排是主 Tab（歌曲 / 视频 / 用户），下面那一排是

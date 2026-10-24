@@ -188,7 +188,10 @@ func mediaOf(id int, title string) map[string]any {
 	return map[string]any{
 		"id": id, "type": 2, "title": title, "bvid": "BV1" + strconv.Itoa(id),
 		"cover": "", "duration": 185, "attr": 0, "page": 1,
-		"upper": map[string]any{"name": "UP " + strconv.Itoa(id)},
+		// ⚠ **编号要给上**：B 站真的给了（`upper.mid`），而界面上「点 UP 名进他的
+		// 空间」靠的就是它（票 #360）。这一份夹具原来没给，于是收藏夹上那一列
+		// UP 名是点不动的——而真实返回里它点得动。
+		"upper": map[string]any{"name": "UP " + strconv.Itoa(id), "mid": id},
 	}
 }
 
@@ -680,7 +683,7 @@ func TestTheCollectionSearchSaysWhenThereIsNoResult(t *testing.T) {
 	waitFrames(t, tt, "「换个词再搜一次」出现了", func() bool {
 		return tt.HasText("换个词再搜一次")
 	})
-	// ⚠️ **别拿「还没有收藏夹」当反面**：那是**侧栏**里那两组的空状态（这一页
+	// ⚠️ **别拿侧栏那一句空状态当反面**：那是**侧栏**里那两组的（这一页
 	// 的侧栏本来就没有收藏夹），它跟这一页的列表没关系。反面要拿**这一页**的
 	// 那个空状态（「在歌上点星标…」= 这个收藏夹是空的）。
 	if tt.HasText("在歌上点星标") {
@@ -1008,7 +1011,7 @@ func TestTheCollectionHeaderShowsTheCreatorAvatar(t *testing.T) {
 	if r.W < 23 || r.W > 25 || r.H < 23 || r.H > 25 {
 		t.Errorf("创建者头像是 %.0f×%.0f，want 24×24（票面）", r.W, r.H)
 	}
-	// 等那张图到（封面缓存是后台抓的，到���会叫醒界面）。
+	// 等那张图到（封面缓存是后台抓的，到了会叫醒界面）。
 	waitFrames(t, tt, "头像图到了", func() bool {
 		c := tt.Image().RGBAAt(round32(r.X+r.W/2), round32(r.Y+r.H/2))
 		return c.R > 200 && c.G < 80 && c.B < 80

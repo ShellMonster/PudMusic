@@ -328,6 +328,23 @@ type App struct {
 	// 错误、不自己清零，所以不比对的话每 50 ms 会重复报一次。
 	reportedErr error
 
+	// prefetch 这一摊，见 prefetch.go。挂上在线播放之前它一直是空的。
+	//
+	// ⚠️ **它有自己的锁，不在 `a.mu` 里**：写它的是后台那个预取 goroutine
+	// （网络那一趟回来的时候），而 `a.mu` 是界面**每帧**都要的。混进 `a.mu`
+	// 的话，界面那一帧的等待时间就变成了「网络那一趟」——理由同 `likeMu`
+	// / `partsMu`。
+	prefetchMu sync.Mutex
+	// prefetch 是「备好的下一首」。nil = 没有在备。
+	prefetch *prefetchEntry
+	// prefetchGen 是**预取代次**：每发起一趟就加一，迟到的结果对不上就丢掉
+	//（队列变了、换歌了、又发起了一趟——三种都会让上一趟没人要了）。
+	prefetchGen int
+	// prefetchOff 是「整个预取停掉」那一档：预取撞上了风控/限流那几类
+	// 「立刻再问一次也没用」的错（见 prefetch.go 的 prefetchFailed）。
+	// 到下一首开始为止（见 takePrefetch）。
+	prefetchOff bool
+
 	// 歌词这一摊，见 lyrics.go。挂上缓存之前 lyricCache 是 nil，那时就一直
 	// 「没有歌词」。
 	lyricCache *lyrics.Cache
@@ -345,6 +362,13 @@ type App struct {
 	// lyricEntry 是缓存里这一条原文+译文的**内容**（不含偏移和字号那两个
 	// 用户值，那两个在 flushLyrics 里现填）。写盘和换源都靠它。
 	lyricEntry lyrics.Entry
+	// lyricOrigin 是当前这一份歌词的**来路**（`lyrics.OriginBili` /
+	// `lyrics.OriginSearch` / 空串 = 不知道）。界面上那句话靠它说清「这份歌词
+	// 是自动来的还是搜来的」（见 `lyrics.go` 的 `LyricsSnapshot`）。
+	//
+	// ⚠️ **它跟着 `lyricEntry` 一起换**：换一份歌词就要换它的来路，而
+	// `lyricEntry` 是从缓存里读回来的（那一栏也在缓存里，见 `lyrics.Entry`）。
+	lyricOrigin string
 	// lyricStopTimer 是偏移/字号落盘那个防抖窗口的「停掉它」。每次重新排窗口都会
 	// 先调上一次那个（理由见 armLyricsSaveLocked）。它是**函数**而不是
 	// `*time.Timer`，是为了让测试能换成一个手动推进的假钟。
@@ -441,7 +465,8 @@ type App struct {
 	downloads *download.Manager
 	// downloadQueueFile 是队列落盘的位置。退出时写、重开时读。
 	downloadQueueFile string
-	// downloadFallbackDir 是设置里没选过下载目录时的去处（系统下载目录）。
+	// downloadFallbackDir 是设置里没选过下载目录时的去处（默认是「音乐」目录下的
+	// 应用子目录）。
 	downloadFallbackDir string
 
 	// updates 是自动更新那一摊，见 update.go。挂上去之前是 nil，界面要判空。
@@ -531,6 +556,8 @@ func New() *App {
 	// ⚠️ **排在起后台时钟之前**：那个钩子会被后台那一拍读到，而 goroutine 的
 	// 创建就是一次同步——排在后面就是一次数据竞争。
 	a.queue.onChange = a.markPlaybackDirty
+	// 队列一变，**备好的下一首**就作废了（见 prefetch.go）。
+	a.queue.onInvalidate = a.invalidatePrefetch
 	go a.tick()
 	return a
 }
@@ -1278,6 +1305,8 @@ func (a *App) Close() {
 	// 而上面那句关的是**播放器**——关不到它。没有这一句的话，一次卡死的取流
 	// 会在应用退出之后还在下载（临时文件也一起留在盘上）。
 	a.abortPendingSource()
+	// 在途的那一趟**预取**也要掐：它还占着一条连接，而用户已经退出了。
+	a.invalidatePrefetch()
 	a.mu.Lock()
 	a.online = nil
 	a.mu.Unlock()
@@ -1323,6 +1352,7 @@ func (a *App) tick() {
 			a.mu.Lock()
 			p := a.player
 			live := a.wantPlay || a.playing
+			dur := a.duration
 			wake := a.wake
 			a.mu.Unlock()
 
@@ -1340,21 +1370,34 @@ func (a *App) tick() {
 			// goroutine 的事，不占着界面每帧都要的那把锁。
 			var pos time.Duration
 			var playing bool
+			// finished 是「这一首真的放完了」（字节读到头、没有报错）——和
+			// 「暂停」是两回事（暂停时字节没到头）。
+			finished := false
 			if p != nil && live {
 				pos, playing = p.Position(), p.Playing()
+				finished = !playing && p.Ended() && p.Err() == nil
 			}
 
 			a.mu.Lock()
 			// ended 是「这一路从在放变成不在放」——绝大多数场合是歌放完了。
 			//
 			// ⚠️ 它要认准「是这一台播放器」：换歌时锁里就把 `a.player` 换成
-			// 新的了，拿旧那台的「不���放」去判新歌放完了，是白报一次。
+			// 新的了，拿旧那台的「不在放」去判新歌放完了，是白报一次。
 			ended := false
 			// 位置和 playing 是**这一台播放器**的：这中间换歌了（换歌在锁里把
 			// `a.player` 换成新的），就不能把旧那台的位置写到新歌头上。
 			if p != nil && live && a.player == p {
 				ended = a.playing && !playing
-				a.position, a.playing = pos, playing
+				if finished {
+					// ⚠️ **放完了就把位置报成 0**：这一串放完了之后进度条该
+					// 回到开头（见 AdvanceStop 那支），而播放器那边的 Seek(0)
+					// 还没生效——这一拍读到的是**放完之前**的位置（实测是歌曲
+					// 的全长），报出去就成了「进度条卡在末尾」。
+					a.position = 0
+				} else {
+					a.position = pos
+				}
+				a.playing = playing
 			}
 			// 锁屏上的进度条是**系统自己外推**出来的（Apple 头文件原话），
 			// 而外推的是它的时间：我们这边卡一下解码、换一次流、音频设备
@@ -1372,6 +1415,19 @@ func (a *App) tick() {
 				a.mediaAt = now
 			}
 			a.mu.Unlock()
+
+			// 「下一首的流地址提前备好」（见 prefetch.go）。
+			//
+			// ⚠️ **这一拍是天然的挂点**：进度条的位置只有这一拍知道，而「还剩
+			// 多久」就是从它算出来的。
+			//
+			// ⚠️ **放完的那一拍不备**：那一刻下一首马上就开始放了，而备它的
+			// 下一首（第三首）还早得很——备它只是白打一次请求。
+			//
+			// ⚠️ **暂停的那一拍不备**（`live` 是假）：用户停着，备好了也白备。
+			if p != nil && live && !finished {
+				a.maybePrefetch(pos, dur)
+			}
 
 			// 「上次听到哪儿」这一格：在放的时候位置一直在变，所以按节奏落一次
 			// （见 savePlaybackIfDue）。**不在放的时候它落得更勤**——用户按了

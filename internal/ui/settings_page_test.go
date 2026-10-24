@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/testproc"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -26,7 +27,7 @@ import (
 // 从 32 抬到 64（Biu 的 `h-16`）之后，写死的 40 就**比顶栏矮**了——于是一个
 // y=45 的控件（也就是压在顶栏底下那一行的）会被 `settingRect` 当成「已在可视区里」
 // 直接点下去，而点下去什么也不会发生。按 `navMinHeight` 算，顶栏再抬一次这里
-// 跟着抬，而���条那条断言仍然是「别点在顶栏上」。
+// 跟着抬，而**那条断言**仍然是「别点在顶栏上」。
 const (
 	pageTop    = navMinHeight + 8
 	pageBottom = 800 - playbarHeight - 8
@@ -352,7 +353,7 @@ func pageChildRoundTrip(t *testing.T) {
 // runPageChild 拉起一次本测试二进制自己。-test.run 让它只跑这一条。
 func runPageChild(t *testing.T, path, mode string) {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=TestSettingsMadeOnThePageSurviveAProcessRestart", "-test.count=1")
+	cmd := exec.Command(testproc.Path(t), "-test.run=TestSettingsMadeOnThePageSurviveAProcessRestart", "-test.count=1")
 	cmd.Env = append(os.Environ(),
 		pageChildEnv+"=1",
 		"BIU_PAGE_PATH="+path,
