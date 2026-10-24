@@ -3070,6 +3070,29 @@ var Items = []Item{
 		},
 	},
 	{
+		// 🔴 **这一条的错法是「静默」的**：顶图被冻在列表上面，滚动列表时它一动
+		// 不动——**没有一样会报错**，界面只是「不像上游那一页」。
+		//
+		// 上游那一页（`music-recommend/index.tsx`）的顶图和下面的列表在**同一个
+		// 滚动容器**里，所以顶图跟着滚走；而 Tab 那一排在滚动容器**外面**，滚
+		// 列表时它不动。
+		Category: Platform,
+		// 票 #369。
+		Spec: "首页「流行」那一屏：顶图（新歌速递）**跟着列表一起滚走**，而 Tab 那一排**留在滚动容器外面**（滚列表时它不动）；另外两档不受影响",
+		Tests: []string{
+			// 顶图滚一段之后不在画面上了，而下面那一档的歌还在。
+			"TestTheTopImagesScrollAwayWithTheList",
+			// 网格那一档（设置里的「数据显示样式」）也是一样的。
+			"TestTheTopImagesScrollAwayInGridModeToo",
+			// Tab 那一排的 y 在滚动前后一模一样。
+			"TestTheTabRowStaysPutWhileTheListScrolls",
+			// 另外两档没动：没有顶图，而且照样能滚。
+			"TestTheMusicAndGuichuTabsAreNotTouched",
+			// 下面那一档没歌的时候顶图还在（它是这一屏的内容，不是列表的装饰）。
+			"TestTheTopImagesStayWhenTheListIsEmpty",
+		},
+	},
+	{
 		// 🔴 **这一条的错法也是「静默」的**：那一枚按钮悬在 Tab 右边半截、
 		// 矮一截（28 而不是 40）、又没有那枚 ▶——**没有一样会报错**，界面
 		// 只是「不像这一页的操作，也不像全局操作」。

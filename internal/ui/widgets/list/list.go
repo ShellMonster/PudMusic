@@ -225,6 +225,12 @@ type List struct {
 	// 它不是歌，所以行身份是 footerKey：一个歌 ID 不可能撞上的类型。
 	footer func(c *ui.Context)
 
+	// lead 是「这一份歌上面那一块」（页内头部），为 nil 时没有。
+	//
+	// ⚠️ **它占列表的第 0 行**：所以下面那些歌在框架那一层的行号整体挪了一格
+	// （见 lead.go）。**对外那些 API 收的仍然是「歌的下标」**。
+	lead *Lead
+
 	// scroll 是这个列表把滚动位置写回来的那个句柄，为 nil 时不写。
 	scroll *ui.ScrollState
 
@@ -298,7 +304,9 @@ func New(cache *imgcache.Cache, acts Actions) *List {
 // ⚠️ **下一帧才生效**：框架的焦点请求是在一帧的末尾统一兑现的。
 func (l *List) TakeFocus() {
 	if len(l.songs) > 0 {
-		l.sel = 0
+		// ⚠️ **光标停在第一首上**（不是页内头部那一行）：那一块不是歌，停在它
+		// 上面的话用户按的第一下方向键是「从顶上往回走」。
+		l.sel = leadRows(l.lead)
 	}
 	l.state.Handle.Focus()
 }
@@ -320,6 +328,16 @@ func (l *List) SetSongs(songs []Music) {
 //
 // ⚠️ 只能由界面线程调，同 SetSongs。
 func (l *List) SetFooter(fn func(c *ui.Context)) { l.footer = fn }
+
+// SetLead 装「这一份歌上面那一块」（页内头部），传 nil 去掉。
+//
+// ⚠️ **它占列表的第 0 行**，所以下面那些歌在框架那一层的行号整体挪了一格——
+// 而这一份对外的 API（`Selected` / `At` / `ScrollTo`）收的仍然是**歌的下标**。
+//
+// ⚠️ **按需装**：没装的那一份（其余那些页面）一个字节都不多画，行号也不挪。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (l *List) SetLead(lead *Lead) { l.lead = lead }
 
 // SetEmpty 换掉「没有歌时说的那句话」。
 //
@@ -523,8 +541,11 @@ func (l *List) emptyText() string {
 // rows 是这个列表有几行，含末尾那一行（没装 footer 就不算）。
 //
 // paged.go 的「末尾进了画面没有」问的是它，所以行数只有一个算法（就是这里）。
+//
+// ⚠️ **页内头部占着第 0 行**（见 lead.go）：它不是歌，但它是列表里的一行——
+// 所以它算在行数里，而下面那些歌的行号整体挪了一格。
 func (l *List) rows() int {
-	n := len(l.songs)
+	n := len(l.songs) + leadRows(l.lead)
 	if l.footer != nil {
 		n++
 	}
@@ -536,6 +557,10 @@ func (l *List) rows() int {
 //
 // 页面要它做两件事：换路由回来时回到原位，以及 PLAN 4.1 里那个「滚了 400 像素
 // 才出现的回顶按钮」。
+//
+// ⚠️ **row 是「列表的行号」，不是「歌的下标」**：页内头部占着第 0 行（见
+// lead.go），所以「回顶」要回到的是**第 0 行**（那一块），不是第一首歌。
+// 没装页内头部的那几页，第 0 行就是第一首歌——**一个数都不用改**。
 //
 // ⚠️ 只能由界面线程调（就是跑 view 的那个线程），并且**要连着几帧**看效果：
 // 列表是在布局时才滚过去的，而那一条落在哪儿是布局那一步才定的（列表这一档的行高
@@ -552,10 +577,24 @@ func (l *List) ScrollTop() { l.state.ScrollTo(0, ui.Start) }
 // 返回的是**歌**不是序号：序号在插一行之后就指另一首了，调用方拿着它去干什么
 // 都是错的（这就是铁律四）。
 func (l *List) Selected() (Music, bool) {
-	if l.sel < 0 || l.sel >= len(l.songs) {
+	i := l.selSong()
+	if i < 0 {
 		return Music{}, false
 	}
-	return l.songs[l.sel], true
+	return l.songs[i], true
+}
+
+// selSong 是「选中的那一首」在**歌**里的下标。**-1 是没选**。
+//
+// ⚠️ **框架那个游标记的是「列表的行号」**：页内头部占着第 0 行（见 lead.go），
+// 所以行号和歌的下标差着 `leadRows`——差的那一格就是页内头部，选中它的时候
+// 这里给的是 -1（那不是一首歌）。
+func (l *List) selSong() int {
+	i := l.sel - leadRows(l.lead)
+	if i < 0 || i >= len(l.songs) {
+		return -1
+	}
+	return i
 }
 
 // View 画这个列表。页面在每一帧开头调一次。
@@ -582,8 +621,16 @@ func (l *List) View(c *ui.Context) {
 	//
 	// ⚠️ 别改成序号：那正是实测踩过的坑（头部插入后选中项变成旁边另一首）。
 	//
+	// ⚠️ **页内头部占着第 0 行**（见 lead.go）：所以行号和歌的下标差着
+	// `leadRows`——身份要给的是**歌的 ID**，差的那一格给页内头部自己的身份。
+	//
 	// 末尾那一行（footer）不是歌，给它一个歌不可能撞上的身份，别在这里越界。
 	l.state.Key = func(i int) any {
+		lead := leadRows(l.lead)
+		if i < lead {
+			return leadKey{}
+		}
+		i -= lead
 		if i >= len(l.songs) {
 			return footerKey{}
 		}
@@ -593,6 +640,14 @@ func (l *List) View(c *ui.Context) {
 	}
 	// Label 是这一行给无障碍和「打字选中」用的名字。
 	l.state.Label = func(i int) string {
+		lead := leadRows(l.lead)
+		if i < lead {
+			if l.lead == nil {
+				return ""
+			}
+			return l.lead.Label
+		}
+		i -= lead
 		if i >= len(l.songs) {
 			return footerLabel
 		}
@@ -622,7 +677,10 @@ func (l *List) View(c *ui.Context) {
 		HandleInput(l.keys.Input).
 		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击：
 		// `biu/src/components/music-list-item/index.tsx`）。
-		OnSubmit(func() { l.playFrom(l.sel) }).
+		//
+		// ⚠️ **给的是「歌的下标」**：框架那个游标记的是列表的行号，而页内头部
+		// 占着第 0 行（见 lead.go）。
+		OnSubmit(func() { l.playFrom(l.selSong()) }).
 		// ⚠️ **焦点环只留在「还没选中任何一行」的时候**（票 #197）。
 		//
 		// 框架默认给**整张列表**画一圈焦点环（`mygo/ui/inline.go` 的 ringShown），
@@ -632,7 +690,9 @@ func (l *List) View(c *ui.Context) {
 		// 所以：**还没选中行时环在列表上**（Tab 刚进来的那一瞬间，焦点在列表上，
 		// 列表就是焦点所在的地方），**选中行之后环跟着那一行走**（列表那一圈收
 		// 起来，免得两处都亮）。鼠标点过之后焦点不是从键盘来的，两边都不画。
-		FocusRing(l.sel < 0).
+		//
+		// ⚠️ **判的是「有没有选中一首歌」**：页内头部那一行不算（它不是歌）。
+		FocusRing(l.selSong() < 0).
 		// 没有歌时列表是空的，Children 里那一支就是它的空状态。
 		// 一句都不说的时候连这一支都不建（见 SetEmpty）。
 		Children(func() {
@@ -683,6 +743,14 @@ func (l *List) Hot() bool { return l.hot }
 func (l *List) viewRow(r ui.ListRow) {
 	c, i := r.Context, r.Index
 
+	// ⚠️ **页内头部占着第 0 行**（见 lead.go）：它是列表里的第一行，画的是
+	// 「这一份歌上面那一块」。
+	if i < leadRows(l.lead) {
+		l.viewLead(c)
+		return
+	}
+	i -= leadRows(l.lead)
+
 	// 末尾那一行：翻页的哨兵 / 转圈 / 重试（见 paged.go）。它同样要兜住，
 	// 只是不参与选中（Selected 越界时是 ok=false）。
 	if i >= len(l.songs) {
@@ -697,6 +765,31 @@ func (l *List) viewRow(r ui.ListRow) {
 	}
 
 	guardFailed(&l.failed, "列表行", m.ID, func() { l.viewCard(r) })
+}
+
+// viewLead 画页内头部那一块（列表的第 0 行）。
+//
+// 🔴 **画崩了要兜住**：行是在**布局**那一遍建的（框架的 `buildLate`），而布局那一遍
+// **在页面那道 Guard 之外**——所以这里自己兜一层，只废掉这一块（同一套兜法，同
+// 一张表）。
+//
+// ⚠️ **底下刷一层页面底色**：框架给「选中的行」铺一整块实心主色底
+// （`mygo/ui/table.go` 的 node.Selected），而页内头部那一行**也可能被选中**
+// （点它一下就是选中了第 0 行）——那一块主色底露出来就是「一整条绿」，而它上面
+// 装的是卡片。刷一层页面底色把它盖掉（和 `selection.go` 的 `rowCover` 同一个
+// 道理）。
+func (l *List) viewLead(c *ui.Context) {
+	if l.lead == nil || l.lead.Draw == nil {
+		return
+	}
+	if l.failed[leadFailed] {
+		return
+	}
+	guardFailed(&l.failed, "页内头部", leadFailed, func() {
+		ui.Column(c).FillWidth().Background(c.Theme().Background).Children(func() {
+			l.lead.Draw(c)
+		})
+	})
 }
 
 // viewFooter 画末尾那一行，崩了也只废掉这一行（同一套兜法，同一张表）。

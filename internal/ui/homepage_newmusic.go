@@ -2,6 +2,15 @@
 //
 // 抄的是 Biu 的 `src/pages/music-recommend/new-music-top.tsx`。
 //
+// # 它画在哪儿
+//
+// ⚠️ **它画在「流行」那一档列表的第 0 行**（`list.Lead`，页内头部）——所以它在
+// 列表的滚动区里，跟着内容一起滚走（上游那一页的顶图和下面的列表在**同一个滚动
+// 容器**里，`music-recommend/index.tsx:295`）。此前它是列表的**兄弟**，于是滚动
+// 列表时它一动不动——票 #369 修的就是这个。
+//
+// ⚠️ **只有「流行」那一档有它**（上游 `index.tsx:295`），另外两档上没有。
+//
 // ## 它和分页网格不是同一张表
 //
 // 「新歌速递」的列数断点是 **640 / 768 / 1024 / 1280 → 3 / 4 / 5 / 6**（更窄
@@ -39,6 +48,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
@@ -232,6 +242,12 @@ type newMusicGrid struct {
 	// width 是这一块**上一帧**量出来的容器宽，用来分列（见 view 里那两句）。
 	width float32
 
+	// coverSide 是这一帧封面那个正方形的边长（见 newMusicCoverSide）。
+	//
+	// ⚠️ **它是估的**（见 `Height`）：回顶按钮判断「滚过多少像素」靠它算这一块的
+	// 高，而它跟着窗口的宽高走。
+	coverSide float32
+
 	// rows 是**上一帧**摆了几行，用来在换歌的时候夹页码（见 clampPage）。0 是还没
 	// 画过一帧。
 	//
@@ -365,6 +381,7 @@ func (g *newMusicGrid) view(c *ui.Context) {
 	rows := newMusicRowsAt(wh, cell)
 	coverSide := newMusicCoverSide(wh, cell)
 	g.width, g.rows = w, rows
+	g.coverSide = coverSide
 
 	g.clampPage()
 	total := g.totalPages()
@@ -516,10 +533,17 @@ func (g *newMusicGrid) viewCard(c *ui.Context, i int, coverSide float32) {
 		// ② 歌名 + UP 名。上游两行都是 `line-clamp-1`，这里照它。字号走 DESIGN.md
 		// 的网格那一档：歌名 16、UP 名 14。
 		//
+		// ⚠️ **显示的字是清洗过的**（`list.ShowOf`，规则见 `widgets/title`）：B 站
+		// 视频标题里全是「【4K修复】」「官方MV」这种视频的痕迹，而这里是音乐 App
+		// （规范 §0）。副标题那一行带上从方括号里挪出来的歌手 / 专辑名，现场版
+		// 带一枚「现场」小标签——**和下面那一档的列表是同一套**（同一个出口，
+		// 见 `widgets/list` 的 `Shown`）。
+		//
 		// ⚠️ **正在放的那一首、以及指针压着的那一格，都把歌名染成主色**：这一块
 		// 和上面三个 Tab 是同一页，判据也是同一份（`Actions.IsPlaying`，按
 		// `app.Item.Identity`）。同一屏上「正在播放」在两个地方说两套话，用户只能
 		// 靠猜。hover 变主色是上游那张卡片的 `group-hover:text-primary`（票 #170）。
+		sh := list.ShowOf(m)
 		titleColor := t.Text
 		if onCard || (g.acts.IsPlaying != nil && g.acts.IsPlaying(m.Item)) {
 			// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（理由见
@@ -528,11 +552,34 @@ func (g *newMusicGrid) viewCard(c *ui.Context, i int, coverSide float32) {
 			// 在下面那一排是深绿、在这一块是读不出来的亮绿。
 			titleColor = ink.AccentOn(t)
 		}
-		ui.Text(c, m.Title).FontSize(scale.Font(c, scale.Size16)).TextColor(titleColor).MaxLines(1).Ellipsis("…")
-		if m.Owner != "" {
-			ui.Text(c, m.Owner).FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
+		ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size16)).TextColor(titleColor).MaxLines(1).Ellipsis("…")
+		if sh.Owner != "" || sh.Live {
+			list.OwnerLine(c, sh, scale.Font(c, scale.ListOwner), leading.Owner, t.TextMuted, 0, false)
 		}
 	})
+}
+
+// Height 是这一块有多高（像素）。
+//
+// ⚠️ **它是估的**：卡片的文字那几行是量出来的，而这里算的是「封面 + 文字那一块」
+// 的估高（`newMusicCardTextH`）。差几个像素的后果只是那枚「回到顶部」早一点或
+// 晚一点出现——而它本来就是按 400 像素那个门槛估的（`list.List.ScrollOffset`）。
+//
+// 用处只有一个：这一块是「流行」那一档列表的**页内头部**（列表的第 0 行），
+// 而回顶按钮判断「滚过 400 像素没有」要把这一块的高度算进去（它也是滚过去的
+// 内容的一部分）。
+func (g *newMusicGrid) Height() float32 {
+	// 空状态 / 正在拉 / 拉不到：那一块是定高的那一格（`newMusicEmptyH`）。
+	if g.err != nil || g.loading || g.totalPages() == 0 {
+		return newMusicHeadH + newMusicGap + newMusicEmptyH
+	}
+	rows := g.rows
+	if rows <= 0 {
+		rows = newMusicRows
+	}
+	// 标题 + 一道缝 + 几行卡片（每行：封面 + 文字）+ 行间的缝。
+	return newMusicHeadH + newMusicGap +
+		float32(rows)*(g.coverSide+newMusicCardTextH) + float32(rows-1)*newMusicGap
 }
 
 // play 把第 i 首放进队列并开始播。

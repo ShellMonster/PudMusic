@@ -375,6 +375,164 @@ func TestNewMusicShowsOnlyOnThePopTab(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 顶图跟着滚走（票 #369）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheTopImagesScrollAwayWithTheList 钉住这一票的头一条：**滚动时顶图被滑出
+// 屏幕**。
+//
+// 判据是画面：滚一段之后新歌速递那几张图不在画面上了。
+//
+// ⚠️ **为什么它此前是红的**：新歌速递那一块是列表的**兄弟**（在列表的滚动容器
+// **外面**），所以滚动列表时它一动不动。上游那一页是
+// `{activeTab === "pop" && <NewMusicTop … />}` 和下面的列表在**同一个滚动容器**
+// 里（`music-recommend/index.tsx`），顶图跟着滚走。
+//
+// 怎么滚：滚轮要落在**列表**那一块上（`ui.Tester.Scroll` 给的是指针位置）。
+func TestTheTopImagesScrollAwayWithTheList(t *testing.T) {
+	_, tt := newHome(t, fullSongs())
+	clickTab(t, tt, homePopTab)
+
+	// 滚之前：顶图在画面上。
+	if !shows(tt, "新歌速递") {
+		t.Fatalf("切到「流行」之后新歌速递不在画面上，文字有 %q", tt.Texts())
+	}
+	if !shows(tt, songName("新歌", 1)) {
+		t.Fatalf("新歌速递那一块没有画出它的卡片，文字有 %q", tt.Texts())
+	}
+
+	// 滚一段。指针落在下面那一档的歌上（列表那一块）。
+	tt.Scroll(homeW/2, homeH-150, 0, 1200)
+	homeFrame(tt)
+
+	// 顶图不见了。
+	if shows(tt, "新歌速递") {
+		t.Errorf("滚了 1200 像素之后新歌速递还在画面上——它没有跟着滚走，文字有 %q", tt.Texts())
+	}
+	if shows(tt, songName("新歌", 1)) {
+		t.Errorf("滚了 1200 像素之后新歌速递的卡片还在画面上，文字有 %q", tt.Texts())
+	}
+	// 而下面那一档的歌还在（滚的是列表，不是把整页滚没了）。
+	if len(listPos(tt, homeTabs[homePopTab])) == 0 {
+		t.Errorf("滚了 1200 像素之后「%s」那一档一首歌都没画出来，文字有 %q",
+			homeTabs[homePopTab], tt.Texts())
+	}
+}
+
+// TestTheTabRowStaysPutWhileTheListScrolls 钉住这一票的第二条：**Tab 那一排留在
+// 滚动容器外面**（滚列表时它不动）。
+//
+// ⚠️ **它和上一条是一对**：顶图要跟着滚走，Tab 那一排不能跟着走——上游也是
+// （Tab 那一排在滚动容器外面，只有顶图和列表在里面）。
+//
+// 判据是**位置**：Tab 那一排的 y 在滚动前后要一模一样。判「还在不在」不够——
+// 它一直在，只是位置变了。
+func TestTheTabRowStaysPutWhileTheListScrolls(t *testing.T) {
+	_, tt := newHome(t, fullSongs())
+	clickTab(t, tt, homePopTab)
+
+	before, ok := tt.Find(homeTabs[homePopTab])
+	if !ok || before.H == 0 {
+		t.Fatalf("找不到「%s」那一档的 Tab，文字有 %q", homeTabs[homePopTab], tt.Texts())
+	}
+
+	tt.Scroll(homeW/2, homeH-150, 0, 1200)
+	homeFrame(tt)
+
+	after, ok := tt.Find(homeTabs[homePopTab])
+	if !ok || after.H == 0 {
+		t.Fatalf("滚完之后找不到「%s」那一档的 Tab，文字有 %q", homeTabs[homePopTab], tt.Texts())
+	}
+	if after.Y != before.Y {
+		t.Errorf("滚列表的时候 Tab 那一排动了：y 从 %v 变成 %v——它应该留在滚动容器外面",
+			before.Y, after.Y)
+	}
+}
+
+// TestTheTopImagesScrollAwayInGridModeToo 验「数据显示样式 = 网格」那一档**也一样**。
+//
+// ⚠️ **这一档是另一个控件**：网格那一档不是 `list.List`，是 `list.Grid`（它自己
+// 一份 `ui.ListState`、自己一套列数分档）。页内头部要**两档都装**
+// （`SwitchView.SetLead`），漏了网格那一档的症状是「用户在设置里切成网格，新歌速递
+// 那一块就没了」——而它是这一屏的内容，不是列表的装饰。
+func TestTheTopImagesScrollAwayInGridModeToo(t *testing.T) {
+	// 「数据显示样式」是**设置**里的一格，所以要先把那份设置挂上（走的是
+	// 「先写盘、再挂上去」那条生产路，见 `withSettings`）。
+	st := app.DefaultSettings("")
+	st.DisplayMode = app.DisplayModeCard
+	s, tt := newShell(t, withSettings(st))
+	s.home.SetSongs(fullSongs())
+	homeFrame(tt)
+	clickTab(t, tt, homePopTab)
+
+	if !shows(tt, "新歌速递") {
+		t.Fatalf("网格那一档上没有新歌速递，文字有 %q", tt.Texts())
+	}
+
+	tt.Scroll(homeW/2, homeH-150, 0, 1200)
+	homeFrame(tt)
+
+	if shows(tt, "新歌速递") {
+		t.Errorf("网格那一档滚了 1200 像素之后新歌速递还在画面上，文字有 %q", tt.Texts())
+	}
+	if len(listPos(tt, homeTabs[homePopTab])) == 0 {
+		t.Errorf("网格那一档滚了 1200 像素之后一首歌都没画出来，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheTopImagesStayWhenTheListIsEmpty 验「下面那一档没歌的时候，顶图还在」。
+//
+// ⚠️ **顶图是这一屏的内容，不是列表的装饰**：新歌速递那一块和下面那一档的推荐单
+// 是两摊各拉各的（见 `homepage_feed.go` 的「四摊，各自独立」）。下面那一档没拉到
+// 的时候，上游那一页照样摆着 `<NewMusicTop/>`（`index.tsx:295`）。
+//
+// ⚠️ 而这一档**没有列表可挂**（一根歌都没有 → 画的是页面那一档的空状态，不是
+// 列表），所以顶图得自己站在上面——它平时是列表的第 0 行（页内头部）。
+func TestTheTopImagesStayWhenTheListIsEmpty(t *testing.T) {
+	songs := fullSongs()
+	songs.tabs[homePopTab] = nil
+	_, tt := newHome(t, songs)
+
+	clickTab(t, tt, homePopTab)
+	if !shows(tt, "新歌速递") {
+		t.Errorf("下面那一档没歌的时候顶图不见了，文字有 %q", tt.Texts())
+	}
+	if !shows(tt, lookup(homePath).Empty.Title) {
+		t.Errorf("下面那一档没歌的时候空状态不见了，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheMusicAndGuichuTabsAreNotTouched 钉住「另外两档没动」这一条。
+//
+// 两条判据：另外两档上**没有**新歌速递（上游本来就没有），而它们**照样能滚**
+// （这一票没把滚动容器挪到别处去）。
+//
+// ⚠️ 第二条是这一票真正可能踩坏的地方：顶图要滚走，实现就动了列表的滚动容器
+// ——而另外两档的列表是**共用同一套**的（`list.SwitchView`）。动坏了的症状是
+// 「另外两档滚不动了」。
+func TestTheMusicAndGuichuTabsAreNotTouched(t *testing.T) {
+	_, tt := newHome(t, fullSongs())
+
+	for _, tab := range []int{0, 1} {
+		clickTab(t, tt, tab)
+		if shows(tt, "新歌速递") {
+			t.Errorf("「%s」那一档上画了新歌速递（上游只有 pop 有）", homeTabs[tab])
+		}
+		atStart := listPos(tt, homeTabs[tab])
+		tt.Scroll(homeW/2, homeH-150, 0, 1200)
+		homeFrame(tt)
+		after := listPos(tt, homeTabs[tab])
+		if len(after) == 0 {
+			t.Errorf("「%s」那一档滚过去之后一首歌都没画出来", homeTabs[tab])
+			continue
+		}
+		if slices.Equal(after, atStart) {
+			t.Errorf("「%s」那一档滚了 1200 像素之后画面没变——它滚不动了", homeTabs[tab])
+		}
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 一行歌都没有时说的话
 // ─────────────────────────────────────────────────────────────────────────────
 
