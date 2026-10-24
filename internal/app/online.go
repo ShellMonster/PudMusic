@@ -674,19 +674,33 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	a.artist = it.Artist
 	a.artistMid = it.ArtistMid
 	a.duration = p.Duration()
-	// 位置：正常起播是 0；恢复那一趟是 at（夹进 [0, 时长]）。
+	// 位置：正常起播是 0；恢复那一趟是 at。
+	//
+	// ⚠️ **夹进 [0, 时长]，但时长拿不到的时候不夹**：时长是 0 的时候夹下去就把
+	// 位置清成 0 了——恢复出来的那一首会停在开头，而用户明明停在中间。
+	// （时长拿不到不算致命，见 `internal/service/audio/extaf` 的 Len()：
+	// 拿不到总帧数时它返回 -1，只是进度条没有终点。）
+	//
+	// ⚠️ **和 `restreamOnline` / `refreshOnlineNow` 同一个规矩**：那两处也是
+	// `a.position = pos` 不夹，只在 `pos < p.Duration()` 时才 Seek。
 	pos := time.Duration(0)
 	if paused {
-		pos = min(max(at, 0), a.duration)
+		pos = at
+		if pos < 0 {
+			pos = 0
+		}
+		if d := a.duration; d > 0 && pos > d {
+			pos = d
+		}
 	}
 	a.position = pos
 	if paused {
 		// 恢复：**停在那个位置，不出声**。
 		//
-		// ⚠️ **`wantPlay` 记成 true**：它说的是「用户想听这一首」，而这一首
-		// 正是上次听到的那首。它要是记成 false，用户按了播放之后这一首放完，
-		// 队列就不会往下走（`onTrackFinished` 认的就是 wantPlay）。
-		a.wantPlay, a.playing = true, false
+		// ⚠️ **`wantPlay` 记成 false**：它说的是「用户按过播放」，而恢复出来
+		// 的时候用户还没按过——这一格要和一个普通的暂停**一模一样**。
+		// 用户按了播放之后 `Toggle` 会把它记回 true（见 app.go 的 Toggle）。
+		a.wantPlay, a.playing = false, false
 	} else {
 		a.wantPlay, a.playing = true, true
 	}
@@ -715,6 +729,9 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	wake := a.wake
 	a.mu.Unlock()
 
+	// 换了一首 → 落盘那一格该跟着变（见 playback_state.go）。
+	a.markPlaybackDirty()
+
 	a.logf("biu: 这一首放起来了：%q（代次 %d，%s）", it.Title, gen, ref.Label)
 
 	// 念出去（无障碍）：**「加载完成」**——在线流要跑一趟网络（取流 + 开解码器），
@@ -738,6 +755,9 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	}
 	if paused {
 		// 停在那个位置，**不出声**。
+		//
+		// ⚠️ **位置已经夹过了**（时长拿得到的时候夹进 [0, 时长]），所以这里
+		// 直接 seek 就好——MyGo 的 Seek 自己也会夹（见 mygo 的 audio.go）。
 		if pos > 0 {
 			p.Seek(pos)
 		}

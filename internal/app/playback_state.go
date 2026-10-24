@@ -47,7 +47,7 @@
 //	|-----------------|-----------------------|------------------------------------------|--------------------------------------------------------------------------|
 //	| 队列顺序        | `playback.items`      | 队列变了（加 / 删 / 换集）                | **恢复出来的顺序先落成队列**；用户之后任何一次队列操作都盖掉它             |
 //	| 当前项          | `playback.current`    | 切歌（下一首 / 上一首 / 点一行 / 放完）  | **恢复出来的当前项先选中**；用户切歌就盖掉它                               |
-//	| 播放位置        | `playback.positionMs` | 位置一变就写；在放的时候最多每 5 秒一次（暂停 / 停止 / 拖进度条 / 切歌那几处会**立刻**写） | **恢复出来的位置先落成「从这儿继续」**；用户拖动 / 切歌就盖掉它 |
+//	| 播放位置        | `playback.positionMs` | 位置一变就写。**用户动了一下**（拖进度条 / 切歌 / 按了暂停或停止）→ **半秒之内**就写；**只是歌在往前走** → 最多每 **5 秒**一次 | **恢复出来的位置先落成「从这儿继续」**；用户拖动 / 切歌就盖掉它 |
 //	| 音量            | `volume`（既有那一格）| 用户动音量 / 静音                        | **恢复不碰它**：它在另一个键里，写它的是用户自己                           |
 //	| 静音            | `isMuted`（既有那一格）| 同上                                    | 同上                                                                       |
 //	| 播放模式        | `playMode`（既有那一格）| 用户切档                                | 同上                                                                       |
@@ -201,15 +201,34 @@ func itemOfPlaybackEntry(e PlaybackEntry) (Item, bool) {
 
 // ---- 落盘 ----
 
-// playbackSaveEvery 是「在放的时候多久落一次位置」。
+// 两个落盘节奏。
 //
-// 位置一直在变（在放的时候每一拍都在变），而落盘是往整个设置文件里写一遍。
-// 不限速的话就是每 120ms 写一次文件（设置存储的防抖窗口），那是白花的磁盘 IO。
-//
-// 5 秒是个中间值：用户按了暂停、切了歌、拖了进度条，那几处**立刻**落（不等
-// 这个窗口），而「一直在放」这一种最坏也就是丢掉最后 5 秒的进度——而退出前
-// 那一次是强制落的（见 `App.Close` 和界面层的 OnWillQuit）。
-const playbackSaveEvery = 5 * time.Second
+// 🔴 **两个都必须有，而且不能只有一个**：落盘是往整个设置文件里写一遍，而设置
+// 存储的防抖是「每次改动都把 120ms 的窗口往后推」——落得太勤就把那个窗口一直
+// 顶掉，**暂停期间用户改的任何设置都不落盘**（直到退出那一次），而界面还被
+// 叫醒 20 次/秒（一次叫醒 = 一帧）。
+const (
+	// playbackSaveEvery 是「位置自己在往前走」时多久落一次。
+	//
+	// 位置一直在变（在放的时候每一拍都在变），而落盘是往整个设置文件里写一遍。
+	// 不限速的话就是每 120ms 写一次文件（设置存储的防抖窗口），那是白花的磁盘
+	// IO，还把设置存储的防抖窗口一直顶掉。
+	//
+	// 5 秒是个中间值：最坏丢掉最后 5 秒的进度——而退出前那一次是强制落的
+	// （见 `App.Close` 和界面层的 OnWillQuit）。
+	playbackSaveEvery = 5 * time.Second
+
+	// playbackWriteMinGap 是「用户动了一下」之后落盘的下限间隔。
+	//
+	// 「用户动了一下」= 改了队列 / 切了歌 / 拖了进度条 / 按了暂停或停止
+	// （那几处都调 `markPlaybackDirty`）。那些**尽快**落（不等
+	// playbackSaveEvery 那个窗口），但也不能连着写——拖动重排那一类操作是每一
+	// 帧都改队列的，每一帧都落一次就是上面说的那个坑。
+	//
+	// 500ms 离设置存储的防抖窗口（120ms）够远：那 120ms 里文件确实会落一次，
+	// 所以**别的设置不会被这一格饿死**。
+	playbackWriteMinGap = 500 * time.Millisecond
+)
 
 // markPlaybackDirty 记下「播放状态变了，该落盘了」。
 //
@@ -226,24 +245,31 @@ func (a *App) markPlaybackDirty() {
 //
 // 什么时候落：
 //
-//	不在放（暂停 / 停住 / 什么都没有）→ 脏了就落（立刻）
-//	在放 → 脏了，而且离上一次落盘超过 playbackSaveEvery → 落
+//	用户动了一下（dirty：改了队列 / 切了歌 / 拖了进度条 / 按了暂停）→ 尽快，
+//	  但至少隔 playbackWriteMinGap
+//	只是位置在往前走（歌在放）→ 最多每 playbackSaveEvery 一次
 //
-// 「脏了」有两个来源：队列 / 当前项变了（`markPlaybackDirty`），或者**位置变
-// 了**（在放的时候每一拍都在变）。
+// ⚠️ **两边的位置比较必须是同一个单位**：`a.position` 是纳秒，而落盘那一格是
+// 毫秒（`pos.Milliseconds()`）。拿落盘那个毫秒值去比纳秒的位置，**永远不相
+// 等**——于是「位置变了没有」这一条恒真，每一拍都落一次盘。
 func (a *App) savePlaybackIfDue(now time.Time) {
 	a.mu.Lock()
 	pos := a.position
 	savedPos := a.playbackSavedPos
 	savedAt := a.playbackSavedAt
 	dirty := a.playbackDirty
-	live := a.playing || a.wantPlay
 	a.mu.Unlock()
 
-	if !dirty && pos == savedPos {
+	// 位置变了没有。⚠️ **两边都是纳秒**（见上面那段）。
+	moved := pos != savedPos
+	if !dirty && !moved {
 		return
 	}
-	if live && now.Sub(savedAt) < playbackSaveEvery {
+	gap := playbackSaveEvery
+	if dirty {
+		gap = playbackWriteMinGap
+	}
+	if now.Sub(savedAt) < gap {
 		return
 	}
 	a.persistPlayback()
@@ -263,11 +289,13 @@ func (a *App) persistPlayback() {
 		return
 	}
 
-	snap := a.playbackSnapshot()
+	snap, pos := a.playbackSnapshot()
 	a.mu.Lock()
 	a.playbackDirty = false
 	a.playbackSavedAt = time.Now()
-	a.playbackSavedPos = time.Duration(snap.Position) * time.Millisecond
+	// ⚠️ **存的是那个精确的纳秒位置**，不是落盘那个毫秒值：这一格是拿来跟
+	// `a.position` 比的（见 savePlaybackIfDue），单位不一样的话永远不相等。
+	a.playbackSavedPos = pos
 	a.mu.Unlock()
 
 	if _, err := a.UpdateSettings(func(s *Settings) { s.Playback = snap }); err != nil {
@@ -283,14 +311,21 @@ func (a *App) persistPlayback() {
 // **退出前调它**（见 `App.Close` 和界面层的 OnWillQuit）：落盘是防抖合并写，
 // 最后那一下有可能还等在退避窗口里，用户听了一会儿直接退出就丢了——而这一格
 // 丢了的症状是「重启之后回到空队列」，用户只会觉得「这应用记不住东西」。
+//
+// ⚠️ **它绕过了那两个间隔**（见 savePlaybackIfDue）：退出这一刻就该把最后那个
+// 状态写下去，等一个窗口就是丢一次。
 func (a *App) SavePlayback() {
 	a.persistPlayback()
 }
 
 // playbackSnapshot 拼出现在的队列、当前项和位置。
 //
+// 第二个返回值是**那个精确的纳秒位置**：落盘那一格是毫秒（那是给文件看的），
+// 而落盘那一格的判据要拿它跟 `a.position` 比（见 savePlaybackIfDue）——单位
+// 不一样的话永远不相等。
+//
 // ⚠️ **当前项存的是标识，不是下标**（见 PlaybackSnapshot.Current）。
-func (a *App) playbackSnapshot() PlaybackSnapshot {
+func (a *App) playbackSnapshot() (PlaybackSnapshot, time.Duration) {
 	a.mu.Lock()
 	pos := a.position
 	a.mu.Unlock()
@@ -306,7 +341,7 @@ func (a *App) playbackSnapshot() PlaybackSnapshot {
 	if cur, ok := a.queue.Current(); ok {
 		out.Current = cur.Identity()
 	}
-	return out
+	return out, pos
 }
 
 // ---- 恢复 ----
@@ -380,8 +415,10 @@ func (a *App) RestorePlayback() error {
 
 	if cur.IsLocal() {
 		// 本地文件：离线就能开，**停在那儿、不出声**。
-		if err := a.openLocal(cur.Path, at, true); err != nil {
-			a.logf("biu: 恢复上次那一首放不起来：%q：%v", cur.Title, err)
+		//
+		// ⚠️ **打不开要安静**（见 openLocal 的 openRestore 那一档）：文件在、
+		// 但这台机器解不开，也是「取不到」——启动时冒一句红字是应用在说自己。
+		if err := a.openLocal(cur.Path, at, openRestore); err != nil {
 			return nil
 		}
 		a.logf("biu: 恢复了上次的队列（%d 首，当前是 %q，位置 %v，跳过 %d 条）",

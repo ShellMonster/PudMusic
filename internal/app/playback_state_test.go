@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,7 +53,7 @@ func playbackRestart(t *testing.T, a *app.App, path string) *app.App {
 	return b
 }
 
-// storedPlayback 读设置文件里落盘的那一格。
+// playbackStored 读设置文件里落盘的那一格。
 func playbackStored(t *testing.T, path string) app.PlaybackSnapshot {
 	t.Helper()
 	b, err := os.ReadFile(path)
@@ -68,6 +69,26 @@ func playbackStored(t *testing.T, path string) app.PlaybackSnapshot {
 		t.Fatalf("设置文件读不出来：%v", err)
 	}
 	return f.AppSettings.Playback
+}
+
+// playbackStoredSettings 读设置文件里的 appSettings 那一段（原始的那几格）。
+//
+// ⚠️ **读的是盘上真的那份**：不是内存里的 store。有些断言要验的就是「文件到
+// 底落没落」——落盘那一格每一拍写一次的话，设置存储的防抖窗口会被一直顶掉，
+// 文件一次也不落（而内存里那份是对的，看不出来）。
+func playbackStoredSettings(t *testing.T, path string) map[string]any {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("设置文件读不出来：%v", err)
+	}
+	var f struct {
+		AppSettings map[string]any `json:"appSettings"`
+	}
+	if err := json.Unmarshal(b, &f); err != nil {
+		t.Fatalf("设置文件读不出来：%v", err)
+	}
+	return f.AppSettings
 }
 
 // TestTheQueueTheCurrentItemAndThePositionSurviveARestart 是这一票的主验收：
@@ -490,5 +511,165 @@ func TestThePositionIsKeptWhilePlaying(t *testing.T) {
 	snap := playbackStored(t, path)
 	if snap.Position <= 0 {
 		t.Errorf("退出时落盘的位置是 %v，want > 0", snap.Position)
+	}
+}
+
+// ---- 复审提的那几处的回归保护 ----
+
+// TestPausedDoesNotWriteEveryTick 钉住「暂停时不每一拍都落盘」。
+//
+// 落盘是往整个设置文件里写一遍，而设置存储的防抖是「每次改动都把 120ms 的
+// 窗口往后推」——落得太勤就把那个窗口一直顶掉，后果有两个：
+//
+//   - 界面被叫醒 20 次/秒（一次叫醒 = 一帧）；
+//   - **暂停期间用户改的任何设置都不落盘**（直到退出那一次才写）。
+//
+// 这一条量的是第一件，第二件由 TestASettingChangeWhilePausedStillLandsOnDisk
+// 量。
+func TestPausedDoesNotWriteEveryTick(t *testing.T) {
+	paths := copies(t, 1)
+	a, _ := playbackMount(t)
+
+	if err := a.PlayFrom(items(paths[0])...); err != nil {
+		t.Fatal(err)
+	}
+	a.Toggle() // 暂停
+
+	// 数 2 秒里界面被叫醒几次（一次叫醒 = 一帧）。
+	var wakes int
+	a.SetWake(func() { wakes++ })
+	time.Sleep(2 * time.Second)
+	if wakes > 5 {
+		t.Errorf("暂停 2 秒里界面被叫醒了 %d 次，want ≤ 5（每一拍落一次盘就是 40 次）", wakes)
+	}
+}
+
+// TestASettingChangeWhilePausedStillLandsOnDisk 钉住「暂停期间改的设置要落盘」。
+//
+// 那一格每一拍写一次的话，设置存储的防抖窗口会被一直顶掉，文件一次也不落——
+// 于是用户暂停着把音量调小，重启之后又是 100%。
+//
+// ⚠️ **读的是盘上那份，不是内存里那份**：内存里那份是对的（本票那个错法也是
+// 内存里对的、盘上不落）。
+func TestASettingChangeWhilePausedStillLandsOnDisk(t *testing.T) {
+	paths := copies(t, 1)
+	a, path := playbackMount(t)
+
+	if err := a.PlayFrom(items(paths[0])...); err != nil {
+		t.Fatal(err)
+	}
+	a.Toggle() // 暂停
+	// 等那一格自己落一次（它一落就把设置存储的防抖窗口顶掉了）。
+	time.Sleep(700 * time.Millisecond)
+
+	a.SetVolume(0.25)
+	// ⚠️ **不显式 flush**：要验的就是「设置存储自己的防抖窗口有没有被顶掉」。
+	time.Sleep(1500 * time.Millisecond)
+
+	got := playbackStoredSettings(t, path)["volume"]
+	f, ok := got.(float64)
+	if !ok {
+		t.Fatalf("落盘的 volume 是 %v（%T），want 一个数", got, got)
+	}
+	if f != 0.25 {
+		t.Errorf("落盘的音量是 %v，want 0.25（暂停期间改的设置必须落盘）", f)
+	}
+}
+
+// TestAScrubWhilePlayingIsSavedPromptly 钉住那张表里「用户动了一下就尽快写」。
+//
+// 拖了进度条之后不用等 5 秒那个窗口：半秒之内就该落盘。
+func TestAScrubWhilePlayingIsSavedPromptly(t *testing.T) {
+	paths := copies(t, 1)
+	a, path := playbackMount(t)
+
+	if err := a.PlayFrom(items(paths[0])...); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 3*time.Second, "位置开始往前跑", func() bool {
+		return a.Snapshot().Position > 0
+	})
+	a.ScrubEnd(0.8) // 4 秒的歌 → 3.2 秒
+
+	// 半秒之内就该落盘（那一格走的是「尽快写」那条路）。
+	time.Sleep(700 * time.Millisecond)
+	pos := playbackStored(t, path).Position
+	if pos < 2000 {
+		t.Errorf("落盘的位置是 %d ms，want ≥ 2000（拖完就该落，不用等 5 秒那个窗口）", pos)
+	}
+}
+
+// TestARestoredLocalFileThatCannotBeDecodedIsSkippedQuietly 钉住「安静跳过」。
+//
+// 「文件在、但解不开」也是「取不到」：用户换了个机器、文件被别的东西改了、
+// 编码是这台机器解不了的。启动时冒一句红字是应用在说自己，不是在说给用户听。
+//
+// （在线那一首取不到流是安静的，见
+// TestTheRestoredOnlineItemIsRestoredQuietly。）
+func TestARestoredLocalFileThatCannotBeDecodedIsSkippedQuietly(t *testing.T) {
+	paths := copies(t, 1)
+	// 一个「在、但解不开」的文件。
+	bad := filepath.Join(t.TempDir(), "bad.flac")
+	if err := os.WriteFile(bad, []byte("这根本不是音频"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a, path := playbackMount(t)
+	// 当前项就是那个解不开的。
+	//
+	// ⚠️ **用 `Move` 选中它，不去放它**：放它会立刻报错（那是对的——用户自己
+	// 点了一首放不出来的歌，就该有一句人话）。
+	a.Queue().Append(app.LocalItem(bad), items(paths[0])[0])
+	if _, ok := a.Queue().Move(0); !ok {
+		t.Fatal("选不中队列里那一项")
+	}
+	a.SavePlayback()
+	if err := a.FlushSettings(); err != nil {
+		t.Fatal(err)
+	}
+
+	b := playbackRestart(t, a, path)
+	if err := b.RestorePlayback(); err != nil {
+		t.Fatalf("恢复不该报错：%v", err)
+	}
+	st := b.Snapshot()
+	if st.Err != "" {
+		t.Errorf("恢复失败时冒了一句红字：%q（应该是安静跳过）", st.Err)
+	}
+	if st.HasTrack {
+		t.Error("解不开却把播放器装上了")
+	}
+}
+
+// TestTheRestoreIsAnnounced 钉住「恢复出来的那一句会真的送出去」。
+//
+// 那句话是为**读屏软件用户**准备的（恢复出来的那一首在屏幕上是看得见的，但
+// 读屏软件用户得先找到播放条）。它不是死代码：恢复那一趟真的会调 `announce`。
+//
+// ⚠️ **句柄是界面层装的**（`internal/ui/shell.go` 的 `New` 里 `AddAnnounce`），
+// 所以恢复必须排在那个外壳建好之后——`ui.Run` 里就是这么排的（见那里那一句）。
+func TestTheRestoreIsAnnounced(t *testing.T) {
+	paths := copies(t, 1)
+	a, path := playbackMount(t)
+
+	if err := a.PlayFrom(items(paths[0])...); err != nil {
+		t.Fatal(err)
+	}
+	a.Toggle() // 暂停
+
+	b := playbackRestart(t, a, path)
+	var said []string
+	b.AddAnnounce(func(text string) { said = append(said, text) })
+	if err := b.RestorePlayback(); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, s := range said {
+		if strings.Contains(s, "已恢复上次的位置") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("恢复出来的那一句没有送出去（送出去的是 %q）", said)
 	}
 }
