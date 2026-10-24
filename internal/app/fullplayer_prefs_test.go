@@ -243,10 +243,11 @@ func TestASettingThatIsOnlyInMemoryStillSwitches(t *testing.T) {
 
 // ---- 频谱条 ----
 
-// TestTheSpectrumBarsAreZeroWithoutATrack 断「没歌时画出来是一条基线」。
+// TestTheSpectrumBarsAreZeroWithoutATrack 断「没歌时给的是一排 0」。
 //
-// 返回一排 0 而不是空切片：空切片在界面上是「这一条压根没有数据」，
-// 而一排 0 是「有数据，就是静」。
+// 返回一排 0 而不是空切片：调用方要的是**格数**（`barCount` 根），空切片会让
+// 那一块连格子都没有。而一排 0 在画面上是**什么都没有**——`paintSpectrum` 里
+// 高度为 0 的那几格不画（票 #374 改成柱状图之后，旧画法那条「基线」没了）。
 func TestTheSpectrumBarsAreZeroWithoutATrack(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
