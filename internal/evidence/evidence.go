@@ -2707,4 +2707,21 @@ var Items = []Item{
 			"TestTheLoadedCoverHasAnEdgeOfItsOwn",
 		},
 	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：那一枚按钮悬在 Tab 右边半截、
+		// 矮一截（28 而不是 40）、又没有那枚 ▶——**没有一样会报错**，界面
+		// 只是「不像这一页的操作，也不像全局操作」。
+		//
+		// 而它是首页和每一页列表上**唯一的主色实心块**，用户第一眼先看它。
+		Category: Platform,
+		// 票 #288（UX 报告 C-04 + C-05）。
+		Spec: "「全部播放」那一枚贴在内容区右沿、尺寸 114×40、带一枚 18 的 ▶ 图标（上游 HeroUI `Button size=\"md\"` 的逐像素实测值）",
+		Tests: []string{
+			// 右沿 = 内容区右沿、尺寸 114×40（1200 与 900 两档窗口，深浅两套）。
+			"TestThePlayAllButtonSitsAtTheRightEdgeOfTheContentArea",
+			// 那一枚里有一枚 18 的 ▶ 图标，而且它在字的**前面**（上游的
+			// `startContent`）。
+			"TestThePlayAllButtonHasThePlayIcon",
+		},
+	},
 }
