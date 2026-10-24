@@ -282,6 +282,27 @@ var Items = []Item{
 		},
 	},
 	{
+		// 票 #194：右下角那三枚旋钮改成**上游那三枚的样子**。
+		//
+		// 改的是**形状**，不是位置，也不是功能：位置（右沿 1128、底沿 680、每枚
+		// 32、中心间距 44）和三枚各自的动作一个字都没动。
+		//
+		// 而「图标化」最容易丢的是**名字**：钮上不再有「找歌词」三个字，可它
+		// 恰恰是**没有歌词时**唯一摆着的那个键——名字（`Label`）没了，读屏软件
+		// 念不出来，无头 Tester 也找不到了。所以这一条把「名字还在」和「当前值
+		// 在浮层里」都钉住：值不常驻钮上（上游那两个钮上就只有一个图标），但
+		// 展开浮层仍然看得见。
+		Category: Play,
+		Spec:     "右下角那三枚歌词旋钮是 ⌀32 的圆形图标钮（上游同一份组件挂两处：主窗口「正在播放」那一页与满屏那一屏）：圆里只有一枚图标（上游那三枚 Aa / 时钟 / T 形框）没有字；无障碍名与 Tester 名字都还在；点击行为不变（字号 / 偏移开浮层、找歌词开搜索弹窗）；当前值不常驻钮上、在浮层里看；位置与间距不变（右沿 1128、底沿 680、每枚 32、中心间距 44）",
+		Tests: []string{
+			"TestTheKnobIsARoundIconButtonWithTheValueInThePopover",
+			"TestTheTwoKnobsAreThereOnlyWithLyrics",
+			"TestTheFullPlayerHasTheThreeLyricKnobs",
+			"TestTheFullPlayerKnobsSitAtTheBottomRightOfTheLyrics",
+			"TestTheFullPlayerKnobsActuallyWork",
+		},
+	},
+	{
 		// 满屏那个偏好面板的三样（UX 报告 B4）：**有标题**（用户不用靠里面的
 		// 开关名猜这是什么面板）、**能关**（除了点外面和 Esc，还有一枚看得见的
 		// 「×」）、**和齿轮对齐**（面板的左沿对着齿轮的图形，不对着那枚键的
