@@ -104,7 +104,7 @@ func IconButton(c *ui.Context, svg *ui.SVG, label string, font float32) ui.Eleme
 // 条：**主色当底和主色当字是两件事**。
 //
 // ⚠️ **禁用的状态必须从这里给**，不能靠调用方链 `.Disabled(...)`：悬停是**建元素
-// 的时候**问的（`Hovered()` 在禁用的键上恒为 false，见 `mygo/ui/input.go:1111`），
+// 的时候**问的（`Hovered()` 在禁用的键上恒为 false，见 `mygo/ui/input.go:1113`），
 // 而链式调用是在返回**之后**才把禁用设上去——问早了，一枚**禁用**的键会用主色
 // 告诉用户「这里点得动」（票 #217 的评审查出来过同款的一条）。
 //

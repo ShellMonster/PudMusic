@@ -121,6 +121,14 @@ type Account struct {
 	runID uint64
 
 	wake func()
+
+	// onLogin 是「登录成了」那一下要通知出去的那一个。
+	//
+	// ⚠️ **这一层不认识收藏夹**：登录只管登录态，而「登录之后顺手把侧栏的
+	// 收藏夹拉一次」是应用层的事（见 `App.AutoRefreshFavorites`）。所以这里
+	// 留的是一个回调，而不是直接去调收藏夹那一摊——那样这一层就得知道
+	// 「收藏夹那一摊挂上没有」，而它挂不挂跟登录一点关系都没有。
+	onLogin func()
 }
 
 // newAccount 建一个登录管理器。
@@ -195,11 +203,25 @@ func (a *Account) setState(st LoginState) {
 func (a *App) MountLogin(store Store, cli *bili.Client) {
 	acc := newAccount(store, cli)
 	acc.wake = a.wakeLocked()
+	// 登录成了要顺手拉一次侧栏的收藏夹（见 `App.AutoRefreshFavorites`）。
+	//
+	// ⚠️ **这个回调是在登录成功的那一刻才调的**，而收藏夹那一摊（`MountCollections`）
+	// 在生产上是**后**挂的——没关系：回调调的是运行期的事，不是挂载期的事。
+	acc.onLogin = a.onLoginSucceeded
 	a.account = acc
 
 	if err := acc.restore(cli); err != nil {
 		log.Printf("biu: 读不回登录态，先按没登录处理：%v", err)
 	}
+}
+
+// onLoginSucceeded 是「登录成了」那一下。
+//
+// 登录之后顺手把侧栏的收藏夹拉一次：用户不该为了看见自己的收藏夹，先去头像
+// 下拉里按「刷新数据」——那是一个没人会自己想到的操作，而侧栏上长期空着
+// 会被当成「我没有收藏夹」。
+func (a *App) onLoginSucceeded() {
+	a.AutoRefreshFavorites()
 }
 
 // wakeLocked 取当前装的唤醒回调。
@@ -443,10 +465,28 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult,
 			Hint:  "登录成功（这次没能存下来，关掉应用要重新登录）",
 			Err:   err.Error(),
 		})
+		a.notifyLogin()
 	case err != nil:
 		a.fail(id, "保存登录态失败："+err.Error())
 	default:
 		a.setStateFor(id, LoginState{Phase: LoginDone, Hint: "登录成功", LoggedIn: true})
+		a.notifyLogin()
+	}
+}
+
+// notifyLogin 告诉应用层「登录成了」。
+//
+// ⚠️ **只在这一层知道成没成**：登录态存没存住、会话有没有被换掉，
+// 这一层最清楚；而「登录之后该拉哪些数据」是应用层的决定。所以这里只发
+// 一个信号，不替应用层决定拉什么。
+//
+// ⚠️ **判空**：没装回调时什么都不做（`MountLogin` 装上，但别的路径可能没有）。
+func (a *Account) notifyLogin() {
+	a.mu.Lock()
+	fn := a.onLogin
+	a.mu.Unlock()
+	if fn != nil {
+		fn()
 	}
 }
 
@@ -476,6 +516,10 @@ func (a *App) Logout() error {
 	if rep != nil {
 		rep.stopAccount()
 	}
+	// 🔴 **侧栏那两组收藏夹也清掉**（见 `Favorites.clear` 的注释）：它们是
+	// **上一个账号**的。退登之后还摆着的话，换人登录那几秒里新用户看到的是
+	// 别人的收藏夹名。
+	a.FavoritesOf().clear()
 	return err
 }
 

@@ -558,8 +558,10 @@ func (c *Client) RemoveCollectionMedias(ctx context.Context, id int64, medias []
 // **界面那边只判所有权、不判容器类型**（见 `app.CanDeleteCollection` 的注释，
 // 以及 `DeleteFolder` 上「界面上不做类型判断」那段）：自己建的合集 / 系列上，
 // 这一项照样摆得出来，而 B 站会回一句它不认识。合集 / 系列在 URL 上是
-// `/collection/{id}?type=21`，而今天界面上没有任何地方拼出那个查询串——要手敲
-// URL 才碰得到，所以这一条现在只是**注释里的话必须是真的**，不是一个活着的缺陷。
+// `/collection/{id}?type=21`，而**今天界面上没有一行点得进去会拼出那个查询串**
+// ——侧栏「我收藏的」那一组只收收藏夹（见 `app.collectedFavorites` 的注释：
+// 合集的内容列表是另一套接口，本项目没接，摆进去是死的路）。要手敲 URL 才碰
+// 得到，所以这一条现在只是**注释里的话必须是真的**，不是一个活着的缺陷。
 func (c *Client) CleanInvalidResources(ctx context.Context, id int64) error {
 	if id <= 0 {
 		return fmt.Errorf("bili: 收藏夹 id 不对（%d）", id)

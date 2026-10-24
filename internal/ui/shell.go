@@ -256,7 +256,7 @@ type Shell struct {
 	// fullScreen 是主窗口此刻是不是全屏。
 	//
 	// ⚠️ **它由窗口的回调推过来，不在 view 里问**：`win.IsFullScreen()`
-	// 每帧问一次是跨一次 ObjC 调用（`mygo@v0.6.2/window.go:764` 的 `get`），
+	// 每帧问一次是跨一次 ObjC 调用（`mygo@v0.6.3/window.go:766` 的 `get`），
 	// 而答案在**进全屏那一刻**就定了——事件推过来既省事又准。
 	//
 	// 它只给侧栏那个品牌块用（macOS 非全屏时要多留一格，见 `sidebar.go` 的
@@ -1233,6 +1233,21 @@ func Run(a *app.App, sess *media.Session) error {
 		// 在应用还没 ready 的时候调会 panic（框架的 `needsApp`，
 		// `mygo/app.go:128`），而 `Run` 之前是那一刻。
 		a.StartLocalMusicWatch()
+		// 开机时如果已经登录，顺手把侧栏的收藏夹拉一次。
+		//
+		// 用户不该为了看见自己的收藏夹，先去头像下拉里按「刷新数据」——那是一
+		// 个没人会自己想到的操作，而侧栏上长期空着会被当成「我没有收藏夹」。
+		//
+		// ⚠️ **排在单实例锁之后**（锁在 `Run` 的第一句）：锁没拿到的话这个进程
+		// 马上就要退出，而这一趟是往 B 站发请求——第二个实例白发两次请求，
+		// 而用户那边什么也看不出来。
+		//
+		// ⚠️ **排在开窗口之前**：拉回来赶得上的话，第一帧上就有收藏夹；
+		// 赶不上的话那一行「正在刷新收藏夹…」会在（见 `viewFavoritesRefreshing`），
+		// 回来之后界面会被叫醒。
+		//
+		// ⚠️ **没登录时它一个请求都不发**（见 `app.AutoRefreshFavorites`）。
+		a.AutoRefreshFavorites()
 		// 后台自动查更新。**必须在 `WhenReady` 里**：第一次查询要走网络，而
 		// `WhenReady` 之前事件循环还没转起来，那时候发请求等于在一条还没开始
 		// 跑的路上走（框架自己也把「需要事件循环」的 API 挡在 ready 之前，见
@@ -1582,7 +1597,7 @@ func (s *Shell) viewMain(c *ui.Context) {
 // pageJustShown 报「这一帧是刚进这一页的第一帧」。
 //
 // 路由切走再切回来时，框架会把焦点还给「离开这一页时有焦点的那个元素」
-// （`Router.focusPage`，`mygo@v0.6.2/ui/router.go:726`）。收藏夹/local 那一页
+// （`Router.focusPage`，`mygo@v0.6.3/ui/router.go:726`）。收藏夹/local 那一页
 // 的「会展开的搜索」正好是那个元素——于是用户回来的时候，键盘焦点被塞进一个
 // 他没打开过的框里，他在别处敲的字就落进那里（评审第 5 条）。
 //
