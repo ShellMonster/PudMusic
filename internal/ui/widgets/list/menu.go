@@ -46,7 +46,7 @@ var menuSeparator = menuItem{sep: true}
 // `biu/src/pages/music-recommend/menu.tsx`（搜索结果那一套完全一样）。
 //
 // 「下一首播放」的位置也是抄上游：Biu 把它摆在「播放」和「添加到队列」**之间**
-// （`music-recommend/index.tsx:204-213`）——三个是同一件事的三档（立刻听 / 听
+// （`music-recommend/index.tsx:204-213`）——那一档是同一件事的几档（立刻听 / 听
 // 完这首就听 / 排到最后），连着摆用户才看得出这是个梯度。
 //
 // ⚠️ **「打开来处」按这一项有没有来处分**：本地文件没有 bvid，写「在 B 站打开」
@@ -54,6 +54,23 @@ var menuSeparator = menuItem{sep: true}
 // `actions.go` 的 OpenLabel 里，播放列表抽屉的行菜单也调它。
 //
 // ⚠️ 别看着 Biu 有图标就给每一项补一张图：MenuItem 没有图标字段，补不进去。
+//
+// # 三档播放（票 #299，2026-10-24 拍板）
+//
+// 这一段菜单现在是**三档**，名字各说各的事：
+//
+//	立即播放        只放**这一首**（队列被换成这一首）
+//	从这一首往后听  从这一首到这一页末尾，接进队列并播放
+//	下一首播放      这一首排在正在放的那首后面
+//	添加到队列      这一首排到队尾
+//
+// ⚠️ **「立即播放」和「从这一首往后听」只差几个字，做的事差着一个队列**——所以
+// 原来那项叫「播放」的那一枚**改了名**：菜单里同时摆着「播放」和「立即播放」
+// 两枚，用户按的是哪一枚只能靠试，而试错的那一下会把用户的队列换掉。
+//
+// 「立即播放」是**拍板定的语义**（票 #299）：只放当前这一首。它对应的是上游
+// 那一枚（老版本歌单行菜单里的 `PlayList/index.tsx:68`「立即播放」）——「立刻
+// 放这一首」，不是「把这一页都排上」。
 //
 // # 放不了的那一类：先别给入口
 //
@@ -66,8 +83,17 @@ var menuSeparator = menuItem{sep: true}
 // 分不清「真没有音频流」和「没取到」（这两件事要走的路正好相反，见
 // `internal/app/unplayable.go`）。
 func menuItems(m Music) []menuItem {
+	// ⚠️ **「播放」那一项在用户行上是另一个动作**：搜索页「用户」那一档的行
+	// 不是歌（`app.ItemTypeUser`），它那一项的「播放」是**进 UP 主空间**
+	// （上游 `user-card.tsx:51`）。所以那一档的行仍旧写「播放」——写成
+	// 「从这一首往后听」的话，用户会以为点下去是在放歌。
+	playLabel := "从这一首往后听"
+	if m.Item.Type == app.ItemTypeUser {
+		playLabel = "播放"
+	}
 	items := []menuItem{
-		{key: "play", label: "播放"},
+		{key: "play-now", label: "立即播放"},
+		{key: "play", label: playLabel},
 		{key: "play-next", label: "下一首播放"},
 		{key: "queue", label: "添加到队列"},
 		menuSeparator,
@@ -81,7 +107,8 @@ func menuItems(m Music) []menuItem {
 
 // markUnplayable 把放不了 / 下不了的那些项按不动，并补上说明。
 //
-// 两类分开判：**放不了**（没有可播的稿件身份）动的是三个播放入口；
+// 两类分开判：**放不了**（没有可播的稿件身份）动的是四个播放入口
+// （立即播放 / 从这一首往后听 / 下一首播放 / 添加到队列）；
 // **下不了**（音乐库条目：放得了但没有下载通道）动的是「下载音频」。
 // 合成一句会错——「下载音频」对放不了的条目也是对的（它压根下不了，
 // 但原因不同）。
@@ -92,7 +119,7 @@ func markUnplayable(items []menuItem, it app.Item) []menuItem {
 	if !app.CanPlay(it) {
 		for i := range items {
 			switch items[i].key {
-			case "play", "play-next", "queue", "download-audio":
+			case "play-now", "play", "play-next", "queue", "download-audio":
 				items[i].disabled = true
 			}
 		}
@@ -163,6 +190,14 @@ func buildSongMenu(menu *ui.Menu, songs []Music, acts Actions, i int, playFrom f
 // doAction 是菜单项被选中之后做的事。i 是这一项的下标，song 是它那一首。
 func doAction(item menuItem, i int, song Music, acts Actions, playFrom func(int)) {
 	switch item.key {
+	case "play-now":
+		// 「立即播放」= **只放当前这一首**（票 #299）：队列被换成这一首。
+		if acts.PlayNow == nil {
+			// 说清楚比按了没反应好（和下面几项同一个道理）。
+			notify(acts, "「"+item.label+"」现在还不能用", notice.Warning)
+			return
+		}
+		acts.PlayNow(song.Item)
 	case "play":
 		playFrom(i)
 	case "play-next":

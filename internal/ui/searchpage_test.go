@@ -233,19 +233,24 @@ func queueOneSong(t *testing.T, s *Shell, tt *mygoui.Tester) app.Item {
 // 三个反直觉行为
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestPlayAllOnlyAppendsToTheQueue 是验收第 1 条，也是最容易被做反的一条：
-// 「全部播放」**不替换**当前队列。
+// TestPlayAllAppendsToTheQueueWithoutDroppingWhatIsThere 是验收第 1 条，也是最
+// 容易被做反的一条：「全部播放」**不替换**当前队列。
 //
 // 上游的原话就在那儿（`video-list/index.tsx:89-101`）：它把当前已加载的列表全量
 // 映射之后调 `addList`，**不是 `playList`**。做成了 `PlayFrom`（换掉整个队列、
 // 从第一首起播）的表现是：用户正听着歌，按一下按钮，正在放的那首立刻被换掉，
 // 队列里前面放的那些全没了。
-func TestPlayAllOnlyAppendsToTheQueue(t *testing.T) {
+//
+// ⚠️ **这一条只判队列，不判正在放的是哪一首**：票 #299 之后这一枚**也开始播**
+// （从这一页的第一首开始），而这一页的歌是**在线的**——测试环境里没挂取流那一段
+// （`internal/app` 的 `StreamingMounted`），按下去只会得到一句「在线播放暂时用不了」。
+// 「开始播」那一条用**本地歌**钉：`ticket299_test.go` 的那两条，还有
+// `internal/app` 的 `TestEnqueueAndPlayAppendsInOrderAndStartsAtTheFirst`。
+func TestPlayAllAppendsToTheQueueWithoutDroppingWhatIsThere(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
 	settleText(t, tt, "第 1 页 第 1 首")
 
 	queueOneSong(t, s, tt)
-	playing := s.app.Snapshot().Title
 	before := s.app.Queue().Items()
 	if len(before) != 1 {
 		t.Fatalf("测试自己出了问题：队列里有 %d 项", len(before))
@@ -257,10 +262,6 @@ func TestPlayAllOnlyAppendsToTheQueue(t *testing.T) {
 	tt.Frame()
 	tt.Frame()
 
-	// 🔴 正在放的那一首不能换。
-	if got := s.app.Snapshot().Title; got != playing {
-		t.Errorf("按了「全部播放」之后正在放的是 %q，want 还是 %q", got, playing)
-	}
 	after := s.app.Queue().Items()
 	if len(after) != len(before)+24 {
 		t.Fatalf("队列里有 %d 项，want %d（原来 1 + 追加 24）", len(after), len(before)+24)
@@ -270,10 +271,6 @@ func TestPlayAllOnlyAppendsToTheQueue(t *testing.T) {
 		if after[i] != it {
 			t.Errorf("队列第 %d 项被换了：%+v，want %+v", i, after[i], it)
 		}
-	}
-	// 话照抄上游（`video-list/index.tsx:100`）。
-	if !tt.HasText("已添加 24 首到播放列表") {
-		t.Errorf("没有说加了几首，文字有 %q", tt.Texts())
 	}
 }
 
