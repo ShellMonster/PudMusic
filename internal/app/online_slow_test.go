@@ -671,8 +671,16 @@ func TestTheFailureSaysWhatActuallyHappened(t *testing.T) {
 	if err := a.Enqueue(onlineItem("BV1", "1", "下到一半卡住的那一首")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 15*time.Second, "字节源收到字节了", func() bool {
-		return downloadedBytes(t, dir) > 0
+	// ⚠️ **等的是「那 64 KB 全到了盘上」，不是「有字节了」**：失败那句话里
+	// 写的字节数是**第一次闹钟时量到的那个数**（`loadFilled`，见
+	// `downloadProgressLocked`），而夹具只保证「服务器把 64 KB 发出去了」——
+	// **客户端收到几 KB 是另一回事**（机器一忙，socket 里那 64 KB 一次只
+	// 读到 4 KB）。那时候那句话**如实**说「已经下了 4 KB」，于是下面那句
+	// 断言（要说「64 KB」）就成了一条**竞态**：机器一忙就红。
+	// （2026-10-25 在板上验收时红过一次：load 30+，报的是「已经下了 4 KB」
+	// ——是这条竞态，不是产品的问题。）
+	waitFor(t, 15*time.Second, "那 64 KB 全到了", func() bool {
+		return downloadedBytes(t, dir) >= 64<<10
 	})
 	waitFor(t, 15*time.Second, "状态里说在取流", func() bool {
 		return a.Snapshot().Loading
