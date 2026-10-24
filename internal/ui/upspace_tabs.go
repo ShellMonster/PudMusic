@@ -26,7 +26,15 @@ func (s *Shell) viewSpaceTabs(c *ui.Context, sp *upSpace) {
 	// 的那一类控件（Checkbox/Radio/Slider/List/TextInput 都一样），框架造它
 	// 的时候就把状态建好了，事后再挂 key 会 panic（`ui/element.go` 的 `Key`）。
 	// 给他外面套一层是最省事的做法。
-	ui.Column(c).Key("space-tabs").PaddingX(upPad).Children(func() {
+	// ⚠️ **下面那 16 是四张 Tab 共用的那一段**：Tab 那一条和内容之间留一段
+	// （上游那个 Tab 的**内容面板**是 `px-0 py-4`——上下各 16，左右那 16 由页面
+	// 外层给）。原来一点都没有，于是「动态」两个字底下一张卡片就顶上来
+	// （用户 2026-10-25 说的）。
+	//
+	// ⚠️ **这一段给在 Tab 那一条上，不在内容面板里**：四张 Tab 的内容都摆在
+	// 下面那一个 `space-body` 里（`viewUpSpace`），所以这一段是**四张一起**的
+	// ——「一页两套口径」这件事从根上就不可能再有。
+	ui.Column(c).Key("space-tabs").Padding(space.None, upPad, space.Px16, upPad).Children(func() {
 		// ⚠️ **主 Tab 用轨道 + 滑块那一种**（`mainTabs`，见 tabs.go）：这一排
 		// 和次级排序那几排不是同一个样子（票 #138）。
 		//
@@ -90,8 +98,12 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 		// 表头**在列表外面**（`rowheader.go` 文件头）：列表往下滚它不动，宽屏下滚到
 		// 右边列名也还在。
 		// 工具条：全部播放 + 共几首（设计规范 §7.18，和首页、搜索页同一枚主按钮）。
+		//
+		// ⚠️ **上边那一格是 0**：Tab 那一条和这一段之间那 16 已经给了（上面
+		// `viewSpaceTabs` 那一层），工具条自己再给一份的话，这一张 Tab 的间距就
+		// 和另外三张不是同一个数了。
 		ui.Row(c).Key("upspace:toolbar").FillWidth().Gap(space.Px12).AlignItems(ui.Center).
-			Padding(space.Px4, upPad, space.Px8, upPad).Children(func() {
+			Padding(space.None, upPad, space.Px8, upPad).Children(func() {
 			if playAllButton(c, p.Loading || p.Loaded == 0).Clicked() {
 				s.playAllSongs(sp.videos.Items())
 			}
@@ -188,7 +200,8 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	//   - 滚动容器**直接**当别的容器的下一层时，它里面文字的盒子量出来是
 	//     0×0（BMG-16 记着的 Tester 那个坑），套一层就正常。
 	//
-	// ⚠️ **左右 16 是这一层给的，不在卡片里**：上游这三张 Tab 的内容摆在
+	// ⚠️ **左右 16 是这一层给的，上下那一段不在这一层**（在上面 Tab 那一条的
+	// 下内边距里，理由见 `viewSpaceTabs`）：上游那三张 Tab 的内容摆在
 	// `user-profile/index.tsx:130` 那个 `p-4` 里，而动态卡片自己左右是 0
 	// （动态流那一页的 32 是另一层 16+16）。卡片自己做内边距的话，同一个
 	// 组件在两页就会缩成两个宽度。
@@ -236,6 +249,18 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 				}
 				s.viewUpRow(r.Context, sp, tab, r.Index)
 			})
+		// ⚠️ **动态那一张 Tab 的行间距由列表给**（上游 `mb-2` = 8）。
+		//
+		// 卡片自己的下外边距**不能**留着：那一段属于**行**（不在卡片里），而
+		// 框架给「指针压着的那一行」铺一层 `t.SurfaceHover`——留着它，卡片底下
+		// 就露出那一层（暖纸主题下是淡棕，用户 2026-10-25 说的那条带子）。
+		// 改成列表的行间距之后，行和卡片一样高，那一层被卡片自己盖住了。
+		//
+		// ⚠️ **收藏夹 / 合集那两张 Tab 不给**：它们那一行是**卡片**（自己的底色、
+		// 圆角、描边），行间距还是它自己的下外边距 8（画面不变）。
+		if tab == upTabDynamic {
+			spaceList = spaceList.GapY(space.Px8)
+		}
 		s.trackScrollbar(spaceList)
 	})
 
