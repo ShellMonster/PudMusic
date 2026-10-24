@@ -122,6 +122,71 @@ func TestEnqueueFirstStartsPlayingAndRestJustWaits(t *testing.T) {
 	}
 }
 
+// TestEnqueueAndPlayAppendsInOrderAndStartsAtTheFirst 钉住「全部播放」那一枚的
+// 语义（票 #299，2026-10-24 人定的）：**这一页的歌按顺序加进队列并播放**。
+//
+// 三个判据，缺一个都不算对：
+//
+//   - **按顺序**进队列（打乱了的话用户听到的顺序和屏幕上看到的不一样）；
+//   - **队列里原来有的那几首还在**（这一枚是**追加**，不是换队列——和
+//     `PlayFrom` 的分界就在这里）；
+//   - **正在放的是这一批的第一首**（不是队列里第一首，也不是最后一首）。
+//
+// 跟 `Enqueue` 的差也要钉住：`Enqueue` 只在队列原本空的时候起播，而这一条
+// **总是**从这一批的第一首开始播——用户按的是「把这一页放一遍」。
+func TestEnqueueAndPlayAppendsInOrderAndStartsAtTheFirst(t *testing.T) {
+	a := newApp(t)
+	paths := copies(t, 4)
+
+	// 队列里先有一首（旧的）。
+	if err := a.Enqueue(items(paths[0])...); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, "第一首开始播", func() bool { return a.Snapshot().HasTrack })
+
+	if err := a.EnqueueAndPlay(items(paths[1], paths[2], paths[3])...); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, "这一批的第一首开始播", func() bool { return a.Snapshot().Title == "b" })
+
+	got := a.Queue().Items()
+	want := []string{paths[0], paths[1], paths[2], paths[3]}
+	if len(got) != len(want) {
+		t.Fatalf("队列里有 %d 首，want %d（旧的那一首 + 这一批的三首）", len(got), len(want))
+	}
+	for i, w := range want {
+		if got[i].Path != w {
+			t.Errorf("队列第 %d 首是 %q，want %q（这一批要按顺序进队列）", i+1, got[i].Path, w)
+		}
+	}
+	if idx := a.Queue().CurrentIndex(); idx != 1 {
+		t.Errorf("正在放的是队列第 %d 首，want 第 2 首（旧的那一首之后就是这一批的第一首）", idx+1)
+	}
+}
+
+// TestEnqueueAndPlayWithNothingToPlayLeavesTheQueueAlone 验给空是「什么都不做」。
+//
+// 给空却把队列清空的话，用户的歌悄悄没了而正在放的那首还在响——那是清空队列
+// 那一件事（`Queue.Reset`）的活，两件事混在一起最难查。
+func TestEnqueueAndPlayWithNothingToPlayLeavesTheQueueAlone(t *testing.T) {
+	a := newApp(t)
+	paths := copies(t, 2)
+	if err := a.Enqueue(items(paths[0])...); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, "第一首开始播", func() bool { return a.Snapshot().HasTrack })
+
+	if err := a.EnqueueAndPlay(); err != nil {
+		t.Fatalf("EnqueueAndPlay()：%v", err)
+	}
+	if got := a.Queue().Len(); got != 1 {
+		t.Errorf("给空之后队列里有 %d 首，want 还是原来那 1 首", got)
+	}
+	if title := a.Snapshot().Title; title != "a" {
+		t.Errorf("给空之后放的是 %q，want 还是 a", title)
+	}
+}
+
 // TestPlayFromSwapsTheQueueAndStartsAtTheFirst 是列表里「播放」那一项接的那条路
 // （widgets/list 的 Actions.Play）：换掉整个队列，从第一首开始播。
 //

@@ -388,7 +388,7 @@ func TestRightClickOnACardOpensTheSameMenuAsAListRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := tt.Menu()
-	want := []string{"播放", "下一首播放", "添加到队列", "-", "在 B 站打开", "-", "收藏", "下载音频"}
+	want := []string{"立即播放", "从这一首往后听", "下一首播放", "添加到队列", "-", "在 B 站打开", "-", "收藏", "下载音频"}
 	if !slices.Equal(got, want) {
 		t.Errorf("卡片上的菜单有 %q，want %q", got, want)
 	}
@@ -404,7 +404,7 @@ func TestChoosingPlayOnACardQueuesThatCardAndTheRestAfterIt(t *testing.T) {
 	if err := tt.RightClick("在线的歌 C"); err != nil {
 		t.Fatal(err)
 	}
-	if err := tt.ChooseMenuItem("播放"); err != nil {
+	if err := tt.ChooseMenuItem("从这一首往后听"); err != nil {
 		t.Fatal(err)
 	}
 	if len(rec.played) != 1 {

@@ -364,7 +364,10 @@ func (s *Shell) historyMenu(m *ui.Menu, i int) {
 	switch {
 	// 直播、专栏那几类在 B 站那边也放不了（上游的 `canPlay = business ===
 	// "archive"`，这里由 app 层判好传下来）。
-	case m.Item("播放").Disabled(!row.CanPlay).Chosen():
+	case m.Item("立即播放").Disabled(!row.CanPlay).Chosen():
+		// 「立即播放」= **只放这一首**（票 #299）：队列被换成这一首。
+		acts.PlayNow(i)
+	case m.Item("从这一首往后听").Disabled(!row.CanPlay).Chosen():
 		acts.Play(i)
 	// 「下一首播放」判的是同一个 CanPlay，理由见 laterMenu 里那一项。
 	case m.Item("下一首播放").Disabled(!row.CanPlay).Chosen():

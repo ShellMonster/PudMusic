@@ -879,6 +879,11 @@ func (p *pagedRows) playFrom(i int) {
 // 网格里放不出来」那种最难查的错（BMG-10 的收尾说明点名过同一件事）。
 type RowActions struct {
 	Play func(i int) // 从第 i 行往后接进队列并开始播
+	// PlayNow **只放第 i 行那一首**——菜单里那枚「立即播放」。
+	//
+	// 🔴 **语义是拍板定的**（票 #299，2026-10-24，人定的）：「立即播放」=
+	// 只放当前这一首。队列被换成这一首，不是「从这一行往后」的那一批。
+	PlayNow func(i int)
 	// PlayNext 把第 i 行排在**正在放的那首后面**（「下一首播放」）。
 	//
 	// 和 Add 的分界就是插在哪：Add 接在队尾（得等整张列表放完），这一条接在
@@ -896,6 +901,7 @@ type RowActions struct {
 func (p *pagedRows) actions() RowActions {
 	return RowActions{
 		Play:      p.playFrom,
+		PlayNow:   p.playNowOne,
 		PlayNext:  p.playNextOne,
 		Add:       p.addOne,
 		Open:      p.openOne,
@@ -917,6 +923,18 @@ func (p *pagedRows) addOne(i int) {
 	row, ok := p.Row(i)
 	if ok && p.acts.Add != nil {
 		p.acts.Add([]app.Item{row.Item})
+	}
+}
+
+// playNowOne 只放第 i 行那一首（队列被换成这一首）。
+//
+// ⚠️ **底下那一层可能是 nil**：和 `playNextOne` 同一个理由——测试里那份
+// `list.Actions{}` 什么都没有，调一个 nil 函数会一路穿出 Cocoa 事件循环把
+// 进程带走（铁律四）。
+func (p *pagedRows) playNowOne(i int) {
+	row, ok := p.Row(i)
+	if ok && p.acts.PlayNow != nil {
+		p.acts.PlayNow(row.Item)
 	}
 }
 
