@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -296,6 +297,126 @@ func TestTheSourceGivesUpAfterTheBackoffIsUsedUp(t *testing.T) {
 	}
 	if !errors.Is(err, ErrStreamDead) {
 		t.Errorf("err = %v，没有包 ErrStreamDead", err)
+	}
+}
+
+// TestTheRetryNumberCountsThisRoundOnly 盯**「第 N 次」的口径**（票 #378）。
+//
+// 界面上写的是「正在重连（第 N 次）」，而那个 N 必须是「**这一轮断流**里的
+// 第几次重试」——一次断流恢复之后，下一轮从第 1 次重新数。
+//
+// 🔴 **以前那个 N 是「这条源累计换过几次流」**：一次断流恢复之后，下一次
+// 断流的**第一次**重试会显示「第 2 次」——用户读到的是「我刚才已经重试过
+// 一次了」，而实际上**这一轮是第一次**。
+//
+// 这一条造的形状是「断 → 恢复 → 再断」：
+//
+//	第一次请求	地址过期（403）→ 这一轮的第 1 次重试
+//	第二次请求	发一半就断——**字节是到了的**，所以这一轮算「恢复过」
+//	第三次请求	接着下完
+//
+// 于是两次断流都是「第 1 次」。旧口径下第二次会报「第 2 次」。
+func TestTheRetryNumberCountsThisRoundOnly(t *testing.T) {
+	data := payload(64 << 10)
+
+	var (
+		mu   sync.Mutex
+		hits int
+	)
+	// 掐断要等测试确认「那半截字节到了客户端」再放行（理由见 `cutAfter`
+	// 那段注释）：不这样的话，客户端看到的就成了一次「什么都没下到」的
+	// 失败——那样测的就不是「这一轮恢复过了」。
+	gate := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		n := hits
+		mu.Unlock()
+		switch n {
+		case 1:
+			// 地址过期了：这一轮的第 1 次重试。
+			http.Error(w, "地址失效了", http.StatusForbidden)
+		case 2:
+			// 发一半就断。**字节是到了的**——那一轮因此算「恢复过」。
+			from := rangeStart(r)
+			w.Header().Set("Content-Length", fmt.Sprint(int64(len(data))-from))
+			if from > 0 {
+				w.Header().Set("Content-Range",
+					fmt.Sprintf("bytes %d-%d/%d", from, len(data)-1, len(data)))
+				w.WriteHeader(http.StatusPartialContent)
+			}
+			w.Write(data[from : len(data)/2])
+			w.(http.Flusher).Flush()
+			<-gate
+			panic(http.ErrAbortHandler)
+		default:
+			serveBytes(w, r, data, len(data))
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	var (
+		evMu       sync.Mutex
+		attempts   []int
+		reconnects int
+	)
+	s, err := NewStreamSource(StreamSourceOptions{
+		URLs:    []string{srv.URL},
+		Client:  srv.Client(),
+		TempDir: t.TempDir(),
+		Backoff: fastBackoff(),
+		Refetch: func(context.Context, int64) *StreamReply {
+			return &StreamReply{URLs: []string{srv.URL}}
+		},
+		OnRetry: func(attempt int, wait time.Duration) {
+			evMu.Lock()
+			attempts = append(attempts, attempt)
+			evMu.Unlock()
+		},
+		OnReconnected: func() {
+			evMu.Lock()
+			reconnects++
+			evMu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	// 先把头几个字节读出来，确认它们到了，再放行掐断。
+	buf := make([]byte, 16)
+	if _, err := io.ReadFull(s, buf); err != nil {
+		t.Fatalf("头几个字节没到：%v", err)
+	}
+	close(gate)
+
+	got, err := io.ReadAll(s)
+	if err != nil {
+		t.Fatalf("重试之后应该能下完：%v", err)
+	}
+	if !bytes.Equal(got, data[len(buf):]) {
+		t.Errorf("下到的字节不对：%d 字节，want %d", len(got), len(data)-len(buf))
+	}
+
+	evMu.Lock()
+	defer evMu.Unlock()
+	// 🔴 **两次断流都是「第 1 次」**：字节回来过（这一轮过去了），下一次
+	// 断流重新数。
+	want := []int{1, 1}
+	if len(attempts) != len(want) {
+		t.Fatalf("报了 %d 次「第几次重试」：%v，want %v", len(attempts), attempts, want)
+	}
+	for i, at := range attempts {
+		if at != want[i] {
+			t.Errorf("第 %d 次断流报的是「第 %d 次」，want 第 %d 次（这一轮重新数）",
+				i+1, at, want[i])
+		}
+	}
+	if reconnects != 2 {
+		// 两次恢复：第二次请求发来的那半截（这一轮过去了），第三次请求发完的
+		// 那半截（下一轮也过去了）。
+		t.Errorf("「字节回来了」报了 %d 次，want 2 次（两轮各自恢复过一次）", reconnects)
 	}
 }
 
