@@ -958,6 +958,10 @@ func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
 	// `RiStarFill/Line size={18}`（`components/music-fav-button/index.tsx:55-56`），
 	// 而**播放条上全部图标键都是 18**。改之前是 14（`iconSm`）——比上游小 4 像素，
 	// 在 32 的盒子里每边留 9，看起来像「画糊了」。
+	// 🔴 **身份钉死**：这一段的兄弟是「逐帧问出来」的「分集」键（单 P 的稿子不
+	// 摆），它一出现，这一枚的兄弟序号就变了——而动画通道是存在身份里的（理由
+	// 见 `playbar_keys.go`）。
+	c.Key(favButtonKey)
 	btn := s.withTip(c, iconKey(c, favIcon(faved), "收藏", iconMd, false).
 		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), favTooltip(faved))
 	if faved {

@@ -33,6 +33,8 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -66,6 +68,57 @@ const (
 	likeRingSteps = 48
 )
 
+// 赞键那一下的动效：图标层先弹，**背景层晚 0.1s 才长出来**。
+//
+// # 0.1s 这个数从哪来
+//
+// 《制作点赞与投票动画》榜单 v3：「爱心与圆形背景分别做 0.7s 的 scale 动画，
+// **背景晚 0.1s 开始**」；手册里也有一处同样的说法（2024 年的点赞按钮：背景爱心
+// 比按钮圆形层延迟 0.1s）。
+//
+// ⚠️ **晚 0.1s 是靠两条通道 + `Animation.Delay` 做的**（框架的 `Delay` 只在
+// **目标变了**的时候才生效，见 `mygo/ui/motion.go`）——所以图标层和背景层是
+// **两个元素、两条通道**，不是一条通道两个数。
+const (
+	// likePopScale 是图标层弹到多大（弹完回到 1）。
+	likePopScale = 1.25
+	// likePopUp 是弹上去要多久。
+	likePopUp = 100 * time.Millisecond
+	// likePopDown 是弹回来要多久。
+	//
+	// ⚠️ **比弹上去慢**：弹回去是「余韵」，快一点会显得像弹了一下就断了。
+	likePopDown = 180 * time.Millisecond
+	// likeBgDelay 是**背景层比图标层晚多久开始**。
+	likeBgDelay = 100 * time.Millisecond
+	// likeBgTime 是背景层长出来要多久。
+	//
+	// ⚠️ **比图标层慢**：两层的时长一样的话，晚 0.1s 才开始的那一层会「追」上来，
+	// 错落就白错了。
+	likeBgTime = 260 * time.Millisecond
+	// likeBgRest 是背景层在「没赞」那一档缩到多少。
+	//
+	// 🔴 **不是 0**：手册 ⓪ ②「伴随不透明度的缩放动画…不要以 0 作为开始和结束的
+	// 值，一般保持在 0.5 以上」——用户很容易注意到元素从一个点出现。所以背景层在
+	// 「没赞」那一档是**半大、半透明**（不透明度那一档是 0，所以看不见），长出来
+	// 的时候从 0.5 起，而不是从一个点里钻出来。
+	likeBgRest = 0.5
+	// likeBgAlpha 是背景层那一圈的颜色透明度。
+	//
+	// 0.18：主色压一层很淡的底，图标（主色）压在上面读得出来（对照 DESIGN.md
+	// §四那张对比度表——主色当字色是 1.9:1，所以底要淡到不干扰它）。
+	likeBgAlpha = 0.18
+)
+
+// 赞键那三条动画通道的键。
+//
+// ⚠️ **必须是常量**：框架把动画的值存在元素状态的一个 map 里，键是 `any`——
+// 传一个每次都要装箱的字符串，每一帧就多一次分配（见 `widgets/flat/press.go`）。
+const (
+	likeIconKey    = "like:icon"
+	likeBgScaleKey = "like:bg-scale"
+	likeBgAlphaKey = "like:bg-alpha"
+)
+
 // likeGesture 是长按那一套状态机。
 //
 // ⚠️ **只由 view 在主线程上读写**（铁律一）。它挂在 `Shell` 上而不是每帧新建：
@@ -84,6 +137,26 @@ type likeGesture struct {
 	// progress 是环走到哪（0~1），0 = 不画。每一帧重算（不用动画），
 	// 所以它只是这一帧的答案，**不是**跨帧记着的进度。
 	progress float32
+
+	// popUntil 是图标层那一弹什么时候结束（**引擎钟**，见 `viewLikeStar`）。
+	//
+	// ⚠️ **是引擎钟，不是 `s.clock`**：这一档是画面上的动画，引擎钟才听「减少
+	// 动态效果」、才推得动（无头测试推的就是它）。长按那 2.5 秒是真时钟的事
+	// （`start` 那一栏），两件事各用各的钟。
+	popUntil time.Time
+
+	// 下面三个是**这一帧各层缩到多少、多实**（0 ~ 1 或 1.25）。
+	//
+	// ⚠️ **它们是这一帧的答案，不是跨帧记着的进度**——跟上面那个 `progress` 一
+	// 样（每一帧重算）。留着是因为「图标层先动、背景层晚 0.1s」这件事**只有
+	// 从这几个数上看得见**：画面上那一圈淡主色太浅，量像素量不出来。
+	//
+	// iconScale 是图标层（赞的那一下弹到 1.25，弹完回到 1）。
+	iconScale float32
+	// bgScale 是背景层（没赞时 0.5，赞了长到 1）。
+	bgScale float32
+	// bgAlpha 是背景层的不透明度（没赞时 0，赞了长到 1）。
+	bgAlpha float32
 
 	// pts 是环的顶点，每帧复用（稳态一帧不分配，和频谱那一块同一条）。
 	pts [][2]float32
@@ -283,6 +356,15 @@ func (s *Shell) ringPoints(r ui.Rect, progress float32) [][2]float32 {
 // 🔴 **图标 18、点击区 32**（票 #219，报告 §3.6）：上游那一枚是
 // `RiThumbUpFill/Line size={18}`（`components/music-thumb/index.tsx:152-153`），
 // 而**播放条上全部图标键都是 18**。改之前是 14（`iconSm`）——比上游小 4 像素。
+//
+// # 两层：图标层 + 背景层
+//
+// 底下一圈**背景**（主色很淡的一盘），上面是**拇指图形**。赞的那一下：图标层
+// 先弹，**背景层晚 0.1s 才长出来**（`likeBgDelay`）——错落来自手册和那份
+// 点赞动画榜单（见上面那几个数的注释）。
+//
+// 🔴 **两层是两个元素、两条通道**：框架的 `Animation.Delay` 只在**目标变了**的
+// 时候才生效（`mygo/ui/motion.go`），一条通道没法让两层错开 0.1s。
 func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 	if !s.app.Likeable() {
 		return
@@ -302,16 +384,112 @@ func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 	// icons.go 那四个函数的头一段：调用点一旦自己也能决定画哪张，「哪一档配哪
 	// 一张」就没有钉住的地方了。
 	name := likeIcon(rel.Liked)
-	btn := s.withTip(c, iconKey(c, name, label, iconMd, false).
-		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7).TextColor(color),
+
+	// 🔴 **身份要钉死**：这一段是「分集 / 收藏 / 赞」三枚并排，而「分集」是逐帧
+	// 问出来的（单 P 的稿子不摆，见 `viewPartButton`）——它一出现，后面几枚的
+	// **兄弟序号**就都变了，而**动画通道是存在身份里的**（理由见
+	// `playbar_keys.go`）。所以这里给这一枚钉一个 key。
+	c.Key(likeButtonKey)
+
+	btn := s.withTip(c, s.likeButton(c, name, label, color, rel.Liked),
 		likeStarTooltip(rel.Liked, s.app.LikeErr() != nil && !s.app.LikeAsked()))
 	if btn.Clicked() {
+		// 赞的那一下：图标层弹起来，背景层晚 0.1s（那条通道的 `Delay` 自己算）。
+		//
+		// ⚠️ **这一弹是从下一帧才开始的**：框架的 `Children` 是**同步跑回调**的
+		// （`mygo/ui/element.go` 的 `func (e *node) Children(fn func())` 里就是
+		// `fn()`），所以图标层在**上面那一句**里就已经建好了——它问到的
+		// `popUntil` 还是上一次的值。于是这一帧按完，这一弹要到下一帧才起步
+		// （下一帧由 `SetLike` 叫醒，所以墙钟上几乎看不出）。
+		s.like.popUntil = c.Now().Add(likePopUp)
 		s.app.SetLike(!rel.Liked, func(err error) {
 			if err != nil {
 				s.addToast("赞不了："+err.Error(), notice.Danger)
 			}
 		})
 	}
+}
+
+// likeButton 是赞键那一枚按钮：底下那一圈背景，上面是拇指图形。
+//
+// ⚠️ **两层都是绝对定位、居中挂在按钮上**：绝对定位的元素绘制时排在普通子元素
+// **之后**（`mygo/ui/paint.go` 的两趟循环），而同一趟里是按**建元素的先后**画的
+// ——所以背景层先建、图标层后建，图标才落在背景上面。
+//
+// ⚠️ **位置用 `Attach(AnchorCenter, AnchorCenter)`**：绝对定位是相对按钮的
+// **padding box**（`mygo/ui/element.go` 的 `Absolute` 文档：「Top(0) puts the
+// element just below the border, whatever the padding」），居中挂上去正好在按钮
+// 正中间，和内边距无关。
+//
+// ⚠️ **按下时是「放大」到 1.04**（不是别的图标键那种缩到 0.96）：赞是往外给的
+// 一个动作，按下去的时候让它**涨一点**，比缩下去更像「按到了」（手册 ⓪ ①：
+// 「如果是放大，一般 1.04 就够了」）。
+func (s *Shell) likeButton(c *ui.Context, name, label string, color ui.Color, liked bool) ui.Element {
+	b := flat.Button(c, "").Label(label).
+		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7).TextColor(color)
+	b.Children(func() {
+		// 背景层（先建 → 画在下面）
+		bg := ui.Box(c).Attach(ui.AnchorCenter, ui.AnchorCenter).
+			Size(iconHitMd, iconHitMd).Radius(iconHitMd / 2).
+			Background(c.Theme().Accent.Alpha(likeBgAlpha))
+		// ⚠️ **两条通道各管各的**：缩放管「多大」，不透明度管「多实」。
+		// 不透明度那一档在「没赞」时是 0（所以看不见），而缩放那一档是 0.5 而不是
+		// 0（手册 ⓪ ②：带透明度的缩放不要以 0 作为开始和结束的值）。
+		bgScale := bg.AnimateTo(likeBgScaleKey, likeBgScaleTarget(liked),
+			ui.Animation{Duration: likeBgTime, Delay: likeBgDelay, Ease: motion.Unified})
+		bgAlpha := bg.AnimateTo(likeBgAlphaKey, likeBgAlphaTarget(liked),
+			ui.Animation{Duration: likeBgTime, Delay: likeBgDelay, Ease: motion.Unified})
+		bg = bg.Scale(bgScale, bgScale).Opacity(bgAlpha)
+		s.like.bgScale, s.like.bgAlpha = bgScale, bgAlpha
+
+		// 图标层（后建 → 画在上面）
+		ic := ui.Icon(c, icon(name)).FontSize(iconMd).Attach(ui.AnchorCenter, ui.AnchorCenter)
+		if col, ok := flat.IconAccentOnHover(c, false, b.Hovered()); ok {
+			ic = ic.TextColor(col)
+		}
+		// ⚠️ **两个缩放要相乘**：框架的 `Scale` 本来就是「在已有变换之后再缩」
+		// （`mygo/ui/transform.go` 的 `e.transform.Then(Scaling(x, y))`），两次
+		// `Scale` 也就是乘在一起的——这里自己乘一次，是为了让「乘的是哪两个」在
+		// 一行里看得见（而且只留一份变换）。
+		v := flat.PressScaleValue(ic, b.Pressed(), true) * s.likeIconScale(c, ic)
+		ic = ic.Scale(v, v)
+	})
+	return b
+}
+
+// likeIconScale 是图标层这一帧该缩到多大：赞的那一下弹一下，弹完回到 1。
+//
+// ⚠️ **弹上去和弹回来是两档时长**：目标变了的时候框架才用这一帧给的时长重画
+// 曲线（`mygo/ui/motion.go`），所以「弹上去 100ms、弹回来 180ms」是这么给的。
+func (s *Shell) likeIconScale(c *ui.Context, ic ui.Element) float32 {
+	popping := c.Now().Before(s.like.popUntil)
+	target, d := float32(1), likePopDown
+	if popping {
+		target, d = likePopScale, likePopUp
+	}
+	v := ic.AnimateTo(likeIconKey, target, ui.Animation{Duration: d, Ease: motion.Unified})
+	s.like.iconScale = v
+	return v
+}
+
+// likeBgScaleTarget 是背景层这一帧该缩到多大。
+func likeBgScaleTarget(liked bool) float32 {
+	if liked {
+		return 1
+	}
+	return likeBgRest
+}
+
+// likeBgAlphaTarget 是背景层这一帧该多实。
+//
+// ⚠️ **「没赞」那一档是 0**：背景层在没赞的时候要**看不见**（半大的一盘淡主色
+// 挂在赞键底下，看着像没点着但颜色不对）。0.5 那个下限管的是**缩放**那一档
+// （`likeBgRest`），不是这一档。
+func likeBgAlphaTarget(liked bool) float32 {
+	if liked {
+		return 1
+	}
+	return 0
 }
 
 // likeStarTooltip 是星标悬停时那句话。
