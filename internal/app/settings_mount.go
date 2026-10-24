@@ -70,6 +70,23 @@ func (a *App) MountSettings(path string) error {
 	a.queue.SetPlayMode(s.PlayMode)
 	a.queue.SetKeepPagesOrderInRandom(s.ShouldKeepPagesOrderInRandomPlayMode)
 
+	// 音量：用户设过的那一档，重启之后还在（票 #311）。
+	//
+	// ⚠️ **「这一格不存在」和「这一格是 0」必须分开**：前者是老版本写的文件
+	// （那时候音量压根不落盘，每一次启动都是 100%），该给默认值；后者是用户自己
+	// 把滑块拉到最下（= 静音），该给 0。所以这一格是指针（见 `Settings.Volume`）。
+	//
+	// ⚠️ **静音是它自己的一格**：静音的时候音量那一格一动不动，落盘的也是它——
+	// 「静音后退出再启动，音量变成 0」那个坑就是这么踩的（Clementine 的老毛病）。
+	vol := DefaultVolume
+	if s.Volume != nil {
+		vol = *s.Volume
+	}
+	a.mu.Lock()
+	a.volume = vol
+	a.muted = s.Muted
+	a.mu.Unlock()
+
 	// 落盘完成了要叫醒界面：不唤醒的话，界面会一直停在「还没存」的那一帧
 	//（和播放进度走的是同一条路，见 App.SetWake 的注释）。
 	store.SetWake(a.invalidate)
