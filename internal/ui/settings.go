@@ -38,6 +38,14 @@ func MountSettings(a *app.App) error {
 	// 挂在最前面，下面拿不到目录直接返回时它照样兜着：那时没有 store，
 	// FlushSettings 什么都不做。
 	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
+		// 「上次听到哪儿」这一格：**退出前强制落一次**（见
+		// `internal/app/playback_state.go`）。
+		//
+		// ⚠️ **它排在 flush 前面**：flush 落的是「此刻设置里是什么」，而这一格
+		// 是刚刚才写进去的——顺序反了的话，退出时最后那一下就丢了。
+		//
+		// 丢了的症状是「重启之后回到空队列」，用户只会觉得「这应用记不住东西」。
+		a.SavePlayback()
 		if err := a.FlushSettings(); err != nil {
 			log.Printf("biu: 退出时保存设置失败：%v", err)
 		}

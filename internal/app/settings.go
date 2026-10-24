@@ -353,6 +353,19 @@ type Settings struct {
 	// 键名照 Biu 的 `play-list` 那个 zustand 字段（`isMuted`）。
 	Muted bool `json:"isMuted"`
 
+	// Playback 是「上次听到哪儿」那一格：队列、当前项、播放位置。
+	//
+	// ⚠️ **它和音量、播放模式在同一个文件里，是有意的**：同一次原子写里落盘，
+	// 它们之间就没有「谁先谁后」的竞态（见 playback_state.go 文件头那张表）。
+	//
+	// 键名是我们自己的（Biu 那边没有这一个键，它把队列放在 `play-list` store
+	// 里）。Biu 读到它会当不认识的键——最坏的结果是**它自己的队列不受影响**
+	//（那是另一个文件里的事）。
+	//
+	// 加键不用涨 SchemaVersion（见 SchemaVersion 的注释：只加新的可选键不用
+	// 涨）：读不到就是空的，等于「没有上次听到哪儿」。
+	Playback PlaybackSnapshot `json:"playback"`
+
 	// extra 是这个版本的代码不认识的键，原样带着走。
 	//
 	// 两个方向都要保：更新的 Biu 加了新键，或者未来的我们加了键而用户换回了
@@ -465,6 +478,13 @@ func DefaultSettings(downloadPath string) Settings {
 		// 音量：默认 100%（老版本每一次启动都是这一档，见 DefaultVolume）。
 		Volume: &vol,
 		Muted:  false,
+
+		// 「上次听到哪儿」那一格：默认是空的（= 没有上次听到哪儿）。
+		//
+		// ⚠️ **`Items` 给空序列而不是 nil**：nil 和空序列在 JSON 里差一个
+		// `null`，写出去会让「还没存过」和「存过、当时队列是空的」看起来是两
+		// 回事。统一成空序列。
+		Playback: PlaybackSnapshot{Items: []PlaybackEntry{}},
 
 		// 播放模式的两个默认值都照 Biu 的初始状态（`play-list.ts:370,373`）：
 		// 默认循环播放（不是顺序播放——「放完就停住」正是这一票要治的症状，
@@ -713,6 +733,10 @@ func (s *Settings) normalize() {
 	}
 	if s.SideMenuCollectionOrder.Collected == nil {
 		s.SideMenuCollectionOrder.Collected = []int64{}
+	}
+	// 「上次听到哪儿」那一格，同一个理由（见 DefaultSettings 里那一句）。
+	if s.Playback.Items == nil {
+		s.Playback.Items = []PlaybackEntry{}
 	}
 }
 
