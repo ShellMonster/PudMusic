@@ -2,24 +2,62 @@ package app
 
 // 这一组盯的是「正在重连」这一档在**应用层**的接线（票 #315）。
 //
-// # 为什么这一档要有
+// # 🔴 那一档的**源那一半住在源那边**
 //
-// 断流之后应用在救这一首（换地址 / 换流 / 从播放位置重开），而这一档以前
-// 界面上一个字都没有——用户看到的是「歌停着、界面不动、没有字」。
+// `audio.StreamSource.Reconnecting()` 报「这条流是不是在等字节回来」，应用
+// 只**问**当前在管的那一两条流（见 `reconnect.go`）。
 //
-// 这一组钉四件事：
+// ⚠️ **为什么不能在这儿存一栏**（票 #315 的评审复现过）：一条**建出来又被
+// 丢掉**（代次过期）的源会把那一栏抢走，于是正在放的那首断流时，界面上
+// 「正在重连」**一次都不亮**——正是这一票要消灭的「歌停着、界面不动、没有
+// 字」。这一组盯的就是「**应用问的是哪一条源**」。
 //
-//	字节源说「我要重试了」→ 那一档亮起来，而且说得出是第几次
-//	字节回来了 / 出错了 → 那一档收掉
-//	**迟到的回调不许碰界面上的状态**（旧流的回调会擦掉新流的那一行）
-//	代次不对的回调不许碰（那是上一首歌的事）
+// 这一组用的是**真的源**（真退避、真 HTTP fixture）：手工塞一栏进去的话，
+// 证明不了「源的状态真的到了界面上」。
 
 import (
+	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 )
 
-// TestTheReconnectingFlagReachesTheSnapshot 盯「字节源说要重试 → 界面知道」。
+// retryingSource 造一条「正在重试」的字节源（它一直下不动）。
+//
+// 真源、真退避——只是把退避调得很快（几毫秒），好让用例不慢。
+func retryingSource(t *testing.T) *audio.StreamSource {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "地址失效了", http.StatusForbidden)
+	}))
+	t.Cleanup(srv.Close)
+	s, err := audio.NewStreamSource(audio.StreamSourceOptions{
+		URLs:    []string{srv.URL},
+		Client:  srv.Client(),
+		TempDir: t.TempDir(),
+		Backoff: []time.Duration{10 * time.Millisecond},
+		Refetch: func(context.Context, int64) *audio.StreamReply {
+			return &audio.StreamReply{URLs: []string{srv.URL}}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	waitFor(t, func() bool {
+		_, ok := s.Reconnecting()
+		return ok
+	}, "源开始重试")
+	return s
+}
+
+// TestTheReconnectingFlagReachesTheSnapshot 盯「源在等字节 → 界面上那一档亮」。
+//
+// 这一条盯的是**接线**：源的状态要真的走到 `State` 上（不是应用里另存一栏）。
 func TestTheReconnectingFlagReachesTheSnapshot(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
@@ -28,92 +66,66 @@ func TestTheReconnectingFlagReachesTheSnapshot(t *testing.T) {
 		t.Fatalf("什么都没发生就说在重连：%+v", st)
 	}
 
-	token := a.newReconnectToken()
-	a.noteReconnect(a.onlineGen, token, 2)
+	src := retryingSource(t)
+	a.mu.Lock()
+	a.pendingSrc = src
+	a.pendingSrcGen = a.onlineGen
+	a.mu.Unlock()
 
 	st := a.Snapshot()
 	if !st.Reconnecting {
-		t.Errorf("字节源说要重试，界面上却没有「正在重连」：%+v", st)
+		t.Errorf("源在等字节回来，界面上却没有「正在重连」：%+v", st)
 	}
-	if st.ReconnectAttempt != 2 {
-		t.Errorf("第几次重试 = %d，want 2", st.ReconnectAttempt)
-	}
-}
-
-// TestTheBytesComingBackTurnsTheReconnectingFlagOff 盯**成功那一半**。
-//
-// 「重连成功」在界面上就是「那一行不见了、歌接着响」——不另给一句提示
-// （那是噪音：成功了就继续播，用户要的是歌）。
-func TestTheBytesComingBackTurnsTheReconnectingFlagOff(t *testing.T) {
-	a := New()
-	t.Cleanup(a.Close)
-
-	token := a.newReconnectToken()
-	a.noteReconnect(a.onlineGen, token, 1)
-	a.noteReconnected(a.onlineGen, token)
-
-	if st := a.Snapshot(); st.Reconnecting {
-		t.Errorf("字节都回来了还说着「正在重连」：%+v", st)
+	if st.ReconnectAttempt < 1 {
+		t.Errorf("第几次重试 = %d，want ≥1", st.ReconnectAttempt)
 	}
 }
 
-// TestAnErrorTurnsTheReconnectingFlagOff 盯**失败那一半**。
+// TestOnlyTheSourceTheAppCaresAboutCounts 盯「应用问的是哪一条源」。
 //
-// 出错之后那一行必须收掉：错的那句和「正在重连」占同一个位置，而错的那句
-// 信息量更大——用户要看到的是「为什么不行、还能怎么办」。
-func TestAnErrorTurnsTheReconnectingFlagOff(t *testing.T) {
+// 🔴 **这一条是评审复现的那个洞**：一条**建出来又被丢掉**（代次过期）的源，
+// 它重试的时候**不许**点亮界面上那一档——抢走了的话，正在放的那首断流时，
+// 界面上「正在重连」一次都不亮。
+//
+// 判据是「应用只问当前在管的那一条」：被丢掉的那条既不是 `pendingSrc`，
+// 也不是 `online.source`。
+func TestOnlyTheSourceTheAppCaresAboutCounts(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
 
-	token := a.newReconnectToken()
-	a.noteReconnect(a.onlineGen, token, 1)
-	a.setErrText("在线流拉不下来了", true)
+	kept := retryingSource(t)
+	dropped := retryingSource(t)
 
-	st := a.Snapshot()
-	if st.Reconnecting {
-		t.Errorf("已经报错了还说着「正在重连」：%+v", st)
+	a.mu.Lock()
+	a.pendingSrc = kept
+	a.pendingSrcGen = a.onlineGen
+	a.mu.Unlock()
+
+	// 被丢掉的那条也在重试——它不该影响界面上的那一档。
+	if _, ok := dropped.Reconnecting(); !ok {
+		t.Fatal("被丢掉的那条源没有在重试，这条用例就验不到东西了")
 	}
-	if st.Err == "" {
-		t.Error("那句话没上屏")
-	}
-}
-
-// TestALateCallbackFromTheOldStreamDoesNotTouchTheNewOne 盯**迟到的回调**。
-//
-// 换音质 / 换流重开会建一条新的字节源，而旧源可能还在退避里等着——它的
-// 「字节回来了」回调在这之后才到。不看令牌的话，旧流会把新流的「正在重连」
-// 那一行擦掉：用户正等着重连，那一行却忽然没了。
-func TestALateCallbackFromTheOldStreamDoesNotTouchTheNewOne(t *testing.T) {
-	a := New()
-	t.Cleanup(a.Close)
-
-	old := a.newReconnectToken()
-	a.noteReconnect(a.onlineGen, old, 1)
-
-	// 换了一条流：令牌换了。
-	fresh := a.newReconnectToken()
-	a.noteReconnect(a.onlineGen, fresh, 1)
-
-	// 旧源的回调迟到了。
-	a.noteReconnected(a.onlineGen, old)
-
 	if st := a.Snapshot(); !st.Reconnecting {
-		t.Errorf("旧流的回调把新流的「正在重连」擦掉了：%+v", st)
+		t.Errorf("在管的那条源在重试，界面上却没有「正在重连」：%+v", st)
 	}
 }
 
-// TestACallbackFromAnotherGenerationIsIgnored 盯**代次不对的回调**。
+// TestAStalePendingSourceDoesNotCount 盯**代次不对的那条不算**。
 //
-// 切歌之后，上一首歌的源回调才回来是常事——它不许碰界面上的状态。
-func TestACallbackFromAnotherGenerationIsIgnored(t *testing.T) {
+// 切歌之后，上一首歌那条**还在建**的源会留在 `pendingSrc` 上（它要到自己
+// 建完才发现代次过期）。那一段的「正在重试」和用户眼前这一首没关系。
+func TestAStalePendingSourceDoesNotCount(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
 
-	token := a.newReconnectToken()
-	a.noteReconnect(a.onlineGen+1, token, 1)
+	src := retryingSource(t)
+	a.mu.Lock()
+	a.pendingSrc = src
+	a.pendingSrcGen = a.onlineGen - 1 // 上一代留下的
+	a.mu.Unlock()
 
 	if st := a.Snapshot(); st.Reconnecting {
-		t.Errorf("上一代的回调把这一代的状态改了：%+v", st)
+		t.Errorf("上一代留下的源把「正在重连」点亮了：%+v", st)
 	}
 }
 
@@ -143,33 +155,6 @@ func TestTheReopenFromThePlaybackPositionSaysSo(t *testing.T) {
 	}
 }
 
-// TestANewStreamClearsTheOldOnesRetryState 盯「新的一段流顶上来」。
-//
-// 旧源要么被关了、要么被换掉了——它的「正在重试」到此为止。不收的话那一行
-// 会一直亮着，而那一段流早就没人管了。
-//
-// ⚠️ **只收源那一半**：应用层那一半（「正在从播放位置重开」）正开着呢——
-// `refreshOnlineNow` 是先 `beginReconnect` 再建这条流的。
-func TestANewStreamClearsTheOldOnesRetryState(t *testing.T) {
-	a := New()
-	t.Cleanup(a.Close)
-
-	old := a.newReconnectToken()
-	a.noteReconnect(a.onlineGen, old, 1)
-	a.beginReconnect(a.onlineGen)
-
-	// 新的一段流顶上来了。
-	a.newReconnectToken()
-
-	st := a.Snapshot()
-	if st.ReconnectAttempt != 0 {
-		t.Errorf("旧那一段的「正在重试」没收掉：%+v", st)
-	}
-	if !st.Reconnecting {
-		t.Errorf("「正在从播放位置重开」那一半被顺手收掉了：%+v", st)
-	}
-}
-
 // TestClearingTheErrorDoesNotClearTheReconnecting 盯「装上新播放器不许抹掉重连」。
 //
 // 🔴 **这一条是评审复现的那个洞**：源刚点亮「正在重连」，`runOnline` 装好
@@ -182,8 +167,11 @@ func TestClearingTheErrorDoesNotClearTheReconnecting(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
 
-	token := a.newReconnectToken()
-	a.noteReconnect(a.onlineGen, token, 1)
+	src := retryingSource(t)
+	a.mu.Lock()
+	a.pendingSrc = src
+	a.pendingSrcGen = a.onlineGen
+	a.mu.Unlock()
 
 	// 装上新播放器走的就是这一句（`runOnline` / `restreamOnline` / 重开成功）。
 	a.clearErrLocked()
@@ -209,8 +197,6 @@ func TestTheSecondReopenSaysItGaveUp(t *testing.T) {
 
 	a.mu.Lock()
 	a.online = &onlineTrack{item: Item{Title: "换过两次的那一首"}, reopening: true}
-	// 源刚刚报过「我要重试」——这一档正亮着。
-	a.reconnecting = true
 	a.mu.Unlock()
 
 	a.refreshOnlineNow(errors.New("audio: 换流换到了另一条流"))

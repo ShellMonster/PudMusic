@@ -1043,13 +1043,12 @@ var Items = []Item{
 		// **一个字也没有**——「歌停着、界面不动、没有字」。
 		//
 		// 这一组盯三件事：**退避是真的**（重试之间隔了、随次数变长、关掉
-		// 能打断）、**「正在重连」看得见**（点亮、收掉、迟到的回调不许擦掉
-		// 别人的那一行）、以及**失败有交代**（第二次重开被挡掉时必须报错，
-		// 不许一声不吭地亮着）。
+		// 能打断）、**「正在重连」看得见**（它住在源那边、应用问的是**当前
+		// 在管的那一条**——一条被丢掉的源抢不走它）、以及**失败有交代**
+		// （第二次重开被挡掉时必须报错，不许一声不吭地亮着）。
 		//
-		// 🔴 **端到端那三条在 `internal/app/reconnect_e2e_test.go`**：手工调
-		// `noteReconnect` 的用例证明不了「源→应用层→界面」这条接线——把
-		// `buildFromRef` 里那两个回调整个拆掉，它们照样全绿。
+		// 🔴 **端到端那四条在 `internal/app/reconnect_e2e_test.go`**：手工调
+		// 应用的内部函数证明不了「源→应用层→界面」这条接线。
 		Spec: "断流重连：重试之间有退避（1 秒 / 2 秒 / 4 秒，总 ≤ 7 秒），重连期间界面上说「正在重连」，成功或失败都有明确结果",
 		Tests: []string{
 			"TestTheDefaultBackoffIsOneTwoFour",
@@ -1059,16 +1058,14 @@ var Items = []Item{
 			"TestTheSourceGivesUpAfterTheBackoffIsUsedUp",
 			"TestCloseCancelsTheBackoffWait",
 			"TestTheReconnectingFlagReachesTheSnapshot",
-			"TestTheBytesComingBackTurnsTheReconnectingFlagOff",
-			"TestAnErrorTurnsTheReconnectingFlagOff",
-			"TestALateCallbackFromTheOldStreamDoesNotTouchTheNewOne",
-			"TestACallbackFromAnotherGenerationIsIgnored",
+			"TestOnlyTheSourceTheAppCaresAboutCounts",
+			"TestAStalePendingSourceDoesNotCount",
 			"TestTheReopenFromThePlaybackPositionSaysSo",
-			"TestANewStreamClearsTheOldOnesRetryState",
 			"TestClearingTheErrorDoesNotClearTheReconnecting",
 			"TestTheSecondReopenSaysItGaveUp",
 			"TestTheStreamBreakShowsUpAsReconnecting",
 			"TestTheBreakDuringTheFirstLoadIsStillVisible",
+			"TestAStaleSourceDoesNotStealTheReconnectState",
 			"TestThePlayBarSaysItIsReconnecting",
 			"TestTheErrorWinsOverTheReconnectingLine",
 		},

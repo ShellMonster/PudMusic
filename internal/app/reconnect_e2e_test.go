@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -269,4 +270,102 @@ func waitForFine(t *testing.T, d time.Duration, what string, cond func() bool) {
 		time.Sleep(2 * time.Millisecond)
 	}
 	t.Fatalf("等了 %v，%s 还没发生", d, what)
+}
+
+// TestAStaleSourceDoesNotStealTheReconnectState 盯「一条被丢掉的源抢不走状态」。
+//
+// 队列两首：「慢的那首」取流慢 400ms、「快的那首」正常。起播慢的那首
+// （代次 1），100ms 后切到快的那首（代次 2，它先建源先装上）；慢的那首的
+// 取流这时才回来 → 它建了一条源 → 代次对不上 → 那条源被丢掉。
+//
+// 🔴 **以前那条被丢掉的源会把「正在重连」抢走**（那时候「谁在重连」是
+// 「建源时」发的一个令牌，谁最后建谁抢）：于是快的那首断流时，它的重试
+// 被守卫丢掉，界面上「正在重连」**一次都不亮**——正是这一票要消灭的
+// 「歌停着、界面不动、没有字」（票 #315 的评审复现过）。
+//
+// 现在那一档**住在源那边**，应用只问自己当前在管的那一条流——被丢掉的那条
+// 压根没人问。
+func TestAStaleSourceDoesNotStealTheReconnectState(t *testing.T) {
+	f := newStreamFixture(t)
+	data := readFlac(t)
+	f.media = data
+
+	// 「慢的那首」的那一次取流慢 400ms；快的那首那一次正常。
+	var (
+		mu           sync.Mutex
+		playCalls    int
+		slowReturned = make(chan struct{})
+	)
+	f.on("/x/player/wbi/playurl", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		playCalls++
+		mine := playCalls
+		mu.Unlock()
+		if mine == 1 {
+			time.Sleep(400 * time.Millisecond)
+		}
+		f.servePlayURL(w, r.URL.Query())
+		if mine == 1 {
+			// 响应写回去了：应用那边马上就要建源（然后发现代次过期，把它丢掉）。
+			close(slowReturned)
+		}
+	})
+	f.onPlayURL(dashFor(cdnURL(f.URL, "v1.flac", time.Hour), int(bili.QualityHigh192), 110836))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "v1.flac", time.Hour), int(bili.QualityHigh192), 110836))
+
+	// CDN：发到 20% 就停住，等 gate 放行才掐断——这样断点才是确定的。
+	gate := make(chan struct{})
+	f.on("/cdn/v1.flac", func(w http.ResponseWriter, r *http.Request) {
+		f.mediaHits.Add(1)
+		serveUntilCut(w, r, data, len(data)/5, gate)
+	})
+
+	a := newOnlineApp(t, f, t.TempDir())
+	if err := a.Enqueue(onlineItem("BV1", "1", "慢的那首")); err != nil {
+		t.Fatal(err)
+	}
+	// 慢的那首已经在取流了（playurl 的第一次调用），这时候切到快的那首。
+	waitFor(t, 15*time.Second, "慢的那首开始取流", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return playCalls >= 1
+	})
+	if err := a.Enqueue(onlineItem("BV2", "2", "快的那首")); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.PlayAt(1); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "快的那首")
+
+	// 等慢的那首的取流回来：它会建一条源，然后发现代次过期，把它丢掉。
+	select {
+	case <-slowReturned:
+	case <-time.After(30 * time.Second):
+		t.Fatal("慢的那首的取流一直没回来")
+	}
+	// 给它「建源 + 作废」的时间（响应写回去之后应用才建源）。
+	time.Sleep(200 * time.Millisecond)
+
+	// 现在掐断 CDN：快的那首的源会重试。
+	close(gate)
+
+	// 🔴 **界面上必须说得出「正在重连」**，而且说的是**快的那首**的这一次：
+	// 那条被丢掉的源（慢的那首留下的）抢不走这一档。
+	//
+	// ⚠️ **「快的那首」不在了就停**：那首歌放完了、队列往下走了，而那一档跟
+	// 它无关——再等下去只会等到**下一首**的那一次重连（那一次是好的，但它证明
+	// 不了这一条）。
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		st := a.Snapshot()
+		if st.Title != "快的那首" {
+			break
+		}
+		if st.Reconnecting {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("快的那首断流之后，界面上一次都没说「正在重连」：%+v", a.Snapshot())
 }

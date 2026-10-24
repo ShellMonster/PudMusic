@@ -258,25 +258,13 @@ type App struct {
 	loading bool
 	// loadingTitle 是正在取的那一首的名字（见 State.LoadingTitle）。
 	loadingTitle string
-	// reconnecting 是「**字节源**正在重试」这一半（见 State.Reconnecting）。
-	reconnecting bool
-	// reconnectAttempt 是第几次重试（见 State.ReconnectAttempt）。
-	reconnectAttempt int
 	// reopenInFlight 是「**应用**正在从播放位置重开」那一半。
 	//
-	// ⚠️ **它和 `reconnecting` 是两件事，亮与灭各管各的**：源在退避里等着
-	// 的时候，播放器可能已经装好了（可字节还没回来）；而应用正在重开的时候，
-	// 源压根还没开始重试。混成一栏的话，装播放器那一下会把「正在重连」收掉，
-	// 退避的那一秒就又变成静默的了（票 #315 的评审复现过）。
+	// ⚠️ **源那一半不住在这儿**（它住在 `audio.StreamSource` 那边，见
+	// `reconnect.go`）：在这儿存一栏的话，一条**建出来又被丢掉**（代次过期）
+	// 的源会把那一栏抢走——那时正在放的那首断流，界面上「正在重连」一次都
+	// 不亮（票 #315 的评审复现过）。
 	reopenInFlight bool
-	// reconnectToken 是**当前这条在线字节源**的重连令牌，
-	// reconnectSeq 是发令牌的计数器。
-	//
-	// ⚠️ **令牌是给「迟到的回调」用的**：一条旧字节源可能还在退避里等着，
-	// 而它的「字节回来了」回调在这之后才到——那时候界面上的「正在重连」
-	// 已经属于**另一条**流了，不看令牌的话旧流会把新流的那一行擦掉。
-	reconnectToken int
-	reconnectSeq   int
 	// loadStop 是「取流超时」那个闹钟的停掉函数。nil = 没挂。
 	//
 	// ⚠️ **它和 `lyricStopTimer` 不是一个东西**：那一个管歌词偏移的防抖写盘，
@@ -604,6 +592,9 @@ func (a *App) Snapshot() State {
 	if a.streaming != nil {
 		pref = BiliToPref(a.streaming.Quality)
 	}
+	// 🔴 **「正在重连」那一档要去问源**（见 `reconnect.go`）：源那一半住在
+	// 源那边，应用只问当前在管的那一两条流——所以一条被丢掉的源抢不走它。
+	attempt, retrying := a.reconnectingLocked()
 	return State{
 		HasTrack:         a.player != nil,
 		Title:            a.title,
@@ -620,8 +611,8 @@ func (a *App) Snapshot() State {
 		ErrDetail:        a.errDetail,
 		Loading:          a.loading,
 		LoadingTitle:     a.loadingTitle,
-		Reconnecting:     a.reconnecting || a.reopenInFlight,
-		ReconnectAttempt: a.reconnectAttempt,
+		Reconnecting:     a.reopenInFlight || retrying,
+		ReconnectAttempt: attempt,
 		CanRetry:         a.errRetryable,
 		BiliURL:          a.biliURLLocked(),
 		Quality:          a.quality,

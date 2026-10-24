@@ -19,12 +19,12 @@
 // 用户看到的差别很大，而两者的等待上限也不同：取流是 20 秒
 // （`onlinePlayTimeout`），重连是「退避 7 秒 + 一次换流往返」。
 //
-// # 🔴 **这一档有两半，亮与灭各管各的**
+// # 🔴 这一档的**两半**，亮与灭各管各的
 //
 // 这一档是**两件互不相干的事**的并集：
 //
-//	a.reconnecting	**字节源**正在重试（它在退避里等着，或者刚失败）
-//	a.reopenInFlight	**应用**正在从播放位置重开（重新取流 + 开解码器）
+//	源那一半	**字节源**正在等字节回来（它在退避里等着）
+//	应用那一半	**应用**正在从播放位置重开（重新取流 + 开解码器）
 //
 // 两半各有各的亮和灭，**不能互相抹**：
 //
@@ -34,18 +34,26 @@
 //	——那恰恰是这一档要消灭的形态（票 #315 的评审复现过：源刚点亮这一档，
 //	`runOnline` 装播放器时顺手清了，退避那一秒完全静默）。
 //
-//	🔴 **新的一段流顶上来的时候要抹掉旧那一半**：旧源要么被关了、要么被
-//	换掉了，它的「正在重试」到此为止（`newReconnectToken`）。
+//	🔴 **报错要抹掉应用那一半**：一句错比一枚转圈信息量大，而它们占**同一
+//	个位置**（播放条上只有一行宽）。
 //
-//	🔴 **报错要抹掉两半**：一句错比一枚转圈信息量大（`setErrTextDetail`）。
+// # 🔴 源那一半**不住在这里**
+//
+// 它住在源那边（`audio.StreamSource.Reconnecting()`），应用只**问**当前在管
+// 的那一两条流。为什么不能在这儿存一栏——票 #315 的评审复现过：
+//
+//	一条建出来又被丢掉（代次过期）的源把那一栏抢走 → 正在放的那首断流时，
+//	它的重试被当成「别的流的事」丢掉 → 界面上「正在重连」**一次都不亮**
+//
+// 住在源那边就没有「抢」这回事：应用压根不读那条被丢掉的源的状态。
 //
 // # 谁点亮它、谁收掉它
 //
-//	点亮	字节源说「我要重试了」（`noteReconnect`）
+//	点亮	源说「我要重试了」（`OnRetry` → 叫醒界面）
 //	点亮	应用要从播放位置重开（`beginReconnect`）
-//	收掉	字节回来了（`noteReconnected`）
+//	收掉	字节回来了（`OnReconnected` → 叫醒界面）
+//	收掉	源放弃 / 被关了（泵退出 → `Reconnecting()` 变成 false）
 //	收掉	重开这一趟结束了（`endReconnect`）
-//	收掉	新的一段流顶上来（`newReconnectToken`）
 //	收掉	出错了（`setErrTextDetail`）——错的那句信息量更大
 //	收掉	换歌 / 停了 / 放本地文件了（`playOnline` / `ClearTrack` / `Open`）
 //
@@ -55,65 +63,36 @@
 
 package app
 
-// setReconnectLocked 把「正在重连」这一档的三个值一起落。
+// reconnectingLocked 报「当前在管的那两条流里，有没有在等字节回来的」。
 //
-// ⚠️ **三个值必须一起落**：只落 `reconnecting` 而留着 `reconnectAttempt`，
-// 界面上就会说「第 0 次」——而 0 是「不是重试那一档」的记号。
+// **问的是源，不是这里存的一栏**——理由见文件头那一节。
 //
-// 返回「变了没有」——变了才要叫醒界面（没变就叫醒是白要一帧）。
+// 问的是两条：
 //
-// **必须在持锁时调**。
-func (a *App) setReconnectLocked(reconnecting bool, attempt int, reopen bool) bool {
-	changed := a.reconnecting != reconnecting ||
-		a.reconnectAttempt != attempt ||
-		a.reopenInFlight != reopen
-	a.reconnecting = reconnecting
-	a.reconnectAttempt = attempt
-	a.reopenInFlight = reopen
-	return changed
-}
-
-// noteReconnect 记下「字节源正在重试」（第 attempt 次）。
+//	`pendingSrc`	正在建的那条（还没装上）
+//	`online.source`	正在放的那条
 //
-// 它是**字节源**回调上来的：源在退避开始之前就说了「我要重试」，所以
-// 界面上从第一秒起就亮着「正在重连」。
+// 🔴 **`pendingSrc` 要对代次**：切歌之后，上一首歌那条**还在建**的源会留在
+// `pendingSrc` 上（它要到自己建完才发现代次过期）。那一段的「正在重试」
+// 和用户眼前这一首没关系——不问代次的话，界面上会亮起一盏**别人的**指示灯。
 //
-// ⚠️ **代次和令牌都要对**：代次不对是「上一首歌的事」（切歌了），令牌
-// 不对是「上一条流的事」（换音质 / 换流重开建了新的源，而旧源的回调迟到
-// 了）。两种迟到都不能碰界面上的状态。
-func (a *App) noteReconnect(gen, token, attempt int) {
-	a.mu.Lock()
-	if token == 0 || a.onlineGen != gen || a.closed || a.reconnectToken != token {
-		a.mu.Unlock()
-		return
+// ⚠️ **代次不对的 `online.source` 不问**：它一定是当前这一首的源（装上去的
+// 时候代次是对过的）。
+//
+// **必须在持锁时调**（`a.mu`）。它会再去拿源的锁（`s.mu`）——那边不会反手
+// 拿 `a.mu`（源的回调都在**不持** `s.mu` 的时候调），所以不会死锁。
+func (a *App) reconnectingLocked() (attempt int, retrying bool) {
+	if a.pendingSrc != nil && a.pendingSrcGen == a.onlineGen {
+		if at, ok := a.pendingSrc.Reconnecting(); ok {
+			return at, true
+		}
 	}
-	changed := a.setReconnectLocked(true, attempt, a.reopenInFlight)
-	wake := a.wake
-	a.mu.Unlock()
-	if changed && wake != nil {
-		wake()
+	if a.online != nil && a.online.source != nil {
+		if at, ok := a.online.source.Reconnecting(); ok {
+			return at, true
+		}
 	}
-}
-
-// noteReconnected 收掉「字节源正在重试」这一半：字节又回来了。
-//
-// ⚠️ **它不报「这一趟成功了」**：换流可能换到了另一条流（那要上层重新开
-// 解码器并跳回播放位置），而这里只说明「连接恢复了，字节在来了」。
-//
-// ⚠️ **只收源那一半**：应用层那一半（「正在从播放位置重开」）是另一件事，
-// 它归 `endReconnect` 管。
-func (a *App) noteReconnected(gen, token int) {
-	a.mu.Lock()
-	if token == 0 || a.onlineGen != gen || a.closed || a.reconnectToken != token {
-		a.mu.Unlock()
-		return
-	}
-	changed := a.setReconnectLocked(false, 0, a.reopenInFlight)
-	wake := a.wake
-	a.mu.Unlock()
-	if changed && wake != nil {
-		wake()
-	}
+	return 0, false
 }
 
 // beginReconnect 记下「正在从原位置重开」。
@@ -127,7 +106,8 @@ func (a *App) beginReconnect(gen int) {
 		a.mu.Unlock()
 		return
 	}
-	changed := a.setReconnectLocked(a.reconnecting, a.reconnectAttempt, true)
+	changed := !a.reopenInFlight
+	a.reopenInFlight = true
 	wake := a.wake
 	a.mu.Unlock()
 	if changed && wake != nil {
@@ -145,7 +125,8 @@ func (a *App) endReconnect(gen int) {
 		a.mu.Unlock()
 		return
 	}
-	changed := a.setReconnectLocked(a.reconnecting, a.reconnectAttempt, false)
+	changed := a.reopenInFlight
+	a.reopenInFlight = false
 	wake := a.wake
 	a.mu.Unlock()
 	if changed && wake != nil {
@@ -153,42 +134,26 @@ func (a *App) endReconnect(gen int) {
 	}
 }
 
-// clearReconnectLocked 把「正在重连」这一档**整个**收掉（两半都收）。
+// clearReconnectLocked 收掉「正在重连」这一档的**应用那一半**。
 //
 // **必须在持锁时调**。用在「这一首已经不是刚才那一首了」的那些地方：
 // 换歌、停了、放本地文件了。
 //
-// ⚠️ **那些地方本来就会叫醒界面**（它们各自都有一次 wake），所以这里不用
-// 再报「变了没有」。
+// ⚠️ **源那一半不用管**：它住在源那边（`Reconnecting()`），应用只问当前在管
+// 的那一条流——换歌之后问到的就是新那一首的源。
 func (a *App) clearReconnectLocked() {
-	a.setReconnectLocked(false, 0, false)
+	a.reopenInFlight = false
 }
 
-// newReconnectToken 给一条新的在线字节源发一个重连令牌。
+// wakeUp 叫醒界面：状态变了，要一帧。
 //
-// **每一段流一个**：旧源的回调（它可能还在退避里等着）回来的时候令牌已经
-// 变了，就不再碰界面上的状态——不然「上一条流的恢复」会把「这一条流正在
-// 重连」那一行擦掉。
-//
-// ⚠️ **令牌从 1 起**：0 是「没有令牌」，回调拿着 0 一律不认（`noteReconnect`
-// / `noteReconnected` 里各判一次）——不然一个还没建过源的 App 会把第一个
-// 回调当成自己的。
-//
-// 🔴 **顺手把源那一半收掉**：新的一段流顶上来了，**旧**那一段要么被关了、
-// 要么被换掉了——它的「正在重试」到此为止。不收的话它会一直亮着，而那一段
-// 流早就没人管了。
-//
-// ⚠️ **只收源那一半**：应用层那一半（「正在从播放位置重开」）正开着呢——
-// `refreshOnlineNow` 是先 `beginReconnect` 再建这条流的。
-func (a *App) newReconnectToken() int {
+// ⚠️ **不持 `a.mu` 调**：它是给源的回调用的，而源的回调从任何 goroutine 过来
+// （下载泵）。
+func (a *App) wakeUp() {
 	a.mu.Lock()
-	a.reconnectSeq++
-	a.reconnectToken = a.reconnectSeq
-	changed := a.setReconnectLocked(false, 0, a.reopenInFlight)
 	wake := a.wake
 	a.mu.Unlock()
-	if changed && wake != nil {
+	if wake != nil {
 		wake()
 	}
-	return a.reconnectSeq
 }

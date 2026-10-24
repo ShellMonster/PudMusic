@@ -808,7 +808,6 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 ) (*audio.StreamSource, *audio.Player, error) {
 	// 🔴 **每一段流一个重连令牌**：旧源的回调可能迟到（它还在退避里等着
 	// 的时候这一条已经换掉了），令牌对不上就不碰界面上的状态。
-	token := a.newReconnectToken()
 	src, err := audio.NewStreamSource(audio.StreamSourceOptions{
 		URLs:      ref.URLs,
 		ExpiresAt: ref.ExpiresAt,
@@ -822,8 +821,15 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 		// 🔴 **「正在重连」从源那边报上来**（票 #315）：换地址 / 换流之前
 		// 源要等一个退避（1 秒 / 2 秒 / 4 秒），那几秒里界面上不能一个字
 		// 都没有——用户看到的是「歌停着、界面不动」。
-		OnRetry:       func(attempt int, wait time.Duration) { a.noteReconnect(gen, token, attempt) },
-		OnReconnected: func() { a.noteReconnected(gen, token) },
+		//
+		// ⚠️ **这两个回调只负责「叫醒界面」**：那一档的状态**住在源那边**
+		// （`StreamSource.Reconnecting()`），应用只**问**当前在管的那一条流。
+		//
+		// 🔴 **为什么不能反过来——让源把状态报上来、应用存一栏**：一条**建
+		// 出来又被丢掉**（代次过期）的源会把那一栏抢走，于是正在放的那首
+		// 断流时，界面上「正在重连」**一次都不亮**（票 #315 的评审复现过）。
+		OnRetry:       func(attempt int, wait time.Duration) { a.wakeUp() },
+		OnReconnected: func() { a.wakeUp() },
 	})
 	if err != nil {
 		return nil, nil, err
@@ -1256,10 +1262,10 @@ func (a *App) refreshOnlineNow(cause error) {
 		a.clearErrLocked()
 		// 🔴 **「正在从播放位置重开」这一档到此为止**（新播放器装上了）。
 		//
-		// ⚠️ **只收应用层那一半**：字节源可能**正在退避里等着**——歌停着、
-		// 位置不动、字节还没回来。源那一半归 `noteReconnected` 管（字节回来
-		// 才收），这里收了它，退避的那几秒就又变成静默的了。
-		a.setReconnectLocked(a.reconnecting, a.reconnectAttempt, false)
+		// ⚠️ **只收应用层那一半**：源那一半（源正在等字节回来）归源自己管
+		// （`Reconnecting()`）——它可能**正在退避里等着**：歌停着、位置不动、
+		// 字节还没回来。这里收了它，退避的那几秒就又变成静默的了。
+		a.reopenInFlight = false
 		wake := a.wake
 		a.mu.Unlock()
 

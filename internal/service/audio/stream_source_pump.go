@@ -36,6 +36,12 @@ import (
 // 和「切歌」而不是「出错」对得上）。
 func (s *StreamSource) pump() {
 	defer s.wg.Done()
+	// 🔴 **泵退出 = 这条流不再「正在重试」**：它要么下完了、要么放弃了
+	// （换不动了）、要么被关了（切歌 / 退出）。
+	//
+	// ⚠️ **不收这一档的话，上层会拿着一盏永久亮着的假指示灯**（票 #315 的
+	// 评审复现过）：源放弃了，而界面上还写着「正在重连」，一句红字也没有。
+	defer s.clearRetrying()
 	buf := make([]byte, copyBufSize)
 
 	for {
@@ -231,8 +237,9 @@ func (s *StreamSource) recover(from int64, cause error) bool {
 	s.refreshes++
 	attempt := s.refreshes
 	// 「字节还没回来」这一档从现在开始记着：等一会儿字节真的回来了
-	// （`append`）就报一次「恢复了」。
+	// （`append`）就报一次「恢复了」；放弃了（泵退出）就收掉。
 	s.retryPending = true
+	s.retryAttempt = attempt
 	s.mu.Unlock()
 
 	// 🔴 **先等，再重试**。等待期间源是可以被关掉的（切歌、退出）。
@@ -271,6 +278,17 @@ func (s *StreamSource) recover(from int64, cause error) bool {
 		return false
 	}
 	return true
+}
+
+// clearRetrying 收掉「正在等字节回来」那一档。
+//
+// ⚠️ **泵退出时必须收**：源放弃了（换不动了）或者被关了（切歌 / 退出）之后，
+// 它就不再是「正在重试」——不收的话，上层会拿着一盏**永久亮着的假指示灯**
+// （票 #315 的评审复现过）。
+func (s *StreamSource) clearRetrying() {
+	s.mu.Lock()
+	s.retryPending = false
+	s.mu.Unlock()
 }
 
 // backoffFor 报第 attempt 次重试要等多久（attempt 从 1 起）。

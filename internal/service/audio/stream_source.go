@@ -266,7 +266,13 @@ type StreamSource struct {
 	// 字节回来的那一刻（`append`）就报一次「恢复了」——判据是**真的有
 	// 字节到了**，不是「请求没报错」：连上了却一个字节都下不动（半死不活
 	// 的连接）在用户听来和没恢复一样。
+	//
+	// 🔴 **泵退出时收掉**（见 `stream_source_pump.go` 的 `pump`）：源放弃了
+	// 或者被关了之后，它就不再是「正在重试」——不收的话上层会拿着一盏
+	// **永久亮着的假指示灯**。
 	retryPending bool
+	// retryAttempt 是当前这一次是第几次重试（从 1 起）。
+	retryAttempt int
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -354,6 +360,32 @@ func (s *StreamSource) Quality() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.quality
+}
+
+// Reconnecting 报「这条流现在是不是在等字节回来」，以及这是第几次。
+//
+// ok = false 表示没在等：要么从来没失败过，要么已经放弃了（泵退出），要么
+// 字节已经回来了。
+//
+// # 为什么这一档住在**源**这边，而不是上层存一栏
+//
+// 上层（`internal/app`）要拿这一档去显示「正在重连」，而**上层的「当前这条
+// 流」随时会换**：换歌、换音质、代次过期被丢掉……
+//
+// ⚠️ **上层自己存一栏的话，一条「建出来又被丢掉」的源会把那一栏抢走**
+// （票 #315 的评审复现过）：那时正在放的那首断流，它的重试被当成「别的流
+// 的事」丢掉，界面上「正在重连」**一次都不亮**——正是这一票要消灭的
+// 「歌停着、界面不动、没有字」。
+//
+// 住在源这边就没有「抢」这回事：上层只**问**自己当前在管的那一两条流，
+// 压根不读那条被丢掉的源的状态。
+func (s *StreamSource) Reconnecting() (attempt int, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.retryPending {
+		return 0, false
+	}
+	return s.retryAttempt, true
 }
 
 // Size 返回总长。还不知道时是 -1。
