@@ -53,6 +53,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
@@ -86,6 +87,9 @@ const followCardPad = space.Px16
 //   - 从底边往上 16（`bottom-4`）；
 //   - 平时再往下藏 80（`translate-y-20`），指针移上去才升回来；
 //   - 300 毫秒（`duration-300 ease-in-out`）。
+//
+// ⚠️ **时长照抄，曲线没抄**：那一档的 `ease-in-out` 换成了全应用那条统一曲线
+// （理由见下面 `AnimateWith` 那一段和 DESIGN.md §五）。
 const (
 	followActionBarBottom = 16
 	followActionBarRise   = 80
@@ -943,9 +947,11 @@ func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser, selected, ring 
 	if card.Hovered() {
 		shown = 1
 	}
-	// 缓动照上游的 `ease-in-out`（`user-card.tsx:89`），不是框架 `Animate`
-	// 默认的 ease-out。
-	shown = card.AnimateWith(followActionBarKey, shown, followActionBarTime, ui.EaseInOut)
+	// 缓动走**全应用那条统一曲线**（`motion.Unified`），不是上游那个
+	// `ease-in-out`：手册⓪ 说「不要使用或批判地看待类 ease-in 曲线…我的建议
+	// 是只使用 ease-out」，而这一条是**点击触发**的过渡（指针移上去操作条升
+	// 起来），正是手册反对 ease-in 的那一种（理由见 DESIGN.md §五）。
+	shown = card.AnimateWith(followActionBarKey, shown, followActionBarTime, motion.Unified)
 
 	card.Children(func() {
 		// 头像。上游是 `rounded-full`，所以是圆的（`spaceAvatar` 画的也是圆的，
