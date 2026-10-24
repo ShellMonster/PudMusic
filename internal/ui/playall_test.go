@@ -144,7 +144,7 @@ func TestThePlayAllButtonHasThePlayIcon(t *testing.T) {
 				box.Min.X+playAllPadX, box.Min.Y+2,
 				box.Min.X+playAllPadX+playAllIconSize, box.Max.Y-2))
 			if !ok {
-				t.Fatalf("绿块左边那一格没有黑的——那枚 ▶ 图标不见了（上游是 "+
+				t.Fatalf("绿块左边那一格没有黑的——那枚 ▶ 图标不见了（上游是 " +
 					"`<RiPlayFill size={18} />`）")
 			}
 			if ink.Dx() < 7 || ink.Dx() > 10 {

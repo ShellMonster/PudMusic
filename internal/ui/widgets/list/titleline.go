@@ -65,10 +65,10 @@ type ownerRow struct {
 	tip string
 	// size 是字的大小，lh 是行高，color 是字的颜色（次要色那一档）。
 	size, lh float32
-	color      ui.Color
+	color    ui.Color
 	// maxW 是这一行的宽度上限（0 = 不限），grow 是「吃满剩下的宽度」。
 	maxW float32
-	grow  bool
+	grow bool
 	// acts 是这个列表会做的操作（`OpenOwner` 在里面）。
 	acts Actions
 }

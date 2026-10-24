@@ -1278,7 +1278,7 @@ func TestAnArchiveWithoutABvidIsNotCalledEmpty(t *testing.T) {
 	uiSpaceData(b, "发了一条投稿的 UP", 0, 1)
 	b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
 		uiExploreJSON(w, 0, map[string]any{
-			"items": []any{uiDynamicArchiveWithoutBvid("av1", "他写的那段话")},
+			"items":  []any{uiDynamicArchiveWithoutBvid("av1", "他写的那段话")},
 			"offset": "", "has_more": false,
 		})
 	})
@@ -1314,7 +1314,7 @@ func TestAnArchiveWithoutABvidAndWithoutTextIsCalledEmpty(t *testing.T) {
 	uiSpaceData(b, "发了一条空投稿的 UP", 0, 1)
 	b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
 		uiExploreJSON(w, 0, map[string]any{
-			"items": []any{uiDynamicArchiveWithoutBvid("av1", "")},
+			"items":  []any{uiDynamicArchiveWithoutBvid("av1", "")},
 			"offset": "", "has_more": false,
 		})
 	})

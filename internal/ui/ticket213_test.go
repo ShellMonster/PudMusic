@@ -289,7 +289,7 @@ func TestTheFollowPaneSeparatesAllFromTheGroups(t *testing.T) {
 
 			y := findSeparator(img, cur.X, cur.X+cur.W, cur.Y+cur.H, first.Y, paneBg, selBg, line)
 			if y < 0 {
-				t.Errorf("「全部关注(3)」和「特别关注(1)」之间没有分界——"+
+				t.Errorf("「全部关注(3)」和「特别关注(1)」之间没有分界——" +
 					"那一格（全部关注）和后面那些（分组）不是一伙的")
 				return
 			}

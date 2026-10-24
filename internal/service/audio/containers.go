@@ -81,7 +81,7 @@ var mediaFoundationDecoderOpen = openWithMediaFoundation
 // openWithMediaFoundation 用 Windows 的 Media Foundation 打开 r。
 //
 // 它解两种容器：MP4 家族（`.m4a` / `.m4s`，B 站有损流那种）和裸 ADTS
-//（`.aac`）。别的平台上没有 Media Foundation，`mfadec.Open` 会返回
+// （`.aac`）。别的平台上没有 Media Foundation，`mfadec.Open` 会返回
 // `mfadec.ErrUnsupported`——那一层是平台无关的，所以这一行在 macOS 上也
 // 编得过、也跑得起来（只是永远走不到成功那一支）。
 func openWithMediaFoundation(r io.ReadSeeker) (mygoaudio.Decoder, error) {

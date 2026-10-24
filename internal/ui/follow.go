@@ -672,7 +672,7 @@ func (s *Shell) viewFollowPaneRow(c *ui.Context, f *followPage, i int) {
 	// ⚠️ **这一行自己不铺底色**：没选中的那些行是**透**的——底是这一列的底。
 	// （框架那一层行悬停底在这一列里**不存在**：它只在「列表有游标」时才铺，
 	// 而这一列的列表没有游标，见下面 `flat.Feel` 那一段。）
-	box := ui.Row(c).Grow(1).Key("follow-tab:" + tab).Padding(space.Px6, space.Px8).Radius(t.Radius).
+	box := ui.Row(c).Grow(1).Key("follow-tab:"+tab).Padding(space.Px6, space.Px8).Radius(t.Radius).
 		AlignItems(ui.Center)
 	if tab == f.tab {
 		// 当前正在看的那一格：和侧栏菜单当前项**同一套**画法（`flatCurrent`——
