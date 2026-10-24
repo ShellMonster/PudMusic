@@ -1340,8 +1340,12 @@ func (a *App) tick() {
 			// goroutine 的事，不占着界面每帧都要的那把锁。
 			var pos time.Duration
 			var playing bool
+			// finished 是「这一首真的放完了」（字节读到头、没有报错）——和
+			// 「暂停」是两回事（暂停时字节没到头）。
+			finished := false
 			if p != nil && live {
 				pos, playing = p.Position(), p.Playing()
+				finished = !playing && p.Ended() && p.Err() == nil
 			}
 
 			a.mu.Lock()
@@ -1354,7 +1358,16 @@ func (a *App) tick() {
 			// `a.player` 换成新的），就不能把旧那台的位置写到新歌头上。
 			if p != nil && live && a.player == p {
 				ended = a.playing && !playing
-				a.position, a.playing = pos, playing
+				if finished {
+					// ⚠️ **放完了就把位置报成 0**：这一串放完了之后进度条该
+					// 回到开头（见 AdvanceStop 那支），而播放器那边的 Seek(0)
+					// 还没生效——这一拍读到的是**放完之前**的位置（实测是歌曲
+					// 的全长），报出去就成了「进度条卡在末尾」。
+					a.position = 0
+				} else {
+					a.position = pos
+				}
+				a.playing = playing
 			}
 			// 锁屏上的进度条是**系统自己外推**出来的（Apple 头文件原话），
 			// 而外推的是它的时间：我们这边卡一下解码、换一次流、音频设备
