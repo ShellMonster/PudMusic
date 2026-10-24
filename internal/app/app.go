@@ -74,9 +74,27 @@ type State struct {
 	// 界面和缓存都不用改。
 	CoverURL string
 	Playing  bool
-	Position time.Duration
-	Duration time.Duration
-	Volume float64
+	// Stopped 是「**停住了**」：进度回到开头、不在放。
+	//
+	// ⚠️ **它和暂停是两件事**（票 #319）：暂停停在原地，而停住是**回到开头**——
+	// 系统媒体会话那边也是两个不同的状态（`media.StateStopped`，见 media.go
+	// 的 `mediaSnapshotLocked`）。界面上要靠它把两者分得开。
+	//
+	// 它由**两处**置上：`App.Stop`（用户按了停止）和顺序播放走到队尾
+	// （`onTrackFinished` 的 `AdvanceStop`）——后者见 `QueueFinished`。
+	Stopped bool
+	// QueueFinished 是「**这一串放完了**」：顺序播放走到队尾，于是停在开头
+	// 等用户（和 Biu 上游的 `audio.currentTime = 0; audio.pause()` 一样）。
+	//
+	// ⚠️ **它蕴含 `Stopped`**：那两条路最后都落在「停住了」这一档上，而用户
+	// 要分的是**两件事**：队列里还有歌、而用户叫停的（「已停止」），和队列
+	// 自己走完了（「这一串放完了」）。**只有后者才是「没有下一首了」**。
+	//
+	// 判据见 `Snapshot` 里那一行（`stopped` 和 `wantPlay` 一起读）。
+	QueueFinished bool
+	Position      time.Duration
+	Duration      time.Duration
+	Volume        float64
 	// Muted 是「静音」这一档。
 	//
 	// ⚠️ **它和 Volume 是两件事**（票 #311 / 报告 §3.3 的 B2）：Volume 记的是
@@ -408,8 +426,18 @@ type App struct {
 	// ⚠️ 它和 artist **一起**换、一起清：只换名字不换编号的话，播放条上的
 	// UP 名会指着**上一个 UP 主**的空间，而界面上看不出任何异样。
 	artistMid int64
-	// stopped 是「用户按了停止」：和暂停分开，因为它让进度条回到开头，
+	// stopped 是「停住了」：和暂停分开，因为它让进度条回到开头，
 	// 而系统那边也是两个不同的状态（见 media.go 的 Stop）。
+	//
+	// ⚠️ **它由两处置上，而那两处要分得开**（票 #319）：`App.Stop`（用户按了
+	// 停止，顺手把 `wantPlay` 落成 false）和 `onTrackFinished` 的
+	// `AdvanceStop`（顺序播放走到队尾，`wantPlay` 留着 true）。**用户要分的
+	// 正是这两件事**：「我按了停止」和「这一串放完了」——只有后者才是「没有
+	// 下一首了」。
+	//
+	// 所以读它的时候要**和 `wantPlay` 一起读**（见 `Snapshot` 里的
+	// `QueueFinished`）。其余几处置 `stopped` 的地方都顺手把它收成 false，
+	// 所以「停住了、而用户仍想放」这个组合只有 `AdvanceStop` 那一处凑得出来。
 	stopped bool
 
 	// mediaSink 是「该跟系统媒体会话说一声了」的那只手，由界面层装一次。
@@ -576,27 +604,37 @@ func (a *App) Snapshot() State {
 		pref = BiliToPref(a.streaming.Quality)
 	}
 	return State{
-		HasTrack:     a.player != nil,
-		Title:        a.title,
-		Path:         a.path,
-		Source:       a.sourceLocked(),
-		CoverURL:     a.cover,
-		Playing:      a.playing,
-		Position:     a.position,
-		Duration:     a.duration,
-		Volume:       a.volume,
-		Muted:        a.muted,
-		Rate:         a.rate,
-		Err:          a.errText,
-		ErrDetail:    a.errDetail,
-		Loading:      a.loading,
-		LoadingTitle: a.loadingTitle,
-		CanRetry:     a.errRetryable,
-		BiliURL:      a.biliURLLocked(),
-		Quality:      a.quality,
-		QualityPref:  pref,
-		Artist:       a.artist,
-		ArtistMid:    a.artistMid,
+		HasTrack: a.player != nil,
+		Title:    a.title,
+		Path:     a.path,
+		Source:   a.sourceLocked(),
+		CoverURL: a.cover,
+		Playing:  a.playing,
+		Stopped:  a.stopped,
+		// ⚠️ **「这一串放完了」和「用户按了停止」是两件事**（票 #319）：前者是
+		// 队列自己走完了（**没有下一首了**），后者是用户叫停的（队列里还有歌）。
+		// 界面上要把它们说成两句不同的话，所以这一栏不能只是 `a.stopped`。
+		//
+		// 判据是**两栏一起读**：`stopped` 说「停住了」，`wantPlay` 说「用户还
+		// 想放」。**只有 `onTrackFinished` 的 `AdvanceStop` 会留下「停住了、
+		// 而用户仍想放」这个组合**——`App.Stop` 是把两栏一起落的，而其余几处
+		// （重新播放、拖动进度条、清空当前曲目）会把 `stopped` 收掉。
+		QueueFinished: a.stopped && a.wantPlay,
+		Position:      a.position,
+		Duration:      a.duration,
+		Volume:        a.volume,
+		Muted:         a.muted,
+		Rate:          a.rate,
+		Err:           a.errText,
+		ErrDetail:     a.errDetail,
+		Loading:       a.loading,
+		LoadingTitle:  a.loadingTitle,
+		CanRetry:      a.errRetryable,
+		BiliURL:       a.biliURLLocked(),
+		Quality:       a.quality,
+		QualityPref:   pref,
+		Artist:        a.artist,
+		ArtistMid:     a.artistMid,
 
 		// 播放模式在队列自己的锁里，不在 `a.mu` 里——它是队列的形状，不是
 		// 播放器的状态。顺着一句一句取：`a.mu` 已经拿在手里，而 `a.queue`
