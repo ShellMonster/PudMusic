@@ -348,6 +348,10 @@ func (c *Client) refFromSongURL(d *songURLData, requested string) *StreamRef {
 // 而投稿那路的地址上带一个 `deadline` 查询参数。两边都认：地址上带 deadline
 // 就用它（更准），没有就用 now + timeout。
 //
+// ⚠️ **投稿那一路的接口不给这个字段**——所以那一路只有 `deadline` 那一个分支
+// （见 `expiryOf`）。**口径是同一个**（票 #220）：「地址上的 deadline 优先，
+// 否则用接口给的有效秒数，都没有就当成立刻失效」。
+//
 // 都读不到就当**立刻失效**——理由和 `deadlineOf` 一样：误判成「永不过期」
 // 会让换流那三条路径一次都不跑，而那种症状（歌播到一半静默停住）比提前
 // 换流难查得多。
@@ -355,15 +359,7 @@ func (c *Client) refFromSongURL(d *songURLData, requested string) *StreamRef {
 // 走的是 `c.now` 而不是 `time.Now`：和 WBI 签名同一个时钟（`Options.Now`），
 // 假时钟下有效期是能算准的。
 func (c *Client) songExpiry(urls []string, timeout int) time.Time {
-	if len(urls) > 0 {
-		if d := deadlineOf(urls[0]); !d.IsZero() {
-			return d
-		}
-	}
-	if timeout <= 0 {
-		return time.Time{}
-	}
-	return c.now().Add(time.Duration(timeout) * time.Second)
+	return expiryOf(urls, timeout, c.now())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
