@@ -13,7 +13,7 @@ func TestTouchReplacesAForgottenEntry(t *testing.T) {
 	l := newLRU(1000)
 	old := &entry{url: "https://example.invalid/a.png"}
 	l.touch(old)
-	l.resize(old, 600)
+	l.resize(old, 600, 0)
 	l.drop(old)
 	if l.used != 0 {
 		t.Fatalf("drop 之后 used=%d，want 0", l.used)
@@ -31,7 +31,7 @@ func TestTouchReplacesAForgottenEntry(t *testing.T) {
 	if n := l.order.Len(); n != 1 {
 		t.Errorf("LRU 里有 %d 条，want 1", n)
 	}
-	l.resize(fresh, 400)
+	l.resize(fresh, 400, 0)
 	if l.used != 400 {
 		t.Errorf("新条目记账之后 used=%d，want 400", l.used)
 	}
@@ -57,7 +57,7 @@ func TestAnEntryEvictedBeforeItIsDecodedIsNotAccounted(t *testing.T) {
 	l.drop(e)
 
 	// 解码这时候才回来。
-	l.resize(e, 500)
+	l.resize(e, 500, 0)
 
 	if l.used != 0 {
 		t.Errorf("一条已经不在表里的条目被记了 %d 字节（want 0）——\n"+
@@ -85,7 +85,7 @@ func TestTheEvictionSkipsEntriesThatHaveNoBytesYet(t *testing.T) {
 	// 后来的那一张下完了，把预算占满。
 	loaded := &entry{url: "https://example.invalid/loaded.png"}
 	l.touch(loaded)
-	l.resize(loaded, 1000)
+	l.resize(loaded, 1000, 0)
 	if l.used != 1000 {
 		t.Fatalf("used=%d，want 1000", l.used)
 	}
@@ -93,7 +93,7 @@ func TestTheEvictionSkipsEntriesThatHaveNoBytesYet(t *testing.T) {
 	// 再来一张：预算装不下了，要挤掉一个。
 	third := &entry{url: "https://example.invalid/third.png"}
 	l.touch(third)
-	l.resize(third, 1000)
+	l.resize(third, 1000, 0)
 
 	// 挤掉的是**有字节的那一张**，不是还在下的那一张。
 	if _, ok := l.byURL[loading.url]; !ok {
