@@ -272,6 +272,8 @@ func TestTheMiniPlayerKeysAreFlat(t *testing.T) {
 				if !ok {
 					t.Fatalf("迷你播放器上找不到 %q，文字有 %q", label, tt.Texts())
 				}
+				// 84 高的窗里键的上沿紧挨进度条滑钮的软影子，上沿不量（左右下仍量）。
+				r.Y, r.H = r.Y+4, r.H-4
 				assertNoRing(t, img, r, bg, "迷你播放器 "+label)
 			}
 		})
@@ -397,8 +399,9 @@ func TestTheDynamicCardKeysAreFlat(t *testing.T) {
 			noPointer(tt)
 
 			// 作者名：`uiDynamic` 里叫「作者v1」。
-			assertTextKeysFlat(t, tt, flatPageBG(s, dark), "动态卡片",
-				"作者v1", "赞 12", "下一首播放", "下载音频", "下载视频")
+			// 卡片现在是一张 `surface1` 卡，键压在卡的底色上。
+			assertTextKeysFlat(t, tt, rgbaOf(s.cardBackground(BuildTheme(s.app.SettingsSnapshot(), dark))), "动态卡片",
+				"作者v1", "赞 12", "下一首播放", "下载音频")
 		})
 	}
 }

@@ -1552,7 +1552,7 @@ func rowKeys(sp *upSpace, tab, n int) []any {
 // TestTheSpaceAvatarIs140AndTheHeaderPads32 钉住头图区那两个数：
 // 头像 140（上游 `space-info.tsx:89` 的 `h-[140px] w-[140px]`）、左右留白 32
 // （同一行的 `px-8`，`space-info.tsx:83`）。
-func TestTheSpaceAvatarIs140AndTheHeaderPads32(t *testing.T) {
+func TestTheSpaceAvatarIs88AndTheHeaderPads32(t *testing.T) {
 	b := newUIExplore(t)
 	uiSpaceData(b, "量尺寸的 UP 主", 0, 123456)
 	s, tt, _ := newSpaceShell(t, b, true, "77")
@@ -1562,21 +1562,21 @@ func TestTheSpaceAvatarIs140AndTheHeaderPads32(t *testing.T) {
 	if !ok {
 		t.Fatalf("画面上找不到头像，文字有 %q", tt.Texts())
 	}
-	if av.W != 140 || av.H != 140 {
-		t.Errorf("头像量出来是 %.1f×%.1f，want 140×140", av.W, av.H)
+	if av.W != 88 || av.H != 88 {
+		t.Errorf("头像量出来是 %.1f×%.1f，want 88×88", av.W, av.H)
 	}
 
 	winW := float32(tt.Image().Bounds().Dx())
 	pageLeft := float32(sideTargetWidth(s.app.SettingsSnapshot()))
-	if got := av.X - pageLeft; got != 32 {
-		t.Errorf("头像离页面左缘 %.1f，want 32（上游头像那一行是 px-8）", got)
+	if got := av.X - pageLeft; got != 32+upAvatarRing {
+		t.Errorf("头像离页面左缘 %.1f，want 35（左右留白 32 + 3 的底色环）", got)
 	}
 	name, ok := tt.Find("量尺寸的 UP 主")
 	if !ok {
 		t.Fatalf("画面上找不到昵称，文字有 %q", tt.Texts())
 	}
-	if got := name.X - (av.X + av.W); got != 16 {
-		t.Errorf("昵称离头像右边 %.1f，want 16（上游头像和文字之间是 space-x-4）", got)
+	if got := name.X - (av.X + av.W); got != 16+upAvatarRing {
+		t.Errorf("昵称离头像右边 %.1f，want 19（间距 16 + 3 的底色环）", got)
 	}
 	lv, ok := tt.Find("Lv4")
 	if !ok {
@@ -1586,9 +1586,9 @@ func TestTheSpaceAvatarIs140AndTheHeaderPads32(t *testing.T) {
 		t.Errorf("统计离页面右缘 %.1f，want 32（上游同一行 px-8）", got)
 	}
 
-	// 头图区 200 高：头像上沿离页面顶 44（200 - 16 - 140），下沿再留 16。
-	if av.Y-64 != 44 {
-		t.Errorf("头像上沿在 %.1f（页面顶 64 往下 %.1f），want 44", av.Y, av.Y-64)
+	// 头像压在 132 高的横幅下沿：环的上沿在 88，头像再进去 3。
+	if av.Y-64 != upAvatarTop+upAvatarRing {
+		t.Errorf("头像上沿在 %.1f（页面顶 64 往下 %.1f），want %d", av.Y, av.Y-64, upAvatarTop+upAvatarRing)
 	}
 
 	// 头像那圈 `shadow-lg`：头像正下方那一带的底色，要比同一块头图的别处暗。

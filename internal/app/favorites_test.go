@@ -343,7 +343,7 @@ func TestTheSidebarWidthIsClampedOnTheWayIn(t *testing.T) {
 		{99999, app.MaxSideMenuWidth},
 		{0, app.MinSideMenuWidth},
 		{-5, app.MinSideMenuWidth},
-		{320, 320},
+		{280, 280},
 	} {
 		if got := app.ClampSideMenuWidth(tc.in); got != tc.want {
 			t.Errorf("ClampSideMenuWidth(%v) = %v，want %v", tc.in, got, tc.want)
