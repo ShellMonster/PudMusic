@@ -120,6 +120,15 @@ func Friendly(err error) string {
 		return "连不上 B 站这条音频流了（网络或地址的问题，不是歌坏了）"
 	}
 
+	// 🔴 **「这一条解不了」要说人话**（票 #282）。
+	//
+	// 底下是「OSStatus -11800」「不像 FLAC」这种行话——用户读不出来，也照着
+	// 做不了任何事（换网？换歌？他不知道）。这一条说的是「这台机器解不了它」
+	// 并且给出**还能怎么办**。
+	if errors.Is(err, audio.ErrUnsupportedFormat) {
+		return "这一条的音频解不了（这台机器的解码器认不出它）。换一档音质试试，或者在 B 站里听它"
+	}
+
 	// B 站的业务错误：查表。
 	var api *APIError
 	if errors.As(err, &api) {
@@ -224,6 +233,10 @@ func Recoverable(err error) bool {
 	// 字节源拉不动：网络或地址的问题，换张网 / 再试一次。
 	case errors.Is(err, audio.ErrStreamDead):
 		return true
+	// 🔴 **解不了就是解不了**：再取一次流拿回来的还是同一条，还是解不了。
+	// 给一枚按了也没用的「重试」比不给更糟（票 #282）。
+	case errors.Is(err, audio.ErrUnsupportedFormat):
+		return false
 	// 没拿到 HTTP 响应（断网、超时、DNS）。
 	case errors.Is(err, ErrNetwork):
 		return true
