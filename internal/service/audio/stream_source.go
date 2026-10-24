@@ -88,6 +88,28 @@ const (
 	copyBufSize = 64 << 10
 )
 
+// defaultBackoff 是**默认的退避序列**：1 秒、2 秒、4 秒。
+//
+// # 为什么是这三个数
+//
+//	1 秒	CDN 抖一下（地铁进隧道、Wi-Fi 换信道）通常一秒之内就缓过来了
+//	2 秒	再宽一档，覆盖「刚被风控挡了一下」那种一秒不够的情况
+//	4 秒	最后一次，给它一个真有可能会成功的窗口
+//
+// # 为什么**总时长封顶在 7 秒**
+//
+// 再长用户就走了。他看到的是「歌不动了」，而「等 20 秒」和「等 4 秒」
+// 在他的感受里没有区别——他只会以为应用死了，然后去按暂停。
+//
+// ⚠️ **这是「指数退避 + 封顶」**，不是「固定间隔」也不是「随机抖动」：
+// 市面上量级相近的几种做法是 mpv 的 FFmpeg 后端（0/1/3/7 秒）、
+// Nuclear 的换源退避（1 秒起、×2、封顶 30 秒，但只用于换源）、
+// VLC 的 EOS 突发退避（100ms→3.2 秒）。我们取最保守的那一档：**总等待
+// 不超过 7 秒**，而退避期间界面上一直写着「正在重连」（票 #315）。
+func defaultBackoff() []time.Duration {
+	return []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
+}
+
 // StreamReply 是换流之后拿到的新一条流。
 //
 // 刻意**不**用 `bili.StreamRef`：服务层之间不互相认识（`spec.md` 的四层
@@ -126,6 +148,37 @@ type StreamSourceOptions struct {
 
 	// OnRefresh 每次换流成功后调一次，让上层把音质徽章更新掉。
 	OnRefresh func(*StreamReply)
+
+	// OnRetry 每次**准备重试**时调一次。
+	//
+	// 🔴 **它在退避开始之前调**：界面上的「正在重连」得从**第一秒**就亮着，
+	// 而不是等到重试真的跑起来了才说——等到那时候用户已经对着一个不动的
+	// 界面等了好几秒了（票 #315）。
+	//
+	// 参数是「第几次重试」（从 1 起）和「这一次要等多久」。
+	OnRetry func(attempt int, wait time.Duration)
+
+	// OnReconnected 重试之后**字节又开始来了**时调一次。
+	//
+	// 第一次就下成功的话不调——那时候压根没有重连过。
+	//
+	// ⚠️ **它报的是「数据回来了」，不是「这一趟成功了」**：换流可能换到了
+	// 另一条流（那要上层重新开解码器并跳回播放位置），而数据回来只说明
+	// 连接恢复了。
+	OnReconnected func()
+
+	// Backoff 是**每一次重试之前要等的时长**序列。
+	//
+	// 零值用默认：1 秒、2 秒、4 秒（见 `defaultBackoff`）。
+	//
+	// 为什么要有它：CDN 抖一下的时候三次重试在几毫秒里就打完了一——那不叫
+	// 「重试」，那是连着撞了同一堵墙三次。中间等一等，网络缓过来了就救得
+	// 回来；网络没缓过来，等下去也只是把同一堵墙多撞两次。
+	//
+	// ⚠️ **序列用完了用最后一个**（不是变成 0）：重试次数的上限是
+	// `MaxRefresh`，过了那个上限源就报终态错误了，所以「用完」这个状态
+	// 压根到不了。
+	Backoff []time.Duration
 
 	// Client 是取字节用的客户端。
 	//
@@ -193,6 +246,19 @@ type StreamSource struct {
 	now     func() time.Time
 	stall   time.Duration
 
+	// backoff 是**每一次重试之前要等的时长**序列（见 `defaultBackoff`）。
+	backoff []time.Duration
+	// onRetry / onReconn 是「正在重试」和「字节又回来了」这两个回调
+	// （见 `StreamSourceOptions`）。它们给上层一个能显示在界面上的状态。
+	onRetry  func(attempt int, wait time.Duration)
+	onReconn func()
+	// retryPending 是「上一次是重试来的，字节还没回来」。
+	//
+	// 字节回来的那一刻（`append`）就报一次「恢复了」——判据是**真的有
+	// 字节到了**，不是「请求没报错」：连上了却一个字节都下不动（半死不活
+	// 的连接）在用户听来和没恢复一样。
+	retryPending bool
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -237,6 +303,9 @@ func NewStreamSource(o StreamSourceOptions) (*StreamSource, error) {
 		client:    o.Client,
 		refetch:   o.Refetch,
 		onRefr:    o.OnRefresh,
+		onRetry:   o.OnRetry,
+		onReconn:  o.OnReconnected,
+		backoff:   append([]time.Duration(nil), o.Backoff...),
 		now:       o.Now,
 		stall:     orDefaultDuration(o.StallTimeout, defaultStallTimeout),
 		ctx:       ctx,

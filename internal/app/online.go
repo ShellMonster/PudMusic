@@ -803,6 +803,9 @@ func (a *App) buildOnline(ctx context.Context, s *Streaming, it Item, gen int) (
 func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	ref *bili.StreamRef,
 ) (*audio.StreamSource, *audio.Player, error) {
+	// 🔴 **每一段流一个重连令牌**：旧源的回调可能迟到（它还在退避里等着
+	// 的时候这一条已经换掉了），令牌对不上就不碰界面上的状态。
+	token := a.newReconnectToken()
 	src, err := audio.NewStreamSource(audio.StreamSourceOptions{
 		URLs:      ref.URLs,
 		ExpiresAt: ref.ExpiresAt,
@@ -813,6 +816,11 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 		// 而取流接口没有「从第几个字节开始」这个参数。
 		Refetch:   func(ctx context.Context, _ int64) *audio.StreamReply { return a.refetch(ctx, s, it) },
 		OnRefresh: func(r *audio.StreamReply) { a.noteQuality(gen, r.Quality) },
+		// 🔴 **「正在重连」从源那边报上来**（票 #315）：换地址 / 换流之前
+		// 源要等一个退避（1 秒 / 2 秒 / 4 秒），那几秒里界面上不能一个字
+		// 都没有——用户看到的是「歌停着、界面不动」。
+		OnRetry:       func(attempt int, wait time.Duration) { a.noteReconnect(gen, token, attempt) },
+		OnReconnected: func() { a.noteReconnected(gen, token) },
 	})
 	if err != nil {
 		return nil, nil, err
@@ -1183,6 +1191,11 @@ func (a *App) refreshOnlineNow() {
 	gen := a.onlineGen
 	pos, want := a.position, a.wantPlay
 	a.mu.Unlock()
+
+	// 🔴 **「正在重连」从这一刻开始**（票 #315）：这一趟要走一次网络往返
+	// （重新取流 + 开解码器），几百毫秒到几秒。界面上原来一个字都没有，
+	// 用户看到的就是「歌停着、界面不动、没有字」——等多久都像应用死了。
+	a.beginReconnect(gen)
 
 	s := a.streamingSnapshot()
 	if s == nil {

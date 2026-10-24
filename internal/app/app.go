@@ -111,6 +111,24 @@ type State struct {
 	// ⚠️ **它不是 `Title`**：`Title` 是「正在放的那首」，而取流这一趟里正在放
 	// 的还是上一首。用户要知道的是「我刚才点的那一首在准备」，不是上一首。
 	LoadingTitle string
+	// Reconnecting 是「**正在重连**」：断流之后应用在救这一首。
+	//
+	// 🔴 **它和 `Loading` 是两件事**，用户看到的差别很大：
+	//
+	//	Loading		这一首**还没放起来**（第一次点它）
+	//	Reconnecting	这一首**响过一半**，流断了，正在换地址 / 换流重开
+	//
+	// 后者以前界面上一个字都没有——用户看到的是「歌停着、界面不动、没有
+	// 字」，等多久都像应用死了（票 #315）。加上退避之后更糟：那 7 秒的
+	// 等待原本是**完全静默**的。
+	//
+	// ⚠️ **它必须有上限**：退避最多等 7 秒（`audio` 的 `defaultBackoff`），
+	// 加上换流那一趟网络往返，总共十几秒。到点了就该报失败，不能一直亮着
+	// ——一直亮着就是另一种「什么都不说」。
+	Reconnecting bool
+	// ReconnectAttempt 是第几次重试（从 1 起）。0 = 不是「重试」那一档
+	// （比如应用层自己从播放位置重开）。
+	ReconnectAttempt int
 	// CanRetry 报当前那一句错误**再试一次有没有用**。
 	//
 	// ⚠️ **它和 `Err` 是一对**：Err 说「出了什么事」，CanRetry 说「还能不能
@@ -223,6 +241,18 @@ type App struct {
 	loading bool
 	// loadingTitle 是正在取的那一首的名字（见 State.LoadingTitle）。
 	loadingTitle string
+	// reconnecting 是「正在重连」（见 State.Reconnecting）。
+	reconnecting bool
+	// reconnectAttempt 是第几次重试（见 State.ReconnectAttempt）。
+	reconnectAttempt int
+	// reconnectToken 是**当前这条在线字节源**的重连令牌，
+	// reconnectSeq 是发令牌的计数器。
+	//
+	// ⚠️ **令牌是给「迟到的回调」用的**：一条旧字节源可能还在退避里等着，
+	// 而它的「字节回来了」回调在这之后才到——那时候界面上的「正在重连」
+	// 已经属于**另一条**流了，不看令牌的话旧流会把新流的那一行擦掉。
+	reconnectToken int
+	reconnectSeq   int
 	// loadStop 是「取流超时」那个闹钟的停掉函数。nil = 没挂。
 	//
 	// ⚠️ **它和 `lyricStopTimer` 不是一个东西**：那一个管歌词偏移的防抖写盘，
@@ -551,26 +581,28 @@ func (a *App) Snapshot() State {
 		pref = BiliToPref(a.streaming.Quality)
 	}
 	return State{
-		HasTrack:     a.player != nil,
-		Title:        a.title,
-		Path:         a.path,
-		Source:       a.sourceLocked(),
-		CoverURL:     a.cover,
-		Playing:      a.playing,
-		Position:     a.position,
-		Duration:     a.duration,
-		Volume:       a.volume,
-		Rate:         a.rate,
-		Err:          a.errText,
-		ErrDetail:    a.errDetail,
-		Loading:      a.loading,
-		LoadingTitle: a.loadingTitle,
-		CanRetry:     a.errRetryable,
-		BiliURL:      a.biliURLLocked(),
-		Quality:      a.quality,
-		QualityPref:  pref,
-		Artist:       a.artist,
-		ArtistMid:    a.artistMid,
+		HasTrack:         a.player != nil,
+		Title:            a.title,
+		Path:             a.path,
+		Source:           a.sourceLocked(),
+		CoverURL:         a.cover,
+		Playing:          a.playing,
+		Position:         a.position,
+		Duration:         a.duration,
+		Volume:           a.volume,
+		Rate:             a.rate,
+		Err:              a.errText,
+		ErrDetail:        a.errDetail,
+		Loading:          a.loading,
+		LoadingTitle:     a.loadingTitle,
+		Reconnecting:     a.reconnecting,
+		ReconnectAttempt: a.reconnectAttempt,
+		CanRetry:         a.errRetryable,
+		BiliURL:          a.biliURLLocked(),
+		Quality:          a.quality,
+		QualityPref:      pref,
+		Artist:           a.artist,
+		ArtistMid:        a.artistMid,
 
 		// 播放模式在队列自己的锁里，不在 `a.mu` 里——它是队列的形状，不是
 		// 播放器的状态。顺着一句一句取：`a.mu` 已经拿在手里，而 `a.queue`

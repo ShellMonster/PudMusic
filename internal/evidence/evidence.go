@@ -1026,6 +1026,33 @@ var Items = []Item{
 	},
 	{
 		Category: Negative,
+		// 票 #315：CDN 抖一下的时候三次重试是**瞬间打完**的（`recover` 里
+		// 一个 sleep 都没有），用户只看到一句红字；而重连的那几秒里界面上
+		// **一个字也没有**——「歌停着、界面不动、没有字」。
+		//
+		// 这一组盯两件事：**退避是真的**（重试之间隔了、随次数变长、关掉
+		// 能打断），以及**「正在重连」看得见**（点亮、收掉、迟到的回调不许
+		// 擦掉别人的那一行）。
+		Spec: "断流重连：重试之间有退避（1 秒 / 2 秒 / 4 秒，总 ≤ 7 秒），重连期间界面上说「正在重连」，成功或失败都有明确结果",
+		Tests: []string{
+			"TestTheDefaultBackoffIsOneTwoFour",
+			"TestARetryWaitsBeforeItRetries",
+			"TestTheBackoffGrowsWithEveryRetry",
+			"TestTheBackoffStopsAtItsLastValue",
+			"TestTheSourceGivesUpAfterTheBackoffIsUsedUp",
+			"TestCloseCancelsTheBackoffWait",
+			"TestTheReconnectingFlagReachesTheSnapshot",
+			"TestTheBytesComingBackTurnsTheReconnectingFlagOff",
+			"TestAnErrorTurnsTheReconnectingFlagOff",
+			"TestALateCallbackFromTheOldStreamDoesNotTouchTheNewOne",
+			"TestACallbackFromAnotherGenerationIsIgnored",
+			"TestTheReopenFromThePlaybackPositionSaysSo",
+			"TestThePlayBarSaysItIsReconnecting",
+			"TestTheErrorWinsOverTheReconnectingLine",
+		},
+	},
+	{
+		Category: Negative,
 		Spec:     "扫码中途断网：不算失败，网络回来自己走完",
 		Tests:    []string{"TestScanningSurvivesTheNetworkGoingAway", "TestLogoutSurvivesAnUnreachableBilibili"},
 	},

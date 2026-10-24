@@ -1283,6 +1283,15 @@ func (a *App) setErrTextDetail(msg, detail string, retryable bool) {
 	a.errText = msg
 	a.errDetail = detail
 	a.errRetryable = retryable
+	// 🔴 **有错就不再说「正在重连」**（票 #315）：那一行和错误那一行占**同一个
+	// 位置**（播放条上只有一行宽），而错的那句信息量更大——重连失败之后用户
+	// 要看的是「为什么不行、还能怎么办」，不是「还在重连」。
+	//
+	// ⚠️ **空消息不算**：那是「把错误清掉」（`clearStaleQualityErr`），
+	// 不是「出错了」——清错误的时候不该顺手把「正在重连」也收掉。
+	if msg != "" {
+		a.clearReconnectingLocked()
+	}
 	wake := a.wake
 	a.mu.Unlock()
 	if wake != nil {
@@ -1295,10 +1304,15 @@ func (a *App) setErrTextDetail(msg, detail string, retryable bool) {
 // 🔴 **三个值一起清**：只清 `errText` 而留着 `errRetryable`，界面上就变成
 // 「没有错误了，但重试那一枚键还亮着」——而那枚键按下去会重放上一首，
 // 用户会以为是自己按错了。
+//
+// 🔴 **顺手把「正在重连」那一档也收掉**（票 #315）：调用它的这四处
+// （开新歌、放起来、换流重开成功、换音质成功）都是「**这一首已经在响了**」，
+// 而「正在重连」说的是「正在救」——两者同时挂着是自相矛盾的。
 func (a *App) clearErrLocked() {
 	a.errText = ""
 	a.errDetail = ""
 	a.errRetryable = false
+	a.clearReconnectingLocked()
 }
 
 // Retry 再放一次上一次用户想放的那一首。
