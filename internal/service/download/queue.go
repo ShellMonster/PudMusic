@@ -63,6 +63,13 @@ type Options struct {
 	Client *http.Client
 	// Now 是取时刻（Unix 毫秒）。nil 用真时钟。给它是给测试用的。
 	Now func() int64
+	// OnDone 是「一项有结果了」的回调：**下完了**或者**下坏了**。
+	//
+	// ⚠️ **暂停 / 取消不报**：那不是「下完了」，报出去是撒谎（用户还要接着下）。
+	//
+	// ⚠️ **它在后台那条线上被调**（不是界面线程），所以它不许碰界面状态。
+	// 上层拿它做的是「说一句话」（见 `internal/app/announce.go`）。
+	OnDone func(Snapshot)
 }
 
 // Manager 是下载队列。
@@ -79,6 +86,9 @@ type Manager struct {
 
 	// wake 是「状态变了，要一帧」的回调，由界面层装。
 	wake func()
+
+	// onDone 是「一项有结果了」的回调（见 `Options.OnDone`）。
+	onDone func(Snapshot)
 
 	ctx    context.Context
 	quit   context.CancelFunc
@@ -127,6 +137,7 @@ func New(opts Options, path string) (*Manager, error) {
 		client:  opts.Client,
 		resolve: opts.Resolve,
 		now:     now,
+		onDone:  opts.OnDone,
 		ctx:     ctx,
 		quit:    quit,
 		wakeup:  make(chan struct{}, 1),
@@ -575,11 +586,13 @@ func (m *Manager) runOne(id string) {
 
 	m.mu.Lock()
 	delete(m.cancels, id)
+	var done Snapshot
 	if t := m.tasks[id]; t != nil {
 		switch {
 		case err == nil:
 			t.Status = StatusDone
 			t.Err = ""
+			done = SnapshotOf(t)
 		case errors.Is(err, context.Canceled), errors.Is(err, ErrPaused):
 			// 暂停 / 应用退出：这不是失败，用户还要接着下。
 			//
@@ -593,12 +606,23 @@ func (m *Manager) runOne(id string) {
 		default:
 			t.Status = StatusError
 			t.Err = err.Error()
+			done = SnapshotOf(t)
 		}
 	}
 	wake = m.wake
+	onDone := m.onDone
 	m.mu.Unlock()
 	if wake != nil {
 		wake()
+	}
+	// 🔴 **「下完了 / 下坏了」要报出去**（无障碍）：这一格的变化在下载记录页的
+	// 一列上，而用户多半在别的页——**他既看不见那个勾，也听不见声音**。
+	//
+	// ⚠️ **只有终态才报**：暂停 / 取消不是「下完了」，报出去是撒谎。
+	//
+	// ⚠️ **锁外面调**：那是上层装进来的回调，而它回头要拿应用层的锁。
+	if onDone != nil && done.ID != "" {
+		onDone(done)
 	}
 }
 
