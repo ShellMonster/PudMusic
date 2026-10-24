@@ -59,6 +59,7 @@ func (s *Shell) settingsProxy(c *ui.Context, st app.Settings, ro bool) {
 		}
 		// 选了「不使用代理」就不画地址那几行——Biu 是 `(value.type === "http" || ...) && (...)`（`:61`）。
 		if cur.Type == app.ProxyNone {
+			proxyHint(c, "现在不走代理。选了上面那一档才填地址。")
 			return
 		}
 
