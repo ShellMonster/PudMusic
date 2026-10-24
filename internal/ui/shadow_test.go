@@ -114,7 +114,7 @@ func assertShadow(t *testing.T, img *image.RGBA, band, control mygoui.Rect, tol 
 // ⚠️ **为什么有一处要用这个而不是上一条那个**：深色下背景是 `#18181b`，而
 // Tailwind 那一档影只有 **10% 黑**——压在深底上只差**一个色阶**（实测 24 → 23）。
 // 「比远处那块暗」那种比法在深色下要一个色阶以上才数得出来，于是那一处明明画了
-// 影却说它没画。**两��画法差的那一点就是影本身**，量它就量得到。
+// 影却说它没画。**两种画法差的那一点就是影本身**，量它就量得到。
 func assertShadowDarker(t *testing.T, with, without *image.RGBA, band mygoui.Rect, what string) {
 	t.Helper()
 	n := 0
