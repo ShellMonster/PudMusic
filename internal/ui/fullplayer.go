@@ -86,8 +86,8 @@ const (
 	// 有主角；而被切的原因是**底栏高度没跟着它重算**（当时是 80）。票 #169 把
 	// 底栏按上游重排（进度 20 + 缝 8 + 播放键 + 底边距 16），48 完全
 	// 放得下。**改底栏的留白时这个高度要一起重算**，别再让它去迁就一个旧框。
-	fullPlayGlyph = iconPlayBtn
-	fullPlayHit   = iconHitPlay
+	fullPlayGlyph = 28
+	fullPlayHit   = 64
 
 	// 顶栏：上游 `px-6 py-4`（`index.tsx:291`）——左右 24、上下 16。
 	//
@@ -110,10 +110,10 @@ const (
 	// fullControlsHeight 是整条底栏的高度，**由内容算出来**：
 	// 进度行 20（`knobFullLook` 那个 `Height(t.Space(5))`）
 	// + 缝 8（`gap-2`）
-	// + 播放键 48（`fullPlayHit`，这一行最高的那一个）
+	// + 播放键 64（`fullPlayHit`，这一行最高的那一个；设计规范 §5）
 	// + 离底 16（`mb-4`）
-	// = 92。藏起来的时候整条要移出窗口，靠的也是这个数。
-	fullControlsHeight = 92
+	// = 108。藏起来的时候整条要移出窗口，靠的也是这个数。
+	fullControlsHeight = 108
 	fullBottomPadX     = space.Px48
 	fullBottomMargin   = space.Px16
 	fullBottomMaxW     = 1152
@@ -995,7 +995,7 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 		Justify(ui.Center).AlignItems(ui.End)
 	bar = bar.Opacity(bar.AnimateTo("full-controls:o", shown, ui.Smooth))
 	// ⚠️ 位移**不跟着淡入一起动**（顶栏也是这么写的）：藏起来的时候这一条要真的
-	// 移出窗口，不然停在窗口底下那 92 像素里的控件仍然接得到点击。
+	// 移出窗口，不然停在窗口底下那 108 像素里的控件仍然接得到点击。
 	bar = bar.Translate(0, (1-shown)*fullControlsHeight)
 
 	bar.Children(func() {
@@ -1028,17 +1028,17 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 					s.viewPrevButton(c)
 					// 提示走 tooltip.go（时延照上游），不是框架那枚固定的 600ms。
 					//
-					// 🔴 **这一枚不走 `iconButtonPlay`**（那一枚带「悬停变主色」）：
-					// 满屏的底是**压暗过的封面**，不是应用底色——主色当字色那一档
-					// 压在那上面只有 1.0:1（实测：浅色主题下悬停后变成 rgb(18,114,52)
-					// 的深绿，比底色还暗），而且那一行其余四枚图标都是满屏自己的
-					// 前景色（白 92%），**一枚变绿另外四枚不变，一眼就不成套**。
-					// 所以这一枚就是那一行里的一枚图标键（图形是前景色），形状和
-					// 播放条上那一枚一样（48×48、图形正好填满）。
-					if s.withTip(c, iconButton(c, transportIcon(st.Playing),
-						transportLabel(st.Playing), fullPlayGlyph).
-						Size(fullPlayHit, fullPlayHit).Padding(space.None, space.None).
-						Disabled(!st.Playing && !st.HasTrack), transportLabel(st.Playing)).Clicked() {
+					// 满屏上这一枚和播放条上是同一枚实心强调色圆（规范 §5：64×64，图形 28）。
+					// 实心圆的底是强调色、字是 `AccentText`，压在糊过的封面上也读得出来——
+					// 旧的「悬停变主色」那一档按应用底色算，在封面上会掉到 1.0:1，所以旧版
+					// 才特意不走 `iconButtonPlay`；现在这一枚自己带底，没有那个问题。
+					glyph := iconPlayFill
+					if st.Playing {
+						glyph = iconPauseFill
+					}
+					if s.withTip(c, iconButtonPlay(c, glyph, transportLabel(st.Playing),
+						fullPlayHit, fullPlayGlyph, !st.Playing && !st.HasTrack),
+						transportLabel(st.Playing)).Clicked() {
 						s.app.Toggle()
 					}
 					s.viewNextButton(c)

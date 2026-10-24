@@ -146,3 +146,62 @@ func TestPickingAPresetOnTheSettingsPage(t *testing.T) {
 		t.Errorf("拖了圆角之后方案还是 %q，应当回到经典", got)
 	}
 }
+
+// TestTheSidebarTakesThePresetsOwnColor：套了方案，侧栏底是方案里的 `sidebar`，
+// 不是内容区的 Background；经典沿用 Background（侧栏和内容区同色，靠右缘那条线分界）。
+func TestTheSidebarTakesThePresetsOwnColor(t *testing.T) {
+	for _, tc := range []struct {
+		preset app.ThemePreset
+		dark   bool
+	}{
+		{app.ThemePresetWarmPaper, false}, {app.ThemePresetWarmPaper, true},
+		{app.ThemePresetDuskAmber, true}, {app.ThemePresetSoftPeach, false},
+	} {
+		st := app.DefaultSettings("")
+		st.ThemePreset = tc.preset
+		st.ThemeMode = app.ThemeModeLight
+		if tc.dark {
+			st.ThemeMode = app.ThemeModeDark
+		}
+		tt, _, _, _ := shellOnSettings(t, st)
+		sk, _, _ := presetSkinFor(tc.preset, tc.dark)
+		want := rgb(mygoui.Hex(sk.sidebar))
+		if got := tt.Image().RGBAAt(3, 300); !sameColor(got, want) {
+			t.Errorf("%s dark=%v：侧栏底是 %v，该是方案的 sidebar %v", tc.preset, tc.dark, got, want)
+		}
+		if mygoui.Hex(sk.sidebar) == mygoui.Hex(sk.bg) {
+			t.Errorf("%s dark=%v：sidebar 和 bg 同色，侧栏就分不出层次了", tc.preset, tc.dark)
+		}
+	}
+
+	st := app.DefaultSettings("")
+	st.ThemePreset = app.ThemePresetClassic
+	st.ThemeMode = app.ThemeModeLight
+	tt, _, _, _ := shellOnSettings(t, st)
+	bg := rgb(BuildTheme(st, false).Background)
+	if got := tt.Image().RGBAAt(3, 300); !sameColor(got, bg) {
+		t.Errorf("经典：侧栏底是 %v，该沿用 Background %v", got, bg)
+	}
+}
+
+// TestTheSelectedSideItemUsesTheAccentSoftBase：选中的侧栏项底是强调色淡底
+// （`accentSoft`），字在这层底上仍 ≥ 4.5:1。
+func TestTheSelectedSideItemUsesTheAccentSoftBase(t *testing.T) {
+	for _, name := range allPresets {
+		for _, dark := range []bool{false, true} {
+			s := app.DefaultSettings("")
+			s.ThemePreset = name
+			s.ThemeMode = app.ThemeModeLight
+			if dark {
+				s.ThemeMode = app.ThemeModeDark
+			}
+			th := BuildTheme(s, false)
+			if got, want := flatCurrentBg(th), accentSoft(th); got != want {
+				t.Errorf("%s dark=%v：选中底 %v，该是 accentSoft %v", name, dark, got, want)
+			}
+			if r := presetRatio(flatCurrentText(th, true), flatCurrentBg(th)); r < 4.5 {
+				t.Errorf("%s dark=%v：选中项的字压在淡底上只有 %.2f:1", name, dark, r)
+			}
+		}
+	}
+}

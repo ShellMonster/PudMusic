@@ -22,29 +22,19 @@ import (
 // fullPlayLabel 是这一帧播放键的名字（在播时叫「暂停」）。
 func fullPlayLabel(s *Shell) string { return transportLabel(s.app.Snapshot().Playing) }
 
-// TestTheFullPlayerPlayKeyKeepsTheRowForeground 断满屏那一枚**悬停时不变主色**。
+// TestTheFullPlayerPlayKeyIsTheSolidAccentCircle 断满屏那一枚和播放条是同一种：
+// 64×64 的实心强调色圆，悬停变 AccentHover。
 //
-// 🔴 **这一条是评审查出来的（major）**：满屏的底是**压暗过的封面**，不是应用底色，
-// 而「悬停变主色」那一档是按**应用底色**算的（`widgets/ink` 的 `AccentOn`）——
-// 浅色主题下它是 rgb(18,114,52) 的深绿，压在满屏那个底（实测 {115,115,115}）上
-// **只有 1.0:1**，比底色还暗，**等于看不见**；而且那一行其余四枚图标都是满屏自己的
-// 前景色（白 92%），**一枚变绿另外四枚不变，一眼就不成套**。
-//
-// 所以满屏那一枚走 `iconButton`（图形是那一行的前景色），不走 `iconButtonPlay`
-// （那一枚带「悬停变主色」）。
-//
-// 判据：悬停之后那一枚图形**仍然是中性色**（白 92% 那一档），不是绿的。
-// 深浅两套都断：深色下主色是亮的绿，一样不是中性色。
-func TestTheFullPlayerPlayKeyKeepsTheRowForeground(t *testing.T) {
+// ⚠️ **这条替换了原来的 `…KeepsTheRowForeground`**：原来满屏那一枚是无底图形，
+// 压在压暗过的封面上不能变主色（只有 1.0:1）。现在它是**自带底**的实心圆（设计规范
+// §5），字色 AccentText 压在强调色上，和封面无关，那个顾虑不存在了。
+func TestTheFullPlayerPlayKeyIsTheSolidAccentCircle(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
 		if dark {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
-			// ⚠️ **自己搭一套，不用 `fullTester`**：那一支一律深色（它数的是
-			// 「接近白的像素」），而这里要量的是**浅色下**那一档——浅色下主色当字色
-			// 那一档最深，正好压在满屏压暗过的封面上。
 			s, tt := newShell(t)
 			s.clock = newFakeClock(time.Unix(1_700_000_000, 0))
 			tt.SetDark(dark)
@@ -62,23 +52,19 @@ func TestTheFullPlayerPlayKeyKeepsTheRowForeground(t *testing.T) {
 			if !ok {
 				t.Fatalf("画面上找不到满屏的播放键，文字有 %q", tt.Texts())
 			}
-			// 指针落到那一枚上。
+			th := BuildTheme(s.app.SettingsSnapshot(), dark)
+			edge := func() color.RGBA {
+				return tt.Image().RGBAAt(round32(btn.X)+2, round32(btn.Y)+int(btn.H)/2)
+			}
+			tt.Move(10, 10)
+			tt.Frame()
+			if got := edge(); !near(got, rgb(th.Accent)) {
+				t.Errorf("满屏播放键的圆边缘是 %v，该是强调色 %v", got, rgb(th.Accent))
+			}
 			tt.Move(btn.X+btn.W/2, btn.Y+btn.H/2)
 			tt.Frame()
-
-			// 那一格里**离底色最远**的那个像素就是图形本身。
-			//
-			// ⚠️ **不能找「最白」的那个**：主色当字色那一档在浅色下是**比底色还暗**
-			// 的深绿（rgb(18,114,52)），那一格里面最白的像素反而是**底色**
-			// （实测 115）——找「最白」就永远找不到那一枚图形（这是第一版的错法，
-			// 浅色那一档因此绿了）。
-			bg := modeOf(columnLeftOf(tt.Image(), btn))
-			got := farthestFrom(tt.Image(), btn, bg)
-			if absInt(int(got.G)-int(got.R)) > 12 || absInt(int(got.B)-int(got.R)) > 12 {
-				t.Errorf("满屏的播放键悬停之后是 %v（底色 %v）——那不是满屏自己的"+
-					"前景色（白 92%%），是主色那一档（浅色主题下压在满屏那个底上"+
-					"只有 1.0:1，等于看不见；而且旁边四枚图标都还是白的）",
-					got, bg)
+			if got := edge(); !near(got, rgb(th.AccentHover)) {
+				t.Errorf("悬停时满屏播放键的圆是 %v，该是 AccentHover %v", got, rgb(th.AccentHover))
 			}
 		})
 	}
@@ -235,14 +221,14 @@ func TestTheFullPlayerBottomBarPaddingAndMaxWidth(t *testing.T) {
 	settleFull(t, tt)
 
 	// 上游那几个类名换算出来的字面量：px-12 = 48、mb-4 = 16、max-w-6xl = 1152；
-	// 播放键的盒子是 48（上游 `size-12 min-w-12`，图形正好填满）。
-	const wantPadX, wantMargin, wantMaxW, wantHit = 48, 16, 1152, 48
+	// 播放键的盒子是 64（设计规范 §5 的满屏主播放键）。
+	const wantPadX, wantMargin, wantMaxW, wantHit = 48, 16, 1152, 64
 	play, ok := tt.Find(fullPlayLabel(s))
 	if !ok {
 		t.Fatalf("找不到播放键，文字有 %q", tt.Texts())
 	}
 	if play.W != wantHit || play.H != wantHit {
-		t.Errorf("播放键是 %.0fx%.0f，want %dx%d（上游的 `size-12 min-w-12`）",
+		t.Errorf("播放键是 %.0fx%.0f，want %dx%d（设计规范 §5 满屏主播放键 64）",
 			play.W, play.H, wantHit, wantHit)
 	}
 	if d := float32(fullWinH) - (play.Y + play.H) - wantMargin; d != 0 {
@@ -413,7 +399,7 @@ func TestTheFullPlayerBottomBarHasPlayModeAndQueue(t *testing.T) {
 		}
 	}
 
-	// 抽屉底下让出来的是**满屏的底栏**（92 高），不是播放条那 88：进度条整条
+	// 抽屉底下让出来的是**满屏的底栏**（108 高），不是播放条那 88：进度条整条
 	// 都该按得着。点它一下，抽屉不该被当成「点了蒙版」关掉。
 	prog, ok := tt.Find("全屏播放进度")
 	if !ok {
@@ -439,7 +425,8 @@ func TestTheFullPlayerBottomBarHasPlayModeAndQueue(t *testing.T) {
 	}
 }
 
-// TestTheFullPlayerPlayGlyphIsFortyEight 断播放键的**图形**是 48 的。
+// TestTheFullPlayerPlayGlyphIsTwentyEight 断主播放键的**圆**是 64 的、图形是 28 的（设计规范 §5）。
+// 下面几段是原来 48 档的说明，量法已换：现在量强调色圆盘的外接框。
 //
 // 按钮框是 48（上游 `size-12 min-w-12`，见上一条）；图形本身是 48——上游
 // `music-play-control/index.tsx:23-25` 的 `RiPlayCircleFill size={48}`。
@@ -450,20 +437,26 @@ func TestTheFullPlayerBottomBarHasPlayModeAndQueue(t *testing.T) {
 // 众数」是**图形本身**而不是底色，`scanGlyph` 量到的那一片「墨迹」其实是
 // **圆盘边缘那一圈抗锯齿**——它的外接框和圆盘的外接框是同一个数（40 + 4 的
 // 回扩 = 44），所以这一条量到的仍然是图形的大小。
-func TestTheFullPlayerPlayGlyphIsFortyEight(t *testing.T) {
+func TestTheFullPlayerPlayGlyphIsTwentyEight(t *testing.T) {
 	s, tt, _ := fullTester(t)
 	openFull(t, tt)
 	settleFull(t, tt)
 
-	g := scanGlyph(tt, fullPlayLabel(s))
-	if g.ink == "" {
-		t.Fatalf("播放键那一块没画东西，文字有 %q", tt.Texts())
+	btn, ok := tt.Find(fullPlayLabel(s))
+	if !ok {
+		t.Fatalf("找不到播放键，文字有 %q", tt.Texts())
 	}
-	const wantGlyph = 48 // 上游 `RiPlayCircleFill size={48}`
-	long := max(g.box.W, g.box.H)
-	if long < 40 || long > wantGlyph {
-		t.Errorf("播放图形的外接框是 %.1fx%.1f，want 落在 40~%d（48 的字号）——"+
-			"34 那一档量出来只有 28 上下", g.box.W, g.box.H, wantGlyph)
+	accent := rgb(BuildTheme(s.app.SettingsSnapshot(), true).Accent)
+	x0, x1 := 1<<30, -1
+	for y := int(btn.Y); y < int(btn.Y+btn.H); y++ {
+		for x := int(btn.X); x < int(btn.X+btn.W); x++ {
+			if near(tt.Image().RGBAAt(x, y), accent) {
+				x0, x1 = min(x0, x), max(x1, x)
+			}
+		}
+	}
+	if d := x1 - x0 + 1; d < 60 || d > 64 {
+		t.Errorf("满屏播放键的圆直径是 %d，want 60~64（规范 64）", d)
 	}
 }
 

@@ -2194,23 +2194,22 @@ var Items = []Item{
 		// 归「双平台」那一组：还是播放条那一块，但说的是**播放键那一枚的形状**
 		//（issue 217 / BMG-129，票 B）。
 		Category: Platform,
-		// issue 217：播放键改成**上游那一枚**——48×48 的盒子、**底下什么都没有**、
-		// 图形是**前景色**（深色下白、浅色下近黑），悬停时图形变主色。
+		// issue 217 原来把播放键做成上游那一枚（无底、前景色图形）。设计规范 v0.1 §5
+		// 之后（应用未发版）改成**实心强调色圆**：播放条 44×44、满屏 64×64，图形用
+		// AccentText，悬停 AccentHover、按下 AccentPressed，禁用不变色。
 		//
-		// 🔴 **判据全是画面上的像素**：改之前那一枚是「一块 58×58 的实心主色
-		// 圆角方块，里面一枚深色的圆」，改之后是「底色上的一枚圆」——**明暗正好
-		// 反过来**，而「还是那枚键」这件事在代码里看不出来（签名一个字没改）。
-		//
-		// ⚠️ **「正在播放」那一档也要对**（形状换成 `RiPauseCircleFill`）：两档
-		// 都断，「只改了播放那一档」这种坏法就抓得住。
-		Spec: "播放键是上游那一枚：48×48 的盒子、图形正好填满、底下没有实色、图形是前景色（不是主色）、悬停时图形变主色；「正在播放」那一档一样",
+		// 🔴 **判据全是画面上的像素**（圆边缘、方盒角、图形色），播放 / 暂停两档、
+		// 浅深两套都断。
+		Spec: "播放键是实心强调色圆（播放条 44、满屏 64）：圆边缘是强调色、方盒角是底色、图形是 AccentText、悬停与按下换底色、禁用时悬停不变；「正在播放」那一档一样",
 		Tests: []string{
-			// 盒子是 48×48、图形本身够大、图形落在盒子中间。
+			// 盒子 44×44、圆本身够大、图形落在圆心。
 			"TestThePlayKeyIsBigEnoughToHit",
-			// 底下没有压着实色、图形是前景色（深浅两套 × 播放/暂停两档）。
-			"TestThePlayKeyHasNoSolidBackground",
-			// 悬停时图形变主色（上游的 `hover:text-primary`）。
-			"TestThePlayKeyTurnsAccentOnHover",
+			// 圆是实心强调色、图形是 AccentText（深浅 × 播放/暂停）。
+			"TestThePlayKeyIsASolidAccentCircle",
+			// 悬停 → AccentHover，按下 → AccentPressed。
+			"TestThePlayKeyFillShiftsOnHoverAndPress",
+			// 满屏那一枚同一种，64×64。
+			"TestTheFullPlayerPlayKeyIsTheSolidAccentCircle",
 		},
 	},
 	{

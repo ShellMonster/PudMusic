@@ -19,7 +19,7 @@ import (
 // 为什么不用那边的常量：布局和期望都用它的话，常量一改两边一起跟着变，测试就
 // 发现不了了。它们的真值只来自 Biu 的源码，不来自我们的常量。
 const (
-	biuRowCoverSize = 56  // layout/playbar/left/index.tsx:29-45 的 width/height
+	biuRowCoverSize = 52  // 设计规范 v0.1 §7.1：播放条封面 52×52（原 Biu 是 56）
 	biuFullCoverW   = 384 // max(260, min(1200*0.7, 800*0.48, 520)) = min(840,384,520)
 	biuFullCoverH   = 288 // 封面宽 * 0.75
 	biuHideSeconds  = 3   // index.tsx:132 的 scheduleHideUi(3000)

@@ -20,7 +20,7 @@ import (
 
 // presetSkin 是一套方案在一种深浅下的颜色。
 type presetSkin struct {
-	bg, surface2, text1, text2, accent, onAccent string
+	bg, sidebar, surface2, text1, text2, accent, onAccent string
 	// accentSoftA / borderA / focusA 是透明度（0~1）：选中底、描边、焦点环。
 	accentSoftA, borderA, focusA float32
 	// danger / success / warning 是语义色（三套共用，浅深各一份）。
@@ -47,18 +47,18 @@ const (
 
 var presets = map[app.ThemePreset]preset{
 	app.ThemePresetWarmPaper: {
-		light: presetSkin{"#F8F4ED", "#F1EBE0", "#2A2420", "#6B6158", "#A8552E", "#FFFFFF", 0.14, 0.12, 0.60, presetDangerLight, presetSuccessLight, presetWarningLight},
-		dark:  presetSkin{"#1C1815", "#342D28", "#F3ECE3", "#B8AC9F", "#E58A5A", "#1C1409", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
+		light: presetSkin{"#F8F4ED", "#EFE9DE", "#F1EBE0", "#2A2420", "#6B6158", "#A8552E", "#FFFFFF", 0.14, 0.12, 0.60, presetDangerLight, presetSuccessLight, presetWarningLight},
+		dark:  presetSkin{"#1C1815", "#231E1A", "#342D28", "#F3ECE3", "#B8AC9F", "#E58A5A", "#1C1409", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
 		shape: presetShape{radius: 8, rowHeight: 40},
 	},
 	app.ThemePresetDuskAmber: {
-		light: presetSkin{"#FAF5EA", "#F3EAD8", "#2B2218", "#6A5C48", "#9A5F08", "#FFFFFF", 0.14, 0.12, 0.60, presetDangerLight, presetSuccessLight, presetWarningLight},
-		dark:  presetSkin{"#16120E", "#302922", "#F6EEE2", "#BDAF9C", "#E9A23B", "#1A1208", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
+		light: presetSkin{"#FAF5EA", "#F1E9D8", "#F3EAD8", "#2B2218", "#6A5C48", "#9A5F08", "#FFFFFF", 0.14, 0.12, 0.60, presetDangerLight, presetSuccessLight, presetWarningLight},
+		dark:  presetSkin{"#16120E", "#1D1813", "#302922", "#F6EEE2", "#BDAF9C", "#E9A23B", "#1A1208", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
 		shape: presetShape{radius: 10, rowHeight: 44},
 	},
 	app.ThemePresetSoftPeach: {
-		light: presetSkin{"#FFF9F5", "#FBEEE6", "#2E2523", "#6F605C", "#B4492E", "#FFFFFF", 0.12, 0.10, 0.55, presetDangerLight, presetSuccessLight, presetWarningLight},
-		dark:  presetSkin{"#1F1A1E", "#382F38", "#F7EEF0", "#C0B2B8", "#F2937A", "#2A140D", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
+		light: presetSkin{"#FFF9F5", "#FBEFE8", "#FBEEE6", "#2E2523", "#6F605C", "#B4492E", "#FFFFFF", 0.12, 0.10, 0.55, presetDangerLight, presetSuccessLight, presetWarningLight},
+		dark:  presetSkin{"#1F1A1E", "#262026", "#382F38", "#F7EEF0", "#C0B2B8", "#F2937A", "#2A140D", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
 		shape: presetShape{radius: 12, rowHeight: 44},
 	},
 }
@@ -108,4 +108,23 @@ func applyPreset(t *ui.Theme, name app.ThemePreset) {
 
 	t.Danger, t.Success, t.Warning = hex(sk.danger), hex(sk.success), hex(sk.warning)
 	t.Radius = shape.radius
+}
+
+// sidebarBackground 是侧栏这一帧的底色：方案里的 `sidebar`（规范 §2），经典不套方案、
+// 沿用主题的 Background。
+func (s *Shell) sidebarBackground(t *ui.Theme) ui.Color {
+	if sk, _, ok := presetSkinFor(s.app.SettingsSnapshot().ThemePreset, t.Dark); ok {
+		return ui.Hex(sk.sidebar)
+	}
+	return t.Background
+}
+
+// accentSoft 是「强调色的淡底」：底色往强调色推一点（规范 §2 的 `accentSoft`，
+// 浅色 12~14%、深色 18%）。选中行、选中的左栏项用它做底。
+func accentSoft(t *ui.Theme) ui.Color {
+	a := float32(0.14)
+	if t.Dark {
+		a = 0.18
+	}
+	return t.Background.Mix(t.Accent, a)
 }
