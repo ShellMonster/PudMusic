@@ -677,3 +677,58 @@ func assertCursorOnFirstSong(t *testing.T, s *Shell, tab int, key string) {
 			homeTabs[tab], key, m.Title, ok, want)
 	}
 }
+
+// TestTheNewMusicPagerIsClickableInsideTheList 钉住「翻页箭头点得动」。
+//
+// ⚠️ **这一块在列表的滚动区里**（它是「流行」那一档列表的第 0 行），而列表的浮动
+// 滚动条就贴在它的右边：指针一悬停滚动条就出现，**按下被滚动条抢走**（框架的
+// `pointerDown` 先问 `scrollbarPress`，滚动条那一帧画出来了就把这一次按下拿走），
+// 于是那两枚翻页箭头按了没反应——**用户翻不到第三页**（新歌 9~12 那四首看不到）。
+//
+// ⚠️ **单独造这一块的测试量不到**（`newGridTester` 那一块不在列表里，没有滚动条），
+// 所以这一条要**在首页上**跑。
+//
+// ⚠️ **两条都量**：直接点，和「先把指针悬停上去再点」——后者是评审探针里更狠的那条
+// （悬停让滚动条出现，之后每一次按下都被它拿走）。
+func TestTheNewMusicPagerIsClickableInsideTheList(t *testing.T) {
+	_, tt := newHome(t, fullSongs())
+	clickTab(t, tt, homePopTab)
+
+	// 一路翻到第三页：1 / 3 → 2 / 3 → 3 / 3。
+	for _, want := range []string{"2 / 3", "3 / 3"} {
+		if err := tt.Click("下一页"); err != nil {
+			t.Fatalf("点不到「下一页」：%v，文字有 %q", err, tt.Texts())
+		}
+		homeFrame(tt)
+		if got := readout(tt); got != want {
+			t.Fatalf("翻页之后读数是 %q，want %q（箭头点不动：列表的浮动滚动条压在它上面）", got, want)
+		}
+	}
+
+	// 翻回第一页，再来一遍「先悬停再点」——悬停会让滚动条出现。
+	for range 2 {
+		if err := tt.Click("上一页"); err != nil {
+			t.Fatalf("点不到「上一页」：%v，文字有 %q", err, tt.Texts())
+		}
+		homeFrame(tt)
+	}
+	if got := readout(tt); got != "1 / 3" {
+		t.Fatalf("翻回第一页读数是 %q，want 1 / 3", got)
+	}
+
+	// 把指针悬停在「下一页」上（滚动条于是出现），再点它。
+	r, ok := tt.Find("下一页")
+	if !ok || r.W == 0 {
+		t.Fatalf("画面上找不到「下一页」，文字有 %q", tt.Texts())
+	}
+	tt.Move(r.X+r.W/2, r.Y+r.H/2)
+	homeFrame(tt)
+
+	if err := tt.Click("下一页"); err != nil {
+		t.Fatalf("点不到「下一页」：%v，文字有 %q", err, tt.Texts())
+	}
+	homeFrame(tt)
+	if got := readout(tt); got != "2 / 3" {
+		t.Errorf("悬停之后点「下一页」，读数是 %q，want 2 / 3（滚动条把这一次按下抢走了）", got)
+	}
+}

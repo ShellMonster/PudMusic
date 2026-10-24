@@ -51,6 +51,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrollbar"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -460,8 +461,24 @@ func (g *newMusicGrid) view(c *ui.Context) {
 //
 // ⚠️ 一首都没有时**整个翻页那一块都不画**（上游那时候画的是「1 / 0」）：空网格
 // 上摆一个 1 / 0 的读数和两个转不动的箭头，用户只会以为界面坏了。
+//
+// ⚠️ **右边让出列表滚动条那一条**（票 #369 的评审）：这一块在列表的**滚动区**里
+// （它是「流行」那一档列表的第 0 行），而列表的浮动滚动条就贴在它的右边——指针
+// 一悬停滚动条就出现，**按下被滚动条抢走**（框架的 `pointerDown` 先问
+// `scrollbarPress`），于是那两枚翻页箭头按了没反应，用户翻不到第三页。
+//
+// 让出的宽度是滚动条那条**轨道**的宽（滚动条本身 + 框架在它左边留的 6 像素，见
+// `widgets/scrollbar` 的 `HotZone`）——箭头整个落在轨道外面才点得动。
+//
+// ⚠️ **只有这一行让**：卡片那一块不动（它和下面那些歌一样齐着右边，让了的话整块
+// 网格比下面那几行窄一截 ✗ ——那比点不动的箭头更显眼）。卡片最右边那一条封面被
+// 滚动条盖住，和下面那些歌行尾的「⋯」一样（那是列表一直就有的那件事）。
 func (g *newMusicGrid) viewHeader(c *ui.Context, total int) {
-	ui.Row(c).Key("new-music:head").FillWidth().Gap(space.Px12).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Key("new-music:head").FillWidth().Gap(space.Px12).AlignItems(ui.Center).
+		// ⚠️ **是 Padding 不是 Margin**：Margin 在 flex 里是**盒子外面**的那一圈，
+		// 它不缩内容区（内容区 = 盒子减去 Padding）——用 Margin 的话翻页那一块
+		// 还是贴在最右边，一样被滚动条压着。
+		Padding(space.None, scrollbar.HotZone, space.None, space.None).Children(func() {
 		ui.Text(c, "新歌速递").FontSize(scale.Font(c, scale.NewMusicTitle))
 
 		if total == 0 {
