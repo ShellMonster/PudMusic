@@ -205,6 +205,12 @@ type upResult struct {
 	sent    int
 	hasMore bool
 	dropped int
+	// dropWhy 是丢掉的理由（人话，一种一句）。**只进日志**，不进界面。
+	//
+	// ⚠️ 「整页一条都不剩」这种失败在界面上完全看不出来（只有一个空列表
+	// 加一个转着的圈），不把理由写进日志，下一个人只能从头再猜一遍
+	// （票 #300 的实测就是 `pub_ts` 变成了字符串）。
+	dropWhy []string
 	err     error
 }
 

@@ -114,6 +114,8 @@ type feedResult struct {
 	sent    int
 	hasMore bool
 	dropped int
+	// dropWhy 是丢掉的理由（人话，一种一句）。**只进日志**，不进界面。
+	dropWhy []string
 	err     error
 }
 
@@ -457,6 +459,14 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 
 	// ⚠️ Key 挂在外面的 Column 上，理由见上面那一处。
 	ui.Column(c).Key("feed-dynamic-list").Grow(1).FillHeight().Children(func() {
+		// 「有 N 条我们画不出来」那一行（理由同 upspace_tabs.go 那一处）。
+		//
+		// ⚠️ **只在「一条都没画出来」时出现**：有内容的时候插一行字只是
+		// 噪音；而一条都没有的时候，用户看到的是**一片空白加一个转着的
+		// 圈**——像是坏了，而真相是「他们发的那些我们画不出来」。
+		if len(f.items) == 0 && f.dropped > 0 {
+			s.viewDroppedNote(c, f.dropped)
+		}
 		// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
 		//
 		// ⚠️ **登记的是 `&f.keys` 而不是裸的句柄**：这一份的 `TakeFocus` 还要
@@ -524,8 +534,7 @@ func feedEmpty(f *dynamicFeed) emptyState {
 		return emptyState{
 			Title: "这里没有能显示的动态",
 			Icon:  iconEmptyFeed,
-			Hint: fmt.Sprintf("B 站的动态有好几种形态，这一版只画得出其中三种"+
-				"（纯文字、图文、投稿），刚才那 %d 条都落在别的形态上了", f.dropped),
+			Hint:  fmt.Sprintf("%s，有 %d 条落在别的形态上了", dynamicShapesNote, f.dropped),
 		}
 	}
 	return lookup(dynamicFeedPath).Empty
@@ -605,6 +614,17 @@ func (s *Shell) fetchFeed(ctx context.Context, f *dynamicFeed, which int, cursor
 		pg, err := s.app.DynamicFeed(ctx, cursor)
 		r.err, r.dyns, r.hasMore, r.dropped = err, pg.Items, pg.HasMore, pg.Dropped
 		r.cursor, r.sent = pg.Offset, pg.Raw
+		r.dropWhy = pg.DropWhy
+	}
+
+	// 🔴 **每一趟都留一句计数**（理由同 upspace_fetch.go 那一处）：界面上那个
+	// 转着的圈**分不出**是「同一页被反复要了」还是「真的在翻页」（票 #300）。
+	if r.err == nil {
+		log.Printf("biu: 拉动态流：B 站发了 %d 条，留下 %d 条，丢掉 %d 条，还有下一页=%v",
+			r.sent, len(r.dyns)+len(r.authors), r.dropped, r.hasMore)
+		for _, why := range r.dropWhy {
+			log.Printf("biu: 拉动态流丢掉一条：%s", why)
+		}
 	}
 }
 
@@ -654,7 +674,9 @@ func (s *Shell) adoptFeed(f *dynamicFeed) {
 			f.authors = append(f.authors, a)
 		}
 		if r.which == feedItems {
-			f.dropped = r.dropped
+			// ⚠️ **丢掉的是累计的，不是这一页的**：翻了好几页各丢几条就是几十条，
+			// 界面上那句话说的是「一共有多少条没显示」。
+			f.dropped += r.dropped
 			f.started = true
 		}
 		// ⚠️ 传的是**这一页**返回了几行，不是累计的：累计的数在「第一页就空」

@@ -180,6 +180,17 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	// 组件在两页就会缩成两个宽度。
 	ui.Column(c).Key("space-list:" + upTabNames[tab]).Grow(1).FillHeight().
 		PaddingX(upPad).Children(func() {
+		// 「有 N 条我们画不出来」那一行。
+		//
+		// ⚠️ **只在「一条都没画出来」时出现**：有内容的时候插一行字只是
+		// 噪音；而一条都没有的时候，用户看到的是**一片空白加一个转着的
+		// 圈**——像是坏了，而真相是「他发的那些我们画不出来」（票 #300）。
+		//
+		// ⚠️ **它不是空状态**：空状态会把整个列表换掉，而哨兵那一行还得
+		// 留着（翻页靠它）。
+		if upRowCount(sp, tab) == 0 && sp.dropped[tab] > 0 {
+			s.viewDroppedNote(c, sp.dropped[tab])
+		}
 		// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
 		//
 		// ⚠️ **登记的是 `&sp.keys[tab]` 而不是裸的句柄**：这一份的
@@ -287,7 +298,14 @@ func upRowLabel(sp *upSpace, tab, i int) string {
 }
 
 // upEmptyKey 是某张 Tab 空状态的 key。
+//
+// ⚠️ **带上「有没有丢弃」那一档**：同一个 key 上换文案，读屏软件读到的是
+// 同一句话，而「暂无动态」和「有 N 条没显示」必须被当成两件事（理由同
+// `feedEmptyKey`）。
 func upEmptyKey(sp *upSpace, tab int) string {
+	if sp.dropped[tab] > 0 {
+		return "space-dropped:" + strconv.FormatInt(sp.mid, 10) + ":" + upTabNames[tab]
+	}
 	return "space:" + strconv.FormatInt(sp.mid, 10) + ":" + upTabNames[tab]
 }
 
@@ -295,12 +313,14 @@ func upEmptyKey(sp *upSpace, tab int) string {
 //
 // ⚠️ **「有丢弃」和「真的没有」必须说两句话**：B 站的动态有二十多种形态，
 // 这一版只画三种。说成「暂无动态」的话，用户会以为他没发过。
+//
+// ⚠️ **那个数是累计的**：翻了好几页各丢几条就是几十条，说「有 N 条落在别的
+// 形态上了」比说「刚才那几条」诚实。
 func upTabEmpty(tab int, dropped int) emptyState {
 	if dropped > 0 {
 		return emptyState{
 			Title: "这里没有能显示的" + upTabNames[tab],
-			Hint: fmt.Sprintf("B 站的动态有好几种形态，这一版只画得出其中三种"+
-				"（纯文字、图文、投稿），刚才那 %d 条都落在别的形态上了", dropped),
+			Hint:  fmt.Sprintf("%s，有 %d 条落在别的形态上了", dynamicShapesNote, dropped),
 		}
 	}
 	switch tab {
