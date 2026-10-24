@@ -176,10 +176,9 @@ func TestCardsAndDialogsStillStandOffTheBackground(t *testing.T) {
 
 			bg := rgbaOf(BuildTheme(s.app.SettingsSnapshot(), dark).Background)
 			s.drawerOpen = true
-			waitFrames(t, tt, "抽屉开出来了", func() bool {
-				_, ok := tt.Find("播放列表")
-				return ok
-			})
+			// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在
+			// 窗口外面（它从右边滑进来），量到的右半边是空的。
+			settleDrawer(t, s, tt)
 
 			// ① 面板那一块和页面底色**一样**（上游的 `bg-background`）。
 			if got := probeColor(tt, drawerProbeX, drawerProbeY); got != bg {

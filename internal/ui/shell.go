@@ -312,6 +312,11 @@ type Shell struct {
 	// 关掉窗口就该是关着的（Biu 那边的 modal store 也不持久化它）。
 	drawerOpen bool
 
+	// drawerPhase 是抽屉现在处在进场的哪一段。**和 drawerOpen 不是一回事**：
+	// 退场的那 200ms 里面板还在树上（滑出去了才拆），所以「关掉」不是「不建」。
+	// 理由和那一组状态机见 queue_drawer.go 的 drawerPhase。
+	drawerPhase drawerPhase
+
 	// queueList 是抽屉里那一列的列表状态：滚动位置、行身份、行高。
 	queueList ui.ListState
 	// queueRowKeys 记着抽屉里每一行的身份（**预先装箱好的那一份**）。
