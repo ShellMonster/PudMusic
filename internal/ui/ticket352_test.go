@@ -59,8 +59,22 @@ func TestTheQueueDrawerSaysTheQueueIsDone(t *testing.T) {
 //
 // ⚠️ **它是上一条的那一半**：把两种停住一律说成「这一串放完了」也照样绿——
 // 而那是在骗用户（队列里明明还有十几首）。
+//
+// 🔴 **队列里要有多首歌**（票 #352 的评审）：这一档和「这一串放完了」的区别
+// **就是**「队列里还有歌」——摆一首的话，队列一放完就是「没有下一首了」，两件事
+// 在画面上分不开，而这一条验的就不是它了。所以这里摆三首。
+//
+// ⚠️ **而且要摆长素材**（`copiesOf`，4 秒那一份）：这一档的前提是「按停止的
+// 时候歌还在放」——用 `shortItems`（0.25 秒）的话，放完就变成另一档了，
+// 这一条就变成在赌时序。
 func TestTheQueueDrawerStillSaysStoppedWhenTheUserStops(t *testing.T) {
-	tt, s := queueDrawerTesterWith(t, false, shortItems(t, 1)...)
+	tt, s := queueDrawerTesterWith(t, false, copiesOf(t, 3)...)
+
+	// ⚠️ **队列里确实还有歌**：这一档的前提。不钉住它的话，将来有人把这条
+	// 用例改成「只有一首歌」，它照样绿——而那时候它验的就不是这一档了。
+	if got := s.app.Queue().Len(); got < 2 {
+		t.Fatalf("队列里只剩 %d 首了——这一档说的是「用户按了停止，队列里还有歌」", got)
+	}
 
 	s.app.Stop()
 	tt.Frame()

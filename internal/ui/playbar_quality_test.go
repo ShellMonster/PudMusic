@@ -111,7 +111,7 @@ func TestNoQualityBadgeWhenThereIsNoTrack(t *testing.T) {
 // # 为什么这条不能只断「字在不在」
 //
 // 出错时界面变成什么样，只有**位置**能说清：「有一句话」在歌名被挤成
-// 一字一行的竖条、又被 88 高的播放条裁掉的时候**照样成立**——字确实画了，
+// 一字一行的竖条、又被 76 高的播放条裁掉的时候**照样成立**——字确实画了，
 // 只是没人看得见。所以这里断的是两个 Rect 的关系：
 //
 //	错误那一行的上边在歌名那一行的下边之下（竖着堆，不是并排）
@@ -141,9 +141,9 @@ func TestTheErrorSitsUnderTheTitle(t *testing.T) {
 					errBox.X, errBox.Y, errBox.W, errBox.H,
 					title.X, title.Y, title.W, title.H)
 			}
-			// 两行都在播放条里面。播放条 88 高，歌名在行内垂直居中。
+			// 两行都在播放条里面。播放条 76 高，歌名在行内垂直居中。
 			if title.H > playbarHeight || errBox.Y+errBox.H > playbarHeight {
-				t.Errorf("宽度 %d：内容被 88 高的播放条裁了（歌名 %.1f 高，错误下边在 y=%.1f）",
+				t.Errorf("宽度 %d：内容被 76 高的播放条裁了（歌名 %.1f 高，错误下边在 y=%.1f）",
 					width, title.H, errBox.Y+errBox.H)
 			}
 			// 歌名横向要占得开——被压到 40px 以下就说明已经是竖排了。

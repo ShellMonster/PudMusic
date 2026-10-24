@@ -12,7 +12,7 @@ package ui
 // 这一组断三件事：
 //
 //  1. **点得开**：点那一句红字，出来一块面板，里面是完整那一句（多行排开）。
-//  2. **播放条一个像素都没动**：面板是浮层，那一行还是一行，播放条还是 88 高。
+//  2. **播放条一个像素都没动**：面板是浮层，那一行还是一行，播放条还是 76 高。
 //  3. **错没了面板就收**：不然下一句错一上来，面板是开着的。
 
 import (
@@ -109,11 +109,11 @@ func TestClickingTheErrorOpensTheWholeSentence(t *testing.T) {
 	}
 }
 
-// TestThePlayBarDoesNotMoveWhenTheDetailOpens 盯「播放条还是一行、还是 88 高」。
+// TestThePlayBarDoesNotMoveWhenTheDetailOpens 盯「播放条还是一行、还是 76 高」。
 //
 // ⚠️ **判据是「一个像素都没动」**：面板是浮层，它挂在窗口的覆盖层上——它要是
 // 挤进了播放条的布局里，播放条就会被撑成两行，而**症状是静默的**：最后一行
-// 被 88 高裁掉，界面上看不出坏了（文本节点还在，测试也还找得到它）。
+// 被 76 高裁掉，界面上看不出坏了（文本节点还在，测试也还找得到它）。
 func TestThePlayBarDoesNotMoveWhenTheDetailOpens(t *testing.T) {
 	st := app.State{Err: errLongSentence}
 	tt, _ := errBarTester(t, &st, 1200, 320, false)
@@ -131,9 +131,9 @@ func TestThePlayBarDoesNotMoveWhenTheDetailOpens(t *testing.T) {
 		t.Errorf("打开详情之后播放条上那一句动了：%v → %v", before, after)
 	}
 	// 🔴 **还是一行**：一行 12 号字是 14 像素高。两行（28）就说明它换行了，
-	// 而 88 高的播放条装不下第二行。
+	// 而 76 高的播放条装不下第二行。
 	if after.H > 20 {
-		t.Errorf("播放条上那一句错高 %.1f——它换行了（88 高的播放条装不下两行）", after.H)
+		t.Errorf("播放条上那一句错高 %.1f——它换行了（76 高的播放条装不下两行）", after.H)
 	}
 }
 
@@ -156,6 +156,58 @@ func TestTheDetailClosesWhenTheErrorIsGone(t *testing.T) {
 
 	if _, ok := tt.Find("错误详情"); ok {
 		t.Errorf("错没了，详情面板还开着：%q", tt.Texts())
+	}
+}
+
+// TestTheDetailClosesWhenTheUserPressesEscape 盯「按 Esc 能关掉那块面板」。
+//
+// ⚠️ **判据是「面板不在画面上了」**：浮层是框架那个 `ui.Popover` 建的，而
+// 「点外面 / 按 Esc 关掉」是它自己处理的（`mygo/ui/base.go` 的 `popover`）——
+// 代码里这一层只管开关本身。
+//
+// ⚠️ **Esc 那一条有条件**：框架把键**先给焦点链**（焦点上的控件和它周围那一圈），
+// 它们都不处理才轮到浮层（`mygo/ui/input.go` 的 `routeKeys`）。所以焦点在一个
+// **自己吃 Esc** 的控件里时（`ui.SearchField` 就是）这一块关不掉——那条限制
+// 写在 `playbar.go` 里 `viewTrackError` 的注释上。
+//
+// 这一条钉的是「焦点在别处时关得掉」这一档：点开之后焦点在锚点那一行上。
+func TestTheDetailClosesWhenTheUserPressesEscape(t *testing.T) {
+	st := app.State{Err: errLongSentence}
+	tt, _ := errBarTester(t, &st, 1200, 320, false)
+
+	openErrDetail(t, tt, errLongSentence)
+	if _, ok := tt.Find("错误详情"); !ok {
+		t.Fatalf("点开之后没有详情面板：%q", tt.Texts())
+	}
+
+	tt.Key(0, mygoui.KeyEscape)
+	tt.Frame()
+
+	if _, ok := tt.Find("错误详情"); ok {
+		t.Errorf("按了 Esc 之后详情面板还开着：%q", tt.Texts())
+	}
+}
+
+// TestTheDetailClosesWhenTheUserClicksOutside 盯「点外面能关掉那块面板」。
+//
+// 这一条和上面那条是**两个手势**（框架的 `popover` 分开判：`PressedOutside()`
+// 和 `OverlayShortcut(0, KeyEscape)`），而「点外面」那一条**没有**焦点上的
+// 前提——指针点在哪就是哪。
+func TestTheDetailClosesWhenTheUserClicksOutside(t *testing.T) {
+	st := app.State{Err: errLongSentence}
+	tt, _ := errBarTester(t, &st, 1200, 320, false)
+
+	openErrDetail(t, tt, errLongSentence)
+	if _, ok := tt.Find("错误详情"); !ok {
+		t.Fatalf("点开之后没有详情面板：%q", tt.Texts())
+	}
+
+	// 点面板外面那一块空白（播放条上面那一大片）。
+	tt.ClickAt(600, 40)
+	tt.Frame()
+
+	if _, ok := tt.Find("错误详情"); ok {
+		t.Errorf("点了外面之后详情面板还开着：%q", tt.Texts())
 	}
 }
 
