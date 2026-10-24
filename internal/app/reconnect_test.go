@@ -31,6 +31,16 @@ import (
 // 真源、真退避——只是把退避调得很快（几毫秒），好让用例不慢。
 func retryingSource(t *testing.T) *audio.StreamSource {
 	t.Helper()
+	return retryingSourceWith(t, 10*time.Millisecond)
+}
+
+// retryingSourceWith 造一条「正在重试」的字节源，退避给的是多久。
+//
+// ⚠️ **退避要够长**：源只在**退避里等着**的那一段是「正在重试」，退避一
+// 完它就放弃（`MaxRefresh` 用完了）——退避只有几毫秒的话，那一档亮着的
+// 时间只有那么一小会儿，断言就变成「赌那一瞬间正好采到」了。
+func retryingSourceWith(t *testing.T, wait time.Duration) *audio.StreamSource {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "地址失效了", http.StatusForbidden)
 	}))
@@ -39,7 +49,7 @@ func retryingSource(t *testing.T) *audio.StreamSource {
 		URLs:    []string{srv.URL},
 		Client:  srv.Client(),
 		TempDir: t.TempDir(),
-		Backoff: []time.Duration{10 * time.Millisecond},
+		Backoff: []time.Duration{wait},
 		Refetch: func(context.Context, int64) *audio.StreamReply {
 			return &audio.StreamReply{URLs: []string{srv.URL}}
 		},
@@ -178,6 +188,86 @@ func TestClearingTheErrorDoesNotClearTheReconnecting(t *testing.T) {
 
 	if st := a.Snapshot(); !st.Reconnecting {
 		t.Errorf("清错的时候把「正在重连」也抹了：%+v", st)
+	}
+}
+
+// TestTheOldSongsReconnectStateDoesNotStayOnTheNewSong 盯「切歌之后旧流的状态
+// 不留在新歌上」（票 #378）。
+//
+// 切歌之后 `a.online` 还是**旧那一首**——新播放器要等取流完了才装上，而
+// 那之前旧的一直在放。旧那条流**可能正在重连**，那时候界面上「正在重连」
+// 亮着的是**旧那一首**的状态，它把这一趟该说的「正在取流：新的一首」
+// 盖掉了——用户看着像「一直在取流」，而实际是旧歌的状态赖在新歌上面。
+//
+// 🔴 **这一条钉的是代次守卫**：每一段流的状态各归各——代次不对的那一条源，
+// 应用压根不去问它（理由见 `reconnect.go` 的 `reconnectingLocked`）。
+//
+// 端到端的那一条在 `reconnect_e2e_test.go`；这一条把机制本身钉死，不依赖
+// 时序。
+func TestTheOldSongsReconnectStateDoesNotStayOnTheNewSong(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	// 旧那一首：它的流正在重连（退避给得长，这一档亮着的时间才够断言）。
+	src := retryingSourceWith(t, 30*time.Second)
+	a.mu.Lock()
+	a.online = &onlineTrack{item: Item{Title: "旧的那首"}, source: src, gen: a.onlineGen}
+	a.mu.Unlock()
+
+	if st := a.Snapshot(); !st.Reconnecting {
+		t.Fatalf("旧那一首在重连，界面上却没有「正在重连」：%+v", st)
+	}
+
+	// 切歌：新的一趟开始取流（这一段就是 `playOnlineFrom` 干的事）。
+	a.mu.Lock()
+	a.onlineGen++
+	a.loading = true
+	a.loadingTitle = "新的一首"
+	a.mu.Unlock()
+
+	st := a.Snapshot()
+	if st.Reconnecting {
+		t.Errorf("旧那一首的重连状态留在了新歌上：%+v", st)
+	}
+	if !st.Loading {
+		t.Errorf("新的一趟没有说「正在取流」：%+v", st)
+	}
+	if st.LoadingTitle != "新的一首" {
+		t.Errorf("在取哪一首说错了：%q", st.LoadingTitle)
+	}
+}
+
+// TestTheOldSongsReconnectStateDoesNotStealTheNewOnesLine 盯「新的一首自己在
+// 重连时，那一档说的是**它自己**」（票 #378 的另一半）。
+//
+// 切歌之后新的一首也要取流，而它自己那条流**也可能**在重连（取流的那一趟
+// 里地址就失效了）。那时候界面上该说的是新的一首的重连状态——不是旧那一首
+// 的，也不是没有。
+//
+// 🔴 **代次守卫不许把话说反**：问的是**当前这一趟**的那一条源。
+func TestTheOldSongsReconnectStateDoesNotStealTheNewOnesLine(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	// 旧那一首：它的流正在重连。
+	old := retryingSourceWith(t, 30*time.Second)
+	a.mu.Lock()
+	a.online = &onlineTrack{item: Item{Title: "旧的那首"}, source: old, gen: a.onlineGen}
+	a.onlineGen++
+	a.loading = true
+	a.loadingTitle = "新的一首"
+	// 新的一首正在建的那条源：它也在重连（这一趟自己的）。
+	newSrc := retryingSourceWith(t, 30*time.Second)
+	a.pendingSrc = newSrc
+	a.pendingSrcGen = a.onlineGen
+	a.mu.Unlock()
+
+	st := a.Snapshot()
+	if !st.Reconnecting {
+		t.Errorf("新的一首自己在重连，界面上却没有「正在重连」：%+v", st)
+	}
+	if st.ReconnectAttempt < 1 {
+		t.Errorf("第几次重试 = %d，want ≥1", st.ReconnectAttempt)
 	}
 }
 
