@@ -2752,4 +2752,21 @@ var Items = []Item{
 			"TestThePlayAllButtonHasThePlayIcon",
 		},
 	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：页头右侧那枚开关**一个字都没有**
+		// （`Label` 是给读屏和测试器找它用的名字，屏幕上不画），于是用户看见
+		// 一枚绿绿的旋钮，却不知道拨它会不会把自己的播放记录报上去——那是**写
+		// 操作**，是隐私。界面上没有任何一样东西会报错。
+		Category: Platform,
+		// 票 #296（UX 报告 L-05）。
+		Spec: "历史记录页头右侧是「开关 + 「记录播放历史」文案」，文案照抄上游原文；**没有清空键**（清空历史不可逆，不加是有意的取舍）",
+		Tests: []string{
+			// 那句话**看得见**（画面上有两处叫这句话的节点，而且开关右边
+			// 那一段真的有深色的字——只判 `HasText` 的话，开关自己的 `Label`
+			// 就够数了）。
+			"TestTheHistoryHeaderSaysWhatTheSwitchIs",
+			// **没有**清空键（守成：别有一天顺手把它加回来）。
+			"TestTheHistoryHeaderHasNoClearKey",
+		},
+	},
 }
