@@ -175,6 +175,20 @@ type Shell struct {
 	// 新建等于每帧都当成没问过——那是一帧一个请求。
 	avatar avatarState
 
+	// avatarMenuOpen 是头像下面那一层下拉开着没有（见 navbar_avatar.go）。
+	//
+	// ⚠️ **它是跨帧的**：即时模式每一帧都重画一遍，局部变量下一帧就没了。
+	avatarMenuOpen bool
+	// avatarMenuIndex 是「当前是第几项」（键盘走到的 / 鼠标悬停的那一项）。
+	//
+	// ⚠️ **鼠标和键盘共用这一个下标**：两个下标的话，画面上会有两项同时亮着
+	// （鼠标移到第三项上的那一帧，键盘那一项还亮着）。
+	avatarMenuIndex int
+	// avatarLogoutAsk 是「退出登录」那道确认开着没有。
+	//
+	// ⚠️ **跨帧**：确认框要活过一帧（用户得看着它按「确认」或「取消」）。
+	avatarLogoutAsk bool
+
 	// local 是本地音乐那一页自己的一摊状态：表格 / 列表 / 网格三档的控件、
 	// 筛选条件、两道确认弹窗、以及**逐窗口**的唤醒句柄表。见 localmusic.go。
 	//

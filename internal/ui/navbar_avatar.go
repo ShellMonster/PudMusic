@@ -1,18 +1,26 @@
-// 顶栏右边的头像 + 下拉菜单：Biu 的 N-08
+// 顶栏右边的头像 + 它下面那一层下拉：Biu 的 N-08
 // （`biu/src/layout/navbar/user/index.tsx`）。
 //
-// ## 用系统原生菜单，不自绘
+// # 这一层是**自绘的浮层**，不是系统原生菜单
 //
-// MyGo 的 `Element.Menu` 给的是**系统菜单**（`ui/menu.go:64` → `rt.openMenu`），
-// 自带键盘导航、系统外观，和别的应用的菜单一模一样的手感。自绘一个浮层要重做
-// 这四件事，还做不对其中任何一件。
+// 原来这里走的是 MyGo 的 `Element.Menu`（`ui/menu.go:64` → `rt.openMenu`，
+// 系统菜单）。那一次的理由有两条，而**两条现在都不成立了**：
 //
-// Biu 那一排菜单项**带图标**（`startContent: <RiSettings3Line size={18}/>`）。
-// MyGo 的 `MenuItem` 只有 label / disabled / checked / shortcut / sub
-// （`ui/menu.go:131-140`），**没有图标这一格**——照抄不了，也就不画。PLAN.md
-// §阶段 4 的风险表里已经写了这一条（「右键菜单项没有图标」）。
+//  1. 「MyGo 的 Element.Menu 给的是系统菜单，自带键盘导航、系统外观，和别的
+//     应用的菜单一模一样的手感。自绘一个浮层要重做这四件事，还做不对其中
+//     任何一件」——那四件事是：点外面关、Esc 关、键盘能上下走、选中项有反馈。
+//     现在**都做得到**：前两件是 `ui.PopoverBase` 那一层自己管的，后两件接在
+//     头像那一枚按钮上（见 `viewAvatarMenuKeys`）。
+//  2. 「Biu 那一排菜单项带图标（startContent: <RiSettings3Line size={18}/>），
+//     MyGo 的 MenuItem 没有图标这一格，照抄不了，也就不画」——菜单项现在
+//     **是我们自己画的行**，图标是自己画的：六枚都取自 `iconset` 里现成的
+//     同族素材（RemixIcon，逐字照上游那六个 `RiXxxLine`）。
 //
-// ## 六项一项不少，顺序照 Biu
+// 而系统菜单的**样式**跟当前的设计规范完全不搭（它是系统外观，不是我们的
+// surface1 / radiusLg / shadow.Modal / accentSoft）——那一条从来就没被上面
+// 那两条理由覆盖过，只是当时系统菜单省事。
+//
+// # 六项一项不少，顺序照 Biu
 //
 // Biu 的 `dropdownItems` 是六条，其中「登录」在登录后隐藏、「个人资料」和
 // 「退出登录」在未登录时隐藏（`user/index.tsx:88-158` 的 `hidden`）。
@@ -31,7 +39,14 @@
 // 和退登按钮（见 login.go 的 viewAccountFooter），所以它也是一个说得清
 // 「你现在是什么状态」的地方。
 //
-// ## 登录态的**唯一**来源是 app，不是这个包
+// # 「退出登录」多了一步确认
+//
+// 上游退登之前问一句（「确认退出登录？」，`user/index.tsx:146`），我们原来
+// 点一下就退——退登是不可逆的那一下，而确认框是仓库现成的那一道
+// （`confirmModal`，见 confirmmodal.go）。取消 / Esc / 点外面都算「取消」：
+// 什么都不做。
+//
+// # 登录态的**唯一**来源是 app，不是这个包
 //
 // 「有没有登录」只有 `app.App` 知道（`LoggedIn()` / `Session()`，凭据在钥匙串
 // 里，界面这一层根本碰不到）。这一层**不存第二份**——存两份的后果是退登之后
@@ -47,6 +62,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -84,6 +100,33 @@ const (
 	// Biu 指的是它自己的仓库（`user/index.tsx:138`）。这里指我们自己的——
 	// 用户在 MyGo 里点「问题反馈」，要能开到能提 MyGo 的那个地方去。
 	feedbackURL = "https://github.com/ShellMonster/Biu_Go/issues"
+
+	// avatarMenuLabel 是那一层浮层的无障碍名字，也是测试认得它的凭据。
+	//
+	// ⚠️ **它不能和上面任何一项的名字一样**：无头 Tester 的 `Find` 找的是
+	// 「显示着这个字**或者**标着这个名字」的元素，两处叫同一个名字的话，
+	// 按名字找会撞车（返回先建的那个）。
+	avatarMenuLabel = "用户菜单"
+
+	// avatarMenuW 是浮层多宽。
+	//
+	// ⚠️ **160 是照着上游那一行的形状算出来的**：上游是 `min-w-[140px]`
+	//（`user/index.tsx:70` 的 `classNames.content`），而它那一行是
+	// 「18 的图标 + 8 的缝 + 四个字（14 号 ≈ 56）+ 左右各 12」= 106；
+	// 「问题反馈」那一行右边还要多摆一枚 18 的外链记号 + 8 的缝 = 132。
+	// 140 装得下而一点余量都没有，所以这里给 160。
+	avatarMenuW = 160
+
+	// avatarMenuRowH 是每一项多高。
+	//
+	// 上游 HeroUI 的 DropdownItem 是 md 档（`h-10` = 40）；我们是 36
+	//（18 的图标 + 上下各 9）。
+	avatarMenuRowH = 36
+
+	// avatarMenuIconSize 是菜单项左边那一枚图标多大。
+	//
+	// ⚠️ **18**，逐字照上游那六项的 `size={18}`（`user/index.tsx:96` 等六处）。
+	avatarMenuIconSize = 18
 )
 
 // avatarMenuItem 是下拉里的一项。
@@ -92,8 +135,18 @@ const (
 // 后者（`Context.OpenURL`）。**不许给 nil**——做不了的那几项也要有 run，只不过
 // 它做的是「告诉用户为什么」，而不是一声不响。
 type avatarMenuItem struct {
+	// label 是那一项的名字（可见的字，也是无障碍名字）。
 	label string
-	run   func(s *Shell, c *ui.Context)
+	// icon 是左边那一枚图标的名字（`icons.go` 里的常量）。
+	icon string
+	// end 是右边那一枚。上游只有「问题反馈」有：外链记号
+	//（`RiExternalLinkLine`）。空串 = 右边没有。
+	end string
+	// danger 是「这一项是危险动作」——字走危险色那一档（上游的
+	// `color="danger"` + `className="text-danger"`）。
+	danger bool
+	// run 是点了这一项要做的事。
+	run func(s *Shell, c *ui.Context)
 }
 
 // avatarMenuItems 是头像下拉的那六项，逐条照 Biu 的
@@ -101,36 +154,37 @@ type avatarMenuItem struct {
 //
 // Biu 那六条的 key 依次是 login / profile / settings / refresh / feedback /
 // logout，对着一数就知道一条没漏、一条没编。
+//
+// ⚠️ **图标逐字照上游那六项的 `startContent`**：登录 `RiLoginCircleLine`、
+// 个人资料 `RiProfileLine`、设置 `RiSettings3Line`、刷新数据 `RiRefreshLine`、
+// 问题反馈 `RiFeedbackLine`（右边还有一枚 `RiExternalLinkLine`）、退出登录
+// `RiLogoutCircleLine`。
 var avatarMenuItems = []avatarMenuItem{
-	{label: "登录", run: func(s *Shell, _ *ui.Context) { s.goLogin() }},
-	{label: "个人资料", run: func(s *Shell, _ *ui.Context) { s.goProfile() }},
-	{label: "设置", run: func(s *Shell, _ *ui.Context) { s.navigate(settingsPath) }},
-	{label: "刷新数据", run: func(s *Shell, _ *ui.Context) {
+	{label: "登录", icon: iconLoginCircle, run: func(s *Shell, _ *ui.Context) { s.goLogin() }},
+	{label: "个人资料", icon: iconProfile, run: func(s *Shell, _ *ui.Context) { s.goProfile() }},
+	{label: "设置", icon: iconSettings, run: func(s *Shell, _ *ui.Context) { s.navigate(settingsPath) }},
+	{label: "刷新数据", icon: iconRefresh, run: func(s *Shell, _ *ui.Context) {
 		// 真的是重新拉一次侧栏那些收藏夹（`app/favorites_refresh.go`）。
 		// 之前这一项只弹一句「还没有数据可刷新」，而接口是有的——用户改了收藏夹
 		// 切回来看不到，说的却是「这里没有数据」。
 		//
 		// ⚠️ **这里只发起，不等**：网络那一趟在后台，而这一项的菜单**选完就关**，
 		// 没有任何地方可以转圈。进行中状态是侧栏那一行「正在刷新收藏夹…」
-		// （见 sidebar_favorites.go），跑完的那句话走 `reportFavoritesRefresh`。
+		//（见 sidebar_favorites.go），跑完的那句话走 `reportFavoritesRefresh`。
 		//
 		// 已经有一趟在飞时应用层会挡下来，并把「正在刷新收藏夹…」说给用户听——
 		// 连点两下只发一次请求，而第二下不至于毫无动静。
 		s.app.RefreshFavorites()
 	}},
-	{label: "问题反馈", run: func(_ *Shell, c *ui.Context) {
-		// 用 `Context.OpenURL` 而不是 `Window.Open`：后者收到 nil 会直接
-		// SIGSEGV（见 wake.go 的规则二），前者是给 view 用的那一条。
-		c.OpenURL(feedbackURL)
+	{label: "问题反馈", icon: iconFeedback, end: iconExternal, run: func(s *Shell, c *ui.Context) {
+		// 走 `Shell.openFeedback`：它把地址交给系统（`Context.OpenURL`），
+		// **而且记一笔**（`lastFeedbackURL`）——无头 Tester 里 `OpenURL` 走不了
+		// 事件循环，于是「点得动」这件事除了「这一项在」之外一句都验不到。
+		// 理由见 shell.go 的 `openFeedback`。
+		s.openFeedback(c)
 	}},
-	{label: "退出登录", run: func(s *Shell, _ *ui.Context) {
-		if !s.app.LoggedIn() {
-			s.addToast("还没登录，没有可退的", notice.Warning)
-			return
-		}
-		// 走 login.go 那一支：它退完会把界面收回未登录的样子，退不干净
-		// （钥匙串锁了）也会说出来。
-		s.logoutAndStartOver()
+	{label: "退出登录", icon: iconLogoutCircle, danger: true, run: func(s *Shell, _ *ui.Context) {
+		s.askLogout()
 	}},
 }
 
@@ -146,6 +200,18 @@ func (s *Shell) goProfile() {
 		return
 	}
 	s.navigate("/user/" + mid)
+}
+
+// askLogout 是「退出登录」那一项做的事：**先问一句**再退。
+//
+// ⚠️ **没登录的时候不問**：没登录就没有可退的，而问一句「确认退出登录？」
+// 再答「确认」是一趟没有意义的往返——直接说一句（和原来一样）。
+func (s *Shell) askLogout() {
+	if !s.app.LoggedIn() {
+		s.addToast("还没登录，没有可退的", notice.Warning)
+		return
+	}
+	s.avatarLogoutAsk = true
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -192,7 +258,7 @@ type avatarState struct {
 	mid      string
 
 	// gen 是代次。换一次账号 / 退一次登录就 +1，后台那一趟回来时对不上就闭嘴
-	// （和 runID 那套一样，见 `internal/app/account.go` 的注释）。
+	//（和 runID 那套一样，见 `internal/app/account.go` 的注释）。
 	gen uint64
 
 	look avatarLook
@@ -337,24 +403,17 @@ const (
 	avatarNoteNoPicture = "头像没加载出来（多半是网络）"
 )
 
-// viewAvatar 是头像 + 它的下拉。
+// viewAvatar 是头像 + 它下面那一层下拉。
 //
 // ⚠️ **命中区 32×32，里面那枚圆 20**（票 #241 / 报告 F-16）：顶栏那一排的图标
 // 键命中区都是 32（`iconHitMd`），头像原来那一格只有 28 见方——**它缩小之后
 // 命中区反而更小了**，于是把命中区留在 32、只把**画出来的那一枚圆**收到 20。
 func (s *Shell) viewAvatar(c *ui.Context) {
-	// Key 挂在外面这一格上：`.Menu()` 会把元素变成菜单按钮（`ui/menu.go:66`
-	// 置 flagClickable / flagFocusable），Key 挂在这种元素上会 panic
-	// （`ui/element.go:658`）。
+	// Key 挂在外面这一格上：里面那一枚是**按钮**，而 Key 挂在「创建时处理过
+	// 输入」的控件上会 panic（`ui/element.go:658`）。
 	ui.Column(c).Key("avatar").Children(func() {
-		hit := ui.Box(c).Size(iconHitMd, iconHitMd).Center().
-			Label(avatarLabel).Menu(func(m *ui.Menu) {
-			for _, item := range avatarMenuItems {
-				if m.Item(item.label).Chosen() {
-					item.run(s, c)
-				}
-			}
-		})
+		hit := ui.ButtonBase(c).Size(iconHitMd, iconHitMd).Padding(space.None).
+			Label(avatarLabel)
 		// ⚠️ **指针移上去时那个圆头像放大 5%**：上游顶栏那一枚是
 		// `<Avatar ... className="mr-4 cursor-pointer transition-transform
 		// hover:scale-105" />`（`layout/navbar/user/index.tsx:178`）。放大的是
@@ -369,7 +428,192 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 				Radius(avatarSize/2).Clip().Border(1, c.Theme().Border)
 			face.Children(func() { s.viewAvatarFace(c) })
 		})
+		// 点它开 / 关那一层浮层。
+		//
+		// ⚠️ **按下这一枚会把键盘焦点给它**（框架的规矩：指针按下的那条链上
+		// 第一个可聚焦的元素拿到焦点，见 `mygo/ui/input.go` 的 setFocus）——
+		// 而键盘那一半正是靠这个焦点（见 `viewAvatarMenuKeys`）。
+		if hit.Clicked() {
+			s.avatarMenuOpen = !s.avatarMenuOpen
+			s.avatarMenuIndex = 0
+		}
+		// ⚠️ **键盘那一半排在浮层前面**：方向键改的是「当前是第几项」，而浮层
+		// 里那几行是照着那个下标画亮底的——键盘在前、浮层在后的话，按下 ↓ 的
+		// 那一帧亮底就跟着走了（反过来则要等到下一帧，而下一帧不一定有）。
+		s.viewAvatarMenuKeys(c, hit)
+		s.viewAvatarMenu(c, hit)
+		s.viewAvatarLogoutConfirm(c)
 	})
+}
+
+// viewAvatarMenu 是头像点开之后的那一层浮层。
+//
+// ⚠️ **它走 `ui.PopoverBase`**（而不是自己拼一个浮层）：框架那一份自带
+// 「点外面关 / 按 Esc 关」，而自己拼的话得自己实现那两件事——漏了就是面板
+// 关不掉（点外面也没反应）。理由同 `sidebar_favorites.go` 的
+// `viewFavoritesPanel`。
+func (s *Shell) viewAvatarMenu(c *ui.Context, anchor ui.Element) {
+	if !s.avatarMenuOpen {
+		return
+	}
+	t := c.Theme()
+	ui.PopoverBase(c, anchor, &s.avatarMenuOpen, func(panel ui.Element) {
+		// ⚠️ **锚在头像的右下角**：头像在顶栏最右端，面板要是左对齐就有
+		// 一半挂在窗口外面（上游 HeroUI 那个下拉是靠 shift 摆回来的，我们
+		// 直接锚在右端）。
+		//
+		// ⚠️ **面板和锚点之间留一道缝**（上游那个浮层也留 4，见框架的
+		// `stylePanel`）：贴着头像的下拉看着像头像长出了一块。
+		popupPanelCard(s, t, panel.
+			AttachTo(anchor, ui.AnchorBottomEnd, ui.AnchorTopEnd).
+			Margin(t.Space(1), space.None, space.None, space.None).
+			Width(avatarMenuW).
+			Padding(space.Px4).
+			// 面板自己有个名字：读屏软件念得出「用户菜单」。
+			Label(avatarMenuLabel)).
+			Children(func() {
+				s.viewAvatarMenuItems(c)
+			})
+	})
+}
+
+// viewAvatarMenuItems 是浮层里那六项。
+//
+// ⚠️ **每一项都是一整行按钮**（不是一枚图标键）：上游 HeroUI 的 DropdownItem
+// 是「图标 + 名字」的一行，`startContent` 在左、`endContent` 在右。
+func (s *Shell) viewAvatarMenuItems(c *ui.Context) {
+	t := c.Theme()
+	rows := make([]ui.Element, 0, len(avatarMenuItems))
+	for i, item := range avatarMenuItems {
+		row := ui.ButtonBase(c).Key("avatar-menu:" + item.label).
+			FillWidth().Height(avatarMenuRowH).
+			Padding(space.None, space.Px12).Gap(space.Px8).
+			Justify(ui.Start).Radius(t.Radius)
+		// ⚠️ **悬停把「当前是第几项」也改了**：鼠标和键盘共用同一个下标，
+		// 于是画面上永远只有一项是亮的（两个下标的话，鼠标移到第三项上的
+		// 那一帧会有两项都亮着）。
+		if row.Hovered() {
+			s.avatarMenuIndex = i
+		}
+		row.Children(func() {
+			ui.Icon(c, icon(item.icon)).FontSize(avatarMenuIconSize).
+				TextColor(avatarMenuIconColor(t, item))
+			ui.Text(c, item.label).FontSize(scale.Font(c, scale.Size14)).
+				TextColor(avatarMenuTextColor(t, item)).Grow(1)
+			if item.end != "" {
+				ui.Icon(c, icon(item.end)).FontSize(avatarMenuIconSize).TextColor(t.TextMuted)
+			}
+		})
+		if row.Clicked() {
+			s.runAvatarMenuItem(c, item)
+		}
+		rows = append(rows, row)
+	}
+	// 当前那一项：底是强调色的淡底（规范 §2 的 `accentSoft`）。
+	//
+	// ⚠️ **底是这一轮建完之后才铺的**：悬停是在建这一行的时候才发现的，
+	// 而「当前是第几项」要到那一刻才知道——边建边问边铺的话，鼠标移过去的
+	// 那一帧会有两项都亮着（上一项还带着上一帧的亮底）。
+	if s.avatarMenuIndex >= 0 && s.avatarMenuIndex < len(rows) {
+		rows[s.avatarMenuIndex] = rows[s.avatarMenuIndex].Background(accentSoft(t))
+	}
+}
+
+// avatarMenuTextColor 是那一项的字色。
+//
+// ⚠️ **危险色当字色要压深那一档**（`dangerText`）：主题给的 `t.Danger` 在浅色
+// 下只有 4.14:1，达不到正文的 4.5:1（DESIGN.md §四 那张表）。上游那一项是
+// `text-danger`，而我们这一档是仓库自己的规矩（票 #241 / 报告 F-22）。
+func avatarMenuTextColor(t *ui.Theme, item avatarMenuItem) ui.Color {
+	if item.danger {
+		return dangerText(t)
+	}
+	return t.Text
+}
+
+// avatarMenuIconColor 是那一项左边那一枚图标的颜色。
+//
+// ⚠️ **它跟着字走**：上游那六项的图标是 `startContent`，颜色继承那一行的
+// 文字色（危险那一项于是也是红的）。而右边那一枚（外链记号）是**次要的**，
+// 它走 `t.TextMuted`。
+func avatarMenuIconColor(t *ui.Theme, item avatarMenuItem) ui.Color {
+	return avatarMenuTextColor(t, item)
+}
+
+// viewAvatarMenuKeys 是那一层浮层的**键盘那一半**：上下走、回车选中。
+//
+// ⚠️ **这四条注册在头像那一枚按钮上，不注册在浮层上**——
+//
+// 浮层能收键的方式是 `OverlayShortcut`，而它只在「焦点那一圈没人要这个键」的
+// 时候才拿得到键。焦点在头像那一枚按钮上，而框架对**有焦点的按钮**是先把
+// 回车自己吃掉的（`mygo/ui/input.go` 的 handleKey：回车/空格 → 那枚按钮
+// clicks++），于是那一下回车会变成「再点一下头像」——菜单直接关掉，而选中项
+// 什么也没发生。
+//
+// 注册在按钮上就不一样了：`Shortcut` 的登记会让框架知道「这个键有人要」
+// （`claimedBy`），按钮那一下 clicks++ 就不做了，键于是按快捷键走回来。
+//
+// ⚠️ **菜单关着的时候这四条一条都不许注册**：注册了的话按钮上的回车就被
+// 「有人要」了，于是**回车打不开这一层浮层**（那正是它唯一的键盘入口）。
+func (s *Shell) viewAvatarMenuKeys(c *ui.Context, anchor ui.Element) {
+	if !s.avatarMenuOpen {
+		return
+	}
+	// ⚠️ **四条都要每帧登记**：键是按**上一帧**的登记路由的（`rt.regs`），
+	// 这一帧只登记「这一帧按下的那一条」的话，下一次按另一个键就路由不到
+	// 这里了。
+	down := anchor.Shortcut(0, ui.KeyDown)
+	up := anchor.Shortcut(0, ui.KeyUp)
+	enter := anchor.Shortcut(0, ui.KeyEnter)
+	space := anchor.Shortcut(0, ui.KeySpace)
+	switch {
+	case down:
+		s.avatarMenuIndex = min(s.avatarMenuIndex+1, len(avatarMenuItems)-1)
+	case up:
+		s.avatarMenuIndex = max(s.avatarMenuIndex-1, 0)
+	case enter, space:
+		if s.avatarMenuIndex >= 0 && s.avatarMenuIndex < len(avatarMenuItems) {
+			s.runAvatarMenuItem(c, avatarMenuItems[s.avatarMenuIndex])
+		}
+	}
+}
+
+// runAvatarMenuItem 跑下拉里的那一项：先收浮层，再做那件事。
+//
+// ⚠️ **先收浮层**：那一层盖在顶栏上，而好几项做完之后会弹一句提示
+//（「还没登录，个人资料用不了」），浮层还开着的话提示压在浮层底下。
+func (s *Shell) runAvatarMenuItem(c *ui.Context, item avatarMenuItem) {
+	s.avatarMenuOpen = false
+	s.avatarMenuIndex = 0
+	item.run(s, c)
+}
+
+// viewAvatarLogoutConfirm 画「退出登录」那道确认框。
+//
+// ⚠️ **用的是仓库现成的那一道**（`confirmModal`，走 `dialogPanel`）：底色
+// surface1、圆角 radiusLg、影 shadow.Modal，两颗按钮的档位都是仓库自己的
+// 契约。取消 / Esc / 点外面都算「取消」——什么都不做。
+func (s *Shell) viewAvatarLogoutConfirm(c *ui.Context) {
+	if !s.avatarLogoutAsk {
+		return
+	}
+	switch confirmModal(c, &s.avatarLogoutAsk, confirmSpec{
+		// ⚠️ **danger（红）**：上游那一步是 `type: "danger"`
+		//（`user/index.tsx:149`）。
+		tone:    toneDanger,
+		title:   "确认退出登录？",
+		confirm: "退出登录",
+		cancel:  "取消",
+	}) {
+	case confirmAccepted:
+		s.avatarLogoutAsk = false
+		// 走 login.go 那一支：它退完会把界面收回未登录的样子，退不干净
+		// （钥匙串锁了）也会说出来。
+		s.logoutAndStartOver()
+	case confirmCancelled:
+		// 取消 / Esc / 点外面：**什么都不做**。
+		s.avatarLogoutAsk = false
+	}
 }
 
 // viewAvatarFace 是头像那一格里的图。

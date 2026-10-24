@@ -156,9 +156,29 @@ const (
 	iconLogout = "System/logout-circle-r-line.svg" // 退出登录
 
 	// iconLoginCircle / iconLogoutCircle 是上游原来那**一对**（圆圈里一支箭头，
-	// 一个朝右一个朝左）。界面现在不用它们——理由在上面那一段——但资源留着。
+	// 一个朝右一个朝左）。顶栏上那两枚**不用**它们——理由在上面那一段——但
+	// **头像下拉里那两项用的正是它们**（上游 `user/index.tsx` 的「登录」是
+	// `RiLoginCircleLine`、「退出登录」是 `RiLogoutCircleLine`）。
+	//
+	// ⚠️ 那一对在 18px 上分不清进出（票 #242），所以**顶栏那两枚**换成了
+	// 二维码和朝外的箭头；头像下拉里它们是**带文字的**（左边还有一枚图标、
+	// 右边写着「登录」/「退出登录」），认得出来——所以那一处照上游用这一对。
 	iconLoginCircle  = "System/login-circle-line.svg"
 	iconLogoutCircle = "System/logout-circle-line.svg"
+
+	// iconProfile 是头像下拉里「个人资料」那一项的图标。
+	//
+	// 逐字照上游：`RiProfileLine`（`biu/src/layout/navbar/user/index.tsx:101`
+	// 的 `startContent: <RiProfileLine size={18}/>`）。
+	//
+	// ⚠️ **它在 `Business/` 分类里，不在 `User & Faces/`**：RemixIcon 把
+	// 「个人资料」那一枚归到 Business（`icons/Business/profile-line.svg`），
+	// 而「用户」那一族在 `User & Faces/`。目录照上游分类放，别按名字猜
+	// （见文件头那一段）。
+	//
+	// ⚠️ **这一张是这一票引进来的**（之前 `iconset` 里没有它）：
+	// `gh api repos/Remix-Design/RemixIcon/contents/icons/Business/profile-line.svg`。
+	iconProfile = "Business/profile-line.svg"
 
 	// ── 播放条右边那一组 ──
 	// ⚠️ 「播放列表」原来在顶栏那一列里，票 #127 跟着上游搬到了播放条
@@ -355,10 +375,12 @@ var iconNames = []string{
 	// 顶栏
 	iconSettings, iconFolder, iconQueue,
 	iconSearch, iconClose, iconFeed, iconLogin, iconLogout,
-	// 上游原来的那一对登录 / 退出（圆圈 + 一个向左、一个向右的箭头）。界面
-	// 现在不用它们了（18px 上分不清，票 #242），但**资源留着**：这一份图标
-	// 是照上游备齐的，「备齐」和「接上去」是两件事（见文件头）。
+	// 上游原来的那一对登录 / 退出（圆圈 + 一个向左、一个向右的箭头）。顶栏上
+	// 那两枚**不用**它们（18px 上分不清，票 #242），**头像下拉里那两项用的
+	// 就是它们**（上游那六项逐字照抄）。
 	iconLoginCircle, iconLogoutCircle,
+	// 头像下拉里「个人资料」那一枚。
+	iconProfile,
 	// 队列抽屉头与行
 	iconLocate, iconDelete, iconPlayFill, iconPauseFill,
 

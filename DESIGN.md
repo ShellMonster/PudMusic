@@ -48,6 +48,12 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 - **弹窗面板**（确认框、更新、裁剪封面）统一走 `dialogPanel`：底色 `surface1`、圆角 `radiusLg`、
   `shadow.Modal`；方案的值由 `applyFrameTheme` 每帧发布（`frameCard`），经典保持原样。
   删除类确认框一出来按回车**不会**确认。
+- **头像下拉**（顶栏右上角那枚头像点开的那一层）是**自绘的浮层**，不再是系统菜单：
+  锚在头像**下面**、右沿和头像对齐；底色 `surface1`、圆角 `radiusLg`、影 `shadow.Modal`
+  （走 `popupPanelCard` 这个出口）。六项照上游 Biu（登录 / 个人资料 / 设置 / 刷新数据 /
+  问题反馈 / 退出登录），每一项左边带一枚 **18** 的图标（RemixIcon 同一族），当前项的底是
+  `accentSoft`；「退出登录」先弹一道确认（标题「确认退出登录？」，走 `dialogPanel`）。
+  登录态**不**决定哪几项出现（六项一直都在，见 `internal/ui/navbar_avatar.go` 的文件头）。
 - **队列抽屉**宽 **320**（原 384，设计规范 §4 的右侧 Inspector）。
 - **语义色底上的字**（Toast、确认键）走 `readableOn`：惯用字色压上去 < 3:1 才换成白 / 近黑里更清楚的
   那个。经典的三个上游色不触发换色（像素不变）；方案里的深棕警告、深绿成功、浅红危险会触发。
