@@ -680,7 +680,7 @@ func TestTheCollectionSearchSaysWhenThereIsNoResult(t *testing.T) {
 	waitFrames(t, tt, "「换个词再搜一次」出现了", func() bool {
 		return tt.HasText("换个词再搜一次")
 	})
-	// ⚠️ **别拿「还没有收藏夹」当反面**：那是**侧栏**里那两组的空状态（这一页
+	// ⚠️ **别拿侧栏那一句空状态当反面**：那是**侧栏**里那两组的（这一页
 	// 的侧栏本来就没有收藏夹），它跟这一页的列表没关系。反面要拿**这一页**的
 	// 那个空状态（「在歌上点星标…」= 这个收藏夹是空的）。
 	if tt.HasText("在歌上点星标") {

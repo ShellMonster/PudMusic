@@ -265,7 +265,7 @@ issue 的验收标准**（`gh issue edit`，见 `docs/agents/issue-tracker.md`�
    每次打包前都会跑一遍并检查 `git diff`。
 9. **用户数据目录的名字不跟显示名走。** 应用 2026-10 从 `Biu MyGo` 改名成
    `BiuGo`，而 `mygo.App.Path(mygo.PathUserData)` 默认是 `os.UserConfigDir()`
-   **拼应用名**（`mygo@v0.6.2/paths.go:90-93`）。所以 `internal/platform/datadir.go`
+   **拼应用名**（`mygo@v0.6.3/paths.go:90-93`）。所以 `internal/platform/datadir.go`
    的 `PinUserDataDir()` 把目录**钉死**在旧名字上，`main()` 的第一句就调它——
    必须排在所有 `Mount*` 之前，因为「读不到设置」的默认处理是**安静地按第一次运行
    开起来**，晚一步的症状是「设置一直存不住」而不是任何一句报错。

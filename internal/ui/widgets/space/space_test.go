@@ -210,7 +210,7 @@ func parseDesignSpacing(t *testing.T, root string) map[string]int {
 
 // spacingMethods 是「间距」那一族方法名。
 //
-// ⚠️ **这份名单必须和框架对得上**（mygo v0.6.2）：框架里真有的是
+// ⚠️ **这份名单必须和框架对得上**（mygo v0.6.3）：框架里真有的是
 // `Gap` / `GapX` / `GapY` / `Padding` / `PaddingX` / `PaddingY` /
 // `PaddingStart` / `PaddingEnd` / `Margin` / `MarginX` / `MarginY` /
 // `MarginStart` / `MarginEnd`。
