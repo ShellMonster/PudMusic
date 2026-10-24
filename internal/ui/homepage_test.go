@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
@@ -66,6 +67,21 @@ func homeFrame(tt *ui.Tester) {
 	for range 3 {
 		tt.Frame()
 	}
+}
+
+// settleHome 推着钟走一段，让**切 Tab 的那一段过渡**走完。
+//
+// ⚠️ **推钟是必须的**（AGENTS.md §2）：切 Tab 有过渡（票 #368），而 Tester 的
+// 钟站着不动——不推钟的话画面停在过渡的**第一帧**上（内容还在淡入、还差着
+// 那 8 DIP），而逐像素的断言量到的就是那一帧（一个「切过去就换内容」的硬切
+// 实现也是那种画面，所以那样的断言断不出「有没有过渡」）。
+//
+// ⚠️ **推 250ms**：过渡本身是 200ms（`homeBodyDuration`），留 50ms 余量。
+// 主 Tab 那个滑块的弹簧（`tabs.go` 的 `TabSlide`，实测 453ms 才收手）**不在
+// 这条的范围里**——它在 Tab 那一排上，而这一组要量的是内容那一块。
+func settleHome(tt *ui.Tester) {
+	tt.Advance(homeBodyDuration + 50*time.Millisecond)
+	tt.Frame()
 }
 
 // newHome 给首页塞上歌，返回外壳和画着它的 Tester。
@@ -154,12 +170,16 @@ func titles(pos []rowPos) string {
 }
 
 // clickTab 点那三个 Tab 里的一个。
+//
+// ⚠️ **推钟把过渡走完**（`settleHome`）：切 Tab 有过渡（票 #368），而 Tester
+// 的钟站着不动——不推钟的话画面停在过渡的第一帧上。
 func clickTab(t *testing.T, tt *ui.Tester, tab int) {
 	t.Helper()
 	if err := tt.Click(homeTabs[tab]); err != nil {
 		t.Fatalf("点不到 %q 那一档：%v，文字有 %q", homeTabs[tab], err, tt.Texts())
 	}
 	homeFrame(tt)
+	settleHome(tt)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

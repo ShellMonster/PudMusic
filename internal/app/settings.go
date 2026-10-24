@@ -480,8 +480,12 @@ type settingsFile struct {
 	AppSettings   Settings `json:"appSettings"`
 }
 
-// DefaultSettings 返回 Biu 的默认设置。downloadPath 传系统下载目录，
+// DefaultSettings 返回 Biu 的默认设置。downloadPath 传默认下载目录，
 // 对应 Biu 的 `electron/store.ts:18`（那里注入 `app.getPath("downloads")`）。
+//
+// ⚠️ **我们这边传的是空串**：默认落点由 `platform.DefaultDownloadsDir` 算出来
+// （「音乐」目录下的应用子目录），不是系统下载目录——见
+// `platform/downloadsdir.go` 顶上那一节。
 func DefaultSettings(downloadPath string) Settings {
 	// 音量那一格是**指针**，所以每一次调用都要新的一份——共用同一个指针的话，
 	// 有人改了 `*s.Volume` 就把全局的默认值改了。

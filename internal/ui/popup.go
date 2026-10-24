@@ -11,6 +11,9 @@
 // 票面要的是「两处有一处无」统一；这里收成一个出口，以后再加浮层就不会漏。
 // ⚠️ **自己拼面板的地方必须走这个出口**——`internal/ui/popup_test.go` 的
 // `TestEveryHandMadePopupHasAShadow` 扫源码盯着这件事（#229）。
+//
+// ⚠️ **出口有两档**（浮层那一档 / 卡片那一档），但**两档都带影**——漏影是那
+// 一条要防的，档位不是。头像下拉走卡片那一档（见 `popupPanelCard`）。
 package ui
 
 import (
@@ -40,5 +43,30 @@ func popupPanel(t *ui.Theme, panel ui.Element) ui.Element {
 	return shadow.Popover(
 		panel.Radius(popupRadius).
 			Background(t.Background).Border(1, t.Border),
+		t)
+}
+
+// popupPanelCard 给一个**卡片级**浮层面板上外观：底色 surface1、圆角 radiusLg、
+// 阴影 shadow.Modal。
+//
+// # 它和 `popupPanel` 是**两档料**，不是两个出口
+//
+//	浮层那一档（`popupPanel`）  底 = 页面底、圆角 8、影 = shadow.Popover
+//	卡片那一档（这一档）        底 = surface1、圆角 radiusLg、影 = shadow.Modal
+//
+// 卡片那一档是**设计规范 §零** 定的：登录页那张卡、弹窗面板（`dialogPanel`）
+// 都是这一档，而**头像下拉是同一块料**——它是一张浮在内容上面的卡片，不是
+// 「贴着一层底的小浮层」。
+//
+// ⚠️ **底色和圆角取自 `Shell.cardBackground` / `Shell.cardRadius`**（方案里的
+// surface1 / radiusLg；经典是控件层和 1.5 倍圆角）——它们是卡片这一档的**唯一
+// 出口**，别在调用处自己算一个。
+//
+// ⚠️ **影是 `shadow.Modal` 那一档**（值只写在 `widgets/shadow`）。
+func popupPanelCard(s *Shell, t *ui.Theme, panel ui.Element) ui.Element {
+	return shadow.Modal(
+		panel.Radius(s.cardRadius(t)).
+			Background(s.cardBackground(t)).
+			Border(1, t.Border),
 		t)
 }

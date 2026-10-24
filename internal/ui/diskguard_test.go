@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/testproc"
 )
 
 // 这一份是 `internal/ui` 的**磁盘护栏**：跑之前先看一眼临时目录所在的文件系统
@@ -73,9 +74,25 @@ func TestMain(m *testing.M) {
 	if !run {
 		os.Exit(1)
 	}
+	// 这一包的「音乐」目录指到临时目录上（理由见 `musicdir_test.go`）：默认
+	// 下载目录是用户自己的 `~/Music/BiuGo`，而这一包里任何一条测试碰了它就是
+	// 在用户的磁盘上留下一个文件夹。
+	music, err := useTempMusicDir()
+	if err != nil {
+		reportTempMusicDirFailure(err)
+		os.Exit(1)
+	}
 	// 本包的老用例量的是经典外观（见 `app.DefaultThemePreset` 的说明）。
 	app.DefaultThemePreset = app.ThemePresetClassic
-	os.Exit(m.Run())
+	code := m.Run()
+	// 收掉「子进程跑本测试自己」的那份副本（理由见 `internal/testproc`）。
+	//
+	// ⚠️ **它在删临时目录之前**：还活着的子进程可能正拿着那个「音乐」目录，
+	// 删早了它会再写一份出来。
+	testproc.Cleanup()
+	// ⚠️ **收尾在 `os.Exit` 之前**：`os.Exit` 不走 defer。
+	dropTempMusicDir(music)
+	os.Exit(code)
 }
 
 // shouldRunPackage 决定这一包要不要跑，并把「为什么」写成一句能直接贴给

@@ -495,6 +495,9 @@ func (s *Shell) releaseMini() {
 // 控件，而 MyGo 每帧开头把主题重置成跟随系统那份，见 theme.go）。
 func (s *Shell) viewMini(c *ui.Context) {
 	s.applyFrameTheme(c)
+	// 封面缓存要知道「新的一帧开始了」——理由见 `Shell.viewMain` 里那一句
+	// （票 #358）。迷你窗口和主窗口共用一份缓存，两边各数各的帧。
+	s.images.BeginFrame(c.Now())
 	// 应用内快捷键：**和主窗口走同一条**（`viewShortcuts`），次序也一样（主题之后、
 	// 其它每帧钩子之前）。
 	//

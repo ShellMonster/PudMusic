@@ -216,7 +216,7 @@ func TestAFreshInstallGetsThatDirectoryCreated(t *testing.T) {
 // appDisplayName 读 `mygo.json` 里的应用名（显示名）。
 //
 // ⚠️ **不调 `mygo.App.Name()`**：那个函数在没有打包应用时退回**可执行文件名**
-// （`mygo@v0.6.2/app.go:275-287`），在 `go test` 里那就是测试二进制的名字，
+// （`mygo@v0.6.3/app.go:275-287`），在 `go test` 里那就是测试二进制的名字，
 // 拿它去比较等于什么都没比。这里要的是**界面上写着的那个名字**，所以直接读文件。
 func appDisplayName(t *testing.T) string {
 	t.Helper()
