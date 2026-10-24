@@ -329,7 +329,7 @@ func TestTheAvatarMenuSelectsWithTheKeyboard(t *testing.T) {
 //
 // ⚠️ **这一条量的是「画面上的结果」，不是「我们选了哪一边」**：框架自己会
 // 「翻转」——面板挂在锚点那一边放不下的时候，它翻到另一边去
-//（`mygo/ui/layout.go` 的 `alongTarget`）。所以两种锚法在窄窗口上画出来是
+// （`mygo/ui/layout.go` 的 `alongTarget`）。所以两种锚法在窄窗口上画出来是
 // 一模一样的，而这一条要管的是**用户看见的那个结果**：面板在头像下面、
 // 右沿和头像对齐、整个在窗口里。
 func TestTheAvatarMenuHangsUnderTheAvatar(t *testing.T) {

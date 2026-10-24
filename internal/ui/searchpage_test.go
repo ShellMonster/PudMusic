@@ -690,7 +690,7 @@ func TestTheSearchPageHasOneTitleAndNoSecondSearchBox(t *testing.T) {
 
 	// ① 页内那个输入框没了。
 	if _, ok := tt.Find("搜索歌名或 UP 主"); ok {
-		t.Errorf("搜索页上还有那个 420 宽的页内输入框——2026-10-22 拍板不加"+
+		t.Errorf("搜索页上还有那个 420 宽的页内输入框——2026-10-22 拍板不加" +
 			"（DESIGN.md §十.1），改词回顶栏")
 	}
 

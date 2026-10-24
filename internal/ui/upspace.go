@@ -748,7 +748,7 @@ func (s *Shell) spaceAvatar(c *ui.Context, face string, side float32, withShadow
 // 头像就是这样：卡片底改成卡片那一档之后，占位那个圆不见了，卡片看着是空的）。
 //
 // 给一个「和它所在的那个底差得开」的色就看得见了：关注卡给的是**页面底色**
-//（卡片底下那一层 = 卡片上开了一个洞），而页面底上的那些头像仍然是
+// （卡片底下那一层 = 卡片上开了一个洞），而页面底上的那些头像仍然是
 // `t.Surface`（那正是「页面底往文字色推一档」）。
 func (s *Shell) spaceAvatarWith(c *ui.Context, face string, side float32, withShadow bool, placeholder ui.Color) {
 	s.spaceAvatarOn(c, face, side, withShadow, "", false, placeholder)

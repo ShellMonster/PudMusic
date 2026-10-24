@@ -62,14 +62,14 @@ func TestTheFailureDecidesWhetherARetryIsOffered(t *testing.T) {
 		want     bool
 	}{
 		{
-			what:    "判据说不能重试",
+			what:     "判据说不能重试",
 			canRetry: func(error) bool { return false },
-			want:    false,
+			want:     false,
 		},
 		{
-			what:    "判据说能重试",
+			what:     "判据说能重试",
 			canRetry: func(error) bool { return true },
-			want:    true,
+			want:     true,
 		},
 		{
 			// 没装判据就按「能重试」算（旧行为）。
