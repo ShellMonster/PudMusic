@@ -32,9 +32,14 @@ func repoRoot(t *testing.T) string {
 func TestTheScrimValuesAreLocked(t *testing.T) {
 	want := map[string]float64{
 		"Media": 0.55, "Cover": 0.50, "Modal": 0.40, "Overlay": 0.35, "OnScrim": 0.92,
+		// UP 空间头图区那两档（浅色 / 深色各一对）。
+		"HeaderLight": 0.30, "HeaderDark": 0.50,
+		"HeaderTextLight": 0.40, "HeaderTextDark": 0.15,
 	}
 	got := map[string]float64{
 		"Media": Media, "Cover": Cover, "Modal": Modal, "Overlay": Overlay, "OnScrim": OnScrim,
+		"HeaderLight": HeaderLight, "HeaderDark": HeaderDark,
+		"HeaderTextLight": HeaderTextLight, "HeaderTextDark": HeaderTextDark,
 	}
 	for name, w := range want {
 		g, ok := got[name]
