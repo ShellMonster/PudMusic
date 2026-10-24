@@ -807,3 +807,67 @@ func TestTheToastMessagesKeepTheirBrackets(t *testing.T) {
 		}
 	}
 }
+
+// TestTheToastStaysWhileThePointerIsOnIt 钉住「悬停宽限」。
+//
+// 《Functional Motion》：「当鼠标移入时，所有 Message 将会展开」「悬停时不会
+// 消失」——用户多半是照着这一条去按底下的那一行，它在指针还在上面的时候就消失
+// 了，那句话就没用了。
+//
+// ⚠️ **到期走的是真时钟**（后台那条 goroutine 真睡），所以这一条**要真等**——
+// 推钟推不动它（`toastEnterAt` 那一档才是引擎钟）。
+func TestTheToastStaysWhileThePointerIsOnIt(t *testing.T) {
+	s, tt := newShell(t)
+	shortToasts(t, 300*time.Millisecond)
+
+	s.addToast("指着它", notice.Plain)
+	tt.Frame()
+	settleToast(t, tt)
+	r, ok := tt.Find("指着它")
+	if !ok {
+		t.Fatalf("提示没画出来，文字有 %q", tt.Texts())
+	}
+
+	// 指针压到这一条上。
+	tt.Move(r.X+r.W/2, r.Y+r.H/2)
+	tt.Frame()
+
+	// 等过它该到点的时刻（真时钟）。
+	time.Sleep(600 * time.Millisecond)
+	tt.Frame()
+	if !tt.HasText("指着它") {
+		t.Fatalf("指针指着它，它却没了，文字有 %q", tt.Texts())
+	}
+
+	// 指针移开：它就该按原定的时刻收走。
+	tt.Move(4, 4)
+	tt.Frame()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && len(s.visibleToasts()) > 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	tt.Frame()
+	if tt.HasText("指着它") {
+		t.Errorf("指针移开之后它还赖在画面上，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheToastGoesAwayEvenWithoutAPointer 断的是上一条的另一半。
+//
+// ⚠️ **别把「悬停宽限」做成「永远不消失」**：没有指针指着的时候，它到点就得走。
+func TestTheToastGoesAwayEvenWithoutAPointer(t *testing.T) {
+	s, tt := newShell(t)
+	shortToasts(t, 300*time.Millisecond)
+
+	s.addToast("没人指着我", notice.Plain)
+	tt.Frame()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && len(s.visibleToasts()) > 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	tt.Frame()
+	if tt.HasText("没人指着我") {
+		t.Errorf("没人指着它，它却还赖着，文字有 %q", tt.Texts())
+	}
+}

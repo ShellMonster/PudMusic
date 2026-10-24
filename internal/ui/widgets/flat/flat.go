@@ -82,9 +82,15 @@ func Button(c *ui.Context, label string) ui.Element {
 // svg 是要画的那张图。**由调用方给**（而不是这里按名字取）：取图标的表在界面层
 // 那一层（`internal/ui` 的 `icons.go`），而控件层随手画一张时用的是
 // `iconset.Must`——同一个名字永远是同一个指针，两边不会各画各的。
+//
+// ⚠️ **按下时图标缩到 0.96**（`PressScale`）——纯图标键才缩，理由见 `press.go`。
 func IconButton(c *ui.Context, svg *ui.SVG, label string, font float32) ui.Element {
 	b := Button(c, "").Label(label)
-	b.Children(func() { ui.Icon(c, svg).FontSize(font) })
+	b.Children(func() {
+		ic := ui.Icon(c, svg).FontSize(font)
+		// ⚠️ **问的是按钮的按着没有**（理由见 press.go）。
+		ic = PressScale(ic, b.Pressed(), false)
+	})
 	return b
 }
 
@@ -115,13 +121,30 @@ func IconButtonAccent(c *ui.Context, svg *ui.SVG, label string, font float32, di
 	b := Button(c, "").Label(label).Disabled(disabled)
 	b.Children(func() {
 		ic := ui.Icon(c, svg).FontSize(font)
-		// ⚠️ **问的是按钮的悬停**：图标的悬停要问它自己，而它那时候还没长在按钮
-		// 里面（`Children` 的回调是在建的时候跑的），问出来的是「它在按钮外面」。
-		if !disabled && b.Hovered() {
-			ic = ic.TextColor(ink.AccentOn(c.Theme()))
+		if col, ok := IconAccentOnHover(c, disabled, b.Hovered()); ok {
+			ic = ic.TextColor(col)
 		}
+		ic = PressScale(ic, b.Pressed(), false)
 	})
 	return b
+}
+
+// IconAccentOnHover 是「悬停时图形变主色」那一档字色。
+//
+// ⚠️ **问的是按钮的悬停**：图标的悬停要问它自己，而它那时候还没长在按钮里面
+// （`Children` 的回调是在建的时候跑的），问出来的是「它在按钮外面」。
+//
+// ⚠️ **不该染色时返回 ok=false**，调用方就**别设**颜色——那样图标接着继承按钮
+// 的字色（赞键那种「没赞是灰的、赞了是主色的」就是靠这一条）。
+//
+// 这条判断单独拿出来，是因为**图标键不止一种形状**：赞键那一枚是「图标 + 底下
+// 一圈背景」两层（见 `internal/ui/like.go`），它自己也要这一档主色——而「哪一档
+// 主色」只有这一个决定的地方。
+func IconAccentOnHover(c *ui.Context, disabled, hovered bool) (ui.Color, bool) {
+	if disabled || !hovered {
+		return ui.Color{}, false
+	}
+	return ink.AccentOn(c.Theme()), true
 }
 
 // IconLabelButton 是一个「图标 + 文字」的扁平按钮：图标在一个 cell×cell 的
@@ -145,7 +168,10 @@ func IconLabelButton(c *ui.Context, svg *ui.SVG, label string, font, cell float3
 		Justify(ui.Start)
 	b.Children(func() {
 		ui.Column(c).Size(cell, cell).AlignItems(ui.Center).Justify(ui.Center).
-			Children(func() { ui.Icon(c, svg).FontSize(font) })
+			Children(func() {
+				ic := ui.Icon(c, svg).FontSize(font)
+				ic = PressScale(ic, b.Pressed(), false)
+			})
 		ui.Text(c, label).SingleLine()
 	})
 	return b
@@ -162,7 +188,10 @@ func IconLabelButton(c *ui.Context, svg *ui.SVG, label string, font, cell float3
 // 一枚 font 那么大的图标——14 的内边距会把 40 的格子掏成 12 宽，图标直接被裁。
 func IconCellButton(c *ui.Context, svg *ui.SVG, label string, font, cell float32) ui.Element {
 	b := Button(c, "").Label(label).Size(cell, cell).Padding(space.None, space.None)
-	b.Children(func() { ui.Icon(c, svg).FontSize(font) })
+	b.Children(func() {
+		ic := ui.Icon(c, svg).FontSize(font)
+		ic = PressScale(ic, b.Pressed(), false)
+	})
 	return b
 }
 
