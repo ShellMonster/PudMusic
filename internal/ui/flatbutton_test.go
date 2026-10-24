@@ -685,9 +685,9 @@ func TestTheQueueHeaderKeysAreIconButtonsWithNames(t *testing.T) {
 	s, tt := newShell(t)
 	s.app.Queue().Reset(app.Item{Source: "local", Type: "audio", Title: "第一首"})
 	s.drawerOpen = true
-	for range 3 {
-		tt.Frame()
-	}
+	// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在窗口外面，
+	// 按名字找「清空」会找不到（它在窗口外）。
+	settleDrawer(t, s, tt)
 	for _, name := range []string{"定位当前播放", "清空"} {
 		r, ok := tt.Find(name)
 		if !ok {
@@ -757,9 +757,9 @@ func TestRenderFlatShots(t *testing.T) {
 				app.Item{Source: "local", Type: "audio", Title: "晴天", Artist: "周杰伦"},
 			)
 			s.drawerOpen = true
-			for range 3 {
-				tt.Frame()
-			}
+			// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在
+			// 窗口外面（它从右边滑进来），存下来的图是空的右半边。
+			settleDrawer(t, s, tt)
 			tt.Move(away[0], away[1])
 			tt.Frame()
 			save(t, dir, "21-"+name+"-队列抽屉.png", tt)

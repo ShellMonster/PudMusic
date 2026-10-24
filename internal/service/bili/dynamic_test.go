@@ -600,11 +600,124 @@ func TestAnEmptyFirstPageStopsTheList(t *testing.T) {
 	if len(pg.Items) != 0 {
 		t.Fatalf("空页里有 %d 条", len(pg.Items))
 	}
-	// has_more 由 B 站说了算；这一层不替它改（`upPager.adopt` 那一支
-	// 看到 n==0 会自己收口）。断言它**没丢**信息。
-	if !pg.HasMore {
-		t.Log("B 站说没有下一页 —— 这一版照它的话")
+	// ⚠️ **B 站说「还有」也不作数**：这一页既没有东西，也没有**下一次要问的
+	// 入口**（offset 是空串），于是「再问一页」问回来的是同一页——那个圈
+	// 会一直转下去（票 #300 的实测：60 帧发了 40 次请求）。
+	if pg.HasMore {
+		t.Error("空页又没给下一次的口令，却说「还有下一页」——会一直问同一页")
 	}
+}
+
+// TestTheOffsetThatDoesNotMoveEndsTheList 钉住「入口没前进就是到底了」。
+//
+// ⚠️ **B 站的 `has_more` 和 `offset` 不是一起可信的**：它有时候会回一个和
+// 上一次**一模一样**的 offset（或者干脆空串）而 `has_more` 仍然是 true。
+// 拿着那个 offset 再问一次，问回来的是**同一页**——于是「再问一页」永远
+// 问不完（实测：一页全是转发动态时 60 帧发了 40 次请求，界面上一直转圈，
+// 一条内容都出不来）。
+//
+// 判据是「下一次要问的入口和这一次的**是不是同一个**」。
+func TestTheOffsetThatDoesNotMoveEndsTheList(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		used   string
+		offset string
+	}{
+		{"同一个 offset", "O1", "O1"},
+		{"空的 offset", "O1", ""},
+		{"第一页就给空串", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, cli := dynamicFixture(t, []any{dynItem("d")}, tc.offset, true)
+			pg, err := cli.DynamicFeed(context.Background(), tc.used)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if pg.HasMore {
+				t.Errorf("入口没有前进（问的是 %q，回来的是 %q），却还说「还有下一页」",
+					tc.used, tc.offset)
+			}
+		})
+	}
+}
+
+// TestTheOffsetThatMovesKeepsTheNextPage 钉住上一条的反面：入口**动了**就
+// 还有下一页。
+//
+// 少了这一条，上一条那个「一律收口」就能把正常的翻页也掐死——而症状是
+// 「翻不到第二页」，比「一直翻同一页」更难一眼看出来。
+func TestTheOffsetThatMovesKeepsTheNextPage(t *testing.T) {
+	_, cli := dynamicFixture(t, []any{dynItem("d")}, "O2", true)
+	pg, err := cli.DynamicFeed(context.Background(), "O1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pg.HasMore {
+		t.Error("入口前进了（O1 → O2），却把「还有下一页」收掉了——翻页被掐死了")
+	}
+}
+
+// TestAFieldThatChangedItsTypeDoesNotTakeThePageDown 钉住「一个字段改了
+// 类型不能��整页带走」。
+//
+// 🔴 **实测踩过的坑**（票 #300，2026-10-24）：B 站把 `module_author.pub_ts`
+// 从 Unix 秒（数字）改成了**字符串**（`"1792720812"`），而 `encoding/json`
+// 遇到类型对不上会让**整个反序列化失败**——于是那一页 12 条动态**全部**被
+// 当成「读不懂」丢掉，UP 空间的「动态」那一格永远转圈、永远拿不到内容，
+// 而界面上**一个字都不提**。
+//
+// 判据是「这些字段换成另一种写法，那一条**照样留下**」。
+func TestAFieldThatChangedItsTypeDoesNotTakeThePageDown(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		wantID string
+		mutate func(m map[string]any)
+	}{
+		{"pub_ts 是字符串", "d1", func(m map[string]any) {
+			authorOf(m)["pub_ts"] = "1792720812"
+		}},
+		{"pub_ts 是数字", "d1", func(m map[string]any) {
+			authorOf(m)["pub_ts"] = 1792720812
+		}},
+		// ⚠️ **id 变成数字时身份就是那个数字的字面量**——不能走一遍 float
+		// （19 位的大整数过一趟 float 就掉精度了）。
+		{"id_str 是数字", "1261627848475541545", func(m map[string]any) {
+			m["id_str"] = 1261627848475541545
+		}},
+		{"mid 是字符串", "d1", func(m map[string]any) {
+			authorOf(m)["mid"] = "42"
+		}},
+		{"赞的数是字符串", "d1", func(m map[string]any) {
+			mods := m["modules"].(map[string]any)
+			mods["module_stat"] = map[string]any{
+				"like": map[string]any{"count": "367309", "status": 1},
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pg, err := dynamicPageOf(t, dynItem("d1", tc.mutate))
+			if err != nil {
+				t.Fatalf("这一条把整页带崩了：%v", err)
+			}
+			if len(pg.Items) != 1 {
+				t.Fatalf("留下了 %d 条，want 1（字段换了写法不该让这一条消失）", len(pg.Items))
+			}
+			if pg.Items[0].ID != tc.wantID {
+				t.Errorf("留下的是 %q，want %q", pg.Items[0].ID, tc.wantID)
+			}
+		})
+	}
+}
+
+// authorOf 拿到（并造出）module_author 那一段。
+func authorOf(m map[string]any) map[string]any {
+	mods := m["modules"].(map[string]any)
+	a, ok := mods["module_author"].(map[string]any)
+	if !ok {
+		a = map[string]any{}
+		mods["module_author"] = a
+	}
+	return a
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

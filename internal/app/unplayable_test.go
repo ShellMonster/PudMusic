@@ -9,6 +9,10 @@ package app_test
 //	真没有音频流	重试一万次也没用；该做的是换一首、去 B 站里听
 //	取流失败	再试一次就有可能好；该做的是等一下、换个网
 //
+// ⚠️ **「取流失败」里还嵌着一个风控**：它也是「没取到」，但**立刻**再问一次
+// 还是撞同一面墙——风控要等的是**时间**，而界面上那枚「重试」没有退避。
+// 所以它判成**不可重试**（票 #316）。
+//
 // 而它们在界面上原本长得一模一样（都是「打不开：……」），于是用户按着
 // 「怎么又坏了」的方向一直查，方向从头就是错的。
 //
@@ -17,7 +21,7 @@ package app_test
 //  1. **真没有音频流的那一类**：话说准「B 站说这一条没有音频流」，
 //     **而且不给重试**（给了也是按了没用的）。
 //  2. **取流失败的那一类**：话说清是网络，**而且给重试**，
-//     按下去真的能放出来。
+//     按下去真的能放出来。（风控不在这一类里：给它重试就是让用户再撞一次墙。）
 //  3. **点之前就不给播放入口**：判据在这里，界面照它画（见
 //     `internal/ui/widgets/list/menu_test.go`）。
 //
@@ -110,6 +114,37 @@ func TestANetworkFailureIsOfferedARetryThatActuallyWorks(t *testing.T) {
 	playing(t, a, "这一首")
 	if st := a.Snapshot(); st.Err != "" {
 		t.Errorf("放出来了，播放条上还挂着那句话：%q", st.Err)
+	}
+}
+
+// TestARiskControlFailureIsNotOfferedARetryThatWouldHitTheWallAgain 盯风控
+// 那一类（票 #316）。
+//
+// 🔴 **这一条是上面那条的反面**：网络抖了给「重试」是对的，风控给了就是
+// 把用户往墙上推——那枚「重试」是**立刻**再取一次流（`App.Retry` 里没有
+// 退避），所以按下去就是**再撞一次风控**。用户按一次撞一次，按第二次
+// 再撞，于是他不再信这枚键了。
+//
+// ⚠️ **限流（-509）是另一回事**：它是「等一会儿就好」，所以仍然是可重试的
+// （`bili.Recoverable` 那张表上分开判，这里不重复验）。
+func TestARiskControlFailureIsNotOfferedARetryThatWouldHitTheWallAgain(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = readFlac(t)
+	// 取流那一趟被风控挡了：B 站回的是业务码 -352。
+	f.on("/x/player/wbi/playurl", func(w http.ResponseWriter, r *http.Request) {
+		writeStreamJSON(w, map[string]any{"code": -352, "message": "风控", "data": nil})
+	})
+	a := newOnlineApp(t, f, t.TempDir())
+
+	if err := a.PlayFrom(onlineItem("BV1MbZnYoEk1", "29165486316", "这一首")); err != nil {
+		t.Fatalf("放不进去：%v", err)
+	}
+	msg := waitForErr(t, a)
+	if !strings.Contains(msg, "风控") {
+		t.Errorf("播放条上那句话是 %q，没有说清是「被风控拦下了」", msg)
+	}
+	if a.Snapshot().CanRetry {
+		t.Error("给了一枚按下去只会再撞一次风控的「重试」")
 	}
 }
 

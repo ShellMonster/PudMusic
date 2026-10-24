@@ -353,6 +353,14 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// 风控**不判成「可重试」**：界面上那枚「重试」是立刻再问一次（没有退避），
+		// 而风控要等的是时间——判成可重试的话用户点一次撞一次（票 #316）。
+		// 限流（-509）是另一回事：等一会儿就好，所以仍然是可重试的。
+		Spec:  "风控不可重试（立刻再问还是撞墙），限流可重试（等一会儿就好）",
+		Tests: []string{"TestRiskControlIsNotWorthRetryingAgain"},
+	},
+	{
+		Category: HTTP,
 		Spec:     "取流超时会回来，不是挂着",
 		Tests:    []string{"TestSlowServerIsCutOffByTheTimeout", "TestALateStarterDoesNotWaitForTheTimeout"},
 	},
@@ -1110,6 +1118,43 @@ var Items = []Item{
 			"TestRestartKeepsTheLoginState",
 			"TestMountedSettingsSurviveAProcessRestart",
 			"TestSearchHistorySurvivesRestart",
+		},
+	},
+	{
+		Category: Negative,
+		// 音量三件套（票 #311）。这一组盯的是三件**静默**的事：
+		//
+		//  1. 音量不落盘 → 每次启动回到 100%。用户为了不吵把音量调到 20%，
+		//     重启之后突然全速——耳机上那是真的惊吓。
+		//  2. 静音还是「音量 0」的话，一旦开始落盘音量，「静音后退出再启动，
+		//     音量永远是 0」就成了必然（Clementine 的老毛病）。所以静音是它
+		//     自己的一格，而音量那一格记的是用户设的值。
+		//  3. 「这份设置里没有音量这一格」（老版本写的文件）和「用户自己把音量
+		//     拉到 0」分不开的话，升级上来的用户打开应用是**一点声都没有**，
+		//     而界面上不会说任何一个字。
+		//
+		// 第四件是「音量不一步跳过去」：开始放 / 恢复时从 0 走到那一档（淡入），
+		// 调音量和按静音时从当前值渐变到新值（渐变 / 淡出）。
+		Spec: "音量：落盘记住（重启还是上次那一档）；静音是独立的一格（静音后退出再启动，音量不是 0）；开始放 / 恢复时淡入，调音量时渐变，不是瞬间跳",
+		Tests: []string{
+			// 落盘与读回。
+			"TestTheVolumeSurvivesARestart",
+			"TestMuteIsItsOwnFlag",
+			// 「没有这一格」和「这一格是 0」分得开。
+			"TestAnOldSettingsFileGetsTheDefaultVolume",
+			"TestAVolumeOfZeroIsNotTheSameAsNoVolume",
+			// 静音那一格自己的语义。
+			"TestUnmutingRestoresTheVolume",
+			"TestSettingANonZeroVolumeUnmutes",
+			"TestDraggingTheVolumeToZeroIsMute",
+			"TestAMutedPlayerStillKeepsItsVolume",
+			"TestMutedAlwaysDrawsTheMuteIcon",
+			// 淡入 / 渐变 / 淡出。
+			"TestTheVolumeFadesInOnStart",
+			"TestSettingTheVolumeRamps",
+			"TestMutingFadesOut",
+			"TestSettingTheVolumeRetargetsTheRamp",
+			"TestCloseStopsTheRamp",
 		},
 	},
 	{
@@ -1890,8 +1935,9 @@ var Items = []Item{
 		//
 		//   · 编号是**画出来的字**——量的是 `Texts()` 里有一条逐字等于 "1"/"2"/"3"，
 		//     不是字段里有 page（`partRowsFor` 填对了而 view 没画，别条照样绿）。
-		//   · 正在放那一集**整行染主色**，而没在放的不许染——两半都钉，染了这一半
-		//     而不钉另一半的话，「标出来」就只是「有一行不一样」。
+		//   · 正在放那一集**整行淡主色底**（上游 `bg-primary/20`，票 #323），而没在放
+		//     的不许染——两半都钉，染了这一半而不钉另一半的话，「标出来」就只是
+		//     「有一行不一样」。
 		//   · **单 P 不摆入口**：摆一个点了没反应的键，用户会以为应用坏了。
 		//   · 问不到时说「问不出分集」而不是留一片空白——空白在界面上和「这一首
 		//     没有分集」一模一样，而空列表**进都进不去**（入口在「没问到」时也得
@@ -2515,6 +2561,38 @@ var Items = []Item{
 		},
 	},
 	{
+		// 🔴 **这一条的错法是「静默」里最静的那种**：少一层蒙版、字色跟着
+		// 主题翻——**没有一样会报错**，界面只是「有时候读不清」。而头图是
+		// **用户上传的任意图片**：用户传一张白底图，浅色主题下白字就化在
+		// 白底里（上游靠 `drop-shadow` 补，我们没有那一层）。
+		Category: Platform,
+		// 票 #295（UI 审计 L-13）：UP 空间头图区那一层黑蒙版。
+		//
+		// ⚠️ **上游那一档是平的**（浅 30% / 深 50%）：压在**纯白**头图上，
+		// 白字只有 2.1:1（浅色）/ 4.0:1（深色）——所以有字的那一带**再压
+		// 一档**，压到最坏情况也有 4.5:1（WCAG 正文 AA）。
+		//
+		// ⚠️ **这一条不放在表末尾**：表末尾那处已经撞过好几回（这一轮就是
+		// 第三次），挨着上面那条「收藏夹头图区」读得顺——两条讲的都是
+		// 「头图区」。
+		Spec: "UP 空间头图区：整块压一层黑蒙版（浅色 30% / 深色 50%，上游 `space-info.tsx:83-86`）；头图上的字是白字（次要的那一档 92% 的白），**两套主题一样**；有字的那一带再压一档（浅 40% / 深 15%），最坏情况（纯白头图）下白字 ≥4.5:1",
+		Tests: []string{
+			// 整块那一档的值（浅 30% / 深 50%，上游那一档）。
+			"TestTheSpaceHeaderMaskIsTheUpstreamOne",
+			// 画面上真的压着那两层（深浅两套，逐像素）。
+			"TestTheSpaceHeaderIsMaskedInBothThemes",
+			// 蒙版压在**真头图**上面（夹具里真的回一张纯白的 PNG——最坏情况）。
+			"TestTheSpaceHeaderMaskCoversARealBanner",
+			// **系统字号放大时名字仍然落在满档里**（1 倍到 2.25 倍，Windows 的
+			// 上限）——那一行是贴着底边的，字号一放大就往上长。
+			"TestTheSpaceHeaderTextStaysReadableAtEveryTextScale",
+			// 最坏情况（纯白头图 / 没有头图）下白字和 92% 的白都 ≥4.5:1。
+			"TestTheSpaceHeaderTextIsReadableOnAnyBanner",
+			// 昵称那一行真的是白字（不跟主题翻）。
+			"TestTheSpaceHeaderNameIsWhiteOnThePicture",
+		},
+	},
+	{
 		// 归「双平台」那一组：这一票动的是**播放条自己的刻度**，而播放条是
 		// **每一屏都在**的那一条（理由同 issue 127 那一条）。
 		Category: Platform,
@@ -2707,10 +2785,16 @@ var Items = []Item{
 		// 票 #234（审计 F-01 / F-02 / F-03 / F-06 + UX B1 / B2）：视觉一致性第一批。
 		//
 		// ⚠️ **队列抽屉「正在播放」那一行不在这条里了**（票 #294，2026-10-24）：
-		// 它后来单独改成了**淡主色底**（上游 `bg-primary/20`），见本表最后一条。
+		// 它后来单独改成了**淡主色底**（上游 `bg-primary/20`），见本表里票 #294
+		// 那一条（分集抽屉那一行是票 #323 那一条）。
 		// 这一条说的是**左栏那四处**——侧栏菜单当前项、侧栏收藏夹当前项、关注页
 		// 分组当前项、动态页作者栏当前项。
-		Spec: "「当前在哪」在应用里只有**一种底色**：侧栏菜单当前项、侧栏收藏夹当前项、关注页分组当前项、动态页作者栏当前项，四处的**底**都是 flat 那一档（淡主色底 / 中性灰底），**没有实心主色大块**；**字**分两档：深色下是主色字、浅色下是正文色；搜索页**没有页内输入框**，也没有「搜索」那一行标题，顶上第一行就是「搜索【词】的结果」（24/400），当前搜的词显示在**顶栏**那个框里（填上去的那个词，用户点进去敲字是**替换**不是追加；在搜索页上按那枚「清空」清掉的是这一场搜索，不只是框里那几个字）；满屏播放器顶栏的设置齿轮**紧跟在歌名后面**（上游那一组的构图），不是浮在窗口中间",
+		//
+		// ⚠️ **「字」那一档是压深的主色，不是正文色**（票 #323 改对）：票 #239 把浅色
+		// 下的底从「主色 14%」换成中性灰之后，主色当字也得跟着换成「按新底算」的
+		// 那一档（默认主色下 #107032）——代码里 `flatbutton.go` 的 `flatCurrentText`
+		// 自己写着「**不是正文色**」。
+		Spec: "「当前在哪」在应用里只有**一种底色**：侧栏菜单当前项、侧栏收藏夹当前项、关注页分组当前项、动态页作者栏当前项，四处的**底**都是 flat 那一档的**中性灰底**（深浅两套是同一个数：浅色 #dcdcdf / 深色 #3e3e41），**没有实心主色大块**；**字**分两档：深色下是主色字、浅色下是**从主色现算的、压到 ≥4.5:1 的那一档**（默认主色下 #107032，**不是正文色**）；搜索页**没有页内输入框**，也没有「搜索」那一行标题，顶上第一行就是「搜索【词】的结果」（24/400），当前搜的词显示在**顶栏**那个框里（填上去的那个词，用户点进去敲字是**替换**不是追加；在搜索页上按那枚「清空」清掉的是这一场搜索，不只是框里那几个字）；满屏播放器顶栏的设置齿轮**紧跟在歌名后面**（上游那一组的构图），不是浮在窗口中间",
 		Tests: []string{
 			// 左栏那四处「当前在哪」是同一个底色配方（深浅两套都量，底色和字色都量）。
 			"TestTheCurrentItemIsFlatEverywhere",
@@ -2901,6 +2985,67 @@ var Items = []Item{
 			"TestTheTextOnThePalePrimaryRowIsReadable",
 			// 那几个数钉死（浅 #d2f7df / 深 #193e29，底是不透明的）。
 			"TestThePalePrimaryRowKeepsItsNumbers",
+		},
+	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：那一行是实心主色底，界面不报错、不崩
+		// ——只是「哪一集在放」和上游差着一个数，而**队列抽屉的「正在播放」那一行
+		// 早就按上游改过了**（票 #294）：同一件事，两个抽屉差着两种画法。
+		Category: Platform,
+		// 票 #323（2026-10-24；BMG-173 的评审留的小账）。
+		//
+		// ⚠️ **它和票 #294 那一条是同一档**：上游那两处都是 HeroUI 的
+		// `variant="flat" color="primary"`，展开成 `bg-primary/20 text-primary-600`。
+		// 两个抽屉现在**共用同一份配方**（`internal/ui/playingrow.go`）。
+		Spec: "分集抽屉里「正在放」的那一集的**底色是主色 20% 那一层淡底**（浅色 #d2f7df / 深色 #193e29），**不是实心主色底**；底上的字（标题 13 / 编号 12）**对比度都 ≥4.5:1**（深浅两套都量，且跟着用户自定义的主色重算）",
+		Tests: []string{
+			// 那一行的底就是那一层淡主色底（画面上量的，深浅两套），而且不是
+			// 实心主色底、也和旁边那一行不一样。
+			"TestTheDrawerMarksTheEpisodeThatIsPlaying",
+			// 底上的字够读（标题 + 编号，深浅两套 × 六种主色）。
+			"TestTheTextOnThePalePartRowIsReadable",
+			// 那几个数钉死（浅 #d2f7df / 深 #193e29，标题 #127d38 / 编号 #6b6b74）。
+			"TestThePartDrawerPlayingRowKeepsItsNumbers",
+		},
+	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：抽屉「啪」地一下出现、或者弹到窗口
+		// 外面去就再也不回来——界面不报错、不崩，只是「来得很生硬」。
+		//
+		// 而「动的是布局位置、不是 transform」那一条在**软件渲染回退**时会差两个
+		// 数量级（DESIGN §五），所以这一条把它一起钉住。
+		Category: Platform,
+		// 票 #298（2026-10-24 拍板：**分两类，不一刀切**）。
+		//
+		// ⚠️ **「小浮层不加」说的是这一票不加**：Toast 那 250ms 的入场是 #207
+		// 自己定的（票 #180「Toast 语义色与入场」），而 #292 还要改它的曲线——
+		// 本票没动它（下面最后一条证据把它钉住）。
+		Spec: "队列抽屉从**右侧滑入**、往右滑出，**200ms** + `CubicBezier(0.16, 0.9, 0.21, 0.98)`，**不做回弹**；**开的时候先建面板再动，关的时候动完再拆**（退场那 200ms 里面板还在树上，滑完了才拆）；动画**不挡交互**（滑进去那 200ms 里面板和底下那片蒙版都点得动，退场途中再点一次外面**不会**把抽屉弹回来，而**退场那 200ms 里底下那片蒙版不吃点击**——它是透明的，看不见的东西吃点击就是「点不动」）；**动的是布局位置，不是 transform**；**每帧分配不涨**；菜单 / 小浮层 / 确认框 / Toast **不加**进出场",
+		Tests: []string{
+			// 方向和终点（画面上量的：面板左缘那道 1 像素的边线）。
+			"TestTheQueueDrawerSlidesInFromTheRight",
+			// 曲线和时长（滑到 100ms 时面板已经走完 95.4%）+ 不做回弹
+			//（整条轨迹单调、不越过终点）。
+			"TestTheQueueDrawerSlidesInOnThatCurveInThatTime",
+			"TestTheQueueDrawerDoesNotBounce",
+			// 开合和动画对齐：关掉之后**动完才拆**。
+			"TestTheQueueDrawerIsTornDownOnlyAfterItSlidOut",
+			// 退场那条曲线和时长（退到一半时退到 1182.5）——进场那一侧量了，
+			// 退场这一侧也得量：不然「退场瞬移」测试照样绿。
+			"TestTheQueueDrawerSlidesOutOnThatCurveInThatTime",
+			// 动画不挡交互 + 关是幂等的（退场途中再点外面不弹回来）。
+			"TestTheQueueDrawerDoesNotBlockClicksWhileItSlides",
+			// 退场那 200ms 里底下那片蒙版**不吃点击**（它是透明的，看不见的
+			// 东西吃点击就是「点不动」）。
+			"TestTheQueueDrawerBackdropStopsEatingClicksWhileItSlidesOut",
+			// 每帧分配没涨（进场那 200ms 和稳态一个数）。
+			"TestTheQueueDrawerSlideDoesNotAllocatePerFrame",
+			// 小浮层不加进出场（读语法树：确认框 / 菜单 / 弹窗 / 浮层那一批，
+			// 一个动画调用都没有）。
+			"TestTheSmallOverlaysHaveNoEnterOrExitAnimation",
+			// Toast 那 250ms 的入场**没被这一票动过**（它是 #207 定的，#292 要改
+			// 的是它的曲线不是它的时长）。
+			"TestTheToastKeepsItsOwnEntryAnimation",
 		},
 	},
 }
