@@ -647,7 +647,7 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, t *ui.Theme) {
 func (s *Shell) viewQueueCover(c *ui.Context, item app.Item, playing, hovered bool) {
 	t := c.Theme()
 	ui.Row(c).Width(queueCoverSize).FillHeight().Children(func() {
-		imgcache.View(c, s.images, item.Cover, queueCoverSize, queueCoverSize)
+		imgcache.ViewTitled(c, s.images, item.Cover, item.Title, queueCoverSize, queueCoverSize)
 		if playing || !hovered {
 			return
 		}

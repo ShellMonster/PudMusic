@@ -541,7 +541,7 @@ func (s *Shell) viewMiniCover(c *ui.Context, st app.State) {
 	}
 	ui.Row(c).Key("mini-cover-col").Width(miniCoverCol).Height(miniHeight).
 		Padding(miniPad, miniPad, miniPad, miniPad).AlignItems(ui.Center).Children(func() {
-		imgcache.View(c, s.images, st.CoverURL, miniCover, miniCover)
+		imgcache.ViewTitled(c, s.images, st.CoverURL, st.Title, miniCover, miniCover)
 	})
 }
 

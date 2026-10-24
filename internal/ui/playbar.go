@@ -1049,7 +1049,7 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 		// （`layout/playbar/left/index.tsx:40`），而我们原来摆的是一枚图片图标。
 		// 本地文件**永远**没有封面（见 `State.CoverURL`），所以这一档在播放条上
 		// 是常客——摆成音符才说得清「这是一首歌，只是它没有封面」。
-		imgcache.ViewPlaceholder(c, s.images, st.CoverURL, coverSize, coverSize, coverRadius,
+		imgcache.ViewPlaceholderTitled(c, s.images, st.CoverURL, st.Title, coverSize, coverSize, coverRadius,
 			icon(iconEmptyMusic)).
 			Label("当前封面").
 			Transition(coverTransition(coverIdentity(s, st)))
