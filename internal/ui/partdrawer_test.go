@@ -12,7 +12,6 @@ package ui
 import (
 	"errors"
 	"fmt"
-	"image"
 	"slices"
 	"strings"
 	"testing"
@@ -173,48 +172,63 @@ func TestEveryEpisodeRowCarriesItsNumber(t *testing.T) {
 
 // TestTheDrawerMarksTheEpisodeThatIsPlaying 断「标出正在播的那一集」。
 //
-// Biu 那一支是 `variant="flat" color="primary"`（整行浅主色底 + 主色字），
-// 所以这里断的是**那一行有没有被主色铺上**——而只有正在放的那一行是。
+// Biu 那一支是 `variant="flat" color="primary"`（整行**淡主色底** + 主色字，
+// 上游展开成 `bg-primary/20 text-primary-600`），所以这里断的是**那一行的底
+// 是不是主色 20% 那一层淡底**——而只有正在放的那一行是。
 //
-// ⚠️ 判据是**框里主色像素占多少**，不是「某个点上是什么颜色」，也不是「那个点等于
-// 主题里那个 Accent」。两个理由，都是量出来的：
+// ⚠️ **判据是「那一行底上的众数」**：那一块里既有底也有字，而底占绝大多数——
+// 众数才是底。取的是**整行**的框（`Tester.Find` 给的是整行，500×64）：四角那点
+// 圆角的抗锯齿像素是面板底色，只有几十个，不影响众数。
 //
-//  1. `Tester.Find` 给回来的是**标题那三个字自己**的框（第一版按「行的框」用，
-//     量出来数字在它左边 8~18 像素，方向整个反了）。而那个框里对正在放的那一行还
-//     压着字——字是主色文字（白），按点取样会取到字而不是底。
-//  2. 框里离编号那几个像素远一点的地方**不是纯主题底色**（实测 {24 24 27} 往里
-//     一步是 {22 22 25}，圆角的抗锯齿），所以「等于 `t.Background`」这种判据在
-//     这里不成立。
+// ⚠️ **改之前那一行是实心主色底**（票 #323）：那一版的判据是「框里主色像素占
+// 多少」，而淡底**不算**主色像素（浅色下 #d2f7df 的绿 − 红 = 37，门槛是 60）——
+// 换成淡底之后那条判据不适用了，钉的是「底就是那一层淡主色」。
 //
-// 「主色像素」判的是**绿调**（绿通道比红通道高出一截）而不是逐字比对：那是这个
-// 应用主色的形状（`DefaultPrimaryColor` 一族），而深浅两套主题换的是同一个值。
+// ⚠️ **深浅两套都量**：淡底在深色下是 #193e29，压在 #18181b 上只差十几个通道，
+// 只量浅色的话深色下那一层根本看不出来。
 func TestTheDrawerMarksTheEpisodeThatIsPlaying(t *testing.T) {
-	s, tt := onlineTester(t, multiPages(), false)
-	partsReady(t, s, tt, 3)
-	openPartsDrawer(t, tt)
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, tt := onlineTester(t, multiPages(), false)
+			tt.SetDark(dark)
+			partsReady(t, s, tt, 3)
+			openPartsDrawer(t, tt)
+			tt.Frame()
 
-	for _, c := range []struct {
-		title string
-		want  bool
-	}{
-		{"第一集", true}, // 队列里 cid 是 777，也就是第一集
-		{"第二集", false},
-		{"第 3 集", false},
-	} {
-		r, ok := tt.Find(c.title)
-		if !ok {
-			t.Fatalf("浮层里没有 %q，文字有 %q", c.title, tt.Texts())
-		}
-		share := accentShare(tt.Image(), r)
-		if c.want && share < 0.5 {
-			t.Errorf("「%s」那一行只有 %.0f%% 是主色（{30 215 96} 那一种），want 一半以上——"+
-				"正在放的那一集没标出来，用户分不清自己在哪一集", c.title, share*100)
-		}
-		if !c.want && share >= inactiveRowShareLimit {
-			t.Errorf("「%s」那一行有 %.0f%% 是主色（阈值 %.0f%%）——"+
-				"没在放的那一行也被染上了主色，标出来的那一集就没有意义了",
-				c.title, share*100, inactiveRowShareLimit*100)
-		}
+			theme := BuildTheme(app.DefaultSettings(""), dark)
+			want := playingRowBg(theme)
+
+			// 队列里 cid 是 777，也就是「第一集」——正在放的就是它。
+			cur, ok := tt.Find("第一集")
+			if !ok {
+				t.Fatalf("浮层里没有「第一集」，文字有 %q", tt.Texts())
+			}
+			sib, ok := tt.Find("第二集")
+			if !ok {
+				t.Fatalf("浮层里没有「第二集」，文字有 %q", tt.Texts())
+			}
+			img := tt.Image()
+			got := modeOf(bandPixels(img, cur))
+			sibBg := modeOf(bandPixels(img, sib))
+			t.Logf("%s：正在放那一行 底 %v，旁边那一行 底 %v", name, got, sibBg)
+
+			if !nearRGBA(got, rgbaOf(want), 3) {
+				t.Errorf("%s：正在放那一行的底色是 %v，want %v（主色 20%% 那一层淡底）",
+					name, got, want)
+			}
+			if nearRGBA(got, rgbaOf(theme.Accent), 2) {
+				t.Errorf("%s：正在放那一行是**实心主色底** %v——那是改之前的样子"+
+					"（上游是 bg-primary/20 的那一层淡底）", name, got)
+			}
+			if nearRGBA(got, sibBg, 3) {
+				t.Errorf("%s：正在放那一行和旁边那一行是同一个底色 %v——"+
+					"「哪一集在放」就看不出来了", name, got)
+			}
+		})
 	}
 }
 
@@ -835,44 +849,13 @@ func lenOf(pages []any) int {
 	return len(pages)
 }
 
-// inactiveRowShareLimit 是「没在放的那一行算不算被标上了」的阈值。
-//
-// ⚠️ **不是 0，因为相邻两行的边界上会漏一像素**：这一列的行是 40 高、首尾紧挨着
-// （实测第一集 y=367..407、第二集 407..447），而上面那一行整行是主色，取整时它的
-// 填充会漏进下面那一行的第一个像素行——量下来「第二集」有 2.5%，而**全部集中在
-// 最上面那一行像素上**（y=0），其余全是底色。
-//
-// 这不是标记，是子像素取整：#118 把播放条图标化之后浮层落在了不同的亚像素位置，
-// 边界那一行的取整就变了。**真的被标上的那一行是 96%**，而阈值取 10%——两边差一个
-// 数量级，所以「每一行都被染上了」那种坏照样被抓住（变异验过：每一行都标 → 96% →
-// 红）。
-const inactiveRowShareLimit = 0.10
-
 // accentGreenGap 是「一个像素算不算主色」的门槛：绿通道要比红通道高出这么多。
 //
 // 主题里那个 Accent 是 {30 215 96}（绿 - 红 = 185），面板底色是 {24 24 27}（差 0），
 // 正文是浅灰（差也是 0）——所以这一个条件既认得出主色，又不会把字和底算进去。
 // 60 是从「主题色差 185」倒推的一半：认得出，又不会因为抗锯齿的边缘像素误判。
+//
+// ⚠️ **它现在只被别处用着**（历史记录那个开关、本地音乐那一处）：分集抽屉
+// 「正在放」那一行改成了**淡主色底**（票 #323），而淡底**不算**主色像素
+// （浅色下 #d2f7df 的绿 − 红 = 37）——那一处的判据换成了「底是不是那一层淡底」。
 const accentGreenGap = 60
-
-// accentShare 是一个框里「主色」像素占的比例。
-func accentShare(img *image.RGBA, r ui.Rect) float64 {
-	x0, y0 := int(r.X), int(r.Y)
-	w, h := int(r.W), int(r.H)
-	if w <= 0 || h <= 0 {
-		return 0
-	}
-	n := 0
-	for y := y0; y < y0+h; y++ {
-		for x := x0; x < x0+w; x++ {
-			if x < 0 || y < 0 || x >= img.Bounds().Dx() || y >= img.Bounds().Dy() {
-				continue
-			}
-			c := img.RGBAAt(x, y)
-			if int(c.G)-int(c.R) >= accentGreenGap {
-				n++
-			}
-		}
-	}
-	return float64(n) / float64(w*h)
-}

@@ -1130,7 +1130,7 @@ func TestTheCollapsedSideMenuItemIsAFortySquareIconCell(t *testing.T) {
 // 这里量的是 **logo 那一块墨的上沿**：它等于「侧栏的上沿 + 顶部留白 +
 // 图标自己的那点留白」。
 //
-// ⚠️ **侧栏的上沿现在就是窗口的上沿**（票 #165 / 报告 C-01）：侧栏改成从
+// ⚠️ **侧栏的上沿现在就是窗口的上沿**（票 #286 / 报告 C-01）：侧栏改成从
 // 窗口顶端贯到底（上游那种通栏），顶栏只盖内容区那一段——于是红黄绿落在
 // 侧栏那一带，而 logo 正好在它们下面，那 32 留白是**真的在给它们让位**。
 func TestTheBrandIsALogoAndTheAppName(t *testing.T) {
@@ -1190,7 +1190,7 @@ func TestTheBrandIsALogoAndTheAppName(t *testing.T) {
 
 			// ④ 顶部留白：logo 的上沿 = 侧栏的上沿 + 留白 + 图标自己的留白。
 			//
-			// ⚠️ **侧栏的上沿 = 窗口的上沿 = 0**（票 #165 / 报告 C-01）：侧栏
+			// ⚠️ **侧栏的上沿 = 窗口的上沿 = 0**（票 #286 / 报告 C-01）：侧栏
 			// 从窗口顶端贯到底，所以这里量的是「离窗口上沿多远」。
 			wantTop := 12
 			if runtime.GOOS == "darwin" {

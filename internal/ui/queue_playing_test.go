@@ -132,15 +132,15 @@ func TestTheTextOnThePalePrimaryRowIsReadable(t *testing.T) {
 						name, hex, playingRowText(theme), bg, r)
 				}
 				// 副题：次要色，同样按那一层淡底算（深色下原样就够）。
-				if r := ink.Ratio(playlistSubtitleColor(theme, true), bg); r < 4.5 {
+				if r := ink.Ratio(playlistSubtitleColor(theme, queueRowCurrent), bg); r < 4.5 {
 					t.Errorf("%s 主色 %s：副题 %v 压淡底 %v 只有 %.2f:1（< 4.5）",
-						name, hex, playlistSubtitleColor(theme, true), bg, r)
+						name, hex, playlistSubtitleColor(theme, queueRowCurrent), bg, r)
 				}
 				if hex == "#1ed760" {
 					t.Logf("%s：淡底 %v，歌名 %v（%.2f:1），副题 %v（%.2f:1）", name, bg,
 						playingRowText(theme), ink.Ratio(playingRowText(theme), bg),
-						playlistSubtitleColor(theme, true),
-						ink.Ratio(playlistSubtitleColor(theme, true), bg))
+						playlistSubtitleColor(theme, queueRowCurrent),
+						ink.Ratio(playlistSubtitleColor(theme, queueRowCurrent), bg))
 				}
 			}
 		})
