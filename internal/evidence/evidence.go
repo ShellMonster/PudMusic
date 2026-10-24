@@ -2808,7 +2808,7 @@ var Items = []Item{
 		// ⚠️ **「小浮层不加」说的是这一票不加**：Toast 那 250ms 的入场是 #207
 		// 自己定的（票 #180「Toast 语义色与入场」），而 #292 还要改它的曲线——
 		// 本票没动它（下面最后一条证据把它钉住）。
-		Spec: "队列抽屉从**右侧滑入**，**200ms** + `CubicBezier(0.16, 0.9, 0.21, 0.98)`，**不做回弹**；**开的时候先建面板再动，关的时候动完再拆**（退场那 200ms 里面板还在树上，滑完了才拆）；动画**不挡交互**（滑进去那 200ms 里面板和底下那片蒙版都点得动，退场途中再点一次外面**不会**把抽屉弹回来）；**动的是布局位置，不是 transform**；**每帧分配不涨**；菜单 / 小浮层 / 确认框 / Toast **不加**进出场",
+		Spec: "队列抽屉从**右侧滑入**、往右滑出，**200ms** + `CubicBezier(0.16, 0.9, 0.21, 0.98)`，**不做回弹**；**开的时候先建面板再动，关的时候动完再拆**（退场那 200ms 里面板还在树上，滑完了才拆）；动画**不挡交互**（滑进去那 200ms 里面板和底下那片蒙版都点得动，退场途中再点一次外面**不会**把抽屉弹回来，而**退场那 200ms 里底下那片蒙版不吃点击**——它是透明的，看不见的东西吃点击就是「点不动」）；**动的是布局位置，不是 transform**；**每帧分配不涨**；菜单 / 小浮层 / 确认框 / Toast **不加**进出场",
 		Tests: []string{
 			// 方向和终点（画面上量的：面板左缘那道 1 像素的边线）。
 			"TestTheQueueDrawerSlidesInFromTheRight",
@@ -2818,8 +2818,14 @@ var Items = []Item{
 			"TestTheQueueDrawerDoesNotBounce",
 			// 开合和动画对齐：关掉之后**动完才拆**。
 			"TestTheQueueDrawerIsTornDownOnlyAfterItSlidOut",
+			// 退场那条曲线和时长（退到一半时退到 1182.5）——进场那一侧量了，
+			// 退场这一侧也得量：不然「退场瞬移」测试照样绿。
+			"TestTheQueueDrawerSlidesOutOnThatCurveInThatTime",
 			// 动画不挡交互 + 关是幂等的（退场途中再点外面不弹回来）。
 			"TestTheQueueDrawerDoesNotBlockClicksWhileItSlides",
+			// 退场那 200ms 里底下那片蒙版**不吃点击**（它是透明的，看不见的
+			// 东西吃点击就是「点不动」）。
+			"TestTheQueueDrawerBackdropStopsEatingClicksWhileItSlidesOut",
 			// 每帧分配没涨（进场那 200ms 和稳态一个数）。
 			"TestTheQueueDrawerSlideDoesNotAllocatePerFrame",
 			// 小浮层不加进出场（读语法树：确认框 / 菜单 / 弹窗 / 浮层那一批，

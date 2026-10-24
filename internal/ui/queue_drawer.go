@@ -200,9 +200,28 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 			bottomInset = fullControlsHeight
 		}
 		back := ui.Row(c).Key("queue-backdrop").
-			Absolute().Left(0).Top(0).Right(0).Bottom(bottomInset).
+			Absolute().Left(0).Top(0).Right(0).Bottom(bottomInset)
+		if s.drawerPhase == drawerOut {
+			// ⚠️ **退场那 200ms 里，这片蒙版不吃点击**。
+			//
+			// 改动之前关掉抽屉是**整个浮层都不建**（`viewQueueDrawer` 第一句
+			// `if !s.drawerOpen { return }`），蒙版立刻消失，下一次点击直接落在
+			// 页面上。现在面板还要滑 200ms 才拆，而面板在 ~100ms 时就已经 95%
+			// 滑出屏幕了——「看上去已经关好」的那段时间，底下那一页（侧栏、页面）
+			// 却点不动：那一下点击被这片**看不见的**蒙版吃掉，只会把 drawerOpen
+			// 又设成 false。
+			//
+			// 所以退场一开始，蒙版就**让开指针**（`PassThrough`）：它是透明的，
+			// 用户看不见它，而它盖住整页——看不见的东西吃点击，就是「点不动」。
+			back = back.PassThrough()
+		} else {
 			// 没有底色：Biu 的 `backdrop="transparent"`，底下那一层照旧看得见。
-			Modal()
+			//
+			// ⚠️ **开着的时候它是模态**：Modal 把焦点关进抽屉、外面那些快捷键
+			// 让路，而底下那一页在它开着的时候点不动（Biu 的透明蒙版也是这样，
+			// 它只是看不见，不是空的）。
+			back = back.Modal()
+		}
 		back.Children(func() {
 			// ⚠️ **那一圈影是上游给的**：Biu 那一枚是 HeroUI 的
 			// `<Drawer radius="md" shadow="md">`（`components/music-playlist-drawer/
@@ -229,6 +248,13 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 			panel := shadow.HeroMedium(ui.Column(c).Key("queue-drawer").
 				Absolute().Top(0).Bottom(0).Width(queueDrawerWidth).
 				Background(t.Background).BorderStartWidth(1).BorderColor(t.Border), t)
+			// ⚠️ **面板在退场时照旧接点击**：它还在屏幕上（滑出去那一段看得见），
+			// 而「看不见的东西吃点击」才是坏的（那是底下那片蒙版，见上面）。
+			// 面板看得见，所以点它就是点它。
+			//
+			// ⚠️ **别用 `Disabled` 关它**：框架把禁用画成**半透明**
+			// （`mygo/ui/paint.go`：`if e.flags&flagDisabled != 0 { p.opacity *= 0.5 }`），
+			// 那会让面板一边滑一边淡——变成「淡出」而不是「滑出」了。
 			panel.Role(ui.RoleDialog).Label("播放列表").
 				Children(func() {
 					s.viewQueueHeader(c, t)

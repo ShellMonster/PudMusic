@@ -352,6 +352,71 @@ func TestTheToastKeepsItsOwnEntryAnimation(t *testing.T) {
 	}
 }
 
+// TestTheQueueDrawerSlidesOutOnThatCurveInThatTime 断②的另一半：**退场**那条曲线。
+//
+// ⚠️ **为什么单起一条**：进场那一侧逐帧量了曲线和半程位置，退场只断了「滑完了
+// 才拆」——那样的话**退场变成瞬移**（目标值写错、时长改成 0）测试照样绿。
+//
+// 判据是**画面上那道 1 像素的边线**（面板的左缘）退到哪儿了：
+//
+//	刚关	还在右沿（x = 宽度 - 384）
+//	滑了 100ms	退到 宽度 - 384 + 384×0.954460680（那条曲线在 0.5 处的值）
+//	滑完	整个在窗口外面（x = 宽度）
+//
+// ⚠️ **它和进场那一侧是镜像的**：进场的半程在 x=833.5，退场的半程在 x=1182.5
+// （两者关于窗口中点 x=1008 对称）。
+func TestTheQueueDrawerSlidesOutOnThatCurveInThatTime(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, tt := drawerTester(t, dark)
+			border := drawerBorder(s, dark)
+
+			// 先让它滑到位（开着的时候量不到退场）。
+			tt.Frame()
+			settleDrawer(t, s, tt)
+
+			// 关掉：这一帧是退场的第 0 毫秒，面板还在右沿。
+			s.drawerOpen = false
+			tt.Frame()
+			if s.drawerPhase != drawerOut {
+				t.Fatalf("关掉之后阶段是 %d，want %d（它该开始往窗口外面滑）",
+					s.drawerPhase, drawerOut)
+			}
+			x, ok := drawerEdgeX(tt.Image(), drawerEdgeRow, border)
+			if !ok || x != shotWinW-queueDrawerWidth {
+				t.Fatalf("刚关时面板左缘在 %d（画面上找得到：%v），want %d",
+					x, ok, shotWinW-queueDrawerWidth)
+			}
+
+			// 滑了 100ms：退到那条曲线的半程处。
+			tt.Advance(100 * time.Millisecond)
+			x, ok = drawerEdgeX(tt.Image(), drawerEdgeRow, border)
+			if !ok {
+				t.Fatalf("滑了 100ms，面板左缘那道边线还不在画面上——它没在滑")
+			}
+			// 期望：1200 - 384 + 384 × 0.954460680 = 1182.487。
+			//
+			// ⚠️ **容差是 1.5 个像素**：面板的位置是浮点数，而画面上那道 1 像素的
+			// 边线画在整数列上。
+			want := shotWinW - queueDrawerWidth + queueDrawerWidth*0.954460680
+			if math.Abs(float64(x)-want) > 1.5 {
+				t.Errorf("退场滑到一半时面板左缘在 x=%d，want %.2f（那条曲线在半程处是 95.4%%）",
+					x, want)
+			}
+
+			// 滑完：整个面板在窗口外面（左边那道边线也跟着出去了，画面上找不到）。
+			tt.Advance(150 * time.Millisecond)
+			if _, ok := drawerEdgeX(tt.Image(), drawerEdgeRow, border); ok {
+				t.Error("退场滑完了，面板左缘那道边线还在画面上——它该整个滑出去了")
+			}
+		})
+	}
+}
+
 // TestTheQueueDrawerDoesNotBlockClicksWhileItSlides 断「动画**不能挡交互**」。
 //
 // 抽屉滑进去的那 200ms 里面板还在窗口外面，而底下那片蒙版**照常吃点击**——
@@ -465,6 +530,56 @@ func measureAllocs(fn func()) (allocs, bytes uint64) {
 	fn()
 	runtime.ReadMemStats(&after)
 	return after.Mallocs - before.Mallocs, after.TotalAlloc - before.TotalAlloc
+}
+
+// TestTheQueueDrawerBackdropStopsEatingClicksWhileItSlidesOut 断退场时
+// **底下那片蒙版不吃点击**。
+//
+// # 为什么单起一条
+//
+// 蒙版是**透明**的：用户看不见它，而它盖住整页。看不见的东西吃点击，
+// 就是「点不动」——而它吃掉的那些点击只会把 `drawerOpen` 又设成 false。
+//
+// 改动之前关掉抽屉是**整个浮层都不建**，蒙版立刻消失，下一次点击直接落在页面上。
+// 现在面板还要滑 200ms 才拆，所以蒙版得**手动**让开指针（`PassThrough`）。
+//
+// # 判据
+//
+// 同一个坐标（侧栏的「本地音乐」那一项）：
+//
+//	抽屉开着	点不动（蒙版吃掉了——Biu 的透明蒙版就是这样）
+//	正在退场	点得动，路由真的变了
+func TestTheQueueDrawerBackdropStopsEatingClicksWhileItSlidesOut(t *testing.T) {
+	s, tt := drawerTester(t, false)
+
+	tt.Frame()
+	settleDrawer(t, s, tt)
+
+	// 开着的时候：底下那一页点不动（蒙版吃掉了）。
+	if err := tt.Click("本地音乐"); err != nil {
+		t.Fatalf("点不了侧栏的「本地音乐」：%v（文字：%q）", err, tt.Texts())
+	}
+	tt.Frame()
+	if got := s.router.Location(); got == "/local-music" {
+		t.Fatal("抽屉开着的时候底下那一页点得动——蒙版没盖住")
+	}
+
+	// 关掉：这一帧是退场的第 0 毫秒，面板还在右沿，蒙版还在树上。
+	s.drawerOpen = false
+	tt.Frame()
+	if s.drawerPhase != drawerOut {
+		t.Fatalf("关掉之后阶段是 %d，want %d", s.drawerPhase, drawerOut)
+	}
+
+	// 退场中：底下那一页要点得动。
+	if err := tt.Click("本地音乐"); err != nil {
+		t.Fatalf("退场时点不了侧栏的「本地音乐」：%v（文字：%q）", err, tt.Texts())
+	}
+	tt.Frame()
+	if got := s.router.Location(); got != "/local-music" {
+		t.Errorf("退场时点侧栏的「本地音乐」，路由是 %q，want %q——"+
+			"底下那片蒙版还在吃点击", got, "/local-music")
+	}
 }
 
 // ---- 出图 ----
