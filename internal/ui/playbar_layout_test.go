@@ -24,7 +24,7 @@ import (
 //
 // 和 `metaBarTester`（playbar_meta_test.go）的差别有三个：**能指定深浅**、
 // 这一份总是带一个**有时长的**状态（旋钮那条测试要进度条是**能用的**：框架的
-// `Hovered()` 对禁用的控件恒为 false，`mygo/ui/input.go:1116`），以及
+// `Hovered()` 对禁用的控件恒为 false，`mygo/ui/input.go:1118`），以及
 // **它把应用的主题装上了**（`applyFrameTheme`）——
 //
 // ⚠️ **最后那一条是这一族要读颜色的前提**：真窗口里每一帧开头都装一次主题

@@ -175,6 +175,31 @@ type Shell struct {
 	// 新建等于每帧都当成没问过——那是一帧一个请求。
 	avatar avatarState
 
+	// avatarMenuOpen 是头像下面那一层下拉开着没有（见 navbar_avatar.go）。
+	//
+	// ⚠️ **它是跨帧的**：即时模式每一帧都重画一遍，局部变量下一帧就没了。
+	avatarMenuOpen bool
+	// avatarMenuIndex 是「当前是第几项」（键盘走到的 / 鼠标悬停的那一项）。
+	//
+	// ⚠️ **鼠标和键盘共用这一个下标**：两个下标的话，画面上会有两项同时亮着
+	// （鼠标移到第三项上的那一帧，键盘那一项还亮着）。
+	//
+	// ⚠️ **-1 = 什么也没选中**：上游 HeroUI 打开下拉时不高亮任何一项，而
+	// 「一打开就亮着第一项」会让回车直接进扫码登录页（那一下用户根本不是
+	// 想登录）。
+	avatarMenuIndex int
+	// avatarMenuHover 是**上一帧**指针停在第几项（-1 = 不在菜单项上）。
+	//
+	// ⚠️ **它是为了让「指针不动的时候键盘说了算」**：每一帧都让悬停改一遍
+	// 「当前是第几项」的话，键盘刚走的那一格会被指针改回去——「键盘能上下
+	// 走」于是只在指针不在菜单项上的时候才成立。框架自己那个下拉也是这么
+	// 做的（`mygo/ui/base.go` 的 `selectParts.Item`）。
+	avatarMenuHover int
+	// avatarLogoutAsk 是「退出登录」那道确认开着没有。
+	//
+	// ⚠️ **跨帧**：确认框要活过一帧（用户得看着它按「确认」或「取消」）。
+	avatarLogoutAsk bool
+
 	// local 是本地音乐那一页自己的一摊状态：表格 / 列表 / 网格三档的控件、
 	// 筛选条件、两道确认弹窗、以及**逐窗口**的唤醒句柄表。见 localmusic.go。
 	//
@@ -231,7 +256,7 @@ type Shell struct {
 	// fullScreen 是主窗口此刻是不是全屏。
 	//
 	// ⚠️ **它由窗口的回调推过来，不在 view 里问**：`win.IsFullScreen()`
-	// 每帧问一次是跨一次 ObjC 调用（`mygo@v0.6.2/window.go:764` 的 `get`），
+	// 每帧问一次是跨一次 ObjC 调用（`mygo@v0.6.3/window.go:766` 的 `get`），
 	// 而答案在**进全屏那一刻**就定了——事件推过来既省事又准。
 	//
 	// 它只给侧栏那个品牌块用（macOS 非全屏时要多留一格，见 `sidebar.go` 的
@@ -1572,7 +1597,7 @@ func (s *Shell) viewMain(c *ui.Context) {
 // pageJustShown 报「这一帧是刚进这一页的第一帧」。
 //
 // 路由切走再切回来时，框架会把焦点还给「离开这一页时有焦点的那个元素」
-// （`Router.focusPage`，`mygo@v0.6.2/ui/router.go:726`）。收藏夹/local 那一页
+// （`Router.focusPage`，`mygo@v0.6.3/ui/router.go:726`）。收藏夹/local 那一页
 // 的「会展开的搜索」正好是那个元素——于是用户回来的时候，键盘焦点被塞进一个
 // 他没打开过的框里，他在别处敲的字就落进那里（评审第 5 条）。
 //

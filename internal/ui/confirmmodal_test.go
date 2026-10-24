@@ -73,7 +73,7 @@ func TestTheConfirmDialogHasAToneColoredWarningIcon(t *testing.T) {
 //
 // 🔴 **这一条是换掉系统原生那一份时丢掉的**：原生那个 `ui.AlertDialog` 建面板
 // 时是 `Role(RoleAlertDialog)` + `panel.Label(title)` +
-// `panel.description = message`（mygo v0.6.2 的 `ui/feedback.go:186-188`），
+// `panel.description = message`（mygo v0.6.3 的 `ui/feedback.go:186-188`），
 // 所以读屏软件报得出「删除确认吗？」和它下面那一句正文。而 `ui.Modal`
 // （`coreDialogBase`）只给 `Role(RoleDialog)`——**既没有名字也没有描述**，
 // 于是读屏软件只报「一个对话框」。

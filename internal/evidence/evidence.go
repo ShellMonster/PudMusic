@@ -282,6 +282,27 @@ var Items = []Item{
 		},
 	},
 	{
+		// 票 #194：右下角那三枚旋钮改成**上游那三枚的样子**。
+		//
+		// 改的是**形状**，不是位置，也不是功能：位置（右沿 1128、底沿 680、每枚
+		// 32、中心间距 44）和三枚各自的动作一个字都没动。
+		//
+		// 而「图标化」最容易丢的是**名字**：钮上不再有「找歌词」三个字，可它
+		// 恰恰是**没有歌词时**唯一摆着的那个键——名字（`Label`）没了，读屏软件
+		// 念不出来，无头 Tester 也找不到了。所以这一条把「名字还在」和「当前值
+		// 在浮层里」都钉住：值不常驻钮上（上游那两个钮上就只有一个图标），但
+		// 展开浮层仍然看得见。
+		Category: Play,
+		Spec:     "右下角那三枚歌词旋钮是 ⌀32 的圆形图标钮（上游同一份组件挂两处：主窗口「正在播放」那一页与满屏那一屏）：圆里只有一枚图标（上游那三枚 Aa / 时钟 / T 形框）没有字；无障碍名与 Tester 名字都还在；点击行为不变（字号 / 偏移开浮层、找歌词开搜索弹窗）；当前值不常驻钮上、在浮层里看；位置与间距不变（右沿 1128、底沿 680、每枚 32、中心间距 44）",
+		Tests: []string{
+			"TestTheKnobIsARoundIconButtonWithTheValueInThePopover",
+			"TestTheTwoKnobsAreThereOnlyWithLyrics",
+			"TestTheFullPlayerHasTheThreeLyricKnobs",
+			"TestTheFullPlayerKnobsSitAtTheBottomRightOfTheLyrics",
+			"TestTheFullPlayerKnobsActuallyWork",
+		},
+	},
+	{
 		// 满屏那个偏好面板的三样（UX 报告 B4）：**有标题**（用户不用靠里面的
 		// 开关名猜这是什么面板）、**能关**（除了点外面和 Esc，还有一枚看得见的
 		// 「×」）、**和齿轮对齐**（面板的左沿对着齿轮的图形，不对着那枚键的
@@ -491,6 +512,51 @@ var Items = []Item{
 			"TestTheAvatarSaysSomethingWhenThePictureDoesNotComeBack",
 			"TestAFaceThatComesBackForTheWrongAccountNeverLands",
 			"TestTheAvatarNeverLooksTheSameTwoWays",
+		},
+	},
+	{
+		// 归「播放」那一组：还是顶栏，但说的是头像**下面那一层**（票 #363）。
+		//
+		// 归这一组是因为它是**界面上的一处交互**（和满屏偏好面板那一条同一类），
+		// 而不是一个接口。
+		Category: Play,
+		// 这一层原来是**系统原生菜单**（`ui.Element.Menu`），这一票换成自绘的
+		// 浮层：样式跟设计规范对得上（surface1 / radiusLg / shadow.Modal /
+		// accentSoft），而系统菜单是系统外观；菜单项也要能带图标。
+		//
+		// 🔴 **换成自绘之后，系统菜单那四件好事一件都不能丢**（当初用系统菜单
+		// 就是为了它们）：点外面关、Esc 关、键盘能上下走、选中项有反馈。
+		//
+		// ⚠️ **指针和键盘混着来是最难的那一种**：两者共用「当前是第几项」，而
+		// 悬停每一帧都改它——不处理的话，键盘刚走的那一格会被指针改回去，
+		// 「键盘能上下走」只剩「指针不在菜单项上」的时候才成立。
+		Spec: "头像下拉是自绘浮层（不是系统菜单）：六项按上游的顺序、每一项带图标、锚在头像下面；点外面关、Esc 关、方向键走得动（指针停在菜单项上也走得动）、当前项有反馈；「退出登录」先问一句，取消什么都不做",
+		Tests: []string{
+			// 六项都在、顺序照上游、而且**不是系统菜单**。
+			"TestAvatarMenuHasBiuSixItems",
+			// 六项都按得动：换路由、去个人资料、去设置、退登（先问一句）。
+			"TestAvatarMenuGoesToItsRoute",
+			"TestAvatarMenuProfileUsesTheLoggedInMid",
+			"TestAvatarMenuWithoutALoginSaysSo",
+			"TestAvatarMenuLogoutActuallyLogsOut",
+			"TestAvatarMenuOpensTheIssuePage",
+			// 点外面关、Esc 关。
+			"TestTheAvatarMenuClosesOnEscape",
+			"TestTheAvatarMenuClosesWhenClickingOutside",
+			// 键盘那一半：方向键走得动（**指针停在菜单项上时也走得动**）、
+			// 回车选的是亮着的那一项。
+			"TestTheAvatarMenuWalksWithTheArrowKeys",
+			"TestTheAvatarMenuWalksWhileThePointerRestsOnAnItem",
+			"TestTheAvatarMenuSelectsWithTheKeyboard",
+			// 浮层的样子：锚在头像下面、右沿对齐、底色是 surface1 那一档。
+			"TestTheAvatarMenuHangsUnderTheAvatar",
+			"TestTheAvatarMenuPanelLooksLikeACard",
+			// 每一项前面都有图标。
+			"TestEveryAvatarMenuItemHasAnIcon",
+			// 当前那一项的危险字按那层底现算（底换了，字要跟着换）。
+			"TestTheDangerItemKeepsItsContrastOnTheHighlightedRow",
+			// 「退出登录」先问一句，取消什么都不做。
+			"TestTheAvatarMenuAsksBeforeLoggingOut",
 		},
 	},
 	{

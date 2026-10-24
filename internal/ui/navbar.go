@@ -119,7 +119,11 @@ func (s *Shell) viewNav(c *ui.Context) {
 	// 读的是**上一帧**的 searchSuggest：viewSearchBox 在 Children 里才跑，那一刻
 	// 还没法知道这一帧的结果。一帧的差在这里没有后果——刚点开浮层的那一帧顶栏
 	// 还能拖，从第二帧起就不拖了。
-	if !s.searchSuggest {
+	//
+	// ⚠️ **头像下面那一层下拉也算**（上游 `isNoDrag = isSearchFocused ||
+	// isUserDropdownOpen`，`index.tsx:25-30`）：那一层开着的时候用户正要往
+	// 里面点，拖一下窗口就把选择弄没了。
+	if !s.searchSuggest && !s.avatarMenuOpen {
 		nav = nav.DragWindow()
 	}
 

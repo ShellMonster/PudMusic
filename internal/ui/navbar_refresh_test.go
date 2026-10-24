@@ -61,15 +61,14 @@ func refreshShellOpts(t *testing.T, f *folderBili, mid string, opts ...shellOpt)
 }
 
 // chooseRefresh 点开头像下拉，选「刷新数据」。
+//
+// ⚠️ **下拉是自绘的浮层**（原来是系统菜单），所以这一项是**按位置点**的
+// （理由见 `clickAvatarMenuItem`）：按名字找会撞上别处同名的那一个。
 func chooseRefresh(t *testing.T, tt *mygoui.Tester) {
 	t.Helper()
 	tt.SetFocused(true)
-	if err := tt.Click(avatarLabel); err != nil {
-		t.Fatalf("点不到头像：%v，文字有 %q", err, tt.Texts())
-	}
-	if err := tt.ChooseMenuItem("刷新数据"); err != nil {
-		t.Fatalf("下拉里选不了「刷新数据」：%v", err)
-	}
+	openAvatarMenu(t, tt)
+	clickAvatarMenuItem(t, tt, avatarMenuIndexOf("刷新数据"))
 }
 
 // refreshList 是「拉回来的收藏夹在画面上了吗」。
