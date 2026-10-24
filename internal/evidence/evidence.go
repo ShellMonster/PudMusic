@@ -460,6 +460,25 @@ var Items = []Item{
 			"TestACorruptFileNeverLooksLikeItFinished",
 		},
 	},
+	{
+		Category: PCM,
+		// 上一条的另一面：**完整的**短文件不是「截断的输入」，不许报错。
+		//
+		// macOS 上 AudioToolbox 探容器时第一次就要 8192 字节，而整个文件
+		// 不足 8192——字节源读到的是「没凑齐就到了头」，那不是失败，是
+		// 「流到头了」。以前把它当成了硬错误，于是**总长不足 8192 字节**
+		// 的文件（秒开片段、缓存碎片、测试素材）一个样本都解不出来，
+		// 界面上是「这歌放不出来」（#312）。
+		//
+		// 这条证据是 macOS 专属的（`extaf` 只在 macOS 上存在）。
+		Spec: "总长不足 8192 字节的**完整**文件也能解出来：样本数与时长都对、样本值对得上、读到头是干净的 EOF（末尾短读不算错）",
+		Tests: []string{
+			"TestAShortFileStillDecodes",
+			"TestAShortFileKeepsItsSamples",
+			"TestAShortFileEndsAtEOF",
+			"TestAShortCompressedFileStillDecodes",
+		},
+	},
 
 	// ── 分页与路由 ─────────────────────────────────────────────────────────
 	{
@@ -2624,6 +2643,25 @@ var Items = []Item{
 		},
 	},
 	{
+		// 这一族动的是**过渡本身**：曲线、时长、位移与淡入的错开。
+		//
+		// 🔴 **这一族的错法全是「静默」的**：曲线换了没有任何东西会报错，界面
+		// 只是「不太顺」；滑块退回定时长曲线也不报错，只是连点三个 Tab 时
+		// 顿一下；淡入和位移又同步了也不报错，只是「啪」地一下出现。
+		Category: Platform,
+		// 票 #292（DESIGN.md §五）：一条统一曲线 + 主 Tab 滑块换成弹簧。
+		Spec: "所有过渡走同一条曲线 `CubicBezier(0.16, 0.9, 0.21, 0.98)`（DESIGN.md §五《一条统一曲线》）；主 Tab 滑块走**弹簧**（ζ=0.9923，接近临界阻尼；不是定时长曲线）；Toast 入场的**淡入与位移错开**（位移先走、淡入后到）",
+		Tests: []string{
+			// 曲线和弹簧的值不许漂（唯一出处就是那一个包）。
+			"TestTheUnifiedCurveIsTheOneWeCopied",
+			"TestTheTabSlideIsASpring",
+			// 滑块走的是弹簧：100ms 时只走到约一半（定时长曲线那时已经 78%）。
+			"TestTheTabSliderFollowsTheSpring",
+			// 淡入与位移错开：同一时刻量到的两个进度，淡入那个明显更小。
+			"TestTheToastFadesInAfterItSlides",
+		},
+	},
+	{
 		// 归「双平台」那一组：这一票动的是**播放条上那些控件的颜色与反馈**
 		// （悬停、圆角、倍速浮层、音量浮层、两枚图形的区别）。
 		//
@@ -2752,7 +2790,7 @@ var Items = []Item{
 		// 报错**，界面只是「不好用」。
 		Category: Platform,
 		// 票 #244（UX 报告 §2 的 D1 / B5 / B6 / E1 / E2）。
-		Spec: "布局一批：设置页每一行的说明和控件之间**不空着几百像素**；迷你窗的音量滑块**有悬停提示**（而且那枚提示**看得见**）；「全部播放」在两个页面上是**同一枚**（语义待裁决，这一票只统一画法）；列表里的**超长歌名不占满整行中段**；**深色下的封面有边**（不再和行的底色融成一片）",
+		Spec: "布局一批：设置页每一行的说明和控件之间**不空着几百像素**；迷你窗的音量滑块**有悬停提示**（而且那枚提示**看得见**）；「全部播放」在两个页面上是**同一枚**（画法统一；语义是票 #299 拍板的那一条）；列表里的**超长歌名不占满整行中段**；**深色下的封面有边**（不再和行的底色融成一片）",
 		Tests: []string{
 			// 设置页那一段空档（1200 / 900 两档窗口，量的是画面上的字迹）。
 			"TestTheSettingsRowsDoNotStretchAcrossTheWindow",
@@ -2792,6 +2830,34 @@ var Items = []Item{
 			// 那一枚里有一枚 18 的 ▶ 图标，而且它在字的**前面**（上游的
 			// `startContent`）。
 			"TestThePlayAllButtonHasThePlayIcon",
+		},
+	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：按了「全部播放」而正在放的那首
+		// 不换（用户以为按钮是死的）、或者把这一页的歌**换掉**了用户原来的队列
+		// （他正听着的那几首不见了）——**没有一样会报错**，界面只是「不按他
+		// 以为的那样」。
+		//
+		// 而这两枚入口（页级的「全部播放」、行级的「立即播放」）只差几个字，
+		// 做的事差着一个队列——所以它们各自叫什么、做什么，都得钉住。
+		Category: Play,
+		// 票 #299（2026-10-24 人定的）。
+		Spec: "「全部播放」= 把这一页的歌按顺序加进队列并播放（从这一页的第一首开始）；「立即播放」= 只放当前这一首",
+		Tests: []string{
+			// 队列里多了这一页的歌（**按顺序**）、旧的那几首还在、正在放的是
+			// 这一页的**第一首**（夹具是本地歌：在线的那些在无头环境里放不了，
+			// 而真网络是**真账号**）。
+			"TestThePlayAllButtonAppendsThePageAndStartsAtItsFirstSong",
+			// 应用层那一条：追加 + 从这一批的第一首开始播（队列里原来有的那几首
+			// 不动）。
+			"TestEnqueueAndPlayAppendsInOrderAndStartsAtTheFirst",
+			// 「立即播放」**只放当前这一首**：队列里只有它，正在放的是它。
+			"TestThePlayNowEntryPlaysOnlyThatSong",
+			// 菜单那一层：交给接线的是**只有这一首**，不是「从这一首往后」的那
+			// 一整段。
+			"TestChoosingPlayNowHandsOverJustThatSong",
+			// **两枚入口都在**（少建一项那一项就永远点不到）。
+			"TestBothPlayEntriesAreOnTheRowMenu",
 		},
 	},
 	{
