@@ -109,7 +109,10 @@ func likeArmed(a *app.App) bool {
 // ⚠️ **每帧只喂一次**，而且喂的就是**长按目标自己**报的那个 `Pressed()`。
 // 喂两次（一次 true 一次 false）会把这一按立刻取消掉：这一帧末尾那个 false
 // 看到的是「手指已经松开了」。
-func (s *Shell) trackLike(c *ui.Context, pressed, armed bool) float32 {
+//
+// ⚠️ **它管的是「按着没有」和「什么时候发三连」，环画到哪是**画的时候**算的**
+// （`likeRingProgress`）——理由见那一段（局部重绘不重建，票 #392）。
+func (s *Shell) trackLike(c *ui.Context, pressed, armed bool) {
 	g := &s.like
 	now := s.clock.Now()
 
@@ -152,11 +155,18 @@ func (s *Shell) trackLike(c *ui.Context, pressed, armed bool) float32 {
 
 	// ⚠️ **按住的时候必须一直要帧**：指针不动时框架不会自己出帧，于是进度环
 	// 停在 0、那 2.5 秒也永远不会到（不报错、不崩溃，就是长按没反应）。
-	// `AnimationFrame` 是框架自己的那一条（`Loop` / `Animate` 用的也是它）。
-	if armed && pressed {
+	//
+	// ⚠️ **但只有「环还没出来」的那一段要靠重建**（`c.AnimationFrame()`）：
+	// 环那个元素此刻还不存在，于是**没有东西能去要「只重画」的那一帧**——
+	// 而局部重绘那一帧**不重建**（`mygo/ui/runtime.go` 的 `repaintFrame`），
+	// 靠它量不到「按了多久」。
+	//
+	// 环出来之后（`g.progress > 0`）就换成**画的时候**要帧
+	// （`likeRingProgress` 里的 `p.AnimationFrame()`），那一段走的是局部
+	// 重绘：整棵元素树不必每一帧重建一遍（票 #392）。
+	if armed && pressed && g.progress <= 0 {
 		c.AnimationFrame()
 	}
-	return g.progress
 }
 
 // swallowClick 消费掉长按之后补发的那一次 click。返回 true = 这一次要吞掉。
@@ -232,9 +242,14 @@ func tripleSaysWhatHappened(res bili.TripleResult) string {
 // ⚠️ 环是**封面外面**的一圈（Biu 的 `inset: -2px`），所以它摆成铺满封面的一层
 // `Absolute`，画的时候把半径往外推一点。它 `PassThrough`：环自己不接指针——
 // 否则指针停在环上时报的是「停在空气上」，悬停那一层（⤢）就不亮了。
+//
+// ⚠️ **环画到哪是**画的时候**算的**（`likeRingProgress`），而「环这个元素要不要
+// 建」是**建的时候**看的（`s.like.progress`）——那一段（按住的头 500ms）还没有
+// 环可画，只能靠重建（见 `trackLike` 那一段）。
 func (s *Shell) viewLikeRing(c *ui.Context, pressed bool) {
-	progress := s.trackLike(c, pressed, likeArmed(s.app))
-	if progress <= 0 {
+	armed := likeArmed(s.app)
+	s.trackLike(c, pressed, armed)
+	if s.like.progress <= 0 {
 		return
 	}
 	ring := ui.Box(c).Key("like-ring").
@@ -242,8 +257,53 @@ func (s *Shell) viewLikeRing(c *ui.Context, pressed bool) {
 		PassThrough().
 		Role(ui.RoleProgress).Label("点赞进度")
 	ring.Draw(func(p *ui.Painter, r ui.Rect) {
-		p.StrokePolyline(s.ringPoints(r, progress), likeRingWidth, c.Theme().Accent)
+		progress := s.likeRingProgress(armed)
+		if progress <= 0 {
+			// 三连刚发出去（或者这一段本来就不画）：环收掉。
+			//
+			// ⚠️ **这一帧不再要下一帧**：环已经没有了，而三连那一趟是后台
+			// 线程在跑（`App.TripleLike` 自己起 goroutine），它回来时会叫醒
+			// 界面（铁律三）。
+			return
+		}
+		p.StrokePolyline(s.ringPoints(r, progress), likeRingWidth, p.Theme().Accent)
+		// 环在动 → 要下一帧。而那一帧走的是**局部重绘**
+		// （`p.AnimationFrame()`，不是 `c.AnimationFrame()`）：环是画出来的，
+		// 而局部重绘那一帧**只重画、不重建整棵元素树**（票 #392）。
+		p.AnimationFrame()
 	})
+}
+
+// likeRingProgress 是环走到哪（0~1），0 = 不画。
+//
+// ⚠️ **它是在画的时候算的**（`viewLikeRing` 的 `Draw` 回调里），不是建的时候：
+// 环走的是**局部重绘**（`p.AnimationFrame()`），而局部重绘那一帧**不重建**
+// ——建的时候算出来的进度会被**冻结**在闭包里，环于是不走了（票 #392）。
+//
+// ⚠️ **用的是 `s.clock` 那只钟，不是 `p.Now()`**：这一段的判据是「按了多久到
+// 了 2500ms」——那是一个**绝对**的时刻，而 `p.Now()` 是这一帧的显示时刻，
+// 比墙钟早一帧（十几毫秒）。用早一点的时刻判「到没到 2500ms」会让三连晚
+// 触发一点，而 Biu 那三个数（500 / 2500 / 2s）是死的。
+//
+// ⚠️ **三连也是在这里发出去的**（而不是等到下一次重建）：局部重绘那一帧**不
+// 重建**，而「按了多久」只有这一层知道——等下一次重建才发现就晚了。
+func (s *Shell) likeRingProgress(armed bool) float32 {
+	g := &s.like
+	if !g.held {
+		return 0
+	}
+	held := s.clock.Now().Sub(g.start)
+	if armed && !g.fired && held >= likeLongPress {
+		// 到点了（同 `trackLike` 那一支）：Biu 那边这一帧把进度环收掉
+		// （`setIsProgressing(false)`）并把补发的那一次 click 标成要吞的
+		// （`ignoreNextPressRef = true`）。
+		g.fired, g.swallow = true, true
+		s.tripleNow()
+	}
+	if !armed || g.fired || held <= likeRingDelay {
+		return 0
+	}
+	return min(float32(held-likeRingDelay)/float32(likeRingSpan), 1)
 }
 
 // ringPoints 算出这一帧进度环的那些点。

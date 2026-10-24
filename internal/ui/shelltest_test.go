@@ -209,7 +209,11 @@ func newTestShell(t *testing.T, opts ...shellOpt) *testShell {
 	// 那一份「窗口看不看得见」是包级的（`hover.frameVisible`），而 `withView`
 	// 可以绕过 `Shell.View` 单独画一块——那样它就不会被每帧重设，于是上一条
 	// 测试留下的「看不见」会漏进这一条。每条测试都从「看得见」开始。
-	hover.SetFrameVisible(true)
+	//
+	// ⚠️ **装的是一个新开关，不是改外壳那一个**：外壳那一个（`s.visible`）要等
+	// 外壳建好之后才拿得到，而这里是在建外壳**之前**。而「上一条测试留下的
+	// 看不见」正是要挡的那件事——换一个新的、看得见的，等于把它抹掉。
+	hover.SetVisibleFlag(hover.NewVisibleFlag())
 	if sp.migration != nil {
 		migration.mu.Lock()
 		migration.r = *sp.migration

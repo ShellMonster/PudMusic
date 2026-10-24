@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -52,6 +53,14 @@ type Shell struct {
 	// 窗口自己的生命周期回调改它；`wake.invalidate` 拿它决定这一帧要不要画；
 	// `View` 拿它决定这一帧的逐帧动画要不要继续要下一帧。
 	presence windowPresence
+
+	// visible 是「这一扇窗看不看得见」那一个**活的**开关，给「每帧都要一帧」
+	// 的动画用（波形那一格，见 `hover.SetVisibleFlag`）。
+	//
+	// ⚠️ **它逐窗口一份**：主窗口失焦不等于迷你播放器看不见（见 presence.go）。
+	// ⚠️ **它是活的**：波形在**画的时候**读它（那一帧只重画、不重建，票 #392），
+	// 所以窗口失焦的那一刻就得改它——`noteWindow` 那条路改的就是它。
+	visible *atomic.Bool
 
 	// snapScroll 是「这一帧是从看不见恢复过来的那一帧」，snapAt 是它的时刻。
 	//
@@ -1000,6 +1009,9 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 		// 「看得见」的默认值（见 newWindowPresence）：无头 Tester 没有窗口，
 		// 还没建出窗口的那段启动路径也一样——它们都得照常画动画。
 		presence: newWindowPresence(),
+		// 「这一扇窗看不看得见」那一个**活的**开关（见上面那个字段的注释）。
+		// 零值必须是「看得见」——理由同 `presence` 那两句。
+		visible: hover.NewVisibleFlag(),
 	}
 	// 唤醒句柄问的是**这个外壳**的可见性（wake.go 的规则三）。
 	s.wake.seen = s.presence.seen
@@ -1411,14 +1423,19 @@ func (s *Shell) View(c *ui.Context) {
 	s.wake.set(c)
 
 	// 这一帧的窗口看不看得见，交给「每帧都要一帧」的动画自己去判断（见
-	// hover.SetFrameVisible 的注释）。**必须在 draw 之前**：波形是在 draw 里
-	// 建出来的，而它在建的那一刻就要知道这一帧要不要再要一帧。
+	// hover.SetVisibleFlag 的注释）。**必须在 draw 之前**：波形是在 draw 里
+	// 建出来的，而它建的那一刻就要认下这一扇窗的那一个开关。
 	//
 	// ⚠️ 这一句挡的是「自发动画」，不挡「有人在要帧」：看不见的时候之所以
 	// 没有帧，是因为 `wakeHandle.invalidate` 不进来了；万一有别的路径送进来
 	// 一帧（比如本地库扫完那一支直接调 `Services.Invalidate`），这一帧照样
 	// 画得出来，只是它**不会再要下一帧**。两处合起来才停得下来。
-	hover.SetFrameVisible(s.presence.seen())
+	//
+	// ⚠️ **顺带把答案刷成此刻的**：那个开关是**活的**（波形在画的时候读它），
+	// 而可见性有可能是在两次 build 之间变的（`noteWindow` 那一条路也会改它，
+	// 但这里再刷一次是保险——`presence` 是唯一的事实来源）。
+	s.visible.Store(s.presence.seen())
+	hover.SetVisibleFlag(s.visible)
 
 	// 从看不见恢复过来的那一帧：让那些「有中间状态」的动画一次到位（见
 	// snapScroll 的注释：同一时刻的两遍 view 都算这一帧）。
