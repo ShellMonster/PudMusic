@@ -450,12 +450,24 @@ type dlRowKey struct{}
 
 // viewCell 画一格，外包一层 panic 兜底。
 //
-// 页级那道 Guard（`Shell.page`）兜的是**整页**：一格画崩了，用户看到的是整个
-// 下载记录页变成一张错误页，而出错的地方在一格进度条上。这一层只废掉那一格。
+// 🔴 **这一格自己兜住自己**：页级那道 Guard（`Shell.page`）兜的是**整页**——
+// 一格画崩了要是冒到页级，用户看到的就是整个下载记录页变成一张错误页，而出错
+// 的地方只是一格封面。所以崩了只废掉那一格：那一格写「画不出来」，别的格子
+// 照画，整页照常。
+//
+// ⚠️ **越界也是「这一格画不出来」**：这一格的身份是「行 id + 列号」，而越界的
+// 时候没有行 id 可用——所以直接画占位，不记 `failed`（没有 id 可记）。这里
+// **不许崩**：崩了就是整页变成错误页，那正是这一格要防的那件事（表格是按
+// `len(d.rows)` 建的，所以这一支不该走到；`d.state.Key` / `d.state.Label`
+// 那两处也各自判了一次，理由一样）。
 func (d *downloadsPage) viewCell(c *ui.Context, s *Shell, row, col int) {
+	if row < 0 || row >= len(d.rows) {
+		dlBrokenCellText(c)
+		return
+	}
 	id := fmt.Sprintf("%s#%d", d.rows[row].ID, col)
 	if d.failed[id] {
-		ui.Text(c, "画不出来").FontSize(scale.Font(c, scale.Size11)).TextColor(c.Theme().TextMuted)
+		dlBrokenCellText(c)
 		return
 	}
 	defer func() {
@@ -465,9 +477,26 @@ func (d *downloadsPage) viewCell(c *ui.Context, s *Shell, row, col int) {
 			}
 			d.failed[id] = true
 			log.Printf("biu: 下载记录的一格画崩了（%s）：%v\n%s", id, rec, debug.Stack())
+			// 🔴 **崩了要再要一帧**：recover 接住的是 build pass **中间**，那一格
+			// 剩下的部分没建（封面那一格是个空盒子），画出来是半张。下一帧那一格
+			// 才画得出「画不出来」——而界面是**按需绘制**的：没人要帧，那一格就
+			// 一直空着，用户看到的是一个空框而不是「画不出来」。
+			//
+			// ⚠️ **下一帧不会自己来**：MyGo 一帧只跑一遍 view（除非这一帧里有
+			// 事件改了状态，见 mygo 的 `runtime.go` 那个 pass 循环），所以光靠
+			// 「下一遍会从头重建」是不够的——得有人要那一帧。和 `Shell.onPanic`
+			// 补 Invalidate 是同一个道理（那一处是整页版，这一处是格子版）。
+			s.wake.invalidate()
 		}
 	}()
 	d.drawCell(c, s, row, col)
+}
+
+// dlBrokenCellText 是「这一格画不出来」那一行字。
+//
+// 单独立一个：崩过的那一格和下标越界的那一格画的是同一句话（见 `viewCell`）。
+func dlBrokenCellText(c *ui.Context) {
+	ui.Text(c, "画不出来").FontSize(scale.Font(c, scale.Size11)).TextColor(c.Theme().TextMuted)
 }
 
 // drawCell 是真的画一格。

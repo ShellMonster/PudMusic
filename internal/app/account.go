@@ -129,6 +129,16 @@ type Account struct {
 	// 留的是一个回调，而不是直接去调收藏夹那一摊——那样这一层就得知道
 	// 「收藏夹那一摊挂上没有」，而它挂不挂跟登录一点关系都没有。
 	onLogin func()
+
+	// onAccountChanged 是「登录态**换人**了」那一下要通知出去的那一个。
+	//
+	// ⚠️ **它和 onLogin 是两件事**：onLogin 每次登录成功都调（第一次登录
+	// 也是），而这一下**只在换人时**调——侧栏那两组收藏夹是**上一个账号**的，
+	// 得作废（见 `App.onAccountChanged`）。
+	//
+	// ⚠️ **退登不走这里**：退登是「登录态没了」，它有自己那条路（见
+	// `App.Logout`），而那两条路在应用层汇到同一个钩子上。
+	onAccountChanged func()
 }
 
 // newAccount 建一个登录管理器。
@@ -208,6 +218,8 @@ func (a *App) MountLogin(store Store, cli *bili.Client) {
 	// ⚠️ **这个回调是在登录成功的那一刻才调的**，而收藏夹那一摊（`MountCollections`）
 	// 在生产上是**后**挂的——没关系：回调调的是运行期的事，不是挂载期的事。
 	acc.onLogin = a.onLoginSucceeded
+	// 换人登录要走的那条路（见 `App.onAccountChanged`）。
+	acc.onAccountChanged = a.onAccountChanged
 	a.account = acc
 
 	if err := acc.restore(cli); err != nil {
@@ -222,6 +234,29 @@ func (a *App) MountLogin(store Store, cli *bili.Client) {
 // 会被当成「我没有收藏夹」。
 func (a *App) onLoginSucceeded() {
 	a.AutoRefreshFavorites()
+}
+
+// onAccountChanged 是「登录态换人了（或没了）」那一下。
+//
+// # 两处走它，而它们要做的是同一件事
+//
+//   - **退登**（`App.Logout`）：登录态没了。
+//   - **换账号**：已登录时再扫一次码，登录成**另一个账号**
+//     （`Account.finish` → `notifyAccountChanged`）。
+//
+// 侧栏那两组收藏夹是**上一个账号**的：退登之后还摆着，换人登录那几秒里新
+// 用户看到的就是别人的收藏夹名。所以这一下把它们整个作废（见
+// `Favorites.forgetAccount`）。
+//
+// ⚠️ **退登那条路早就是对的**（issue #96 起就有），而**换账号那条路漏了**——
+// 漏掉的后果是「上一个账号的收藏夹被填回侧栏，而新账号的那一趟一个请求都不发」
+// （issue #398）。
+//
+// ⚠️ **要叫醒界面**：即时模式是按需绘制，只改状态不唤醒的话，界面上还摆着上一个
+// 账号的收藏夹，直到下一件别的事把它画出来。
+func (a *App) onAccountChanged() {
+	a.FavoritesOf().forgetAccount()
+	a.wakeUI()
 }
 
 // wakeLocked 取当前装的唤醒回调。
@@ -424,8 +459,8 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult,
 	if !res.LoggedInAt.IsZero() {
 		sess.SavedAt = res.LoggedInAt
 	}
-	// IssuedCookies 已经只包含 B 站自己主机上下发的那一批（见 session.go
-	// 里 isBilibiliHost 的注释：按 cookie 自己的域过滤会把登录凭据滤掉）。
+	// IssuedCookies 已经只包含 B 站自己主机上下发的那一批（见 `bili` 包
+	// session.go 里 isOwnHost 的注释：按 cookie 自己的域过滤会把登录凭据滤掉）。
 	// 这里全都收下——SESSDATA / bili_jct / DedeUserID 三个都在里面，
 	// 少一个都会让「登录成功之后第一个要用的接口」失败。
 	for _, c := range a.cli.IssuedCookies() {
@@ -441,6 +476,11 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult,
 		a.fail(id, "扫码成功了，但没有拿到登录凭据")
 		return
 	}
+
+	// ⚠️ **旧的那份登录态先拿住**：这一趟成功之后要拿它比一比——「换人了没有」
+	// （见 `accountChanged`）。换人了的话，侧栏那两组收藏夹是**上一个账号**的，
+	// 得在拉新账号的那一趟**之前**作废掉（见 `App.onAccountChanged`）。
+	prev := a.mgr.Current()
 
 	err := lease.Commit(ctx, func(cur *Session) error {
 		*cur = sess
@@ -460,6 +500,7 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult,
 		// 界面上那一行「凭据后端不可用，登录态关掉应用就没了」就是干这个的。
 		log.Printf("biu: 这次登录没能存下来，先只在内存里用着：%v", err)
 		a.mgr.Adopt(sess)
+		a.notifyAccountChanged(prev, sess)
 		a.setStateFor(id, LoginState{
 			Phase: LoginDone,
 			Hint:  "登录成功（这次没能存下来，关掉应用要重新登录）",
@@ -469,6 +510,7 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult,
 	case err != nil:
 		a.fail(id, "保存登录态失败："+err.Error())
 	default:
+		a.notifyAccountChanged(prev, sess)
 		a.setStateFor(id, LoginState{Phase: LoginDone, Hint: "登录成功", LoggedIn: true})
 		a.notifyLogin()
 	}
@@ -488,6 +530,41 @@ func (a *Account) notifyLogin() {
 	if fn != nil {
 		fn()
 	}
+}
+
+// notifyAccountChanged 告诉应用层「登录态换人了」。
+//
+// ⚠️ **判空**：没装回调时什么都不做（`MountLogin` 装上，但别的路径可能没有）。
+func (a *Account) notifyAccountChanged(prev, next Session) {
+	if !accountChanged(prev, next) {
+		return
+	}
+	log.Printf("biu: 登录态换人了（uid %s → %s）", prev.DedeUserID, next.DedeUserID)
+	a.mu.Lock()
+	fn := a.onAccountChanged
+	a.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+// accountChanged 报「登录态换人了」。
+//
+// ⚠️ **身份是 uid（DedeUserID），不是 SESSDATA**：SESSDATA 每次登录都是新发的，
+// 拿它比的话「同一个账号重新扫一次码」也会被当成换人——而那会让侧栏那两组
+// 白清一遍又拉回来（用户看见的是收藏夹闪一下就没了）。
+//
+// ⚠️ **之前没登录不算换人**：那是「第一次登录」，侧栏上本来就没有上一个账号的
+// 东西，清它没有意义（清了就得多拉一趟，白费一次往返）。
+//
+// ⚠️ **旧的那份没有 uid 时按「换了」算**：那种登录态拉不了收藏夹（接口问的是
+// `up_mid`，从 cookie 里读），所以侧栏上本来就没有它的东西；而新账号是有 uid 的
+// ——宁可多清一次，也不能把上一个账号的留在那儿。
+func accountChanged(prev, next Session) bool {
+	if !prev.LoggedIn() {
+		return false
+	}
+	return prev.DedeUserID != next.DedeUserID
 }
 
 // Logout 退出登录。
@@ -516,10 +593,13 @@ func (a *App) Logout() error {
 	if rep != nil {
 		rep.stopAccount()
 	}
-	// 🔴 **侧栏那两组收藏夹也清掉**（见 `Favorites.clear` 的注释）：它们是
+	// 🔴 **侧栏那两组收藏夹也作废**（见 `onAccountChanged`）：它们是
 	// **上一个账号**的。退登之后还摆着的话，换人登录那几秒里新用户看到的是
 	// 别人的收藏夹名。
-	a.FavoritesOf().clear()
+	//
+	// ⚠️ **退登和换账号走的是同一条路**：换账号那条路早先漏了，而漏掉的后果是
+	// 「旧账号的收藏夹被填回侧栏，新账号的还一个请求都不发」（issue #398）。
+	a.onAccountChanged()
 	return err
 }
 
