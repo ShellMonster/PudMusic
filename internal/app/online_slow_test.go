@@ -1,0 +1,546 @@
+package app_test
+
+import (
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+)
+
+// 这一组是票 #220 的回归：「取流非常慢」和「一直转圈」这两件事。
+//
+// # 复现的是什么
+//
+// 用户实测（2026-10-24）：「我感觉取流非常慢，有时候点到什么歌一直在加载取流」。
+//
+// 那一票把取流这一趟拆成三段来量：
+//
+//	① 问 playurl 拿地址	一次带 WBI 签名的接口往返
+//	② 下载首段字节		CDN 那边给头几个字节
+//	③ 解码第一帧		这一台机器的解码器开这条流
+//
+// 而查出来的病根是**判据错了**：下载那一段等的是**一条持续的下载**，不是
+// 「一次往返」——而闹钟量的是「这一段**一共**等了多久」。于是：
+//
+//	一条慢而**一直在走**的流	20 秒后被掐掉 → 「取流超时了」，而歌明明下得好好的
+//	一个字节都不来的流	转圈转到 20 秒才停 → 「一直转圈」
+//
+// 改之后的判据是「**这一段还有没有进展**」：还在走就接着等（界面上说「取流
+// 很慢」并说清卡在哪一步），一个字节都不来才按失败处理。
+
+// slowCDN 是一台「先给一点点、然后卡住等放行」的 CDN。
+//
+// ⚠️ **它模拟的是「网络慢但没断」**——用户抱怨的正是这个：慢不是错，
+// 而把慢当成错（20 秒就掐掉）才是错。
+//
+// ⚠️ **头一点点要「少到解码器开不起来」**：解码器的嗅探要 16 个字节
+// （MyGo 的 `NewDecoder`），而它开不起来，这一趟才**停在这一段**
+// （「下音频」）里——不然这一段两毫秒就过去了，测试根本来不及看。
+//
+// arrived 是「真的开始给字节了」的信号；release 是「放行剩下的字节」。
+func slowCDN(data []byte, first int, arrived chan struct{}, release chan struct{}) http.HandlerFunc {
+	var once sync.Once
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		if _, err := w.Write(data[:first]); err != nil {
+			return
+		}
+		if fl != nil {
+			fl.Flush()
+		}
+		once.Do(func() { close(arrived) })
+		// 卡住，等测试放行。
+		<-release
+		if _, err := w.Write(data[first:]); err != nil {
+			return
+		}
+		if fl != nil {
+			fl.Flush()
+		}
+	}
+}
+
+// downloadedBytes 报「字节源已经下到多少字节」。
+//
+// ⚠️ **它看的是那个临时文件**：字节源把收到的字节写进 `TempDir` 里的
+// `biu-stream-*`（见 `audio.NewStreamSource`），而 `WriteAt` 在偏移处写会
+// **把文件撑大**——所以文件大小就是「已经下到的字节数」。
+//
+// 为什么测试要绕这一圈：CDN 那头「已经开始给字节」和「客户端已经收到
+// 字节」之间**有一步之差**（服务器写完 → 传输层 → 客户端读走 → 落盘）。
+// 而「这一段有没有进展」判的是**落盘**那一步——所以测试必须等落盘，
+// 等服务器的信号会差那么一点点（而那一点点正好够判成「没进展」）。
+func downloadedBytes(t *testing.T, dir string) int64 {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	var total int64
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.Size() > total {
+			total = info.Size()
+		}
+	}
+	return total
+}
+
+// TestASlowButProgressingStreamIsNotKilled 盯「慢但在走的流不许被掐掉」。
+//
+// 🔴 **这是这一票最要紧的一条**：改之前那个 20 秒的闹钟量的是「这一段一共
+// 等了多久」，而下载那一段等的是**一条持续的下载**——一条 30 秒才下完的
+// 慢流会被 20 秒的闹钟判成失败，用户看到的是「取流超时了」，而歌本来
+// 好好的。
+//
+// 改之后判据是「**这一段还有没有进展**」：还在走就接着等。
+func TestASlowButProgressingStreamIsNotKilled(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = readFlac(t)
+	dir := t.TempDir()
+	arrived := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
+	// 🔴 **只给 12 个字节**：解码器的嗅探要 16 个（MyGo 的 `NewDecoder`），
+	// 所以这一趟**开不起来**——它停在「下音频」这一段里，测试才看得见。
+	f.on("/cdn/slow.m4s", slowCDN(f.media, 12, arrived, release))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "slow.m4s", 2*time.Hour),
+		int(bili.QualityHigh192), 110836))
+
+	a := newOnlineApp(t, f, dir)
+	clock := &fakeClock{}
+	a.SetAfterForTest(clock.after)
+
+	if err := a.Enqueue(onlineItem("BV1", "1", "慢慢下的那一首")); err != nil {
+		t.Fatal(err)
+	}
+
+	// 一、**这一段确实在走**：字节已经落到缓存文件里了。
+	waitFor(t, 15*time.Second, "字节源收到字节了", func() bool {
+		return downloadedBytes(t, dir) > 0
+	})
+	waitFor(t, 15*time.Second, "状态里说在取流", func() bool {
+		return a.Snapshot().Loading
+	})
+
+	// 二、🔴 **「慢」那一档在 5 秒就该说话了**：用户抱怨的就是「慢到没有
+	// 一句话说」——光是「不判它失败」不够，用户还是不知道该等还是该换歌。
+	clock.fireAt(app.LoadSlowAfter)
+	waitFor(t, 15*time.Second, "界面上说「慢」", func() bool {
+		return a.Snapshot().LoadingSlow
+	})
+	if st := a.Snapshot(); st.LoadingStage == "" {
+		t.Error("不知道卡在哪一步——用户分不出「问地址问不动」和「音频下不来」")
+	}
+
+	// 三、**超时的闹钟响了**（假钟点火 = 「20 秒到了」）。
+	clock.fireAt(app.LoadPlayTimeout)
+
+	// 四、🔴 **关键**：这一段还在走 → 不许判它失败。
+	waitFor(t, 15*time.Second, "下载还在走", func() bool {
+		return a.Snapshot().Loading
+	})
+	st := a.Snapshot()
+	if st.Err != "" {
+		t.Fatalf("一条还在好好下的流被判成了失败：%q（%q）", st.Err, st.ErrDetail)
+	}
+	// 🔴 **「慢」那一档不许被重新起算弄丢**：用户等的是同一段。
+	if !st.LoadingSlow {
+		t.Error("重新起算之后「慢」那一档没了——用户看到的话又变回「正在取流」")
+	}
+
+	// 五、**最后它真的放出来了**：掐掉「不判失败」不算修好。
+	close(release)
+	playing(t, a, "慢慢下的那一首")
+}
+
+// TestAStuckStreamStopsTheSpinner 盯「一个字节都不来的流要停下来」。
+//
+// 🔴 **这一条是「一直转圈」那半边**：闹钟响了而这一段**没有进展**，那就
+// 按失败处理——转圈停，一句能看懂的话上屏。
+//
+// ⚠️ **判据是「有没有进展」而不是「等了多久」**：所以这一条特意用一台
+// **一个字节都不给**的 CDN——那正是「卡死」的样子。
+func TestAStuckStreamStopsTheSpinner(t *testing.T) {
+	f := newStreamFixture(t)
+	arrived := make(chan struct{})
+	f.on("/cdn/hang.m4s", hangingCDN(arrived))
+	f.onPlayURL(dashFor(cdnURL(f.URL, "hang.m4s", 2*time.Hour),
+		int(bili.QualityHigh192), 110836))
+
+	a := newOnlineApp(t, f, t.TempDir())
+	clock := &fakeClock{}
+	a.SetAfterForTest(clock.after)
+
+	if err := a.Enqueue(onlineItem("BV1", "1", "卡住的那一首")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-arrived:
+	case <-time.After(30 * time.Second):
+		t.Fatal("取流一直没到 CDN：这一条测的不是「流卡住了」")
+	}
+	waitFor(t, 15*time.Second, "状态里说在取流", func() bool {
+		return a.Snapshot().Loading
+	})
+
+	clock.fire()
+
+	waitFor(t, 15*time.Second, "卡住之后有一句话", func() bool {
+		return a.Snapshot().Err != ""
+	})
+	st := a.Snapshot()
+	// 🔴 **转圈必须停**——这一条是这一票的验收项。
+	if st.Loading {
+		t.Error("卡住之后还在转圈——那还是「一直转圈」")
+	}
+	if !strings.Contains(st.Err, "超时") {
+		t.Errorf("话里没有说清是超时：%q", st.Err)
+	}
+	// 🔴 **话要说清是「下载」那一段**：用户面对的是「网络断了」还是
+	// 「B 站不给地址」，要做的下一件事完全不同。
+	if !strings.Contains(st.ErrDetail, "音频") {
+		t.Errorf("详情里没有说清是哪一段：%q", st.ErrDetail)
+	}
+	// 网络问题是可以再试一次的。
+	if !st.CanRetry {
+		t.Error("下载卡死是可以再试一次的（网络问题），界面上却没有「重试」那一枚键")
+	}
+}
+
+// TestTheRiskControlDoesNotTurnIntoAWait 盯「风控 / 限流不会变成一直等」。
+//
+// ⚠️ **「不可重试」说的是没有「重试」键，界面上的转圈停不停是另一件事**
+// （票 #346 判的是前者，这一票查的是后者）。
+//
+// B 站回 -509（限流）的时候，应用必须**立刻**给一句人话并且把转圈收掉——
+// 而不是「再等等看」：-509 要等的是时间，等下去也是撞同一面墙。
+func TestTheRiskControlDoesNotTurnIntoAWait(t *testing.T) {
+	f := newStreamFixture(t)
+	f.on("/x/player/wbi/playurl", func(w http.ResponseWriter, r *http.Request) {
+		writeStreamJSON(w, map[string]any{"code": -509, "message": "请求过于频繁", "ttl": 1})
+	})
+
+	a := newOnlineApp(t, f, t.TempDir())
+	if err := a.Enqueue(onlineItem("BV1", "1", "被限流的那一首")); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFor(t, 15*time.Second, "限流报出来了", func() bool {
+		return a.Snapshot().Err != ""
+	})
+	st := a.Snapshot()
+	if st.Loading {
+		t.Error("限流之后还在转圈——风控变成了一场没有尽头的等待")
+	}
+	if !strings.Contains(st.Err, "太快") {
+		t.Errorf("话里没有说清是被限流：%q", st.Err)
+	}
+	// ⚠️ **不给「重试」**：那一枚是**立刻**再问一次，而限流要等的是时间。
+	if st.CanRetry {
+		t.Error("限流给了「重试」那一枚键——按下去就是再撞一次墙")
+	}
+}
+
+// TestTheThreeSegmentsAreWrittenDown 盯「分段耗时写进日志」。
+//
+// 🔴 **它是「先量再改」的那一半**：没有这三段，谁也说不清慢的是哪一段。
+// 而日志是**事后**唯一的凭据——用户能描述的只有「它不响」（票 #282）。
+func TestTheThreeSegmentsAreWrittenDown(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = readFlac(t)
+	f.onPlayURL(dashFor(cdnURL(f.URL, "x.m4s", 2*time.Hour),
+		int(bili.QualityHigh192), 110836))
+
+	a := newOnlineApp(t, f, t.TempDir())
+	lines, restore := app.CapturePlayLog(a)
+	t.Cleanup(restore)
+
+	if err := a.Enqueue(onlineItem("BV1", "1", "量一量的那一首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "量一量的那一首")
+
+	waitFor(t, 15*time.Second, "日志里写了分段耗时", func() bool {
+		return strings.Contains(strings.Join(*lines, "\n"), "取流分段耗时")
+	})
+	joined := strings.Join(*lines, "\n")
+	// 🔴 **三段都要在**：缺一段就答不出「慢的是哪一段」。
+	for _, want := range []string{"① 问地址", "② 下音频", "③ 解码"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("日志里没有 %q：\n%s", want, joined)
+		}
+	}
+	if !strings.Contains(joined, "量一量的那一首") {
+		t.Errorf("日志里没写是哪一首：\n%s", joined)
+	}
+}
+
+// TestBothStreamPathsShareOneTimeoutPolicy 盯**两条取流路径是同一套口径**
+// （票 #220 的验收项）。
+//
+// 投稿那一路（`/x/player/wbi/playurl`）和音乐库那一路（`sid`）问的是两个
+// 接口，但**超时这件事上它们必须一样**：
+//
+//	问地址	同一个 `bili.Client`，同一个 10 秒请求超时
+//	下音频	同一个字节源，同一个 20 秒卡死判定
+//
+// 这一条盯的是**应用这一层**：两条路走的是**同一段代码**（`streamFor` 按
+// 类型分派，之后一模一样），所以判据必然一致——而这一条钉住「将来别把
+// 它们分家」。
+//
+// ⚠️ **它盯的是「音乐库那一路也要问一次元信息」**：那一路比投稿多一次
+// 网络往返（`withSongInfo`），所以它的「问地址」那段可能更长——但**上限
+// 一样**，而且**元信息问不到不许挡住播放**（那是「锦上添花」）。
+func TestBothStreamPathsShareOneTimeoutPolicy(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = readFlac(t)
+	// 音乐库那一路：取流接口给一条流，**元信息那一趟挂掉**。
+	f.musicCDN = cdnURL(f.URL, "music.m4a", 2*time.Hour)
+	f.on("/audio/music-service-c/web/song/info", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "这一趟挂了", http.StatusBadGateway)
+	})
+
+	a := newOnlineApp(t, f, t.TempDir())
+	if err := a.Enqueue(app.Item{Source: "online", Type: "audio", Sid: "1293494",
+		Title: "音乐库那一首"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 🔴 **元信息问不到不许挡住播放**：问不到就少一个作者名。
+	playing(t, a, "音乐库那一首")
+	st := a.Snapshot()
+	if st.Err != "" {
+		t.Errorf("音乐库那一首没放起来：%q", st.Err)
+	}
+}
+
+// gatedCDN 是一台「先给前 n 个字节、然后卡住等放行」的 CDN。
+//
+// 🔴 **它卡住的位置是「文件还没下完」**：测试要靠它把「文件没下完」和
+// 「解码器开好了」这两件事分开——而这两件事在 moov 在不在末尾时**完全相反**。
+func gatedCDN(data []byte, n int, arrived chan struct{}, release chan struct{}) http.HandlerFunc {
+	var once sync.Once
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		if n > len(data) {
+			n = len(data)
+		}
+		if _, err := w.Write(data[:n]); err != nil {
+			return
+		}
+		if fl != nil {
+			fl.Flush()
+		}
+		once.Do(func() { close(arrived) })
+		<-release
+		if _, err := w.Write(data[n:]); err != nil {
+			return
+		}
+		if fl != nil {
+			fl.Flush()
+		}
+	}
+}
+
+// TestTheDecoderWaitsForTheWholeFileWhenMoovIsAtTheEnd 钉住**「moov 在文件
+// 末尾」这件事的后果**（票 #220 的根因）。
+//
+// # 这一条钉的是什么
+//
+// 「点一首歌 → 出声」的第③段（解码第一帧）在 macOS 上是 `extaf` 开口那一段，
+// 而 AudioToolbox 探 MP4 容器时要**扫过所有顶层盒子**才能找到 `moov`——
+// `moov` 在文件末尾时，它得**扫到文件末尾**，于是第③段的耗时 = **整个文件
+// 下载完**的耗时。
+//
+// 本仓库自己的素材就是这个形状（`mfadec/testdata/aaclc-192k.m4a`，注释写着
+// 「按 B 站形状造的 MP4」）：`ftyp` / `free` / `mdat` / **`moov`（在末尾）**。
+//
+// # 为什么这一条必须是**夹具**而不是「真机测一下」
+//
+// 真机上的形状取决于 B 站给的那个文件是不是 faststart，而**本地夹具能把两种
+// 形状都造出来**——这才是能拿来做回归的东西。
+//
+// 🔴 **判据是「文件没下完的时候解码器开没开」**，不是「过了多少毫秒」：
+// 毫秒那一种判据在满载的机器上会飘（AGENTS.md §2），而这一种不会。
+func TestTheDecoderWaitsForTheWholeFileWhenMoovIsAtTheEnd(t *testing.T) {
+	moovAtEnd := readMP4(t, "stereo16.mp4")
+	moovAtFront := readMP4(t, "reference-24bit-mp4.m4a")
+
+	t.Run("moov 在末尾：文件没下完就不出声", func(t *testing.T) {
+		dir := t.TempDir()
+		f := newStreamFixture(t)
+		arrived := make(chan struct{})
+		release := make(chan struct{})
+		t.Cleanup(func() { close(release) })
+		// 只给 64 KB：moov 在 242156 字节处，所以**给不到**。
+		f.on("/cdn/x.m4s", gatedCDN(moovAtEnd, 64<<10, arrived, release))
+		f.onPlayURL(dashFor(cdnURL(f.URL, "x.m4s", 2*time.Hour),
+			int(bili.QualityHigh192), 110836))
+
+		a := newOnlineApp(t, f, dir)
+		if err := a.Enqueue(onlineItem("BV1", "1", "moov在末尾")); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-arrived:
+		case <-time.After(30 * time.Second):
+			t.Fatal("CDN 一直没开始给字节")
+		}
+		waitFor(t, 15*time.Second, "字节源开始收字节", func() bool {
+			return downloadedBytes(t, dir) > 0
+		})
+		// 🔴 **关键**：文件才下了一小部分，而**播放器还没装上**——
+		// 解码器在等那个还在文件末尾的 `moov`。
+		time.Sleep(300 * time.Millisecond)
+		st := a.Snapshot()
+		if st.HasTrack {
+			t.Error("文件才下了一小部分就出声了——这一条钉的是「moov 在末尾时要等整个文件」")
+		}
+		if !st.Loading {
+			t.Error("还没出声就不在「正在取流」了——界面上会是一句空白")
+		}
+	})
+
+	t.Run("moov 在开头：文件没下完也能出声", func(t *testing.T) {
+		dir := t.TempDir()
+		f := newStreamFixture(t)
+		arrived := make(chan struct{})
+		release := make(chan struct{})
+		t.Cleanup(func() { close(release) })
+		f.on("/cdn/x.m4s", gatedCDN(moovAtFront, 64<<10, arrived, release))
+		f.onPlayURL(dashFor(cdnURL(f.URL, "x.m4s", 2*time.Hour),
+			int(bili.QualityHigh192), 110836))
+
+		a := newOnlineApp(t, f, dir)
+		if err := a.Enqueue(onlineItem("BV1", "1", "moov在开头")); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-arrived:
+		case <-time.After(30 * time.Second):
+			t.Fatal("CDN 一直没开始给字节")
+		}
+		// 🔴 **对照的那一半**：moov 在开头，64 KB 就够解码器开口了——
+		// 于是**文件没下完它也出声了**。
+		playing(t, a, "moov在开头")
+	})
+}
+
+// readMP4 读一份 MP4 素材。
+func readMP4(t *testing.T, name string) []byte {
+	t.Helper()
+	p := filepath.Join("..", "service", "audio", "flacdec", "testdata", name)
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Skipf("拿不到素材 %s：%v", name, err)
+	}
+	return b
+}
+
+// TestMeasureTheThreeSegments 是**量那三段**的工具（票 #220 的「先量再改」）。
+//
+// # 它量的是什么
+//
+// 「点一首歌 → 出声」的三段，在**同一台限速的假 CDN**上各占多少：
+//
+//	① 问地址	问 playurl 拿地址（一次接口往返）
+//	② 下音频	从建源到头几个字节落到缓存里
+//	③ 解码	从头几个字节到解码器把流开好（能出声了）
+//
+// # ⚠️ **它量的是本地夹具，不打真 B 站**（铁律）。
+//
+// 它量的是**代码这一侧的形状**：某一台机器上「下音频」和「解码」各占多少。
+// 真机上的绝对值取决于 B 站和用户的网络，而**相对关系**（③ 是不是等于整个
+// 下载时间）由容器形状决定——那个是夹具能测准的。
+//
+// # 怎么跑
+//
+//	BIU_MEASURE=1 go test ./internal/app/ -run TestMeasureTheThreeSegments -v
+//
+// 平时它**跳过**（`BIU_MEASURE` 没设）：它要跑好几秒，而它不是一条断言。
+func TestMeasureTheThreeSegments(t *testing.T) {
+	if os.Getenv("BIU_MEASURE") == "" {
+		t.Skip("设 BIU_MEASURE=1 才量（它要跑好几秒）")
+	}
+	cases := []struct {
+		name string
+		file string
+		rate int
+	}{
+		{"moov 在开头（faststart）", "reference-24bit-mp4.m4a", 200_000},
+		{"moov 在末尾", "stereo16.mp4", 200_000},
+		{"moov 在末尾 + 慢网（50KB/s）", "stereo16.mp4", 50_000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := readMP4(t, tc.file)
+			f := newStreamFixture(t)
+			f.on("/cdn/x.m4s", rateCDN(data, tc.rate))
+			f.onPlayURL(dashFor(cdnURL(f.URL, "x.m4s", 2*time.Hour),
+				int(bili.QualityHigh192), 110836))
+			a := newOnlineApp(t, f, t.TempDir())
+			lines, restore := app.CapturePlayLog(a)
+			t.Cleanup(restore)
+			if err := a.Enqueue(onlineItem("BV1", "1", tc.name)); err != nil {
+				t.Fatal(err)
+			}
+			playing(t, a, tc.name)
+			for _, l := range *lines {
+				if strings.Contains(l, "取流分段耗时") {
+					t.Logf("%s（%d 字节，%d 字节/秒）→ %s", tc.name, len(data), tc.rate, l)
+				}
+			}
+		})
+	}
+}
+
+// rateCDN 是一台「按固定速率给字节」的 CDN。
+//
+// 🔴 **它给的是「这一秒给多少字节」**：慢网的形状是「一直在走，只是走得慢」——
+// 而那正是「慢但在走」和「卡死了」的区别（见 `downloadProgressLocked`）。
+func rateCDN(data []byte, bytesPerSec int) http.HandlerFunc {
+	chunk := bytesPerSec / 20
+	if chunk < 1024 {
+		chunk = 1024
+	}
+	per := time.Duration(float64(time.Second) * float64(chunk) / float64(bytesPerSec))
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		for off := 0; off < len(data); off += chunk {
+			end := off + chunk
+			if end > len(data) {
+				end = len(data)
+			}
+			if _, err := w.Write(data[off:end]); err != nil {
+				return
+			}
+			if fl != nil {
+				fl.Flush()
+			}
+			time.Sleep(per)
+		}
+	}
+}

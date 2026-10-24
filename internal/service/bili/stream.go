@@ -108,8 +108,11 @@ type StreamRef struct {
 
 	// ExpiresAt 是地址的失效时刻。
 	//
-	// 两条取流路径的来源不一样：投稿那路从地址上的 `deadline` 读
-	// （`deadlineOf`），音乐库那路用接口给的 `timeout` 秒数（`songExpiry`）。
+	// 🔴 **两条取流路径用的是同一个口径**（票 #220）：见 `expiryOf`——
+	// 「地址上的 `deadline` 优先，否则用接口给的有效秒数，都没有就当成立刻
+	// 失效」。投稿那路（`deadlineOf`）和音乐库那路（`songExpiry`）走的是
+	// **同一个函数**，而音乐库那一路多一个「接口给的有效秒数」的分支
+	// （`timeout`，一般三小时）——因为**只有那个接口给这个字段**。
 	ExpiresAt time.Time
 
 	// Bvid / Cid 是这条流属于哪个稿件的哪一集。换流之后拿它们比对，
@@ -276,7 +279,9 @@ func refFrom(d *playurlData, bvid, cid string, pref AudioQuality) (*StreamRef, e
 		Bitrate:   s.Bandwidth,
 		Codecs:    s.Codecs,
 		Container: containerOf(s),
-		ExpiresAt: deadlineOf(urls[0]),
+		// 🔴 **和音乐库那一路同一个口径**（票 #220）：见 `expiryOf`。
+		// 投稿这一路的接口**不给**有效秒数，所以只有 `deadline` 那个分支。
+		ExpiresAt: expiryOf(urls, 0, time.Now()),
 		Bvid:      bvid,
 		Cid:       cid,
 	}
@@ -330,4 +335,33 @@ func deadlineOf(raw string) time.Time {
 		return time.Time{}
 	}
 	return time.Unix(sec, 0)
+}
+
+// expiryOf 算这组地址什么时候失效。**两条取流路径用的是同一个口径**
+// （票 #220）。
+//
+//	地址上带 `deadline`	用它——最准，那是 B 站给这条地址的失效时刻
+//	接口另给了有效秒数	用它——音乐库那一路（`timeout`，一般三小时）
+//	都没有		**当成立刻失效**
+//
+// ⚠️ **投稿那一路没有「接口给的有效秒数」**：它的返回里没有那个字段，
+// 所以它只有第一个和第三个分支。于是**投稿那一路拿不到 `deadline` 的地址会
+// 被当成立刻失效**——而那个后果是**保守的**（提前换流，而不是拿一条死地址
+// 放到歌播到一半）。
+//
+// ⚠️ **都没有时不当成「永不过期」**（理由同 `deadlineOf`）：误判成永不过期
+// 会让换流那几条路径一次都不跑，而那种症状（歌播到一半静默停住）比提前
+// 换流难查得多。
+//
+// now 是时钟：走 `Client.now`（和 WBI 签名同一个钟）是为了假时钟下算得准。
+func expiryOf(urls []string, timeout int, now time.Time) time.Time {
+	if len(urls) > 0 {
+		if d := deadlineOf(urls[0]); !d.IsZero() {
+			return d
+		}
+	}
+	if timeout <= 0 {
+		return time.Time{}
+	}
+	return now.Add(time.Duration(timeout) * time.Second)
 }

@@ -29,6 +29,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/audio"
@@ -57,19 +58,128 @@ var errStreamingMissing = errors.New("在线播放暂时用不了")
 //
 // # 🔴 **每一段都重新起算**，不是「从点下去起算 20 秒」
 //
-// 取流这一趟是**三段**串行的网络往返：
+// 取流这一趟是**几段**串行的网络往返：
 //
 //	问哪一集 / 补元信息	最多 10 秒（`bili.Client` 自己的超时）
 //	取流接口		最多 10 秒（同上）
-//	CDN 的头几个字节	最多 20 秒（字节源的卡死判定）
+//	CDN 的头几个字节 + 解码	**没有固定上限**（见下）
 //
 // 一次性的闹钟会把**前两段**的时间算进去：接口慢 10 秒（到顶）+ CDN 的头
 // 11 秒 = 21 秒，本来放得出来，却在一个 20 秒的闹钟上先响了。所以每一段
 // 结束都**重新起算**——判据是「**这一段**最多等 20 秒」。
 //
-// 最坏情况因此是 10 + 20 = **30 秒**（接口那一段自己封顶 10 秒），而用户
-// 从头到尾看得见「正在取流：<歌名>」——不是一片沉默。
+// # 🔴 **「下音频」和「解码」那两段不是「一共等多久」，是「还有没有进展」**
+// （票 #220）
+//
+// 前两段等的是**一次往返**——20 秒不回就是死了。而后两段等的是**一条持续的
+// 下载**：一条慢而**一直在走**的流，20 秒之后照样在好好地下，而把「慢」当成
+// 「死」的结果就是**把一首好歌掐掉**——用户看到的是「取流超时了」，而歌
+// 明明下得好好的。那正是用户说的「取流非常慢」。
+//
+// 所以后两段的判据是「这一段还有没有进展」（见 `loadTimedOut`），而 20 秒
+// 是「**多久没进展**算死」——不是「一共等多久」。
+//
+// ⚠️ **投稿那一路和音乐库那一路用的是同一套口径**（票 #220）：
+//
+//	问地址 / 问分集	同一个 `bili.Client`，同一个 10 秒请求超时
+//	下音频 / 解码	同一个字节源，同一个 20 秒卡死判定
+//
+// 两路唯一的差别是**问的接口不一样**（投稿走 `/x/player/wbi/playurl`、
+// 音乐库走 `/audio/music-service-c/url`），而音乐库那一路在退档时会**多问
+// 一次**——所以它的「问地址」那段可能比投稿那一段多一个往返。
 const onlinePlayTimeout = 20 * time.Second
+
+// loadSlowAfter 是「这一段慢到该告诉用户了」的门槛。
+//
+// ⚠️ **它必须明显小于 `onlinePlayTimeout`**：它的用处是让用户在**还有希望**
+// 的时候就知道「这一段慢了」——而等到超时那一刻才说，用户已经白等了
+// 20 秒，而那句话只说了「超时」。
+//
+// 取 5 秒：真机上一次取流往返是 200~400 毫秒（见 `prefetch.go` 的文件头），
+// 所以 5 秒已经是「慢得不对劲」了。
+const loadSlowAfter = 5 * time.Second
+
+// onlineLoadTotalTimeout 是「这一趟取流」**不管有没有进展**最多等多久。
+//
+// ⚠️ **它管的是「永远转圈」那件事**：下载那一段的判据是「还有没有进展」
+// （见 `loadTimedOut`），而一个每 19 秒吐一个字节的地址能让那个判据一直
+// 为真——于是转圈就永远不停。这一栏是那道**总闸**。
+//
+// 取 120 秒：一首 10 MB 的歌在 100 KB/s 的网络上要 100 秒，而 120 秒之后
+// 再等下去用户早就换歌了。
+const onlineLoadTotalTimeout = 120 * time.Second
+
+// 取流这一趟的**分段**。界面上「慢」的时候要说清「卡在哪一段」。
+//
+// ⚠️ **这些词是给人看的，所以要短**：播放条上那一行只有 140 像素宽
+// （1200 宽的窗口，实测），12 号字放得下十来个字，而前面还顶着别的字。
+//
+// ⚠️ **它们是「这一段在等什么」，不是「这一段叫什么」**：「问地址」说的是
+// 「在等 B 站给地址」，用户能对上自己遇到的事（网络慢、B 站慢）；
+// 而「playurl」这种词他读不出来。
+const (
+	// loadStagePart 是「问哪一集 / 补元信息」那一次往返。
+	//
+	// ⚠️ **它不是取流接口那一次**：投稿那一路要先问一次分 P（搜索结果
+	// 全都没有 cid），音乐库那一路要先问一次元信息。两次都是网络往返，
+	// 都可能慢。
+	loadStagePart = "问分集"
+	// loadStageURL 是「问 playurl 拿地址」那一次往返（票 #220 的第①段）。
+	loadStageURL = "问地址"
+	// loadStageBytes 是「从 CDN 取字节 + 解码第一帧」（票 #220 的第②③段）。
+	//
+	// ⚠️ **②和③合成一个词，是因为它们在慢的时候是同一件事**：③（解码第一帧）
+	// 要等解码器把流开起来，而**MP4 的 `moov` 在文件末尾时，解码器要等整个
+	// 文件下完**（实测见 `internal/service/audio/extaf` 那边的注释；本仓库
+	// 自己的、按 B 站形状造的素材 `mfadec/testdata/aaclc-192k.m4a` 就是
+	// `moov` 在末尾）。那时候界面上如果写「解码」，用户会以为**这台机器
+	// 解得慢**——而真相是「还在下」。
+	loadStageBytes = "下音频"
+)
+
+// loadTiming 是「这一趟取流」的分段耗时（票 #220）。
+//
+// # 为什么要有它
+//
+// 「点一首歌到出声」是**三段串行的网络往返**，而它们的快慢完全不是一回事：
+//
+//	① 问 playurl 拿地址	一次带 WBI 签名的接口往返
+//	② 下载首段字节		CDN 那边给头几个字节
+//	③ 解码第一帧		这一台机器的解码器开这条流
+//
+// 混在一起只有一个「总的等了多久」，而那个数**说不出慢的是哪一段**——
+// 而三段的 remedies 完全不同：① 是 B 站接口慢，② 是网络慢，③ 是这台机器
+// 解得慢（换一档音质就有用）。
+//
+// ⚠️ **零值表示「没量到」**：某一段压根没发生（比如地址没取到，那一段的
+// 耗时是 0 而不是「瞬间」）。
+type loadTiming struct {
+	// Part 是开头那一次「问哪一集 / 补元信息」。
+	Part time.Duration
+	// URL 是①：问 playurl 拿地址。
+	URL time.Duration
+	// Bytes 是②：从建源到头几个字节落到缓存里。
+	//
+	// ⚠️ **字节一个都没到时它是「等到失败为止的那段时间」**，而 Decode
+	// 是 0——那时候根本没有「解码」这一段可量。
+	Bytes time.Duration
+	// Decode 是③：从头几个字节到解码器开好（能出声了）。
+	Decode time.Duration
+}
+
+// Total 是这一趟一共等了多久。
+func (t loadTiming) Total() time.Duration {
+	return t.Part + t.URL + t.Bytes + t.Decode
+}
+
+// String 把这一趟的耗时排成一句能进日志的话。
+//
+// ⚠️ **它按「人读得懂的顺序」排**，不是按结构体的字段顺序——日志是给
+// 人看的（票 #282 的「事后查得到」）。
+func (t loadTiming) String() string {
+	return fmt.Sprintf("① 问地址 %v ② 下音频 %v ③ 解码 %v（另：问分集 %v，合计 %v）",
+		t.URL, t.Bytes, t.Decode, t.Part, t.Total())
+}
 
 // defaultPlayLog 是播放路径的默认日志出口（**每个 App 一份**，见 App.playLog）。
 //
@@ -202,7 +312,7 @@ func (a *App) rememberAudioQuality(q bili.AudioQuality) {
 func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Duration, want bool, gen int) {
 	s := a.streamingSnapshot()
 	if s == nil {
-		a.failOnline(gen, tr.item, "换音质（取流零件没挂）", errStreamingMissing)
+		a.failOnline(gen, tr.item, "换音质（取流零件没挂）", errStreamingMissing, "")
 		return
 	}
 
@@ -224,7 +334,7 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 			a.clearStaleQualityErr(gen, tr)
 			return
 		}
-		src, p, err := a.buildFromRef(context.Background(), s, tr.item, gen, ref)
+		src, p, err := a.buildFromRef(context.Background(), s, tr.item, gen, ref, nil)
 		if err != nil {
 			a.failQualitySwitch(gen, q, err)
 			return
@@ -326,7 +436,7 @@ func (a *App) failQualitySwitch(gen int, q bili.AudioQuality, err error) {
 		a.logf("biu: 换音质的结果被作废了（用户又换档了）：%q：%v", it.Title, err)
 		return
 	}
-	a.failOnline(gen, it, "换音质", err)
+	a.failOnline(gen, it, "换音质", err, "")
 }
 
 // AudioQuality 返回当前偏好。
@@ -489,7 +599,7 @@ func (a *App) playOnlineFrom(it Item, at time.Duration, paused bool) error {
 	// 🔴 **「正在取流」从这一刻开始**（票 #282）：取流要跑一趟网络，而那一趟
 	// 里界面上什么都不会变——不说这一句，用户看到的就是「点了没反应」。
 	// 超时由 `loadTimedOut` 兜着，不让它变成另一种「什么都不说」。
-	a.beginLoadingLocked(gen, it.Title)
+	a.beginLoadingLocked(gen, it.Title, loadStagePart)
 	// 🔴 **这一趟是「恢复」**：它放不起来的时候**不许**在播放条上冒一句红字
 	// ——启动时用户什么都没做就被骂一句「打不开」，那是应用在说自己，不是在
 	// 说给用户听。见 `failOnline` 里认这一代次的那一处。
@@ -508,35 +618,61 @@ func (a *App) playOnlineFrom(it Item, at time.Duration, paused bool) error {
 	return nil
 }
 
-// beginLoadingLocked 记下「正在取流」，并把超时的闹钟挂上。**必须在持锁时调**。
+// beginLoadingLocked 记下「正在取流」，并把两个闹钟挂上。**必须在持锁时调**。
 //
 // 闹钟带的是**这一次**的代次和歌名：超时那一刻要判「还在不在这一趟里」，
 // 而歌名是要写进那句话和日志里的（用户要知道是哪一首超时了）。
-func (a *App) beginLoadingLocked(gen int, title string) {
+//
+// stage 是「这一段在等什么」——界面靠它说出「卡在哪一步」（票 #220）。
+func (a *App) beginLoadingLocked(gen int, title, stage string) {
 	a.loading = true
 	a.loadingTitle = title
+	a.loadingStage = stage
+	a.loadingSince = time.Now()
+	// 🔴 **「慢」那一档重新算**：新的一段从零开始等，而上一段慢不慢跟这一段
+	// 无关（用户此刻在等的是这一段）。
+	a.loadingSlow = false
+	// 🔴 **进度归零**：新的一段从「还没下到东西」开始。
+	a.loadFilled = -1
 	// 挂新闹钟之前先停掉上一个：连点两首时，前一个的闹钟不能替后一个喊。
+	a.stopLoadTimersLocked()
+	a.loadStop = a.after(onlinePlayTimeout, func() { a.loadTimedOut(gen, title, stage) })
+	// 🔴 **「慢」的闹钟比「超时」的早**：它的用处是在**还有希望**的时候就把
+	// 「这一段慢了」说出去，而不是等到超时才说（那时候用户已经白等了 20 秒）。
+	a.loadSlowStop = a.after(loadSlowAfter, func() { a.loadBecameSlow(gen) })
+}
+
+// stopLoadTimersLocked 把「正在取流」这一摊的两个闹钟都停掉。
+// **必须在持锁时调**。
+//
+// ⚠️ **两个闹钟各停各的**（理由见 App 里 loadSlowStop 那段注释）：共用一个
+// 字段的话，先停掉另一个就把另一个的闹钟弄丢了——丢了「超时」那个 =
+// 永远转圈，丢了「慢」那个 = 慢了也不说。
+func (a *App) stopLoadTimersLocked() {
 	if a.loadStop != nil {
 		a.loadStop()
 		a.loadStop = nil
 	}
-	a.loadStop = a.after(onlinePlayTimeout, func() { a.loadTimedOut(gen, title) })
+	if a.loadSlowStop != nil {
+		a.loadSlowStop()
+		a.loadSlowStop = nil
+	}
 }
 
-// rearmLoading 重新起算「这一段最多等多久」。**必须在持锁时调**。
+// rearmLoading 换一段：重新起算「这一段最多等多久」。**必须在持锁时调**。
 //
 // 🔴 **它不碰「正在取流」那一档**，只重挂闹钟：那一档从头到尾都是「这一首
 // 正在准备」，而闹钟量的是「**这一段**网络还没回」。
 //
 // ⚠️ **代次不对就不动**：那一趟已经被取代了（切歌 / 超时），它的闹钟早就
 // 被收掉了，别去动**新的**那一趟的。
-func (a *App) rearmLoading(gen int, title string) {
+func (a *App) rearmLoading(gen int, title, stage string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.onlineGen != gen || a.closed || !a.loading {
 		return
 	}
-	a.beginLoadingLocked(gen, title)
+	a.beginLoadingLocked(gen, title, stage)
 }
 
 // endLoadingLocked 把「正在取流」这一档收掉，并把闹钟停掉。
@@ -544,9 +680,37 @@ func (a *App) rearmLoading(gen int, title string) {
 func (a *App) endLoadingLocked() {
 	a.loading = false
 	a.loadingTitle = ""
-	if a.loadStop != nil {
-		a.loadStop()
-		a.loadStop = nil
+	a.loadingStage = ""
+	a.loadingSlow = false
+	a.loadFilled = -1
+	a.stopLoadTimersLocked()
+}
+
+// loadingWaitLocked 报「当前这一段已经等了多久」。**必须在持锁时调**。
+//
+// ⚠️ **没在取流时是 0**：界面上那一栏只在「正在取流」那一档里才有意义。
+func (a *App) loadingWaitLocked() time.Duration {
+	if !a.loading || a.loadingSince.IsZero() {
+		return 0
+	}
+	return time.Since(a.loadingSince)
+}
+
+// loadBecameSlow 是「这一段慢到该说了」那个闹钟响了。
+//
+// 🔴 **它只置一档，不改别的**：这一趟还在跑（还有希望），而用户此刻缺的是
+// 一句「这一段慢了」——不是一句失败。
+func (a *App) loadBecameSlow(gen int) {
+	a.mu.Lock()
+	if a.onlineGen != gen || a.closed || !a.loading {
+		a.mu.Unlock()
+		return
+	}
+	a.loadingSlow = true
+	wake := a.wake
+	a.mu.Unlock()
+	if wake != nil {
+		wake()
 	}
 }
 
@@ -557,14 +721,59 @@ func (a *App) endLoadingLocked() {
 //
 // **作废在途的那一次**：代次加一，那条还在跑的取流回来时对不上代次，自己走人
 // ——它要是回来得比这个闹钟晚，装上来的话用户会看到「说了失败、结果又放起来了」。
-func (a *App) loadTimedOut(gen int, title string) {
+//
+// # 🔴 **下载那一段是「进度」判据，不是「一共等了多久」**（票 #220）
+//
+// 「下音频」「解码」这两段等的是**一条持续的下载**，不是「一次往返」。
+// 一条慢而**一直在走**的流，20 秒之后照样在好好地下——而改之前那个
+// 20 秒的闹钟会把它掐掉，界面上一句「取流超时了」，歌再也放不出来。
+// 那正是用户说的「取流非常慢」：网络慢不是错，而**把慢当成错**是错。
+//
+// 所以这两段的判据是「**这一段还有没有进展**」：
+//
+//	有进展	还在下 → **重新起算**，让这一段接着等（界面上「取流很慢」陪着用户）
+//	没进展	卡死了 → 按失败处理（转圈停 + 一句能看懂的话）
+//
+// ⚠️ **「有进展」是拿字节源已经下到的字节数比的**（`Filled()`）：它是
+// 「网络还在动」的唯一可靠证据——请求没报错不算（连上了却一个字节都不下，
+// 那种连接在用户听来和没恢复一样）。
+//
+// ⚠️ **另有一道总闸**（`onlineLoadTotalTimeout`）：一个每 19 秒吐一个字节的
+// 地址能让「有进展」一直为真，于是转圈就永远不停——总闸管的是那件事。
+func (a *App) loadTimedOut(gen int, title, stage string) {
 	a.mu.Lock()
 	if a.onlineGen != gen || a.closed || !a.loading {
 		// 这一趟已经不是当前那一趟了（用户又点了一首，或者它已经成了）。
 		a.mu.Unlock()
 		return
 	}
+	// 🔴 **下载那两段：先问「还有没有进展」**。
+	if stage == loadStageBytes {
+		waited := a.loadingWaitLocked()
+		if a.downloadProgressLocked() && waited < onlineLoadTotalTimeout {
+			// 还在动：这一段慢，但不是死了。
+			//
+			// 🔴 **「慢」这一档在这里也置上**：能撑到 20 秒还活着，
+			// 那它**就是慢的**——而「慢」那一档的闹钟（5 秒）可能在
+			// 重新起算的时候被收掉了（`rearmLoadingLocked` 会重挂一个），
+			// 那一档不能因为「闹钟被换了一个」就丢掉。
+			a.loadingSlow = true
+			//
+			// 🔴 **重新起算的是这一段**：进度那一栏也要留着（「上次量到多少
+			// 字节」是下一次比较的基准），而「这一段从什么时候开始」要**接着
+			// 算**——它量的是「用户为这一段等了多久」。
+			a.rearmLoadingLocked(gen, title, stage)
+			wake := a.wake
+			a.mu.Unlock()
+			if wake != nil {
+				wake()
+			}
+			return
+		}
+	}
 	a.onlineGen++
+	stage = a.loadingStage
+	waited := a.loadingWaitLocked()
 	a.endLoadingLocked()
 	restore := a.restoreGen == gen
 	wake := a.wake
@@ -575,7 +784,8 @@ func (a *App) loadTimedOut(gen int, title string) {
 	// 这一次「已经判它失败」的取流会一直下到天亮。
 	a.abortPendingSource()
 
-	a.logf("biu: 取流超时：%q（代次 %d，%v 内这一段还没回）", title, gen, onlinePlayTimeout)
+	a.logf("biu: 取流超时：%q（代次 %d，%v 内这一段还没回，段=%s）",
+		title, gen, onlinePlayTimeout, stage)
 	// 🔴 **恢复那一趟：安静地跳过**（理由同 `failOnline` 里那一处）。启动时在
 	// 播放条上冒一句「取流超时了」，用户会以为是自己点的歌放不出来——他这一
 	// 次连歌都还没点。
@@ -591,12 +801,96 @@ func (a *App) loadTimedOut(gen int, title string) {
 	// 四个字。一句 50 个字的话在屏幕上只剩「打不开：取流…」这样的碎片——
 	// 那不是「一句能看懂的话」。所以**短的那句上屏，长的那句进悬停提示**
 	// （`State.ErrDetail`）。
-	a.setErrTextDetail("取流超时了",
-		fmt.Sprintf("取流超时了（%v 内这一段网络没回）。可能是网络慢，也可能是这一首的流取不到——换一首放，或者点重试再试一次。",
-			onlinePlayTimeout), true)
+	//
+	// 🔴 **下载那两段的话和接口那两段不一样**（票 #220）：「这一段一直没回」
+	// 和「一个字节都不下来」是**两件不同的事**，而用户能做的事也不同
+	// （前者是等，后者是换网 / 换歌）。给同一句「取流超时了」就是把两件事
+	// 说成一件。
+	short, detail := "取流超时了", fmt.Sprintf(
+		"取流超时了（%v 内这一段网络没回）。可能是网络慢，也可能是这一首的流取不到——换一首放，或者点重试再试一次。",
+		onlinePlayTimeout)
+	if stage == loadStageBytes {
+		if waited >= onlineLoadTotalTimeout {
+			short = "取流太慢了"
+			detail = fmt.Sprintf(
+				"这一首取流太慢了（已经等了 %v，再等下去也来不及）。可能是网络特别慢，也可能是这一首特别大——换一首放，或者点重试再试一次。",
+				waited.Round(time.Second))
+		} else {
+			short = "下载超时了"
+			detail = fmt.Sprintf(
+				"这条音频一直没下下来（%v 内一个字节都没到）。多半是网络断了，或者这条地址失效了——换个网络，或者点重试再试一次。",
+				onlinePlayTimeout)
+		}
+	}
+	a.setErrTextDetail(short, detail, true)
 	if wake != nil {
 		wake()
 	}
+}
+
+// setLoadBaseline 把「进度」的基准记成「一个字节都还没到」。
+//
+// ⚠️ **代次要对**：别把**别的**那一趟的源算进来（理由见 `buildFromRef` 里
+// 那一处）。
+func (a *App) setLoadBaseline(gen int) {
+	a.mu.Lock()
+	if a.onlineGen == gen {
+		a.loadFilled = 0
+	}
+	a.mu.Unlock()
+}
+
+// downloadProgressLocked 报「下载那一段还有没有进展」。**必须在持锁时调**。
+//
+// 判据是**字节源已经下到的字节数变没变**（`Filled()`）：那是「网络还在动」
+// 的唯一可靠证据——请求没报错不算（连上了却一个字节都不下，那种连接在用户
+// 听来和没恢复一样）。
+//
+// ⚠️ **基准是「这一段开始时已经下到多少」**（`setPendingSource` 记的 0），
+// 不是「上一次量到多少」：一个字节都不下的地址从 0 到 0 是**没有进展**，
+// 而拿「-1（还没量过）」当基准的话，0 ≠ -1 会被判成「有进展」——那正好把
+// 最坏的那种情况（**一个字节都不来**）判成「还在走」。
+//
+// ⚠️ **代次要对**：上一趟留下的那条源（切歌了还没建好新的）说的不是这一趟
+// 的进度。
+func (a *App) downloadProgressLocked() bool {
+	src := a.pendingSrc
+	if src == nil || a.pendingSrcGen != a.onlineGen {
+		// 还没有字节源（还在问地址那几段）：这一段压根不适用进度判据。
+		return false
+	}
+	n := src.Filled()
+	if a.loadFilled < 0 {
+		// 还没量过：记下基准，**不算进展**。
+		a.loadFilled = n
+		return false
+	}
+	if n == a.loadFilled {
+		return false
+	}
+	a.loadFilled = n
+	return true
+}
+
+// rearmLoadingLocked 换一段（**必须在持锁时调**）。
+//
+// ⚠️ **它和 `rearmLoading` 的区别是「保留这一段的进度基准和「慢」那一档」**：
+//
+//	进度基准	下一次比较要用「上一次下到多少」，重置成 -1 的话，
+//		一个字节都不下的地址也会被判成「有进展」
+//	「慢」那一档	这一段本来就慢，重新起算**不是**让它不慢——
+//		「取流很慢」那句话要一直陪着用户等到这一段结束
+//	「从什么时候开始等」	它量的是「用户为这一段等了多久」，
+//		中途重新起算不该把它归零
+func (a *App) rearmLoadingLocked(gen int, title, stage string) {
+	if a.onlineGen != gen || a.closed || !a.loading {
+		return
+	}
+	filled, slow, since := a.loadFilled, a.loadingSlow, a.loadingSince
+	a.beginLoadingLocked(gen, title, stage)
+	a.loadFilled = filled
+	a.loadingSlow = slow
+	a.loadingSince = since
 }
 
 // runOnline 是后台那条线：建一套播放链路，然后（代次还对得上的话）换上。
@@ -624,11 +918,17 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	// 说清「问不出这一集是哪一集」，比放错一集好。
 	//
 	// 音乐库条目走的是另一半（补元信息）：它没有 cid 要补，见 `withSource`。
+	//
+	// 🔴 **分段计时从这一刻开始**（票 #220）：「点一首歌 → 出声」是几段串行
+	// 的网络往返，而它们的快慢完全不是一回事——混在一起只有一个「等了多久」，
+	// 那个数说不出慢的是哪一段。
+	t0 := time.Now()
 	it, err := a.withSource(context.Background(), s, it)
 	if err != nil {
 		a.failPlay(gen, it, "问哪一集/补元信息", err)
 		return
 	}
+	tim := loadTiming{Part: time.Since(t0)}
 	// 🔴 **代次变了就别再往下走**：问分 P / 元信息是**一次网络往返**，这一趟
 	// 等它的时候用户完全可能已经切了歌、或者超时闹钟已经响了。那就没人要这
 	// 个结果了——继续往下走只会白花一次取流（票 #282）。
@@ -636,15 +936,20 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 		a.failPlay(gen, it, "问哪一集/补元信息", errStaleGen)
 		return
 	}
-	// 🔴 **这一段过了，闹钟重新起算**：取流这一趟是三段串行的网络往返，
+	// 🔴 **这一段过了，闹钟重新起算**：取流这一趟是几段串行的网络往返，
 	// 判据是「**这一段**最多等 20 秒」，不是「从点下去起 20 秒」——
 	// 理由见 `onlinePlayTimeout` 那段注释。
-	a.rearmLoading(gen, it.Title)
+	a.rearmLoading(gen, it.Title, loadStageURL)
 
 	// 🔴 **取流和开播放器是分开报的**：两者坏法不一样，用户要做的下一件事也
 	// 不一样（取流失败是网络/地址，开不了播放器是这一条的格式/这台机器解不了）。
 	// 合成一句「取流失败」的话，用户分不出该换网还是该换歌。
+	//
+	// 🔴 **① 问 playurl 拿地址**（票 #220 的第一段）：这一段是一次带 WBI
+	// 签名的接口往返，而它是**两条取流路径（投稿 / 音乐库）唯一的共同段**。
+	tURL := time.Now()
 	ref, err := a.resolve(context.Background(), s, it, s.Quality)
+	tim.URL = time.Since(tURL)
 	if err != nil {
 		a.failPlay(gen, it, "取流", err)
 		return
@@ -662,12 +967,18 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	}
 	// 🔴 **再起算一次**：从这儿往后等的是 CDN 的头几个字节（字节源自己的
 	// 卡死判定是 20 秒）。
-	a.rearmLoading(gen, it.Title)
-	src, p, err := a.buildFromRef(context.Background(), s, it, gen, ref)
+	//
+	// ⚠️ **这一段的判据是「还有没有进展」**，不是「一共等了多久」——
+	// 理由见 `loadTimedOut` 那段注释（票 #220）。
+	a.rearmLoading(gen, it.Title, loadStageBytes)
+	src, p, err := a.buildFromRef(context.Background(), s, it, gen, ref, &tim)
 	if err != nil {
 		a.failPlay(gen, it, "开播放器", err)
 		return
 	}
+	// 🔴 **分段耗时写进日志**（票 #220）：这三段是「点一首歌 → 出声」的全部
+	// 成本，而事后能查到的只有这一句——用户能描述的只有「它不响」。
+	a.logf("biu: 取流分段耗时：%q（代次 %d）%s", it.Title, gen, tim.String())
 
 	a.mu.Lock()
 	if a.onlineGen != gen || a.closed {
@@ -899,7 +1210,7 @@ func (a *App) buildOnline(ctx context.Context, s *Streaming, it Item, gen int) (
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	src, p, err := a.buildFromRef(ctx, s, it, gen, ref)
+	src, p, err := a.buildFromRef(ctx, s, it, gen, ref, nil)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -914,11 +1225,24 @@ func (a *App) buildOnline(ctx context.Context, s *Streaming, it Item, gen int) (
 //
 // 音量和倍率在这里**现读**（`buildOnline` 那段注释说了为什么）。三条建播放
 // 链路的路——开新歌、换流重开、换音质——都走这里，所以三处一处都不会漏。
+//
+// tim 是**分段耗时**的收口（票 #220）：nil = 不量（换音质 / 换流重开那两条路
+// 不量——它们量的是「换流花了多久」，不是「从点歌到出声花了多久」，混进
+// 同一个口径里会让那个数没法读）。
 func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
-	ref *bili.StreamRef,
+	ref *bili.StreamRef, tim *loadTiming,
 ) (*audio.StreamSource, *audio.Player, error) {
 	// 🔴 **每一段流一个重连令牌**：旧源的回调可能迟到（它还在退避里等着
 	// 的时候这一条已经换掉了），令牌对不上就不碰界面上的状态。
+	//
+	// 🔴 **`OnFirstBytes` 是「第②段」的计时点**（票 #220）：头几个字节落到
+	// 缓存里的那一刻，「等字节」这一段就结束了，剩下的全是「等解码器」。
+	//
+	// ⚠️ **它跑在下载 goroutine 里，而读它的是这一段的主体**：所以那个时刻
+	// 用**原子量**记（`atomic.Int64`），不是普通变量——普通变量在这里是
+	// 一个实实在在的数据竞争（`-race` 一跑就红）。
+	var firstAt atomic.Int64
+	srcStart := time.Now()
 	src, err := audio.NewStreamSource(audio.StreamSourceOptions{
 		URLs:      ref.URLs,
 		ExpiresAt: ref.ExpiresAt,
@@ -941,6 +1265,13 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 		// 断流时，界面上「正在重连」**一次都不亮**（票 #315 的评审复现过）。
 		OnRetry:       func(attempt int, wait time.Duration) { a.wakeUp() },
 		OnReconnected: func() { a.wakeUp() },
+		// 🔴 **「头几个字节到了」**：第②段的计时点（票 #220）。
+		//
+		// ⚠️ **它在下载 goroutine 里调**，所以它只做一件事：记时刻。
+		// **不许在里面拿 `a.mu`**——那把锁是界面每帧都要的。
+		OnFirstBytes: func(int64) {
+			firstAt.CompareAndSwap(0, time.Now().UnixNano())
+		},
 	})
 	if err != nil {
 		return nil, nil, err
@@ -948,6 +1279,17 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	// 🔴 **把源记在 App 上**：建播放器的这一段里源已经在下载了，而播放器还没
 	// 建起来——「超时」和「退出」都要能把它掐掉（见 App.pendingSrc）。
 	a.setPendingSource(src, gen)
+	// 🔴 **进度的基准归零**（票 #220）：这一段从「一个字节都还没到」开始，
+	// 而「没下到」和「下到了一点」在 `Filled()` 上分别是 0 和 n——基准必须是
+	// 0，不然「一个字节都不来」会被判成「还在走」（理由见
+	// `downloadProgressLocked`）。
+	//
+	// ⚠️ **只有「开新歌」那一趟才归零**（`tim != nil`）：换音质 / 换流重开
+	// 那两条路也会建源，而它们**不是**用户此刻在等的那一趟——它们要是顺手
+	// 把基准改了，正在下着的那一首会被判成「没进展」。
+	if tim != nil {
+		a.setLoadBaseline(gen)
+	}
 	// 🔴 **建源的这一小段时间里代次也可能变了**（用户切歌、或者超时闹钟响了）。
 	// 那就没人要这条流了——立刻关掉，别让它下到天亮。
 	if a.genStale(gen) {
@@ -955,7 +1297,27 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 		src.Close()
 		return nil, nil, errStaleGen
 	}
+	// 🔴 **③ 解码第一帧**：`OpenStream` 要等解码器把这条流开起来，而
+	// AudioToolbox 探容器要 8 KB 左右的字节——**moov 在文件尾的 MP4 还要
+	// 把整个文件读完**（见 `internal/service/audio/extaf` 的注释）。
+	//
+	// ⚠️ **「开好」的时刻是 `OpenStream` 返回的那一刻**，不是它调用的前一刻：
+	// 头几个字节可能正好落在那两句之间，而那时候「解码」这一段还没开始。
+	// 拿调用前的时刻当终点会算出**负数**的③。
 	p, err := audio.OpenStream(src)
+	opened := time.Now()
+	// 🔴 **分段耗时落地**（票 #220）：② 是「建源 → 头几个字节到」，
+	// ③ 是「头几个字节到 → 解码器开好」。
+	if tim != nil {
+		if ns := firstAt.Load(); ns > 0 {
+			tim.Bytes = time.Unix(0, ns).Sub(srcStart)
+			tim.Decode = opened.Sub(time.Unix(0, ns))
+		} else {
+			// 一个字节都没到：② 是「白等的那段时间」，而③压根没发生。
+			tim.Bytes = opened.Sub(srcStart)
+			tim.Decode = 0
+		}
+	}
 	if err != nil {
 		a.clearPendingSource(src)
 		src.Close()
@@ -1269,7 +1631,12 @@ func (a *App) checkPlayback() {
 // 也会被换音质 / 换流重开那些**别的**路调用（它们拿的是当前代次）：
 // 「别的歌的失败把这一首的看门狗取消掉」那个洞就是这么来的（票 #282 的
 // 评审）。收那一档是 `failPlay` 的事。
-func (a *App) failOnline(gen int, it Item, branch string, err error) {
+//
+// stage 是「失败发生在哪一段」（票 #220）：空串 = 这一条不是「取流那一趟」
+// （换音质 / 换流重开）。它进**那一句的完整说明**（悬停提示），不说清
+// 「卡在哪一步」的话，用户面对的是一句「连不上 B 站」——而他连是**问地址**
+// 问不动、还是**音频**下不来都分不出来。
+func (a *App) failOnline(gen int, it Item, branch string, err error, stage string) {
 	a.mu.Lock()
 	stale := a.onlineGen != gen
 	closed := a.closed
@@ -1299,11 +1666,19 @@ func (a *App) failOnline(gen int, it Item, branch string, err error) {
 			it.Title, branch, gen, err)
 		return
 	}
-	a.logf("biu: 播放失败：%q（%s，代次 %d）：%v", it.Title, branch, gen, err)
+	a.logf("biu: 播放失败：%q（%s，段=%s，代次 %d）：%v", it.Title, branch, stage, gen, err)
 	// ⚠️ **`setErrText` 自己会叫醒界面**（它把新的话写进去之后才醒），所以这里
 	// 不要再叫一次——两次唤醒只是多一帧，而顺序写错会让界面先画出「转圈停了」
 	// 再画出那句话，中间那一帧是「既没有转圈也没有话」。
-	a.setErrText(bili.Friendly(err), bili.Recoverable(err))
+	//
+	// 🔴 **短的那句上屏，长的那句进悬停提示**（票 #282 的评审）：播放条上
+	// 那一行只有 140 像素宽，一句长话上屏只剩「打不开：取流…」这样的碎片。
+	msg := bili.Friendly(err)
+	detail := msg
+	if stage != "" {
+		detail = fmt.Sprintf("卡在「%s」这一步：%s", stage, msg)
+	}
+	a.setErrTextDetail(msg, detail, bili.Recoverable(err))
 }
 
 // failPlay 报一次「**这一趟播放**」的失败，并把「正在取流」那一档收掉。
@@ -1318,11 +1693,14 @@ func (a *App) failOnline(gen int, it Item, branch string, err error) {
 // 超时了）不能去动**新的**那一趟的看门狗。
 func (a *App) failPlay(gen int, it Item, branch string, err error) {
 	a.mu.Lock()
+	// 🔴 **先抄下「卡在哪一段」再收档**：`endLoadingLocked` 会把那一栏清掉，
+	// 而它是失败那句话里最有用的那一半（票 #220）。
+	stage := a.loadingStage
 	if a.onlineGen == gen && !a.closed {
 		a.endLoadingLocked()
 	}
 	a.mu.Unlock()
-	a.failOnline(gen, it, branch, err)
+	a.failOnline(gen, it, branch, err, stage)
 }
 
 // refreshOnlineNow 从当前的播放位置重开一首。
@@ -1374,7 +1752,7 @@ func (a *App) refreshOnlineNow(cause error) {
 	go func() {
 		src, p, ref, err := a.buildOnline(context.Background(), s, tr.item, gen)
 		if err != nil {
-			a.failOnline(gen, tr.item, "换流重开", err)
+			a.failOnline(gen, tr.item, "换流重开", err, "")
 			return
 		}
 
