@@ -177,6 +177,17 @@ func showsText(tt *mygoui.Tester, s string) bool {
 	return ok
 }
 
+// showsAnyText 报「画面上**有**包含这一串的那一句」。
+//
+// ⚠️ **`showsText` 是全等匹配**，而「有 N 条落在别的形态上了」那一整句里
+// 夹着一个**会变的数**（翻一页就多几条），全等匹配就永远匹配不上。
+//
+// ⚠️ 用它之前先确认这一串**不会撞上别的元素**：侧栏那个「我的关注」就让
+// 「关注」两个字全等匹配不上（见 `showsText` 的注释）。
+func showsAnyText(tt *mygoui.Tester, s string) bool {
+	return tt.HasText(s)
+}
+
 // openSpace 切到某个 UP 的空间并等头加载完。
 func openSpace(t *testing.T, s *Shell, tt *mygoui.Tester, mid int64) *upSpace {
 	t.Helper()
@@ -905,6 +916,112 @@ func TestLoggedOutSpaceDoesNotRefetchTheHeaderOnEveryFrame(t *testing.T) {
 	}
 	if n := b.countHit("/x/relation/stat"); n != 0 {
 		t.Errorf("未登录还查了 %d 次关注数（界面那一块没登录时不画，查它是白花）", n)
+	}
+}
+
+// TestTheSpaceDynamicTabDoesNotAskTheSamePageAgain 钉住「反复刷」那一条。
+//
+// 🔴 **实测踩过的坑**（票 #300，2026-10-24）：UP 空间的「动态」那一格
+// **一直转圈、一直拿不到内容**，而日志里那个动态接口**每一帧都被问一次**。
+// 两个原因叠在一起：
+//
+//   - **B 站把 `module_author.pub_ts` 从数字改成了字符串**，于是
+//     `encoding/json` 整个失败，每一条动态都被当成「读不懂」丢掉——
+//     一页 12 条一条不剩（这一条由 `bili` 包的测试钉着）。
+//   - **B 站的 `has_more` 和 `offset` 不是一起可信的**：入口没前进还说着
+//     「还有下一页」，于是同一个入口被反复问。
+//
+// 判据是**请求次数**和**画面上那一句话**：三种情形（空响应 / 失败 / 全被
+// 丢弃）都必须是「问一次就停」，而且画面上要说清楚是哪一种——不是一直转圈。
+func TestTheSpaceDynamicTabDoesNotAskTheSamePageAgain(t *testing.T) {
+	cases := []struct {
+		name string
+		// reply 是那一台假 B 站怎么答。n 是它是第几次被问。
+		reply func(w http.ResponseWriter, r *http.Request, n int)
+		// wantAsk 是**最多**能问几次。
+		wantAsk int
+		// wantSay 是画面上该有的一句话（`showsText` 是全等匹配）。
+		wantSay string
+	}{
+		{
+			name: "空响应",
+			reply: func(w http.ResponseWriter, r *http.Request, n int) {
+				uiExploreJSON(w, 0, map[string]any{
+					"items": []any{}, "offset": "", "has_more": true,
+				})
+			},
+			wantAsk: 1,
+			wantSay: "暂无动态",
+		},
+		{
+			name: "失败",
+			reply: func(w http.ResponseWriter, r *http.Request, n int) {
+				uiExploreJSON(w, -101, nil)
+			},
+			wantAsk: 1,
+			wantSay: "这一块没拉出来",
+		},
+		{
+			name: "全被丢弃",
+			reply: func(w http.ResponseWriter, r *http.Request, n int) {
+				uiExploreJSON(w, 0, map[string]any{
+					"items":  []any{uiDynamicUnrenderable("f1", "forward", "转发正文")},
+					"offset": "", "has_more": true,
+				})
+			},
+			wantAsk: 1,
+			wantSay: "落在别的形态上了",
+		},
+		{
+			// ⚠️ **入口不前进的那一种**：第一页给了入口 "O1"，第二页又回了
+			// 同一个 "O1"——再问一次还是同一页，所以到第二页就该收手。
+			name: "游标不前进",
+			reply: func(w http.ResponseWriter, r *http.Request, n int) {
+				uiExploreJSON(w, 0, map[string]any{
+					"items":  []any{uiDynamicUnrenderable("f1", "forward", "转发正文")},
+					"offset": "O1", "has_more": true,
+				})
+			},
+			wantAsk: 2,
+			wantSay: "落在别的形态上了",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			b := newUIExplore(t)
+			uiSpaceData(b, "某个 UP 主", 0, 1)
+			var mu sync.Mutex
+			asked := 0
+			b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				asked++
+				n := asked
+				mu.Unlock()
+				c.reply(w, r, n)
+			})
+			s, tt, _ := newSpaceShell(t, b, false, "")
+			openSpace(t, s, tt, 42)
+
+			// **画几十帧，一帧都不滚**。
+			//
+			// ⚠️ 这是这一条的全部意义：早一版那个圈是**每一帧**都要一次那个
+			// 接口（60 帧 40 次），而「画几帧就停」是骗不出这个的。
+			for range 40 {
+				tt.Frame()
+			}
+
+			mu.Lock()
+			n := asked
+			mu.Unlock()
+			if n > c.wantAsk {
+				t.Errorf("画了 40 帧，那个动态接口被问了 %d 次，want 最多 %d"+
+					"（同一个入口被反复问 = 用户看到的就是「一直转圈」）", n, c.wantAsk)
+			}
+			if !showsAnyText(tt, c.wantSay) {
+				t.Errorf("画面上没有 %q，文字有 %q", c.wantSay, tt.Texts())
+			}
+		})
 	}
 }
 

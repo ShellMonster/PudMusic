@@ -98,6 +98,18 @@ const (
 	DefaultBorderRadius = 8.0
 	// MaxBorderRadius 是圆角的上限，也是 Biu 设置页滑块的右端点。
 	MaxBorderRadius = 24.0
+	// DefaultVolume 是「用户没设过音量」时给的默认音量（1 = 100%）。
+	//
+	// ⚠️ **它是 1 而不是 Biu 的 0.5**：Biu 那边 0.5 是 `play-list` store 的初值，
+	// 而我们**老版本每一次启动都是 100%**（音量压根没落盘）——老用户升级上来
+	// 看到的还是他一直习惯的那一档，不该在升级的那一次突然变成一半。
+	//
+	// 上游那 0.5 的出处见报告 §4.4（`biu/src/store/play-list.ts:369`）。
+	DefaultVolume = 1.0
+	// DefaultUnmuteVolume 是「压根没有音量可放回去」时取消静音放回去的值。
+	//
+	// 0.5 是一半——用户按了「取消静音」，听到的应该是一半声音，不是 0。
+	DefaultUnmuteVolume = 0.5
 )
 
 // 侧栏宽度的三个数，抄 Biu `src/layout/side/index.tsx:15-17`：
@@ -318,6 +330,29 @@ type Settings struct {
 	// 注释）。要让这个开关真的有话可说，得让每一集各占一项，那是另一件事。
 	ShouldKeepPagesOrderInRandomPlayMode bool `json:"shouldKeepPagesOrderInRandomPlayMode"`
 
+	// Volume 是用户设的音量（0..1），1 是解码出来的原样。
+	//
+	// ⚠️ **用指针**：「这份设置里没有这一格」（老版本写的文件）和「用户把音量
+	// 拉到 0」必须分得开——前者该给默认值（100%），后者该给 0（真的没声）。
+	// 用 float64 的话两者读出来都是 0，而「启动时突然没声」和「用户自己拉到 0」
+	// 是两回事：前者是 bug，后者是用户要的。
+	//
+	// （和 `ProxySettings.Port` 同一个理由——那份也是 Biu 那边用 `?:` 表达的
+	// 「没设过」。）
+	//
+	// 键名照 Biu 的 `play-list` 那个 zustand 字段（`volume`），位置换了——
+	// 和 `PlayMode` / `ShouldKeepPagesOrderInRandomPlayMode` 同一段理由。
+	Volume *float64 `json:"volume"`
+
+	// Muted 是静音标志。**它和音量分开存**（票 #311 / 报告 §3.3 的 B2）。
+	//
+	// ⚠️ **别再用「音量 0」顶替静音**：落盘之后那就是个坑——静音之后退出再
+	// 启动，音量变成 0（Clementine 的老毛病）。静音是它自己的一格，而音量那一
+	// 格记的是「用户设的是多少」。
+	//
+	// 键名照 Biu 的 `play-list` 那个 zustand 字段（`isMuted`）。
+	Muted bool `json:"isMuted"`
+
 	// extra 是这个版本的代码不认识的键，原样带着走。
 	//
 	// 两个方向都要保：更新的 Biu 加了新键，或者未来的我们加了键而用户换回了
@@ -399,6 +434,9 @@ type settingsFile struct {
 // DefaultSettings 返回 Biu 的默认设置。downloadPath 传系统下载目录，
 // 对应 Biu 的 `electron/store.ts:18`（那里注入 `app.getPath("downloads")`）。
 func DefaultSettings(downloadPath string) Settings {
+	// 音量那一格是**指针**，所以每一次调用都要新的一份——共用同一个指针的话，
+	// 有人改了 `*s.Volume` 就把全局的默认值改了。
+	vol := DefaultVolume
 	return Settings{
 		AutoStart:         false,
 		CloseWindowOption: CloseWindowHide,
@@ -423,6 +461,10 @@ func DefaultSettings(downloadPath string) Settings {
 		},
 		ReportPlayHistory: true,
 		LocalMusicDirs:    []string{},
+
+		// 音量：默认 100%（老版本每一次启动都是这一档，见 DefaultVolume）。
+		Volume: &vol,
+		Muted:  false,
 
 		// 播放模式的两个默认值都照 Biu 的初始状态（`play-list.ts:370,373`）：
 		// 默认循环播放（不是顺序播放——「放完就停住」正是这一票要治的症状，
@@ -647,6 +689,22 @@ func (s *Settings) normalize() {
 	}
 	if s.LocalMusicDirs == nil {
 		s.LocalMusicDirs = []string{}
+	}
+	// 音量：钳进 [0, 1]。
+	//
+	// ⚠️ **「这一格不存在」和「这一格是 0」必须分开**：前者是老版本写的文件
+	// （那时候音量压根不落盘，每一次启动都是 100%），该给**默认值**；后者是用户
+	// 自己把滑块拉到最下（= 静音），该给 0。用 float64 的话两者读出来都是 0，
+	// 而「启动时突然没声」是最难查的一类回归——所以这一格是指针（见
+	// `Settings.Volume` 的注释）。
+	//
+	// 而 0 本身是合法的：用户把滑块拉到最下就是 0（= 静音，见 `App.SetVolume`）。
+	if s.Volume == nil {
+		v := DefaultVolume
+		s.Volume = &v
+	} else {
+		v := min(max(*s.Volume, 0), 1)
+		s.Volume = &v
 	}
 	// nil 和空序列在 JSON 里差一个 `null`，写出去会让「还没排过序」和
 	// 「排过序，排出来是空的」看起来是两回事。统一成空序列。

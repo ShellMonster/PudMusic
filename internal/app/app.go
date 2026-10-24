@@ -95,6 +95,17 @@ type State struct {
 	Position      time.Duration
 	Duration      time.Duration
 	Volume        float64
+	// Muted 是「静音」这一档。
+	//
+	// ⚠️ **它和 Volume 是两件事**（票 #311 / 报告 §3.3 的 B2）：Volume 记的是
+	// 「用户设的是多少」，Muted 记的是「现在按着静音没有」。
+	//
+	// 静音的时候 Volume **不变**——取消静音放回去的就是它。落盘的也是它：静音
+	// 之后退出再启动，音量还是用户设的那一档，而不是 0（Clementine 的老毛病）。
+	//
+	// 界面读这一栏画那一枚图标（静音 / 取消静音），不靠「音量是不是 0」去猜
+	// ——音量 0 和静音在**听感**上一样，在**意思**上不一样。
+	Muted bool
 	// Rate 是当前的播放倍率（0.5~2.0，1 是原速）。
 	//
 	// 它是**用户的一个设置**，不是某一首歌的属性：换歌之后还在，切歌那一瞬间
@@ -199,6 +210,12 @@ type App struct {
 	position time.Duration
 	duration time.Duration
 	volume   float64
+	// muted 是「静音」这一档，和 volume 分开记（票 #311）。
+	//
+	// ⚠️ **它和 volume 必须是两件事**：静音的时候 volume 一动都不动——取消静音
+	// 放回去的就是它，落盘的也是它。合成一档（静音 = 音量 0）的话，一旦开始
+	// 落盘音量，就会踩 Clementine 那个坑：静音后退出再启动，音量变成 0。
+	muted bool
 	// rate 是播放倍率，和 volume 一样是**用户的选择**，换歌之后还在。
 	// 它必须由这一层记着：播放器只管手上这一首（`audio.Player.SetRate`），
 	// 而新歌是后开的播放器，得有人告诉它「用户要的是几倍」。
@@ -455,7 +472,7 @@ type wakeEntry struct {
 
 // New 建一个空的应用状态，开后台时钟。
 func New() *App {
-	a := &App{volume: 1, rate: audio.DefaultRate, queue: NewQueue(), done: make(chan struct{}),
+	a := &App{volume: DefaultVolume, rate: audio.DefaultRate, queue: NewQueue(), done: make(chan struct{}),
 		streamCache: map[string]*bili.StreamRef{}, after: afterFunc, playLog: defaultPlayLog}
 	go a.tick()
 	return a
@@ -598,6 +615,7 @@ func (a *App) Snapshot() State {
 		Position:      a.position,
 		Duration:      a.duration,
 		Volume:        a.volume,
+		Muted:         a.muted,
 		Rate:          a.rate,
 		Err:           a.errText,
 		ErrDetail:     a.errDetail,
@@ -701,7 +719,10 @@ func (a *App) Open(path string) error {
 	a.mu.Lock()
 	old := a.player
 	// 倍率和音量一样是「用户选的那个值」，换歌之后照旧——见 App.rate 那段。
-	p.SetVolume(a.volume).SetRate(a.rate)
+	//
+	// ⚠️ **送进去的是增益，不是音量那一格**：静音的时候增益是 0，而音量那一格
+	// 记的还是用户设的值（取消静音放回去的就是它）。
+	p.SetVolume(a.gainLocked()).SetRate(a.rate)
 	a.player = p
 	a.online = nil
 	// 🔴 **代次要加**：本地文件和在线流是**两条并行的路**，而在线那一路是后台
@@ -786,20 +807,97 @@ func (a *App) Toggle() {
 	}
 }
 
-// SetVolume 设音量，1 是解码出来的原样，0 静音。
+// SetVolume 设音量，1 是解码出来的原样，0 是没声。
+//
+// ⚠️ **设一个非零的音量等于取消静音**：用户按音量键、滚滚轮、拖滑块，说的都是
+// 「我要出声」——静音着不动的话，按了音量加还是没声音，那一格就成了摆设
+// （mpv 和 VLC 都是这样：动了音量就取消静音）。
+//
+// ⚠️ **设成 0 等于静音**：音量 0 那一档和静音在听感上是一件事（图标也是同一
+// 张），而落盘的时候「用户自己拉到 0」和「按了静音」分不开——分开的那一格是
+// `Muted`，而音量那一格记的是用户设的值。
 func (a *App) SetVolume(v float64) {
 	v = min(max(v, 0), 1)
 	a.mu.Lock()
-	a.volume = v
+	if v <= 0 {
+		a.volume = 0
+		a.muted = true
+	} else {
+		a.volume = v
+		a.muted = false
+	}
+	gain := a.gainLocked()
 	p, wake := a.player, a.wake
 	a.mu.Unlock()
 
 	if p != nil {
-		p.SetVolume(v)
+		p.SetVolume(gain)
 	}
 	if wake != nil {
 		wake()
 	}
+	a.persistVolume()
+}
+
+// ToggleMute 静音 / 取消静音。
+//
+// 静音**不动音量**：取消静音放回去的就是用户设的那一档（落盘的也是它）。
+//
+// ⚠️ **它切的是「现在有没有声」**：音量本身是 0（用户自己把滑块拉到最下）的时候
+// 按它，是**取消静音**——那一档本来就是没声，按一下让它有声。
+//
+// ⚠️ **「压根没有音量可放回去」时给一半**（`DefaultUnmuteVolume`）：那多半是
+// 用户自己把滑块拉到最下过的，或者是第一次运行——按了「取消静音」，听到的应该
+// 是一半声音，不是 0。
+func (a *App) ToggleMute() {
+	a.mu.Lock()
+	if a.muted || a.volume <= 0 {
+		// 现在是没有声的：取消静音，把音量放回去。
+		a.muted = false
+		if a.volume <= 0 {
+			a.volume = DefaultUnmuteVolume
+		}
+	} else {
+		a.muted = true
+	}
+	gain := a.gainLocked()
+	p, wake := a.player, a.wake
+	a.mu.Unlock()
+
+	if p != nil {
+		p.SetVolume(gain)
+	}
+	if wake != nil {
+		wake()
+	}
+	a.persistVolume()
+}
+
+// gainLocked 是**真正送进播放器的增益**。**必须在持锁时调**。
+//
+// 静音的时候是 0——而音量那一格（`a.volume`）一动不动：那是「用户设的是多少」，
+// 和「现在有没有声」是两件事。
+func (a *App) gainLocked() float64 {
+	if a.muted {
+		return 0
+	}
+	return a.volume
+}
+
+// persistVolume 把音量（和静音）写回设置。
+//
+// ⚠️ **锁外面调**：它要去 store 那边拿锁，还要叫醒界面（`UpdateSettings` 末尾
+// 调 `a.invalidate`，而那一句要拿 `a.mu`）——拿着 `a.mu` 调它就是当场死锁。
+func (a *App) persistVolume() {
+	a.mu.Lock()
+	vol, muted := a.volume, a.muted
+	a.mu.Unlock()
+
+	_, _ = a.UpdateSettings(func(s *Settings) {
+		v := vol
+		s.Volume = &v
+		s.Muted = muted
+	})
 }
 
 // SetRate 设播放倍率，夹在 [audio.MinRate, audio.MaxRate]（0.5~2.0）。1 是原速。
