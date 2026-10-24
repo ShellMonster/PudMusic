@@ -133,6 +133,17 @@ func main() {
 	// 所以这里拿到的是会话本身，绑窗口那一下交给 ui.Run。
 	sess := ui.MountMedia(a)
 
+	// 恢复「上次听到哪儿」：队列、当前项和播放位置都从上次退出时的那份恢复，
+	// 恢复出来是**暂停**的（启动时不该突然出声——上游 Biu 和 Dopamine 都这样）。
+	//
+	// ⚠️ **排在所有 Mount 之后**：在线的那一首要取流零件才能开，而那要登录先
+	// 挂好；排在它前面的话，恢复出来的那首在线的歌永远开不起来。
+	//
+	// 失败不挡启动：恢复不出来就照常开一个空队列的应用。
+	if err := a.RestorePlayback(); err != nil {
+		log.Printf("biu: 恢复上次播放的状态失败：%v", err)
+	}
+
 	if err := ui.Run(a, sess); err != nil {
 		log.Fatal(err)
 	}

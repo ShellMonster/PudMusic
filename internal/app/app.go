@@ -241,6 +241,21 @@ type App struct {
 
 	queue *Queue // 播放队列，见 queue.go
 
+	// playbackDirty 是「播放状态变了，该落盘了」。见 playback_state.go。
+	playbackDirty bool
+	// playbackSavedAt 是上一次落盘的时刻，playbackSavedPos 是那一次的位置。
+	//
+	// 两者是用来**限速**的：位置一直在变（在放的时候每一拍都在变），而不限速
+	// 就是每 120ms 写一次整个设置文件。见 savePlaybackIfDue。
+	playbackSavedAt time.Time
+	playbackSavedPos time.Duration
+	// restoreGen 是「这一趟取流是为了恢复上次的位置」的标记，见
+	// playback_state.go。
+	//
+	// ⚠️ **它认的是代次**，所以只对那一趟有效：用户之后点的任何一首歌都是
+	// 另一个代次，不会被这一趟的「安静失败」罩住。
+	restoreGen int
+
 	// account 是扫码登录那摊事（状态、轮询、落盘），见 account.go。
 	// 挂上去之前是 nil，界面要判空。
 	account *Account
@@ -482,6 +497,11 @@ type wakeEntry struct {
 func New() *App {
 	a := &App{volume: DefaultVolume, rate: audio.DefaultRate, queue: NewQueue(), done: make(chan struct{}),
 		streamCache: map[string]*bili.StreamRef{}, after: afterFunc, playLog: defaultPlayLog}
+	// 队列一变就标脏（落盘那一格，见 playback_state.go）。
+	//
+	// ⚠️ **排在起后台时钟之前**：那个钩子会被后台那一拍读到，而 goroutine 的
+	// 创建就是一次同步——排在后面就是一次数据竞争。
+	a.queue.onChange = a.markPlaybackDirty
 	go a.tick()
 	return a
 }
@@ -701,7 +721,17 @@ func (a *App) setCover(url string) {
 }
 
 // Open 打开一个本地音频文件并开始播放，上一首连同它的文件句柄一起关掉。
-func (a *App) Open(path string) error {
+func (a *App) Open(path string) error { return a.openLocal(path, 0, false) }
+
+// openLocal 是「打开一个本地音频文件」的那一条路。
+//
+// paused 为真时打开之后**停在 at 那个位置、不出声**——那是「恢复上次听到哪儿」
+// 用的（见 playback_state.go）。
+//
+// ⚠️ **为什么不能「先放再停」**：出声是 `p.Play()` 那一刻就发生的，而启动时
+// 突然出声是最糟的一种（用户刚打开应用，房间里突然有声音）。所以恢复那一趟
+// 从头到尾都不 `Play()`。
+func (a *App) openLocal(path string, at time.Duration, paused bool) error {
 	p, err := audio.Open(path)
 	if err != nil {
 		a.mu.Lock()
@@ -758,9 +788,24 @@ func (a *App) Open(path string) error {
 	// 队列里的项自带的话，App.play 会在开成功之后补上。
 	a.artist = ""
 	a.artistMid = 0
-	a.position = 0
 	a.duration = p.Duration()
-	a.wantPlay, a.playing = true, true
+	// 位置：正常打开是 0；恢复那一趟是 at（而且夹进 [0, 时长]——存的位置是
+	// 上一首歌的时长，歌换了之后它就超了）。
+	pos := time.Duration(0)
+	if paused {
+		pos = min(max(at, 0), a.duration)
+	}
+	a.position = pos
+	if paused {
+		// 恢复：**停在那个位置，不出声**。
+		//
+		// ⚠️ **`wantPlay` 记成 true**：它说的是「用户想听这一首」，而这一首
+		// 正是上次听到的那首。它要是记成 false，用户按了播放之后这一首放完，
+		// 队列就不会往下走（`onTrackFinished` 认的就是 wantPlay）。
+		a.wantPlay, a.playing = true, false
+	} else {
+		a.wantPlay, a.playing = true, true
+	}
 	a.stopped = false
 	a.clearErrLocked()
 	// ⚠️ **本地文件把 `pending` 让出来**：那一栏记的是「在线的那一首」，
@@ -779,7 +824,14 @@ func (a *App) Open(path string) error {
 	//
 	// ⚠️ **歌名是解锁前拿的**：解锁之后再读 `a.title` 是竞态（别的 goroutine
 	// 可能正在换歌）。
-	a.announce("正在放《" + title + "》")
+	//
+	// ⚠️ **恢复那一趟说的是另一句话**：「正在放《X》」对一首**没有在放**的歌
+	// 是一句谎话，而读屏软件会照着念给用户听。
+	if paused {
+		a.announce("已恢复上次的位置：《" + title + "》")
+	} else {
+		a.announce("正在放《" + title + "》")
+	}
 
 	// 在途的那条在线流也掐掉（代次加了，那一头会自己走人——但它自己走人要等
 	// 网络那一头先回话，而这里可以立刻停）。
@@ -791,7 +843,15 @@ func (a *App) Open(path string) error {
 	if old != nil {
 		old.Close()
 	}
-	p.Play()
+	if paused {
+		// 停在那个位置，**不出声**。
+		if pos > 0 {
+			p.Seek(pos)
+		}
+		p.Pause()
+	} else {
+		p.Play()
+	}
 	a.publishMedia()
 	// 歌词跟着换歌一起换：先重置成默认值，再从缓存恢复（见 lyrics.go）。
 	a.setLyricTrack(LocalItem(path))
@@ -1076,6 +1136,16 @@ func (a *App) Close() {
 	a.mu.Unlock()
 
 	close(a.done)
+
+	// 「上次听到哪儿」这一格：**退出前强制落一次**。
+	//
+	// ⚠️ 落盘是防抖合并写，最后那一下有可能还等在退避窗口里——用户听了一
+	//会儿直接退出，那一格就丢了，而丢了的症状是「重启之后回到空队列」。
+	//
+	// 排在 `close(a.done)` 之后：后台时钟已经停了，不会再有别的 goroutine 来
+	// 改这一格，落下去的就是**最后那个状态**。
+	a.SavePlayback()
+
 	// 播放记录先结掉这一轮，再关那条 goroutine。
 	//
 	// ⚠️ **顺序不能反**：退出这一刻用户可能刚听到一半，那条 PlayEnd 是这一轮
@@ -1189,6 +1259,11 @@ func (a *App) tick() {
 				a.mediaAt = now
 			}
 			a.mu.Unlock()
+
+			// 「上次听到哪儿」这一格：在放的时候位置一直在变，所以按节奏落一次
+			// （见 savePlaybackIfDue）。**不在放的时候它落得更勤**——用户按了
+			// 暂停或者拖了进度条，那一下就该马上落（见那份文件里的那张表）。
+			a.savePlaybackIfDue(now)
 
 			if publish || ended {
 				a.publishMedia()

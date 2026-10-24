@@ -451,7 +451,17 @@ func (it Item) OnlineReady() bool { return playableOnline(it) == nil }
 //
 // 返回的错误只包含「同步就能看出来」的那几种（条目不完整、没挂取流），
 // 它们会让调用方把队列滚回去；网络上的失败走播放条上的红字。
-func (a *App) playOnline(it Item) error {
+func (a *App) playOnline(it Item) error { return a.playOnlineFrom(it, 0, false) }
+
+// playOnlineFrom 是「开一条在线流」的那一条路，可以指定「从哪儿开始」和「开了
+// 之后**别出声**」。
+//
+// 那两个参数只有「恢复上次听到哪儿」那一趟会带（见 playback_state.go）：at 是
+// 要停到的位置，paused 是「开了之后别出声」。
+//
+// ⚠️ **它不能靠「先放再停」**：出声是 `p.Play()` 那一刻就发生的，而启动时突然
+// 出声是最糟的一种（用户刚打开应用，房间里突然有声音）。
+func (a *App) playOnlineFrom(it Item, at time.Duration, paused bool) error {
 	if err := playableOnline(it); err != nil {
 		return err
 	}
@@ -471,6 +481,12 @@ func (a *App) playOnline(it Item) error {
 	// 里界面上什么都不会变——不说这一句，用户看到的就是「点了没反应」。
 	// 超时由 `loadTimedOut` 兜着，不让它变成另一种「什么都不说」。
 	a.beginLoadingLocked(gen, it.Title)
+	// 🔴 **这一趟是「恢复」**：它放不起来的时候**不许**在播放条上冒一句红字
+	// ——启动时用户什么都没做就被骂一句「打不开」，那是应用在说自己，不是在
+	// 说给用户听。见 `failOnline` 里认这一代次的那一处。
+	if paused {
+		a.restoreGen = gen
+	}
 	wake := a.wake
 	a.mu.Unlock()
 
@@ -479,7 +495,7 @@ func (a *App) playOnline(it Item) error {
 	if wake != nil {
 		wake()
 	}
-	go a.runOnline(it, gen)
+	go a.runOnline(it, gen, at, paused)
 	return nil
 }
 
@@ -541,6 +557,7 @@ func (a *App) loadTimedOut(gen int, title string) {
 	}
 	a.onlineGen++
 	a.endLoadingLocked()
+	restore := a.restoreGen == gen
 	wake := a.wake
 	a.mu.Unlock()
 
@@ -550,6 +567,16 @@ func (a *App) loadTimedOut(gen int, title string) {
 	a.abortPendingSource()
 
 	a.logf("biu: 取流超时：%q（代次 %d，%v 内这一段还没回）", title, gen, onlinePlayTimeout)
+	// 🔴 **恢复那一趟：安静地跳过**（理由同 `failOnline` 里那一处）。启动时在
+	// 播放条上冒一句「取流超时了」，用户会以为是自己点的歌放不出来——他这一
+	// 次连歌都还没点。
+	if restore {
+		a.restoreGen = 0
+		if wake != nil {
+			wake()
+		}
+		return
+	}
 	// 🔴 **上屏的那一句必须短**（票 #282 的评审）：播放条上那一行只有 140 像素宽
 	// （1200 宽的窗口，实测），12 号字放得下十来个字，而前面还顶着「打不开：」
 	// 四个字。一句 50 个字的话在屏幕上只剩「打不开：取流…」这样的碎片——
@@ -564,7 +591,10 @@ func (a *App) loadTimedOut(gen int, title string) {
 }
 
 // runOnline 是后台那条线：建一套播放链路，然后（代次还对得上的话）换上。
-func (a *App) runOnline(it Item, gen int) {
+//
+// at / paused 只有「恢复上次听到哪儿」那一趟会带（见 playback_state.go）：
+// at 是要停到的位置，paused 是「开了之后别出声」。
+func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	s := a.streamingSnapshot()
 	if s == nil {
 		a.failPlay(gen, it, "取流零件没挂", errStreamingMissing)
@@ -643,9 +673,23 @@ func (a *App) runOnline(it Item, gen int) {
 	a.cover = it.Cover
 	a.artist = it.Artist
 	a.artistMid = it.ArtistMid
-	a.position = 0
 	a.duration = p.Duration()
-	a.wantPlay, a.playing = true, true
+	// 位置：正常起播是 0；恢复那一趟是 at（夹进 [0, 时长]）。
+	pos := time.Duration(0)
+	if paused {
+		pos = min(max(at, 0), a.duration)
+	}
+	a.position = pos
+	if paused {
+		// 恢复：**停在那个位置，不出声**。
+		//
+		// ⚠️ **`wantPlay` 记成 true**：它说的是「用户想听这一首」，而这一首
+		// 正是上次听到的那首。它要是记成 false，用户按了播放之后这一首放完，
+		// 队列就不会往下走（`onTrackFinished` 认的就是 wantPlay）。
+		a.wantPlay, a.playing = true, false
+	} else {
+		a.wantPlay, a.playing = true, true
+	}
 	a.stopped = false
 	a.quality = ref.Label
 	a.online = &onlineTrack{item: it, ref: ref, source: src, quality: ref.Label}
@@ -661,6 +705,13 @@ func (a *App) runOnline(it Item, gen int) {
 	// 「没有可以重试的那一首」——那枚键是死的。
 	//
 	// 换歌不会让它过期：`playOnline` 每放一首都会把它换成新的那首。
+	//
+	// 🔴 **恢复那一趟到此为止**：它已经放起来了（或者放起来了又坏了），之后
+	// 的错就该照常报给用户了——「安静」只罩住「启动时把上次那一首恢复出来」
+	// 这一趟，见 `failOnline` 里认这一代次的那一处。
+	if paused {
+		a.restoreGen = 0
+	}
 	wake := a.wake
 	a.mu.Unlock()
 
@@ -672,13 +723,28 @@ func (a *App) runOnline(it Item, gen int) {
 	//
 	// ⚠️ **这一句是「发生了什么」，不是「这一枚是什么」**：它说的是刚刚过去的一件
 	// 事（这一首备好了），不是任何一个控件的名字。
-	a.announce("加载完成，正在放《" + it.Title + "》")
+	//
+	// ⚠️ **恢复那一趟说的是另一句话**：「正在放」对一首**没有在放**的歌是一句
+	// 谎话，而读屏软件会照着念给用户听。
+	if paused {
+		a.announce("已恢复上次的位置：《" + it.Title + "》")
+	} else {
+		a.announce("加载完成，正在放《" + it.Title + "》")
+	}
 
 	// 先把新歌换上，再关旧的：换歌期间 tick 拿到的一直是有效的播放器。
 	if old != nil {
 		old.Close()
 	}
-	p.Play()
+	if paused {
+		// 停在那个位置，**不出声**。
+		if pos > 0 {
+			p.Seek(pos)
+		}
+		p.Pause()
+	} else {
+		p.Play()
+	}
 	a.publishMedia()
 	// 歌词跟着换歌一起换：先重置成默认值，再从缓存恢复（见 lyrics.go）。
 	// 放在换上播放器**之后**——歌词区问的是「现在放的是哪一首」，那一刻
@@ -1140,6 +1206,7 @@ func (a *App) failOnline(gen int, it Item, branch string, err error) {
 	stale := a.onlineGen != gen
 	closed := a.closed
 	cur := a.onlineGen
+	restore := a.restoreGen == gen
 	a.mu.Unlock()
 	if stale || closed {
 		if closed {
@@ -1149,6 +1216,19 @@ func (a *App) failOnline(gen int, it Item, branch string, err error) {
 			a.logf("biu: 在途的播放被作废了（代次变了）：%q（%s，来的代次 %d，现在的代次 %d）：%v",
 				it.Title, branch, gen, cur, err)
 		}
+		return
+	}
+	// 🔴 **恢复那一趟：安静地跳过**。
+	//
+	// 这一趟是「把上次听到哪儿恢复出来」（见 playback_state.go），它放不起来
+	// 的时候**不许**在播放条上冒一句红字——启动时用户什么都没做就被骂一句
+	// 「打不开」，那是应用在说自己，不是在说给用户听。
+	//
+	// ⚠️ **它只罩住这一代次**：用户之后点的任何一首歌都是另一个代次，不会
+	// 被这一句「安静」顺带吞掉。
+	if restore {
+		a.logf("biu: 恢复上次的那一首放不起来（安静跳过）：%q（%s，代次 %d）：%v",
+			it.Title, branch, gen, err)
 		return
 	}
 	a.logf("biu: 播放失败：%q（%s，代次 %d）：%v", it.Title, branch, gen, err)

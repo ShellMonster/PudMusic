@@ -67,12 +67,19 @@ var biuKeys = []string{
 // **不在 app-settings.json 里**。而我们**必须**落盘它——不落盘的话，用户为了
 // 不吵把音量调到 20%，重启之后又是 100%（耳机上那是真的惊吓）。
 // 键名照 Biu 的字段名逐字抄（`volume` / `isMuted`）。
+//
+// ⚠️ **「上次听到哪儿」（`playback`）也在这一栏里**，理由同上（它在 Biu 那边是
+// `play-list` store 的 `list` / `playId` 和 `play-progress` 的
+// `localStorage["play-current-time"]`）。而它**尤其**该跟着设置走：它和音量、
+// 播放模式在**同一次原子写**里落盘，三者之间才没有「谁先谁后」的竞态
+// （见 `internal/app/playback_state.go` 文件头那张表）。键名是我们自己的。
 var ourOwnKeys = []string{
 	"sideMenuCollectionOrder",
 	"playMode",
 	"shouldKeepPagesOrderInRandomPlayMode",
 	"volume",
 	"isMuted",
+	"playback",
 }
 
 // TestSettingsKeysMatchBiu 逐字比对键名。
@@ -944,7 +951,8 @@ const ourOwnKeysJSON = `{
 	"playMode": "loop",
 	"shouldKeepPagesOrderInRandomPlayMode": false,
 	"volume": 1,
-	"isMuted": false
+	"isMuted": false,
+	"playback": {"items": [], "current": "", "positionMs": 0}
 }`
 
 // wantSettings 是「读完一份 Biu 的文件之后应该拿到的那份设置」。
