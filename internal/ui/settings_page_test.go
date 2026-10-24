@@ -422,7 +422,7 @@ func TestTogglingAutoStartGoesThroughTheSystem(t *testing.T) {
 // 一个死数」——`MaxWidth` 是上限，可视区多窄它就多窄，最小窗口（900 - 侧栏
 // 200 = 700）上照抄一个固定 900 会把右边推出去。
 func TestTheSettingsContentIsCappedAndCentered(t *testing.T) {
-	const sideW = 200 // 默认侧栏宽（app.DefaultSideMenuWidth）
+	const sideW = int(app.DefaultSideMenuWidth) // 默认侧栏宽
 
 	for _, winW := range []int{1200, 1400, 1000} {
 		tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), at(winW, 800))

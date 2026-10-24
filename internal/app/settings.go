@@ -121,10 +121,11 @@ const (
 // 放在这一层而不是界面层，是因为 normalize 也要用：设置文件是用户能直接编辑的，
 // 一个 `sideMenuWidth: 99999` 不该一路穿到画界面的那一行。
 const (
-	CollapsedSideMenuWidth = 72.0
-	MinSideMenuWidth       = 160.0
-	MaxSideMenuWidth       = 480.0
-	DefaultSideMenuWidth   = 200.0
+	// 设计规范 v0.1 §4：展开 220（可拖 180 到 300），折叠 64 仅图标。上游 Biu 是 72 / 160~480 / 200。
+	CollapsedSideMenuWidth = 64.0
+	MinSideMenuWidth       = 180.0
+	MaxSideMenuWidth       = 300.0
+	DefaultSideMenuWidth   = 220.0
 )
 
 // ClampSideMenuWidth 把一个宽度拉进 [MinSideMenuWidth, MaxSideMenuWidth]。
