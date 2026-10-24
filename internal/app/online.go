@@ -835,8 +835,10 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	}
 	// 音量和倍率**现读**（理由见上面那段注释）：建一条在线流要走网络，
 	// 这中间用户完全可能按了音量或者换了倍速。建完才读，读到的才是当下那个值。
+	//
+	// ⚠️ **音量读的是增益**（静音的时候是 0），而音量那一格记的还是用户设的值。
 	a.mu.Lock()
-	vol, rate := a.volume, a.rate
+	vol, rate := a.gainLocked(), a.rate
 	a.mu.Unlock()
 	p.SetVolume(vol).SetRate(rate)
 	return src, p, nil

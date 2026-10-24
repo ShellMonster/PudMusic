@@ -1054,6 +1054,43 @@ var Items = []Item{
 	},
 	{
 		Category: Negative,
+		// 音量三件套（票 #311）。这一组盯的是三件**静默**的事：
+		//
+		//  1. 音量不落盘 → 每次启动回到 100%。用户为了不吵把音量调到 20%，
+		//     重启之后突然全速——耳机上那是真的惊吓。
+		//  2. 静音还是「音量 0」的话，一旦开始落盘音量，「静音后退出再启动，
+		//     音量永远是 0」就成了必然（Clementine 的老毛病）。所以静音是它
+		//     自己的一格，而音量那一格记的是用户设的值。
+		//  3. 「这份设置里没有音量这一格」（老版本写的文件）和「用户自己把音量
+		//     拉到 0」分不开的话，升级上来的用户打开应用是**一点声都没有**，
+		//     而界面上不会说任何一个字。
+		//
+		// 第四件是「音量不一步跳过去」：开始放 / 恢复时从 0 走到那一档（淡入），
+		// 调音量和按静音时从当前值渐变到新值（渐变 / 淡出）。
+		Spec: "音量：落盘记住（重启还是上次那一档）；静音是独立的一格（静音后退出再启动，音量不是 0）；开始放 / 恢复时淡入，调音量时渐变，不是瞬间跳",
+		Tests: []string{
+			// 落盘与读回。
+			"TestTheVolumeSurvivesARestart",
+			"TestMuteIsItsOwnFlag",
+			// 「没有这一格」和「这一格是 0」分得开。
+			"TestAnOldSettingsFileGetsTheDefaultVolume",
+			"TestAVolumeOfZeroIsNotTheSameAsNoVolume",
+			// 静音那一格自己的语义。
+			"TestUnmutingRestoresTheVolume",
+			"TestSettingANonZeroVolumeUnmutes",
+			"TestDraggingTheVolumeToZeroIsMute",
+			"TestAMutedPlayerStillKeepsItsVolume",
+			"TestMutedAlwaysDrawsTheMuteIcon",
+			// 淡入 / 渐变 / 淡出。
+			"TestTheVolumeFadesInOnStart",
+			"TestSettingTheVolumeRamps",
+			"TestMutingFadesOut",
+			"TestSettingTheVolumeRetargetsTheRamp",
+			"TestCloseStopsTheRamp",
+		},
+	},
+	{
+		Category: Negative,
 		// 封面落盘缓存（#158 / BMG-98）。这一组盯的都是**静默**的错法：
 		// 没有上限就是磁盘一直长；删到目录外面就是删用户文件；半截文件被当成
 		// 命中就是「每次启动都先闪一张坏图」；读盘放到主线程就是「滚列表卡住」。

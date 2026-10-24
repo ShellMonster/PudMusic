@@ -433,7 +433,7 @@ func TestEveryVolumeLevelHasItsIcon(t *testing.T) {
 	}
 	seen := map[string]float64{}
 	for _, c := range cases {
-		if got := volumeIcon(c.volume); got != c.want {
+		if got := volumeIcon(c.volume, false); got != c.want {
 			t.Errorf("音量 %v 配的图标是 %q，want %q", c.volume, got, c.want)
 		}
 		if icon(c.want) == nil {
@@ -443,6 +443,23 @@ func TestEveryVolumeLevelHasItsIcon(t *testing.T) {
 			t.Errorf("音量 %v 和 %v 配的是同一张图标 %q", c.volume, prev, c.want)
 		}
 		seen[c.want] = c.volume
+	}
+}
+
+// TestMutedAlwaysDrawsTheMuteIcon 钉住「静音」这一格自己说了算。
+//
+// ⚠️ **静音的时候音量那一格记的还是用户设的值**（票 #311）：用户为了不吵把音量
+// 调到 20%，按了静音——取消静音放回去的就是 20%，落盘的也是 20%。
+//
+// 而画面上这时候要画的是**静音那张**：不靠「音量是不是 0」去猜（用户自己把滑块
+// 拉到 0 也是静音，但不是「按了静音」）。
+func TestMutedAlwaysDrawsTheMuteIcon(t *testing.T) {
+	if got := volumeIcon(0.2, true); got != iconVolumeMute {
+		t.Errorf("静音的时候画的图标是 %q，want %q", got, iconVolumeMute)
+	}
+	// 没静音的时候那一档还是照音量走（0.2 是「小」那一档）。
+	if got := volumeIcon(0.2, false); got != iconVolumeMid {
+		t.Errorf("没静音、音量 0.2 的时候画的图标是 %q，want %q", got, iconVolumeMid)
 	}
 }
 
