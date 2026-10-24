@@ -160,7 +160,7 @@ func (p *mpSession) push(n NowPlaying, art id) {
 	// 状态说在放」这种对不上的组合——而它**不会自己好回来**，因为校正只在
 	// 播放中跑。
 	//
-	// 所以这里宁可这一次什么也不写（下一��� publish 自然会补上），也不要写坏。
+	// 所以这里宁可这一次什么也不写（下一次 publish 自然会补上），也不要写坏。
 	if !onObjCThreadNow() {
 		warnPushOffThread.Do(func() {
 			log.Printf("biu: 系统媒体会话有一次写入不在它自己那条线程上，已拒掉（" +

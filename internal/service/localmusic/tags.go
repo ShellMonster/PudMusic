@@ -39,7 +39,7 @@ import (
 // headRead 是从文件头读多少字节来够找标签。
 //
 // 够绝大多数真实文件用：ID3v2 允许一个大到离谱的标签（几 MB 的封面），
-// FLAC 的注释块也在头��，WAV 的 INFO 通常在 fmt 之后不远。真读到了边界之外
+// FLAC 的注释块也在头部，WAV 的 INFO 通常在 fmt 之后不远。真读到了边界之外
 // 就是这一份读不出来 —— 退回文件名，不报错。
 const headRead = 4 << 20 // 4 MiB
 
@@ -410,7 +410,7 @@ func oggTitle(b []byte) string {
 
 // oggPackets 取开头那几页里的**完整**数据包，最多 maxPackets 个。
 //
-// 跨页的包**不拼**：真实的 Ogg 标签经常一个大包顶一页，而这���只读了文件
+// 跨页的包**不拼**：真实的 Ogg 标签经常一个大包顶一页，而这里只读了文件
 // 开头那一段（`headRead`），拼不出来就如实返回「没有」，由调用方退回文件名。
 func oggPackets(b []byte, maxPackets int) [][]byte {
 	var out [][]byte

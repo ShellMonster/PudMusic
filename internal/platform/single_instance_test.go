@@ -96,7 +96,7 @@ const lockStayEnv = "BIU_TEST_LOCK_STAY"
 //
 // 为什么单开这个模式：另外两条并发测试靠的是框架的 unix socket，而那条路在
 // Windows 上能不能走要看系统（AF_UNIX，Win10 1703+ 才有）。而 `lockExclusive`
-// 本身在三个平台上都要验——Windows 那份是一个独立的实���（LockFileEx），上一轮
+// 本身在三个平台上都要验——Windows 那份是一个独立的实例（LockFileEx），上一轮
 // review 就抓到过它只在 darwin 上跑过、逻辑错了没人发现。这个模式不依赖任何
 // socket，所以**每个平台都会跑**。
 const lockProbeEnv = "BIU_TEST_LOCK_PROBE"
