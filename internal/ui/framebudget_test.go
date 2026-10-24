@@ -635,7 +635,7 @@ func TestEachScreenIsBuiltOncePerFrame(t *testing.T) {
 			s.builds = buildTally{}
 			tt.Frame()
 			if tt.FramePending() {
-				t.Fatal("这一帧之后还在要帧——一帧画了两遍以上，"+
+				t.Fatal("这一帧之后还在要帧——一帧画了两遍以上，" +
 					"「一帧建几遍」这个单位已经不是一帧了")
 			}
 			// 这一帧画完了吗？崩了的帧画的是**错误页**（`s.crash` 非 nil），
@@ -728,7 +728,7 @@ func measureFrames(t *testing.T, tt *mygoui.Tester, n int) frameCost {
 	return frameCost{
 		allocs: float64(after.Mallocs-before.Mallocs) / float64(n),
 		bytes:  float64(after.TotalAlloc-before.TotalAlloc) / float64(n),
-		live:   float64(int64(afterGC.HeapAlloc) - int64(before.HeapAlloc)) / float64(n),
+		live:   float64(int64(afterGC.HeapAlloc)-int64(before.HeapAlloc)) / float64(n),
 	}
 }
 

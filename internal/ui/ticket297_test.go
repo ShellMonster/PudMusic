@@ -425,7 +425,7 @@ func segmentDrawerCallers(t *testing.T) map[string]map[string]bool {
 		t.Fatal(err)
 	}
 	out := map[string]map[string]bool{
-		"segmentButton":  {},
+		"segmentButton":   {},
 		"settingsSegment": {},
 	}
 	for _, name := range matches {
