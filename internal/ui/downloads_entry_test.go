@@ -83,8 +83,10 @@ func TestTheMissingDownloadDirectoryTakesYouToTheSetting(t *testing.T) {
 // ⚠️ **判据是「它在不在可视区里」**：设置页那一格有几十行，「下载目录」在第三
 // 段——不滚过去的话用户看到的还是「外观」那一段，而他要配的东西在下面。
 //
-// ⚠️ **滚进视野要跨两帧**：量的是上一帧的盒子（`Element.Bounds()` 的规矩），
-// 而刚跳过来那一帧画的是别的页——所以这里等的是「它进了视野」，不是「跳过去了」。
+// ⚠️ **连说明那一行也要在视野里**：它是那一行的下半截，贴着边的话它被切掉半截
+// ——而那正是「滚进视野」要避免的事。所以上游那一行（`Element.ScrollIntoView()`）
+// 滚的是「刚好露出这一行的**盒子**」，而盒子底下垫着的那 16 像素（见
+// `settingsFocusMargin`）就是给它的留白。
 func TestTheDownloadDirectoryIsScrolledIntoView(t *testing.T) {
 	_, tt := newRows(t)
 	if err := tt.Click("还没有下载目录"); err != nil {
@@ -99,6 +101,55 @@ func TestTheDownloadDirectoryIsScrolledIntoView(t *testing.T) {
 		}
 		return r.Y >= pageTop && r.Y+r.H <= pageBottom
 	})
+	// ⚠️ **说明那一行也得整个在视野里**：它比标题低一截，标题还在而它被切了，
+	// 用户看见的就是「设置项的名字在，说明只剩半行」。
+	desc, ok := tt.Find("选择音视频保存的位置")
+	if !ok {
+		t.Fatalf("设置页上没有「选择音视频保存的位置」这一句说明，文字有 %q", tt.Texts())
+	}
+	if desc.Y+desc.H > pageBottom {
+		t.Errorf("「下载目录」那一行的说明被切了：它的下沿 %.1f 在可视区下沿 %.1f 之下",
+			desc.Y+desc.H, float64(pageBottom))
+	}
+}
+
+// TestTheFocusedSettingDoesNotPushTheRowsBelowIt 断「指着的那一行」**不会**把
+// 设置页里它下面的每一行压低。
+//
+// ⚠️ **它是怎么坏过的**：为了补上那 16 像素的留白，曾经给被指着的那一行垫了
+// 16 像素的**下内边距**——而那 16 像素是**内容高度**的一部分，于是它下面每一行
+// 都低了 16 像素（「下载目录」到「FFmpeg 路径」的行距从 24 变成 40）。落地那一
+// 帧看不出来（用户看见的还是同一行被指着），**往下滚一屏就看得见**。
+//
+// 判据：**指着的那一行不许把这一页的内容撑高**——两个外壳，一份没指着、一份
+// 指着了，内容总高必须一样（`ScrollState.MaxY` 是内容高度减去可视区高度，
+// 与滚到哪儿无关）。
+func TestTheFocusedSettingDoesNotPushTheRowsBelowIt(t *testing.T) {
+	// 外壳一：直接进设置页，什么也没指着。
+	s1, tt1 := newRows(t)
+	s1.navigate(settingsPath)
+	for range 3 {
+		tt1.Frame()
+	}
+	plain := s1.settings.scroll.MaxY
+
+	// 外壳二：从下载记录页跳过来，「下载目录」那一行被指着。
+	s2, tt2 := newRows(t)
+	if err := tt2.Click("还没有下载目录"); err != nil {
+		t.Fatalf("点页头那一句：%v", err)
+	}
+	for range 8 {
+		tt2.Frame()
+	}
+	if s2.settings.focus != settingsFocusDownload {
+		t.Fatalf("没有指着「下载目录」那一行，focus=%q", s2.settings.focus)
+	}
+	focused := s2.settings.scroll.MaxY
+
+	if focused != plain {
+		t.Errorf("指着「下载目录」那一行把设置页的内容撑高了 %.3f 像素（%.3f → %.3f）——"+
+			"它下面每一行都被压低了", focused-plain, plain, focused)
+	}
 }
 
 // TestChangingTheDownloadDirectorySaysWhereItTakesEffect 断改完下载目录之后
