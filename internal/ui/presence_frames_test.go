@@ -94,7 +94,7 @@ func TestAnUnseenWindowDrawsTheFrameItGetsButAsksForNoMore(t *testing.T) {
 	// 两条都验过（各自反向验证过一次：把 view 改成看不见就 return，只有第二条
 	// 会红；把送帧的那一句去掉，两条都会红）。
 	if *frames <= before {
-		t.Errorf("看不见的窗口收到一帧之后，view 一次都没被调用——"+
+		t.Errorf("看不见的窗口收到一帧之后，view 一次都没被调用——" +
 			"这一帧是用户切回来时看到的，它不能丢")
 	}
 	// 而且是**建出来了**，不是画了半张：播放条那一条界面建过。
@@ -111,7 +111,7 @@ func TestAnUnseenWindowDrawsTheFrameItGetsButAsksForNoMore(t *testing.T) {
 	// 而它**不再要下一帧**：`hover.SetFrameVisible(false)` 挡住了自发动画
 	// （波形、频谱），所以这一帧画完就停。
 	if tt.FramePending() {
-		t.Errorf("看不见的窗口画完这一帧之后还在请求下一帧——"+
+		t.Errorf("看不见的窗口画完这一帧之后还在请求下一帧——" +
 			"这一帧画完就该停（`hover.SetFrameVisible` 挡住了自发动画）")
 	}
 

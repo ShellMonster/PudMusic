@@ -326,18 +326,18 @@ func (s *Shell) viewFavoriteGroup(c *ui.Context, st app.Settings, g app.Favorite
 	//
 	// ⚠️ **上边距用 `Margin(top, …)`**（不是 `MarginY`）：`MarginY` 设的是上下
 	// 两个，而这里要的是**上面**那一截——下面那一截由这一组自己的内容决定。
-	ui.Column(c).Key("fav-group:" + strconv.Itoa(int(g))).Gap(space.Px2).
+	ui.Column(c).Key("fav-group:"+strconv.Itoa(int(g))).Gap(space.Px2).
 		Margin(top, space.None, space.None, space.None).Children(func() {
-			s.viewFavoriteHeader(c, g, folded)
-			if folded {
-				return
+		s.viewFavoriteHeader(c, g, folded)
+		if folded {
+			return
+		}
+		if len(items) == 0 {
+			if emptyText != "" {
+				s.viewFavoritesEmptyLine(c, emptyText)
 			}
-			if len(items) == 0 {
-				if emptyText != "" {
-					s.viewFavoritesEmptyLine(c, emptyText)
-				}
-				return
-			}
+			return
+		}
 		s.viewFavoriteList(c, g, items)
 	})
 }

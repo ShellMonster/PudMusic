@@ -225,7 +225,7 @@ func TestSwitchingToATabThatIsStillLoadingKeepsTheOldContentEvenAfterTheClockMov
 	}
 	// 而「正在加载流行推荐」那一格**不许出现**（票 #368 的验收第 3 条）。
 	if showsText(tt, "正在加载流行推荐") {
-		t.Errorf("切到「流行」而它还在拉的时候画了「正在加载流行推荐」——\n"+
+		t.Errorf("切到「流行」而它还在拉的时候画了「正在加载流行推荐」——\n" +
 			"那一格只在真的没内容可画时才有（票 #368）")
 	}
 }
@@ -509,9 +509,9 @@ func TestTheFadeOutStartsAtFullOpacity(t *testing.T) {
 // （升上来 8 DIP）。写成 0 的话两边的淡入会**叠乘**——新的那一块会淡入两遍。
 func TestTheBodyTransitionDoesNotCopyTheOldContent(t *testing.T) {
 	if homeBodyTransition.Exit != nil {
-		t.Errorf("内容那一块的过渡还写着 `Exit`——框架会复制一份上一帧的样子，\n"+
-			"而那份复制品要重新排一遍旧列表的文字（实测 204 KB），\n"+
-			"而且它和新的那一块**同时在画面上**（重影）。\n"+
+		t.Errorf("内容那一块的过渡还写着 `Exit`——框架会复制一份上一帧的样子，\n" +
+			"而那份复制品要重新排一遍旧列表的文字（实测 204 KB），\n" +
+			"而且它和新的那一块**同时在画面上**（重影）。\n" +
 			"退场那一段要改成**旧的那一块自己的不透明度**（见 homepage_transition.go）")
 	}
 	if homeBodyTransition.Enter == nil {

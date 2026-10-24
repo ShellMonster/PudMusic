@@ -206,7 +206,7 @@ func TestThePlayBarCoverWithoutOneShowsSomething(t *testing.T) {
 			"空着的话用户看到的是「这里缺一块」", got)
 	}
 	if !hasCoverBorder(tt) {
-		t.Error("没封面时那一格没有描边框——那一圈线是「这一格最后会是一张图，"+
+		t.Error("没封面时那一格没有描边框——那一圈线是「这一格最后会是一张图，" +
 			"但现在没有」的标记")
 	}
 }

@@ -246,7 +246,7 @@ func TestTheSearchWatchStopsWhileTheFullPlayerIsOpen(t *testing.T) {
 		tt.Frame()
 	}
 	if s.searchWatchStop != nil {
-		t.Errorf("满屏开着的时候那个 125ms 的钟还醒着——"+
+		t.Errorf("满屏开着的时候那个 125ms 的钟还醒着——" +
 			"它叫醒的每一帧画的都是满屏（白醒）")
 	}
 	if !s.laterPage.pendingSince.IsZero() {
@@ -296,7 +296,7 @@ func TestTheShortcutRecordingSurvivesTheFullPlayer(t *testing.T) {
 		tt.Frame()
 	}
 	if s.recording == (shortcutSlot{}) {
-		t.Errorf("满屏开着的时候「正在录」被静默取消了——"+
+		t.Errorf("满屏开着的时候「正在录」被静默取消了——" +
 			"而录制期间窗口一个应用内组合键都不登记，用户看不见为什么")
 	}
 }
