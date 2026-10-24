@@ -522,13 +522,23 @@ func TestTheDisplayStyleSettingShowsAPreviewOfEachStyle(t *testing.T) {
 	}
 }
 
-// TestThePreviewHighlightsTheChosenStyle 钉住预览上「哪一张是现在这一档」。
+// TestThePreviewCarriesNoSelectionSignal 钉住预览上**没有**「哪一张是现在
+// 这一档」的那一层。
+//
+// # 这一条是反过来写的（票 #297）
+//
+// 此前这一格里有**两个**选中信号：药丸（实心主色底，说「现在是列表」）**加上**
+// 选中那张预览的主色描边（也说「现在是列表」）。同一格里两种信号，用户会以为
+// 预览也是能点的（而它不是——预览不可点，见 `displaymode.go` 的注释）。
+//
+// 票 #297 裁掉的是后者：**预览是示意图**（那三档长什么样），现在是哪一档由
+// 药丸说。
 //
 // ⚠️ **不数「主色像素有几个」**：边框那一圈是圆角 + 抗锯齿画出来的，量出来的是
 // {87 225 136} 这种混了白边的颜色，一个像素都对不上主色（实测三档都是 0 个）——
 // 那是判据不对，不是没画。改成「这一格的边框里离主色最近的像素，比离普通边框色
 // 更近」：抗锯齿只影响「有几个」，不影响「哪边更近」。
-func TestThePreviewHighlightsTheChosenStyle(t *testing.T) {
+func TestThePreviewCarriesNoSelectionSignal(t *testing.T) {
 	for _, mode := range []app.DisplayMode{
 		app.DisplayModeList, app.DisplayModeCard, app.DisplayModeCompact,
 	} {
@@ -539,20 +549,15 @@ func TestThePreviewHighlightsTheChosenStyle(t *testing.T) {
 				return st
 			}())
 			th := BuildTheme(a.SettingsSnapshot(), false)
-			chosen := list.ViewOf(mode)
 
 			for v := list.View(0); v < list.ViewCount; v++ {
 				r, ok := tt.Find("预览：" + v.String())
 				if !ok || r.W <= 0 {
 					t.Fatalf("「预览：%s」没画出来", v.String())
 				}
-				got := borderLeansToAccent(tt, r, th.Accent, th.Border)
-				if v == chosen && !got {
-					t.Errorf("选中的是「%s」，而那一张的描边不是主色——预览指着错的",
-						chosen.String())
-				}
-				if v != chosen && got {
-					t.Errorf("没选中的「%s」描边也是主色——三张分不出哪一档是现在这一档",
+				if borderLeansToAccent(tt, r, th.Accent, th.Border) {
+					t.Errorf("「预览：%s」那一张描的是主色边——那一格里就有**两种**"+
+						"选中信号了（药丸 + 预览的绿框），票 #297 裁掉的就是这个",
 						v.String())
 				}
 			}
