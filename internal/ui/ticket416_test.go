@@ -251,7 +251,7 @@ func TestTheDynamicItemIsFullWidthWithOneBottomBorder(t *testing.T) {
 						x, got)
 				}
 			}
-			for _, x := range []int{int(card.X), int(card.X + card.W) - 1} {
+			for _, x := range []int{int(card.X), int(card.X+card.W) - 1} {
 				for y := int(card.Y); y < bottom; y++ {
 					if got := img.RGBAAt(x, y); got == border {
 						t.Fatalf("卡片侧边（x=%d）在 y=%d 也有一道描边（%v）——"+
