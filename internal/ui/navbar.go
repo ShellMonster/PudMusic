@@ -100,12 +100,18 @@ func (s *Shell) viewNav(c *ui.Context) {
 	// 后退/前进也是换页：上一页的提示同样不该留着，崩过的状态同样该复位。
 	back := func() { s.clearToasts(); s.crash = nil }
 
-	// ⚠️ 隐藏标题栏的窗口里，红黄绿是叠在内容上面的。左边让出 bar.Left、
-	// 右边让出 bar.Right，才不会把它们压住。
+	// ⚠️ 隐藏标题栏的窗口里，窗口控件是叠在内容上面的。**右边**让出 bar.Right，
+	// 才不会把它们压住。
+	//
+	// ⚠️ **左边不再让出 bar.Left**（票 #165 / 报告 C-01）：顶栏现在**只盖内容区
+	// 那一段**（x ≥ 侧栏宽），而 macOS 的红黄绿在**窗口左上角**——也就是侧栏
+	// 那一带，跟顶栏压根不在一块。让开它们的是侧栏的品牌块（`sidebar.go` 的
+	// `sideBrandTopPad`：macOS 非全屏时上边留 32，给红黄绿腾出那一格）。
+	// 继续让的话，顶栏左边会空出 `bar.Left` 那么宽（真窗口上 66 像素）。
 	bar := c.TitleBar()
 
 	nav := ui.Row(c).Key("nav").Height(max(bar.Height, navMinHeight)).
-		Padding(space.None, bar.Right+8, space.None, bar.Left+8).
+		Padding(space.None, bar.Right+8, space.None, space.Px8).
 		Gap(space.Px8).AlignItems(ui.Center)
 
 	// Biu 的 `window-no-drag`（`index.tsx:22`）：建议浮层开着的时候整条不拖。
