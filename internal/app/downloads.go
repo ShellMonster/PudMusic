@@ -150,7 +150,9 @@ func (a *App) downloadFinished(s download.Snapshot) {
 	case download.StatusDone:
 		a.announce("《" + s.Title + "》下载完成")
 	case download.StatusError:
-		a.announce("《" + s.Title + "》下载失败：" + s.Err)
+		// ⚠️ **剥掉内部前缀**（"download: "）：那是我们自己的说法，读屏软件
+		// 是逐字念的（理由见 `announce.go` 的 `announceErrTextOf`）。
+		a.announce("《" + s.Title + "》下载失败：" + announceErrTextOf(s.Err))
 	}
 }
 

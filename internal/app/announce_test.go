@@ -114,6 +114,54 @@ func TestADownloadThatFinishedIsReadOut(t *testing.T) {
 	}
 }
 
+// TestTheAnnouncedErrorIsNotTheRawGoError 钉住「念出来的不是英文系统错」。
+//
+// 🔴 **读屏软件是逐字念的**：而 `err.Error()` 是
+// "open /Users/x/a.m4a: no such file or directory"——用户听到的是一串他完全
+// 不懂的英文路径。
+func TestTheAnnouncedErrorIsNotTheRawGoError(t *testing.T) {
+	a := newAnnounceApp(t)
+	c := &announceCollector{}
+	a.AddAnnounce(c.sink)
+
+	_ = a.Open("/biu-go/这个文件不存在.m4a")
+
+	got := c.take()
+	if len(got) != 1 {
+		t.Fatalf("念出去的是 %q", got)
+	}
+	if strings.Contains(got[0], "no such file") || strings.Contains(got[0], "/biu-go/") {
+		t.Fatalf("念出去的是原始的 Go 错串：%q", got[0])
+	}
+	if !strings.Contains(got[0], "打不开这个文件") {
+		t.Fatalf("念出去的是 %q，want 一句人话", got[0])
+	}
+}
+
+// TestTheAnnouncedDownloadErrorHasNoInternalPrefix 钉住「内部前缀不念出去」。
+//
+// "download: " 是**我们自己的说法**，用户听不懂；而读屏软件是逐字念的。
+func TestTheAnnouncedDownloadErrorHasNoInternalPrefix(t *testing.T) {
+	a := newAnnounceApp(t)
+	c := &announceCollector{}
+	a.AddAnnounce(c.sink)
+
+	a.downloadFinished(download.Snapshot{
+		Title: "晴天", Status: download.StatusError, Err: "download: 拉字节：连接被重置",
+	})
+
+	got := c.take()
+	if len(got) != 1 {
+		t.Fatalf("念出去的是 %q", got)
+	}
+	if strings.Contains(got[0], "download: ") {
+		t.Fatalf("念出去的是带内部前缀的：%q", got[0])
+	}
+	if !strings.Contains(got[0], "连接被重置") {
+		t.Fatalf("念出去的是 %q，want 那半句错还在（只是前缀没了）", got[0])
+	}
+}
+
 // TestADownloadThatFailedIsReadOut 钉住「下载失败」那一句。
 func TestADownloadThatFailedIsReadOut(t *testing.T) {
 	a := newAnnounceApp(t)

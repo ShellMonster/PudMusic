@@ -17,8 +17,16 @@
 // 「取走」是**有破坏性**的：谁先画一帧谁就取走了，于是迷你开着的时候那一句
 // 可能被收起来的主窗口吃掉，迷你窗口永远听不到。
 //
-// 挨个送就没有这个问题：两扇窗都拿到同一句，而只有**看得见**的那一扇会把它
-// 念出来（看不见的窗口连帧都不画，见 `internal/ui/wake.go` 的规则三）。
+// 挨个送就没有这个问题：每一扇窗自己决定收不收——界面层那一头会问「用户现在
+// 看得到这一扇吗」，看不见的直接丢掉（见 `internal/ui/announce.go` 的
+// `Shell.announce`）。
+//
+// ⚠️ **两扇窗不会同时收下同一句**：主窗口和迷你播放器**互斥**（迷你开着的时候
+// 主窗口收在后台，见 `miniplayer.go`），而「看得见」是**逐窗口**的判据
+// （`presence.seen`）——于是同一时刻只有一扇窗看得见，也只有它收得下。
+//
+// ⚠️ **收在后台的那一扇不会攒着**：它看不见的时候连帧都不画，攒着的话等用户
+// 回来时会**一次性全念出来**（攒了多久就念多久之前的旧事）。
 //
 // # 念出来的是「发生了什么」，不是「这个元素是什么」
 //
@@ -29,7 +37,54 @@
 // 也没有——那正是这一票要消掉的毛病。
 package app
 
-import "slices"
+import (
+	"errors"
+	"os"
+	"slices"
+	"strings"
+
+	"github.com/ShellMonster/Biu_Go/internal/service/audio"
+)
+
+// announceErrText 把一个错翻成一句**给用户听**的话。
+//
+// ⚠️ **不许念原始的 Go 错串**：那是 "open /Users/x/a.m4a: no such file or
+// directory" 这种英文系统错，而读屏软件是**逐字念**的——用户听到的是一串他
+// 完全不懂的英文路径。
+//
+// ⚠️ **在线流那一路已经过了 `bili.Friendly`**（见 `online.go` 的 `failOnline`），
+// 那一档不用这里管；这里是**本地文件**和**下载**那两路——它们的错是服务层原样
+// 递过来的。
+func announceErrText(err error) string {
+	if err == nil {
+		return ""
+	}
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return "打不开这个文件（它已经不在原来的位置上了）"
+	case errors.Is(err, os.ErrPermission):
+		return "打不开这个文件（没有读它的权限）"
+	case errors.Is(err, audio.ErrLocalFormat), errors.Is(err, audio.ErrUnsupportedFormat):
+		return "这个文件的格式放不了（这台机器的解码器认不出它）"
+	}
+	return announceErrTextOf(err.Error())
+}
+
+// announceErrTextOf 从**一句**错里挑出给用户听的那部分。
+//
+// ⚠️ **内部前缀要剥掉**（"download: " / "app: "）：那是我们自己的说法，用户
+// 听不懂。界面层那一处剥它们（`internal/ui/downloadlist_ops.go` 的
+// `trimDownloadErr`）——这里是同一件事的另一半：播报是**逐字念**的，念出
+// 「download: 」比念出「出了点问题」还糟。
+func announceErrTextOf(msg string) string {
+	for _, p := range []string{"download: ", "app: "} {
+		msg = strings.TrimPrefix(msg, p)
+	}
+	if msg == "" {
+		return "出了点问题"
+	}
+	return msg
+}
 
 // announceSink 是一扇窗的播报句柄：界面层装一个，App 往里送要念的句子。
 type announceSink func(text string)

@@ -2888,8 +2888,9 @@ var Items = []Item{
 		//
 		// ⚠️ **念和看是两件事**：`.Label(...)` 给的是「**这一枚是什么**」（那一枚
 		// 按钮叫什么、那一行是谁），播报给的是「**刚刚发生了什么**」。`internal/ui`
-		// 里那 102 处 `.Label` 一处都不许改成播报——那会让读屏软件用户听到一屏
-		// 控件名字，而**一件正在发生的事一句也没有**。
+		// 里那 95 处 `.Label`（带参数的那些才是给读屏软件的名字）一处都不许改成
+		// 播报——那会让读屏软件用户听到一屏控件名字，而**一件正在发生的事一句
+		// 也没有**。
 		Spec: "状态变化被接到平台的无障碍播报上：加载完成、下载完成、播放失败、搜索完成各念一遍；同一件事一帧里只念一遍；`.Label`（这一枚是什么）一处都没改成播报",
 		Tests: []string{
 			// 加载完成（在线那一段真的走完了取流 + 开解码器）和播放失败。
@@ -2898,13 +2899,23 @@ var Items = []Item{
 			// 下载完成：下载队列那一头报一声，应用层念一句。
 			"TestTheCallbackIsToldWhenAnItemIsDone",
 			"TestADownloadThatFinishedIsReadOut",
-			// 搜索完成。
+			// 搜索完成（**真的那一支**：B 站给的命中总数，不是屏幕上那几行）。
 			"TestASearchThatFoundSomethingIsReadOut",
+			"TestTheSearchTotalIsTheOneThatIsAnnounced",
 			// 快捷键录上了（界面上一个字都没有的那一种）。
 			"TestARecordedShortcutIsReadOut",
 			// 「一句只念一遍」（一帧建好几遍视图）+ 「提示也念一遍」。
 			"TestTheSameThingIsNotReadOutTwice",
 			"TestAToastIsAlsoReadOut",
+			// **接线那一条**：应用层发生了一件事 → 界面层念出来（中间就靠
+			// `AddAnnounce` 那一行，删掉它编译照样过、别的用例照样绿）。
+			"TestAPlayingFailureReachesTheScreenReaderThroughTheRealWiring",
+			// 看不见的那一扇窗不攒着；攒着的那几摊**有上限也有过期**。
+			"TestAnAnnouncementIsNotKeptWhileTheWindowIsInvisible",
+			"TestAnOldAnnouncementIsNotReadOut",
+			"TestAtMostThreeAnnouncementsAreKept",
+			// 念出去的是**人话**，不是英文系统错（读屏软件是逐字念的）。
+			"TestTheAnnouncedErrorIsNotTheRawGoError",
 			// **`.Label` 一处都没动**（这是这一票的另一半）。
 			"TestTheLabelsAreNotTurnedIntoAnnouncements",
 		},

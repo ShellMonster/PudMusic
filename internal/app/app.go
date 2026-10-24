@@ -682,7 +682,10 @@ func (a *App) Open(path string) error {
 		a.mu.Unlock()
 		// 念出去（无障碍）：本地文件打不开这件事，**读屏软件用户看不见**——
 		// 播放条上那一行字他们看不到。
-		a.announce("播放失败：" + err.Error())
+		//
+		// ⚠️ **说人话，不念英文系统错**：读屏软件是**逐字念**的，而
+		// `err.Error()` 是 "open /Users/x/a.m4a: no such file or directory"。
+		a.announce("播放失败：" + announceErrText(err))
 		if wake != nil {
 			wake()
 		}
