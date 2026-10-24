@@ -233,6 +233,19 @@ func (l *Library) RemoveLater(ctx context.Context, id string) error {
 	return l.Client.ToViewRemove(ctx, aid)
 }
 
+// ClearViewedLater 清掉稍后再看里**已看完**的那些（上游页头右上角那个
+// 「清除已看完」，`later/index.tsx:218-224`）。
+//
+// ⚠️ **它是一次不可恢复的批量删除**：B 站那边没有「撤销」，清掉的就再也回不来
+// （只有用户自己在 B 站 APP 里加回来的那条路）。所以界面层必须先问一句
+// （`internal/ui/confirmmodal.go` 那一套），这一层只管发请求。
+func (l *Library) ClearViewedLater(ctx context.Context) error {
+	if l == nil || l.Client == nil {
+		return errLibraryMissing
+	}
+	return l.Client.ToViewRemoveViewed(ctx)
+}
+
 // RemoveHistory 删掉一条历史记录。id 是那一行的 `LibraryItem.ID`。
 func (l *Library) RemoveHistory(ctx context.Context, id string) error {
 	if l == nil || l.Client == nil {

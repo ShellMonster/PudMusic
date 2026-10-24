@@ -72,6 +72,34 @@ func (r removeResult) apply(p *pagedRows) {
 	p.Drop(r.id)
 }
 
+// clearViewedResult 是后台清完「已看完」的那些之后投进信箱的东西。
+type clearViewedResult struct {
+	// gen 是发这一次清除时的代次。对不上就是换了查询之后回来的——那一次清空
+	// 动的是**另一个查询**的结果，不该拿它去动现在这一批行。
+	gen uint64
+	err error
+}
+
+// apply 把「清完了」落到界面上：重新拉一遍列表，说一句话。
+//
+// ⚠️ **要重新拉一遍**：清掉的是 **B 站那边**的清单，界面上的行还摆着——不重拉
+// 的话用户看着那些已看完的歌还在列表里，而它们其实已经没了。
+func (r clearViewedResult) apply(p *pagedRows) {
+	if r.err != nil {
+		if p.acts.Notify != nil {
+			p.acts.Notify("清不掉："+r.err.Error(), notice.Danger)
+		}
+		return
+	}
+	if r.gen != p.gen {
+		return // 换查询之前发出去的那一次，别去动新的那一批。
+	}
+	p.Reload()
+	if p.acts.Notify != nil {
+		p.acts.Notify("清掉了已看完的", notice.Success)
+	}
+}
+
 // deliver 把一页结果投进信箱，然后叫醒界面。任何 goroutine 都能调。
 //
 // 🔴 铁律三：投递完**必须**唤醒（不唤醒实测 0 帧刷新）；只唤醒一个窗口就是

@@ -10,8 +10,9 @@
 //	arc_min_duration / key
 //
 // 只发我们用得上的那几个：时长上下限 Biu 也没接线（页面上没有对应控件），
-// 发一个恒为 0 的参数没有意义，`viewed` 只有「清除已看完」那一条路要，等
-// 那个功能做了再开——那时候把它做成一个字段，不要写死在查询里。
+// 发一个恒为 0 的参数没有意义。列表这一份 `viewed`（0 全部 / 2 未看完）我们也
+// 不筛——**「清除已看完」走的是删除接口那一份 `viewed=true`**（见
+// `ToViewRemoveViewed`），不是列表这一份。
 //
 // # 时间单位
 //
@@ -191,6 +192,19 @@ func toViewPageOf(d *toViewListData) ToViewPage {
 func (c *Client) ToViewRemove(ctx context.Context, aid int64) error {
 	form := url.Values{}
 	form.Set("aid", strconv.FormatInt(aid, 10))
+	return c.postLater(ctx, toViewDelPath, form)
+}
+
+// ToViewRemoveViewed 清掉稍后再看里**已看完**的那些（上游的「清除已看完」）。
+//
+// ⚠️ **和删一条是同一个接口，两种参数**：上游那一份
+// `src/service/history-toview-del.ts` 的参数是 `{viewed?: boolean; aid?: number}`——
+// `viewed` 的说明是「是否删除所有已观看的视频，默认 false」。所以「删一条」是
+// `aid=…`，「清已看完」是 `viewed=true`，**两个都不发**的话 B 站什么都不删
+// （而它回的是 code 0）。
+func (c *Client) ToViewRemoveViewed(ctx context.Context) error {
+	form := url.Values{}
+	form.Set("viewed", "true")
 	return c.postLater(ctx, toViewDelPath, form)
 }
 
