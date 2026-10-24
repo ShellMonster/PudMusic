@@ -50,7 +50,7 @@ func shellShotShell(t *testing.T, dark bool) (*Shell, *mygoui.Tester, *image.RGB
 // 不一样」的像素——那就是那条线。
 //
 // ⚠️ **挑的行要空**：菜单项、选中那一行的淡底都会挡在前面。y=300 那一行在
-// 侧栏上是空的（菜单只到 y=250 左右，下面是「还没有收藏夹」那几句，都在
+// 侧栏上是空的（菜单只到 y=250 左右，下面是收藏夹那一片，都在
 // x=8..170，不在 x=190 那一列上——但扫的是整行，所以挑的是**侧栏那一列**）。
 func sideDividerColumn(t *testing.T, img *image.RGBA, y int) int {
 	t.Helper()

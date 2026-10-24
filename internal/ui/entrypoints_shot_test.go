@@ -72,7 +72,8 @@ func TestRenderEntryPointShots(t *testing.T) {
 				save(t, dir, "03-本地音乐-空-"+name+".png", tt)
 			}
 
-			// 04 侧栏（展开态，收藏夹空）：那一句「还没有收藏夹」**只有一句**，
+			// 04 侧栏（展开态，收藏夹空）：那一句空状态**只有一句**
+			// （没登录时是「登录后能看到收藏夹」——见 `favEmptyText`），
 			// 而且缩进和分组标题对齐（报告 C3）。
 			{
 				_, tt := shotShell(t, dark, "/")

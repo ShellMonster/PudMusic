@@ -48,7 +48,7 @@ const DownloadsDirName = "BiuGo"
 //	Linux    $XDG_MUSIC_DIR/BiuGo（退回 ~/Music/BiuGo）
 //
 // ⚠️ **Windows 上那条路径是「英文名的 Music」，不是「音乐」**：框架的
-// `PathMusic` 只把一张写死的英文名表拼在家目录下面（`mygo@v0.6.2/paths.go`
+// `PathMusic` 只把一张写死的英文名表拼在家目录下面（`mygo@v0.6.3/paths.go`
 // 的 `userDir()`），**不走系统的已知文件夹 API**——而中文 Windows 上真正的
 // 那个文件夹叫 `C:\Users\<用户名>\音乐`。所以在中文 Windows 上，应用会**另造**
 // 一个 `Music` 文件夹，资源管理器里它**不是**「音乐」那一栏（见下面那条）。

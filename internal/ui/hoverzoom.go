@@ -49,7 +49,7 @@ const (
 	// 另两处没写时长，走的是 Tailwind `transition-transform` 的默认那一档
 	// （`cubic-bezier(0.4, 0, 0.2, 1)`）。
 	//
-	// ⚠️ **那条曲线不是 `ui.EaseInOut`**：实算（同一个 mygo v0.6.2）——
+	// ⚠️ **那条曲线不是 `ui.EaseInOut`**：实算（同一个 mygo v0.6.3）——
 	// t=0.25 时上游那条走 23.7%、`ui.EaseInOut` 只走 6.3%；t=0.5 时是
 	// 77.6% 对 50.0%。**差得很远**（这条由 `hoverzoom_test.go` 的
 	// `TestTheHoverZoomCurveIsNotTheUpstreamOne` 钉着）。
