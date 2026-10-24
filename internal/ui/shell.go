@@ -94,6 +94,11 @@ type Shell struct {
 	// （见 librarypage.go）。挂在壳上而不是页面的局部变量，理由同上。
 	laterPage   libraryPage
 	historyPage libraryPage
+	// laterClearOpen 是「清除已看完」那道确认开着没有（页头右上角那一枚按钮，
+	// 见 `later.go` 的 `viewLaterHeader`）。
+	//
+	// ⚠️ **它得跨帧活着**：即时模式每一帧都重画一遍，局部变量下一帧就没了。
+	laterClearOpen bool
 	// searchWatchStop 是那个 500ms 关键词防抖的钟。醒着的时候只有一个，
 	// 两页共用——用户一次只能在一页上敲字。
 	searchWatchStop func()
