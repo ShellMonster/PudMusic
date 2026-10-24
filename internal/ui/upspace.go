@@ -41,6 +41,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -88,6 +89,29 @@ const (
 	// ⚠️ **不要拿它去改 Tab 那一条**：上游 Tab 外面是 `p-4`（16），头图才是
 	// 32。两处共用一个数的话，Tab 会跟着头图一起往中间缩。
 	upPadX = space.Px32
+
+	// upHeaderTextFade 是头图区里「有字的那一带」那一层黑的**渐变**在多高
+	// 的地方满档。
+	//
+	// 它是**那一带高度的比例**（不是像素）：那一带是「头像 140 + 上下各 16」
+	// = 172，0.15 就是 26。
+	//
+	// ⚠️ **别把它调大**：名字上沿在那一带里约 38 的地方（最坏情况：签名两行
+	// + 认证那一行都在，那一列有 96 高），渐变结束在它**上面**（26 < 38），
+	// 那几个字才落在**满档**里——对比度是按满档算的（`upHeaderTextDim` 的
+	// 注释里有数）。
+	upHeaderTextFade = 0.15
+
+	// spaceDividerAlpha 是统计之间那条竖线的 alpha（35% 白）。
+	//
+	// ⚠️ **它也是白字那一族**：主题那一档分隔线在浅色下是 #dbdbdb（亮）、在深色下
+	// 是 #3f3f46（暗）——后者压在头图区那块深底上几乎看不见。这里是 35% 的白，
+	// 两套主题下都看得见。
+	//
+	// ⚠️ **它不受 4.5:1 那一档管**：它是**装饰性的分隔线**，不是「读懂内容
+	// 所必需」的图形（WCAG 1.4.11 管的是后者）。两个统计的名字本身是字，
+	// 那一档已经量过了（`upHeaderTextDim`）。
+	spaceDividerAlpha = 0.35
 )
 
 // upPathOf 是 mid 这个 UP 的空间地址。
@@ -532,7 +556,24 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 		} else {
 			ui.Box(c).Height(upHeaderH).FillWidth().Background(t.Surface)
 		}
-		// ② 头像 + 昵称 + 签名 + 右边那一排关注和统计。圆角留白与间距照上游：
+		// ② 蒙版：**浅色 30% / 深色 50%**（上游 `space-info.tsx:83-86` 的
+		// `overlayOpacity`）。
+		//
+		// ⚠️ **没有头图的时候也在**：上游那一层是 `bg-cover` 自己的底，
+		// 没有图时它是白底 × 30% 黑 = #b2b2b2（上游实图实测值）。
+		//
+		// ⚠️ **它必须是 `Absolute`**：这一块是 `ui.Box`，而**框架的 Box 是
+		// 一列**（`mygo/ui/api_gen.go:709`：「lays its children out in a
+		// column」）——不是叠在一起的一摞。非绝对的子元素是**往下排**的，
+		// 排在头图下面（还被这一块的 `Clip()` 剪掉），于是蒙版会变成
+		// 「头图下面那一块黑」，而不是「压在头图上的那一层黑」。
+		// 绝对定位的那一档才是**画在非绝对的那些之上**的（框架的绘制顺序：
+		// 先画非绝对的，再画绝对的）。
+		ui.Box(c).Absolute().Left(0).Right(0).Top(0).Bottom(0).
+			Background(ui.RGBA(0, 0, 0, upHeaderMask(t.Dark)))
+		// ③ 文字那一带再压一档（理由和数值的算法见 `spaceTextScrim`）。
+		s.spaceTextScrim(c, t.Dark)
+		// ④ 头像 + 昵称 + 签名 + 右边那一排关注和统计。圆角留白与间距照上游：
 		// `px-8 py-4`、头像和文字 `space-x-4`、文字两行 `space-y-2`。
 		ui.Row(c).Key("space-head-info").Absolute().Left(0).Right(0).Bottom(0).
 			Padding(upPad, upPadX).Gap(space.Px16).AlignItems(ui.Center).Children(func() {
@@ -543,20 +584,96 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 				// F-26）：600 在 `DESIGN.md` §二 的刻度里有那一档却没有用途，
 				// 而这三个数字 / 名字正是「比正文重一档」的那一档。理由同
 				// `spaceStat` 那处的注释。
-				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, scale.Size20)).FontWeight(weightMedium).MaxLines(1).Ellipsis("…")
+				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, scale.Size20)).FontWeight(weightMedium).MaxLines(1).Ellipsis("…").TextColor(upHeaderText())
 				if h.User.Official != "" {
-					ui.Text(c, "认证："+h.User.Official).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+					ui.Text(c, "认证："+h.User.Official).FontSize(scale.Font(c, scale.Size12)).TextColor(upHeaderTextDim())
 				}
 				if h.User.Sign != "" {
 					// 上游是 `text-sm text-white/80`（`space-info.tsx:110`）：
 					// 14，不是 13。
-					ui.Text(c, h.User.Sign).FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).MaxLines(2)
+					ui.Text(c, h.User.Sign).FontSize(scale.Font(c, scale.Size14)).TextColor(upHeaderTextDim()).MaxLines(2)
 				}
 			})
 			ui.Box(c).Grow(1)
 			s.viewSpaceActions(c, sp, h)
 		})
 	})
+}
+
+// upHeaderMask 是头图区**整块**那一层黑蒙版的 alpha。
+//
+// 浅色 30%、深色 50%——和上游一样（票 #295 / 报告 L-13）。
+func upHeaderMask(dark bool) float32 {
+	if dark {
+		return scrim.HeaderDark
+	}
+	return scrim.HeaderLight
+}
+
+// upHeaderTextScrim 是**有字的那一带**再压的那一档的 alpha。
+//
+// 数值是「压到白字 ≥4.5:1」算出来的（算法在 `widgets/scrim` 的注释里）。
+func upHeaderTextScrim(dark bool) float32 {
+	if dark {
+		return scrim.HeaderTextDark
+	}
+	return scrim.HeaderTextLight
+}
+
+// upHeaderText 是头图区上那些字的颜色：**白字，不跟主题翻**。
+//
+// ⚠️ **上游也是白字**（`space-info.tsx:100` 的 `text-white`、`:110` 的
+// `text-white/80`）：头图区是**一张照片**，它永远是「深底」——字要是跟着
+// 主题翻，浅色主题下就是深字压深底，那正是这层蒙版要防的那件事。
+//
+// ⚠️ **别拿 `t.Text` / `t.TextMuted` 代替**：那一档在浅色下是**深色**的
+// （#18181b），压在压暗过的照片上就是「深字压深底」。
+func upHeaderText() ui.Color {
+	return ui.RGB(255, 255, 255)
+}
+
+// upHeaderTextDim 是头图区上那些次要的字（认证、签名、统计的名字）。
+//
+// 92% 白——仓库里「压在深色上的白字」那一档（`scrim.OnScrim`）。
+//
+// ⚠️ **92% 不是随便取的**：压在最坏情况（纯白头图）的底上，白字是 5.33:1
+// / 5.25:1，92% 的白是 **4.80:1 / 4.73:1**——都还在 4.5:1 之上。
+func upHeaderTextDim() ui.Color {
+	return ui.RGBA(255, 255, 255, scrim.OnScrim)
+}
+
+// spaceTextScrim 是头图区里**有字的那一带**再压的一档黑。
+//
+// ## 为什么需要它
+//
+// 整块那一档蒙版是**平**的，而头图是**用户上传的任意图片**——最坏情况是
+// 一张**纯白**的头图。浅色下 30% 的黑只把纯白压到 #b2b2b2，白字压在上面
+// 只有 **2.1:1**（读不出来）；深色下 50% 只压到 #7f7f7f，**4.0:1**（大字够、
+// 小字不够）。所以有字的那一带再压一档（数值见 `upHeaderTextScrim`）。
+//
+// ## 它不是把整块那一档改深
+//
+// 头图区**整块**的蒙版还是上游那一档（浅 30% / 深 50%），多出来的这一档
+// **只盖住有字的那一带**——所以「蒙版在位（浅 30% / 深 50%）」那一条量的是
+// 头图区上沿（那里没有字，也就没有这一档）。
+//
+// ## 上沿是渐变的
+//
+// 从透明渐到满档，渐变结束在**名字上沿之前**（`upHeaderTextFade`）——名字、
+// 签名、统计全落在**满档**的那一段里，对比度才有保证。
+//
+// ⚠️ **一档一刀切会露馅**：渐变结束得太晚，名字上沿那几行就落在渐变里，
+// 对比度比算出来的低。
+func (s *Shell) spaceTextScrim(c *ui.Context, dark bool) {
+	alpha := upHeaderTextScrim(dark)
+	// 这一带就是「信息那一行」占的那一块：头像 140 + 上下各 16。
+	band := float32(upAvatarS + upPad*2)
+	ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(band).
+		LinearGradient(ui.LinearGradient{Angle: 180, Stops: []ui.GradientStop{
+			{Color: ui.Transparent, At: 0},
+			{Color: ui.RGBA(0, 0, 0, alpha), At: upHeaderTextFade},
+			{Color: ui.RGBA(0, 0, 0, alpha), At: 1},
+		}})
 }
 
 // viewSpaceActions 是右边那一排：关注按钮 + 粉丝数 + 等级。
@@ -569,7 +686,6 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 // ⚠️ 上游的统计**只有这三个**——没有获赞数、没有播放数（`space-info.tsx:31-45`
 // 的 `stats` 表就三行）。这一版照它，不自己加。
 func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
-	t := c.Theme()
 	isSelf := s.app.SelfMid() == sp.mid
 
 	ui.Row(c).Key("space-actions").Gap(space.Px16).AlignItems(ui.Center).Children(func() {
@@ -593,8 +709,8 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 				// 🔴 **没查到就说没查到**。画一个能按的「关注」比不画更糟：
 				// 用户按下去是一次**取关**（B 站对没关注过的人「取关」是成功的），
 				// 于是他更确信自己关注过——而真相是我们压根没读到。
-				ui.Text(c, "关注状态没读到").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-				if flatButton(c, "重试").FontSize(scale.Font(c, scale.Size12)).Clicked() {
+				ui.Text(c, "关注状态没读到").FontSize(scale.Font(c, scale.Size12)).TextColor(upHeaderTextDim())
+				if flatButton(c, "重试").FontSize(scale.Font(c, scale.Size12)).TextColor(upHeaderTextDim()).Clicked() {
 					sp.header.RetryRelation()
 					sp.header.Load()
 				}
@@ -620,8 +736,8 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 				}
 				spaceDivider(c)
 			} else if h.StatFailed() {
-				ui.Text(c, "粉丝数没读到").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-				if flatButton(c, "重试").FontSize(scale.Font(c, scale.Size12)).Clicked() {
+				ui.Text(c, "粉丝数没读到").FontSize(scale.Font(c, scale.Size12)).TextColor(upHeaderTextDim())
+				if flatButton(c, "重试").FontSize(scale.Font(c, scale.Size12)).TextColor(upHeaderTextDim()).Clicked() {
 					sp.header.RetryRelation()
 					sp.header.Load()
 				}
@@ -650,18 +766,25 @@ func (sp *upSpace) follow(yes bool) {
 // 上游是 `font-semibold`，而 600 在 `DESIGN.md` §二 的刻度里**有这一档却没有
 // 用途**——「600 是无主」：没有人能说出这三个数字为什么该是 600。500 才是
 // 仓库里唯一被命名的字重，用途正是「比正文重一档但不到标题那么重」。
+//
+// ⚠️ **字色是白字**（`upHeaderText` / `upHeaderTextDim`）：这一块压在头图区
+// 那张照片上，而头图区**永远是深底**——用主题的正文色的话，浅色主题下就是
+// 深字压深底。
 func spaceStat(c *ui.Context, label, value string) {
-	t := c.Theme()
 	ui.Column(c).Key("space-stat:" + label).Gap(space.Px2).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, value).FontSize(scale.Font(c, scale.Size18)).FontWeight(weightMedium)
-		ui.Text(c, label).FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted)
+		ui.Text(c, value).FontSize(scale.Font(c, scale.Size18)).FontWeight(weightMedium).TextColor(upHeaderText())
+		ui.Text(c, label).FontSize(scale.Font(c, scale.Size14)).TextColor(upHeaderTextDim())
 	})
 }
 
 // spaceDivider 是统计之间那条竖线：上游 `Divider orientation="vertical"
 // className="h-4"`（`space-info.tsx:136-137`），高 16。
+//
+// ⚠️ **它也是白字那一族**：主题那一档分隔线在浅色下是 #dbdbdb（亮）、在深色下
+// 是 #3f3f46（暗）——后者压在头图区那块深底上几乎看不见。这里是 35% 的白，
+// 两套主题下都看得见（图形只要 3:1）。
 func spaceDivider(c *ui.Context) {
-	ui.Box(c).Width(1).Height(16).Background(c.Theme().Border)
+	ui.Box(c).Width(1).Height(16).Background(ui.RGBA(255, 255, 255, spaceDividerAlpha))
 }
 
 // spaceName 是这个 UP 显示在标题上的名字。还没加载时给一个占位，而不是空串
