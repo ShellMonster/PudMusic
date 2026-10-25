@@ -619,6 +619,16 @@ func iconKey(c *ui.Context, name, label string, font float32, disabled bool) ui.
 	return flatIconButtonAccent(c, name, label, font, disabled)
 }
 
+// iconKeyOnBase 是 iconKey 的「**底色可传**」变体：悬停时图形变的那一档主色按
+// **给定的底**算，而不是按 `t.Background` 算。
+//
+// ⚠️ **满屏播放器那一行走的就是它**：那一行的底是压暗过的封面，而按页面白底算
+// 出来的那一档（浅色主题下是深绿 `#107032`）压在那上面只有 **1.0:1**——指针一
+// 停上去，那几个图标**反而不见了**（票 #248）。
+func iconKeyOnBase(c *ui.Context, name, label string, font float32, disabled bool, base flat.Base) ui.Element {
+	return flatIconButtonAccentOnBase(c, name, label, font, disabled, base)
+}
+
 // iconButtonPlay 是播放/暂停那一枚：**设计规范的主播放键**。
 //
 // 规范 §5：实心强调色圆形，里面是实心的播放 / 暂停图形，字色是 `AccentText`

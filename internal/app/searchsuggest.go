@@ -13,10 +13,17 @@
 //
 // # 失败是**静默**的，而且静默有具体形状
 //
-// 规格：「请求失败时静默：浮层保持只有历史那一档，不弹错误。」所以这一层**根本没有**
-// 错误字段：拉不到就是 `Items` 为空，画面上和「B 站没给联想」长得一模一样。
+// 规格：「请求失败时静默：不弹错误。」所以失败**不弹错误、不转圈、不变红**——
+// 用户看见的是浮层里那一句自己的话（界面上「联想词」那一档写「没能取到联想词」，
+// 见 `ui/navbar_suggest.go` 的 `suggestFailedNote`）。
 //
-// ⚠️ 但「静默」不许写成「什么都不做」：失败之后 `query` 仍然记下那个词，于是界面
+// ⚠️ **静默 ≠ 什么都不做**（票 #455 / 报告 246 第 12 条）：「不弹错误」是规格要的，
+// 而「一个字都没有」不是——那让「B 站没给联想」和「这一趟没拉到」在画面上**长得
+// 一模一样**（都是「联想那一栏空着」），用户读出来的是「B 站没给我联想」，而真实
+// 原因可能是网络断了、登录态过期或风控。所以这一层有一个 `Failed` 位（见
+// `SuggestState.Failed`），让界面能说一句自己的话。
+//
+// ⚠️ 但「不许每帧重发」这一条仍然成立：失败之后 `query` 仍然记着那个词，于是界面
 // 那一支「这个词已经问过了」一直成立，下一帧不会又发一次。少了这一句就是自己养自己
 // 的循环——生产里每次投递都叫醒界面，于是浮层底下**每一帧都在刷一次网络**，而用户
 // 看到的是「搜索框卡了一下」。和歌词那一支 `failLocked` 留着 `Query` 是同一个道理。
@@ -59,6 +66,21 @@ type SuggestState struct {
 	// 用户在打每一个字，联想是一闪一闪地补上来的，中间摆一句「正在搜…」比不给还吵。
 	// 它在这儿是因为界面上有一个判断要靠它（「这个词还在飞就别再问一遍」）。
 	Loading bool
+
+	// Failed 是「这一趟拉失败了」。
+	//
+	// ⚠️ **它和「一个联想词都没有」是两件不同的事**（票 #455 / 报告 246 第 12 条）：
+	// B 站这一次没给联想，和这一次**没拉到**（网络断了、登录态过期、风控），在
+	// 用户那边完全是两回事——而没有这一位时它们**长得一模一样**（画面上就是
+	// 「联想那一栏空着」），用户读出来的是「B 站没给我联想」。
+	//
+	// ⚠️ **静默是规格要的，但静默不许是「什么都不做」**：这一位让界面**能说一句
+	// 自己的话**（`ui/navbar_suggest.go` 的 `suggestFailedNote`）——不弹错误、
+	// 不转圈、不变红，只是把两种「没有」分开。
+	//
+	// ⚠️ **它记的是「这一趟」**：换了一个词去问，那一趟还没回来，这一位是 false
+	// （而「正在飞」是 Loading 那一位）。
+	Failed bool
 }
 
 // suggestState 是这一摊的内部状态。**只有界面线程和后台 goroutine 经过 a.mu**。
@@ -66,6 +88,8 @@ type suggestState struct {
 	query   string
 	items   []string
 	loading bool
+	// failed 是「这一趟拉失败了」（理由见 SuggestState.Failed）。
+	failed bool
 	// gen 是**联想代次**，每问一次加一（见文件头「代次」）。
 	gen int
 }
@@ -96,6 +120,7 @@ func (a *App) SearchSuggest(keyword string) {
 		// 空的（静默是规格要的），用户唯一能做的事就是再敲一遍。
 		s.gen++
 		s.query, s.items, s.loading = "", nil, false
+		s.failed = false
 		a.mu.Unlock()
 		a.wakeSuggest()
 		return
@@ -121,17 +146,24 @@ func (a *App) SearchSuggest(keyword string) {
 	s.gen++
 	gen := s.gen
 	s.query, s.items, s.loading = keyword, nil, true
+	// ⚠️ **新的一趟开始，失败那一位就清掉**：它是「这一趟」的（理由见
+	// SuggestState.Failed），而这一趟还没回来——还没失败。
+	s.failed = false
 	a.mu.Unlock()
 	// 摆上「正在拉」并要一帧：不然上一批词还挂着一个字都没改，而它属于上一个词。
 	a.wakeSuggest()
 
 	if cli == nil {
 		// 没挂上 B 站客户端（没走过 MountLogin）。**静默**：这就是「拉不到」那一种，
-		// 而界面上该表现的是浮层里只剩历史那一档。
+		// 而界面上该表现的是浮层里「联想词」那一档**说一句自己的话**
+		// （「没能取到联想词」，见 `ui/navbar_suggest.go` 的 `suggestFailedNote`）
+		// ——历史那一档照旧摆着，而「这一趟没拉到」和「B 站没给联想」在画面上
+		// 分得开（票 #455）。
 		a.mu.Lock()
 		if a.suggest.gen == gen && !a.closed {
 			a.suggest.loading = false
 			a.suggest.items = nil
+			a.suggest.failed = true
 		}
 		a.mu.Unlock()
 		a.wakeSuggest()
@@ -150,9 +182,14 @@ func (a *App) SearchSuggest(keyword string) {
 		a.suggest.loading = false
 		if err == nil {
 			a.suggest.items = got
+			a.suggest.failed = false
+		} else {
+			// ⚠️ **失败那一位要记上**：`items` 在发出去时就已经被清成 nil 了，
+			// 而 `query` 记着这个失败的词（界面上「已经问过了」那一支靠它挡住每帧
+			// 重发）。不记这一位的话，界面上「联想这一栏空着」和「B 站没给联想」
+			// 长得一模一样（理由见 SuggestState.Failed）。
+			a.suggest.failed = true
 		}
-		// ⚠️ **失败的那一支什么都不做**：`items` 在发出去时就已经被清成 nil 了，
-		// 而 `query` 记着这个失败的词（界面上「已经问过了」那一支靠它挡住每帧重发）。
 		a.mu.Unlock()
 		a.wakeSuggest()
 	}()
@@ -166,6 +203,7 @@ func (a *App) SuggestState() SuggestState {
 		Items:   a.suggest.items,
 		Query:   a.suggest.query,
 		Loading: a.suggest.loading,
+		Failed:  a.suggest.failed,
 	}
 }
 

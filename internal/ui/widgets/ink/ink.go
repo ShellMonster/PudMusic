@@ -31,6 +31,29 @@ var (
 	white = ui.Color{R: 255, G: 255, B: 255, A: 255}
 )
 
+// 判据的两条门槛（WCAG 2.x）。
+//
+//	TextContrast    正文：4.5:1（WCAG AA，1.4.3）。
+//	GraphicContrast 图形：3:1（WCAG 1.4.11 非文字对比度）——图标、圆点、
+//	                    描边、**控件的状态**（悬停 / 按下 / 选中）都算这一档。
+//
+// ⚠️ **图标键的悬停色按图形那一档算**：那是一枚 22 像素的图形，WCAG 对它的
+// 要求是 3:1 而不是 4.5:1（票 #248）。
+const (
+	TextContrast    = 4.5
+	GraphicContrast = 3.0
+)
+
+// PivotLuminance 是「黑字和白字对比度相等」的那个相对亮度（0.179）。
+//
+// 底比它亮 → 该用黑字；比它暗 → 该用白字。解 `(L+0.05)/0.05 = 1.05/(L+0.05)`。
+//
+// ⚠️ **不是 0.5**：同样是 0.5 的阈值，`#00ff00` 这种绿在肉眼上远比 `#0000ff`
+// 亮，加权之后才和观感对得上。Biu 用的 color2k `readableColor` 也是 0.179，
+// 满屏播放器那一层的前景色按它挑（见 `internal/ui/fullplayer.go` 的
+// `fullForeground`）。
+const PivotLuminance = 0.179
+
 // Luminance 是 WCAG 2.x 的相对亮度。
 //
 // 和 `ui.Color` 里那个未导出的 `gray()` **不是一回事**：gray 是 sRGB 空间的
@@ -124,7 +147,32 @@ func AccentOn(t *ui.Theme) ui.Color {
 	if t.SurfaceHover.A == 255 && Luminance(t.SurfaceHover) < Luminance(bg) {
 		bg = t.SurfaceHover
 	}
-	return Ensure(t.Accent, bg, 4.5)
+	return Ensure(t.Accent, bg, TextContrast)
+}
+
+// AccentOnBase 是 AccentOn 的「**底色可传**」变体：主色当**字色**时按**给定的
+// 底**算，而不是按 `t.Background` 算。
+//
+// # 为什么需要它
+//
+// `AccentOn` 那一档是按**页面底色**算的——它答的是「主色压在页面上读不读得出
+// 来」。而满屏播放器那一行坐着的是**压暗过的封面**：按页面白底算出来的那一档
+// （浅色主题下是深绿 `#107032`）压在那上面只有 **1.0:1**，等于图标**消失**——
+// 指针一停上去，那几个图标反而不见了（票 #248）。
+//
+// # 怎么算
+//
+// 一律 `Ensure`：底够暗的话主色本身就读得出来（**原样返回**，颜色身份留着），
+// 底亮的话往黑 / 白那一头混到 `ratio` 为止。
+//
+// ⚠️ **不按主题深浅分叉**：`AccentOn` 在深色下直接给主色（那是「深色下页面白
+// 字压深底」的结论），而这里的底是**调用方给的**，和主题深浅无关——浅色主题
+// 那一行也可能坐在一块深底上（满屏播放器那一行就是）。
+//
+// ratio 是这一档要达到的对比度：正文用 `TextContrast`（4.5），图形用
+// `GraphicContrast`（3）。
+func AccentOnBase(t *ui.Theme, base ui.Color, ratio float64) ui.Color {
+	return Ensure(t.Accent, base, ratio)
 }
 
 // SemanticOn 是**语义色**（危险 / 警告 / 成功）当**字色**用时该用的那一档。

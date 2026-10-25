@@ -454,7 +454,7 @@ func (p *PagedList) apply(r pageResult) {
 		p.err = r.err
 		p.blocked = true
 		log.Printf("biu: 第 %d 页拉失败（%s）：%v", r.page, p.why, r.err)
-		notify(p.surf.List().acts, "加载更多失败："+r.err.Error(), notice.Danger)
+		notify(p.surf.List().acts, loadFailToast(r.page, r.err), notice.Danger)
 		return
 	}
 
@@ -566,6 +566,21 @@ func (p *PagedList) load(why trigger) {
 
 // errFetcherPanic 是拉页器自己崩了之后变成的那个错。
 var errFetcherPanic = errors.New("拉页的代码崩了")
+
+// loadFailToast 是拉页失败时弹的那一句。
+//
+// ⚠️ **第一页失败不说「加载更多」**：那一页还没加载过任何东西，说「加载更多失败」
+// 说的是一件用户当下没在做的事（他还没有什么可加载更多的）。第一页失败时这一屏
+// **一个结果都没有**，用户读到的是「加载失败」——那才是真的。
+//
+// ⚠️ 后面的页仍然说「加载更多」：那几页确实是接着往下加载时失败的，而那一档
+// 已经有结果在屏幕上了，说「加载失败」会让人以为整页都没了。
+func loadFailToast(page int, err error) string {
+	if page <= 1 {
+		return "加载失败：" + err.Error()
+	}
+	return "加载更多失败：" + err.Error()
+}
 
 // fetchOne 调 fetch，**崩了也变成一个错**。
 //
