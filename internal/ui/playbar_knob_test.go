@@ -9,6 +9,7 @@
 package ui
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"testing"
@@ -266,65 +267,154 @@ func TestTheVolumeSliderDoesNotDriftWithThePercentText(t *testing.T) {
 //
 // 断两样：
 //
-//   - **结构**：百分比那一格和滑块那一格**是同一个盒子**（上游那边也是同一个宽：
-//     滑块 `w-[32px]`、百分比 `w-8`，见 `music-volume/index.tsx`）。
+//   - **结构**：百分比那一格的**中心**和滑块那一格的中心在同一条竖线上。
 //   - **像素**：字（墨迹）的中心线和那根柱子（主色）的中心线重合。
 //
+// ⚠️ **结构那条断的是「中心」，不是「同一个盒子」**：百分比那一格是 **40** 宽
+// （比滑块那 32 宽，好让字号放大时那几个字不折行——见
+// `TestTheVolumePercentDoesNotWrapAtBigTextScales`），而列是 `AlignItems(Center)`：
+// 这一格在 32 宽的内容区里居中，于是**中心重合**、左右各探出 4（正好铺满列）。
+//
 // ⚠️ **像素那条才断得住「盒子对了而字靠左」**：改之前就是那样——格子 40 宽、
-// 列的内容区 32 宽，这一格在内容区里居中时左右各探出 4 像素，而字又靠左，
-// 墨迹中心比柱子中心**偏左 7.3 像素**。
+// 字靠左，墨迹中心比柱子中心**偏左 7.3 像素**。
 //
 // ⚠️ **容差 1.5 像素**：12 号字下墨迹宽度的**奇偶**会让中心差半个像素（同一份
 // 画面，浅色下墨迹 25 宽、深色下 26 宽）。
+//
+// ⚠️ **两档都要断**：80% 那一档字窄（排版宽 26.3），而**用户点名的是 100%**
+// （排版宽 31.8，最宽的一档）——只断前者的话，那一档坏了照样绿。
 func TestTheVolumePercentSitsUnderTheSlider(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
 		if dark {
 			name = "深色"
 		}
-		t.Run(name, func(t *testing.T) {
+		for _, c := range []struct {
+			vol  float64
+			text string
+		}{{0.8, "80%"}, {1, "100%"}} {
+			t.Run(fmt.Sprintf("%s-%s", name, c.text), func(t *testing.T) {
+				st := barState()
+				st.Volume = c.vol
+				tt, s := bottomBarTester(t, st, 1200, 320, dark)
+				hoverVolumeKey(t, tt)
+
+				sl, ok := tt.Find("音量")
+				if !ok {
+					t.Fatalf("浮层里没有那根音量滑块，文字有 %q", tt.Texts())
+				}
+				pct, ok := tt.Find(c.text)
+				if !ok {
+					t.Fatalf("浮层里没有那个百分比，文字有 %q", tt.Texts())
+				}
+
+				// 结构：两个盒子的中心在同一条竖线上。
+				slMid := sl.X + sl.W/2
+				pctMid := pct.X + pct.W/2
+				if absF(pctMid-slMid) > 0.01 {
+					t.Errorf("百分比那一格的中心在 x=%.1f，而滑块那一格的中心在 x=%.1f"+
+						"（差 %.2f）——字和柱子不在同一条竖线上",
+						pctMid, slMid, absF(pctMid-slMid))
+				}
+
+				// 像素：柱子的中心 = 主色像素的 x 范围中心（旋钮和轨道都居中于那一格）；
+				// 字的中心 = 墨迹的 x 范围中心。
+				th := BuildTheme(s.app.SettingsSnapshot(), dark)
+				img := tt.Image()
+				klo, khi := accentExtent(img, sl, rgb(th.Accent))
+				if klo < 0 {
+					t.Fatalf("那根滑块上量不到主色像素 %v", sl)
+				}
+				tlo, thi, n := inkExtent(img, pct, rgb(th.Background))
+				if n == 0 {
+					t.Fatalf("那个百分比上量不到墨迹")
+				}
+				kMid := float32(klo+khi) / 2
+				tMid := float32(tlo+thi) / 2
+				if absF(kMid-tMid) > 1.5 {
+					t.Errorf("百分比的墨迹中心在 x=%.1f，而那根柱子的中心在 x=%.1f"+
+						"（差 %.1f）——数字没有和柱子对齐",
+						tMid, kMid, absF(kMid-tMid))
+				}
+			})
+		}
+	}
+}
+
+// TestTheVolumePercentDoesNotWrapAtBigTextScales 钉「字号放大时浮层里那个百分比
+// 不折行」。
+//
+// 🔴 **这一条是评审抓出来的回归**（票 #485 的第二轮）：把百分比那一格收成和滑块
+// 同宽（32）之后，「100%」在 12 号字下的排版宽是 **31.8**，格子只剩 **0.2 像素**
+// 余量——系统字号放大到 **1.05 倍**它就折成两行（画成「100」换行「%」），而改动前
+// 要到 1.40 倍才折。
+//
+// ⚠️ **macOS 上看不出问题**：它的 TextScale 恒为 1。Windows 读注册表
+// TextScaleFactor（`mygo/internal/windows/system.go:438`）、Linux 读 GNOME 的
+// text-scaling-factor（`mygo/internal/linux/system.go:406`）——那两边放大是常态。
+//
+// 判据是**那一格的高度**：一行 ≈ 字号 × 缩放 × 1.18（框架的行高），超过「一行半」
+// 就是折行了（和 `TestTheSettingsDescriptionDoesNotWrapAtBigTextScales` 同一个
+// 量法）。
+//
+// 顺带断**放大之后中心仍重合**：字居中于那一格，格子居中于列的内容区，于是两个
+// 中心一直是一条线——这条断了的话，字放大后会偏出去。
+func TestTheVolumePercentDoesNotWrapAtBigTextScales(t *testing.T) {
+	for _, sc := range []float32{1, 1.05, 1.25, 1.4, 1.5, 1.75} {
+		t.Run(fmt.Sprintf("%.2f倍", sc), func(t *testing.T) {
 			st := barState()
-			st.Volume = 0.8
-			tt, s := bottomBarTester(t, st, 1200, 320, dark)
+			st.Volume = 1
+			tt, _ := volumeBarTesterAtScale(t, st, 1200, 320, false, sc)
 			hoverVolumeKey(t, tt)
 
 			sl, ok := tt.Find("音量")
 			if !ok {
 				t.Fatalf("浮层里没有那根音量滑块，文字有 %q", tt.Texts())
 			}
-			pct, ok := tt.Find("80%")
+			pct, ok := tt.Find("100%")
 			if !ok {
 				t.Fatalf("浮层里没有那个百分比，文字有 %q", tt.Texts())
 			}
 
-			// 结构：两个盒子重合。
-			if absF(pct.X-sl.X) > 0.01 || absF(pct.W-sl.W) > 0.01 {
-				t.Errorf("百分比那一格是 x=%.1f 宽 %.1f，而滑块那一格是 x=%.1f 宽 %.1f"+
-					"——两者不是同一个盒子，字和柱子就对不上",
-					pct.X, pct.W, sl.X, sl.W)
+			// 一行字的高 ≈ 12 × 缩放 × 1.18；一行半是「还没折」的宽限。
+			if line := 12 * sc * 1.18; pct.H > line*1.5 {
+				t.Errorf("%.2f 倍字号下那个百分比折行了（高 %.1f，一行是 %.1f）——"+
+					"「100」换行「%%」既难看，又把浮层撑高、把那个百分比挤到离滑块"+
+					"更远的地方去", sc, pct.H, line)
 			}
-
-			// 像素：柱子的中心 = 主色像素的 x 范围中心（旋钮和轨道都居中于那一格）；
-			// 字的中心 = 墨迹的 x 范围中心。
-			th := BuildTheme(s.app.SettingsSnapshot(), dark)
-			img := tt.Image()
-			klo, khi := accentExtent(img, sl, rgb(th.Accent))
-			if klo < 0 {
-				t.Fatalf("那根滑块上量不到主色像素 %v", sl)
-			}
-			tlo, thi, n := inkExtent(img, pct, rgb(th.Background))
-			if n == 0 {
-				t.Fatalf("那个百分比上量不到墨迹")
-			}
-			kMid := float32(klo+khi) / 2
-			tMid := float32(tlo+thi) / 2
-			if absF(kMid-tMid) > 1.5 {
-				t.Errorf("百分比的墨迹中心在 x=%.1f，而那根柱子的中心在 x=%.1f"+
-					"（差 %.1f）——数字没有和柱子对齐",
-					tMid, kMid, absF(kMid-tMid))
+			// 放大之后，中心仍得重合。
+			if absF((pct.X+pct.W/2)-(sl.X+sl.W/2)) > 0.01 {
+				t.Errorf("%.2f 倍字号下百分比那一格的中心在 x=%.1f，而滑块那一格的"+
+					"中心在 x=%.1f——放大之后两者不重合了",
+					sc, pct.X+pct.W/2, sl.X+sl.W/2)
 			}
 		})
 	}
+}
+
+// volumeBarTesterAtScale 是「带系统字号缩放」的播放条测试器。
+//
+// ⚠️ **缩放得在建外壳时就给**（`withPrefs`）：框架每帧把 `Preferences.TextScale`
+// 缓存下来（`scale.Font` 读的是 `Context.Preferences()`），而字号是**布局**的一部分
+// ——建好之后再改，量出来的尺寸是旧缩放的。
+func volumeBarTesterAtScale(t *testing.T, st app.State, width, height int, dark bool, sc float32) (*mygoui.Tester, *Shell) {
+	t.Helper()
+	var b *testShell
+	b = newTestShell(t, at(width, height), systemIsDark(dark),
+		withPrefs(mygoui.Preferences{TextScale: sc}),
+		withView(func(s *Shell) func(*mygoui.Context) {
+			return func(c *mygoui.Context) {
+				s.wake.set(c)
+				s.applyFrameTheme(c)
+				mygoui.Column(c).Fill().Children(func() {
+					mygoui.Row(c).Grow(1)
+					s.viewPlayBar(c, st)
+				})
+			}
+		}))
+	tt := b.tt
+	tt.Frame()
+	return tt, b.s
 }
 
 // accentExtent 是「盒子里主色像素的 x 范围」。
