@@ -134,6 +134,11 @@ func TestSearchHistoryIsAGreyChip(t *testing.T) {
 				t.Fatalf("点不到搜索框：%v", err)
 			}
 			tt.Frame()
+			// ⚠️ **要把面板的进场推完**（票 #259）：浮层现在进场是 200ms 的一段
+			// （淡入 + 升上来），而 Tester 的钟站着不动——不推它的话画面停在
+			// 进场的第一帧，而那一帧**面板上一个字都没画**（不透明度是 0）。
+			// 这一条量的是面板上的像素，所以必须先让它淡进来。
+			settleSuggestEnter(t, tt)
 
 			chip, ok := tt.Find("周杰伦")
 			if !ok {
@@ -277,6 +282,11 @@ func TestTheHistoryChipCloseButtonIsNotSmallerThanItsLabel(t *testing.T) {
 		t.Fatalf("点不到搜索框：%v", err)
 	}
 	tt.Frame()
+	// ⚠️ **要把面板的进场推完**（票 #259）：浮层现在进场是 200ms 的一段（淡入
+	// + 升上来），而 Tester 的钟站着不动——不推它的话画面停在进场的第一帧，
+	// 而那一帧**面板上一个字都没画**（不透明度是 0）。这一条量的是面板上的
+	// 像素，所以必须先让它淡进来。
+	settleSuggestEnter(t, tt)
 
 	label, ok := tt.Find("周杰伦")
 	if !ok {
@@ -350,6 +360,11 @@ func TestTheClearAllButtonShowsATrashBin(t *testing.T) {
 		t.Fatalf("点不到搜索框：%v", err)
 	}
 	tt.Frame()
+	// ⚠️ **要把面板的进场推完**（票 #259）：浮层现在进场是 200ms 的一段（淡入
+	// + 升上来），而 Tester 的钟站着不动——不推它的话画面停在进场的第一帧，
+	// 而那一帧**面板上一个字都没画**（不透明度是 0）。这一条量的是面板上的
+	// 像素，所以必须先让它淡进来。
+	settleSuggestEnter(t, tt)
 
 	clear, ok := tt.Find("清除全部")
 	if !ok {
