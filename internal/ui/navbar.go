@@ -198,10 +198,13 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// 事——**挪入口不是纯对齐，要人拍板**。
 		s.viewDynamicDot(c)
 		s.viewAvatar(c)
-		// 登录 / 退出登录那个入口（login.go 的 viewLoginEntry）。它在 router.go
+		// 登录入口（login.go 的 viewLoginEntry）。它在 router.go
 		// 那一行末尾——顶栏那一行是从那儿搬过来的，所以这一句也跟着搬过来。
-		// 放在头像**旁边**而不是头像**里面**：头像是原生菜单的触发点，
+		// 放在头像**旁边**而不是头像**里面**：头像是那一层下拉的触发点，
 		// 按下是弹菜单不是切路由（见 navbar_avatar.go）。
+		//
+		// ⚠️ **它只在未登录时占位**（票 #260）：登录之后这一格整个消失，
+		// 顶栏右端只剩头像那一枚——退登走头像下拉里那一项。
 		s.viewLoginEntry(c)
 	})
 }
