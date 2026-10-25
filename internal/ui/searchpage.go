@@ -204,7 +204,7 @@ func (s *Shell) viewSearchResults(c *ui.Context, keyword string) {
 		// 列表要吃掉剩下的高度，自己占 Grow(1)（见 list.go 的 View）。外面这一
 		// 层 Grow(1) 是给它留地方：直接摆在根上不给高度的话，它会按自己的行数
 		// 去要高度，一屏二十几行会把页面撑出去。
-		s.viewSearchResultsBody(c, cur)
+		s.viewSearchResultsBody(c, cur, keyword)
 	})
 }
 
@@ -239,16 +239,26 @@ func (s *Shell) viewSearchToolbar(c *ui.Context, tab int) {
 	})
 }
 
-// viewSearchResultsBody 是结果那一块。一行都没有、而且此刻没在拉 → 画「没有搜索
-// 结果」；一行都没有、正在拉 → 画「正在加载…」；其余 → 列表。
+// viewSearchResultsBody 是结果那一块。四种状态四种样子。
 //
-// ⚠️ 第一支**不看有没有出错**，照抄上游：它的 `retryInitial` 失败时
-// `addToast("加载失败")`，而 `list` 仍然是空的，于是下一句 `!initialLoading &&
-// !list?.length` 成立，画的是同一个 `<Empty />`（`video-list/index.tsx:181`）——
-// **搜不出来时用户看见的是「换个词再搜」加一条 Toast**，不是一块错误页。
+//	正在拉   转圈（列表自己那一格）
+//	拉失败   一句原因 + 一个「重试搜索」
+//	真的没有 「换个词再搜一次」
+//	有结果   列表
 //
-// 拉了半截之后失败是另一回事：那时 `Loaded > 0`，末尾那一行由分页列表自己给出
-// 「加载失败，点此重试」。
+// ⚠️ **「拉失败」和「没有结果」必须是两件事**（票 #455 / 报告 246 第 27 条）：
+// 把失败画成「没有结果」，用户读到的是「B 站没有这个结果，去换个词」——而真实
+// 原因可能是网络断了、登录态过期、B 站风控。「换个词」这个建议在网络故障时是
+// 错的，而且那一屏**没有任何办法重来**。
+//
+// ⚠️ **失败走共用的 `viewLoadError`**，不是 `viewEmpty` 的一个空状态：那一格自带
+// 一句原因和一个重试按钮（理由在 `empty.go` 顶上那三条）。首页那三个 Tab 拉失败
+// 时走的也是它（`homepage.go` 的 `viewTabBody`）——同一个应用里同一个毛病只有
+// 一种画法。
+//
+// ⚠️ **手上已经有结果时不画失败**（`pg.Loaded == 0` 那一半）：那会把用户正在看
+// 的一屏换成一句错。翻了半页之后失败是另一回事——那时末尾那一行由分页列表自己
+// 给出「加载失败，点此重试」。
 //
 // ⚠️ **「正在加载」那一格是列表自己画的那一格**（画法是外面递进去的，见
 // `loadingCell` 和 `searchresults.go` 的 `init`）：它原来是一句 13pt 淡灰缩在
@@ -257,10 +267,16 @@ func (s *Shell) viewSearchToolbar(c *ui.Context, tab int) {
 //
 // ⚠️ **加载的时候列表照画，不 return**：后台回来的结果是在列表的 `View` 里收的
 // （`adopt`），不画它这一页就永远停在「正在加载」。
-func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int) {
+func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string) {
 	t := &s.search.lists[tab]
 	pg := t.list.Paged()
 
+	if pg.Err != nil && pg.Loaded == 0 {
+		s.viewLoadError(c, "search:fail:"+strconv.Itoa(tab),
+			"搜索「"+keyword+"」", "重试搜索", pg.Err,
+			func() { t.list.Reload() })
+		return
+	}
 	if pg.Loaded == 0 && !pg.Loading {
 		s.viewEmpty(c, "search:no-results:"+strconv.Itoa(tab), noSearchResults)
 		return

@@ -861,10 +861,21 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 
 		// ① 封面 + 它上面那圈 hover 反馈：右下角一个 40 的主色圆播放钮，封面底部
 		// 一条 black/90 的渐变（左播放量 / 右时长），都 200ms 淡入。
-		hover.CardCover(c, g.cache, m.Cover, cell, gridCoverH, onCell,
-			g.countText.At(i, m.View, PlayCountText),
-			g.durText.At(i, m.Duration, formatDuration), m.Title,
-			func() { g.playFrom(i) })
+		//
+		// ⚠️ **「用户」那一档的格子不是歌**（`isUserItem`）：那一格按下去是进他的
+		// 空间，所以那一圈反馈换一套——图形、提示、无障碍名三样都换（理由见
+		// `hover.ProfileTip`）。
+		if isUserItem(m) {
+			hover.CardCoverProfile(c, g.cache, m.Cover, cell, gridCoverH, onCell,
+				g.countText.At(i, m.View, PlayCountText),
+				g.durText.At(i, m.Duration, formatDuration), m.Title,
+				func() { g.playFrom(i) })
+		} else {
+			hover.CardCover(c, g.cache, m.Cover, cell, gridCoverH, onCell,
+				g.countText.At(i, m.View, PlayCountText),
+				g.durText.At(i, m.Duration, formatDuration), m.Title,
+				func() { g.playFrom(i) })
+		}
 
 		// ② 歌名 + UP 名/时长。
 		//

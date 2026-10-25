@@ -243,7 +243,12 @@ func (s *Shell) fetchSearchTab(tab int, ctx context.Context, page int) (list.Pag
 		songs, hasMore, total = searchVideoMusics(pg.Hits), pg.HasMore, pg.Total
 	}
 	if err != nil {
-		return list.Page{}, err
+		// ⚠️ **说人话**：界面上原样摆的就是这一句（失败那一格画的是 `err.Error()`，
+		// 那条 Toast 也是），而 B 站客户端的错是「bili: 网络没通: GET /x/y: dial
+		// tcp …」这种给开发者看的东西。`bili.Friendly` 把它翻成「连不上 B 站，
+		// 检查一下网络」——首页那一档也是这么办的（`homepage_feed.go` 的
+		// `homeFailureOf`）。
+		return list.Page{}, searchFailureOf(err)
 	}
 
 	// 留一份给「全部播放」。去重在按下按钮那一刻做（见 searchPlayAll）。
@@ -260,6 +265,27 @@ func (s *Shell) fetchSearchTab(tab int, ctx context.Context, page int) (list.Pag
 	t.mu.Unlock()
 
 	return list.Page{Songs: songs, HasMore: hasMore}, nil
+}
+
+// searchFailureOf 把 B 站客户端那一句错翻成一句**用户看得懂**的话。
+//
+// ⚠️ **这一句会原样出现在界面上**：搜索页的失败那一格画的是 `err.Error()`，而
+// 那条 Toast 也是。`bili.Friendly` 负责翻（-101 → 「登录已经过期了，重新扫码
+// 登录一下」、`ErrNetwork` → 「连不上 B 站，检查一下网络」），而它也**绝不把
+// 地址原样打出去**（取流地址带签名，出现在界面上等于把那条流公开了）。
+//
+// ⚠️ **空的那一句有兜底**：`bili.Friendly` 对「用户自己取消了」返回空串（那一趟
+// 不该在界面上留话），而这儿是**一次真的失败**——空着的话界面上就只剩一个图标
+// 和一个重试按钮，一句原因都没有。
+func searchFailureOf(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := bili.Friendly(err)
+	if msg == "" {
+		msg = "拉不到这一场搜索，等一会儿再试"
+	}
+	return errors.New(msg)
 }
 
 // searchVideoQueryOf 把「歌曲 / 视频」那一档的查询变成一次 B 站请求。

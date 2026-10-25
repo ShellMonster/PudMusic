@@ -35,6 +35,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -130,6 +131,51 @@ func FromLabel(title string) string { return title + " " + PlayFrom }
 // PlayLabel 是「只放这一首」那枚播放钮的标签，理由同 FromLabel。
 func PlayLabel(title string) string { return title + " " + PlayNow }
 
+// ProfileTip 是「按下去进他的 UP 空间」那一句提示。
+//
+// # 为什么它和 `PlayFrom` 是两句话
+//
+// 搜索页「用户」那一档的行**不是歌**：按下去是跳到那个 UP 主的主页
+// （`internal/ui/searchresults.go` 的 `openSearchUser` → `navigate("/user/" + mid)`）。
+//
+// 那一圈反馈原来**三样都在说「放歌」**（图形是一枚播放三角、提示是「从这一首
+// 往后听」、无障碍名也是那一句）——用户读到的和发生的对不上：他想进他的主页，
+// 屏幕上却写着「我要开始放歌」。三样里只改一样，另一样还在说「放歌」。
+//
+// ⚠️ **这一句不许写成「播放」**：菜单里那一项已经从「从这一首往后听」改成
+// 「播放」了（`widgets/list/menu.go`），而「播放」说的是放歌——那是另一件事，
+// 说了还是对不上。
+const ProfileTip = "进他的 UP 空间"
+
+// ProfileLabel 是那一档的无障碍名（带上名字），理由同 FromLabel。
+func ProfileLabel(title string) string { return title + " " + ProfileTip }
+
+// profileIcon 是「进这个人的空间」那一枚图形：一个人。
+//
+// ⚠️ **和 `internal/ui` 的 `iconUser` 是同一张图**（`User & Faces/user-line.svg`），
+// 而这一处**不能** import `internal/ui`（那是个环：那一层 import 了这一包）——
+// 所以走 `iconset`（叶子包，两边共用同一份资源和同一个解析器，见它的文件头）。
+//
+// ⚠️ **为什么是「一个人」而不是「一张名片」**：应用里另有一枚「个人资料」
+// （`Business/profile-line.svg`，头像下拉里那一项），但它那一圈细线在 20 见方
+// 的地方糊成一团；一个人头加肩膀在那个尺寸上仍然一眼认得出。而这一枚要画在
+// 48 见方的头像正中间，只有 20 大。
+var profileIcon = iconset.Must("User & Faces/user-line.svg")
+
+// glyph 是封面那一圈上画的那个图形。
+//
+// ⚠️ **两种图形是两种事情**：播放三角说「放歌」，那一个人说「进他的空间」。
+// 判据在 `widgets/list` 那一层算好（`app.Item.Type == app.ItemTypeUser`）再传进来
+// ——这一包在 `widgets/list` 下面，够不着 `internal/app`（那是个环）。
+type glyph uint8
+
+const (
+	// glyphPlay 是一枚播放三角（「从这一首往后听」）。
+	glyphPlay glyph = iota
+	// glyphProfile 是一枚「一个人」（「进他的 UP 空间」）。
+	glyphProfile
+)
+
 // PlayingLabel 是那个跳动波形的标签，理由同 FromLabel。
 func PlayingLabel(title string) string { return title + " " + PlayingMark }
 
@@ -172,6 +218,10 @@ const (
 	idsCard
 	// idsCardOne 是网格卡片封面那一圈，「只放这一首」。
 	idsCardOne
+	// idsRowProfile 是列表行封面那一圈，「进他的 UP 空间」。
+	idsRowProfile
+	// idsCardProfile 是网格卡片封面那一圈，「进他的 UP 空间」。
+	idsCardProfile
 )
 
 // idsKey 是缓存的键：歌名 + 哪一种反馈。
@@ -241,13 +291,16 @@ func idsOf(title string, kind idsKind) ids {
 // packIDs 算出那一份身份。**只在歌名变了的时候走一次**。
 func packIDs(title string, kind idsKind) ids {
 	var out ids
-	if kind == idsCardOne {
+	switch kind {
+	case idsCardOne:
 		out.label = PlayLabel(title)
-	} else {
+	case idsRowProfile, idsCardProfile:
+		out.label = ProfileLabel(title)
+	default:
 		out.label = FromLabel(title)
 	}
 	switch kind {
-	case idsCard, idsCardOne:
+	case idsCard, idsCardOne, idsCardProfile:
 		out.bar = out.label + ":bar"
 		out.btn = out.label + ":btn"
 	default:
@@ -328,7 +381,7 @@ func drawTri(p *ui.Painter, r ui.Rect, c ui.Color) {
 // 列表行
 // ─────────────────────────────────────────────────────────────────────────────
 
-// RowCover 是「列表行的封面 + 它上面那一圈 hover 反馈」。
+// RowCover 是「列表行的封面 + 它上面那一圈 hover 反馈」，按下去是**从这一首往后听**。
 //
 // 代替直接调 `imgcache.View`：反馈是**贴在封面上**的，它得知道封面有多大、又摆在
 // 哪儿。调用方手里只有「一个 48×48 的封面」，所以连盒子一起给了。
@@ -339,12 +392,35 @@ func drawTri(p *ui.Painter, r ui.Rect, c ui.Color) {
 // 是 140 高跟着格子宽走，那一边收两个（见 CardCover）。
 func RowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 	on bool, title string, play func()) {
+	rowCover(c, cache, url, size, on, title, idsOf(title, idsRow), PlayFrom, glyphPlay, play)
+}
+
+// RowCoverProfile 是同一圈反馈，但按下去是**进他的 UP 空间**。
+//
+// 搜索页「用户」那一档的行走的这一条（`internal/ui/searchresults.go` 的
+// `openSearchUser`）：那一行不是歌，是**一个人**。图形、提示、无障碍名三样都
+// 跟着换——三样里只换一样，另一样还在说「放歌」（理由见 `ProfileTip`）。
+func RowCoverProfile(c *ui.Context, cache *imgcache.Cache, url string, size float32,
+	on bool, title string, play func()) {
+	rowCover(c, cache, url, size, on, title, idsOf(title, idsRowProfile), ProfileTip, glyphProfile, play)
+}
+
+// rowCover 是 RowCover / RowCoverProfile 共用的那一层。
+//
+// ids 是「这一行的身份」（算好的那一份，见上面「那几个身份」那一节），tip 是
+// 指针停在上面时的那句提示，g 是画在封面上的那个图形。
+//
+// ⚠️ **封面那一图的标签是 `title`（光名字），不是 `ids.label`**：那一图说的是
+// 「这是什么」，而上面那一圈反馈说的是「按下去会怎样」——两件事。
+//
+// （网格那一档的封面图拿的是 `ids.label`，那是那边一直的样子，见 `cardCover`；
+// 这一处没跟着改——改它就是改「歌」那一档的读屏效果，而那一档这一票不许动。）
+func rowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
+	on bool, title string, ids ids, tip string, g glyph, play func()) {
 	t := c.Theme()
 	// ⚠️ **那几个身份是记好的那一份**（见上面「那几个身份」那一节）：现算的话
 	// 每帧每行要拼四个字符串、再装箱三次——一屏十三行就是九十一次。
-	ids := idsOf(title, idsRow)
-
-	// ⚠️ **外面这一层盒子是必需的**：压暗和那个三角用 `Attach` 贴在**父盒子的内边距
+	// 外面那一层盒子是必需的：压暗和那个三角用 `Attach` 贴在**父盒子的内边距
 	// 框**上（`mygo/ui/api_gen.go` 的 Attach），而调用方给的父是那一行的 `ui.Row`
 	//——贴上去就成了「浮在这一行中间」，横竖都不对。裹一层和封面一样大的盒子，贴的
 	// 是它。
@@ -371,11 +447,9 @@ func RowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 		show(dim, a)
 
 		tri := ui.Box(c).Key(ids.tri).Size(triSize, triSize).
-			Label(ids.label).Tooltip(PlayFrom).
-			Attach(ui.AnchorCenter, ui.AnchorCenter).
-			Draw(func(p *ui.Painter, r ui.Rect) {
-				drawTri(p, r, ui.RGBA(255, 255, 255, triTint))
-			})
+			Label(ids.label).Tooltip(tip).
+			Attach(ui.AnchorCenter, ui.AnchorCenter)
+		drawCoverGlyph(c, g, tri, triSize, ui.RGBA(255, 255, 255, triTint))
 		show(tri, a)
 
 		// ⚠️ **`Hovered` / `Clicked` 要在它建完之后立刻问**（同 `list/card.go` 里那一
@@ -389,6 +463,26 @@ func RowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 			//（`mygo/ui/transform.go` 的 transformAt），所以是往外涨而不是往一边偏。
 			_ = tri.Scale(triScale, triScale)
 		}
+	})
+}
+
+// drawCoverGlyph 画封面那一圈上的那个图形。
+//
+// ⚠️ **两种图形是两种画法**：播放三角是**一条路径**（`drawTri`），而「一个人」
+// 是**一枚图标**（`iconset` 里那张 `user-line.svg`）——图标那一套自带矢量绘制，
+// 比手画一个人头可靠。
+//
+// size 是那个图形**自己**占多大：三角填满整个盒子（`box` 已经是 20 见方），
+// 图标是它的边长（`ui.Icon` 是「和字号一样高、保持长宽比」）。
+func drawCoverGlyph(c *ui.Context, g glyph, box ui.Element, size float32, color ui.Color) {
+	if g == glyphProfile {
+		box.Children(func() {
+			ui.Icon(c, profileIcon).FontSize(size).TextColor(color)
+		})
+		return
+	}
+	box.Draw(func(p *ui.Painter, r ui.Rect) {
+		drawTri(p, r, color)
 	})
 }
 
@@ -406,7 +500,16 @@ func RowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 // 类，两边都是「封面 + 两行字浮在页面上」，那不是差距（票面「不要做」里点名了）。
 func CardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 	on bool, playCount, clock, title string, play func()) {
-	cardCover(c, cache, url, w, h, on, playCount, clock, idsOf(title, idsCard), PlayFrom, play, false)
+	cardCover(c, cache, url, w, h, on, playCount, clock, idsOf(title, idsCard), PlayFrom, glyphPlay, play, false)
+}
+
+// CardCoverProfile 是同一圈反馈，但按下去是**进他的 UP 空间**。
+//
+// 搜索页「用户」那一档的格子走的这一条：那一格不是歌，是**一个人**。图形、
+// 提示、无障碍名三样都跟着换（理由见 `ProfileTip`）。
+func CardCoverProfile(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
+	on bool, playCount, clock, title string, play func()) {
+	cardCover(c, cache, url, w, h, on, playCount, clock, idsOf(title, idsCardProfile), ProfileTip, glyphProfile, play, false)
 }
 
 // CardCoverOne 是同一圈反馈，但按下去**只放这一首**（`PlayNow`）。
@@ -421,10 +524,11 @@ func CardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 // 它只有底下那条渐变和右下角那个带影的播放钮。
 func CardCoverOne(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 	on bool, title string, play func()) {
-	cardCover(c, cache, url, w, h, on, "", "", idsOf(title, idsCardOne), PlayNow, play, true)
+	cardCover(c, cache, url, w, h, on, "", "", idsOf(title, idsCardOne), PlayNow, glyphPlay, play, true)
 }
 
-// cardCover 是 CardCover / CardCoverOne 共用的那一层：封面 + 上面那一圈反馈。
+// cardCover 是 CardCover / CardCoverOne / CardCoverProfile 共用的那一层：
+// 封面 + 上面那一圈反馈。
 //
 // coverShadow 说**封面自己**要不要带一圈影（见 CardCoverOne 顶上那一段）。
 //
@@ -432,7 +536,7 @@ func CardCoverOne(c *ui.Context, cache *imgcache.Cache, url string, w, h float32
 // 是裁着的（`Clip`）——影于是画在封面的四周，正好是上游那个 `shadow-md` 的样子。
 // 加在里面的图上会变成「图在框里放大」，那是另一回事（hover 放大才那么做）。
 func cardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
-	on bool, playCount, clock string, ids ids, tip string, play func(), coverShadow bool) {
+	on bool, playCount, clock string, ids ids, tip string, g glyph, play func(), coverShadow bool) {
 	t := c.Theme()
 
 	cover := ui.Box(c).Size(w, h).Radius(t.Radius).Clip()
@@ -442,12 +546,12 @@ func cardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 	}
 	cover.Children(func() {
 		imgcache.ViewTitled(c, cache, url, ids.label, w, h)
-		cardOverlay(c, w, h, on, playCount, clock, ids, tip, play)
+		cardOverlay(c, w, h, on, playCount, clock, ids, tip, g, play)
 	})
 }
 
 // cardOverlay 画网格卡片封面**上面**那一圈。
-func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock string, ids ids, tip string, play func()) {
+func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock string, ids ids, tip string, g glyph, play func()) {
 	t := c.Theme()
 
 	bar := ui.Box(c).Key(ids.bar).Size(w, barH).
@@ -497,11 +601,19 @@ func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock string, 
 	shadow.Tailwind2XL(circle)
 
 	show(circle, a).Children(func() {
-		e := ui.Box(c).Size(btn, btn).Label(ids.label).Tooltip(tip).Center().
-			Draw(func(p *ui.Painter, r ui.Rect) {
+		e := ui.Box(c).Size(btn, btn).Label(ids.label).Tooltip(tip).Center()
+		if g == glyphProfile {
+			// 一个人：图标那一枚是「和字号一样高、保持长宽比」，所以给它 24
+			// （圆的六成，和下面那个三角一样大）就正好。
+			e.Children(func() {
+				ui.Icon(c, profileIcon).FontSize(btn * 0.6).TextColor(t.AccentText)
+			})
+		} else {
+			e.Draw(func(p *ui.Painter, r ui.Rect) {
 				// 三角缩到圆的六成：整个圆那么大的三角会顶出圆外。
 				drawTri(p, shrink(r, 0.4), t.AccentText)
 			})
+		}
 		if play != nil && e.Clicked() {
 			play()
 		}

@@ -267,8 +267,13 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 	}
 	history := s.hist.list()
 	showHistory := s.app.SettingsSnapshot().ShowSearchHistory && len(history) > 0
-	terms := s.app.SuggestState().Items
-	if !showHistory && len(terms) == 0 {
+	state := s.app.SuggestState()
+	terms := state.Items
+	// ⚠️ **「没拉到」也算这一档有东西**（票 #455 / 报告 246 第 12 条）：那一档
+	// 摆一句自己的话（`suggestFailedNote`），而不是空着——空着的话「B 站没给
+	// 联想」和「这一趟没拉到」在画面上长得一模一样。
+	failed := state.Failed && len(terms) == 0
+	if !showHistory && len(terms) == 0 && !failed {
 		return
 	}
 	t := c.Theme()
@@ -296,11 +301,11 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 						}
 					})
 				}
-				if len(terms) > 0 {
+				if len(terms) > 0 || failed {
 					if showHistory {
 						ui.Box(c).FillWidth().Height(suggestTermsGap)
 					}
-					s.viewSuggestTerms(c)
+					s.viewSuggestTerms(c, terms, failed)
 				}
 			})
 			s.trackScrollbar(suggestScroll)

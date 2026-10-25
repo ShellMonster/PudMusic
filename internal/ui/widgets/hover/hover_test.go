@@ -1,6 +1,7 @@
 package hover
 
 import (
+	"image"
 	"image/color"
 	"testing"
 
@@ -393,4 +394,87 @@ func TestReduceMotionMakesTheFadeArriveAtOnce(t *testing.T) {
 	if diff(rsettled, settled) > 4 {
 		t.Errorf("两条路的终点不一样：减少动态 %v，默认走完 %v", rsettled, settled)
 	}
+}
+
+// TestTheProfileGlyphIsNotAPlayTriangle 钉住「进他的 UP 空间」那一枚图形**不是**
+// 播放三角（票 #455 / 报告 246 第 30 条）。
+//
+// 原来搜索页「用户」那一档的封面上是一枚播放三角、提示是「从这一首往后听」——
+// 图形、提示、无障碍名三样都在说放歌，而用户按下去做的是跳到那个 UP 主的主页。
+//
+// 判据是**画出来的像素**：
+//
+//   - 播放三角是**朝右**的一枚楔子，它在盒子里**偏左**（左边缘是竖的，右边缘收成
+//     一个尖），所以盒子**偏左、正中**那一个像素是实的；
+//   - 「一个人」是**居中**的（一个脑袋加两块肩膀），那一个像素是空的——透出底下
+//     的封面。
+//
+// ⚠️ **两块的底色必须一样**：封面那一格画的是「首字 + 渐变」（`imgcache` 的
+// `drawGlyphCover`），而渐变是按**标题的哈希**算的——两块用同一个标题，底色才
+// 一模一样，比的才是图形而不是底色。
+//
+// ⚠️ **底色从盒子自己的角上取**：那一角两种图形都是空的（三角在角上是空的，人头
+// 也在角上是空的），所以它就是底色。
+func TestTheProfileGlyphIsNotAPlayTriangle(t *testing.T) {
+	const cover = 48
+	cache := newCache(t)
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Row(c).Gap(40).Padding(6).Children(func() {
+			RowCover(c, cache, "", cover, true, "甲", nil)
+			RowCoverProfile(c, cache, "", cover, true, "甲", nil)
+		})
+	}, testerW, testerH)
+	tt.Frame()
+	settle(tt)
+
+	play, ok := tt.Find(FromLabel("甲"))
+	if !ok {
+		t.Fatalf("没有那个播放三角，文字有 %q", tt.Texts())
+	}
+	prof, ok := tt.Find(ProfileLabel("甲"))
+	if !ok {
+		t.Fatalf("没有「进他的 UP 空间」那一枚，文字有 %q", tt.Texts())
+	}
+	if play.W < 19 || play.H < 19 {
+		t.Fatalf("那个盒子只有 %.1f×%.1f，want 20×20", play.W, play.H)
+	}
+
+	img := tt.Image()
+	// 底色：盒子左上角那一个像素（两种图形在那儿都是空的）。
+	bg := img.RGBAAt(int(play.X)+1, int(play.Y)+1)
+	bg2 := img.RGBAAt(int(prof.X)+1, int(prof.Y)+1)
+	if diff(bg, bg2) > 12 {
+		t.Fatalf("两块封面的底色不一样（%v / %v）——这一条比的就不是图形了", bg, bg2)
+	}
+
+	// ① 播放三角那一处是实的。
+	triPix := img.RGBAAt(int(play.X+play.W*0.2), int(play.Y+play.H*0.5))
+	if diff(triPix, bg) < 60 {
+		t.Errorf("播放三角在盒子偏左正中那处不是实的（%v，底色 %v）——判据本身有问题", triPix, bg)
+	}
+	// ② 「进他的 UP 空间」那一处**不是**实的：那儿没有播放三角。
+	profPix := img.RGBAAt(int(prof.X+prof.W*0.2), int(prof.Y+prof.H*0.5))
+	if diff(profPix, bg) > 60 {
+		t.Errorf("「进他的 UP 空间」那一枚画的还是那枚播放三角（%v，底色 %v）", profPix, bg)
+	}
+	// ③ 而它**画了东西**：那一枚不是空的。
+	if n := inkIn(img, prof, bg); n == 0 {
+		t.Errorf("「进他的 UP 空间」那一枚一个像素都没画——它得是一个「人」")
+	}
+}
+
+// inkIn 数那个盒子里有多少像素**不是**底色。
+//
+// 判据是 `diff > 60`：底色是封面那个渐变压暗之后的一层淡彩，而图形是白的一层
+// 92%——两者差着几百个通道值（渐变自己在盒子里那点变化只有十几）。
+func inkIn(img *image.RGBA, box ui.Rect, bg color.RGBA) int {
+	n := 0
+	for x := int(box.X); x < int(box.X+box.W); x++ {
+		for y := int(box.Y); y < int(box.Y+box.H); y++ {
+			if diff(img.RGBAAt(x, y), bg) > 60 {
+				n++
+			}
+		}
+	}
+	return n
 }
