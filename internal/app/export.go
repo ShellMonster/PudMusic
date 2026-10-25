@@ -27,8 +27,9 @@
 //     用户名）照导——代理地址不是秘密，用户换台机器接着用是想要的。
 //
 // Cookie / SESSDATA / bili_jct / refresh_token / 带签名的 URL 这一类**根本不在
-// 设置里**：凭据存在系统钥匙串（`credentials.go` 的 `keychainStore`），不在用户
-// 数据目录里的任何一份 JSON 中。所以它们不是「被排除了」，是「压根没有地方可导」。
+// 设置里**：凭据存在**另一个文件**里——macOS 上是用户数据目录下的
+// `credentials/session.json`（`credentials_file_darwin.go`），Windows 上是同目录下
+// 的 `credentials.dpapi`。所以它们不是「被排除了」，是「压根不在设置里」。
 // 这一条要有测试钉住（`export_test.go`），因为它靠的是「凭据不在这几个文件里」
 // 这个布局事实，而不是某一句 `if`。
 package app
