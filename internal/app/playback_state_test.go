@@ -36,7 +36,7 @@ func playbackMount(t *testing.T) (*app.App, string) {
 // restart 模拟「退出再打开」：把这一份设置落盘收尾，然后拿同一个文件开一个新 App。
 //
 // ⚠️ **它走的是真的那条路**：`Close` → `CloseSettings`（落盘 + 停后台写），
-// 和界面层关窗口时做的是同一串（见 internal/ui/shell.go 的 Close）。
+// 和界面层关窗口时做的是同一串（见 internal/ui/shell_window.go 的 Close）。
 func playbackRestart(t *testing.T, a *app.App, path string) *app.App {
 	t.Helper()
 	a.Close()
@@ -379,7 +379,7 @@ func TestQuittingForcesTheQueueToBeSaved(t *testing.T) {
 	// 改了队列，**不等防抖窗口**，直接退出。
 	a.Queue().Append(items(paths[0])[0])
 
-	// 退出（和界面层关窗口时做的是同一串，见 internal/ui/shell.go 的 Close）。
+	// 退出（和界面层关窗口时做的是同一串，见 internal/ui/shell_window.go 的 Close）。
 	a.Close()
 	if err := a.CloseSettings(); err != nil {
 		t.Fatal(err)

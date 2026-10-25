@@ -469,7 +469,7 @@ done
 `Close`、`bindMedia`、`Run`）、**画法**（`View`、`viewMain`、`viewFolderDialogs`）、
 **崩溃兜底**（`Guard`、`onPanicAt`、`newCrashInfo`、`viewCrash`）和**挂载**
 （`mountSearchHistory`、`mountShortcuts`）四块——四块之间没有互相依赖的顺序，
-搬开就是四个文件。
+搬开就是四个文件。**票 #234 已经拆完了**（2026-10-25，见下面那个表）。
 
 ### 怎么拆：优先「纯搬文件」
 
@@ -481,6 +481,11 @@ internal/ui/shell.go  →  shell_window.go   窗口生命周期
                         shell_crash.go    崩溃兜底
                         shell_mount.go    挂载
 ```
+
+（**这一票已经照这张表拆完了**：`shell.go` 现在只剩 `Shell` 结构体本身和装配它
+的几段；`shell_window.go` / `shell_view.go` / `shell_crash.go` / `shell_mount.go`
+是四个新文件。⚠️ **字段一个都没动**——Go 的 struct 字段只能写在同一处，而队列
+抽屉那一摊正在被连续改，见下面那条。）
 
 - **Go 编译器保证行为不变 → 风险几乎为零**：搬完 `go build` 绿、测试绿，就是搬对
   了。同一包内搬方法不需要改任何调用点。
