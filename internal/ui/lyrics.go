@@ -470,7 +470,6 @@ func (lv *lyricsView) centre(c *ui.Context, active int, content uint32, fontSize
 			//
 			// 局部重绘那一帧里量到的还是**上一帧**的框（空的），于是这一句要的
 			// 那一帧永远不会来，歌词就一直滚不动。
-			println("DBG AnimationFrame from lyrics.go")
 			//
 			// 而它**也不值得**改：这一句是**每次换歌最多三帧**（`pend` 有预算），
 			// 省下来的三次整窗重建。

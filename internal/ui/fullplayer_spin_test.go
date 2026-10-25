@@ -386,12 +386,17 @@ func TestTheFullCoverKeepsTurningBetweenRebuilds(t *testing.T) {
 //
 // 「看不见」在应用层是**失焦**那一档（框架管不了：窗口还在屏幕上，只是没有
 // 焦点），于是它得由这一层自己挡（`presence.go`）。挡住的标志是**不再要帧**。
+//
+// ⚠️ **这一条画的是「只画满屏那一块」的那一份**（`withView`）：整窗那一份里
+// 首页那三张 Tab 的滑块自己也要帧（`tabs.go` 的 `c.AnimationFrame()`），量出来
+// 的「还在要帧」是**它们**要的，不是封面这一转要的。
 func TestTheFullCoverStopsAskingForFramesWhenTheWindowIsNotSeen(t *testing.T) {
-	s, tt, _ := fullTester(t)
-	openFull(t, tt)
-	// 推够钟，让**共享元素转场**先走完——它自己也要帧，不走完的话下面那条
-	// 「还在要帧」量的是转场而不是封面那一转。
-	tt.Advance(800 * time.Millisecond)
+	st := spinPlayingState()
+	s, tt := spinTester(t, st)
+	armTheSpin(t, tt)
+
+	// 转起来了 → 框架一直要帧。
+	tt.Advance(100 * time.Millisecond)
 	if !tt.FramePending() {
 		t.Fatal("满屏开着、歌在放，界面却不再要帧了——封面那一转压根没转起来，" +
 			"下面那条就量不到东西")
@@ -399,6 +404,10 @@ func TestTheFullCoverStopsAskingForFramesWhenTheWindowIsNotSeen(t *testing.T) {
 
 	// 窗口看不见了（失焦：框架管不了的那一档）。
 	s.noteWindow(func(p *windowPresence) { p.focused = false })
+	// ⚠️ **要有一帧重建**：那条通道只有**重建一次**才会被重新瞄一个目标
+	// （只重绘的那些帧里它一直往前走）——所以「看不见」之后得有一帧重建，
+	// view 才会把那个 pose 收掉（摆一个停在那儿的），框架才不再要帧。
+	tt.Frame()
 	tt.Advance(200 * time.Millisecond)
 	if tt.FramePending() {
 		t.Error("窗口看不见了，界面还在要帧——封面那一转要帧走的是框架那一层，" +

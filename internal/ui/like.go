@@ -238,7 +238,6 @@ func (s *Shell) trackLike(c *ui.Context, pressed, armed bool) {
 	// （`likeRingProgress` 里的 `p.AnimationFrame()`），那一段走的是局部
 	// 重绘：整棵元素树不必每一帧重建一遍（票 #392）。
 	if armed && pressed && g.progress <= 0 {
-		println("DBG AnimationFrame from like.go")
 		c.AnimationFrame()
 	}
 }
