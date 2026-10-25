@@ -73,6 +73,8 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 （1 MiB = 1024×1024 字节），接受 1–4096 的整数；未设置或无效时使用 32 MiB，
 无效值会写一条日志。改后重启生效，主窗口和迷你播放器共用这份缓存。
 代码里的默认值是 `internal/ui/widgets/imgcache/cache.go` 的 `DefaultMaxBytes`。
+这一档是人代选的，随时可调。96 → 32 MiB 在 BMG-263 的原 PNG 探针中
+测得堆峰值 415.0 → 298.8 MB（约省 116 MB）；这不是所有图片格式的固定收益。
 
 ```sh
 BIU_IMAGE_CACHE_MB=32 go run .
@@ -88,8 +90,11 @@ BIU_IMAGE_CACHE_MB=32 /Applications/BiuGo.app/Contents/MacOS/BiuGo
 
 内存未命中时先读磁盘缓存，磁盘也未命中才重新下载，因此网络代价取决于磁盘命中率。
 这只是图片缓存的预算：正在显示的图片受保护，可以暂时超额；它不限制整个进程的内存。
-普通大 PNG（非交错、8 位 RGB/RGBA）会逐行解码并按原算法缩到最长边 768，
-避免临时保留整张原图；其他格式、交错或其他位深的 PNG 仍使用原来的解码器。
+普通大 PNG（非交错、8 位 RGB/RGBA）逐行解码；基线 JPEG（灰度或 YCbCr，
+单扫描）只保留两行 MCU 块。两者都按原来的 ApproxBiLinear 算法缩到最长边 768，
+保留相同像素，避免临时分配整张原图。渐进式 JPEG、RGB/CMYK JPEG、其他格式及
+特殊 PNG 仍走标准解码器。EXIF 只有元数据或方向为 1 的 JPEG 也会缩放；真正
+需要旋转/翻转的 JPEG 继续由框架摆正，保留原尺寸。
 
 ---
 

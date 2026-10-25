@@ -7,8 +7,8 @@ import (
 	"strings"
 )
 
-// Read once when creating the shared cache. Both windows use the same budget;
-// changing the environment requires a restart, not a per-frame environment read.
+// Resolve defaults when constructing or explicitly resetting a cache. Both
+// windows share one cache; normal operation never reads the environment per frame.
 func configuredMaxBytes() int64 {
 	value := strings.TrimSpace(os.Getenv("BIU_IMAGE_CACHE_MB"))
 	if value == "" {

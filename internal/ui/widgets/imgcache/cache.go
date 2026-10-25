@@ -400,12 +400,13 @@ func (c *Cache) BeginFrame(now time.Time) {
 //
 // 改小之后**下一次记账**（有一张图解码完）就会按新的上限挤——已经记好的账
 // 不动，所以它不是「立刻把缓存缩到那个数」。
+// n <= 0 与 New(Options{}) 一致，重新读取环境配置，未配置则用默认值。
 //
 // 测试把预算调低，就能复现票 #358 那种「字节不够」的局面，
 // 不必为填满默认预算生成几十兆封面。
 func (c *Cache) SetMaxBytes(n int64) {
 	if n <= 0 {
-		n = DefaultMaxBytes
+		n = configuredMaxBytes()
 	}
 	c.mu.Lock()
 	c.lru.max = n
