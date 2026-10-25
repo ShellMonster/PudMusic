@@ -240,7 +240,7 @@ var overflowTerms = []string{
 
 // overflowPanel 建一个「最小窗口 + 满两档」的外壳，回到刚画完一帧的样子。
 //
-// ⚠️ **最小窗口**：900×560 是 `WindowOptions` 的 MinWidth/MinHeight（shell.go），
+// ⚠️ **最小窗口**：900×560 是 `WindowOptions` 的 MinWidth/MinHeight（shell_window.go），
 // 也是用户把窗口缩到最小的样子。这一组量的就是**这一个尺寸**下会发生什么——
 // 默认的 1200×800 什么都装得下。
 func overflowPanel(t *testing.T, history []string, terms []string) (*Shell, *mygoui.Tester) {
