@@ -209,6 +209,32 @@ var routes = []Route{
 // 还剩几秒回首页，比一句「暂无内容」有用得多。
 var notFound = Route{Match: "*", Title: "页面不存在"}
 
+// newRouter 造路由表，**切页没有过渡**。
+//
+// # 为什么显式设 `TransitionNone`，而不是靠框架的默认值
+//
+// 框架的 `Router.Transition` 零值是 **`TransitionAuto`**（`mygo@v0.6.3/ui/router.go:123`），
+// 也就是「进深的换页 250ms EaseOut 滑入、平级的换页 150ms EaseOut 淡入」
+// （同文件 `:135-136`、`:654-662`）。**不设它就是开着**。
+//
+// 而规范说**不做**：`DESIGN.md` §五《不做》第一条「页面切换动画（上游没有）」，
+// §九「已经拍板、不要重新提的」里也有同一条。2026-10-25 观测证实，那条兜底
+// **确实一直在跑**：进深（`/` → `/settings`）是 250ms 的滑入，退栈
+// （`/settings` → `/`）是 250ms，平级（`/settings` → `/local-music`）是 150ms 的淡入。
+// 帧证据见 `internal/ui/router_test.go` 的 `TestTheRouterHasNoPageTransition`。
+//
+// 不显式设的话，这就是**靠一个默认值撑着规范**：框架哪天改了零值、或者我们哪天
+// 升级框架，多出一条动画时**没有任何东西会报错**——画面上只是「换页滑了一下」。
+// 所以这里把「不做」写成代码，而不写成「暂时没管」。
+//
+// ⚠️ **这条只管路由换页**：页面**内部**的过渡照旧有（首页切 Tab、侧栏折叠、
+// 队列抽屉进出场…），它们各走各的出口，见 `DESIGN.md` §五《逐处》那张表。
+func newRouter(path string) *ui.Router {
+	r := ui.NewRouter(path)
+	r.Transition = ui.TransitionNone
+	return r
+}
+
 // lookup 按路径找出它属于哪一条路由，照 `{id}` 是通配的规矩走。
 func lookup(path string) Route {
 	p := "/" + strings.Trim(path, "/")

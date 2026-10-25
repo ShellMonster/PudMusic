@@ -40,6 +40,9 @@ func newMiniShell(t *testing.T, toggle func()) (*Shell, *app.App) {
 
 	s := NewMini(a, main, toggle)
 	t.Cleanup(s.closePerWindow)
+	// 迷你窗那一扇的 router 也显式关掉切页动画（生产那一档就是「不做」，
+	// 见 `router.go` 的 `newRouter`；这里再写一遍是让这一扇的取值在测试里
+	// 一眼看得见）。
 	s.router.Transition = mygoui.TransitionNone
 	return s, a
 }

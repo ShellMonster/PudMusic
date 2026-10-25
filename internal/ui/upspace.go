@@ -398,9 +398,11 @@ func (p *upPager) adopt(cursor string, sent int, hasMore bool) {
 // Dispatch 和 drain 都没有 recover，view 里 panic 会穿透 Cocoa 事件循环
 // **直接杀死进程**。这里再加一层不会更安全，只会让同一个 panic 被记两遍。
 //
-// ⚠️ **问 `r` 不要问 `c.Router()`**：换页动画还在走的时候，正在离场的那一页
-// 会被重新建一遍，而 MyGo 建离场页时故意不设 `c.router`，
-// `c.Router().Query(...)` 在那一帧就是空指针（`searchpage.go` 有完整的一段）。
+// ⚠️ **问 `r` 不要问 `c.Router()`**：`r` 是这一页自己那条 entry，而 `c.Router()`
+// 是路由器的当前位置——「正在画的不是当前那一页」时两者不是一回事，而框架建离场页
+// 时故意不设 `c.router`，那一帧 `c.Router()` 是空指针（`searchpage.go` 有完整
+// 的一段）。我们不做换页动画（`router.go` 的 `newRouter`），那个坑今天踩不到，
+// **但规矩不能因为「今天踩不到」就丢掉**。
 func (s *Shell) viewUpSpace(c *ui.Context, r *ui.Route) {
 	// 🔴 铁律二：每帧第一件事就是装主题，而且必须在最开头。
 	s.applyFrameTheme(c)
