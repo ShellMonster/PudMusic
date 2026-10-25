@@ -232,6 +232,11 @@ type List struct {
 	// 它不是歌，所以行身份是 footerKey：一个歌 ID 不可能撞上的类型。
 	footer func(c *ui.Context)
 
+	// footerLabel 是末尾那一行给无障碍和「打字选中」用的名字。空串是默认那句
+	// （`footerLabel`）。翻页那一层会按末尾那一行此刻的样子换它（转圈 / 重试
+	// / 「没有更多了」），见 `PagedList.syncList`。
+	footerLabel string
+
 	// lead 是「这一份歌上面那一块」（页内头部），为 nil 时没有。
 	//
 	// ⚠️ **它占列表的第 0 行**：所以下面那些歌在框架那一层的行号整体挪了一格
@@ -335,6 +340,16 @@ func (l *List) SetSongs(songs []Music) {
 //
 // ⚠️ 只能由界面线程调，同 SetSongs。
 func (l *List) SetFooter(fn func(c *ui.Context)) { l.footer = fn }
+
+// SetFooterLabel 换末尾那一行给无障碍和「打字选中」用的名字。传空串是退回
+// 默认那句（`footerLabel`）。
+//
+// ⚠️ **它换的是「那一行叫什么」，不是「那一行画什么」**：画法是 `SetFooter`
+// 那一件，而这一句是给读屏软件念的。末尾那一行有两种样子（还在拉 / 到头了），
+// 两种该念的名字不一样——见 `PagedList.syncList`。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (l *List) SetFooterLabel(s string) { l.footerLabel = s }
 
 // SetLead 装「这一份歌上面那一块」（页内头部），传 nil 去掉。
 //
@@ -530,6 +545,13 @@ type footerKey struct{}
 // 状态变（转圈 / 重试）——它在无障碍里念出来总比一句会变的话稳。
 const footerLabel = "加载更多"
 
+// EndLabel 是「没有更多了」那一行的字。
+//
+// ⚠️ **导出是因为界面层要画那一行**（`PagedList.SetEndView`）：免得两处各写一遍
+// 「没有更多了」，而其中一处改了之后另一处还在说旧的话——那样无障碍里念出来的
+// 和画面上写的对不上。
+const EndLabel = "没有更多了"
+
 // defaultEmpty 是一行歌都没有时默认说的话。
 const defaultEmpty = "这里还没有歌"
 
@@ -656,6 +678,9 @@ func (l *List) View(c *ui.Context) {
 		}
 		i -= lead
 		if i >= len(l.songs) {
+			if l.footerLabel != "" {
+				return l.footerLabel
+			}
 			return footerLabel
 		}
 		return l.songs[i].Title

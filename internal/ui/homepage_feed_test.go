@@ -18,7 +18,9 @@ package ui
 // 抄一遍那二十行，而抄出来的那份迟早和那边分叉。
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -37,17 +39,16 @@ const (
 
 // newHomeShell 装一个指着假 B 站的首页。
 //
-// ⚠️ 和 `newSpaceShell` 同一个形状：`MountLogin` 建**那一个**客户端，然后把它
-// 递给 `MountRecommend`。建第二个客户端的话登录态、WBI 密钥、请求头都不是同一
-// 份，而症状是「首页一直 -101」——那句话读起来像是「你没权限看推荐」。
+// ⚠️ 和 `newSpaceShell` 同一个形状，所以也走同一个基座：`MountLogin` 建**那一个**
+// 客户端，然后把它递给 `MountRecommend`（建第二个客户端的话登录态、WBI 密钥、
+// 请求头都不是同一份，而症状是「首页一直 -101」）。而 Mount* 都要在建外壳
+// **之前**挂上，收尾（四个定时器、封面缓存、应用、设置/历史/快捷键的落盘）
+// 由 `newTestShell` 无条件挂上——少挂一次就是一组挂到测试二进制结束的 goroutine。
+//
+// ⚠️ **opts 排在最后**：出图的那几组要换深浅（`systemIsDark`），而换主题
+// 预设要挂一份带方案名的设置（`withSettings`）——那两样都是基座的活。
 func newHomeShell(t *testing.T, b *uiExplore, opts ...shellOpt) (*Shell, *mygoui.Tester, *app.App) {
 	t.Helper()
-	// ⚠️ 和 `newSpaceShell` 同一个形状，所以也走同一个基座：Mount* 都要在建外壳
-	// **之前**挂上，而收尾（四个定时器、封面缓存、应用、设置/历史/快捷键的落盘）
-	// 由 `newTestShell` 无条件挂上。少挂一次就是一组挂到测试二进制结束的 goroutine。
-	//
-	// ⚠️ **opts 排在最后**：出图的那几组要换深浅（`systemIsDark`），而换主题
-	// 预设要挂一份带方案名的设置（`withSettings`）——那两样都是基座的活。
 	sh := newTestShell(t, append([]shellOpt{at(homeW, homeH), mounted(func(_ *testing.T, a *app.App) {
 		transport := &app.CredentialTransport{Base: b.Server.Client().Transport, Policy: app.DefaultInjectPolicy()}
 		cli := bili.NewClient(bili.Options{Transport: transport})
@@ -62,21 +63,48 @@ func newHomeShell(t *testing.T, b *uiExplore, opts ...shellOpt) (*Shell, *mygoui
 // homeArchiveData 造一份分区推荐的 data 段。region 是「音乐」还是「鬼畜」。
 //
 // ⚠️ 两档给的歌**不一样**：同一个实现回同一批的话「切到鬼畜还是那一批」是绿的。
+//
+// ⚠️ **给的是一整页（15 首）**，不是一首两首：分区推荐一页就是 15 条（上游的
+// `REGION_PAGE_SIZE = 15`，见 `service/bili/recommend.go`），而**首页的列表
+// 滚到底会自动拉下一段**（票 #370）——一页填不满一屏的话它会接着拉，于是
+// 「这一档只发了一个请求」那种断法就数不准了（它数的是请求，而请求有几回取决
+// 于屏幕装不装得下）。
+const homePageSize = 15
+
 func homeArchiveData(region string) map[string]any {
-	return map[string]any{"archives": []map[string]any{
-		{
-			"aid": 11, "bvid": "BV1home1", "cid": 101, "duration": 185,
-			"title": region + " 推的第一首", "cover": "https://f/one.jpg",
-			"author": map[string]any{"mid": 7, "name": region + " 的 UP 主"},
-			"stat":   map[string]any{"view": 1000},
-		},
-		{
-			"aid": 12, "bvid": "BV1home2", "cid": 102, "duration": 200,
-			"title": region + " 推的第二首", "cover": "https://f/two.jpg",
-			"author": map[string]any{"mid": 8, "name": region + " 的另一个 UP"},
-			"stat":   map[string]any{"view": 2000},
-		},
-	}}
+	archives := make([]map[string]any, 0, homePageSize)
+	for i := range homePageSize {
+		cover := fmt.Sprintf("https://f/home%d.jpg", i+1)
+		if i == 0 {
+			cover = "https://f/one.jpg"
+		}
+		if i == 1 {
+			cover = "https://f/two.jpg"
+		}
+		archives = append(archives, map[string]any{
+			"aid": 11 + i, "bvid": fmt.Sprintf("BV1home%d", i+1), "cid": 101 + i,
+			"duration": 185,
+			"title":    fmt.Sprintf("%s 推的第%s首", region, homeOrdinal(i+1)),
+			"cover":    cover,
+			"author": map[string]any{
+				"mid": 7, "name": region + " 的 UP 主",
+			},
+			"stat": map[string]any{"view": 1000},
+		})
+	}
+	return map[string]any{"archives": archives}
+}
+
+// homeOrdinal 是第 n 个汉字数词（首页那几首的歌名用它）。
+func homeOrdinal(n int) string {
+	switch n {
+	case 1:
+		return "一"
+	case 2:
+		return "二"
+	default:
+		return strconv.Itoa(n)
+	}
 }
 
 // homeArchives 给一台假 B 站装上首页那几个接口：分区推荐按 `from_region` 回不同
@@ -141,7 +169,10 @@ func TestTheHomePagePullsTheTabYouAreLookingAt(t *testing.T) {
 	}
 
 	// 卡片上那三样：标题、UP 名、封面（🔴 铁律四的身份也在这行里）。
-	m, ok := s.home.lists[0].At(0)
+	//
+	// ⚠️ **走 `List().At(0)`**：三个 Tab 现在是三个翻页列表（`list.PagedList`），
+	// 而行在底下那个 `list.List` 里（翻页那一层只管「拉页、翻页、哨兵」）。
+	m, ok := s.home.lists[0].List().At(0)
 	if !ok {
 		t.Fatal("第一档一行歌都没有")
 	}

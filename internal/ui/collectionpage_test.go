@@ -25,6 +25,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -1016,6 +1017,85 @@ func TestTheCollectionHeaderShowsTheCreatorAvatar(t *testing.T) {
 		c := tt.Image().RGBAAt(round32(r.X+r.W/2), round32(r.Y+r.H/2))
 		return c.R > 200 && c.G < 80 && c.B < 80
 	})
+}
+
+// TestTheCollectionCreatorOpensThatSpace 验头图区那个「创建者」**能点进他的空间**
+// （票 BMG-253）。
+//
+// # 为什么这一条要紧
+//
+// 这一行（头像 + 名字）原先**整个都点不动**：用户看到「某某创建的」却进不去他的
+// 空间——而**同一页的列表里每一行的 UP 名是能点进去的**（一页两套）。
+//
+// 两条路都要钉：名字（那一枚和列表里的 UP 名是**同一个出口**）和头像。
+func TestTheCollectionCreatorOpensThatSpace(t *testing.T) {
+	for _, what := range []string{"名字", "头像"} {
+		t.Run(what, func(t *testing.T) {
+			b := newCollectionBili(t)
+			b.setMedias(mediaOf(1, "歌 一"))
+			b.infos["upper"] = map[string]any{"mid": 7, "name": "UP 小明"}
+			_, s, tt := collectionShellFrom(t, b, nil, "", "12345")
+			waitSongs(t, tt, s, 1)
+
+			target := "UP 小明"
+			if what == "头像" {
+				target = collectionOwnerAvatarLabel
+			}
+			if err := tt.Click(target); err != nil {
+				t.Fatalf("点不到创建者的%s：%v，文字有 %q", what, err, tt.Texts())
+			}
+			tt.Frame()
+			if got := s.router.Path(); got != "/user/7" {
+				t.Errorf("点了创建者的%s之后在 %q，want /user/7", what, got)
+			}
+		})
+	}
+}
+
+// TestTheCollectionCreatorNameLooksLikeALink 验创建者那个名字**和列表里的 UP 名
+// 同一档**（票 BMG-253）：悬停时底下长出一道**主色下划线**。
+//
+// # 判据是「悬停前后那一格里有没有主色像素」
+//
+// 那一档反馈是列表里 UP 名用的**名字型链接**（`flat.Link`）：悬停下划线，
+// **没有按钮壳**。而头图区这一行原先是一段**普通字**——和旁边的「简介」「类型 +
+// 条数」长得一模一样，用户不知道它能点。
+//
+// 深浅两套都量：主色那一档在浅色下是**压深过**的（`ink.AccentOn`）。
+func TestTheCollectionCreatorNameLooksLikeALink(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			b := newCollectionBili(t)
+			b.setMedias(mediaOf(1, "歌 一"))
+			b.infos["upper"] = map[string]any{"mid": 7, "name": "UP 小明"}
+			// ⚠️ **外壳要跟着主题走**：主色那一档在深浅两套里是两个数
+			// （`ink.AccentOn`），而这一条量的是「那一格有没有主色像素」。
+			_, s, tt := collectionShellFrom(t, b, []shellOpt{systemIsDark(dark)}, "", "12345")
+			waitSongs(t, tt, s, 1)
+
+			label, ok := tt.Find("UP 小明")
+			if !ok {
+				t.Fatalf("头图区里没有创建者的名字，文字有 %q", tt.Texts())
+			}
+			th := BuildTheme(s.app.SettingsSnapshot(), dark)
+			accent := ink.AccentOn(th)
+
+			// 没悬停：那一格里一个主色像素都没有（它是普通字）。
+			if n := countNear(tt.Image(), label, accent); n != 0 {
+				t.Errorf("没悬停时创建者的名字那一格里已经有 %d 个主色像素", n)
+			}
+			// 悬停：底下长出一道主色下划线。
+			tt.Move(label.X+label.W/2, label.Y+label.H/2)
+			tt.Frame()
+			if n := countNear(tt.Image(), label, accent); n == 0 {
+				t.Errorf("悬停时创建者的名字那一格里一个主色像素都没有——它和旁边的普通字长得一样")
+			}
+		})
+	}
 }
 
 // TestTheCollectionSearchIsACollapsedButton 搜索收着是一枚图标键，点开才是输入框。

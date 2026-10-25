@@ -59,6 +59,14 @@ const (
 	// `Find` 找的是「显示着这个字或者标着这个名字」的元素。
 	searchLabel = "搜索"
 
+	// searchActionLabel 是那枚放大镜的无障碍名字。
+	//
+	// 🔴 **它不能也叫「搜索」**（票 BMG-253）：输入框自己就带那个名字，而
+	// `Tester.Find` 认的是**逐字相等**——两个同名的话它会认到**先画的那一个**
+	// （放大镜画在输入框前面），于是「点一下搜索框」那一下就点到了放大镜上
+	// （而放大镜是「拿框里的词去搜」）。
+	searchActionLabel = "开始搜索"
+
 	// searchHeight 是搜索框多高。Biu 那个 Input 是 md 档（`h-10`，
 	// `search/index.tsx:72-96`；Tailwind 1 单位 = 4px）——40，顶栏 64 高，
 	// 上下各留 12。
@@ -188,10 +196,20 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 		Border(1, searchFieldBorder(t, false, false)).
 		Padding(space.None, searchPadX).Gap(searchGap).AlignItems(ui.Center)
 	row.Children(func() {
-		// 放大镜是**装饰**：它不可点，而输入框自己就带「搜索」这个无障碍名字
-		//（`searchLabel`），所以这里不加 Label——加了就是两个同名的，
-		// 而 `Tester.Find` 只会认到先画的那个。
-		ui.Icon(c, icon(iconSearch)).FontSize(iconMd).TextColor(t.TextMuted)
+		// 放大镜是**真按钮**：点它 = 拿框里的词去搜（票 BMG-253 / 报告第 4 条）。
+		//
+		// 它原先是**纯装饰**——不可点、永远是同一个淡灰色，而用户点它只是把光标
+		// 放进输入框（结果碰巧对，但界面上没有任何东西说明它是个入口）。
+		//
+		// ⚠️ **命中区是整列的高**（`searchHeight`）而**宽还是图标那么宽**
+		// （`iconMd`）：宽一多一个字就往右挪，而那一列的宽是上游算好的
+		// （`px-3 gap-3` = 12 + 18 + 12，见上面 `searchPadX` / `searchGap`）。
+		//
+		// ⚠️ **悬停时图形染主色**（`flatIconButtonAccent`）：它是「图形换色」那一档
+		// （上游 HeroUI 的 `hover:text-primary`），和全应用那些图标键同一套。
+		mag := flatIconButtonAccent(c, iconSearch, searchActionLabel, iconMd, false).
+			Size(iconMd, searchHeight).Padding(space.None).
+			TextColor(t.TextMuted)
 
 		// ⚠️ **不许给输入框加 Key**：Key 只能挂在「创建时没有处理输入」的控件上，
 		// 挂上去直接 panic（`ui/element.go:658`）。外面这一格有 Key 就够了。
@@ -265,6 +283,15 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 
 		// 回车 = 拿这个词去搜。Biu 的 submitSearch。
 		if field.Submitted() {
+			s.submitSearch(s.searchKeyword)
+		}
+
+		// 点那枚放大镜 = 拿这个词去搜（和回车是同一件事，票 BMG-253）。
+		//
+		// ⚠️ **它排在输入框之后问**：按下那一枚会把键盘焦点从输入框拿走（框架的
+		// 规矩：指针按下的那条链上第一个可聚焦的元素拿到焦点），而框里那个词
+		// 是这一格建好之后才最新的。
+		if mag.Clicked() {
 			s.submitSearch(s.searchKeyword)
 		}
 
@@ -416,9 +443,30 @@ func suggestPanelMaxH(winH float32) float32 {
 	return h
 }
 
+// clearHistoryTip 是「清除全部」那句提示（票 BMG-253）。
+//
+// ⚠️ **它要说清两件事**：删掉的是什么、能不能撤。删历史**没有撤销**——
+// B 站那边没有这一条路，用户自己删掉的那一条再也搜不回来。
+const clearHistoryTip = "清除全部搜索历史，删掉之后不能撤销"
+
 // viewSuggestHeader 是浮层顶上那一行：「搜索历史」和「清除全部」。
 //
 // 「清除全部」照 Biu 的 `clearSearchHistory`（`search/index.tsx:122-138`）。
+//
+// 🔴 **它是这一块唯一的不可逆动作**（票 BMG-253）：它一次性删掉全部搜索历史，
+// 而 B 站那边没有「撤销」——所以它照**本仓库其它破坏性动作的画法**来：
+// 一枚**垃圾桶图标** + 一句提示。
+//
+// ⚠️ **最贴的那一处 precedent 是「清空播放列表」**（`queue_drawer.go` 的
+// `viewQueueHeader`）：那一样也是**一次删掉一整份列表**、一样没有撤销，而它是
+// 一枚垃圾桶图标 + 一句提示，**没有确认框**。删搜索历史比清空播放列表轻，
+// 加一道模态反而是给一个轻动作加重量。
+//
+// （另一族——删收藏夹 / 删选中的歌 / 删下载记录 / 删本地文件——都走确认框，
+// 但那几样删的是**用户自己的东西**，不是应用自己记的一张小表。）
+//
+// ⚠️ **提示要说清它删的是什么、能不能撤**：原来它**一句提示都没有**，用户
+// 只看见一个 12px 的淡灰字，点了才知道自己删掉了什么。
 func (s *Shell) viewSuggestHeader(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).Key("suggest-header").FillWidth().Gap(space.Px8).
@@ -426,7 +474,15 @@ func (s *Shell) viewSuggestHeader(c *ui.Context) {
 		// 14/400（上游 `text-sm`，`search/index.tsx:126`）。**不许加粗**：
 		// 上游那一行是正文那一档，靠字号和上面那排 chip 分开，不靠字重。
 		ui.Text(c, "搜索历史").FontSize(scale.Font(c, scale.Size14)).Grow(1)
-		if flatButton(c, "清除全部").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Clicked() {
+		// ⚠️ **字还是 12**（票面量过：标题 14、这一枚 12，见
+		// `navbar_search_form_test.go` 的那条用例）——所以图标那一枚也是 14
+		// 那一档的小图标，而不是 18 的大图标（18 会把这一行撑高）。
+		clear := flatButton(c, "")
+		clear.Children(func() {
+			ui.Icon(c, icon(iconDelete)).FontSize(iconSm)
+			ui.Text(c, "清除全部").FontSize(scale.Font(c, scale.Size12))
+		})
+		if s.withTip(c, clear, clearHistoryTip).TextColor(t.TextMuted).Clicked() {
 			s.hist.clear()
 		}
 	})
@@ -451,17 +507,37 @@ const (
 	historyChipLightR, historyChipLightG, historyChipLightB uint8 = 0xd4, 0xd4, 0xd8
 	historyChipDarkR, historyChipDarkG, historyChipDarkB    uint8 = 0x3f, 0x3f, 0x46
 
-	historyChipPadY     = space.Px3
+	// historyChipPadRight 是 chip 右边那 8 像素：给关闭键一圈和左面对称的留白。
 	historyChipPadRight = space.Px8
 	// historyChipLabelPadX 是标签按钮**左边**的内边距，也是 chip 左半圈那 8
 	// 像素的归属：指针落在上面点得中这条历史，而不是只有字本身可点。
-	// 右边只留 2，和 chip 的 gap 合起来是字到关闭键的 4（上游 px-2 + gap-1）。
+	//
+	// 右边只留 2，和 chip 的 gap 合起来是字到关闭键的 8（票 BMG-253 把它从 4
+	// 放大了——两个后果完全相反的动作原来只靠 2 像素分开）。
 	historyChipLabelPadX   = space.Px8
 	historyChipLabelPadEnd = space.Px2
-	// historyChipClose 是右边那个关闭键的点击区。18 = 12 的图标 + 每边 3；
-	// 再加 chip 上下各 3，整个 chip 正好 24 高（上游 h-6）。
-	historyChipClose = 18
-	historyChipGap   = space.Px2
+	// historyChipPadY 是 chip 上下那一层留白。
+	//
+	// 🔴 **现在是 0**（票 BMG-253）：chip 的高由**关闭键那一格**（24）撑着，
+	// 而标签按钮也占满这 24（它自己的上下内边距是 3）——两个按钮的热区一样高，
+	// 谁也不比谁矮一截。原来是 3：标签按钮只占中间那 18，关闭键也是 18，
+	// 而它的图形只有 12。
+	historyChipPadY = space.None
+	// historyChipLabelPadY 是标签按钮的上下内边距：它和关闭键一样占满 chip 的
+	// 24 高（文字那 18 + 上下各 3）。
+	historyChipLabelPadY = space.Px3
+	// historyChipClose 是右边那个关闭键的点击区。
+	//
+	// 🔴 **24 而不是 18**（票 BMG-253）：那 18 是「12 的图标 + 每边 3」，
+	// 而 chip 里的标签按钮占着 24 高——两个热区一个高一格矮，而矮的那个偏偏是
+	// 图形最小的那一个（12 的叉对 12 的字）。现在关闭键占满 chip 整个高，
+	// 和标签按钮**一样高**。
+	historyChipClose = 24
+	// historyChipGap 是标签按钮和关闭键之间那道缝。
+	//
+	// 🔴 **6 而不是 2**（票 BMG-253）：这两个按钮的后果**完全相反**（一个去搜
+	// 这一条，一个删掉这一条），而它们原来只靠 2 像素分开——指针偏一点就删了。
+	historyChipGap = space.Px6
 )
 
 // historyChipBg 是那枚灰色 Chip 的底色。深浅两套是 HeroUI default 色阶的两头。
@@ -488,12 +564,16 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 		Background(historyChipBg(t)).
 		// 左边不留内边距：那 8 像素归标签按钮，点了才落在这一条上。右边留 8，
 		// 给关闭键一圈和左面对称的留白。
+		//
+		// ⚠️ **上下不留**（`historyChipPadY`）：chip 的高由关闭键那一格撑着，
+		// 标签按钮也占满这 24——两个热区一样高。
 		Padding(historyChipPadY, historyChipPadRight, historyChipPadY, space.None).
 		Gap(historyChipGap).AlignItems(ui.Center).Children(func() {
-		// ⚠️ 标签按钮的上下内边距清零：`flatButton` 默认是 6，套在 chip 里会把
-		// 24 高撑到 30 以上，那就不再是 `h-6` 那种小块了。
+		// ⚠️ 标签按钮的上下内边距是 3（不是 `flatButton` 默认的 6）：套在 chip
+		// 里的话默认那个 6 会把 24 高撑到 30 以上，而它要和关闭键一样占满这 24。
 		if flatButton(c, label).FontSize(scale.Font(c, scale.Size12)).
-			Padding(space.None, historyChipLabelPadEnd, space.None, historyChipLabelPadX).Clicked() {
+			Padding(historyChipLabelPadY, historyChipLabelPadEnd,
+				historyChipLabelPadY, historyChipLabelPadX).Clicked() {
 			// ⚠️ **先把词填回框里**（Biu 的 `setValue(item.value)`，
 			// `search/index.tsx:154`）。不填的话用户点完历史，框里还是原来敲的
 			// 半截字，而页面那边搜的是这一条——两处对不上，按返回再回来还会

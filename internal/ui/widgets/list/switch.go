@@ -107,6 +107,13 @@ func (s *SwitchView) SetFooter(fn func(c *ui.Context)) {
 	s.grid.SetFooter(fn)
 }
 
+// SetFooterLabel 换末尾那一行给无障碍和「打字选中」用的名字，两份都换。
+// 理由同 `SetFooter`（末尾那一行在两档里各有一份）。
+func (s *SwitchView) SetFooterLabel(name string) {
+	s.list.SetFooterLabel(name)
+	s.grid.SetFooterLabel(name)
+}
+
 // SetScroll 让两份都把滚动位置写进 s。同一份 `ScrollState` 只给正在画的那一个用
 // （没在画的那个压根不调 TrackScroll，见 `List.View` 末尾），所以不打架。
 func (s *SwitchView) SetScroll(st *ui.ScrollState) {
