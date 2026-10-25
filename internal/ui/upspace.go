@@ -40,7 +40,9 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
@@ -71,27 +73,51 @@ var upTabNames = []string{"动态", "投稿", "收藏夹", "合集"}
 // upSeriesPageSize 是「合集」Tab 一页几条。上游 `series/index.tsx:41` 是 20。
 const upSeriesPageSize = 20
 
-// 头图区的尺寸（设计规范 v0.1 §7.18，取代上游 Biu 那块压黑的 200 高大头图）：
-// 上面一条横幅（有头图就用头图，没有就是主题色渐变），横幅底部淡进页面底色；
-// 头像压在横幅下沿，名字、签名、统计都写在**页面底色**上，所以字色就是主题的
-// 字色，不再需要为「任意照片 + 白字」算蒙版。
+// 头图区的尺寸（票 #268：对着上游 Biu 的 UP 主页量）。
+//
+// 上游是 `src/pages/user-profile/space-info.tsx`，量的数是这些：
+//
+//   - 头图块：`flex h-[200px] items-end justify-between space-x-8 px-8 py-4`
+//     ——200 高、左右 32、上下 16、左右两组之间 32；
+//   - 头像：`h-[140px] w-[140px] flex-none shadow-lg`（140 的圆）；
+//   - 头像与名字那一列：`space-x-4`（16）；
+//   - 名字那一列：`flex flex-col space-y-2`（行与行之间 8）；
+//   - 名字：`text-xl`（20）；
+//   - 认证徽章：`h-5 w-5 rounded-full`（20 的圆），与名字之间 8；
+//   - 签名：`text-sm`（14）、两行；
+//   - 右边那一组：`flex flex-none items-center space-x-4`（项与项之间 16）；
+//   - 统计：数字 `text-lg`（18）、名字 `text-sm`（14），竖线 `h-4`（16）。
+//
+// ⚠️ **有一处我们故意不抄上游**：上游把名字、签名、统计**全压在头图那张照片
+// 上**（白字 + 一层黑蒙版），而我们这一版把它们写在**页面底色**上（设计规范
+// v0.1 §7.18）——横幅于是是一条独立的横幅，头像压住它的下沿，字在横幅下面。
+// 所以这里的头像比上游小（112 对 140）：上游那个头像整个骑在照片上，我们的
+// 头像有一半压在横幅上、一半落在页面底色上。
 const (
 	// upHeaderH 是头图区一共多高。
 	upHeaderH = 216
 	// upBannerH 是横幅那一条的高。
 	upBannerH = 132
 	// upAvatarS 是头像边长（外面再套一圈 3px 的页面底色环）。
-	upAvatarS = 88
+	upAvatarS = 112
 	// upAvatarRing 是头像外那圈底色环的宽。
 	upAvatarRing = 3
 	// upAvatarTop 是头像（含环）上沿离头图区上沿的距离：压住横幅下沿 44。
 	upAvatarTop = upBannerH - 44
 	// upPad 是 Tab 那一条的左右内边距（内容区那一圈 `p-4`）。
 	upPad = space.Px16
-	// upPadX 是头图区的左右内边距。
+	// upPadX 是头图区的左右内边距（上游 `px-8` = 32）。
 	upPadX = space.Px32
 	// upTextTop 是名字那一列的上沿：横幅下沿再往下 8。
 	upTextTop = upBannerH + 8
+	// upHeadGap 是头像与名字那一列之间的距离（上游 `space-x-4` = 16）。
+	upHeadGap = space.Px16
+	// upActionsGap 是右边那一组与左边那一组之间的距离（上游 `space-x-8` = 32）。
+	upActionsGap = space.Px32
+	// upStatGap 是右边那一组里各项之间的距离（上游 `space-x-4` = 16）。
+	upStatGap = space.Px16
+	// upBadgeS 是昵称右边那枚认证徽章的直径（上游 `h-5 w-5` = 20）。
+	upBadgeS = 20
 )
 
 // upPathOf 是 mid 这个 UP 的空间地址。
@@ -398,9 +424,11 @@ func (p *upPager) adopt(cursor string, sent int, hasMore bool) {
 // Dispatch 和 drain 都没有 recover，view 里 panic 会穿透 Cocoa 事件循环
 // **直接杀死进程**。这里再加一层不会更安全，只会让同一个 panic 被记两遍。
 //
-// ⚠️ **问 `r` 不要问 `c.Router()`**：换页动画还在走的时候，正在离场的那一页
-// 会被重新建一遍，而 MyGo 建离场页时故意不设 `c.router`，
-// `c.Router().Query(...)` 在那一帧就是空指针（`searchpage.go` 有完整的一段）。
+// ⚠️ **问 `r` 不要问 `c.Router()`**：`r` 是这一页自己那条 entry，而 `c.Router()`
+// 是路由器的当前位置——「正在画的不是当前那一页」时两者不是一回事，而框架建离场页
+// 时故意不设 `c.router`，那一帧 `c.Router()` 是空指针（`searchpage.go` 有完整
+// 的一段）。我们不做换页动画（`router.go` 的 `newRouter`），那个坑今天踩不到，
+// **但规矩不能因为「今天踩不到」就丢掉**。
 func (s *Shell) viewUpSpace(c *ui.Context, r *ui.Route) {
 	// 🔴 铁律二：每帧第一件事就是装主题，而且必须在最开头。
 	s.applyFrameTheme(c)
@@ -580,30 +608,65 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 					{Color: t.Background, At: 1},
 				}})
 		})
-		// ② 头像 + 名字 + 签名，右边关注和统计。
+		// ② 头像 + 名字 + 认证徽章 + 签名，右边关注和统计。
+		//
+		// 排布照上游（`space-info.tsx:80-137`）：**一行**——左边是头像 +
+		// 名字那一列，右边是关注 + 统计；头像与名字那一列之间 16，左右两组
+		// 之间 32（上游的 `space-x-4` / `space-x-8`）。
+		//
+		// ⚠️ **横幅和信息行都是 `Absolute`**：框架的 Box 是一列，非绝对的子
+		// 元素往下排；不绝对定位的话它们各占一份高度，头像就掉到横幅下面去了。
 		ui.Row(c).Key("space-head-info").Absolute().Left(0).Right(0).Top(upAvatarTop).
-			Padding(space.None, upPadX).Gap(space.Px16).AlignItems(ui.Start).Children(func() {
-			ui.Box(c).Size(upAvatarS+2*upAvatarRing, upAvatarS+2*upAvatarRing).
-				Radius((upAvatarS + 2*upAvatarRing) / 2).Background(t.Background).Center().Children(func() {
-				s.spaceAvatar(c, h.User.Face, upAvatarS, true)
+			Padding(space.None, upPadX).Gap(upActionsGap).AlignItems(ui.Start).Children(func() {
+			// 左组：头像 + 名字那一列。
+			ui.Row(c).Grow(1).Shrink(1).Gap(upHeadGap).AlignItems(ui.Start).Children(func() {
+				ui.Box(c).Size(upAvatarS+2*upAvatarRing, upAvatarS+2*upAvatarRing).
+					Radius((upAvatarS + 2*upAvatarRing) / 2).Background(t.Background).Center().Children(func() {
+					s.spaceAvatar(c, h.User.Face, upAvatarS, true)
+				})
+				ui.Column(c).Grow(1).Shrink(1).Gap(space.Px8).
+					Margin(upTextTop-upAvatarTop, space.None, space.None, space.None).Children(func() {
+					// 名字 + 认证徽章（上游那一行是 `flex items-center space-x-2`）。
+					ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
+						// ⚠️ **字重是 500（`weightMedium`）**，不是 600（票 #241 / 报告 F-26）。
+						ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, scale.Size20)).FontWeight(weightMedium).
+							MaxLines(1).Ellipsis("…")
+						if h.User.Official != "" {
+							s.spaceBadge(c, h.User.Official)
+						}
+					})
+					// 签名（上游两行，`text-sm`）。
+					if h.User.Sign != "" {
+						ui.Text(c, h.User.Sign).FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).MaxLines(2)
+					}
+				})
 			})
-			ui.Column(c).Grow(1).Shrink(1).Gap(space.Px4).
-				Margin(upTextTop-upAvatarTop, space.None, space.None, space.None).Children(func() {
-				// ⚠️ **字重是 500（`weightMedium`）**，不是 600（票 #241 / 报告 F-26）。
-				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, scale.Size20)).FontWeight(weightMedium).
-					MaxLines(1).Ellipsis("…")
-				if h.User.Official != "" {
-					ui.Text(c, "认证："+h.User.Official).FontSize(scale.Font(c, scale.Size12)).
-						TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
-				}
-				if h.User.Sign != "" {
-					ui.Text(c, h.User.Sign).FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).MaxLines(2)
-				}
-			})
+			// 右组：关注按钮 + 统计。**上沿跟名字那一列齐**（上游那一组是
+			// `items-end`，而上游的名字那一列比头像矮得多——我们这一版的
+			// 名字那一列在横幅下面，跟它齐更接近参考图上「+ 关注」那一枚
+			// 跟昵称齐着的样子）。
 			ui.Box(c).Margin(upTextTop-upAvatarTop, space.None, space.None, space.None).Children(func() {
 				s.viewSpaceActions(c, sp, h)
 			})
 		})
+	})
+}
+
+// spaceBadge 是昵称右边那一枚认证徽章：**20 的圆 + 强调色底 + 一枚盾**。
+//
+// 上游是 `bg-primary flex h-5 w-5 items-center justify-center rounded-full
+// text-white ring-2 ring-white`（`space-info.tsx:97-101`），里面一枚 12 的
+// 闪电（`RiFlashlightFill`）。我们图标集里没有闪电那一枚，用的是盾
+// （`System/shield-check-line.svg`）——同样是「这一位是被认证过的」。
+//
+// ⚠️ **认证的说明文字不进画面**：上游把它放在提示里（`Tooltip`），这一页
+// 没有接那一层。它是徽章的**无障碍名字**（`Label`），读屏能读到；画面上
+// 少的是「认证：某某」那一行字（改之前是有的）。
+func (s *Shell) spaceBadge(c *ui.Context, official string) {
+	t := c.Theme()
+	ui.Box(c).Key("space-badge").Size(upBadgeS, upBadgeS).Radius(upBadgeS / 2).
+		Background(t.Accent).Label(official).Center().Children(func() {
+		ui.Icon(c, icon(iconVerified)).FontSize(12).TextColor(t.AccentText)
 	})
 }
 
@@ -619,7 +682,7 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 	isSelf := s.app.SelfMid() == sp.mid
 
-	ui.Row(c).Key("space-actions").Gap(space.Px16).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Key("space-actions").Gap(upStatGap).AlignItems(ui.Center).Children(func() {
 		// 关注按钮**只在「登录了、且看的不是自己」时画**（上游
 		// `space-info.tsx:100` 的 `Boolean(user?.isLogin) && !isSelf`）。
 		// 看自己的时候画一个「关注自己」是 B 站网页版都不做的事。
@@ -629,11 +692,11 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 				// ⚠️ **关注是写接口**（要 CSRF、要网络、一个往返）。在界面线程
 				// 上直接调就是每按一次冻一下窗口，所以开后台；
 				// `UpSpace.Follow` 自己会叫醒界面（铁律三）。
-				if ui.Button(c, "已关注").Clicked() {
+				if s.spaceFollowButton(c, true).Clicked() {
 					sp.follow(false)
 				}
 			case app.FollowAskable:
-				if ui.PrimaryButton(c, "关注").Clicked() {
+				if s.spaceFollowButton(c, false).Clicked() {
 					sp.follow(true)
 				}
 			case app.FollowFailed:
@@ -689,6 +752,56 @@ func (sp *upSpace) follow(yes bool) {
 	}()
 }
 
+// spaceFollowButton 是「关注」那一枚：**描边方块 + 一枚加号**。
+//
+// 上游是 HeroUI 的 `AsyncButton`（`variant="shadow"`，实心底 + 影），而参考图
+// （B 站 UP 主页）上是**描边方块**加一个「+」。这一版照参考图。
+//
+// ⚠️ **「已关注」那一档还是描边方块**：填成实心底的话，头图区里最响的那一块
+// 恰恰是用户**已经做过**的事——它不该抢注意力（而且那一档按下去是取关，
+// 越显眼越容易误按）。
+//
+// ⚠️ **加号那一枚是 `iconAdd`**（`System/add-line.svg`），和上游的
+// `RiAddLine size={18}` 同一个图形。
+//
+// # 🔴 它必须是 `ui.ButtonBase`，不能是 `ui.Row`
+//
+// `ui.ButtonBase` 才有 `Focusable()`（`mygo/ui/base.go:25-29`）：**Tab 走得到
+// 它、回车 / 空格按得动它**，读屏也当它是按钮（`mygo/ui/access.go:174`：
+// clickable + focusable 才是 `RoleButton`）。
+//
+// ⚠️ **`ui.Row` 只是一个容器**：`Clicked()` 只设 `flagClickable`（不设
+// `flagFocusable`），于是 Tab **跳过**它、回车按不动、读屏只当它是「容器里
+// 的一段字」——鼠标点得动，键盘用户完全够不着（票 #453 修的正是这一类断口，
+// 见 `sidebar_focus_test.go` 的文件头）。
+//
+// 改之前这一枚是 `ui.PrimaryButton`（框架的按钮），键盘是走得到的——这一版
+// 换成描边方块的时候**不能把那份可达性一起丢掉**。
+func (s *Shell) spaceFollowButton(c *ui.Context, following bool) ui.Element {
+	t := c.Theme()
+	label := "关注"
+	mark := icon(iconAdd)
+	if following {
+		label = "已关注"
+		mark = icon(iconFollowDone)
+	}
+	// ⚠️ **悬停 / 按下的反馈走 `flat.Feel`**：它压的是一层半透明的前景色，
+	// 而这一枚自己有描边（不是「无描边按钮」那一族），所以不能直接用
+	// `flat.Button`——那一份把描边也去掉了。
+	//
+	// ⚠️ **`flat.Feel` 不影响焦点**：它只是往元素上挂一个画的时候跑的
+	// `DrawOver`（`widgets/flat/flat.go:426-435`），标志一个都不动。
+	box := ui.ButtonBase(c).Key("space-follow").Gap(space.Px4).AlignItems(ui.Center).
+		Padding(space.Px6, space.Px12).Radius(t.Radius).
+		Border(1, t.Border).Background(t.Background)
+	box = flat.Feel(c, box)
+	box.Children(func() {
+		ui.Icon(c, mark).FontSize(16).TextColor(t.TextMuted)
+		ui.Text(c, label).FontSize(scale.Font(c, scale.Size14))
+	})
+	return box
+}
+
 // spaceStat 是一个统计数字（上面是数、下面是名字）。
 //
 // 字号照上游 `space-info.tsx:131-133`：数字 `text-lg`（18），名字 `text-sm`（14）。
@@ -698,9 +811,10 @@ func (sp *upSpace) follow(yes bool) {
 // 用途**——「600 是无主」：没有人能说出这三个数字为什么该是 600。500 才是
 // 仓库里唯一被命名的字重，用途正是「比正文重一档但不到标题那么重」。
 //
-// ⚠️ **字色是白字**（`upHeaderText` / `upHeaderTextDim`）：这一块压在头图区
-// 那张照片上，而头图区**永远是深底**——用主题的正文色的话，浅色主题下就是
-// 深字压深底。
+// ⚠️ **字色是主题的字色**（`t.Text` / `t.TextMuted`），不是白字：这一块写在
+// **页面底色**上（横幅下面那一段），而头图区那一版「白字压在照片上」的做法
+// 早就换掉了（设计规范 v0.1 §7.18）——所以这里不需要为「任意照片 + 白字」
+// 算蒙版，字色跟着主题走，方案换一套整套跟着换。
 func spaceStat(c *ui.Context, label, value string) {
 	ui.Column(c).Key("space-stat:" + label).Gap(space.Px2).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, value).FontSize(scale.Font(c, scale.Size18)).FontWeight(weightMedium)
@@ -757,7 +871,7 @@ func (s *Shell) spaceAvatarWith(c *ui.Context, face string, side float32, withSh
 // spaceAvatarZoom 是 spaceAvatar 加一个「指针移上去放大」。
 //
 // zoomKey 非空串时才放大——那一格每一帧都要重建，而动画的值记在**节点的状态**
-// 上，身份跨帧不变才有那份状态（见 `hoverzoom.go` 的文件头）。on 是这一帧指针
+// 上，身份跨帧不变才有那份状态（见 `widgets/motion/hoverzoom.go` 的文件头）。on 是这一帧指针
 // 在不在它上面。
 //
 // ⚠️ **放大的是整个头像（那个圆），不是里面那张图**：上游那一处写的是
@@ -774,7 +888,7 @@ func (s *Shell) spaceAvatarOn(c *ui.Context, face string, side float32, withShad
 		box = shadow.TailwindLG(box)
 	}
 	if zoomKey != "" {
-		box = hoverZoom(c, box, zoomKey, on)
+		box = motion.HoverZoom(box, zoomKey, on)
 	}
 	box.Children(func() {
 		if st := s.images.Get(face); face != "" && st.Ready() {
@@ -836,7 +950,7 @@ func (s *Shell) spaceThumbZoom(c *ui.Context, url string, w, h float32, zoomKey 
 		if st := s.images.Get(url); url != "" && st.Ready() {
 			img := ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(w, h)
 			if zoomKey != "" {
-				hoverZoom(c, img, zoomKey, on)
+				motion.HoverZoom(img, zoomKey, on)
 			}
 			return
 		}

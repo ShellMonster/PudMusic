@@ -524,8 +524,12 @@ func TestTheVolumePopoverMatchesTheUpstreamSizes(t *testing.T) {
 // textInkWidth 量一串字在某个字号下**画出来**有多宽（那几个字的墨迹有多宽）。
 //
 // ⚠️ **量的是墨迹，不是控件的宽**：浮层里那个百分比是**定宽**的一格
-// （`Width(volPanelW)`），而字号变的是**那几个字本身**——要断「字号对不对」，
-// 就得量字的墨迹。
+// （`Width(volPanelW)` = 40，字在格子里居中、而且 `NoWrap` 不许折行），而字号变
+// 的是**那几个字本身**——要断「字号对不对」，就得量字的墨迹。
+//
+// ⚠️ **那一格是 40 而不是滑块那 32**：「100%」在 12 号字下的排版宽是 31.8，
+// 32 宽的格子只剩 0.2 像素余量，系统字号放大到 1.05 倍它就折成两行（票 #485
+// 的评审抓出来的）。见 `TestTheVolumePercentDoesNotWrapAtBigTextScales`。
 func textInkWidth(t *testing.T, s string, font float32) int {
 	t.Helper()
 	tt := mygoui.NewTester(func(c *mygoui.Context) {

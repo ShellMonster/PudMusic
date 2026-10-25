@@ -189,6 +189,22 @@ type Shell struct {
 	//
 	// ⚠️ **它是跨帧的**：即时模式每一帧都重画一遍，局部变量下一帧就没了。
 	avatarMenuOpen bool
+	// dynMenuFor 是「哪一条动态的「⋯」菜单开着」（空串 = 都没开）。
+	//
+	// ⚠️ **它记的是那一条动态的编号，不是「第几行」**：动态是往尾部追加的
+	// （翻页追加），而刷新时新动态会插到**前面**——记行号的话，用户盯着
+	// 那一格菜单会突然跑到别的条目上去。
+	//
+	// ⚠️ **建在 Shell 上而不是每帧新建**：即时模式每一帧都重画一遍，局部
+	// 变量下一帧就没了（和 `avatarMenuOpen` 同一个理由）。
+	dynMenuFor string
+	// dynMenuOpen 是「那一格「⋯」菜单开着没有」。
+	//
+	// ⚠️ **它和 `dynMenuFor` 分开记**：框架的 `PopoverBase` 要的是一个
+	// `*bool`（点外面关、按 Esc 关都写回那一个），而「开着的是哪一条」是
+	// 另一件事——合成一个字段的话，框架写回 false 的时候会把「哪一条」也
+	// 抹掉（那样倒也行，但两件事挤在一个字段里，改一处就容易改错另一处）。
+	dynMenuOpen bool
 	// avatarMenuIndex 是「当前是第几项」（键盘走到的 / 鼠标悬停的那一项）。
 	//
 	// ⚠️ **鼠标和键盘共用这一个下标**：两个下标的话，画面上会有两项同时亮着
@@ -294,8 +310,9 @@ type Shell struct {
 	// `full.bgDraws`）：满屏开着的时候底下那一页不该再被建，而「有没有被建」
 	// 在界面上看不出来——它被一层不透明的浮层整个盖着。
 	//
-	// ⚠️ 数的是 `Shell.page` 那一次分派（`router.go`）：换页动画期间离场的那
-	// 一页也会被建一次，所以这个数在换页那一帧会跳两下——那是对的，两页都建了。
+	// ⚠️ 数的是 `Shell.page` 那一次分派（`router.go`）。**换页那一次只建一页**：
+	// 我们不做换页动画（`router.go` 的 `newRouter`），离场页不会被重建，
+	// 所以这个数换页前后都只跳一下。
 	pageBuilds int
 
 	// like 是长按封面 2.5 秒一键三连那一摊，见 like.go。
@@ -307,6 +324,15 @@ type Shell struct {
 	// ⚠️ **播放条那张封面和满屏那张封面共用这一份**：开着满屏的时候播放条整个
 	// 不建（见 fullplayer.go 文件头），所以任一帧只有其中一个在喂它。
 	like likeGesture
+
+	// halo 是「正在取流」时绕着播放键转的那一圈光，见 loadhalo.go。
+	//
+	// ⚠️ **只有起点这一个字段**：角度是画的时候按钟算的，而起点得记着——
+	// 播放条每 50ms 重建一次，每帧都拿「此刻」当起点的话光圈每 50ms 就
+	// 跳回 12 点（那是在抖，不是在转）。
+	//
+	// ⚠️ **只由 view 在主线程上读写**，和别的界面状态同一条规矩。
+	halo loadHalo
 
 	// rateOpen 是倍率那个浮层开着没有。**只由 view 在主线程上读写**，
 	// 见 playbar_rate.go。
@@ -503,6 +529,19 @@ type Shell struct {
 	searchKeywordFilled bool
 	searchSuggest       bool
 	searchFocused       bool
+	// suggestShown 是「**这一场**进场已经播过了」。
+	//
+	// ⚠️ **它是「这一场」，不是「面板此刻在不在画面上」**：新的一趟请求会把上一批
+	// 词清空（`internal/app/searchsuggest.go`），于是**「没有搜索历史」的用户每敲
+	// 一个字面板都会空掉一帧**（框架不摆那个 panel）——按「此刻在不在」判的话，
+	// **每一次按键都会重播一遍 200ms 的进场**（票面 AC 第 4 条要挡的正是这个）。
+	//
+	// ⚠️ **它只在浮层关掉的时候复位**（见 `navbar_search.go` 的 `viewSuggest`）：
+	// 那是「用户重新开了一次浮层」，那一下**就该**重新播。
+	//
+	// ⚠️ **「用户敲了字、开关翻成 true 的那一帧面板可能还空着」**：那时候**没有
+	// 面板可播**；等词回来、面板第一次出现在画面上，那一下才是用户看得见的那一下。
+	suggestShown bool
 	// tipCandidates 是这一遍 build 里登记下来的那些提示（tooltip.go）。
 	//
 	// 🔴 **同一时刻只出一枚提示**（票 #420）：登记的是「有可能要画的」，整遍
@@ -842,7 +881,7 @@ func New(a *app.App) *Shell { return newShellWithImages(a, coverCacheDir()) }
 func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	s := &Shell{
 		app:       a,
-		router:    ui.NewRouter("/"),
+		router:    newRouter("/"),
 		clock:     realClock{},
 		images:    imgcache.New(imgcache.Options{Dir: imagesDir}),
 		autostart: systemAutoStart{},

@@ -41,7 +41,7 @@ func TestRenderAvatarMenuShots(t *testing.T) {
 				if dark {
 					st.ThemeMode = app.ThemeModeDark
 				}
-				b := newTestShell(t, withSettings(st))
+				b := newTestShell(t, withSettings(st), loggedInWith("2"))
 				tt := b.tt
 				tt.SetFocused(true)
 				tt.Frame()
@@ -56,7 +56,12 @@ func TestRenderAvatarMenuShots(t *testing.T) {
 				// 指针停在最后一项（「退出登录」）上：当前项铺的是 accentSoft
 				// 淡底，而**那一项的危险字要按这层底现算**——这一张就是看
 				// 那两个字在淡底上还读不读得出来。
-				row, ok := avatarMenuRow(tt, len(avatarMenuItems)-1)
+				//
+				// ⚠️ **要登录态**：未登录时「退出登录」那一项**不画**
+				// （票 #260，照上游 `user/index.tsx:146` 的 `hidden`），最后
+				// 一项是「问题反馈」——而它不是危险色，那张图就白拍了。
+				items := b.s.avatarMenuItemsNow()
+				row, ok := avatarMenuRow(tt, len(items)-1)
 				if !ok {
 					t.Fatalf("画面上找不到下拉里最后一项")
 				}

@@ -33,12 +33,41 @@
 // （远端，Biu 的 `getSearchSuggestMain`）——**两档在同一个面板里**，不是一个浮层
 // 套另一个浮层（理由见 `navbar_suggest.go` 的文件头）。远端那一档的防抖、请求、
 // 画法都在那一边的文件里。
+//
+// ## 面板的进场（票 #259）
+//
+// 联想面板**第一次出现**的那一下有一小段过渡：**淡入 + 从下面升上来 10 DIP**，
+// **200ms** + `motion.Unified`（和队列抽屉、侧栏折叠同一档）。
+//
+// **为什么这一处有，而别的浮层没有**：DESIGN.md §五《不做》写着「菜单 / 小浮层 /
+// 确认框 / Toast 的进出场不加——它们是高频操作，加了变噪音」。**那一条对这一处
+// 不成立**：联想面板**不是高频操作**——它**只在用户输入时出现**，而且**用户此刻
+// 正盯着它**（他刚敲了几个字，正在等联想词）。它不是「一秒好几次」的那种浮层。
+// DESIGN.md §五《不做》那一条的例外就写在这一处（2026-10-25 拍板）。
+//
+// **不抄 QQ音乐那一套**：它的顶栏联想面板是 `max-height` 展开、**600ms**
+// ease-out。抄不了——我们的面板高度是**算出来的**（内容多高就多高，
+// `suggestPanelMaxH` 只是上限），不是从 0 展开的，而 `max-height` 那一套要求
+// 高度从 0 起算。我们做的是**整块面板进场**：淡入 + 轻微上移。
+// **时长也不抄那 600ms**：那是 Web 版在慢网络下的补偿，本地是 200ms 那一档。
+//
+// **只做进场，退场保持瞬消**：框架的 `PopoverBase` 在 `open == false` 时**根本
+// 不 build 那个 panel** → 面板直接消失。要做退场就得**自己接管开关状态**
+// （自己多管一个「正在退场」的状态 + 延时把 `open` 设成 false），**代价大于
+// 收益**；而进场那一下才是用户能感知的「它长出来了」。
+//
+// ⚠️ **开着的时候内容变了不重播**（联想词返回来那一趟）：**这一场里**只在面板
+// **第一次出现**的那一帧播——判据是 `Shell.suggestShown`，而它**只在浮层关掉的
+// 时候**复位（见 `viewSuggest` 那里的说明：面板中间空掉一帧**不算**重新开）。
+// 这一条挡的是「每一次按键都重播一遍进场」。
 package ui
 
 import (
 	"net/url"
 	"strings"
+	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -336,8 +365,16 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 // 的一半）。实测在应用允许的最小窗口（900×560）上灌满两边之后，最后一条联想被排到
 // y=735 —— 而屏幕只有 560 高：它**画在屏幕底下，点不着，也滚不到**（面板原本不是
 // 一个滚动容器）。
+//
+// # 进场（票 #259）
+//
+// 面板**第一次出现**的那一帧播一段进场：淡入 + 从下面升上来 10 DIP。
+// 判据是 `Shell.suggestShown`——**开着的时候内容变了不重播**（联想词返回来
+// 那一趟不重播），理由见文件头《面板的进场》那一段。
 func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 	if !s.searchSuggest {
+		// 面板没了：下一回它再出现的时候，那一下又是「进场」。
+		s.suggestShown = false
 		return
 	}
 	history := s.hist.list()
@@ -349,15 +386,70 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 	// 联想」和「这一趟没拉到」在画面上长得一模一样。
 	failed := state.Failed && len(terms) == 0
 	if !showHistory && len(terms) == 0 && !failed {
+		// 面板**还不存在**（两档都空着）：等有内容了、它第一次出现在画面上，
+		// 那一下才是「进场」。
+		//
+		// 🔴 **这里不许把 `suggestShown` 放回 false**：新的一趟请求会把上一批词
+		// 清空（`internal/app/searchsuggest.go` 的 `s.query, s.items, s.loading =
+		// keyword, nil, true`），于是**「没有搜索历史」的用户每敲一个字，面板都会
+		// 空掉一帧**（框架不摆那个 panel）——按「面板此刻在不在画面上」判的话，
+		// **每一次按键都会重播一遍 200ms 的进场**（票面 AC 第 4 条要挡的正是
+		// 这个）。
+		//
+		// 所以这一位是「**这一场**播过了没有」，**只在浮层关掉的时候**才复位
+		// （见上面那一支）。
 		return
 	}
 	t := c.Theme()
 	_, winH := c.Size()
 
+	// 面板**这一场里第一次出现**的那一帧才播进场。
+	//
+	// ⚠️ **判据是「这一场播过了没有」，不是「开关有没有翻」**：用户敲了字、
+	// 开关翻成 true 的那一帧面板可能还空着（联想词还在路上）——那时候没有
+	// 面板可播；等词回来、面板第一次出现，那一下才是用户看得见的那一下。
+	justOpened := !s.suggestShown
+	s.suggestShown = true
+
 	ui.PopoverBase(c, field, &s.searchSuggest, func(panel ui.Element) {
 		// KeepFocus 的理由见文件头。少这一句，浮层里的条目点不到。
-		popupPanel(t, panel.KeepFocus().
-			Width(suggestWidth).Padding(space.Px8)).Children(func() {
+		p := popupPanel(t, panel.KeepFocus().
+			Width(suggestWidth).Padding(space.Px8))
+
+		// ---- 进场：淡入 + 升上来 10 DIP（票 #259） ----
+		//
+		// ⚠️ **第一帧要 Jump 一下**：框架的规矩是「一个值从它的第一个目标开始」
+		// （`mygo/ui/motion.go` 的 channel：第一次 `AnimateTo` 直接把值给成
+		// 目标），不先 Jump 的话面板会**直接出现在**它该在的地方——没有那一下。
+		//
+		// ⚠️ **「减少动态效果」时直接到终点**：框架的 `AnimateTo` 自己读
+		// `Preferences.ReduceMotion`，为真时它把值直接给成目标（同一帧里
+		// Jump 掉的那个起点也被它盖掉）——所以这一处**不用自己判**。
+		if justOpened {
+			p.Jump(suggestEnterFadeKey, 0)
+			p.Jump(suggestEnterRiseKey, suggestEnterRise)
+		}
+		fade := p.AnimateTo(suggestEnterFadeKey, 1, suggestEnterAnim)
+		rise := p.AnimateTo(suggestEnterRiseKey, 0, suggestEnterAnim)
+		//
+		// ⚠️ **位移动的是布局位置，不是 transform**（DESIGN.md §五《不做》：
+		// 「动画不要用 transform 动大子树……要动就动布局位置」）。面板挂在
+		// 搜索框下面（`AttachTo`），它的**上边距**就是它离搜索框多远——那一格
+		// 从 10 走到 0，面板就从下面 10 DIP 升到位。
+		//
+		// （队列抽屉动的是面板的**右边距**，同一个办法，见 queue_drawer.go。）
+		//
+		// ⚠️ **不透明度是画在面板自己身上的**：那圈影跟着面板一起淡——影要是
+		// 不淡，面板淡入的时候底下会先浮出一块方形阴影。
+		//
+		// ⚠️ **这一段换不了 `AnimatePose`**（票 #276 查过）：**升起的那一段动的是
+		// 布局位置**（上边距），而布局量 pose 动不了（`Pose{Y}` 是 transform，
+		// 而 DESIGN.md §五《不做》明说「要动就动布局位置」）——所以 `rise` 还得
+		// 被 view 读，每帧照样重建。**只把淡入换成 pose 是白换**（判据：换完之后
+		// 那个动画值还会不会被 view 读——会读就白换）。
+		p = p.Opacity(fade).Margin(rise, space.None, space.None, space.None)
+
+		p.Children(func() {
 			// 🔴 **这一层 `Scroll` 是「最下面那几条点得着」的全部**：MaxHeight 把它
 			// 压在屏幕之内，超出去的部分靠滚。没有它，少掉的是「词看得见」——而用户
 			// 看到的是一个**列表突然断在屏幕边上**，既不知道下面还有，也不知道能滚。
@@ -387,6 +479,38 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 		})
 	})
 }
+
+// ---- 联想面板的进场（票 #259） ----
+//
+// 理由和出处见文件头《面板的进场》那一段（DESIGN.md §五《不做》那一条的例外）。
+
+// suggestEnterDuration 是面板进场那一段的时长：**200ms**。
+//
+// ⚠️ **和队列抽屉、侧栏折叠同一档**（DESIGN.md §五《逐处》那张表）：200ms +
+// `motion.Unified`。**不抄 QQ音乐那 600ms**——那是 Web 版在慢网络下的补偿。
+const suggestEnterDuration = 200 * time.Millisecond
+
+// suggestEnterRise 是面板进场时从下面升上来多少（DIP）。
+//
+// ⚠️ **10 在「读得出动了、读不出方向」那一档**（票面要的是 8~12）：再大就成
+// 了一次「滑动」（DESIGN.md §五《规则》第 5 条），再小就只是「凭空出现」。
+const suggestEnterRise = 10
+
+// suggestEnterAnim 是面板进场那一段动画：200ms + 全应用那一条统一曲线。
+//
+// ⚠️ **它是包级变量，不能每帧现造**：`motion.Unified` 是一个闭包，每帧调一次
+// 就是**每帧一个分配**——而每帧分配是我们唯一的性能判据
+// （`internal/ui/framebudget_test.go`）。
+var suggestEnterAnim = ui.Animation{Duration: suggestEnterDuration, Ease: motion.Unified}
+
+// 两条通道的键：淡入一条、位移一条。
+//
+// ⚠️ **键必须是常量字符串**：框架把动画的值记在元素的 state 里，键是 `any`，
+// 而非常量字符串每帧装箱一次就是每帧一个分配（同上）。
+const (
+	suggestEnterFadeKey = "suggest:enter:fade"
+	suggestEnterRiseKey = "suggest:enter:rise"
+)
 
 // syncSearchKeyword 让顶栏那个框里显示**当前这一页搜的词**。
 //

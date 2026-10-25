@@ -85,6 +85,18 @@ const followActionPillRadius = 999
 // followCardPad 是卡里那圈留白。上游是 `p-4`（16）。
 const followCardPad = space.Px16
 
+// followRowGap 是**行与行之间**的缝。上游是 `virtual-grid-page-list` 的
+// `ROW_GAP = 16`（`src/components/virtual-grid-page-list/index.tsx:22`）。
+//
+// ⚠️ **它和 `list.GridGap` 是两回事，别混成一处**：上游那一份 `ROW_GAP` 同时
+// 当地面上两个角色——**行间距**是 `estimateSize: () => rowHeight + ROW_GAP`
+// 加 `height: virtualRow.size - ROW_GAP`（行之间留 16、画的时候把那一份减掉），
+// **列间距**是 `gap: ${ROW_GAP}px`（同一个数）。我们这边**列间距**走的是共用
+// 的一份 `list.GridGap`（首页和这一页共用），**行间距**是这一页自己的——
+// 每一行是**一排卡**，行与行之间原来一点缝都没有，卡片背靠背（用户 2026-10-25
+// 的截图）。
+const followRowGap = space.Px16
+
 // 关注卡上那条 hover 操作条的三个数，照上游 `user-card.tsx:89`：
 //   - 从底边往上 16（`bottom-4`）；
 //   - 平时再往下藏 80（`translate-y-20`），指针移上去才升回来；
@@ -877,6 +889,18 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 		// 键盘接线：游标 + 「↑ 到顶回侧栏」（票 #245 的 E4）。
 		f.keys.wire(c, st, s.focusSide)
 		e := ui.List(c, st, n).Grow(1).FillWidth().
+			// ⚠️ **行间距由列表给**（上游 `virtual-grid-page-list` 的
+			// `ROW_GAP = 16`，见 `followRowGap`）：每一行是**一排卡**，而行与行
+			// 之间原来一点缝都没有——卡片背靠背（用户 2026-10-25 的截图）。
+			//
+			// 框架的列表 `GapY` 正是上游那个意思：**缝在行与行之间**。摆行的
+			// 时候是「下一行的顶 = 这一行的底 + 缝」，而内容的高度是
+			// `所有行高 + (行数-1)*缝`——**末尾那一份它自己减掉了**，所以**最后
+			// 一行底下不多那 16**（上游是画的时候把 `size - ROW_GAP` 减掉，
+			// 同一个意思）。
+			// ⚠️ **别去动卡片的留白**（`followCardPad`）或者**列间距**
+			// （`list.GridGap`）——那两样是**格子**上的事。
+			GapY(followRowGap).
 			// ⚠️ **听一听输入**：为了知道「键盘往回走到顶上了」。
 			// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选格、
 			// Tab 换焦点都还在。
@@ -1097,8 +1121,13 @@ func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser, selected, ring 
 	// # 留白和格子之间的缝，对着上游核过（一个数都没改）
 	//
 	//   - 卡里那圈留白 **16**（上游 `CardBody` 的 `p-4`，见 `followCardPad`）；
-	//   - 卡片之间的缝 **16**（上游 `virtual-grid-page-list` 的 `ROW_GAP = 16`，
-	//     走的是 `list.GridGap`——首页和这一页共用那一份）。
+	//   - **列与列之间**的缝 **16**（上游 `virtual-grid-page-list` 的
+	//     `gap: ${ROW_GAP}px`，走的是 `list.GridGap`——首页和这一页共用那一份）。
+	//
+	// ⚠️ **上游那一个 `ROW_GAP` 同时当地面上两个角色**：上面这一条是**列间距**，
+	// 而**行间距**是同一个数、但走的是另一个出口（`estimateSize` 加
+	// `height: size - ROW_GAP`）。我们这边**行间距**是 `followRowGap`（列表的
+	// `GapY`），别把它当成「格子之间的缝」。
 	cardBg := s.cardBackground(t)
 	card := ui.Column(c).Grow(1).Radius(s.cardRadius(t)).AlignSelf(ui.Stretch).Clip().
 		AlignItems(ui.Center).Gap(space.Px6).Padding(followCardPad).

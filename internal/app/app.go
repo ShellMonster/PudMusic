@@ -161,6 +161,18 @@ type State struct {
 	// ⚠️ **它记的是「这一段」**：取流是三段串行的网络往返，每一段都
 	// 重新起算——所以这一栏是「用户此刻正在等的那一件事」。
 	LoadingWait time.Duration
+	// Starting 是「**应用还在启动中**」（票 #478）。
+	//
+	// ⚠️ **它和 `Loading` 不是一回事**：`Loading` 说「这一首还没放起来」，
+	// 而这一栏说「**整个应用**还没准备好」——冷启动恢复上次那一首时，
+	// 窗口开了、界面在那儿、就是没声音，而用户不知道自己在等什么。
+	//
+	// ⚠️ **它只在「还没有歌」的时候才为真**：有歌的时候界面上摆的是
+	// 歌名，用户看得见应用已经准备好了。
+	//
+	// 🔴 **它不是「有没有在取流」**：应用准备好了之后，用户再点一首歌，
+	// 那一趟取流**不是**「启动」——那一句「正在取流」已经说清了在等什么。
+	Starting bool
 	// Reconnecting 是「**正在重连**」：断流之后应用在救这一首。
 	//
 	// 🔴 **它和 `Loading` 是两件事**，用户看到的差别很大：
@@ -408,6 +420,34 @@ type App struct {
 	pendingSrcGen int
 	// online 是当前正在放的那条在线流，nil 表示放的是本地文件。
 	online *onlineTrack
+	// startup 是「冷启动」那一段的计时（见 startup.go）。
+	//
+	// ⚠️ **它有自己的锁，不在 `a.mu` 里**：那些时刻是从主线程、界面线程、
+	// 后台 goroutine 三个地方记的，而 `a.mu` 是界面**每帧**都要的。
+	startup startupState
+	// starting 是「**启动那一段还没结束**」。
+	//
+	// # 它是什么
+	//
+	// 从进程起来，到「第一次取流有结果了（成了或者败了）」为止。
+	//
+	// # 为什么界面要靠它说一句话
+	//
+	// 冷启动恢复上次那一首时，**窗口已经开了，而那一首还在取**——
+	// 于是播放条上写的是「还没有打开文件」加「正在取流：<歌名>」。
+	// 而第一句是**错的**：应用不是「没有文件」，它是在**等上一首**。
+	// 用户看到的是「窗口开了、界面在那儿、就是没声音」——而他不知道
+	// 自己在等什么（票 #478）。
+	//
+	// # 什么时候它结束
+	//
+	//	第一帧画出来了，而那一刻**没有取流在路上**	→ 结束
+	//	（冷启动恢复上一首时那一趟还在路上 → 不结束，等它有结果）
+	//	那一趟取流有结果了（成了或者败了）	→ 结束
+	//
+	// ⚠️ **它在 `a.mu` 里**：界面每一帧都要读它（`Snapshot` 那一行），
+	// 而它是应用自己的状态——不是界面的。
+	starting bool
 	// quality 是 State.Quality 的存放处，跟着换流更新。
 	quality string
 	// reportedErr 是已经往界面上报过的那一条。解码器的 Err 记的是**第一条**
@@ -637,6 +677,14 @@ type wakeEntry struct {
 func New() *App {
 	a := &App{volume: DefaultVolume, rate: audio.DefaultRate, queue: NewQueue(), done: make(chan struct{}),
 		streamCache: map[string]*bili.StreamRef{}, after: afterFunc, playLog: defaultPlayLog}
+	// 🔴 **「启动那一段」从这儿开始**（票 #478）：应用一建起来就在启动，
+	// 而它在「第一次取流有结果了」之前都算「还没准备好」——
+	// 界面上要靠它说一句话（见 App 里 `starting` 那段注释）。
+	//
+	// ⚠️ **它会在第一帧画出来的时候自己收掉**（见 `startup.go` 的
+	// `NoteFirstFrame`）——而那一帧之前界面还不存在，所以这句话
+	// 实际上是说给「窗口开了、而第一首歌还在取」那一刻的。
+	a.starting = true
 	// 队列一变就标脏（落盘那一格，见 playback_state.go）。
 	//
 	// ⚠️ **排在起后台时钟之前**：那个钩子会被后台那一拍读到，而 goroutine 的
@@ -801,6 +849,10 @@ func (a *App) Snapshot() State {
 		LoadingStage: a.loadingStage,
 		LoadingSlow:  a.loadingSlow,
 		LoadingWait:  a.loadingWaitLocked(),
+		// 🔴 **「启动中」只在「还没有歌」的时候才为真**（见 State 里
+		// `Starting` 那段注释）：有歌的时候界面上摆的是歌名，用户看得见
+		// 应用已经准备好了。
+		Starting: a.starting && a.player == nil,
 		// 🔴 **「正在重连」那一档要去问源**（见 `reconnect.go`）：源那一半住在
 		// 源那边，应用只问当前在管的那一两条流——所以一条被丢掉的源抢不走它。
 		Reconnecting:     a.reopenInFlight || retrying,

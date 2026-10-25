@@ -33,8 +33,8 @@
 //
 //   - **左缩进 16**：和侧栏的品牌 logo、侧栏分组标题（「发现」「我的音乐」）
 //     同一列——这一片是侧栏里的一块，缩进到别处就像是另外贴上去的一件东西。
-//   - **一个字都起在同一列**（36）：分组标题的字、收藏夹名的字、空状态那句、
-//     在飞状态那句，全都在这一列上（见 `favTextPad`）。
+//   - **外层那一列（36）**：分组标题的字、**收藏夹那一枚封面**、空状态那句、
+//     在飞状态那句，都起在这一列上（见 `favTextPad`）。
 //   - **分组标题**：一枚 14 的箭头图标 + 12 / 500 / 次要色的组名（和侧栏分组
 //     标题同一档）。
 //   - **收藏夹名**：14 的正文色；选中那一行是 `accentSoft` 淡底 + 按那层底
@@ -42,6 +42,25 @@
 //     景色，和侧栏菜单项同一档）。
 //   - **折叠态那一层浮层**：底 `surface1`、圆角 `radiusLg`、影 `shadow.Modal`
 //     （`popupPanelCard`）。
+//
+// # 这一片每一行是「图 + 名称 + N 首」（票 #270）
+//
+// 用户 2026-10-25 给的参考图（Biu 的设计稿
+// `Biu_Design/concepts/B3_queue_inspector.png` 左边「创建的歌单」那一组）上，
+// 侧栏那两组收藏夹的每一行是**一枚方形封面 + 名称 + 歌曲数量**，不是纯文字。
+// 照它画。
+//
+//   - **封面 32 见方**（圆角走主题），**和分组标题的字同一列**——参考图上
+//     「创建的歌单」那几个字和下面那些封面是左对齐的。
+//   - **名称 14**（#371 那一档，不动），让开封面之后起在 78。
+//   - **「N 首」12 / 次要色**，在名称下面。
+//   - **折叠态**：侧栏折起来时这一组**整个不画**（换成一枚图标 + 一层浮层，
+//     见 viewFavoritesCollapsed），而**浮层里那几行是同一套**——浮层是同一个
+//     入口的另一种展开方式，两处画得不一样的话用户会以为它们是两样东西。
+//
+// ⚠️ **封面和数量都是白拿的**：`created/list` 和 `collected/list` 这两个
+// 接口的返回里本来就带着 `cover` 和 `media_count`（见 `app.Favorite`）——
+// **不是每行另发一次请求**（那是 N 次网络往返）。
 //
 // ⚠️ **颜色和圆角一个都不写死**：底色走方案，文字走主题，圆角走 `t.Radius`。
 package ui
@@ -56,6 +75,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -88,9 +108,13 @@ const (
 
 	// favTextPad 是这一片里**文字列**相对整片左沿的偏移：图标 + 缝 = 20。
 	//
-	// ⚠️ **分组标题的字、收藏夹名的字、空状态那句、在飞状态那句，都起在这一列
-	// 上**（绝对位置 36）。它们不在一条竖线上的时候，这一片看着就是两段东西
+	// ⚠️ **分组标题的字、空状态那句、在飞状态那句，都起在这一列上**
+	// （绝对位置 36）。它们不在一条竖线上的时候，这一片看着就是两段东西
 	// （报告 C3 那条理由）：一句话顶格在最左边，像一句不属于任何一组的说明。
+	//
+	// ⚠️ **收藏夹名的字不在这儿了**（票 #270）：那一行左边多了一枚方形封面，
+	// 名字得让开它（见 `favNamePad`）。**在这一列上的是封面**（见
+	// `favCoverPad`）——而封面和分组标题的字左对齐，正是参考图上的样子。
 	favTextPad = favIconW + favIconGap
 
 	// favGroupGap 是两组收藏夹之间留的那一截（12）。
@@ -99,6 +123,54 @@ const (
 	// `sideGroupGapTop`）：两个分组标题之间要有一道呼吸，不然第二组的标题紧贴
 	// 着上一组最后一条，看着像上一组多出来的一个条目。
 	favGroupGap = space.Px12
+)
+
+// 这一片每一行的版式（票 #270）：**一枚方形封面 + 名称 + 「N 首」**。
+//
+// # 数是**对着参考图量**的
+//
+// 参考图是用户 2026-10-25 给的 Biu 设计稿
+// （`Biu_Design/concepts/B3_queue_inspector.png` 左边「创建的歌单」那一组）。
+// 那张稿子上的实测值：
+//
+//	封面 40×40，图与字之间的缝 14，名称的字约 16，「N 首」约 13，行与行之间 18。
+//
+// ⚠️ **那张稿子的侧栏比我们的宽**（289 对 220），字也比我们的**大一号**
+// （名称 16 对 14）——所以它不能 1:1 抄。按我们的字号缩：封面 40 → 35、
+// 缝 14 → 12、名称 16 → 14、「N 首」13 → 11。
+//
+// ⚠️ **缝从 12 收到 10**：一枚 32 的封面 + 12 的缝，这一行在 220 宽的侧栏
+// 里就只剩 134 给名字了，而名字是这一行里唯一要读的东西（上游那种
+// 「【长期主义】2026 年度歌单合集·最终版」有二十来个字）。
+const (
+	// favCoverSize 是那枚方形封面的边长。**32**（刻度上最近的一档）。
+	favCoverSize = space.Px32
+
+	// favCoverGap 是封面和右边那两行字之间的缝。**10**。
+	favCoverGap = space.Px10
+
+	// favTextGap 是名称和「N 首」之间的缝。**2**（和侧栏菜单项行内那一档
+	// 一样紧——那两个字是一块，不是两段）。
+	favTextGap = space.Px2
+
+	// favCoverPad 是那枚封面的左沿。**和分组标题的字同一列**（`favTextPad`）。
+	//
+	// ⚠️ **参考图上「创建的歌单」那几个字和下面那些封面是左对齐的**——
+	// 照它摆，这一片看着是「标题 + 它下面缩进一层的东西」，而不是两段。
+	favCoverPad = favTextPad
+
+	// favNamePad 是收藏夹名的字起在哪：封面 + 缝。
+	//
+	// ⚠️ **它不再和分组标题的字同列**（票 #371 那条「字起在 36」对**收藏夹名**
+	// 这一项已经不成立了）：名字左边有一枚封面，它得让开。
+	favNamePad = favCoverPad + favCoverSize + favCoverGap
+
+	// favCoverX 是封面那一格的**绝对**左缘：这一片的左缩进 + 那一列的偏移。
+	//
+	// ⚠️ **它是给测试和文档用的**：代码里那两处（整片的左缩进、行自己的左内边
+	// 距）各自写死了，凑出这个数只是为了「和某一列对齐」这件事能一眼验——
+	// 而「和参照物对齐」正是这一族测试的判据（票 #371）。
+	favCoverX = favIndent + favTextPad
 )
 
 // favMenuAction 是右键菜单里的一项。
@@ -551,6 +623,9 @@ func (s *Shell) viewFavoritesPanel(c *ui.Context, st app.Settings, anchor ui.Ele
 // 这里就怎么画。浮层是同一个入口的另一种展开方式，两处画得不一样的话，用户
 // 会以为它们是两样东西。
 //
+// ⚠️ **票 #270 之后连「封面 + N 首」也是同一套**：浮层里那一行同样是
+// 「一枚方形封面 + 名称 + N 首」——不然两处摆着同一个收藏夹，一边一个样。
+//
 // ⚠️ **这里不画「当前」那一行的淡底**（侧栏里那一行有）：两处都分不出组——
 // 同一个收藏夹完全可能既是自己建的、又是自己收藏的（B 站上很常见），而路由里
 // 只有 id（`/collection/{id}`），没有组——于是「当前」那一格会**两行同时亮**，
@@ -566,15 +641,21 @@ func (s *Shell) viewFavoritesPanelRow(c *ui.Context, f app.Favorite) {
 	if label == "" {
 		label = "（没名字）"
 	}
-	row := ui.Row(c).FillWidth().Padding(space.Px4, space.Px8).Radius(t.Radius)
+	row := ui.Row(c).FillWidth().Padding(space.Px4, space.Px8).Radius(t.Radius).
+		Gap(favCoverGap).AlignItems(ui.Center)
 	row = flat.Feel(c, row)
 	// 🔴 **这一行也得能进键盘焦点**（票 #453）：折叠态的收藏夹只有这层浮层里
 	// 看得见，所以「键盘走不到」在这里就是「折叠侧栏之后收藏夹整类都走不到」。
 	// 理由和口径见 `sidebar.go` 的 `sideFocusable`。
 	row = sideFocusable(row)
 	row.Children(func() {
-		ui.Text(c, label).FontSize(scale.Font(c, scale.FavPanelItem)).Grow(1).
-			MaxLines(1).Ellipsis("…")
+		s.viewFavoriteCover(c, f)
+		ui.Column(c).Grow(1).Gap(favTextGap).AlignItems(ui.Start).Children(func() {
+			ui.Text(c, label).FontSize(scale.Font(c, scale.FavPanelItem)).Grow(1).
+				MaxLines(1).Ellipsis("…")
+			ui.Text(c, favCountText(f)).FontSize(scale.Font(c, scale.Size12)).
+				TextColor(t.TextMuted).Grow(1).MaxLines(1)
+		})
 	})
 	if row.Clicked() {
 		// ⚠️ **进去之后要把浮层收掉**：它开着的话会盖在收藏夹那一页上面，
@@ -694,6 +775,15 @@ func collectionTypeQueryOf(f app.Favorite) string {
 }
 
 // viewFavoriteRow 是侧栏里的一行。
+//
+// # 一行是「封面 + 名称 + N 首」（票 #270）
+//
+// 用户 2026-10-25 给的参考图（Biu 的设计稿）上，侧栏那两组收藏夹的每一行是
+// 「一枚方形封面 + 名称 + 数量」，不是纯文字。照它画。
+//
+// ⚠️ **封面和数量都是白拿的**：那两个列表接口本来就给这两格
+// （`created/list` 和 `collected/list` 的 `list[].cover` / `media_count`），
+// 见 `app.Favorite` 的注释——**不是每行另发一次请求**。
 func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favorite) {
 	t := c.Theme()
 	// ⚠️ **当前项要连类型一起比**：合集（21）和收藏夹（11）是两个不同的容器，
@@ -702,16 +792,16 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 	cur := s.router.Path() == collectionPath(f.ID) &&
 		s.router.Query(collectionTypeQuery) == collectionTypeQueryOf(f)
 
-	// ⚠️ **左内边距是 `favTextPad`**（票 #371）：收藏夹名的字和分组标题的**字**
-	// 同列（36），而标题左边那一枚箭头图标在 16——名字和箭头不是一列，名字和
-	// 标题的字是一列。名字比标题的字更靠左的话，这一片看着是「标题缩进了一
-	// 格」，而不是「标题 + 它下面的东西」。
+	// ⚠️ **左内边距是 `favCoverPad`**（票 #270）：这一行左边是一枚封面，而
+	// **封面和分组标题的字同一列**（36）——参考图上「创建的歌单」那几个字和
+	// 下面那些封面是左对齐的。名字让开封面之后在 78（`favNamePad`）。
 	//
 	// ⚠️ **右边还是 8**：那一头留白和左边那一列对称（右 8 对上侧栏右缘那条
 	// 分隔线），而收藏夹名很长（上游那种「【长期主义】2026 年度歌单合集·最终
 	// 版」），右边多留一点白是有用的。
-	row := ui.Column(c).Key(favRowKey(g, f.ID)).Grow(1).Radius(t.Radius).
-		Padding(space.Px6, space.Px8, space.Px6, favTextPad)
+	row := ui.Row(c).Key(favRowKey(g, f.ID)).Grow(1).Radius(t.Radius).
+		Gap(favCoverGap).AlignItems(ui.Center).
+		Padding(space.Px6, space.Px8, space.Px6, favCoverPad)
 	// 🔴 **这一行也得能进键盘焦点**（票 #453）：`Clicked()` 只设 `flagClickable`
 	// ——鼠标点得动，键盘走不到（报告 (b) 一节的第一个断口：「侧栏的收藏夹列表
 	// 键盘完全走不到」）。理由和口径见 `sidebar.go` 的 `sideFocusable`。
@@ -738,22 +828,30 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 	row = flat.Feel(c, row)
 
 	row.Children(func() {
-		label := f.Title
-		if label == "" {
-			label = "（没名字）"
-		}
-		// 🔴 **单行 + 省略号**：名字一长（上游那种「【长期主义】2026 年度歌单
-		// 合集·最终版」）这一行会长高一截，把下面那些收藏夹整体顶下去，
-		// 侧栏跟着抖。侧栏只有 160~480 宽，超过约 20 个汉字就换行。
-		//
-		// ⚠️ **别用 `Wrap()`**：那是给弹性容器用的（让子元素换行），对文字
-		// 叶子无效。列表行和播放条那几处都是「单行 + 省略号」这一套
-		// （`library_rows.go` / `follow.go`），照它们抄。
-		//
-		// 上游那边是 CSS 的 `truncate`（`biu/src/components/menu/menu-item.tsx:111`
-		// 的 `className="pointer-events-none truncate"`），那是同一个意思。
-		ui.Text(c, label).FontSize(scale.Font(c, scale.Size14)).TextColor(rowTextColor(t, cur)).Grow(1).
-			MaxLines(1).Ellipsis("…")
+		s.viewFavoriteCover(c, f)
+		// ⚠️ **两行字是一块**：名称在上、「N 首」在下，右对齐到同一列。
+		ui.Column(c).Grow(1).Gap(favTextGap).AlignItems(ui.Start).Children(func() {
+			label := f.Title
+			if label == "" {
+				label = "（没名字）"
+			}
+			// 🔴 **单行 + 省略号**：名字一长（上游那种「【长期主义】2026 年度歌单
+			// 合集·最终版」）这一行会长高一截，把下面那些收藏夹整体顶下去，
+			// 侧栏跟着抖。侧栏只有 160~480 宽，超过约 20 个汉字就换行。
+			//
+			// ⚠️ **别用 `Wrap()`**：那是给弹性容器用的（让子元素换行），对文字
+			// 叶子无效。列表行和播放条那几处都是「单行 + 省略号」这一套
+			// （`library_rows.go` / `follow.go`），照它们抄。
+			//
+			// 上游那边是 CSS 的 `truncate`（`biu/src/components/menu/menu-item.tsx:111`
+			// 的 `className="pointer-events-none truncate"`），那是同一个意思。
+			ui.Text(c, label).FontSize(scale.Font(c, scale.Size14)).
+				TextColor(rowTextColor(t, cur)).Grow(1).
+				MaxLines(1).Ellipsis("…")
+			// 「N 首」：小字、次要色。
+			ui.Text(c, favCountText(f)).FontSize(scale.Font(c, scale.Size12)).
+				TextColor(t.TextMuted).Grow(1).MaxLines(1)
+		})
 	})
 
 	if row.Clicked() {
@@ -765,6 +863,36 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 	row.ContextMenu(func(m *ui.Menu) {
 		s.favoriteMenu(g, f, m)
 	})
+}
+
+// viewFavoriteCover 是那一行左边那枚方形封面。
+//
+// ⚠️ **拉不到时画什么**：三档都由 `imgcache` 自己管——
+//
+//   - **正在加载**：一块底色；
+//   - **拉到了**：图；
+//   - **拉失败 / 没有地址**：一枚图片图标的占位（`widgets/imgcache` 那一档）。
+//
+// ⚠️ **「没有地址」不是「拉失败」**：用户一个收藏夹都没设过封面，B 站那边
+// 就是没有——那是常态，画占位图就是对的（而不是发一次请求去问「它到底有没有
+// 封面」，那一问的答案已经在这两个接口的返回里了）。
+//
+// ⚠️ **不给它发请求**：封面地址是那两个列表接口本来就给的一格（见
+// `app.Favorite` 的注释），每行另发一次就是 N 次网络往返。
+func (s *Shell) viewFavoriteCover(c *ui.Context, f app.Favorite) {
+	// `CoverURL` 顺手把协议补上（`//i0.hdslb.com/…` → `https://…`）并拼上
+	// 图床的裁剪参数——侧栏这一枚只有 32 宽，要原图是白下几十倍。
+	imgcache.View(c, s.images, imgcache.CoverURL(f.Cover, imgcache.ParamsSquare),
+		favCoverSize, favCoverSize)
+}
+
+// favCountText 是「N 首」那一句。
+//
+// ⚠️ **这个数是 B 站上次统计的**（`media_count`），不是实时的——用户在 B 站
+// 网页上刚加了一首，这边要等下一次刷新才数得对。**那不是 bug**（票 #270 的
+// 验收标准），所以这里不写「大约」也不加波浪号。
+func favCountText(f app.Favorite) string {
+	return strconv.Itoa(f.MediaCount) + " 首"
 }
 
 // favRowKey 是一行的 key。用「组 + ID」：两组可能有同一个 ID（B 站那边

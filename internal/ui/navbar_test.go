@@ -551,31 +551,69 @@ func TestAnEmptySearchGoesBackToTheIdleState(t *testing.T) {
 	}
 }
 
-// TestAvatarMenuHasBiuSixItems 验头像下拉就是 Biu 那六项，顺序也一样。
+// TestAvatarMenuHasBiuSixItems 验头像下拉就是 Biu 那六项，顺序也一样，
+// **而且按登录态隐藏**也照 Biu 那一栏 `hidden`。
 //
 // ⚠️ **这一层现在是自绘的浮层**（原来是系统菜单），所以数菜单项不用
 // `tt.Menu()`——那个读的是系统菜单真正摆出来的那一份，而现在压根没有系统
 // 菜单。改成读浮层里的字：浮层自己的名字（`avatarMenuLabel`）之后就是那
-// 六项，顺序即 Biu 的顺序。
+// 几项，顺序即 Biu 的顺序。
+//
+// ⚠️ **Biu 是六项，我们按登录态挑着画**（票 #260，上游
+// `user/index.tsx:88-158` 的 `hidden`）：
+//
+//   - 未登录 → 「登录 / 设置 / 刷新数据 / 问题反馈」（没有「个人资料」、
+//     没有「退出登录」）。
+//   - 已登录 → 「个人资料 / 设置 / 刷新数据 / 问题反馈 / 退出登录」
+//     （没有「登录」）。
+//
+// ⚠️ **顺序仍然是 Biu 的顺序**：藏掉的那几项不改变其余各项的相对次序。
 func TestAvatarMenuHasBiuSixItems(t *testing.T) {
-	_, tt := newShell(t)
-	tt.SetFocused(true)
+	for _, tc := range []struct {
+		name string
+		mid  string
+		want []string
+	}{
+		{
+			name: "未登录",
+			mid:  "",
+			want: []string{"登录", "设置", "刷新数据", "问题反馈"},
+		},
+		{
+			name: "已登录",
+			mid:  "2",
+			want: []string{"个人资料", "设置", "刷新数据", "问题反馈", "退出登录"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var (
+				s  *Shell
+				tt *mygoui.Tester
+			)
+			if tc.mid == "" {
+				s, tt = newShell(t)
+			} else {
+				s, tt = newLoggedInShell(t, tc.mid)
+			}
+			tt.SetFocused(true)
 
-	openAvatarMenu(t, tt)
-	want := []string{"登录", "个人资料", "设置", "刷新数据", "问题反馈", "退出登录"}
-	got := avatarMenuLabels(tt)
-	if len(got) != len(want) {
-		t.Fatalf("头像下拉有 %d 项 %q，want %d 项 %q", len(got), got, len(want), want)
-	}
-	for i, w := range want {
-		if got[i] != w {
-			t.Errorf("第 %d 项是 %q，want %q（整个是 %q）", i+1, got[i], w, got)
-		}
-	}
-	// ⚠️ **而且它不是系统菜单**：系统菜单是系统外观，跟设计规范不搭，
-	// 而换掉它就是这一票要办的事。
-	if m := tt.Menu(); len(m) != 0 {
-		t.Errorf("头像点开之后弹的是系统菜单 %q——这一票要的是自绘浮层", m)
+			openAvatarMenu(t, tt)
+			got := avatarMenuLabels(tt)
+			if len(got) != len(tc.want) {
+				t.Fatalf("头像下拉有 %d 项 %q，want %d 项 %q", len(got), got, len(tc.want), tc.want)
+			}
+			for i, w := range tc.want {
+				if got[i] != w {
+					t.Errorf("第 %d 项是 %q，want %q（整个是 %q）", i+1, got[i], w, got)
+				}
+			}
+			// ⚠️ **而且它不是系统菜单**：系统菜单是系统外观，跟设计规范不搭，
+			// 而换掉它就是这一票要办的事。
+			if m := tt.Menu(); len(m) != 0 {
+				t.Errorf("头像点开之后弹的是系统菜单 %q——这一票要的是自绘浮层", m)
+			}
+			_ = s
+		})
 	}
 }
 
@@ -585,14 +623,14 @@ func TestAvatarMenuGoesToItsRoute(t *testing.T) {
 	tt.SetFocused(true)
 
 	openAvatarMenu(t, tt)
-	clickAvatarMenuItem(t, tt, avatarMenuIndexOf("设置"))
+	clickAvatarMenuItem(t, s, tt, "设置")
 	if got := s.router.Path(); got != settingsPath {
 		t.Errorf("选了「设置」之后在 %q，want %q", got, settingsPath)
 	}
 
 	// 「登录」接的是扫码登录页。
 	openAvatarMenu(t, tt)
-	clickAvatarMenuItem(t, tt, avatarMenuIndexOf("登录"))
+	clickAvatarMenuItem(t, s, tt, "登录")
 	if got := s.router.Path(); got != loginPath {
 		t.Errorf("选了「登录」之后在 %q，want %q", got, loginPath)
 	}
@@ -608,27 +646,40 @@ func TestAvatarMenuProfileUsesTheLoggedInMid(t *testing.T) {
 	tt.SetFocused(true)
 
 	openAvatarMenu(t, tt)
-	clickAvatarMenuItem(t, tt, avatarMenuIndexOf("个人资料"))
+	clickAvatarMenuItem(t, s, tt, "个人资料")
 	if got := s.router.Path(); got != "/user/2" {
 		t.Errorf("选了「个人资料」之后在 %q，want /user/2", got)
 	}
 }
 
-// TestAvatarMenuWithoutALoginSaysSo 验没登录时那两项说清楚，而不是带用户走进 404。
+// TestAvatarMenuWithoutALoginSaysSo 验没登录时**画出来的那些项**说清楚，
+// 而不是带用户走进 404。
 //
-// Biu 那两条是按登录态隐藏掉的。我们六项一直都在（见 navbar_avatar.go 文件头），
-// 于是「个人资料」和「退出登录」在没登录时必须有话说。
+// ⚠️ **Biu 那两条是按登录态隐藏掉的，我们现在也照它隐藏**（票 #260，上游
+// `user/index.tsx:88-158` 的 `hidden` 那一栏）：「个人资料」和「退出登录」
+// 在没登录时**压根不画**，于是它们不会「说一句」——它们不在那儿。
 //
-// ⚠️ **「退出登录」在没登录时不问**：没有可退的，问一句「确认退出登录？」
-// 再答「确认」是一趟没有意义的往返——它直接说一句。
+// ⚠️ **而「刷新数据」两项都在**：它没登录也说得出「还没登录，登录之后才能
+// 刷新收藏夹」（那一句在应用层说的，见 `app/favorites_refresh.go`）。
 func TestAvatarMenuWithoutALoginSaysSo(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
 
-	for _, item := range []string{"个人资料", "退出登录", "刷新数据"} {
+	// ⚠️ **先钉住「那两项不画」**：这是这一票改的那件事。
+	openAvatarMenu(t, tt)
+	for _, hidden := range []string{"个人资料", "退出登录"} {
+		for _, label := range avatarMenuLabels(tt) {
+			if label == hidden {
+				t.Errorf("没登录时头像下拉里画着%q——上游那两项是按登录态藏起来的", hidden)
+			}
+		}
+	}
+
+	for _, item := range []string{"刷新数据"} {
 		s.clearToasts()
-		openAvatarMenu(t, tt)
-		clickAvatarMenuItem(t, tt, avatarMenuIndexOf(item))
+		// ⚠️ **不要再 `openAvatarMenu` 一次**：浮层已经开着，而那一句是**再点
+		// 一下头像**——于是它把浮层关掉了，后面那一下就点了个空处。
+		clickAvatarMenuItem(t, s, tt, item)
 		if got := toastTexts(s.visibleToasts()); len(got) != 1 {
 			t.Fatalf("选了 %q 之后有 %d 条提示 %q，want 1 条", item, len(got), got)
 		}
@@ -654,7 +705,7 @@ func TestAvatarMenuLogoutActuallyLogsOut(t *testing.T) {
 		t.Fatal("装上去的登录态没生效")
 	}
 	openAvatarMenu(t, tt)
-	clickAvatarMenuItem(t, tt, avatarMenuIndexOf("退出登录"))
+	clickAvatarMenuItem(t, s, tt, "退出登录")
 	if !tt.HasText("确认退出登录？") {
 		t.Fatalf("选了「退出登录」之后没有确认框，文字有 %q", tt.Texts())
 	}
@@ -672,11 +723,11 @@ func TestAvatarMenuLogoutActuallyLogsOut(t *testing.T) {
 
 // TestAvatarMenuOpensTheIssuePage 验「问题反馈」把地址交给系统。
 func TestAvatarMenuOpensTheIssuePage(t *testing.T) {
-	_, tt := newShell(t)
+	s, tt := newShell(t)
 	tt.SetFocused(true)
 
 	openAvatarMenu(t, tt)
-	clickAvatarMenuItem(t, tt, avatarMenuIndexOf("问题反馈"))
+	clickAvatarMenuItem(t, s, tt, "问题反馈")
 	if got := tt.OpenedURLs(); len(got) != 1 || got[0] != feedbackURL {
 		t.Errorf("「问题反馈」打开的是 %q，want [%s]", got, feedbackURL)
 	}

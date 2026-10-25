@@ -257,8 +257,9 @@ func TestTheTextOverTheBlurredBackgroundIsStillReadable(t *testing.T) {
 // 一样的出现方式」。
 //
 // 判据是**同一帧里两者的对比**：界面藏了三秒之后指针一动，顶栏是慢慢淡回来的
-// （`Opacity(AnimateTo(…))`），底下那一条原来写的是 `Opacity(shown)`——那是
-// 「啪」地一下出现的。于是同一帧里：顶栏还看不见，底下那一条已经全亮了。
+// （一个 pose：淡出和位移都在里面，见 `fullplayer.go` 的 `fullBarPose`），
+// 底下那一条原来写的是 `Opacity(shown)`——那是「啪」地一下出现的。于是同一帧里：
+// 顶栏还看不见，底下那一条已经全亮了。
 //
 // 一个界面里两种响应，用户看得见：手一回来，底下那一条先「啪」地一下弹出来，
 // 顶栏才慢慢淡回来。
@@ -760,6 +761,17 @@ func relLuminance(c color.RGBA) float64 {
 // 用的是仓库自己的写法（见 settings_test.go 的 settleSettingsPage）：
 // **`tt.Advance(d)` 配 `tt.FramePending()`**，不数帧。Tester 的钟站着不动，
 // 数帧那种等法会静默失效（CLAUDE.md §2）。
+//
+// ⚠️ **满屏的封面在转的时候，这一条等不到**（票 #468）：那一转是**常驻**的，
+// 框架于是**一直要帧**——而本应用的「看不见就不画」那道闸只挡应用自己发的
+// 唤醒，挡不住框架发的（`fullplayer_spin.go` 那一段有细说）。
+//
+// 所以这里**推满 1.28 秒就收工**（满屏那个共享元素转场是条弹簧，约 500ms；
+// 1.28s 是它原来的上限），而**不再把「还在要帧」当错**。
+//
+// ⚠️ **「动画停不下来」这件事并没有因此没人管**：共享元素转场停不下来的话，
+// 量它落位的那些用例（`TestTheFullPlayerSplitsTheWindowInHalf` 等）会量到
+// 错的位置——它们照样红。
 func settleFull(t *testing.T, tt *mygoui.Tester) {
 	t.Helper()
 	const step = 16 * time.Millisecond
@@ -770,5 +782,5 @@ func settleFull(t *testing.T, tt *mygoui.Tester) {
 			return
 		}
 	}
-	t.Fatal("推了 1.28s 的钟，界面还在要帧——动画停不下来")
+	t.Log("推了 1.28s 的钟，界面还在要帧——多半是满屏的封面在转（常驻动画）")
 }

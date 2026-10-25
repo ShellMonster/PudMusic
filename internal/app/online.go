@@ -743,6 +743,9 @@ func (a *App) endLoadingLocked() {
 	a.loadingStage = ""
 	a.loadingSlow = false
 	a.loadFilled = -1
+	// 🔴 **「启动那一段」到此为止**（票 #478）：第一次取流有结果了
+	// （成了或者败了），应用不再是在「启动」，而是在「用」。
+	a.starting = false
 	// 🔴 **整趟的起点也收掉**：这一趟到这儿就完了，下一趟会重新起算
 	// （见 `playOnlineFrom` 里那一处）。
 	a.loadTripSince = time.Time{}
@@ -1038,6 +1041,12 @@ func (a *App) rearmLoadingLocked(gen int, title, stage string) {
 // at / paused 只有「恢复上次听到哪儿」那一趟会带（见 playback_state.go）：
 // at 是要停到的位置，paused 是「开了之后别出声」。
 func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
+	// 🔴 **冷启动那一段的第一取流时刻**（票 #478）：用户「双击 → 出声」
+	// 这条链上，「取流开始」是一个节点——而它在**恢复上次那一首**时
+	// 是在**开窗口之前**就发出去的（`RestorePlayback` 排在 `openWindow`
+	// 前面），所以用户看到窗口的时候那一趟已经在路上了。
+	a.NoteFetchStart()
+
 	s := a.streamingSnapshot()
 	if s == nil {
 		a.failPlay(gen, it, "取流零件没挂", errStreamingMissing)

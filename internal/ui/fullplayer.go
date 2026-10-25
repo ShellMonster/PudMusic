@@ -37,6 +37,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
@@ -350,6 +351,12 @@ type fullPlayer struct {
 	// bgDraws 是这张画布被重画了几次。**给测试看的**：毛玻璃每帧重渲一遍就是
 	// 这里在涨（那在软件渲染上是 80~100 毫秒一帧）。
 	bgDraws int
+
+	// spin 是「封面在转」这一轮的状态（见 fullplayer_spin.go）。
+	//
+	// ⚠️ **它跟着 `fullPlayer` 一起复位**（`closeFullPlayer` 里的
+	// `s.full = fullPlayer{}`）：满屏关掉之后那一轮就结束了，下次打开从头转。
+	spin fullCoverSpin
 }
 
 // partRow 是分集列表里的一行。
@@ -674,15 +681,17 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 		Absolute().Left(0).Right(0).Top(0).Height(max(titleBar.Height, fullTopHeight)).
 		Padding(fullTopPadY, fullTopPadX, fullTopPadY, fullTopBarPadLeft(titleBar)).
 		Gap(fullTopGap).AlignItems(ui.Center).DragWindow()
-	bar = bar.Opacity(bar.AnimateTo("full-top:o", shown, ui.Smooth))
-	// ⚠️ 藏起来的时候要**移出窗口**，不只是 Opacity(0)。不移的话那两个看不见的
+	// ⚠️ **淡出和位移一起进 pose**（理由见 `fullBarPose` 那一段）：
+	// 只换不透明度的话，位移那一条还在 view 里被读，每帧照样重建整棵满屏播放器。
+	//
+	// ⚠️ 藏起来的时候要**移出窗口**，不只是淡到 0。不移的话那两个看不见的
 	// 按钮仍然接点击：停在窗口顶部点一下，满屏就被关掉；点右上角会把偏好面板
-	// 凭空开出来。底下那一条 controls 用 `Translate` 推出去了，顶栏原来没做。
+	// 凭空开出来。底下那一条 controls 用位移推出去了，顶栏原来没做。
 	//
 	// ⚠️ **方向和底下那一条相反**：controls 在底部，「滑出去」是往下（正的 Y）；
 	// 顶栏在顶部，「滑出去」是往上（负的 Y）。写反了的话它滑到整条还在窗口里
 	// （正的 `fullTopHeight`），按钮照样点得动。
-	bar = bar.Translate(0, -(1-shown)*(titleBar.Height+fullTopHeight))
+	bar = bar.AnimatePose(fullBarPose(shown, -(titleBar.Height+fullTopHeight)), fullBarAnim(c))
 
 	// ⚠️ 这一帧**进来时**面板是开着没有：`ui.Popover` 处理「点外面 / 按 Esc 关掉」
 	// 是在它自己那一趟里做的，进函数时读到的还是上一帧的值。要判断「刚刚被关掉」
@@ -809,9 +818,14 @@ const fullCoverColRatio = 0.5
 // fullStageRect 是中间那一块的区域：**整窗**。
 //
 // ⚠️ **上游那两栏是 `h-full`**（`full-screen-player/index.tsx:330-331`），也就是
-// 从窗口最上头贯到底——所以封面是**在整窗里垂直居中**的（1200×800 上是
-// y=256..543），而歌词那一栏的内容盒是 `py-24` 去掉之后的那一段（96..704），
-// **正在唱的那一句落在窗口的正中**（400）。
+// 从窗口最上头贯到底——所以**上游那个封面**（4:3、384×288）是在整窗里垂直居中
+// 的（1200×800 上是 y=256..543）；歌词那一栏的内容盒是 `py-24` 去掉之后的那一段
+// （96..704），**上游**正在唱的那一句落在窗口的正中（400）。
+//
+// ⚠️ **我们跟上游差两处**（2026-10-25 出图逐张对着上游源码量的）：
+// ① 封面是**正方形 320**（设计规范 v0.1 §7.5），于是它垂直居中在 y=240..560；
+// ② 歌词那一栏的**顶上 22px 让给了「歌词来自搜索」那一句**，于是**正在唱的那一句
+// 落在 411**，不在 400（见 `fullplayer_lyrics.go` 的 `fullLyricsPadY`）。
 //
 // ⚠️ **底下那一条给频谱留了位置**这件事因此变了：频谱是画在底栏正上方那一段
 // 的（`viewFullSpectrum` 的 `Bottom(...)`，656..696），而歌词内容盒一直铺到
@@ -948,9 +962,22 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 		box = box.Cursor(ui.CursorNone)
 	}
 	box.Children(func() {
-		imgcache.View(c, s.images, st.CoverURL, w, h).
+		// 共享元素转场的身份：**两处封面用的是同一个**（这里和播放条上那一张）。
+		id := coverIdentity(s, st)
+		cover := imgcache.View(c, s.images, st.CoverURL, w, h).
 			Label("当前封面").
-			Transition(coverTransition(coverIdentity(s, st)))
+			Transition(coverTransition(id))
+		// ⚠️ **封面在转**（见 fullplayer_spin.go）。
+		//
+		// 转的是**图片这一格**，不是外面那个盒子：盒子里面还有长按三连的进度环，
+		// 环画在封面外面一圈，跟着转会让那圈弧乱甩。
+		//
+		// ⚠️ **走的是 pose 那一档**（`AnimatePose`），不是 `Element.Rotate`：
+		// 后者是建的时候写死的变换，角度每帧都变就得每帧重建一遍整棵满屏播放器
+		//（那是票 #392 治的毛病）。理由见那个文件的头一段。
+		if pose, anim, ok := s.fullCoverSpinPose(c, st); ok {
+			cover = cover.AnimatePose(pose, anim)
+		}
 
 		// 长按 2.5 秒 = 一键三连。满屏上**没有**别的赞入口（照抄 Biu：它那边
 		// 满屏那张封面是 `pointer-events-none`，三连只在播放条上）——我们把这一层
@@ -1023,20 +1050,17 @@ const (
 //
 // ## 淡入要和顶栏**一模一样**
 //
-// 顶栏是 `Opacity(bar.AnimateTo("full-top:o", shown, ui.Smooth))`——不透明度是
-// **动画**出来的。这一条原来写的是 `Opacity(shown)`，那是**一下子**变 0 或 1 的。
-// 于是界面藏了三秒、指针一动之后：顶栏慢慢淡回来，底下这一整条「啪」地一下出现
-// ——同一个界面里两种响应。框架现成的动画写法照抄顶栏那一行就行。
+// 顶栏和底下这一条走的是同一条：**一个 pose**（不透明度和位移都在里面）——
+// 理由见 `fullBarPose` 那一段。框架现成的动画写法照抄顶栏那一行就行。
 func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 	shown := fullShown(hidden)
 	on, dim := s.fullForeground(c)
 	bar := ui.Row(c).Key("full-controls").
 		Absolute().Left(0).Right(0).Bottom(0).Height(fullControlsHeight).
 		Justify(ui.Center).AlignItems(ui.End)
-	bar = bar.Opacity(bar.AnimateTo("full-controls:o", shown, ui.Smooth))
-	// ⚠️ 位移**不跟着淡入一起动**（顶栏也是这么写的）：藏起来的时候这一条要真的
+	// ⚠️ 位移**跟着淡出一起动**（顶栏也是这么写的）：藏起来的时候这一条要真的
 	// 移出窗口，不然停在窗口底下那 108 像素里的控件仍然接得到点击。
-	bar = bar.Translate(0, (1-shown)*fullControlsHeight)
+	bar = bar.AnimatePose(fullBarPose(shown, fullControlsHeight), fullBarAnim(c))
 
 	bar.Children(func() {
 		// 上游那一层：`mx-auto mb-4 flex w-full max-w-6xl flex-col items-center
@@ -1086,9 +1110,16 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 					if st.Playing {
 						glyph = iconPauseFill
 					}
-					if s.withTip(c, iconButtonPlay(c, glyph, transportLabel(st.Playing),
-						fullPlayHit, fullPlayGlyph, !st.Playing && !st.HasTrack),
-						transportLabel(st.Playing)).Clicked() {
+					// ⚠️ **这一枚禁用的时候不画光圈**（票 #271 / loadhalo.go）：
+					// 框架对禁用的控件整个乘 0.5 不透明度。
+					disabled := !st.Playing && !st.HasTrack
+					b := iconButtonPlay(c, glyph, transportLabel(st.Playing),
+						fullPlayHit, fullPlayGlyph, disabled)
+					// 🔴 **取流的时候它外面多绕一圈光**（票 #271）：满屏这一枚
+					// 是用户盯着等的地方（64×64 的实心圆），光圈比播放条那一枚
+					// 大一圈——它是**加**上去的，按钮照旧是播放 / 暂停。
+					b = s.withLoadHalo(c, b, st, fullPlayHit, !disabled)
+					if s.withTip(c, b, transportLabel(st.Playing)).Clicked() {
 						s.app.Toggle()
 					}
 					s.viewNextButtonOn(c, base)
@@ -1201,6 +1232,53 @@ func fullShown(hidden bool) float32 {
 		return 0
 	}
 	return 1
+}
+
+// fullBarPose 是满屏那两条（顶栏 / 底下那一条控制条）这一帧的 pose。
+//
+// # 为什么**淡出和位移合成一个 pose**，而不是两样分开做
+//
+// 判据只有一条：**换完之后那个动画值还会不会被 view 读**。
+// `AnimateTo` 的返回值是**被 view 读**的（`Opacity(…AnimateTo(…))`），
+// 所以每一帧都要重跑 view ——满屏开着的时候那是**整棵满屏播放器**重建一遍
+// （实测 97 次分配 / 帧，报告 BMG-264 §6.2）。
+// `AnimatePose` 的值**元素自己走**，view 只给**目标**——于是中间那些帧走的是
+// 「只重绘」（`mygo/ui/pose.go`：「the cheapest motion there is」），**不重建**。
+//
+// ⚠️ **只把不透明度换成 pose 是白换**：位移那一条还在 view 里被读
+// （`Translate(0, (1-shown)*H)`），view 照样每帧重建。两样**必须一起**进 pose。
+//
+// # ⚠️ `Fade` 的方向和 `Opacity` **相反**
+//
+//	Opacity(v)      ⇒ p.opacity *= v          （v = alpha，1 = 不透明）
+//	Pose{Fade: f}  ⇒ p.opacity *= 1 - f       （f = 淡出的量，0 = 不透明，1 = 全没）
+//
+// ⇒ **等价的是 `Fade: 1 - v`**。写反了会让该亮的时候变透明。
+//
+// shift 是「藏起来的时候往哪边挪多少像素」（顶栏是负的、往上；控制条是正的、往下）。
+func fullBarPose(shown, shift float32) ui.Pose {
+	return ui.Pose{
+		Y:    (1 - shown) * shift,
+		Fade: 1 - shown,
+	}
+}
+
+// fullBarAnim 是满屏那两条的动画。
+//
+// ⚠️ **「减少动态效果」时用「一次到位」**：pose 的 X/Y/Scale/Rotate 四个通道在
+// ReduceMotion 下会**直接到终点**，**而 `Fade` 那一个照常平滑**
+// （`mygo/ui/pose.go` 的 `still && i < 4` 只盖住前四个通道）——于是那一档会
+// 「滑到位、慢慢淡出来」。而原来走 `AnimateTo` 的是**整个值瞬移**
+// （`mygo/ui/motion.go`）。所以这一档自己判 ReduceMotion，用 1ns 的曲线
+// （`motion.Snap`）把淡出也变成瞬移。
+//
+// ⚠️ **别用 `c.DisableAnimations()`**：那是**整帧**生效的，会把这一帧所有动画
+// 都变成瞬移（报告 BMG-264 §7 A1 的坑①）。
+func fullBarAnim(c *ui.Context) ui.Animation {
+	if c.Preferences().ReduceMotion {
+		return motion.Snap
+	}
+	return ui.Smooth
 }
 
 // ---- 分集面板 ----

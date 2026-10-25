@@ -102,6 +102,10 @@ func PressScaleValue(e ui.Element, pressed, grow bool) float32 {
 			target = PressShrink
 		}
 	}
+	// ⚠️ **这一档换不了 `AnimatePose`**（票 #276 查过）：它的返回值是**被读**的
+	// ——调用方拿它去乘（`like.go` 的图标层把这一档和「弹出来」那一档相乘），
+	// 而 pose 的当前值**没有公开的读法**（`mygo/ui/pose.go`）。判据只有一条：
+	// **换完之后那个动画值还会不会被 view 读**——会读就还是每帧重建，就白换。
 	return e.AnimateWith(pressKey, target, pressTime, motion.Unified)
 }
 

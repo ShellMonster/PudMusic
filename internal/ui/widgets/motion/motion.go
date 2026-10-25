@@ -1,4 +1,4 @@
-// Package motion 是全应用的动效值表：曲线、弹簧。
+// Package motion 是全应用的动效值表：曲线、弹簧、缩放。
 //
 // # 为什么单开一个包
 //
@@ -21,9 +21,24 @@
 //
 // `TabSlide` 是主 Tab 滑块那一下的动画。它**不是**曲线，是弹簧——因为那一处
 // 要的是「打断时接着走」，那是曲线给不了的（理由见它自己的注释）。
+//
+// # 缩放
+//
+// `hoverzoom.go` 是「指针移上去放大一点」那一层（1.05 / 300ms / `ui.EaseInOut`），
+// `zoom.go` 是「弹出来」和「停在上面长大一点」那两档（0.85 → 1、1 → 1.1，
+// 都 150ms / `Unified`）。
+//
+// ⚠️ **这一包住在 `widgets/` 底下，是因为它得被两个方向都用**：封面那一族在
+// `widgets/hover`（package hover），而顶栏头像和 UP 空间那一族在
+// `internal/ui`（package ui）——而 `internal/ui` import 了 `widgets/hover`，
+// 反过来 import 会成环（票 #467 的那一次下沉就是这件事）。
 package motion
 
-import "github.com/egoist/mygo/ui"
+import (
+	"time"
+
+	"github.com/egoist/mygo/ui"
+)
 
 // Unified 是全应用默认的缓动曲线：一条 ease-out。
 //
@@ -71,3 +86,43 @@ var TabSlide = ui.Animation{Spring: ui.SpringOptions{
 	// 0.5 DIP = 半个像素：肉眼看不出来，但足够让弹簧收手（见上面的实算）。
 	Precision: 0.5,
 }}
+
+// 一条定时长的曲线：满屏播放器封面那一圈。
+//
+// # 转速是**自定值**，不是从 QQ音乐 量来的
+//
+// QQ音乐 客户端播放页那个「透明彩胶」的官方图是**静态图**，录屏里也只有静止帧
+// ——**取不到转速**（报告 BMG-254 §3.6 的 QQ-11）。所以这里按**行业惯例**取：
+// 一张黑胶 **33⅓ rpm**（一圈 1.8 秒）。
+//
+// ⚠️ **改这个数之前先想清楚**：它不是抄来的，改它就是改我们的口味——而这一条
+// 写在收尾说明里是为了让人知道它是**推的**，不是量的。
+const (
+	// CoverSpinPeriod 是满屏播放器封面转一圈要多久（33⅓ rpm）。
+	CoverSpinPeriod = 1800 * time.Millisecond
+	// CoverSpinTurn 是一圈多少度。
+	CoverSpinTurn = 360.0
+	// CoverSpinSpeed 是每秒转多少度（360 度 ÷ 1.8 秒 = 200 度/秒）。
+	//
+	// ⚠️ **它和上面那两个是一个数**：改 Period 或 Turn 时要连它一起改
+	// （`motion_test.go` 有一条测试钉着这三个数的关系）。
+	CoverSpinSpeed = 200.0
+)
+
+// CoverSpin 是满屏播放器封面那一圈的动画：**一条线性曲线**，走满一整圈。
+//
+// ⚠️ **它不跟统一曲线**：匀速转不是一段过渡，没有 ease-out 可言——统一曲线
+// 那一族全是「前重后轻」，拿它来转圈等于圈越转越慢。
+//
+// ⚠️ **时长是一圈**：目标定在「当前角度 + 一整圈」，曲线也走一整圈，于是速度
+// 恰好是 `CoverSpinSpeed`（匀速）。见 `internal/ui/fullplayer_spin.go`。
+var CoverSpin = ui.Animation{Duration: CoverSpinPeriod, Ease: ui.Linear}
+
+// Snap 是「一次到位」：一个 1ns 的线性曲线。
+//
+// ⚠️ **不能用 `ui.Animation{}`**：它的零值是 `Smooth` 那条 500ms 的弹簧
+// （`mygo/ui/motion.go:33`），而那正好是「慢慢追」——要「立刻」就得写这条
+// （框架的 `channel.step` 里 `t >= 1` 直接取 target，下一帧就到位）。
+//
+// （`internal/ui/lyrics.go` 的 `lyricSnapAnim` 是同一个东西的另写一份。）
+var Snap = ui.Animation{Duration: time.Nanosecond, Ease: ui.Linear}

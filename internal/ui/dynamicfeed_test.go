@@ -487,13 +487,16 @@ func TestTheDynamicPaneCardAndCoverMatchUpstream(t *testing.T) {
 		t.Errorf("作者栏头像量出来是 %.1f×%.1f，want 36×36", av.W, av.H)
 	}
 
-	// ④ 投稿封面 96×96（设计规范 §7.17：纯音频，封面是方的）。
+	// ④ 投稿封面 192×128（上游 `w-48 h-32`，`user-profile/dynamic-list/item.tsx:180`）。
+	//
+	// ⚠️ **不是方的**：改之前是 96 见方（纯音频产品的旧设计，设计规范 v0.1
+	// §7.17），票 #268 照 B 站 UP 主页那张参考图改成 16:9 的横图。
 	cover, ok := tt.Find("https://f/c.jpg")
 	if !ok {
 		t.Fatalf("投稿封面没画出来，文字有 %q", tt.Texts())
 	}
-	if cover.W != 96 || cover.H != 96 {
-		t.Errorf("投稿封面量出来是 %.1f×%.1f，want 96×96", cover.W, cover.H)
+	if cover.W != 192 || cover.H != 128 {
+		t.Errorf("投稿封面量出来是 %.1f×%.1f，want 192×128", cover.W, cover.H)
 	}
 
 	// ⑤ 两张卡之间那条下边框：扫两行之间，找一行**贯穿卡片整宽**的线。

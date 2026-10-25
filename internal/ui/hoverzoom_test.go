@@ -1,4 +1,6 @@
-// 这一族验**三处 hover 放大**（票 #179 的 G45）。
+// 这一族验**hover 放大**（票 #179 的 G45，以及票 #467 把它接到网格卡那一族）。
+//
+// # 原来那三处
 //
 //	UP 空间 / 合集网格那张封面	上游 `user-profile/grid-card/index.tsx:26`
 //	动态流作者栏那个头像		上游 `dynamic-feed/user.tsx:46`
@@ -6,6 +8,12 @@
 //
 // 三处都是 `hover:scale-105`——放大到 **105%**，网格那一处还带
 // `transition-transform duration-300`。
+//
+// # 现在还有一处（同一个值）
+//
+// **网格卡 / 歌单卡 / 新歌速递 / 历史记录 / 稍后再看那几档的封面**：那一层
+// `hoverZoom` 住在 `internal/ui/widgets/motion`（票 #467 把它从
+// `internal/ui` 下沉下去，因为封面是 `widgets/hover` 那个包画的）。
 //
 // # 判据是「画出来的那一格变大了」
 //
@@ -26,6 +34,10 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -143,7 +155,7 @@ func TestTheCollectionCoverGrowsOnHover(t *testing.T) {
 	// 指针移到那一行上，推满 300 毫秒。
 	tt.Move(before.X+before.W/2, before.Y+before.H/2)
 	tt.Frame()
-	tt.Advance(hoverZoomTime)
+	tt.Advance(motion.HoverZoomTime)
 	tt.Frame()
 
 	after, ok := tt.Find(cover)
@@ -190,7 +202,7 @@ func TestTheAuthorAvatarGrowsOnHover(t *testing.T) {
 
 	tt.Move(before.X+before.W/2, before.Y+before.H/2)
 	tt.Frame()
-	tt.Advance(hoverZoomTime)
+	tt.Advance(motion.HoverZoomTime)
 	tt.Frame()
 
 	after, ok := tt.Find("https://f/author-11.jpg")
@@ -215,7 +227,7 @@ func TestTheNavbarAvatarGrowsOnHover(t *testing.T) {
 
 	tt.Move(before.X+before.W/2, before.Y+before.H/2)
 	tt.Frame()
-	tt.Advance(hoverZoomTime)
+	tt.Advance(motion.HoverZoomTime)
 	tt.Frame()
 
 	after, ok := tt.Find(avatarLabel)
@@ -269,4 +281,119 @@ func TestTheHoverZoomCurveIsNotTheUpstreamOne(t *testing.T) {
 				p.at, mygoui.EaseInOut(p.at), upstream(p.at))
 		}
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 网格卡那一族（票 #467）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheGridCardCoverGrowsOnHover 钉住「网格档那张封面在悬停时放大」。
+//
+// ⚠️ **量的是像素，不是盒子**：封面那一格没有标签（`Tester.Find` 认不出来），
+// 而放大的是**框里那张图**——外面那个框不动（上游那个 `overflow-hidden` 的框
+// 也不动）。
+//
+// ⚠️ **封面不能是纯色**：一块纯色放大 5% 在画面上一个像素都不变。网格那一档的
+// 封面走的是「没有地址」那一档——它画的是「歌名首字 + 主题色渐变」，那个字
+// 够大（0.44 × 边长），放大 5% 之后它的边挪了好几个像素。
+func TestTheGridCardCoverGrowsOnHover(t *testing.T) {
+	_, tt := gridHome(t)
+	title := songName(homeTabs[0], 3)
+	card, ok := tt.Find(title)
+	if !ok {
+		t.Fatalf("画面上找不到第三张卡，文字有 %q", tt.Texts())
+	}
+
+	// 指针停在那一格上（歌名也在这一格里——那一圈反馈是**整格**的）。
+	tt.Move(card.X+card.W/2, card.Y+card.H/2)
+	tt.Frame()
+	tt.Advance(motion.HoverZoomTime)
+	tt.Frame()
+	hovered := tt.Image()
+	// 那枚播放钮在封面的**右下角**（离右边和下边各 8），所以它的位置量得出
+	// 封面那一块的右下角。
+	btn, ok := tt.Find(hover.FromLabel(title))
+	if !ok {
+		t.Fatalf("hover 之后封面上没有那个播放钮：%q", tt.Texts())
+	}
+
+	// 指针挪开，画面回到平时的样子。
+	tt.Move(1180, 770)
+	tt.Frame()
+	tt.Advance(motion.HoverZoomTime + hover.Fade)
+	tt.Frame()
+	idle := tt.Image()
+
+	// ⚠️ **只量封面的上半截**：下半截有封面底部那条渐变和右下角那枚圆钮，
+	// 它们淡入淡出的时候也改像素——量到那儿就分不出「放大」和「淡入」了。
+	//
+	// ⚠️ **上半截的位置是量出来的**：封面的下边 = 播放钮的下边 + 8（`btnInset`），
+	// 左边 = 那一格的左边（歌名的左边就是那一格的左边）。
+	coverRight := btn.X + btn.W + 8
+	coverBottom := btn.Y + btn.H + 8
+	top := mygoui.Rect{X: card.X + 4, Y: coverBottom - 130, W: (coverRight - card.X) / 2, H: 100}
+	if n := uiChangedPixels(idle, hovered, top); n < 20 {
+		t.Errorf("指针移上去之后那张封面的上半截只有 %d 个像素变了——"+
+			"悬停放大（%v）没画出来", n, motion.HoverZoomScale)
+	}
+}
+
+// TestTheNewMusicCardCoverGrowsOnHover 钉住「新歌速递那张卡的封面也放大」。
+//
+// ⚠️ **那一档走的是另一个入口**（`hover.CardCoverOne`，多一圈影、标签和提示
+// 也不一样），所以它要自己一条——不然「入口只有一个」这件事是猜的。
+func TestTheNewMusicCardCoverGrowsOnHover(t *testing.T) {
+	th := mygoui.LightTheme()
+	th.Accent = mygoui.Hex("#1ed760")
+	songs := homeSongsOf("新歌", 8)
+	g := newNewMusic(homeTestCache(t), list.Actions{}, func() {})
+	g.SetSongs(songs)
+	tt := mygoui.NewTester(func(c *mygoui.Context) {
+		c.SetTheme(th)
+		g.View(c)
+	}, 800, 900)
+	homeFrame(tt)
+
+	title := songName("新歌", 3)
+	card, ok := tt.Find(title)
+	if !ok || card.W == 0 {
+		t.Fatalf("画面上找不到第三张卡片，文字有 %q", tt.Texts())
+	}
+	// 封面的边长 = 格子的宽（上游 `aspect-square w-full`，票 #475 之后不再有
+	// 「窗口矮就压小」那一档，所以它就是格子宽）。
+	side := newMusicCellWidth(800, newMusicColsFor(800))
+	// 封面在卡片的最上面，边长是 side。
+	cover := mygoui.Rect{X: card.X, Y: card.Y, W: side, H: side}
+	idle := tt.Image()
+
+	tt.Move(card.X+side/2, card.Y+side/2)
+	tt.Frame()
+	tt.Advance(motion.HoverZoomTime)
+	tt.Frame()
+	hovered := tt.Image()
+
+	// ⚠️ **量的是上半截**：下半截有封面底部那条渐变和右下角那枚圆钮。
+	top := mygoui.Rect{X: cover.X, Y: cover.Y, W: cover.W, H: cover.H / 2}
+	if n := uiChangedPixels(idle, hovered, top); n < 20 {
+		t.Errorf("指针移上去之后那张封面的上半截只有 %d 个像素变了——"+
+			"悬停放大（%v）没画出来", n, motion.HoverZoomScale)
+	}
+	// ⚠️ **圆角那一角不许变**：卡片有圆角，不裁的话画面上是「封面从圆角里长
+	// 出来」——而那在画面上只是「角上多了一块颜色」。
+	if idle.RGBAAt(int(cover.X), int(cover.Y)) != hovered.RGBAAt(int(cover.X), int(cover.Y)) {
+		t.Errorf("封面左上角那个像素在 hover 之后变了——放大没有被圆角裁住")
+	}
+}
+
+// gridHome 把首页摆成网格档，返回外壳和画着它的 Tester。
+func gridHome(t *testing.T) (*Shell, *mygoui.Tester) {
+	t.Helper()
+	b := newTestShell(t, systemIsDark(false))
+	s, tt := b.s, b.tt
+	s.home.SetSongs(fullSongs())
+	homeFrame(tt)
+	mountDisplay(t, s.app)
+	setDisplay(t, s.app, tt, app.DisplayModeCard)
+	homeFrame(tt)
+	return s, tt
 }

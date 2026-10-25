@@ -129,7 +129,23 @@ const (
 	iconClose    = "System/close-line.svg"         // 清空
 	iconFeed     = "User & Faces/team-line.svg"    // 动态
 
-	// iconLogin / iconLogout 是顶栏右端那两枚（登录 / 退出登录）。
+	// ── UP 空间头图区（票 #268）──
+	//
+	// ⚠️ **加号和勾是现成的**：`iconAdd`（`System/add-line.svg`，上游
+	// `RiAddLine`，「关注」和「新建收藏夹」共用那一枚）和 `iconFollowDone`
+	// （`System/check-line.svg`，上游 `RiCheckLine`）都在下面那张表里。
+	//
+	// iconVerified 是昵称右边那枚认证徽章里的图形。上游是闪电
+	// （`RiFlashlightFill`，`user-profile/space-info.tsx:98`），我们图标集里
+	// 没有那一枚，用的是盾——同样是「这一位是被认证过的」那个意思。
+	iconVerified = "System/shield-check-line.svg"
+
+	// iconLogin 是顶栏右端那一枚「登录」（未登录时才在）。
+	// iconLogout 是当初顶栏右端那一枚「退出登录」——**它现在顶栏上没有了**
+	//（票 #260）：登录之后顶栏不再有独立的「退出」按钮，退登走**头像下拉里**
+	// 那一项（`navbar_avatar.go` 的 `avatarMenuItems`）。这一枚图**还留着**
+	//（图标集里本来就有这一张，而 `icons_test.go` 有一条钉着「登录和退出那两枚
+	// 一眼分得清」），但顶栏上已经没有它的位置了。
 	//
 	// ⚠️ **这一对换过图形**：原来是 `System/login-circle-line.svg` 和
 	// `System/logout-circle-line.svg`——**同一枚圆圈差一个箭头方向**（一个向右、
@@ -414,6 +430,8 @@ var iconNames = []string{
 	iconLoginCircle, iconLogoutCircle,
 	// 头像下拉里「个人资料」那一枚。
 	iconProfile,
+	// UP 空间头图区里昵称右边那枚认证徽章（票 #268）。
+	iconVerified,
 	// 队列抽屉头与行
 	iconLocate, iconDelete, iconPlayFill, iconPauseFill,
 
@@ -501,8 +519,12 @@ const (
 	// 136~141 的 **1.36 倍**——整排最重的一枚）；**16px 下那几块还是分得开的**
 	// （墨迹 137，和那三枚**同一档**），而且仍然看得出是个二维码。
 	//
-	// 票 #241 / 报告 F-16：顶栏末两枚的墨迹要和左边那三枚线框图标**同一档**
+	// 票 #241 / 报告 F-16：**登录键**的墨迹要和左边那三枚线框图标**同一档**
 	// （原来有四枚，票 #289 拿掉了顶栏那一枚「设置」）。
+	//
+	// ⚠️ **只管登录键**：顶栏右端原来那「末两枚」里的**头像**在票 #260 按用户
+	// 要求放大到上游的 40 见方，**它不再是同一档**（理由见
+	// `navbar_avatar.go` 的 `avatarSize`）。
 	iconLoginSize = 16
 
 	// iconSkip 是「上一首 / 下一首」那两枚的图标边长。

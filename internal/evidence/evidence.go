@@ -456,6 +456,71 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// 票 #478：「`moov` 盒在文件末尾」的那个容器层修法。
+		//
+		// 🔴 **这一族的错法全是「静默」的**：末尾那一段取错了偏移（解出来是
+		// 噪声）、`moov` 在前面时还去取（白花一条请求）、不是 MP4 的文件被
+		// 当成 MP4（把错的字节写进缓存）——**没有一样会报错**。
+		//
+		// ⚠️ **判据是「形状」不是「毫秒」**：主下载卡在 64 KB 而解码器开口了
+		// （它拿到的是并行取回来的那个 `moov`），而「等了多久」那种判据在满载
+		// 的机器上会飘（AGENTS.md §2）。
+		Spec: "moov 在文件末尾时并行取回末尾那一段，解码不用等整个文件下完",
+		Tests: []string{
+			// 盒子走法（手造每一种形状）。
+			"TestTheTopLevelWalkFindsTheTrailingMoov",
+			"TestTheTopLevelWalkFindsTheMoovAtTheFront",
+			"TestTheTopLevelWalkGivesUpOnTheOtherShapes",
+			"TestTheTopLevelWalkHandlesTheSixtyFourBitSize",
+			"TestTheTopLevelWalkOnTheRealFixtures",
+			// 源那一层：末尾那一段是并行取回来的，而 `moov` 在前面时不取。
+			"TestTheTrailingMoovIsFetchedInParallel",
+			"TestTheTrailingMoovIsNotFetchedWhenItIsAlreadyAtTheFront",
+			// 🔴 **盒子头在很后面时**：等必须是**阻塞**的——空转会把一个核占满
+			// （CPU 那半边要 `getrusage`，所以那一条带 `unix` 标签）。
+			"TestTheTailIsFetchedEvenWhenTheBoxHeaderIsFarAway",
+			"TestTheTailWaitBlocksInsteadOfSpinning",
+			// 整条链路：主下载没下完就能出声，而拿不到尾部时退回老样子。
+			"TestTheDecoderOpensBeforeTheWholeFileArrives",
+		},
+	},
+	{
+		Category: HTTP,
+		// 票 #478：「首次打开特有」——**什么缓存都还没有**那一项。
+		//
+		// WBI 签名密钥**只缓存在内存里**（两小时），所以**每一次冷启动，
+		// 第一次取流都要多付一次 `nav` 往返**——而那正是用户抱怨的
+		// 「首次打开取流慢」的那一刻。修法是启动时在后台先把它取回来。
+		//
+		// 🔴 **这一族有两条边**：服务层那一半（密钥取回来没有、缓存生效
+		// 没有）和应用层那一半（**真的会去调它**、**不挡事**）。
+		Spec: "冷启动时把 WBI 签名密钥预热起来（第一次取流就不用多付一次 nav 往返），预热失败不挡事",
+		Tests: []string{
+			"TestWarmWBIKeyFetchesTheKeyAheadOfTime",
+			"TestWarmWBIKeyDoesNotSendASecondRequestWhenTheKeyIsThere",
+			"TestWarmWBIKeySaysSoWhenItFails",
+			"TestTheWarmUpActuallyHappens",
+			"TestTheWarmUpDoesNotBlockTheCaller",
+			"TestTheWarmUpSurvivesAFailingNav",
+		},
+	},
+	{
+		Category: HTTP,
+		// 票 #478：冷启动那一段的分段计时。
+		//
+		// 🔴 **「慢」和「等人」必须分得开**：macOS 会在应用还没有窗口的时候弹
+		// 一个系统授权框，用户要点一下才继续——那一段的时长是**用户点的**，
+		// 不是我们慢。混进「冷启动一共多久」里，用户读到的是「应用慢」。
+		Spec: "冷启动分了段（零件挂好 / 应用就绪 / 首帧 / 第一次取流），钥匙串那一段单独一栏并说清是「等人」",
+		Tests: []string{
+			"TestTheStartupIsSplitIntoSegments",
+			"TestTheKeychainWaitIsNotCalledSlow",
+			"TestTheStartupEndsWhenTheFirstTrackSettles",
+			"TestTheStartupLineIsOnlyShownWhenThereIsNoTrack",
+		},
+	},
+	{
+		Category: HTTP,
 		// 音乐库（type=12 / sid）是**另一套接口、另一套档位编号**，连错误说明
 		// 那个字段都叫 `msg` 而不是 `message`。这一条钉的就是「形状别抄错」。
 		//
@@ -530,9 +595,9 @@ var Items = []Item{
 		// ⚠️ **指针和键盘混着来是最难的那一种**：两者共用「当前是第几项」，而
 		// 悬停每一帧都改它——不处理的话，键盘刚走的那一格会被指针改回去，
 		// 「键盘能上下走」只剩「指针不在菜单项上」的时候才成立。
-		Spec: "头像下拉是自绘浮层（不是系统菜单）：六项按上游的顺序、每一项带图标、锚在头像下面；点外面关、Esc 关、方向键走得动（指针停在菜单项上也走得动）、当前项有反馈；「退出登录」先问一句，取消什么都不做",
+		Spec: "头像下拉是自绘浮层（不是系统菜单）：六项按上游的顺序、**按登录态隐藏**（已登录没有「登录」，未登录没有「个人资料」「退出登录」）、每一项带图标、锚在头像下面；点外面关、Esc 关、方向键走得动（指针停在菜单项上也走得动）、当前项有反馈；「退出登录」先问一句，取消什么都不做",
 		Tests: []string{
-			// 六项都在、顺序照上游、而且**不是系统菜单**。
+			// 六项都在、顺序照上游、**按登录态隐藏**、而且**不是系统菜单**。
 			"TestAvatarMenuHasBiuSixItems",
 			// 六项都按得动：换路由、去个人资料、去设置、退登（先问一句）。
 			"TestAvatarMenuGoesToItsRoute",
@@ -557,6 +622,31 @@ var Items = []Item{
 			"TestTheDangerItemKeepsItsContrastOnTheHighlightedRow",
 			// 「退出登录」先问一句，取消什么都不做。
 			"TestTheAvatarMenuAsksBeforeLoggingOut",
+		},
+	},
+	{
+		// 顶栏**右端**那一块（票 #260）：用户 2026-10-25 说的那一段。
+		//
+		// 归这一组是因为它和上面那一条是同一块地方——**头像下面那一层**和
+		// **头像自己**，说的是同一件事：登录之后那一枚独立的「退出」按钮没了，
+		// 而头像本身是上游那个尺寸。
+		Category: Play,
+		// 顶栏右端：**登录之后没有独立的「退出」按钮**（退登走头像下拉里那一
+		// 项），未登录时那枚「登录」还在（登录入口不能没）；头像画出来的那一枚
+		// 圆是**上游的 40**（顶栏 64 高的 5/8），命中区装得下它，而顶栏另外
+		// 那几枚图标键**没被这一票改到**。
+		Spec: "顶栏右端：登录之后没有独立的「退出」按钮（退登走头像下拉），未登录时那枚「登录」还在；头像画出来的那一枚圆是上游的 40，命中区装得下它",
+		Tests: []string{
+			"TestTheLoggedInTopBarHasNoStandaloneLogoutButton",
+			"TestTheGuestTopBarStillHasTheLoginButton",
+			"TestTheAvatarHitAreaCoversTheCircleItDraws",
+			// 画出来的那一枚圆**量出来**是上游那个尺寸（不是照 `size="sm"` 猜的）。
+			"TestTheTopBarEndsWithTheUpstreamSizedAvatar",
+			// 而顶栏另外那几枚图标键**没被这一票改到**。
+			"TestTheOtherTopBarKeysKeptTheirHitArea",
+			// 下拉里那一项**点得动**（面板的身份钉死了，见 navbar_avatar.go 的
+			// `c.Key("avatar-menu-panel")`）。
+			"TestTheAvatarMenuItemIsAlwaysClickable",
 		},
 	},
 	{
@@ -665,6 +755,24 @@ var Items = []Item{
 		Category: Paging,
 		Spec:     "切路由：上一页的滚动位置留着，回来还在原处",
 		Tests:    []string{"TestLeavingTheHomePageAndComingBackKeepsWhereYouWere"},
+	},
+	{
+		// 🔴 **这一条钉的是「代码路径上没开着」**：框架 `Router.Transition` 的零值
+		// 是 `TransitionAuto`（一条 250ms 滑入 / 150ms 淡入），不显式关掉就是开着，
+		// 而 2026-10-25 实测证实**它一直开着**——现象只是「换页滑了一下」，
+		// 不报错、不崩溃，评审和测试都看不出来。
+		//
+		// 那一组里还有一条**对照**（`TestThePageTransitionProbeWouldNoticeItIfItCameBack`），
+		// 它故意把动画打开、要求探针**必须**量到差别——没有它，上面那几条有可能
+		// 因为「探针根本没生效」而恒绿。
+		Category: Paging,
+		Spec:     "切路由是硬切：没有过渡动画（规范说不做，代码显式关掉）",
+		Tests: []string{
+			"TestTheRouterHasNoPageTransition",
+			"TestThePageTransitionProbeWouldNoticeItIfItCameBack",
+			"TestTheRouterTransitionIsSetExplicitly",
+			"TestTheMiniWindowAlsoHasNoPageTransition",
+		},
 	},
 	{
 		Category: Paging,
@@ -1350,6 +1458,11 @@ var Items = []Item{
 			"TestFriendlySaysTheFormatCannotBeDecoded",
 			"TestTheLogFileActuallyReceivesWhatIsLogged",
 			"TestTheLogFileIsAppendedTo",
+			// 票 #478：冷启动那一段界面上也有一句话（而「还没有打开文件」
+			// 在那一段是**一句假话**——应用不是没有文件，它是在等上一首）。
+			"TestTheStartupSaysItIsPreparing",
+			"TestTheStartupLineGoesAwayWhenTheAppIsReady",
+			"TestTheStartupLineIsNotShownWhenThereIsATrack",
 		},
 	},
 	{
@@ -2465,7 +2578,7 @@ var Items = []Item{
 		// ⚠️ **「进度条随窗口变长」断的是单调，不是某个像素数**：进度条该有多长
 		// 取决于窗口有多宽、也取决于右边那一组有多宽（音量收成图标之后它窄了
 		// 141），所以钉死一个数的话，改动右边任何一枚键都会把它顶红。
-		Spec: "播放条：进度条随窗口变长、三键是上一首·播放·下一首、播放键 48 像素、旋钮只在悬停或按下时画（键盘焦点上时也画）、填过的那一段平时是前景色、悬停/按下才变主色、音量收成图标加浮层（浮层里一根竖滑块和百分比，点图标静音、滚轮 ±0.05）、音量轨道填的是已经调上去的那一段、浮层走远了会自己收起、旋钮不探出滑块的框、按住时多一层更深的影子、浮层里的滑块不跟着百分比字数横向漂、三键落在窗口的竖直中轴上、中间那一列是 1:3:1、进度行占那一列的 3/4 且居中、三键之间的空隙是 24",
+		Spec: "播放条：进度条随窗口变长、三键是上一首·播放·下一首、播放键 48 像素、旋钮只在悬停或按下时画（键盘焦点上时也画）、填过的那一段平时是前景色、悬停/按下才变主色、音量收成图标加浮层（浮层里一根竖滑块和百分比，百分比和滑块居中对齐、字号放大时不折行，点图标静音、滚轮 ±0.05）、音量轨道填的是已经调上去的那一段、浮层走远了会自己收起、旋钮不探出滑块的框、按住时多一层更深的影子、浮层里的滑块不跟着百分比字数横向漂、三键落在窗口的竖直中轴上、中间那一列是 1:3:1、进度行占那一列的 3/4 且居中、三键之间的空隙是 24",
 		Tests: []string{
 			// 进度条：900 / 1200 / 1600 三档单调变长（**中间那档 1200 必须在**：
 			// 只断两端的话，「中间那一列不参与分配」这种坏法在两端看不出来）。
@@ -2511,6 +2624,10 @@ var Items = []Item{
 			"TestTheKnobGetsDeeperWhileHeld",
 			// 音量浮层里那根滑块**不跟着百分比的字数横向漂**（它就在指针底下）。
 			"TestTheVolumeSliderDoesNotDriftWithThePercentText",
+			// 浮层底下那个百分比**和那根竖滑块居中对齐**（票 #485：数字看着偏左）。
+			"TestTheVolumePercentSitsUnderTheSlider",
+			// 字号放大时那个百分比**不许折行**（「100」换行「%」既难看又撑高浮层）。
+			"TestTheVolumePercentDoesNotWrapAtBigTextScales",
 		},
 	},
 	{
@@ -2970,10 +3087,38 @@ var Items = []Item{
 		// ⚠️ **这一条不放在表末尾**：表末尾那处已经撞过好几回（这一轮就是
 		// 第三次），挨着上面那条「收藏夹头图区」读得顺——两条讲的都是
 		// 「头图区」。
-		Spec: "UP 空间头图区（设计规范 v0.1 §7.18，取代上游压黑蒙版 + 白字的做法）：横幅 132 高、底部淡进页面底色；头像 88 压在横幅下沿；名字、签名、统计写在**页面底色**上，字色用主题自己的字色，不再依赖头图是什么图",
+		//
+		// ⚠️ **票 #268（2026-10-25）把这一块按参考图重排了**：头图区不再
+		// 压黑蒙版、字不再压在照片上（票 #357 之后就是那一版），所以下面
+		// 那句 spec 记的是**现在这一版**的样子：横幅 132 高、头像 112 压在
+		// 横幅下沿、名字 / 签名 / 统计写在**页面底色**上。
+		Spec: "UP 空间头图区（设计规范 v0.1 §7.18，取代上游压黑蒙版 + 白字的做法）：横幅 132 高、底部淡进页面底色；头像 112 压在横幅下沿；名字、认证徽章、签名、统计写在**页面底色**上，字色用主题自己的字色，不再依赖头图是什么图",
 		Tests: []string{
-			// 头像 88、左右留白 32、头像压在横幅下沿。
-			"TestTheSpaceAvatarIs88AndTheHeaderPads32",
+			// 头像 112、左右留白 32、头像压在横幅下沿、昵称与徽章与签名的排布。
+			"TestTheSpaceAvatarIs112AndTheHeaderPads32",
+			"TestTheHeaderPutsTheNameTheBadgeAndTheSignInOneRow",
+			"TestTheFollowButtonIsAnOutlinedBox",
+			"TestTheHeaderShowsTheBadgeOnlyWhenThereIsOne",
+			// 「关注」那一枚**键盘走得到、回车按得动**（它换成了自绘的描边
+			// 方块，而自绘的那一版一开始用的是 `ui.Row`——那是个容器，
+			// Tab 走不到它）。
+			"TestTheFollowButtonIsKeyboardReachable",
+		},
+	},
+	{
+		// 票 #268（2026-10-25）：UP 空间的动态条目与稿件卡按 B 站 UP 主页
+		// 那张参考图重排。
+		//
+		// ⚠️ **静默的那几种错法都在这儿**：条目头一行的时间回到昵称右边
+		// （看着还是一行，只是顺序反了）、「赞」掉回下面那一排、稿件卡的封面
+		// 又变回方的——**没有一样会报错**，每一处都还是「能看」。
+		Category: Platform,
+		Spec:     "UP 空间的动态条目：左边头像 + 昵称，下面一行「时间 · 动作」，右边「赞 + 数」与「⋯」；稿件卡横排（封面 192×128 + 右下角时长角标，右边标题 / 描述 / 播放量），带圆角、描边和卡片底",
+		Tests: []string{
+			"TestTheDynamicItemPutsTheTimeUnderTheNameAndTheLikeOnTheRight",
+			"TestTheMoreMenuHoldsTheMusicActions",
+			"TestTheArchiveCardIsHorizontalWithADurationBadge",
+			"TestTheDynamicPaneCardAndCoverMatchUpstream",
 		},
 	},
 	{
@@ -3372,6 +3517,37 @@ var Items = []Item{
 		},
 	},
 	{
+		// 🔴 **这一条的错法是「静默」的**：窗口一矮，新歌速递那一块就减成**一行**
+		// ——用户看到的是「4 张图」，而上游那一块永远是**两行**。没有一样会报错，
+		// 界面只是「不像上游那一页」。
+		//
+		// 上游 `new-music-top.tsx:157` 的 `pageSize = colCount * 2`：那个文件**只量
+		// `window.innerWidth`、从不量高度**，所以它永远是两行；列数也是按**窗口
+		// 宽**分档的（`:135` 与 `:209` 那组 Tailwind 视口断点），所以同一个窗口
+		// 宽度下我们摆几列、一页摆几首都和上游一样。
+		//
+		// ⚠️ **「下面那一档的歌在首屏之外」是上游的样子**，不是缺陷：上游那一块和
+		// 列表在同一个滚动容器里（`music-recommend/index.tsx:261`），矮窗口下这一
+		// 块占满首屏，歌要往下滚才看得到。
+		Category: Platform,
+		// 票 #475。
+		Spec: "首页「流行」那一档顶部的新歌速递：**永远两行**（不因窗口矮就减成一行），列数按**窗口宽**分档（上游那张表），默认窗口下画着 10 张",
+		Tests: []string{
+			// 窗口从最小高到很高，行数一个都不许变。
+			"TestTheBlockIsAlwaysTwoRows",
+			// 默认窗口（1200×800）下画着 10 张（上游 5 列 × 2 行）。
+			"TestTheDefaultWindowShowsTenCards",
+			// 改宽度列数跟着换（上游的断点），改高度行数不动。
+			"TestResizingTheWindowChangesTheColumnsNotTheRows",
+			// 列数那张表本身（上游的断点）。
+			"TestNewMusicColumnsFollowItsOwnBreakpoints",
+			// 封面永远是格子的宽、宽高相等（上游 `aspect-square w-full`）。
+			"TestTheCoverStaysSquareAtTheMinimumWindowHeight",
+			// 翻页箭头在列表里点得动（上游有这两枚箭头：`new-music-top.tsx:182-199`）。
+			"TestTheNewMusicPagerIsClickableInsideTheList",
+		},
+	},
+	{
 		// 🔴 **这一条的错法也是「静默」的**：那一枚按钮悬在 Tab 右边半截、
 		// 矮一截（28 而不是 40）、又没有那枚 ▶——**没有一样会报错**，界面
 		// 只是「不像这一页的操作，也不像全局操作」。
@@ -3628,10 +3804,17 @@ var Items = []Item{
 		//
 		// 🔴 **判据是「和同一根侧栏里的参照物对齐」，不是「某个具体的数」**：
 		// 方案换了、主题的间距变了，那些数会跟着变，而「是不是一套」不会。
-		Spec: "侧栏里那两组收藏夹按当前风格画：左缩进和侧栏分组标题同一列、这一片的字都在同一列；分组标题和侧栏分组标题同一档（12 / 500 / 次要色）；收藏夹名 14 的正文色、选中那一行是 accentSoft 淡底、悬停是 flat.Feel；折叠态那枚图标在收藏夹页上亮起来，点开的那层浮层是卡片那一档（surface1 / radiusLg）",
+		//
+		// ⚠️ **票 #270 之后「这一片的字都在同一列」只对「分组标题那一列」成立**：
+		// 收藏夹那一行左边多了一枚方形封面，**名字让开它**（起在封面右边）。
+		// 仍然是同一列的是**封面**——它和分组标题的字左对齐，正是参考图上的
+		// 样子（「创建的歌单」那几个字和下面那些封面）。
+		Spec: "侧栏里那两组收藏夹按当前风格画：左缩进和侧栏分组标题同一列、**封面和分组标题的字同一列**；分组标题和侧栏分组标题同一档（12 / 500 / 次要色）；**每一行是一枚方形封面 + 名称 + 「N 首」**（票 #270：封面和数量都是那两个列表接口本来就给的，不另发请求；「N 首」是 B 站上次统计的 `media_count`，不是实时的）；收藏夹名 14 的正文色、选中那一行是 accentSoft 淡底、悬停是 flat.Feel；折叠态那枚图标在收藏夹页上亮起来，点开的那层浮层是卡片那一档（surface1 / radiusLg）",
 		Tests: []string{
-			// 这一片和侧栏是同一块：左沿一样、字在同一列。
+			// 这一片和侧栏是同一块：左沿一样、封面和标题的字同列、名字让开了封面。
 			"TestTheFavoritesAreaLinesUpWithTheSidebar",
+			// 每一行是「图 + 名称 + N 首」（票 #270 的正题）。
+			"TestEachFavoriteRowHasACoverAndACount",
 			// 空状态那句也在那一列（它替下面那些收藏夹名说话）。
 			"TestTheFavoritesEmptyLineLinesUpWithTheNames",
 			// 分组标题和侧栏的分组标题是同一档（字号 + 字色）。
