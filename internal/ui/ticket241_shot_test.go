@@ -37,8 +37,9 @@ func TestRenderTicket241Shots(t *testing.T) {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
-			// 80 顶栏：末两枚（头像 / 登录键）的重量要和左边那三枚线框图标
-			// 同一档——整窗看的是「那一排」，放大看的是「墨迹」。
+			// 80 顶栏：右边那一排的重量——**头像是上游那个尺寸（40 见方，
+			// 票 #260）**，而**登录键和左边那三枚线框图标同一档**。
+			// 整窗看的是「那一排」，放大看的是「墨迹」。
 			b := newTestShell(t, systemIsDark(dark))
 			s, tt := b.s, b.tt
 			openATrack(t, s)
