@@ -102,21 +102,30 @@ func inkDistance(a, b color.RGBA) int {
 // 那一档（浅色主题下算出来是深绿 `#107032`）压在那上面只有 **1.0:1**——指针一
 // 停上去，那几个图标**反而不见了**（票 #248）。
 //
-// # 三条判据
+// # 四条判据
 //
 //  1. **图形变了**：悬停那一帧的颜色和平时那一帧差得够多（RGB 距离 ≥ 24）——
 //     「量得出来，不是看着差不多」；
 //  2. **图形看得见**：悬停时图形和**那一行的底**的对比度 ≥ 3:1（WCAG 1.4.11
 //     非文字那一档）；
+//     2b. **图形和悬停时真正压在它背后那一层**（淡底）也看得见（≥ 2.5:1）——
+//     那一层是**悬停反馈本身**，它把底下的一切都压低一档（见下面那段）；
 //  3. **多了一层淡底**：悬停时那一枚底下多出一层半透明的前景色——按**那一行的
 //     底**算（深底压白、浅底压黑），不是按主题正文色算。
 //
 // ⚠️ **底色是「最亮的那一档封面」**：纯白的封面压完 55% 的黑是 `#737373`
 // （`fullRowBase`），而按它算出来的颜色在**任何**一档封面上都读得出来。
 //
-// ⚠️ **第 2 条比的是「图形 vs 那一行的底」**：悬停时图形底下多出来的那层淡底
-// （8% 的白）是**悬停反馈本身**，它把图形和底的对比度压低了一档——而图形读不读
-// 得出来，判的是它和**这一行坐着的那块底**。
+// ⚠️ **第 2 条和第 2b 条量的不是同一个东西**：第 2 条量的是「图形 vs 这一行
+// 坐着的那块底」，第 2b 条量的是「图形 vs 悬停时**真正压在它背后**的那一层
+// 淡底」（8% 的白，上游 `bg-foreground/10` 就是这么一层）。**两层都要量**——
+// 只量前者会漏掉「淡底把图形压下去一档」这件事。
+//
+// ⚠️ **深底上「色相」和「亮度对比」只能要一个**：那一行的图标平时是白 92%
+// （对底 4.31:1），悬停时换成主色（色相明显的那一档）就必然掉一档亮度——
+// 所以实测是：对底 3.10:1、对淡底 2.65:1。**相对改之前**（浅色主题下悬停是
+// 深绿压深底 1.31:1，等于看不见）这是一大截。理由写在
+// `widgets/flat` 的 `IconButtonAccentOnBase` 上面。
 func TestTheFullPlayerRowKeysAreVisibleOnHover(t *testing.T) {
 	for _, preset := range []app.ThemePreset{app.ThemePresetWarmPaper, app.ThemePresetDuskAmber} {
 		for _, dark := range []bool{false, true} {
@@ -156,9 +165,25 @@ func TestTheFullPlayerRowKeysAreVisibleOnHover(t *testing.T) {
 							"「悬停反馈看得见」这一条不成立", label, rest, hot, d)
 					}
 					// 2. 图形和那一行的底看得见。
+					//
+					// ⚠️ **这是「图形 vs 那一行坐着的那块底」**：悬停时图形底下多出来
+					// 那一层淡底（8% 的白）是**悬停反馈本身**（上游 `bg-foreground/10`
+					// 就是这么一层），它把这一枚底下的一切都压低一档——所以下面第 2b
+					// 条单独量「图形 vs 那一层淡底」。
 					if r := contrastRatio(hot, base); r < 3 {
 						t.Errorf("%s 悬停时图形 %v 和它背后那一行的底 %v 只有 %.2f:1"+
 							"（门槛 3:1）——图标在暗底上读不出来", label, hot, base, r)
+					}
+					// 2b. 图形和**悬停时真正压在它背后那一层**（淡底）也得看得见。
+					//
+					// ⚠️ **门槛是 2.5:1 而不是 3:1**：那一层淡底是**悬停反馈本身**，
+					// 它把底下的一切都压低一档（实测 2.65~2.67:1）——和上游那套
+					// 「浅色图标压在浅色悬停底上」的写法一样，这一层天生就把局部
+					// 对比度拉低。而它必须**比改之前那 1.0:1 高得多**：改之前浅色
+					// 主题下悬停时那枚图标是深绿压深底，**等于看不见**。
+					if r := contrastRatio(hot, over); r < 2.5 {
+						t.Errorf("%s 悬停时图形 %v 和它背后真正压着的那层淡底 %v 只有 %.2f:1"+
+							"（门槛 2.5:1）——图标在那层淡底上读不出来", label, hot, over, r)
 					}
 					// 3. 多了一层淡底（深底上压白 → 变亮）。
 					if l := int(over.R) - int(base.R); l < 6 {
@@ -188,7 +213,7 @@ func TestTheFullPlayerProgressBarIsNotAccentUntilHover(t *testing.T) {
 	st.ThemePreset = app.ThemePresetClassic
 	st.ThemeMode = app.ThemeModeLight
 
-	tt := fullProgressTester(t, st, app.State{HasTrack: true, Duration: 60, Position: 30})
+	tt := fullProgressTester(t, st, app.State{HasTrack: true, Duration: 60, Position: 30}, 0.5)
 	box, ok := tt.Find("全屏播放进度")
 	if !ok {
 		t.Fatalf("找不到满屏那条进度，文字有 %q", tt.Texts())
@@ -198,8 +223,16 @@ func TestTheFullPlayerProgressBarIsNotAccentUntilHover(t *testing.T) {
 	fillX := int(box.X + box.W*0.25)
 	trackX := int(box.X + box.W*0.75)
 	restFill := pixelAt(tt.Image(), float32(fillX), box.Y+box.H/2)
+	restTrackPix := pixelAt(tt.Image(), float32(trackX), box.Y+box.H/2)
 	restTrack := trackThickness(tt, trackX, int(box.Y), int(box.Y+box.H))
 
+	// 0. ⚠️ **先证明「填过的那一段确实画出来了」**：量的是 25% 那一格，而轨道在
+	// 75% 那一格——两格得**不一样**，否则量到的就是轨道（那一段压根没画），后面
+	// 那几条断言会**恒过**（这就是评审指出来的那一条：改之前的用例就是这么空的）。
+	if maxDiff(restFill, restTrackPix) <= 6 {
+		t.Errorf("满屏那条进度 25%% 那一格和 75%% 那一格（轨道）一样（%v）——"+
+			"填过的那一段压根没画出来，后面那几条断言都是空的", restFill)
+	}
 	// 1. 平时不是主色：那一段是**无彩色**的（前景色）。
 	if sp := channelSpread(restFill); sp > 6 {
 		t.Errorf("满屏那条进度平时填过的一段是 %v（有彩色，跨度 %d）——"+
@@ -234,24 +267,48 @@ func TestTheFullPlayerProgressBarIsNotAccentUntilHover(t *testing.T) {
 // `.Disabled(true)`），而这一屏上「主色 = 可交互」的信号正是那枚实心播放键——
 // 一根**不能拖**的进度条不该是主色的（票 #248）。
 //
-// ⚠️ **判据是「无彩色」**：禁用的那一档是那一行的第二档前景色（白 62%），
-// 没有任何彩色；而改之前那一档是主色（有彩色）。
+// # 🔴 **进度得停在中间，否则这一条是空的**
+//
+// ⚠️ **时长为 0 的时候 `viewFullProgress` 不再改 `s.fullScrub`**（它只在
+// `known`（`st.Duration > 0`）时按 `Position/Duration` 写），于是那一份进度**一直
+// 是 0**——填过的那一段**压根没画**，量到的 25% 那一格就是**轨道**（无彩色），
+// 断言恒过。**改之前的代码上这一条也是绿的**——它抓不住自己要抓的 bug。
+//
+// 所以这里**把进度强行停在 50%**（`s.fullScrub`）：填过的那一段这才真的画出来，
+// 于是量到的才是它。
+//
+// # 三条判据
+//
+//  1. **那一段确实画出来了**：25% 那一格和 75% 那一格（轨道）**不一样**
+//     ——不一样才说明量的是「填过的那一段」，不是轨道；
+//  2. **它不是主色**：**无彩色**（轨道色）——改之前那一档是主色（有彩色，
+//     实测 {98 191 131}，绿杠）。
+//
+// ⚠️ 第 1 条是**防空跑**的：没有它，第 2 条量的是轨道（也是无彩色），
+// 恒过。
 func TestTheDisabledProgressBarIsNotAccent(t *testing.T) {
 	st := app.DefaultSettings("")
 	st.ThemePreset = app.ThemePresetClassic
 	st.ThemeMode = app.ThemeModeLight
 
-	// 时长 0 → 那一根是禁用的；而进度停在中间（`Position` 之外的那一份），
-	// 所以填过的那一段确实画出来了。
-	tt := fullProgressTester(t, st, app.State{HasTrack: true, Duration: 0, Position: 0})
+	// 时长 0 → 那一根是禁用的；进度强行停在 50%（见上面那段注释）。
+	tt := fullProgressTester(t, st, app.State{HasTrack: true, Duration: 0, Position: 0}, 0.5)
 	box, ok := tt.Find("全屏播放进度")
 	if !ok {
 		t.Fatalf("找不到满屏那条进度，文字有 %q", tt.Texts())
 	}
 	fill := pixelAt(tt.Image(), box.X+box.W*0.25, box.Y+box.H/2)
+	track := pixelAt(tt.Image(), box.X+box.W*0.75, box.Y+box.H/2)
+
+	// 1. 那一段确实画出来了（否则后面两条量的都是轨道）。
+	if maxDiff(fill, track) <= 6 {
+		t.Errorf("禁用的满屏进度条 25%% 那一格和 75%% 那一格（轨道）一样（%v）——"+
+			"填过的那一段压根没画出来，这条用例是空的", fill)
+	}
+	// 2. 它不是主色。
 	if sp := channelSpread(fill); sp > 6 {
 		t.Errorf("禁用的满屏进度条填过的那一段是 %v（有彩色，跨度 %d）——"+
-			"一根不能拖的进度条不该是主色的", fill, sp)
+			"一根不能拖的进度条不该是主色的（改之前那一档是主色）", fill, sp)
 	}
 }
 
@@ -315,12 +372,16 @@ func TestRenderFullPlayerRowShots(t *testing.T) {
 // 而主题是 `viewMain` 第一行装的——不装的话量到的是框架那一份默认主题
 // （主色是它自己的蓝 #2563eb、Border 是它自己的 #d9d9de），不是应用给用户
 // 看的那一套。
-func fullProgressTester(t *testing.T, st app.Settings, state app.State) *mygoui.Tester {
+func fullProgressTester(t *testing.T, st app.Settings, state app.State, scrub float64) *mygoui.Tester {
 	t.Helper()
 	b := newTestShell(t, at(900, 120), withSettings(st), withView(func(s *Shell) func(*mygoui.Context) {
 		return func(c *mygoui.Context) {
 			s.wake.set(c)
 			s.applyFrameTheme(c)
+			// ⚠️ **进度先摆到 scrub 上**：时长为 0 的时候 `viewFullProgress` 不再改
+			// 它（那一份会一直是 0，填过的那一段压根不画——见
+			// `TestTheDisabledProgressBarIsNotAccent` 那段注释）。
+			s.fullScrub = scrub
 			mygoui.Box(c).Fill().Background(fullScrim.Over(mygoui.Color{R: 255, G: 255, B: 255, A: 255})).
 				Children(func() {
 					s.viewFullProgress(c, state, fullDimColor)

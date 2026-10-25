@@ -259,6 +259,17 @@ func IconButtonAccent(c *ui.Context, svg *ui.SVG, label string, font float32, di
 // ⚠️ **图形那一档按 3:1 算**（WCAG 1.4.11 非文字对比度），不是正文那一档的 4.5：
 // 这是一枚 22 像素的图标，而 4.5 会把它推到「几乎纯白」——那样它和平时那一档
 // （白 92%）几乎看不出分别，悬停反馈等于没有。
+//
+// ⚠️ **那 3:1 是「图形 vs 那一块底」**：悬停时图形底下还多一层**淡底**（8% 的白，
+// 上游 `bg-foreground/10` 就是这么一层），而它是**悬停反馈本身**——它把这一枚
+// 底下的一切都压低一档。所以图形的**局部**对比度（图形 vs 淡底）是 **2.65:1**
+// （实测），而它对**那一块底**是 3.10:1。
+//
+// 🔴 **深底上「色相」和「亮度对比」只能要一个**：那一行的图标平时是白 92%
+// （对底 4.31:1），换成主色就必然掉一档亮度（色相越明显，亮度掉得越多）。
+// 我们选**色相**（白 → 亮薄荷绿 / 亮桃色，那是「这一枚活着」的信号）加上**淡底**
+// 那一层，而不是选亮度——上游 Biu 的 `hover:text-primary` 也是同一个取舍。
+// 相对**改之前**（浅色主题下悬停是深绿压深底 1.31:1，等于看不见）这是一大截。
 func IconButtonAccentOnBase(c *ui.Context, svg *ui.SVG, label string, font float32, disabled bool, base Base) ui.Element {
 	return iconButtonAccent(c, svg, label, font, disabled, base)
 }
