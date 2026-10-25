@@ -75,7 +75,7 @@ func TestAnUnseenWindowDrawsTheFrameItGetsButAsksForNoMore(t *testing.T) {
 	// 直接叫 `Services.Invalidate`。
 	//
 	// ⚠️ 生产里真有这样的路径（本地库扫完那一支直接调 `Services.Invalidate`
-	// ——见 shell.go 里 `hover.SetVisibleFlag` 那一段的注释），所以这一档不是
+	// ——见 shell_view.go 里 `hover.SetVisibleFlag` 那一段的注释），所以这一档不是
 	// 假想的。
 	before = *frames
 	beforeBar := s.builds.playbar

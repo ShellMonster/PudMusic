@@ -202,6 +202,10 @@ type Grid struct {
 	// 钉住这一条的是 `TestTheGridOffersTheRetryThatTheListOffers`。
 	footer func(c *ui.Context)
 
+	// footerLabel 是末尾那一格给无障碍和「打字选中」用的名字。空串是默认那句
+	// （`footerLabel`）。理由同 `List.footerLabel`。
+	footerLabel string
+
 	// lead 是「这一份歌上面那一块」（页内头部），为 nil 时没有。
 	//
 	// ⚠️ **它占网格的第 0 行**（整行，不是一格）：所以下面那些行在框架那一层的
@@ -324,6 +328,12 @@ func (g *Grid) SetEmptyView(fn func(c *ui.Context)) { g.emptyView = fn }
 //
 // ⚠️ 只能由界面线程调，同 SetSongs。
 func (g *Grid) SetFooter(fn func(c *ui.Context)) { g.footer = fn }
+
+// SetFooterLabel 换末尾那一格给无障碍和「打字选中」用的名字。传空串是退回
+// 默认那句（`footerLabel`）。理由同 `List.SetFooterLabel`。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (g *Grid) SetFooterLabel(name string) { g.footerLabel = name }
 
 // SetLead 装「这一份歌上面那一块」（页内头部），传 nil 去掉。
 //
@@ -506,6 +516,9 @@ func (g *Grid) View(c *ui.Context) {
 		}
 		i := first(row)
 		if i >= len(g.songs) {
+			if g.footerLabel != "" {
+				return g.footerLabel
+			}
 			return footerLabel
 		}
 		return g.songs[i].Title

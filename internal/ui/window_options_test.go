@@ -53,7 +53,7 @@ func TestTheWindowKeepsTheSystemControls(t *testing.T) {
 //
 // 抄的是 Biu 的 `width: 1200, height: 800`（`electron/main.ts:41-42`）——
 // 首页三个 Tab + 新歌速递那一屏的断点就是照这个宽度定的，换了宽度「看起来
-// 也对」是最容易过的那种错，所以这里写 Biu 的字面量，不用 shell.go 里的数。
+// 也对」是最容易过的那种错，所以这里写 Biu 的字面量，不用 shell_window.go 里的数。
 func TestTheWindowOpensAtBiuNumbers(t *testing.T) {
 	const (
 		biuWidth  = 1200 // electron/main.ts:41
