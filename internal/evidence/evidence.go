@@ -1556,11 +1556,17 @@ var Items = []Item{
 		// 就把上限顶破了，于是挤 → 退占位 → 重新下 → 又被挤……一直循环。
 		//
 		// 全部用 `httptest` 验（假图床 + 假 B 站接口），不连真网。
-		Spec: "封面不再在有图和占位之间反复切换：一屏封面按显示尺寸存得下、字节账不漏、还在下的那一张不参与淘汰、画面上正画着的那一张不参与淘汰（首页、历史记录、稍后再看三处）",
+		Spec: "封面不再在有图和占位之间反复切换：一屏封面按显示尺寸存得下、字节账不漏、还在下的那一张不参与淘汰、画面上正画着的那一张不参与淘汰（首页、历史记录、稍后再看三处）；普通大 PNG 逐行缩放不分配整张原图、像素不变，缓存预算可由环境变量配置",
 		Tests: []string{
 			"TestTheSameCoverStaysReadyAcrossFrames",
 			"TestTheHomeCoversDoNotGoBackToPlaceholder",
 			"TestStoredCoversAreScaledDown",
+			"TestStreamingPNGMatchesExistingPixels",
+			"TestStreamingPNGFiltersAndChunks",
+			"TestStreamingPNGRejectsCorruption",
+			"TestStreamingPNGFallsBackForOtherImages",
+			"TestStoredPNGDoesNotAllocateFullSizeImage",
+			"TestImageCacheBudgetFromEnvironment",
 			"TestAnEntryEvictedBeforeItIsDecodedIsNotAccounted",
 			"TestTheEvictionSkipsEntriesThatHaveNoBytesYet",
 			"TestACoverThatIsStillLoadingIsNotEvicted",

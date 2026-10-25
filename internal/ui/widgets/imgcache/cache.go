@@ -124,7 +124,8 @@ func (systemClock) AfterFunc(d time.Duration, f func()) Timer { return time.Afte
 
 // Options 是建缓存时能调的旋钮。零值就是推荐值。
 type Options struct {
-	// MaxBytes 是**内存**缓存的字节上限，零值是 DefaultMaxBytes。
+	// MaxBytes 是**内存**缓存预算；正值优先，零值读 BIU_IMAGE_CACHE_MB，
+	// 未配置或配置无效时用 DefaultMaxBytes。正在显示的图片仍受保护，可超预算。
 	MaxBytes int64
 	// Dir 是磁盘缓存目录，空就是不落盘——零值就是「全在内存里」，和以前一样。
 	//
@@ -232,7 +233,7 @@ type Cache struct {
 // New 建一个缓存。
 func New(opts Options) *Cache {
 	if opts.MaxBytes <= 0 {
-		opts.MaxBytes = DefaultMaxBytes
+		opts.MaxBytes = configuredMaxBytes()
 	}
 	if opts.DiskMaxBytes <= 0 {
 		opts.DiskMaxBytes = DefaultDiskMaxBytes

@@ -77,6 +77,13 @@ func decodeStored(data []byte) (*ui.Bitmap, error) {
 	if hasExifOrientation(data) {
 		return ui.DecodeBitmap(data)
 	}
+	// 普通大 PNG 逐行解：只留缩放要用的两行，不建整张原图。
+	if img, handled, err := decodePNGStored(data); handled {
+		if err != nil {
+			return nil, err
+		}
+		return ui.NewBitmap(img), nil
+	}
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
@@ -91,10 +98,7 @@ func decodeStored(data []byte) (*ui.Bitmap, error) {
 	}
 
 	// 按比例缩：长边落到 maxStoredSide，另一边按同一个比例走。
-	k := float64(maxStoredSide) / float64(max(w, h))
-	dw := max(1, int(float64(w)*k+0.5))
-	dh := max(1, int(float64(h)*k+0.5))
-	dst := image.NewRGBA(image.Rect(0, 0, dw, dh))
+	dst := image.NewRGBA(storedBounds(w, h))
 	// ⚠️ **用 ApproxBiLinear 而不是 CatmullRom**（`internal/ui/covercrop.go` 那一处
 	// 缩放用的是 CatmullRom）：实测一张 1920×1080 缩到 768×432，CatmullRom 要
 	// 120~280ms（跟机器负载有关），ApproxBiLinear 只要 10~15ms——**十几倍**。
@@ -104,6 +108,11 @@ func decodeStored(data []byte) (*ui.Bitmap, error) {
 	// CPU 差就是「封面半秒之后才出来」和「封面立刻出来」的差别。
 	xdraw.ApproxBiLinear.Scale(dst, dst.Bounds(), img, b, xdraw.Src, nil)
 	return ui.NewBitmap(dst), nil
+}
+
+func storedBounds(w, h int) image.Rectangle {
+	k := min(1, float64(maxStoredSide)/float64(max(w, h)))
+	return image.Rect(0, 0, max(1, int(float64(w)*k+0.5)), max(1, int(float64(h)*k+0.5)))
 }
 
 // hasExifOrientation 报这张 JPEG 有没有 EXIF 方向信息。
