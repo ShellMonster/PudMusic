@@ -129,6 +129,17 @@ const (
 	iconClose    = "System/close-line.svg"         // 清空
 	iconFeed     = "User & Faces/team-line.svg"    // 动态
 
+	// ── UP 空间头图区（票 #268）──
+	//
+	// ⚠️ **加号和勾是现成的**：`iconAdd`（`System/add-line.svg`，上游
+	// `RiAddLine`，「关注」和「新建收藏夹」共用那一枚）和 `iconFollowDone`
+	// （`System/check-line.svg`，上游 `RiCheckLine`）都在下面那张表里。
+	//
+	// iconVerified 是昵称右边那枚认证徽章里的图形。上游是闪电
+	// （`RiFlashlightFill`，`user-profile/space-info.tsx:98`），我们图标集里
+	// 没有那一枚，用的是盾——同样是「这一位是被认证过的」那个意思。
+	iconVerified = "System/shield-check-line.svg"
+
 	// iconLogin / iconLogout 是顶栏右端那两枚（登录 / 退出登录）。
 	//
 	// ⚠️ **这一对换过图形**：原来是 `System/login-circle-line.svg` 和
@@ -414,6 +425,8 @@ var iconNames = []string{
 	iconLoginCircle, iconLogoutCircle,
 	// 头像下拉里「个人资料」那一枚。
 	iconProfile,
+	// UP 空间头图区里昵称右边那枚认证徽章（票 #268）。
+	iconVerified,
 	// 队列抽屉头与行
 	iconLocate, iconDelete, iconPlayFill, iconPauseFill,
 
