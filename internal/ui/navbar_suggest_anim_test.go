@@ -78,7 +78,16 @@ func settleSuggestEnter(t *testing.T, tt *mygoui.Tester) {
 // 出现了离底更远的东西」——面板没画的时候，那一格是**底下**的东西（首页那几个
 // Tab），离底色只有十几。
 func suggestPanelMark(tt *mygoui.Tester, bg color.RGBA) (y float32, mark int) {
-	chip, ok := tt.Find(suggestAnimTerm)
+	return suggestMarkOf(tt, bg, suggestAnimTerm)
+}
+
+// suggestMarkOf 量浮层里**那一个字**所在的一格：它在哪儿（y），以及面板画了
+// 多少（墨）。
+//
+// ⚠️ **量的是「字」而不是「面板」**：面板的底和页面的底是同一个色，面板画没画
+// 在画面上就是「那一格里有没有离底更远的东西」——而字是那一格里最靠得住的一处。
+func suggestMarkOf(tt *mygoui.Tester, bg color.RGBA, what string) (y float32, mark int) {
+	chip, ok := tt.Find(what)
 	if !ok {
 		return 0, -1
 	}
@@ -265,6 +274,88 @@ func TestTheSuggestPanelDoesNotReplayWhenTheTermsArrive(t *testing.T) {
 	}
 	if mark1 != mark0 {
 		t.Errorf("内容变了之后面板淡了一下（墨 %d → %d）——进场的动画重播了", mark0, mark1)
+	}
+}
+
+// TestTheSuggestPanelDoesNotReplayWhenTheTermsAreCleared 断③之二：**没有搜索
+// 历史**的用户每敲一个字，面板**不该**重播一遍进场。
+//
+// # 这一条是评审抓出来的（第一版判据错了）
+//
+// 场景：用户敲「周」→ 词回来 → 面板出现（进场播一遍）→ 又敲「杰」→ **新的一趟
+// 请求把上一批词清空**（`internal/app/searchsuggest.go`：
+// `s.query, s.items, s.loading = keyword, nil, true`）→ 面板两档都空 → **框架
+// 不摆那个 panel** → 面板空掉一帧 → 词回来 → 面板重新出现。
+//
+// ⚠️ **第一版的判据是「面板此刻在不在画面上」**：面板空掉那一帧把那个判据清成
+// 假，词回来时它又**从下面升上来一遍**——于是**每一次按键都重播一遍 200ms 的
+// 进场**。而这正是票面 AC 第 4 条（和这一票自己写进 `DESIGN.md` 的「不重播」）
+// 要挡的事。
+//
+// ⚠️ **这一条只有「没有搜索历史」的用户才走得到**：有历史的话，历史那一档一直
+// 在，面板不会空掉——**所以上面那一条（加了历史的）抓不到这个**。
+//
+// 判据是**画面**：面板重新出现的那一帧，它**已经是满亮的、落位的**——不是从
+// 下面升上来、也不是透明的。
+func TestTheSuggestPanelDoesNotReplayWhenTheTermsAreCleared(t *testing.T) {
+	f := newBiliFixture(t, 1)
+	// ⚠️ **两趟给不同的词**：假 B 站是按「问的词」回联想词的（`serveSuggest`），
+	// 而这里要能分清「面板空掉了」和「面板回来了」——两趟的字不一样才分得清。
+	f.setSuggestTerms("周杰", "周杰伦")
+	f.setSuggestTerms("周杰杰", "林俊杰")
+	s, tt := newSuggestShell(t, f)
+	// ⚠️ **不加搜索历史**：这一条就是「没有历史」的那一类用户。
+	tt.Frame()
+
+	bg := rgb(BuildTheme(s.app.SettingsSnapshot(), false).Background)
+
+	// 第一次敲字：词回来，面板出现——**这一下是进场**（面板在下面 10 DIP）。
+	typeInSearch(t, tt, "周杰")
+	settleSuggestDebounce(s, tt)
+	waitFrames(t, tt, "联想词出来了", func() bool { return tt.HasText("周杰伦") })
+	yFirst, _ := suggestMarkOf(tt, bg, suggestTermsHeading)
+
+	// 把它推完：记下落位的样子（量的是「联想词」那一行——两次都是同一个元素）。
+	settleSuggestEnter(t, tt)
+	settledY, settledMark := suggestMarkOf(tt, bg, suggestTermsHeading)
+
+	// ① 第一次出现的那一帧，面板**在下面 10 DIP**（进场的起点）。
+	//
+	// ⚠️ **判据是位置而不是像素**：面板的底和页面的底是同一个色，它画没画在画面
+	// 上是「那一格里有没有离底更远的东西」——而这一格的**底下**是首页那排 Tab
+	// （它自己有深色的字），所以「墨」在画没画的时候都**不是零**（实测 149 对
+	// 208）。**位置没有这个含糊**：进场那一帧的边距就是 10，落位就是 0。
+	if math.Abs(float64(yFirst-(settledY+suggestEnterRise))) > 0.05 {
+		t.Errorf("面板第一次出现时它在 y=%.4f，落位是 %.4f——它应该从下面 %.0f DIP 升上来",
+			yFirst, settledY, float64(suggestEnterRise))
+	}
+
+	// 又敲一个字：新的一趟请求把上一批词清空 → 面板空掉一帧。
+	tt.Type("杰")
+	tt.Frame()
+	settleSuggestDebounce(s, tt)
+	if tt.HasText("周杰伦") {
+		t.Fatalf("新的一趟请求应该把上一批词清空，面板该空掉一帧——可它还在，文字有 %q",
+			tt.Texts())
+	}
+
+	// 词回来：面板重新出现。
+	waitFrames(t, tt, "联想词回来了", func() bool { return tt.HasText("林俊杰") })
+
+	// ② 重新出现的��一帧，它**已经在落位上**了——没有再从下面升上来一遍。
+	yBack, markBack := suggestMarkOf(tt, bg, suggestTermsHeading)
+	if math.Abs(float64(yBack-settledY)) > 0.05 {
+		t.Errorf("面板重新出现的那一帧在 y=%.4f，落位是 %.4f——它又从下面升上来了一遍",
+			yBack, settledY)
+	}
+	// ③ 而且它是**画满了**的（不透明度已经是 1）。
+	//
+	// ⚠️ **容差是 40**：这一格的底下是首页那排 Tab（它自己有深色的字），所以
+	// 「没画」的时候那一格的墨也不是零（实测 149，而画满是 208）。位置那一条
+	// （②）才是抓「重播」的硬判据——这一条是顺带看一眼。
+	if markBack < settledMark-40 {
+		t.Errorf("面板重新出现的那一帧只有 %d 的墨（落位是 %d）——它还在淡着",
+			markBack, settledMark)
 	}
 }
 
