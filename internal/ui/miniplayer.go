@@ -697,15 +697,15 @@ func (s *Shell) viewMiniTransport(c *ui.Context, st app.State) {
 	ui.Row(c).Key("mini-transport").FillWidth().Gap(space.Px6).AlignItems(ui.Center).
 		Children(func() {
 			// 能不能按看的是队列，和播放条上那两个键是同一个判据（`viewStepButtons`）。
-			if s.withTip(c, flatIconButton(c, iconPrev, "上一首", 18).
+			if flatIconButton(c, iconPrev, "上一首", 18).
 				Key("mini-prev").Size(miniStepW, miniStepW).Padding(space.None, space.Px5).
-				Disabled(!s.app.CanPrev()), "上一首").Clicked() {
+				Disabled(!s.app.CanPrev()).Clicked() {
 				s.app.Prev()
 			}
 			s.viewMiniPlay(c, st)
-			if s.withTip(c, flatIconButton(c, iconNext, "下一首", 18).
+			if flatIconButton(c, iconNext, "下一首", 18).
 				Key("mini-next").Size(miniStepW, miniStepW).Padding(space.None, space.Px5).
-				Disabled(!s.app.CanNext()), "下一首").Clicked() {
+				Disabled(!s.app.CanNext()).Clicked() {
 				s.app.Next()
 			}
 			ui.Spacer(c).Grow(1)
@@ -818,7 +818,7 @@ func (s *Shell) viewMiniPlay(c *ui.Context, st app.State) {
 		// ⚠️ **光圈是绕着那枚 24 的圆，不是绕着那 28 的点击区**：点击区是
 		// 「按得到」的范围，而画出来的那枚圆是 24。
 		b = s.withLoadHalo(c, b, st, miniPlayGlyph, true)
-		if s.withTip(c, b, "暂停").Clicked() {
+		if b.Clicked() {
 			s.app.Toggle()
 		}
 		return
@@ -832,7 +832,7 @@ func (s *Shell) viewMiniPlay(c *ui.Context, st app.State) {
 	// ⚠️ **键是灰的时候不画光圈**（理由见 loadhalo.go：框架对禁用的控件整个
 	// 乘 0.5 不透明度）。
 	b = s.withLoadHalo(c, b, st, miniPlayGlyph, st.HasTrack)
-	if s.withTip(c, b, "播放").Clicked() {
+	if b.Clicked() {
 		s.app.Toggle()
 	}
 }
