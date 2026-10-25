@@ -91,6 +91,9 @@ func TestRenderHoverShots(t *testing.T) {
 			// ⚠️ **推满 300 毫秒**（`motion.HoverZoomTime`）：封面放大是 300ms 的
 			// 动画，不推钟的话存出来的是「放大还没开始」的那一帧。
 			tt.Move(away[0], away[1])
+			// ⚠️ **推钟**：上一张 hover 的那一格要**淡完**才退干净——不推钟的话
+			// 存出来的「平时」那张上，上一格还挂着半淡的那枚钮和那条渐变。
+			tt.Advance(motion.HoverZoomTime + hover.Fade)
 			homeFrame(tt)
 			save(t, dir, "37-"+name+"-网格-封面放大-平时.png", tt)
 			hoverCover(t, tt, songName(homeTabs[0], 2))
