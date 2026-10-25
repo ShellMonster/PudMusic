@@ -416,6 +416,45 @@ func TestABackendThatCannotReadDoesNotThrowAwayTheCredentials(t *testing.T) {
 	}
 }
 
+// TestThePendingCleanupActuallyRemovesTheKeychainItem 钉住「那笔标记不是摆设」。
+//
+// 钥匙串读不到 → 留下一笔「待清理」；下一次启动**必须**真的去把那一项删掉
+// （判据 ②：钥匙串里不能留着同一份明文）。
+//
+// 这条用一个**假的 security**：只有 delete 会成功，别的都失败——
+// 于是「标记被清掉」就等于「delete 被调用过」。
+func TestThePendingCleanupActuallyRemovesTheKeychainItem(t *testing.T) {
+	fake := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"case \"$1\" in\n" +
+		"  delete-generic-password) exit 0;;\n" +
+		"esac\n" +
+		"exit 1\n"
+	if err := os.WriteFile(filepath.Join(fake, "security"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	f := newTestStore(t)
+	ctx := context.Background()
+	// 凭据文件先在（这样 Load 不会走迁移那条路）。
+	if err := f.Save(ctx, testSession()); err != nil {
+		t.Fatalf("存：%v", err)
+	}
+	// 放一笔「待清理」。
+	marker := filepath.Join(f.dir, cleanupMarkerName)
+	if err := os.WriteFile(marker, []byte("svc"), credentialsFileMode); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.Load(ctx); err != nil {
+		t.Fatalf("取：%v", err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("清理标记还在——说明没去删钥匙串里那一项")
+	}
+}
+
 // TestTheMigrationLeavesAMarkerWhenTheKeychainCannotBeRead 钉住
 // 「钥匙串读不到 → 留下待清理的标记」。
 //
