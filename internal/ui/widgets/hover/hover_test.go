@@ -4,8 +4,10 @@ import (
 	"image"
 	"image/color"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -95,6 +97,10 @@ func TestRowCoverHidesEverythingWhenOff(t *testing.T) {
 //
 // ⚠️ 量得到是因为 `Tester.Find` 给回的是**变换后**的盒子（`mygo/ui/runtime.go` 的
 // `visualRect`），而 `Scale` 恰好不改布局——所以这一条量的是画出来的大小。
+//
+// ⚠️ **必须推钟**：那一档放大**现在有动画了**（以前是瞬时的，每帧直接算 `Scale`），
+// 而 Tester 的钟站着不动（`mygo/ui/headless.go`）——不推的话量到的是「放大还没
+// 开始」，那一帧量出来是 1.0 倍。
 func TestRowCoverGrowsTheTriangleOnHover(t *testing.T) {
 	cache := newCache(t)
 	on := false
@@ -118,12 +124,13 @@ func TestRowCoverGrowsTheTriangleOnHover(t *testing.T) {
 	// 指针挪到三角的正中间。
 	tt.Move(rest.X+rest.W/2, rest.Y+rest.H/2)
 	tt.Frame()
+	tt.Advance(motion.GrowTime)
 	tt.Frame()
 	grown, ok := tt.Find(FromLabel("甲"))
 	if !ok {
 		t.Fatalf("指针停在三角上时它不见了：%q", tt.Texts())
 	}
-	if want := rest.W * triScale; grown.W < want-1 {
+	if want := rest.W * motion.GrowScale; grown.W < want-1 {
 		t.Errorf("指针停在上面时它只有 %.1f 宽，want %.1f（上游的 110%%）", grown.W, want)
 	}
 }
@@ -255,6 +262,189 @@ func TestCardCoverLeavesOutWhatItWasNotGiven(t *testing.T) {
 	}
 	if _, ok := tt.Find("0"); ok {
 		t.Errorf("没有播放量却画了一个「0」：%q", tt.Texts())
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 悬停放大 / 弹出来
+// ─────────────────────────────────────────────────────────────────────────────
+
+// changedPixels 数两张图在 box 里不一样的像素有几个。
+func changedPixels(a, b *image.RGBA, box ui.Rect) int {
+	n := 0
+	for y := int(box.Y); y < int(box.Y+box.H); y++ {
+		for x := int(box.X); x < int(box.X+box.W); x++ {
+			if a.RGBAAt(x, y) != b.RGBAAt(x, y) {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// TestTheCardCoverGrowsOnHover 钉住「网格卡片那张封面在悬停时放大」。
+//
+// ⚠️ **量的是像素，不是盒子**：封面那一格没有标签（`Tester.Find` 认不出来），
+// 而放大的是**框里那张图**——外面那个框不动（上游那个 `overflow-hidden` 的框
+// 也不动，见 `widgets/motion/hoverzoom.go`）。
+//
+// ⚠️ **量的那一块是封面的上半截**：下半截有封面底部那条渐变和右下角那枚圆钮，
+// 它们淡入的时候也改像素——量到那儿就分不出「放大」和「淡入」了。而上半截
+// 只有封面自己（那个「歌名首字 + 渐变」的占位），它变了就是放大画出来了。
+//
+// ⚠️ **封面不能是纯色**：一块纯色放大 5% 在画面上一个像素都不变。这里的占位
+// 画的是「首字 + 渐变」，那个字够大（0.44 × 边长），放大 5% 之后它的边挪了
+// 好几像素。
+func TestTheCardCoverGrowsOnHover(t *testing.T) {
+	const coverW, coverH = 120, 140
+	cache := newCache(t)
+	on := false
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Box(c).Size(coverW+12, coverH+12).Padding(6).Children(func() {
+			CardCover(c, cache, "", coverW, coverH, on, "", "", "甲", nil)
+		})
+	}, testerW, testerH)
+	tt.Frame()
+	tt.Move(200, 200) // 指针先落在画面外
+	tt.Frame()
+	before := tt.Image()
+
+	on = true
+	tt.Frame()
+	tt.Advance(motion.HoverZoomTime)
+	tt.Frame()
+	after := tt.Image()
+
+	top := ui.Rect{X: 6, Y: 6, W: coverW, H: coverH / 2}
+	if n := changedPixels(before, after, top); n < 20 {
+		t.Errorf("指针移上去之后那张封面的上半截只有 %d 个像素变了——"+
+			"悬停放大（%v）没画出来", n, motion.HoverZoomScale)
+	}
+}
+
+// TestTheCardCoverZoomStaysInsideItsCorners 钉住「放大的封面被圆角裁住」。
+//
+// ⚠️ **判据是那两个角上一个像素都不许变**：卡片有圆角，不裁的话画面上是「封面
+// 从圆角里长出来」——而那在画面上只是「角上多了一块颜色」，一眼看不出是哪儿
+// 错了。
+//
+// ⚠️ **只断上面那两个角**：下面那两个角上有一枚 40 的圆钮和它那圈 `shadow-2xl`
+// 的影（影落在盒子外面，会漫到角上），它们淡入的时候也改像素。
+func TestTheCardCoverZoomStaysInsideItsCorners(t *testing.T) {
+	const coverW, coverH = 120, 140
+	cache := newCache(t)
+	on := false
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Box(c).Size(coverW+12, coverH+12).Padding(6).Children(func() {
+			CardCover(c, cache, "", coverW, coverH, on, "", "", "甲", nil)
+		})
+	}, testerW, testerH)
+	tt.Frame()
+	tt.Move(200, 200)
+	tt.Frame()
+	before := tt.Image()
+
+	on = true
+	tt.Frame()
+	tt.Advance(motion.HoverZoomTime)
+	tt.Frame()
+	after := tt.Image()
+
+	for _, c := range []struct {
+		name string
+		x, y int
+	}{
+		{"左上角", 6, 6},
+		{"右上角", 6 + coverW - 1, 6},
+	} {
+		if before.RGBAAt(c.x, c.y) != after.RGBAAt(c.x, c.y) {
+			t.Errorf("%s那个像素在 hover 之后变了（%v → %v）——"+
+				"放大没有被圆角裁住，画面上是「封面从圆角里长出来」",
+				c.name, before.RGBAAt(c.x, c.y), after.RGBAAt(c.x, c.y))
+		}
+	}
+}
+
+// TestThePlayButtonPopsOut 钉住「网格卡右下角那枚 40 的圆钮是**弹**出来的」。
+//
+// ⚠️ **量的是画出来的大小**：`Tester.Find` 给回的是**变换后**的盒子，而 `Scale`
+// 不改布局——所以量的是那一枚钮画出来多大。
+//
+// ⚠️ **「弹」和「啪地一下出现」的区别就在头几帧**：淡入是 200ms，而缩放是
+// 150ms——指针移过去之后的头一帧，那一枚钮**已经能看见**（淡入有了一点点），
+// 但它**还没长到位**（85%）。两样都到位了之后它是 40。
+func TestThePlayButtonPopsOut(t *testing.T) {
+	const coverW, coverH = 120, 140
+	cache := newCache(t)
+	on := false
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Box(c).Size(coverW+12, coverH+12).Padding(6).Children(func() {
+			CardCover(c, cache, "", coverW, coverH, on, "", "", "甲", nil)
+		})
+	}, testerW, testerH)
+	tt.Frame()
+	tt.Move(200, 200)
+	tt.Frame()
+
+	on = true
+	tt.Frame()
+	tt.Advance(10 * time.Millisecond)
+	tt.Frame()
+	knob, ok := tt.Find(FromLabel("甲"))
+	if !ok {
+		t.Fatalf("指针移上去之后没有那个播放钮：%q", tt.Texts())
+	}
+	if knob.W >= btn-1 {
+		t.Errorf("那枚钮刚出现时就已经是 %.1f 宽了——它是「啪」地一下出现的，不是弹出来的", knob.W)
+	}
+
+	tt.Advance(motion.PopTime)
+	tt.Frame()
+	knob, ok = tt.Find(FromLabel("甲"))
+	if !ok {
+		t.Fatalf("弹完之后那枚钮不见了：%q", tt.Texts())
+	}
+	if knob.W < btn-1 {
+		t.Errorf("弹完之后那枚钮只有 %.1f 宽，want %d（弹到位就是满的）", knob.W, btn)
+	}
+}
+
+// TestTheTrianglePopsOut 钉住「列表行封面上那枚三角是**弹**出来的」。
+//
+// ⚠️ 判据同 `TestThePlayButtonPopsOut`：头一帧它已经看得见（淡入有了一点），
+// 但还没长到位（85%）；弹完是 20。
+func TestTheTrianglePopsOut(t *testing.T) {
+	cache := newCache(t)
+	on := false
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Box(c).Size(60, 60).Padding(6).Children(func() {
+			RowCover(c, cache, "", 48, on, "甲", nil)
+		})
+	}, testerW, testerH)
+	tt.Frame()
+	tt.Move(200, 200)
+	tt.Frame()
+
+	on = true
+	tt.Frame()
+	tt.Advance(10 * time.Millisecond)
+	tt.Frame()
+	tri, ok := tt.Find(FromLabel("甲"))
+	if !ok {
+		t.Fatalf("指针移上去之后没有那个三角：%q", tt.Texts())
+	}
+	if tri.W >= triSize-1 {
+		t.Errorf("那枚三角刚出现时就已经是 %.1f 宽了——它是「啪」地一下出现的，不是弹出来的", tri.W)
+	}
+
+	tt.Advance(motion.PopTime)
+	tt.Frame()
+	tri, ok = tt.Find(FromLabel("甲"))
+	if !ok {
+		t.Fatalf("弹完之后那枚三角不见了：%q", tt.Texts())
+	}
+	if tri.W < triSize-1 {
+		t.Errorf("弹完之后那枚三角只有 %.1f 宽，want %d（弹到位就是满的）", tri.W, triSize)
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -213,7 +214,7 @@ func shotCollectionZoom(t *testing.T, dir, name string, dark bool) {
 	}
 	tt.Move(before.X+before.W/2, before.Y+before.H/2)
 	tt.Frame()
-	tt.Advance(hoverZoomTime)
+	tt.Advance(motion.HoverZoomTime)
 	tt.Frame()
 	save(t, dir, "59-"+name+"-收藏夹封面放大.png", tt)
 }
@@ -241,7 +242,7 @@ func shotAuthorZoom(t *testing.T, dir, name string, dark bool) {
 	}
 	tt.Move(av.X+av.W/2, av.Y+av.H/2)
 	tt.Frame()
-	tt.Advance(hoverZoomTime)
+	tt.Advance(motion.HoverZoomTime)
 	tt.Frame()
 	save(t, dir, "60-"+name+"-作者头像放大.png", tt)
 }
@@ -258,7 +259,7 @@ func shotNavbarZoom(t *testing.T, dir, name string, dark bool) {
 	}
 	tt.Move(av.X+av.W/2, av.Y+av.H/2)
 	tt.Frame()
-	tt.Advance(hoverZoomTime)
+	tt.Advance(motion.HoverZoomTime)
 	tt.Frame()
 	save(t, dir, "61-"+name+"-顶栏头像放大.png", tt)
 }

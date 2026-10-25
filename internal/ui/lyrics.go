@@ -147,7 +147,7 @@ const lyricLineTransition = 300 * time.Millisecond
 // ⚠️ **它也不是上游那个 `ease-out`**：上游（CSS）那个是
 // `cubic-bezier(0, 0, 0.58, 1)`，实算 t=0.25 时一条走 57.8%、另一条走 37.8%
 // ——**两条不是一个东西**（框架里 `ui.EaseInOut` 与上游那条
-// `cubic-bezier(0.4,0,0.2,1)` 的差别更大，见 `hoverzoom.go` 那儿记着）。
+// `cubic-bezier(0.4,0,0.2,1)` 的差别更大，见 `widgets/motion/hoverzoom.go` 那儿记着）。
 //
 // ⚠️ **这里显式写了曲线**（票 #292）：全应用走**一条统一曲线**
 // （`motion.Unified`），上游那个 `ease-out` 只是上游的默认值，不是这一处的

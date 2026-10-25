@@ -41,6 +41,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
@@ -757,7 +758,7 @@ func (s *Shell) spaceAvatarWith(c *ui.Context, face string, side float32, withSh
 // spaceAvatarZoom 是 spaceAvatar 加一个「指针移上去放大」。
 //
 // zoomKey 非空串时才放大——那一格每一帧都要重建，而动画的值记在**节点的状态**
-// 上，身份跨帧不变才有那份状态（见 `hoverzoom.go` 的文件头）。on 是这一帧指针
+// 上，身份跨帧不变才有那份状态（见 `widgets/motion/hoverzoom.go` 的文件头）。on 是这一帧指针
 // 在不在它上面。
 //
 // ⚠️ **放大的是整个头像（那个圆），不是里面那张图**：上游那一处写的是
@@ -774,7 +775,7 @@ func (s *Shell) spaceAvatarOn(c *ui.Context, face string, side float32, withShad
 		box = shadow.TailwindLG(box)
 	}
 	if zoomKey != "" {
-		box = hoverZoom(c, box, zoomKey, on)
+		box = motion.HoverZoom(box, zoomKey, on)
 	}
 	box.Children(func() {
 		if st := s.images.Get(face); face != "" && st.Ready() {
@@ -836,7 +837,7 @@ func (s *Shell) spaceThumbZoom(c *ui.Context, url string, w, h float32, zoomKey 
 		if st := s.images.Get(url); url != "" && st.Ready() {
 			img := ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(w, h)
 			if zoomKey != "" {
-				hoverZoom(c, img, zoomKey, on)
+				motion.HoverZoom(img, zoomKey, on)
 			}
 			return
 		}

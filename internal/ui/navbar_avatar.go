@@ -63,6 +63,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -422,7 +423,7 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 		//
 		// ⚠️ hover 要在 Children **之前**问（理由同 `widgets/list` 的 grid.go）。
 		on := hit.Hovered()
-		hit = hoverZoom(c, hit, "avatar-zoom", on)
+		hit = motion.HoverZoom(hit, "avatar-zoom", on)
 		hit.Children(func() {
 			// 那一枚圆：**裁成圆的**（里面的图要按圆裁），外面留一圈 1 像素的描边。
 			face := ui.Box(c).Size(avatarSize, avatarSize).
