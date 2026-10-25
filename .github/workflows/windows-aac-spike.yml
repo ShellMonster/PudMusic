@@ -34,9 +34,24 @@ on:
       - "internal/licensing/**"
       - "resources/licenses/**"
       - ".github/workflows/windows-aac-spike.yml"
+  # ⚠️ `push` 也按路径过滤，跟上面 `pull_request` **一模一样**。
+  #
+  # 为什么：这份工作流只验 Windows 上的 AAC 解码（issue #128），跟界面票、
+  # 别的包没关系。曾经 `push` 只按分支过滤（`work/**`）→ 每个分支的每次 push
+  # 都烧一次 Actions 额度，而板上同时有十个 agent 在推分支，一轮下来满屏红叉
+  # （额度用尽时 job 两秒就 failed、runner 都没分配上——那是账单问题，不是代码
+  # 问题）。
+  #
+  # ⚠️ 两条 `paths` 列表必须保持一致：它们是「同一件事的两条路」。漏一条就是
+  # 半开半开——改音频不触发、或者改界面照样触发。
   push:
     branches:
       - "work/**"
+    paths:
+      - "internal/service/audio/**"
+      - "internal/licensing/**"
+      - "resources/licenses/**"
+      - ".github/workflows/windows-aac-spike.yml"
   workflow_dispatch:
 
 jobs:
