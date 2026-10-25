@@ -50,7 +50,7 @@ func TestTheWaveDoesNotRebuildTheWindowEveryFrame(t *testing.T) {
 	before := *frames
 	tt.Advance(500 * time.Millisecond)
 	if !tt.FramePending() {
-		t.Fatal("推进了半秒，画面却没有在要下一帧——"+
+		t.Fatal("推进了半秒，画面却没有在要下一帧——" +
 			"跳动波形没有在逐帧动画，下面那条「重建得少」就验不到东西")
 	}
 

@@ -359,9 +359,17 @@ func (h *homePage) viewBody(c *ui.Context, s *Shell) {
 		// 新歌速递只画在「流行」那一档的顶部，别的地方一律不画（上游
 		// index.tsx:295）。它自己那三态（拉取中 / 拉不到 / 正常）是它内部的
 		// 事，这里只把这一摊的状态递过去。
+		//
+		// ⚠️ **这一块本身不是在这里画的**（票 #369）：它是「流行」那一档**列表的
+		// 第 0 行**（页内头部，见 `list.Lead`），所以它在列表的滚动区里——跟着内容
+		// 一起滚走（上游那一页的顶图和下面的列表在**同一个滚动容器**里）。画它
+		// 的地方是 `viewPopLead`（那一档有列表的时候）和 `viewPopTop`（那一档
+		// 一首歌都没有、没有列表可挂的时候）。
+		//
+		// ⚠️ **状态要在画之前递过去**：它那三态是它**画的时候**读的，而它在
+		// 布局那一遍才画（列表的行是布局时建的）——递晚了那一帧画出来的是旧状态。
 		if tab == homePopTab {
 			h.newGrid.SetStatus(h.feed.loadingOf(homeNewMusic), h.feed.newTab.err)
-			h.newGrid.View(c)
 		}
 
 		h.viewTabBody(c, s, tab)

@@ -518,7 +518,7 @@ func (s *Shell) viewAvatarMenuItems(c *ui.Context) {
 	marks := make([]avatarMenuMark, 0, len(avatarMenuItems))
 	hovered := -1
 	for i, item := range avatarMenuItems {
-		row := ui.ButtonBase(c).Key("avatar-menu:" + item.label).
+		row := ui.ButtonBase(c).Key("avatar-menu:"+item.label).
 			FillWidth().Height(avatarMenuRowH).
 			Padding(space.None, space.Px12).Gap(space.Px8).
 			Justify(ui.Start).Radius(t.Radius)
@@ -634,7 +634,7 @@ func (s *Shell) viewAvatarMenuKeys(c *ui.Context, anchor ui.Element) {
 // runAvatarMenuItem 跑下拉里的那一项：先收浮层，再做那件事。
 //
 // ⚠️ **先收浮层**：那一层盖在顶栏上，而好几项做完之后会弹一句提示
-//（「还没登录，个人资料用不了」），浮层还开着的话提示压在浮层底下。
+// （「还没登录，个人资料用不了」），浮层还开着的话提示压在浮层底下。
 func (s *Shell) runAvatarMenuItem(c *ui.Context, item avatarMenuItem) {
 	s.avatarMenuOpen = false
 	// ⚠️ **下标回到「什么也没选中」**：浮层下一次打开时是从零开始的

@@ -104,6 +104,12 @@ const (
 // 它是 var 不是 const：测试要把它改短，不然每条都干等 2 秒。
 var toastLifetime = 2 * time.Second
 
+// toastHoverPoll 是「指针压着它」的时候隔多久问一次。
+//
+// ⚠️ **不用更长**：指针一离开，那条提示就该收走——问得越稀，「松手之后它还赖在
+// 屏幕上」的时间越长。100ms 是「看不出来」的粒度。
+const toastHoverPoll = 100 * time.Millisecond
+
 // toast 是一条提示。id 用来在到点时认出「是自己那一条」——文字可能重复。
 type toast struct {
 	id   uint64
@@ -118,6 +124,11 @@ type toast struct {
 	// 而入场是画面上的动画（引擎钟——它才听「减少动态效果」，也才推得动）。
 	// 见 `toastEnterAt`。
 	enterAt time.Time
+	// hovered 是「指针正压着这一条」。
+	//
+	// ⚠️ **主线程写、后台那条 goroutine 读**（`expire` 要靠它决定收不收）——
+	// 所以它跟 `s.toasts` 一样在 `toastMu` 底下。
+	hovered bool
 }
 
 // addToast 弹一条提示。多到 3 条时把最旧的挤掉。
@@ -160,14 +171,76 @@ func (s *Shell) addToast(text string, tone notice.Tone) {
 
 // expire 等到点就把这一条收走，然后叫醒界面。
 //
-// ⚠️ 收走之后**必须**调 invalidate。少了这一行，这条提示会一直挂在屏幕上，
+// # ⚠️ 指针压着它的时候**不收**
+//
+// 《Functional Motion》：「当鼠标移入时，所有 Message 将会展开」「悬停时不会
+// 消失」——用户多半是照着这一条去按底下的那一行，它在指针还在上面的时候就消失
+// 了，那句话就没用了。
+//
+// 所以这一条在**被指着**的时候一直留着，等指针走了才按原定的时刻收走（到点那一刻
+// 剩下的时间照旧走完——「暂停」而不是「重来」）。
+//
+// ⚠️ **收走之后必须调 invalidate**。少了这一行，这条提示会一直挂在屏幕上，
 // 直到别的原因碰巧重画了界面为止——「只投递不唤醒 = 0 帧刷新」实测踩过。
 func (s *Shell) expire(t toast) {
-	if d := time.Until(t.until); d > 0 {
-		time.Sleep(d)
+	for {
+		s.toastMu.Lock()
+		cur, ok := s.toastByID(t.id)
+		if !ok {
+			// 已经被人收走了（切路由清空、或者别人先收的）——没什么可等的了。
+			s.toastMu.Unlock()
+			return
+		}
+		wait, hovered := time.Until(cur.until), cur.hovered
+		s.toastMu.Unlock()
+
+		if hovered {
+			// 指针压着它：先不收，等下一轮再问。
+			//
+			// ⚠️ **这一轮要叫醒界面**：指针移走的时候，框架**不一定**给这一条发一帧
+			//（卡片是 PassThrough 的，不在指针的命中链里——见 `viewToast`），所以
+			// 「指针还压着吗」这个答案要靠我们自己 periodic 地问一次才拿得到。
+			// 不问的话，那一条会一直赖在屏幕上（直到别的原因碰巧重画了界面）。
+			//
+			// ⚠️ **代价是「指着它的时候界面在 10 帧每秒地重画」**：所以这一轮只
+			// 在**指着**的时候才问——指针一走，这一条就按原定的时刻收走。
+			time.Sleep(toastHoverPoll)
+			s.wake.invalidate()
+			continue
+		}
+		if wait > 0 {
+			time.Sleep(wait)
+			continue
+		}
+		s.dropToast(t.id)
+		s.wake.invalidate()
+		return
 	}
-	s.dropToast(t.id)
-	s.wake.invalidate()
+}
+
+// toastByID 在锁底下找那一条。找不到就是没有了。
+func (s *Shell) toastByID(id uint64) (toast, bool) {
+	for _, t := range s.toasts {
+		if t.id == id {
+			return t, true
+		}
+	}
+	return toast{}, false
+}
+
+// setToastHovered 记下「指针是不是压在这一条上」。
+//
+// ⚠️ **要加锁**：这个标记是**后台那条 goroutine** 也要读的（`expire` 靠它决定
+// 收不收），而它是在主线程上写的——不加锁就是数据竞争。
+func (s *Shell) setToastHovered(id uint64, hovered bool) {
+	s.toastMu.Lock()
+	defer s.toastMu.Unlock()
+	for i := range s.toasts {
+		if s.toasts[i].id == id {
+			s.toasts[i].hovered = hovered
+			return
+		}
+	}
 }
 
 // dropToast 收走 id 那一条。
@@ -196,7 +269,10 @@ func (s *Shell) visibleToasts() []toast {
 	now := time.Now()
 	kept := s.toasts[:0]
 	for _, t := range s.toasts {
-		if t.until.After(now) {
+		// ⚠️ **指针压着的那一条留着**：它到点之后**不立刻消失**，要等指针走了
+		// （见 `expire`）——这里要是按到期时刻把它藏了，那条提示会**凭空消失**
+		// （后台还没收，屏幕上先没了），而用户正指着它。
+		if t.hovered || t.until.After(now) {
 			kept = append(kept, t)
 		}
 	}
@@ -285,6 +361,16 @@ func (s *Shell) viewToast(c *ui.Context, t toast, theme *ui.Theme) {
 			ui.Text(c, t.text).FontSize(scale.Font(c, scale.ToastFont)).
 				FontWeight(weightMedium).TextColor(fg).PassThrough()
 		})
+
+	// ⚠️ **悬停宽限**：指针压在这一条上时它不收走（见 `expire`）。
+	//
+	// 卡片是 **PassThrough** 的（不挡底下的点击），所以它拿不到悬停事件——只能
+	// **按位置**判：`PointerPosition` 给的是指针相对这一条的位置和「在不在上面」。
+	//
+	// ⚠️ **必须在建元素的这一帧问**：框架的元素句柄**跨帧就作废**
+	// （`mygo/ui/frame.go` 的 `expired`），帧外问会 panic。
+	_, _, over := card.PointerPosition()
+	s.setToastHovered(t.id, over)
 
 	// 入场：250ms 的一段（DESIGN.md「动效」）。淡入 + 从右边滑进来。
 	//

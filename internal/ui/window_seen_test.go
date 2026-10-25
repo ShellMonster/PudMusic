@@ -94,7 +94,7 @@ func TestAnUnseenWindowStopsAskingForFrames(t *testing.T) {
 			before := *frames
 			tt.Advance(500 * time.Millisecond)
 			if !tt.FramePending() {
-				t.Fatalf("看得见、有歌在放，推进半秒画面却不再要下一帧——"+
+				t.Fatalf("看得见、有歌在放，推进半秒画面却不再要下一帧——" +
 					"跳动波形没有在逐帧动画，下面那条「看不见时停帧」就验不到东西")
 			}
 
@@ -132,7 +132,7 @@ func TestAnUnseenWindowStopsAskingForFrames(t *testing.T) {
 			s.wake.invalidateNow()
 			tt.Advance(time.Second)
 			if tt.FramePending() {
-				t.Errorf("窗口看不见了，送进去一帧之后画面还在要下一帧——"+
+				t.Errorf("窗口看不见了，送进去一帧之后画面还在要下一帧——" +
 					"它会一直按帧重画，用户看不到这一扇窗，那些帧全是白烧的电")
 			}
 

@@ -202,6 +202,12 @@ type Grid struct {
 	// 钉住这一条的是 `TestTheGridOffersTheRetryThatTheListOffers`。
 	footer func(c *ui.Context)
 
+	// lead 是「这一份歌上面那一块」（页内头部），为 nil 时没有。
+	//
+	// ⚠️ **它占网格的第 0 行**（整行，不是一格）：所以下面那些行在框架那一层的
+	// 行号整体挪了一格（见 lead.go）。
+	lead *Lead
+
 	// scroll 是这个网格把滚动位置写回来的那个句柄，为 nil 时不写。理由同
 	// `List.scroll`：MyGo 的列表不往外说自己滚到哪儿了（回顶按钮和三重保障都要它）。
 	scroll *ui.ScrollState
@@ -318,6 +324,15 @@ func (g *Grid) SetEmptyView(fn func(c *ui.Context)) { g.emptyView = fn }
 // ⚠️ 只能由界面线程调，同 SetSongs。
 func (g *Grid) SetFooter(fn func(c *ui.Context)) { g.footer = fn }
 
+// SetLead 装「这一份歌上面那一块」（页内头部），传 nil 去掉。
+//
+// ⚠️ **它占网格的第 0 行**（整行，不是一格），所以下面那些行在框架那一层的行号
+// 整体挪了一格——而这一份对外的 API（`Selected` / `At` / `ScrollToItem`）收的
+// 仍然是**歌的下标**。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (g *Grid) SetLead(lead *Lead) { g.lead = lead }
+
 // SetScroll 让这个网格把滚动位置写进 s（每帧写一次）。理由见那个字段的注释。
 //
 // ⚠️ 只能由界面线程调，同 SetSongs。
@@ -345,6 +360,9 @@ func (g *Grid) At(i int) (Music, bool) {
 //
 // ⚠️ 列数取的是 `g.cols`，而 `View` 是在**算出这一帧的列数之后、算行数之前**把它
 // 换掉的（见那里）——所以这里拿到的就是这一帧真正在画的那一档列数。
+//
+// ⚠️ **页内头部占着一整行**（见 lead.go）：它不是歌，但它是网格里的一行——所以它
+// 算在行数里，而下面那些歌的行号整体挪了一格。
 func (g *Grid) rows() int {
 	cols := g.cols
 	if cols <= 0 {
@@ -354,7 +372,7 @@ func (g *Grid) rows() int {
 	if g.footer != nil {
 		n++
 	}
-	return (n + cols - 1) / cols
+	return (n+cols-1)/cols + leadRows(g.lead)
 }
 
 // scrollTop 回到顶上。切路由和点回顶按钮都走它。
@@ -418,7 +436,8 @@ func (g *Grid) ScrollToItem(item int, align ui.Align) {
 	if item >= 0 && item < len(g.songs) {
 		g.anchorID = g.songs[item].ID
 	}
-	g.state.ScrollTo(item/cols, align)
+	// ⚠️ **页内头部占着第 0 行**（见 lead.go）：框架那一层的行号要加上它那一行。
+	g.state.ScrollTo(item/cols+leadRows(g.lead), align)
 }
 
 // View 画这个网格。页面在每一帧开头调一次。
@@ -461,8 +480,14 @@ func (g *Grid) View(c *ui.Context) {
 	// 最后一格，排在 len(songs) 那一位），照旧写 `g.songs[row*cols].ID` 会越界
 	// ——越界是当场 panic（`ui/diagnostics.go`），而它只在「翻页列表切成了网格」
 	// 之后才到得了，也就是只有开了这个设置的用户会撞上。
-	first := func(row int) int { return row * cols }
+	// ⚠️ **页内头部占着第 0 行**（整行，不是一格，见 lead.go）：所以行号和
+	// 「这一行第一首是第几首」差着 `leadRows`——差的那一格给页内头部自己的身份。
+	lead := leadRows(g.lead)
+	first := func(row int) int { return (row - lead) * cols }
 	g.state.Key = func(row int) any {
+		if row < lead {
+			return leadKey{}
+		}
 		i := first(row)
 		if i >= len(g.songs) {
 			return footerKey{}
@@ -472,6 +497,12 @@ func (g *Grid) View(c *ui.Context) {
 		return g.rowKeys.At(row, g.songs[i].ID, rowkey.Identity)
 	}
 	g.state.Label = func(row int) string {
+		if row < lead {
+			if g.lead == nil {
+				return ""
+			}
+			return g.lead.Label
+		}
 		i := first(row)
 		if i >= len(g.songs) {
 			return footerLabel
@@ -566,14 +597,33 @@ func (g *Grid) keepAnchor(cols int) {
 	}
 	// ⚠️ 这一段里的行号都除以 g.cols——**旧**的列数：歌的下标是它在旧布局里的
 	// 位置，换算回去也用旧的。View 是在 keepAnchor 之后才把 g.cols 换成新值的。
+	//
+	// ⚠️ **页内头部占着第 0 行**（见 lead.go）：所以「歌在第几行」要加上它那
+	// 一行，才是框架那一层的行号。
+	lead := leadRows(g.lead)
 	j := indexOfID(g.songs, g.anchorID)
-	if j < 0 || j/g.cols < first || j/g.cols > last {
-		if j = first * g.cols; j >= len(g.songs) {
+	if j < 0 || j/g.cols+lead < first || j/g.cols+lead > last {
+		// ⚠️ **顶上那一行要是页内头部**：那就从它的下面那一行开始找——那一行
+		// 才是第一行歌（`first` 是框架那一层的行号）。
+		row := first
+		if row < lead {
+			row = lead
+		}
+		if j = (row - lead) * g.cols; j >= len(g.songs) {
 			return // 这一行是空的（歌没了），没有可守的
 		}
 		g.anchorID = g.songs[j].ID
 	}
-	g.state.ScrollTo(j/cols, ui.Start)
+	// ⚠️ **页内头部还在画面上的时候，滚到第 0 行**（别滚到它下面那一行去）。
+	//
+	// 换列数时这一段要重新落位，而「锚点那一首」在页内头部**下面**——滚到它那
+	// 一行，页内头部就被滚出画面了。而这一档刚切进来时锚点就是第一首歌，于是症状是
+	// 「顶图一进来就不见了」（票 #369 的网格那一档）。
+	row := j/cols + lead
+	if first < lead {
+		row = 0
+	}
+	g.state.ScrollTo(row, ui.Start)
 }
 
 // viewRow 画一行：一行 cols 首歌。
@@ -587,7 +637,15 @@ func (g *Grid) keepAnchor(cols int) {
 //
 // 两层都是 shared.go 的 guardFailed，崩过的按 ID 记下来，下一帧不再重试。
 func (g *Grid) viewRow(r ui.ListRow, cols int, cell float32) {
-	c, first := r.Context, r.Index*cols
+	c := r.Context
+
+	// ⚠️ **页内头部占着第 0 行**（整行，见 lead.go）。
+	if r.Index < leadRows(g.lead) {
+		g.viewLead(c)
+		return
+	}
+
+	first := (r.Index - leadRows(g.lead)) * cols
 
 	// 哨兵**独占一行**时（`len(g.songs)` 正好是列数的整数倍）：这一行里没有歌。
 	if first >= len(g.songs) {
@@ -640,6 +698,29 @@ func (g *Grid) viewRow(r ui.ListRow, cols int, cell float32) {
 				}
 				g.viewCellGuarded(c, i, cell)
 			}
+		})
+	})
+}
+
+// viewLead 画页内头部那一块（网格的第 0 行，整行）。
+//
+// 🔴 **画崩了要兜住**：行是在**布局**那一遍建的（框架的 `buildLate`），而布局那一遍
+// **在页面那道 Guard 之外**——所以这里自己兜一层，只废掉这一块。
+//
+// ⚠️ **底下刷一层页面底色**：框架给「选中的行」铺一整块实心主色底
+// （`mygo/ui/table.go` 的 node.Selected），而页内头部那一行**也可能被选中**
+// ——那一块主色底露出来就是「一整条绿」，而它上面装的是卡片。刷一层页面底色
+// 把它盖掉（和 `selection.go` 的 `rowCover` 同一个道理）。
+func (g *Grid) viewLead(c *ui.Context) {
+	if g.lead == nil || g.lead.Draw == nil {
+		return
+	}
+	if g.failedRow[leadFailed] {
+		return
+	}
+	guardFailed(&g.failedRow, "页内头部", leadFailed, func() {
+		ui.Column(c).FillWidth().Background(c.Theme().Background).Children(func() {
+			g.lead.Draw(c)
 		})
 	})
 }
@@ -791,13 +872,13 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 		// 的**，歌名折行时那一行就高一点（上游的 music-card 是 `line-clamp-2`，两行）。
 		// 列表那一档的行高是定死的（`card.go` 的文件头），网格这一档不是——两处是
 		// 两件事，别把一边改成另一边的做法。
-		sh := showOf(m)
+		sh := ShowOf(m)
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).PaddingY(cardGap).
 			Children(func() {
-				ui.Text(c, sh.title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
+				ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
 					TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
 				ui.Row(c).Gap(cardGap).Children(func() {
-					if sh.owner != "" || sh.live {
+					if sh.Owner != "" || sh.Live {
 						ownerLine(c, ownerRow{
 							shown: sh,
 							name:  m.Owner,
@@ -811,6 +892,7 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 							grow:  true,
 							acts:  g.acts,
 						})
+
 					}
 					// 正在放的那一格：时长换成一句「正在播放」。
 					//
@@ -851,7 +933,14 @@ const gridRowHeight = 190
 //
 // ⚠️ **它是估的**（见 `gridRowHeight`）：网格的行高跟着内容走，没有一个定死的行高
 // 可乘。列表那一档是准的（`List.ScrollOffset`）。
+//
+// ⚠️ **页内头部算在里面**：它是内容的一部分（见 lead.go），它有多高是**估的**
+// （`Lead.Height`）。
 func (g *Grid) ScrollOffset() float32 {
 	first, _ := g.state.Visible()
-	return float32(first) * gridRowHeight
+	lead := leadRows(g.lead)
+	if first < lead {
+		return 0
+	}
+	return leadHeight(g.lead) + float32(first-lead)*gridRowHeight
 }
