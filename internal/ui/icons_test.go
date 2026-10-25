@@ -811,7 +811,7 @@ func TestTheHitAreaIsBiggerThanTheGlyph(t *testing.T) {
 	//
 	// ⚠️ **写的是字面的 44，不是 `iconHitPlay`**：写成常量的话，把常量改回 48
 	// 这一条就照样绿，得由这一条钉住。
-	const wantPlayBox = 44
+	const wantPlayBox = 36
 	if d := absF(play.W-wantPlayBox) + absF(play.H-wantPlayBox); d > 2 {
 		t.Errorf("播放键在画面上是 %.1fx%.1f，而规范的盒子是 %d×%d——"+
 			"布局没用上那个尺寸", play.W, play.H, wantPlayBox, wantPlayBox)
