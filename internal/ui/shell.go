@@ -342,6 +342,9 @@ type Shell struct {
 	// 见 playbar_sleep.go。
 	sleepOpen bool
 
+	// spaceAt 是上一次空格触发播放/暂停的帧时刻，用来同一帧去重。
+	spaceAt time.Time
+
 	// 音量浮层那一摊。**只由 view 在主线程上读写**，见 playbar_volume.go。
 	//
 	// volOpen 是那个浮层开着没有（悬停图标就开，指针走远了就收）。

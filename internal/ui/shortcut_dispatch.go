@@ -108,6 +108,20 @@ func (s *Shell) viewShortcuts(c *ui.Context) {
 			fired = it.ID
 		}
 	}
+	// 裸空格永远是播放/暂停（音乐播放器的通用约定）。
+	//
+	// ⚠️ **不登记的话，空格会落到有焦点的按钮上**：框架对有焦点的按钮是「回车/空格 =
+	// 点一下」，于是点过侧栏「首页」之后按空格就是再点一次首页——用户想暂停，结果
+	// 被送回了首页。`Shortcut` 的登记会让框架知道这个键有人要，按钮那一下就不做了。
+	// 输入框优先、浮层优先仍然由引擎保证（搜索框里空格是空格，对话框里空格归按钮）。
+	// 用户把播放/暂停自己录成别的键时空格照样可用；录成空格时上面那一轮已经命中。
+	if c.Shortcut(0, ui.KeySpace) && fired == "" {
+		fired = "togglePlay"
+		if c.Now().Equal(s.spaceAt) {
+			fired = ""
+		}
+		s.spaceAt = c.Now()
+	}
 	if fired != "" {
 		s.onShortcut(fired)
 	}
@@ -347,4 +361,14 @@ func accelKeyFromName(name string) (ui.Key, bool) {
 		}
 	}
 	return ui.KeyUnknown, false
+}
+
+// spaceTogglesPlay 是空格命中之后做的事。同一帧里窗口级和根上那两处登记可能都
+// 命中，所以按这一帧的时刻去一次重。
+func (s *Shell) spaceTogglesPlay(c *ui.Context) {
+	if c.Now().Equal(s.spaceAt) {
+		return
+	}
+	s.spaceAt = c.Now()
+	s.onShortcut("togglePlay")
 }
