@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -286,6 +287,10 @@ func triY(tt *ui.Tester, title string) float32 {
 // ⚠️ **量得到是因为 `Tester.Find` 给的是变换后的盒子**（`mygo/ui/runtime.go` 的
 // `visualRect`），不是布局那个。这是它值钱的地方：`Scale` 不改布局，而断言量的是
 // 画出来的大小。
+//
+// ⚠️ **必须推钟**：那一档放大**现在有动画了**（以前是瞬时的，每帧直接算 `Scale`），
+// 而 Tester 的钟站着不动（`mygo/ui/headless.go`）——不推的话量到的是「放大还没
+// 开始」，那一帧量出来还是 20。
 func TestThePlayTriangleGrowsWhenThePointerIsOnIt(t *testing.T) {
 	rec := &recorded{}
 	songs := ownersAre(5)
@@ -301,6 +306,7 @@ func TestThePlayTriangleGrowsWhenThePointerIsOnIt(t *testing.T) {
 	// 把指针挪到三角的正中间。
 	tt.Move(rest.X+rest.W/2, rest.Y+rest.H/2)
 	tt.Frame()
+	tt.Advance(motion.GrowTime)
 	tt.Frame()
 	grown, ok := tt.Find(hover.FromLabel(songs[2].Title))
 	if !ok {
