@@ -53,7 +53,7 @@ const folderItemLimit = 200
 
 // PlayFolder 播放这个容器里的内容。**立刻返回**，跑完了在后台调 done。
 //
-// 从第一首起，把翻出来的那几首接进队列并开始播——和收藏夹页的「播放全部」是
+// 把队列**换成**翻出来的那几首并从第一首起播——和收藏夹页的「播放全部」是
 // 同一件事，那边读到的是用户已经滚出来的那几页，这边是现拉的。
 func (a *App) PlayFolder(f Favorite, done func(string, notice.Tone)) {
 	a.withFolderItems(f, "播放", "播放", done, func(items []Item) error {
