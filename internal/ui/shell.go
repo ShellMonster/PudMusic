@@ -513,6 +513,19 @@ type Shell struct {
 	searchKeywordFilled bool
 	searchSuggest       bool
 	searchFocused       bool
+	// suggestShown 是「**这一场**进场已经播过了」。
+	//
+	// ⚠️ **它是「这一场」，不是「面板此刻在不在画面上」**：新的一趟请求会把上一批
+	// 词清空（`internal/app/searchsuggest.go`），于是**「没有搜索历史」的用户每敲
+	// 一个字面板都会空掉一帧**（框架不摆那个 panel）——按「此刻在不在」判的话，
+	// **每一次按键都会重播一遍 200ms 的进场**（票面 AC 第 4 条要挡的正是这个）。
+	//
+	// ⚠️ **它只在浮层关掉的时候复位**（见 `navbar_search.go` 的 `viewSuggest`）：
+	// 那是「用户重新开了一次浮层」，那一下**就该**重新播。
+	//
+	// ⚠️ **「用户敲了字、开关翻成 true 的那一帧面板可能还空着」**：那时候**没有
+	// 面板可播**；等词回来、面板第一次出现在画面上，那一下才是用户看得见的那一下。
+	suggestShown bool
 	// tipCandidates 是这一遍 build 里登记下来的那些提示（tooltip.go）。
 	//
 	// 🔴 **同一时刻只出一枚提示**（票 #420）：登记的是「有可能要画的」，整遍
