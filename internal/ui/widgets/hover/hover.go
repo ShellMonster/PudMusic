@@ -98,8 +98,10 @@ const (
 	// triSize 是列表行封面上那个播放三角的边长。上游是 20。
 	triSize = 20
 
-	// triScale 是指针停在三角上时它放大的倍数。**110%**，抄上游那一处。
-	triScale = 1.1
+	// ⚠️ **「指针停在三角上时它放大到 110%」那个倍数不在这里**：它是
+	// `motion.GrowScale`（动效的值只写一处，理由见 `widgets/motion` 的文件头）。
+	// 这一处以前写死了 1.1（`triScale`），而它和「弹出来」那一档是同一枚三角上
+	// 的两档缩放——分成两处写，两处就会漂开。
 
 	// btn 是网格卡片右下角那个圆播放钮的直径。上游是 40。
 	btn = 40
@@ -265,6 +267,12 @@ type ids struct {
 	// bar / btn 是网格卡片那一圈的两样：封面底部那一条渐变的节点键、右下角那枚
 	// 播放钮的节点键。
 	bar, btn any
+	// zoom 是**网格卡片那张封面**放大那一层的键（悬停放大，见 `motion.HoverZoom`）。
+	zoom any
+	// pop 是「弹出来」那一层的键（列表行那枚三角 / 网格卡右下角那枚圆钮）。
+	pop any
+	// grow 是列表行那枚三角「指针停在它上面时长大到 110%」那一层的键。
+	grow any
 }
 
 // idsCache 记着「算好的那一份身份」。
@@ -322,14 +330,22 @@ func packIDs(title string, kind idsKind) ids {
 	case idsCard, idsCardOne, idsCardProfile:
 		out.bar = out.label + ":bar"
 		out.btn = out.label + ":btn"
+		// 封面那张图放大那一层（悬停放大）。
+		out.zoom = out.label + ":zoom"
 	default:
 		out.dim = out.label + ":dim"
 		out.tri = out.label + ":tri"
+		// 指针停在三角上时它长大到 110% 那一层。
+		out.grow = out.label + ":grow"
 	}
 	// ⚠️ **淡入动画的键两种共用一个字段**：动画状态记在**节点自己**那份里
 	// （`mygo/ui` 的 `st.motions`，而 `st` 是按节点 id 找的），所以同一个盒子
 	// 里的压暗（列表行）和渐变条（卡片）各用各的节点，互不干扰。
 	out.fade = out.label + ":fade"
+	// ⚠️ **「弹出来」那一层的键也是两种共用一个**：列表行那枚三角和网格卡右下角
+	// 那枚圆钮是**同一个动作**（那一枚播放键弹出来），而它们在两个不同的节点上
+	// ——理由同上（动画状态记在节点自己那份里）。
+	out.pop = out.label + ":pop"
 	return out
 }
 
@@ -495,17 +511,28 @@ func rowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 		}
 		show(tri, a)
 
+		// ⚠️ **「弹出来」那一层**：这一枚三角不是淡进来的，是从 85% 弹到 100%
+		//（QQ音乐 那一侧是 `scale(0.7) → scale(1)` + 淡入，两条通道并行）。
+		//
+		// ⚠️ **缩放是「画的时候」的变换**（`Scale`），布局不动——所以那一行不会
+		// 因为它跳一下。
+		motion.Pop(tri, ids.pop, on)
+
 		// ⚠️ **`Hovered` / `Clicked` 要在它建完之后立刻问**（同 `list/card.go` 里那一
 		// 处）：它们报的是这一帧指针在这一格上发生了什么，而那一格得先被画出来才问
 		// 得到。
 		if play != nil && tri.Clicked() {
 			play()
 		}
-		if tri.Hovered() {
-			// 上游是 `hover:scale-110`。`Scale` 的原点默认是盒子中心
-			//（`mygo/ui/transform.go` 的 transformAt），所以是往外涨而不是往一边偏。
-			_ = tri.Scale(triScale, triScale)
-		}
+		// 指针停在三角上时它长大到 110%（上游是 `group-hover:scale-110`）。
+		// `Scale` 的原点默认是盒子中心（`mygo/ui/transform.go` 的 transformAt），
+		// 所以是往外涨而不是往一边偏。
+		//
+		// ⚠️ **这一档以前是瞬时的**（每帧直接算 `Scale`）：那样它看着是「啪」地
+		// 一下变大的，和它旁边那一枚淡进来的三角不是一个节奏。现在它走动画
+		// （`motion.Grow`），而它和「弹出来」那一档是同一个时长（150ms）——
+		// 两档缩放叠在同一个节点上，框架把它们相乘（1 × 1.1 = 1.1）。
+		motion.Grow(tri, ids.grow, tri.Hovered())
 	})
 }
 
@@ -558,6 +585,10 @@ func CardCoverOne(c *ui.Context, cache *imgcache.Cache, url string, w, h float32
 // ⚠️ **影加在封面这一格上，不加在里面的图上**：影是**盒子外面**那一圈，而这一格
 // 是裁着的（`Clip`）——影于是画在封面的四周，正好是上游那个 `shadow-md` 的样子。
 // 加在里面的图上会变成「图在框里放大」，那是另一回事（hover 放大才那么做）。
+//
+// ⚠️ **悬停放大的是「框里那张图」，外面这个框不动**（上游那个 `overflow-hidden`
+// 的框也不动，见 `widgets/motion/hoverzoom.go` 的文件头）：`Scale` 是画的时候的
+// 变换，布局留给它的位置不动——改尺寸的话封面长大 5% 就把旁边的字挤走了。
 func cardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 	on bool, playCount, clock string, ids ids, tip string, g glyph, play func(), coverShadow bool) {
 	t := c.Theme()
@@ -568,7 +599,13 @@ func cardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 		cover = shadow.TailwindMD(cover)
 	}
 	cover.Children(func() {
-		imgcache.ViewTitled(c, cache, url, ids.label, w, h)
+		// ⚠️ **放大的是这一张图，外面那个框裁着**（`Radius` + `Clip`）：卡片有
+		// 圆角，不裁的话画面上是「封面从圆角里长出来」。
+		//
+		// ⚠️ **图自己那一层也带着同样的圆角和裁剪**（`imgcache.ViewTitled`）：
+		// 放大 5% 之后那一圈裁剪也跟着放大，而**外面这一层（不放大）更紧**——
+		// 于是最后露出来的还是卡片那个圆角，画面上是一个整的圆角矩形。
+		motion.HoverZoom(imgcache.ViewTitled(c, cache, url, ids.label, w, h), ids.zoom, on)
 		cardOverlay(c, w, h, on, playCount, clock, ids, tip, g, play)
 	})
 }
@@ -622,6 +659,17 @@ func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock string, 
 	// 两半影会被封面的圆角裁掉，**看得见的是左边和上边那一圈**。上游也一样：
 	// 那一枚在 `overflow-hidden` 的封面里（`music-card/index.tsx:33`）。
 	shadow.Tailwind2XL(circle)
+
+	// ⚠️ **「弹出来」那一层**：这一枚圆钮不是淡进来的，是从 85% 弹到 100%
+	//（QQ音乐 那一侧是 `scale(0.7) → scale(1)` + 淡入，两条通道并行）。
+	//
+	// ⚠️ **缩的是这一枚圆钮，不是里面那个三角**——三角是圆钮的子元素，跟着圆钮
+	// 一起缩，所以两个通道（缩放 + 淡入）都在这一枚上。
+	//
+	// ⚠️ **它不动封面**：封面那一格放大是**另一条通道**（`motion.HoverZoom`，
+	// 在 `cardCover` 那一层），而这一枚是封面的**兄弟**（`Attach` 贴在封面上），
+	// 所以封面长大时它**待在原地**——否则它会被推出卡片外面。
+	motion.Pop(circle, ids.pop, on)
 
 	show(circle, a).Children(func() {
 		e := ui.Box(c).Size(btn, btn).Label(ids.label).Tooltip(tip).Center()

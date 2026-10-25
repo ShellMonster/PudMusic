@@ -252,14 +252,20 @@ func newTestShell(t *testing.T, opts ...shellOpt) *testShell {
 	if sp.stub != nil {
 		sp.stub(t, s)
 	}
-	// 🔴 关掉切页动画。Tester 一帧画完，250ms 的滑动在里面永远走不完：那一帧
-	// 停在半路，上一页正往左挪、下一页正往右进，中间那道分界线正扫过页面区域。
-	// 于是「点一下再读某个点」这一次读到窗口底色、下次读到分界线，同一条测试
-	// 时而红时而绿。
+	// ⚠️ **这里不覆盖生产的切页档**（票 #469）：生产那一档是「不做」
+	// （`router.go` 的 `newRouter` 显式设的 `TransitionNone`）。
 	//
-	// 造外壳的所有入口都关，是为了同一个理由：屏幕上的任何一个采样点都要是
-	// 确定的。要验动画的那一条用 `withPageAnimation()` 要回来。
-	s.router.Transition = defaultTransition(sp.animating)
+	// 以前这个基座**无条件**把它设成 `TransitionNone`，那等于**把生产的取值挡在
+	// 测试之外**——于是「生产到底开着没有」这件事**任何测试都量不到**：框架零值
+	// 是 `TransitionAuto`（一条 250ms 滑入），而生产从来没显式设过它，
+	// 那条兜底**一直在跑**，而**没有任何测试报过警**（现象只是「换页滑了一下」，
+	// 不报错、不崩溃）。
+	//
+	// 现在基座**只在显式要动画的时候才动它**（`withPageAnimation()`），
+	// 默认走生产那一档。要验动画的那一条用 `withPageAnimation()` 要回来。
+	if sp.animating {
+		s.router.Transition = mygoui.TransitionAuto
+	}
 
 	w, h := sp.width, sp.height
 	if w == 0 {
@@ -308,14 +314,6 @@ func newTestShell(t *testing.T, opts ...shellOpt) *testShell {
 func (sh *testShell) Close() {
 	sh.t.Helper()
 	sh.s.Close()
-}
-
-// defaultTransition 造外壳时该用哪一种切页动画。
-func defaultTransition(animating bool) mygoui.Transition {
-	if animating {
-		return mygoui.TransitionAuto
-	}
-	return mygoui.TransitionNone
 }
 
 // writableTempDir 造一个**后台写盘会往里写**的临时目录，测试结束时删掉。
