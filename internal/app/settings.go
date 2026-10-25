@@ -433,7 +433,7 @@ type Settings struct {
 	// （`user-feed/index.tsx:12` 的 useState），所以它重启之后又是「全部没看过」
 	// ——那个点每五分钟回来一次，而用户已经看过了。
 	//
-	// 键名 ours，不是 Biu 的：放在设置里是因为设置存储已经把 schema 版本、
+	// 键名是我们自己的，不是 Biu 的：放在设置里是因为设置存储已经把 schema 版本、
 	// 原子写、退出前 flush、只读保护这几件都做好了（理由同 Playback 那一格）。
 	DynamicSeen DynamicSeen `json:"dynamicSeen"`
 
