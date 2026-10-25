@@ -56,12 +56,17 @@ func avatarMenuLabels(tt *mygoui.Tester) []string {
 	return texts[at+1:]
 }
 
-// avatarMenuIndexOf 报某一项在下拉里的序号（从 0 起）。
+// avatarMenuIndexOf 报某一项在**这一帧画出来的那几项**里的序号（从 0 起）。
+//
+// ⚠️ **它查的是 `s.avatarMenuItemsNow()`，不是静态表 `avatarMenuItems`**（票
+// #260）：下拉里画哪几项按登录态挑（上游 `user/index.tsx:88-158` 的
+// `hidden` 那一栏），所以「个人资料」在静态表里是第 2 项，而在**未登录**的
+// 画面上它压根不存在（已登录的画面上它才是第 1 项）。
 //
 // 找不到就 -1——调用方拿它去点一项，-1 会让那条测试红，而不是**点错一项**
 // （点错一项照样绿，而它验的根本不是那一项）。
-func avatarMenuIndexOf(label string) int {
-	for i, item := range avatarMenuItems {
+func avatarMenuIndexOf(s *Shell, label string) int {
+	for i, item := range s.avatarMenuItemsNow() {
 		if item.label == label {
 			return i
 		}
@@ -95,15 +100,22 @@ func avatarMenuRow(tt *mygoui.Tester, i int) (mygoui.Rect, bool) {
 	}, true
 }
 
-// clickAvatarMenuItem 点下拉里的第 i 项。
-func clickAvatarMenuItem(t *testing.T, tt *mygoui.Tester, i int) {
+// clickAvatarMenuItem 点下拉里名字是 label 的那一项。
+//
+// ⚠️ **按名字找、再按位置点**：名字只在**这一帧画出来的那几项**里找（见
+// `avatarMenuIndexOf`），而点击是**按位置**的——「设置」在侧栏里也有一项
+// （DESIGN §九「侧栏多一条设置」），而无头 Tester 的 `Find` 返回的是**先建
+// 的那个**——按名字点会点到侧栏上去，而侧栏那一项做的事也一样（都是去设置
+// 页），于是测试照样绿，而它验的根本不是下拉里的那一项。
+func clickAvatarMenuItem(t *testing.T, s *Shell, tt *mygoui.Tester, label string) {
 	t.Helper()
-	if i < 0 || i >= len(avatarMenuItems) {
-		t.Fatalf("下拉里没有第 %d 项", i+1)
+	i := avatarMenuIndexOf(s, label)
+	if i < 0 {
+		t.Fatalf("下拉里没有%q（登录态：%v）", label, s.app.LoggedIn())
 	}
 	r, ok := avatarMenuRow(tt, i)
 	if !ok {
-		t.Fatalf("画面上找不到下拉里第 %d 项", i+1)
+		t.Fatalf("画面上找不到下拉里第 %d 项（%q）", i+1, label)
 	}
 	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
 }
@@ -198,7 +210,7 @@ func TestTheAvatarMenuWalksWithTheArrowKeys(t *testing.T) {
 	plain := toRGBA(s.cardBackground(th))
 
 	// 刚打开的时候**什么也没亮**（上游 HeroUI 打开时也不高亮任何一项）。
-	for i := range avatarMenuItems {
+	for i := range s.avatarMenuItemsNow() {
 		if got, _ := avatarMenuRowBG(tt, i); got != plain {
 			t.Fatalf("刚打开时第 %d 项的底是 %v，want 普通底 %v（刚打开不该高亮任何一项）",
 				i+1, got, plain)
@@ -295,23 +307,28 @@ func TestTheAvatarMenuWalksWhileThePointerRestsOnAnItem(t *testing.T) {
 // （比如走到「退出登录」却把登录给做了）是这一类改动最贵的那种错。
 //
 // ⚠️ **浮层刚打开时什么也没选中**（上游 HeroUI 就是这样），所以这里要先按
-// 两下 ↓ 走到第二项「个人资料」。
+// 两下 ↓ 走到第二项。
+//
+// ⚠️ **用的是已登录的外壳**（票 #260）：下拉里画哪几项按登录态挑，而
+// **「个人资料」只在已登录时存在**（上游 `user/index.tsx:96` 的
+// `hidden: !user?.isLogin`）。已登录时那几项是「个人资料 / 设置 / 刷新数据 /
+// 问题反馈 / 退出登录」，所以两下 ↓ 落在**「设置」**上——按下去就该去设置页。
+// ⚠️ **走错了会立刻看出来**：走成「退出登录」的话弹的是确认框，路由不会变。
 func TestTheAvatarMenuSelectsWithTheKeyboard(t *testing.T) {
-	s, tt := newShell(t)
+	s, tt := newLoggedInShell(t, "2")
 	tt.SetFocused(true)
 
 	openAvatarMenu(t, tt)
-	// ↓ ↓ 走到第二项「个人资料」。
+	// ↓ ↓ 走到第二项「设置」。
 	tt.Key(0, mygoui.KeyDown)
 	tt.Frame()
 	tt.Key(0, mygoui.KeyDown)
 	tt.Frame()
-	// 没登录时那一项会说一句「还没登录」——这一条要的是「走对了那一项」。
 	tt.Key(0, mygoui.KeyEnter)
 	tt.Frame()
 
-	if got := toastTexts(s.visibleToasts()); len(got) != 1 {
-		t.Fatalf("回车之后有 %d 条提示 %q，want 1 条（走的是「个人资料」）", len(got), got)
+	if got := s.router.Path(); got != settingsPath {
+		t.Errorf("回车之后在 %q，want %q（回车选的是亮着的那一项）", got, settingsPath)
 	}
 	if _, ok := tt.Find(avatarMenuLabel); ok {
 		t.Error("回车之后浮层还开着")
@@ -393,12 +410,13 @@ func TestTheAvatarMenuPanelLooksLikeACard(t *testing.T) {
 // 量的地方是行内最左边那一格（行内左边距 12 之后那一枚 18 见方）：那里
 // 除了图标没有别的东西。
 func TestEveryAvatarMenuItemHasAnIcon(t *testing.T) {
-	_, tt := newShell(t)
+	s, tt := newShell(t)
 	tt.SetFocused(true)
 
 	openAvatarMenu(t, tt)
 	img := tt.Image()
-	for i := range avatarMenuItems {
+	items := s.avatarMenuItemsNow()
+	for i, item := range items {
 		row, ok := avatarMenuRow(tt, i)
 		if !ok {
 			t.Fatalf("画面上找不到下拉里第 %d 项", i+1)
@@ -420,7 +438,7 @@ func TestEveryAvatarMenuItemHasAnIcon(t *testing.T) {
 		}
 		if drawn == 0 {
 			t.Errorf("第 %d 项（%q）前面那一格里什么都没画——上游那六项每一项都带一枚图标",
-				i+1, avatarMenuItems[i].label)
+				i+1, item.label)
 		}
 	}
 }
@@ -478,7 +496,7 @@ func TestTheAvatarMenuAsksBeforeLoggingOut(t *testing.T) {
 	tt.SetFocused(true)
 
 	openAvatarMenu(t, tt)
-	clickAvatarMenuItem(t, tt, avatarMenuIndexOf("退出登录"))
+	clickAvatarMenuItem(t, s, tt, "退出登录")
 	if !tt.HasText("确认退出登录？") {
 		t.Fatalf("没有确认框，文字有 %q", tt.Texts())
 	}

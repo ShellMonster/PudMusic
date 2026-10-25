@@ -137,10 +137,14 @@ func shotNotFound(t *testing.T, dir, name string, dark bool) {
 	b.Close()
 }
 
-// shotNavCorner 存顶栏右端那一块（头像 + 登录 / 退出那一枚）。
+// shotNavCorner 存顶栏右端那一块（头像 + 未登录时那一枚「登录」）。
 //
-// loggedIn 为真时那一枚是「退出登录」（圆圈 + 一支朝外的箭头），为假时是
-// 「登录」（二维码）——两枚挨着看，才看得出「一眼分得清」。
+// ⚠️ **登录之后那一枚独立的「退出」按钮没有了**（票 #260）：退登走头像下拉里
+// 那一项。所以已登录那一张存的是「**只有头像**」的顶栏右端——
+// 那一块该是什么样，看这一张。
+//
+// ⚠️ **未登录那一张的二维码图标还在**：它是那一侧的登录入口，删了就没有
+// 登录入口了。
 func shotNavCorner(t *testing.T, dir, name string, dark, loggedIn bool) {
 	t.Helper()
 	b := newTestShell(t, systemIsDark(dark), mounted(func(_ *testing.T, a *app.App) {
@@ -167,7 +171,7 @@ func shotNavCorner(t *testing.T, dir, name string, dark, loggedIn bool) {
 
 	file := "115-顶栏-登录图标"
 	if loggedIn {
-		file = "116-顶栏-退出图标"
+		file = "116-顶栏-只有头像"
 	}
 	out := filepath.Join(dir, fmt.Sprintf("%s-%s.png", file, name))
 	f, err := os.Create(out)
