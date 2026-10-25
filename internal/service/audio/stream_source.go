@@ -495,6 +495,17 @@ func (s *StreamSource) Read(p []byte) (int, error) {
 
 			got, err := s.file.ReadAt(p[:n], off)
 			if got > 0 {
+				// 🔴 **游标要按真的读到多少挪**：读少了而游标还停在
+				// `off+n` 的话，下一次读会**跳过**中间那一段——而那一段
+				// 是**已经下到**的（读少了只可能是文件被外力动过）。
+				//
+				// 正常情况下 `got == n`（那一段确实在盘上），而这一句
+				// 是**兜底**。
+				if int64(got) < n {
+					s.mu.Lock()
+					s.cur = off + int64(got)
+					s.mu.Unlock()
+				}
 				return got, nil
 			}
 			if err != nil && !errors.Is(err, io.EOF) {
