@@ -1,18 +1,7 @@
 package ui
 
-// 票 #299：「全部播放」与「立即播放」两枚的语义（2026-10-24 人定的）。
-//
-//	「全部播放」= 把这一页的歌按顺序加进队列并播放（从这一页的第一首开始）
-//	「立即播放」= 只放当前这一首
-//
-// 这一组盯的是**两件事**：按下去之后队列变成什么样、正在放的是哪一首。
-//
-// ⚠️ **判据全在队列上**，不是「调了哪个函数」：接线换了而行为没变（或者反过来）
-// 都是静默的，而队列是用户看得见的那一面。
-//
-// ⚠️ **夹具用本地歌**：在线的那些在测试里放不了（`internal/app` 的在线取流要真
-// 网络，而真网络是**真账号**——铁律：不打真 B 站）。本地歌走的是开文件那一路，
-// 放得起来，「正在放的是哪一首」才断得准。
+// 票 #337 覆盖 #299：全部播放替换这一批；立即播放追加单首并起播。
+// 本地音频夹具走真实播放器，不访问真 B 站。
 
 import (
 	"os"
@@ -49,31 +38,22 @@ func localSongs(t *testing.T, n int) []list.Music {
 	return out
 }
 
-// TestThePlayAllButtonAppendsThePageAndStartsAtItsFirstSong 钉住「全部播放」
-// 的**那一句字**说的是什么：这一页的歌**按顺序加进队列**，并**从这一页的第一首
-// 开始播**。
+// TestThePlayAllButtonReplacesQueueAndStartsAtItsFirstSong 钉住「全部播放」的语义：
+// **换成这一页的歌，并从这一页的第一首开始播**（票 #337）。
 //
-// 三个判据，缺一个都不算对：
-//
-//   - **队列里多了这一页的歌**，而且是这一页的**顺序**（打乱了的话用户听到的
-//     顺序和屏幕上看到的不一样）。
-//   - **队列里原来有的那几首还在**（这一枚是**追加**，不是换队列）。
-//   - **正在放的是这一页的第一首**——不是队列里第一首（旧的那首），也不是最后
-//     一首。
-func TestThePlayAllButtonAppendsThePageAndStartsAtItsFirstSong(t *testing.T) {
+// 先排三首旧歌，再点批量入口；旧队列必须消失，新的三首必须按页面顺序成为
+// 完整队列，当前项是新批次第一首。
+func TestThePlayAllButtonReplacesQueueAndStartsAtItsFirstSong(t *testing.T) {
 	home := newTestShell(t, withSettings(app.DefaultSettings("")))
-	old := localSongs(t, 1)
+	old := localSongs(t, 3)
 	page := localSongs(t, 3)
 
-	// 队列里先放一首（旧的）：这一枚是**追加**，它不该把旧的挤掉。
-	if err := home.s.app.Enqueue(old[0].Item); err != nil {
+	if err := home.s.app.Enqueue(old[0].Item, old[1].Item, old[2].Item); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "队列里那首开始播", func() bool { return home.s.app.Snapshot().HasTrack })
+	waitFor(t, "旧队列第一首开始播", func() bool { return home.s.app.Snapshot().HasTrack })
 
-	home.s.home.SetSongs(homeSongs{
-		tabs: [homeTabCount][]list.Music{0: page},
-	})
+	home.s.home.SetSongs(homeSongs{tabs: [homeTabCount][]list.Music{0: page}})
 	homeFrame(home.tt)
 	btn, ok := home.tt.Find(playAllLabel)
 	if !ok {
@@ -82,54 +62,43 @@ func TestThePlayAllButtonAppendsThePageAndStartsAtItsFirstSong(t *testing.T) {
 	home.tt.ClickAt(btn.X+btn.W/2, btn.Y+btn.H/2)
 	home.tt.Frame()
 
-	// 队列：旧的在前，这一页的三首按顺序在后。
 	got := home.s.app.Queue().Items()
-	want := []string{old[0].Item.Path, page[0].Item.Path, page[1].Item.Path, page[2].Item.Path}
+	want := []string{page[0].Item.Path, page[1].Item.Path, page[2].Item.Path}
 	if len(got) != len(want) {
-		t.Fatalf("按了 %q 之后队列里有 %d 首，want %d（先放的那一首 + 这一页的三首）",
-			playAllLabel, len(got), len(want))
+		t.Fatalf("按了 %q 之后队列里有 %d 首，want %d（旧队列应被这一批替换）", playAllLabel, len(got), len(want))
 	}
 	for i, w := range want {
 		if got[i].Path != w {
-			t.Errorf("队列第 %d 首是 %q，want %q（这一页的歌要按顺序进队列）", i+1, got[i].Path, w)
+			t.Errorf("队列第 %d 首是 %q，want %q", i+1, got[i].Path, w)
 		}
 	}
-
-	// 正在放的是**这一页的第一首**。
 	waitFor(t, "这一页的第一首开始播", func() bool {
 		home.tt.Frame()
-		return home.s.app.Snapshot().Title == page[0].Item.Title
+		st := home.s.app.Snapshot()
+		return st.HasTrack && st.Playing && st.Path == page[0].Item.Path
 	})
-	if got := home.s.app.Queue().CurrentIndex(); got != 1 {
-		t.Errorf("正在放的是队列第 %d 首，want 第 2 首（旧的那首之后就是这一页的第一首）", got+1)
+	if got := home.s.app.Queue().CurrentIndex(); got != 0 {
+		t.Errorf("正在放的是队列第 %d 首，want 第 1 首", got+1)
 	}
-	// ⚠️ **说一句话**：按下去之后界面上要看得见「加了首、开始播了」——不然用户
-	// 只看见队列悄悄长了一截（队列在播放条那儿，未必看得到）。
-	if !home.tt.HasText("已添加 3 首到播放列表") {
-		t.Errorf("没有说加了几首，文字有 %q", home.tt.Texts())
+	if !home.tt.HasText("已切换到 3 首") {
+		t.Errorf("没有说已经切换到这一批，文字有 %q", home.tt.Texts())
 	}
 }
 
-// TestThePlayNowEntryPlaysOnlyThatSong 钉住「立即播放」的**那一句字**说的是什么：
-// **只放当前这一首**。
-//
-// ⚠️ **它和「全部播放」差在队列里剩下什么**：那一枚把这一页的歌都排上，这一枚
-// **只放按下去的那一首**——用户正在听的那首不该被顺带排到这一页后面去。
-func TestThePlayNowEntryPlaysOnlyThatSong(t *testing.T) {
+// TestThePlayNowEntryAppendsAndStartsThatSong 钉住行级「立即播放」：**加这一首
+// 并立即播，队列里原来有的歌保留**（票 #337）。
+func TestThePlayNowEntryAppendsAndStartsThatSong(t *testing.T) {
 	home := newTestShell(t, withSettings(app.DefaultSettings("")))
-	old := localSongs(t, 1)
+	old := localSongs(t, 3)
 	page := localSongs(t, 3)
 
-	if err := home.s.app.Enqueue(old[0].Item); err != nil {
+	if err := home.s.app.Enqueue(old[0].Item, old[1].Item, old[2].Item); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "队列里那首开始播", func() bool { return home.s.app.Snapshot().HasTrack })
+	waitFor(t, "旧队列第一首开始播", func() bool { return home.s.app.Snapshot().HasTrack })
 
-	home.s.home.SetSongs(homeSongs{
-		tabs: [homeTabCount][]list.Music{0: page},
-	})
+	home.s.home.SetSongs(homeSongs{tabs: [homeTabCount][]list.Music{0: page}})
 	homeFrame(home.tt)
-
 	if err := home.tt.RightClick(page[1].Title); err != nil {
 		t.Fatalf("右键点不到那一行：%v，文字有 %q", err, home.tt.Texts())
 	}
@@ -138,18 +107,24 @@ func TestThePlayNowEntryPlaysOnlyThatSong(t *testing.T) {
 	}
 	home.tt.Frame()
 
-	// 队列里**只有**按下去的那一首。
 	got := home.s.app.Queue().Items()
-	if len(got) != 1 {
-		t.Fatalf("按了「立即播放」之后队列里有 %d 首，want 1（只放当前这一首）：%v", len(got), got)
+	want := []string{old[0].Item.Path, old[1].Item.Path, old[2].Item.Path, page[1].Item.Path}
+	if len(got) != len(want) {
+		t.Fatalf("按了「立即播放」之后队列里有 %d 首，want 4（原来的三首 + 新歌）: %v", len(got), got)
 	}
-	if got[0].Path != page[1].Item.Path {
-		t.Errorf("放的是 %q，want %q（用户按下去的那一首）", got[0].Path, page[1].Item.Path)
+	for i, w := range want {
+		if got[i].Path != w {
+			t.Errorf("队列第 %d 首是 %q，want %q", i+1, got[i].Path, w)
+		}
 	}
 	waitFor(t, "那一首开始播", func() bool {
 		home.tt.Frame()
-		return home.s.app.Snapshot().Title == page[1].Item.Title
+		st := home.s.app.Snapshot()
+		return st.HasTrack && st.Playing && st.Path == page[1].Item.Path
 	})
+	if got := home.s.app.Queue().CurrentIndex(); got != 3 {
+		t.Errorf("正在放的是队列第 %d 首，want 第 4 首", got+1)
+	}
 }
 
 // TestBothPlayEntriesAreOnTheRowMenu 钉住**两枚入口都在**。
