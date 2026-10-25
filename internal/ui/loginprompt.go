@@ -76,8 +76,18 @@ func (s *Shell) viewNeedsLogin(c *ui.Context, key string, e emptyState) {
 		ui.Text(c, e.Hint).FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
 		// 给一个能立刻做完的事：这一页在没登录之前永远是这个样子，而
 		// `/login` 就是扫码登录那一页（router.go 的 routes 表里那一条）。
+		//
+		// ⚠️ **走 `goLogin`，不走 `navigate`**（票 #277）：`goLogin` 会记下
+		// 「登录成功了该去哪」，而 `navigate` 不记——那样的话，这一页进去的
+		// 登录会用上一个入口留下的那个去处（用户可能刚从动态页那边进过一次
+		// 登录，落到动态页去）。
+		//
+		// ⚠️ **去处是首页**：用户 2026-10-25 原话「登录成功后应该提示并且
+		// 回到首页」。而这一页的入口在侧栏上，登录完回到首页之后，侧栏里
+		// 那三行（我的关注 / 稍后再看 / 历史记录）就摆出来了——用户想看哪
+		// 一页再点哪一页。
 		if ui.PrimaryButton(c, "去登录").Clicked() {
-			s.navigate(loginPath)
+			s.goLogin(homePath)
 		}
 	})
 }

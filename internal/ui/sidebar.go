@@ -676,7 +676,7 @@ func (s *Shell) viewLoggedOutHint(c *ui.Context, hidden int) {
 		// 第四个断口：「「还有 N 个入口，登录后可见」那行文字鼠标可点、键盘不可达」）。
 		hint := ui.Text(c, loggedOutHint(hidden)).FontSize(scale.Font(c, scale.Size12)).Wrap().
 			TextColor(c.Theme().TextMuted).Padding(space.Px4, space.Px8).
-			OnClick(func() { s.goLogin() })
+			OnClick(func() { s.goLogin(homePath) })
 		hint = sideFocusable(hint)
 		// 悬停才显出「点得动」：主色 + 下划线。
 		//

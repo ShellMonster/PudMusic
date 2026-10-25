@@ -755,6 +755,26 @@ type Shell struct {
 	qrDimBitmap *ui.Bitmap
 	qrFor       *bili.Code
 
+	// loginAfter 是「登录成功了该去哪」——进登录页时写进去，登录成功时兑现。
+	//
+	// ⚠️ **空串 = 首页**（`homePath`）：用户 2026-10-25 原话是「登录成功后应该
+	// 提示并且回到首页」。从「用户动态」那一路进去的写 `dynamicFeedPath`。
+	//
+	// ⚠️ **它记的是「进登录页那一次」的承诺**：进登录页时写，登录成功时读出来
+	// 用掉，然后清空（见 `goLogin` / `finishLogin`）。
+	//
+	// **只由界面线程读写**（进登录页和登录成功都在主线程上）。
+	loginAfter string
+
+	// lastLoginPhase 是**上一帧**的登录相位。
+	//
+	// 它是「**刚刚**登录成功那一次」的判据（见 `syncLoginSuccess`）：登录成功
+	// 是异步的状态变化，而界面是每帧重画的——只看「现在是已登录」的话，那
+	// 一下会**每帧做一次**。
+	//
+	// **只由界面线程读写**（就在那一层里）。
+	lastLoginPhase app.LoginPhase
+
 	// quitting 是「已经进了退出流程」，只由 OnBeforeQuit 置位（主线程）。
 	//
 	// 存在的理由是退出流程本身要靠关窗口走完：框架的 prepareQuit 遍历窗口

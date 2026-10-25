@@ -214,7 +214,9 @@ type avatarMenuItem struct {
 // （`avatarMenuItemsNow`）——`onlyLoggedIn` / `onlyGuest` 那一格就是上游的
 // `hidden` 那一栏（票 #260）。
 var avatarMenuItems = []avatarMenuItem{
-	{label: "登录", icon: iconLoginCircle, onlyGuest: true, run: func(s *Shell, _ *ui.Context) { s.goLogin() }},
+	// ⚠️ **登录完回首页**（票 #277）：这一项是**泛入口**（从头像下拉进来的），
+	// 所以去处是首页——用户 2026-10-25 原话「登录成功后应该提示并且回到首页」。
+	{label: "登录", icon: iconLoginCircle, onlyGuest: true, run: func(s *Shell, _ *ui.Context) { s.goLogin(homePath) }},
 	{label: "个人资料", icon: iconProfile, onlyLoggedIn: true, run: func(s *Shell, _ *ui.Context) { s.goProfile() }},
 	{label: "设置", icon: iconSettings, run: func(s *Shell, _ *ui.Context) { s.navigate(settingsPath) }},
 	{label: "刷新数据", icon: iconRefresh, run: func(s *Shell, _ *ui.Context) {
