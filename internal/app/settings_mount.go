@@ -90,6 +90,7 @@ func (a *App) MountSettings(path string) error {
 	a.muted = s.Muted
 	a.normalize = s.NormalizeVolume
 	a.trackFade = time.Duration(s.TrackFadeSeconds) * time.Second
+	a.eqGains = audio.EQPresetByID(s.EQPreset).Gains
 	if s.PlaybackRate > 0 {
 		a.rate = audio.SnapRate(s.PlaybackRate)
 	}
@@ -157,8 +158,14 @@ func (a *App) UpdateSettings(fn func(*Settings)) (Settings, error) {
 	changed := a.normalize != s.NormalizeVolume
 	a.normalize = s.NormalizeVolume
 	a.trackFade = time.Duration(s.TrackFadeSeconds) * time.Second
+	eq := audio.EQPresetByID(s.EQPreset).Gains
+	eqChanged := a.eqGains != eq
+	a.eqGains = eq
 	p, path, local := a.player, a.path, a.online == nil
 	a.mu.Unlock()
+	if eqChanged && p != nil {
+		p.SetEQ(eq)
+	}
 	if changed && p != nil {
 		p.SetNormalize(s.NormalizeVolume)
 		if s.NormalizeVolume && local {

@@ -19,6 +19,7 @@
 package ui
 
 import (
+	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 	"strconv"
 	"strings"
 
@@ -1032,5 +1033,23 @@ func (s *Shell) pickTrackFade(c *ui.Context, st app.Settings, ro bool) {
 		opts, chosen, ro, func(i int) {
 			v := trackFadeSteps[i]
 			s.applySetting("切歌淡入淡出", func(cur *app.Settings) { cur.TrackFadeSeconds = v })
+		})
+}
+
+// pickEQ 是均衡器那一排预设：关 / 低音 / 人声 / 明亮 / 流行 / 摇滚。
+func (s *Shell) pickEQ(c *ui.Context, st app.Settings, ro bool) {
+	cur := audio.EQPresetByID(st.EQPreset).ID
+	chosen := 0
+	opts := make([]segmentOption, len(audio.EQPresets))
+	for i, p := range audio.EQPresets {
+		opts[i] = segmentOption{label: p.Name}
+		if p.ID == cur {
+			chosen = i
+		}
+	}
+	s.settingsSegment(c, "setting:eq", "均衡器", scale.Font(c, settingsControlW),
+		opts, chosen, ro, func(i int) {
+			id := audio.EQPresets[i].ID
+			s.applySetting("均衡器", func(c *app.Settings) { c.EQPreset = id })
 		})
 }

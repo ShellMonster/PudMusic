@@ -102,6 +102,8 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 			})
 		s.settingRow(c, "切歌淡入淡出", "",
 			func() { s.pickTrackFade(c, st, ro) })
+		s.settingRow(c, "均衡器", "",
+			func() { s.pickEQ(c, st, ro) })
 		s.settingRow(c, "音量均衡", "让不同歌的响度一致（本地歌曲按整首测量，在线歌曲只会压低过响的）",
 			func() {
 				s.pickSwitch(c, "音量均衡", "音量均衡", st.NormalizeVolume, ro,

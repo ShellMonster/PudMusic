@@ -82,6 +82,7 @@ var ourOwnKeys = []string{
 	"playbackRate",
 	"normalizeVolume",
 	"trackFadeSeconds",
+	"eqPreset",
 	"isMuted",
 	"playback",
 	"themePreset",
@@ -959,6 +960,7 @@ const ourOwnKeysJSON = `{
 	"playbackRate": 0,
 	"normalizeVolume": false,
 	"trackFadeSeconds": 0,
+	"eqPreset": "",
 	"isMuted": false,
 	"playback": {"items": [], "current": "", "positionMs": 0},
 	"themePreset": "warm-paper"
