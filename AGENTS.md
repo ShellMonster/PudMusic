@@ -451,8 +451,8 @@ done
 
 仓库里从前没有「一个文件该多大」的规矩，于是 agent 只会往上加：`internal/ui/shell.go`
 在 #357 那次重设计之后的 8 个提交里从 **1697 行涨到 1798 行**（#357 自己动了它
--14 行，其他票又加回来）；`internal/app/queue.go` 1866 行、
-`internal/evidence/evidence.go` 3502 行。
+-14 行，其他票又加回来；**票 #404 之后它已经拆成五个文件了**，见下）；
+`internal/app/queue.go` 1866 行、`internal/evidence/evidence.go` 3502 行。
 
 > 下面的行数是 **2026-10-25 量的一次快照**。这一节看的是**职责和耦合**，不是
 > 这个数——数会过期，判断不会。
@@ -465,11 +465,13 @@ done
   把一团分成几团，反而更难找。
 - **行数只是信号，不是判据**——见下面「什么时候别拆」。
 
-`internal/ui/shell.go` 是能说清的那种：它同时装着**窗口生命周期**（`Attach`、
-`Close`、`bindMedia`、`Run`）、**画法**（`View`、`viewMain`、`viewFolderDialogs`）、
-**崩溃兜底**（`Guard`、`onPanicAt`、`newCrashInfo`、`viewCrash`）和**挂载**
-（`mountSearchHistory`、`mountShortcuts`）四块——四块之间没有互相依赖的顺序，
-搬开就是四个文件。
+`internal/ui/shell.go` **从前**是能说清的那种：它**曾经**同时装着**窗口生命周期**
+（`Attach`、`Close`、`bindMedia`、`Run`）、**画法**（`View`、`viewMain`、
+`viewFolderDialogs`）、**崩溃兜底**（`Guard`、`onPanicAt`、`newCrashInfo`、
+`viewCrash`）和**挂载**（`mountSearchHistory`、`mountShortcuts`）四块——四块之间
+没有互相依赖的顺序，搬开就是四个文件。**票 #404 已经拆完了**（2026-10-25，
+见下面那个表）：`shell.go` 现在只剩 `Shell` 结构体和装配它的那几段，四块各自
+搬到了按职责命名的文件里。
 
 ### 怎么拆：优先「纯搬文件」
 
@@ -481,6 +483,11 @@ internal/ui/shell.go  →  shell_window.go   窗口生命周期
                         shell_crash.go    崩溃兜底
                         shell_mount.go    挂载
 ```
+
+（**这一票已经照这张表拆完了**：`shell.go` 现在只剩 `Shell` 结构体本身和装配它
+的几段；`shell_window.go` / `shell_view.go` / `shell_crash.go` / `shell_mount.go`
+是四个新文件。⚠️ **字段一个都没动**——Go 的 struct 字段只能写在同一处，而队列
+抽屉那一摊正在被连续改，见下面那条。）
 
 - **Go 编译器保证行为不变 → 风险几乎为零**：搬完 `go build` 绿、测试绿，就是搬对
   了。同一包内搬方法不需要改任何调用点。

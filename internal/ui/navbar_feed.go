@@ -122,7 +122,7 @@ func (p *feedPoller) arm(c clockSource, wake func()) {
 }
 
 // disarm 停掉那一路。窗口真关掉之后 `Invalidate` 对它是 no-op，但它还会一直每
-// 五分钟醒一次到进程退出，所以要在收尾的地方停掉（见 shell.go 的 Attach）。
+// 五分钟醒一次到进程退出，所以要在收尾的地方停掉（见 shell_window.go 的 Attach）。
 func (p *feedPoller) disarm() {
 	if p.stop != nil {
 		p.stop()

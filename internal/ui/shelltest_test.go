@@ -27,7 +27,7 @@ import (
 // 而更要命的是它们让同包的渲染时快时慢，把「等两秒」「等 3000 帧」这类按墙钟
 // 写的断言从「多半能过」变成「看机器脸色」。
 //
-// 现在收尾是 `Shell.Close`，和真窗口关掉时走的是同一份代码（见 shell.go），
+// 现在收尾是 `Shell.Close`，和真窗口关掉时走的是同一份代码（见 shell_window.go），
 // 由 `newTestShell` 无条件挂上：造外壳的地方只有一处，收尾也就没有「忘了谁」。
 //
 // 用法见下面那几个 `newShell` / `shellWithSettings` ——它们是这一层之上
@@ -300,7 +300,7 @@ func newTestShell(t *testing.T, opts ...shellOpt) *testShell {
 		sh.tt = tt
 	}
 
-	// 收尾。`Shell.Close` 和真窗口关掉时走的是同一份代码（shell.go）：停掉
+	// 收尾。`Shell.Close` 和真窗口关掉时走的是同一份代码（shell_window.go）：停掉
 	// 四个定时器、封面缓存、应用状态，并把关着的设置 / 搜索历史 / 快捷键落完盘。
 	//
 	// ⚠️ 它是**无条件**挂的，不给「这个外壳特殊所以不收」留口子——以前那种
