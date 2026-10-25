@@ -3,12 +3,14 @@
 // 这一格是红点那一摊的**记忆**：没有它，「用户看过了」这件事只活在内存里，
 // 于是用户点掉那个点之后，五分钟它又回来（上游 Biu 就是这样），而重启之后
 // 判定又是另一回事。
+//
+// ⚠️ **基准是一条动态的 id**（B 站的 update_baseline 要的就是那个，不是什么
+// 时间戳）——见 internal/app/dynamicseen.go 的文件头。
 package app
 
 import (
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 // newSeenApp 装一个带设置和登录态的 App。
@@ -27,18 +29,23 @@ func newSeenApp(t *testing.T, path, mid string) *App {
 	return a
 }
 
+// 两条动态的 id（B 站的动态 id 是十进制的雪花那一类，越大越新）。
+const (
+	seenIDOld = "954659517801431040"
+	seenIDNew = "954659517801431041"
+)
+
 // TestTheDynamicBaselineSurvivesARestart 验「看到哪儿了」**落盘**。
 //
-// ⚠️ **不落盘的话每次启动的判定都是乱的**：重启之后基准回到 0，于是问 B 站
+// ⚠️ **不落盘的话每次启动的判定都是乱的**：重启之后基准回到空串，于是问 B 站
 // 的时候问的是「从头算」，那个点就一直亮着——而用户明明看过了。
 func TestTheDynamicBaselineSurvivesARestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), SettingsFileName)
-	at := time.Unix(1792141200, 0)
 
 	a := newSeenApp(t, path, "77")
-	a.MarkDynamicSeen(at)
-	if got := a.DynamicBaseline(); got != at.Unix() {
-		t.Fatalf("记完之后基线是 %d，want %d", got, at.Unix())
+	a.MarkDynamicSeen(seenIDOld)
+	if got := a.DynamicBaseline(); got != seenIDOld {
+		t.Fatalf("记完之后基线是 %q，want %q", got, seenIDOld)
 	}
 	// 落盘要真的落到盘上（设置存储是后台合并写的）。
 	if err := a.CloseSettings(); err != nil {
@@ -46,9 +53,9 @@ func TestTheDynamicBaselineSurvivesARestart(t *testing.T) {
 	}
 
 	b := newSeenApp(t, path, "77")
-	if got := b.DynamicBaseline(); got != at.Unix() {
-		t.Errorf("重启之后基线是 %d，want %d（不落盘的话每次启动的判定都是乱的）",
-			got, at.Unix())
+	if got := b.DynamicBaseline(); got != seenIDOld {
+		t.Errorf("重启之后基线是 %q，want %q（不落盘的话每次启动的判定都是乱的）",
+			got, seenIDOld)
 	}
 }
 
@@ -62,51 +69,48 @@ func TestTheDynamicBaselineSurvivesARestart(t *testing.T) {
 // 而用户明明看过了。
 func TestTheDynamicBaselineIsPerAccount(t *testing.T) {
 	a := newSeenApp(t, filepath.Join(t.TempDir(), SettingsFileName), "77")
-	at := time.Unix(1792141200, 0)
-	a.MarkDynamicSeen(at)
+	a.MarkDynamicSeen(seenIDOld)
 
 	// 换账号：那是另一份「没看过的动态」，从头算。
 	loginExplore(a, "88")
-	if got := a.DynamicBaseline(); got != 0 {
-		t.Errorf("换账号之后基线还是 %d，want 0（那是另一份「没看过」）", got)
+	if got := a.DynamicBaseline(); got != "" {
+		t.Errorf("换账号之后基线是 %q，want 空（那是另一份「没看过」）", got)
 	}
 
 	// 记 B 的，再切回 A：A 的基准**还在**。
-	bAt := time.Unix(1792142000, 0)
-	a.MarkDynamicSeen(bAt)
+	a.MarkDynamicSeen(seenIDNew)
 	loginExplore(a, "77")
-	if got := a.DynamicBaseline(); got != at.Unix() {
-		t.Errorf("切回 A 之后基线是 %d，want %d（A 的基准不该被 B 冲掉）", got, at.Unix())
+	if got := a.DynamicBaseline(); got != seenIDOld {
+		t.Errorf("切回 A 之后基线是 %q，want %q（A 的基准不该被 B 冲掉）", got, seenIDOld)
 	}
 	// B 的那份也还在。
 	loginExplore(a, "88")
-	if got := a.DynamicBaseline(); got != bAt.Unix() {
-		t.Errorf("切回 B 之后基线是 %d，want %d", got, bAt.Unix())
+	if got := a.DynamicBaseline(); got != seenIDNew {
+		t.Errorf("切回 B 之后基线是 %q，want %q", got, seenIDNew)
 	}
 }
 
 // TestTheDynamicBaselineOnlyMovesForward 验基准**只往前挪**。
 //
-// 用户把机器的时间调回去（或者时区换了）的时候，基线不能倒退——倒退一步，
+// 动态 id 是雪花那一类的（越大越新），所以比一比就知道新的那个是不是更大。
+// 倒退一步（两趟请求回来的顺序反了、或者用户把机器的时间调回去了）会让
 // 「已经看过的」又变成「没看过」，那个点会诈尸。
 func TestTheDynamicBaselineOnlyMovesForward(t *testing.T) {
 	a := newSeenApp(t, filepath.Join(t.TempDir(), SettingsFileName), "77")
-	later := time.Unix(1792141200, 0)
-	earlier := time.Unix(1780000000, 0)
-
-	a.MarkDynamicSeen(later)
-	a.MarkDynamicSeen(earlier)
-	if got := a.DynamicBaseline(); got != later.Unix() {
-		t.Errorf("基线退回了 %d，want %d（只往前挪）", got, later.Unix())
+	a.MarkDynamicSeen(seenIDNew)
+	a.MarkDynamicSeen(seenIDOld)
+	if got := a.DynamicBaseline(); got != seenIDNew {
+		t.Errorf("基线退回了 %q，want %q（只往前挪）", got, seenIDNew)
 	}
 }
 
-// TestTheDynamicBaselineIsZeroBeforeAnythingIsSeen 验「一次都没看过」是 0。
+// TestTheDynamicBaselineIsEmptyBeforeAnythingIsSeen 验「一次都没看过」是空的。
 //
-// 0 那一档是「从头算」——用户第一次打开就能看见那个点（上游 Biu 传的就是 0）。
-func TestTheDynamicBaselineIsZeroBeforeAnythingIsSeen(t *testing.T) {
+// 空串 → 问 B 站的时候传 0，那一档是「从头算」——用户第一次打开就能看见那个点
+// （上游 Biu 传的就是 0）。
+func TestTheDynamicBaselineIsEmptyBeforeAnythingIsSeen(t *testing.T) {
 	a := newSeenApp(t, filepath.Join(t.TempDir(), SettingsFileName), "77")
-	if got := a.DynamicBaseline(); got != 0 {
-		t.Errorf("没看过的时候基线是 %d，want 0", got)
+	if got := a.DynamicBaseline(); got != "" {
+		t.Errorf("没看过的时候基线是 %q，want 空", got)
 	}
 }

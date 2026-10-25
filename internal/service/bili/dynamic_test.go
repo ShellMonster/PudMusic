@@ -1063,7 +1063,11 @@ func TestDynamicFeedUpdateAsksWithTheBaseline(t *testing.T) {
 	})
 	cli := f.client(t, Options{})
 
-	n, err := cli.DynamicFeedUpdate(context.Background(), 1792141200)
+	// ⚠️ **基线是动态 id**（B 站的 update_baseline 要的就是那个，不是什么时间戳：
+	// 社区文档写着它是 str、必填，而 /feed/all 的返回里 data.update_baseline 是
+	// 「等于 items 中第一条记录的 id」）。
+	const baseline = "954659517801431040"
+	n, err := cli.DynamicFeedUpdate(context.Background(), baseline)
 	if err != nil {
 		t.Fatalf("问新动态失败了：%v", err)
 	}
@@ -1079,8 +1083,8 @@ func TestDynamicFeedUpdateAsksWithTheBaseline(t *testing.T) {
 		t.Errorf("方法是 %s，want GET（这是个查询）", reqs[0].Method)
 	}
 	q := reqs[0].Query
-	if got := q.Get("update_baseline"); got != "1792141200" {
-		t.Errorf("基线是 %q，want 1792141200", got)
+	if got := q.Get("update_baseline"); got != baseline {
+		t.Errorf("基线是 %q，want %q（那是一个动态 id，不是什么时间戳）", got, baseline)
 	}
 	if got := q.Get("type"); got != "video" {
 		t.Errorf("type 是 %q，want video（上游写死的那个）", got)
@@ -1101,11 +1105,59 @@ func TestDynamicFeedUpdateReadsANumberThatComesAsAString(t *testing.T) {
 	})
 	cli := f.client(t, Options{})
 
-	n, err := cli.DynamicFeedUpdate(context.Background(), 0)
+	n, err := cli.DynamicFeedUpdate(context.Background(), "")
 	if err != nil {
 		t.Fatalf("问新动态失败了：%v", err)
 	}
 	if n != 12 {
 		t.Errorf("问回来 %d 条，want 12（字符串也要读得出来）", n)
+	}
+}
+
+// TestDynamicFeedUpdateAsksZeroWhenNothingWasSeen 验「一次都没看过」传的是 0。
+//
+// ⚠️ **0 是上游 Biu 一直传的那个值**（`user-feed/index.tsx:18`）——那一档是
+// 「全部」，于是用户第一次打开就能看见那个点（和上游一样）。
+func TestDynamicFeedUpdateAsksZeroWhenNothingWasSeen(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(dynamicFeedUpdatePath, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{"update_num": 3}))
+	})
+	cli := f.client(t, Options{})
+
+	if _, err := cli.DynamicFeedUpdate(context.Background(), ""); err != nil {
+		t.Fatalf("问新动态失败了：%v", err)
+	}
+	reqs := f.requests()
+	if len(reqs) != 1 {
+		t.Fatalf("发了 %d 个请求，want 1", len(reqs))
+	}
+	if got := reqs[0].Query.Get("update_baseline"); got != "0" {
+		t.Errorf("基线是 %q，want 0（一次都没看过 → 从头算）", got)
+	}
+}
+
+// TestDynamicFeedCarriesTheUpdateBaseline 验动态流那一页把**更新基线**带出来。
+//
+// ⚠️ **它是动态 id，不是时间戳**：社区文档写着 /feed/all 的返回里
+// `data.update_baseline`「等于 items 中第一条记录的 id」，而 /feed/all/update
+// 要的就是它（真实返回长这样："954659517801431040"）。
+//
+// 拿不到它，「用户看到哪儿了」就没地方记——顶栏那个点于是只能永远传 0（上游
+// 那一档），而点掉了之后五分钟它又回来。
+func TestDynamicFeedCarriesTheUpdateBaseline(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(dynamicFeedAllPath, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			"items": []any{}, "offset": "OFF", "has_more": false,
+			"update_baseline": "954659517801431040",
+		}))
+	})
+	pg, err := f.client(t, Options{}).DynamicFeed(context.Background(), "")
+	if err != nil {
+		t.Fatalf("拉动态流失败了：%v", err)
+	}
+	if pg.Baseline != "954659517801431040" {
+		t.Errorf("更新基线是 %q，want 954659517801431040（那是最新那条动态的 id）", pg.Baseline)
 	}
 }

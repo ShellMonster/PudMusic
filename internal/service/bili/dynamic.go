@@ -332,6 +332,19 @@ type DynamicPage struct {
 	// 不留下这句话，下一个人只能从头再猜一遍（票 #300 的实测：`pub_ts`
 	// 变成了字符串，于是每一页 12 条全被丢掉）。
 	DropWhy []string
+
+	// Baseline 是「更新基线」——**等于这一页里最新那条动态的 id**。
+	//
+	// ⚠️ **它是动态 id，不是时间戳**：B 站那个「有没有新动态」的接口
+	// （/feed/all/update）要的就是它——社区文档写着 update_baseline 是 str、
+	// 必填，而 /feed/all 的返回里它「等于 items 中第一条记录的 id」；真实的
+	// 返回长这样："954659517801431040"（18 位的动态 id）。
+	//
+	// ⚠️ **上游 Biu 永远传 0**（`biu/src/layout/navbar/user-feed/index.tsx:18`），
+	// 所以它从没暴露过这个参数该传什么形状——我们这里传**真的那一条**，
+	// 于是「用户看到哪儿了」才说得清（否则点过之后那个基准是非法的，那个点
+	// 要么再也不亮、要么永远亮着）。
+	Baseline string
 }
 
 // noteDrop 记一条丢掉的理由（同一种理由只记一次）。
@@ -377,6 +390,10 @@ type dynamicEnvelope struct {
 	Items   []json.RawMessage `json:"items"`
 	Offset  flexString        `json:"offset"`
 	HasMore flexBool          `json:"has_more"`
+	// Baseline 是「更新基线」（= 这一页里最新那条动态的 id）。见 DynamicPage。
+	//
+	// ⚠️ **用 flexString**：B 站同一个字段有可能给字符串也有可能给数字。
+	Baseline flexString `json:"update_baseline"`
 }
 
 // DynamicFeed 拉「关注的人在发什么」，一页。
@@ -407,33 +424,44 @@ func (c *Client) DynamicFeed(ctx context.Context, offset string) (DynamicPage, e
 	return pg, nil
 }
 
-// DynamicFeedUpdate 问「从 baseline 到现在有没有新动态」，返回条数。
+// DynamicFeedUpdate 问「比 baseline 新的那几条动态有几条」，返回条数。
 //
-// # baseline 是「用户上一次看动态」的时刻（Unix 秒）
+// # baseline 是**动态 id**，不是时间戳
 //
-// B 站这个接口按一个**基线时刻**算「有多少条比它新」。上游 Biu 传的是 0
-// （`biu/src/layout/navbar/user-feed/index.tsx:18`），于是那一档永远是「全部」
-// ——用户点掉了那个点，五分钟之后它又回来（上游只是把本地的数清成 0，
-// 下一轮又问回同一个数）。
+// B 站这个接口按一个**基线**算「有多少条比它新」，而那个基线就是**动态 id**
+// （社区文档：update_baseline 是 str、必填、意思是「更新基线」；同族的
+// /feed/all 返回里 `data.update_baseline` 明确写着「等于 items 中第一条记录的
+// id」；真实的返回长这样："954659517801431040"）。
 //
-// 我们这里传的是**用户上一次看动态的时刻**：点掉之后它真的不回来了，直到
-// 有新的动态发出来。而 0 那一档留给「一次都没看过」（新装的、换账号的），
-// 于是用户第一次打开就能看见那个点——和上游一样。
+// ⚠️ **上游 Biu 永远传 0**（`biu/src/layout/navbar/user-feed/index.tsx:18`），
+// 于是它那一档永远是「全部」——用户点掉了那个点，五分钟之后它又回来（上游只是
+// 把本地的数清成 0，下一轮又问回同一个数）。它从没暴露过这个参数该传什么形状。
+//
+// 我们这里传的是**用户看过的那条最新动态的 id**（见 DynamicPage.Baseline）：
+// 点掉之后它真的不回来了，直到有新的动态发出来。而 0 那一档留给「一次都没看过」
+// （新装的、换账号的），于是用户第一次打开就能看见那个点——和上游一样。
+//
+// ⚠️ **传错形状的后果是静默的**：时间戳不是合法的 id，于是 B 站要么回一个错
+// （那个点再也不亮），要么当成「比它新的都算」（那个点永远亮着）。
 //
 // # 它不要签名
 //
 // 上游那一支没传 useWbi（而 feed/space 传了）。这一条抄错的话 B 站回 -403，
 // 而症状是「那个点永远不亮」。
-func (c *Client) DynamicFeedUpdate(ctx context.Context, baseline int64) (int, error) {
+func (c *Client) DynamicFeedUpdate(ctx context.Context, baseline string) (int, error) {
 	params := url.Values{}
 	// 上游写死的三个参数（`user-feed/index.tsx:16-20`）：
 	//
 	//   - `type=video` 是「按视频那条取」，和 feed/all 一样；
-	//   - `update_baseline` 是基线时刻（0 = 从头算）；
+	//   - `update_baseline` 是基线（动态 id；0 = 从头算）；
 	//   - `web_location` 告诉 B 站「这是网页版的哪一块」，不带的话它给的是
 	//     App 的形状。
 	params.Set("type", "video")
-	params.Set("update_baseline", strconv.FormatInt(baseline, 10))
+	if baseline == "" {
+		// 一次都没看过 → 传 0（上游一直传的就是它，那一档是「全部」）。
+		baseline = "0"
+	}
+	params.Set("update_baseline", baseline)
 	params.Set("web_location", "333.1365")
 
 	raw, err := c.Do(ctx, Call{
@@ -546,7 +574,12 @@ func dynamicPageFrom(raw []byte) (DynamicPage, error) {
 		return DynamicPage{}, fmt.Errorf("bili: 动态流的返回读不懂：%w", err)
 	}
 
-	pg := DynamicPage{Offset: env.Offset.String(), HasMore: env.HasMore.Bool(), Raw: len(env.Items)}
+	pg := DynamicPage{
+		Offset:   env.Offset.String(),
+		HasMore:  env.HasMore.Bool(),
+		Raw:      len(env.Items),
+		Baseline: env.Baseline.String(),
+	}
 	for _, item := range env.Items {
 		d, drop, ok := parseDynamic(item)
 		if !ok {

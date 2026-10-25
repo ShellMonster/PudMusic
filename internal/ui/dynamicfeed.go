@@ -133,6 +133,12 @@ type feedResult struct {
 	// dropWhy 是丢掉的理由（人话，一种一句）。**只进日志**，不进界面。
 	dropWhy []string
 	err     error
+	// baseline 是这一页的「更新基线」（= 最新那条动态的 id）。只有**第一页**有
+	// （翻页的那些页里最新的一条更旧）。
+	//
+	// ⚠️ **它是动态 id，不是时间戳**：B 站「有没有新动态」那个接口
+	// （/feed/all/update）的 update_baseline 要的就是它（票 #480）。
+	baseline string
 }
 
 // 这一页的两条闸门各自是哪一条。
@@ -661,6 +667,18 @@ func (s *Shell) fetchFeed(ctx context.Context, f *dynamicFeed, which int, cursor
 		r.err, r.dyns, r.hasMore, r.drops = err, pg.Items, pg.HasMore, pg.Drops
 		r.cursor, r.sent = pg.Offset, pg.Raw
 		r.dropWhy = pg.DropWhy
+		// ⚠️ **第一页 = 用户看到的是最新的那几条**：那一页的 `update_baseline` 就是
+		// 「此刻最新那条动态的 id」（B 站给的是动态 id，不是时间戳），顶栏那个红点
+		// 下一次问的时候要知道「用户看到哪儿了」（票 #480）。
+		//
+		// ⚠️ **只有第一页有**：翻页的那些页里最新的一条更旧，记上去会让基准往回
+		// 退（而基准只往前挪，见 app.MarkDynamicSeen）。
+		//
+		// ⚠️ **落盘不在这里**：那是界面状态（铁律一），落盘在 adoptFeed 那一层
+		// （那一层跑在界面线程上）。
+		if cursor == "" {
+			r.baseline = pg.Baseline
+		}
 	}
 
 	// 🔴 **每一趟都留一句计数**（理由同 upspace_fetch.go 那一处）：界面上那个
@@ -724,6 +742,18 @@ func (s *Shell) adoptFeed(f *dynamicFeed) {
 			f.authors = append(f.authors, a)
 		}
 		if r.which == feedItems {
+			// ⚠️ **「用户看到这儿了」**：第一页里最新那条动态的 id 就是「看过基准」
+			// （B 站的 update_baseline 要的就是它，见 app/dynamicseen.go）。
+			//
+			// 而**那个点要一并清掉**：用户此刻正在看的就是最新的那几条——所以
+			// 「比它更新的」一条也没有，那个点不该亮着。
+			//
+			// ⚠️ **这一段跑在界面线程上**（adoptFeed 是 view 调的），而落盘那件事
+			// 要在界面状态里做（铁律一）。
+			if r.baseline != "" {
+				s.app.MarkDynamicSeen(r.baseline)
+				s.feed.clear()
+			}
 			// ⚠️ **丢掉的是累计的，不是这一页的**：翻了好几页各丢几条就是几十条，
 			// 界面上那句话说的是「一共有多少条没显示」。
 			//

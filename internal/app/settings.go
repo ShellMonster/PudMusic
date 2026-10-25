@@ -329,8 +329,15 @@ func (o SideMenuCollectionOrder) setList(g FavoriteGroup, v []int64) SideMenuCol
 type DynamicSeenEntry struct {
 	// Mid 是这个账号的 mid。
 	Mid int64 `json:"mid"`
-	// Baseline 是「用户上一次看动态」的时刻（Unix 秒）。
-	Baseline int64 `json:"baseline"`
+	// Baseline 是**用户看过的那条最新动态的 id**（B 站的动态 id，18 位左右）。
+	//
+	// ⚠️ **它是动态 id，不是时间戳**：B 站「有没有新动态」那个接口
+	// （/feed/all/update）要的就是它（社区文档：update_baseline 是 str、必填；
+	// 真实的返回长这样："954659517801431040"）。传一个时间戳进去，那个接口要么
+	// 回错、要么当成「比它新的都算」——而界面上只是「那个点不对」。
+	//
+	// 空串 = 一次都没看过 → 问 B 站的时候传 0（上游 Biu 一直传的就是 0）。
+	Baseline string `json:"baseline"`
 }
 
 // DynamicSeen 是「动态红点看到哪儿了」——**按账号**记。

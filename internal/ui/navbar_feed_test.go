@@ -10,12 +10,22 @@ package ui
 import (
 	"image/color"
 	"net/http"
-	"strconv"
 	"sync"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 )
+
+// seenDynID 是假 B 站那儿的「此刻最新那条动态」的 id。
+//
+// ⚠️ **它是动态 id，不是时间戳**：B 站「有没有新动态」那个接口
+// （/feed/all/update）的 update_baseline 要的就是它（社区文档：str、必填；
+// 真实的返回长这样："954659517801431040"）。
+const seenDynID = "954659517801431040"
+
+// seenDynIDNew 是比 seenDynID 更新的一条动态的 id（动态 id 是雪花那一类的，
+// 越大越新）。
+const seenDynIDNew = "954659517801431041"
 
 // feedBaselineLog 记下每一趟问 B 站时带的基线。
 type feedBaselineLog struct {
@@ -120,8 +130,9 @@ func TestTheRedDotSitsOnTheTopRightOfTheIcon(t *testing.T) {
 // 这一条走的是**真的**那一趟：假 B 站按基线回答——基线是 0 就说「有 3 条没看过
 // 的」，基线不是 0 就说「没有」（用户看过了）。
 //
-// ⚠️ **它量的是「基线往后挪了」**：点一下之后基线记成「用户看的那一刻」，下一轮
-// 问的就是那个基线，于是 B 站说 0——那个点不会又冒出来。
+// ⚠️ **它量的是「基线往后挪了，而且挪成的是一条动态的 id」**：点一下之后，
+// 应用层现拉一次动态流的第一页，拿它 `update_baseline` 里那个 id（= 此刻最新
+// 那条动态）当基准；下一轮问的就是那个 id，于是 B 站说 0——那个点不会又冒出来。
 //
 // （上游 Biu 传的一直是 0，所以它清掉之后五分钟又回来：用户明明看过了。）
 func TestTheRedDotDoesNotComeBackAfterReadingIt(t *testing.T) {
@@ -136,6 +147,15 @@ func TestTheRedDotDoesNotComeBackAfterReadingIt(t *testing.T) {
 		}
 		uiExploreJSON(w, 0, map[string]any{"update_num": n})
 	})
+	// 动态流那一页：它的返回里带着「更新基线」（= 最新那条动态的 id）。
+	//
+	// ⚠️ **没有它就拿不到基准**：B 站的 /feed/all/update 要的就是这个 id。
+	b.on("/x/polymer/web-dynamic/v1/feed/all", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{
+			"items": []any{}, "offset": "", "has_more": false,
+			"update_baseline": seenDynID,
+		})
+	})
 	// 设置挂着：基线要落盘，而落盘走的是设置存储（见 internal/app/dynamicseen.go）。
 	s, tt, a := newSpaceShell(t, b, true, "77", withSettings(app.Settings{}))
 	clock := fakeClockOn(s, fakeClockStart)
@@ -149,19 +169,24 @@ func TestTheRedDotDoesNotComeBackAfterReadingIt(t *testing.T) {
 		t.Errorf("看完动态那个点还在，文字有 %q", tt.Texts())
 	}
 
-	// ⚠️ **基线必须往后挪**：它就是「用户看的那一刻」。
+	// ⚠️ **基线必须往后挪**，而且挪成的是**一条动态的 id**（不是什么时间戳：
+	// 传错形状的话，B 站要么回错、要么当成「比它新的都算」——那个点就不对）。
 	//
 	// 判据是**这一趟问的基线是不是那个新值**，而不是「问了几趟」——点之前发出
 	// 去的那一趟还带着 0（它发出去的时候用户还没看），那是应该的。
+	//
+	// ⚠️ **要等它落下来**：那一页的第一页是后台拉回来的，它落地的时候才把基准
+	// 记上（见 dynamicfeed.go 的 adoptFeed）。
+	waitFrames(t, tt, "基准记上了", func() bool { return a.DynamicBaseline() != "" })
 	want := a.DynamicBaseline()
-	if want == 0 {
-		t.Fatalf("点过之后基线还是 0：那个点会又回来")
+	if want != seenDynID {
+		t.Errorf("基线是 %q，want %q（那是最新那条动态的 id，不是什么时间戳）", want, seenDynID)
 	}
 
 	// 下一轮。
 	clock.Advance(wantFeedInterval)
 	waitFrames(t, tt, "下一轮带着新基线问出去了", func() bool {
-		return log.has(strconv.FormatInt(want, 10)) && !s.feed.busy
+		return log.has(want) && !s.feed.busy
 	})
 
 	if tt.HasText("3 条新动态") {
@@ -184,6 +209,12 @@ func TestTheRedDotComesBackWhenNewDynamicsArrive(t *testing.T) {
 		log.add(r.URL.Query().Get("update_baseline"))
 		uiExploreJSON(w, 0, map[string]any{"update_num": 2})
 	})
+	b.on("/x/polymer/web-dynamic/v1/feed/all", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{
+			"items": []any{}, "offset": "", "has_more": false,
+			"update_baseline": seenDynID,
+		})
+	})
 	s, tt, a := newSpaceShell(t, b, true, "77", withSettings(app.Settings{}))
 	clock := fakeClockOn(s, fakeClockStart)
 
@@ -195,17 +226,68 @@ func TestTheRedDotComesBackWhenNewDynamicsArrive(t *testing.T) {
 	if tt.HasText("2 条新动态") {
 		t.Errorf("看完动态那个点还在，文字有 %q", tt.Texts())
 	}
+	waitFrames(t, tt, "基准记上了", func() bool { return a.DynamicBaseline() != "" })
 	want := a.DynamicBaseline()
-	if want == 0 {
-		t.Fatalf("点过之后基线还是 0")
+	if want == "" {
+		t.Fatalf("点过之后基线还是空的")
 	}
 
 	// 下一轮：基线往后挪了，而 B 站说「又有 2 条」→ 那个点要再亮。
 	clock.Advance(wantFeedInterval)
 	waitFrames(t, tt, "那个点又亮了", func() bool { return tt.HasText("2 条新动态") })
 
-	if !log.has(strconv.FormatInt(want, 10)) {
-		t.Errorf("下一轮问的基线里没有那个新基线 %d（问过的：%v）", want, log.all())
+	if !log.has(want) {
+		t.Errorf("下一轮问的基线里没有那个新基线 %q（问过的：%v）", want, log.all())
+	}
+}
+
+// TestTheRedDotCatchesUpWhenThePageIsAlreadyOpen 验「那一页已经开着」的时候，
+// 点那个点也会把「看过基准」追上来。
+//
+// ⚠️ **为什么这一条要单独验**：那一页开着的时候它自己**不会刷新**（它只在第一次
+// 进去时拉第一页），于是「看过基准」停在旧的那一条 → B 站一直说「还有新的」→
+// **那个点每五分钟回来一次**（票面「点了不该马上又冒出来」）。
+//
+// 所以点那个点的时候要**现拉一次**动态流的第一页（那个 catchUp），拿它
+// update_baseline 里那个 id 当基准。
+func TestTheRedDotCatchesUpWhenThePageIsAlreadyOpen(t *testing.T) {
+	b := newUIExplore(t)
+	var log feedBaselineLog
+	var feedMu sync.Mutex
+	feedCalls := 0
+	b.on("/x/polymer/web-dynamic/v1/feed/all/update", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Query().Get("update_baseline"))
+		uiExploreJSON(w, 0, map[string]any{"update_num": 3})
+	})
+	// 动态流：第一页给旧的基线，之后（catchUp 那一次）给新的——好看出基准追上来。
+	b.on("/x/polymer/web-dynamic/v1/feed/all", func(w http.ResponseWriter, r *http.Request) {
+		feedMu.Lock()
+		feedCalls++
+		id := seenDynID
+		if feedCalls > 1 {
+			id = seenDynIDNew
+		}
+		feedMu.Unlock()
+		uiExploreJSON(w, 0, map[string]any{
+			"items": []any{}, "offset": "", "has_more": false,
+			"update_baseline": id,
+		})
+	})
+	s, tt, a := newSpaceShell(t, b, true, "77", withSettings(app.Settings{}))
+	fakeClockOn(s, fakeClockStart)
+
+	// 先把那一页打开：它自己拉第一页，于是基准是那一条旧的。
+	s.navigate(dynamicFeedPath)
+	waitFrames(t, tt, "那一页拉完了", func() bool { return s.dynamicFeedOf().started })
+	waitFrames(t, tt, "基准记上了", func() bool { return a.DynamicBaseline() == seenDynID })
+
+	// 点那个点：那一页已经开着（它不会自己刷新），所以靠 catchUp 把基准追上来。
+	if err := tt.Click("动态"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "基准追上来了", func() bool { return a.DynamicBaseline() == seenDynIDNew })
+	if got := a.DynamicBaseline(); got != seenDynIDNew {
+		t.Errorf("基准是 %q，want %q（那一页开着的时候要现拉一次才能追上）", got, seenDynIDNew)
 	}
 }
 

@@ -18,6 +18,20 @@
 //     个数，五分钟之后那个点又回来——用户明明看过了。我们这里把基准落盘
 //     （见 `internal/app/dynamicseen.go`）。
 //
+// ## 「看过」的基准是**一条动态的 id**，不是时间戳
+//
+// B 站那个「有没有新动态」的接口（/feed/all/update）按一个**基线**算「有多少条
+// 比它新」，而那个基线就是**动态 id**：社区文档写着 update_baseline 是 str、
+// 必填，而同族的 /feed/all 返回里 `data.update_baseline` 明确写着「等于 items
+// 中第一条记录的 id」；真实的返回长这样："954659517801431040"。
+//
+// ⚠️ **传错形状的后果是静默的**：时间戳不是合法的 id，于是 B 站要么回一个错
+// （那个点再也不亮），要么当成「比它新的都算」（那个点永远亮着）——用户看到的
+// 只是「那个点不对」。
+//
+// ⚠️ **上游 Biu 永远传 0**（`user-feed/index.tsx:18`），所以它从没暴露过这个
+// 参数该传什么形状：那一档永远是「全部」，于是点掉之后五分钟又回来。
+//
 // ## 查询是**异步**的：界面线程一次都不等它
 //
 // 查询是一次网络请求，而问它的是 view（界面线程）。在界面线程上等它等于把
@@ -98,6 +112,17 @@ type feedPoller struct {
 	// 收走它（见 drain）。
 	ask func(done func(count int, err error))
 
+	// catchUpAsk 是「用户追上来了」那一趟：拉一次动态流的第一页，回它最新那条
+	// 动态的 id。
+	//
+	// ⚠️ **它和 poll 是两回事**：poll 问「比基线新的有几条」，catchUp 问「现在最新
+	// 的是哪一条」——后者是**基线本身**的来源（基线是动态 id，不是时间戳）。
+	//
+	// ⚠️ **为什么点那个点要问它**：用户点那个点的时候他在说「我看到这儿了」，而
+	// 「用户动态」那一页可能十分钟前就开着（它自己不刷新）——于是光靠那一页记下来
+	// 的 id 是旧的，B 站会一直说「还有新的」，**那个点每五分钟回来一次**。
+	catchUpAsk func(done func(id string, err error))
+
 	// wake 是「结果回来了，叫醒界面」那一路。
 	//
 	// ⚠️ **它只在建这个节奏的时候写一次**（newFeedPoller），之后**只读**。
@@ -143,6 +168,9 @@ type feedPoller struct {
 	// login 是上一次问的时候登录态是什么。变了就把下一轮提前（见 syncFeedDot）。
 	login bool
 
+	// catchingUp 是「有一趟 catchUp 在途」。
+	catchingUp bool
+
 	// box 是后台投回来的结果。
 	boxMu sync.Mutex
 	box   []feedUpdate
@@ -156,13 +184,22 @@ type feedUpdate struct {
 	err error
 	// gen 是发出去那一刻的「清点次数」。
 	gen int
+	// id 是「此刻最新那条动态的 id」（catchUp 那一趟）。
+	id string
+	// caughtUp 标出「这是 catchUp 那一趟」。
+	caughtUp bool
 }
 
 // newFeedPoller 建一个节奏。ask 为 nil 就是一个永远问不出东西的空拉。
 //
 // wake 是「结果回来了叫醒界面」那一路，**建的时候就装好**（理由见 wake 那一格）。
-func newFeedPoller(interval time.Duration, ask func(done func(count int, err error)), wake func()) *feedPoller {
-	return &feedPoller{interval: interval, ask: ask, wake: wake}
+func newFeedPoller(
+	interval time.Duration,
+	ask func(done func(count int, err error)),
+	catchUpAsk func(done func(id string, err error)),
+	wake func(),
+) *feedPoller {
+	return &feedPoller{interval: interval, ask: ask, catchUpAsk: catchUpAsk, wake: wake}
 }
 
 // tick 到点就轮一次，返回这一帧该画几个红点。
@@ -202,6 +239,29 @@ func (p *feedPoller) start() {
 	})
 }
 
+// catchUp 发起「用户追上来了」那一趟：拉一次动态流的第一页，拿它最新那条的 id。
+//
+// ⚠️ **它不问「有没有新的」**：它问的是「现在最新的是哪一条」——那个 id 是**基线
+// 本身**（B 站的 update_baseline 要的就是动态 id，不是时间戳）。
+//
+// ⚠️ **基线是应用层落盘的**（`App.CatchUpDynamicSeen`）：这一层只管「它回来了」
+// ——回来之后把点清掉，并且把在途的那一趟作废（它问的是旧的基线）。
+func (p *feedPoller) catchUp() {
+	if p.catchUpAsk == nil || p.catchingUp {
+		return
+	}
+	p.catchingUp = true
+	gen := p.gen
+	p.catchUpAsk(func(id string, err error) {
+		p.boxMu.Lock()
+		p.box = append(p.box, feedUpdate{id: id, err: err, gen: gen, caughtUp: true})
+		p.boxMu.Unlock()
+		if p.wake != nil {
+			p.wake()
+		}
+	})
+}
+
 // drain 收走后台投回来的结果。**只能由界面线程调**。
 func (p *feedPoller) drain() {
 	p.boxMu.Lock()
@@ -212,6 +272,21 @@ func (p *feedPoller) drain() {
 		return
 	}
 	for _, u := range box {
+		if u.caughtUp {
+			p.catchingUp = false
+			if u.err != nil {
+				log.Printf("biu: 追动态失败了：%v", u.err)
+				continue
+			}
+			// ⚠️ **用户追上了**：那个点不该亮。
+			//
+			// 而基线本身已经由应用层落盘了（App.CatchUpDynamicSeen）——这一层
+			// 只管「把它清掉」和「让在途的那一趟作废」（那一趟问的是旧的基线，
+			// 拿它的答案把点点亮就是「点了又冒出来」）。
+			p.count = 0
+			p.gen++
+			continue
+		}
 		p.busy = false
 		if u.gen != p.gen {
 			// 用户在这一趟回来之前看过动态了：那一趟的数是旧的，作废。
@@ -322,12 +397,29 @@ func (s *Shell) askNewDynamics(done func(count int, err error)) {
 	}()
 }
 
-// markDynamicSeen 记下「用户看到这儿了」。
+// askCatchUp 发起「用户追上来了」那一趟：拉一次动态流的第一页，拿它最新那条的
+// id 当「看过基准」。
 //
-// 落盘在设置里（见 `internal/app/dynamicseen.go` 的文件头）：不落盘的话重启
-// 之后基准还是「从头算」，那个点会一直亮着——而用户明明看过了。
-func (s *Shell) markDynamicSeen() {
-	s.app.MarkDynamicSeen(s.clock.Now())
+// ⚠️ **它在后台 goroutine 里跑**：那是一次网络请求，而在界面线程上等它等于把
+// 整个应用冻住（理由见 feedPoller 那一段的「查询是异步的」）。
+//
+// ⚠️ **落盘是应用层做的**（`App.CatchUpDynamicSeen`）：它知道「基线」是什么、
+// 落在哪；这一层只管「它回来了没有」。
+func (s *Shell) askCatchUp(done func(id string, err error)) {
+	if !s.app.LoggedIn() {
+		done("", nil)
+		return
+	}
+	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("biu: 追动态崩了：%v\n%s", rec, debug.Stack())
+				done("", fmt.Errorf("追动态的代码崩了：%v", rec))
+			}
+		}()
+		id, err := s.app.CatchUpDynamicSeen(context.Background())
+		done(id, err)
+	}()
 }
 
 // viewDynamicDot 是顶栏上的「动态」那一格：有新动态时右上角一个圆点。
@@ -355,12 +447,23 @@ func (s *Shell) viewDynamicDot(c *ui.Context) {
 			if s.withMenuTip(c, iconKey(c, iconFeed, "动态", iconMd, false).
 				Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "动态").Clicked() {
 				// Biu 的 handleOpen：清掉红点，再去看动态。
-				//
+				s.feed.clear()
 				// ⚠️ **还要把「看到哪儿了」记下来**：只清本地那个数的话，下一轮
 				// 又问回同一个数，点过五分钟那个点又冒出来（上游就是那样）。
-				// 记下「用户看到这儿了」之后，问 B 站时的基线就往后挪了。
-				s.feed.clear()
-				s.markDynamicSeen()
+				//
+				// 而「看到哪儿了」是**一条动态的 id**（B 站的 update_baseline 要的
+				// 是那个，不是什么时间戳）——它从「此刻最新那条动态」那儿来。
+				//
+				// ⚠️ **只有那一页已经开着的时候才要现拉一次**：那一页开着的时候它
+				// 自己不会刷新（它只在第一次进去时拉第一页），于是「看过基准」停在
+				// 旧的那一条 → B 站一直说「还有新的」→ **那个点每五分钟回来一次**
+				//（票面「点了不该马上又冒出来」）。
+				//
+				// 而那一页**还没开过**的时候不用管：点过去它自己会拉第一页，而那一页
+				// 的 update_baseline 就是基准（见 dynamicfeed.go 的 adoptFeed）。
+				if s.dynamicFeedOf().started {
+					s.feed.catchUp()
+				}
 				s.navigate(dynamicFeedPath)
 			}
 			// ⚠️ **这里读的是 `s.feed.count`，不是刚进来时记下的那一份**：这一帧
