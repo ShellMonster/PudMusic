@@ -305,6 +305,8 @@ type Shell struct {
 	// full 是全屏播放器自己那一摊，见 fullplayer.go。
 	// **只由 view 在主线程上读写**，不跨 goroutine（铁律一）。
 	full fullPlayer
+	// vv 是满屏里视频画面那一边（见 fullvideo.go）。
+	vv videoView
 
 	// pageBuilds 是「路由页被建了几次」。**给测试看的探针**（理由同
 	// `full.bgDraws`）：满屏开着的时候底下那一页不该再被建，而「有没有被建」

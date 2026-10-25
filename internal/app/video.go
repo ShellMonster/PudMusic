@@ -48,6 +48,16 @@ type videoRun struct {
 	gen    int
 	err    error
 	cancel context.CancelFunc
+	// open 换掉取流那一步（测试用）；空就走真的 B 站。
+	open func(ctx context.Context, it Item, pos time.Duration) (*video.Session, error)
+}
+
+// SetVideoOpener 换掉「怎么拿到一路视频」。**只给测试用**：界面测试没有真的 B 站，
+// 也不该为了点一下角标就去跑一台假 CDN。
+func (a *App) SetVideoOpener(f func(ctx context.Context, it Item, pos time.Duration) (*video.Session, error)) {
+	a.vid.mu.Lock()
+	a.vid.open = f
+	a.vid.mu.Unlock()
 }
 
 func videoKey(it Item) string { return it.Source + "|" + it.Bvid + "|" + it.Cid }
@@ -102,12 +112,19 @@ func (a *App) StartVideo() {
 	}
 	a.vid.gen++
 	gen := a.vid.gen
+	open := a.vid.open
 	a.vid.phase, a.vid.key, a.vid.err, a.vid.cancel = VideoLoading, videoKey(it), nil, cancel
 	a.vid.mu.Unlock()
 	a.wakeAll()
 
 	go func() {
-		sess, err := a.openVideo(ctx, s, it, pos)
+		var sess *video.Session
+		var err error
+		if open != nil {
+			sess, err = open(ctx, it, pos)
+		} else {
+			sess, err = a.openVideo(ctx, s, it, pos)
+		}
 		a.vid.mu.Lock()
 		if a.vid.gen != gen {
 			a.vid.mu.Unlock()
