@@ -290,8 +290,17 @@ func (l *List) viewCard(r ui.ListRow) {
 
 		// ② 封面，四态由 imgcache 画（空地址画空框，不画「失败」），上面压着
 		// hover 反馈：压暗 + 播放三角。上游 `music-list-item/index.tsx:100-107`。
-		hover.RowCover(c, l.cache, m.Cover, coverSize, onRow, m.Title,
-			func() { l.playFrom(i) })
+		//
+		// ⚠️ **「用户」那一档的行不是歌**（`isUserItem`）：那一行按下去是进他的
+		// 空间，所以那一圈反馈换一套——图形、提示、无障碍名三样都换（理由见
+		// `hover.ProfileTip`）。只换一样的话，另一样还在说「放歌」。
+		if isUserItem(m) {
+			hover.RowCoverProfile(c, l.cache, m.Cover, coverSize, onRow, m.Title,
+				func() { l.playFrom(i) })
+		} else {
+			hover.RowCover(c, l.cache, m.Cover, coverSize, onRow, m.Title,
+				func() { l.playFrom(i) })
+		}
 
 		// ③ 标题 + UP 名。这一列 Grow(1)，把剩下的宽度都吃掉。
 		//
