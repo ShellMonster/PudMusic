@@ -183,3 +183,18 @@ func TestAVolumeOfZeroIsNotTheSameAsNoVolume(t *testing.T) {
 		t.Errorf("设置文件里写着音量 0，读出来是 %v，want 0", got)
 	}
 }
+
+func TestThePlaybackRateSurvivesARestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), app.SettingsFileName)
+
+	first := volumeApp(t, path)
+	first.SetRate(1.5)
+	if err := first.CloseSettings(); err != nil {
+		t.Fatal(err)
+	}
+
+	second := volumeApp(t, path)
+	if got := second.Snapshot().Rate; got != 1.5 {
+		t.Errorf("重启之后倍率是 %v，want 1.5", got)
+	}
+}

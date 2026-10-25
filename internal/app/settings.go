@@ -387,6 +387,10 @@ type Settings struct {
 	// 和 `PlayMode` / `ShouldKeepPagesOrderInRandomPlayMode` 同一段理由。
 	Volume *float64 `json:"volume"`
 
+	// PlaybackRate 是用户设的播放倍率。0 表示没设过（倍率的合法范围从 0.5 起，
+	// 所以 0 不会和真值混淆），读出来按原速。重启之后还在。
+	PlaybackRate float64 `json:"playbackRate"`
+
 	// Muted 是静音标志。**它和音量分开存**（票 #311 / 报告 §3.3 的 B2）。
 	//
 	// ⚠️ **别再用「音量 0」顶替静音**：落盘之后那就是个坑——静音之后退出再
