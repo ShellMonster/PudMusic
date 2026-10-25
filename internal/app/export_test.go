@@ -47,7 +47,8 @@ func TestTheExportIsShapedTheWayBiuReadsItBack(t *testing.T) {
 // 凭据一件都不进导出。
 //
 // Cookie / SESSDATA / bili_jct / refresh_token / 带签名的 URL **压根不在设置里**
-// ——凭据在系统钥匙串。这一条靠的是那个布局事实，所以断言的是「导出的 JSON 里
+// ——凭据在另一个文件里（macOS 是 `credentials/session.json`，Windows 是
+// `credentials.dpapi`）。这一条靠的是那个布局事实，所以断言的是「导出的 JSON 里
 // grep 不到这些词」，而不是「某一句 if 拦住了它们」。哪天有人把 cookie 加进
 // `Settings`，这一条会红。
 func TestTheExportCarriesNoCredentialOfAnyKind(t *testing.T) {
