@@ -728,7 +728,7 @@ func TestEveryViewSurvivesTheNarrowestWindow(t *testing.T) {
 }
 
 // minWindowW / minWindowH 是窗口能拖到的最小尺寸，**照抄** `WindowOptions` 里那
-// 两个（`shell.go`：`MinWidth: 900` / `MinHeight: 560`）。
+// 两个（`shell_window.go`：`MinWidth: 900` / `MinHeight: 560`）。
 //
 // ⚠️ **别改小、也别改大**：这一组量的是「挤到最窄时有没有崩、有没有整行消失」。
 // 改小是在量一个用户到不了的尺寸，改大就永远量不到最窄那一档。

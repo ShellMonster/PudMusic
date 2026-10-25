@@ -132,7 +132,7 @@ func countExactText(tt *mygoui.Tester, s string) int {
 // TestTheNinePicturesWrapInsteadOfRunningOffTheEdge 钉住「九张图换行」。
 //
 // ⚠️ 九张 × 92 点 + 八道 6 点的缝 = 876 点，而窗口缩到 `MinWidth` 900
-// （`shell.go` 的 WindowOptions）时列表只有 660 点宽——一个不会换行的 Row
+// （`shell_window.go` 的 WindowOptions）时列表只有 660 点宽——一个不会换行的 Row
 // 把最后几张切在窗口边界外，既看不见也点不着。
 //
 // 判据是量出来的 y：第 4 张必须落在第 1 张**下面**（一行三张）。

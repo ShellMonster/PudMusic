@@ -182,7 +182,7 @@ var avatarMenuItems = []avatarMenuItem{
 		// 走 `Shell.openFeedback`：它把地址交给系统（`Context.OpenURL`），
 		// **而且记一笔**（`lastFeedbackURL`）——无头 Tester 里 `OpenURL` 走不了
 		// 事件循环，于是「点得动」这件事除了「这一项在」之外一句都验不到。
-		// 理由见 shell.go 的 `openFeedback`。
+		// 理由见 shell_mount.go 的 `openFeedback`。
 		s.openFeedback(c)
 	}},
 	{label: "退出登录", icon: iconLogoutCircle, danger: true, run: func(s *Shell, _ *ui.Context) {

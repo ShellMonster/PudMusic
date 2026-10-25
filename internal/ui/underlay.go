@@ -54,7 +54,8 @@ import (
 // 那一层是模态的，底下的按钮点不着），而关掉满屏之后 `Router.View` 照旧从它
 // 记着的那一页接着走——`Router` 的 `view.shown` 记着「上一次画的是哪一页」，
 // 中间跳过多少帧都认得出来，于是**不会**把这一页当成「刚换过来的」再走一遍
-// 换页动画。
+// 换页（我们本来也不做换页动画，见 `router.go` 的 `newRouter`；这一层记的是
+// 「画的是哪一页」，不只服务于动画）。
 func (s *Shell) drawUnderlay(c *ui.Context, st app.State) {
 	if s.underlayHidden() {
 		return

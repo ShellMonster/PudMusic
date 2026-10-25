@@ -123,7 +123,7 @@ func (a *App) announce(text string) {
 // AddAnnounce 登记一扇窗的播报句柄，返回摘掉它的那一个。
 //
 // **每个窗口一个**：主窗口一个、迷你播放器那一个（见 `miniplayer.go`）。
-// 摘掉的那一支由界面层在关窗时调（`internal/ui/shell.go` 的 `closePerWindow`）——
+// 摘掉的那一支由界面层在关窗时调（`internal/ui/shell_window.go` 的 `closePerWindow`）——
 // 不摘的话「进迷你 / 退出迷你」来回十次之后那个列表就有十条，每发生一件事
 // 就多走十趟空转。
 func (a *App) AddAnnounce(fn func(text string)) (remove func()) {

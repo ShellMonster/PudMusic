@@ -118,7 +118,7 @@ func TestCloseWhileACoverIsStillLoading(t *testing.T) {
 	// `context.Canceled` 上不落终态，见 cache.go）。界面上那一句就变成
 	// 「载入中」永远不变。
 	//
-	// 现在碰不到：`images.Close()` 只在窗口**真的**关掉时跑（shell.go 的
+	// 现在碰不到：`images.Close()` 只在窗口**真的**关掉时跑（shell_window.go 的
 	// `OnClosed`），选「隐藏到托盘」时压根跑不到；而选「关掉就退出」时窗口
 	// 关完就退进程了，没人会再画一帧。所以这是一条**待修的隐患**，不是现在
 	// 的故障——已经记在 BMG-43 的报告里，改法是「关掉之后、状态还没落到

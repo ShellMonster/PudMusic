@@ -878,7 +878,7 @@ func TestALongFavoriteNameDoesNotMakeTheRowTaller(t *testing.T) {
 // TestTheSidebarPanicIsCaught 验侧栏画崩了，**程序不崩**，而且切到错误页。
 //
 // ⚠️ 这条证明不了「是侧栏自己那层 Guard 接住的」。`New()` 里 viewMain 外面
-// 已经包了一层 `Guard`（`shell.go`），侧栏在里面，外层照样接得住——把
+// 已经包了一层 `Guard`（`shell_crash.go`），侧栏在里面，外层照样接得住——把
 // viewMain 里那句 `Guard(s.sideBody, s.onPanic)(c)` 换成裸的 `s.sideBody(c)`，
 // 这条照样绿。所以它证明的是**用户看得见的行为**（崩了不死、错误页、有记录），
 // 不是哪一层接的。侧栏那层 Guard 是任务要求的写法，靠 code review 守着。
