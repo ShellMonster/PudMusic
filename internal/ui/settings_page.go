@@ -23,7 +23,6 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
-	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
@@ -942,8 +941,7 @@ func (s *Shell) pickCloseWindow(c *ui.Context, st app.Settings, ro bool) {
 	opts := make([]segmentOption, len(closeWindowOptions))
 	for i, opt := range closeWindowOptions {
 		// ⚠️ **这一排没有图标**：那两档没有配得上语义的图标——「隐藏到托盘」
-		// 在 macOS 上根本不是托盘（那边不建托盘图标，见 `pickTrayNote`），
-		// 画一个托盘图形就是**画了一件不会发生的事**；而「直接退出」能配
+		// 而「直接退出」能配
 		// 退出那一枚，可这一排只有它有图标的话，另一档空着更难看。
 		//
 		// 上游那两档本来也没有图标（`settings/index.tsx` 里那一行是横排单选，
@@ -988,17 +986,6 @@ func (s *Shell) pickAutoStart(c *ui.Context, st app.Settings, ro bool) {
 		s.addToast("开机自启没设上："+strings.TrimPrefix(err.Error(), "app: "), notice.Danger)
 		// 下一帧 `on` 会从设置里重新读（没写成功，所以还是旧值），开关自己弹回去。
 	}
-}
-
-// pickTrayNote 是 macOS 上「没有托盘」那句话。只在该说的话的时候摆。
-func (s *Shell) pickTrayNote(c *ui.Context) {
-	if platform.TraySupported() {
-		return
-	}
-	// macOS 上没有托盘（与 Biu 一致），「隐藏到托盘」这一格在这儿是「收进 Dock」。
-	// 得说出来，不然用户以为 Biu 有而我们没做。
-	ui.Text(c, "macOS 上不建托盘图标（与 Biu 一致）：「隐藏到托盘」是收进程序坞，"+
-		"图标还在，点一下就回来。").FontSize(scale.Font(c, scale.Size12)).TextColor(c.Theme().TextMuted)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -130,7 +130,6 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 	s.settingGroup(c, "系统", func() {
 		s.settingRow(c, "窗口关闭", "选择窗口关闭时的行为",
 			func() { s.pickCloseWindow(c, st, ro) })
-		s.pickTrayNote(c)
 		s.settingRow(c, "开机自启", "系统登录后自动启动应用",
 			func() { s.pickAutoStart(c, st, ro) })
 

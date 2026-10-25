@@ -110,10 +110,8 @@ func TestSettingsPageShowsItsContent(t *testing.T) {
 	if s.builtPage(lookup(settingsPath)) == nil {
 		t.Errorf("设置页没接上 builtPage，画出来的是空状态而不是设置页")
 	}
-	// macOS 上不建托盘（与 Biu 一致），「隐藏到托盘」在这边是收进程序坞。名字和
-	// 实际行为对不上时得说出来，否则用户会以为我们漏做了托盘。
-	if !tt.HasText("macOS 上不建托盘图标") {
-		t.Errorf("没说清 macOS 上没有托盘，文字有 %q", tt.Texts())
+	if tt.HasText("macOS 上不建托盘图标") {
+		t.Errorf("菜单栏图标已经有了，不该再解释「没有托盘」：%q", tt.Texts())
 	}
 }
 
