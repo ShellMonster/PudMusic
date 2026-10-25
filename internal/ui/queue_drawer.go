@@ -17,6 +17,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
@@ -274,6 +275,9 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 	// 阶段先推，**建不建后说**：退场的那一段面板还在树上，所以「关掉」不是「不建」。
 	justIn := s.syncDrawerPhase()
 	if s.drawerPhase == drawerGone {
+		// 抽屉不在了，那道确认也不该留着——留着的话下一次开抽屉时它自己弹出来
+		// （而用户上一次明明已经取消过了）。
+		s.queueClearOpen = false
 		return
 	}
 	// 记一笔「抽屉建了一遍」——给「一帧建了几遍」那条测试数（见 builds.go）。
@@ -420,6 +424,17 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 			s.drawerOpen = false
 		}
 	})
+
+	// 「清空播放列表」那道二次确认。
+	//
+	// ⚠️ **排在抽屉之后**：它是浮在抽屉**上面**的（框架的浮层都挂在同一个
+	// overlay root 上，后建的在上），而它自己是模态的——在它上面点任何别的控件
+	// 都不该生效。
+	//
+	// ⚠️ **放在这里而不是 `viewMain` 里**：满屏播放器开着的时候抽屉由满屏那一支
+	// 建（`viewFullPlayer` 末尾那一句），而 `viewMain` 让开——放在这儿两处都
+	// 盖得住。
+	s.viewQueueClearConfirm(c)
 }
 
 // syncDrawerPhase 推一遍抽屉的阶段机，返回这一帧是不是「刚打开」。
@@ -505,9 +520,20 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 			"把队列滚到正在放的那一首").Clicked() {
 			s.locateCurrent()
 		}
+		// ⚠️ **「清空」要先问一次**（票 #454 / 报告 §四 的第 43 条）：这一下是
+		// **一键销毁整个队列 + 停掉播放**（`app.ClearQueue` → `queue.Reset()` +
+		// `ClearTrack()`），而它原来**没有二次确认、也没有任何事后消息**——本仓库
+		// 对别的破坏性动作（删收藏夹、删下载记录、删本地文件）都有确认框，
+		// 同一个应用两套做法。
+		//
+		// 这里**只记下「要问」，不动手**：真正那一下在 `viewQueueClearConfirm` 里
+		// ——那个框是**模态**的，在它上面点任何别的控件都不该生效。
+		//
+		// ⚠️ **这一枚走 `iconKey`**（悬停时图形变主色，票 #249）：和它旁边那枚
+		// 「定位当前播放」同一档，也和打开这个抽屉的那一枚同一档。
 		if s.withTip(c, iconKey(c, iconDelete, "清空", iconSm, false).
 			Size(iconHit, iconHit).Padding(space.None, space.Px9), "清空播放列表").Clicked() {
-			s.app.ClearQueue()
+			s.queueClearOpen = true
 		}
 	})
 	// 头下面那条线用框架的 `ui.Divider`：1 DIP、无圆角、无内边距，取的就是
@@ -515,6 +541,58 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 	// 逐字一样，只是换了个出处。它看自己在 `Row` 还是 `Column` 里决定给宽度还是
 	// 高度，这里外面是 `Column`，所以画出来还是横着那一条。
 	ui.Divider(c).Key("queue-header-rule")
+}
+
+// viewQueueClearConfirm 是「清空播放列表」之前那道二次确认。
+//
+// ⚠️ **用仓库现成的那一道**（`confirmModal`，见 confirmmodal.go）：删收藏夹、
+// 删下载记录、删本地文件、清除已看完——**全走它**。同一类破坏性动作两套反应是
+// 不行的（报告 §四 的第 43 条点名的就是这一处）。
+//
+// ⚠️ **danger（红）**：这一下毁掉的是**整个队列**，而且撤不回来（B 站那边没有
+// 「撤销队列」这回事），连正在放的那首也停了。它和「清除失效内容」那一种不是
+// 一回事——那一个只从本地记录里拿掉几行。
+//
+// ⚠️ **确认之后给一句事后消息**：确认框问的是「要不要」，而「已经清掉了」是另一
+// 句话——本仓库对做完的破坏性动作都有一句（见 `downloadlist_ops.go` 的
+// `downloadDoneText` 那一套）。
+func (s *Shell) viewQueueClearConfirm(c *ui.Context) {
+	if !s.queueClearOpen {
+		return
+	}
+	switch confirmModal(c, &s.queueClearOpen, confirmSpec{
+		tone:    toneDanger,
+		title:   "清空播放列表吗？",
+		body:    queueClearBody(len(s.queueRows), s.app.Snapshot().HasTrack),
+		confirm: "清空",
+		cancel:  "取消",
+	}) {
+	case confirmAccepted:
+		// 先关弹窗再做那件事：做的时候会弹提示（addToast），而弹窗还开着的话
+		// 用户看到的是提示压在弹窗底下（同一件事见 `later.go` 的
+		// `viewLaterClearConfirm`）。
+		s.queueClearOpen = false
+		s.app.ClearQueue()
+		s.addToast("已清空播放列表", notice.Success)
+	case confirmCancelled:
+		// 取消 / Esc / 点外面：**什么都不做**。
+		s.queueClearOpen = false
+	}
+}
+
+// queueClearBody 是那道确认的正文：说清毁掉的是什么、有几首。
+//
+// ⚠️ **数的是抽屉里画着的那几行**（去重之后）：那是用户看得见的数——顶上写着
+// 「(3)」，正文写着「3 首」才说得通。
+//
+// ⚠️ **「正在放的那首也会停」只在真的有歌在放的时候才说**：没在放的时候提它，
+// 用户会以为这一下还顺手做了别的什么。
+func queueClearBody(n int, playing bool) string {
+	what := "队列里的 " + strconv.Itoa(n) + " 首会清掉"
+	if playing {
+		what += "，正在放的那首也会停下来"
+	}
+	return what + "。"
 }
 
 // viewQueueBody 是抽屉下面那一块：有歌就是那一列，没有歌是一句空状态（分岔照
@@ -702,6 +780,12 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 		//
 		// 配方在 `playingrow.go`（**两个抽屉共用一份**：分集抽屉的「正在放」那一
 		// 行是同一档，见 `partdrawer.go` 的 `viewPartRow`）。
+		//
+		// ⚠️ **这一行以前是全抽屉里唯一一行没有悬停反馈的**（这一支排在
+		// `case hovered` 前面，于是指针落在它上面时底色一点不变）——而它是**可点
+		// 的**（`rowEl.Clicked()` → `app.PlayAt`，只是点了不重头播）。用户分不清
+		// 它是「不能点」还是「坏了」。现在它和别的行一样有悬停反馈（下面那一层
+		// `flat.Feel`），而**封面照旧不浮播放三角**——它已经在放了。
 		rowEl = rowEl.Background(playingRowBg(t)).TextColor(playingRowText(t))
 	case hovered:
 		// 悬停要有反应：这一行点得动（跳过去放它），没有反馈用户不知道它是能点的。
@@ -713,7 +797,8 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 	rowEl = rowEl.Drag(s.queueDragFor(at, row))
 	// 拖着的那一行半透明——框架那一套也是这么画的（见 mygo/ui/list.go 的
 	// reorder）：行还在原处，而跟着指针走的是另一份拷贝。
-	if rowEl.Dragging() {
+	dragging := rowEl.Dragging()
+	if dragging {
 		rowEl = rowEl.Opacity(0.4)
 		// 这一行就是**拖动源** → 「有东西正被拖着」。
 		//
@@ -722,6 +807,20 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 		// 画半透明要的），拿它报「正被拖着」不花钱。差一帧看不出来——插入线晚
 		// 一帧出现，而拖动本来就不是一帧的事（见 shell.go 里 queueDragging）。
 		s.queueDraggingNow = true
+	}
+	// ⚠️ **悬停 / 按下那一层**（`flat` 那一档：悬停 8%、按下 16%）。
+	//
+	// **放在状态底色之后**：这一层是**压上去**的，不是把底色换掉——所以它压在
+	// 「正在放」那层淡主色底上面也成立（那是这一行原来最缺的一层反馈）。
+	//
+	// ⚠️ **普通行原来只有悬停底、没有按下态**：按下去的画面 = 悬停的画面，
+	// 而整个应用里扁平按钮是有 16% 那一层的（`widgets/flat` 的 `feel`）。现在行
+	// 也有——**按下去比悬停深一档**。
+	//
+	// ⚠️ **拖着的时候不铺这一层**：拖动期间那一行一直「按着」（指针没抬起来），
+	// 而它已经半透明了，再压一层 16% 会让拖动的那一行莫名其妙地更深。
+	if !dragging {
+		rowEl = flat.Feel(c, rowEl)
 	}
 	// 指针在这一行上吗？落点就记在这儿。
 	//

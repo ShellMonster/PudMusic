@@ -463,6 +463,13 @@ type Shell struct {
 	// queueList.Key 每帧都要读它，所以它和 rows 数得对上（见 queue_drawer.go）。
 	queueRows []queueRow
 
+	// queueClearOpen 是「清空播放列表」那道二次确认开着没有（抽屉头右上角那枚
+	// 垃圾桶，见 queue_drawer.go 的 viewQueueClearConfirm）。
+	//
+	// ⚠️ **它得跨帧活着**：即时模式每一帧都重画一遍，局部变量下一帧就没了——
+	// 那一帧弹窗还没画出来，状态就已经没了。
+	queueClearOpen bool
+
 	// 播放条上那个分集抽屉的一摊。**同样只由 view 在主线程上读写**。
 	//
 	// partOpen 不进设置，理由和 drawerOpen 一样：抽屉是「我现在要看分集」这一下

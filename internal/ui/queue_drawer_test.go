@@ -930,6 +930,14 @@ func TestQueueDrawerClearEmptiesItAndStops(t *testing.T) {
 	}
 	h.tt.Frame()
 
+	// ⚠️ **要问一次**（票 #454）：这一下是「一键销毁整个队列 + 停掉播放」，而它
+	// 原来连确认都没有。确认框长什么样、取消会怎么样，见 `ticket454_test.go` 的
+	// `TestClearingTheQueueAsksFirst`——这一条只管「确定了之后确实清掉了」。
+	if err := h.tt.Click("确认清空"); err != nil {
+		t.Fatalf("点不了确认键：%v（文字：%q）", err, h.tt.Texts())
+	}
+	h.tt.Frame()
+
 	if n := h.app.Queue().Len(); n != 0 {
 		t.Errorf("清空之后队列还剩 %d 首", n)
 	}
