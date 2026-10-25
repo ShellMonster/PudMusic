@@ -129,7 +129,12 @@ const (
 	iconClose    = "System/close-line.svg"         // 清空
 	iconFeed     = "User & Faces/team-line.svg"    // 动态
 
-	// iconLogin / iconLogout 是顶栏右端那两枚（登录 / 退出登录）。
+	// iconLogin 是顶栏右端那一枚「登录」（未登录时才在）。
+	// iconLogout 是当初顶栏右端那一枚「退出登录」——**它现在顶栏上没有了**
+	//（票 #260）：登录之后顶栏不再有独立的「退出」按钮，退登走**头像下拉里**
+	// 那一项（`navbar_avatar.go` 的 `avatarMenuItems`）。这一枚图**还留着**
+	//（图标集里本来就有这一张，而 `icons_test.go` 有一条钉着「登录和退出那两枚
+	// 一眼分得清」），但顶栏上已经没有它的位置了。
 	//
 	// ⚠️ **这一对换过图形**：原来是 `System/login-circle-line.svg` 和
 	// `System/logout-circle-line.svg`——**同一枚圆圈差一个箭头方向**（一个向右、

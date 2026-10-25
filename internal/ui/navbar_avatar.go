@@ -20,24 +20,25 @@
 // surface1 / radiusLg / shadow.Modal / accentSoft）——那一条从来就没被上面
 // 那两条理由覆盖过，只是当时系统菜单省事。
 //
-// # 六项一项不少，顺序照 Biu
+// # 六项，顺序照 Biu；**按登录态隐藏**也照 Biu
 //
 // Biu 的 `dropdownItems` 是六条，其中「登录」在登录后隐藏、「个人资料」和
 // 「退出登录」在未登录时隐藏（`user/index.tsx:88-158` 的 `hidden`）。
-// **我们不按登录态隐藏**，六项一直都在：
+// **我们照它做**（票 #260）：
 //
-//   - 菜单的**形状**不随登录态变来变去。用户点开下拉，六个位置六个名，记住的
-//     是「第 2 项是个人资料」，而不是「有时候有有时候没有」。
-//   - Biu 那一套「按登录态隐藏」的另一面是：显示出来的那些项点了都有反应。
-//     这里六项都按得动，做不到的那几项把**为什么**说出来。
+//   - **已登录**：画「个人资料 / 设置 / 刷新数据 / 问题反馈 / 退出登录」五项，
+//     **「登录」那一项不画**——登录了还摆一枚「登录」是自相矛盾（用户
+//     2026-10-25 原话：「因为现在登录状态我们的还会显示『登录』的选项」）。
+//   - **未登录**：画「登录 / 设置 / 刷新数据 / 问题反馈」四项，「个人资料」
+//     和「退出登录」那两项不画——没登录就没有资料可看、也没有可退的。
+//
+// ⚠️ **原来我们是故意不按登录态隐藏的**，理由写在旧注释里：「菜单的形状不
+// 随登录态变来变去，用户记住的是『第 2 项是个人资料』」。**那个取舍用户不
+// 认**（票 #260），所以现在按上游那一套来。
 //
 // 六项里「刷新数据」现在是真的做那件事（重新拉一次侧栏的收藏夹，见
 // `app/favorites_refresh.go`）；它拒绝的时候也说话，而那几句话是在应用层说的
 // （那一层才知道有没有登录、收藏夹那一摊挂上没有），这一层不另写一份。
-//
-// 「登录」那一项在已登录时也还是进扫码登录页：那一页底下有「已登录（UID …）」
-// 和退登按钮（见 login.go 的 viewAccountFooter），所以它也是一个说得清
-// 「你现在是什么状态」的地方。
 //
 // # 「退出登录」多了一步确认
 //
@@ -69,24 +70,51 @@ import (
 )
 
 const (
-	// avatarSize 是头像那一枚圆有多大。Biu 是 `size="sm"` 加 `mr-4`，具体值没
-	// 露出来。
+	// avatarSize 是头像那一枚圆有多大。**40**。
 	//
-	// ⚠️ **18 是照着「顶栏那一排的视觉重量」定的**（票 #241 / 报告 F-16）：
-	// 左边那三枚线框图标（文件 / 迷你 / 动态）都是 16 宽的图形，墨迹
-	// 137~141；**头像原来那一枚是 28 直径的一块实心圆盘（墨迹 608）**——是那
-	// 三枚的 **4.3 倍**，用户第一眼落在它上面而不是任何一枚功能键上。
-	// 18 是那一档：现在这一枚的墨迹是 152~160，和那三枚**同一档**
-	// （1.08~1.14 倍，而那三枚彼此之间也有 1.03 倍的差别）。
+	// 🔴 **40 是照上游量出来的**（票 #260）：上游那一枚是
+	// `<Avatar isBordered showFallback size="sm" as="button" …/>`
+	// （`biu/src/layout/navbar/user/index.tsx:176-182`）。
+	//
+	// ⚠️ **不是照 `size="sm"` 猜的**：HeroUI v2 的 `size="sm"` 是**那个盒子**
+	// 32（`w-8 h-8`，见 `@heroui/theme` 的 `avatar` 那一支的 `size` 变体），
+	// 而 `isBordered` 在盒子**外面**又加了一圈——`ring-2 ring-offset-2`
+	// （同一支的 `isBordered` 变体）。Tailwind 的 `ring-2` + `ring-offset-2`
+	// 是「从盒子外沿往外 4 像素」（2 像素的 offset 是底色，再外面 2 像素才是
+	// 环），所以**从外沿到外沿是 32 + 每边 4 = 40**。
+	//
+	// 拿上游自己的截图核过一遍（`biu/screenshots/main.png`，1950×1127）：那张
+	// 图的比例是 **1.25**（顶栏的搜索框 280 CSS px 量到 350 设备像素、后退键
+	// 32 量到 40、播放条 88 量到 110，三处都对得上），而头像那一枚**从外沿
+	// 到外沿量到 50 设备像素 = 40 CSS px**——和上面那笔账严丝合缝。
+	//
+	// ⚠️ **40 相对顶栏是 5/8**：上游顶栏 64 高（`h-16 flex-none`，
+	// `biu/src/layout/index.tsx:40`），我们也是 64（`navbar.go` 的
+	// `navMinHeight`）——**所以照抄 40 就是照抄那个比例**。
+	//
+	// ⚠️ **这里原来是 18**（票 #241 / 报告 F-16）：那一票把它从 28 收到 18，
+	// 理由是「要和左边那三枚线框图标同一档」（墨迹 152~160 对 137~141）。
+	// **那个理由现在不成立了**——用户 2026-10-25 说「头像要大一点，参考 biu
+	// 的比例」，而上游那个 40 **本来就比它旁边的 18 图标大一大截**（上游顶栏
+	// 右边就是几枚小图标 + 一枚大头像）。这一条是用户拍的。
 	//
 	// ⚠️ **改这个数要连着下面那一堆比例一起看**：人形剪影的每一块都是它的分数
-	// 倍（`avatarPerson`）。⚠️ 这句话原来还接着「28 是顶栏这个高度里放得下、
-	// 又不抢戏的一个数」——那是**在它比邻居重四倍的时候**说的，现在那一半
-	// 理由已经作废：这一格要和左边那三枚**同一档**，不是比它们大一号。
+	// 倍（`avatarPerson`）。
+	avatarSize = 40
+
+	// avatarHit 是头像那一格（菜单按钮）的**命中区**边长。
 	//
-	// ⚠️ **左边原来有四枚**（多一枚「设置」）：票 #289 拿掉了顶栏那一枚——侧栏
-	// 和头像下拉里都有同一个动作，三个入口会不一致。
-	avatarSize = 18
+	// ⚠️ **它必须比 `avatarSize` 大**：那一格画出来的是一枚 40 的圆，而命中区
+	// 原来只有 32（`iconHitMd`）——**画出来的那一枚会比命中区还大**，于是圆
+	// 的外沿那几像素点不到。
+	//
+	// ⚠️ **48 = 40 + 每边 4 的留白**：和播放条上那几枚大键一个量级
+	// （`icons.go` 的 `iconHitPlay` = 44）。
+	//
+	// ⚠️ **上游那一格是 32**（`as="button"` 的 Avatar 命中区就是它那个盒子，
+	// 而它画出来的环在盒子外面——上游自己那儿就有一圈点不到）。我们照抄 40
+	// 的**可见**尺寸，就得自己把命中区补上。
+	avatarHit = 48
 
 	// avatarLabel 是头像那个**可点的方块**的无障碍名字，也是测试点得到它的
 	// 凭据——无头 Tester 的 `Find` 找的是「显示着这个字或者标着这个名字」的
@@ -116,17 +144,28 @@ const (
 	// 「18 的图标 + 8 的缝 + 四个字（14 号 ≈ 56）+ 左右各 12」= 106；
 	// 「问题反馈」那一行右边还要多摆一枚 18 的外链记号 + 8 的缝 = 132。
 	// 140 装得下而一点余量都没有，所以这里给 160。
+	//
+	// ⚠️ **票 #260 核过一遍，没动**：头像从 18 放大到 40 之后，浮层那几项的
+	// **内容一点没变**（还是 18 的图标 + 14 号的字），所以宽度跟头像没关系。
+	// 变的只有**浮层锚在哪儿**：它锚在头像那一格的右下角，而那一格从 32 宽
+	// 变成 48 宽——面板的**右沿**跟着右移（面板是 `AnchorBottomEnd`），而
+	// 左沿跟着窗口右边走。
 	avatarMenuW = 160
 
 	// avatarMenuRowH 是每一项多高。
 	//
 	// 上游 HeroUI 的 DropdownItem 是 md 档（`h-10` = 40）；我们是 36
 	//（18 的图标 + 上下各 9）。
+	//
+	// ⚠️ **票 #260 核过一遍，没动**：这一条和头像的大小无关——它量的是行里
+	// 那一枚 18 的图标加上下留白。
 	avatarMenuRowH = 36
 
 	// avatarMenuIconSize 是菜单项左边那一枚图标多大。
 	//
 	// ⚠️ **18**，逐字照上游那六项的 `size={18}`（`user/index.tsx:96` 等六处）。
+	//
+	// ⚠️ **票 #260 核过一遍，没动**：上游那六项的图标是 18，跟头像多大无关。
 	avatarMenuIconSize = 18
 )
 
@@ -146,6 +185,15 @@ type avatarMenuItem struct {
 	// danger 是「这一项是危险动作」——字走危险色那一档（上游的
 	// `color="danger"` + `className="text-danger"`）。
 	danger bool
+	// onlyLoggedIn 是「这一项**只在已登录时**出现」。
+	//
+	// ⚠️ **照上游的 `hidden` 那一栏**（`user/index.tsx:88-158`）：
+	// 「个人资料」和「退出登录」两项 `hidden: !user?.isLogin`。
+	onlyLoggedIn bool
+	// onlyGuest 是「这一项**只在未登录时**出现」。
+	//
+	// ⚠️ **上游的「登录」那一项**是 `hidden: user?.isLogin`——已登录时不画。
+	onlyGuest bool
 	// run 是点了这一项要做的事。
 	run func(s *Shell, c *ui.Context)
 }
@@ -160,9 +208,13 @@ type avatarMenuItem struct {
 // 个人资料 `RiProfileLine`、设置 `RiSettings3Line`、刷新数据 `RiRefreshLine`、
 // 问题反馈 `RiFeedbackLine`（右边还有一枚 `RiExternalLinkLine`）、退出登录
 // `RiLogoutCircleLine`。
+//
+// ⚠️ **这六项一直都在这儿**，画哪几项是每一帧按登录态挑的
+// （`avatarMenuItemsNow`）——`onlyLoggedIn` / `onlyGuest` 那一格就是上游的
+// `hidden` 那一栏（票 #260）。
 var avatarMenuItems = []avatarMenuItem{
-	{label: "登录", icon: iconLoginCircle, run: func(s *Shell, _ *ui.Context) { s.goLogin() }},
-	{label: "个人资料", icon: iconProfile, run: func(s *Shell, _ *ui.Context) { s.goProfile() }},
+	{label: "登录", icon: iconLoginCircle, onlyGuest: true, run: func(s *Shell, _ *ui.Context) { s.goLogin() }},
+	{label: "个人资料", icon: iconProfile, onlyLoggedIn: true, run: func(s *Shell, _ *ui.Context) { s.goProfile() }},
 	{label: "设置", icon: iconSettings, run: func(s *Shell, _ *ui.Context) { s.navigate(settingsPath) }},
 	{label: "刷新数据", icon: iconRefresh, run: func(s *Shell, _ *ui.Context) {
 		// 真的是重新拉一次侧栏那些收藏夹（`app/favorites_refresh.go`）。
@@ -184,9 +236,36 @@ var avatarMenuItems = []avatarMenuItem{
 		// 理由见 shell.go 的 `openFeedback`。
 		s.openFeedback(c)
 	}},
-	{label: "退出登录", icon: iconLogoutCircle, danger: true, run: func(s *Shell, _ *ui.Context) {
+	{label: "退出登录", icon: iconLogoutCircle, danger: true, onlyLoggedIn: true, run: func(s *Shell, _ *ui.Context) {
 		s.askLogout()
 	}},
+}
+
+// avatarMenuItemsNow 是**这一帧该画的那几项**：按此刻的登录态把上游那一栏
+// `hidden` 说过要藏起来的那几项去掉（票 #260）。
+//
+//   - 已登录 → 「登录」那一项不画（`onlyGuest`）。
+//   - 未登录 → 「个人资料」「退出登录」那两项不画（`onlyLoggedIn`）。
+//
+// ⚠️ **登录判据只有 `App.LoggedIn()`**（凭据在钥匙串里，界面这一层碰不到），
+// 而这一层**不存第二份**（理由见文件头那一节）。
+//
+// ⚠️ **调它的地方只有两处**（`viewAvatarMenuItems` 和 `viewAvatarMenuKeys`），
+// 而它们都只在浮层**开着**的时候才跑——所以这一份切片是开浮层那几帧才分配
+// 的，不进平时那几帧的分配预算。
+func (s *Shell) avatarMenuItemsNow() []avatarMenuItem {
+	loggedIn := s.app.LoggedIn()
+	out := make([]avatarMenuItem, 0, len(avatarMenuItems))
+	for _, it := range avatarMenuItems {
+		if it.onlyLoggedIn && !loggedIn {
+			continue
+		}
+		if it.onlyGuest && loggedIn {
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
 }
 
 // goProfile 去「个人资料」那一页。Biu 是 `navigate(`/user/${user?.mid}`)`
@@ -194,6 +273,11 @@ var avatarMenuItems = []avatarMenuItem{
 //
 // 没登录就没有 mid——这时候给一条 `/user/` 空着的路径等于把用户送进 404，
 // 说一句「还没登录」诚实得多。
+//
+// ⚠️ **这一支现在按不到**（票 #260）：「个人资料」那一项未登录时**不画**
+// （上游 `user/index.tsx:96` 的 `hidden: !user?.isLogin`）。这一句留着当
+// 兜底——登录态在这一层是**现问**的，而这一项是上一帧画出来的，中间隔着
+// 一次退登是可能的。
 func (s *Shell) goProfile() {
 	mid := s.app.Session().DedeUserID
 	if mid == "" {
@@ -207,6 +291,9 @@ func (s *Shell) goProfile() {
 //
 // ⚠️ **没登录的时候不問**：没登录就没有可退的，而问一句「确认退出登录？」
 // 再答「确认」是一趟没有意义的往返——直接说一句（和原来一样）。
+//
+// ⚠️ **这一支现在也按不到**（票 #260）：「退出登录」那一项未登录时**不画**
+// （上游 `user/index.tsx:146` 的 `hidden: !user?.isLogin`）。留着当兜底。
 func (s *Shell) askLogout() {
 	if !s.app.LoggedIn() {
 		s.addToast("还没登录，没有可退的", notice.Warning)
@@ -406,14 +493,17 @@ const (
 
 // viewAvatar 是头像 + 它下面那一层下拉。
 //
-// ⚠️ **命中区 32×32，里面那枚圆 20**（票 #241 / 报告 F-16）：顶栏那一排的图标
-// 键命中区都是 32（`iconHitMd`），头像原来那一格只有 28 见方——**它缩小之后
-// 命中区反而更小了**，于是把命中区留在 32、只把**画出来的那一枚圆**收到 20。
+// ⚠️ **命中区 48×48，里面那枚圆 40**（票 #260）：圆放大到 40 之后命中区必须
+// 跟着长——**命中区比画出来的那一枚还小的话，圆的外沿那几像素点不到**
+// （`avatarHit` 那一段有为什么是 48 的账）。
+//
+// ⚠️ **顶栏另外那几枚图标键的命中区还是 32**（`iconHitMd`）——这一票只动
+// 头像这一格。
 func (s *Shell) viewAvatar(c *ui.Context) {
 	// Key 挂在外面这一格上：里面那一枚是**按钮**，而 Key 挂在「创建时处理过
 	// 输入」的控件上会 panic（`ui/element.go:658`）。
 	ui.Column(c).Key("avatar").Children(func() {
-		hit := ui.ButtonBase(c).Size(iconHitMd, iconHitMd).Padding(space.None).
+		hit := ui.ButtonBase(c).Size(avatarHit, avatarHit).Padding(space.None).
 			Label(avatarLabel)
 		// ⚠️ **指针移上去时那个圆头像放大 5%**：上游顶栏那一枚是
 		// `<Avatar ... className="mr-4 cursor-pointer transition-transform
@@ -424,8 +514,8 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 		on := hit.Hovered()
 		hit = hoverZoom(c, hit, "avatar-zoom", on)
 		// 🔴 **悬停时头像外面多一圈主色的环**（票 BMG-253）：放大 5% 是这一排里
-		// **最弱**的反馈——一个 18 像素的圆涨到 19 像素，指针压上去几乎看不出
-		// 区别，而这一格是顶栏里唯一的「个人入口」。
+		// **最弱**的反馈——一个小圆涨到 19 像素，指针压上去几乎看不出区别，而
+		// 这一格是顶栏里唯一的「个人入口」。
 		hit = avatarHoverRing(c, hit, on, float32(avatarSize))
 		hit.Children(func() {
 			// 那一枚圆：**裁成圆的**（里面的图要按圆裁），外面留一圈 1 像素的描边。
@@ -467,9 +557,8 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 //
 // # 为什么不用「铺一层淡底」
 //
-// 那一格的命中区是 32×32，而图只有 18：铺出来的淡底要么是一块 32 的**方块**
-// （方的，和圆头像不搭），要么是一圈 7 像素宽的晕（太宽，抢戏——票 #241 刚把
-// 头像从 28 收到 18 就是为了让它和旁边那三枚同一档）。
+// 那一格的命中区是方的（顶栏那一格 48），而画出来的是一枚圆：铺出来的淡底要么
+// 是一块**方块**（方的，和圆头像不搭），要么是一圈 7 像素宽的晕（太宽，抢戏）。
 //
 // 一圈 2 像素的主色环贴着头像的外沿，是「这一格是活的」最省事也最清楚的一档。
 //
@@ -538,7 +627,11 @@ type avatarMenuMark struct {
 	text ui.Element
 }
 
-// viewAvatarMenuItems 是浮层里那六项。
+// viewAvatarMenuItems 是浮层里那几项。
+//
+// ⚠️ **画哪几项按登录态挑**（票 #260）：这一帧该有哪些项是
+// `avatarMenuItemsNow` 说的——已登录没有「登录」那一项，未登录没有「个人
+// 资料」「退出登录」那两项（照上游 `user/index.tsx:88-158` 的 `hidden`）。
 //
 // ⚠️ **每一项都是一整行按钮**（不是一枚图标键）：上游 HeroUI 的 DropdownItem
 // 是「图标 + 名字」的一行，`startContent` 在左、`endContent` 在右。
@@ -557,10 +650,14 @@ type avatarMenuMark struct {
 func (s *Shell) viewAvatarMenuItems(c *ui.Context) {
 	t := c.Theme()
 	panelBG := s.cardBackground(t)
-	rows := make([]ui.Element, 0, len(avatarMenuItems))
-	marks := make([]avatarMenuMark, 0, len(avatarMenuItems))
+	// ⚠️ **下标是「这一帧画出来的那几项」的序号**，不是 `avatarMenuItems` 里
+	// 那个静态表的序号——两者的编号在登录态不对时**不是一回事**（未登录时
+	// 「个人资料」是静态表里的第 2 项，而画面上它是第 4 项）。
+	items := s.avatarMenuItemsNow()
+	rows := make([]ui.Element, 0, len(items))
+	marks := make([]avatarMenuMark, 0, len(items))
 	hovered := -1
-	for i, item := range avatarMenuItems {
+	for i, item := range items {
 		row := ui.ButtonBase(c).Key("avatar-menu:"+item.label).
 			FillWidth().Height(avatarMenuRowH).
 			Padding(space.None, space.Px12).Gap(space.Px8).
@@ -602,7 +699,7 @@ func (s *Shell) viewAvatarMenuItems(c *ui.Context) {
 			bg = accentSoft(t)
 			rows[i] = rows[i].Background(bg)
 		}
-		col := avatarMenuTextColor(t, avatarMenuItems[i], bg, current)
+		col := avatarMenuTextColor(t, items[i], bg, current)
 		marks[i].icon = marks[i].icon.TextColor(col)
 		marks[i].text = marks[i].text.TextColor(col)
 	}
@@ -657,10 +754,14 @@ func (s *Shell) viewAvatarMenuKeys(c *ui.Context, anchor ui.Element) {
 	up := anchor.Shortcut(0, ui.KeyUp)
 	enter := anchor.Shortcut(0, ui.KeyEnter)
 	space := anchor.Shortcut(0, ui.KeySpace)
+	// ⚠️ **上下走的上限是「这一帧画出来的那几项」的条数**，不是静态表那六条
+	// （票 #260）：登录态不对时画出来的条数不一样，而**画出来的那几项的下标
+	// 就是键盘走的那几项的下标**（见 `viewAvatarMenuItems`）。
+	items := s.avatarMenuItemsNow()
 	switch {
 	case down:
 		// ⚠️ **-1（什么也没选中）往下走一步就是第一项**。
-		s.avatarMenuIndex = min(s.avatarMenuIndex+1, len(avatarMenuItems)-1)
+		s.avatarMenuIndex = min(s.avatarMenuIndex+1, len(items)-1)
 	case up:
 		// ⚠️ **往上不越过第一项**（菜单的老规矩：不在顶上绕回去）。
 		s.avatarMenuIndex = max(s.avatarMenuIndex-1, 0)
@@ -668,8 +769,8 @@ func (s *Shell) viewAvatarMenuKeys(c *ui.Context, anchor ui.Element) {
 		// ⚠️ **没有当前项的时候回车什么都不做**：浮层刚打开时是什么也没选中
 		// （上游 HeroUI 也是这样），而回车的作用是「做当前那一项」——
 		// 没有当前项就没有可做的。
-		if s.avatarMenuIndex >= 0 && s.avatarMenuIndex < len(avatarMenuItems) {
-			s.runAvatarMenuItem(c, avatarMenuItems[s.avatarMenuIndex])
+		if s.avatarMenuIndex >= 0 && s.avatarMenuIndex < len(items) {
+			s.runAvatarMenuItem(c, items[s.avatarMenuIndex])
 		}
 	}
 }

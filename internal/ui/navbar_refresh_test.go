@@ -64,11 +64,11 @@ func refreshShellOpts(t *testing.T, f *folderBili, mid string, opts ...shellOpt)
 //
 // ⚠️ **下拉是自绘的浮层**（原来是系统菜单），所以这一项是**按位置点**的
 // （理由见 `clickAvatarMenuItem`）：按名字找会撞上别处同名的那一个。
-func chooseRefresh(t *testing.T, tt *mygoui.Tester) {
+func chooseRefresh(t *testing.T, s *Shell, tt *mygoui.Tester) {
 	t.Helper()
 	tt.SetFocused(true)
 	openAvatarMenu(t, tt)
-	clickAvatarMenuItem(t, tt, avatarMenuIndexOf("刷新数据"))
+	clickAvatarMenuItem(t, s, tt, "刷新数据")
 }
 
 // refreshList 是「拉回来的收藏夹在画面上了吗」。
@@ -96,13 +96,13 @@ func TestRefreshingReallyPullsTheFoldersAgain(t *testing.T) {
 	f := newFolderBili(t, nil)
 	f.pages = [][]map[string]any{folderPage(1, 2)}
 
-	_, tt := refreshShell(t, f, "7")
+	s, tt := refreshShell(t, f, "7")
 	tt.Frame()
 	if refreshList(tt, "收藏夹 1", "收藏夹 2") {
 		t.Fatalf("起点侧栏上就有收藏夹了（谁塞的？），文字有 %q", tt.Texts())
 	}
 
-	chooseRefresh(t, tt)
+	chooseRefresh(t, s, tt)
 	waitFrames(t, tt, "第一次刷新之后侧栏上出现了刚拉回来的收藏夹", func() bool {
 		return refreshList(tt, "收藏夹 1", "收藏夹 2")
 	})
@@ -117,7 +117,7 @@ func TestRefreshingReallyPullsTheFoldersAgain(t *testing.T) {
 	f.pages = [][]map[string]any{folderPage(900, 2)}
 	f.unlock()
 
-	chooseRefresh(t, tt)
+	chooseRefresh(t, s, tt)
 	waitFrames(t, tt, "第二次刷新之后侧栏换成了新的一份", func() bool {
 		return refreshList(tt, "收藏夹 900", "收藏夹 901")
 	})
@@ -154,10 +154,10 @@ func TestRefreshingTwiceSendsOneRequestAndSaysItIsBusy(t *testing.T) {
 	f.listGate = gate
 	f.pages = [][]map[string]any{folderPage(1, 2)}
 
-	_, tt := refreshShell(t, f, "7")
+	s, tt := refreshShell(t, f, "7")
 	tt.Frame()
 
-	chooseRefresh(t, tt)
+	chooseRefresh(t, s, tt)
 	waitFrames(t, tt, "侧栏上出现那一行进行中", func() bool {
 		return tt.HasText(refreshLine)
 	})
@@ -166,7 +166,7 @@ func TestRefreshingTwiceSendsOneRequestAndSaysItIsBusy(t *testing.T) {
 	// 第二下。它必须被挡下来，而挡下来这件事也要说给用户听——
 	// 而且说的是**另一句话**（侧栏那一行说的是「在飞」，这里说的是「你这一下
 	// 没发出去、因为已经在刷了」）。
-	chooseRefresh(t, tt)
+	chooseRefresh(t, s, tt)
 	tt.Frame()
 	if !tt.HasText(refreshLine) {
 		t.Errorf("第二下之后进行中那一行不见了，文字有 %q", tt.Texts())
@@ -206,10 +206,10 @@ func TestRefreshingWithoutALoginSaysSoAndSendsNothing(t *testing.T) {
 	f := newFolderBili(t, nil)
 	f.pages = [][]map[string]any{folderPage(1, 2)}
 
-	_, tt := refreshShell(t, f, "")
+	s, tt := refreshShell(t, f, "")
 	tt.Frame()
 
-	chooseRefresh(t, tt)
+	chooseRefresh(t, s, tt)
 	waitFrames(t, tt, "说清楚还没登录", func() bool {
 		return tt.HasText("还没登录，登录之后才能刷新收藏夹")
 	})
@@ -227,10 +227,10 @@ func TestRefreshingWithoutALoginSaysSoAndSendsNothing(t *testing.T) {
 // 那一档在真机上基本不出现（客户端是 `main` 挂的），而它出错的症状是**按下去
 // 什么都不发生**——所以照样得说一句话。
 func TestRefreshingWithoutTheFoldersMountedSaysSo(t *testing.T) {
-	_, tt := newLoggedInShell(t, "7")
+	s, tt := newLoggedInShell(t, "7")
 	tt.Frame()
 
-	chooseRefresh(t, tt)
+	chooseRefresh(t, s, tt)
 	waitFrames(t, tt, "说清楚这一摊暂时加载不出来", func() bool {
 		return tt.HasText("刷不了收藏夹：这一摊暂时加载不出来")
 	})

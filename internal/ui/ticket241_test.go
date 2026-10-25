@@ -31,18 +31,24 @@ import (
 // F-16　顶栏末两枚的视觉重量
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheTopBarEndsWithTwoLightControls 钉住「顶栏最右那两枚和左边三枚线框图标
-// 同一档」。
+// TestTheTopBarEndsWithTheUpstreamSizedAvatar 钉住「顶栏最右那两枚」的现状：
+// **登录键**和左边三枚线框图标同一档，**头像**是上游那个尺寸（40）。
 //
 // 判据是**墨迹像素数**：报告那一份就是这么量的（每枚取「图标 ±6 像素」的框，
 // 背景采样在框左上，数和底色差 > 12 的像素）。
 //
-// ⚠️ **量的是图标键自己的框**（32×32），所以五枚是同一块面积上的墨迹——
-// 可比。改之前：头像 608、登录方块 752，而那几枚是 140~152。
+// ⚠️ **量的是图标键自己的框**（32×32），所以几枚是同一块面积上的墨迹——可比。
 //
 // ⚠️ **左边那三枚**（打开文件 / 迷你 / 动态）：原来有四枚，票 #289 拿掉了顶栏
 // 那一枚「设置」（侧栏和头像下拉里都有同一个动作）。
-func TestTheTopBarEndsWithTwoLightControls(t *testing.T) {
+//
+// ⚠️⚠️ **头像不再要求「和那三枚同一档」**（票 #260）：这一条原来量的是
+// 「头像 152~160、那三枚 137~141」，而用户 2026-10-25 说「头像要大一点，
+// 参考 biu 的比例」——**上游那一枚是 40**（顶栏 64 高的 5/8，见
+// `navbar_avatar.go` 的 `avatarSize`），它**本来就**比旁边那些 18 的线框
+// 图标大一大截。所以这一条改成钉「**它就是上游那个尺寸**」，而**其余几枚**
+// 仍旧是同一档。
+func TestTheTopBarEndsWithTheUpstreamSizedAvatar(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
 		if dark {
@@ -83,16 +89,19 @@ func TestTheTopBarEndsWithTwoLightControls(t *testing.T) {
 					tier = inks[label]
 				}
 			}
-			// 头像：和那三枚线框图标**同一档**。
+			// 头像：**上游那个尺寸**（40）。
 			//
-			// ⚠️ **上限给到 1.3 倍**：那一档不是「一模一样」（头像有一圈 1 像素的描
-			// 边，那三枚线框图标没有），而是「同一档」——报告的原话。实测：头像
-			// 152~160、那三枚 137~141，也就是 1.08~1.14 倍（那三枚彼此之间也有
-			// 1.03 倍的差别）。改之前是 608（4.3 倍）。
-			if inks[avatarLabel] > tier*13/10 {
-				t.Errorf("头像那一格的墨迹是 %d 像素，而左边那三枚线框图标是 %d~%d——"+
-					"它比邻居重，用户的眼睛先落在它身上（框 %v）",
-					inks[avatarLabel], inks[lineIcons[0]], tier, rects[avatarLabel])
+			// ⚠️ **量的是「画出来的那一枚圆」的外沿**，不是那一格的命中区
+			// （48）：差的那一圈是留白。量法是**墨迹的包围盒**——那一枚圆自己
+			// 有一圈 1 像素的描边（`viewAvatar` 的 `Border(1, …)`），所以包围盒
+			// 正好就是它的外沿（实测深浅两套都是 40×40）。
+			//
+			// ⚠️ **指针要挪开**（`tt.Move(1180, 300)`）：停在头像上时多出来的那
+			// 一圈悬停环（`avatarHoverRing`）会把包围盒撑到 44。
+			w, h := inkBoxInRect(tt.Image(), rects[avatarLabel], bg)
+			if w < avatarSize-1 || w > avatarSize+1 || h < avatarSize-1 || h > avatarSize+1 {
+				t.Errorf("头像那一枚圆是 %d×%d，want %d×%d——上游那一枚就是 40"+
+					"（顶栏 64 高的 5/8，框 %v）", w, h, avatarSize, avatarSize, rects[avatarLabel])
 			}
 			// 登录键：**和那三枚线框图标同一档**。
 			//
@@ -466,6 +475,29 @@ func inkInRect(img *image.RGBA, r ui.Rect, bg color.RGBA) int {
 		}
 	}
 	return n
+}
+
+// inkBoxInRect 量一格里**墨迹的包围盒**（宽、高）。
+//
+// ⚠️ **它量的是「画出来的那一块东西」有多大，不是那一格有多大**：包围盒只
+// 罩住有墨的地方，所以一圈留白不算进去。
+//
+// ⚠️ **和 `inkInRect` 用的是同一个「算不算墨」的界**（差底色 > 12）——两处
+// 用两个界的话，同一张画面上「墨迹有多少」和「墨迹有多大」会对不上。
+func inkBoxInRect(img *image.RGBA, r ui.Rect, bg color.RGBA) (int, int) {
+	minX, minY, maxX, maxY := 1<<30, 1<<30, -1, -1
+	for y := max(int(r.Y), 0); y < min(int(r.Y+r.H), img.Rect.Max.Y); y++ {
+		for x := max(int(r.X), 0); x < min(int(r.X+r.W), img.Rect.Max.X); x++ {
+			if maxDiff(img.RGBAAt(x, y), bg) > 12 {
+				minX, maxX = min(minX, x), max(maxX, x)
+				minY, maxY = min(minY, y), max(maxY, y)
+			}
+		}
+	}
+	if maxX < 0 {
+		return 0, 0
+	}
+	return maxX - minX + 1, maxY - minY + 1
 }
 
 // inkLine 是一行墨迹的左右边界和它占的行号。
