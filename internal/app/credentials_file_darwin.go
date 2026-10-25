@@ -51,6 +51,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -83,6 +84,12 @@ const (
 
 	// legacyKeychainAccount 是旧那一项的账号名。
 	legacyKeychainAccount = "primary"
+
+	// cleanupMarkerName 是「钥匙串里可能还留着旧的一份，要清」的标记文件名。
+	//
+	// ⚠️ 它放在**用户数据目录的根**，不在凭据子目录里——理由见
+	// markCleanupPending 的注释。
+	cleanupMarkerName = ".keychain-cleanup"
 )
 
 // 权限位。
@@ -93,6 +100,14 @@ const (
 const (
 	credentialsFileMode = 0o600
 	credentialsDirMode  = 0o700
+
+	// groupOrOtherBits 是「组和其他用户」那三个权限位。
+	//
+	// ⚠️ 判「权限被放宽」**只看这三个位**：owner 的执行位（0700）对凭据文件
+	// 不算宽——组和其他用户一个字节都读不到。
+	// （早先的判据是 `perm &^ 0600 != 0`，它把 0700 也算成「宽」，
+	// 而文案写着「别人能读了」——那是假的。）
+	groupOrOtherBits = 0o077
 )
 
 // fileStore 是 macOS 上的凭据后端。
@@ -124,6 +139,11 @@ func (f *fileStore) Name() string { return "macos-file" }
 
 // Load 读出登录态。文件不存在就是 ErrNotLoggedIn。
 func (f *fileStore) Load(ctx context.Context) (Session, error) {
+	// ⚠️ **清理要在所有路径上都跑**：包括「钥匙串锁着、搬不动」那条——
+	// 那条路会写下一个「待清理」的标记，而真正把它删掉的就是这一步。
+	// 用 defer 是因为它横跨了好几个 return。
+	defer f.cleanupLegacyKeychainItem(ctx)
+
 	blob, err := f.readFile()
 	if errors.Is(err, os.ErrNotExist) {
 		// 文件还没有 → 可能是从旧版（钥匙串）升上来的，试着搬一次。
@@ -133,19 +153,35 @@ func (f *fileStore) Load(ctx context.Context) (Session, error) {
 		// 钥匙串里那份早就被搬走并删掉了，搬也搬不到什么；
 		// 而「目录都不在」才是「这个后端第一次上桌」。
 		if _, dirErr := os.Stat(filepath.Dir(f.path)); errors.Is(dirErr, os.ErrNotExist) {
-			if err := f.migrateFromKeychain(ctx); err != nil {
-				// 搬不动不是错误：没登录就是没登录。
+			migrated, mErr := f.migrateFromKeychain(ctx)
+			switch {
+			case migrated:
+				// 搬成功了（**哪怕钥匙串那一项没删掉**）→ 文件里有凭据，
+				// 用户是登录着的。「没删掉」那件事由标记文件记着，下次启动再清一次。
+				//
+				// ⚠️ 这里**不能**因为「没删掉」就报「没登录」：文件里明明有可用的
+				// 凭据，报「没登录」会让用户白扫一次码（评审逮到过这一条）。
+				blob, err = f.readFile()
+				if err != nil {
+					return Session{}, fmt.Errorf("%w: 读 %s: %v", ErrBackend, f.path, err)
+				}
+			case errors.Is(mErr, errNoLegacyKeychainItem):
+				// 钥匙串里本来就没有旧的那一项 → 没得搬。
+				//
+				// ⚠️ **也要记一笔**（把凭据目录建出来）：否则每次启动都会去
+				// 碰一次钥匙串，而钥匙串锁着时那一次会弹框要密码。
+				f.markCleanupPending()
 				return Session{}, ErrNotLoggedIn
-			}
-			blob, err = f.readFile()
-			if errors.Is(err, os.ErrNotExist) {
+			default:
+				// 搬不动（多半是钥匙串锁着）：这次按没登录处理，
+				// 但**记一笔「可能还有旧的一份要清」**，下次启动再清。
+				f.markCleanupPending()
 				return Session{}, ErrNotLoggedIn
 			}
 		} else {
 			return Session{}, ErrNotLoggedIn
 		}
-	}
-	if err != nil {
+	} else if err != nil {
 		return Session{}, fmt.Errorf("%w: 读 %s: %v", ErrBackend, f.path, err)
 	}
 	var s Session
@@ -191,10 +227,48 @@ func (f *fileStore) Clear(context.Context) error {
 	return nil
 }
 
-// readFile 读凭据文件，顺便**查权限**。
+// readFile 读凭据文件，顺便**把被放宽的权限收回来**。
+//
+// # 为什么权限不对**不**算读失败
+//
+// 这一段的第一版是「权限比 0600 宽就返回 ErrBackend」。后果是一条**没人想到的**
+// 删除链：
+//
+//	启动 → 读凭据 → 权限被判成「宽」→ Load 返回 ErrBackend
+//	     → Account.restore 判定「后端坏了」→ 调 Logout
+//	     → store.Clear → **凭据文件被删掉** → 用户的登录态没了
+//
+// 而界面上什么也不说（只有一行日志），README 还在教用户
+// 「chmod 644 之后启动应用」来自验——照着做一次就丢一次登录态。
+// （这条链被评审逮到过一次，见 issue #493 的收尾说明。）
+//
+// 现在的口径：**权限被放宽是「该修」，不是「凭据坏了」**。
+// 文件里的内容还是好的，登录态还在——所以照常读出来，
+// 同时把权限**收回 0600**（能收就收），并记一行日志说清发生过什么。
+//
+// 「被发现」的方式也因此变得无损：权限自己收回去了，用户 `ls -l` 一眼看得见，
+// 不需要为了看一条告警而丢掉登录态。
+//
+// # 判据只看 group / other
+//
+// 0700（owner 可执行）对凭据文件不算「宽」——组和其他用户一个字节都读不到。
+// 早先的判据 `perm &^ 0600 != 0` 会把它算成「宽」，那是错的：
+// 报错文案说的是「别人能读了」，而 0700 别人根本读不到。
 func (f *fileStore) readFile() ([]byte, error) {
-	if err := checkPermissions(f.path); err != nil {
+	perm, err := checkPermissions(f.path)
+	if err != nil {
 		return nil, err
+	}
+	if perm&groupOrOtherBits != 0 {
+		// 权限被放宽了 → 收回来 + 说出来。
+		if err := os.Chmod(f.path, credentialsFileMode); err != nil {
+			log.Printf("biu: 凭据文件 %s 的权限是 %04o，比应有的 %04o 宽"+
+				"（别人能读了），收不回来：%v；请手动 chmod 600 %q",
+				f.path, perm, credentialsFileMode, err, f.path)
+		} else {
+			log.Printf("biu: 凭据文件 %s 的权限被放宽成 %04o，已收回 %04o",
+				f.path, perm, credentialsFileMode)
+		}
 	}
 	return os.ReadFile(f.path)
 }
@@ -243,36 +317,27 @@ func (f *fileStore) writeFile(blob []byte) error {
 	return nil
 }
 
-// checkPermissions 查凭据文件的权限有没有被放宽。
+// checkPermissions 查凭据文件的权限有没有被放宽（只看 group / other）。
 //
-// # 为什么要有这一道
-//
-// 权限位**不是保险栓**：它是「提醒」。一旦这个文件变成 0644（世界可读），
+// ⚠️ **权限位不是保险栓**：它是「提醒」。一旦这个文件变成 0644（世界可读），
 // **没有任何系统会报错**——它照常读、照常写，登录态照常能用，
 // 只是别的用户也能看了。症状是静默的。
 //
-// 所以这里自己会喊：发现权限比 0600 宽，就**拒绝读**并说清楚怎么修。
+// 所以这里自己会喊。⚠️ **但「喊」的方式是「收回去 + 记日志」，不是「拒绝读」**：
+// 拒绝读会让上层判定「后端坏了」，而那条路的尽头是**把凭据删掉**
+// （见 readFile 的注释）。所以：**读照常读，权限顺手收回。**
 //
-// # 为什么是「拒绝读」而不是「读但警告」
-//
-// 因为「读但警告」在 GUI 应用里等于**没有警告**：窗口一闪而过，用户看不见；
-// 而凭据已经躺在那儿被人读过了。宁可让用户登不上（他能按提示 chmod 回来），
-// 也不要让它悄悄变宽。
-func checkPermissions(path string) error {
+// 判据只看 group / other 那三个位：owner 的执行位（0700）不算「宽」，
+// 因为组和其他用户一个字节都读不到。
+func checkPermissions(path string) (os.FileMode, error) {
 	st, err := os.Stat(path)
 	if err != nil {
-		return err // 文件不存在 → 原样交给调用方处理
+		return 0, err // 文件不存在 → 原样交给调用方处理
 	}
 	if st.IsDir() {
-		return fmt.Errorf("%w: %s 是个目录，不该是凭据文件", ErrBackend, path)
+		return st.Mode().Perm(), fmt.Errorf("%w: %s 是个目录，不该是凭据文件", ErrBackend, path)
 	}
-	perm := st.Mode().Perm()
-	if perm&^credentialsFileMode != 0 {
-		return fmt.Errorf("%w: %s 的权限是 %04o，比应有的 %04o 宽"+
-			"（别人能读了）；修：chmod 600 %q",
-			ErrBackend, path, perm, credentialsFileMode, path)
-	}
-	return nil
+	return st.Mode().Perm(), nil
 }
 
 // migrateFromKeychain 把旧版留在钥匙串里的登录态搬进文件，然后删掉钥匙串那一项。
@@ -298,7 +363,16 @@ func checkPermissions(path string) error {
 //
 // 搬完之后钥匙串里还留着同一份 SESSDATA 的明文——**留着就等于没搬**。
 // 而且它还在被「点一次始终允许就多一条 cdhash」的历史污染着。
-func (f *fileStore) migrateFromKeychain(ctx context.Context) error {
+//
+// # 返回值
+//
+//   - `(true, nil)`：搬完了，钥匙串那一项也删掉了。
+//   - `(true, errCleanupPending)`：搬完了，但**钥匙串那一项没删掉**。
+//     ⚠️ 这**不是失败**：文件里已经有可用的凭据了，用户是登录着的。
+//     旧的那份明文还在钥匙串里 → 写一个标记文件，下次启动再删一次。
+//   - `(false, errNoLegacyKeychainItem)`：钥匙串里本来就没有旧的那一项。
+//   - `(false, 其它错误)`：搬不动（多半是钥匙串锁着）。
+func (f *fileStore) migrateFromKeychain(ctx context.Context) (bool, error) {
 	// ⚠️ 钥匙串锁着的时候，`security` 会弹框要密码——那个框会一直挂着。
 	// 所以给它一个上限：搬不过去就当没登录（用户重新扫码），
 	// 不能让整个应用卡在启动上。
@@ -307,32 +381,96 @@ func (f *fileStore) migrateFromKeychain(ctx context.Context) error {
 
 	content, err := f.readLegacyKeychainItem(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if len(bytes.TrimSpace(content)) == 0 {
-		return errors.New("钥匙串里那一项是空的")
+		return false, errors.New("钥匙串里那一项是空的")
 	}
 	// ⚠️ **先验一下它真的是我们认得的格式**：直接写进去的话，
 	// 一个解析不了的旧内容会变成「文件里有一份坏 JSON」，症状是「一直登不上」。
 	var probe Session
 	if err := json.Unmarshal(bytes.TrimSpace(content), &probe); err != nil {
-		return fmt.Errorf("钥匙串里那份解不开: %w", err)
+		return false, fmt.Errorf("钥匙串里那份解不开: %w", err)
 	}
 	if !probe.LoggedIn() {
-		return errors.New("钥匙串里那份不是登录态")
+		return false, errors.New("钥匙串里那份不是登录态")
 	}
 	if err := f.Save(ctx, probe); err != nil {
-		return err
+		return false, err
 	}
 	// 文件已经写好并核对过了 → 现在删钥匙串那一项。
 	if err := f.deleteLegacyKeychainItem(ctx); err != nil {
-		// 删不掉不是致命的：文件里已经有了，用户是登录着的。
-		// 但**必须说出来**——钥匙串里那份明文还在。
-		return fmt.Errorf("文件已经搬好了，但钥匙串里那一项删不掉（%v）；"+
+		// 删不掉**不是致命**：文件里已经有了，用户是登录着的。
+		// 但**必须记下来**——钥匙串里那份明文还在，下次启动要再删一次。
+		f.markCleanupPending()
+		log.Printf("biu: 登录态已经搬进 %s，但钥匙串里那一项删不掉（%v）；"+
+			"它里面还留着同一份登录态，下次启动会再删一次", f.path, err)
+		return true, fmt.Errorf("%w: 文件已经搬好了，但钥匙串里那一项删不掉（%v）；"+
 			"它里面还留着同一份登录态，手动删：security delete-generic-password -s %s",
-			err, legacyKeychainService)
+			errCleanupPending, err, legacyKeychainService)
 	}
-	return nil
+	return true, nil
+}
+
+// errNoLegacyKeychainItem 说「钥匙串里本来就没有旧的那一项」。
+//
+// ⚠️ 它跟「搬不动」是**两件事**，必须分开：
+// 「没有」是正常状态（没登录过，或者已经搬过了）；
+// 「搬不动」是钥匙串锁着之类，**可能**还有一份旧的在那儿——
+// 那时要记一笔，下次启动再清。
+var errNoLegacyKeychainItem = errors.New("钥匙串里没有旧的那一项")
+
+// errCleanupPending 说「搬完了，但钥匙串那一项还没删掉」。
+//
+// ⚠️ 调用方**不能**把它当成「没登录」：文件里明明有可用的凭据。
+var errCleanupPending = errors.New("钥匙串里那一项还没删掉")
+
+// markCleanupPending 记一笔「钥匙串里可能还留着旧的一份，要清」。
+//
+// 它同时**把凭据目录建出来**——这一步是有讲究的：
+//
+// 「凭据目录存在」是「**不再自动尝试迁移**」的判据（见 Load）。
+// 所以搬不动的时候（多半是钥匙串锁着）把目录建出来，迁移这条���就到此为止：
+// 否则每次启动都会去碰一次钥匙串，而钥匙串锁着时那一次会弹框要密码——
+// 那正是这一票要消除的现象。
+//
+// ⚠️ **代价**：钥匙串锁着的那一次，旧的那份登录态**搬不过来**，
+// 用户要重新扫码一次（README「已知边界」里写了这一条）。
+// 那份明文仍然会被清掉（下面那个标记就是干这个的），所以判据 ② 照样成立。
+//
+// ⚠️ 标记放在**用户数据目录的根**，不在凭据子目录里：
+// 放在子目录里就得先建那个目录——而那正是这一步要做的（建凭据目录）。
+func (f *fileStore) markCleanupPending() {
+	// 建凭据目录 → 迁移这条路到此为止（理由见上面的注释）。
+	if err := os.MkdirAll(filepath.Dir(f.path), credentialsDirMode); err != nil {
+		log.Printf("biu: 建 %s 失败：%v", filepath.Dir(f.path), err)
+	}
+	marker := filepath.Join(f.dir, cleanupMarkerName)
+	if err := os.WriteFile(marker, []byte(legacyKeychainService), credentialsFileMode); err != nil {
+		log.Printf("biu: 记不下「钥匙串里还有旧的一份」这一笔（%v）：%v", marker, err)
+	}
+}
+
+// cleanupLegacyKeychainItem 把钥匙串里旧的那一项删掉（如果它还在）。
+//
+// ⚠️ **只在标记存在时才做**：没有标记就完全不碰钥匙串——
+// 那正是这一票的全部意义（钥匙串不再参与）。
+//
+// ⚠️ 删不掉就留着标记，下次启动再试。**清不掉不影响登录态**：
+// 凭据已经在文件里了。
+func (f *fileStore) cleanupLegacyKeychainItem(ctx context.Context) {
+	marker := filepath.Join(f.dir, cleanupMarkerName)
+	if _, err := os.Stat(marker); err != nil {
+		return // 没有标记 → 不碰钥匙串
+	}
+	// ⚠️ 钥匙串锁着时 `security` 会弹框要密码，那个框会一直挂着 → 给它一个上限。
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if err := f.deleteLegacyKeychainItem(ctx); err != nil {
+		log.Printf("biu: 钥匙串里旧的那一项还是删不掉（%v）；下次启动再试", err)
+		return
+	}
+	_ = os.Remove(marker)
 }
 
 // readLegacyKeychainItem 读出钥匙串里旧的那一项（不打印内容）。
@@ -356,8 +494,10 @@ func (f *fileStore) readLegacyKeychainItem(ctx context.Context) ([]byte, error) 
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		// 找不到是**正常状态**（没登录过 / 已经搬过了）。
+		// ⚠️ 它跟「读不出来」必须分开：找不到 = 钥匙串里没有旧的那一份，
+		// 读不出来 = 可能有（钥匙串锁着）——后者要记一笔，下次再清。
 		if ee := new(exec.ExitError); errors.As(err, &ee) && ee.ExitCode() == 44 {
-			return nil, errors.New("钥匙串里没有旧的那一项")
+			return nil, errNoLegacyKeychainItem
 		}
 		return nil, fmt.Errorf("读钥匙串失败: %v: %s", err, strings.TrimSpace(stderr.String()))
 	}

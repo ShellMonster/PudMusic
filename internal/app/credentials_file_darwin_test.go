@@ -6,10 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -261,9 +261,12 @@ func TestTheCredentialsFileIsOnlyReadableByItsOwner(t *testing.T) {
 
 // TestAWidenedCredentialsFileIsCaught 钉住「权限被放宽要能被发现」。
 //
-// 这一条对应的是**静默出错**：文件变成 0644 之后，没有任何系统会报错——
-// 它照常读、照常写，登录态照常能用，只是别的用户也能看了。
-// 所以这一层自己得会喊。
+// ⚠️ **而且不能因此把登录态弄丢**：早先的版本在这里返回 ErrBackend，
+// 于是上层判定「后端坏了」→ Logout → **凭据文件被删掉** → 用户的登录态没了，
+// 而界面上什么也不说（评审逮到过，见 issue #493 的收尾说明）。
+//
+// 现在的口径：**读照常读，权限顺手收回**——
+// 「被发现」的方式是权限自己收回去了（`ls -l` 一眼看得见），不需要丢数据。
 func TestAWidenedCredentialsFileIsCaught(t *testing.T) {
 	f := newTestStore(t)
 	ctx := context.Background()
@@ -273,12 +276,165 @@ func TestAWidenedCredentialsFileIsCaught(t *testing.T) {
 	if err := os.Chmod(f.path, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := f.Load(ctx)
-	if !errors.Is(err, ErrBackend) {
-		t.Fatalf("权限被放宽后取，应是 ErrBackend，实际 %v", err)
+
+	// ① 读得出来——登录态没丢。
+	got, err := f.Load(ctx)
+	if err != nil {
+		t.Fatalf("权限被放宽不该让读取失败：%v", err)
 	}
-	if !strings.Contains(err.Error(), "chmod 600") {
-		t.Errorf("报错要告诉用户怎么修，实际：%v", err)
+	if got.SESSDATA != "sessdata-value" {
+		t.Errorf("读回来的登录态不对：SESSDATA=%q", got.SESSDATA)
+	}
+	// ② 权限被收回了——这就是「被发现」。
+	st, err := os.Stat(f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := st.Mode().Perm(); perm != credentialsFileMode {
+		t.Errorf("权限没有被收回：%04o，应是 %04o", perm, credentialsFileMode)
+	}
+}
+
+// TestAnExecutableCredentialsFileIsNotTooWide 钉住「判据只看 group / other」。
+//
+// 0700（owner 可执行）对凭据文件**不算「宽」**：组和其他用户一个字节都读不到。
+// 早先的判据 `perm &^ 0600 != 0` 会把它算成「宽」，而报错文案写着
+// 「别人能读了」——那是假的，而且照样会把用户引上「拒绝读 → 删凭据」那条路。
+func TestAnExecutableCredentialsFileIsNotTooWide(t *testing.T) {
+	f := newTestStore(t)
+	ctx := context.Background()
+	if err := f.Save(ctx, testSession()); err != nil {
+		t.Fatalf("存：%v", err)
+	}
+	if err := os.Chmod(f.path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Load(ctx); err != nil {
+		t.Fatalf("0700 不该算「宽」：%v", err)
+	}
+	st, err := os.Stat(f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := st.Mode().Perm(); perm != 0o700 {
+		t.Errorf("0700 不该被改动：%04o", perm)
+	}
+}
+
+// TestTheMigrationSurvivesAFailedKeychainDeletion 钉住「搬成功但钥匙串删不掉」。
+//
+// 那一项删不掉时（钥匙串锁着、security 失败……），**文件里已经有可用的凭据了**，
+// 用户是登录着的。早先的代码把任何迁移错误一律映射成「没登录」，
+// 于是用户明明登录着却被当成没登录（评审逮到过）。
+//
+// 这条用一个**假的 security** 模拟「find 成功、delete 失败」。
+func TestTheMigrationSurvivesAFailedKeychainDeletion(t *testing.T) {
+	fake := t.TempDir()
+	content := `{"cookies":[],"SESSDATA":"sess","bili_jct":"jct","DedeUserID":"1","refresh_token":"rt"}`
+	script := "#!/bin/sh\n" +
+		"case \"$1\" in\n" +
+		"  find-generic-password) printf '%s' '" + content + "'; exit 0;;\n" +
+		"  delete-generic-password) exit 45;;\n" +
+		"esac\n" +
+		"exit 1\n"
+	if err := os.WriteFile(filepath.Join(fake, "security"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	f := newTestStore(t)
+	got, err := f.Load(context.Background())
+	if err != nil {
+		t.Fatalf("钥匙串删不掉不该让读取失败：%v", err)
+	}
+	if got.SESSDATA != "sess" {
+		t.Errorf("迁过来的登录态不对：SESSDATA=%q", got.SESSDATA)
+	}
+	// 旧的那份还在钥匙串里 → 必须留下一个「待清理」的标记。
+	if _, err := os.Stat(filepath.Join(f.dir, cleanupMarkerName)); err != nil {
+		t.Errorf("钥匙串里旧的那一份还没删掉，应该留下清理标记：%v", err)
+	}
+}
+
+// TestAWidenedCredentialsFileDoesNotThrowAwayTheLoginState 是评审给的那条
+// 复现路径的**正面版本**：
+//
+//	Save 一份登录态 → chmod 0644 → 走真路径 restore(nil)
+//	→ 凭据文件**必须还在**，登录态**必须还在**。
+//
+// 早先的版本：权限自检让 Load 失败 → restore 判定「后端坏了」→ Logout
+// → **凭据文件被删掉** → 用户的登录态没了，而界面上什么也不说。
+func TestAWidenedCredentialsFileDoesNotThrowAwayTheLoginState(t *testing.T) {
+	f := newTestStore(t)
+	ctx := context.Background()
+	if err := f.Save(ctx, testSession()); err != nil {
+		t.Fatalf("存：%v", err)
+	}
+	if err := os.Chmod(f.path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := newAccount(f, nil)
+	// restore(nil) 最后会因为「没有客户端」返回错，但那是在**读完凭据之后**。
+	_ = a.restore(nil)
+
+	if _, err := os.Stat(f.path); err != nil {
+		t.Fatalf("凭据文件被删了：%v", err)
+	}
+	if !a.mgr.Current().LoggedIn() {
+		t.Error("登录态没了")
+	}
+}
+
+// clearingStore 是「读不出来」的后端，并且**记下有没有被 Clear 过**。
+type clearingStore struct{ cleared bool }
+
+func (*clearingStore) Name() string { return "clearing" }
+func (*clearingStore) Load(context.Context) (Session, error) {
+	return Session{}, fmt.Errorf("%w: 读不出来", ErrBackend)
+}
+func (*clearingStore) Save(context.Context, Session) error { return nil }
+func (c *clearingStore) Clear(context.Context) error {
+	c.cleared = true
+	return nil
+}
+
+// TestABackendThatCannotReadDoesNotThrowAwayTheCredentials 钉住
+// 「读不出来 ≠ 凭据该被删掉」。
+//
+// 清掉是**不可逆**的（凭据一删，登录态就没了），而「读不出来」只是
+// 暂时的问题——凭据还在那儿，下次读得到。所以只有「解不开」
+// （ErrCorrupt）才清，「读不出来」（ErrBackend）不清。
+func TestABackendThatCannotReadDoesNotThrowAwayTheCredentials(t *testing.T) {
+	store := &clearingStore{}
+	a := newAccount(store, nil)
+	if err := a.restore(nil); !errors.Is(err, ErrBackend) {
+		t.Fatalf("restore 应把后端的错原样带出来，实际 %v", err)
+	}
+	if store.cleared {
+		t.Error("后端只是读不出来，凭据却被清掉了")
+	}
+}
+
+// TestTheMigrationLeavesAMarkerWhenTheKeychainCannotBeRead 钉住
+// 「钥匙串读不到 → 留下待清理的标记」。
+//
+// 那一项可能还在钥匙串里（钥匙串锁着而已），而判据 ② 要求它最后必须没有。
+// 所以搬不动的时候要记一笔，下次启动再清。
+func TestTheMigrationLeavesAMarkerWhenTheKeychainCannotBeRead(t *testing.T) {
+	fake := t.TempDir()
+	script := "#!/bin/sh\nexit 1\n" // find 和 delete 都失败
+	if err := os.WriteFile(filepath.Join(fake, "security"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	f := newTestStore(t)
+	if _, err := f.Load(context.Background()); !errors.Is(err, ErrNotLoggedIn) {
+		t.Fatalf("钥匙串读不到时应是 ErrNotLoggedIn，实际 %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(f.dir, cleanupMarkerName)); err != nil {
+		t.Errorf("应该留下「待清理」的标记：%v", err)
 	}
 }
 
