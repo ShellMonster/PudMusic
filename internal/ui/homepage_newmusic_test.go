@@ -678,3 +678,62 @@ func TestRenderNewMusicShots(t *testing.T) {
 		})
 	}
 }
+
+// TestRenderPopTabShots 把「流行」那一屏存成 PNG：顶图在顶上那张，和滚一段之后
+// 顶图滚走那张。深浅各一套，外加三个主题方案各看一眼。
+//
+//	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderPopTabShots
+//
+// ⚠️ **深浅两套都要出**（DESIGN.md §八），而**主题方案也要各看一眼**（§零）：
+// 那一块的颜色全是主题令牌出来的（没有写死的颜色），所以每一套都要看一眼。
+func TestRenderPopTabShots(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			b := newTestShell(t, systemIsDark(dark))
+			s, tt := b.s, b.tt
+			s.home.SetSongs(fullSongs())
+			homeFrame(tt)
+			clickTab(t, tt, homePopTab)
+			homeFrame(tt)
+
+			// 指针停在窗口右下那片空地上：第一张要的是「平时」。
+			tt.Move(1180, 770)
+			homeFrame(tt)
+			save(t, dir, "39-"+name+"-流行-顶图在顶上.png", tt)
+
+			// 滚一段：顶图跟着滚走了（票 #369 的头一条）。
+			tt.Scroll(homeW/2, homeH-150, 0, 1200)
+			homeFrame(tt)
+			save(t, dir, "40-"+name+"-流行-顶图滚走之后.png", tt)
+		})
+	}
+
+	// 三个主题方案各看一眼（暖纸 / 暮光 / 柔雾）。经典是默认外观，浅色那张就是它。
+	for _, preset := range []app.ThemePreset{
+		app.ThemePresetWarmPaper, app.ThemePresetDuskAmber, app.ThemePresetSoftPeach,
+	} {
+		t.Run(string(preset), func(t *testing.T) {
+			st := app.DefaultSettings("")
+			st.ThemePreset = preset
+			st.ThemeMode = app.ThemeModeLight
+			b := newTestShell(t, withSettings(st))
+			s, tt := b.s, b.tt
+			s.home.SetSongs(fullSongs())
+			homeFrame(tt)
+			clickTab(t, tt, homePopTab)
+			homeFrame(tt)
+			tt.Move(1180, 770)
+			homeFrame(tt)
+			save(t, dir, "41-"+string(preset)+"-流行-顶图在顶上.png", tt)
+		})
+	}
+}
