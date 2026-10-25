@@ -538,6 +538,7 @@ type App struct {
 	// trackFade 是切歌淡入淡出的时长（0 = 关），fadeOutFor 是已经开始淡出的那台
 	// 播放器，fadeInNext/fadeInUntil 是「下一台新播放器按这个时长淡入」的一次性标记。
 	trackFade   time.Duration
+	eqGains     [10]float64
 	fadeOutFor  *audio.Player
 	fadeInNext  time.Duration
 	fadeInUntil time.Time
@@ -1032,7 +1033,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	//
 	// ⚠️ **送进去的是增益，不是音量那一格**：静音的时候增益是 0，而音量那一格
 	// 记的还是用户设的值（取消静音放回去的就是它）。
-	p.SetVolume(a.gainLocked()).SetRate(a.rate).SetNormalize(a.normalize)
+	p.SetVolume(a.gainLocked()).SetRate(a.rate).SetNormalize(a.normalize).SetEQ(a.eqGains)
 	a.applyFadeInLocked(p)
 	a.player = p
 	a.online = nil

@@ -53,6 +53,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -400,6 +401,9 @@ type Settings struct {
 	// TrackFadeSeconds 是切歌淡入淡出的时长（秒，0..15），0 = 关（默认）。
 	// 一首快放完时音量渐渐降到 0，下一首（自动接上的）从 0 渐渐升回来。
 	TrackFadeSeconds int `json:"trackFadeSeconds"`
+
+	// EQPreset 是均衡器预设的 ID（见 audio.EQPresets），空或 "flat" = 关（默认）。
+	EQPreset string `json:"eqPreset"`
 
 	// Muted 是静音标志。**它和音量分开存**（票 #311 / 报告 §3.3 的 B2）。
 	//
@@ -789,6 +793,9 @@ func (s *Settings) normalize() {
 	} else {
 		v := min(max(*s.Volume, 0), 1)
 		s.Volume = &v
+	}
+	if audio.EQPresetByID(s.EQPreset).ID == "flat" {
+		s.EQPreset = ""
 	}
 	s.TrackFadeSeconds = min(max(s.TrackFadeSeconds, 0), MaxTrackFadeSeconds)
 	// nil 和空序列在 JSON 里差一个 `null`，写出去会让「还没排过序」和

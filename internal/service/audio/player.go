@@ -415,6 +415,12 @@ func (p *Player) SetVolume(v float64) *Player {
 	return p
 }
 
+// SetEQ 设十段均衡器的增益（dB）。全是 0 时均衡器不处理任何采样。
+func (p *Player) SetEQ(g [10]float64) *Player {
+	p.tap.eq.set(g)
+	return p
+}
+
 // SetNormalize 开关音量均衡（见 normalize.go）。关掉时增益在一段之内回到 1。
 func (p *Player) SetNormalize(on bool) *Player {
 	p.tap.normOn.Store(on)

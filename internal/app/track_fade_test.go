@@ -48,3 +48,27 @@ func TestScrubbingNearTheEndWithAFadeOnKeepsPlayingWithoutErrors(t *testing.T) {
 		t.Error("拖回中间之后没有继续放")
 	}
 }
+
+func TestTheEQPresetSurvivesARestartAndUnknownOnesAreOff(t *testing.T) {
+	path := filepath.Join(t.TempDir(), app.SettingsFileName)
+	first := volumeApp(t, path)
+	if first.SettingsSnapshot().EQPreset != "" {
+		t.Fatal("均衡器默认应该是关")
+	}
+	if _, err := first.UpdateSettings(func(s *app.Settings) { s.EQPreset = "rock" }); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.CloseSettings(); err != nil {
+		t.Fatal(err)
+	}
+	second := volumeApp(t, path)
+	if got := second.SettingsSnapshot().EQPreset; got != "rock" {
+		t.Errorf("重启之后预设是 %q", got)
+	}
+	if _, err := second.UpdateSettings(func(s *app.Settings) { s.EQPreset = "没有这个" }); err != nil {
+		t.Fatal(err)
+	}
+	if got := second.SettingsSnapshot().EQPreset; got != "" {
+		t.Errorf("认不出的预设该落成空，得到 %q", got)
+	}
+}
