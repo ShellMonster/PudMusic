@@ -173,6 +173,9 @@ type upSpace struct {
 
 	// videosStarted 是「投稿」Tab 拉过第一页了没有。见 viewSpaceVideos。
 	videosStarted bool
+
+	// leadSet 是「投稿」那张列表的页内头部装过了没有（只装一次）。
+	leadSet bool
 	// videos 是「投稿」Tab。直接用 `list.PagedList`——它就是干这个的：
 	// 三条翻页保障、防重入、页脚重试、回顶按钮全在里面了。
 	videos *list.PagedList
@@ -455,7 +458,6 @@ func (s *Shell) viewUpSpace(c *ui.Context, r *ui.Route) {
 
 	// ⚠️ **收结果和起头图那一拉挪到 `syncUpSpace` 那一层了**（票 #161）：满屏
 	// 开着的时候这一页不画，而头图和列表的后台结果不能跟着一起停。
-	h := sp.header.Snapshot()
 
 	// ⚠️ **切 Tab 什么都不重置**——这是 PLAN 阶段 5 的一条验收（「切 Tab 的
 	// 滚动位置恢复与 Biu 一致」），也是 Biu 那边本来的行为（上游那四张 Tab
@@ -468,11 +470,9 @@ func (s *Shell) viewUpSpace(c *ui.Context, r *ui.Route) {
 	// 翻回一张 Tab 只会问「还要不要下一页」，而 `started` 为真时答案是否。
 
 	ui.Column(c).Key("page:" + upPath).Grow(1).FillHeight().Children(func() {
-		s.viewSpaceHeader(c, sp, h)
-		s.viewSpaceTabs(c, sp)
-		ui.Row(c).Key("space-body").Grow(1).FillHeight().Children(func() {
-			s.viewSpaceTab(c, sp)
-		})
+		// ⚠️ **头图区和 Tab 条不在这里画**：它们是每张 Tab 那张列表的第 0 行
+		// （页内头部），跟着内容一起滚走，见 `viewSpaceTab`。
+		s.viewSpaceTab(c, sp)
 	})
 }
 
