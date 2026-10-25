@@ -21,6 +21,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
 	"github.com/ShellMonster/Biu_Go/internal/service/video"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -40,6 +41,9 @@ const (
 	fullKaraokeLiftHidden = 56
 	// 画面停下后再要多久的帧（等拖动进度之后解码器追上来）。
 	videoIdleFrames = time.Second
+
+	fullVideoQualityKey = "full:video:quality"
+	fullVideoQItemKey   = "full:video:quality:item:"
 )
 
 // videoView 是画面这一边的状态，**只在界面线程读写**。
@@ -47,6 +51,8 @@ type videoView struct {
 	bm    *ui.Bitmap
 	w, h  int
 	frame time.Time
+	// qOpen 是画质菜单开着没有。
+	qOpen bool
 }
 
 func (v *videoView) upload(f video.Frame, now time.Time) {
@@ -59,7 +65,7 @@ func (v *videoView) upload(f video.Frame, now time.Time) {
 	v.frame = now
 }
 
-func (v *videoView) reset() { v.bm, v.w, v.h, v.frame = nil, 0, 0, time.Time{} }
+func (v *videoView) reset() { v.bm, v.w, v.h, v.frame, v.qOpen = nil, 0, 0, time.Time{}, false }
 
 // drawVideo 取帧、上传、画。radius 为 0 就是直角。
 func (s *Shell) drawVideo(p *ui.Painter, r ui.Rect, radius float32) {
@@ -120,13 +126,14 @@ func (s *Shell) viewVideoWindow(c *ui.Context, phase app.VideoPhase, w, h float3
 //
 // on 是已经在影院里（那时两枚都变成「退出」）。right/bottom 是它离父盒右、下沿的距离。
 func (s *Shell) viewVideoModeKeys(c *ui.Context, on bool, right, bottom, top float32) {
-	row := ui.Row(c).Key("full:video:modes").Absolute().Right(right).Gap(6)
+	row := ui.Row(c).Key("full:video:modes").Absolute().Right(right).Gap(space.Px6)
 	if top > 0 {
 		row = row.Top(top)
 	} else {
 		row = row.Bottom(bottom)
 	}
 	row.Children(func() {
+		s.viewVideoQuality(c, right, bottom, top)
 		inLabel, scrLabel := "窗口内全屏", "屏幕全屏"
 		if on {
 			inLabel = "退出窗口内全屏"
@@ -258,4 +265,50 @@ func karaokeFrac(rows []lyrics.Row, i int, now time.Duration) float32 {
 		return 1
 	}
 	return min(float32(now-rows[i].At)/float32(d)/0.85, 1)
+}
+
+// viewVideoQuality 是画质键：一枚写着当前档（如 720P）的小药丸，点开是一列可选的档。
+// 这一集只有一档（没登录时常见）就不画——只有一个选项的菜单是噪音。
+func (s *Shell) viewVideoQuality(c *ui.Context, right, bottom, top float32) {
+	list, cur := s.app.VideoQualities()
+	if len(list) < 2 {
+		s.vv.qOpen = false
+		return
+	}
+	white := ui.RGBA(255, 255, 255, 0.95)
+	pill := ui.Box(c).Key(fullVideoQualityKey).Role(ui.RoleButton).Label("清晰度").
+		Height(28).PaddingX(space.Px10).Radius(14).Background(ui.RGBA(0, 0, 0, scrim.Media)).
+		Center().Cursor(ui.CursorPointer)
+	pill.Children(func() {
+		ui.Text(c, cur.Label()).FontSize(13).TextColor(white)
+	})
+	if pill.Clicked() {
+		s.vv.qOpen = !s.vv.qOpen
+	}
+	if !s.vv.qOpen {
+		return
+	}
+	menu := ui.Column(c).Key("full:video:quality:menu").Absolute().Right(0).Gap(space.Px2).Padding(space.Px6).
+		Radius(10).Background(ui.RGBA(0, 0, 0, scrim.Badge))
+	if top > 0 {
+		menu = menu.Top(36)
+	} else {
+		menu = menu.Bottom(36)
+	}
+	menu.Children(func() {
+		for i := len(list) - 1; i >= 0; i-- {
+			q := list[i]
+			col := ui.RGBA(255, 255, 255, 0.75)
+			if q == cur {
+				col = ui.Color{R: 0xE8, G: 0x8A, B: 0x5E, A: 255}
+			}
+			item := ui.Box(c).Key(fullVideoQItemKey + q.Label()).Role(ui.RoleButton).Label(q.Label()).
+				Height(30).PaddingX(space.Px12).Radius(6).Center().Cursor(ui.CursorPointer)
+			item.Children(func() { ui.Text(c, q.Label()).FontSize(13).TextColor(col) })
+			if item.Clicked() {
+				s.vv.qOpen = false
+				s.app.SetVideoQuality(q)
+			}
+		}
+	})
 }

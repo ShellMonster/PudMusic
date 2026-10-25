@@ -49,12 +49,17 @@ type videoRun struct {
 	err    error
 	cancel context.CancelFunc
 	// open 换掉取流那一步（测试用）；空就走真的 B 站。
-	open func(ctx context.Context, it Item, pos time.Duration) (*video.Session, error)
+	open func(ctx context.Context, it Item, pos time.Duration, qn bili.VideoQuality) (*video.Session, error)
+
+	// quality 是用户选的画质上限，avail / cur 是这一集实际有的档和正在放的那一档。
+	quality bili.VideoQuality
+	avail   []bili.VideoQuality
+	cur     bili.VideoQuality
 }
 
 // SetVideoOpener 换掉「怎么拿到一路视频」。**只给测试用**：界面测试没有真的 B 站，
 // 也不该为了点一下角标就去跑一台假 CDN。
-func (a *App) SetVideoOpener(f func(ctx context.Context, it Item, pos time.Duration) (*video.Session, error)) {
+func (a *App) SetVideoOpener(f func(ctx context.Context, it Item, pos time.Duration, qn bili.VideoQuality) (*video.Session, error)) {
 	a.vid.mu.Lock()
 	a.vid.open = f
 	a.vid.mu.Unlock()
@@ -96,7 +101,29 @@ func sameBvid(key string, it Item) bool {
 }
 
 // StartVideo 开始看视频。已经开着或在加载就什么也不做。
-func (a *App) StartVideo() {
+func (a *App) StartVideo() { a.beginVideo(false) }
+
+// VideoQualities 是这一集能选的画质（从低到高）和当前这一档。
+// 视频还没取到流之前列表是空的。
+func (a *App) VideoQualities() ([]bili.VideoQuality, bili.VideoQuality) {
+	a.vid.mu.Lock()
+	defer a.vid.mu.Unlock()
+	return append([]bili.VideoQuality(nil), a.vid.avail...), a.vid.cur
+}
+
+// SetVideoQuality 换画质：就地从当前进度重开，视频窗口不会闪回封面。
+// 档位只是「不超过」的上限，这一集没有的档 B 站会给最接近的低档。
+func (a *App) SetVideoQuality(q bili.VideoQuality) {
+	a.vid.mu.Lock()
+	a.vid.quality = q
+	live := a.vid.phase == VideoOn || a.vid.phase == VideoLoading
+	a.vid.mu.Unlock()
+	if live {
+		a.beginVideo(true)
+	}
+}
+
+func (a *App) beginVideo(restart bool) {
 	it, ok := a.CurrentItem()
 	if !ok || !a.VideoAvailable() {
 		return
@@ -105,14 +132,23 @@ func (a *App) StartVideo() {
 	pos := a.Snapshot().Position
 	ctx, cancel := context.WithCancel(context.Background())
 	a.vid.mu.Lock()
-	if a.vid.phase == VideoLoading || a.vid.phase == VideoOn {
+	if !restart && (a.vid.phase == VideoLoading || a.vid.phase == VideoOn) {
 		a.vid.mu.Unlock()
 		cancel()
 		return
 	}
+	if old, oc := a.vid.sess, a.vid.cancel; restart {
+		if oc != nil {
+			oc()
+		}
+		if old != nil {
+			go old.Close()
+		}
+		a.vid.sess = nil
+	}
 	a.vid.gen++
 	gen := a.vid.gen
-	open := a.vid.open
+	open, qn := a.vid.open, a.vid.quality
 	a.vid.phase, a.vid.key, a.vid.err, a.vid.cancel = VideoLoading, videoKey(it), nil, cancel
 	a.vid.mu.Unlock()
 	a.wakeAll()
@@ -121,7 +157,7 @@ func (a *App) StartVideo() {
 		var sess *video.Session
 		var err error
 		if open != nil {
-			sess, err = open(ctx, it, pos)
+			sess, err = open(ctx, it, pos, qn)
 		} else {
 			sess, err = a.openVideo(ctx, s, it, pos)
 		}
@@ -195,12 +231,21 @@ func (a *App) openVideo(ctx context.Context, s *Streaming, it Item, pos time.Dur
 	if err != nil {
 		return nil, err
 	}
-	ref, err := s.Client.PlayVideo(ctx, it.Bvid, it.Cid, videoQuality)
+	a.vid.mu.Lock()
+	qn := a.vid.quality
+	a.vid.mu.Unlock()
+	if qn == bili.VideoQualityUnknown {
+		qn = videoQuality
+	}
+	ref, avail, err := s.Client.PlayVideoList(ctx, it.Bvid, it.Cid, qn)
 	if err != nil {
 		return nil, err
 	}
+	a.vid.mu.Lock()
+	a.vid.avail, a.vid.cur = avail, bili.VideoQuality(ref.Quality)
+	a.vid.mu.Unlock()
 	src := &videoSource{media: s.Media, ref: ref, refresh: func(ctx context.Context) (*bili.StreamRef, error) {
-		return s.Client.PlayVideo(ctx, it.Bvid, it.Cid, videoQuality)
+		return s.Client.PlayVideo(ctx, it.Bvid, it.Cid, qn)
 	}}
 	if s.Media == nil {
 		return nil, errStreamingMissing
@@ -265,4 +310,11 @@ func (v *videoSource) get(ctx context.Context, url string, from, to int64) ([]by
 		return nil, fmt.Errorf("video: 服务器不认 Range")
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, to-from))
+}
+
+// SetVideoQualitiesForTest 直接摆一份「能选的画质」。只给测试用（理由同 SetVideoOpener）。
+func (a *App) SetVideoQualitiesForTest(avail []bili.VideoQuality, cur bili.VideoQuality) {
+	a.vid.mu.Lock()
+	a.vid.avail, a.vid.cur = avail, cur
+	a.vid.mu.Unlock()
 }

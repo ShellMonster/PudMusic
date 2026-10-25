@@ -7,13 +7,21 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
 	"github.com/ShellMonster/Biu_Go/internal/service/video"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
 func videoTester(t *testing.T) (*Shell, *mygoui.Tester) {
+	s, tt, _ := videoTesterQN(t)
+	return s, tt
+}
+
+// videoTesterQN 另外给出一份「每次开视频用了哪一档」的记录。
+func videoTesterQN(t *testing.T) (*Shell, *mygoui.Tester, *[]bili.VideoQuality) {
 	t.Helper()
+	var qns []bili.VideoQuality
 	if !video.Supported() {
 		t.Skip("这个平台没有视频解码器")
 	}
@@ -22,14 +30,15 @@ func videoTester(t *testing.T) (*Shell, *mygoui.Tester) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.app.SetVideoOpener(func(_ context.Context, _ app.Item, pos time.Duration) (*video.Session, error) {
+	s.app.SetVideoOpener(func(_ context.Context, _ app.Item, pos time.Duration, qn bili.VideoQuality) (*video.Session, error) {
+		qns = append(qns, qn)
 		return video.Start(video.Config{TempDir: t.TempDir(), Fetch: func(_ context.Context, from, to int64) ([]byte, error) {
 			return b[from:min(to, int64(len(b)))], nil
 		}}, pos), nil
 	})
 	s.openFullPlayer()
 	tt.Frame()
-	return s, tt
+	return s, tt, &qns
 }
 
 func TestAnOnlineVideoShowsAPlayBadgeOnTheCover(t *testing.T) {
@@ -169,5 +178,39 @@ func TestTheTwoFullscreenKeysAreDistinctAndOnlyTheWindowOneEntersTheTheater(t *t
 	tt.Frame()
 	if s.full.theater {
 		t.Fatal("没退出影院")
+	}
+}
+
+func TestTheQualityMenuListsTheAvailableTiersAndRestartsInPlace(t *testing.T) {
+	s, tt, qns := videoTesterQN(t)
+	if err := tt.Click("看视频"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "视频小窗出现", func() bool { _, ok := tt.Find("视频，点击全屏"); return ok })
+	if _, ok := tt.Find("清晰度"); ok {
+		t.Fatal("只有一档（或不知道有几档）时不该画画质键")
+	}
+	s.app.SetVideoQualitiesForTest([]bili.VideoQuality{bili.VideoQuality360, bili.VideoQuality480, bili.VideoQuality720, bili.VideoQuality1080}, bili.VideoQuality720)
+	tt.Frame()
+	if err := tt.Click("清晰度"); err != nil {
+		t.Fatalf("没有画质键：%v（文字 %q）", err, tt.Texts())
+	}
+	tt.Frame()
+	for _, q := range []string{"360P", "480P", "720P", "1080P"} {
+		if _, ok := tt.Find(q); !ok {
+			t.Fatalf("菜单里没有 %s，文字有 %q", q, tt.Texts())
+		}
+	}
+	s.full.theater = true
+	tt.Frame()
+	if err := tt.Click("1080P"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "按新画质重开", func() bool { return len(*qns) == 2 })
+	if (*qns)[1] != bili.VideoQuality1080 {
+		t.Errorf("重开用的画质 %v，应当是 1080P", (*qns)[1])
+	}
+	if !s.full.theater || s.app.VideoPhase() == app.VideoOff {
+		t.Error("换画质不该退出影院或关掉视频")
 	}
 }

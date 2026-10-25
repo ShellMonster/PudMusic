@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 )
 
@@ -303,19 +304,27 @@ func videoRef(v dashVideo, bvid, cid string) *StreamRef {
 // PlayVideo 只要视频那一条流，给边放边看用：优先 H.264（系统解码器
 // 都认），没有 H.264 才退到别的编码；画质不超过 qn。
 func (c *Client) PlayVideo(ctx context.Context, bvid, cid string, qn VideoQuality) (*StreamRef, error) {
+	ref, _, err := c.PlayVideoList(ctx, bvid, cid, qn)
+	return ref, err
+}
+
+// PlayVideoList 同 PlayVideo，另外给出这一集**能选的画质**（从低到高）。
+// 没登录时 B 站只给低档，登录后才有 1080P 以上，列表如实反映这一点。
+func (c *Client) PlayVideoList(ctx context.Context, bvid, cid string, qn VideoQuality) (*StreamRef, []VideoQuality, error) {
 	if bvid == "" || cid == "" {
-		return nil, fmt.Errorf("%w: 稿件或分 P 不完整（bvid=%q cid=%q）", ErrNoStream, bvid, cid)
+		return nil, nil, fmt.Errorf("%w: 稿件或分 P 不完整（bvid=%q cid=%q）", ErrNoStream, bvid, cid)
 	}
-	d, err := c.fetchPlayurl(ctx, bvid, cid, qn)
+	// 不带 qn：B 站把这一集所有的档都返回来，才列得出能选的画质；上限在本地挑。
+	d, err := c.fetchPlayurl(ctx, bvid, cid, VideoQualityUnknown)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	return videoOnly(d, bvid, cid, qn)
 }
 
-func videoOnly(d *playurlData, bvid, cid string, qn VideoQuality) (*StreamRef, error) {
+func videoOnly(d *playurlData, bvid, cid string, qn VideoQuality) (*StreamRef, []VideoQuality, error) {
 	if d == nil || d.Dash == nil {
-		return nil, fmt.Errorf("%w: 这个稿件没有 dash 流", ErrNoStream)
+		return nil, nil, fmt.Errorf("%w: 这个稿件没有 dash 流", ErrNoStream)
 	}
 	dash := *d.Dash
 	var avc []dashVideo
@@ -329,7 +338,16 @@ func videoOnly(d *playurlData, bvid, cid string, qn VideoQuality) (*StreamRef, e
 	}
 	v, ok := pickVideo(&dash, qn)
 	if !ok {
-		return nil, fmt.Errorf("%w: 稿件 %s 的第 %s 集没有视频流", ErrNoStream, bvid, cid)
+		return nil, nil, fmt.Errorf("%w: 稿件 %s 的第 %s 集没有视频流", ErrNoStream, bvid, cid)
 	}
-	return videoRef(v, bvid, cid), nil
+	seen := map[VideoQuality]bool{}
+	var list []VideoQuality
+	for _, x := range dash.Video {
+		if q := VideoQuality(x.ID); x.BaseURL != "" && !seen[q] && videoQualityRank[q] > 0 {
+			seen[q] = true
+			list = append(list, q)
+		}
+	}
+	sort.Slice(list, func(i, j int) bool { return videoQualityRank[list[i]] < videoQualityRank[list[j]] })
+	return videoRef(v, bvid, cid), list, nil
 }

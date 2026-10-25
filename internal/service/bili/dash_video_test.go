@@ -345,3 +345,22 @@ func TestPlayVideoFallsBackWhenThereIsNoH264(t *testing.T) {
 		t.Fatalf("ref=%+v err=%v", ref, err)
 	}
 }
+
+func TestPlayVideoListOffersEveryTierAndHonoursTheCap(t *testing.T) {
+	exp := time.Now().Add(time.Hour)
+	c := dashClient(t, dashWithVideo(
+		dashVideoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-80.m4s")),
+		dashVideoItem(32, 500_000, 852, 480, streamURL(exp, "-32.m4s")),
+		dashVideoItem(64, 1_000_000, 1280, 720, streamURL(exp, "-64.m4s")),
+	))
+	ref, list, err := c.PlayVideoList(context.Background(), testBvid, testCid, VideoQuality720)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Height != 720 {
+		t.Errorf("上限 720P 却给了 %dp", ref.Height)
+	}
+	if len(list) != 3 || list[0] != VideoQuality480 || list[2] != VideoQuality1080 {
+		t.Errorf("可选档 %v，应当是 480/720/1080 由低到高", list)
+	}
+}
