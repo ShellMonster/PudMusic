@@ -187,6 +187,12 @@ func TestBothLibraryPagesOfferTheirOwnLastMenuItem(t *testing.T) {
 // 不一致。
 //
 // 断的是**那一行的下边沿**：只断「画面上有这几个字」的话，标错了行也照样通过。
+//
+// ⚠️ **「哪一首在放」是换上去的接线给的**：判据认的是「**此刻有声音的那一首**」
+// （`App.IsPlaying`），而这一层没法让一首在线的歌真的出声——所以这里换成一份
+// 说「第一首在放」的接线，量的是**画面**（标记画在哪一行、有没有画歪）。
+// 判据本身由 `internal/app` 那一组量，而「真在放时真的有标记」由
+// `internal/ui/widgets/list` 的端到端那一条量。
 func TestBothLibraryPagesMarkThePlayingRow(t *testing.T) {
 	for _, c := range []struct{ path, title string }{
 		{laterPath, "稍后再看"},
@@ -201,12 +207,9 @@ func TestBothLibraryPagesMarkThePlayingRow(t *testing.T) {
 
 			rows := s.pageOf(c.path).rows
 			items := rows.Rows()
-			// 摆一条两首的队列并让**第一首**在放——而它在这一页上是第一行。
-			// 摆的是队列那一层（`Queue.Reset` 不起播），所以这一条不需要播放器。
-			if _, ok := s.app.Queue().Reset(items[0].Item, items[1].Item); !ok {
-				t.Fatal("队列摆不进去")
-			}
-			// `Reset` 不起播、也就没有「叫醒界面」那一下（它不是用户动作）。
+			// 换成一份说「第一首在放」的接线。
+			playing := items[0].Item.Identity()
+			rows.acts.IsPlaying = func(it app.Item) bool { return it.Identity() == playing }
 			// Tester 的 `Find` 读的是**上一帧**画出来的东西，所以这里要自己
 			// 要一帧。
 			tt.Frame()
@@ -214,7 +217,6 @@ func TestBothLibraryPagesMarkThePlayingRow(t *testing.T) {
 			// 该不该标看的是**判重标识**，不是第几行——历史记录那一页的假数据
 			// 两条记录是**同一首歌**（B 站就是这样的两条，见 `historyBody`），
 			// 所以两行都该亮，而少亮一行同样是错的。
-			playing := items[0].Item.Identity()
 			marked := 0
 			for i, r := range items {
 				row, ok := tt.Find(r.Title)
@@ -237,7 +239,7 @@ func TestBothLibraryPagesMarkThePlayingRow(t *testing.T) {
 				}
 			}
 			if marked == 0 {
-				t.Errorf("一页上没有任何一行被标成正在放，而队列里明明有在放的那首")
+				t.Errorf("一页上没有任何一行被标成正在放，而接线明明说第一首在放")
 			}
 		})
 	}

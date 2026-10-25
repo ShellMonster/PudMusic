@@ -1,6 +1,7 @@
 package list
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -90,24 +91,26 @@ func TestAppActionsPlayNextSaysSoWhenItCannotQueue(t *testing.T) {
 // 它量的是**接线**那一半（`AppActions.IsPlaying` 认不认得出正在放的那首）；
 // 画出来的那一半在 `playing_test.go` 里。
 //
-// 队列是 [一, 二]，当前项挪到第二首。于是「正在放的是二」这件事和下标无关。
+// ⚠️ **它真的放了一个文件**（`App.Open`）：判据认的是「**此刻有声音的那一首**」，
+// 而不是「队列的指针停在哪一项上」——只摆队列的话那一刻压根没有声音，判据
+// （正确地）会说「不在放」。
 func TestAppActionsFindTheSongThatIsPlaying(t *testing.T) {
 	a := app.New()
 	t.Cleanup(a.Close)
-	items := seedQueue(t, a, "一", "二")
+
+	path := realFLAC(t)
+	if err := a.Open(path); err != nil {
+		t.Fatalf("放不了那个文件：%v", err)
+	}
+	playing := app.LocalItem(path)
+	other := app.LocalItem("/不是这一首.flac")
 
 	acts := AppActions(a, nil)
-	if acts.IsPlaying(items[1]) {
-		t.Errorf("还没挪当前项就说第二首在放了（当前项是 %q）", playingTitle(a))
+	if !acts.IsPlaying(playing) {
+		t.Errorf("真的在放这个文件，而 IsPlaying 却说它不在放")
 	}
-	if _, ok := a.Queue().Move(1); !ok {
-		t.Fatal("队列走不到第二首")
-	}
-	if !acts.IsPlaying(items[1]) {
-		t.Errorf("当前项已经是第二首了，IsPlaying 却说不是")
-	}
-	if acts.IsPlaying(items[0]) {
-		t.Errorf("第一首不是正在放的那首，IsPlaying 却说了是")
+	if acts.IsPlaying(other) {
+		t.Errorf("不是正在放的那首，IsPlaying 却说了是")
 	}
 }
 
@@ -119,24 +122,58 @@ func TestAppActionsFindTheSongThatIsPlaying(t *testing.T) {
 func TestAppActionsIsPlayingIsReadEveryFrame(t *testing.T) {
 	a := app.New()
 	t.Cleanup(a.Close)
-	items := seedQueue(t, a, "一", "二", "三")
 
+	first := realFLAC(t)
+	if err := a.Open(first); err != nil {
+		t.Fatalf("放不了第一个文件：%v", err)
+	}
 	acts := AppActions(a, nil)
-	if _, ok := a.Queue().Move(2); !ok {
-		t.Fatal("队列走不到第三首")
-	}
-	if !acts.IsPlaying(items[2]) {
-		t.Fatalf("一开始就没有认出来（队列是 %v）", ids(a.Queue().Items()))
+	if !acts.IsPlaying(app.LocalItem(first)) {
+		t.Fatalf("一开始就没有认出来")
 	}
 
-	// 换歌：队列整个换掉，当前项落在新队列的第一首。
-	other := seedQueue(t, a, "四", "五")
-	if acts.IsPlaying(items[2]) {
+	// 换歌：放另一个文件。
+	second := realFLACIn(t, "第二个")
+	if err := a.Open(second); err != nil {
+		t.Fatalf("放不了第二个文件：%v", err)
+	}
+	if acts.IsPlaying(app.LocalItem(first)) {
 		t.Errorf("换歌之后还在说旧的那首在放")
 	}
-	if !acts.IsPlaying(other[0]) {
+	if !acts.IsPlaying(app.LocalItem(second)) {
 		t.Errorf("换歌之后认不出新的那一首")
 	}
+}
+
+// realFLAC 是一份**真的能放起来**的测试素材（判重标识是它的完整路径）。
+//
+// ⚠️ 它和 `app_test.go` 里那个 `flac` 不是同一份：那个在**外部**测试包里，
+// 而这一组在包内（它要碰 `app.App` 的接线）。
+//
+// ⚠️ **它走系统音频输出**：没有声卡时 MyGo 静音播放（照常走时间轴），而断言的
+// 是「哪一首被认成在放」，不依赖「听得见」。
+func realFLAC(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join("..", "..", "..", "service", "audio", "flacdec", "testdata", "stereo16.flac")
+	if _, err := os.Stat(p); err != nil {
+		t.Skipf("找不到 FLAC 测试素材：%v", err)
+	}
+	return p
+}
+
+// realFLACIn 是「第二份」素材：拷一份到临时目录，让两条路径不同——判重认的是
+// 路径，而两份同名同内容的文件在判重上是**两首**。
+func realFLACIn(t *testing.T, name string) string {
+	t.Helper()
+	raw, err := os.ReadFile(realFLAC(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(t.TempDir(), name+".flac")
+	if err := os.WriteFile(p, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 // ids 把队列里几首的判重标识列出来，好让报错那句话读得懂。
@@ -146,13 +183,4 @@ func ids(items []app.Item) []string {
 		out[i] = it.Identity()
 	}
 	return out
-}
-
-// playingTitle 是当前项的歌名（没有当前项时是空串）。
-func playingTitle(a *app.App) string {
-	it, ok := a.Queue().Current()
-	if !ok {
-		return ""
-	}
-	return it.Title
 }

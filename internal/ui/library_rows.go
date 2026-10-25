@@ -839,6 +839,11 @@ const playingMark = list.PlayingMark
 //
 // 判据和理由全在 `list.Actions.IsPlaying` 那一段（按 `app.Item.Identity`，
 // 不是行的序号也不是 `Music.ID`）。没装判据时一律当不在放。
+//
+// ⚠️ **它答的是「此刻有声音的是哪一首」**：这一行画的是**跳动的波形**，还会被
+// 读屏软件念成「正在播放」——所以「队列的指针指着它」不算（暂停、停止、启动时
+// 恢复出来没起播、取流失败、换歌的取流窗口，那几档指针都还指着它，而没有声音）。
+// 那是票 #279 修的那一处。
 func (p *pagedRows) isPlaying(m libraryRow) bool {
 	if p.acts.IsPlaying == nil {
 		return false

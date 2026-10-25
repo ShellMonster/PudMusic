@@ -84,12 +84,25 @@ var Items = []Item{
 		// 也就是 Biu 那个抽屉去重时用的同一把尺子。顺带钉住「认的是**同一首**
 		// 而不是同一份」：同一首歌排了两遍时（内容列表不判重）两行都该亮，
 		// 而认整项的话两行都不亮——用户在**正在放**的那份上看到「哪首都没在放」。
-		Spec: "「正在播放」按歌认（队列重排了也还对，同一首排两遍算一首）；「下一首播放」插在当前项后面而不是队尾",
+		//
+		// ⚠️ **而且认的是「此刻有声音的那一首」，不是「队列的指针停在哪一项上」**
+		// （票 #279）：那一档画的是**跳动的波形**、还会被读屏软件念成「正在播放」，
+		// 而指针停着而声音停着的那几档（暂停、停止、启动时恢复出来没起播、取流
+		// 失败、换歌的取流窗口）以前都会把那一行标上——用户看到的是「历史记录
+		// 第一行在跳，而我没有在播放它」。
+		Spec: "「正在播放」按歌认（队列重排了也还对，同一首排两遍算一首），而且按**此刻有声音的那一首**认（指针停着而声音停着时不认）；「下一首播放」插在当前项后面而不是队尾",
 		Tests: []string{
 			"TestIsPlayingFindsTheSongWhereverTheQueuePutIt",
 			"TestIsPlayingSurvivesTheQueueBeingRearranged",
 			"TestIsPlayingIsAboutTheSongNotAboutThatCopy",
+			"TestIsPlayingSaysNoWhenOnlyTheQueuePointsAtIt",
+			"TestIsPlayingSaysNoWhilePaused",
+			"TestIsPlayingFollowsTheSoundNotTheQueuePointer",
+			"TestIsPlayingRecognisesTheSongThatIsReallyPlaying",
 			"TestTheSameSongInTwoRowsIsOneHighlight",
+			"TestTheRowThatIsReallyPlayingIsMarked",
+			"TestTheHistoryPageDoesNotMarkASongThatIsNotPlaying",
+			"TestTheLaterPageDoesNotMarkASongThatIsNotPlaying",
 			"TestAppActionsPlayNextLandsRightAfterTheCurrentOne",
 			"TestInsertNextLandsRightAfterTheCurrentOne",
 		},
