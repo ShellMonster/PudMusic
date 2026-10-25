@@ -287,6 +287,80 @@ func TestWaveDrawsBarsThatMove(t *testing.T) {
 	}
 }
 
+// TestTheWaveKeepsMovingOnRepaintFrames 钉住「波形在**只重画**的那些帧里照跳」。
+//
+// ## 为什么这一条最要紧
+//
+// 波形改走**局部重绘**之后（票 #392：`p.AnimationFrame()`，见 hover.go 的
+// `Wave`），而局部重绘那一帧**不重建**（`mygo/ui/runtime.go` 的 `repaintFrame`）。
+// 于是相位（拿钟算的那一个）有两个地方可以算：
+//
+//   - **画的时候**算 → 每一帧都是新的 → 波形照跳；
+//   - **建的时候**算 → 闭包捕获住 → 局部重绘那一帧里它**被冻住** →
+//     **波形一动不动**。
+//
+// ⚠️ **后者不报错、不崩溃、画面上只是「不跳了」**，而上面那条
+// `TestWaveDrawsBarsThatMove` **抓不住它**——那条量的是 `tt.Frame()` 之后的样子，
+// 而 Tester 的 `Frame()` **每次都是整棵元素树重建一遍**（`mygo/ui/headless.go` 的
+// `settle()` 调的是 `runFrame`），于是相位在**建的时候**重算，条子照样动。
+//
+// 所以这一条量的必须是「**两段纯局部重绘的帧之间**」：那几帧**不重建**，于是
+// 只有「相位在画的时候算」才可能让条子动。
+//
+// ## 怎么让 Tester 画出「纯局部重绘的帧」
+//
+// 无头 Tester 是**拉式**的（不 `Frame()` 一帧都不画），而 `Advance` 只画
+// 「有人要了帧」的那些时刻。于是：
+//
+//  1. `ctx.Invalidate()`——一次**外面来的**唤醒（模拟 `App.tick`）：它要的那一帧
+//     是**重建**（框架把 `rt.redraw` 清了）。
+//  2. `Advance` 跑起来之后，波形自己要的那些帧走**局部重绘**（`rt.redraw` 是
+//     真的），于是**重建的次数是 0**——这一条量的时候要**先断这个**：不然量到的
+//     条子高度可能是「重建时算的相位」，而那不是这一条要验的东西。
+func TestTheWaveKeepsMovingOnRepaintFrames(t *testing.T) {
+	builds := 0
+	var ctx *ui.Context
+	tt := ui.NewTester(func(c *ui.Context) {
+		builds++
+		ctx = c
+		ui.Box(c).Size(60, 30).Padding(8).Children(func() {
+			Wave(c, "wave", 40, ui.RGB(0, 0, 255), "甲")
+		})
+	}, testerW, testerH)
+	tt.Frame()
+	wave, ok := tt.Find(PlayingLabel("甲"))
+	if !ok {
+		t.Fatalf("那个波形没有标签：%q", tt.Texts())
+	}
+
+	// 一次「外面来的」唤醒（模拟 `App.tick`：放歌时它每 50ms 叫醒每个窗口一次）。
+	// ⚠️ **没有它就没有帧**：Tester 是拉式的，不有人要帧它一帧都不画。
+	ctx.Invalidate()
+	// ⚠️ **推四分之一轮**：相位整整走了 90°，那四根条子的高度**必然**变
+	// （正弦在 90° 上取到极值，而极值本身就和起点的值不同）——推得更少的话，
+	// 相位正好落在极值附近时条子可能看不出动，那条测试就成了「有时绿有时红」。
+	tt.Advance(wavePeriod / 4)
+
+	// 下面这一段是**纯局部重绘**：重建的次数必须是 0。
+	before := builds
+	first := bars(t, tt, wave)
+	tt.Advance(wavePeriod / 4)
+	if got := builds - before; got != 0 {
+		t.Fatalf("这一段重建了 %d 次整棵元素树，want 0——"+
+			"下面量的就不是「只重画的那几帧」了（重建的时候相位也会重算，"+
+			"那样这条就验不到相位是不是在画的时候算的）", got)
+	}
+	wave, _ = tt.Find(PlayingLabel("甲"))
+	second := bars(t, tt, wave)
+	if sameAs(first, second) {
+		t.Errorf("波形在纯局部重绘的那一段里一动不动：%v → %v——相位被冻住了。\n"+
+			"相位**必须在画的时候算**（`p.Now()`），不能在建的时候算完塞进闭包：\n"+
+			"局部重绘那一帧**不重建**，建的时候算出来的值会被**冻结**"+
+			"（见 hover.go 的 `Wave` 和 `wavePhase`）。",
+			first, second)
+	}
+}
+
 // bars 是那个盒子里**每一列画出来多少像素**（跳动的就是这些数——条子的横坐标不动，
 // 上下两端在动）。
 //

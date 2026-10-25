@@ -3638,4 +3638,32 @@ var Items = []Item{
 			"TestThePagerStopsWhenAnEmptyPageKeepsTheSameOffset",
 		},
 	},
+	{
+		// 票 #387：随机档的洗牌袋是**池子**，而「下一首播放」压过随机。
+		//
+		// 随机不是「排好一张表」，是「下一首从还没放过的里面随机挑」（持续随机——
+		// 行业做法：Spotify / Apple / QQ音乐 / 网易云都是这一个东西）：新加进队列的
+		// 歌**立刻就在候选里**，这一轮就轮到它，而不是等下一轮重装。
+		//
+		// 而「下一首播放」是**用户显式的意图**：它压过随机（Spotify 社区管这叫
+		// "queue overrides"）——随机档下按它，**下一首就是它**。
+		//
+		// ⚠️ **顺序 / 循环 / 单曲三档一个字都不许动**：袋子是随机档的东西，而那一
+		// 档的下一首是纯按索引算的。
+		Category: Play,
+		Spec:     "随机档的洗牌袋是池子（这一轮中途加进来的歌这一轮就轮到它，不重复也不遗漏）；「下一首播放」压过随机（下一首就是它）；其余三档按索引算，一个字都不变",
+		Tests: []string{
+			// 池子：中途加进来的歌这一轮就轮到它，而且只轮到一次。
+			"TestRandomPlaysASongAddedMidRound",
+			// 「下一首播放」压过随机：手动按下一首、自动切歌两条路都认。
+			"TestRandomPlayNextIsTheNextOne",
+			"TestRandomPlayNextIsTheNextOneOnAutoAdvance",
+			// 反面：其余三档一个字都没变（回归的护栏）。
+			"TestPlayNextOutsideRandomIsStillByIndex",
+			// 界面上说得清（随机档才说，其余三档一句话都不说）。
+			"TestTheEnqueueNoticeIsOnlyForRandom",
+			"TestAddingASongInRandomModeSaysItWillPlayThisRound",
+			"TestAddingASongOutsideRandomModeSaysNothing",
+		},
+	},
 }

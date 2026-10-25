@@ -583,6 +583,12 @@ func (s *Shell) addWholeCollectionToQueue(p *collectionPage) {
 	}
 	if err := s.app.Enqueue(items...); err != nil {
 		s.addToast("加不进队列："+err.Error(), notice.Danger)
+		return
+	}
+	// ⚠️ **随机档要说一句**：那一档的洗牌袋是**池子**——加进来的歌立刻在池中，
+	// 这一轮就轮到它（见 app/queue_shuffle.go）。用户看不见池子里有什么。
+	if n := s.app.PlayMode().EnqueueNotice(); n != "" {
+		s.addToast(n, notice.Success)
 	}
 }
 

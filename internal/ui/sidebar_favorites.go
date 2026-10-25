@@ -568,6 +568,10 @@ func (s *Shell) viewFavoritesPanelRow(c *ui.Context, f app.Favorite) {
 	}
 	row := ui.Row(c).FillWidth().Padding(space.Px4, space.Px8).Radius(t.Radius)
 	row = flat.Feel(c, row)
+	// 🔴 **这一行也得能进键盘焦点**（票 #453）：折叠态的收藏夹只有这层浮层里
+	// 看得见，所以「键盘走不到」在这里就是「折叠侧栏之后收藏夹整类都走不到」。
+	// 理由和口径见 `sidebar.go` 的 `sideFocusable`。
+	row = sideFocusable(row)
 	row.Children(func() {
 		ui.Text(c, label).FontSize(scale.Font(c, scale.FavPanelItem)).Grow(1).
 			MaxLines(1).Ellipsis("…")
@@ -708,6 +712,10 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 	// 版」），右边多留一点白是有用的。
 	row := ui.Column(c).Key(favRowKey(g, f.ID)).Grow(1).Radius(t.Radius).
 		Padding(space.Px6, space.Px8, space.Px6, favTextPad)
+	// 🔴 **这一行也得能进键盘焦点**（票 #453）：`Clicked()` 只设 `flagClickable`
+	// ——鼠标点得动，键盘走不到（报告 (b) 一节的第一个断口：「侧栏的收藏夹列表
+	// 键盘完全走不到」）。理由和口径见 `sidebar.go` 的 `sideFocusable`。
+	row = sideFocusable(row)
 	switch {
 	case cur:
 		// 当前就在这一页：和侧栏菜单当前项**同一套**画法（`flatCurrent`——

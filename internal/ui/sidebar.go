@@ -607,6 +607,35 @@ func (s *Shell) sideItemTip(c *ui.Context, anchor ui.Element, text string) {
 	}, true)
 }
 
+// sideFocusable 是侧栏里那些「鼠标点得动、键盘走不到」的元素**统一的出口**。
+//
+// # 为什么它们要能进键盘焦点
+//
+// `Element.Clicked()` 只设 `flagClickable`（`mygo/ui/input.go:1042`）——
+// **不设 `flagFocusable`**；而 Tab 只走可聚焦的元素（`mygo/ui/input.go` 的
+// `focusChain`）。于是那一行鼠标点得动、键盘却走不到：Tab 跳过它，回车也
+// 按不到它。
+//
+// 报告（BMG-246 的 `audit-side-settings.md` 的 (b) 一节「键盘那一路」）把这一条
+// 列成**四个断口**的头一条：**侧栏的收藏夹列表键盘完全走不到**（展开态那一列
+// 和折叠态那层浮层里的行都是）。
+//
+// # ⚠️ **焦点环是框架画的那一圈**
+//
+// `.Focusable()` 之后框架给这个元素画焦点环（`mygo/ui/paint.go:334`）——
+// 和侧栏菜单项、顶栏那几枚图标键**同一档**，不另立一套。
+//
+// ⚠️ **框架那一圈画在元素外面 3 像素**（`mygo/ui/paint.go` 的 `FocusRing`）：
+// 收藏夹那一行左右各有 8 像素的留白，画在外面压不到字上。
+//
+// # ⚠️ **可聚焦之后，回车 / 空格就能按下去了**
+//
+// 框架给「有焦点而且可点」的元素补上那一下（`mygo/ui/input.go:741`），
+// 所以这一行不但是「键盘走得到」，也是「键盘按得动」。
+func sideFocusable(e ui.Element) ui.Element {
+	return e.Focusable()
+}
+
 // loggedOutHint 是那一句话的正文。
 //
 // ⚠️ **一个「我的关注」「稍后再看」「历史记录」都不许出现在里面**（理由见
@@ -641,9 +670,14 @@ func loggedOutHint(hidden int) string {
 // 可点文字是同一套做法，见 `playbar.go`）。
 func (s *Shell) viewLoggedOutHint(c *ui.Context, hidden int) {
 	ui.Column(c).Key("side-logged-out").Children(func() {
+		//
+		// 🔴 **它也得能进键盘焦点**（票 #453）：这一行鼠标点得动（`OnClick`），
+		// 而 `OnClick` 只设 `flagClickable`——**键盘走不到**（报告 (b) 一节的
+		// 第四个断口：「「还有 N 个入口，登录后可见」那行文字鼠标可点、键盘不可达」）。
 		hint := ui.Text(c, loggedOutHint(hidden)).FontSize(scale.Font(c, scale.Size12)).Wrap().
 			TextColor(c.Theme().TextMuted).Padding(space.Px4, space.Px8).
 			OnClick(func() { s.goLogin() })
+		hint = sideFocusable(hint)
 		// 悬停才显出「点得动」：主色 + 下划线。
 		//
 		// ⚠️ **主色当字色要取 `ink.AccentOn`**：浅色下主色是亮绿，压在浅底上

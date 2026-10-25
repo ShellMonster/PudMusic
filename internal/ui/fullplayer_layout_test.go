@@ -466,10 +466,12 @@ func TestTheFullPlayerPlayGlyphIsTwentyEight(t *testing.T) {
 // 自己按 `hideThumb={!showThumb}` 决定画不画旋钮（`music-progress/index.tsx:22`）。
 // 以前这一根用的是常驻旋钮（20×16），一条进度上永远亮着一个白点。
 //
-// 判据是**进度条框里有没有接近白的像素**：深色主题下进度条自己只画主色/分隔线，
-// 白色只可能来自旋钮。指针挪到别处时不画；压上去之后画。
+// 判据是**画面上有没有那个旋钮本身**：它的面是**纯白**（浅色主题）或者
+// `#e0e1e1`（深色主题），而填过的那一段是那一行的**前景色**（白 92%）——
+// 两者差得开（票 #248 之后那一段不再是主色，而是前景色，所以这里不能再
+// 「数接近白的像素」了）。
 func TestTheFullPlayerProgressKnobIsOnlyPaintedOnHover(t *testing.T) {
-	_, tt, _ := fullTester(t)
+	s, tt, _ := fullTester(t)
 	openFull(t, tt)
 	settleFull(t, tt)
 
@@ -477,25 +479,54 @@ func TestTheFullPlayerProgressKnobIsOnlyPaintedOnHover(t *testing.T) {
 	if !ok {
 		t.Fatalf("找不到进度条，文字有 %q", tt.Texts())
 	}
+	// 旋钮那一面的颜色（浅色主题纯白、深色主题 #e0e1e1）。
+	//
+	// ⚠️ **主题是按设置拼的**（`BuildTheme`）：`fullTester` 一律深色，而那一档
+	// 的旋钮面是 #e0e1e1 —— 拿「接近白」当旋钮会数到填过的那一段（见
+	// `knobPixels` 那段注释）。
+	face := color.RGBA{R: 255, G: 255, B: 255, A: 255}
+	if BuildTheme(s.app.SettingsSnapshot(), true).Dark {
+		face = color.RGBA{R: 224, G: 225, B: 225, A: 255}
+	}
 	// 指针先离开（Tester 默认在 (0,0)，但满屏打开时那一下可能已经移过来了）。
 	tt.Move(5, 400)
 	tt.Frame()
-	if n := brightIn(tt.Image(), prog); n != 0 {
-		t.Errorf("没悬停的时候进度条框里有 %d 个亮像素——旋钮一直画着", n)
+	if n := knobPixels(tt.Image(), prog, face); n != 0 {
+		t.Errorf("没悬停的时候进度条框里有 %d 个旋钮的像素——旋钮一直画着", n)
 	}
 
 	tt.Move(prog.X+prog.W/2, prog.Y+prog.H/2)
 	tt.Frame()
-	if n := brightIn(tt.Image(), prog); n == 0 {
-		t.Errorf("指针压在进度条上，旋钮还是没画出来（%v 一个亮像素都没有）", prog)
+	if n := knobPixels(tt.Image(), prog, face); n == 0 {
+		t.Errorf("指针压在进度条上，旋钮还是没画出来（%v 一个旋钮像素都没有）", prog)
 	}
 
 	// 移开之后又收起来（不是「悬停过一次就常驻」）。
 	tt.Move(5, 400)
 	tt.Frame()
-	if n := brightIn(tt.Image(), prog); n != 0 {
-		t.Errorf("指针移开之后进度条框里还有 %d 个亮像素——旋钮没有收回去", n)
+	if n := knobPixels(tt.Image(), prog, face); n != 0 {
+		t.Errorf("指针移开之后进度条框里还有 %d 个旋钮的像素——旋钮没有收回去", n)
 	}
+}
+
+// knobPixels 是 box 里有多少像素是**旋钮那一面**的颜色。
+//
+// ⚠️ **不能拿「接近白的像素」当旋钮**：满屏那条进度填过的那一段现在是那一行的
+// **前景色**（白 92%，票 #248），它比旋钮还接近白——数「接近白」会把那一段
+// 数进去，于是「旋钮没画」这一条永远红。
+func knobPixels(img *image.RGBA, box mygoui.Rect, face color.RGBA) int {
+	n := 0
+	for y := max(int(box.Y), img.Rect.Min.Y); y < min(int(box.Y+box.H), img.Rect.Max.Y); y++ {
+		for x := max(int(box.X), img.Rect.Min.X); x < min(int(box.X+box.W), img.Rect.Max.X); x++ {
+			p := img.RGBAAt(x, y)
+			if absInt(int(p.R)-int(face.R)) <= 4 &&
+				absInt(int(p.G)-int(face.G)) <= 4 &&
+				absInt(int(p.B)-int(face.B)) <= 4 {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // TestTheFullPlayerSettingsPanelHasEverySwitchAndColor 断设置面板补齐了
