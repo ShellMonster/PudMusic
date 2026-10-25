@@ -82,15 +82,20 @@ func TestAnUnseenWindowStopsAskingForFrames(t *testing.T) {
 			//
 			// ⚠️ 那一次 `invalidate` 是模拟 `App.tick`：在放歌的时候它每 50ms 叫醒
 			// 每个窗口一次。Tester 的时钟要有人先要帧，`Advance` 才会按刷新率画。
+			//
+			// ⚠️ **判据是 `FramePending`，不是「重建了几次」**：波形要的那些帧走的是
+			// **局部重绘**（票 #392），不重建——数重建是数不出来的。而这一档里
+			// **没有别的人要帧**（`countingShell` 只摆队列不起播，`App` 的 `live`
+			// 为假，于是 `App.tick` 从不叫醒窗口），所以 `FramePending` 为真就是
+			// 波形要的。
 			if !s.wake.invalidateIf(true) {
 				t.Fatal("看得见的窗口却把唤醒丢掉了")
 			}
 			before := *frames
 			tt.Advance(500 * time.Millisecond)
-			if *frames <= before {
-				t.Fatalf("看得见、有歌在放，推进半秒却只画了 %d 帧——"+
-					"跳动波形没有在要下一帧，下面那条「看不见时停帧」就验不到东西",
-					*frames-before)
+			if !tt.FramePending() {
+				t.Fatalf("看得见、有歌在放，推进半秒画面却不再要下一帧——" +
+					"跳动波形没有在逐帧动画，下面那条「看不见时停帧」就验不到东西")
 			}
 
 			// 看不见。
@@ -112,8 +117,23 @@ func TestAnUnseenWindowStopsAskingForFrames(t *testing.T) {
 			}
 			tt.Advance(time.Second)
 			if got := *frames - before; got != 0 {
-				t.Errorf("窗口看不见的一秒里画了 %d 帧，want 0——"+
+				t.Errorf("窗口看不见的一秒里重建了 %d 次整棵元素树，want 0——"+
 					"用户看不到这一扇窗，那些帧全是白烧的电", got)
+			}
+
+			// ⚠️ **还要断「画面自己不再要下一帧」**：上面那条数的是**重建**，
+			// 而波形要的那些帧走**局部重绘**（不重建）——数重建是数不出来的，
+			// 于是「窗口看不见了可它还在按帧重画」那种回归会从它底下溜过去
+			//（票 #392 把它从「每一帧重建」改成了「每一帧只重画」）。
+			//
+			// 所以这里**再送一帧进去**（`invalidateNow` 绕过「看不看得见」那道
+			// 闸门，模拟「外面来的」一帧：输入、后台结果……），然后断**那一帧
+			// 之后画面不再要下一帧**。
+			s.wake.invalidateNow()
+			tt.Advance(time.Second)
+			if tt.FramePending() {
+				t.Errorf("窗口看不见了，送进去一帧之后画面还在要下一帧——" +
+					"它会一直按帧重画，用户看不到这一扇窗，那些帧全是白烧的电")
 			}
 
 			// 而「看不见」不是永久的：窗口回来之后必须接着画（下面那条
