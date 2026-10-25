@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -363,38 +364,97 @@ func gatedCDN(data []byte, n int, arrived chan struct{}, release chan struct{}) 
 	}
 }
 
-// TestTheDecoderWaitsForTheWholeFileWhenMoovIsAtTheEnd 钉住**「moov 在文件
-// 末尾」这件事的后果**（票 #220 的根因）。
+// gatedRangeCDN 是一台「主请求给前 n 个字节就卡住、而**尾部那一段立刻给**」的
+// CDN。
+//
+// 🔴 **它把两件事分开**：主请求（没有 Range 头）走「给 n 个字节然后卡住」，
+// 而带 Range 头的请求（源并行去取末尾那一小段）**立刻给完**。
+//
+// 有了这个区分，「末尾那一段是并行取回来的」这件事就有了**一个不靠时间的
+// 判据**：主下载卡在 64 KB，而解码器照样开口了——它拿到的是并行取回来的
+// `moov`。
+func gatedRangeCDN(data []byte, n int, arrived chan struct{}, release chan struct{}) http.HandlerFunc {
+	var once sync.Once
+	return func(w http.ResponseWriter, r *http.Request) {
+		from := int64(0)
+		if h := r.Header.Get("Range"); h != "" {
+			if _, err := fmt.Sscanf(h, "bytes=%d-", &from); err != nil {
+				from = 0
+			}
+		}
+		if from > 0 {
+			// 尾部那一段：立刻给完。
+			body := data[from:]
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			w.Header().Set("Content-Range",
+				fmt.Sprintf("bytes %d-%d/%d", from, len(data)-1, len(data)))
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write(body)
+			return
+		}
+		// 主请求：给 n 个字节然后卡住等放行。
+		if n > len(data) {
+			n = len(data)
+		}
+		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		if _, err := w.Write(data[:n]); err != nil {
+			return
+		}
+		if fl != nil {
+			fl.Flush()
+		}
+		once.Do(func() { close(arrived) })
+		<-release
+		if _, err := w.Write(data[n:]); err != nil {
+			return
+		}
+		if fl != nil {
+			fl.Flush()
+		}
+	}
+}
+
+// TestTheDecoderOpensBeforeTheWholeFileArrives 钉住「**不用等整个文件下完**」
+// （票 #478 的容器层修法）。
 //
 // # 这一条钉的是什么
 //
-// 「点一首歌 → 出声」的第③段（解码第一帧）在 macOS 上是 `extaf` 开口那一段，
-// 而 AudioToolbox 探 MP4 容器时要**扫过所有顶层盒子**才能找到 `moov`——
-// `moov` 在文件末尾时，它得**扫到文件末尾**，于是第③段的耗时 = **整个文件
-// 下载完**的耗时。
+// 「点一首歌 → 出声」的第③段（解码第一帧）在 macOS 上是 `extaf` 开口那一段。
+// AudioToolbox 探 MP4 容器时要扫过所有顶层盒子才找得到 `moov`——而
+// **B 站形状的完整 `.m4a` 的 `moov` 在文件末尾**。
 //
-// 本仓库自己的素材就是这个形状（`mfadec/testdata/aaclc-192k.m4a`，注释写着
-// 「按 B 站形状造的 MP4」）：`ftyp` / `free` / `mdat` / **`moov`（在末尾）**。
+// ⚠️ **实测：AudioToolbox 不是从头读到尾的，它是「跳」过去的**
+// （2026-10-25 实测：它读 0 / 8 / 16 / 28 / 36，然后**直接跳到 `moov` 的
+// 起点**）。所以**末尾那一小段在手上，它立刻就能开口**。
+//
+// 而在那之前，源只有**顺序下载的前沿**能用——于是「跳过去」的那一步会
+// **等整个文件下完**（票 #220 的实测：200 KB/s 的网上 1.22 秒，
+// 50 KB/s 的网上 5.02 秒）。
+//
+// # 判据是「形状」不是「毫秒」
+//
+// 🔴 **主下载卡在 64 KB，而解码器开口了**——这是一个事实，不受机器快慢
+// 影响（AGENTS.md §2）。而「等了多久」那种判据在满载的机器上会飘。
 //
 // # 为什么这一条必须是**夹具**而不是「真机测一下」
 //
 // 真机上的形状取决于 B 站给的那个文件是不是 faststart，而**本地夹具能把两种
 // 形状都造出来**——这才是能拿来做回归的东西。
-//
-// 🔴 **判据是「文件没下完的时候解码器开没开」**，不是「过了多少毫秒」：
-// 毫秒那一种判据在满载的机器上会飘（AGENTS.md §2），而这一种不会。
-func TestTheDecoderWaitsForTheWholeFileWhenMoovIsAtTheEnd(t *testing.T) {
+func TestTheDecoderOpensBeforeTheWholeFileArrives(t *testing.T) {
 	moovAtEnd := readMP4(t, "stereo16.mp4")
 	moovAtFront := readMP4(t, "reference-24bit-mp4.m4a")
 
-	t.Run("moov 在末尾：文件没下完就不出声", func(t *testing.T) {
+	t.Run("moov 在末尾：并行取回尾部那一段就能出声", func(t *testing.T) {
 		dir := t.TempDir()
 		f := newStreamFixture(t)
 		arrived := make(chan struct{})
 		release := make(chan struct{})
 		t.Cleanup(func() { close(release) })
-		// 只给 64 KB：moov 在 242156 字节处，所以**给不到**。
-		f.on("/cdn/x.m4s", gatedCDN(moovAtEnd, 64<<10, arrived, release))
+		// 🔴 **主下载只给 64 KB 就卡住**：moov 在 242156 字节处，所以给不到。
+		// 而「尾部那一段」是**另一条请求**，它立刻就给。
+		f.on("/cdn/x.m4s", gatedRangeCDN(moovAtEnd, 64<<10, arrived, release))
 		f.onPlayURL(dashFor(cdnURL(f.URL, "x.m4s", 2*time.Hour),
 			int(bili.QualityHigh192), 110836))
 
@@ -410,16 +470,9 @@ func TestTheDecoderWaitsForTheWholeFileWhenMoovIsAtTheEnd(t *testing.T) {
 		waitFor(t, 15*time.Second, "字节源开始收字节", func() bool {
 			return downloadedBytes(t, dir) > 0
 		})
-		// 🔴 **关键**：文件才下了一小部分，而**播放器还没装上**——
-		// 解码器在等那个还在文件末尾的 `moov`。
-		time.Sleep(300 * time.Millisecond)
-		st := a.Snapshot()
-		if st.HasTrack {
-			t.Error("文件才下了一小部分就出声了——这一条钉的是「moov 在末尾时要等整个文件」")
-		}
-		if !st.Loading {
-			t.Error("还没出声就不在「正在取流」了——界面上会是一句空白")
-		}
+		// 🔴 **关键**：主下载还卡在 64 KB，而**播放器已经装上了**——
+		// 解码器拿到的是**并行取回来的那个 `moov`**。
+		playing(t, a, "moov在末尾")
 	})
 
 	t.Run("moov 在开头：文件没下完也能出声", func(t *testing.T) {
@@ -445,6 +498,48 @@ func TestTheDecoderWaitsForTheWholeFileWhenMoovIsAtTheEnd(t *testing.T) {
 		// 于是**文件没下完它也出声了**。
 		playing(t, a, "moov在开头")
 	})
+
+	t.Run("CDN 不认 Range 时退回老样子（等整个文件）", func(t *testing.T) {
+		dir := t.TempDir()
+		f := newStreamFixture(t)
+		arrived := make(chan struct{})
+		release := make(chan struct{})
+		t.Cleanup(func() { close(release) })
+		// ⚠️ **这一台不认 Range**（`gatedCDN`）：它对带 Range 的请求也回
+		// 200 + 整个文件，于是并行取尾部的那一条**只能作废**（见
+		// `fetchTail`：只认 206）。
+		//
+		// 于是这里就是**老样子**：文件没下完就不出声。
+		//
+		// 🔴 **这一条不是「我们又慢回去了」**：它是「CDN 不给这一段时，
+		// 我们照样能放，只是慢一点」——**不许**因为它就判失败。
+		f.on("/cdn/x.m4s", gatedCDN(moovAtEnd, 64<<10, arrived, release))
+		f.onPlayURL(dashFor(cdnURL(f.URL, "x.m4s", 2*time.Hour),
+			int(bili.QualityHigh192), 110836))
+
+		a := newOnlineApp(t, f, dir)
+		if err := a.Enqueue(onlineItem("BV1", "1", "moov在末尾")); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-arrived:
+		case <-time.After(30 * time.Second):
+			t.Fatal("CDN 一直没开始给字节")
+		}
+		waitFor(t, 15*time.Second, "字节源开始收字节", func() bool {
+			return downloadedBytes(t, dir) > 0
+		})
+		// 文件才下了一小部分，而**播放器还没装上**——
+		// 解码器在等那个还在文件末尾的 `moov`。
+		time.Sleep(300 * time.Millisecond)
+		st := a.Snapshot()
+		if st.HasTrack {
+			t.Error("文件才下了一小部分就出声了——这一条钉的是「拿不到尾部时还是老样子」")
+		}
+		if !st.Loading {
+			t.Error("还没出声就不在「正在取流」了——界面上会是一句空白")
+		}
+	})
 }
 
 // readMP4 读一份 MP4 素材。
@@ -458,15 +553,25 @@ func readMP4(t *testing.T, name string) []byte {
 	return b
 }
 
-// TestMeasureTheThreeSegments 是**量那三段**的工具（票 #220 的「先量再改」）。
+// TestMeasureTheThreeSegments 是**量那三段**的工具（票 #220 的「先量再改」，
+// 票 #478 把它扩成「冷启动 + 取流」两段的对照）。
 //
 // # 它量的是什么
 //
-// 「点一首歌 → 出声」的三段，在**同一台限速的假 CDN**上各占多少：
+// 「点一首歌 → 出声」的各段，在**同一台限速的假 CDN**上各占多少：
 //
 //	① 问地址	问 playurl 拿地址（一次接口往返）
 //	② 下音频	从建源到头几个字节落到缓存里
 //	③ 解码	从头几个字节到解码器把流开好（能出声了）
+//
+// # 🔴 **它量的是同一个形状的两次**（票 #478）
+//
+// 同一个文件、同一个速率，跑两遍：一遍的 CDN **不认 Range**（= 没有并行
+// 取尾部），一遍的 CDN **认 Range**（= 末尾那一小段被并行取回来了）。
+// 两次的差就是**容器层那个修法省下来的时间**。
+//
+// ⚠️ **绝对值会飘**（机器一忙就飘），**差值是这一条要看的**——而差值的
+// 形状是确定的：「不认 Range」那一次，③ 必然 ≈ 整个文件下载完的时间。
 //
 // # ⚠️ **它量的是本地夹具，不打真 B 站**（铁律）。
 //
@@ -495,20 +600,29 @@ func TestMeasureTheThreeSegments(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			data := readMP4(t, tc.file)
-			f := newStreamFixture(t)
-			f.on("/cdn/x.m4s", rateCDN(data, tc.rate))
-			f.onPlayURL(dashFor(cdnURL(f.URL, "x.m4s", 2*time.Hour),
-				int(bili.QualityHigh192), 110836))
-			a := newOnlineApp(t, f, t.TempDir())
-			lines, restore := app.CapturePlayLog(a)
-			t.Cleanup(restore)
-			if err := a.Enqueue(onlineItem("BV1", "1", tc.name)); err != nil {
-				t.Fatal(err)
-			}
-			playing(t, a, tc.name)
-			for _, l := range *lines {
-				if strings.Contains(l, "取流分段耗时") {
-					t.Logf("%s（%d 字节，%d 字节/秒）→ %s", tc.name, len(data), tc.rate, l)
+			for _, shape := range []struct {
+				label string
+				cdn   func([]byte, int) http.HandlerFunc
+			}{
+				{"不认 Range（＝没有并行取尾部）", rateCDN},
+				{"认 Range（＝并行取了尾部）", rateRangeCDN},
+			} {
+				f := newStreamFixture(t)
+				f.on("/cdn/x.m4s", shape.cdn(data, tc.rate))
+				f.onPlayURL(dashFor(cdnURL(f.URL, "x.m4s", 2*time.Hour),
+					int(bili.QualityHigh192), 110836))
+				a := newOnlineApp(t, f, t.TempDir())
+				lines, restore := app.CapturePlayLog(a)
+				t.Cleanup(restore)
+				if err := a.Enqueue(onlineItem("BV1", "1", tc.name)); err != nil {
+					t.Fatal(err)
+				}
+				playing(t, a, tc.name)
+				for _, l := range *lines {
+					if strings.Contains(l, "取流分段耗时") {
+						t.Logf("%s（%d 字节，%d 字节/秒，%s）→ %s",
+							tc.name, len(data), tc.rate, shape.label, l)
+					}
 				}
 			}
 		})
@@ -519,6 +633,10 @@ func TestMeasureTheThreeSegments(t *testing.T) {
 //
 // 🔴 **它给的是「这一秒给多少字节」**：慢网的形状是「一直在走，只是走得慢」——
 // 而那正是「慢但在走」和「卡死了」的区别（见 `downloadProgressLocked`）。
+//
+// ⚠️ **它不认 Range**：来了带 Range 的请求它也回 **200 + 整个文件**。
+// 而尾部那一段（票 #478 的容器层修法）只认 **206**——所以这一台 CDN
+// 造出来的就是「**没有**并行取尾部」的那一种形状。
 func rateCDN(data []byte, bytesPerSec int) http.HandlerFunc {
 	chunk := bytesPerSec / 20
 	if chunk < 1024 {
@@ -535,6 +653,56 @@ func rateCDN(data []byte, bytesPerSec int) http.HandlerFunc {
 				end = len(data)
 			}
 			if _, err := w.Write(data[off:end]); err != nil {
+				return
+			}
+			if fl != nil {
+				fl.Flush()
+			}
+			time.Sleep(per)
+		}
+	}
+}
+
+// rateRangeCDN 是一台「认 Range、按固定速率给字节」的 CDN。
+//
+// 🔴 **它和 `rateCDN` 的唯一区别就是认不认 Range**——而那一条区别
+// 恰好就是「**有没有并行把文件尾部取回来**」（票 #478 的容器层修法）：
+// 认 Range 的那台会让源多发一条 `Range: bytes=<moov 起点>-`，
+// 于是 AudioToolbox 不用等整个文件下完就能开口。
+//
+// 所以这两台 CDN 摆在一起就是一次**干净的 A/B**：同样的字节、同样的速率，
+// 唯一的差别是「末尾那一小段是不是并行取回来了」。
+func rateRangeCDN(data []byte, bytesPerSec int) http.HandlerFunc {
+	chunk := bytesPerSec / 20
+	if chunk < 1024 {
+		chunk = 1024
+	}
+	per := time.Duration(float64(time.Second) * float64(chunk) / float64(bytesPerSec))
+	return func(w http.ResponseWriter, r *http.Request) {
+		from := int64(0)
+		if h := r.Header.Get("Range"); h != "" {
+			if _, err := fmt.Sscanf(h, "bytes=%d-", &from); err != nil {
+				from = 0
+			}
+		}
+		if from > int64(len(data)) {
+			http.Error(w, "越界", http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		body := data[from:]
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		if from > 0 {
+			w.Header().Set("Content-Range",
+				fmt.Sprintf("bytes %d-%d/%d", from, len(data)-1, len(data)))
+			w.WriteHeader(http.StatusPartialContent)
+		}
+		fl, _ := w.(http.Flusher)
+		for off := 0; off < len(body); off += chunk {
+			end := off + chunk
+			if end > len(body) {
+				end = len(body)
+			}
+			if _, err := w.Write(body[off:end]); err != nil {
 				return
 			}
 			if fl != nil {

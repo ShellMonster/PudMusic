@@ -244,6 +244,25 @@ type StreamSource struct {
 	err    error  // 终态错误；io.EOF 是「正常读完」
 	closed bool
 
+	// tailStart 是「单独取回来的尾部那一段」的起点。-1 = 没在取尾部。
+	//
+	// ⚠️ **它和 `filled` 是两件事**：`filled` 是**顺序下载的前沿**
+	// （[0, filled) 都有），而尾部那一段是**并行的第二条 Range 请求**
+	// 单独取回来的一小段（[tailStart, tailStart+tailGot)）。
+	//
+	// 为什么要有它：B 站形状的完整 `.m4a` 的 `moov` 盒**在文件末尾**，
+	// 而 AudioToolbox 探容器时要扫到文件末尾才找得到 `moov`——于是
+	// 「解码第一帧」那一段要等**整个文件下完**（票 #220 的实测：
+	// 200 KB/s 的网上 1.22 秒）。并行把末尾那一小段取回来，
+	// AudioToolbox 就能立刻拿到 `moov` 开口。
+	//
+	// ⚠️ **这两段之间可能有洞**（尾部先到了、中间那一段还没下到），
+	// 而洞里的字节是**零**——读出来是解不出来的噪声，不是「还没到」。
+	// 所以可用区间是两段的**并**，而 `availAt` 只认**连续**的那一段。
+	tailStart int64
+	// tailGot 是尾部那一段已经收到多少字节。
+	tailGot int64
+
 	// expectTotal 是「换流之后，新流**应该**有多长」。
 	//
 	// 为什么需要它：换流拿回来的新流可能根本不是同一段字节（会员过期、
@@ -337,9 +356,12 @@ func NewStreamSource(o StreamSourceOptions) (*StreamSource, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &StreamSource{
-		file:         f,
-		path:         f.Name(),
-		size:         o.Size,
+		file: f,
+		path: f.Name(),
+		size: o.Size,
+		// ⚠️ **-1 而不是零值**：零值是「第 0 个字节起就是尾部」，
+		// 那会让 `availAt` 把整个顺序下载区都当成「已经单独取回来了」。
+		tailStart:    -1,
 		urls:         append([]string(nil), o.URLs...),
 		quality:      "",
 		maxRefr:      orDefaultInt(o.MaxRefresh, defaultMaxRefresh),
@@ -367,9 +389,10 @@ func NewStreamSource(o StreamSourceOptions) (*StreamSource, error) {
 	}
 	s.cond = sync.NewCond(&s.mu)
 
-	s.wg.Add(2)
+	s.wg.Add(3)
 	go s.pump()
 	go s.watchdog()
+	go s.tailFetch()
 	return s, nil
 }
 
@@ -450,16 +473,20 @@ func (s *StreamSource) Read(p []byte) (int, error) {
 
 	for {
 		s.mu.Lock()
+		// 🔴 **一次只给「连续」的那一段**（见 `availAt`）：缓存文件里
+		// 可能有洞，而洞里的字节是零——读出来是解不出来的噪声。
+		//
+		// 短读是**允许**的：`extaf` 那头是 `io.ReadFull`，它会接着要
+		// 剩下的字节（而 `extaf` 的读回调只把「少于我要的」当成
+		// 「流到头了」——见 `extaf.source.readAt`）。
+		avail := s.availAt(s.cur, int64(len(p)))
 		switch {
 		case s.closed:
 			s.mu.Unlock()
 			return 0, ErrSourceClosed
 
-		case s.cur < s.filled:
-			n := int64(len(p))
-			if room := s.filled - s.cur; n > room {
-				n = room
-			}
+		case avail > 0:
+			n := avail
 			// 游标先挪好再解锁：这一次读的是哪一段在锁内就定下来，
 			// 不然解码器的读回调中途改游标会读到错位的段。
 			var off int64
@@ -498,6 +525,45 @@ func (s *StreamSource) Read(p []byte) (int, error) {
 			s.mu.Unlock()
 		}
 	}
+}
+
+// availAt 报「从 cur 开始**连续**可读多少字节」（不超过 limit）。
+//
+// ⚠️ **「连续」是这一层的全部要害**：缓存文件里可能有**洞**——尾部那一段
+// 是并行的第二条 Range 请求单独取回来的，它落在文件末尾，而中间那一段
+// （顺序下载还没追上的部分）还是**洞**。洞里的字节是**零**，读出来是
+// 解不出来的噪声，而不是「还没到」。
+//
+// 所以可用区间是**两段的并**：
+//
+//	[0, filled)			顺序下载的前沿
+//	[tailStart, tailStart+tailGot)	单独取回来的尾部那一段
+//
+// 而这一层只认**从 cur 开始连续**的那一段：两段之间有洞的时候，
+// 就只给到洞的边缘（剩下的等顺序下载追上来）。
+//
+// ⚠️ **必须在持 `s.mu` 时调**。
+func (s *StreamSource) availAt(cur, limit int64) int64 {
+	end := cur
+	// 顺序下载那一段。
+	if cur < s.filled {
+		end = s.filled
+	}
+	// 单独取回来的尾部那一段：只有它**接得上**（起点不晚于 cur）才算。
+	if s.tailStart >= 0 && s.tailStart <= cur {
+		if te := s.tailStart + s.tailGot; te > end {
+			end = te
+		}
+	}
+	// 总长是上限。
+	if s.size >= 0 && end > s.size {
+		end = s.size
+	}
+	n := end - cur
+	if n > limit {
+		n = limit
+	}
+	return n
 }
 
 // Seek 挪游标。**不阻塞**，除非是 `SeekEnd`——那个必须等总长出来。
