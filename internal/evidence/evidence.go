@@ -595,9 +595,9 @@ var Items = []Item{
 		// ⚠️ **指针和键盘混着来是最难的那一种**：两者共用「当前是第几项」，而
 		// 悬停每一帧都改它——不处理的话，键盘刚走的那一格会被指针改回去，
 		// 「键盘能上下走」只剩「指针不在菜单项上」的时候才成立。
-		Spec: "头像下拉是自绘浮层（不是系统菜单）：六项按上游的顺序、每一项带图标、锚在头像下面；点外面关、Esc 关、方向键走得动（指针停在菜单项上也走得动）、当前项有反馈；「退出登录」先问一句，取消什么都不做",
+		Spec: "头像下拉是自绘浮层（不是系统菜单）：六项按上游的顺序、**按登录态隐藏**（已登录没有「登录」，未登录没有「个人资料」「退出登录」）、每一项带图标、锚在头像下面；点外面关、Esc 关、方向键走得动（指针停在菜单项上也走得动）、当前项有反馈；「退出登录」先问一句，取消什么都不做",
 		Tests: []string{
-			// 六项都在、顺序照上游、而且**不是系统菜单**。
+			// 六项都在、顺序照上游、**按登录态隐藏**、而且**不是系统菜单**。
 			"TestAvatarMenuHasBiuSixItems",
 			// 六项都按得动：换路由、去个人资料、去设置、退登（先问一句）。
 			"TestAvatarMenuGoesToItsRoute",
@@ -622,6 +622,31 @@ var Items = []Item{
 			"TestTheDangerItemKeepsItsContrastOnTheHighlightedRow",
 			// 「退出登录」先问一句，取消什么都不做。
 			"TestTheAvatarMenuAsksBeforeLoggingOut",
+		},
+	},
+	{
+		// 顶栏**右端**那一块（票 #260）：用户 2026-10-25 说的那一段。
+		//
+		// 归这一组是因为它和上面那一条是同一块地方——**头像下面那一层**和
+		// **头像自己**，说的是同一件事：登录之后那一枚独立的「退出」按钮没了，
+		// 而头像本身是上游那个尺寸。
+		Category: Play,
+		// 顶栏右端：**登录之后没有独立的「退出」按钮**（退登走头像下拉里那一
+		// 项），未登录时那枚「登录」还在（登录入口不能没）；头像画出来的那一枚
+		// 圆是**上游的 40**（顶栏 64 高的 5/8），命中区装得下它，而顶栏另外
+		// 那几枚图标键**没被这一票改到**。
+		Spec: "顶栏右端：登录之后没有独立的「退出」按钮（退登走头像下拉），未登录时那枚「登录」还在；头像画出来的那一枚圆是上游的 40，命中区装得下它",
+		Tests: []string{
+			"TestTheLoggedInTopBarHasNoStandaloneLogoutButton",
+			"TestTheGuestTopBarStillHasTheLoginButton",
+			"TestTheAvatarHitAreaCoversTheCircleItDraws",
+			// 画出来的那一枚圆**量出来**是上游那个尺寸（不是照 `size="sm"` 猜的）。
+			"TestTheTopBarEndsWithTheUpstreamSizedAvatar",
+			// 而顶栏另外那几枚图标键**没被这一票改到**。
+			"TestTheOtherTopBarKeysKeptTheirHitArea",
+			// 下拉里那一项**点得动**（面板的身份钉死了，见 navbar_avatar.go 的
+			// `c.Key("avatar-menu-panel")`）。
+			"TestTheAvatarMenuItemIsAlwaysClickable",
 		},
 	},
 	{
@@ -3457,6 +3482,37 @@ var Items = []Item{
 			"TestTheMusicAndGuichuTabsAreNotTouched",
 			// 下面那一档没歌的时候顶图还在（它是这一屏的内容，不是列表的装饰）。
 			"TestTheTopImagesStayWhenTheListIsEmpty",
+		},
+	},
+	{
+		// 🔴 **这一条的错法是「静默」的**：窗口一矮，新歌速递那一块就减成**一行**
+		// ——用户看到的是「4 张图」，而上游那一块永远是**两行**。没有一样会报错，
+		// 界面只是「不像上游那一页」。
+		//
+		// 上游 `new-music-top.tsx:157` 的 `pageSize = colCount * 2`：那个文件**只量
+		// `window.innerWidth`、从不量高度**，所以它永远是两行；列数也是按**窗口
+		// 宽**分档的（`:135` 与 `:209` 那组 Tailwind 视口断点），所以同一个窗口
+		// 宽度下我们摆几列、一页摆几首都和上游一样。
+		//
+		// ⚠️ **「下面那一档的歌在首屏之外」是上游的样子**，不是缺陷：上游那一块和
+		// 列表在同一个滚动容器里（`music-recommend/index.tsx:261`），矮窗口下这一
+		// 块占满首屏，歌要往下滚才看得到。
+		Category: Platform,
+		// 票 #475。
+		Spec: "首页「流行」那一档顶部的新歌速递：**永远两行**（不因窗口矮就减成一行），列数按**窗口宽**分档（上游那张表），默认窗口下画着 10 张",
+		Tests: []string{
+			// 窗口从最小高到很高，行数一个都不许变。
+			"TestTheBlockIsAlwaysTwoRows",
+			// 默认窗口（1200×800）下画着 10 张（上游 5 列 × 2 行）。
+			"TestTheDefaultWindowShowsTenCards",
+			// 改宽度列数跟着换（上游的断点），改高度行数不动。
+			"TestResizingTheWindowChangesTheColumnsNotTheRows",
+			// 列数那张表本身（上游的断点）。
+			"TestNewMusicColumnsFollowItsOwnBreakpoints",
+			// 封面永远是格子的宽、宽高相等（上游 `aspect-square w-full`）。
+			"TestTheCoverStaysSquareAtTheMinimumWindowHeight",
+			// 翻页箭头在列表里点得动（上游有这两枚箭头：`new-music-top.tsx:182-199`）。
+			"TestTheNewMusicPagerIsClickableInsideTheList",
 		},
 	},
 	{

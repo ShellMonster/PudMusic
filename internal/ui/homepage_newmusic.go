@@ -19,17 +19,28 @@
 // `new-music-top.tsx:135-141` 是这一张，`virtual-grid-page-list/index.tsx:57-64`
 // 是那一张。抄错一张，用户在同一个窗口宽度下看到的列数就和 Biu 不一致。
 //
-// ⚠️ 判据仍然是**容器**的宽不是窗口的（Biu 那边量的是 `window.innerWidth`，
-// 但页面左边有侧栏：同一个窗口宽度下这一块的容器宽是定值，用窗口宽去分档等于
-// 把侧栏那一份宽度算进内容区，差一档就是差一列）。这一条是 BMG-16 在分页网格
-// 上定下来的规矩，两张表共用。
+// ⚠️ **量的是窗口宽（上游 `window.innerWidth`），不是容器宽**：上游的**网格列数**
+// 是 Tailwind 的**视口**断点（`new-music-top.tsx:209` 的
+// `sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6`，那四个断点就是
+// 640/768/1024/1280，和这张表一样），而**页大小**（`colCount * 2`）量的是同一个
+// 数（`:135` 的 `window.innerWidth`）——**两边都是窗口宽**。
+//
+// 我们此前量的是**容器**的宽：侧栏把内容区窄掉一截，于是卡片比上游**大**一档
+// （1200 宽时格子 228 而不是 180），**一页只摆得下 4 张**、这一块也更高，把下面
+// 那一档的列表整个挤出视口——票 #475 说的「只有 1 行、这一行只有 4 个」就是它。
+// 改回窗口宽之后，卡片占**容器**的比例和上游一样（侧栏那一份宽度就是窄掉的那么
+// 一块），而一页摆几首也和上游一样。
 //
 // ## 一页摆多少
 //
 // 上游 `pageSize = colCount * 2`：一页两行，左右两个箭头翻页（`new-music-top.tsx:157`
-// 与 `:186-203`）。这里是**够高就两行、不够就一行**：封面是方的，两行有多高跟着
-// 容器宽走（见 newMusicTwoRowsMinH）。默认的 1200×800 摆不下两行（那一档要 978
-// 高），所以默认是一行、4 首一页，两枚箭头照旧翻页。
+// 与 `:182-199`）。**上游永远是两行**——那个文件只量 `window.innerWidth`，**从不量
+// 高度**——而整页是一个滚动容器（`music-recommend/index.tsx:261`），所以矮窗口下
+// 这一块照样占两行，下面的列表被推到更下面（**滚得到，不是被挤没**）。
+//
+// ⚠️ **我们此前多了一条「窗口矮就减成一行」的降级**：那不是上游的，是我们的。
+// 它就是「只有 1 行、这一行只有 4 个」的来源，而它同时把下面那一档的列表挤没了。
+// 现在这一块**永远两行**，封面**永远是格子的宽**（上游 `aspect-square w-full`）。
 //
 // ## 🔴 行身份
 //
@@ -59,17 +70,13 @@ import (
 const (
 	// newMusicRows 是**一页摆几行**。上游是列数乘 2（`new-music-top.tsx:157`）。
 	//
-	// ⚠️ 这是**窗口够高时**的数。窗口矮到放不下两行就只摆一行（见 newMusicRowsAt），
-	// 每页的首数跟着变，翻页照旧。少摆一行比把下面的列表挤没强：那一档的推荐
-	// 列表才是这一屏的主内容。
-	newMusicRows = 2
-
-	// newMusicChromeH 是这一块之外、这一屏不管怎样都要花掉的高度。
+	// ⚠️ **它不再跟着窗口高变**：上游那个文件**只量 `window.innerWidth`、从不量
+	// 高度**，所以它永远是两行——矮窗口下这一块比视口高，下面那一档的列表被推到
+	// 更下面（**滚得到**），不是被挤没。
 	//
-	// 量出来的：顶栏 ~52 + 播放条 ~90 + 页面内边距 40 + Tab 那一排 ~34 + 页面里
-	// 两道缝 24 = 240。封面是方的之后，两行的总高跟着容器宽走（见
-	// newMusicTwoRowsMinH），所以这个数从「一个定死的门槛」变成公式里的一项。
-	newMusicChromeH = 240
+	// 我们此前有一条「窗口矮就减成一行」的降级（那是我们自己加的，上游没有），
+	// 它就是票 #475 说的「只有 1 行、这一行只有 4 个」的来源。**去掉它。**
+	newMusicRows = 2
 
 	// newMusicHeadH 是「新歌速递」那一行标题占的高。24 号字的行高约 29，取 32
 	// 留一点余量。
@@ -78,27 +85,6 @@ const (
 	// newMusicCardTextH 是封面下面那两行字占的高：歌名 16（行高 ~20）、UP 名
 	// 14（行高 ~18）、两道 6 的缝。取 52 留一点余量。
 	newMusicCardTextH = 52
-
-	// newMusicListRowH 是下面那一档列表**一行**的高（widgets/list 的
-	// `listRowHeight` 是 64）。
-	newMusicListRowH = 64
-
-	// newMusicListHeadH 是列表**表头**加「表头到第一行那道缝」的高。
-	//
-	// 表头是 `list.Header`：上下各 8 的 Padding + 14 号字那行（约 17）+ 1 的
-	// 分隔线 ≈ 34；首页这一页的 Column 在表头和列表之间还有一道 12 的 gap。
-	// 取 52 留一点余量（行高会跟着平台差几个十分之一像素）。
-	//
-	// ⚠️ **这一段原来漏掉了**：只给列表留一行 64 的话，真正画出来的那一行只剩
-	// 64 − 约 48 = 16 上下——一行被裁掉四分之三，而 `Tester` 里它仍然「在」
-	// （盒子在、字也在，只是被视口切了），只看「有没有」的测试抓不到。评审在
-	// 1200×640 / 560 / 930 上都量到过（约 25 / 16 / 25 高）。
-	newMusicListHeadH = 52
-
-	// newMusicListMinH 是摆完这一块之后，下面那一档至少要留下的高：**表头 +
-	// 一行完整的行**。少给的话用户看到的是一排卡片下面压着一根切了一半的歌名，
-	// 比少摆一行更糟。
-	newMusicListMinH = newMusicListHeadH + newMusicListRowH
 
 	// newMusicGap 是格子之间的间距。上游是 `gap-3`（12 像素）。
 	newMusicGap = space.Px12
@@ -113,13 +99,17 @@ const (
 	// newMusicArrowW 是左右两个翻页键的点击区边长：32×32。
 	//
 	// 图标本身还是 16（上游那两枚 `RiArrowLeftSLine` / `RiArrowRightSLine` 的
-	// size 是 16，`new-music-top.tsx:185-199`），32 是**点击区**（票 #170 的数）。
-	// 原来它是 84（两个汉字加内边距），图标化之后 84×84 的一枚图标键在这个页头上
+	// size 是 16，`new-music-top.tsx:188` 与 `:197`），32 是**点击区**（票 #170 的
+	// 数）。原来它是 84（两个汉字加内边距），图标化之后 84×84 的一枚图标键在这个页头上
 	// 会是一块方砖，比旁边那个读数还大。
 	newMusicArrowW = 32
 )
 
-// newMusicColsFor 是容器有 w 那么宽时新歌速递摆几列。
+// newMusicColsFor 是**窗口**有 w 那么宽时新歌速递摆几列。
+//
+// ⚠️ **量的是窗口宽**：上游的网格列数是 Tailwind 的视口断点、页大小量的是
+// `window.innerWidth`（`new-music-top.tsx:135`），**两边都是窗口宽**。见文件头
+// 「它和分页网格不是同一张表」那一段。
 //
 // ⚠️ 这张表和 `widgets/list` 里那张**不是同一张**，抄的时候别抄串了（见文件头）。
 var newMusicColsFor = func(w float32) int {
@@ -133,60 +123,8 @@ var newMusicColsFor = func(w float32) int {
 	case w >= 640:
 		return 3
 	default:
-		return 2 // 比 640 窄（上游 `:142` 的 `return 2`）
+		return 2 // 比 640 窄（上游 `:140` 的 `return 2`）
 	}
-}
-
-// newMusicRowsAt 是窗口有 h 那么高时一页摆几行。
-//
-// 上游永远是两行（`new-music-top.tsx:157` 的 `colCount * 2`），因为上游那一整页在
-// 一个滚动容器里，滚下去就是了。这里摆不下两行时**减成一行**，理由见
-// `newMusicTwoRowsMinH`。
-//
-// ⚠️ 判据要**格子宽**：封面是方的（边长等于格子宽），所以两行有多高跟着容器有多
-// 宽走。拿一个定死的窗口高当门槛是封面还定高 140 时的算法，方封面下它会算错：
-// 1200 宽时容器 4 列、格子 231，两行要 978 高；639 宽时容器只有 2 列、格子反而
-// 313，两行要 1143 高——两种宽度不可能共用一个门槛。
-func newMusicRowsAt(h, cell float32) int {
-	if h >= newMusicTwoRowsMinH(cell) {
-		return newMusicRows
-	}
-	return 1
-}
-
-// newMusicTwoRowsMinH 是「窗口要这么高，两行才摆得下」的那个数。
-//
-// 它按格子宽算：两行的封面是 2×cell，加上两行文字、行间缝、标题和这一屏的固定
-// 开销（`newMusicChromeH`），再给下面的列表留**表头 + 一行完整的行**
-// （`newMusicListMinH`）。
-//
-// 窗口最小高是 560（`WindowOptions` 的 `MinHeight`），那一档按两行摆的话下面的
-// 列表就只剩 0——实测那一档的行盒子宽 0 高 0，一首歌都看不见。
-func newMusicTwoRowsMinH(cell float32) float32 {
-	return newMusicChromeH + newMusicHeadH + 2*newMusicGap +
-		2*(cell+newMusicCardTextH) + newMusicListMinH
-}
-
-// newMusicCoverSide 是这一帧封面那个正方形的边长。
-//
-// 平时就是格子的宽（上游 `aspect-square w-full`）。窗口矮到**连一行整宽的封面
-// 都放不下**时（最小窗口 1200×560 就是那一档：整宽 231 的封面 + 顶栏 / Tab /
-// 播放条会把下面的列表挤成 0×0），把边长压到「摆完之后列表还留得下
-// `newMusicListMinH`（表头 + 一行完整的行）」的那个数。压小之后它仍然是方的——
-// 票面要的就是宽高相等，而不是「一定要占满格子」。
-//
-// ⚠️ 两行的档不用在这里再算一遍：两行的门槛（newMusicTwoRowsMinH）成立时，
-// 这个函数算出来的上限一定大于格子宽，于是边长就是格子宽。
-func newMusicCoverSide(h, cell float32) float32 {
-	room := h - newMusicChromeH - newMusicHeadH - newMusicGap -
-		newMusicCardTextH - newMusicListMinH
-	if room < 0 {
-		room = 0
-	}
-	if cell < room {
-		return cell
-	}
-	return room
 }
 
 // newMusicCellWidth 是一格有多宽：容器减去列间的缝，平分。
@@ -203,8 +141,9 @@ func newMusicCellWidth(w float32, cols int) float32 {
 
 // newMusicPageSize 是**一页摆几首**：列数乘行数。
 //
-// 每页的首数会跟着行数变（窗口矮时只有一行），所以「一共几页」跟着变——翻页的
-// 箭头和「几 / 几」那个读数算的都是它，页码别的地方也照它（见 clampPage）。
+// 行数是定死的两行（上游），所以「一共几页」只跟着**列数**变——而列数是按**窗口
+// 宽**分的档（见 newMusicColsFor）。翻页的箭头和「几 / 几」那个读数算的都是它，
+// 页码别的地方也照它（见 clampPage）。
 func newMusicPageSize(cols, rows int) int {
 	if cols < 1 || rows < 1 {
 		return 0
@@ -212,8 +151,7 @@ func newMusicPageSize(cols, rows int) int {
 	return cols * rows
 }
 
-// newMusicGrid 是新歌速递那一块：每页一到两行，左右翻页（几行看窗口有多高，见
-// newMusicRowsAt）。
+// newMusicGrid 是新歌速递那一块：两行，左右翻页。
 //
 // **建一次，存进首页的状态里，每一帧调 View**。同 widgets/list 的 List：新建一个
 // 等于每帧回到第一页（这里就是每帧都回到第一页，翻页翻了个寂寞）。
@@ -245,20 +183,23 @@ type newMusicGrid struct {
 	// page 是现在第几页，从 1 起。0 是还没画过一帧。
 	page int
 
-	// width 是这一块**上一帧**量出来的容器宽，用来分列（见 view 里那两句）。
+	// width 是这一块**上一帧**量出来的**容器**宽，用来算格子宽（见 view 里那两句）。
+	//
+	// ⚠️ **它不是分列的判据**（分列看的是窗口宽，见 newMusicColsFor）：格子宽是
+	// 「容器宽按列数平分」，而列数是按窗口宽定的。
 	width float32
 
-	// coverSide 是这一帧封面那个正方形的边长（见 newMusicCoverSide）。
+	// coverSide 是这一帧封面那个正方形的边长（= 格子宽，见 view）。
 	//
 	// ⚠️ **它是估的**（见 `Height`）：回顶按钮判断「滚过多少像素」靠它算这一块的
-	// 高，而它跟着窗口的宽高走。
+	// 高，而它跟着窗口的宽走。
 	coverSide float32
 
-	// rows 是**上一帧**摆了几行，用来在换歌的时候夹页码（见 clampPage）。0 是还没
+	// cols 是**上一帧**摆了几列，用来在换歌的时候夹页码（见 clampPage）。0 是还没
 	// 画过一帧。
 	//
-	// ⚠️ 只有它被记着：窗口高每一帧现读 `c.Size()`，不存（见 view 里那三段）。
-	rows int
+	// ⚠️ 只有它被记着：窗口宽每一帧现读 `c.Size()`，不存（见 view 里那三段）。
+	cols int
 
 	// ── 下面这一摊是取数状态（homepage_feed.go 递进来的）──────────────
 
@@ -337,16 +278,16 @@ func (g *newMusicGrid) clampPage() {
 
 // totalPages 一共有几页。
 //
-// 每页 size 首（size 是**上一帧**的列数乘行数），一首都没有时是 0 页而不是 1 页：
+// 每页 size 首（size 是**上一帧**的列数乘两行），一首都没有时是 0 页而不是 1 页：
 // 空着的时候画的是「暂无数据」那一块，画一个 1 / 0 的读数比不画更让人以为界面坏了。
 func (g *newMusicGrid) totalPages() int {
-	// 还没画过一帧时 rows 是 0，按最常见的那个（两行）算：夹页码只需要一个够用的
-	// 分母，而画第一帧时 view 里会拿真的行数重算一遍。
-	rows := g.rows
-	if rows <= 0 {
-		rows = newMusicRows
+	// 还没画过一帧时 cols 是 0，按最窄的那个（两列）算：夹页码只需要一个够用的
+	// 分母，而画第一帧时 view 里会拿真的列数重算一遍。
+	cols := g.cols
+	if cols <= 0 {
+		cols = 2
 	}
-	size := newMusicPageSize(newMusicColsFor(g.width), rows)
+	size := newMusicPageSize(cols, newMusicRows)
 	if len(g.songs) == 0 || size <= 0 {
 		return 0
 	}
@@ -369,29 +310,31 @@ func (g *newMusicGrid) view(c *ui.Context) {
 	t := c.Theme()
 
 	// 容器宽。头一帧还没量出来（`Bounds` 读的是上一帧的盒子），先拿窗口的宽
-	// 顶着——那一帧的列数和封面宽是**估的**（窗口比容器宽，估出来偏大），下一帧
+	// 顶着——那一帧的格子宽是**估的**（窗口比容器宽，估出来偏大），下一帧
 	// 量到真的就换过去了。反过来（第一帧量到 0 就当最窄）的话会先闪一下两列，
 	// 宁可宽一帧，也不要窄一帧。理由和 widgets/list 的 Grid.View 里那几句一样。
 	//
-	// ⚠️ **窗口高每一帧都现读，不记**（`g.windowH` 那个字段是踩过坑才删的）：记
-	// 下来之后用户改窗口高度就不生效了——实测把 800 记在字段里、把窗口拖到 560，
-	// 这一块还是摆两行，下面那档的列表被挤没。`c.Size()` 读的是两个字段，读它不
+	// ⚠️ **列数按窗口宽分档，格子宽按容器宽分**（上游就是这么两样分的：列数是
+	// Tailwind 的视口断点，格子是容器里 `repeat(n, minmax(0, 1fr))` 平分的）。
+	//
+	// ⚠️ **窗口宽每一帧都现读，不记**（`g.windowW` 那个字段是踩过坑才删的）：记
+	// 下来之后用户改窗口宽度就不生效了——实测把 1200 记在字段里、把窗口拖到 900，
+	// 这一块还是五列，而上游在 900 宽上是四列。`c.Size()` 读的是两个字段，读它不
 	// 花钱。
-	ww, wh := c.Size()
+	ww, _ := c.Size()
 	w := g.width
 	if w <= 0 {
 		w = ww
 	}
-	cols := newMusicColsFor(w)
+	cols := newMusicColsFor(ww)
 	cell := newMusicCellWidth(w, cols)
-	rows := newMusicRowsAt(wh, cell)
-	coverSide := newMusicCoverSide(wh, cell)
-	g.width, g.rows = w, rows
+	coverSide := cell
+	g.width, g.cols = w, cols
 	g.coverSide = coverSide
 
 	g.clampPage()
 	total := g.totalPages()
-	size := newMusicPageSize(cols, rows)
+	size := newMusicPageSize(cols, newMusicRows)
 
 	ui.Column(c).Key("new-music").FillWidth().Gap(space.Px12).Children(func() {
 		g.viewHeader(c, total)
@@ -401,7 +344,7 @@ func (g *newMusicGrid) view(c *ui.Context) {
 		// 登录态过期这三样上读到的都是「B 站没有新歌」。
 		switch {
 		case g.err != nil && len(g.songs) == 0:
-			// 高度照「暂无数据」那一支（`new-music-top.tsx:186` 的 h-[200px]）：
+			// 高度照「暂无数据」那一支（`new-music-top.tsx:212` 的 h-[200px]）：
 			// 失败之后网格整个换掉，这一块的高度跟着换会让下面那个列表跳一格。
 			//
 			// ⚠️ **底色是页面底色 + 一圈影**（`shadow.HeroSmall`），不是「比背景
@@ -419,7 +362,7 @@ func (g *newMusicGrid) view(c *ui.Context) {
 			return
 
 		case g.loading && len(g.songs) == 0:
-			// 上游 `new-music-top.tsx:207-209`：拉的时候就是一个转圈。
+			// 上游 `new-music-top.tsx:203-205`：拉的时候就是一个转圈。
 			shadow.HeroSmall(ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
 				Background(t.Background).Center(), t).Children(func() {
 				ui.Spinner(c).Label("正在加载新歌速递")
@@ -488,7 +431,7 @@ func (g *newMusicGrid) viewHeader(c *ui.Context, total int) {
 			// ⚠️ 翻页不重置网格那一块的横向位置——它本来就没有横向滚动，
 			// 页码就是它唯一的「位置」。
 			// 上游那两枚是 `variant="flat"` 的 `RiArrowLeftSLine` / `RiArrowRightSLine`
-			// 16（`new-music-top.tsx:185-199`）。图标键 + 悬停说出它做什么。
+			// 16（`new-music-top.tsx:188` 与 `:197`）。图标键 + 悬停说出它做什么。
 			//
 			// ⚠️ **走 `iconKey`（悬停时图形变主色）**，不是 `iconButton`（票 #249）：
 			// 翻页是这一块唯一的交互，而原来那一档只有 8% 的淡底、图形不换色——
@@ -518,9 +461,9 @@ func (g *newMusicGrid) viewHeader(c *ui.Context, total int) {
 
 // viewCard 画一格：封面 + 歌名 + UP 名，外加点一下就放队列。
 //
-// 结构照上游 `new-music-top.tsx:217-261` 那个 `role="button" tabIndex={0}` 的
-// 卡片：封面**占满一格的宽、宽高相等**（上游 `:225` 的 `aspect-square w-full`；
-// 窗口矮到整宽的封面会把列表挤没时按 `newMusicCoverSide` 压小，但还是方的），
+// 结构照上游 `new-music-top.tsx:216-259` 那个 `role="button" tabIndex={0}` 的
+// 卡片：封面**占满一格的宽、宽高相等**（上游 `:225` 的 `aspect-square w-full`——
+// **永远是格子的宽**，不因为窗口矮就压小：上游那个文件只量宽度、不量高度），
 // 下面 `mt-2` 是歌名，再下面一行小字（上游那一行是 `作者 · 日期`，我们这一块的
 // `list.Music` 没有日期字段，所以只有 UP 名）。
 //
@@ -551,7 +494,7 @@ func (g *newMusicGrid) viewCard(c *ui.Context, i int, coverSide float32) {
 	onCard := card.Hovered()
 
 	card.Children(func() {
-		// ① 封面。边长是 `coverSide`（平时等于格子的宽，见 newMusicCoverSide），
+		// ① 封面。边长是 `coverSide`（= 格子的宽，见 view），
 		// 上面那一圈 hover 反馈是**和网格卡片同一套**：封面底部一条 black/90
 		// 渐变、右下角一个主色圆播放钮、200ms 淡入。四态由 imgcache.View 画：
 		// 空地址画空框，不画「失败」。
@@ -615,13 +558,9 @@ func (g *newMusicGrid) Height() float32 {
 	if g.err != nil || g.loading || g.totalPages() == 0 {
 		return newMusicHeadH + newMusicGap + newMusicEmptyH
 	}
-	rows := g.rows
-	if rows <= 0 {
-		rows = newMusicRows
-	}
-	// 标题 + 一道缝 + 几行卡片（每行：封面 + 文字）+ 行间的缝。
+	// 标题 + 一道缝 + 两行卡片（每行：封面 + 文字）+ 行间的缝。
 	return newMusicHeadH + newMusicGap +
-		float32(rows)*(g.coverSide+newMusicCardTextH) + float32(rows-1)*newMusicGap
+		float32(newMusicRows)*(g.coverSide+newMusicCardTextH) + float32(newMusicRows-1)*newMusicGap
 }
 
 // play 把第 i 首追加到队尾并立即播放，保留用户原队列（票 #337）。

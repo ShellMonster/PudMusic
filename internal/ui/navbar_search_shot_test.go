@@ -57,6 +57,10 @@ func TestRenderSearchShots(t *testing.T) {
 			}
 			tt.Move(900, 500)
 			tt.Frame()
+			// ⚠️ **要把面板的进场推完**（票 #259）：浮层现在进场是 200ms 的一段
+			// （淡入 + 升上来），而 Tester 的钟站着不动——不推它的话这一张存的是
+			// 进场的第一帧，而那一帧**面板上一个字都没画**。
+			settleSuggestEnter(t, tt)
 			save(t, dir, "03-搜索历史-"+name+".png", tt)
 		})
 	}
