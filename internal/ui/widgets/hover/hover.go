@@ -109,9 +109,9 @@ const (
 // 的事，只是那句话没有提前说。
 const PlayFrom = "从这一首往后听"
 
-// PlayNow 是「按下去只放这一首」这句话。
+// PlayNow 是「按下去加这一首并立即播」这句话。
 //
-// ⚠️ 和 PlayFrom 分开：首页「新歌速递」那张卡片按下去换掉整个队列、只放这一首
+// ⚠️ 和 PlayFrom 分开：首页「新歌速递」那张卡片按下去保留原队列、追加并立即播这一首
 // （上游 `new-music-top.tsx` 的 `handlePlay`），说「从这一首往后听」会提前许诺一
 // 件那一下不做的事。
 const PlayNow = "播放"
@@ -128,7 +128,7 @@ const PlayingMark = "正在播放"
 // 己猜是哪一首。顺带它让这一行在 Tester 里可认（`Tester.Find` 认标签）。
 func FromLabel(title string) string { return title + " " + PlayFrom }
 
-// PlayLabel 是「只放这一首」那枚播放钮的标签，理由同 FromLabel。
+// PlayLabel 是「加这一首并立即播」那枚播放钮的标签，理由同 FromLabel。
 func PlayLabel(title string) string { return title + " " + PlayNow }
 
 // ProfileTip 是「按下去进他的 UP 空间」那一句提示。
@@ -512,9 +512,9 @@ func CardCoverProfile(c *ui.Context, cache *imgcache.Cache, url string, w, h flo
 	cardCover(c, cache, url, w, h, on, playCount, clock, idsOf(title, idsCardProfile), ProfileTip, glyphProfile, play, false)
 }
 
-// CardCoverOne 是同一圈反馈，但按下去**只放这一首**（`PlayNow`）。
+// CardCoverOne 是同一圈反馈，但按下去**加这一首并立即播**（`PlayNow`）。
 //
-// 首页「新歌速递」那一块用它：那张卡片单击就换掉整个队列只放这一首（上游
+// 首页「新歌速递」那一块用它：那张卡片单击就追加并立即播这一首（上游
 // `new-music-top.tsx` 的 `handlePlay`），和网格卡片「从这一首往后接」不是一件事。
 // 两处的视觉是同一套——同一个应用里同一个手势不该长出两个样子。
 //

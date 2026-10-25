@@ -574,14 +574,8 @@ func (s *Shell) openSearchUser(items []app.Item) {
 // B6）：同一个动作在两个页面上各有一枚入口，而此前**只有搜索页有**——用户在
 // 一个页面能按、在另一个页面找不到，会以为是两个不同的功能。
 //
-// 🔴 **语义是「只追加，不替换」**（验收第 1 条，也是上游那一行的原话：它把当前
-// 已加载的列表全量映射之后调 `addList`，**不是 `playList`**
-// （`pages/search/video-list/index.tsx:89-101`）。本项目里这就是
-// `App.Enqueue`（往队尾追加）而不是 `App.PlayFrom`（换掉整个队列并从第一首
-// 起播）。差别在界面上看得见：按了之后正在放的那首**不换**，新的一首排在它后面。
-//
-// 「从这首开始」那一档仍然待人裁决（DESIGN.md §十第 3 条）——裁决之后改
-// `playAllSongs` 一处，两个页面一起变。
+// 票 #337（2026-10-24）：换成已经加载的这一批并从第一首播。
+// 上游 v1.16 搜索页曾走 addList，本项目在 playAllSongs 中统一成 PlayFrom。
 func (s *Shell) searchPlayAll(t *searchTab) {
 	s.playAllSongs(t.snapshot())
 }
