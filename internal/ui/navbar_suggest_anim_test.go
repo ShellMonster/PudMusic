@@ -207,6 +207,8 @@ func TestTheSuggestPanelVanishesAtOnce(t *testing.T) {
 	if _, ok := tt.Find(suggestAnimTerm); !ok {
 		t.Fatalf("浮层上没有那条历史，文字有 %q", tt.Texts())
 	}
+	bg := rgb(BuildTheme(s.app.SettingsSnapshot(), false).Background)
+	settledY, _ := suggestPanelMark(tt, bg)
 
 	// 关掉。
 	s.searchSuggest = false
@@ -214,6 +216,21 @@ func TestTheSuggestPanelVanishesAtOnce(t *testing.T) {
 
 	if _, ok := tt.Find(suggestAnimTerm); ok {
 		t.Error("关掉之后浮层上还有那条历史——它是淡出去的（这一票只做进场，退场是瞬消）")
+	}
+
+	// 再开一次：**进场要再播一遍**（判据是「面板第一次出现」，不是「这一帧」）。
+	//
+	// ⚠️ **这一条挡的是一个具体的坏法**：面板的元素状态在它不在树上的时候会被
+	// 框架回收（`mygo/ui/runtime.go` 的 prune），所以第二次打开时那条通道是
+	// 新的——如果不重新 Jump，面板会**直接出现在**该在的地方（没有那一下）。
+	s.searchSuggest = true
+	tt.Frame()
+	y, mark := suggestPanelMark(tt, bg)
+	if mark > 40 {
+		t.Errorf("第二次打开浮层时它已经画上了（离底 %d）——进场没有重播", mark)
+	}
+	if y <= settledY {
+		t.Errorf("第二次打开浮层时它在 y=%.3f，落位是 %.3f——它没有从下面升上来", y, settledY)
 	}
 }
 
