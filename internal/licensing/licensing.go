@@ -86,6 +86,10 @@ const VendoredGoMP3LicenseRelPath = "resources/licenses/github.com-tphakala-go-m
 // 是真的那份，手抄一遍抄错一个字，那条声明就不成立了。
 const VendoredGoMP3LicenseSource = "internal/service/audio/mp3dec/gomp3/LICENSE"
 
+// Go image/jpeg 解码器的 MCU 行存储改版，保留 Go 的 BSD-3-Clause 声明。
+const GoJPEGLicenseRelPath = "resources/licenses/go-image-jpeg-LICENSE.txt"
+const GoJPEGLicenseSource = "internal/ui/widgets/imgcache/internal/jpegrows/LICENSE"
+
 // AssetLicenseRelPaths 是**不是构建依赖、但同样要随包发出去**的许可证原文。
 //
 // 每一份都得排进 `gen-notices` 的输出列表，否则 prune 会把它删掉——而删掉一个
@@ -94,6 +98,7 @@ const VendoredGoMP3LicenseSource = "internal/service/audio/mp3dec/gomp3/LICENSE"
 var AssetLicenseRelPaths = []string{
 	IconLicenseRelPath,
 	VendoredGoMP3LicenseRelPath,
+	GoJPEGLicenseRelPath,
 }
 
 // AssetLicenseSources 是「随包发出去的那一份是从哪儿抄来的」。
@@ -108,6 +113,7 @@ var AssetLicenseRelPaths = []string{
 // 没有任何东西会发现。
 var AssetLicenseSources = map[string]string{
 	VendoredGoMP3LicenseRelPath: VendoredGoMP3LicenseSource,
+	GoJPEGLicenseRelPath:        GoJPEGLicenseSource,
 }
 
 // VendoredCodeLicenseRelPaths 是**vendor 进仓库的第三方代码**那几份许可证原文。
@@ -122,6 +128,7 @@ var AssetLicenseSources = map[string]string{
 // License 根本不是 SPDX 标识，认不出不等于有传染性。
 var VendoredCodeLicenseRelPaths = []string{
 	VendoredGoMP3LicenseRelPath,
+	GoJPEGLicenseRelPath,
 }
 
 // BiuRequiredNotice 是 PolyForm 要求**逐字**保留的那一行。
@@ -165,7 +172,9 @@ const noticesHeader = `# BiuGo 第三方许可清单
 # ── 不是 Go 模块的那几样 ─────────────────────────────────────────────────────
 #
 # 上面那张表只列**编进可执行文件的 Go 模块**（go list -deps 数得出来的那些）。
-# 这个目录里还有三份**不是模块**的，同样随包发出去：
+# 这个目录里还有四份**不是模块**的，同样随包发出去：
+#
+# go-image-jpeg-LICENSE.txt Go image/jpeg 的 MCU 行存储改版（BSD-3-Clause）。
 #
 # BIU-LICENSE.txt          Biu 本体（PolyForm Noncommercial 1.0.0）。Biu 不是构建
 #                          依赖，它是这个项目的**上游**；PolyForm 的 Notices 一节

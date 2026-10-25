@@ -63,7 +63,7 @@ const maxStoredSide = 768
 // 和 `ui.DecodeBitmap` 的区别只有两个：
 //
 //   - 长边超过 `maxStoredSide` 的按比例缩到 `maxStoredSide`；
-//   - 带 EXIF 方向信息的那一张**不缩**（见 hasExifOrientation）。
+//   - EXIF 需要旋转/翻转的那一张**不缩**（见 hasExifOrientation）。
 //
 // ⚠️ **碰像素必须在造 Bitmap 之前**（`ui.Bitmap` 只能写不能读，
 // `mygo/ui/bitmap.go`：没有 GetPixel、没有把像素取出来的那一支）：所以这一格
@@ -72,10 +72,23 @@ func decodeStored(data []byte) (*ui.Bitmap, error) {
 	if len(data) == 0 {
 		return nil, errors.New("imgcache: 没有字节")
 	}
-	// 带 EXIF 方向的走框架那一支：它会把方向摆正，而缩放这一支不认识方向，
-	// 转错了就是一张躺着的封面。B 站的图床上没有带方向的图，这一支是兜底。
+	// 需要旋转/翻转的仍由框架摆正。只有 EXIF 元数据、方向为 1 或未设置
+	// 的图可以正常缩放；真机缓存中 146 张有 EXIF，均不需要旋转。
 	if hasExifOrientation(data) {
 		return ui.DecodeBitmap(data)
+	}
+	if img, handled, err := decodeJPEGStored(data); handled {
+		if err != nil {
+			return nil, err
+		}
+		return ui.NewBitmap(img), nil
+	}
+	// 普通大 PNG 逐行解：只留缩放要用的两行，不建整张原图。
+	if img, handled, err := decodePNGStored(data); handled {
+		if err != nil {
+			return nil, err
+		}
+		return ui.NewBitmap(img), nil
 	}
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
@@ -91,10 +104,7 @@ func decodeStored(data []byte) (*ui.Bitmap, error) {
 	}
 
 	// 按比例缩：长边落到 maxStoredSide，另一边按同一个比例走。
-	k := float64(maxStoredSide) / float64(max(w, h))
-	dw := max(1, int(float64(w)*k+0.5))
-	dh := max(1, int(float64(h)*k+0.5))
-	dst := image.NewRGBA(image.Rect(0, 0, dw, dh))
+	dst := image.NewRGBA(storedBounds(w, h))
 	// ⚠️ **用 ApproxBiLinear 而不是 CatmullRom**（`internal/ui/covercrop.go` 那一处
 	// 缩放用的是 CatmullRom）：实测一张 1920×1080 缩到 768×432，CatmullRom 要
 	// 120~280ms（跟机器负载有关），ApproxBiLinear 只要 10~15ms——**十几倍**。
@@ -106,16 +116,14 @@ func decodeStored(data []byte) (*ui.Bitmap, error) {
 	return ui.NewBitmap(dst), nil
 }
 
-// hasExifOrientation 报这张 JPEG 有没有 EXIF 方向信息。
-//
-// 扫的是 JPEG 的段结构：APP1（0xE1）那一段的头六个字节是 "Exif\x00\x00"。
-// 找到就说明**可能**有方向信息——这里不读 TIFF 里的 Orientation 标签，
-// 宁可多判一张（多判的后果只是「这一张不缩」），也不肯把一张躺着的封面
-// 缩成一张躺着的封面。
-//
-// 这一段扫描抄的是 `mygo/ui/bitmap.go` 的 `exifOrientation`（那里读得更细，
-// 要 TIFF 的那个标签）；抄它而不是自己另写一套，是因为 JPEG 的段结构就那
-// 么几行，抄一遍比重新发明一份可靠。
+func storedBounds(w, h int) image.Rectangle {
+	k := min(1, float64(maxStoredSide)/float64(max(w, h)))
+	return image.Rect(0, 0, max(1, int(float64(w)*k+0.5)), max(1, int(float64(h)*k+0.5)))
+}
+
+// hasExifOrientation reports an actual rotation/flip (EXIF 2..8), not merely
+// the presence of metadata. Parsing follows MyGo's bitmap.go orientation rules;
+// malformed or absent tags mean no transform, just as in ui.DecodeBitmap.
 func hasExifOrientation(data []byte) bool {
 	if len(data) < 4 || data[0] != 0xff || data[1] != 0xd8 {
 		return false // 不是 JPEG
@@ -130,9 +138,36 @@ func hasExifOrientation(data []byte) bool {
 			return false // 图像数据开始，或者这段坏了
 		}
 		if marker == 0xe1 && size >= 8 && string(data[i+4:i+10]) == "Exif\x00\x00" {
-			return true
+			return rotatedTIFF(data[i+10 : i+2+size])
 		}
 		i += 2 + size
+	}
+	return false
+}
+
+func rotatedTIFF(t []byte) bool {
+	if len(t) < 8 {
+		return false
+	}
+	var bo binary.ByteOrder
+	switch string(t[:2]) {
+	case "II":
+		bo = binary.LittleEndian
+	case "MM":
+		bo = binary.BigEndian
+	default:
+		return false
+	}
+	ifd := int64(bo.Uint32(t[4:8]))
+	if ifd < 8 || ifd+2 > int64(len(t)) {
+		return false
+	}
+	n := int(bo.Uint16(t[ifd : ifd+2]))
+	for e := int(ifd) + 2; n > 0 && e+12 <= len(t); e, n = e+12, n-1 {
+		if bo.Uint16(t[e:e+2]) == 0x0112 && bo.Uint16(t[e+2:e+4]) == 3 {
+			o := bo.Uint16(t[e+8 : e+10])
+			return o >= 2 && o <= 8
+		}
 	}
 	return false
 }
