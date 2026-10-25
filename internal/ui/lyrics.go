@@ -459,6 +459,17 @@ func (lv *lyricsView) centre(c *ui.Context, active int, content uint32, fontSize
 		// 的那个东西（这一帧画出来的框）可能压根不会有。
 		lv.pend++
 		if lv.pend <= lyricMeasureFrames {
+			// ⚠️ **这一句不能改成 `p.AnimationFrame()`**（票 #392 的那一批里，
+			// 别处都改了，就这一处没改——**理由不是「忘了」，是它要的东西不同**）：
+			// 局部重绘（`mygo/ui/runtime.go` 的 `repaintFrame`）**只重画、不
+			// 重建**，于是**不重排**——而这一句要的是「**再排一遍**好量到歌词
+			// 区和那一行的框」（那两个框是布局量出来的，见 `viewLyricLines`）。
+			//
+			// 局部重绘那一帧里量到的还是**上一帧**的框（空的），于是这一句要的
+			// 那一帧永远不会来，歌词就一直滚不动。
+			//
+			// 而它**也不值得**改：这一句是**每次换歌最多三帧**（`pend` 有预算），
+			// 省下来的三次整窗重建。
 			c.AnimationFrame()
 		}
 		return
