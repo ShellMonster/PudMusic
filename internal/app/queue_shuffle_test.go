@@ -244,3 +244,189 @@ func TestTheHistorySurvivesAReorder(t *testing.T) {
 		t.Errorf("上一首是 %q，want %q（重排不该把历史栈弄丢）", back.Title, before.Title)
 	}
 }
+
+// ---- 袋子是池子：新加进来的歌这一轮就轮到它（票 #387）----
+//
+// 这一组盯的是**随机那一档的池子语义**（见 queue_shuffle.go 文件头）：随机不是
+// 「排好一张表」，是「下一首从还没放过的里面随机挑」，而**新加进队列的歌立刻
+// 就在池子里**（Spotify / Apple / QQ音乐 / 网易云都是这个做法）。
+
+// TestRandomPlaysASongAddedMidRound 盯「**这一轮中途加进队列的歌，这一轮就轮到
+// 它**」。
+//
+// 洗牌袋原来是**轮开始时的快照**——中途加进来的歌不在袋子里，要等下一轮重装
+// 才轮到（而票面写的是「随机不重复、不遗漏」，那句话对中途加的歌不成立）。
+//
+// 判据不是「它排在第几个」：它插在池子里的位置是随机的（下一首就有可能抽到
+// 它），所以钉的是「**这一轮里它被轮到，而且只轮到一次**」。
+func TestRandomPlaysASongAddedMidRound(t *testing.T) {
+	q := app.NewQueueWithRand(&steppingRand{})
+	q.SetPlayMode(app.PlayModeRandom)
+	q.Append(items("a.mp3", "b.mp3", "c.mp3", "d.mp3")...)
+	at(q, 0)
+
+	// 发出这一轮的第一首（袋子里于是少了一首）。
+	first := q.Advance()
+	if first.Kind != app.AdvancePlay {
+		t.Fatalf("结论是 %v，want AdvancePlay", first.Kind)
+	}
+
+	// 中途加一首歌。
+	q.Append(items("e.mp3")...)
+
+	// 这一轮剩下的四首：e 必须在里面，而且只出现一次。
+	round := playTitles(t, q, 4)
+	if got := countOf(round, "e"); got != 1 {
+		t.Errorf("这一轮放了 %q，want 恰好一次（中途加进来的歌这一轮就该轮到它）", round)
+	}
+	if len(seenTitles(round)) != len(round) {
+		t.Errorf("这一轮是 %q——里面有重复的歌（洗牌袋要保证一列里一首不重复）", round)
+	}
+
+	// 下一轮也一样：它**每一轮**都恰好轮到一次（不重复，也不遗漏）。
+	next := playTitles(t, q, 5)
+	if got := countOf(next, "e"); got != 1 {
+		t.Errorf("下一轮放了 %q，want e 恰好一次", next)
+	}
+}
+
+// TestRandomPlayNextIsTheNextOne 盯「**下一首播放压过随机**」。
+//
+// 随机档的「下一首」是洗牌袋说了算，而「下一首播放」是**用户显式的意图**——它
+// 压过随机（Spotify 社区管这叫 "queue overrides"，见 queue_shuffle.go 文件头）。
+//
+// 改之前它在随机档是**完全失效**的：歌插进了队列，可下一首还是池子里随机抽的
+// 另一首，用户按了跟没按一样（症状是「点了没反应」）。
+func TestRandomPlayNextIsTheNextOne(t *testing.T) {
+	q := app.NewQueueWithRand(&steppingRand{})
+	q.SetPlayMode(app.PlayModeRandom)
+	q.Append(items("a.mp3", "b.mp3", "c.mp3", "d.mp3")...)
+	at(q, 0)
+	q.Advance() // 这一轮已经发出了一首
+
+	q.InsertNext(app.LocalItem("e.mp3"))
+
+	next, ok := q.MoveNext()
+	if !ok {
+		t.Fatal("按下一首没反应")
+	}
+	if next.Title != "e" {
+		t.Errorf("下一首是 %q，want e（「下一首播放」压过随机）", next.Title)
+	}
+}
+
+// TestRandomPlayNextIsTheNextOneOnAutoAdvance 同上一条，但走**自动切歌**那条路
+// （一首歌放完了接着放哪首）。
+//
+// 两条路都得认「下一首播放」——它们读的是同一个袋子（见 `Queue.Advance` 和
+// `Queue.MoveNext`）。
+func TestRandomPlayNextIsTheNextOneOnAutoAdvance(t *testing.T) {
+	q := app.NewQueueWithRand(&steppingRand{})
+	q.SetPlayMode(app.PlayModeRandom)
+	q.Append(items("a.mp3", "b.mp3", "c.mp3", "d.mp3")...)
+	at(q, 0)
+	q.Advance()
+
+	q.InsertNext(app.LocalItem("e.mp3"))
+
+	d := q.Advance()
+	if d.Kind != app.AdvancePlay {
+		t.Fatalf("结论是 %v，want AdvancePlay", d.Kind)
+	}
+	if d.Item.Title != "e" {
+		t.Errorf("放完这一首之后是 %q，want e（「下一首播放」压过随机）", d.Item.Title)
+	}
+}
+
+// TestPlayNextOutsideRandomIsStillByIndex 盯「**顺序 / 循环 / 单曲三档一个字都
+// 不变**」。
+//
+// 那一档的「下一首」是纯按索引算的：插在当前那一首后面的就是下一首；而「添加到
+// 队列」接在队尾——它不改变下一首是谁。
+//
+// ⚠️ 这是**回归的护栏**：袋子是随机档的东西，而那一档的行为一个字都不许动。
+func TestPlayNextOutsideRandomIsStillByIndex(t *testing.T) {
+	for _, mode := range []app.PlayMode{app.PlayModeSequence, app.PlayModeLoop, app.PlayModeSingle} {
+		q := app.NewQueueWithRand(&steppingRand{})
+		q.SetPlayMode(mode)
+		q.Append(items("a.mp3", "b.mp3", "c.mp3")...)
+		at(q, 0)
+
+		// 「下一首播放」：下一首就是它。
+		q.InsertNext(app.LocalItem("x.mp3"))
+		next, ok := q.MoveNext()
+		if !ok {
+			t.Fatalf("%s：按下一首没反应", mode)
+		}
+		if next.Title != "x" {
+			t.Errorf("%s：下一首是 %q，want x", mode, next.Title)
+		}
+
+		// 「添加到队列」：接在队尾，下一首不变（那一档下一首是按索引算的）。
+		q.Append(items("z.mp3")...)
+		after, ok := q.MoveNext()
+		if !ok {
+			t.Fatalf("%s：加了一首之后按下一首没反应", mode)
+		}
+		if after.Title != "b" {
+			t.Errorf("%s：加了一首之后下一首是 %q，want b（那一档下一首是按索引算的）", mode, after.Title)
+		}
+	}
+}
+
+// TestTheEnqueueNoticeIsOnlyForRandom 盯「**只有随机档才说那句话**」。
+//
+// 随机档的袋子是池子：加进来的歌这一轮就轮到它——而用户看不见池子里有什么，
+// 所以得说一声（见 `PlayMode.EnqueueNotice`）。
+//
+// 其余三档是空串：那一档的下一首是按索引算的，加进来的歌排在哪就是哪，没有
+// 什么要解释的。
+func TestTheEnqueueNoticeIsOnlyForRandom(t *testing.T) {
+	if n := app.PlayModeRandom.EnqueueNotice(); n == "" {
+		t.Error("随机档加歌时没有话说——用户不知道这一轮就轮到它")
+	}
+	for _, m := range []app.PlayMode{app.PlayModeSequence, app.PlayModeLoop, app.PlayModeSingle} {
+		if n := m.EnqueueNotice(); n != "" {
+			t.Errorf("%s 档说了 %q，want 空串", m, n)
+		}
+	}
+}
+
+// playTitles 连着放 n 首，把放出来的歌名收成一列。
+func playTitles(t *testing.T, q *app.Queue, n int) []string {
+	t.Helper()
+	out := make([]string, 0, n)
+	for range n {
+		d := q.Advance()
+		if d.Kind != app.AdvancePlay {
+			t.Fatalf("第 %d 首的结论是 %v，want AdvancePlay", len(out)+1, d.Kind)
+		}
+		out = append(out, d.Item.Title)
+	}
+	return out
+}
+
+// countOf 数一列里某首歌出现了几次。
+func countOf(titles []string, want string) int {
+	n := 0
+	for _, t := range titles {
+		if t == want {
+			n++
+		}
+	}
+	return n
+}
+
+// seenTitles 收一列里各不相同的那几个（重复的只留一份）。
+func seenTitles(titles []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(titles))
+	for _, t := range titles {
+		if seen[t] {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	return out
+}
