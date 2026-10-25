@@ -2,9 +2,15 @@
 //
 // ## 这一版摆什么
 //
-// 三个 Tab（音乐 / 鬼畜 / 流行）+ 新歌速递那一块横向网格。**新歌速递只画在
+// 三个 Tab（音乐 / 鬼畜 / 流行）+ 选中那一档的列表。**新歌速递那一块只画在
 // 「流行」Tab 上**（上游 `index.tsx:295` 的 `{activeTab === "pop" && <NewMusicTop …
 // />}`），另外两个 Tab 上没有它。
+//
+// ⚠️ **新歌速递那一块是「流行」那一档列表的第 0 行**（`list.Lead`，页内头部）——
+// 所以它在列表的滚动区里，**跟着内容一起滚走**，滚一段之后那几张图就不见了
+// （上游那一页就是这么摆的：顶图和下面的列表在**同一个滚动容器**里）。此前它是
+// 列表的**兄弟**（在滚动容器**外面**），于是滚动列表时它一动不动——票 #369 修的
+// 就是这个。Tab 那一排仍在滚动容器**外面**（上游也是），滚列表时它不动。
 //
 // 三档的内容是**接上 B 站的推荐接口**之后拉回来的（取数那一摊在
 // homepage_feed.go，服务层在 `service/bili/recommend.go`）。**没登录时照拉**：
@@ -191,6 +197,22 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 		// 「顶上那一行是第几行 × 64」就是滚过的像素数（`list.List.ScrollOffset`）。
 		h.lists[i] = l
 	}
+
+	// ⚠️ **「流行」那一档的顶图（新歌速递）是列表的第 0 行**（`list.Lead`，页内
+	// 头部）——所以它**跟着列表一起滚走**，滚一段之后那几张图就不见了。
+	//
+	// 上游：`music-recommend/index.tsx:295` 的
+	// `{activeTab === "pop" && <NewMusicTop … />}` 和下面的列表在**同一个滚动
+	// 容器**里。此前我们把那一块摆在列表**外面**（它是列表的兄弟，在列表的滚动
+	// 容器之外），于是滚动列表时它一动不动——票 #369 修的就是这个。
+	//
+	// ⚠️ **只有「流行」这一档装它**：另外两档上游本来就没有这一块（见
+	// `homePopTab` 的注释），而「别动另外两档」是这一票的一条要求。
+	h.lists[homePopTab].SetLead(&list.Lead{
+		Draw:   h.viewPopLead,
+		Label:  "新歌速递",
+		Height: h.newGrid.Height,
+	})
 	return h
 }
 
@@ -283,18 +305,19 @@ func (s *Shell) syncHome(c *ui.Context) {
 
 // view 画首页的内容。
 //
-// 摆法是「一列两块」：Tab 那一排 → 内容那一块。内容那一块里面是
-// （只在流行上）新歌速递 + 那一档的列表。
+// 摆法是「一列两块」：Tab 那一排 → 内容那一块。内容那一块里面是那一档的列表。
 //
 // ⚠️ **内容是单独一个元素**（`viewBody`，票 #368）：切 Tab 时它整个换掉，
 // 框架靠这个认出「旧的退了、新的进了」，于是有过渡；而它换的是**画面上那一
 // 档**（`h.shown`），不一定是选中那一档（`h.tab`）——选中那一档还在拉的时候，
 // 画面上留着上一档的内容（见 `syncSwap`）。
 //
-// 头两句是取数：**先收**后台投回来的结果（铁律三：不收的话这一帧画的是
-// 旧内容，而唤醒只有「结果到了」那一次），**再发**该发的那一摊（画之前
-// 发：画完再发的话这一帧画的是「正在加载」，要等这一页回来才换掉）。
-// 两句的规矩见 homepage_feed.go 的文件头。
+// 下面那一块给了 Grow(1) 的是列表，`list.List` 自己就占了 Grow(1)（见
+// widgets/list 的 List.View），所以它拿走了剩下的高度。
+//
+// ⚠️ **「流行」那一档的顶图（新歌速递）不在这一列里**：它是**列表的第 0 行**
+// （页内头部，见 `list.Lead`），所以它在列表的滚动区里——跟着内容一起滚走
+// （上游那一页就是这么摆的，`music-recommend/index.tsx`）。
 //
 // s 是拿来画这一页的空状态和失败状态的（`viewEmpty` / `viewLoadError`）。
 //
@@ -311,8 +334,48 @@ func (h *homePage) view(c *ui.Context, s *Shell) {
 	})
 }
 
-// viewTabBody 画**那一档**的内容。四种状态四种样子。
+// viewPopLead 画「流行」那一档的**页内头部**：新歌速递那一块 + 列表的表头。
 //
+// ⚠️ **它画在列表的滚动区里**（列表的第 0 行），所以它跟着内容一起滚走——
+// 滚一段之后那几张图就不见了（上游那一页就是这么摆的：
+// `music-recommend/index.tsx` 的 `<NewMusicTop/>` 和下面的列表在同一个滚动容器里）。
+//
+// ⚠️ **表头也在里面**：表头说的是**下面那些歌**，而新歌速递在它们**上面**——
+// 表头要是留在列表外面（它在另外两档上就是外面，见 `rowheader.go` 的文件头），
+// 它就会跑到新歌速递**上面**去，隔着一堆卡片说「下面这些是歌」。
+//
+// ⚠️ 代价是**这一档的表头会跟着滚走**（另外两档的表头是钉住的）：这一屏的上半
+// 是「顶图 + 表头」这一整块，滚下去就该一起走——上游那一屏的上半也是这么滚的。
+func (h *homePage) viewPopLead(c *ui.Context) {
+	ui.Column(c).FillWidth().Gap(space.Px12).
+		// ⚠️ 底下留一道 12 的缝：表头到第一首歌之间原来有那道缝（页面那一列的
+		// `Gap`），表头搬进页内头部之后它得跟着走。
+		Padding(space.None, space.None, space.Px12).
+		Children(func() {
+			h.newGrid.View(c)
+			h.lists[homePopTab].Header(c, "home:header:"+strconv.Itoa(homePopTab))
+		})
+}
+
+// viewPopTop 画新歌速递那一块——**不在列表里**的那一次。
+//
+// ⚠️ **什么时候才走这里**：「流行」那一档的列表**一首歌都没有**的时候（拉失败 /
+// 正在拉 / 真的没有）——那三种状态下压根没有列表可挂，它就自己站在上面，位置和
+// 它挂在列表里时一样（都在 Tab 那一排下面）。
+//
+// ⚠️ **tab 是「画面上画的是哪一档」**，不一定等于选中那一档（票 #368，见
+// `syncSwap`）——它和这一段里别的地方一样按 tab 取。
+//
+// ⚠️ **另外两档一律不画**：上游的新歌速递只在「流行」那一档（`index.tsx:295`）。
+func (h *homePage) viewPopTop(c *ui.Context, tab int) {
+	if tab != homePopTab {
+		return
+	}
+	h.newGrid.View(c)
+}
+
+// viewTabBody 画**那一档**的内容。四种状态四种样子。
+
 // ⚠️ **「没拉到」和「没有内容」是两件事，界面上必须分开**：
 //
 //	正在拉   转圈（上游 index.tsx:284-288 的 Spinner）
@@ -338,6 +401,12 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		//
 		// 用共用的 `viewLoadError`（不是 `viewEmpty` 的一个空状态），理由在
 		// empty.go 那一段：失败必须有重试按钮，而且不能被「暂无内容」盖住。
+		//
+		// ⚠️ **顶图先画**：这一档没有列表可挂（列表一根歌都没有），而新歌速递
+		// 那一块是**这一屏的内容**（上游 `index.tsx:295`），它不因为下面那一档
+		// 没拉到就消失。
+		h.viewPopTop(c, tab)
+
 		s.viewLoadError(c, "home:fail:"+homeTabs[tab], homeTabs[tab]+"推荐", "重试加载"+homeTabs[tab]+"推荐",
 			err, func() { h.retryTab(tab) })
 	case err == nil && h.feed.loadingOf(tab) && len(songs) == 0:
@@ -348,16 +417,29 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// ⚠️ **这一格只在真的没内容可画时才出现**（票 #368）：切到一档而它还在
 		// 拉的时候，画面上留着**上一档**的内容（见 `syncSwap`），所以这里轮到
 		// 「正在加载」的时候，屏幕上确实一首歌都没有。
+		//
+		// ⚠️ **顶图先画**（理由同上面那一支）。
+		h.viewPopTop(c, tab)
 		drawLoading(c, "home:loading", "正在加载"+homeTabs[tab]+"推荐")
+
 	case len(songs) == 0:
 		// ⚠️ 走 `viewEmpty`（`routes` 表里 `/` 那一条，出处和其余 13 条写在
 		// 一起），不是让 `list.List` 说它自己那句「这里还没有歌」：那句只说
 		// 这一屏是空的，那一页的两句话连着说了「为什么空」和「怎么才能不空」。
+		//
+		// ⚠️ **顶图先画**（理由同上面那一支）。
+		h.viewPopTop(c, tab)
 		s.viewEmpty(c, "home:empty", lookup(homePath).Empty)
 	default:
 		// ⚠️ **表头在列表外面**（`rowheader.go` 文件头）：它是 `View` 的兄弟，所以列表往
 		// 下滚它不动，宽屏下滚到右边列名也还在。
-		h.lists[tab].Header(c, "home:header:"+strconv.Itoa(tab))
+		//
+		// ⚠️ **「流行」那一档除外**：那一档的表头在**页内头部里面**（跟着新歌速递
+		// 那一块一起滚走，见 `viewPopLead`）——表头说的是下面那些歌，而新歌速递在
+		// 它们上面，表头留在列表外面就会跑到新歌速递上面去。
+		if tab != homePopTab {
+			h.lists[tab].Header(c, "home:header:"+strconv.Itoa(tab))
+		}
 		h.lists[tab].View(c)
 		s.noteScrollbar(h.lists[tab].Hot())
 

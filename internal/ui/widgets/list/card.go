@@ -186,9 +186,18 @@ func (l *List) rowHeight() float32 {
 //
 // ⚠️ **网格那一档是估的**（`Grid.ScrollOffset`）：它的行高跟着内容走（歌名两行），
 // 没有一个定死的数可乘。
+//
+// ⚠️ **页内头部算不算在「滚过的像素」里**：算——它是内容的一部分，滚过去就是滚过
+// 了（见 lead.go）。它有多高是**估的**（`Lead.Height`），差几十像素的后果只是那枚
+// 回顶按钮早一点或晚一点出现。
 func (l *List) ScrollOffset() float32 {
 	first, _ := l.state.Visible()
-	return float32(first) * l.rowHeight()
+	lead := leadRows(l.lead)
+	if first < lead {
+		// 页内头部还在画面上：还没滚过它。
+		return 0
+	}
+	return leadHeight(l.lead) + float32(first-lead)*l.rowHeight()
 }
 
 // rowColors 是这一行文字该用的两个颜色。
@@ -237,7 +246,9 @@ func (l *List) viewCard(r ui.ListRow) {
 		return
 	}
 
-	c, i := r.Context, r.Index
+	// ⚠️ **i 是「歌的下标」**：框架给的是**列表的行号**，而页内头部占着第 0 行
+	// （见 lead.go）。
+	c, i := r.Context, r.Index-leadRows(l.lead)
 	t := c.Theme()
 	m := l.songs[i]
 	playing := l.isPlaying(m)
@@ -292,11 +303,11 @@ func (l *List) viewCard(r ui.ListRow) {
 		// 会一路长到离右边那几列只差 31 像素（理由见那个常量）。
 		// 显示的字是清洗过的（`showOf`）：去掉视频宣传标签，歌手 / 专辑名挪到副标题，
 		// 现场版在副标题前加一枚「现场」小标签。
-		sh := showOf(m)
+		sh := ShowOf(m)
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).Children(func() {
-			ui.Text(c, sh.title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
+			ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
 				TextColor(titleColor).MaxLines(listTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
-			if sh.owner != "" || sh.live {
+			if sh.Owner != "" || sh.Live {
 				ownerLine(c, ownerRow{
 					shown: sh,
 					name:  m.Owner,
@@ -364,7 +375,9 @@ func (l *List) viewCard(r ui.ListRow) {
 // ⚠️ **字号只降了歌名那一处**（16 → 13）。UP 名和时长还是 12：它们本来就比正文小，
 // 再降一档在 12pt 的基础上会糊，而这一档省的是高度不是宽度。
 func (l *List) viewCompactCard(r ui.ListRow) {
-	c, i := r.Context, r.Index
+	// ⚠️ **i 是「歌的下标」**：框架给的是**列表的行号**，而页内头部占着第 0 行
+	// （见 lead.go）。
+	c, i := r.Context, r.Index-leadRows(l.lead)
 	t := c.Theme()
 	m := l.songs[i]
 	playing := l.isPlaying(m)
@@ -385,11 +398,11 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 		l.viewCheckbox(c, i, m.Title)
 		l.viewIndex(c, i, playing, titleColor, m.Title, compactIndexWidth, 11)
 
-		sh := showOf(m)
+		sh := ShowOf(m)
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px2).Children(func() {
-			ui.Text(c, sh.title).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Compact).
+			ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Compact).
 				TextColor(titleColor).MaxLines(compactTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
-			if sh.owner != "" || sh.live {
+			if sh.Owner != "" || sh.Live {
 				ownerLine(c, ownerRow{
 					shown: sh,
 					name:  m.Owner,
