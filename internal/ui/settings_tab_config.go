@@ -29,7 +29,8 @@
 //
 // 导出走白名单 + 抹掉代理密码，见 `internal/app/export.go` 的文件头。
 // Cookie / SESSDATA / refresh_token / 带签名的 URL **根本不在设置里**——凭据存在
-// 系统钥匙串（`app/credentials.go`），不在用户数据目录的任何一份 JSON 中。
+// 凭据后端（`app/credentials.go`：macOS 是用户数据目录下的
+// `credentials/session.json`，Windows 是 `credentials.dpapi`），不在设置里。
 // 代理密码**在**设置里，所以要单独抹；抹完 `proxySettings` 那一格还在，
 // 类型、主机、端口、用户名照导（代理地址不是秘密，换台机器接着用是想要的）。
 package ui
