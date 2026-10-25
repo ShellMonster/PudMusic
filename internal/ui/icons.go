@@ -291,9 +291,18 @@ const (
 	// 上游点名的缺口逐条对上：更多、网格 / 列表视图、文件夹+、编辑、删除、日历、
 	// 展开 / 全屏、画中画、刷新、外链、眼睛、感叹号、问号、导入 / 导出、用户组、
 	// 关注 / 取关、月亮 / 太阳、磁盘。
-	iconMore        = "System/more-2-line.svg"              // 每一行的操作（⋮）
-	iconMoreFilled  = "System/more-fill.svg"                // 操作（实心那一档）
-	iconMoreFilled2 = "System/more-2-fill.svg"              // 操作（实心，另一版）
+	// iconMore 是「⋯」那一枚（每一行的操作入口）。
+	//
+	// ⚠️ **它是实心那一版，而且名字来自 `iconset`**（票 BMG-253 的评审）：
+	// 全应用有**四枚**「⋯」（这一枚、队列抽屉行尾、收藏夹工具栏、网格卡角上），
+	// 而**列表里那两枚**（`widgets/list`）在界面层**下面**——四枚要同一张图，
+	// 那个名字只能住在两边都够得着的 `iconset` 里（`iconset.MoreVertical`）。
+	//
+	// 线框那版（`more-2-line`）的三个点是 24 见方里半径 1.5 的圆——画成 16 像素
+	// 就是**三个 2 像素的斑点**，和旁边那个 12 像素的时长数字一样重。
+	iconMore        = iconset.MoreVertical                 // 每一行的操作（⋮，实心那一版）
+	iconMoreFilled  = "System/more-fill.svg"                // 操作（实心，横着的另一版）
+	iconMoreLine    = "System/more-2-line.svg"              // 操作（线框那一版：备着，不摆）
 	iconViewGrid    = "Design/layout-grid-line.svg"         // 网格档
 	iconViewList    = "Editor/list-check-2.svg"             // 列表档
 	iconGrid        = "Design/grid-line.svg"                // 网格
@@ -415,7 +424,7 @@ var iconNames = []string{
 	iconEmptyDownload, iconFailed, iconCoverPlaceholder,
 
 	// 调研点名的缺口
-	iconMore, iconMoreFilled, iconMoreFilled2,
+	iconMore, iconMoreFilled, iconMoreLine,
 	iconViewGrid, iconViewList, iconGrid,
 	iconFolderAdd, iconEdit, iconEditBox, iconCalendar,
 	iconExpand, iconShrinkBack, iconPiP, iconRefresh, iconExternal,
