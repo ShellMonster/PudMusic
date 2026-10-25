@@ -598,6 +598,18 @@ func (s *Shell) viewAvatarMenu(c *ui.Context, anchor ui.Element) {
 		return
 	}
 	t := c.Theme()
+	// 🔴 **面板的身份必须钉死**（`c.Key`）：框架给元素的身份是「父的身份 +
+	// 兄弟序号」（`mygo/ui/context.go` 的 `newElement`），而**浮层里的兄弟会
+	// 多会少**——头像那一枚的悬停提示进进出出浮层就是一样。
+	//
+	// 面板的身份一变，**里面那几项的身份也跟着变**（它们是「面板的身份 +
+	// 自己的 key」）。而按下和抬起之间**隔着帧**：按下记在旧身份上，抬起
+	// 之后那一项已经是新身份了——于是**那一下点空**（菜单还开着、什么都没
+	// 发生）。实测 40 次里有 5~6 次。
+	//
+	// ⚠️ **这一条不是这一票引入的**（HEAD 上也有），但它让这一票的验收跑不
+	// 稳（头像放大之后那一枚的悬停提示更容易进浮层），所以顺手钉死。
+	c.Key("avatar-menu-panel")
 	ui.PopoverBase(c, anchor, &s.avatarMenuOpen, func(panel ui.Element) {
 		// ⚠️ **锚在头像的右下角**：头像在顶栏最右端，面板要是左对齐就有
 		// 一半挂在窗口外面（上游 HeroUI 那个下拉是靠 shift 摆回来的，我们

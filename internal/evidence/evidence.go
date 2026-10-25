@@ -579,6 +579,9 @@ var Items = []Item{
 			"TestTheTopBarEndsWithTheUpstreamSizedAvatar",
 			// 而顶栏另外那几枚图标键**没被这一票改到**。
 			"TestTheOtherTopBarKeysKeptTheirHitArea",
+			// 下拉里那一项**点得动**（面板的身份钉死了，见 navbar_avatar.go 的
+			// `c.Key("avatar-menu-panel")`）。
+			"TestTheAvatarMenuItemIsAlwaysClickable",
 		},
 	},
 	{

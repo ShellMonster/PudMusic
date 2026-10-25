@@ -1,3 +1,5 @@
+package ui
+
 // 票 #260 的判据：顶栏右端那一块。
 //
 // # 这一票改了三件事
@@ -8,8 +10,6 @@
 //
 // ⚠️ **判据都在画面上**：顶栏右端那一块到底摆了什么、头像画出来的那一枚圆
 // 有多大——这些是用户看见的东西，而状态字段只用来定位，不当判据。
-package ui
-
 import "testing"
 
 // TestTheLoggedInTopBarHasNoStandaloneLogoutButton 钉住「登录之后顶栏上没有
@@ -96,6 +96,47 @@ func TestTheOtherTopBarKeysKeptTheirHitArea(t *testing.T) {
 		if r.W != iconHitMd || r.H != iconHitMd {
 			t.Errorf("%q 那一格的命中区是 %v，want %d×%d——这一票只动头像那一格",
 				label, r, iconHitMd, iconHitMd)
+		}
+	}
+}
+
+// TestTheAvatarMenuItemIsAlwaysClickable 钉住「下拉里那一项**点得动**」。
+//
+// # 这一条在 2026-10-25 之前是**偶发**红的
+//
+// 症状是「按下去没反应」：菜单还开着、什么都没发生。根因是下拉**面板**的
+// **身份**（框架给元素的身份）：本来它是「浮层里的兄弟序号」，而**浮层里的
+// 东西会多会少**——指针从头像移到菜单项上的那一刻，头像那一枚的悬停提示
+// 回到浮层里（`tooltip.go` 的 `tipPhase.step`：提示「收」的延迟要等钟走够，
+// 而那一次离开把 `dismissed` 复位了），于是浮层里多了一样东西，**面板的
+// 身份跟着变了**。
+//
+// 而**按下和抬起之间隔着帧**：按下记在旧身份上，抬起之后那一项已经是新
+// 身份了——于是那一下**点空**。实测 40 次里有 5~6 次（机器越忙越容易）。
+//
+// ⚠️ **钉死它的办法**：给面板一个自己的身份（`navbar_avatar.go` 的
+// `viewAvatarMenu` 里那一句 `c.Key("avatar-menu-panel")`）——身份不再跟着
+// 浮层里的兄弟序号变。
+//
+// # 为什么这一条是**统计**的
+//
+// 那个偶发**跟机器忙不忙有关**：忙的时候 40 遍里有 5~6 遍点空，空闲的机器上
+// 一遍都不空。所以判据只能是「点了就响」——**每一次**确认框都要出来。
+//
+// 20 遍是折中：机器忙的时候它几乎必红（12% 上下 → 20 遍里漏掉的机会不到
+// 7%），空闲的机器上它不红（而那时候那个偶发本来也不发生）。
+// **修好之后是 0**（实测 60 遍全中）。
+func TestTheAvatarMenuItemIsAlwaysClickable(t *testing.T) {
+	const rounds = 20
+	for i := 0; i < rounds; i++ {
+		s, tt := newLoggedInShell(t, "2")
+		tt.SetFocused(true)
+
+		openAvatarMenu(t, tt)
+		clickAvatarMenuItem(t, s, tt, "退出登录")
+		if !tt.HasText("确认退出登录？") {
+			t.Fatalf("第 %d 遍点空了——下拉里那一项按下去没有反应"+
+				"（菜单还开着：%v）", i+1, s.avatarMenuOpen)
 		}
 	}
 }
