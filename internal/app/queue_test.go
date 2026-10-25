@@ -122,68 +122,108 @@ func TestEnqueueFirstStartsPlayingAndRestJustWaits(t *testing.T) {
 	}
 }
 
-// TestEnqueueAndPlayAppendsInOrderAndStartsAtTheFirst 钉住「全部播放」那一枚的
-// 语义（票 #299，2026-10-24 人定的）：**这一页的歌按顺序加进队列并播放**。
+// TestEnqueueAndPlayNowAppendsAndStartsTheNewSong 钉住行级「立即播放」的语义
+// （票 #337，2026-10-24 人定的）：**加这一首到队尾，并立即打断播放它**。
 //
 // 三个判据，缺一个都不算对：
 //
-//   - **按顺序**进队列（打乱了的话用户听到的顺序和屏幕上看到的不一样）；
-//   - **队列里原来有的那几首还在**（这一枚是**追加**，不是换队列——和
-//     `PlayFrom` 的分界就在这里）；
-//   - **正在放的是这一批的第一首**（不是队列里第一首，也不是最后一首）。
-//
-// 跟 `Enqueue` 的差也要钉住：`Enqueue` 只在队列原本空的时候起播，而这一条
-// **总是**从这一批的第一首开始播——用户按的是「把这一页放一遍」。
-func TestEnqueueAndPlayAppendsInOrderAndStartsAtTheFirst(t *testing.T) {
+//   - **原来的三首仍按顺序在队列里**；
+//   - **新歌追加在队尾**，队列长度从 3 变成 4；
+//   - **正在放的是新歌**，而不是原来当前项。
+func TestEnqueueAndPlayNowAppendsAndStartsTheNewSong(t *testing.T) {
 	a := newApp(t)
 	paths := copies(t, 4)
 
-	// 队列里先有一首（旧的）。
-	if err := a.Enqueue(items(paths[0])...); err != nil {
+	// 先排三首，第一首开始播放。
+	if err := a.Enqueue(items(paths[0], paths[1], paths[2])...); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, 2*time.Second, "第一首开始播", func() bool { return a.Snapshot().HasTrack })
 
-	if err := a.EnqueueAndPlay(items(paths[1], paths[2], paths[3])...); err != nil {
+	if err := a.EnqueueAndPlayNow(app.LocalItem(paths[3])); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 2*time.Second, "这一批的第一首开始播", func() bool { return a.Snapshot().Title == "b" })
+	waitFor(t, 2*time.Second, "立即播放的新歌开始播", func() bool { return a.Snapshot().Title == "d" })
 
 	got := a.Queue().Items()
 	want := []string{paths[0], paths[1], paths[2], paths[3]}
 	if len(got) != len(want) {
-		t.Fatalf("队列里有 %d 首，want %d（旧的那一首 + 这一批的三首）", len(got), len(want))
+		t.Fatalf("立即播放之后队列里有 %d 首，want %d（原来的三首 + 新歌）", len(got), len(want))
 	}
 	for i, w := range want {
 		if got[i].Path != w {
-			t.Errorf("队列第 %d 首是 %q，want %q（这一批要按顺序进队列）", i+1, got[i].Path, w)
+			t.Errorf("队列第 %d 首是 %q，want %q", i+1, got[i].Path, w)
 		}
 	}
-	if idx := a.Queue().CurrentIndex(); idx != 1 {
-		t.Errorf("正在放的是队列第 %d 首，want 第 2 首（旧的那一首之后就是这一批的第一首）", idx+1)
+	if idx := a.Queue().CurrentIndex(); idx != 3 {
+		t.Errorf("正在放的是队列第 %d 首，want 第 4 首（立即播放追加的新歌）", idx+1)
 	}
 }
 
-// TestEnqueueAndPlayWithNothingToPlayLeavesTheQueueAlone 验给空是「什么都不做」。
+// TestEnqueueAndPlayNowAppendsTheSameSongTwice 钉住「这一首已经在队列里」的
+// 情形：**照样再加一份**（票 #337 拍板的是「追加这一首到队尾」）。
 //
-// 给空却把队列清空的话，用户的歌悄悄没了而正在放的那首还在响——那是清空队列
-// 那一件事（`Queue.Reset`）的活，两件事混在一起最难查。
-func TestEnqueueAndPlayWithNothingToPlayLeavesTheQueueAlone(t *testing.T) {
+// ⚠️ **这一条与上游不同**，所以它必须被钉住：上游 Biu v1.16 的 `play()`
+// （`src/store/play-list.ts`）遇到已经在列表里的条目是**选中现有那一份**
+// （`existItem`），**不**重复入队。改成跟它一样的话，这一条会红——
+// 而它红了才说明「本项目与上游的那处不同」没有被人顺手改掉。
+//
+// 三个判据：
+//
+//   - 队列长度从 1 变成 2（**多了一份**，不是替换、不是选中）；
+//   - 两份是同一首（路径相同）；
+//   - 正在放的是**新追加的那一份**（队列第 2 项）。
+func TestEnqueueAndPlayNowAppendsTheSameSongTwice(t *testing.T) {
 	a := newApp(t)
-	paths := copies(t, 2)
+	paths := copies(t, 1)
+
 	if err := a.Enqueue(items(paths[0])...); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, 2*time.Second, "第一首开始播", func() bool { return a.Snapshot().HasTrack })
 
-	if err := a.EnqueueAndPlay(); err != nil {
-		t.Fatalf("EnqueueAndPlay()：%v", err)
+	if err := a.EnqueueAndPlayNow(app.LocalItem(paths[0])); err != nil {
+		t.Fatal(err)
 	}
-	if got := a.Queue().Len(); got != 1 {
-		t.Errorf("给空之后队列里有 %d 首，want 还是原来那 1 首", got)
+	waitFor(t, 2*time.Second, "同一首又起播了一遍", func() bool { return a.Snapshot().HasTrack })
+
+	got := a.Queue().Items()
+	if len(got) != 2 {
+		t.Fatalf("队列里有 %d 首，want 2（同一首排了两份）", len(got))
 	}
-	if title := a.Snapshot().Title; title != "a" {
-		t.Errorf("给空之后放的是 %q，want 还是 a", title)
+	for i, g := range got {
+		if g.Path != paths[0] {
+			t.Errorf("队列第 %d 首是 %q，want %q（两份是同一首）", i+1, g.Path, paths[0])
+		}
+	}
+	if idx := a.Queue().CurrentIndex(); idx != 1 {
+		t.Errorf("正在放的是队列第 %d 首，want 第 2 首（新追加的那一份）", idx+1)
+	}
+}
+
+// TestEnqueueAndPlayNowKeepsTheOldSelectionOnFailure 验追加成功但同步起播失败。
+func TestEnqueueAndPlayNowKeepsTheOldSelectionOnFailure(t *testing.T) {
+	a := newApp(t)
+	paths := copies(t, 3)
+	if err := a.Enqueue(items(paths...)...); err != nil {
+		t.Fatal(err)
+	}
+	a.Next()
+	missing := app.LocalItem(filepath.Join(t.TempDir(), "missing.flac"))
+	if err := a.EnqueueAndPlayNow(missing); err == nil {
+		t.Fatal("不存在的文件竟然播成功了")
+	}
+	got := a.Queue().Items()
+	if len(got) != 4 || got[3] != missing {
+		t.Fatalf("追加的新歌丢了：%v", got)
+	}
+	for i, path := range paths {
+		if got[i].Path != path {
+			t.Errorf("原队列第 %d 首变了", i)
+		}
+	}
+	if a.Queue().CurrentIndex() != 1 || a.Snapshot().Path != paths[1] {
+		t.Fatalf("起播失败后没有退回原来的歌：%+v", a.Snapshot())
 	}
 }
 
