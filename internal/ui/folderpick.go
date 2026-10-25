@@ -123,7 +123,25 @@ func (s *Shell) listActions() list.Actions {
 	// ⚠ **别在列表里再加第二套导航**：那是「同一条路两套写法」，改一处就会
 	// 有一处安静地走错。
 	acts.OpenOwner = func(mid int64, _ string) {
-		s.navigate(upPathOf(mid))
+		s.openOwnerSpace(mid)
 	}
 	return acts
+}
+
+// openOwnerSpace 进那个 UP 主的空间。
+//
+// ⚠️ **只有这一处导航**（票 #360 / BMG-253）：列表里的 UP 名、收藏夹头图区
+// 那一行、这一页的创建者头像——三处都走它。各写一遍 `navigate` 的话，改了
+// 一处另一处就安静地走错（而那种错在界面上只是「点了没反应」）。
+func (s *Shell) openOwnerSpace(mid int64) {
+	s.navigate(upPathOf(mid))
+}
+
+// ownerActions 是「进那个 UP 的空间」这一件事用的那份操作。
+//
+// ⚠️ **它只装 `OpenOwner`**：收藏夹头图区那一行能做的只有这一件事，列表那一
+// 整套（收藏夹选择、焦点交接……）在那里都用不上——而那一整套每帧要建五六个
+// 闭包。
+func (s *Shell) ownerActions() list.Actions {
+	return list.Actions{OpenOwner: func(mid int64, _ string) { s.openOwnerSpace(mid) }}
 }

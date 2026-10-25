@@ -1309,6 +1309,12 @@ func TestTheCollectionHeaderCopyIsFourteen(t *testing.T) {
 //
 // 找法同 `smallCopyHasLineHeight`：在**一个表达式语句**里同时看到那个 `ui.Text`
 // 和那个 `FontSize`，不用顺着调用链往上爬。
+//
+// ⚠️ **它认两种画法**（票 BMG-253）：一行字可以**直接画**（`ui.Text` + 一个
+// `FontSize(...)` 调用），也可以**交给另一个出口画**——收藏夹头图区那个创建者
+// 名字走的是 `list.OwnerName`（它和列表里的 UP 名是同一枚，票 BMG-253 要的
+// 就是这个「同一套」），而那一档的字号是**传进去的** `scale.Font(c, …)`，
+// 不是外面一个 `FontSize(...)` 调用。
 func textUsesFontSize(t *testing.T, file, key, want string) bool {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -1333,7 +1339,10 @@ func textUsesFontSize(t *testing.T, file, key, want string) bool {
 				return true
 			}
 			switch sel.Sel.Name {
-			case "Text":
+			case "Text", "OwnerName":
+				// ⚠️ **「画这一行字」有两个出口**（票 BMG-253）：直接画
+				// （`ui.Text`）或者交给列表那个出口画（`list.OwnerName`——
+				// 收藏夹头图区的创建者名字走的是它，和列表里的 UP 名同一枚）。
 				for _, arg := range call.Args {
 					if exprKey(arg) == key {
 						hasText = true
@@ -1356,6 +1365,25 @@ func textUsesFontSize(t *testing.T, file, key, want string) bool {
 			}
 			return true
 		})
+		// ⚠️ **字号也可能是「传进去的」**：交给 `list.OwnerName` 画的那一行，字号
+		// 是它的一个**参数**（`scale.Font(c, scale.CollectionCopy)`），而不是
+		// 外面一个 `FontSize(...)` 调用。
+		if hasText && !hasSize {
+			ast.Inspect(stmt, func(m ast.Node) bool {
+				call, ok := m.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok || sel.Sel.Name != "Font" || len(call.Args) != 2 {
+					return true
+				}
+				if mentionsIdent(call.Args[1], want) {
+					hasSize = true
+				}
+				return true
+			})
+		}
 		if hasText && hasSize {
 			found = true
 		}

@@ -34,8 +34,14 @@ import (
 // 反过来 import 是个环（见 `iconset` 文件头）。同一个文件在界面层的常量叫
 // `iconMore`。
 //
-// 上游是 `RiMore2Line`（`music-list-item/operation.tsx:22`），16px。
-var moreIcon = iconset.Must("System/more-2-line.svg")
+// 🔴 **它是实心那一版**（票 BMG-253 / 报告第 17 条）：线框那一版
+// （`more-2-line`）的三个点是 24 见方里的三个**半径 1.5** 的圆——画成 16 像素
+// 就是**三个 2 像素的斑点**，而它旁边就是那个 12 像素的时长数字（也是淡灰），
+// 两样东西看起来一样重，用户读不出「这是一枚菜单键」。
+//
+// 实心那一版（`more-2-fill`）的点半径是 **2**（16 像素下 2.7 像素）：三个实心点
+// 一眼就是一个**图形**，而不是三个像标点的碎点。
+var moreIcon = iconset.Must("System/more-2-fill.svg")
 
 const (
 	// OperationColWidth 是行尾「操作」那一列的宽。
@@ -70,6 +76,14 @@ const (
 // 逐字相等，`HasText` 是子串——后者在几千行里分不出是哪一行）。
 func OperationLabel(title string) string { return "「" + title + "」的操作" }
 
+// operationTip 是那枚「⋯」的悬停提示：这一行里唯一的操作入口，得有一句话说明
+// 它是什么（票 BMG-253 / 报告第 17 条——它原先**一句提示都没有**，用户只能靠
+// 试）。
+//
+// ⚠️ **它是一句常数**：每帧每一行都现拼一次的话就是每帧十几次字符串拼接
+// （票 #313 那一类，见 `rowkey.Memo`）。而这一句不认行——「这一首」就够了。
+const operationTip = "这一首的操作"
+
 // Operation 画行尾那枚「⋯」。
 //
 // build 是**这一行的菜单怎么建**——和右键这一行走的是同一个函数（`menu.go` 的
@@ -85,10 +99,16 @@ func OperationLabel(title string) string { return "「" + title + "」的操作"
 // label 是给无障碍（和 Tester）用的名字，**带上歌名**：读屏软件读的是标签而不是
 // 画出来的符号，只说「操作」的话用户听到的是一句没头没尾的话；Tester 也靠它认出
 // **哪一行**的那一枚。
+//
+// ⚠️ **悬停提示是框架那一份**（`Tooltip`，600ms 出）：这个包在界面层**下面**，
+// 拿不到界面层那份提示（`internal/ui` 的 `withTip`，0ms 出 / 500ms 收）——
+// 而列表里另外那一枚带提示的控件（UP 名，见 `titleline.go`）走的也是框架那一份，
+// 两处一致。
 func Operation(c *ui.Context, label string, color ui.Color, build func(m *ui.Menu)) ui.Element {
 	return flat.IconButton(c, moreIcon, label, operationIconSize).
 		Padding(operationHitPad, operationHitPad).
 		TextColor(color).
+		Tooltip(operationTip).
 		Menu(build)
 }
 
@@ -107,6 +127,7 @@ func OperationCorner(c *ui.Context, label string, build func(m *ui.Menu)) ui.Ele
 			flat.IconButton(c, moreIcon, label, operationIconSize).
 				Padding(operationHitPad, operationHitPad).
 				TextColor(ui.RGBA(255, 255, 255, scrim.OnScrim)).
+				Tooltip(operationTip).
 				Menu(build)
 		})
 }

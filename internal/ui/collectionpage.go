@@ -615,10 +615,19 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 				// ④ 创建者：一枚 24 的圆头像 + 14 的昵称（上游是一个 `User`）。
 				if info.OwnerName != "" {
 					ui.Row(c).Gap(space.Px8).Center().Children(func() {
-						s.viewCollectionOwnerAvatar(c, info.OwnerFace)
-						ui.Text(c, info.OwnerName).FontSize(scale.Font(c, scale.CollectionCopy)).
-							LineHeight(leading.Copy).TextColor(t.TextMuted).
-							MaxLines(1).Ellipsis("…")
+						s.viewCollectionOwnerAvatar(c, info.OwnerFace, info.OwnerMid)
+						// 🔴 **名字是一枚可点的名字型链接**（票 BMG-253）：这一行
+						// 原先**整个都点不动**——用户看到「某某创建的」却进不去他的
+						// 空间，而**同一页的列表里每一行的 UP 名是能点进去的**
+						// （一页两套）。
+						//
+						// ⚠️ **走 `list.OwnerName`**：那是列表里那一枚的**同一个
+						// 出口**——同一档反馈、同一套下划线、同一句提示。两处各画
+						// 各的的话，同一个 UP 名在一处有下划线、在另一处没有。
+						list.OwnerName(c, info.OwnerName, info.OwnerName,
+							list.OwnerTipText(info.OwnerName), info.OwnerMid,
+							scale.Font(c, scale.CollectionCopy), leading.Copy,
+							t.TextMuted, s.ownerActions())
 					})
 				}
 			})
@@ -630,15 +639,41 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 // 地址空着、还没下回来、或者下失败时画一块同色的圆占位——**头像这一格不消失**：
 // 它是「创建者」那一行的开头，消失之后那一行只剩一个名字，左边凭空空出一格；
 // 而占位的大小和真头像一样，换上来的时候那一行不会动。
-func (s *Shell) viewCollectionOwnerAvatar(c *ui.Context, face string) {
+//
+// 🔴 **它是一枚按钮**（票 BMG-253）：这一行原先整个都点不动——用户看到「某某
+// 创建的」却进不去他的空间。悬停时外面多一圈主色的环（和顶栏那个头像同一套，
+// 见 `avatarHoverRing`），所以它**看起来也是能点的**。
+//
+// ⚠️ **没有编号时它不是按钮**：那一页压根没给创建者的编号，而点它只能跳到一个
+// 空路径（理由同 `list.OwnerName` 那一段：把入口画成能点的、点下去却到不了
+// 地方，比不画更坏）。
+func (s *Shell) viewCollectionOwnerAvatar(c *ui.Context, face string, mid int64) {
 	t := c.Theme()
 	side := float32(collectionOwnerAvatarSize)
-	ui.Box(c).Size(side, side).Radius(side / 2).Clip().
-		Background(t.Surface).Label(collectionOwnerAvatarLabel).Children(func() {
-		if st := s.images.Get(face); face != "" && st.Ready() {
-			ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(side, side)
-		}
-	})
+	// 那一枚圆（占位 / 真图都在里面）。
+	//
+	// ⚠️ **名字只挂一处**：可点的那一格把名字挂在**按钮**上（下面），里面这一
+	// 格就不挂——两处都挂的话辅助技术会念两遍，而画面上只有一枚圆。
+	draw := func(label string) {
+		ui.Box(c).Size(side, side).Radius(side / 2).Clip().
+			Background(t.Surface).Label(label).Children(func() {
+			if st := s.images.Get(face); face != "" && st.Ready() {
+				ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(side, side)
+			}
+		})
+	}
+	if mid <= 0 {
+		draw(collectionOwnerAvatarLabel)
+		return
+	}
+	hit := ui.ButtonBase(c).Size(side, side).Padding(space.None).
+		Label(collectionOwnerAvatarLabel)
+	// ⚠️ hover 要在 Children **之前**问（理由同顶栏那个头像）。
+	hit = avatarHoverRing(c, hit, hit.Hovered(), side)
+	hit.Children(func() { draw("") })
+	if hit.Clicked() {
+		s.openOwnerSpace(mid)
+	}
 }
 
 // collectionTitleText 是头图区那个大标题。

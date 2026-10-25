@@ -3,6 +3,7 @@ package list
 import (
 	"slices"
 	"testing"
+	"time"
 )
 
 // 这一组验行尾那枚「⋯」。
@@ -142,5 +143,30 @@ func TestTheGridOperationButtonOpensTheSameMenuAsTheRightClick(t *testing.T) {
 	if !slices.Equal(byButton, byRight) {
 		t.Errorf("格子上角那枚「⋯」开出来的菜单是 %q，右键开出来的是 %q",
 			byButton, byRight)
+	}
+}
+
+// TestTheOperationButtonSaysWhatItIs 验行尾那枚「⋯」**有一句提示**（票 BMG-253）。
+//
+// 它是这一行里**唯一**的操作入口，而它原先一句提示都没有——用户得知道三个点
+// 是菜单，而第一次用只能靠试。
+//
+// ⚠️ **判据是那句提示本身**：图形（实心那一版的三个点）认得出来的人多，认不出
+// 的也有，而一句「这一首的操作」谁都读得懂。
+func TestTheOperationButtonSaysWhatItIs(t *testing.T) {
+	_, tt := newList(t, Actions{}, onlineSongs(3))
+
+	btn, ok := tt.Find(OperationLabel("在线的歌 B"))
+	if !ok {
+		t.Fatalf("画面上找不到那枚「⋯」，文字有 %q", tt.Texts())
+	}
+	// 指针停上去，等过提示那一档的时延（框架那一份是 600ms 出）。
+	tt.Move(btn.X+btn.W/2, btn.Y+btn.H/2)
+	tt.Frame()
+	tt.Advance(700 * time.Millisecond)
+	tt.Frame()
+
+	if !tt.HasText(operationTip) {
+		t.Errorf("指针停在「⋯」上没有那句提示（%q），文字有 %q", operationTip, tt.Texts())
 	}
 }

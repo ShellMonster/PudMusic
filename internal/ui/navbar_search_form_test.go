@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -202,7 +203,108 @@ func TestSearchHistoryHeadingIsFourteenRegular(t *testing.T) {
 	}
 }
 
+// TestTheSearchMagnifierLooksAliveWhenThePointerIsOnIt 验顶栏那枚放大镜**看起来
+// 是活的**（票 BMG-253）。
+//
+// # 判据是「那一格里有没有主色像素」
+//
+// 那枚放大镜原先是**纯装饰**：不可点、永远是同一个淡灰色，而它旁边就是一个
+// 淡灰色的输入框——用户看不出它是个入口。现在它是一枚**按钮**，悬停时图形染
+// 主色（上游 HeroUI 的 `hover:text-primary`），所以「悬停前后那一格里的主色
+// 像素有没有变多」就是「它是不是活的」这一句的答案。
+//
+// 深浅两套都量：主色那一档在浅色下是**压深过**的（`ink.AccentOn`），而浅色
+// 底上那一档和背景差得开——深色下就是主色本身。
+func TestTheSearchMagnifierLooksAliveWhenThePointerIsOnIt(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, tt := newShell(t, systemIsDark(dark))
+			tt.SetFocused(true)
+			// 指针先放到内容区，别让idle 那一档带上悬停。
+			tt.Move(900, 500)
+			tt.Frame()
+
+			mag, ok := tt.Find(searchActionLabel)
+			if !ok {
+				t.Fatalf("顶栏上没有那枚放大镜（%q），文字有 %q", searchActionLabel, tt.Texts())
+			}
+			th := BuildTheme(s.app.SettingsSnapshot(), dark)
+			accent := ink.AccentOn(th)
+
+			// 悬停之前：那一格里一个主色像素都没有。
+			if n := countNear(tt.Image(), mag, accent); n != 0 {
+				t.Errorf("没悬停时放大镜那一格里已经有 %d 个主色像素——它不该是死的", n)
+			}
+
+			// 悬停之后：图形染主色。
+			tt.Move(mag.X+mag.W/2, mag.Y+mag.H/2)
+			tt.Frame()
+			if n := countNear(tt.Image(), mag, accent); n == 0 {
+				t.Errorf("悬停时放大镜那一格里一个主色像素都没有——它看起来还是死的")
+			}
+		})
+	}
+}
+
+// TestTheHistoryChipCloseButtonIsNotSmallerThanItsLabel 验历史 chip 右边那个「×」
+// 的命中区**不小于**同 chip 里的标签，而它和标签之间的缝也够大（票 BMG-253）。
+//
+// # 为什么这两条要一起钉
+//
+// 那个叉的图形只有 12 像素，而它的命中区原来只有 18——比同 chip 里那行 12 像素的
+// 标签**还矮**一截。两个按钮的后果**完全相反**（一个去搜这一条，一个删掉这一条），
+// 而它们原来只靠 2 像素分开：指针偏一点就删掉了。
+func TestTheHistoryChipCloseButtonIsNotSmallerThanItsLabel(t *testing.T) {
+	s, tt := newShell(t)
+	tt.SetFocused(true)
+	s.hist.add("周杰伦")
+	tt.Frame()
+	if err := tt.Click(searchLabel); err != nil {
+		t.Fatalf("点不到搜索框：%v", err)
+	}
+	tt.Frame()
+
+	label, ok := tt.Find("周杰伦")
+	if !ok {
+		t.Fatalf("浮层上没有那条历史，文字有 %q", tt.Texts())
+	}
+	close, ok := tt.Find("删除「周杰伦」")
+	if !ok {
+		t.Fatalf("浮层上没有那个关闭键，文字有 %q", tt.Texts())
+	}
+
+	// ① 命中区不小于标签：那个叉占满 chip 整个高（24），标签那行字是 18。
+	if close.H < label.H {
+		t.Errorf("关闭键的命中区高 %.0f、标签那行字高 %.0f——它比标签还难瞄",
+			close.H, label.H)
+	}
+	// ② 两个热区之间要有一道看得见的缝。
+	if gap := close.X - (label.X + label.W); gap < 6 {
+		t.Errorf("关闭键离标签的字只有 %.0f 像素（want ≥6）——偏一点就删错了", gap)
+	}
+}
+
 // ---- 这一组用的小工具 ----
+
+// countNear 数那一格里有多少个像素**接近** want（三通道相加的差 ≤ 40）。
+//
+// 只用来量「那一格里有没有某个颜色的墨迹」：抗锯齿的边缘像素不会算进去，
+// 而图形最浓的那几个像素是算得进去的。
+func countNear(img *image.RGBA, r ui.Rect, want ui.Color) int {
+	n := 0
+	for y := int(r.Y); y < int(r.Y+r.H); y++ {
+		for x := int(r.X); x < int(r.X+r.W); x++ {
+			if distRGBA(img.RGBAAt(clampX(img, x), y), want) <= 40 {
+				n++
+			}
+		}
+	}
+	return n
+}
 
 // verticalRun 从 mid 开始往上、往下找「不是 bg」的那一段，返回首末行。
 //
