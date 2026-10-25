@@ -114,6 +114,7 @@ func (a *App) VideoQualities() ([]bili.VideoQuality, bili.VideoQuality) {
 // SetVideoQuality 换画质：就地从当前进度重开，视频窗口不会闪回封面。
 // 档位只是「不超过」的上限，这一集没有的档 B 站会给最接近的低档。
 func (a *App) SetVideoQuality(q bili.VideoQuality) {
+	_, _ = a.UpdateSettings(func(s *Settings) { s.VideoQuality = int(q) })
 	a.vid.mu.Lock()
 	a.vid.quality = q
 	live := a.vid.phase == VideoOn || a.vid.phase == VideoLoading
@@ -317,4 +318,10 @@ func (a *App) SetVideoQualitiesForTest(avail []bili.VideoQuality, cur bili.Video
 	a.vid.mu.Lock()
 	a.vid.avail, a.vid.cur = avail, cur
 	a.vid.mu.Unlock()
+}
+
+func (v *videoRun) setQuality(q bili.VideoQuality) {
+	v.mu.Lock()
+	v.quality = q
+	v.mu.Unlock()
 }

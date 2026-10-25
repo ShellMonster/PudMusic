@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/audio"
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 )
 
 // settingsSlot 是一个 App 上挂着的那份设置。
@@ -91,6 +92,7 @@ func (a *App) MountSettings(path string) error {
 	a.normalize = s.NormalizeVolume
 	a.trackFade = time.Duration(s.TrackFadeSeconds) * time.Second
 	a.eqGains = audio.EQPresetByID(s.EQPreset).Gains
+	a.vid.setQuality(bili.VideoQuality(s.VideoQuality))
 	if s.PlaybackRate > 0 {
 		a.rate = audio.SnapRate(s.PlaybackRate)
 	}
@@ -158,6 +160,7 @@ func (a *App) UpdateSettings(fn func(*Settings)) (Settings, error) {
 	changed := a.normalize != s.NormalizeVolume
 	a.normalize = s.NormalizeVolume
 	a.trackFade = time.Duration(s.TrackFadeSeconds) * time.Second
+	a.vid.setQuality(bili.VideoQuality(s.VideoQuality))
 	eq := audio.EQPresetByID(s.EQPreset).Gains
 	eqChanged := a.eqGains != eq
 	a.eqGains = eq

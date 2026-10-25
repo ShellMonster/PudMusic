@@ -72,3 +72,27 @@ func TestTheEQPresetSurvivesARestartAndUnknownOnesAreOff(t *testing.T) {
 		t.Errorf("认不出的预设该落成空，得到 %q", got)
 	}
 }
+
+func TestTheVideoQualityPreferenceSurvivesARestartAndRejectsUnknownTiers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), app.SettingsFileName)
+	first := volumeApp(t, path)
+	if first.SettingsSnapshot().VideoQuality != 0 {
+		t.Fatal("默认应该是 0（720P）")
+	}
+	if _, err := first.UpdateSettings(func(s *app.Settings) { s.VideoQuality = 80 }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.UpdateSettings(func(s *app.Settings) { s.VideoQuality = 999 }); err != nil {
+		t.Fatal(err)
+	}
+	if got := first.SettingsSnapshot().VideoQuality; got != 0 {
+		t.Errorf("认不得的档没被清掉：%d", got)
+	}
+	_, _ = first.UpdateSettings(func(s *app.Settings) { s.VideoQuality = 80 })
+	if err := first.CloseSettings(); err != nil {
+		t.Fatal(err)
+	}
+	if got := volumeApp(t, path).SettingsSnapshot().VideoQuality; got != 80 {
+		t.Errorf("重启之后是 %d，应该是 80", got)
+	}
+}
