@@ -270,11 +270,11 @@ func TestTheFullPlayerSplitsTheWindowInHalf(t *testing.T) {
 		t.Fatalf("满屏上找不到封面，文字有 %q", tt.Texts())
 	}
 	const (
-		wantCoverLeft  = 232 // 封面栏 600 − 留白 48 − 封面 320
+		wantCoverLeft  = 192 // 封面栏 600 − 留白 48 − 封面 360
 		wantCoverRight = 552
 	)
 	if d := absF(cover.X - wantCoverLeft); d > 1 {
-		t.Errorf("封面的左沿在 %.1f，want %d（封面栏 600 − 留白 48 − 封面 320）",
+		t.Errorf("封面的左沿在 %.1f，want %d（封面栏 600 − 留白 48 − 封面 360）",
 			cover.X, wantCoverLeft)
 	}
 	if d := absF(cover.X + cover.W - wantCoverRight); d > 1 {

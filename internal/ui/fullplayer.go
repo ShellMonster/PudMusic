@@ -351,12 +351,6 @@ type fullPlayer struct {
 	// bgDraws 是这张画布被重画了几次。**给测试看的**：毛玻璃每帧重渲一遍就是
 	// 这里在涨（那在软件渲染上是 80~100 毫秒一帧）。
 	bgDraws int
-
-	// spin 是「封面在转」这一轮的状态（见 fullplayer_spin.go）。
-	//
-	// ⚠️ **它跟着 `fullPlayer` 一起复位**（`closeFullPlayer` 里的
-	// `s.full = fullPlayer{}`）：满屏关掉之后那一轮就结束了，下次打开从头转。
-	spin fullCoverSpin
 }
 
 // partRow 是分集列表里的一行。
@@ -964,21 +958,9 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 	box.Children(func() {
 		// 共享元素转场的身份：**两处封面用的是同一个**（这里和播放条上那一张）。
 		id := coverIdentity(s, st)
-		cover := imgcache.View(c, s.images, st.CoverURL, w, h).
+		imgcache.View(c, s.images, st.CoverURL, w, h).
 			Label("当前封面").
 			Transition(coverTransition(id))
-		// ⚠️ **封面在转**（见 fullplayer_spin.go）。
-		//
-		// 转的是**图片这一格**，不是外面那个盒子：盒子里面还有长按三连的进度环，
-		// 环画在封面外面一圈，跟着转会让那圈弧乱甩。
-		//
-		// ⚠️ **走的是 pose 那一档**（`AnimatePose`），不是 `Element.Rotate`：
-		// 后者是建的时候写死的变换，角度每帧都变就得每帧重建一遍整棵满屏播放器
-		//（那是票 #392 治的毛病）。理由见那个文件的头一段。
-		if pose, anim, ok := s.fullCoverSpinPose(c, st); ok {
-			cover = cover.AnimatePose(pose, anim)
-		}
-
 		// 长按 2.5 秒 = 一键三连。满屏上**没有**别的赞入口（照抄 Biu：它那边
 		// 满屏那张封面是 `pointer-events-none`，三连只在播放条上）——我们把这一层
 		// 接进来是因为 SPEC 需求 69 说的是「长按封面」，而满屏上只有这一张封面。
@@ -1031,13 +1013,13 @@ func fullCoverSize(c *ui.Context, maxW float32) (float32, float32) {
 	if maxW > 0 {
 		w = min(w, maxW)
 	}
-	return w, w
+	return w, w * 3 / 4
 }
 
-// 满屏封面的边长（设计规范 v0.1 §7.5）。
+// 满屏封面的宽（4:3，原图直接显示、不转；窄窗口里小一档）。
 const (
-	fullCoverSide       = 320
-	fullCoverSideNarrow = 240
+	fullCoverSide       = 360
+	fullCoverSideNarrow = 280
 	fullCoverNarrowWin  = 1000
 )
 
