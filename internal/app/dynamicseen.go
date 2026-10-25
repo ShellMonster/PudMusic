@@ -101,9 +101,12 @@ func (a *App) CatchUpDynamicSeen(ctx context.Context) (string, error) {
 		return "", err
 	}
 	if pg.Baseline == "" {
-		// B 站没给基线（协议变了？）：不动它——宁可让那个点下次又亮，
-		// 也不要记一个错的（错的会让「点进去真的消失」那条落空）。
-		log.Printf("biu: 动态流没给更新基线（update_baseline 是空的）")
+		// ⚠️ **到这儿说明这一页一条动态都没有**：基线的退路是「这一页第一条动态的
+		// id」（见 bili.dynamicPageFrom），而这一页没有第一条。
+		//
+		// 不动它——宁可让那个点下次又亮，也不要记一个错的（错的会让「点进去真的
+		// 消失」那条落空）。
+		log.Printf("biu: 动态流这一页是空的，没有可记的更新基线")
 		return "", nil
 	}
 	a.MarkDynamicSeen(pg.Baseline)

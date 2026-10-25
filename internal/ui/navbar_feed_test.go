@@ -125,6 +125,33 @@ func TestTheRedDotSitsOnTheTopRightOfTheIcon(t *testing.T) {
 	}
 }
 
+// TestTheRedDotDoesNotSwallowTheClicks 验**点那个看得见的红点**也有反应。
+//
+// ⚠️ **这一条是那个点画在按钮上面留下的坑**：MyGo 的命中链是「**最上面那个元素**
+// + 它的祖先」（`mygo/ui/input.go` 的 appendHitChain），**兄弟不参与**——于是
+// 那个点那 8×8 底下的按钮收不到指针事件，「动态」那一枚的右上角变成**死区**
+// （点那个看得见的点没反应），指针停在它上面时按钮也不亮。
+//
+// 治法是给那个点一句 `PassThrough()`（指针穿过去，落到按钮上）。
+func TestTheRedDotDoesNotSwallowTheClicks(t *testing.T) {
+	s, tt := newShell(t)
+	tt.SetFocused(true)
+	fakeClockOn(s, fakeClockStart)
+	s.feed.ask = func(done func(int, error)) { done(3, nil) }
+
+	tt.Frame()
+	dot, ok := tt.Find("3 条新动态")
+	if !ok {
+		t.Fatalf("那个点没画出来，文字有 %q", tt.Texts())
+	}
+
+	// ⚠️ **点那个点自己的正中心**：它压在按钮上面。
+	tt.ClickAt(dot.X+dot.W/2, dot.Y+dot.H/2)
+	if got := s.router.Path(); got != dynamicFeedPath {
+		t.Errorf("点那个点之后在 %q，want %q（那个点把点击吃掉了）", got, dynamicFeedPath)
+	}
+}
+
 // TestTheRedDotDoesNotComeBackAfterReadingIt 验「点进去清掉」真的清得掉。
 //
 // 这一条走的是**真的**那一趟：假 B 站按基线回答——基线是 0 就说「有 3 条没看过

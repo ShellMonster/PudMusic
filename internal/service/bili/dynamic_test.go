@@ -1161,3 +1161,53 @@ func TestDynamicFeedCarriesTheUpdateBaseline(t *testing.T) {
 		t.Errorf("更新基线是 %q，want 954659517801431040（那是最新那条动态的 id）", pg.Baseline)
 	}
 }
+
+// TestDynamicFeedFallsBackToTheFirstItemsID 验 B 站没给 update_baseline 时的**退路**。
+//
+// ⚠️ **为什么非有不可**：B 站哪天少给这一格，「点进去之后不冒出来」就静悄悄退回
+// 上游那个行为（每五分钟又回来），而界面上看不出任何异样。
+//
+// 退路是「这一页第一条动态的 id」——上游的注释写着基线就是「第一条记录ID」
+// （`biu/src/service/web-dynamic.ts:58`），而 `items[0].id_str` 就是动态 id。
+func TestDynamicFeedFallsBackToTheFirstItemsID(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(dynamicFeedAllPath, func(w http.ResponseWriter, r *http.Request) {
+		// ⚠️ **故意不给 update_baseline**（模拟 B 站少给这一格）。
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			"items":  []any{dynItem("d1"), dynItem("d2")},
+			"offset": "", "has_more": false,
+		}))
+	})
+	pg, err := f.client(t, Options{}).DynamicFeed(context.Background(), "")
+	if err != nil {
+		t.Fatalf("拉动态流失败了：%v", err)
+	}
+	if pg.Baseline != "d1" {
+		t.Errorf("更新基线是 %q，want d1（退路：这一页第一条动态的 id）", pg.Baseline)
+	}
+}
+
+// TestDynamicFeedFallsBackToTheRawFirstItem 验退路取的是**原始**第一条。
+//
+// ⚠️ **不能从画得出来的那一份里取**：画不出来的那些（转发、广告……）被丢掉了，
+// 而基线要的是 B 站自己认的那一条（最新的那条）。
+func TestDynamicFeedFallsBackToTheRawFirstItem(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(dynamicFeedAllPath, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			// 第一条是画不出来的（转发），第二条才是画得出来的。
+			"items": []any{
+				dynItem("x1", func(m map[string]any) { m["type"] = "DYNAMIC_TYPE_FORWARD" }),
+				dynItem("d2"),
+			},
+			"offset": "", "has_more": false,
+		}))
+	})
+	pg, err := f.client(t, Options{}).DynamicFeed(context.Background(), "")
+	if err != nil {
+		t.Fatalf("拉动态流失败了：%v", err)
+	}
+	if pg.Baseline != "x1" {
+		t.Errorf("更新基线是 %q，want x1（退路取的是原始第一条，不是过滤之后的第一条）", pg.Baseline)
+	}
+}

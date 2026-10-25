@@ -595,6 +595,18 @@ func dynamicPageFrom(raw []byte) (DynamicPage, error) {
 		Raw:      len(env.Items),
 		Baseline: env.Baseline.String(),
 	}
+	// ⚠️ **退路**：B 站要是没给 `update_baseline`，就用这一页**原始**第一条的
+	// id——上游的注释写着基线就是「第一条记录ID」（`web-dynamic.ts:58`），而
+	// `items[0].id_str` 就是动态 id（`LikeDynamic` 用的也是它）。
+	//
+	// ⚠️ **为什么非有不可**：没有它，B 站哪天少给这一格，「点进去之后不冒出来」
+	// 就**静悄悄**退回上游那个行为（每五分钟又回来），而界面上看不出任何异样。
+	//
+	// ⚠️ **不能从 pg.Items[0] 取**：那一份是**过滤之后**的（画不出来的那些被丢掉
+	// 了，见本文件开头那个约定），而基线要的是 B 站自己认的那一条（最新的那条）。
+	if pg.Baseline == "" && len(env.Items) > 0 {
+		pg.Baseline = rawItemID(env.Items[0])
+	}
 	for _, item := range env.Items {
 		d, drop, ok := parseDynamic(item)
 		if !ok {
@@ -878,6 +890,21 @@ func parseDynamic(raw json.RawMessage) (Dynamic, DroppedDynamic, bool) {
 	}
 	d.Kind = DynamicText
 	return d, DroppedDynamic{}, true
+}
+
+// rawItemID 是一条**原始**动态的 id（B 站的 id_str，18 位左右）。
+//
+// ⚠️ **它只读 id_str**：这一条别的什么都不管——包括「这一条画不画得出来」
+// （那一份是 parseDynamic 的事）。基线要的是「这一页最新的那条」的 id，而
+// B 站给的 id_str 就是它。
+func rawItemID(raw json.RawMessage) string {
+	var r struct {
+		IDStr flexString `json:"id_str"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return ""
+	}
+	return r.IDStr.String()
 }
 
 // dropKeyOf 是一条丢掉的东西的**身份**（跨页去重用的）。
