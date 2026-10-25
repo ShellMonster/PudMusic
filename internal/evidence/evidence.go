@@ -686,6 +686,24 @@ var Items = []Item{
 	},
 	{
 		Category: Paging,
+		// 首页那三张 Tab 的「无限下滑」（票 #370）。四件事缺一不可：
+		//
+		//   - **滚到底自动拉下一段**（一直滑一直有，到 B 站没有更多为止）；
+		//   - **到头了说清楚**（「没有更多了」那一行——不是无限转圈、不是空白）；
+		//   - **切回某档还在原来那一段**（这一条是换列表换出来的，位置记在哪
+		//     可以换，但那个行为不能丢）；
+		//   - **「回到顶部」那一枚回的是当前这一档**（三档各记各的）。
+		Spec: "首页三张 Tab 无限下滑：滚到底自动拉下一段，到头说「没有更多了」；切回某档还在原处；回顶按钮回的是当前这一档",
+		Tests: []string{
+			"TestTheHomeKeepsLoadingMoreWhenYouScrollToTheEnd",
+			"TestTheHomeSaysThereIsNoMoreWhenThereIsNoMore",
+			"TestTheHomeBackToTopGoesBackToThatTab",
+			"TestEachHomeTabKeepsItsOwnScrollAndItsOwnBackToTop",
+			"TestSwitchingBackRestoresThatTabsScrollPosition",
+		},
+	},
+	{
+		Category: Paging,
 		Spec:     "404 三秒自动回首页，离开就不倒计时",
 		Tests:    []string{"TestNotFoundRedirectsHomeAfterThreeSeconds", "TestLeavingThe404PageCancelsTheRedirect"},
 	},

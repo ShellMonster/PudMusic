@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -212,7 +213,179 @@ func TestSearchHistoryHeadingIsFourteenRegular(t *testing.T) {
 	}
 }
 
+// TestTheSearchMagnifierLooksAliveWhenThePointerIsOnIt 验顶栏那枚放大镜**看起来
+// 是活的**（票 BMG-253）。
+//
+// # 判据是「那一格里有没有主色像素」
+//
+// 那枚放大镜原先是**纯装饰**：不可点、永远是同一个淡灰色，而它旁边就是一个
+// 淡灰色的输入框——用户看不出它是个入口。现在它是一枚**按钮**，悬停时图形染
+// 主色（上游 HeroUI 的 `hover:text-primary`），所以「悬停前后那一格里的主色
+// 像素有没有变多」就是「它是不是活的」这一句的答案。
+//
+// 深浅两套都量：主色那一档在浅色下是**压深过**的（`ink.AccentOn`），而浅色
+// 底上那一档和背景差得开——深色下就是主色本身。
+func TestTheSearchMagnifierLooksAliveWhenThePointerIsOnIt(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, tt := newShell(t, systemIsDark(dark))
+			tt.SetFocused(true)
+			// 指针先放到内容区，别让idle 那一档带上悬停。
+			tt.Move(900, 500)
+			tt.Frame()
+
+			mag, ok := tt.Find(searchActionLabel)
+			if !ok {
+				t.Fatalf("顶栏上没有那枚放大镜（%q），文字有 %q", searchActionLabel, tt.Texts())
+			}
+			th := BuildTheme(s.app.SettingsSnapshot(), dark)
+			accent := ink.AccentOn(th)
+
+			// 悬停之前：那一格里一个主色像素都没有。
+			if n := countNear(tt.Image(), mag, accent); n != 0 {
+				t.Errorf("没悬停时放大镜那一格里已经有 %d 个主色像素——它不该是死的", n)
+			}
+
+			// 悬停之后：图形染主色。
+			tt.Move(mag.X+mag.W/2, mag.Y+mag.H/2)
+			tt.Frame()
+			if n := countNear(tt.Image(), mag, accent); n == 0 {
+				t.Errorf("悬停时放大镜那一格里一个主色像素都没有——它看起来还是死的")
+			}
+		})
+	}
+}
+
+// TestTheHistoryChipCloseButtonIsNotSmallerThanItsLabel 验历史 chip 右边那个「×」
+// 的命中区**不小于**同 chip 里的标签，而它和标签之间的缝也够大（票 BMG-253）。
+//
+// # 为什么这两条要一起钉
+//
+// 那个叉的图形只有 12 像素，而它的命中区原来只有 18——比同 chip 里那行 12 像素的
+// 标签**还矮**一截。两个按钮的后果**完全相反**（一个去搜这一条，一个删掉这一条），
+// 而它们原来只靠 2 像素分开：指针偏一点就删掉了。
+func TestTheHistoryChipCloseButtonIsNotSmallerThanItsLabel(t *testing.T) {
+	s, tt := newShell(t, systemIsDark(false))
+	tt.SetFocused(true)
+	s.hist.add("周杰伦")
+	tt.Frame()
+	if err := tt.Click(searchLabel); err != nil {
+		t.Fatalf("点不到搜索框：%v", err)
+	}
+	tt.Frame()
+
+	label, ok := tt.Find("周杰伦")
+	if !ok {
+		t.Fatalf("浮层上没有那条历史，文字有 %q", tt.Texts())
+	}
+	close, ok := tt.Find("删除「周杰伦」")
+	if !ok {
+		t.Fatalf("浮层上没有那个关闭键，文字有 %q", tt.Texts())
+	}
+
+	th := BuildTheme(s.app.SettingsSnapshot(), false)
+	panel := rgb(th.Background)
+	chip := rgb(historyChipBg(th))
+
+	// chip 自己的上下沿：在**右边那一段留白**那一列上量（那里只有它自己的底色）。
+	chipTop, chipBottom := verticalRun(tt.Image(), int(close.X+close.W+4),
+		int(label.Y+label.H/2), panel)
+	chipH := chipBottom - chipTop + 1
+
+	// ① 那个叉的命中区**占满 chip 整个高**：chip 的上下留白是 0，所以它和同 chip
+	// 里那个标签按钮一样高——两个热区不再一高一矮（矮的那个偏偏是图形最小的
+	// 那一个：12 的叉对 12 的字）。
+	if close.H != float32(chipH) {
+		t.Errorf("关闭键的命中区高 %.0f、chip 整个高 %d——它没有占满这一格",
+			close.H, chipH)
+	}
+
+	// ② 它**不小于标签按钮那一格**。
+	//
+	// ⚠️ **量的是标签按钮那一格，不是那行字**：标签按钮**没有名字**
+	// （`Tester.Find` 只找得到它里面的那段字），量它靠它悬停时铺的那层淡色——
+	// 指针停在那行字上，那一格就亮起来，**亮的那一段就是它的盒子**
+	// （实测 20 高：那段字 14 + 上下各 3 的内边距）。
+	tt.Move(label.X+label.W/2, label.Y+label.H/2)
+	tt.Frame()
+	col := int(label.X + label.W/2)
+	lit := 0
+	for y := chipTop; y <= chipBottom; y++ {
+		if tt.Image().RGBAAt(col, y) != chip {
+			lit++
+		}
+	}
+	if close.H < float32(lit) {
+		t.Errorf("关闭键的命中区高 %.0f、标签按钮那一格只有 %d 像素高——"+
+			"它比标签还难瞄", close.H, lit)
+	}
+	// ② 两个热区之间要有一道看得见的缝。
+	if gap := close.X - (label.X + label.W); gap < 6 {
+		t.Errorf("关闭键离标签的字只有 %.0f 像素（want ≥6）——偏一点就删错了", gap)
+	}
+}
+
+// TestTheClearAllButtonShowsATrashBin 验「清除全部」那一枚**画着垃圾桶**
+// （票 BMG-253）。
+//
+// # 为什么它要有牙齿
+//
+// 它是这一块**唯一的不可逆动作**（一次性删掉全部搜索历史，而 B 站那边没有
+// 「撤销」），而仓库里别的破坏性动作都带一枚**垃圾桶图标**（「清除已看完」
+// 「清空播放列表」——见 `later.go` 和 `queue_drawer.go`）。一个 12 像素的淡灰字
+// 看不出是删除。
+//
+// 判据是**字左边那一段里有墨迹**：垃圾桶在字的左边（中间隔着按钮自己那道 6
+// 像素的缝和左边的留白），所以量的是「字左边 22 像素那一段」。
+func TestTheClearAllButtonShowsATrashBin(t *testing.T) {
+	s, tt := newShell(t, systemIsDark(false))
+	tt.SetFocused(true)
+	s.hist.add("周杰伦")
+	tt.Frame()
+	if err := tt.Click(searchLabel); err != nil {
+		t.Fatalf("点不到搜索框：%v", err)
+	}
+	tt.Frame()
+
+	clear, ok := tt.Find("清除全部")
+	if !ok {
+		t.Fatalf("浮层上没有「清除全部」，文字有 %q", tt.Texts())
+	}
+	th := BuildTheme(s.app.SettingsSnapshot(), false)
+	// 那枚图标画的是按钮的字色（次要色那一档）。
+	icon := ui.Rect{
+		X: clear.X - 22,
+		Y: clear.Y,
+		W: 18,
+		H: clear.H,
+	}
+	if n := countNear(tt.Image(), icon, th.TextMuted); n == 0 {
+		t.Errorf("「清除全部」左边没有墨迹（%v）——它没有画那枚垃圾桶图标，"+
+			"用户看不出这一下是不可逆的", icon)
+	}
+}
+
 // ---- 这一组用的小工具 ----
+
+// countNear 数那一格里有多少个像素**接近** want（三通道相加的差 ≤ 40）。
+//
+// 只用来量「那一格里有没有某个颜色的墨迹」：抗锯齿的边缘像素不会算进去，
+// 而图形最浓的那几个像素是算得进去的。
+func countNear(img *image.RGBA, r ui.Rect, want ui.Color) int {
+	n := 0
+	for y := int(r.Y); y < int(r.Y+r.H); y++ {
+		for x := int(r.X); x < int(r.X+r.W); x++ {
+			if distRGBA(img.RGBAAt(clampX(img, x), y), want) <= 40 {
+				n++
+			}
+		}
+	}
+	return n
+}
 
 // verticalRun 从 mid 开始往上、往下找「不是 bg」的那一段，返回首末行。
 //
