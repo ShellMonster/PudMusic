@@ -14,6 +14,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"log"
 	"strconv"
 	"sync"
 
@@ -248,6 +249,12 @@ func (s *Shell) fetchSearchTab(tab int, ctx context.Context, page int) (list.Pag
 		// tcp …」这种给开发者看的东西。`bili.Friendly` 把它翻成「连不上 B 站，
 		// 检查一下网络」——首页那一档也是这么办的（`homepage_feed.go` 的
 		// `homeFailureOf`）。
+		//
+		// 🔴 **原始的那一句要进日志**：翻过去的那一句有时候是「出了点问题（详情看
+		// 日志）」——那句话指的日志里得有这件事，而分页列表那边记的是**翻过之后**
+		// 的那一句（`widgets/list/paged.go` 的 `apply`）。所以原始的那一份在这里
+		// 记一份。
+		log.Printf("biu: 搜索拉页失败（%s，第 %d 页）：%v", searchTabNames[tab], page, err)
 		return list.Page{}, searchFailureOf(err)
 	}
 

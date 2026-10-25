@@ -155,7 +155,10 @@ func (a *App) SearchSuggest(keyword string) {
 
 	if cli == nil {
 		// 没挂上 B 站客户端（没走过 MountLogin）。**静默**：这就是「拉不到」那一种，
-		// 而界面上该表现的是浮层里只剩历史那一档。
+		// 而界面上该表现的是浮层里「联想词」那一档**说一句自己的话**
+		// （「没能取到联想词」，见 `ui/navbar_suggest.go` 的 `suggestFailedNote`）
+		// ——历史那一档照旧摆着，而「这一趟没拉到」和「B 站没给联想」在画面上
+		// 分得开（票 #455）。
 		a.mu.Lock()
 		if a.suggest.gen == gen && !a.closed {
 			a.suggest.loading = false

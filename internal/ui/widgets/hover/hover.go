@@ -449,7 +449,31 @@ func rowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 		tri := ui.Box(c).Key(ids.tri).Size(triSize, triSize).
 			Label(ids.label).Tooltip(tip).
 			Attach(ui.AnchorCenter, ui.AnchorCenter)
-		drawCoverGlyph(c, g, tri, triSize, ui.RGBA(255, 255, 255, triTint))
+		if g == glyphProfile {
+			// 「一个人」：一枚图标（`iconset` 里那张 `user-line.svg`）——图标那一套
+			// 自带矢量绘制，比手画一个人头可靠（理由见 `profileIcon`）。
+			//
+			// ⚠️ **20 见方**：和原来那枚三角**一样大**——反馈的重量不变，只是换了
+			// 说的是哪件事。
+			tri.Children(func() {
+				ui.Icon(c, profileIcon).FontSize(triSize).
+					TextColor(ui.RGBA(255, 255, 255, triTint))
+			})
+		} else {
+			// 播放三角。
+			//
+			// 🔴 **这个闭包不许捕获任何变量**：它每一帧每一行建一次，而**捕获了变量
+			// 的闭包会逃到堆上**（每行每帧多一次分配）。`triTint` 是**常量**，
+			// 所以这一支编译出来是一个**静态函数值**、一个分配都不占。
+			//
+			// ⚠️ **别把它挪进一个带参数的函数里**（票 #455 的评审实测）：那样闭包
+			// 捕获的就是那个参数，于是每一行每一帧多一次堆分配——首页列表那一档的
+			// 分配从 46 涨到 59（上限 54），整条帧预算因此变红
+			// （`internal/ui/framebudget_test.go`）。
+			tri.Draw(func(p *ui.Painter, r ui.Rect) {
+				drawTri(p, r, ui.RGBA(255, 255, 255, triTint))
+			})
+		}
 		show(tri, a)
 
 		// ⚠️ **`Hovered` / `Clicked` 要在它建完之后立刻问**（同 `list/card.go` 里那一
@@ -463,26 +487,6 @@ func rowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 			//（`mygo/ui/transform.go` 的 transformAt），所以是往外涨而不是往一边偏。
 			_ = tri.Scale(triScale, triScale)
 		}
-	})
-}
-
-// drawCoverGlyph 画封面那一圈上的那个图形。
-//
-// ⚠️ **两种图形是两种画法**：播放三角是**一条路径**（`drawTri`），而「一个人」
-// 是**一枚图标**（`iconset` 里那张 `user-line.svg`）——图标那一套自带矢量绘制，
-// 比手画一个人头可靠。
-//
-// size 是那个图形**自己**占多大：三角填满整个盒子（`box` 已经是 20 见方），
-// 图标是它的边长（`ui.Icon` 是「和字号一样高、保持长宽比」）。
-func drawCoverGlyph(c *ui.Context, g glyph, box ui.Element, size float32, color ui.Color) {
-	if g == glyphProfile {
-		box.Children(func() {
-			ui.Icon(c, profileIcon).FontSize(size).TextColor(color)
-		})
-		return
-	}
-	box.Draw(func(p *ui.Painter, r ui.Rect) {
-		drawTri(p, r, color)
 	})
 }
 
@@ -603,12 +607,18 @@ func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock string, 
 	show(circle, a).Children(func() {
 		e := ui.Box(c).Size(btn, btn).Label(ids.label).Tooltip(tip).Center()
 		if g == glyphProfile {
-			// 一个人：图标那一枚是「和字号一样高、保持长宽比」，所以给它 24
+			// 「一个人」：图标那一枚是「和字号一样高、保持长宽比」，所以给它 24
 			// （圆的六成，和下面那个三角一样大）就正好。
 			e.Children(func() {
 				ui.Icon(c, profileIcon).FontSize(btn * 0.6).TextColor(t.AccentText)
 			})
 		} else {
+			// 播放三角。
+			//
+			// ⚠️ **这个闭包捕获了 `t`（主题）**，所以它会逃到堆上——**而这一处
+			// 一直就是这样**（网格那一档的帧预算里一直算着这一次分配）。别为了
+			// 「列表行那一支不捕获」把这一支也改了：两处的分配数各自算各自的，
+			// 动了哪一头都会动那一条预算。
 			e.Draw(func(p *ui.Painter, r ui.Rect) {
 				// 三角缩到圆的六成：整个圆那么大的三角会顶出圆外。
 				drawTri(p, shrink(r, 0.4), t.AccentText)
