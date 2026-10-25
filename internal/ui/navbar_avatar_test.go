@@ -36,6 +36,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -441,6 +442,58 @@ func TestTheAvatarOnlyAsksOnceEvenThoughEveryFrameAsks(t *testing.T) {
 	if n := f.countHit(avatarNavPath); n != 1 {
 		t.Errorf("画了 30 帧之后那台 B 站被问了 %d 次，want 1——"+
 			"闸门住在每帧的副作用那一层里，写松了一点就变成每一帧一个带凭据的请求", n)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 悬停：那一格是活的
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheAvatarWearsARingWhenThePointerIsOnIt 验顶栏那个头像**悬停时看得出是活的**
+// （票 BMG-253）。
+//
+// # 为什么「放大 5%」不够
+//
+// 上游那一处是 `hover:scale-105`——一个 18 像素的圆涨到 19 像素，指针压上去几乎
+// 看不出区别，而它是顶栏里唯一的「个人入口」（放大是那一排里**最弱**的反馈：
+// 图形不变色、也没有铺底）。
+//
+// 现在悬停时那一枚圆外面多一圈 **2 像素的主色环**：深浅两套都取 `ink.AccentOn`
+// （浅色下是压深过的那一档，深色下就是主色本身）。
+//
+// # 判据是「那一格里有没有主色像素」
+//
+// 那一格平时的墨迹是**人形**（`t.TextMuted`）——不是主色。所以「悬停之前一个
+// 主色像素都没有、悬停之后有」就是这一档反馈的全部。
+func TestTheAvatarWearsARingWhenThePointerIsOnIt(t *testing.T) {
+	for _, systemDark := range []bool{false, true} {
+		name := "浅色"
+		if systemDark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newAvatarFixture(t)
+			s, tt := newAvatarShellIn(t, f, "", systemDark)
+			// 指针先放到内容区，别让悬停那一档提前出现。
+			tt.Move(900, 500)
+			tt.Frame()
+
+			hit, ok := avatarBox(tt)
+			if !ok {
+				t.Fatalf("顶栏上没有头像，文字有 %q", tt.Texts())
+			}
+			th := BuildTheme(s.app.SettingsSnapshot(), systemDark)
+			accent := ink.AccentOn(th)
+
+			if n := countNear(tt.Image(), hit, accent); n != 0 {
+				t.Errorf("没悬停时头像那一格里已经有 %d 个主色像素", n)
+			}
+			tt.Move(hit.X+hit.W/2, hit.Y+hit.H/2)
+			tt.Frame()
+			if n := countNear(tt.Image(), hit, accent); n == 0 {
+				t.Errorf("悬停时头像那一格里一个主色像素都没有——它和没悬停时长得一样")
+			}
+		})
 	}
 }
 

@@ -888,6 +888,84 @@ func TestSuggestClearAllEmptiesTheHistory(t *testing.T) {
 	}
 }
 
+// TestTheSearchMagnifierSearchesWhatIsInTheBox 验顶栏那枚放大镜**是能点的**
+// （票 BMG-253）。
+//
+// # 为什么这一条重要
+//
+// 那枚放大镜原先是**纯装饰**：不可点、永远是同一个淡灰色。用户点它只是把光标
+// 放进输入框——**结果碰巧对，但界面上没有任何东西说明它是个入口**。
+//
+// 现在它是**一枚按钮**：点它 = 拿框里的词去搜（和回车是同一件事）。
+func TestTheSearchMagnifierSearchesWhatIsInTheBox(t *testing.T) {
+	s, tt := newShell(t)
+	tt.SetFocused(true)
+	tt.Frame()
+
+	// 在框里敲一个词（走的是真实输入）。
+	box, ok := tt.Find(searchLabel)
+	if !ok {
+		t.Fatalf("顶栏上没有搜索框，文字有 %q", tt.Texts())
+	}
+	tt.ClickAt(box.X+box.W/2, box.Y+box.H/2)
+	tt.Frame()
+	tt.Type("周杰伦")
+	tt.Frame()
+
+	// 点那枚放大镜。
+	mag, ok := tt.Find(searchActionLabel)
+	if !ok {
+		t.Fatalf("顶栏上没有那枚放大镜（%q），文字有 %q", searchActionLabel, tt.Texts())
+	}
+	tt.ClickAt(mag.X+mag.W/2, mag.Y+mag.H/2)
+	tt.Frame()
+
+	if got := s.router.Query(searchQuery); got != "周杰伦" {
+		t.Errorf("点放大镜之后搜的是 %q，want 周杰伦", got)
+	}
+	if got := s.router.Path(); got != searchPath {
+		t.Errorf("点放大镜之后在 %q，want %q", got, searchPath)
+	}
+	// 记进历史：它是「一次搜索」，不是「点了一下那个图标」。
+	if got := searchValues(s.hist.list()); len(got) != 1 || got[0] != "周杰伦" {
+		t.Errorf("点放大镜之后历史是 %q，want [周杰伦]", got)
+	}
+}
+
+// TestTheClearAllButtonSaysWhatItDeletes 验「清除全部」**说清它删的是什么、能不能
+// 撤**（票 BMG-253）。
+//
+// # 为什么这一条不是「加一句提示」那么轻
+//
+// 「清除全部」是这一块**唯一的不可逆动作**：它一次性删掉全部搜索历史，而 B 站
+// 那边没有「撤销」——删掉的那一条用户自己再也搜不回来。它原先是 12 像素的淡灰
+// 字、**一句提示都没有**，用户点了才知道自己删掉了什么。
+//
+// 判据是**提示的那句话本身**：它既要说清删的是什么（全部搜索历史），也要说清
+// 能不能撤（不能）。
+func TestTheClearAllButtonSaysWhatItDeletes(t *testing.T) {
+	s, tt := newShell(t)
+	tt.SetFocused(true)
+	s.hist.add("周杰伦")
+	tt.Frame()
+	if err := tt.Click(searchLabel); err != nil {
+		t.Fatalf("点不到搜索框：%v", err)
+	}
+	tt.Frame()
+
+	clear, ok := tt.Find("清除全部")
+	if !ok {
+		t.Fatalf("浮层上没有「清除全部」，文字有 %q", tt.Texts())
+	}
+	// 指针停上去，那句提示就该出来（界面层那一份是 0ms 出）。
+	tt.Move(clear.X+clear.W/2, clear.Y+clear.H/2)
+	tt.Frame()
+	if !tt.HasText(clearHistoryTip) {
+		t.Errorf("指针停在「清除全部」上没有那句提示（%q），文字有 %q",
+			clearHistoryTip, tt.Texts())
+	}
+}
+
 // TestLeavingTheSearchPageMidTransitionDoesNotCrashTheWindow 验从 /search 离开时
 // 不崩。
 //

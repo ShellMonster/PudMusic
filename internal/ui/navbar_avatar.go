@@ -423,6 +423,10 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 		// ⚠️ hover 要在 Children **之前**问（理由同 `widgets/list` 的 grid.go）。
 		on := hit.Hovered()
 		hit = hoverZoom(c, hit, "avatar-zoom", on)
+		// 🔴 **悬停时头像外面多一圈主色的环**（票 BMG-253）：放大 5% 是这一排里
+		// **最弱**的反馈——一个 18 像素的圆涨到 19 像素，指针压上去几乎看不出
+		// 区别，而这一格是顶栏里唯一的「个人入口」。
+		hit = avatarHoverRing(c, hit, on, float32(avatarSize))
 		hit.Children(func() {
 			// 那一枚圆：**裁成圆的**（里面的图要按圆裁），外面留一圈 1 像素的描边。
 			face := ui.Box(c).Size(avatarSize, avatarSize).
@@ -450,6 +454,45 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 		s.viewAvatarMenuKeys(c, hit)
 		s.viewAvatarMenu(c, hit)
 		s.viewAvatarLogoutConfirm(c)
+	})
+}
+
+// avatarHoverRing 是头像那一枚圆外面那圈**悬停时的主色环**（票 BMG-253）。
+//
+// # 为什么是画在图**上面**的一圈，而不是改外面那一圈描边
+//
+// 头像那一格本来有一圈 1 像素的描边（`t.Border`，见 `viewAvatar`），而**图是
+// 18×18、正好盖满那一格**——描边被图压在底下，改它的颜色在**有图的时候**一个
+// 像素都看不见（而那正是常态：登录之后一直有图）。
+//
+// # 为什么不用「铺一层淡底」
+//
+// 那一格的命中区是 32×32，而图只有 18：铺出来的淡底要么是一块 32 的**方块**
+// （方的，和圆头像不搭），要么是一圈 7 像素宽的晕（太宽，抢戏——票 #241 刚把
+// 头像从 28 收到 18 就是为了让它和旁边那三枚同一档）。
+//
+// 一圈 2 像素的主色环贴着头像的外沿，是「这一格是活的」最省事也最清楚的一档。
+//
+// ⚠️ **深浅两套都取 `ink.AccentOn`**：亮绿压白底只有 1.9:1，直接用等于看不见
+// （浅色下那一档是压深到 ≥4.5:1 的，深色下就是主色本身）。
+//
+// side 是**那一枚圆的多大**（顶栏那个是 `avatarSize`，收藏夹头图区那个是 24）。
+func avatarHoverRing(c *ui.Context, e ui.Element, on bool, side float32) ui.Element {
+	if !on {
+		return e
+	}
+	ring := ink.AccentOn(c.Theme())
+	const width = float32(2)
+	// 环的**内沿**正好贴着头像那一枚圆的外沿：描边画在那个圆的**外边** width
+	// 那一圈上。
+	d := side + 2*width
+	return e.DrawOver(func(p *ui.Painter, r ui.Rect) {
+		p.Stroke(ui.Rect{
+			X: r.X + (r.W-d)/2,
+			Y: r.Y + (r.H-d)/2,
+			W: d,
+			H: d,
+		}, ring, d/2, width)
 	})
 }
 
