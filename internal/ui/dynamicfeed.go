@@ -266,6 +266,16 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 			// 就没有这个列表。给一句能指路的，比一个空列表有用。
 			ui.Text(c, "登录之后能看到你关注的人").FontSize(scale.Font(c, scale.Size12)).
 				TextColor(t.TextMuted).PaddingX(space.Px8)
+			// ⚠️ **再给一个能立刻做完的事**（票 #277）：这一页没登录时作者栏
+			// 整个拉不出来，而「去登录」是唯一能解开它的动作——只有一句
+			// 「登录之后能看到你关注的人」的话，用户得自己再去顶栏找那枚图标。
+			//
+			// ⚠️ **它带一个「登录完去哪」**：从这一页进去的，登录完**回这一页**
+			// ——用户就是来看动态的，登录完落回首页等于把他白绕一圈
+			// （这一条是票 #277 点名的那个例外：别的入口回首页）。
+			if ui.Button(c, "去登录").Clicked() {
+				s.goLogin(dynamicFeedPath)
+			}
 			return
 		}
 
