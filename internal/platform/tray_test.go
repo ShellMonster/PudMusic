@@ -7,14 +7,41 @@ import (
 	"testing"
 )
 
-// TestTraySupportedSkipsMacOS 钉住「macOS 上没有托盘」。
-//
-// 这是与 Biu 一致的地方（`biu/electron/main.ts` 把 createTray 整个包在
-// `process.platform !== "darwin"` 里），也是这个平台「隐藏之后怎么回来」的唯一
-// 答案：收进 Dock，点图标，不是托盘。谁哪天在 macOS 上顺手建了个托盘，这条会红。
-func TestTraySupportedSkipsMacOS(t *testing.T) {
-	if got, want := TraySupported(), runtime.GOOS != "darwin"; got != want {
-		t.Errorf("TraySupported() = %v，want %v（darwin 上不该有托盘）", got, want)
+// TestEveryPlatformHasATrayIcon 钉住三个平台都有托盘 / 菜单栏图标。
+func TestEveryPlatformHasATrayIcon(t *testing.T) {
+	if !TraySupported() {
+		t.Error("TraySupported() = false，三个平台都该有托盘 / 菜单栏图标")
+	}
+	b, tmpl := TrayIcon()
+	if len(b) == 0 || tmpl != (runtime.GOOS == "darwin") {
+		t.Errorf("TrayIcon() = %d 字节，模板=%v", len(b), tmpl)
+	}
+}
+
+// TestTheTemplateIconIsBlackAndTransparent 验模板图只有黑和透明：系统按菜单栏
+// 的明暗给它着色，带颜色的像素会被当成形状的一部分染掉。
+func TestTheTemplateIconIsBlackAndTransparent(t *testing.T) {
+	img, err := png.Decode(bytes.NewReader(TrayTemplatePNG()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := img.Bounds(); b.Dx() != 36 || b.Dy() != 36 {
+		t.Errorf("模板图是 %dx%d，want 36x36（菜单栏 18pt 的 Retina 尺寸）", b.Dx(), b.Dy())
+	}
+	opaque := 0
+	for y := 0; y < 36; y++ {
+		for x := 0; x < 36; x++ {
+			r, g, bl, a := img.At(x, y).RGBA()
+			if a > 0 {
+				opaque++
+				if r|g|bl != 0 {
+					t.Fatalf("(%d,%d) 不是黑色：%v", x, y, img.At(x, y))
+				}
+			}
+		}
+	}
+	if opaque < 80 || opaque > 36*36/2 {
+		t.Errorf("不透明像素 %d 个，图形不对（太空或太满）", opaque)
 	}
 }
 

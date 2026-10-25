@@ -1,5 +1,4 @@
-// 托盘图标和它的菜单（**只在 Windows / Linux 上有**，macOS 不建，见
-// `platform.TraySupported`）。
+// 托盘图标（macOS 是菜单栏图标）和它的菜单。
 //
 // 菜单项照 Biu 的 `electron/windows/tray.ts` 一条一条对：播放/暂停、上一曲、
 // 下一曲、显示/隐藏界面、分隔线、设置、退出程序。少一项就是「菜单项不齐」——
@@ -8,6 +7,7 @@ package ui
 
 import (
 	"log"
+	"runtime"
 
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/egoist/mygo"
@@ -18,17 +18,18 @@ import (
 // 建不出来只记日志不停下来：托盘是这个平台的「隐藏之后怎么回来」，但它不是
 // 「能不能起来」。因为一个图标建不出来就把整个应用卡在起不来的状态，是本末倒置。
 func (s *Shell) installTray() {
-	if !platform.TraySupported() {
-		return // macOS：收进 Dock，不是托盘（见 platform.TraySupported）
-	}
-	tray, err := platform.NewTray(platform.TrayIconPNG(), s.trayMenu())
+	icon, template := platform.TrayIcon()
+	tray, err := platform.NewTray(icon, template, s.trayMenu())
 	if err != nil {
 		log.Printf("biu: 托盘图标建不出来，隐藏之后只能再启动一个应用唤回来：%v", err)
 		return
 	}
 	s.tray = tray
 	// 左键点图标 = 显示/隐藏，和 Biu 一样（`tray.ts` 的 `tray.on("click")`）。
-	tray.OnClick(func() { s.toggleWindow() })
+	// macOS 上点图标直接弹菜单，菜单里有「显示/隐藏界面」，不另挂。
+	if platform.TraySupported() && runtime.GOOS != "darwin" {
+		tray.OnClick(func() { s.toggleWindow() })
+	}
 }
 
 // trayMenu 是托盘右键（Windows 上是左键）弹出的菜单。
