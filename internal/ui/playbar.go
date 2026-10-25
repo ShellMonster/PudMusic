@@ -447,6 +447,18 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 	title := tclean.Clean(st.Title).Title
 	if !st.HasTrack {
 		title = "还没有打开文件"
+		// 🔴 **冷启动那一句**（票 #478）：窗口开了、界面在那儿、就是没声音，
+		// 而「还没有打开文件」是**一句假话**——应用不是没有文件，它是在
+		// **等上一首**（冷启动恢复上次那一首时，那一趟还在取流）。
+		//
+		// 用户看到的是「我什么都没干，它怎么不动」——而他不知道自己在
+		// 等什么。这一句说的就是「还在准备」。
+		//
+		// ⚠️ **它只在启动那一段说**：应用准备好了之后，这一句收掉，
+		// 回到「还没有打开文件」——那时这句话是真的（用户确实没开过文件）。
+		if st.Starting {
+			title = "正在启动应用…"
+		}
 	}
 
 	// 🔴 **缝是 4**（上游那一列的 `space-y-1`）——理由和量法见 `trackRowGap`。
@@ -549,6 +561,11 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 // 🔴 **那枚转圈在这里，不在播放/暂停那一枚上**（票 #282 的评审）：取流这一趟
 // 里**上一首还在放**，把那一枚换成转圈的话用户就按不了暂停了。
 //
+// 🔴 **票 #271 又在播放键上**加了一层**光**（不是把这一枚换成转圈）：那一
+// 圈光绕着键转，说的是「**这一枚正在准备**」——按钮还在、还是播放 / 暂停、
+// 照样按得下。这一句说的是「**哪一首在准备、卡在哪一步**」，两者说的不是
+// 同一件事，所以都留（理由见 `loadhalo.go`）。
+//
 // # 🔴 **慢的时候换一句**（票 #220）
 //
 // 「正在取流：<歌名>」说的是「**在准备**」，而用户抱怨的是「**非常慢**」——
@@ -563,6 +580,11 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 // ⚠️ **完整那一句在悬停提示里**（和错误那一栏同一个做法）：那里说清
 // **卡在哪一步**（「问地址」/「下音频」/「解码」）和**等了多久**——那才是
 // 用户能据此判断「再等等」还是「换一首」的东西。
+//
+// 🔴 **这一句留着，而播放键上那圈光也留着**（票 #271）：两者说的不是同一
+// 件事——这一句是**说明**（哪一首、卡在哪一步、等了多久），光圈是**即时
+// 反馈**（余光就能看见「在准备」）。理由见 `loadhalo.go` 的「第三行那句话
+// 留着」那一节。
 func (s *Shell) viewTrackLoading(c *ui.Context, st app.State, t *ui.Theme) {
 	msg := "正在取流"
 	if st.LoadingSlow {
@@ -1121,15 +1143,24 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 		// 按不了暂停了（迷你窗和满屏播放器里还有，播放条上没有了）。
 		//
 		// 「正在取流」的那枚转圈在**第三行**（`viewTrackLoading`），不在这里。
+		//
+		// 🔴 **取流的时候它外面多绕一圈光**（票 #271）：那是**加**上去的，
+		// 不是替掉这一枚——按钮照旧是播放 / 暂停、照样按得下、提示照旧。
 		if st.Playing {
-			if s.withTip(c, iconButtonPlay(c, iconPauseFill, "暂停", iconHitPlay, iconPlayBtn, false), "暂停").Clicked() {
+			b := iconButtonPlay(c, iconPauseFill, "暂停", iconHitPlay, iconPlayBtn, false)
+			// ⚠️ **光圈只在这一枚不是灰的时候画**：框架对禁用的控件整个乘
+			// 0.5 不透明度（理由见 loadhalo.go）。
+			b = s.withLoadHalo(c, b, st, iconHitPlay, true)
+			if s.withTip(c, b, "暂停").Clicked() {
 				s.app.Toggle()
 			}
 		} else {
 			// ⚠️ **禁不启用由这里给**（`iconButtonPlay` 的 `disabled`）：那一枚的
 			// 颜色是**建元素时**定的，「悬停变主色」要在**禁用之后**才问——问早了
 			// 一枚禁用的键会用主色告诉用户「这里点得动」（理由见那个函数）。
-			if s.withTip(c, iconButtonPlay(c, iconPlayFill, "播放", iconHitPlay, iconPlayBtn, !st.HasTrack), "播放").Clicked() {
+			b := iconButtonPlay(c, iconPlayFill, "播放", iconHitPlay, iconPlayBtn, !st.HasTrack)
+			b = s.withLoadHalo(c, b, st, iconHitPlay, st.HasTrack)
+			if s.withTip(c, b, "播放").Clicked() {
 				s.app.Toggle()
 			}
 		}

@@ -302,6 +302,31 @@ func (c *Client) wbiKey(ctx context.Context) (string, error) {
 	return key, err
 }
 
+// WarmWBIKey 提前把签名密钥取回来。
+//
+// # 为什么要有它
+//
+// 密钥**只缓存在内存里**（两小时，见 `wbiKeyTTL`），所以**每一次冷启动，
+// 第一次签名请求都要多付一次 `nav` 往返**。而用户抱怨的正是「首次打开
+// 取流慢」——那多出来的一次往返正好落在「第一次点歌」的那一刻。
+//
+// 启动的时候在后台调它，那次往返就和「开窗口」并行了（票 #478 的
+// 「预热」）。
+//
+// # 它**不会**把并发取变成并发发
+//
+// `wbiKey` 按代次去重：已经在取的时候，后来的人**等**那一次，而不是
+// 各发各的（并发重取会直接撞上 -412 风控）。
+//
+// # 它**不改变**错误语义
+//
+// 取不到就返回那个错——而调用方（`StartWarmUp`）只记一条日志：
+// 真正要签名的时候 `wbiKey` 会自己再取一次。
+func (c *Client) WarmWBIKey(ctx context.Context) error {
+	_, err := c.wbiKey(ctx)
+	return err
+}
+
 // fetchWBIKey 发一次 nav 把两个 key 取回来。**锁外面调用。**
 func (c *Client) fetchWBIKey(ctx context.Context) (string, error) {
 	data, err := c.Do(ctx, Call{Method: "GET", URL: c.hostAPI + pathNav})

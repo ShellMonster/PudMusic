@@ -222,7 +222,13 @@ func (a *App) MountLogin(store Store, cli *bili.Client) {
 	acc.onAccountChanged = a.onAccountChanged
 	a.account = acc
 
-	if err := acc.restore(cli); err != nil {
+	// 🔴 **钥匙串那一段单独计时**（票 #478）：它可能是「**等人**」而不是
+	// 「慢」——macOS 会在应用还没有窗口的时候弹一个系统授权框，用户要点
+	// 一下才继续。那一段的时长是**用户点的**，不跟别的段混在一起说。
+	keychainStart := time.Now()
+	err := acc.restore(cli)
+	a.NoteKeychainRead(time.Since(keychainStart))
+	if err != nil {
 		log.Printf("biu: 读不回登录态，先按没登录处理：%v", err)
 	}
 }

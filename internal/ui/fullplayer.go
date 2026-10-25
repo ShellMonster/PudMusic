@@ -350,6 +350,12 @@ type fullPlayer struct {
 	// bgDraws 是这张画布被重画了几次。**给测试看的**：毛玻璃每帧重渲一遍就是
 	// 这里在涨（那在软件渲染上是 80~100 毫秒一帧）。
 	bgDraws int
+
+	// spin 是「封面在转」这一轮的状态（见 fullplayer_spin.go）。
+	//
+	// ⚠️ **它跟着 `fullPlayer` 一起复位**（`closeFullPlayer` 里的
+	// `s.full = fullPlayer{}`）：满屏关掉之后那一轮就结束了，下次打开从头转。
+	spin fullCoverSpin
 }
 
 // partRow 是分集列表里的一行。
@@ -953,9 +959,22 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 		box = box.Cursor(ui.CursorNone)
 	}
 	box.Children(func() {
-		imgcache.View(c, s.images, st.CoverURL, w, h).
+		// 共享元素转场的身份：**两处封面用的是同一个**（这里和播放条上那一张）。
+		id := coverIdentity(s, st)
+		cover := imgcache.View(c, s.images, st.CoverURL, w, h).
 			Label("当前封面").
-			Transition(coverTransition(coverIdentity(s, st)))
+			Transition(coverTransition(id))
+		// ⚠️ **封面在转**（见 fullplayer_spin.go）。
+		//
+		// 转的是**图片这一格**，不是外面那个盒子：盒子里面还有长按三连的进度环，
+		// 环画在封面外面一圈，跟着转会让那圈弧乱甩。
+		//
+		// ⚠️ **走的是 pose 那一档**（`AnimatePose`），不是 `Element.Rotate`：
+		// 后者是建的时候写死的变换，角度每帧都变就得每帧重建一遍整棵满屏播放器
+		//（那是票 #392 治的毛病）。理由见那个文件的头一段。
+		if pose, anim, ok := s.fullCoverSpinPose(c, st); ok {
+			cover = cover.AnimatePose(pose, anim)
+		}
 
 		// 长按 2.5 秒 = 一键三连。满屏上**没有**别的赞入口（照抄 Biu：它那边
 		// 满屏那张封面是 `pointer-events-none`，三连只在播放条上）——我们把这一层
@@ -1091,9 +1110,16 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 					if st.Playing {
 						glyph = iconPauseFill
 					}
-					if s.withTip(c, iconButtonPlay(c, glyph, transportLabel(st.Playing),
-						fullPlayHit, fullPlayGlyph, !st.Playing && !st.HasTrack),
-						transportLabel(st.Playing)).Clicked() {
+					// ⚠️ **这一枚禁用的时候不画光圈**（票 #271 / loadhalo.go）：
+					// 框架对禁用的控件整个乘 0.5 不透明度。
+					disabled := !st.Playing && !st.HasTrack
+					b := iconButtonPlay(c, glyph, transportLabel(st.Playing),
+						fullPlayHit, fullPlayGlyph, disabled)
+					// 🔴 **取流的时候它外面多绕一圈光**（票 #271）：满屏这一枚
+					// 是用户盯着等的地方（64×64 的实心圆），光圈比播放条那一枚
+					// 大一圈——它是**加**上去的，按钮照旧是播放 / 暂停。
+					b = s.withLoadHalo(c, b, st, fullPlayHit, !disabled)
+					if s.withTip(c, b, transportLabel(st.Playing)).Clicked() {
 						s.app.Toggle()
 					}
 					s.viewNextButtonOn(c, base)

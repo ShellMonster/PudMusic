@@ -416,6 +416,9 @@ func (s *StreamSource) restart() error {
 	if err := s.file.Truncate(0); err != nil {
 		return fmt.Errorf("audio: 清空在线流的缓存：%w", err)
 	}
+	// 🔴 **尾部那一段的记账也要清**：截断把已经取回来的末尾那一段
+	// **一起抹掉**了（见 `restartTail`）。
+	s.restartTail()
 	s.mu.Lock()
 	s.filled = 0
 	s.cond.Broadcast()

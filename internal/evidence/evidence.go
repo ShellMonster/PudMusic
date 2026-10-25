@@ -456,6 +456,71 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// 票 #478：「`moov` 盒在文件末尾」的那个容器层修法。
+		//
+		// 🔴 **这一族的错法全是「静默」的**：末尾那一段取错了偏移（解出来是
+		// 噪声）、`moov` 在前面时还去取（白花一条请求）、不是 MP4 的文件被
+		// 当成 MP4（把错的字节写进缓存）——**没有一样会报错**。
+		//
+		// ⚠️ **判据是「形状」不是「毫秒」**：主下载卡在 64 KB 而解码器开口了
+		// （它拿到的是并行取回来的那个 `moov`），而「等了多久」那种判据在满载
+		// 的机器上会飘（AGENTS.md §2）。
+		Spec: "moov 在文件末尾时并行取回末尾那一段，解码不用等整个文件下完",
+		Tests: []string{
+			// 盒子走法（手造每一种形状）。
+			"TestTheTopLevelWalkFindsTheTrailingMoov",
+			"TestTheTopLevelWalkFindsTheMoovAtTheFront",
+			"TestTheTopLevelWalkGivesUpOnTheOtherShapes",
+			"TestTheTopLevelWalkHandlesTheSixtyFourBitSize",
+			"TestTheTopLevelWalkOnTheRealFixtures",
+			// 源那一层：末尾那一段是并行取回来的，而 `moov` 在前面时不取。
+			"TestTheTrailingMoovIsFetchedInParallel",
+			"TestTheTrailingMoovIsNotFetchedWhenItIsAlreadyAtTheFront",
+			// 🔴 **盒子头在很后面时**：等必须是**阻塞**的——空转会把一个核占满
+			// （CPU 那半边要 `getrusage`，所以那一条带 `unix` 标签）。
+			"TestTheTailIsFetchedEvenWhenTheBoxHeaderIsFarAway",
+			"TestTheTailWaitBlocksInsteadOfSpinning",
+			// 整条链路：主下载没下完就能出声，而拿不到尾部时退回老样子。
+			"TestTheDecoderOpensBeforeTheWholeFileArrives",
+		},
+	},
+	{
+		Category: HTTP,
+		// 票 #478：「首次打开特有」——**什么缓存都还没有**那一项。
+		//
+		// WBI 签名密钥**只缓存在内存里**（两小时），所以**每一次冷启动，
+		// 第一次取流都要多付一次 `nav` 往返**——而那正是用户抱怨的
+		// 「首次打开取流慢」的那一刻。修法是启动时在后台先把它取回来。
+		//
+		// 🔴 **这一族有两条边**：服务层那一半（密钥取回来没有、缓存生效
+		// 没有）和应用层那一半（**真的会去调它**、**不挡事**）。
+		Spec: "冷启动时把 WBI 签名密钥预热起来（第一次取流就不用多付一次 nav 往返），预热失败不挡事",
+		Tests: []string{
+			"TestWarmWBIKeyFetchesTheKeyAheadOfTime",
+			"TestWarmWBIKeyDoesNotSendASecondRequestWhenTheKeyIsThere",
+			"TestWarmWBIKeySaysSoWhenItFails",
+			"TestTheWarmUpActuallyHappens",
+			"TestTheWarmUpDoesNotBlockTheCaller",
+			"TestTheWarmUpSurvivesAFailingNav",
+		},
+	},
+	{
+		Category: HTTP,
+		// 票 #478：冷启动那一段的分段计时。
+		//
+		// 🔴 **「慢」和「等人」必须分得开**：macOS 会在应用还没有窗口的时候弹
+		// 一个系统授权框，用户要点一下才继续——那一段的时长是**用户点的**，
+		// 不是我们慢。混进「冷启动一共多久」里，用户读到的是「应用慢」。
+		Spec: "冷启动分了段（零件挂好 / 应用就绪 / 首帧 / 第一次取流），钥匙串那一段单独一栏并说清是「等人」",
+		Tests: []string{
+			"TestTheStartupIsSplitIntoSegments",
+			"TestTheKeychainWaitIsNotCalledSlow",
+			"TestTheStartupEndsWhenTheFirstTrackSettles",
+			"TestTheStartupLineIsOnlyShownWhenThereIsNoTrack",
+		},
+	},
+	{
+		Category: HTTP,
 		// 音乐库（type=12 / sid）是**另一套接口、另一套档位编号**，连错误说明
 		// 那个字段都叫 `msg` 而不是 `message`。这一条钉的就是「形状别抄错」。
 		//
@@ -1393,6 +1458,11 @@ var Items = []Item{
 			"TestFriendlySaysTheFormatCannotBeDecoded",
 			"TestTheLogFileActuallyReceivesWhatIsLogged",
 			"TestTheLogFileIsAppendedTo",
+			// 票 #478：冷启动那一段界面上也有一句话（而「还没有打开文件」
+			// 在那一段是**一句假话**——应用不是没有文件，它是在等上一首）。
+			"TestTheStartupSaysItIsPreparing",
+			"TestTheStartupLineGoesAwayWhenTheAppIsReady",
+			"TestTheStartupLineIsNotShownWhenThereIsATrack",
 		},
 	},
 	{
@@ -2508,7 +2578,7 @@ var Items = []Item{
 		// ⚠️ **「进度条随窗口变长」断的是单调，不是某个像素数**：进度条该有多长
 		// 取决于窗口有多宽、也取决于右边那一组有多宽（音量收成图标之后它窄了
 		// 141），所以钉死一个数的话，改动右边任何一枚键都会把它顶红。
-		Spec: "播放条：进度条随窗口变长、三键是上一首·播放·下一首、播放键 48 像素、旋钮只在悬停或按下时画（键盘焦点上时也画）、填过的那一段平时是前景色、悬停/按下才变主色、音量收成图标加浮层（浮层里一根竖滑块和百分比，点图标静音、滚轮 ±0.05）、音量轨道填的是已经调上去的那一段、浮层走远了会自己收起、旋钮不探出滑块的框、按住时多一层更深的影子、浮层里的滑块不跟着百分比字数横向漂、三键落在窗口的竖直中轴上、中间那一列是 1:3:1、进度行占那一列的 3/4 且居中、三键之间的空隙是 24",
+		Spec: "播放条：进度条随窗口变长、三键是上一首·播放·下一首、播放键 48 像素、旋钮只在悬停或按下时画（键盘焦点上时也画）、填过的那一段平时是前景色、悬停/按下才变主色、音量收成图标加浮层（浮层里一根竖滑块和百分比，百分比和滑块居中对齐、字号放大时不折行，点图标静音、滚轮 ±0.05）、音量轨道填的是已经调上去的那一段、浮层走远了会自己收起、旋钮不探出滑块的框、按住时多一层更深的影子、浮层里的滑块不跟着百分比字数横向漂、三键落在窗口的竖直中轴上、中间那一列是 1:3:1、进度行占那一列的 3/4 且居中、三键之间的空隙是 24",
 		Tests: []string{
 			// 进度条：900 / 1200 / 1600 三档单调变长（**中间那档 1200 必须在**：
 			// 只断两端的话，「中间那一列不参与分配」这种坏法在两端看不出来）。
@@ -2554,6 +2624,10 @@ var Items = []Item{
 			"TestTheKnobGetsDeeperWhileHeld",
 			// 音量浮层里那根滑块**不跟着百分比的字数横向漂**（它就在指针底下）。
 			"TestTheVolumeSliderDoesNotDriftWithThePercentText",
+			// 浮层底下那个百分比**和那根竖滑块居中对齐**（票 #485：数字看着偏左）。
+			"TestTheVolumePercentSitsUnderTheSlider",
+			// 字号放大时那个百分比**不许折行**（「100」换行「%」既难看又撑高浮层）。
+			"TestTheVolumePercentDoesNotWrapAtBigTextScales",
 		},
 	},
 	{
@@ -3013,10 +3087,38 @@ var Items = []Item{
 		// ⚠️ **这一条不放在表末尾**：表末尾那处已经撞过好几回（这一轮就是
 		// 第三次），挨着上面那条「收藏夹头图区」读得顺——两条讲的都是
 		// 「头图区」。
-		Spec: "UP 空间头图区（设计规范 v0.1 §7.18，取代上游压黑蒙版 + 白字的做法）：横幅 132 高、底部淡进页面底色；头像 88 压在横幅下沿；名字、签名、统计写在**页面底色**上，字色用主题自己的字色，不再依赖头图是什么图",
+		//
+		// ⚠️ **票 #268（2026-10-25）把这一块按参考图重排了**：头图区不再
+		// 压黑蒙版、字不再压在照片上（票 #357 之后就是那一版），所以下面
+		// 那句 spec 记的是**现在这一版**的样子：横幅 132 高、头像 112 压在
+		// 横幅下沿、名字 / 签名 / 统计写在**页面底色**上。
+		Spec: "UP 空间头图区（设计规范 v0.1 §7.18，取代上游压黑蒙版 + 白字的做法）：横幅 132 高、底部淡进页面底色；头像 112 压在横幅下沿；名字、认证徽章、签名、统计写在**页面底色**上，字色用主题自己的字色，不再依赖头图是什么图",
 		Tests: []string{
-			// 头像 88、左右留白 32、头像压在横幅下沿。
-			"TestTheSpaceAvatarIs88AndTheHeaderPads32",
+			// 头像 112、左右留白 32、头像压在横幅下沿、昵称与徽章与签名的排布。
+			"TestTheSpaceAvatarIs112AndTheHeaderPads32",
+			"TestTheHeaderPutsTheNameTheBadgeAndTheSignInOneRow",
+			"TestTheFollowButtonIsAnOutlinedBox",
+			"TestTheHeaderShowsTheBadgeOnlyWhenThereIsOne",
+			// 「关注」那一枚**键盘走得到、回车按得动**（它换成了自绘的描边
+			// 方块，而自绘的那一版一开始用的是 `ui.Row`——那是个容器，
+			// Tab 走不到它）。
+			"TestTheFollowButtonIsKeyboardReachable",
+		},
+	},
+	{
+		// 票 #268（2026-10-25）：UP 空间的动态条目与稿件卡按 B 站 UP 主页
+		// 那张参考图重排。
+		//
+		// ⚠️ **静默的那几种错法都在这儿**：条目头一行的时间回到昵称右边
+		// （看着还是一行，只是顺序反了）、「赞」掉回下面那一排、稿件卡的封面
+		// 又变回方的——**没有一样会报错**，每一处都还是「能看」。
+		Category: Platform,
+		Spec:     "UP 空间的动态条目：左边头像 + 昵称，下面一行「时间 · 动作」，右边「赞 + 数」与「⋯」；稿件卡横排（封面 192×128 + 右下角时长角标，右边标题 / 描述 / 播放量），带圆角、描边和卡片底",
+		Tests: []string{
+			"TestTheDynamicItemPutsTheTimeUnderTheNameAndTheLikeOnTheRight",
+			"TestTheMoreMenuHoldsTheMusicActions",
+			"TestTheArchiveCardIsHorizontalWithADurationBadge",
+			"TestTheDynamicPaneCardAndCoverMatchUpstream",
 		},
 	},
 	{
