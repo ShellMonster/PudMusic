@@ -667,7 +667,11 @@ func (s *Shell) viewCollectionOwnerAvatar(c *ui.Context, face string, mid int64)
 		return
 	}
 	hit := ui.ButtonBase(c).Size(side, side).Padding(space.None).
-		Label(collectionOwnerAvatarLabel)
+		Label(collectionOwnerAvatarLabel).
+		// ⚠️ **角色是「按钮」**：框架的 `ui.ButtonBase` **不给角色**（只有
+		// `ui.Button` 给），而这一枚是这一票新加的按钮——辅助技术得念得出它是
+		// 一个按得动的东西。
+		Role(ui.RoleButton)
 	// ⚠️ hover 要在 Children **之前**问（理由同顶栏那个头像）。
 	hit = avatarHoverRing(c, hit, hit.Hovered(), side)
 	hit.Children(func() { draw("") })
