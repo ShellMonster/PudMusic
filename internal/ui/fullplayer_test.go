@@ -423,34 +423,29 @@ func TestEscapeClosesTheFullScreen(t *testing.T) {
 
 // ---- 频谱的开关 ----
 
-// TestTheSpectrumIsOffUntilTheUserTurnsItOn 断「默认是关的」。
-//
-// Biu 的 `defaultSettings.showSpectrum: false`。开着全屏什么开关都没碰的时候，
-// 频谱那个区域**压根不该存在**——不是「画了一片空」。
-func TestTheSpectrumIsOffUntilTheUserTurnsItOn(t *testing.T) {
+// TestTheSpectrumIsOnUntilTheUserTurnsItOff 断「默认是开的，用户可以关」。
+func TestTheSpectrumIsOnUntilTheUserTurnsItOff(t *testing.T) {
 	s, tt, _ := fullTester(t)
 	openFull(t, tt)
+	tt.Frame()
 
-	if _, ok := tt.Find("频谱"); ok {
-		t.Fatalf("没开开关频谱就画出来了")
+	if _, ok := tt.Find("频谱"); !ok {
+		t.Fatalf("默认没有频谱，文字有 %q", tt.Texts())
 	}
 	if err := tt.Click("全屏设置"); err != nil {
 		t.Fatalf("点不了偏好面板：%v（文字：%q）", err, tt.Texts())
 	}
 	tt.Frame()
-	// ⚠️ 点的是**开关**（命名是「开关：那一行的标题」），不是左边那行标题的
-	// 文字：后者是兄弟节点，点它什么也不会发生。
 	if err := tt.Click("开关：显示频谱图"); err != nil {
 		t.Fatalf("点不了频谱开关：%v（文字：%q）", err, tt.Texts())
 	}
 	tt.Frame()
 	tt.Frame()
-	if _, ok := tt.Find("频谱"); !ok {
-		t.Fatalf("开了开关频谱还是没有，文字有 %q", tt.Texts())
+	if _, ok := tt.Find("频谱"); ok {
+		t.Fatalf("关了开关频谱还在")
 	}
-	// 偏好也要存住：这一帧是全屏开着的那一帧，下一次开全屏还是得画。
-	if !s.app.FullPlayerPrefs().ShowSpectrum {
-		t.Error("偏好里没有记下频谱开着")
+	if s.app.FullPlayerPrefs().ShowSpectrum {
+		t.Error("偏好里没有记下频谱关着")
 	}
 }
 

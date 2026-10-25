@@ -46,8 +46,8 @@ const (
 type FullPlayerPrefs struct {
 	// ShowLyrics 歌词画不画。默认 **true**（Biu 的 `defaultSettings.showLyrics`）。
 	ShowLyrics bool `json:"showLyrics"`
-	// ShowSpectrum 频谱画不画。**默认 false**：Biu 的 `defaultSettings` 就是
-	// `showSpectrum: false`，用户得自己开。
+	// ShowSpectrum 频谱画不画。**默认 true**（和 Biu 的 `showSpectrum: false` 不同，
+	// 这是产品的取舍：播放页要有频谱）。
 	ShowSpectrum bool `json:"showSpectrum"`
 	// ShowCover 封面画不画。默认 **true**。
 	ShowCover bool `json:"showCover"`
@@ -76,7 +76,7 @@ type FullPlayerPrefs struct {
 func DefaultFullPlayerPrefs() FullPlayerPrefs {
 	return FullPlayerPrefs{
 		ShowLyrics:            true,
-		ShowSpectrum:          false,
+		ShowSpectrum:          true,
 		ShowCover:             true,
 		ShowBlurredBackground: true,
 	}

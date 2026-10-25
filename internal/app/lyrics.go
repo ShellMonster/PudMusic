@@ -258,6 +258,11 @@ func (a *App) loadLyrics(key string, gen int) {
 			return
 		}
 		a.lyricEntry = entry
+		if !ok {
+			if title, local := localLyricTitle(key); local {
+				defer a.autoSearchLyrics(key, title)
+			}
+		}
 		if ok {
 			a.lyricRows = rows
 			// 只有真的调过才盖回去。缓存里没这两个字段时（老记录、别的源写的）
@@ -455,10 +460,19 @@ func (a *App) fetchBiliSubtitle(ctx context.Context, it Item, ref *bili.StreamRe
 	a.mu.Unlock()
 
 	go func() {
+		if !a.fetchBiliSubtitleNow(ctx, it, key, cache, ref, s) {
+			a.autoSearchLyrics(key, it.Title)
+		}
+	}()
+}
+
+// fetchBiliSubtitleNow 去取 B 站字幕。返回 false 表示「没装上，该试试自动搜」。
+func (a *App) fetchBiliSubtitleNow(ctx context.Context, it Item, key string, cache *lyrics.Cache, ref *bili.StreamRef, s *Streaming) bool {
+	{
 		// 缓存里已经有词了就别再下载（理由见上面那一条）。
 		if cache != nil {
 			if e, ok := cache.Load(key); ok && strings.TrimSpace(e.Lyrics) != "" {
-				return
+				return true
 			}
 		}
 
@@ -475,13 +489,13 @@ func (a *App) fetchBiliSubtitle(ctx context.Context, it Item, ref *bili.StreamRe
 			u, err := s.Client.SubtitleURLs(ctx, it.SubtitleBvid, it.SubtitleCid)
 			if err != nil {
 				log.Printf("biu: 问不出这一首的字幕地址：%v", err)
-				return
+				return false
 			}
 			urls = u
 		}
 		if len(urls) == 0 {
 			// B 站没有给这一首字幕。**不是错误**：界面上照旧是「暂无歌词」。
-			return
+			return false
 		}
 
 		// ⚠️ **几个地址是一个一个试的**（见 `lyrics.FetchBiliSubtitle`）：B 站给
@@ -491,14 +505,15 @@ func (a *App) fetchBiliSubtitle(ctx context.Context, it Item, ref *bili.StreamRe
 		lines, err := lyrics.FetchBiliSubtitle(ctx, s.Media, urls)
 		if err != nil {
 			log.Printf("biu: B 站那份歌词拉不到：%v", err)
-			return
+			return false
 		}
 		lrc := lyrics.ToLRC(lines)
 		if strings.TrimSpace(lrc) == "" {
-			return
+			return false
 		}
 		a.installBiliLyrics(key, lrc)
-	}()
+		return true
+	}
 }
 
 // installBiliLyrics 把 B 站那一份装进状态并落盘。

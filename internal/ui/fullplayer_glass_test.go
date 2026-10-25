@@ -361,7 +361,10 @@ func TestTheProgressKnobStaysVisibleWhileDragging(t *testing.T) {
 // 这一层用的是本包自己的 `staticSwitch`（见 static_switch.go）：旋钮直接跳到新的
 // 位置。
 func TestTheSpectrumSwitchMovesItsKnobAtOnce(t *testing.T) {
-	_, tt, _ := fullTester(t)
+	s, tt, _ := fullTester(t)
+	off := s.app.FullPlayerPrefs()
+	off.ShowSpectrum = false
+	s.app.SetFullPlayerPrefs(off)
 	openFull(t, tt)
 	if err := tt.Click("全屏设置"); err != nil {
 		t.Fatalf("点不了偏好面板：%v（文字：%q）", err, tt.Texts())

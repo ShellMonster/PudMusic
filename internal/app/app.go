@@ -537,6 +537,8 @@ type App struct {
 	normalize bool
 	// loud 是本地文件的响度扫描结果缓存（见 loudness_scan.go）。
 	loud loudnessCache
+	// autoLyricTried 记着这次运行里已经自动找过歌词的歌（见 lyrics_auto.go）。
+	autoLyricTried map[string]bool
 
 	sleepAt         time.Time
 	sleepStop       func()
