@@ -376,6 +376,7 @@ const (
 	iconVideo         = "Media/video-line.svg"                  // 视频
 	iconHeadphone     = "Media/headphone-line.svg"              // 耳机
 	iconMovie         = "Media/movie-line.svg"                  // 影片
+	iconSleep         = "Weather/moon-line.svg"                 // 睡眠定时
 	iconEqualizer     = "Media/equalizer-line.svg"              // 正在放（跳动的波形）
 	iconStop          = "Media/stop-circle-line.svg"            // 停止
 	iconBell          = "Media/notification-line.svg"           // 通知
@@ -458,7 +459,7 @@ var iconNames = []string{
 	iconToTop, iconToTopLeft, iconToBottomLeft, iconDrag, iconFullscreenLine,
 
 	// 文件、媒体、其余
-	iconImageAdd, iconVideo, iconHeadphone, iconMovie, iconEqualizer,
+	iconImageAdd, iconVideo, iconHeadphone, iconMovie, iconEqualizer, iconSleep,
 	iconStop, iconBell, iconFileMusic, iconFileList, iconFileAdd,
 	iconFileSheet, iconDraft, iconDownloadLine, iconDownloadCloud,
 	iconShield, iconChecked, iconUnchecked, iconZoomIn, iconZoomOut,

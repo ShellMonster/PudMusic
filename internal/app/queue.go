@@ -1693,6 +1693,10 @@ func (a *App) onTrackFinished() {
 	if p == nil || !want {
 		return
 	}
+	if a.takeSleepAfterTrack() {
+		a.Stop()
+		return
+	}
 
 	d := a.queue.Advance()
 	// 🔴 **下一首开始了**：备好的那一份（不管成没成）到此为止。
