@@ -1086,6 +1086,32 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
+		// 图标键**只有一档配方**：悬停时图形变主色（上游 HeroUI 的
+		// `hover:text-primary`）。改之前顶栏那几枚、队列抽屉头那两枚、新歌速递的
+		// 翻页箭头走的是「只有淡底、图形不变色」那一档——同一个「图标键」在应用
+		// 里有两套画法，用户从一处移到另一处会觉得「这一枚不亮」。
+		//
+		// 顺带把队列抽屉行尾那枚「⋯」对齐到列表那一档：点击区 32×32（它原来
+		// 是 44×28，把歌名那一列截短了 12px）、无障碍名带上歌名（一屏 N 枚都叫
+		// 「这一首的操作」，读屏分不出是哪一行）。
+		//
+		// ⚠️ **满屏播放器那一行不在这一档里**：它的底是压暗过的封面，主色压在
+		// 上面只有 1.0:1（等于看不见）——那是另一票的事，钉在
+		// `TestTheFullPlayerRowKeepsItsOwnRecipe` 那一条上。
+		Spec: "图标键统一成一档：顶栏那几枚、队列抽屉头那两枚、抽屉行尾那枚「⋯」、新歌速递的翻页箭头，悬停时图形变主色；「⋯」的点击区是 32×32、无障碍名带上歌名；满屏播放器那一行不在这一档里",
+		Tests: []string{
+			"TestTheTopBarIconKeysTurnAccentOnHover",
+			"TestTheQueueDrawerHeaderKeysTurnAccentOnHover",
+			"TestTheQueueRowOperationKeyTurnsAccentOnHover",
+			"TestTheQueueRowOperationKeyIsNamedAfterItsSong",
+			"TestTheQueueRowOperationKeyIsThirtyTwoSquare",
+			"TestTheNewMusicPagerTurnsAccentOnHover",
+			"TestTheTopBarKeysKeepTheirTipsAndNames",
+			"TestTheFullPlayerRowKeepsItsOwnRecipe",
+		},
+	},
+	{
+		Category: Platform,
 		Spec:     "Windows 媒体会话与任务栏缩略图（**要 Windows 真机跑**）",
 		Tests: []string{
 			"TestThumbbarIsPrevPlayPauseNext",

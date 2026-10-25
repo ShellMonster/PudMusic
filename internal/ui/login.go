@@ -341,14 +341,14 @@ func qrHintColor(t *ui.Theme, phase app.LoginPhase) ui.Color {
 // 个低频次动作。**上游的顶栏右侧压根没有这么一枚按钮**（那边登录在头像下拉
 // 里），所以「实心主色」是我们自己加的强调，而它强调错了地方。
 //
-// 现在两态同形（`iconButton`，无底色，悬停时才变主色），**未登录 / 已登录
+// 现在两态同形（`iconKey`，无底色，**悬停时图形变主色**），**未登录 / 已登录
 // 只有图标不同**。
 //
 // ⚠️ **别把它改回实心主色**：主色留给「正在播放」那种方向标（DESIGN.md §四），
 // 而这一排的视觉重量由**图标**说话——这一枚曾经是那一排里最响的一个。
 func (s *Shell) viewLoginEntry(c *ui.Context) {
 	if s.app.LoggedIn() {
-		if s.withTip(c, iconButton(c, iconLogout, "退出登录", iconMd).
+		if s.withTip(c, iconKey(c, iconLogout, "退出登录", iconMd, false).
 			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "退出登录").Clicked() {
 			s.logoutAndStartOver()
 		}
@@ -358,9 +358,12 @@ func (s *Shell) viewLoginEntry(c *ui.Context) {
 	// （票 #242），18px 下它那几块方块糊成一块，16px 下还是分得开的，**墨迹和
 	// 左边那四枚线框图标同一档**（理由见 `icons.go` 的 `iconLoginSize`）。
 	//
-	// ⚠️ **这一枚和已登录那一支同形**（`iconButton`，无底色）——票 #241 /
+	// ⚠️ **这一枚和已登录那一支同形**（`iconKey`，无底色）——票 #241 /
 	// 报告 F-05 去掉的那块实心主色底，理由见上面那段。
-	if s.withTip(c, iconButton(c, iconLogin, "登录", iconLoginSize).
+	//
+	// ⚠️ **走 `iconKey`（悬停时图形变主色）**，不是 `iconButton`（票 #249）：顶栏
+	// 这一排统一成一档配方，理由见 `navbar.go` 的「打开文件」那一枚。
+	if s.withTip(c, iconKey(c, iconLogin, "登录", iconLoginSize, false).
 		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "登录 B 站账号").Clicked() {
 		s.goLogin()
 	}

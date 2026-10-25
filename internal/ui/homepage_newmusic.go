@@ -489,17 +489,26 @@ func (g *newMusicGrid) viewHeader(c *ui.Context, total int) {
 			// 页码就是它唯一的「位置」。
 			// 上游那两枚是 `variant="flat"` 的 `RiArrowLeftSLine` / `RiArrowRightSLine`
 			// 16（`new-music-top.tsx:185-199`）。图标键 + 悬停说出它做什么。
-			prev := g.tipWith(c, flatIconButton(c, iconSideCollapse, "上一页", 16).
-				Size(newMusicArrowW, newMusicArrowW).Padding(space.None, space.Px8).
-				Disabled(g.page <= 1), "上一页")
+			//
+			// ⚠️ **走 `iconKey`（悬停时图形变主色）**，不是 `iconButton`（票 #249）：
+			// 翻页是这一块唯一的交互，而原来那一档只有 8% 的淡底、图形不换色——
+			// 用户最需要在这里知道「还有下一页」的时候看不出来。
+			//
+			// 🔴 **禁用的状态走 `iconKey` 的 `disabled` 那一栏**（不能靠链上的
+			// `.Disabled(...)`）：悬停色是**建元素的时候**问的（`Hovered()`），而链式
+			// 调用是返回之后才把禁用设上去——问早了，一枚**禁用**的键会用主色告诉
+			// 用户「这里点得动」（票 #217 的评审查出来过同款的一条）。
+			prev := g.tipWith(c, iconKey(c, iconSideCollapse, "上一页", 16, g.page <= 1).
+				Size(newMusicArrowW, newMusicArrowW).Padding(space.None, space.Px8),
+				"上一页")
 			if prev.Clicked() {
 				g.page--
 			}
 			ui.Textf(c, "%d / %d", g.page, total).FontSize(scale.Font(c, scale.Size13)).Width(newMusicPageW).
 				TextAlign(ui.Center).TextColor(c.Theme().TextMuted)
-			next := g.tipWith(c, flatIconButton(c, iconSideExpand, "下一页", 16).
-				Size(newMusicArrowW, newMusicArrowW).Padding(space.None, space.Px8).
-				Disabled(g.page >= total), "下一页")
+			next := g.tipWith(c, iconKey(c, iconSideExpand, "下一页", 16, g.page >= total).
+				Size(newMusicArrowW, newMusicArrowW).Padding(space.None, space.Px8),
+				"下一页")
 			if next.Clicked() {
 				g.page++
 			}
