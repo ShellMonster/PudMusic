@@ -48,6 +48,7 @@ package ui
 import (
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
@@ -85,19 +86,25 @@ type sliderLook struct {
 	// `thumb: "bg-primary"` 正是这个。
 	face func(t *ui.Theme) ui.Color
 
-	// fill 是「填过的那一段」的**两档**颜色：不悬停的那一档、悬停/按下的那一档。
+	// fill 是「填过的那一段」的**三档**颜色：不悬停的那一档、悬停/按下的那一档、
+	// **禁用**的那一档。
 	//
 	// 上游 `music-play-progress/index.tsx:38`：
 	// `color={showThumb ? "primary" : "foreground"}`——**不悬停是前景色，悬停才
 	// 主色**（深色下那条绿杠于是变成一条白杠；上游那张截图实测 #ecedee）。
 	//
-	// ⚠️ **两档一样 = 一直是那个颜色**：满屏那根和音量那根是上游另外两个组件，
-	// 填过的那一段一直是一个颜色（理由见各自那处的注释）。
-	fill func(t *ui.Theme) (idle, hot ui.Color)
+	// ⚠️ **两档一样 = 一直是那个颜色**：音量那根是上游的另一个组件，填过的那一段
+	// 一直是一个颜色（理由见它那处的注释）。满屏那根和播放条那根都拆了。
+	//
+	// ⚠️ **禁用是单独的一档**（票 #248）：禁用的滑块**不能拖**，而主色在这一屏
+	// 上是「点得动」的信号（满屏那枚实心播放键就是主色）——一根不能拖的进度条
+	// 不该是主色的。播放条那根的禁用档和平时那一档一样（`t.Text`），满屏那根
+	// 换成**轨道色**（那一段和轨道一个样，看不出来）。
+	fill func(t *ui.Theme) (idle, hot, off ui.Color)
 }
 
-// knobFullLook 是满屏播放器那根的样子：轨道 6 像素、旋钮只在悬停或按下时画，
-// 旋钮是白的。
+// knobFullLook 是满屏播放器那根的样子：轨道 6 像素（悬停 / 按下 8 像素）、旋钮
+// 只在悬停或按下时画，旋钮是白的。
 //
 // 轨道 6 照上游满屏那一行传下去的 `trackClassName="h-[6px]"`；「只在悬停或按下
 // 时画」照 `music-play-progress` 的 `hideThumb={!showThumb}`——一颗一直亮着的
@@ -108,27 +115,39 @@ type sliderLook struct {
 //
 // 尺寸照框架的 `coreSlider` 抄（`mygo/ui/widgets.go`）：旋钮 `t.Space(5)` ×
 // `t.Space(4)`、元素高 `t.Space(5)`、最小宽 `t.Space(20)`。
-var knobFullLook = sliderLook{
-	trackW:       6,
-	knobW:        20,
-	knobH:        16,
-	knobWhenIdle: false,
-	face: func(t *ui.Theme) ui.Color {
-		if t.Dark {
-			return ui.RGB(224, 225, 225)
-		}
-		return ui.RGB(255, 255, 255)
-	},
-	// ⚠️ **这一根一直是主色，不拆两档**：满屏的底永远是糊过的封面加一层 55% 的
-	// 黑（`fullplayer.go` 的 `fullScrim`），而这一根的旋钮是**白的**——前景色
-	// （浅色下近黑）压在那上面根本看不见，浅色主题下更是一条黑杠。
-	//
-	// 上游满屏那一条进度是 `full-screen-player/index.tsx:291-400` 里的另一套
-	// markup，而 BMG-124 那份对比报告**只量了播放条那一条**（满屏那一条没有
-	// 像素取证）——所以这一根按「一直是主色」留着，票 #218 只动播放条。
-	fill: func(t *ui.Theme) (ui.Color, ui.Color) {
-		return t.Accent, t.Accent
-	},
+//
+// # idle / base 是**这一行自己的**两样
+//
+//   - idle 是填过的那一段**平时**的颜色：满屏那一行给的是这一行的**第二档**
+//     前景色（白 62%，和两个时间读数同一档）——
+//     ⚠️ **不能给最亮的那一档**（白 92%）：旋钮是白的，而它**只在悬停或按下
+//     时画**，两者只差 11 个通道——那颗白旋钮就埋进填过的那一段里了。
+//   - base 是这一行坐着的那块底（压暗过的封面）：悬停那一档主色按它算。
+//
+// ⚠️ **主色那一档按 base 算，不按 `t.Accent` 算**：这一行的底是深底，而主色
+// 当**字色**用时要按底算才读得出来（浅色主题下按页面白底算出来的那一档是深绿
+// `#107032`，压在这上面只有 1.0:1，票 #248）。
+func knobFullLook(idle, base ui.Color) sliderLook {
+	return sliderLook{
+		trackW:       6,
+		hotTrackW:    8,
+		knobW:        20,
+		knobH:        16,
+		knobWhenIdle: false,
+		face: func(t *ui.Theme) ui.Color {
+			if t.Dark {
+				return ui.RGB(224, 225, 225)
+			}
+			return ui.RGB(255, 255, 255)
+		},
+		// 平时是那一行的前景色，悬停 / 按下才主色（照播放条那根，票 #218），
+		// 禁用是**轨道色**——那一档和轨道一个样，于是那一段看不出来（票 #248：
+		// 一根不能拖的进度条不该是主色的，而这一屏上「主色 = 可交互」的信号
+		// 正是那枚实心播放键）。
+		fill: func(t *ui.Theme) (ui.Color, ui.Color, ui.Color) {
+			return idle, ink.AccentOnBase(t, base, ink.GraphicContrast), t.Border
+		},
+	}
 }
 
 // knobHoverLook 是播放条那根的样子：轨道 4 像素，旋钮只在悬停或按下时画。
@@ -155,8 +174,8 @@ var knobHoverLook = sliderLook{
 	// `hideThumb`，而我们这边「旋钮只在悬停或按下时画」也是同一个条件
 	// （见 `knobWanted`）。所以这一档和旋钮出不出来是一致的，不会出现
 	// 「旋钮是主色而那一段是前景色」那种自相矛盾的画面。
-	fill: func(t *ui.Theme) (ui.Color, ui.Color) {
-		return t.Text, t.Accent
+	fill: func(t *ui.Theme) (ui.Color, ui.Color, ui.Color) {
+		return t.Text, t.Accent, t.Text
 	},
 }
 
@@ -186,17 +205,20 @@ var knobMiniVolumeLook = sliderLook{
 		return ui.RGB(255, 255, 255)
 	},
 	// 平时次要色，悬停 / 按下才主色（理由见上面那段）。
-	fill: func(t *ui.Theme) (ui.Color, ui.Color) {
-		return t.TextMuted, t.Accent
+	fill: func(t *ui.Theme) (ui.Color, ui.Color, ui.Color) {
+		return t.TextMuted, t.Accent, t.TextMuted
 	},
 }
 
 // knobSlider 造一根旋钮按住也看得见的滑块（满屏播放器那条进度）。
 //
+// look 是这一根的样子——满屏那根的颜色按**那一行自己的色**和**那一行坐着的底**
+// 算（`knobFullLook`），所以它得由调用方给。
+//
 // 出来的那个元素照旧可以 `.Grow(1)` / `.Label(…)` / `.Disabled(…)`。
-func knobSlider(c *ui.Context, value *float64, lo, hi float64) ui.Element {
+func knobSlider(c *ui.Context, value *float64, lo, hi float64, look sliderLook) ui.Element {
 	t := c.Theme()
-	return selfSlider(c, value, lo, hi, knobFullLook).
+	return selfSlider(c, value, lo, hi, look).
 		Height(t.Space(5)).MinWidth(t.Space(20))
 }
 
@@ -266,24 +288,27 @@ func selfSlider(c *ui.Context, value *float64, lo, hi float64, look sliderLook) 
 	heat := sl.Animate(fillHeatKey, hotTarget, 150*time.Millisecond)
 
 	face := look.face(t)
-	idleFill, hotFill := look.fill(t)
+	idleFill, hotFill, offFill := look.fill(t)
 
 	sl.Draw(func(p *ui.Painter, r ui.Rect) {
 		var track ui.Rect
 		var cx, cy float32 // 旋钮的中心
 
-		// 🔴 **填过的那一段的两档颜色**（票 #218）：平时前景色、悬停/按下才主色。
+		// 🔴 **填过的那一段的三档颜色**（票 #218 / #248）：平时前景色、悬停/按下
+		// 才主色、**禁用**时是中性色。
 		//
 		// ⚠️ **禁用的滑块不算「热」**：`.Disabled(…)` 是调用方在 `selfSlider` 返回
 		// **之后**才设上的（`playbar.go` 的 `viewProgress`），所以**建**的时候
 		// 问不出「禁用」，而**画**的时候问得出（框架的 `Hovered()` 里有
 		// `if e.IsDisabled() { return false }`）。禁用的滑块没有旋钮（`knobWanted`
-		// 那一处），那一段也就不该是主色。
+		// 那一处），那一段也就不该是主色——满屏那根的主色是那一屏上「点得动」的
+		// 信号（那枚实心播放键），一根**不能拖**的进度条不该是主色的（票 #248）。
 		hot := heat
+		fill := idleFill.Mix(hotFill, hot)
 		if sl.IsDisabled() {
 			hot = 0
+			fill = offFill
 		}
-		fill := idleFill.Mix(hotFill, hot)
 		trackW := look.trackW
 		if look.hotTrackW > 0 {
 			trackW += (look.hotTrackW - look.trackW) * hot
