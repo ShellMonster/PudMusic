@@ -583,6 +583,9 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme) {
 	// 落点先清掉：**每一行自己记**（见下面 viewQueueRow 里那几句
 	// PointerPosition），指针不在任何一行上时它就该是「没有落点」。
 	s.queueDropAt = -1
+	// 「有东西正被拖着」这一帧的结论也先清掉：**每一行自己报**（见下面
+	// viewQueueRow 里那一句 Dragging）——它是「这一行是不是拖动源」。
+	s.queueDraggingNow = false
 
 	e := ui.List(c, &s.queueList, len(rows), func(i int) {
 		s.viewQueueRow(c, rows[i], i, t)
@@ -595,22 +598,30 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme) {
 	// 这一列是**拖动的落点**（框架把落点交给指针底下最里层那个肯收拖动值的
 	// 元素——行里的封面、字、⋯ 都不收，所以收到的是这一列）。
 	//
-	// ⚠️ **问一次，不要每行问一次**：框架那两样（Drop / DragOver）每问一次都
-	// 要新建一个闭包（那个闭包要抓住类型），而队列抽屉一屏有十来行——每行每帧
-	// 问一次就是每帧二十几次分配（见 framebudget_test.go，那一档的上限是 50
-	// 次）。问一次是两次（这里两行），问每一行就是二十六次。
+	// ⚠️ **只问 Drop，不问 DragOver**：框架那两样（Drop / DragOver）每问一次
+	// 都要新建一个闭包（那个闭包要抓住类型，见 mygo/ui/dragdrop.go 的
+	// coreDrop），而队列抽屉一屏有十来行——每行每帧问一次就是每帧二十几次
+	// 分配（见 framebudget_test.go，那一档的上限是 43 次）。
+	//
+	// ⚠️ **问一次，不要每行问一次**：问这一列是两次（这里两行），问每一行就是
+	// 二十六次。
 	//
 	// ⚠️ **Drop 读到的是「刚刚落下」那一次**：这一句在列表建完之后才问，而框架
 	// 是在建列表的过程中把落点交给这一列的——问得晚一帧没关系，落下那一次
 	// 记在元素的状态里，下一帧还在。
+	//
+	// ⚠️ **Drop 不能省**：问它的那一句同时把这一列**登记成收拖动值的元素**
+	// （`accepts` + `flagValueDrop`）——框架是照着这个登记找落点的，不登记的话
+	// 松手时压根找不到这一列。
 	if v, ok := ui.Drop[*queueDragValue](e); ok {
 		s.queueDrop(v)
 	}
 	// 有东西正被拖着经过这一列：拖着的时候要画那条插入线。
-	s.queueDragging = false
-	if _, ok := ui.DragOver[*queueDragValue](e); ok {
-		s.queueDragging = true
-	}
+	//
+	// ⚠️ **这一句是「上一帧」的结论**（插入线在建行的时候画，而这一帧的结论
+	// 要等列表建完才知道）——差一帧看不出来，理由见 shell.go 里
+	// queueDragging 那一条。
+	s.queueDragging = s.queueDraggingNow
 }
 
 // currentRow 是「正在放的那一首」在抽屉里的行号，没有是 -1。
@@ -704,6 +715,13 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 	// reorder）：行还在原处，而跟着指针走的是另一份拷贝。
 	if rowEl.Dragging() {
 		rowEl = rowEl.Opacity(0.4)
+		// 这一行就是**拖动源** → 「有东西正被拖着」。
+		//
+		// ⚠️ **用这一句顶掉框架的 DragOver**：DragOver 每问一次都要新建一个
+		// 闭包（每帧一次分配），而这一句本来就在问（上面那句 `Dragging()` 是
+		// 画半透明要的），拿它报「正被拖着」不花钱。差一帧看不出来——插入线晚
+		// 一帧出现，而拖动本来就不是一帧的事（见 shell.go 里 queueDragging）。
+		s.queueDraggingNow = true
 	}
 	// 指针在这一行上吗？落点就记在这儿。
 	//
