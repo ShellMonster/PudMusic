@@ -9,6 +9,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
@@ -1282,15 +1283,25 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 // ⚠️ **内边距跟着图形走**：命中区恒是 32，而 22 的图标要每边 5 才放得下；
 // 还留着 7 的话内容框只剩 18，那枚图形自己就被裁掉 4 像素（而**界面上看不出坏了**
 // ——它只是小了一圈）。
-func (s *Shell) viewPrevButton(c *ui.Context) {
-	if s.withTip(c, iconKey(c, iconPrev, "上一首", iconSkip, !s.app.CanPrev()).
+//
+// # 满屏播放器那一行用的是**另一个入口**
+//
+// `viewPrevButtonOn` / `viewNextButtonOn` / `viewPlayModeOn` 是同一枚键，**按给定
+// 的底**算悬停反馈：满屏那一行坐着的是压暗过的封面，而按页面白底算出来的那一
+// 档主色压在那上面等于看不见（票 #248）。
+func (s *Shell) viewPrevButton(c *ui.Context) { s.viewPrevButtonOn(c, flat.ThemeBase) }
+
+func (s *Shell) viewPrevButtonOn(c *ui.Context, base flat.Base) {
+	if s.withTip(c, iconKeyOnBase(c, iconPrev, "上一首", iconSkip, !s.app.CanPrev(), base).
 		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px5), "上一首").Clicked() {
 		s.app.Prev()
 	}
 }
 
-func (s *Shell) viewNextButton(c *ui.Context) {
-	if s.withTip(c, iconKey(c, iconNext, "下一首", iconSkip, !s.app.CanNext()).
+func (s *Shell) viewNextButton(c *ui.Context) { s.viewNextButtonOn(c, flat.ThemeBase) }
+
+func (s *Shell) viewNextButtonOn(c *ui.Context, base flat.Base) {
+	if s.withTip(c, iconKeyOnBase(c, iconNext, "下一首", iconSkip, !s.app.CanNext(), base).
 		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px5), "下一首").Clicked() {
 		s.app.Next()
 	}
@@ -1308,10 +1319,19 @@ func (s *Shell) viewNextButton(c *ui.Context) {
 // 摆在哪儿：右边那一组的**头一个**（`viewPlayBarRight`，照
 // `playbar/right/index.tsx:14`）。原来它摆在进度那一行的最右边，那是右边摆不下
 // 时借中间那一列的富余（票 #104）；上游本来就在右边这一组。
+//
+// # 满屏播放器那一行用的是**另一个入口**
+//
+// `viewPlayModeOn` 是同一枚键，**按给定的底**算悬停反馈：满屏那一行坐着的是压暗
+// 过的封面，而按页面白底算出来的那一档主色压在那上面等于看不见（票 #248）。
 func (s *Shell) viewPlayMode(c *ui.Context, st app.State) {
+	s.viewPlayModeOn(c, st, flat.ThemeBase)
+}
+
+func (s *Shell) viewPlayModeOn(c *ui.Context, st app.State, base flat.Base) {
 	// 四档各配一个图标（Biu 的 `getPlayModeList`，逐个照它的 `icon` 那一项），
 	// 悬停那句话仍然报的是**当前这一档**。
-	btn := s.withTip(c, iconKey(c, playModeIcon(st.PlayMode), "播放模式", iconMd, false).
+	btn := s.withTip(c, iconKeyOnBase(c, playModeIcon(st.PlayMode), "播放模式", iconMd, false, base).
 		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
 		st.PlayMode.Label()+"："+st.PlayMode.Desc()+"（点一下换，右键看全部）")
 

@@ -35,6 +35,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
@@ -246,6 +247,35 @@ func (s *Shell) fullBackground(c *ui.Context) ui.Color {
 		}
 	}
 	return c.Theme().Background
+}
+
+// fullRowBase 是**底下那一行**（进度 + 播放模式 / 上下首 / 播放 / 队列）坐着的那
+// 块底——这一行的每一个悬停反馈都按它算（票 #248）。
+//
+// # 虚化背景关着：底是**确切**的那一块
+//
+// 用户挑的那个颜色（空串 = 主题底色）。这一层没有模糊、没有压暗，屏幕上就是它。
+//
+// # 虚化背景开着：底是糊过的封面压一层 55% 的黑
+//
+// 而**封面的颜色随歌变**——框架的 `ui.Bitmap` 造出来之后像素就读不回来了
+// （`widgets/imgcache` 的文件头写着这件事：取主色、做模糊占位都得在
+// `DecodeBitmap` 之前做完），所以这里**取最亮的那一档**：纯白的封面压完那层黑
+// 是 255×0.45 = 115（`#737373`）。
+//
+// ⚠️ **取「最亮」而不是「平均」是故意的**：按它算出来的那一档悬停色，在**任何
+// 一档封面上**都读得出来（最亮的那一档是判据）；按平均算的话，一张纯白的封面
+// 就会让悬停色算成深绿——那正是这个票要修的那个 bug。
+//
+// ⚠️ **这一行是**满屏**里唯一按底算悬停反馈的地方**：顶栏那两枚（关闭 / 齿轮）
+// 坐在同一块底上，但它们的淡底还是按主题正文色算的（那是另一张票的事，票面写
+// 着「满屏播放器那一行」）。
+func (s *Shell) fullRowBase(c *ui.Context) ui.Color {
+	if !s.app.FullPlayerPrefs().ShowBlurredBackground {
+		return s.fullBackground(c)
+	}
+	// 糊过的封面（最亮 = 纯白）压一层 55% 的黑。
+	return fullScrim.Over(ui.Color{R: 255, G: 255, B: 255, A: 255})
 }
 
 // colorLuminance 是 WCAG 的相对亮度（0 = 黑，1 = 白）。
@@ -1032,16 +1062,26 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 			// `t.Text` 是黑的，模式/上下首/队列那四枚会一起消失在背景里。
 			// 哪一档配哪一张由 `transportIcon` / `playModeIcon` 说了算，这一行
 			// 不自己决定（守卫盯着）。
+			//
+			// ⚠️ **这一行每一枚的悬停反馈都按 `base` 算**（票 #248）：这一行的底
+			// 是**压暗过的封面**，而按页面白底算出来的那一档（主色当字色那一档、
+			// 悬停铺的那层淡底）压在那上面等于**看不见**——浅色主题下指针一停上
+			// 去，那几个图标反而消失（深绿压深底 1.0:1）。
+			base := flat.BaseOf(s.fullRowBase(c))
 			ui.Row(c).FillWidth().TextColor(on).Gap(space.Px16).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
-				s.viewPlayMode(c, st)
+				s.viewPlayModeOn(c, st, base)
 				ui.Row(c).Gap(space.Px24).AlignItems(ui.Center).Children(func() {
-					s.viewPrevButton(c)
+					s.viewPrevButtonOn(c, base)
 					// 提示走 tooltip.go（时延照上游），不是框架那枚固定的 600ms。
 					//
 					// 满屏上这一枚和播放条上是同一枚实心强调色圆（规范 §5：64×64，图形 28）。
 					// 实心圆的底是强调色、字是 `AccentText`，压在糊过的封面上也读得出来——
 					// 旧的「悬停变主色」那一档按应用底色算，在封面上会掉到 1.0:1，所以旧版
 					// 才特意不走 `iconButtonPlay`；现在这一枚自己带底，没有那个问题。
+					//
+					// ⚠️ **这一枚不许跟着这一行改**（票 #248 明写）：它自己带 64×64 的
+					// 实心主色圆，压在糊过的封面上读得出来——它是这一屏上唯一「主色 =
+					// 可交互」的那枚信号。
 					glyph := iconPlayFill
 					if st.Playing {
 						glyph = iconPauseFill
@@ -1051,10 +1091,15 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 						transportLabel(st.Playing)).Clicked() {
 						s.app.Toggle()
 					}
-					s.viewNextButton(c)
+					s.viewNextButtonOn(c, base)
 				})
 				// 同一处：队列开关的提示也走 tooltip.go。
-				if s.withTip(c, iconButton(c, iconQueue, "播放列表", iconMd).
+				//
+				// ⚠️ **它也是图标键**（和播放条上那一枚同一档）：以前这里用的是
+				// `iconButton`（只有一层淡底、没有「悬停变主色」），于是同一个
+				// 「播放列表开关」在两个界面上是两种反应——而这里那一层淡底按主题
+				// 正文色算，浅色主题下还是 8% 的黑压在暗底上，等于没有。
+				if s.withTip(c, iconKeyOnBase(c, iconQueue, "播放列表", iconMd, false, base).
 					Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), drawerTip(s.drawerOpen)).Clicked() {
 					s.drawerOpen = !s.drawerOpen
 				}
@@ -1072,12 +1117,25 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 // ⚠️ 滑块**不是** `ui.Slider`，是 `knobSlider`（见 knobslider.go）：框架那一颗
 // 旋钮被按住时会褪成一片黑边透镜，在满屏这种永远深着的底上等于消失——用户
 // 按住旋钮拖，旋钮反而不见了。
+//
+// # 这一行的三档颜色都按**这一行自己的**来算（票 #248）
+//
+//   - 平时填过的那一段 = 这一行的**第二档**前景色（白 62%，和两个时间读数同一档）；
+//   - 悬停 / 按下 = 主色，按这一行坐着的那块底算（`ink.AccentOnBase`）；
+//   - **禁用**（没歌 / 不知道时长）= 轨道色（`t.Border`）——一根**不能拖**的
+//     进度条不该是主色的，而这一屏上「主色 = 可交互」的信号正是那枚实心播放键。
+//
+// ⚠️ **平时那一档不是最亮的那一档**：旋钮是**白的**，而它**只在悬停或按下时
+// 画**——填过的那一段要是也是白 92%，那颗白旋钮就埋在里面了（差 11 个通道，
+// 只剩影子能看出那儿有个东西）。用这一行的第二档（白 62%）就分得开，而且
+// 悬停那一档（主色）比它**亮**——「悬停让这一段更显眼」，不是更不显眼。
 func (s *Shell) viewFullProgress(c *ui.Context, st app.State, dim ui.Color) {
 	known := st.Duration > 0
 	ui.Row(c).FillWidth().Gap(space.Px10).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, scale.Size12)).TextColor(dim).
 			MinWidth(48).MaxLines(1)
-		sl := knobSlider(c, &s.fullScrub, 0, 1).Grow(1).Label("全屏播放进度").Disabled(!known)
+		sl := knobSlider(c, &s.fullScrub, 0, 1, knobFullLook(dim, s.fullRowBase(c))).
+			Grow(1).Label("全屏播放进度").Disabled(!known)
 		switch held := sl.Pressed(); {
 		case held && !s.fullHeld:
 			s.fullHeld = true
