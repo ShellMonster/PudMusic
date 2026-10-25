@@ -23,6 +23,11 @@
 // 不是三个列表各自那句「这里还没有歌」——那句话只说这一屏是空的，没说怎么
 // 才能不空，而 `routes` 表里这一条两句话都在。
 //
+// 🔴 **三档是三个翻页列表**（`list.PagedList`，票 #370）：滚到底自动拉下一段，
+// 一直滑一直有（到 B 站没有更多为止），末尾那一行说「没有更多了」。翻页那一套
+// （防重入、取消、旧结果作废、容器没填满自动续拉）**在那一层里**，界面层不
+// 另写一份。
+//
 // ## 「正在加载」那一格什么时候才出现（票 #368）
 //
 // **只有屏幕上真的没内容可画的时候**。切到一档而它还在拉的时候，画面上留着
@@ -52,6 +57,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -88,8 +94,12 @@ const homePopTab = 2
 
 // homeSongs 是首页这一屏要画的两摊歌。
 //
-// 歌是 `homePage.feed` 拉回来的（见 homepage_feed.go），外部塞进来的走
-// `SetSongs`（测试和还没接上的环境用）。
+// ⚠️ **它是「外面塞进来的一批歌」的格式，不是这一屏此刻的状态**：真正在画面上
+// 的是三个 `list.PagedList` 自己手里那一份（翻页往尾部追加），而这一份只在
+// `SetSongs` 那一刻被搬进那三个列表；新歌速递那一摊则是这一份管着的。
+//
+// 歌是拉回来的（取数那一摊在 homepage_feed.go），外部塞进来的走 `SetSongs`
+// （测试和还没接上的环境用）。
 type homeSongs struct {
 	// tabs 是三个 Tab 各自的推荐单，下标对着 homeTabs。
 	tabs [homeTabCount][]list.Music
@@ -106,23 +116,22 @@ type homePage struct {
 	// acts 是这一屏会做的操作：双击、右键菜单、点一下新歌速递的那一格。
 	acts list.Actions
 
-	// lists 是三个 Tab 各自的列表。**滚动位置就跟着这三个对象走**，见文件头
-	// 下面「切 Tab 的滚动位置」那一段。
+	// lists 是三个 Tab 各自的**翻页列表**。**滚动位置就跟着这三个对象走**，见
+	// 文件头下面「切 Tab 的滚动位置」那一段。
 	//
-	// ⚠️ 是 `SwitchView` 而不是 `list.List`：设置里的「数据显示样式」要能在
-	// 网格 / 紧凑 / 列表之间换，而网格那一档是另一个控件（`widgets/list/switch.go`
-	// 顶上写明了为什么不是让 `List` 自己画）。三个 Tab 各有一份，切档时
-	// **每个 Tab 各自记着自己停在哪**。
-	lists [homeTabCount]*list.SwitchView
+	// ⚠️ 是 `list.PagedList` 而不是 `list.List`：滚到底要自动拉下一段（票 #370），
+	// 而那一套（防重入、取消、旧结果作废、容器没填满自动续拉）就在这一层里，
+	// 别在界面层另写一套。
+	//
+	// ⚠️ **每个 Tab 各有一份**，所以「切回某个 Tab 还在它原来的位置」是天然的
+	// （每一份的滚动位置跟着它自己那个 `ui.ListState` 走）——理由见文件末尾
+	// 那一段。
+	lists [homeTabCount]*list.PagedList
 
 	// newGrid 是新歌速递那一块横向网格，见 homepage_newmusic.go。
 	newGrid *newMusicGrid
 
-	// songs 是这一屏要画的歌，由 SetSongs 换。三个列表和那一块网格都读它。
-	songs homeSongs
-
-	// feed 是四摊取数的状态（三个 Tab + 新歌速递）和那个信箱，见
-	// homepage_feed.go。
+	// feed 是新歌速递那一摊的取数状态和那个信箱，见 homepage_feed.go。
 	feed homeFeed
 
 	// loads 是「去拉」的那几个活儿（接线在 Shell 那一层，见 homepage_feed.go
@@ -176,25 +185,32 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 	// 而重试要能重新拉那一摊。
 	h.newGrid.SetRetry(func() { h.retryNew() })
 	for i := range h.lists {
-		l := list.NewSwitchView(cache, acts)
-		// 空状态**不在这里说**：一句都没接上时是**这一页**的空状态（routes 表里
-		// `/` 那一条，见 viewHome）。让三个列表都说一遍自己那句「这里还没有歌」，
-		// 叠在那一页的空状态上就是两句话在讲同一件事。
-		l.SetEmpty("")
+		l := list.NewPaged(cache, acts, h.tabFetcher(i))
 		// 播放量那一列：首页三个 Tab 的接口都带着它（`RecommendItem.View`）。
 		//
 		// ⚠️ **投稿时间不画**：上游首页自己就是 `hidePubTime`
 		// （`pages/music-recommend/list.tsx:49` 与 `:60`），而它那一层的
 		// `RecommendItem` 也没把 `pubdate` 带上来——照它。
 		l.SetColumns(list.Columns{PlayCount: true})
-		// ⚠️ **这里不挂 `ScrollState`**：给一个 `List` 挂上它会和它自己按行记的
-		// 位置**打架**——TrackScroll 每一帧按那个像素数把容器摆过去，而
-		// `ui.ListState` 记的是「第几行 + 那一行离顶多远」，两个数换算的那一帧里
-		// 锚点会被拽偏。实测：同一个列表滚到第 19 首、切走再切回来，挂上
-		// ScrollState 时回到第 6 首（Y 从 1200 变成 359）。
+		// 「没有更多了」那一行（票 #370 的验收第 2 条）：别的页到底了就是到底了，
+		// 而这一屏要说得清——不然用户只看到列表停在半截。
+		l.SetEndView(homeEndRow)
+		// ⚠️ **失败不另说一句**：这一屏自己有一整块失败态（一句人话 + 一个重试
+		// 按钮），再说一遍是噪音，而那一句还带着 B 站的原始码。
+		l.SetFailureNotice(false)
+		// ⚠️ **三档落在不同的位置上**（票 #368 的内容块按档分了 key，见
+		// homepage_transition.go 的 `homeBodyKeys`）：框架把滚动状态记在**元素的
+		// 位置**上，而同一个位置轮流画的几份列表会**抢同一份**——切回「音乐」
+		// 会落到第 6 首而不是它原来的第 19 首（实测）。
 		//
-		// 「回顶按钮」要的「滚过多少像素」不靠它：列表那一档的行高是**定死的 64**，
-		// 「顶上那一行是第几行 × 64」就是滚过的像素数（`list.List.ScrollOffset`）。
+		// 🔴 **不挂 ScrollState**（`list.PagedList.SetScrollState`）：挂着的时候
+		// 滚动位置由它记，而它记的是「元素那个位置」的——于是上一档留下的偏移
+		// 会拽走这一档（同一件事的另一面，见上面那一条）。
+		//
+		// 不挂它，那三档就各自按**自己的行锚点**记位置（`ui.ListState`，框架
+		// 本来就是按行记的）——而回顶那一枚的偏移改按行换算（列表那一档的行高
+		// 是定死的 64，差不到一行）。
+		l.SetScrollState(false)
 		h.lists[i] = l
 	}
 
@@ -216,17 +232,29 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 	return h
 }
 
+// homeEndRow 是末尾「没有更多了」那一行。
+//
+// ⚠️ **它画在列表里面**（末尾那一行就是哨兵那一行），所以它跟着列表一起滚——
+// 停在列表的最下面，而不是浮在窗上。
+func homeEndRow(c *ui.Context) {
+	t := c.Theme()
+	ui.Row(c).AlignSelf(ui.Stretch).Center().Padding(space.Px8).Children(func() {
+		ui.Text(c, list.EndLabel).FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
+	})
+}
+
 // SetSongs 换掉首页这一屏的歌。三个 Tab 的列表和新歌速递那一块一起换。
 //
 // ⚠️ **不碰滚动位置**：滚动是那一屏的事，换歌不该把用户推回顶上。`list.List`
 // 自己的 `SetSongs` 也是这个规矩——行身份跟着 ID 走（铁律四），用户盯着的那一
-// 首还是那一首。重新拉一个 Tab 的第一页时该推回顶上，那一条留给接接口的那一
-// 张（`List.ScrollTo(0, ui.Start)` 一句就够，见 widgets/list 的 List.ScrollTo）。
+// 首还是那一首。
+//
+// ⚠️ **翻页那一层由它自己管**（`list.PagedList`）：装进去的这一批算「第一页」，
+// 而「后面还有没有」由它下一次拉页说了算。
 //
 // ⚠️ 只能由界面线程调（就是跑 view 的那个线程）：它改的正是 view 每帧读的那份
 // 状态，后台投递结果回来之后要落地也得靠 `ui.Services.Invalidate()` 先叫醒界面。
 func (h *homePage) SetSongs(songs homeSongs) {
-	h.songs = songs
 	for i, l := range h.lists {
 		l.SetSongs(songs.tabs[i])
 	}
@@ -287,15 +315,27 @@ func (s *Shell) syncHome(c *ui.Context) {
 		l.SetView(view)
 	}
 
+	// 🔴 **只同步选中那一档**：另外两档等用户切过去再拉（那一档的 Sync 会
+	// 替它拉第一页）。
+	//
+	// ⚠️ **这一句必须在画之前**：画的时候读到的是 `PagedList.Paged()`，而那是
+	// **收完后台结果之后**的数——晚一步的话，这一帧画的是上一帧的状态（第一帧
+	// 是「正在加载」，而其实歌已经回来了）。
+	//
+	// ⚠️ **选中那一档不一定画在画面上**（票 #368：切过去而它还在拉的时候，
+	// 画面上留着上一档）——但**它得有人收结果、有人起第一拉**，所以同步的是
+	// 它，而画出来的那一档由它自己的 `View` 同步（见 `PagedList.view`）。
+	h.lists[h.tab].Sync(c)
+
 	// 算「要换到哪一档」和「它到了没有」。
 	//
 	// ⚠️ **这一层算，不在 view 里算**（票 #238 的评审指出来的）：sync 层跑在
 	// view 之前，而框架把点中的下标写在**画 Tab 那一排**的时候（tabs.go）——
-	// 所以此刻 `h.tab` 已经是用户刚点的那一档（上一帧写下的），而 `pull()`
-	// （也在这一层）**刚把那一档的请求发了出去**（`loadingOf` 为真）。
+	// 所以此刻 `h.tab` 已经是用户刚点的那一档（上一帧写下的），而**上面那一句
+	// `Sync`** 刚把那一档的请求发了出去（`tabPending` 于是看得见「还在拉」）。
 	//
 	// **「切到一档而它还在拉」就是在这儿认出来的**：在 view 里认的话，那一帧
-	// 的请求**还没发出去**（`loadingOf` 还是假），于是会以为「它已经有着落了」
+	// 的请求**还没发出去**（还在拉还是假），于是会以为「它已经有着落了」
 	// 而立刻换过去——而换过去之后，屏幕上就是「正在加载 XXX 推荐」那一格
 	//（票 #368 明令不许出现的）。
 	//
@@ -330,6 +370,10 @@ func (h *homePage) view(c *ui.Context, s *Shell) {
 		AlignItems(ui.Stretch).Children(func() {
 		h.viewTabs(c, s)
 
+		// ⚠️ **内容是单独一个元素**（`viewBody`，票 #368）：切 Tab 时它整个换掉，
+		// 框架靠这个认出「旧的退了、新的进了」，于是有过渡；而它换的是**画面上
+		// 那一档**（`h.shown`），不一定是选中那一档（`h.tab`）——选中那一档还在
+		// 拉的时候，画面上留着上一档的内容（见 `syncShown`）。
 		h.viewBody(c, s)
 	})
 }
@@ -387,17 +431,19 @@ func (h *homePage) viewPopTop(c *ui.Context, tab int) {
 // 于是他永远不会去点那个本该在那儿的「重试」——而 B 站的风控、断网、
 // 登录态过期全都会走到那一支。
 //
+// ⚠️ **状态是翻页列表自己说的**（`list.PagedList.Paged()`）：拉页、防重入、
+// 取消都在那一层里，而这一层只管「此刻画面上该是什么样子」。
+//
 // ⚠️ **tab 是「画面上画的是哪一档」，不一定等于选中那一档**（票 #368）：选中那
 // 一档还在拉的时候，画面上画的是上一档（见 `syncSwap`）——所以这一段里
 // 列表、表头、滚动条、回顶按钮**全都按 tab 取**，不能按 `h.tab` 取。
 func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
-	songs := h.songs.tabs[tab]
-	err := h.feed.stateOf(tab).err
+	pg := h.lists[tab].Paged()
 	switch {
-	case err != nil && len(songs) == 0:
-		// ⚠️ `len(songs) == 0` 那一半：手上已经有歌的时候不画失败（那会把
-		// 用户正在看的一屏换成一句错）。首页每档只拉一次，所以「有歌又失败」
-		// 只可能出现在一次失败的重试之后。
+	case pg.Err != nil && pg.Loaded == 0:
+		// ⚠️ `pg.Loaded == 0` 那一半：手上已经有歌的时候不画失败（那会把
+		// 用户正在看的一屏换成一句错）。第一页失败之后「已经有歌」是不可能的，
+		// 而后面那些页失败时失败的是**那一页**（末尾那一行有它自己的重试）。
 		//
 		// 用共用的 `viewLoadError`（不是 `viewEmpty` 的一个空状态），理由在
 		// empty.go 那一段：失败必须有重试按钮，而且不能被「暂无内容」盖住。
@@ -408,8 +454,8 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		h.viewPopTop(c, tab)
 
 		s.viewLoadError(c, "home:fail:"+homeTabs[tab], homeTabs[tab]+"推荐", "重试加载"+homeTabs[tab]+"推荐",
-			err, func() { h.retryTab(tab) })
-	case err == nil && h.feed.loadingOf(tab) && len(songs) == 0:
+			pg.Err, func() { h.retryTab(tab) })
+	case pg.Loading && pg.Loaded == 0:
 		// ⚠️ 走**共用**的那一格（`drawLoading`）：上游首页那一屏也是
 		// `h-[40vh]` 那一格里的转圈（`src/pages/music-recommend/index.tsx:319`），
 		// 而这一票把其余几页也统一成那一格（票 #178，见 `loading.go`）。
@@ -421,8 +467,7 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// ⚠️ **顶图先画**（理由同上面那一支）。
 		h.viewPopTop(c, tab)
 		drawLoading(c, "home:loading", "正在加载"+homeTabs[tab]+"推荐")
-
-	case len(songs) == 0:
+	case pg.Loaded == 0:
 		// ⚠️ 走 `viewEmpty`（`routes` 表里 `/` 那一条，出处和其余 13 条写在
 		// 一起），不是让 `list.List` 说它自己那句「这里还没有歌」：那句只说
 		// 这一屏是空的，那一页的两句话连着说了「为什么空」和「怎么才能不空」。
@@ -443,25 +488,14 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		h.lists[tab].View(c)
 		s.noteScrollbar(h.lists[tab].Hot())
 
-		// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见
+		// 「回到顶部」那一枚**由画着的那一档自己画**（`list.PagedList` 里面那
+		// 一份 `BackToTop`）：滚过 400 像素才出现，浮在整窗右下（上游的数，见
 		// `widgets/list` 的 `BackToTop`）。
 		//
-		// ⚠️ **给的是当前这一档的那一份位置**（`ScrollOffset`）：给错了的话按钮会在
-		// 没滚过的页面上冒出来。
-		list.BackToTop(c, h.lists[tab].ScrollOffset(), h.scrollTop)
+		// ⚠️ **别在这里再画一枚**：画出来的那一枚给的是「这一档」的数，而三档
+		// 一起画的话按钮就是三枚。按它回的是**画面上画着那一档**自己的位置
+		// （见 `PagedList.ScrollTop`）——这正好是票面要的那一条。
 	}
-}
-
-// scrollTop 回到顶上。
-//
-// ⚠️ **回的是列表自己的行锚点**（`ListState.ScrollTo`）：这一页的位置由三个
-// `ListState` 各自记着（见文件末尾「切 Tab 的滚动位置」那一段），而回顶按钮的
-// 位置是**按行算**出来的（`ScrollOffset`）——不用另有一份像素要归零。
-//
-// ⚠️ **回的是「画面上那一档」**（`h.shown`），不是选中那一档（票 #368）：画面上
-// 画的是哪一档，滚的就是哪一档——屏幕上滚动的那个列表和回顶按钮得是同一个。
-func (h *homePage) scrollTop() {
-	h.lists[h.shown].ScrollTo(0, ui.Start)
 }
 
 // viewTabs 画那三个 Tab 和「全部播放」。
@@ -504,11 +538,15 @@ func (h *homePage) viewTabs(c *ui.Context, s *Shell) {
 
 		// 「全部播放」：这一档的歌（**当前这一档 Tab 的**，不是三个 Tab 加起来）。
 		//
-		// ⚠️ **禁用的条件和搜索页那一枚一样**：正在装这一档，或者这一档一首都
-		// 没有时不让按（上游那一枚也是这个条件，`video-list/search-header.tsx:55`）。
-		songs := h.songs.tabs[h.tab]
-		if playAllButton(c, h.feed.loadingOf(h.tab) || len(songs) == 0).Clicked() {
-			s.playAllSongs(songs)
+		// ⚠️ **禁用的条件**：一首都没有的时候不让按（上游那一枚也是这个条件，
+		// `video-list/search-header.tsx:55`）。而**正在往下拉的那一页不关它**——
+		// 手上已经有歌了就能放，用户不必等这一页回来。
+		pg := h.lists[h.tab].Paged()
+		if playAllButton(c, pg.Loaded == 0).Clicked() {
+			// ⚠️ **歌是按下去那一刻才取的**：`PagedList.Items()` 是一份拷贝，
+			// 每帧取一次就是每帧一次大分配（而这一屏有逐帧分配的预算，见
+			// `framebudget_test.go`）。
+			s.playAllSongs(h.lists[h.tab].Items())
 		}
 	})
 }
@@ -519,26 +557,42 @@ func (h *homePage) viewTabs(c *ui.Context, s *Shell) {
 //
 // 「切回某个 Tab 时它还在原来的位置」是这么来的，**没有一行存-取-还的代码**：
 //
-// 每个 Tab 一个 `list.List`，滚动位置就跟着那一个对象走。`ui.ListState` 把
-// 「顶上那一行是第几行、它离列表顶多远、每一行量出来多高」全记在它自己的字段里
-// （`mygo/ui/list.go` 的 ListState：「The place: the first row in view, and how
-// far the list is scrolled past its top」），而它由 `list.List` 自己拿着。切 Tab
-// 时换掉的只是「画哪一个 `*list.List`」，用户看到的就回到那一屏。
+// 每个 Tab 一个翻页列表（`list.PagedList`），滚动位置就跟着那一个对象走。
+// `ui.ListState` 把「顶上那一行是第几行、它离列表顶多远、每一行量出来多高」全记
+// 在它自己的字段里（`mygo/ui/list.go` 的 ListState：「The place: the first row in
+// view, and how far the list is scrolled past its top」），而它由底下那个
+// `list.List` 自己拿着。切 Tab 时换掉的只是「画哪一个列表」，用户看到的就回到
+// 那一屏。
 //
-// 为什么不能三个 Tab 共用一个 `list.List`：那样切回时同一个 `ui.ListState` 里
-// 顶上那一行是**另一个 Tab 的第几行**，而顶上那首歌会随换 Tab 换掉——用户滚到
-// 第 17 首、切去「鬼畜」、再切回来，看到的是「鬼畜」的第 17 首，或者干脆回到
-// 顶上。`TestSwitchingBackRestoresThatTabsScrollPosition` 钉的就是这一条。
+// 为什么不能三个 Tab 共用一个列表：那样切回时同一个 `ui.ListState` 里顶上那一行
+// 是**另一个 Tab 的第几行**，而顶上那首歌会随换 Tab 换掉——用户滚到第 17 首、
+// 切去「鬼畜」、再切回来，看到的是「鬼畜」的第 17 首，或者干脆回到顶上。
+// `TestSwitchingBackRestoresThatTabsScrollPosition` 钉的就是这一条。
+//
+// ⚠️ **换成翻页列表没有动这一条**：三个 Tab 仍然是三个各记各的列表（换的是
+// 列表**外面**那一层：翻页、防重入、取消），而滚动位置住在**列表里面**那个
+// `ui.ListState` 上——换外面那一层不换里面那一个。
 //
 // ⚠️ **别拿 `ui.ScrollState` 去「存像素、切回来再 ScrollTo 回去」**：那是在已经
 // 记对了的锚点上抢方向盘。实测过一次——三个列表各挂一个 `ScrollState`
 // （`List.SetScroll`），滚到第 19 首（Y=1200）、切走再切回来，Y 变成 359，顶上
 // 那首变成第 6 首：TrackScroll 按像素把容器摆过去，`ListState` 按行把锚点算回
-// 去，两个数换算的那一帧里锚点被拽偏了。不挂 `ScrollState`（`newHomePage` 里
-// 特意不调 `SetScroll`）同一个用例一次就过。
+// 去，两个数换算的那一帧里锚点被拽偏了。
 //
-// 真要按像素对外说（**回顶按钮**判断「滚过 400 像素没有」），**也别挂
-// `ScrollState`**——挂了就撞上上面那一条。列表那一档的行高是**定死的 64**，
-// 所以「顶上那一行是第几行 × 64」就是滚过的像素数，一个不差（见
-// `list.List.ScrollOffset`）。网格那一档的行高跟着内容走，那一档是**估**的
-// （见 `list.Grid.ScrollOffset`）。
+// 🔴 **而这一页那三档偏偏都不挂 ScrollState**（`list.PagedList.SetScrollState`）：
+// 挂上它的时候滚动位置由它记，而它记的是「**元素那个位置**」的——于是上一档
+// 留下的偏移会拽走这一档（实测：切回「音乐」落到第 6 首而不是它原来的第 19 首）。
+// 不挂它，三档就各自按**自己的行锚点**记位置（`ui.ListState`，框架本来就是按行
+// 记的）——互不干扰。
+//
+// ⚠️ **三档落在不同的元素位置上**（票 #368 的内容块按档分了 key，见
+// `homepage_transition.go` 的 `homeBodyKeys`）：框架把滚动状态记在**元素的位置**
+// 上，而同一个位置轮流画的几份列表会**抢同一份**。这一条是上面那条的前提——
+// 两档抢同一份的话，不挂 ScrollState 也一样会被拽走。
+//
+// ⚠️ **代价是回顶那一枚的偏移改按行换算**（列表那一档的行高是定死的 64，
+// 所以差不到一行；网格那一档是估的，见 `list.Grid.ScrollOffset`）。而这一页
+// 的列表**够长**（一直往下滑一直有），所以「滚过 400 像素」这个门槛滚得到。
+//
+// 真要按像素对外说（**回顶按钮**判断「滚过 400 像素没有」），**读那一档自己的
+// 那一份**——`list.PagedList` 里的回顶按钮就是这么画的。

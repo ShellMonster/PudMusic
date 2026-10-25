@@ -369,7 +369,7 @@ func (h *homePage) viewBody(c *ui.Context, s *Shell) {
 		// ⚠️ **状态要在画之前递过去**：它那三态是它**画的时候**读的，而它在
 		// 布局那一遍才画（列表的行是布局时建的）——递晚了那一帧画出来的是旧状态。
 		if tab == homePopTab {
-			h.newGrid.SetStatus(h.feed.loadingOf(homeNewMusic), h.feed.newTab.err)
+			h.newGrid.SetStatus(h.feed.newTab.loading, h.feed.newTab.err)
 		}
 
 		h.viewTabBody(c, s, tab)
@@ -390,5 +390,10 @@ func (h *homePage) viewBody(c *ui.Context, s *Shell) {
 // 加载」**（`homepage_newmusic.go` 的三态）——用户看得见**哪一块在等**。
 func (h *homePage) tabPending(tab int) bool {
 	// 这一档的歌还在拉，而手上还没有歌。
-	return h.feed.loadingOf(tab) && len(h.songs.tabs[tab]) == 0
+	//
+	// ⚠️ **状态是翻页列表自己说的**（`list.PagedList.Paged()`）：三档的内容在
+	// 各自的翻页列表里（票 #370），而「还在拉」和「拉到了但是空的」在那一层
+	// 里分得最清。
+	pg := h.lists[tab].Paged()
+	return pg.Loading && pg.Loaded == 0
 }
