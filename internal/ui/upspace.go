@@ -763,6 +763,20 @@ func (sp *upSpace) follow(yes bool) {
 //
 // ⚠️ **加号那一枚是 `iconAdd`**（`System/add-line.svg`），和上游的
 // `RiAddLine size={18}` 同一个图形。
+//
+// # 🔴 它必须是 `ui.ButtonBase`，不能是 `ui.Row`
+//
+// `ui.ButtonBase` 才有 `Focusable()`（`mygo/ui/base.go:25-29`）：**Tab 走得到
+// 它、回车 / 空格按得动它**，读屏也当它是按钮（`mygo/ui/access.go:174`：
+// clickable + focusable 才是 `RoleButton`）。
+//
+// ⚠️ **`ui.Row` 只是一个容器**：`Clicked()` 只设 `flagClickable`（不设
+// `flagFocusable`），于是 Tab **跳过**它、回车按不动、读屏只当它是「容器里
+// 的一段字」——鼠标点得动，键盘用户完全够不着（票 #453 修的正是这一类断口，
+// 见 `sidebar_focus_test.go` 的文件头）。
+//
+// 改之前这一枚是 `ui.PrimaryButton`（框架的按钮），键盘是走得到的——这一版
+// 换成描边方块的时候**不能把那份可达性一起丢掉**。
 func (s *Shell) spaceFollowButton(c *ui.Context, following bool) ui.Element {
 	t := c.Theme()
 	label := "关注"
@@ -774,7 +788,10 @@ func (s *Shell) spaceFollowButton(c *ui.Context, following bool) ui.Element {
 	// ⚠️ **悬停 / 按下的反馈走 `flat.Feel`**：它压的是一层半透明的前景色，
 	// 而这一枚自己有描边（不是「无描边按钮」那一族），所以不能直接用
 	// `flat.Button`——那一份把描边也去掉了。
-	box := ui.Row(c).Key("space-follow").Gap(space.Px4).AlignItems(ui.Center).
+	//
+	// ⚠️ **`flat.Feel` 不影响焦点**：它只是往元素上挂一个画的时候跑的
+	// `DrawOver`（`widgets/flat/flat.go:426-435`），标志一个都不动。
+	box := ui.ButtonBase(c).Key("space-follow").Gap(space.Px4).AlignItems(ui.Center).
 		Padding(space.Px6, space.Px12).Radius(t.Radius).
 		Border(1, t.Border).Background(t.Background)
 	box = flat.Feel(c, box)

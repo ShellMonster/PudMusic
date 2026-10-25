@@ -314,7 +314,14 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic, selected, ring bo
 // （上游的 `textContent` 是 `desc?.text || opus?.summary?.text`，投稿动态的
 // `desc.text` 通常是空的）。
 func dynBodyRepeatsCard(d bili.Dynamic) bool {
-	return d.Kind == bili.DynamicVideo && d.Video != nil && d.Text != "" && d.Text == d.Video.Desc
+	if d.Kind != bili.DynamicVideo || d.Video == nil || d.Text == "" {
+		return false
+	}
+	// ⚠️ **两边都要去空白才能比**：`bili` 那一层给 `Video.Desc` 的是**原样**
+	// （`a.Desc.String()`），而 `Dynamic.Text` 是**去空白**的
+	// （`strings.TrimSpace(...)`）——拿原样去比，简介后面多一个空格或换行
+	// 时判据就是假的，同一句话照样画两遍（这一处要消掉的正是那个重复）。
+	return d.Text == strings.TrimSpace(d.Video.Desc)
 }
 
 // viewDynamicActions 是条目**右上角**那一组：赞 + 数，和「⋯」。
@@ -367,6 +374,18 @@ const dynMoreLabel = "这条动态的更多操作"
 // ⚠️ **开着的是哪一条记在 `Shell.dynMenuFor`**（不是「第几行」）：动态是往
 // 尾部追加的，而刷新时新动态会插到**前面**——记行号的话，用户盯着的那一格
 // 菜单会突然跑到别的条目上去。
+//
+// # ⚠️ 菜单**只能用鼠标打开**
+//
+// 条目在**列表的一行里**，而框架的列表把回车留给「选中那一行」
+// （`mygo/ui/list.go:1190` 的 `o.Shortcut(0, KeyEnter)`）——那一行里的按钮
+// **按回车没有反应**（实测：焦点停在「⋯」上，回车之后菜单没开；「赞」那一枚
+// 同样按回车没反应）。作者名是唯一的例外：它是 `RoleLink`，走的是另一条路
+// （`flat.Link` 给它 `Role(ui.RoleLink)`）。
+//
+// ⚠️ **这不是这一票引入的**：改之前这一行里的「赞」「下一首播放」「下载音频」
+// 同样按回车没反应（基线实测：赞数不变、队列没变）。收进菜单只是把「看得见
+// 但按不动」变成「看不见也按不动」——**功能上没有进一步变差**。
 func (s *Shell) viewDynamicMore(c *ui.Context, d bili.Dynamic) {
 	btn := flatIconButton(c, iconMore, dynMoreLabel, 16)
 	if btn.Clicked() {

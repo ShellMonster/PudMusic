@@ -108,7 +108,7 @@ const (
 	//	深色：0.5×(1-x) ≤ 0.465 → x ≥ 0.069 → 取 0.15（同上）
 	//
 	// 92% 的白（`OnScrim` 那一档）压在同样的底上还有 4.80:1 / 4.73:1，
-	// 也够（算法见 `internal/ui/upspace.go` 的 `upHeaderTextDim`）。
+	// 也够（那一档白是 `scrim.OnScrim` 自己）。
 	HeaderTextLight = 0.40
 	HeaderTextDark  = 0.15
 )

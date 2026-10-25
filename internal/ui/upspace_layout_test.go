@@ -10,6 +10,8 @@ package ui
 import (
 	"net/http"
 	"testing"
+
+	mygoui "github.com/egoist/mygo/ui"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -166,6 +168,70 @@ func TestTheMoreMenuHoldsTheMusicActions(t *testing.T) {
 	// 「赞」不在菜单里——它留在外面。
 	if tt.HasText("赞 12") && countExactText(tt, "赞 12") != 1 {
 		t.Errorf("「赞」既在外面又在菜单里，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheFollowButtonIsKeyboardReachable 断「关注」那一枚**键盘走得到、回车
+// 按得动**。
+//
+// ⚠️ **这一条是回归**：这一版把它从 `ui.PrimaryButton` 换成了自绘的描边方块，
+// 而自绘的那一版一开始用的是 `ui.Row`——`ui.Row` 只是一个容器（`Clicked()`
+// 只设 `flagClickable`、不设 `flagFocusable`），于是 Tab **跳过**它、回车按
+// 不动，读屏也只当它是「容器里的一段字」。改之前（`ui.PrimaryButton`）键盘
+// 是走得到的——这一版不能把那份可达性一起丢掉（票 #453 修的正是这一类断口）。
+func TestTheFollowButtonIsKeyboardReachable(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "要点关注的 UP", 0, 1)
+	s, tt, _ := newSpaceShell(t, b, true, "77")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+
+	// Tab 走到「关注」上（这一页能拿焦点的东西不止一个，所以多按几下）。
+	found := false
+	for range 40 {
+		tt.Key(0, mygoui.KeyTab)
+		tt.Frame()
+		if tt.Focused("关注") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("按了 40 次 Tab 也没走到「关注」上——键盘用户够不着它")
+	}
+	// 回车按下去：关系该变成「已关注」。
+	tt.Key(0, mygoui.KeyEnter)
+	tt.Frame()
+	waitFor(t, "关系变成已关注", func() bool {
+		return sp.header.Snapshot().Relation.Followed()
+	})
+	tt.Frame()
+	if !showsText(tt, "已关注") {
+		t.Errorf("键盘按下去之后按钮没变成「已关注」，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheArchiveDescriptionIsNotSaidTwice 钉住「那一句话只说一遍」。
+//
+// 我们这一版的投稿动态在**正文空的时候用简介顶上**（`bili` 那层，票 #344 的
+// 判据要靠它），而参考图上那一句简介是**画在稿件卡里**的——正文那一行照画
+// 就是同一句话说两遍。
+//
+// ⚠️ **判据两边都要去空白才能比**：`bili` 给 `Video.Desc` 的是**原样**，而
+// `Dynamic.Text` 是**去空白**的——简介后面多一个空格时，拿原样去比就判不出
+// 「是同一句话」，那句话于是画两遍（这一处要消掉的正是那个重复）。
+func TestTheArchiveDescriptionIsNotSaidTwice(t *testing.T) {
+	item := uiDynamicArchive("v1", "BV1play")
+	// 简介后面多一个空格（B 站真会给带空格的简介）。
+	arch := item["modules"].(map[string]any)["module_dynamic"].(map[string]any)["major"].(map[string]any)["archive"].(map[string]any)
+	arch["desc"] = "投稿简介 "
+
+	_, tt, _ := dynamicCardShell(t, newUIExplore(t), item)
+
+	// 「投稿简介」与「投稿简介 」是同一句话：加起来只该有一处。
+	n := countExactText(tt, "投稿简介") + countExactText(tt, "投稿简介 ")
+	if n != 1 {
+		t.Errorf("那一句话在画面上出现了 %d 次，want 1（正文那一行与稿件卡里那一行是同一句）", n)
 	}
 }
 

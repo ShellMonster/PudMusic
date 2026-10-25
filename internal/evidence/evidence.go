@@ -3000,6 +3000,10 @@ var Items = []Item{
 			"TestTheHeaderPutsTheNameTheBadgeAndTheSignInOneRow",
 			"TestTheFollowButtonIsAnOutlinedBox",
 			"TestTheHeaderShowsTheBadgeOnlyWhenThereIsOne",
+			// 「关注」那一枚**键盘走得到、回车按得动**（它换成了自绘的描边
+			// 方块，而自绘的那一版一开始用的是 `ui.Row`——那是个容器，
+			// Tab 走不到它）。
+			"TestTheFollowButtonIsKeyboardReachable",
 		},
 	},
 	{
