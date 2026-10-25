@@ -240,6 +240,7 @@ func TestSetRateIsSnappedAndClamped(t *testing.T) {
 // 三个窗口在同一个播放器上量，1x 的那个当基准。倍率反过来（2 倍速听成 0.5 倍速）
 // 时比值会反过来，容差抓得住。
 func TestTheClockFollowsTheRate(t *testing.T) {
+	t.Parallel()
 	a := newApp(t)
 	if err := a.Open(longWav(t, "一首长歌.wav")); err != nil {
 		t.Fatal(err)
@@ -284,6 +285,7 @@ func TestTheClockFollowsTheRate(t *testing.T) {
 // 基准改为在**开歌之后**临时把倍率拨回 1 量一段，量完再拨回 2。开歌之后
 // `a.player != nil` 了，走的是另一支，不影响上面那条断言。
 func TestRateIsRememberedBeforeAnyTrackIsOpen(t *testing.T) {
+	t.Parallel()
 	a := newApp(t)
 	if st := a.Snapshot(); st.HasTrack || st.Rate != 1 {
 		t.Fatalf("刚开出来就有歌了（%+v）", st)
@@ -324,6 +326,7 @@ func TestRateIsRememberedBeforeAnyTrackIsOpen(t *testing.T) {
 // 顺带也盯了「切歌那一瞬间位置不跳」这件事的另一半：新歌开好之后 `Position`
 // 从 0 开始，而不是接着上一首结尾那个数往上数。
 func TestRateSurvivesTrackChanges(t *testing.T) {
+	t.Parallel()
 	one := longWav(t, "第一首.wav")
 	two := longWav(t, "第二首.wav")
 
@@ -395,6 +398,7 @@ func TestRateSurvivesTrackChanges(t *testing.T) {
 // 2 倍速下要走掉四秒，四秒的歌在窗口末尾就放完了——量出来的会是「歌放完了
 // 位置停住」，被误判成「倍率没套上」。
 func TestOnlineTrackKeepsTheRate(t *testing.T) {
+	t.Parallel()
 	f := newStreamFixture(t)
 	f.media = readWav(t, longWav(t, "在线的一首.wav"))
 	f.onPlayURL(dashFor(cdnURL(f.URL, "a.wav", 2*time.Hour), int(bili.QualityHigh192), 110836))
