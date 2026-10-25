@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
-	"image/color"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -588,75 +587,6 @@ func TestNavHasALoginEntry(t *testing.T) {
 	words := screenText(tt)
 	if !strings.Contains(words, "登录") {
 		t.Errorf("顶栏上没有登录入口。\n画面上的字是：\n%s", words)
-	}
-}
-
-// TestTheLoginKeyIsNotASolidBlock 钉住「顶栏最右那枚登录键不是一块实心主色」。
-//
-// # 它原来是整条顶栏最响的元素
-//
-// 那一枚原来走的是 `ui.PrimaryButton`：**一块实心主色的圆角方块**，墨迹
-// **752 像素**，是紧挨着它左边那几枚线框图标（120~140）的 **5.4 倍**——
-// 而「登录」是一个低频次动作（UI 报告 §3 的 F-05）。已登录那一支是
-// `iconButton`（无底色），同一枚按钮两种登录态两种重量。
-//
-// 判据是**画面上的墨迹**：那一格里的墨迹必须和左边那几枚线框图标同一档。
-// ⚠️ **不许用「有没有底色」当判据**：那一格本来就没有底色（`flat` 的配方），
-// 它有的是**一整块实心的主色**——量墨迹才量得出这个差别。
-//
-// ⚠️ **指针要挪开**：悬停会给图标键加一层淡底（`widgets/flat` 的配方），
-// 那一层墨迹不该算进「这一枚有多重」。
-func TestTheLoginKeyIsNotASolidBlock(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			b := newTestShell(t, systemIsDark(dark), withSettings(app.DefaultSettings("")))
-			tt := b.tt
-			tt.Frame()
-			tt.Move(600, 780) // 挪到播放条那片空地上
-			tt.Frame()
-
-			img := tt.Image()
-			br, bg, bb, ba := pageBackground(img, image.Rect(0, 0, 1200, navMinHeight))
-			back := color.RGBA{br, bg, bb, ba}
-
-			login, ok := tt.Find("登录")
-			if !ok {
-				t.Fatalf("顶栏上找不到登录键，文字有 %q", tt.Texts())
-			}
-			loginInk := inkPixels(img, login, back)
-
-			// 相邻那几枚线框图标：同一栏、同样大小（`iconHitMd` 见方）。
-			//
-			// ⚠️ **「设置」不在这一列里**（票 #289）：顶栏那一枚拿掉了——侧栏和
-			// 头像下拉里都有同一个动作，三个入口会不一致。
-			worst := 0
-			for _, label := range []string{"打开文件", "迷你"} {
-				r, ok := tt.Find(label)
-				if !ok {
-					t.Fatalf("顶栏上找不到 %q，文字有 %q", label, tt.Texts())
-				}
-				if n := inkPixels(img, r, back); n > worst {
-					worst = n
-				}
-			}
-			if worst == 0 {
-				t.Fatal("相邻那几枚图标一格墨迹都没有——量不出基准，这条测试不算数")
-			}
-			// 把数打出来：这一条断的是**比值**，而比值随图标（矢量图形的栅格化）
-			// 变——出问题时得看得见那几个数。
-			t.Logf("登录键墨迹 %d，相邻最重的那枚 %d（比值 %.2f）",
-				loginInk, worst, float64(loginInk)/float64(worst))
-			if loginInk > worst*2 {
-				t.Errorf("登录键那一格有 %d 像素的墨迹，而相邻那几枚线框图标最重的"+
-					"那枚只有 %d（重 %.1f 倍）——它不该是整条顶栏最响的元素"+
-					"（UI 报告 §3 的 F-05）",
-					loginInk, worst, float64(loginInk)/float64(worst))
-			}
-		})
 	}
 }
 

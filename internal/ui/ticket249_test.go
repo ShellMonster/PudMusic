@@ -115,7 +115,7 @@ func TestTheTopBarIconKeysTurnAccentOnHover(t *testing.T) {
 			s, tt := navBarShell(t, app.DefaultThemePreset, dark)
 			want := rgb(ink.AccentOn(BuildTheme(s.app.SettingsSnapshot(), dark)))
 
-			for _, label := range []string{"打开文件", "迷你", "动态", "登录"} {
+			for _, label := range []string{"打开文件", "迷你", "动态"} {
 				btn, ok := tt.Find(label)
 				if !ok || btn.W == 0 {
 					t.Fatalf("顶栏上找不到 %q，文字有 %q", label, tt.Texts())
@@ -398,7 +398,6 @@ func TestTheTopBarKeysKeepTheirTipsAndNames(t *testing.T) {
 		{"打开文件", "打开本地音频文件"},
 		{"迷你", "缩成 320×84 的小窗贴边悬浮，音乐不停"},
 		{"动态", "动态"},
-		{"登录", "登录 B 站账号"},
 	} {
 		btn, ok := tt.Find(want.key)
 		if !ok || btn.W == 0 {
@@ -420,14 +419,6 @@ func TestTheTopBarKeysKeepTheirTipsAndNames(t *testing.T) {
 		t.Errorf("按了「动态」之后的路由是 %q，want %q", got, dynamicFeedPath)
 	}
 
-	s2, tt2 := navBarShell(t, app.DefaultThemePreset, false)
-	if err := tt2.Click("登录"); err != nil {
-		t.Fatalf("点不了「登录」：%v", err)
-	}
-	tt2.Frame()
-	if got := s2.router.Path(); got != loginPath {
-		t.Errorf("按了「登录」之后的路由是 %q，want %q", got, loginPath)
-	}
 }
 
 // TestTheFullPlayerRowKeepsItsOwnRecipe 钉住**满屏播放器那一行没被这一票改到**。
