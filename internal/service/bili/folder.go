@@ -91,11 +91,23 @@ type FolderInfo struct {
 type CreatedFolder struct {
 	ID    int64
 	Title string
+	// Cover 是这个收藏夹的封面地址（可能是协议相对地址，界面层再补协议头）。
+	//
+	// ⚠️ **它是这个接口本来就给的一格**，不是另外发一次请求问来的
+	// （`created/list` 的 `list[].cover`）——侧栏那一行要画封面，而每行多发
+	// 一次请求就是 N 次网络往返（票 #270）。
+	//
+	// 空串 = B 站那边没有封面（用户一个都没设过）。**空串不是「拉失败」**——
+	// 界面上画占位图（见 `ui` 那一层）。
+	Cover string
 	// Attr 的第 0 位是公开性（见 `CollectionInfo` 的注释），第 1 位是
 	// 「是不是默认收藏夹」。
 	Private bool
 	Default bool
 	// MediaCount 是里面有几个内容。
+	//
+	// ⚠️ **它是 B 站上次统计的数字，不是实时的**（票 #270 的验收标准）——
+	// 用户在 B 站网页上刚加了一首，这边要等下一次刷新才数得对。那不是 bug。
 	MediaCount int
 	// Faved 是**这条内容**在不在里面。选择弹窗就是拿它填初始勾选的。
 	Faved bool
@@ -108,6 +120,7 @@ type createdListData struct {
 	List    []struct {
 		ID         int64  `json:"id"`
 		Title      string `json:"title"`
+		Cover      string `json:"cover"`
 		Attr       int    `json:"attr"`
 		MediaCount int    `json:"media_count"`
 		FavState   int    `json:"fav_state"`
@@ -149,7 +162,7 @@ func (c *Client) CreatedFolders(ctx context.Context, upMid, rid int64, page int)
 	out := make([]CreatedFolder, 0, len(d.List))
 	for _, f := range d.List {
 		out = append(out, CreatedFolder{
-			ID: f.ID, Title: f.Title,
+			ID: f.ID, Title: f.Title, Cover: f.Cover,
 			Private: f.Attr&1 == 1, Default: (f.Attr>>1)&1 == 0,
 			MediaCount: f.MediaCount, Faved: f.FavState == 1,
 		})

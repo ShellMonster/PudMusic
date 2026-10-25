@@ -33,10 +33,15 @@ import (
 //
 //  1. **左沿一样**：这一片的折叠开关起在 x=16，和侧栏的分组标题（「发现」）、
 //     品牌 logo 同一列——它缩进到别的地方，就像是另外贴上去的一件东西。
-//  2. **字在同一列**：分组标题的字、收藏夹名的字都在 x=36（标题左边那枚箭头
-//     图标占了 20）。
-//  3. **空状态那句也在那一列**：它替下面那些收藏夹名说话，缩进不一样的话，
-//     它像是另一层级的一句说明（报告 C3）。
+//  2. **封面和分组标题的字同列**：分组标题的字、下面那些**封面**都在 x=36
+//     （标题左边那枚箭头图标占了 20）。参考图上「创建的歌单」那几个字和下面
+//     那些封面就是左对齐的。
+//  3. **收藏夹名的字让开了封面**：它起在 `favNamePad`（36 + 32 + 10 = 78），
+//     不再和分组标题的字同列——那一行左边多了一枚方形封面（票 #270）。
+//
+// ⚠️ **第 2 条和第 3 条是一对**：封面和标题字同列、名字在封面的右边，两处
+// 都对的时候这一片才是「标题 + 它下面缩进一层的东西」；只对一处的话，
+// 要么是封面飘在中间，要么是名字被封面压住。
 func TestTheFavoritesAreaLinesUpWithTheSidebar(t *testing.T) {
 	_, _, tt, _ := favShell(t, 2, 0)
 
@@ -70,10 +75,58 @@ func TestTheFavoritesAreaLinesUpWithTheSidebar(t *testing.T) {
 	// 东西（`inkLeft` 的注释写着这件事）。
 	img := tt.Image()
 	titleLeft := inkLeft(img, title, int(title.X))
-	nameLeft := inkLeft(img, row, 0)
-	if titleLeft != nameLeft {
-		t.Errorf("分组标题的字起在 x=%d，而收藏夹名的字起在 x=%d——这一片不是一整块",
-			titleLeft, nameLeft)
+	// 名字那一行的墨从**它该在的那一列**开始找：起点太靠左会先撞上封面里
+	// 那枚占位图标（那是封面，不是名字）。
+	want := titleLeft + int(favCoverSize) + int(favCoverGap)
+	nameLeft := inkLeft(img, row, want-2)
+	if nameLeft < want-2 || nameLeft > want+2 {
+		t.Errorf("分组标题的字起在 x=%d，收藏夹名的字却起在 x=%d（want %d 上下）——"+
+			"名字没有让开那枚封面", titleLeft, nameLeft, want)
+	}
+}
+
+// TestEachFavoriteRowHasACoverAndACount 断**每一行是「图 + 名称 + N 首」**。
+//
+// ⚠️ **这是票 #270 的正题**：用户 2026-10-25 给的参考图（Biu 的设计稿）上，
+// 侧栏那两组收藏夹的每一行是一枚方形封面 + 名称 + 数量，不是纯文字。
+//
+// 三件事：
+//
+//  1. **左边有一枚方块**（封面那一格）；
+//  2. **名字右边有「N 首」**（数量用的是 B 站那个 `media_count`）；
+//  3. **那枚方块和名字各自在該在的列上**（上面那条已经钉了名字，这一钉方块）。
+func TestEachFavoriteRowHasACoverAndACount(t *testing.T) {
+	_, a, tt, _ := sideShell(t)
+	a.SetFavorites(app.FavoritesCreated, []app.Favorite{{
+		ID: 1, Title: "夏日午后", Mid: 42, Type: 11,
+		// 封面地址留空：没有封面是真的有（B 站那边用户没设过），画占位图就是
+		// 对的——而这一格**照样得在**。
+		Cover:      "",
+		MediaCount: 32,
+	}})
+	tt.Frame()
+
+	row, ok := tt.Find("夏日午后")
+	if !ok {
+		t.Fatalf("侧栏上没有「夏日午后」那一行，文字有 %q", tt.Texts())
+	}
+
+	// ② 数量那一行。
+	if !tt.HasText("32 首") {
+		t.Errorf("那一行没有写数量，文字有 %q", tt.Texts())
+	}
+
+	// ① 左边那枚方块：从封面那一列（`favCoverX`）往右找第一笔墨，它得落在
+	// 封面那一格里面（`favCoverSize` 见方）。
+	//
+	// ⚠️ **用的是画面上的墨，不是元素**：封面那一格是 imgcache 画的，界面上
+	// 没有一个能按名字找着的文字节点——而它没地址时画的那枚占位图标是有墨的
+	// （`widgets/imgcache` 的「没有地址」那一档），量得到。
+	img := tt.Image()
+	ink := inkLeft(img, row, int(favCoverX))
+	if ink < 0 || ink >= int(favCoverX)+int(favCoverSize) {
+		t.Errorf("那一行左边没有一枚方块（第一笔墨在 x=%d，而封面那一格是 %d..%d）",
+			ink, int(favCoverX), int(favCoverX)+int(favCoverSize))
 	}
 }
 

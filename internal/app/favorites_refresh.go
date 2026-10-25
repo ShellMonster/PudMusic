@@ -320,6 +320,7 @@ func collectedFavorites(list []bili.CollectedFolder) []Favorite {
 		}
 		out = append(out, Favorite{
 			ID: it.ID, Title: it.Title, Mid: it.Mid, Type: it.Type,
+			Cover: it.Cover, MediaCount: it.MediaCount,
 		})
 	}
 	return out
@@ -329,11 +330,15 @@ func collectedFavorites(list []bili.CollectedFolder) []Favorite {
 //
 // Type 一律填「收藏夹」（11）：这个接口给的**只有收藏夹**，而 `folderRef` 认不出
 // 类型时会按收藏夹处理（见 sidebar_folders.go），填对了那一处的兜底就不用救了。
+//
+// ⚠️ **封面和数量都从这个接口的返回里带过来**（`created/list` 的 `list[].cover`
+// 和 `media_count`）——不是每行另发一次请求问来的（票 #270）。
 func createdFavorites(list []bili.CreatedFolder, mid int64) []Favorite {
 	out := make([]Favorite, 0, len(list))
 	for _, it := range list {
 		out = append(out, Favorite{
 			ID: it.ID, Title: it.Title, Mid: mid, Type: int(bili.CollectionFavorite),
+			Cover: it.Cover, MediaCount: it.MediaCount,
 		})
 	}
 	return out
