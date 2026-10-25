@@ -111,6 +111,36 @@ var (
 
 	secKeychainItemDelete func(item unsafe.Pointer) OSStatus
 
+	// 这一族是「改访问控制」用的（为什么需要它们，见下面
+	// openAccessToEveryone 的注释）。
+	//
+	// ⚠️ 出参一律声明成指针类型，理由跟上面那几个一样：purego 只有在
+	// 参数类型是指针时才把它登记成「可写回的缓冲」，声明成 uintptr 的话
+	// 地址照样传过去、C 那边往里写的东西回不来。
+	secKeychainItemCopyAccess func(item unsafe.Pointer, access *unsafe.Pointer) OSStatus
+
+	secAccessCopyACLList func(access unsafe.Pointer, aclList *unsafe.Pointer) OSStatus
+
+	secACLCopyContents func(
+		acl unsafe.Pointer,
+		applicationList *unsafe.Pointer, // CFArrayRef*
+		description *unsafe.Pointer, // CFStringRef*
+		promptSelector *uint16,
+	) OSStatus
+
+	secACLSetContents func(
+		acl unsafe.Pointer,
+		applicationList unsafe.Pointer, // CFArrayRef（nil = 不限制谁能用）
+		description unsafe.Pointer, // CFStringRef
+		promptSelector uint16,
+	) OSStatus
+
+	secKeychainItemSetAccess func(item unsafe.Pointer, access unsafe.Pointer) OSStatus
+
+	cfArrayGetCount func(theArray unsafe.Pointer) int64
+
+	cfArrayGetValueAtIndex func(theArray unsafe.Pointer, idx int64) unsafe.Pointer
+
 	// cfRelease 归还 itemRef（SecKeychainItemRef 是个 +1 的
 	// CoreFoundation 对象引用）。
 	//
@@ -158,8 +188,28 @@ func bindSystemSymbols() error {
 		{"SecKeychainAddGenericPassword", &secKeychainAddGenericPassword, "SecKeychainAddGenericPassword"},
 		{"SecKeychainItemModifyContent", &secKeychainItemModifyContent, "SecKeychainItemModifyContent"},
 		{"SecKeychainItemDelete", &secKeychainItemDelete, "SecKeychainItemDelete"},
+		{"SecKeychainItemCopyAccess", &secKeychainItemCopyAccess, "SecKeychainItemCopyAccess"},
+		{"SecAccessCopyACLList", &secAccessCopyACLList, "SecAccessCopyACLList"},
+		{"SecACLCopyContents", &secACLCopyContents, "SecACLCopyContents"},
+		{"SecACLSetContents", &secACLSetContents, "SecACLSetContents"},
+		{"SecKeychainItemSetAccess", &secKeychainItemSetAccess, "SecKeychainItemSetAccess"},
 	} {
 		addr, err := purego.Dlsym(sec, b.sym)
+		if err != nil {
+			return fmt.Errorf("app: %s: %w", b.sym, err)
+		}
+		purego.RegisterFunc(b.fn, addr)
+	}
+	for _, b := range []struct {
+		name string
+		fn   any
+		sym  string
+	}{
+		// 遍历 ACL 列表要用的两个 CoreFoundation 函数。
+		{"CFArrayGetCount", &cfArrayGetCount, "CFArrayGetCount"},
+		{"CFArrayGetValueAtIndex", &cfArrayGetValueAtIndex, "CFArrayGetValueAtIndex"},
+	} {
+		addr, err := purego.Dlsym(cf, b.sym)
 		if err != nil {
 			return fmt.Errorf("app: %s: %w", b.sym, err)
 		}
@@ -244,6 +294,83 @@ func (k *keychainStore) Save(_ context.Context, s Session) error {
 		return nil
 	}
 	return k.addAndVerify(blob)
+}
+
+// openAccessToEveryone 把这一项的访问控制放宽成「不限制谁能读」。
+//
+// # 为什么要有这个
+//
+// 这一项存的是 B 站的登录态（SESSDATA / refresh_token）。
+// 默认的访问控制是「只有被点过『始终允许』的那些程序能读」——而「那些程序」
+// 在 ad-hoc 签名下是按**这一次构建的字节**认的（cdhash）。于是每重新构建一次，
+// 钥匙串就认不出这是谁，弹一次框要授权（用户 2026-10-25 的原话：
+// 「现在每次打开都需要钥匙串授权」）。
+//
+// 这一项的**保护级别**本来由两样东西撑起来：钥匙串的加密，和「只有你能读」。
+// 现在这里放开的只是**后者**：谁都能读到内容，但内容仍然是钥匙串加密着的、
+// 仍然只在这台机器的这个账号下。
+//
+// ⚠️ **代价说在前面**：同机上任何程序都能读到这一项的内容
+// （包括别的用户账号下运行的程序，只要它有钥匙串访问权）。
+// 这是 2026-10-25 用户在「不用 Apple 账号签名」这个约束下拍板选的
+// （对应 issue #216 / BMG-274）：另一条路是买 Apple 的开发者账号，
+// 那条路能同时保住「只有你能读」和「不弹框」。
+//
+// # 为什么只在这一项**新建**的时候做
+//
+// 改**既有**项的访问控制要解锁钥匙串（要密码，弹框；实测 SecKeychainItemSetAccess
+// 在这里会一直挂着等输入）。所以这一步只在新建时做——
+// 已经存在的那一项要变公开，得删掉重新登录一次（README「已知边界」那一节写了）。
+//
+// # 失败不致命
+//
+// 写不进去就写不进去：这一项照样能用（只是会弹框）。
+// 所以这里返回错误、由调用方记下，不让它把「登录」整条路堵死。
+func openAccessToEveryone(item unsafe.Pointer) error {
+	var access unsafe.Pointer
+	if st := secKeychainItemCopyAccess(item, &access); st != errSecSuccess {
+		return keychainError("读取访问控制", st)
+	}
+	defer cfRelease(access)
+
+	var aclList unsafe.Pointer
+	if st := secAccessCopyACLList(access, &aclList); st != errSecSuccess {
+		return keychainError("读取访问控制", st)
+	}
+	defer cfRelease(aclList)
+
+	count := cfArrayGetCount(aclList)
+	for i := int64(0); i < count; i++ {
+		acl := cfArrayGetValueAtIndex(aclList, i)
+		if acl == nil {
+			continue
+		}
+		var (
+			applicationList unsafe.Pointer
+			description     unsafe.Pointer
+			promptSelector  uint16
+		)
+		if st := secACLCopyContents(acl, &applicationList, &description, &promptSelector); st != errSecSuccess {
+			return keychainError("读取访问控制", st)
+		}
+		if applicationList != nil {
+			cfRelease(applicationList)
+		}
+		// applicationList 传 nil = 「适用于所有应用程序」（钥匙串访问.app 里
+		// 那句「允许所有应用程序访问此项目」）。description 传回原来的那份，
+		// 不改它（它装着 partition list，删了会坏别的语义）。
+		st := secACLSetContents(acl, nil, description, promptSelector)
+		if description != nil {
+			cfRelease(description)
+		}
+		if st != errSecSuccess {
+			return keychainError("改写访问控制", st)
+		}
+	}
+	if st := secKeychainItemSetAccess(item, access); st != errSecSuccess {
+		return keychainError("写回访问控制", st)
+	}
+	return nil
 }
 
 // addAndVerify 新建这一项，然后**读回来核对**。
