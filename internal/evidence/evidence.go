@@ -3248,7 +3248,7 @@ var Items = []Item{
 		// 报错**，界面只是「不好用」。
 		Category: Platform,
 		// 票 #244（UX 报告 §2 的 D1 / B5 / B6 / E1 / E2）。
-		Spec: "布局一批：设置页每一行的说明和控件之间**不空着几百像素**；迷你窗的音量滑块**有悬停提示**（而且那枚提示**看得见**）；「全部播放」在两个页面上是**同一枚**（画法统一；语义是票 #299 拍板的那一条）；列表里的**超长歌名不占满整行中段**；**深色下的封面有边**（不再和行的底色融成一片）",
+		Spec: "布局一批：设置页每一行的说明和控件之间**不空着几百像素**；迷你窗的音量滑块**有悬停提示**（而且那枚提示**看得见**）；「全部播放」在两个页面上是**同一枚**（画法统一；语义是票 #337 拍板的那一条）；列表里的**超长歌名不占满整行中段**；**深色下的封面有边**（不再和行的底色融成一片）",
 		Tests: []string{
 			// 设置页那一段空档（1200 / 900 两档窗口，量的是画面上的字迹）。
 			"TestTheSettingsRowsDoNotStretchAcrossTheWindow",
@@ -3261,7 +3261,7 @@ var Items = []Item{
 			// 两个页面上那两枚按钮是同一枚（盒子一模一样）。
 			"TestThePlayAllButtonIsTheSameOnBothPages",
 			// 两个页面上按下去，进去队列的都是这一页的歌。
-			"TestThePlayAllButtonEnqueuesOnBothPages",
+			"TestThePlayAllButtonReplacesQueueOnBothPages",
 			// **放不了的不要塞进队列**（判据 `app.CanPlay`，和右键菜单里那三个
 			// 入口是同一个）——而且跳过了几首要说一声。
 			"TestThePlayAllButtonSkipsTheUnplayableOnes",
@@ -3271,6 +3271,29 @@ var Items = []Item{
 			"TestAShortTitleIsNotAffected",
 			// 「图取到了」那一档也描一圈边（深浅两套）。
 			"TestTheLoadedCoverHasAnEdgeOfItsOwn",
+		},
+	},
+	{
+		// 🔴 **这一条的错法是「静默」的**：顶图被冻在列表上面，滚动列表时它一动
+		// 不动——**没有一样会报错**，界面只是「不像上游那一页」。
+		//
+		// 上游那一页（`music-recommend/index.tsx`）的顶图和下面的列表在**同一个
+		// 滚动容器**里，所以顶图跟着滚走；而 Tab 那一排在滚动容器**外面**，滚
+		// 列表时它不动。
+		Category: Platform,
+		// 票 #369。
+		Spec: "首页「流行」那一屏：顶图（新歌速递）**跟着列表一起滚走**，而 Tab 那一排**留在滚动容器外面**（滚列表时它不动）；另外两档不受影响",
+		Tests: []string{
+			// 顶图滚一段之后不在画面上了，而下面那一档的歌还在。
+			"TestTheTopImagesScrollAwayWithTheList",
+			// 网格那一档（设置里的「数据显示样式」）也是一样的。
+			"TestTheTopImagesScrollAwayInGridModeToo",
+			// Tab 那一排的 y 在滚动前后一模一样。
+			"TestTheTabRowStaysPutWhileTheListScrolls",
+			// 另外两档没动：没有顶图，而且照样能滚。
+			"TestTheMusicAndGuichuTabsAreNotTouched",
+			// 下面那一档没歌的时候顶图还在（它是这一屏的内容，不是列表的装饰）。
+			"TestTheTopImagesStayWhenTheListIsEmpty",
 		},
 	},
 	{
@@ -3291,31 +3314,37 @@ var Items = []Item{
 		},
 	},
 	{
-		// 🔴 **这一条的错法也是「静默」的**：按了「全部播放」而正在放的那首
-		// 不换（用户以为按钮是死的）、或者把这一页的歌**换掉**了用户原来的队列
-		// （他正听着的那几首不见了）——**没有一样会报错**，界面只是「不按他
-		// 以为的那样」。
-		//
-		// 而这两枚入口（页级的「全部播放」、行级的「立即播放」）只差几个字，
-		// 做的事差着一个队列——所以它们各自叫什么、做什么，都得钉住。
+		// 票 #337 覆盖 #299：单首保留队列，显式批量/区段替换队列。
 		Category: Play,
-		// 票 #299（2026-10-24 人定的）。
-		Spec: "「全部播放」= 把这一页的歌按顺序加进队列并播放（从这一页的第一首开始）；「立即播放」= 只放当前这一首",
+		Spec:     "立即播放追加这一首并打断，旧队列保留；批量入口替换这一批并从第一首播；从这一首往后听/下一首播放/添加到队列保持区段替换/当前后插入/队尾追加的语义",
 		Tests: []string{
-			// 队列里多了这一页的歌（**按顺序**）、旧的那几首还在、正在放的是
-			// 这一页的**第一首**（夹具是本地歌：在线的那些在无头环境里放不了，
-			// 而真网络是**真账号**）。
-			"TestThePlayAllButtonAppendsThePageAndStartsAtItsFirstSong",
-			// 应用层那一条：追加 + 从这一批的第一首开始播（队列里原来有的那几首
-			// 不动）。
-			"TestEnqueueAndPlayAppendsInOrderAndStartsAtTheFirst",
-			// 「立即播放」**只放当前这一首**：队列里只有它，正在放的是它。
-			"TestThePlayNowEntryPlaysOnlyThatSong",
-			// 菜单那一层：交给接线的是**只有这一首**，不是「从这一首往后」的那
-			// 一整段。
+			"TestEnqueueAndPlayNowAppendsAndStartsTheNewSong",
+			// 同一首已经在队列里时**照样再加一份**（与上游那一处不同）。
+			"TestEnqueueAndPlayNowAppendsTheSameSongTwice",
+			"TestEnqueueAndPlayNowKeepsTheOldSelectionOnFailure",
+			"TestThePlayNowEntryAppendsAndStartsThatSong",
+			"TestThePlayAllButtonReplacesQueueAndStartsAtItsFirstSong",
+			"TestThePlayAllButtonReplacesQueueOnBothPages",
+			"TestPlayAllReplacesTheQueueWithSearchResults",
+			"TestTheUpSpacePlayAllReplacesTheQueue",
+			"TestOtherBatchEntriesReplaceQueueAndStartFirst",
+			"TestTheFourRowQueueActions",
+			"TestLibraryPlayNowPreservesTheQueue",
+			"TestSingleSongCardsPreserveTheQueue",
 			"TestChoosingPlayNowHandsOverJustThatSong",
-			// **两枚入口都在**（少建一项那一项就永远点不到）。
 			"TestBothPlayEntriesAreOnTheRowMenu",
+			// 应用层那三条：**替换队列**这条路的契约（换掉 + 从第一首 + 起播失败
+			// 把原队列换回去）。
+			"TestPlayFromSwapsTheQueueAndStartsAtTheFirst",
+			"TestPlayFromWithNothingToPlayLeavesTheQueueAlone",
+			"TestPlayFromKeepsTheQueueWhenTheFirstSongWillNotPlay",
+			// 新歌速递那两枚播放钮（这一票把它们从 Play 改成 PlayNow）。
+			"TestClickingANewMusicCardQueuesExactlyThatSong",
+			"TestClickingTheHoverPlayButtonQueuesExactlyThatSong",
+			// 两页的行菜单**共用一份**（这一票把「立即播放」那一档收进共用那份），
+			// 各自最后那一项（移除 / 删除）仍各归各的。
+			"TestBothLibraryPagesOfferTheirOwnLastMenuItem",
+			"TestBothLibraryPagesOfferPlayNextInTheRowMenu",
 		},
 	},
 	{

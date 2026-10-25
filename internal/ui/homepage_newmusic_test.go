@@ -488,12 +488,12 @@ func TestASongWithoutAnOwnerDoesNotDrawOne(t *testing.T) {
 
 // TestClickingANewMusicCardQueuesExactlyThatSong 验点一下那一格会做的事：**放
 // 这一首**（上游 `new-music-top.tsx:22-36` 的 `handlePlay` 走
-// `usePlayList.play({…})`，换掉整个队列从这一首开始），不是「从它往后」。
+// `usePlayList.play({…})`，追加这一首并立即播），不是「从它往后」。
 //
 // 判据是**真的被要求放的那几项**，不是「调了哪个函数」。
 func TestClickingANewMusicCardQueuesExactlyThatSong(t *testing.T) {
 	var got [][]app.Item
-	acts := list.Actions{Play: func(items []app.Item) { got = append(got, items) }}
+	acts := list.Actions{PlayNow: func(item app.Item) { got = append(got, []app.Item{item}) }}
 	_, tt := newGridTester(t, acts, homeSongsOf("新歌", 8), 800, 900)
 
 	if err := tt.Click(songName("新歌", 3)); err != nil {
@@ -615,10 +615,10 @@ func TestHoveringANewMusicCardShowsThePlayButtonTheGradientAndTheAccentTitle(t *
 }
 
 // TestClickingTheHoverPlayButtonQueuesExactlyThatSong 钉住 hover 播放钮的语义：
-// 和点卡片一样，**只放这一首**（不是网格卡片那枚「从这一首往后接」）。
+// 和点卡片一样，**加这一首并立即播**（不是网格卡片那枚「从这一首往后接」）。
 func TestClickingTheHoverPlayButtonQueuesExactlyThatSong(t *testing.T) {
 	var got [][]app.Item
-	acts := list.Actions{Play: func(items []app.Item) { got = append(got, items) }}
+	acts := list.Actions{PlayNow: func(item app.Item) { got = append(got, []app.Item{item}) }}
 	songs := homeSongsOf("新歌", 8)
 	_, tt := newGridTester(t, acts, songs, 800, 900)
 
@@ -675,6 +675,65 @@ func TestRenderNewMusicShots(t *testing.T) {
 
 			hoverRow(t, tt, songName("新歌", 2))
 			save(t, dir, "38-"+name+"-新歌速递-卡片hover.png", tt)
+		})
+	}
+}
+
+// TestRenderPopTabShots 把「流行」那一屏存成 PNG：顶图在顶上那张，和滚一段之后
+// 顶图滚走那张。深浅各一套，外加三个主题方案各看一眼。
+//
+//	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderPopTabShots
+//
+// ⚠️ **深浅两套都要出**（DESIGN.md §八），而**主题方案也要各看一眼**（§零）：
+// 那一块的颜色全是主题令牌出来的（没有写死的颜色），所以每一套都要看一眼。
+func TestRenderPopTabShots(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			b := newTestShell(t, systemIsDark(dark))
+			s, tt := b.s, b.tt
+			s.home.SetSongs(fullSongs())
+			homeFrame(tt)
+			clickTab(t, tt, homePopTab)
+			homeFrame(tt)
+
+			// 指针停在窗口右下那片空地上：第一张要的是「平时」。
+			tt.Move(1180, 770)
+			homeFrame(tt)
+			save(t, dir, "39-"+name+"-流行-顶图在顶上.png", tt)
+
+			// 滚一段：顶图跟着滚走了（票 #369 的头一条）。
+			tt.Scroll(homeW/2, homeH-150, 0, 1200)
+			homeFrame(tt)
+			save(t, dir, "40-"+name+"-流行-顶图滚走之后.png", tt)
+		})
+	}
+
+	// 三个主题方案各看一眼（暖纸 / 暮光 / 柔雾）。经典是默认外观，浅色那张就是它。
+	for _, preset := range []app.ThemePreset{
+		app.ThemePresetWarmPaper, app.ThemePresetDuskAmber, app.ThemePresetSoftPeach,
+	} {
+		t.Run(string(preset), func(t *testing.T) {
+			st := app.DefaultSettings("")
+			st.ThemePreset = preset
+			st.ThemeMode = app.ThemeModeLight
+			b := newTestShell(t, withSettings(st))
+			s, tt := b.s, b.tt
+			s.home.SetSongs(fullSongs())
+			homeFrame(tt)
+			clickTab(t, tt, homePopTab)
+			homeFrame(tt)
+			tt.Move(1180, 770)
+			homeFrame(tt)
+			save(t, dir, "41-"+string(preset)+"-流行-顶图在顶上.png", tt)
 		})
 	}
 }

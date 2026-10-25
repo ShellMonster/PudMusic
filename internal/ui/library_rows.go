@@ -863,10 +863,9 @@ func viewPlayingMark(c *ui.Context, t *ui.Theme, title string) {
 		FontSize(scale.Font(c, scale.Size11)).TextColor(ink.AccentOn(t)).MaxLines(1)
 }
 
-// playFrom 从第 i 行往后接进队列并开始播。
+// playFrom 换成第 i 行往后的一整段并开始播。
 //
-// 给的是**从这一行起的全部**，和 Biu 的「在 B 站打开这一首从这儿听」一致：点
-// 了一首，接下来的队列就该是它和它后面那些，不是整个列表从头。
+// 给的是**从这一行起的全部**：接下来的队列是它和它后面那些。
 func (p *pagedRows) playFrom(i int) {
 	if i < 0 || i >= len(p.rows) {
 		return
@@ -884,11 +883,12 @@ func (p *pagedRows) playFrom(i int) {
 // 这里——**不要在两个页面的菜单里各写一份**：改漏一边的后果是「列表里能播、
 // 网格里放不出来」那种最难查的错（BMG-10 的收尾说明点名过同一件事）。
 type RowActions struct {
-	Play func(i int) // 从第 i 行往后接进队列并开始播
-	// PlayNow **只放第 i 行那一首**——菜单里那枚「立即播放」。
+	Play func(i int) // 换成第 i 行往后的一整段并开始播
+	// PlayNow 把第 i 行那一首加到队尾并立即播——菜单里那枚「立即播放」。
 	//
-	// 🔴 **语义是拍板定的**（票 #299，2026-10-24，人定的）：「立即播放」=
-	// 只放当前这一首。队列被换成这一首，不是「从这一行往后」的那一批。
+	// 🔴 **语义是拍板定的**（票 #337，2026-10-24，人定的）：「立即播放」=
+	// 加当前这一首并立即打断播放。队列里原来有的歌保留，不是「从这一行往后」
+	// 的那一批替换语义。
 	PlayNow func(i int)
 	// PlayNext 把第 i 行排在**正在放的那首后面**（「下一首播放」）。
 	//
@@ -932,7 +932,7 @@ func (p *pagedRows) addOne(i int) {
 	}
 }
 
-// playNowOne 只放第 i 行那一首（队列被换成这一首）。
+// playNowOne 把第 i 行那一首加到队尾并立即播（队列里原来的歌保留）。
 //
 // ⚠️ **底下那一层可能是 nil**：和 `playNextOne` 同一个理由——测试里那份
 // `list.Actions{}` 什么都没有，调一个 nil 函数会一路穿出 Cocoa 事件循环把
