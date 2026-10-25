@@ -78,15 +78,17 @@ func (s *StreamSource) tailFetch() {
 func (s *StreamSource) tailTarget() (int64, bool) {
 	for {
 		s.mu.Lock()
-		// 等「总长知道了」且「文件头下到了」。
+		// 等「文件头下到了」。
 		//
-		// ⚠️ **总长是必须等的**：没有它就不知道 `moov` 是不是真的在末尾
-		//（`mdat` 一直到文件末尾时，`moov` 就不在后面）。
+		// ⚠️ **总长不是必须等的**：末尾那一段的起点是从 `mdat` 盒的头
+		// 算出来的（`mdat` 自己的长度就写在它的头里），而总长只用来
+		// 判「`moov` 是不是真的在 `mdat` 后面」——那一条判错的后果只是
+		// 多发一条请求（服务器会对越界的 Range 回 416，而那一路是安全的）。
 		//
-		// ⚠️ **文件头也是必须等的**：`mp4TopLevel` 要读盒子的头，
+		// ⚠️ **文件头是必须等的**：`mp4TopLevel` 要读盒子的头，
 		// 而头还没下到的时候读到的是**零**——那会被当成「一个长度乱七
 		// 八糟的盒子」，得出一个错的结论。
-		for !s.closed && s.err == nil && !(s.size > 0 && s.filled >= mp4HeadMin) {
+		for !s.closed && s.err == nil && s.filled < mp4HeadMin {
 			s.cond.Wait()
 		}
 		if s.closed || s.err != nil {

@@ -91,7 +91,9 @@ var mp4FirstBoxTypes = map[string]bool{
 // errHeadNotReady（**不是** io.EOF：io.EOF 在这一层是「文件到头了」，
 // 而「还没下到」是另一回事，混起来会把「再等等」说成「不用管了」）。
 //
-// size 是整个文件有多长。
+// size 是整个文件有多长。**-1 是「还不知道」**（服务器没给
+// Content-Length）——那时的判据松一点：末尾那一段照样取（服务器会对
+// 「越界的 Range」回 416，而那一条路是安全的，见 `fetchTail`）。
 func mp4TopLevel(r io.ReaderAt, size int64) (moovAt, tailAt int64, err error) {
 	moovAt, tailAt = -1, -1
 	off := int64(0)
@@ -114,6 +116,10 @@ func mp4TopLevel(r io.ReaderAt, size int64) (moovAt, tailAt int64, err error) {
 		switch boxSize {
 		case 0:
 			// 这个盒子一直到文件末尾。
+			if size < 0 {
+				// 总长都不知道 → 算不出它在哪儿 → 不用取尾部。
+				return -1, -1, errMP4NotOurShape
+			}
 			boxSize = size - off
 		case 1:
 			// 真正的长度在头后面那 8 个字节里（64 位大端）。
@@ -148,7 +154,7 @@ func mp4TopLevel(r io.ReaderAt, size int64) (moovAt, tailAt int64, err error) {
 				return -1, -1, errMP4NotOurShape
 			}
 			end := off + boxSize
-			if end >= size {
+			if size >= 0 && end >= size {
 				// `mdat` 一直到文件末尾——`moov` 只可能在它前面，
 				// 而那上面已经走过了（没看到 `moov` 就是没有）。
 				return -1, -1, errMP4NotOurShape
@@ -163,7 +169,7 @@ func mp4TopLevel(r io.ReaderAt, size int64) (moovAt, tailAt int64, err error) {
 			return -1, -1, errMP4NotOurShape
 		}
 		off += boxSize
-		if off >= size {
+		if size >= 0 && off >= size {
 			return -1, -1, errMP4NotOurShape
 		}
 	}

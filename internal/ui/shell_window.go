@@ -303,6 +303,10 @@ func Run(a *app.App, sess *media.Session) error {
 	}
 
 	mygo.App.WhenReady(func() {
+		// 🔴 **冷启动那一段的「应用就绪」时刻**（票 #478）：这一句之前是
+		// 「进程起来 → 读盘 + 读钥匙串 + 挂零件」，之后才是「建窗口」。
+		// 两段分开量，才答得出「慢的是读盘还是画窗口」。
+		a.NoteReady()
 		// scheme 在这里登记而不是 Run 之前：登记要走系统 API，事件循环起来
 		// 之后才接得住；而它又必须早于框架那次启动参数的交付——handleReady
 		// 把交付排在所有 WhenReady 回调之后（`mygo/app.go:266`），所以正好。
