@@ -253,6 +253,14 @@ func (p *PagedList) SetView(v View) { p.surf.SetView(v) }
 // ⚠️ 只能由界面线程调。
 func (p *PagedList) SetColumns(c Columns) { p.surf.SetColumns(c) }
 
+// SetLead 装「这一份歌上面那一块」（页内头部），传 nil 去掉。
+//
+// ⚠️ **它占列表的第 0 行**，所以下面那些歌在框架那一层的行号整体挪了一格——
+// 而这一份对外的 API（`Selected` / `At`）收的仍然是**歌的下标**。
+//
+// ⚠️ 只能由界面线程调。
+func (p *PagedList) SetLead(lead *Lead) { p.surf.SetLead(lead) }
+
 // SetEmptyView 换掉「**第一页在途时那一格**」的画法。
 //
 // ⚠️ **它只管这一档**：拉失败了、或者已经有歌了，那一格都不归它管（见

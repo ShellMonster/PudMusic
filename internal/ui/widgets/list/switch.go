@@ -121,6 +121,18 @@ func (s *SwitchView) SetScroll(st *ui.ScrollState) {
 	s.grid.SetScroll(st)
 }
 
+// SetLead 装「这一份歌上面那一块」（页内头部），两份都装，传 nil 去掉。
+//
+// ⚠️ **两份都装是必须的**：设置里的「数据显示样式」随时会换档，而那一块
+// （首页「流行」那一档的新歌速递）**两档都要有**——只在列表那一档装的话，用户
+// 切到网格档它就没了，而它是这一屏的内容，不是列表的装饰。
+//
+// ⚠️ 它占**第 0 行**，所以下面那些歌的行号整体挪了一格（见 lead.go）。
+func (s *SwitchView) SetLead(lead *Lead) {
+	s.list.SetLead(lead)
+	s.grid.SetLead(lead)
+}
+
 // SetSelection 装多选那一摊接线，两份都装（理由见 `Grid.sel2`）。
 func (s *SwitchView) SetSelection(sel Selection) {
 	s.list.SetSelection(sel)
