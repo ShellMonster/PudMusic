@@ -499,6 +499,16 @@ type Shell struct {
 	searchKeywordFilled bool
 	searchSuggest       bool
 	searchFocused       bool
+	// suggestShown 是「联想面板现在在画面上」（票 #259）。
+	//
+	// ⚠️ **它是「面板在不在」，不是「用户让不讓它开」**：用户敲了字、开关翻成
+	// true 的那一帧，面板可能还空着（联想词还在路上）——那时候**面板还不存在**，
+	// 于是这一位是假的；等词回来、面板第一次出现在画面上，那一下才是「进场」
+	// （见 navbar_search.go 的 `viewSuggest`）。
+	//
+	// ⚠️ **它管的是「只播一次」**：面板开着的时候内容变了（联想词返回来）**不重播**
+	// 那一段进场。
+	suggestShown bool
 	// tipCandidates 是这一遍 build 里登记下来的那些提示（tooltip.go）。
 	//
 	// 🔴 **同一时刻只出一枚提示**（票 #420）：登记的是「有可能要画的」，整遍

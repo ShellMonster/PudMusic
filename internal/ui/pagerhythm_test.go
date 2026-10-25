@@ -996,6 +996,11 @@ func TestTheSuggestTermsShowWhichCharsWereHit(t *testing.T) {
 	waitFrames(t, tt, "联想词出来了", func() bool {
 		return tt.HasText("周杰伦")
 	})
+	// ⚠️ **要把面板的进场推完**（票 #259）：浮层现在进场是 200ms 的一段（淡入
+	// + 升上来），而 Tester 的钟站着不动——不推它的话画面停在进场的第一帧，
+	// 而那一帧**面板上一个字都没画**（不透明度是 0）。这一条数的是面板上那个
+	// 粉的像素，所以必须先让它淡进来。
+	settleSuggestEnter(t, tt)
 
 	// 命中段那两个字是上游那个粉（浅色底下压暗一档，见 `suggestHitColor`）。
 	hit := suggestHitColor(BuildTheme(app.DefaultSettings(""), false))
