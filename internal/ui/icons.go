@@ -300,27 +300,27 @@ const (
 	//
 	// 线框那版（`more-2-line`）的三个点是 24 见方里半径 1.5 的圆——画成 16 像素
 	// 就是**三个 2 像素的斑点**，和旁边那个 12 像素的时长数字一样重。
-	iconMore        = iconset.MoreVertical                 // 每一行的操作（⋮，实心那一版）
-	iconMoreFilled  = "System/more-fill.svg"                // 操作（实心，横着的另一版）
-	iconMoreLine    = "System/more-2-line.svg"              // 操作（线框那一版：备着，不摆）
-	iconViewGrid    = "Design/layout-grid-line.svg"         // 网格档
-	iconViewList    = "Editor/list-check-2.svg"             // 列表档
-	iconGrid        = "Design/grid-line.svg"                // 网格
-	iconFolderAdd   = "Document/folder-add-line.svg"        // 新建收藏夹
-	iconEdit        = "Design/edit-line.svg"                // 编辑
-	iconEditBox     = "Design/edit-box-line.svg"            // 编辑（框起来那一版）
-	iconCalendar    = "Business/calendar-line.svg"          // 日期 / 日期范围
-	iconExpand      = "Arrows/expand-diagonal-line.svg"     // 放大
-	iconShrinkBack  = "Arrows/expand-diagonal-2-line.svg"   // 还原
-	iconPiP         = "Media/picture-in-picture-2-line.svg" // 画中画
-	iconRefresh     = "System/refresh-line.svg"             // 刷新
-	iconExternal    = "Arrows/arrow-right-up-line.svg"      // 外链（在 B 站打开）
-	iconEye         = "System/eye-line.svg"                 // 显示
-	iconEyeOff      = "System/eye-off-line.svg"             // 隐藏
-	iconWarning     = "System/error-warning-line.svg"       // 感叹号 / 警告
-	iconQuestion    = "System/question-line.svg"            // 问号（帮助）
-	iconImport      = "System/import-line.svg"              // 导入
-	iconExport      = "System/export-line.svg"              // 导出
+	iconMore       = iconset.MoreVertical                  // 每一行的操作（⋮，实心那一版）
+	iconMoreFilled = "System/more-fill.svg"                // 操作（实心，横着的另一版）
+	iconMoreLine   = "System/more-2-line.svg"              // 操作（线框那一版：备着，不摆）
+	iconViewGrid   = "Design/layout-grid-line.svg"         // 网格档
+	iconViewList   = "Editor/list-check-2.svg"             // 列表档
+	iconGrid       = "Design/grid-line.svg"                // 网格
+	iconFolderAdd  = "Document/folder-add-line.svg"        // 新建收藏夹
+	iconEdit       = "Design/edit-line.svg"                // 编辑
+	iconEditBox    = "Design/edit-box-line.svg"            // 编辑（框起来那一版）
+	iconCalendar   = "Business/calendar-line.svg"          // 日期 / 日期范围
+	iconExpand     = "Arrows/expand-diagonal-line.svg"     // 放大
+	iconShrinkBack = "Arrows/expand-diagonal-2-line.svg"   // 还原
+	iconPiP        = "Media/picture-in-picture-2-line.svg" // 画中画
+	iconRefresh    = "System/refresh-line.svg"             // 刷新
+	iconExternal   = "Arrows/arrow-right-up-line.svg"      // 外链（在 B 站打开）
+	iconEye        = "System/eye-line.svg"                 // 显示
+	iconEyeOff     = "System/eye-off-line.svg"             // 隐藏
+	iconWarning    = "System/error-warning-line.svg"       // 感叹号 / 警告
+	iconQuestion   = "System/question-line.svg"            // 问号（帮助）
+	iconImport     = "System/import-line.svg"              // 导入
+	iconExport     = "System/export-line.svg"              // 导出
 	// iconAdd 既是「关注」也是「新建收藏夹」那枚加号——上游两处用的是同一个
 	// `RiAddLine`（`music-list-item` 和 `side/collection`），而 `icons.go` 一个
 	// 文件一个名字，所以只留一个。
