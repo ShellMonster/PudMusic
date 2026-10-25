@@ -198,6 +198,22 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 	// ⚠️ `ui.Modal` 的回调**拿不到面板**（签名是 `fn func()`），而
 	// `ui.DialogBase` 给（`fn func(backdrop, panel)`）——所以这里用后者，
 	// **自己把 `ui.Modal` 那套样子摆一遍**（下一段就是照抄 `coreModal` 的）。
+	// 🔴 **确认框的身份也得钉死**（`c.Key`）：框架给元素的身份是「父的身份 +
+	// 兄弟序号」（`mygo/ui/context.go` 的 `newElement`），而**浮层里的东西会
+	// 多会少**——头像下拉那一层浮层开着的时候，它占着浮层里的一个位置；它关掉
+	// 的时候那个位置就没了。于是**确认框里那几颗键的身份跟着变**，而按下和
+	// 抬起之间隔着帧：按下记在旧身份上，抬起之后那一颗已经是新身份——**那一下
+	// 点空**（确认框还开着，退登没发生）。
+	//
+	// ⚠️ **给的是那个「底幕」**：`ui.DialogBase` 先建底幕、再把面板建在底幕
+	// **里面**（`mygo/ui/base.go` 的 `coreDialogBase`），而 `Context.Key` 是给
+	// **下一个**建出来的元素用的——所以键落在底幕上，而面板的身份是「底幕的
+	// 身份 + 兄弟序号」，底幕的身份钉死了它也就钉死了。
+	//
+	// ⚠️ **这一条不是这一票引入的**（HEAD 上也有），但这一票把「头像下拉」和
+	// 「退登确认」这两层浮层接在了一起（顶栏那枚独立的「退出」按钮没了，退登
+	// 走下拉里那一项），于是它更容易撞上。
+	c.Key("confirm-backdrop:" + spec.title)
 	m := ui.DialogBase(c, open, func(backdrop, panel ui.Element) {
 		w, h := c.Size()
 		backdrop.Background(ui.RGBA(0, 0, 0, scrim.Modal))
