@@ -1091,9 +1091,16 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 					if st.Playing {
 						glyph = iconPauseFill
 					}
-					if s.withTip(c, iconButtonPlay(c, glyph, transportLabel(st.Playing),
-						fullPlayHit, fullPlayGlyph, !st.Playing && !st.HasTrack),
-						transportLabel(st.Playing)).Clicked() {
+					// ⚠️ **这一枚禁用的时候不画光圈**（票 #271 / loadhalo.go）：
+					// 框架对禁用的控件整个乘 0.5 不透明度。
+					disabled := !st.Playing && !st.HasTrack
+					b := iconButtonPlay(c, glyph, transportLabel(st.Playing),
+						fullPlayHit, fullPlayGlyph, disabled)
+					// 🔴 **取流的时候它外面多绕一圈光**（票 #271）：满屏这一枚
+					// 是用户盯着等的地方（64×64 的实心圆），光圈比播放条那一枚
+					// 大一圈——它是**加**上去的，按钮照旧是播放 / 暂停。
+					b = s.withLoadHalo(c, b, st, fullPlayHit, !disabled)
+					if s.withTip(c, b, transportLabel(st.Playing)).Clicked() {
 						s.app.Toggle()
 					}
 					s.viewNextButtonOn(c, base)
