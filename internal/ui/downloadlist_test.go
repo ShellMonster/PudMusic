@@ -296,7 +296,7 @@ func TestTheTableShowsEveryTask(t *testing.T) {
 // TestTheFileColumnStaysReadableAtTheNarrowestWindow 钉住**最窄那一档窗口**下
 // 歌名还读得出来。
 //
-// 900 是这个应用自己定的 `WindowOptions.MinWidth`（shell.go），而这一页最难看
+// 900 是这个应用自己定的 `WindowOptions.MinWidth`（shell_window.go），而这一页最难看
 // 的尺寸就是它：减去侧栏和页面内边距，表格只剩约 660。MyGo 的 `ui.Table` 把没给
 // `Width` 的列当「吃剩下的」，四个定宽吃掉多少，文件那一列就只剩多少——第一版
 // 那四个数合计 560，于是文件列只剩 100，封面占掉 48 之后**歌名一行放得下两个
@@ -316,7 +316,7 @@ func TestTheTableShowsEveryTask(t *testing.T) {
 // 格子各自左右各留 10 的内边距，一来一回抵掉）；表格的左边界是「文件」那个框
 // 往左 10（单元格里边距），右边界是窗口减去页面的内边距 20。
 func TestTheFileColumnStaysReadableAtTheNarrowestWindow(t *testing.T) {
-	// dlNarrow 抄的是 `WindowOptions.MinWidth`（internal/ui/shell.go）。抄而不
+	// dlNarrow 抄的是 `WindowOptions.MinWidth`（internal/ui/shell_window.go）。抄而不
 	// 查是因为那边是个结构体字面量、没有导出的名字可引；而这一条的全部意义就是
 	// 「应用自己定的那一档」。
 	const dlNarrow = 900

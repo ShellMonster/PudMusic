@@ -297,7 +297,7 @@ func TestDecodingRejectsWhatBiuRejects(t *testing.T) {
 // TestCroppingDoesNotPanicOnAThinImage 极端形状不能 panic。
 //
 // 🔴 一条 `draw.Scaler` 的源矩形只要超出源图一个像素就**直接 panic**，而 view
-// 里的 panic 会穿透 Cocoa 事件循环杀掉整个进程（见 shell.go 的 Guard 注释）。
+// 里的 panic 会穿透 Cocoa 事件循环杀掉整个进程（见 shell_crash.go 的 Guard 注释）。
 // 所以「夹到图里」那几行不是保险，是防崩。
 func TestCroppingDoesNotPanicOnAThinImage(t *testing.T) {
 	for _, sz := range [][2]int{{1, 1}, {3, 1}, {1, 3}, {2, 1000}, {1000, 2}} {

@@ -657,7 +657,7 @@ func TestEachScreenIsBuiltOncePerFrame(t *testing.T) {
 			// 那一刻各个界面一个都没建——数字全是 0，而真正的原因在日志里。
 			//
 			// ⚠️ 这一句是「一帧建两遍」最常见的下场：两遍建出来的东西撞了同一个
-			// key，框架当场 panic（见 shell.go 里 viewMain 那段注释），于是这一帧
+			// key，框架当场 panic（见 shell_view.go 里 viewMain 那段注释），于是这一帧
 			// 是半张，错误页接手——而界面上的症状是「忽然跳到错误页」，离真因
 			// 隔着三层。
 			if s.crash != nil {

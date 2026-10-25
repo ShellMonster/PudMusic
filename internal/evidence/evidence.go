@@ -689,6 +689,24 @@ var Items = []Item{
 		Tests:    []string{"TestLeavingTheHomePageAndComingBackKeepsWhereYouWere"},
 	},
 	{
+		// 🔴 **这一条钉的是「代码路径上没开着」**：框架 `Router.Transition` 的零值
+		// 是 `TransitionAuto`（一条 250ms 滑入 / 150ms 淡入），不显式关掉就是开着，
+		// 而 2026-10-25 实测证实**它一直开着**——现象只是「换页滑了一下」，
+		// 不报错、不崩溃，评审和测试都看不出来。
+		//
+		// 那一组里还有一条**对照**（`TestThePageTransitionProbeWouldNoticeItIfItCameBack`），
+		// 它故意把动画打开、要求探针**必须**量到差别——没有它，上面那几条有可能
+		// 因为「探针根本没生效」而恒绿。
+		Category: Paging,
+		Spec:     "切路由是硬切：没有过渡动画（规范说不做，代码显式关掉）",
+		Tests: []string{
+			"TestTheRouterHasNoPageTransition",
+			"TestThePageTransitionProbeWouldNoticeItIfItCameBack",
+			"TestTheRouterTransitionIsSetExplicitly",
+			"TestTheMiniWindowAlsoHasNoPageTransition",
+		},
+	},
+	{
 		Category: Paging,
 		Spec:     "翻页中切查询：在途那一页被取消，迟到的结果不落地",
 		Tests:    []string{"TestReloadCancelsThePageInFlight", "TestAStaleResultNeverLands"},
