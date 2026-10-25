@@ -804,6 +804,14 @@ func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyri
 	if s.snapScroll {
 		presence = line.Jump(lyricPresenceKey, target)
 	} else {
+		// ⚠️ **这一档换不了 `AnimatePose`**（票 #276 查过）：`presence` **同时**
+		// 驱动**字号**（`size = fontSize*(1+(lyricsActiveScale-1)*presence)`，
+		// 而字号是**布局**）和不透明度——字号那一半必须读 `presence`，于是 view
+		// 每帧都要重建整棵界面，**只把不透明度换成 pose 省不到任何东西**
+		//（判据：换完之后那个动画值还会不会被 view 读——会读就白换）。
+		//
+		// 顺带：歌词的不透明度还有个底 `lyricsIdleOpacity`，不是 0→1 的斜坡；
+		// 真要换得算 `Fade = 1 - lerp(idle, active, presence)`。
 		presence = line.AnimateTo(lyricPresenceKey, target, lyricLineAnim)
 	}
 

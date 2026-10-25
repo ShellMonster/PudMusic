@@ -441,6 +441,12 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 		//
 		// ⚠️ **不透明度是画在面板自己身上的**：那圈影跟着面板一起淡——影要是
 		// 不淡，面板淡入的时候底下会先浮出一块方形阴影。
+		//
+		// ⚠️ **这一段换不了 `AnimatePose`**（票 #276 查过）：**升起的那一段动的是
+		// 布局位置**（上边距），而布局量 pose 动不了（`Pose{Y}` 是 transform，
+		// 而 DESIGN.md §五《不做》明说「要动就动布局位置」）——所以 `rise` 还得
+		// 被 view 读，每帧照样重建。**只把淡入换成 pose 是白换**（判据：换完之后
+		// 那个动画值还会不会被 view 读——会读就白换）。
 		p = p.Opacity(fade).Margin(rise, space.None, space.None, space.None)
 
 		p.Children(func() {

@@ -37,6 +37,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
@@ -680,15 +681,17 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 		Absolute().Left(0).Right(0).Top(0).Height(max(titleBar.Height, fullTopHeight)).
 		Padding(fullTopPadY, fullTopPadX, fullTopPadY, fullTopBarPadLeft(titleBar)).
 		Gap(fullTopGap).AlignItems(ui.Center).DragWindow()
-	bar = bar.Opacity(bar.AnimateTo("full-top:o", shown, ui.Smooth))
-	// ⚠️ 藏起来的时候要**移出窗口**，不只是 Opacity(0)。不移的话那两个看不见的
+	// ⚠️ **淡出和位移一起进 pose**（理由见 `fullBarPose` 那一段）：
+	// 只换不透明度的话，位移那一条还在 view 里被读，每帧照样重建整棵满屏播放器。
+	//
+	// ⚠️ 藏起来的时候要**移出窗口**，不只是淡到 0。不移的话那两个看不见的
 	// 按钮仍然接点击：停在窗口顶部点一下，满屏就被关掉；点右上角会把偏好面板
-	// 凭空开出来。底下那一条 controls 用 `Translate` 推出去了，顶栏原来没做。
+	// 凭空开出来。底下那一条 controls 用位移推出去了，顶栏原来没做。
 	//
 	// ⚠️ **方向和底下那一条相反**：controls 在底部，「滑出去」是往下（正的 Y）；
 	// 顶栏在顶部，「滑出去」是往上（负的 Y）。写反了的话它滑到整条还在窗口里
 	// （正的 `fullTopHeight`），按钮照样点得动。
-	bar = bar.Translate(0, -(1-shown)*(titleBar.Height+fullTopHeight))
+	bar = bar.AnimatePose(fullBarPose(shown, -(titleBar.Height+fullTopHeight)), fullBarAnim(c))
 
 	// ⚠️ 这一帧**进来时**面板是开着没有：`ui.Popover` 处理「点外面 / 按 Esc 关掉」
 	// 是在它自己那一趟里做的，进函数时读到的还是上一帧的值。要判断「刚刚被关掉」
@@ -1047,20 +1050,17 @@ const (
 //
 // ## 淡入要和顶栏**一模一样**
 //
-// 顶栏是 `Opacity(bar.AnimateTo("full-top:o", shown, ui.Smooth))`——不透明度是
-// **动画**出来的。这一条原来写的是 `Opacity(shown)`，那是**一下子**变 0 或 1 的。
-// 于是界面藏了三秒、指针一动之后：顶栏慢慢淡回来，底下这一整条「啪」地一下出现
-// ——同一个界面里两种响应。框架现成的动画写法照抄顶栏那一行就行。
+// 顶栏和底下这一条走的是同一条：**一个 pose**（不透明度和位移都在里面）——
+// 理由见 `fullBarPose` 那一段。框架现成的动画写法照抄顶栏那一行就行。
 func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 	shown := fullShown(hidden)
 	on, dim := s.fullForeground(c)
 	bar := ui.Row(c).Key("full-controls").
 		Absolute().Left(0).Right(0).Bottom(0).Height(fullControlsHeight).
 		Justify(ui.Center).AlignItems(ui.End)
-	bar = bar.Opacity(bar.AnimateTo("full-controls:o", shown, ui.Smooth))
-	// ⚠️ 位移**不跟着淡入一起动**（顶栏也是这么写的）：藏起来的时候这一条要真的
+	// ⚠️ 位移**跟着淡出一起动**（顶栏也是这么写的）：藏起来的时候这一条要真的
 	// 移出窗口，不然停在窗口底下那 108 像素里的控件仍然接得到点击。
-	bar = bar.Translate(0, (1-shown)*fullControlsHeight)
+	bar = bar.AnimatePose(fullBarPose(shown, fullControlsHeight), fullBarAnim(c))
 
 	bar.Children(func() {
 		// 上游那一层：`mx-auto mb-4 flex w-full max-w-6xl flex-col items-center
@@ -1232,6 +1232,53 @@ func fullShown(hidden bool) float32 {
 		return 0
 	}
 	return 1
+}
+
+// fullBarPose 是满屏那两条（顶栏 / 底下那一条控制条）这一帧的 pose。
+//
+// # 为什么**淡出和位移合成一个 pose**，而不是两样分开做
+//
+// 判据只有一条：**换完之后那个动画值还会不会被 view 读**。
+// `AnimateTo` 的返回值是**被 view 读**的（`Opacity(…AnimateTo(…))`），
+// 所以每一帧都要重跑 view ——满屏开着的时候那是**整棵满屏播放器**重建一遍
+// （实测 97 次分配 / 帧，报告 BMG-264 §6.2）。
+// `AnimatePose` 的值**元素自己走**，view 只给**目标**——于是中间那些帧走的是
+// 「只重绘」（`mygo/ui/pose.go`：「the cheapest motion there is」），**不重建**。
+//
+// ⚠️ **只把不透明度换成 pose 是白换**：位移那一条还在 view 里被读
+// （`Translate(0, (1-shown)*H)`），view 照样每帧重建。两样**必须一起**进 pose。
+//
+// # ⚠️ `Fade` 的方向和 `Opacity` **相反**
+//
+//	Opacity(v)      ⇒ p.opacity *= v          （v = alpha，1 = 不透明）
+//	Pose{Fade: f}  ⇒ p.opacity *= 1 - f       （f = 淡出的量，0 = 不透明，1 = 全没）
+//
+// ⇒ **等价的是 `Fade: 1 - v`**。写反了会让该亮的时候变透明。
+//
+// shift 是「藏起来的时候往哪边挪多少像素」（顶栏是负的、往上；控制条是正的、往下）。
+func fullBarPose(shown, shift float32) ui.Pose {
+	return ui.Pose{
+		Y:    (1 - shown) * shift,
+		Fade: 1 - shown,
+	}
+}
+
+// fullBarAnim 是满屏那两条的动画。
+//
+// ⚠️ **「减少动态效果」时用「一次到位」**：pose 的 X/Y/Scale/Rotate 四个通道在
+// ReduceMotion 下会**直接到终点**，**而 `Fade` 那一个照常平滑**
+// （`mygo/ui/pose.go` 的 `still && i < 4` 只盖住前四个通道）——于是那一档会
+// 「滑到位、慢慢淡出来」。而原来走 `AnimateTo` 的是**整个值瞬移**
+// （`mygo/ui/motion.go`）。所以这一档自己判 ReduceMotion，用 1ns 的曲线
+// （`motion.Snap`）把淡出也变成瞬移。
+//
+// ⚠️ **别用 `c.DisableAnimations()`**：那是**整帧**生效的，会把这一帧所有动画
+// 都变成瞬移（报告 BMG-264 §7 A1 的坑①）。
+func fullBarAnim(c *ui.Context) ui.Animation {
+	if c.Preferences().ReduceMotion {
+		return motion.Snap
+	}
+	return ui.Smooth
 }
 
 // ---- 分集面板 ----
