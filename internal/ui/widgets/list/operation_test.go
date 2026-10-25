@@ -146,6 +146,44 @@ func TestTheGridOperationButtonOpensTheSameMenuAsTheRightClick(t *testing.T) {
 	}
 }
 
+// TestTheOperationButtonDrawsSolidDots 验行尾那枚「⋯」画的是**实心**那一版
+// （票 BMG-253 的评审点名的那一条）。
+//
+// # 为什么它要有牙齿
+//
+// 全应用有**四枚**「⋯」（这一枚、网格卡角上那一枚、队列抽屉行尾那一枚、收藏夹
+// 工具栏那一枚），它们**必须同一张图**（名字在 `iconset.MoreVertical` 那一处，
+// 票 BMG-253 的评审指出过「同一页上两种字形并存」）。
+//
+// 而线框那一版的三个点是 24 见方里**半径 1.5** 的圆——画成 16 像素就是**三个 2
+// 像素的斑点**，和旁边那个 12 像素的时长数字一样重，用户读不出「这是一枚菜单键」。
+//
+// 判据是**墨点有几个**：实心那一版 16 像素下量到 **36** 个，线框那一版只有
+// **12**（两个都是本机实测）。门槛取 20：两边都离得开。
+func TestTheOperationButtonDrawsSolidDots(t *testing.T) {
+	_, tt := newList(t, Actions{}, onlineSongs(3))
+
+	btn, ok := tt.Find(OperationLabel("在线的歌 B"))
+	if !ok {
+		t.Fatalf("画面上找不到那枚「⋯」，文字有 %q", tt.Texts())
+	}
+	img := tt.Image()
+	// 底色取按钮**空出来的那一角**（图标是居中的 16，四角都是行底色）。
+	bg := img.RGBAAt(int(btn.X)+2, int(btn.Y)+2)
+	n := 0
+	for y := int(btn.Y); y < int(btn.Y+btn.H); y++ {
+		for x := int(btn.X); x < int(btn.X+btn.W); x++ {
+			if img.RGBAAt(x, y) != bg {
+				n++
+			}
+		}
+	}
+	if n < 20 {
+		t.Errorf("那枚「⋯」只有 %d 个墨点（want ≥20）——它是线框那一版的三个斑点，"+
+			"和旁边的时长数字一样重", n)
+	}
+}
+
 // TestTheOperationButtonSaysWhatItIs 验行尾那枚「⋯」**有一句提示**（票 BMG-253）。
 //
 // 它是这一行里**唯一**的操作入口，而它原先一句提示都没有——用户得知道三个点

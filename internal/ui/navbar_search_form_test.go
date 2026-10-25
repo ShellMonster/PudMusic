@@ -259,7 +259,7 @@ func TestTheSearchMagnifierLooksAliveWhenThePointerIsOnIt(t *testing.T) {
 // 标签**还矮**一截。两个按钮的后果**完全相反**（一个去搜这一条，一个删掉这一条），
 // 而它们原来只靠 2 像素分开：指针偏一点就删掉了。
 func TestTheHistoryChipCloseButtonIsNotSmallerThanItsLabel(t *testing.T) {
-	s, tt := newShell(t)
+	s, tt := newShell(t, systemIsDark(false))
 	tt.SetFocused(true)
 	s.hist.add("周杰伦")
 	tt.Frame()
@@ -277,14 +277,85 @@ func TestTheHistoryChipCloseButtonIsNotSmallerThanItsLabel(t *testing.T) {
 		t.Fatalf("浮层上没有那个关闭键，文字有 %q", tt.Texts())
 	}
 
-	// ① 命中区不小于标签：那个叉占满 chip 整个高（24），标签那行字是 18。
-	if close.H < label.H {
-		t.Errorf("关闭键的命中区高 %.0f、标签那行字高 %.0f——它比标签还难瞄",
-			close.H, label.H)
+	th := BuildTheme(s.app.SettingsSnapshot(), false)
+	panel := rgb(th.Background)
+	chip := rgb(historyChipBg(th))
+
+	// chip 自己的上下沿：在**右边那一段留白**那一列上量（那里只有它自己的底色）。
+	chipTop, chipBottom := verticalRun(tt.Image(), int(close.X+close.W+4),
+		int(label.Y+label.H/2), panel)
+	chipH := chipBottom - chipTop + 1
+
+	// ① 那个叉的命中区**占满 chip 整个高**：chip 的上下留白是 0，所以它和同 chip
+	// 里那个标签按钮一样高——两个热区不再一高一矮（矮的那个偏偏是图形最小的
+	// 那一个：12 的叉对 12 的字）。
+	if close.H != float32(chipH) {
+		t.Errorf("关闭键的命中区高 %.0f、chip 整个高 %d——它没有占满这一格",
+			close.H, chipH)
+	}
+
+	// ② 它**不小于标签按钮那一格**。
+	//
+	// ⚠️ **量的是标签按钮那一格，不是那行字**：标签按钮**没有名字**
+	// （`Tester.Find` 只找得到它里面的那段字），量它靠它悬停时铺的那层淡色——
+	// 指针停在那行字上，那一格就亮起来，**亮的那一段就是它的盒子**
+	// （实测 20 高：那段字 14 + 上下各 3 的内边距）。
+	tt.Move(label.X+label.W/2, label.Y+label.H/2)
+	tt.Frame()
+	col := int(label.X + label.W/2)
+	lit := 0
+	for y := chipTop; y <= chipBottom; y++ {
+		if tt.Image().RGBAAt(col, y) != chip {
+			lit++
+		}
+	}
+	if close.H < float32(lit) {
+		t.Errorf("关闭键的命中区高 %.0f、标签按钮那一格只有 %d 像素高——"+
+			"它比标签还难瞄", close.H, lit)
 	}
 	// ② 两个热区之间要有一道看得见的缝。
 	if gap := close.X - (label.X + label.W); gap < 6 {
 		t.Errorf("关闭键离标签的字只有 %.0f 像素（want ≥6）——偏一点就删错了", gap)
+	}
+}
+
+// TestTheClearAllButtonShowsATrashBin 验「清除全部」那一枚**画着垃圾桶**
+// （票 BMG-253）。
+//
+// # 为什么它要有牙齿
+//
+// 它是这一块**唯一的不可逆动作**（一次性删掉全部搜索历史，而 B 站那边没有
+// 「撤销」），而仓库里别的破坏性动作都带一枚**垃圾桶图标**（「清除已看完」
+// 「清空播放列表」——见 `later.go` 和 `queue_drawer.go`）。一个 12 像素的淡灰字
+// 看不出是删除。
+//
+// 判据是**字左边那一段里有墨迹**：垃圾桶在字的左边（中间隔着按钮自己那道 6
+// 像素的缝和左边的留白），所以量的是「字左边 22 像素那一段」。
+func TestTheClearAllButtonShowsATrashBin(t *testing.T) {
+	s, tt := newShell(t, systemIsDark(false))
+	tt.SetFocused(true)
+	s.hist.add("周杰伦")
+	tt.Frame()
+	if err := tt.Click(searchLabel); err != nil {
+		t.Fatalf("点不到搜索框：%v", err)
+	}
+	tt.Frame()
+
+	clear, ok := tt.Find("清除全部")
+	if !ok {
+		t.Fatalf("浮层上没有「清除全部」，文字有 %q", tt.Texts())
+	}
+	th := BuildTheme(s.app.SettingsSnapshot(), false)
+	// 那枚图标画的是按钮的字色（次要色那一档）。
+	icon := ui.Rect{
+		X: clear.X - 22,
+		Y: clear.Y,
+		W: 18,
+		H: clear.H,
+	}
+	if n := countNear(tt.Image(), icon, th.TextMuted); n == 0 {
+		t.Errorf("「清除全部」左边没有墨迹（%v）——它没有画那枚垃圾桶图标，"+
+			"用户看不出这一下是不可逆的", icon)
 	}
 }
 
