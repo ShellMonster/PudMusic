@@ -319,3 +319,29 @@ func TestPlayDashTakesTheLeastBadWhenNoneIsLowEnough(t *testing.T) {
 			"——往高里退的话用户明选了「省流量」却拿回一个几百 MB 的 1080P", got)
 	}
 }
+
+func TestPlayVideoPrefersH264OverHigherHEVC(t *testing.T) {
+	exp := time.Now().Add(time.Hour)
+	hevc := dashVideoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-hevc80.m4s"))
+	hevc["codecs"] = "hev1.1.6.L120.90"
+	avc := dashVideoItem(64, 1_000_000, 1280, 720, streamURL(exp, "-avc64.m4s"))
+	c := dashClient(t, dashWithVideo(hevc, avc))
+	ref, err := c.PlayVideo(context.Background(), testBvid, testCid, VideoQuality1080)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(ref.Codecs, "avc1") || ref.Height != 720 {
+		t.Fatalf("got %s %dp, want the H.264 720p", ref.Codecs, ref.Height)
+	}
+}
+
+func TestPlayVideoFallsBackWhenThereIsNoH264(t *testing.T) {
+	exp := time.Now().Add(time.Hour)
+	hevc := dashVideoItem(64, 1_000_000, 1280, 720, streamURL(exp, "-hevc64.m4s"))
+	hevc["codecs"] = "hev1.1.6.L120.90"
+	c := dashClient(t, dashWithVideo(hevc))
+	ref, err := c.PlayVideo(context.Background(), testBvid, testCid, VideoQuality720)
+	if err != nil || !strings.HasPrefix(ref.Codecs, "hev1") {
+		t.Fatalf("ref=%+v err=%v", ref, err)
+	}
+}

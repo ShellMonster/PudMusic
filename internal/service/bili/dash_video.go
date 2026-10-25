@@ -148,19 +148,7 @@ func pairFrom(d *playurlData, bvid, cid string, qn VideoQuality, pref AudioQuali
 		return nil, err
 	}
 
-	video := &StreamRef{
-		URLs:      urlsOf(v.BaseURL, v.BackupURL),
-		Quality:   Quality(v.ID),
-		Bitrate:   v.Bandwidth,
-		Codecs:    v.Codecs,
-		Container: videoContainer(v),
-		ExpiresAt: deadlineOf(v.BaseURL),
-		Bvid:      bvid,
-		Cid:       cid,
-		Width:     v.Width,
-		Height:    v.Height,
-	}
-	video.Label = VideoQuality(v.ID).Label()
+	video := videoRef(v, bvid, cid)
 	return &DashPair{Video: video, Audio: a}, nil
 }
 
@@ -293,4 +281,55 @@ func (c *Client) fetchPlayurl(ctx context.Context, bvid, cid string, qn VideoQua
 		return nil, fmt.Errorf("bili: 取流接口的返回读不懂：%w", err)
 	}
 	return &d, nil
+}
+
+// videoRef 把 `dash.video[]` 的一项变成 StreamRef。
+func videoRef(v dashVideo, bvid, cid string) *StreamRef {
+	return &StreamRef{
+		URLs:      urlsOf(v.BaseURL, v.BackupURL),
+		Quality:   Quality(v.ID),
+		Label:     VideoQuality(v.ID).Label(),
+		Bitrate:   v.Bandwidth,
+		Codecs:    v.Codecs,
+		Container: videoContainer(v),
+		ExpiresAt: deadlineOf(v.BaseURL),
+		Bvid:      bvid,
+		Cid:       cid,
+		Width:     v.Width,
+		Height:    v.Height,
+	}
+}
+
+// PlayVideo 只要视频那一条流，给边放边看用：优先 H.264（系统解码器
+// 都认），没有 H.264 才退到别的编码；画质不超过 qn。
+func (c *Client) PlayVideo(ctx context.Context, bvid, cid string, qn VideoQuality) (*StreamRef, error) {
+	if bvid == "" || cid == "" {
+		return nil, fmt.Errorf("%w: 稿件或分 P 不完整（bvid=%q cid=%q）", ErrNoStream, bvid, cid)
+	}
+	d, err := c.fetchPlayurl(ctx, bvid, cid, qn)
+	if err != nil {
+		return nil, err
+	}
+	return videoOnly(d, bvid, cid, qn)
+}
+
+func videoOnly(d *playurlData, bvid, cid string, qn VideoQuality) (*StreamRef, error) {
+	if d == nil || d.Dash == nil {
+		return nil, fmt.Errorf("%w: 这个稿件没有 dash 流", ErrNoStream)
+	}
+	dash := *d.Dash
+	var avc []dashVideo
+	for _, v := range dash.Video {
+		if strings.HasPrefix(v.Codecs, "avc1") {
+			avc = append(avc, v)
+		}
+	}
+	if len(avc) > 0 {
+		dash.Video = avc
+	}
+	v, ok := pickVideo(&dash, qn)
+	if !ok {
+		return nil, fmt.Errorf("%w: 稿件 %s 的第 %s 集没有视频流", ErrNoStream, bvid, cid)
+	}
+	return videoRef(v, bvid, cid), nil
 }
