@@ -71,11 +71,11 @@ func TestRightClickOpensTheBiuMenu(t *testing.T) {
 }
 
 // TestChoosingPlayNowHandsOverJustThatSong 钉住「立即播放」的**那一句字**说的是
-// 什么：**只放当前这一首**（票 #299，2026-10-24 拍板）。
+// 什么：**只把当前这一首交给追加并立即播放的出口**（票 #337）。
 //
 // ⚠️ 它和「从这一首往后听」差在**带过去几首**：那一枚带的是从这一首到这一页
 // 末尾的那一整段，这一枚**只带它自己**。多带一首就是「按了一首把整页都排上了」——
-// 而「只放这一首」这句话许诺的恰恰相反。
+// 「立即播放」只追加当前这一首，原队列仍然保留。
 func TestChoosingPlayNowHandsOverJustThatSong(t *testing.T) {
 	rec := &recorded{}
 	_, tt := newList(t, rec.actions(), onlineSongs(5))

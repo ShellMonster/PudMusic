@@ -43,7 +43,6 @@ import (
 	"log"
 	"runtime/debug"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
 	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
@@ -548,7 +547,7 @@ func (g *newMusicGrid) viewCard(c *ui.Context, i int, coverSide float32) {
 		// 渐变、右下角一个主色圆播放钮、200ms 淡入。四态由 imgcache.View 画：
 		// 空地址画空框，不画「失败」。
 		//
-		// ⚠️ 播放钮按下去是 `g.play(i)`（只放这一首），不是网格卡片那枚「从这一
+		// ⚠️ 播放钮按下去是 `g.play(i)`（追加这一首并立即播），不是网格卡片那枚「从这一
 		// 首往后接」——所以走 `CardCoverOne`，它的标签和提示说的也是这一件事。
 		hover.CardCoverOne(c, g.cache, m.Cover, coverSide, coverSide, onCard, m.Title,
 			func() { g.play(i) })
@@ -616,14 +615,10 @@ func (g *newMusicGrid) Height() float32 {
 		float32(rows)*(g.coverSide+newMusicCardTextH) + float32(rows-1)*newMusicGap
 }
 
-// play 把第 i 首放进队列并开始播。
-//
-// 给的是**只有这一首**，不是「从它往后」：上游 `handlePlay` 走的是
-// `usePlayList.play({…})`，换掉整个队列从这一首开始（见 widgets/list 的
-// actions.go 里 `AppActions` 的 `Play`，它和这里说的是同一件事）。
+// play 把第 i 首追加到队尾并立即播放，保留用户原队列（票 #337）。
 func (g *newMusicGrid) play(i int) {
-	if i < 0 || i >= len(g.songs) || g.acts.Play == nil {
+	if i < 0 || i >= len(g.songs) || g.acts.PlayNow == nil {
 		return
 	}
-	g.acts.Play([]app.Item{g.songs[i].Item})
+	g.acts.PlayNow(g.songs[i].Item)
 }

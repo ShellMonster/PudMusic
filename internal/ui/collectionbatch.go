@@ -562,7 +562,7 @@ func (s *Shell) allMedias(p *collectionPage) []bili.Media {
 	return out
 }
 
-// playWholeCollection 播放全部：从第一首起，把**已经加载出来的**都接进队列。
+// playWholeCollection 播放全部：把队列**换成**已经加载出来的那些并从第一首起播。
 func (s *Shell) playWholeCollection(p *collectionPage) {
 	items := itemsOfMedias(s.allMedias(p))
 	if len(items) == 0 {

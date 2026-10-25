@@ -200,7 +200,7 @@ func TestTheMiniVolumeSliderSaysWhatItIs(t *testing.T) {
 // 同一个字、同一颗实心主色、同一枚控件 ⇒ 两处的盒子一模一样。而「一个页面有、
 // 另一个没有」这件事本身也由这一条断掉：少一个就量不成一对。
 //
-// ⚠️ **不判语义**：队列语义（追加 / 从这首开始）仍然待人裁决，这一票只统一画法。
+// ⚠️ **不判语义**：队列语义由票 #337 的行为测试钉住，这一票只统一画法。
 func TestThePlayAllButtonIsTheSameOnBothPages(t *testing.T) {
 	// 首页：摆三首歌，那一枚按钮才是可按的。
 	home := newTestShell(t, withSettings(app.DefaultSettings("")))
@@ -236,56 +236,32 @@ func TestThePlayAllButtonIsTheSameOnBothPages(t *testing.T) {
 // B6 的另一半：两枚按钮按下去做的是同一件事
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestThePlayAllButtonEnqueuesOnBothPages 钉住「两个页面上按『全部播放』，
-// 进去队列的是同一批歌」。
-//
-// ⚠️ **只判「队列里多了这一页的歌」**：这一枚的**语义**（追加 + 从这一页的第一
-// 首开始播）是票 #299 拍板定的，钉在 `ticket299_test.go` 那两条里；这里只管
-// **两个页面是同一个出口**（改了一边忘了另一边，这一页就少一半功能）。
-func TestThePlayAllButtonEnqueuesOnBothPages(t *testing.T) {
-	// 首页：三首歌按下去，队列里就该多三首。
-	//
-	// ⚠️ **这一页的歌用本地文件**：票 #299 之后「全部播放」会**真的开始播**这一页
-	// 的第一首，而在线的那些在测试里放不了（在线取流要真网络，而真网络是**真
-	// 账号**——铁律：不打真 B 站）。本地歌走的是开文件那一路，放得起来。
-	home := newTestShell(t, withSettings(app.DefaultSettings("")))
-	if err := home.s.app.Enqueue(app.LocalItem(flacPath(t))); err != nil {
-		t.Fatal(err)
-	}
-	home.s.home.SetSongs(homeSongs{
-		tabs: [homeTabCount][]list.Music{0: localSongs(t, 3)},
+// TestThePlayAllButtonReplacesQueueOnBothPages 验两个页面共用批量替换语义。
+// 在线搜索走本地 HTTP fixture，起播与队列都检查。
+func TestThePlayAllButtonReplacesQueueOnBothPages(t *testing.T) {
+	t.Run("首页", func(t *testing.T) {
+		home := newTestShell(t, withSettings(app.DefaultSettings("")))
+		seedThreeSongs(t, home.a)
+		page := localSongs(t, 3)
+		home.s.home.SetSongs(homeSongs{tabs: [homeTabCount][]list.Music{0: page}})
+		homeFrame(home.tt)
+		if err := home.tt.Click(playAllLabel); err != nil {
+			t.Fatal(err)
+		}
+		assertQueueAndPlaying(t, home.a, []app.Item{page[0].Item, page[1].Item, page[2].Item}, 0)
 	})
-	homeFrame(home.tt)
-	btn, ok := home.tt.Find(playAllLabel)
-	if !ok {
-		t.Fatalf("首页上没有 %q 那一枚，文字有 %q", playAllLabel, home.tt.Texts())
-	}
-	home.tt.ClickAt(btn.X+btn.W/2, btn.Y+btn.H/2)
-	home.tt.Frame()
-	// ⚠️ **队列里先有那一首本地文件**：所以按完之后是 1 + 3。
-	if got := home.s.app.Queue().Len(); got != 4 {
-		t.Errorf("首页上按了 %q 之后队列里是 %d 首，want 4（先放的那一首 + 这一页的三首）",
-			playAllLabel, got)
-	}
-
-	// 搜索页：同样按一下，进去的是这一页的结果。
-	st := newSearchStub(10, 20)
-	search, searchTT := newSearchPage(t, "周杰伦", st)
-	waitFor(t, "搜索结果出来了", func() bool {
-		searchTT.Frame()
-		return searchTT.HasText(playAllLabel)
+	t.Run("搜索", func(t *testing.T) {
+		st := newSearchStub(24, 24)
+		search, tt := newSearchPage(t, "周杰伦", st)
+		mountQueueStreaming(t, search.app)
+		settleText(t, tt, stubTitle(1, 0))
+		seedThreeSongs(t, search.app)
+		if err := tt.Click(playAllLabel); err != nil {
+			t.Fatal(err)
+		}
+		want, _ := playAllItems(st.rows(searchTabSong, 1))
+		assertQueueAndPlaying(t, search.app, want, 0)
 	})
-	before := search.app.Queue().Len()
-	searchBtn, ok := searchTT.Find(playAllLabel)
-	if !ok {
-		t.Fatalf("搜索页上没有 %q 那一枚，文字有 %q", playAllLabel, searchTT.Texts())
-	}
-	searchTT.ClickAt(searchBtn.X+searchBtn.W/2, searchBtn.Y+searchBtn.H/2)
-	searchTT.Frame()
-	if got := search.app.Queue().Len(); got <= before {
-		t.Errorf("搜索页上按了 %q 之后队列里还是 %d 首——那一枚按钮按了没反应",
-			playAllLabel, got)
-	}
 }
 
 // playableSongsOf 造 n 首**放得了**的歌（首页那一屏）。
@@ -322,22 +298,20 @@ func playableSongsOf(prefix string, n int) []list.Music {
 // 从这一首往后听 / 下一首播放 / 添加到队列」四个入口都按不动，末尾还补一句
 // 为什么）。
 //
-// 「全部播放」是**整页一起加**的：它要是把放不了的也加进去，用户就会在队列里
+// 「全部播放」是**整页一起换**的：它要是把放不了的也换进去，用户就会在队列里
 // 撞上几首按不动的歌，而界面上一个字的解释都没有。
 //
 // # 判据是**队列里那几项**
 //
 // 放得了的那一首进去了，放不了的那一首没进去；而且**跳过了几首要说一声**
-// （不然用户数不出「这一页有 2 首，队列里只多了 1 首」）。
+// （不然用户数不出「这一页有 2 首，而队列里换过去的是 1 首」）。
 func TestThePlayAllButtonSkipsTheUnplayableOnes(t *testing.T) {
 	home := newTestShell(t, withSettings(app.DefaultSettings("")))
 	// 队列先放一首。
 	if err := home.s.app.Enqueue(app.LocalItem(flacPath(t))); err != nil {
 		t.Fatal(err)
 	}
-	// ⚠️ **「放得了的」那一首用本地文件**：这一票之后「全部播放」会**真的开始播**
-	// 这一页的第一首（票 #299），而在线的那些在测试里放不了（在线取流要真网络，
-	// 真网络是**真账号**——铁律：不打真 B 站）。本地歌走的是开文件那一路。
+	// 本地音频夹具可实际起播；不可播条目必须被跳过并说明。
 	playable := writeCopy(t, t.TempDir(), "放得了的.flac")
 	home.s.home.SetSongs(homeSongs{
 		tabs: [homeTabCount][]list.Music{0: {
@@ -358,12 +332,12 @@ func TestThePlayAllButtonSkipsTheUnplayableOnes(t *testing.T) {
 	home.tt.Frame()
 
 	items := home.s.app.Queue().Items()
-	if len(items) != 2 {
-		t.Fatalf("队列里有 %d 项，want 2（原来那一首 + 放得了的那一首）——"+
+	if len(items) != 1 {
+		t.Fatalf("队列里有 %d 项，want 1（只剩放得了的那一首）——"+
 			"放不了的那一首不该被塞进队列", len(items))
 	}
-	if items[1].Title != "放得了的" {
-		t.Errorf("队列第 2 项是 %q，want 「放得了的」", items[1].Title)
+	if items[0].Title != "放得了的" {
+		t.Errorf("队列第 1 项是 %q，want 「放得了的」", items[0].Title)
 	}
 	// 跳过了几首要说一声。
 	if !home.tt.HasText("有 1 首放不了") {
