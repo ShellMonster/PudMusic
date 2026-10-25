@@ -23,6 +23,10 @@
 // 那一项的分区列表里现在堆着 **22 条历史 cdhash**，那就是 22 次
 // 「重新构建 → 重新授权」的化石记录。
 //
+// 旧的钥匙串那一项**不迁移、不清理**：软件还没发版，没有别的用户的老数据
+// （AGENTS.md §5）。本机上留着的旧条目，想删就手动
+// `security delete-generic-password -s com.biu-go.biu-mygo.login`，重新扫码登录一次。
+//
 // # 代价（这一条是安全倒退，说在前面）
 //
 // 钥匙串那一层提供的保护是「**别的程序读不到**」。改成文件之后没有了：
@@ -53,9 +57,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -72,24 +74,6 @@ const (
 
 	// credentialsFileName 是凭据文件的名字。
 	credentialsFileName = "session.json"
-
-	// legacyKeychainService 是**旧**后端（钥匙串）用的服务名。
-	//
-	// ⚠️ **它现在只用于一次性迁移**：读出旧的那份、搬进文件、然后删掉钥匙串里
-	// 那一项。搬完之后这个服务名就不再有任何用了。
-	//
-	// ⚠️ **不要改它**：改了等于换了一项，钥匙串里旧的那份就再也读不回来，
-	// 表现是「升级之后掉登录」。
-	legacyKeychainService = "com.biu-go.biu-mygo.login"
-
-	// legacyKeychainAccount 是旧那一项的账号名。
-	legacyKeychainAccount = "primary"
-
-	// cleanupMarkerName 是「钥匙串里可能还留着旧的一份，要清」的标记文件名。
-	//
-	// ⚠️ 它放在**用户数据目录的根**，不在凭据子目录里——理由见
-	// markCleanupPending 的注释。
-	cleanupMarkerName = ".keychain-cleanup"
 )
 
 // 权限位。
@@ -114,13 +98,6 @@ const (
 type fileStore struct {
 	dir  string // 应用数据目录
 	path string // 凭据文件的全路径
-
-	// legacyService 是迁移时去钥匙串找的那一项的服务名。
-	//
-	// ⚠️ 它是个字段而不是常量，是为了**测试**：迁移要真的动钥匙串，
-	// 而测试绝不能碰用户真数据（那一项里是用户真的登录态）。
-	// 所以测试把它换成一次性服务名，测完删掉。
-	legacyService string
 }
 
 // NewSystemStore 按平台建一个「系统保护存储」。
@@ -129,59 +106,20 @@ func NewSystemStore(dir string) (Store, error) {
 		return nil, fmt.Errorf("%w: 没有应用数据目录", ErrUnavailable)
 	}
 	return &fileStore{
-		dir:           dir,
-		path:          filepath.Join(dir, credentialsDirName, credentialsFileName),
-		legacyService: legacyKeychainService,
+		dir:  dir,
+		path: filepath.Join(dir, credentialsDirName, credentialsFileName),
 	}, nil
 }
 
 func (f *fileStore) Name() string { return "macos-file" }
 
 // Load 读出登录态。文件不存在就是 ErrNotLoggedIn。
-func (f *fileStore) Load(ctx context.Context) (Session, error) {
-	// ⚠️ **清理要在所有路径上都跑**：包括「钥匙串锁着、搬不动」那条——
-	// 那条路会写下一个「待清理」的标记，而真正把它删掉的就是这一步。
-	// 用 defer 是因为它横跨了好几个 return。
-	defer f.cleanupLegacyKeychainItem(ctx)
-
+func (f *fileStore) Load(context.Context) (Session, error) {
 	blob, err := f.readFile()
 	if errors.Is(err, os.ErrNotExist) {
-		// 文件还没有 → 可能是从旧版（钥匙串）升上来的，试着搬一次。
-		//
-		// ⚠️ **判据是「凭据目录在不在」，不是「文件在不在」**：目录在、文件不在
-		// 是「登出过」（Clear 删了文件、目录留着），那**不该**再去钥匙串搬——
-		// 钥匙串里那份早就被搬走并删掉了，搬也搬不到什么；
-		// 而「目录都不在」才是「这个后端第一次上桌」。
-		if _, dirErr := os.Stat(filepath.Dir(f.path)); errors.Is(dirErr, os.ErrNotExist) {
-			migrated, mErr := f.migrateFromKeychain(ctx)
-			switch {
-			case migrated:
-				// 搬成功了（**哪怕钥匙串那一项没删掉**）→ 文件里有凭据，
-				// 用户是登录着的。「没删掉」那件事由标记文件记着，下次启动再清一次。
-				//
-				// ⚠️ 这里**不能**因为「没删掉」就报「没登录」：文件里明明有可用的
-				// 凭据，报「没登录」会让用户白扫一次码（评审逮到过这一条）。
-				blob, err = f.readFile()
-				if err != nil {
-					return Session{}, fmt.Errorf("%w: 读 %s: %v", ErrBackend, f.path, err)
-				}
-			case errors.Is(mErr, errNoLegacyKeychainItem):
-				// 钥匙串里本来就没有旧的那一项 → 没得搬。
-				//
-				// ⚠️ **也要记一笔**（把凭据目录建出来）：否则每次启动都会去
-				// 碰一次钥匙串，而钥匙串锁着时那一次会弹框要密码。
-				f.markCleanupPending()
-				return Session{}, ErrNotLoggedIn
-			default:
-				// 搬不动（多半是钥匙串锁着）：这次按没登录处理，
-				// 但**记一笔「可能还有旧的一份要清」**，下次启动再清。
-				f.markCleanupPending()
-				return Session{}, ErrNotLoggedIn
-			}
-		} else {
-			return Session{}, ErrNotLoggedIn
-		}
-	} else if err != nil {
+		return Session{}, ErrNotLoggedIn
+	}
+	if err != nil {
 		return Session{}, fmt.Errorf("%w: 读 %s: %v", ErrBackend, f.path, err)
 	}
 	var s Session
@@ -338,187 +276,4 @@ func checkPermissions(path string) (os.FileMode, error) {
 		return st.Mode().Perm(), fmt.Errorf("%w: %s 是个目录，不该是凭据文件", ErrBackend, path)
 	}
 	return st.Mode().Perm(), nil
-}
-
-// migrateFromKeychain 把旧版留在钥匙串里的登录态搬进文件，然后删掉钥匙串那一项。
-//
-// # 为什么用 `security` 命令行，而不是钥匙串 API
-//
-// 钥匙串 API 读内容要过**访问控制**那一关，而访问控制认的是**代码身份**——
-// 本 app 是 ad-hoc 签名的，每一次构建都是「一个新程序」，于是每读一次
-// 就要弹一次框要授权（用户看到的就是「每次打开都要钥匙串授权」）。
-//
-// 而 `/usr/bin/security` 是 **Apple 自己签的**，它在分区列表里有稳定的一档
-// （`apple-tool:`），读我们那一项**不弹框**。
-//
-// ⚠️ 代价：多一个子进程依赖（`/usr/bin/security` 是 macOS 自带的，
-// 但在受限环境里可能不在——那种情况下迁移失败，当没登录处理）。
-//
-// # 顺序：先写文件、写对了才删钥匙串
-//
-// 反过来（先删钥匙串再写文件）的话，中途断电就是**登录态两头都没了**：
-// 钥匙串里那份已经被删了，文件里也没写成——用户只能重新扫码。
-//
-// # 删掉那一项是必须的
-//
-// 搬完之后钥匙串里还留着同一份 SESSDATA 的明文——**留着就等于没搬**。
-// 而且它还在被「点一次始终允许就多一条 cdhash」的历史污染着。
-//
-// # 返回值
-//
-//   - `(true, nil)`：搬完了，钥匙串那一项也删掉了。
-//   - `(true, errCleanupPending)`：搬完了，但**钥匙串那一项没删掉**。
-//     ⚠️ 这**不是失败**：文件里已经有可用的凭据了，用户是登录着的。
-//     旧的那份明文还在钥匙串里 → 写一个标记文件，下次启动再删一次。
-//   - `(false, errNoLegacyKeychainItem)`：钥匙串里本来就没有旧的那一项。
-//   - `(false, 其它错误)`：搬不动（多半是钥匙串锁着）。
-func (f *fileStore) migrateFromKeychain(ctx context.Context) (bool, error) {
-	// ⚠️ 钥匙串锁着的时候，`security` 会弹框要密码——那个框会一直挂着。
-	// 所以给它一个上限：搬不过去就当没登录（用户重新扫码），
-	// 不能让整个应用卡在启动上。
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-
-	content, err := f.readLegacyKeychainItem(ctx)
-	if err != nil {
-		return false, err
-	}
-	if len(bytes.TrimSpace(content)) == 0 {
-		return false, errors.New("钥匙串里那一项是空的")
-	}
-	// ⚠️ **先验一下它真的是我们认得的格式**：直接写进去的话，
-	// 一个解析不了的旧内容会变成「文件里有一份坏 JSON」，症状是「一直登不上」。
-	var probe Session
-	if err := json.Unmarshal(bytes.TrimSpace(content), &probe); err != nil {
-		return false, fmt.Errorf("钥匙串里那份解不开: %w", err)
-	}
-	if !probe.LoggedIn() {
-		return false, errors.New("钥匙串里那份不是登录态")
-	}
-	if err := f.Save(ctx, probe); err != nil {
-		return false, err
-	}
-	// 文件已经写好并核对过了 → 现在删钥匙串那一项。
-	if err := f.deleteLegacyKeychainItem(ctx); err != nil {
-		// 删不掉**不是致命**：文件里已经有了，用户是登录着的。
-		// 但**必须记下来**——钥匙串里那份明文还在，下次启动要再删一次。
-		f.markCleanupPending()
-		log.Printf("biu: 登录态已经搬进 %s，但钥匙串里那一项删不掉（%v）；"+
-			"它里面还留着同一份登录态，下次启动会再删一次", f.path, err)
-		return true, fmt.Errorf("%w: 文件已经搬好了，但钥匙串里那一项删不掉（%v）；"+
-			"它里面还留着同一份登录态，手动删：security delete-generic-password -s %s",
-			errCleanupPending, err, legacyKeychainService)
-	}
-	return true, nil
-}
-
-// errNoLegacyKeychainItem 说「钥匙串里本来就没有旧的那一项」。
-//
-// ⚠️ 它跟「搬不动」是**两件事**，必须分开：
-// 「没有」是正常状态（没登录过，或者已经搬过了）；
-// 「搬不动」是钥匙串锁着之类，**可能**还有一份旧的在那儿——
-// 那时要记一笔，下次启动再清。
-var errNoLegacyKeychainItem = errors.New("钥匙串里没有旧的那一项")
-
-// errCleanupPending 说「搬完了，但钥匙串那一项还没删掉」。
-//
-// ⚠️ 调用方**不能**把它当成「没登录」：文件里明明有可用的凭据。
-var errCleanupPending = errors.New("钥匙串里那一项还没删掉")
-
-// markCleanupPending 记一笔「钥匙串里可能还留着旧的一份，要清」。
-//
-// 它同时**把凭据目录建出来**——这一步是有讲究的：
-//
-// 「凭据目录存在」是「**不再自动尝试迁移**」的判据（见 Load）。
-// 所以搬不动的时候（多半是钥匙串锁着）把目录建出来，迁移这条���就到此为止：
-// 否则每次启动都会去碰一次钥匙串，而钥匙串锁着时那一次会弹框要密码——
-// 那正是这一票要消除的现象。
-//
-// ⚠️ **代价**：钥匙串锁着的那一次，旧的那份登录态**搬不过来**，
-// 用户要重新扫码一次（README「已知边界」里写了这一条）。
-// 那份明文仍然会被清掉（下面那个标记就是干这个的），所以判据 ② 照样成立。
-//
-// ⚠️ 标记放在**用户数据目录的根**，不在凭据子目录里：
-// 放在子目录里就得先建那个目录——而那正是这一步要做的（建凭据目录）。
-func (f *fileStore) markCleanupPending() {
-	// 建凭据目录 → 迁移这条路到此为止（理由见上面的注释）。
-	if err := os.MkdirAll(filepath.Dir(f.path), credentialsDirMode); err != nil {
-		log.Printf("biu: 建 %s 失败：%v", filepath.Dir(f.path), err)
-	}
-	marker := filepath.Join(f.dir, cleanupMarkerName)
-	if err := os.WriteFile(marker, []byte(legacyKeychainService), credentialsFileMode); err != nil {
-		log.Printf("biu: 记不下「钥匙串里还有旧的一份」这一笔（%v）：%v", marker, err)
-	}
-}
-
-// cleanupLegacyKeychainItem 把钥匙串里旧的那一项删掉（如果它还在）。
-//
-// ⚠️ **只在标记存在时才做**：没有标记就完全不碰钥匙串——
-// 那正是这一票的全部意义（钥匙串不再参与）。
-//
-// ⚠️ 删不掉就留着标记，下次启动再试。**清不掉不影响登录态**：
-// 凭据已经在文件里了。
-func (f *fileStore) cleanupLegacyKeychainItem(ctx context.Context) {
-	marker := filepath.Join(f.dir, cleanupMarkerName)
-	if _, err := os.Stat(marker); err != nil {
-		return // 没有标记 → 不碰钥匙串
-	}
-	// ⚠️ 钥匙串锁着时 `security` 会弹框要密码，那个框会一直挂着 → 给它一个上限。
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	if err := f.deleteLegacyKeychainItem(ctx); err != nil {
-		log.Printf("biu: 钥匙串里旧的那一项还是删不掉（%v）；下次启动再试", err)
-		return
-	}
-	_ = os.Remove(marker)
-}
-
-// readLegacyKeychainItem 读出钥匙串里旧的那一项（不打印内容）。
-//
-// ⚠️ **内容绝不能进日志**：它是 SESSDATA。这里只用子进程的标准输出，
-// 捕获到内存里，不落盘、不打日志。
-//
-// ⚠️⚠️ **服务名必须来自实例字段，不能用包级常量。**
-// 用常量的话，测试用的那个后端会去读**用户真数据**那一项——
-// 而读完紧接着就是「把那一项删掉」，于是**测试把用户的登录态删了**。
-// （这个坑本票真踩过一次：见收尾说明。）
-func (f *fileStore) readLegacyKeychainItem(ctx context.Context) ([]byte, error) {
-	security, err := exec.LookPath("security")
-	if err != nil {
-		return nil, fmt.Errorf("找不到 security 命令行工具: %w", err)
-	}
-	cmd := exec.CommandContext(ctx, security, "find-generic-password",
-		"-s", f.legacyService, "-a", legacyKeychainAccount, "-w")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		// 找不到是**正常状态**（没登录过 / 已经搬过了）。
-		// ⚠️ 它跟「读不出来」必须分开：找不到 = 钥匙串里没有旧的那一份，
-		// 读不出来 = 可能有（钥匙串锁着）——后者要记一笔，下次再清。
-		if ee := new(exec.ExitError); errors.As(err, &ee) && ee.ExitCode() == 44 {
-			return nil, errNoLegacyKeychainItem
-		}
-		return nil, fmt.Errorf("读钥匙串失败: %v: %s", err, strings.TrimSpace(stderr.String()))
-	}
-	return stdout.Bytes(), nil
-}
-
-// deleteLegacyKeychainItem 删掉钥匙串里旧的那一项。
-func (f *fileStore) deleteLegacyKeychainItem(ctx context.Context) error {
-	security, err := exec.LookPath("security")
-	if err != nil {
-		return fmt.Errorf("找不到 security 命令行工具: %w", err)
-	}
-	cmd := exec.CommandContext(ctx, security, "delete-generic-password",
-		"-s", f.legacyService, "-a", legacyKeychainAccount)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if ee := new(exec.ExitError); errors.As(err, &ee) && ee.ExitCode() == 44 {
-			return nil // 已经不在了
-		}
-		return fmt.Errorf("%v: %s", err, strings.TrimSpace(stderr.String()))
-	}
-	return nil
 }
