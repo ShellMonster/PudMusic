@@ -14,6 +14,8 @@ import (
 	"errors"
 	"path/filepath"
 	"sync"
+
+	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 )
 
 // settingsSlot 是一个 App 上挂着的那份设置。
@@ -85,6 +87,9 @@ func (a *App) MountSettings(path string) error {
 	a.mu.Lock()
 	a.volume = vol
 	a.muted = s.Muted
+	if s.PlaybackRate > 0 {
+		a.rate = audio.SnapRate(s.PlaybackRate)
+	}
 	a.mu.Unlock()
 
 	// 落盘完成了要叫醒界面：不唤醒的话，界面会一直停在「还没存」的那一帧

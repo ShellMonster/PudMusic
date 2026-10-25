@@ -79,6 +79,7 @@ var ourOwnKeys = []string{
 	"playMode",
 	"shouldKeepPagesOrderInRandomPlayMode",
 	"volume",
+	"playbackRate",
 	"isMuted",
 	"playback",
 	"themePreset",
@@ -953,6 +954,7 @@ const ourOwnKeysJSON = `{
 	"playMode": "loop",
 	"shouldKeepPagesOrderInRandomPlayMode": false,
 	"volume": 1,
+	"playbackRate": 0,
 	"isMuted": false,
 	"playback": {"items": [], "current": "", "positionMs": 0},
 	"themePreset": "warm-paper"
