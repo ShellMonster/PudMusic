@@ -31,10 +31,14 @@ func (s *Shell) viewSpaceTabs(c *ui.Context, sp *upSpace) {
 	// 外层给）。原来一点都没有，于是「动态」两个字底下一张卡片就顶上来
 	// （用户 2026-10-25 说的）。
 	//
+	// ⚠️ **上面那 16 是头图区和这一条之间的**：上游那一层是 `p-4`
+	// （`user-profile/index.tsx:130`），上下左右各 16——左右那两段由这一列的
+	// 左右内边距给，上下两段在这里给。
+	//
 	// ⚠️ **这一段给在 Tab 那一条上，不在内容面板里**：四张 Tab 的内容都摆在
 	// 下面那一个 `space-body` 里（`viewUpSpace`），所以这一段是**四张一起**的
 	// ——「一页两套口径」这件事从根上就不可能再有。
-	ui.Column(c).Key("space-tabs").Padding(space.None, upPad, space.Px16, upPad).Children(func() {
+	ui.Column(c).Key("space-tabs").Padding(space.Px16, upPad, space.Px16, upPad).Children(func() {
 		// ⚠️ **主 Tab 用轨道 + 滑块那一种**（`mainTabs`，见 tabs.go）：这一排
 		// 和次级排序那几排不是同一个样子（票 #138）。
 		//

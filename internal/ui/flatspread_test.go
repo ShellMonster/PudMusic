@@ -403,7 +403,11 @@ func TestTheDynamicCardKeysAreFlat(t *testing.T) {
 			// ⚠️ **键压着的是**页面底色**：动态条目是**通栏**的（上游那一档：透明底、
 			// 只有一条下边框、直角，票 #416），卡片自己不再有底色。
 			assertTextKeysFlat(t, tt, flatPageBG(s, dark), "动态卡片",
-				"作者v1", "赞 12", "下一首播放", "下载音频")
+				"作者v1", "赞 12")
+			// ⚠️ **「下一首播放」「下载音频」不在这一列里**：它们收在右上角那个
+			// 「⋯」菜单里（票 #268，照上游的 `MoreMenu`），而「赞」留在外面。
+			// 「⋯」那一枚是图标键。
+			assertKeysFlat(t, tt, "动态卡片", dynMoreLabel)
 		})
 	}
 }

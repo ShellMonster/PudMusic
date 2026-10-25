@@ -70,9 +70,8 @@ func (g FavoriteGroup) Valid() bool { return g >= 0 && g < favoriteGroupCount }
 
 // Favorite 是侧栏里的一行：一个收藏夹，或者一个合集 / 系列。
 //
-// 字段只留现在画得出来的那些（标题 + 跳转要用的 id / 账号 / 类型）。
-// 封面那一格等 imgcache 接上再补——**先立字段、后接数据**，和
-// `State.CoverURL` 是同一个理由：本地文件永远没有封面，但字段先立着。
+// 字段只留现在画得出来的那些（标题 + 跳转要用的 id / 账号 / 类型 + 封面 +
+// 歌曲数量）。
 //
 // ⚠️ **今天侧栏上只有收藏夹那一种行**：合集 / 系列的内容列表是另一套接口
 // （本项目没接），摆进去是死的路，所以 `app.collectedFavorites` 那一道把
@@ -87,6 +86,20 @@ type Favorite struct {
 	// 「我创建的」全是收藏夹；「我收藏的」那边接口也会给合集 / 系列，
 	// 但它们被滤掉了（见上面的注释）。
 	Type int
+	// Cover 是这个容器的封面地址（可能是协议相对地址）。
+	//
+	// ⚠️ **来源是那两个列表接口本来就给的一格**
+	// （`created/list` 和 `collected/list` 的 `list[].cover`）——不是每行
+	// 另发一次请求问来的（票 #270）。空串 = 没有封面，界面上画占位图。
+	//
+	// ⚠️ **「我收藏的」那一组里它是原主人的封面**（那一组全是别人的收藏夹，
+	// 见 `bili.CollectedFolder.Cover`）。
+	Cover string
+	// MediaCount 是里面有几个内容。
+	//
+	// ⚠️ **它是 B 站上次统计的数字，不是实时的**——用户在 B 站网页上刚加
+	// 一首，这边要等下一次刷新才数得对。那不是 bug（票 #270 的验收标准）。
+	MediaCount int
 }
 
 // Favorites 是侧栏那两组条目。
@@ -357,6 +370,12 @@ func (f *Favorites) Reorder(g FavoriteGroup, id, before int64) ([]int64, bool) {
 // 走这一条的是**建完之后 / 改完之后**那一下：接口告诉了我们新收藏夹是什么，
 // 但拉全量是另一趟往返（见 app 层的 `LoadCreatedFolders`），而「新建完
 // 侧栏里立刻出现它」比「顺序正确」更要紧。
+//
+// ⚠️ **数量沿用旧的那一份**：建 / 改收藏夹那两个接口**不返回 media_count**
+// （`bili.FolderInfo` 没有这一格），所以传进来的 `MediaCount` 是 0——而这里的
+// 0 是「不知道」，不是「真的 0 首」。直接换上去的话，用户改一次收藏夹的名字，
+// 侧栏上那个「32 首」就变成了「0 首」，而那个收藏夹里明明还有 32 首。
+// 真的新建出来的那一格没有旧值，沿用不到，于是就是 0（它确实是空的）。
 func (f *Favorites) Upsert(g FavoriteGroup, item Favorite) {
 	if !g.Valid() || item.ID == 0 {
 		return
@@ -364,6 +383,9 @@ func (f *Favorites) Upsert(g FavoriteGroup, item Favorite) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if i := slices.IndexFunc(f.groups[g], func(x Favorite) bool { return x.ID == item.ID }); i >= 0 {
+		if item.MediaCount == 0 {
+			item.MediaCount = f.groups[g][i].MediaCount
+		}
 		f.groups[g][i] = item
 		return
 	}
