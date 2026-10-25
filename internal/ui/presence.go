@@ -109,8 +109,21 @@ func (p *windowPresence) takeResumed() bool {
 // 由系统画——那一帧是对的吗？**恰好是**，因为 view 每帧都从 `Snapshot()` 读。
 // 但只在「系统会画一帧」的路径上成立（Show / 取消最小化），而 `OnFocus` 这种
 // 路径不会自己出帧（窗口本来就在屏幕上，只是焦点回来了）。所以三条路一起补。
+//
+// ⚠️ **可见性变了就刷那一个开关，两个方向都刷**（票 #392）：界面里有些东西是
+// **画的时候**问「这一扇窗看不看得见」的（波形那一格，见 `hover.Wave`）——而
+// 那一帧走的是**局部重绘**（只重画、不重建），所以答案得是**活的**：窗口一
+// 看不见，那个开关立刻就变，那一格于是不再要帧（票 #156 的那个「失焦还在
+// 按帧重画」的风扇问题不会回来）。
+//
+// ⚠️ 而「刚回来」那一刻还要**补一帧**：看不见的这段时间里后台照样改了状态，
+// 而唤醒全被 `wakeHandle` 拦掉了。
 func (s *Shell) noteWindow(apply func(*windowPresence)) {
-	if !s.presence.update(apply) {
+	resumed := s.presence.update(apply)
+	// ⚠️ **先刷开关，再决定要不要补帧**：那个开关是「这一帧要不要继续要下一帧」
+	// 的唯一判据，而它得在任何一帧画出来之前就是对的。
+	s.visibleFlag().Store(s.presence.seen())
+	if !resumed {
 		return
 	}
 	// ⚠️ 必须用 `invalidateNow`：`invalidate` 会再问一次 `seen()`，而

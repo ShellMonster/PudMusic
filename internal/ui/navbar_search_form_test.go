@@ -83,24 +83,34 @@ func TestSearchFieldLooksLikeAnInput(t *testing.T) {
 				t.Errorf("聚焦没有把底色抬起来（%v / %v）", idle, hot)
 			}
 
-			// ④ 没有描边：左缘那一条要和框里同一个颜色。焦点那一档尤其要看——
-			// 改之前这里是一圈主色绿，是最容易在重构成「底色」时漏掉的一条。
+			// ④ 描边：**聚焦那一档是主色**（票 #453）。
+			//
+			// ⚠️ **这一条以前是反的**：改之前这里断言「没有描边」——那是「只有
+			// 底色」的画法。而框里那个输入框是 `ui.TextInputBase`（**没有描边**），
+			// 框架对输入框一律不画焦点环，于是聚焦时**一点指示都没有**：同一个
+			// 应用里另一个搜索框（收藏夹 / 本地音乐那枚可展开的搜索）聚焦时描边
+			// 变主色——**同一个动作两种反应**。这一票把它补回来。
+			//
+			// ⚠️ **描边画在这一格的边沿上**（框架的 `Border` 是「盒子里那条线」），
+			// 所以它在框里那个采样点的**左边一像素**。
 			rowLeft := int(r.X) - (searchPadX + iconMd + searchGap)
 			inside := tt.Image().RGBAAt(rowLeft+3, mid)
 			if maxDiff(inside, hot) > 6 {
 				t.Fatalf("框里那个采样点是 %v，want %v——左缘位置算错了，下面的描边判据不成立",
 					inside, hot)
 			}
-			nearFill, nearBorder, nearAccent := 1<<30, 1<<30, 1<<30
-			for x := rowLeft - 1; x <= rowLeft+3; x++ {
-				p := tt.Image().RGBAAt(clampX(tt.Image(), x), mid)
-				nearFill = min(nearFill, distRGBA(p, ui.Color{R: hot.R, G: hot.G, B: hot.B, A: 255}))
-				nearBorder = min(nearBorder, distRGBA(p, th.Border))
-				nearAccent = min(nearAccent, distRGBA(p, th.Accent))
+			borderX := clampX(tt.Image(), rowLeft-1)
+			gotBorder := tt.Image().RGBAAt(borderX, mid)
+			// 主色是**不透明**的，所以聚焦那一档的描边就该是主色本身（抗锯齿会
+			// 差一两个通道）。
+			if d := maxDiff(gotBorder, rgb(th.Accent)); d > 10 {
+				t.Errorf("聚焦时搜索框的描边是 %v，want 主色 %v（差 %d）——"+
+					"聚焦没有看得见的指示", gotBorder, th.Accent, d)
 			}
-			if nearBorder < nearFill || nearAccent < nearFill {
-				t.Errorf("搜索框左缘（x=%d）最像的是描边/主色而不是底色（距底色 %d、描边 %d、主色 %d）——"+
-					"框上还留着一圈边框", rowLeft, nearFill, nearBorder, nearAccent)
+			// 描边和框里那层底**分得开**：不然这一圈线就白画了。
+			if d := maxDiff(gotBorder, hot); d < 8 {
+				t.Errorf("聚焦时搜索框的描边 %v 和框里的底色 %v 几乎一样（差 %d）——"+
+					"这一圈线看不出来", gotBorder, hot, d)
 			}
 		})
 	}

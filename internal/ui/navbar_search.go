@@ -117,6 +117,42 @@ func searchFieldBg(t *ui.Theme, hot bool) ui.Color {
 	return ui.RGBA(searchGrayLightR, searchGrayLightG, searchGrayLightB, a)
 }
 
+// searchFieldBorder 是搜索框这一刻的描边色。
+//
+// # ⚠️ **口径照框架那一份，别自己另立一套**
+//
+// 框架的 `ui.TextInput`（收藏夹 / 本地音乐那枚可展开的搜索、歌词搜索框、
+// 设置页那几个输入框）用的是 `mygo@v0.6.3/ui/form.go` 的 `inputBorder`：
+//
+//	有焦点 → `t.Accent`；指针压在上面 → `t.Border.Mix(t.Text, 0.25)`；否则 `t.Border`
+//
+// 顶栏这一枚是**同应用里的另一个搜索框**，所以它得是**同一档**——
+// 同一个动作（把焦点放进搜索框）只有一种反应。
+//
+// # 为什么顶栏这一枚原来一点指示都没有
+//
+// 框里那个输入框是 `ui.TextInputBase`——**没有描边**；而框架对 `kindInput`
+// 一律不画焦点环（`mygo@v0.6.3/ui/paint.go:334` 的 `e.kind != kindInput`）。
+// 于是聚焦时唯一的变化是底色 20% → 30%，浅色底上几乎读不出来。
+//
+// ⚠️ **描边画在外面那一格上，不画在输入框上**：这一格（`row`）才是用户看见的
+// 那个框——输入框在它里面，只占中间那一段；描边画在输入框上会是一小截，
+// 跟胶囊的形状对不上。
+//
+// ⚠️ **描边取的是主题里那个原值**（`t.Accent`），不是 `ink.AccentOn` 那一档：
+// 描边是**图形**不是字，图形不受 4.5:1 约束（`widgets/ink` 的 `SemanticOn`
+// 那一段写着这一条），而框架那一档用的也是原值——两处必须一模一样。
+func searchFieldBorder(t *ui.Theme, focused, hovered bool) ui.Color {
+	switch {
+	case focused:
+		return t.Accent
+	case hovered:
+		return t.Border.Mix(t.Text, 0.25)
+	default:
+		return t.Border
+	}
+}
+
 // 搜索页那条路由是 `searchPath`（在 searchpage.go 里），这里直接用它，不另立一份
 // 常量：两条路由同一个字符串，两个定义迟早会分家。
 
@@ -151,6 +187,13 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 	row := ui.Row(c).Key("search").Width(searchWidth).Height(searchHeight).
 		MinWidth(0).
 		Radius(searchRadius).Background(searchFieldBg(t, false)).
+		// 🔴 **描边是这一档的焦点指示**（理由见 searchFieldBorder）：
+		// 框里那个输入框是 `TextInputBase`——没有描边，而框架对输入框一律不画
+		// 焦点环，所以不在这儿画一圈的话，聚焦时**一点指示都没有**。
+		//
+		// ⚠️ 描边是**画在这一格的边沿上**（框架的 `Border` 是「盒子里那条线」，
+		// 不是盒外那一圈），所以这一格的内容往里让 1 像素——胶囊的形状不变。
+		Border(1, searchFieldBorder(t, false, false)).
 		Padding(space.None, searchPadX).Gap(searchGap).AlignItems(ui.Center)
 	row.Children(func() {
 		// 放大镜是**真按钮**：点它 = 拿框里的词去搜（票 BMG-253 / 报告第 4 条）。
@@ -265,9 +308,14 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 	// 指针压在框上、或者框拿着焦点：底色抬到 30%（上游那两条 `…/30`）。
 	// `s.searchFocused` 在 Children 里刚被这一帧的 `field.Focused()` 写过，
 	// 所以点下去的那一帧就是深的那一档，不用等下一帧。
-	if s.searchFocused || row.Hovered() {
+	//
+	// 🔴 **描边跟着一起换**（理由见 `searchFieldBorder`）：聚焦那一档是主色，
+	// 指针压上去那一档是 `t.Border` 压深——和框架的 `inputBorder` 同一个口径。
+	hovered := row.Hovered()
+	if s.searchFocused || hovered {
 		row.Background(searchFieldBg(t, true))
 	}
+	row.BorderColor(searchFieldBorder(t, s.searchFocused, hovered))
 }
 
 // viewSuggest 是搜索建议浮层。**两档都在这个面板里**：搜索历史 + 联想词。
