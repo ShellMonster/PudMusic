@@ -95,6 +95,13 @@ func TestRenderPlayBarStateShots(t *testing.T) {
 				Rate: 1, Volume: 0.8, PlayMode: app.PlayModeLoop,
 			}, 1200, dark)
 			save(t, dir, "06-播放条-风控-不给重试-"+name+".png", risk)
+
+			// 07 **冷启动那一段**：窗口开了、界面在那儿、就是没声音，
+			// 而「还没有打开文件」是**一句假话**（应用是在等上一首，
+			// 不是没有文件）。所以那一段改说「正在启动应用…」
+			// （票 #478）。
+			starting := playBarTester(t, app.State{Starting: true}, 1200, dark)
+			save(t, dir, "07-播放条-冷启动-"+name+".png", starting)
 		})
 	}
 }

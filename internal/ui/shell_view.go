@@ -149,6 +149,20 @@ func (s *Shell) newCrashInfo(where string, r any) *crashInfo {
 // viewMain 是正常的那一帧：上导航 + 左边栏 + 路由页 + 播放条，浮层上是播放列表
 // 抽屉（开着的话）和右下角的提示。
 func (s *Shell) viewMain(c *ui.Context) {
+	// 🔴 **冷启动那一段的「首帧」时刻**（票 #478）：用户「双击 → 窗口出来」
+	// 等的就是这一帧，而它之前的那一大段（读盘、读钥匙串、建窗口）合起来
+	// 是「应用慢」还是「等过人」，只有量出来才答得出。
+	//
+	// ⚠️ **它必须在 `Guard` 里面**（铁律四）：`Shell.View` 在 `s.draw` 之前
+	// 的那几句是**没有保护**的——view 里 panic 会一路穿到 Cocoa 事件循环
+	// 上去把整个进程带走。而这一句碰的是 `s.app`，它**可能**是 nil
+	// （迷你窗口那道护栏测试就故意把它摘掉，好让那一帧真的炸）。
+	// 所以它排在 `viewMain` 的**第一行**——`s.draw = s.guardAt("整帧", …)`
+	// 已经把这一段包住了。
+	//
+	// ⚠️ **只有主窗口记**：迷你窗口画的是 `viewMini`，不经过这里——而
+	// 「应用的首帧」说的就是主窗口那一帧。
+	s.app.NoteFirstFrame()
 	// 滚动条的悬停状态交接：上一帧量到的这一帧用，这一帧重新量（各容器在
 	// `viewMain` 后半段把它们建出来）。必须排在 `applyFrameTheme` 之前。
 	s.scrollbarHot, s.scrollbarHotNow = s.scrollbarHotNow, false
