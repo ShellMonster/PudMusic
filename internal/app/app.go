@@ -325,6 +325,9 @@ type App struct {
 
 	// 在线播放这一摊，见 online.go。挂上去之前 streaming 是 nil。
 	streaming *Streaming
+
+	// vid 是边放边看的那一路视频，见 video.go。自己带锁，不受 a.mu 管。
+	vid videoRun
 	// 歌单内容页这一摊，见 collection.go。挂上去之前是 nil（界面判空）。
 	collections *collections
 

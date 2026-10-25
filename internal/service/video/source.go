@@ -48,3 +48,6 @@ func newSource(pool chan []byte) *Source {
 	s.Frames = s.frames
 	return s
 }
+
+// Supported 报告这个平台有没有视频解码器。
+func Supported() bool { return supported }
