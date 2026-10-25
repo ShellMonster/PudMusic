@@ -20,14 +20,17 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
 	"github.com/ShellMonster/Biu_Go/internal/service/video"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/egoist/mygo/ui"
 )
 
 const (
-	fullVideoKey      = "full:video"
-	fullVideoBadgeKey = "full:video:badge"
-	fullVideoCloseKey = "full:video:close"
-	fullTheaterKey    = "full:theater"
+	fullVideoKey       = "full:video"
+	fullVideoBadgeKey  = "full:video:badge"
+	fullVideoCloseKey  = "full:video:close"
+	fullTheaterKey     = "full:theater"
+	fullVideoInKey     = "full:video:in-window"
+	fullVideoScreenKey = "full:video:screen"
 
 	fullVideoBadgeSize = 40
 	fullVideoEdge      = 10
@@ -61,14 +64,15 @@ func (v *videoView) reset() { v.bm, v.w, v.h, v.frame = nil, 0, 0, time.Time{} }
 // drawVideo 取帧、上传、画。radius 为 0 就是直角。
 func (s *Shell) drawVideo(p *ui.Painter, r ui.Rect, radius float32) {
 	v := &s.vv
-	if f, ok := s.app.VideoFrame(s.app.Snapshot().Position); ok {
+	st := s.app.Snapshot()
+	if f, ok := s.app.VideoFrame(st.Position); ok {
 		v.upload(f, p.Now())
 	}
 	p.Fill(r, ui.RGBA(0, 0, 0, 1), radius)
 	if v.bm != nil {
 		p.Clip(r, radius, func() { p.Image(v.bm, r, ui.Contain) })
 	}
-	if s.app.Snapshot().Playing || p.Now().Sub(v.frame) < videoIdleFrames || v.bm == nil {
+	if st.Playing || p.Now().Sub(v.frame) < videoIdleFrames || v.bm == nil {
 		p.AnimationFrame()
 	}
 }
@@ -78,7 +82,7 @@ func (s *Shell) viewVideoBadge(c *ui.Context) {
 	b := ui.Box(c).Key(fullVideoBadgeKey).Role(ui.RoleButton).Label("看视频").
 		Absolute().Right(fullVideoEdge).Bottom(fullVideoEdge).
 		Size(fullVideoBadgeSize, fullVideoBadgeSize).
-		Radius(fullVideoBadgeSize / 2).Background(ui.RGBA(0, 0, 0, 0.55)).
+		Radius(fullVideoBadgeSize / 2).Background(ui.RGBA(0, 0, 0, scrim.Media)).
 		Center().Cursor(ui.CursorPointer)
 	b.Children(func() {
 		ui.Icon(c, icon(iconPlay)).FontSize(24).TextColor(ui.RGBA(255, 255, 255, 0.95))
@@ -106,12 +110,70 @@ func (s *Shell) viewVideoWindow(c *ui.Context, phase app.VideoPhase, w, h float3
 		s.full.theater = true
 	}
 	s.viewVideoClose(c)
+	s.viewVideoModeKeys(c, false, fullVideoEdge, fullVideoEdge, 0)
+}
+
+// viewVideoModeKeys 是「两种全屏」那一对键，**图标不同、名字不同**：
+//
+//	窗口内全屏   斜向双箭头（expand）：视频撑满这扇窗口，窗口大小不变
+//	屏幕全屏     四角括号（fullscreen）：整个窗口进系统全屏
+//
+// on 是已经在影院里（那时两枚都变成「退出」）。right/bottom 是它离父盒右、下沿的距离。
+func (s *Shell) viewVideoModeKeys(c *ui.Context, on bool, right, bottom, top float32) {
+	row := ui.Row(c).Key("full:video:modes").Absolute().Right(right).Gap(6)
+	if top > 0 {
+		row = row.Top(top)
+	} else {
+		row = row.Bottom(bottom)
+	}
+	row.Children(func() {
+		inLabel, scrLabel := "窗口内全屏", "屏幕全屏"
+		if on {
+			inLabel = "退出窗口内全屏"
+		}
+		if s.fullScreen {
+			scrLabel = "退出屏幕全屏"
+		}
+		if s.videoModeKey(c, fullVideoInKey, iconExpand, inLabel).Clicked() {
+			s.full.theater = !on
+			if on {
+				s.setScreenFull(false)
+			}
+		}
+		if s.videoModeKey(c, fullVideoScreenKey, iconFullscreenLine, scrLabel).Clicked() {
+			if s.fullScreen {
+				s.setScreenFull(false)
+			} else {
+				s.full.theater = true
+				s.setScreenFull(true)
+			}
+		}
+	})
+}
+
+func (s *Shell) videoModeKey(c *ui.Context, key, name, label string) ui.Element {
+	b := ui.Box(c).Key(key).Role(ui.RoleButton).Label(label).Size(28, 28).
+		Radius(14).Background(ui.RGBA(0, 0, 0, scrim.Media)).Center().Cursor(ui.CursorPointer)
+	b.Children(func() {
+		ui.Icon(c, icon(name)).FontSize(16).TextColor(ui.RGBA(255, 255, 255, 0.95))
+	})
+	return b
+}
+
+// setScreenFull 让窗口进出系统全屏，并记下是不是**我们**让它进的：
+// 视频关掉的时候只有我们进的才替用户退回来。
+func (s *Shell) setScreenFull(v bool) {
+	if s.win == nil || s.fullScreen == v {
+		return
+	}
+	s.videoMadeFull = v
+	s.win.SetFullScreen(v)
 }
 
 func (s *Shell) viewVideoClose(c *ui.Context) {
 	b := ui.Box(c).Key(fullVideoCloseKey).Role(ui.RoleButton).Label("关闭视频").
 		Absolute().Right(fullVideoEdge).Top(fullVideoEdge).Size(28, 28).
-		Radius(14).Background(ui.RGBA(0, 0, 0, 0.55)).Center().Cursor(ui.CursorPointer)
+		Radius(14).Background(ui.RGBA(0, 0, 0, scrim.Media)).Center().Cursor(ui.CursorPointer)
 	b.Children(func() {
 		ui.Icon(c, icon(iconClose)).FontSize(16).TextColor(ui.RGBA(255, 255, 255, 0.95))
 	})
@@ -142,7 +204,9 @@ func (s *Shell) viewFullTheater(c *ui.Context, hidden bool) {
 	})
 	if box.Clicked() {
 		s.full.theater = false
+		s.setScreenFull(false)
 	}
+	s.viewVideoModeKeys(c, true, 24, 0, 72)
 }
 
 // paintKaraoke 画两句：正在唱的那句边唱边从左往右扫亮，下一句淡着。

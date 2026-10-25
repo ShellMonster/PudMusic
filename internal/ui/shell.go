@@ -307,6 +307,8 @@ type Shell struct {
 	full fullPlayer
 	// vv 是满屏里视频画面那一边（见 fullvideo.go）。
 	vv videoView
+	// videoMadeFull 是系统全屏是视频的「屏幕全屏」键让进的。
+	videoMadeFull bool
 
 	// pageBuilds 是「路由页被建了几次」。**给测试看的探针**（理由同
 	// `full.bgDraws`）：满屏开着的时候底下那一页不该再被建，而「有没有被建」

@@ -441,7 +441,9 @@ func (s *Shell) viewFullPlayer(c *ui.Context, st app.State) {
 		})
 
 		if probe.OverlayShortcut(0, ui.KeyEscape) {
-			if s.full.theater {
+			if s.fullScreen && s.videoMadeFull {
+				s.setScreenFull(false)
+			} else if s.full.theater {
 				s.full.theater = false
 			} else {
 				s.closeFullPlayer()
@@ -890,6 +892,9 @@ func (s *Shell) viewFullStage(c *ui.Context, st app.State, hidden bool) {
 	if s.app.VideoPhase() == app.VideoOff {
 		s.full.theater = false
 		s.vv.reset()
+		if s.videoMadeFull {
+			s.setScreenFull(false)
+		}
 	} else if s.full.theater {
 		s.viewFullTheater(c, hidden)
 		return

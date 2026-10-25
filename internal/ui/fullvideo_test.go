@@ -135,3 +135,39 @@ func TestKaraokeSweepsAcrossTheLine(t *testing.T) {
 		t.Errorf("last line at 2s: %.2f", got)
 	}
 }
+
+func TestTheTwoFullscreenKeysAreDistinctAndOnlyTheWindowOneEntersTheTheater(t *testing.T) {
+	s, tt := videoTester(t)
+	if err := tt.Click("看视频"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "视频小窗出现", func() bool { _, ok := tt.Find("视频，点击全屏"); return ok })
+	in, ok1 := tt.Find("窗口内全屏")
+	scr, ok2 := tt.Find("屏幕全屏")
+	if !ok1 || !ok2 {
+		t.Fatalf("两枚全屏键没都在，文字有 %q", tt.Texts())
+	}
+	if in.X == scr.X && in.Y == scr.Y {
+		t.Fatal("两枚键叠在一起")
+	}
+	if g1, g2 := scanGlyph(tt, "窗口内全屏"), scanGlyph(tt, "屏幕全屏"); g1.ink == g2.ink {
+		t.Error("两枚键画的是同一个图标，分不出来")
+	}
+	if err := tt.Click("窗口内全屏"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !s.full.theater {
+		t.Fatal("窗口内全屏没进影院")
+	}
+	if _, ok := tt.Find("退出窗口内全屏"); !ok {
+		t.Fatalf("影院里没有退出键，文字有 %q", tt.Texts())
+	}
+	if err := tt.Click("退出窗口内全屏"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if s.full.theater {
+		t.Fatal("没退出影院")
+	}
+}
