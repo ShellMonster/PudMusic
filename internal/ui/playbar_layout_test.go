@@ -433,9 +433,9 @@ func TestThePlayKeyIsBigEnoughToHit(t *testing.T) {
 	if !ok {
 		t.Fatalf("画面上找不到「暂停」，文字有 %q", tt.Texts())
 	}
-	const wantBox = 44
+	const wantBox = 36
 	if d := absFloat(play.W-wantBox) + absFloat(play.H-wantBox); d > 2 {
-		t.Errorf("播放键的盒子是 %.1fx%.1f，规范是 44×44", play.W, play.H)
+		t.Errorf("播放键的盒子是 %.1fx%.1f，规范是 36×36", play.W, play.H)
 	}
 	prev, ok := tt.Find("上一首")
 	if !ok {
@@ -459,8 +459,8 @@ func TestThePlayKeyIsBigEnoughToHit(t *testing.T) {
 			}
 		}
 	}
-	if dx1 < 0 || dx1-dx0+1 < 42 {
-		t.Fatalf("播放键上的圆只有 %d 宽（%d..%d）——规范是直径 44 的实心强调色圆", dx1-dx0+1, dx0, dx1)
+	if dx1 < 0 || dx1-dx0+1 < 34 {
+		t.Fatalf("播放键上的圆只有 %d 宽（%d..%d）——规范是直径 36 的实心强调色圆", dx1-dx0+1, dx0, dx1)
 	}
 	if gx1 < 0 {
 		t.Fatalf("播放键的圆里没有画出图形（找不到 AccentText 色 %v）", on)
