@@ -341,14 +341,42 @@ func (s *Shell) favAreaState() (loaded, failed bool) {
 // 下面那些名字更靠左，看着像是另一个层级的东西。
 func (s *Shell) viewFavoritesEmptyLine(c *ui.Context, text string) {
 	t := c.Theme()
-	// ⚠️ **内边距在「壳」上，不在字上**：字那一格的盒子被 Column 拉满宽
-	// （默认 Stretch），量出来的 X 是 0，而字实际起头的位置是内边距那一份。
-	// 套一层壳，那一句的盒子就从内边距那儿起头——「它和标题对齐」这件事
-	// 才量得出来（测试就是这么量的）。
-	ui.Row(c).Padding(space.Px6, favTextPad).Children(func() {
-		ui.Text(c, text).FontSize(scale.Font(c, scale.Size12)).
-			TextColor(t.TextMuted)
+	ic, label, run := s.favEmptyAction(s.app.LoggedIn())
+	// ⚠️ **不再是一句孤零零的字**：它和下面的收藏夹行是同一个版式——左边一枚方形
+	// 图标块（和封面同大同位置），右边一句话 + 一个能点的下一步（去登录 / 重试 /
+	// 新建收藏夹）。一句只会说「没有」的字，没给用户下一步。
+	ui.Row(c).Key("fav-empty").Gap(favCoverGap).AlignItems(ui.Center).
+		Padding(space.Px6, space.Px8, space.Px6, favCoverPad).Children(func() {
+		ui.Box(c).Size(favCoverSize, favCoverSize).Radius(t.Radius).
+			Background(t.Background.Mix(t.Text, 0.05)).Border(1, t.Border).Center().Children(func() {
+			ui.Icon(c, icon(ic)).FontSize(iconMd).TextColor(t.TextMuted)
+		})
+		ui.Column(c).Grow(1).Gap(favTextGap).AlignItems(ui.Start).Children(func() {
+			ui.Text(c, text).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Wrap()
+			if label != "" && flatLink(c, label).FontSize(scale.Font(c, scale.Size12)).Clicked() {
+				run()
+			}
+		})
 	})
+}
+
+// favEmptyAction 是空状态那一句旁边的「下一步」：图标、按钮字、点了做什么。
+// 按钮字空串 = 这一档没有下一步（还没拉：等就行）。
+//
+// 和 `favEmptyText` 同一个四档判据：拉失败 → 重试；没登录 → 去登录；
+// 真的没有 → 新建收藏夹。
+func (s *Shell) favEmptyAction(loggedIn bool) (ic, label string, run func()) {
+	loaded, failed := s.favAreaState()
+	switch {
+	case failed:
+		return iconRefresh, "重试", s.app.RefreshFavorites
+	case !loaded && !loggedIn:
+		return iconLoginCircle, "去登录", func() { s.goLogin(homePath) }
+	case !loaded:
+		return iconFolder, "", nil
+	default:
+		return iconFolderAdd, "新建收藏夹", func() { s.openFolderEdit(0) }
+	}
 }
 
 // refreshLine 是「正在刷」那一行的字。
@@ -400,7 +428,7 @@ func (s *Shell) viewFavoriteGroup(c *ui.Context, st app.Settings, g app.Favorite
 	// 两个，而这里要的是**上面**那一截——下面那一截由这一组自己的内容决定。
 	ui.Column(c).Key("fav-group:"+strconv.Itoa(int(g))).Gap(space.Px2).
 		Margin(top, space.None, space.None, space.None).Children(func() {
-		s.viewFavoriteHeader(c, g, folded)
+		s.viewFavoriteHeader(c, g, folded, len(items))
 		if folded {
 			return
 		}
@@ -419,9 +447,9 @@ func (s *Shell) viewFavoriteGroup(c *ui.Context, st app.Settings, g app.Favorite
 // 「新建」只给「我创建的」那组（Biu 的 `collection/index.tsx:486-498`：那个
 // + 号是 `renderFavoriteGroup` 的 `titleExtra`，只有 created 那一组传了它）。
 // 「我收藏的」里新建出来的东西属于**别人**，自己建的会出现在上面那一组。
-func (s *Shell) viewFavoriteHeader(c *ui.Context, g app.FavoriteGroup, folded bool) {
+func (s *Shell) viewFavoriteHeader(c *ui.Context, g app.FavoriteGroup, folded bool, n int) {
 	ui.Row(c).Gap(space.Px2).Center().Children(func() {
-		fold := s.favoriteFoldButton(c, g, folded).Grow(1)
+		fold := s.favoriteFoldButton(c, g, folded, n).Grow(1)
 		if fold.Clicked() {
 			s.toggleFavoriteFolded(g, folded)
 		}
@@ -459,7 +487,7 @@ func (s *Shell) viewFavoriteHeader(c *ui.Context, g app.FavoriteGroup, folded bo
 //
 // 「折叠 我创建的」/「展开 我创建的」。画面上只有一枚箭头和一个组名，念不出
 // 它是干什么的；而读屏软件念的是这个名字（`Label`），画面上不多画一个字。
-func (s *Shell) favoriteFoldButton(c *ui.Context, g app.FavoriteGroup, folded bool) ui.Element {
+func (s *Shell) favoriteFoldButton(c *ui.Context, g app.FavoriteGroup, folded bool, n int) ui.Element {
 	t := c.Theme()
 	name, tip := iconChevronDown, "折叠 "+g.String()
 	if folded {
@@ -473,6 +501,10 @@ func (s *Shell) favoriteFoldButton(c *ui.Context, g app.FavoriteGroup, folded bo
 		ui.Icon(c, icon(name)).FontSize(favIconW).TextColor(t.TextMuted)
 		ui.Text(c, g.String()).FontSize(scale.Font(c, scale.Size12)).
 			FontWeight(weightMedium).TextColor(t.TextMuted)
+		// 这一组有几个：一枚小数字，贴在组名后面（折起来时也看得见里面有多少）。
+		if n > 0 {
+			ui.Text(c, strconv.Itoa(n)).FontSize(scale.Font(c, scale.Size11)).TextColor(t.TextMuted)
+		}
 	})
 	// ⚠️ **悬停 / 按下是 `flat.Feel`**（压一层半透明的前景色）：和侧栏菜单项
 	// 同一档（`widgets/flat` 的文件头写着为什么是「压」不是「换」——换底会把
