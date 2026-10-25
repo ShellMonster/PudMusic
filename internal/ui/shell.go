@@ -297,8 +297,9 @@ type Shell struct {
 	// `full.bgDraws`）：满屏开着的时候底下那一页不该再被建，而「有没有被建」
 	// 在界面上看不出来——它被一层不透明的浮层整个盖着。
 	//
-	// ⚠️ 数的是 `Shell.page` 那一次分派（`router.go`）：换页动画期间离场的那
-	// 一页也会被建一次，所以这个数在换页那一帧会跳两下——那是对的，两页都建了。
+	// ⚠️ 数的是 `Shell.page` 那一次分派（`router.go`）。**换页那一次只建一页**：
+	// 我们不做换页动画（`router.go` 的 `newRouter`），离场页不会被重建，
+	// 所以这个数换页前后都只跳一下。
 	pageBuilds int
 
 	// like 是长按封面 2.5 秒一键三连那一摊，见 like.go。
@@ -1022,7 +1023,7 @@ func New(a *app.App) *Shell { return newShellWithImages(a, coverCacheDir()) }
 func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	s := &Shell{
 		app:       a,
-		router:    ui.NewRouter("/"),
+		router:    newRouter("/"),
 		clock:     realClock{},
 		images:    imgcache.New(imgcache.Options{Dir: imagesDir}),
 		autostart: systemAutoStart{},
