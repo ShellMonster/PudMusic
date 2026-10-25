@@ -44,6 +44,48 @@ const (
 	pressA = 0.16
 )
 
+// Base 是「**这一枚按钮坐着的那块底**」。
+//
+// # 为什么要有它
+//
+// 悬停 / 按下的反馈有**两处**是按底算的，而它们原来都是按**页面底色**算的：
+//
+//  1. 悬停时图形变的那一档主色（`ink.AccentOn` 按 `t.Background` 算）；
+//  2. 悬停 / 按下铺的那一层半透明淡底（`t.Text` 压上去）。
+//
+// 这两处都对「底是页面底色」成立——而**满屏播放器那一行的底是压暗过的封面**：
+// 按页面白底算出来的那一档主色（浅色主题下是深绿 `#107032`）压在那上面只有
+// **1.0:1**，等于图标**消失**（指针一停上去，那几个图标反而不见了，票 #248）。
+//
+// # 零值 = 按主题算（和以前一模一样）
+//
+// `ThemeBase` 是零值：普通页面上的那些键（播放条、顶栏、侧栏、列表行尾的「⋯」）
+// 都是它——**它们的行为一个字节都不变**。
+//
+// 非零 = **按给定的底算**：主色那一档按那块底算（`ink.AccentOnBase`），淡底按
+// 那块底的深浅挑黑或白（深底压白、浅底压黑）。
+//
+// ⚠️ 「有没有给底」的判据是**那一档带不带 alpha**（`A != 0`）：真的底永远是
+// **不透明**的，而零值是全透明的（`ui.Color{}`）——所以这两件事不会撞。
+type Base struct {
+	color ui.Color
+}
+
+// BaseOf 是「**按给定的底算**」那一档。
+//
+// 那块底得是**不透明**的（真的底色就是）：给了带 alpha 的颜色，算出来的对比度
+// 会按「合到白底上」那一档算（`ink.Ratio` 的规矩），和屏幕上看到的不一样。
+func BaseOf(c ui.Color) Base { return Base{color: c} }
+
+// ThemeBase 是「**按主题算**」那一档（零值）。
+//
+// 普通页面上的那些键都是它——`ink.AccentOn` 按 `t.Background` 算主色那一档、
+// 淡底按主题正文色算，和这一档加进来之前**一模一样**。
+var ThemeBase Base
+
+// given 报这一档有没有给底。
+func (b Base) given() bool { return b.color.A != 0 }
+
 const (
 	// labelPad 是「图标 + 文字」那一类按钮的**左**内边距。
 	//
@@ -65,6 +107,14 @@ const (
 // 同样文字的无障碍节点，画面上出现两份（和 `internal/ui` 的 `viewSideMenu` 里
 // 那一处同源）。**只有图标按钮要补**——见 `IconButton`。
 func Button(c *ui.Context, label string) ui.Element {
+	return button(c, label, ThemeBase)
+}
+
+// button 是 Button 的「底色可传」那一支。
+//
+// base 只影响**悬停 / 按下铺的那一层淡底**（按底挑黑或白，见 `shadeInk`）——
+// 按钮自己的外观（无描边、无常驻底色）两个分支一样。
+func button(c *ui.Context, label string, base Base) ui.Element {
 	t := c.Theme()
 	b := ui.ButtonBase(c).
 		Padding(t.Space(1.5), t.Space(3.5)).
@@ -73,7 +123,7 @@ func Button(c *ui.Context, label string) ui.Element {
 	if label != "" {
 		b.Children(func() { ui.Text(c, label).SingleLine() })
 	}
-	return feel(c, b)
+	return feel(c, b, base)
 }
 
 // Link 是「名字型链接」那一档：**一句话字**，指针落上去时底下长出一道**下划线**，
@@ -157,7 +207,7 @@ func linkFeel(c *ui.Context, e ui.Element) ui.Element {
 //
 // ⚠️ **按下时图标缩到 0.96**（`PressScale`）——纯图标键才缩，理由见 `press.go`。
 func IconButton(c *ui.Context, svg *ui.SVG, label string, font float32) ui.Element {
-	b := Button(c, "").Label(label)
+	b := button(c, "", ThemeBase).Label(label)
 	b.Children(func() {
 		ic := ui.Icon(c, svg).FontSize(font)
 		// ⚠️ **问的是按钮的按着没有**（理由见 press.go）。
@@ -188,12 +238,37 @@ func IconButton(c *ui.Context, svg *ui.SVG, label string, font float32) ui.Eleme
 //
 // ⚠️ **它只给「底是应用底色」的地方用**：主色当字色那一档是按 `t.Background`
 // 算的，而满屏播放器那一行的底是**压暗过的封面**——浅色下那一档压在上面只有
-// 1.0:1（等于看不见，见票 #217 的评审）。所以那一行**不用这一档**。
+// 1.0:1（等于看不见，见票 #217 的评审）。所以那一行**不用这一档**，它用
+// `IconButtonAccentOnBase`（底色由调用方给）。
 func IconButtonAccent(c *ui.Context, svg *ui.SVG, label string, font float32, disabled bool) ui.Element {
-	b := Button(c, "").Label(label).Disabled(disabled)
+	return iconButtonAccent(c, svg, label, font, disabled, ThemeBase)
+}
+
+// IconButtonAccentOnBase 是 IconButtonAccent 的「**底色可传**」变体：悬停时图形
+// 变的那一档主色按**给定的底**算，而不是按 `t.Background` 算。
+//
+// # 为什么需要它
+//
+// 满屏播放器那一行（上一首 / 下一首 / 播放模式 / 队列开关）的底是**压暗过的
+// 封面**，而按页面白底算出来的那一档主色（浅色主题下是深绿 `#107032`）压在那
+// 上面只有 **1.0:1**——指针一停上去，那几个图标**反而不见了**（票 #248）。
+//
+// 按给定的底算出来的那一档，在**任何一档封面上**都读得出来（那一档是按最亮的
+// 封面算的，见 `internal/ui/fullplayer.go` 的 `fullRowBase`）。
+//
+// ⚠️ **图形那一档按 3:1 算**（WCAG 1.4.11 非文字对比度），不是正文那一档的 4.5：
+// 这是一枚 22 像素的图标，而 4.5 会把它推到「几乎纯白」——那样它和平时那一档
+// （白 92%）几乎看不出分别，悬停反馈等于没有。
+func IconButtonAccentOnBase(c *ui.Context, svg *ui.SVG, label string, font float32, disabled bool, base Base) ui.Element {
+	return iconButtonAccent(c, svg, label, font, disabled, base)
+}
+
+// iconButtonAccent 是一枚「悬停时图形变主色」的扁平图标键（底色可传）。
+func iconButtonAccent(c *ui.Context, svg *ui.SVG, label string, font float32, disabled bool, base Base) ui.Element {
+	b := button(c, "", base).Label(label).Disabled(disabled)
 	b.Children(func() {
 		ic := ui.Icon(c, svg).FontSize(font)
-		if col, ok := IconAccentOnHover(c, disabled, b.Hovered()); ok {
+		if col, ok := iconAccentOnHover(c, disabled, b.Hovered(), base); ok {
 			ic = ic.TextColor(col)
 		}
 		ic = PressScale(ic, b.Pressed(), false)
@@ -213,10 +288,34 @@ func IconButtonAccent(c *ui.Context, svg *ui.SVG, label string, font float32, di
 // 一圈背景」两层（见 `internal/ui/like.go`），它自己也要这一档主色——而「哪一档
 // 主色」只有这一个决定的地方。
 func IconAccentOnHover(c *ui.Context, disabled, hovered bool) (ui.Color, bool) {
+	return iconAccentOnHover(c, disabled, hovered, ThemeBase)
+}
+
+// IconAccentOnHoverOnBase 是 IconAccentOnHover 的「**底色可传**」变体：悬停时
+// 图形变的那一档主色按**给定的底**算。
+//
+// ⚠️ **给了底就按底算，不看主题深浅**：主题深浅管的是「页面上字压着的那块底」，
+// 而这里的底是调用方给的那一块——浅色主题下满屏播放器那一行也坐在深底上。
+func IconAccentOnHoverOnBase(c *ui.Context, disabled, hovered bool, base Base) (ui.Color, bool) {
+	return iconAccentOnHover(c, disabled, hovered, base)
+}
+
+// iconAccentOnHover 是「悬停时图形变主色」那一档字色（底色可传）。
+//
+// ⚠️ **不该染色时返回 ok=false**，调用方就**别设**颜色——那样图标接着继承按钮
+// 的字色（赞键那种「没赞是灰的、赞了是主色的」就是靠这一条）。
+//
+// 这条判断单独拿出来，是因为**图标键不止一种形状**：赞键那一枚是「图标 + 底下
+// 一圈背景」两层（见 `internal/ui/like.go`），它自己也要这一档主色——而「哪一档
+// 主色」只有这一个决定的地方。
+func iconAccentOnHover(c *ui.Context, disabled, hovered bool, base Base) (ui.Color, bool) {
 	if disabled || !hovered {
 		return ui.Color{}, false
 	}
-	return ink.AccentOn(c.Theme()), true
+	if !base.given() {
+		return ink.AccentOn(c.Theme()), true
+	}
+	return ink.AccentOnBase(c.Theme(), base.color, ink.GraphicContrast), true
 }
 
 // IconLabelButton 是一个「图标 + 文字」的扁平按钮：图标在一个 cell×cell 的
@@ -302,7 +401,7 @@ func Dimmed(c *ui.Context, e ui.Element) ui.Element {
 //
 // 用法：`e = flat.Feel(c, e)`，放在别的样式**之后**（选中那一层的底色要先铺好，
 // 悬停那层是压在它上面的）。
-func Feel(c *ui.Context, e ui.Element) ui.Element { return feel(c, e) }
+func Feel(c *ui.Context, e ui.Element) ui.Element { return feel(c, e, ThemeBase) }
 
 // feel 铺上「悬停 / 按下」的那一层反馈。
 //
@@ -313,13 +412,13 @@ func Feel(c *ui.Context, e ui.Element) ui.Element { return feel(c, e) }
 // 这里靠的是指针位置**不进事件循环就不变**（`mygo/ui/input.go:265` 的
 // `setHover`），于是画面上的效果一样。本包早就在用这个写法
 // （`internal/ui/navbar_suggest.go` 的 `viewSuggestTerm`）。
-func feel(c *ui.Context, e ui.Element) ui.Element {
+func feel(c *ui.Context, e ui.Element, base Base) ui.Element {
 	t := c.Theme()
 	switch {
 	case e.Pressed():
-		e = e.DrawOver(shade(e, t, pressA))
+		e = e.DrawOver(shade(e, t, pressA, base))
 	case e.Hovered():
-		e = e.DrawOver(shade(e, t, hoverA))
+		e = e.DrawOver(shade(e, t, hoverA, base))
 	}
 	return e
 }
@@ -330,8 +429,8 @@ func feel(c *ui.Context, e ui.Element) ui.Element {
 // `t.SurfaceHover`）：换成底色的话，选中态那一层主色淡底会被整块顶掉——指针一
 // 落上去，「当前在哪」就整个不见了。而压一层前景色在**任何**底上都成立：透明底
 // 上是变灰，主色淡底上是变深，和上游 `bg-foreground/10` 是同一个做法。
-func shade(b ui.Element, t *ui.Theme, a float32) func(p *ui.Painter, r ui.Rect) {
-	fg, radius := t.Text.Alpha(a), t.Radius
+func shade(b ui.Element, t *ui.Theme, a float32, base Base) func(p *ui.Painter, r ui.Rect) {
+	fg, radius := shadeInk(t, base).Alpha(a), t.Radius
 	// 🔴 **「禁用没有」必须在画的时候问，不能在建按钮的时候问。**
 	//
 	// 调用方是在 `Button` 返回**之后**才 `.Disabled(...)` 的（`internal/ui` 的
@@ -349,4 +448,31 @@ func shade(b ui.Element, t *ui.Theme, a float32) func(p *ui.Painter, r ui.Rect) 
 		}
 		p.Fill(r, fg, radius)
 	}
+}
+
+// shadeInk 是「悬停 / 按下那一层」该压什么色。
+//
+// # 按主题算（默认）
+//
+// 主题正文色 `t.Text`——和这一层加进来之前一模一样：浅色主题下是黑的（压在白
+// 底上是变灰）、深色主题下是亮的（压在深底上是变亮）。
+//
+// # 按给定的底算
+//
+// **按底的深浅挑黑或白**（`ink.PivotLuminance` 是「黑白两个字对比度相等」的那
+// 个点，和满屏播放器挑前景色用的是同一个数）。
+//
+// ⚠️ **按主题挑在深底上是错的**：浅色主题的正文色是黑的，而满屏播放器那一行
+// 坐着的是**压暗过的封面**——8% 的黑压在那一层上画面上几乎看不出变化（那一行
+// 的悬停反馈等于没有，票 #248）。深底压白、浅底压黑，两边都看得出变化。
+func shadeInk(t *ui.Theme, base Base) ui.Color {
+	if !base.given() {
+		return t.Text
+	}
+	if ink.Luminance(base.color) > ink.PivotLuminance {
+		// 浅底 → 压黑。
+		return ui.Color{A: 255}
+	}
+	// 深底 → 压白。
+	return ui.Color{R: 255, G: 255, B: 255, A: 255}
 }
