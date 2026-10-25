@@ -170,8 +170,16 @@ func TestTheCoverOpensTheFullScreenPlayer(t *testing.T) {
 //	刚点完      它还**在**列表行那个框里（转场是从那儿起的）
 //	推进 80ms   它已经长大了（真在动）
 //	推进 2s     它落在满屏那个框上，384×288、居中
+//
+// ⚠️ **这一条先把歌暂停了**（票 #468）：满屏的封面现在**在转**，而转起来之后
+// 封面那个框的**可见外接矩形**会变大（一个转起来的正方形，外接框是
+// 320×(cosθ+sinθ)）——这一条量的是「它落在哪儿、多大」，所以量的是**没转**
+// 的那一份。转起来的那一份由 `fullplayer_spin_test.go` 断。
 func TestTheCoverFliesFromTheRowIntoTheFullScreenBackground(t *testing.T) {
 	s, tt, fc := fullTester(t)
+	// ⚠️ **暂停**：满屏的封面在转（票 #468），而这一条量的是封面那个框的
+	// 大小和位置——转起来之后那个框的可见外接矩形会变大（见上面的注释）。
+	s.app.Pause()
 
 	row, ok := tt.Find("当前封面")
 	if !ok {
@@ -240,6 +248,10 @@ func TestTheCoverFliesFromTheRowIntoTheFullScreenBackground(t *testing.T) {
 // 封面回不去——「啪」地一下就没了。
 func TestTheCoverFliesBackWhenItCloses(t *testing.T) {
 	s, tt, fc := fullTester(t)
+	// ⚠️ **暂停**（票 #468）：这一条量的是满屏那张封面**那个框**的大小，而满屏
+	// 的封面现在**在转**——转起来之后那个框的可见外接矩形会变大（一个转起来的
+	// 正方形，外接框是 320×(cosθ+sinθ)）。量的是**没转**的那一份。
+	s.app.Pause()
 
 	row, _ := tt.Find("当前封面")
 	tt.ClickAt(row.X+row.W/2, row.Y+row.H/2)
