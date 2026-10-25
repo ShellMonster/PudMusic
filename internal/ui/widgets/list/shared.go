@@ -110,3 +110,16 @@ func isPlaying(acts Actions, item app.Item) bool {
 	}
 	return acts.IsPlaying(item)
 }
+
+// isUserItem 报这一项是**一个 UP 主**，不是一首歌。
+//
+// 搜索页「用户」那一档的行是 UP 主：那一行按下去是**进他的空间**（上游
+// `user-card.tsx:51` 的 `navigate("/user/" + mid)`），不是放歌。
+//
+// ⚠️ **封面那一圈反馈因此换一套**（图形、提示、无障碍名三样都换，理由见
+// `hover.ProfileTip`）——那一圈原来三样都在说「放歌」，而用户按下去发现的是
+// 跳到别人的主页。
+//
+// ⚠️ **判据和菜单那一处是同一个**（`menu.go` 的 `menuItems`）：两处各写一份
+// 的话，改了一处另一处还在说「放歌」。
+func isUserItem(m Music) bool { return m.Item.Type == app.ItemTypeUser }

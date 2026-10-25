@@ -57,6 +57,21 @@ const (
 	// `suggest-history` 分开，于是两栏是两块而不是一栏。
 	suggestTermsKey = "suggest-terms"
 
+	// suggestFailedNote 是「这一趟没拉到」时那一档自己的一句话。
+	//
+	// ⚠️ **它不许是「没有联想词」**：那一句说的是「B 站没给联想」，而没拉到是另一
+	// 回事（网络断了、登录态过期、风控）。两种「没有」长得一模一样的话，用户读到
+	// 的是「B 站没有联想」，而真相是「这一趟没回来」（报告 246 第 12 条）。
+	//
+	// ⚠️ **它只是一句话，不弹错误、不转圈、不变红**：规格要的是「失败时静默」
+	// （issue #97 第四条）——静默说的是「别拿一条红字吓用户」，不是「一个字都不许
+	// 说」。而这一句是这一档**唯一**能说清「为什么是空的」的地方。
+	//
+	// ⚠️ **它说得够准**：不说「网络不通」——那会让用户去查自己的网，而真实原因也
+	// 可能是登录态过期或者 B 站风控（`errSearchNotMounted` 那一句也是这个口径，
+	// 见 `searchresults.go`）。
+	suggestFailedNote = "没能取到联想词"
+
 	// suggestTermPadY / suggestTermPadX 是联想词那一行的上下 / 左右留白。
 	//
 	// 比 chip 那圈大一点：chip 是小圆角的小块，而联想词是**一整行**，行高小一点
@@ -189,20 +204,32 @@ func (s *Shell) suggestSearching() bool {
 	return !s.terms.pendingSince.IsZero()
 }
 
-// viewSuggestTerms 画浮层里那一档「联想词」。**一个都没有就不摆**（调用方判）。
+// viewSuggestTerms 画浮层里那一档「联想词」。
+//
+// ⚠️ **一个都没有、也没失败，就不摆**（调用方也判一次）：那一档空着的时候浮层上
+// 只有历史那一档，而历史那一档永远在——「联想这一栏空着」和「这一趟没拉到」在
+// 画面上必须分得开（`suggestFailedNote` 的注释）。
 //
 // ⚠️ **拉回来的那一刻不摆任何「正在找…」**：用户是在一个字一个字地打，联想是
 // 一闪一闪补上来的，中间摆一句「正在搜…」比不给还吵——他自己知道在等什么。
-func (s *Shell) viewSuggestTerms(c *ui.Context) {
-	items := s.app.SuggestState().Items
-	if len(items) == 0 {
+func (s *Shell) viewSuggestTerms(c *ui.Context, items []string, failed bool) {
+	if len(items) == 0 && !failed {
 		return
 	}
+	t := c.Theme()
 	ui.Column(c).Key(suggestTermsKey).FillWidth().Gap(space.Px2).Children(func() {
 		// 标题和「搜索历史」那一句同一个字号和粗细：两栏是平级的，谁也不比谁大。
 		// 两处都是 14/400（上游历史标题是 `text-sm`；联想词这一栏没有标题，
 		// 这一句是我们自己的，跟着它走）。
 		ui.Text(c, suggestTermsHeading).FontSize(scale.Font(c, scale.Size14)).Grow(1)
+		if len(items) == 0 {
+			// 失败：这一档说一句自己的话（理由见 suggestFailedNote）。
+			//
+			// ⚠️ **淡灰、12 号**：它是一句说明，不是警报。变红会让「联想词没取到」
+			// 看着像出了大事，而它多半只是这一趟没回来。
+			ui.Text(c, suggestFailedNote).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+			return
+		}
 		for _, term := range items {
 			s.viewSuggestTerm(c, term)
 		}

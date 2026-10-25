@@ -212,6 +212,24 @@ func waitCalls(t *testing.T, b *suggestBili, n int) {
 	}
 }
 
+// waitSuggestFailed 等那一趟的失败落地。
+//
+// ⚠️ **不能只等「问过了」**：`waitCalls` 等的是请求被记下来的那一刻，而失败是
+// 背景那一趟回来之后才记上的——早一步读到的是「还没失败」。
+func waitSuggestFailed(t *testing.T, a *App) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if a.SuggestState().Failed {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("等了 5 秒，那一趟还是没记下失败")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
 // TestAskingGivesBackWhatBilibiliSaid 钉住最基本的那一条：问了就到。
 func TestAskingForSuggestGivesBackWhatBilibiliSaid(t *testing.T) {
 	a, b := newSuggestRig(t)
@@ -267,14 +285,19 @@ func TestTheSameWordIsNotAskedForSuggestTwice(t *testing.T) {
 	}
 }
 
-// TestAFailedSuggestSaysNothingAndDoesNotFireAgain 钉住规格里「静默」那一条。
+// TestAFailedSuggestSaysNoErrorAndDoesNotFireAgain 钉住规格里「静默」那一条。
 //
 // 两个后果一起钉：
 //
-//   - 界面上没有任何一句错误——这一层**没有错误字段**，浮层上只会剩下历史那一档；
+//   - 界面上没有任何一句错误——这一层**不产出错误文本**，浮层上不会弹一条错；
 //   - 之后不许每帧重发。少了后半句就是自己养自己的循环（生产里每次投递都叫醒
 //     界面），于是浮层底下一直刷网络，而用户只看到搜索框卡一下。
-func TestAFailedSuggestSaysNothingAndDoesNotFireAgain(t *testing.T) {
+//
+// ⚠️ **「静默」改过一次口径**（票 #455 / 报告 246 第 12 条）：静默说的是「不弹
+// 错误、不转圈、不变红」，而**不是「一个字都不许说」**——所以这一层现在有一个
+// `Failed` 位（界面靠它说「没能取到联想词」）。不记这一位的话，「B 站没给联想」
+// 和「这一趟没拉到」在画面上长得一模一样。
+func TestAFailedSuggestSaysNoErrorAndDoesNotFireAgain(t *testing.T) {
 	a, b := newSuggestRig(t)
 	b.failWith = -412 // 被风控挡了
 
@@ -288,6 +311,11 @@ func TestAFailedSuggestSaysNothingAndDoesNotFireAgain(t *testing.T) {
 	// 而那个词仍然记着——界面上「已经问过了」那一支靠它挡住每帧重发。
 	if got := a.SuggestState().Query; got != "周杰伦" {
 		t.Errorf("生效的词是 %q，want 周杰伦（失败也要记，界面靠它挡住重发）", got)
+	}
+	// ⚠️ **失败那一位要记上**：界面靠它把两种「没有」分开（票 #455）。
+	waitSuggestFailed(t, a)
+	if !a.SuggestState().Failed {
+		t.Errorf("拉不到却没记下「这一趟失败了」，界面于是分不出「没给联想」和「没拉到」")
 	}
 
 	for range 10 {
