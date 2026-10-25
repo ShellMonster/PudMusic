@@ -476,8 +476,32 @@ var Items = []Item{
 			// 源那一层：末尾那一段是并行取回来的，而 `moov` 在前面时不取。
 			"TestTheTrailingMoovIsFetchedInParallel",
 			"TestTheTrailingMoovIsNotFetchedWhenItIsAlreadyAtTheFront",
+			// 🔴 **盒子头在很后面时**：等必须是**阻塞**的——空转会把一个核占满
+			// （CPU 那半边要 `getrusage`，所以那一条带 `unix` 标签）。
+			"TestTheTailIsFetchedEvenWhenTheBoxHeaderIsFarAway",
+			"TestTheTailWaitBlocksInsteadOfSpinning",
 			// 整条链路：主下载没下完就能出声，而拿不到尾部时退回老样子。
 			"TestTheDecoderOpensBeforeTheWholeFileArrives",
+		},
+	},
+	{
+		Category: HTTP,
+		// 票 #478：「首次打开特有」——**什么缓存都还没有**那一项。
+		//
+		// WBI 签名密钥**只缓存在内存里**（两小时），所以**每一次冷启动，
+		// 第一次取流都要多付一次 `nav` 往返**——而那正是用户抱怨的
+		// 「首次打开取流慢」的那一刻。修法是启动时在后台先把它取回来。
+		//
+		// 🔴 **这一族有两条边**：服务层那一半（密钥取回来没有、缓存生效
+		// 没有）和应用层那一半（**真的会去调它**、**不挡事**）。
+		Spec: "冷启动时把 WBI 签名密钥预热起来（第一次取流就不用多付一次 nav 往返），预热失败不挡事",
+		Tests: []string{
+			"TestWarmWBIKeyFetchesTheKeyAheadOfTime",
+			"TestWarmWBIKeyDoesNotSendASecondRequestWhenTheKeyIsThere",
+			"TestWarmWBIKeySaysSoWhenItFails",
+			"TestTheWarmUpActuallyHappens",
+			"TestTheWarmUpDoesNotBlockTheCaller",
+			"TestTheWarmUpSurvivesAFailingNav",
 		},
 	},
 	{

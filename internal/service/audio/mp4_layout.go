@@ -33,6 +33,7 @@ package audio
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 )
 
@@ -44,13 +45,36 @@ var (
 	// 而 `moov` 在另一个初始化段里）、以及 `moov` 就在文件前面
 	// （faststart——那种文件不用等整个文件下完，票 #220 的对照组）。
 	errMP4NotOurShape = errors.New("audio: 这个文件不用取尾部")
-
-	// errHeadNotReady 是「文件头还没下到，等一会儿再来」。
-	//
-	// 它和 errMP4NotOurShape 是两回事：前者是「再等等」，后者是「不用管」。
-	// 混在一起的话，顺序下载才刚开始的时候就会把这一票的机会关掉。
-	errHeadNotReady = errors.New("audio: 文件头还没下到")
 )
+
+// headNotReady 是「这一段文件头还没下到」。
+//
+// ⚠️ **它带着「等哪一段」**：调用方要**阻塞**等顺序下载追上那个偏移，
+// 而不是**空转**重试——空转会把一个 CPU 核占满，直到下载追上
+// （2026-10-25 的评审实测：墙钟 6.1 秒里 CPU 占了 5.8 秒，≈0.95 个核，
+// 而那段时间里源唯一在做的事就是「等字节」）。
+//
+// ⚠️ **为什么会有这种情况**：盒子头不一定在前 512 字节里——一个 20 MB 的
+// `free`/`sidx` 盒子排在 `mdat`/`moov` 前面时，`mdat` 的头在好几兆之外。
+type headNotReady struct {
+	// need 是「要读到第几个字节才够」。等顺序下载的 `filled` 追上它就行。
+	need int64
+}
+
+func (e headNotReady) Error() string {
+	return fmt.Sprintf("audio: 文件头还没下到（要等第 %d 字节）", e.need)
+}
+
+// needOffset 从一个错误里取出「要等第几个字节」。
+//
+// 不是一个错误 → 返回 (0, false)。
+func needOffset(err error) (int64, bool) {
+	var h headNotReady
+	if errors.As(err, &h) {
+		return h.need, true
+	}
+	return 0, false
+}
 
 // mp4MaxBoxes 是「走顶层盒子」最多走多少个。
 //
@@ -85,10 +109,11 @@ var mp4FirstBoxTypes = map[string]bool{
 //	moovAt >= 0	`moov` 在这个偏移——它在文件前面，**不用**取尾部
 //	tailAt >= 0	`moov` 在文件末尾，尾部那一段从 tailAt 开始
 //	errMP4NotOurShape	不用取尾部
-//	errHeadNotReady	文件头还没下到（等顺序下载追上来再走一遍）
+//	headNotReady	文件头还没下到（**带着要等第几个字节**——调用方要
+//			**阻塞**等它，而不是空转重试）
 //
 // r 是「只读已经下到的那部分」的读者——它读不到还没下的字节时必须报
-// errHeadNotReady（**不是** io.EOF：io.EOF 在这一层是「文件到头了」，
+// `headNotReady`（**不是** io.EOF：io.EOF 在这一层是「文件到头了」，
 // 而「还没下到」是另一回事，混起来会把「再等等」说成「不用管了」）。
 //
 // size 是整个文件有多长。**-1 是「还不知道」**（服务器没给
@@ -101,8 +126,8 @@ func mp4TopLevel(r io.ReaderAt, size int64) (moovAt, tailAt int64, err error) {
 		var hdr [16]byte
 		n, rerr := r.ReadAt(hdr[:8], off)
 		if rerr != nil {
-			if errors.Is(rerr, errHeadNotReady) {
-				return -1, -1, errHeadNotReady
+			if need, ok := needOffset(rerr); ok {
+				return -1, -1, headNotReady{need: need}
 			}
 			return -1, -1, errMP4NotOurShape
 		}
@@ -125,8 +150,8 @@ func mp4TopLevel(r io.ReaderAt, size int64) (moovAt, tailAt int64, err error) {
 			// 真正的长度在头后面那 8 个字节里（64 位大端）。
 			n, rerr = r.ReadAt(hdr[8:16], off+8)
 			if rerr != nil {
-				if errors.Is(rerr, errHeadNotReady) {
-					return -1, -1, errHeadNotReady
+				if need, ok := needOffset(rerr); ok {
+					return -1, -1, headNotReady{need: need}
 				}
 				return -1, -1, errMP4NotOurShape
 			}

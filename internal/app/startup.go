@@ -188,7 +188,12 @@ func (a *App) NoteFirstFrame() {
 func (a *App) NoteFetchStart() {
 	now := time.Now()
 	a.startup.mu.Lock()
-	if a.startup.fetch.IsZero() {
+	// 🔴 **「第一次」这个闸要管住**写日志**那一句**：它在闸门外面的话，
+	// 每点一首歌都会往「冷启动」那一栏里写一行「首帧之后才开始取流，
+	// 中间隔了 5m0s」——而那一栏是**专门为「事后查冷启动」**建的，
+	// 混进一次次点歌的记录之后，它就什么也答不出了。
+	first := a.startup.fetch.IsZero()
+	if first {
 		a.startup.fetch = now
 	}
 	frame := a.startup.frame
@@ -197,7 +202,10 @@ func (a *App) NoteFetchStart() {
 	// 🔴 **首帧已经记过了**：那时候还没有取流，于是那一行日志里
 	// 「取流开始」是空的。现在补一行「首帧 → 取流开始」——
 	// 那正是票面问的「首帧 → 第一次取流开始」那一段。
-	if logged && !frame.IsZero() {
+	//
+	// ⚠️ **只补这一次**（`first`）：这一栏说的是**冷启动**，
+	// 而冷启动只有一次。
+	if first && logged && !frame.IsZero() {
 		startupLog("biu: 冷启动：首帧之后才开始取流，中间隔了 %v", now.Sub(frame))
 	}
 }

@@ -107,11 +107,27 @@ func (s *StreamSource) tailTarget() (int64, bool) {
 			return tail, true
 		case errors.Is(err, errMP4NotOurShape):
 			return 0, false
-		case errors.Is(err, errHeadNotReady):
-			// 文件头还没下到——等顺序下载追上来再走一遍。
-			continue
 		default:
-			return 0, false
+			// 🔴 **「文件头还没下到」要**阻塞**等，不能空转重试**。
+			//
+			// 空转（`continue` 回去再走一遍）会把**一个 CPU 核占满**，
+			// 直到顺序下载追上那个偏移——而那段时间里源唯一在做的事就是
+			// 「等字节」（2026-10-25 的评审实测：墙钟 6.1 秒里 CPU 占了
+			// 5.8 秒，≈0.95 个核）。
+			//
+			// 触发条件是**盒子头落在前 512 字节之外**——一个大的
+			// `free`/`sidx` 盒子排在 `mdat`/`moov` 前面时，`mdat` 的头
+			// 在好几兆之外。
+			need, ok := needOffset(err)
+			if !ok {
+				return 0, false
+			}
+			s.mu.Lock()
+			for !s.closed && s.err == nil && s.filled < need {
+				s.cond.Wait()
+			}
+			s.mu.Unlock()
+			continue
 		}
 	}
 }
@@ -125,9 +141,12 @@ const mp4HeadMin = 512
 
 // headReader 把缓存文件包成「只读已经下到的那部分」的读者。
 //
-// ⚠️ **读不到还没下的字节时必须报 errHeadNotReady，不能报 io.EOF**：
+// ⚠️ **读不到还没下的字节时必须报 `headNotReady`，不能报 io.EOF**：
 // io.EOF 在 `mp4TopLevel` 那一层是「这个文件不用取尾部」，
 // 而「还没下到」是「再等等」——混起来会把这一票的机会关掉。
+//
+// ⚠️ **它带着「要等第几个字节」**：调用方据此**阻塞**等顺序下载追上，
+// 而不是空转重试（空转会把一个 CPU 核占满）。
 type headReader struct {
 	s *StreamSource
 }
@@ -140,7 +159,7 @@ func (h headReader) ReadAt(p []byte, off int64) (int, error) {
 	filled := h.s.filled
 	h.s.mu.Unlock()
 	if off+int64(len(p)) > filled {
-		return 0, errHeadNotReady
+		return 0, headNotReady{need: off + int64(len(p))}
 	}
 	return h.s.file.ReadAt(p, off)
 }

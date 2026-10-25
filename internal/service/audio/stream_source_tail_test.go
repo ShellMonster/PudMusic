@@ -22,8 +22,8 @@ import (
 // `moov` 在末尾时它得扫到文件末尾。
 //
 // ⚠️ **实测它不是从头读到尾的，它是「跳」过去的**（2026-10-25 实测：
-// 它读 0 / 8 / 16 / 28 / 36 这几个位置，然后**直接跳到 `moov` 的起点**）。
-// 所以：**末尾那一小段在手上，AudioToolbox 立刻就能开口**。
+// 它读 0 / 8 / 16 / 28 / 36 这几个位置，然后**直接跳到 `moov` 的
+// 起点**）。所以：**末尾那一小段在手上，AudioToolbox 立刻就能开口**。
 //
 // 而在那之前，源只有**顺序下载的前沿**能用——于是「跳过去」的那一步
 // 会等**整个文件下完**（票 #220 的实测：200 KB/s 的网上 1.22 秒）。
@@ -177,6 +177,66 @@ func TestTheTrailingMoovIsFetchedInParallel(t *testing.T) {
 		t.Fatal("末尾那一段读出来是空的")
 	}
 	// 读出来的应该是 `moov` 盒的头（长度 + 类型）。
+	if got := string(buf[4:8]); got != "moov" {
+		t.Errorf("读到的不是 moov 盒的头：%q", got)
+	}
+}
+
+// TestTheTailIsFetchedEvenWhenTheBoxHeaderIsFarAway 盯「**盒子头在很后面**
+// 时，末尾那一段照样取得到」。
+//
+// # 这一条钉的是什么
+//
+// 盒子头不一定在前 512 字节里——一个大的 `free`/`sidx` 盒子排在
+// `mdat`/`moov` 前面时，`mdat` 的头在**好几兆之外**。而那时候源要**等**
+// 顺序下载追上那个偏移。
+//
+// ⚠️ **「等」必须是阻塞的**：写成「空转重试」的话，那个 goroutine 会
+// **把一个 CPU 核占满**，直到下载追上（2026-10-25 的评审实测：墙钟
+// 6.1 秒里 CPU 占了 5.8 秒）。CPU 那半边由
+// `stream_source_tail_cpu_test.go`（Unix 才有 `getrusage`）钉着；
+// 这一条钉的是**功能**：等到了之后，末尾那一段照样取得到。
+func TestTheTailIsFetchedEvenWhenTheBoxHeaderIsFarAway(t *testing.T) {
+	// 一份「`free` 盒子很大、`mdat` 的头在很后面」的素材。
+	rest := concat(
+		box("ftyp", make([]byte, 20)),
+		box("free", make([]byte, 256<<10)),
+		box("mdat", make([]byte, 64<<10)),
+		box("moov", make([]byte, 100)),
+	)
+	moov := moovAt(t, rest)
+	// 前提：`mdat` 的头落在前 512 字节之外（否则走不到「等」那一条路）。
+	if moov <= mp4HeadMin {
+		t.Fatalf("这份素材的 moov 不在够远的地方（%d）", moov)
+	}
+
+	srv := httptest.NewServer(slowRangeCDN(rest, 200_000))
+	defer srv.Close()
+
+	src, err := NewStreamSource(StreamSourceOptions{
+		URLs:   []string{srv.URL},
+		Client: srv.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+
+	// 末尾那一段最后还是取回来了（等到了那个偏移之后）。
+	deadline := time.Now().Add(30 * time.Second)
+	for src.tailBytes() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("盒子头在很后面时，末尾那一段一直没取回来")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := src.Seek(moov, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 64)
+	if _, err := src.Read(buf); err != nil {
+		t.Fatalf("读末尾那一段：%v", err)
+	}
 	if got := string(buf[4:8]); got != "moov" {
 		t.Errorf("读到的不是 moov 盒的头：%q", got)
 	}
