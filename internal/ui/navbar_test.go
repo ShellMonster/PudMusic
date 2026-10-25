@@ -740,9 +740,12 @@ func TestDynamicDotPollsEveryFiveMinutes(t *testing.T) {
 // 接线那一截（view 每帧都调了 arm）由下面那条盯着。
 func TestTheFeedPollerWakesTheWindowWhenTheIntervalElapses(t *testing.T) {
 	clock := newFakeClock(fakeClockStart)
-	p := newFeedPoller(wantFeedInterval, nil)
 	woke := 0
-	p.arm(clock, func() { woke++ })
+	// ⚠️ **唤醒那一路是建的时候给的**（不是 arm 的时候）：每帧给一次既是竞态，
+	// 又会让第一帧发出的那一趟读到一个 nil 的唤醒。理由见 navbar_feed.go 的
+	// `feedPoller.wake` 那一格。
+	p := newFeedPoller(wantFeedInterval, nil, func() { woke++ })
+	p.arm(clock)
 
 	clock.Advance(wantFeedInterval - time.Millisecond)
 	if woke != 0 {

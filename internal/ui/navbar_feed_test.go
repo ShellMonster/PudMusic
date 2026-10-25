@@ -60,6 +60,13 @@ func (l *feedBaselineLog) has(baseline string) bool {
 	return false
 }
 
+// all 是问过的全部基线（给报错那句话用）。
+func (l *feedBaselineLog) all() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.seen...)
+}
+
 // TestTheRedDotSitsOnTheTopRightOfTheIcon 验那个点**落在图标的右上角**。
 //
 // ⚠️ **这一条是这一票的要害**：那个点以前画在图标的**右边**——它是那一行里的
@@ -159,6 +166,46 @@ func TestTheRedDotDoesNotComeBackAfterReadingIt(t *testing.T) {
 
 	if tt.HasText("3 条新动态") {
 		t.Errorf("看完动态之后那个点又回来了，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheRedDotComesBackWhenNewDynamicsArrive 验「看过之后又有新动态 → 点会再亮」。
+//
+// 这一条是上一条的**另一半**：上一条量的是「点过之后那个点不再回来」（没有新动态
+// 的时候它不该回来），这一条量的是「**有**新动态的时候它要回来」——不然就成了
+// 「点一次就永远不亮了」。
+//
+// ⚠️ 假 B 站**每一趟都说「有 2 条没看过的」**：第一趟让点亮起来；点过之后那一趟
+// （基线已经往后挪了）说的还是 2 —— 那就是「用户看过之后又有新的了」。
+func TestTheRedDotComesBackWhenNewDynamicsArrive(t *testing.T) {
+	b := newUIExplore(t)
+	var log feedBaselineLog
+	b.on("/x/polymer/web-dynamic/v1/feed/all/update", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Query().Get("update_baseline"))
+		uiExploreJSON(w, 0, map[string]any{"update_num": 2})
+	})
+	s, tt, a := newSpaceShell(t, b, true, "77", withSettings(app.Settings{}))
+	clock := fakeClockOn(s, fakeClockStart)
+
+	waitFrames(t, tt, "那个点出来了", func() bool { return tt.HasText("2 条新动态") })
+
+	if err := tt.Click("动态"); err != nil {
+		t.Fatal(err)
+	}
+	if tt.HasText("2 条新动态") {
+		t.Errorf("看完动态那个点还在，文字有 %q", tt.Texts())
+	}
+	want := a.DynamicBaseline()
+	if want == 0 {
+		t.Fatalf("点过之后基线还是 0")
+	}
+
+	// 下一轮：基线往后挪了，而 B 站说「又有 2 条」→ 那个点要再亮。
+	clock.Advance(wantFeedInterval)
+	waitFrames(t, tt, "那个点又亮了", func() bool { return tt.HasText("2 条新动态") })
+
+	if !log.has(strconv.FormatInt(want, 10)) {
+		t.Errorf("下一轮问的基线里没有那个新基线 %d（问过的：%v）", want, log.all())
 	}
 }
 

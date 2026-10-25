@@ -98,7 +98,21 @@ type feedPoller struct {
 	// 收走它（见 drain）。
 	ask func(done func(count int, err error))
 
-	// wake 是「结果回来了，叫醒界面」那一路。arm 的时候装上。
+	// wake 是「结果回来了，叫醒界面」那一路。
+	//
+	// ⚠️ **它只在建这个节奏的时候写一次**（newFeedPoller），之后**只读**。
+	//
+	// 为什么不能「每帧装一次」（原来的写法）：那一格是**裸的共享字段**——
+	// 界面线程每帧写它、后台那一趟的回调读它，而两者之间没有锁、也没有
+	// happens-before，`-race` 直接报竞态。
+	//
+	// ⚠️ **而且那个写法还有一个更要命的症状**：第一帧里 `tick` 先发起那一趟
+	// （`arm` 排在它后面），于是后台读到的还是 **nil** —— 唤醒被跳过，那个结果
+	// 躺在信箱里没人取，要等下一次有帧才亮（下一帧可能就是五分钟之后）。
+	// 那正是这一票要治的「看不见」。
+	//
+	// 现在它**建的时候就有**，而后台那一趟**不读这一格**：start 把值拷进闭包，
+	// 闭包带的是那份拷贝（见 start）。
 	wake func()
 
 	// stop 是「到点叫醒界面」那个定时器的停法，nil 表示没装。
@@ -145,8 +159,10 @@ type feedUpdate struct {
 }
 
 // newFeedPoller 建一个节奏。ask 为 nil 就是一个永远问不出东西的空拉。
-func newFeedPoller(interval time.Duration, ask func(done func(count int, err error))) *feedPoller {
-	return &feedPoller{interval: interval, ask: ask}
+//
+// wake 是「结果回来了叫醒界面」那一路，**建的时候就装好**（理由见 wake 那一格）。
+func newFeedPoller(interval time.Duration, ask func(done func(count int, err error)), wake func()) *feedPoller {
+	return &feedPoller{interval: interval, ask: ask, wake: wake}
 }
 
 // tick 到点就轮一次，返回这一帧该画几个红点。
@@ -172,13 +188,16 @@ func (p *feedPoller) start() {
 	}
 	p.busy = true
 	gen := p.gen
+	// ⚠️ **把唤醒那一路拷进闭包**：后台那一趟读的是这份**拷贝**，不是 `p.wake`
+	// 那一格——于是这一格从头到尾只有界面线程碰它（`-race` 干净，见 wake 那一格）。
+	wake := p.wake
 	p.ask(func(count int, err error) {
 		p.boxMu.Lock()
 		p.box = append(p.box, feedUpdate{count: count, err: err, gen: gen})
 		p.boxMu.Unlock()
 		// 🔴 铁律三：投递完**必须**唤醒。只投递不唤醒 = 界面停在旧帧。
-		if p.wake != nil {
-			p.wake()
+		if wake != nil {
+			wake()
 		}
 	})
 }
@@ -225,13 +244,15 @@ func (p *feedPoller) clear() {
 // 每一帧都调是安全的：装上了就直接返回。装完的那一趟从**这一刻**起每 interval
 // 醒一次，所以定时器和轮询时刻始终差着一个恒定的偏移（第一次装上的那一帧），
 // 而那个偏移小到看不见。
-func (p *feedPoller) arm(c clockSource, wake func()) {
-	// 唤醒那一路每一帧都装：它是「结果回来了叫醒界面」用的（见 start）。
-	p.wake = wake
+//
+// ⚠️ **它不收唤醒函数当参数**：那一格（`p.wake`）建的时候就有，每帧再传一份
+// 过来等于每帧造一个方法值（它会逃到堆上——顶栏那一排每帧两次，帧预算那一条
+// 盯着分配数）。
+func (p *feedPoller) arm(c clockSource) {
 	if p.stop != nil {
 		return
 	}
-	p.stop = c.EveryFunc(p.interval, wake)
+	p.stop = c.EveryFunc(p.interval, p.wake)
 }
 
 // disarm 停掉那一路。窗口真关掉之后 `Invalidate` 对它是 no-op，但它还会一直每
@@ -272,7 +293,7 @@ func (s *Shell) syncFeedDot() {
 	// 一趟、不会再走。那一个就挂到测试进程结束（真窗口里 OnClosed 之后不会再有帧，
 	// 可这条不该靠「恰好不会」来对）。
 	if !s.closed {
-		s.feed.arm(s.clock, s.wake.invalidate)
+		s.feed.arm(s.clock)
 	}
 }
 

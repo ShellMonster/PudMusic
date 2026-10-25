@@ -35,17 +35,20 @@ import (
 //
 // 0 = 一次都没看过（新装的、换账号的、没登录的）→ 问 B 站的时候传 0，那一档
 // 是「从头算」，于是用户第一次打开就能看见那个点。
+//
+// ⚠️ **它按账号取**：换账号之后那是另一份「没看过的动态」，从头算；而**切回去**
+// 的时候这一个账号的基准还在（那是一张表，见 DynamicSeen 的说明）。
 func (a *App) DynamicBaseline() int64 {
 	mid := a.SelfMid()
 	if mid <= 0 {
 		return 0
 	}
-	seen := a.SettingsSnapshot().DynamicSeen
-	if seen.Mid != mid {
-		// 换账号了：那是另一份「没看过的动态」，从头算。
-		return 0
+	for _, e := range a.SettingsSnapshot().DynamicSeen.Baselines {
+		if e.Mid == mid {
+			return e.Baseline
+		}
 	}
-	return seen.Baseline
+	return 0
 }
 
 // NewDynamicCount 问一次「从上次看过的地方到现在有几条没看过的」。
@@ -79,10 +82,22 @@ func (a *App) MarkDynamicSeen(at time.Time) {
 	}
 	now := at.Unix()
 	_, err := a.UpdateSettings(func(s *Settings) {
-		if s.DynamicSeen.Mid == mid && s.DynamicSeen.Baseline > now {
+		// ⚠️ **只动这一个账号那一行**：别的账号的基准得留着（切回去的时候那个点
+		// 不该又按「全部没看过」亮起来）。
+		for i := range s.DynamicSeen.Baselines {
+			if s.DynamicSeen.Baselines[i].Mid != mid {
+				continue
+			}
+			// 只往前挪：用户把机器的时间调回去时不动它（倒退一步那个点会诈尸）。
+			if s.DynamicSeen.Baselines[i].Baseline > now {
+				return
+			}
+			s.DynamicSeen.Baselines[i].Baseline = now
 			return
 		}
-		s.DynamicSeen = DynamicSeen{Mid: mid, Baseline: now}
+		// 这个账号还没有：加一行。
+		s.DynamicSeen.Baselines = append(s.DynamicSeen.Baselines,
+			DynamicSeenEntry{Mid: mid, Baseline: now})
 	})
 	if err != nil {
 		// 存不住不是致命的：这一趟顶多让那个点下次又冒出来，而用户已经看过了。

@@ -52,19 +52,36 @@ func TestTheDynamicBaselineSurvivesARestart(t *testing.T) {
 	}
 }
 
-// TestTheDynamicBaselineIsPerAccount 验基准是**按账号**的。
+// TestTheDynamicBaselineIsPerAccount 验基准是**按账号**的，而且**切回去还在**。
 //
 // 动态流是「我关注的人在发什么」，那是按账号的：换账号之后那是另一份
 // 「没看过的动态」，基准不能接着上一个账号的用。
+//
+// ⚠️ **切回去也要在**：基准存成一张表（不是一个格子）——只存一格的话，切到 B
+// 的时候就把 A 的基准冲掉了，切回 A 之后那个点又会按「全部没看过」亮起来，
+// 而用户明明看过了。
 func TestTheDynamicBaselineIsPerAccount(t *testing.T) {
 	a := newSeenApp(t, filepath.Join(t.TempDir(), SettingsFileName), "77")
 	at := time.Unix(1792141200, 0)
 	a.MarkDynamicSeen(at)
 
-	// 换账号。
+	// 换账号：那是另一份「没看过的动态」，从头算。
 	loginExplore(a, "88")
 	if got := a.DynamicBaseline(); got != 0 {
 		t.Errorf("换账号之后基线还是 %d，want 0（那是另一份「没看过」）", got)
+	}
+
+	// 记 B 的，再切回 A：A 的基准**还在**。
+	bAt := time.Unix(1792142000, 0)
+	a.MarkDynamicSeen(bAt)
+	loginExplore(a, "77")
+	if got := a.DynamicBaseline(); got != at.Unix() {
+		t.Errorf("切回 A 之后基线是 %d，want %d（A 的基准不该被 B 冲掉）", got, at.Unix())
+	}
+	// B 的那份也还在。
+	loginExplore(a, "88")
+	if got := a.DynamicBaseline(); got != bAt.Unix() {
+		t.Errorf("切回 B 之后基线是 %d，want %d", got, bAt.Unix())
 	}
 }
 

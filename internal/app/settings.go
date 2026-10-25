@@ -325,22 +325,38 @@ func (o SideMenuCollectionOrder) setList(g FavoriteGroup, v []int64) SideMenuCol
 	return o
 }
 
-// DynamicSeen 是「动态红点看到哪儿了」。
+// DynamicSeenEntry 是一个账号的「看到哪儿了」。
+type DynamicSeenEntry struct {
+	// Mid 是这个账号的 mid。
+	Mid int64 `json:"mid"`
+	// Baseline 是「用户上一次看动态」的时刻（Unix 秒）。
+	Baseline int64 `json:"baseline"`
+}
+
+// DynamicSeen 是「动态红点看到哪儿了」——**按账号**记。
 //
 // ⚠️ **它按账号记**：动态流是「**我关注的人**在发什么」，那是**按账号**的
 // （和 dynamicFeed 那一页同一个理由，见 upspace.go）。换账号之后那是另一份
 // 「没看过的动态」，基准不能接着上一个账号的用。
 //
+// ⚠️ **它是一张表，不是一格**：账号来回切的时候，**每一个账号的基准都得留着**——
+// 冲掉上一个账号那一格的话，切回去之后那个点又会按「全部没看过」亮起来，而用户
+// 明明看过了（那张表是这一票的第二版；第一版只有一格，评审查出来的）。
+//
 // 加键不用涨 SchemaVersion（见 SchemaVersion 的注释：只加新的可选键不用涨）：
-// 读不到就是零值，等于「一次都没看过」。
+// 读不到就是空表，等于「每个账号都没看过」。
 type DynamicSeen struct {
-	// Mid 是这一份基准属于哪个账号。0 是没登录 / 还没记过。
-	Mid int64 `json:"mid"`
-	// Baseline 是「用户上一次看动态」的时刻（Unix 秒）。
+	// Baselines 是每一个账号的基准。
+	//
+	// ⚠️ **它是一个序列，不是一个映射**：映射的**空字面量要分配**（序列不会——
+	// 空序列指向 `runtime.zerobase`），而 `DefaultSettings` 每帧都可能被调
+	// （`SettingsSnapshot` 在没挂存储时给的就是它）——帧预算那一条盯着每帧的
+	// 分配数（实测：映射那一版让播放条那一档从 14 次涨到 16 次，上限正好是 16）。
+	// 一张表只有一两条，扫一遍就行。
 	//
 	// 0 = 一次都没看过 → 问 B 站的时候传 0，那一档是「从头算」，于是用户
 	// 第一次打开就能看见那个点（上游 Biu 传的就是 0）。
-	Baseline int64 `json:"baseline"`
+	Baselines []DynamicSeenEntry `json:"baselines"`
 }
 
 // Settings 是一份完整的应用设置，键名与 Biu 一一对应。
@@ -550,6 +566,13 @@ func DefaultSettings(downloadPath string) Settings {
 		},
 		ReportPlayHistory: true,
 		LocalMusicDirs:    []string{},
+
+		// 「每个账号看到哪儿了」那张表：空表 = 每个账号都没看过（于是问 B 站
+		// 的时候传 0，用户第一次打开就能看见那个点）。
+		//
+		// ⚠️ **空序列不分配**（它指向 `runtime.zerobase`），而空映射要分配——
+		// 理由见 DynamicSeen.Baselines 那一格。
+		DynamicSeen: DynamicSeen{Baselines: []DynamicSeenEntry{}},
 
 		// 音量：默认 100%（老版本每一次启动都是这一档，见 DefaultVolume）。
 		Volume: &vol,
@@ -787,6 +810,13 @@ func (s *Settings) normalize() {
 	}
 	if s.LocalMusicDirs == nil {
 		s.LocalMusicDirs = []string{}
+	}
+	// 「每个账号看到哪儿了」那张表：nil 和空表在 JSON 里差一个 `null`，而它写出去
+	// 的形状该是稳定的（空表 = 每个账号都没看过）。
+	//
+	// ⚠️ **空序列不分配**（它指向 `runtime.zerobase`）——见 DynamicSeen.Baselines。
+	if s.DynamicSeen.Baselines == nil {
+		s.DynamicSeen.Baselines = []DynamicSeenEntry{}
 	}
 	// 音量：钳进 [0, 1]。
 	//

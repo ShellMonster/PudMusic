@@ -896,7 +896,10 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	s.hist = newSearchHistory("")
 	s.keys = newShortcutKeys("")
 	s.picker = systemPathPicker{}
-	s.feed = newFeedPoller(dynamicFeedInterval, s.askNewDynamics)
+	// ⚠️ **唤醒那一路在这里就装好**（不是每帧装）：见 navbar_feed.go 里
+	// `feedPoller.wake` 那一格——每帧装一次既是竞态，又会让第一帧发出的那一趟
+	// 读到一个 nil 的唤醒（那个点于是要再等一个 5 分钟才亮）。
+	s.feed = newFeedPoller(dynamicFeedInterval, s.askNewDynamics, s.wake.invalidate)
 	s.buildLibraryPages()
 	// 搜索页那三个 Tab 各建一份分页列表。建在这里而不是第一次画到搜索页时：
 	// 翻页列表要在**第一帧之前**就建好（它的滚动位置、翻页状态全在里头），

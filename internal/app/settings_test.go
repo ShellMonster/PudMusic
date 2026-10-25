@@ -171,7 +171,7 @@ func TestNestedKeysMatchBiu(t *testing.T) {
 		}
 	}
 
-	// 「动态看到哪儿了」那一格：两个键，键名是我们自己的。
+	// 「动态看到哪儿了」那一格：一个键（一张按账号分的表），键名是我们自己的。
 	d, err := json.Marshal(s.DynamicSeen)
 	if err != nil {
 		t.Fatal(err)
@@ -180,7 +180,7 @@ func TestNestedKeysMatchBiu(t *testing.T) {
 	if err := json.Unmarshal(d, &seen); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"mid", "baseline"} {
+	for _, k := range []string{"baselines"} {
 		if _, ok := seen[k]; !ok {
 			t.Errorf("dynamicSeen 少了键 %q", k)
 		}
@@ -978,7 +978,7 @@ const ourOwnKeysJSON = `{
 	"isMuted": false,
 	"playback": {"items": [], "current": "", "positionMs": 0},
 	"themePreset": "warm-paper",
-	"dynamicSeen": {"mid": 0, "baseline": 0}
+	"dynamicSeen": {"baselines": []}
 }`
 
 // wantSettings 是「读完一份 Biu 的文件之后应该拿到的那份设置」。
