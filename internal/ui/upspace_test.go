@@ -1695,10 +1695,15 @@ func rowKeys(sp *upSpace, tab, n int) []any {
 	return out
 }
 
-// TestTheSpaceAvatarIs140AndTheHeaderPads32 钉住头图区那两个数：
-// 头像 140（上游 `space-info.tsx:89` 的 `h-[140px] w-[140px]`）、左右留白 32
-// （同一行的 `px-8`，`space-info.tsx:83`）。
-func TestTheSpaceAvatarIs88AndTheHeaderPads32(t *testing.T) {
+// TestTheSpaceAvatarIs112AndTheHeaderPads32 钉住头图区那几个数：
+// 头像 112、左右留白 32（上游 `space-info.tsx:83` 的 `px-8`）、头像与昵称之间
+// 16（上游那一行的 `space-x-4`）。
+//
+// ⚠️ **头像 112 不是上游的 140**：上游把名字、签名、统计**全压在头图那张照片
+// 上**，而我们这一版把它们写在**页面底色**上（设计规范 v0.1 §7.18，票 #268
+// 照参考图重排之后仍然是这一套）——横幅于是是一条独立的横幅，头像有一半压在
+// 横幅上，112 是「压得住又不至于把横幅整个盖掉」的那个数。
+func TestTheSpaceAvatarIs112AndTheHeaderPads32(t *testing.T) {
 	b := newUIExplore(t)
 	uiSpaceData(b, "量尺寸的 UP 主", 0, 123456)
 	s, tt, _ := newSpaceShell(t, b, true, "77")
@@ -1708,8 +1713,8 @@ func TestTheSpaceAvatarIs88AndTheHeaderPads32(t *testing.T) {
 	if !ok {
 		t.Fatalf("画面上找不到头像，文字有 %q", tt.Texts())
 	}
-	if av.W != 88 || av.H != 88 {
-		t.Errorf("头像量出来是 %.1f×%.1f，want 88×88", av.W, av.H)
+	if av.W != 112 || av.H != 112 {
+		t.Errorf("头像量出来是 %.1f×%.1f，want 112×112", av.W, av.H)
 	}
 
 	winW := float32(tt.Image().Bounds().Dx())

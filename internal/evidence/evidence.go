@@ -3013,10 +3013,38 @@ var Items = []Item{
 		// ⚠️ **这一条不放在表末尾**：表末尾那处已经撞过好几回（这一轮就是
 		// 第三次），挨着上面那条「收藏夹头图区」读得顺——两条讲的都是
 		// 「头图区」。
-		Spec: "UP 空间头图区（设计规范 v0.1 §7.18，取代上游压黑蒙版 + 白字的做法）：横幅 132 高、底部淡进页面底色；头像 88 压在横幅下沿；名字、签名、统计写在**页面底色**上，字色用主题自己的字色，不再依赖头图是什么图",
+		//
+		// ⚠️ **票 #268（2026-10-25）把这一块按参考图重排了**：头图区不再
+		// 压黑蒙版、字不再压在照片上（票 #357 之后就是那一版），所以下面
+		// 那句 spec 记的是**现在这一版**的样子：横幅 132 高、头像 112 压在
+		// 横幅下沿、名字 / 签名 / 统计写在**页面底色**上。
+		Spec: "UP 空间头图区（设计规范 v0.1 §7.18，取代上游压黑蒙版 + 白字的做法）：横幅 132 高、底部淡进页面底色；头像 112 压在横幅下沿；名字、认证徽章、签名、统计写在**页面底色**上，字色用主题自己的字色，不再依赖头图是什么图",
 		Tests: []string{
-			// 头像 88、左右留白 32、头像压在横幅下沿。
-			"TestTheSpaceAvatarIs88AndTheHeaderPads32",
+			// 头像 112、左右留白 32、头像压在横幅下沿、昵称与徽章与签名的排布。
+			"TestTheSpaceAvatarIs112AndTheHeaderPads32",
+			"TestTheHeaderPutsTheNameTheBadgeAndTheSignInOneRow",
+			"TestTheFollowButtonIsAnOutlinedBox",
+			"TestTheHeaderShowsTheBadgeOnlyWhenThereIsOne",
+			// 「关注」那一枚**键盘走得到、回车按得动**（它换成了自绘的描边
+			// 方块，而自绘的那一版一开始用的是 `ui.Row`——那是个容器，
+			// Tab 走不到它）。
+			"TestTheFollowButtonIsKeyboardReachable",
+		},
+	},
+	{
+		// 票 #268（2026-10-25）：UP 空间的动态条目与稿件卡按 B 站 UP 主页
+		// 那张参考图重排。
+		//
+		// ⚠️ **静默的那几种错法都在这儿**：条目头一行的时间回到昵称右边
+		// （看着还是一行，只是顺序反了）、「赞」掉回下面那一排、稿件卡的封面
+		// 又变回方的——**没有一样会报错**，每一处都还是「能看」。
+		Category: Platform,
+		Spec:     "UP 空间的动态条目：左边头像 + 昵称，下面一行「时间 · 动作」，右边「赞 + 数」与「⋯」；稿件卡横排（封面 192×128 + 右下角时长角标，右边标题 / 描述 / 播放量），带圆角、描边和卡片底",
+		Tests: []string{
+			"TestTheDynamicItemPutsTheTimeUnderTheNameAndTheLikeOnTheRight",
+			"TestTheMoreMenuHoldsTheMusicActions",
+			"TestTheArchiveCardIsHorizontalWithADurationBadge",
+			"TestTheDynamicPaneCardAndCoverMatchUpstream",
 		},
 	},
 	{
