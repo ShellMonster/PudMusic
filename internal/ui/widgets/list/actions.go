@@ -150,8 +150,19 @@ func AppActions(a *app.App, notify func(string, notice.Tone)) Actions {
 			}
 		},
 		Add: func(items []app.Item) {
-			if err := a.Enqueue(items...); err != nil && notify != nil {
-				notify("加不进队列："+err.Error(), notice.Danger)
+			if err := a.Enqueue(items...); err != nil {
+				if notify != nil {
+					notify("加不进队列："+err.Error(), notice.Danger)
+				}
+				return
+			}
+			// ⚠️ **随机档要说一句**：那一档的洗牌袋是**池子**——加进来的歌立刻
+			// 在池中，这一轮就轮到它（见 app/queue_shuffle.go）。而用户看不见池子
+			// 里有什么：他加了一首歌，得知道它**这一轮就放得到**。
+			if notify != nil {
+				if n := a.PlayMode().EnqueueNotice(); n != "" {
+					notify(n, notice.Success)
+				}
 			}
 		},
 		PlayNext: func(item app.Item) {
