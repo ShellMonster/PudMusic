@@ -7,6 +7,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -83,6 +84,18 @@ func TestRenderHoverShots(t *testing.T) {
 			hoverRow(t, tt, songName(homeTabs[0], 3))
 			save(t, dir, "33-"+name+"-网格-卡片hover.png", tt)
 
+			// ── 网格卡封面悬停放大（票 #467）────────────────────────────────
+			//
+			// ⚠️ **要一张完全露在画面里的那一格**：上面那张 hover 的第三格被右边的
+			// 滚动条切掉一截，放大的那一部分看不见——那样的图证明不了放大画出来了。
+			// ⚠️ **推满 300 毫秒**（`motion.HoverZoomTime`）：封面放大是 300ms 的
+			// 动画，不推钟的话存出来的是「放大还没开始」的那一帧。
+			tt.Move(away[0], away[1])
+			homeFrame(tt)
+			save(t, dir, "37-"+name+"-网格-封面放大-平时.png", tt)
+			hoverCover(t, tt, songName(homeTabs[0], 2))
+			save(t, dir, "38-"+name+"-网格-封面放大-hover.png", tt)
+
 			// ── 紧凑档：表头换了一套更窄的列宽，顺带存一张 ─────────────────────
 			setDisplay(t, s.app, tt, app.DisplayModeCompact)
 			tt.Move(away[0], away[1])
@@ -120,6 +133,25 @@ func hoverRow(t *testing.T, tt *ui.Tester, title string) {
 	tt.Move(r.X+r.W/2, r.Y+r.H/2)
 	tt.Frame()
 	tt.Advance(hover.Fade)
+	tt.Frame()
+}
+
+// hoverCover 把指针停在那一格上，并把**悬停放大**推满。
+//
+// ⚠️ **推的是 300 毫秒**（`motion.HoverZoomTime`），不是淡入那 200 毫秒：封面
+// 放大那一层是 300ms 的动画，不推满的话存出来的是「放大还没开始」的那一帧。
+//
+// ⚠️ **指针停在歌名那一行上就行**：那一圈反馈是**整格**的（`onCell` 是那一格
+// 的 `Hovered()`），封面在那一格的上面，一样会放大。
+func hoverCover(t *testing.T, tt *ui.Tester, title string) {
+	t.Helper()
+	r, ok := tt.Find(title)
+	if !ok {
+		t.Fatalf("画面上找不到「%s」，文字有 %q", title, tt.Texts())
+	}
+	tt.Move(r.X+r.W/2, r.Y+r.H/2)
+	tt.Frame()
+	tt.Advance(motion.HoverZoomTime)
 	tt.Frame()
 }
 
