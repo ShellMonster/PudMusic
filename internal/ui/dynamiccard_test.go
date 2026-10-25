@@ -222,7 +222,7 @@ func TestClickingTheAuthorGoesIntoHisSpace(t *testing.T) {
 	}
 }
 
-// TestClickingAnArchiveDynamicQueuesIt 钉住「点投稿那一块 = 从它往后播」。
+// TestClickingAnArchiveDynamicQueuesIt 钉住「点投稿那一块 = 加这一首并立即播」。
 //
 // ⚠️ 这条测试**改过一次断言**：早一版钉的是「点了会说放不了」——那是因为
 // 动态接口给的 `major.archive` 里没有 cid，而 B 站的取流接口不给 cid 会取到

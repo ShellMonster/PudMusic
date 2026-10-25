@@ -365,14 +365,14 @@ func (s *Shell) viewDynamicPics(c *ui.Context, pics []string) {
 
 // viewDynamicVideo 画一条投稿型动态里那份稿件。
 //
-// **整块可点，点它从这一首往后播**——和列表里双击一首是一个意思。
-// 真放不了的时候说一句话（`list.Actions.Play` 里的 Toast），不装死。
+// 整块可点：追加这首并立即播，保留原队列（票 #337）。
+// 起播失败由 list.Actions.PlayNow 的 Toast 说明。
 func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author bili.DynamicAuthor) {
 	t := c.Theme()
 	box := ui.Row(c).Grow(1).Gap(space.Px12).Padding(space.Px8).Radius(t.Radius).
 		Background(t.Surface).AlignItems(ui.Center).Key("dynv:" + v.Bvid)
 	if box.Clicked() {
-		list.AppActions(s.app, s.addToast).Play([]app.Item{dynVideoItem(v, author)})
+		s.listActions().PlayNow(dynVideoItem(v, author))
 	}
 	box.Children(func() {
 		s.spaceThumb(c, v.Cover, dynamicCoverW, dynamicCoverH)
