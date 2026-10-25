@@ -402,6 +402,10 @@ type Settings struct {
 	// 一首快放完时音量渐渐降到 0，下一首（自动接上的）从 0 渐渐升回来。
 	TrackFadeSeconds int `json:"trackFadeSeconds"`
 
+	// VideoQuality 是看视频时**优先**的画质上限（B 站的 qn：16/32/64/80/112/120），
+	// 0 = 默认（720P）。这一集没有那一档时（比如没开会员）自动降到最接近的低档。
+	VideoQuality int `json:"videoQuality"`
+
 	// EQPreset 是均衡器预设的 ID（见 audio.EQPresets），空或 "flat" = 关（默认）。
 	EQPreset string `json:"eqPreset"`
 
@@ -798,6 +802,9 @@ func (s *Settings) normalize() {
 		s.EQPreset = ""
 	}
 	s.TrackFadeSeconds = min(max(s.TrackFadeSeconds, 0), MaxTrackFadeSeconds)
+	if !slices.Contains(VideoQualitySteps, s.VideoQuality) {
+		s.VideoQuality = 0
+	}
 	// nil 和空序列在 JSON 里差一个 `null`，写出去会让「还没排过序」和
 	// 「排过序，排出来是空的」看起来是两回事。统一成空序列。
 	if s.SideMenuCollectionOrder.Created == nil {
@@ -1116,3 +1123,6 @@ func syncDir(dir string) error {
 	defer d.Close()
 	return d.Sync()
 }
+
+// VideoQualitySteps 是设置里「视频画质」能选的档（B 站的 qn，0 = 默认）。
+var VideoQualitySteps = []int{0, 16, 32, 64, 80, 120}

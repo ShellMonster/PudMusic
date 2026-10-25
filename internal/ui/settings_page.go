@@ -20,6 +20,7 @@ package ui
 
 import (
 	"github.com/ShellMonster/Biu_Go/internal/service/audio"
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"strconv"
 	"strings"
 
@@ -1033,6 +1034,26 @@ func (s *Shell) pickTrackFade(c *ui.Context, st app.Settings, ro bool) {
 		opts, chosen, ro, func(i int) {
 			v := trackFadeSteps[i]
 			s.applySetting("切歌淡入淡出", func(cur *app.Settings) { cur.TrackFadeSeconds = v })
+		})
+}
+
+// pickVideoQuality 是「视频画质」那一排：优先的上限，这一集没有就自动降档。
+func (s *Shell) pickVideoQuality(c *ui.Context, st app.Settings, ro bool) {
+	chosen := 0
+	opts := make([]segmentOption, len(app.VideoQualitySteps))
+	for i, q := range app.VideoQualitySteps {
+		opts[i] = segmentOption{label: "720P"}
+		if q != 0 {
+			opts[i].label = bili.VideoQuality(q).Label()
+		}
+		if q == st.VideoQuality {
+			chosen = i
+		}
+	}
+	s.settingsSegment(c, "setting:videoQuality", "视频画质", scale.Font(c, settingsControlW),
+		opts, chosen, ro, func(i int) {
+			v := app.VideoQualitySteps[i]
+			s.applySetting("视频画质", func(cur *app.Settings) { cur.VideoQuality = v })
 		})
 }
 

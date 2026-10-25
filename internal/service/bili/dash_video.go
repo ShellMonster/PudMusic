@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 )
 
@@ -148,19 +149,7 @@ func pairFrom(d *playurlData, bvid, cid string, qn VideoQuality, pref AudioQuali
 		return nil, err
 	}
 
-	video := &StreamRef{
-		URLs:      urlsOf(v.BaseURL, v.BackupURL),
-		Quality:   Quality(v.ID),
-		Bitrate:   v.Bandwidth,
-		Codecs:    v.Codecs,
-		Container: videoContainer(v),
-		ExpiresAt: deadlineOf(v.BaseURL),
-		Bvid:      bvid,
-		Cid:       cid,
-		Width:     v.Width,
-		Height:    v.Height,
-	}
-	video.Label = VideoQuality(v.ID).Label()
+	video := videoRef(v, bvid, cid)
 	return &DashPair{Video: video, Audio: a}, nil
 }
 
@@ -293,4 +282,72 @@ func (c *Client) fetchPlayurl(ctx context.Context, bvid, cid string, qn VideoQua
 		return nil, fmt.Errorf("bili: 取流接口的返回读不懂：%w", err)
 	}
 	return &d, nil
+}
+
+// videoRef 把 `dash.video[]` 的一项变成 StreamRef。
+func videoRef(v dashVideo, bvid, cid string) *StreamRef {
+	return &StreamRef{
+		URLs:      urlsOf(v.BaseURL, v.BackupURL),
+		Quality:   Quality(v.ID),
+		Label:     VideoQuality(v.ID).Label(),
+		Bitrate:   v.Bandwidth,
+		Codecs:    v.Codecs,
+		Container: videoContainer(v),
+		ExpiresAt: deadlineOf(v.BaseURL),
+		Bvid:      bvid,
+		Cid:       cid,
+		Width:     v.Width,
+		Height:    v.Height,
+	}
+}
+
+// PlayVideo 只要视频那一条流，给边放边看用：优先 H.264（系统解码器
+// 都认），没有 H.264 才退到别的编码；画质不超过 qn。
+func (c *Client) PlayVideo(ctx context.Context, bvid, cid string, qn VideoQuality) (*StreamRef, error) {
+	ref, _, err := c.PlayVideoList(ctx, bvid, cid, qn)
+	return ref, err
+}
+
+// PlayVideoList 同 PlayVideo，另外给出这一集**能选的画质**（从低到高）。
+// 没登录时 B 站只给低档，登录后才有 1080P 以上，列表如实反映这一点。
+func (c *Client) PlayVideoList(ctx context.Context, bvid, cid string, qn VideoQuality) (*StreamRef, []VideoQuality, error) {
+	if bvid == "" || cid == "" {
+		return nil, nil, fmt.Errorf("%w: 稿件或分 P 不完整（bvid=%q cid=%q）", ErrNoStream, bvid, cid)
+	}
+	// 不带 qn：B 站把这一集所有的档都返回来，才列得出能选的画质；上限在本地挑。
+	d, err := c.fetchPlayurl(ctx, bvid, cid, VideoQualityUnknown)
+	if err != nil {
+		return nil, nil, err
+	}
+	return videoOnly(d, bvid, cid, qn)
+}
+
+func videoOnly(d *playurlData, bvid, cid string, qn VideoQuality) (*StreamRef, []VideoQuality, error) {
+	if d == nil || d.Dash == nil {
+		return nil, nil, fmt.Errorf("%w: 这个稿件没有 dash 流", ErrNoStream)
+	}
+	dash := *d.Dash
+	var avc []dashVideo
+	for _, v := range dash.Video {
+		if strings.HasPrefix(v.Codecs, "avc1") {
+			avc = append(avc, v)
+		}
+	}
+	if len(avc) > 0 {
+		dash.Video = avc
+	}
+	v, ok := pickVideo(&dash, qn)
+	if !ok {
+		return nil, nil, fmt.Errorf("%w: 稿件 %s 的第 %s 集没有视频流", ErrNoStream, bvid, cid)
+	}
+	seen := map[VideoQuality]bool{}
+	var list []VideoQuality
+	for _, x := range dash.Video {
+		if q := VideoQuality(x.ID); x.BaseURL != "" && !seen[q] && videoQualityRank[q] > 0 {
+			seen[q] = true
+			list = append(list, q)
+		}
+	}
+	sort.Slice(list, func(i, j int) bool { return videoQualityRank[list[i]] < videoQualityRank[list[j]] })
+	return videoRef(v, bvid, cid), list, nil
 }

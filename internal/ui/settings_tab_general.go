@@ -102,6 +102,8 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 			})
 		s.settingRow(c, "切歌淡入淡出", "",
 			func() { s.pickTrackFade(c, st, ro) })
+		s.settingRow(c, "视频画质", "",
+			func() { s.pickVideoQuality(c, st, ro) })
 		s.settingRow(c, "均衡器", "",
 			func() { s.pickEQ(c, st, ro) })
 		s.settingRow(c, "音量均衡", "",
