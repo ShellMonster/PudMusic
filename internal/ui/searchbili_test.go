@@ -585,6 +585,9 @@ func TestStaleResponseDoesNotReachPlayAllOnTheRealPath(t *testing.T) {
 	if got := len(s.search.lists[searchTabSong].snapshot()); got != 1 {
 		t.Fatalf("「全部播放」那份副本里有 %d 行，want 1（迟到的旧响应漏进来了）", got)
 	}
+	// ⚠️ **挂的是手里这一台夹具**（`f.client()` 就是页面正在用的那个客户端），
+	// 不是另起一台——生产环境取流和搜索用的是同一个客户端（见 `main.go` 那段注释）。
+	s.app.MountStreaming(app.Streaming{Client: f.client(), Media: f.Client(), TempDir: t.TempDir()})
 	if err := tt.Click("全部播放"); err != nil {
 		t.Fatalf("点不到「全部播放」：%v，文字有 %q", err, tt.Texts())
 	}

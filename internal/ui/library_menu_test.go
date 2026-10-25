@@ -38,11 +38,15 @@ func TestBothLibraryPagesOfferPlayNextInTheRowMenu(t *testing.T) {
 			if !slices.Contains(got, "下一首播放") {
 				t.Errorf("%s 的行菜单里没有「下一首播放」：%q", c.title, got)
 			}
-			// ⚠️ **四档挨着摆**（票 #299）：立即播放 / 从这一首往后听 / 下一首
+			// ⚠️ **四档挨着摆**（票 #337）：立即播放 / 从这一首往后听 / 下一首
 			// 播放 / 添加到队列——四件事是同一个动作的四档（现在就放这一首 /
 			// 从这一首接到这一页末尾 / 排在当前后面 / 排到队尾），摆在一起用户
 			// 才看得出这是个梯度（Biu 的 `music-recommend/index.tsx:204-213` 就是
 			// 这个顺序）。
+			//
+			// ⚠️ **四档各是什么**：立即播放 = **加这一首到队尾并打断**（队列里原来
+			// 有的保留）；从这一首往后听 = 换成从这一行往后的一整段；下一首播放 =
+			// 插在当前项后面；添加到队列 = 加到队尾。后两档不打断。
 			//
 			// ⚠️ **判的是下标不是「在不在」**：少了哪一档，`Index` 回来的是 -1，
 			// 而 -1 比谁都小——那样这条断言会**假装通过**。
@@ -125,9 +129,54 @@ func queueTitles(items []app.Item) []string {
 	return out
 }
 
+// TestBothLibraryPagesOfferTheirOwnLastMenuItem 钉住两页菜单**最后那一项**各自
+// 的名字：稍后再看是「移除」，历史记录是「删除」。
+//
+// ⚠️ **两页的菜单本体是共用的一份**（`libraryMenuItems`），只有最后那一项是
+// 这一页自己的——共用之后最容易出的错就是「两页都显示成同一个名字」或者「那一项
+// 干脆没了」：它由参数带进去，传错或漏传，界面上就是一个**摆不出来**的菜单项。
+//
+// ⚠️ **只断菜单上有没有这一项，不去按它**：按下去是**写操作**（删一条播放记录 /
+// 移一条稍后再看），那要打真 B 站——铁律：不打真 B 站写接口。
+func TestBothLibraryPagesOfferTheirOwnLastMenuItem(t *testing.T) {
+	for _, c := range []struct {
+		path, title, want string
+	}{
+		{laterPath, "稍后再看", "移除"},
+		{historyPath, "历史记录", "删除"},
+	} {
+		t.Run(c.title, func(t *testing.T) {
+			f := newLibFake(t).
+				withLater(1, 2, "甲", "乙").
+				withHistory(1, 10, 200, "甲", "乙")
+			tt, s := libraryShell(t, f, c.path)
+			waitFrames(t, tt, "把内容拉回来", func() bool { return rowsShown(s.pageOf(c.path)) == 2 })
+
+			if err := tt.RightClick("甲"); err != nil {
+				t.Fatalf("右键那一行开不出菜单：%v，文字有 %q", err, tt.Texts())
+			}
+			got := tt.Menu()
+			if !slices.Contains(got, c.want) {
+				t.Errorf("%s 的行菜单里没有 %q：%q", c.title, c.want, got)
+			}
+			// 另一页的那一个名字**不许**串到这一页来（共用菜单体最容易串的就是它）。
+			other := "移除"
+			if c.want == "移除" {
+				other = "删除"
+			}
+			if slices.Contains(got, other) {
+				t.Errorf("%s 的行菜单里混进了 %q（那是另一页的那一项）：%q", c.title, other, got)
+			}
+			// 它是**最后**那一项：删掉/移除摆在菜单末尾，上游也是这个顺序。
+			if i := slices.Index(got, c.want); i >= 0 && i != len(got)-1 {
+				t.Errorf("%q 在菜单的第 %d 项，want 最后一项：%q", c.want, i+1, got)
+			}
+		})
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 「正在播放」高亮（这两页自己画的行）
-// ─────────────────────────────────────────────────────────────────────────────
 
 // TestBothLibraryPagesMarkThePlayingRow 盯稍后再看 / 历史记录这两页也标出
 // 正在放的那一行。
