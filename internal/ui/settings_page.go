@@ -19,6 +19,7 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -1008,4 +1009,28 @@ func settingsButton(c *ui.Context, label string) ui.Element {
 	t := c.Theme()
 	return flatButton(c, label).Height(settingsSelectH).Padding(space.None, space.Px12).
 		Radius(t.Radius).Background(t.Surface).Border(1, t.Border)
+}
+
+// trackFadeSteps 是「切歌淡入淡出」那一排按钮的档位（秒，0 = 关）。
+var trackFadeSteps = []int{0, 3, 5, 8, 10, 15}
+
+// pickTrackFade 是切歌淡入淡出那一排：关 / 3 / 5 / 8 / 10 / 15 秒。
+func (s *Shell) pickTrackFade(c *ui.Context, st app.Settings, ro bool) {
+	chosen := 0
+	opts := make([]segmentOption, len(trackFadeSteps))
+	for i, sec := range trackFadeSteps {
+		label := "关"
+		if sec > 0 {
+			label = strconv.Itoa(sec) + " 秒"
+		}
+		opts[i] = segmentOption{label: label}
+		if sec == st.TrackFadeSeconds {
+			chosen = i
+		}
+	}
+	s.settingsSegment(c, "setting:trackFade", "切歌淡入淡出", scale.Font(c, settingsControlW),
+		opts, chosen, ro, func(i int) {
+			v := trackFadeSteps[i]
+			s.applySetting("切歌淡入淡出", func(cur *app.Settings) { cur.TrackFadeSeconds = v })
+		})
 }

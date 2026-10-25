@@ -100,6 +100,8 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 				s.pickSwitch(c, "上报本机播放记录", "播放记录上报", st.ReportPlayHistory, ro,
 					func(cur *app.Settings, on bool) { cur.ReportPlayHistory = on })
 			})
+		s.settingRow(c, "切歌淡入淡出", "",
+			func() { s.pickTrackFade(c, st, ro) })
 		s.settingRow(c, "音量均衡", "让不同歌的响度一致（本地歌曲按整首测量，在线歌曲只会压低过响的）",
 			func() {
 				s.pickSwitch(c, "音量均衡", "音量均衡", st.NormalizeVolume, ro,

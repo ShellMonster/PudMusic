@@ -147,3 +147,29 @@ func TestCloseStopsTheRamp(t *testing.T) {
 		t.Errorf("关掉之后增益还在变（%v → %v）——那一趟斜坡没收掉", before, got)
 	}
 }
+
+func TestALongFadeInOnlyAppliesToTheNextPlay(t *testing.T) {
+	p := fadePlayer(t)
+	p.SetVolume(0.8)
+	p.SetFadeIn(2 * time.Second)
+	p.Play()
+	time.Sleep(300 * time.Millisecond)
+	if got := p.gainNow(); got <= 0 || got >= 0.4 {
+		t.Errorf("2 秒淡入走了 0.3 秒，增益 %v，want 在 (0, 0.4) 之间", got)
+	}
+	p.Pause()
+	p.SetVolume(0.8)
+	p.Play()
+	waitUntil(t, 3*time.Second, func() bool { return p.gainNow() >= 0.8 })
+}
+
+func TestFadeOutGoesToZeroAndSetVolumeBringsItBack(t *testing.T) {
+	p := fadePlayer(t)
+	p.SetVolume(0.8)
+	p.Play()
+	waitUntil(t, 3*time.Second, func() bool { return p.gainNow() >= 0.8 })
+	p.FadeOut(400 * time.Millisecond)
+	waitUntil(t, 3*time.Second, func() bool { return p.gainNow() <= 0 })
+	p.SetVolume(0.8)
+	waitUntil(t, 3*time.Second, func() bool { return p.gainNow() >= 0.8 })
+}
