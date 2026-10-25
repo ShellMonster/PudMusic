@@ -377,6 +377,18 @@ func dynamicCardShell(t *testing.T, b *uiExplore, item map[string]any) (*Shell, 
 	return s, tt, a
 }
 
+// openDynMenu 点开动态条目右上角那个「⋯」。
+//
+// ⚠️ **「下一首播放」「下载音频」收在那个菜单里**（票 #268：照上游的
+// `MoreMenu`），而「赞」留在外面——所以要按那两项的用例得先把它点开。
+func openDynMenu(t *testing.T, tt *mygoui.Tester) {
+	t.Helper()
+	if err := tt.Click(dynMoreLabel); err != nil {
+		t.Fatalf("点不到「⋯」：%v", err)
+	}
+	tt.Frame()
+}
+
 // TestLikingADynamicReallyReachesBili 「赞」不是一句「还没接」。
 //
 // 钉三样：**按钮摆出来了**、**按下去发的是这一条的 id**、**界面上立刻变了**。
@@ -453,6 +465,7 @@ func TestAFailedLikeGoesBackToWhatItWas(t *testing.T) {
 // TestAVideoDynamicOffersBothDownloads 投稿型动态上才有「下载音频」（纯音频产品，没有「下载视频」）。
 func TestAVideoDynamicOffersBothDownloads(t *testing.T) {
 	_, tt, _ := dynamicCardShell(t, newUIExplore(t), uiDynamicArchive("v1", "BV1play"))
+	openDynMenu(t, tt)
 
 	for _, want := range []string{"下载音频"} {
 		if !tt.HasText(want) {
@@ -471,6 +484,9 @@ func TestATextDynamicHasNoDownloadButtons(t *testing.T) {
 	if !tt.HasText("赞") {
 		t.Errorf("纯文字动态上没有赞，文字有 %q", tt.Texts())
 	}
+	// ⚠️ **菜单要点开再看**：那两项收在「⋯」里（票 #268），而纯文字那一条
+	// 连菜单里都不该有它们——摆出来按不动。
+	openDynMenu(t, tt)
 	if tt.HasText("下载音频") || tt.HasText("下载视频") {
 		t.Errorf("纯文字动态上摆着下载（按了也下不了），文字有 %q", tt.Texts())
 	}
@@ -496,6 +512,7 @@ func TestDownloadingFromADynamicReallyReachesTheQueue(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("挂下载：%v", err)
 	}
+	openDynMenu(t, tt)
 	if err := tt.Click("下载音频"); err != nil {
 		t.Fatal(err)
 	}
@@ -517,6 +534,7 @@ func TestPlayNextFromADynamicLandsOnTheNextSlot(t *testing.T) {
 	a.Queue().Reset(app.Item{Source: "online", Type: "mv", Bvid: "BVplaying", Title: "正在放的那首"})
 	before := a.Queue().Items()
 
+	openDynMenu(t, tt)
 	if err := tt.Click("下一首播放"); err != nil {
 		t.Fatal(err)
 	}
@@ -538,6 +556,8 @@ func TestPlayNextFromADynamicLandsOnTheNextSlot(t *testing.T) {
 // TestATextDynamicHasNoPlayNextButton 纯文字 / 图文里没有可放的东西。
 func TestATextDynamicHasNoPlayNextButton(t *testing.T) {
 	_, tt, _ := dynamicCardShell(t, newUIExplore(t), uiDynamic("t1", "纯文字的那一条"))
+	// ⚠️ **菜单要点开再看**：那一项收在「⋯」里（票 #268）。
+	openDynMenu(t, tt)
 	if tt.HasText("下一首播放") {
 		t.Errorf("纯文字动态上摆着「下一首播放」（那一栏里根本没有东西可放），文字有 %q", tt.Texts())
 	}

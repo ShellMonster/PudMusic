@@ -243,8 +243,16 @@ func (a *App) submitFolder(id int64, draft bili.FolderDraft) {
 		// 侧栏立刻能看到它。⚠️ **用接口回回来的 title 而不是用户敲的那个**：
 		// B 站会改（B 站对某些名字会加后缀），而侧栏下次刷新拉的是同一个值，
 		// 两边不一致的话用户会看到「弹窗里叫 A，侧栏里叫 B」直到下次刷新。
+		//
+		// ⚠️ **封面也带上**（`bili.FolderInfo.Cover` 是有的）：用户刚换完封面，
+		// 侧栏上那一枚就该是新的——下一次刷新要等网络往返，而那之前用户看到
+		// 的是旧封面。
+		//
+		// ⚠️ **数量不在这里给**（`FolderInfo` 没有 media_count 那一格）：0 在
+		// 这里是「不知道」，`Favorites.Upsert` 会沿用原来那个数（见它的注释）。
 		a.FavoritesOf().Upsert(FavoritesCreated, Favorite{
 			ID: info.ID, Title: info.Title, Mid: info.Mid, Type: info.Type,
+			Cover: info.Cover,
 		})
 		text := "收藏夹建好了"
 		if id > 0 {

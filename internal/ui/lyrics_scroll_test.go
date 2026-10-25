@@ -16,6 +16,8 @@ package ui
 import (
 	"testing"
 	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 )
 
 // TestTheLyricScrollIsTwoHundredMilliseconds 钉住那一下的时长与形状。
@@ -47,7 +49,7 @@ func TestTheLyricScrollIsTwoHundredMilliseconds(t *testing.T) {
 	if got, want := lyricLineAnim.Duration, 300*time.Millisecond; got != want {
 		t.Errorf("行内渐变的时长是 %v，want %v（那是逐字抄上游 Biu 的）", got, want)
 	}
-	if got, want := lyricSnapAnim.Duration, time.Nanosecond; got != want {
+	if got, want := motion.Snap.Duration, time.Nanosecond; got != want {
 		t.Errorf("窗口刚恢复那一帧的时长是 %v，want %v（一次到位）", got, want)
 	}
 }

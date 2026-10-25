@@ -11,6 +11,15 @@ const (
 	ParamsAvatar = "160w_160h_1c_1s.webp"
 	// ParamsMini 是迷你播放器的小封面，对应 Biu 的 `472w_264h_1c_!web-dynamic.webp`。
 	ParamsMini = "472w_264h_1c_!web-dynamic.webp"
+	// ParamsSquare 是**方形小图**（侧栏收藏夹那一枚封面，32 见方）。
+	//
+	// ⚠️ **它和 `ParamsAvatar` 是同一串参数**，但**不是一件事**：头像按正方形
+	// 裁是因为头像是方的，收藏夹的封面本来可能是方的也可能是别的形状——
+	// B 站图床这一档把它裁成正方形，正好是侧栏那一枚要的样子。
+	//
+	// 另起一个名字是为了「这一格是给谁的」写在代码里，而不是让调用处去猜
+	// 「头像那一档能不能拿来用」。
+	ParamsSquare = "160w_160h_1c_1s.webp"
 )
 
 // CoverURL 按 B 站图床的裁剪参数拼出封面地址。

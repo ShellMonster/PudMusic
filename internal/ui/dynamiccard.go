@@ -21,16 +21,26 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
-// dynamicCoverW / dynamicCoverH 是投稿那一块的封面尺寸：纯音频产品，封面是**方的**
-// （设计规范 v0.1 §7.17，取代上游 Biu 的 192×128 横图缩略图）。
+// dynamicCoverW / dynamicCoverH 是投稿那一块的封面尺寸：**16:9 的横图**
+// （上游 `w-48 h-32` = 192×128，`user-profile/dynamic-list/item.tsx:180`）。
+//
+// ⚠️ **不是方的**：改之前是 96 见方（纯音频产品的旧设计，票 #268 改成对齐
+// 参考图——B 站 UP 主页那条动态里的稿件卡是横着的）。
 const (
-	dynamicCoverW = 96
-	dynamicCoverH = 96
+	dynamicCoverW = 192
+	dynamicCoverH = 128
 )
+
+// dynamicAvatarS 是动态条目上那个头像的边长。
+//
+// 上游 HeroUI 的 `User` 组件默认 `size="md"`——头像那一档是 **40**
+// （`md` 是 `w-10 h-10`）。
+const dynamicAvatarS = 40
 
 // dynamicPlayBtn 是投稿卡右边那枚播放键的直径；它是正圆，所以圆角是直径的一半，不跟主题圆角走。
 const dynamicPlayBtn = 36
@@ -231,36 +241,55 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic, selected, ring bo
 	// 指针停在一张**被选中**的动态上时，整条卡片会变成淡棕。
 	card = list.SelectedRow(card, t, selected, false, ring)
 	card.Children(func() {
-		// ① 头一行：头像 + 昵称（可点）+ 时间。
-		ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-			s.spaceAvatar(c, d.Author.Face, 40, false)
-			name := d.Author.Name
-			if name == "" {
-				name = "这个 UP 主"
-			}
-			// 昵称是**链接**不是装饰：它是「从这条动态进他空间」这条路。
-			//
-			// ⚠️ **它是「名字型链接」，不是一枚按钮**（票 #417）：上游那一格是
-			// `User` 的 `hover:underline`——**没有按钮壳、没有底色、没有胶囊**。
-			// 改之前这里画的是扁平按钮（左右各留一段内边距 + 圆角），于是那个
-			// 名字被一个胶囊包着，而指针落上去时胶囊才显出来——像一块底牌。
-			//
-			// ⚠️ **没有编号时点不动**（`d.Author.Mid > 0`）：那一句仍然显示——
-			// 「把名字藏起来是另一种撒谎」（理由同 `widgets/list` 的 `OwnerName`）。
-			if flatLink(c, name).FontSize(scale.Font(c, scale.Size14)).Clicked() && d.Author.Mid > 0 {
-				s.navigate(upPathOf(d.Author.Mid))
-			}
-			if d.Time != "" {
-				when := d.Time
-				if d.Kind == bili.DynamicVideo && d.Video != nil {
-					when += " · 发布了音乐"
-				}
-				ui.Text(c, when).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
-			}
+		// ① 头一行：**左边头像 + 昵称 / 「时间 · 动作」，右边「赞 + 数」与「⋯」**。
+		//
+		// 排布照上游（`user-profile/dynamic-list/item.tsx:113-160` 的
+		// `CardHeader className="flex items-start justify-between px-0 py-2"`）：
+		// 左边是 `User`（头像 + 名字 + 下面一行的「时间 · 动作」），右边是
+		// 赞和「⋯」那一组。
+		ui.Row(c).FillWidth().AlignItems(ui.Start).Children(func() {
+			// 左组：头像 + 名字那一列。
+			ui.Row(c).Grow(1).Shrink(1).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
+				s.spaceAvatar(c, d.Author.Face, dynamicAvatarS, false)
+				ui.Column(c).Gap(space.Px2).Children(func() {
+					// 昵称是**链接**不是装饰：它是「从这条动态进他空间」这条路。
+					//
+					// ⚠️ **它是「名字型链接」，不是一枚按钮**（票 #417）：上游那一格是
+					// `User` 的 `hover:underline`——**没有按钮壳、没有底色、没有胶囊**。
+					// 改之前这里画的是扁平按钮（左右各留一段内边距 + 圆角），于是那个
+					// 名字被一个胶囊包着，而指针落上去时胶囊才显出来——像一块底牌。
+					//
+					// ⚠️ **没有编号时点不动**（`d.Author.Mid > 0`）：那一句仍然显示——
+					// 「把名字藏起来是另一种撒谎」（理由同 `widgets/list` 的 `OwnerName`）。
+					name := d.Author.Name
+					if name == "" {
+						name = "这个 UP 主"
+					}
+					if flatLink(c, name).FontSize(scale.Font(c, scale.Size14)).Clicked() && d.Author.Mid > 0 {
+						s.navigate(upPathOf(d.Author.Mid))
+					}
+					// 「时间 · 动作」那一行（上游 `User` 的 `description`）。
+					if d.Time != "" {
+						when := d.Time
+						if d.Kind == bili.DynamicVideo && d.Video != nil {
+							when += " · 发布了音乐"
+						}
+						ui.Text(c, when).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
+					}
+				})
+			})
+			// 右组：赞 + 数，还有「⋯」。
+			s.viewDynamicActions(c, d)
 		})
 
 		// ② 正文。
-		if d.Text != "" {
+		//
+		// ⚠️ **投稿型动态的正文与稿件卡里的简介是同一句话时，正文不画**：我们
+		// 这一版的投稿动态在正文空的时候**用简介顶上**（`bili` 那层，票 #344 的
+		// 判据要靠它），而参考图上那一句简介是**画在稿件卡里**的——两处都画
+		// 就是同一句话说两遍（改之前那一张卡也是两处都画，而画出来是「上面
+		// 一行字、卡里又一行一样的字」）。
+		if d.Text != "" && !dynBodyRepeatsCard(d) {
 			ui.Text(c, d.Text).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Copy).MaxLines(8)
 		}
 
@@ -271,23 +300,44 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic, selected, ring bo
 		case len(d.Pics) > 0:
 			s.viewDynamicPics(c, d.Pics)
 		}
-
-		// ④ 那一排动作：赞 +（投稿型的）下一首播放 / 下载音频 / 下载视频。
-		s.viewDynamicActions(c, d)
 	})
 }
 
-// viewDynamicActions 是卡片最下面那一排按钮。
+// dynBodyRepeatsCard 报「这一条的正文就是稿件卡里那一句简介」。
 //
-// 项照 Biu 的 `src/pages/dynamic-feed/item.tsx:112`（点赞）、`:118`（下一首播放）、
-// `:134`/`:135`（下载音频 / 下载视频）：
+// ⚠️ **它成立是因为数据那一层的一个约定**：投稿型动态在正文空的时候**用简介
+// 顶上**（`bili` 那层，票 #344 的判据要靠它分「什么也没有」和「投稿没有稿件
+// 号」）。于是那一句简介在**正文那一行**和**稿件卡里**各出现一次——同一句话
+// 说两遍。
 //
-//   - **赞**对三种卡片都有——B 站给纯文字和图文也评赞。
-//   - 其余三项只有投稿型有：纯文字和图文里没有可放的东西（B 站音乐库里的音频
-//     条目还没有取流通道），摆出来按不动。
+// 参考图（B 站 UP 主页）上那一句简介是**画在稿件卡里**的，正文那一行是空的
+// （上游的 `textContent` 是 `desc?.text || opus?.summary?.text`，投稿动态的
+// `desc.text` 通常是空的）。
+func dynBodyRepeatsCard(d bili.Dynamic) bool {
+	if d.Kind != bili.DynamicVideo || d.Video == nil || d.Text == "" {
+		return false
+	}
+	// ⚠️ **两边都要去空白才能比**：`bili` 那一层给 `Video.Desc` 的是**原样**
+	// （`a.Desc.String()`），而 `Dynamic.Text` 是**去空白**的
+	// （`strings.TrimSpace(...)`）——拿原样去比，简介后面多一个空格或换行
+	// 时判据就是假的，同一句话照样画两遍（这一处要消掉的正是那个重复）。
+	return d.Text == strings.TrimSpace(d.Video.Desc)
+}
+
+// viewDynamicActions 是条目**右上角**那一组：赞 + 数，和「⋯」。
+//
+// 上游是 `CardHeader` 右边那一组（`user-profile/dynamic-list/item.tsx:135-160`）：
+// 一枚 `variant="light"` 的赞（18 的拇指图标 + 数字）和一枚「⋯」。
+//
+// ⚠️ **赞是自己看得见的一枚按钮**，不收进「⋯」菜单（票 #268）：B 站给纯文字
+// 和图文也评赞，而那一按是**乐观**的（先点亮再发请求）——收进菜单里就多了一层。
+//
+// ⚠️ **「下一首播放」「下载音频」收进「⋯」菜单**（上游的 `MoreMenu` 就是这么
+// 放的：`dynamic-feed/item.tsx:145-150` 的 `onAddToNext` / `onDownloadAudio`）。
+// 它们原来在卡片最下面那一排（正文下面），而参考图上那一排没有它们。
 func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 	t := c.Theme()
-	ui.Row(c).Key("dyn-acts:" + d.ID).Gap(space.Px6).Children(func() {
+	ui.Row(c).Key("dyn-acts:" + d.ID).Gap(space.Px4).AlignItems(ui.Center).Children(func() {
 		liked, count := s.dynLikes.get(d.ID, d.Liked, d.LikeCount)
 		label := "赞"
 		if count > 0 {
@@ -308,19 +358,131 @@ func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 		if btn.Clicked() {
 			s.toggleDynamicLike(d)
 		}
+		// 「⋯」。
+		s.viewDynamicMore(c, d)
+	})
+}
 
-		if d.Kind != bili.DynamicVideo || d.Video == nil {
-			return
+// dynMoreLabel 是「⋯」那一枚的无障碍名字（也是无头 Tester 认得它的凭据）。
+const dynMoreLabel = "这条动态的更多操作"
+
+// viewDynamicMore 是「⋯」那一枚：点开一个菜单。
+//
+// ⚠️ **走 `ui.PopoverBase`**（和头像下拉同一份）：框架那一份自带「点外面关 /
+// 按 Esc 关」，自己拼的话得自己实现那两件事——漏了就是面板关不掉。
+//
+// ⚠️ **开着的是哪一条记在 `Shell.dynMenuFor`**（不是「第几行」）：动态是往
+// 尾部追加的，而刷新时新动态会插到**前面**——记行号的话，用户盯着的那一格
+// 菜单会突然跑到别的条目上去。
+//
+// # ⚠️ 菜单**只能用鼠标打开**
+//
+// 条目在**列表的一行里**，而框架的列表把回车留给「选中那一行」
+// （`mygo/ui/list.go:1190` 的 `o.Shortcut(0, KeyEnter)`）——那一行里的按钮
+// **按回车没有反应**（实测：焦点停在「⋯」上，回车之后菜单没开；「赞」那一枚
+// 同样按回车没反应）。作者名是唯一的例外：它是 `RoleLink`，走的是另一条路
+// （`flat.Link` 给它 `Role(ui.RoleLink)`）。
+//
+// ⚠️ **这不是这一票引入的**：改之前这一行里的「赞」「下一首播放」「下载音频」
+// 同样按回车没反应（基线实测：赞数不变、队列没变）。收进菜单只是把「看得见
+// 但按不动」变成「看不见也按不动」——**功能上没有进一步变差**。
+func (s *Shell) viewDynamicMore(c *ui.Context, d bili.Dynamic) {
+	btn := flatIconButton(c, iconMore, dynMoreLabel, 16)
+	if btn.Clicked() {
+		if s.dynMenuOpen && s.dynMenuFor == d.ID {
+			s.dynMenuOpen = false
+		} else {
+			s.dynMenuOpen = true
+			s.dynMenuFor = d.ID
 		}
-		if flatButton(c, "下一首播放").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Clicked() {
-			s.playNextFromDynamic(d.Video, d.Author)
-		}
-		// ⚠️ 下载走 `downloadLater`（异步补 cid）：动态接口给的稿件**不带
-		// cid**（`major.archive` 里没有这个字段），而下载按分 P 存文件。
-		if flatButton(c, "下载音频").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Clicked() {
-			s.downloadLater(dynVideoItem(d.Video, d.Author), false, "下载音频")
+	}
+	if !s.dynMenuOpen || s.dynMenuFor != d.ID {
+		return
+	}
+	t := c.Theme()
+	ui.PopoverBase(c, btn, &s.dynMenuOpen, func(panel ui.Element) {
+		popupPanelCard(s, t, panel.
+			AttachTo(btn, ui.AnchorBottomEnd, ui.AnchorTopEnd).
+			Margin(t.Space(1), space.None, space.None, space.None).
+			Width(dynMenuW).
+			Padding(space.Px4).
+			Label("这条动态的更多操作")).
+			Children(func() {
+				s.viewDynamicMenuItems(c, d)
+			})
+	})
+}
+
+// dynMenuW 是「⋯」菜单多宽。
+const dynMenuW = 168
+
+// viewDynamicMenuItems 是「⋯」菜单里的那几项。
+//
+// ⚠️ **纯文字和图文那两条只有一项**：B 站音乐库里的音频条目还没有取流通道，
+// 「下一首播放」「下载音频」摆出来按不动（理由同 `viewDynamicActions` 原来
+// 那一段注释）。
+func (s *Shell) viewDynamicMenuItems(c *ui.Context, d bili.Dynamic) {
+	t := c.Theme()
+	items := []dynMenuItem{}
+	if d.Kind == bili.DynamicVideo && d.Video != nil {
+		items = append(items,
+			dynMenuItem{label: "下一首播放", icon: iconEnqueue, run: func() {
+				s.playNextFromDynamic(d.Video, d.Author)
+			}},
+			dynMenuItem{label: "下载音频", icon: iconDownload, run: func() {
+				s.downloadLater(dynVideoItem(d.Video, d.Author), false, "下载音频")
+			}},
+			dynMenuItem{label: "在 B 站打开", icon: iconExternal, run: func() {
+				s.openBiliVideo(d.Video.Bvid)
+			}},
+		)
+	}
+	if len(items) == 0 {
+		return
+	}
+	ui.Column(c).Key("dyn-menu:" + d.ID).FillWidth().Children(func() {
+		for _, item := range items {
+			row := ui.ButtonBase(c).Key("dyn-menu-item:"+item.label).
+				FillWidth().Height(dynMenuRowH).
+				Padding(space.None, space.Px12).Gap(space.Px8).
+				Justify(ui.Start).Radius(t.Radius)
+			row.Children(func() {
+				ui.Icon(c, icon(item.icon)).FontSize(dynMenuIconSize).TextColor(t.TextMuted)
+				ui.Text(c, item.label).FontSize(scale.Font(c, scale.Size14)).Grow(1)
+			})
+			if row.Clicked() {
+				s.dynMenuOpen = false
+				item.run()
+			}
 		}
 	})
+}
+
+// dynMenuRowH 是「⋯」菜单里每一项多高（和头像下拉那六项同一档）。
+const dynMenuRowH = 32
+
+// dynMenuIconSize 是菜单项左边那一枚图标多大。
+const dynMenuIconSize = 16
+
+// dynMenuItem 是「⋯」菜单里的一项。
+type dynMenuItem struct {
+	label string
+	icon  string
+	run   func()
+}
+
+// openBiliVideo 在浏览器里打开 B 站上那一条稿件。
+//
+// ⚠️ **打不开要说一句**：静默失败的话，用户按了那一项什么也没发生，而界面上
+// 看不出任何异样（菜单还收起来了，像是按对了）。
+func (s *Shell) openBiliVideo(bvid string) {
+	if bvid == "" {
+		s.addToast("这一条没有 B 站地址", notice.Warning)
+		return
+	}
+	if err := systemOpenLink("https://www.bilibili.com/video/" + bvid); err != nil {
+		s.addToast("打不开那个链接："+err.Error(), notice.Danger)
+	}
 }
 
 // playNextFromDynamic 是动态卡片上的「下一首播放」。
@@ -365,21 +527,66 @@ func (s *Shell) viewDynamicPics(c *ui.Context, pics []string) {
 
 // viewDynamicVideo 画一条投稿型动态里那份稿件。
 //
+// 排布照上游（`user-profile/dynamic-list/item.tsx:173-215`）：
+//
+//	<div className="group border-default-200 bg-default-50 hover:bg-default-100
+//	              relative mt-2 cursor-pointer overflow-hidden rounded-xl border">
+//	  <div className="flex flex-row">
+//	    <div className="relative h-32 w-48 shrink-0">  ← 封面 192×128（16:9）
+//	      …右下角一个时长角标…
+//	    </div>
+//	    <div className="flex min-w-0 grow flex-col justify-between p-3">
+//	      <div className="space-y-1">
+//	        <h3 className="line-clamp-2 text-sm font-medium">标题</h3>
+//	        <div className="text-default-500 line-clamp-1 text-xs">描述</div>
+//	      </div>
+//	      <span className="text-default-400 mt-1 text-xs">播放量</span>
+//	    </div>
+//	  </div>
+//	</div>
+//
+// ⚠️ **封面是 16:9 的横图**（上游 `h-32 w-48`），不是我们原来那个 96 见方的
+// 方块（那是纯音频产品的旧设计，票 #268 改成对齐参考图）。
+//
+// ⚠️ **行数照参考图**（B 站 UP 主页那张图）：标题 **1 行**、描述 **2 行**。
+// 上游那一版是标题 2 行、描述 1 行。
+//
 // 整块可点：追加这首并立即播，保留原队列（票 #337）。
 // 起播失败由 list.Actions.PlayNow 的 Toast 说明。
 func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author bili.DynamicAuthor) {
 	t := c.Theme()
-	box := ui.Row(c).Grow(1).Gap(space.Px12).Padding(space.Px8).Radius(t.Radius).
-		Background(t.Surface).AlignItems(ui.Center).Key("dynv:" + v.Bvid)
+	box := ui.Row(c).Grow(1).AlignItems(ui.Center).
+		Radius(s.cardRadius(t)).Background(s.cardBackground(t)).Border(1, t.Border).
+		Clip().Key("dynv:" + v.Bvid)
 	if box.Clicked() {
 		s.listActions().PlayNow(dynVideoItem(v, author))
 	}
 	box.Children(func() {
-		s.spaceThumb(c, v.Cover, dynamicCoverW, dynamicCoverH)
-		ui.Column(c).Grow(1).Gap(space.Px4).Children(func() {
-			ui.Text(c, tclean.Clean(v.Title).Title).FontSize(scale.Font(c, scale.Size14)).MaxLines(2).Ellipsis("…")
+		// ① 封面（16:9）+ 右下角那个时长角标。
+		ui.Box(c).Size(dynamicCoverW, dynamicCoverH).Clip().Children(func() {
+			s.spaceThumb(c, v.Cover, dynamicCoverW, dynamicCoverH)
+			// ⚠️ **时长角标是黑底白字**（上游 `bg-black/70 px-1 text-xs
+			// text-white`），不是主题色——它压在封面那张照片上，主题色在深色
+			// 封面上读不出来。
+			//
+			// ⚠️ **那 70% 的黑走 `scrim.Badge`**（令牌表里那一档）：界面层不许
+			// 出现裸的遮罩 alpha（`widgets/scrim` 的 `TestNoScrimLiteralIsLeft`
+			// 盯着这件事）。
+			if v.Duration != "" {
+				ui.Box(c).Absolute().Right(space.Px4).Bottom(space.Px4).
+					Padding(space.None, space.Px4).Radius(space.Px4).
+					Background(ui.RGBA(0, 0, 0, scrim.Badge)).Children(func() {
+					ui.Text(c, v.Duration).FontSize(scale.Font(c, scale.Size12)).TextColor(ui.Color{R: 255, G: 255, B: 255, A: 255})
+				})
+			}
+		})
+		// ② 右边那一列：标题 + 描述 + 播放量。
+		ui.Column(c).Grow(1).Shrink(1).Padding(space.Px12).Gap(space.Px4).Children(func() {
+			ui.Text(c, tclean.Clean(v.Title).Title).FontSize(scale.Font(c, scale.Size14)).
+				FontWeight(weightMedium).MaxLines(1).Ellipsis("…")
 			if v.Desc != "" {
-				ui.Text(c, v.Desc).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
+				ui.Text(c, v.Desc).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).
+					MaxLines(2).Ellipsis("…")
 			}
 			if meta := dynVideoMeta(v); meta != "" {
 				ui.Text(c, meta).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
@@ -392,19 +599,15 @@ func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author b
 	})
 }
 
-// dynVideoMeta 是投稿那一块底下那一行小字（播放数 + 时长）。
+// dynVideoMeta 是投稿那一块底下那一行小字（播放数）。
+//
+// ⚠️ **时长不在这一行**：它现在是封面右下角那个角标（上游那样），两处都画
+// 是同一句话说两遍。
 func dynVideoMeta(v *bili.DynamicArchive) string {
-	meta := ""
-	if v.Play != "" {
-		meta = v.Play + "收听"
+	if v.Play == "" {
+		return ""
 	}
-	if v.Duration != "" {
-		if meta != "" {
-			meta += " · "
-		}
-		meta += v.Duration
-	}
-	return meta
+	return v.Play + "收听"
 }
 
 // dynVideoItem 把一份动态里的投稿变成队列里的一项。

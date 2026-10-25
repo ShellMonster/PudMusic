@@ -69,7 +69,8 @@ func TestCollectedFoldersReadsTheTypeAndTheOwner(t *testing.T) {
 		writeJSON(w, jsonData(t, 0, "0", map[string]any{
 			"count": 3,
 			"list": []map[string]any{
-				{"id": 496307088, "title": "入站必刷", "mid": 412466388, "type": 11, "media_count": 55},
+				{"id": 496307088, "title": "入站必刷", "mid": 412466388, "type": 11, "media_count": 55,
+					"cover": "http://i0.hdslb.com/bfs/album/otherguy.jpg"},
 				{"id": 700, "title": "合集 甲", "mid": 42, "type": 21, "media_count": 3},
 				{"id": 701, "title": "系列 乙", "mid": 43, "type": 31, "media_count": 4},
 			},
@@ -80,8 +81,11 @@ func TestCollectedFoldersReadsTheTypeAndTheOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// ⚠️ **封面是「原主人」的那一张**（票 #270）：这一组里的收藏夹全是别人的，
+	// 而 B 站给的就是那个收藏夹自己的封面——不是收藏它的人的封面。
 	want := []CollectedFolder{
-		{ID: 496307088, Title: "入站必刷", Mid: 412466388, Type: 11, MediaCount: 55},
+		{ID: 496307088, Title: "入站必刷", Cover: "http://i0.hdslb.com/bfs/album/otherguy.jpg",
+			Mid: 412466388, Type: 11, MediaCount: 55},
 		{ID: 700, Title: "合集 甲", Mid: 42, Type: 21, MediaCount: 3},
 		{ID: 701, Title: "系列 乙", Mid: 43, Type: 31, MediaCount: 4},
 	}
