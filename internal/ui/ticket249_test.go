@@ -43,6 +43,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -205,16 +206,26 @@ func TestTheQueueRowOperationKeyIsNamedAfterItsSong(t *testing.T) {
 // TestTheQueueRowOperationKeyIsThirtyTwoSquare 钉住行尾那枚「⋯」的**尺寸**。
 //
 // 它曾经是 **44×28**（`flat` 的默认内边距 6/14），而列表那一档是 32×32。44 宽在
-// 320 宽的抽屉里吃掉 14% 行宽，歌名那一列因此只有 **196** 而不是 208——**标题比
+// 320 宽的抽屉里吃掉 14% 行宽，歌名那一列因此只有 **195** 而不是 207——**标题比
 // 需要早 12px 截断**。
 //
 // 判据断两样：
 //
 //   - 那枚自己 **32×32**；
-//   - **歌名那一列 208 宽**（320 − 每边 8 内边距 − 封面 48 − 两道 8 的缝 − 32）。
+//   - **歌名那一列 207 宽**（行的内容 303 − 封面 48 − 两道 8 的缝 − 「⋯」32）。
 //
-// ⚠️ **歌名那一列是量出来的，不是算出来的**：那一列是 `Grow(1)`，它有多宽由
-// 别的东西占掉多少决定——所以「⋯」那一枚宽了 12，这一列就窄 12。
+// ⚠️ **歌名那一列是量出来的，而且量的是那一列，不是整行**。
+//
+// `Tester.Find(歌名)` 给回来的是**行**——行自己的无障碍名字就是歌名
+// （`ListState.Label` 给的），而它排在树里更前。所以**量它的宽等于量整行**
+// （319），而整行的宽**不随「⋯」变**（那一列是 `Grow(1)`：别的占多少它就剩多少）。
+// 拿整行当判据，那条断言改前改后都成立——**抓不到它要防的截断**。
+//
+// 所以这里从**两个量出来的框**算那一列：行的内容左边 + 封面 + 一道缝 = 那一列的
+// 左边；「⋯」的左边 − 一道缝 = 那一列的右边。
+//
+// ⚠️ **先确认按歌名找到的真是行**（高 64）：不是行的话下面那条量到的就是别的
+// 东西——**宁可当场红，也不要一条永远绿的断言**。
 func TestTheQueueRowOperationKeyIsThirtyTwoSquare(t *testing.T) {
 	h := drawerShell(t, app.DefaultThemePreset, false)
 
@@ -228,16 +239,27 @@ func TestTheQueueRowOperationKeyIsThirtyTwoSquare(t *testing.T) {
 			op.W, op.H)
 	}
 
-	// 歌名那一列：320（抽屉宽）− 每边 8（行内边距）− 封面 48 − 两道 8 的缝 −
-	// 「⋯」32 = 208。
-	const wantTitleW = 208.0
-	title, ok := h.tt.Find("队列里的第二首")
-	if !ok || title.W == 0 {
-		t.Fatalf("那一行的歌名没画出来，文字有 %q", h.tt.Texts())
+	// 那一行本身（**行**，不是那一列——见文件头那一段）。
+	row, ok := h.tt.Find("队列里的第二首")
+	if !ok || row.W == 0 {
+		t.Fatalf("那一行没画出来，文字有 %q", h.tt.Texts())
 	}
-	if title.W < wantTitleW-0.5 {
+	if row.H != queueRowHeight {
+		t.Fatalf("按歌名找到的是 %.0f×%.0f 的框，want %.0f 高的**行**——"+
+			"它不是行的话，下面那条「歌名那一列有多宽」量到的就是别的东西",
+			row.W, row.H, float64(queueRowHeight))
+	}
+
+	// 歌名那一列：行的内容左边 + 封面 48 + 一道 8 的缝 = 左边；「⋯」的左边 − 一道
+	// 8 的缝 = 右边。
+	const wantTitleW = 207.0
+	titleLeft := row.X + queuePadX + queueCoverSize + space.Px8
+	titleRight := op.X - space.Px8
+	titleW := titleRight - titleLeft
+	if titleW < wantTitleW-0.5 {
 		t.Errorf("歌名那一列只有 %.0f 宽，want ≥ %.0f——"+
-			"「⋯」那一枚又把它挤窄了（标题提前截断）", title.W, wantTitleW)
+			"「⋯」那一枚又把它挤窄了（标题提前 %.0fpx 截断）",
+			titleW, wantTitleW, wantTitleW-titleW)
 	}
 }
 

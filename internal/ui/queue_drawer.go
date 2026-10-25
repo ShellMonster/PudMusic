@@ -768,11 +768,17 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 			// Tester 也认不出是哪一行。现在是「「歌名」的操作」，和列表那一档
 			// 一样。
 			//
+			// ⚠️ **那个名字是「记好的那一份」**（`s.queueRowOps`，票 #313 / #339
+			// 那一档）：`list.OperationLabel` 现拼的话每帧每行一次字符串拼接，而
+			// 抽屉一屏画着十来行——那十来次分配把队列抽屉那一档的**每帧分配上限**
+			// （`framebudget_test.go`：44 次）顶穿了。列表那一档早就是记好的
+			// （`widgets/list` 的 `opText`），这一处没跟着记。
+			//
 			// ⚠️ **悬停时图形变主色**（`OperationAccent`）：指针落在它上面时整行
 			// 也亮着（`rowEl.Hovered()` 对祖先为真），两处反馈叠在一起，而原来
 			// 两者都是极淡的中性色——**看不出「我现在指着的是哪一枚」**。变主色
 			// 那一档是上游 `hover:text-primary`（票 #249）。
-			list.OperationAccent(c, list.OperationLabel(row.item.Title),
+			list.OperationAccent(c, s.queueRowOps.At(row.at, row.item.Title, list.OperationLabel),
 				func(m *ui.Menu) { s.queueMenu(m, row) })
 		})
 	})
