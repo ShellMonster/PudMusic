@@ -661,6 +661,9 @@ func fullTesterWithCoverPNG(t *testing.T, body []byte) (*Shell, *mygoui.Tester) 
 	if !s.app.Snapshot().HasTrack {
 		t.Fatalf("歌没开起来：%q", s.app.Snapshot().Err)
 	}
+	// ⚠️ **暂停**（理由见 `fullTester` 的注释）：满屏的封面在转的时候，那一转
+	// 是常驻的，「动画停下来了」这一条永远等不到。
+	s.app.Pause()
 	return s, tt
 }
 
@@ -760,6 +763,10 @@ func relLuminance(c color.RGBA) float64 {
 // 用的是仓库自己的写法（见 settings_test.go 的 settleSettingsPage）：
 // **`tt.Advance(d)` 配 `tt.FramePending()`**，不数帧。Tester 的钟站着不动，
 // 数帧那种等法会静默失效（CLAUDE.md §2）。
+//
+// ⚠️ **满屏的封面在转的时候，这一条等不到**（票 #468）：那一转是**常驻**的，
+// 框架于是**一直要帧**。所以这一族测试用的那几份外壳都**先把歌暂停了**
+// （见 `fullTester` 的注释）——封面不转，动画就会停。
 func settleFull(t *testing.T, tt *mygoui.Tester) {
 	t.Helper()
 	const step = 16 * time.Millisecond

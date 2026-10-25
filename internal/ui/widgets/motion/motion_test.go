@@ -182,6 +182,20 @@ func TestTheTableMatchesTheDesignTokens(t *testing.T) {
 				"两边对不上", w.name, got, w.want)
 		}
 	}
+
+	// ③ 满屏封面那一圈：一圈 1.8 秒。
+	//
+	// ⚠️ **这一条是「自定值」**（QQ音乐 取不到转速，见报告 BMG-254 §3.6 的
+	// QQ-11）——但正因为它是推出来的，两边更要钉死：DESIGN.md 写 1.8 秒，代码
+	// 里就得是 1.8 秒。
+	spin, ok := tokens["cover_spin"]
+	if !ok {
+		t.Fatalf("DESIGN.md 的 motion 一节里没有 cover_spin 令牌")
+	}
+	if !strings.Contains(spin, "1800ms") {
+		t.Errorf("DESIGN.md motion.cover_spin = %q——里面不是 1800ms"+
+			"（代码里一圈是 %v）", spin, CoverSpinPeriod)
+	}
 }
 
 // parseDesignMotion 读 DESIGN.md 里 `motion:` 那一段，返回令牌表。
@@ -264,4 +278,35 @@ func numberIn(name, s string) (float64, bool) {
 		return 0, false
 	}
 	return v, true
+}
+
+// TestTheCoverSpinNumbersAgree 把满屏封面那一圈的那几个数钉成**一家人**。
+//
+// ⚠️ **它们是同一个数的三种写法**：一圈 1.8 秒（`CoverSpinPeriod`）、一圈
+// 360 度（`CoverSpinTurn`）、每秒 200 度（`CoverSpinSpeed`）。改了一个而没改
+// 另两个，转速就悄悄变了——而那一圈转多快没有别的地方能看出来（框架只把
+// 「当前值 → 目标值」按曲线走，它不知道我们想要多少度/秒）。
+//
+// ⚠️ **曲线那条也得钉住**：那一圈是**匀速**的，所以它走的是 `ui.Linear`
+// （不是统一曲线——那一族全是「前重后轻」，拿它来转圈等于圈越转越慢）。
+func TestTheCoverSpinNumbersAgree(t *testing.T) {
+	if got := CoverSpinSpeed * CoverSpinPeriod.Seconds(); got != CoverSpinTurn {
+		t.Errorf("转速和圈长对不上：%v 度/秒 × %v 秒 = %v 度，want %v 度（一圈）",
+			CoverSpinSpeed, CoverSpinPeriod.Seconds(), got, CoverSpinTurn)
+	}
+	// 33⅓ rpm：一圈 1.8 秒。
+	if got := CoverSpinPeriod.Seconds(); got != 1.8 {
+		t.Errorf("一圈是 %v 秒，want 1.8 秒（33⅓ rpm）", got)
+	}
+	if CoverSpin.Duration != CoverSpinPeriod {
+		t.Errorf("那条曲线的时长是 %v，want %v（一圈）", CoverSpin.Duration, CoverSpinPeriod)
+	}
+	// 匀速：`ui.Linear` 是个函数值，比不了「是不是同一条」——比它在两处上的
+	// 取值（`ui.Linear(0.25)` 恰好是 0.25，而统一曲线那一族不是）。
+	if CoverSpin.Ease == nil {
+		t.Fatal("那条曲线没有 Ease——留空就是框架默认的 EaseOut，不是匀速")
+	}
+	if got := CoverSpin.Ease(0.25); got != 0.25 {
+		t.Errorf("那条曲线在四分之一处是 %v，want 0.25（匀速就是这样的）", got)
+	}
 }
