@@ -131,6 +131,13 @@ func (s *Shell) syncUnderlay(c *ui.Context) {
 	// 里待着的那几秒里，那个倒计时停在半路。
 	s.syncRoute()
 
+	// 「**刚刚**登录成功那一下」（票 #277）：说一句提示、回该去的页。
+	//
+	// ⚠️ **它在这一层，不在 `pageSyncs` 里**：登录成功的时候用户**可能已经
+	// 不在登录页上了**（他扫完码就自己走了），而登录页自己的 `syncLogin`
+	// 只在当前路由是 `/login` 时才跑——放那儿就漏掉了那一半。
+	s.syncLoginSuccess()
+
 	// 当前这一页自己那一份。
 	s.syncCurrentPage(c)
 }
