@@ -18,6 +18,10 @@
 // 这一枚；而 `internal/ui` 的「稍后再看 / 历史记录」那两页自己也画行（走的是另一
 // 套，见 `internal/ui/library_rows.go` 的文件头），它们也要同一枚——所以这一份
 // 放在**两边都够得着**的 `widgets/list` 里，界面层 import 它。
+//
+// 队列抽屉的行尾那一枚也走这里（`internal/ui/queue_drawer.go` 的
+// `list.OperationAccent`）——**同一个「⋯」只应该有一个尺寸**（它曾经有三个：
+// 这一档 32×32、抽屉头那两枚 32×32、队列抽屉行尾那一枚 44×28，票 #249）。
 package list
 
 import (
@@ -113,6 +117,31 @@ func Operation(c *ui.Context, label string, color ui.Color, build func(m *ui.Men
 		Padding(operationHitPad, operationHitPad).
 		TextColor(color).
 		Tooltip(operationTip).
+		Menu(build)
+}
+
+// OperationAccent 是 Operation 加上「**悬停时图形变主色**」。
+//
+// 上游 HeroUI 的 `IconButton` 是 `hover:text-primary`
+// （`src/components/icon-button/index.tsx:16`）——悬停时图形**从前景色变成主色**，
+// 不只是底下多一层淡底。播放条上那些图标键早就是这一档（`internal/ui` 的
+// `iconKey`），而这一枚原来还是「只有淡底、图形不变色」的那一档——用户从别的
+// 图标键挪到它上面会觉得「这一枚不亮」（票 #249）。
+//
+// # 为什么它**不接字色**
+//
+// `Operation` 接一个 color，是因为列表行的字色是**那一行自己算出来的**
+// （`card.go` 的 `rowColors`），得抄一份给它。而队列抽屉那一行（`internal/ui` 的
+// `queue_drawer.go`）的字色是**继承**来的——行自己已经定过了（正在放那一行是主色
+// 压深的那一档）。所以这里不接：接了就得在两处各抄一份字色，而抄的那一份迟早
+// 和行自己算出来的那一份对不上。
+//
+// ⚠️ **尺寸和 `Operation` 一样**（图标 16 + 每边 8 = 32×32）：同一个「⋯」在仓库里
+// 只应该有一个尺寸——它曾经有三个（这一档 32×32、抽屉头那两枚 32×32、队列抽屉
+// 行尾那一枚 44×28）。
+func OperationAccent(c *ui.Context, label string, build func(m *ui.Menu)) ui.Element {
+	return flat.IconButtonAccent(c, moreIcon, label, operationIconSize, false).
+		Padding(operationHitPad, operationHitPad).
 		Menu(build)
 }
 

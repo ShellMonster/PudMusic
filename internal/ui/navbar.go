@@ -137,7 +137,13 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// 阶段 1 唯一的入口：选一个本地文件。Biu 里对应侧栏的「本地音乐」。
 		// 走的是播放条「加歌」那一条路：多选的文件全都进队列，用它打开的歌
 		// 上一首/下一首才是亮的（直接调 app.Open 就进不了队列，见 pickAndEnqueue）。
-		if s.withTip(c, iconButton(c, iconFolder, "打开文件", iconMd).
+		//
+		// ⚠️ **走 `iconKey`（悬停时图形变主色）**，不是 `iconButton`（票 #249）：
+		// 上游 HeroUI 的 `IconButton` 是 `hover:text-primary`
+		// （`src/components/icon-button/index.tsx:16`），而顶栏这一排原来走的是
+		// 「只有淡底、图形不变色」那一档——同一个「图标键」在应用里有两套配方，
+		// 用户从播放条挪到顶栏会觉得「这一枚不亮」。
+		if s.withTip(c, iconKey(c, iconFolder, "打开文件", iconMd, false).
 			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "打开本地音频文件").Clicked() {
 			s.pickAndEnqueue()
 		}
@@ -164,7 +170,10 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// 说的是同一件事，读屏软件和测试都还叫得出它。
 		//
 		// （票 #289 拿掉顶栏那一枚「设置」之后，这一排**全是图标键**了。）
-		if s.withTip(c, iconButton(c, iconPiP, "迷你", iconMd).
+		//
+		// ⚠️ **走 `iconKey`（悬停时图形变主色）**，不是 `iconButton`（票 #249）：
+		// 同一档配方，理由见上面「打开文件」那一枚。
+		if s.withTip(c, iconKey(c, iconPiP, "迷你", iconMd, false).
 			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
 			"缩成 320×84 的小窗贴边悬浮，音乐不停").Clicked() {
 			s.toggleMiniPlayer()

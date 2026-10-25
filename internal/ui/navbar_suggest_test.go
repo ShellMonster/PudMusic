@@ -21,13 +21,13 @@ import (
 //
 // 时钟换成假的（clock.go）：防抖那 500ms 不能真等，而这一组量的就是那 500ms。
 // `fakeClockOn` 会把红点那个节奏拨回零值（造外壳的第一帧已经按真时钟走过一趟）。
-func newSuggestShell(t *testing.T, f *biliFixture) (*Shell, *mygoui.Tester) {
+func newSuggestShell(t *testing.T, f *biliFixture, opts ...shellOpt) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	b := newTestShell(t, mounted(func(t *testing.T, a *app.App) {
+	b := newTestShell(t, append(opts, mounted(func(t *testing.T, a *app.App) {
 		// 走真的登录那条路（挂一个空登录态 + 那个客户端）：`App.BiliClient` 只有
 		// 走过 MountLogin 之后才有值，而那一层问的就是它。
 		a.MountLogin(app.NewMemoryStore("suggest-test"), f.client())
-	}))
+	}))...)
 	// ⚠️ **把应用的唤醒句柄接上**：生产上那是 `Attach` 干的（`a.SetWake`），而无头
 	// Tester 没有窗口、`Attach` 永远不跑。少了它，「谁改了状态谁要一帧」这件事在
 	// 这里压根不发生——于是「界面自己养自己」（每一帧都请求下一帧）那种坏法在这
@@ -359,11 +359,21 @@ func TestReopeningTheOverlayStartsAtTheTop(t *testing.T) {
 	}
 }
 
-// TestAFailedSuggestLeavesOnlyTheHistory 钉住规格第四条：请求失败时静默。
+// TestAFailedSuggestSaysSoInsteadOfLookingEmpty 钉住「拉失败要说一句自己的话」。
 //
-// 判据是三样：浮层上**还有**历史那一档、**没有**联想词那一档、**没有**任何一句
-// 错误（提示条也不弹）。少一样用户就会以为搜索框坏了——而手动打字搜索照旧能用。
-func TestAFailedSuggestLeavesOnlyTheHistory(t *testing.T) {
+// ⚠️ **这一条改过口径**（票 #455 / 报告 246 第 12 条）：原来的验收是「请求失败
+// 时静默：浮层保持只有历史那一档，不弹错误」（issue #97 第四条）。**不弹错误、
+// 不转圈、不变红**那一半仍然成立；而「一个字都没有」那一半改了——失败时「联想词」
+// 那一档摆一句自己的话（「没能取到联想词」）。
+//
+// 理由：同一个浮层里，历史那档是**本地**的（永远在），联想那档是**远端**的（会
+// 失败）。「联想这一栏空着」读出来的意思是「没有联想词」，不是「没拉到」——两种
+// 「没有」长得一模一样时，用户读到的是「B 站没给我联想」，而真实原因可能是网络
+// 断了、登录态过期或风控。
+//
+// 判据是四样：浮层上**还有**历史那一档、**有**联想词那一档、那一档里**有**那句
+// 自己的话、**没有**任何一句错误（提示条也不弹）。
+func TestAFailedSuggestSaysSoInsteadOfLookingEmpty(t *testing.T) {
 	f := newBiliFixture(t, 1)
 	f.setSuggestFail(-412)
 	s, tt := newSuggestShell(t, f)
@@ -382,13 +392,18 @@ func TestAFailedSuggestLeavesOnlyTheHistory(t *testing.T) {
 	if !tt.HasText("搜索历史") || !tt.HasText("林俊杰") {
 		t.Errorf("拉不到之后连历史那一档也没了，文字有 %q", tt.Texts())
 	}
-	if tt.HasText(suggestTermsHeading) {
-		t.Errorf("拉不到却摆了一档联想词出来，文字有 %q", tt.Texts())
+	// ⚠️ **联想词那一档要摆出来**：它摆的是那一句自己的话（不摆的话，这一栏空着，
+	// 而「空着」正是这一条要治的那个毛病）。
+	if !tt.HasText(suggestTermsHeading) {
+		t.Errorf("拉不到却连「联想词」那一档都没有了，文字有 %q", tt.Texts())
 	}
-	// 一个字都不能有：静默是这一条的全部。
+	if !tt.HasText(suggestFailedNote) {
+		t.Errorf("拉不到却没有那句自己的话（%q），文字有 %q", suggestFailedNote, tt.Texts())
+	}
+	// 一个字都不能有：**静默是这一条的全部**——不弹错误、不转圈、不变红。
 	for _, bad := range []string{"失败", "错误", "拉不到", "风控", "重试"} {
 		if tt.HasText(bad) {
-			t.Errorf("拉不到却在画面上说了 %q（要静默），文字有 %q", bad, tt.Texts())
+			t.Errorf("拉不到却在画面上说了 %q（静默只管「不吵」，不管「不说话」）", bad)
 		}
 	}
 	if toasts := s.visibleToasts(); len(toasts) != 0 {
@@ -405,10 +420,10 @@ func TestAFailedSuggestLeavesOnlyTheHistory(t *testing.T) {
 
 // TestTypingTheSameWordAgainAsksAgain 钉住「失败之后还能再试一次」。
 //
-// 静默是规格要的，于是**用户看不到任何提示**——他唯一能做的事就是把那几个字删掉
-// 重敲一遍。而那一遍必须真的会再问一次：业务层为了挡住「每帧重发」记着「这个词已经
-// 问过了」，连失败的那一次也记着，于是不清掉的话他重敲多少遍都是空的，而界面上
-// 一个字都没有告诉他为什么。
+// 失败是静默的（不弹错误、不变红），于是**用户能做的只有把那几个字删掉重敲一遍**
+// ——界面上那一档只说一句「没能取到联想词」，没有别的入口。而那一遍必须真的会再
+// 问一次：业务层为了挡住「每帧重发」记着「这个词已经问过了」，连失败的那一次也
+// 记着，于是不清掉的话他重敲多少遍都是空的。
 func TestTypingTheSameWordAgainAsksAgain(t *testing.T) {
 	f := newBiliFixture(t, 1)
 	f.setSuggestFail(-412) // 先拉不到
@@ -419,8 +434,10 @@ func TestTypingTheSameWordAgainAsksAgain(t *testing.T) {
 	typeInSearch(t, tt, "林俊杰")
 	settleSuggestDebounce(s, tt)
 	waitFor(t, "那一次有问有答", func() bool { return f.suggestServed() >= 1 })
-	if tt.HasText(suggestTermsHeading) {
-		t.Fatalf("拉不到却摆了一档联想词出来，文字有 %q", tt.Texts())
+	waitFrames(t, tt, "失败之后那一帧", func() bool { return !s.app.SuggestState().Loading })
+	// ⚠️ **失败之后那一档摆的是那一句自己的话**（票 #455）：不是空着。
+	if !tt.HasText(suggestFailedNote) {
+		t.Fatalf("拉不到却没说一句自己的话（%q），文字有 %q", suggestFailedNote, tt.Texts())
 	}
 
 	// 用户把那三个字删干净，重敲一遍：B 站这一次放行。

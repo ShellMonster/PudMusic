@@ -202,6 +202,10 @@ type Grid struct {
 	// 钉住这一条的是 `TestTheGridOffersTheRetryThatTheListOffers`。
 	footer func(c *ui.Context)
 
+	// footerLabel 是末尾那一格给无障碍和「打字选中」用的名字。空串是默认那句
+	// （`footerLabel`）。理由同 `List.footerLabel`。
+	footerLabel string
+
 	// lead 是「这一份歌上面那一块」（页内头部），为 nil 时没有。
 	//
 	// ⚠️ **它占网格的第 0 行**（整行，不是一格）：所以下面那些行在框架那一层的
@@ -324,6 +328,12 @@ func (g *Grid) SetEmptyView(fn func(c *ui.Context)) { g.emptyView = fn }
 //
 // ⚠️ 只能由界面线程调，同 SetSongs。
 func (g *Grid) SetFooter(fn func(c *ui.Context)) { g.footer = fn }
+
+// SetFooterLabel 换末尾那一格给无障碍和「打字选中」用的名字。传空串是退回
+// 默认那句（`footerLabel`）。理由同 `List.SetFooterLabel`。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (g *Grid) SetFooterLabel(name string) { g.footerLabel = name }
 
 // SetLead 装「这一份歌上面那一块」（页内头部），传 nil 去掉。
 //
@@ -506,6 +516,9 @@ func (g *Grid) View(c *ui.Context) {
 		}
 		i := first(row)
 		if i >= len(g.songs) {
+			if g.footerLabel != "" {
+				return g.footerLabel
+			}
 			return footerLabel
 		}
 		return g.songs[i].Title
@@ -1029,10 +1042,21 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 
 		// ① 封面 + 它上面那圈 hover 反馈：右下角一个 40 的主色圆播放钮，封面底部
 		// 一条 black/90 的渐变（左播放量 / 右时长），都 200ms 淡入。
-		hover.CardCover(c, g.cache, m.Cover, cell, gridCoverH, onCell,
-			g.countText.At(i, m.View, PlayCountText),
-			g.durText.At(i, m.Duration, formatDuration), m.Title,
-			func() { g.playFrom(i) })
+		//
+		// ⚠️ **「用户」那一档的格子不是歌**（`isUserItem`）：那一格按下去是进他的
+		// 空间，所以那一圈反馈换一套——图形、提示、无障碍名三样都换（理由见
+		// `hover.ProfileTip`）。
+		if isUserItem(m) {
+			hover.CardCoverProfile(c, g.cache, m.Cover, cell, gridCoverH, onCell,
+				g.countText.At(i, m.View, PlayCountText),
+				g.durText.At(i, m.Duration, formatDuration), m.Title,
+				func() { g.playFrom(i) })
+		} else {
+			hover.CardCover(c, g.cache, m.Cover, cell, gridCoverH, onCell,
+				g.countText.At(i, m.View, PlayCountText),
+				g.durText.At(i, m.Duration, formatDuration), m.Title,
+				func() { g.playFrom(i) })
+		}
 
 		// ② 歌名 + UP 名/时长。
 		//

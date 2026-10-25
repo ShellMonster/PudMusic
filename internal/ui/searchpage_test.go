@@ -45,6 +45,11 @@ type searchStub struct {
 	overlap bool
 	// gates 把某一次拉页卡住，直到 release：用来造「旧查询的响应迟到」。
 	gates map[string]chan struct{}
+	// fail 是这一份拉页器要失败时说的话。nil 就是正常拉。
+	//
+	// ⚠️ **它要在接上之前定好**（理由同这个结构体上面那一段）：接上之后第一趟请求
+	// 可能已经在后台跑了，那时候再改字段就是竞态。
+	fail error
 
 	mu    sync.Mutex
 	calls []searchCall
@@ -95,9 +100,15 @@ func (st *searchStub) fetch(tab int, _ context.Context, page int) (list.Page, er
 	st.calls = append(st.calls, searchCall{tab: tab, page: page, keyword: q.keyword, sort: q.sort})
 	rows := st.rows(tab, page)
 	ch := st.gates[gateKey(q.keyword, page)]
+	fail := st.fail
 	st.mu.Unlock()
 	if ch != nil {
 		<-ch // 放行之前这一趟不落地（模拟「旧查询的响应迟到」）
+	}
+	if fail != nil {
+		// 这一次拉失败了。走的是真的那条路：分页列表把错记下来、解锁、停下来等
+		// 人点重试（`widgets/list/paged.go` 的 apply）。
+		return list.Page{}, fail
 	}
 
 	// 「全部播放」那份副本：和真的那一支走同一段逻辑，包括**代次对不上就整个丢掉**
@@ -748,15 +759,22 @@ func TestStaleResponseDoesNotReachPlayAll(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // TestNoClientSaysSoInsteadOfPretending 盯「没挂 B 站客户端」别静默。生产上 `main.go`
-// 一定先挂（`ui.MountLogin`），这一条给「万一没挂」留：表现是「搜了没有结果」那一支
-// 加一条说清原因的提示，而不是一片空白。
+// 一定先挂（`ui.MountLogin`），这一条给「万一没挂」留。
+//
+// ⚠️ **失败不再被说成「没有结果」**（票 #455 / 报告 246 第 27 条）：那一屏上要有
+// 失败自己的说法（一句原因 + 一个「重试搜索」），而「换个词再搜一次」那一句在
+// 「没挂上客户端」时是错的建议——B 站没给错，是这一趟根本没发出去。
 func TestNoClientSaysSoInsteadOfPretending(t *testing.T) {
 	s, tt := newShell(t) // 没有换掉 fetch：走真的那一支，而它没有客户端
 	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("周杰伦"))
 
-	settleText(t, tt, noSearchResults.Hint)
-	if !tt.HasText(errSearchNotMounted.Error()) {
-		t.Errorf("没有说清是「没接上」，文字有 %q", tt.Texts())
+	settleText(t, tt, errSearchNotMounted.Error())
+	if tt.HasText(noSearchResults.Hint) {
+		t.Errorf("拉不到却画成「没有结果」那一格，文字有 %q", tt.Texts())
+	}
+	// 而用户得有一条路能重来：失败那一格自带「重试搜索」。
+	if _, ok := tt.Find("重试搜索"); !ok {
+		t.Errorf("拉不到却没有「重试搜索」那一枚，文字有 %q", tt.Texts())
 	}
 	_ = s
 }

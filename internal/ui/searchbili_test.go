@@ -72,6 +72,13 @@ type biliFixture struct {
 	served int
 	media  []byte
 
+	// searchFail 非 0 时「搜索」这一路回这个 **HTTP 状态码**（造「拉不到」）。
+	//
+	// ⚠️ **它是 HTTP 状态码而不是业务 code**：403 这一档走的是 `bili.ErrNetwork`
+	// （压根没拿到一份能解析的响应），而业务 code（比如 -101）走的是另一条路。
+	// 两��路都有人在用（联想词那一档走的是业务 code，见 `setSuggestFail`）。
+	searchFail int
+
 	// searchTotal 是搜索那一次回包里的**命中总数**（B 站的 `numResults`）。
 	// 零 = 1（默认那一份）。
 	//
@@ -195,6 +202,16 @@ func (f *biliFixture) serveSearch(w http.ResponseWriter, r *http.Request) {
 
 	f.mu.Lock()
 	f.searched = append(f.searched, kw)
+	fail := f.searchFail
+	f.mu.Unlock()
+	if fail != 0 {
+		// 403 这一档：压根没拿到一份能解析的响应 → `bili.ErrNetwork`
+		// → 界面上一句「连不上 B 站，检查一下网络」。
+		w.WriteHeader(fail)
+		return
+	}
+
+	f.mu.Lock()
 	// ⚠️ 这里**不删**门：删了就没人放行了（`release` 从这张表里取），那条响应会一直
 	// 挂到 `gateWait` 兜底才自己回去——而用例早就断言完了，看着全绿其实什么都没验到。
 	ch := f.gates[kw]
@@ -268,6 +285,17 @@ func (f *biliFixture) setSuggestTerms(kw string, terms ...string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.suggestTerms[kw] = terms
+}
+
+// setSearchFail 改「搜索」这一路要回的 HTTP 状态码（0 = 正常）。
+//
+// ⚠️ **状态码不是业务 code**：403 走的是「压根没拿到一份能解析的响应」
+// （`bili.ErrNetwork`），而业务 code（比如 -101）在 JSON 里面、走的是另一条路。
+// 两条路翻出来的话不一样（见 `bili.Friendly`），所以要分别造。
+func (f *biliFixture) setSearchFail(code int) {
+	f.mu.Lock()
+	f.searchFail = code
+	f.mu.Unlock()
 }
 
 // setSuggestFail 改这一路要回的业务 code（0 = 正常）。
@@ -547,6 +575,48 @@ func TestASearchResultSaysWhyWhenThePartCannotBeAsked(t *testing.T) {
 	// 🔴 **一个没有 cid 的取流请求都不该发**。
 	for i, c := range f.cids() {
 		t.Errorf("第 %d 次取流还是发出去了，cid=%q —— 问不出来就不该取流", i+1, c)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 拉失败时界面上那一句是人话（票 #455）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheSearchFailureSaysSomethingTheUserCanUnderstand 盯「搜索拉失败时，界面上
+// 摆出来的那一句是**用户看得懂的话**」。
+//
+// ⚠️ **这一条走真的那条链**（真的 `bili.Client` → 真的 HTTP → 真的 403）：上一组
+// （`searchpage_test.go`）用的是假拉页器，而假拉页器把自己写的那句错直接递上来
+// ——那一支**压根不经过 `bili.Friendly`**。于是「原始的错翻成人话」这一段在那边
+// 一条用例都没有：它要是坏了（忘了翻，或者翻出来的是「bili: 网络没通: GET …」
+// 这种给开发者看的话），仓库里没有一条用例会红。
+//
+// 403 那一档走的是 `bili.ErrNetwork`（压根没拿到一份能解析的响应）→ 一句
+// 「连不上 B 站，检查一下网络」。
+func TestTheSearchFailureSaysSomethingTheUserCanUnderstand(t *testing.T) {
+	f := newBiliFixture(t, 1)
+	f.setSearchFail(http.StatusForbidden)
+
+	s, tt := newShell(t)
+	searchOnRealClient(s, f.client())
+	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("周杰伦"))
+
+	// 等失败落地（那一趟是真的网络往返）。
+	waitFrames(t, tt, "拉失败了", func() bool {
+		return s.search.lists[searchTabSong].list.Paged().Err != nil
+	})
+
+	want := "连不上 B 站，检查一下网络"
+	if !tt.HasText(want) {
+		t.Errorf("失败那一格没有说人话（want %q），文字有 %q", want, tt.Texts())
+	}
+	// 而原始的那一句**不许**出现在界面上：那是给开发者看的。
+	if tt.HasText("bili:") {
+		t.Errorf("失败那一格把内部那一句原样摆出来了，文字有 %q", tt.Texts())
+	}
+	// 而它不是「没有结果」。
+	if tt.HasText(noSearchResults.Hint) {
+		t.Errorf("拉不到却画成「没有结果」那一格，文字有 %q", tt.Texts())
 	}
 }
 
