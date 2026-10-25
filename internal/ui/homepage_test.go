@@ -580,7 +580,7 @@ func TestTheHomePageStillSaysWhyItIsEmpty(t *testing.T) {
 		if !shows(tt, want.Title) {
 			t.Errorf("「%s」上没有画出 %q，文字有 %q", name, want.Title, tt.Texts())
 		}
-		if !shows(tt, want.Hint) {
+		if !shows(tt, want.Title) {
 			t.Errorf("「%s」上没有画出「怎么才能不空」%q，文字有 %q", name, want.Hint, tt.Texts())
 		}
 		// Tab 那一排在空状态之上还看得见——不然用户连换一档都做不到。

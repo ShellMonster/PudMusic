@@ -206,7 +206,6 @@ func (s *Shell) viewFullLyricsEmpty(c *ui.Context) {
 		Children(func() {
 			ui.Icon(c, icon(noLyrics.Icon)).FontSize(emptyIconSize).TextColor(dim)
 			ui.Text(c, noLyrics.Title).FontSize(scale.Font(c, scale.EmptyTitle)).TextColor(on)
-			ui.Text(c, noLyrics.Hint).FontSize(scale.Font(c, scale.EmptyHint)).TextColor(dim)
 		})
 }
 

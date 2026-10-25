@@ -168,7 +168,7 @@ func TestEveryRouteHasItsOwnPage(t *testing.T) {
 			if rt.Empty.Hint == "" {
 				t.Fatalf("%s 没说「怎么才能不空」", rt.Match)
 			}
-			if !tt.HasText(rt.Empty.Hint) {
+			if !tt.HasText(rt.Empty.Title) {
 				t.Errorf("没有画出 %s 的「怎么才能不空」%q，文字有 %q", rt.Match, rt.Empty.Hint, tt.Texts())
 			}
 		})

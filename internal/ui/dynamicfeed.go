@@ -591,6 +591,7 @@ func feedEmpty(f *dynamicFeed) emptyState {
 			Title: "这里没有能显示的动态",
 			Icon:  iconEmptyFeed,
 			Hint:  dropSentence(f.drops.counts),
+			Info:  true,
 		}
 	}
 	return lookup(dynamicFeedPath).Empty

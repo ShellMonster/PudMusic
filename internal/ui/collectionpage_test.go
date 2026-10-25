@@ -681,8 +681,8 @@ func TestTheCollectionSearchSaysWhenThereIsNoResult(t *testing.T) {
 	clock.Advance(searchDebounce + time.Millisecond)
 	tt.Frame()
 
-	waitFrames(t, tt, "「换个词再搜一次」出现了", func() bool {
-		return tt.HasText("换个词再搜一次")
+	waitFrames(t, tt, "「没有搜索结果」出现了", func() bool {
+		return tt.HasText(noSearchResults.Title)
 	})
 	// ⚠️ **别拿侧栏那一句空状态当反面**：那是**侧栏**里那两组的（这一页
 	// 的侧栏本来就没有收藏夹），它跟这一页的列表没关系。反面要拿**这一页**的

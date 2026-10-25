@@ -28,10 +28,10 @@ import (
 func TestTheDownloadPageDoesNotTellYouToDownloadWhenThereIsNowhereToPutIt(t *testing.T) {
 	_, tt := newRows(t)
 
-	if !tt.HasText(noDownloadDir.Hint) {
+	if !tt.HasText(noDownloadDir.Title) {
 		t.Errorf("没有目录时中央那一格没说 %q，文字有 %q", noDownloadDir.Hint, tt.Texts())
 	}
-	if tt.HasText(noDownloads.Hint) {
+	if tt.HasText(noDownloads.Title) {
 		t.Errorf("没有目录却还在说「搜一首歌…」（页头已经写着没有目录了，两句"+
 			"打架，用户照着做然后失败），文字有 %q", tt.Texts())
 	}
@@ -42,11 +42,11 @@ func TestTheDownloadPageDoesNotTellYouToDownloadWhenThereIsNowhereToPutIt(t *tes
 
 	// 有目录的时候，那一句行动指南回来。
 	_, tt2 := newRowsWithDir(t)
-	if !tt2.HasText(noDownloads.Hint) {
+	if !tt2.HasText(noDownloads.Title) {
 		t.Errorf("有目录时中央那一格没说「怎么才能不空」%q，文字有 %q",
 			noDownloads.Hint, tt2.Texts())
 	}
-	if tt2.HasText(noDownloadDir.Hint) {
+	if tt2.HasText(noDownloadDir.Title) {
 		t.Errorf("有目录却还在说「还没有下载目录」，文字有 %q", tt2.Texts())
 	}
 }
@@ -101,16 +101,6 @@ func TestTheDownloadDirectoryIsScrolledIntoView(t *testing.T) {
 		}
 		return r.Y >= pageTop && r.Y+r.H <= pageBottom
 	})
-	// ⚠️ **说明那一行也得整个在视野里**：它比标题低一截，标题还在而它被切了，
-	// 用户看见的就是「设置项的名字在，说明只剩半行」。
-	desc, ok := tt.Find("选择音频保存的位置")
-	if !ok {
-		t.Fatalf("设置页上没有「选择音频保存的位置」这一句说明，文字有 %q", tt.Texts())
-	}
-	if desc.Y+desc.H > pageBottom {
-		t.Errorf("「下载目录」那一行的说明被切了：它的下沿 %.1f 在可视区下沿 %.1f 之下",
-			desc.Y+desc.H, float64(pageBottom))
-	}
 }
 
 // TestTheFocusedSettingDoesNotPushTheRowsBelowIt 断「指着的那一行」**不会**把

@@ -185,13 +185,13 @@ func mergeHiddenMenuKeys(hidden, keys, visible []string) []string {
 // `sideMenuWidth` / `sideMenuCollapsed` 那一对（见 sidebar.go），所以这里改了
 // 滑块、那边拖把手，两边不会互相打脸。
 func (s *Shell) pickSideMenu(c *ui.Context, st app.Settings, ro bool) {
-	s.settingRow(c, "折叠侧栏", "收起侧栏，只留一列图标",
+	s.settingRow(c, "折叠侧栏", "",
 		func() {
 			s.pickSwitch(c, "折叠侧栏", "折叠侧栏", st.SideMenuCollapsed, ro,
 				func(cur *app.Settings, on bool) { cur.SideMenuCollapsed = on })
 		})
 	w := st.SideMenuWidth
-	s.settingRow(c, "侧栏宽度", "拖动调整，也可以直接拖侧栏的右边缘", func() {
+	s.settingRow(c, "侧栏宽度", "", func() {
 		ui.Row(c).Key("setting:sideMenuWidth").Width(settingsControlW).MinWidth(settingsControlMinW).
 			Gap(space.Px12).AlignItems(ui.Center).Children(func() {
 			sl := ui.Slider(c, &w, app.MinSideMenuWidth, app.MaxSideMenuWidth).
