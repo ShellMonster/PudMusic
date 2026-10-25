@@ -80,6 +80,7 @@ var ourOwnKeys = []string{
 	"shouldKeepPagesOrderInRandomPlayMode",
 	"volume",
 	"playbackRate",
+	"normalizeVolume",
 	"isMuted",
 	"playback",
 	"themePreset",
@@ -955,6 +956,7 @@ const ourOwnKeysJSON = `{
 	"shouldKeepPagesOrderInRandomPlayMode": false,
 	"volume": 1,
 	"playbackRate": 0,
+	"normalizeVolume": false,
 	"isMuted": false,
 	"playback": {"items": [], "current": "", "positionMs": 0},
 	"themePreset": "warm-paper"

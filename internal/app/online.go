@@ -1509,9 +1509,9 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	//
 	// ⚠️ **音量读的是增益**（静音的时候是 0），而音量那一格记的还是用户设的值。
 	a.mu.Lock()
-	vol, rate := a.gainLocked(), a.rate
+	vol, rate, norm := a.gainLocked(), a.rate, a.normalize
 	a.mu.Unlock()
-	p.SetVolume(vol).SetRate(rate)
+	p.SetVolume(vol).SetRate(rate).SetNormalize(norm)
 	return src, p, nil
 }
 

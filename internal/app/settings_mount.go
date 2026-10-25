@@ -87,6 +87,7 @@ func (a *App) MountSettings(path string) error {
 	a.mu.Lock()
 	a.volume = vol
 	a.muted = s.Muted
+	a.normalize = s.NormalizeVolume
 	if s.PlaybackRate > 0 {
 		a.rate = audio.SnapRate(s.PlaybackRate)
 	}
@@ -149,6 +150,14 @@ func (a *App) UpdateSettings(fn func(*Settings)) (Settings, error) {
 	s, err := slot.store.Update(fn)
 	if err != nil {
 		return s, err
+	}
+	a.mu.Lock()
+	changed := a.normalize != s.NormalizeVolume
+	a.normalize = s.NormalizeVolume
+	p := a.player
+	a.mu.Unlock()
+	if changed && p != nil {
+		p.SetNormalize(s.NormalizeVolume)
 	}
 	a.invalidate()
 	return s, nil
