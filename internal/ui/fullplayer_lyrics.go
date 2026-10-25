@@ -187,7 +187,7 @@ func (s *Shell) viewFullLyricKnobs(c *ui.Context, snap app.LyricsSnapshot, lv *l
 //
 // 「怎么才能不空」那一句必须兑现得了——找歌词的入口**有**，就是右下角那一列
 // 旋钮里的「找歌词」（按下去开的就是歌词搜索弹窗，`lyricssearch.go`，那个弹窗
-// 画在满屏**上面**，见 `shell.go` 里 `viewLyricDialogs` 的次序）。
+// 画在满屏**上面**，见 `shell_view.go` 里 `viewMain` 的次序）。
 //
 // ⚠️ **两个一模一样的「找歌词」摆在同一屏上是噪音**（评审抓到的那一条）：中间
 // 一个、右下角一个，用户会以为是两个不同的动作。上游那一屏只有一个入口
