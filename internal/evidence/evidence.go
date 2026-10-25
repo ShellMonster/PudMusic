@@ -3017,10 +3017,38 @@ var Items = []Item{
 		// ⚠️ **这一条不放在表末尾**：表末尾那处已经撞过好几回（这一轮就是
 		// 第三次），挨着上面那条「收藏夹头图区」读得顺——两条讲的都是
 		// 「头图区」。
-		Spec: "UP 空间头图区（设计规范 v0.1 §7.18，取代上游压黑蒙版 + 白字的做法）：横幅 132 高、底部淡进页面底色；头像 88 压在横幅下沿；名字、签名、统计写在**页面底色**上，字色用主题自己的字色，不再依赖头图是什么图",
+		//
+		// ⚠️ **票 #268（2026-10-25）把这一块按参考图重排了**：头图区不再
+		// 压黑蒙版、字不再压在照片上（票 #357 之后就是那一版），所以下面
+		// 那句 spec 记的是**现在这一版**的样子：横幅 132 高、头像 112 压在
+		// 横幅下沿、名字 / 签名 / 统计写在**页面底色**上。
+		Spec: "UP 空间头图区（设计规范 v0.1 §7.18，取代上游压黑蒙版 + 白字的做法）：横幅 132 高、底部淡进页面底色；头像 112 压在横幅下沿；名字、认证徽章、签名、统计写在**页面底色**上，字色用主题自己的字色，不再依赖头图是什么图",
 		Tests: []string{
-			// 头像 88、左右留白 32、头像压在横幅下沿。
-			"TestTheSpaceAvatarIs88AndTheHeaderPads32",
+			// 头像 112、左右留白 32、头像压在横幅下沿、昵称与徽章与签名的排布。
+			"TestTheSpaceAvatarIs112AndTheHeaderPads32",
+			"TestTheHeaderPutsTheNameTheBadgeAndTheSignInOneRow",
+			"TestTheFollowButtonIsAnOutlinedBox",
+			"TestTheHeaderShowsTheBadgeOnlyWhenThereIsOne",
+			// 「关注」那一枚**键盘走得到、回车按得动**（它换成了自绘的描边
+			// 方块，而自绘的那一版一开始用的是 `ui.Row`——那是个容器，
+			// Tab 走不到它）。
+			"TestTheFollowButtonIsKeyboardReachable",
+		},
+	},
+	{
+		// 票 #268（2026-10-25）：UP 空间的动态条目与稿件卡按 B 站 UP 主页
+		// 那张参考图重排。
+		//
+		// ⚠️ **静默的那几种错法都在这儿**：条目头一行的时间回到昵称右边
+		// （看着还是一行，只是顺序反了）、「赞」掉回下面那一排、稿件卡的封面
+		// 又变回方的——**没有一样会报错**，每一处都还是「能看」。
+		Category: Platform,
+		Spec:     "UP 空间的动态条目：左边头像 + 昵称，下面一行「时间 · 动作」，右边「赞 + 数」与「⋯」；稿件卡横排（封面 192×128 + 右下角时长角标，右边标题 / 描述 / 播放量），带圆角、描边和卡片底",
+		Tests: []string{
+			"TestTheDynamicItemPutsTheTimeUnderTheNameAndTheLikeOnTheRight",
+			"TestTheMoreMenuHoldsTheMusicActions",
+			"TestTheArchiveCardIsHorizontalWithADurationBadge",
+			"TestTheDynamicPaneCardAndCoverMatchUpstream",
 		},
 	},
 	{
@@ -3706,10 +3734,17 @@ var Items = []Item{
 		//
 		// 🔴 **判据是「和同一根侧栏里的参照物对齐」，不是「某个具体的数」**：
 		// 方案换了、主题的间距变了，那些数会跟着变，而「是不是一套」不会。
-		Spec: "侧栏里那两组收藏夹按当前风格画：左缩进和侧栏分组标题同一列、这一片的字都在同一列；分组标题和侧栏分组标题同一档（12 / 500 / 次要色）；收藏夹名 14 的正文色、选中那一行是 accentSoft 淡底、悬停是 flat.Feel；折叠态那枚图标在收藏夹页上亮起来，点开的那层浮层是卡片那一档（surface1 / radiusLg）",
+		//
+		// ⚠️ **票 #270 之后「这一片的字都在同一列」只对「分组标题那一列」成立**：
+		// 收藏夹那一行左边多了一枚方形封面，**名字让开它**（起在封面右边）。
+		// 仍然是同一列的是**封面**——它和分组标题的字左对齐，正是参考图上的
+		// 样子（「创建的歌单」那几个字和下面那些封面）。
+		Spec: "侧栏里那两组收藏夹按当前风格画：左缩进和侧栏分组标题同一列、**封面和分组标题的字同一列**；分组标题和侧栏分组标题同一档（12 / 500 / 次要色）；**每一行是一枚方形封面 + 名称 + 「N 首」**（票 #270：封面和数量都是那两个列表接口本来就给的，不另发请求；「N 首」是 B 站上次统计的 `media_count`，不是实时的）；收藏夹名 14 的正文色、选中那一行是 accentSoft 淡底、悬停是 flat.Feel；折叠态那枚图标在收藏夹页上亮起来，点开的那层浮层是卡片那一档（surface1 / radiusLg）",
 		Tests: []string{
-			// 这一片和侧栏是同一块：左沿一样、字在同一列。
+			// 这一片和侧栏是同一块：左沿一样、封面和标题的字同列、名字让开了封面。
 			"TestTheFavoritesAreaLinesUpWithTheSidebar",
+			// 每一行是「图 + 名称 + N 首」（票 #270 的正题）。
+			"TestEachFavoriteRowHasACoverAndACount",
 			// 空状态那句也在那一列（它替下面那些收藏夹名说话）。
 			"TestTheFavoritesEmptyLineLinesUpWithTheNames",
 			// 分组标题和侧栏的分组标题是同一档（字号 + 字色）。
