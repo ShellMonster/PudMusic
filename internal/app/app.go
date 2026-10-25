@@ -535,6 +535,8 @@ type App struct {
 	// 睡眠定时器（见 sleep_timer.go）：到点时刻、停它的函数、「放完这一首」标志。
 	// normalize 是「音量均衡」开关的内存副本（落盘的是 Settings.NormalizeVolume）。
 	normalize bool
+	// loud 是本地文件的响度扫描结果缓存（见 loudness_scan.go）。
+	loud loudnessCache
 
 	sleepAt         time.Time
 	sleepStop       func()
@@ -1037,6 +1039,9 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	a.reportedErr = nil
 	a.title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	a.path = path
+	if a.normalize {
+		a.startLoudnessScan(p, path)
+	}
 	// 手上只有一个本地路径，没有封面地址（见 State.CoverURL）。队列里的项自带
 	// 封面的话，App.play 会在开成功之后补上。
 	a.cover = ""

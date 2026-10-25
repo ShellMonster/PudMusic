@@ -413,6 +413,13 @@ func (p *Player) SetNormalize(on bool) *Player {
 	return p
 }
 
+// SetLoudness 告诉播放器这一首已经量好的响度（见 MeasureFile），开着音量均衡
+// 时按它给整首定增益，不再靠开头那几秒估。
+func (p *Player) SetLoudness(l Loudness) *Player {
+	p.tap.norm.known.Store(&l)
+	return p
+}
+
 // Volume 返回音量增益（目标值，不是渐变途中那一瞬间的值）。
 func (p *Player) Volume() float64 {
 	p.gainMu.Lock()

@@ -154,10 +154,13 @@ func (a *App) UpdateSettings(fn func(*Settings)) (Settings, error) {
 	a.mu.Lock()
 	changed := a.normalize != s.NormalizeVolume
 	a.normalize = s.NormalizeVolume
-	p := a.player
+	p, path, local := a.player, a.path, a.online == nil
 	a.mu.Unlock()
 	if changed && p != nil {
 		p.SetNormalize(s.NormalizeVolume)
+		if s.NormalizeVolume && local {
+			a.startLoudnessScan(p, path)
+		}
 	}
 	a.invalidate()
 	return s, nil
