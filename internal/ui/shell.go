@@ -338,6 +338,10 @@ type Shell struct {
 	// 见 playbar_rate.go。
 	rateOpen bool
 
+	// sleepOpen 是睡眠定时那个浮层开着没有。只由 view 在主线程上读写，
+	// 见 playbar_sleep.go。
+	sleepOpen bool
+
 	// 音量浮层那一摊。**只由 view 在主线程上读写**，见 playbar_volume.go。
 	//
 	// volOpen 是那个浮层开着没有（悬停图标就开，指针走远了就收）。

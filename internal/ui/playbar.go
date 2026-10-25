@@ -398,6 +398,8 @@ func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 		// 倍速紧挨着音量：两个都是「听感」旋钮（上游也是挨着的）。
 		s.viewRate(c, st)
 
+		s.viewSleep(c, st)
+
 		if s.withTip(c, iconKey(c, iconEnqueue, "加歌", iconMd, false).
 			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "把本地文件加到队列末尾").Clicked() {
 			s.pickAndEnqueue()
