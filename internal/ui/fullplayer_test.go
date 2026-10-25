@@ -20,8 +20,8 @@ import (
 // 发现不了了。它们的真值只来自 Biu 的源码，不来自我们的常量。
 const (
 	biuRowCoverSize = 52  // 设计规范 v0.1 §7.1：播放条封面 52×52（原 Biu 是 56）
-	biuFullCoverW   = 320 // 设计规范 v0.1 §7.5：正方形 320（窗口宽 < 1000 用 240）
-	biuFullCoverH   = 320 // 正方形
+	biuFullCoverW   = 360 // 4:3，原图不转：宽 360（窗口宽 < 1000 用 280）
+	biuFullCoverH   = 270 // 4:3
 	biuHideSeconds  = 3   // index.tsx:132 的 scheduleHideUi(3000)
 )
 
