@@ -28,7 +28,12 @@ import (
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
-// F-16　顶栏末两枚的视觉重量
+// F-16　顶栏右端那两枚的视觉重量
+//
+// ⚠️ **这一条被票 #260 改过**：原来钉的是「末两枚（头像 / 登录键）和左边那三枚
+// 线框图标**同一档**」。用户 2026-10-25 说「头像要大一点，参考 biu 的比例」，
+// 而上游那个头像的外沿是 40（**本来就**比旁边的 18 图标大一大截）——所以现在
+// 钉的是「**头像是上游那个尺寸，登录键仍然和邻居同一档**」。
 // ─────────────────────────────────────────────────────────────────────────────
 
 // TestTheTopBarEndsWithTheUpstreamSizedAvatar 钉住「顶栏最右那两枚」的现状：
@@ -66,7 +71,7 @@ func TestTheTopBarEndsWithTheUpstreamSizedAvatar(t *testing.T) {
 			th := BuildTheme(app.DefaultSettings(""), dark)
 			bg := rgb(th.Background)
 
-			// 前面三枚线框图标，和末两枚（头像 / 登录键）。
+			// 前面三枚线框图标，和右边那两枚（头像 / 登录键）。
 			lineIcons := []string{"打开文件", "迷你", "动态"}
 			tail := []string{avatarLabel, "登录"}
 
@@ -125,7 +130,7 @@ func TestTheTopBarEndsWithTheUpstreamSizedAvatar(t *testing.T) {
 				t.Errorf("登录键那一格里有 %d 块主色像素——它不该再是一块实心主色的方块"+
 					"（改之前是 778，是相邻线框图标的 5.4 倍）", n)
 			}
-			t.Logf("三枚线框图标 %v，末两枚 %v", inks, inks)
+			t.Logf("三枚线框图标 %v，头像 / 登录键 %v", inks, inks)
 		})
 	}
 }
