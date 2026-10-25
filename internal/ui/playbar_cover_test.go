@@ -45,8 +45,9 @@ func hexOf(c color.Color) string {
 //
 // 为什么不用那边的常量：布局和期望都用它的话，常量一改，两边一起跟着变，
 // 测试就发现不了了——把 playbarHeight 从 88 改成 122，期望也跟着变成 122，
-// 照样全绿。而这几条正是本任务要钉死的东西（「总高 88px，封面上下各 16」），
-// 它们的真值只来自 Biu 的源码，不来自我们的常量。
+// 照样全绿。而这几条正是本任务要钉死的东西（「总高 76px，封面上下各 12」——
+// 设计规范 v0.1 §4 / §7.1 的数，原 Biu 是 88 / 56），
+// 它们的真值只来自那份规范，不来自我们的常量。
 const (
 	biuPlaybarHeight = 76 // 设计规范 v0.1 §4：播放条高 76（原 Biu 是 88，应用未发版，改按规范）
 	biuPlaybarPadX   = 16 // playbar/index.tsx:23-31 的 px-4
@@ -54,7 +55,7 @@ const (
 	biuCoverGap      = 8  // playbar/left/index.tsx 的 space-x-2
 )
 
-// 测试窗口的高度：几个都要用到 88 这条，窗口高写成一个常量，位置才能一次算清。
+// 测试窗口的高度：几个都要用到播放条那条高，窗口高写成一个常量，位置才能一次算清。
 const coverWinH = 460
 
 // TestPlayBarUsesBiuNumbers 是那几个数字本身的一条：playbar.go 里改成了别的数，
@@ -143,7 +144,7 @@ func TestPlayBarCoverWhileLoadingShowsThePlaceholder(t *testing.T) {
 
 // TestPlayBarCoverShowsTheImageWhenItIsReady 是就绪：图，并且量它的位置。
 //
-// 尺寸和位置照 Biu 抄（playbar.go 顶上那几个常量）：播放条 88 高、左右 16、
+// 尺寸和位置照设计规范 v0.1 抄（playbar.go 顶上那几个常量）：播放条 76 高、左右 16、
 // 封面 56×56 在这一行里垂直居中（上下各 16）、到歌名 8。这里从像素上量，
 // 不是问控件要尺寸。
 func TestPlayBarCoverShowsTheImageWhenItIsReady(t *testing.T) {
@@ -358,7 +359,7 @@ func coverBarTester(t *testing.T, st app.State) (*Shell, *mygoui.Tester) {
 // ⚠️ **往里收 inset 像素**：边框那一圈和它的抗锯齿边会让「一块纯色」变成好几种
 // 近色，而判据要问的正是「里面画了什么」。
 //
-// 位置是**算出来的**（`biuPlaybarPadX`、封面在 88 高的播放条里垂直居中），
+// 位置是**算出来的**（`biuPlaybarPadX`、封面在 76 高的播放条里垂直居中），
 // 不是扫出来的：扫出来的话封面挪到别处那一格照样量得到一块。
 func coverColors(t *testing.T, tt *mygoui.Tester, inset int) []string {
 	t.Helper()
@@ -396,7 +397,7 @@ func equalStrings(a, b []string) bool {
 
 // assertCoverGeometry 量封面在整张画面上的位置。
 //
-// barTop 是播放条顶边在画面上的 y。播放条是 88 高的一行、封面 56 在行内垂直居中，
+// barTop 是播放条顶边在画面上的 y。播放条是 76 高的一行、封面 52 在行内垂直居中，
 // 所以封面该落在 [barTop+12, barTop+64]：上下各 12 是怎么来的——(76-52)/2。
 //
 // 这几条一起断的是「总高 76 + 上下各 12」。播放条一高封面就跟着往上跑，底边那条

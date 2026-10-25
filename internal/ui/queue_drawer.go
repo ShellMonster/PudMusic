@@ -286,9 +286,10 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 	s.queueRows = queueRowsFor(s.app.Queue().Items(), &s.queueRowIDs)
 
 	ui.Overlay(c, func() {
-		// ⚠️ 底边留出底下那一条的高度（Biu 的 `data-[placement=right]:mb-22` 就是
-		// 88）。这一层是吃点击的（见下面 back.Clicked 那段），不留出这一条播放条
-		// 就**整个被它盖住**：抽屉开着时按播放、上一首、下一首都按不动。
+		// ⚠️ 底边留出底下那一条的高度（**上游** Biu 的
+		// `data-[placement=right]:mb-22` 是 88，**我们**的是 `playbarHeight`
+		// = 76）。这一层是吃点击的（见下面 back.Clicked 那段），不留出这一条
+		// 播放条就**整个被它盖住**：抽屉开着时按播放、上一首、下一首都按不动。
 		//
 		// 满屏开着的时候底下那一条是满屏的底栏（进度 + 控制键，108 高，见
 		// `fullControlsHeight`），不是播放条——让出的高度要跟着它，否则进度条

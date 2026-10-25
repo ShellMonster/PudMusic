@@ -168,12 +168,12 @@ func TestTheCacheIsKeyedBySourceAndByWord(t *testing.T) {
 //
 // # 改法为什么是对的
 //
-// - 守卫本身**是对的**（界面上的「正在搜…」是按代次算的），本测试不该去改它。
-// - 真实的界面一次只搜**当前那个** tab（`internal/ui/lyricssearch.go` 里是
-//   `s.app.SearchLyrics(l.tab, q)`），**不会连着搜两个 tab**——所以原来那个
-//   摆法测的是一个界面根本不会产生的时序。
-// - 同一个文件里那条 `TestTheCacheIsKeyedBySourceAndByWord` **本来就是这么写的**
-//   （先等第一个词回来，再发第二个词）。这一条改成一样的写法，两个测试就一致了。
+//   - 守卫本身**是对的**（界面上的「正在搜…」是按代次算的），本测试不该去改它。
+//   - 真实的界面一次只搜**当前那个** tab（`internal/ui/lyricssearch.go` 里是
+//     `s.app.SearchLyrics(l.tab, q)`），**不会连着搜两个 tab**——所以原来那个
+//     摆法测的是一个界面根本不会产生的时序。
+//   - 同一个文件里那条 `TestTheCacheIsKeyedBySourceAndByWord` **本来就是这么写的**
+//     （先等第一个词回来，再发第二个词）。这一条改成一样的写法，两个测试就一致了。
 //
 // 断的东西**一点没少**：两个源各搜一次、各进各的缓存，再搜一遍一个请求都不发。
 func TestEachSourceHasItsOwnCache(t *testing.T) {

@@ -100,6 +100,11 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 		return
 	}
 
+	// 🔴 **身份钉死**：这一枚是**逐帧问出来**的（单 P 的稿子不摆），它一出现，
+	// 后面几枚的兄弟序号就都变了——而动画通道是存在身份里的（理由见
+	// `playbar_keys.go`）。
+	c.Key(partButtonKey)
+
 	// ⚠️ **图标不是装饰，是它唯一能被认出来的东西**：`ui.Icon` 对辅助技术是不可见
 	// 的（`mygo/ui/svg.go`），所以 `Label("分集")` 不许省——它既是无障碍名字，也是
 	// 无头 Tester 认得这个按钮的唯一凭据（`Find` 按 label 找）。
@@ -118,8 +123,12 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 	if btn.Clicked() {
 		s.partOpen = !s.partOpen
 	}
-	// Popover 自己处理「点外面关掉」和 Escape，所以这里只管开关本身
-	// （和 `viewRate` 同一个写法）。
+	// 「点外面关掉」是框架那个浮层自己管的（`mygo/ui/base.go` 的 `popover`），
+	// 所以这里只管开关本身（和 `viewRate` 同一个写法）。
+	//
+	// ⚠️ **Escape 那一条有条件**：框架把键先给焦点链，它们都不处理才轮到浮层
+	// （`mygo/ui/input.go` 的 `routeKeys`）——焦点在一个自己吃 Esc 的控件里时，
+	// 这一块关不掉（理由见 `playbar.go` 里 `viewTrackError` 那处注释）。
 	//
 	// ⚠️ 浮层那一层外面包一层 Guard（铁律三）：它是在**播放条这一层的布局之外**
 	// 单独建的，它一崩坏掉的是整块浮层，而报错的地方在播放条上——两者对不上，

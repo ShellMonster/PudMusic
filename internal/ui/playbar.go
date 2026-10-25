@@ -20,15 +20,19 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// 播放条的尺寸，数字全部照 Biu 的源码抄，不是自己挑的：
+// 播放条的尺寸：
 //
-//	总高 88px        _research/biu/src/layout/index.tsx:48 的 h-[88px]
+//	总高 76px        `playbarHeight`（2026-10-24 那一批界面重设计，PR #357）
 //	左右内边距 16px  playbar/index.tsx:23-31 的 px-4
-//	封面 56×56       playbar/left/index.tsx:29-45 的 width={56} height={56}
+//	封面 52×52       同上（重设计之后从 56 改成 52）
 //	封面与歌名 8px   同一处的 space-x-2
 //
-// ⚠️ 关键是 Biu 那条**只有 px-4，没有上下内边距**：88 高的一行内容垂直居中，
-// 56 的封面就正好上下各留 16（88-56=32）。所以这里是 Height(88) + PaddingX(16)
+// ⚠️ **上游 Biu 那条是 88 高**（`_research/biu/src/layout/index.tsx:48` 的
+// `h-[88px]`），而**我们这一条是 76**（重设计把它改小了，票 #357）。
+// **88 那个数是上游的，别拿它算我们的**——2026-10-24 之前我们才是 88。
+//
+// ⚠️ Biu 那条**只有 px-4，没有上下内边距**：一行内容垂直居中，56 的封面就正好
+// 上下各留 16（88-56=32）。所以这里是 Height(76) + PaddingX(16)
 // + 一行 AlignItems(Center)，不是四边都 Padding(16) 再往上堆第二行——那样算
 // 出来是 98 起（Biu 那条提示的 toastOffset=90 也会被压穿）。
 //
@@ -422,13 +426,13 @@ func drawerTip(open bool) string {
 //
 // 三行竖着堆，行数由**有没有那一句**决定：平时两行（歌名 / UP 名），出错时
 // 三行。三行实测占 57.5（歌名 18.8 + UP 名 16.5 + 错误 14.1 + 两道 4 的缝），
-// 在 88 高的播放条里上下各留 15.3——而横向仍然是 `Grow(1)` 那一段的整条宽：
+// 在 76 高的播放条里上下各留 15.3——而横向仍然是 `Grow(1)` 那一段的整条宽：
 // **下面两行的固定宽度不吃歌名的宽度**（这一条是「为什么第二行不挤歌名」的
 // 答案，`TestTheTextColumnDoesNotSquashTheTitle` 盯着它）。
 //
 // ⚠️ **外面必须是 Column**。这里曾经为了塞下音质徽章把 Column 拆成了一个裸
 // Row（歌名和徽章并排），结果错误文字变成了这一层的**兄弟**——它落到了
-// 歌名右边的外层行上，把歌名挤成 20px 宽、88px 高的竖条并被裁掉。
+// 歌名右边的外层行上，把歌名挤成 20px 宽、76px 高的竖条并被裁掉。
 // 而「出错时播放条上有一句人话」正是这一票要保证的东西，结构不能为它让路。
 //
 // ⚠️ **UP 名那一行是后来才有的**（A23），错误那一行是从第二行掉到第三行的。
@@ -449,7 +453,7 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 		ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 			// ⚠️ **一行，截断**——照 Biu：`left/index.tsx` 的歌名是
 			// `min-w-0 flex-1 truncate`。以前这里不设 MaxLines，窗口一窄它就换行、
-			// 换到三行，而**下面两行一格都分不到**：88 高的播放条塞不下
+			// 换到三行，而**下面两行一格都分不到**：76 高的播放条塞不下
 			// 「三行歌名 + UP 名 + 错误」，多出来的那两行被裁掉，而**界面上看不出坏了**
 			//（歌名还在，只是下面的话看不见了）。一行 + 省略号之后超长的那部分看不全，
 			// 但下面每一行都还在。
@@ -577,7 +581,7 @@ func (s *Shell) viewTrackLoading(c *ui.Context, st app.State, t *ui.Theme) {
 		// 唯一能认出「这里在等」的凭据（无头 Tester 也只认字和名字）。
 		ui.Spinner(c).Size(loadingLineSpinnerSize, loadingLineSpinnerSize).Label("正在取流")
 		// ⚠️ **一行 + 省略号，和错那一行同一个理由**（见 `viewTrackError`）：
-		// 88 高的播放条放不下两行，而超长的歌名会把这一行挤没。
+		// 76 高的播放条放不下两行，而超长的歌名会把这一行挤没。
 		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
 			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").Grow(1), tip)
 	})
@@ -775,12 +779,16 @@ func (s *Shell) viewTrackActions(c *ui.Context, st app.State) {
 //	点它	播放条**上方**那块小面板（`playbar_err.go`）——完整那一句、多行
 //	        排开、**能选中复制**（用户要拿它去提 issue）
 //
-// ⚠️ **面板是浮层**：88 高那一行一个字都不多（票 #320 的验收盯的就是这个）。
+// ⚠️ **面板是浮层**：76 高那一行一个字都不多（票 #320 的验收盯的就是这个）。
 //
 // ⚠️ **每帧多一次分配**：那个 `OnClick` 的闭包（和歌名那一处一个道理——它也
 // 是每帧一个闭包）。**平时（没有错）一个字都没多**：`framebudget_test.go`
-// 量的是「一首 B 站的歌」那一副（12 次 / 578 字节，实测不变）；出错的那一
-// 副本来就多花钱（那句话的字要排版），这一条不改变量级。
+// 量的是「一首 B 站的歌」那一副（**14 次 / 385 字节**，2026-10-25 在 HEAD 上
+// 实测；出错的那一副本来就多花钱——那句话的字要排版——这一条不改变量级）。
+//
+// ⚠️ **别拿旧的数当基线**：票 #320 的报告里写过「12 次 / 578 字节」，那是
+// 2026-10-24 那次界面重设计**之前**的数（重设计把播放条从 88 高改成 76、
+// 封面从 56 改成 52）；现在的数是 14 次 / 385 字节（票 #320 的评审查出来的）。
 func (s *Shell) viewTrackError(c *ui.Context, st app.State, t *ui.Theme) {
 	msg := "打不开：" + st.Err
 	// 🔴 **提示框里给的是完整那一句**：这一行只有 140 像素宽（1200 宽的窗口，
@@ -797,7 +805,7 @@ func (s *Shell) viewTrackError(c *ui.Context, st app.State, t *ui.Theme) {
 	ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 		// 🔴 **一行 + 省略号，和歌名同一个理由**：这一列最窄的时候（760 宽
 		// 的测试窗口，比应用自己的下限 900 还窄）只剩 70，而这一句话有 14 个
-		// 字——换成两行就是四行，**88 高的播放条装不下，最后一行被裁掉**，
+		// 字——换成两行就是四行，**76 高的播放条装不下，最后一行被裁掉**，
 		// 而症状是「说了有话却看不见」（文本节点还在，测试也还找得到它）。
 		//
 		// 缩掉的那几个字在提示框和「详情」面板里补回来（见上面那段说明）。
@@ -815,8 +823,16 @@ func (s *Shell) viewTrackError(c *ui.Context, st app.State, t *ui.Theme) {
 		if line.Hovered() {
 			line = line.Underline().Cursor(ui.CursorPointer)
 		}
-		// Popover 自己处理「点外面关掉」和 Escape，所以这里只管开关本身
-		//（和 `viewRate` / `viewPartButton` 同一个写法）。
+		// 「点外面关掉」是框架那个浮层自己管的（`mygo/ui/base.go` 的 `popover`：
+		// `panel.PressedOutside()`），所以这里只管开关本身（和 `viewRate` /
+		// `viewPartButton` 同一个写法）。
+		//
+		// ⚠️ **Escape 那一条有条件**：框架把键**先给焦点链**（焦点上的那个控件
+		// 和它周围那一圈），**它们都不处理，才轮到浮层**（`mygo/ui/input.go` 的
+		// `routeKeys`）。所以「焦点在一个自己吃 Esc 的控件里」的时候**这一块
+		// 关不掉**（`ui.SearchField` 就是——它的清空按钮在 `afterInput` 里判
+		// `in.Shortcut(0, KeyEscape)`，见 `navbar_search.go` 顶上那一节）；
+		// 焦点在别处（点开之后焦点在锚点那一行上）时，Esc 是关得掉的。
 		//
 		// ⚠️ 浮层那一层外面包一层 Guard（铁律三）：它是在**播放条这一层的布局
 		// 之外**单独建的，它一崩坏掉的是整块浮层，而报错的地方在播放条上——
@@ -873,14 +889,13 @@ func (s *Shell) openExternalURL(url string) {
 // 🔴 **左对齐**（票 #219，报告 §2.9）：上游那一句是**普通 `span`**，而它那一列
 // 是 `items-start`——所以那句话紧跟在歌名下面、**和歌名同一个左沿**。
 //
-// 我们这里是**一枚按钮**（点它进那个 UP 的空间），而**框架的按钮内容默认居中**
-// （`internal/ui/widgets/flat/flat.go` 没设 `Justify`）——不改的话那句话会
-// **飘到那一列的中间**：实测歌名在 x=80，而 UP 名在 x=219（改之前那一列有
-// 180 宽，那句话被居中到了 219）。
+// 我们这里是**一枚「名字型链接」**（点它进那个 UP 的空间，票 #417）：一句话字，
+// 指针落上去时底下长出一道下划线，**没有按钮壳**——上游那一处也是
+// `hover:underline`。
 //
-// ⚠️ **所以这里要显式 `Justify(ui.Start)`**，而且**内边距清零**（`Padding(0,0)`）：
-// 按钮的内容框从内边距之后开始算，留 2 的话那句话会比歌名**右移 2 像素**，
-// 而「和歌名对齐」是这一条要的东西（上游那一列里两句话的左沿分毫不差）。
+// ⚠️ **左对齐 + 内边距清零**是这一档配方（`widgets/flat` 的 `Link`）里定死的：
+// 框架的按钮内容默认居中、内边距默认 6/14——不改的话那句话会**飘到那一列的
+// 中间**（实测歌名在 x=80，而 UP 名在 x=219）或者比歌名**右移 14 像素**。
 //
 // ⚠️ **有名字、没有编号时照样显示，只是点不动**：B 站有的接口只给名字不给
 // mid（见 `app.Item.ArtistMid`）。把名字藏起来是另一种撒谎——用户看到的是
@@ -900,15 +915,20 @@ func (s *Shell) viewArtist(c *ui.Context, st app.State, t *ui.Theme) {
 			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 		return
 	}
-	// 扁平按钮：UP 名这一格是**播放条上一枚按钮**，而调研点名的描边药丸里就有它
-	//（报告 §1.1 的 F1 证据：播放条上每一枚带描边的键）。它上面是 14px 的弱化
-	// 灰字，本来就不该配一块描边底。
+	// **名字型链接**：UP 名这一格是**一句话字**，指针落上去时底下长出一道下划线。
+	//
+	// ⚠️ **它不是一枚按钮**（票 #417）：改之前这里画的是扁平按钮——左右各留一段
+	// 内边距 + 圆角，于是那个名字被一个**胶囊**包着，而指针落上去时胶囊才显
+	// 出来（像一块底牌）。上游那一处是 `hover:underline`，**没有按钮壳**。
+	//
+	// ⚠️ **左对齐 + 内边距清零**（理由见 `flat.Link`）：名字要跟上面那句歌名
+	// 同一个左沿，而框架的按钮内容默认居中、内边距默认 6/14。
 	//
 	// ⚠ **那句话是 `list.OwnerTipText` 给的**（票 #360）：列表里的 UP 名是同一
 	// 件事的另一个地方，两处各写一遍的话，改了一处另一处就安静地变成另一句
 	// 话——而那种错在画面上只是「提示里那句话怪怪的」。
-	if s.withTip(c, flatButton(c, st.Artist).Grow(1).MinWidth(artistMinW).
-		Justify(ui.Start).FontSize(scale.Font(c, scale.Size14)).Padding(space.None, space.None).TextColor(t.TextMuted).
+	if s.withTip(c, flatLink(c, st.Artist).Grow(1).MinWidth(artistMinW).
+		FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).
 		MaxLines(1).Ellipsis("…"), list.OwnerTipText(st.Artist)).Clicked() {
 		s.navigate(upPathPrefix + strconv.FormatInt(st.ArtistMid, 10))
 	}
@@ -938,6 +958,10 @@ func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
 	// `RiStarFill/Line size={18}`（`components/music-fav-button/index.tsx:55-56`），
 	// 而**播放条上全部图标键都是 18**。改之前是 14（`iconSm`）——比上游小 4 像素，
 	// 在 32 的盒子里每边留 9，看起来像「画糊了」。
+	// 🔴 **身份钉死**：这一段的兄弟是「逐帧问出来」的「分集」键（单 P 的稿子不
+	// 摆），它一出现，这一枚的兄弟序号就变了——而动画通道是存在身份里的（理由
+	// 见 `playbar_keys.go`）。
+	c.Key(favButtonKey)
 	btn := s.withTip(c, iconKey(c, favIcon(faved), "收藏", iconMd, false).
 		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), favTooltip(faved))
 	if faved {
@@ -995,7 +1019,7 @@ func (s *Shell) viewDownloadButton(c *ui.Context, st app.State) {
 //
 // 它同时是**换音质的入口**：点一下开菜单，五档里选一档。
 //
-// 为什么是徽章而不是另摆一个控件：播放条只有 88 高，左右两边（进度条、音量、
+// 为什么是徽章而不是另摆一个控件：播放条只有 76 高，左右两边（进度条、音量、
 // 加歌）都已经占满了，而「我在放的是哪一档」这件事用户本来就在看这行字。
 // 另摆一个下拉框就是把播放条挤坏——上一票为了塞下徽章把歌名挤成竖条，
 // 那次结构性的破坏就是从这个方向来的。
@@ -1377,7 +1401,7 @@ func (s *Shell) pickAndEnqueue() {
 //
 // ⚠️ **是「最少 48」，不是「正好 48」**（票 #222）：超一小时的歌读数是
 // `01:30:00`（八个字符，比 48 宽），钉死 48 的话它**换行**——画面上那一格变成
-// 「01:30:」加「00」两行，而 88 高的播放条里那一行本来就窄，换行之后它是
+// 「01:30:」加「00」两行，而 76 高的播放条里那一行本来就窄，换行之后它是
 // **整个播放条上唯一一处错版**。
 //
 // `MinWidth(48)` + `MaxLines(1)`：平时还是 48（进度条不跳），超一小时时那一格

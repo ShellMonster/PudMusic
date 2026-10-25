@@ -1242,6 +1242,10 @@ var Items = []Item{
 		//
 		// 🔴 **端到端那四条在 `internal/app/reconnect_e2e_test.go`**：手工调
 		// 应用的内部函数证明不了「源→应用层→界面」这条接线。
+		//
+		// 票 #378 补了两条：**每一段流的状态各归各**（切歌之后旧那一首的
+		// 重连状态不许留在新歌上——代次守卫），以及**「第 N 次」的 N 是
+		// 「这一轮里的次数」**（一次断流恢复之后，下一轮从第 1 次重新数）。
 		Spec: "断流重连：重试之间有退避（1 秒 / 2 秒 / 4 秒，总 ≤ 7 秒），重连期间界面上说「正在重连」，成功或失败都有明确结果",
 		Tests: []string{
 			"TestTheDefaultBackoffIsOneTwoFour",
@@ -1261,6 +1265,9 @@ var Items = []Item{
 			"TestAStaleSourceDoesNotStealTheReconnectState",
 			"TestThePlayBarSaysItIsReconnecting",
 			"TestTheErrorWinsOverTheReconnectingLine",
+			"TestTheRetryNumberCountsThisRoundOnly",
+			"TestTheOldSongsReconnectStateDoesNotStayOnTheNewSong",
+			"TestTheOldSongsReconnectStateDoesNotStealTheNewOnesLine",
 		},
 	},
 	{
@@ -2574,7 +2581,7 @@ var Items = []Item{
 		// 归「双平台」那一组：还是播放条那一块，但说的是它上面那一句**错**
 		// （票 #320）。
 		Category: Platform,
-		// 票 #320：播放条上那一句错被压成**一行 + 省略号**（88 高的播放条装不
+		// 票 #320：播放条上那一句错被压成**一行 + 省略号**（76 高的播放条装不
 		// 下两行——这是布局的账），而 `bili.Friendly` 那张表里的话信息量很大
 		//（「B 站没有给这一条单独的音频流（歌单、活动那一种多半是这样）。在 B 站
 		// 里打开它听，或者换一首放」四十来个字）——用户常常只读到半句话。
@@ -2582,11 +2589,11 @@ var Items = []Item{
 		// 🔴 **这一族的坏法全是静默的**：完整那一句拿不到，界面上看不出坏了
 		// （那一行的**文本节点里**就是完整那一句，只是画的时候被截了——所以
 		// 「它在树上」证明不了任何事）；而播放条要是被撑成两行，最后一行会被
-		// 88 高裁掉，**界面上也看不出坏了**。
+		// 76 高裁掉，**界面上也看不出坏了**。
 		//
 		// ⚠️ **判据要分两半**：一是「完整那一句拿得到」（排开了、不止一行），
 		// 二是「播放条一个像素都没动」（打开详情前后那一行的框一模一样）。
-		Spec: "播放条上那一句错：屏幕上还是一行 + 省略号（88 高的播放条装不下两行），完整那一句在悬停提示和点开的详情层里都拿得到（详情层多行排开、能选中复制），打开详情时播放条一个像素都不动，错没了详情层就收",
+		Spec: "播放条上那一句错：屏幕上还是一行 + 省略号（76 高的播放条装不下两行），完整那一句在悬停提示和点开的详情层里都拿得到（详情层多行排开、能选中复制），打开详情时播放条一个像素都不动，错没了详情层就收",
 		Tests: []string{
 			// 详情层里是**完整那一句**，而且**排开了**（不止一行）。
 			"TestClickingTheErrorOpensTheWholeSentence",
@@ -2598,6 +2605,9 @@ var Items = []Item{
 			"TestHoveringTheErrorStillShowsTheWholeSentence",
 			// 面板开着的时候提示框不挂（两块摆在同一个位置，叠在一起像坏了）。
 			"TestTheTooltipDoesNotStackOnTopOfTheDetail",
+			// 那块面板**关得掉**：按 Esc、点外面（浮层自己管那两个手势）。
+			"TestTheDetailClosesWhenTheUserPressesEscape",
+			"TestTheDetailClosesWhenTheUserClicksOutside",
 		},
 	},
 	{
@@ -2738,6 +2748,29 @@ var Items = []Item{
 			"TestTheMiniKeysAreIcons",
 			// 两处手搓的分割线换成了框架的 `ui.Divider`，画出来还得是那一条线。
 			"TestTheTwoRulesAreDrawnAsOnePixelLines",
+		},
+	},
+	{
+		// 归「双平台」那一组：这一票动的是**名字型可点击元素**的样子。
+		//
+		// 🔴 **判据是像素**：那个名字被一个**胶囊**包着（左右各 14 像素的内边距
+		// + 圆角，指针落上去时再压一层半透明前景色），改完是**一句话字 +
+		// 悬停时一道下划线**——而「胶囊」这件事在代码里看不出来，换一种写法
+		// 一样编译得过、点得动、无障碍名字也还叫得出来，只有画面上才差得出来。
+		//
+		// ⚠️ **反面也断**：同一张卡片上那几枚**动作键**（赞 / 下一首播放 /
+		// 下载音频）悬停时**仍然要**有那一层淡底——它们是按钮，不是名字链接。
+		// 把它们一起拍平的话，「哪一个是动作」就没有了。
+		Category: Platform,
+		// issue 417：名字型可点击元素改成下划线（上游是 `hover:underline`）。
+		Spec: "名字型可点击元素（动态条目上的作者名、播放条上的 UP 名、列表行里的 UP 名）是一句话字，悬停时带一道下划线，没有胶囊底；下划线的颜色是主题算出来的那一档主色，深浅两套都读得出来；它仍然点得动、键盘走得到；同一处的动作键仍然是按钮",
+		Tests: []string{
+			"TestTheDynamicAuthorNameIsALinkNotAPill",
+			"TestThePlaybarOwnerNameIsALinkNotAPill",
+			"TestTheListOwnerNameIsALinkNotAPill",
+			"TestTheActionButtonsAreStillButtons",
+			"TestTheNameLinkIsKeyboardReachable",
+			"TestTheUnderlineColorFollowsTheTheme",
 		},
 	},
 	{
@@ -3215,7 +3248,7 @@ var Items = []Item{
 		// 报错**，界面只是「不好用」。
 		Category: Platform,
 		// 票 #244（UX 报告 §2 的 D1 / B5 / B6 / E1 / E2）。
-		Spec: "布局一批：设置页每一行的说明和控件之间**不空着几百像素**；迷你窗的音量滑块**有悬停提示**（而且那枚提示**看得见**）；「全部播放」在两个页面上是**同一枚**（画法统一；语义是票 #299 拍板的那一条）；列表里的**超长歌名不占满整行中段**；**深色下的封面有边**（不再和行的底色融成一片）",
+		Spec: "布局一批：设置页每一行的说明和控件之间**不空着几百像素**；迷你窗的音量滑块**有悬停提示**（而且那枚提示**看得见**）；「全部播放」在两个页面上是**同一枚**（画法统一；语义是票 #337 拍板的那一条）；列表里的**超长歌名不占满整行中段**；**深色下的封面有边**（不再和行的底色融成一片）",
 		Tests: []string{
 			// 设置页那一段空档（1200 / 900 两档窗口，量的是画面上的字迹）。
 			"TestTheSettingsRowsDoNotStretchAcrossTheWindow",
@@ -3228,7 +3261,7 @@ var Items = []Item{
 			// 两个页面上那两枚按钮是同一枚（盒子一模一样）。
 			"TestThePlayAllButtonIsTheSameOnBothPages",
 			// 两个页面上按下去，进去队列的都是这一页的歌。
-			"TestThePlayAllButtonEnqueuesOnBothPages",
+			"TestThePlayAllButtonReplacesQueueOnBothPages",
 			// **放不了的不要塞进队列**（判据 `app.CanPlay`，和右键菜单里那三个
 			// 入口是同一个）——而且跳过了几首要说一声。
 			"TestThePlayAllButtonSkipsTheUnplayableOnes",
@@ -3238,6 +3271,29 @@ var Items = []Item{
 			"TestAShortTitleIsNotAffected",
 			// 「图取到了」那一档也描一圈边（深浅两套）。
 			"TestTheLoadedCoverHasAnEdgeOfItsOwn",
+		},
+	},
+	{
+		// 🔴 **这一条的错法是「静默」的**：顶图被冻在列表上面，滚动列表时它一动
+		// 不动——**没有一样会报错**，界面只是「不像上游那一页」。
+		//
+		// 上游那一页（`music-recommend/index.tsx`）的顶图和下面的列表在**同一个
+		// 滚动容器**里，所以顶图跟着滚走；而 Tab 那一排在滚动容器**外面**，滚
+		// 列表时它不动。
+		Category: Platform,
+		// 票 #369。
+		Spec: "首页「流行」那一屏：顶图（新歌速递）**跟着列表一起滚走**，而 Tab 那一排**留在滚动容器外面**（滚列表时它不动）；另外两档不受影响",
+		Tests: []string{
+			// 顶图滚一段之后不在画面上了，而下面那一档的歌还在。
+			"TestTheTopImagesScrollAwayWithTheList",
+			// 网格那一档（设置里的「数据显示样式」）也是一样的。
+			"TestTheTopImagesScrollAwayInGridModeToo",
+			// Tab 那一排的 y 在滚动前后一模一样。
+			"TestTheTabRowStaysPutWhileTheListScrolls",
+			// 另外两档没动：没有顶图，而且照样能滚。
+			"TestTheMusicAndGuichuTabsAreNotTouched",
+			// 下面那一档没歌的时候顶图还在（它是这一屏的内容，不是列表的装饰）。
+			"TestTheTopImagesStayWhenTheListIsEmpty",
 		},
 	},
 	{
@@ -3258,31 +3314,37 @@ var Items = []Item{
 		},
 	},
 	{
-		// 🔴 **这一条的错法也是「静默」的**：按了「全部播放」而正在放的那首
-		// 不换（用户以为按钮是死的）、或者把这一页的歌**换掉**了用户原来的队列
-		// （他正听着的那几首不见了）——**没有一样会报错**，界面只是「不按他
-		// 以为的那样」。
-		//
-		// 而这两枚入口（页级的「全部播放」、行级的「立即播放」）只差几个字，
-		// 做的事差着一个队列——所以它们各自叫什么、做什么，都得钉住。
+		// 票 #337 覆盖 #299：单首保留队列，显式批量/区段替换队列。
 		Category: Play,
-		// 票 #299（2026-10-24 人定的）。
-		Spec: "「全部播放」= 把这一页的歌按顺序加进队列并播放（从这一页的第一首开始）；「立即播放」= 只放当前这一首",
+		Spec:     "立即播放追加这一首并打断，旧队列保留；批量入口替换这一批并从第一首播；从这一首往后听/下一首播放/添加到队列保持区段替换/当前后插入/队尾追加的语义",
 		Tests: []string{
-			// 队列里多了这一页的歌（**按顺序**）、旧的那几首还在、正在放的是
-			// 这一页的**第一首**（夹具是本地歌：在线的那些在无头环境里放不了，
-			// 而真网络是**真账号**）。
-			"TestThePlayAllButtonAppendsThePageAndStartsAtItsFirstSong",
-			// 应用层那一条：追加 + 从这一批的第一首开始播（队列里原来有的那几首
-			// 不动）。
-			"TestEnqueueAndPlayAppendsInOrderAndStartsAtTheFirst",
-			// 「立即播放」**只放当前这一首**：队列里只有它，正在放的是它。
-			"TestThePlayNowEntryPlaysOnlyThatSong",
-			// 菜单那一层：交给接线的是**只有这一首**，不是「从这一首往后」的那
-			// 一整段。
+			"TestEnqueueAndPlayNowAppendsAndStartsTheNewSong",
+			// 同一首已经在队列里时**照样再加一份**（与上游那一处不同）。
+			"TestEnqueueAndPlayNowAppendsTheSameSongTwice",
+			"TestEnqueueAndPlayNowKeepsTheOldSelectionOnFailure",
+			"TestThePlayNowEntryAppendsAndStartsThatSong",
+			"TestThePlayAllButtonReplacesQueueAndStartsAtItsFirstSong",
+			"TestThePlayAllButtonReplacesQueueOnBothPages",
+			"TestPlayAllReplacesTheQueueWithSearchResults",
+			"TestTheUpSpacePlayAllReplacesTheQueue",
+			"TestOtherBatchEntriesReplaceQueueAndStartFirst",
+			"TestTheFourRowQueueActions",
+			"TestLibraryPlayNowPreservesTheQueue",
+			"TestSingleSongCardsPreserveTheQueue",
 			"TestChoosingPlayNowHandsOverJustThatSong",
-			// **两枚入口都在**（少建一项那一项就永远点不到）。
 			"TestBothPlayEntriesAreOnTheRowMenu",
+			// 应用层那三条：**替换队列**这条路的契约（换掉 + 从第一首 + 起播失败
+			// 把原队列换回去）。
+			"TestPlayFromSwapsTheQueueAndStartsAtTheFirst",
+			"TestPlayFromWithNothingToPlayLeavesTheQueueAlone",
+			"TestPlayFromKeepsTheQueueWhenTheFirstSongWillNotPlay",
+			// 新歌速递那两枚播放钮（这一票把它们从 Play 改成 PlayNow）。
+			"TestClickingANewMusicCardQueuesExactlyThatSong",
+			"TestClickingTheHoverPlayButtonQueuesExactlyThatSong",
+			// 两页的行菜单**共用一份**（这一票把「立即播放」那一档收进共用那份），
+			// 各自最后那一项（移除 / 删除）仍各归各的。
+			"TestBothLibraryPagesOfferTheirOwnLastMenuItem",
+			"TestBothLibraryPagesOfferPlayNextInTheRowMenu",
 		},
 	},
 	{
@@ -3518,12 +3580,20 @@ var Items = []Item{
 		// **对用户是错的**话——没有一样会报错，界面只是「不太对」。
 		Category: Paging,
 		// 票 #344（issue #344，BMG-179 / PR #330 的评审留的三条 minor）。
-		Spec: "UP 空间「动态」那一页：丢掉的理由**分了类**（界面按类别说，「读不懂」不说成「形态不认识」）；丢掉的计数**按不同的动态算**（B 站翻页重叠时同一条只算一次）；**「到底了」看入口有没有前进**——0 条 + 入口前进了 = 继续拉下一页，0 条 + 入口没前进 = 到底",
+		Spec: "UP 空间「动态」那一页：丢掉的理由**分了类**（界面按类别说，「读不懂」不说成「形态不认识」，「投稿没有稿件号」不说成「什么也没有」）；丢掉的计数**按不同的动态算**（B 站翻页重叠时同一条只算一次）；**「到底了」看入口有没有前进**——0 条 + 入口前进了 = 继续拉下一页，0 条 + 入口没前进 = 到底",
 		Tests: []string{
 			// 分类（服务层那一层）：四类各数各的。
 			"TestTheDroppedOnesAreToldApartByReason",
 			// 分类（画面上那句话）：「读不懂」不许被说成「形态不认识」。
 			"TestWhatWeCannotReadIsNotCalledAnUnknownShape",
+			// 「投稿没有稿件号」是**另一类**（它带着正文），服务层和画面上各一条。
+			"TestAnArchiveWithoutABvidIsItsOwnReason",
+			"TestAnArchiveWithoutABvidIsNotCalledEmpty",
+			// **正文也是空的那几条**仍算「什么也没有」（不算「投稿没有稿件号」）。
+			"TestAnArchiveWithoutABvidAndWithoutTextIsEmpty",
+			"TestAnArchiveWithoutABvidAndWithoutTextIsCalledEmpty",
+			// 加了一类而忘了加一档时，计数**不许静默少一条**。
+			"TestAnUnknownDropReasonIsStillCounted",
 			// 计数去重：两页里重叠的一条，计数是 1 不是 2。
 			"TestTheDroppedCountCountsDifferentDynamicsNotHowManyTimesTheyAppear",
 			// 跨页去重靠的是**身份**（服务层那一层）。
@@ -3532,6 +3602,37 @@ var Items = []Item{
 			// 闸门：0 条 + 入口前进了 → 继续拉；0 条 + 入口没前进 → 到底。
 			"TestAnEmptyPageWhoseOffsetMovesStillLoadsTheNextPage",
 			"TestAnEmptyPageWhoseOffsetStaysIsTheEnd",
+			// 闸门的**界面那一半**：「0 条 + 入口没前进」要从界面这一侧也收手
+			//（入口前进了的那一次必须问出去，入口没前进就停）。
+			"TestThePagerStopsWhenAnEmptyPageKeepsTheSameOffset",
+		},
+	},
+	{
+		// 票 #387：随机档的洗牌袋是**池子**，而「下一首播放」压过随机。
+		//
+		// 随机不是「排好一张表」，是「下一首从还没放过的里面随机挑」（持续随机——
+		// 行业做法：Spotify / Apple / QQ音乐 / 网易云都是这一个东西）：新加进队列的
+		// 歌**立刻就在候选里**，这一轮就轮到它，而不是等下一轮重装。
+		//
+		// 而「下一首播放」是**用户显式的意图**：它压过随机（Spotify 社区管这叫
+		// "queue overrides"）——随机档下按它，**下一首就是它**。
+		//
+		// ⚠️ **顺序 / 循环 / 单曲三档一个字都不许动**：袋子是随机档的东西，而那一
+		// 档的下一首是纯按索引算的。
+		Category: Play,
+		Spec:     "随机档的洗牌袋是池子（这一轮中途加进来的歌这一轮就轮到它，不重复也不遗漏）；「下一首播放」压过随机（下一首就是它）；其余三档按索引算，一个字都不变",
+		Tests: []string{
+			// 池子：中途加进来的歌这一轮就轮到它，而且只轮到一次。
+			"TestRandomPlaysASongAddedMidRound",
+			// 「下一首播放」压过随机：手动按下一首、自动切歌两条路都认。
+			"TestRandomPlayNextIsTheNextOne",
+			"TestRandomPlayNextIsTheNextOneOnAutoAdvance",
+			// 反面：其余三档一个字都没变（回归的护栏）。
+			"TestPlayNextOutsideRandomIsStillByIndex",
+			// 界面上说得清（随机档才说，其余三档一句话都不说）。
+			"TestTheEnqueueNoticeIsOnlyForRandom",
+			"TestAddingASongInRandomModeSaysItWillPlayThisRound",
+			"TestAddingASongOutsideRandomModeSaysNothing",
 		},
 	},
 }

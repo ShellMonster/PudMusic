@@ -239,8 +239,15 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic, selected, ring bo
 				name = "这个 UP 主"
 			}
 			// 昵称是**链接**不是装饰：它是「从这条动态进他空间」这条路。
-			// 扁平配方（上游那一格是 `User` 的 `hover:underline`，没有按钮壳）。
-			if flatButton(c, name).FontSize(scale.Font(c, scale.Size14)).Clicked() && d.Author.Mid > 0 {
+			//
+			// ⚠️ **它是「名字型链接」，不是一枚按钮**（票 #417）：上游那一格是
+			// `User` 的 `hover:underline`——**没有按钮壳、没有底色、没有胶囊**。
+			// 改之前这里画的是扁平按钮（左右各留一段内边距 + 圆角），于是那个
+			// 名字被一个胶囊包着，而指针落上去时胶囊才显出来——像一块底牌。
+			//
+			// ⚠️ **没有编号时点不动**（`d.Author.Mid > 0`）：那一句仍然显示——
+			// 「把名字藏起来是另一种撒谎」（理由同 `widgets/list` 的 `OwnerName`）。
+			if flatLink(c, name).FontSize(scale.Font(c, scale.Size14)).Clicked() && d.Author.Mid > 0 {
 				s.navigate(upPathOf(d.Author.Mid))
 			}
 			if d.Time != "" {
@@ -358,14 +365,14 @@ func (s *Shell) viewDynamicPics(c *ui.Context, pics []string) {
 
 // viewDynamicVideo 画一条投稿型动态里那份稿件。
 //
-// **整块可点，点它从这一首往后播**——和列表里双击一首是一个意思。
-// 真放不了的时候说一句话（`list.Actions.Play` 里的 Toast），不装死。
+// 整块可点：追加这首并立即播，保留原队列（票 #337）。
+// 起播失败由 list.Actions.PlayNow 的 Toast 说明。
 func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author bili.DynamicAuthor) {
 	t := c.Theme()
 	box := ui.Row(c).Grow(1).Gap(space.Px12).Padding(space.Px8).Radius(t.Radius).
 		Background(t.Surface).AlignItems(ui.Center).Key("dynv:" + v.Bvid)
 	if box.Clicked() {
-		list.AppActions(s.app, s.addToast).Play([]app.Item{dynVideoItem(v, author)})
+		s.listActions().PlayNow(dynVideoItem(v, author))
 	}
 	box.Children(func() {
 		s.spaceThumb(c, v.Cover, dynamicCoverW, dynamicCoverH)

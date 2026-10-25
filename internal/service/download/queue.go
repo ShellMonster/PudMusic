@@ -152,9 +152,9 @@ func New(opts Options, path string) (*Manager, error) {
 		onDone:  opts.OnDone,
 		// nil 是允许的：没装判据就按「能重试」算（见 `Options.CanRetry`）。
 		canRetry: opts.CanRetry,
-		ctx:     ctx,
-		quit:    quit,
-		wakeup:  make(chan struct{}, 1),
+		ctx:      ctx,
+		quit:     quit,
+		wakeup:   make(chan struct{}, 1),
 	}
 	if path != "" {
 		if err := m.Restore(path); err != nil {

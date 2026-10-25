@@ -49,14 +49,14 @@ func TestRenderPlayBarStateShots(t *testing.T) {
 			loading := playBarTester(t, app.State{
 				HasTrack: true, Title: "在线的一首歌", Source: app.SourceOnline,
 				CoverURL: g.url(),
-				Rate: 1, Volume: 0.8, PlayMode: app.PlayModeLoop,
+				Rate:     1, Volume: 0.8, PlayMode: app.PlayModeLoop,
 			}, 1200, dark)
 			save(t, dir, "03-播放条-封面加载中-"+name+".png", loading)
 
 			// 04 **超一小时**：读数写成 `hh:mm:ss`（上游的 `formatDuration`）。
 			long := playBarTester(t, app.State{
 				HasTrack: true, Title: "一小时以上的一首", Source: app.SourceOnline,
-				BiliURL: "https://www.bilibili.com/video/BV1xx411c7mD",
+				BiliURL:  "https://www.bilibili.com/video/BV1xx411c7mD",
 				Duration: 75 * time.Minute, Position: 90 * time.Minute,
 				Rate: 1, Volume: 0.8, PlayMode: app.PlayModeLoop,
 			}, 1200, dark)
@@ -70,7 +70,7 @@ func TestRenderPlayBarStateShots(t *testing.T) {
 			// 浅色那一版）。
 			hovered := playBarTester(t, app.State{
 				HasTrack: true, Title: "一首歌", Source: app.SourceOnline,
-				BiliURL: "https://www.bilibili.com/video/BV1xx411c7mD",
+				BiliURL:  "https://www.bilibili.com/video/BV1xx411c7mD",
 				Duration: 3 * time.Minute, Position: 42 * time.Second,
 				Rate: 1, Volume: 0.8, PlayMode: app.PlayModeLoop,
 			}, 1200, dark)

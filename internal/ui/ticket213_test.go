@@ -65,16 +65,18 @@ func uiFollowTagsOrdered(b *uiExplore, tags []followTagSpec) {
 
 // followPaneSettings 是这一组测试用的那份设置。
 //
-// ⚠️ **方案要显式写暖纸，不能用 `app.DefaultSettings("")` 那一份**：
-// 界面这一包的 `TestMain` 把 `app.DefaultThemePreset` 按成了**经典**
-// （`internal/ui/diskguard_test.go` 的 `TestMain`），而**经典那一套的 `sidebar`
-// 就是页面底色**（两个都是白）——于是「这一列的底 == 方案的 `sidebar`」这条判据
-// 在测试环境里**恒真**：把这一列的底整个删掉，测试照样绿（2026-10-25 的评审
-// 抓出来的）。
+// ⚠️ **方案要显式写暖纸，不能靠 `app.DefaultSettings("")` 的默认**：这一组要量的是
+// **暖纸**这一套，而**经典那一套的 `sidebar` 就是页面底色**（两个都是白）——于是
+// 「这一列的底 == 方案的 `sidebar`」这条判据在经典底下**恒真**：把这一列的底整个
+// 删掉，测试照样绿（2026-10-25 的评审抓出来的）。
 //
 // 暖纸那一套的 `sidebar`（#EFE9DE）和页面底色（#F8F4ED）**不是一个色**，判据
 // 才立得住——`TestTheFollowPaneAndTheSidebarAreOneFamily` 里还有一条专门盯
 // 「这一套方案里这两个色不是同一个」。
+//
+// （票 #406 之后这一包的 `TestMain` 不再把方案钉成经典，所以显式写这一行是
+// **钉住这一组要量的那一套**，而不是「躲开默认」——两者的区别是：将来默认方案
+// 再变，这一组仍然量暖纸。）
 func followPaneSettings() app.Settings {
 	st := app.DefaultSettings("")
 	st.ThemePreset = app.ThemePresetWarmPaper
@@ -287,7 +289,7 @@ func TestTheFollowPaneSeparatesAllFromTheGroups(t *testing.T) {
 
 			y := findSeparator(img, cur.X, cur.X+cur.W, cur.Y+cur.H, first.Y, paneBg, selBg, line)
 			if y < 0 {
-				t.Errorf("「全部关注(3)」和「特别关注(1)」之间没有分界——"+
+				t.Errorf("「全部关注(3)」和「特别关注(1)」之间没有分界——" +
 					"那一格（全部关注）和后面那些（分组）不是一伙的")
 				return
 			}

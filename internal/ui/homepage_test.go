@@ -76,11 +76,14 @@ func homeFrame(tt *ui.Tester) {
 // 那 8 DIP），而逐像素的断言量到的就是那一帧（一个「切过去就换内容」的硬切
 // 实现也是那种画面，所以那样的断言断不出「有没有过渡」）。
 //
-// ⚠️ **推 250ms**：过渡本身是 200ms（`homeBodyDuration`），留 50ms 余量。
-// 主 Tab 那个滑块的弹簧（`tabs.go` 的 `TabSlide`，实测 453ms 才收手）**不在
-// 这条的范围里**——它在 Tab 那一排上，而这一组要量的是内容那一块。
+// ⚠️ **推的是整段过渡**（票 #238）：那一段现在是**两段**——旧的先淡出
+// （`homeFadeOut`）、新的后淡进（`homeFadeIn`）——所以要推的是**两段加起来**
+// 再留一点余量。
+//
+// ⚠️ **主 Tab 那个滑块的弹簧**（`tabs.go` 的 `TabSlide`，实测 453ms 才收手）
+// **不在这条的范围里**——它在 Tab 那一排上，而这一组要量的是内容那一块。
 func settleHome(tt *ui.Tester) {
-	tt.Advance(homeBodyDuration + 50*time.Millisecond)
+	tt.Advance(homeFadeOut + homeFadeIn + 50*time.Millisecond)
 	tt.Frame()
 }
 
@@ -395,6 +398,164 @@ func TestNewMusicShowsOnlyOnThePopTab(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 顶图跟着滚走（票 #369）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheTopImagesScrollAwayWithTheList 钉住这一票的头一条：**滚动时顶图被滑出
+// 屏幕**。
+//
+// 判据是画面：滚一段之后新歌速递那几张图不在画面上了。
+//
+// ⚠️ **为什么它此前是红的**：新歌速递那一块是列表的**兄弟**（在列表的滚动容器
+// **外面**），所以滚动列表时它一动不动。上游那一页是
+// `{activeTab === "pop" && <NewMusicTop … />}` 和下面的列表在**同一个滚动容器**
+// 里（`music-recommend/index.tsx`），顶图跟着滚走。
+//
+// 怎么滚：滚轮要落在**列表**那一块上（`ui.Tester.Scroll` 给的是指针位置）。
+func TestTheTopImagesScrollAwayWithTheList(t *testing.T) {
+	_, tt := newHome(t, fullSongs())
+	clickTab(t, tt, homePopTab)
+
+	// 滚之前：顶图在画面上。
+	if !shows(tt, "新歌速递") {
+		t.Fatalf("切到「流行」之后新歌速递不在画面上，文字有 %q", tt.Texts())
+	}
+	if !shows(tt, songName("新歌", 1)) {
+		t.Fatalf("新歌速递那一块没有画出它的卡片，文字有 %q", tt.Texts())
+	}
+
+	// 滚一段。指针落在下面那一档的歌上（列表那一块）。
+	tt.Scroll(homeW/2, homeH-150, 0, 1200)
+	homeFrame(tt)
+
+	// 顶图不见了。
+	if shows(tt, "新歌速递") {
+		t.Errorf("滚了 1200 像素之后新歌速递还在画面上——它没有跟着滚走，文字有 %q", tt.Texts())
+	}
+	if shows(tt, songName("新歌", 1)) {
+		t.Errorf("滚了 1200 像素之后新歌速递的卡片还在画面上，文字有 %q", tt.Texts())
+	}
+	// 而下面那一档的歌还在（滚的是列表，不是把整页滚没了）。
+	if len(listPos(tt, homeTabs[homePopTab])) == 0 {
+		t.Errorf("滚了 1200 像素之后「%s」那一档一首歌都没画出来，文字有 %q",
+			homeTabs[homePopTab], tt.Texts())
+	}
+}
+
+// TestTheTabRowStaysPutWhileTheListScrolls 钉住这一票的第二条：**Tab 那一排留在
+// 滚动容器外面**（滚列表时它不动）。
+//
+// ⚠️ **它和上一条是一对**：顶图要跟着滚走，Tab 那一排不能跟着走——上游也是
+// （Tab 那一排在滚动容器外面，只有顶图和列表在里面）。
+//
+// 判据是**位置**：Tab 那一排的 y 在滚动前后要一模一样。判「还在不在」不够——
+// 它一直在，只是位置变了。
+func TestTheTabRowStaysPutWhileTheListScrolls(t *testing.T) {
+	_, tt := newHome(t, fullSongs())
+	clickTab(t, tt, homePopTab)
+
+	before, ok := tt.Find(homeTabs[homePopTab])
+	if !ok || before.H == 0 {
+		t.Fatalf("找不到「%s」那一档的 Tab，文字有 %q", homeTabs[homePopTab], tt.Texts())
+	}
+
+	tt.Scroll(homeW/2, homeH-150, 0, 1200)
+	homeFrame(tt)
+
+	after, ok := tt.Find(homeTabs[homePopTab])
+	if !ok || after.H == 0 {
+		t.Fatalf("滚完之后找不到「%s」那一档的 Tab，文字有 %q", homeTabs[homePopTab], tt.Texts())
+	}
+	if after.Y != before.Y {
+		t.Errorf("滚列表的时候 Tab 那一排动了：y 从 %v 变成 %v——它应该留在滚动容器外面",
+			before.Y, after.Y)
+	}
+}
+
+// TestTheTopImagesScrollAwayInGridModeToo 验「数据显示样式 = 网格」那一档**也一样**。
+//
+// ⚠️ **这一档是另一个控件**：网格那一档不是 `list.List`，是 `list.Grid`（它自己
+// 一份 `ui.ListState`、自己一套列数分档）。页内头部要**两档都装**
+// （`SwitchView.SetLead`），漏了网格那一档的症状是「用户在设置里切成网格，新歌速递
+// 那一块就没了」——而它是这一屏的内容，不是列表的装饰。
+func TestTheTopImagesScrollAwayInGridModeToo(t *testing.T) {
+	// 「数据显示样式」是**设置**里的一格，所以要先把那份设置挂上（走的是
+	// 「先写盘、再挂上去」那条生产路，见 `withSettings`）。
+	st := app.DefaultSettings("")
+	st.DisplayMode = app.DisplayModeCard
+	s, tt := newShell(t, withSettings(st))
+	s.home.SetSongs(fullSongs())
+	homeFrame(tt)
+	clickTab(t, tt, homePopTab)
+
+	if !shows(tt, "新歌速递") {
+		t.Fatalf("网格那一档上没有新歌速递，文字有 %q", tt.Texts())
+	}
+
+	tt.Scroll(homeW/2, homeH-150, 0, 1200)
+	homeFrame(tt)
+
+	if shows(tt, "新歌速递") {
+		t.Errorf("网格那一档滚了 1200 像素之后新歌速递还在画面上，文字有 %q", tt.Texts())
+	}
+	if len(listPos(tt, homeTabs[homePopTab])) == 0 {
+		t.Errorf("网格那一档滚了 1200 像素之后一首歌都没画出来，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheTopImagesStayWhenTheListIsEmpty 验「下面那一档没歌的时候，顶图还在」。
+//
+// ⚠️ **顶图是这一屏的内容，不是列表的装饰**：新歌速递那一块和下面那一档的推荐单
+// 是两摊各拉各的（见 `homepage_feed.go` 的「四摊，各自独立」）。下面那一档没拉到
+// 的时候，上游那一页照样摆着 `<NewMusicTop/>`（`index.tsx:295`）。
+//
+// ⚠️ 而这一档**没有列表可挂**（一根歌都没有 → 画的是页面那一档的空状态，不是
+// 列表），所以顶图得自己站在上面——它平时是列表的第 0 行（页内头部）。
+func TestTheTopImagesStayWhenTheListIsEmpty(t *testing.T) {
+	songs := fullSongs()
+	songs.tabs[homePopTab] = nil
+	_, tt := newHome(t, songs)
+
+	clickTab(t, tt, homePopTab)
+	if !shows(tt, "新歌速递") {
+		t.Errorf("下面那一档没歌的时候顶图不见了，文字有 %q", tt.Texts())
+	}
+	if !shows(tt, lookup(homePath).Empty.Title) {
+		t.Errorf("下面那一档没歌的时候空状态不见了，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheMusicAndGuichuTabsAreNotTouched 钉住「另外两档没动」这一条。
+//
+// 两条判据：另外两档上**没有**新歌速递（上游本来就没有），而它们**照样能滚**
+// （这一票没把滚动容器挪到别处去）。
+//
+// ⚠️ 第二条是这一票真正可能踩坏的地方：顶图要滚走，实现就动了列表的滚动容器
+// ——而另外两档的列表是**共用同一套**的（`list.SwitchView`）。动坏了的症状是
+// 「另外两档滚不动了」。
+func TestTheMusicAndGuichuTabsAreNotTouched(t *testing.T) {
+	_, tt := newHome(t, fullSongs())
+
+	for _, tab := range []int{0, 1} {
+		clickTab(t, tt, tab)
+		if shows(tt, "新歌速递") {
+			t.Errorf("「%s」那一档上画了新歌速递（上游只有 pop 有）", homeTabs[tab])
+		}
+		atStart := listPos(tt, homeTabs[tab])
+		tt.Scroll(homeW/2, homeH-150, 0, 1200)
+		homeFrame(tt)
+		after := listPos(tt, homeTabs[tab])
+		if len(after) == 0 {
+			t.Errorf("「%s」那一档滚过去之后一首歌都没画出来", homeTabs[tab])
+			continue
+		}
+		if slices.Equal(after, atStart) {
+			t.Errorf("「%s」那一档滚了 1200 像素之后画面没变——它滚不动了", homeTabs[tab])
+		}
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 一行歌都没有时说的话
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -452,5 +613,125 @@ func TestOneEmptyTabDoesNotBlankOutTheOthers(t *testing.T) {
 		if !shows(tt, songName(homeTabs[i], 1)) {
 			t.Errorf("切到有歌的 %q，却没画出它的歌，文字有 %q", homeTabs[i], tt.Texts())
 		}
+	}
+}
+
+// TestTheLeadRowIsNeverTheCursor 钉住「页内头部那一行不是歌」。
+//
+// ⚠️ **基线上 Home 和 ↑ 都停在第一首歌上**（三档都一样）：页内头部占着框架的
+// **第 0 行**，而框架的游标记的是**行号**——于是 Home / ↑ 会把光标停在那一行上，
+// 而那一行不是歌：**选中项变成空**、**按 Enter 不放歌**、焦点环从「跟着那一行走」
+// 退回「画在整张列表上」，而票 #245 的 E4「↑ 在顶上一行时把焦点交回侧栏」在
+// 「流行」这一档也失效了（↑ 从第一首歌往上走会停在那一行上，而不是交回侧栏）。
+//
+// 所以逐键量：三档各按一次 Home 和一次 ↑，**光标都得停在第一首歌上**。
+func TestTheLeadRowIsNeverTheCursor(t *testing.T) {
+	// ⚠️ **窗口要有焦点**，否则框架的 `Focused()` 恒为假，「焦点在哪」这一整套
+	// 判据就全是假的（见 `focus_test.go` 那一条的注释）。
+	fc := &focusCtx{}
+	s, tt := newShell(t, fc.opt())
+	tt.SetFocused(true)
+	s.home.SetSongs(fullSongs())
+
+	for tab := range homeTabs {
+		clickTab(t, tt, tab)
+		// 把焦点交给这一档的列表，光标停在第一首歌上（和用户走进来时一样）。
+		s.home.lists[tab].TakeFocus()
+		homeFrame(tt)
+
+		// Home：光标该停在第一首歌上。
+		tt.Key(0, ui.KeyHome)
+		homeFrame(tt)
+		assertCursorOnFirstSong(t, s, tab, "Home")
+
+		// Enter：光标停在歌上时，它放的是**那一首**。
+		//
+		// ⚠️ **这里量的是「选中项」而不是队列**：测试里那些歌放不了（不是真的
+		// 音频），所以队列两种情况下都是空的 ✗ —— 区别在**光标停在哪一行**：
+		// 停在页内头部那一行时，`OnSubmit` 走 `playFrom(-1)`，**什么也不放**。
+		tt.Key(0, ui.KeyEnter)
+		homeFrame(tt)
+		assertCursorOnFirstSong(t, s, tab, "Enter")
+
+		// ↑：光标该**留在**第一首歌上（基线上 ↑ 在顶上一行时把焦点交回侧栏，
+		// 选中项不动；页内头部那一行不是歌，光标停上去的话选中项会变成空）。
+		s.home.lists[tab].TakeFocus()
+		homeFrame(tt)
+		tt.Key(0, ui.KeyUp)
+		homeFrame(tt)
+		assertCursorOnFirstSong(t, s, tab, "↑")
+
+		// ⚠️ **↑ 在顶上一行时把焦点交回侧栏**（票 #245 的 E4）：页内头部那一行
+		// 不是歌，光标停上去的话这一半就失效了——焦点既没交回侧栏，光标也空了。
+		if !s.sideAnchor.Focused(fc.c) {
+			t.Errorf("「%s」这一档在顶上一行按 ↑ 之后焦点没交回侧栏——"+
+				"光标大概停在页内头部那一行上了", homeTabs[tab])
+		}
+	}
+}
+
+// assertCursorOnFirstSong 断言这一档的光标停在**第一首歌**上。
+func assertCursorOnFirstSong(t *testing.T, s *Shell, tab int, key string) {
+	t.Helper()
+	m, ok := s.home.lists[tab].Selected()
+	want := songName(homeTabs[tab], 1)
+	if !ok || m.Title != want {
+		t.Errorf("「%s」这一档按 %s 之后选中的是 %q（ok=%v），want %q",
+			homeTabs[tab], key, m.Title, ok, want)
+	}
+}
+
+// TestTheNewMusicPagerIsClickableInsideTheList 钉住「翻页箭头点得动」。
+//
+// ⚠️ **这一块在列表的滚动区里**（它是「流行」那一档列表的第 0 行），而列表的浮动
+// 滚动条就贴在它的右边：指针一悬停滚动条就出现，**按下被滚动条抢走**（框架的
+// `pointerDown` 先问 `scrollbarPress`，滚动条那一帧画出来了就把这一次按下拿走），
+// 于是那两枚翻页箭头按了没反应——**用户翻不到第三页**（新歌 9~12 那四首看不到）。
+//
+// ⚠️ **单独造这一块的测试量不到**（`newGridTester` 那一块不在列表里，没有滚动条），
+// 所以这一条要**在首页上**跑。
+//
+// ⚠️ **两条都量**：直接点，和「先把指针悬停上去再点」——后者是评审探针里更狠的那条
+// （悬停让滚动条出现，之后每一次按下都被它拿走）。
+func TestTheNewMusicPagerIsClickableInsideTheList(t *testing.T) {
+	_, tt := newHome(t, fullSongs())
+	clickTab(t, tt, homePopTab)
+
+	// 一路翻到第三页：1 / 3 → 2 / 3 → 3 / 3。
+	for _, want := range []string{"2 / 3", "3 / 3"} {
+		if err := tt.Click("下一页"); err != nil {
+			t.Fatalf("点不到「下一页」：%v，文字有 %q", err, tt.Texts())
+		}
+		homeFrame(tt)
+		if got := readout(tt); got != want {
+			t.Fatalf("翻页之后读数是 %q，want %q（箭头点不动：列表的浮动滚动条压在它上面）", got, want)
+		}
+	}
+
+	// 翻回第一页，再来一遍「先悬停再点」——悬停会让滚动条出现。
+	for range 2 {
+		if err := tt.Click("上一页"); err != nil {
+			t.Fatalf("点不到「上一页」：%v，文字有 %q", err, tt.Texts())
+		}
+		homeFrame(tt)
+	}
+	if got := readout(tt); got != "1 / 3" {
+		t.Fatalf("翻回第一页读数是 %q，want 1 / 3", got)
+	}
+
+	// 把指针悬停在「下一页」上（滚动条于是出现），再点它。
+	r, ok := tt.Find("下一页")
+	if !ok || r.W == 0 {
+		t.Fatalf("画面上找不到「下一页」，文字有 %q", tt.Texts())
+	}
+	tt.Move(r.X+r.W/2, r.Y+r.H/2)
+	homeFrame(tt)
+
+	if err := tt.Click("下一页"); err != nil {
+		t.Fatalf("点不到「下一页」：%v，文字有 %q", err, tt.Texts())
+	}
+	homeFrame(tt)
+	if got := readout(tt); got != "2 / 3" {
+		t.Errorf("悬停之后点「下一页」，读数是 %q，want 2 / 3（滚动条把这一次按下抢走了）", got)
 	}
 }

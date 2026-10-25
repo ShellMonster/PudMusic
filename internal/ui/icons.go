@@ -44,6 +44,7 @@ package ui
 import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -508,7 +509,8 @@ const (
 	// `<RiPlayCircleFill size={48} />`），我们照抄。
 	//
 	// ⚠️ **它曾经是 30**，理由写的是「播放条只有 88 高，中间那一列还压着进度条」——
-	// 而那个理由是假的：88 高装得下 48（48 + 2 的缝 + 20 的进度行 = 70）。
+	// 而那个理由是假的：76 高也装得下 48（48 + 2 的缝 + 20 的进度行 = 70）。
+	// （那句里的 88 是**当时**的数：2026-10-24 那一批重设计把播放条改成了 76。）
 	// 30 的真正后果是**它成了全条上最小的一枚**，而 18 的上下首和它挤成一小堆，
 	// 一眼看过去中间是空的——用户要找的那枚键反而不显眼。
 	iconPlayBtn = 20
@@ -640,7 +642,15 @@ func iconButtonPlay(c *ui.Context, name, label string, box, font float32, disabl
 	}
 	b = b.Background(fill)
 	b.Children(func() {
-		ui.Icon(c, icon(name)).FontSize(font).TextColor(t.AccentText)
+		ic := ui.Icon(c, icon(name)).FontSize(font).TextColor(t.AccentText)
+		// ⚠️ **按下时图形缩到 0.96**（`widgets/flat` 的 `PressScale`）——这一枚
+		// 也是图标键（DESIGN.md §六「图标键」把它和别的一起列着：盒子 48×48、
+		// 图形正好填满），所以它跟别的一样缩。
+		//
+		// ⚠️ **缩的是图形，不是那一枚圆底**：圆底是按钮自己的背景，缩它会把
+		// **命中区**一起缩掉 4%（指针压在边缘那一像素时 `Pressed()` 翻成
+		// false，缩放于是自己抖起来——理由见 `widgets/flat/press.go`）。
+		ic = flat.PressScale(ic, b.Pressed(), false)
 	})
 	return b
 }

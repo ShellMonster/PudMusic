@@ -9,17 +9,24 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// shown 是一首歌在列表 / 网格里**真正显示**的几样字：清洗过的歌名、副标题（从标题方括号里
+// Shown 是一首歌在列表 / 网格里**真正显示**的几样字：清洗过的歌名、副标题（从标题方括号里
 // 挪出来的歌手 / 专辑名拼在 UP 名前面）、是不是现场版。清洗规则见 `widgets/title`。
 // 它只管显示：`Music.Title` 不变，勾选框 / 菜单 / 无障碍名字仍用原标题。
-type shown struct {
-	title string
-	owner string
-	live  bool
+//
+// ⚠️ **导出的**：界面层里有几处自己画行 / 画卡片（首页的新歌速递那一块，见
+// `internal/ui/homepage_newmusic.go`），它们要显示的字**必须和列表里的一样**——
+// 两处各写一份清洗算法的话，同一首歌在两个地方会显示成两个名字。
+type Shown struct {
+	// Title 是清洗过的歌名。
+	Title string
+	// Owner 是副标题那一行：UP 名（前面可能缀着从标题方括号里挪出来的歌手 / 专辑名）。
+	Owner string
+	// Live 是「这是现场版」。
+	Live bool
 }
 
-// showOf 清洗一首歌的显示字。
-func showOf(m Music) shown {
+// ShowOf 清洗一首歌的显示字。
+func ShowOf(m Music) Shown {
 	c := title.Clean(m.Title)
 	owner := m.Owner
 	switch {
@@ -28,15 +35,18 @@ func showOf(m Music) shown {
 	case c.Extra != "":
 		owner = c.Extra
 	}
-	return shown{title: c.Title, owner: owner, live: c.Live}
+	return Shown{Title: c.Title, Owner: owner, Live: c.Live}
 }
 
 // liveTagRadius 是「现场」小标签的圆角：刻意不跟主题圆角走（标签是个小胶囊，
 // 用户把全局圆角拖到 24 它也不该变成圆球）。
 const liveTagRadius = 4
 
-// liveTag 画那枚「现场」小标签：caption 号、强调色字、强调色 14% 的淡底（规范 §7.3）。
-func liveTag(c *ui.Context) {
+// LiveTag 画那枚「现场」小标签：caption 号、强调色字、强调色 14% 的淡底（规范 §7.3）。
+//
+// ⚠️ **导出的**：界面层里自己画行 / 画卡片的那几处要画同一枚标签（见 `Shown` 的
+// 注释）——各画各的的话，同一首歌在一处有「现场」标签、在另一处没有。
+func LiveTag(c *ui.Context) {
 	t := c.Theme()
 	ui.Text(c, "现场").FontSize(scale.Font(c, scale.Size11)).TextColor(liveTagText(t)).
 		Background(t.Background.Mix(t.Accent, 0.14)).Radius(liveTagRadius).
@@ -47,12 +57,12 @@ func liveTag(c *ui.Context) {
 //
 // # ⚠ 「画出来的那一句」和「那个人」是两样
 //
-// shown.owner 是**清洗过**的那一句（可能是「歌手 · UP 名」，见 `showOf`），
+// shown.Owner 是**清洗过**的那一句（可能是「歌手 · UP 名」，见 `ShowOf`），
 // 而 name 是**那个人**的名字——提示里说的是他（「打开 X 的空间」），不是
 // 那一行拼出来的字。
 type ownerRow struct {
 	// shown 是要画的那一份（清洗过的）。
-	shown shown
+	shown Shown
 	// name 是那个 UP 主的名字（提示里用的那个）。
 	name string
 	// mid 是那个 UP 主的编号。
@@ -65,10 +75,10 @@ type ownerRow struct {
 	tip string
 	// size 是字的大小，lh 是行高，color 是字的颜色（次要色那一档）。
 	size, lh float32
-	color      ui.Color
+	color    ui.Color
 	// maxW 是这一行的宽度上限（0 = 不限），grow 是「吃满剩下的宽度」。
 	maxW float32
-	grow  bool
+	grow bool
 	// acts 是这个列表会做的操作（`OpenOwner` 在里面）。
 	acts Actions
 }
@@ -86,7 +96,7 @@ func OwnerTipText(name string) string { return "打开 " + name + " 的空间" }
 
 // ownerLine 画副标题那一行：现场标签（有就画）+ 副标题文字。
 //
-// 🔴 **有编号时 UP 名是一枚可点的扁平按钮**（票 #360）：点了进那个 UP 的空间。
+// 🔴 **有编号时 UP 名是一枚可点的名字型链接**（票 #360）：点了进那个 UP 的空间。
 // **没有编号时照旧画成普通字**——名字照样显示，只是点不动（B 站有些接口只给
 // 名字不给编号，见 `app.Item.ArtistMid`）。
 func ownerLine(c *ui.Context, o ownerRow) {
@@ -98,22 +108,22 @@ func ownerLine(c *ui.Context, o ownerRow) {
 		row = row.Grow(1)
 	}
 	row.Children(func() {
-		if o.shown.live {
-			liveTag(c)
+		if o.shown.Live {
+			LiveTag(c)
 		}
-		if o.shown.owner == "" {
+		if o.shown.Owner == "" {
 			return
 		}
-		OwnerName(c, o.shown.owner, o.name, o.tip, o.mid, o.size, o.lh, o.color, o.acts)
+		OwnerName(c, o.shown.Owner, o.name, o.tip, o.mid, o.size, o.lh, o.color, o.acts)
 	})
 }
 
-// OwnerName 画那一行的 UP 名：有编号时是一枚**可点的**扁平按钮，点了走
-// `acts.OpenOwner`；没有时是**普通字**。
+// OwnerName 画那一行的 UP 名：有编号时是一枚**可点的名字型链接**（点了走
+// `acts.OpenOwner`）；没有时是**普通字**。
 //
 // # ⚠ 「画出来的那一句」和「那个人」是两样
 //
-// text 是**画出来**的那一句（可能是清洗过的「歌手 · UP 名」，见 `showOf`），
+// text 是**画出来**的那一句（可能是清洗过的「歌手 · UP 名」，见 `ShowOf`），
 // 而 name 是**那个人**的名字——提示里说的是他（「打开 X 的空间」），不是
 // 那一行拼出来的字。
 //
@@ -157,13 +167,21 @@ func OwnerName(c *ui.Context, text, name, tip string, mid int64,
 
 // ownerButton 画那一枚**可点的** UP 名。
 //
-// # ⚠ 照播放条上那一枚画
+// # 它是「名字型链接」，不是一枚按钮（票 #417）
+//
+// **没有按钮壳、没有底色、没有胶囊**——指针落上去时名字底下长出一道下划线
+// （上游那一处是 `hover:underline`）。
+//
+// 改之前这里画的是扁平按钮（`flat.Button`）：左右各留一段内边距 + 圆角，
+// 于是那个名字被一个**胶囊**包着，而指针落上去时胶囊才显出来——像一块底牌。
+// 列表里一屏十几行，每一行都顶着那么一块底牌，一眼就是「另一种控件库」。
+//
+// ⚠️ **照播放条上那一枚画**
 //
 // `internal/ui/playbar.go` 的 `viewArtist` 是同一件事的另一个地方：有编号时
-// 播放条上那个 UP 名是一枚**扁平按钮**（无描边、无常驻底色），字色还是
-// **次要色**那一档。**别为了「可点」就把它画成主色实心块**——上游那一枚是
-// `text-sm` 的弱化灰字（见 playbar.go 顶上那一段），而列表里每一行都多一块
-// 绿的话，一屏就是十几块。
+// 播放条上那个 UP 名也是一枚**名字型链接**。**别为了「可点」就把它画成主色
+// 实心块**——上游那一枚是 `text-sm` 的弱化灰字（见 playbar.go 顶上那一段），
+// 而列表里每一行都多一块绿的话，一屏就是十几块。
 //
 // # ⚠ 内边距清零、内容左对齐
 //
@@ -171,6 +189,8 @@ func OwnerName(c *ui.Context, text, name, tip string, mid int64,
 // 那句话会比同列的字**右移 14 像素**，而这一列的字是从左沿起的（上游那一列是
 // `items-start`）。框架的按钮内容默认居中，所以还要 `Justify(ui.Start)`——
 // 理由和播放条上那一枚一模一样（见 playbar.go 的 `viewArtist` 顶上）。
+//
+// 这两样现在由**「名字型链接」那一档的配方**（`widgets/flat` 的 `Link`）给死了。
 //
 // # ⚠ 宽度上限**不在这里**
 //
@@ -184,14 +204,13 @@ func OwnerName(c *ui.Context, text, name, tip string, mid int64,
 func ownerButton(c *ui.Context, text, tip string, size, lh float32, color ui.Color) ui.Element {
 	// ⚠ **空标签**：那份配方默认给它建一个字，而这里要的是**自己**建那个字
 	// （字号 / 行高 / 字色 / 省略号都跟这一列的字一模一样，见 `ownerLine`）。
-	b := flat.Button(c, "").
-		Padding(space.None, space.None).
-		Justify(ui.Start)
+	b := flat.Link(c, "")
 	b = b.Children(func() {
 		t := ui.Text(c, text).FontSize(size).TextColor(color).MaxLines(1).Ellipsis("…")
 		// ⚠ **行高是 0 就不设**（理由同 `OwnerName` 的那一句）。
 		if lh > 0 {
 			t = t.LineHeight(lh)
+
 		}
 	})
 	return b.Tooltip(tip)
@@ -200,4 +219,29 @@ func ownerButton(c *ui.Context, text, tip string, size, lh float32, color ui.Col
 // liveTagText 是标签字色：强调色压在它自己的 14% 淡底上，浅色下不够 4.5:1 就压深。
 func liveTagText(t *ui.Theme) ui.Color {
 	return ink.Ensure(t.Accent, t.Background.Mix(t.Accent, 0.14), 4.5)
+}
+
+// OwnerLine 画副标题那一行（**导出**给界面层里自己画行 / 画卡片的那几处用）。
+//
+// ⚠️ **它和列表里那一行是同一套**：现场标签（有就画）+ UP 名（有编号时是一枚**可点
+// 的**扁平按钮，点了进那个 UP 的空间，见 `OwnerName`）——两处各画各的的话，同一个
+// UP 名在一处点得动、在另一处点不动。
+//
+// ⚠️ **tip 由调用方给**：列表那边是**记好的那一份**（`rowkey.Memo`，见
+// `List.ownerTip`）——现算的话每帧每一行一次字符串拼接。
+//
+// ⚠️ **maxW / grow 不在这一层**：自己画行 / 画卡片的那几处（首页的新歌速递那一块）
+// 那一行不限宽、也不吃满剩下的宽度。
+func OwnerLine(c *ui.Context, s Shown, m Music, tip string,
+	size, lh float32, color ui.Color, acts Actions) {
+	ownerLine(c, ownerRow{
+		shown: s,
+		name:  m.Owner,
+		mid:   m.Item.ArtistMid,
+		tip:   tip,
+		size:  size,
+		lh:    lh,
+		color: color,
+		acts:  acts,
+	})
 }

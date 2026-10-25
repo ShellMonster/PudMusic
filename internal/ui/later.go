@@ -543,52 +543,11 @@ const (
 //
 // ⚠️ **每一项都要 Item 一遍**：菜单是这趟全部建出来的，只有被 Chosen 的那一项为
 // true（`ui/menu.go` 的 buildMenu）。少建一项，那一项就永远点不到。
+//
+// ⚠️ **菜单本体在 `Shell.libraryMenuItems`**（两页共用一份，见那里的注释）：这里
+// 只说这一页是「稍后再看」——最后那一项因此是「移除」。
 func (s *Shell) laterMenu(m *ui.Menu, i int) {
-	p := &s.laterPage
-	row, ok := p.rows.Row(i)
-	if !ok {
-		return
-	}
-	acts := p.rows.actions()
-
-	switch {
-	case m.Item("立即播放").Disabled(!row.CanPlay).Chosen():
-		// 「立即播放」= **只放这一首**（票 #299）：队列被换成这一首，不是把这一
-		// 页剩下的歌一起排上。
-		acts.PlayNow(i)
-	case m.Item("从这一首往后听").Disabled(!row.CanPlay).Chosen():
-		// ⚠️ PGC（番剧 / 纪录片）放不了：取流那一套对 PGC 不通（见
-		// `app.playableOnline`），上游也是不给这一类入口（`cannotPlay = is_pgc`）。
-		// **画成灰的而不是不画**：不画的话同一份列表里有的行能播有的不能，用户会
-		// 以为是坏的。
-		acts.Play(i)
-	case m.Item("下一首播放").Disabled(!row.CanPlay).Chosen():
-		// 和「播放」同样判 `CanPlay`：插进队列的那一首照样要放得了，
-		// 而队列里插一首放不了的歌，下一首就会停在那里一声不响
-		// （`App.step` 退回上一首并说一句）。
-		acts.PlayNext(i)
-	case m.Item("添加到队列").Disabled(!row.CanPlay).Chosen():
-		acts.Add(i)
-	case m.Item("在 B 站打开").Chosen():
-		acts.Open(i)
-	// 收藏 / 下载这两项和内容列表那套菜单是同一份（Biu 的
-	// `music-list-item` 菜单对每一行都一样），摆在这里而不是不摆：用户在一个
-	// 列表上收藏了某一首，切到收藏夹页再收藏一次是白折腾。
-	case m.Item("收藏").Chosen():
-		acts.FavSelect(i)
-	case m.Item("下载音频").Chosen():
-		acts.Download(i)
-	case m.Item("移除").Chosen():
-		p.rows.Remove(i, s.app.LibraryOf().RemoveLater)
-	}
-	// 🔴 **按不动的那几项要说明为什么**。
-	//
-	// 用户看到的是「一行灰的」，而他不知道灰的是哪一种、还能怎么办——
-	// 而他也不可能猜到「PGC」是什么。说明摆在菜单末尾（它不是动作，
-	// 只是给人看的一句话）。
-	if row.CannotPlay != "" {
-		m.Item(row.CannotPlay).Disabled(true).Chosen()
-	}
+	s.libraryMenuItems(m, s.laterPage.rows, i, libraryLater)
 }
 
 // playCountText 是播放量那一列的字。**折法的出处只有一处**：`list.PlayCountText`

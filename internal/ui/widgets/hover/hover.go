@@ -31,6 +31,7 @@ package hover
 
 import (
 	"math"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -107,9 +108,9 @@ const (
 // 的事，只是那句话没有提前说。
 const PlayFrom = "从这一首往后听"
 
-// PlayNow 是「按下去只放这一首」这句话。
+// PlayNow 是「按下去加这一首并立即播」这句话。
 //
-// ⚠️ 和 PlayFrom 分开：首页「新歌速递」那张卡片按下去换掉整个队列、只放这一首
+// ⚠️ 和 PlayFrom 分开：首页「新歌速递」那张卡片按下去保留原队列、追加并立即播这一首
 // （上游 `new-music-top.tsx` 的 `handlePlay`），说「从这一首往后听」会提前许诺一
 // 件那一下不做的事。
 const PlayNow = "播放"
@@ -126,11 +127,139 @@ const PlayingMark = "正在播放"
 // 己猜是哪一首。顺带它让这一行在 Tester 里可认（`Tester.Find` 认标签）。
 func FromLabel(title string) string { return title + " " + PlayFrom }
 
-// PlayLabel 是「只放这一首」那枚播放钮的标签，理由同 FromLabel。
+// PlayLabel 是「加这一首并立即播」那枚播放钮的标签，理由同 FromLabel。
 func PlayLabel(title string) string { return title + " " + PlayNow }
 
 // PlayingLabel 是那个跳动波形的标签，理由同 FromLabel。
 func PlayingLabel(title string) string { return title + " " + PlayingMark }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 那几个身份：算一次，记下来
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// # 为什么要有这一节
+//
+// 那一圈反馈（压暗 / 三角 / 渐变条 / 播放钮）每一帧都要建，而它建出来的那几样
+// 东西**带着身份**：节点键（`Key`）和动画键（`AnimateWith`）——淡入要跨帧，
+// 节点的身份不变才有那份状态（见文件头那一段）。
+//
+// 现算的话，每一帧每一行要：
+//
+//   - 拼四个字符串（标签、`:dim`、`:fade`、`:tri`）：**四次分配**；
+//   - 把其中三个**装箱进 `any`**（`Key` 和 `AnimateWith` 的参数是 `any`，而
+//     `string → any` 的装箱每次都要在堆上分配一次）：**又三次**。
+//
+// 一屏十三行就是**九十一次**——实测那是首页那一屏每帧 137 次分配里的 91 次
+// （见 `internal/ui/framebudget_test.go` 里「首页列表」那一档）。而那几个身份
+// **只跟着歌名变**：歌名不变，它们就不变。
+//
+// # 所以：算一次，记下来，之后每帧拿现成的
+//
+// ⚠️ **记的是 `any`（已经装箱的那一份），不是字符串**：只把字符串记下来、
+// 每帧再装箱一次，等于只省了「拼字符串」那几笔——**装箱那三次还在**。
+//
+// ⚠️ **键和值都和改之前一模一样**（同一个字符串、同一个后缀），所以节点的
+// id（`keyedID` 对字符串走 `maphash.String`）和改之前**逐位相同**——淡入的
+// 状态、跨帧的身份，一样都不差。这一节改的是「算几次」，不是「算什么」。
+
+// idsKind 是「哪一种反馈」——每一种要一套自己的身份（同一个盒子里的节点键不能重）。
+type idsKind uint8
+
+const (
+	// idsRow 是列表行封面那一圈。
+	idsRow idsKind = iota
+	// idsCard 是网格卡片封面那一圈，「从这一首往后听」。
+	idsCard
+	// idsCardOne 是网格卡片封面那一圈，「只放这一首」。
+	idsCardOne
+)
+
+// idsKey 是缓存的键：歌名 + 哪一种反馈。
+//
+// ⚠️ **它是结构体而不是字符串**：结构体键进 map **不装箱**（零分配），而
+// `string` 键进 `sync.Map` 要装箱（每次一次分配）。
+type idsKey struct {
+	title string
+	kind  idsKind
+}
+
+// ids 是「算好的那一份身份」。
+type ids struct {
+	// label 是无障碍名字（「歌名 从这一首往后听」那种）。
+	//
+	// ⚠️ **它是字符串而不是 `any`**：`Label` 的参数是 `string`（`mygo/ui` 的
+	// `node.Label(s string)`），传字符串不装箱。
+	label string
+	// dim / fade / tri 是列表行那一圈的三样：压暗那一层的节点键、淡入动画的键、
+	// 三角那一层的节点键。
+	dim, fade, tri any
+	// bar / btn 是网格卡片那一圈的两样：封面底部那一条渐变的节点键、右下角那枚
+	// 播放钮的节点键。
+	bar, btn any
+}
+
+// idsCache 记着「算好的那一份身份」。
+//
+// ⚠️ **它是全局的，而键里有歌名**：那套身份只跟着**歌名**变（歌名不变，那几个
+// 键就不变），所以按歌名记一份就够——按「哪一行」记就得在四个地方各挂一份备忘
+// （列表 / 网格 / 稍后再看 / 历史记录），而那四处算的是同一串东西。
+var idsCache = struct {
+	mu sync.Mutex
+	m  map[idsKey]ids
+}{m: make(map[idsKey]ids)}
+
+// idsMax 是缓存里最多记多少份。
+//
+// 满了就整个清掉重来（和 `widgets/title` 那个缓存同一个做法）：够用，也不会
+// 无限长。
+//
+// ⚠️ **这一份缓存的量级算进票 #364 的账**（「调研：怎么降低 MyGo 运行时的
+// 内存占用」）：上限一万条，每条一个标签加四个装箱好的字符串；键是**歌名**，
+// 所以用户听过多少首歌就留多少条。而它换来的是**每帧少九十一次分配**——
+// 原来那九十一个对象是**每帧现造的垃圾**，记一份反而更省。
+const idsMax = 10000
+
+// idsOf 返回「这一首歌 + 这一种反馈」要用的那几个身份。
+//
+// ⚠️ **歌名不变时零分配**：查表不分配（结构体键不进 `any`），返回的是记好的
+// 那一份（几个 `any` 是现成的，不用再装箱）。
+func idsOf(title string, kind idsKind) ids {
+	key := idsKey{title: title, kind: kind}
+	idsCache.mu.Lock()
+	defer idsCache.mu.Unlock()
+	if got, ok := idsCache.m[key]; ok {
+		return got
+	}
+	got := packIDs(title, kind)
+	if len(idsCache.m) >= idsMax {
+		clear(idsCache.m)
+	}
+	idsCache.m[key] = got
+	return got
+}
+
+// packIDs 算出那一份身份。**只在歌名变了的时候走一次**。
+func packIDs(title string, kind idsKind) ids {
+	var out ids
+	if kind == idsCardOne {
+		out.label = PlayLabel(title)
+	} else {
+		out.label = FromLabel(title)
+	}
+	switch kind {
+	case idsCard, idsCardOne:
+		out.bar = out.label + ":bar"
+		out.btn = out.label + ":btn"
+	default:
+		out.dim = out.label + ":dim"
+		out.tri = out.label + ":tri"
+	}
+	// ⚠️ **淡入动画的键两种共用一个字段**：动画状态记在**节点自己**那份里
+	// （`mygo/ui` 的 `st.motions`，而 `st` 是按节点 id 找的），所以同一个盒子
+	// 里的压暗（列表行）和渐变条（卡片）各用各的节点，互不干扰。
+	out.fade = out.label + ":fade"
+	return out
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 淡入
@@ -148,7 +277,11 @@ func PlayingLabel(title string) string { return title + " " + PlayingMark }
 // ⚠️ **曲线是全应用那条统一的**（`motion.Unified`），不是 `Animate` 的默认
 // `EaseOut`——`Animate` 就是 `AnimateWith(..., EaseOut)`，所以这里要显式写
 // `AnimateWith`。理由见 DESIGN.md §五。
-func fade(e ui.Element, key string, on bool) float32 {
+//
+// ⚠️ **key 是 `any` 而不是 `string`**：它是**已经装好的那一份**（见上面「那几个
+// 身份」那一节）。`AnimateWith` 的参数本来就是 `any`，而 `string → any` 的装箱
+// 每次都要在堆上分配一次——传一个现成的 `any` 就是零分配。
+func fade(e ui.Element, key any, on bool) float32 {
 	if on {
 		return e.AnimateWith(key, 1, Fade, motion.Unified)
 	}
@@ -207,7 +340,9 @@ func drawTri(p *ui.Painter, r ui.Rect, c ui.Color) {
 func RowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 	on bool, title string, play func()) {
 	t := c.Theme()
-	key := FromLabel(title)
+	// ⚠️ **那几个身份是记好的那一份**（见上面「那几个身份」那一节）：现算的话
+	// 每帧每行要拼四个字符串、再装箱三次——一屏十三行就是九十一次。
+	ids := idsOf(title, idsRow)
 
 	// ⚠️ **外面这一层盒子是必需的**：压暗和那个三角用 `Attach` 贴在**父盒子的内边距
 	// 框**上（`mygo/ui/api_gen.go` 的 Attach），而调用方给的父是那一行的 `ui.Row`
@@ -228,15 +363,15 @@ func RowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 		//
 		// ⚠️ 这两层都**不占布局**（`Attach` 把它们从父的布局里拿出来了），所以指针
 		// 移上去的时候那一行不会横向跳一下。
-		dim := ui.Box(c).Key(key+":dim").Size(size, size).Radius(t.Radius).
+		dim := ui.Box(c).Key(ids.dim).Size(size, size).Radius(t.Radius).
 			Background(ui.RGBA(0, 0, 0, dimAlpha)).
 			Attach(ui.AnchorCenter, ui.AnchorCenter)
 		// **动画只装在压暗这一层上**，三角用同一个返回值（理由见 fade）。
-		a := fade(dim, key+":fade", on)
+		a := fade(dim, ids.fade, on)
 		show(dim, a)
 
-		tri := ui.Box(c).Key(key+":tri").Size(triSize, triSize).
-			Label(key).Tooltip(PlayFrom).
+		tri := ui.Box(c).Key(ids.tri).Size(triSize, triSize).
+			Label(ids.label).Tooltip(PlayFrom).
 			Attach(ui.AnchorCenter, ui.AnchorCenter).
 			Draw(func(p *ui.Painter, r ui.Rect) {
 				drawTri(p, r, ui.RGBA(255, 255, 255, triTint))
@@ -271,12 +406,12 @@ func RowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 // 类，两边都是「封面 + 两行字浮在页面上」，那不是差距（票面「不要做」里点名了）。
 func CardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 	on bool, playCount, clock, title string, play func()) {
-	cardCover(c, cache, url, w, h, on, playCount, clock, FromLabel(title), PlayFrom, play, false)
+	cardCover(c, cache, url, w, h, on, playCount, clock, idsOf(title, idsCard), PlayFrom, play, false)
 }
 
-// CardCoverOne 是同一圈反馈，但按下去**只放这一首**（`PlayNow`）。
+// CardCoverOne 是同一圈反馈，但按下去**加这一首并立即播**（`PlayNow`）。
 //
-// 首页「新歌速递」那一块用它：那张卡片单击就换掉整个队列只放这一首（上游
+// 首页「新歌速递」那一块用它：那张卡片单击就追加并立即播这一首（上游
 // `new-music-top.tsx` 的 `handlePlay`），和网格卡片「从这一首往后接」不是一件事。
 // 两处的视觉是同一套——同一个应用里同一个手势不该长出两个样子。
 //
@@ -286,7 +421,7 @@ func CardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 // 它只有底下那条渐变和右下角那个带影的播放钮。
 func CardCoverOne(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 	on bool, title string, play func()) {
-	cardCover(c, cache, url, w, h, on, "", "", PlayLabel(title), PlayNow, play, true)
+	cardCover(c, cache, url, w, h, on, "", "", idsOf(title, idsCardOne), PlayNow, play, true)
 }
 
 // cardCover 是 CardCover / CardCoverOne 共用的那一层：封面 + 上面那一圈反馈。
@@ -297,7 +432,7 @@ func CardCoverOne(c *ui.Context, cache *imgcache.Cache, url string, w, h float32
 // 是裁着的（`Clip`）——影于是画在封面的四周，正好是上游那个 `shadow-md` 的样子。
 // 加在里面的图上会变成「图在框里放大」，那是另一回事（hover 放大才那么做）。
 func cardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
-	on bool, playCount, clock, label, tip string, play func(), coverShadow bool) {
+	on bool, playCount, clock string, ids ids, tip string, play func(), coverShadow bool) {
 	t := c.Theme()
 
 	cover := ui.Box(c).Size(w, h).Radius(t.Radius).Clip()
@@ -306,23 +441,22 @@ func cardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 		cover = shadow.TailwindMD(cover)
 	}
 	cover.Children(func() {
-		imgcache.ViewTitled(c, cache, url, label, w, h)
-		cardOverlay(c, w, h, on, playCount, clock, label, tip, play)
+		imgcache.ViewTitled(c, cache, url, ids.label, w, h)
+		cardOverlay(c, w, h, on, playCount, clock, ids, tip, play)
 	})
 }
 
 // cardOverlay 画网格卡片封面**上面**那一圈。
-func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock, label, tip string, play func()) {
+func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock string, ids ids, tip string, play func()) {
 	t := c.Theme()
-	key := label
 
-	bar := ui.Box(c).Key(key+":bar").Size(w, barH).
+	bar := ui.Box(c).Key(ids.bar).Size(w, barH).
 		// 上游是 `bg-gradient-to-t from-black/90`：`from-` 那一头在下边，也就是封面的
 		// 底边，往上淡出。`Gradient` 的角度是「从竖直方向顺时针起算，180 是从上到
 		// 下」，所以不透明那一头要放在第二个参数上。
 		Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.9), 180).
 		Attach(ui.AnchorBottomLeft, ui.AnchorBottomLeft)
-	a := fade(bar, key+":fade", on)
+	a := fade(bar, ids.fade, on)
 
 	show(bar, a).Children(func() {
 		// ⚠️ **`Padding` 的四个值是 上 / 右 / 下 / 左**（CSS 那一套）：这一层**右边**
@@ -350,7 +484,7 @@ func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock, label, 
 	})
 
 	// 右下角那个主色圆播放钮。上游 `music-card/index.tsx:39-47`。
-	circle := ui.Box(c).Key(key+":btn").Size(btn, btn).Radius(btn/2).
+	circle := ui.Box(c).Key(ids.btn).Size(btn, btn).Radius(btn/2).
 		Background(t.Accent).
 		Attach(ui.AnchorBottomRight, ui.AnchorBottomRight).Right(btnInset).Bottom(btnInset)
 	// ⚠️ **那一圈影是 `shadow-2xl`**（上游 `music-card/index.tsx:51` 的
@@ -363,7 +497,7 @@ func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock, label, 
 	shadow.Tailwind2XL(circle)
 
 	show(circle, a).Children(func() {
-		e := ui.Box(c).Size(btn, btn).Label(key).Tooltip(tip).Center().
+		e := ui.Box(c).Size(btn, btn).Label(ids.label).Tooltip(tip).Center().
 			Draw(func(p *ui.Painter, r ui.Rect) {
 				// 三角缩到圆的六成：整个圆那么大的三角会顶出圆外。
 				drawTri(p, shrink(r, 0.4), t.AccentText)

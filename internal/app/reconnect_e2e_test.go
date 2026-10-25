@@ -7,9 +7,21 @@ package app_test
 // 真的字节源、真的退避、真的应用层接线、真的 `State`。它盯的是
 // 「字节源说重试 → 应用层知道 → `State.Reconnecting` 亮起来」这条**接线**。
 //
-// 🔴 **手工调 `noteReconnect` 的用例证明不了它**：把 `buildFromRef` 里
-// `OnRetry` / `OnReconnected` 那两个回调整个拆掉（功能完全不工作，界面上
-// 永远不会出现「正在重连」），那些用例照样全绿——而这一组会红。
+// 🔴 **手工调 `noteReconnect` 的用例证明不了它**：那些用例绕过了「源说重试」
+// 这一步——源那边到底报不报、应用层到底知不知道，只有走真的源才验得到。
+//
+// # ⚠️ **这一组守不住的是 `buildFromRef` 里那两个回调**
+//
+// `OnRetry` / `OnReconnected` 这两个回调**只做一件事：叫醒界面**（它们不碰
+// 任何状态）。**把那两个回调整个拆掉，这一组照样全绿**——因为「正在重连」
+// 这一档的状态**住在源那边**（`StreamSource.Reconnecting()`），应用只**问**
+// 当前在管的那一条流（见 `reconnect.go` 的文件头）：叫不叫醒界面，这一档的
+// 状态都不变。
+//
+// ⚠️ **所以别拿「拆掉那两个回调这一组会红」当证据**——那句话在这份文件头上
+// 说过一次，而它是**错的**（票 #315 的评审查出来的）。这一组守的是**状态**；
+// 「叫醒界面」那一半归界面层（放歌时界面每 50 毫秒自己醒一次，见 AGENTS.md
+// §4 第 3 条）。
 //
 // 这一组用的全是 **HTTP fixture**（假 B 站 + 假 CDN）：**不打真 B 站**。
 
@@ -253,6 +265,109 @@ func TestTheBreakDuringTheFirstLoadIsStillVisible(t *testing.T) {
 	if !<-lit {
 		t.Error("采样里一次都没看见「正在重连」——那一档亮得太短，等于没有")
 	}
+}
+
+// TestTheOldSongsReconnectStateDoesNotStayOnTheNewSong 盯「切歌之后旧流的状态
+// 不留在新歌上」（票 #378，端到端）。
+//
+// 旧那一首断流了、它的源正在退避里等着 → 用户切到新的一首 → 播放条上那一行
+// 必须是**这一趟该说的**「正在取流：新的一首」，而不是旧那一首的「正在重连」。
+//
+// 🔴 **走的是 `Next()` 而不是 `PlayAt()`**：`PlayAt` 会先把还在响的那首停掉
+// （`ClearTrack`），那条路上压根没有「旧状态赖在新歌上」这回事——有这回事的
+// 是播放条上那两个「上一首 / 下一首」键。
+func TestTheOldSongsReconnectStateDoesNotStayOnTheNewSong(t *testing.T) {
+	f := newStreamFixture(t)
+	data := readFlac(t)
+	f.media = data
+
+	// 取流接口按 bvid 分：旧的那首给一个「下到一半就断」的地址；新的那首
+	// **取流慢 1.5 秒**——把「正在取流」那个窗口撑开，好观察它。
+	f.on("/x/player/wbi/playurl", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		f.playCalls.Add(1)
+		var dash map[string]any
+		if q.Get("bvid") == "BVOLD" {
+			dash = dashFor(cdnURL(f.URL, "old.flac", time.Hour), int(bili.QualityHigh192), 110836)
+		} else {
+			dash = dashFor(cdnURL(f.URL, "new.flac", time.Hour), int(bili.QualityHigh192), 110836)
+			time.Sleep(1500 * time.Millisecond)
+		}
+		writeStreamJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
+			"data": map[string]any{"timelength": 1000, "dash": dash}})
+	})
+
+	// 旧那一首的地址：发到一半就断；之后（续传那几次）一律 403——于是那条
+	// 源会一直退避重试，「正在重连」那一档一直亮着。
+	gate := make(chan struct{})
+	// ⚠️ **这条用例挂掉的时候也得把门打开**：那个 handler 卡在 `<-gate` 上，
+	// 而假服务器收尾要等所有请求结束——门不开，收尾就卡住（用例挂掉时看到
+	// 的是「测试卡住」，不是「断言没过」）。
+	t.Cleanup(func() {
+		select {
+		case <-gate:
+		default:
+			close(gate)
+		}
+	})
+	f.on("/cdn/old.flac", func(w http.ResponseWriter, r *http.Request) {
+		f.mediaHits.Add(1)
+		if r.Header.Get("Range") != "" {
+			http.Error(w, "地址失效了", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Length", fmt.Sprint(len(data)))
+		w.Write(data[:len(data)/2])
+		w.(http.Flusher).Flush()
+		<-gate
+		panic(http.ErrAbortHandler)
+	})
+
+	a := newOnlineApp(t, f, t.TempDir())
+	if err := a.Enqueue(onlineItem("BVOLD", "1", "旧的那首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "旧的那首")
+	waitFor(t, 15*time.Second, "播放位置动起来", func() bool {
+		return a.Snapshot().Position > 0
+	})
+	if err := a.Enqueue(onlineItem("BVNEW", "2", "新的那首")); err != nil {
+		t.Fatal(err)
+	}
+
+	// 掐断旧那一首的流 → 它的源开始退避 → 「正在重连」亮起来。
+	close(gate)
+	waitFor(t, 30*time.Second, "旧的那首开始重连", func() bool {
+		return a.Snapshot().Reconnecting
+	})
+
+	// 切歌。
+	a.Next()
+
+	// 🔴 **这一趟取流的那 1.5 秒里，那一行必须是这一趟该说的**：旧那一首的
+	// 重连状态不许留着（它把「正在取流：新的那首」盖掉了）。
+	sawLoading := false
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		st := a.Snapshot()
+		if st.Reconnecting {
+			t.Fatalf("旧那一首的重连状态留在了新歌上：%+v", st)
+		}
+		if st.Loading {
+			sawLoading = true
+			if st.LoadingTitle != "新的那首" {
+				t.Fatalf("在取哪一首说错了：%+v", st)
+			}
+		} else if sawLoading {
+			break // 这一趟取完了
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !sawLoading {
+		t.Fatal("新的一趟没有说「正在取流」")
+	}
+	// 新的那首真的放起来了（这一趟说完了）。
+	playing(t, a, "新的那首")
 }
 
 // waitForFine 每 2ms 采一次，等一个条件成立。

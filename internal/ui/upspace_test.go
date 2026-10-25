@@ -290,6 +290,21 @@ func uiDynamicOpus(id, text string, pics ...string) map[string]any {
 	return m
 }
 
+// uiDynamicArchiveWithoutBvid 造一条**投稿型、却没有稿件号**的动态。
+//
+// ⚠️ **它带着正文**（`desc.text` 里有那段话）：这一条和「什么也没有」是两回事
+// ——只是 `major.archive.bvid` 是空的，放不出来（票 #344 的评审）。
+func uiDynamicArchiveWithoutBvid(id, text string) map[string]any {
+	m := uiDynamic(id, text)
+	m["type"] = "DYNAMIC_TYPE_AV"
+	mods := m["modules"].(map[string]any)
+	mods["module_dynamic"].(map[string]any)["major"] = map[string]any{
+		"type":    "MAJOR_TYPE_ARCHIVE",
+		"archive": map[string]any{"title": "一个没有稿件号的投稿"},
+	}
+	return m
+}
+
 // uiDynamicUnrenderable 是造一条这一版画不出来的动态（转发/直播/剧集…）。
 //
 // ⚠️ `withText` 决定它带不带正文——**带正文的那一条才是真考题**：
@@ -1247,6 +1262,83 @@ func TestTheDroppedCountCountsDifferentDynamicsNotHowManyTimesTheyAppear(t *test
 	}
 }
 
+// TestAnArchiveWithoutABvidIsNotCalledEmpty 钉住「投稿动态没有稿件号」**不**
+// 被说成「什么也没有」。
+//
+// ⚠️ **这一条带着正文**：UP 写的那段话就在 `desc.text` 里，只是稿件号是空的
+// ——放不出来。而「什么也没有」那一档说的是「既没有正文也没有图」。
+//
+// ⚠️ **说错了就是对用户说错话**：「有 1 条什么也没有，画不出来」听起来像是
+// 「他什么都没发」，而真相是「他发了一条投稿，我们放不出来」（票 #344 的评审）。
+//
+// 判据是**画面上那句话**：说的是「投稿…放不出来」，而且**不许**说「什么也
+// 没有」。
+func TestAnArchiveWithoutABvidIsNotCalledEmpty(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "发了一条投稿的 UP", 0, 1)
+	b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{
+			"items":  []any{uiDynamicArchiveWithoutBvid("av1", "他写的那段话")},
+			"offset": "", "has_more": false,
+		})
+	})
+	s, tt, _ := newSpaceShell(t, b, false, "")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+	waitFrames(t, tt, "动态加载完", func() bool { return sp.dyn.started })
+	tt.Frame()
+
+	if !showsAnyText(tt, "有 1 条是投稿却放不出来（没有稿件号）") {
+		t.Errorf("没说清是「投稿放不出来」，文字有 %q", tt.Texts())
+	}
+	if showsAnyText(tt, "什么也没有") {
+		t.Errorf("把「投稿没有稿件号」说成了「什么也没有」——"+
+			"那一条明明带着正文，文字有 %q", tt.Texts())
+	}
+	if got := sp.drops[upTabDynamic].counts.NoArchive; got != 1 {
+		t.Errorf("「投稿没有稿件号」那一类数了 %d 条，want 1", got)
+	}
+	if got := sp.drops[upTabDynamic].counts.Empty; got != 0 {
+		t.Errorf("「什么也没有」那一类数了 %d 条，want 0（这一条带着正文）", got)
+	}
+}
+
+// TestAnArchiveWithoutABvidAndWithoutTextIsCalledEmpty 钉住「投稿动态**既**没有
+// 稿件号**又**没有正文」说成「什么也没有」。
+//
+// ⚠️ **它是上一条的那一半**：上一条量的是「有正文的投稿没有稿件号」；这一条量
+// 的是**正文也是空的**那一种——它什么也没有，说成「是投稿却放不出来」是**错的**
+// （那一句话说的是「他发了东西，只是我们放不出来」）。
+func TestAnArchiveWithoutABvidAndWithoutTextIsCalledEmpty(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "发了一条空投稿的 UP", 0, 1)
+	b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{
+			"items":  []any{uiDynamicArchiveWithoutBvid("av1", "")},
+			"offset": "", "has_more": false,
+		})
+	})
+	s, tt, _ := newSpaceShell(t, b, false, "")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+	waitFrames(t, tt, "动态加载完", func() bool { return sp.dyn.started })
+	tt.Frame()
+
+	if !showsAnyText(tt, "有 1 条什么也没有") {
+		t.Errorf("没说清是「什么也没有」，文字有 %q", tt.Texts())
+	}
+	if showsAnyText(tt, "放不出来") {
+		t.Errorf("把「什么也没有」说成了「是投稿却放不出来」——"+
+			"这一条连正文都没有，文字有 %q", tt.Texts())
+	}
+	if got := sp.drops[upTabDynamic].counts.Empty; got != 1 {
+		t.Errorf("「什么也没有」那一类数了 %d 条，want 1", got)
+	}
+	if got := sp.drops[upTabDynamic].counts.NoArchive; got != 0 {
+		t.Errorf("「投稿没有稿件号」那一类数了 %d 条，want 0（这一条什么也没有）", got)
+	}
+}
+
 // TestWhatWeCannotReadIsNotCalledAnUnknownShape 钉住「读不懂的形状**不**被说成
 // 「形态不认识」。
 //
@@ -1359,6 +1451,60 @@ func TestAnEmptyPageWhoseOffsetStaysIsTheEnd(t *testing.T) {
 	if n != 1 {
 		t.Errorf("画了 40 帧，那个动态接口被问了 %d 次，want 1"+
 			"（入口没前进就是到底，再问是问同一页）", n)
+	}
+}
+
+// TestThePagerStopsWhenAnEmptyPageKeepsTheSameOffset 钉住 UI 那一半的
+// 「0 条 + 入口没前进 = 到底了」。
+//
+// # 为什么上面那一条不够
+//
+// `TestAnEmptyPageWhoseOffsetStaysIsTheEnd` 给的是「入口**空串**」——而那一条
+// 在**服务层**就收口了（`bili.DynamicPage.MoreAfter`：入口是空的就没有下一页），
+// **UI 那一半根本没被问到**。这一条给的是「入口**没前进**」：入口还在（"O1"），
+// 而 B 站又回了同一个 "O1"——再问一次问回来的还是同一页，所以到第二页就该收手。
+//
+// 🔴 **这一条守着 UI 那一层的闸门**（`upPager.adopt` 里的 `advanced` 那一档）：
+// 第一页 B 站发了 **0 条**，而**入口前进了**（给了 "O1"）——所以界面**必须**
+// 接着拉下一页（判据是 `sent > 0 || advanced`）。少了 `advanced` 那一档的话，
+// 第一页就地收手，第二页永远不会被问，而后面那一页里可能有正常动态。
+//
+// 判据是**问了几次**：正好两次（第一页 + 入口没前进的那一次），不能再多——
+// 一直问就是那个圈转不停（实测：60 帧 40 次，票 #300）。
+func TestThePagerStopsWhenAnEmptyPageKeepsTheSameOffset(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "空的 UP", 0, 1)
+	var mu sync.Mutex
+	asked := 0
+	b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		asked++
+		mu.Unlock()
+		// **0 条，而且入口一直是同一个 "O1"**：第一页给了 "O1"，第二页又回了
+		// "O1"——再问一次问回来的还是同一页。
+		uiExploreJSON(w, 0, map[string]any{"items": []any{}, "offset": "O1", "has_more": true})
+	})
+	s, tt, _ := newSpaceShell(t, b, false, "")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+
+	// 第一页到了（它发了 0 条，可它**给了入口**——所以还要问第二页）。
+	waitFrames(t, tt, "第一页到了", func() bool { return sp.dyn.started })
+	for range 40 {
+		tt.Frame()
+	}
+
+	mu.Lock()
+	n := asked
+	mu.Unlock()
+	if n != 2 {
+		t.Errorf("画了 40 帧，那个动态接口被问了 %d 次，want 2"+
+			"（0 条 + 入口没前进就是到底，再问是问同一页；而入口前进了的那一次"+
+			"必须问出去——不然后面那一页永远不会被加载）", n)
+	}
+	// 收手之后画面上说的是「没有动态」那一句，而不是一直转圈。
+	if !showsText(tt, "暂无动态") {
+		t.Errorf("收手之后画面上不是「暂无动态」，文字有 %q", tt.Texts())
 	}
 }
 
