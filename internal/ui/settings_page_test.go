@@ -373,9 +373,6 @@ func TestTheAutoStartSwitchIsOnThePage(t *testing.T) {
 	if !tt.HasText("开机自启") {
 		t.Fatalf("设置页上没有「开机自启」这一行，文字有 %q", tt.Texts())
 	}
-	if !tt.HasText("系统登录后自动启动应用") {
-		t.Errorf("「开机自启」没有说明，文字有 %q", tt.Texts())
-	}
 }
 
 // TestTogglingAutoStartGoesThroughTheSystem 验开关是**真的**在动系统。

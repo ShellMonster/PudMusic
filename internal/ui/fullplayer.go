@@ -486,7 +486,7 @@ func (s *Shell) viewFullEmpty(c *ui.Context) {
 
 		probe.Children(func() {
 			s.viewFullTopBar(c, app.State{}, hidden)
-			on, dim := s.fullForeground(c)
+			on, _ := s.fullForeground(c)
 			ui.Column(c).Key("full-empty").
 				Absolute().Left(0).Top(0).Right(0).Bottom(0).
 				Center().Gap(space.Px6).Children(func() {
@@ -496,7 +496,6 @@ func (s *Shell) viewFullEmpty(c *ui.Context) {
 				// 那两档的话，在浅色封面铺满的屏上这两行会糊进去。字号仍然是
 				// 15 / 12，和别处一样。
 				ui.Text(c, fullNothing.Title).FontSize(scale.Font(c, scale.Size15)).TextColor(on)
-				ui.Text(c, fullNothing.Hint).FontSize(scale.Font(c, scale.Size12)).TextColor(dim)
 			})
 		})
 

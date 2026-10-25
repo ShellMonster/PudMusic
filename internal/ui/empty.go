@@ -58,6 +58,9 @@ type emptyState struct {
 	// 空串就只画上面那一句（上游没有第二行）。判据在测试里：
 	// `TestEmptyStateCopySaysWhyAndHow` 要求每一句都带一个动作词。
 	Hint string
+	// Info 为真时 Hint 里有**数据**（比如「N 条动态没法显示」），照样画；
+	// 否则 Hint 只是提示语，不画（标题 + 插画 + 能点的下一步已经说清了）。
+	Info bool
 	// Icon 是插画位上那一枚图标（上游的「分类/文件名」，见 icons.go）。
 	//
 	// ⚠️ **给的是「这一页是干什么的」，不是随便一枚好看的**：首页推荐配音乐、
@@ -200,7 +203,9 @@ func emptyArt(c *ui.Context, name string) {
 func emptyCopy(c *ui.Context, e emptyState) {
 	t := c.Theme()
 	ui.Text(c, e.Title).FontSize(scale.Font(c, scale.EmptyTitle)).TextColor(t.Text)
-	if e.Hint != "" {
+	// 提示语（Hint）默认不画：标题 + 插画 + 能点的下一步已经说清了，多一句
+	// 解释只是让人多读一行。带数据的（Info）才画。
+	if e.Info && e.Hint != "" {
 		ui.Text(c, e.Hint).FontSize(scale.Font(c, scale.EmptyHint)).LineHeight(leading.Copy).
 			TextColor(t.TextMuted)
 	}

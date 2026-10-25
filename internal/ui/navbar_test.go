@@ -425,11 +425,11 @@ func TestSubmittingSearchCarriesTheWordToThePage(t *testing.T) {
 	// 页面上画的是「搜了没有结果」那一支，不是「还没输入」那一支——
 	// 后者的正文写着「在上面的搜索框里输入歌名或 UP 主」，正是这条要防的。
 	// 结果是异步回来的，那一句比提交晚几帧才画出来（理由见 settleText）。
-	settleText(t, tt, noSearchResults.Hint)
-	if !tt.HasText(noSearchResults.Hint) {
+	settleText(t, tt, noSearchResults.Title)
+	if !tt.HasText(noSearchResults.Title) {
 		t.Errorf("页面上没有「没有结果」那一句，文字有 %q", tt.Texts())
 	}
-	if tt.HasText(searchIdle.Hint) {
+	if tt.HasText(searchIdle.Title) {
 		t.Errorf("页面上还是「还没输入」那一支，文字有 %q", tt.Texts())
 	}
 }
@@ -512,7 +512,7 @@ func TestClearingTheSearchBoxOnTheSearchPageClearsTheResults(t *testing.T) {
 	if got := s.router.Location(); strings.Contains(got, "q=") {
 		t.Errorf("按了「清空」之后 URL 上还有词：%q——这一场搜索应该没了", got)
 	}
-	if !tt.HasText(searchIdle.Hint) {
+	if !tt.HasText(searchIdle.Title) {
 		t.Errorf("没有回到「还没输入」那一支，文字有 %q", tt.Texts())
 	}
 }
@@ -542,7 +542,7 @@ func TestAnEmptySearchGoesBackToTheIdleState(t *testing.T) {
 	if got := s.router.Location(); strings.Contains(got, "q=") {
 		t.Errorf("空词回车之后 URL 上还有词：%q", got)
 	}
-	if !tt.HasText(searchIdle.Hint) {
+	if !tt.HasText(searchIdle.Title) {
 		t.Errorf("空词回车之后没有回到「还没输入」那一支，文字有 %q", tt.Texts())
 	}
 }

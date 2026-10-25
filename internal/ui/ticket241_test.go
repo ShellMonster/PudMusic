@@ -366,31 +366,6 @@ func darkestIn(tt *ui.Tester, x0, y0, x1, y1 int, bg color.RGBA) (color.RGBA, bo
 // F-24　抽屉空状态提示的末行不是孤字
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheQueueEmptyHintHasNoOrphan 钉住「队列抽屉那句提示的末行不是一个字」。
-//
-// 那一句在抽屉那 352 宽的内容区里折成两行，原来那一版是 31 个字——折完末行只剩
-// 「来」一个字（中文孤字：行尾单字）。
-//
-// 判据：**末行的墨迹宽度 ≥ 两个字的宽度**（12px 的汉字约 11.5 像素宽）。
-func TestTheQueueEmptyHintHasNoOrphan(t *testing.T) {
-	b := newTestShell(t)
-	b.s.drawerOpen = true
-	// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在窗口外面
-	//（它从右边滑进来），量墨迹量的是空的右半边。
-	settleDrawer(t, b.s, b.tt)
-	homeFrame(b.tt)
-
-	lines := inkLines(t, b.tt, queueEmpty.Hint, rgb(BuildTheme(app.DefaultSettings(""), false).Background))
-	if len(lines) < 2 {
-		t.Fatalf("那句话没有折成两行（只有 %d 行墨），判据量不了末行", len(lines))
-	}
-	last := lines[len(lines)-1]
-	if w := last.right - last.left; w < 20 {
-		t.Errorf("那句话末行只有 %d 像素宽（约 %d 个字）——中文孤字，行尾单字应回避",
-			w, w/11)
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // F-26　三处 600 字重
 // ─────────────────────────────────────────────────────────────────────────────

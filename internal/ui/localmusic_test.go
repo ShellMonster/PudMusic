@@ -285,9 +285,6 @@ func TestTheEmptyStateSaysWhyAndHowForAnEmptyFolder(t *testing.T) {
 	if !tt.HasText("这里没有音频文件") {
 		t.Errorf("加了空目录却说「还没有添加音乐目录」，文字有 %q", tt.Texts())
 	}
-	if !tt.HasText("第一层") {
-		t.Errorf("没说清楚只扫一层，文字有 %q", tt.Texts())
-	}
 }
 
 // TestTheFirstFrameDoesNotClaimThereIsNoMusic 钉住「正在扫描」。

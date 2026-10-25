@@ -658,47 +658,6 @@ func TestLoginPageSaysTheCredentialsCannotBeKept(t *testing.T) {
 	}
 }
 
-// TestTheLoginPageSaysWhatLoggingInGivesYou 钉住「登录能换来什么」。
-//
-// # 为什么这一条要紧
-//
-// 用户点进登录页的时候，脑子里的问题是「登录了能干什么」。原来这一页只说
-// 「扫码登录」「用 bilibili 手机客户端扫一扫就能登进来」，**一个字都没说收益**
-// ——登录像一道没有说明书的考题（UX 报告 §3-A 的 A3）。
-//
-// ⚠️ **每一态都要有**：二维码出来之后那一句也得在——用户是先扫了码才想起来
-// 「登进来能干什么」的，所以只在「还没点开始」那一态写它，等于只答了一半。
-func TestTheLoginPageSaysWhatLoggingInGivesYou(t *testing.T) {
-	const benefit = "登录之后可以看你的关注、收藏、历史记录和稍后再看"
-
-	t.Run("还没开始扫码", func(t *testing.T) {
-		b := newUIBili(t, 86101)
-		a := newLoginApp(t, b)
-		tt, _ := loginTester(t, a)
-		tt.Frame()
-
-		if !tt.HasText(benefit) {
-			t.Errorf("登录页没说清登录能换来什么，文字有 %q", tt.Texts())
-		}
-	})
-
-	t.Run("已经在等扫码", func(t *testing.T) {
-		b := newUIBili(t, 86101)
-		a := newLoginApp(t, b)
-		tt, _ := loginTester(t, a)
-		tt.Frame()
-
-		a.BeginLogin()
-		waitQRCode(t, a)
-		waitLogin(t, a, app.LoginWaiting)
-		tt.Frame()
-
-		if !tt.HasText(benefit) {
-			t.Errorf("二维码出来之后登录页反而不说收益了，文字有 %q", tt.Texts())
-		}
-	})
-}
-
 // TestTheNotLoggedInScreenHasItsOwnIllustration 钉住「没登录」那一屏有插画。
 //
 // # 为什么这一条要紧

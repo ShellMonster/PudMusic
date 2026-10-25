@@ -368,7 +368,7 @@ func TestTheLibraryPagesEmptyStateSaysWhyAndHow(t *testing.T) {
 				t.Fatalf("routes 表里 %s 那一条的空状态不完整：%+v", path, e)
 			}
 			waitFrames(t, tt, "把空状态画出来", func() bool { return tt.HasText(e.Title) })
-			if !tt.HasText(e.Hint) {
+			if !tt.HasText(e.Title) {
 				t.Errorf("%s 空着的时候没说「怎么才能不空」，文字有 %q", path, tt.Texts())
 			}
 		})

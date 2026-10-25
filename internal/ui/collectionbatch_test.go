@@ -497,7 +497,6 @@ func TestEmptyCollectionSaysNoFavorites(t *testing.T) {
 	_, s, tt := collectionShell(t, "12345")
 	waitSongs(t, tt, s, 0)
 	wantText(t, tt, noFavorites.Title)
-	wantText(t, tt, noFavorites.Hint)
 }
 
 // TestTheNotMountedPageSaysSo 没挂接口时画得出来，但要告诉用户为什么。
@@ -507,7 +506,6 @@ func TestTheNotMountedPageSaysSo(t *testing.T) {
 	tt.Frame()
 	tt.Frame()
 	wantText(t, tt, "暂时打不开收藏夹")
-	wantText(t, tt, "这一页现在打不开，稍后再试试")
 }
 
 func newEmptyFolderClient(t *testing.T) *bili.Client {

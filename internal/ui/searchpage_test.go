@@ -254,7 +254,7 @@ func TestPlayAllReplacesTheQueueWithSearchResults(t *testing.T) {
 // 让按，用户点完什么反应都没有，还以为搜索坏了。
 func TestPlayAllIsDisabledWhenThereIsNothingToPlay(t *testing.T) {
 	s, tt := newSearchPage(t, "不存在的歌", newSearchStub(24, 0))
-	settleText(t, tt, noSearchResults.Hint)
+	settleText(t, tt, noSearchResults.Title)
 
 	if err := tt.Click("全部播放"); err != nil {
 		t.Fatalf("画面上连「全部播放」都没有：%v，文字有 %q", err, tt.Texts())
@@ -769,7 +769,7 @@ func TestNoClientSaysSoInsteadOfPretending(t *testing.T) {
 	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("周杰伦"))
 
 	settleText(t, tt, errSearchNotMounted.Error())
-	if tt.HasText(noSearchResults.Hint) {
+	if tt.HasText(noSearchResults.Title) {
 		t.Errorf("拉不到却画成「没有结果」那一格，文字有 %q", tt.Texts())
 	}
 	// 而用户得有一条路能重来：失败那一格自带「重试搜索」。

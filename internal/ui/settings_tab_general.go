@@ -78,24 +78,24 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 	s.settingGroup(c, "外观", func() {
 		// ⚠️ 这一格走 `viewDisplayMode`（切换 + 预览），不是光 `pickDisplayMode`：预览
 		// 是这一格的一部分，理由见 displaymode.go 的文件头。
-		s.settingRow(c, "数据显示样式", "内容页排成列表、网格还是紧凑",
+		s.settingRow(c, "数据显示样式", "",
 			func() { s.viewDisplayMode(c, st, ro) })
-		s.settingRow(c, "主题方案", "选一套整体配色；改下面的颜色或圆角会回到经典",
+		s.settingRow(c, "主题方案", "",
 			func() { s.pickThemePreset(c, st, ro) })
-		s.settingRow(c, "主题", "选择浅色或深色主题",
+		s.settingRow(c, "主题", "",
 			func() { s.pickTheme(c, st, ro) })
-		s.settingRow(c, "颜色", "背景色和主色，点色块挑颜色",
+		s.settingRow(c, "颜色", "",
 			func() { s.pickColors(c, st, ro) })
-		s.settingRow(c, "字体", "选择界面显示的字体",
+		s.settingRow(c, "字体", "",
 			func() { s.pickFont(c, st, ro) })
-		s.settingRow(c, "圆角", "调整界面控件的圆角大小",
+		s.settingRow(c, "圆角", "",
 			func() { s.pickRadius(c, st, ro) })
 
 	})
 	s.settingGroup(c, "播放", func() {
-		s.settingRow(c, "音质偏好", audioQualityHint[st.AudioQuality],
+		s.settingRow(c, "音质偏好", "",
 			func() { s.pickAudioQuality(c, st, ro) })
-		s.settingRow(c, "上报本机播放记录", "将播放进度同步到Bilibili服务器",
+		s.settingRow(c, "上报本机播放记录", "",
 			func() {
 				s.pickSwitch(c, "上报本机播放记录", "播放记录上报", st.ReportPlayHistory, ro,
 					func(cur *app.Settings, on bool) { cur.ReportPlayHistory = on })
@@ -104,7 +104,7 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 			func() { s.pickTrackFade(c, st, ro) })
 		s.settingRow(c, "均衡器", "",
 			func() { s.pickEQ(c, st, ro) })
-		s.settingRow(c, "音量均衡", "让不同歌的响度一致（本地歌曲按整首测量，在线歌曲只会压低过响的）",
+		s.settingRow(c, "音量均衡", "",
 			func() {
 				s.pickSwitch(c, "音量均衡", "音量均衡", st.NormalizeVolume, ro,
 					func(cur *app.Settings, on bool) { cur.NormalizeVolume = on })
@@ -115,16 +115,16 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 		// ⚠️ **这一行有身份**（`settingRowAt`）：从下载记录页跳过来的时候要指着它
 		// （见 goToDownloadDirSetting）——设置页有四个 Tab、几十行，不指一下用户
 		// 还得自己找「下载目录」在哪儿。
-		s.settingRowAt(c, string(settingsFocusDownload), "下载目录", "选择音频保存的位置",
+		s.settingRowAt(c, string(settingsFocusDownload), "下载目录", "",
 			func() { s.pickDownloadPath(c, st, ro) })
-		s.settingRow(c, "FFmpeg 路径", "手动指定 FFmpeg 可执行文件路径",
+		s.settingRow(c, "FFmpeg 路径", "",
 			func() { s.pickFFmpegPath(c, st, ro) })
 	})
 
 	s.pickLocalMusicDirs(c, st, ro)
 
 	s.settingGroup(c, "搜索", func() {
-		s.settingRow(c, "显示搜索历史", "在搜索框中显示搜索历史记录",
+		s.settingRow(c, "显示搜索历史", "",
 			func() {
 				s.pickSwitch(c, "显示搜索历史", "显示搜索历史", st.ShowSearchHistory, ro,
 					func(cur *app.Settings, on bool) { cur.ShowSearchHistory = on })
@@ -132,9 +132,9 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 
 	})
 	s.settingGroup(c, "系统", func() {
-		s.settingRow(c, "窗口关闭", "选择窗口关闭时的行为",
+		s.settingRow(c, "窗口关闭", "",
 			func() { s.pickCloseWindow(c, st, ro) })
-		s.settingRow(c, "开机自启", "系统登录后自动启动应用",
+		s.settingRow(c, "开机自启", "",
 			func() { s.pickAutoStart(c, st, ro) })
 
 		// 「关于应用」摆在最后，照 Biu 的 `system-settings.tsx` 那一段的顺序。

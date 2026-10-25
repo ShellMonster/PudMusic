@@ -495,6 +495,7 @@ func upTabEmpty(tab int, counts bili.DropCounts) emptyState {
 		return emptyState{
 			Title: "这里没有能显示的" + upTabNames[tab],
 			Hint:  dropSentence(counts),
+			Info:  true,
 		}
 	}
 	switch tab {
