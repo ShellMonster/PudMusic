@@ -318,12 +318,17 @@ func (q *Queue) invalidate() {
 }
 
 // Append 往队列尾部追加，不动当前项。
+//
+// ⚠️ **随机档要把新加的那些装进洗牌袋**（见 queue_shuffle.go 的
+// bagAddItemsLocked）：那一档的袋子是**池子**——新加进来的歌立刻在池中，这一轮
+// 就轮到它（而不是等下一轮重装）。其余三档一个字都不动。
 func (q *Queue) Append(items ...Item) {
 	if len(items) == 0 {
 		return
 	}
 	q.mu.Lock()
 	q.items = append(q.items, items...)
+	q.bagAddItemsLocked(items)
 	q.mu.Unlock()
 	q.changed()
 	// 队尾多了一首：下一首可能变了（顺序播放走到队尾那一档时，下一首就是它）。
@@ -340,6 +345,12 @@ func (q *Queue) Append(items ...Item) {
 //
 // ⚠️ **cur == -1（还没开始放）时插到最前面**：那时候队列里的东西都还没轮到，
 // 新来的这一首理应是下一个。插在队尾的话用户会以为它排在最后。
+//
+// ⚠️ **随机档：它要立刻成为下一首**（见 queue_shuffle.go 的 bagPromoteLocked）。
+// 那一档的「下一首」是**洗牌袋**说了算，而袋子只装「这一轮还没轮到」的——
+// 不动袋子的话「下一首播放」在随机档是**完全失效**的：歌插进了队列，可下一首
+// 还是池子里随机抽的一首，用户按了跟没按一样（症状是「点了没反应」）。
+// 「下一首播放」是**用户显式的意图**，它压过随机（见 queue_shuffle.go 文件头）。
 //
 // 队列是空的那一支把 cur 落在 0：没有正在放的那首，「下一首」就是它自己。
 // 起播是 `App.EnqueueNext` 的事（它照 `App.Enqueue` 那样判「队列原本空不空」）。
@@ -358,8 +369,8 @@ func (q *Queue) InsertNext(item Item) {
 		at = min(q.cur+1, len(q.items))
 	}
 	q.items = slices.Insert(q.items, at, item)
-	// ⚠️ **袋子不用动**：它记的是判重标识，而插一首歌不改别的歌的身份
-	// （见 Queue 里 bag 那段注释）。
+	// ⚠️ **随机档要把它挪到袋头**（见上面那段）：那一档的「下一首」是袋子说了算。
+	q.bagPromoteLocked(item.Identity())
 	q.mu.Unlock()
 	q.changed()
 	// 插在正在放的那首后面 → **下一首就是它**了：之前备好的那份作废。
@@ -934,6 +945,24 @@ func (m PlayMode) Label() string {
 func (m PlayMode) Next() PlayMode {
 	i := slices.Index(PlayModes, m)
 	return PlayModes[(i+1)%len(PlayModes)]
+}
+
+// EnqueueNotice 是「加进队列」之后要对用户说的一句话——**不是随机档就是空串**。
+//
+// 随机档的洗牌袋是**池子**：新加进来的歌立刻在池中，这一轮就轮到它（见
+// queue_shuffle.go）。而用户看不见池子里有什么——他加了一首歌，得知道它**这一轮
+// 就放得到**，而不是「要等下一轮」。
+//
+// ⚠️ **别说「这一轮放不到」**：那不是我们要的行为（票 #387，2026-10-25 人定的
+// 一条：随机档加进来的歌这一轮就轮到它）。
+//
+// 其余三档是空串：那一档的「下一首」是纯按索引算的，加进来的歌排在哪就是哪，
+// 没有什么要解释的。
+func (m PlayMode) EnqueueNotice() string {
+	if m != PlayModeRandom {
+		return ""
+	}
+	return "随机播放中：加进来的歌这一轮也会轮到"
 }
 
 // RandSource 是随机模式挑歌用的随机源。方法形状照 `math/rand` 的 Rand，

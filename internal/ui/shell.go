@@ -13,6 +13,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/media"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
@@ -1802,4 +1803,9 @@ func (s *Shell) enqueuePicked(paths []string) {
 		items[i] = app.LocalItem(p)
 	}
 	s.app.Enqueue(items...)
+	// ⚠️ **随机档要说一句**：那一档的洗牌袋是**池子**——加进来的歌立刻在池中，
+	// 这一轮就轮到它（见 app/queue_shuffle.go）。用户看不见池子里有什么。
+	if n := s.app.PlayMode().EnqueueNotice(); n != "" {
+		s.addToast(n, notice.Success)
+	}
 }
