@@ -114,104 +114,119 @@ func TestNewMusicColumnsFollowItsOwnBreakpoints(t *testing.T) {
 	}
 }
 
-// homeTallH 是「两行摆得下」的一个窗口高。
+// TestTheBlockIsAlwaysTwoRows 钉住「这一块**永远两行**」。
 //
-// 封面是方的之后，两行的门槛跟着格子宽走（见 newMusicTwoRowsMinH）；1200 宽、
-// 容器 ~960、4 列、格子 231 时要 978 高。1000 刚够，这里取 1000 而不是贴着门槛，
-// 留一点余量给字体行高那点平台差。
-const homeTallH = 1000
-
-// TestAShortWindowShowsOneRowSoTheListStillHasRoom 验「窗口矮了就只摆一行」。
+// 上游 `new-music-top.tsx:157` 的 `pageSize = colCount * 2`：那个文件**只量
+// `window.innerWidth`、从不量高度**，所以它永远是两行——矮窗口下这一块比视口高，
+// 下面那一档的列表被推到更下面（**滚得到**，上游整页是一个滚动容器，
+// `music-recommend/index.tsx:261`）。
 //
-// 上游永远是两行（`new-music-top.tsx:157` 的 `colCount * 2`），因为上游那一整页在
-// 一个滚动容器里，滚下去就看到了。我们不行——「流行」那一档的推荐列表是个虚拟
-// 列表，它自己占着滚动，整页再套一层 Scroll 的话那个列表就没有确定的视口高度。
+// ⚠️ 我们此前有一条「窗口矮就减成一行」的降级（**上游没有**），它就是票 #475 说的
+// 「只有 1 行、这一行只有 4 个」的来源，而它同时把下面那一档的列表挤没了。
+// **这条钉住它不许回来。**
 //
-// 不减行数的后果是量出来的：窗口 560 高（`WindowOptions` 的 `MinHeight`）时，
-// 两行卡片 + 顶栏 + Tab 那一排 + 播放条把那一屏占满，**「流行」那一档的列表是
-// 0×0，一首歌都看不见**（见 newMusicTwoRowsMinH）。
-//
-// 判据是**这一页画着几张卡片**（列数 × 应摆的行数），以及**那一档的第一行是完整的
-// 64 高**——后者才是这条要救的东西。只看「列表里还有行」不够：视口比一行矮的时候
-// 那一行仍然画得出来，只是被裁掉了大半，而 `songsDrawn>0` 照样是绿的（评审在
-// 1200×640 / 560 / 930 上都量到过 25 / 16 高的一行）。
-//
-// 窗口高取这几档：最短的两档、默认、**两行门槛的两侧**（threshold−1 与 threshold）、
-// 以及更高的一档。门槛两侧是这一条最容易漏的地方：刚切到两行的那个高度上，列表
-// 最容易只剩一条缝。
-func TestAShortWindowShowsOneRowSoTheListStillHasRoom(t *testing.T) {
+// 判据是**这一页画着几张卡片**（列数 × 两行）。
+func TestTheBlockIsAlwaysTwoRows(t *testing.T) {
 	s, tt := newHome(t, fullSongs())
-	clickTab(t, tt, homePopTab) // 先让这一块开始画，好量出容器宽
+	clickTab(t, tt, homePopTab) // 先让这一块开始画，好量出列数
+	homeFrame(tt)
 
-	cols := newMusicColsFor(s.home.newGrid.width)
-	cell := newMusicCellWidth(s.home.newGrid.width, cols)
-	threshold := int(newMusicTwoRowsMinH(cell))
+	cols := s.home.newGrid.cols
+	if cols <= 0 {
+		t.Fatalf("这一块还没量出列数")
+	}
 
-	for _, h := range []int{560, 640, homeH, threshold - 1, threshold, homeTallH} {
+	// 窗口高取这几档：最短的（`WindowOptions` 的 `MinHeight` 是 560）、默认、
+	// 以及更高的一档。**行数一个都不许变**。
+	for _, h := range []int{560, 640, homeH, 900, 1200} {
 		tt.SetSize(homeW, h)
 		homeFrame(tt)
 
-		rows := newMusicRowsAt(float32(h), cell)
-		if got := cardsOnPage(t, tt, "新歌"); got != cols*rows {
+		if got := cardsOnPage(t, tt, "新歌"); got != cols*newMusicRows {
 			t.Errorf("窗口高 %d 时这一页画着 %d 张卡片，want %d 列 × %d 行",
-				h, got, cols, rows)
+				h, got, cols, newMusicRows)
 		}
-		assertFirstListRowFull(t, tt, h)
 	}
 }
 
-// assertFirstListRowFull 断言下面那一档的第一行**没有被视口裁掉**。
+// TestTheDefaultWindowShowsTenCards 钉住「默认窗口（1200×800）下这一块画着
+// **10 张**卡片」。
 //
-// 一行的高是 64（`list.listRowHeight`）。被裁的时候 `Find` 仍然找得到它、宽也不是
-// 0，只有 H 变小——所以判据只能是高度，不能是「在不在」。
-func assertFirstListRowFull(t *testing.T, tt *ui.Tester, h int) {
-	t.Helper()
-	r, ok := tt.Find(songName(homeTabs[homePopTab], 1))
-	if !ok || r.W == 0 {
-		t.Fatalf("窗口高 %d 时列表第一行没画出来，文字有 %q", h, tt.Texts())
-	}
-	if r.H < 63 {
-		t.Errorf("窗口高 %d 时列表第一行只有 %.1f 高（完整一行是 64）——被新歌速递那一块挤到视口外裁掉了", h, r.H)
-	}
-}
-
-// TestResizingTheWindowChangesTheRowCount 钉住「改窗口高度，行数跟着换」。
+// ⚠️ **它就是用户 2026-10-25 说的那件事**（「我看『流行』里现在还是只有1行且这一行
+// 只有4个」）：改之前是 4 张（窗口矮 → 减成一行 → 一页 4 首），改之后是
+// **上游那一套**——两行 × 五列。
 //
-// ⚠️ 这是一条**单独**的用例，不能和上面那条合：上面那条是「先切到流行、再改
-// 窗口」，行数在那一块**第一次被画**的时候就是对的（那一帧现读 `c.Size()`）。
-// 这一条断的是另一种：那一块早就在画了，用户这时才拖窗口边。
+// 五列是**上游那张表按窗口宽分档**的结果（`new-music-top.tsx:135` 的
+// `window.innerWidth`：1200 落在 1024~1279 那一档 → 五列；网格那几列是同一组
+// 断点的 Tailwind 视口类 `:209`）。**一页摆几首和上游一样**（上游也是 5 × 2 = 10）。
 //
-// 实现上把窗口高记进字段（`windowH`）的话这里立刻红——记的是 1000，用户拖到 560
-// 之后还是两行，下面那档的列表被挤成 0×0。这个坑真踩过，所以单开一条。
-func TestResizingTheWindowChangesTheRowCount(t *testing.T) {
+// ⚠️ **下面那一档的歌在首屏之外**：这一块 510 高 + 表头 52 + 一道缝 12 = 574，
+// 而列表的视口只有 611——**上游也是这样**（它那一块和列表在同一个滚动容器里，
+// 矮窗口下这一块占满首屏，歌要往下滚才看得到）。所以这里**不**断言「第一行歌
+// 完整可见」——那是此前那条「窗口矮就减成一行」的规矩带来的，不是上游的。
+func TestTheDefaultWindowShowsTenCards(t *testing.T) {
 	s, tt := newHome(t, fullSongs())
-	tt.SetSize(homeW, homeTallH)
+	homeFrame(tt)
+	clickTab(t, tt, homePopTab)
+	homeFrame(tt)
+
+	if got, want := s.home.newGrid.cols, newMusicColsFor(homeW); got != want {
+		t.Errorf("1200 宽时这一块摆 %d 列，want %d 列（上游按窗口宽分档）", got, want)
+	}
+	if got, want := cardsOnPage(t, tt, "新歌"), 10; got != want {
+		t.Errorf("默认窗口下这一页画着 %d 张卡片，want %d 张（上游 5 列 × 2 行）", got, want)
+	}
+	// 第十张也要真的画出来（不只是数对了）。
+	if r, ok := tt.Find(songName("新歌", 10)); !ok || r.W == 0 {
+		t.Errorf("第十张卡片没画出来，文字有 %q", tt.Texts())
+	}
+}
+
+// TestResizingTheWindowChangesTheColumnsNotTheRows 钉住「改窗口**宽度**，列数跟着
+// 换；改窗口**高度**，行数一个都不许动」。
+//
+// ⚠️ 上游的列数断点量的是**窗口宽**（`new-music-top.tsx:135` 的 `window.innerWidth`，
+// 网格那几列是 Tailwind 的视口断点 `:209`）——所以同一个窗口宽度下，我们摆几列和
+// 上游一样。
+//
+// ⚠️ 这一条是**单独**的用例：它断的是「这一块早就在画了，用户这时才拖窗口边」，
+// 而上面那几条是「先切到流行、再改窗口」。把窗口宽记进字段（`windowW`）的话这里
+// 立刻红——记的是 1200，用户拖到 900 之后还是五列，而上游在 900 宽上是四列。
+func TestResizingTheWindowChangesTheColumnsNotTheRows(t *testing.T) {
+	s, tt := newHome(t, fullSongs())
 	homeFrame(tt)
 	clickTab(t, tt, homePopTab) // 先让这一块开始画
+	homeFrame(tt)
 
-	cols := newMusicColsFor(s.home.newGrid.width)
+	cols := s.home.newGrid.cols
+	if cols != newMusicColsFor(homeW) {
+		t.Fatalf("1200 宽时这一块摆 %d 列，want %d 列（上游按窗口宽分档）",
+			cols, newMusicColsFor(homeW))
+	}
 	if got := cardsOnPage(t, tt, "新歌"); got != cols*newMusicRows {
 		t.Fatalf("拖之前这一页画着 %d 张卡片，want %d 列 × %d 行",
 			got, cols, newMusicRows)
 	}
-	assertFirstListRowFull(t, tt, homeTallH)
 
-	// 往下拖：矮到放不下两行，列表的第一行还得是完整的。
+	// 往下拖：高度变了，行数一个都不许变。
 	tt.SetSize(homeW, 560)
 	homeFrame(tt)
-	if got := cardsOnPage(t, tt, "新歌"); got != cols {
-		t.Errorf("拖矮之后这一页画着 %d 张卡片，want 一行（%d 列）", got, cols)
-	}
-	assertFirstListRowFull(t, tt, 560)
-
-	// 再拖回去：两行回来了，列表照样完整。
-	tt.SetSize(homeW, homeTallH)
-	homeFrame(tt)
 	if got := cardsOnPage(t, tt, "新歌"); got != cols*newMusicRows {
-		t.Errorf("拖回来之后这一页画着 %d 张卡片，want %d 列 × %d 行",
+		t.Errorf("拖矮之后这一页画着 %d 张卡片，want %d 列 × %d 行（行数不跟高度走）",
 			got, cols, newMusicRows)
 	}
-	assertFirstListRowFull(t, tt, homeTallH)
+
+	// 往窄里拖：宽度变了，列数跟着换（上游的断点：900 宽 → 四列）。
+	tt.SetSize(900, homeH)
+	homeFrame(tt)
+	want := newMusicColsFor(900)
+	if got := s.home.newGrid.cols; got != want {
+		t.Errorf("拖窄之后这一块摆 %d 列，want %d 列（上游按窗口宽分档）", got, want)
+	}
+	if got := cardsOnPage(t, tt, "新歌"); got != want*newMusicRows {
+		t.Errorf("拖窄之后这一页画着 %d 张卡片，want %d 列 × %d 行",
+			got, want, newMusicRows)
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -313,7 +328,7 @@ func TestShrinkingTheSongsBringsThePageBack(t *testing.T) {
 // TestNoSongsSaysSoAndHidesThePager 验空状态：照上游那句「暂无数据」，并且**整个
 // 翻页那一块都不画**。
 //
-// ⚠️ 上游空的时候画的是「1 / 0」加两个转不动的箭头（`new-music-top.tsx:181-199`
+// ⚠️ 上游空的时候画的是「1 / 0」加两个转不动的箭头（`new-music-top.tsx:182-199`
 // 只在 `newLoading` 的时候藏）。空网格上摆一个 1 / 0，用户只会以为界面坏了，所以
 // 这里藏掉——这一条是本项目自己的取舍，不是照抄，出处写在 viewHeader 上。
 func TestNoSongsSaysSoAndHidesThePager(t *testing.T) {
@@ -442,9 +457,10 @@ func TestANewMusicCardShowsTheCoverTheTitleAndTheOwner(t *testing.T) {
 
 // TestTheCoverStaysSquareAtTheMinimumWindowHeight 钉住最小窗口那一档的封面。
 //
-// 1200×560（`WindowOptions` 的 `MinHeight`）时，整宽 231 的封面 + 顶栏 / Tab /
-// 播放条会把下面的列表挤成 0×0，所以 `newMusicCoverSide` 把它压到 108。**压小之后
-// 它必须还是方的**——票面的判据是「宽高相等」，不是「一定占满格子」。
+// 1200×560（`WindowOptions` 的 `MinHeight`）时这一块比视口高（上游那样：它只量
+// 宽度、不量高度），但**封面仍然是方的**——它是格子的宽（上游 `:225` 的
+// `aspect-square w-full`），不因为窗口矮就压小。判据是「宽高相等」，不是
+// 「一定占满格子」。
 func TestTheCoverStaysSquareAtTheMinimumWindowHeight(t *testing.T) {
 	_, tt := newHome(t, fullSongs())
 	tt.SetSize(homeW, 560)
@@ -487,7 +503,7 @@ func TestASongWithoutAnOwnerDoesNotDrawOne(t *testing.T) {
 }
 
 // TestClickingANewMusicCardQueuesExactlyThatSong 验点一下那一格会做的事：**放
-// 这一首**（上游 `new-music-top.tsx:22-36` 的 `handlePlay` 走
+// 这一首**（上游 `new-music-top.tsx:38-52` 的 `handlePlay` 走
 // `usePlayList.play({…})`，追加这一首并立即播），不是「从它往后」。
 //
 // 判据是**真的被要求放的那几项**，不是「调了哪个函数」。
@@ -581,7 +597,7 @@ func TestHoveringANewMusicCardShowsThePlayButtonTheGradientAndTheAccentTitle(t *
 		t.Fatalf("指针还没移上去，卡片上就有播放钮了：%q", tt.Texts())
 	}
 
-	side := newMusicCoverSide(900, newMusicCellWidth(800, newMusicColsFor(800)))
+	side := newMusicCellWidth(800, newMusicColsFor(800))
 	// 封面底边往上留一点，避开圆角；横向取中间，避开右下角那个播放钮。
 	px := int(card.X + side/2)
 	py := int(card.Y + side - 4)
