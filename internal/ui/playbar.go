@@ -1151,7 +1151,7 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 			// ⚠️ **光圈只在这一枚不是灰的时候画**：框架对禁用的控件整个乘
 			// 0.5 不透明度（理由见 loadhalo.go）。
 			b = s.withLoadHalo(c, b, st, iconHitPlay, true)
-			if s.withTip(c, b, "暂停").Clicked() {
+			if b.Clicked() {
 				s.app.Toggle()
 			}
 		} else {
@@ -1160,7 +1160,7 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 			// 一枚禁用的键会用主色告诉用户「这里点得动」（理由见那个函数）。
 			b := iconButtonPlay(c, iconPlayFill, "播放", iconHitPlay, iconPlayBtn, !st.HasTrack)
 			b = s.withLoadHalo(c, b, st, iconHitPlay, st.HasTrack)
-			if s.withTip(c, b, "播放").Clicked() {
+			if b.Clicked() {
 				s.app.Toggle()
 			}
 		}
@@ -1323,8 +1323,8 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 func (s *Shell) viewPrevButton(c *ui.Context) { s.viewPrevButtonOn(c, flat.ThemeBase) }
 
 func (s *Shell) viewPrevButtonOn(c *ui.Context, base flat.Base) {
-	if s.withTip(c, iconKeyOnBase(c, iconPrev, "上一首", iconSkip, !s.app.CanPrev(), base).
-		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px5), "上一首").Clicked() {
+	if iconKeyOnBase(c, iconPrev, "上一首", iconSkip, !s.app.CanPrev(), base).
+		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px5).Clicked() {
 		s.app.Prev()
 	}
 }
@@ -1332,8 +1332,8 @@ func (s *Shell) viewPrevButtonOn(c *ui.Context, base flat.Base) {
 func (s *Shell) viewNextButton(c *ui.Context) { s.viewNextButtonOn(c, flat.ThemeBase) }
 
 func (s *Shell) viewNextButtonOn(c *ui.Context, base flat.Base) {
-	if s.withTip(c, iconKeyOnBase(c, iconNext, "下一首", iconSkip, !s.app.CanNext(), base).
-		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px5), "下一首").Clicked() {
+	if iconKeyOnBase(c, iconNext, "下一首", iconSkip, !s.app.CanNext(), base).
+		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px5).Clicked() {
 		s.app.Next()
 	}
 }
