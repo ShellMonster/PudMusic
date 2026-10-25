@@ -95,7 +95,7 @@ func (p *localPage) deleteTrack(tr localmusic.Track) {
 // 操作
 // ─────────────────────────────────────────────────────────────────────────────
 
-// playAll 从当前筛选出来的第一首开始播，把整批接进队列（Biu 的 `playAll`）。
+// playAll 从当前筛选出来的第一首开始播，把队列**换成**整批（Biu 的 `playAll`）。
 func (p *localPage) playAll() {
 	if len(p.rows) == 0 {
 		return
@@ -103,7 +103,7 @@ func (p *localPage) playAll() {
 	p.playRow(0)
 }
 
-// playRow 从第 i 首往后接进队列并开始播。
+// playRow 把队列换成第 i 首往后的那一段并从第 i 首开始播。
 func (p *localPage) playRow(i int) {
 	if i < 0 || i >= len(p.rows) {
 		return
