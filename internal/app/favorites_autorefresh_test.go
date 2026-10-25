@@ -285,6 +285,57 @@ func TestLoggingOutClearsTheFavorites(t *testing.T) {
 	}
 }
 
+// TestTheSidebarRowsCarryTheCoverAndTheCount 钉住**封面和数量真的到了侧栏**。
+//
+// ⚠️ **封面不许另发请求**：它和数量都是那两个列表接口本来就给的那两格
+// （`created/list` 和 `collected/list` 的 `list[].cover` / `media_count`），
+// 所以这一条验的是「读的是同一份返回」——每行另发一次就是 N 次网络往返
+// （票 #270）。
+//
+// ⚠️ **「我收藏的」那一组的封面是原主人的**：那一组里的收藏夹全是别人的，
+// 而 B 站给的就是那个收藏夹自己的封面——不是收藏它的人的封面。
+func TestTheSidebarRowsCarryTheCoverAndTheCount(t *testing.T) {
+	f := newBiliFixture(t)
+	hits := &favHits{}
+	onFavList(t, f, hits, []map[string]any{
+		{"id": 11, "title": "夏日午后", "attr": 0, "media_count": 32,
+			"cover": "http://i0.hdslb.com/bfs/album/mine.jpg"},
+	}, false)
+	onFavCollected(t, f, hits, []map[string]any{
+		{"id": 900, "title": "入站必刷", "mid": 77, "type": 11, "state": 0, "media_count": 55,
+			"cover": "http://i0.hdslb.com/bfs/album/other.jpg"},
+	}, false)
+
+	a := favApp(t, f, favStore(t, "7"))
+	a.AutoRefreshFavorites()
+
+	waitFor(t, waitTimeout, "两组都拉回来了", func() bool {
+		return len(a.SideFavorites(app.FavoritesCreated)) == 1 &&
+			len(a.SideFavorites(app.FavoritesCollected)) == 1
+	})
+
+	created := a.SideFavorites(app.FavoritesCreated)[0]
+	if created.Cover != "http://i0.hdslb.com/bfs/album/mine.jpg" {
+		t.Errorf("「我创建的」那一行的封面是 %q，want mine.jpg", created.Cover)
+	}
+	if created.MediaCount != 32 {
+		t.Errorf("「我创建的」那一行的数量是 %d，want 32", created.MediaCount)
+	}
+	collected := a.SideFavorites(app.FavoritesCollected)[0]
+	if collected.Cover != "http://i0.hdslb.com/bfs/album/other.jpg" {
+		t.Errorf("「我收藏的」那一行的封面是 %q，want other.jpg（那是原主人的那张）",
+			collected.Cover)
+	}
+	if collected.MediaCount != 55 {
+		t.Errorf("「我收藏的」那一行的数量是 %d，want 55", collected.MediaCount)
+	}
+	// ⚠️ **请求数不许因为封面而多**：两组各一次列表请求就够——封面和数量是
+	// 同一份返回里的两格。
+	if got := hits.count(); got != 2 {
+		t.Errorf("这一趟发了 %d 次列表请求，want 2（封面是同一份返回里的，不另发）", got)
+	}
+}
+
 // TestTheCollectedFoldersShowUpInTheSidebar 钉住「我收藏的」那一组有源了。
 //
 // 这一条是这一票的后一半：B 站「我收藏了别人的哪些收藏夹」那个接口**是有的**

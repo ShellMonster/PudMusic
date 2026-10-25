@@ -56,6 +56,16 @@ type CollectedFolder struct {
 	// ID 是这个容器的完整 id（收藏夹的 mlid / 合集的 season_id）。
 	ID    int64
 	Title string
+	// Cover 是这个容器的封面地址（可能是协议相对地址，界面层再补协议头）。
+	//
+	// ⚠️ **它是这个接口本来就给的一格**，不是另外发一次请求问来的
+	// （`collected/list` 的 `list[].cover`）——侧栏那一行要画封面，而每行多发
+	// 一次请求就是 N 次网络往返（票 #270）。
+	//
+	// ⚠️ **它是「原主人」的那张封面**：这一组里的收藏夹全是别人的
+	// （见 Mid 的注释），而 B 站给的就是那个收藏夹自己的封面——不是收藏它
+	// 的人的封面，也不是我们的。空串 = 那边没有封面（画占位）。
+	Cover string
 	// Mid 是这个容器**属于谁**——收藏夹主人的 mid。
 	//
 	// ⚠️ **它是主人的 mid，不是收藏的人的**：跳 `/collection/{id}?mid=` 要的
@@ -64,6 +74,9 @@ type CollectedFolder struct {
 	// Type 是哪一类容器：收藏夹 11 / 合集 21 / 系列 31。
 	Type int
 	// MediaCount 是里面有几个内容。
+	//
+	// ⚠️ **它是 B 站上次统计的数字，不是实时的**（票 #270 的验收标准）——
+	// 用户在 B 站网页上刚加了一首，这边要等下一次刷新才数得对。那不是 bug。
 	MediaCount int
 }
 
@@ -99,6 +112,7 @@ func (c *Client) CollectedFolders(ctx context.Context, upMid int64, page int) ([
 		List  []struct {
 			ID         int64  `json:"id"`
 			Title      string `json:"title"`
+			Cover      string `json:"cover"`
 			Mid        int64  `json:"mid"`
 			Type       int    `json:"type"`
 			State      int    `json:"state"`
@@ -117,7 +131,7 @@ func (c *Client) CollectedFolders(ctx context.Context, upMid int64, page int) ([
 			continue
 		}
 		out = append(out, CollectedFolder{
-			ID: f.ID, Title: f.Title, Mid: f.Mid,
+			ID: f.ID, Title: f.Title, Cover: f.Cover, Mid: f.Mid,
 			Type: collectedType(f.Type), MediaCount: f.MediaCount,
 		})
 	}
