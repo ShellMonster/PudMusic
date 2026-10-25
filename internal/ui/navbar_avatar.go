@@ -63,6 +63,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -422,7 +423,7 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 		//
 		// ⚠️ hover 要在 Children **之前**问（理由同 `widgets/list` 的 grid.go）。
 		on := hit.Hovered()
-		hit = hoverZoom(c, hit, "avatar-zoom", on)
+		hit = motion.HoverZoom(hit, "avatar-zoom", on)
 		// 🔴 **悬停时头像外面多一圈主色的环**（票 BMG-253）：放大 5% 是这一排里
 		// **最弱**的反馈——一个 18 像素的圆涨到 19 像素，指针压上去几乎看不出
 		// 区别，而这一格是顶栏里唯一的「个人入口」。

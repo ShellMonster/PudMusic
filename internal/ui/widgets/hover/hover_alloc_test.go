@@ -187,6 +187,13 @@ func TestTheCoverIdentitiesAreDistinctPerKind(t *testing.T) {
 		t.Errorf("列表行那一圈的身份重了（%v / %v / %v）——"+
 			"压暗、三角和淡入动画各自要一个", row.dim, row.tri, row.fade)
 	}
+	// ⚠️ **同一个节点上的两个动画键不能重**：那一枚三角上叠着两档缩放
+	//（「弹出来」和「指针停在上面时长大」），键重了就是它们共用一份动画状态，
+	// 于是「弹出来」的时候它就长到 110% 了。
+	if row.pop == row.grow {
+		t.Errorf("列表行那枚三角上的两档缩放用了同一个键（%v）——"+
+			"「弹出来」和「停在上面长大」得各走各的动画", row.pop)
+	}
 }
 
 // TestTheCoverIdentitiesAreTheOnesTheOldCodeBuilt 钉住「身份的值**本身**」
@@ -215,6 +222,15 @@ func TestTheCoverIdentitiesAreTheOnesTheOldCodeBuilt(t *testing.T) {
 	oldCard := func(label string) (bar, fade, btn string) {
 		return label + ":bar", label + ":fade", label + ":btn"
 	}
+	// ⚠️ **后面加的那几样（缩放那一族）也写死在这里**：它们的键一样是
+	// 「标签 + 后缀」，而键一变就是另一个节点——动画的状态跟着重来（放大变成
+	// 「啪」地一下出现）。
+	oldRowZoom := func(label string) (pop, grow string) {
+		return label + ":pop", label + ":grow"
+	}
+	oldCardZoom := func(label string) (zoom, pop string) {
+		return label + ":zoom", label + ":pop"
+	}
 
 	// ⚠️ **歌名取样含空串和重复歌名**：空串是「这一首歌没有名字」（标签就只剩
 	// 那半句），重复歌名是两张列表里同名的两首（它们要拿到**同一套**身份，
@@ -229,6 +245,9 @@ func TestTheCoverIdentitiesAreTheOnesTheOldCodeBuilt(t *testing.T) {
 		assertSame(t, "列表行压暗那一层的键", row.dim, wantDim)
 		assertSame(t, "列表行淡入动画的键", row.fade, wantFade)
 		assertSame(t, "列表行三角那一层的键", row.tri, wantTri)
+		wantPop, wantGrow := oldRowZoom(wantLabel)
+		assertSame(t, "列表行「弹出来」那一层的键", row.pop, wantPop)
+		assertSame(t, "列表行「停在上面长大」那一层的键", row.grow, wantGrow)
 
 		card := idsOf(title, idsCard)
 		assertSame(t, "卡片的无障碍名字", card.label, wantLabel)
@@ -236,6 +255,9 @@ func TestTheCoverIdentitiesAreTheOnesTheOldCodeBuilt(t *testing.T) {
 		assertSame(t, "卡片渐变条的键", card.bar, wantBar)
 		assertSame(t, "卡片淡入动画的键", card.fade, wantCardFade)
 		assertSame(t, "卡片播放钮的键", card.btn, wantBtn)
+		wantZoom, wantCardPop := oldCardZoom(wantLabel)
+		assertSame(t, "卡片封面放大那一层的键", card.zoom, wantZoom)
+		assertSame(t, "卡片「弹出来」那一层的键", card.pop, wantCardPop)
 
 		one := idsOf(title, idsCardOne)
 		wantOneLabel := title + " " + PlayNow
@@ -244,6 +266,9 @@ func TestTheCoverIdentitiesAreTheOnesTheOldCodeBuilt(t *testing.T) {
 		assertSame(t, "「只放这一首」那张卡的渐变条的键", one.bar, wantBar)
 		assertSame(t, "「只放这一首」那张卡的淡入动画的键", one.fade, wantCardFade)
 		assertSame(t, "「只放这一首」那张卡的播放钮的键", one.btn, wantBtn)
+		wantZoom, wantCardPop = oldCardZoom(wantOneLabel)
+		assertSame(t, "「只放这一首」那张卡封面放大那一层的键", one.zoom, wantZoom)
+		assertSame(t, "「只放这一首」那张卡「弹出来」那一层的键", one.pop, wantCardPop)
 	}
 }
 
