@@ -1,4 +1,15 @@
-// 「指针移上去放大一点」那一层：三处共用。
+// 「指针移上去放大一点」那一层：全应用共用。
+//
+// # 它住在哪个包，为什么
+//
+// 这一层原来在 `internal/ui/hoverzoom.go`（**package ui**），而封面是
+// `internal/ui/widgets/hover`（**package hover**）画的——`internal/ui` import 了
+// `widgets/hover`，反过来 import 会成环，而封面那个 `ui.Element` 调用方又拿不到。
+// 所以它**下沉到 `widgets/motion`**：那个包只 import `github.com/egoist/mygo/ui`，
+// 两边都已经 import 它（`widgets/hover` 的 import 里有它，`internal/ui` 也有）。
+//
+// ⚠️ **值仍然只有一处**（倍数、时长、曲线都在下面这个文件里）：另起一套
+// （1.04 / `Unified` 之类）会让「同一个应用里两种放大手感」。
 //
 // # 上游只有三处
 //
@@ -9,6 +20,9 @@
 // 三处的类名都是 `hover:scale-105`（网格那一处还带 `transition-transform
 // duration-300`），所以**倍数和时长只有一套**——写三遍就会漂开，而漂开的那一处
 // 在画面上只是「这一块好像没那么活」。
+//
+// **我们比上游多接了几处**（网格卡 / 歌单卡 / 新歌速递 / 历史记录 / 稍后再看那
+// 几档的封面，QQ音乐 那一侧对应的是它的「封面模块」）：用的是**同一套值**。
 //
 // # 为什么用 transform 而不是改尺寸
 //
@@ -28,7 +42,7 @@
 //   - 那一格**每一帧都要重建**（不能是「指针不在就不建」——那样节点每帧都是新的，
 //     动画直接给到终点，放大变成「啪」地一下出现，见 `widgets/hover` 的文件头）；
 //   - **身份要稳定**：给一个自己的 key，别靠「父 ID + 兄弟序号」。
-package ui
+package motion
 
 import (
 	"time"
@@ -37,13 +51,13 @@ import (
 )
 
 const (
-	// hoverZoomScale 是放大到的倍数。**105%**，抄上游那三处。
+	// HoverZoomScale 是放大到的倍数。**105%**，抄上游那三处。
 	//
 	// ⚠️ 不是 110%：110% 是**列表行**那个播放三角的（上游
 	// `music-list-item/index.tsx:105` 的 `group-hover:scale-110`），两处别混。
-	hoverZoomScale = 1.05
+	HoverZoomScale = 1.05
 
-	// hoverZoomTime 是放大的时长。**300 毫秒**——上游网格那一处写的是
+	// HoverZoomTime 是放大的时长。**300 毫秒**——上游网格那一处写的是
 	// `duration-300`（`user-profile/grid-card/index.tsx:26`）。
 	//
 	// 另两处没写时长，走的是 Tailwind `transition-transform` 的默认那一档
@@ -51,12 +65,12 @@ const (
 	//
 	// ⚠️ **那条曲线不是 `ui.EaseInOut`**：实算（同一个 mygo v0.6.3）——
 	// t=0.25 时上游那条走 23.7%、`ui.EaseInOut` 只走 6.3%；t=0.5 时是
-	// 77.6% 对 50.0%。**差得很远**（这条由 `hoverzoom_test.go` 的
+	// 77.6% 对 50.0%。**差得很远**（这条由 `internal/ui/hoverzoom_test.go` 的
 	// `TestTheHoverZoomCurveIsNotTheUpstreamOne` 钉着）。
-	hoverZoomTime = 300 * time.Millisecond
+	HoverZoomTime = 300 * time.Millisecond
 )
 
-// hoverZoom 给 e 装上「指针在它上面就放大到 105%」这一层，返回同一个元素。
+// HoverZoom 给 e 装上「指针在它上面就放大到 105%」这一层，返回同一个元素。
 //
 // on 是**这一帧**指针在不在它上面。key 是这一格的身份：**每一处都要给自己的**
 // ——两处用同一个 key 的话它们会共用一份动画状态（一个放大另一个跟着放大）。
@@ -77,14 +91,9 @@ const (
 // ⚠️ **我们这条也不是上游那条**：上游那两处没写时长，走的是 Tailwind
 // `transition-transform` 的默认档 `cubic-bezier(0.4, 0, 0.2, 1)`，而我们用的是
 // `ui.EaseInOut`（框架那条对称三次曲线）——**两者差得很远**（t=0.5 时 77.6% 对
-// 50.0%，见上面 `hoverZoomTime` 那一段）。**这是一个已知偏离**：票 #292 裁决
+// 50.0%，见上面 `HoverZoomTime` 那一段）。**这是一个已知偏离**：票 #292 裁决
 // 这一处不动（理由如上），但要「精确复刻上游」的话写的是
 // `ui.CubicBezier(0.4, 0, 0.2, 1)`，**观感会明显不一样**。
-func hoverZoom(c *ui.Context, e ui.Element, key string, on bool) ui.Element {
-	target := float32(1)
-	if on {
-		target = hoverZoomScale
-	}
-	v := e.AnimateWith(key, target, hoverZoomTime, ui.EaseInOut)
-	return e.Scale(v, v)
+func HoverZoom(e ui.Element, key any, on bool) ui.Element {
+	return zoomTo(e, key, on, HoverZoomScale, 1, HoverZoomTime, ui.EaseInOut)
 }
