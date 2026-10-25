@@ -28,7 +28,15 @@ import (
 // shotTester 造一个只画播放条的外壳（装应用的主题），喂一份手摆的状态。
 func shotTester(t *testing.T, st app.State, dark bool) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	b := newTestShell(t, at(1200, coverWinH), systemIsDark(dark),
+	return shotTesterPreset(t, st, dark, app.ThemePresetWarmPaper)
+}
+
+// shotTesterPreset 造一个只画播放条的外壳，用**指定的主题方案**。
+func shotTesterPreset(t *testing.T, st app.State, dark bool, preset app.ThemePreset) (*Shell, *mygoui.Tester) {
+	t.Helper()
+	settings := app.DefaultSettings("")
+	settings.ThemePreset = preset
+	b := newTestShell(t, at(1200, coverWinH), systemIsDark(dark), withSettings(settings),
 		withView(func(s *Shell) func(*mygoui.Context) {
 			return func(c *mygoui.Context) {
 				s.wake.set(c)
@@ -98,6 +106,16 @@ func TestRenderLoadHaloShots(t *testing.T) {
 
 			// 迷你播放器那一枚（24 的实心圆，最小的一枚）。
 			saveHaloCrop(t, dir, "04-迷你窗-取流光圈-"+name+".png", miniHaloTester(t, st), 0, 0, 80, 60)
+
+			// **另外两套主题方案**各看一眼（暖纸·赤陶是默认的那一套，
+			// 上面几张就是它）：光圈是 `t.Accent`，而强调色**逐套不同**——
+			// 所以每一套都要看得出「那一圈光还在」。
+			for _, preset := range []app.ThemePreset{app.ThemePresetDuskAmber, app.ThemePresetClassic} {
+				_, pt := shotTesterPreset(t, st, dark, preset)
+				pt.Advance(350 * time.Millisecond)
+				pt.Frame()
+				saveHaloCrop(t, dir, "05-播放条-取流光圈-"+string(preset)+"-"+name+".png", pt, 540, 0, 120, 76)
+			}
 		})
 	}
 }
