@@ -1060,11 +1060,129 @@ func TestTheSmallCopyHasAFixedLineHeight(t *testing.T) {
 	}
 }
 
-// smallCopyHasLineHeight 报那个文件里那一句字有没有调 `LineHeight(want)`。
+// copyValueKind 是「一行小字的排版值」的两族。
+type copyValueKind uint8
+
+const (
+	// copyFontSize 是**字号**那一族：值是 `scale.Font(c, want)`（一个调用）。
+	copyFontSize copyValueKind = iota
+	// copyLeading 是**行高**那一族：值是 `want` 自己（`leading.Copy`）。
+	copyLeading
+)
+
+// copyValueIs 报那个表达式是不是「want 那个排版值」。
 //
-// 找法：**一句**（一个 `ExprStmt`）里同时有 `ui.Text(...)`（认得出是那一行字）
-// 和 `LineHeight(...)`（认得出调的是哪个数）——所以不用顺着调用链往上爬。
-func smallCopyHasLineHeight(t *testing.T, file, key, want string) bool {
+// ⚠️ **两族的形状不一样**：字号是 `scale.Font(c, want)`（**一个调用**，第二个
+// 参数是 want），行高是 `leading.Copy`（**一个选择器**，末段名就是 want）。
+func copyValueIs(e ast.Expr, want string, kind copyValueKind) bool {
+	switch kind {
+	case copyFontSize:
+		call, ok := e.(*ast.CallExpr)
+		if !ok || len(call.Args) != 2 {
+			return false
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Font" {
+			return false
+		}
+		return mentionsIdent(call.Args[1], want)
+	case copyLeading:
+		sel, ok := e.(*ast.SelectorExpr)
+		return ok && sel.Sel.Name == want
+	}
+	return false
+}
+
+// stmtCalls 列出**这一句**里的那些调用（**不进函数体**）。
+//
+// ⚠️ **不进函数体**是这一族判据的关键：MyGo 的每一个元素的孩子都写在一个
+// `Children(func(){ ... })` 里面，而那个函数体里是**别的语句**（别的行字）。
+// 顺着函数体走的话，「简介那一行用的是 `LineHeight(Copy)`」会把「创建者那一行」
+// 一起放过去——判据就等于没有。
+//
+// （这条是票 BMG-253 的评审逼出来的：那一族判据**原来**就是顺着函数体走的，
+// 所以「创建者那一行」换成 `list.OwnerName` 之后它靠**别的那一行**的字通过了。）
+func stmtCalls(stmt ast.Expr) []*ast.CallExpr {
+	var out []*ast.CallExpr
+	var walk func(ast.Expr)
+	walk = func(e ast.Expr) {
+		switch v := e.(type) {
+		case *ast.CallExpr:
+			out = append(out, v)
+			for _, arg := range v.Args {
+				if _, ok := arg.(*ast.FuncLit); ok {
+					continue
+				}
+				walk(arg)
+			}
+			walk(v.Fun)
+		case *ast.SelectorExpr:
+			// ⚠️ **顺着接收者链往下**：`ui.Text(...).FontSize(...)` 那一串在
+			// AST 里是「一个选择器的 X 是上一个调用」——不往下走就只看得到
+			// 链的**最后一环**（`AlignSelf`），链上其余那些都看不见。
+			walk(v.X)
+		case *ast.FuncLit:
+			return
+		}
+	}
+	walk(stmt)
+	return out
+}
+
+// chainHasCall 报 target 在不在 e 那条**接收者链**上。
+//
+//	ui.Text(...).FontSize(...).LineHeight(...)
+//	         ^target      ^ 这个链的底
+//
+// 判据是**链上的某一环**——不是「同一个函数体里的别处」。
+func chainHasCall(e ast.Expr, target *ast.CallExpr) bool {
+	for {
+		switch v := e.(type) {
+		case *ast.CallExpr:
+			if v == target {
+				return true
+			}
+			e = v.Fun
+		case *ast.SelectorExpr:
+			e = v.X
+		default:
+			return false
+		}
+	}
+}
+
+// copyUsesValue 报那个文件里那一行字有没有用上 want 那个排版值。
+//
+// # 判据是「**那一行字自己**接上了那个值」
+//
+//   - **自己调**：`ui.Text(...).FontSize(scale.Font(c, want))` —— 值挂在**那一句
+//     字自己的链**上。
+//   - **传进去**：值是**画那一行字的那一句的参数**（`list.OwnerName` 那一档：
+//     字号和行高都是它的参数）。
+//
+// ⚠️ **不许顺着函数体往里走**（理由见 `stmtCalls`）。
+//
+// # 四种画法都要认（缺一种就会在仓库里留下一条确定性的红）
+//
+//	字号 · 自己调	FontSize(scale.Font(c, want))
+//	字号 · 传进去	scale.Font(c, want)      ← 交给 list.OwnerName 画的那一行
+//	行高 · 自己调	LineHeight(want)
+//	行高 · 传进去	leading.Copy             ← 同上
+//
+// ⚠️ **「自己调」和「传进去」的区别只在那个调用在不在**，值本身是同一个表达式。
+//
+// # 为什么两种都要认（票 BMG-253 的评审抓到的那一条）
+//
+// 收藏夹头图区那个「创建者」的名字改走 `list.OwnerName`（和列表里的 UP 名同一枚）
+// 之后，字号和行高从「外面一个 `FontSize(...)` / `LineHeight(...)` 调用」变成了
+// 「**传进去的两个参数**」。只认「自己调」的那一族时，仓库里留下一条
+// **确定性的红**（`TestTheSmallCopyHasAFixedLineHeight`）——而那种红只有整包
+// `internal/ui` 才看得见（默认验收命令**不带**那个包，AGENTS.md §1）。
+//
+// ⚠️ **这一族的两条判据必须一起改**：字号（`textUsesFontSize`）和行高
+// （`smallCopyHasLineHeight`）是同一件事的两半——它们**共用这一个函数**，所以
+// 不会再有「改了字号忘了行高」这种事。
+func copyUsesValue(t *testing.T, file, key, want string, kind copyValueKind) bool {
 	t.Helper()
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, file, nil, 0)
@@ -1077,43 +1195,63 @@ func smallCopyHasLineHeight(t *testing.T, file, key, want string) bool {
 		if !ok {
 			return true
 		}
-		hasText, hasLeading := false, false
-		ast.Inspect(stmt, func(m ast.Node) bool {
-			call, ok := m.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
+		calls := stmtCalls(stmt.X)
+		// 「画那一行字」的那一句调用。
+		//
+		// ⚠️ **「画字」有两个出口**（票 BMG-253）：直接画（`ui.Text`）或者交给
+		// 列表那个出口画（`list.OwnerName`——收藏夹头图区的创建者名字走的是它，
+		// 和列表里的 UP 名同一枚）。
+		var textCall *ast.CallExpr
+		for _, call := range calls {
 			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return true
+			if !ok || (sel.Sel.Name != "Text" && sel.Sel.Name != "OwnerName") {
+				continue
 			}
-			switch sel.Sel.Name {
-			case "Text":
-				// ⚠️ **看的是所有参数**：第一个是 `c`（那个上下文），字在后面。
-				for _, arg := range call.Args {
-					if exprKey(arg) == key {
-						hasText = true
-					}
-				}
-			case "LineHeight":
-				if len(call.Args) == 1 {
-					// ⚠️ **认包名限定的那种写法**（`leading.Copy`）：行高的
-					// 出处现在是 `widgets/leading` 那张表，代码里写的是
-					// `leading.Copy`——那是一个 `*ast.SelectorExpr`，
-					// 只认 `*ast.Ident` 的话这个判据会**静默地永远不成立**。
-					if mentionsIdent(call.Args[0], want) {
-						hasLeading = true
-					}
+			for _, arg := range call.Args {
+				if exprKey(arg) == key {
+					textCall = call
+					break
 				}
 			}
+			if textCall != nil {
+				break
+			}
+		}
+		if textCall == nil {
 			return true
-		})
-		if hasText && hasLeading {
-			found = true
+		}
+		// ① 「传进去」：值是**画字那一句的参数**。
+		for _, arg := range textCall.Args {
+			if copyValueIs(arg, want, kind) {
+				found = true
+			}
+		}
+		// ② 「自己调」：值挂在**那一句字自己的链**上。
+		for _, call := range calls {
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || (sel.Sel.Name != "FontSize" && sel.Sel.Name != "LineHeight") {
+				continue
+			}
+			if !chainHasCall(call, textCall) {
+				continue
+			}
+			for _, arg := range call.Args {
+				if copyValueIs(arg, want, kind) {
+					found = true
+				}
+			}
 		}
 		return true
 	})
 	return found
+}
+
+// smallCopyHasLineHeight 报那个文件里那一句字有没有用 `leading.Copy` 那个行高。
+//
+// 找法见 `copyUsesValue`（四种画法都在那儿）。
+func smallCopyHasLineHeight(t *testing.T, file, key, want string) bool {
+	t.Helper()
+	return copyUsesValue(t, file, key, want, copyLeading)
 }
 
 // exprKey 把一个表达式变成一个能认出来的键。
@@ -1304,92 +1442,13 @@ func TestTheCollectionHeaderCopyIsFourteen(t *testing.T) {
 	}
 }
 
-// textUsesFontSize 报那个文件里那一句 `ui.Text` 有没有用
-// `FontSize(scale.Font(c, want))`。
+// textUsesFontSize 报那个文件里那一句字有没有用 `scale.Font(c, want)` 那个字号。
 //
-// 找法同 `smallCopyHasLineHeight`：在**一个表达式语句**里同时看到那个 `ui.Text`
-// 和那个 `FontSize`，不用顺着调用链往上爬。
-//
-// ⚠️ **它认两种画法**（票 BMG-253）：一行字可以**直接画**（`ui.Text` + 一个
-// `FontSize(...)` 调用），也可以**交给另一个出口画**——收藏夹头图区那个创建者
-// 名字走的是 `list.OwnerName`（它和列表里的 UP 名是同一枚，票 BMG-253 要的
-// 就是这个「同一套」），而那一档的字号是**传进去的** `scale.Font(c, …)`，
-// 不是外面一个 `FontSize(...)` 调用。
+// 找法见 `copyUsesValue`（四种画法都在那儿——「直接画」和「交给
+// `list.OwnerName` 画」各两种）。
 func textUsesFontSize(t *testing.T, file, key, want string) bool {
 	t.Helper()
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, file, nil, 0)
-	if err != nil {
-		t.Fatalf("解析 %s 失败：%v", file, err)
-	}
-	found := false
-	ast.Inspect(f, func(n ast.Node) bool {
-		stmt, ok := n.(*ast.ExprStmt)
-		if !ok {
-			return true
-		}
-		hasText, hasSize := false, false
-		ast.Inspect(stmt, func(m ast.Node) bool {
-			call, ok := m.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			switch sel.Sel.Name {
-			case "Text", "OwnerName":
-				// ⚠️ **「画这一行字」有两个出口**（票 BMG-253）：直接画
-				// （`ui.Text`）或者交给列表那个出口画（`list.OwnerName`——
-				// 收藏夹头图区的创建者名字走的是它，和列表里的 UP 名同一枚）。
-				for _, arg := range call.Args {
-					if exprKey(arg) == key {
-						hasText = true
-					}
-				}
-			case "FontSize":
-				if len(call.Args) == 1 {
-					if inner, ok := call.Args[0].(*ast.CallExpr); ok {
-						if fn, ok := inner.Fun.(*ast.SelectorExpr); ok &&
-							fn.Sel.Name == "Font" && len(inner.Args) == 2 {
-							// ⚠️ **认包名限定的那种写法**（`scale.CollectionCopy`）：
-							// 字号的出处现在是 `widgets/scale` 那张表，写的是
-							// `scale.CollectionCopy`——那是一个 `*ast.SelectorExpr`。
-							if mentionsIdent(inner.Args[1], want) {
-								hasSize = true
-							}
-						}
-					}
-				}
-			}
-			return true
-		})
-		// ⚠️ **字号也可能是「传进去的」**：交给 `list.OwnerName` 画的那一行，字号
-		// 是它的一个**参数**（`scale.Font(c, scale.CollectionCopy)`），而不是
-		// 外面一个 `FontSize(...)` 调用。
-		if hasText && !hasSize {
-			ast.Inspect(stmt, func(m ast.Node) bool {
-				call, ok := m.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok || sel.Sel.Name != "Font" || len(call.Args) != 2 {
-					return true
-				}
-				if mentionsIdent(call.Args[1], want) {
-					hasSize = true
-				}
-				return true
-			})
-		}
-		if hasText && hasSize {
-			found = true
-		}
-		return true
-	})
-	return found
+	return copyUsesValue(t, file, key, want, copyFontSize)
 }
 
 // TestTheCollectionHeaderStaysInsideTheCoverOnOneLine 钉住「一行标题时头图区那一列
