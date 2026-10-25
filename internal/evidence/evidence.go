@@ -456,6 +456,47 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// 票 #478：「`moov` 盒在文件末尾」的那个容器层修法。
+		//
+		// 🔴 **这一族的错法全是「静默」的**：末尾那一段取错了偏移（解出来是
+		// 噪声）、`moov` 在前面时还去取（白花一条请求）、不是 MP4 的文件被
+		// 当成 MP4（把错的字节写进缓存）——**没有一样会报错**。
+		//
+		// ⚠️ **判据是「形状」不是「毫秒」**：主下载卡在 64 KB 而解码器开口了
+		// （它拿到的是并行取回来的那个 `moov`），而「等了多久」那种判据在满载
+		// 的机器上会飘（AGENTS.md §2）。
+		Spec: "moov 在文件末尾时并行取回末尾那一段，解码不用等整个文件下完",
+		Tests: []string{
+			// 盒子走法（手造每一种形状）。
+			"TestTheTopLevelWalkFindsTheTrailingMoov",
+			"TestTheTopLevelWalkFindsTheMoovAtTheFront",
+			"TestTheTopLevelWalkGivesUpOnTheOtherShapes",
+			"TestTheTopLevelWalkHandlesTheSixtyFourBitSize",
+			"TestTheTopLevelWalkOnTheRealFixtures",
+			// 源那一层：末尾那一段是并行取回来的，而 `moov` 在前面时不取。
+			"TestTheTrailingMoovIsFetchedInParallel",
+			"TestTheTrailingMoovIsNotFetchedWhenItIsAlreadyAtTheFront",
+			// 整条链路：主下载没下完就能出声，而拿不到尾部时退回老样子。
+			"TestTheDecoderOpensBeforeTheWholeFileArrives",
+		},
+	},
+	{
+		Category: HTTP,
+		// 票 #478：冷启动那一段的分段计时。
+		//
+		// 🔴 **「慢」和「等人」必须分得开**：macOS 会在应用还没有窗口的时候弹
+		// 一个系统授权框，用户要点一下才继续——那一段的时长是**用户点的**，
+		// 不是我们慢。混进「冷启动一共多久」里，用户读到的是「应用慢」。
+		Spec: "冷启动分了段（零件挂好 / 应用就绪 / 首帧 / 第一次取流），钥匙串那一段单独一栏并说清是「等人」",
+		Tests: []string{
+			"TestTheStartupIsSplitIntoSegments",
+			"TestTheKeychainWaitIsNotCalledSlow",
+			"TestTheStartupEndsWhenTheFirstTrackSettles",
+			"TestTheStartupLineIsOnlyShownWhenThereIsNoTrack",
+		},
+	},
+	{
+		Category: HTTP,
 		// 音乐库（type=12 / sid）是**另一套接口、另一套档位编号**，连错误说明
 		// 那个字段都叫 `msg` 而不是 `message`。这一条钉的就是「形状别抄错」。
 		//
@@ -1350,6 +1391,11 @@ var Items = []Item{
 			"TestFriendlySaysTheFormatCannotBeDecoded",
 			"TestTheLogFileActuallyReceivesWhatIsLogged",
 			"TestTheLogFileIsAppendedTo",
+			// 票 #478：冷启动那一段界面上也有一句话（而「还没有打开文件」
+			// 在那一段是**一句假话**——应用不是没有文件，它是在等上一首）。
+			"TestTheStartupSaysItIsPreparing",
+			"TestTheStartupLineGoesAwayWhenTheAppIsReady",
+			"TestTheStartupLineIsNotShownWhenThereIsATrack",
 		},
 	},
 	{
