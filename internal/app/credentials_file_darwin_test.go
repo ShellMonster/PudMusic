@@ -4,33 +4,14 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 )
 
-// selftestOn 报告要不要真的动钥匙串。
-//
-// ⚠️ 它跟**旧**的钥匙串后端那套自测用的是同一个开关名
-// （`BIU_KEYCHAIN_SELFTEST=1`）：那一套已经删了，但开关留着——
-// 「这台机器上到底能不能动真钥匙串」是**同一个问题**，换个名字只会让人
-// 以为有两套规矩。
-var selftestOn = os.Getenv("BIU_KEYCHAIN_SELFTEST") == "1"
-
-// 这一套测的是**文件后端**（macOS）。
-//
-// 大部分用例跑在 `t.TempDir()` 里，不碰用户真数据。
-// ⚠️ 只有迁移那一条要动**真钥匙串**——它用一次性服务名，且**默认跳过**，
-// 要跑得显式说一声：
-//
-//	BIU_KEYCHAIN_SELFTEST=1 go test ./internal/app/ -run File -v
-//
-// 为什么迁移那条非得动真钥匙串：它要验的是「钥匙串里那一项读得出来、
-// 搬得走、而且**搬完真的没了**」——这三件事只有在真的钥匙串上才成立。
+// 这一套测的是**文件后端**（macOS），全部跑在 `t.TempDir()` 里，不碰用户真数据。
 
 // TestTheCredentialsFileSurvivesAProcessRestart 钉住「重启之后还是登录态」。
 //
@@ -47,9 +28,8 @@ func TestTheCredentialsFileSurvivesAProcessRestart(t *testing.T) {
 
 	// 一个**全新的**后端实例——相当于重启之后的第一次读。
 	restarted := &fileStore{
-		dir:           f.dir,
-		path:          f.path,
-		legacyService: f.legacyService,
+		dir:  f.dir,
+		path: f.path,
 	}
 	got, err := restarted.Load(ctx)
 	if err != nil {
@@ -60,83 +40,13 @@ func TestTheCredentialsFileSurvivesAProcessRestart(t *testing.T) {
 	}
 }
 
-// TestReadingTheCredentialsFileDoesNotTouchTheKeychain 钉住「有文件就不碰钥匙串」。
-//
-// 这一条是判据「不再有任何钥匙串授权弹框」的**结构性**保证：
-// 凭据在文件里的时候，读取路径**完全不经过钥匙串**——
-// 所以它既不会弹授权框，也不会往分区列表里追加 cdhash。
-//
-// 验法：钥匙串里放一项（一次性名字），文件也放好；读完之后
-// **钥匙串那一项必须还在**——它在，说明压根没去碰过它。
-//
-// ⚠️ 要动真钥匙串，默认跳过。
-func TestReadingTheCredentialsFileDoesNotTouchTheKeychain(t *testing.T) {
-	if !selftestOn {
-		t.Skip("要动真钥匙串，设 BIU_KEYCHAIN_SELFTEST=1 再跑")
-	}
-	ctx := context.Background()
-	f := newTestStore(t)
-	service := f.legacyService
-
-	cleanup := func() {
-		_ = exec.Command("security", "delete-generic-password",
-			"-s", service, "-a", "primary").Run()
-	}
-	cleanup()
-	t.Cleanup(cleanup)
-	// 钥匙串里放一项（内容随便——它不该被读）。
-	if out, err := exec.Command("security", "add-generic-password",
-		"-s", service, "-a", "primary", "-w", "untouched").CombinedOutput(); err != nil {
-		t.Fatalf("往钥匙串里造一项：%v: %s", err, out)
-	}
-
-	// 文件里放好登录态。
-	if err := f.Save(ctx, testSession()); err != nil {
-		t.Fatalf("存：%v", err)
-	}
-	if _, err := f.Load(ctx); err != nil {
-		t.Fatalf("取：%v", err)
-	}
-
-	// 钥匙串那一项应该**还在**。
-	find := exec.Command("security", "find-generic-password",
-		"-s", service, "-a", "primary")
-	if out, err := find.CombinedOutput(); err != nil {
-		t.Errorf("钥匙串那一项不见了——读取路径碰了钥匙串：%v: %s", err, out)
-	}
-}
-
-// TestTheTestBackendNeverPointsAtTheRealKeychainItem 是一条**保险**。
-//
-// 迁移的后端会去读钥匙串里旧的那一项，**读完紧接着就把它删掉**。
-// 所以「测试用的后端指向哪个服务名」这件事一旦写错，后果不是测试红，
-// 而是**用户的登录态被删掉**——而内容进了 `t.TempDir()`，测试一结束就没了。
-//
-// （这个坑本票真踩过一次：迁移函数一开始用的是包级常量而不是实例字段，
-// 于是测试去删了用户真数据那一项。见收尾说明。）
-func TestTheTestBackendNeverPointsAtTheRealKeychainItem(t *testing.T) {
-	f := newTestStore(t)
-	if f.legacyService == legacyKeychainService {
-		t.Fatalf("测试后端指向了用户真数据那一项（%s）", legacyKeychainService)
-	}
-	if f.legacyService == "" {
-		t.Fatal("测试后端没有设迁移用的服务名")
-	}
-}
-
 // newTestStore 造一个指向临时目录的文件后端。
-//
-// ⚠️ `legacyService` 用的是一个**保证不存在**的服务名：迁移是从钥匙串里
-// 「读出一项旧数据」，那个名字要是真的存在，别处的用例就会把它的内容
-// 当成登录态搬进自己的临时文件里（症状：某个用例莫名其妙地登录上了）。
 func newTestStore(t *testing.T) *fileStore {
 	t.Helper()
 	dir := t.TempDir()
 	return &fileStore{
 		dir:  dir,
 		path: filepath.Join(dir, credentialsDirName, credentialsFileName),
-		// 这个名字在钥匙串里不存在；迁移那条用例会自己造一项出来。
-		legacyService: "com.biu-go.biu-mygo.login.selftest.absent",
 	}
 }
 
@@ -321,41 +231,6 @@ func TestAnExecutableCredentialsFileIsNotTooWide(t *testing.T) {
 	}
 }
 
-// TestTheMigrationSurvivesAFailedKeychainDeletion 钉住「搬成功但钥匙串删不掉」。
-//
-// 那一项删不掉时（钥匙串锁着、security 失败……），**文件里已经有可用的凭据了**，
-// 用户是登录着的。早先的代码把任何迁移错误一律映射成「没登录」，
-// 于是用户明明登录着却被当成没登录（评审逮到过）。
-//
-// 这条用一个**假的 security** 模拟「find 成功、delete 失败」。
-func TestTheMigrationSurvivesAFailedKeychainDeletion(t *testing.T) {
-	fake := t.TempDir()
-	content := `{"cookies":[],"SESSDATA":"sess","bili_jct":"jct","DedeUserID":"1","refresh_token":"rt"}`
-	script := "#!/bin/sh\n" +
-		"case \"$1\" in\n" +
-		"  find-generic-password) printf '%s' '" + content + "'; exit 0;;\n" +
-		"  delete-generic-password) exit 45;;\n" +
-		"esac\n" +
-		"exit 1\n"
-	if err := os.WriteFile(filepath.Join(fake, "security"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	f := newTestStore(t)
-	got, err := f.Load(context.Background())
-	if err != nil {
-		t.Fatalf("钥匙串删不掉不该让读取失败：%v", err)
-	}
-	if got.SESSDATA != "sess" {
-		t.Errorf("迁过来的登录态不对：SESSDATA=%q", got.SESSDATA)
-	}
-	// 旧的那份还在钥匙串里 → 必须留下一个「待清理」的标记。
-	if _, err := os.Stat(filepath.Join(f.dir, cleanupMarkerName)); err != nil {
-		t.Errorf("钥匙串里旧的那一份还没删掉，应该留下清理标记：%v", err)
-	}
-}
-
 // TestAWidenedCredentialsFileDoesNotThrowAwayTheLoginState 是评审给的那条
 // 复现路径的**正面版本**：
 //
@@ -416,67 +291,6 @@ func TestABackendThatCannotReadDoesNotThrowAwayTheCredentials(t *testing.T) {
 	}
 }
 
-// TestThePendingCleanupActuallyRemovesTheKeychainItem 钉住「那笔标记不是摆设」。
-//
-// 钥匙串读不到 → 留下一笔「待清理」；下一次启动**必须**真的去把那一项删掉
-// （判据 ②：钥匙串里不能留着同一份明文）。
-//
-// 这条用一个**假的 security**：只有 delete 会成功，别的都失败——
-// 于是「标记被清掉」就等于「delete 被调用过」。
-func TestThePendingCleanupActuallyRemovesTheKeychainItem(t *testing.T) {
-	fake := t.TempDir()
-	script := "#!/bin/sh\n" +
-		"case \"$1\" in\n" +
-		"  delete-generic-password) exit 0;;\n" +
-		"esac\n" +
-		"exit 1\n"
-	if err := os.WriteFile(filepath.Join(fake, "security"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	f := newTestStore(t)
-	ctx := context.Background()
-	// 凭据文件先在（这样 Load 不会走迁移那条路）。
-	if err := f.Save(ctx, testSession()); err != nil {
-		t.Fatalf("存：%v", err)
-	}
-	// 放一笔「待清理」。
-	marker := filepath.Join(f.dir, cleanupMarkerName)
-	if err := os.WriteFile(marker, []byte("svc"), credentialsFileMode); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := f.Load(ctx); err != nil {
-		t.Fatalf("取：%v", err)
-	}
-	if _, err := os.Stat(marker); err == nil {
-		t.Error("清理标记还在——说明没去删钥匙串里那一项")
-	}
-}
-
-// TestTheMigrationLeavesAMarkerWhenTheKeychainCannotBeRead 钉住
-// 「钥匙串读不到 → 留下待清理的标记」。
-//
-// 那一项可能还在钥匙串里（钥匙串锁着而已），而判据 ② 要求它最后必须没有。
-// 所以搬不动的时候要记一笔，下次启动再清。
-func TestTheMigrationLeavesAMarkerWhenTheKeychainCannotBeRead(t *testing.T) {
-	fake := t.TempDir()
-	script := "#!/bin/sh\nexit 1\n" // find 和 delete 都失败
-	if err := os.WriteFile(filepath.Join(fake, "security"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	f := newTestStore(t)
-	if _, err := f.Load(context.Background()); !errors.Is(err, ErrNotLoggedIn) {
-		t.Fatalf("钥匙串读不到时应是 ErrNotLoggedIn，实际 %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(f.dir, cleanupMarkerName)); err != nil {
-		t.Errorf("应该留下「待清理」的标记：%v", err)
-	}
-}
-
 // TestWritingAgainTightensThePermissions 钉住「写回去会把权限收回」。
 func TestWritingAgainTightensThePermissions(t *testing.T) {
 	f := newTestStore(t)
@@ -516,59 +330,5 @@ func TestTheCredentialsBackendIsNamedForDiagnostics(t *testing.T) {
 func TestNoUserDataDirMeansNoBackend(t *testing.T) {
 	if _, err := NewSystemStore(""); !errors.Is(err, ErrUnavailable) {
 		t.Errorf("没有数据目录应是 ErrUnavailable，实际 %v", err)
-	}
-}
-
-// TestTheLoginStateMovesOutOfTheKeychainAndTheKeychainItemIsDeleted
-// 验的是**一次性迁移**这条路的三个关键点：
-//
-//  1. 钥匙串里旧的那份**读得出来**（不要求用户重新登录）；
-//  2. 搬完之后凭据在文件里；
-//  3. **钥匙串里那一项真的没了**——留着就等于同一份明文还在那儿。
-//
-// ⚠️ 这条要动**真的钥匙串**，所以默认跳过（见文件头）。
-func TestTheLoginStateMovesOutOfTheKeychainAndTheKeychainItemIsDeleted(t *testing.T) {
-	if !selftestOn {
-		t.Skip("要动真钥匙串，设 BIU_KEYCHAIN_SELFTEST=1 再跑")
-	}
-	ctx := context.Background()
-	f := newTestStore(t)
-	service := f.legacyService
-
-	// 造一份旧格式的登录态放进钥匙串（模拟升级前的状态）。
-	old := testSession()
-	blob, err := json.Marshal(old)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cleanup := func() {
-		_ = exec.Command("security", "delete-generic-password",
-			"-s", service, "-a", "primary").Run()
-	}
-	cleanup()
-	t.Cleanup(cleanup)
-	add := exec.Command("security", "add-generic-password",
-		"-s", service, "-a", "primary", "-w", string(blob))
-	if out, err := add.CombinedOutput(); err != nil {
-		t.Fatalf("往钥匙串里造一项：%v: %s", err, out)
-	}
-
-	// 文件还没有 → 触发迁移。
-	got, err := f.Load(ctx)
-	if err != nil {
-		t.Fatalf("迁移后取：%v", err)
-	}
-	if got.SESSDATA != old.SESSDATA {
-		t.Errorf("迁过来的不是原来那份：SESSDATA=%q", got.SESSDATA)
-	}
-	if _, err := os.Stat(f.path); err != nil {
-		t.Errorf("凭据文件没落盘：%v", err)
-	}
-
-	// 钥匙串里那一项应该**没了**。
-	find := exec.Command("security", "find-generic-password",
-		"-s", service, "-a", "primary")
-	if out, err := find.CombinedOutput(); err == nil {
-		t.Errorf("钥匙串里那一项还在（迁移没删掉它）：%s", out)
 	}
 }
