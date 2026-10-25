@@ -154,7 +154,7 @@ func TestLoggingInPullsTheFavorites(t *testing.T) {
 // 不该先看到一片空的。
 //
 // ⚠️ **它模拟的是开机那一趟**（`ui.Run` 的 `WhenReady` 里那一行
-// `AutoRefreshFavorites`，见 `internal/ui/shell.go`）。
+// `AutoRefreshFavorites`，见 `internal/ui/shell_window.go`）。
 func TestAlreadyLoggedInPullsTheFavoritesAtStartup(t *testing.T) {
 	f := newBiliFixture(t)
 	hits := &favHits{}

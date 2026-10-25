@@ -446,8 +446,9 @@ func TestRenderShots(t *testing.T) {
 	// 而不是「刚装上、还没扫码」的那一份——后者另有前面几张空状态图。
 	s, tt := newLoggedInShell(t, "7")
 
-	// 不做切页动画：Tester 一帧就画完，250ms 的滑动停在半路，存出来的图上
-	// 上一页的文字还压在左边（看着像渲染错了，其实是动画没走完）。
+	// 切页那一下是硬切：生产那一档就是「不做」（`router.go` 的 `newRouter`），
+	// 而 Tester 一帧画完——万一哪天真把切页动画开回来，250ms 的滑动会停在半路，
+	// 存出来的图上上一页的文字还压在左边（看着像渲染错了，其实是动画没走完）。
 	s.router.Transition = mygoui.TransitionNone
 
 	save(t, dir, "10-首页.png", tt)

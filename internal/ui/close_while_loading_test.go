@@ -18,7 +18,7 @@ import (
 //
 //	关窗口 → images.Close() → app.Close() → 之后又来了一帧
 //
-// 这一串是**在生产里连着调的**（shell.go 的 `w.OnClosed`），而 view 里 panic
+// 这一串是**在生产里连着调的**（shell_window.go 的 `w.OnClosed`），而 view 里 panic
 // 会穿透 Cocoa 事件循环直接杀死进程（铁律三）。也就是说：收尾里任何一次
 // 不合时宜的唤醒，任何一个已经失效的句柄被碰一下，症状都是**整个应用没了**
 // ——不是「这一帧画歪了」。

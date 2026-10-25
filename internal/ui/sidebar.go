@@ -346,7 +346,7 @@ func (s *Shell) viewSideBrand(c *ui.Context, collapsed bool) {
 // 落在**侧栏这一带**，logo 正好在它们下面。之前侧栏在顶栏下面，红黄绿够不着
 // 品牌，这一格是照上游抄下来的数；现在它是那件事本身。
 //
-// ⚠️ **红黄绿的位置**：`internal/ui/shell.go` 那一处把 `TrafficLightPosition`
+// ⚠️ **红黄绿的位置**：`internal/ui/shell_window.go` 那一处把 `TrafficLightPosition`
 // 钉在 `{X: 14, Y: 18}`，所以它们占着窗口左上角 y=18..30 那一段，而 logo 的
 // 上沿在 y=32——**差 2 像素**。别把这一格调小：调小 logo 就压在红黄绿底下了。
 func (s *Shell) sideBrandTopPad() float32 {

@@ -686,7 +686,7 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 
 	// ⚠️ 这一帧**进来时**面板是开着没有：`ui.Popover` 处理「点外面 / 按 Esc 关掉」
 	// 是在它自己那一趟里做的，进函数时读到的还是上一帧的值。要判断「刚刚被关掉」
-	// 就得先把进来时的值记下来（理由同 shell.go 的 syncRoute）。
+	// 就得先把进来时的值记下来（理由同 notfound.go 的 syncRoute）。
 	//
 	// ⚠️ **按 Esc 那一条有条件**：框架把键先给焦点链，它们都不处理才轮到浮层
 	// （`mygo/ui/input.go` 的 `routeKeys`）——焦点在一个自己吃 Esc 的控件里时，
