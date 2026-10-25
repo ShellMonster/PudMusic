@@ -32,8 +32,8 @@ func TestTheDefaultsMatchBiusStore(t *testing.T) {
 	if !p.ShowLyrics {
 		t.Error("默认歌词是关的，Biu 是开着的")
 	}
-	if p.ShowSpectrum {
-		t.Error("默认频谱是开着的，Biu 是关着的")
+	if !p.ShowSpectrum {
+		t.Error("默认频谱是关的，产品要求默认开着")
 	}
 	if !p.ShowCover {
 		t.Error("默认封面是关的，Biu 是开着的")
