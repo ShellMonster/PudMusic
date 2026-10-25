@@ -14,6 +14,10 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone.
 
+## Ticket template
+
+Write ticket bodies from the skeleton in `docs/agents/ticket-template.md`. **UI tickets must carry a "visual review" acceptance criterion**, and that criterion must name what the review is compared against (upstream Biu's corresponding page, a user-supplied reference image, or the version written down in `DESIGN.md`). The rules are in `AGENTS.md` §1.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
