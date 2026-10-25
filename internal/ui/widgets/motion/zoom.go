@@ -87,6 +87,23 @@ func Grow(e ui.Element, key any, on bool) ui.Element {
 // ⚠️ **动画的值记在节点上**（`mygo/ui/motion.go` 的 `st.motions`），而状态是
 // **按身份**跨帧留下来的——所以调用方必须保证那一格**每一帧都重建**、身份稳定
 // （见 `hoverzoom.go` 的文件头那三条）。
+//
+// # ⚠️ **这一档换不了 `AnimatePose`**（票 #276 查过）
+//
+// 判据只有一条：**换完之后那个动画值还会不会被 view 读**——会被读就还是每帧重建
+// 整棵界面，就白换（`mygo/ui/pose.go`：「the cheapest motion there is」是
+// `AnimatePose` 的好处，而它的前提是**view 不读那个值**）。
+//
+// 而这一档的返回值**就是要被读**的：`e.Scale(v, v)` 把这一帧的倍数写进元素
+// 自己的变换里——**view 在建这一帧的时候读它**。换成 pose 的话，pose 的缩放会
+// 和元素自己的变换**相乘**（`mygo/ui/transform.go` 的 `transformAt`：
+// `poseM.Mul(e.transform.flat())`），于是理论上可以把「这一档的缩放」整个交给
+// pose——**但那样这一档的当前值就没有公开的读法了**（pose 的值读不出来），
+// 而「弹出来」那一档要和「按下缩放」相乘（`flat.PressScaleValue`），两个数
+// 都得是「这一刻的值」——相乘的那一头必须是能读的。
+//
+// ⇒ **这一档留在 `AnimateTo` 那一档**：换过去省不下重建（view 照样每帧读那个
+// 乘出来的倍数），却把一个能读的数变成读不出来的。
 func zoomTo(e ui.Element, key any, on bool, to, from float32, d time.Duration, ease ui.Easing) ui.Element {
 	target := from
 	if on {
