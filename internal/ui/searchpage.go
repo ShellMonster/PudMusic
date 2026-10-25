@@ -72,11 +72,16 @@ const searchHeaderGap = space.Px12
 
 // viewSearch 是搜索页：当前状态该画的那一块。
 //
-// 🔴 关键词**问 `r`，不要问 `c.Router()`**：换页动画期间离场的那一页会被重建一遍
-// （`Router.View` 的 leaving 那一支），而 MyGo 建离场页时**故意不设 `c.router`**
-// （`mygo/ui/router.go:685`），`c.Router().Query` 在那一帧就是空指针解引用，整个窗口
-// 被换成错误页。`(*ui.Route).Query` 读的是它自己那条 entry 的 loc，正是这一页自己
-// 的查询串。
+// 🔴 关键词**问 `r`，不要问 `c.Router()`**：`r` 是**这一页自己**那条 entry，
+// 而 `c.Router()` 是路由器的**当前**位置——两者在「正在画的不是当前那一页」时
+// 不是一回事。
+//
+// ⚠️ **为什么这条规矩不能因为「我们不做换页动画了」就丢掉**：框架建离场页时
+// **故意不设 `c.router`**（`mygo/ui/router.go:685`），那一帧 `c.Router()` 是空指针，
+// `c.Router().Query` 直接把整个窗口换成错误页。我们现在显式设了
+// `TransitionNone`（`router.go` 的 `newRouter`），离场页不会被重建，所以那个坑
+// 今天踩不到；**但哪天真把换页动画开回来，它立刻就回来**——而症状是「整个窗口
+// 变成错误页」，不是「某一页坏了」。
 func (s *Shell) viewSearch(c *ui.Context, r *ui.Route) {
 	// 🔴 铁律二：页面 view 的头一件正事就是装主题（见 theme.go）。
 	s.applyFrameTheme(c)

@@ -112,18 +112,40 @@ const (
 	noLyric = -1
 )
 
+// lyricScrollDuration 是滚到中间那一下走多久：200ms。
+//
+// # 这一条是人 2026-10-25 拍板的，不是抄上游来的
+//
+// 上游 Biu 那个 `scrollTo({ behavior: "smooth" })`（`index.tsx:314`）**没有给
+// 时长**——是平台自己那条缓动。我们原来那 500ms 是**拿框架的默认值顶上的**
+// （`ui.Smooth` 就是 500ms 的弹簧，`mygo/ui/motion.go:33`），所以它从来不是
+// 「抄来的数」。
+//
+// 依据是 BMG-254 那份「对标 QQ音乐」的报告（§3.4 的 QQ-08）：QQ音乐 Web 播放页
+// 的歌词区滚动是 `transform` 平移、**100ms ease-out**——我们慢 5 倍。
+//
+// ⚠️ **只收时长，不换曲线**：这一段要的是**弹簧**——歌词连着换句时，弹簧**打断
+// 时接着走**（速度连续），而曲线打断会「速度归零重新起跑」。
+//
+// ⚠️ **这个时长是弹簧的周期**，不是「走完全程」的墙钟（SwiftUI 的口径：
+// `Duration` 是无阻尼弹簧的周期，见 `mygo/ui/motion.go` 的 `physics()`）。实算
+// （临界阻尼、`Bounce: 0`）：走完 98.6% 要 200ms，而收到 0.05 DIP 真正收手要
+// 320~400ms（距离 100~1000 DIP）。
+const lyricScrollDuration = 200 * time.Millisecond
+
 // lyricScrollAnim 是滚到中间用的那一下动画。
 //
-// 抄上游 `index.tsx:314` 的 `scrollTo({ behavior: "smooth" })`——那里没有时长，
-// 是平台自己那条缓动，而 MyGo 的 `ui.Smooth` 正是默认的那一支弹簧（500ms、
-// 不回弹，`mygo/ui/motion.go:33`）。这里是在它上面**只**补一个 Precision。
+// ⚠️ **它是弹簧**（`Duration` 留空就走弹簧那一支，`mygo/ui/motion.go`）：
+// `Bounce: 0` 不过冲，而 `Precision: 0.05` 决定它**什么时候收手**——实算（临界
+// 阻尼、距离 100~1000 DIP）：`Precision: 0.05` 那一档是 320~400ms，而框架默认的
+// 0.001 DIP 要一直跑到 450~530ms。而那段时间里用户拿滚轮翻了歌词，下一帧就会
+// 重新对一次目标。0.05 DIP 是一根头发丝的误差，肉眼看不出来，到点就收手。
 //
-// ⚠️ **必须给 Precision**，理由是这一层拿 `ScrollState.Scrolling()` 判
-// 「弹簧还在飞、让它飞完」。框架的默认是 0.001 DIP（`motion.go:75`），到这个
-// 精度之后弹簧还要再真跑两秒才收手——而这两秒里用户拿滚轮翻了歌词，下一帧
-// 就会重新对一次目标。0.05 DIP 是一根头发丝的误差，肉眼看不出来，到点就收手。
+// ⚠️ **收手这件事不只是「省几帧」**：这一层拿 `ScrollState.Scrolling()` 判
+// 「弹簧还在飞、让它飞完」，而那一支是「每一帧按当下的几何重新对一次目标」——
+// 弹簧收得干脆，「用户翻了歌词不会被拽回去」那一支才让得开位。
 var lyricScrollAnim = ui.Animation{
-	Spring: ui.SpringOptions{Duration: 500 * time.Millisecond, Precision: 0.05},
+	Spring: ui.SpringOptions{Duration: lyricScrollDuration, Precision: 0.05},
 }
 
 // 「窗口刚重新看得见」那一帧用的那一下：**一次到位**。
@@ -144,13 +166,14 @@ const lyricLineTransition = 300 * time.Millisecond
 // lyricLineAnim 就是那段过渡。
 //
 // ⚠️ **Ease 留空 = `ui.EaseOut`**（`mygo/ui/motion.go:17` 与 `widgets.go:98`），
-// 那是框架那条三次曲线 `1-(1-t)³`。写成 `ui.Smooth`（零值）会变成 500ms
-// 的弹簧——那是滚到中间那段用的东西，不是行样式这段。
+// 那是框架那条三次曲线 `1-(1-t)³`。写成 `ui.Smooth`（零值）会变成**弹簧**
+// （默认那条 500ms 的）——滚到中间那一段要的是弹簧（打断时接着走），而行样式
+// 这一段要的是**定时长的曲线**。
 //
 // ⚠️ **它也不是上游那个 `ease-out`**：上游（CSS）那个是
 // `cubic-bezier(0, 0, 0.58, 1)`，实算 t=0.25 时一条走 57.8%、另一条走 37.8%
 // ——**两条不是一个东西**（框架里 `ui.EaseInOut` 与上游那条
-// `cubic-bezier(0.4,0,0.2,1)` 的差别更大，见 `hoverzoom.go` 那儿记着）。
+// `cubic-bezier(0.4,0,0.2,1)` 的差别更大，见 `widgets/motion/hoverzoom.go` 那儿记着）。
 //
 // ⚠️ **这里显式写了曲线**（票 #292）：全应用走**一条统一曲线**
 // （`motion.Unified`），上游那个 `ease-out` 只是上游的默认值，不是这一处的

@@ -1,4 +1,4 @@
-// Package motion 是全应用的动效值表：曲线、弹簧。
+// Package motion 是全应用的动效值表：曲线、弹簧、缩放。
 //
 // # 为什么单开一个包
 //
@@ -21,6 +21,17 @@
 //
 // `TabSlide` 是主 Tab 滑块那一下的动画。它**不是**曲线，是弹簧——因为那一处
 // 要的是「打断时接着走」，那是曲线给不了的（理由见它自己的注释）。
+//
+// # 缩放
+//
+// `hoverzoom.go` 是「指针移上去放大一点」那一层（1.05 / 300ms / `ui.EaseInOut`），
+// `zoom.go` 是「弹出来」和「停在上面长大一点」那两档（0.85 → 1、1 → 1.1，
+// 都 150ms / `Unified`）。
+//
+// ⚠️ **这一包住在 `widgets/` 底下，是因为它得被两个方向都用**：封面那一族在
+// `widgets/hover`（package hover），而顶栏头像和 UP 空间那一族在
+// `internal/ui`（package ui）——而 `internal/ui` import 了 `widgets/hover`，
+// 反过来 import 会成环（票 #467 的那一次下沉就是这件事）。
 package motion
 
 import (

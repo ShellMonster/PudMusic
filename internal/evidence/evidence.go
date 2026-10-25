@@ -667,6 +667,24 @@ var Items = []Item{
 		Tests:    []string{"TestLeavingTheHomePageAndComingBackKeepsWhereYouWere"},
 	},
 	{
+		// 🔴 **这一条钉的是「代码路径上没开着」**：框架 `Router.Transition` 的零值
+		// 是 `TransitionAuto`（一条 250ms 滑入 / 150ms 淡入），不显式关掉就是开着，
+		// 而 2026-10-25 实测证实**它一直开着**——现象只是「换页滑了一下」，
+		// 不报错、不崩溃，评审和测试都看不出来。
+		//
+		// 那一组里还有一条**对照**（`TestThePageTransitionProbeWouldNoticeItIfItCameBack`），
+		// 它故意把动画打开、要求探针**必须**量到差别——没有它，上面那几条有可能
+		// 因为「探针根本没生效」而恒绿。
+		Category: Paging,
+		Spec:     "切路由是硬切：没有过渡动画（规范说不做，代码显式关掉）",
+		Tests: []string{
+			"TestTheRouterHasNoPageTransition",
+			"TestThePageTransitionProbeWouldNoticeItIfItCameBack",
+			"TestTheRouterTransitionIsSetExplicitly",
+			"TestTheMiniWindowAlsoHasNoPageTransition",
+		},
+	},
+	{
 		Category: Paging,
 		Spec:     "翻页中切查询：在途那一页被取消，迟到的结果不落地",
 		Tests:    []string{"TestReloadCancelsThePageInFlight", "TestAStaleResultNeverLands"},
@@ -3369,6 +3387,37 @@ var Items = []Item{
 			"TestTheMusicAndGuichuTabsAreNotTouched",
 			// 下面那一档没歌的时候顶图还在（它是这一屏的内容，不是列表的装饰）。
 			"TestTheTopImagesStayWhenTheListIsEmpty",
+		},
+	},
+	{
+		// 🔴 **这一条的错法是「静默」的**：窗口一矮，新歌速递那一块就减成**一行**
+		// ——用户看到的是「4 张图」，而上游那一块永远是**两行**。没有一样会报错，
+		// 界面只是「不像上游那一页」。
+		//
+		// 上游 `new-music-top.tsx:157` 的 `pageSize = colCount * 2`：那个文件**只量
+		// `window.innerWidth`、从不量高度**，所以它永远是两行；列数也是按**窗口
+		// 宽**分档的（`:135` 与 `:209` 那组 Tailwind 视口断点），所以同一个窗口
+		// 宽度下我们摆几列、一页摆几首都和上游一样。
+		//
+		// ⚠️ **「下面那一档的歌在首屏之外」是上游的样子**，不是缺陷：上游那一块和
+		// 列表在同一个滚动容器里（`music-recommend/index.tsx:261`），矮窗口下这一
+		// 块占满首屏，歌要往下滚才看得到。
+		Category: Platform,
+		// 票 #475。
+		Spec: "首页「流行」那一档顶部的新歌速递：**永远两行**（不因窗口矮就减成一行），列数按**窗口宽**分档（上游那张表），默认窗口下画着 10 张",
+		Tests: []string{
+			// 窗口从最小高到很高，行数一个都不许变。
+			"TestTheBlockIsAlwaysTwoRows",
+			// 默认窗口（1200×800）下画着 10 张（上游 5 列 × 2 行）。
+			"TestTheDefaultWindowShowsTenCards",
+			// 改宽度列数跟着换（上游的断点），改高度行数不动。
+			"TestResizingTheWindowChangesTheColumnsNotTheRows",
+			// 列数那张表本身（上游的断点）。
+			"TestNewMusicColumnsFollowItsOwnBreakpoints",
+			// 封面永远是格子的宽、宽高相等（上游 `aspect-square w-full`）。
+			"TestTheCoverStaysSquareAtTheMinimumWindowHeight",
+			// 翻页箭头在列表里点得动（上游有这两枚箭头：`new-music-top.tsx:182-199`）。
+			"TestTheNewMusicPagerIsClickableInsideTheList",
 		},
 	},
 	{
