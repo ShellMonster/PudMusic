@@ -861,3 +861,25 @@ func clickGlobalToggle(t *testing.T, tt *mygoui.Tester) {
 func hasToastContaining(tt *mygoui.Tester, want string) bool {
 	return tt.HasText(want)
 }
+
+func TestABareSpaceTogglesPlayback(t *testing.T) {
+	_, tt, _, got := shellWithHotkeys(t)
+	tt.Frame()
+	tt.Key(0, mygoui.KeySpace)
+	tt.Frame()
+	if len(*got) != 1 || (*got)[0] != "togglePlay" {
+		t.Errorf("按空格触发的是 %v，want [togglePlay]", *got)
+	}
+}
+
+func TestSpaceDoesNotActivateTheFocusedButton(t *testing.T) {
+	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	got := watchCommands(s)
+	openSettingsTab(t, tt, "菜单设置")
+	tt.Frame()
+	tt.Key(0, mygoui.KeySpace)
+	tt.Frame()
+	if len(*got) == 0 || (*got)[len(*got)-1] != "togglePlay" {
+		t.Errorf("点过标签之后按空格触发的是 %v，want 以 togglePlay 结尾", *got)
+	}
+}

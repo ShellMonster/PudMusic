@@ -61,7 +61,17 @@ func (s *Shell) drawUnderlay(c *ui.Context, st app.State) {
 		return
 	}
 
-	ui.Column(c).Fill().Children(func() {
+	root := ui.Column(c).Fill()
+	// 空格 = 播放/暂停（见 shortcut_dispatch.go 的 spaceTogglesPlay）。
+	//
+	// ⚠️ **登记在这一层根上，而不是只登记在窗口上**：点过一个按钮之后焦点就留在
+	// 那枚按钮上，而框架让「有焦点的按钮」先于窗口级快捷键拿空格（`input.go`
+	// 的 `claimedBy(k, false)`）——于是空格会再点一次那枚按钮（比如侧栏的首页）。
+	// 根在焦点链上，登记在它身上框架才知道「这个键有人要」。
+	if s.recording == (shortcutSlot{}) && root.Shortcut(0, ui.KeySpace) {
+		s.spaceTogglesPlay(c)
+	}
+	root.Children(func() {
 		// ⚠️ **侧栏和「顶栏 + 内容区」那一列是兄弟**（上游
 		// `biu/src/layout/index.tsx:36-47`）：侧栏从窗口最上头一直贯到底，
 		// 顶栏**只画在内容列上**（侧栏右边那一段）。
