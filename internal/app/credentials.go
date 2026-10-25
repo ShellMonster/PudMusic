@@ -24,7 +24,7 @@
 //
 //	ErrNotLoggedIn     没登录过。这是**正常状态**，不是故障，不该弹错误、
 //	                   不该写日志、不该重试。退登之后也是它。
-//	ErrBackend         后端不可用（钥匙串被锁、DPAPI 用户变了、权限不对）。
+//	ErrBackend         后端不可用（凭据文件权限被放宽、DPAPI 用户变了、目录写不了）。
 //	                   该提示用户、该考虑让用户手动重登，但不该当成「已退登」。
 //	ErrCorrupt         存的东西坏了/解不开。该提示并**按退登处理**——解不开的
 //	                   凭据不能当没登录继续用，也不能无限重试。
@@ -236,7 +236,7 @@ func (s Session) Secrets() []string {
 //  3. **不要落明文**。不是「尽量别落」，是这条接口存在的意义。
 //     后端自己决定密文格式，本包不关心也不该关心。
 type Store interface {
-	// Name 是后端的名字（"macos-keychain"、"windows-dpapi"…）。
+	// Name 是后端的名字（"macos-file"、"windows-dpapi"…）。
 	// 写进诊断信息，不含任何秘密。
 	Name() string
 
@@ -394,7 +394,7 @@ func (m *Manager) Jar() http.CookieJar {
 // 半成品最难查。
 //
 // ⚠️ 存盘期间一直拿着 m.mu——这正是「要么全改要么全没改」的前提。
-// 代价是存盘期间 Current()/Generation() 一起等；钥匙串写很快，可以接受。
+// 代价是存盘期间 Current()/Generation() 一起等；写一个文件很快，可以接受。
 // **Store 的实现不许回调 Manager**，那会死锁。
 func (m *Manager) Update(ctx context.Context, fn func(*Session) error) error {
 	m.mu.Lock()
@@ -417,7 +417,7 @@ func (m *Manager) Update(ctx context.Context, fn func(*Session) error) error {
 // Adopt 把登录态装进内存，但**不落盘**。
 //
 // 只有一个用途：这个平台压根没有系统保护存储，或者后端此刻不可用
-// （钥匙串锁了、DPAPI 解不开）。这时候这次登录是**真的**——B 站认了、
+// （凭据文件读不了、DPAPI 解不开）。这时候这次登录是**真的**——B 站认了、
 // cookie 也拿到了——只是留不到下次启动。
 //
 // 与其让用户「扫了半天码换来一句保存失败」然后这次登录也白扫，

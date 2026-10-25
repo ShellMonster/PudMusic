@@ -69,9 +69,13 @@ import (
 // ⚠️ **不要「顺手」把它改成和应用名一致。** 那一下的代价是全体老用户的数据
 // 消失，而症状是静默的：没有报错，只是界面回到出厂设置。
 //
-// 同时它也是钥匙串之外**唯一**不该跟着改名走的东西：登录态靠的是
-// `internal/app/credentials_keychain_darwin.go` 里写死的服务名
-// `com.biu-go.biu-mygo.login`，那个也不能动（动了老用户要重新登录）。
+// 同时它也是**唯一**不该跟着改名走的东西：登录态就落在这个目录里
+// （`credentials/session.json`，见 `internal/app/credentials_file_darwin.go`），
+// 目录一改，登录态跟着「消失」——症状同样是静默的：老用户升级之后掉登录。
+//
+// （旧版把登录态放在 macOS 钥匙串里，服务名 `com.biu-go.biu-mygo.login`。
+// 那个服务名现在只用于**一次性迁移**，但同样不能改——改了迁移就读不到旧的那份，
+// 表现还是「升级之后掉登录」。）
 const LegacyUserDataDirName = "Biu MyGo"
 
 // PinUserDataDir 把应用数据目录钉在 `LegacyUserDataDirName` 上（见本文件顶上）。
