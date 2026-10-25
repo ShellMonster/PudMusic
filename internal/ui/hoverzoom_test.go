@@ -359,7 +359,9 @@ func TestTheNewMusicCardCoverGrowsOnHover(t *testing.T) {
 	if !ok || card.W == 0 {
 		t.Fatalf("画面上找不到第三张卡片，文字有 %q", tt.Texts())
 	}
-	side := newMusicCoverSide(900, newMusicCellWidth(800, newMusicColsFor(800)))
+	// 封面的边长 = 格子的宽（上游 `aspect-square w-full`，票 #475 之后不再有
+	// 「窗口矮就压小」那一档，所以它就是格子宽）。
+	side := newMusicCellWidth(800, newMusicColsFor(800))
 	// 封面在卡片的最上面，边长是 side。
 	cover := mygoui.Rect{X: card.X, Y: card.Y, W: side, H: side}
 	idle := tt.Image()

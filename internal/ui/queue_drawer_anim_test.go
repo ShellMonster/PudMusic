@@ -274,11 +274,21 @@ func TestTheQueueDrawerIsTornDownOnlyAfterItSlidOut(t *testing.T) {
 // 定的（票 #180「Toast 语义色与入场」），而 #292 还要把它的曲线统一成
 // `CubicBezier(0.16, 0.9, 0.21, 0.98)`。这一票按「不加 = **这一票**不加」
 // 处理：**没动它**（下面那一条把它钉住，免得它被顺手改掉）。
+//
+// ⚠️ **顶栏那个联想面板也不在这个名单里，而且是刻意的**（票 #259，2026-10-25
+// 拍板）：**它只在用户输入时出现**，而用户此刻正盯着它——它不属于「高频操作」
+// 那一档，所以给它开了一个例外：进场 200ms（淡入 + 升上来 10 DIP）。
+// ⚠️ **例外只开这一处**：`navbar_search.go` **不许**加进这个名单（那是把
+// 例外变成规矩）；理由与范围见 DESIGN.md §五《联想面板的进场》那一节。
 func TestTheSmallOverlaysHaveNoEnterOrExitAnimation(t *testing.T) {
 	// 名单是「小浮层」那一类：菜单、确认框、弹窗、浮层面板。
+	//
+	// ⚠️ **「浮层面板（联想、旋钮面板、下拉）」那一行说的是 `popup.go`**——那是
+	// **共用的那个外观出口**（`popupPanel`），不是联想面板本身。联想面板的动画
+	// 在 `navbar_search.go`（它自己那一层），所以这里断不到它。
 	files := []string{
 		"confirmmodal.go",    // 确认框
-		"popup.go",           // 浮层面板（联想、旋钮面板、下拉）
+		"popup.go",           // 浮层面板的**外观**出口（旋钮面板、下拉也走它）
 		"menu.go",            // 应用菜单
 		"covermodal.go",      // 封面大图
 		"folderedit.go",      // 新建 / 改收藏夹
