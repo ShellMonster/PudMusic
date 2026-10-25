@@ -64,8 +64,6 @@ type fullCoverSpin struct {
 	at time.Time
 	// started 是「这一轮开过没有」（第一帧和后面的帧走的是两支，见下面）。
 	started bool
-	// id 是这一轮属于**哪一首**（换歌了从头转）。
-	id string
 }
 
 // fullCoverSpinPose 算这一帧满屏那张封面该摆的 pose。
@@ -81,7 +79,19 @@ type fullCoverSpin struct {
 // 所以下面那份是照着通道的脾气更新的：**匀速走向目标，走到就停**——于是它既
 // 不会越过目标（窗口在后台隔了很久也不会「补」那一段），也不会在通道歇着的
 // 时候偷偷往前跑。
-func (s *Shell) fullCoverSpinPose(c *ui.Context, st app.State, id string) (ui.Pose, ui.Animation, bool) {
+//
+// # 「看不见」的时候要**摆一个停住的 pose**
+//
+// pose 那一档要帧走的是**框架那一层**（`mygo/ui/pose.go` 的 showPose →
+// `rt.repainting` → `rt.host.requestFrame()`），**不经过本应用那道「看不见就
+// 不画」的闸**（`wake.go` 的 `invalidateIf` 只挡应用自己发的唤醒）——所以一个
+// 常驻的动画要是没人管，窗口失焦之后仍然每秒画 60 帧（票 #156 治的正是那个
+// 风扇和电池的问题）。
+//
+// 所以这一档自己判「看不看得见」：**看不见就摆一个停在那儿的 pose**（目标 =
+// 当前角度 + 1ns 的曲线）——通道于是立刻歇下来（框架不再要帧 ✓），而**角度
+// 不丢**：窗口回来的时候接着转。
+func (s *Shell) fullCoverSpinPose(c *ui.Context, st app.State) (ui.Pose, ui.Animation, bool) {
 	// ⚠️ **「减少动态效果」时不许转**：框架只管它自己算的那一半——ReduceMotion 会
 	// 让 pose 的值**直接到终点**（`mygo/ui/pose.go` 的 samplePose），那是「停在
 	// 某一个角度」，不是「不转」。所以这一档得自己判（DESIGN.md §五《减少动态
@@ -93,11 +103,6 @@ func (s *Shell) fullCoverSpinPose(c *ui.Context, st app.State, id string) (ui.Po
 	}
 
 	spin := &s.full.spin
-	// 换歌了（或者刚打开满屏）：这一轮从头转——新封面出现时是**正的**。
-	if spin.id != id {
-		*spin = fullCoverSpin{id: id}
-	}
-
 	now := c.Now()
 	// 第一帧：那条通道还不存在，而框架是**在目标上把它建出来的**
 	// （`mygo/ui/pose.go`：「Not posed in the frame before: it shows there at
@@ -122,6 +127,21 @@ func (s *Shell) fullCoverSpinPose(c *ui.Context, st app.State, id string) (ui.Po
 	spin.angle = next
 	spin.at = now
 
+	// 窗口看不见（按**本应用自己的**定义：失焦 / 最小化 / 隐藏，见 presence.go）：
+	// 停在它此刻转到的地方（角度不丢，窗口回来接着转）。
+	//
+	// ⚠️ **这里不能「不摆 pose」**：不摆的话，那条通道还在动，框架于是**一直要
+	// 帧**（它要帧走的是框架那一层，不经过本应用那道闸）——窗口失焦之后仍然
+	// 每秒画 60 帧。摆一个「停在那儿」的 pose，通道才会立刻歇下来。
+	//
+	// ⚠️ **而且要把「目标」也落到当前角度上**（和暂停那一支一样）：不然这一份
+	// 记的角度会一直往前跑（它算的是「这一帧该走多远」），而通道已经歇了——
+	// 于是每重建一次就把通道重新瞄一次，框架就一直要帧（那正是要治的毛病）。
+	if !s.presence.seen() {
+		spin.target = spin.angle
+		return ui.Pose{Rotate: float32(spin.angle)}, motion.Snap, true
+	}
+
 	if !st.Playing {
 		// 暂停：**停在它此刻转到的地方**。
 		//
@@ -135,6 +155,11 @@ func (s *Shell) fullCoverSpinPose(c *ui.Context, st app.State, id string) (ui.Po
 
 	// 在放：目标定在**一整圈之后**，而曲线也走一整圈——于是它是**匀速**的
 	// （200 度/秒 = 33⅓ rpm），而中间那些帧**不用重建界面**（见文件头）。
+	//
+	// ⚠️ **换歌不重置这个角度**：框架那条通道是**连续的**——换歌不会让它跳回
+	// 0 度（画面上那一块还是老角度），而这一份要是归零，就和通道对不上了
+	// （目标会落在通道**后面**，那一转于是会**倒着**转一段）。
+	// QQ音乐 那边也是这个样子：转的是**那张唱片**，换歌换的是唱片中间那张图。
 	spin.target = spin.angle + motion.CoverSpinTurn
 	return ui.Pose{Rotate: float32(spin.target)}, motion.CoverSpin, true
 }

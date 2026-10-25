@@ -45,9 +45,6 @@ func TestTheFullPlayerPlayKeyIsTheSolidAccentCircle(t *testing.T) {
 			if !s.app.Snapshot().HasTrack {
 				t.Fatalf("歌没开起来：%q", s.app.Snapshot().Err)
 			}
-			// ⚠️ **暂停**（理由见 `fullTester` 的注释）：满屏的封面在转的时候，
-			// 那一转是常驻的，`settleFull` 等的「动画停下来了」永远等不到。
-			s.app.Pause()
 			openFull(t, tt)
 			settleFull(t, tt)
 

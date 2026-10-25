@@ -339,3 +339,69 @@ func measureSpinAllocs(t *testing.T, playing bool) float64 {
 	}
 	return float64(after.Mallocs-before.Mallocs) / float64(rebuilds)
 }
+
+// TestTheFullCoverKeepsTurningBetweenRebuilds 断「转是**连续的**，不是重建时
+// 才跳一下」。
+//
+// # 为什么要有这一条
+//
+// 「转起来」这件事有两种做法，**画面上看着差不多，成本差得远**：
+//
+//	重建的时候把角度改一下   每一帧都要重建整棵满屏播放器（`AnimateTo` 那一档）
+//	一条通道一直往前走      中间的帧只是**重画**（`AnimatePose` 那一档）
+//
+// 而它们在**画面上**的区别只有一处：**重建之间**（也就是「只重绘」的那些帧里）
+// 封面还在不在动。所以判据是：**推一段时间、一次都不重建，画面上的像素变了
+// 没有**。
+//
+// ⚠️ **别拿「框变大了没有」当判据**：那个框（无障碍标签的框）是**重建时**量的，
+// 只重绘的帧里它还是上一次的值（`mygo/ui/runtime.go` 的 commitElement）。
+// 所以这里比的是**画面本身**。
+func TestTheFullCoverKeepsTurningBetweenRebuilds(t *testing.T) {
+	st := spinPlayingState()
+	_, tt := spinTester(t, st)
+	armTheSpin(t, tt)
+
+	before := snapshot(tt)
+	// 推进 100 毫秒：这中间**没有一次重建**（那几帧是「只重绘」的）。
+	tt.Advance(100 * time.Millisecond)
+	after := snapshot(tt)
+
+	if changed := changedPixels(before, after); len(changed) == 0 {
+		t.Error("推进 100 毫秒（中间一次都没重建），画面一个像素都没变——" +
+			"封面只在重建的时候才动一下，那不是「转」")
+	}
+}
+
+// TestTheFullCoverStopsAskingForFramesWhenTheWindowIsNotSeen 断「看不见就停」。
+//
+// # 为什么这一条要紧
+//
+// 满屏的封面在转的时候，要帧走的是**框架那一层**（pose 的通道 →
+// `rt.repainting` → `requestFrame`），**不经过本应用那道「看不见就不画」的闸**
+// （`wake.go` 的 `invalidateIf` 只挡应用自己发的唤醒）。所以这一档要是没人管，
+// 窗口失焦之后仍然每秒画 60 帧（票 #156 治的正是那个风扇和电池的问题）。
+//
+// # 判据是「还要不要下一帧」
+//
+// 「看不见」在应用层是**失焦**那一档（框架管不了：窗口还在屏幕上，只是没有
+// 焦点），于是它得由这一层自己挡（`presence.go`）。挡住的标志是**不再要帧**。
+func TestTheFullCoverStopsAskingForFramesWhenTheWindowIsNotSeen(t *testing.T) {
+	s, tt, _ := fullTester(t)
+	openFull(t, tt)
+	// 推够钟，让**共享元素转场**先走完——它自己也要帧，不走完的话下面那条
+	// 「还在要帧」量的是转场而不是封面那一转。
+	tt.Advance(800 * time.Millisecond)
+	if !tt.FramePending() {
+		t.Fatal("满屏开着、歌在放，界面却不再要帧了——封面那一转压根没转起来，" +
+			"下面那条就量不到东西")
+	}
+
+	// 窗口看不见了（失焦：框架管不了的那一档）。
+	s.noteWindow(func(p *windowPresence) { p.focused = false })
+	tt.Advance(200 * time.Millisecond)
+	if tt.FramePending() {
+		t.Error("窗口看不见了，界面还在要帧——封面那一转要帧走的是框架那一层，" +
+			"不经过本应用那道闸，得由这一档自己判（见 fullplayer_spin.go）")
+	}
+}

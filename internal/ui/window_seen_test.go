@@ -245,9 +245,6 @@ func TestTheMiniWindowKeepsUpWhileTheMainWindowIsUnseen(t *testing.T) {
 // 还在 visible 位上——见 presence.go 里 `watchWindow` 那一段）。
 func TestTheSpectrumStopsAndResumesWithTheWindow(t *testing.T) {
 	s, tt, _ := fullTester(t)
-	// ⚠️ **接着放**（`fullTester` 给的是暂停着的那一份）：频谱要的是「歌在放」
-	// ——它每一帧要下一帧，靠的是解码器还在吐数据。
-	s.app.Toggle()
 	s.app.SetFullPlayerPrefs(app.FullPlayerPrefs{ShowSpectrum: true})
 	openFull(t, tt)
 	if _, ok := tt.Find("频谱"); !ok {

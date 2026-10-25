@@ -35,14 +35,6 @@ const (
 //
 // 为什么换假时钟：那三秒必须是假时钟测的（`PLAN.md` 的验收项），而真等三秒一条
 // 测试就是三秒。
-//
-// ⚠️ **这一份是暂停着的**（票 #468）：满屏的封面现在**在转**，而那一转是
-// **常驻**的——框架于是**一直要帧**，「动画停下来了」这一条永远等不到
-// （`settleFull` 等的就是它）。所以这一族测试先把歌暂停：封面不转，动画就
-// 会停。
-//
-// 要**正在放**的那一份的测试，自己 `s.app.Toggle()` 接着放（见
-// `TestTheSpectrumIsActuallyPaintedWithThatColor`——它要的是解码器真的吐数据）。
 func fullTester(t *testing.T) (*Shell, *mygoui.Tester, *fakeClock) {
 	t.Helper()
 	s, tt := newShell(t)
@@ -65,8 +57,6 @@ func fullTester(t *testing.T) (*Shell, *mygoui.Tester, *fakeClock) {
 	if !s.app.Snapshot().HasTrack {
 		t.Fatalf("歌没开起来：%q", s.app.Snapshot().Err)
 	}
-	// ⚠️ **暂停**（理由见这个函数的注释）。
-	s.app.Pause()
 	return s, tt, fc
 }
 
@@ -258,6 +248,10 @@ func TestTheCoverFliesFromTheRowIntoTheFullScreenBackground(t *testing.T) {
 // 封面回不去——「啪」地一下就没了。
 func TestTheCoverFliesBackWhenItCloses(t *testing.T) {
 	s, tt, fc := fullTester(t)
+	// ⚠️ **暂停**（票 #468）：这一条量的是满屏那张封面**那个框**的大小，而满屏
+	// 的封面现在**在转**——转起来之后那个框的可见外接矩形会变大（一个转起来的
+	// 正方形，外接框是 320×(cosθ+sinθ)）。量的是**没转**的那一份。
+	s.app.Pause()
 
 	row, _ := tt.Find("当前封面")
 	tt.ClickAt(row.X+row.W/2, row.Y+row.H/2)
@@ -490,9 +484,6 @@ func TestTheSpectrumColorFallsBackToTheDefault(t *testing.T) {
 // 频谱那条带上有没有接近 #666 的像素。
 func TestTheSpectrumIsActuallyPaintedWithThatColor(t *testing.T) {
 	s, tt, _ := fullTester(t)
-	// ⚠️ **接着放**（`fullTester` 给的是暂停着的那一份）：解码器要真的吐出来
-	// 几段才有频谱（它跑在自己的 goroutine 上，和 Tester 的钟没关系）。
-	s.app.Toggle()
 	s.app.SetFullPlayerPrefs(app.FullPlayerPrefs{ShowSpectrum: true})
 	openFull(t, tt)
 

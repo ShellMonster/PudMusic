@@ -156,6 +156,7 @@ func mainTabs(c *ui.Context, selected *int, size tabSize, labels ...string) ui.E
 		//
 		// 而它**也不值得**改：这一句是**每次切页一次**（不是每帧），省下来的
 		// 是一次整窗重建——四张界面里最贵的那一屏的一次，约一毫秒。
+		println("DBG AnimationFrame from tabs.go")
 		c.AnimationFrame()
 		return tabs.List
 	}

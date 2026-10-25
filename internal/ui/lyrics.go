@@ -126,13 +126,16 @@ var lyricScrollAnim = ui.Animation{
 	Spring: ui.SpringOptions{Duration: 500 * time.Millisecond, Precision: 0.05},
 }
 
-// lyricSnapAnim 是「窗口刚重新看得见」那一帧用的那一下：一次到位。
+// 「窗口刚重新看得见」那一帧用的那一下：**一次到位**。
 //
 // ⚠️ **不能用 `ui.Animation{}`**：它的零值是 `Smooth` 那条 500ms 的弹簧
 // （`mygo/ui/motion.go:33`），而那正好是票面不要的「慢慢追」。一个 1ns 的
 // 曲线在下一帧就落到目标上（`channel.step` 里 `t >= 1` 直接取 target），
 // 用户看到的是一次跳到位。
-var lyricSnapAnim = ui.Animation{Duration: time.Nanosecond, Ease: ui.Linear}
+//
+// ⚠️ **那条 1ns 的曲线是 `motion.Snap`**（值只写在 `widgets/motion`，见
+// DESIGN.md §五《动效的值表》）——原先这里另写了一份一模一样的，票 #468
+// 把它并回去了。
 
 // lyricLineTransition 是「这一句从没在唱变成正在唱」（以及反过来）走多久，
 // 抄上游 `index.tsx:330` 的 `transition-all duration-300 ease-out`。
@@ -467,6 +470,7 @@ func (lv *lyricsView) centre(c *ui.Context, active int, content uint32, fontSize
 			//
 			// 局部重绘那一帧里量到的还是**上一帧**的框（空的），于是这一句要的
 			// 那一帧永远不会来，歌词就一直滚不动。
+			println("DBG AnimationFrame from lyrics.go")
 			//
 			// 而它**也不值得**改：这一句是**每次换歌最多三帧**（`pend` 有预算），
 			// 省下来的三次整窗重建。
@@ -488,10 +492,10 @@ func (lv *lyricsView) centre(c *ui.Context, active int, content uint32, fontSize
 		// 是「现在唱到哪一句」，不是一段补放的滚动。
 		//
 		// 目标算法和下面那一支完全一样：几何是上一帧量到的，`ScrollTo` 的
-		// `MaxY` 夹取也是同一套（见 `lyricSnapAnim`）。
+		// `MaxY` 夹取也是同一套（见 `motion.Snap`）。
 		lv.aim = aim
 		lv.aiming = false
-		lv.scroll.ScrollTo(0, lv.scroll.Y+off, lyricSnapAnim)
+		lv.scroll.ScrollTo(0, lv.scroll.Y+off, motion.Snap)
 		return
 	}
 

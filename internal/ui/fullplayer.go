@@ -967,7 +967,7 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 		// ⚠️ **走的是 pose 那一档**（`AnimatePose`），不是 `Element.Rotate`：
 		// 后者是建的时候写死的变换，角度每帧都变就得每帧重建一遍整棵满屏播放器
 		//（那是票 #392 治的毛病）。理由见那个文件的头一段。
-		if pose, anim, ok := s.fullCoverSpinPose(c, st, id); ok {
+		if pose, anim, ok := s.fullCoverSpinPose(c, st); ok {
 			cover = cover.AnimatePose(pose, anim)
 		}
 

@@ -45,9 +45,6 @@ func fullTesterWithCoverSettings(t *testing.T, st app.Settings, body []byte) (*S
 	if !s.app.Snapshot().HasTrack {
 		t.Fatalf("歌没开起来：%q", s.app.Snapshot().Err)
 	}
-	// ⚠️ **暂停**（理由见 `fullTester` 的注释）：满屏的封面在转的时候，那一转
-	// 是常驻的，「动画停下来了」这一条永远等不到。
-	s.app.Pause()
 	return s, tt
 }
 
