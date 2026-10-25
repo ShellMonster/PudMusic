@@ -70,8 +70,9 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 ### 封面内存缓存
 
 启动时可以用环境变量 `BIU_IMAGE_CACHE_MB` 配置内存缓存预算，单位是 MiB
-（1 MiB = 1024×1024 字节），接受 1–4096 的整数；未设置或无效时使用 96 MiB，
+（1 MiB = 1024×1024 字节），接受 1–4096 的整数；未设置或无效时使用 32 MiB，
 无效值会写一条日志。改后重启生效，主窗口和迷你播放器共用这份缓存。
+代码里的默认值是 `internal/ui/widgets/imgcache/cache.go` 的 `DefaultMaxBytes`。
 
 ```sh
 BIU_IMAGE_CACHE_MB=32 go run .
@@ -82,7 +83,7 @@ BIU_IMAGE_CACHE_MB=32 /Applications/BiuGo.app/Contents/MacOS/BiuGo
 | 预算 | 取舍 |
 |---|---|
 | 96 MiB | 保留更多已看过的封面，回滚时较少重新解码。 |
-| 32 MiB | 减少常驻图片，回滚时更容易需要读盘、解码。 |
+| 32 MiB（默认） | 减少常驻图片，回滚时更容易需要读盘、解码。 |
 | 16 MiB（或更小） | 更积极淘汰，反复滚动时更常重新加载，首帧可能变慢。 |
 
 内存未命中时先读磁盘缓存，磁盘也未命中才重新下载，因此网络代价取决于磁盘命中率。

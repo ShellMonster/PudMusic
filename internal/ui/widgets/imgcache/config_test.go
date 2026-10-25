@@ -7,7 +7,7 @@ func TestImageCacheBudgetFromEnvironment(t *testing.T) {
 		value string
 		want  int64
 	}{
-		{"", DefaultMaxBytes}, {"96", 96 << 20}, {"32", 32 << 20}, {"16", 16 << 20},
+		{"", 32 << 20}, {"96", 96 << 20}, {"32", 32 << 20}, {"16", 16 << 20},
 		{" 32 ", 32 << 20}, {"1", 1 << 20}, {"4096", 4096 << 20},
 		{"0", DefaultMaxBytes}, {"-1", DefaultMaxBytes}, {"4097", DefaultMaxBytes},
 		{"999999999999999999999", DefaultMaxBytes}, {"NaN", DefaultMaxBytes}, {"1.5", DefaultMaxBytes},
