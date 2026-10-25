@@ -336,14 +336,23 @@ type DynamicPage struct {
 	// Baseline 是「更新基线」——**等于这一页里最新那条动态的 id**。
 	//
 	// ⚠️ **它是动态 id，不是时间戳**：B 站那个「有没有新动态」的接口
-	// （/feed/all/update）要的就是它——社区文档写着 update_baseline 是 str、
-	// 必填，而 /feed/all 的返回里它「等于 items 中第一条记录的 id」；真实的
-	// 返回长这样："954659517801431040"（18 位的动态 id）。
+	// （/feed/all/update）要的就是它。
 	//
-	// ⚠️ **上游 Biu 永远传 0**（`biu/src/layout/navbar/user-feed/index.tsx:18`），
-	// 所以它从没暴露过这个参数该传什么形状——我们这里传**真的那一条**，
-	// 于是「用户看到哪儿了」才说得清（否则点过之后那个基准是非法的，那个点
-	// 要么再也不亮、要么永远亮着）。
+	// **契约在 Biu 上游源码里**（不用去查社区文档）：
+	//
+	//   - `biu/src/service/web-dynamic.ts:58`（/feed/all 的返回类型）：
+	//     `update_baseline: string; // 更新基线 (第一条记录ID)`；
+	//   - `biu/src/service/web-dynamic.ts:35-36`（/feed/all/update 的参数）：
+	//     「**默认为上次请求 获取全部动态列表 返回的 update_baseline**，
+	//     实测填 0 也可正常获取」；
+	//   - `biu/src/service/web-dynamic.ts:341-345`：那个接口自己
+	//     （`getWebDynamicFeedAllUpdate`），它**永远传 0**（见
+	//     `biu/src/layout/navbar/user-feed/index.tsx:18`）——所以它那一档永远是
+	//     「全部」，点掉之后五分钟又回来，它从没暴露过这个参数该传什么形状。
+	//
+	// ⚠️ **传错形状的后果是静默的**：时间戳不是合法的 id，于是 B 站要么回一个错
+	// （那个点再也不亮），要么当成「比它新的都算」（那个点永远亮着）——而用户看到
+	// 的只是「那个点不对」。
 	Baseline string
 }
 
@@ -428,10 +437,16 @@ func (c *Client) DynamicFeed(ctx context.Context, offset string) (DynamicPage, e
 //
 // # baseline 是**动态 id**，不是时间戳
 //
-// B 站这个接口按一个**基线**算「有多少条比它新」，而那个基线就是**动态 id**
-// （社区文档：update_baseline 是 str、必填、意思是「更新基线」；同族的
-// /feed/all 返回里 `data.update_baseline` 明确写着「等于 items 中第一条记录的
-// id」；真实的返回长这样："954659517801431040"）。
+// B 站这个接口按一个**基线**算「有多少条比它新」，而那个基线就是**动态 id**。
+//
+// **契约在 Biu 上游源码里**（不用去查社区文档）：
+//
+//   - `biu/src/service/web-dynamic.ts:35-36`（这个接口的参数）：
+//     「**默认为上次请求 获取全部动态列表 返回的 update_baseline**，
+//     实测填 0 也可正常获取」；
+//   - `biu/src/service/web-dynamic.ts:58`（/feed/all 的返回类型）：
+//     `update_baseline: string; // 更新基线 (第一条记录ID)`——那个基线就是
+//     **最新那条动态的 id**（本仓库的 DynamicPage.Baseline 就是它）。
 //
 // ⚠️ **上游 Biu 永远传 0**（`biu/src/layout/navbar/user-feed/index.tsx:18`），
 // 于是它那一档永远是「全部」——用户点掉了那个点，五分钟之后它又回来（上游只是
