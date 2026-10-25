@@ -109,15 +109,15 @@ const (
 	likeBgAlpha = 0.18
 )
 
-// 赞键那三条动画通道的键。
+// 赞键那几条动画通道的键。
 //
 // ⚠️ **必须是常量**：框架把动画的值存在元素状态的一个 map 里，键是 `any`——
 // 传一个每次都要装箱的字符串，每一帧就多一次分配（见 `widgets/flat/press.go`）。
-const (
-	likeIconKey    = "like:icon"
-	likeBgScaleKey = "like:bg-scale"
-	likeBgAlphaKey = "like:bg-alpha"
-)
+//
+// ⚠️ **背景层那两条通道没有了**：它现在走 `AnimatePose`（缩放和不透明度合成一个
+// pose，见 `likeButton` 那一段），而 pose 的值**没有公开的读法**——所以「背景层
+// 此刻缩到多少」只能从**画面上**量（见 `like_anim_test.go`）。
+const likeIconKey = "like:icon"
 
 // likeGesture 是长按那一套状态机。
 //
@@ -145,18 +145,15 @@ type likeGesture struct {
 	// （`start` 那一栏），两件事各用各的钟。
 	popUntil time.Time
 
-	// 下面三个是**这一帧各层缩到多少、多实**（0 ~ 1 或 1.25）。
+	// 下面是**这一帧图标层缩到多少**（0 ~ 1 或 1.25）。
 	//
-	// ⚠️ **它们是这一帧的答案，不是跨帧记着的进度**——跟上面那个 `progress` 一
+	// ⚠️ **它是这一帧的答案，不是跨帧记着的进度**——跟上面那个 `progress` 一
 	// 样（每一帧重算）。留着是因为「图标层先动、背景层晚 0.1s」这件事**只有
-	// 从这几个数上看得见**：画面上那一圈淡主色太浅，量像素量不出来。
+	// 从它身上看得见**：画面上那一圈淡主色太浅，量像素量不出来（背景层那
+	// 一半现在只能从画面上量，见 `like_anim_test.go`）。
 	//
 	// iconScale 是图标层（赞的那一下弹到 1.25，弹完回到 1）。
 	iconScale float32
-	// bgScale 是背景层（没赞时 0.5，赞了长到 1）。
-	bgScale float32
-	// bgAlpha 是背景层的不透明度（没赞时 0，赞了长到 1）。
-	bgAlpha float32
 
 	// pts 是环的顶点，每帧复用（稳态一帧不分配，和频谱那一块同一条）。
 	pts [][2]float32
@@ -492,15 +489,29 @@ func (s *Shell) likeButton(c *ui.Context, name, label string, color ui.Color, li
 		bg := ui.Box(c).Attach(ui.AnchorCenter, ui.AnchorCenter).
 			Size(iconHitMd, iconHitMd).Radius(iconHitMd / 2).
 			Background(c.Theme().Accent.Alpha(likeBgAlpha))
-		// ⚠️ **两条通道各管各的**：缩放管「多大」，不透明度管「多实」。
+		// ⚠️ **缩放和不透明度合成一个 pose**（原来是两条通道）：
+		//
+		//	缩放管「多大」   不透明度管「多实」
+		//
 		// 不透明度那一档在「没赞」时是 0（所以看不见），而缩放那一档是 0.5 而不是
 		// 0（手册 ⓪ ②：带透明度的缩放不要以 0 作为开始和结束的值）。
-		bgScale := bg.AnimateTo(likeBgScaleKey, likeBgScaleTarget(liked),
-			ui.Animation{Duration: likeBgTime, Delay: likeBgDelay, Ease: motion.Unified})
-		bgAlpha := bg.AnimateTo(likeBgAlphaKey, likeBgAlphaTarget(liked),
-			ui.Animation{Duration: likeBgTime, Delay: likeBgDelay, Ease: motion.Unified})
-		bg = bg.Scale(bgScale, bgScale).Opacity(bgAlpha)
-		s.like.bgScale, s.like.bgAlpha = bgScale, bgAlpha
+		//
+		// 🔴 **两条必须一起进 pose**：判据是「换完之后那个动画值还会不会被 view
+		// 读」——`AnimateTo` 的返回值是**被 view 读**的（`Scale(…AnimateTo(…))`），
+		// 所以每帧都要重建整棵界面；而 `AnimatePose` 的值**元素自己走**，中间那些
+		// 帧只重绘、不重建（报告 BMG-264 §7 A1）。
+		//
+		// ⚠️ **`Fade` 的方向和 `Opacity` 相反**：`Opacity(v)` 是 alpha（1 = 不透明），
+		// 而 `Pose{Fade: f}` 是**淡出的量**（0 = 不透明，1 = 全没）⇒ 等价的是
+		// **`Fade: 1 - v`**。写反了会让「赞了」的时候那圈背景整个不见。
+		//
+		// ⚠️ **延迟（`likeBgDelay`）对两个通道是一样长的**：pose 的五个通道各自
+		// 走同一条 `Animation`，延迟也是同一条（`mygo/ui/motion.go` 的 `headFor`），
+		// 所以「背景层晚 0.1s 才长出来」这件事**还在**。
+		bg = bg.AnimatePose(ui.Pose{
+			Scale: likeBgScaleTarget(liked),
+			Fade:  1 - likeBgAlphaTarget(liked),
+		}, ui.Animation{Duration: likeBgTime, Delay: likeBgDelay, Ease: motion.Unified})
 
 		// 图标层（后建 → 画在上面）
 		ic := ui.Icon(c, icon(name)).FontSize(iconMd).Attach(ui.AnchorCenter, ui.AnchorCenter)

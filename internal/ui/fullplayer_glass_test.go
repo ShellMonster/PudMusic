@@ -257,8 +257,9 @@ func TestTheTextOverTheBlurredBackgroundIsStillReadable(t *testing.T) {
 // 一样的出现方式」。
 //
 // 判据是**同一帧里两者的对比**：界面藏了三秒之后指针一动，顶栏是慢慢淡回来的
-// （`Opacity(AnimateTo(…))`），底下那一条原来写的是 `Opacity(shown)`——那是
-// 「啪」地一下出现的。于是同一帧里：顶栏还看不见，底下那一条已经全亮了。
+// （一个 pose：淡出和位移都在里面，见 `fullplayer.go` 的 `fullBarPose`），
+// 底下那一条原来写的是 `Opacity(shown)`——那是「啪」地一下出现的。于是同一帧里：
+// 顶栏还看不见，底下那一条已经全亮了。
 //
 // 一个界面里两种响应，用户看得见：手一回来，底下那一条先「啪」地一下弹出来，
 // 顶栏才慢慢淡回来。
