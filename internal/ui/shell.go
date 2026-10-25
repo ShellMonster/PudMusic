@@ -309,6 +309,15 @@ type Shell struct {
 	// 不建（见 fullplayer.go 文件头），所以任一帧只有其中一个在喂它。
 	like likeGesture
 
+	// halo 是「正在取流」时绕着播放键转的那一圈光，见 loadhalo.go。
+	//
+	// ⚠️ **只有起点这一个字段**：角度是画的时候按钟算的，而起点得记着——
+	// 播放条每 50ms 重建一次，每帧都拿「此刻」当起点的话光圈每 50ms 就
+	// 跳回 12 点（那是在抖，不是在转）。
+	//
+	// ⚠️ **只由 view 在主线程上读写**，和别的界面状态同一条规矩。
+	halo loadHalo
+
 	// rateOpen 是倍率那个浮层开着没有。**只由 view 在主线程上读写**，
 	// 见 playbar_rate.go。
 	rateOpen bool

@@ -119,6 +119,12 @@ const (
 	// 所以仍然是这一行的视觉重心——和播放条上那一枚（44×44 的实心强调色圆）是
 	// 同一个安排，只是尺寸照上游的迷你播放器。
 	miniPlayW = 28
+	// miniPlayGlyph 是那一枚**画出来的圆**的直径：**24**。
+	//
+	// ⚠️ **它不是 miniPlayW**：点击区是 28，而画出来的那枚实心圆是 24
+	// （`flatIconButton` 的图形边长）。取流时绕着它转的那一圈光（票 #271）
+	// 绕的是**画出来的那枚圆**，不是那个点击区。
+	miniPlayGlyph = 24
 )
 
 // MiniWindowOptions 是迷你播放器窗口的样子。view 是这个窗口每帧要画的界面。
@@ -802,8 +808,17 @@ func (s *Shell) viewMiniPlay(c *ui.Context, st app.State) {
 	const style = miniPlayW
 
 	if st.Playing {
-		if s.withTip(c, flatIconButton(c, transportIcon(true), transportLabel(true), 24).
-			Key("mini-play").Size(style, style).Padding(space.None, space.Px2), "暂停").Clicked() {
+		b := flatIconButton(c, transportIcon(true), transportLabel(true), miniPlayGlyph).
+			Key("mini-play").Size(style, style).Padding(space.None, space.Px2)
+		// 🔴 **取流的时候它外面多绕一圈光**（票 #271）：这一枚也是一枚实心圆
+		// （`transportIcon` 是 `play-circle-fill`），和播放条那一枚是**同一个
+		// 安排**——而这一扇窗里**一个字都不说**在取流（迷你窗只有歌名和音量
+		// 两行），所以这一圈光是这儿**唯一**的取流提示。
+		//
+		// ⚠️ **光圈是绕着那枚 24 的圆，不是绕着那 28 的点击区**：点击区是
+		// 「按得到」的范围，而画出来的那枚圆是 24。
+		b = s.withLoadHalo(c, b, st, miniPlayGlyph, true)
+		if s.withTip(c, b, "暂停").Clicked() {
 			s.app.Toggle()
 		}
 		return
@@ -811,9 +826,13 @@ func (s *Shell) viewMiniPlay(c *ui.Context, st app.State) {
 	// 没歌时「播放」是灰的：Biu 那边是 `isDisabled={!title}`
 	// （`pages/mini-player/index.tsx:139`）。一个亮着而按了没反应的键比一个灰的
 	// 键更容易让人以为坏了。
-	if s.withTip(c, flatIconButton(c, transportIcon(false), transportLabel(false), 24).
+	b := flatIconButton(c, transportIcon(false), transportLabel(false), miniPlayGlyph).
 		Key("mini-play").Size(style, style).Padding(space.None, space.Px2).
-		Disabled(!st.HasTrack), "播放").Clicked() {
+		Disabled(!st.HasTrack)
+	// ⚠️ **键是灰的时候不画光圈**（理由见 loadhalo.go：框架对禁用的控件整个
+	// 乘 0.5 不透明度）。
+	b = s.withLoadHalo(c, b, st, miniPlayGlyph, st.HasTrack)
+	if s.withTip(c, b, "播放").Clicked() {
 		s.app.Toggle()
 	}
 }
