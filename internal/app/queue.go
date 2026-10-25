@@ -137,6 +137,15 @@ func LocalItem(path string) Item {
 	}
 }
 
+// localTrack 是本地文件那一项的**判重那一半**：只填身份要用的字段。
+//
+// ⚠️ **它不是 `LocalItem`**：那个会顺手算一次标题（`filepath.Base` + 截后缀），
+// 而那是两次分配——`App.IsPlaying` 每帧每一行都要比一次，带着它就是每帧几十个
+// 分配（票 #339 那一族的道理）。标题在判重里用不上。
+func localTrack(path string) Item {
+	return Item{Source: SourceLocal, Type: "local", Path: path}
+}
+
 // 判重标识的三个前缀。**和 `Item.Identity()` 认的完全一样**，而落盘那一格
 // （`playback.items`）也用它们——所以「落盘时写的」和「恢复时认的」永远是同一
 // 个东西。
@@ -167,27 +176,54 @@ const (
 // 键里带来源前缀不是多余的：Bvid / Sid / 路径三样都是用户数据，不加前缀的话
 // 一个叫 `1293494` 的 sid 和一个叫 `1293494` 的本地文件名会认成同一首。
 func (it Item) Identity() string {
+	kind, id := it.trackKey()
+	if id == "" {
+		return ""
+	}
+	return kind + id
+}
+
+// trackKey 是「这一项是哪一种、身份是什么」那两样：种类就是 `Identity()` 的
+// 那个前缀，身份是路径 / bvid / sid 里的一个。
+//
+// 🔴 **它是判重口径的唯一出处**：`Identity()`（拼成字符串）和 `SameTrack`
+// （比字段）都从这儿拿——两处各写一份的话，改了「Identity」忘了「SameTrack」，
+// 症状是「列表上标着正在放的那一首，和抽屉里认的不是同一首」，而界面上看不出
+// 任何异样。
+//
+// ⚠️ **认不出是哪一项时两样都是空串**：空串不是「谁都跟它一样」——调用方必须
+// 把它当「没法判重」处理（见 `Identity` 那段）。
+func (it Item) trackKey() (kind, id string) {
 	// ⚠️ Source 和 Type 都判（见 IsLocal）：`LocalItem` 两个都填，而手写的
 	// Item 常常只填 Type。少判一个的话，本地项会掉到下面那两支里去拿一个空
 	// 标识。
 	switch {
 	case it.IsLocal():
-		if it.Path == "" {
-			return ""
-		}
-		return playbackIDLocal + it.Path
+		return playbackIDLocal, it.Path
 	case it.Type == "mv":
-		if it.Bvid == "" {
-			return ""
-		}
-		return playbackIDMV + it.Bvid
+		return playbackIDMV, it.Bvid
 	case it.Type == "audio":
-		if it.Sid == "" {
-			return ""
-		}
-		return playbackIDAudio + it.Sid
+		return playbackIDAudio, it.Sid
 	}
-	return ""
+	return "", ""
+}
+
+// SameTrack 报两项是不是同一首。
+//
+// 它认的是**和 `Item.Identity()` 同一件事**（`trackKey` 那一份口径），但**不拼
+// 字符串**：界面每一帧每一行都要比一次，拼字符串就是每帧几十个分配（票 #339
+// 那一族的道理）。
+//
+// ⚠️ **两边都认不出身份时不算同一首**：那种项的身份都是空串，拿空串去比会让
+// 「两行都是没法认的」凑成同一首——那在界面上是「其中一首不见了」。
+// （`trackKey` 认得出种类、认不出身份时也是这一档：种类是 "mv:" 而 bvid 是空串。）
+func SameTrack(x, y Item) bool {
+	kx, ix := x.trackKey()
+	ky, iy := y.trackKey()
+	if kx == "" || ky == "" || ix == "" || iy == "" {
+		return false
+	}
+	return kx == ky && ix == iy
 }
 
 // IsLocal 报这一项是不是本地文件。
@@ -1422,14 +1458,32 @@ func (a *App) PlayAt(i int) error {
 //
 // **认不出是哪一首的（标识是空串）一律当不同**：两首都认不出的歌在标识上长得一样，
 // 当成同一首就会把「点一行」变成「什么都不做」。
-func sameSong(x, y Item) bool {
-	id := x.Identity()
-	return id != "" && id == y.Identity()
-}
-
-// IsPlaying 报这一项是不是**正在放的那首**。
 //
-// 列表上「正在播放」的高亮认的就是它（见 `widgets/list` 的 Actions.IsPlaying）。
+// ⚠️ **比的是字段而不是拼出来的字符串**（`SameTrack`）：口径同一份（`trackKey`），
+// 而每一帧每一行都要比一次，拼字符串就是每帧几十个分配。
+func sameSong(x, y Item) bool { return SameTrack(x, y) }
+
+// IsPlaying 报这一项是不是**此刻正在放的那首**。
+//
+// 列表上「正在播放」的高亮认的就是它（见 `widgets/list` 的 Actions.IsPlaying）——
+// 而那一档画的是**跳动的波形**，还会被读屏软件念成「正在播放」。所以它答的
+// 必须是「**此刻有声音的那一首**」，不能是「队列的指针停在哪一项上」。
+//
+// # 🔴 **队列的当前项 ≠ 此刻正在放的那首**
+//
+// 这两样在下面这几处**不是同一件事**，而以前这一栏认的是前者：
+//
+//   - **暂停 / 停止**：指针不动，声音没了；
+//   - **启动时「恢复上次听到哪儿」**：恢复出来是**停着的**（`openLocal` 的
+//     `openRestore` 那一档明写「不出声」）；
+//   - **取流失败**：那一首压根没放起来；
+//   - **换歌的取流窗口**：队列已经换到新歌了，而播放器还在放上一首（在线取流要
+//     跑一趟网络，那几秒里两样差着一整首）。
+//
+// 认错的后果是「**没在放的那一行在跳**」：用户在历史记录页看到第一行有跳动的
+// 波形，而播放条上根本没有它（票 #279）。
+//
+// # 判据
 //
 // 🔴 **按判重标识认，不按下标，也不按 `Music.ID`**：
 //
@@ -1440,20 +1494,31 @@ func sameSong(x, y Item) bool {
 //     而存在，它和「这是不是同一首歌」是两回事（历史记录里同一首歌看过两次是
 //     两行，`Music.ID` 不同而它们是同一首）。
 //
-// 认不出是哪一首的（`Identity` 是空串）一律当「不在放」：那是「还没接来源的
+// 而「正在放的是哪一首」认的是**播放器手上那一项**：本地是 `a.path`，在线是
+// `a.online.item`——**不是队列的当前项**（理由见上面那一节）。
+//
+// ⚠️ **认不出是哪一首的（标识是空串）一律当「不在放」**：那是「还没接来源的
 // 占位项」，把它当正在放的话界面上会出现一个说不清自己在指哪里的高亮。
+//
+// ⚠️ **一次锁就够**：判据要的三样（`a.playing` / `a.path` / `a.online`）都在
+// `a.mu` 底下，而**队列这一层压根不碰**——碰它就得定「先 App 的锁还是先队列的
+// 锁」，而那个顺序在别处是反的（`App.Play` 先拿队列的锁再拿 App 的锁）。
 func (a *App) IsPlaying(it Item) bool {
-	id := it.Identity()
-	if id == "" {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	// 此刻没有声音 → 没有任何一首在放（暂停、停止、恢复出来没起播、取流失败）。
+	if !a.playing {
 		return false
 	}
-	cur, ok := a.queue.Current()
-	if !ok {
-		return false
+	// 本地那一项：路径就是它的身份（见 `Item.Identity`）。
+	if a.path != "" {
+		return SameTrack(it, localTrack(a.path))
 	}
-	// ⚠️ 认不出正在放那首的标识（空串）时不能拿它和 id 比：那样 id 非空、
-	// cur 为空，两边不一样是对的；反过来 id 为空已经在上面挡住了。
-	return cur.Identity() == id
+	// 在线那一项：它就是 `a.online` 里那一条。
+	if a.online != nil {
+		return SameTrack(it, a.online.item)
+	}
+	return false
 }
 
 // hasTrack 报告现在有没有歌在放（「播放器还开着」就是有）。

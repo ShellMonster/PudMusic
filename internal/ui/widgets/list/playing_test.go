@@ -190,3 +190,36 @@ func TestTheGridMarksThePlayingCellToo(t *testing.T) {
 		t.Errorf("网格上有 %d 处「正在播放」，want 1 处：%q", n, tt.Texts())
 	}
 }
+
+// TestTheRowThatIsReallyPlayingIsMarked 端到端：**真的在放**的时候，那一行
+// 真的有那个标记。
+//
+// ⚠️ 上面那几条走的是**假接线**（`playingActions` 自己说「哪首在放」），而这一条
+// 走**真的接线**（`AppActions` → `App.IsPlaying`）和**真的播放器**——它量的是
+// 「应用真的在放一首歌时，界面上真的有那个标记」，也就是票 #279 的另一半：
+// 修好之后「没在放就不标」，而「在放**仍然**要标」。
+//
+// ⚠️ 它走系统音频输出：没有声卡时 MyGo 静音播放（照常走时间轴），而断言的是
+// 「那一行有没有被标」，不依赖「听得见」。
+func TestTheRowThatIsReallyPlayingIsMarked(t *testing.T) {
+	a := app.New()
+	t.Cleanup(a.Close)
+
+	path := realFLAC(t)
+	if err := a.Open(path); err != nil {
+		t.Fatalf("放不了那个文件：%v", err)
+	}
+
+	songs := []Music{{
+		ID: "local:1", Title: "本地那一首",
+		Item: app.LocalItem(path),
+	}}
+	_, tt := newList(t, AppActions(a, nil), songs)
+
+	if !markedOn(t, tt, "本地那一首") {
+		t.Errorf("真的在放的那一行没有被标成「正在播放」：%q", tt.Texts())
+	}
+	if n := countMarks(tt); n != 1 {
+		t.Errorf("画面上有 %d 处「正在播放」，want 1 处：%q", n, tt.Texts())
+	}
+}
