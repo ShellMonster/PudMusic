@@ -3,7 +3,7 @@
 // # 必须在开窗口之前调
 //
 // `lyrics.NewCache` 要 `MkdirAll`——那是阻塞 IO，放在开窗口那条路上就是每启动
-// 一次窗口白等一次（见 shell.go 里 `mountSearchHistory` / `mountShortcuts` 的同一条
+// 一次窗口白等一次（见 shell_mount.go 里 `mountSearchHistory` / `mountShortcuts` 的同一条
 // 理由）。它也不发任何请求，所以「早晚」无所谓，排在开窗口之前只是因为「所有零件
 // 都齐了」这件事在那儿看得见一点。
 //

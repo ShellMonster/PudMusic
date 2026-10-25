@@ -411,7 +411,7 @@ type probeTester struct {
 	probe themeProbe
 }
 
-// newProbeTester 的 view 就是 shell.go 里该长的样子：每帧开头读设置、装主题。
+// newProbeTester 的 view 就是 shell_view.go 里该长的样子：每帧开头读设置、装主题。
 func newProbeTester(settings func() app.Settings) *probeTester {
 	p := &probeTester{}
 	p.tt = mygoui.NewTester(func(c *mygoui.Context) {
@@ -429,7 +429,7 @@ func (p *probeTester) frame() { p.tt.Frame() }
 
 // TestShellFramesCarryTheTheme 验错误页也是一帧，也得有主题。
 //
-// shell.go 现在还没接 ApplyTheme（那个文件不归本阶段改），这条用真实的
+// shell_view.go 现在还没接 ApplyTheme（那个文件不归本阶段改），这条用真实的
 // Shell 跑，把「接上去之后该是什么样子」钉住：正常页和错误页都带着当前设置。
 func TestShellFramesCarryTheTheme(t *testing.T) {
 	settings := app.DefaultSettings("")
