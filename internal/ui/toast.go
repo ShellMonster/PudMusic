@@ -387,6 +387,23 @@ func (s *Shell) viewToast(c *ui.Context, t toast, theme *ui.Theme) {
 	if move < 1 {
 		card = card.Translate((1-move)*toastEnterShift, 0)
 	}
+	// ⚠️ **这一段换不了 `AnimatePose`**（票 #276 查过）。
+	//
+	// 表面上它是满屏那两条的同一种形状（淡出 + 位移，都能进一个 pose）——但**淡入
+	// 和位移是错开的**（位移先走、淡入后到，两段进度分开算，见 `toastFadeDelay`），
+	// 而**一个 pose 的五个通道共用一条 `Animation`**（一条曲线、一个延迟）。
+	// ⇒ 错开的那一段表达不出来。
+	//
+	// 而只把淡入换成 pose、位移留在 `Translate` 又是**白换**：位移那一条还在
+	// view 里被读，每帧照样重建整棵界面（判据：换完之后那个动画值还会不会被
+	// view 读——会读就白换）。
+	//
+	// ⚠️ **顺带记一条**：这一段之所以要 `c.AnimationFrame()`（重建那一档）而不
+	// 是 `p.AnimationFrame()`（只重绘），正是因为这两个属性是**建的时候**写死在
+	// 节点上的（见下面那一段注释）——**而 pose 那条路恰好没有这个毛病**：
+	// pose 的值是在 commit 里采的、在只重绘的那些帧里也会重新算
+	// （`mygo/ui/pose.go` 的 `repose`）。所以哪天这一段能拆成一条时间线，
+	// pose 就是它的答案。
 }
 
 // toastColors 是这一档语义的底色和压在这个底色上的字色。
