@@ -496,12 +496,16 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 		// tooltip。**无障碍名字一个字没少**——原来那两个文字键念出来是「定位当前
 		// 播放」「清空」，换成图标之后靠 `Label` 念的还是这两句，而它们同时也是
 		// 无头 Tester 认这两个按钮的唯一凭据（`queue_drawer_test.go` 靠它点）。
-		if s.withTip(c, iconButton(c, iconLocate, "定位当前播放", iconSm).
+		//
+		// ⚠️ **走 `iconKey`（悬停时图形变主色）**，不是 `iconButton`（票 #249）：
+		// 打开这个抽屉的那一枚（播放条上的「播放列表」）走的是 `iconKey`——同一个
+		// 抽屉里，头上的键和开抽屉的键反馈档位不一样，用户会觉得「这一枚不亮」。
+		if s.withTip(c, iconKey(c, iconLocate, "定位当前播放", iconSm, false).
 			Size(iconHit, iconHit).Padding(space.None, space.Px9),
 			"把队列滚到正在放的那一首").Clicked() {
 			s.locateCurrent()
 		}
-		if s.withTip(c, iconButton(c, iconDelete, "清空", iconSm).
+		if s.withTip(c, iconKey(c, iconDelete, "清空", iconSm, false).
 			Size(iconHit, iconHit).Padding(space.None, space.Px9), "清空播放列表").Clicked() {
 			s.app.ClearQueue()
 		}
@@ -752,8 +756,24 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 			// 图标是上游那一枚（`music-list-item/operation.tsx:22` 的
 			// `RiMore2Line`，16px）：这一颗画出来就是三个点，而「⋯」那几个
 			// 字符跟着系统字体走——同一个意思在两台机器上是两个不同的宽高。
-			flatIconButton(c, iconMore, "这一首的操作", 16).
-				Menu(func(m *ui.Menu) { s.queueMenu(m, row) })
+			//
+			// ⚠️ **配方在 `widgets/list` 里**（票 #249）：同一个「⋯」在仓库里
+			// 曾经有**三个尺寸**——列表那一档是 32×32、这里这一枚是 44×28（`flat`
+			// 默认内边距 6/14）。44 宽在 320 的抽屉里吃掉 14% 行宽，歌名那一列
+			// 因此只有 196 而不是 208，**标题比需要早 12px 截断**。现在两处共用
+			// 一份（`list.OperationAccent`），尺寸是 16 + 每边 8 = 32×32。
+			//
+			// ⚠️ **无障碍名带上歌名**（`list.OperationLabel`）：原来这一枚叫
+			// 「这一首的操作」——一屏 N 枚全都叫这一句，读屏念出来分不出是哪一行，
+			// Tester 也认不出是哪一行。现在是「「歌名」的操作」，和列表那一档
+			// 一样。
+			//
+			// ⚠️ **悬停时图形变主色**（`OperationAccent`）：指针落在它上面时整行
+			// 也亮着（`rowEl.Hovered()` 对祖先为真），两处反馈叠在一起，而原来
+			// 两者都是极淡的中性色——**看不出「我现在指着的是哪一枚」**。变主色
+			// 那一档是上游 `hover:text-primary`（票 #249）。
+			list.OperationAccent(c, list.OperationLabel(row.item.Title),
+				func(m *ui.Menu) { s.queueMenu(m, row) })
 		})
 	})
 
