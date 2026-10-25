@@ -212,7 +212,7 @@ func TestTheTopBarKeepsItsButtonsInsideTheWindow(t *testing.T) {
 	tt := b.tt
 	tt.Frame()
 
-	for _, what := range []string{"打开文件", "迷你", "动态", avatarLabel, "登录"} {
+	for _, what := range []string{"打开文件", "迷你", "动态", avatarLabel} {
 		r, ok := tt.Find(what)
 		if !ok {
 			t.Fatalf("顶栏上找不到 %q，文字有 %q", what, tt.Texts())

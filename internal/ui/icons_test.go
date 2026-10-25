@@ -602,7 +602,7 @@ func TestTheNavBarDrawsAnIconForEveryAction(t *testing.T) {
 			// 头像下拉里都有同一个动作，三个入口会不一致。设置还在不在、够不够
 			// 得着，由 `navbar_test.go` 的 `TestTheTopBarHasNoSettingsKey` 和
 			// 侧栏那一条（`sidebar_test.go`）管。
-			for _, label := range []string{"后退", "前进", "打开文件", "动态", "登录"} {
+			for _, label := range []string{"后退", "前进", "打开文件", "动态"} {
 				assertGlyphPainted(t, tt, label)
 			}
 		})

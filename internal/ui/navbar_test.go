@@ -112,12 +112,8 @@ func TestTheTopBarCoversTheContentAreaOnly(t *testing.T) {
 	if !ok {
 		t.Fatalf("顶栏上没有头像，文字有 %q", tt.Texts())
 	}
-	// 最右边那一格是登录入口（login.go 的 viewLoginEntry），顶栏「顶满」验的是
-	// 它，不是头像——头像右边还有别的控件，拿头像验会得出一个假的「没顶满」。
-	login, ok := tt.Find("登录")
-	if !ok {
-		t.Fatalf("顶栏上没有登录入口，文字有 %q", tt.Texts())
-	}
+	// 最右边那一格就是头像（它也是未登录时的登录入口），顶栏「顶满」验的是它。
+	login := avatar
 
 	if back.Y < 0 || back.Y+back.H > navMinHeight {
 		t.Errorf("后退按钮在 %v，不在顶上那 %v 高里", back, navMinHeight)
@@ -1125,9 +1121,9 @@ func TestTheTopBarIsBiuHeight(t *testing.T) {
 	if !ok {
 		t.Fatalf("顶栏上没有后退，文字有 %q", tt.Texts())
 	}
-	login, ok := tt.Find("登录")
+	login, ok := tt.Find(avatarLabel)
 	if !ok {
-		t.Fatalf("顶栏上没有登录入口，文字有 %q", tt.Texts())
+		t.Fatalf("顶栏上没有头像，文字有 %q", tt.Texts())
 	}
 	// 无头 Tester 里 `c.TitleBar()` 是零（`ui/headless.go:46` 那张表默认没填），
 	// 所以这一帧顶栏画的就是 `navMinHeight` 本身。64 是量出来的，见 navMinHeight。
@@ -1308,7 +1304,7 @@ func TestTheTopBarHasNoSettingsKey(t *testing.T) {
 // 事；这一条只保证这一票没有顺手把别的也拿掉。
 func TestTheTopBarKeepsItsOtherEntries(t *testing.T) {
 	tt := navBarTester(t, false)
-	for _, label := range []string{"打开文件", "迷你", "动态", avatarLabel, "登录"} {
+	for _, label := range []string{"打开文件", "迷你", "动态", avatarLabel} {
 		if _, ok := tt.Find(label); !ok {
 			t.Errorf("顶栏上找不到 %q（顶栏上的字：%q）——这一票只该拿掉「设置」"+
 				"那一枚，别的入口没动", label, tt.Texts())

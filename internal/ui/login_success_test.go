@@ -207,7 +207,7 @@ func TestLoginFromTheDynamicPageComesBackToTheDynamicPage(t *testing.T) {
 
 // TestLoginFromTheTopBarGoesHome 断「别的入口去首页」。
 //
-// 顶栏那枚「登录」是**最泛的那个入口**，所以去处是首页（用户 2026-10-25
+// 头像下拉里那项「登录」是**最泛的那个入口**，所以去处是首页（用户 2026-10-25
 // 原话：「登录成功后应该提示并且回到首页」）。
 func TestLoginFromTheTopBarGoesHome(t *testing.T) {
 	b := newUIBili(t, 0)
@@ -215,9 +215,8 @@ func TestLoginFromTheTopBarGoesHome(t *testing.T) {
 	tt, s := loginFlowTester(t, a, homePath)
 	tt.Frame()
 
-	if err := tt.Click("登录"); err != nil {
-		t.Fatalf("顶栏上点不到那枚登录键：%v，文字有 %q", err, tt.Texts())
-	}
+	openAvatarMenu(t, tt)
+	clickAvatarMenuItem(t, s, tt, "登录")
 	tt.Frame()
 	if got := s.router.Path(); got != loginPath {
 		t.Fatalf("点了登录之后停在 %q，want %q", got, loginPath)
