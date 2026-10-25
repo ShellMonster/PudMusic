@@ -312,6 +312,40 @@ func TestNoSavedOrderMeansTheOrderTheApiGave(t *testing.T) {
 	}
 }
 
+// TestRenamingAFolderKeepsItsCount 钉住**改一次名字不会把数量抹成 0**。
+//
+// 建 / 改收藏夹那两个接口**不返回 media_count**（`bili.FolderInfo` 没有那一格），
+// 所以侧栏那一行被换回去的时候，数量是 0——而这里的 0 是「不知道」，不是
+// 「真的 0 首」。直接换上去的话，用户改一次收藏夹的名字，侧栏上那个
+// 「32 首」就变成了「0 首」，而那个收藏夹里明明还有 32 首。
+//
+// ⚠️ **新建的那一格还是 0**：它没有旧值可沿用，而它确实是空的。
+func TestRenamingAFolderKeepsItsCount(t *testing.T) {
+	a, _ := favMounted(t)
+	a.SetFavorites(app.FavoritesCreated, []app.Favorite{{
+		ID: 1, Title: "夏日午后", Mid: 42, Type: 11,
+		Cover: "http://i0.hdslb.com/bfs/album/mine.jpg", MediaCount: 32,
+	}})
+
+	// 改完名字之后接口回的那一份：没有数量（0），封面有。
+	a.FavoritesOf().Upsert(app.FavoritesCreated, app.Favorite{
+		ID: 1, Title: "夏日午后（改过）", Mid: 42, Type: 11,
+		Cover: "http://i0.hdslb.com/bfs/album/mine.jpg",
+	})
+
+	got := a.SideFavorites(app.FavoritesCreated)
+	if len(got) != 1 {
+		t.Fatalf("侧栏上有 %d 条，want 1", len(got))
+	}
+	if got[0].Title != "夏日午后（改过）" {
+		t.Errorf("标题是 %q，want 改过之后那个", got[0].Title)
+	}
+	if got[0].MediaCount != 32 {
+		t.Errorf("改完名字之后数量是 %d，want 32（建/改接口不返回 media_count，"+
+			"0 在这里是「不知道」）", got[0].MediaCount)
+	}
+}
+
 // TestAFreshInstallHasTwoEmptyGroups 验空状态：两组都在，都空。
 //
 // 「还没接接口」是这一阶段的正常状态，不该是「少了点什么」——所以这里钉住

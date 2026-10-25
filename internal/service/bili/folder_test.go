@@ -39,8 +39,10 @@ func TestCreatedFoldersAsksForAHundred(t *testing.T) {
 		writeJSON(w, jsonData(t, 0, "0", map[string]any{
 			"count": 2, "has_more": false,
 			"list": []map[string]any{
-				{"id": 1, "title": "默认收藏夹", "attr": 0, "media_count": 3, "fav_state": 1},
-				{"id": 2, "title": "私密的那个", "attr": 3, "media_count": 0, "fav_state": 0},
+				{"id": 1, "title": "默认收藏夹", "attr": 0, "media_count": 3, "fav_state": 1,
+					"cover": "http://i0.hdslb.com/bfs/album/one.jpg"},
+				{"id": 2, "title": "私密的那个", "attr": 3, "media_count": 0, "fav_state": 0,
+					"cover": "http://i0.hdslb.com/bfs/album/two.jpg"},
 			},
 		}))
 	})
@@ -56,9 +58,14 @@ func TestCreatedFoldersAsksForAHundred(t *testing.T) {
 	// 过的那个意思）。所以 attr=0 是「公开、而且是默认收藏夹」，attr=3 才是
 	// 「私密、不是默认」。当枚举读的话「默认收藏夹」两个字整个读反，而默认
 	// 收藏夹是绝大多数人的第一个。
+	//
+	// ⚠️ **封面也在这儿**（票 #270）：它是这个接口本来就给的一格，侧栏那一行
+	// 要画封面，而每行另发一次请求就是 N 次网络往返。
 	want := []CreatedFolder{
-		{ID: 1, Title: "默认收藏夹", Private: false, Default: true, MediaCount: 3, Faved: true},
-		{ID: 2, Title: "私密的那个", Private: true, Default: false, MediaCount: 0, Faved: false},
+		{ID: 1, Title: "默认收藏夹", Cover: "http://i0.hdslb.com/bfs/album/one.jpg",
+			Private: false, Default: true, MediaCount: 3, Faved: true},
+		{ID: 2, Title: "私密的那个", Cover: "http://i0.hdslb.com/bfs/album/two.jpg",
+			Private: true, Default: false, MediaCount: 0, Faved: false},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("拿到 %d 个收藏夹，want %d", len(got), len(want))
