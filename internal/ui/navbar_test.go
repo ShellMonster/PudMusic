@@ -693,7 +693,9 @@ func TestDynamicDotPollsEveryFiveMinutes(t *testing.T) {
 
 	clock := fakeClockOn(s, fakeClockStart)
 	polls := 0
-	s.feed.fetch = func() int { polls++; return 0 }
+	// 换一只假问：它**同步**回话（真的那一趟在后台 goroutine 上，见
+	// navbar_feed.go 的文件头「查询是异步的」）。这一条要量的是「问了几次」。
+	s.feed.ask = func(done func(int, error)) { polls++; done(0, nil) }
 
 	tt.Frame()
 	if polls != 1 {
@@ -780,13 +782,14 @@ func TestTheRedDotIsArmedWhileTheWindowIsUp(t *testing.T) {
 	}
 }
 
-// TestDynamicDotShowsAndClears 验有更新时红点出来，点进去就清掉。// TestDynamicDotShowsAndClears 验有更新时红点出来，点进去就清掉。
+// TestDynamicDotShowsAndClears 验有更新时红点出来，点进去就清掉。
 func TestDynamicDotShowsAndClears(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
 
-	clock := fakeClockOn(s, fakeClockStart)
-	s.feed.fetch = func() int { return 3 }
+	fakeClockOn(s, fakeClockStart)
+	// 假问：同步回话，说有 3 条没看过的。
+	s.feed.ask = func(done func(int, error)) { done(3, nil) }
 
 	tt.Frame()
 	if !tt.HasText("3 条新动态") {
@@ -801,13 +804,6 @@ func TestDynamicDotShowsAndClears(t *testing.T) {
 	}
 	if tt.HasText("3 条新动态") {
 		t.Errorf("看完动态红点还在，文字有 %q", tt.Texts())
-	}
-
-	// 下一个 5 分钟再拉一次，还是 3 条：红点会再出来。
-	clock.Advance(wantFeedInterval)
-	tt.Frame()
-	if !tt.HasText("3 条新动态") {
-		t.Errorf("下一轮之后红点没回来，文字有 %q", tt.Texts())
 	}
 }
 

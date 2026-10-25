@@ -896,7 +896,7 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	s.hist = newSearchHistory("")
 	s.keys = newShortcutKeys("")
 	s.picker = systemPathPicker{}
-	s.feed = newFeedPoller(dynamicFeedInterval, nil)
+	s.feed = newFeedPoller(dynamicFeedInterval, s.askNewDynamics)
 	s.buildLibraryPages()
 	// 搜索页那三个 Tab 各建一份分页列表。建在这里而不是第一次画到搜索页时：
 	// 翻页列表要在**第一帧之前**就建好（它的滚动位置、翻页状态全在里头），

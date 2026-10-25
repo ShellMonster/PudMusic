@@ -325,6 +325,24 @@ func (o SideMenuCollectionOrder) setList(g FavoriteGroup, v []int64) SideMenuCol
 	return o
 }
 
+// DynamicSeen 是「动态红点看到哪儿了」。
+//
+// ⚠️ **它按账号记**：动态流是「**我关注的人**在发什么」，那是**按账号**的
+// （和 dynamicFeed 那一页同一个理由，见 upspace.go）。换账号之后那是另一份
+// 「没看过的动态」，基准不能接着上一个账号的用。
+//
+// 加键不用涨 SchemaVersion（见 SchemaVersion 的注释：只加新的可选键不用涨）：
+// 读不到就是零值，等于「一次都没看过」。
+type DynamicSeen struct {
+	// Mid 是这一份基准属于哪个账号。0 是没登录 / 还没记过。
+	Mid int64 `json:"mid"`
+	// Baseline 是「用户上一次看动态」的时刻（Unix 秒）。
+	//
+	// 0 = 一次都没看过 → 问 B 站的时候传 0，那一档是「从头算」，于是用户
+	// 第一次打开就能看见那个点（上游 Biu 传的就是 0）。
+	Baseline int64 `json:"baseline"`
+}
+
 // Settings 是一份完整的应用设置，键名与 Biu 一一对应。
 //
 // 字段顺序按 Biu `defaultAppSettings` 的书写顺序排，方便两边对着看。
@@ -408,6 +426,16 @@ type Settings struct {
 	// 加键不用涨 SchemaVersion（见 SchemaVersion 的注释：只加新的可选键不用
 	// 涨）：读不到就是空的，等于「没有上次听到哪儿」。
 	Playback PlaybackSnapshot `json:"playback"`
+
+	// DynamicSeen 是「动态红点看到哪儿了」。
+	//
+	// ⚠️ **这是我们自己的键**（Biu 那边没有）：Biu 把「看过没有」放在内存里
+	// （`user-feed/index.tsx:12` 的 useState），所以它重启之后又是「全部没看过」
+	// ——那个点每五分钟回来一次，而用户已经看过了。
+	//
+	// 键名 ours，不是 Biu 的：放在设置里是因为设置存储已经把 schema 版本、
+	// 原子写、退出前 flush、只读保护这几件都做好了（理由同 Playback 那一格）。
+	DynamicSeen DynamicSeen `json:"dynamicSeen"`
 
 	// extra 是这个版本的代码不认识的键，原样带着走。
 	//

@@ -59,6 +59,12 @@ const (
 	dynamicFeedSpacePath = "/x/polymer/web-dynamic/v1/feed/space"
 	// followingsPath 是「我关注的人」分页列表。动态流左侧作者栏用它。
 	followingsPath = "/x/relation/followings"
+	// dynamicFeedUpdatePath 是「有没有新动态」那个接口。
+	//
+	// ⚠️ **它不要签名**（上游 `getWebDynamicFeedAllUpdate` 没传 useWbi，
+	// 而 feed/space 传了）——抄错这一处的话 B 站回 -403，而症状是
+	// 「那个点永远不亮」，没有任何报错。
+	dynamicFeedUpdatePath = "/x/polymer/web-dynamic/v1/feed/all/update"
 	// dynamicThumbPath 是给一条动态点赞 / 取消点赞。
 	//
 	// ⚠️ **不是 `/x/v2/dynamic/feed/like/thumb`**（那一个要的是稿件 id，评的是
@@ -399,6 +405,54 @@ func (c *Client) DynamicFeed(ctx context.Context, offset string) (DynamicPage, e
 	// ⚠️ **`has_more` 不可信**：入口没前进就是没有下一页（见 MoreAfter）。
 	pg.HasMore = pg.MoreAfter(offset)
 	return pg, nil
+}
+
+// DynamicFeedUpdate 问「从 baseline 到现在有没有新动态」，返回条数。
+//
+// # baseline 是「用户上一次看动态」的时刻（Unix 秒）
+//
+// B 站这个接口按一个**基线时刻**算「有多少条比它新」。上游 Biu 传的是 0
+// （`biu/src/layout/navbar/user-feed/index.tsx:18`），于是那一档永远是「全部」
+// ——用户点掉了那个点，五分钟之后它又回来（上游只是把本地的数清成 0，
+// 下一轮又问回同一个数）。
+//
+// 我们这里传的是**用户上一次看动态的时刻**：点掉之后它真的不回来了，直到
+// 有新的动态发出来。而 0 那一档留给「一次都没看过」（新装的、换账号的），
+// 于是用户第一次打开就能看见那个点——和上游一样。
+//
+// # 它不要签名
+//
+// 上游那一支没传 useWbi（而 feed/space 传了）。这一条抄错的话 B 站回 -403，
+// 而症状是「那个点永远不亮」。
+func (c *Client) DynamicFeedUpdate(ctx context.Context, baseline int64) (int, error) {
+	params := url.Values{}
+	// 上游写死的三个参数（`user-feed/index.tsx:16-20`）：
+	//
+	//   - `type=video` 是「按视频那条取」，和 feed/all 一样；
+	//   - `update_baseline` 是基线时刻（0 = 从头算）；
+	//   - `web_location` 告诉 B 站「这是网页版的哪一块」，不带的话它给的是
+	//     App 的形状。
+	params.Set("type", "video")
+	params.Set("update_baseline", strconv.FormatInt(baseline, 10))
+	params.Set("web_location", "333.1365")
+
+	raw, err := c.Do(ctx, Call{
+		Method: "GET", URL: c.hostAPI + dynamicFeedUpdatePath, Query: params,
+	})
+	if err != nil {
+		return 0, err
+	}
+	var d struct {
+		// UpdateNum 是「比基线新的那几条」。
+		//
+		// ⚠️ **用 flexInt**：B 站同一个字段有可能给数字也有可能给字符串，
+		// 而这一层读不出来就当 0（见 flexjson.go 的文件头）。
+		UpdateNum flexInt `json:"update_num"`
+	}
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return 0, fmt.Errorf("bili: 新动态的返回读不懂：%w", err)
+	}
+	return max(int(d.UpdateNum.Int64()), 0), nil
 }
 
 // SpaceDynamics 拉某一个 UP 空间里的动态，一页。

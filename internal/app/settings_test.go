@@ -74,6 +74,12 @@ var biuKeys = []string{
 // `localStorage["play-current-time"]`）。而它**尤其**该跟着设置走：它和音量、
 // 播放模式在**同一次原子写**里落盘，三者之间才没有「谁先谁后」的竞态
 // （见 `internal/app/playback_state.go` 文件头那张表）。键名是我们自己的。
+//
+// ⚠️ **「动态看到哪儿了」（`dynamicSeen`）也在这一栏里**：Biu 那边根本没有这个
+// 状态——它把「看过没有」放在内存里（`biu/src/layout/navbar/user-feed/index.tsx:12`
+// 的 useState），于是用户点掉那个点之后，五分钟它又回来（用户明明看过了）。
+// 我们把它落盘，是因为「看过」这件事本来就跨进程（见
+// `internal/app/dynamicseen.go` 的文件头）。键名是我们自己的。
 var ourOwnKeys = []string{
 	"sideMenuCollectionOrder",
 	"playMode",
@@ -82,6 +88,7 @@ var ourOwnKeys = []string{
 	"isMuted",
 	"playback",
 	"themePreset",
+	"dynamicSeen",
 }
 
 // TestSettingsKeysMatchBiu 逐字比对键名。
@@ -161,6 +168,21 @@ func TestNestedKeysMatchBiu(t *testing.T) {
 	for _, k := range []string{"created", "collected"} {
 		if _, ok := order[k]; !ok {
 			t.Errorf("sideMenuCollectionOrder 少了键 %q", k)
+		}
+	}
+
+	// 「动态看到哪儿了」那一格：两个键，键名是我们自己的。
+	d, err := json.Marshal(s.DynamicSeen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen map[string]json.RawMessage
+	if err := json.Unmarshal(d, &seen); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"mid", "baseline"} {
+		if _, ok := seen[k]; !ok {
+			t.Errorf("dynamicSeen 少了键 %q", k)
 		}
 	}
 }
@@ -955,7 +977,8 @@ const ourOwnKeysJSON = `{
 	"volume": 1,
 	"isMuted": false,
 	"playback": {"items": [], "current": "", "positionMs": 0},
-	"themePreset": "warm-paper"
+	"themePreset": "warm-paper",
+	"dynamicSeen": {"mid": 0, "baseline": 0}
 }`
 
 // wantSettings 是「读完一份 Biu 的文件之后应该拿到的那份设置」。

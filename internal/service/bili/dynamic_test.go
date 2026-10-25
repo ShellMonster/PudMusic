@@ -1044,3 +1044,68 @@ func TestFollowingsNeedsYourOwnMid(t *testing.T) {
 		t.Error("vmid=0（没登录）不该发出去：那个接口会回 -101")
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 有没有新动态
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestDynamicFeedUpdateAsksWithTheBaseline 验「有没有新动态」那一趟。
+//
+// 判据是**请求里那三个参数**和**回来的那个数**：B 站的这个接口按一个基线算
+// 「有多少条比它新」，而基线传错的话那个点要么永远不亮、要么永远亮着。
+//
+// ⚠️ **它不要签名**：上游那一支没传 useWbi（而 feed/space 传了）。抄错的话
+// B 站回 -403，而症状是「那个点永远不亮」。
+func TestDynamicFeedUpdateAsksWithTheBaseline(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(dynamicFeedUpdatePath, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{"update_num": 7}))
+	})
+	cli := f.client(t, Options{})
+
+	n, err := cli.DynamicFeedUpdate(context.Background(), 1792141200)
+	if err != nil {
+		t.Fatalf("问新动态失败了：%v", err)
+	}
+	if n != 7 {
+		t.Errorf("问回来 %d 条，want 7", n)
+	}
+
+	reqs := f.requests()
+	if len(reqs) != 1 {
+		t.Fatalf("发了 %d 个请求，want 1", len(reqs))
+	}
+	if reqs[0].Method != http.MethodGet {
+		t.Errorf("方法是 %s，want GET（这是个查询）", reqs[0].Method)
+	}
+	q := reqs[0].Query
+	if got := q.Get("update_baseline"); got != "1792141200" {
+		t.Errorf("基线是 %q，want 1792141200", got)
+	}
+	if got := q.Get("type"); got != "video" {
+		t.Errorf("type 是 %q，want video（上游写死的那个）", got)
+	}
+	if got := q.Get("web_location"); got != "333.1365" {
+		t.Errorf("web_location 是 %q，want 333.1365（上游写死的那个）", got)
+	}
+}
+
+// TestDynamicFeedUpdateReadsANumberThatComesAsAString 验那个数是字符串也读得出来。
+//
+// B 站同一个字段有可能给数字也有可能给字符串（见 flexjson.go 的文件头），
+// 而这一条读不出来就当 0——那个点就永远不亮，而界面上看不出任何异样。
+func TestDynamicFeedUpdateReadsANumberThatComesAsAString(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(dynamicFeedUpdatePath, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{"update_num": "12"}))
+	})
+	cli := f.client(t, Options{})
+
+	n, err := cli.DynamicFeedUpdate(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("问新动态失败了：%v", err)
+	}
+	if n != 12 {
+		t.Errorf("问回来 %d 条，want 12（字符串也要读得出来）", n)
+	}
+}
