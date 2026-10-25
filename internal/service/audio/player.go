@@ -407,6 +407,12 @@ func (p *Player) SetVolume(v float64) *Player {
 	return p
 }
 
+// SetNormalize 开关音量均衡（见 normalize.go）。关掉时增益在一段之内回到 1。
+func (p *Player) SetNormalize(on bool) *Player {
+	p.tap.normOn.Store(on)
+	return p
+}
+
 // Volume 返回音量增益（目标值，不是渐变途中那一瞬间的值）。
 func (p *Player) Volume() float64 {
 	p.gainMu.Lock()

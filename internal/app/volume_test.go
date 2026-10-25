@@ -198,3 +198,21 @@ func TestThePlaybackRateSurvivesARestart(t *testing.T) {
 		t.Errorf("重启之后倍率是 %v，want 1.5", got)
 	}
 }
+
+func TestTheVolumeNormalizeSwitchSurvivesARestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), app.SettingsFileName)
+
+	first := volumeApp(t, path)
+	if first.SettingsSnapshot().NormalizeVolume {
+		t.Fatal("音量均衡默认应该是关的")
+	}
+	if _, err := first.UpdateSettings(func(s *app.Settings) { s.NormalizeVolume = true }); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.CloseSettings(); err != nil {
+		t.Fatal(err)
+	}
+	if !volumeApp(t, path).SettingsSnapshot().NormalizeVolume {
+		t.Error("重启之后音量均衡开关没了")
+	}
+}

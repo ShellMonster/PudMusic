@@ -533,6 +533,9 @@ type App struct {
 	after func(d time.Duration, fn func()) func()
 
 	// 睡眠定时器（见 sleep_timer.go）：到点时刻、停它的函数、「放完这一首」标志。
+	// normalize 是「音量均衡」开关的内存副本（落盘的是 Settings.NormalizeVolume）。
+	normalize bool
+
 	sleepAt         time.Time
 	sleepStop       func()
 	sleepAfterTrack bool
@@ -1019,7 +1022,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	//
 	// ⚠️ **送进去的是增益，不是音量那一格**：静音的时候增益是 0，而音量那一格
 	// 记的还是用户设的值（取消静音放回去的就是它）。
-	p.SetVolume(a.gainLocked()).SetRate(a.rate)
+	p.SetVolume(a.gainLocked()).SetRate(a.rate).SetNormalize(a.normalize)
 	a.player = p
 	a.online = nil
 	// 🔴 **代次要加**：本地文件和在线流是**两条并行的路**，而在线那一路是后台

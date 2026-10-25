@@ -391,6 +391,10 @@ type Settings struct {
 	// 所以 0 不会和真值混淆），读出来按原速。重启之后还在。
 	PlaybackRate float64 `json:"playbackRate"`
 
+	// NormalizeVolume 是「音量均衡」开关：把特别响的歌压到统一的响度，只压不抬
+	// （见 internal/service/audio/normalize.go）。默认关。
+	NormalizeVolume bool `json:"normalizeVolume"`
+
 	// Muted 是静音标志。**它和音量分开存**（票 #311 / 报告 §3.3 的 B2）。
 	//
 	// ⚠️ **别再用「音量 0」顶替静音**：落盘之后那就是个坑——静音之后退出再
