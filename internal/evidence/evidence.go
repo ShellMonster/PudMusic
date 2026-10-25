@@ -686,6 +686,24 @@ var Items = []Item{
 	},
 	{
 		Category: Paging,
+		// 首页那三张 Tab 的「无限下滑」（票 #370）。四件事缺一不可：
+		//
+		//   - **滚到底自动拉下一段**（一直滑一直有，到 B 站没有更多为止）；
+		//   - **到头了说清楚**（「没有更多了」那一行——不是无限转圈、不是空白）；
+		//   - **切回某档还在原来那一段**（这一条是换列表换出来的，位置记在哪
+		//     可以换，但那个行为不能丢）；
+		//   - **「回到顶部」那一枚回的是当前这一档**（三档各记各的）。
+		Spec: "首页三张 Tab 无限下滑：滚到底自动拉下一段，到头说「没有更多了」；切回某档还在原处；回顶按钮回的是当前这一档",
+		Tests: []string{
+			"TestTheHomeKeepsLoadingMoreWhenYouScrollToTheEnd",
+			"TestTheHomeSaysThereIsNoMoreWhenThereIsNoMore",
+			"TestTheHomeBackToTopGoesBackToThatTab",
+			"TestEachHomeTabKeepsItsOwnScrollAndItsOwnBackToTop",
+			"TestSwitchingBackRestoresThatTabsScrollPosition",
+		},
+	},
+	{
+		Category: Paging,
 		Spec:     "404 三秒自动回首页，离开就不倒计时",
 		Tests:    []string{"TestNotFoundRedirectsHomeAfterThreeSeconds", "TestLeavingThe404PageCancelsTheRedirect"},
 	},
@@ -1082,6 +1100,32 @@ var Items = []Item{
 			"TestTheMiniCardFitsInThreeHundredAndTwentyByEightyFour",
 			"TestTheMiniKeysAreIcons",
 			"TestTheMiniControlsKeepTheirIdentityWhenTheLabelChanges",
+		},
+	},
+	{
+		Category: Platform,
+		// 图标键**只有一档配方**：悬停时图形变主色（上游 HeroUI 的
+		// `hover:text-primary`）。改之前顶栏那几枚、队列抽屉头那两枚、新歌速递的
+		// 翻页箭头走的是「只有淡底、图形不变色」那一档——同一个「图标键」在应用
+		// 里有两套画法，用户从一处移到另一处会觉得「这一枚不亮」。
+		//
+		// 顺带把队列抽屉行尾那枚「⋯」对齐到列表那一档：点击区 32×32（它原来
+		// 是 44×28，把歌名那一列截短了 12px）、无障碍名带上歌名（一屏 N 枚都叫
+		// 「这一首的操作」，读屏分不出是哪一行）。
+		//
+		// ⚠️ **满屏播放器那一行不在这一档里**：它的底是压暗过的封面，主色压在
+		// 上面只有 1.0:1（等于看不见）——那是另一票的事，钉在
+		// `TestTheFullPlayerRowKeepsItsOwnRecipe` 那一条上。
+		Spec: "图标键统一成一档：顶栏那几枚、队列抽屉头那两枚、抽屉行尾那枚「⋯」、新歌速递的翻页箭头，悬停时图形变主色；「⋯」的点击区是 32×32、无障碍名带上歌名；满屏播放器那一行不在这一档里",
+		Tests: []string{
+			"TestTheTopBarIconKeysTurnAccentOnHover",
+			"TestTheQueueDrawerHeaderKeysTurnAccentOnHover",
+			"TestTheQueueRowOperationKeyTurnsAccentOnHover",
+			"TestTheQueueRowOperationKeyIsNamedAfterItsSong",
+			"TestTheQueueRowOperationKeyIsThirtyTwoSquare",
+			"TestTheNewMusicPagerTurnsAccentOnHover",
+			"TestTheTopBarKeysKeepTheirTipsAndNames",
+			"TestTheFullPlayerRowKeepsItsOwnRecipe",
 		},
 	},
 	{
@@ -1953,16 +1997,18 @@ var Items = []Item{
 		//   - 和历史建议在界面上区分得开（判据是**画出来的像素**：chip 有底色，
 		//     联想那一行没有；另外还有「清除全部」只清历史那一档这个行为上的后果）；
 		//   - 选中一条等于选中那次的搜索（页面上、URL 上、**框里**都是那一个词）；
-		//   - 请求失败时静默（浮层保持只有历史那一档，一个错字都没有、提示条也不弹）。
+		//   - 请求失败时**不吵**（不弹错误、不转圈、不变红、提示条也不弹），而**那一档
+		//     要说一句自己的话**（「没能取到联想词」）——「B 站没给联想」和「这一趟没
+		//     拉到」在画面上必须分得开（票 #455 改了原来「一个字都没有」那半句）。
 		//
 		// ⚠️ 「设置里的『显示搜索历史』不许把联想词一起关掉」也单列：那个设置管的
 		// 是「我不想看见我搜过什么」，而联想词是 B 站这次给的。
-		Spec: "搜索浮层里多一档「联想词」：输入时出来、和搜索历史在界面上分得开、选中等于选中那次的搜索、拉不到时静默（浮层保持只有历史那一档）、和历史在同一个浮层里（Esc 一起收）、设置里的「显示搜索历史」不管它；两档都摆满时（最小窗口 + 10 条长历史）最下面那几条也在屏幕里、滚得动、点得中",
+		Spec: "搜索浮层里多一档「联想词」：输入时出来、和搜索历史在界面上分得开、选中等于选中那次的搜索、拉不到时不吵而那一档说一句自己的话（两种「没有」分得开）、和历史在同一个浮层里（Esc 一起收）、设置里的「显示搜索历史」不管它；两档都摆满时（最小窗口 + 10 条长历史）最下面那几条也在屏幕里、滚得动、点得中",
 		Tests: []string{
 			"TestTypingBringsUpTheSuggestTerms",
 			"TestTheTwoSectionsAreToldApart",
 			"TestChoosingOneSearchesThatWord",
-			"TestAFailedSuggestLeavesOnlyTheHistory",
+			"TestAFailedSuggestSaysSoInsteadOfLookingEmpty",
 			"TestEscapeTakesBothSectionsAway",
 			"TestTheHistorySettingDoesNotTakeTheSuggestWithIt",
 			// 框里一个字都没有时一个请求都不发（点开搜索框是在翻历史，不是在要联想）。
@@ -1978,17 +2024,46 @@ var Items = []Item{
 	},
 	{
 		Category: Negative,
+		// 票 #455（BMG-252）：把「失败」和「没有」分开说。
+		//
+		// 搜索页拉失败原来被说成「没有结果」——用户读到的是「B 站没有这个结果，去换
+		// 个词」，而真实原因可能是网络断了、登录态过期、风控。「换个词」这个建议在网
+		// 络故障时是错的，而且那一屏**没有任何办法重来**。
+		//
+		// 联想词那一档拉失败原来**一个字都没有**——「联想这一栏空着」读出来的意思是
+		// 「没有联想词」，不是「没拉到」。现在那一档说一句自己的话（「没能取到联想
+		// 词」），而**不吵**（不弹错误、不转圈、不变红）那一半没变。
+		//
+		// ⚠️ **「用户」那一档那一行不是歌**：那一圈反馈原来三样都在说放歌（图形是播
+		// 放三角、提示是「从这一首往后听」、无障碍名也是那一句），而用户按下去做的
+		// 是跳到那个 UP 主的主页。现在三样都改成「进他的 UP 空间」，而**歌那一档的
+		// 「从这一首往后听」不许被改**——那是另一件事（要改另开票）。
+		Spec: "搜索页拉失败：失败有自己的说法（不是「没有结果」）且有一个能按的重试；翻页失败不把已经拿到的结果换成一句错；联想词那一档拉失败：那一档说自己的话（不是空着）且不吵；搜索页「用户」那一档：封面那一圈反馈的图形、提示、无障碍名三样说的都是「进他的 UP 空间」，而歌那一档的「从这一首往后听」没被改",
+		Tests: []string{
+			"TestTheSearchPageSaysItFailedInsteadOfSayingThereIsNoResult",
+			"TestTheSearchPageKeepsTheResultsWhenALaterPageFails",
+			"TestAFailedSuggestSaysSoInsteadOfLookingEmpty",
+			"TestTheUserRowSaysGoToHisSpaceInsteadOfPlay",
+			"TestTheProfileGlyphIsNotAPlayTriangle",
+		},
+	},
+	{
+		Category: Negative,
 		// 联想词那一摊的边界。
 		//
 		// 🔴 **失败之后不许每帧重发**是这一条里最要紧的：业务层失败时仍然记着那个
 		// 词，界面上「已经问过了」那一支才成立；少了它就是自己养自己的循环（生产里
 		// 每次投递都叫醒界面），于是浮层底下一直刷网络而用户只看到搜索框卡一下。
 		//
+		// ⚠️ **「静默」改成了「不吵」**（票 #455）：失败不许弹错误、不许转圈、不许变红，
+		// 但界面**能说一句自己的话**（那一档写「没能取到联想词」）——「B 站没给联想」
+		// 和「这一趟没拉到」在画面上必须分得开。
+		//
 		// 迟到的结果不许盖掉新的（代次守卫）、退出了不许再往状态上写、框里空了上一
 		// 批要收掉（它属于上一个问题）、没挂上 B 站客户端也要安静。
-		Spec: "联想词的边界：失败之后静默且不每帧重发、重敲同一个词还能再问一次（失败是静默的，界面上用户唯一能做的就是再敲一遍）、空框不许自己养自己（每一帧都请求下一帧 = 窗口永远停不下来）、迟到的结果不盖掉新的、退出之后不写回来、框空了收掉上一批、同一个词不搜第二遍、没挂客户端时不吵",
+		Spec: "联想词的边界：失败之后不吵（不弹错误、不转圈、不变红，而那一档说自己的话）且不每帧重发、重敲同一个词还能再问一次（界面上用户能做的就是再敲一遍）、空框不许自己养自己（每一帧都请求下一帧 = 窗口永远停不下来）、迟到的结果不盖掉新的、退出之后不写回来、框空了收掉上一批、同一个词不搜第二遍、没挂客户端时不吵",
 		Tests: []string{
-			"TestAFailedSuggestSaysNothingAndDoesNotFireAgain",
+			"TestAFailedSuggestSaysNoErrorAndDoesNotFireAgain",
 			"TestTypingTheSameWordAgainAsksAgain",
 			"TestAnEmptySearchBoxDoesNotKeepTheWindowRedrawing",
 			"TestAStaleSuggestNeverLands",
@@ -3605,6 +3680,34 @@ var Items = []Item{
 			// 闸门的**界面那一半**：「0 条 + 入口没前进」要从界面这一侧也收手
 			//（入口前进了的那一次必须问出去，入口没前进就停）。
 			"TestThePagerStopsWhenAnEmptyPageKeepsTheSameOffset",
+		},
+	},
+	{
+		// 票 #387：随机档的洗牌袋是**池子**，而「下一首播放」压过随机。
+		//
+		// 随机不是「排好一张表」，是「下一首从还没放过的里面随机挑」（持续随机——
+		// 行业做法：Spotify / Apple / QQ音乐 / 网易云都是这一个东西）：新加进队列的
+		// 歌**立刻就在候选里**，这一轮就轮到它，而不是等下一轮重装。
+		//
+		// 而「下一首播放」是**用户显式的意图**：它压过随机（Spotify 社区管这叫
+		// "queue overrides"）——随机档下按它，**下一首就是它**。
+		//
+		// ⚠️ **顺序 / 循环 / 单曲三档一个字都不许动**：袋子是随机档的东西，而那一
+		// 档的下一首是纯按索引算的。
+		Category: Play,
+		Spec:     "随机档的洗牌袋是池子（这一轮中途加进来的歌这一轮就轮到它，不重复也不遗漏）；「下一首播放」压过随机（下一首就是它）；其余三档按索引算，一个字都不变",
+		Tests: []string{
+			// 池子：中途加进来的歌这一轮就轮到它，而且只轮到一次。
+			"TestRandomPlaysASongAddedMidRound",
+			// 「下一首播放」压过随机：手动按下一首、自动切歌两条路都认。
+			"TestRandomPlayNextIsTheNextOne",
+			"TestRandomPlayNextIsTheNextOneOnAutoAdvance",
+			// 反面：其余三档一个字都没变（回归的护栏）。
+			"TestPlayNextOutsideRandomIsStillByIndex",
+			// 界面上说得清（随机档才说，其余三档一句话都不说）。
+			"TestTheEnqueueNoticeIsOnlyForRandom",
+			"TestAddingASongInRandomModeSaysItWillPlayThisRound",
+			"TestAddingASongOutsideRandomModeSaysNothing",
 		},
 	},
 }

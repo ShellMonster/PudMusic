@@ -969,8 +969,9 @@ func TestTheResourceFilesCarryNoTransparentMargin(t *testing.T) {
 // 也有 Tooltip），无头 Tester 也照样全绿，只有用读屏的人才发现。
 //
 // 所以这里扫**每一个** `iconButton(` / `iconButtonPlay(` /
-// `iconKey(` / `flatIconButton(` 调用，断言第三个参数（非障碍名字）是非空的字符串
-// 字面量。空串、变量、或者干脆少一个参数，都当场报错并报出文件:行号。
+// `iconKey(` / `flatIconButton(` / `flatIconButtonAccent(` 调用，断言第三个参数
+// （非障碍名字）是非空的字符串字面量。空串、变量、或者干脆少一个参数，都当场报错
+// 并报出文件:行号。
 func TestEveryIconButtonNamesItself(t *testing.T) {
 	matches, err := filepath.Glob("*.go")
 	if err != nil {
@@ -1005,9 +1006,13 @@ func TestEveryIconButtonNamesItself(t *testing.T) {
 			// 那些悬停时图形会变主色的键都走它（`iconButton` 的那个「图标键」
 			// 变体）。它同样得有个无障碍名字，而**它挪走了就等于掉出了这张网**：
 			// 只扫 `iconButton` 的话，这一票新写的那些图标键一个都管不到。
+			//
+			// ⚠️ **`flatIconButtonAccent` 也要扫**（票 #249）：它是 `iconKey` 的
+			// 底下那一层（`widgets/flat` 的 `IconButtonAccent`），将来谁直接用它，
+			// 同样得给无障碍名字。
 			if !ok || (id.Name != "iconButton" &&
 				id.Name != "iconButtonPlay" && id.Name != "iconKey" &&
-				id.Name != "flatIconButton") {
+				id.Name != "flatIconButton" && id.Name != "flatIconButtonAccent") {
 				return true
 			}
 			checked++

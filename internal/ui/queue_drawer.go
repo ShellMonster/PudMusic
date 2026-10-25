@@ -511,7 +511,11 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 		// tooltip。**无障碍名字一个字没少**——原来那两个文字键念出来是「定位当前
 		// 播放」「清空」，换成图标之后靠 `Label` 念的还是这两句，而它们同时也是
 		// 无头 Tester 认这两个按钮的唯一凭据（`queue_drawer_test.go` 靠它点）。
-		if s.withTip(c, iconButton(c, iconLocate, "定位当前播放", iconSm).
+		//
+		// ⚠️ **走 `iconKey`（悬停时图形变主色）**，不是 `iconButton`（票 #249）：
+		// 打开这个抽屉的那一枚（播放条上的「播放列表」）走的是 `iconKey`——同一个
+		// 抽屉里，头上的键和开抽屉的键反馈档位不一样，用户会觉得「这一枚不亮」。
+		if s.withTip(c, iconKey(c, iconLocate, "定位当前播放", iconSm, false).
 			Size(iconHit, iconHit).Padding(space.None, space.Px9),
 			"把队列滚到正在放的那一首").Clicked() {
 			s.locateCurrent()
@@ -524,7 +528,10 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 		//
 		// 这里**只记下「要问」，不动手**：真正那一下在 `viewQueueClearConfirm` 里
 		// ——那个框是**模态**的，在它上面点任何别的控件都不该生效。
-		if s.withTip(c, iconButton(c, iconDelete, "清空", iconSm).
+		//
+		// ⚠️ **这一枚走 `iconKey`**（悬停时图形变主色，票 #249）：和它旁边那枚
+		// 「定位当前播放」同一档，也和打开这个抽屉的那一枚同一档。
+		if s.withTip(c, iconKey(c, iconDelete, "清空", iconSm, false).
 			Size(iconHit, iconHit).Padding(space.None, space.Px9), "清空播放列表").Clicked() {
 			s.queueClearOpen = true
 		}
@@ -654,6 +661,9 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme) {
 	// 落点先清掉：**每一行自己记**（见下面 viewQueueRow 里那几句
 	// PointerPosition），指针不在任何一行上时它就该是「没有落点」。
 	s.queueDropAt = -1
+	// 「有东西正被拖着」这一帧的结论也先清掉：**每一行自己报**（见下面
+	// viewQueueRow 里那一句 Dragging）——它是「这一行是不是拖动源」。
+	s.queueDraggingNow = false
 
 	e := ui.List(c, &s.queueList, len(rows), func(i int) {
 		s.viewQueueRow(c, rows[i], i, t)
@@ -666,22 +676,30 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme) {
 	// 这一列是**拖动的落点**（框架把落点交给指针底下最里层那个肯收拖动值的
 	// 元素——行里的封面、字、⋯ 都不收，所以收到的是这一列）。
 	//
-	// ⚠️ **问一次，不要每行问一次**：框架那两样（Drop / DragOver）每问一次都
-	// 要新建一个闭包（那个闭包要抓住类型），而队列抽屉一屏有十来行——每行每帧
-	// 问一次就是每帧二十几次分配（见 framebudget_test.go，那一档的上限是 50
-	// 次）。问一次是两次（这里两行），问每一行就是二十六次。
+	// ⚠️ **只问 Drop，不问 DragOver**：框架那两样（Drop / DragOver）每问一次
+	// 都要新建一个闭包（那个闭包要抓住类型，见 mygo/ui/dragdrop.go 的
+	// coreDrop），而队列抽屉一屏有十来行——每行每帧问一次就是每帧二十几次
+	// 分配（见 framebudget_test.go，那一档的上限是 43 次）。
+	//
+	// ⚠️ **问一次，不要每行问一次**：问这一列是两次（这里两行），问每一行就是
+	// 二十六次。
 	//
 	// ⚠️ **Drop 读到的是「刚刚落下」那一次**：这一句在列表建完之后才问，而框架
 	// 是在建列表的过程中把落点交给这一列的——问得晚一帧没关系，落下那一次
 	// 记在元素的状态里，下一帧还在。
+	//
+	// ⚠️ **Drop 不能省**：问它的那一句同时把这一列**登记成收拖动值的元素**
+	// （`accepts` + `flagValueDrop`）——框架是照着这个登记找落点的，不登记的话
+	// 松手时压根找不到这一列。
 	if v, ok := ui.Drop[*queueDragValue](e); ok {
 		s.queueDrop(v)
 	}
 	// 有东西正被拖着经过这一列：拖着的时候要画那条插入线。
-	s.queueDragging = false
-	if _, ok := ui.DragOver[*queueDragValue](e); ok {
-		s.queueDragging = true
-	}
+	//
+	// ⚠️ **这一句是「上一帧」的结论**（插入线在建行的时候画，而这一帧的结论
+	// 要等列表建完才知道）——差一帧看不出来，理由见 shell.go 里
+	// queueDragging 那一条。
+	s.queueDragging = s.queueDraggingNow
 }
 
 // currentRow 是「正在放的那一首」在抽屉里的行号，没有是 -1。
@@ -782,6 +800,13 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 	dragging := rowEl.Dragging()
 	if dragging {
 		rowEl = rowEl.Opacity(0.4)
+		// 这一行就是**拖动源** → 「有东西正被拖着」。
+		//
+		// ⚠️ **用这一句顶掉框架的 DragOver**：DragOver 每问一次都要新建一个
+		// 闭包（每帧一次分配），而这一句本来就在问（上面那句 `Dragging()` 是
+		// 画半透明要的），拿它报「正被拖着」不花钱。差一帧看不出来——插入线晚
+		// 一帧出现，而拖动本来就不是一帧的事（见 shell.go 里 queueDragging）。
+		s.queueDraggingNow = true
 	}
 	// ⚠️ **悬停 / 按下那一层**（`flat` 那一档：悬停 8%、按下 16%）。
 	//
@@ -848,8 +873,30 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 			// 图标是上游那一枚（`music-list-item/operation.tsx:22` 的
 			// `RiMore2Line`，16px）：这一颗画出来就是三个点，而「⋯」那几个
 			// 字符跟着系统字体走——同一个意思在两台机器上是两个不同的宽高。
-			flatIconButton(c, iconMore, "这一首的操作", 16).
-				Menu(func(m *ui.Menu) { s.queueMenu(m, row) })
+			//
+			// ⚠️ **配方在 `widgets/list` 里**（票 #249）：同一个「⋯」在仓库里
+			// 曾经有**三个尺寸**——列表那一档是 32×32、这里这一枚是 44×28（`flat`
+			// 默认内边距 6/14）。44 宽在 320 的抽屉里吃掉 14% 行宽，歌名那一列
+			// 因此只有 196 而不是 208，**标题比需要早 12px 截断**。现在两处共用
+			// 一份（`list.OperationAccent`），尺寸是 16 + 每边 8 = 32×32。
+			//
+			// ⚠️ **无障碍名带上歌名**（`list.OperationLabel`）：原来这一枚叫
+			// 「这一首的操作」——一屏 N 枚全都叫这一句，读屏念出来分不出是哪一行，
+			// Tester 也认不出是哪一行。现在是「「歌名」的操作」，和列表那一档
+			// 一样。
+			//
+			// ⚠️ **那个名字是「记好的那一份」**（`s.queueRowOps`，票 #313 / #339
+			// 那一档）：`list.OperationLabel` 现拼的话每帧每行一次字符串拼接，而
+			// 抽屉一屏画着十来行——那十来次分配把队列抽屉那一档的**每帧分配上限**
+			// （`framebudget_test.go`：44 次）顶穿了。列表那一档早就是记好的
+			// （`widgets/list` 的 `opText`），这一处没跟着记。
+			//
+			// ⚠️ **悬停时图形变主色**（`OperationAccent`）：指针落在它上面时整行
+			// 也亮着（`rowEl.Hovered()` 对祖先为真），两处反馈叠在一起，而原来
+			// 两者都是极淡的中性色——**看不出「我现在指着的是哪一枚」**。变主色
+			// 那一档是上游 `hover:text-primary`（票 #249）。
+			list.OperationAccent(c, s.queueRowOps.At(row.at, row.item.Title, list.OperationLabel),
+				func(m *ui.Menu) { s.queueMenu(m, row) })
 		})
 	})
 

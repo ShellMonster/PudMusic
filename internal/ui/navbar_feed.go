@@ -173,7 +173,10 @@ func (s *Shell) viewDynamicDot(c *ui.Context) {
 		ui.Column(c).Key("nav-feed-btn").Children(func() {
 			// 上游这一枚是 user-feed 的 `Tooltip closeDelay={0}`
 			// （`navbar/user-feed/index.tsx:50`）：菜单那一档，指针一走就收。
-			if s.withMenuTip(c, iconButton(c, iconFeed, "动态", iconMd).
+			//
+			// ⚠️ **走 `iconKey`（悬停时图形变主色）**，不是 `iconButton`（票 #249）：
+			// 顶栏这一排和播放条上是同一个「图标键」，配方得是同一档。
+			if s.withMenuTip(c, iconKey(c, iconFeed, "动态", iconMd, false).
 				Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "动态").Clicked() {
 				// Biu 的 handleOpen：清掉红点，再去看动态。
 				s.feed.clear()

@@ -8,35 +8,37 @@
 // 会把那个文件撑成两个主题，而这一份的规矩（不许重入、失败等人点重试、
 // 唤醒）要独立讲清楚。
 //
-// # 四摊，各自独立
+// # 三个 Tab 是三个翻页列表，三摊互不合并
 //
-// 三个 Tab 各一摊，新歌速递又一摊。**不合并成一次请求**：三个 Tab 用的本来
-// 就是两套接口（见 `service/bili/recommend.go` 的文件头），而用户未必会看
-// 另外两档——启动就把三摊都拉一遍，等于用两个用不上的请求换一个「切 Tab
-// 不用等」。**第一次切到哪一档才拉哪一档**，拉过就一直留在那儿（切 Tab 不
-// 重来，上游是每切一次重拉一次，见下面「为什么不跟着上游那样每次都重拉」）。
+// **每一档一个 `list.PagedList`**，它自己管翻页（拉页、防重入、取消、旧结果
+// 作废、容器没填满自动续拉）——这一层**不另写一套**（票 #370 的验收第 5 条）。
+//
+// ⚠️ **三摊互不合并**：三个 Tab 用的本来就是两套接口（见
+// `service/bili/recommend.go` 的文件头），而用户未必会看另外两档——启动就把三摊
+// 都拉一遍，等于用两个用不上的请求换一个「切 Tab 不用等」。**第一次切到哪一档
+// 才拉哪一档**，拉过就一直留在那儿（切 Tab 不重来，上游是每切一次重拉一次，见
+// 下面「为什么不跟着上游那样每次都重拉」）。
 //
 // # 为什么不跟着上游那样每次切 Tab 都重拉
 //
 // 上游 `music-recommend/index.tsx:133-137` 的 `useEffect([activeTab, init])`
 // 每切一次 Tab 就重新拉第一页。它能这么干是因为它整个列表是空的开始（翻页
-// 状态跟着它那个 `listKey` 一起重建），而我们**一个 Tab 一个 `list.List`**、
+// 状态跟着它那个 `listKey` 一起重建），而我们**一个 Tab 一个翻页列表**、
 // 滚动位置跟着那一个对象走（见 `homepage.go`「切 Tab 的滚动位置」那一段）。
 // 每切一次重拉会把用户盯着的第 17 首换成另一批的第 17 首——用户盯着的那一首
 // 变了，而那个变化他解释不了。
 //
 // # 🔴 失败之后只有人能让它再来一次
 //
-// `viewHome` 每一帧都会跑一遍 `pull`，而它发不发只看一个数：`started`
-// （「拉过没有」，**失败也算**）。失败的那一趟不会把它落回 false，所以那一档
-// 不会再自动发，唯一的出口是界面上那个「重试」（`retryTab` / `retryNew`
-// 才落它）。少了这道门就是一个每帧发一次请求的死循环（`upspace_test.go` 里
-// 那个 300 毫秒 138 次的例子就是同一件事）。
+// 翻页列表自己闩着这件事（`list.PagedList` 的 `blocked`）：失败之后自动补屏
+// 就此停手，唯一的出口是界面上那个「重试」（末尾那一行，或者首页这一屏
+// 那一整块失败态里的「重试加载××推荐」）。少了这道门就是一个每帧发一次请求
+// 的死循环（`upspace_test.go` 里那个 300 毫秒 138 次的例子就是同一件事）。
 //
 // # 🔴 换账号时整份作废
 //
 // 分区推荐是**按账号**的（B 站拿 Cookie 里的 mid 算口味）。带着 A 账号的
-// 推荐给 B 账号看，界面上没有任何东西提示这一点，所以登录态一变就把四摊
+// 推荐给 B 账号看，界面上没有任何东西提示这一点，所以登录态一变就把三档
 // 全清掉重来（和 `dynamicfeed.go` 的 `resetIfAccountChanged` 同一个理由）。
 package ui
 
@@ -51,20 +53,14 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 )
 
-// homeNewMusic 是新歌速递那一摊的下标，和三个 Tab 挤在同一个信箱里。
+// homeFeed 装新歌速递那一摊的取数状态。
 //
-// ⚠️ **它不是第四个 Tab**：`homeTabs` 还是三个（`homepage.go`），这一格只在
-// 「流行」那一档的顶部画（上游 `index.tsx:295`），而 `homeTabs` 的长度被
-// `homeTabCount` 拿去定数组了——往里加第四个会让三个 Tab 的滚动位置测试
-// 全错，而那一块根本不是 Tab。
-const homeNewMusic = homeTabCount
-
-// homeFeed 装这一页的四摊取数状态。
+// ⚠️ **三个 Tab 不在这一摊里**：它们各有自己的 `list.PagedList`，翻页状态在
+// 那一层里（见文件头「三个 Tab 是三个翻页列表」）。
 //
-// ⚠️ 里面的 `tabs` / `newTab` **只由界面线程读写**（铁律一），跨 goroutine
-// 的只有下面那一个带锁的信箱。
+// ⚠️ 里面的 `newTab` **只由界面线程读写**（铁律一），跨 goroutine 的只有下面
+// 那一个带锁的信箱。
 type homeFeed struct {
-	tabs    [homeTabCount]homeTab
 	newTab  homeTab
 	forWho  int64 // 手上这一份是为哪个账号拉的（0 = 没登录）
 	haveWho bool
@@ -92,11 +88,12 @@ type homeTab struct {
 
 // homeResult 是后台拉完之后投进信箱的东西。
 type homeResult struct {
-	// which 是哪一摊：0..2 是三个 Tab，homeNewMusic 是新歌速递。
-	which   int
-	songs   []list.Music
+	// songs 是这一摊拉回来的歌。
+	songs []list.Music
+	// dropped 是画不出来的条数。
 	dropped int
-	err     error
+	// err 是这一趟的错。
+	err error
 	// selfMid 是发这一次时的账号。换账号之后回来的那一摊**作废**——
 	// 停请求停不掉已经在回来的那一趟（和 `dynamicfeed.go` 同一句话）。
 	selfMid int64
@@ -110,8 +107,8 @@ type homeLoads struct {
 	// mounted 报 B 站客户端挂上没有。没挂上时页面**不发请求**，照它自己的
 	// 空状态画（见 viewHome 里那段）。
 	mounted func() bool
-	// tab 拉第 tab 个 Tab 的一页推荐。
-	tab func(ctx context.Context, tab int) ([]app.RecommendItem, int, error)
+	// tab 拉第 tab 个 Tab 的**第 page 页**推荐（页码从 1 起）。
+	tab func(ctx context.Context, tab, page int) ([]app.RecommendItem, int, error)
 	// new 拉新歌速递那一摊。
 	new func(ctx context.Context) ([]app.RecommendItem, int, error)
 	// selfMid 是当前登录账号（0 = 没登录），用来判断手上这一份该不该作废。
@@ -124,16 +121,16 @@ type homeLoads struct {
 func (h *homePage) initLoads(l homeLoads) { h.loads = l }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 接上去的那两个「去拉」
+// 接上去的那几个「去拉」
 // ─────────────────────────────────────────────────────────────────────────────
 
-// fetchHomeTab 拉第 tab 个 Tab 的一页推荐。**跑在后台 goroutine 里**。
+// fetchHomeTab 拉第 tab 个 Tab 的**第 page 页**推荐。**跑在后台 goroutine 里**。
 //
-// ⚠️ 它只认传进来的 `tab` 和 `ctx`，**不许回去读界面上任何东西**：那一刻
+// ⚠️ 它只认传进来的 `tab` 和 `page`，**不许回去读界面上任何东西**：那一刻
 // 用户可能已经切到别的 Tab 了，而这一趟发的是切走之前那一档（回来之后按
 // 下标落到那一档，各 Tab 各自一份，互不干扰）。
-func (s *Shell) fetchHomeTab(ctx context.Context, tab int) ([]app.RecommendItem, int, error) {
-	return s.app.RecommendOf().Feed(ctx, tab, homeFirstPage)
+func (s *Shell) fetchHomeTab(ctx context.Context, tab, page int) ([]app.RecommendItem, int, error) {
+	return s.app.RecommendOf().Feed(ctx, tab, page)
 }
 
 // fetchHomeNewMusic 拉新歌速递那一摊。**跑在后台 goroutine 里**。
@@ -141,16 +138,47 @@ func (s *Shell) fetchHomeNewMusic(ctx context.Context) ([]app.RecommendItem, int
 	return s.app.RecommendOf().NewMusic(ctx)
 }
 
-// homeFirstPage 是首页拉的那一页（从 1 起）。
+// tabFetcher 是第 tab 个 Tab 那一档的拉页器。**建一次**，见 newHomePage。
 //
-// ⚠️ **只拉第一页**：上游是滚到底再拉下一段（`music-recommend/index.tsx:154-162`
-// 的 `loadMore`），而那要的是一个带三条翻页保障的分页列表（`list.PagedList`）。
-// 首页这一屏现在用的是三个各记各的滚动位置的 `list.List`（见 homepage.go
-// 「切 Tab 的滚动位置」），把它们换成翻页列表就是换掉那三个对象——而
-// `TestSwitchingBackRestoresThatTabsScrollPosition` 钉的就是「切回某个 Tab
-// 还在它原来的位置」。等要做「往下拉还有」时再说，那时这两件事要在同一次
-// 改动里解决。
-const homeFirstPage = 1
+// ⚠️ **页码从 1 起**（`list.PagedList` 那一层就是这么问的），而 B 站的两个接口
+// 收的都是页码：分区推荐收在 `display_id` 上，音乐榜收在 `pn` 上（见
+// `service/bili/recommend.go` 的文件头）。
+func (h *homePage) tabFetcher(tab int) list.Fetcher {
+	return func(ctx context.Context, page int) (list.Page, error) {
+		if h.loads.tab == nil {
+			return list.Page{}, errors.New("首页还没接上推荐接口")
+		}
+		if h.loads.mounted == nil || !h.loads.mounted() {
+			// 没有 B 站客户端：给一个**空的、而且「没有更多」**的页。
+			//
+			// ⚠️ **不是错**：错会走到页面上那一整块失败态（一句「拉不到」+ 一个
+			// 重试按钮），而这一屏压根不是拉失败了——是没有 B 站可拉（真机上这一
+			// 支不该走到，`main.go` 在开窗口之前就把客户端挂上了）。
+			//
+			// 而这一档画出来的是**这一页的空状态**（`routes` 表里 `/` 那一条），
+			// 那句话说的正是「怎么才能不空」。
+			return list.Page{HasMore: false}, nil
+		}
+		items, dropped, err := h.loads.tab(ctx, tab, page)
+		if err != nil {
+			// ⚠️ **翻成人话在落地的那一刻**，不在每一帧画的时候（理由见
+			// `homeFailureOf`）：翻完的错是给界面看的，原始的错进日志。
+			log.Printf("biu: 首页第 %d 档第 %d 页拉失败：%v", tab, page, err)
+			return list.Page{}, homeFailureOf(err)
+		}
+		if dropped > 0 {
+			// 不画在界面上（用户看见的是一屏正常的歌），但要留下一条：用户说
+			// 「怎么少了几首」的时候，日志里有这一行，而界面上一个字都没有。
+			log.Printf("biu: 首页第 %d 档第 %d 页有 %d 条画不出来（没有身份，或者和前面那条重了）",
+				tab, page, dropped)
+		}
+		// ⚠️ **「还有没有」不由这一层说**：B 站这两个接口都不给「还有没有」这一
+		// 格，而「一页空的」就是到底了（`list.PagedList` 那一层会照这一句把哨兵
+		// 收掉，见它的 `apply`）。所以这里一律说「还有」，让翻页那一层去问下一
+		// 页——问回来是空的，它自己就知道到底了。
+		return list.Page{Songs: homeMusicOf(items), HasMore: true}, nil
+	}
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 收：后台的结果落地
@@ -169,7 +197,7 @@ func (h *homePage) adopt() {
 		if r.selfMid != selfMidOf(h.loads) {
 			continue
 		}
-		st := h.feed.stateOf(r.which)
+		st := &h.feed.newTab
 		st.loading = false
 		st.err = nil
 		if r.err != nil {
@@ -179,11 +207,11 @@ func (h *homePage) adopt() {
 		st.dropped = r.dropped
 		if r.dropped > 0 {
 			// 不画在界面上（用户看见的是一屏正常的歌），但要留下一条：用户说
-			//「怎么少了几首」的时候，日志里有这一行，而界面上一个字都没有。
-			log.Printf("biu: 首页第 %d 摊有 %d 条画不出来（没有身份，或者和前面那条重了）",
-				r.which, r.dropped)
+			// 「怎么少了几首」的时候，日志里有这一行，而界面上一个字都没有。
+			log.Printf("biu: 新歌速递有 %d 条画不出来（没有身份，或者和前面那条重了）",
+				r.dropped)
 		}
-		h.adoptSongs(r.which, r.songs)
+		h.newGrid.SetSongs(r.songs)
 	}
 }
 
@@ -207,24 +235,15 @@ func homeFailureOf(err error) error {
 	return errors.New(msg)
 }
 
-// adoptSongs 把一摊换掉。**换歌不动滚动位置**，理由同 `homePage.SetSongs`。
-func (h *homePage) adoptSongs(which int, songs []list.Music) {
-	if which == homeNewMusic {
-		h.songs.new = songs
-		h.newGrid.SetSongs(songs)
-		return
-	}
-	h.songs.tabs[which] = songs
-	h.lists[which].SetSongs(songs)
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 发：该拉的那几摊拉起来
 // ─────────────────────────────────────────────────────────────────────────────
 
 // pull 把「此刻该拉的那几摊」拉起来。**每一帧都跑一遍**（见文件头那些规矩）。
 //
-// 只拉正在看的那一档；「流行」那一档顺带拉新歌速递（它只画在那里）。
+// ⚠️ **三个 Tab 不在这里拉**：它们由各自的翻页列表拉（`list.PagedList` 的
+// `Sync` 在这一份被画到时起第一拉，滚到底再起下一拉）。这里只管新歌速递
+// 那一摊——它只画在「流行」上，而它不是翻页列表（它自己横向翻页）。
 func (h *homePage) pull() {
 	if h.loads.mounted == nil || !h.loads.mounted() {
 		// 没有 B 站客户端。**不发那个注定失败的请求**，页面照它自己的空
@@ -232,9 +251,8 @@ func (h *homePage) pull() {
 		// 走到（`main.go` 在开窗口之前就把客户端挂上了）。
 		return
 	}
-	// ⚠️ 换账号了：四摊全部作废重来（下面那个函数顺手清了歌）。
+	// ⚠️ 换账号了：三档全部作废重来（下面那个函数顺手清了歌）。
 	h.resetForAccount()
-	h.pullTab(h.tab)
 	if h.tab == homePopTab {
 		h.pullNew()
 	}
@@ -258,38 +276,22 @@ func (h *homePage) resetForAccount() {
 		return
 	}
 	h.feed.forWho = mid
-	h.feed.tabs = [homeTabCount]homeTab{}
 	h.feed.newTab = homeTab{}
-	h.songs = homeSongs{}
+	// ⚠️ **三档用 Reset 而不是 Reload**：Reload 是「清空 + 当场拉第一页」，
+	// 而这里只有**正在看的那一档**该发请求——另外两档等用户切过去再拉
+	// （那一档的翻页列表被画到时会替它拉第一页）。
 	for _, l := range h.lists {
-		l.SetSongs(nil)
+		l.Reset()
 	}
 	h.newGrid.SetSongs(nil)
 }
 
-// pullTab 拉第 tab 个 Tab（还没拉过才拉）。
-//
-// 「重试」也走这里：`retry` 把 started 落回 false，这一帧再调一次 pull 就
-// 发出去了——**只有这一条路能重发**，见文件头「失败之后只有人能让它再来一次」。
-func (h *homePage) pullTab(tab int) {
-	st := &h.feed.tabs[tab]
-	if st.started || st.loading || h.loads.tab == nil {
-		return
-	}
-	st.started, st.loading = true, true
-	st.err = nil
-	mid := selfMidOf(h.loads)
-	loads := h.loads
-	h.goFetch(tab, func(ctx context.Context) ([]app.RecommendItem, int, error) {
-		return loads.tab(ctx, tab)
-	}, mid)
-}
-
 // retryTab 让第 tab 个 Tab 再拉一次。**人点了「重试」才走这里**。
+//
+// ⚠️ **走 Reload**：它把那一档清空、回顶、然后从第一页重来（票 #370 的
+// 验收第 1 条——失败之后要能从头再来，而不是接着失败的那一页）。
 func (h *homePage) retryTab(tab int) {
-	st := &h.feed.tabs[tab]
-	st.started, st.err = false, nil
-	h.pullTab(tab)
+	h.lists[tab].Reload()
 }
 
 // pullNew 拉新歌速递（还没拉过才拉）。
@@ -301,7 +303,7 @@ func (h *homePage) pullNew() {
 	st.started, st.loading = true, true
 	st.err = nil
 	loads := h.loads
-	h.goFetch(homeNewMusic, loads.new, selfMidOf(loads))
+	h.goFetch(loads.new, selfMidOf(loads))
 }
 
 // retryNew 让新歌速递再拉一次。**人点了「重试」才走这里**。
@@ -316,11 +318,11 @@ func (h *homePage) retryNew() {
 // ⚠️ 界面线程**不碰** `st`（`loading` 那些字段）：它正在这一帧的画里被读，
 // 而后台那条线还在跑——两边都写就是一处数据竞争（`-race` 一定会报）。
 // 后台只碰信箱那把锁。
-func (h *homePage) goFetch(which int, fetch homeFetch, selfMid int64) {
+func (h *homePage) goFetch(fetch homeFetch, selfMid int64) {
 	wake := h.loads.wake
 	go func() {
 		items, dropped, err := fetch(context.Background())
-		res := homeResult{which: which, dropped: dropped, err: err, selfMid: selfMid}
+		res := homeResult{dropped: dropped, err: err, selfMid: selfMid}
 		if err == nil {
 			res.songs = homeMusicOf(items)
 		}
@@ -328,7 +330,7 @@ func (h *homePage) goFetch(which int, fetch homeFetch, selfMid int64) {
 		h.feed.box = append(h.feed.box, res)
 		h.feed.boxMu.Unlock()
 		// 🔴 铁律三：**投递完必须唤醒**。只投递不唤醒的话界面停在旧帧，
-		// 而唤醒只有「结果到了」这一次——不唤醒就是一个永远转圈的页面。
+		// 而唤醒只有「结果到了」那一次——不唤醒就是一个永远转圈的页面。
 		if wake != nil {
 			wake()
 		}
@@ -363,14 +365,3 @@ func selfMidOf(l homeLoads) int64 {
 	}
 	return l.selfMid()
 }
-
-// stateOf 是某一摊此刻的状态。
-func (f *homeFeed) stateOf(which int) *homeTab {
-	if which == homeNewMusic {
-		return &f.newTab
-	}
-	return &f.tabs[which]
-}
-
-// loadingOf 是那一摊此刻有没有在拉。view 每帧读它。
-func (f *homeFeed) loadingOf(which int) bool { return f.stateOf(which).loading }

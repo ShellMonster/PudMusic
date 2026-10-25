@@ -291,27 +291,36 @@ const (
 	// 上游点名的缺口逐条对上：更多、网格 / 列表视图、文件夹+、编辑、删除、日历、
 	// 展开 / 全屏、画中画、刷新、外链、眼睛、感叹号、问号、导入 / 导出、用户组、
 	// 关注 / 取关、月亮 / 太阳、磁盘。
-	iconMore        = "System/more-2-line.svg"              // 每一行的操作（⋮）
-	iconMoreFilled  = "System/more-fill.svg"                // 操作（实心那一档）
-	iconMoreFilled2 = "System/more-2-fill.svg"              // 操作（实心，另一版）
-	iconViewGrid    = "Design/layout-grid-line.svg"         // 网格档
-	iconViewList    = "Editor/list-check-2.svg"             // 列表档
-	iconGrid        = "Design/grid-line.svg"                // 网格
-	iconFolderAdd   = "Document/folder-add-line.svg"        // 新建收藏夹
-	iconEdit        = "Design/edit-line.svg"                // 编辑
-	iconEditBox     = "Design/edit-box-line.svg"            // 编辑（框起来那一版）
-	iconCalendar    = "Business/calendar-line.svg"          // 日期 / 日期范围
-	iconExpand      = "Arrows/expand-diagonal-line.svg"     // 放大
-	iconShrinkBack  = "Arrows/expand-diagonal-2-line.svg"   // 还原
-	iconPiP         = "Media/picture-in-picture-2-line.svg" // 画中画
-	iconRefresh     = "System/refresh-line.svg"             // 刷新
-	iconExternal    = "Arrows/arrow-right-up-line.svg"      // 外链（在 B 站打开）
-	iconEye         = "System/eye-line.svg"                 // 显示
-	iconEyeOff      = "System/eye-off-line.svg"             // 隐藏
-	iconWarning     = "System/error-warning-line.svg"       // 感叹号 / 警告
-	iconQuestion    = "System/question-line.svg"            // 问号（帮助）
-	iconImport      = "System/import-line.svg"              // 导入
-	iconExport      = "System/export-line.svg"              // 导出
+	// iconMore 是「⋯」那一枚（每一行的操作入口）。
+	//
+	// ⚠️ **它是实心那一版，而且名字来自 `iconset`**（票 BMG-253 的评审）：
+	// 全应用有**四枚**「⋯」（这一枚、队列抽屉行尾、收藏夹工具栏、网格卡角上），
+	// 而**列表里那两枚**（`widgets/list`）在界面层**下面**——四枚要同一张图，
+	// 那个名字只能住在两边都够得着的 `iconset` 里（`iconset.MoreVertical`）。
+	//
+	// 线框那版（`more-2-line`）的三个点是 24 见方里半径 1.5 的圆——画成 16 像素
+	// 就是**三个 2 像素的斑点**，和旁边那个 12 像素的时长数字一样重。
+	iconMore       = iconset.MoreVertical                  // 每一行的操作（⋮，实心那一版）
+	iconMoreFilled = "System/more-fill.svg"                // 操作（实心，横着的另一版）
+	iconMoreLine   = "System/more-2-line.svg"              // 操作（线框那一版：备着，不摆）
+	iconViewGrid   = "Design/layout-grid-line.svg"         // 网格档
+	iconViewList   = "Editor/list-check-2.svg"             // 列表档
+	iconGrid       = "Design/grid-line.svg"                // 网格
+	iconFolderAdd  = "Document/folder-add-line.svg"        // 新建收藏夹
+	iconEdit       = "Design/edit-line.svg"                // 编辑
+	iconEditBox    = "Design/edit-box-line.svg"            // 编辑（框起来那一版）
+	iconCalendar   = "Business/calendar-line.svg"          // 日期 / 日期范围
+	iconExpand     = "Arrows/expand-diagonal-line.svg"     // 放大
+	iconShrinkBack = "Arrows/expand-diagonal-2-line.svg"   // 还原
+	iconPiP        = "Media/picture-in-picture-2-line.svg" // 画中画
+	iconRefresh    = "System/refresh-line.svg"             // 刷新
+	iconExternal   = "Arrows/arrow-right-up-line.svg"      // 外链（在 B 站打开）
+	iconEye        = "System/eye-line.svg"                 // 显示
+	iconEyeOff     = "System/eye-off-line.svg"             // 隐藏
+	iconWarning    = "System/error-warning-line.svg"       // 感叹号 / 警告
+	iconQuestion   = "System/question-line.svg"            // 问号（帮助）
+	iconImport     = "System/import-line.svg"              // 导入
+	iconExport     = "System/export-line.svg"              // 导出
 	// iconAdd 既是「关注」也是「新建收藏夹」那枚加号——上游两处用的是同一个
 	// `RiAddLine`（`music-list-item` 和 `side/collection`），而 `icons.go` 一个
 	// 文件一个名字，所以只留一个。
@@ -415,7 +424,7 @@ var iconNames = []string{
 	iconEmptyDownload, iconFailed, iconCoverPlaceholder,
 
 	// 调研点名的缺口
-	iconMore, iconMoreFilled, iconMoreFilled2,
+	iconMore, iconMoreFilled, iconMoreLine,
 	iconViewGrid, iconViewList, iconGrid,
 	iconFolderAdd, iconEdit, iconEditBox, iconCalendar,
 	iconExpand, iconShrinkBack, iconPiP, iconRefresh, iconExternal,
@@ -567,10 +576,25 @@ const (
 // name 是图标名，label 是无障碍名字，font 是图标边长。点击区由调用方的
 // `Padding` / `Size` 撑——这里给的是「一个画着图标的按钮」，不是「多大一个」。
 //
-// ⚠️ **它是扁平的**（无描边、无常驻底色，见 flatbutton.go）：顶栏那几枚、播放条
-// 上那一排、队列抽屉头那两枚都是它，而调研点名的那圈 1px 描边正是 `ui.Button`
-// 的默认样式给的（报告 §1.1 的 F1）。这一改之后**所有图标键一处都不漏**——
-// 它们全从这里出。
+// ⚠️ **它是扁平的**（无描边、无常驻底色，见 flatbutton.go）：调研点名的那圈 1px
+// 描边正是 `ui.Button` 的默认样式给的（报告 §1.1 的 F1）。这一改之后**所有图标键
+// 一处都不漏**——它们全从这里出。
+//
+// ⚠️ **它不换色，悬停只有一层淡底**——所以它**不是「图标键」那一档**，那是
+// `iconKey`（上游的 `hover:text-primary`）。票 #249 把顶栏那几枚、队列抽屉头那两枚
+// 改成 `iconKey` 之后，**这个包装（`iconButton`）剩下 6 处调用点**，都在两个地方：
+//
+//   - **满屏播放器**（`fullplayer.go`，5 处）：那一行的底是**压暗过的封面**，主色
+//     当字色那一档压在上面只有 1.0:1（等于看不见，见票 #217 的评审）。
+//   - **搜索框里的「清空」**（`navbar_search.go`，1 处）：那一枚和输入框是同一个
+//     组合件。
+//
+// ⚠️ **别把这句话读成「全应用只剩这两处」**：界面层底下那一层（`flatIconButton`）
+// 还有 **20 处**走「不换色」这一档（2026-10-25 量的快照）——页头的小键、列表行尾
+// 的操作键、迷你播放器的那几个传输键（`collectionpage` / `downloadlist_ops` /
+// `localmusic` / `miniplayer` / `sidebar_favorites` / `searchbutton` …）。
+// 票 #249 只点了顶栏、队列抽屉头和抽屉行尾那枚「⋯」，其余的**各有各的上下文**
+// （尺寸、底色、是不是那一行的主键），**不是漏改**——要一起改是另一票。
 //
 // 🔴 **label 不许省**。图标对辅助技术是不可见的（`mygo/ui/svg.go` 的 Icon 文档：
 // "Icons are decorations that assistive technology does not see, unless Label
@@ -588,7 +612,11 @@ func iconButton(c *ui.Context, name, label string, font float32) ui.Element {
 //
 // ⚠️ **它和 `iconButton` 是两件事**：上游那个 `IconButton` 是**共享组件**，而我们
 // 把「底是应用底色」和「底是压暗过的封面」分成两种情况（见下面那段），所以
-// **按调用点挑**，不是全局的。播放条上那些图标键走它，满屏播放器那一行不走。
+// **按调用点挑**，不是全局的。
+//
+// 走它的地方（票 #249 之后）：播放条上那些图标键、**顶栏那几枚**、**队列抽屉头
+// 那两枚**、**队列抽屉行尾那一枚「⋯」**、**新歌速递的翻页箭头**。满屏播放器那一行
+// 不走（底是压暗过的封面）。
 //
 // ⚠️ **禁用的状态必须从这里给**（`disabled` 那一栏），不能靠调用方链
 // `.Disabled(...)`：悬停是**建元素的时候**问的（`Hovered()` 在禁用的键上恒为
@@ -598,6 +626,16 @@ func iconButton(c *ui.Context, name, label string, font float32) ui.Element {
 // 理由、颜色那一档怎么取，都在 `widgets/flat` 的 `IconButtonAccent` 上面写着。
 func iconKey(c *ui.Context, name, label string, font float32, disabled bool) ui.Element {
 	return flatIconButtonAccent(c, name, label, font, disabled)
+}
+
+// iconKeyOnBase 是 iconKey 的「**底色可传**」变体：悬停时图形变的那一档主色按
+// **给定的底**算，而不是按 `t.Background` 算。
+//
+// ⚠️ **满屏播放器那一行走的就是它**：那一行的底是压暗过的封面，而按页面白底算
+// 出来的那一档（浅色主题下是深绿 `#107032`）压在那上面只有 **1.0:1**——指针一
+// 停上去，那几个图标**反而不见了**（票 #248）。
+func iconKeyOnBase(c *ui.Context, name, label string, font float32, disabled bool, base flat.Base) ui.Element {
+	return flatIconButtonAccentOnBase(c, name, label, font, disabled, base)
 }
 
 // iconButtonPlay 是播放/暂停那一枚：**设计规范的主播放键**。

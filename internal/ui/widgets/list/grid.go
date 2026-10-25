@@ -202,6 +202,10 @@ type Grid struct {
 	// 钉住这一条的是 `TestTheGridOffersTheRetryThatTheListOffers`。
 	footer func(c *ui.Context)
 
+	// footerLabel 是末尾那一格给无障碍和「打字选中」用的名字。空串是默认那句
+	// （`footerLabel`）。理由同 `List.footerLabel`。
+	footerLabel string
+
 	// lead 是「这一份歌上面那一块」（页内头部），为 nil 时没有。
 	//
 	// ⚠️ **它占网格的第 0 行**（整行，不是一格）：所以下面那些行在框架那一层的
@@ -237,9 +241,10 @@ type Grid struct {
 
 	// keys 记「上一次输入是键盘还是指针」。
 	//
-	// ⚠️ **网格这一档还没有焦点环**（`List` 那一档有，见 `card.go` 的
-	// `SelectedRow`），所以它眼下只干一件事：知道「↑ 在顶上一行时把焦点交回
-	// 侧栏」（票 #245 的 E4）。焦点环那一档是另一张票的事。
+	// 网格这一档现在**也有焦点环**了（票 #453）：游标那一格画 `rowFocusRing`
+	// ——和列表那一档**同一个函数**（`selection.go`），所以两档是同一档环。
+	//
+	// ⚠️ **它还管一件事**：「↑ 在顶上一行时把焦点交回侧栏」（票 #245 的 E4）。
 	keys KeyboardMode
 }
 
@@ -323,6 +328,12 @@ func (g *Grid) SetEmptyView(fn func(c *ui.Context)) { g.emptyView = fn }
 //
 // ⚠️ 只能由界面线程调，同 SetSongs。
 func (g *Grid) SetFooter(fn func(c *ui.Context)) { g.footer = fn }
+
+// SetFooterLabel 换末尾那一格给无障碍和「打字选中」用的名字。传空串是退回
+// 默认那句（`footerLabel`）。理由同 `List.SetFooterLabel`。
+//
+// ⚠️ 只能由界面线程调，同 SetSongs。
+func (g *Grid) SetFooterLabel(name string) { g.footerLabel = name }
 
 // SetLead 装「这一份歌上面那一块」（页内头部），传 nil 去掉。
 //
@@ -505,6 +516,9 @@ func (g *Grid) View(c *ui.Context) {
 		}
 		i := first(row)
 		if i >= len(g.songs) {
+			if g.footerLabel != "" {
+				return g.footerLabel
+			}
 			return footerLabel
 		}
 		return g.songs[i].Title
@@ -520,13 +534,32 @@ func (g *Grid) View(c *ui.Context) {
 	// 那一支——而哨兵压根没装（`g.footer` 是 nil），当场空指针崩在画页脚那里。
 	g.cols, g.started = cols, true
 
+	// ⚠️ **游标挪了没有**：挪了而且不是指针挪的，就是键盘挪的（焦点环靠它，
+	// 理由见 `selection.go` 的 KeyboardMode）。
+	//
+	// ⚠️ **要在画格之前问**：焦点环是画在格子上的，这一句晚了那一帧就少一圈环。
+	g.keys.Moved(g.sel)
+
 	e := ui.List(c, &g.state, g.rows()).
 		Grow(1).
 		FillWidth().
-		// ⚠️ **听一听输入**：为了知道「键盘往回走到顶上了」（票 #245 的 E4）。
-		// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选格、
-		// Tab 换焦点都还在。
-		HandleInput(g.keys.Input).
+		// 🔴 **听一听输入**：方向键挪游标、回车放歌，外加知道「键盘在管还是
+		// 指针在管」（焦点环靠它，理由见 `selection.go`）。
+		//
+		// ⚠️ **返回 true 的是「这一下我吃掉了」**：吃掉方向键，滚动容器才不会
+		// 跟着滚——游标挪到哪一格，画面就停在哪一格。
+		HandleInput(g.gridInput).
+		// 🔴 **网格这一档要能进键盘焦点**（票 #453）。
+		//
+		// ⚠️ **为什么不能等框架给**：框架只在「这张列表有游标」的时候才
+		// `Focusable()`（`mygo/ui/list.go` 的 `if s.cursor() != nil`），而网格
+		// 不用框架那一套行游标（格子是布局，它自己管），所以焦点这一档得自己装。
+		//
+		// ⚠️ **框架那一圈（画在整张网格上）只在「一个格子都没选中」时画**：
+		// 选中了哪一格，环就落在那一格上——和列表那一档一个规矩（见 `card.go`
+		// 的 `FocusRing(l.selSong() < 0)`）。
+		Focusable().
+		FocusRing(g.sel < 0).
 		// 没有歌时网格是空的，Children 里那一支就是它的空状态。
 		Children(func() {
 			if len(g.songs) == 0 {
@@ -563,6 +596,134 @@ func (g *Grid) View(c *ui.Context) {
 
 // Hot 报上一次 View 时指针是不是压在这个网格的滚动条上。见 `List.Hot`。
 func (g *Grid) Hot() bool { return g.hot }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 键盘那一路：方向键挪游标、回车放歌、焦点环落在游标那一格
+// ─────────────────────────────────────────────────────────────────────────────
+
+// gridInput 是网格这一档的键盘输入。
+//
+// # ⚠️ **它和 `KeyboardMode.Input` 是同一个回调**
+//
+// 框架一个元素只挂一个 `HandleInput`（`mygo/ui/element.go` 的 `e.inputFn = fn`），
+// 所以两件事得在这里自己串起来：先让 `KeyboardMode` 听一听（它要记「键盘在管」
+// 和「指针在管」，焦点环靠这两个），再走这一档自己的键。
+//
+// # ⚠️ **返回 true 是「这一下我吃掉了」**
+//
+// 吃掉方向键，滚动容器才不会跟着滚——游标挪到哪一格，画面就停在哪一格。
+// （框架那一层不画焦点环给输入框、也不替列表之外的控件挪游标，见
+// `mygo/ui/list.go` 的 `listInput`：它只在「这张列表有游标」时才导航。）
+func (g *Grid) gridInput(ev ui.InputEvent) bool {
+	g.keys.Input(ev)
+	if ev.Kind != ui.InputKeyDown {
+		return false
+	}
+	switch ev.Key {
+	case ui.KeyLeft:
+		g.moveCursor(-1, 0)
+	case ui.KeyRight:
+		g.moveCursor(1, 0)
+	case ui.KeyUp:
+		g.moveCursor(0, -1)
+	case ui.KeyDown:
+		g.moveCursor(0, 1)
+	case ui.KeyEnter:
+		g.submitCursor()
+	default:
+		return false
+	}
+	// ⚠️ **方向键一律吃掉**，挪不动也吃掉：列表那一档也是这样的（框架的
+	// `navigate` 认了方向键，容器就不滚了，`mygo/ui/list.go`）——方向键只挪游标，
+	// 滚动是滚轮和 PageDown / PageUp 的事。
+	//
+	// ⚠️ **「挪不动」不是「这一下没处理」**：撞到边上就是不动，而焦点交回侧栏
+	// 是 `KeyboardMode` 那一档的事（它认的是「按了 ↑ 而游标没动」）。
+	return true
+}
+
+// moveCursor 是方向键挪游标的那一段：把游标挪到 (行+dy, 列+dx) 那一格。
+//
+// 挪成了返回 true，没挪成返回 false（**没挪成不是错**：撞到边上就是不动）。
+//
+// # 网格是二维的，所以左右不绕行
+//
+// 从一行的最后一格按 → **不**跳到下一行的第一格——那是 ↓ 的事。绕行的话
+// 「按了 → 却跳到下一行」和「按 ↓」是同一个动作，用户连按两下会跳两行。
+//
+// # 到顶了不动
+//
+// ↑ 在顶上一行时**不动**：焦点交回侧栏是 `KeyboardMode` 那一档的事
+// （它认的是「按了 ↑ 而游标没动」，理由见 `selection.go`）。
+//
+// # 最后一行不满时也不动
+//
+// 下面没有那一格就是没有——挪到那一行里**别的**一格是错的方向（↓ 是往下，
+// 不是往右）。
+func (g *Grid) moveCursor(dx, dy int) bool {
+	n := len(g.songs)
+	if n == 0 {
+		return false
+	}
+	cols := g.gridCols()
+	cur := g.sel
+	if cur < 0 || cur >= n {
+		// 还没有游标：任何方向键都从**第一格**开始（和列表那一档同一个规矩——
+		// 框架的 `f.step(max(*sel,-1), 1)`，`mygo/ui/list.go`）。
+		//
+		// ⚠️ **↑ 也是第一格**：列表那一档在「还没选中任何一行」时按 ↑ 落的也是
+		// 第一行，于是「↑ 到顶交回侧栏」要按第二下才生效——两档一个规矩。
+		g.sel = 0
+		g.scrollCursorIntoView(0)
+		return true
+	}
+	row, col := cur/cols, cur%cols
+	row += dy
+	col += dx
+	if col < 0 || col >= cols {
+		return false
+	}
+	if row < 0 {
+		return false
+	}
+	next := row*cols + col
+	if next >= n {
+		return false
+	}
+	g.sel = next
+	g.scrollCursorIntoView(next)
+	return true
+}
+
+// gridCols 是这一帧的列数。
+//
+// ⚠️ **头一帧是 0**（容器还没量出来）：按最窄那一档算，和 `keepAnchor` 一个口径。
+func (g *Grid) gridCols() int {
+	if g.cols <= 0 {
+		return gridMinCols
+	}
+	return g.cols
+}
+
+// scrollCursorIntoView 把游标那一格滚进画面。
+//
+// ⚠️ **滚的是「行」**：框架的 `ScrollIntoView` 收的是行号，而网格一行几首——
+// 行号 = 歌的下标 ÷ 列数 + 页内头部占着的那一行（和 `ScrollToItem` 同一个算法）。
+func (g *Grid) scrollCursorIntoView(i int) {
+	g.state.ScrollIntoView(i/g.gridCols() + leadRows(g.lead))
+}
+
+// submitCursor 是回车：放游标那一格那一首。
+//
+// ⚠️ **和列表那一档同一个手势**：列表的 `OnSubmit` 走的是 `playFrom`
+// （`card.go` 的 `viewCard`），网格的双击走的也是它——回车走同一条路，
+// 免得「列表里回车放歌、网格里回车没反应」。
+func (g *Grid) submitCursor() {
+	if g.sel < 0 || g.sel >= len(g.songs) {
+		return
+	}
+	g.playFrom(g.sel)
+}
 
 // keepAnchor 是「换列数时滚动锚点保持」的那一段（验收第 2 条）。
 //
@@ -827,7 +988,27 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 		ContextMenu(func(m *ui.Menu) { buildSongMenu(m, g.songs, g.acts, i, g.playFrom) }).
 		// 点一下选中这一首。Biu 的卡片单击是直接播，这里只选中：桌面端单击
 		// 就换队列太容易误触，播放走双击和右键菜单。
-		OnClick(func() { g.sel = i })
+		//
+		// 🔴 **点完把键盘焦点交给这个网格**（票 #453）：格子本身不可聚焦，
+		// 而列表那一档点一行之后焦点是落在**列表**上的（框架的
+		// `f.owner.Focus()`，`mygo/ui/value_input.go`）——网格这一档要自己来，
+		// 否则「点一格之后按方向键」那一路走不通（方向键只送给有焦点的那个
+		// 元素，见 `mygo/ui/input.go` 的 `focusHandler`）。
+		OnClick(func() {
+			g.sel = i
+			g.state.Handle.Focus()
+		})
+
+	// 🔴 **焦点环落在游标那一格上**（票 #453）：用列表那一档**同一个函数**
+	//（`selection.go` 的 `rowFocusRing`），所以两档是同一档环——而且它已经
+	// 处理了「往里收 3 像素」（不收会盖到隔壁那一格）。
+	//
+	// ⚠️ **环只在「键盘在管」且「这个网格有焦点」时画**：鼠标点一格之后那一格
+	// 什么标记都没有（上游点一格不改变它的样子，票 #197），而方向键走位之后
+	// 环要回来（理由见 `selection.go` 的 `KeyboardMode`）。
+	if i == g.sel && g.keys.On() && Focused(c, &g.state) {
+		box = rowFocusRing(box, t)
+	}
 
 	// ⚠️ **hover 要在 `Children` 之前问**（同 `card.go` 里那一处）：它报的是这一帧指针
 	// 在不在这一格上，而封面上面那圈反馈要等 Children 才建得出来。
@@ -861,10 +1042,21 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 
 		// ① 封面 + 它上面那圈 hover 反馈：右下角一个 40 的主色圆播放钮，封面底部
 		// 一条 black/90 的渐变（左播放量 / 右时长），都 200ms 淡入。
-		hover.CardCover(c, g.cache, m.Cover, cell, gridCoverH, onCell,
-			g.countText.At(i, m.View, PlayCountText),
-			g.durText.At(i, m.Duration, formatDuration), m.Title,
-			func() { g.playFrom(i) })
+		//
+		// ⚠️ **「用户」那一档的格子不是歌**（`isUserItem`）：那一格按下去是进他的
+		// 空间，所以那一圈反馈换一套——图形、提示、无障碍名三样都换（理由见
+		// `hover.ProfileTip`）。
+		if isUserItem(m) {
+			hover.CardCoverProfile(c, g.cache, m.Cover, cell, gridCoverH, onCell,
+				g.countText.At(i, m.View, PlayCountText),
+				g.durText.At(i, m.Duration, formatDuration), m.Title,
+				func() { g.playFrom(i) })
+		} else {
+			hover.CardCover(c, g.cache, m.Cover, cell, gridCoverH, onCell,
+				g.countText.At(i, m.View, PlayCountText),
+				g.durText.At(i, m.Duration, formatDuration), m.Title,
+				func() { g.playFrom(i) })
+		}
 
 		// ② 歌名 + UP 名/时长。
 		//

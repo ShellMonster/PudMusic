@@ -88,6 +88,16 @@ func flatIconButtonAccent(c *ui.Context, name, label string, font float32, disab
 	return flat.IconButtonAccent(c, icon(name), label, font, disabled)
 }
 
+// flatIconButtonAccentOnBase 是 flatIconButtonAccent 的「**底色可传**」变体：
+// 悬停时图形变的那一档主色按**给定的底**算，而不是按 `t.Background` 算。
+//
+// 满屏播放器那一行（上一首 / 下一首 / 播放模式 / 队列开关）的底是**压暗过的
+// 封面**：按页面白底算出来的那一档主色（浅色主题下是深绿 `#107032`）压在那上面
+// 只有 **1.0:1**——指针一停上去，那几个图标**反而不见了**（票 #248）。
+func flatIconButtonAccentOnBase(c *ui.Context, name, label string, font float32, disabled bool, base flat.Base) ui.Element {
+	return flat.IconButtonAccentOnBase(c, icon(name), label, font, disabled, base)
+}
+
 // flatIconLabelButton 是一个「图标 + 文字」的扁平按钮：图标在一个 cell×cell 的
 // 格子里，文字在格子右边，内容**左对齐**。
 //

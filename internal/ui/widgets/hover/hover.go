@@ -35,6 +35,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -44,28 +45,47 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// frameVisible 是「画这一帧的那个窗口，用户现在看得到吗」。
+// frameVisible 是「画这一帧的那个窗口，用户现在看得到吗」那一个开关。
 //
-// 为什么是包级而不是参数：`Wave` 在控件层，拿不到 `Shell`；而它每帧都要问
-// 同一个问题。MyGo 的 view 全部跑在主线程上，同一时刻只画一个窗口，所以
-// `Shell.View` 每帧开头设一次就够，画完不用恢复——下一个窗口画自己那一帧时会
-// 重新设置（`internal/ui/shell.go` 的 `View`）。
+// ⚠️ **它是逐窗口一份的**（票 #392）：主窗口失焦不等于迷你播放器看不见
+// （`internal/ui/presence.go`：「为什么每个窗口各有一份」）。所以这里放的是
+// **一个指针**——每一扇窗装上自己那一份，而这一格波形在**建的时候**把指针
+// 认下来（见 `Wave`）。
 //
-// 零值必须是「看得见」：这个包自己的测试直接调 `Wave`，没有 Shell 来设置；
+// ⚠️ **为什么是指针、而不是建的时候问一次「看得见吗」**：波形是**画的时候**
+// 问的（那一帧走**局部重绘**，只重画、不重建），而可见性会变——窗口失焦的
+// 那一刻答案就变了。一个**活的**开关（`atomic.Bool`）能被立刻改掉，而一个
+// 建的时候问出来的布尔值要等下一帧重建时才会更新——那中间窗口还在按帧重画
+// （票 #156 治的就是那个：失焦时白烧电）。
+//
+// 零值必须是「看得见」：这个包自己的测试直接调 `Wave`，没有窗口来装开关；
 // 设成 false 的话那些测试里的波形会永远不动，而它们测的正是「动」。
 //
 // ⚠️ **这个开关只管「要不要下一帧」，不管「这一帧画不画」**：看不见的时候
 // 能走到这里的那一帧照样画完整（也许是某条后台路径送进来的），只是画完不再
 // 要下一帧。真正让帧停下来的那一半在 `wakeHandle.invalidate`（wake.go）。
-var frameVisible = func() *atomic.Bool {
+var frameVisible = NewVisibleFlag()
+
+// NewVisibleFlag 造一个「看得见」的开关（给 `SetVisibleFlag` 用，和
+// `frameVisible` 那一个默认值一样）。
+func NewVisibleFlag() *atomic.Bool {
 	v := &atomic.Bool{}
 	v.Store(true)
 	return v
-}()
+}
 
-// SetFrameVisible 告诉这个包「这一帧所在的窗口看不看得见」。只由
-// `internal/ui.Shell.View` 每帧调一次。
-func SetFrameVisible(visible bool) { frameVisible.Store(visible) }
+// SetVisibleFlag 装上「这一扇窗看不看得见」那一个开关。只由
+// `internal/ui.Shell.View` 每帧调一次（装的是这一扇窗自己那一份）。
+//
+// ⚠️ **装的是指针，不是「看得见吗」**：这个包里的波形在**画的时候**问那个
+// 开关（那一帧只重画、不重建），所以问出来的答案必须是**活的**——窗口失焦
+// 的那一刻它就得变（理由见上面 `frameVisible` 那一段）。
+func SetVisibleFlag(visible *atomic.Bool) {
+	if visible == nil {
+		visible = NewVisibleFlag()
+	}
+	frameVisible = visible
+}
 
 const (
 	// Fade 是淡入淡出的时长。Biu 那两处都是 `duration-200`。
@@ -130,6 +150,51 @@ func FromLabel(title string) string { return title + " " + PlayFrom }
 // PlayLabel 是「加这一首并立即播」那枚播放钮的标签，理由同 FromLabel。
 func PlayLabel(title string) string { return title + " " + PlayNow }
 
+// ProfileTip 是「按下去进他的 UP 空间」那一句提示。
+//
+// # 为什么它和 `PlayFrom` 是两句话
+//
+// 搜索页「用户」那一档的行**不是歌**：按下去是跳到那个 UP 主的主页
+// （`internal/ui/searchresults.go` 的 `openSearchUser` → `navigate("/user/" + mid)`）。
+//
+// 那一圈反馈原来**三样都在说「放歌」**（图形是一枚播放三角、提示是「从这一首
+// 往后听」、无障碍名也是那一句）——用户读到的和发生的对不上：他想进他的主页，
+// 屏幕上却写着「我要开始放歌」。三样里只改一样，另一样还在说「放歌」。
+//
+// ⚠️ **这一句不许写成「播放」**：菜单里那一项已经从「从这一首往后听」改成
+// 「播放」了（`widgets/list/menu.go`），而「播放」说的是放歌——那是另一件事，
+// 说了还是对不上。
+const ProfileTip = "进他的 UP 空间"
+
+// ProfileLabel 是那一档的无障碍名（带上名字），理由同 FromLabel。
+func ProfileLabel(title string) string { return title + " " + ProfileTip }
+
+// profileIcon 是「进这个人的空间」那一枚图形：一个人。
+//
+// ⚠️ **和 `internal/ui` 的 `iconUser` 是同一张图**（`User & Faces/user-line.svg`），
+// 而这一处**不能** import `internal/ui`（那是个环：那一层 import 了这一包）——
+// 所以走 `iconset`（叶子包，两边共用同一份资源和同一个解析器，见它的文件头）。
+//
+// ⚠️ **为什么是「一个人」而不是「一张名片」**：应用里另有一枚「个人资料」
+// （`Business/profile-line.svg`，头像下拉里那一项），但它那一圈细线在 20 见方
+// 的地方糊成一团；一个人头加肩膀在那个尺寸上仍然一眼认得出。而这一枚要画在
+// 48 见方的头像正中间，只有 20 大。
+var profileIcon = iconset.Must("User & Faces/user-line.svg")
+
+// glyph 是封面那一圈上画的那个图形。
+//
+// ⚠️ **两种图形是两种事情**：播放三角说「放歌」，那一个人说「进他的空间」。
+// 判据在 `widgets/list` 那一层算好（`app.Item.Type == app.ItemTypeUser`）再传进来
+// ——这一包在 `widgets/list` 下面，够不着 `internal/app`（那是个环）。
+type glyph uint8
+
+const (
+	// glyphPlay 是一枚播放三角（「从这一首往后听」）。
+	glyphPlay glyph = iota
+	// glyphProfile 是一枚「一个人」（「进他的 UP 空间」）。
+	glyphProfile
+)
+
 // PlayingLabel 是那个跳动波形的标签，理由同 FromLabel。
 func PlayingLabel(title string) string { return title + " " + PlayingMark }
 
@@ -172,6 +237,10 @@ const (
 	idsCard
 	// idsCardOne 是网格卡片封面那一圈，「只放这一首」。
 	idsCardOne
+	// idsRowProfile 是列表行封面那一圈，「进他的 UP 空间」。
+	idsRowProfile
+	// idsCardProfile 是网格卡片封面那一圈，「进他的 UP 空间」。
+	idsCardProfile
 )
 
 // idsKey 是缓存的键：歌名 + 哪一种反馈。
@@ -241,13 +310,16 @@ func idsOf(title string, kind idsKind) ids {
 // packIDs 算出那一份身份。**只在歌名变了的时候走一次**。
 func packIDs(title string, kind idsKind) ids {
 	var out ids
-	if kind == idsCardOne {
+	switch kind {
+	case idsCardOne:
 		out.label = PlayLabel(title)
-	} else {
+	case idsRowProfile, idsCardProfile:
+		out.label = ProfileLabel(title)
+	default:
 		out.label = FromLabel(title)
 	}
 	switch kind {
-	case idsCard, idsCardOne:
+	case idsCard, idsCardOne, idsCardProfile:
 		out.bar = out.label + ":bar"
 		out.btn = out.label + ":btn"
 	default:
@@ -328,7 +400,7 @@ func drawTri(p *ui.Painter, r ui.Rect, c ui.Color) {
 // 列表行
 // ─────────────────────────────────────────────────────────────────────────────
 
-// RowCover 是「列表行的封面 + 它上面那一圈 hover 反馈」。
+// RowCover 是「列表行的封面 + 它上面那一圈 hover 反馈」，按下去是**从这一首往后听**。
 //
 // 代替直接调 `imgcache.View`：反馈是**贴在封面上**的，它得知道封面有多大、又摆在
 // 哪儿。调用方手里只有「一个 48×48 的封面」，所以连盒子一起给了。
@@ -339,12 +411,35 @@ func drawTri(p *ui.Painter, r ui.Rect, c ui.Color) {
 // 是 140 高跟着格子宽走，那一边收两个（见 CardCover）。
 func RowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 	on bool, title string, play func()) {
+	rowCover(c, cache, url, size, on, title, idsOf(title, idsRow), PlayFrom, glyphPlay, play)
+}
+
+// RowCoverProfile 是同一圈反馈，但按下去是**进他的 UP 空间**。
+//
+// 搜索页「用户」那一档的行走的这一条（`internal/ui/searchresults.go` 的
+// `openSearchUser`）：那一行不是歌，是**一个人**。图形、提示、无障碍名三样都
+// 跟着换——三样里只换一样，另一样还在说「放歌」（理由见 `ProfileTip`）。
+func RowCoverProfile(c *ui.Context, cache *imgcache.Cache, url string, size float32,
+	on bool, title string, play func()) {
+	rowCover(c, cache, url, size, on, title, idsOf(title, idsRowProfile), ProfileTip, glyphProfile, play)
+}
+
+// rowCover 是 RowCover / RowCoverProfile 共用的那一层。
+//
+// ids 是「这一行的身份」（算好的那一份，见上面「那几个身份」那一节），tip 是
+// 指针停在上面时的那句提示，g 是画在封面上的那个图形。
+//
+// ⚠️ **封面那一图的标签是 `title`（光名字），不是 `ids.label`**：那一图说的是
+// 「这是什么」，而上面那一圈反馈说的是「按下去会怎样」——两件事。
+//
+// （网格那一档的封面图拿的是 `ids.label`，那是那边一直的样子，见 `cardCover`；
+// 这一处没跟着改——改它就是改「歌」那一档的读屏效果，而那一档这一票不许动。）
+func rowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
+	on bool, title string, ids ids, tip string, g glyph, play func()) {
 	t := c.Theme()
 	// ⚠️ **那几个身份是记好的那一份**（见上面「那几个身份」那一节）：现算的话
 	// 每帧每行要拼四个字符串、再装箱三次——一屏十三行就是九十一次。
-	ids := idsOf(title, idsRow)
-
-	// ⚠️ **外面这一层盒子是必需的**：压暗和那个三角用 `Attach` 贴在**父盒子的内边距
+	// 外面那一层盒子是必需的：压暗和那个三角用 `Attach` 贴在**父盒子的内边距
 	// 框**上（`mygo/ui/api_gen.go` 的 Attach），而调用方给的父是那一行的 `ui.Row`
 	//——贴上去就成了「浮在这一行中间」，横竖都不对。裹一层和封面一样大的盒子，贴的
 	// 是它。
@@ -371,11 +466,33 @@ func RowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 		show(dim, a)
 
 		tri := ui.Box(c).Key(ids.tri).Size(triSize, triSize).
-			Label(ids.label).Tooltip(PlayFrom).
-			Attach(ui.AnchorCenter, ui.AnchorCenter).
-			Draw(func(p *ui.Painter, r ui.Rect) {
+			Label(ids.label).Tooltip(tip).
+			Attach(ui.AnchorCenter, ui.AnchorCenter)
+		if g == glyphProfile {
+			// 「一个人」：一枚图标（`iconset` 里那张 `user-line.svg`）——图标那一套
+			// 自带矢量绘制，比手画一个人头可靠（理由见 `profileIcon`）。
+			//
+			// ⚠️ **20 见方**：和原来那枚三角**一样大**——反馈的重量不变，只是换了
+			// 说的是哪件事。
+			tri.Children(func() {
+				ui.Icon(c, profileIcon).FontSize(triSize).
+					TextColor(ui.RGBA(255, 255, 255, triTint))
+			})
+		} else {
+			// 播放三角。
+			//
+			// 🔴 **这个闭包不许捕获任何变量**：它每一帧每一行建一次，而**捕获了变量
+			// 的闭包会逃到堆上**（每行每帧多一次分配）。`triTint` 是**常量**，
+			// 所以这一支编译出来是一个**静态函数值**、一个分配都不占。
+			//
+			// ⚠️ **别把它挪进一个带参数的函数里**（票 #455 的评审实测）：那样闭包
+			// 捕获的就是那个参数，于是每一行每一帧多一次堆分配——首页列表那一档的
+			// 分配从 46 涨到 59（上限 54），整条帧预算因此变红
+			// （`internal/ui/framebudget_test.go`）。
+			tri.Draw(func(p *ui.Painter, r ui.Rect) {
 				drawTri(p, r, ui.RGBA(255, 255, 255, triTint))
 			})
+		}
 		show(tri, a)
 
 		// ⚠️ **`Hovered` / `Clicked` 要在它建完之后立刻问**（同 `list/card.go` 里那一
@@ -406,7 +523,16 @@ func RowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 // 类，两边都是「封面 + 两行字浮在页面上」，那不是差距（票面「不要做」里点名了）。
 func CardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 	on bool, playCount, clock, title string, play func()) {
-	cardCover(c, cache, url, w, h, on, playCount, clock, idsOf(title, idsCard), PlayFrom, play, false)
+	cardCover(c, cache, url, w, h, on, playCount, clock, idsOf(title, idsCard), PlayFrom, glyphPlay, play, false)
+}
+
+// CardCoverProfile 是同一圈反馈，但按下去是**进他的 UP 空间**。
+//
+// 搜索页「用户」那一档的格子走的这一条：那一格不是歌，是**一个人**。图形、
+// 提示、无障碍名三样都跟着换（理由见 `ProfileTip`）。
+func CardCoverProfile(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
+	on bool, playCount, clock, title string, play func()) {
+	cardCover(c, cache, url, w, h, on, playCount, clock, idsOf(title, idsCardProfile), ProfileTip, glyphProfile, play, false)
 }
 
 // CardCoverOne 是同一圈反馈，但按下去**加这一首并立即播**（`PlayNow`）。
@@ -421,10 +547,11 @@ func CardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 // 它只有底下那条渐变和右下角那个带影的播放钮。
 func CardCoverOne(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 	on bool, title string, play func()) {
-	cardCover(c, cache, url, w, h, on, "", "", idsOf(title, idsCardOne), PlayNow, play, true)
+	cardCover(c, cache, url, w, h, on, "", "", idsOf(title, idsCardOne), PlayNow, glyphPlay, play, true)
 }
 
-// cardCover 是 CardCover / CardCoverOne 共用的那一层：封面 + 上面那一圈反馈。
+// cardCover 是 CardCover / CardCoverOne / CardCoverProfile 共用的那一层：
+// 封面 + 上面那一圈反馈。
 //
 // coverShadow 说**封面自己**要不要带一圈影（见 CardCoverOne 顶上那一段）。
 //
@@ -432,7 +559,7 @@ func CardCoverOne(c *ui.Context, cache *imgcache.Cache, url string, w, h float32
 // 是裁着的（`Clip`）——影于是画在封面的四周，正好是上游那个 `shadow-md` 的样子。
 // 加在里面的图上会变成「图在框里放大」，那是另一回事（hover 放大才那么做）。
 func cardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
-	on bool, playCount, clock string, ids ids, tip string, play func(), coverShadow bool) {
+	on bool, playCount, clock string, ids ids, tip string, g glyph, play func(), coverShadow bool) {
 	t := c.Theme()
 
 	cover := ui.Box(c).Size(w, h).Radius(t.Radius).Clip()
@@ -442,12 +569,12 @@ func cardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 	}
 	cover.Children(func() {
 		imgcache.ViewTitled(c, cache, url, ids.label, w, h)
-		cardOverlay(c, w, h, on, playCount, clock, ids, tip, play)
+		cardOverlay(c, w, h, on, playCount, clock, ids, tip, g, play)
 	})
 }
 
 // cardOverlay 画网格卡片封面**上面**那一圈。
-func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock string, ids ids, tip string, play func()) {
+func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock string, ids ids, tip string, g glyph, play func()) {
 	t := c.Theme()
 
 	bar := ui.Box(c).Key(ids.bar).Size(w, barH).
@@ -497,11 +624,25 @@ func cardOverlay(c *ui.Context, w, h float32, on bool, playCount, clock string, 
 	shadow.Tailwind2XL(circle)
 
 	show(circle, a).Children(func() {
-		e := ui.Box(c).Size(btn, btn).Label(ids.label).Tooltip(tip).Center().
-			Draw(func(p *ui.Painter, r ui.Rect) {
+		e := ui.Box(c).Size(btn, btn).Label(ids.label).Tooltip(tip).Center()
+		if g == glyphProfile {
+			// 「一个人」：图标那一枚是「和字号一样高、保持长宽比」，所以给它 24
+			// （圆的六成，和下面那个三角一样大）就正好。
+			e.Children(func() {
+				ui.Icon(c, profileIcon).FontSize(btn * 0.6).TextColor(t.AccentText)
+			})
+		} else {
+			// 播放三角。
+			//
+			// ⚠️ **这个闭包捕获了 `t`（主题）**，所以它会逃到堆上——**而这一处
+			// 一直就是这样**（网格那一档的帧预算里一直算着这一次分配）。别为了
+			// 「列表行那一支不捕获」把这一支也改了：两处的分配数各自算各自的，
+			// 动了哪一头都会动那一条预算。
+			e.Draw(func(p *ui.Painter, r ui.Rect) {
 				// 三角缩到圆的六成：整个圆那么大的三角会顶出圆外。
 				drawTri(p, shrink(r, 0.4), t.AccentText)
 			})
+		}
 		if play != nil && e.Clicked() {
 			play()
 		}
@@ -546,10 +687,17 @@ const (
 // 变，而快速切歌时帧率本来就紧」）。**这一版换掉了那个理由**：界面骨架已经和上游对
 // 上了，而这一句字和上游的波形是两回事——用户扫一眼列表时，眼睛先被动的那个抓住。
 //
-// ⚠️ **窗口看得见的时候它每一帧都要一帧**（`AnimationFrame`）。这一帧的成本是重画一
-// 次画面（`mygo/ui/runtime.go` 的 `next()`：`animating` → `requestFrame`），而屏幕上
-// 同时最多只有一行在放。窗口看不见时不要（票 #156，见 `frameVisible`）——那是
-// 「后台还在每 50ms 叫醒一次」时风扇和电池的来源。
+// ⚠️ **窗口看得见的时候它每一帧都要一帧**（`AnimationFrame`）。而这一帧走的是
+// **局部重绘**（`p.AnimationFrame()`，不是 `c.AnimationFrame()`）：波形是**画**
+// 出来的（四个圆角竖条），而局部重绘那一帧**只重画、不重建整棵元素树**
+// （`mygo/ui/runtime.go` 的 `repaintFrame`）——于是「放歌时整窗每秒重建 60 次」
+// 变成「每秒重建 20 次（后台 tick 那条链）+ 重画 40 次」，CPU 和电都省一大截
+// （票 #392）。
+//
+// ⚠️ **正因为走的是局部重绘，相位只能在**画**的时候算**：`repaintFrame` 那一帧
+// **不重建**，所以建的时候算出来的相位会被**冻结**（闭包捕获的是建那一刻的值）。
+// 相位是拿钟算的，于是它改成在 `Draw` 回调里算——那一层拿得到这一帧的时刻
+// （`p.Now()`）。
 //
 // ## color 是**调用方给的**
 //
@@ -559,8 +707,16 @@ const (
 // ⚠️ **标签必须带歌名**（`PlayingLabel`）：理由同文件头那一段——读屏软件读的是标签。
 func Wave(c *ui.Context, key string, width float32, color ui.Color, title string) {
 	wave := ui.Box(c).Key(key).Size(width, waveH).Label(PlayingLabel(title))
-	phase := wavePhase(c, wave)
+	// 跨帧要记的那一份状态在**建的时候**取一次（`ui.Local` 查表是建的时候的事，
+	// 而局部重绘那一帧不重建）。指针在闭包里，跨帧指的是**同一个**那一份
+	// （`ui.Local` 按 key 认元素，元素在，那一份就在）。
+	st := ui.Local(wave, waveStateKey{}, func() waveState { return waveState{} })
+	// ⚠️ **开关在**建的时候**认下来**（指针），而它的值在**画的时候**读：
+	// 那个开关是**逐窗口**的（见 `frameVisible` 那一段），而局部重绘那一帧
+	// **不重建**——那一刻包级那个指针还是**别的窗口**留下的。
+	visible := frameVisible
 	wave.Draw(func(p *ui.Painter, r ui.Rect) {
+		phase := wavePhase(p, st, visible.Load())
 		// 竖条整体居中：4×2 + 3×2 = 14 宽，在 32 宽的序号那一列里两边各空 9。
 		x0 := r.X + (r.W-float32(waveBars*waveBarW+(waveBars-1)*waveGap))/2
 		for i := range waveBars {
@@ -606,6 +762,13 @@ type waveStateKey struct{}
 
 // wavePhase 是此刻的相位（0~1），并且在**钟走了、窗口也看得见的时候**要下一帧。
 //
+// ⚠️ **它是在**画的时候**调的**（`Wave` 的 `Draw` 回调里），不是建的时候：
+// 波形走的是**局部重绘**（`p.AnimationFrame()`），而局部重绘那一帧**不重建**
+// ——建的时候算出来的相位会被冻结在闭包里，波形于是不动了。
+//
+// 而 `p.Now()` 拿得到这一帧的时刻（`mygo/ui/paint.go`：`p.rt.c.now`），
+// 所以相位在画的时候照样算得出来。
+//
 // ⚠️ **看不见时 `seen` 照样更新，只是不要帧**：恢复可见之后那一次比较仍然
 // 「钟走了」，于是会重新要帧，波形也从当前时刻接着跳。要是不更新 `seen`，
 // 恢复后那一次也一样会要帧——两者在行为上一样，但更新让「这个字段是上一次
@@ -650,9 +813,14 @@ type waveStateKey struct{}
 // 真正让那一票之前每帧付钱的是**键**（`key+":start"` 那个字符串）：它既要在
 // 运行期**拼出来**，又要**装箱进 `any`**（`ui.Local` 的键是 `any`），两次
 // 分配。闭包只是顺带被算在了头上。
-func wavePhase(c *ui.Context, wave ui.Element) float32 {
-	now := c.Now()
-	st := ui.Local(wave, waveStateKey{}, func() waveState { return waveState{} })
+//
+// ## ⚠️ **`ui.Local` 现在是**建的时候**问的，状态是**画的时候**改的
+//
+// 查表（`ui.Local`）必须在建的时候做——它是「这个元素跨帧的那一份」。
+// 而相位是钟算的，所以它在画的时候算。两者分开之后，`st` 这个指针是从建
+// 的那一刻起就**指着同一份**的（`ui.Local` 按 key 认元素，元素在，那一份就在）。
+func wavePhase(p *ui.Painter, st *waveState, visible bool) float32 {
+	now := p.Now()
 	if !st.started {
 		// 第一次看见这一格：相位的零点就是此刻。
 		//
@@ -666,8 +834,12 @@ func wavePhase(c *ui.Context, wave ui.Element) float32 {
 		// 看不见的窗口不要再要帧（票 #156）：它每帧都请求下一帧，而
 		// `App.tick` 又在放歌时每 50ms 叫醒每个窗口一次——两条链合起来，
 		// 一扇收在后台的窗口会一直按帧重画，用户能感到的是风扇和电池。
-		if frameVisible.Load() {
-			c.AnimationFrame()
+		//
+		// ⚠️ **这里要的是「局部重绘」那一帧**（`p.AnimationFrame()`），不是
+		// 「整棵元素树重建一遍」（`c.AnimationFrame()`）：波形是画出来的，而
+		// 重建那一帧要把整窗重排一遍——放歌时那是每秒 60 次（票 #392）。
+		if visible {
+			p.AnimationFrame()
 		}
 	}
 	return float32(now.Sub(st.start)%wavePeriod) / float32(wavePeriod)

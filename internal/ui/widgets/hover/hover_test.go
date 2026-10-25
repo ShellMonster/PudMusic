@@ -1,6 +1,7 @@
 package hover
 
 import (
+	"image"
 	"image/color"
 	"testing"
 
@@ -286,6 +287,80 @@ func TestWaveDrawsBarsThatMove(t *testing.T) {
 	}
 }
 
+// TestTheWaveKeepsMovingOnRepaintFrames 钉住「波形在**只重画**的那些帧里照跳」。
+//
+// ## 为什么这一条最要紧
+//
+// 波形改走**局部重绘**之后（票 #392：`p.AnimationFrame()`，见 hover.go 的
+// `Wave`），而局部重绘那一帧**不重建**（`mygo/ui/runtime.go` 的 `repaintFrame`）。
+// 于是相位（拿钟算的那一个）有两个地方可以算：
+//
+//   - **画的时候**算 → 每一帧都是新的 → 波形照跳；
+//   - **建的时候**算 → 闭包捕获住 → 局部重绘那一帧里它**被冻住** →
+//     **波形一动不动**。
+//
+// ⚠️ **后者不报错、不崩溃、画面上只是「不跳了」**，而上面那条
+// `TestWaveDrawsBarsThatMove` **抓不住它**——那条量的是 `tt.Frame()` 之后的样子，
+// 而 Tester 的 `Frame()` **每次都是整棵元素树重建一遍**（`mygo/ui/headless.go` 的
+// `settle()` 调的是 `runFrame`），于是相位在**建的时候**重算，条子照样动。
+//
+// 所以这一条量的必须是「**两段纯局部重绘的帧之间**」：那几帧**不重建**，于是
+// 只有「相位在画的时候算」才可能让条子动。
+//
+// ## 怎么让 Tester 画出「纯局部重绘的帧」
+//
+// 无头 Tester 是**拉式**的（不 `Frame()` 一帧都不画），而 `Advance` 只画
+// 「有人要了帧」的那些时刻。于是：
+//
+//  1. `ctx.Invalidate()`——一次**外面来的**唤醒（模拟 `App.tick`）：它要的那一帧
+//     是**重建**（框架把 `rt.redraw` 清了）。
+//  2. `Advance` 跑起来之后，波形自己要的那些帧走**局部重绘**（`rt.redraw` 是
+//     真的），于是**重建的次数是 0**——这一条量的时候要**先断这个**：不然量到的
+//     条子高度可能是「重建时算的相位」，而那不是这一条要验的东西。
+func TestTheWaveKeepsMovingOnRepaintFrames(t *testing.T) {
+	builds := 0
+	var ctx *ui.Context
+	tt := ui.NewTester(func(c *ui.Context) {
+		builds++
+		ctx = c
+		ui.Box(c).Size(60, 30).Padding(8).Children(func() {
+			Wave(c, "wave", 40, ui.RGB(0, 0, 255), "甲")
+		})
+	}, testerW, testerH)
+	tt.Frame()
+	wave, ok := tt.Find(PlayingLabel("甲"))
+	if !ok {
+		t.Fatalf("那个波形没有标签：%q", tt.Texts())
+	}
+
+	// 一次「外面来的」唤醒（模拟 `App.tick`：放歌时它每 50ms 叫醒每个窗口一次）。
+	// ⚠️ **没有它就没有帧**：Tester 是拉式的，不有人要帧它一帧都不画。
+	ctx.Invalidate()
+	// ⚠️ **推四分之一轮**：相位整整走了 90°，那四根条子的高度**必然**变
+	// （正弦在 90° 上取到极值，而极值本身就和起点的值不同）——推得更少的话，
+	// 相位正好落在极值附近时条子可能看不出动，那条测试就成了「有时绿有时红」。
+	tt.Advance(wavePeriod / 4)
+
+	// 下面这一段是**纯局部重绘**：重建的次数必须是 0。
+	before := builds
+	first := bars(t, tt, wave)
+	tt.Advance(wavePeriod / 4)
+	if got := builds - before; got != 0 {
+		t.Fatalf("这一段重建了 %d 次整棵元素树，want 0——"+
+			"下面量的就不是「只重画的那几帧」了（重建的时候相位也会重算，"+
+			"那样这条就验不到相位是不是在画的时候算的）", got)
+	}
+	wave, _ = tt.Find(PlayingLabel("甲"))
+	second := bars(t, tt, wave)
+	if sameAs(first, second) {
+		t.Errorf("波形在纯局部重绘的那一段里一动不动：%v → %v——相位被冻住了。\n"+
+			"相位**必须在画的时候算**（`p.Now()`），不能在建的时候算完塞进闭包：\n"+
+			"局部重绘那一帧**不重建**，建的时候算出来的值会被**冻结**"+
+			"（见 hover.go 的 `Wave` 和 `wavePhase`）。",
+			first, second)
+	}
+}
+
 // bars 是那个盒子里**每一列画出来多少像素**（跳动的就是这些数——条子的横坐标不动，
 // 上下两端在动）。
 //
@@ -393,4 +468,87 @@ func TestReduceMotionMakesTheFadeArriveAtOnce(t *testing.T) {
 	if diff(rsettled, settled) > 4 {
 		t.Errorf("两条路的终点不一样：减少动态 %v，默认走完 %v", rsettled, settled)
 	}
+}
+
+// TestTheProfileGlyphIsNotAPlayTriangle 钉住「进他的 UP 空间」那一枚图形**不是**
+// 播放三角（票 #455 / 报告 246 第 30 条）。
+//
+// 原来搜索页「用户」那一档的封面上是一枚播放三角、提示是「从这一首往后听」——
+// 图形、提示、无障碍名三样都在说放歌，而用户按下去做的是跳到那个 UP 主的主页。
+//
+// 判据是**画出来的像素**：
+//
+//   - 播放三角是**朝右**的一枚楔子，它在盒子里**偏左**（左边缘是竖的，右边缘收成
+//     一个尖），所以盒子**偏左、正中**那一个像素是实的；
+//   - 「一个人」是**居中**的（一个脑袋加两块肩膀），那一个像素是空的——透出底下
+//     的封面。
+//
+// ⚠️ **两块的底色必须一样**：封面那一格画的是「首字 + 渐变」（`imgcache` 的
+// `drawGlyphCover`），而渐变是按**标题的哈希**算的——两块用同一个标题，底色才
+// 一模一样，比的才是图形而不是底色。
+//
+// ⚠️ **底色从盒子自己的角上取**：那一角两种图形都是空的（三角在角上是空的，人头
+// 也在角上是空的），所以它就是底色。
+func TestTheProfileGlyphIsNotAPlayTriangle(t *testing.T) {
+	const cover = 48
+	cache := newCache(t)
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Row(c).Gap(40).Padding(6).Children(func() {
+			RowCover(c, cache, "", cover, true, "甲", nil)
+			RowCoverProfile(c, cache, "", cover, true, "甲", nil)
+		})
+	}, testerW, testerH)
+	tt.Frame()
+	settle(tt)
+
+	play, ok := tt.Find(FromLabel("甲"))
+	if !ok {
+		t.Fatalf("没有那个播放三角，文字有 %q", tt.Texts())
+	}
+	prof, ok := tt.Find(ProfileLabel("甲"))
+	if !ok {
+		t.Fatalf("没有「进他的 UP 空间」那一枚，文字有 %q", tt.Texts())
+	}
+	if play.W < 19 || play.H < 19 {
+		t.Fatalf("那个盒子只有 %.1f×%.1f，want 20×20", play.W, play.H)
+	}
+
+	img := tt.Image()
+	// 底色：盒子左上角那一个像素（两种图形在那儿都是空的）。
+	bg := img.RGBAAt(int(play.X)+1, int(play.Y)+1)
+	bg2 := img.RGBAAt(int(prof.X)+1, int(prof.Y)+1)
+	if diff(bg, bg2) > 12 {
+		t.Fatalf("两块封面的底色不一样（%v / %v）——这一条比的就不是图形了", bg, bg2)
+	}
+
+	// ① 播放三角那一处是实的。
+	triPix := img.RGBAAt(int(play.X+play.W*0.2), int(play.Y+play.H*0.5))
+	if diff(triPix, bg) < 60 {
+		t.Errorf("播放三角在盒子偏左正中那处不是实的（%v，底色 %v）——判据本身有问题", triPix, bg)
+	}
+	// ② 「进他的 UP 空间」那一处**不是**实的：那儿没有播放三角。
+	profPix := img.RGBAAt(int(prof.X+prof.W*0.2), int(prof.Y+prof.H*0.5))
+	if diff(profPix, bg) > 60 {
+		t.Errorf("「进他的 UP 空间」那一枚画的还是那枚播放三角（%v，底色 %v）", profPix, bg)
+	}
+	// ③ 而它**画了东西**：那一枚不是空的。
+	if n := inkIn(img, prof, bg); n == 0 {
+		t.Errorf("「进他的 UP 空间」那一枚一个像素都没画——它得是一个「人」")
+	}
+}
+
+// inkIn 数那个盒子里有多少像素**不是**底色。
+//
+// 判据是 `diff > 60`：底色是封面那个渐变压暗之后的一层淡彩，而图形是白的一层
+// 92%——两者差着几百个通道值（渐变自己在盒子里那点变化只有十几）。
+func inkIn(img *image.RGBA, box ui.Rect, bg color.RGBA) int {
+	n := 0
+	for x := int(box.X); x < int(box.X+box.W); x++ {
+		for y := int(box.Y); y < int(box.Y+box.H); y++ {
+			if diff(img.RGBAAt(x, y), bg) > 60 {
+				n++
+			}
+		}
+	}
+	return n
 }
