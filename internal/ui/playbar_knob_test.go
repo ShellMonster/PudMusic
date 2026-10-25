@@ -258,3 +258,93 @@ func TestTheVolumeSliderDoesNotDriftWithThePercentText(t *testing.T) {
 		}
 	}
 }
+
+// TestTheVolumePercentSitsUnderTheSlider 钉「浮层底下那个百分比和滑块居中对齐」。
+//
+// 用户 2026-10-25 说的（票 #485）：「音量播放那个调整音量的，底下的 100% 什么的，
+// 跟那个柱子的不是对齐的，看起来数字的靠左」。
+//
+// 断两样：
+//
+//   - **结构**：百分比那一格和滑块那一格**是同一个盒子**（上游那边也是同一个宽：
+//     滑块 `w-[32px]`、百分比 `w-8`，见 `music-volume/index.tsx`）。
+//   - **像素**：字（墨迹）的中心线和那根柱子（主色）的中心线重合。
+//
+// ⚠️ **像素那条才断得住「盒子对了而字靠左」**：改之前就是那样——格子 40 宽、
+// 列的内容区 32 宽，这一格在内容区里居中时左右各探出 4 像素，而字又靠左，
+// 墨迹中心比柱子中心**偏左 7.3 像素**。
+//
+// ⚠️ **容差 1.5 像素**：12 号字下墨迹宽度的**奇偶**会让中心差半个像素（同一份
+// 画面，浅色下墨迹 25 宽、深色下 26 宽）。
+func TestTheVolumePercentSitsUnderTheSlider(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			st := barState()
+			st.Volume = 0.8
+			tt, s := bottomBarTester(t, st, 1200, 320, dark)
+			hoverVolumeKey(t, tt)
+
+			sl, ok := tt.Find("音量")
+			if !ok {
+				t.Fatalf("浮层里没有那根音量滑块，文字有 %q", tt.Texts())
+			}
+			pct, ok := tt.Find("80%")
+			if !ok {
+				t.Fatalf("浮层里没有那个百分比，文字有 %q", tt.Texts())
+			}
+
+			// 结构：两个盒子重合。
+			if absF(pct.X-sl.X) > 0.01 || absF(pct.W-sl.W) > 0.01 {
+				t.Errorf("百分比那一格是 x=%.1f 宽 %.1f，而滑块那一格是 x=%.1f 宽 %.1f"+
+					"——两者不是同一个盒子，字和柱子就对不上",
+					pct.X, pct.W, sl.X, sl.W)
+			}
+
+			// 像素：柱子的中心 = 主色像素的 x 范围中心（旋钮和轨道都居中于那一格）；
+			// 字的中心 = 墨迹的 x 范围中心。
+			th := BuildTheme(s.app.SettingsSnapshot(), dark)
+			img := tt.Image()
+			klo, khi := accentExtent(img, sl, rgb(th.Accent))
+			if klo < 0 {
+				t.Fatalf("那根滑块上量不到主色像素 %v", sl)
+			}
+			tlo, thi, n := inkExtent(img, pct, rgb(th.Background))
+			if n == 0 {
+				t.Fatalf("那个百分比上量不到墨迹")
+			}
+			kMid := float32(klo+khi) / 2
+			tMid := float32(tlo+thi) / 2
+			if absF(kMid-tMid) > 1.5 {
+				t.Errorf("百分比的墨迹中心在 x=%.1f，而那根柱子的中心在 x=%.1f"+
+					"（差 %.1f）——数字没有和柱子对齐",
+					tMid, kMid, absF(kMid-tMid))
+			}
+		})
+	}
+}
+
+// accentExtent 是「盒子里主色像素的 x 范围」。
+//
+// ⚠️ **量的是范围，不是宽度**：音量那根滑块上，主色既是旋钮的颜色、也是轨道
+// **填过的那一段**的颜色——两者都居中于那一格，于是这个范围的中心就是柱子的中心。
+func accentExtent(img *image.RGBA, box mygoui.Rect, accent color.RGBA) (lo, hi int) {
+	lo, hi = -1, -1
+	for y := max(int(box.Y), img.Rect.Min.Y); y < min(int(box.Y+box.H), img.Rect.Max.Y); y++ {
+		for x := max(int(box.X), img.Rect.Min.X); x < min(int(box.X+box.W), img.Rect.Max.X); x++ {
+			if !near(img.RGBAAt(x, y), accent) {
+				continue
+			}
+			if lo < 0 || x < lo {
+				lo = x
+			}
+			if x > hi {
+				hi = x
+			}
+		}
+	}
+	return lo, hi
+}

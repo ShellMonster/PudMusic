@@ -85,9 +85,21 @@ const (
 	//
 	// 40 = 滑块那 32 + 左右各 4 的内边距——**滑块要放得下**（票 #220 把它从 20
 	// 加宽到 32，而列的内容宽是「列宽 − 内边距」，列不改的话滑块会探出列外）。
-	// 里面那个百分比是**定宽**的一格（`Width(volPanelW)`），所以「100%」三个字
-	// 换不换位置都不会挪。
 	volPanelW = 40
+
+	// volPercentW 是浮层底下那个百分比**那一格**的宽度。
+	//
+	// 🔴 **它得和滑块一样宽**（`volSliderW`），而且字要在这一格**里居中**——
+	// 两条合起来，百分比的中心线才和滑块的中心线重合（票 #485：数字看着偏左）。
+	//
+	// 上游那边就是这么对上的：`endContent` 是 `w-8 text-center`——**32 像素的定宽
+	// 格子，字在格子里居中**——而滑块是 `w-[32px]`
+	// （`music-volume/index.tsx`：两个都是 32，于是中心线重合）。
+	//
+	// ⚠️ **别拿 `volPanelW` 当这一格的宽**：那是**列**的宽（40），比列的内容宽
+	// （40 − 4 − 4 = 32）还宽 8——这一格于是左右各探出内容区 4 像素，而字又靠左，
+	// 数字的墨迹中心比滑块中心**偏左 7.3 像素**（实测，票 #485）。
+	volPercentW = volSliderW
 )
 
 // volSliderLook 是浮层里那根竖滑块的样子。
@@ -237,7 +249,8 @@ func (s *Shell) viewVolumePanel(c *ui.Context, st app.State) {
 	// 4.7 像素，**滑块就在指针底下横向挪**（评审指出来的）。
 	//
 	// 定宽之后列宽恒定，居中的滑块也就恒定 ✓。上游那边也是这么做的：那个百分比
-	// 是个 `w-8`（32 像素）的定宽格子（`music-volume` 的 `endContent`）。
+	// 是个 `w-8 text-center`（32 像素的定宽格子，字在格子里居中，
+	// `music-volume` 的 `endContent`）。
 	col := ui.Column(c).Key("playbar:volume").Padding(space.Px4).Gap(space.Px2).AlignItems(ui.Center).
 		Width(volPanelW)
 	col.Children(func() {
@@ -245,9 +258,16 @@ func (s *Shell) viewVolumePanel(c *ui.Context, st app.State) {
 		if sl.Changed() {
 			s.setVolume(vol)
 		}
-		// 百分比也定宽：不然它自己在那一格里靠左，字数一变位置就变。
+		// 百分比也定宽：不然字数一变位置就变。
+		//
+		// 🔴 **它得和滑块一样宽，而且字在格子里居中**（票 #485）：之前它是
+		// `Width(volPanelW)`（40，比列的内容宽还宽 8），于是这一格在 32 宽的
+		// 内容区里居中时左右各探出 4 像素，而字又靠左——数字的墨迹中心比滑块
+		// 中心**偏左 7.3 像素**（实测）。现在宽度是 `volPercentW`（= 滑块那 32）、
+		// 字居中，于是两者的中心线重合 ✓（上游那边是 `w-8 text-center`，同一个
+		// 做法：`music-volume/index.tsx`）。
 		ui.Text(c, volPercent(vol)).FontSize(scale.Font(c, scale.VolPercentFont)).
-			TextColor(t.TextMuted).Width(volPanelW)
+			TextColor(t.TextMuted).Width(volPercentW).TextAlign(ui.Center)
 	})
 
 	// 记下「指针在浮层里」，给下一帧的收放判断用（见 `syncVolIdle`）。
