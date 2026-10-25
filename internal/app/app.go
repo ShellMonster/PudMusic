@@ -535,6 +535,12 @@ type App struct {
 	// 睡眠定时器（见 sleep_timer.go）：到点时刻、停它的函数、「放完这一首」标志。
 	// normalize 是「音量均衡」开关的内存副本（落盘的是 Settings.NormalizeVolume）。
 	normalize bool
+	// trackFade 是切歌淡入淡出的时长（0 = 关），fadeOutFor 是已经开始淡出的那台
+	// 播放器，fadeInNext/fadeInUntil 是「下一台新播放器按这个时长淡入」的一次性标记。
+	trackFade   time.Duration
+	fadeOutFor  *audio.Player
+	fadeInNext  time.Duration
+	fadeInUntil time.Time
 	// loud 是本地文件的响度扫描结果缓存（见 loudness_scan.go）。
 	loud loudnessCache
 	// autoLyricTried 记着这次运行里已经自动找过歌词的歌（见 lyrics_auto.go）。
@@ -1027,6 +1033,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	// ⚠️ **送进去的是增益，不是音量那一格**：静音的时候增益是 0，而音量那一格
 	// 记的还是用户设的值（取消静音放回去的就是它）。
 	p.SetVolume(a.gainLocked()).SetRate(a.rate).SetNormalize(a.normalize)
+	a.applyFadeInLocked(p)
 	a.player = p
 	a.online = nil
 	// 🔴 **代次要加**：本地文件和在线流是**两条并行的路**，而在线那一路是后台
@@ -1594,6 +1601,9 @@ func (a *App) tick() {
 			// ⚠️ **暂停的那一拍不备**（`live` 是假）：用户停着，备好了也白备。
 			if p != nil && live && !finished {
 				a.maybePrefetch(pos, dur)
+			}
+			if p != nil {
+				a.tickTrackFade(p, pos, dur, live && playing && !finished)
 			}
 
 			// 「上次听到哪儿」这一格：在放的时候位置一直在变，所以按节奏落一次

@@ -883,3 +883,15 @@ func TestSpaceDoesNotActivateTheFocusedButton(t *testing.T) {
 		t.Errorf("点过标签之后按空格触发的是 %v，want 以 togglePlay 结尾", *got)
 	}
 }
+
+func TestPickingATrackFadeLength(t *testing.T) {
+	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	tt.Frame()
+	if err := tt.Click("5 秒"); err != nil {
+		t.Fatalf("找不到切歌淡入淡出的 5 秒档：%v（%q）", err, tt.Texts())
+	}
+	tt.Frame()
+	if got := s.app.SettingsSnapshot().TrackFadeSeconds; got != 5 {
+		t.Errorf("点了 5 秒，设置里是 %d", got)
+	}
+}

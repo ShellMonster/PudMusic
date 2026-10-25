@@ -14,6 +14,7 @@ import (
 	"errors"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 )
@@ -88,6 +89,7 @@ func (a *App) MountSettings(path string) error {
 	a.volume = vol
 	a.muted = s.Muted
 	a.normalize = s.NormalizeVolume
+	a.trackFade = time.Duration(s.TrackFadeSeconds) * time.Second
 	if s.PlaybackRate > 0 {
 		a.rate = audio.SnapRate(s.PlaybackRate)
 	}
@@ -154,6 +156,7 @@ func (a *App) UpdateSettings(fn func(*Settings)) (Settings, error) {
 	a.mu.Lock()
 	changed := a.normalize != s.NormalizeVolume
 	a.normalize = s.NormalizeVolume
+	a.trackFade = time.Duration(s.TrackFadeSeconds) * time.Second
 	p, path, local := a.player, a.path, a.online == nil
 	a.mu.Unlock()
 	if changed && p != nil {

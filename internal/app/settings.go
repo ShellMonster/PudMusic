@@ -106,6 +106,8 @@ const (
 	//
 	// 上游那 0.5 的出处见报告 §4.4（`biu/src/store/play-list.ts:369`）。
 	DefaultVolume = 1.0
+	// MaxTrackFadeSeconds 是切歌淡入淡出能设的最长时间。
+	MaxTrackFadeSeconds = 15
 	// DefaultUnmuteVolume 是「压根没有音量可放回去」时取消静音放回去的值。
 	//
 	// 0.5 是一半——用户按了「取消静音」，听到的应该是一半声音，不是 0。
@@ -394,6 +396,10 @@ type Settings struct {
 	// NormalizeVolume 是「音量均衡」开关：把特别响的歌压到统一的响度，只压不抬
 	// （见 internal/service/audio/normalize.go）。默认关。
 	NormalizeVolume bool `json:"normalizeVolume"`
+
+	// TrackFadeSeconds 是切歌淡入淡出的时长（秒，0..15），0 = 关（默认）。
+	// 一首快放完时音量渐渐降到 0，下一首（自动接上的）从 0 渐渐升回来。
+	TrackFadeSeconds int `json:"trackFadeSeconds"`
 
 	// Muted 是静音标志。**它和音量分开存**（票 #311 / 报告 §3.3 的 B2）。
 	//
@@ -784,6 +790,7 @@ func (s *Settings) normalize() {
 		v := min(max(*s.Volume, 0), 1)
 		s.Volume = &v
 	}
+	s.TrackFadeSeconds = min(max(s.TrackFadeSeconds, 0), MaxTrackFadeSeconds)
 	// nil 和空序列在 JSON 里差一个 `null`，写出去会让「还没排过序」和
 	// 「排过序，排出来是空的」看起来是两回事。统一成空序列。
 	if s.SideMenuCollectionOrder.Created == nil {

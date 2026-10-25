@@ -1768,6 +1768,7 @@ func (a *App) onTrackFinished() {
 			// 命中了就**不再取流**。
 			a.putStreamCache(item, ref)
 		}
+		a.markFadeIn()
 		if err := a.play(item); err != nil {
 			a.queue.UndoStep()
 			a.setErr(fmt.Sprintf("接不上下一首：%v", err))
