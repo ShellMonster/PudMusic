@@ -171,6 +171,12 @@ const (
 	// HomeTabPop 是「流行」那一档：音乐综合榜（**不是第三个分区**，见
 	// `service/bili/recommend.go` 的文件头）。
 	HomeTabPop = 2
+	// HomeTabHot 是「热榜」那一档：B 站音乐站的热榜，取最新一期。
+	HomeTabHot = 3
+	// HomeTabOriginal 是「原创榜」那一档：同上，原创榜。
+	HomeTabOriginal = 4
+	// HomeTabRecent 是「最近播放」那一档：登录账号的观看历史（投稿）。
+	HomeTabRecent = 5
 )
 
 // HomeRegionOf 是 Tab 对应的分区号。**「流行」那一档没有分区**——它走榜。
@@ -200,6 +206,12 @@ func (r *Recommend) Feed(ctx context.Context, tab, page int) ([]RecommendItem, i
 	if !r.Mounted() {
 		return nil, 0, errRecommendMissing
 	}
+	switch tab {
+	case HomeTabHot, HomeTabOriginal:
+		return r.toplist(ctx, tab, page)
+	case HomeTabRecent:
+		return r.recent(ctx, page)
+	}
 	if tab == HomeTabPop {
 		items, err := r.Client.MusicRank(ctx, bili.MusicRankQuery{Page: page})
 		if err != nil {
@@ -215,6 +227,55 @@ func (r *Recommend) Feed(ctx context.Context, tab, page int) ([]RecommendItem, i
 		return nil, 0, err
 	}
 	out, dropped := recommendItems(items)
+	return out, dropped, nil
+}
+
+// toplist 拉热榜 / 原创榜的最新一期。
+//
+// ⚠️ **整期一次给完**（一期就是一张完整的榜），所以只有第 1 页有内容，第 2 页起
+// 一律是空的——翻页那一层照「一页空的就是到底了」收哨兵，不会为它多发请求。
+// 没有任何一期（B 站给了空榜）时同样是一页空的。
+func (r *Recommend) toplist(ctx context.Context, tab, page int) ([]RecommendItem, int, error) {
+	if page > 1 {
+		return nil, 0, nil
+	}
+	kind := bili.ToplistHot
+	if tab == HomeTabOriginal {
+		kind = bili.ToplistOriginal
+	}
+	id, err := r.Client.ToplistLatestID(ctx, kind)
+	if err != nil || id == 0 {
+		return nil, 0, err
+	}
+	items, err := r.Client.ToplistMusic(ctx, id)
+	if err != nil {
+		return nil, 0, err
+	}
+	out, dropped := recommendItems(items)
+	return out, dropped, nil
+}
+
+// recent 拉第 page 页最近播放（B 站历史记录，投稿类）。
+//
+// ⚠️ **只读**：这里只调历史列表，不碰任何写接口（删除、清空、播放上报）。
+// 需要登录——没登录时 B 站回 -101，界面在发请求之前就拦下了（见
+// `internal/ui/homepage_feed.go` 的 `tabFetcher`），不靠这个错。
+//
+// 行身份走 bvid（同一部稿件重复看过只留一条，`recommendItems` 去重）：首页这一档
+// 是「再放一遍」的入口，不是历史记录页——要按观看时刻区分、要删除，去历史记录页。
+func (r *Recommend) recent(ctx context.Context, page int) ([]RecommendItem, int, error) {
+	pg, err := r.Client.HistorySearch(ctx, bili.HistoryQuery{Page: page})
+	if err != nil {
+		return nil, 0, err
+	}
+	in := make([]bili.RecommendItem, 0, len(pg.Items))
+	for _, it := range pg.Items {
+		in = append(in, bili.RecommendItem{
+			Bvid: it.Bvid, Cid: it.Cid, Title: it.Title, Cover: it.Cover,
+			Owner: it.AuthorName, OwnerMid: it.AuthorMid, Duration: it.Duration,
+		})
+	}
+	out, dropped := recommendItems(in)
 	return out, dropped, nil
 }
 
