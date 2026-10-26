@@ -83,6 +83,15 @@ type biliFixture struct {
 	// 而这一张是给别的测试用的——`nav` 每一处都要手动填一遍，而收藏夹
 	// 那两个接口只有收藏夹那些用例要问。
 	handlers map[string]http.HandlerFunc
+	// scanCookies 是扫码成功那一次**额外**下发的 cookie。
+	//
+	// ⚠️ **为什么要有这个口子**：B 站登录成功时下发的那批 cookie 里
+	// **有 buvid3**，而 `app.Account.finish` 把它们**全部**存下来——于是
+	// 登录之后 jar 里就有一枚 buvid3，而 jar 里的 cookie 是在运输层之前
+	// 加上去的。评论那一处必须挡住它（见 `comment_buvid_test.go`）。
+	scanCookies []*http.Cookie
+	// commentCookies 记下评论接口每次收到的 Cookie 头。
+	commentCookies []string
 }
 
 // on 装好某个路径回什么。
@@ -208,6 +217,12 @@ func newBiliFixture(t *testing.T) *biliFixture {
 				http.SetCookie(w, &http.Cookie{Name: "SESSDATA", Value: "sess-from-fixture", Path: "/"})
 				http.SetCookie(w, &http.Cookie{Name: "bili_jct", Value: "jct-from-fixture", Path: "/"})
 				http.SetCookie(w, &http.Cookie{Name: "DedeUserID", Value: uid, Path: "/"})
+				f.mu.Lock()
+				extra := f.scanCookies
+				f.mu.Unlock()
+				for _, c := range extra {
+					http.SetCookie(w, c)
+				}
 			}
 			writeFixtureJSON(t, w, 0, "0", map[string]any{
 				"code":          scan,
@@ -255,6 +270,32 @@ func (f *biliFixture) onScanAs(uid string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.loginUID = uid
+}
+
+// onScanCookie 设好「扫码成功那一次额外下发这个 cookie」。
+//
+// ⚠️ **为什么需要它**：真实情况下 B 站登录成功时下发的那批 cookie 里
+// **有 buvid3**，而 `app.Account.finish` 把它们**全部**存下来。没有这个口子
+// 就造不出「登录之后 jar 里有一枚 buvid3」这个状态，而那正是评论那一处要
+// 挡住的（见 `comment_buvid_test.go`）。
+func (f *biliFixture) onScanCookie(c *http.Cookie) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.scanCookies = append(f.scanCookies, c)
+}
+
+// recordCommentCookie 记下评论接口这一次收到的 Cookie 头。
+func (f *biliFixture) recordCommentCookie(ck string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.commentCookies = append(f.commentCookies, ck)
+}
+
+// commentCookiesSeen 读出评论接口收到过的那些 Cookie 头。
+func (f *biliFixture) commentCookiesSeen() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.commentCookies...)
 }
 
 // stepByHand 改成每次轮询都要测试放行。
