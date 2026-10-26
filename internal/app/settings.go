@@ -157,8 +157,10 @@ const (
 	ThemeModeSchedule ThemeMode = "schedule"
 )
 
-// ThemePreset 是主题方案：设计规范里的三套整体配色（暖纸 / 暮光 / 柔雾），
-// 每套含浅色和深色各一份底色、文字色、强调色和圆角。
+// ThemePreset 是主题方案：一套整体配色（底色、文字色、强调色和圆角，浅色深色
+// 各一份）。暖纸 / 暮光 / 柔雾来自设计规范 v0.1 §2；青瓷 / 墨宣 / 紫檀 / 靛夜
+// 是 2026-10-26 本仓库**原创**补的四套（补上冷色和水墨/紫/蓝几个色相，对比度
+// 按 WCAG 现算过）——数值不取自任何现成的公开色板。
 //
 // ## 我们加的、Biu 没有的键
 //
@@ -177,10 +179,14 @@ const (
 type ThemePreset string
 
 const (
-	ThemePresetWarmPaper ThemePreset = "warm-paper"
-	ThemePresetDuskAmber ThemePreset = "dusk-amber"
-	ThemePresetSoftPeach ThemePreset = "soft-peach"
-	ThemePresetClassic   ThemePreset = "classic"
+	ThemePresetWarmPaper   ThemePreset = "warm-paper"
+	ThemePresetDuskAmber   ThemePreset = "dusk-amber"
+	ThemePresetSoftPeach   ThemePreset = "soft-peach"
+	ThemePresetCeladon     ThemePreset = "celadon"      // 青瓷
+	ThemePresetInkPaper    ThemePreset = "ink-paper"    // 墨宣
+	ThemePresetSandalwood  ThemePreset = "sandalwood"   // 紫檀
+	ThemePresetIndigoNight ThemePreset = "indigo-night" // 靛夜
+	ThemePresetClassic     ThemePreset = "classic"
 )
 
 // DefaultThemePreset 是新设置的默认方案。
@@ -193,7 +199,7 @@ const (
 // （`internal/ui` 的 `TestMain` 不再改它），界面那一包的测试现在量的是**暖纸**
 // ——那才是用户看见的那一版。
 //
-// 「经典」这个**用户选项**照旧保留（设置页四张预览卡里有它），它自己那套配色有
+// 「经典」这个**用户选项**照旧保留（设置页方案卡里有它，摆在最后一行末尾），它自己那套配色有
 // 专门的用例盯着（`internal/ui/themepreset_test.go` 及那几处按方案各跑一遍的
 // 截图用例）。而「生产默认是暖纸」由本包里的测试盯着（`themepreset_test.go`）。
 var DefaultThemePreset = ThemePresetWarmPaper
@@ -816,7 +822,9 @@ func (s *Settings) normalize() {
 	s.ThemeMode = pickEnum(s.ThemeMode, ThemeModeSystem,
 		ThemeModeSystem, ThemeModeLight, ThemeModeDark, ThemeModeSchedule)
 	s.ThemePreset = pickEnum(s.ThemePreset, DefaultThemePreset,
-		ThemePresetWarmPaper, ThemePresetDuskAmber, ThemePresetSoftPeach, ThemePresetClassic)
+		ThemePresetWarmPaper, ThemePresetDuskAmber, ThemePresetSoftPeach,
+		ThemePresetCeladon, ThemePresetInkPaper, ThemePresetSandalwood,
+		ThemePresetIndigoNight, ThemePresetClassic)
 	s.AudioQuality = pickEnum(s.AudioQuality, AudioQualityAuto,
 		AudioQualityAuto, AudioQualityLossless, AudioQualityHigh,
 		AudioQualityMedium, AudioQualityLow)

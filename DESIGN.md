@@ -28,11 +28,14 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 `macOS 音乐 App 设计规范 v0.1`，本节只记**代码里已经落地**的部分。
 
 - **主题方案**：设置新增 `themePreset`（`warm-paper` 暖纸·赤陶 / `dusk-amber` 暮光·琥珀
-  / `soft-peach` 柔雾·蜜桃 / `classic` 经典）。**默认暖纸**。色板在
-  `internal/ui/themepreset.go`，逐个抄自规范 §2，含浅色、深色各一份（深色独立调校）。
-  套了方案就压过 `primaryColor` / `backgroundColor` / `borderRadius`；设置页改那三项
-  会把方案清成经典。**经典 = 原来的 Biu 绿外观**，本文件后面「令牌」「颜色」两节
-  量的就是经典。
+  / `soft-peach` 柔雾·蜜桃 / `classic` 经典；2026-10-26 起**本仓库原创**补了四套——
+  `celadon` 青瓷 / `ink-paper` 墨宣 / `sandalwood` 紫檀 / `indigo-night` 靛夜，管的是
+  冷灰绿、水墨、紫、蓝四个色相，**值是照 WCAG 现配的原创数值，不取自任何公开色板**，
+  内置预设不碰第三方配色的口径见「皮肤包」那条调研）。**默认暖纸**。色板在
+  `internal/ui/themepreset.go`：规范那三套逐个抄自规范 §2，含浅色、深色各一份
+  （深色独立调校）。套了方案就压过 `primaryColor` / `backgroundColor` /
+  `borderRadius`；设置页改那三项会把方案清成经典。**经典 = 原来的 Biu 绿外观**，
+  本文件后面「令牌」「颜色」两节量的就是经典。
 - **播放条**：高 **76**、封面 **52**（原 88 / 56）。
 - **主播放键**：**实心强调色圆**（播放条 44×44、图形 20；满屏 64×64、图形 28），图形用
   `AccentText`，悬停 `AccentHover`、按下 `AccentPressed`。原来是无底的
@@ -91,7 +94,7 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
   - **折叠态**：侧栏折起来时这一组**整个不画**（一枚图标 + 一层浮层），而**浮层
     里那几行是同一套**（封面 + 名称 + N 首）——浮层是同一个入口的另一种展开
     方式。
-- **设置页「主题方案」**是四张预览卡（暖纸 / 暮光 / 柔雾 / 经典，`settings_preset_card.go`），
+- **设置页「主题方案」**是预览卡（`settings_preset_card.go`），**每行四张、八套折两行**，
   不是分段控件；套了方案时「颜色」那行的色块显示方案真在画的色。
 - **登录页**内容收在一张居中的卡片里（宽 420、`surface1`、`radiusLg`、1px 描边）；卡片底色和圆角
   走 `Shell.cardBackground` / `Shell.cardRadius`（方案里的 `surface1` / `radiusLg`，经典用控件层和 1.5 倍圆角），

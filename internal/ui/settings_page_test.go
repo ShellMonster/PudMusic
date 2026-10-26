@@ -421,9 +421,13 @@ func TestTheSettingsContentIsCappedAndCentered(t *testing.T) {
 	const sideW = int(app.DefaultSideMenuWidth) // 默认侧栏宽
 
 	for _, winW := range []int{1200, 1400, 1000} {
-		tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), at(winW, 800))
+		tt, sh, _, _ := shellOnSettings(t, app.DefaultSettings(""), at(winW, 800))
 		homeFrame(tt)
 
+		// 圆角那一行在页面很靠下的地方（外观组现在有八套方案折两行），800 高的
+		// 窗口装不下整页——被滚出可视区的元素框架量成 0×0，横向测量就废了。
+		// 先把它滚进来再量。
+		settingRect(t, tt, sh, "8px")
 		left, okL := tt.Find("外观")
 		if !okL {
 			t.Fatalf("窗口 %d：设置页上没有「外观」那个小标题，文字有 %q", winW, tt.Texts())
