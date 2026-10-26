@@ -562,3 +562,61 @@ func TestATextDynamicHasNoPlayNextButton(t *testing.T) {
 		t.Errorf("纯文字动态上摆着「下一首播放」（那一栏里根本没有东西可放），文字有 %q", tt.Texts())
 	}
 }
+
+// TestAClickedDynamicCardKeepsItsTextDark 钉住「点过的动态卡不变白字」。
+//
+// 框架的列表在**指针点一下**时就把那一行标成选中（`mygo/ui/list.go:708` 的
+// `w.Selected(on)`），那一笔带着一块主色底和一层白字。底被卡片自己刷的页面底
+// 盖掉了，白字盖不住——卡片里没写死颜色的字（标题、UP 昵称、行尾那枚「⋯」）
+// 会继承它，压在浅底上就是「点过的那张卡变成白字，看不清」（2026-10-26 用户
+// 实测：点开「⋯」再点旁边空白，整张卡的标题和昵称都白了）。修法是卡片根上
+// 无条件钉一层正文色（见 viewDynamicCard）。
+//
+// 复刻的就是用户那条流程：点开「⋯」→ 点旁边空白 → 标题还读得出来。
+// 判据用**最暗像素**（理由见 playbar_color_test.go 的 darkestPixel）：白字那一档
+// 最暗也在 700 上下，正文色在 110 上下，中间没有第三种可能。
+func TestAClickedDynamicCardKeepsItsTextDark(t *testing.T) {
+	b := newUIExplore(t)
+	uiSpaceData(b, "发投稿的 UP", 0, 1)
+	b.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{
+			"items": []any{uiDynamicArchive("v1", "BV1play")}, "offset": "", "has_more": false,
+		})
+	})
+	s, tt, _ := newSpaceShell(t, b, true, "77")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+	waitFrames(t, tt, "动态加载完", func() bool { return sp.dyn.started })
+	tt.Frame()
+
+	// 「⋯」这一枚带 Label，Find 给的是它自己的矩形（普通文字给的是整张卡的），
+	// 拿它当这一行的锚点。
+	more, ok := tt.Find(dynMoreLabel)
+	if !ok {
+		t.Fatalf("画面上没有「⋯」，文字有 %q", tt.Texts())
+	}
+
+	// 用户流程：点开「⋯」，再点它**上方**那片空白（同一行的头部，指针不落在
+	// 任何键上）。框架的列表认这一下——那一行就此被标成选中。
+	if err := tt.Click(dynMoreLabel); err != nil {
+		t.Fatalf("点不到「⋯」：%v", err)
+	}
+	tt.Frame()
+	// 空白点：和「⋯」同一行高、往左一大段（头部那一行的空档，不在任何键上）。
+	tt.ClickAt(more.X-170, more.Y+more.H/2)
+	tt.Frame()
+	tt.Frame()
+
+	// 菜单该收起来了；「⋯」自己还读得出来——它的图标没写死颜色，白字一漏
+	// 它第一个消失。判据用**最暗像素**（理由见 playbar_color_test.go 的
+	// darkestPixel）：图标在（正文色）最暗在 110 上下，白字那一档在 570 上下，
+	// 中间没有第三种可能。
+	if _, open := tt.Find("下一首播放"); open {
+		t.Error("点了空白处菜单没收起来")
+	}
+	darkest := darkestPixel(tt.Image(), more)
+	lum := int(darkest.R) + int(darkest.G) + int(darkest.B)
+	if lum > 300 {
+		t.Errorf("点过的卡片上「⋯」最暗像素是 %v（亮度 %d）——白字又漏出来了", darkest, lum)
+	}
+}

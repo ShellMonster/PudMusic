@@ -36,6 +36,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/covertint"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
@@ -167,6 +168,9 @@ func (x *mediaIndex) reset() {
 // 整个换掉。
 type collectionPage struct {
 	ref app.CollectionRef
+
+	// tint 是头图区背景光晕的取色（封面主色，见 viewCollectionHeader）。
+	tint coverTint
 
 	// list 是下面那个分页列表。
 	list *list.PagedList
@@ -585,9 +589,16 @@ const collectionOpsButtonH = 40
 func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 	t := c.Theme()
 	info := s.app.Collection(p.ref)
+	hue, sat := p.tint.sync(info.Cover, s.wake.invalidate)
+	glow := collectionGlow(t, hue, sat)
 
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
-	ui.Row(c).Key("collection-header").Gap(space.Px16).Padding(space.Px20, space.None, space.Px8).
+	//
+	// 设计稿 docs/design-mockups/collection_header.png：头图区是一块带封面主色光晕的
+	// 横幅——从封面色（浅色 18% / 深色 28%）自上而下淡到透明。取不到色（封面空、
+	// 还没下回来、灰得没颜色）时没有光晕，画面和以前一样。
+	ui.Row(c).Key("collection-header").Gap(space.Px16).Padding(space.Px20, space.Px20, space.Px20).
+		Radius(t.Radius * 2).LinearGradient(glow).
 		Children(func() {
 			// ① 封面。空地址时 imgcache 画空框（没给封面的收藏夹真的有）。
 			imgcache.View(c, s.images, info.Cover, collectionCoverW, collectionCoverH)
@@ -1087,4 +1098,24 @@ func (s *Shell) collectionSearching() bool {
 		return false
 	}
 	return !p.pendingSince.IsZero()
+}
+
+// collectionGlow 是头图区背景光晕：封面主色自上而下淡到透明。
+//
+// 没取到颜色（饱和度 0）时两端都是透明，等于没有。浅色底上压 18%、深色底上 28%
+// （深底上同样的透明度看着更淡）。
+func collectionGlow(t *ui.Theme, hue, sat float64) ui.LinearGradient {
+	if sat <= 0 {
+		return ui.LinearGradient{}
+	}
+	dark := int(t.Background.R)+int(t.Background.G)+int(t.Background.B) < 3*128
+	col, ok := parseHexColor(covertint.Hue{H: hue, S: sat}.Color(dark))
+	if !ok {
+		return ui.LinearGradient{}
+	}
+	a := float32(0.18)
+	if dark {
+		a = 0.28
+	}
+	return ui.LinearGradient{From: col.Alpha(a), To: col.Alpha(0), Angle: 180}
 }

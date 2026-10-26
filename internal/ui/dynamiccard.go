@@ -17,6 +17,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
@@ -41,9 +42,6 @@ const (
 // 上游 HeroUI 的 `User` 组件默认 `size="md"`——头像那一档是 **40**
 // （`md` 是 `w-10 h-10`）。
 const dynamicAvatarS = 40
-
-// dynamicPlayBtn 是投稿卡右边那枚播放键的直径；它是正圆，所以圆角是直径的一半，不跟主题圆角走。
-const dynamicPlayBtn = 36
 
 // dynamicPicSide 是图文里每张图的边长。
 const dynamicPicSide = 92
@@ -167,6 +165,10 @@ func (s *Shell) viewCollectionRow(c *ui.Context, col bili.UpCollection, selected
 	box := ui.Row(c).Grow(1).Gap(space.Px12).Padding(space.Px12).AlignItems(ui.Center).
 		Margin(space.None, space.None, space.Px8, space.None).
 		Background(s.cardBackground(t)).Radius(s.cardRadius(t)).Border(1, t.Border).
+		// 🔴 **字色钉回正文色，是无条件的**（理由见 viewDynamicCard 根上那一段）：
+		// 框架在指针点一下时就把行标成选中并带上一层白字，标题没写死颜色，
+		// 不钉的话点一下就变白字。
+		TextColor(t.Text).
 		Key("coll:" + strconv.FormatInt(col.ID, 10))
 	// ⚠️ hover 要在 Children **之前**问（理由同 `widgets/list` 的 grid.go）：
 	// 它报的是这一帧指针在不在这一行上，而封面是在 Children 里画的。
@@ -231,6 +233,14 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic, selected, ring bo
 		Padding(dynamicCardPadY, space.None, dynamicCardPadY, space.None).
 		// ⚠️ **底色刷成页面底色，是为了盖掉框架那一层悬停底**（见下面那段）。
 		Background(t.Background).
+		// 🔴 **字色钉回正文色，是无条件的**：框架的列表在**指针点一下**时就把
+		// 那一行标记成选中（`mygo/ui/list.go:708` 的 `w.Selected(on)`），那一笔
+		// 带着一块主色底和一层**白字**。底被上面那句盖掉了，白字盖不住——卡片里
+		// 没写死颜色的字（标题、UP 昵称、行尾那枚「⋯」）会继承它，压在浅底上
+		// 就是「点过的那张卡变成白字，看不清」（2026-10-26 用户实测）。在根上
+		// 钉一层正文色，继承到的是它；写死了颜色的字（「赞 N」、时间、简介）
+		// 不受影响。
+		TextColor(t.Text).
 		BorderWidth(0, 0, 1, 0).BorderColor(t.Border).
 		Gap(space.Px8)
 	// 选中那一层：盖掉框架那块实心主色底，键盘走到它上面时给它一圈焦点环
@@ -343,18 +353,24 @@ func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 		if count > 0 {
 			label = "赞 " + strconv.Itoa(count)
 		}
-		// 上游那一枚是 `variant="light"`（`dynamic-feed/item.tsx:112`）：图标 +
-		// 数字，无边框无底。我们这一枚还带着数字（「赞 12」），所以保留文字键的
-		// 形状，只换掉那层壳——图标化会丢掉「赞过几次」这个用户要看的数。
-		btn := flatButton(c, label).FontSize(scale.Font(c, scale.Size12))
+		// 上游那一枚是 `variant="light"`（`dynamic-feed/item.tsx:108-116`）：
+		// **拇指图标（18，赞过实心/没赞空心）+ 数字**，无边框无底。以前我们只画
+		// 「赞 N」两个字的文字键——用户 2026-10-26 点名要回上游那个大拇指。
+		// 壳走 `flat.ButtonContent`（和 Button 同一份壳），内容自己拼。
+		//
+		// 点亮的那一下是**看得见的**（「我赞过了」不是数字变大）：实心拇指 +
+		// 主色当字（浅色下取压深的那一档，理由见 `widgets/ink`）；没赞是空心
+		// 拇指 + 次要色。
+		col := t.TextMuted
+		thumb := iconLike
 		if liked {
-			// 点亮的那一下是**看得见的**（「我赞过了」不是数字变大）。
-			// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（理由见
-			// `widgets/ink`）。
-			btn = btn.TextColor(ink.AccentOn(t))
-		} else {
-			btn = btn.TextColor(t.TextMuted)
+			col = ink.AccentOn(t)
+			thumb = iconLikeFilled
 		}
+		btn := flat.ButtonContent(c, func(c *ui.Context) {
+			ui.Icon(c, icon(thumb)).FontSize(18).TextColor(col)
+			ui.Text(c, label).FontSize(scale.Font(c, scale.Size12)).TextColor(col).SingleLine()
+		})
 		if btn.Clicked() {
 			s.toggleDynamicLike(d)
 		}
@@ -562,9 +578,28 @@ func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author b
 		s.listActions().PlayNow(dynVideoItem(v, author))
 	}
 	box.Children(func() {
-		// ① 封面（16:9）+ 右下角那个时长角标。
+		// ① 封面（16:9）+ 悬停罩上的播放键 + 右下角时长角标。
+		//
+		// ⚠️ **播放入口是封面上的悬停罩，不是卡右上一枚圆键**（上游
+		// `dynamic-feed/item.tsx:166-171`：封面 `absolute inset-0` 一层黑罩，
+		// 中间一枚 32 的白色播放三角，`opacity-0 group-hover:opacity-100`——
+		// 指针停在**卡上**（`group` 在外层那一格）罩才升起来）。我们原来在卡
+		// 最右边画了一枚实心主色圆键（#357 引入的），用户 2026-10-26 点名
+		// 「要像上游那样，不是在最右侧」。整块可点不变，这一枚罩只是**看得见的
+		// 入口**（和原来那枚圆键同一句话）。
+		//
+		// ⚠️ **罩的黑白走令牌**：上游是 `rgba(0,0,0,0.4)`，我们取共用的
+		// `scrim.Overlay`（35%，图上薄黑那一档，行封面悬停压暗同款）——界面层
+		// 不许写裸的遮罩 alpha（`widgets/scrim` 的 `TestNoScrimLiteralIsLeft`）。
+		// 白三角和时长角标一样是纯白：它压在黑罩加照片上，主题色读不出来。
 		ui.Box(c).Size(dynamicCoverW, dynamicCoverH).Clip().Children(func() {
 			s.spaceThumb(c, v.Cover, dynamicCoverW, dynamicCoverH)
+			if box.Hovered() {
+				ui.Box(c).Absolute().Size(dynamicCoverW, dynamicCoverH).
+					Background(ui.RGBA(0, 0, 0, scrim.Overlay)).Center().Children(func() {
+					ui.Icon(c, icon(iconPlayFill)).FontSize(32).TextColor(ui.Color{R: 255, G: 255, B: 255, A: 255})
+				})
+			}
 			// ⚠️ **时长角标是黑底白字**（上游 `bg-black/70 px-1 text-xs
 			// text-white`），不是主题色——它压在封面那张照片上，主题色在深色
 			// 封面上读不出来。
@@ -572,6 +607,9 @@ func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author b
 			// ⚠️ **那 70% 的黑走 `scrim.Badge`**（令牌表里那一档）：界面层不许
 			// 出现裸的遮罩 alpha（`widgets/scrim` 的 `TestNoScrimLiteralIsLeft`
 			// 盯着这件事）。
+			//
+			// ⚠️ **画在悬停罩的上面**（上游 z-20 > z-10）：罩升起来也不能把
+			// 时长盖掉。
 			if v.Duration != "" {
 				ui.Box(c).Absolute().Right(space.Px4).Bottom(space.Px4).
 					Padding(space.None, space.Px4).Radius(space.Px4).
@@ -591,10 +629,6 @@ func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author b
 			if meta := dynVideoMeta(v); meta != "" {
 				ui.Text(c, meta).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
 			}
-		})
-		// 右边一枚实心强调色圆的播放键（整块也可点，这一枚是看得见的入口）。
-		ui.Box(c).Size(dynamicPlayBtn, dynamicPlayBtn).Radius(dynamicPlayBtn / 2).Background(t.Accent).Center().Children(func() {
-			ui.Icon(c, icon(iconPlayFill)).FontSize(18).TextColor(t.AccentText)
 		})
 	})
 }

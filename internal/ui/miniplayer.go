@@ -572,7 +572,7 @@ func (s *Shell) viewMini(c *ui.Context) {
 	//
 	// ⚠️ **语义色要盖住整张卡片**：迷你那一张卡片是浮在桌面上的，而深色主题
 	// 下 `t.Surface` 和桌面糊在一起——那一行字压着灰底读不清。
-	cardBG := t.Surface
+	cardBG := s.coverWash(t, t.Surface)
 	noticeFG := t.Text
 	if hasNotice {
 		cardBG, noticeFG = toastColors(noticeTone, t)

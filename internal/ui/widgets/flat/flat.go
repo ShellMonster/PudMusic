@@ -110,6 +110,25 @@ func Button(c *ui.Context, label string) ui.Element {
 	return button(c, label, ThemeBase)
 }
 
+// ButtonContent 是 Button 的「**内容自己拼**」变体：壳（内边距、圆角、悬停 /
+// 按下那一层淡底）和 `Button` 完全同一份，里面画什么由调用方给。
+//
+// # 为什么要有它
+//
+// 上游的赞键是「图标 + 数字」的 `variant="light"` 按钮
+// （`dynamic-feed/item.tsx:108-116`：`RiThumbUpFill/RiThumbUpLine` + 一格数字）。
+// `Button` 只会画一段字，`IconLabelButton` 又是侧栏菜单那一号（图标装在一个
+// 格子里、内容左对齐、高度钉死）——都不是它。硬凑哪一个都会在这一枚上长出
+// 别处的形状；让它走这一份壳，是「别在别处再写一份无描边按钮」那条规矩的
+// 另一半：**壳不许抄，内容可以换**。
+//
+// 🔴 **build 里画的那段可见文字就是它的无障碍名字**，别再补 `Label`（同 `Button`）。
+func ButtonContent(c *ui.Context, build func(c *ui.Context)) ui.Element {
+	b := button(c, "", ThemeBase)
+	b.Children(func() { build(c) })
+	return b
+}
+
 // button 是 Button 的「底色可传」那一支。
 //
 // base 只影响**悬停 / 按下铺的那一层淡底**（按底挑黑或白，见 `shadeInk`）——

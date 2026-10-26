@@ -1132,6 +1132,10 @@ func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser, selected, ring 
 	card := ui.Column(c).Grow(1).Radius(s.cardRadius(t)).AlignSelf(ui.Stretch).Clip().
 		AlignItems(ui.Center).Gap(space.Px6).Padding(followCardPad).
 		Background(cardBg).
+		// 🔴 **字色钉回正文色，是无条件的**（理由见 dynamiccard.go 的
+		// viewDynamicCard 根上那一段）：框架在指针点一下时就把行标成选中并带
+		// 一层白字，昵称没写死颜色，不钉的话点一下就变白字。
+		TextColor(t.Text).
 		OnClick(func() { s.navigate(upPathOf(u.Mid)) })
 	// 选中那一层：盖掉框架那块实心主色底，键盘走到它上面时给它一圈焦点环
 	//（理由见 `widgets/list/selection.go`）。
