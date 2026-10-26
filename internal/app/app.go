@@ -10,11 +10,13 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/media"
 	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/service/danmaku"
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
 )
@@ -616,6 +618,45 @@ type App struct {
 	// 把它取出来递给那个 goroutine，goroutine 不碰这个字段）。生产上永远是 nil。
 	likeFetch func(context.Context, string) (bili.ArchiveRelation, error)
 
+	// 弹幕这一摊，见 danmaku.go。挂上缓存之前 danmakuCache 是 nil。
+	//
+	// ⚠️ **它自己的锁，不在 `a.mu` 里**：理由和 `likeMu` 一样——写它的是网络
+	// 往返回来的那个 goroutine，而 `a.mu` 是播放器那一摊的（`Snapshot` 每帧都要
+	// 它）。弹幕区也是**每一帧**问一次的（`App.Danmaku`），混进 `a.mu` 的话，
+	// 界面那一帧的等待时间就变成了「网络那一趟」。
+	danmakuMu     sync.Mutex
+	danmakuCache  *danmaku.Cache
+	danmakuKey    string
+	danmakuItems  []DanmakuItem
+	danmakuErr    error
+	danmakuReady  bool
+	danmakuLoaded bool
+	danmakuWanted bool
+	// danmakuGen 是**弹幕代次**。每换一次歌（或换一次集）就加一，迟到的结果回来
+	// 发现代次变了直接走人（见 `finishDanmaku`）。
+	//
+	// ⚠️ **少了它的症状是「在听 B，滚着 A 的弹幕」**：慢一拍的那一趟回来时把
+	// 旧歌的弹幕装了上去，而用户看不出发生了什么。
+	danmakuGen int
+	// danmakuDropped 是**被丢掉的那一趟**的计数（代次对不上的那一种）。
+	//
+	// ⚠️ **它只是给测试看的**：被丢掉的那一趟**什么都不改**（状态没变，就不该
+	// 叫醒界面），于是从外面看不出来「它到底处理了没有」——测试要等的正是
+	// 「旧的那一趟已经走了，而新歌的弹幕没被盖掉」。
+	//
+	// ⚠️ **它是原子计数器**：它被后台那个 goroutine 加，而测试在另一个
+	// goroutine 里读它。
+	danmakuDropped atomic.Int64
+	// danmakuTriedAt 是上一次**发起**那一问的时刻，问失败之后拿它算退避
+	// （`danmakuRetryAfter`）。成功之后用不上——`danmakuLoaded` 已经挡住了。
+	danmakuTriedAt time.Time
+	// danmakuFetch 是取弹幕的那一趟，nil = 走取流零件上的 `bili.Client.Danmaku`。
+	//
+	// 和 `partsFetch` / `likeFetch` 同一条规矩：**只由界面那一侧读写**
+	//（`ensureDanmaku` 在那里就把它取出来递给那个 goroutine，goroutine 不碰这个
+	// 字段）。生产上永远是 nil。
+	danmakuFetch func(context.Context, string) ([]bili.Danmaku, error)
+
 	// 本地音乐库，见 localmusic.go。挂上去之前是 nil，界面要判空。
 	localMusic *localLibrary
 
@@ -1155,6 +1196,9 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	a.publishMedia()
 	// 歌词跟着换歌一起换：先重置成默认值，再从缓存恢复（见 lyrics.go）。
 	a.setLyricTrack(LocalItem(path))
+	// 弹幕也跟着换歌一起换（见 danmaku.go）：本地文件压根没有弹幕，所以旧的那
+	// 一份得**作废**——不清的话界面上会继续滚上一首的弹幕。
+	a.startDanmaku(LocalItem(path))
 	if wake != nil {
 		wake()
 	}
@@ -1504,6 +1548,9 @@ func (a *App) Close() {
 	}
 	// 歌词偏移/字号那一次防抖写可能还欠着，退出前落完。
 	a.closeLyrics()
+	// 弹幕那一摊也收掉：在途的那一趟回来时会发现代次变了，直接走人——于是它
+	// 不会在应用退出之后还往盘上写一份缓存。
+	a.closeDanmaku()
 	// 下载要**停掉并落盘**。停掉是为了别让在飞的请求在应用退出时还在往盘上
 	// 写；落盘是因为队列文件是「下到哪儿了」的唯一一份，丢了用户重启就得
 	// 从头下。写失败不往上报错：退出路径上没有用户在看。

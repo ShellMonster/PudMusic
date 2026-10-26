@@ -1274,6 +1274,11 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	// ⚠️ **整个过程在后台**，而且**它不拦播放**：没有字幕的那一首歌，界面照旧
 	// 是「暂无歌词」加一个「找歌词」的入口。
 	a.fetchBiliSubtitle(context.Background(), it, ref, s)
+	// 弹幕也跟着换歌一起换（见 danmaku.go）：换歌就作废旧的，后台取新的那一份。
+	//
+	// ⚠️ **放在换上播放器之后**：弹幕区问的是「现在放的是哪一集」，而 `it` 里的
+	// cid 是取流那一趟补出来的（`withCid`）——放早了队列项还没有 cid。
+	a.startDanmaku(it)
 	if wake != nil {
 		wake()
 	}
