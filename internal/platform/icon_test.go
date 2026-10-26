@@ -189,7 +189,7 @@ func checkSizeStillReadsAsTheSubject(t *testing.T, size int) {
 		t.Fatalf("%d：画出来是 %dx%d", size, got.Dx(), got.Dy())
 	}
 
-	var opaque, subject, accent int
+	var opaque, subject, accent, disc int
 	for y := range size {
 		for x := range size {
 			c := img.NRGBAAt(x, y)
@@ -203,6 +203,9 @@ func checkSizeStillReadsAsTheSubject(t *testing.T, size int) {
 			case isAccent(c):
 				accent++
 			}
+			if isDisc(c) {
+				disc++
+			}
 		}
 	}
 	if opaque == 0 {
@@ -210,6 +213,7 @@ func checkSizeStillReadsAsTheSubject(t *testing.T, size int) {
 		return
 	}
 	w, o := float64(subject)/float64(opaque), float64(accent)/float64(opaque)
+	d := float64(disc) / float64(opaque)
 	// ⚠️ **阈值是按这张图标量的**：源图上深色占 20~22%、红日 25%，各尺寸几乎不变；
 	// 而**切完圆角留白之后**（图案只占画布的 0.824² ≈ 68%）再缩到 16 那一档，
 	// 深色被米色的纸底稀释到 **10.3%**。所以主体那条断在 **8%**（实测 10.3%，
@@ -218,13 +222,20 @@ func checkSizeStillReadsAsTheSubject(t *testing.T, size int) {
 	// **要抓的坏图在两头**：主体被平均没了（深色掉到 0，Dock 上是一块米色方块），
 	// 或者底被吃掉（红掉到 0）。中间地带靠肉眼在 32px 上看过——那还是一只张着嘴的
 	// 熊猫戴着一副金边耳机。
-	if w < 0.08 {
-		t.Errorf("%d：主体（熊猫的深色）只剩 %.1f%% 的不透明像素（要 ≥8%%）——"+
+	// 三个色系：**橙红的大圆**（最醒目，主体）、**米色的云**（底）、
+	// **黑胶唱片**（细节）。源图上它们分别是 35% / 59% / 7%，各尺寸几乎不变
+	// （缩到 16 那一档黑胶会被米色稀释到 6% 上下）。
+	if w < 0.20 {
+		t.Errorf("%d：主体（橙红的大圆）只剩 %.1f%% 的不透明像素（要 ≥20%%）——"+
 			"16 尺寸那一档最容不下它，糊过去就是一块底色", size, w*100)
 	}
 	if o < 0.18 {
-		t.Errorf("%d：底色（红日）只剩 %.1f%% 的不透明像素（要 ≥18%%）——"+
+		t.Errorf("%d：底色（米色的云）只剩 %.1f%% 的不透明像素（要 ≥18%%）——"+
 			"整张图糊成一种颜色就不是图标了", size, o*100)
+	}
+	if d < 0.035 {
+		t.Errorf("%d：唱片的深色只剩 %.1f%% 的不透明像素（要 ≥3.5%%）——"+
+			"那就只剩一个橙红圆，看不出是张唱片了", size, d*100)
 	}
 }
 
@@ -233,10 +244,14 @@ func checkSizeStillReadsAsTheSubject(t *testing.T, size int) {
 // 阈值不是从这张图上「量」出来的，是按人眼看画的：奶白 R≈250 G≈245 B≈225，
 // 黄 R≈250 G≈200 B≈120，青绿底 R≈95 G≈160 B≈165——R 这一刀分得很开，两边都留
 // 了十几的余量，所以换一张同风格的图也还成立。
-func isSubject(c color.NRGBA) bool { return c.R < 90 && c.G < 90 && c.B < 90 }
+// isSubject 认主体：那个**橙红的大圆**（R 明显高于 G 和 B）。
+func isSubject(c color.NRGBA) bool { return c.R > 170 && c.R > c.G+40 && c.R > c.B+50 }
 
-// isAccent 认底色：红日那一族（R 明显高于 G 和 B）。
-func isAccent(c color.NRGBA) bool { return c.R > c.G+30 && c.R > c.B+30 }
+// isAccent 认底色：**米色的云**那一族。
+func isAccent(c color.NRGBA) bool { return c.R > 200 && c.G > 185 && c.B > 150 }
+
+// isDisc 认那张**黑胶唱片**（深色那一族）。
+func isDisc(c color.NRGBA) bool { return c.R < 90 && c.G < 90 && c.B < 90 }
 
 // TestTheIconIsNotOneFlatColor 钉住「不是一张纯色图」。
 //

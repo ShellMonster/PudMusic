@@ -59,8 +59,14 @@ func TestTheDataDirectoryNameIsNotTheDisplayName(t *testing.T) {
 		t.Fatalf("mygo.json 里的应用名还是 %q——显示名和用户数据目录同名，"+
 			"老用户升级之后数据目录会整个搬走（见本文件顶上那一节）", name)
 	}
-	if !strings.Contains(name, "BiuGo") {
-		t.Errorf("mygo.json 里的应用名是 %q，不是 BiuGo", name)
+	// ⚠️ **不断言显示名的字面量**：显示名是可以改的（2026-10 改过一次，
+	// 2026-10-26 又改成「布丁音乐」），而这条断的是**「显示名与目录名各走各的」**
+	// 那个不变式——上面那句「显示名 == 目录名」才是它要抓的坏法。
+	// 拿某个具体名字来断（「必须叫 BiuGo」）是**把显示名焊死在测试里**：
+	// 改一次名就红一次，红完还得回来改测试——而那时人会开始想「是不是这条不许改」。
+	if strings.Contains(name, "Biu My Go") {
+		t.Errorf("mygo.json 里的应用名是 %q，和用户数据目录同名了——"+
+			"老用户升级之后数据目录会整个搬走", name)
 	}
 }
 
