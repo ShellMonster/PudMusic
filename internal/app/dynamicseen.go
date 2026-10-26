@@ -131,21 +131,36 @@ func (a *App) MarkDynamicSeen(dynID string) {
 		return
 	}
 	_, err := a.UpdateSettings(func(s *Settings) {
+		// ⚠️ **整份换掉，不就地改元素**。
+		//
+		// 设置存储的 `Snapshot()` 给的是**浅拷贝**：切片头共用同一个底层数组，
+		// 而锁在返回时就放了。于是锁外读那些元素（`SettingsSnapshot` →
+		// `DynamicBaseline`）的时候，这边在锁里**就地**改同一个数组，就是一次
+		// 数据竞争（`-race` 直接报）。
+		//
+		// 换掉整个切片就没有这个问题：改的是**新数组**，而外面那些读者读的是
+		// **旧数组**——旧数组从这一刻起再没人改它。
+		//
+		// ⚠️ **这也是这个包里别的键的写法**：`SideMenuCollectionOrder.setList`
+		// 和 `normalize` 都是**换头**，没有一处就地改元素。
+		next := make([]DynamicSeenEntry, len(s.DynamicSeen.Baselines))
+		copy(next, s.DynamicSeen.Baselines)
 		// ⚠️ **只动这一个账号那一行**：别的账号的基准得留着（切回去的时候那个点
 		// 不该又按「全部没看过」亮起来）。
-		for i := range s.DynamicSeen.Baselines {
-			if s.DynamicSeen.Baselines[i].Mid != mid {
+		for i := range next {
+			if next[i].Mid != mid {
 				continue
 			}
-			if !newerDynID(dynID, s.DynamicSeen.Baselines[i].Baseline) {
+			if !newerDynID(dynID, next[i].Baseline) {
 				// 只往前挪：已经记着的那个更新（或者一样新），就不动它。
 				return
 			}
-			s.DynamicSeen.Baselines[i].Baseline = dynID
+			next[i].Baseline = dynID
+			s.DynamicSeen.Baselines = next
 			return
 		}
 		// 这个账号还没有：加一行。
-		s.DynamicSeen.Baselines = append(s.DynamicSeen.Baselines,
+		s.DynamicSeen.Baselines = append(next,
 			DynamicSeenEntry{Mid: mid, Baseline: dynID})
 	})
 	if err != nil {

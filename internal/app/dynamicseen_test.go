@@ -9,6 +9,7 @@
 package app
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 )
@@ -101,6 +102,51 @@ func TestTheDynamicBaselineOnlyMovesForward(t *testing.T) {
 	a.MarkDynamicSeen(seenIDOld)
 	if got := a.DynamicBaseline(); got != seenIDNew {
 		t.Errorf("基线退回了 %q，want %q（只往前挪）", got, seenIDNew)
+	}
+}
+
+// TestReadingTheBaselineWhileItIsWrittenDoesNotRace 验「读基准」和「记基准」并发时
+// **不是数据竞争**。
+//
+// ⚠️ **这一条的牙齿在 `-race` 上**：设置存储的 `Snapshot()` 给的是**浅拷贝**
+// （切片头共用同一个底层数组），而锁在返回时就放了——所以锁外读那些元素的时候，
+// 另一个 goroutine 在锁里**就地**改同一个数组，就是一次数据竞争（`-race` 直接报
+// `WARNING: DATA RACE`）。
+//
+// 而真机上正是这样并发的：轮询那一趟在**后台 goroutine** 里读它
+// （`internal/ui/navbar_feed.go` 的 ask），而「动态页拉到第一页」在**界面线程**
+// 上写它、「点那个点时的 catchUp」在**后台 goroutine** 里写它。
+//
+// 治法是**换头不就地改**（改一份新数组，外面那些读者读的还是旧数组，而旧数组从
+// 那一刻起再没人改）——这也是这个包里别的键的写法（`SideMenuCollectionOrder.
+// setList`、`normalize` 都是换头）。
+func TestReadingTheBaselineWhileItIsWrittenDoesNotRace(t *testing.T) {
+	a := newSeenApp(t, filepath.Join(t.TempDir(), SettingsFileName), "77")
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = a.DynamicBaseline()
+		}
+	}()
+
+	for i := 0; i < 50; i++ {
+		// ⚠️ **每次都是更新的那一条**：写要真的改到元素上（只是换头的话，
+		// 「往回退」那一支就永远走不到，而那一支正是会读错别人的那种）。
+		a.MarkDynamicSeen(fmt.Sprintf("%018d", 954659517801431000+i))
+	}
+	close(stop)
+	<-done
+
+	if got := a.DynamicBaseline(); got == "" {
+		t.Error("并发写完之后基准是空的")
 	}
 }
 
