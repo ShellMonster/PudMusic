@@ -75,14 +75,26 @@ const homePath = "/"
 // 少写一个 Tab 而数组还按三个走，缺的那一屏画的是 nil 指针。Biu 那三个 Tab 是
 // 写死的（`index.tsx` 的 `RecommendTabKey` 只有 music / guichu / pop），这里
 // 跟着写死。
-const homeTabCount = 3
+const homeTabCount = 6
 
 // homeTabs 是那三个 Tab 的名字，从左到右。
 //
 // 顺序和字面都照 Biu 的 `src/pages/music-recommend/index.tsx:280-282`
 // （`<Tab key="music" title="音乐" />`、`guichu` / `鬼畜`、`pop` / `流行`）。
 // 顺序换了，用户每次开应用先看到的那一屏就跟着变了，而那是 Biu 的默认 Tab。
-var homeTabs = [homeTabCount]string{"音乐", "鬼畜", "流行"}
+//
+// 后三个是音乐发现那一组：热榜 / 原创榜（B 站音乐站每期的榜）和最近播放（登录账号
+// 的观看历史）。**「为你推荐」就是原来的「音乐」那一档**：它拉的是音乐分区的个性化
+// 推荐（B 站按登录账号的口味排），本来就是只含音乐的那一份；换名字是因为它的内容
+// 是「给这个账号的」，而不是「所有人看到的音乐」。⚠️ 没有用 B 站首页的「每日推荐」：
+// 那一份混着大量非音乐视频。
+var homeTabs = [homeTabCount]string{"为你推荐", "鬼畜", "流行", "热榜", "原创榜", "最近播放"}
+
+// homeTabNouns 是各档在「正在加载 X」「重试加载 X」「没拉出来的是：X」里的名词。
+//
+// 和 Tab 上的字分开：「为你推荐」那一档的这几句一直说「音乐推荐」（它拉的是音乐分区
+// 推荐），而「热榜推荐」「最近播放推荐」读不通，榜和历史直接说它们自己。
+var homeTabNouns = [homeTabCount]string{"音乐推荐", "鬼畜推荐", "流行推荐", "热榜", "原创榜", "最近播放"}
 
 // homePopTab 是「流行」那一档的下标，新歌速递只画在这里。
 //
@@ -91,6 +103,10 @@ var homeTabs = [homeTabCount]string{"音乐", "鬼畜", "流行"}
 // 「音乐」和「鬼畜」走的是分区推荐（`getRegionFeedRcmd`），榜上没有的东西它
 // 没有。
 const homePopTab = 2
+
+// homeRecentTab 是「最近播放」那一档的下标。它登录后才有内容，而且历史接口不给
+// 播放量，所以那一列不画。
+const homeRecentTab = 5
 
 // homeSongs 是首页这一屏要画的两摊歌。
 //
@@ -191,7 +207,7 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 		// ⚠️ **投稿时间不画**：上游首页自己就是 `hidePubTime`
 		// （`pages/music-recommend/list.tsx:49` 与 `:60`），而它那一层的
 		// `RecommendItem` 也没把 `pubdate` 带上来——照它。
-		l.SetColumns(list.Columns{PlayCount: true})
+		l.SetColumns(list.Columns{PlayCount: i != homeRecentTab})
 		// 「没有更多了」那一行（票 #370 的验收第 2 条）：别的页到底了就是到底了，
 		// 而这一屏要说得清——不然用户只看到列表停在半截。
 		l.SetEndView(homeEndRow)
@@ -440,6 +456,10 @@ func (h *homePage) viewPopTop(c *ui.Context, tab int) {
 func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 	pg := h.lists[tab].Paged()
 	switch {
+	case tab == homeRecentTab && h.loads.mounted != nil && h.loads.mounted() && selfMidOf(h.loads) == 0:
+		// ⚠️ **先于下面几支**：没登录时那一档一个请求都没发，「一首都没有」说成
+		// 「暂无内容」会让用户以为 B 站没记着他听过什么。
+		s.viewNeedsLogin(c, "home:recent:login", recentNotLoggedIn)
 	case pg.Err != nil && pg.Loaded == 0:
 		// ⚠️ `pg.Loaded == 0` 那一半：手上已经有歌的时候不画失败（那会把
 		// 用户正在看的一屏换成一句错）。第一页失败之后「已经有歌」是不可能的，
@@ -453,7 +473,7 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// 没拉到就消失。
 		h.viewPopTop(c, tab)
 
-		s.viewLoadError(c, "home:fail:"+homeTabs[tab], homeTabs[tab]+"推荐", "重试加载"+homeTabs[tab]+"推荐",
+		s.viewLoadError(c, "home:fail:"+homeTabs[tab], homeTabNouns[tab], "重试加载"+homeTabNouns[tab],
 			pg.Err, func() { h.retryTab(tab) })
 	case pg.Loading && pg.Loaded == 0:
 		// ⚠️ 走**共用**的那一格（`drawLoading`）：上游首页那一屏也是
@@ -466,7 +486,7 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		//
 		// ⚠️ **顶图先画**（理由同上面那一支）。
 		h.viewPopTop(c, tab)
-		drawLoading(c, "home:loading", "正在加载"+homeTabs[tab]+"推荐")
+		drawLoading(c, "home:loading", "正在加载"+homeTabNouns[tab])
 	case pg.Loaded == 0:
 		// ⚠️ 走 `viewEmpty`（`routes` 表里 `/` 那一条，出处和其余 13 条写在
 		// 一起），不是让 `list.List` 说它自己那句「这里还没有歌」：那句只说

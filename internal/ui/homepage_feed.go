@@ -159,6 +159,11 @@ func (h *homePage) tabFetcher(tab int) list.Fetcher {
 			// 那句话说的正是「怎么才能不空」。
 			return list.Page{HasMore: false}, nil
 		}
+		// 最近播放是登录账号的观看历史：没登录就**不发请求**（画面上是「去登录」那
+		// 一支，见 `viewTabBody`）。
+		if tab == homeRecentTab && selfMidOf(h.loads) == 0 {
+			return list.Page{}, nil
+		}
 		items, dropped, err := h.loads.tab(ctx, tab, page)
 		if err != nil {
 			// ⚠️ **翻成人话在落地的那一刻**，不在每一帧画的时候（理由见
