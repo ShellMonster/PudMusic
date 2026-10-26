@@ -82,10 +82,17 @@ func TestSourceGivesTheOriginalBytes(t *testing.T) {
 
 // TestSourceImageIsNotScaled 断**`SourceImage` 给的是原图，不是缓存里那一份**。
 //
-// ⚠️ **判据是宽高**：一张 1024×768 的图，缓存里存的是最长边 768 的那一份
-// （1024×768 会被缩成 768×576），而交出去的要能是原图。
+// ⚠️ **判据是宽高**：缓存里存的是**最长边 768** 的那一份，而交出去的要能是
+// 原图。
+//
+// ⚠️ **图不能太大**：这一组每一条都要编一张 JPEG 再解一遍，而这一组跑在
+// **验收命令里**（`go test -p 4` 全部包一起跑）——编一张 1024×768 的 JPEG 要
+// 几百毫秒，8 个方向再加框架对照就是好几秒的 CPU，而那几秒是**抢在别人的
+// 机器上**的。所以这一组用**小到能验出宽高**的图（80×60）：缩放那一档
+// （最长边 768）根本不会碰它，于是「原图 vs 缩过的那一份」这一条依然成立，
+// 而代价从几百毫秒降到几毫秒。
 func TestSourceImageIsNotScaled(t *testing.T) {
-	body := exifJPEG(t, 1024, 768, 1)
+	body := exifJPEG(t, 80, 60, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write(body)
 	}))
@@ -99,8 +106,8 @@ func TestSourceImageIsNotScaled(t *testing.T) {
 		t.Fatalf("取原图：%v", err)
 	}
 	b := img.Bounds()
-	if b.Dx() != 1024 || b.Dy() != 768 {
-		t.Errorf("拿到的是 %dx%d，want 1024x768（缩过的那一份是 768x576）", b.Dx(), b.Dy())
+	if b.Dx() != 80 || b.Dy() != 60 {
+		t.Errorf("拿到的是 %dx%d，want 80x60", b.Dx(), b.Dy())
 	}
 }
 
@@ -110,7 +117,7 @@ func TestSourceImageIsNotScaled(t *testing.T) {
 // 而 2~4（翻转那一批）宽高不变。**不摆正的话交出去的是一张横躺着的图**。
 func TestSourceImageStraightensTheEXIFOrientation(t *testing.T) {
 	for _, o := range []int{1, 2, 3, 4, 5, 6, 7, 8} {
-		body := exifJPEG(t, 1024, 768, o)
+		body := exifJPEG(t, 80, 60, o)
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Write(body)
 		}))
@@ -122,9 +129,9 @@ func TestSourceImageStraightensTheEXIFOrientation(t *testing.T) {
 			t.Fatalf("方向 %d：取原图：%v", o, err)
 		}
 		b := img.Bounds()
-		wantW, wantH := 1024, 768
+		wantW, wantH := 80, 60
 		if o >= 5 {
-			wantW, wantH = 768, 1024
+			wantW, wantH = 60, 80
 		}
 		if b.Dx() != wantW || b.Dy() != wantH {
 			t.Errorf("方向 %d：拿到的是 %dx%d，want %dx%d", o, b.Dx(), b.Dy(), wantW, wantH)
@@ -146,7 +153,7 @@ func TestSourceImageStraightensTheEXIFOrientation(t *testing.T) {
 // 个可比的数，而转置那一批（5~8）本来就要靠宽高才看得出来。
 func TestTheOrientationMatchesTheFrameworksOwn(t *testing.T) {
 	for _, o := range []int{1, 2, 3, 4, 5, 6, 7, 8} {
-		body := exifJPEG(t, 1024, 768, o)
+		body := exifJPEG(t, 80, 60, o)
 
 		bm, err := ui.DecodeBitmap(body)
 		if err != nil {
