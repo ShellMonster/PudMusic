@@ -68,6 +68,8 @@ type Player struct {
 	gain float64
 	// fadeStop 停掉正在跑的那一趟斜坡（nil = 没有在跑）。
 	fadeStop chan struct{}
+	// fadeIn 是下一次 Play 的淡入时长，0 = 默认（见 SetFadeIn）。
+	fadeIn time.Duration
 
 	// closers 是这个播放器**自己**占着的资源，目前只有在线字节源。
 	//
@@ -346,7 +348,13 @@ func (p *Player) Play() {
 	// ⚠️ **先把增益按到 0，再让播放器开口**：MyGo 的播放器一开口就是第一帧，
 	// 那一帧必须是静的——否则「一上来就全速」照旧（斜坡是之后才走的）。
 	p.setGain(0)
-	p.startRamp(p.Volume(), rampDuration)
+	p.gainMu.Lock()
+	d := rampDuration
+	if p.fadeIn > 0 {
+		d, p.fadeIn = p.fadeIn, 0
+	}
+	p.gainMu.Unlock()
+	p.startRamp(p.Volume(), d)
 	p.play.Play()
 }
 
@@ -406,6 +414,37 @@ func (p *Player) SetVolume(v float64) *Player {
 	p.startRamp(v, rampDuration)
 	return p
 }
+
+// SetEQ 设十段均衡器的增益（dB）。全是 0 时均衡器不处理任何采样。
+func (p *Player) SetEQ(g [10]float64) *Player {
+	p.tap.eq.set(g)
+	return p
+}
+
+// SetNormalize 开关音量均衡（见 normalize.go）。关掉时增益在一段之内回到 1。
+func (p *Player) SetNormalize(on bool) *Player {
+	p.tap.normOn.Store(on)
+	return p
+}
+
+// SetLoudness 告诉播放器这一首已经量好的响度（见 MeasureFile），开着音量均衡
+// 时按它给整首定增益，不再靠开头那几秒估。
+func (p *Player) SetLoudness(l Loudness) *Player {
+	p.tap.norm.known.Store(&l)
+	return p
+}
+
+// SetFadeIn 让**下一次**开始放时的淡入走 d（默认 150ms）。只管一次：放起来之后
+// 就恢复默认，暂停后再恢复不会再淡 d 那么久。
+func (p *Player) SetFadeIn(d time.Duration) *Player {
+	p.gainMu.Lock()
+	p.fadeIn = d
+	p.gainMu.Unlock()
+	return p
+}
+
+// FadeOut 让增益在 d 之内渐变到 0（切歌前的淡出）。之后调 SetVolume 会重新拉回来。
+func (p *Player) FadeOut(d time.Duration) { p.startRamp(0, d) }
 
 // Volume 返回音量增益（目标值，不是渐变途中那一瞬间的值）。
 func (p *Player) Volume() float64 {

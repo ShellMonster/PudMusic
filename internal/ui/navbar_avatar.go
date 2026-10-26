@@ -49,7 +49,7 @@
 //
 // # 登录态的**唯一**来源是 app，不是这个包
 //
-// 「有没有登录」只有 `app.App` 知道（`LoggedIn()` / `Session()`，凭据在钥匙串
+// 「有没有登录」只有 `app.App` 知道（`LoggedIn()` / `Session()`，凭据在后端里
 // 里，界面这一层根本碰不到）。这一层**不存第二份**——存两份的后果是退登之后
 // 头像还显示着上一个人的样子，而界面上没有任何一个地方会提示「没退干净」。
 package ui
@@ -214,7 +214,9 @@ type avatarMenuItem struct {
 // （`avatarMenuItemsNow`）——`onlyLoggedIn` / `onlyGuest` 那一格就是上游的
 // `hidden` 那一栏（票 #260）。
 var avatarMenuItems = []avatarMenuItem{
-	{label: "登录", icon: iconLoginCircle, onlyGuest: true, run: func(s *Shell, _ *ui.Context) { s.goLogin() }},
+	// ⚠️ **登录完回首页**（票 #277）：这一项是**泛入口**（从头像下拉进来的），
+	// 所以去处是首页——用户 2026-10-25 原话「登录成功后应该提示并且回到首页」。
+	{label: "登录", icon: iconLoginCircle, onlyGuest: true, run: func(s *Shell, _ *ui.Context) { s.goLogin(homePath) }},
 	{label: "个人资料", icon: iconProfile, onlyLoggedIn: true, run: func(s *Shell, _ *ui.Context) { s.goProfile() }},
 	{label: "设置", icon: iconSettings, run: func(s *Shell, _ *ui.Context) { s.navigate(settingsPath) }},
 	{label: "刷新数据", icon: iconRefresh, run: func(s *Shell, _ *ui.Context) {
@@ -248,7 +250,7 @@ var avatarMenuItems = []avatarMenuItem{
 //   - 已登录 → 「登录」那一项不画（`onlyGuest`）。
 //   - 未登录 → 「个人资料」「退出登录」那两项不画（`onlyLoggedIn`）。
 //
-// ⚠️ **登录判据只有 `App.LoggedIn()`**（凭据在钥匙串里，界面这一层碰不到），
+// ⚠️ **登录判据只有 `App.LoggedIn()`**（凭据在后端里，界面这一层碰不到），
 // 而这一层**不存第二份**（理由见文件头那一节）。
 //
 // ⚠️ **调它的地方只有两处**（`viewAvatarMenuItems` 和 `viewAvatarMenuKeys`），
@@ -823,7 +825,7 @@ func (s *Shell) viewAvatarLogoutConfirm(c *ui.Context) {
 	case confirmAccepted:
 		s.avatarLogoutAsk = false
 		// 走 login.go 那一支：它退完会把界面收回未登录的样子，退不干净
-		// （钥匙串锁了）也会说出来。
+		// （后端读不出来）也会说出来。
 		s.logoutAndStartOver()
 	case confirmCancelled:
 		// 取消 / Esc / 点外面：**什么都不做**。

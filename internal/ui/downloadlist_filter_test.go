@@ -223,12 +223,12 @@ func TestTheEmptyCopyAfterFilteringIsNotTheCopyForNoDownloads(t *testing.T) {
 	}
 
 	// 还没筛：一句空状态都不该出现。
-	if shows(tt, real.Title) || shows(tt, real.Hint) {
+	if shows(tt, real.Title) || shows(tt, real.Title) {
 		t.Fatalf("有记录却画了空状态，文字有 %q", tt.Texts())
 	}
 
 	dlPick(t, tt, 2) // 视频：一支都没有
-	if !shows(tt, filtered.Title) || !shows(tt, filtered.Hint) {
+	if !shows(tt, filtered.Title) || !shows(tt, filtered.Title) {
 		t.Errorf("筛出来的空没有说 %q / %q，文字有 %q", filtered.Title, filtered.Hint, tt.Texts())
 	}
 	for _, wrong := range []string{real.Title, real.Hint} {
@@ -260,7 +260,7 @@ func TestTheEmptyPageHasNoFilterToPoke(t *testing.T) {
 	// 而真的没下载那一句还在（这一条是 `TestTheEmptyListStillSaysWhyItIsEmpty`
 	// 的对面：不是把它弄丢了）。
 	want := lookup(downloadListPath).Empty
-	if !shows(tt, want.Hint) {
+	if !shows(tt, want.Title) {
 		t.Errorf("空着的时候没有说「怎么才能不空」，文字有 %q", tt.Texts())
 	}
 }

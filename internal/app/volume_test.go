@@ -183,3 +183,54 @@ func TestAVolumeOfZeroIsNotTheSameAsNoVolume(t *testing.T) {
 		t.Errorf("设置文件里写着音量 0，读出来是 %v，want 0", got)
 	}
 }
+
+func TestThePlaybackRateSurvivesARestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), app.SettingsFileName)
+
+	first := volumeApp(t, path)
+	first.SetRate(1.5)
+	if err := first.CloseSettings(); err != nil {
+		t.Fatal(err)
+	}
+
+	second := volumeApp(t, path)
+	if got := second.Snapshot().Rate; got != 1.5 {
+		t.Errorf("重启之后倍率是 %v，want 1.5", got)
+	}
+}
+
+func TestTheVolumeNormalizeSwitchSurvivesARestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), app.SettingsFileName)
+
+	first := volumeApp(t, path)
+	if first.SettingsSnapshot().NormalizeVolume {
+		t.Fatal("音量均衡默认应该是关的")
+	}
+	if _, err := first.UpdateSettings(func(s *app.Settings) { s.NormalizeVolume = true }); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.CloseSettings(); err != nil {
+		t.Fatal(err)
+	}
+	if !volumeApp(t, path).SettingsSnapshot().NormalizeVolume {
+		t.Error("重启之后音量均衡开关没了")
+	}
+}
+
+// 「封面取色」开关重启后还在。
+func TestTheCoverAccentSwitchSurvivesARestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), app.SettingsFileName)
+	first := volumeApp(t, path)
+	if first.SettingsSnapshot().CoverAccent {
+		t.Fatal("封面取色该默认关")
+	}
+	if _, err := first.UpdateSettings(func(s *app.Settings) { s.CoverAccent = true }); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.CloseSettings(); err != nil {
+		t.Fatal(err)
+	}
+	if !volumeApp(t, path).SettingsSnapshot().CoverAccent {
+		t.Error("重启后封面取色开关丢了")
+	}
+}

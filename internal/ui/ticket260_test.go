@@ -35,22 +35,20 @@ func TestTheLoggedInTopBarHasNoStandaloneLogoutButton(t *testing.T) {
 	}
 }
 
-// TestTheGuestTopBarStillHasTheLoginButton 钉住「**未登录**时顶栏那枚「登录」
-// 按钮还在」。
+// TestTheGuestTopBarHasNoSeparateLoginKey 钉住「**未登录**时顶栏右端只有头像，没有
+// 另一枚二维码登录键」。
 //
-// ⚠️ **这一枚不能跟着一起删掉**：删了就没有登录入口了——而顶栏头像下拉里
-// 虽然也有一项「登录」，可那一项要**先点开头像**才看得见（用户 2026-10-25
-// 只说了删那枚独立的「退出」）。
-func TestTheGuestTopBarStillHasTheLoginButton(t *testing.T) {
+// 用户 2026-10-25：「右上角登录的直接就那个 icon 就行，不需要旁边的扫码」。登录入口
+// 是头像下拉里那一项「登录」（照上游）。
+func TestTheGuestTopBarHasNoSeparateLoginKey(t *testing.T) {
 	_, tt := newShell(t)
 	tt.Frame()
 
-	r, ok := tt.Find("登录")
-	if !ok {
-		t.Fatalf("没登录时顶栏上那一枚「登录」不见了——登录入口不能没，文字有 %q", tt.Texts())
+	if _, ok := tt.Find("登录"); ok {
+		t.Errorf("没登录时顶栏上还有一枚独立的「登录」键，文字有 %q", tt.Texts())
 	}
-	if r.W <= 0 || r.H <= 0 {
-		t.Errorf("那一枚「登录」在 %v，量不出来", r)
+	if _, ok := tt.Find(avatarLabel); !ok {
+		t.Errorf("顶栏上没有头像，文字有 %q", tt.Texts())
 	}
 }
 

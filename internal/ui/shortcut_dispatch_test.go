@@ -861,3 +861,53 @@ func clickGlobalToggle(t *testing.T, tt *mygoui.Tester) {
 func hasToastContaining(tt *mygoui.Tester, want string) bool {
 	return tt.HasText(want)
 }
+
+func TestABareSpaceTogglesPlayback(t *testing.T) {
+	_, tt, _, got := shellWithHotkeys(t)
+	tt.Frame()
+	tt.Key(0, mygoui.KeySpace)
+	tt.Frame()
+	if len(*got) != 1 || (*got)[0] != "togglePlay" {
+		t.Errorf("按空格触发的是 %v，want [togglePlay]", *got)
+	}
+}
+
+func TestSpaceDoesNotActivateTheFocusedButton(t *testing.T) {
+	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	got := watchCommands(s)
+	openSettingsTab(t, tt, "菜单设置")
+	tt.Frame()
+	tt.Key(0, mygoui.KeySpace)
+	tt.Frame()
+	if len(*got) == 0 || (*got)[len(*got)-1] != "togglePlay" {
+		t.Errorf("点过标签之后按空格触发的是 %v，want 以 togglePlay 结尾", *got)
+	}
+}
+
+func TestPickingATrackFadeLength(t *testing.T) {
+	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	tt.Frame()
+	tt.Scroll(700, 400, 0, 700)
+	tt.Frame()
+	if err := tt.Click("5 秒"); err != nil {
+		t.Fatalf("找不到切歌淡入淡出的 5 秒档：%v（%q）", err, tt.Texts())
+	}
+	tt.Frame()
+	if got := s.app.SettingsSnapshot().TrackFadeSeconds; got != 5 {
+		t.Errorf("点了 5 秒，设置里是 %d", got)
+	}
+}
+
+func TestPickingAnEQPreset(t *testing.T) {
+	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	tt.Frame()
+	tt.Scroll(700, 400, 0, 700)
+	tt.Frame()
+	if err := tt.Click("摇滚"); err != nil {
+		t.Fatalf("找不到均衡器的摇滚档：%v", err)
+	}
+	tt.Frame()
+	if got := s.app.SettingsSnapshot().EQPreset; got != "rock" {
+		t.Errorf("点了摇滚，设置里是 %q", got)
+	}
+}

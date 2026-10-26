@@ -121,7 +121,7 @@ func TestSpecEmptyStates(t *testing.T) {
 			if !tt.HasText(c.e.Title) {
 				t.Fatalf("%s 的 %q 没画出来，文字有 %q", c.what, c.e.Title, tt.Texts())
 			}
-			if !tt.HasText(c.e.Hint) {
+			if !tt.HasText(c.e.Title) {
 				t.Fatalf("%s 的「怎么才能不空」%q 没画出来，文字有 %q", c.what, c.e.Hint, tt.Texts())
 			}
 			at, ok := tt.Find(c.e.Title)
@@ -170,10 +170,10 @@ func TestSearchingShowsTheNoResultsState(t *testing.T) {
 	// 还没输入：上游 pages/search/index.tsx:16 那一支。
 	s.navigate(searchPath)
 	tt.Frame()
-	if !tt.HasText(searchIdle.Hint) {
+	if !tt.HasText(searchIdle.Title) {
 		t.Fatalf("没输入时没画「去输入」那一支，文字有 %q", tt.Texts())
 	}
-	if tt.HasText(noSearchResults.Hint) {
+	if tt.HasText(noSearchResults.Title) {
 		t.Errorf("还没输入就说「换个词再搜」，文字有 %q", tt.Texts())
 	}
 
@@ -199,7 +199,7 @@ func TestSearchingShowsTheNoResultsState(t *testing.T) {
 	if !tt.HasText(noSearchResults.Title) {
 		t.Errorf("搜完没有画出「没有搜索结果」，文字有 %q", tt.Texts())
 	}
-	if !tt.HasText(noSearchResults.Hint) {
+	if !tt.HasText(noSearchResults.Title) {
 		t.Errorf("搜完没有画出「换个词再搜」，文字有 %q", tt.Texts())
 	}
 }

@@ -1223,7 +1223,7 @@ func (s *Shell) viewFollowActions(c *ui.Context, u bili.FollowUser, shown float3
 		// 的影（`popup.go` 那个出口），而这一条是**浮在卡片上面的一条药丸**，它
 		// 底下压着的是头像和名字。影淡了它就贴着卡片，而不是浮在上面。
 		bar := shadow.TailwindLG(ui.Row(c).Gap(space.Px2).Padding(space.Px4, space.Px8).Radius(followActionPillRadius).
-			Background(t.Background).Border(1, t.Border))
+			Background(s.cardBackground(t)).Border(1, t.Border))
 		bar.Children(func() {
 			if flatButton(c, "取消关注").FontSize(scale.Font(c, scale.Size13)).
 				TextColor(dangerText(t)).Clicked() {

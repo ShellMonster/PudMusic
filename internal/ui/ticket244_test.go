@@ -9,132 +9,15 @@
 package ui
 
 import (
-	"fmt"
 	"strconv"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
-	mygoui "github.com/egoist/mygo/ui"
 )
 
-// ─────────────────────────────────────────────────────────────────────────────
-// D1：设置页每一行的说明和控件之间不该空着几百像素
-// ─────────────────────────────────────────────────────────────────────────────
-
-// settingsDescGapMax 是「说明」和右边那枚控件之间允许的最大空档。
-//
-// 🔴 **它是量出来的**：改动之前（内容段 900）那一档是 **347** 像素——用户改一个
-// 设置，眼睛要在屏幕两端来回横跳三百多像素。改动之后（内容段 780）是 **226**。
-//
-// 250 卡在两档中间：比改动前那一档小得多，又给「说明换行」留了余量（说明那一列
-// 的下限是 320，最长的一句是 15 个字 ≈ 210 像素）。
-const settingsDescGapMax = 250
-
-// settingsLongestDesc 是设置页上最长的一句说明（15 个字）。
-//
-// ⚠️ **它得是最长的那一句**：那一列的宽是定死的，而说明是**左对齐**的——空档
-// = 那一列的宽 − 这一句的宽 + 缝。句子越长空档越小，所以量空档要量最长的那一句。
-const settingsLongestDesc = "内容页排成列表、网格还是紧凑"
-
-// TestTheSettingsRowsDoNotStretchAcrossTheWindow 钉住「设置页每一行的说明和
-// 控件之间不该空着几百像素」。
-//
-// # 那一段空档是什么
-//
-// 每一行是「左边标题 + 一句说明，右边一枚控件」，**两端对齐**——说明在左沿、
-// 控件钉在右沿。内容那一段（去掉左右内边距）有多宽，那一段空档就有多宽减去
-// 说明自己的宽。
-//
-// # 判据是**画面上的墨迹**
-//
-// 说明那一格是个 `Wrap` 的文本，它**画出来的盒子是整列的宽**（说明在那一格里
-// 左对齐），所以量盒子的右边量到的是「列的右沿」，量不到用户看见的那一段空白。
-// 真正要量的是**字迹的最右沿**——那一段空白就是从那儿到控件列之间的那一截。
-func TestTheSettingsRowsDoNotStretchAcrossTheWindow(t *testing.T) {
-	for _, winW := range []int{1200, 900} {
-		t.Run(fmt.Sprintf("窗口%d", winW), func(t *testing.T) {
-			tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""), at(winW, 800))
-			homeFrame(tt)
-
-			desc, ok := tt.Find(settingsLongestDesc)
-			if !ok {
-				t.Fatalf("设置页上没有 %q 那一句，文字有 %q", settingsLongestDesc, tt.Texts())
-			}
-			// 控件列的左沿：那一列的控件**都从这一条线上起**（票 #235 的 F-04）。
-			ctrl := settingRect(t, tt, s, "主题模式")
-
-			ink := settingsInkRight(tt, desc, ctrl.X)
-			gap := ctrl.X - ink
-			if gap > settingsDescGapMax {
-				t.Errorf("说明和右边那枚控件之间空了 %.0f 像素（上限 %.0f）——"+
-					"改一个设置，眼睛要在屏幕两端横跳这么远（窗口 %d）",
-					gap, float32(settingsDescGapMax), winW)
-			}
-		})
-	}
-}
-
-// settingsInkRight 量说明那一格里**字迹的最右沿**。
-//
-// ⚠️ **量的是像素，不是那个文本元素的盒子**：说明是 `Wrap` 的，它画出来的盒子
-// 是整列的宽（字在那一格里左对齐），而用户看见的那一段空白是从**字迹的最右
-// 沿**开始的——量盒子量不到它。
-//
-// ⚠️ **只扫到控件列之前**：右边那枚控件（分段控件 / 开关）在同一行上，扫过去
-// 量到的就是它了。
-//
-// ⚠️ **判据是「明显比底色深」**：说明是次要色（浅色下 #6b6b70 一档），底色是
-// 页面底色（浅色下接近白）。阈值取 200：抗锯齿的边缘落在这一侧，字芯落在另一侧。
-func settingsInkRight(tt *mygoui.Tester, text mygoui.Rect, limit float32) float32 {
-	img := tt.Image()
-	right := text.X
-	for x := int(text.X); float32(x) < limit; x++ {
-		for y := int(text.Y); y < int(text.Y+text.H); y++ {
-			r, g, b, _ := img.At(x, y).RGBA()
-			if r>>8 < 200 && g>>8 < 200 && b>>8 < 200 {
-				right = float32(x)
-				break
-			}
-		}
-	}
-	return right
-}
-
-// TestTheSettingsDescriptionDoesNotWrapAtBigTextScales 钉住「字号放大时说明
-// 不折行」。
-//
-// 🔴 **这一条是评审抓出来的回归**：内容段收窄（900 → 780，票 #244 的 D1）之后
-// **没有算系统字号**——1.5 倍时那句最长的说明就折成两行，而**说明折行会让整行
-// 变高、右边那列控件跟着往下挪半格**，一页设置于是参差不齐（`settingsDescMinW`
-// 的注释写着这一条要避免）。
-//
-// 修法是**内容段的上限跟着字号缩放走**（`settingsContentMaxWAt`）：1.4 倍时上限
-// 是 1092，而 1200 宽的窗口只有 1000 可视，于是那一档的内容段就是可视区那么宽
-// ——说明那一列因此还放得下那句话。
-//
-// # 判据是**说明那一格的高度**
-//
-// 一行字的高 ≈ 字号 × 1.18（框架的行高）。超过「一行半」就说明它折行了。
-func TestTheSettingsDescriptionDoesNotWrapAtBigTextScales(t *testing.T) {
-	for _, sc := range []float32{1, 1.25, 1.4, 1.5, 1.75} {
-		t.Run(fmt.Sprintf("%.2f倍", sc), func(t *testing.T) {
-			tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), at(1200, 800),
-				withPrefs(mygoui.Preferences{TextScale: sc}))
-			homeFrame(tt)
-			desc, ok := tt.Find(settingsLongestDesc)
-			if !ok {
-				t.Fatalf("设置页上没有 %q 那一句，文字有 %q", settingsLongestDesc, tt.Texts())
-			}
-			// 一行字的高 ≈ 14 × 缩放 × 1.18；一行半是「还没折」的宽限。
-			if line := 14 * sc * 1.18; desc.H > line*1.5 {
-				t.Errorf("%.2f 倍字号下那句说明折行了（高 %.1f，一行是 %.1f）——"+
-					"说明一折行，整行就变高，右边那列控件跟着往下挪半格",
-					sc, desc.H, line)
-			}
-		})
-	}
-}
+// D1（设置页说明和控件之间的空档）已经不存在：设置页的每一行不再带说明文字，
+// 自解释的标题加控件就够了。
 
 // ─────────────────────────────────────────────────────────────────────────────
 // B5：迷你窗那根音量滑块要有一枚看得见的悬停提示

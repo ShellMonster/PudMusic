@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
@@ -216,15 +217,16 @@ func TestTheLibraryRowIndexBecomesAWaveformWhilePlaying(t *testing.T) {
 		t.Fatalf("还没有歌在放，那一行上就有波形了：%q", tt.Texts())
 	}
 
-	// ⚠️ **摆队列而不是 `playFrom`**：在线播放那一路在测试里没接上（`Play` 走真播放
-	// 器），按下去只会说一句「放不了这一首」。而「哪一行在放」认的是**队列的当前项**
-	// （`app.Item.Identity`），摆好队列它就成立了——和 `library_menu_test.go` 那一族
-	// 同一个做法。
+	// ⚠️ **换接线而不是 `playFrom`**：在线播放那一路在测试里没接上（`Play` 走真播放
+	// 器），按下去只会说一句「放不了这一首」。而判据认的是「**此刻有声音的那一首**」
+	// （`app.App.IsPlaying`），这一层没法让一首在线的歌真的出声——所以这里换成
+	// 一份说「第一首在放」的接线，量的是**画面**（波形有没有换上去、摆在哪儿）。
+	// 判据本身由 `internal/app` 那一组量，而「真在放时真的有标记」由
+	// `internal/ui/widgets/list` 的端到端那一条量。
 	rows := s.laterPage.rows
 	items := rows.Rows()
-	if _, ok := s.app.Queue().Reset(items[0].Item, items[1].Item); !ok {
-		t.Fatal("队列摆不进去")
-	}
+	playing := items[0].Item.Identity()
+	rows.acts.IsPlaying = func(it app.Item) bool { return it.Identity() == playing }
 	tt.Frame()
 
 	if !rows.isPlaying(items[0]) {

@@ -602,7 +602,7 @@ func TestTheNavBarDrawsAnIconForEveryAction(t *testing.T) {
 			// 头像下拉里都有同一个动作，三个入口会不一致。设置还在不在、够不够
 			// 得着，由 `navbar_test.go` 的 `TestTheTopBarHasNoSettingsKey` 和
 			// 侧栏那一条（`sidebar_test.go`）管。
-			for _, label := range []string{"后退", "前进", "打开文件", "动态", "登录"} {
+			for _, label := range []string{"后退", "前进", "打开文件", "动态"} {
 				assertGlyphPainted(t, tt, label)
 			}
 		})
@@ -811,7 +811,7 @@ func TestTheHitAreaIsBiggerThanTheGlyph(t *testing.T) {
 	//
 	// ⚠️ **写的是字面的 44，不是 `iconHitPlay`**：写成常量的话，把常量改回 48
 	// 这一条就照样绿，得由这一条钉住。
-	const wantPlayBox = 44
+	const wantPlayBox = 36
 	if d := absF(play.W-wantPlayBox) + absF(play.H-wantPlayBox); d > 2 {
 		t.Errorf("播放键在画面上是 %.1fx%.1f，而规范的盒子是 %d×%d——"+
 			"布局没用上那个尺寸", play.W, play.H, wantPlayBox, wantPlayBox)

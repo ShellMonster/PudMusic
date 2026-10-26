@@ -61,6 +61,10 @@ type tap struct {
 	an *spectrum.Analyzer
 	// vol 是音量增益：设置走界面线程、读取走解码 goroutine，所以用 atomic。
 	vol atomic.Uint32
+	// normOn 是「音量均衡」开着没有（见 normalize.go）；norm 只由解码 goroutine 碰。
+	normOn atomic.Bool
+	norm   normState
+	eq     eqState
 	// out 是分析器的输出缓冲（FFT 的中间量在 Analyzer 自己那里）。
 	// **只有解码 goroutine 碰它**，所以不加锁。
 	out []float32
@@ -98,6 +102,8 @@ func (t *tap) Read(buf []float32) (int, error) {
 	n, err := t.Decoder.Read(buf)
 	if n > 0 {
 		ch := max(t.Decoder.Channels(), 1)
+		t.eq.apply(buf[:n-n%ch], ch, t.Decoder.SampleRate())
+		t.norm.apply(buf[:n-n%ch], ch, t.Decoder.SampleRate(), t.normOn.Load())
 		if frames := int64(n / ch); frames > 0 {
 			t.an.SetVolume(math.Float32frombits(t.vol.Load()))
 			t.push(buf[:n], frames, ch)

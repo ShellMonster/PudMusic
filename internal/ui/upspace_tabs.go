@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -48,6 +49,12 @@ func (s *Shell) viewSpaceTabs(c *ui.Context, sp *upSpace) {
 }
 
 // viewSpaceTab 画当前那一张 Tab 的内容。
+//
+// ⚠️ **头图区 + Tab 条是这一页的「页内头部」**：上游整页是一个滚动容器，头图跟着
+// 列表一起滚走（`user-profile/index.tsx`）；我们此前把它摆在列表**外面**，于是滚
+// 列表时头图（横幅、头像、名字、关注）钉在顶上不动。现在它是每张 Tab 那张列表的
+// 第 0 行（`list.Lead` / 裸 `ui.List` 的第 0 行）。没有列表可挂的状态（加载中 /
+// 失败 / 真的没有）走 `viewSpaceFlat`——那时没有东西可滚。
 func (s *Shell) viewSpaceTab(c *ui.Context, sp *upSpace) {
 	if sp.tab == upTabVideo {
 		s.viewSpaceVideos(c, sp)
@@ -55,6 +62,53 @@ func (s *Shell) viewSpaceTab(c *ui.Context, sp *upSpace) {
 	}
 	s.viewSpaceList(c, sp, sp.tab)
 }
+
+// viewSpaceLead 画页内头部：头图区 + Tab 条。
+func (s *Shell) viewSpaceLead(c *ui.Context, sp *upSpace) {
+	s.viewSpaceHeader(c, sp, sp.header.Snapshot())
+	s.viewSpaceTabs(c, sp)
+}
+
+// viewSpaceFlat 画「没有列表可挂」的那几种状态：头图区 + Tab 条在上，状态在下。
+func (s *Shell) viewSpaceFlat(c *ui.Context, sp *upSpace, body func()) {
+	s.viewSpaceLead(c, sp)
+	ui.Row(c).Key("space-body").Grow(1).FillHeight().Children(body)
+}
+
+// upLeadKey 是页内头部那一行的身份（类型撞不上 B 站的 id）。
+type upLeadKey struct{}
+
+// upLeadRows 是裸 `ui.List` 那三张 Tab 的页内头部占几行（恒为 1）。
+const upLeadRows = 1
+
+// viewUpLead 画那三张 Tab 的第 0 行：头图区 + Tab 条（+「画不出来」那一行说明）。
+//
+// ⚠️ **不画灰底选中**：框架可能给被选中的行铺一整块主色底，页内头部自己刷一层页面
+// 底色盖掉（同 `list.List.viewLead`）。
+func (s *Shell) viewUpLead(c *ui.Context, sp *upSpace, tab int) {
+	//
+	// ⚠️ **动态那一张的列表有 8 的行间距**（`GapY`），页内头部是它的第 0 行，于是头部
+	// 和第一张卡片之间多出一段 8——下外边距取 -8 抵掉，画面与头部在列表外面时一样。
+	var bottom float32
+	if tab == upTabDynamic {
+		bottom = -space.Px8
+	}
+	ui.Column(c).Key("space-lead").AlignSelf(ui.Stretch).Background(c.Theme().Background).
+		Margin(space.None, -upPad, bottom, -upPad).Children(func() {
+		s.viewSpaceLead(c, sp)
+		// 「有 N 条我们画不出来」那一行。
+		//
+		// ⚠️ **只在「一条都没画出来」时出现**：有内容的时候插一行字只是噪音；而一条都
+		// 没有的时候，用户看到的是**一片空白加一个转着的圈**——像是坏了，而真相是
+		// 「他发的那些我们画不出来」（票 #300）。它不是空状态：哨兵那一行还得留着。
+		if upRowCount(sp, tab) == 0 && sp.drops[tab].total() > 0 {
+			s.viewDroppedNote(c, sp.drops[tab].counts)
+		}
+	})
+}
+
+// upLeadHeight 是页内头部的估高（回顶按钮判「滚过没有」用，差几十像素无妨）。
+const upLeadHeight = upHeaderH + 80
 
 // viewSpaceVideos 是「投稿」Tab。
 //
@@ -83,9 +137,11 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 	// 而列表**照画**（下面那一支）：后台回来的结果是在列表的 `View` 里收的
 	// （`adopt`），不画它这一页就永远停在「正在加载」。
 	if sp.videosStarted && p.Loaded == 0 && !p.Loading && p.Err == nil {
-		s.viewEmpty(c, "space:video:"+strconv.FormatInt(sp.mid, 10), emptyState{
-			Title: "暂无投稿",
-			Hint:  "他还没有投稿，或者换一个 UP 主看看",
+		s.viewSpaceFlat(c, sp, func() {
+			s.viewEmpty(c, "space:video:"+strconv.FormatInt(sp.mid, 10), emptyState{
+				Title: "暂无投稿",
+				Hint:  "他还没有投稿，或者换一个 UP 主看看",
+			})
 		})
 		return
 	}
@@ -98,28 +154,43 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 	// 摆进去的话它把整行的宽都吃掉了，列表被挤成 0 宽，于是**一首歌都看不见**（实测
 	// 最小窗口下 `Find` 给回 `{900 … 0 0}` 那个盒子）。裹一层 Column，表头在上面、
 	// 列表在下面，两边都在同一列里。
-	ui.Column(c).Grow(1).FillHeight().Children(func() {
-		// 表头**在列表外面**（`rowheader.go` 文件头）：列表往下滚它不动，宽屏下滚到
-		// 右边列名也还在。
-		// 工具条：全部播放 + 共几首（设计规范 §7.18，和首页、搜索页同一枚主按钮）。
-		//
-		// ⚠️ **上边那一格是 0**：Tab 那一条和这一段之间那 16 已经给了（上面
-		// `viewSpaceTabs` 那一层），工具条自己再给一份的话，这一张 Tab 的间距就
-		// 和另外三张不是同一个数了。
-		ui.Row(c).Key("upspace:toolbar").FillWidth().Gap(space.Px12).AlignItems(ui.Center).
-			Padding(space.None, upPad, space.Px8, upPad).Children(func() {
-			if playAllButton(c, p.Loading || p.Loaded == 0).Clicked() {
-				s.playAllSongs(sp.videos.Items())
-			}
-			if p.Loaded > 0 {
-				n := fmt.Sprintf("已加载 %d 首", p.Loaded)
-				if !p.HasMore {
-					n = fmt.Sprintf("共 %d 首", p.Loaded)
-				}
-				ui.Text(c, n).FontSize(scale.Font(c, scale.Size14)).TextColor(c.Theme().TextMuted)
-			}
+	// ⚠️ **头图区 + Tab 条 + 工具条 + 表头都是列表的第 0 行**（页内头部，
+	// `list.Lead`）：跟着内容一起滚走。表头说的是下面那些歌，所以它跟着头图一起走
+	// （同「流行」那一档，见 `homePage.viewPopLead`）。
+	//
+	// ⚠️ **只装一次**：闭包里读的 `p` 是每次画的时候现取的。
+	if !sp.leadSet {
+		sp.leadSet = true
+		sp.videos.SetLead(&list.Lead{
+			Label:  "UP 主的头图",
+			Height: func() float32 { return upLeadHeight },
+			Draw: func(c *ui.Context) {
+				s.viewSpaceLead(c, sp)
+				// 工具条：全部播放 + 共几首（设计规范 §7.18，和首页、搜索页同一枚主按钮）。
+				//
+				// ⚠️ **上边那一格是 0**：Tab 那一条和这一段之间那 16 已经给了（`viewSpaceTabs`），
+				// 工具条自己再给一份的话，这一张 Tab 的间距就和另外三张不是同一个数了。
+				ui.Row(c).Key("upspace:toolbar").FillWidth().Gap(space.Px12).AlignItems(ui.Center).
+					Padding(space.None, upPad, space.Px8, upPad).Children(func() {
+					p := sp.videos.Paged()
+					if playAllButton(c, p.Loading || p.Loaded == 0).Clicked() {
+						s.playAllSongs(sp.videos.Items())
+					}
+					if p.Loaded > 0 {
+						n := fmt.Sprintf("已加载 %d 首", p.Loaded)
+						if !p.HasMore {
+							n = fmt.Sprintf("共 %d 首", p.Loaded)
+						}
+						ui.Text(c, n).FontSize(scale.Font(c, scale.Size14)).TextColor(c.Theme().TextMuted)
+					}
+				})
+				sp.videos.Header(c, "upspace:header")
+			},
 		})
-		sp.videos.Header(c, "upspace:header")
+	}
+	// ⚠️ **外面这一层 Column 是必需的**（理由见 `viewSpaceList`：滚动容器直接当别的
+	// 容器的下一层时，里面文字的盒子量出来是 0×0）。
+	ui.Column(c).Grow(1).FillHeight().Children(func() {
 		sp.videos.View(c)
 	})
 }
@@ -154,11 +225,13 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	// 而 `started` 仍是 false、`err` 非 nil，切走再切回来也不会重拉，
 	// 用户看到的是「他真的什么都没有」。
 	if !p.started && p.err != nil {
-		s.viewLoadError(c, upLoadErrorKey(sp, tab), "这个 UP 主的"+upTabNames[tab], "重试加载"+upTabNames[tab], p.err, func() {
-			p.err = nil
-			if ctx := p.begin(); ctx != nil {
-				go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
-			}
+		s.viewSpaceFlat(c, sp, func() {
+			s.viewLoadError(c, upLoadErrorKey(sp, tab), "这个 UP 主的"+upTabNames[tab], "重试加载"+upTabNames[tab], p.err, func() {
+				p.err = nil
+				if ctx := p.begin(); ctx != nil {
+					go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
+				}
+			})
 		})
 		return
 	}
@@ -166,7 +239,7 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 		// 一条都还没有：第一页在途。这一句就是它全部的内容。
 		// ⚠️ **走 `viewLoading`（和「没有结果」同一个出口）**，理由同 `follow.go`
 		// 那一处（票 #138）。
-		s.viewLoading(c, upEmptyKey(sp, tab), "正在加载"+upTabNames[tab]+"…")
+		s.viewSpaceFlat(c, sp, func() { s.viewLoading(c, upEmptyKey(sp, tab), "正在加载"+upTabNames[tab]+"…") })
 		return
 	}
 	// 🔴 **「一行都没有」也分两种**：
@@ -179,7 +252,7 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	//     永远不再加载。
 	keepLooking := p.started && p.hasMore
 	if upRowCount(sp, tab) == 0 && !keepLooking {
-		s.viewEmpty(c, upEmptyKey(sp, tab), upTabEmpty(tab, sp.drops[tab].counts))
+		s.viewSpaceFlat(c, sp, func() { s.viewEmpty(c, upEmptyKey(sp, tab), upTabEmpty(tab, sp.drops[tab].counts)) })
 		return
 	}
 
@@ -187,7 +260,9 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	// 所以「还在不在画面里」这件事是能问出来的（末尾藏起来的话
 	// 「滚到底」永远触发不了）。
 	sentinel := p.started && (p.hasMore || p.err != nil)
-	rows := upRowCount(sp, tab)
+	// ⚠️ **多出来的第 0 行是页内头部**（头图区 + Tab 条，跟着内容一起滚走），
+	// 所以下面所有「第 i 行」的框架行号都比内容的下标大 1（`upLeadRows`）。
+	rows := upRowCount(sp, tab) + upLeadRows
 	if sentinel {
 		rows++
 	}
@@ -196,8 +271,18 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	// 🔴 铁律四：行身份是这一行自己的 key，不是下标。每一帧重装是为了让
 	// 「忘了装」这件事不可能发生（漏了的话 `TestADynamicKeepsItsIdentity...`
 	// 会红，见 upspace_test.go）。
-	st.Key = func(i int) any { return upRowKey(sp, tab, i) }
-	st.Label = func(i int) string { return upRowLabel(sp, tab, i) }
+	st.Key = func(i int) any {
+		if i < upLeadRows {
+			return upLeadKey{}
+		}
+		return upRowKey(sp, tab, i-upLeadRows)
+	}
+	st.Label = func(i int) string {
+		if i < upLeadRows {
+			return "UP 主的头图"
+		}
+		return upRowLabel(sp, tab, i-upLeadRows)
+	}
 
 	// ⚠️ **外面套一层 Column 有两个缘故**，少一个都踩坑：
 	//   - List 是自己管状态的控件，Key 只能挂在外面的元素上（见 element.go）；
@@ -209,28 +294,32 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	// `user-profile/index.tsx:130` 那个 `p-4` 里，而动态卡片自己左右是 0
 	// （动态流那一页的 32 是另一层 16+16）。卡片自己做内边距的话，同一个
 	// 组件在两页就会缩成两个宽度。
-	ui.Column(c).Key("space-list:" + upTabNames[tab]).Grow(1).FillHeight().
-		PaddingX(upPad).Children(func() {
-		// 「有 N 条我们画不出来」那一行。
-		//
-		// ⚠️ **只在「一条都没画出来」时出现**：有内容的时候插一行字只是
-		// 噪音；而一条都没有的时候，用户看到的是**一片空白加一个转着的
-		// 圈**——像是坏了，而真相是「他发的那些我们画不出来」（票 #300）。
-		//
-		// ⚠️ **它不是空状态**：空状态会把整个列表换掉，而哨兵那一行还得
-		// 留着（翻页靠它）。
-		if upRowCount(sp, tab) == 0 && sp.drops[tab].total() > 0 {
-			s.viewDroppedNote(c, sp.drops[tab].counts)
-		}
+	//
+	// ⚠️ **左右 16 给在列表自己身上**（内容区的内边距，跟着内容滚），而头图区是
+	// 通栏的：页内头部那一行用 -16 的左右外边距撑回满宽。
+	ui.Column(c).Key("space-list:" + upTabNames[tab]).Grow(1).FillHeight().Children(func() {
 		// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
 		//
 		// ⚠️ **登记的是 `&sp.keys[tab]` 而不是裸的句柄**：这一份的
 		// `TakeFocus` 还要把游标摆到第一行（走进来就在第一条上）。
 		s.registerContentFocus(&sp.keys[tab])
 		// 键盘接线：游标 + 「↑ 到顶回侧栏」（票 #245 的 E4）。
+		//
+		// ⚠️ **游标不许停在页内头部那一行上**（第 0 行不是内容，选中它按 Enter
+		// 什么都不会发生、焦点环也跟错）：落到那一行就挪到第一条内容上；一条内容都
+		// 没有就是「没选中」。必须在 `wire` 之前挪——`wire` 里的 `Moved` 看的是这一
+		// 遍的游标，先挪回去它才看得出「↑ 已经在顶上了」，把焦点交回侧栏。
+		if k := &sp.keys[tab]; k.started && k.sel >= 0 && k.sel < upLeadRows {
+			if upRowCount(sp, tab) > 0 {
+				k.sel = upLeadRows
+				st.ScrollIntoView(k.sel)
+			} else {
+				k.sel = -1
+			}
+		}
 		sp.keys[tab].wire(c, st, s.focusSide)
 		spaceList := ui.List(c, st, rows).
-			Grow(1).FillHeight().FillWidth().
+			Grow(1).FillHeight().FillWidth().PaddingX(upPad).
 			// ⚠️ **听一听输入**：为了知道「键盘往回走到顶上了」。
 			// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选行、
 			// Tab 换焦点都还在。
@@ -244,14 +333,19 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 				defer func() {
 					if rec := recover(); rec != nil {
 						log.Printf("biu: UP 空间那一行画崩了（%s）：%v\n%s",
-							upRowKey(sp, tab, r.Index), rec, debug.Stack())
+							upRowKey(sp, tab, r.Index-upLeadRows), rec, debug.Stack())
 					}
 				}()
-				if r.Index >= upRowCount(sp, tab) {
+				if r.Index < upLeadRows {
+					s.viewUpLead(r.Context, sp, tab)
+					return
+				}
+				i := r.Index - upLeadRows
+				if i >= upRowCount(sp, tab) {
 					s.viewUpSentinel(r.Context, sp, tab)
 					return
 				}
-				s.viewUpRow(r.Context, sp, tab, r.Index)
+				s.viewUpRow(r.Context, sp, tab, i)
 			})
 		// ⚠️ **动态那一张 Tab 的行间距由列表给**（上游 `mb-2` = 8）。
 		//
@@ -401,6 +495,7 @@ func upTabEmpty(tab int, counts bili.DropCounts) emptyState {
 		return emptyState{
 			Title: "这里没有能显示的" + upTabNames[tab],
 			Hint:  dropSentence(counts),
+			Info:  true,
 		}
 	}
 	switch tab {

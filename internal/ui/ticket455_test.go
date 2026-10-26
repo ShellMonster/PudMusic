@@ -48,7 +48,7 @@ func TestTheSearchPageSaysItFailedInsteadOfSayingThereIsNoResult(t *testing.T) {
 	})
 
 	// ① 不是「没有结果」那一句。
-	if tt.HasText(noSearchResults.Hint) {
+	if tt.HasText(noSearchResults.Title) {
 		t.Errorf("拉失败却画成「没有结果」那一格，文字有 %q", tt.Texts())
 	}
 	// ② 失败有自己的说法：一句「没拉出来」+ 出错的原因。
@@ -105,7 +105,7 @@ func TestTheSearchPageKeepsTheResultsWhenALaterPageFails(t *testing.T) {
 	if tt.HasText("这一块没拉出来") {
 		t.Errorf("翻页失败把已经拿到的结果换成了一句错，文字有 %q", tt.Texts())
 	}
-	if tt.HasText(noSearchResults.Hint) {
+	if tt.HasText(noSearchResults.Title) {
 		t.Errorf("翻页失败画成了「没有结果」那一格，文字有 %q", tt.Texts())
 	}
 	// 而末尾那一行是列表自己给的重试（「加载失败，点此重试」）——翻页失败归它管。

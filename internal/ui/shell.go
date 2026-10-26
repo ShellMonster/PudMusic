@@ -85,6 +85,9 @@ type Shell struct {
 	// 3 秒后回首页」不用真睡 3 秒。
 	clock clockSource
 
+	// tint 是封面取色的状态（见 covertint.go）。
+	tint coverTint
+
 	// shownPath 是上一帧画的是哪一页，syncRoute 拿它认出「换页了」。
 	shownPath string
 
@@ -305,6 +308,10 @@ type Shell struct {
 	// full 是全屏播放器自己那一摊，见 fullplayer.go。
 	// **只由 view 在主线程上读写**，不跨 goroutine（铁律一）。
 	full fullPlayer
+	// vv 是满屏里视频画面那一边（见 fullvideo.go）。
+	vv videoView
+	// videoMadeFull 是系统全屏是视频的「屏幕全屏」键让进的。
+	videoMadeFull bool
 
 	// pageBuilds 是「路由页被建了几次」。**给测试看的探针**（理由同
 	// `full.bgDraws`）：满屏开着的时候底下那一页不该再被建，而「有没有被建」
@@ -337,6 +344,13 @@ type Shell struct {
 	// rateOpen 是倍率那个浮层开着没有。**只由 view 在主线程上读写**，
 	// 见 playbar_rate.go。
 	rateOpen bool
+
+	// sleepOpen 是睡眠定时那个浮层开着没有。只由 view 在主线程上读写，
+	// 见 playbar_sleep.go。
+	sleepOpen bool
+
+	// spaceAt 是上一次空格触发播放/暂停的帧时刻，用来同一帧去重。
+	spaceAt time.Time
 
 	// 音量浮层那一摊。**只由 view 在主线程上读写**，见 playbar_volume.go。
 	//
@@ -462,6 +476,13 @@ type Shell struct {
 	// queueRows 是这一帧去重之后要画的那几行（连同它们在队列里的下标）。
 	// queueList.Key 每帧都要读它，所以它和 rows 数得对上（见 queue_drawer.go）。
 	queueRows []queueRow
+
+	// queueClearOpen 是「清空播放列表」那道二次确认开着没有（抽屉头右上角那枚
+	// 垃圾桶，见 queue_drawer.go 的 viewQueueClearConfirm）。
+	//
+	// ⚠️ **它得跨帧活着**：即时模式每一帧都重画一遍，局部变量下一帧就没了——
+	// 那一帧弹窗还没画出来，状态就已经没了。
+	queueClearOpen bool
 
 	// 播放条上那个分集抽屉的一摊。**同样只由 view 在主线程上读写**。
 	//
@@ -747,6 +768,26 @@ type Shell struct {
 	qrBitmap    *ui.Bitmap
 	qrDimBitmap *ui.Bitmap
 	qrFor       *bili.Code
+
+	// loginAfter 是「登录成功了该去哪」——进登录页时写进去，登录成功时兑现。
+	//
+	// ⚠️ **空串 = 首页**（`homePath`）：用户 2026-10-25 原话是「登录成功后应该
+	// 提示并且回到首页」。从「用户动态」那一路进去的写 `dynamicFeedPath`。
+	//
+	// ⚠️ **它记的是「进登录页那一次」的承诺**：进登录页时写，登录成功时读出来
+	// 用掉，然后清空（见 `goLogin` / `finishLogin`）。
+	//
+	// **只由界面线程读写**（进登录页和登录成功都在主线程上）。
+	loginAfter string
+
+	// lastLoginPhase 是**上一帧**的登录相位。
+	//
+	// 它是「**刚刚**登录成功那一次」的判据（见 `syncLoginSuccess`）：登录成功
+	// 是异步的状态变化，而界面是每帧重画的——只看「现在是已登录」的话，那
+	// 一下会**每帧做一次**。
+	//
+	// **只由界面线程读写**（就在那一层里）。
+	lastLoginPhase app.LoginPhase
 
 	// quitting 是「已经进了退出流程」，只由 OnBeforeQuit 置位（主线程）。
 	//

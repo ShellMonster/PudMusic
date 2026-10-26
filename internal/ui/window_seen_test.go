@@ -32,8 +32,10 @@ import (
 // countingShell 造一个停在「稍后再看」的外壳，画面上有一首正在放的歌（于是有
 // 那个每帧都要下一帧的跳动波形），并记下画了多少帧。
 //
-// 队列用 `Queue().Reset` 摆（和 `rowheader_test.go` 那一族同一个做法）：在线播放
-// 那一路在测试里没接上，而「哪一行在放」认的是队列的当前项。
+// ⚠️ **「哪一首在放」是换上去的接线给的**：判据认的是「**此刻有声音的那一首**」
+// （`app.App.IsPlaying`），而这一层没法让一首在线的歌真的出声——所以换成一份
+// 说「第一首在放」的接线。这一条要量的是**窗口看不见时还画不画**，波形只是
+// 那一帧里「有东西在动」的凭据。
 func countingShell(t *testing.T) (*Shell, *mygoui.Tester, *int) {
 	t.Helper()
 	f := newLibFake(t).withLater(1, 4, libTitles...)
@@ -48,9 +50,8 @@ func countingShell(t *testing.T) (*Shell, *mygoui.Tester, *int) {
 
 	rows := s.laterPage.rows
 	items := rows.Rows()
-	if _, ok := s.app.Queue().Reset(items[0].Item, items[1].Item); !ok {
-		t.Fatal("队列摆不进去")
-	}
+	playing := items[0].Item.Identity()
+	rows.acts.IsPlaying = func(it app.Item) bool { return it.Identity() == playing }
 	tt.Frame()
 	if _, ok := tt.Find(hover.PlayingLabel(libTitles[0])); !ok {
 		t.Fatalf("起点就不对：正在放的那一行没有跳动波形，这一条就什么都验不到（文字有 %q）",

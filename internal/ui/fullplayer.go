@@ -86,8 +86,8 @@ const (
 	// 有主角；而被切的原因是**底栏高度没跟着它重算**（当时是 80）。票 #169 把
 	// 底栏按上游重排（进度 20 + 缝 8 + 播放键 + 底边距 16），48 完全
 	// 放得下。**改底栏的留白时这个高度要一起重算**，别再让它去迁就一个旧框。
-	fullPlayGlyph = 28
-	fullPlayHit   = 64
+	fullPlayGlyph = 20
+	fullPlayHit   = 44
 
 	// 顶栏：上游 `px-6 py-4`（`index.tsx:291`）——左右 24、上下 16。
 	//
@@ -313,6 +313,8 @@ func coverTransition(id string) ui.ElementTransition {
 type fullPlayer struct {
 	// open 是它开着没有。
 	open bool
+	// theater 是视频铺满整窗（见 fullvideo.go）。
+	theater bool
 	// lastMove 是指针最后一次动的时刻。界面藏没藏就是拿它和现在比。
 	lastMove time.Time
 	// hideStop 是那个「3 秒后叫醒界面」的钟。每一次指针动都停掉重排一个。
@@ -351,12 +353,6 @@ type fullPlayer struct {
 	// bgDraws 是这张画布被重画了几次。**给测试看的**：毛玻璃每帧重渲一遍就是
 	// 这里在涨（那在软件渲染上是 80~100 毫秒一帧）。
 	bgDraws int
-
-	// spin 是「封面在转」这一轮的状态（见 fullplayer_spin.go）。
-	//
-	// ⚠️ **它跟着 `fullPlayer` 一起复位**（`closeFullPlayer` 里的
-	// `s.full = fullPlayer{}`）：满屏关掉之后那一轮就结束了，下次打开从头转。
-	spin fullCoverSpin
 }
 
 // partRow 是分集列表里的一行。
@@ -437,13 +433,21 @@ func (s *Shell) viewFullPlayer(c *ui.Context, st app.State) {
 		probe.Children(func() {
 			s.viewFullTopBar(c, st, hidden)
 			s.viewFullStage(c, st, hidden)
-			s.viewFullSpectrum(c, st, hidden)
+			if !s.full.theater {
+				s.viewFullSpectrum(c, st, hidden)
+			}
 			s.viewFullControls(c, st, hidden)
 			s.viewFullParts(c, hidden)
 		})
 
 		if probe.OverlayShortcut(0, ui.KeyEscape) {
-			s.closeFullPlayer()
+			if s.fullScreen && s.videoMadeFull {
+				s.setScreenFull(false)
+			} else if s.full.theater {
+				s.full.theater = false
+			} else {
+				s.closeFullPlayer()
+			}
 		}
 	})
 
@@ -492,7 +496,7 @@ func (s *Shell) viewFullEmpty(c *ui.Context) {
 
 		probe.Children(func() {
 			s.viewFullTopBar(c, app.State{}, hidden)
-			on, dim := s.fullForeground(c)
+			on, _ := s.fullForeground(c)
 			ui.Column(c).Key("full-empty").
 				Absolute().Left(0).Top(0).Right(0).Bottom(0).
 				Center().Gap(space.Px6).Children(func() {
@@ -502,7 +506,6 @@ func (s *Shell) viewFullEmpty(c *ui.Context) {
 				// 那两档的话，在浅色封面铺满的屏上这两行会糊进去。字号仍然是
 				// 15 / 12，和别处一样。
 				ui.Text(c, fullNothing.Title).FontSize(scale.Font(c, scale.Size15)).TextColor(on)
-				ui.Text(c, fullNothing.Hint).FontSize(scale.Font(c, scale.Size12)).TextColor(dim)
 			})
 		})
 
@@ -886,6 +889,16 @@ const fullLyricsPartsGap = space.Px24
 // 的那一刻**横向跳 128 像素**（实测：第一句从 x=681 滑到 x=809），指针一动界面
 // 回来它又滑回去。宁可右边空一块（那本来就是面板的地盘），也不能让它跳。
 func (s *Shell) viewFullStage(c *ui.Context, st app.State, hidden bool) {
+	if s.app.VideoPhase() == app.VideoOff {
+		s.full.theater = false
+		s.vv.reset()
+		if s.videoMadeFull {
+			s.setScreenFull(false)
+		}
+	} else if s.full.theater {
+		s.viewFullTheater(c, hidden)
+		return
+	}
 	prefs := s.app.FullPlayerPrefs()
 	if !prefs.ShowLyrics {
 		s.viewFullCover(c, st, hidden, fullWindowRect(c), false)
@@ -948,6 +961,10 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 		avail = area.W - 2*fullStagePadX
 	}
 	w, h := fullCoverSize(c, avail)
+	phase := s.app.VideoPhase()
+	if phase == app.VideoLoading || phase == app.VideoOn {
+		h = w * 9 / 16
+	}
 	// ⚠️ **自己算位置**，不要用 `Absolute().Center()`：那个 `Center` 是「把**子**
 	// 元素沿着主轴居中」（`mygo/ui/api_gen.go:3006`），不是「把这个元素摆到中间」。
 	// 这么写的后果是外层那个 Box 宽高就是封面本身、贴在**它待的那一块的最左边**
@@ -964,21 +981,16 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 	box.Children(func() {
 		// 共享元素转场的身份：**两处封面用的是同一个**（这里和播放条上那一张）。
 		id := coverIdentity(s, st)
-		cover := imgcache.View(c, s.images, st.CoverURL, w, h).
-			Label("当前封面").
-			Transition(coverTransition(id))
-		// ⚠️ **封面在转**（见 fullplayer_spin.go）。
-		//
-		// 转的是**图片这一格**，不是外面那个盒子：盒子里面还有长按三连的进度环，
-		// 环画在封面外面一圈，跟着转会让那圈弧乱甩。
-		//
-		// ⚠️ **走的是 pose 那一档**（`AnimatePose`），不是 `Element.Rotate`：
-		// 后者是建的时候写死的变换，角度每帧都变就得每帧重建一遍整棵满屏播放器
-		//（那是票 #392 治的毛病）。理由见那个文件的头一段。
-		if pose, anim, ok := s.fullCoverSpinPose(c, st); ok {
-			cover = cover.AnimatePose(pose, anim)
+		cover := imgcache.View(c, s.images, st.CoverURL, w, h).Label("当前封面")
+		if phase == app.VideoOff || phase == app.VideoFailed {
+			cover = cover.Transition(coverTransition(id))
 		}
-
+		switch {
+		case phase == app.VideoLoading || phase == app.VideoOn:
+			s.viewVideoWindow(c, phase, w, h)
+		case s.app.VideoAvailable():
+			s.viewVideoBadge(c)
+		}
 		// 长按 2.5 秒 = 一键三连。满屏上**没有**别的赞入口（照抄 Biu：它那边
 		// 满屏那张封面是 `pointer-events-none`，三连只在播放条上）——我们把这一层
 		// 接进来是因为 SPEC 需求 69 说的是「长按封面」，而满屏上只有这一张封面。
@@ -1031,13 +1043,13 @@ func fullCoverSize(c *ui.Context, maxW float32) (float32, float32) {
 	if maxW > 0 {
 		w = min(w, maxW)
 	}
-	return w, w
+	return w, w * 3 / 4
 }
 
-// 满屏封面的边长（设计规范 v0.1 §7.5）。
+// 满屏封面的宽（4:3，原图直接显示、不转；窄窗口里小一档）。
 const (
-	fullCoverSide       = 320
-	fullCoverSideNarrow = 240
+	fullCoverSide       = 360
+	fullCoverSideNarrow = 280
 	fullCoverNarrowWin  = 1000
 )
 

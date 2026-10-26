@@ -335,7 +335,7 @@ issue 的验收标准**（`gh issue edit`，见 `docs/agents/issue-tracker.md`�
    开起来**，晚一步的症状是「设置一直存不住」而不是任何一句报错。
 
    ⚠️ **别「顺手」把它改成和应用名一致**：那一下的代价是老用户升级之后设置、
-   搜索历史、快捷键、歌词缓存、下载记录和界面状态一起「消失」——数据一个字节没坏，
+   搜索历史、快捷键、歌词缓存、下载记录、登录态和界面状态一起「消失」——数据一个字节没坏，
    只是没人再去那个目录找，而症状是静默的。取舍与「什么时候该真搬」写在那个文件
    顶上那一节。`internal/app/upgrade.go` 的 `SnapshotReadme` 里那条教用户敲的
    回滚路径因此仍然是 `…/Application Support/Biu MyGo`。
@@ -344,9 +344,14 @@ issue 的验收标准**（`gh issue edit`，见 `docs/agents/issue-tracker.md`�
 
 - **显示名、bundle id、钥匙串服务名、用户数据目录名是四件互不相干的事。**
   2026-10 只改了第一件：`mygo.json` 的 `name` 从 `Biu MyGo` 改成 `BiuGo`，
-  `identifier`（`io.github.shellmonster.biu`）**不动**（bundle id 变了会影响钥匙串
-  访问和 macOS 的隐私授权），钥匙串服务名 `com.biu-go.biu-mygo.login` **不动**
-  （动了老用户要重新登录），用户数据目录名 `Biu MyGo` **不动**（理由见 §4 第 9 条）。
+  `identifier`（`io.github.shellmonster.biu`）**不动**（bundle id 变了会影响 macOS
+  的隐私授权），钥匙串服务名 `com.biu-go.biu-mygo.login` **不动**，
+  用户数据目录名 `Biu MyGo` **不动**（理由见 §4 第 9 条）。
+  ⚠️ **2026-10-25 之后登录态不在钥匙串里了**（在用户数据目录下的
+  `credentials/session.json`，见 `internal/app/credentials_file_darwin.go`）——
+  那个服务名**不再有任何用途**，代码里也没有迁移 / 清理（还没发版，没有别的用户的
+  老数据）。所以现在「登录态跟着哪个名字走」这件事
+  **由用户数据目录名决定**，而目录名**钉死在 `Biu MyGo`**（§4 第 9 条）。
 - **不引入 LGPL / GPL 系代码。** 整条音频栈目前一行 copyleft 都没用上，
   `internal/licensing` 的 `TestNoDependencyIsCopyleft` 盯着这件事。
 - **不打包 ffmpeg，整个应用也不用 webview。** 整条音频栈只增加 1.98 MB，而 ffmpeg
@@ -378,12 +383,15 @@ issue 的验收标准**（`gh issue edit`，见 `docs/agents/issue-tracker.md`�
      设置搬过来。
   2. **用户数据目录钉死在 `Biu MyGo`**（§4 第 9 条）——那是**他自己**的数据（登录态、
      设置、歌词缓存、下载记录、历史），不钉死他**自己**升级就丢。
-  3. **钥匙串里的登录态**（§6、§5）——那也是**他**的。
+  3. **登录态本身**（§6、§5）——那也是**他**的。它现在落在用户数据目录下的
+     `credentials/session.json`（macOS，权限 600）或 `credentials.dpapi`
+     （Windows，DPAPI 加密）；钥匙串那一项**不迁移、不清理**，本机残留的自己手动删。
 
 ## 6. 别打真 B 站
 
-钥匙串（macOS Keychain / Windows DPAPI）里是**用户真实的登录态**。收藏、
-点赞、播放记录上报都是**写操作**，写的是那个账号。
+凭据后端里是**用户真实的登录态**（macOS 是用户数据目录下的
+`credentials/session.json`；Windows 是 `credentials.dpapi`，DPAPI 加密的）。
+收藏、点赞、播放记录上报都是**写操作**，写的是那个账号。
 
 - 验收和测试**一律走 HTTP fixture**（假 B 站），不要连真网。这一条不是洁癖：
   封号代价远高于少验几条，而 fixture 式的失败**只是测试红**，真网的失败是账号

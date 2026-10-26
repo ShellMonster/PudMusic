@@ -84,12 +84,25 @@ var Items = []Item{
 		// 也就是 Biu 那个抽屉去重时用的同一把尺子。顺带钉住「认的是**同一首**
 		// 而不是同一份」：同一首歌排了两遍时（内容列表不判重）两行都该亮，
 		// 而认整项的话两行都不亮——用户在**正在放**的那份上看到「哪首都没在放」。
-		Spec: "「正在播放」按歌认（队列重排了也还对，同一首排两遍算一首）；「下一首播放」插在当前项后面而不是队尾",
+		//
+		// ⚠️ **而且认的是「此刻有声音的那一首」，不是「队列的指针停在哪一项上」**
+		// （票 #279）：那一档画的是**跳动的波形**、还会被读屏软件念成「正在播放」，
+		// 而指针停着而声音停着的那几档（暂停、停止、启动时恢复出来没起播、取流
+		// 失败、换歌的取流窗口）以前都会把那一行标上——用户看到的是「历史记录
+		// 第一行在跳，而我没有在播放它」。
+		Spec: "「正在播放」按歌认（队列重排了也还对，同一首排两遍算一首），而且按**此刻有声音的那一首**认（指针停着而声音停着时不认）；「下一首播放」插在当前项后面而不是队尾",
 		Tests: []string{
 			"TestIsPlayingFindsTheSongWhereverTheQueuePutIt",
 			"TestIsPlayingSurvivesTheQueueBeingRearranged",
 			"TestIsPlayingIsAboutTheSongNotAboutThatCopy",
+			"TestIsPlayingSaysNoWhenOnlyTheQueuePointsAtIt",
+			"TestIsPlayingSaysNoWhilePaused",
+			"TestIsPlayingFollowsTheSoundNotTheQueuePointer",
+			"TestIsPlayingRecognisesTheSongThatIsReallyPlaying",
 			"TestTheSameSongInTwoRowsIsOneHighlight",
+			"TestTheRowThatIsReallyPlayingIsMarked",
+			"TestTheHistoryPageDoesNotMarkASongThatIsNotPlaying",
+			"TestTheLaterPageDoesNotMarkASongThatIsNotPlaying",
 			"TestAppActionsPlayNextLandsRightAfterTheCurrentOne",
 			"TestInsertNextLandsRightAfterTheCurrentOne",
 		},
@@ -635,10 +648,10 @@ var Items = []Item{
 		// 项），未登录时那枚「登录」还在（登录入口不能没）；头像画出来的那一枚
 		// 圆是**上游的 40**（顶栏 64 高的 5/8），命中区装得下它，而顶栏另外
 		// 那几枚图标键**没被这一票改到**。
-		Spec: "顶栏右端：登录之后没有独立的「退出」按钮（退登走头像下拉），未登录时那枚「登录」还在；头像画出来的那一枚圆是上游的 40，命中区装得下它",
+		Spec: "顶栏右端：登录之后没有独立的「退出」按钮（退登走头像下拉），未登录时顶栏右端只有头像（登录走头像下拉，没有独立的二维码键）；头像画出来的那一枚圆是上游的 40，命中区装得下它",
 		Tests: []string{
 			"TestTheLoggedInTopBarHasNoStandaloneLogoutButton",
-			"TestTheGuestTopBarStillHasTheLoginButton",
+			"TestTheGuestTopBarHasNoSeparateLoginKey",
 			"TestTheAvatarHitAreaCoversTheCircleItDraws",
 			// 画出来的那一枚圆**量出来**是上游那个尺寸（不是照 `size="sm"` 猜的）。
 			"TestTheTopBarEndsWithTheUpstreamSizedAvatar",
@@ -1556,11 +1569,23 @@ var Items = []Item{
 		// 就把上限顶破了，于是挤 → 退占位 → 重新下 → 又被挤……一直循环。
 		//
 		// 全部用 `httptest` 验（假图床 + 假 B 站接口），不连真网。
-		Spec: "封面不再在有图和占位之间反复切换：一屏封面按显示尺寸存得下、字节账不漏、还在下的那一张不参与淘汰、画面上正画着的那一张不参与淘汰（首页、历史记录、稍后再看三处）",
+		Spec: "封面不再在有图和占位之间反复切换：一屏封面按显示尺寸存得下、字节账不漏、还在下的那一张不参与淘汰、画面上正画着的那一张不参与淘汰（首页、历史记录、稍后再看三处）；普通大 PNG 逐行、基线 JPEG 按 MCU 行缩放，不分配整张原图且像素不变；仅 EXIF 旋转图保留框架方向处理；缓存创建和重置均遵循环境预算",
 		Tests: []string{
 			"TestTheSameCoverStaysReadyAcrossFrames",
 			"TestTheHomeCoversDoNotGoBackToPlaceholder",
 			"TestStoredCoversAreScaledDown",
+			"TestStreamingPNGMatchesExistingPixels",
+			"TestStreamingPNGFiltersAndChunks",
+			"TestStreamingPNGRejectsCorruption",
+			"TestStreamingPNGFallsBackForOtherImages",
+			"TestStoredPNGDoesNotAllocateFullSizeImage",
+			"TestStreamingJPEGMatchesExistingPixels",
+			"TestStoredJPEGDoesNotAllocateFullSizeImage",
+			"TestStreamingJPEGRejectsTruncation",
+			"TestStreamingJPEGUnsupportedVariantsFallBack",
+			"TestJPEGEXIFOnlyRotationsBypassScaling",
+			"TestJPEGRowCorpusMatchesStandardDecoder",
+			"TestImageCacheBudgetFromEnvironment",
 			"TestAnEntryEvictedBeforeItIsDecodedIsNotAccounted",
 			"TestTheEvictionSkipsEntriesThatHaveNoBytesYet",
 			"TestACoverThatIsStillLoadingIsNotEvicted",
@@ -3349,14 +3374,12 @@ var Items = []Item{
 		// 关闭」那两行会跟着字号变宽（它们的字要放得下），那一列的左边缘于是有
 		// 两条线——这不是回归，是那一行字要放得下（见 `settings_page.go` 的
 		// `settingsControlW` 与 DESIGN.md §三）。
-		Spec: "设置页的控件列有**一条共同的左边缘**（**文本缩放为 1 的时候**）：基准宽度 300，每一行的控件都从同一条线上开始并填满那一格（此前左边缘落在 762 / 801 / 822 / 942 四个位置，预览那三张右边空 16、色卡那两块右边空 91）；顶栏最右那枚登录键**不是实心主色的方块**——它的墨迹和紧挨着它左边那几枚线框图标同一档（此前是相邻图标的 5.4 倍，整条顶栏最响的元素）；**粗体只出现在刻度写明的那几处**（页标题 / 分组标题 / 弹窗标题 / 空状态标题 / 列表里的名字一律 400；粗体只剩品牌字、收藏夹头图区那个大标题、404 那个数字、歌词浮层里那两个读数，和正在唱的那一行歌词——上游的 `font-extrabold`）",
+		Spec: "设置页的控件列有**一条共同的左边缘**（**文本缩放为 1 的时候**）：基准宽度 300，每一行的控件都从同一条线上开始并填满那一格（此前左边缘落在 762 / 801 / 822 / 942 四个位置，预览那三张右边空 16、色卡那两块右边空 91）；**粗体只出现在刻度写明的那几处**（页标题 / 分组标题 / 弹窗标题 / 空状态标题 / 列表里的名字一律 400；粗体只剩品牌字、收藏夹头图区那个大标题、404 那个数字、歌词浮层里那两个读数，和正在唱的那一行歌词——上游的 `font-extrabold`）",
 		Tests: []string{
 			// 控件列的左边缘是一条线（每一个控件都从同一条线上开始）。
 			"TestTheSettingsControlsShareOneBaseline",
 			// 那一列里的控件填满那一格（色卡两块、预览三张、下拉本身）。
 			"TestTheSettingsControlColumnIsFilled",
-			// 顶栏那枚登录键的墨迹和相邻图标同一档（深浅两套）。
-			"TestTheLoginKeyIsNotASolidBlock",
 			// 粗体只在刻度写明的那几处（AST：**递归扫整个 internal/ui**，找四样
 			// 东西——`.Bold()`、`FontWeight(字面量 ≥ 700)`、**字面量 ≥ 700 传给
 			// 一个字重参数**（调用点）、**字重常量 ≥ 700**）。
@@ -3471,10 +3494,8 @@ var Items = []Item{
 		Spec: "布局一批：设置页每一行的说明和控件之间**不空着几百像素**；迷你窗的音量滑块**有悬停提示**（而且那枚提示**看得见**）；「全部播放」在两个页面上是**同一枚**（画法统一；语义是票 #337 拍板的那一条）；列表里的**超长歌名不占满整行中段**；**深色下的封面有边**（不再和行的底色融成一片）",
 		Tests: []string{
 			// 设置页那一段空档（1200 / 900 两档窗口，量的是画面上的字迹）。
-			"TestTheSettingsRowsDoNotStretchAcrossTheWindow",
 			// **字号放大时说明不折行**（1.0 / 1.25 / 1.4 / 1.5 / 1.75 五档）——
 			// 折行会让整行变高、右边那列控件往下挪半格。
-			"TestTheSettingsDescriptionDoesNotWrapAtBigTextScales",
 			// 迷你窗音量滑块那枚提示：它在，而且**在窗内**（窗只有 320×100，
 			// 而滑块在第一行——摆在上面的话整个提示落在窗外）。
 			"TestTheMiniVolumeSliderSaysWhatItIs",

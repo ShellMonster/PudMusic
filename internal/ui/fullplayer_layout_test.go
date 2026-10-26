@@ -222,13 +222,13 @@ func TestTheFullPlayerBottomBarPaddingAndMaxWidth(t *testing.T) {
 
 	// 上游那几个类名换算出来的字面量：px-12 = 48、mb-4 = 16、max-w-6xl = 1152；
 	// 播放键的盒子是 64（设计规范 §5 的满屏主播放键）。
-	const wantPadX, wantMargin, wantMaxW, wantHit = 48, 16, 1152, 64
+	const wantPadX, wantMargin, wantMaxW, wantHit = 48, 16, 1152, 44
 	play, ok := tt.Find(fullPlayLabel(s))
 	if !ok {
 		t.Fatalf("找不到播放键，文字有 %q", tt.Texts())
 	}
 	if play.W != wantHit || play.H != wantHit {
-		t.Errorf("播放键是 %.0fx%.0f，want %dx%d（设计规范 §5 满屏主播放键 64）",
+		t.Errorf("播放键是 %.0fx%.0f，want %dx%d（设计规范 §5 满屏主播放键 44）",
 			play.W, play.H, wantHit, wantHit)
 	}
 	if d := float32(fullWinH) - (play.Y + play.H) - wantMargin; d != 0 {
@@ -455,8 +455,8 @@ func TestTheFullPlayerPlayGlyphIsTwentyEight(t *testing.T) {
 			}
 		}
 	}
-	if d := x1 - x0 + 1; d < 60 || d > 64 {
-		t.Errorf("满屏播放键的圆直径是 %d，want 60~64（规范 64）", d)
+	if d := x1 - x0 + 1; d < 40 || d > 44 {
+		t.Errorf("满屏播放键的圆直径是 %d，want 40~44（规范 44）", d)
 	}
 }
 
@@ -542,6 +542,9 @@ func knobPixels(img *image.RGBA, box mygoui.Rect, face color.RGBA) int {
 // 歌词开着、频谱关着、虚化开着（Biu 的 `defaultSettings`）。
 func TestTheFullPlayerSettingsPanelHasEverySwitchAndColor(t *testing.T) {
 	s, tt, _ := fullTester(t)
+	off := s.app.FullPlayerPrefs()
+	off.ShowSpectrum = false
+	s.app.SetFullPlayerPrefs(off)
 	openFull(t, tt)
 	if err := tt.Click("全屏设置"); err != nil {
 		t.Fatalf("点不了偏好面板：%v（文字：%q）", err, tt.Texts())

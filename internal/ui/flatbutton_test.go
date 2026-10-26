@@ -699,8 +699,15 @@ func TestTheQueueHeaderKeysAreIconButtonsWithNames(t *testing.T) {
 		}
 	}
 	// 还能点：换控件最容易把事件弄丢，而那也不报错。
+	//
+	// ⚠️ **「清空」要先问一次**（票 #454）：点它弹的是那道确认框，队列要等
+	// 「确认清空」按下去才真的清空——所以这一条要连着点两步（那一道确认框长什么样，
+	// 见 `ticket454_test.go` 的 `TestClearingTheQueueAsksFirst`）。
 	if err := tt.Click("清空"); err != nil {
 		t.Fatal(err)
+	}
+	if err := tt.Click("确认清空"); err != nil {
+		t.Fatalf("点不了确认键：%v（文字：%q）", err, tt.Texts())
 	}
 	if n := len(s.app.Queue().Items()); n != 0 {
 		t.Errorf("按了「清空」队列里还剩 %d 首", n)

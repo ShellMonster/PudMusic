@@ -352,7 +352,7 @@ func (g *newMusicGrid) view(c *ui.Context) {
 			// 靠阴影分层」。这一块原来取 `t.Surface`——同一屏里于是既有「同色靠影」
 			// 的卡（关注卡、下载表那张），又有「亮一级」的板。
 			shadow.HeroSmall(ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
-				Background(t.Background).Center().Gap(space.Px8), t).Children(func() {
+				Background(dialogCard(t).bg).Center().Gap(space.Px8), t).Children(func() {
 				ui.Text(c, "新歌速递没拉出来").FontSize(scale.Font(c, scale.Size13)).TextColor(t.Text)
 				ui.Text(c, g.err.Error()).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(2)
 				if g.retry != nil && flatButton(c, "重试加载新歌速递").Clicked() {
@@ -364,7 +364,7 @@ func (g *newMusicGrid) view(c *ui.Context) {
 		case g.loading && len(g.songs) == 0:
 			// 上游 `new-music-top.tsx:203-205`：拉的时候就是一个转圈。
 			shadow.HeroSmall(ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
-				Background(t.Background).Center(), t).Children(func() {
+				Background(dialogCard(t).bg).Center(), t).Children(func() {
 				ui.Spinner(c).Label("正在加载新歌速递")
 			})
 			return
@@ -373,7 +373,7 @@ func (g *newMusicGrid) view(c *ui.Context) {
 			// 上游 `new-music-top.tsx:211-214`：整块宽的一张卡片，正中间一句
 			// 「暂无数据」。这里照它（那一句是上游的文案，别自己编）。
 			shadow.HeroSmall(ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
-				Background(t.Background).Center(), t).Children(func() {
+				Background(dialogCard(t).bg).Center(), t).Children(func() {
 				ui.Text(c, "暂无数据").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
 			})
 			return

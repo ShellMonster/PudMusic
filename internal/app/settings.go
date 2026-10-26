@@ -53,6 +53,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -106,6 +107,8 @@ const (
 	//
 	// 上游那 0.5 的出处见报告 §4.4（`biu/src/store/play-list.ts:369`）。
 	DefaultVolume = 1.0
+	// MaxTrackFadeSeconds 是切歌淡入淡出能设的最长时间。
+	MaxTrackFadeSeconds = 15
 	// DefaultUnmuteVolume 是「压根没有音量可放回去」时取消静音放回去的值。
 	//
 	// 0.5 是一半——用户按了「取消静音」，听到的应该是一半声音，不是 0。
@@ -150,6 +153,8 @@ const (
 	ThemeModeSystem ThemeMode = "system"
 	ThemeModeLight  ThemeMode = "light"
 	ThemeModeDark   ThemeMode = "dark"
+	// ThemeModeSchedule 晚上（19:00 到次日 07:00）用深色，白天用浅色。
+	ThemeModeSchedule ThemeMode = "schedule"
 )
 
 // ThemePreset 是主题方案：设计规范里的三套整体配色（暖纸 / 暮光 / 柔雾），
@@ -427,6 +432,32 @@ type Settings struct {
 	// 键名照 Biu 的 `play-list` 那个 zustand 字段（`volume`），位置换了——
 	// 和 `PlayMode` / `ShouldKeepPagesOrderInRandomPlayMode` 同一段理由。
 	Volume *float64 `json:"volume"`
+
+	// PlaybackRate 是用户设的播放倍率。0 表示没设过（倍率的合法范围从 0.5 起，
+	// 所以 0 不会和真值混淆），读出来按原速。重启之后还在。
+	PlaybackRate float64 `json:"playbackRate"`
+
+	// NormalizeVolume 是「音量均衡」开关：把特别响的歌压到统一的响度，只压不抬
+	// （见 internal/service/audio/normalize.go）。默认关。
+	NormalizeVolume bool `json:"normalizeVolume"`
+
+	// CoverAccent 是「封面取色」开关：主色跟着当前封面的色相走。默认关。
+	CoverAccent bool `json:"coverAccent"`
+
+	// CoverHue / CoverSat 是界面从当前封面取出来的色相（0~360）和饱和度（0~1），只在
+	// 内存里传给主题，不落盘。CoverSat 为 0 表示还没取到（或封面没颜色）。
+	CoverHue, CoverSat float64 `json:"-"`
+
+	// TrackFadeSeconds 是切歌淡入淡出的时长（秒，0..15），0 = 关（默认）。
+	// 一首快放完时音量渐渐降到 0，下一首（自动接上的）从 0 渐渐升回来。
+	TrackFadeSeconds int `json:"trackFadeSeconds"`
+
+	// VideoQuality 是看视频时**优先**的画质上限（B 站的 qn：16/32/64/80/112/120），
+	// 0 = 默认（720P）。这一集没有那一档时（比如没开会员）自动降到最接近的低档。
+	VideoQuality int `json:"videoQuality"`
+
+	// EQPreset 是均衡器预设的 ID（见 audio.EQPresets），空或 "flat" = 关（默认）。
+	EQPreset string `json:"eqPreset"`
 
 	// Muted 是静音标志。**它和音量分开存**（票 #311 / 报告 §3.3 的 B2）。
 	//
@@ -783,7 +814,7 @@ func (s *Settings) normalize() {
 	}
 
 	s.ThemeMode = pickEnum(s.ThemeMode, ThemeModeSystem,
-		ThemeModeSystem, ThemeModeLight, ThemeModeDark)
+		ThemeModeSystem, ThemeModeLight, ThemeModeDark, ThemeModeSchedule)
 	s.ThemePreset = pickEnum(s.ThemePreset, DefaultThemePreset,
 		ThemePresetWarmPaper, ThemePresetDuskAmber, ThemePresetSoftPeach, ThemePresetClassic)
 	s.AudioQuality = pickEnum(s.AudioQuality, AudioQualityAuto,
@@ -840,6 +871,13 @@ func (s *Settings) normalize() {
 	} else {
 		v := min(max(*s.Volume, 0), 1)
 		s.Volume = &v
+	}
+	if audio.EQPresetByID(s.EQPreset).ID == "flat" {
+		s.EQPreset = ""
+	}
+	s.TrackFadeSeconds = min(max(s.TrackFadeSeconds, 0), MaxTrackFadeSeconds)
+	if !slices.Contains(VideoQualitySteps, s.VideoQuality) {
+		s.VideoQuality = 0
 	}
 	// nil 和空序列在 JSON 里差一个 `null`，写出去会让「还没排过序」和
 	// 「排过序，排出来是空的」看起来是两回事。统一成空序列。
@@ -1159,3 +1197,6 @@ func syncDir(dir string) error {
 	defer d.Close()
 	return d.Sync()
 }
+
+// VideoQualitySteps 是设置里「视频画质」能选的档（B 站的 qn，0 = 默认）。
+var VideoQualitySteps = []int{0, 16, 32, 64, 80, 120}

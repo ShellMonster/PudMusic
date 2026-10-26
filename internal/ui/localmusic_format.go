@@ -190,7 +190,18 @@ func unplayableFormats(tracks []localmusic.Track) []string {
 	return out
 }
 
-// isPlaying 报这一项是不是正在放。
+// isPlaying 报这一项是不是**当前项**（队列的指针停在这一项上）。
+//
+// ⚠️ **它认的不是「此刻有声音」那一档**：列表上的「正在播放」标记认的是后者
+// （`app.App.IsPlaying`，见票 #279），而这里要的是「**这一项现在动不得**」——
+// 正在放着的那个文件不给删除按钮（照上游 `local-music.ts:57`）。
+//
+// ⚠️ **所以它认的是「指针停在哪一项上」**：暂停着的时候那个文件仍然动不得
+// （句柄还开着，删了它播放器这一路会一直播到结束），而那一档在列表上是
+// **不标**「正在播放」的。两件事分开记，不要拿一处去顶另一处。
+//
+// ⚠️ 这一页**没有**「正在播放」标记：它的行是自己画的表格（`ui.Table`），
+// 没有那个跳动的波形。
 func (p *localPage) isPlaying(tr localmusic.Track) bool {
 	cur, ok := p.app.Queue().Current()
 	if !ok {

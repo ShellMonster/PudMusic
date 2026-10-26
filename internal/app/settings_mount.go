@@ -14,6 +14,10 @@ import (
 	"errors"
 	"path/filepath"
 	"sync"
+	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/service/audio"
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 )
 
 // settingsSlot 是一个 App 上挂着的那份设置。
@@ -85,6 +89,13 @@ func (a *App) MountSettings(path string) error {
 	a.mu.Lock()
 	a.volume = vol
 	a.muted = s.Muted
+	a.normalize = s.NormalizeVolume
+	a.trackFade = time.Duration(s.TrackFadeSeconds) * time.Second
+	a.eqGains = audio.EQPresetByID(s.EQPreset).Gains
+	a.vid.setQuality(bili.VideoQuality(s.VideoQuality))
+	if s.PlaybackRate > 0 {
+		a.rate = audio.SnapRate(s.PlaybackRate)
+	}
 	a.mu.Unlock()
 
 	// 落盘完成了要叫醒界面：不唤醒的话，界面会一直停在「还没存」的那一帧
@@ -144,6 +155,25 @@ func (a *App) UpdateSettings(fn func(*Settings)) (Settings, error) {
 	s, err := slot.store.Update(fn)
 	if err != nil {
 		return s, err
+	}
+	a.mu.Lock()
+	changed := a.normalize != s.NormalizeVolume
+	a.normalize = s.NormalizeVolume
+	a.trackFade = time.Duration(s.TrackFadeSeconds) * time.Second
+	a.vid.setQuality(bili.VideoQuality(s.VideoQuality))
+	eq := audio.EQPresetByID(s.EQPreset).Gains
+	eqChanged := a.eqGains != eq
+	a.eqGains = eq
+	p, path, local := a.player, a.path, a.online == nil
+	a.mu.Unlock()
+	if eqChanged && p != nil {
+		p.SetEQ(eq)
+	}
+	if changed && p != nil {
+		p.SetNormalize(s.NormalizeVolume)
+		if s.NormalizeVolume && local {
+			a.startLoudnessScan(p, path)
+		}
 	}
 	a.invalidate()
 	return s, nil

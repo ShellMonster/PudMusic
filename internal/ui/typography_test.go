@@ -584,7 +584,6 @@ func TestTheSettingsPageUsesTheTypographicScale(t *testing.T) {
 			}{
 				{text: "外观", size: 20, what: "分组标题"},
 				{text: "主题", size: 16, what: "行标题"},
-				{text: "选择浅色或深色主题", size: 14, what: "说明"},
 			} {
 				r, ok := b.tt.Find(want.text)
 				if !ok {

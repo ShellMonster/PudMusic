@@ -91,9 +91,13 @@ func TestTheEmptyFavoritesLineIsIndentedLikeItsGroup(t *testing.T) {
 	if !ok {
 		t.Fatalf("侧栏上没有「还没有收藏夹」那一句，文字有 %q", tt.Texts())
 	}
-	if line.X != title.X {
-		t.Errorf("那一句起头在 x=%.1f，而分组标题在 x=%.1f——它不属于任何一组",
-			line.X, title.X)
+	// 空状态现在和收藏夹行是同一个版式（左边一枚图标块，字让开它），所以字起在
+	// 「收藏夹名」那一列上，而图标块和分组标题的字同列。
+	if want := float32(favIndent + favNamePad); line.X != want {
+		t.Errorf("那一句起头在 x=%.1f，want %.1f（和收藏夹名同列）", line.X, want)
+	}
+	if title.X != float32(favIndent+favTextPad) {
+		t.Errorf("分组标题在 x=%.1f，want %d", title.X, favIndent+favTextPad)
 	}
 }
 

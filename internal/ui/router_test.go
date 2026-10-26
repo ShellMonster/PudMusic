@@ -168,7 +168,7 @@ func TestEveryRouteHasItsOwnPage(t *testing.T) {
 			if rt.Empty.Hint == "" {
 				t.Fatalf("%s 没说「怎么才能不空」", rt.Match)
 			}
-			if !tt.HasText(rt.Empty.Hint) {
+			if !tt.HasText(rt.Empty.Title) {
 				t.Errorf("没有画出 %s 的「怎么才能不空」%q，文字有 %q", rt.Match, rt.Empty.Hint, tt.Texts())
 			}
 		})
@@ -529,4 +529,24 @@ func save(t *testing.T, dir, name string, tt *mygoui.Tester) {
 		t.Fatal(err)
 	}
 	t.Logf("存了 %s", filepath.Join(dir, name))
+}
+
+// TestSwipingBackAndForwardChangesThePage 验 macOS 的滑动手势（框架交成 KeyBack / KeyForward）能前进后退。
+func TestSwipingBackAndForwardChangesThePage(t *testing.T) {
+	s, tt := newLoggedInShell(t, "7")
+	if err := tt.Click("稍后再看"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+
+	tt.Key(0, mygoui.KeyBack)
+	tt.Frame()
+	if got := s.router.Path(); got != "/" {
+		t.Fatalf("滑动后退之后在 %q，want /", got)
+	}
+	tt.Key(0, mygoui.KeyForward)
+	tt.Frame()
+	if got := s.router.Path(); got != "/later" {
+		t.Errorf("滑动前进之后在 %q，want /later", got)
+	}
 }

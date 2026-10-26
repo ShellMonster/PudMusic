@@ -26,6 +26,9 @@ package main
 
 import (
 	"log"
+	"os"
+	"runtime/debug"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
@@ -33,6 +36,7 @@ import (
 )
 
 func main() {
+	tuneMemory()
 	// **日志先接上**：接不上就往 stderr 打（下面那几句就是），接上了以后
 	// 应用写的每一句都落在文件里，事后查得到（票 #282）。
 	//
@@ -154,4 +158,22 @@ func main() {
 	if err := ui.Run(a, sess); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// tuneMemory 收紧 Go 运行时的内存策略：播放器常驻后台，堆里大头是封面缓存
+// （上限 96MB）加解码缓冲，默认 GOGC=100 会让垃圾堆到和存活数据一样多才回收。
+// GOGC 降到 50 让峰值堆更低；每分钟主动 GC 一次并把空闲页还给系统，常驻内存会跟着回落；软上限 256MB 让接近上限时回收更积极（它是软的，
+// 超了也不会崩，只是回收更勤）。用户自己设了环境变量就尊重用户的。
+func tuneMemory() {
+	if os.Getenv("GOGC") == "" {
+		debug.SetGCPercent(50)
+	}
+	if os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(256 << 20)
+	}
+	go func() {
+		for range time.Tick(time.Minute) {
+			debug.FreeOSMemory()
+		}
+	}()
 }

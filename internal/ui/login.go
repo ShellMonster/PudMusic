@@ -12,7 +12,14 @@
 //	已扫待确认    「已扫码，请在手机上确认」  ← 少了这一句，用户以为没扫成功，
 //	                                          退出重进，然后卡死在这里
 //	二维码失效    「二维码已失效，请刷新」 + 一个显眼的刷新按钮
-//	登录成功      「登录成功」+ 去首页
+//	登录成功      一句「登录成功」的提示 + 回该去的页面（默认首页）
+//
+// ⚠️ **最后那一支不在这一页上画**：登录成功是**异步的状态变化**（扫码 →
+// B 站回调 → 凭据落盘 → 状态变成 `LoginDone`），而这一页是**每帧重画**的——
+// 写在 view 里的话，那一下会**每帧做一次**（每帧都看得见「现在是已登录」）。
+//
+// 所以它在 `syncLoginSuccess` 那一层判**边沿**（「上一帧不是成功、这一帧
+// 是」），说完那句话、回完该去的页，就不在这一页上了（见那个函数的注释）。
 //
 // # 二维码在本地画，不联网取图
 //
@@ -43,7 +50,19 @@ const qrSide = 200
 // loginPath 是登录页那条路由，和 routes 表里登记的是同一个字符串。
 const loginPath = "/login"
 
-// goLogin 切到登录页。
+// goLogin 切到登录页，并记下「登录成功了该去哪」。
+//
+// after 是登录成功之后落到的路由。**空串就是首页**（`homePath`）——用户
+// 2026-10-25 原话：「登录成功后应该提示并且回到首页」。
+//
+// ⚠️ **每个入口自带一个去处**：上游 Biu 那边登录是一个**浮层**，关掉它就回到
+// 你原来那一页；我们这边登录是**一页路由**，那个「回去」得由**入口**自己
+// 说清楚。现在只有一处不是首页：从「用户动态」那一路进去的，登录完回动态页
+// （`dynamicfeed.go` 那一处「去登录」）。
+//
+// ⚠️ **它只 `Push`**：登录页**会**进历史——用户按「后退」要能回到它（他
+// 可能想反悔重扫一次）。真正把它从历史里去掉的是**登录成功那一下**的
+// `Replace`（见 `finishLogin`）。
 //
 // 不用 `navigate`：那三句是**原样抄**的（清 Toast / 清 crash / Push），
 // `navigate` 自己**一条 Toast 都不弹**了（见 `router.go` 的 `navigate`）。
@@ -51,10 +70,84 @@ const loginPath = "/login"
 // ⚠️ 这一段注释曾经写着「`navigate` 是给『还没做的页面』用的，每切一次都会弹
 // 『这一页还没做』」——`navigate` 早就不弹那句了（原型那版才弹）。真照着那句去读
 // 代码的人会以为换掉 `navigate` 会少一个提示，而实际上少不掉任何东西。
-func (s *Shell) goLogin() {
+func (s *Shell) goLogin(after string) {
 	s.clearToasts()
 	s.crash = nil
-	s.router.Push("/login")
+	s.loginAfter = after
+	s.router.Push(loginPath)
+}
+
+// syncLoginSuccess 是「**刚刚**登录成功那一下」的那一次性副作用。
+//
+// # 为什么它不在登录页的 view 里
+//
+// 登录成功是**异步的状态变化**（扫码 → B 站回调 → 凭据落盘 → 状态变成
+// `LoginDone`），而登录页是**每帧重画**的——写在 view 里的话，那一下会
+// **每帧做一次**（每帧都看得见「现在是已登录」）。
+//
+// 所以判据是**边沿**：「上一帧不是 `LoginDone`、这一帧是」。
+// `lastLoginPhase` 记着上一帧那一个。
+//
+// ⚠️ **它在 `syncUnderlay` 那一层跑，不在 `pageSyncs` 里**：登录成功的时候
+// 用户**可能已经不在登录页上了**（他扫完码就自己走了），而登录页自己的
+// `syncLogin` 只在当前路由是 `/login` 时才跑——放那儿就漏掉了那一半。
+//
+// ⚠️ **只查相位，不查「有没有登录态」**：`LoggedIn()` 跟着凭据走，而启动
+// 时凭据是从盘上读回来的（那也是「已登录」），拿它当判据的话，**应用一开
+// 就算登录成功过一次**——而那一次用户什么也没做。
+func (s *Shell) syncLoginSuccess() {
+	if s.app == nil {
+		return
+	}
+	phase := s.app.LoginState().Phase
+	prev := s.lastLoginPhase
+	// ⚠️ **每一帧都要更新**：不更新的话，下一帧的「上一帧」还是老的那一个，
+	// 边沿就永远判不出来（而这一句是**唯一**记着上一帧相位的地方）。
+	s.lastLoginPhase = phase
+	if phase != app.LoginDone || prev == app.LoginDone {
+		return
+	}
+	s.finishLogin()
+}
+
+// finishLogin 是「登录成功了」那一下要做的事：说一句、回该去的页面、
+// 清掉登录页的临时状态。
+//
+// ⚠️ **它只做一次**：调用它的是 `syncLoginSuccess` 的那个**边沿**
+// （见那个函数的注释）。
+func (s *Shell) finishLogin() {
+	// 目标页：进登录页时记下的那个。**空串 = 首页**。
+	target := s.loginAfter
+	s.loginAfter = ""
+	if target == "" {
+		target = homePath
+	}
+
+	// ⚠️ **清掉登录页的临时状态**：二维码那张位图是 **GPU 纹理**，留在壳上
+	// 就一直占着显存，而登录页已经不在了——没人会再看它一眼。
+	//
+	// （**轮询那个计时器不用这里管**：它在 `app.Account` 那一层，登录成功的
+	// 时候那一轮 `run` 自己就返回了，`ticker` 跟着 `defer` 收掉。而扫码状态
+	// ——那张二维码本身——在 `LoginState` 里，成功那一下就被换成了
+	// `Phase: LoginDone` 的新状态，那一份里没有 `QR`。）
+	s.qrFor, s.qrBitmap, s.qrDimBitmap = nil, nil, nil
+
+	// ⚠️ **只在他还停在登录页上的时候才把他带走**：他扫完码自己走了的话，
+	// 把他从当前页拽走是抢他的操作（边界那一条，见收尾说明）。
+	if s.router.Path() == loginPath {
+		// ⚠️ **用 `Replace`，不是 `Push`**：登录页**不许留在历史里**——
+		// 用户按「后退」不该回到登录页（那里是登录成功之前的样子）。
+		//
+		// ⚠️ **不走 `navigate`**：它开头会 `clearToasts()`，而「登录成功」
+		// 那句话正要弹出来——先跳页再说话，顺序反了。
+		s.router.Replace(target)
+	}
+	// 说话。**放在跳页之后**：跳页那一步要是先说话，这一句会被
+	// `navigate`（或者别处的清提示）收掉。
+	//
+	// ⚠️ **逐字照上游**（`src/layout/navbar/login/qrcode-login.tsx` 的
+	// `addToast({ title: "登录成功", color: "success" })`）。
+	s.addToast("登录成功", notice.Success)
 }
 
 // viewLogin 画扫码登录那一页。
@@ -91,19 +184,6 @@ const loginCardW = 420
 
 // viewLoginBody 是登录卡片里的内容：说明、二维码 / 状态、按钮。
 func (s *Shell) viewLoginBody(c *ui.Context, t *ui.Theme, st app.LoginState) {
-	// **登录能换来什么**（票 #242，UX 报告 §3-A 的 A3）。
-	//
-	// 这一句**每一态都在**（不只是「还没点开始」那一态）：用户点进
-	// 登录页的时候，脑子里的问题是「登录了能干什么」——不说的话，登录
-	// 像一道没有说明书的考题，用户可能登录了才发现里面是空的（其实有，
-	// 只是他不知道）。
-	//
-	// 说的那几样都是**真的**：关注列表、收藏夹、历史记录、稍后再看这
-	// 四处的接口全都要 Cookie，没登录时一律回 -101（见 loginprompt.go
-	// 的文件头）。
-	ui.Text(c, "登录之后可以看你的关注、收藏、历史记录和稍后再看").
-		FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted)
-
 	switch {
 	case !st.Busy() && st.QR == nil:
 		// 一开始（还没点）或已经取消：给一个开始的地方。
@@ -114,7 +194,7 @@ func (s *Shell) viewLoginBody(c *ui.Context, t *ui.Theme, st app.LoginState) {
 
 	case st.Phase == app.LoginExpired:
 		s.qrImage(c, st.QR, true)
-		ui.Text(c, "这张二维码已经过期了，扫不了了").FontSize(scale.Font(c, scale.Size14)).TextColor(t.Text)
+		ui.Text(c, "二维码已过期").FontSize(scale.Font(c, scale.Size14)).TextColor(t.Text)
 
 	default:
 		// 这一支（等扫码 / 已扫待确认）**永远不盖灰**。
@@ -326,47 +406,4 @@ func qrHintColor(t *ui.Theme, phase app.LoginPhase) ui.Color {
 		return t.Text
 	}
 	return t.TextMuted
-}
-
-// viewLoginEntry 是顶栏右侧那个**登录**按钮。
-//
-// 位置跟 Biu 对齐：Biu 把登录挂在导航栏右边的头像下拉里（`navbar/login`），
-// 而侧栏是放菜单的地方——把「登录」放进侧栏会让用户为了登录先翻一遍菜单。
-//
-// 这一段放在 `viewNav` 那一行的末尾，不动 `viewMain` / `viewSide`。
-//
-// ⚠️ **只画未登录那一枚**（票 #260）：登录之后顶栏**不再有一枚独立的「退出」
-// 按钮**——退登走**头像下拉里**那一项（`navbar_avatar.go` 的
-// `avatarMenuItems`，最后一项「退出登录」，它先问一句再退）。用户 2026-10-25
-// 原话：「右上角的，独立的退出按钮删掉，参考 biu 的做就行，点开头像后展开
-// 比如设置、资料、退出之类的」。
-//
-// ⚠️ **但未登录那一枚要留着**：它是那一侧的**登录入口**——头像下拉里虽然也有
-// 一项「登录」，可顶栏这一枚是「一眼就看得见」的那个（上游那边登录只在头像
-// 下拉里，而我们多留了一枚，用户不该为了登录先点开头像）。
-//
-// ⚠️ **未登录那一枚也是扁平的**（票 #241 / 报告 F-05 + F-16）：它原来是一块
-// **实心主色的方块**（32×24、墨迹 752），是紧挨着它左边那四枚线框图标
-// （140~152）的 **5.4 倍**——整条顶栏最响的元素，而它挂的是「登录」这么一
-// 个低频次动作。**上游的顶栏右侧压根没有这么一枚按钮**（那边登录在头像下拉
-// 里），所以「实心主色」是我们自己加的强调，而它强调错了地方。
-//
-// ⚠️ **别把它改回实心主色**：主色留给「正在播放」那种方向标（DESIGN.md §四），
-// 而这一排的视觉重量由**图标**说话——这一枚曾经是那一排里最响的一个。
-func (s *Shell) viewLoginEntry(c *ui.Context) {
-	// ⚠️ **登录了就什么都不画**：这一格整个消失（不是「画成别的东西」）——
-	// 顶栏右端于是只剩头像那一枚，和上游一样。
-	if s.app.LoggedIn() {
-		return
-	}
-	// ⚠️ **图标是 16（`iconLoginSize`），不是 `iconMd`**：这一枚的图形是二维码
-	// （票 #242），18px 下它那几块方块糊成一块，16px 下还是分得开的，**墨迹和
-	// 左边那四枚线框图标同一档**（理由见 `icons.go` 的 `iconLoginSize`）。
-	//
-	// ⚠️ **走 `iconKey`（悬停时图形变主色）**，不是 `iconButton`（票 #249）：顶栏
-	// 这一排统一成一档配方，理由见 `navbar.go` 的「打开文件」那一枚。
-	if s.withTip(c, iconKey(c, iconLogin, "登录", iconLoginSize, false).
-		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "登录 B 站账号").Clicked() {
-		s.goLogin()
-	}
 }

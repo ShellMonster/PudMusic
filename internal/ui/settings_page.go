@@ -19,11 +19,13 @@
 package ui
 
 import (
+	"github.com/ShellMonster/Biu_Go/internal/service/audio"
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"strconv"
 	"strings"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/notice"
-	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
@@ -904,7 +906,9 @@ func (s *Shell) pickTheme(c *ui.Context, st app.Settings, ro bool) {
 // 分段控件（票 #240 / 报告 §4 的 F-17）。
 func (s *Shell) pickSelected(c *ui.Context, b ui.Element, ro bool) ui.Element {
 	if ro {
-		return flatCurrent(c, b)
+		// 只读时用控件那一层的中性底，不用主色淡底：框架再乘 50% 之后，带色的淡底
+		// 在暖色方案里压得字到不了 3:1。
+		return b.Background(c.Theme().Surface).TextColor(flatCurrentText(c.Theme(), false))
 	}
 	return flatSolid(c, b)
 }
@@ -942,8 +946,7 @@ func (s *Shell) pickCloseWindow(c *ui.Context, st app.Settings, ro bool) {
 	opts := make([]segmentOption, len(closeWindowOptions))
 	for i, opt := range closeWindowOptions {
 		// ⚠️ **这一排没有图标**：那两档没有配得上语义的图标——「隐藏到托盘」
-		// 在 macOS 上根本不是托盘（那边不建托盘图标，见 `pickTrayNote`），
-		// 画一个托盘图形就是**画了一件不会发生的事**；而「直接退出」能配
+		// 而「直接退出」能配
 		// 退出那一枚，可这一排只有它有图标的话，另一档空着更难看。
 		//
 		// 上游那两档本来也没有图标（`settings/index.tsx` 里那一行是横排单选，
@@ -990,17 +993,6 @@ func (s *Shell) pickAutoStart(c *ui.Context, st app.Settings, ro bool) {
 	}
 }
 
-// pickTrayNote 是 macOS 上「没有托盘」那句话。只在该说的话的时候摆。
-func (s *Shell) pickTrayNote(c *ui.Context) {
-	if platform.TraySupported() {
-		return
-	}
-	// macOS 上没有托盘（与 Biu 一致），「隐藏到托盘」这一格在这儿是「收进 Dock」。
-	// 得说出来，不然用户以为 Biu 有而我们没做。
-	ui.Text(c, "macOS 上不建托盘图标（与 Biu 一致）：「隐藏到托盘」是收进程序坞，"+
-		"图标还在，点一下就回来。").FontSize(scale.Font(c, scale.Size12)).TextColor(c.Theme().TextMuted)
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 // applySetting 改一项设置；写不出去就弹一条提示。
@@ -1021,4 +1013,66 @@ func settingsButton(c *ui.Context, label string) ui.Element {
 	t := c.Theme()
 	return flatButton(c, label).Height(settingsSelectH).Padding(space.None, space.Px12).
 		Radius(t.Radius).Background(t.Surface).Border(1, t.Border)
+}
+
+// trackFadeSteps 是「切歌淡入淡出」那一排按钮的档位（秒，0 = 关）。
+var trackFadeSteps = []int{0, 3, 5, 8, 10, 15}
+
+// pickTrackFade 是切歌淡入淡出那一排：关 / 3 / 5 / 8 / 10 / 15 秒。
+func (s *Shell) pickTrackFade(c *ui.Context, st app.Settings, ro bool) {
+	chosen := 0
+	opts := make([]segmentOption, len(trackFadeSteps))
+	for i, sec := range trackFadeSteps {
+		label := "关"
+		if sec > 0 {
+			label = strconv.Itoa(sec) + " 秒"
+		}
+		opts[i] = segmentOption{label: label}
+		if sec == st.TrackFadeSeconds {
+			chosen = i
+		}
+	}
+	s.settingsSegment(c, "setting:trackFade", "切歌淡入淡出", scale.Font(c, settingsControlW),
+		opts, chosen, ro, func(i int) {
+			v := trackFadeSteps[i]
+			s.applySetting("切歌淡入淡出", func(cur *app.Settings) { cur.TrackFadeSeconds = v })
+		})
+}
+
+// pickVideoQuality 是「视频画质」那一排：优先的上限，这一集没有就自动降档。
+func (s *Shell) pickVideoQuality(c *ui.Context, st app.Settings, ro bool) {
+	chosen := 0
+	opts := make([]segmentOption, len(app.VideoQualitySteps))
+	for i, q := range app.VideoQualitySteps {
+		opts[i] = segmentOption{label: "720P"}
+		if q != 0 {
+			opts[i].label = bili.VideoQuality(q).Label()
+		}
+		if q == st.VideoQuality {
+			chosen = i
+		}
+	}
+	s.settingsSegment(c, "setting:videoQuality", "视频画质", scale.Font(c, settingsControlW),
+		opts, chosen, ro, func(i int) {
+			v := app.VideoQualitySteps[i]
+			s.applySetting("视频画质", func(cur *app.Settings) { cur.VideoQuality = v })
+		})
+}
+
+// pickEQ 是均衡器那一排预设：关 / 低音 / 人声 / 明亮 / 流行 / 摇滚。
+func (s *Shell) pickEQ(c *ui.Context, st app.Settings, ro bool) {
+	cur := audio.EQPresetByID(st.EQPreset).ID
+	chosen := 0
+	opts := make([]segmentOption, len(audio.EQPresets))
+	for i, p := range audio.EQPresets {
+		opts[i] = segmentOption{label: p.Name}
+		if p.ID == cur {
+			chosen = i
+		}
+	}
+	s.settingsSegment(c, "setting:eq", "均衡器", scale.Font(c, settingsControlW),
+		opts, chosen, ro, func(i int) {
+			id := audio.EQPresets[i].ID
+			s.applySetting("均衡器", func(c *app.Settings) { c.EQPreset = id })
+		})
 }

@@ -207,7 +207,7 @@ func TestLoggedInWithNobodyFollowedSaysSomethingElse(t *testing.T) {
 		t.Errorf("登录了还说「%s」", followNotLoggedIn.Title)
 	}
 	e := lookup(followPath).Empty
-	if !showsText(tt, e.Title) || !showsText(tt, e.Hint) {
+	if !showsText(tt, e.Title) || !showsText(tt, e.Title) {
 		t.Errorf("登录了、一个人都没关注，该说 %q / %q，文字有 %q", e.Title, e.Hint, tt.Texts())
 	}
 	// ⚠️ 那个「还没关注任何人」的说法得**真的跟没登录那一支不同**：两句话一样

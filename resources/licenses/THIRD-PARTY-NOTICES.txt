@@ -15,7 +15,9 @@
 # ── 不是 Go 模块的那几样 ─────────────────────────────────────────────────────
 #
 # 上面那张表只列**编进可执行文件的 Go 模块**（go list -deps 数得出来的那些）。
-# 这个目录里还有三份**不是模块**的，同样随包发出去：
+# 这个目录里还有四份**不是模块**的，同样随包发出去：
+#
+# go-image-jpeg-LICENSE.txt Go image/jpeg 的 MCU 行存储改版（BSD-3-Clause）。
 #
 # BIU-LICENSE.txt          Biu 本体（PolyForm Noncommercial 1.0.0）。Biu 不是构建
 #                          依赖，它是这个项目的**上游**；PolyForm 的 Notices 一节
@@ -51,7 +53,7 @@
 
 github.com/Eyevinn/mp4ff	v0.60.0	MIT	github.com-Eyevinn-mp4ff-LICENSE.txt
 github.com/ebitengine/purego	v0.11.1	Apache-2.0	github.com-ebitengine-purego-LICENSE.txt
-github.com/egoist/mygo	v0.6.3	MIT	github.com-egoist-mygo-LICENSE.txt
+github.com/egoist/mygo	v0.6.4	MIT	github.com-egoist-mygo-LICENSE.txt
 github.com/go-text/typesetting	v0.3.5	Unlicense OR BSD-3-Clause	github.com-go-text-typesetting-LICENSE.txt
 github.com/icza/bitio	v1.1.0	Apache-2.0	github.com-icza-bitio-LICENSE.txt
 github.com/jfreymuth/oggvorbis	v1.0.5	MIT	github.com-jfreymuth-oggvorbis-LICENSE.txt

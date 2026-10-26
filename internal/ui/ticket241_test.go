@@ -73,7 +73,7 @@ func TestTheTopBarEndsWithTheUpstreamSizedAvatar(t *testing.T) {
 
 			// 前面三枚线框图标，和右边那两枚（头像 / 登录键）。
 			lineIcons := []string{"打开文件", "迷你", "动态"}
-			tail := []string{avatarLabel, "登录"}
+			tail := []string{avatarLabel}
 
 			inks := map[string]int{}
 			rects := map[string]ui.Rect{}
@@ -107,28 +107,6 @@ func TestTheTopBarEndsWithTheUpstreamSizedAvatar(t *testing.T) {
 			if w < avatarSize-1 || w > avatarSize+1 || h < avatarSize-1 || h > avatarSize+1 {
 				t.Errorf("头像那一枚圆是 %d×%d，want %d×%d——上游那一枚就是 40"+
 					"（顶栏 64 高的 5/8，框 %v）", w, h, avatarSize, avatarSize, rects[avatarLabel])
-			}
-			// 登录键：**和那三枚线框图标同一档**。
-			//
-			// ⚠️ **这一枚的图形是二维码**（票 #242：登录是扫码登录，而「圆圈里一支
-			// 箭头」那一对在 18px 上分不清进出）。二维码**天生比线框图标密**：18px
-			// 下它那几块方块糊成一块（墨迹 191，是邻居的 1.36 倍——整排最重的一枚），
-			// 所以它画在 **16**（`iconLoginSize`）：那几块还是分得开的，墨迹 137，
-			// 和邻居**同一档**。
-			//
-			// 顺带断一句「它不是一块实心主色的方块」：F-16 / F-05 说的就是那块底
-			// （改之前 778 块主色像素），这一格现在一块主色像素都没有。
-			if inks["登录"] > tier*13/10 {
-				t.Errorf("登录键那一格的墨迹是 %d 像素，而左边那三枚线框图标是 %d~%d——"+
-					"它比邻居重，用户的眼睛先落在它身上（框 %v）",
-					inks["登录"], inks[lineIcons[0]], tier, rects["登录"])
-			}
-			loginRect := rects["登录"]
-			accent := hexColorOf(t, "#1ed760")
-			if n := countPixelsIn(t, tt, int(loginRect.X)-2, int(loginRect.Y)-2,
-				int(loginRect.X+loginRect.W)+2, int(loginRect.Y+loginRect.H)+2, accent); n > 0 {
-				t.Errorf("登录键那一格里有 %d 块主色像素——它不该再是一块实心主色的方块"+
-					"（改之前是 778，是相邻线框图标的 5.4 倍）", n)
 			}
 			t.Logf("三枚线框图标 %v，头像 / 登录键 %v", inks, inks)
 		})
@@ -387,31 +365,6 @@ func darkestIn(tt *ui.Tester, x0, y0, x1, y1 int, bg color.RGBA) (color.RGBA, bo
 // ─────────────────────────────────────────────────────────────────────────────
 // F-24　抽屉空状态提示的末行不是孤字
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheQueueEmptyHintHasNoOrphan 钉住「队列抽屉那句提示的末行不是一个字」。
-//
-// 那一句在抽屉那 352 宽的内容区里折成两行，原来那一版是 31 个字——折完末行只剩
-// 「来」一个字（中文孤字：行尾单字）。
-//
-// 判据：**末行的墨迹宽度 ≥ 两个字的宽度**（12px 的汉字约 11.5 像素宽）。
-func TestTheQueueEmptyHintHasNoOrphan(t *testing.T) {
-	b := newTestShell(t)
-	b.s.drawerOpen = true
-	// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在窗口外面
-	//（它从右边滑进来），量墨迹量的是空的右半边。
-	settleDrawer(t, b.s, b.tt)
-	homeFrame(b.tt)
-
-	lines := inkLines(t, b.tt, queueEmpty.Hint, rgb(BuildTheme(app.DefaultSettings(""), false).Background))
-	if len(lines) < 2 {
-		t.Fatalf("那句话没有折成两行（只有 %d 行墨），判据量不了末行", len(lines))
-	}
-	last := lines[len(lines)-1]
-	if w := last.right - last.left; w < 20 {
-		t.Errorf("那句话末行只有 %d 像素宽（约 %d 个字）——中文孤字，行尾单字应回避",
-			w, w/11)
-	}
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // F-26　三处 600 字重

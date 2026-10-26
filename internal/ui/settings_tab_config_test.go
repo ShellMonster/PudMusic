@@ -371,12 +371,19 @@ func TestImportingADarkThemeActuallyTurnsTheWholeWindowDark(t *testing.T) {
 	// 各自铺的是同一个底色（#127 统一之后），一个点只验到其中一半——把侧栏那
 	// 一半改回 `Surface`（深色下 `#27272a`）而内容区不动，这一条原来照样全绿。
 	probes := [][2]int{{100, 500}, {1160, 400}}
-	lightBG := BuildTheme(a.SettingsSnapshot(), false).Background
+	// 第一个点在侧栏上（方案的 sidebar 层），第二个在内容区上（Background）。
+	probeBG := func(sysDark bool, i int) mygoui.Color {
+		if i == 0 {
+			return wantBackground(t, a, sysDark)
+		}
+		return BuildTheme(a.SettingsSnapshot(), sysDark).Background
+	}
 	// ⚠️ 每一处读像素都走 `waitPixel`（等它对上），不是「画一帧就读」：切路由是
 	// 淡入的，刚点完那一帧的底色还差百分之几（实测 255 里的 251），那个差跟
 	// 主题对不对毫无关系，却会让这条测试随机红，而它红的时刻正好是「别的模块给
 	// 顶栏多加了一个控件」那种改动。判据没有放宽——条件就是 want 本身。
-	for _, p := range probes {
+	for i, p := range probes {
+		lightBG := probeBG(false, i)
 		if w := asColor(waitPixel(t, tt, p[0], p[1], rgbaOf(lightBG), "起点")); w != lightBG {
 			t.Fatalf("起点 (%d,%d) 不是浅色（%v），这一条验不出什么：want %v", p[0], p[1], w, lightBG)
 		}
@@ -396,10 +403,11 @@ func TestImportingADarkThemeActuallyTurnsTheWholeWindowDark(t *testing.T) {
 	if want.Dark != true {
 		t.Fatalf("测试本身有问题：设置要深色、系统浅色，却拼出了浅色主题")
 	}
-	for _, p := range probes {
-		if w := asColor(waitPixel(t, tt, p[0], p[1], rgbaOf(want.Background), "导入深色主题之后")); w != want.Background {
+	for i, p := range probes {
+		wb := probeBG(false, i)
+		if w := asColor(waitPixel(t, tt, p[0], p[1], rgbaOf(wb), "导入深色主题之后")); w != wb {
 			t.Fatalf("导入深色主题之后画面 (%d,%d) 还是 %v，want %v（这一帧的主题还是系统那份）",
-				p[0], p[1], w, want.Background)
+				p[0], p[1], w, wb)
 		}
 	}
 
@@ -415,8 +423,8 @@ func TestImportingADarkThemeActuallyTurnsTheWholeWindowDark(t *testing.T) {
 	tt.SetDark(true)
 	tt.Frame()
 
-	sysBG := BuildTheme(a.SettingsSnapshot(), true).Background
-	for _, p := range probes {
+	for i, p := range probes {
+		sysBG := probeBG(true, i)
 		if got := asColor(waitPixel(t, tt, p[0], p[1], rgbaOf(sysBG), "「跟随系统」+ 系统深色")); got != sysBG {
 			t.Errorf("「跟随系统」+ 系统深色：画面 (%d,%d) 是 %v，want %v", p[0], p[1], got, sysBG)
 		}

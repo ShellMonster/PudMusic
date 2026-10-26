@@ -284,9 +284,18 @@ func (a *Account) restore(cli *bili.Client) error {
 	case errors.Is(err, ErrNotLoggedIn):
 		return nil
 	default:
-		// 后端坏了 / 凭据解不开：当成没登录继续，但别把用户困在里面——
-		// 记一条日志，界面上仍是登出状态，用户重新扫码一次就好。
-		_ = a.mgr.Logout(context.Background())
+		// 后端坏了 / 凭据解不开：界面上按没登录继续，让用户重新扫码一次就好。
+		//
+		// ⚠️ **只有「解不开」（ErrCorrupt）才清掉那份数据**：清掉是**不可逆**的
+		// （凭据文件一删，登录态就没了），而「读不出来」这类暂时性故障
+		// **不该把用户的登录态一起赔进去**——凭据还在那儿，下次读得到。
+		//
+		// 早先这里对**任何**错误都 Logout，于是「凭据文件权限被放宽」这种
+		// 一读就出的问题会顺着这条路把凭据文件删掉、用户的登录态没了，
+		// 而界面上什么也不说。见 issue #493 的收尾说明。
+		if errors.Is(err, ErrCorrupt) {
+			_ = a.mgr.Logout(context.Background())
+		}
 		return err
 	}
 	if cli == nil {

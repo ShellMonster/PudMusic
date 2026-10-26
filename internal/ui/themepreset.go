@@ -204,6 +204,14 @@ func (s *Shell) cardHoverBackground(t *ui.Theme, cardBg ui.Color) ui.Color {
 type cardStyle struct {
 	bg     ui.Color
 	radius float32
+	// preset 是这一帧套着方案（不是经典）：写死的冷灰（zinc）在暖色方案里要换成跟着主题走的色。
+	preset bool
+}
+
+// presetActive 报这一帧是不是套着方案。还没发布过（测试里直接画一块）就当经典。
+func presetActive() bool {
+	p := frameCard.Load()
+	return p != nil && p.preset
 }
 
 // frameCard 是「这一帧的弹窗面板长什么样」：`applyFrameTheme` 每帧开头发布，
@@ -218,7 +226,7 @@ var frameCard atomic.Pointer[cardStyle]
 func (s *Shell) publishCard(t *ui.Theme) {
 	cs := cardStyle{bg: t.Background, radius: t.Space(2.5)}
 	if sk, shape, ok := presetSkinFor(s.app.SettingsSnapshot().ThemePreset, t.Dark); ok {
-		cs = cardStyle{bg: ui.Hex(sk.surface1), radius: shape.radiusLg}
+		cs = cardStyle{bg: ui.Hex(sk.surface1), radius: shape.radiusLg, preset: true}
 	}
 	frameCard.Store(&cs)
 }

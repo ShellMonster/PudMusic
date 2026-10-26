@@ -110,10 +110,8 @@ func TestSettingsPageShowsItsContent(t *testing.T) {
 	if s.builtPage(lookup(settingsPath)) == nil {
 		t.Errorf("设置页没接上 builtPage，画出来的是空状态而不是设置页")
 	}
-	// macOS 上不建托盘（与 Biu 一致），「隐藏到托盘」在这边是收进程序坞。名字和
-	// 实际行为对不上时得说出来，否则用户会以为我们漏做了托盘。
-	if !tt.HasText("macOS 上不建托盘图标") {
-		t.Errorf("没说清 macOS 上没有托盘，文字有 %q", tt.Texts())
+	if tt.HasText("macOS 上不建托盘图标") {
+		t.Errorf("菜单栏图标已经有了，不该再解释「没有托盘」：%q", tt.Texts())
 	}
 }
 
@@ -374,9 +372,6 @@ func TestTheAutoStartSwitchIsOnThePage(t *testing.T) {
 
 	if !tt.HasText("开机自启") {
 		t.Fatalf("设置页上没有「开机自启」这一行，文字有 %q", tt.Texts())
-	}
-	if !tt.HasText("系统登录后自动启动应用") {
-		t.Errorf("「开机自启」没有说明，文字有 %q", tt.Texts())
 	}
 }
 

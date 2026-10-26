@@ -276,3 +276,11 @@ func TestThePlaybarShowsACleanTitle(t *testing.T) {
 		}
 	}
 }
+
+// cardColorOf 是卡片在这份设置下该是的底色：方案里是 surface1，经典就是页面底色。
+func cardColorOf(st app.Settings, th *mygoui.Theme) mygoui.Color {
+	if sk, _, ok := presetSkinFor(st.ThemePreset, th.Dark); ok {
+		return mygoui.Hex(sk.surface1)
+	}
+	return th.Background
+}

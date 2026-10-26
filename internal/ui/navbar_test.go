@@ -112,12 +112,8 @@ func TestTheTopBarCoversTheContentAreaOnly(t *testing.T) {
 	if !ok {
 		t.Fatalf("顶栏上没有头像，文字有 %q", tt.Texts())
 	}
-	// 最右边那一格是登录入口（login.go 的 viewLoginEntry），顶栏「顶满」验的是
-	// 它，不是头像——头像右边还有别的控件，拿头像验会得出一个假的「没顶满」。
-	login, ok := tt.Find("登录")
-	if !ok {
-		t.Fatalf("顶栏上没有登录入口，文字有 %q", tt.Texts())
-	}
+	// 最右边那一格就是头像（它也是未登录时的登录入口），顶栏「顶满」验的是它。
+	login := avatar
 
 	if back.Y < 0 || back.Y+back.H > navMinHeight {
 		t.Errorf("后退按钮在 %v，不在顶上那 %v 高里", back, navMinHeight)
@@ -429,11 +425,11 @@ func TestSubmittingSearchCarriesTheWordToThePage(t *testing.T) {
 	// 页面上画的是「搜了没有结果」那一支，不是「还没输入」那一支——
 	// 后者的正文写着「在上面的搜索框里输入歌名或 UP 主」，正是这条要防的。
 	// 结果是异步回来的，那一句比提交晚几帧才画出来（理由见 settleText）。
-	settleText(t, tt, noSearchResults.Hint)
-	if !tt.HasText(noSearchResults.Hint) {
+	settleText(t, tt, noSearchResults.Title)
+	if !tt.HasText(noSearchResults.Title) {
 		t.Errorf("页面上没有「没有结果」那一句，文字有 %q", tt.Texts())
 	}
-	if tt.HasText(searchIdle.Hint) {
+	if tt.HasText(searchIdle.Title) {
 		t.Errorf("页面上还是「还没输入」那一支，文字有 %q", tt.Texts())
 	}
 }
@@ -516,7 +512,7 @@ func TestClearingTheSearchBoxOnTheSearchPageClearsTheResults(t *testing.T) {
 	if got := s.router.Location(); strings.Contains(got, "q=") {
 		t.Errorf("按了「清空」之后 URL 上还有词：%q——这一场搜索应该没了", got)
 	}
-	if !tt.HasText(searchIdle.Hint) {
+	if !tt.HasText(searchIdle.Title) {
 		t.Errorf("没有回到「还没输入」那一支，文字有 %q", tt.Texts())
 	}
 }
@@ -546,7 +542,7 @@ func TestAnEmptySearchGoesBackToTheIdleState(t *testing.T) {
 	if got := s.router.Location(); strings.Contains(got, "q=") {
 		t.Errorf("空词回车之后 URL 上还有词：%q", got)
 	}
-	if !tt.HasText(searchIdle.Hint) {
+	if !tt.HasText(searchIdle.Title) {
 		t.Errorf("空词回车之后没有回到「还没输入」那一支，文字有 %q", tt.Texts())
 	}
 }
@@ -1124,9 +1120,9 @@ func TestTheTopBarIsBiuHeight(t *testing.T) {
 	if !ok {
 		t.Fatalf("顶栏上没有后退，文字有 %q", tt.Texts())
 	}
-	login, ok := tt.Find("登录")
+	login, ok := tt.Find(avatarLabel)
 	if !ok {
-		t.Fatalf("顶栏上没有登录入口，文字有 %q", tt.Texts())
+		t.Fatalf("顶栏上没有头像，文字有 %q", tt.Texts())
 	}
 	// 无头 Tester 里 `c.TitleBar()` 是零（`ui/headless.go:46` 那张表默认没填），
 	// 所以这一帧顶栏画的就是 `navMinHeight` 本身。64 是量出来的，见 navMinHeight。
@@ -1307,7 +1303,7 @@ func TestTheTopBarHasNoSettingsKey(t *testing.T) {
 // 事；这一条只保证这一票没有顺手把别的也拿掉。
 func TestTheTopBarKeepsItsOtherEntries(t *testing.T) {
 	tt := navBarTester(t, false)
-	for _, label := range []string{"打开文件", "迷你", "动态", avatarLabel, "登录"} {
+	for _, label := range []string{"打开文件", "迷你", "动态", avatarLabel} {
 		if _, ok := tt.Find(label); !ok {
 			t.Errorf("顶栏上找不到 %q（顶栏上的字：%q）——这一票只该拿掉「设置」"+
 				"那一枚，别的入口没动", label, tt.Texts())

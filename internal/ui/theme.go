@@ -17,8 +17,10 @@ package ui
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/covertint"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -57,6 +59,8 @@ type themeKey struct {
 	// primary / background 是设置里的主色和底色（十六进制串）。
 	primary    string
 	background string
+	// coverHue / coverSat 是封面取色那一对（只在 coverAccent 开着时有值）。
+	coverHue, coverSat float64
 	// dark 是这份主题**实际要的那一档深浅**（见 `effectiveDark`）。
 	//
 	// ⚠️ **不是「系统是不是深色」**：档位是浅色/深色时，主题跟系统深浅无关，
@@ -68,6 +72,28 @@ type themeKey struct {
 	contrast  bool
 	textScale float32
 }
+
+func coverHueOf(s app.Settings) float64 {
+	if s.CoverAccent {
+		return s.CoverHue
+	}
+	return 0
+}
+
+func coverSatOf(s app.Settings) float64 {
+	if s.CoverAccent {
+		return s.CoverSat
+	}
+	return 0
+}
+
+var themeNow = time.Now
+
+// 「定时」档：这个钟点之后用深色，早上这个钟点起用浅色。
+const (
+	scheduleDarkFrom  = 19
+	scheduleLightFrom = 7
+)
 
 // effectiveDark 是这份设置实际要的那一档深浅。
 //
@@ -81,6 +107,9 @@ func effectiveDark(s app.Settings, systemDark bool) bool {
 		return false
 	case app.ThemeModeDark:
 		return true
+	case app.ThemeModeSchedule:
+		h := themeNow().Hour()
+		return h >= scheduleDarkFrom || h < scheduleLightFrom
 	}
 	return systemDark
 }
@@ -124,6 +153,8 @@ func (c *themeCache) of(s app.Settings, systemDark bool, p ui.Preferences) *ui.T
 		font:       s.FontFamily,
 		primary:    s.PrimaryColor,
 		background: s.BackgroundColor,
+		coverHue:   coverHueOf(s),
+		coverSat:   coverSatOf(s),
 		dark:       effectiveDark(s, systemDark),
 		contrast:   p.HighContrast,
 		textScale:  p.TextScale,
@@ -181,7 +212,11 @@ func (c *themeCache) hot() *ui.Theme { return c.hotTheme }
 // 都要装」照样成立：每帧还是调 `SetTheme`，只是装上去的是同一份。
 func (s *Shell) applyFrameTheme(c *ui.Context) {
 	systemDark := c.Theme().Dark
-	t := s.theme.of(s.app.SettingsSnapshot(), systemDark, c.Preferences())
+	st := s.app.SettingsSnapshot()
+	if st.CoverAccent {
+		st.CoverHue, st.CoverSat = s.tint.sync(s.app.Snapshot().CoverURL, s.wake.invalidate)
+	}
+	t := s.theme.of(st, systemDark, c.Preferences())
 	// 指针压在滚动条上时深一档（上游 `--os-handle-bg-hover`）。框架的绘制
 	// 只在**指针落在容器上**时画滚动条，所以这里只管「出现之后更明显」。
 	//
@@ -336,6 +371,13 @@ func buildTheme(s app.Settings, systemDark bool, p ui.Preferences) *ui.Theme {
 	// 主题方案盖在最后：选了方案就压过上面的底色 / 主色 / 圆角；经典不动。
 	// ⚠️ 放在 Inverse 之前——Inverse 取的是 Text / Background / Surface，要取方案的。
 	applyPreset(t, s.ThemePreset)
+
+	// 封面取色盖在方案之后：开着且取到了颜色，主色换成封面的色相（亮度按深浅定）。
+	if s.CoverAccent && s.CoverSat > 0 {
+		if c, ok := parseHexColor(covertint.Hue{H: s.CoverHue, S: s.CoverSat}.Color(dark)); ok {
+			applyAccent(t, c)
+		}
+	}
 
 	// 🔴 Inverse / InverseText 留零的话，MyGo 的 inverse() 会退回
 	// 「fill=Text、text=Background」——深色下就是**一张白底卡片**，

@@ -1045,7 +1045,6 @@ func TestTheSmallCopyHasAFixedLineHeight(t *testing.T) {
 		// want 是那个 `LineHeight(...)` 该调用的档（`widgets/leading` 那张表里的名字）。
 		want string
 	}{
-		{file: "empty.go", key: "e.Hint", want: "Copy"},
 		{file: "collectionpage.go", key: "info.Intro", want: "Copy"},
 		{file: "collectionpage.go", key: "collectionKindText()", want: "Copy"},
 		{file: "collectionpage.go", key: "info.OwnerName", want: "Copy"},

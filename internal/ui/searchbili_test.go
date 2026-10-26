@@ -615,7 +615,7 @@ func TestTheSearchFailureSaysSomethingTheUserCanUnderstand(t *testing.T) {
 		t.Errorf("失败那一格把内部那一句原样摆出来了，文字有 %q", tt.Texts())
 	}
 	// 而它不是「没有结果」。
-	if tt.HasText(noSearchResults.Hint) {
+	if tt.HasText(noSearchResults.Title) {
 		t.Errorf("拉不到却画成「没有结果」那一格，文字有 %q", tt.Texts())
 	}
 }

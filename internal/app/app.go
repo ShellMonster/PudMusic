@@ -111,6 +111,10 @@ type State struct {
 	// 它是**用户的一个设置**，不是某一首歌的属性：换歌之后还在，切歌那一瞬间
 	// 也不该把它按成 1。所以它每帧都从 App 现读，界面上的按钮也一样。
 	Rate float64
+	// SleepAt 是睡眠定时器到点的时刻，零值 = 没设按时长的那一档。
+	SleepAt time.Time
+	// SleepAfterTrack 是「放完这一首就停」那一档开着没有。
+	SleepAfterTrack bool
 	// Err 是最近一次打开文件的失败原因，显示在播放条上，直到下一次打开成功。
 	Err string
 	// ErrDetail 是那一句错误的**完整说明**（界面上只显示 `Err`，完整的挂在
@@ -321,6 +325,9 @@ type App struct {
 
 	// 在线播放这一摊，见 online.go。挂上去之前 streaming 是 nil。
 	streaming *Streaming
+
+	// vid 是边放边看的那一路视频，见 video.go。自己带锁，不受 a.mu 管。
+	vid videoRun
 	// 歌单内容页这一摊，见 collection.go。挂上去之前是 nil（界面判空）。
 	collections *collections
 
@@ -527,6 +534,25 @@ type App struct {
 	// `time.Sleep`——而 `PLAN.md` 的验收项明写「用假钟，不靠 time.Sleep」。
 	// 用得着的只有歌词那 500ms 的防抖窗口（见 lyrics.go）。
 	after func(d time.Duration, fn func()) func()
+
+	// 睡眠定时器（见 sleep_timer.go）：到点时刻、停它的函数、「放完这一首」标志。
+	// normalize 是「音量均衡」开关的内存副本（落盘的是 Settings.NormalizeVolume）。
+	normalize bool
+	// trackFade 是切歌淡入淡出的时长（0 = 关），fadeOutFor 是已经开始淡出的那台
+	// 播放器，fadeInNext/fadeInUntil 是「下一台新播放器按这个时长淡入」的一次性标记。
+	trackFade   time.Duration
+	eqGains     [10]float64
+	fadeOutFor  *audio.Player
+	fadeInNext  time.Duration
+	fadeInUntil time.Time
+	// loud 是本地文件的响度扫描结果缓存（见 loudness_scan.go）。
+	loud loudnessCache
+	// autoLyricTried 记着这次运行里已经自动找过歌词的歌（见 lyrics_auto.go）。
+	autoLyricTried map[string]bool
+
+	sleepAt         time.Time
+	sleepStop       func()
+	sleepAfterTrack bool
 
 	// playMu 护着 playLog。
 	playMu sync.Mutex
@@ -832,16 +858,18 @@ func (a *App) Snapshot() State {
 		// 想放」。**只有 `onTrackFinished` 的 `AdvanceStop` 会留下「停住了、
 		// 而用户仍想放」这个组合**——`App.Stop` 是把两栏一起落的，而其余几处
 		// （重新播放、拖动进度条、清空当前曲目）会把 `stopped` 收掉。
-		QueueFinished: a.stopped && a.wantPlay,
-		Position:      a.position,
-		Duration:      a.duration,
-		Volume:        a.volume,
-		Muted:         a.muted,
-		Rate:          a.rate,
-		Err:           a.errText,
-		ErrDetail:     a.errDetail,
-		Loading:       a.loading,
-		LoadingTitle:  a.loadingTitle,
+		QueueFinished:   a.stopped && a.wantPlay,
+		Position:        a.position,
+		Duration:        a.duration,
+		Volume:          a.volume,
+		Muted:           a.muted,
+		Rate:            a.rate,
+		SleepAt:         a.sleepAt,
+		SleepAfterTrack: a.sleepAfterTrack,
+		Err:             a.errText,
+		ErrDetail:       a.errDetail,
+		Loading:         a.loading,
+		LoadingTitle:    a.loadingTitle,
 		// 🔴 **「慢」这一档是三样东西**：卡在哪一段、够不够慢、等了多久。
 		// 「够了多久」用**这一段开始的时刻**现算（见 App 里 loadingSince
 		// 那段注释）——界面每一帧都要读这一栏，而现算比另外存一栏更不容易
@@ -1008,7 +1036,8 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	//
 	// ⚠️ **送进去的是增益，不是音量那一格**：静音的时候增益是 0，而音量那一格
 	// 记的还是用户设的值（取消静音放回去的就是它）。
-	p.SetVolume(a.gainLocked()).SetRate(a.rate)
+	p.SetVolume(a.gainLocked()).SetRate(a.rate).SetNormalize(a.normalize).SetEQ(a.eqGains)
+	a.applyFadeInLocked(p)
 	a.player = p
 	a.online = nil
 	// 🔴 **代次要加**：本地文件和在线流是**两条并行的路**，而在线那一路是后台
@@ -1023,6 +1052,9 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	a.reportedErr = nil
 	a.title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	a.path = path
+	if a.normalize {
+		a.startLoudnessScan(p, path)
+	}
 	// 手上只有一个本地路径，没有封面地址（见 State.CoverURL）。队列里的项自带
 	// 封面的话，App.play 会在开成功之后补上。
 	a.cover = ""
@@ -1280,6 +1312,7 @@ func (a *App) SetRate(r float64) {
 	if p != nil {
 		p.SetRate(r)
 	}
+	_, _ = a.UpdateSettings(func(s *Settings) { s.PlaybackRate = r })
 	if wake != nil {
 		wake()
 	}
@@ -1572,6 +1605,9 @@ func (a *App) tick() {
 			// ⚠️ **暂停的那一拍不备**（`live` 是假）：用户停着，备好了也白备。
 			if p != nil && live && !finished {
 				a.maybePrefetch(pos, dur)
+			}
+			if p != nil {
+				a.tickTrackFade(p, pos, dur, live && playing && !finished)
 			}
 
 			// 「上次听到哪儿」这一格：在放的时候位置一直在变，所以按节奏落一次

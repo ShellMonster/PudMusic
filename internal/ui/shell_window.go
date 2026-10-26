@@ -214,7 +214,7 @@ func (s *Shell) Attach(w *mygo.Window) {
 	// 用户看到的还是进全屏之前的样子（而窗口在进全屏那一刻本来就会重画，
 	// 但**出**全屏那一帧不一定）。
 	w.OnEnterFullScreen(func() { s.fullScreen = true; s.wake.invalidate() })
-	w.OnLeaveFullScreen(func() { s.fullScreen = false; s.wake.invalidate() })
+	w.OnLeaveFullScreen(func() { s.fullScreen, s.videoMadeFull = false, false; s.wake.invalidate() })
 
 	w.OnClose(func(e *mygo.CloseEvent) {
 		opt := s.app.SettingsSnapshot().CloseWindowOption
@@ -304,7 +304,7 @@ func Run(a *app.App, sess *media.Session) error {
 
 	mygo.App.WhenReady(func() {
 		// 🔴 **冷启动那一段的「应用就绪」时刻**（票 #478）：这一句之前是
-		// 「进程起来 → 读盘 + 读钥匙串 + 挂零件」，之后才是「建窗口」。
+		// 「进程起来 → 读盘 + 读凭据 + 挂零件」，之后才是「建窗口」。
 		// 两段分开量，才答得出「慢的是读盘还是画窗口」。
 		a.NoteReady()
 		// scheme 在这里登记而不是 Run 之前：登记要走系统 API，事件循环起来
