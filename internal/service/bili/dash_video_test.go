@@ -58,7 +58,7 @@ func TestPlayDashPicksTheVideoAndKeepsItsIdentity(t *testing.T) {
 		dashVideoItem(16, 300_000, 640, 360, streamURL(exp, "-v16.m4s")),
 	))
 
-	pair, err := c.PlayDash(context.Background(), testBvid, testCid, VideoQualityUnknown, AudioAuto)
+	pair, err := c.PlayDash(context.Background(), testBvid, testCid, VideoQualityUnknown, AudioHigh)
 	if err != nil {
 		t.Fatalf("取流：%v", err)
 	}
@@ -102,7 +102,7 @@ func TestPlayDashPicksTheVideoAndKeepsItsIdentity(t *testing.T) {
 // 稿件没有视频流」直接告诉他这一条走不通。
 func TestPlayDashSaysSoWhenThereIsNoVideo(t *testing.T) {
 	c := dashClient(t, dashWithVideo())
-	_, err := c.PlayDash(context.Background(), testBvid, testCid, VideoQualityUnknown, AudioAuto)
+	_, err := c.PlayDash(context.Background(), testBvid, testCid, VideoQualityUnknown, AudioHigh)
 	if err == nil {
 		t.Fatal("没有视频流也取成功了")
 	}
@@ -125,7 +125,7 @@ func TestPlayDashSkipsAVideoEntryWithNoAddress(t *testing.T) {
 		dashVideoItem(120, 9_000_000, 3840, 2160, ""), // 条目在，地址是空的
 		dashVideoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-v80.m4s")),
 	))
-	pair, err := c.PlayDash(context.Background(), testBvid, testCid, VideoQualityUnknown, AudioAuto)
+	pair, err := c.PlayDash(context.Background(), testBvid, testCid, VideoQualityUnknown, AudioHigh)
 	if err != nil {
 		t.Fatalf("取流：%v", err)
 	}
@@ -146,7 +146,7 @@ func TestPlayDashKeepsTheBackupURLs(t *testing.T) {
 		streamURL(exp, "-v80-b2.m4s"),
 	}
 	c := dashClient(t, dashWithVideo(v))
-	pair, err := c.PlayDash(context.Background(), testBvid, testCid, VideoQualityUnknown, AudioAuto)
+	pair, err := c.PlayDash(context.Background(), testBvid, testCid, VideoQualityUnknown, AudioHigh)
 	if err != nil {
 		t.Fatalf("取流：%v", err)
 	}
@@ -164,7 +164,7 @@ func TestPlayDashSaysSoWhenThereIsNoAudio(t *testing.T) {
 	d := dashWithVideo(dashVideoItem(80, 2_000_000, 1920, 1080, streamURL(exp, "-v80.m4s")))
 	d["audio"] = []any{}
 	c := dashClient(t, d)
-	_, err := c.PlayDash(context.Background(), testBvid, testCid, VideoQualityUnknown, AudioAuto)
+	_, err := c.PlayDash(context.Background(), testBvid, testCid, VideoQualityUnknown, AudioHigh)
 	if err == nil {
 		t.Fatal("没有音频流也取成功了")
 	}
@@ -208,7 +208,7 @@ func TestPlayDashSendsTheQualityOnlyWhenAsked(t *testing.T) {
 			mu.Lock()
 			qns = nil
 			mu.Unlock()
-			if _, err := c.PlayDash(context.Background(), testBvid, testCid, tc.qn, AudioAuto); err != nil {
+			if _, err := c.PlayDash(context.Background(), testBvid, testCid, tc.qn, AudioHigh); err != nil {
 				t.Fatalf("取流：%v", err)
 			}
 			mu.Lock()
@@ -276,7 +276,7 @@ func TestPlayDashRespectsTheQualityTheUserPicked(t *testing.T) {
 		{"没点名就给最好的（4K）", VideoQualityUnknown, 120},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			pair, err := c.PlayDash(context.Background(), testBvid, testCid, tc.qn, AudioAuto)
+			pair, err := c.PlayDash(context.Background(), testBvid, testCid, tc.qn, AudioHigh)
 			if err != nil {
 				t.Fatalf("取流：%v", err)
 			}
@@ -310,7 +310,7 @@ func TestPlayDashTakesTheLeastBadWhenNoneIsLowEnough(t *testing.T) {
 		dashVideoItem(64, 900_000, 1280, 720, streamURL(exp, "-v64.m4s")),
 		dashVideoItem(32, 500_000, 854, 480, streamURL(exp, "-v32.m4s")),
 	))
-	pair, err := c.PlayDash(context.Background(), testBvid, testCid, VideoQuality360, AudioAuto)
+	pair, err := c.PlayDash(context.Background(), testBvid, testCid, VideoQuality360, AudioHigh)
 	if err != nil {
 		t.Fatalf("取流：%v", err)
 	}

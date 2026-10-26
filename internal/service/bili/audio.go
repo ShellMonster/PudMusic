@@ -17,8 +17,9 @@
 // 出声——然后在用户以为歌还没放完的地方停住，界面上一个错都没有。
 //
 // 所以这里把 -1 当成「这一首放不出来」，报一句说清差在哪的话（`ErrPreviewOnly`）。
-// 别的档位（自动 / 高音质）会**退到不用会员的那一档再问一次**，退的规矩和
-// `pickAudio` 末尾那段一样；点名的「无损」不退——用户为无损付了钱。
+// 点名的档拿不到（B 站给回的是试听片段）会**退到不用会员的那一档再问一次**，
+// 退的规矩和 `pickAudio` 末尾那段一样（票 #581：降档放出来比报错好）——
+// 真的每一档都要会员，才落回那句「要会员才有完整版」。
 //
 // # ⚠️ 音质是**另一套编号**
 //
@@ -203,12 +204,13 @@ type songQuality struct {
 
 // AudioStreamURL 问 B 站要一条音乐库条目的音频流。
 //
-// sid 是那个 auid，pref 是用户选的音质档（`AudioAuto` 是默认）。
+// sid 是那个 auid，pref 是用户选的音质档。
 //
 // 返回的 `StreamRef` 里同样没有任何凭据，**不要**写进日志（同 `PlayURL`）。
 //
-// 🔴 **试听片段不会当成流给出去**：见本文件的文件头。点名的「无损」拿不到就
-// 报错（不偷偷降级），别的档位退到不用会员的那一档再问一次。
+// 🔴 **试听片段不会当成流给出去**：见本文件的文件头。点名的档拿不到（B 站给
+// 回的是试听片段）就**退到不用会员的那一档再问一次**——降档放出来比报错好，
+// 实际拿到了哪一档由 app 那一层提示（票 #581）。
 func (c *Client) AudioStreamURL(ctx context.Context, sid string, pref AudioQuality) (*StreamRef, error) {
 	id, err := parseSid(sid)
 	if err != nil {
@@ -222,13 +224,8 @@ func (c *Client) AudioStreamURL(ctx context.Context, sid string, pref AudioQuali
 	}
 
 	if MusicTier(d.Type) == MusicTierPreview {
-		// 点名要无损而拿到的是片段：**不偷偷降级**，说法照 `refFrom` 那一句，
-		// 用户为无损付了钱。
-		if pref == AudioLossless {
-			return nil, fmt.Errorf("%w: 这一首没有无损（要的是「%s」），换一档音质或用大会员账号", ErrNoStream, pref.Label())
-		}
-		// 别的档位按「退到不高于它的那一档里最好的」再问一次。退到哪一档不用猜：
-		// B 站在 `qualities` 里带着每一档要不要会员（`require`）。
+		// 点名的档要会员：按「退到不高于它的那一档里最好的」再问一次。退到
+		// 哪一档不用猜：B 站在 `qualities` 里带着每一档要不要会员（`require`）。
 		if free, ok := freeTier(d.Qualities, want); ok {
 			again, err := c.fetchSongURL(ctx, id, free)
 			if err != nil {

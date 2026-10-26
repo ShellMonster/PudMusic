@@ -140,15 +140,16 @@ func TestTheNextTrackIsPreparedBeforeTheSwitch(t *testing.T) {
 	}
 }
 
-// TestAManualSwitchResolvesTheAddressAgain 盯「手动切歌重新取地址」。
+// TestAManualNextUsesThePreparedAddress 盯「下一首按钮吃预取」（票 #581）。
 //
-// 自动切歌用备好的那一份；**用户自己按了下一首**的时候重新取——他要的是
-// 「现在」这一首的地址，而备好的那一份是几十秒前算的（报告 B12 的分工）。
+// 用户按下一首的那一刻往往正好在预取的 15 秒窗口里，让它重新取一次流就是
+// 白等一趟带签名的往返——手动按下一首和自动切歌从此是同一个待遇：
+// **都用备好的那一份，取流接口的次数停在 2**。
 //
-// ⚠️ 手动切歌会把备好的那一份作废（队列变了，见 queue.go 的 onInvalidate），
-// 所以这一次预取是白做了——**多打的那一次请求就是这一条的代价**，而它换来的是
-// 「用户按下一首时拿到的一定是新鲜的地址」。
-func TestAManualSwitchResolvesTheAddressAgain(t *testing.T) {
+// ⚠️ 备好的那份和挪到的那首对不上时（队列刚变过、随机档抽了别的），
+// `step` 会把它丢掉、照常重新取——宁可多取一次，也不能放错歌（比对判据
+// 在 step 里，同 `takePrefetch` 的那一半）。
+func TestAManualNextUsesThePreparedAddress(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = shortWav(1.0)
 	playURLBySong(f, 2*time.Hour)
@@ -165,8 +166,11 @@ func TestAManualSwitchResolvesTheAddressAgain(t *testing.T) {
 	// 用户自己按了「下一首」。
 	a.Next()
 	playing(t, a, "第二首")
-	if n := f.playCalls.Load(); n != 3 {
-		t.Errorf("手动切歌没有重新取流（取流接口一共被打了 %d 次，want 3）", n)
+	if n := f.playCalls.Load(); n != 2 {
+		t.Errorf("手动切歌又取了一次流（取流接口一共被打了 %d 次，want 2——备好的那一份就该用上）", n)
+	}
+	if st := a.Snapshot(); st.Err != "" {
+		t.Errorf("播放条上有错：%s", st.Err)
 	}
 }
 

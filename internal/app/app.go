@@ -139,32 +139,10 @@ type State struct {
 	// 🔴 **它必须有超时**：这一栏要是能一直亮着，它就成了另一种「什么都不说」
 	// （票 #282）。超过 `onlinePlayTimeout` 就按失败处理，界面上换成一句人话。
 	Loading bool
-	// LoadingTitle 是正在取的那一首的名字。空串 = 没有在取流。
+	// 🔴 **界面上没有「正在取流」的文字**（票 #581）：取流的反馈只有播放键上
+	// 那一圈光（`loadhalo.go`）。卡在哪一段、等了多久这些细节只进日志和
+	// 超时之后的那句错误话——不占播放条上的一行。
 	//
-	// ⚠️ **它不是 `Title`**：`Title` 是「正在放的那首」，而取流这一趟里正在放
-	// 的还是上一首。用户要知道的是「我刚才点的那一首在准备」，不是上一首。
-	LoadingTitle string
-	// LoadingStage 是这一趟取流**现在卡在哪一段**（票 #220）。
-	//
-	// 取值是那几个短词（见 `internal/app/online.go` 的 `loadStage*`）：
-	// 「问分集」/「问地址」/「下音频」/「解码」。
-	//
-	// 🔴 **它是为「慢」准备的**：界面上说一句「卡在『下音频』这一步」，
-	// 比一枚不说话的转圈有用得多——而分不清「网络慢」和「解码慢」的
-	// 话，用户只会觉得应用坏了。
-	LoadingStage string
-	// LoadingSlow 是「这一段已经慢到该说出来了」（票 #220）。
-	//
-	// ⚠️ **它和 `Loading` 是两件事**：`Loading` 说「还在准备」，
-	// 这一栏说「**准备得慢**」——后者要换一句**不一样的话**上屏，
-	// 否则用户看到的还是那一句「正在取流」，而他等的那个「非常慢」
-	// 一句话都没说。
-	LoadingSlow bool
-	// LoadingWait 是**当前这一段**已经等了多久。
-	//
-	// ⚠️ **它记的是「这一段」**：取流是三段串行的网络往返，每一段都
-	// 重新起算——所以这一栏是「用户此刻正在等的那一件事」。
-	LoadingWait time.Duration
 	// Starting 是「**应用还在启动中**」（票 #478）。
 	//
 	// ⚠️ **它和 `Loading` 不是一回事**：`Loading` 说「这一首还没放起来」，
@@ -175,7 +153,7 @@ type State struct {
 	// 歌名，用户看得见应用已经准备好了。
 	//
 	// 🔴 **它不是「有没有在取流」**：应用准备好了之后，用户再点一首歌，
-	// 那一趟取流**不是**「启动」——那一句「正在取流」已经说清了在等什么。
+	// 那一趟取流**不是**「启动」——播放键上那圈光已经说清了在等什么。
 	Starting bool
 	// Reconnecting 是「**正在重连**」：断流之后应用在救这一首。
 	//
@@ -361,19 +339,6 @@ type App struct {
 	// 往返（见 `onlinePlayTimeout` 那段注释），每一段都重新起算——所以
 	// 「这一段等了多久」才是用户此刻真正在等的那件事。
 	loadingSince time.Time
-	// loadingSlow 是「这一段已经慢到该说出来了」（见 State.LoadingSlow）。
-	//
-	// ⚠️ **它是一个闹钟的结果，不是一个比较的结果**：界面是**按需绘制**
-	// 的（见 AGENTS.md「静默出错的几条铁律」第 3 条），所以「刚刚变慢」
-	// 这一刻必须有人去叫醒界面——比较出来的值在界面不动的时候不会变。
-	loadingSlow bool
-	// loadSlowStop 是「变慢」那个闹钟的停掉函数。
-	//
-	// ⚠️ **它和 `loadStop` 各存各的**：那一个管「这一段超时了判失败」，
-	// 这一个管「这一段慢到要告诉用户」。共用一个字段的话，先停掉另一个
-	// 就把另一个的闹钟弄丢了（那一个丢了 = 永远转圈，这一个丢了 =
-	// 慢了也不说）。
-	loadSlowStop func()
 	// loadFilled 是**上一次检查时**字节源已经下到的字节数。
 	//
 	// ⚠️ **它是「下载那一段还有没有进展」的比对基准**（见 `downloadProgressLocked`）：
@@ -841,7 +806,7 @@ func (a *App) Snapshot() State {
 	defer a.mu.Unlock()
 	// ⚠️ 偏好直接从 `a.streaming` 读，**不能**调 `a.AudioQuality()`：那把锁
 	// 已经在手里了，sync.Mutex 不可重入，那样写是当场死锁。
-	pref := AudioQualityAuto
+	pref := AudioQualityHigh
 	if a.streaming != nil {
 		pref = BiliToPref(a.streaming.Quality)
 	}
@@ -875,14 +840,6 @@ func (a *App) Snapshot() State {
 		Err:             a.errText,
 		ErrDetail:       a.errDetail,
 		Loading:         a.loading,
-		LoadingTitle:    a.loadingTitle,
-		// 🔴 **「慢」这一档是三样东西**：卡在哪一段、够不够慢、等了多久。
-		// 「够了多久」用**这一段开始的时刻**现算（见 App 里 loadingSince
-		// 那段注释）——界面每一帧都要读这一栏，而现算比另外存一栏更不容易
-		// 走偏（那一栏要跟着每一次「重新起算」一起改）。
-		LoadingStage: a.loadingStage,
-		LoadingSlow:  a.loadingSlow,
-		LoadingWait:  a.loadingWaitLocked(),
 		// 🔴 **「启动中」只在「还没有歌」的时候才为真**（见 State 里
 		// `Starting` 那段注释）：有歌的时候界面上摆的是歌名，用户看得见
 		// 应用已经准备好了。

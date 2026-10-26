@@ -232,9 +232,6 @@ func TestTheOldSongsReconnectStateDoesNotStayOnTheNewSong(t *testing.T) {
 	if !st.Loading {
 		t.Errorf("新的一趟没有说「正在取流」：%+v", st)
 	}
-	if st.LoadingTitle != "新的一首" {
-		t.Errorf("在取哪一首说错了：%q", st.LoadingTitle)
-	}
 }
 
 // TestTheOldSongsReconnectStateDoesNotStealTheNewOnesLine 盯「新的一首自己在

@@ -142,16 +142,6 @@ func TestASlowButProgressingStreamIsNotKilled(t *testing.T) {
 		return a.Snapshot().Loading
 	})
 
-	// 二、🔴 **「慢」那一档在 5 秒就该说话了**：用户抱怨的就是「慢到没有
-	// 一句话说」——光是「不判它失败」不够，用户还是不知道该等还是该换歌。
-	clock.fireAt(app.LoadSlowAfter)
-	waitFor(t, 15*time.Second, "界面上说「慢」", func() bool {
-		return a.Snapshot().LoadingSlow
-	})
-	if st := a.Snapshot(); st.LoadingStage == "" {
-		t.Error("不知道卡在哪一步——用户分不出「问地址问不动」和「音频下不来」")
-	}
-
 	// 三、**超时的闹钟响了**（假钟点火 = 「20 秒到了」）。
 	clock.fireAt(app.LoadPlayTimeout)
 
@@ -162,10 +152,6 @@ func TestASlowButProgressingStreamIsNotKilled(t *testing.T) {
 	st := a.Snapshot()
 	if st.Err != "" {
 		t.Fatalf("一条还在好好下的流被判成了失败：%q（%q）", st.Err, st.ErrDetail)
-	}
-	// 🔴 **「慢」那一档不许被重新起算弄丢**：用户等的是同一段。
-	if !st.LoadingSlow {
-		t.Error("重新起算之后「慢」那一档没了——用户看到的话又变回「正在取流」")
 	}
 
 	// 五、**最后它真的放出来了**：掐掉「不判失败」不算修好。
