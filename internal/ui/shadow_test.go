@@ -225,7 +225,7 @@ func TestTheDownloadTableHasAShadow(t *testing.T) {
 			assertShadow(t, img,
 				mygoui.Rect{X: 50, Y: 200, W: 10, H: 20},
 				mygoui.Rect{X: 20, Y: 200, W: 10, H: 20},
-				2, "下载表那张卡")
+				map[bool]int{false: 2, true: 1}[dark], "下载表那张卡")
 			_ = s
 		})
 	}

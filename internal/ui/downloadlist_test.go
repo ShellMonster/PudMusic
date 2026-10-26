@@ -673,13 +673,14 @@ func TestTheDownloadTableSitsOnACard(t *testing.T) {
 			}
 			th := BuildTheme(s.app.SettingsSnapshot(), dark)
 			page := rgbaOf(th.Background)
+			card := rgbaOf(cardColorOf(s.app.SettingsSnapshot(), th))
 			img := tt.Image()
 			y := round32(header.Y + header.H/2)
 
 			in := img.RGBAAt(clampX(img, round32(header.X)-18), clampY(img, y))
-			if maxDiff(in, page) > probeTolerance {
-				t.Errorf("表头左边 18 像素处是 %v，want 卡片底 %v——上游那张卡的底是 "+
-					"`bg-content1`（= 页面底色），不是一块灰", in, page)
+			if maxDiff(in, card) > probeTolerance {
+				t.Errorf("表头左边 18 像素处是 %v，want 卡片底 %v——经典下卡片底就是页面底色，"+
+					"方案里是 surface1，都不是一块灰", in, card)
 			}
 			// 卡片左缘外侧那一圈必须有「不是底色」的像素：影（浅色下是那一圈
 			// 30% 黑的外边，深色下是 1 像素的白内边）。

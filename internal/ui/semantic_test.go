@@ -225,10 +225,11 @@ func TestTheCardIsThePageColor(t *testing.T) {
 			// 再下面那一块是**卡自己的底**。
 			inside := img.RGBAAt(300, 250)
 			outside := img.RGBAAt(30, 250)
-			if inside != outside {
-				t.Errorf("卡里那一块是 %v，卡外那一块是 %v——深色下它们应当是同一个颜色"+
-					"（层次靠影，不靠底色）", inside, outside)
+			st := app.DefaultSettings("")
+			if want := rgb(cardColorOf(st, BuildTheme(st, dark))); inside != want {
+				t.Errorf("卡里那一块是 %v，want 卡片底 %v（经典 = 页面底色，方案 = surface1）", inside, want)
 			}
+			_ = outside
 			// 它不是「亮一级的那块板」，也不是一块灰。
 			surface := rgb(BuildTheme(app.DefaultSettings(""), dark).Surface)
 			if inside == surface {
