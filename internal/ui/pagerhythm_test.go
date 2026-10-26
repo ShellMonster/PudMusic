@@ -633,9 +633,10 @@ func TestEveryLoadingStateIsDrawnTheSameWay(t *testing.T) {
 		name    string
 		loading string
 		path    string
+		rows    bool
 	}{
-		{name: "搜索", loading: "正在加载…", path: searchPath + "?q=%E5%91%A8%E6%9D%B0%E4%BC%A6"},
-		{name: "收藏夹", loading: "正在加载…", path: collectionPathPrefix + "12345"},
+		{name: "搜索", loading: "正在加载…", path: searchPath + "?q=%E5%91%A8%E6%9D%B0%E4%BC%A6", rows: true},
+		{name: "收藏夹", loading: "正在加载…", path: collectionPathPrefix + "12345", rows: true},
 		{name: "稍后再看", loading: "正在加载…", path: laterPath},
 		{name: "历史记录", loading: "正在加载…", path: historyPath},
 		{name: "我的关注", loading: "正在加载关注的人…", path: followPath},
@@ -655,7 +656,11 @@ func TestEveryLoadingStateIsDrawnTheSameWay(t *testing.T) {
 			if !ok {
 				t.Fatalf("%s 没有说「%s」，文字有 %q", page.name, page.loading, tt.Texts())
 			}
-			if r.W != loadingSpinnerSize || r.H != loadingSpinnerSize {
+			if page.rows {
+				if r.H <= 0 || r.H > skeletonRows*skeletonRowH { // 矮窗口里会被视口截短
+					t.Errorf("%s 的骨架屏高 %.0f，want (0, %d]", page.name, r.H, skeletonRows*skeletonRowH)
+				}
+			} else if r.W != loadingSpinnerSize || r.H != loadingSpinnerSize {
 				t.Errorf("%s 的「%s」那一枚是 %.0f×%.0f，want %d×%d——"+
 					"「加载中」在每一页上都是同一枚转圈", page.name, page.loading,
 					r.W, r.H, loadingSpinnerSize, loadingSpinnerSize)
