@@ -87,6 +87,12 @@ func SetVisibleFlag(visible *atomic.Bool) {
 	frameVisible = visible
 }
 
+// VisibleFlag 返回这一扇窗当前装着的「看得见」开关（给别的会自己要帧的动画用，
+// 比如 `widgets/skeleton`）。
+//
+// ⚠️ **要在建的时候取、画的时候读**：和 `Wave` 一样，局部重绘那一帧不重建。
+func VisibleFlag() *atomic.Bool { return frameVisible }
+
 const (
 	// Fade 是淡入淡出的时长。Biu 那两处都是 `duration-200`。
 	Fade = 200 * time.Millisecond

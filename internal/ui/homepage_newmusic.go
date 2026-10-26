@@ -53,6 +53,7 @@ package ui
 import (
 	"log"
 	"runtime/debug"
+	"strconv"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
 	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
@@ -63,6 +64,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrollbar"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/skeleton"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -365,7 +367,13 @@ func (g *newMusicGrid) view(c *ui.Context) {
 			// 上游 `new-music-top.tsx:203-205`：拉的时候就是一个转圈。
 			shadow.HeroSmall(ui.Column(c).FillWidth().Height(newMusicEmptyH).Radius(t.Radius).
 				Background(dialogCard(t).bg).Center(), t).Children(func() {
-				ui.Spinner(c).Label("正在加载新歌速递")
+				// 骨架屏（设计稿 docs/design-mockups/skeleton.png）：卡片的形状先摆出来，
+				// 数据到了只换内容。无障碍名字还是那句话，读屏软件和测试都靠它。
+				ui.Row(c).Gap(space.Px16).AlignItems(ui.Center).Label("正在加载新歌速递").Children(func() {
+					for i := range 5 {
+						skeleton.Card(c, "newmusic:skel:"+strconv.Itoa(i), 110)
+					}
+				})
 			})
 			return
 
