@@ -133,13 +133,6 @@ func (g *copyGeneration) next() uint64 {
 	return g.gen
 }
 
-// current 报现在最新的号是多少。
-func (g *copyGeneration) current() uint64 {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.gen
-}
-
 // isCurrent 报 gen 还是不是**最新**的那一个。
 //
 // ⚠️ **比的是「有没有人后来又按了一次」**，不是「是不是我发的那个」——
