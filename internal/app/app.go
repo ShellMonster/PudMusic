@@ -1070,7 +1070,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 		//
 		// ⚠️ **说人话，不念英文系统错**：读屏软件是**逐字念**的，而
 		// `err.Error()` 是 "open /Users/x/a.m4a: no such file or directory"。
-		a.announce("播放失败：" + announceErrText(err))
+		a.announce("播放失败：" + FriendlyErrText(err))
 		if wake != nil {
 			wake()
 		}

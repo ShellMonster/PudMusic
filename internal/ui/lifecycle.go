@@ -74,7 +74,20 @@ func (s *Shell) installLifecycle() {
 	// OnOpenURL（`mygo/deeplink.go` 的 deliverArgs，由 single_instance.go 的
 	// acceptSecondInstances 调），这里只负责把窗口叫回来：用户明明是在唤起这个
 	// 应用，结果窗口还藏在那儿，是最容易被当成「点了没反应」的一种情况。
-	mygo.App.OnSecondInstance(func([]string, string) { s.openWindow() })
+	//
+	//
+	// ⚠️ **命令行里要是有文件呢**：那一份**在 `installOpenFile` 里装**
+	// （见 `openfile.go` 的 `installOpenFile`）——因为「第二个实例转交过来的
+	// 文件」和「系统直接交过来的文件」是**同一件事**，而框架只交它收得下的
+	// 那些（`mygo/deeplink.go` 的 `fileArgs`），收不下的那些要在**我们这一
+	// 侧**说一句话（这一票要求「要有可见提示」）。
+	//
+	// ⚠️ **这里这一句只管把窗口叫回来**：用户明明是在唤起这个应用，结果
+	// 窗口还藏在那儿，是最容易被当成「点了没反应」的一种情况。
+	openFileHooks.onSecondInstance(func(args []string, workingDir string) {
+		s.handleLaunchArgs(args, workingDir)
+		s.openWindow()
+	})
 
 	// biu://… 到了就跳到它指的那一页。
 	//
@@ -97,6 +110,17 @@ func (s *Shell) installLifecycle() {
 	// DidBecomeActive——所以这里不会因为 RestoreFromBackground 里的
 	// App.Focus 又绕回来。
 	mygo.App.OnActivate(func(bool) { s.openWindow() })
+
+	// 系统把一个音频文件交给本应用（双击、拖到 Dock 图标上）时的那一条路。
+	//
+	// ⚠️ **必须在 Run 之前装**（框架的注释写得很明确，`mygo/app.go:470-477`）：
+	// 启动命令行里的文件是在应用 ready 之后交付的，回调装晚了那一次就永远
+	// 收不到——而「双击一个文件，应用起来却什么也没放」正是这一票要治的。
+	//
+	// ⚠️ **它排在 `OnOpenURL` 那一段的后面，不是前面**：两件事互不干扰
+	// （一个交文件、一个交链接），而文件那一条要多做一步「让开迷你播放器」
+	// （见 `openfile.go`）。
+	s.installOpenFile()
 }
 
 // handleDeepLink 是「biu://… 指到了 route」那一半：让开迷你，跳到那一页。
