@@ -140,6 +140,9 @@ func searchFieldBg(t *ui.Theme, hot bool) ui.Color {
 	if hot {
 		a = searchBgHot
 	}
+	if presetActive() {
+		return t.TextMuted.Alpha(a)
+	}
 	if t.Dark {
 		return ui.RGBA(searchGrayDarkR, searchGrayDarkG, searchGrayDarkB, a)
 	}
@@ -666,6 +669,9 @@ const (
 
 // historyChipBg 是那枚灰色 Chip 的底色。深浅两套是 HeroUI default 色阶的两头。
 func historyChipBg(t *ui.Theme) ui.Color {
+	if presetActive() {
+		return t.Surface.Mix(t.Text, 0.08)
+	}
 	if t.Dark {
 		return ui.RGBA(historyChipDarkR, historyChipDarkG, historyChipDarkB, 1)
 	}
