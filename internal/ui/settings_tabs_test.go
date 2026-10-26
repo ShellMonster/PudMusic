@@ -247,11 +247,11 @@ func TestTheGeneralTabStoresEachOfItsChoices(t *testing.T) {
 	if got := a.SettingsSnapshot().AudioQuality; got != app.AudioQualityLossless {
 		t.Errorf("音质是 %q，want lossless", got)
 	}
-	// 底下那句说明要跟着换：Biu 就是把当前档位的解释写在这一格下面（`system-
-	// settings.tsx:236-241`）。不跟着换的话「无损到底是什么」还是没地方看。
-	if !tt.HasText("FLAC / Hi-Res") {
-		t.Errorf("换了档位之后说明没跟着换，文字有 %q", tt.Texts())
-	}
+	// ⚠️ **这一格底下没有「跟着档位换」的说明了**（票 #530 删的）：Biu 那边把
+	// 当前档位的解释写在这一格下面（`system-settings.tsx:236-241`），我们曾经
+	// 也跟着画、这条测试也断言过「FLAC / Hi-Res」——那一批说明整块去掉之后，
+	// 这里的断言成了对一句界面上不存在的话的钉子。别再补回来：现在的口径就是
+	// 档位名自己说话（「无损 / 高 / 中 / 低」）。
 
 	// 两个开关。⚠️ 开关没有名字，靠**点它左边的那个小方框**点不到（Tester 的
 	// Click 是找显示着那个字的元素），所以这里走 Find + ClickAt。

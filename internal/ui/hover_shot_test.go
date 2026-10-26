@@ -160,16 +160,14 @@ func hoverCover(t *testing.T, tt *ui.Tester, title string) {
 
 // shotLaterPage 存「稍后再看」那一页的两张：平时（看表头那五列）和 hover 一行。
 //
-// 用的夹具是 `libFake`（内存假 B 站），一个真接口都没打。
+// 走 `libraryShellOpts`（内存假 B 站 + **挂一份登录态**），一个真接口都没打。
+// ⚠️ **不能像这一族别处那样直接 `newTestShell` + `MountLibrary`**：这一页
+// `RequiresLogin`，不挂登录态画的是「先登录」那一支，一个请求都不发——
+// 「稍后再看第一页」就永远等不到（这一条在 main 上红了很久，就是这里）。
 func shotLaterPage(t *testing.T, dir, name string, dark bool) {
 	t.Helper()
 	f := newLibFake(t).withLater(1, 6, "甲曲", "乙曲", "丙曲", "丁曲", "戊曲", "己曲")
-	b := newTestShell(t,
-		systemIsDark(dark),
-		mounted(func(_ *testing.T, a *app.App) { a.MountLibrary(biliForTest(t, f)) }),
-		withClock(newFakeClock(now)))
-	s, tt := b.s, b.tt
-	s.navigate(laterPath)
+	tt, s := libraryShellOpts(t, f, laterPath, systemIsDark(dark))
 	waitFrames(t, tt, "稍后再看第一页", func() bool {
 		return rowsShown(&s.laterPage) == 6
 	})

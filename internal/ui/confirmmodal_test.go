@@ -22,15 +22,6 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// 语义色的字面值（DESIGN.md §四 那一档）。
-//
-// ⚠️ **别用主题里的 `t.Danger`**：主题那一个可能被用户改过，而这里要钉的是
-// **上游那一档**（票 #172 换上去的那个）。
-const (
-	confirmDangerHex  = "#f31260"
-	confirmWarningHex = "#f5a524"
-)
-
 // TestTheConfirmDialogHasAToneColoredWarningIcon 钉住「标题左边有一枚按类型
 // 变色的警告图标」。
 //
@@ -46,6 +37,11 @@ const (
 // 而面板是标题那行字的**父**——父先被遍历，所以 `Find(标题)` 给的是**面板**
 // 那个框（`Texts()` 里那一次「面板的名字」在「标题字」前面）。
 // 图标在面板的左上角：面板的内边距 `t.Space(5)` 之后的第一样东西。
+//
+// ⚠️ **量的是当前方案给的 Danger，不是上游那个字面值**：这里钉的是「图标跟着
+// 类型走」，不是「图标是某一个红」。曾经的写法把上游经典的 #f31260 钉死在这
+// 里，默认方案换成暖纸（Danger 是它自己的 #C93B3B）之后图标没变、钉的字面值
+// 过期了——跟着主题断言，换方案这案件就不会再发。
 func TestTheConfirmDialogHasAToneColoredWarningIcon(t *testing.T) {
 	_, s, tt := collectionShell(t, "12345",
 		mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
@@ -57,14 +53,16 @@ func TestTheConfirmDialogHasAToneColoredWarningIcon(t *testing.T) {
 		t.Fatalf("确认框没画出来（找不到标题），文字有 %q", tt.Texts())
 	}
 	// 面板的内边距（`coreModal` 那一套：`t.Space(5)`）。
-	pad := BuildTheme(app.DefaultSettings(""), false).Space(5)
+	th := BuildTheme(app.DefaultSettings(""), false)
+	pad := th.Space(5)
+	danger := color.RGBA{R: th.Danger.R, G: th.Danger.G, B: th.Danger.B, A: th.Danger.A}
 	icon := ui.Rect{
 		X: panel.X + pad, Y: panel.Y + pad,
 		W: confirmIconSize, H: confirmIconSize,
 	}
-	if n := countTonePixels(t, tt, icon, hexColor(t, confirmDangerHex)); n < 3 {
-		t.Errorf("标题左边只有 %d 块接近 %s 的像素，want ≥3——那枚警告图标不在（或者不是红的）",
-			n, confirmDangerHex)
+	if n := countTonePixels(t, tt, icon, danger); n < 3 {
+		t.Errorf("标题左边只有 %d 块接近 %v 的像素，want ≥3——那枚警告图标不在（或者不是红的）",
+			n, th.Danger)
 	}
 }
 
@@ -107,12 +105,18 @@ func TestTheConfirmDialogHasANameInTheAccessibilityTree(t *testing.T) {
 // ⚠️ **取的是按钮左边那一小块，不是中心**：按钮上写着字，而中心正落在字上
 // （主色按钮上的字是白的）——量中心量到的是**字**，不是底。
 func TestTheConfirmButtonTakesTheToneColor(t *testing.T) {
+	// 危险 / 警告两档量的是**当前方案**的语义色（和上面那枚图标同一条口径）：
+	// 默认方案是暖纸，Danger / Warning 是它自己的那两个值。
+	th := BuildTheme(app.DefaultSettings(""), false)
+	danger := color.RGBA{R: th.Danger.R, G: th.Danger.G, B: th.Danger.B, A: th.Danger.A}
+	warning := color.RGBA{R: th.Warning.R, G: th.Warning.G, B: th.Warning.B, A: th.Warning.A}
+
 	t.Run("危险", func(t *testing.T) {
 		_, s, tt := collectionShell(t, "12345",
 			mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
 		waitSongs(t, tt, s, 3)
 		openBatchConfirm(t, tt, "批量删除")
-		assertConfirmButton(t, tt, "确认删除", hexColor(t, confirmDangerHex))
+		assertConfirmButton(t, tt, "确认删除", danger)
 	})
 
 	t.Run("警告", func(t *testing.T) {
@@ -121,7 +125,7 @@ func TestTheConfirmButtonTakesTheToneColor(t *testing.T) {
 		if err := chooseMore(t, tt, "清除失效内容"); err != nil {
 			t.Fatal(err)
 		}
-		assertConfirmButton(t, tt, "确认清除", hexColor(t, confirmWarningHex))
+		assertConfirmButton(t, tt, "确认清除", warning)
 	})
 
 	t.Run("普通", func(t *testing.T) {
@@ -132,8 +136,8 @@ func TestTheConfirmButtonTakesTheToneColor(t *testing.T) {
 		if err := chooseMore(t, tt, "从侧栏移除"); err != nil {
 			t.Fatal(err)
 		}
-		// 主色那一档跟着用户挑的那一档走（默认设置是 Biu 的绿）。
-		accent := BuildTheme(app.DefaultSettings(""), false).Accent
+		// 主色那一档跟着当前方案走（默认是暖纸的主色）。
+		accent := th.Accent
 		assertConfirmButton(t, tt, "确认移除", color.RGBA{
 			R: accent.R, G: accent.G, B: accent.B, A: accent.A,
 		})
