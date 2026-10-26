@@ -58,6 +58,14 @@ var recentNotLoggedIn = emptyState{
 	Icon:  iconEmptyLogin,
 }
 
+// recentEmpty 是首页「最近播放」那一档登录了、但账号里一条观看记录都没有时说的话。
+// 它和没登录是两件事：这里的下一步是回到推荐去听点什么。
+var recentEmpty = emptyState{
+	Title: "还没有最近播放",
+	Hint:  "听过的歌会按时间出现在这里",
+	Icon:  iconEmptyHistory,
+}
+
 // viewNeedsLogin 画「这一页要登录才有内容」那一支。
 //
 // ⚠️ **它不是空状态那一套**：标题是**页标题那个字号**（`scale.PageTitle`，24）

@@ -108,6 +108,12 @@ const homePopTab = 2
 // 播放量，所以那一列不画。
 const homeRecentTab = 5
 
+// homeHotTab / homeOriginalTab 是两张榜的下标：序号那一列在这两档上是名次。
+const (
+	homeHotTab      = 3
+	homeOriginalTab = 4
+)
+
 // homeSongs 是首页这一屏要画的两摊歌。
 //
 // ⚠️ **它是「外面塞进来的一批歌」的格式，不是这一屏此刻的状态**：真正在画面上
@@ -207,7 +213,7 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 		// ⚠️ **投稿时间不画**：上游首页自己就是 `hidePubTime`
 		// （`pages/music-recommend/list.tsx:49` 与 `:60`），而它那一层的
 		// `RecommendItem` 也没把 `pubdate` 带上来——照它。
-		l.SetColumns(list.Columns{PlayCount: i != homeRecentTab})
+		l.SetColumns(list.Columns{PlayCount: i != homeRecentTab, Rank: i == homeHotTab || i == homeOriginalTab})
 		// 「没有更多了」那一行（票 #370 的验收第 2 条）：别的页到底了就是到底了，
 		// 而这一屏要说得清——不然用户只看到列表停在半截。
 		l.SetEndView(homeEndRow)
@@ -504,6 +510,10 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// 返回了空的那一档，这一格就是屏幕上唯一的东西。
 		e := lookup(homePath).Empty
 		e.Action = &emptyAction{Label: "打开文件", Do: s.pickAndEnqueue}
+		if tab == homeRecentTab {
+			e = recentEmpty
+			e.Action = &emptyAction{Label: "去听推荐", Do: func() { h.tab = 0 }}
+		}
 		h.viewPopTop(c, tab)
 		s.viewEmpty(c, "home:empty", e)
 	default:

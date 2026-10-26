@@ -5,6 +5,7 @@ package ui
 // 没登录时最近播放不发请求而是「去登录」。全部走假 B 站，不碰真账号。
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -77,6 +78,31 @@ func TestRecentPlaysAsksToLogInAndSendsNothingWhenLoggedOut(t *testing.T) {
 	waitFramesClock(t, tt, "去登录那一支", func() bool { return showsText(tt, "去登录") })
 	if b.hit(uiHomeHistory) {
 		t.Error("没登录却去拉了历史记录")
+	}
+}
+
+func TestRecentPlaysWithNoHistoryHasItsOwnEmptyState(t *testing.T) {
+	b := homeDiscoverFake(t)
+	store := app.NewMemoryStore("home-test")
+	if err := store.Save(context.Background(), app.Session{SESSDATA: "sess", DedeUserID: "42"}); err != nil {
+		t.Fatal(err)
+	}
+	sh := newTestShell(t, at(homeW, homeH), mounted(func(_ *testing.T, a *app.App) {
+		transport := &app.CredentialTransport{Base: b.Server.Client().Transport, Policy: app.DefaultInjectPolicy()}
+		cli := bili.NewClient(bili.Options{Transport: transport})
+		cli.TestOnlyPointHostsAtFixture(b.URL)
+		a.MountLogin(store, cli)
+		a.MountRecommend(cli)
+	}))
+	tt := sh.tt
+	waitFrames(t, tt, "第一档", func() bool { return showsText(tt, "音乐 推的第一首") })
+
+	if err := tt.Click(homeTabs[homeRecentTab]); err != nil {
+		t.Fatalf("点不到最近播放：%v，文字有 %q", err, tt.Texts())
+	}
+	waitFramesClock(t, tt, "最近播放的空状态", func() bool { return showsText(tt, recentEmpty.Title) })
+	if !showsText(tt, "去听推荐") {
+		t.Errorf("最近播放空了却没有「去听推荐」那一步：%q", tt.Texts())
 	}
 }
 
