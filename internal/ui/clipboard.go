@@ -74,12 +74,20 @@ const copyNoCoverNote = "这一首没有封面，复制不了"
 // 读屏会把两个名字都念一遍——用户听到的是「当前封面，当前封面的操作」。
 const copyCoverActionsLabel = "当前封面的操作"
 
-// copyGeneration 是「用户到这一刻为止一共按过几次复制」。
+// copyAction 是**一次复制动作**：它拿到的号，和把它的内容写进剪贴板的那一下。
+type copyAction struct {
+	// gen 是这次动作的号（见 `copyClipboard.next`）。
+	gen uint64
+	// write 把这一档的内容写进剪贴板（接缝那一下）。
+	write func() error
+}
+
+// copyClipboard 是「复制」这一族**全进程一份**的状态。
 //
 // # 它挡的是什么
 //
 // 「复制封面」那一趟要下网络 + 解一张图 + 编一张 PNG，全在**后台 goroutine**
-// 上（主线程做会冻住界面）。而那个后台完成的时候，**用户可能已经又按了别的**：
+// 上。而那个后台跑完的时候，**用户可能已经又按了别的**：
 //
 //	10:00:00  按「复制封面」（封面 A 在慢速网络上，要 3 秒）
 //	10:00:01  按「复制歌曲信息」（一瞬间就写完了）
@@ -91,56 +99,123 @@ const copyCoverActionsLabel = "当前封面的操作"
 // 症状是**静默**的：提示弹出来的是「封面已复制」（那一趟确实成功了），
 // 而剪贴板里的东西和用户最后一次的选择对不上，没有任何报错。
 //
-// # 怎么挡
+// # 为什么「写之前比一比号」**不够**
 //
-// **每一次复制动作都拿一个号**（`copyGeneration` 加一），后台那一趟跑完时
-// **比一比自己那个号是不是最新的**：
+// 起初的做法是「写之前比一比自己那个号是不是最新的」——而**那漏了一种交错**：
+// 「比」和「写」是**两件事**，中间夹着一次真正写剪贴板（要走主线程，可能
+// 慢）。于是这一种漏了过去：
 //
-//   - **不是最新的**（用户后来又按了别的）→ **不写剪贴板**（也不弹「已复制」）：
-//     用户要的是最后一次那一份；
-//   - **是最新的** → 写进去。
+//	10:00:00  按「复制封面」
+//	10:00:01  封面那一趟**比过了**（它当时确实是最新的一趟），开始写
+//	10:00:02  按「复制歌曲信息」——写完了，剪贴板里是那段文字
+//	10:00:03  封面那一趟的写**落地**——剪贴板里又变成那张旧封面
 //
-// ⚠️ **「不写」而不是「写完再改回来」**：写进去再改回来，中间那一瞬间剪贴板里
-// 是过时的内容，而别的应用可能正好在读它。
+// 用户最后按的是文字，而剪贴板里是图。**「比过了」不等于「写进去的时候
+// 仍然是那一档」**——中间还有一次真正的写。
+//
+// # 怎么挡：**写之前比一比 + 写之后收敛**
+//
+// **写之前**比一比号（`isLatest`）：**不是最新的一趟什么都不写**——剪贴板里
+// **压根不出现**过时的东西（这是大多数情形：旧封面还在下网络，文本早就写完了）。
+//
+// 而**写之后**还要再比一次——因为「写」和「比」之间夹着一次真正的写（要走
+// 主线程，可能慢），而那一次里用户可能又按了别的。所以这里多记一样东西：
+// **剪贴板里现在是什么**（`committed`，连着写下它那一档的号）。每一趟写完
+// 之后**比一比**：
+//
+//   - 自己那一趟的号 **≥** 剪贴板里那一档的号 → 我写的这一份就是最新的 →
+//     记下来，收工；
+//   - **小于** → 有一档**更新的**内容在我写之前就已经写进剪贴板了，而我这一趟
+//     **把它盖掉了** → **把那一档再写回去**（然后再比一次）。
+//
+// ⚠️ **「盖掉了就写回去」**：盖掉的那一刻已经过去了，而剪贴板是**一个全局的
+// 格子**——别的应用可能正好在读它。要让**最后**留在剪贴板里的一定是用户最后
+// 按的那一份，只能这样收敛。
+//
+// ⚠️ **收敛留着一小段「过时内容在剪贴板里」的窗口**（盖掉的那一下到写回去
+// 的那一下之间）：**握着锁写是走不通的**——框架那一档要走主线程并**等**它
+// （`mygo.Clipboard.Write` → `onMain`），而主线程可能正在按「复制歌曲信息」
+// 并**等同一把锁**，那就是死锁。所以这里**不握着锁写**，改用收敛。
 //
 // ⚠️ **文本那一档也要占号**：文本是同步写的（不等网络），但它**照样要作废
 // 前面那一趟封面**——否则「先按封面（慢）、再按文本」最后留着的还是那张图。
 // 而「先按文本（快）、再按封面（慢）」是对的：封面是**最后**按的那一个，
 // 它跑完之后写进去，正是用户要的。
-type copyGeneration struct {
+type copyClipboard struct {
 	mu sync.Mutex
-	// gen 是最后一次复制动作的号。
+	// gen 是用户到这一刻为止一共按过几次复制。
 	gen uint64
+	// committed 是「剪贴板里现在是什么」：那一档，和写下它的那次动作的号。
+	//
+	// ⚠️ **零值是「还没有复制过」**（号 0）：于是第一次写的那一趟（号 ≥ 1）
+	// 一定赢——而它也确实该赢（剪贴板里本来就是空的）。
+	committed copyAction
 }
 
-// copyGen 是**全进程一份**的代次计数器。
+// copyClip 是**全进程一份**的那一份状态。
 //
 // ⚠️ **它必须是包级的，不能每个外壳一份**：剪贴板是**整个系统只有一份**，
 // 而主窗口和迷你播放器是**两个外壳**——两边都发起复制的话，两个各自计数
 // 的号互不相识，于是「迷你窗发起的封面（慢）、主窗发起的文本（快）」这一趟
-// 不会被作废，剪贴板最后留着的仍然是**过时的那一个**。
+// 不会把迷你窗那一趟作废掉。
 //
 // ⚠️ **不是每个测试一份**：这一份是**全局状态**，而测试要能断言「这一趟被
 // 作废了」——所以测试靠**号本身**（而不是全局的当前值）来断，见
-// `copyGeneration.isCurrent`。
-var copyGen copyGeneration
+// `copyClipboard.isLatest`。
+var copyClip copyClipboard
 
 // next 发一个新的号，并作废前面所有的号。
-func (g *copyGeneration) next() uint64 {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.gen++
-	return g.gen
+func (c *copyClipboard) next() uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.gen++
+	return c.gen
 }
 
-// isCurrent 报 gen 还是不是**最新**的那一个。
+// isLatest 报 gen 还是不是**最新**的那一个。
 //
 // ⚠️ **比的是「有没有人后来又按了一次」**，不是「是不是我发的那个」——
 // 两者在只有一个动作时一样，在两个动作时不同，而这正是要挡的那一种。
-func (g *copyGeneration) isCurrent(gen uint64) bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return gen == g.gen
+func (c *copyClipboard) isLatest(gen uint64) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return gen == c.gen
+}
+
+// commit 把这一档写进剪贴板，并且**保证最后留在剪贴板里的是用户最后按的那一份**。
+//
+// 它报「**该不该说「已复制」**」——不是的话这一趟**什么也不说**（用户后来
+// 按了别的，那一档会自己说；这一趟说了就是骗人）。
+//
+// ⚠️ **写的时候不握着那把锁**（理由见类型注释里那一条「不会死锁」）。
+func (c *copyClipboard) commit(a copyAction) (bool, error) {
+	// ⚠️ **写之前先比一次**：不是最新的一趟**什么都不写**——剪贴板里压根不
+	// 出现过时的内容（这是大多数情形：旧封面还在下网络，而文本早就写完了）。
+	if !c.isLatest(a.gen) {
+		return false, nil
+	}
+	for {
+		err := a.write()
+		c.mu.Lock()
+		if err != nil {
+			// 没写进去 → 剪贴板里还是原来那份 → 不用收敛。
+			c.mu.Unlock()
+			return false, err
+		}
+		if a.gen >= c.committed.gen {
+			c.committed = a
+			c.mu.Unlock()
+			// ⚠️ **「我这一份现在在剪贴板里」还不够**：用户可能又按了别的
+			// （那一档还没写进去）。那时候说「已复制」是在骗人——它马上就要
+			// 被换掉。而**那一档会自己说**。
+			return c.isLatest(a.gen), nil
+		}
+		// 有一档比我新的，它在我写之前就写进去了，而我把它盖掉了 →
+		// **把它写回去**（然后再比一次）。
+		newer := c.committed
+		c.mu.Unlock()
+		a = newer
+	}
 }
 
 // viewCopyMenu 建当前这一首的「复制」菜单。播放条上那一张封面和满屏里那一张
@@ -261,8 +336,8 @@ func formatSongDuration(d time.Duration) string {
 // 提示，而不是什么都不做。
 func (s *Shell) copySongInfo(st app.State) {
 	// ⚠️ **先占号**：这一档虽然是同步写完的，但它**照样要作废前面那一趟封面**
-	// （「先按封面（慢）、再按文本」最后留着的必须是那段文字，见 `copyGeneration`）。
-	gen := copyGen.next()
+	// （「先按封面（慢）、再按文本」最后留着的必须是那段文字，见 `copyClipboard`）。
+	gen := copyClip.next()
 	text := songInfoText(st)
 	if text == "" {
 		s.addToast("这一首没有可复制的信息", notice.Warning)
@@ -272,14 +347,19 @@ func (s *Shell) copySongInfo(st app.State) {
 	if write == nil {
 		write = systemWriteClipboardText
 	}
-	// ⚠️ **写之前再看一眼号**：这一档是同步的，理论上不会有别人插进来，
-	// 但**写剪贴板本身可能花时间**（框架那一档要走主线程），而用户在
-	// 那段时间里按了「复制封面」是可能的——那时候这一段就该让位。
-	if !copyGen.isCurrent(gen) {
+	// ⚠️ **走 `commit` 而不是「比一比再写」**：这一档是同步的，但**写剪贴板
+	// 本身要走到主线程**（框架那一档），而用户在那段时间里按了「复制封面」
+	// 是可能的——「比过了」不等于「写进去的时候仍然是这一档」（见
+	// `copyClipboard` 的注释）。
+	mine, err := copyClip.commit(copyAction{gen: gen, write: func() error {
+		return write(text)
+	}})
+	if err != nil {
+		s.addToast("复制不了歌曲信息："+err.Error(), notice.Danger)
 		return
 	}
-	if err := write(text); err != nil {
-		s.addToast("复制不了歌曲信息："+err.Error(), notice.Danger)
+	// ⚠️ **不是我这一份就不说「已复制」**：用户后来按了别的，那一档会自己说。
+	if !mine {
 		return
 	}
 	s.addToast("歌曲信息已复制", notice.Success)
@@ -308,7 +388,7 @@ func (s *Shell) copyCover(st app.State) {
 	// 但反过来「先按文本、再按封面」要是占晚了，就会把**用户最后按的那一次**
 	// 作废掉（文本那一趟已经写完了，而封面这一趟被自己作废）——剪贴板里留着
 	// 的是文本，而用户最后按的是封面。所以号必须在**动作开始的那一刻**发。
-	gen := copyGen.next()
+	gen := copyClip.next()
 	url := st.CoverURL
 	go s.copyCoverInBackground(url, gen)
 }
@@ -316,7 +396,7 @@ func (s *Shell) copyCover(st app.State) {
 // copyCoverInBackground 是「复制封面」的后台那一半。
 //
 // ⚠️ **gen 是这一趟自己的号**：跑完时要比一比它还是不是最新的（见
-// `copyGeneration`）。不是最新就**什么都不写**——用户后来按的那一次才是
+// `copyClipboard`）。不是最新就**什么都不写**——用户后来按的那一次才是
 // 他要的。
 func (s *Shell) copyCoverInBackground(url string, gen uint64) {
 	// ⚠️ **收尾那一句话在最后**：这一趟可能什么都没写（被后来的动作作废了），
@@ -330,7 +410,7 @@ func (s *Shell) copyCoverInBackground(url string, gen uint64) {
 	if err != nil {
 		// ⚠️ **只有还是最新的那一趟才说话**：过时的失败不用吵用户——
 		// 用户后来已经按了别的，他要的是那一个的结果。
-		if copyGen.isCurrent(gen) {
+		if copyClip.isLatest(gen) {
 			s.addToast("复制不了封面："+err.Error(), notice.Danger)
 			s.wake.invalidate()
 		}
@@ -340,19 +420,25 @@ func (s *Shell) copyCoverInBackground(url string, gen uint64) {
 	if write == nil {
 		write = systemWriteClipboardImage
 	}
-	// ⚠️ **写之前再看一眼号**：这一段是整趟里最贵的一步（编一张 PNG），
-	// 而它在后台跑着——用户完全可能在它跑的时候又按了一次。
-	//
-	// ⚠️ **过时的那一趟不叫醒界面**：它什么也没写、什么也没说，画面上
-	// 没有变化——叫醒只是白画一帧。
-	if !copyGen.isCurrent(gen) {
-		return
-	}
-	if err := write(data); err != nil {
-		if copyGen.isCurrent(gen) {
+	// ⚠️ **走 `commit`**：这一段是整趟里最贵的一步（编一张 PNG），而它在
+	// 后台跑着——用户完全可能在它跑的时候又按了一次。
+	// 而「比过了号」**不等于**「写进去的时候仍然是这一档」：中间还夹着一次
+	// 真正的写（要走主线程，可能慢），而那一次里用户可能又按了文本——
+	// 那样的话旧封面会盖掉那段文字（见 `copyClipboard` 的注释）。
+	mine, err := copyClip.commit(copyAction{gen: gen, write: func() error {
+		return write(data)
+	}})
+	if err != nil {
+		if copyClip.isLatest(gen) {
 			s.addToast("复制不了封面："+err.Error(), notice.Danger)
 			s.wake.invalidate()
 		}
+		return
+	}
+	// ⚠️ **不是我这一份就不说「已复制」**：用户后来按了别的，那一档会自己说。
+	// 而**过时的那一趟不叫醒界面**：它什么也没说、什么也没改成，画面上
+	// 没有变化——叫醒只是白画一帧。
+	if !mine {
 		return
 	}
 	s.addToast("封面已复制", notice.Success)

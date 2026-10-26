@@ -4109,6 +4109,9 @@ var Items = []Item{
 			// 可以不一样——先发起的封面那一趟**不许覆盖**后来的复制内容。
 			"TestTheLastCopyActionWinsOverAnEarlierCover",
 			"TestAnEarlierCoverDoesNotOverwriteALaterCover",
+			// **连「已经进了写剪贴板那一步」的旧封面也不许赢**：比号和写是
+			// 两件事，中间夹着一次真正的写——那一段里用户可能又按了文本。
+			"TestACoverAlreadyInsideTheWriteDoesNotWinOverALaterText",
 			// 键盘：Tab 走到封面上，菜单键能开出这一份菜单。
 			"TestTheMenuKeyOpensTheCopyMenuOnTheCover",
 		},

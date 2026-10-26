@@ -28,6 +28,7 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -147,6 +148,44 @@ func clipKind(clip *clipStub) (isImage bool, width int) {
 		return true, -1
 	}
 	return true, img.Bounds().Dx()
+}
+
+// clipSlot 是**一个格子**的剪贴板：后来的覆盖先来的。
+//
+// ⚠️ **为什么不用 `clipStub` 那一套**：`clipStub` 把文本和图**分开记**
+// （`text` 和 `image` 两个字段），所以「图把文本盖掉了」这件事在它那儿
+// **看不出来**——两个字段各自都还在。而**真的剪贴板是一个格子**：
+// 写进去什么，剪贴板里就是什么，后来的覆盖先来的。
+//
+// ⚠️ **它记下写的顺序**：判据要看的不只是「最后是什么」，还有「写了几次、
+// 什么顺序」——收敛那一档会**把新的一份再写一遍**（见 `copyClipboard.commit`），
+// 所以顺序是 `[text cover text]` 而最后是 `text`。
+type clipSlot struct {
+	mu    sync.Mutex
+	value string
+	order []string
+}
+
+// write 往格子里写一样东西（后来的覆盖先来的）。
+func (c *clipSlot) write(what string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.value = what
+	c.order = append(c.order, what)
+}
+
+// is 报格子里现在是什么。
+func (c *clipSlot) is() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.value
+}
+
+// writes 报写的顺序（**照抄一份**，免得调用方在锁外看）。
+func (c *clipSlot) writes() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.order)
 }
 
 // ---- 用例 ----
@@ -275,5 +314,91 @@ func TestAnEarlierCoverDoesNotOverwriteALaterCover(t *testing.T) {
 	}
 	if w != 60 {
 		t.Errorf("剪贴板里最后是 %d 宽的那一张，want 60（后按的那一次赢）", w)
+	}
+}
+
+// TestACoverAlreadyInsideTheWriteDoesNotWinOverALaterText 断**「已经进了写剪贴板
+// 那一步」的旧封面不会盖掉后来那一段文字**。
+//
+// ⚠️ **这一条量的是另外两条量不到的那个缝隙**：前两条里，旧封面那一趟
+// **整个被作废了**（它在**写之前**就发现号过时了，于是什么都没写）。
+// 而这一条是**另一种交错**——旧封面那一趟**已经通过了那个检查、已经进了写
+// 剪贴板那一步**，而那一步**还没落地**：
+//
+//	10:00:00  按「复制封面」
+//	10:00:01  旧封面通过了检查，进了写剪贴板那一步（**卡着**：那一步要走到
+//	          主线程，可能慢）
+//	10:00:02  按「复制歌曲信息」——**写完了**，剪贴板里是那段文字
+//	10:00:03  旧封面的那一步**落地**——剪贴板里又变成那张旧封面
+//
+// 用户最后按的是文字，而剪贴板里是图。**「比过了号」不等于「写进去的时候
+// 仍然是那一档」**——中间还夹着一次真正的写（这正是评审指出来的那一处）。
+//
+// ⚠️ **判据是「一个格子」**：真的剪贴板是**一个**格子（后来的覆盖先来的），
+// 而 `clipStub` 把文本和图**分开记**，所以「图把文本盖掉了」在它那儿
+// **看不出来**——两个字段各自都还在。这一条用的是 `clipSlot`（一个格子 +
+// 写的顺序）。
+func TestACoverAlreadyInsideTheWriteDoesNotWinOverALaterText(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(headerPNG(t, 8))
+	}))
+	defer srv.Close()
+
+	sh, tt, clip := copyShell(t, app.State{
+		HasTrack: true, Title: "一首歌", CoverURL: srv.URL + "/cover.png",
+	})
+
+	slot := &clipSlot{}
+	// ⚠️ **旧封面的那一步卡住**：模拟「那一步还没落地」的那一刻。
+	arrived := make(chan struct{})
+	release := make(chan struct{})
+	var once bool
+	sh.writeClipboardImage = func(data []byte) error {
+		if !once {
+			once = true
+			close(arrived)
+		}
+		<-release
+		slot.write("cover")
+		return clip.writeImage(data)
+	}
+	sh.writeClipboardText = func(text string) error {
+		slot.write("text")
+		return clip.writeText(text)
+	}
+
+	// 第一次：复制封面（卡在写剪贴板那一步）。
+	if err := tt.RightClick("当前封面"); err != nil {
+		t.Fatalf("右键不了封面：%v", err)
+	}
+	if err := tt.ChooseMenuItem(copyCoverLabel); err != nil {
+		t.Fatalf("选不了 %q：%v", copyCoverLabel, err)
+	}
+	select {
+	case <-arrived:
+	case <-time.After(10 * time.Second):
+		t.Fatal("旧封面那一趟没进写剪贴板那一步")
+	}
+
+	// 第二次：复制歌曲信息（这一趟**写完了**）。
+	if err := tt.RightClick("当前封面"); err != nil {
+		t.Fatalf("右键不了封面：%v", err)
+	}
+	if err := tt.ChooseMenuItem(copyInfoLabel); err != nil {
+		t.Fatalf("选不了 %q：%v", copyInfoLabel, err)
+	}
+	if got := slot.is(); got != "text" {
+		t.Fatalf("复制歌曲信息之后剪贴板里是 %q，want \"text\"", got)
+	}
+
+	// 放行旧封面那一步（它现在才落地——**盖掉**了刚才那段文字）。
+	close(release)
+	clip.waitDone(t, 10*time.Second)
+
+	// ⚠️ **判据是「最后留在剪贴板里的是哪一份」**：用户最后按的是文字，
+	// 所以最后必须是文字。
+	if got := slot.is(); got != "text" {
+		t.Errorf("剪贴板里最后是 %q，want \"text\"（用户最后按的是歌曲信息）"+
+			"——写的顺序：%v", got, slot.writes())
 	}
 }
