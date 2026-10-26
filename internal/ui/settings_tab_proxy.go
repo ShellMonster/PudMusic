@@ -1,18 +1,18 @@
 // 设置页的第四个 Tab：代理。照 Biu 的 `src/pages/settings/proxy-settings.tsx`。
 //
-// ## 四种协议，不是两种
+// ## 五档，不是四档
 //
 // Biu 那一页的类型下拉有四档（`PROXY_TYPE_OPTIONS`，`:10-15`）：不使用 / HTTP /
-// SOCKS4 / SOCKS5，值和 `app.ProxyType` 一字不差。Biu 自己没给 HTTPS 一档，我们
-// 也不加——`app.ProxyType` 里没有它，而**不新造键值**是这一页的第一条规矩
-// （见 `internal/app/settings.go` 的文件头）。HTTPS 走的是 HTTP 那一档：Go 的
-// 代理拨号对 `http://` 和 `https://` 的处理本来就是同一条路。
+// SOCKS4 / SOCKS5。我们多一个 HTTPS 档——`app.ProxyType` 的注释讲了为什么这不算
+// 破「不新造键值」的规矩（键一个没动，多的是一个**值**，两边都读得懂）。这一格
+// 真的有消费者：网络层每条请求都按它走（`internal/app/proxy.go`），SOCKS4 由
+// 那边的隧道拨号接住。
 //
 // ## 密码只有三档才有
 //
 // 照 Biu 的 `showPassword = type === "http" || type === "socks5"`（`:39`），
-// 外加新加的 HTTPS——三者都带用户名密码那一段。SOCKS4 和 SOCKS 协议里本来就没有
-// 「用户名密码」这一段，填了也没有地方去。
+// 外加 HTTPS——三者都带用户名密码那一段。SOCKS4 协议里只有 USERID 没有密码
+// （USERID 落在用户名那一格），填了密码也没有地方去。
 package ui
 
 import (

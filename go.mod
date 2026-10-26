@@ -9,6 +9,7 @@ require (
 	github.com/mewkiz/flac v1.0.14
 	github.com/tphakala/go-m4a v0.8.0
 	golang.org/x/image v0.46.0
+	golang.org/x/net v0.59.0
 )
 
 require (
@@ -18,7 +19,6 @@ require (
 	github.com/jfreymuth/vorbis v1.0.2 // indirect
 	github.com/mewkiz/pkg v0.0.0-20250417130911-3f050ff8c56d // indirect
 	github.com/mewpkg/term v0.0.0-20241026122259-37a80af23985 // indirect
-	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 )
 
