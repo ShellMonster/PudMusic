@@ -350,7 +350,7 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 			// 那才是「从窗口右边挪进来」能用的那一套。
 			panel := shadow.HeroMedium(ui.Column(c).Key("queue-drawer").
 				Absolute().Top(0).Bottom(0).Width(queueDrawerWidth).
-				Background(t.Background).BorderStartWidth(1).BorderColor(t.Border), t)
+				Background(s.cardBackground(t)).BorderStartWidth(1).BorderColor(t.Border), t)
 			// ⚠️ **面板在退场时照旧接点击**：它还在屏幕上（滑出去那一段看得见），
 			// 而「看不见的东西吃点击」才是坏的（那是底下那片蒙版，见上面）。
 			// 面板看得见，所以点它就是点它。

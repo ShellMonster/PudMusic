@@ -419,8 +419,8 @@ func (d *downloadsPage) viewTable(c *ui.Context, s *Shell) {
 	// （那里是唯一一份）。
 	//
 	// ⚠️ **底色是 #172 那一票定的**（`t.Background`），影是 #179 的——两件事分开。
-	card := shadow.HeroSmall(ui.Column(c).Grow(1).FillWidth().Radius(t.Radius).
-		Background(t.Background).Padding(t.Space(4)), t)
+	card := shadow.HeroSmall(ui.Column(c).Grow(1).FillWidth().Radius(s.cardRadius(t)).
+		Background(s.cardBackground(t)).Padding(t.Space(4)), t)
 	card.Children(func() {
 		// ⚠️ **筛选排在卡片里面**（理由见上面那段）：原来它在卡片外面，于是
 		// 「全部 / 音频 / 视频」那一排和它下面那张卡看着是两块不相干的东西。

@@ -3,6 +3,7 @@ package ui
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
@@ -335,6 +336,7 @@ func luminanceOf(c mygoui.Color) float32 {
 // 这条再往下一层：读渲染结果的像素。
 func TestThemeReachesThePixels(t *testing.T) {
 	s := app.DefaultSettings("")
+	s.ThemePreset = app.ThemePresetClassic
 	s.BackgroundColor = "#336699"
 
 	tt := mygoui.NewTester(func(c *mygoui.Context) {
@@ -456,5 +458,39 @@ func TestShellFramesCarryTheTheme(t *testing.T) {
 	tt.Frame()
 	if !got.dark {
 		t.Error("错误页没有带上设置里的深色主题")
+	}
+}
+
+// TestTheScheduleModeIsDarkAtNightAndLightByDay 验「定时」档：晚上深色、白天浅色，不看系统。
+func TestTheScheduleModeIsDarkAtNightAndLightByDay(t *testing.T) {
+	defer func(f func() time.Time) { themeNow = f }(themeNow)
+	st := app.DefaultSettings("")
+	st.ThemeMode = app.ThemeModeSchedule
+	for hour, want := range map[int]bool{0: true, 6: true, 7: false, 12: false, 18: false, 19: true, 23: true} {
+		themeNow = func() time.Time { return time.Date(2026, 1, 1, hour, 30, 0, 0, time.Local) }
+		for _, sys := range []bool{false, true} {
+			if got := effectiveDark(st, sys); got != want {
+				t.Errorf("%d 点（系统深色=%v）：深色=%v，want %v", hour, sys, got, want)
+			}
+		}
+	}
+}
+
+// TestTheCoverHueOnlyTurnsTheAccentWhenTheSwitchIsOn 验封面取色：开着才换主色，关着取到了也不动；深浅主题下亮度不同。
+func TestTheCoverHueOnlyTurnsTheAccentWhenTheSwitchIsOn(t *testing.T) {
+	st := app.DefaultSettings("")
+	base := BuildTheme(st, false).Accent
+	st.CoverHue, st.CoverSat = 200, 0.8
+	if got := BuildTheme(st, false).Accent; got != base {
+		t.Fatalf("开关关着，主色却变了：%v → %v", base, got)
+	}
+	st.CoverAccent = true
+	light, dark := BuildTheme(st, false).Accent, BuildTheme(st, true).Accent
+	if light == base || light == dark {
+		t.Errorf("开着之后浅色主色 %v（原 %v）、深色主色 %v，应该都变了且深浅不同", light, base, dark)
+	}
+	st.CoverSat = 0
+	if got := BuildTheme(st, false).Accent; got != base {
+		t.Errorf("没取到颜色时主色 %v，want 原来的 %v", got, base)
 	}
 }

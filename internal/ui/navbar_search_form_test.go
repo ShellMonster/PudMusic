@@ -156,7 +156,12 @@ func TestSearchHistoryIsAGreyChip(t *testing.T) {
 			}
 			// HeroUI 那套 default 色阶是锌灰，带一点点蓝（深色 #3f3f46 的三个
 			// 通道差 7）；只要不是彩色的，都算这一档的「灰」。
-			if spread := channelSpread(got); spread > 8 {
+			// 暖色方案里的「灰」带一点暖（三个通道差到 ~20），经典才是锌灰。
+			limit := 8
+			if presetActive() {
+				limit = 24
+			}
+			if spread := channelSpread(got); spread > limit {
 				t.Errorf("历史 chip 底色 %v 不是灰的（三个通道差 %d）", got, spread)
 			}
 			if maxDiff(got, panel) < 8 {

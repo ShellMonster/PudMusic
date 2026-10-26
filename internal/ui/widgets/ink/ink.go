@@ -234,9 +234,11 @@ func SemanticOn(t *ui.Theme, c ui.Color) ui.Color {
 func Disabled(t *ui.Theme) ui.Color {
 	const (
 		fade = 0.5 // 框架禁用元素的透明度，见上面的注释
-		want = 3.0
+		want = 3.2 // 比 3 高一点：底色是估的，留余量
 	)
-	bg := t.Background
+	// 字坐在控件的底上，那一块比页面底色再偏向字色一点（选中档的中性灰、卡片层）：
+	// 按页面底色算，暖色方案里字会差一截（2.4~2.9:1）。
+	bg := t.Background.Mix(t.Text, 0.06)
 	shown := func(c ui.Color) ui.Color { return c.Alpha(float32(fade)).Over(bg) }
 	// 方向同样按「合完 50% 之后哪一端更远」选（理由同 `Ensure`）。
 	//
