@@ -322,8 +322,10 @@ issue 的验收标准**（`gh issue edit`，见 `docs/agents/issue-tracker.md`�
    两个都拿到锁：都 Dial 失败 → 都删掉对方的 socket 文件 → 都 Listen 成功）。所以
    `internal/platform` 在它之上还压了一把内核独占锁（`single_instance.go`）。
 8. **图标和第三方许可清单是生成物。** 图标图案在 `platform.AppIcon` 里——图源是
-   它 `go:embed` 的 `internal/platform/icon-source.png`（人工挑定、满幅方图），
-   留白与圆角由代码切；清单从 `go list -deps` 生成。换了图案或依赖却忘了重新
+   它 `go:embed` 的 `internal/platform/icon-source.png`（人工挑定）。**图源有两种**：
+   **满幅方图**（四个角不透明 → 留白与圆角由代码切）或**自带形状**（四个角透明 →
+   形状是图案的一部分，代码原样用）；走哪一条由**代码看源图自己判**，换图不用改代码。
+   清单从 `go list -deps` 生成。换了图案或依赖却忘了重新
    生成，仓库里躺着的是旧文件，而**没有任何一处会报错**。改完跑
    `go generate ./internal/platform/ ./internal/licensing/`；`scripts/build.sh`
    每次打包前都会跑一遍并检查 `git diff`。
