@@ -113,6 +113,13 @@ const (
 	//
 	// 0.5 是一半——用户按了「取消静音」，听到的应该是一半声音，不是 0。
 	DefaultUnmuteVolume = 0.5
+	// DefaultMiniLyricsCurtain 是「迷你播放器点封面展开歌词卷帘」那一格的默认
+	// 值。**默认开**（票 #536，2026-10-26 主人定的）。
+	//
+	// ⚠️ **它是 true 而不是 false**：主人 2026-10-26 先说「默认关」，后一天
+	// 更正成「默认开」——**以票面为准**（票 #536 的正文写的是「默认开着」）。
+	// 装上就有卷帘这个效果，是这一格存在的意义。
+	DefaultMiniLyricsCurtain = true
 )
 
 // 侧栏宽度的三个数，抄 Biu `src/layout/side/index.tsx:15-17`：
@@ -447,6 +454,23 @@ type Settings struct {
 	// （见 internal/service/audio/normalize.go）。默认关。
 	NormalizeVolume bool `json:"normalizeVolume"`
 
+	// MiniLyricsCurtain 是「迷你播放器点封面展开歌词卷帘」那个开关。**默认开**
+	// （票 #536，2026-10-26 主人定的）。
+	//
+	// ⚠️ **用指针**，和上面那个 `Volume` 同一路数：「这份设置里没有这一格」
+	// （老版本写的文件）和「用户把卷帘关了」必须分得开——前者该给默认的
+	// **开**，后者才是关。
+	//
+	// ⚠️ **为什么不能是 `bool`**：布尔值表达不了「没设过」，而这一格的默认
+	// 恰恰是**开**——用 `bool` 的话，一份老设置文件读出来就是 false（= 关），
+	// 于是「默认开着」这件事对老用户**不成立**（而票面要的是「装上就有
+	// 卷帘」）。这一格是**新增**的键，所以 nil = 没设过 = 默认开。
+	//
+	// ⚠️ **这不是「为老数据写兼容」**（AGENTS.md §5 那条规矩针对的是老外观、
+	// 老目录、老设置值）：这里没有迁移、没有双份格式、没有兜底分支，只是
+	// 「默认」这一档落在哪儿的问题。
+	MiniLyricsCurtain *bool `json:"miniLyricsCurtain"`
+
 	// CoverAccent 是「封面取色」开关：主色跟着当前封面的色相走。默认关。
 	CoverAccent bool `json:"coverAccent"`
 
@@ -522,6 +546,21 @@ var knownSettingsKeys = func() map[string]bool {
 	return m
 }()
 
+// MiniLyricsCurtainOn 报「迷你播放器点封面展开歌词卷帘」那一格是开是关。
+//
+// ⚠️ **nil 算「开」**：这一格的默认是开（票 #536），而 nil 是「这份设置里
+// 没有这一格」——老设置文件读出来就是 nil。界面层问这一格时走这一个方法，
+// 于是「默认开着」这件事只有一处定义（`DefaultMiniLyricsCurtain`）。
+//
+// ⚠️ 正常路径上 `normalize()` 已经把 nil 填成默认了（见 `Settings.normalize`），
+// 而这里再兜一次是因为**零值 `Settings{}`** 也可能出现（界面上手工拼的那几处）。
+func (s Settings) MiniLyricsCurtainOn() bool {
+	if s.MiniLyricsCurtain == nil {
+		return DefaultMiniLyricsCurtain
+	}
+	return *s.MiniLyricsCurtain
+}
+
 // UnmarshalJSON 读一个 Settings：已知的键按结构体读，剩下的存进 extra。
 func (s *Settings) UnmarshalJSON(b []byte) error {
 	// plain 去掉方法的那一份类型，防止 UnmarshalJSON 自己调自己。
@@ -585,6 +624,9 @@ func DefaultSettings(downloadPath string) Settings {
 	// 音量那一格是**指针**，所以每一次调用都要新的一份——共用同一个指针的话，
 	// 有人改了 `*s.Volume` 就把全局的默认值改了。
 	vol := DefaultVolume
+	// 「迷你播放器点封面展开歌词卷帘」那一格同样是**指针**（理由见那个字段的
+	// 注释），而它**默认是开的**（票 #536）。
+	curtain := DefaultMiniLyricsCurtain
 	return Settings{
 		AutoStart:         false,
 		CloseWindowOption: CloseWindowHide,
@@ -621,6 +663,13 @@ func DefaultSettings(downloadPath string) Settings {
 		// 音量：默认 100%（老版本每一次启动都是这一档，见 DefaultVolume）。
 		Volume: &vol,
 		Muted:  false,
+
+		// 迷你播放器的歌词卷帘：**默认开**（票 #536）。
+		//
+		// ⚠️ 它是**指针**，所以每一次调用都要新的一份——共用同一个指针的话，
+		// 有人改了 `*s.MiniLyricsCurtain` 就把全局的默认值改了（和上面那个
+		// `vol` 同一路数）。
+		MiniLyricsCurtain: &curtain,
 
 		// 「上次听到哪儿」那一格：默认是空的（= 没有上次听到哪儿）。
 		//
@@ -879,6 +928,19 @@ func (s *Settings) normalize() {
 	} else {
 		v := min(max(*s.Volume, 0), 1)
 		s.Volume = &v
+	}
+	// 迷你播放器的歌词卷帘：nil = 这份设置里**没有这一格** = 默认**开**
+	// （票 #536）。
+	//
+	// ⚠️ **默认是开，所以 nil 要给 true 而不是 false**：这一格是新增的键，
+	// 而一份老设置文件读出来它就是 nil——给它 false 的话，「装上就有卷帘」
+	// 这件事对每一个老用户都不成立（而那正是票面要的）。
+	//
+	// ⚠️ **「用户关了」和「没设过」分得开**：前者是 `*ptr == false`，这里原样
+	// 留着；后者是 nil，这里给它默认。
+	if s.MiniLyricsCurtain == nil {
+		v := DefaultMiniLyricsCurtain
+		s.MiniLyricsCurtain = &v
 	}
 	if audio.EQPresetByID(s.EQPreset).ID == "flat" {
 		s.EQPreset = ""

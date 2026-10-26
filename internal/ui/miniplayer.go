@@ -38,6 +38,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	tclean "github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
 	"github.com/egoist/mygo"
@@ -459,6 +460,25 @@ func (s *Shell) attachMiniWindow(w *mygo.Window) {
 	// 话，用户点一下播放键进度条就不再动了（见 presence.go）。
 	s.watchWindow(w)
 
+	// 🔴 **关窗之前先把卷帘收掉**（票 #536）。
+	//
+	// 理由是 `StateKey`：**宽高也记在里面**（`mygo/window_state.go:196` 的
+	// `captureState`），而抓状态是在关窗那一刻（`closeState()`，`window.go`
+	// 的 `destroy` 先调它）。⇒ 展开着的时候直接关窗，落盘的就是「84 + 卷帘
+	// 高」，下次开出来是个 320×(84+236) 的透明大窗——而**那一块透明的地方照样
+	// 吃点击**（这一扇窗是 `Transparent: true`）。
+	//
+	// ⚠️ **钩的是 `OnClose` 而不是 `OnClosed`**：`OnClosed` 跑的时候原生那一边
+	// 已经关掉了（`w.native == nil`），那时候 `SetSize` 不生效（`Window.do`
+	// 里那个 `if w.native != nil`）。`OnClose` 在关窗**之前**跑（`mygo/window.go`
+	// 的 `close()`：先 `fire1(&w.onClose, e)`，再 `w.destroy()`），改尺寸还来得及。
+	w.OnClose(func(e *mygo.CloseEvent) {
+		// ⚠️ **「立刻收起」而不是「滑下去」**：窗马上就要没了，滑下去那 240ms
+		// 是白滑的——而更要紧的是**落盘的尺寸**（`StateKey` 抓的是关窗那一
+		// 刻的宽高）。
+		s.miniCurtainCollapseNow()
+	})
+
 	w.OnClosed(func() {
 		if s.win == w {
 			s.win = nil
@@ -492,6 +512,13 @@ func (s *Shell) attachMiniWindow(w *mygo.Window) {
 // 不画那些页面，而它们要是不收，「进迷你 / 退出迷你」来回十次之后就是十份挂着的
 // goroutine 到进程退出为止。
 func (s *Shell) releaseMini() {
+	// 🔴 **收尾之前把卷帘收掉**（票 #536）：这一扇窗要关了，而
+	// `StateKey` 会在关窗那一刻记下**宽高**——展开着关窗的话，落盘的就是
+	// 「84 + 卷帘高」，下次开出来是个透明大窗。
+	//
+	// ⚠️ **这一句在 `closePerWindow` 之前**：那一句会把 `s.win` 置成 nil
+	// （`Shell.Close` 里 `s.win = nil`），而改窗口尺寸要那扇窗还在。
+	s.miniCurtainCollapseNow()
 	s.closePerWindow()
 }
 
@@ -522,6 +549,22 @@ func (s *Shell) viewMini(c *ui.Context) {
 	st := s.app.Snapshot()
 	t := c.Theme()
 
+	// 🔴 **开关关着的时候，卷帘这一整套压根不该被触发**（票 #536）：设置页
+	// 那一格被用户关掉之后，这一档里点封面**什么也不发生**——不改高度、
+	// 不建卷帘、不留半截窗口。
+	//
+	// 而「展开着的时候把开关关掉 ⇒ **立刻收起**」走的就是这一支：设置改完之后
+	// `App.UpdateSettings` → `a.invalidate()` **挨个叫醒每个窗口**（铁律三），
+	// 这一扇下一帧读到的设置已经是关的 ⇒ 收起。
+	//
+	// ⚠️ **收起是「一下就到位」而不是「滑下去」**：票面写的是「**立刻收起**」
+	// ——用户把开关拨过去，卷帘就该马上不在了。而**滑下去**要 240ms，那 240ms
+	// 里窗还比内容高（透明的那一块在吃点击），而**这一格开关是用户刚刚主动
+	// 关掉的**——他要的是「没有了」，不是「正在收」。
+	if !miniCurtainEnabled(s.app.SettingsSnapshot()) && s.miniCurtain.open {
+		s.miniCurtainCollapseNow()
+	}
+
 	// ⚠️ **底下这一层背景不是装饰**：窗口是透明的（`MiniWindowOptions`），框架
 	// 把帧清成透明，所以这一块不透明底是我们**唯一**的底。不画的话这个窗口在
 	// 桌面上是隐形的。
@@ -542,11 +585,66 @@ func (s *Shell) viewMini(c *ui.Context) {
 	// 页内那些卡片（关注卡、下载表那张、新歌速递那块空状态板）才是「同色靠影」
 	// 那一族，它们已经归一（票 #239）。
 	// 圆角跟着主题走，用户在设置页调圆角时这一块跟着变，和别处一致。
-	ui.Row(c).Key("mini").Fill().Radius(t.Radius).
-		Background(t.Surface).DragWindow().Children(func() {
-		// 里面照样逐块包一层 Guard（铁律四）：崩掉封面那一块不该把控制键一起带走。
-		s.guardAt("迷你播放器封面", func(c *ui.Context) { s.viewMiniCover(c, st) })(c)
-		s.guardAt("迷你播放器控制键", func(c *ui.Context) { s.viewMiniControls(c, st, t) })(c)
+	//
+	// 🔴 **根是「上下两段」，不是一张 `Fill()` 的卡片**（票 #536）：以前整张卡片
+	// `Fill()`，于是窗口一变高，卡片就跟着拉高——卷帘要的是「**上面那张 84 高
+	// 的卡片不动，下面多出一块卷帘**」。所以根是一个 Column，上面那一段钉死
+	// 84（`Height(miniHeight)`），下面那一段是卷帘。
+	// 🔴 **整扇窗是一块面板**：底、圆角、影全挂在**根**这一段上（票 #536）。
+	//
+	// ⚠️ **为什么不能「卡片一块 + 卷帘一块」**：两张各有自己圆角的板拼在
+	// 一起，接缝处会出现**两个相对的圆弧**——卡片的下沿两个角**凹**进去、
+	// 卷帘的上沿两个角**凸**出来，中间那一小块是**空的**。而这一扇窗是
+	// `Transparent: true`，**透明的那一块照样吃点击**（那一小块会拦住底下
+	// 应用的点击）。
+	//   - 视觉审查量过（2026-10-27）：接缝那一行（y=83）左沿是 231/225/215，
+	//     而表面是 241/235/224——**深了 10 个色阶**，那是桌面透出来的地方。
+	//   - 改成「一整块」之后量回来：接缝那几行（y=80..86）左沿和右沿**逐
+	//     像素都是 241/235/224**——**一条缝都没有**。
+	//
+	// ⚠️ **影挂在根上、且只在展开时挂**：影挂在**卷帘**上会正好压在接缝上，
+	// 留下**一道灰痕**（浅色下接缝那一行比表面深 10 个色阶）。挂在根上的
+	// 时候它围着**整块**面板，落在面板**外面**（而不接缝上）。
+	// 而**收起的时候不挂影**——迷你卡片原来就**没有影**（票 #239 的审计记着
+	// 迷你窗那一块是 DESIGN §四 的「有理由的例外」），这一票不该顺手给它
+	// 加一道。
+	//
+	// ⚠️ **根的圆角跟着卷帘走**：展开时是「上面两个角圆、下面两个角方」
+	// （卷帘从卡片底下拉出来，下面是方的），收着时四个角都圆（原来那一版）。
+	//
+	// ⚠️ **根是 `Fill()` 而不是 `FillWidth()`**：迷你窗**故意没给
+	// `DisableResize`**（`MiniWindowOptions` 的那一段），于是用户可以把窗
+	// 往高里拖。根只 `FillWidth()` 的话，窗高大于「84 + 卷帘高」时，
+	// 根底下会空出一块——而这一扇窗是**透明**的，**透明的那一块照样吃点击**
+	//（底下那个应用的按钮就点不到那几十像素）。`Fill()` 让根铺满整扇窗，
+	// 那多出来的一块是**面板自己的底**（不透明，不吃点击的那种空）。
+	panel := ui.Column(c).Key("mini-root").Fill()
+	if s.miniCurtain.height > 0 {
+		panel = panel.Radius(t.Radius, t.Radius, space.None, space.None)
+	} else {
+		panel = panel.Radius(t.Radius)
+	}
+	panel = panel.Background(t.Surface)
+	if s.miniCurtain.height > 0 {
+		panel = shadow.Popover(panel, t)
+	}
+	panel.Children(func() {
+		// ⚠️ **高度那一段推在这里**（而不是 `viewMini` 的开头）：它要建的那个
+		// 「动画值的宿主」元素得是**根的子节点**（框架按「键 + 父」认元素），
+		// 而根是上面那一句建的。
+		//
+		// ⚠️ **它在 `applyFrameTheme` 之后**：收起的那一段会画出来（窗高是动画
+		// 值），而那一段画的是**当前这一帧**的主题——主题先装好，它才对。
+		s.miniCurtainSyncHeight(c)
+		ui.Row(c).Key("mini").FillWidth().Height(miniHeight).
+			DragWindow().Children(func() {
+			// 里面照样逐块包一层 Guard（铁律四）：崩掉封面那一块不该把控制键一起带走。
+			s.guardAt("迷你播放器封面", func(c *ui.Context) { s.viewMiniCover(c, st) })(c)
+			s.guardAt("迷你播放器控制键", func(c *ui.Context) { s.viewMiniControls(c, st, t) })(c)
+		})
+		// 卷帘。⚠️ **高度为 0 的时候一个字都不画**（`viewMiniCurtain` 那一支）——
+		// 窗高已经回到 84，而这一段要是还画着，窗就比内容矮。
+		s.viewMiniCurtain(c, st, t, s.miniCurtain.height)
 	})
 }
 
@@ -561,16 +659,47 @@ func (s *Shell) viewMini(c *ui.Context) {
 // `Transparent` 那一段）。票 #168 / G10 要的是上游那个 100，票 #357 的重设计
 // 收窄到 72——再早一版是 52×52（列 64），小得看不出是哪首歌。
 //
-// ⚠️ 有封面才画。没歌时 Biu 那边是 `if (!cover) return null`——右边那一列铺满
-// 整窗。一个空框在那儿比没有更让人以为图加载坏了。
+// ⚠️ 有封面才画那张图。没歌时 Biu 那边是 `if (!cover) return null`——右边那一列
+// 铺满整窗。一个空框在那儿比没有更让人以为图加载坏了。
+//
+// # 这一列同时是**卷帘的触发器**（票 #536）
+//
+// 点它展开 / 收起歌词卷帘。⚠️ **触发器包住的是整列**，不只是那张图——
+// 没有封面的时候（`st.CoverURL == ""`）**那一列一个字都不画**，于是「点封面」
+// 在没歌的时候压根没有可点的东西。所以「那一列」本身才是触发器。
+//
+// ⚠️ **`Clicked()` 挂在**外层**那个 `Box` 上**：框架的命中链是**从最里层往外**
+// 排的（`mygo/ui/input.go:144` 的 `appendHitChain`），而点击落在链上**第一个
+// interactive 的**那个元素上——也就是最里层那个。所以触发器要挂在**包住封面
+// 的那一层**，而不是封面自己。
+//
+// ⚠️ **不额外包一层按钮**：多包一层就多一层命中链，而点击落在**最里层**那个
+// interactive 的元素上——包的那一层反而收不到点击。
 func (s *Shell) viewMiniCover(c *ui.Context, st app.State) {
-	if st.CoverURL == "" {
-		return
+	trigger := ui.Box(c).Key(miniCurtainCoverKey).
+		Width(miniCoverCol).Height(miniHeight).
+		// ⚠️ **这一圈内边距是卡片内边距**（`miniPad` 6）：封面是 72×72，
+		// 列是 84 宽 —— 84 − 6 − 6 = 72，**正好**。所以封面落在 (6,6)，
+		// 那一圈透出桌面去（迷你窗是透明的，圆角才看得出来，见
+		// `MiniWindowOptions` 的 `Transparent` 那一段）。
+		//
+		// ⚠️ **别把这一圈丢了**：封面一贴到 (0,0)，卡片那个圆角就被盖掉，
+		// 而「封面的左上角在 (7,7)」正是版面那一条测试钉着的数
+		//（`minilayout_test.go` 的 `TestTheMiniCoverColumnIsBiuWidth`）。
+		Padding(miniPad, miniPad, miniPad, miniPad).
+		// ⚠️ **它是一个按钮**（读屏软件念得出「展开歌词」）：`Role(RoleButton)`
+		// + `Focusable()` 让它能被 Tab 到、能让读屏念出它是干什么的。
+		Role(ui.RoleButton).Focusable().
+		Label("展开歌词").Description(st.Title).
+		Children(func() {
+			if st.CoverURL == "" {
+				return
+			}
+			imgcache.ViewTitled(c, s.images, st.CoverURL, st.Title, miniCover, miniCover)
+		})
+	if trigger.Clicked() {
+		s.miniCurtainToggle()
 	}
-	ui.Row(c).Key("mini-cover-col").Width(miniCoverCol).Height(miniHeight).
-		Padding(miniPad, miniPad, miniPad, miniPad).AlignItems(ui.Center).Children(func() {
-		imgcache.ViewTitled(c, s.images, st.CoverURL, st.Title, miniCover, miniCover)
-	})
 }
 
 // viewMiniControls 是封面右边那一列：标题 + 音量 + 退出、进度、控制键。

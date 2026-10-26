@@ -618,6 +618,34 @@ type Shell struct {
 	// 歌词，迷你播放器那一页也跟着被拽回去（反过来也一样）。
 	fullLyric lyricsView
 
+	// miniCurtain 是**迷你播放器那个卷帘**自己那一摊：开着没有、动画走到哪儿、
+	// 目标高度、以及这一帧窗该有多高。见 minicurtain.go。
+	//
+	// ⚠️ **它是迷你那个外壳的**（不是主窗口那个）：卷帘只画在迷你窗里，而
+	// 迷你窗是**另一个 `Shell` 实例**。
+	miniCurtain miniCurtainState
+
+	// miniCurtainWork 是**卷帘高度按哪块工作区算**。
+	//
+	// ⚠️ **零值 = 「问真的」**：生产路径走的是 `mygo.Screen.DisplayMatching(win)
+	// .WorkArea`（那一块是那扇窗所在的显示器的工作区）。
+	//
+	// ⚠️ **它是给无头测试用的**：`mygo.Screen` 头上有 `needsApp`
+	// （`mygo/app.go:128`），应用没 ready 的时候调它**直接 panic**，而无头
+	// Tester 里压根没有应用。所以那一档把工作区摆进来——而「卷帘不该长出
+	// 工作区」这件事本身是纯逻辑（`miniCurtainHeight`），单测断的是那一个
+	// 函数。
+	miniCurtainWork mygo.Rectangle
+
+	// miniLyric 是**卷帘里那个歌词区**自己那一摊（滚动位置、上一帧量到的两个
+	// 框、正在滚向哪一句）。
+	//
+	// ⚠️ **不是 `lyric` 那一份，也不是 `fullLyric` 那一份**：三处画的是同一首歌
+	// 的同一份歌词，而「滚到了哪儿是各人各眼的事」——共用一份的话，在满屏里翻
+	// 一下歌词，迷你窗的卷帘也跟着被拽回去（反过来也一样）。理由同
+	// `fullplayer_lyrics.go` 的文件头那一段。
+	miniLyric lyricsView
+
 	// lyricSearch 是「搜索歌词」和「歌词预览」那两个弹窗自己那一摊：搜索框里
 	// 正在敲的字、待发的那一次搜索、切在哪个源、候选表。见 lyricssearch.go。
 	//
