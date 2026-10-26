@@ -267,12 +267,16 @@ func TestMountSettingsUsesTheMyGoAppDataDirectory(t *testing.T) {
 // 用户真的能切
 // ─────────────────────────────────────────────────────────────────────────────
 
-// clickTheme 点主题那三个按钮之一（设置页上）。
-func clickTheme(t *testing.T, tt *mygoui.Tester, label string) {
+// clickTheme 点主题那排的某一档（设置页上）。
+//
+// ⚠️ **先滚进可视区再点**：外观组现在有八套方案折两行，这一排比从前矮不下去——
+// 在 900×600（最小窗口）那一档，「主题」整排被推到了可视区外，而 `tt.Click`
+// 只按标签找元素、不检查它滚出去了没有，点在窗外等于没点（和 `clickSetting`
+// 顶上那段注释说的是同一个坑）。
+func clickTheme(t *testing.T, tt *mygoui.Tester, s *Shell, label string) {
 	t.Helper()
-	if err := tt.Click(label); err != nil {
-		t.Fatalf("点「%s」失败：%v（设置页上还有切换主题的入口吗）", label, err)
-	}
+	r := settingRect(t, tt, s, label)
+	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
 	tt.Frame()
 }
 
@@ -365,11 +369,11 @@ func settleSettingsPage(t *testing.T, tt *mygoui.Tester) {
 // 设置里的档位而不是系统色。
 func TestUserCanSwitchTheThemeFromTheInterface(t *testing.T) {
 	// 系统是深色，起点是「跟随系统」。
-	tt, _, a, path := shellWithSettings(t, app.ThemeModeSystem, true)
+	tt, sh, a, path := shellWithSettings(t, app.ThemeModeSystem, true)
 	assertBackground(t, tt, wantBackground(t, a, true), "起点：跟随系统，系统是深色")
 	openSettings(t, tt)
 
-	clickTheme(t, tt, "浅色")
+	clickTheme(t, tt, sh, "浅色")
 	if got := a.SettingsSnapshot().ThemeMode; got != app.ThemeModeLight {
 		t.Fatalf("点了「浅色」之后设置是 %q", got)
 	}
@@ -381,7 +385,7 @@ func TestUserCanSwitchTheThemeFromTheInterface(t *testing.T) {
 	assertBackground(t, tt, wantBackground(t, a, false), "系统切回浅色之后")
 
 	// 点「深色」，并且**真的落到了盘上**（切换和持久化是同一条路）。
-	clickTheme(t, tt, "深色")
+	clickTheme(t, tt, sh, "深色")
 	assertBackground(t, tt, wantBackground(t, a, false), "点「深色」之后，系统此时是浅色")
 	if err := a.FlushSettings(); err != nil {
 		t.Fatal(err)
@@ -395,7 +399,7 @@ func TestUserCanSwitchTheThemeFromTheInterface(t *testing.T) {
 	}
 
 	// 点回「跟随系统」：系统此刻是浅色，就该跟着变回浅色。
-	clickTheme(t, tt, "跟随系统")
+	clickTheme(t, tt, sh, "跟随系统")
 	if got := a.SettingsSnapshot().ThemeMode; got != app.ThemeModeSystem {
 		t.Fatalf("点回「跟随系统」之后设置是 %q", got)
 	}
@@ -430,7 +434,7 @@ func TestThemeSwitchSaysWhyItCannotSwitch(t *testing.T) {
 	if !tt.HasText("设置只读") {
 		t.Errorf("界面上没有说清为什么切不了，文字有 %q", tt.Texts())
 	}
-	clickTheme(t, tt, "深色")
+	clickTheme(t, tt, b.s, "深色")
 	if got := a.SettingsSnapshot().ThemeMode; got != app.ThemeModeSystem {
 		t.Errorf("只读的设置被改了：%q", got)
 	}

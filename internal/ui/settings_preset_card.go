@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	// presetThumbH 是缩略图的高。宽由「四张卡平分控件列」算出来（约 69），按
-	// 窗口的 3:2 左右取 46。
+	// presetThumbH 是缩略图的高。宽由「每行四张卡平分控件列」算出来（约 79），
+	// 按窗口的 3:2 左右取 46。
 	presetThumbH = 46
 	// presetThumbSide 是缩略图里侧栏那一条的宽。
 	presetThumbSide = 14

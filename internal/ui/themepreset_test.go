@@ -2,13 +2,20 @@ package ui
 
 import (
 	"math"
+	"sort"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
-var allPresets = []app.ThemePreset{app.ThemePresetWarmPaper, app.ThemePresetDuskAmber, app.ThemePresetSoftPeach}
+// allPresets 是「除经典外」的全部方案。新增方案必须加进这份清单——下面那几条
+// 对比度/覆盖/弹窗底色的检查都按它逐套跑。
+var allPresets = []app.ThemePreset{
+	app.ThemePresetWarmPaper, app.ThemePresetDuskAmber, app.ThemePresetSoftPeach,
+	app.ThemePresetCeladon, app.ThemePresetInkPaper, app.ThemePresetSandalwood,
+	app.ThemePresetIndigoNight,
+}
 
 func presetLum(c mygoui.Color) float64 {
 	f := func(v uint8) float64 {
@@ -206,27 +213,66 @@ func TestTheSelectedSideItemUsesTheAccentSoftBase(t *testing.T) {
 	}
 }
 
-// TestThePresetCardsAreFourEqualCards：设置页「主题方案」是四张等宽的预览卡
-// （暖纸 / 暮光 / 柔雾 / 经典），名字都画得出来、没被省略号吃掉。
-func TestThePresetCardsAreFourEqualCards(t *testing.T) {
+// TestThePresetCardsAreRowsOfFourEqualCards：设置页「主题方案」是**每行四张**
+// 等宽的预览卡（八套方案折两行），名字都画得出来、没被省略号吃掉；两行的左缘
+// 齐在一条线上。
+func TestThePresetCardsAreRowsOfFourEqualCards(t *testing.T) {
 	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	var xs []float32
+	type card struct {
+		xCenter, yCenter float32
+	}
+	cards := make([]card, 0, len(themePresets))
 	for _, p := range themePresets {
 		r := settingRect(t, tt, s, p.label)
-		xs = append(xs, r.X+r.W/2)
+		cards = append(cards, card{r.X + r.W/2, r.Y + r.H/2})
 	}
-	if len(xs) != 4 {
-		t.Fatalf("方案卡有 %d 张，want 4", len(xs))
+	if len(cards) != len(themePresets) {
+		t.Fatalf("方案卡有 %d 张，want %d", len(cards), len(themePresets))
 	}
-	step := xs[1] - xs[0]
-	if step < 40 {
-		t.Fatalf("相邻两张卡的中心只差 %.1f，卡片被挤扁了", step)
-	}
-	for i := 2; i < len(xs); i++ {
-		if d := xs[i] - xs[i-1] - step; d > 1 || d < -1 {
-			t.Errorf("第 %d 张和前一张的间距是 %.1f，其余是 %.1f——四张卡不等宽", i, xs[i]-xs[i-1], step)
+	// 按纵坐标分行（同一行的 y 中心差不过 1 像素）。
+	rows := [][]card{}
+	for _, c := range cards {
+		found := false
+		for ri := range rows {
+			if d := c.yCenter - rows[ri][0].yCenter; d < 2 && d > -2 {
+				rows[ri] = append(rows[ri], c)
+				found = true
+				break
+			}
+		}
+		if !found {
+			rows = append(rows, []card{c})
 		}
 	}
+	if len(rows) != 2 {
+		t.Fatalf("方案卡折成 %d 行，want 2（每行四张）", len(rows))
+	}
+	for ri, row := range rows {
+		if len(row) != presetRowColumns {
+			t.Fatalf("第 %d 行有 %d 张卡，want %d", ri+1, len(row), presetRowColumns)
+		}
+		sort.Slice(row, func(i, j int) bool { return row[i].xCenter < row[j].xCenter })
+		step := row[1].xCenter - row[0].xCenter
+		if step < 40 {
+			t.Fatalf("第 %d 行相邻两张卡的中心只差 %.1f，卡片被挤扁了", ri+1, step)
+		}
+		for i := 2; i < len(row); i++ {
+			if d := row[i].xCenter - row[i-1].xCenter - step; d > 1 || d < -1 {
+				t.Errorf("第 %d 行第 %d 张和前一张的间距是 %.1f，其余是 %.1f——卡不等宽",
+					ri+1, i+1, row[i].xCenter-row[i-1].xCenter, step)
+			}
+		}
+		if ri > 0 && d2(row[0].xCenter, rows[ri-1][0].xCenter) > 1 {
+			t.Errorf("第 %d 行的左缘（%.1f）和上一行（%.1f）没对齐", ri+1, row[0].xCenter, rows[ri-1][0].xCenter)
+		}
+	}
+}
+
+func d2(a, b float32) float32 {
+	if a > b {
+		return a - b
+	}
+	return b - a
 }
 
 // TestToastAndConfirmTextIsReadableOnEveryPresetColor：方案的语义色当底时（Toast、
