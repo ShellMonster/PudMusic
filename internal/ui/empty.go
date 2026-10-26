@@ -191,6 +191,10 @@ func emptyArt(c *ui.Context, name string) {
 	if name == "" {
 		return
 	}
+	if v, ok := emptyIllustrations[name]; ok {
+		ui.Image(c, v).Height(emptyIllustrationH).TextColor(c.Theme().TextMuted)
+		return
+	}
 	ui.Icon(c, icon(name)).FontSize(emptyIconSize).TextColor(c.Theme().TextMuted)
 }
 
