@@ -27,8 +27,10 @@
 // 底取**众数**（那一格里绝大多数像素是底，字只占少数），字取**离底最远**的那一个
 // （抗锯齿画出来的那串过渡色里最远的那一头就是字本身）。
 //
-// ⚠️ **深浅两套都要跑**：主色在两套下是同一个值，而 `t.AccentText`（字）是按主色
-// 的亮度挑的黑或白——默认那个绿够亮，所以两套都是**深色字**。
+// ⚠️ **深浅两套都要跑，而且造壳必须带 `systemIsDark(dark)`**：方案的主色
+// **深浅是两个值**（暖纸浅色 #A8552E、深色 #E58A5A）——壳还画着浅色、断言却拿
+// 深色的主题去比，「深色」那一档就永远红。经典那一档深浅同值，所以当年不带
+// 也绿——那不是对，是侥幸。`t.AccentText`（字）是按主色的亮度挑的黑或白。
 package ui
 
 import (
@@ -78,7 +80,7 @@ func TestTheSelectedOptionLooksTheSameEverywhere(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			// ① 主题三档：默认那一档是「跟随系统」。
 			t.Run("设置页的档位按钮", func(t *testing.T) {
-				tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+				tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), systemIsDark(dark))
 				theme := BuildTheme(app.DefaultSettings(""), dark)
 				assertSolidAccentOption(t, tt, "跟随系统", theme)
 			})
@@ -92,7 +94,7 @@ func TestTheSelectedOptionLooksTheSameEverywhere(t *testing.T) {
 			// ⚠️ **每一段都自己造一个外壳**：滚动是**往下**滚的，而「音质偏好」
 			// 那个下拉在「隐藏到托盘」**上面**——同一个外壳里滚不过去。
 			t.Run("窗口关闭那两档", func(t *testing.T) {
-				tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+				tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""), systemIsDark(dark))
 				theme := BuildTheme(app.DefaultSettings(""), dark)
 				settingRect(t, tt, s, "隐藏到托盘")
 				assertSolidAccentOption(t, tt, "隐藏到托盘", theme)
@@ -107,7 +109,7 @@ func TestTheSelectedOptionLooksTheSameEverywhere(t *testing.T) {
 			// ⚠️ **点的是 trigger 上画着的那个字**（「自动」），不是它的无障碍
 			// 名字（「选择音质偏好」）：后者在画面上**不占地方**，按坐标点会点空。
 			t.Run("下拉项的高亮", func(t *testing.T) {
-				tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+				tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""), systemIsDark(dark))
 				theme := BuildTheme(app.DefaultSettings(""), dark)
 				settingRect(t, tt, s, "自动")
 				if err := tt.Click("自动"); err != nil {

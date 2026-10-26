@@ -17,6 +17,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
@@ -911,5 +912,53 @@ func TestPickingAnEQPreset(t *testing.T) {
 	tt.Frame()
 	if got := s.app.SettingsSnapshot().EQPreset; got != "rock" {
 		t.Errorf("点了摇滚，设置里是 %q", got)
+	}
+}
+
+// TestTheSeekShortcutsMoveThePosition 验 ⇧← / ⇧→ 真的会快退 / 快进。
+//
+// 这两条是「只登记在应用内」的自加命令（`inAppOnlyShortcuts`）：Biu 的六条
+// 之外，音乐播放器里「跳过几秒」是键盘党的高频动作。
+//
+// ⚠️ **先按停再量**：素材只有 4 秒，放着不管的话位置自己会走，断言就跟播放
+// 抢时间——`Toggle` 暂停之后 tick 不跑（`ScrubEnd` 的注释），位置才钉得住。
+//
+// ⚠️ **快进那一下用 `seekBy` 直调**：4 秒的素材上按 ⇧→ 必然钳到末尾，而
+// 「拖到末尾」之后播放器自己会走完这一首（`ScrubEnd` 的既有行为）——断言
+// 就得跟「队列放完」那套语义抢时机。键盘 → 分发 → `seekBy` 这条路 ⇧← 已经
+// 走通了，钳制是同一段算术，直调补上就行。
+func TestTheSeekShortcutsMoveThePosition(t *testing.T) {
+	s, tt := newShell(t)
+	// 没有歌的时候按了要什么都不做：一根不知道多长的进度条无处可跳。
+	tt.Frame() // 先画一帧：这一帧才登记上快捷键
+	tt.Key(mygoui.Shift, mygoui.KeyRight)
+	tt.Frame()
+	if got := s.app.Snapshot().Position; got != 0 {
+		t.Errorf("没歌的时候按 ⇧→ 位置变成了 %v", got)
+	}
+
+	openATrack(t, s)
+	s.app.Toggle() // 按停，位置才钉得住
+	tt.Frame()
+	s.app.ScrubEnd(0.5) // 4 秒素材的中点：2s
+	if got := s.app.Snapshot().Position; got != 2*time.Second {
+		t.Fatalf("起点位置是 %v，want 2s", got)
+	}
+
+	// 键盘那一条路：⇧← 从 2s 退 5s，钳到 0。
+	tt.Key(mygoui.Shift, mygoui.KeyLeft)
+	tt.Frame()
+	if got := s.app.Snapshot().Position; got != 0 {
+		t.Errorf("按了 ⇧← 之后位置是 %v，want 0（2s − 5s 钳到 0）", got)
+	}
+
+	// 快进的算术和钳制：往前 2s 到 2s；越过末尾的那一下钳到时长。
+	s.seekBy(2 * time.Second)
+	if got := s.app.Snapshot().Position; got != 2*time.Second {
+		t.Errorf("seekBy(2s) 之后位置是 %v，want 2s", got)
+	}
+	s.seekBy(time.Minute)
+	if got := s.app.Snapshot().Position; got != s.app.Snapshot().Duration {
+		t.Errorf("越过末尾之后位置是 %v，want 钳到时长 %v", got, s.app.Snapshot().Duration)
 	}
 }

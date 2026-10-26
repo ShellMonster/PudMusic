@@ -81,11 +81,13 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 		// 第三段，界面上一个字都没说它在哪儿）。所以它是一枚按钮：点了直接
 		// 跳到那一项上（见 goToDownloadDirSetting）。
 		//
-		// ⚠️ **它是一枚扁平按钮而不是一行灰字**：灰字在画面上就是一句说明，
-		// 用户不会想到它点得动；按钮有悬停反馈和指针，而提示（tooltip）说得出
-		// 按下去会发生什么。
+		// ⚠️ **它是一行链接字而不是一行灰字**：灰字在画面上就是一句说明，
+		// 用户不会想到它点得动；链接悬停时长下划线、指针变手型，而提示
+		// （tooltip）说得出按下去会发生什么。用 `flatLink` 不用扁平按钮，
+		// 是和侧栏「还有 N 个入口，登录后可见」、收藏夹那句「去登录」
+		// 同一套「可点文字」的语言——三处一种悬停相。
 		if dir == "" {
-			if d.tipWith(c, flatButton(c, "还没有下载目录"), "去设置里选一个下载目录").
+			if d.tipWith(c, flatLink(c, "还没有下载目录"), "去设置里选一个下载目录").
 				Clicked() {
 				s.goToDownloadDirSetting()
 			}
