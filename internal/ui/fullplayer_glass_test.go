@@ -347,20 +347,18 @@ func TestTheProgressKnobStaysVisibleWhileDragging(t *testing.T) {
 	settleFull(t, tt)
 }
 
-// TestTheSpectrumSwitchMovesItsKnobAtOnce 断「开关按下去，旋钮立刻就过去」。
+// TestTheSpectrumSwitchSpringsItsKnobToTheOtherSide 断「开关按下去，旋钮弹过去」。
 //
 // 判据是**旋钮在哪半边**：开关是 36×20 的一颗，旋钮是一颗白圆，关着的时候在左
 // 半边、开着的时候在右半边。
 //
-// ⚠️ 原来用 `ui.Switch`：它的旋钮是**滑过去**的（`mygo/ui/widgets.go` 的
-// `coreSwitch`：`sw.Animate("knob", …, 140*time.Millisecond)`），而滑动的起点是
-// **按下之前**那个位置——于是按下去的那一帧旋钮一动不动，要等 140ms 之后才开始
-// 滑。而无头 Tester 的钟**站着不动**，那 140ms 永远走不完：实测按下去之后开关
-// 那一块**一个像素都没变**。
+// ⚠️ **它不再是「立刻就过去」**：旋钮现在是**弹簧**那一族（`springSwitch`，见
+// switch.go），要弹过去——所以这一条改成两段：按下去那一帧旋钮**还在左半边**
+// （钟没推，弹簧还没走），推 600ms 之后才在**右半边**（弹完了）。
 //
-// 这一层用的是本包自己的 `staticSwitch`（见 static_switch.go）：旋钮直接跳到新的
-// 位置。
-func TestTheSpectrumSwitchMovesItsKnobAtOnce(t *testing.T) {
+// ⚠️ **推的是钟**：无头 Tester 的钟站着不动，不推它，弹簧永远走不完（这正是
+// 框架那一颗 140ms 滑动的老毛病）。
+func TestTheSpectrumSwitchSpringsItsKnobToTheOtherSide(t *testing.T) {
 	s, tt, _ := fullTester(t)
 	off := s.app.FullPlayerPrefs()
 	off.ShowSpectrum = false
@@ -384,12 +382,18 @@ func TestTheSpectrumSwitchMovesItsKnobAtOnce(t *testing.T) {
 	}
 
 	tt.ClickAt(sw.X+sw.W/2, sw.Y+sw.H/2)
-	// ⚠️ **不推钟**：这一帧就该是新的样子。
+	// ⚠️ **钟还没推，旋钮不许跳**：弹簧要弹过去，不是啪一下跳过去。
 	tt.Frame()
+	if left, right := knobHalves(tt.Image(), sw); left == 0 || right != 0 {
+		t.Errorf("按下去那一帧旋钮已经在右半边了（左 %d、右 %d）——它是弹过去的，"+
+			"不是跳过去的", left, right)
+	}
 
+	// ⚠️ **要推钟**：无头 Tester 的钟站着不动，不推它那 500ms 的弹簧永远走不完。
+	tt.Advance(600 * time.Millisecond)
+	tt.Frame()
 	if left, right := knobHalves(tt.Image(), sw); right == 0 || left != 0 {
-		t.Errorf("按下去之后旋钮没有到右半边（左 %d、右 %d）——它是滑过去的，"+
-			"而那 140ms 要等钟走", left, right)
+		t.Errorf("弹完了旋钮没有到右半边（左 %d、右 %d）", left, right)
 	}
 	// 底下那一行跟着开关走（这一条不区分修没修，是顺带钉住的行为）。
 	if !tt.HasText("频谱图颜色") {

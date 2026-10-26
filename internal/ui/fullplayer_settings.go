@@ -236,9 +236,13 @@ func (s *Shell) setFullPrefs(mut func(*app.FullPlayerPrefs)) {
 
 // fullSwitchRow 是偏好面板里的一行开关：左边标题，右边开关。
 //
-// ⚠️ 用 `staticSwitch`，不是 `ui.Switch`——理由见 static_switch.go 顶上那一段：
-// 框架那一颗的旋钮要等 140ms 才滑过去，而无头 Tester 的钟站着不动，实测点下去
-// 之后开关那一块**一个像素都没变**。设置页上每一个开关用的也正是它。
+// ⚠️ 用 `springSwitch`，不是 `ui.Switch`——理由见 switch.go 顶上那一段：框架
+// 那一颗的旋钮是 140ms 的**匀出**（不是弹簧），而我们要的是弹一下。设置页上
+// 每一个开关用的也正是它——**同一个开关只有一种样子**（同语义的东西用同样的
+// 动作，DESIGN.md §五《规则》第 21 条）。
+//
+// ⚠️ **这一格不弹提示**：偏好面板上这几格的效果**看得见**（频谱出来、虚化背景
+// 变糊、歌词出现、封面换一张）——判据见 `switch_hint.go`。
 //
 // ⚠️ 开关的名字写成「开关：那一行的标题」，不是照抄标题：标题是它**兄弟节点**
 // 上的可见文字，两者同名的话无头 Tester 的 `Find` 先找到标题（点它什么也不会
@@ -246,7 +250,7 @@ func (s *Shell) setFullPrefs(mut func(*app.FullPlayerPrefs)) {
 func (s *Shell) fullSwitchRow(c *ui.Context, title string, on *bool, save func(bool)) {
 	ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, title).FontSize(scale.Font(c, scale.Size16)).FontWeight(500)
-		if staticSwitch(c, on).Label("开关：" + title).Changed() {
+		if springSwitch(c, on).Label("开关：" + title).Changed() {
 			save(*on)
 		}
 	})
