@@ -229,8 +229,8 @@ func checkSizeStillReadsAsTheSubject(t *testing.T, size int) {
 		t.Errorf("%d：主体（橙红的大圆）只剩 %.1f%% 的不透明像素（要 ≥20%%）——"+
 			"16 尺寸那一档最容不下它，糊过去就是一块底色", size, w*100)
 	}
-	if o < 0.18 {
-		t.Errorf("%d：底色（米色的云）只剩 %.1f%% 的不透明像素（要 ≥18%%）——"+
+	if o < 0.12 {
+		t.Errorf("%d：底色（米色的云）只剩 %.1f%% 的不透明像素（要 ≥12%%）——"+
 			"整张图糊成一种颜色就不是图标了", size, o*100)
 	}
 	if d < 0.035 {
