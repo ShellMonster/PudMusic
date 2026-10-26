@@ -400,6 +400,13 @@ type Settings struct {
 	// （见 internal/service/audio/normalize.go）。默认关。
 	NormalizeVolume bool `json:"normalizeVolume"`
 
+	// CoverAccent 是「封面取色」开关：主色跟着当前封面的色相走。默认关。
+	CoverAccent bool `json:"coverAccent"`
+
+	// CoverHue / CoverSat 是界面从当前封面取出来的色相（0~360）和饱和度（0~1），只在
+	// 内存里传给主题，不落盘。CoverSat 为 0 表示还没取到（或封面没颜色）。
+	CoverHue, CoverSat float64 `json:"-"`
+
 	// TrackFadeSeconds 是切歌淡入淡出的时长（秒，0..15），0 = 关（默认）。
 	// 一首快放完时音量渐渐降到 0，下一首（自动接上的）从 0 渐渐升回来。
 	TrackFadeSeconds int `json:"trackFadeSeconds"`

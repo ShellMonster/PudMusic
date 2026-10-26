@@ -475,3 +475,22 @@ func TestTheScheduleModeIsDarkAtNightAndLightByDay(t *testing.T) {
 		}
 	}
 }
+
+// TestTheCoverHueOnlyTurnsTheAccentWhenTheSwitchIsOn 验封面取色：开着才换主色，关着取到了也不动；深浅主题下亮度不同。
+func TestTheCoverHueOnlyTurnsTheAccentWhenTheSwitchIsOn(t *testing.T) {
+	st := app.DefaultSettings("")
+	base := BuildTheme(st, false).Accent
+	st.CoverHue, st.CoverSat = 200, 0.8
+	if got := BuildTheme(st, false).Accent; got != base {
+		t.Fatalf("开关关着，主色却变了：%v → %v", base, got)
+	}
+	st.CoverAccent = true
+	light, dark := BuildTheme(st, false).Accent, BuildTheme(st, true).Accent
+	if light == base || light == dark {
+		t.Errorf("开着之后浅色主色 %v（原 %v）、深色主色 %v，应该都变了且深浅不同", light, base, dark)
+	}
+	st.CoverSat = 0
+	if got := BuildTheme(st, false).Accent; got != base {
+		t.Errorf("没取到颜色时主色 %v，want 原来的 %v", got, base)
+	}
+}

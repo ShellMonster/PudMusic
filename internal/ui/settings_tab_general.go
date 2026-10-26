@@ -86,6 +86,11 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 			func() { s.pickTheme(c, st, ro) })
 		s.settingRow(c, "颜色", "",
 			func() { s.pickColors(c, st, ro) })
+		s.settingRow(c, "封面取色", "",
+			func() {
+				s.pickSwitch(c, "封面取色", "封面取色", st.CoverAccent, ro,
+					func(cur *app.Settings, on bool) { cur.CoverAccent = on })
+			})
 		s.settingRow(c, "字体", "",
 			func() { s.pickFont(c, st, ro) })
 		s.settingRow(c, "圆角", "",

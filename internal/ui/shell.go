@@ -85,6 +85,9 @@ type Shell struct {
 	// 3 秒后回首页」不用真睡 3 秒。
 	clock clockSource
 
+	// tint 是封面取色的状态（见 covertint.go）。
+	tint coverTint
+
 	// shownPath 是上一帧画的是哪一页，syncRoute 拿它认出「换页了」。
 	shownPath string
 
