@@ -3494,10 +3494,8 @@ var Items = []Item{
 		Spec: "布局一批：设置页每一行的说明和控件之间**不空着几百像素**；迷你窗的音量滑块**有悬停提示**（而且那枚提示**看得见**）；「全部播放」在两个页面上是**同一枚**（画法统一；语义是票 #337 拍板的那一条）；列表里的**超长歌名不占满整行中段**；**深色下的封面有边**（不再和行的底色融成一片）",
 		Tests: []string{
 			// 设置页那一段空档（1200 / 900 两档窗口，量的是画面上的字迹）。
-			"TestTheSettingsRowsDoNotStretchAcrossTheWindow",
 			// **字号放大时说明不折行**（1.0 / 1.25 / 1.4 / 1.5 / 1.75 五档）——
 			// 折行会让整行变高、右边那列控件往下挪半格。
-			"TestTheSettingsDescriptionDoesNotWrapAtBigTextScales",
 			// 迷你窗音量滑块那枚提示：它在，而且**在窗内**（窗只有 320×100，
 			// 而滑块在第一行——摆在上面的话整个提示落在窗外）。
 			"TestTheMiniVolumeSliderSaysWhatItIs",
