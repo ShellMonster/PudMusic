@@ -209,6 +209,17 @@ type updater struct {
 	// 一次 `Show` 是真的会再弹一次（macOS 上同 ID 的一条再 Show 是重新弹）。
 	// 所以去重得自己记一份「这个版本已经说过了」。
 	//
+	// 🔴 **而这一份是「**这一轮**说过了」，不是「这个版本说过了」**（票 #559，
+	// 2026-10-27 的评审）：**记下它的那一层还不知道用户在不在线**——用户可能
+	// 正盯着应用看更新弹窗，而系统通知是给「用户不在」时用的（那一档是界面层
+	// 判的，见 `internal/ui/notification.go`）。于是「用户在前台时那一次」会
+	// 把这个版本**永久**记成「说过了」——而它**根本没说过**。用户随后离开，
+	// 下一次后台检查就被这一份挡住，那一条通知**永远发不出去**。
+	//
+	// ⚠️ **所以它是可以被退回去的**：界面层判完「用户在里面」就调
+	// `ReleaseUpdateNotification` 把它退回来（见下面的 `releaseUpdateNotification`），
+	// 于是下一次检查还会再问一次——而那时用户也许已经走了。
+	//
 	// ⚠️ **它跟着 `u.mu`**：它是更新器的状态，而 `check` 在后台 goroutine 上跑。
 	//
 	// ⚠️ **它不是「跨启动」的记忆**：应用重启之后后台检查又会查一遍那个版本，
@@ -652,6 +663,16 @@ func (u *updater) check(user bool) {
 //
 // ⚠️ **它只认版本**：换了版本就该再发一次（用户要看的正是「哪一个版本」）。
 //
+// 🔴 **而它是可以被退回去的**（票 #559，2026-10-27 的评审）：**记下它的那一层
+// 还不知道用户在不在线**——用户可能正盯着应用，而系统通知是给「用户不在」时
+// 用的（那一档是界面层判的，见 `internal/ui/notification.go`）。所以界面层判完
+// 「用户在里面」就调 `ReleaseUpdateNotification` 把这一份退回来——于是下一次
+// 检查还会再问一次，而那时用户也许已经走了。
+//
+// ⚠️ **不退回的话就是这一条 bug**：用户在前台时那一次把版本**永久**记成
+// 「说过了」（而它**根本没说过**），用户随后离开，下一次后台检查被这一份挡
+// 住，那一条通知**永远发不出去**——而界面上看不出任何异样。
+//
 // ⚠️ **它跟着 `u.mu`**：检查在后台 goroutine 上跑，而这一份是更新器的状态。
 func (u *updater) claimUpdateNotification(version string) bool {
 	u.mu.Lock()
@@ -661,6 +682,44 @@ func (u *updater) claimUpdateNotification(version string) bool {
 	}
 	u.notifiedVersion = version
 	return true
+}
+
+// releaseUpdateNotification 把「这个版本已经说过了」那一份退回去。
+//
+// 🔴 **它是 `claimUpdateNotification` 的另一半**（票 #559，2026-10-27 的评审）：
+// **「说过了」这句话只有在真的说过之后才成立**。而「用户在不在线」只有界面层
+// 答得了（那是窗口的状态），所以**由界面层来退**——它判完「用户在里面」就调
+// 这一句。
+//
+// ⚠️ **它只退「同一个版本」**：更新器已经记下别的版本了的话，退这一次是退不
+// 动的（那一份说的是另一个版本，不该被这一次弄丢）。
+func (u *updater) releaseUpdateNotification(version string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if version != "" && u.notifiedVersion == version {
+		u.notifiedVersion = ""
+	}
+}
+
+// ReleaseUpdateNotification 把「这个版本已经提醒过了」那一份退回去。
+//
+// 🔴 **它是票 #559 那一段的另一半**：应用层记下「这个版本说过了」，而**界面层
+// 判完发现用户正盯着应用**（所以那条系统通知没发出去）就调这一句把它退回去。
+//
+// ⚠️ **不退回的话用户就永远收不到那一条通知**：他在前台时那一次后台检查把版本
+// 记死了，而它**根本没说过**——他随后离开，下一次后台检查被挡住，那一条再也
+// 发不出去（而界面上看不出任何异样）。
+//
+// ⚠️ **它不在 `a.mu` 底下调更新器**：更新器有自己的锁（`u.mu`），而这一层拿着
+// `a.mu` 去拿另一个锁就是当场死锁。
+func (a *App) ReleaseUpdateNotification(version string) {
+	a.mu.Lock()
+	u := a.updates
+	a.mu.Unlock()
+	if u == nil {
+		return
+	}
+	u.releaseUpdateNotification(version)
 }
 
 // install 下载并装好那一个版本。
