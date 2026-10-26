@@ -889,6 +889,7 @@ func TestPickingATrackFadeLength(t *testing.T) {
 	tt.Frame()
 	tt.Scroll(700, 400, 0, 700)
 	tt.Frame()
+	openSelect(t, tt, "选择淡入淡出时长")
 	if err := tt.Click("5 秒"); err != nil {
 		t.Fatalf("找不到切歌淡入淡出的 5 秒档：%v（%q）", err, tt.Texts())
 	}
@@ -903,6 +904,7 @@ func TestPickingAnEQPreset(t *testing.T) {
 	tt.Frame()
 	tt.Scroll(700, 400, 0, 700)
 	tt.Frame()
+	openSelect(t, tt, "选择均衡器预设")
 	if err := tt.Click("摇滚"); err != nil {
 		t.Fatalf("找不到均衡器的摇滚档：%v", err)
 	}

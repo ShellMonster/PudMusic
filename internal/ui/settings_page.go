@@ -1018,61 +1018,71 @@ func settingsButton(c *ui.Context, label string) ui.Element {
 // trackFadeSteps 是「切歌淡入淡出」那一排按钮的档位（秒，0 = 关）。
 var trackFadeSteps = []int{0, 3, 5, 8, 10, 15}
 
-// pickTrackFade 是切歌淡入淡出那一排：关 / 3 / 5 / 8 / 10 / 15 秒。
+// pickIndexed 是设置页里「从一串档位里选一档」的下拉：档位多（5～6 档）时
+// 分段控件的每一格只有 40 多像素，标签会被裁成「…」，所以改用下拉。
+func (s *Shell) pickIndexed(c *ui.Context, what, label string, labels []string, chosen int, ro bool, pick func(i int)) {
+	items := make([]enumItem[int], len(labels))
+	for i, l := range labels {
+		items[i] = enumItem[int]{value: i, label: l}
+	}
+	cur := chosen
+	enumSelect(c, &cur, items, label, selectWidth, settingsControlMinW, ro)
+	if cur != chosen {
+		pick(cur)
+	}
+}
+
+// pickTrackFade 是切歌淡入淡出：关 / 3 / 5 / 8 / 10 / 15 秒。
 func (s *Shell) pickTrackFade(c *ui.Context, st app.Settings, ro bool) {
 	chosen := 0
-	opts := make([]segmentOption, len(trackFadeSteps))
+	labels := make([]string, len(trackFadeSteps))
 	for i, sec := range trackFadeSteps {
-		label := "关"
+		labels[i] = "关"
 		if sec > 0 {
-			label = strconv.Itoa(sec) + " 秒"
+			labels[i] = strconv.Itoa(sec) + " 秒"
 		}
-		opts[i] = segmentOption{label: label}
 		if sec == st.TrackFadeSeconds {
 			chosen = i
 		}
 	}
-	s.settingsSegment(c, "setting:trackFade", "切歌淡入淡出", scale.Font(c, settingsControlW),
-		opts, chosen, ro, func(i int) {
-			v := trackFadeSteps[i]
-			s.applySetting("切歌淡入淡出", func(cur *app.Settings) { cur.TrackFadeSeconds = v })
-		})
+	s.pickIndexed(c, "切歌淡入淡出", "选择淡入淡出时长", labels, chosen, ro, func(i int) {
+		v := trackFadeSteps[i]
+		s.applySetting("切歌淡入淡出", func(cur *app.Settings) { cur.TrackFadeSeconds = v })
+	})
 }
 
-// pickVideoQuality 是「视频画质」那一排：优先的上限，这一集没有就自动降档。
+// pickVideoQuality 是「视频画质」：优先的上限，这一集没有就自动降档。
 func (s *Shell) pickVideoQuality(c *ui.Context, st app.Settings, ro bool) {
 	chosen := 0
-	opts := make([]segmentOption, len(app.VideoQualitySteps))
+	labels := make([]string, len(app.VideoQualitySteps))
 	for i, q := range app.VideoQualitySteps {
-		opts[i] = segmentOption{label: "720P"}
+		labels[i] = "720P"
 		if q != 0 {
-			opts[i].label = bili.VideoQuality(q).Label()
+			labels[i] = bili.VideoQuality(q).Label()
 		}
 		if q == st.VideoQuality {
 			chosen = i
 		}
 	}
-	s.settingsSegment(c, "setting:videoQuality", "视频画质", scale.Font(c, settingsControlW),
-		opts, chosen, ro, func(i int) {
-			v := app.VideoQualitySteps[i]
-			s.applySetting("视频画质", func(cur *app.Settings) { cur.VideoQuality = v })
-		})
+	s.pickIndexed(c, "视频画质", "选择视频画质", labels, chosen, ro, func(i int) {
+		v := app.VideoQualitySteps[i]
+		s.applySetting("视频画质", func(cur *app.Settings) { cur.VideoQuality = v })
+	})
 }
 
-// pickEQ 是均衡器那一排预设：关 / 低音 / 人声 / 明亮 / 流行 / 摇滚。
+// pickEQ 是均衡器预设：关 / 低音 / 人声 / 明亮 / 流行 / 摇滚。
 func (s *Shell) pickEQ(c *ui.Context, st app.Settings, ro bool) {
 	cur := audio.EQPresetByID(st.EQPreset).ID
 	chosen := 0
-	opts := make([]segmentOption, len(audio.EQPresets))
+	labels := make([]string, len(audio.EQPresets))
 	for i, p := range audio.EQPresets {
-		opts[i] = segmentOption{label: p.Name}
+		labels[i] = p.Name
 		if p.ID == cur {
 			chosen = i
 		}
 	}
-	s.settingsSegment(c, "setting:eq", "均衡器", scale.Font(c, settingsControlW),
-		opts, chosen, ro, func(i int) {
-			id := audio.EQPresets[i].ID
-			s.applySetting("均衡器", func(c *app.Settings) { c.EQPreset = id })
-		})
+	s.pickIndexed(c, "均衡器", "选择均衡器预设", labels, chosen, ro, func(i int) {
+		id := audio.EQPresets[i].ID
+		s.applySetting("均衡器", func(c *app.Settings) { c.EQPreset = id })
+	})
 }
