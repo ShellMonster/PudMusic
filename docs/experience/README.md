@@ -1,0 +1,121 @@
+# 项目经验
+
+这个目录装的是**「为什么是这样」**，不是「怎么办」。
+
+- **规矩**（不许做什么、必须做什么）留在 `AGENTS.md`——那份是每次开工都要读的。
+- **数值**（间距多大、圆角多少、列宽几格）在 `DESIGN.md`——那份是量东西时用的尺子。
+- **细则**（派单怎么写、测试怎么判、收尾怎么清）在 `docs/agents/`。
+- **知识**（当初为什么这么选、哪些地方静默出错、每个子系统怎么分层）在这里。
+
+为什么单独开一个目录：这些坑的共同特征是**只有在你改到那块时才会咬你**。混在
+`AGENTS.md` 里，每次都要读一遍规矩的人也被迫读一遍历史；合成一个大文件，则整份
+被忽略 ⇒ 等于丢了。所以按主题拆开，**改到哪块读哪块**。
+
+⚠️ 本目录里的每一段都带一行「**什么时候用得上**」——知识不进场景就等于没写。
+
+---
+
+## 目录里有什么
+
+| 文档 | 一句话 | 什么时候读它 |
+|---|---|---|
+| [interface-pitfalls.md](interface-pitfalls.md) | 界面层那些「不报错、只是悄悄不对」的地方：主题、panic、唤醒、行 key、拖动、测试的钟 | 你要动 `internal/ui/` 的绘制、输入或 view 生命周期 |
+| [startup-and-artifacts.md](startup-and-artifacts.md) | 启动顺序、单实例、生成物（图标 / 许可清单）、图标素材的规矩 | 你要动 `main.go`、`internal/platform/`、打包或换图标 |
+| [audio-stack.md](audio-stack.md) | 解码器各自负责什么、在线音质怎么换档、哪些格式解不了、哪些还没在真机验过 | 你要动 `internal/service/audio/`、`internal/service/bili/` 的音质或容器 |
+| [data-and-credentials.md](data-and-credentials.md) | 四个名字互不相干、用户数据目录为什么钉死、登录态为什么不放钥匙串、什么时候不许写兼容逻辑 | 你要动设置、登录态、用户数据目录、迁移 |
+| [architecture.md](architecture.md) | 分层与依赖方向、两扇窗怎么共用一份状态、封面缓存的内存预算 | 你要加一个子系统，或者不清楚某段代码该放哪一层 |
+| [upstream-biu.md](upstream-biu.md) | 上游 Biu 的源码和截图怎么取、哪些数值以上游为准、我们和上游刻意不同的地方 | 你在实现或对齐一个上游页面（UI 票尤其） |
+| [release-and-versioning.md](release-and-versioning.md) | 版本号三处对上、发版五步、更新签名私钥、MyGo 版本基线 | 你要发版、升版本、升 MyGo |
+| [git-and-workflow.md](git-and-workflow.md) | 提交信息、文件怎么拆、注释为什么不许写「还没做」、工作板与 worktree 怎么配合 | 你要提交、拆文件、或第一次在这个仓库里干活 |
+
+---
+
+## 为什么是 8 份而不是 7 份
+
+早一版的设计稿（BMG-287 报告 §2.6）给的是 7 份。本目录把**发版与版本**从
+「工程与协作」里单独拆出来，成了 8 份——理由是这两件事的**读者和时机都不同**：
+
+- 「提交信息、文件怎么拆」是**每次提交前**要想到的；
+- 「发版五步、私钥在哪」是**一年可能碰一次**、而碰错代价极大（私钥丢了就再也发不了
+  更新）的东西。
+
+混在一份里，那份就得一年里被反复打开，而里面最要紧的那几行会被淹没。
+
+---
+
+## 搬迁对照表
+
+这一节是给**下一个人**看的：这些内容原来在哪儿、现在在哪儿、为什么搬。
+它同时是「有没有漏」的核对表——搬一处留一处出处，漏了能看出来。
+
+> 「留在原处」= 这一票**不改**源文件（瘦身是下一张票的事）。所以下表里
+> 「留在原处」的段落现在**同时**存在于源文件和新文档里；下一票才删掉源文件里的那份。
+
+### 从 `AGENTS.md` 搬来的
+
+| 原位置 | 内容 | 新位置（文档 § 小节） | 留在原处？ |
+|---|---|---|---|
+| §1 | `-trimpath` 为什么（缓存跨 worktree 命中、实测 38 包 / 41 MB）、三个硬条件 | `docs/agents/testing.md` §《验收命令》§《编译缓存与 `-trimpath`》 | ✅ |
+| §1 | `-p 4` 为什么限并发、默认不跑 `internal/ui`、为什么不带 `-race` | `docs/agents/testing.md` §《验收命令》 | ✅ |
+| §1 视觉审查 ① | 上游源码怎么取、上游截图只有六张且是旧版 | `docs/experience/upstream-biu.md` §《上游源码与截图怎么取》 | ✅ |
+| §1 视觉审查 ①③④ | 跟什么比、比哪五项、留下什么、不合格就继续改 | `docs/agents/visual-review.md` §《① 跟什么比》…§《④ 不合格就继续改》 | ✅ |
+| §1 视觉审查 ⚠️ | 不要要求逐像素比（出图本身不确定）、票 #418 的翻车 | `docs/agents/visual-review.md` §《逐像素比这件事》《一次真实的翻车（票 #418）》 | ✅ |
+| §1 视觉审查 | 上游 `ROW_GAP` 的两个角色、票 #418 把行距当列距 | `docs/experience/upstream-biu.md` §《数值怎么对齐》 | ✅ |
+| §2 | `waitFor` / `waitFrames`、推钟 + `FramePending`、load < 8、磁盘 5 GB、`diskguard`、不许清缓存、加压 3 次、F12 检查器、每帧分配判据、`gofmt` | `docs/agents/testing.md` §《跑测试的几条口径》 | ✅ |
+| §2 | 已知会飘的名单（3 条 + 1 条待复核 + 2 条已划掉）、怎么自己核这份名单 | `docs/agents/testing.md` §《已知会飘的那几条》 | ✅ |
+| §4 界面层 1 | `SetTheme` 每帧在 view 最开头调 | `docs/experience/interface-pitfalls.md` §《主题色》 | ✅ |
+| §4 界面层 2 | view 里 panic 会杀进程 ⇒ `ui.Guard` | `docs/experience/interface-pitfalls.md` §《panic》 | ✅ |
+| §4 界面层 3 | 投递完状态要挨着每扇窗叫醒；`Update(nil)` SIGSEGV；看不见的窗丢帧是设计 | `docs/experience/interface-pitfalls.md` §《唤醒》 | ✅ |
+| §4 界面层 4 | 动态列表行要有稳定且唯一的 key | `docs/experience/interface-pitfalls.md` §《行 key》 | ✅ |
+| §4 拖动两条 | `Pressed()` / `Dragged()` / `Dragging()` 各自的适用范围 | `docs/experience/interface-pitfalls.md` §《拖动》 | ✅ |
+| §4 启动 5 | `App.WhenReady` 之前不能 `NewWindow` | `docs/experience/startup-and-artifacts.md` §《建窗口的时机》 | ✅ |
+| §4 启动 6 | 单实例锁与退出回调要在 `Run()` 之前 | `docs/experience/startup-and-artifacts.md` §《单实例与退出回调》 | ✅ |
+| §4 启动 7 | `RequestSingleInstanceLock()` 挡不住（20 轮 17 轮）⇒ 内核独占锁 | `docs/experience/startup-and-artifacts.md` §《单实例与退出回调》 | ✅ |
+| §4 启动 8 | 图标与第三方许可清单是生成物 | `docs/experience/startup-and-artifacts.md` §《生成物》 | ✅ |
+| §4 启动 9 | 用户数据目录的名字不跟显示名走 | `docs/experience/data-and-credentials.md` §《用户数据目录》 | ✅ |
+| §5 | 四个名字互不相干 | `docs/experience/data-and-credentials.md` §《四个名字》 | ✅ |
+| §5 | FLAC 解码器是逐样本验证过的资产 | `docs/experience/audio-stack.md` §《FLAC 解码器》 | ✅ |
+| §5 | 动 macOS 音频路径前先读 `extaf/` 的注释 | `docs/experience/audio-stack.md` §《macOS 那条路：AudioToolbox》 | ✅ |
+| §5 | 不为「我们自己的老状态」写兼容逻辑 + 三条例外 | `docs/experience/data-and-credentials.md` §《什么时候该写兼容逻辑》 | ✅ |
+| §6 | 一律走 fixture、真机回归单独立项 | `docs/experience/data-and-credentials.md` §《别打真 B 站》 | ✅ |
+| §7 | 注释说谎比没有注释更坏（审计查出过至少五条） | `docs/experience/git-and-workflow.md` §《注释的纪律》 | ✅ |
+| §8 | 提交信息：中文一句话 + 票号；不写 `Closes #N` | `docs/experience/git-and-workflow.md` §《提交信息》 | ✅ |
+| §9 | `GLOSSARY.md` / `docs/adr/` 不存在、`docs/research/` 不进版本库、回归证据是代码 | `docs/experience/git-and-workflow.md` §《仓库里哪些东西不是文档》；`docs/experience/architecture.md` §《回归证据是代码，不是文档》 | ✅ |
+| §10 | gopls 收尾：为什么（插件源码）、怎么做（按 cwd 认领）、清理的顺序 | `docs/agents/cleanup.md` §《为什么》§《怎么做》§《清理的顺序》 | ✅ |
+| §11 | 文件怎么组织：什么时候该拆 / 怎么拆 / 什么时候别拆 | `docs/experience/git-and-workflow.md` §《文件怎么组织》 | ✅ |
+| §1 里 `-trimpath` 的理由 | 为什么全板必须一致（半开半开 ⇒ 缓存翻倍到 518 MB） | `docs/experience/git-and-workflow.md` §《工作板与 worktree》 | ✅ |
+
+### 从 `README.md` 搬来的
+
+| 原位置 | 内容 | 新位置（文档 § 小节） | 留在原处？ |
+|---|---|---|---|
+| 「安装」（macOS / Windows） | dmg 没有公证、安装包没有代码签名、用户第一次打开会看到什么 | `docs/experience/release-and-versioning.md` §《打包与签名》 | ✅ |
+| 「从源码跑 / 自己打包」 | NSIS 缺失时脚本要停下；打包走 `go tool mygo build` | `docs/experience/release-and-versioning.md` §《打包与签名》 | ✅ |
+| 「封面内存缓存」 | `BIU_IMAGE_CACHE_MB` 的档位与取舍、96 → 32 MiB 的堆峰值实测、解码路径 | `docs/experience/architecture.md` §《封面缓存与内存预算》 | ✅ |
+| 「已知边界 → 音频格式」 | WMA / AIFF / ALAC / Windows AAC 未验 / 杜比 id / FLAC 在哪个平台走哪条路 | `docs/experience/audio-stack.md` §《解不了 / 没验过的几处》《支持哪些格式》 | ✅ |
+| 「已知边界 → 登录」 | 登录态为什么不在钥匙串、权限被放宽会自愈、换机要重新扫码 | `docs/experience/data-and-credentials.md` §《登录态》 | ✅ |
+| 「已知边界 → 平台」 | 首发只有 macOS/Windows、Windows 媒体浮窗没封面、页面切换动画照抄「没有」、不上架 MAS | `docs/experience/upstream-biu.md` §《我们和上游刻意不同的地方》 | ✅ |
+| 「已知边界 → 音频质量之外的行为」 | 音乐 MV 播不了、变速倍率落盘、改倍率约 1 秒才听得出来 | `docs/experience/audio-stack.md` §《音频之外的几条已知边界》 | ✅ |
+| 「已知边界 → 差异说明」 | 为什么这一版没有毛玻璃、验收口径不是逐像素 | `docs/experience/upstream-biu.md` §《我们和上游刻意不同的地方》 | ✅ |
+| 「许可」 | 许可清单是三道会红的断言、为什么不读 `go.mod`、三份不在 `go list -deps` 里的东西、purego 是 Apache-2.0 / go-mp3 是 MIT | `docs/experience/startup-and-artifacts.md` §《许可清单是三道会红的断言》 | ✅（用户读的声明留在 README） |
+| 「支持哪些格式」 | 容器 → 解码器对照表、B 站无损是 MP4 里的 FLAC | `docs/experience/audio-stack.md` §《支持哪些格式》 | ✅ |
+| 「图标」 | 图源不能缩到 512、macOS 不替你切圆角、托盘与应用同一张图、图源两种由代码自己判 | `docs/experience/startup-and-artifacts.md` §《图标素材的规矩》 | ✅ |
+| 「在线音质」 | 两档路、档位 id 在哪翻译、徽章换档的行为、编号上错过两次 | `docs/experience/audio-stack.md` §《在线音质怎么换档》 | ✅ |
+| 「怎么测」 | 测试分哪三层、分别跑哪几个包 | `docs/agents/testing.md` §《测试分三层》 | ✅ |
+| 「代码怎么分层」 | 依赖单向图、`main.go` 只做一件事、两扇窗共用一份状态 | `docs/experience/architecture.md` §《依赖单向》《`main.go` 只做一件事》《两扇窗》 | ✅ |
+| 「踩过坑的规矩」1–3 | `Update(nil)` SIGSEGV、投递后要唤醒、view 包 `Guard` | `docs/experience/interface-pitfalls.md` §《唤醒》《panic》 | ✅ |
+| 「踩过坑的规矩」4–7 | 单实例锁与退出回调、`WhenReady`、`RequestSingleInstanceLock`、生成物 | `docs/experience/startup-and-artifacts.md` §《单实例与退出回调》《建窗口的时机》《生成物》 | ✅ |
+| 「踩过坑的规矩」8 | 应用数据目录的名字不跟显示名走 | `docs/experience/data-and-credentials.md` §《用户数据目录》 | ✅ |
+| 「踩过坑的规矩」拖动两条 + 位移累加 | `Dragging()` / `Pressed()` / `Dragged()`、别拿位移累加 | `docs/experience/interface-pitfalls.md` §《拖动》 | ✅ |
+| 「版本」 | MyGo 基线、pre-1.0 不锁死、升级前重跑探针 | `docs/experience/release-and-versioning.md` §《MyGo 版本基线》 | ✅ |
+| 「版本」v0.5.5 起 | `ui.Tester` 的钟站着不动 ⇒ 推钟 + `FramePending()` | `docs/experience/interface-pitfalls.md` §《测试里的钟》 | ✅ |
+
+### 明确**没有**搬的（它们不是「项目经验」）
+
+- `AGENTS.md` §1、§2、§3、§6、§7、§8、§10 的**纪律本体**——「不许做什么、必须做什么」留在
+  `AGENTS.md`，那是每次都要读的。搬走等于把纪律降级成知识。
+- `AGENTS.md` §5 的**不变量清单**——「不可协商的项目不变量」是纪律，不是知识。
+- `README.md` 的**安装步骤、已知边界的表格本体、许可与著作权声明**——那是给用户看的，
+  不是给改代码的人看的。它留在 `README.md`。（许可那一节里**「清单怎么生成、怎么核」
+  那一半**搬到了 `docs/experience/startup-and-artifacts.md`，因为那是改代码的人要看的东西。）
+- `DESIGN.md`——不动（它被 12 处按章节号引用，挪动会大面积指错）。
