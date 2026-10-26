@@ -110,4 +110,5 @@ var themeModes = []struct {
 	{app.ThemeModeSystem, "跟随系统", iconComputer},
 	{app.ThemeModeLight, "浅色", iconSun},
 	{app.ThemeModeDark, "深色", iconMoon},
+	{app.ThemeModeSchedule, "定时", iconEmptyLater},
 }

@@ -17,6 +17,7 @@ package ui
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/egoist/mygo/ui"
@@ -69,6 +70,14 @@ type themeKey struct {
 	textScale float32
 }
 
+var themeNow = time.Now
+
+// 「定时」档：这个钟点之后用深色，早上这个钟点起用浅色。
+const (
+	scheduleDarkFrom  = 19
+	scheduleLightFrom = 7
+)
+
 // effectiveDark 是这份设置实际要的那一档深浅。
 //
 // 档位是浅色/深色时由档位说了算；「跟随系统」时才看系统。
@@ -81,6 +90,9 @@ func effectiveDark(s app.Settings, systemDark bool) bool {
 		return false
 	case app.ThemeModeDark:
 		return true
+	case app.ThemeModeSchedule:
+		h := themeNow().Hour()
+		return h >= scheduleDarkFrom || h < scheduleLightFrom
 	}
 	return systemDark
 }

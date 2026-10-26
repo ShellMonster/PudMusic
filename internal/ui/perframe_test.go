@@ -43,6 +43,7 @@ import (
 func TestTheFrameThemeIsNotRebuiltEveryFrame(t *testing.T) {
 	s := &Shell{}
 	settings := app.DefaultSettings("")
+	settings.ThemePreset = app.ThemePresetClassic
 	prefs := mygoui.Preferences{}
 
 	// 第一帧：建一份出来。

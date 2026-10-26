@@ -172,7 +172,9 @@ func TestShellCrashPageCarriesTheTheme(t *testing.T) {
 	if !tt.HasText("界面出错了") {
 		t.Fatalf("没有画错误页，文字有 %q", tt.Texts())
 	}
-	assertBackground(t, tt, wantBackground(t, a, true), "错误页")
+	// 错误页铺的是页面底色，不是侧栏那一层。
+	crashBG := BuildTheme(a.SettingsSnapshot(), true).Background
+	waitPixel(t, tt, sampleX, sampleY, color.RGBA{R: crashBG.R, G: crashBG.G, B: crashBG.B, A: crashBG.A}, "错误页")
 }
 
 // TestShellSaysSoWhenSettingsAreBroken 验设置读写失败不让界面崩，而且用户

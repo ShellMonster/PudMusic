@@ -153,6 +153,8 @@ const (
 	ThemeModeSystem ThemeMode = "system"
 	ThemeModeLight  ThemeMode = "light"
 	ThemeModeDark   ThemeMode = "dark"
+	// ThemeModeSchedule 晚上（19:00 到次日 07:00）用深色，白天用浅色。
+	ThemeModeSchedule ThemeMode = "schedule"
 )
 
 // ThemePreset 是主题方案：设计规范里的三套整体配色（暖纸 / 暮光 / 柔雾），
@@ -747,7 +749,7 @@ func (s *Settings) normalize() {
 	}
 
 	s.ThemeMode = pickEnum(s.ThemeMode, ThemeModeSystem,
-		ThemeModeSystem, ThemeModeLight, ThemeModeDark)
+		ThemeModeSystem, ThemeModeLight, ThemeModeDark, ThemeModeSchedule)
 	s.ThemePreset = pickEnum(s.ThemePreset, DefaultThemePreset,
 		ThemePresetWarmPaper, ThemePresetDuskAmber, ThemePresetSoftPeach, ThemePresetClassic)
 	s.AudioQuality = pickEnum(s.AudioQuality, AudioQualityAuto,

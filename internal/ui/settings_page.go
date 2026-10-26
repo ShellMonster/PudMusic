@@ -906,7 +906,9 @@ func (s *Shell) pickTheme(c *ui.Context, st app.Settings, ro bool) {
 // 分段控件（票 #240 / 报告 §4 的 F-17）。
 func (s *Shell) pickSelected(c *ui.Context, b ui.Element, ro bool) ui.Element {
 	if ro {
-		return flatCurrent(c, b)
+		// 只读时用控件那一层的中性底，不用主色淡底：框架再乘 50% 之后，带色的淡底
+		// 在暖色方案里压得字到不了 3:1。
+		return b.Background(c.Theme().Surface).TextColor(flatCurrentText(c.Theme(), false))
 	}
 	return flatSolid(c, b)
 }
