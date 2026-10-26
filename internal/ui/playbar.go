@@ -1461,12 +1461,16 @@ func (s *Shell) pickAndEnqueue() {
 // 自己撑开、**不换行**（进度条短一点，那一档的例外）。
 func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 	known := st.Duration > 0
+	chs := st.Chapters
 
 	ui.Row(c).Gap(space.Px10).AlignItems(ui.Center).WidthPercent(75).Children(func() {
 		ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, scale.Size14)).TextColor(c.Theme().TextMuted).
 			MinWidth(48).MaxLines(1)
 
 		sl := playbarProgressSlider(c, &s.scrub, 0, 1).Grow(1).Label("播放进度").Disabled(!known)
+		// 章节点画在滑块自己的画法之上（`DrawOver`；pad 是旋钮留在轨道里的
+		// 那半个宽 8，点比 4 像素的轨道粗 3——票 #585）。
+		sl = withChapterDots(sl, chs, st.Duration, 8, 7, c.Theme().Background)
 		// ⚠️ 这里必须用 Pressed()，不能用 Dragging()。
 		//
 		// Dragging() 报的是「这个控件正在拖一个值 / 正在被拖动」（Drag 与
@@ -1477,10 +1481,13 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 		switch held := sl.Pressed(); {
 		case held && !s.held:
 			s.held = true
+			// 记下按下那一帧的指针和位置：松手时拿它们分「点 / 拖」。
+			s.scrubPressX, _, _ = sl.PointerPosition()
+			s.scrubPressPos = st.Position
 			s.app.ScrubStart()
 		case !held && s.held:
 			s.held = false
-			s.app.ScrubEnd(s.scrub)
+			s.app.ScrubEnd(snappedScrub(sl, s.scrub, s.scrubPressX, s.scrubPressPos, st.Duration, chs))
 		case !s.held && known:
 			// 松手之后进度条跟着播放器走。
 			s.scrub = float64(st.Position) / float64(st.Duration)

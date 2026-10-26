@@ -230,6 +230,14 @@ type State struct {
 	// 那一批）。那种情况下 UP 名照样显示，只是**点不动**（见 `Item.ArtistMid`）。
 	ArtistMid int64
 
+	// Chapters 是当前这一首（投稿）的章节，进度条上的点画的就是它们的起点
+	// （票 #585）。空 = 没有章节（本地文件、音乐库、没问回来、或者这一条
+	// 本来就没有）——三种种情况界面上是同一个样子：一根光滑的进度条。
+	//
+	// ⚠️ **取的那一趟是异步的**：Snapshot 第一次给 nil，问回来了叫醒界面，
+	// 下一帧就有了。取数那一摊见 `chapters.go`。
+	Chapters []Chapter
+
 	// Quality 是当前这条流的音质徽章（「Hi-Res 无损」/「192K」）。
 	//
 	// 空串 = 这一首是本地文件，没有音质这回事（本地文件是什么格式和
@@ -596,6 +604,24 @@ type App struct {
 	// 测试里替成一个假函数，才能量「失败之后到底有没有再问」。
 	partsFetch func(context.Context, string) ([]bili.VideoPart, error)
 
+	// chapters 是当前这一首（投稿）的章节，chaptersKey 是它们属于哪一集
+	// （bvid+cid，多 P 的章节按集给）。见 chapters.go。
+	//
+	// ⚠️ **它自己的锁，不在 `a.mu` 里**：理由和 like 那一组一样——写它的
+	// 是网络往返回来的 goroutine，不该去抢每帧都在拿的那把。
+	chaptersMu      sync.Mutex
+	chapters        []Chapter
+	chaptersKey     string
+	chaptersLoaded  bool
+	chaptersWanted  bool
+	chaptersTriedAt time.Time
+	// chaptersFetch 是问章节的那一趟，nil = 走取流零件上的 `bili.Client.Chapters`。
+	//
+	// 和 `partsFetch` 同一条规矩：**只由界面那一侧读写**（`ensureChapters` 在
+	// 那里把它取出来递给后台那个 goroutine）。生产上永远是 nil；测试里替成
+	// 假函数。
+	chaptersFetch func(context.Context, string, string) ([]bili.Chapter, error)
+
 	// like 是当前这一首的赞 / 藏状态，likeBvid 是它属于哪一个稿件。见 like.go。
 	//
 	// ⚠️ **它自己的锁，不在 `a.mu` 里**：写它的是网络往返回来的那个 goroutine，
@@ -897,6 +923,9 @@ func (a *App) Snapshot() State {
 		QualityPref:      pref,
 		Artist:           a.artist,
 		ArtistMid:        a.artistMid,
+		// 章节走的是它自己的锁和队列的锁（形状和上面 `PlayMode` 那两行一样），
+		// 顺手把没问过的那一趟问出去——见 `chapters.go`。
+		Chapters: a.chaptersForSnapshotLocked(),
 
 		// 播放模式在队列自己的锁里，不在 `a.mu` 里——它是队列的形状，不是
 		// 播放器的状态。顺着一句一句取：`a.mu` 已经拿在手里，而 `a.queue`
