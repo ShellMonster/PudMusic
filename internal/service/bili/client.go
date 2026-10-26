@@ -343,6 +343,73 @@ type Call struct {
 // 的 data 形状各不相同，在这一层统一成一个结构体只会造出一个什么都装
 // 下的空壳。
 func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
+	res, err := c.send(ctx, call)
+	if err != nil {
+		return nil, err
+	}
+
+	var env envelope
+	if err := json.Unmarshal(res.body, &env); err != nil {
+		// 🔴 **「不是 JSON」要分成两种**（票 #346）：
+		//
+		//	截断   响应本来是 JSON，但没传完（网络抖了一下）→ 再问一次有可能好
+		//	不是   回的是一页 HTML —— 多半是风控挡的 → 立刻再问还是撞同一面墙
+		//
+		// ⚠️ **它们都不能归到 `ErrRiskControl`**：真风控是 -352/-412（业务码，
+		// 在 JSON 里面），而这一档是压根没拿到 JSON。混成一处的话，被截断的
+		// 响应会跟着风控一起被判成不可重试（票 #316 收窄了那一档）。
+		if !looksLikeHTML(res.body) {
+			return nil, fmt.Errorf("%w: %s %s: 响应被截断了: %w",
+				ErrTruncatedResponse, res.method, res.path, err)
+		}
+		return nil, fmt.Errorf("%w: %s %s: 响应不是 JSON（多半是被风控挡了）: %w",
+			ErrBadResponse, res.method, res.path, err)
+	}
+	if env.Code != 0 {
+		return nil, &APIError{
+			Code:     env.Code,
+			Message:  env.message(),
+			Endpoint: res.path,
+			Data:     env.Data,
+		}
+	}
+	return env.Data, nil
+}
+
+// DoRaw 发一次请求，返回**响应体原文**（不解 JSON）。
+//
+// # 为什么要有它
+//
+// B 站有一条接口回的不是 JSON：弹幕 `/x/v1/dm/list.so` 回的是**原始
+// deflate 的 XML**（`Content-Type: text/xml`、`Content-Encoding: deflate`）。
+// `Do` 把响应体当 JSON 解，那条路解不了——而「解不了」的表现是
+// 「一条弹幕都没有」，**不报错**。
+//
+// ⇒ 请求头 / WBI / buvid / 错误分类**全部复用 `Do` 那一条**（都走
+// `send`），只有「最后那一段解什么」不一样。
+//
+// ⚠️ **它不解压缩**：B 站给的那一档 deflate 由调用方自己解（`compress/flate`
+// 是**原始 deflate**，不是 zlib——见 `danmaku.go`）。
+func (c *Client) DoRaw(ctx context.Context, call Call) ([]byte, error) {
+	res, err := c.send(ctx, call)
+	if err != nil {
+		return nil, err
+	}
+	return res.body, nil
+}
+
+// rawResponse 是一次请求的结果：方法、路径、响应体原文。
+type rawResponse struct {
+	method string
+	path   string
+	body   []byte
+}
+
+// send 发一次请求，把响应体读回来（**不解**）。
+//
+// `Do` 和 `DoRaw` 都走它：请求头 / WBI / buvid / 错误分类只有**一份**，
+// 而它们分岔的地方只有「解 JSON 还是不解」。
+func (c *Client) send(ctx context.Context, call Call) (rawResponse, error) {
 	method := call.Method
 	if method == "" {
 		method = http.MethodGet
@@ -363,13 +430,13 @@ func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
 		var err error
 		q, err = c.signWBI(ctx, q)
 		if err != nil {
-			return nil, err
+			return rawResponse{}, err
 		}
 	}
 
 	endpoint, err := url.Parse(call.URL)
 	if err != nil {
-		return nil, fmt.Errorf("bili: 地址不合法 %q: %w", call.URL, err)
+		return rawResponse{}, fmt.Errorf("bili: 地址不合法 %q: %w", call.URL, err)
 	}
 	// 查询串是**签名的一部分**（WBI 把整个查询串哈希了），所以必须
 	// 在拼地址时原样带上，不能让 net/url 再排序或重新编码一次。
@@ -382,7 +449,7 @@ func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
 	case call.JSON != nil:
 		raw, err := json.Marshal(call.JSON)
 		if err != nil {
-			return nil, fmt.Errorf("bili: JSON 请求体编不出来: %w", err)
+			return rawResponse{}, fmt.Errorf("bili: JSON 请求体编不出来: %w", err)
 		}
 		body = bytes.NewReader(raw)
 		call.Form = nil
@@ -392,7 +459,7 @@ func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
 
 	req, err := http.NewRequestWithContext(ctx, method, endpoint.String(), body)
 	if err != nil {
-		return nil, fmt.Errorf("bili: 造请求: %w", err)
+		return rawResponse{}, fmt.Errorf("bili: 造请求: %w", err)
 	}
 	if call.JSON != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -429,7 +496,7 @@ func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
 		// 在**取流途中**按下的「暂停」会被记成「任务出错」，界面上是一行红字加
 		// 一颗「重试」，而不是「下载暂停」。消息一个字没变（两个动词渲染出来的
 		// 字符串一样），变的是错误链。
-		return nil, fmt.Errorf("%w: %s %s: %w", ErrNetwork, method, endpoint.Path, err)
+		return rawResponse{}, fmt.Errorf("%w: %s %s: %w", ErrNetwork, method, endpoint.Path, err)
 	}
 	defer resp.Body.Close()
 
@@ -438,42 +505,17 @@ func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
 		// 🔴 **读一半断了 = 响应没传完**（票 #346）：那是网络层的事（抖了一下、
 		// 连接被掐了），**再问一次有可能好**——所以它归「可重试」那一档，
 		// 不跟「压根不是 JSON」混在一起。
-		return nil, fmt.Errorf("%w: %s %s: 响应没读全: %w",
+		return rawResponse{}, fmt.Errorf("%w: %s %s: 响应没读全: %w",
 			ErrTruncatedResponse, method, endpoint.Path, err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// 非 2xx 时 B 站有时仍然给 JSON 外壳，但绝大多数时候给的是
 		// 网关错误页。两种都报网络错——HTTP 层就没成，业务 code 没意义。
-		return nil, fmt.Errorf("%w: %s %s: HTTP %d", ErrNetwork, method, endpoint.Path, resp.StatusCode)
+		return rawResponse{}, fmt.Errorf("%w: %s %s: HTTP %d", ErrNetwork, method, endpoint.Path, resp.StatusCode)
 	}
 
-	var env envelope
-	if err := json.Unmarshal(bodyBytes, &env); err != nil {
-		// 🔴 **「不是 JSON」要分成两种**（票 #346）：
-		//
-		//	截断   响应本来是 JSON，但没传完（网络抖了一下）→ 再问一次有可能好
-		//	不是   回的是一页 HTML —— 多半是风控挡的 → 立刻再问还是撞同一面墙
-		//
-		// ⚠️ **它们都不能归到 `ErrRiskControl`**：真风控是 -352/-412（业务码，
-		// 在 JSON 里面），而这一档是压根没拿到 JSON。混成一处的话，被截断的
-		// 响应会跟着风控一起被判成不可重试（票 #316 收窄的那一档）。
-		if !looksLikeHTML(bodyBytes) {
-			return nil, fmt.Errorf("%w: %s %s: 响应被截断了: %w",
-				ErrTruncatedResponse, method, endpoint.Path, err)
-		}
-		return nil, fmt.Errorf("%w: %s %s: 响应不是 JSON（多半是被风控挡了）: %w",
-			ErrBadResponse, method, endpoint.Path, err)
-	}
-	if env.Code != 0 {
-		return nil, &APIError{
-			Code:     env.Code,
-			Message:  env.message(),
-			Endpoint: endpoint.Path,
-			Data:     env.Data,
-		}
-	}
-	return env.Data, nil
+	return rawResponse{method: method, path: endpoint.Path, body: bodyBytes}, nil
 }
 
 // looksLikeHTML 报这个响应体是不是**一页 HTML**（而不是 JSON）。
