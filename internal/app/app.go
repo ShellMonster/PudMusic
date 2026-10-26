@@ -335,6 +335,12 @@ type App struct {
 	// onlineGen 是**播放代次**。每开一次在线流就加一，异步回来的结果
 	// 先对一遍，对不上就走人（快速切歌时旧曲的结果不能覆盖新曲）。
 	onlineGen int
+	// skipStreak 是**连着多少首起播失败了**（见 online.go 的 autoSkipDead）。
+	//
+	// 🔴 **它是自动跳过的那根保险丝**：循环 / 随机两档的 `Queue.Advance` 永远
+	// 给得出「下一首」，一个全失效的收藏夹不数着的话会无限跳下去。放成一首
+	// 就清零（两处成功起播的代码块里，见 autoSkipDead 的注释）。
+	skipStreak int
 	// loading 是「正在取流」（见 State.Loading）。
 	loading bool
 	// loadingTitle 是正在取的那一首的名字（见 State.LoadingTitle）。
@@ -1050,6 +1056,8 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	a.endLoadingLocked()
 	a.quality = ""
 	a.reportedErr = nil
+	// 🔴 **本地这一首放起来了，跳过的账清零**（同 runOnline 成功那一支）。
+	a.skipStreak = 0
 	a.title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	a.path = path
 	if a.normalize {
