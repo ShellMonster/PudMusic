@@ -971,6 +971,10 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 		mounted: func() bool { return s.app.RecommendOf().Mounted() },
 		tab:     s.fetchHomeTab,
 		new:     s.fetchHomeNewMusic,
+		board: func(tab int) (int, time.Time, bool) {
+			p, ok := s.app.RecommendOf().BoardPeriod(tab)
+			return p.Number, p.PublishedAt, ok
+		},
 		selfMid: s.app.SelfMid,
 		wake:    s.wake.invalidate,
 	})

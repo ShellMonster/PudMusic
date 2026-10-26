@@ -8,6 +8,7 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
@@ -104,6 +105,32 @@ func TestRecentPlaysWithNoHistoryHasItsOwnEmptyState(t *testing.T) {
 	if !showsText(tt, "去听推荐") {
 		t.Errorf("最近播放空了却没有「去听推荐」那一步：%q", tt.Texts())
 	}
+}
+
+func TestTheBoardCaptionNamesThePeriodAndTheUpdateDate(t *testing.T) {
+	at := time.Date(2024, 5, 12, 8, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		n    int
+		at   time.Time
+		want string
+	}{
+		{3, at, "第 3 期 · 2024-05-12 更新"}, {3, time.Time{}, "第 3 期"},
+		{0, at, "2024-05-12 更新"}, {0, time.Time{}, ""},
+	} {
+		if got := boardCaptionText(tc.n, tc.at); got != tc.want {
+			t.Errorf("boardCaptionText(%d, %v) = %q，want %q", tc.n, tc.at, got, tc.want)
+		}
+	}
+}
+
+func TestTheBoardTabShowsItsPeriodAboveTheList(t *testing.T) {
+	b := homeDiscoverFake(t)
+	_, tt, _ := newHomeShell(t, b)
+	waitFrames(t, tt, "第一档", func() bool { return showsText(tt, "音乐 推的第一首") })
+	if err := tt.Click(homeTabs[homeHotTab]); err != nil {
+		t.Fatalf("点不到热榜：%v", err)
+	}
+	waitFramesClock(t, tt, "热榜的期数", func() bool { return showsText(tt, "第 3 期 · 1970-01-01 更新") })
 }
 
 // TestTheSixTabsAndPlayAllFitAtTheSmallestWindow 量最小窗口下 Tab 那一排：六个 Tab 一个

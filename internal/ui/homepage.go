@@ -54,6 +54,8 @@ package ui
 
 import (
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
@@ -523,6 +525,7 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// ⚠️ **「流行」那一档除外**：那一档的表头在**页内头部里面**（跟着新歌速递
 		// 那一块一起滚走，见 `viewPopLead`）——表头说的是下面那些歌，而新歌速递在
 		// 它们上面，表头留在列表外面就会跑到新歌速递上面去。
+		h.viewBoardCaption(c, tab)
 		if tab != homePopTab {
 			h.lists[tab].Header(c, "home:header:"+strconv.Itoa(tab))
 		}
@@ -537,6 +540,36 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// 一起画的话按钮就是三枚。按它回的是**画面上画着那一档**自己的位置
 		// （见 `PagedList.ScrollTop`）——这正好是票面要的那一条。
 	}
+}
+
+// boardCaptionText 是榜单页顶上那一行：第几期、哪天更新。缺哪样就少说哪样。
+func boardCaptionText(number int, at time.Time) string {
+	var parts []string
+	if number > 0 {
+		parts = append(parts, "第 "+strconv.Itoa(number)+" 期")
+	}
+	if !at.IsZero() {
+		parts = append(parts, at.Format("2006-01-02")+" 更新")
+	}
+	return strings.Join(parts, " · ")
+}
+
+// viewBoardCaption 在热榜 / 原创榜的列表上面画期数和更新时间。别的档不画；
+// 还没拉到那一期的信息时也不画（不摆一行空话）。
+func (h *homePage) viewBoardCaption(c *ui.Context, tab int) {
+	if (tab != homeHotTab && tab != homeOriginalTab) || h.loads.board == nil {
+		return
+	}
+	n, at, ok := h.loads.board(tab)
+	if !ok {
+		return
+	}
+	text := boardCaptionText(n, at)
+	if text == "" {
+		return
+	}
+	ui.Text(c, text).Key("home:board:caption").FontSize(scale.Font(c, scale.Size13)).
+		TextColor(c.Theme().TextMuted).MaxLines(1)
 }
 
 // viewTabs 画那三个 Tab 和「全部播放」。

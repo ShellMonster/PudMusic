@@ -53,6 +53,24 @@ var errRecommendMissing = errors.New("app: 首页暂时加载不出来")
 type Recommend struct {
 	// Client 是 B 站客户端。**全项目那一份**（`MountLogin` 建的那一个）。
 	Client *bili.Client
+
+	mu sync.Mutex
+	// periods 是两张榜最近一次拉到的那一期（下标 0 热榜、1 原创榜），给榜单页的
+	// 「第几期 · 更新于」那一行用。
+	periods [2]bili.ToplistPeriod
+}
+
+// BoardPeriod 是热榜 / 原创榜（HomeTabHot / HomeTabOriginal）最近一次拉到的那一期。
+// 还没拉到、或者不是榜单那两档时 ok 为 false。
+func (r *Recommend) BoardPeriod(tab int) (p bili.ToplistPeriod, ok bool) {
+	i := tab - HomeTabHot
+	if r == nil || i < 0 || i >= len(r.periods) {
+		return p, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p = r.periods[i]
+	return p, p.ID != 0
 }
 
 // Mounted 报这一摊挂上没有。界面靠它说清「还没接上」。
@@ -243,11 +261,14 @@ func (r *Recommend) toplist(ctx context.Context, tab, page int) ([]RecommendItem
 	if tab == HomeTabOriginal {
 		kind = bili.ToplistOriginal
 	}
-	id, err := r.Client.ToplistLatestID(ctx, kind)
-	if err != nil || id == 0 {
+	period, err := r.Client.ToplistLatest(ctx, kind)
+	if err != nil || period.ID == 0 {
 		return nil, 0, err
 	}
-	items, err := r.Client.ToplistMusic(ctx, id)
+	r.mu.Lock()
+	r.periods[tab-HomeTabHot] = period
+	r.mu.Unlock()
+	items, err := r.Client.ToplistMusic(ctx, period.ID)
 	if err != nil {
 		return nil, 0, err
 	}

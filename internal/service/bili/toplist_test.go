@@ -93,3 +93,19 @@ func TestToplistRejectsAShapeItDoesNotKnow(t *testing.T) {
 		t.Errorf("err = %v，want errReadRecommend", err)
 	}
 }
+
+func TestToplistLatestCarriesThePeriodNumberAndTime(t *testing.T) {
+	f := signedFake(t)
+	f.on(toplistPeriodsPath, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", json.RawMessage(`{"list":{
+			"2023":[{"ID":1,"priod":40,"publish_time":100}],
+			"2024":[{"ID":7,"priod":"42","publish_time":300},{"ID":6,"priod":41,"publish_time":200}]}}`)))
+	})
+	p, err := f.client(t, Options{}).ToplistLatest(context.Background(), ToplistHot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ID != 7 || p.Number != 42 || p.PublishedAt.Unix() != 300 {
+		t.Errorf("最新一期 = %+v，want ID 7 / 第 42 期 / 时刻 300", p)
+	}
+}

@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"net/url"
 	"strconv"
+	"time"
 )
 
 const (
@@ -50,34 +51,54 @@ const (
 // toplistPeriodsData 是 all_period 的 data 段：年份 → 该年各期。
 type toplistPeriodsData struct {
 	List map[string][]struct {
-		ID          int64 `json:"ID"`
-		PublishTime int64 `json:"publish_time"`
+		ID          int64     `json:"ID"`
+		Number      flexInt64 `json:"priod"`
+		PublishTime int64     `json:"publish_time"`
 	} `json:"list"`
 }
 
-// ToplistLatestID 取某张榜**最新一期**的榜单 id。没有任何一期时返回 0。
+// ToplistPeriod 是某张榜的一期：榜单 id、第几期、发布时刻。
+type ToplistPeriod struct {
+	ID          int64
+	Number      int
+	PublishedAt time.Time
+}
+
+// ToplistLatest 取某张榜**最新一期**。没有任何一期时返回零值（ID 为 0）。
 //
 // 最新 = 发布时间最大的那一期（不信「最后一个年份的第一项」：年份是 map，没有顺序）。
-func (c *Client) ToplistLatestID(ctx context.Context, kind ToplistKind) (int64, error) {
+// 接口里期数那一格的字段名就叫 `priod`（B 站拼错了），照它读。
+func (c *Client) ToplistLatest(ctx context.Context, kind ToplistKind) (ToplistPeriod, error) {
 	v := url.Values{}
 	v.Set("list_type", strconv.Itoa(int(kind)))
 	raw, err := c.Do(ctx, Call{Method: "GET", URL: c.hostAPI + toplistPeriodsPath, Query: v, CSRF: true})
 	if err != nil {
-		return 0, err
+		return ToplistPeriod{}, err
 	}
 	var d toplistPeriodsData
 	if err := json.Unmarshal(raw, &d); err != nil {
-		return 0, errReadRecommend
+		return ToplistPeriod{}, errReadRecommend
 	}
-	var id, at int64
+	var best ToplistPeriod
+	var at int64
 	for _, year := range d.List {
 		for _, p := range year {
 			if p.PublishTime >= at {
-				id, at = p.ID, p.PublishTime
+				best = ToplistPeriod{ID: p.ID, Number: int(p.Number)}
+				if p.PublishTime > 0 {
+					best.PublishedAt = time.Unix(p.PublishTime, 0)
+				}
+				at = p.PublishTime
 			}
 		}
 	}
-	return id, nil
+	return best, nil
+}
+
+// ToplistLatestID 取某张榜最新一期的榜单 id。没有任何一期时返回 0。
+func (c *Client) ToplistLatestID(ctx context.Context, kind ToplistKind) (int64, error) {
+	p, err := c.ToplistLatest(ctx, kind)
+	return p.ID, err
 }
 
 // toplistMusicData 是 music_list 的 data 段。

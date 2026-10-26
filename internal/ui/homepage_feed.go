@@ -47,6 +47,7 @@ import (
 	"errors"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
@@ -111,6 +112,8 @@ type homeLoads struct {
 	tab func(ctx context.Context, tab, page int) ([]app.RecommendItem, int, error)
 	// new 拉新歌速递那一摊。
 	new func(ctx context.Context) ([]app.RecommendItem, int, error)
+	// board 是热榜 / 原创榜最近拉到的那一期（期数、发布时刻）；没拉到时 ok 为 false。
+	board func(tab int) (number int, at time.Time, ok bool)
 	// selfMid 是当前登录账号（0 = 没登录），用来判断手上这一份该不该作废。
 	selfMid func() int64
 	// wake 是「要一帧新画面」。后台投递完不唤醒 = 界面停在旧帧（铁律三）。
