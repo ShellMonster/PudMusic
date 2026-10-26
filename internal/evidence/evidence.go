@@ -2229,7 +2229,6 @@ var Items = []Item{
 			"TestDanmakuSaysSoWhenTheAnswerIsNotDanmaku",
 			"TestDanmakuWithTheFeatureTurnedOffIsNotAnError",
 			"TestDanmakuKeepsGoingAfterALineWithAControlCharacter",
-			"TestDanmakuGivesEveryLineItsOwnID",
 			"TestTheRealResponsesGiveTheExpectedNumberOfLines",
 			"TestTheFixtureMatchesTheServerBytes",
 			"TestDanmakuWithAnEmptyBodyIsNotAnError",
