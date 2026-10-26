@@ -145,6 +145,9 @@ func (f *streamFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/x/player/wbi/playurl":
 		f.servePlayURL(w, r.URL.Query())
 
+	case r.URL.Path == "/x/player/wbi/v2":
+		f.servePlayerInfo(w)
+
 	case r.URL.Path == "/audio/music-service-c/url":
 		f.serveSongURL(w, r.URL.Query())
 
@@ -214,6 +217,22 @@ func (f *streamFixture) serveSongInfo(w http.ResponseWriter) {
 			"author": "夜灯", "title": "月光", "cover": "https://i0.hdslb.com/c.jpg",
 			"duration": 214, "bvid": "", "cid": 0, "collectIds": []int{},
 		}})
+}
+
+// servePlayerInfo 是播放器信息接口：字幕地址在这里（不在 playurl 里）。
+func (f *streamFixture) servePlayerInfo(w http.ResponseWriter) {
+	f.mu.Lock()
+	sub, subV2 := f.subtitleURL, f.subtitleURLV2
+	f.mu.Unlock()
+	data := map[string]any{}
+	if sub != "" {
+		item := map[string]any{"id": 1, "lan": "zh-CN", "subtitle_url": sub}
+		if subV2 != "" {
+			item["subtitle_url_v2"] = subV2
+		}
+		data["subtitle"] = map[string]any{"subtitles": []any{item}}
+	}
+	writeStreamJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1, "data": data})
 }
 
 func (f *streamFixture) servePlayURL(w http.ResponseWriter, q url.Values) {
