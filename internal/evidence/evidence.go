@@ -4044,7 +4044,13 @@ var Items = []Item{
 			// 迷你开着时收到文件：让开迷你，主窗口上放。
 			"TestOpeningAFileMakesRoomForTheMainWindow",
 			// 回调在 `Run` 之前装上了（装晚了那一次就永远收不到）。
+			// ⚠️ **走生产那条安装点**（`installLifecycle`）：删掉它里面那一行
+			// → 这一条红（第二轮评审实测过：上一版这一条是手工装钩子、
+			// 手工调回调，删掉生产那一行照样绿）。
 			"TestTheOpenFileHookIsInstalledBeforeRun",
+			// 第二个实例把命令行转交过来那一档也装上了（它同样要认下框架
+			// 丢掉的那一部分）。
+			"TestTheSecondInstanceHookIsInstalledBeforeRun",
 			// 三种没收下要说成三件不同的事，而且不打断正在放的那首。
 			"TestCheckOpenFileTellsTheThreeRejectionsApart",
 			"TestOpeningAMissingFileSaysSoAndKeepsPlaying",
@@ -4053,6 +4059,21 @@ var Items = []Item{
 			// 「格式放不了」那一句要说清楚支持哪些格式。
 			"TestTheUnsupportedTextSaysWhichFormatsWeTake",
 			"TestTheMissingTextSaysTheFileIsGone",
+			// 🔴 **「看得见」那一条**：不是「状态里记着」，而是**画面上真的有**
+			//（`repaint` 那一格要了帧）。主窗口那一扇、迷你那一扇各断一遍——
+			// 迷你**不画 toast**，而它常常就是用户眼前那一扇。
+			"TestARejectedFileIsVisibleOnScreen",
+			"TestARejectedFileIsVisibleWithTheMiniPlayerOpen",
+			// 提示写进状态之后**自己会要一帧**（不然界面停在旧帧上）。
+			"TestTheToastIsPaintedOnTheNextFrame",
+			// 命令行那一侧：框架在 `OnOpenFile` 之前丢掉的那一部分，
+			// **我们自己在命令行这一侧认下来**，而用户看得见。
+			"TestTheFrameworkDropsThosePathsBeforeOnOpenFile",
+			"TestTheLaunchArgsPickUpWhatTheFrameworkDrops",
+			"TestTheCommandLineRejectionsAreVisible",
+			"TestTheSecondInstanceArgsAreCheckedForTheOnesTheFrameworkDrops",
+			// 框架会交的那些我们不重复处理（重复了队列里两份同一首歌）。
+			"TestALaunchArgThatTheFrameworkDeliversIsNotHandledTwice",
 		},
 	},
 }

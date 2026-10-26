@@ -74,7 +74,20 @@ func (s *Shell) installLifecycle() {
 	// OnOpenURL（`mygo/deeplink.go` 的 deliverArgs，由 single_instance.go 的
 	// acceptSecondInstances 调），这里只负责把窗口叫回来：用户明明是在唤起这个
 	// 应用，结果窗口还藏在那儿，是最容易被当成「点了没反应」的一种情况。
-	mygo.App.OnSecondInstance(func([]string, string) { s.openWindow() })
+	//
+	//
+	// ⚠️ **命令行里要是有文件呢**：那一份**在 `installOpenFile` 里装**
+	// （见 `openfile.go` 的 `installOpenFile`）——因为「第二个实例转交过来的
+	// 文件」和「系统直接交过来的文件」是**同一件事**，而框架只交它收得下的
+	// 那些（`mygo/deeplink.go` 的 `fileArgs`），收不下的那些要在**我们这一
+	// 侧**说一句话（这一票要求「要有可见提示」）。
+	//
+	// ⚠️ **这里这一句只管把窗口叫回来**：用户明明是在唤起这个应用，结果
+	// 窗口还藏在那儿，是最容易被当成「点了没反应」的一种情况。
+	openFileHooks.onSecondInstance(func(args []string, workingDir string) {
+		s.handleLaunchArgs(args, workingDir)
+		s.openWindow()
+	})
 
 	// biu://… 到了就跳到它指的那一页。
 	//
