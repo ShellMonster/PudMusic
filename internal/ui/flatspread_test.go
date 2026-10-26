@@ -525,9 +525,19 @@ func TestTheTwoRulesAreDrawnAsOnePixelLines(t *testing.T) {
 			// 窗口外面（它从右边滑进来），量到的是空的右半边。
 			settleDrawer(t, s, tt)
 			img := tt.Image()
-			border := flatColor(BuildTheme(s.app.SettingsSnapshot(), dark).Border)
+			// ⚠️ **找的是合成到屏幕上的那一色**：分割线画的是 `t.Border`，而方案
+			// 的 Border 是**半透明**的（alpha = borderA）——落在面板上的是它和
+			// 面板底混出来的颜色。拿未合成的 RGB 去扫，一行都对不上（它连 alpha
+			// 都不一样）：经典那套边框不透明，所以当年侥幸绿。
+			// 两个面板的底不一样：队列抽屉走 `cardBackground`（方案的 surface1），
+			// 分集浮层走框架 `stylePanel` 给的主题底色（`t.Background`）。
+			th := BuildTheme(s.app.SettingsSnapshot(), dark)
+			onCard := flatColor(s.cardBackground(th).Mix(
+				mygoui.RGB(th.Border.R, th.Border.G, th.Border.B), float32(th.Border.A)/255))
+			onPopover := flatColor(th.Background.Mix(
+				mygoui.RGB(th.Border.R, th.Border.G, th.Border.B), float32(th.Border.A)/255))
 			x0 := img.Rect.Max.X - queueDrawerWidth
-			assertRuleAt(t, img, border, "队列抽屉", x0, img.Rect.Max.X-1,
+			assertRuleAt(t, img, onCard, "队列抽屉", x0, img.Rect.Max.X-1,
 				queueHeaderHeight-2, queueHeaderHeight+2, queueDrawerWidth-8)
 
 			// 分集抽屉：要一首有多 P 的，否则那一列摆不出来（`partsDrawer`
@@ -545,7 +555,7 @@ func TestTheTwoRulesAreDrawnAsOnePixelLines(t *testing.T) {
 				t.Fatalf("画面上找不到分集面板，文字有 %q", stt.Texts())
 			}
 			py := round32(panel.Y)
-			assertRuleAt(t, stt.Image(), border, "分集抽屉",
+			assertRuleAt(t, stt.Image(), onPopover, "分集抽屉",
 				round32(panel.X), round32(panel.X+panel.W)-1,
 				py+partHeaderHeight-2, py+partHeaderHeight+2, int(panel.W)-8)
 		})
