@@ -149,6 +149,11 @@ type pageCase struct {
 	name string
 	// open 打开那一页，返回外壳、Tester 和画在画面上的前三首歌名。
 	open func(t *testing.T) (*Shell, *mygoui.Tester, [3]string)
+	// nudge 在缩到最小窗口之后、断言之前滚一点。**只有 UP 空间那一页要**：
+	// 它的页内头部（头图 216 + Tab 条）是列表的第 0 行，本来就该跟着列表一起
+	// 滚走（`upspace_tabs.go` 的 `viewSpaceTab` 那段注释）；900×560 不滚的话
+	// 第二行差几个像素在折叠线下面——那是「还没滚」，不是「画不出来」。
+	nudge func(t *testing.T, tt *mygoui.Tester)
 }
 
 // displayPages 是**接了这个设置的每一页**。
@@ -159,7 +164,13 @@ var displayPages = []pageCase{
 	{name: "首页", open: openHomeForDisplay},
 	{name: "搜索结果", open: openSearchForDisplay},
 	{name: "收藏夹", open: openCollectionForDisplay},
-	{name: "UP 空间的投稿", open: openUpSpaceForDisplay},
+	{name: "UP 空间的投稿", open: openUpSpaceForDisplay, nudge: func(t *testing.T, tt *mygoui.Tester) {
+		t.Helper()
+		tt.Scroll(500, 450, 0, 160)
+		for range 2 {
+			tt.Frame()
+		}
+	}},
 	{name: "稍后再看", open: openLaterForDisplay},
 	{name: "历史记录", open: openHistoryForDisplay},
 	{name: "本地音乐", open: openLocalForDisplay},
@@ -547,19 +558,27 @@ func TestThePreviewCarriesNoSelectionSignal(t *testing.T) {
 		app.DisplayModeList, app.DisplayModeCard, app.DisplayModeCompact,
 	} {
 		t.Run(string(mode), func(t *testing.T) {
-			tt, _, a, _ := shellOnSettings(t, func() app.Settings {
+			tt, sh, a, _ := shellOnSettings(t, func() app.Settings {
 				st := app.DefaultSettings("")
 				st.DisplayMode = mode
 				return st
 			}())
 			th := BuildTheme(a.SettingsSnapshot(), false)
+			// ⚠️ **比的是合成到屏幕上的那一色**：方案的 Border 是**半透明的**
+			// （alpha = borderA，现在是 12%），画到卡片上的是它和坐着的那块底
+			// 混出来的颜色（设置分组卡走 `cardBackground`，即方案的 surface1）。
+			// 拿未合成的 RGB 去比，混出来的那色反而离主色更近——经典那套边框
+			// 不透明，所以当年侥幸绿。
+			onCard := sh.cardBackground(th).Mix(
+				mygoui.RGB(th.Border.R, th.Border.G, th.Border.B),
+				float32(th.Border.A)/255)
 
 			for v := list.View(0); v < list.ViewCount; v++ {
 				r, ok := tt.Find("预览：" + v.String())
 				if !ok || r.W <= 0 {
 					t.Fatalf("「预览：%s」没画出来", v.String())
 				}
-				if borderLeansToAccent(tt, r, th.Accent, th.Border) {
+				if borderLeansToAccent(tt, r, th.Accent, onCard) {
 					t.Errorf("「预览：%s」那一张描的是主色边——那一格里就有**两种**"+
 						"选中信号了（药丸 + 预览的绿框），票 #297 裁掉的就是这个",
 						v.String())
@@ -704,6 +723,9 @@ func TestEveryViewSurvivesTheNarrowestWindow(t *testing.T) {
 			tt.SetSize(minWindowW, minWindowH)
 			for range 3 {
 				tt.Frame()
+			}
+			if p.nudge != nil {
+				p.nudge(t, tt)
 			}
 			for _, m := range []app.DisplayMode{
 				app.DisplayModeCompact, app.DisplayModeCard, app.DisplayModeList,

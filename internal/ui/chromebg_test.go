@@ -47,23 +47,27 @@ const (
 	playbarProbeX, playbarY = 150, 780
 
 	// drawerProbe 是播放列表抽屉面板上的一个空白处：面板从
-	// 窗口右缘往左 384（`queueDrawerWidth`），所以 x=1160 在里面。
+	// 窗口右缘往左 320（`queueDrawerWidth`），所以 x=1160 在里面。
 	drawerProbeX, drawerProbeY = 1160, 300
 )
 
 // probeColor 是画面上那一个点的颜色。
 func probeColor(tt *ui.Tester, x, y int) color.RGBA { return tt.Image().RGBAAt(x, y) }
 
-// TestTheChromeSharesOneBackground 钉住侧栏、内容区、播放条是同一个底色。
+// TestTheChromeSharesOneBackground 钉住三块「chrome」的底色各有其源，且不漂。
 //
 // ⚠️ **深浅两套都要跑，而且 want 从当前主题现算**，不写死一个十六进制值。
 // 写死的话改一次主题引擎就得回来改这一条，而「忘了改」的那一次是**恒绿**。
 //
-// 两套都跑不是为了「浅色那一套更严」——**浅色也抓得住**：断言是逐字节相等，
-// `#f4f4f5` 和 `#ffffff` 差 11 也照样红（实测：把侧栏改回 `t.Surface`，浅色和
-// 深色两个子测试各报一次）。两套都跑是为了**不让这一族自己只盯着深色**：这一票的
-// 症状在深色下才明显（三个通道各跳一级，肉眼一眼是三条带），浅色下差 11、肉眼
-// 未必看得出——而「靠肉眼看不看得出」正是这一族要换成读像素的理由。
+// ⚠️ **侧栏不再和内容区同一个色**（设计规范 v0.1）：侧栏底色是方案自己的
+// `sidebar` token（`Shell.sidebarBackground`），内容区和播放条还是页面底色。
+// 这一条曾经的口径是「三处一整块」——那是经典（无方案）时代的形状，方案一上
+// 来侧栏就**该**不同了。现在钉的是「各回各的 token」，漂了照样红。
+//
+// 两套都跑不是为了「浅色那一套更严」——**浅色也抓得住**：断言是逐字节相等。
+// 两套都跑是为了**不让这一族自己只盯着深色**：这一票的症状在深色下才明显
+// （三个通道各跳一级，肉眼一眼是三条带），浅色下差 11、肉眼未必看得出——而
+// 「靠肉眼看不看得出」正是这一族要换成读像素的理由。
 func TestTheChromeSharesOneBackground(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -74,20 +78,21 @@ func TestTheChromeSharesOneBackground(t *testing.T) {
 			b := newTestShell(t, systemIsDark(dark), at(shotWinW, shotWinH))
 			s, tt := b.s, b.tt
 
-			wantRGBA := rgbaOf(BuildTheme(s.app.SettingsSnapshot(), dark).Background)
+			th := BuildTheme(s.app.SettingsSnapshot(), dark)
 
 			probes := []struct {
 				what string
 				x, y int
+				want color.RGBA
 			}{
-				{"侧栏", sideProbeX, sideProbeY},
-				{"内容区", contentProbeX, contentProbeY},
-				{"播放条", playbarProbeX, playbarY},
+				{"侧栏", sideProbeX, sideProbeY, rgbaOf(s.sidebarBackground(th))},
+				{"内容区", contentProbeX, contentProbeY, rgbaOf(th.Background)},
+				{"播放条", playbarProbeX, playbarY, rgbaOf(th.Background)},
 			}
 			for _, p := range probes {
-				if got := probeColor(tt, p.x, p.y); got != wantRGBA {
-					t.Errorf("%s那一块 (%d,%d) 是 %v，want %v——底色和窗口不是同一个来源，"+
-						"深色下界面会裂成三条带", p.what, p.x, p.y, got, wantRGBA)
+				if got := probeColor(tt, p.x, p.y); got != p.want {
+					t.Errorf("%s那一块 (%d,%d) 是 %v，want %v——底色和它的 token 不是"+
+						"同一个来源，深色下界面会裂成三条带", p.what, p.x, p.y, got, p.want)
 				}
 			}
 		})
@@ -150,20 +155,14 @@ func TestTheChromeStillHasASeparationFromTheBackground(t *testing.T) {
 	}
 }
 
-// TestCardsAndDialogsStillStandOffTheBackground 钉住「统一底色」没有把卡片和
-// 弹窗也一起**刷没**：抽屉那一块面板和底色同色，但分开的正是它左缘那一圈。
+// TestCardsAndDialogsStillStandOffTheBackground 钉住抽屉面板「和底下那一页分得开」。
 //
-// ⚠️ **这一条的判据跟着票 #172 换了**：面板的底色原来取 `t.Surface`（深色下
-// 比底色亮一档），现在取 `t.Background`——上游那一枚 Drawer 没有自己的底色类，
-// 走的是 HeroUI Drawer 的默认 `bg-background`，而上游主题把 `background` 这个
-// 色定义成了**页面底色**（`src/common/constants/theme.ts`：深色 #17181a、浅色
-// #ffffff）。所以它和底下那一页是**同一个颜色**，DESIGN.md §四说的正是这一条：
-// 「深色层次：卡片与背景几乎同色，靠阴影分层——不要用『比背景亮一级』的板」。
-//
-// 于是「和背景区分开」这件事改由**影**和**那条分隔线**负责（上游 HeroUI 那一档
-// `shadow="md"` 深色下有一层 1 像素的白色**内**影，深底上那才是真正看得见的
-// 边界）。本条只断「面板那一块 = 底色」和「面板左缘那一列 ≠ 底色」两件事；
-// 影的浓度在 `shadow_test.go` 里那一条钉着。
+// ⚠️ **面板的底色是设计规范 v0.1 之后的那个**：设计规范 v0.1（DESIGN.md §零）
+// 把卡片、弹层的底统一到 `Shell.cardBackground`——方案里的 `surface1`；经典沿用
+// 控件那一层。这一条曾经的口径是「面板 = 页面底色（上游 `bg-background`）」，
+// 那是 #172 时代的形状；现在面板和页面底**本来就不同色**，「分得开」由底色差、
+// 影和左缘那圈线三层一起负责。所以本条断的是「面板那一块 = cardBackground」
+// 和「面板左缘那一列 ≠ 页面底色」两件事；影的浓度在 `shadow_test.go` 里钉着。
 func TestCardsAndDialogsStillStandOffTheBackground(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -174,21 +173,22 @@ func TestCardsAndDialogsStillStandOffTheBackground(t *testing.T) {
 			b := newTestShell(t, systemIsDark(dark), at(shotWinW, shotWinH))
 			s, tt := b.s, b.tt
 
-			bg := rgbaOf(BuildTheme(s.app.SettingsSnapshot(), dark).Background)
+			th := BuildTheme(s.app.SettingsSnapshot(), dark)
+			bg := rgbaOf(th.Background)
+			panel := rgbaOf(s.cardBackground(th))
 			s.drawerOpen = true
 			// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在
 			// 窗口外面（它从右边滑进来），量到的右半边是空的。
 			settleDrawer(t, s, tt)
 
-			// ① 面板那一块和页面底色**一样**（上游的 `bg-background`）。
-			if got := probeColor(tt, drawerProbeX, drawerProbeY); got != bg {
-				t.Errorf("播放列表抽屉面板 (%d,%d) 是 %v，want %v（页面底色）——"+
-					"上游那一枚 Drawer 走的是 `bg-background`，和底下那一页同色，"+
-					"分开的正是那圈影", drawerProbeX, drawerProbeY, got, bg)
+			// ① 面板那一块就是 cardBackground（方案的 surface1）。
+			if got := probeColor(tt, drawerProbeX, drawerProbeY); got != panel {
+				t.Errorf("播放列表抽屉面板 (%d,%d) 是 %v，want %v（cardBackground）——"+
+					"面板底色和它的 token 不是同一个来源", drawerProbeX, drawerProbeY, got, panel)
 			}
 
-			// ② 面板左缘那一列**不是**底色——那是分隔线和影，没有它这块面板就
-			// 真的和背后糊成一片了（深色下尤其）。
+			// ② 面板左缘那一列**不是**页面底色——那是分隔线和影，没有它这块面板
+			// 就真的和背后糊成一片了（深色下尤其）。
 			edgeX := shotWinW - queueDrawerWidth
 			edge := probeColor(tt, edgeX, drawerProbeY)
 			if maxDiff(edge, bg) <= 2 {
