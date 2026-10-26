@@ -990,9 +990,14 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 	box.Children(func() {
 		// 共享元素转场的身份：**两处封面用的是同一个**（这里和播放条上那一张）。
 		id := coverIdentity(s, st)
-		cover := imgcache.View(c, s.images, st.CoverURL, w, h).Label("当前封面")
+		// 切歌时新旧封面交叉淡入淡出：封面按封面地址起键，旧的退场时留一份淡出的
+		// 影子，新的同时淡入。
+		cover := imgcache.View(c, s.images, st.CoverURL, w, h).Label("当前封面").
+			Key(s.fullCoverKeyFor(st.CoverURL))
 		if phase == app.VideoOff || phase == app.VideoFailed {
-			cover = cover.Transition(coverTransition(id))
+			cover = cover.Transition(s.fullCoverMatchFor(id))
+		} else {
+			cover = cover.Transition(fullCoverFade)
 		}
 		switch {
 		case phase == app.VideoLoading || phase == app.VideoOn:
@@ -1017,6 +1022,35 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 	if box.Clicked() {
 		s.like.swallowClick()
 	}
+}
+
+// fullCoverFade 是满屏封面切歌时的交叉淡入淡出：进场从全透明、退场到全透明，300ms。
+// 包级变量：每帧现造会多一次分配（见 framebudget_test.go）。
+var fullCoverFade = ui.ElementTransition{
+	Duration: 300 * time.Millisecond, Ease: motion.Unified,
+	Enter: &fullCoverGhost, Exit: &fullCoverGhost,
+}
+
+// fullCoverGhost 是封面进场的起点和退场的终点：全透明。
+var fullCoverGhost = ui.Motion{Opacity: 0}
+
+// fullCoverKeyFor 是满屏封面格子的键（带封面地址）。拼出来的字符串缓存着，
+// 地址不变就不再拼——每帧拼一次就是每帧一次分配。
+func (s *Shell) fullCoverKeyFor(url string) any {
+	if s.fullCoverKey == nil || s.fullCoverKeyURL != url {
+		s.fullCoverKeyURL, s.fullCoverKey = url, "full-cover-art:"+url
+	}
+	return s.fullCoverKey
+}
+
+// fullCoverMatchFor 是「共享元素 + 淡入淡出」的转场。它里面的 Match 装着一个 any，
+// 每次现造都是一次分配，所以按身份缓存，身份不变就原样返回。
+func (s *Shell) fullCoverMatchFor(id string) ui.ElementTransition {
+	if s.fullCoverTrID != id || s.fullCoverTr.Match == nil {
+		s.fullCoverTrID, s.fullCoverTr = id, coverTransition(id)
+		s.fullCoverTr.Enter, s.fullCoverTr.Exit = &fullCoverGhost, &fullCoverGhost
+	}
+	return s.fullCoverTr
 }
 
 // coverIdentity 是共享元素这一次的身份：当前这一首的判重标识。
