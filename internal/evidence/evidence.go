@@ -4048,6 +4048,8 @@ var Items = []Item{
 			// 发不出去时不丢事件。
 			"TestAFailedNotificationStillSaysItInTheApp",
 			"TestAFailedNotificationStillSaysItWhenTheUserReturns",
+			"TestTheStickyNoticeIsReleasedWhenTheUserComesBack",
+			"TestTheStickyNoticeIsOnScreenWhenTheUserComesBack",
 			// 同一个版本只提醒一次（稳定 ID 不代替它）。
 			"TestTheSameVersionIsNotNotifiedTwice",
 			"TestANewVersionIsNotifiedAgain",

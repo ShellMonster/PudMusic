@@ -475,6 +475,82 @@ func TestAFailedNotificationStillSaysItWhenTheUserReturns(t *testing.T) {
 	}
 }
 
+// TestTheStickyNoticeIsReleasedWhenTheUserComesBack 钉住「用户回来之后那一句
+// 会被收掉」。
+//
+// 🔴 **它是上一条的另一半**（票 #559）：粘着的那一句等的就是「用户回来」——
+// 而他回来了，它就**该按正常的那两秒走**。不然它会永远赖在屏幕上（一条收不
+// 掉的提示比「提示过期了」更糟）。
+func TestTheStickyNoticeIsReleasedWhenTheUserComesBack(t *testing.T) {
+	sh := newTestShell(t, withoutTester())
+	s := sh.s
+
+	old := swapMainShell(s)
+	t.Cleanup(func() { swapMainShell(old) })
+
+	notifyFallback("下载完成", "《晴天》下载完成", errFakeNotify)
+	if len(s.toasts) == 0 {
+		t.Fatal("系统通知发不出去，可那句应用内提示压根没弹")
+	}
+	if !s.toasts[0].sticky {
+		t.Error("那一句不是「粘着」的 —— 而用户不在应用里的时候它必须粘着")
+	}
+
+	// 用户回来了：这一扇窗重新拿到焦点（这一档由 `syncFocusTracker` 认）。
+	s.noteWindow(func(p *windowPresence) { p.focused = true })
+
+	if len(s.toasts) > 0 && s.toasts[0].sticky {
+		t.Error("用户已经回来了，那一句还粘着 —— 它会永远赖在屏幕上")
+	}
+	// 放走之后它按正常的那两秒走：过一会儿它自己没了。
+	time.Sleep(toastLifetime + 300*time.Millisecond)
+	if len(s.toasts) != 0 {
+		t.Errorf("用户回来之后过了 %v，那一句还摆着 %d 条 —— 它该按正常的那两秒收掉",
+			toastLifetime, len(s.toasts))
+	}
+}
+
+// TestTheStickyNoticeIsOnScreenWhenTheUserComesBack 钉住「用户回来时那一句
+// **画在画面上**」。
+//
+// 🔴 **它是上一条之外的另一半**（票 #559）：上一条量的是「它被放走了」，而这一条
+// 量的是「它在被放走**之前**确实摆在他眼前」。
+//
+// ⚠️ **而这一条量得到，是因为提示是逐窗口一份的**：主窗收着的时候那一帧**不画**
+// （见 `presence.go`），所以那时候它虽然「在」，用户却看不见。
+func TestTheStickyNoticeIsOnScreenWhenTheUserComesBack(t *testing.T) {
+	sh := newTestShell(t, withoutTester())
+	s := sh.s
+
+	old := swapMainShell(s)
+	t.Cleanup(func() { swapMainShell(old) })
+
+	notifyFallback("下载完成", "《晴天》下载完成", errFakeNotify)
+
+	// ⚠️ **先让主窗收起来**：那是「用户不在应用里」的那一档（迷你模式 / 收在
+	// 后台），而那一档**不画**——所以那句话虽然还在，用户看不见它。
+	s.noteWindow(func(p *windowPresence) { p.shown = false })
+	s.presence.update(func(p *windowPresence) { p.focused = false })
+
+	if len(s.toasts) == 0 {
+		t.Fatal("那一句不见了 —— 而它必须等用户回来")
+	}
+
+	// 用户回到主窗：它露出来了（`OnShow`）。
+	s.noteWindow(func(p *windowPresence) { p.shown = true })
+
+	// ⚠️ **它得画出来**：提示卡片是 `PassThrough` 的（见 `viewToasts`），所以
+	// 「它在那儿」靠的是它**画出来了**，而画出来的那一帧得是「主窗看得见」的
+	// 那一帧。
+	visible := s.visibleToasts()
+	if len(visible) == 0 {
+		t.Fatal("用户回到主窗，那一句却没画出来 —— 而他就是靠它知道歌下完了")
+	}
+	if !strings.Contains(visible[0].text, "晴天") {
+		t.Errorf("画面上那一句是 %q，want 一句带歌名的", visible[0].text)
+	}
+}
+
 // TestTheSameVersionIsNotNotifiedTwice 钉住「同一个版本只提醒一次」。
 //
 // 🔴 **这是票面第 6 条「不重复刷通知」**（票 #559）：后台检查**每小时**一次，
