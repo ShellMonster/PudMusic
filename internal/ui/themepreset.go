@@ -1,7 +1,10 @@
-// 主题方案：设计规范 v0.1 §2 的三套配色（暖纸·赤陶 / 暮光·琥珀 / 柔雾·蜜桃）。
+// 主题方案：暖纸·赤陶 / 暮光·琥珀 / 柔雾·蜜桃来自设计规范 v0.1 §2；青瓷 / 墨宣 /
+// 紫檀 / 靛夜是本仓库 2026-10-26 原创补的四套（冷色系和水墨/紫/蓝几个色相）。
 //
-// 每套含浅色、深色各一份，深色是**独立调校**的，不是浅色反相。数值逐个抄自规范的
-// token 表（含对比度），改这里之前先改规范。
+// 每套含浅色、深色各一份，深色是**独立调校**的，不是浅色反相。规范的 token 表
+// 抄自规范；原创那四套的每个值都按 WCAG 现算过对比度（正文 ≥10:1、次要字 ≥4.5:1、
+// 强调底上的字 ≥4.5:1，和暖纸一档的带子一致）——改之前先跑一遍那套算法
+// （`internal/ui/themepreset_test.go` 的对比度用例也在盯着）。
 //
 // ## 套在哪一步
 //
@@ -73,6 +76,36 @@ var presets = map[app.ThemePreset]preset{
 		light: presetSkin{"#FFF9F5", "#FBEFE8", "#FFFFFF", "#FBEEE6", "#2E2523", "#6F605C", "#B4492E", "#FFFFFF", 0.12, 0.10, 0.55, presetDangerLight, presetSuccessLight, presetWarningLight},
 		dark:  presetSkin{"#1F1A1E", "#262026", "#2E272E", "#382F38", "#F7EEF0", "#C0B2B8", "#F2937A", "#2A140D", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
 		shape: presetShape{radius: 12, rowHeight: 44, radiusLg: 18},
+	},
+	// 下面四套是本仓库原创（2026-10-26），补的是现有三套全是暖色的缺口：
+	// 青瓷管冷灰绿、靛夜管蓝、紫檀管紫、墨宣管水墨+一方印。色值是照 WCAG
+	// 对比度现配的，不是从任何现成色板抄的（内置预设不碰第三方配色，见
+	// DESIGN.md §零）。
+	app.ThemePresetCeladon: {
+		// 青瓷：冷灰绿的瓷面。强调色是深青瓷（浅色下当文字用也 ≥4.5:1，白字压上
+		// 5.5:1），深色下换成亮一档的瓷青。
+		light: presetSkin{"#F1F5F3", "#E3EBE7", "#FAFCFB", "#E6EEE9", "#1F2A26", "#5A6A62", "#2A7564", "#FFFFFF", 0.14, 0.12, 0.60, presetDangerLight, presetSuccessLight, presetWarningLight},
+		dark:  presetSkin{"#131A18", "#19221F", "#1E2825", "#28332E", "#E7EEEA", "#9CAFA6", "#62BBA1", "#0C1310", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
+		shape: presetShape{radius: 10, rowHeight: 40, radiusLg: 14},
+	},
+	app.ThemePresetInkPaper: {
+		// 墨宣：宣纸底、墨字、一方朱砂印。圆角收得最扁（4/8）——印章是方的，
+		// 这一档的性子就是「正」。朱砂和语义色的危险红拉开过（色相 16° vs 3°）。
+		light: presetSkin{"#F7F6F1", "#ECEBE4", "#FCFBF7", "#EFEDE6", "#26241E", "#6D6A5F", "#B0492F", "#FFFFFF", 0.14, 0.12, 0.60, presetDangerLight, presetSuccessLight, presetWarningLight},
+		dark:  presetSkin{"#191816", "#201E1B", "#262420", "#302D27", "#EDEAE2", "#A8A399", "#D97B5A", "#1A0E0B", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
+		shape: presetShape{radius: 4, rowHeight: 40, radiusLg: 8},
+	},
+	app.ThemePresetSandalwood: {
+		// 紫檀：紫木的深与雅。圆角放大到 12/18（和柔雾同档），整套装起来更软。
+		light: presetSkin{"#F5F3F7", "#E9E5EE", "#FBFAFD", "#EBE7F0", "#24202E", "#635D72", "#614693", "#FFFFFF", 0.14, 0.12, 0.60, presetDangerLight, presetSuccessLight, presetWarningLight},
+		dark:  presetSkin{"#161320", "#1C1826", "#221D2E", "#2C263A", "#EBE8F2", "#A49CB6", "#A98FDE", "#150F20", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
+		shape: presetShape{radius: 12, rowHeight: 44, radiusLg: 18},
+	},
+	app.ThemePresetIndigoNight: {
+		// 靛夜：蓝布与靛青。现有几套里唯一管「蓝」的档。
+		light: presetSkin{"#F1F4F8", "#E3E9F0", "#FAFBFD", "#E6EBF2", "#1E2530", "#596373", "#2F5DA8", "#FFFFFF", 0.14, 0.12, 0.60, presetDangerLight, presetSuccessLight, presetWarningLight},
+		dark:  presetSkin{"#121722", "#171D2B", "#1D2433", "#262F42", "#E5EAF2", "#97A2B8", "#7AA5E8", "#0C1120", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
+		shape: presetShape{radius: 8, rowHeight: 40, radiusLg: 12},
 	},
 }
 

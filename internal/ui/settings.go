@@ -83,8 +83,9 @@ func (s *Shell) reportSettingsError() {
 	s.addToast("设置："+strings.TrimPrefix(err.Error(), "app: "), notice.Danger)
 }
 
-// themePresets 是主题方案那几档（含显式的「经典」，放最后），顺序就是从左到右的顺序。
-// 名字照设计规范 v0.1：暖纸·赤陶 / 暮光·琥珀 / 柔雾·蜜桃，按钮上只放前两个字。
+// themePresets 是主题方案那几档（含显式的「经典」，放最后），顺序就是画面上
+// 从左到右、从上到下的顺序。暖纸/暮光/柔雾的名字照设计规范 v0.1；青瓷/墨宣/
+// 紫檀/靛夜是本仓库原创档（2026-10-26 补的冷色/水墨/紫/蓝四个色相）。
 var themePresets = []struct {
 	preset app.ThemePreset
 	label  string
@@ -92,6 +93,10 @@ var themePresets = []struct {
 	{app.ThemePresetWarmPaper, "暖纸"},
 	{app.ThemePresetDuskAmber, "暮光"},
 	{app.ThemePresetSoftPeach, "柔雾"},
+	{app.ThemePresetCeladon, "青瓷"},
+	{app.ThemePresetInkPaper, "墨宣"},
+	{app.ThemePresetSandalwood, "紫檀"},
+	{app.ThemePresetIndigoNight, "靛夜"},
 	{app.ThemePresetClassic, "经典"},
 }
 

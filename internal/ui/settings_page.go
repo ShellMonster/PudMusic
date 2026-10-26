@@ -867,24 +867,35 @@ func (s *Shell) pickSelected(c *ui.Context, b ui.Element, ro bool) ui.Element {
 	return flatSolid(c, b)
 }
 
-// pickThemePreset 是主题方案那几档（经典 / 暖纸 / 暮光 / 柔雾）。
+// presetRowColumns 是「主题方案」那一格一行摆几张卡。方案现在有八套，折成
+// 两行四张——一行摆八张的话每张只剩 38 宽，缩略图和名字都摆不下。
+const presetRowColumns = 4
+
+// pickThemePreset 是主题方案那几档（暖纸 / 暮光 / 柔雾 / 青瓷 / 墨宣 / 紫檀 /
+// 靛夜 / 经典）。
 //
-// 四张预览卡（`settings_preset_card.go`），不是分段控件：方案是一整套配色，要让人看见
-// 长什么样再选。选中的方案压过「颜色」
-// 和「圆角」两行（见 `app.ThemePreset`）；那两行一改，方案会被清回「经典」，
-// 见 `settings_tab_general.go` 里各处 `ThemePreset = Classic`。
+// 每行四张预览卡（`settings_preset_card.go`），不是分段控件：方案是一整套配色，
+// 要让人看见长什么样再选。选中的方案压过「颜色」和「圆角」两行（见
+// `app.ThemePreset`）；那两行一改，方案会被清回「经典」，见
+// `settings_tab_general.go` 里各处 `ThemePreset = Classic`。
 func (s *Shell) pickThemePreset(c *ui.Context, st app.Settings, ro bool) {
 	w := s.settingsControlFitW(c, scale.Font(c, settingsControlW))
-	// 四张卡把控件列平分：卡宽 = (列宽 - 三道缝) / 4。定宽而不是 Grow：Grow 的卡
-	// 宽跟着内容走，缩略图是 FillWidth，于是四张卡宽窄不一。
-	cardW := (w - 3*space.Px8) / float32(len(themePresets))
-	row := ui.Row(c).Key("setting:themePreset").Label("主题方案").Gap(space.Px8).Width(w)
-	row.Children(func() {
-		for _, p := range themePresets {
-			if s.presetCard(c, p.preset, p.label, cardW, p.preset == st.ThemePreset, ro).Clicked() {
-				pick := p.preset
-				s.applySetting("主题方案", func(cur *app.Settings) { cur.ThemePreset = pick })
-			}
+	// 每行四张平分控件列：卡宽 = (列宽 - 三道缝) / 4。定宽而不是 Grow：Grow 的
+	// 卡宽跟着内容走，缩略图是 FillWidth，于是卡宽窄不一。行距和卡距同是一道
+	// 8 的缝；最后一行摆不满就摆几张（左对齐）。
+	cardW := (w - float32(presetRowColumns-1)*space.Px8) / presetRowColumns
+	col := ui.Column(c).Key("setting:themePreset").Label("主题方案").Gap(space.Px8).Width(w)
+	col.Children(func() {
+		for start := 0; start < len(themePresets); start += presetRowColumns {
+			end := min(start+presetRowColumns, len(themePresets))
+			ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
+				for _, p := range themePresets[start:end] {
+					if s.presetCard(c, p.preset, p.label, cardW, p.preset == st.ThemePreset, ro).Clicked() {
+						pick := p.preset
+						s.applySetting("主题方案", func(cur *app.Settings) { cur.ThemePreset = pick })
+					}
+				}
+			})
 		}
 	})
 }
@@ -927,23 +938,27 @@ func (s *Shell) pickCloseWindow(c *ui.Context, st app.Settings, ro bool) {
 // 界面上亮着一个实际上没开的开关，比暗着更坏——用户会以为明天开机它自己就起来了。
 func (s *Shell) pickAutoStart(c *ui.Context, st app.Settings, ro bool) {
 	on := st.AutoStart
-	// ⚠️ 这里**不能** .Key()。Switch 的旋钮是 `Animate("knob", …)`，动画状态记在
-	// 控件节点上；给它一个 Key 等于每帧换一个新节点，动画每帧从头开始——于是这一页
-	// 永远停不下来（实测：加了 Key 之后 `settleSettingsPage` 跑满 60 帧还在滑，
-	// 去掉就好了）。上面那两排按钮能加 Key，是因为 Row 本身没有动画。
+	// ⚠️ 这里**不能** .Key()。开关的旋钮是**动画**出来的（`springSwitch`：旋钮是
+	// 开关的一个孩子，动画记在那个孩子的节点上）；给它一个 Key 等于每帧换一个新
+	// 节点，动画每帧从头开始——于是这一页永远停不下来（实测：加了 Key 之后
+	// `settleSettingsPage` 跑满 60 帧还在滑，去掉就好了）。上面那两排按钮能加
+	// Key，是因为 Row 本身没有动画。
 	// ⚠️ 那个 `Label` 不能省，原因见 `pickSwitch`：开关自己一个字都没有。
 	//
-	// 用 `staticSwitch` 而不是 `ui.Switch`：Biu 那一页每一个开关都写了
-	// `disableAnimation`，而 `ui.Switch` 的 140ms 旋钮动画没有关掉的开关——见
-	// static_switch.go，那一节顺带说明了它为什么还很贵。
-	sw := staticSwitch(c, &on).Label("开关：开机自启").Disabled(ro)
+	// 用 `springSwitch` 而不是 `ui.Switch`：框架那一颗是 140ms 的**匀出**
+	// （`mygo/ui/widgets.go` 的 `coreSwitch`），不是弹簧——见 switch.go。
+	sw := springSwitch(c, &on).Label("开关：开机自启").Disabled(ro)
 	if !sw.Changed() {
 		return
 	}
 	if err := s.SetAutoStart(on); err != nil {
 		s.addToast("开机自启没设上："+strings.TrimPrefix(err.Error(), "app: "), notice.Danger)
 		// 下一帧 `on` 会从设置里重新读（没写成功，所以还是旧值），开关自己弹回去。
+		return
 	}
+	// ⚠️ **设上了才说**（理由见 `switch_hint.go`）：这一格的效果看不见——系统里
+	// 多了一个登录项，界面上什么也没变。
+	s.saySwitchHint("开机自启", on)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -955,9 +970,20 @@ func (s *Shell) pickAutoStart(c *ui.Context, st app.Settings, ro bool) {
 // 落盘失败时档位在内存里是改成功了的（这一点是对的，别回滚），丢的是磁盘上
 // 那一份，用户下次启动看到的才是旧值。
 func (s *Shell) applySetting(what string, fn func(*app.Settings)) {
+	s.applySettingOK(what, fn)
+}
+
+// applySettingOK 是 applySetting 的「写成功了没有」那一版。
+//
+// ⚠️ **为什么要分两个**：开关那一格要在**写成功之后**才说「开了它会怎样」——
+// 写失败的时候已经弹了一条「没存上」，再说一句效果就是两句话打架，而那两句话
+// 有一句是假的（设置压根没存住）。
+func (s *Shell) applySettingOK(what string, fn func(*app.Settings)) bool {
 	if _, err := s.app.UpdateSettings(fn); err != nil {
 		s.addToast(what+"没存上："+strings.TrimPrefix(err.Error(), "app: "), notice.Danger)
+		return false
 	}
+	return true
 }
 
 // settingsButton 是设置页的次级按钮（选择、添加文件夹、导入导出、恢复默认）：

@@ -28,11 +28,14 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 `macOS 音乐 App 设计规范 v0.1`，本节只记**代码里已经落地**的部分。
 
 - **主题方案**：设置新增 `themePreset`（`warm-paper` 暖纸·赤陶 / `dusk-amber` 暮光·琥珀
-  / `soft-peach` 柔雾·蜜桃 / `classic` 经典）。**默认暖纸**。色板在
-  `internal/ui/themepreset.go`，逐个抄自规范 §2，含浅色、深色各一份（深色独立调校）。
-  套了方案就压过 `primaryColor` / `backgroundColor` / `borderRadius`；设置页改那三项
-  会把方案清成经典。**经典 = 原来的 Biu 绿外观**，本文件后面「令牌」「颜色」两节
-  量的就是经典。
+  / `soft-peach` 柔雾·蜜桃 / `classic` 经典；2026-10-26 起**本仓库原创**补了四套——
+  `celadon` 青瓷 / `ink-paper` 墨宣 / `sandalwood` 紫檀 / `indigo-night` 靛夜，管的是
+  冷灰绿、水墨、紫、蓝四个色相，**值是照 WCAG 现配的原创数值，不取自任何公开色板**，
+  内置预设不碰第三方配色的口径见「皮肤包」那条调研）。**默认暖纸**。色板在
+  `internal/ui/themepreset.go`：规范那三套逐个抄自规范 §2，含浅色、深色各一份
+  （深色独立调校）。套了方案就压过 `primaryColor` / `backgroundColor` /
+  `borderRadius`；设置页改那三项会把方案清成经典。**经典 = 原来的 Biu 绿外观**，
+  本文件后面「令牌」「颜色」两节量的就是经典。
 - **播放条**：高 **76**、封面 **52**（原 88 / 56）。
 - **主播放键**：**实心强调色圆**（播放条 44×44、图形 20；满屏 64×64、图形 28），图形用
   `AccentText`，悬停 `AccentHover`、按下 `AccentPressed`。原来是无底的
@@ -91,7 +94,7 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
   - **折叠态**：侧栏折起来时这一组**整个不画**（一枚图标 + 一层浮层），而**浮层
     里那几行是同一套**（封面 + 名称 + N 首）——浮层是同一个入口的另一种展开
     方式。
-- **设置页「主题方案」**是四张预览卡（暖纸 / 暮光 / 柔雾 / 经典，`settings_preset_card.go`），
+- **设置页「主题方案」**是预览卡（`settings_preset_card.go`），**每行四张、八套折两行**，
   不是分段控件；套了方案时「颜色」那行的色块显示方案真在画的色。
 - **登录页**内容收在一张居中的卡片里（宽 420、`surface1`、`radiusLg`、1px 描边）；卡片底色和圆角
   走 `Shell.cardBackground` / `Shell.cardRadius`（方案里的 `surface1` / `radiusLg`，经典用控件层和 1.5 倍圆角），
@@ -808,6 +811,7 @@ mygo v0.6.3）：
 | 悬停淡入 | 200ms | `motion.Unified` | 时长抄上游 `transition-opacity duration-200`（列表行、网格卡两处） |
 | **播放键「弹」出来** | **150ms** | `motion.Unified` | 见《播放键弹出来》那一节；倍数 0.85 → 1（**不抄** QQ音乐 的 0.7） |
 | 主 Tab 滑块 | **弹簧**（没有固定时长） | `ui.SpringOptions{Stiffness: 260, Damping: 32, Precision: 0.5}` | 见《主 Tab 滑块为什么是弹簧》 |
+| **设置开关的旋钮** | **弹簧**（没有固定时长） | `ui.SpringOptions{Duration: 500ms, Bounce: 0.15, Precision: 0.05}`（= 框架的 `ui.Snappy`，只是把精度收了） | 2026-10-26 拍板（票 BMG-284；用户原话：「开关要有那种弹的效果的，就是用户明显看到是打开」）。**上游是反的**（Biu 设置页那三处开关都写了 `disableAnimation`）——我们**故意不抄**，见《设置开关为什么是弹簧》 |
 | Toast 入场 | 250ms | `motion.Unified`，**淡入与位移错开** | 时长抄上游 `appearance-in 250ms ease-out`；错开见《Toast 的淡入与位移错开》 |
 | 赞键的背景层 | 260ms，**晚 100ms 起** | `motion.Unified` | 从半大长到满大（起点 0.5，见《按下缩放》那一节） |
 | 歌词行切换 | 300ms | `motion.Unified` | 时长抄上游 `transition-all duration-300 ease-out`（`index.tsx:330`） |
@@ -1173,6 +1177,32 @@ QQ音乐（Web）的顶栏联想面板是 **`max-height` 展开、600ms ease-out
 - **时长也不抄那 600ms**：那是 Web 版在慢网络下的补偿；本地这一档是
   **200ms**（和队列抽屉、侧栏折叠同一档）。
 
+### 设置开关为什么是弹簧
+
+**它要的是「明显看到开了」，而「啪一下跳过去」看不见那一下。**
+
+- **上游是反的**：Biu 设置页那三处开关都写了 `disableAnimation`
+  （`src/pages/settings/system-settings.tsx`），而 MyGo 自己的 `ui.Switch` 是
+  **140ms 的匀出**（`mygo/ui/widgets.go` 的 `coreSwitch`：
+  `sw.Animate("knob", b2f(*on), 140*time.Millisecond)`）——**匀出不是弹**：它从
+  最快开始、慢慢停住，没有「冲过头再回来」的那一下。
+  ⇒ **这一处是我们和上游明确相反的地方**（票 BMG-284，2026-10-26 用户要的）。
+- **走 `AnimatePose` 那一族（只重绘），不走 `AnimateTo`**：判据是「**动画的值
+  会不会被 view 读**」（见 `like.go` / `fullplayer.go` 那一段）。旋钮画在哪要读
+  那个值 ⇒ `AnimateTo` 会让**整棵设置页**在那几百毫秒里每帧重建一遍（设置页是
+  全应用最大的一棵树）；`AnimatePose` 的值**元素自己走**，中间那些帧只重绘。
+  ⇒ **旋钮自己是一个元素**（开关的一个绝对定位的孩子），位置由它的 pose 带着走。
+- **过冲只有 0.10 DIP（肉眼看不见）**：这一颗旋钮停下来时离轨道边只有 2 DIP，
+  过冲超过 2 DIP 它就**戳出轨道**了。看得见的是**旋钮真的飞过去**（250ms 走完
+  90%、333ms 走完 98%）。
+- **轨道底色是瞬变的**：底色是节点自己的属性（`Background`，建的时候写死），
+  pose 那一族带得动位置、缩放、旋转和不透明度，**带不动颜色**；要让底色也一起
+  动画，就得让 view 每帧读一个动画出来的颜色（`AnimateColor`），又回到「每帧
+  重建整棵界面」。
+- **精度收到 0.05 DIP**：框架默认的 0.001 会让弹簧跑到 **884ms** 才收手，而画面
+  在 350ms 之后就已经不动了——多出来的那些帧是白占的（同一件事见《歌词滚到中间
+  为什么是弹簧》那一节）。
+
 ### 上游那 43 处 `disableAnimation` 的范围
 
 「上游刻意关掉动画」这句话**只对一半**：上游是**一件一件挂在具体组件上的**，
@@ -1197,6 +1227,11 @@ QQ音乐（Web）的顶栏联想面板是 **`max-height` 展开、600ms ease-out
 ⚠️ **「浮层那一类」只占 21 处**（Modal 10 + Popover 6 + Dropdown 3 + Select 1 +
 Drawer 1），**另外 22 处根本不是浮层**（按钮按下 10、开关 4、勾选框 3、提示气泡 4、
 滑块 1）。把 43 处一概说成「浮层的进出场都关了」是当初写这条时的推断。
+
+⚠️ **Switch 那一档（4 处）我们**故意不抄**：上游把设置页那三处开关的动画关了，
+而我们让它们**弹**（票 BMG-284，2026-10-26 用户原话：「开关要有那种弹的效果的，
+就是用户明显看到是打开」）——理由与取舍见《设置开关为什么是弹簧》那一节。
+**这是上游和我们明确相反的一处。**
 
 ⚠️ **「按组件分」这件事只有一处容易数错**：**右键菜单那个是 HeroUI 的 `<Popover>`**
 （`src/components/context-menu/index.tsx:73`），不是 `<Dropdown>`——它不是系统菜单，
