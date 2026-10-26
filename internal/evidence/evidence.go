@@ -2592,6 +2592,42 @@ var Items = []Item{
 		},
 	},
 	{
+		Category: HTTP,
+		// 弹幕这一条路（应用层 + 缓存那一层）：
+		//
+		//   - **代次**：换歌之后旧的那一趟回来时必须被丢掉——症状是「在听 B，
+		//     屏幕上滚着 A 的弹幕」，而弹幕盖住封面的时候本来就不好认。
+		//   - **防重入**：界面每一帧问一次，不挡住的话一次播放能发几百个请求
+		//     （B 站会风控，而症状是「怎么问不出弹幕」）。
+		//   - **缓存**：7 天之内再进是瞬时的（不发请求），过期了会重新拉。
+		//   - **没有 cid**：快照为空，且**一个请求都不发**（本地文件和音乐库条目
+		//     走这一支，而它们永远没有弹幕）。
+		Spec: "弹幕：换歌之后旧的那一趟作废、界面每帧问一次只发一趟、7 天内再进是瞬时的（不发请求）、没有 cid 时快照为空且不发任何请求",
+		Tests: []string{
+			"TestALateDanmakuFromTheOldSongNeverLands",
+			"TestEveryFrameAsksButOnlyOneGoesOut",
+			"TestTheSecondTimeIsInstant",
+			"TestAnExpiredCacheIsFetchedAgain",
+			"TestNoCidMeansNoSnapshotAndNoRequest",
+			"TestSevenDaysLaterItIsGone",
+			"TestTheFileIsNamedAfterTheBvidAndTheCid",
+			// 生产那一档（真 `bili.Client`）：前面那些都替掉了那一趟。
+			"TestTheProductionPathActuallyAsksBili",
+			// 端到端：cid 是取流那一趟问出来的（搜索结果那一路）。
+			"TestTheDanmakuComesForASongWhoseCidHadToBeAsked",
+			// 评审提的三条：
+			//  - 同一个 bvid 的新选择（cid 还没问出来）不许拿上一分 P 的弹幕
+			//  - 同一个 key 上慢的那一趟不许盖掉新写的那份缓存
+			//  - Close 之后缓存不再被写
+			"TestReviewUnresolvedSameBVidShowsThePreviousPartsDanmaku",
+			"TestReviewAStaleSameKeyFetchOverwritesTheFreshCache",
+			"TestReviewCloseStillWritesTheCache",
+			// 同一个 bvid 的**另一分 P** 的在途那一趟也不许把自己的 cid 写上
+			// （bvid 对得上不够——多 P 的投稿 bvid 是同一个）。
+			"TestTheInFlightRunOfAnotherPartDoesNotWriteItsCid",
+		},
+	},
+	{
 		Category: Play,
 		// 「多 P 的投稿只能播第一集」（BMG-47 的 A12）那一张票的界面那一半：
 		// 播放条上有分集入口 → 打开是浮层列表、每一集有编号和标题 → 标出正在播的
