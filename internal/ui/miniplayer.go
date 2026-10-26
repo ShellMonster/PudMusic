@@ -204,7 +204,7 @@ const (
 // 鼠标去点（点一下会改动用户当前的前台应用）。收尾说明里把这两种证据分开写了。
 func MiniWindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 	return mygo.WindowOptions{
-		Title:  "BiuGo 迷你播放器",
+		Title:  "布丁音乐迷你播放器",
 		Width:  miniWidth,
 		Height: miniHeight,
 		// 🔴 `Transparent` 必须配着自己画的背景，理由见文件头那一条。

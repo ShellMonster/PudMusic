@@ -302,7 +302,7 @@ func (s *Shell) commitSideWidth() {
 // `sidebar_test.go` 的 `TestTheSidebarShowsTheAppNameExactlyOnce` 钉住它。
 //
 // ⚠️ **折叠态只摆 logo，不摆名字**：侧栏折叠后是 72 像素
-// （`app.CollapsedSideMenuWidth`），而 24px 的「BiuGo」光文字就约 73 宽——
+// （`app.CollapsedSideMenuWidth`），而 24px 的「布丁音乐」光文字就约 96 宽——
 // 摆不下。上游也是折叠态不摆名字（`{!isCollapsed && <span>Biu</span>}`）。
 //
 // # 字色：主色，但浅色下走 `ink.AccentOn`
@@ -313,8 +313,16 @@ func (s *Shell) commitSideWidth() {
 // ≥4.5:1 的变体，深色下原样不动），见 `widgets/ink`。
 func (s *Shell) viewSideBrand(c *ui.Context, collapsed bool) {
 	t := c.Theme()
+	// ⚠️ **名字要让开左上角那三枚系统按钮**（macOS 的红黄绿）：它们**浮在内容
+	// 上面**，而侧栏是**通栏**的（从窗口最顶开始），所以品牌这一行和它们**同一行**
+	// ——不挪开的话名字就**顶在那三枚底下**。
+	// `bar.Left` 就是系统控件在左边占掉的宽度（真窗口上约 66 像素；
+	// `mygo/ui/context.go` 的 `TitleBar{Height, Left, Right}`）。
+	// ⚠️ 顶栏那一行**不让**这几十像素（票 #286：顶栏只盖内容区，侧栏那一片不盖），
+	// 而侧栏是通栏的 —— **两处的理由不一样**。
+	bar := c.TitleBar()
 	row := ui.Row(c).Key("side-brand").Gap(space.Px8).AlignItems(ui.Center).
-		Padding(s.sideBrandTopPad(), space.Px12, space.Px12, space.Px16)
+		Padding(s.sideBrandTopPad(), space.Px12, space.Px12, space.Px16+bar.Left)
 	if collapsed {
 		// 🔴 **折叠态必须把左右那两格内边距去掉**：侧栏折叠后是 72，而其中
 		// **9 像素是右缘那条把手和分隔线**（8 + 1）——内容区只剩 63。
@@ -327,11 +335,19 @@ func (s *Shell) viewSideBrand(c *ui.Context, collapsed bool) {
 		row = row.Padding(s.sideBrandTopPad(), space.None, space.Px12, space.None).Justify(ui.Center)
 	}
 	row.Children(func() {
-		ui.Image(c, brandLogo()).Size(sideBrandLogo, sideBrandLogo)
-		if !collapsed {
-			ui.Text(c, appName).FontSize(scale.Font(c, scale.BrandName)).Bold().
+		// ⚠️ **不摆 logo 了**（人 2026-10-26：「左上角的不需要用 icon 了，
+		// 就用名称就行」）。
+		//
+		// 折叠态摆**一个字**（不是图）：侧栏折叠后是 72 像素、内容区只剩 63，
+		// 24px 的「布丁音乐」四个字放不下，但**一个字**放得下 —— 折叠后那一片
+		// 不至于空着。
+		if collapsed {
+			ui.Text(c, appNameShort).FontSize(scale.Font(c, scale.BrandName)).Bold().
 				TextColor(ink.AccentOn(t))
+			return
 		}
+		ui.Text(c, appName).FontSize(scale.Font(c, scale.BrandName)).Bold().
+			TextColor(ink.AccentOn(t))
 	})
 }
 

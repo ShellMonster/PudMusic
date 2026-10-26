@@ -1,12 +1,12 @@
 {
-  "name": "BiuGo",
+  "name": "布丁音乐",
   "identifier": "io.github.shellmonster.biu",
   "version": "0.1.0",
   "out": "build",
   "urlSchemes": ["biu"],
   "copyright": "Copyright © 2026 ShellMonster. Based on Biu, Copyright © 2022–2025 wood3n. PolyForm Noncommercial 1.0.0 — see the licenses folder shipped with this app.",
   "macos": {
-    "dmgTitle": "安装 BiuGo",
+    "dmgTitle": "安装布丁音乐",
     "infoPlist": {
       "LSApplicationCategoryType": "public.app-category.music"
     }

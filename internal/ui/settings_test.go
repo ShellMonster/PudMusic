@@ -207,9 +207,9 @@ func TestShellSaysSoWhenSettingsAreBroken(t *testing.T) {
 	// 提示归提示，界面照常画。
 	//
 	// 断的是**侧栏那个品牌字**：它是整扇窗最外层的骨架，画不出来的话整个界面
-	// 都不成立。（原来这里断的是 "Biu"，而画面上早就只有 "BiuGo" 了——`HasText`
+	// 都不成立。（原来这里断的是 "Biu"，而画面上早就只有现在这个显示名了——`HasText`
 	// 是子串匹配，那一句一直是在靠巧合过的。）
-	if !tt.HasText("BiuGo") {
+	if !tt.HasText("布丁音乐") {
 		t.Errorf("提示之外界面没画出来，文字有 %q", tt.Texts())
 	}
 

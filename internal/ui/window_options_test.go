@@ -63,7 +63,7 @@ func TestTheWindowOpensAtBiuNumbers(t *testing.T) {
 	if opts.Width != biuWidth || opts.Height != biuHeight {
 		t.Errorf("窗口是 %d×%d，Biu 是 %d×%d", opts.Width, opts.Height, biuWidth, biuHeight)
 	}
-	if opts.Title != "BiuGo" {
+	if opts.Title != "布丁音乐" {
 		t.Errorf("窗口标题是 %q", opts.Title)
 	}
 	// 断点：布局里那几档是按「窗口至少这么宽」设计的。

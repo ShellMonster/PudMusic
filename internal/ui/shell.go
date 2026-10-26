@@ -1043,4 +1043,8 @@ func (s *Shell) visibleFlag() *atomic.Bool {
 //
 // ⚠️ **这和 bundle id、钥匙串服务名、用户数据目录名是四件互不相干的事**
 // （见 AGENTS.md §5）：改显示名不许顺手动那三样。
-const appName = "BiuGo"
+const appName = "布丁音乐"
+
+// appNameShort 是折叠态那一片摆的那一个字（侧栏折叠后只剩 72 像素，
+// 「布丁音乐」四个字放不下——见 `viewSideBrand`）。
+const appNameShort = "布"

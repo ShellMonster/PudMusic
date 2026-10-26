@@ -82,7 +82,7 @@ func dragTo(t *testing.T, tt *mygoui.Tester, to float64) {
 // TestWindowShowsPlayBar 是验收项 1：起得来，画面上有播放条。
 func TestWindowShowsPlayBar(t *testing.T) {
 	h := newHarness(t)
-	if !h.tt.HasText("BiuGo") {
+	if !h.tt.HasText("布丁音乐") {
 		t.Errorf("标题不在，文字有 %q", h.tt.Texts())
 	}
 	if !h.tt.HasText("还没有打开文件") {
