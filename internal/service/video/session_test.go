@@ -95,7 +95,19 @@ func TestSessionStartsAtTheRequestedTime(t *testing.T) {
 	defer s.Close()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if f, ok := s.Poll(time.Hour); ok {
+		// ⚠️ **问的位置不能是「一小时之后」**——和上面那一条同一个毛病。
+		//
+		// `Poll` 里有一段「离上次 seek 超过 resyncGap（1.5 秒）就重新对时」：
+		// 而「一小时之后」这个位置**永远在** `s.head+resyncAhead` 前面 ⇒ 机器
+		// 一忙（第一帧晚 1.5 秒才到）就 seek 到一小时处（视频早就放完了）
+		// → 那一趟直接结束 → **一帧都拿不到**：
+		//
+		//	no frame, err=<nil>
+		//
+		// 问「起点 + 100 毫秒」就不会触发它（那个位置落在这一趟刚开始的那个
+		// 2 秒之后，而 `s.head` 还没跑过它），而这一条要量的「从要求的那个
+		// 时间开始」一点没变。
+		if f, ok := s.Poll(2*time.Second + 100*time.Millisecond); ok {
 			if f.PTS < 2*time.Second {
 				t.Fatalf("first frame %v is before the start", f.PTS)
 			}

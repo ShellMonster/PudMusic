@@ -286,6 +286,20 @@ func newHarness(t *testing.T, size int64, quality int) *harness {
 // 自己删就躲开了那一下：删不掉（目录不空）就等一会儿再删，直到删干净；删掉之后
 // `t.TempDir()` 的清理再跑一遍 `RemoveAll`——路径已经没了，它什么也不做，也不
 // 会报错。
+//
+// 🔴 **但「`RemoveAll` 返回 nil」不等于「目录没了」**（2026-10-27 实测）：
+//
+//	RETRY still-there: 歌.m4s
+//
+// 那个被丢下的 goroutine **会把目录重新建出来**——`prepare` 里的 `ensureDir`
+// 干的就是这个（`os.MkdirAll`），而它跑在 `RemoveAll` **之后**。于是：
+// `RemoveAll` 删掉了目录 → goroutine 又 `MkdirAll` 建了一个 → 在里面建
+// `.part` → **这一次 `RemoveAll` 成功返回了**（它删的时候目录还是空的）→
+// 而 `t.TempDir()` 的清理再来删时，目录里又多了那个 `.part` ⇒
+// 「TempDir RemoveAll cleanup: directory not empty」。
+//
+// ⇒ 所以判据不能是「`RemoveAll` 报没报错」，而是「**那个路径还在不在**」：
+// 还在就**再删一遍**，直到它真的不见了为止。
 func closeManager(t *testing.T, m *Manager, dir string) {
 	t.Helper()
 	_ = m.Close("")
@@ -294,11 +308,19 @@ func closeManager(t *testing.T, m *Manager, dir string) {
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		err := os.RemoveAll(dir)
-		if err == nil || time.Now().After(deadline) {
+		_ = os.RemoveAll(dir)
+		// 🔴 **`RemoveAll` 报没报错不算数**（见上面那段）：那个被丢下的
+		// goroutine 可能**在它删完之后**又把目录建出来。所以这里看的是
+		// 「那个路径还在不在」。
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			return
 		}
-		// 那个被丢下的 goroutine 还在写：等它收尾。
+		if time.Now().After(deadline) {
+			// 到点还在：那就留着，让 `t.TempDir()` 的清理去报错——
+			// **它报的是真话**（确实有东西一直往里写），不该在这儿悄悄放过。
+			return
+		}
+		// 那个被丢下的 goroutine 还在写：等它收尾，再删一遍。
 		time.Sleep(5 * time.Millisecond)
 	}
 }

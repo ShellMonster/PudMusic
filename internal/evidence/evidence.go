@@ -2221,6 +2221,62 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// B 站那一份弹幕（`/x/v1/dm/list.so`）。**这一条回的不是 JSON**——
+		// 它回的是**原始 deflate 的 XML**（实测 2026-10-27：响应头
+		// `Content-Type: text/xml` + `Content-Encoding: deflate`，而 deflate 是
+		// **裸的**，头两字节 `c5 55`，不是 zlib 的 `78 xx`）。
+		//
+		// 🔴 **「解不出 JSON」是一个静默的失败**：症状是「一条弹幕都没有」，
+		// 而界面上看不出任何异样。所以另开了 `DoRaw`（拿原文不解），而**错误
+		// 分类仍走 `Do` 那一条**——「能不能重试」那张表是全项目唯一的一处
+		// （`retry.go`），`DoRaw` 自己造一套的话，弹幕那条路上的「重试」会给错。
+		//
+		// ⚠️ **压缩那一档是静默的**：拿 `compress/zlib` 去解会报一句看不懂的错
+		// （`flate: corrupt input before offset 5`），而症状是「一条弹幕都没有」。
+		// ⇒ 有一条测试专门钉「deflate 不是 zlib」。
+		//
+		// ⚠️ **`p` 那 9 段第 8 段是 19 位的大整数**（弹幕 id）——走过 `float64`
+		// 会掉精度。而 `p` 段数不够的时候，后面几段是空的 ⇒ 颜色变成 0（全黑），
+		// **一条黑字弹幕在界面上看着完全正常**。所以段数不够的那一条要丢掉。
+		//
+		// ⚠️ **一条读不懂的不许把整份丢掉**：弹幕的正文是**用户自己打的字**，
+		// 什么字符都可能有，而一个**控制字符**（实测 U+0001）在 XML 里是
+		// **报错**的——报错的位置在那一条上。
+		//
+		// 🔴 **这一档最省事的写法是错的**：用一个 `xml.Decoder` 读到底的话，
+		// 那个错**让整个 decoder 卡住**——后面的合法弹幕**一条都读不到**
+		// （症状是「这个视频只有一条弹幕」）。⇒ 解析要**一条一条单独解**：
+		// 解不开的**只丢那一条**。
+		//
+		// ⚠️ **而没定义的实体要「原样留着」**（`&foo;`）——那是用户打的字，
+		// 非严格模式把它原样带出来，**不丢那一条**。
+		Spec: "B 站那一份弹幕自己来：原始 deflate（不是 zlib）解开、XML 里 `p` 那 9 段逐段切对（时间/模式/字号/十进制颜色）、正文里的 XML 实体解开、读不出来的一条只丢那一条；拉不到要有话说",
+		Tests: []string{
+			"TestDanmakuReadsEveryFieldOfEveryLine",
+			"TestDanmakuCutsTheNineFieldsOfThePAttribute",
+			"TestDanmakuUnwrapsTheXMLEntities",
+			"TestDanmakuUnwrapsIsDeflateNotZlib",
+			"TestDoRawHandsBackTheBytesUndecoded",
+			"TestDoRawReportsTheSameErrorsAsDo",
+			"TestDanmakuAsksTheDanmakuEndpoint",
+			"TestDanmakuWithoutACidDoesNotAsk",
+			"TestDanmakuWithNoDanmakuIsNotAnError",
+			"TestDanmakuKeepsWhatItCouldReadWhenOneLineIsBroken",
+			"TestDanmakuIgnoresLinesItCannotUnderstand",
+			"TestDanmakuUnwrapsAWholeResponseThatIsDeflated",
+			"TestDanmakuKeepsTheRowIDAsAString",
+			"TestDanmakuGivesEveryLineItsOwnID",
+			"TestDanmakuKeepsTheOrderBiliGave",
+			"TestDanmakuSaysSoWhenTheAnswerIsNotDanmaku",
+			"TestDanmakuWithTheFeatureTurnedOffIsNotAnError",
+			"TestDanmakuKeepsGoingAfterALineWithAControlCharacter",
+			"TestTheRealResponsesGiveTheExpectedNumberOfLines",
+			"TestTheFixtureMatchesTheServerBytes",
+			"TestDanmakuWithAnEmptyBodyIsNotAnError",
+		},
+	},
+	{
+		Category: HTTP,
 		// 联想词那个接口（Biu 的 `getSearchSuggestMain`）。**参数逐个对着上游抄**，
 		// 少一个的症状在界面上像「联想词永远是空的那一档」，而那和「拉不到」长得
 		// 一模一样。
@@ -4047,6 +4103,78 @@ var Items = []Item{
 			"TestTheEnqueueNoticeIsOnlyForRandom",
 			"TestAddingASongInRandomModeSaysItWillPlayThisRound",
 			"TestAddingASongOutsideRandomModeSaysNothing",
+		},
+	},
+	{
+		// 票 #557：系统把一个音频文件交给本应用（双击、拖到程序坞图标）。
+		//
+		// 🔴 **这一族全是「静默」的坏法**：登记漏了、回调装晚了、扩展名对不上，
+		// 三样都不会报错——症状都是「双击一个文件，应用起来了而什么也没放」。
+		//
+		// ⚠️ **三份口径必须一样**：`mygo.json` 的 `fileAssociations`（系统按它
+		// 登记）、框架按它过滤命令行（`mygo/deeplink.go` 的 `fileArgs`）、界面
+		// 按它判收不收（`internal/platform` 的 `AssociatedAudioExts`）。
+		//
+		// ⚠️ **登记的那一份是「真放得出声」的那一份**，不是扫描白名单——
+		// 扫描白名单里有 `.wma`，而我们没有 ASF 解码器（PLAN §5.4）。
+		//
+		// ⚠️ **队列语义是行级「立即播放」那一档**：追加到队尾并打断，**不清空**
+		// 用户已经排好的队列（DESIGN.md §十第 4 条）。
+		Category: Platform,
+		Spec:     "系统把一个音频文件交给本应用：已有的实例被叫回，主窗打开并放它（追加队尾并打断，不清空队列），不起第二个实例；收不下的（文件不在了、不是普通文件、格式放不了）有可见提示，而且不打断正在放的那首",
+		Tests: []string{
+			// 登记的那一份（`internal/platform`）：内容、`.wma` 不在里面、
+			// 带点和不带点是同一个格式。
+			"TestTheAssociatedExtensionsAreThePlayableOnes",
+			"TestWMAIsNotAssociated",
+			"TestIsAssociatedAudioExtAcceptsBothSpellings",
+			"TestAudioExtOfTakesTheExtensionWithoutTheDot",
+			// `mygo.json` 与代码里那一份**是同一份**，且扩展名不带点
+			//（带点会被 MyGo 的配置校验器拒绝，打包在读配置那一步就失败）。
+			"TestMygoJSONDeclaresTheSameExtensions",
+			"TestMygoJSONExtensionsCarryNoDot",
+			"TestMygoJSONStillDeclaresTheURLScheme",
+			// 框架按什么过滤命令行里的文件（照抄框架那三行）。
+			"TestTheFrameworkFiltersCommandLineFilesByTheseExtensions",
+			// 界面那一半：放起来了、队列没被清空、界面说了话。
+			"TestOpeningAFilePlaysItAndKeepsTheQueue",
+			// 迷你开着时收到文件：让开迷你，主窗口上放。
+			"TestOpeningAFileMakesRoomForTheMainWindow",
+			// 回调在 `Run` 之前装上了（装晚了那一次就永远收不到）。
+			// ⚠️ **走生产那条安装点**（`installLifecycle`）：删掉它里面那一行
+			// → 这一条红（第二轮评审实测过：上一版这一条是手工装钩子、
+			// 手工调回调，删掉生产那一行照样绿）。
+			"TestTheOpenFileHookIsInstalledBeforeRun",
+			// 第二个实例把命令行转交过来那一档也装上了（它同样要认下框架
+			// 丢掉的那一部分）。
+			"TestTheSecondInstanceHookIsInstalledBeforeRun",
+			// 三种没收下要说成三件不同的事，而且不打断正在放的那首。
+			"TestCheckOpenFileTellsTheThreeRejectionsApart",
+			"TestOpeningAMissingFileSaysSoAndKeepsPlaying",
+			"TestOpeningAnUnsupportedFormatSaysSo",
+			"TestOpeningADirectorySaysSo",
+			// 「格式放不了」那一句要说清楚支持哪些格式。
+			"TestTheUnsupportedTextSaysWhichFormatsWeTake",
+			"TestTheMissingTextSaysTheFileIsGone",
+			// 🔴 **「看得见」那一条**：不是「状态里记着」，而是**画面上真的有**
+			//（`repaint` 那一格要了帧）。主窗口那一扇、迷你那一扇各断一遍——
+			// 迷你**不画 toast**，而它常常就是用户眼前那一扇。
+			"TestARejectedFileIsVisibleOnScreen",
+			"TestARejectedFileIsVisibleWithTheMiniPlayerOpen",
+			// 提示写进状态之后**自己会要一帧**（不然界面停在旧帧上）。
+			"TestTheToastIsPaintedOnTheNextFrame",
+			// 命令行那一侧：框架在 `OnOpenFile` 之前丢掉的那一部分，
+			// **我们自己在命令行这一侧认下来**，而用户看得见。
+			"TestTheFrameworkDropsThosePathsBeforeOnOpenFile",
+			"TestTheLaunchArgsPickUpWhatTheFrameworkDrops",
+			"TestTheCommandLineRejectionsAreVisible",
+			"TestTheSecondInstanceArgsAreCheckedForTheOnesTheFrameworkDrops",
+			// 框架会交的那些我们不重复处理（重复了队列里两份同一首歌）。
+			"TestALaunchArgThatTheFrameworkDeliversIsNotHandledTwice",
+			// ⚠️ **Windows 的盘符不是 scheme**：`C:\歌.flac` 被 `url.Parse`
+			// 认成 scheme `c`，而按 `u.Scheme != "file"` 判的话**整个
+			// Windows 的文件关联这一档会被自己扔掉**。
+			"TestTheLaunchArgKeepsTheWindowsDriveLetter",
 		},
 	},
 	{
