@@ -279,7 +279,13 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 			// ⚠️ **它带一个「登录完去哪」**：从这一页进去的，登录完**回这一页**
 			// ——用户就是来看动态的，登录完落回首页等于把他白绕一圈
 			// （这一条是票 #277 点名的那个例外：别的入口回首页）。
-			if ui.Button(c, "去登录").Clicked() {
+			//
+			// ⚠️ **读屏的名字要能和侧栏那一枚分清**：侧栏收藏夹区没登录时也有
+			// 一枚「去登录」，归宿是首页（`sidebar_favorites.go` 的
+			// `favEmptyAction`）。两枚同名不同宿，读屏软件念出来是一样的——
+			// 这里给它一个说出去哪的名字。测试定位这一枚也靠它
+			// （`TestLoginFromTheDynamicPageComesBackToTheDynamicPage`）。
+			if ui.Button(c, "去登录").Label("去登录，登录后回到动态页").Clicked() {
 				s.goLogin(dynamicFeedPath)
 			}
 			return

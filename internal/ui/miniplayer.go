@@ -543,7 +543,7 @@ func (s *Shell) viewMini(c *ui.Context) {
 	// 那一族，它们已经归一（票 #239）。
 	// 圆角跟着主题走，用户在设置页调圆角时这一块跟着变，和别处一致。
 	ui.Row(c).Key("mini").Fill().Radius(t.Radius).
-		Background(t.Surface).DragWindow().Children(func() {
+		Background(s.coverWash(t, t.Surface)).DragWindow().Children(func() {
 		// 里面照样逐块包一层 Guard（铁律四）：崩掉封面那一块不该把控制键一起带走。
 		s.guardAt("迷你播放器封面", func(c *ui.Context) { s.viewMiniCover(c, st) })(c)
 		s.guardAt("迷你播放器控制键", func(c *ui.Context) { s.viewMiniControls(c, st, t) })(c)

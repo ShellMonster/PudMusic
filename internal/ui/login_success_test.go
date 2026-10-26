@@ -182,6 +182,12 @@ func TestLoginSuccessClearsTheLoginPagesTemporaryState(t *testing.T) {
 // ⚠️ **入口是动态页上那个「去登录」**（`dynamicfeed.go` 的作者栏）：那一页
 // 没登录时作者栏整个拉不出来，而「去登录」是唯一能解开它的动作。
 //
+// ⚠️ **点击要按读屏的名字找**：屏上同时还有侧栏收藏夹区那一枚「去登录」
+// （`sidebar_favorites.go` 的 `favEmptyAction`，归宿是首页），而按可见文字找
+// 的话 `Tester.Find` 取的是元素树里**先建出来的那一个、不查几何**（侧栏排在
+// 内容列前面）——按文字点会点中侧栏那一枚，登录完落回首页（这一条当年就是这么
+// 悄悄红的）。作者栏那一枚的读屏名字带着归宿，按它找。
+//
 // ⚠️ **这一条和「别的入口去首页」是一对**：从顶栏那枚进去的落首页，从
 // 动态页进去的落动态页——**去处是入口自己说的**（`goLogin(after)`）。
 func TestLoginFromTheDynamicPageComesBackToTheDynamicPage(t *testing.T) {
@@ -190,12 +196,18 @@ func TestLoginFromTheDynamicPageComesBackToTheDynamicPage(t *testing.T) {
 	tt, s := loginFlowTester(t, a, dynamicFeedPath)
 	tt.Frame()
 
-	if err := tt.Click("去登录"); err != nil {
-		t.Fatalf("动态页上点不到「去登录」：%v，文字有 %q", err, tt.Texts())
+	if err := tt.Click("去登录，登录后回到动态页"); err != nil {
+		t.Fatalf("动态页上点不到作者栏那枚「去登录」：%v，文字有 %q", err, tt.Texts())
 	}
 	tt.Frame()
 	if got := s.router.Path(); got != loginPath {
 		t.Fatalf("点了「去登录」之后停在 %q，want %q", got, loginPath)
+	}
+	// 🔴 **当场验「点中的是哪一枚」**：`loginAfter` 是 `goLogin` 记下的归宿。
+	// 点错枚的话它会是首页，这一条立刻红并说出原因，而不是等到最后一句
+	// 「停在 /」才让人回头猜。
+	if got := s.loginAfter; got != dynamicFeedPath {
+		t.Fatalf("点中的不是作者栏那一枚：登录完的归宿记成了 %q，want %q（动态页）", got, dynamicFeedPath)
 	}
 
 	loginSucceeds(t, tt, a)

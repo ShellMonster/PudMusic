@@ -6,12 +6,14 @@
 package ui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/service/localmusic/localmusictest"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -40,7 +42,7 @@ func TestDeleteAsksFirstAndOnlyThenTouchesDisk(t *testing.T) {
 	}
 	tt.Frame()
 
-	// 弹窗上必须有 Biu 那句告知，一个字都没改。
+	// 弹窗上必须有那句告知（票 #558 之后正文改了，见 deleteDialogBody）。
 	if !tt.HasText(deleteDialogBody) {
 		t.Errorf("弹窗上没有「%s」，文字有 %q", deleteDialogBody, tt.Texts())
 	}
@@ -83,7 +85,7 @@ func TestDeleteAsksFirstAndOnlyThenTouchesDisk(t *testing.T) {
 		t.Fatal("确认之后文件还在盘上")
 	}
 	// 那一行也得从列表里没掉。⚠️ 判据用**行上才有的东西**（「打开文件夹」）
-	// 而不是歌名：刚删完右下角那句 Toast 里就有歌名（「已从磁盘上删掉「要删的」），
+	// 而不是歌名：刚删完右下角那句 Toast 里就有歌名（「已移到系统废纸篓「要删的」），
 	// 拿歌名去判会一直红——而那恰恰是这一条想验的那件事成功了。
 	if tt.HasText("打开文件夹") {
 		t.Errorf("删掉了但列表里还留着那一行，文字有 %q", tt.Texts())
@@ -95,8 +97,8 @@ func TestDeleteAsksFirstAndOnlyThenTouchesDisk(t *testing.T) {
 
 // TestTheDeleteDialogNamesTheFullPath 钉住弹窗上带完整路径。
 //
-// 歌名会重名（「同名.mp3」在好几个目录里），而按下去不可恢复——用户得能确认
-// 自己删的是哪一个文件。
+// 歌名会重名（「同名.mp3」在好几个目录里），而按下去文件就动起来了——用户
+// 得能确认自己动的是哪一个文件。
 func TestTheDeleteDialogNamesTheFullPath(t *testing.T) {
 	root := t.TempDir()
 	libSong(t, root, "同名.mp3")
@@ -152,6 +154,241 @@ func TestTheDeleteDialogIsOpenableFromASymlinkRow(t *testing.T) {
 	}
 	if !exists(target) {
 		t.Fatal("链接指向的文件被删了——这就是「删到别处去」")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 废纸篓（票 #558）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestDeletingMovesTheFileToTheTrashAndSaysSo 钉住成功那一句。
+//
+// ⚠️ **三件事都要成立**：文件从原处没了、它在**废纸篓里**（找得回来）、
+// 界面上说的是「已移到系统废纸篓」。
+//
+// 拿掉修复的方式：成功那一句改回「已从磁盘上删掉」——用户会以为文件被
+// 永久删掉了，而它在废纸篓里（那倒不是坏事，只是说错了话）；而反过来，
+// 把最后一步偷偷换回 `os.Remove` 的话，这一条的「废纸篓里有」那半会红。
+func TestDeletingMovesTheFileToTheTrashAndSaysSo(t *testing.T) {
+	root := t.TempDir()
+	path := libSong(t, root, "要移走的.mp3")
+	tt, _, _, _, trash, bin := shellOnLocalMusicWithTrash(t, false, root)
+
+	if err := tt.Click(deleteRowLabel); err != nil {
+		t.Fatalf("点不到行里的「%s」：%v，文字有 %q", deleteRowLabel, err, tt.Texts())
+	}
+	tt.Frame()
+	if err := tt.Click(deleteConfirmLabel); err != nil {
+		t.Fatalf("点不到弹窗里的「%s」：%v，文字有 %q", deleteConfirmLabel, err, tt.Texts())
+	}
+	tt.Frame()
+
+	if exists(path) {
+		t.Fatal("原处还有那个文件")
+	}
+	// ⚠️ **它在废纸篓里**：用户找得回来。
+	entries, err := os.ReadDir(bin)
+	if err != nil {
+		t.Fatalf("读废纸篓：%v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("废纸篓里有 %d 项，want 1（文件得是搬过去的，不是删掉的）", len(entries))
+	}
+	if trash.CallCount() != 1 {
+		t.Errorf("回收站被调了 %d 次，want 1", trash.CallCount())
+	}
+	// 界面上那一句。
+	if !screenHasText(tt, "已移到系统废纸篓") {
+		t.Errorf("界面上没有「已移到系统废纸篓」那一句，文字有 %q", tt.Texts())
+	}
+	// ⚠️ **不许说「不可恢复」**：那一句话在票 #558 之后是**假话**（文件在
+	// 废纸篓里，用户找得回来）。
+	if screenHasText(tt, "不可恢复") {
+		t.Errorf("界面上还写着「不可恢复」，文字有 %q", tt.Texts())
+	}
+}
+
+// TestTheDeleteDialogNoLongerPromisesItIsUnrecoverable 钉住弹窗上那一句。
+//
+// ⚠️ **那句话是用户按下按钮和文件动起来之间唯一的告知**：留着上游那句
+// 「且不可恢复」就是**对用户说假话**（文件现在进的是系统废纸篓）。
+func TestTheDeleteDialogNoLongerPromisesItIsUnrecoverable(t *testing.T) {
+	root := t.TempDir()
+	libSong(t, root, "歌.mp3")
+	tt, _, _, _, _, _ := shellOnLocalMusicWithTrash(t, false, root)
+
+	if err := tt.Click(deleteRowLabel); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+
+	if !tt.HasText(deleteDialogBody) {
+		t.Errorf("弹窗上没有「%s」，文字有 %q", deleteDialogBody, tt.Texts())
+	}
+	if screenHasText(tt, "不可恢复") {
+		t.Errorf("弹窗上还写着「不可恢复」，文字有 %q", tt.Texts())
+	}
+	if !screenHasText(tt, "废纸篓") {
+		t.Errorf("弹窗上没提「废纸篓」，文字有 %q", tt.Texts())
+	}
+}
+
+// TestATrashThatFailsSaysTheFileIsStillThere 钉住失败那一句。
+//
+// ⚠️ **三件事都要成立**：界面上说「**文件未删除**」、**文件还在原处**、
+// 那一行**还在列表里**。
+//
+// 拿掉修复的方式：把失败当成成功——那用户会看到「已移到废纸篓」，而文件
+// 好好地躺在原处（下一次重扫它又回来了）。
+func TestATrashThatFailsSaysTheFileIsStillThere(t *testing.T) {
+	root := t.TempDir()
+	path := libSong(t, root, "还在的.mp3")
+
+	// 造一个**回收站不可用**的外壳：假的那一份每次都失败，而按契约
+	// **它不碰文件**。
+	b := newTestShell(t,
+		systemIsDark(false),
+		withSettings(func() app.Settings {
+			st := app.DefaultSettings("")
+			st.LocalMusicDirs = []string{root}
+			return st
+		}()),
+		mounted(func(_ *testing.T, a *app.App) {
+			a.MountLocalMusic(app.LocalMusic{
+				Trash: localmusictest.Fail(errors.New(
+					"mygo: cannot move it to the recycle bin: it would be deleted permanently")),
+			})
+		}))
+	tt, _, a := b.tt, b.s, b.a
+	openLocal(t, tt)
+	settleLocal(t, a, tt)
+
+	if err := tt.Click(deleteRowLabel); err != nil {
+		t.Fatalf("点不到行里的「%s」：%v，文字有 %q", deleteRowLabel, err, tt.Texts())
+	}
+	tt.Frame()
+	if err := tt.Click(deleteConfirmLabel); err != nil {
+		t.Fatalf("点不到弹窗里的「%s」：%v，文字有 %q", deleteConfirmLabel, err, tt.Texts())
+	}
+	tt.Frame()
+
+	if !exists(path) {
+		t.Fatal("回收站失败了却把文件删了——这一层绝不能回退到永久删除")
+	}
+	if !screenHasText(tt, "文件未删除") {
+		t.Errorf("界面上没有「文件未删除」那一句，文字有 %q", tt.Texts())
+	}
+	// 那一行还在列表里（用户还能再试一次）。
+	if !tt.HasText("打开文件夹") {
+		t.Errorf("失败的删除把那一行从列表里拿掉了，文字有 %q", tt.Texts())
+	}
+}
+
+// TestATrashThatFailsNeverSaysItMovedToTheTrash 钉住「**回收站失败的时候，
+// 界面上不许出现「已移到系统废纸篓」**」。
+//
+// 🔴 **这一条是评审打回来的那一种**。原来错误分类对**整段**系统原话做
+// 子串匹配，而 Windows 那边**每一句**回收站失败的原话都带同一截前缀
+// 「to the recycle bin」——拿它当判据的话，权限失败（0x80070005）、已存在
+// （0x80070050）、文件不存在（0x80070002）**全**被归成「系统不提供回收站」。
+//
+// 而更糟的那一种：一个叫「Not Found.mp3」的文件，失败的话里就带着
+// 「not found」三个字——它被归成「文件已经不在了」，于是界面说
+// 「已移到系统废纸篓」，**列表那一行也消失了**，而文件好好地躺在原处。
+//
+// ⚠️ **三件事都要成立**：界面上**没有**「已移到系统废纸篓」、**文件还在
+// 原处**、**那一行还在列表里**。
+func TestATrashThatFailsNeverSaysItMovedToTheTrash(t *testing.T) {
+	root := t.TempDir()
+	path := libSong(t, root, "Not Found.mp3")
+
+	// 造一个**Windows 形态**的失败：原话带着那一条路径（路径上的文件名
+	// 叫「Not Found」），而 HRESULT 是 0x80070005（权限不够）。
+	b := newTestShell(t,
+		systemIsDark(false),
+		withSettings(func() app.Settings {
+			st := app.DefaultSettings("")
+			st.LocalMusicDirs = []string{root}
+			return st
+		}()),
+		mounted(func(_ *testing.T, a *app.App) {
+			a.MountLocalMusic(app.LocalMusic{
+				Trash: localmusictest.WindowsFailure(0x80070005),
+			})
+		}))
+	tt, _, a := b.tt, b.s, b.a
+	openLocal(t, tt)
+	settleLocal(t, a, tt)
+
+	if err := tt.Click(deleteRowLabel); err != nil {
+		t.Fatalf("点不到行里的「%s」：%v，文字有 %q", deleteRowLabel, err, tt.Texts())
+	}
+	tt.Frame()
+	if err := tt.Click(deleteConfirmLabel); err != nil {
+		t.Fatalf("点不到弹窗里的「%s」：%v，文字有 %q", deleteConfirmLabel, err, tt.Texts())
+	}
+	tt.Frame()
+
+	// 🔴 **这一句是这一条的要害**：回收站失败了，而界面说「已移到系统
+	// 废纸篓」——用户以为删掉了（还能去废纸篓里找），而文件还在原处。
+	if screenHasText(tt, "已移到系统废纸篓") {
+		t.Errorf("回收站失败了，界面上却说「已移到系统废纸篓」，文字有 %q", tt.Texts())
+	}
+	if !screenHasText(tt, "文件未删除") {
+		t.Errorf("界面上没有「文件未删除」那一句，文字有 %q", tt.Texts())
+	}
+	if !exists(path) {
+		t.Fatal("回收站失败了却把文件删了——这一层绝不能回退到永久删除")
+	}
+	// 那一行还在列表里（用户还能再试一次）。
+	if !tt.HasText("打开文件夹") {
+		t.Errorf("失败的删除把那一行从列表里拿掉了，文字有 %q", tt.Texts())
+	}
+}
+
+// TestAFileThatIsAlreadyGoneNeverSaysItMovedToTheTrash 钉住「文件本来就不
+// 在了」那一种。
+//
+// 🔴 **这一条是评审打回来的那一种**：用户先在访达里删了歌，回来点删除，
+// 而应用层把「文件已经不在了」改成 `nil`（当作「不是失败」）——于是界面走
+// 成功分支，说「已移到系统废纸篓「外面已经删了」」。
+//
+// ⚠️ **那句话是假话**：它**承诺用户能从废纸篓里恢复**，而它压根没进过
+// 废纸篓。
+//
+// ⚠️ **三件事都要成立**：界面上**没有**「已移到系统废纸篓」、界面上**说了**
+// 「已经不在了」、**那一行从列表里没掉**（那是用户想要的结果）。
+func TestAFileThatIsAlreadyGoneNeverSaysItMovedToTheTrash(t *testing.T) {
+	root := t.TempDir()
+	path := libSong(t, root, "外面已经删了.mp3")
+	tt, _, _, _, _, _ := shellOnLocalMusicWithTrash(t, false, root)
+
+	// 先把原文件删掉：模拟「用户先在访达里删了，回来才点删除」。
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := tt.Click(deleteRowLabel); err != nil {
+		t.Fatalf("点不到行里的「%s」：%v，文字有 %q", deleteRowLabel, err, tt.Texts())
+	}
+	tt.Frame()
+	if err := tt.Click(deleteConfirmLabel); err != nil {
+		t.Fatalf("点不到弹窗里的「%s」：%v，文字有 %q", deleteConfirmLabel, err, tt.Texts())
+	}
+	tt.Frame()
+
+	// 🔴 **这一句是这一条的要害**。
+	if screenHasText(tt, "已移到系统废纸篓") {
+		t.Errorf("文件压根没进过废纸篓，界面上却说「已移到系统废纸篓」，文字有 %q", tt.Texts())
+	}
+	// 而它得说清楚**真相**：文件已经不在了（用户自己删的）。
+	if !screenHasText(tt, "已经不在了") {
+		t.Errorf("界面上没有「已经不在了」那一句，文字有 %q", tt.Texts())
+	}
+	// ⚠️ **那一行照样从列表里没掉**：那是用户想要的结果（把过期的那一行
+	// 清掉）。
+	if tt.HasText("打开文件夹") {
+		t.Errorf("文件已经不在了，那一行却还留在列表里，文字有 %q", tt.Texts())
 	}
 }
 

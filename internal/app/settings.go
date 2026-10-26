@@ -252,13 +252,15 @@ const (
 //
 //   - Biu 读到 `{"proxySettings":{"type":"https"}}` 时，TypeScript 的那个联合类型
 //     在运行时拦不住它，值原样留在 store 里——**Biu 那边一个字节都不丢**。
-//   - 我们这边它是合法值，`normalize()` 认它、拨号认它。
+//   - 我们这边它是合法值，`normalize()` 认它，网络层也认它（`proxy.go` 的
+//     `ProxyForSettings`）。https 走的是 HTTP 那一套拨号（Go 的 `http.Transport`
+//     对 `http://` 和 `https://` 的代理是同一条路），所以多一档不需要新的实现，
+//     只是把用户要的那一档摆出来。
 //
-// 为什么必须有：任务与 `SPEC.md` 的网络一节明写「代理支持 HTTP / HTTPS / SOCKS5 /
-// SOCKS4 四种协议」。`SPEC.md` 那行字照的是 Biu 的四个协议名里的前两个，但**以任务
-// 明文为准**。HTTPS 走的也是 HTTP 那一套拨号（Go 的 `http.Transport` 对
-// `http://` 和 `https://` 的代理是同一条路），所以多一档不需要新的实现，只是把
-// 用户要的那一档摆出来。
+// 这一格的**消费端**在本包里：`MountSettings` / `UpdateSettings` 把它存进
+// 网络层每请求现读的那一格（`proxy.go` 的 `storeProxy` / `ProxySnapshot`），
+// 每一条出网请求都按它走——四种协议里的 SOCKS4 由 `Socks4Tunnel` 在拨号里
+// 隧道（`http.Transport` 不认这个 scheme）。
 type ProxyType string
 
 const (

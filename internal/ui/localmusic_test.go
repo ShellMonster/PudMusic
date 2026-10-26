@@ -9,6 +9,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
+	"github.com/ShellMonster/Biu_Go/internal/service/localmusic/localmusictest"
 	"github.com/egoist/mygo/ui"
 	mygoui "github.com/egoist/mygo/ui"
 )
@@ -37,11 +38,29 @@ func shellOnLocalMusic(t *testing.T, dirs ...string) (*mygoui.Tester, *Shell, *a
 // `chrome_shot_test.go` 那一组同一个做法。
 func shellOnLocalMusicIn(t *testing.T, dark bool, dirs ...string) (*mygoui.Tester, *Shell, *app.App, *dirPicker) {
 	t.Helper()
+	tt, s, a, pick, _, _ := shellOnLocalMusicWithTrash(t, dark, dirs...)
+	return tt, s, a, pick
+}
+
+// shellOnLocalMusicWithTrash 是 `shellOnLocalMusicIn` 再加两样东西：**假
+// 回收站**和**它假废纸篓的目录**。
+//
+// ⚠️ **为什么测试要挂一个假回收站**：删文件走的是「移到系统废纸篓」那一步
+// （票 #558），而**真的** `mygo.Shell.TrashItem` 在无头 Tester 里调不得
+// （它要走应用的事件循环，而无头环境里没有）。所以测试装一份假的——它把
+// 文件**搬进一个临时目录**，于是「用户找得回来」这件事能被验到。
+//
+// ⚠️ **它不是 `os.Remove`**：假的那一份是「搬」，而生产代码里**任何一处**
+// 都没有永久删除用户文件的路（那正是这一票要消灭的）。
+func shellOnLocalMusicWithTrash(t *testing.T, dark bool, dirs ...string) (*mygoui.Tester, *Shell, *app.App, *dirPicker, *localmusictest.Fake, string) {
+	t.Helper()
 
 	pick := &dirPicker{}
 	// ⚠️ **不挂文件监听**：测试里换掉 `s.local.pickDir` 和 wake 都很方便，
 	// 而真监听要系统事件循环（`WhenReady`），无头环境里根本起不来。
 	// 监听那一半由 app 层的桩验（`internal/app/localmusic_test.go`）。
+	bin := filepath.Join(t.TempDir(), "废纸篓")
+	trash := localmusictest.Success(bin)
 	b := newTestShell(t,
 		systemIsDark(dark),
 		withSettings(func() app.Settings {
@@ -49,12 +68,12 @@ func shellOnLocalMusicIn(t *testing.T, dark bool, dirs ...string) (*mygoui.Teste
 			st.LocalMusicDirs = dirs
 			return st
 		}()),
-		mounted(func(_ *testing.T, a *app.App) { a.MountLocalMusic(app.LocalMusic{}) }),
+		mounted(func(_ *testing.T, a *app.App) { a.MountLocalMusic(app.LocalMusic{Trash: trash}) }),
 		stubbed(func(_ *testing.T, s *Shell) { s.local.pickDir = pick.pick }))
 	a, s, tt := b.a, b.s, b.tt
 	openLocal(t, tt)
 	settleLocal(t, a, tt)
-	return tt, s, a, pick
+	return tt, s, a, pick, trash, bin
 }
 
 // dirPicker 是「添加目录」那个系统对话框的桩。

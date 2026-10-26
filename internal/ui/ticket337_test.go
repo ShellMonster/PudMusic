@@ -125,7 +125,10 @@ func TestOtherBatchEntriesReplaceQueueAndStartFirst(t *testing.T) {
 // 本来就放不出来——等「真的开始播放」会等超时，而那说的不是这一条要验的东西。
 // 「换成这一批」这件事本身，队列内容与当前项就说得清。
 //
-// 判据：先排三首旧歌 → 按「全部播放」→ 队列**只剩**这一页的歌，当前项是第一首。
+// 判据：先排三首旧歌 → 按「全部播放」→ 队列**只剩**这一页的歌；当前项按
+// #551 之后的样子写——两首都放不起来（这一页的假 B 站不伺服取流），自动跳过
+// 绕完一圈停在**这一批的最后一首**。队列换成这一批这件事本身，队列内容与
+// 当前项就说得清。
 func TestTheUpSpacePlayAllReplacesTheQueue(t *testing.T) {
 	b := newUIExplore(t)
 	uiSpaceData(b, "投稿的 UP", 0, 1)
@@ -163,8 +166,11 @@ func TestTheUpSpacePlayAllReplacesTheQueue(t *testing.T) {
 			t.Errorf("队列第 %d 首是 %q，want %q", i+1, got[i].Bvid, want)
 		}
 	}
-	if idx := a.Queue().CurrentIndex(); idx != 0 {
-		t.Errorf("当前项 = %d，want 0（这一批的第一首）", idx)
+	// 🔴 当前项是 **1** 不是 0：两首都放不起来（假 B 站不伺服取流），#551 的
+	// 自动跳过把当前项推到了这一批的最后一首然后停（整圈停）。这一条要验的
+	// 「队列换成这一批」不受它影响——内容断言在上面。
+	if idx := a.Queue().CurrentIndex(); idx != 1 {
+		t.Errorf("当前项 = %d，want 1（两首都放不起来：#551 的自动跳过绕完一圈停在这一批的最后一首）", idx)
 	}
 }
 
