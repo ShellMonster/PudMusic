@@ -42,7 +42,7 @@ func TestPlanWindowClose(t *testing.T) {
 // MyGo 自己画的原生界面，没有页面可以载入，框架碰到这些角色直接 return：菜单
 // 项还在、快捷键还占着，按下去什么都不发生。
 func TestAppMenuDropsTheWebOnlyItems(t *testing.T) {
-	roles := menuRoles(appMenu())
+	roles := menuRoles(appMenu(func() {}, func() {}))
 	for _, r := range []mygo.MenuRole{
 		mygo.RoleReload, mygo.RoleForceReload,
 		mygo.RoleResetZoom, mygo.RoleZoomIn, mygo.RoleZoomOut,
