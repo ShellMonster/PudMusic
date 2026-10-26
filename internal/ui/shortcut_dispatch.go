@@ -41,6 +41,7 @@ package ui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -146,9 +147,38 @@ func (s *Shell) runShortcut(id string) {
 		s.nudgeVolume(shortcutVolumeStep)
 	case "volumeDown":
 		s.nudgeVolume(-shortcutVolumeStep)
+	case "seekBack":
+		s.seekBy(-shortcutSeekStep)
+	case "seekForward":
+		s.seekBy(shortcutSeekStep)
 	case "toggleMiniMode":
 		s.toggleMiniPlayer()
 	}
+}
+
+// shortcutSeekStep 是按一次快退 / 快进跳几秒。5 秒是各家播放器（YouTube、
+// 网易云、Spotify）方向键 seek 的同一档；没有出处可抄（Biu 没有这条命令），
+// 取的是这个公约数。
+const shortcutSeekStep = 5 * time.Second
+
+// seekBy 从当前的位置向前 / 向后跳 delta。
+//
+// ⚠️ **走 Scrub 那一对，不自己碰播放器**：进度条拖动走的就是
+// `ScrubStart` / `ScrubEnd(比例)`（`playbar.go` 的 `viewProgress`），跳到的
+// 位置要写回界面、暂停时也要立刻看得见、往回跳要能接着播——这些都是
+// `ScrubEnd` 已经做掉的事（`internal/app/app.go`），再写一份就是两处漂移。
+//
+// ⚠️ **没有歌 / 时长未知就什么都不做**：和进度条 Disabled(!known) 是同一个
+// 判据——一根不知道多长的进度条无处可跳。
+func (s *Shell) seekBy(delta time.Duration) {
+	st := s.app.Snapshot()
+	if !st.HasTrack || st.Duration <= 0 {
+		return
+	}
+	pos := st.Position + delta
+	pos = min(max(pos, 0), st.Duration)
+	s.app.ScrubStart()
+	s.app.ScrubEnd(float64(pos) / float64(st.Duration))
 }
 
 // nudgeVolume 加减一次音量。

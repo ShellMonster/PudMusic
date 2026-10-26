@@ -115,6 +115,11 @@ type shortcutSlot struct {
 //
 // ⚠️ 全局那六条比应用内的那六条多一个 ⌥：两边同用一个键的话，在别的应用里按
 // 应用内那一个就会误触发别人——Biu 正是这么分的，照抄。
+//
+// ⚠️ **那六条之外还有两条我们自己加的**（快退 / 快进，见下面 inOnly 那一段）：
+// 它们**只在应用内**登记，没有全局那一半——音乐播放器里「跳过几秒」是键盘党
+// 的高频动作，但把 ⌘⌥ 加方向键钉到系统层去，别的应用里选字/选文件就少了一对
+// 组合键，代价大于收益。
 func defaultShortcutSettings() shortcutSettings {
 	var ids = []struct{ id, key string }{
 		{"togglePlay", "P"},
@@ -124,12 +129,18 @@ func defaultShortcutSettings() shortcutSettings {
 		{"volumeDown", "Down"},
 		{"toggleMiniMode", "M"},
 	}
-	in := make([]shortcutItem, 0, len(ids))
+	in := make([]shortcutItem, 0, len(ids)+len(inAppOnlyShortcuts))
 	global := make([]shortcutItem, 0, len(ids))
 	for _, it := range ids {
 		// CommandOrControl 是 Biu 的写法：macOS 上是 ⌘，别处是 Ctrl。
 		in = append(in, shortcutItem{ID: it.id, Name: defaultShortcutNames[it.id], Shortcut: "CommandOrControl+" + it.key})
 		global = append(global, shortcutItem{ID: it.id, Name: defaultShortcutNames[it.id], Shortcut: "CommandOrControl+Alt+" + it.key})
+	}
+	// 只在应用内的那几条。**用 ⇧ 加方向键，不用裸方向键**：裸方向键是内容区
+	// 键盘走位的那一对（列表 / 表格的上下左右，见 focus.go 的文件头），认领了
+	// 它们走位就断了。
+	for _, it := range inAppOnlyShortcuts {
+		in = append(in, shortcutItem{ID: it.id, Name: defaultShortcutNames[it.id], Shortcut: it.key})
 	}
 	return shortcutSettings{
 		EnableGlobalShortcuts: true,
@@ -138,7 +149,19 @@ func defaultShortcutSettings() shortcutSettings {
 	}
 }
 
-// defaultShortcutNames 是六条命令的名字，逐字抄 Biu 那一行。
+// inAppOnlyShortcuts 是**只登记在应用内**、没有全局那一半的命令：id 和默认键。
+//
+// 它们不在 Biu 的那六条里（`shortcut-settings.ts` 只有六条），是这一层按
+// 「音乐播放器的通用约定」补的——和裸空格 = 播放/暂停（`viewShortcuts` 里
+// 那一段）是同一条思路，只不过这两条要出现在设置页的表里（能改、能看见冲突），
+// 所以走默认表而不是硬编码。
+var inAppOnlyShortcuts = []struct{ id, key string }{
+	{"seekBack", "Shift+Left"},
+	{"seekForward", "Shift+Right"},
+}
+
+// defaultShortcutNames 是每条命令的名字。Biu 的那六条逐字抄 Biu 那一行；
+// inAppOnlyShortcuts 那两条是我们自己的，写法跟同一张表。
 var defaultShortcutNames = map[string]string{
 	"togglePlay":     "播放/暂停",
 	"prev":           "上一首",
@@ -146,6 +169,8 @@ var defaultShortcutNames = map[string]string{
 	"volumeUp":       "音量加",
 	"volumeDown":     "音量减",
 	"toggleMiniMode": "切换mini/完整模式",
+	"seekBack":       "快退 5 秒",
+	"seekForward":    "快进 5 秒",
 }
 
 // shortcutKeys 是快捷键在内存里和磁盘上的那一份。
