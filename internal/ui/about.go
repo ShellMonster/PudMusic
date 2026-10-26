@@ -1,4 +1,4 @@
-// 关于面板：应用菜单里「关于 布丁音乐」点开的那一块。
+// 关于面板：应用菜单里「关于布丁音乐」点开的那一块。
 //
 // ## 为什么是自绘的这一块，不是系统那个关于面板
 //
@@ -49,7 +49,7 @@ import (
 // 关于面板上的字。
 const (
 	// aboutTitle 是面板的名字（读屏软件报出来的那一句）。
-	aboutTitle = "关于 " + appName
+	aboutTitle = "关于" + appName
 	// aboutPanelWidth 是面板多宽。
 	//
 	// 360：确认框那一族是 300~420（`confirmMinW` / `confirmMaxW`），这里取

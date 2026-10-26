@@ -47,7 +47,7 @@ func TestTheAppMenuColumnFollowsTheMacOrder(t *testing.T) {
 		}
 	}
 	want := []string{
-		"关于 布丁音乐", "---", "设置…", "---",
+		"关于布丁音乐", "---", "设置…", "---",
 		string(mygo.RoleHide), string(mygo.RoleHideOthers), string(mygo.RoleUnhide), "---",
 		string(mygo.RoleQuit),
 	}
@@ -78,8 +78,8 @@ func TestTheAboutItemIsOurOwn(t *testing.T) {
 	if it.Click == nil {
 		t.Error("「关于」没有 Click：点了什么也不会发生")
 	}
-	if it.Label != "关于 "+appName {
-		t.Errorf("「关于」那一项写的是 %q，want %q", it.Label, "关于 "+appName)
+	if it.Label != "关于"+appName {
+		t.Errorf("「关于」那一项写的是 %q，want %q", it.Label, "关于"+appName)
 	}
 }
 

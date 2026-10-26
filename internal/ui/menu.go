@@ -93,7 +93,7 @@ func (s *Shell) installMenu() {
 func appMenu(about, settings func()) *mygo.Menu {
 	return mygo.NewMenu([]*mygo.MenuItem{
 		{Role: mygo.RoleAppMenu, Submenu: []*mygo.MenuItem{
-			// 「关于 布丁音乐」。
+			// 「关于布丁音乐」。
 			//
 			// ⚠️ **不用 `RoleAbout`**：那个角色在 macOS 上走的是系统的
 			// `orderFrontStandardAboutPanel:`（`mygo/internal/darwin/menu.go:38`），
@@ -104,7 +104,7 @@ func appMenu(about, settings func()) *mygo.Menu {
 			// ⚠️ **菜单是应用级的**（`SetMenu` 设在 `mygo.App` 上），而回调
 			// 拿到的 `win` **可能是迷你播放器那一扇**——所以回调里**不看
 			// `win`**，一律走主窗口（`openAbout` 里让开迷你 + 叫回主窗口）。
-			{ID: menuAboutID, Label: "关于 " + appName, Click: func(*mygo.MenuItem, *mygo.Window) {
+			{ID: menuAboutID, Label: "关于" + appName, Click: func(*mygo.MenuItem, *mygo.Window) {
 				about()
 			}},
 			// ⚠️ **「关于」和「设置…」之间有一条分隔线**：原生应用都是这样
@@ -150,7 +150,7 @@ func appMenu(about, settings func()) *mygo.Menu {
 // 菜单项的 id。框架用 `Menu.ItemByID` 找它们（`mygo/menu.go:185`），
 // 而**测试要靠 id 认出「哪一项」**——按标签找的话，改一次文案就得改一次测试。
 const (
-	// menuAboutID 是「关于 布丁音乐」那一项。
+	// menuAboutID 是「关于布丁音乐」那一项。
 	menuAboutID = "app.about"
 	// menuSettingsID 是「设置…」那一项。
 	menuSettingsID = "app.settings"
