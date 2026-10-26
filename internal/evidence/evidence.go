@@ -550,6 +550,41 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// 🔴 **评论这一摊的应用层**（票 #572）：
+		//
+		//	oid    mv 那一路的 oid 是**数字 avid**（走 `ArchiveID` 换），
+		//	       audio 那一路是 **auid**（`type=14`）。漏了换 avid ⇒ **静默
+		//	       拿到空列表**（B 站把认不出来的 oid 判成「没有评论」）。
+		//	防重入 界面每一帧都调 `Comments()`，每一帧都发一次请求的话 B 站
+		//	       会以为我们在刷。
+		//	退避  失败之后**要能再问**（不是一次失败就再也不问）。
+		//	换歌  迟到的结果回来发现 oid 对不上就丢——不然刚换的歌上面挂着
+		//	       上一首的评论。
+		//	缓存  同一首歌第二次进是**瞬时的**（不发请求）；TTL 一小时；
+		//	       键带 type（`1-12345` 和 `14-12345` 是两个文件）。
+		//	local 本地文件不摆入口，**一个请求都不发**。
+		Spec: "评论这一摊（应用层）：mv 的 oid 是数字 avid、audio 的 oid 是 auid（type=14）；每帧调不会发第二个请求；失败之后能再问；换歌之后旧的结果作废；缓存命中是瞬时的、TTL 一小时、有刷新能绕过；本地文件不摆入口也不发请求",
+		Tests: []string{
+			"TestTheMVCommentOIDIsTheNumericAVID",
+			"TestTheAudioCommentOIDIsTheAUID",
+			"TestCommentsAreNotAskedTwice",
+			"TestCommentsAreAskedAgainAfterAFailure",
+			"TestTheCommentsOfThePreviousSongDoNotShowUp",
+			"TestTheSecondVisitIsInstant",
+			"TestTheAVIDIsRememberedAcrossRestarts",
+			"TestTheRefreshBypassesTheCache",
+			"TestALocalItemIsNotWorthAsking",
+			"TestLoadMoreUsesTheCursor",
+			"TestTheRepliesUseTheSameObject",
+			"TestNoCommentsIsNotAFailure",
+			"TestTheMVAsksAgainWhenTheAVIDCannotBeFetched",
+			"TestTheKeyCarriesTheType",
+			"TestTheTwoObjectsGetTwoFiles",
+			"TestAnExpiredEntryIsAsGoodAsMissing",
+		},
+	},
+	{
+		Category: HTTP,
 		// 风控和限流**都不判成「可重试」**：界面上那枚「重试」是立刻再问一次
 		// （没有退避），而这两样要等的是时间——判成可重试的话用户点一次撞一次
 		// （票 #316 收窄了风控，票 #346 把限流收到同一档）。
