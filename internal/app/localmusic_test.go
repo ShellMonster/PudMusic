@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
+	"github.com/ShellMonster/Biu_Go/internal/service/localmusic/localmusictest"
 )
 
 // 本地音乐这一摊的测试跑在真磁盘上：真的建目录、真的写文件、真的删文件。
@@ -23,6 +24,11 @@ type libFixture struct {
 	app   *App
 	wakes *counter
 	watch *stubWatch
+	// trash 是「系统回收站」那一份假零件。删文件走的是它（票 #558：
+	// 删是「移到废纸篓」，不是永久删除）。
+	trash *localmusictest.Fake
+	// bin 是假废纸篓放在哪儿：搬走的文件在那儿，用户「找得回来」。
+	bin string
 }
 
 // counter 记一个函数被调了几次。它自己加锁：唤醒是从后台 goroutine 来的。
@@ -94,6 +100,10 @@ func (w *stubWatch) stoppedCount() int {
 }
 
 // newLib 造一个挂好本地音乐的 App。
+//
+// ⚠️ **它一定装上回收站**：删文件走的是「移到系统废纸篓」那一步（票 #558），
+// 而这一层**没有**回收站就会报 `ErrNoTrash`——那是「应用自己没装好」，
+// 不是这一组用例要验的东西。
 func newLib(t *testing.T, roots ...string) *libFixture {
 	t.Helper()
 	a := New()
@@ -101,9 +111,11 @@ func newLib(t *testing.T, roots ...string) *libFixture {
 
 	wakes := &counter{}
 	w := newStubWatch()
+	bin := filepath.Join(t.TempDir(), "废纸篓")
+	trash := localmusictest.Success(bin)
 	a.SetWake(wakes.add)
-	a.MountLocalMusic(LocalMusic{Roots: roots, Watch: w})
-	return &libFixture{app: a, wakes: wakes, watch: w}
+	a.MountLocalMusic(LocalMusic{Roots: roots, Watch: w, Trash: trash})
+	return &libFixture{app: a, wakes: wakes, watch: w, trash: trash, bin: bin}
 }
 
 // waitScan 等那一遍后台扫描落地。
@@ -396,9 +408,13 @@ func TestConcurrentRescansDoNotStackUp(t *testing.T) {
 
 // TestDeleteRemovesTheFileAndTheRow 钉住规格第 83 条。
 //
-// 「真的从磁盘删掉」+「列表里那一行也没了」。两件事都要成立：只删文件而
+// 「真的从原处搬走」+「列表里那一行也没了」。两件事都要成立：只搬文件而
 // 留着行，用户会点第二次然后拿到一句「文件已经不在了」；只删行而留着文件，
 // 那就是最像「实现了」的一种假实现。
+//
+// ⚠️ **而且文件得在废纸篓里找得回来**（票 #558）：这才是「从永久删除改成
+// 可恢复」的那一件。只断「原处没了」的话，一个「偷偷 `os.Remove`」的实现
+// 照样全绿——而那正是这一票明确要消灭的那一种。
 func TestDeleteRemovesTheFileAndTheRow(t *testing.T) {
 	root := t.TempDir()
 	path := song(t, root, "要删的.mp3")
@@ -415,6 +431,14 @@ func TestDeleteRemovesTheFileAndTheRow(t *testing.T) {
 	}
 	if _, err := os.Lstat(path); err == nil {
 		t.Fatal("文件还在盘上")
+	}
+	// ⚠️ **它在废纸篓里**：用户能找回来。
+	entries, err := os.ReadDir(f.bin)
+	if err != nil {
+		t.Fatalf("读废纸篓：%v", err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("废纸篓里有 %d 项，want 1（文件得是搬过去的，不是删掉的）", len(entries))
 	}
 	if got := len(f.app.LocalMusicState().Tracks); got != 0 {
 		t.Errorf("列表里还剩 %d 行", got)
@@ -472,6 +496,43 @@ func TestDeleteOfAFileGoneAlreadyIsNotAFailure(t *testing.T) {
 	}
 	if got := len(f.app.LocalMusicState().Tracks); got != 0 {
 		t.Errorf("列表里还剩 %d 行", got)
+	}
+}
+
+// TestATrashThatIsNotAvailableKeepsTheFileAndTheRow 钉住「那个位置没有
+// 回收站」那一条。
+//
+// ⚠️ **三件事都要成立**：错报得出来（界面要说「文件未删除」）、**文件还在
+// 原处**、**列表里那一行还在**。
+//
+// 拿掉修复的方式：把失败当成成功（`err == nil` 就当删掉了）——那用户会看到
+// 「已移到废纸篓」，而文件好好地躺在那儿，下一次重扫它又回来了。
+func TestATrashThatIsNotAvailableKeepsTheFileAndTheRow(t *testing.T) {
+	root := t.TempDir()
+	path := song(t, root, "还在.mp3")
+	f := newLib(t, root)
+	// 换成一个「那个位置没有回收站」的假零件。
+	f.app.MountLocalMusic(LocalMusic{
+		Roots: []string{root},
+		Watch: f.watch,
+		Trash: localmusictest.NotTrashable(),
+	})
+	f.app.StartLocalMusicWatch()
+	st := waitScan(t, f.app)
+	if len(st.Tracks) != 1 {
+		t.Fatalf("扫到 %d 首", len(st.Tracks))
+	}
+
+	err := f.app.DeleteLocalTrack(st.Tracks[0].ID)
+
+	if !errors.Is(err, localmusic.ErrNotTrashable) {
+		t.Fatalf("错是 %v，want localmusic.ErrNotTrashable", err)
+	}
+	if _, statErr := os.Lstat(path); statErr != nil {
+		t.Fatal("回收站不可用却把文件弄没了——这一层绝不能回退到永久删除")
+	}
+	if got := len(f.app.LocalMusicState().Tracks); got != 1 {
+		t.Errorf("失败的删除动了列表：还剩 %d 首，want 1", got)
 	}
 }
 
