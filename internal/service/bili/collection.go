@@ -255,7 +255,7 @@ func (c *Client) CollectionInfo(ctx context.Context, id int64, typ CollectionTyp
 	// 第一个——「默认收藏夹被当成私密」在界面上就是头图区写着「私密收藏夹」。
 	return &CollectionInfo{
 		ID:         d.ID,
-		Title:      d.Title,
+		Title:      decodeEntities(d.Title),
 		Intro:      d.Intro,
 		Cover:      d.Cover,
 		Type:       typ,
@@ -457,7 +457,7 @@ func (c *Client) CollectionMedias(ctx context.Context, id int64, sort Collection
 	for _, m := range d.Medias {
 		out = append(out, Media{
 			ID: m.ID, Type: m.Type, Bvid: m.Bvid, Page: m.Page,
-			Title: m.Title, Cover: m.Cover, Owner: m.Upper.Name, OwnerMid: m.Upper.Mid,
+			Title: decodeEntities(m.Title), Cover: m.Cover, Owner: decodeEntities(m.Upper.Name), OwnerMid: m.Upper.Mid,
 			// ⚠️ B 站的 duration 是**秒**（浮点）。当毫秒解的话一首三分钟的
 			// 歌会显示成 3 秒，而且界面上没有任何地方会露出错。
 			Duration: time.Duration(float64(m.Duration) * float64(time.Second)),

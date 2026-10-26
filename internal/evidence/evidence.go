@@ -436,6 +436,18 @@ var Items = []Item{
 	// ── 严格 HTTP fixture ──────────────────────────────────────────────────
 	{
 		Category: HTTP,
+		// B 站的 web 接口把文案 HTML 转义过再回（「A &amp; B」），网页端渲染时
+		// 顺手解掉，原生端要在映射层自己解——不解的话用户看到的就是
+		// 「林俊杰&amp;李健合唱…」。判据两层：helper 本身（标准实体、全角分号
+		// 的那一支、无转义原样回）和映射点真的包了（推荐流直接喂纯映射函数）。
+		Spec: "接口文案里的 HTML 实体在映射层解掉（标题、UP 名），没有转义的串原样回",
+		Tests: []string{
+			"TestDecodeEntitiesUnescapesTitleText",
+			"TestTheRecommendFeedDecodesTitleEntities",
+		},
+	},
+	{
+		Category: HTTP,
 		Spec:     "WBI 签名对着公布的那组向量",
 		Tests:    []string{"TestWBISignatureMatchesThePublishedVector", "TestWBIKeysAreFetchedOnceAndCached"},
 	},

@@ -271,8 +271,8 @@ func regionFeedPage(d regionFeedData) []RecommendItem {
 	for _, it := range d.Archives {
 		out = append(out, RecommendItem{
 			Bvid: it.Bvid, Aid: int64(it.Aid), TrackID: it.TrackID, Cid: int64(it.Cid),
-			Title: it.Title, Cover: normalizeImageURL(it.Cover),
-			Owner: it.Author.Name, OwnerMid: int64(it.Author.Mid),
+			Title: decodeEntities(it.Title), Cover: normalizeImageURL(it.Cover),
+			Owner: decodeEntities(it.Author.Name), OwnerMid: int64(it.Author.Mid),
 			View: it.Stat.View, Duration: seconds(it.Duration),
 		})
 	}
@@ -355,8 +355,8 @@ func musicRankPage(d musicRankData) []RecommendItem {
 	for _, it := range d.List {
 		item := RecommendItem{
 			Bvid: it.Bvid, Aid: int64(it.Aid), Cid: int64(it.Cid),
-			Title: it.MusicTitle, Cover: normalizeImageURL(it.Cover),
-			Owner: it.Author,
+			Title: decodeEntities(it.MusicTitle), Cover: normalizeImageURL(it.Cover),
+			Owner: decodeEntities(it.Author),
 			// 榜上那一条自己的 id：上面两个身份都缺的时候它是最后一个。
 			TrackID: strconv.FormatInt(it.Id, 10),
 		}
@@ -460,8 +460,8 @@ func (c *Client) NewMusic(ctx context.Context) ([]RecommendItem, error) {
 	for _, it := range d.List {
 		out = append(out, RecommendItem{
 			Bvid: it.Bvid, Aid: int64(it.Aid), Cid: int64(it.Cid),
-			Title: it.MusicTitle, Cover: normalizeImageURL(it.Cover),
-			Owner: it.Author,
+			Title: decodeEntities(it.MusicTitle), Cover: normalizeImageURL(it.Cover),
+			Owner: decodeEntities(it.Author),
 			// 身份的最后那一格：这个接口给的 `id` 是歌的 id，不是稿件的。
 			TrackID: strconv.FormatInt(it.Id, 10),
 		})
@@ -492,7 +492,7 @@ func (c *Client) NewMusicBanner(ctx context.Context) ([]RecommendItem, error) {
 	for _, it := range d.List {
 		out = append(out, RecommendItem{
 			Bvid: it.Bvid, Aid: int64(it.Aid), Cid: int64(it.Cid),
-			Title: it.ArchiveTitle, Cover: normalizeImageURL(it.Cover),
+			Title: decodeEntities(it.ArchiveTitle), Cover: normalizeImageURL(it.Cover),
 			Owner:   it.Author,
 			TrackID: it.MusicID,
 		})

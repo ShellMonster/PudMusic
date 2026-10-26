@@ -131,7 +131,7 @@ func (c *Client) CollectedFolders(ctx context.Context, upMid int64, page int) ([
 			continue
 		}
 		out = append(out, CollectedFolder{
-			ID: f.ID, Title: f.Title, Cover: f.Cover, Mid: f.Mid,
+			ID: f.ID, Title: decodeEntities(f.Title), Cover: f.Cover, Mid: f.Mid,
 			Type: collectedType(f.Type), MediaCount: f.MediaCount,
 		})
 	}

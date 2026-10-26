@@ -799,7 +799,7 @@ func parseDynamic(raw json.RawMessage) (Dynamic, DroppedDynamic, bool) {
 		ID: r.IDStr.String(),
 		Author: DynamicAuthor{
 			Mid:  r.Modules.Author.Mid.Int64(),
-			Name: r.Modules.Author.Name.String(),
+			Name: decodeEntities(r.Modules.Author.Name.String()),
 			Face: r.Modules.Author.Face.String(),
 		},
 		Time:      dynamicTime(r.Modules.Author.PubTime.String(), r.Modules.Author.PubTS.Int64()),
@@ -844,7 +844,7 @@ func parseDynamic(raw json.RawMessage) (Dynamic, DroppedDynamic, bool) {
 		}
 		d.Kind = DynamicVideo
 		d.Video = &DynamicArchive{
-			Bvid: a.Bvid.String(), Title: a.Title.String(), Cover: a.Cover.String(),
+			Bvid: a.Bvid.String(), Title: decodeEntities(a.Title.String()), Cover: a.Cover.String(),
 			Duration: a.DurationTxt.String(), Play: a.Stat.Play.String(), Desc: a.Desc.String(),
 		}
 		if d.Text == "" {
