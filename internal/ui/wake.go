@@ -72,3 +72,13 @@ func (h *wakeHandle) invalidateIf(askSeen bool) bool {
 	svc.Invalidate()
 	return true
 }
+
+// writeClipboard 把一段文字放进系统剪贴板。要在界面线程上调（菜单被选中那一帧就是）。
+func (h *wakeHandle) writeClipboard(text string) {
+	h.mu.Lock()
+	svc, held := h.svc, h.held
+	h.mu.Unlock()
+	if held {
+		svc.WriteClipboard(text)
+	}
+}
