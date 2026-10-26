@@ -16,7 +16,13 @@ type coverTint struct {
 	hue, sat float64
 }
 
-var tintClient = &http.Client{Timeout: 10 * time.Second}
+// tintClient 拉封面字节用的客户端：走全应用唯一的网络层（代理设置、
+// 凭据边界都归它管），超时保留自己那一档——取色是锦上添花，等不起。
+var tintClient = func() *http.Client {
+	c := newCredentialTransport().Client(nil)
+	c.Timeout = 10 * time.Second
+	return c
+}()
 
 // sync 报当前封面的色相和饱和度；封面换了就起一次后台下载，取到后叫醒界面重画。
 // 还没取到（或封面没有颜色）时饱和度是 0，主题沿用原来的主色。

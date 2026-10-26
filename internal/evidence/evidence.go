@@ -448,6 +448,27 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// 设置页那格代理的**消费端**（上游 Biu 的 #250 一类）：四种协议都要
+		// 真的接到请求上——http/https/socks5 翻成代理地址，socks4 由隧道拨号
+		// 接（http.Transport 不认这个 scheme）；「不使用代理」回落环境变量；
+		// 选了协议没填主机要报错而不是安静直连；改设置下一条请求就走新路。
+		// 回环（httptest 全在本机）永不代理。
+		Spec: "设置页的代理真的被所有出网请求走：四种协议、none 回落环境变量、空主机报错、改了立刻生效",
+		Tests: []string{
+			"TestProxyForSettingsMapsTheFourProtocols",
+			"TestNoProxyFollowsTheEnvironment",
+			"TestAnEmptyProxyHostIsAnErrorNotSilence",
+			"TestLoopbackRequestsAreNeverProxied",
+			"TestTheProxySettingTakesEffectOnTheNextRequest",
+			"TestTheSettingsMountFeedsTheProxySnapshot",
+			"TestTheSocks4TunnelSpeaksTheProtocol",
+			"TestTheSocks4TunnelSendsTheHostnameWhenItCannotResolve",
+			"TestTheSocks4TunnelUsesAResolvedAddressWhenItCan",
+			"TestTheSocks4ReplyCodeIsSpelledOut",
+		},
+	},
+	{
+		Category: HTTP,
 		Spec:     "WBI 签名对着公布的那组向量",
 		Tests:    []string{"TestWBISignatureMatchesThePublishedVector", "TestWBIKeysAreFetchedOnceAndCached"},
 	},

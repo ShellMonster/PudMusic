@@ -97,6 +97,9 @@ func (a *App) MountSettings(path string) error {
 		a.rate = audio.SnapRate(s.PlaybackRate)
 	}
 	a.mu.Unlock()
+	// 代理是网络层的事，不归 App 的锁管：存进网络层现读的那一格
+	// （见 proxy.go 的 storeProxy / ProxySnapshot）。
+	storeProxy(s)
 
 	// 落盘完成了要叫醒界面：不唤醒的话，界面会一直停在「还没存」的那一帧
 	//（和播放进度走的是同一条路，见 App.SetWake 的注释）。
@@ -156,6 +159,9 @@ func (a *App) UpdateSettings(fn func(*Settings)) (Settings, error) {
 	if err != nil {
 		return s, err
 	}
+	// 代理跟着每一笔设置改动走（见 proxy.go）：改完立刻生效，下一条请求
+	// 就走新路，不用重启。
+	storeProxy(s)
 	a.mu.Lock()
 	changed := a.normalize != s.NormalizeVolume
 	a.normalize = s.NormalizeVolume
