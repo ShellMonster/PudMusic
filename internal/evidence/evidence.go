@@ -3987,4 +3987,49 @@ var Items = []Item{
 			"TestAddingASongOutsideRandomModeSaysNothing",
 		},
 	},
+	{
+		// 票 #559（板子任务 #297，2026-10-26）：后台下载完成时弹一条系统通知。
+		//
+		// ⚠️ **判据只有一条**：「一扇窗都没有焦点」。而「窗口全部隐藏」落在
+		// 这一条里——一扇看不见的窗不可能有焦点。
+		//
+		// ⚠️ **迷你播放器那一扇的焦点要算**：它是 Panel（点它不激活应用），可它
+		// 在 macOS 上照样能拿 key（实测 2026-10-26，真窗口）。不算它的话，迷你
+		// 模式下每一次后台下载完成都会弹一条通知，而用户正看着迷你播放器听歌。
+		//
+		// ⚠️ **「互相切换」那一瞬靠「等一等」而不是「判得准」**：主窗失焦到迷你窗
+		// 拿到焦点之间有一个「两扇都没有焦点」的瞬间（实测 35~60 毫秒），而通知
+		// 是立刻弹的——所以判定延后一小会儿再判一次。
+		Category: Platform,
+		Spec:     "用户不在应用里（没有任何一扇窗有焦点）时，后台下载完成弹一条系统通知；用户在应用里时不弹；主窗与迷你窗互相切换不误判；点通知回主窗的下载记录页；权限拒绝 / 不支持时静默降级成应用内提示而不丢事件；同一任务用稳定 ID",
+		Tests: []string{
+			// 判据本身：聚焦 / 失焦 / 迷你那一扇 / 全隐藏 / 窗口还没建出来 /
+			// 关掉的那一扇窗要摘掉。
+			"TestTheFocusSnapshotSaysWhenTheUserIsAway",
+			"TestTheMiniPlayerCountsAsTheUserBeingHere",
+			"TestAllWindowsHiddenMeansTheUserIsAway",
+			"TestNoWindowYetIsNotTheUserBeingAway",
+			"TestAClosedWindowIsNotCounted",
+			// 互相切换那一瞬不误判（靠宽限期）。
+			"TestSwitchingBetweenOurOwnWindowsIsNotLeavingTheApp",
+			// 该发的时候真发了、该静默的时候真静默。
+			"TestDownloadDoneIsAnnouncedWhenTheUserIsAway",
+			"TestDownloadDoneIsSilentWhileTheUserIsHere",
+			// 稳定 ID（同一任务不堆两条）。
+			"TestTheNotificationIDIsStable",
+			// 点通知回到对应页面。
+			"TestTheNotificationGoesToTheDownloadList",
+			"TestTheUpdateNotificationGoesToTheSettings",
+			"TestAnUnknownNotificationGoesNowhere",
+			// 发不出去时不丢事件。
+			"TestAFailedNotificationStillSaysItInTheApp",
+			// 应用层那一段接线（下载完成 / 后台查到更新会递出去）。
+			"TestADownloadThatFinishedReachesTheNotifier",
+			"TestABackgroundCheckTellsTheNotifier",
+			// 平台层那一段（问过没有 / 拒了不再问 / 失败交给上层）。
+			"TestANotificationIsNotSupportedBeforeTheAppIsReady",
+			"TestADeniedNotificationIsNeverAskedForAgain",
+			"TestTheFailureIsHandedToTheUpperLayer",
+		},
+	},
 }

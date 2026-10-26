@@ -694,6 +694,27 @@ type App struct {
 	announceMu  sync.Mutex
 	announces   []announceEntry
 	announceSeq uint64
+
+	// downloadNotifier 是「下载下完了，去看看」的那只手，由界面层装一次。
+	//
+	// ⚠️ **它存在这儿是因为「用户在不在这几扇窗里」只有界面层答得了**（那是
+	// 窗口的焦点状态，见 `internal/ui/notification.go`），而这一层不认识界面
+	// ——所以它只能把「这件事发生了」递过去。
+	//
+	// ⚠️ **它在后台那条线上被调**（下载队列自己那条线），而界面层那一头会读
+	// 窗口状态——那一头是带锁的，所以跨 goroutine 调它不违反铁律一。
+	downloadNotifier func(taskID, title string)
+
+	// updateNotifier 是「查到了新版本，去看看」的那只手，由界面层装一次。
+	//
+	// ⚠️ **它和 `downloadNotifier` 是两件事**：下载完成是**后台发生**的（用户
+	// 常常不在），而「有更新了」是**用户看得见**的事（设置页里明明白白写着
+	// 「发现新版本 x.y.z」，界面还会弹一条提示）。所以它走的是另一档：只有
+	// 用户不在应用里的时候才发系统通知，而界面上的那一条照旧发。
+	//
+	// ⚠️ **它在后台那条线上被调**（检查更新的 goroutine），而界面层那一头会读
+	// 窗口状态——那一头是带锁的，所以跨 goroutine 调它不违反铁律一。
+	updateNotifier func(version string)
 }
 
 // wakeEntry 是一个窗口的唤醒句柄，外加一个用来摘掉它的号。

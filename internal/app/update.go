@@ -536,6 +536,12 @@ func (u *updater) check(user bool) {
 	var msg string
 	var tone notice.Tone
 	var phase UpdatePhase
+	// found 是「这一趟查到了新版本」。
+	//
+	// ⚠️ **它不能靠 `phase` 判**：`phase` 那一档只在「查失败」和「查到了」两支
+	// 里被赋值，而「查到了」那一支**并不写它**（相位是直接写进 `u.state.phase`
+	// 的）。所以这里自己记一份。
+	var found bool
 	// prefs 是**出了 u.mu 之后**才写盘的那一份（见下面 ⚠️）。
 	var prefs *updatePrefsFile
 	u.mu.Lock()
@@ -565,6 +571,7 @@ func (u *updater) check(user bool) {
 		u.state.phase = UpdateAvailable
 		u.state.latest, u.state.notes, u.state.released = rel.Version, rel.Notes, rel.Date
 		u.state.fellBack = false
+		found = true
 		// 记下「上次查到的版本」：离线启动的那一次也能在设置页看到有新版本，
 		// 不用干等网络。
 		prefs = &updatePrefsFile{LastCheck: now, KnownVersion: rel.Version}
@@ -587,6 +594,19 @@ func (u *updater) check(user bool) {
 	// 自己写的规矩自己破掉就没有规矩了。
 	if prefs != nil {
 		u.prefs.put(*prefs)
+	}
+	// 🔴 **系统通知**（票 #559）：查到了新版本，而用户多半不在应用里——
+	// 而「有更新了」这一句界面上的提示，他回到应用才看得见。
+	//
+	// ⚠️ **只有后台查到的才发**：用户自己按「检查更新」的话，他正盯着设置页
+	// 看着那句话，而系统通知是给「用户不在」时用的（那是下载完成那一档的
+	// 规矩，这里是同一档）。
+	//
+	// ⚠️ **它在后台那条线上被调**（检查更新的 goroutine），而界面层那一头要读
+	// 窗口的状态——那一头是带锁的（见 `internal/ui/notification.go`），所以
+	// 跨 goroutine 读它不违反铁律一（铁律一管的是**界面状态**，不是这个）。
+	if !user && found {
+		u.notifyUpdateAvailable(rel.Version)
 	}
 	u.wake()
 }
@@ -681,6 +701,35 @@ func (u *updater) wake() {
 	if fn != nil {
 		fn()
 	}
+}
+
+// notifyUpdateAvailable 把「查到了新版本」告诉界面层。
+//
+// ⚠️ **不在 `u.mu` 底下调界面层那一头**：那一头会读窗口状态（它自己带锁），
+// 而这一层拿着 `u.mu` 去调另一个包的代码就是当场死锁——死锁在这里的表现
+// 是「整个应用冻住」。
+func (u *updater) notifyUpdateAvailable(version string) {
+	a := u.app
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	notifier := a.updateNotifier
+	a.mu.Unlock()
+	if notifier != nil {
+		notifier(version)
+	}
+}
+
+// SetUpdateNotifier 装上「查到了新版本」的那只手，由界面层装一次。
+//
+// ⚠️ **没装的时候那件事也不能丢**：界面层没装（无头测试、或者这一轮界面层
+// 没起来）时，更新器留给界面的那一句提示照旧弹（走的是 `notice` 那条线），
+// 而它不依赖系统通知。
+func (a *App) SetUpdateNotifier(fn func(version string)) {
+	a.mu.Lock()
+	a.updateNotifier = fn
+	a.mu.Unlock()
 }
 
 // errUpdateUnavailable 是「这个应用不能给自己更新」时给界面的一句话。

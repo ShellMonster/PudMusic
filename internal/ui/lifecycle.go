@@ -43,6 +43,14 @@ func planWindowClose(quitting bool, opt app.CloseWindowOption) closeAction {
 func (s *Shell) installLifecycle() {
 	s.installMenu()
 
+	// 🔴 **系统通知的接线**（票 #559）。
+	//
+	// ⚠️ **必须在 `mygo.App.Run` 之前**：框架的 `App.OnNotificationClick` 要
+	// 接住「点通知把应用唤起来」那一次——那是启动参数交付的一部分（框架的
+	// 注释就写着「Register it before Run to receive the one whose click
+	// launched the app」），装晚了就漏掉那一次。
+	installNotification(s)
+
 	// 退出流程的第一站。框架的 prepareQuit 先发 OnBeforeQuit、再挨个关窗口，
 	// 所以这里记下的 quitting 到窗口的 OnClose 跑的时候一定已经是 true。
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { s.quitting = true })

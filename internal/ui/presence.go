@@ -80,6 +80,17 @@ func (p *windowPresence) seen() bool {
 	return p.seenLocked()
 }
 
+// focusedState 报「这一扇窗现在有没有焦点」。任何 goroutine 都能调。
+//
+// ⚠️ **它单独开一个方法，而不是让人直接读那个字段**：那个字段在一把
+// `sync.Mutex` 底下，而 `windowPresence` 本身**不能被整份拷贝**（拷它就是
+// 拷锁，`go vet` 会报）。所以外面要拿这两个值，就走这两个方法。
+func (p *windowPresence) focusedState() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.focused
+}
+
 // update 按 apply 改状态，并报告这次是不是「从看不见变成了看得见」。
 func (p *windowPresence) update(apply func(*windowPresence)) (resumed bool) {
 	p.mu.Lock()
@@ -123,6 +134,12 @@ func (s *Shell) noteWindow(apply func(*windowPresence)) {
 	// ⚠️ **先刷开关，再决定要不要补帧**：那个开关是「这一帧要不要继续要下一帧」
 	// 的唯一判据，而它得在任何一帧画出来之前就是对的。
 	s.visibleFlag().Store(s.presence.seen())
+	// 🔴 **活跃态那本账要同步**（见 notification.go）：「用户在不在这几扇窗里」
+	// 就是从**每扇窗的焦点状态**推出来的，而这里是那一扇窗的状态变了的地方。
+	//
+	// ⚠️ **在「补帧」之前**：那本账答的是「现在能不能弹系统通知」，而通知是
+	// 立刻弹的——它不等下一帧。所以它得在这一刻就是对的。
+	s.syncFocusTracker()
 	// ⚠️ **看不见了也要补一帧**（票 #468）：那一帧是**把常驻动画停下来**的那一帧。
 	//
 	// 满屏的封面在转的时候，要帧走的是**框架那一层**（pose 的通道）——它不经过
@@ -227,6 +244,18 @@ func (s *Shell) watchWindow(w *mygo.Window) {
 		p.minimized = w.IsMinimized()
 		p.focused = w.IsFocused()
 	})
+	// 🔴 **这一扇窗的焦点状态同时进「活跃态」那本账**（见 notification.go）：
+	// 「用户在不在这几扇窗里」是从**每扇窗的焦点**推出来的，而这里是唯一一处
+	// 拿到焦点变化的地方。
+	//
+	// ⚠️ **登记的那一刻就得把焦点记对**：登记之后到第一次状态变化之间可能已经
+	// 有过一份通知在判活跃态了（那一份读到「没焦点」就会判成用户不在）。
+	//
+	// ⚠️ **迷你播放器那一扇也算「有焦点」**：它是 Panel（点它不激活应用），可它
+	// 在 macOS 上照样能拿 key（实测 2026-10-26），而迷你模式下主窗是收起来的
+	// ——不算它的话，用户正看着迷你播放器听歌时每下一次下载完成都会弹一条系统
+	// 通知。理由见 notification.go 的文件头。
+	s.notify.id = tracker().add(w.IsFocused())
 	w.OnFocus(func() { s.noteWindow(func(p *windowPresence) { p.focused = true }) })
 	w.OnBlur(func() { s.noteWindow(func(p *windowPresence) { p.focused = false }) })
 	w.OnShow(func() { s.noteWindow(func(p *windowPresence) { p.shown = true }) })
