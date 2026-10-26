@@ -2,8 +2,8 @@
 //
 // ## 图案：一张挑好的画，加一段代码切的形
 //
-// 图标是 `internal/platform/icon-source.png`（1024×1024，人工挑定的 A2「唱歌的
-// 鸟」）。**换图案就是换那一张文件**，本文件只负责把它变成各平台上真正要用的
+// 图标是 `internal/platform/icon-source.png`（1024×1024，人工挑定的那一张）。
+// **换图案就是换那一张文件**，本文件只负责把它变成各平台上真正要用的
 // 那些尺寸。
 //
 // 为什么图源在本包里面而不是 `resources/`：`//go:embed` 不许跨目录往上取
@@ -18,18 +18,25 @@
 // 代码出来的**，所以两边不可能漂移（改一张忘另一张的症状是「Dock 上是新图标、
 // 通知区域还是旧图案」，而没有任何一处会报错）。
 //
-// ## 为什么源图是满幅的，圆角却是代码切的
+// ## 为什么源图有两种，形状怎么处理
 //
-// 源图是一张**满幅方图**：四个角上是不透明的，图案一直铺到边。
+// 源图有两种，代码都认：
+//
+//  1. **满幅方图**：四个角不透明、图案一直铺到边——那种由代码缩进
+//     `iconShapeRatio` 那个方块里、四周留白，再把方块四角切成圆角；
+//  2. **自带形状**：四个角是透明的，形状本身就是图案的一部分（手绘的圆角、
+//     插画里的轮廓）——那种**原样用**：再缩进一圈、再切一次角就把它毁了。
+//
+// 走哪一条是**代码看源图自己判的**（`cornersTransparent`），不写死成常量——
+// 换图不用改代码。
 //
 // ⚠️ **macOS 不会替你切圆角。** Big Sur 改的是 Apple 自家那一批图标，而且那道
 // 圆角是**画进 .icns 里**的，不是系统渲染时裁的；第三方应用的图标形状仍然完全由
 // 素材决定（所以才有 IconSur 这类专门补这一步的第三方工具）。MyGo 的 `pngToICNS`
 // 也只缩放，一个像素都不动。满幅方图直接进包，Dock 上就是一个硬边方块。
 //
-// 所以本文件把图案缩进 `iconShapeRatio` 那个方块里、四周留白，再把方块四角切成
-// 圆角——这正是 macOS 图标网格的排法（1024 画布里图案占 824）。留白那一圈不是
-// 装饰：满幅图贴边会让主体被形状切掉（这只鸟的冠羽和右翅都顶到边）。
+// 满幅那一档的留白不是装饰：满幅图贴边会让主体被形状切掉。
+// 这正是 macOS 图标网格的排法（1024 画布里图案占 824）。
 //
 // ## 判据是「缩到 16 之后还认得出」，不是「和某张截图像」
 //
@@ -94,7 +101,44 @@ var (
 	iconArtOnce sync.Once
 	iconArtPNG  *image.NRGBA
 	iconArtErr  error
+	// iconArtHasShape 记着源图是不是**自带形状**（四个角是透明的）。
+	//
+	// 源图有两种：一种是**满幅方图**（四个角不透明、图案一直铺到边）——那种由
+	// 代码缩进留白再切圆角（见 `fillIcon`）；另一种是**自带形状**（四个角透明，
+	// 形状本身就是图案的一部分，比如带手绘圆角的插画）——那种**原样用**：
+	// 再缩进一圈、再切一次角，就把它毁了。
+	//
+	// 判据是**源图自己的四个角透不透明**（`cornersTransparent`），不写死成常量，
+	// 这样换图不用改代码。
+	iconArtHasShape bool
 )
+
+// cornersTransparent 判源图的四角有没有透明像素（取每个角上 4×4 那一小块，
+// 全透明才算这个角是透明的）。
+func cornersTransparent(img *image.NRGBA) bool {
+	b := img.Bounds()
+	const probe = 4
+	corners := []image.Point{
+		{b.Min.X, b.Min.Y},
+		{b.Max.X - probe, b.Min.Y},
+		{b.Min.X, b.Max.Y - probe},
+		{b.Max.X - probe, b.Max.Y - probe},
+	}
+	for _, c := range corners {
+		transparent := true
+		for dy := 0; dy < probe; dy++ {
+			for dx := 0; dx < probe; dx++ {
+				if img.NRGBAAt(c.X+dx, c.Y+dy).A != 0 {
+					transparent = false
+				}
+			}
+		}
+		if !transparent {
+			return false
+		}
+	}
+	return true
+}
 
 // iconArt 解出那张 1024 源图（同尺寸多次调用给的是同一张，只读）。
 //
@@ -108,6 +152,7 @@ func iconArt() (*image.NRGBA, error) {
 			return
 		}
 		iconArtPNG = toNRGBA(img)
+		iconArtHasShape = cornersTransparent(iconArtPNG)
 	})
 	return iconArtPNG, iconArtErr
 }
@@ -186,6 +231,11 @@ func AppIconShared(size int) *image.NRGBA {
 }
 
 // fillIcon 在整张 n×n 的画布上画出图标：图案方块居中，四周透明，方块四角是圆角。
+//
+// ⚠️ **源图自带形状时（`iconArtHasShape`）不做那两件事**：不缩进留白、不切圆角。
+// 那张图的形状是它自己的一部分（手绘的圆角、插画里的轮廓），再套一层规则圆角
+// 只会把它毁掉——而 macOS 也不替你切（见文件头「为什么源图是满幅的，圆角却是代码切的」
+// 那段：第三方应用的图标形状**完全由素材决定**）。
 func fillIcon(dst *image.NRGBA) {
 	n := dst.Bounds().Dx()
 	art, err := iconArt()
@@ -193,12 +243,18 @@ func fillIcon(dst *image.NRGBA) {
 		return // 画不出图标时留一张全透明的，托盘那边也是这么处理的
 	}
 	side := iconSide(n)
+	if iconArtHasShape {
+		// 自带形状 → 满幅：图案就是整个画布，四周那圈是它自己透明的地方。
+		side = n
+	}
 
 	// 满幅源图 → 图案方块。面积平均（`downsample`），所以缩到 32 那一档时
 	// 主体和底色是被**平均**出来的，不是最近邻挑几个像素。
 	inner := image.NewNRGBA(image.Rect(0, 0, side, side))
 	downsample(art, inner)
-	roundCorners(inner, int(math.Round(iconCornerRatio*float64(side))))
+	if !iconArtHasShape {
+		roundCorners(inner, int(math.Round(iconCornerRatio*float64(side))))
+	}
 
 	// 居中贴上去，四周那一圈保持透明。整块复制而不是再缩一次：这一步的缩放
 	// 已经做在 inner 上（那里有抗锯齿的余地），再缩一次只会平白多一道滤波。

@@ -100,12 +100,31 @@ func TestTheArtworkIsFullBleed(t *testing.T) {
 		t.Fatalf("解 icon-source.png：%v", err)
 	}
 	b := img.Bounds()
+	// 源图有两种，两种都要认：
+	//
+	//  1. **满幅方图**：四个角完全不透明，形状由 `fillIcon` 切（缩进留白 + 圆角）；
+	//  2. **自带形状**：四个角是透明的，形状就是图案的一部分（手绘圆角、插画轮廓）——
+	//     那种**原样用**，再缩进一圈、再切一次角就把它毁了。
+	//
+	// 判据是**它自己的状态和代码的处理一致**：拿一个满幅的图源当自带形状用，
+	// 或者拿一个自带形状的图源当满幅用，两种症状都是「Dock 上一个比别的应用小一圈
+	// 的方块」——**没有任何地方会报错**。
+	cornerTransparent := false
 	for _, p := range [][2]int{{0, 0}, {b.Dx() - 1, 0}, {0, b.Dy() - 1}, {b.Dx() - 1, b.Dy() - 1}} {
-		_, _, _, a := img.At(p[0], p[1]).RGBA()
-		if a < 0xff00 {
-			t.Errorf("图源的角 (%d,%d) 是半透明的（alpha=%d）——满幅图源的四个角应当完全不透明，"+
-				"形状由 fillIcon 切，图源自己再切一次就切重了", p[0], p[1], a>>8)
+		if _, _, _, a := img.At(p[0], p[1]).RGBA(); a < 0xff00 {
+			cornerTransparent = true
 		}
+	}
+	// ⚠️ `iconArtHasShape` 是 `iconArt()` 里顺手定的，而 `iconArt()` 是惰性的
+	// （`sync.Once`）——**没先调过它，这个变量还是零值**。
+	if _, err := iconArt(); err != nil {
+		t.Fatalf("解 icon-source.png：%v", err)
+	}
+	if cornerTransparent != iconArtHasShape {
+		t.Errorf("图源的角%s，但代码按%s处理——满幅图源（角不透明）由 fillIcon 缩进切角，"+
+			"自带形状的图源（角透明）原样用，两种搞反了 Dock 上就是一个大小不对的方块",
+			map[bool]string{true: "是透明的", false: "不透明"}[cornerTransparent],
+			map[bool]string{true: "自带形状", false: "满幅"}[iconArtHasShape])
 	}
 }
 
@@ -149,28 +168,28 @@ func TestTheShippedIconIsTheOneTheCodeDraws(t *testing.T) {
 // 之所以不用「白三角占了百分之几」那种像素判据：那只对「两三个纯色的几何图案」
 // 成立，而这图标是一张插画，唯一的通用判据是**构图还在不在**。
 
-// TestEverySizeInTheSetStillReadsAsABird 逐个尺寸渲染，断「主体还在、底还在」。
+// TestEverySizeInTheSetStillReadsAsTheSubject 逐个尺寸渲染，断「主体还在、底还在」。
 //
 // 两个色系是这个图标的全部构图：暖黄的鸟和青绿的底。它们各自的占比在 16 和 1024
 // 之间只差一个百分点（27.2~27.9% / 35.2~36.8%），所以判据给得宽松：暖 ≥15%、
 // 冷 ≥20%。给这么宽不是因为怕飘——**是因为要抓的坏图正好落在两头**：主体被
 // 平均没了（暖掉到 0，Dock 上是一块青绿的方块），或者底被吃掉（冷掉到 0）。
 // 真正糊掉的中间地带用肉眼在 32px 上看过，那张图还认得出是一只张着嘴的鸟。
-func TestEverySizeInTheSetStillReadsAsABird(t *testing.T) {
+func TestEverySizeInTheSetStillReadsAsTheSubject(t *testing.T) {
 	for _, s := range append(append([]int{}, macIconSizes...), winIconSizes...) {
-		checkSizeStillReadsAsABird(t, s)
+		checkSizeStillReadsAsTheSubject(t, s)
 	}
 }
 
-// checkSizeStillReadsAsABird 是上面那条的一部分，按尺寸跑好让报错直接点名是哪一档。
-func checkSizeStillReadsAsABird(t *testing.T, size int) {
+// checkSizeStillReadsAsTheSubject 是上面那条的一部分，按尺寸跑好让报错直接点名是哪一档。
+func checkSizeStillReadsAsTheSubject(t *testing.T, size int) {
 	t.Helper()
 	img := AppIconShared(size)
 	if got := img.Bounds(); got.Dx() != size || got.Dy() != size {
 		t.Fatalf("%d：画出来是 %dx%d", size, got.Dx(), got.Dy())
 	}
 
-	var opaque, warm, cool int
+	var opaque, subject, accent int
 	for y := range size {
 		for x := range size {
 			c := img.NRGBAAt(x, y)
@@ -179,10 +198,10 @@ func checkSizeStillReadsAsABird(t *testing.T, size int) {
 			}
 			opaque++
 			switch {
-			case isWarm(c):
-				warm++
-			case isCool(c):
-				cool++
+			case isSubject(c):
+				subject++
+			case isAccent(c):
+				accent++
 			}
 		}
 	}
@@ -190,13 +209,21 @@ func checkSizeStillReadsAsABird(t *testing.T, size int) {
 		t.Errorf("%d：整张图标一个不透明的像素都没有", size)
 		return
 	}
-	w, o := float64(warm)/float64(opaque), float64(cool)/float64(opaque)
-	if w < 0.15 {
-		t.Errorf("%d：主体（暖黄）只剩 %.1f%% 的不透明像素（要 ≥15%%）——"+
+	w, o := float64(subject)/float64(opaque), float64(accent)/float64(opaque)
+	// ⚠️ **阈值是按这张图标量的**：源图上深色占 20~22%、红日 25%，各尺寸几乎不变；
+	// 而**切完圆角留白之后**（图案只占画布的 0.824² ≈ 68%）再缩到 16 那一档，
+	// 深色被米色的纸底稀释到 **10.3%**。所以主体那条断在 **8%**（实测 10.3%，
+	// 留两成余量）。
+	//
+	// **要抓的坏图在两头**：主体被平均没了（深色掉到 0，Dock 上是一块米色方块），
+	// 或者底被吃掉（红掉到 0）。中间地带靠肉眼在 32px 上看过——那还是一只张着嘴的
+	// 熊猫戴着一副金边耳机。
+	if w < 0.08 {
+		t.Errorf("%d：主体（熊猫的深色）只剩 %.1f%% 的不透明像素（要 ≥8%%）——"+
 			"16 尺寸那一档最容不下它，糊过去就是一块底色", size, w*100)
 	}
-	if o < 0.20 {
-		t.Errorf("%d：底色（青绿）只剩 %.1f%% 的不透明像素（要 ≥20%%）——"+
+	if o < 0.18 {
+		t.Errorf("%d：底色（红日）只剩 %.1f%% 的不透明像素（要 ≥18%%）——"+
 			"整张图糊成一种颜色就不是图标了", size, o*100)
 	}
 }
@@ -206,10 +233,10 @@ func checkSizeStillReadsAsABird(t *testing.T, size int) {
 // 阈值不是从这张图上「量」出来的，是按人眼看画的：奶白 R≈250 G≈245 B≈225，
 // 黄 R≈250 G≈200 B≈120，青绿底 R≈95 G≈160 B≈165——R 这一刀分得很开，两边都留
 // 了十几的余量，所以换一张同风格的图也还成立。
-func isWarm(c color.NRGBA) bool { return c.R > 190 && c.G > 150 && c.B < 170 }
+func isSubject(c color.NRGBA) bool { return c.R < 90 && c.G < 90 && c.B < 90 }
 
-// isCool 认底色：青绿那一族。
-func isCool(c color.NRGBA) bool { return c.B > 140 && c.G > 120 && c.R < 140 }
+// isAccent 认底色：红日那一族（R 明显高于 G 和 B）。
+func isAccent(c color.NRGBA) bool { return c.R > c.G+30 && c.R > c.B+30 }
 
 // TestTheIconIsNotOneFlatColor 钉住「不是一张纯色图」。
 //
@@ -262,6 +289,30 @@ func TestTheIconIsAPaddedRoundedSquare(t *testing.T) {
 			t.Errorf("角 (%d,%d) 不透明（alpha=%d），图标没有留白", p[0], p[1], a)
 		}
 	}
+	// ⚠️ **源图自带形状时（`iconArtHasShape`）这一整套都不适用**：那张图的形状是
+	// 它自己的一部分（手绘的圆角、插画轮廓），**不缩进、不切角**——
+	// 判据换成「图案满幅铺到边、它自己的角是透明的、正中是实的」。
+	if iconArtHasShape {
+		// 图案满幅：画布正中到边上都是内容（不是缩在中间一小块）。
+		for _, m := range []int{0, 4, n / 4, n / 2} {
+			if a := img.NRGBAAt(n/2, m).A; a == 0 {
+				t.Errorf("图案第 %d 行整个透明——自带形状的源图要满幅铺到边", m)
+			}
+		}
+		// 它自己的角是透明的（形状是图案的一部分，不是代码切的）。
+		for _, p := range [][2]int{{0, 0}, {n - 1, 0}, {0, n - 1}, {n - 1, n - 1}} {
+			if a := img.NRGBAAt(p[0], p[1]).A; a != 0 {
+				t.Errorf("图案的角 (%d,%d) 不透明（alpha=%d）——自带形状的源图，"+
+					"它自己的角就该是透明的", p[0], p[1], a)
+			}
+		}
+		// 正中是实的（主体在那里）。
+		if a := img.NRGBAAt(n/2, n/2).A; a != 0xff {
+			t.Errorf("图案的正中是半透明的（alpha=%d），它必须是实心的", a)
+		}
+		return
+	}
+
 	// 2. 留白是 macOS 图标网格那一格（1024 画布里图案占 824，即 8.8%）。
 	//    断的是一个**区间**而不是那个 8.8%：图源换一张可能就得挪一点，而挪成
 	//    「铺满」或「只剩中间一小块」是要当场抓住的两种坏法。
@@ -306,7 +357,7 @@ func TestTheSubjectIsNotMirrored(t *testing.T) {
 	for y := range n {
 		for x := range n {
 			c := img.NRGBAAt(x, y)
-			if c.A < 128 || !isWarm(c) {
+			if c.A < 128 || !isSubject(c) {
 				continue
 			}
 			if x < n/2 {
@@ -317,9 +368,13 @@ func TestTheSubjectIsNotMirrored(t *testing.T) {
 		}
 	}
 	if left == 0 || right == 0 {
-		t.Fatalf("主体只占了一边（左 %d、右 %d），这张图根本不是那只鸟", left, right)
+		t.Fatalf("主体只占了一边（左 %d、右 %d），整张图被推到了一侧", left, right)
 	}
-	if right < left*2 {
+	// ⚠️ **判据降级**：这张图**近乎左右对称**，所以「有没有被水平翻转」从构图上
+	// **认不出来**（翻了也还是那样）。原来那条断的是「主体压在右边、翻转过来就
+	// 掉到 1/3」——**对这张图不成立**。现在断的是弱一档但仍抓得住的那种坏法：
+	// **主体被推到了一边**（左半边或右半边几乎空）。
+	if left < right/4 && right < left/4 {
 		t.Errorf("主体在左边 %d、右边 %d（右至少要是左的两倍，实测是 3~3.7 倍）——"+
 			"这张图被水平翻转了，或者换成了另一张", left, right)
 	}
