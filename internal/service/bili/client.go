@@ -47,6 +47,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -226,6 +227,9 @@ type Client struct {
 	// 用同一个地址才读得到——否则「jar 是空的」会变成一个查不出来的
 	// fixture 假象。跟 host* 一样，只有包内测试能改。
 	sessionBase string
+
+	buvidMu sync.Mutex
+	buvid   string
 }
 
 // cookieURL 是读写登录 cookie 用的地址。
@@ -328,6 +332,9 @@ type Call struct {
 	CSRF bool
 	// WBI 表示这次调用要 WBI 签名。
 	WBI bool
+	// Buvid 表示这次调用要带上设备标识（buvid3/buvid4）。取流接口没有它时，
+	// B 站常把请求当成可疑流量，只回一个 v_voucher、不给流。
+	Buvid bool
 }
 
 // Do 发一次请求，返回解好的 data 段。
@@ -401,6 +408,11 @@ func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 	c.setHeaders(req, csrf)
+	if call.Buvid {
+		if b := c.buvidCookie(ctx); b != "" {
+			req.Header.Set("Cookie", b)
+		}
+	}
 
 	if c.onReq != nil {
 		c.onReq(method, endpoint.String())
@@ -536,4 +548,32 @@ func orDefault(v, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+// buvidCookie 返回 `buvid3=…; buvid4=…`，没取到返回空串。第一次成功后缓存。
+//
+// 取流接口没有这两个 cookie 时，B 站常只回 v_voucher；Biu 上游跑在浏览器
+// 里，天然带着它们。
+func (c *Client) buvidCookie(ctx context.Context) string {
+	c.buvidMu.Lock()
+	defer c.buvidMu.Unlock()
+	if c.buvid != "" {
+		return c.buvid
+	}
+	raw, err := c.Do(ctx, Call{URL: c.hostAPI + "/x/frontend/finger/spi"})
+	if err != nil {
+		return ""
+	}
+	var d struct {
+		B3 string `json:"b_3"`
+		B4 string `json:"b_4"`
+	}
+	if json.Unmarshal(raw, &d) != nil || d.B3 == "" {
+		return ""
+	}
+	c.buvid = "buvid3=" + d.B3
+	if d.B4 != "" {
+		c.buvid += "; buvid4=" + d.B4
+	}
+	return c.buvid
 }

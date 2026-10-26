@@ -787,3 +787,40 @@ func TestTheExpiryRuleIsOneRule(t *testing.T) {
 		}
 	})
 }
+
+// 回归：B 站把请求当成可疑流量时只回 {"v_voucher":…}，没有 dash，界面上就成了
+// 「没有给这一条单独的音频流」。现在带上 buvid，被要求验证时用 gaia_source 再问一次。
+func TestPlayURLSurvivesAVoucherAndSendsBuvid(t *testing.T) {
+	f, c := playurlClient(t, nil)
+	f.on("/x/frontend/finger/spi", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"code":0,"message":"ok","data":{"b_3":"B3X","b_4":"B4X"}}`)
+	})
+	exp := time.Unix(1702204169+7200, 0)
+	f.on(playurlPath, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("gaia_source") == "" {
+			writeJSON(w, `{"code":0,"message":"0","ttl":1,"data":{"v_voucher":"voucher_x"}}`)
+			return
+		}
+		writeJSON(w, fakePlayurl(map[string]any{"duration": 100, "audio": []any{
+			audioItem(30280, 110836, "mp4a.40.2", streamURL(exp, "-30280.m4s"))}}))
+	})
+
+	if _, err := c.PlayURL(context.Background(), testBvid, testCid, AudioAuto); err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range f.requests() {
+		if rec.Path == playurlPath && !strings.Contains(rec.Header.Get("Cookie"), "buvid3=B3X") {
+			t.Fatalf("取流请求没带 buvid3：%q", rec.Header.Get("Cookie"))
+		}
+	}
+}
+
+func TestPlayURLReportsRiskControlWhenVoucherPersists(t *testing.T) {
+	f, c := playurlClient(t, nil)
+	f.on(playurlPath, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"code":0,"message":"0","ttl":1,"data":{"v_voucher":"voucher_x"}}`)
+	})
+	if _, err := c.PlayURL(context.Background(), testBvid, testCid, AudioAuto); !errors.Is(err, ErrRiskControl) {
+		t.Fatalf("err = %v，want ErrRiskControl", err)
+	}
+}

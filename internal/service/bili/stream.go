@@ -236,6 +236,8 @@ type playurlData struct {
 	// 上游 Biu 走的就是这一段（`get-lyrics.ts` 的 `getLyricsByBili`），
 	// 见 `subtitle.go` 的文件头。
 	Subtitle *subtitleBlock `json:"subtitle"`
+	// VVoucher 非空而没有 Dash，说明 B 站把这次请求当成可疑流量，要求验证。
+	VVoucher string `json:"v_voucher"`
 }
 
 // PlayURL 问 B 站要一条音频流。

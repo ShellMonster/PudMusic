@@ -252,6 +252,12 @@ func bestNotAbove(list []dashVideo, want VideoQuality) (dashVideo, bool) {
 // `qn` 是视频画质档；0 表示**不传**这个参数——那是音频那条路的原样
 // 行为（取流不带 `qn`，B 站把所有档都返回来，由客户端挑）。
 func (c *Client) fetchPlayurl(ctx context.Context, bvid, cid string, qn VideoQuality) (*playurlData, error) {
+	return c.fetchPlayurlGaia(ctx, bvid, cid, qn, false)
+}
+
+// fetchPlayurlGaia 同 fetchPlayurl。B 站要求验证（只回 v_voucher）时，带着
+// gaia_source=view-card 再问一次；还是不给就报风控。
+func (c *Client) fetchPlayurlGaia(ctx context.Context, bvid, cid string, qn VideoQuality, gaia bool) (*playurlData, error) {
 	q := url.Values{}
 	q.Set("bvid", bvid)
 	q.Set("cid", cid)
@@ -260,6 +266,9 @@ func (c *Client) fetchPlayurl(ctx context.Context, bvid, cid string, qn VideoQua
 	q.Set("fourk", "1")
 	if qn != VideoQualityUnknown {
 		q.Set("qn", fmt.Sprint(int(qn)))
+	}
+	if gaia {
+		q.Set("gaia_source", "view-card")
 	}
 
 	// ⚠️ 这个接口**不强制**要 WBI 签名：不带 w_rid 也能通（实测）。
@@ -270,6 +279,7 @@ func (c *Client) fetchPlayurl(ctx context.Context, bvid, cid string, qn VideoQua
 		URL:    c.hostAPI + playurlPath,
 		Query:  q,
 		WBI:    true,
+		Buvid:  true,
 	})
 	if err != nil {
 		return nil, err
@@ -280,6 +290,12 @@ func (c *Client) fetchPlayurl(ctx context.Context, bvid, cid string, qn VideoQua
 		// 接口回了 200、code 也是 0，但 data 的形状不是我们认识的那个。
 		// 这通常是 B 站改接口改出来的，不要把它当成网络错——重试没用。
 		return nil, fmt.Errorf("bili: 取流接口的返回读不懂：%w", err)
+	}
+	if d.VVoucher != "" && d.Dash == nil {
+		if gaia {
+			return nil, fmt.Errorf("%w: 取流被要求验证（v_voucher）", ErrRiskControl)
+		}
+		return c.fetchPlayurlGaia(ctx, bvid, cid, qn, true)
 	}
 	return &d, nil
 }
