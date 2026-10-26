@@ -35,6 +35,7 @@ package ui
 
 import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -337,6 +338,17 @@ func (s *Shell) adoptShared(main *Shell) {
 		s.hist = main.hist
 		s.shared = true
 	}
+	// 「系统交给我们的那个文件」那一句接主窗口那一份。
+	//
+	// ⚠️ **必须是同一份**：那句话是**一件事**（系统交给我们一个文件，我们
+	// 收下了没有），而**两扇窗都要画它**——迷你那一扇不画 toast（`viewToasts`
+	// 只在主窗口那一支调），而迷你常常就是用户眼前那一扇。
+	//
+	// 两份的话，主窗口那一份上的话迷你看不见，而迷你那一份上的话主窗口
+	// 看不见——于是「用户眼前那一扇没有那句话」照旧发生，而症状一模一样。
+	if main.notice != nil && main.notice != s.notice {
+		s.notice = main.notice
+	}
 }
 
 // openMiniPlayer 开出迷你播放器那个窗口，并把主窗口收起来。
@@ -585,6 +597,30 @@ func (s *Shell) viewMini(c *ui.Context) {
 	// 页内那些卡片（关注卡、下载表那张、新歌速递那块空状态板）才是「同色靠影」
 	// 那一族，它们已经归一（票 #239）。
 	// 圆角跟着主题走，用户在设置页调圆角时这一块跟着变，和别处一致。
+	// 🔴 **「系统交给我们的那个文件，收下了没有」那一句话**（见 filenotice.go）：
+	// **它占掉整个迷你窗**。
+	//
+	// ⚠️ **为什么是整个窗而不是一小条**：这一扇只有 320×84，而那一句话最长
+	// 的一档是「这个格式我们放不了（支持 .mp3 .flac …）」——几十个字。挤成
+	// 一小条的话，那句话会被裁成几个字，而用户看到的是「弹了一小块红」，
+	// 还是不知道出了什么事。
+	//
+	// ⚠️ **为什么迷你要画它**：迷你那一扇**不画 toast**（`viewToasts` 只在
+	// 主窗口那一支调），而迷你常常就是用户眼前那一扇——于是「说了话但用户
+	// 眼前什么也没有」，症状和「双击没反应」一样。
+	noticeText, noticeTone, hasNotice := s.miniNotice()
+
+	// 底色：有那句话的时候是**语义色**（红的那一档和主窗口那条 toast 一样），
+	// 没有的时候是 `t.Surface`。
+	//
+	// ⚠️ **语义色要盖住整张卡片**：迷你那一张卡片是浮在桌面上的，而深色主题
+	// 下 `t.Surface` 和桌面糊在一起——那一行字压着灰底读不清。
+	cardBG := s.coverWash(t, t.Surface)
+	noticeFG := t.Text
+	if hasNotice {
+		cardBG, noticeFG = toastColors(noticeTone, t)
+	}
+
 	//
 	// 🔴 **根是「上下两段」，不是一张 `Fill()` 的卡片**（票 #536）：以前整张卡片
 	// `Fill()`，于是窗口一变高，卡片就跟着拉高——卷帘要的是「**上面那张 84 高
@@ -619,18 +655,32 @@ func (s *Shell) viewMini(c *ui.Context) {
 	//（底下那个应用的按钮就点不到那几十像素）。`Fill()` 让根铺满整扇窗，
 	// 那多出来的一块是**面板自己的底**（不透明，不吃点击的那种空）。
 	//
-	// ⚠️ **底色走 `coverWash`**（上游那一档：封面取色把主色轻轻染进底）：
+	// ⚠️ **底色走 `coverWash`**（上游那一档：封面取色把主色主色轻轻染进底）：
 	// 迷你播放器的底和播放条那一块是**同一族**（都随当前封面的色偏一下），
 	// 而这一扇窗**整个就是一张卡片**——染的是整块面板，卷帘那一段不再单独
 	// 画底（根已经铺满整扇窗了）。
+	//
+	// ⚠️ **「有提示」那一档不展开卷帘**：那一句话占掉的是**整个迷你窗**
+	//（84 高那一张卡片），而卷帘是**挂在它下面**的另一块——两者同时画的话，
+	// 用户看到的是「迷你窗上半张是那句话、下半张是歌词」，而那 84 高里
+	// 有一句「这个格式我们放不了」——**两件事挤在一扇窗里，谁也读不清**。
+	// ⇒ 有提示的时候**卷帘收着**（窗还是 84 高），提示走了它再能展开。
+	expanded := !hasNotice && s.miniCurtain.height > 0
+	// ⚠️ **有提示的时候窗高必须回到 84**（这一扇窗是透明的，而**透明的那
+	// 一块照样吃点击**）：提示占的是**上面那 84 高**（卷帘那一段不画），
+	// 而窗高要是还停在「84 + 卷帘高」，窗底下就多出一块**看不见、却拦
+	// 点击**的透明区——底下那个应用的按钮就点不到那 236 像素。
+	if hasNotice && s.miniCurtain.height > 0 {
+		s.miniCurtainCollapseNow()
+	}
 	panel := ui.Column(c).Key("mini-root").Fill()
-	if s.miniCurtain.height > 0 {
+	if expanded {
 		panel = panel.Radius(t.Radius, t.Radius, space.None, space.None)
 	} else {
 		panel = panel.Radius(t.Radius)
 	}
-	panel = panel.Background(s.coverWash(t, t.Surface))
-	if s.miniCurtain.height > 0 {
+	panel = panel.Background(cardBG)
+	if expanded {
 		panel = shadow.Popover(panel, t)
 	}
 	panel.Children(func() {
@@ -643,13 +693,54 @@ func (s *Shell) viewMini(c *ui.Context) {
 		s.miniCurtainSyncHeight(c)
 		ui.Row(c).Key("mini").FillWidth().Height(miniHeight).
 			DragWindow().Children(func() {
+			// ⚠️ **有提示的时候这一段让位给那句话**（上游那一档，见
+			// `filenotice.go`）：迷你那一张卡片整个变成那句话。
+			if hasNotice {
+				s.viewMiniNotice(c, noticeText, noticeFG)
+				return
+			}
 			// 里面照样逐块包一层 Guard（铁律四）：崩掉封面那一块不该把控制键一起带走。
 			s.guardAt("迷你播放器封面", func(c *ui.Context) { s.viewMiniCover(c, st) })(c)
 			s.guardAt("迷你播放器控制键", func(c *ui.Context) { s.viewMiniControls(c, st, t) })(c)
 		})
 		// 卷帘。⚠️ **高度为 0 的时候一个字都不画**（`viewMiniCurtain` 那一支）——
 		// 窗高已经回到 84，而这一段要是还画着，窗就比内容矮。
-		s.viewMiniCurtain(c, st, t, s.miniCurtain.height)
+		//
+		// ⚠️ **有提示的时候也不画**（理由见上面那一段：那句话占掉整扇窗）。
+		if !hasNotice {
+			s.viewMiniCurtain(c, st, t, s.miniCurtain.height)
+		}
+	})
+}
+
+// miniNotice 报此刻迷你那一扇要显示的那句话（没有就报 false）。
+//
+// ⚠️ **它和主窗口那一条是两套**：主窗口那边是一条 toast（右下角那张卡片，
+// 见 `viewToasts`），而迷你这一扇**不画 toast**——所以这一句另有一份
+// **两扇窗共看**的状态（见 `filenotice.go`）。
+func (s *Shell) miniNotice() (text string, tone notice.Tone, ok bool) {
+	if s.notice == nil {
+		return "", 0, false
+	}
+	return s.notice.current()
+}
+
+// viewMiniNotice 画「系统交给我们的那个文件」那一句。**它占掉整个迷你窗**。
+//
+// ⚠️ **底色是外层那张卡片画的**（`viewMini` 里按语义色换掉 `t.Surface`），
+// 而这一段只画那句话——所以它不需要自己的底，也不会盖掉圆角。
+func (s *Shell) viewMiniNotice(c *ui.Context, text string, fg ui.Color) {
+	// ⚠️ **三行封顶**：这一扇只有 84 高（减去上下 12 的内边距还剩 60，
+	// 而 12 号字一行约 16）——最多三行半。而那一句话最长的一档是
+	// 「这个格式我们放不了（支持 .mp3 .flac .wav …）」，四行放不下。
+	//
+	// 放不下就**省略号**（而不是把字压到窗外）：用户看到的是「这句话被截了」，
+	// 而完整的那一句在主窗口那条 toast 上（两扇窗看的是同一件事）。
+	ui.Column(c).Key("mini-notice").Grow(1).FillHeight().
+		Padding(space.Px12, space.Px12, space.Px12, space.Px12).
+		Justify(ui.Center).Children(func() {
+		ui.Text(c, text).FontSize(scale.Font(c, scale.Size12)).
+			FontWeight(weightMedium).TextColor(fg).MaxLines(3).Ellipsis("…")
 	})
 }
 

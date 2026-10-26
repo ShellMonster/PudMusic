@@ -428,6 +428,54 @@ func TestTheMiniCurtainCollapsesWhenTheSwitchIsTurnedOff(t *testing.T) {
 	}
 }
 
+// TestTheMiniCurtainCollapsesAtOnceWithoutBouncingBack 盯「立刻收起」真的是
+// **一下子**到位，而不是**先弹回 320 再滑下去**。
+//
+// ⚠️ **这是这一票踩到的一个真缺陷**：卷帘高度是一个**动画值**，而
+// `miniCurtainCollapseNow`（开关关掉 / 关窗那两条路走的）只把
+// `height` 归零了——**动画通道里的值还在 236**。于是下一帧那个
+// `AnimateTo(0)` 从 236 往 0 滑，窗于是**先弹回 320 高**，再一路缩到 84。
+//
+// 而那 240ms 里**窗比内容高**：这一扇窗是透明的，**透明的那一块照样吃
+// 点击**——底下那个应用的按钮就点不到那 236 像素。而票面要的是「**立刻
+// 收起**」，不是「正在收」。
+//
+// ⚠️ **判据是「那一帧窗高就是 84」**（不是「最后到了 84」）：滑下去那条路
+// 最后也会到 84，所以只断终态的话，这个缺陷照红照绿。
+func TestTheMiniCurtainCollapsesAtOnceWithoutBouncingBack(t *testing.T) {
+	s, a := miniCurtainShell(t)
+	if err := enqueueTwo(a, t); err != nil {
+		t.Fatal(err)
+	}
+	a.Toggle()
+	a.PutLyricsFrom("", "[00:00.00]第一句\n[00:05.00]第二句\n", "")
+	tt := miniCurtainTester(s)
+
+	clickCurtainCover(t, tt)
+	settleCurtain(t, tt, true)
+	if got := s.miniCurtain.setHeight; got != miniHeight+miniCurtainH {
+		t.Fatalf("起点就不对：窗高是 %d，want %d", got, miniHeight+miniCurtainH)
+	}
+
+	// 「立刻收起」（开关关掉 / 关窗那两条路走的就是它）。
+	s.miniCurtainCollapseNow()
+	// ⚠️ **只推一帧**（16ms）：滑下去那条路在第一帧还在 236 附近，而
+	// 「立刻收起」必须是**这一帧就已经是 84**。
+	tt.Advance(16 * time.Millisecond)
+	tt.Frame()
+
+	if got := s.miniCurtain.height; got != 0 {
+		t.Errorf("立刻收起之后卷帘高 %.1f，want 0：它还在滑下去（窗会先弹回 320）", got)
+	}
+	if got := s.miniCurtain.setHeight; got != miniHeight {
+		t.Errorf("立刻收起之后窗高是 %d，want %d：窗不该先弹回 %d 再滑下来",
+			got, miniHeight, miniHeight+miniCurtainH)
+	}
+	if miniCurtainHasLyrics(tt) {
+		t.Errorf("立刻收起之后画面上还有歌词：卷帘没有收起来，文字有 %q", tt.Texts())
+	}
+}
+
 // TestTheMiniLyricsCurtainSwitchSurvivesARestart 盯「开关落盘」。
 //
 // ⚠️ **走的是生产那条路**：先写盘、再 `MountSettings` 读回来——和真程序

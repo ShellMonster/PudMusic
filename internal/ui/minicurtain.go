@@ -188,6 +188,18 @@ type miniCurtainState struct {
 	// ⚠️ **它是「念一句」那件事的判据**：展开 / 收起各念一次，而念的那一句
 	// 只在**状态变了的那一帧**念（不然每一帧都念一遍）。
 	wasOpen bool
+
+	// animZeroed 是「**立刻收起**那一下已经发生过了」。
+	//
+	// ⚠️ **它管的是「动画通道要不要归零」**：`miniCurtainCollapseNow` 把
+	// `height` 归零了，但**动画通道里的值还在 236**——而下一帧那个
+	// `AnimateTo(0)` 会从 236 往 0 滑，窗于是**先弹回 320 再缩到 84**，
+	// 那 240ms 里窗比内容高（透明的那一块在吃点击）。
+	//
+	// ⇒ 「立刻收起」这一下必须**连动画通道一起钉到 0**（`Jump`），
+	// 而 `Jump` 只能对着**元素**调——元素每帧都建，所以这里记的是
+	// 「下一次建那个元素时要 `Jump` 一下」。
+	animZeroed bool
 }
 
 // miniCurtainEnabled 报「迷你播放器歌词卷帘」那一格是开是关。
@@ -328,6 +340,11 @@ func (s *Shell) miniCurtainCollapseNow() {
 	s.miniCurtain.open = false
 	s.miniCurtain.height = 0
 	s.miniCurtain.setHeight = miniHeight
+	// ⚠️ **动画通道也要归零**（`animZeroed`）：只把 `height` 归零的话，下一帧
+	// 那个 `AnimateTo(0)` 会从 236 往 0 滑——窗于是**先弹回 320 再缩到 84**，
+	// 那 240ms 里窗比内容高（透明的那一块在吃点击），而票面要的是「**立刻
+	// 收起**」。
+	s.miniCurtain.animZeroed = true
 	s.miniCurtainSetHeight(miniHeight)
 }
 
@@ -424,6 +441,18 @@ func (s *Shell) miniCurtainSyncHeight(c *ui.Context) {
 
 	// 那个「空的、键固定的」元素：动画值挂在它身上。
 	holder := ui.Box(c).Key(miniCurtainAnimKey)
+	// ⚠️ **「立刻收起」的那一下要把动画通道钉到 0**（`animZeroed`）：
+	// `miniCurtainCollapseNow` 只归零了 `height`，而**通道里的值还在 236**
+	// ——`AnimateTo(0)` 会从 236 往 0 滑，窗于是**先弹回 320 再缩到 84**，
+	// 那 240ms 里窗比内容高（透明的那一块在吃点击）。
+	//
+	// ⚠️ **`Jump` 会打断正在走的动画**（`ch.moving = false`）——所以它只
+	// 在「立刻收起」这一下用；**正常收起**（再点封面 / Esc / 收起键）走的是
+	// 那条要滑下去的动画，不 `Jump`。
+	if s.miniCurtain.animZeroed {
+		s.miniCurtain.animZeroed = false
+		holder.Jump(miniCurtainAnimKey, 0)
+	}
 	// ⚠️ **`Jump` 在第一次建通道时返回那个值**（`mygo/ui/motion.go:372`），
 	// 而它建的通道值就是 0 ——所以第一次 `Jump(0)` 返回 0，之后 `AnimateTo`
 	// 从 0 起步。
