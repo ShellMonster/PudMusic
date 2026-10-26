@@ -210,6 +210,10 @@ func (s *Shell) pickDisplayMode(c *ui.Context, st app.Settings, ro bool) {
 // 不是设置里还存着的旧值——慢一帧的话读数会一直追不上手指。
 func (s *Shell) pickRadius(c *ui.Context, st app.Settings, ro bool) {
 	v := st.BorderRadius
+	// 套了方案时，滑块显示方案真在用的圆角，而不是被压过的设置值。
+	if st.ThemePreset != app.ThemePresetClassic {
+		v = float64(c.Theme().Radius)
+	}
 	ui.Row(c).Key("setting:borderRadius").Width(settingsControlW).
 		MinWidth(settingsControlMinW).Gap(space.Px12).
 		AlignItems(ui.Center).Children(func() {
