@@ -40,6 +40,9 @@ type Fake struct {
 	calls []string
 	// err 是每次都返回的那个错。nil = 成功。
 	err error
+	// errFunc 是「按路径现造一个错」的那一种（Windows 那一版的原话里带着
+	// 那一条路径）。它和 err 只会有一个有值。
+	errFunc func(path string) error
 	// dir 是假废纸篓放在哪儿。空串 = 只记调用、不搬东西（那一种用来测
 	// 「服务层有没有把**词法上的那一条路径**交给回收站」）。
 	dir string
@@ -71,13 +74,42 @@ func NameConflict() *Fake {
 	return Fail(errors.New("The file “歌.mp3” already exists."))
 }
 
+// WindowsFailure 造一个「回收站失败，而原话是 Windows 那一版」的假零件。
+//
+// code 是 HRESULT 码（0x80070005 权限不够、0x80070050 已存在、
+// 0x80070002 文件不存在）。它给的原话**逐字照抄**框架那一版
+// （`mygo/internal/windows/trash.go`）：
+//
+//	mygo: cannot move %s to the recycle bin: mygo: IFileOperation.PerformOperations failed (HRESULT 0x80070005)
+//
+// ⚠️ **「to the recycle bin」那一截是所有 Windows 失败都有的**——拿它当
+// ⚠️ **路径是按真的那一条填进去的**（不是占位符）——因为**文件名不许参与
+// 分类**：一个叫「Not Found.mp3」的文件，失败的话里就带着那三个字，而拿它
+// 当判据的话，界面会说「已移到系统废纸篓」而文件还在原处（评审打回来的
+// 那一种）。
+//
+// ⚠️ **「to the recycle bin」那一截是所有 Windows 失败都有的**——拿它当
+// 判据会把权限失败、已存在、文件不存在**全**归成同一档（那也是评审打回来
+// 的那一种）。
+func WindowsFailure(code uint32) *Fake {
+	return &Fake{errFunc: func(path string) error {
+		return fmt.Errorf(
+			"mygo: cannot move %s to the recycle bin: mygo: IFileOperation.PerformOperations failed (HRESULT %#08x)",
+			path, code)
+	}}
+}
+
 // TrashItem 搬走 path（或者按它被配好的那样失败）。
 func (f *Fake) TrashItem(path string) error {
 	f.mu.Lock()
 	err := f.err
+	errFunc := f.errFunc
 	f.calls = append(f.calls, path)
 	dir := f.dir
 	f.mu.Unlock()
+	if errFunc != nil {
+		return errFunc(path)
+	}
 	if err != nil {
 		return err
 	}
@@ -93,8 +125,13 @@ func (f *Fake) TrashItem(path string) error {
 	}
 	info, statErr := os.Lstat(path)
 	if statErr != nil {
-		// 文件已经不在了：系统那边会报错，而这一层把它归成
-		// 「已经不在了」（`ClassifyTrashError` 认「no such file」那几句）。
+		// 文件已经不在了：系统那边会报错（Windows 是
+		// `mygo: SHCreateItemFromParsingName failed (HRESULT 0x80070002)`，
+		// macOS 是 `The file “歌.mp3” doesn't exist.`）。
+		//
+		// ⚠️ **这一句不许被归类器当成「成功了」**：真相由 `Delete` 自己
+		// **再 stat 一次**来定（`ClassifyTrashError` 只负责把话翻成人话，
+		// 它分不清「系统说找不到它」和「它真的没了」）。
 		return fmt.Errorf("mygo: cannot move %s to the trash: no such file", path)
 	}
 	target := uniqueIn(dir, filepath.Base(path))

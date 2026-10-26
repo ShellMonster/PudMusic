@@ -211,10 +211,22 @@ func (a *App) LocalTrack(id string) (localmusic.Track, bool) {
 // ⚠️ **路径是从列表里取的，调用方给不了**。传进来的 id 必须在当前列表里，
 // 否则一个 id 都对不上——这一层没有「按任意路径删」的入口，那是有意的。
 //
-// 几个错分得开，界面据此说不同的话：`ErrOutsideRoots` / `ErrNotRegular`
-// 是「不能删」（多半是这一行已经过期了），`ErrMissing` 是「已经不在了」
-// （不是失败，把那一行从列表里拿掉就对了），`ErrTrashFailed` /
-// `ErrNotTrashable` 是「没能移进废纸篓」（**文件还在原处**）。
+// 几个错分得开，界面据此说不同的话：
+//
+//   - `ErrOutsideRoots` / `ErrNotRegular` 是「不能删」（多半是这一行已经
+//     过期了）；
+//   - `ErrMissing` 是「它已经不在了」——**它没进过废纸篓**；
+//   - `ErrTrashFailed` / `ErrNotTrashable` / `ErrDenied` 是「没能移进
+//     废纸篓」（**文件还在原处**）。
+//
+// ⚠️ **三种结果不许混成两种**：只有「真的搬进废纸篓了」那一种能让界面说
+// 「已移到系统废纸篓」。`ErrMissing` 说的是「它本来就不在了」——那一行照样
+// 从列表里拿掉（那是用户想要的结果），但界面**不许**说「已移到系统废纸篓」：
+// 那句话**承诺用户能从废纸篓里恢复**，而它压根没进过废纸篓（**说谎**）。
+//
+// ⚠️ **所以这一层不把 `ErrMissing` 改成 nil**：评审打回来的那一种正是
+// 「把「已经不在了」当成「成功了」」——回收站真失败的时候，界面说「已移到
+// 系统废纸篓」、**列表那一行也消失了**，而文件好好地躺在原处。
 func (a *App) DeleteLocalTrack(id string) error {
 	lib := a.localMusicSnapshot()
 	if lib == nil {
@@ -252,11 +264,15 @@ func (a *App) DeleteLocalTrack(id string) error {
 		lib.drop(track.ID)
 	}
 	if errors.Is(err, localmusic.ErrMissing) {
-		// 用户先在访达里删了。这**不是失败**：把那一行拿掉就是用户要的
-		// 结果，再弹一句红字报错只会让人以为应用坏了。日志留着，
-		// 因为「文件从列表里消失」这件事本身值得知道。
+		// 用户先在访达里删了。那一行从列表里拿掉就是用户要的结果，而它
+		// **没进过废纸篓**——所以这个错**继续往上抛**，界面据此说
+		// 「文件已经不在了」而不是「已移到系统废纸篓」。
+		//
+		// ⚠️ **不许在这里把它改成 nil**：那正是评审打回来的那一种
+		// （界面说「已移到系统废纸篓」，而文件还在原处）。
+		//
+		// 日志留着，因为「文件从列表里消失」这件事本身值得知道。
 		log.Printf("biu: 本地音乐 %s 已经不在盘上了，把它从列表里拿掉", track.Path)
-		err = nil
 	}
 	wakes := slices.Clone(lib.wakes)
 	lib.mu.Unlock()

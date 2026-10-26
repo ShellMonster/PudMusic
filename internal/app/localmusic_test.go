@@ -478,8 +478,16 @@ func TestDeleteOfAnUnknownIDTouchesNothing(t *testing.T) {
 
 // TestDeleteOfAFileGoneAlreadyIsNotAFailure 钉住最常见的那个场景。
 //
-// 用户先在访达里删了歌，回来在列表里点删除。那不是失败——把那一行拿掉就
-// 对了。界面上如果弹一句红字报错，用户会以为应用出问题了。
+// 用户先在访达里删了歌，回来在列表里点删除。那**不是删除失败**——把那一行
+// 拿掉就对了，界面上如果弹一句「文件未删除」的红字报错，用户会以为应用
+// 出问题了（而他自己刚删掉的）。
+//
+// ⚠️ **但它不是一个「成功」**：这一句原来断的是 `err == nil`，而那正是
+// 评审打回来的那一种——`nil` 走到界面上就是「已移到系统废纸篓」，**一句话
+// 承诺用户能从废纸篓里恢复**，而它压根没进过废纸篓（**说谎**）。
+//
+// 所以现在断的是**哪一个错**：`ErrMissing`（「文件已经不在了」）。界面据此
+// 说「已经不在了」，而**不说**「已移到系统废纸篓」。
 func TestDeleteOfAFileGoneAlreadyIsNotAFailure(t *testing.T) {
 	root := t.TempDir()
 	path := song(t, root, "先没了.mp3")
@@ -491,8 +499,10 @@ func TestDeleteOfAFileGoneAlreadyIsNotAFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := f.app.DeleteLocalTrack(st.Tracks[0].ID); err != nil {
-		t.Fatalf("文件已经不在了却报了错：%v", err)
+	err := f.app.DeleteLocalTrack(st.Tracks[0].ID)
+	if !errors.Is(err, localmusic.ErrMissing) {
+		t.Fatalf("错是 %v，want localmusic.ErrMissing（文件本来就不在了，"+
+			"而它**没进过废纸篓**——界面不许说「已移到系统废纸篓」）", err)
 	}
 	if got := len(f.app.LocalMusicState().Tracks); got != 0 {
 		t.Errorf("列表里还剩 %d 行", got)

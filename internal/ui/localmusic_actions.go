@@ -10,6 +10,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -87,8 +88,20 @@ func (p *localPage) viewRemoveDirDialog(c *ui.Context) {
 // ⚠️ **两句话都必须说清「文件还在不在」**（票 #558）：这一下从「永久删除」
 // 改成了「移到系统废纸篓」，而用户最怕的那件事是「以为删了、其实还在」
 // 或者「以为还在废纸篓里、其实没了」。
+//
+// ⚠️ **「已移到系统废纸篓」只在真的搬进去的时候说**：那一句话**承诺用户
+// 能从废纸篓里恢复**，而「文件本来就不在了」（用户先在访达里删了）压根没进
+// 过废纸篓——说那句话就是**对用户说谎**。那一种说「文件已经不在了」。
 func (p *localPage) deleteTrack(tr localmusic.Track) {
-	if err := p.app.DeleteLocalTrack(tr.ID); err != nil {
+	err := p.app.DeleteLocalTrack(tr.ID)
+	if err != nil {
+		// ⚠️ **「文件已经不在了」不是失败**：它没进过废纸篓，所以**不许**
+		// 说「已移到系统废纸篓」，也**不许**说「文件未删除」（那一句会
+		// 让用户以为文件还在原处，而他自己在访达里删掉了）。
+		if errors.Is(err, localmusic.ErrMissing) {
+			p.say("「"+tr.Title+"」已经不在了", notice.Warning)
+			return
+		}
 		// ⚠️ **失败时文件一定还在原处**（契约见 `localmusic.Trash`）：
 		// 框架那一侧「进不了回收站就失败并把东西留在原地」，而这一层
 		// **不做任何补救性的删除**。所以这句话里那句「文件未删除」是

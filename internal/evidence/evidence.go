@@ -4024,7 +4024,7 @@ var Items = []Item{
 		// 自己就把「本来会被永久删除」的那一次拒掉了（Windows 的 progress
 		// sink），而用户看到的是「文件未删除」——那句话是**真话**。
 		Category: Negative,
-		Spec:     "删本地音乐文件是**移到系统废纸篓**而不是永久删除：成功时原处没了、废纸篓里有（找得回来）、界面上说「已移到系统废纸篓」；失败时**文件还在原处**、界面上说「文件未删除」、那一行还在列表里；回收站不可用（网络盘 / 跨卷 / 系统不提供）时报一个用户看得懂的错而**不删**；弹窗上不再承诺「不可恢复」",
+		Spec:     "删本地音乐文件是**移到系统废纸篓**而不是永久删除：成功时原处没了、废纸篓里有（找得回来）、界面上说「已移到系统废纸篓」；失败时**文件还在原处**、界面上说「文件未删除」、那一行还在列表里；**文件本来就不在了**（用户先在访达里删了）时那一行照样没掉、而界面上说「已经不在了」——**三种结果不许混成两种**，「已移到系统废纸篓」只在真的搬进去的时候说；回收站不可用（网络盘 / 跨卷 / 系统不提供）时报一个用户看得懂的错而**不删**；弹窗上不再承诺「不可恢复」",
 		Tests: []string{
 			// 成功那一条：搬走 + 找得回来 + 话说了。
 			"TestDeleteMovesTheFileIntoTheTrash",
@@ -4033,6 +4033,21 @@ var Items = []Item{
 			"TestDeleteLeavesTheFileAloneWhenTheTrashFails",
 			"TestATrashThatIsNotAvailableKeepsTheFileAndTheRow",
 			"TestATrashThatFailsSaysTheFileIsStillThere",
+			// 🔴 **失败的时候不许说「已移到系统废纸篓」**：原来错误分类对整段
+			// 系统原话做子串匹配，而 Windows 那边每一句失败的话都带同一截
+			// 「to the recycle bin」——拿它当判据的话，权限失败 / 已存在 /
+			// 文件不存在全被归成同一档；而一个叫「Not Found.mp3」的文件更
+			// 是被判成「文件已经不在了」，于是界面说成功了、列表那一行也
+			// 消失了，而文件好好地躺在原处。
+			"TestATrashThatFailsNeverSaysItMovedToTheTrash",
+			"TestDeleteDoesNotCallAMissingFileASuccess",
+			"TestClassifyTrashErrorSortsTheWindowsHRESULTs",
+			"TestClassifyTrashErrorDoesNotLetTheFileNameDecide",
+			"TestClassifyTrashErrorDoesNotReadTheWordsInsideQuotes",
+			// 🔴 **「文件本来就不在了」不许说成「已移到系统废纸篓」**：那句话
+			// 承诺用户能从废纸篓里恢复，而它压根没进过废纸篓。
+			"TestAFileThatIsAlreadyGoneNeverSaysItMovedToTheTrash",
+			"TestDeleteSaysTheFileIsAlreadyGoneWhenTheTrashFails",
 			"TestDeleteSaysTheTrashIsNotAvailable",
 			"TestDeleteSaysTheNameIsTaken",
 			// 「没装回收站」：报错，**不删**。

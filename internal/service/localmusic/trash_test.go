@@ -2,6 +2,7 @@ package localmusic
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -137,6 +138,66 @@ func TestDeleteSaysTheNameIsTaken(t *testing.T) {
 	}
 }
 
+// TestDeleteSaysTheFileIsAlreadyGoneWhenTheTrashFails 钉住「文件本来就不在
+// 了」那一条。
+//
+// ⚠️ **它和「搬进废纸篓了」是两件不一样的事**：这一种压根没进过废纸篓，
+// 所以界面上**不许**说「已移到系统废纸篓」（那句话**承诺用户能从废纸篓
+// 恢复**——说它是**说谎**）。
+//
+// ⚠️ **真相是由这一次 stat 定的，不是由系统那句原话定的**：回收站失败，
+// 而文件**真的没了**（用户在别的窗口里刚删的）——那它就是「已经不在了」。
+//
+// ⚠️ **反过来（文件还在）一个字都不许当成「文件没了」**：那正是评审打回来
+// 的那一种——回收站真失败了，而文件好好地躺在原处，界面却说「已移到系统
+// 废纸篓」。
+func TestDeleteSaysTheFileIsAlreadyGoneWhenTheTrashFails(t *testing.T) {
+	root := t.TempDir()
+	song := songPath(t, root, "先没了.mp3")
+	row := trOf(t, song)
+	// 文件在**检查之后**没了——回收站那次失败，而盘上已经没有它了。
+	if err := os.Remove(song); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Delete(row, []string{root}, localmusictest.Fail(
+		errors.New("The file “先没了.mp3” doesn’t exist.")))
+
+	if !errors.Is(err, ErrMissing) {
+		t.Fatalf("错是 %v，want ErrMissing（文件本来就不在了）", err)
+	}
+}
+
+// TestDeleteDoesNotCallAMissingFileASuccess 钉住评审打回来的那一种的**服务层
+// 那一半**。
+//
+// 🔴 **回收站真失败了，而文件还在原处**——这一层**不许**把它说成「已经
+// 不在了」（那是「往成功那边猜」的方向），更不许说成「搬进废纸篓了」。
+//
+// ⚠️ **原话里带着那一条路径**（Windows 那边就是这么说的），而路径上的
+// **文件名叫「Not Found」**——原来那一版对整句做子串匹配，于是它被归成
+// 「文件已经不在了」，界面说「已移到系统废纸篓」，**列表那一行也消失
+// 了**，而文件好好地躺在原处。
+func TestDeleteDoesNotCallAMissingFileASuccess(t *testing.T) {
+	root := t.TempDir()
+	song := songPath(t, root, "Not Found.mp3")
+
+	err := Delete(trOf(t, song), []string{root},
+		localmusictest.WindowsFailure(0x80070005))
+
+	if err == nil {
+		t.Fatal("回收站失败了，删除却报了成功")
+	}
+	// ⚠️ **不许是「文件已经不在了」**：它好好地躺在原处。
+	if errors.Is(err, ErrMissing) {
+		t.Fatalf("回收站失败被判成「文件已经不在了」：%v", err)
+	}
+	// ⚠️ **文件必须还在原处**。
+	if !exists(t, song) {
+		t.Fatal("回收站失败之后文件被删了——这正是这一票要防的那一种")
+	}
+}
+
 // TestDeleteWithoutATrashIsAnError 钉住「没装回收站」那一条。
 //
 // ⚠️ **它是报错，不是「那就不删了当没事」**：界面上得有一句「文件未删除」
@@ -170,14 +231,15 @@ func TestClassifyTrashErrorSortsTheSystemsWording(t *testing.T) {
 	cases := []struct {
 		name string
 		err  error
+		path string
 		want error
 	}{
-		{"文件已经不在了", errors.New("The operation couldn’t be completed. No such file"), ErrMissing},
-		{"no such file", errors.New("mygo: cannot move /x to the trash: no such file"), ErrMissing},
-		// ⚠️ **macOS 的原话是弯撇号**（U+2019）：2026-10-26 的原生冒烟跑出来的
-		// 就是这一句。不认它的话，macOS 上「文件已经不在了」那一档一条都
-		// 命中不了——它会掉进「别的」那一档，被说成「没能移到系统废纸篓」。
-		{"macOS 的弯撇号", errors.New("The file “歌.mp3” doesn’t exist."), ErrMissing},
+		// ⚠️ **「文件已经不在了」不在这一层**：这一层分不清「系统说找不到
+		// 它」和「它真的没了」，而猜错的方向是往成功那边猜。真相由
+		// `Delete` 自己**再 stat 一次**来定（见
+		// `TestDeleteSaysTheFileIsAlreadyGoneWhenTheTrashFails`）。
+		{"文件不在了也不归成功", errors.New("The operation couldn’t be completed. No such file"), "/m/a.mp3", ErrTrashFailed},
+		{"no such file 也不归成功", errors.New("mygo: cannot move /m/a.mp3 to the trash: no such file"), "/m/a.mp3", ErrTrashFailed},
 		// ⚠️ **这一句是 Windows 框架那一版的原话**
 		// （`mygo/internal/windows/trash.go`）：它在「本来会被永久删掉」的时候
 		// 说的就是这一句（而它宁可失败也不让文件被删）。
@@ -186,13 +248,17 @@ func TestClassifyTrashErrorSortsTheSystemsWording(t *testing.T) {
 		// 所以这一句就靠这一条钉着——它一旦改文案，这一档会静悄悄地掉进
 		// 「别的」那一档，用户看到的是「没能移到系统废纸篓」而不是
 		// 「那个位置没有回收站」。
-		{"Windows 的原话", errors.New("mygo: cannot move C:\\music\\song.mp3 to the recycle bin: it would be deleted permanently"), ErrNotTrashable},
-		{"同名的", errors.New("The file “歌.mp3” already exists."), ErrTrashNameConflict},
-		{"别的", errors.New("some other failure"), ErrTrashFailed},
+		{"Windows 的原话", errors.New("mygo: cannot move C:\\music\\song.mp3 to the recycle bin: it would be deleted permanently"), "C:\\music\\song.mp3", ErrNotTrashable},
+		{"同名的", errors.New("The file “歌.mp3” already exists."), "/m/歌.mp3", ErrTrashNameConflict},
+		// ⚠️ **Linux 的原话是 GIO 的 `GError`**（`mygo/internal/linux/system.go`
+		// 的 `gFileTrash`）：那边「这个位置没有回收站」说的是
+		// 「Operation not supported」。
+		{"Linux 的原话", errors.New("Operation not supported"), "/m/a.mp3", ErrNotTrashable},
+		{"别的", errors.New("some other failure"), "/m/a.mp3", ErrTrashFailed},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := ClassifyTrashError(c.err)
+			got := ClassifyTrashError(c.err, c.path)
 			if !errors.Is(got, c.want) {
 				t.Errorf("错是 %v，want %v", got, c.want)
 			}
@@ -204,10 +270,118 @@ func TestClassifyTrashErrorSortsTheSystemsWording(t *testing.T) {
 //
 // 归两次的话，界面上会出现「文件未删除：文件未删除：…」这种两遍的话。
 func TestClassifyTrashErrorDoesNotSayItTwice(t *testing.T) {
-	once := ClassifyTrashError(errors.New("some other failure"))
-	twice := ClassifyTrashError(once)
+	once := ClassifyTrashError(errors.New("some other failure"), "/m/a.mp3")
+	twice := ClassifyTrashError(once, "/m/a.mp3")
 
 	if twice.Error() != once.Error() {
 		t.Errorf("归了两次之后的话变了：%q → %q", once, twice)
+	}
+}
+
+// TestClassifyTrashErrorSortsTheWindowsHRESULTs 钉住 Windows 那边**每一个
+// HRESULT 各自归到哪一档**。
+//
+// 🔴 **这一条是评审打回来的那一种**。原来这一层对**整段**系统原话做子串
+// 匹配，而 Windows 那边**每一句**回收站失败的原话都带同一截前缀
+// 「to the recycle bin」——拿它当判据的话，下面三个 HRESULT **全**被归成
+// 「系统不提供回收站」：
+//
+//	0x80070005 权限不够        → 归成了 ErrNotTrashable（错）
+//	0x80070050 废纸篓里已经有  → 归成了 ErrNotTrashable（错）
+//	0x80070002 文件不存在      → 归成了 ErrNotTrashable（错）
+//
+// 现在判的是**结构化的那个码**（`mygo: … failed (HRESULT 0x…)`），一个码对
+// 一个意思。
+func TestClassifyTrashErrorSortsTheWindowsHRESULTs(t *testing.T) {
+	cases := []struct {
+		name string
+		code uint32
+		want error
+	}{
+		{"权限不够", 0x80070005, ErrDenied},
+		{"废纸篓里已经有同名的", 0x80070050, ErrTrashNameConflict},
+		// ⚠️ **文件不存在**归在「没能移到废纸篓」那一档，而**不是**
+		// 「文件已经不在了」：这一层分不清「系统找不到它」和「它真的
+		// 没了」，而猜错的方向是往成功那边猜（界面会说「已移到系统
+		// 废纸篓」，而文件还在原处）。
+		{"文件不存在", 0x80070002, ErrTrashFailed},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := "C:\\music\\song.mp3"
+			raw := fmt.Errorf("mygo: cannot move %s to the recycle bin: "+
+				"mygo: IFileOperation.PerformOperations failed (HRESULT %#08x)", path, c.code)
+
+			got := ClassifyTrashError(raw, path)
+
+			if !errors.Is(got, c.want) {
+				t.Errorf("错是 %v，want %v", got, c.want)
+			}
+			// ⚠️ **不许归成「成功」那一档**：而这一层现在**没有**
+			// 「成功」这一档了（`ErrMissing` 不再从这一层出来）。
+			if errors.Is(got, ErrMissing) {
+				t.Errorf("回收站失败被判成「文件已经不在了」：%v", got)
+			}
+		})
+	}
+}
+
+// TestClassifyTrashErrorDoesNotLetTheFileNameDecide 钉住「**文件名不许参与
+// 分类**」。
+//
+// 🔴 **这一条是评审打回来的那一种**：一个叫「Not Found.mp3」的文件，
+// 回收站失败时整句原话里就带着「not found」三个字——原来那一版对整句做
+// 子串匹配，于是它被归成「文件已经不在了」，界面说「已移到系统废纸篓」，
+// **而文件好好地躺在原处**（列表那一行还消失了）。
+//
+// 同理，「already exists」「recycle bin」这些字出现在**文件名**里也不许
+// 改变分类。
+func TestClassifyTrashErrorDoesNotLetTheFileNameDecide(t *testing.T) {
+	cases := []struct {
+		name string
+		file string
+	}{
+		{"not found", "Not Found.mp3"},
+		{"already exists", "already exists.mp3"},
+		{"recycle bin", "recycle bin.mp3"},
+		{"no trash", "no trash.mp3"},
+		{"would be deleted permanently", "would be deleted permanently.mp3"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join("/music", c.file)
+			raw := fmt.Errorf("mygo: cannot move %s to the recycle bin: "+
+				"mygo: IFileOperation.PerformOperations failed (HRESULT 0x80070005)", path)
+
+			got := ClassifyTrashError(raw, path)
+
+			// 判据是那个**码**：0x80070005 = 权限不够。
+			if !errors.Is(got, ErrDenied) {
+				t.Errorf("错是 %v，want ErrDenied（文件名里的那几个字不许改分类）", got)
+			}
+			if errors.Is(got, ErrMissing) {
+				t.Errorf("被判成「文件已经不在了」：%v", got)
+			}
+		})
+	}
+}
+
+// TestClassifyTrashErrorDoesNotReadTheWordsInsideQuotes 钉住「引号里的内容
+// 不许参与分类」。
+//
+// macOS 那边的原话是 `The file “歌.mp3” doesn't exist.`——**引号里是文件名**。
+// 而用户可以给自己的文件起名叫「not found.mp3」，那一句原话就变成
+// `The file “not found.mp3” doesn't exist.`。
+func TestClassifyTrashErrorDoesNotReadTheWordsInsideQuotes(t *testing.T) {
+	path := "/music/歌.mp3"
+	raw := errors.New(`The file "not found.mp3" doesn't exist.`)
+
+	got := ClassifyTrashError(raw, path)
+
+	if errors.Is(got, ErrMissing) {
+		t.Errorf("被判成「文件已经不在了」：%v", got)
+	}
+	if !errors.Is(got, ErrTrashFailed) {
+		t.Errorf("错是 %v，want ErrTrashFailed", got)
 	}
 }

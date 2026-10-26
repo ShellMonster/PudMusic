@@ -64,6 +64,11 @@ var (
 	// ErrNotRegular 是「它不是普通文件（目录、设备、套接字……）」。
 	ErrNotRegular = errors.New("不是一个普通文件，不删")
 	// ErrMissing 是「它已经不在了」。
+	//
+	// ⚠️ **它**不是**「已经搬进废纸篓了」**：文件本来就不在（用户先在
+	// 访达里删了），压根没进过废纸篓。界面据此说「已经不在了」，而**不**
+	// 说「已移到系统废纸篓」（那句话承诺用户能从废纸篓恢复——说它是
+	// **说谎**）。
 	ErrMissing = errors.New("文件已经不在了")
 	// ErrMoved 是「这个位置上的东西已经不是你列表里看到的那一个了」。
 	ErrMoved = errors.New("这个位置上的文件已经换了，不删")
@@ -145,7 +150,21 @@ func Delete(tr Track, roots []string, trash Trash) error {
 	if err := trash.TrashItem(clean); err != nil {
 		// ⚠️ **失败时文件一定还在原处**（契约见 trash.go）：这一层
 		// 不做任何补救性的删除——那正是「绝不回退到 os.Remove」那句。
-		return ClassifyTrashError(err)
+		//
+		// ⚠️ **再 stat 一次**：回收站失败，而文件**真的没了**（用户在
+		// 别的窗口里刚删的），那不是失败，是「它已经不在了」——但**它
+		// 没进过废纸篓**，所以界面**不许**说「已移到系统废纸篓」。
+		//
+		// ⚠️ **反过来（文件还在）一个字都不许当成「文件没了」**：那正是
+		// 评审打回来的那一种——回收站真失败了，而文件好好地躺在原处，
+		// 界面却说「已移到系统废纸篓」，**列表那一行也消失了**（用户
+		// 以为删掉了，下一次重扫它又回来了）。所以真相只由**这一次
+		// stat** 定，不靠系统那句原话（那一层分不清「系统说找不到它」
+		// 和「它真的没了」，见 trash.go 的 `ClassifyTrashError`）。
+		if _, statErr := os.Lstat(clean); statErr != nil && errors.Is(statErr, fs.ErrNotExist) {
+			return fmt.Errorf("%w：%s", ErrMissing, clean)
+		}
+		return ClassifyTrashError(err, clean)
 	}
 	return nil
 }

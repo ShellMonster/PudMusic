@@ -27,7 +27,12 @@
 // `localizedDescription`；Windows 是 `IFileOperation` 的 HRESULT 翻出来的
 // 一句 `mygo: cannot move … to the recycle bin: …`；Linux 是 GIO 的
 // `GError`。这一层**不**去猜那些话是什么意思——那是
-// `service/localmusic.ClassifyTrashError` 的活（关键词只在一个地方）。
+// `service/localmusic.ClassifyTrashError` 的活（归类只在一个地方）。
+//
+// ⚠️ **那一层认的是结构化的片段**（HRESULT 码、框架写死的那一句），
+// **不是**整句里的关键词——Windows 那边每一句失败的话都带同一截
+// 「to the recycle bin」，拿它当判据会把权限失败 / 已存在 / 文件不存在
+// 全归成同一档（那正是评审打回来的那一种）。
 
 package ui
 
@@ -52,7 +57,7 @@ func (mygoTrash) TrashItem(path string) error {
 	// ⚠️ **它在应用还没 ready 的时候调会 panic**（`needsApp`）——而这一层
 	// 是在**用户点了删除之后**才被调到的，那时应用早就起来了。
 	if err := mygo.Shell.TrashItem(path); err != nil {
-		return localmusic.ClassifyTrashError(err)
+		return localmusic.ClassifyTrashError(err, path)
 	}
 	return nil
 }
