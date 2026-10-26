@@ -162,3 +162,13 @@ func TestTheSixTabsAndPlayAllFitAtTheSmallestWindow(t *testing.T) {
 		t.Errorf("「全部播放」= %+v，要在最后一个 Tab（右沿 %.0f）右边、窗口（%d）以内", pa, prevRight, minWindowW)
 	}
 }
+
+func TestTheEmptySearchBoxOffersWhatEveryoneIsListeningTo(t *testing.T) {
+	b := homeDiscoverFake(t)
+	_, tt, _ := newHomeShell(t, b)
+	waitFrames(t, tt, "第一档", func() bool { return showsText(tt, "音乐 推的第一首") })
+	if err := tt.Click(searchLabel); err != nil {
+		t.Fatalf("点不到搜索框：%v", err)
+	}
+	waitFramesClock(t, tt, "大家在听", func() bool { return showsText(tt, suggestHotHeading) && showsText(tt, "热榜第一名") })
+}

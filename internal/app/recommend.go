@@ -58,6 +58,74 @@ type Recommend struct {
 	// periods 是两张榜最近一次拉到的那一期（下标 0 热榜、1 原创榜），给榜单页的
 	// 「第几期 · 更新于」那一行用。
 	periods [2]bili.ToplistPeriod
+
+	// hot 是搜索框「大家在听」那一栏的词（热榜前几首的歌名）和它的取数状态。
+	hot        []string
+	hotAt      time.Time
+	hotLoading bool
+}
+
+// hotSongsShown 是「大家在听」摆几个词；hotSongsTTL 是一份词用多久再换。
+const (
+	hotSongsShown = 8
+	hotSongsTTL   = 10 * time.Minute
+	hotSongsRetry = time.Minute
+)
+
+// HotSongTitles 是「大家在听」那一栏此刻的词（热榜前几首的歌名）。没拉到时为空。
+func (r *Recommend) HotSongTitles() []string {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.hot
+}
+
+// RefreshHotSongs 在需要时去后台拉一份热榜歌名，拉完调 wake。
+//
+// 它是每帧可调的：已经有一份且没过期、或者上一趟还在飞、或者刚失败过不久，都直接
+// 返回，不发请求。词取热榜而不是 B 站全站热搜：全站热搜是新闻、游戏，不是歌。
+func (r *Recommend) RefreshHotSongs(wake func()) {
+	if !r.Mounted() {
+		return
+	}
+	r.mu.Lock()
+	ttl := hotSongsTTL
+	if len(r.hot) == 0 {
+		ttl = hotSongsRetry
+	}
+	if r.hotLoading || (!r.hotAt.IsZero() && time.Since(r.hotAt) < ttl) {
+		r.mu.Unlock()
+		return
+	}
+	r.hotLoading = true
+	r.mu.Unlock()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		items, _, err := r.toplist(ctx, HomeTabHot, 1)
+		titles := make([]string, 0, hotSongsShown)
+		seen := map[string]bool{}
+		for _, it := range items {
+			if len(titles) == hotSongsShown {
+				break
+			}
+			if it.Title != "" && !seen[it.Title] {
+				seen[it.Title] = true
+				titles = append(titles, it.Title)
+			}
+		}
+		r.mu.Lock()
+		r.hotLoading, r.hotAt = false, time.Now()
+		if err == nil && len(titles) > 0 {
+			r.hot = titles
+		}
+		r.mu.Unlock()
+		if wake != nil {
+			wake()
+		}
+	}()
 }
 
 // BoardPeriod 是热榜 / 原创榜（HomeTabHot / HomeTabOriginal）最近一次拉到的那一期。

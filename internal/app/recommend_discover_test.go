@@ -127,3 +127,27 @@ func TestRecentPlaysFailureIsReportedNotHidden(t *testing.T) {
 		t.Error("B 站回 -101 时应当把错交给界面，而不是吞成空列表")
 	}
 }
+
+func TestHotSongTitlesComeFromTheHotBoardAndCacheForAWhile(t *testing.T) {
+	f := newHomeBili(t)
+	f.on(toplistHandler)
+	r := recommendOn(t, f)
+	done := make(chan struct{}, 4)
+	wake := func() { done <- struct{}{} }
+
+	r.RefreshHotSongs(wake)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("热榜歌名没拉回来")
+	}
+	if got := r.HotSongTitles(); len(got) != 1 || got[0] != "第一名" {
+		t.Errorf("大家在听 = %q，want [第一名]", got)
+	}
+	n := f.calls(homeToplistMusicPath)
+	r.RefreshHotSongs(wake)
+	time.Sleep(50 * time.Millisecond)
+	if f.calls(homeToplistMusicPath) != n {
+		t.Error("缓存期内又去拉了一遍热榜")
+	}
+}
