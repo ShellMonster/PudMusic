@@ -965,6 +965,33 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
+		// ⚠️ **「菜单栏上真的有那一栏」只有真机量得到**：菜单是系统画的
+		// （AppKit 的 NSMenu），它**不在窗口的画面里**，截图也截不到它——
+		// 无头 Tester 量得到的是「我们交给框架的那棵树长什么样」，以及
+		// 「点了之后有没有反应」（回调走的是我们自己的函数）。
+		//
+		// 真机那一份是：用辅助功能读菜单栏（项、顺序、每一项的快捷键），
+		// 再真点一次「设置…」和「关于 布丁音乐」。
+		Spec: "macOS 应用菜单：「关于 布丁音乐」开的是我们自己的面板（版本号、仓库、第三方许可），「设置…」在**主窗**开设置页（迷你开着也一样）",
+		Tests: []string{
+			"TestTheAppMenuColumnFollowsTheMacOrder",
+			"TestTheAboutItemIsOurOwn",
+			"TestTheSettingsItemHasTheMacShortcut",
+			"TestTheOtherColumnsAreStillThere",
+			"TestTheMenuHasFiveColumns",
+			"TestTheAppIsWrittenInChinese",
+			"TestTheSettingsMenuItemGoesToTheMainWindowEvenWithTheMiniInFront",
+			"TestTheAboutMenuItemBringsTheMainWindowBack",
+			"TestTheAboutPanelShowsTheNameTheVersionAndTheTwoEntries",
+			"TestTheAboutPanelVersionIsTheSameAsTheSettingsPage",
+			"TestTheAboutPanelRepoLinkOpensTheRepository",
+			"TestTheAboutPanelLicenseEntryOpensTheShippedNotices",
+			"TestTheAboutPanelClosesOnOK",
+		},
+		RealOnly: true,
+	},
+	{
+		Category: Platform,
 		Spec:     "中文输入法：窗口接收合成文本、合成串画在框里、上屏能提交",
 		Tests: []string{
 			"TestTheSearchBoxTellsTheSystemItTakesComposedText",
