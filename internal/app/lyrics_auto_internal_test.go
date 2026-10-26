@@ -39,3 +39,17 @@ func TestPickAutoCandidate(t *testing.T) {
 		t.Errorf("不知道时长时应按歌名挑：%+v %v", c, ok)
 	}
 }
+
+// 回归：榜首候选（同名翻唱）没有歌词时，要接着试下一条，而不是整个源放弃；
+// 歌名里带着歌手名的候选排在前面。
+func TestAutoRankingPrefersTheArtistAndKeepsTheRest(t *testing.T) {
+	cands := []lyrics.Candidate{
+		{ID: "1", Title: "稻香", Artist: "路人甲"},
+		{ID: "2", Title: "稻香", Artist: "周杰伦"},
+		{ID: "3", Title: "稻香(翻唱)", Artist: "路人乙"},
+	}
+	r := rankAutoCandidates("周杰伦 - 稻香 高音质", 0, cands)
+	if len(r) != 2 || r[0].ID != "2" || r[1].ID != "1" {
+		t.Fatalf("排序 %+v", r)
+	}
+}

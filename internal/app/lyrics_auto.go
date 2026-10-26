@@ -5,6 +5,7 @@ import (
 	"log"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -42,11 +43,28 @@ func normLyricTitle(s string) string {
 
 // pickAutoCandidate 挑最像的那一条，没有够像的返回 false。
 func pickAutoCandidate(title string, durMS int, cands []lyrics.Candidate) (lyrics.Candidate, bool) {
-	want := normLyricTitle(cleanLyricTitle(title))
-	if want == "" {
+	r := rankAutoCandidates(title, durMS, cands)
+	if len(r) == 0 {
 		return lyrics.Candidate{}, false
 	}
-	best, bestScore := lyrics.Candidate{}, -1
+	return r[0], true
+}
+
+// autoMaxTries 是同一个源里最多逐条试几个候选（排在前面的可能是没词的翻唱）。
+const autoMaxTries = 5
+
+// rankAutoCandidates 按像不像从高到低排好所有够像的候选，分数相同保持搜索原顺序。
+func rankAutoCandidates(title string, durMS int, cands []lyrics.Candidate) []lyrics.Candidate {
+	want := normLyricTitle(cleanLyricTitle(title))
+	if want == "" {
+		return nil
+	}
+	full := normLyricTitle(title)
+	type scored struct {
+		c lyrics.Candidate
+		s int
+	}
+	var list []scored
 	for _, c := range cands {
 		got := normLyricTitle(c.Title)
 		if got == "" || !(strings.Contains(got, want) || strings.Contains(want, got)) {
@@ -55,6 +73,9 @@ func pickAutoCandidate(title string, durMS int, cands []lyrics.Candidate) (lyric
 		score := 1
 		if got == want {
 			score += 100
+		}
+		if a := normLyricTitle(strings.SplitN(c.Artist, " / ", 2)[0]); len(a) > 1 && a != "-" && strings.Contains(full, a) {
+			score += 150
 		}
 		if durMS > 0 && c.DurationMS > 0 {
 			diff := durMS - c.DurationMS
@@ -66,11 +87,14 @@ func pickAutoCandidate(title string, durMS int, cands []lyrics.Candidate) (lyric
 			}
 			score += (autoDurationSlackMS - diff) / 100
 		}
-		if score > bestScore {
-			best, bestScore = c, score
-		}
+		list = append(list, scored{c, score})
 	}
-	return best, bestScore >= 0
+	sort.SliceStable(list, func(i, j int) bool { return list[i].s > list[j].s })
+	out := make([]lyrics.Candidate, len(list))
+	for i, s := range list {
+		out[i] = s.c
+	}
+	return out
 }
 
 // autoSearchLyrics 在后台自动找一份歌词装上。key 是这一首的缓存键，title 是歌名。
@@ -95,27 +119,33 @@ func (a *App) autoSearchLyrics(key, title string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 		defer cancel()
+		failed := 0
 		for _, src := range srcs {
 			cands, err := src.Search(ctx, query)
 			if err != nil {
 				log.Printf("biu: 自动找歌词（%s）搜不到：%v", src.Name(), err)
+				failed++
 				continue
 			}
-			c, ok := pickAutoCandidate(title, durMS, cands)
-			if !ok {
-				continue
-			}
-			doc := lyrics.Doc{LRC: c.LRC, Translated: c.Translated}
-			if !c.HasLyrics() {
-				if doc, err = src.Preview(ctx, c); err != nil {
+			ranked := rankAutoCandidates(title, durMS, cands)
+			for _, c := range ranked[:min(len(ranked), autoMaxTries)] {
+				doc := lyrics.Doc{LRC: c.LRC, Translated: c.Translated}
+				if !c.HasLyrics() {
+					if doc, err = src.Preview(ctx, c); err != nil {
+						continue
+					}
+				}
+				if len(lyrics.Rows(doc.LRC, "")) == 0 {
 					continue
 				}
+				a.installAutoLyrics(key, doc)
+				return
 			}
-			if len(lyrics.Rows(doc.LRC, "")) == 0 {
-				continue
-			}
-			a.installAutoLyrics(key, doc)
-			return
+		}
+		if failed == len(srcs) {
+			a.mu.Lock()
+			delete(a.autoLyricTried, key)
+			a.mu.Unlock()
 		}
 	}()
 }
