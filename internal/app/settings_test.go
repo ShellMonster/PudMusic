@@ -95,6 +95,7 @@ var ourOwnKeys = []string{
 	"playback",
 	"themePreset",
 	"dynamicSeen",
+	"updateNotification",
 }
 
 // TestSettingsKeysMatchBiu 逐字比对键名。
@@ -990,7 +991,8 @@ const ourOwnKeysJSON = `{
 	"isMuted": false,
 	"playback": {"items": [], "current": "", "positionMs": 0},
 	"themePreset": "warm-paper",
-	"dynamicSeen": {"baselines": []}
+	"dynamicSeen": {"baselines": []},
+	"updateNotification": true
 }`
 
 // wantSettings 是「读完一份 Biu 的文件之后应该拿到的那份设置」。

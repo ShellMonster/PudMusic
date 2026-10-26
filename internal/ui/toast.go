@@ -129,6 +129,20 @@ type toast struct {
 	// ⚠️ **主线程写、后台那条 goroutine 读**（`expire` 要靠它决定收不收）——
 	// 所以它跟 `s.toasts` 一样在 `toastMu` 底下。
 	hovered bool
+
+	// sticky 是「这一条不自己到期」。
+	//
+	// 🔴 **它是票面第 5 条「不丢事件」的落地**（票 #559）：系统通知发不出去
+	// （没打包 / 权限被拒 / 不支持）时降级成的那一句应用内提示，**用户多半不在
+	// 应用里**——而普通提示只待两秒（`toastLifetime`，照 Biu 的 timeout 2000），
+	// 于是他回来的时候那一句**早就没了**，而他不知道歌下完了。
+	//
+	// ⚠️ **它到期的那一刻 = 用户回来了**：那时它已经被人看见了，所以它可以按
+	// 正常的两秒走（见 `unstickToasts`）。
+	//
+	// ⚠️ **它不能一直挂着**：那会变成一条永远收不掉的提示——所以「用户回来」
+	// 这一档必须有（见 `syncFocusTracker`）。
+	sticky bool
 }
 
 // addToast 弹一条提示。多到 3 条时把最旧的挤掉。
@@ -148,13 +162,31 @@ type toast struct {
 // ⚠️ **后台那条线也调它**（比如 `download_mount.go` 的 `sayDownloadDone`），而播报
 // 那一头是带锁的（`announceQueue` 自己有锁），所以这里不用管自己在哪条线上。
 func (s *Shell) addToast(text string, tone notice.Tone) {
+	s.addToastWith(text, tone, false)
+}
+
+// addStickyToast 弹一条**不自己到期**的提示。
+//
+// 🔴 **它是票面第 5 条「不丢事件」的落地**（票 #559）：系统通知发不出去时降级
+// 成的那一句应用内提示，用户多半不在应用里——而普通提示只待两秒，于是他回来
+// 的时候那一句早就没了，而**他不知道歌下完了**。
+//
+// ⚠️ **它到期的条件是「用户回来了」**：那时它已经被人看见，于是它按正常的两秒
+// 走（见 `unstickToasts`）。
+func (s *Shell) addStickyToast(text string, tone notice.Tone) {
+	s.addToastWith(text, tone, true)
+}
+
+// addToastWith 是「弹一条提示」那一个动作，`sticky` 说它是不是不自己到期。
+func (s *Shell) addToastWith(text string, tone notice.Tone, sticky bool) {
 	s.toastMu.Lock()
 	s.toastSeq++
 	t := toast{
-		id:    s.toastSeq,
-		text:  text,
-		tone:  tone,
-		until: time.Now().Add(toastLifetime),
+		id:     s.toastSeq,
+		text:   text,
+		tone:   tone,
+		until:  time.Now().Add(toastLifetime),
+		sticky: sticky,
 	}
 	s.toasts = append(s.toasts, t)
 	if len(s.toasts) > toastLimit {
@@ -166,6 +198,12 @@ func (s *Shell) addToast(text string, tone notice.Tone) {
 	// 不该在握着 toast 那把锁的时候去拿另一把。
 	s.announce(text)
 
+	// ⚠️ **粘着的那一条不排收它的 goroutine**：它等的是「用户回来」，而那是
+	// `syncFocusTracker` 那一头的事（见 `unstickToasts`）。而它**照样要在界面
+	// 上摆着**——`viewToasts` 每帧都画它（它不在 `until` 之前就过期）。
+	if sticky {
+		return
+	}
 	go s.expire(t)
 }
 
@@ -262,6 +300,36 @@ func (s *Shell) clearToasts() {
 	s.toastMu.Unlock()
 }
 
+// unstickToasts 把粘着的那几条提示放回「正常待着」。
+//
+// 🔴 **它由「用户回来了」那一档调**（见 `syncFocusTracker`）：粘着的那一条是
+// 系统通知发不出去时降级成的那一句（票面第 5 条「不丢事件」），而它一直摆着
+// 是为了**用户回来时看得见**——用户一回来它就已经被看见了，于是它可以按正常
+// 的两秒走（不然它会永远收不掉）。
+//
+// ⚠️ **到期时刻从「现在」起算**，不是从「它被加进来」起算：它粘着的那段时间
+// 里它一直摆着，而用户看见它的那一刻才是它「被读」的那一刻。
+func (s *Shell) unstickToasts() {
+	s.toastMu.Lock()
+	var released []toast
+	for i := range s.toasts {
+		if !s.toasts[i].sticky {
+			continue
+		}
+		s.toasts[i].sticky = false
+		s.toasts[i].until = time.Now().Add(toastLifetime)
+		released = append(released, s.toasts[i])
+	}
+	s.toastMu.Unlock()
+	// 收尾：那几条到点被收走（后台那条 goroutine 现在才排上）。
+	//
+	// ⚠️ **只排刚刚放开的那些**：别的提示**已经有**自己的收它的 goroutine
+	// （`addToastWith` 排的），再排一份就是两个 goroutine 抢着收同一条。
+	for _, t := range released {
+		go s.expire(t)
+	}
+}
+
 // visibleToasts 是这一帧该画的几条，顺手把到点的收走。
 func (s *Shell) visibleToasts() []toast {
 	s.toastMu.Lock()
@@ -269,6 +337,13 @@ func (s *Shell) visibleToasts() []toast {
 	now := time.Now()
 	kept := s.toasts[:0]
 	for _, t := range s.toasts {
+		// ⚠️ **粘着的那一条不按到期时刻收**：它等的是「用户回来」（见
+		// `unstickToasts`），而用户回来之前它必须**一直摆着**——普通提示只待
+		// 两秒，而用户离开应用可能好几分钟。
+		if t.sticky {
+			kept = append(kept, t)
+			continue
+		}
 		// ⚠️ **指针压着的那一条留着**：它到点之后**不立刻消失**，要等指针走了
 		// （见 `expire`）——这里要是按到期时刻把它藏了，那条提示会**凭空消失**
 		// （后台还没收，屏幕上先没了），而用户正指着它。

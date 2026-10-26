@@ -124,15 +124,30 @@ type focusSnapshot struct {
 	focused int
 	// windows 是登记进来的窗数（用来判「有没有窗」）。
 	windows int
+	// hidden 是「有几扇窗现在看不见」。
+	//
+	// ⚠️ **它是独立的一档**（票面第 1 条要求「任一窗口聚焦 / 全部窗口隐藏」两档
+	// 都要有）：「全部隐藏」不再靠「隐藏必然先失焦」那个隐含顺序——**那一扇窗
+	// 可以还带着焦点标志而已经被藏起来了**（`OnHide` 与 `OnBlur` 是两个回调，
+	// 谁先到不由我们决定；而 macOS 上 `Hide()` 会让它 resign key，可那是系统
+	// 行为，不是我们代码里的顺序保证）。
+	//
+	// 所以「用户在不在这几扇窗里」这一档**只认「有焦点**且**看得见」**的窗。
+	hidden int
 }
 
 // idle 报「用户不在这几扇窗里」。
 //
-// ⚠️ **只有一条判据**：「一扇窗都没有焦点」。
+// ⚠️ **判据是「一扇窗都没有『有焦点**且**看得见』」**。
 //
-// 「窗口全部隐藏」那一档**落在这一条里**：一扇看不见的窗不可能有焦点（macOS 上
-// `Hide()` 会让它 resign key——实测 2026-10-26，`probe_flow.log` 里主窗收起来
-// 时 `main BLUR` 先到），所以「全部隐藏」必然也是「没焦点」。
+// ⚠️ **而「窗口全部隐藏」不再靠「隐藏必然先失焦」那个隐含顺序**：一扇藏起来的
+// 窗**不该**算数，哪怕它的焦点标志还挂着。所以账上**同时记着「看得见吗」**，
+// 而 `focused` 这一档只数「有焦点**且**看得见」的窗。
+//
+// ⚠️ **「看得见」这一位取的是 `presence.shown`**（`OnShow` / `OnHide` 改的那一
+// 位），不是「看得见**且**看得着」那个合成位（`seen()`）——后者还含「聚焦」
+// 和「迷你播放器不聚焦也算」两件事，用它的话这一档会自己套自己（见
+// `syncFocusTracker` 的注释）。
 //
 // ⚠️ **而迷你播放器那一扇的焦点要算进来**（见文件头）：迷你模式下主窗是收起来
 // 的，若不算它，用户正看着迷你播放器听歌时每下一次下载完成都会弹一条通知。
@@ -159,6 +174,11 @@ type focusTracker struct {
 type trackedWindow struct {
 	// focused 是「这一扇现在有焦点」。
 	focused bool
+	// shown 是「这一扇现在看得见」。
+	//
+	// ⚠️ **它是独立的一位**（票面第 1 条要「全部窗口隐藏」那一档，而那一档
+	// 不许靠「隐藏必然先失焦」那个隐含顺序）。`OnShow` / `OnHide` 改它。
+	shown bool
 }
 
 // newFocusTracker 建一份空的账。
@@ -171,12 +191,16 @@ func newFocusTracker() *focusTracker {
 // focused 是「登记那一刻这一扇有没有焦点」——它得一开始就对，因为登记之后到第一
 // 次状态变化之间可能已经有一份通知在判活跃态了（那一份读到「没焦点」就会判成
 // 用户不在）。
-func (t *focusTracker) add(focused bool) int {
+//
+// ⚠️ **shown 也是**：一扇窗刚建出来的时候它是看得见的（`newWindowPresence` 的
+// 默认值就是「看得见」），而登记的那一刻如果它是藏着的，那本账从一开始就该说
+// 「看不见」。
+func (t *focusTracker) add(focused, shown bool) int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.next++
 	id := t.next
-	t.windows[id] = &trackedWindow{focused: focused}
+	t.windows[id] = &trackedWindow{focused: focused, shown: shown}
 	return id
 }
 
@@ -187,8 +211,13 @@ func (t *focusTracker) remove(id int) {
 	delete(t.windows, id)
 }
 
-// set 改一扇窗的焦点状态。
-func (t *focusTracker) set(id int, focused bool) {
+// set 改一扇窗的状态。
+//
+// ⚠️ **两个位一起改**（focused 和 shown）：它们**都是**「这扇窗此刻的状态」，
+// 而「用户在不在这几扇窗里」这一档要同时看它们。分开改的话，中间那一瞬的
+// 快照会拿新的 focused 配旧的 shown——而那一瞬正好是「主窗收起来、迷你窗
+// 建出来」那个切换（见文件头）。
+func (t *focusTracker) set(id int, focused, shown bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	w := t.windows[id]
@@ -196,6 +225,7 @@ func (t *focusTracker) set(id int, focused bool) {
 		return
 	}
 	w.focused = focused
+	w.shown = shown
 }
 
 // snapshot 取一份此刻的快照。
@@ -205,11 +235,40 @@ func (t *focusTracker) snapshot() focusSnapshot {
 	var s focusSnapshot
 	for _, w := range t.windows {
 		s.windows++
+		if !w.shown {
+			// ⚠️ **藏起来的那一扇不算「有焦点」**：票面第 1 条要的「全部窗口隐藏」
+			// 是一档**独立**的状态，不许靠「隐藏必然先失焦」那个隐含顺序
+			// （`OnHide` 与 `OnBlur` 是两个回调，谁先到不由我们决定）。
+			s.hidden++
+			continue
+		}
 		if w.focused {
 			s.focused++
 		}
 	}
 	return s
+}
+
+// shownOf 报一扇窗此刻「看得见吗」。
+func (t *focusTracker) shownOf(id int) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	w := t.windows[id]
+	if w == nil {
+		return false
+	}
+	return w.shown
+}
+
+// focusedOf 报一扇窗此刻「有焦点吗」。
+func (t *focusTracker) focusedOf(id int) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	w := t.windows[id]
+	if w == nil {
+		return false
+	}
+	return w.focused
 }
 
 // focusTrackerRef 是界面层共享的那一份账。
@@ -274,7 +333,8 @@ func (s *Shell) syncFocusTracker() {
 		return
 	}
 	focused := s.presence.focusedState()
-	tracker().set(s.notify.id, focused)
+	shown := s.presence.shownState()
+	tracker().set(s.notify.id, focused, shown)
 
 	// 🔴 **任一扇窗重新拿到焦点就把通知清掉**（票面第 6 条）：用户已经回到应用里
 	// 看着下载记录页了，通知中心里还堆着「下载完成」就是多余的。
@@ -284,6 +344,14 @@ func (s *Shell) syncFocusTracker() {
 	// 焦点**这一下。
 	if focused && !s.notify.wasFocused {
 		platform.ClearNotifications()
+		// 🔴 **而「用户回来了」也是那一句降级提示该收的时候**（票面第 5 条
+		// 「不丢事件」）：那一句是系统通知发不出去时弹的，而它**一直粘着**，
+		// 等的就是这一刻——用户回来时它已经摆在那儿了（他看得见），于是它可以
+		// 按正常的两秒走（不然它会永远收不掉）。
+		//
+		// ⚠️ **它在主窗口那一档弹**（见 `notifyFallback`），而这一段是**逐窗
+		// 窗**跑的——所以只有主窗口那一份会收到这一句。
+		s.unstickToasts()
 	}
 	s.notify.wasFocused = focused
 }
@@ -436,17 +504,67 @@ func notifyUpdateAvailable(version string) {
 	if version == "" {
 		return
 	}
+	// 🔴 **同一个版本只提醒一次**（票面第 6 条「不重复刷通知」）。
+	//
+	// ⚠️ **应用层已经去重了一份**（`internal/app/update.go` 的
+	// `claimUpdateNotification`），而**这里再去一次是双保险**：应用层那一份
+	// 记的是「更新器说过这个版本了」，而这一层记的是「**这个进程**已经为这个
+	// 版本发过通知了」。两层各自能独立成立——删掉任何一层，另一层还拦得住
+	// 「同一个版本反复弹」。
+	//
+	// ⚠️ **而稳定 ID 不代替它**：框架那一次 `Show` 是真的会再弹一次（同一个 ID
+	// 再 `Show` 是**重新弹**，不是「什么都不做」），而 ID 只决定通知中心里那一条
+	// 被**替换**。所以「不再发」得自己记一份。
+	if !claimNotifiedVersion(version) {
+		return
+	}
 	if !tracker().snapshot().idle() {
+		// ⚠️ **而「用户在里面」那一档要把这一格退回去**：通知没发出去，所以
+		// 「这个版本已经提醒过了」这句话**不成立**——等用户下一次不在应用里
+		// 时，它还得能再提醒一次。
+		//
+		// ⚠️ **这就是「提醒过」必须在「真发出去了」之后才记**的原因**：先记
+		// 再发的话，用户在应用里时那一次就把它吃掉了，于是**他永远收不到**
+		// 那一条通知。
+		releaseNotifiedVersion(version)
 		return
 	}
 	// ⚠️ **和下载那一档一样等一小会儿再判**（理由见文件头）：焦点正在两扇窗
 	// 之间搬家的时候，此刻「没有一扇有焦点」而用户**并没有离开**。
 	time.AfterFunc(notifyGrace, func() {
 		if !tracker().snapshot().idle() {
+			releaseNotifiedVersion(version)
 			return
 		}
 		sendNotification(notifyUpdateID(version), "有更新了", "BiuGo "+version+" 可更新")
 	})
+}
+
+// notifiedVersions 是「已经为哪些版本发过通知了」。
+//
+// ⚠️ **它带一把锁**：通知是**延后**发的（宽限期过了才发，那是在一条 goroutine
+// 上），而「记一笔」和「退回去」都从别的 goroutine 上来。
+var notifiedVersions = struct {
+	mu sync.Mutex
+	m  map[string]bool
+}{m: map[string]bool{}}
+
+// claimNotifiedVersion 记下「这个版本正在提醒」，并报「该不该提醒」。
+func claimNotifiedVersion(version string) bool {
+	notifiedVersions.mu.Lock()
+	defer notifiedVersions.mu.Unlock()
+	if notifiedVersions.m[version] {
+		return false
+	}
+	notifiedVersions.m[version] = true
+	return true
+}
+
+// releaseNotifiedVersion 把「正在提醒」退回去——那一次**没有真的提醒**。
+func releaseNotifiedVersion(version string) {
+	notifiedVersions.mu.Lock()
+	delete(notifiedVersions.m, version)
+	notifiedVersions.mu.Unlock()
 }
 
 // notifyStub 是「发通知」那个动作的插口。
@@ -532,11 +650,19 @@ func notifyFallback(title, body string, err error) {
 	// 这一句由**主窗口那个外壳**弹（提示卡片是逐窗口的，见 `toast.go`）——
 	// 迷你播放器画的是「正在放什么」，它没有放提示卡片的地方。
 	//
-	// ⚠️ **而主窗口可能正收着**（迷你模式）：那一档提示会留在那儿，用户回到
-	// 主窗口时能看见（提示在界面上待两秒，而它是在后台弹的——所以多半已经
-	// 过期了）。而**下载记录页上那一列「下载完成」是常驻的**——那才是这一档
-	// 真正不会丢的证据。
+	// 🔴 **而它是「粘着」的那一种**（票面第 5 条「不丢事件」）：用户多半**不在
+	// 应用里**（系统通知发不出去的那一档多半就是他不在的时候），而普通提示只待
+	// 两秒（`toastLifetime`，照 Biu 的 timeout 2000）——于是他回来的时候那一句
+	// **早就没了**，而他不知道歌下完了。
+	//
+	// ⚠️ **它等的是「用户回来」**：那一档由 `syncFocusTracker` 放它走（见那里
+	// 的注释）——用户一回来它就摆在他眼前，然后按正常的两秒收掉。
+	//
+	// ⚠️ **而主窗口可能正收着**（迷你模式）：提示是**逐窗口**的（`toast.go`），
+	// 而主窗口收着的时候它那一帧不画——所以那一句要等主窗口回来才看得见。
+	// 而**下载记录页上那一列「下载完成」是常驻的**——那才是这一档真正不会丢的
+	// 证据。
 	if s := currentMainShell(); s != nil {
-		s.addToast(body, notice.Success)
+		s.addStickyToast(body, notice.Success)
 	}
 }

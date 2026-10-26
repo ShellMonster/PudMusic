@@ -91,6 +91,22 @@ func (p *windowPresence) focusedState() bool {
 	return p.focused
 }
 
+// shownState 报「这一扇窗现在看得见吗」（不含「看得着」那几层）。
+//
+// ⚠️ **它和 `seen()` 不是一回事**：`seen()` 是「看得见**且**看得着」（它还含
+// 「聚焦」和「迷你播放器不聚焦也算」两件事），而这一位只是「系统说这一扇窗
+// 显示着没有」（`OnShow` / `OnHide` 改的那一位）。
+//
+// ⚠️ **「用户在不在这几扇窗里」那一档要的是这一位**：一扇窗**藏起来了**就不该
+// 算「用户在里面」，哪怕它的焦点标志还挂着——票面第 1 条要的「全部窗口隐藏」
+// 是一档**独立**的状态，不许靠「隐藏必然先失焦」那个隐含顺序（`OnHide` 与
+// `OnBlur` 是两个回调，谁先到不由我们决定）。
+func (p *windowPresence) shownState() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.shown
+}
+
 // update 按 apply 改状态，并报告这次是不是「从看不见变成了看得见」。
 func (p *windowPresence) update(apply func(*windowPresence)) (resumed bool) {
 	p.mu.Lock()
@@ -255,7 +271,11 @@ func (s *Shell) watchWindow(w *mygo.Window) {
 	// 在 macOS 上照样能拿 key（实测 2026-10-26），而迷你模式下主窗是收起来的
 	// ——不算它的话，用户正看着迷你播放器听歌时每下一次下载完成都会弹一条系统
 	// 通知。理由见 notification.go 的文件头。
-	s.notify.id = tracker().add(w.IsFocused())
+	//
+	// ⚠️ **「看得见吗」也一起登记**：票面第 1 条要的「全部窗口隐藏」是一档
+	// **独立**的状态，不许靠「隐藏必然先失焦」那个隐含顺序（`OnHide` 与
+	// `OnBlur` 是两个回调，谁先到不由我们决定）。
+	s.notify.id = tracker().add(w.IsFocused(), w.IsVisible())
 	w.OnFocus(func() { s.noteWindow(func(p *windowPresence) { p.focused = true }) })
 	w.OnBlur(func() { s.noteWindow(func(p *windowPresence) { p.focused = false }) })
 	w.OnShow(func() { s.noteWindow(func(p *windowPresence) { p.shown = true }) })

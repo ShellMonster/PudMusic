@@ -1,6 +1,7 @@
 package app
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -161,5 +162,114 @@ func TestAnUpToDateCheckDoesNotTellTheNotifier(t *testing.T) {
 
 	if calls != 0 {
 		t.Errorf("已经是最新了却通知了 %d 次，want 0 次", calls)
+	}
+}
+
+// TestTwoBackgroundChecksDoNotNotifyTheSameVersionTwice 钉住「同一个版本只
+// 提醒一次」。
+//
+// 🔴 **这是票面第 6 条「不重复刷通知」**（票 #559）：后台检查**每小时**一次，
+// 而**同一个新版本会被查到很多次**（用户一直不装它就一直查得到）——不记的话，
+// 用户每小时都会收到一条一模一样的「有更新了」。
+//
+// ⚠️ **而稳定 ID 不代替它**：框架那一次 `Show` 是真的会再弹一次（同一个 ID 再
+// `Show` 是**重新弹**，不是「什么都不做」），而 ID 只决定通知中心里那一条被
+// **替换**。所以「不再发」得自己记一份。
+func TestTwoBackgroundChecksDoNotNotifyTheSameVersionTwice(t *testing.T) {
+	f := newUpdFixture(t, "0.1.0", &UpdateRelease{Version: "0.2.0"})
+
+	var got []string
+	f.app.SetUpdateNotifier(func(version string) { got = append(got, version) })
+
+	// 后台查了两次，同一个版本（用户一直不装它，而检查每小时一次）。
+	f.checkAndWait(t, false)
+	f.checkAndWait(t, false)
+
+	if len(got) != 1 {
+		t.Fatalf("同一个版本通知了 %d 次（%v），want 1 次 —— "+
+			"而用户每小时都会收到一条一模一样的「有更新了」", len(got), got)
+	}
+}
+
+// TestANewVersionIsNotifiedAgain 钉住「换了版本就该再提醒一次」。
+//
+// ⚠️ **去重不许把「整个更新提醒」关掉**：用户要看的正是「哪一个版本」，而
+// 出了新版本他就该知道。
+func TestANewVersionIsNotifiedAgain(t *testing.T) {
+	f := newUpdFixture(t, "0.1.0", &UpdateRelease{Version: "0.2.0"})
+
+	var got []string
+	f.app.SetUpdateNotifier(func(version string) { got = append(got, version) })
+
+	f.checkAndWait(t, false)
+	if len(got) != 1 {
+		t.Fatalf("第一次提醒了 %d 次（%v），want 1 次", len(got), got)
+	}
+
+	// 出了新版本：改掉假后端答的版本号，再查一次。
+	f.be.mu.Lock()
+	f.be.rel = &UpdateRelease{Version: "0.3.0"}
+	f.be.mu.Unlock()
+	f.checkAndWait(t, false)
+
+	if len(got) != 2 {
+		t.Errorf("换了版本却一共只提醒了 %d 次（%v），want 2 次", len(got), got)
+	}
+	if got[1] != "0.3.0" {
+		t.Errorf("第二次提醒的是 %q，want %q", got[1], "0.3.0")
+	}
+}
+
+// TestTheUpdateNotificationSwitchTurnsItOff 钉住「用户关了那一格之后，后台检查
+// 就不再发通知」。
+//
+// 🔴 **这是票面第 3 条「更新提醒可复用同一基础设施但另开开关」**（票 #559）：
+// 那一格**必须真的管住那条通知**——而它默认是**开**的，所以用户明确关掉之后
+// 它得立刻生效。
+func TestTheUpdateNotificationSwitchTurnsItOff(t *testing.T) {
+	f := newUpdFixture(t, "0.1.0", &UpdateRelease{Version: "0.2.0"})
+
+	// 挂上设置（那一格在设置文件里，而更新器读的是**当前那一份**）。
+	if err := f.app.MountSettings(filepath.Join(t.TempDir(), SettingsFileName)); err != nil {
+		t.Fatal(err)
+	}
+
+	// 用户把那一格关了。
+	if _, err := f.app.UpdateSettings(func(s *Settings) {
+		off := false
+		s.UpdateNotification = &off
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := 0
+	f.app.SetUpdateNotifier(func(string) { calls++ })
+
+	f.checkAndWait(t, false)
+
+	if calls != 0 {
+		t.Errorf("用户把「更新提醒」关了，后台检查却还是通知了 %d 次，want 0 次", calls)
+	}
+}
+
+// TestTheUpdateNotificationSwitchIsOnByDefault 钉住「那一格默认是开的」。
+//
+// ⚠️ **而「老版本写的设置文件」也按开算**：那一格是 `*bool`（理由见
+// `Settings.UpdateNotification`），`nil` = 「没设过」→ 默认开。
+func TestTheUpdateNotificationSwitchIsOnByDefault(t *testing.T) {
+	if !DefaultSettings("").UpdateNotificationEnabled() {
+		t.Error("「更新提醒」那一格默认是关的 —— 而系统通知是低频的好事")
+	}
+	// 老版本写的设置文件：那一格不存在（nil）→ 仍然按开算。
+	s := Settings{}
+	if !s.UpdateNotificationEnabled() {
+		t.Error("「更新提醒」那一格不存在（老版本写的设置文件）时按关算 —— " +
+			"而老用户升级上来不该平白多一条通知的打扰")
+	}
+	// 用户明确关了 → 关。
+	off := false
+	s.UpdateNotification = &off
+	if s.UpdateNotificationEnabled() {
+		t.Error("用户明确关了「更新提醒」，却还按开算")
 	}
 }

@@ -199,6 +199,25 @@ type updater struct {
 	tone   notice.Tone
 	// cancel 是这次下载的取消函数。close 调它，用户在下载中途退出应用靠的就是它。
 	cancel context.CancelFunc
+	// notifiedVersion 是「已经为哪个版本发过系统通知了」。
+	//
+	// 🔴 **它是票面第 6 条「不重复刷通知」的另一半**（票 #559）：后台检查**每小时**
+	// 一次，而**同一个新版本会被查到很多次**（用户不装它就一直查得到）——所以
+	// 不记的话，用户每小时都会收到一条一模一样的「有更新了」。
+	//
+	// ⚠️ **稳定 ID 只决定「通知中心里那一条被替换」，不决定「不再发」**：框架那
+	// 一次 `Show` 是真的会再弹一次（macOS 上同 ID 的一条再 Show 是重新弹）。
+	// 所以去重得自己记一份「这个版本已经说过了」。
+	//
+	// ⚠️ **它跟着 `u.mu`**：它是更新器的状态，而 `check` 在后台 goroutine 上跑。
+	//
+	// ⚠️ **它不是「跨启动」的记忆**：应用重启之后后台检查又会查一遍那个版本，
+	// 而那一次**该发**（用户重启应用说明他可能没看见上一次）。要跨启动记住得
+	// 落盘，而落盘那份 `app-update.json` 是更新器的「上次查到什么」——它已经
+	// 记着 `KnownVersion` 了，而那一份的语义是「界面上该显示哪个版本」，不是
+	// 「通知发过没有」。两件事混在一份文件里会互相干扰（用户手动清掉了更新
+	// 之后又该弹一次），所以这里只在本次运行里记。
+	notifiedVersion string
 	// checkCancel 是**正在查**那一次的取消函数。
 	//
 	// 和 `cancel` 分开是因为它们是两次独立的动作，而 `close` 要把两次都收掉：
@@ -605,10 +624,43 @@ func (u *updater) check(user bool) {
 	// ⚠️ **它在后台那条线上被调**（检查更新的 goroutine），而界面层那一头要读
 	// 窗口的状态——那一头是带锁的（见 `internal/ui/notification.go`），所以
 	// 跨 goroutine 读它不违反铁律一（铁律一管的是**界面状态**，不是这个）。
-	if !user && found {
+	//
+	// 🔴 **而「用户要不要这条通知」是一格设置**（票 #559，票面第 3 条
+	// 「更新提醒可复用同一基础设施但另开开关」）：
+	//
+	// ⚠️ **那一格在设置文件里，而这一层拿得到它**（`SettingsSnapshot` 是线程
+	// 安全的，见 `settings_mount.go`）。而**不在这里判的话就没有别的地方判**
+	// ——界面层那一头只管「用户在不在这几扇窗里」，它不认识设置。
+	//
+	// ⚠️ **「用户自己按的」那一档仍然不发**：他正盯着设置页看着那句话，而
+	// 系统通知是给「用户不在」时用的（那是下载完成那一档的规矩，这里是同一档）。
+	if !user && found && u.updateNotificationEnabled() && u.claimUpdateNotification(rel.Version) {
 		u.notifyUpdateAvailable(rel.Version)
 	}
 	u.wake()
+}
+
+// claimUpdateNotification 记下「这个版本已经发过通知了」，并报「该不该发」。
+//
+// 🔴 **它是票面第 6 条「不重复刷通知」的另一半**（票 #559）：后台检查**每小时**
+// 一次，而**同一个新版本会被查到很多次**（用户一直不装它就一直查得到）——不记
+// 的话，用户每小时都会收到一条一模一样的「有更新了」。
+//
+// ⚠️ **而稳定 ID 不代替它**：框架那一次 `Show` 是真的会再弹一次（同一个 ID 再
+// `Show` 是**重新弹**，不是「什么都不做」），而 ID 只决定通知中心里那一条被
+// **替换**。所以「不再发」得自己记一份。
+//
+// ⚠️ **它只认版本**：换了版本就该再发一次（用户要看的正是「哪一个版本」）。
+//
+// ⚠️ **它跟着 `u.mu`**：检查在后台 goroutine 上跑，而这一份是更新器的状态。
+func (u *updater) claimUpdateNotification(version string) bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if version == "" || u.notifiedVersion == version {
+		return false
+	}
+	u.notifiedVersion = version
+	return true
 }
 
 // install 下载并装好那一个版本。
@@ -719,6 +771,31 @@ func (u *updater) notifyUpdateAvailable(version string) {
 	if notifier != nil {
 		notifier(version)
 	}
+}
+
+// updateNotificationEnabled 报「用户要不要「有更新了」这一条系统通知」。
+//
+// ⚠️ **那一格在设置文件里**（`Settings.UpdateNotification`，见 `settings.go`），
+// 而这里读的是**当前那一份**（`SettingsSnapshot` 拿的是 store 的锁底下那份
+// 拷贝，所以跨 goroutine 读它是安全的——检查更新在后台 goroutine 上）。
+//
+// ⚠️ **没挂设置时按「开」算**：没挂设置那份 store 只在拿不到设置文件路径时
+// 才会没有，而那时候用户连设置页都看不了——按「开」算的话通知照发（而那一档
+// 本来也会降级成应用内提示），按「关」算的话用户就**永远收不到**更新提醒了。
+func (a *App) updateNotificationEnabled() bool {
+	return a.SettingsSnapshot().UpdateNotificationEnabled()
+}
+
+// updateNotificationEnabled 是更新器那一头用的那一版。
+//
+// ⚠️ **它和 `App` 那一版是同一件事**（`App` 那一版是给别处用的入口），只是
+// 这一份是从 `updater` 上调的，而 `updater` 手里有 `u.app`。
+func (u *updater) updateNotificationEnabled() bool {
+	a := u.app
+	if a == nil {
+		return true
+	}
+	return a.updateNotificationEnabled()
 }
 
 // SetUpdateNotifier 装上「查到了新版本」的那只手，由界面层装一次。
