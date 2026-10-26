@@ -65,8 +65,11 @@ internal/platform/cmd/, internal/licensing/cmd/   → 生成用的命令行，�
 - 迷你窗是 `Panel` 语义：显示 / 聚焦给键盘，但**不激活应用**（票 #162）；`Transparent`
   必须配着自己画的背景，否则窗口在桌面上是隐形的。
 
-⚠️ 注意 README 里写的迷你窗尺寸是 320×100，而代码里是 `miniWidth = 320` /
-`miniHeight = 84`（`internal/ui/miniplayer.go`）。**以代码为准**——README 那句是旧的。
+⚠️ **以代码为准**：迷你窗是 `miniWidth = 320` / `miniHeight = 84`
+（`internal/ui/miniplayer.go`）。旧版 README 的「代码怎么分层」那一节写过 320×100，
+那是**过时的数字**（票 #357 已改成 320×84）——BMG-290 瘦身 README 时那一节整节删掉了，
+所以**现在 README 里不再有这个尺寸**。代码里那些提到 320×100 的注释是另一回事
+（那些是本票范围外的历史留痕）。
 
 **什么时候用得上**：你在加第三扇窗、或者在改「迷你窗显示的内容不对」。
 
