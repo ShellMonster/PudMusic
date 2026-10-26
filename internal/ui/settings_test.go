@@ -69,10 +69,16 @@ func shellWithSettings(t *testing.T, mode app.ThemeMode, systemDark bool,
 	return b.tt, b.s, b.a, b.settingsPath
 }
 
-// wantBackground 是「设置 + 系统外观」这一对该画出来的窗口底色。
+// wantBackground 是「设置 + 系统外观」这一对在采样点（侧栏那一带）该画出来的底色：
+// 选了方案就是方案的 sidebar，经典就是主题的 Background。
 func wantBackground(t *testing.T, a *app.App, systemDark bool) mygoui.Color {
 	t.Helper()
-	return BuildTheme(a.SettingsSnapshot(), systemDark).Background
+	st := a.SettingsSnapshot()
+	th := BuildTheme(st, systemDark)
+	if sk, _, ok := presetSkinFor(st.ThemePreset, th.Dark); ok {
+		return mygoui.Hex(sk.sidebar)
+	}
+	return th.Background
 }
 
 // assertBackground 断言画面上那个采样点（sampleX / sampleY 在文件头上）就是

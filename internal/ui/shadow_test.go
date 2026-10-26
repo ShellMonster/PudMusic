@@ -252,7 +252,7 @@ func TestTheSettingsColorSwatchHasAShadow(t *testing.T) {
 			assertShadow(t, img,
 				mygoui.Rect{X: 60 - 10, Y: 80, W: 10, H: 20},
 				mygoui.Rect{X: 20, Y: 80, W: 10, H: 20},
-				2, "设置里那块色卡")
+				map[bool]int{false: 2, true: 1}[dark], "设置里那块色卡")
 
 			if !dark {
 				return

@@ -83,7 +83,9 @@ func TestTheFrameThemeIsNotRebuiltEveryFrame(t *testing.T) {
 // 真正用的主题。中间没有一帧的延迟。
 func TestTheThemeFollowsTheSettingsTheMomentTheyChange(t *testing.T) {
 	var got themeProbe
-	b := newTestShell(t, withSettings(app.DefaultSettings("")),
+	classic := app.DefaultSettings("")
+	classic.ThemePreset = app.ThemePresetClassic
+	b := newTestShell(t, withSettings(classic),
 		withView(func(s *Shell) func(*mygoui.Context) {
 			return func(c *mygoui.Context) {
 				s.applyFrameTheme(c)
