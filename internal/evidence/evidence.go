@@ -4106,6 +4106,78 @@ var Items = []Item{
 		},
 	},
 	{
+		// 票 #557：系统把一个音频文件交给本应用（双击、拖到程序坞图标）。
+		//
+		// 🔴 **这一族全是「静默」的坏法**：登记漏了、回调装晚了、扩展名对不上，
+		// 三样都不会报错——症状都是「双击一个文件，应用起来了而什么也没放」。
+		//
+		// ⚠️ **三份口径必须一样**：`mygo.json` 的 `fileAssociations`（系统按它
+		// 登记）、框架按它过滤命令行（`mygo/deeplink.go` 的 `fileArgs`）、界面
+		// 按它判收不收（`internal/platform` 的 `AssociatedAudioExts`）。
+		//
+		// ⚠️ **登记的那一份是「真放得出声」的那一份**，不是扫描白名单——
+		// 扫描白名单里有 `.wma`，而我们没有 ASF 解码器（PLAN §5.4）。
+		//
+		// ⚠️ **队列语义是行级「立即播放」那一档**：追加到队尾并打断，**不清空**
+		// 用户已经排好的队列（DESIGN.md §十第 4 条）。
+		Category: Platform,
+		Spec:     "系统把一个音频文件交给本应用：已有的实例被叫回，主窗打开并放它（追加队尾并打断，不清空队列），不起第二个实例；收不下的（文件不在了、不是普通文件、格式放不了）有可见提示，而且不打断正在放的那首",
+		Tests: []string{
+			// 登记的那一份（`internal/platform`）：内容、`.wma` 不在里面、
+			// 带点和不带点是同一个格式。
+			"TestTheAssociatedExtensionsAreThePlayableOnes",
+			"TestWMAIsNotAssociated",
+			"TestIsAssociatedAudioExtAcceptsBothSpellings",
+			"TestAudioExtOfTakesTheExtensionWithoutTheDot",
+			// `mygo.json` 与代码里那一份**是同一份**，且扩展名不带点
+			//（带点会被 MyGo 的配置校验器拒绝，打包在读配置那一步就失败）。
+			"TestMygoJSONDeclaresTheSameExtensions",
+			"TestMygoJSONExtensionsCarryNoDot",
+			"TestMygoJSONStillDeclaresTheURLScheme",
+			// 框架按什么过滤命令行里的文件（照抄框架那三行）。
+			"TestTheFrameworkFiltersCommandLineFilesByTheseExtensions",
+			// 界面那一半：放起来了、队列没被清空、界面说了话。
+			"TestOpeningAFilePlaysItAndKeepsTheQueue",
+			// 迷你开着时收到文件：让开迷你，主窗口上放。
+			"TestOpeningAFileMakesRoomForTheMainWindow",
+			// 回调在 `Run` 之前装上了（装晚了那一次就永远收不到）。
+			// ⚠️ **走生产那条安装点**（`installLifecycle`）：删掉它里面那一行
+			// → 这一条红（第二轮评审实测过：上一版这一条是手工装钩子、
+			// 手工调回调，删掉生产那一行照样绿）。
+			"TestTheOpenFileHookIsInstalledBeforeRun",
+			// 第二个实例把命令行转交过来那一档也装上了（它同样要认下框架
+			// 丢掉的那一部分）。
+			"TestTheSecondInstanceHookIsInstalledBeforeRun",
+			// 三种没收下要说成三件不同的事，而且不打断正在放的那首。
+			"TestCheckOpenFileTellsTheThreeRejectionsApart",
+			"TestOpeningAMissingFileSaysSoAndKeepsPlaying",
+			"TestOpeningAnUnsupportedFormatSaysSo",
+			"TestOpeningADirectorySaysSo",
+			// 「格式放不了」那一句要说清楚支持哪些格式。
+			"TestTheUnsupportedTextSaysWhichFormatsWeTake",
+			"TestTheMissingTextSaysTheFileIsGone",
+			// 🔴 **「看得见」那一条**：不是「状态里记着」，而是**画面上真的有**
+			//（`repaint` 那一格要了帧）。主窗口那一扇、迷你那一扇各断一遍——
+			// 迷你**不画 toast**，而它常常就是用户眼前那一扇。
+			"TestARejectedFileIsVisibleOnScreen",
+			"TestARejectedFileIsVisibleWithTheMiniPlayerOpen",
+			// 提示写进状态之后**自己会要一帧**（不然界面停在旧帧上）。
+			"TestTheToastIsPaintedOnTheNextFrame",
+			// 命令行那一侧：框架在 `OnOpenFile` 之前丢掉的那一部分，
+			// **我们自己在命令行这一侧认下来**，而用户看得见。
+			"TestTheFrameworkDropsThosePathsBeforeOnOpenFile",
+			"TestTheLaunchArgsPickUpWhatTheFrameworkDrops",
+			"TestTheCommandLineRejectionsAreVisible",
+			"TestTheSecondInstanceArgsAreCheckedForTheOnesTheFrameworkDrops",
+			// 框架会交的那些我们不重复处理（重复了队列里两份同一首歌）。
+			"TestALaunchArgThatTheFrameworkDeliversIsNotHandledTwice",
+			// ⚠️ **Windows 的盘符不是 scheme**：`C:\歌.flac` 被 `url.Parse`
+			// 认成 scheme `c`，而按 `u.Scheme != "file"` 判的话**整个
+			// Windows 的文件关联这一档会被自己扔掉**。
+			"TestTheLaunchArgKeepsTheWindowsDriveLetter",
+		},
+	},
+	{
 		// 票 #558：删本地音乐文件**改成移到系统废纸篓**（原来是永久删除）。
 		//
 		// ⚠️ **语义变了，而那一半是静默的**：以前界面上写着「不可恢复」，
