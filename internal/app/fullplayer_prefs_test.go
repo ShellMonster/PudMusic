@@ -196,8 +196,13 @@ func quoteJSON(s string) string {
 
 // TestABrokenPrefsFileIsIgnored 断「坏文件当没有」。
 //
-// 这一份丢了最坏的结果是频谱回到默认（关着），而频谱本来就该默认关着——
-// 不值得为它拒绝启动（`LoadSettings` 那边要备份、要报错、要只读保护，是另一回事）。
+// 这一份丢了最坏的结果是**回到默认**——而默认是什么由设置说了算（频谱在
+// 票 #525 之后默认开着），不值得为它拒绝启动（`LoadSettings` 那边要备份、要报错、
+// 要只读保护，是另一回事）。
+//
+// ⚠️ **拿默认来比，而不是写死哪几个开关开着**：这一条要量的是「坏文件当没有」，
+// 而「没有」长什么样是 `DefaultFullPlayerPrefs` 说了算（写死的话，默认一改，
+// 这条就红——而它红的不是「坏文件被当成了好文件」，是「默认变了」）。
 func TestABrokenPrefsFileIsIgnored(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, fullPlayerPrefsFileName),
@@ -208,12 +213,8 @@ func TestABrokenPrefsFileIsIgnored(t *testing.T) {
 	t.Cleanup(a.Close)
 	a.MountFullPlayerPrefs(FullPlayerPrefsPath(dir))
 	p := a.FullPlayerPrefs()
-	if p.ShowSpectrum {
-		t.Error("坏文件被读成了「频谱开着」")
-	}
-	if !p.ShowLyrics || !p.ShowCover || !p.ShowBlurredBackground {
-		t.Errorf("坏文件没有落回默认：歌词 %v、封面 %v、虚化 %v",
-			p.ShowLyrics, p.ShowCover, p.ShowBlurredBackground)
+	if want := DefaultFullPlayerPrefs(); p != want {
+		t.Errorf("坏文件没有落回默认：拿到 %+v，want %+v", p, want)
 	}
 }
 

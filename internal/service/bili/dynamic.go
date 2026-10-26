@@ -59,6 +59,12 @@ const (
 	dynamicFeedSpacePath = "/x/polymer/web-dynamic/v1/feed/space"
 	// followingsPath 是「我关注的人」分页列表。动态流左侧作者栏用它。
 	followingsPath = "/x/relation/followings"
+	// dynamicFeedUpdatePath 是「有没有新动态」那个接口。
+	//
+	// ⚠️ **它不要签名**（上游 `getWebDynamicFeedAllUpdate` 没传 useWbi，
+	// 而 feed/space 传了）——抄错这一处的话 B 站回 -403，而症状是
+	// 「那个点永远不亮」，没有任何报错。
+	dynamicFeedUpdatePath = "/x/polymer/web-dynamic/v1/feed/all/update"
 	// dynamicThumbPath 是给一条动态点赞 / 取消点赞。
 	//
 	// ⚠️ **不是 `/x/v2/dynamic/feed/like/thumb`**（那一个要的是稿件 id，评的是
@@ -326,6 +332,28 @@ type DynamicPage struct {
 	// 不留下这句话，下一个人只能从头再猜一遍（票 #300 的实测：`pub_ts`
 	// 变成了字符串，于是每一页 12 条全被丢掉）。
 	DropWhy []string
+
+	// Baseline 是「更新基线」——**等于这一页里最新那条动态的 id**。
+	//
+	// ⚠️ **它是动态 id，不是时间戳**：B 站那个「有没有新动态」的接口
+	// （/feed/all/update）要的就是它。
+	//
+	// **契约在 Biu 上游源码里**（不用去查社区文档）：
+	//
+	//   - `biu/src/service/web-dynamic.ts:58`（/feed/all 的返回类型）：
+	//     `update_baseline: string; // 更新基线 (第一条记录ID)`；
+	//   - `biu/src/service/web-dynamic.ts:35-36`（/feed/all/update 的参数）：
+	//     「**默认为上次请求 获取全部动态列表 返回的 update_baseline**，
+	//     实测填 0 也可正常获取」；
+	//   - `biu/src/service/web-dynamic.ts:341-345`：那个接口自己
+	//     （`getWebDynamicFeedAllUpdate`），它**永远传 0**（见
+	//     `biu/src/layout/navbar/user-feed/index.tsx:18`）——所以它那一档永远是
+	//     「全部」，点掉之后五分钟又回来，它从没暴露过这个参数该传什么形状。
+	//
+	// ⚠️ **传错形状的后果是静默的**：时间戳不是合法的 id，于是 B 站要么回一个错
+	// （那个点再也不亮），要么当成「比它新的都算」（那个点永远亮着）——而用户看到
+	// 的只是「那个点不对」。
+	Baseline string
 }
 
 // noteDrop 记一条丢掉的理由（同一种理由只记一次）。
@@ -371,6 +399,10 @@ type dynamicEnvelope struct {
 	Items   []json.RawMessage `json:"items"`
 	Offset  flexString        `json:"offset"`
 	HasMore flexBool          `json:"has_more"`
+	// Baseline 是「更新基线」（= 这一页里最新那条动态的 id）。见 DynamicPage。
+	//
+	// ⚠️ **用 flexString**：B 站同一个字段有可能给字符串也有可能给数字。
+	Baseline flexString `json:"update_baseline"`
 }
 
 // DynamicFeed 拉「关注的人在发什么」，一页。
@@ -399,6 +431,71 @@ func (c *Client) DynamicFeed(ctx context.Context, offset string) (DynamicPage, e
 	// ⚠️ **`has_more` 不可信**：入口没前进就是没有下一页（见 MoreAfter）。
 	pg.HasMore = pg.MoreAfter(offset)
 	return pg, nil
+}
+
+// DynamicFeedUpdate 问「比 baseline 新的那几条动态有几条」，返回条数。
+//
+// # baseline 是**动态 id**，不是时间戳
+//
+// B 站这个接口按一个**基线**算「有多少条比它新」，而那个基线就是**动态 id**。
+//
+// **契约在 Biu 上游源码里**（不用去查社区文档）：
+//
+//   - `biu/src/service/web-dynamic.ts:35-36`（这个接口的参数）：
+//     「**默认为上次请求 获取全部动态列表 返回的 update_baseline**，
+//     实测填 0 也可正常获取」；
+//   - `biu/src/service/web-dynamic.ts:58`（/feed/all 的返回类型）：
+//     `update_baseline: string; // 更新基线 (第一条记录ID)`——那个基线就是
+//     **最新那条动态的 id**（本仓库的 DynamicPage.Baseline 就是它）。
+//
+// ⚠️ **上游 Biu 永远传 0**（`biu/src/layout/navbar/user-feed/index.tsx:18`），
+// 于是它那一档永远是「全部」——用户点掉了那个点，五分钟之后它又回来（上游只是
+// 把本地的数清成 0，下一轮又问回同一个数）。它从没暴露过这个参数该传什么形状。
+//
+// 我们这里传的是**用户看过的那条最新动态的 id**（见 DynamicPage.Baseline）：
+// 点掉之后它真的不回来了，直到有新的动态发出来。而 0 那一档留给「一次都没看过」
+// （新装的、换账号的），于是用户第一次打开就能看见那个点——和上游一样。
+//
+// ⚠️ **传错形状的后果是静默的**：时间戳不是合法的 id，于是 B 站要么回一个错
+// （那个点再也不亮），要么当成「比它新的都算」（那个点永远亮着）。
+//
+// # 它不要签名
+//
+// 上游那一支没传 useWbi（而 feed/space 传了）。这一条抄错的话 B 站回 -403，
+// 而症状是「那个点永远不亮」。
+func (c *Client) DynamicFeedUpdate(ctx context.Context, baseline string) (int, error) {
+	params := url.Values{}
+	// 上游写死的三个参数（`user-feed/index.tsx:16-20`）：
+	//
+	//   - `type=video` 是「按视频那条取」，和 feed/all 一样；
+	//   - `update_baseline` 是基线（动态 id；0 = 从头算）；
+	//   - `web_location` 告诉 B 站「这是网页版的哪一块」，不带的话它给的是
+	//     App 的形状。
+	params.Set("type", "video")
+	if baseline == "" {
+		// 一次都没看过 → 传 0（上游一直传的就是它，那一档是「全部」）。
+		baseline = "0"
+	}
+	params.Set("update_baseline", baseline)
+	params.Set("web_location", "333.1365")
+
+	raw, err := c.Do(ctx, Call{
+		Method: "GET", URL: c.hostAPI + dynamicFeedUpdatePath, Query: params,
+	})
+	if err != nil {
+		return 0, err
+	}
+	var d struct {
+		// UpdateNum 是「比基线新的那几条」。
+		//
+		// ⚠️ **用 flexInt**：B 站同一个字段有可能给数字也有可能给字符串，
+		// 而这一层读不出来就当 0（见 flexjson.go 的文件头）。
+		UpdateNum flexInt `json:"update_num"`
+	}
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return 0, fmt.Errorf("bili: 新动态的返回读不懂：%w", err)
+	}
+	return max(int(d.UpdateNum.Int64()), 0), nil
 }
 
 // SpaceDynamics 拉某一个 UP 空间里的动态，一页。
@@ -492,7 +589,24 @@ func dynamicPageFrom(raw []byte) (DynamicPage, error) {
 		return DynamicPage{}, fmt.Errorf("bili: 动态流的返回读不懂：%w", err)
 	}
 
-	pg := DynamicPage{Offset: env.Offset.String(), HasMore: env.HasMore.Bool(), Raw: len(env.Items)}
+	pg := DynamicPage{
+		Offset:   env.Offset.String(),
+		HasMore:  env.HasMore.Bool(),
+		Raw:      len(env.Items),
+		Baseline: env.Baseline.String(),
+	}
+	// ⚠️ **退路**：B 站要是没给 `update_baseline`，就用这一页**原始**第一条的
+	// id——上游的注释写着基线就是「第一条记录ID」（`web-dynamic.ts:58`），而
+	// `items[0].id_str` 就是动态 id（`LikeDynamic` 用的也是它）。
+	//
+	// ⚠️ **为什么非有不可**：没有它，B 站哪天少给这一格，「点进去之后不冒出来」
+	// 就**静悄悄**退回上游那个行为（每五分钟又回来），而界面上看不出任何异样。
+	//
+	// ⚠️ **不能从 pg.Items[0] 取**：那一份是**过滤之后**的（画不出来的那些被丢掉
+	// 了，见本文件开头那个约定），而基线要的是 B 站自己认的那一条（最新的那条）。
+	if pg.Baseline == "" && len(env.Items) > 0 {
+		pg.Baseline = rawItemID(env.Items[0])
+	}
 	for _, item := range env.Items {
 		d, drop, ok := parseDynamic(item)
 		if !ok {
@@ -776,6 +890,21 @@ func parseDynamic(raw json.RawMessage) (Dynamic, DroppedDynamic, bool) {
 	}
 	d.Kind = DynamicText
 	return d, DroppedDynamic{}, true
+}
+
+// rawItemID 是一条**原始**动态的 id（B 站的 id_str，18 位左右）。
+//
+// ⚠️ **它只读 id_str**：这一条别的什么都不管——包括「这一条画不画得出来」
+// （那一份是 parseDynamic 的事）。基线要的是「这一页最新的那条」的 id，而
+// B 站给的 id_str 就是它。
+func rawItemID(raw json.RawMessage) string {
+	var r struct {
+		IDStr flexString `json:"id_str"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return ""
+	}
+	return r.IDStr.String()
 }
 
 // dropKeyOf 是一条丢掉的东西的**身份**（跨页去重用的）。

@@ -1044,3 +1044,170 @@ func TestFollowingsNeedsYourOwnMid(t *testing.T) {
 		t.Error("vmid=0（没登录）不该发出去：那个接口会回 -101")
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 有没有新动态
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestDynamicFeedUpdateAsksWithTheBaseline 验「有没有新动态」那一趟。
+//
+// 判据是**请求里那三个参数**和**回来的那个数**：B 站的这个接口按一个基线算
+// 「有多少条比它新」，而基线传错的话那个点要么永远不亮、要么永远亮着。
+//
+// ⚠️ **它不要签名**：上游那一支没传 useWbi（而 feed/space 传了）。抄错的话
+// B 站回 -403，而症状是「那个点永远不亮」。
+func TestDynamicFeedUpdateAsksWithTheBaseline(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(dynamicFeedUpdatePath, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{"update_num": 7}))
+	})
+	cli := f.client(t, Options{})
+
+	// ⚠️ **基线是动态 id**（B 站的 update_baseline 要的就是那个，不是什么时间戳：
+	// 社区文档写着它是 str、必填，而 /feed/all 的返回里 data.update_baseline 是
+	// 「等于 items 中第一条记录的 id」）。
+	const baseline = "954659517801431040"
+	n, err := cli.DynamicFeedUpdate(context.Background(), baseline)
+	if err != nil {
+		t.Fatalf("问新动态失败了：%v", err)
+	}
+	if n != 7 {
+		t.Errorf("问回来 %d 条，want 7", n)
+	}
+
+	reqs := f.requests()
+	if len(reqs) != 1 {
+		t.Fatalf("发了 %d 个请求，want 1", len(reqs))
+	}
+	if reqs[0].Method != http.MethodGet {
+		t.Errorf("方法是 %s，want GET（这是个查询）", reqs[0].Method)
+	}
+	q := reqs[0].Query
+	if got := q.Get("update_baseline"); got != baseline {
+		t.Errorf("基线是 %q，want %q（那是一个动态 id，不是什么时间戳）", got, baseline)
+	}
+	if got := q.Get("type"); got != "video" {
+		t.Errorf("type 是 %q，want video（上游写死的那个）", got)
+	}
+	if got := q.Get("web_location"); got != "333.1365" {
+		t.Errorf("web_location 是 %q，want 333.1365（上游写死的那个）", got)
+	}
+}
+
+// TestDynamicFeedUpdateReadsANumberThatComesAsAString 验那个数是字符串也读得出来。
+//
+// B 站同一个字段有可能给数字也有可能给字符串（见 flexjson.go 的文件头），
+// 而这一条读不出来就当 0——那个点就永远不亮，而界面上看不出任何异样。
+func TestDynamicFeedUpdateReadsANumberThatComesAsAString(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(dynamicFeedUpdatePath, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{"update_num": "12"}))
+	})
+	cli := f.client(t, Options{})
+
+	n, err := cli.DynamicFeedUpdate(context.Background(), "")
+	if err != nil {
+		t.Fatalf("问新动态失败了：%v", err)
+	}
+	if n != 12 {
+		t.Errorf("问回来 %d 条，want 12（字符串也要读得出来）", n)
+	}
+}
+
+// TestDynamicFeedUpdateAsksZeroWhenNothingWasSeen 验「一次都没看过」传的是 0。
+//
+// ⚠️ **0 是上游 Biu 一直传的那个值**（`user-feed/index.tsx:18`）——那一档是
+// 「全部」，于是用户第一次打开就能看见那个点（和上游一样）。
+func TestDynamicFeedUpdateAsksZeroWhenNothingWasSeen(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(dynamicFeedUpdatePath, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{"update_num": 3}))
+	})
+	cli := f.client(t, Options{})
+
+	if _, err := cli.DynamicFeedUpdate(context.Background(), ""); err != nil {
+		t.Fatalf("问新动态失败了：%v", err)
+	}
+	reqs := f.requests()
+	if len(reqs) != 1 {
+		t.Fatalf("发了 %d 个请求，want 1", len(reqs))
+	}
+	if got := reqs[0].Query.Get("update_baseline"); got != "0" {
+		t.Errorf("基线是 %q，want 0（一次都没看过 → 从头算）", got)
+	}
+}
+
+// TestDynamicFeedCarriesTheUpdateBaseline 验动态流那一页把**更新基线**带出来。
+//
+// ⚠️ **它是动态 id，不是时间戳**：社区文档写着 /feed/all 的返回里
+// `data.update_baseline`「等于 items 中第一条记录的 id」，而 /feed/all/update
+// 要的就是它（真实返回长这样："954659517801431040"）。
+//
+// 拿不到它，「用户看到哪儿了」就没地方记——顶栏那个点于是只能永远传 0（上游
+// 那一档），而点掉了之后五分钟它又回来。
+func TestDynamicFeedCarriesTheUpdateBaseline(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(dynamicFeedAllPath, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			"items": []any{}, "offset": "OFF", "has_more": false,
+			"update_baseline": "954659517801431040",
+		}))
+	})
+	pg, err := f.client(t, Options{}).DynamicFeed(context.Background(), "")
+	if err != nil {
+		t.Fatalf("拉动态流失败了：%v", err)
+	}
+	if pg.Baseline != "954659517801431040" {
+		t.Errorf("更新基线是 %q，want 954659517801431040（那是最新那条动态的 id）", pg.Baseline)
+	}
+}
+
+// TestDynamicFeedFallsBackToTheFirstItemsID 验 B 站没给 update_baseline 时的**退路**。
+//
+// ⚠️ **为什么非有不可**：B 站哪天少给这一格，「点进去之后不冒出来」就静悄悄退回
+// 上游那个行为（每五分钟又回来），而界面上看不出任何异样。
+//
+// 退路是「这一页第一条动态的 id」——上游的注释写着基线就是「第一条记录ID」
+// （`biu/src/service/web-dynamic.ts:58`），而 `items[0].id_str` 就是动态 id。
+func TestDynamicFeedFallsBackToTheFirstItemsID(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(dynamicFeedAllPath, func(w http.ResponseWriter, r *http.Request) {
+		// ⚠️ **故意不给 update_baseline**（模拟 B 站少给这一格）。
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			"items":  []any{dynItem("d1"), dynItem("d2")},
+			"offset": "", "has_more": false,
+		}))
+	})
+	pg, err := f.client(t, Options{}).DynamicFeed(context.Background(), "")
+	if err != nil {
+		t.Fatalf("拉动态流失败了：%v", err)
+	}
+	if pg.Baseline != "d1" {
+		t.Errorf("更新基线是 %q，want d1（退路：这一页第一条动态的 id）", pg.Baseline)
+	}
+}
+
+// TestDynamicFeedFallsBackToTheRawFirstItem 验退路取的是**原始**第一条。
+//
+// ⚠️ **不能从画得出来的那一份里取**：画不出来的那些（转发、广告……）被丢掉了，
+// 而基线要的是 B 站自己认的那一条（最新的那条）。
+func TestDynamicFeedFallsBackToTheRawFirstItem(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(dynamicFeedAllPath, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			// 第一条是画不出来的（转发），第二条才是画得出来的。
+			"items": []any{
+				dynItem("x1", func(m map[string]any) { m["type"] = "DYNAMIC_TYPE_FORWARD" }),
+				dynItem("d2"),
+			},
+			"offset": "", "has_more": false,
+		}))
+	})
+	pg, err := f.client(t, Options{}).DynamicFeed(context.Background(), "")
+	if err != nil {
+		t.Fatalf("拉动态流失败了：%v", err)
+	}
+	if pg.Baseline != "x1" {
+		t.Errorf("更新基线是 %q，want x1（退路取的是原始第一条，不是过滤之后的第一条）", pg.Baseline)
+	}
+}
