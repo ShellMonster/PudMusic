@@ -35,7 +35,6 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/covertint"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
@@ -584,11 +583,12 @@ func (s *Shell) viewFullBackdrop(c *ui.Context, url string) {
 			s.viewFullBackdropCanvas(c, url)
 			// 封面主色的光晕：压在压暗层**底下**，所以压暗层照样统一压住，字的对比度
 			// 按「压暗层盖白底」算出来的最坏情况不变。自上而下 45% → 0，取不到色时没有。
-			if hue, sat := s.tint.sync(url, s.wake.invalidate); sat > 0 {
-				if col, ok := parseHexColor(covertint.Hue{H: hue, S: sat}.Color(true)); ok {
-					ui.Box(c).Key("full-glow").Absolute().Left(0).Top(0).Right(0).Bottom(0).
-						LinearGradient(ui.LinearGradient{From: col.Alpha(0.45), To: col.Alpha(0), Angle: 180})
-				}
+			if s.glowWake == nil {
+				s.glowWake = s.wake.invalidate
+			}
+			if col, ok := s.tint.glow(url, s.glowWake); ok {
+				ui.Box(c).Key("full-glow").Absolute().Left(0).Top(0).Right(0).Bottom(0).
+					LinearGradient(ui.LinearGradient{From: col.Alpha(0.45), To: col.Alpha(0), Angle: 180})
 			}
 			ui.Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Background(fullScrim)
 		})

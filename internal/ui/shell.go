@@ -88,6 +88,8 @@ type Shell struct {
 
 	// tint 是封面取色的状态（见 covertint.go）。
 	tint coverTint
+	// glowWake 是满屏光晕取色用的叫醒函数，建一次存着（每帧现写方法值会建闭包）。
+	glowWake func()
 
 	// shownPath 是上一帧画的是哪一页，syncRoute 拿它认出「换页了」。
 	shownPath string
