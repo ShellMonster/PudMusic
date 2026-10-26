@@ -248,7 +248,7 @@ func TestTheSettingsColorSwatchHasAShadow(t *testing.T) {
 				}, false)
 			})
 			img := tt.Image()
-			// 色卡是 100×40，摆在留白之后的第一格。
+			// 色卡是 164×40（控件列 340 的一半），摆在留白之后的第一格。
 			assertShadow(t, img,
 				mygoui.Rect{X: 60 - 10, Y: 80, W: 10, H: 20},
 				mygoui.Rect{X: 20, Y: 80, W: 10, H: 20},
@@ -258,19 +258,20 @@ func TestTheSettingsColorSwatchHasAShadow(t *testing.T) {
 				return
 			}
 			// ⚠️ **深色下真正把这一格和底色分开的是内缘那道 1 像素的白边**：外面
-			// 那一圈是 20% 的黑，压在 `#18181b` 上只差一两个色阶；而那一档影的第三层
-			// 在深色下是 `inset`（1 像素白边）——**它会被铺满整格的那个取色板控件
-			// 盖住**（评审量过：没有它的时候色卡内缘一路是 `t.Surface`）。
+			// 那一圈是 20% 的黑，压在深底上只差一两个色阶；而那一档影的第三层
+			// 在深色下是 `inset`（1 像素白边）。
 			//
 			// 所以这里量的是**内缘那一道线**：它必须比卡面亮。
 			//
-			// ⚠️ **从离左边两像素的地方开始扫**：再往左是那一格自己的**描边**
-			//（`t.Border`，深色下 15% 白叠出来的 #3b3b3d）——它不是影，算上它
-			// 这一条就永远绿。
+			// ⚠️ **从离左边一像素的地方开始扫**：色卡现在是**一个元素**（取色板
+			// 自己就是色块，见 `colorItem`）——描边（`t.Border`，深色下 15% 白叠
+			// 出来的 #3b3b3d）占 swatchX+0 那一列，内缘白边紧跟着在 swatchX+1。
+			// （此前色卡是「盒子套取色板」两层，白边落在 +2；2026-10-26 合并成
+			// 一层之后跟着挪。）它不是影的那一列（描边）不算，算上这条就永远绿。
 			const swatchX = 60
 			interior := img.RGBAAt(swatchX+20, 90)
 			lit := false
-			for x := swatchX + 2; x < swatchX+10; x++ {
+			for x := swatchX + 1; x < swatchX+10; x++ {
 				if c := img.RGBAAt(x, 90); int(c.R) > int(interior.R)+3 {
 					lit = true
 					break

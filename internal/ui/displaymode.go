@@ -44,7 +44,7 @@ func (s *Shell) displayView() list.View {
 
 // viewDisplayMode 是设置里那一格：三档切换 + 底下一张预览。
 //
-// 预览摆在**切换控件底下**而不是右边：右边那格已经有一个 300 宽的切换了，而这一
+// 预览摆在**切换控件底下**而不是右边：右边那格已经有一个基准宽的切换了，而这一
 // 页的页面区最窄是 900（`WindowOptions.MinWidth`）减掉侧栏和内边距 ≈ 660——
 // 再挤一列预览会把「外观」那一段的每一行都顶到换行。
 //
@@ -52,12 +52,12 @@ func (s *Shell) displayView() list.View {
 // 跟着缩放走（理由见 `settingsSegment`）；预览三张要是不跟着走，这一格的两行
 // 就一宽一窄，右边缘参差（票 #235 / F-04 刚消灭掉的那件事）。
 func (s *Shell) viewDisplayMode(c *ui.Context, st app.Settings, ro bool) {
-	// ⚠️ **宽度按内容区算**（`settingsControlFitW`）：这一格跟着字号缩放走
-	// （1.4 倍时 420），而内容区最窄的那一档（窗口 900 + 侧栏拉到 480）只有
-	// 364——不按内容区算，右边那一截会被窗口切掉。
+	// ⚠️ **宽度按卡片里那一行算**（`settingsControlFitW`）：这一格跟着字号缩放走
+	// （1.4 倍时 476），而最窄那一档（窗口 900 + 侧栏拉到 480）的卡内行宽只有
+	// 274——不按它算，右边那一截会被切出卡片外面。
 	colW := s.settingsControlFitW(c, scale.Font(c, settingsControlW))
 	ui.Column(c).Key("setting:displayMode").Width(colW).
-		MinWidth(settingsControlMinW).Gap(space.Px8).Children(func() {
+		Gap(space.Px8).Children(func() {
 		s.pickDisplayMode(c, st, ro)
 		viewDisplayModePreview(c)
 	})
@@ -79,15 +79,12 @@ func (s *Shell) viewDisplayMode(c *ui.Context, st app.Settings, ro bool) {
 //
 // 所以每一张有 `Label`（「预览：网格」这种带前缀的）而没有可见文字：读屏软件
 // 念得出它是哪一张，Tester 也认得出，可它和切换控件那几个「网格」撞不上。
+//
+// ⚠️ **每张的宽不用写死**：三张都是 `Grow(1)`，在控件列那一格里**等分**——
+// 控件列多宽它们就多宽，永远铺满（`settingsControlW` 从 300 变 340 那次要是
+// 还按「三张加两道缝 = 列宽」的算式写死，这一行右边就会空出一截）。缝是固定的
+// 12；高 56。
 const (
-	// previewW 是**一张**缩略图多宽。三张加两道的缝正好铺满控件列那一格
-	// （`settingsControlW`）——此前是 88（3×88 + 2×10 = 284），右边空出 16，
-	// 那一行看上去比上面那行短一截（UI 报告 §4 的 F-04）。
-	//
-	// ⚠️ **92 和 12 都是整数**：它们加起来正好 300，而 93 会差一个像素
-	// （3×93 + 2×10 = 299），那一行的右边缘就又短了一格——差一个像素看不出来，
-	// 但**它会让「填满」这件事不再是事实**。
-	previewW    = 92
 	previewH    = 56
 	previewGap  = space.Px12
 	previewRows = 3 // 列表 / 网格预览里摆几行
@@ -122,12 +119,12 @@ const (
 // 个还在，用户会以为另一个也坏了。而只读保护（`ro`）灰的是**改不了的东西**：设置
 // 来自更新的版本时这一格动不了，预览照样看得见（它一个字都没改）。
 //
-// ⚠️ **宽度和缝都跟着字号缩放走**（`scale.Font`）：三张加两道缝要正好铺满控件列
-// 那一格（`settingsControlW` × 缩放），差一像素那一行的右边缘就又短了一格。
+// ⚠️ **三张 `Grow(1)` 等分**（见上面那组常量的注释）：控件列那一格多宽，
+// 三张就铺到多宽。
 func viewDisplayModePreview(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).Key("setting:displayModePreview").FillWidth().
-		Gap(scale.Font(c, previewGap)).AlignItems(ui.Start).Children(func() {
+		Gap(previewGap).AlignItems(ui.Start).Children(func() {
 		for v := list.View(0); v < list.ViewCount; v++ {
 			previewOne(c, t, v)
 		}
@@ -137,7 +134,7 @@ func viewDisplayModePreview(c *ui.Context) {
 // previewOne 画一张缩略图。
 func previewOne(c *ui.Context, t *ui.Theme, v list.View) {
 	ui.Column(c).Label("预览："+v.String()).
-		Grow(1).MaxWidth(scale.Font(c, previewW)).Height(previewH).Radius(t.Radius).
+		Grow(1).Height(previewH).Radius(t.Radius).
 		// ⚠️ **描边是中性色**：选中的那一张 formerly 描主色边，而那一格里的
 		// 选中信号只有药丸一个（见 `viewDisplayModePreview` 顶上那一段）。
 		Border(1, t.Border).Padding(space.Px6).Gap(space.Px3).Children(func() {

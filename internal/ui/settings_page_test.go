@@ -529,13 +529,18 @@ func TestTheSettingsControlsShareOneBaseline(t *testing.T) {
 // ——预览那三张右边空 16、色卡那两块右边空 91（UI 报告 §4 的 F-04）。
 // 上一条钉的是左边缘，这一条钉的是「填满」。
 //
-// ⚠️ **判据是代码里的那三个数**：色卡是两块各占一半（中间 12 的缝），预览是
-// 三张各占三分之一（中间两道 10 的缝），下拉就是基准宽本身。它们加起来必须
-// 正好是那一格——差一个像素，那一行的右边缘就又参差了一格。
+// ⚠️ **判据是代码里的那几个数**：色卡是两块各占一半（中间 12 的缝），下拉就是
+// 基准宽本身。预览那三张现在是 `Grow(1)` 等分（见 `displaymode.go`），写死的
+// 宽没有了对不上的必要。
+//
+// ⚠️ **340 的那一问也要钉**：基准宽必须装得下主题那排**四档**的内容——
+// 「跟随系统」98 + 其余三档各 70 + 三道 4 的缝 + 行内边距 4 = 324。#534 加了
+// 「定时」那一档之后没人重算这个数，四档全被裁成「跟随…」（2026-10-26 修的那
+// 个回归）；这条钉着它不再发生。
 func TestTheSettingsControlColumnIsFilled(t *testing.T) {
-	if settingsControlW != 300 {
-		t.Errorf("settingsControlW = %d，want 300——控件列的基准宽度是量出来的"+
-			"（主题那三个按钮里「跟随系统」最宽，窄了它会被画成「跟随…」）",
+	if settingsControlW != 340 {
+		t.Errorf("settingsControlW = %d，want 340——控件列的基准宽度是量出来的"+
+			"（主题那排四档里「跟随系统」最宽，窄了它会被画成「跟随…」）",
 			settingsControlW)
 	}
 	for _, c := range []struct {
@@ -543,7 +548,6 @@ func TestTheSettingsControlColumnIsFilled(t *testing.T) {
 		got  float64
 	}{
 		{"两块色卡加中间的缝", float64(colorItemWidth*2 + colorItemGap)},
-		{"三张预览加两道缝", float64(previewW*3 + 2*previewGap)},
 	} {
 		if math.Abs(c.got-float64(settingsControlW)) > 0.01 {
 			t.Errorf("%s 是 %.2f，want %.0f——它们要正好铺满控件列那一格，"+
@@ -553,6 +557,14 @@ func TestTheSettingsControlColumnIsFilled(t *testing.T) {
 	if selectWidth != settingsControlW {
 		t.Errorf("selectWidth = %d，want %d——那一列里的下拉也要按基准宽走，"+
 			"否则控件列的左边缘又落在两个位置上", selectWidth, settingsControlW)
+	}
+	// 四档装得下：段控件那排的内宽（基准宽 - 行内边距 2×2）≥ 四档内容 +
+	// 三道档间缝。宽度的三个成分（内边距 10、图标 18、缝 4）都写在
+	// `segmentButton` / `settingsSegment` 里，这里把账再算一遍。
+	themeContent := 2*2 + 3*4 + (4*(10+10) + 4*18 + 4*4) + (56 + 28*3)
+	if themeContent > settingsControlW {
+		t.Errorf("主题四档的内容要 %d，基准宽只有 %d——「跟随系统」会被裁成"+
+			"「跟随…」；要么收内边距/缝，要么把基准宽抬上去", themeContent, settingsControlW)
 	}
 }
 

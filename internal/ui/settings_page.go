@@ -110,11 +110,11 @@ type settingsPageState struct {
 	// 算一次存下来，各行读它（见 `settingsDescFloor`）。
 	descFloor float32
 
-	// contentW 是内容那一段（**去掉左右内边距**）的宽。
+	// contentW 是**分组卡片里那一行**的宽（去页面内边距、去卡片内边距）。
 	//
-	// ⚠️ **控件列的宽度要钳在它里面**：跟字号缩放走的那一列（分段控件）在
-	// 1.4 倍下是 420，而内容区最窄的那一档（窗口 900 + 侧栏 480）只有 364——
-	// 不钳的话那一列就**比内容区还宽**，右边被窗口切掉。
+	// ⚠️ **控件列的宽度要钳在它里面**（`settingsControlFitW`）：分段控件那一族
+	// 跟字号缩放走（1.4 倍时 476），最窄那一档（窗口 900 + 侧栏 480）的卡内行宽
+	// 只有 274——不钳的话那一列就**比卡片还宽**，右边被切掉。
 	contentW float32
 }
 
@@ -139,115 +139,62 @@ const (
 // settingsTabNames 是四个 Tab 上的字。照 Biu `index.tsx:125-137` 的 title。
 var settingsTabNames = []string{"常规设置", "菜单设置", "快捷键设置", "代理设置"}
 
-// 控件列的宽度。设置页每一行是「左边标题 + 一句说明，右边控件」，**右边那一列
-// 全部按同一个基准宽度排**（票 #235 的 F-04）。
+// 控件列的宽度。设置页每一行是「左边标题，右边控件」，**右边那一列
+// 全部按同一个基准宽度排**（票 #235 的 F-04），右边齐在分组卡片的内右沿，
+// 左边也就齐在同一条线上（卡片内右沿往左 `settingsControlW`）。
 //
-// 300 是量出来的，不是挑的：主题那三个按钮里「跟随系统」四个汉字最宽，按钮
-// 自己还要留内边距。窄了它会被画成「跟随…」——用户看见半个词，第一反应是
-// 这个应用坏了，而不是「这个按钮窄了一点」。
+// 340 是这一列里**最宽的一份内容**量出来的：主题那排现在是**四档**（跟随系统 /
+// 浅色 / 深色 / 定时，定时是 #534 加的），每档「18 图标 + 4 缝 + 字 + 20 内边距」，
+// 「跟随系统」98、其余各 70，加三道 4 的缝和行内边距是 **324**——旧基准 300
+// （#297 时的三档口径）装不下，四档全被裁成「跟随…」「浅…」（2026-10-26 实测
+// 900 / 1200 两档窗口都截断）。
 //
-// # 这一列因此有**一条共同的左边缘**
-//
-// 此前那一列的左边缘落在四个位置（762 / 801 / 822 / 942），而其中两个控件
-// 还没填满自己的盒子——那一列看上去是参差的（UI 报告 §4 的 F-04）。
-// 现在每一行的控件都占**同样宽**的一格，右边齐在内容那一段的右沿，
-// 左边也就齐在同一条线上（内容右沿往左 `settingsControlW`）。
-//
-// ⚠️ **开关是那一列里唯一比基准窄的控件**（它天生就那么宽），它靠右排在那
-// 一格的右端——开关在表单里本来就该贴着行尾。**其余的控件都正好是基准宽**
-// （下拉也是：`selectWidth` 就是 `settingsControlW`），所以整列的左边缘仍然
-// 是一条线。
-//
-// ⚠️ **文本缩放大于 1 的时候，「主题」「窗口关闭」那两行会跟着变宽**
-// （它们里面的字要放得下，见 pickTheme 的注释）。那是这一列唯一的不齐，
-// 基准宽度说的是**缩放为 1 的时候**。
+// ⚠️ **文本缩放大于 1 的时候这一排跟着变宽**（行宽取 `scale.Font(c, settingsControlW)`）：
+// 字一大「跟随系统」也要跟着长，不跟着走标签就会裁半。基准宽说的是**缩放为 1 的时候**。
 //
 // ⚠️ **三处分段控件走同一个出口**（`settingsSegment`）：设置页只有一种分段控件
 // （票 #240 / 报告 §4 的 F-17）。
+//
+// radiusReadoutW 是圆角行那个 px 读数的宽。
 const (
-	settingsControlW = 300
+	settingsControlW = 340
 	radiusReadoutW   = 48
 )
 
-// settingsDescMinW 是**说明列**的最小宽度（左边标题 + 那一句话）。
+// settingsDescMinW 是**说明列**的最小宽度（标题底下那句说明还在的行才有说明列）。
 //
 // # 为什么要有这个下限
 //
 // 每一行是「左边标题 + 一句说明，右边定宽控件」，**控件那一列是定宽的**，
-// 说明那一列吃剩下的——于是窗口越窄，说明被挤得越狠：
-// 1200 宽时那一列是 520，900 宽（`WindowOptions.MinWidth` 定的最小尺寸）
-// 时只剩 320，**掉掉 38%**；说明文字和控件之间的留白从 351 掉到 151
-// （UI 报告 §4 的 F-27）。
+// 说明那一列吃剩下的——窗口越窄，说明被挤得越狠。280 是设计规范 v0.1
+// 定的那一档下限。
 //
-// 320 是量出来的：说明文字里最长的一句是「内容页排成列表、网格还是紧凑」
-// （15 个字，14px 下 210 像素），320 是它的 1.5 倍——再窄它就折行，而那一折
-// 让**整行**变高，右边那个控件也跟着往下挪半格，一页设置于是参差不齐。
+// 🔴 **这个下限是「有条件」的**，条件有两条：
 //
-// 🔴 **这个下限是「有条件」的**（`settingsDescFloor`）：只有内容区**放得下**
-// 它的时候才给。放不下时**不给**——那一档回到改动前的样子（说明列被压扁，
-// 右边那列控件完整可见）。
+//  1. **这一行的说明得存在**（`settingRowElAt`）：#530 把设置页的说明全部删了，
+//     现在每一行的 desc 都是空串——空说明给下限只会白白挤占控件列（900 宽那一档
+//     实测把下拉挤出分组卡片 14 像素）。哪天说明回来了，下限自动跟着回来。
+//  2. **内容区放得下它**（`settingsDescFloor`）：放不下时不给——说明列宁可窄一点，
+//     也不能把右边那列控件顶出卡片。
 //
 // ⚠️ **为什么不能无条件给**：框架的 flex **没有收缩**——一项的 `shrink` 零值
 // 就是 0（`mygo/ui/layout.go` 的 `resolveFlexible`：`factor = shrink × inner`），
-// 所以**放不下就是溢出**：控件列会被顶出窗口右缘。于是「说明列至少 320 +
-// 控件列至少 260 + 缝 24 = 604」在内容区窄过 604 时，用户看见的是半个按钮。
-// （`MinWidth` 还是**硬下限**：`mygo/ui/layout.go` 里 `minW` 一旦存在就接管
-// 那一项的自动最小宽，没有才用内容的 min-content 宽——所以 `MinWidth(0)`
-// 不是「没有下限」，而是把下限变成 0。）
-//
-// 合法配置里最窄的那一档是**窗口 900 + 侧栏拉到最大 480**
-// （`app.MaxSideMenuWidth`），内容区只有 900 - 480 - 56 = 364 ⇒ 604 放不下。
-// 另一档是**窗口 900 + 系统字号 1.4 倍**：控件列跟着字号变宽（420），于是
-// 320 + 24 + 420 = 764 > 644 ⇒ 同样放不下。
-//
-// ⚠️ **报告 §4 那个「掉到 44%」是按一个算错的数算出来的**：它说 900 那一档的
-// 「设置栏宽」是 668，于是说明列是 290。真窗口那张 900×560 的截图上量出来的
-// 是**内容右沿在 872**（= 900 - 28 的内边距），也就是设置栏 700 宽——**滚动条
-// 是浮在上面的，不占宽度**（框架的 `scrollBars` 画在自己的盒子上，
-// `mygo/ui/paint.go:1047`）。于是那一档的说明列是 **320**，掉的是 **38%**，
-// 不是 44%。所以这一条现在**已经是达标的**，本票做的是**把它钉住**（下面那条
-// 测试钉着它），不是把一个已经达标的数再往上推。
-// 320 → 280：侧栏默认变宽（200 → 220）、分组又套了一层卡片（左右各 17），最小窗口 900 下
-// 说明列实测 283；设计规范 v0.1 的新版式下 280 是这一档的下限。
+// 所以**放不下就是溢出**：控件列会被顶出卡片右缘。
 const settingsDescMinW = 280
-
-// settingsControlMinW 是**控件列**的最小宽度。
-//
-// ⚠️ **它是为了「跟随系统」那一档**：四个汉字 14px 下是 56 像素，加上按钮自己
-// 的内边距（`flat.Button` 的 14×2）要 84；三个格子加两道 4 的缝就是 260。
-// 控件列窄过这个数，「跟随系统」就被裁成「跟随系…」——用户看见半个词，第一反应
-// 是这个应用坏了，而不是「这个按钮窄了一点」。
-//
-// ⚠️ **它不跟字号缩放走**：1.4 倍时「跟随系统」要 106 像素一格，三格加缝是 327
-// ——那个数当硬下限的话，内容区窄过 327 + 24 时又会**溢出**。所以下限取**固定**
-// 的 260（1 倍字号的最小值），而**基准宽**才跟缩放走。
-//
-// ⚠️ **它只在控件列被内容区挤窄时才会被撞上**：900 宽（最小尺寸）、默认侧栏
-// 那一档是 320 + 24 + 300 = 644（内容那一段的宽），控件列还是基准宽 300；
-// 而「侧栏拉到 480」那一档内容区只有 364，控件列被挤到 320.4（`settingsControlFitW`
-// 算出来的），还是高于 260 ⇒ 这一档「跟随系统」那三个字也放得下。
-const settingsControlMinW = 260
 
 // settingsDescFloor 是说明列这一帧的**下限**。
 //
-// 🔴 **下限是条件性的**：只有内容区**放得下**它的时候才给（0 = 不给）。
+// 🔴 **下限是条件性的**，条件有两条：
 //
-// 「放得下」= 内容区（去掉内边距）够不够 `说明列下限 + 缝 + 控件列的基准宽`。
-// 放不下时**不给下限**——那一档就回到改动前的样子：说明列被压扁，
-// **右边那列控件完整可见**（评审抓的就是这一点：控件被推出窗口右缘、
-// 半个按钮看不见，比说明列窄一点坏得多）。
-//
-// ⚠️ **为什么不能用 `MinWidth` 一给了之**：框架的 flex **没有收缩**——一项的
-// `shrink` 零值就是 0（`mygo/ui/layout.go` 的 `resolveFlexible`：
-// `factor = shrink × inner`），所以**放不下就是溢出**：控件列被顶出窗口右缘。
-//
-// ⚠️ **而且 `MinWidth(0)` 不是「没有下限」**：框架里 `minW` 一旦存在就接管那一项
-// 的**自动最小宽**（`mygo/ui/layout.go` 的 `flexLayout`：有 `minW` 就用它，
-// 没有才用内容的 min-content 宽）。中文可以逐字换行，内容的 min-content 是**一个
-// 字宽**；给了 0 就连那一个字都不剩，整行塌成 0 高——那一行在画面上整个消失。
+//  1. **说明存在**——调用处（`settingRowElAt`）只在 desc 非空时才用这个值；
+//     #530 之后设置页的说明全部删空了，所以这一帧它通常是 0。
+//  2. **内容区放得下**（0 = 不给）：内容区够不够
+//     `说明列下限 + 缝 + 控件列的基准宽`。放不下时**不给下限**——说明列宁可
+//     窄一点，也不能把右边那列控件顶出卡片（框架的 flex 没有收缩，
+//     放不下就是溢出）。
 //
 // ⚠️ **控件列的基准宽取「分段控件那一族」的**（`scale.Font(c, settingsControlW)`）：
-// 它是这一列里唯一跟着字号缩放走的（另外几行都固定 300），所以它是最坏的一档。
+// 它是这一列里唯一跟着字号缩放走的（别的行都固定 340），所以它是最坏的一档。
 func (s *Shell) settingsDescFloor(c *ui.Context, st app.Settings) float32 {
 	need := float32(settingsDescMinW) + space.Px24 + scale.Font(c, settingsControlW)
 	if s.settingsContentInnerW(c, st) < need {
@@ -256,10 +203,13 @@ func (s *Shell) settingsDescFloor(c *ui.Context, st app.Settings) float32 {
 	return settingsDescMinW
 }
 
-// settingsContentInnerW 是设置的内容那一段（**去掉左右内边距**）的宽。
+// settingsContentInnerW 是**分组卡片里那一行**能占的宽。
 //
-// 可视区 = 窗口宽 - 侧栏宽；内容段收在 min(缩放后的上限, 可视区) 里（`MaxWidth`
-// 是上限，居中）。
+// = 窗口宽 - 侧栏宽，收在内容段上限里（`MaxWidth` 是上限，居中），再减去页面
+// 左右内边距和**分组卡片自己的左右内边距**——现在每一组设置都住在卡片里
+// （`settingGroup`，内边距 16 + 描边 1），控件列的「放不放得下」要按**卡片里面**
+// 那一格算。此前不算卡片这一层，900 宽那一档把 300 宽的下拉挤出卡片右缘
+// 14 像素（2026-10-26 实测：下拉右缘 897，卡片外缘 877）。
 func (s *Shell) settingsContentInnerW(c *ui.Context, st app.Settings) float32 {
 	winW, _ := c.Size()
 	avail := winW - s.settingsSideWidth(st)
@@ -267,7 +217,7 @@ func (s *Shell) settingsContentInnerW(c *ui.Context, st app.Settings) float32 {
 	if avail < block {
 		block = avail
 	}
-	return block - 2*settingsContentPad
+	return block - 2*settingsContentPad - 2*settingsCardInset
 }
 
 // settingsContentMaxWAt 是**这一帧**内容段的上限（**跟着系统字号缩放走**）。
@@ -296,22 +246,26 @@ func (s *Shell) settingsContentMaxWAt(c *ui.Context) float32 {
 	return scale.Font(c, settingsContentMaxW)
 }
 
-// settingsControlFitW 是控件列在**这一帧**能占的宽（上限）。
+// settingsControlFitW 是**这一帧**控件列能占的宽（上限）。
 //
 // 🔴 **为什么必须自己算**：框架的 flex **没有收缩**——一项的 `shrink` 零值是 0
 // （`mygo/ui/layout.go` 的 `resolveFlexible`：`factor = shrink × inner`，而
-// `shrink` 的零值就是 0），所以**放不下就是溢出**：控件列会被推出窗口右缘，
+// `shrink` 的零值就是 0），所以**放不下就是溢出**：控件列会被推出卡片右缘，
 // 用户看见的是半个按钮。
 //
-// 算式：控件列 ≤ 内容区宽 - 缝 - 说明列的最小宽。说明列的最小宽是**一个字**
-// （中文可以逐字换行，内容的 min-content 就是一个字宽），除非这一帧给了它
-// 更大的下限（`settingsDescFloor`）。
-//
-// ⚠️ **只有跟字号缩放走的那一族走这个算式**（分段控件，1.4 倍时 420）：固定的
-// 300 在合法配置里放得下（最窄那一档是窗口 900 + 侧栏 480，内容区 364 >
-// 300 + 24 + 一个字）。
+// 算式：控件列 ≤ 卡片里那一行（`contentW`，见 `settingsContentInnerW`）- 缝 -
+// 说明列的最小宽。说明列的最小宽是**行标题的一个字**——中文可以逐字换行，
+// min-content 就是一个字宽；说明删掉之后（#530）那一列里只剩标题，而标题的
+// 字（16）比正文（14）大，按下限取小了的那一档算，最窄的那一档就会溢出那么
+// 一两个像素（2026-10-26 在「900 + 侧栏 300 + 字号 1.4」档实测溢出 1.7）。
 func (s *Shell) settingsControlFitW(c *ui.Context, base float32) float32 {
-	descMin := scale.Font(c, scale.Size14) // 说明列的最小宽：一个字
+	// ⚠️ **contentW 没算过（0）就用基准宽**：它由 `viewSettings` 每帧算一次，
+	// 而 shadow_test 那一族**脱页直呼**控件函数（`s.pickColors(c, …)`）——没有
+	// 页面上下文就没有这份宽，此时按基准宽画，别把一行控件塌成 0。
+	if s.settings.contentW <= 0 {
+		return base
+	}
+	descMin := scale.Font(c, scale.Size16) // 说明列的最小宽：行标题的一个字
 	if s.settings.descFloor > 0 {
 		descMin = s.settings.descFloor
 	}
@@ -354,11 +308,14 @@ const settingsContentPad = space.Px28
 // 主 Tab、内容）那一层。两处此前分别是 18 和 16，各说各的。
 const settingsGroupGap = space.SettingsGroupGap
 
-// selectWidth 是设置页那两个下拉框多宽。
+// selectWidth 是设置页那几个下拉框多宽。
 //
 // ⚠️ **它就是控件列的基准宽度**（`settingsControlW`）：这一列里别的控件都是
-// 300 宽，下拉要是还按上游那个 180（`system-settings.tsx:164`），这一列的左
+// 340 宽，下拉要是还按上游那个 180（`system-settings.tsx:164`），这一列的左
 // 边缘就又落在两个位置上了——而那正是票 #235 要消灭的那件事。
+//
+// ⚠️ **实际宽度走 `settingsControlFitW`**（调用处）：窄窗口那一档按下限钳，
+// 不然 900 宽的下拉会溢出分组卡片。
 //
 // ⚠️ 代理那一页的下拉是另一个数（`proxySelectWidth`，240）：那一页是**两列**
 // 布局，不在这一列里。
@@ -403,9 +360,10 @@ var closeWindowOptions = []struct {
 // 收到 780 之后：内容那一段（去掉左右内边距）从 844 变成 724，说明列从 520
 // 变成 400，那一段空档从 **347 降到 ~230**。
 //
-// ⚠️ **只改这一个数**：控件列的基准宽（300）、说明列的下限（320）、缝（24）
-// 三样都别动——它们是票 #240 钉着的（`settingsDescMinW` / `settingsControlMinW`），
-// 动了就把「控件列不会被推出内容区」那条验收弄坏了。
+// ⚠️ **别为腾地方再动控件列**：控件列的基准宽（340）是这一列里最宽的内容
+// （主题四档）量出来的，说明列的下限（`settingsDescMinW`，只在说明存在的行
+// 生效）是 F-27 的验收；缝（24）是设计规范的数。挤说明列腾宽度的活由
+// `settingsControlFitW` 干，不要把基准宽改回去——改回去主题那排又装不下四档。
 //
 // ⚠️ **最窄那一档不受影响**：窗口 900 时可视区只有 700（900 - 侧栏 200），
 // 那一档的内容段本来就是 700（`MaxWidth` 是上限），所以 780 和 900 在那一档
@@ -431,11 +389,11 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 	t := c.Theme()
 	st := s.app.SettingsSnapshot()
 	// 设置来自更新的版本时一个字都不许写回去。与其让用户按了没反应，不如把
-	// 控件全关掉，并说清为什么——跟这一页自己下面那三档主题按钮一个道理
+	// 控件全关掉，并说清为什么——跟这一页自己下面那排主题档位一个道理
 	// （`pickTheme`）。
 	//
 	// ⚠️ **这一句原来写的是「跟顶栏那三个按钮一个道理」**——顶栏从来没有过
-	// 主题按钮组，主题那三档就在这一页自己这儿（`pickTheme`，`app/settings.go`
+	// 主题按钮组，主题那几档就在这一页自己这儿（`pickTheme`，`app/settings.go`
 	// 那边也这么写）。它是在说「别让控件看起来还能按」这件事，而举的例子举错了。
 	ro := s.app.SettingsReadOnly()
 
@@ -676,27 +634,26 @@ func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc s
 		row.ScrollIntoView()
 	}
 	row.Children(func() {
-		// ⚠️ **说明列有最小宽度**（`settingsDescMinW`）：控件那一列是定宽的，
-		// 说明这一列吃剩下的——没有这个下限，窗口一窄说明就被压扁（理由见那个
-		// 常量的注释）。
-		//
-		// ⚠️ **下限是有条件的**（`s.settings.descFloor`，每帧算一次）：内容区
-		// 放不下它的时候**不给**——那一档宁可说明列窄一点，也不能把右边那列
-		// 控件顶出窗口（`settingsDescFloor` 的注释写着整段来由）。
+		// ⚠️ **说明列有最小宽度**（`settingsDescMinW`）——但**只在这行真有说明的
+		// 时候**：#530 之后每一行的说明都是空串，空说明给下限只会白白挤占控件列
+		// （900 宽那一档实测把下拉挤出分组卡片 14 像素）。哪天说明回来了，下限
+		// 跟着回来（下限本身还是条件性的，见 `settingsDescFloor`）。
 		//
 		// 🔴 **下限是 0 的时候不许链 `MinWidth(0)`**：框架里 `minW` 一旦存在就
 		// 接管这一项的**自动最小宽**（`mygo/ui/layout.go` 的 `flexLayout`：
 		// 有 `minW` 就用它，没有才用内容的 min-content 宽）。于是
 		// `MinWidth(0)` 会把说明列的最小宽变成 **0**——中文可以逐字换行，
 		// 内容的 min-content 是一个字宽（19.6），给了 0 就连那一个字都不剩，
-		// 整行塌成 0 高，**「主题」那一行在画面上整个消失**。
+		// 整行塌成 0 高，**标题在画面上整个消失**。
 		descCol := ui.Column(c).Grow(1)
-		if s.settings.descFloor > 0 {
+		if desc != "" && s.settings.descFloor > 0 {
 			descCol = descCol.MinWidth(s.settings.descFloor)
 		}
 		descCol.Children(func() {
 			title()
-			ui.Text(c, desc).FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).Wrap()
+			if desc != "" {
+				ui.Text(c, desc).FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).Wrap()
+			}
 		})
 		control()
 	})
@@ -724,17 +681,16 @@ type segmentOption struct {
 // 18 不动。跟着缩放的话 1.4 倍时那枚图标是 25，而「跟随系统」那一档本来
 // 就最宽。
 //
-// ⚠️ **图标那一档的内边距比纯文字那一档小**（10 而不是 14）：加了图标之后
-// 「跟随系统」那一档要 18 + 6 + 56 + 20 = **100 像素**，而控件列在
-// 「窗口 900 + 侧栏拉到 480」那一档只有 300 宽——三档**等分**下来每一格
-// 只有 97.3（见 `settingsSegment` 顶上那一段），不收内边距的话那一档就
-// 装不下，标签会被裁成「跟随…」。
+// ⚠️ **图标那一档的内边距比纯文字那一档小**（10 而不是 14），图标和字之间的
+// 缝也收一道（4，flat.Button 默认是 6）：主题那排是**四档**，每一档收 2~4 像素
+// 才装得进控件列的 340——「跟随系统」98 + 其余三档各 70 + 三道缝，加行内边距
+// 正好 324。
 func segmentButton(c *ui.Context, opt segmentOption) ui.Element {
 	if opt.icon == "" {
 		return flatButton(c, opt.label)
 	}
 	t := c.Theme()
-	b := flatButton(c, "").Padding(t.Space(1.5), t.Space(2.5))
+	b := flatButton(c, "").Padding(t.Space(1.5), t.Space(2.5)).Gap(space.Px4)
 	// ⚠️ **图标和字是按钮的两个孩子**（不是一个「图标 + 字」的复合控件）：
 	// 图标的颜色从祖先的文字色继承（`mygo/ui/svg.go` 的 `coreIcon`），而
 	// 选中那一档是 `flatSolid` 铺的实心主色底 + `t.AccentText` 字——于是
@@ -777,8 +733,8 @@ func segmentButton(c *ui.Context, opt segmentOption) ui.Element {
 //
 // # 宽度跟着字号缩放走
 //
-// 「跟随系统」四个汉字最宽：1.4 倍时它连内边距要 106 像素，三个各 100 的格子
-// 装不下，选中项会被裁成「跟随系…」（评审在 1.4 倍下量到过）。所以这一族的宽度
+// 「跟随系统」四个汉字最宽：1.4 倍时它连内边距要 120 像素，四档装不下 340 的
+// 旧口径，选中项会被裁成「跟随系…」。所以这一族的宽度
 // 是 `scale.Font(c, settingsControlW)`，不是 `settingsControlW`。
 //
 // # 只读时
@@ -787,33 +743,26 @@ func segmentButton(c *ui.Context, opt segmentOption) ui.Element {
 // 实心主色底乘完框架的 50% 不透明度之后字压在上面只剩 2.6:1，只读时用户会以为
 // 「这几个选项消失了」（`pickSelected` 的注释写着整段来由）。
 //
-// # 每一档的宽度是**它自己的内容**，不是三等分
+// # 每一档的宽度是**它自己的内容**，不是等分
 //
-// ⚠️ **三等分装不下「图标 + 四个汉字」**：这一排的宽度是控件列那一格，而
-// `Grow(1)` 在框架里是**三等分**（`mygo/ui/layout.go` 的 `resolveFlexible`：
-// `Grow` 把基准宽设成 0，于是每一格分到的是**整排的等份**，不是「内容 +
-// 一份余量」）。三等分在「窗口 900 + 侧栏拉到 480 + 字号 1.4 倍」那一档
-// 是 (318.7 − 8) / 3 = **103.6**，而「跟随系统」那一档要
-// 18(图标) + 6(缝) + 72.2(字) + 20(内边距) = **116.2**——差 12.6 像素，
-// 于是那个字被裁成「跟随…」。
+// ⚠️ **等分装不下「图标 + 四个汉字」**：`Grow(1)` 在框架里是**等分**
+// （`mygo/ui/layout.go` 的 `resolveFlexible`：`Grow` 把基准宽设成 0，于是每一格
+// 分到的是**整排的等份**，不是「内容 + 一份余量」）。四档等分的话每一格只有
+// (340 − 8 − 12) / 4 = 80，而「跟随系统」那一档要 98——标签会被裁成「跟随…」。
 //
-// 以这一排**不 `Grow`**：每一档的宽度就是它自己的内容，剩下的空档由
-// `Justify(SpaceBetween)` 分到档与档之间（上游那一排也是内容宽的——
-// `system-settings.tsx` 的 Tabs 就是按内容排的）。
+// 所以这一排**不 `Grow`**：每一档的宽度就是它自己的内容，剩下的空档由
+// `Justify(SpaceBetween)` 分到档与档之间。
 //
-// ⚠️ **于是「三档等分」那个旧画法没有了**：三档的位置随内容变（多两个字
-// 的那一档就宽一点）。这和上游一致，而「控件列的左右边缘齐在一条线上」
-// 那一条仍然成立（那一排的盒子还是控件列那一格，空档分在中间）。
-//
-// ⚠️ **`Shrink(1)` 是留给放不下那一档的**：真挤不下时（字号再大），按钮
-// 收缩、标签裁成「跟随…」，而**不是**把这一排顶出内容区（框架的 flex
-// 不会收缩——`shrink` 的零值就是 0，见 `settingsControlFitW` 的注释）。
+// ⚠️ **`Shrink(1)` 是留给放不下那一档的**：真挤不下时（窗口 900 + 侧栏拉到 480
+// 那种极限档），按钮收缩、标签裁成「跟随…」，而**不是**把这一排顶出卡片
+// （框架的 flex 不会收缩——`shrink` 的零值就是 0，见 `settingsControlFitW` 的
+// 注释）。
 //
 // # w 是这一排多宽
 //
 // 0 = **填满父那一格**：「数据显示样式」那一格外面还套着一列预览（切换在上、
 // 预览在下），两样东西必须同宽，而那一格收窄时预览要跟着收窄。别的两处给
-// 控件列的基准宽。
+// 控件列的基准宽（走 `settingsControlFitW` 钳过）。
 func (s *Shell) settingsSegment(c *ui.Context, key, group string, w float32, opts []segmentOption, chosen int, ro bool, pick func(i int)) {
 	// ⚠️ **那个 `Label(group)` 是给这一排起个组名**：读屏软件要知道这几个键是一组
 	// （互斥的几档），而 `Tester.Find` 也靠它量这一排的盒子——控件列的左边是不是
@@ -824,17 +773,17 @@ func (s *Shell) settingsSegment(c *ui.Context, key, group string, w float32, opt
 	// 那一列看上去就参差了——票 #235 的 F-04）。
 	row := ui.Row(c).Key(key).Label(group).Gap(space.Px4).Justify(ui.SpaceBetween)
 	if w > 0 {
-		// ⚠️ **按内容区算宽度**（`settingsControlFitW`）：这一族的宽度跟着字号
-		// 缩放走（1.4 倍时 420），而内容区最窄的那一档（窗口 900 + 侧栏拉到
-		// 480）只有 364——不按内容区算，右边那一截会被窗口切掉。
+		// ⚠️ **按卡片里那一行算宽度**（`settingsControlFitW`）：这一族的宽度跟着
+		// 字号缩放走（1.4 倍时 476），而最窄那一档（窗口 900 + 侧栏拉到 480）的
+		// 卡内行宽只有 274——不按它算，右边那一截会被切出卡片外面。
 		row = row.Width(s.settingsControlFitW(c, w))
 	} else {
 		row = row.FillWidth()
 	}
-	// ⚠️ **下限**：行放不下说明列的最小宽度时，这一列先收窄（框架的 flex 会先
-	// 满足说明列那个 `MinWidth`）——但不低于 `settingsControlMinW`，不然「跟随
-	// 系统」那一档会被裁成半个词（那个常量的注释写着整段来由）。
-	row = row.MinWidth(settingsControlMinW).Padding(space.Px2).Radius(t.Radius + 2).
+	// ⚠️ **不给硬下限**：给 260 那种 `MinWidth` 的话，最窄那一档（放不下 260）会
+	// 回到「顶出卡片」——溢出比标签裁半坏。放不下时让 `Shrink(1)` 收缩、标签
+	// 裁半，那是刻意选的让步。
+	row = row.Padding(space.Px2).Radius(t.Radius + 2).
 		Background(t.Background.Mix(t.Text, 0.06))
 	row.Children(func() {
 		for i, opt := range opts {
@@ -855,7 +804,7 @@ func (s *Shell) settingsSegment(c *ui.Context, key, group string, w float32, opt
 	})
 }
 
-// pickTheme 是主题那三档。
+// pickTheme 是主题那四档（跟随系统 / 浅色 / 深色 / 定时）。
 //
 // 换完之后 `applyFrameTheme` 下一帧就装上新主题：改档位 → UpdateSettings →
 // invalidate → 重画，一帧之内的事。走 `applySetting` 而不是 `SetThemeMode`，
@@ -867,8 +816,13 @@ func (s *Shell) settingsSegment(c *ui.Context, key, group string, w float32, opt
 // 高亮也是它（`settings_enum.go` / `settings_font.go` / `collectionpage.go` 三处都走
 // 同一个出口）。
 //
+// ⚠️ **这一排是控件列里最宽的一份内容**：四档全带图标，「跟随系统」最宽，
+// 控件列的基准宽（`settingsControlW` = 340）就是照它量出来的——往这排里加档位
+// 或加字之前，先重算那个数（`TestTheSettingsControlColumnIsFilled` 钉着）。
+//
 // 上游 Biu 这一排是 HeroUI 的 `RadioGroup`，而 HeroUI 的 `Radio` 选中项就是
-// `bg-primary` 实心底 + `text-primary-foreground`——所以这一档是照上游的。
+// `bg-primary` 实心底 + `text-primary-foreground`——所以这一档是照上游的
+// （「定时」那一档是我们加的，上游只有前三档）。
 func (s *Shell) pickTheme(c *ui.Context, st app.Settings, ro bool) {
 	chosen := 0
 	opts := make([]segmentOption, len(themeModes))
@@ -924,8 +878,7 @@ func (s *Shell) pickThemePreset(c *ui.Context, st app.Settings, ro bool) {
 	// 四张卡把控件列平分：卡宽 = (列宽 - 三道缝) / 4。定宽而不是 Grow：Grow 的卡
 	// 宽跟着内容走，缩略图是 FillWidth，于是四张卡宽窄不一。
 	cardW := (w - 3*space.Px8) / float32(len(themePresets))
-	row := ui.Row(c).Key("setting:themePreset").Label("主题方案").Gap(space.Px8).
-		Width(w).MinWidth(settingsControlMinW)
+	row := ui.Row(c).Key("setting:themePreset").Label("主题方案").Gap(space.Px8).Width(w)
 	row.Children(func() {
 		for _, p := range themePresets {
 			if s.presetCard(c, p.preset, p.label, cardW, p.preset == st.ThemePreset, ro).Clicked() {
@@ -1026,7 +979,10 @@ func (s *Shell) pickIndexed(c *ui.Context, what, label string, labels []string, 
 		items[i] = enumItem[int]{value: i, label: l}
 	}
 	cur := chosen
-	enumSelect(c, &cur, items, label, selectWidth, settingsControlMinW, ro)
+	// ⚠️ **宽度走 `settingsControlFitW`**：定宽 340 在窄窗口那一档会把下拉挤出
+	// 分组卡片（900 宽实测溢出 14 像素）。下限 0——放不下就让下拉自己收窄，
+	// 它的标签最长不过四个字，收得动。
+	enumSelect(c, &cur, items, label, s.settingsControlFitW(c, selectWidth), 0, ro)
 	if cur != chosen {
 		pick(cur)
 	}
