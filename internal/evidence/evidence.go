@@ -231,6 +231,19 @@ var Items = []Item{
 	},
 	{
 		Category: Play,
+		// 「跑测试不出声」：macOS 的输出接的是默认输出设备（扬声器），而测试里
+		// 有一批真的会 `Play()` 的用例——不哑的话每跑一次 `go test`，喇叭就把
+		// 假解码器的台阶波、flacdec 的测试音挨个放一遍。修法是播放链最后一级在
+		// `testing.Testing()` 之下换哑的（`audio.muteDecoder`）；tap、增益、位置
+		// 都在它上游，各族断言不受影响。
+		//
+		// 🔴 **哑级必须转发 Close**：MyGo 收尾解码链靠对最后一级做 `io.Closer`
+		// 断言——不转发的话 extaf 的句柄全漏（`handles_test.go` 那两条盯着）。
+		Spec:  "go test 之下播放链最后一级是哑的（测试不出声），且关资源的链条不断",
+		Tests: []string{"TestTheLastStageIsMutedWhenTestsRun"},
+	},
+	{
+		Category: Play,
 		// 播放模式四档（顺序/循环/随机/单曲，BMG-47 A5）。「放完下一首是哪首」
 		// 这一句是**四档各有一条**——顺序停在队尾、循环绕回队尾、随机真的打乱、
 		// 单曲一步都不挪，缺一档就有一档没人管，而缺了的那一档在界面上和别的

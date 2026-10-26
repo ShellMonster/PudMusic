@@ -124,7 +124,7 @@ func New(d mygoaudio.Decoder) *Player {
 	ed := &errorDecoder{Decoder: d}
 	tp := newTap(ed)
 	vs := newVarispeed(tp)
-	return &Player{dec: ed, tap: tp, vs: vs, play: mygoaudio.NewPlayer(vs), vol: 1, gain: 1}
+	return &Player{dec: ed, tap: tp, vs: vs, play: mygoaudio.NewPlayer(maybeMuted(vs)), vol: 1, gain: 1}
 }
 
 // CloserReadSeeker 是「既是字节来源、又必须被一起关掉」的那一类东西。
