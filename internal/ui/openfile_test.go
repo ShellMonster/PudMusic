@@ -720,3 +720,52 @@ func TestALaunchArgThatTheFrameworkDeliversIsNotHandledTwice(t *testing.T) {
 		t.Errorf("队列里有 %d 首——这一条框架会交给 OnOpenFile，我们再处理一遍就是两份", got)
 	}
 }
+
+// TestTheLaunchArgKeepsTheWindowsDriveLetter 钉住「Windows 的盘符**不是
+// scheme**」。
+//
+// 🔴 **这一条断的是这一票在 Windows 上最要紧的那一半**：资源管理器双击
+// 一个音频交给本应用的命令行**就是** `C:\歌.flac` 那种写法，而
+// `url.Parse` 把它认成 **scheme `c`**（一个字母）、path 是空的
+// （`C:\歌.flac` → `scheme="c" opaque="\歌.flac"`；`C:/歌.flac` →
+// `scheme="c" path="/歌.flac"`）。
+//
+// 所以**只按 `u.Scheme != "file"` 判的话，整个 Windows 的文件关联这一档
+// 会被自己扔掉**——而那正是这一票要治的那个入口（症状是「双击一个音频，
+// 应用起来了而什么也没放」，而且一句报错都没有）。
+//
+// ⚠️ **判据照抄框架那一段**（`mygo@v0.6.4` `deeplink.go:87` 的
+// `urlArgs`）：scheme **只有一个字母**时**当作路径**——Windows 的盘符是
+// 一个字母，而真正的 scheme 至少两个（`file`、`biu`）。
+func TestTheLaunchArgKeepsTheWindowsDriveLetter(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want string
+	}{
+		// Windows 资源管理器交给我们的那两种写法。
+		{`C:\歌.flac`, `C:\歌.flac`},
+		{`C:/歌.flac`, `C:/歌.flac`},
+		// ⚠️ **别的 scheme 仍然不认**：`biu://` 那一档是链接，不是文件。
+		{`biu://settings`, ``},
+	}
+	for _, c := range cases {
+		got, ok := launchArgPath(c.raw, "")
+		if c.want == "" {
+			if ok {
+				t.Errorf("launchArgPath(%q) 认成了一个路径（%q）——"+
+					"`biu://` 那一档是链接，对它说「文件放不了」是对着"+
+					"一件用户没做的事报错", c.raw, got)
+			}
+			continue
+		}
+		if !ok {
+			t.Errorf("launchArgPath(%q) 不认——而资源管理器交给我们的命令行"+
+				"**就是**这种写法，于是整个 Windows 的文件关联这一档"+
+				"被自己扔掉了", c.raw)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("launchArgPath(%q) = %q，want %q", c.raw, got, c.want)
+		}
+	}
+}

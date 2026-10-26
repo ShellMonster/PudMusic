@@ -4115,6 +4115,10 @@ var Items = []Item{
 			"TestTheSecondInstanceArgsAreCheckedForTheOnesTheFrameworkDrops",
 			// 框架会交的那些我们不重复处理（重复了队列里两份同一首歌）。
 			"TestALaunchArgThatTheFrameworkDeliversIsNotHandledTwice",
+			// ⚠️ **Windows 的盘符不是 scheme**：`C:\歌.flac` 被 `url.Parse`
+			// 认成 scheme `c`，而按 `u.Scheme != "file"` 判的话**整个
+			// Windows 的文件关联这一档会被自己扔掉**。
+			"TestTheLaunchArgKeepsTheWindowsDriveLetter",
 		},
 	},
 	{

@@ -384,17 +384,41 @@ func launchFileCandidates(args []string, workingDir string) []string {
 // scheme 是 `c`——**一个字母**。框架的 `urlArgs` 有同一份判断
 // （`len(scheme) > 1`，`deeplink.go:87`），所以这里照抄：scheme 只有一个
 // 字母时**当作路径**。
+//
+// 🔴 **而「只有一个字母」这一条必须真的判，不能靠 `u.Scheme != "file"`
+// 一句带过**：Windows 上资源管理器交给我们的命令行**就是**
+// `C:\歌.flac` 那种写法，而 `url.Parse` 把它认成 scheme `c`、path 是空的
+// （`C:\歌.flac` → `scheme="c" opaque="\歌.flac"`；`C:/歌.flac` →
+// `scheme="c" path="/歌.flac"`）。所以**只按 `u.Scheme != "file"` 判的话，
+// 整个 Windows 的文件关联这一档会被自己扔掉**——而那一档正是这一票要治的
+// 那个入口。
+//
+// ⚠️ **判据和框架那一段一模一样**：scheme **只有一个字母**时当作路径
+// （`len(scheme) > 1` 那个条件，见 `deeplink.go:87`）——Windows 的盘符是
+// 一个字母，而真正的 scheme 至少两个（`file`、`biu`）。
 func launchArgPath(raw string, workingDir string) (string, bool) {
 	p := raw
 	if u, err := url.Parse(raw); err == nil && u.Scheme != "" {
-		if u.Scheme != "file" {
+		// ⚠️ **Windows 的盘符**：scheme 只有一个字母时**当作路径**
+		//（框架的 `urlArgs` 有同一份判断，`deeplink.go:87`）。
+		if u.Scheme != "file" && len(u.Scheme) > 1 {
 			// 别的 scheme（`biu://…`）：框架自己会投给 `OnOpenURL`，而我们要
 			// 说的是「文件放不了」——**不是**这一件事。
 			return "", false
 		}
-		p = filepath.FromSlash(u.Path)
-		if runtime.GOOS == "windows" {
-			p = strings.TrimPrefix(p, `\`) // file:///C:/x
+		if u.Scheme == "file" {
+			p = filepath.FromSlash(u.Path)
+			if runtime.GOOS == "windows" {
+				p = strings.TrimPrefix(p, `\`) // file:///C:/x
+			}
+		} else {
+			// 盘符那一档：**用原样那个参数**，不用 `u.Path`（那是空的或者
+			// 少了盘符的），也不用 `u.Opaque`（那截是 `\歌.flac`，少了盘符）。
+			//
+			// ⚠️ **斜杠要归一**：`C:/歌.flac` 在 Windows 上是同一个路径的
+			// 另一种写法，而 `filepath` 那边的分隔符是 `\`——不换的话
+			// `os.Stat` 找不到它。
+			p = filepath.FromSlash(raw)
 		}
 	}
 	if !filepath.IsAbs(p) && workingDir != "" {
