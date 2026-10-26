@@ -3987,4 +3987,57 @@ var Items = []Item{
 			"TestAddingASongOutsideRandomModeSaysNothing",
 		},
 	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：用户右键封面按了「复制歌曲信息」，
+		// 什么都没发生——而他以为复制好了（按下去没有报错、没有弹窗、没有声音）。
+		// 而「复制封面」那一档更坏：写进去的是**空字节或者一段坏字节**，用户
+		// 在别的应用里粘出来的是**一张打不开的图**。
+		//
+		// 而**没有封面时按不动那一项、也不说为什么**是同一种坏处：用户以为
+		// 程序坏了。
+		Category: Platform,
+		// 票 #556（issue #556）。
+		//
+		// ⚠️ **这一组量的是「剪贴板里到底有什么」**，不是「调了哪个函数」——
+		// 后者是实现，前者是用户看见的东西（文本要逐字，图要能解开）。
+		Spec: "当前这一首的信息能复制成可读文本（歌名 / UP 主 / 时长 / BVID / 链接 / 路径，**没有的字段整行不出现**，没有多余前缀，歌名和界面上摆的是同一个）；当前封面能复制成一张**能解开的 PNG**；**没有封面时那一项按不动且说清楚为什么**，也不往剪贴板里写图；复制失败有**看得见的反馈**；键盘（菜单键 / Shift+F10）够得着这一份菜单",
+		Tests: []string{
+			// 文本：逐字（**多一个前缀用户粘进聊天框还得手删一行**）。
+			"TestTheSongInfoTextHasEveryField",
+			// 文本：**没有的字段整行不出现**（留一行空的「UP主：」更难读）。
+			"TestTheSongInfoTextOmitsTheFieldsThatAreNotThere",
+			// 文本：**音频 id 不是 BVID**（报错了用户拿着它搜会搜到别的东西）。
+			"TestTheSongInfoTextDoesNotCallAnAudioIDSomethingItIsNot",
+			// 文本：歌名**和界面上摆的是同一个**（清洗过的那一份）。
+			"TestTheSongInfoTextUsesTheNameOnScreen",
+			// 文本：没有多余前缀。
+			"TestTheSongInfoTextHasNoExtraPrefix",
+			// 菜单：那两项**真的在菜单里**（少建一项那一项就永远点不到）。
+			"TestTheCoverMenuOffersTheTwoCopyActions",
+			// 走菜单按下去，文本**真的进了剪贴板**。
+			"TestChoosingCopySongInfoPutsTheTextOnTheClipboard",
+			// 封面：剪贴板里那张**能被解开**（别的应用要能贴）。
+			"TestCopyCoverPutsAPNGOnTheClipboard",
+			// 封面：**交出去的是原图**（不是缓存里缩到 768 的那一份），
+			// 而且**EXIF 摆正了**（不摆正的话交出去的是一张横躺着的图）。
+			"TestSourceGivesTheOriginalBytes",
+			"TestSourceImageIsNotScaled",
+			"TestSourceImageStraightensTheEXIFOrientation",
+			// 摆正的结果**和框架自己摆的是同一个**（对着框架比，而不是对着
+			// 一份抄过来的映射比）。
+			"TestTheOrientationMatchesTheFrameworksOwn",
+			// 取不到的时候**报错**（而不是给一段空字节——空字节粘出来
+			// 是一张打不开的图）。
+			"TestSourceOnAnEmptyURLSaysSo",
+			"TestSourceAfterCloseSaysSo",
+			// 没有封面：**不写图**，那一项是灰的，而且说清楚为什么。
+			"TestTheCopyCoverItemIsGreyWithoutACover",
+			"TestCopyCoverWithoutACoverWritesNothing",
+			// 失败**不静默**：文本那一档和封面那一档各一条。
+			"TestAFailedCopySaysSo",
+			"TestAFailedCoverCopySaysSo",
+			// 键盘：Tab 走到封面上，菜单键能开出这一份菜单。
+			"TestTheMenuKeyOpensTheCopyMenuOnTheCover",
+		},
+	},
 }

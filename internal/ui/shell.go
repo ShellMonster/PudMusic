@@ -165,6 +165,22 @@ type Shell struct {
 	// 一个桩，而这一栏是**每扇窗一份**的。
 	openExternal func(url string) error
 
+	// writeClipboardText 是「把一段文字放进剪贴板」的那一下。
+	//
+	// ⚠️ **默认是 `systemWriteClipboardText`，而无头 Tester 里那一句会 panic**
+	// （`mygo.Clipboard.WriteText` 里的 `needsApp` 见到 `App.Run` 没跑过就直接
+	// panic，见 `mygo/app.go:128`）——所以**测试会把它换成记下内容的桩**。
+	// 这一栏就是那个桩的插口。
+	//
+	// ⚠️ **别改成包级变量**：同一个理由——两个窗口各有一份。
+	writeClipboardText func(text string) error
+
+	// writeClipboardImage 是「把一张 PNG 放进剪贴板」的那一下。
+	//
+	// ⚠️ **同一份顾虑**（无头 Tester 里 `mygo.Clipboard.WriteImage` 会 panic），
+	// 而且它**会验一遍是不是 PNG**（`mygo/modules.go:184`）——不是 PNG 就返回错。
+	writeClipboardImage func(png []byte) error
+
 	// images 是网络封面缓存。整个窗口共用一份；迷你窗口借的是主窗口那一份
 	// （`adoptShared`），因为落盘的磁盘缓存目录只能有一个 writer/一本账，
 	// 两个实例同时写同一个目录会各算各的字节数，上限就守不住了。

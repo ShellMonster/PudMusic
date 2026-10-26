@@ -1,0 +1,314 @@
+// 复制当前这一首的信息和封面。
+//
+// # 两个动作
+//
+//	复制歌曲信息	把这一首的可读信息放进剪贴板（纯文本）
+//	复制封面		把当前封面作为 PNG 放进剪贴板
+//
+// 入口是**当前封面上的右键菜单**（播放条上那一张、满屏里那一张共用同一份
+// 菜单，见 `viewCopyMenu`）——而**不是**在播放条上再摆一枚键：
+//
+//   - 播放条左边那一列的宽度是被**钉死的**（`playbarLeftMinW` = 244），加一枚
+//     键就要动那个数，而那个数一动，窄窗口下歌名的宽度跟着变（那一处有
+//     `TestTheLeftBlockIsThreeSegments` 和 `playbar_layout_test.go` 钉着）。
+//   - 满屏顶栏那一组是**贴着歌名**摆的（上游 `space-x-2`，齿轮紧跟歌名，
+//     8 像素——`TestTheFullPlayerGearSitsRightAfterTheTitle` 钉着），加一枚键要
+//     重算那一组的构图。
+//
+// 所以走右键菜单：**不碰任何一处布局**，也就没有视觉审查那一档的负担。
+//
+// # 为什么走系统原生菜单
+//
+// 和列表行菜单、队列抽屉行菜单一样（见 `widgets/list/menu.go` 的文件头）：
+// 验收要的是「系统原生样式、键盘方向键能导航」，只有系统菜单免费给这两样。
+//
+// # 键盘 / 读屏怎么够得着
+//
+// 封面那一层是**可聚焦**的（`.Focusable()`），于是：
+//
+//   - **菜单键 / Shift+F10** 在焦点落在封面上时开出这一份菜单（框架的
+//     `menuKey` 找的是「焦点链上最里层那个带菜单的元素」，见
+//     `mygo/ui/menu.go` 的 `menuTarget`）；
+//   - 读屏软件念得到那一层（`.Label(...)` 给了它一个名字）。
+//
+// ⚠️ **别给封面那一层再补一次 `Label("当前封面")`**：里面那张图已经有一个
+// 了（`imgcache.View...(...).Label("当前封面")`），补第二个会让读屏念两遍。
+// 这一层用的是**另一个名字**（「当前封面的操作」），说的是「这一层能干什么」。
+package ui
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"image/png"
+	"strings"
+	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
+)
+
+// 菜单里那两项的名字。
+//
+// ⚠️ **它们是菜单项的字**，而菜单项是系统画的——读屏软件念的就是这两个字，
+// 所以它们自己得说得清（不能是「复制」「复制图」这种）。
+const (
+	copyInfoLabel  = "复制歌曲信息"
+	copyCoverLabel = "复制封面"
+)
+
+// copyNoCoverNote 是**没有封面时**在菜单末尾说的那句话。
+//
+// ⚠️ **按不动而不说为什么等于让用户猜**（同一句话在 `widgets/list/menu.go`
+// 的 `note` 那一栏写着）。所以「复制封面」那一项按不动，而末尾补一句说明。
+const copyNoCoverNote = "这一首没有封面，复制不了"
+
+// copyCoverActionsLabel 是封面那一层给读屏软件的名字。
+//
+// ⚠️ **不能叫「当前封面」**：里面那张图已经有一个了（`imgcache.View…`），而
+// 读屏会把两个名字都念一遍——用户听到的是「当前封面，当前封面的操作」。
+const copyCoverActionsLabel = "当前封面的操作"
+
+// viewCopyMenu 建当前这一首的「复制」菜单。播放条上那一张封面和满屏里那一张
+// 共用它（两处的入口是同一个动作）。
+//
+// ⚠️ **每一项都要 `m.Item` 一遍**：菜单是这趟全部建出来的，只有被 `Chosen`
+// 的那一项为 true——少建一项，那一项就永远点不到（`mygo/ui/menu.go` 的
+// `MenuItem.Chosen`）。
+//
+// ⚠️ **st 是这一帧的那一份**（外面画这一块时读出来的），不是现读快照：菜单是
+// **弹出那一刻**才建的，而现读快照拿到的是**弹出之后**的样子——那一帧可能已经
+// 换歌了（菜单里的歌名和用户右键时看到的那一首对不上）。
+func (s *Shell) viewCopyMenu(st app.State, m *ui.Menu) {
+	hasCover := st.CoverURL != ""
+
+	// 「复制歌曲信息」什么时候都摆得出来：本地文件也有歌名和路径。
+	if m.Item(copyInfoLabel).Chosen() {
+		s.copySongInfo(st)
+		return
+	}
+	// 「复制封面」没有封面时按不动（灰的），末尾再补一句为什么。
+	if m.Item(copyCoverLabel).Disabled(!hasCover).Chosen() {
+		s.copyCover(st)
+		return
+	}
+	if !hasCover {
+		m.Item(copyNoCoverNote).Disabled(true)
+	}
+}
+
+// songInfoText 是「复制歌曲信息」放进剪贴板的那段文本。
+//
+// # 格式是**稳定的**（票面要求）
+//
+//	歌名：<歌名>
+//	UP主：<UP 主 / 歌手>		（这一项没有就不出现）
+//	时长：<m:ss>			（这一项没有就不出现）
+//	BVID：<BV...>			（在线才有）
+//	链接：<https://…>		（在线才有）
+//	路径：<本地路径>			（本地文件才有）
+//
+// ⚠️ **每一行是「标签：值」**：用户粘到聊天框里之后一眼看得出哪一行是什么，
+// 而**不粘进任何应用的结构化字段**（那是另一个需求，那时要升级到
+// `Clipboard.Write` + `Flush`，见文件末尾那一节）。
+//
+// ⚠️ **没有的字段整行不出现**，不是留空：留一行「UP主：」比不出现更难读。
+//
+// ⚠️ **歌名用清洗过的那一份**（`title.Clean`）：界面上摆的是清洗后的歌名
+// （去掉了「【4K】」「官方MV」那些视频痕迹），而**复制出去的要是同一个**——
+// 复制出来是「【4K修复】晴天」而界面上写着「晴天」，那是两首歌。
+func songInfoText(st app.State) string {
+	var b strings.Builder
+	write := func(label, value string) {
+		if value == "" {
+			return
+		}
+		b.WriteString(label)
+		b.WriteString("：")
+		b.WriteString(value)
+		b.WriteString("\n")
+	}
+	write("歌名", title.Clean(st.Title).Title)
+	write("UP主", st.Artist)
+	if st.Duration > 0 {
+		write("时长", formatSongDuration(st.Duration))
+	}
+	// BVID 和链接：从 B 站地址里拆（`app.BiliLink` 的那两种形状：投稿 / 音频）。
+	bvid, link := splitBiliLink(st.BiliURL)
+	write("BVID", bvid)
+	write("链接", link)
+	write("路径", st.Path)
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// splitBiliLink 从 B 站地址里拆出 BVID 和地址本身。
+//
+// ⚠️ **本地文件没有这一对**，而**没有稿件身份的在线条目也没有**（连同
+// `BiliLink` 那个函数一样，见 `app/unplayable.go`）。拆不出来就是空串，
+// 而空串那一行整行不出现。
+//
+// ⚠️ **音频条目（`audio/au<sid>`）拆不出 BVID**：那一串是**音频 id**（sid），
+// 不是稿件号（BVID）。把它当 BVID 报出去是**说错了**——用户拿着「au123」
+// 去 B 站搜，搜出来的是别的东西。所以那一档只报链接，不报 BVID。
+func splitBiliLink(url string) (bvid, link string) {
+	if url == "" {
+		return "", ""
+	}
+	link = url
+	const videoPrefix = "https://www.bilibili.com/video/"
+	const audioPrefix = "https://www.bilibili.com/audio/au"
+	switch {
+	case strings.HasPrefix(url, videoPrefix):
+		bvid = strings.TrimPrefix(url, videoPrefix)
+	// ⚠️ **音频那一档不拆 BVID**（理由见上面那段注释）。
+	case strings.HasPrefix(url, audioPrefix):
+	}
+	return bvid, link
+}
+
+// formatSongDuration 把时长写成 `m:ss`（超过一小时的是 `h:mm:ss`）。
+//
+// ⚠️ **分不补零、秒补零**（`3:05` 不是 `03:05`）：那一份是给人读的。
+func formatSongDuration(d time.Duration) string {
+	total := int(d.Round(time.Second).Seconds())
+	if total < 0 {
+		total = 0
+	}
+	h, m, sec := total/3600, (total%3600)/60, total%60
+	if h > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", h, m, sec)
+	}
+	return fmt.Sprintf("%d:%02d", m, sec)
+}
+
+// copySongInfo 把这一首的信息放进剪贴板。
+//
+// ⚠️ **失败了要说得出来**（票面要求「不静默失败」）：剪贴板写失败就弹一句
+// 提示，而不是什么都不做。
+func (s *Shell) copySongInfo(st app.State) {
+	text := songInfoText(st)
+	if text == "" {
+		s.addToast("这一首没有可复制的信息", notice.Warning)
+		return
+	}
+	write := s.writeClipboardText
+	if write == nil {
+		write = systemWriteClipboardText
+	}
+	if err := write(text); err != nil {
+		s.addToast("复制不了歌曲信息："+err.Error(), notice.Danger)
+		return
+	}
+	s.addToast("歌曲信息已复制", notice.Success)
+}
+
+// copyCover 把当前封面编码成 PNG 放进剪贴板。
+//
+// # 为什么在**回调里**才编码
+//
+// 编码是 CPU 活（一张 1920×1080 的封面编成 PNG 要几百毫秒），而这一段是
+// 用户**按下去之后**才跑的——不在每一帧里跑。菜单回调本身就在用户按下的
+// 那一帧（框架会在选中的那一帧重跑一遍菜单的建树函数），所以天然只有一次。
+//
+// ⚠️ **取字节 + 解码 + 编码都在后台**：这一段要下网络（封面可能还没在盘上）
+// 和解一张图，在主线程上做会把界面冻住。所以这一整个动作跑在后台 goroutine
+// 上，完了调 `addToast`（它自己带锁）和 `wake.invalidate`（铁律三）。
+func (s *Shell) copyCover(st app.State) {
+	if st.CoverURL == "" {
+		// 这一格按理按不到（菜单里那一项是灰的）。留着是为了「菜单项按得动
+		// 但那时封面没了」这一种——直接说清楚，不静默。
+		s.addToast(copyNoCoverNote, notice.Warning)
+		return
+	}
+	url := st.CoverURL
+	go s.copyCoverInBackground(url)
+}
+
+// copyCoverInBackground 是「复制封面」的后台那一半。
+func (s *Shell) copyCoverInBackground(url string) {
+	data, err := s.coverPNG(url)
+	if err != nil {
+		s.addToast("复制不了封面："+err.Error(), notice.Danger)
+		s.wake.invalidate()
+		return
+	}
+	write := s.writeClipboardImage
+	if write == nil {
+		write = systemWriteClipboardImage
+	}
+	if err := write(data); err != nil {
+		s.addToast("复制不了封面："+err.Error(), notice.Danger)
+		s.wake.invalidate()
+		return
+	}
+	s.addToast("封面已复制", notice.Success)
+	s.wake.invalidate()
+}
+
+// coverPNG 拿这张封面的 **PNG 字节**。
+//
+// # 为什么不能直接用缓存里那一份
+//
+// 缓存里存的是**解码之后**的 `*ui.Bitmap`（缩到最长边 768），而 `ui.Bitmap`
+// 的像素**读不回来**（`mygo/ui/bitmap.go`：只有 Pixelated / Update / Size）。
+// 所以要 PNG 就得从**原始字节**重新走一遍：解 → 编。
+//
+// ⚠️ **EXIF 旋转的那一张**：界面上摆正了（框架的 `ui.DecodeBitmap` 按 EXIF
+// 摆正），而这里从原始字节重新解的时候也得**自己摆正**，否则复制出去的是一张
+// 横躺着的图。摆正那一段在 `imgcache` 里（`SourceImage`：那边有 EXIF 的解析
+// 和全部解码器）。
+func (s *Shell) coverPNG(url string) ([]byte, error) {
+	if s.images == nil {
+		return nil, errors.New("没有封面缓存")
+	}
+	img, err := s.images.SourceImage(url)
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// systemWriteClipboardText 是生产那一档：把文本放进系统剪贴板。
+//
+// ⚠️ **无头 Tester 里调它会 panic**（`mygo.Clipboard.WriteText` 里的
+// `needsApp` 见到 `App.Run` 没跑过就直接 panic，见 `mygo/app.go:128`）——
+// 所以界面上走接缝（`Shell.writeClipboardText` / `Shell.writeClipboardImage`），
+// 测试把它换成记下内容的桩。
+func systemWriteClipboardText(text string) error {
+	mygo.Clipboard.WriteText(text)
+	return nil
+}
+
+// systemWriteClipboardImage 是生产那一档：把 PNG 放进系统剪贴板。
+//
+// ⚠️ **`WriteImage` 自己会验一遍是不是 PNG**（`mygo/modules.go:184`），不是
+// PNG 就返回错——所以这一层传上去的必须真的是 PNG（`coverPNG` 保证了）。
+func systemWriteClipboardImage(data []byte) error {
+	return mygo.Clipboard.WriteImage(data)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 升级到「一次复制同时给文本 + HTML + 图片」的时候要动的那一处
+//
+// 🔴 **首版只调 `WriteText` / `WriteImage`**（票面钉的）：一次复制给一样东西
+// 的时候，两个 API 就够了。
+//
+// 而**将来**如果要用「一次复制同时带文本、HTML 和图片」（很多应用粘进富文本
+// 编辑器时要三样都在），那就得换成 `mygo.Clipboard.Write` + `Flush`：
+//
+//	mygo.Clipboard.Write(transfer.New(
+//		transfer.NewItem(
+//			transfer.Bytes(transfer.PNG, pngBytes),
+//			transfer.Bytes(transfer.Text, []byte(text)),
+//		)))
+//
+// 那一档**不要现在做**：它要自己管一份带锁的「这趟复制的内容」（多 goroutine
+// 同时复制时要排队），而这一版一个用户只会在一个地方按一下。
+// ─────────────────────────────────────────────────────────────────────────────

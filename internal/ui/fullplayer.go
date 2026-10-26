@@ -974,7 +974,16 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 		x = area.X + area.W - fullStagePadX - w
 	}
 	box := ui.Box(c).Key("full-cover").
-		Absolute().Left(x).Top(area.Y+(area.H-h)/2).Size(w, h)
+		Absolute().Left(x).Top(area.Y+(area.H-h)/2).Size(w, h).
+		// 🔴 **可聚焦**：没有它，键盘（菜单键 / Shift+F10）**够不着**这一份
+		// 菜单——框架的 `menuKey` 找的是「焦点链上最里层那个带菜单的元素」
+		// （`mygo/ui/menu.go` 的 `menuTarget`），而焦点链上得先有这一层。
+		//
+		// ⚠️ **名字不能叫「当前封面」**：里面那张图已经有一个了
+		// （`imgcache.View…(...).Label("当前封面")`），读屏会把两个都念一遍。
+		Focusable().
+		Label(copyCoverActionsLabel).
+		ContextMenu(func(m *ui.Menu) { s.viewCopyMenu(st, m) })
 	if hidden {
 		box = box.Cursor(ui.CursorNone)
 	}

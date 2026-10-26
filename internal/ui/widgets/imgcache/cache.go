@@ -30,6 +30,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
 	"io"
 	"log"
 	"net/http"
@@ -685,6 +686,81 @@ func (c *Cache) download(ctx context.Context, url string) ([]byte, error) {
 	}
 
 	return io.ReadAll(io.LimitReader(resp.Body, maxImageBytes))
+}
+
+// Source 拿这张图的**原始字节**（下回来的那份，不是解码缩放之后的那份）。
+//
+// # 为什么要有这一条
+//
+// `ui.Bitmap` 的像素**读不回来**（`mygo/ui/bitmap.go`：只有 Pixelated /
+// Update / Size 三个方法），而界面上的封面正是拿字节解出来的那个 Bitmap。
+// 所以要把封面**原样**交出去（比如放进剪贴板），只有两条路：
+//
+//	① 重新下一遍 —— 浪费一次网络往返，还可能拿到的和界面上那一张不是同一份
+//	② 留住原始字节 —— 就是这一条
+//
+// # 它怎么找字节
+//
+// 先问磁盘缓存（和 `fetch` 同一个顺序）：同一张图启动第二次不用再打图床。
+// 盘上没有就下一次——**和 `fetch` 走的是同一个 `download`**（Referer、UA、
+// 字节上限都在那儿）。
+//
+// ⚠️ **它不占在途名额**（和 `fetch` 同一个理由）：这一条是**用户明确要**的
+// 一次性动作，不是一次滚列表时几十张图一起要。
+//
+// ⚠️ **它不记进 LRU**：内存缓存记的是「解码之后占多少字节」，而这一条给的
+// 是原始字节（压缩过的），两者不同量纲，混进同一本账里上限就废了。
+//
+// ⚠️ **不落盘的那一份不缓存**：拿到的字节直接交给调用方，调用方用完就扔。
+func (c *Cache) Source(url string) ([]byte, error) {
+	if url == "" {
+		return nil, errors.New("imgcache: 没有地址")
+	}
+	if c.closed.Load() {
+		return nil, ErrClosed
+	}
+	// 盘上那份：和 `fetch` 一样先问盘（读盘只该由后台 goroutine 调，这一处
+	// 的调用方在后台，见界面层那一处注释）。
+	if name := c.diskName(url); name != "" {
+		if data, ok := c.disk.open(name); ok {
+			return data, nil
+		}
+	}
+	data, err := c.download(c.ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+// SourceImage 拿这张图**摆正之后**的那一份（`image.Image`）。
+//
+// # 为什么要有这一条
+//
+// 要把封面**原样交出去**（比如放进剪贴板）只有两条路：
+//
+//	① 重新下一遍 —— 浪费一次网络往返，还可能拿到的和界面上那一张不是同一份
+//	② 留住原始字节 —— `Source` 就是这一条
+//
+// 而从字节到「一张能直接编码的图」中间还差一步：**EXIF 摆正**。界面上摆的是
+// 摆正后的那一张（框架的 `ui.DecodeBitmap` 按 EXIF 转），而从原始字节重新解的
+// 时候得**自己转**，否则交出去的是一张横躺着的图。
+//
+// ⚠️ **摆正这一段放在这个包里**：EXIF 的解析和四种格式的解码器注册都在这儿
+// （`scale.go` 顶上那几个 `_ "image/..."` 导入），在外面重写一遍就是两份会走偏
+// 的实现。
+//
+// ⚠️ **不缩放**：这一条给的是**原图**，不是存进缓存的那一份（那个缩到最长边
+// 768）。剪贴板要的是原图。
+//
+// ⚠️ **只该由后台 goroutine 调**：读盘和下载都在这一条里，而读盘只该由后台调
+// （见 `disk.go` 的线程模型）。
+func (c *Cache) SourceImage(url string) (image.Image, error) {
+	raw, err := c.Source(url)
+	if err != nil {
+		return nil, err
+	}
+	return decodeOriented(raw)
 }
 
 // diskName 是这个 url 在磁盘缓存里的文件名，空表示不落盘。
