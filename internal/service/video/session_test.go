@@ -60,7 +60,18 @@ func TestSessionDeliversFramesInOrderAcrossSegments(t *testing.T) {
 	n := 0
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) && last < 3500*time.Millisecond {
-		f, ok := s.Poll(time.Hour)
+		// ⚠️ **问的位置要跟着帧走，不能问「一小时之后」**。
+		//
+		// `Poll` 里有一段「离上次 seek 超过 resyncGap（1.5 秒）就重新对时」：而
+		// 「一小时之后」这个位置**永远在** `s.head+resyncAhead` 前面 —— 于是那一段
+		// 一到（机器一忙，第一帧晚 1.5 秒就到）就会 seek 到一小时处（视频早就
+		// 放完了）→ 那一趟直接结束 → **一帧都拿不到**：
+		//
+		//	stopped at -1ns after 0 polls
+		//
+		// 问「上一帧 + 100 毫秒」就不会触发它（那个位置永远落在 `s.head` 后面
+		// 一点点），而这一条要量的「帧按顺序来」一点没变。
+		f, ok := s.Poll(last + 100*time.Millisecond)
 		if !ok {
 			time.Sleep(5 * time.Millisecond)
 			continue
