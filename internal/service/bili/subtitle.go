@@ -1,17 +1,11 @@
-// B 站那一份字幕：它就**藏在取流响应里**。
+// B 站那一份字幕：来自播放器信息接口 `/x/player/wbi/v2`。
 //
-// # 为什么不用另外的接口
+// # 🔴 不在取流响应里
 //
-// 上游 Biu 是从**取流那一趟**的响应里拿字幕的（`src/components/lyrics/get-lyrics.ts`
-// 的 `getLyricsByBili`）：
-//
-//	const res = await getWebPlayerInfo(params)      // ← 就是取流那一趟
-//	const subTitleUrl = res?.data?.subtitle?.subtitles?.[0]?.subtitle_url
-//	                  || res?.data?.subtitle?.subtitles?.[0]?.subtitle_url_v2
-//
-// 而 Biu 那个 `getWebPlayerInfo` 打的是 `/x/player/wbi/playurl`——**和我们取流
-// 打的是同一个接口**。所以不需要多发一次请求：同一趟响应里已经带着它了，我们
-// 以前只是没读那一段（`playurlData` 只声明了三个字段，见 `stream.go`）。
+// 上游 Biu 的 `getLyricsByBili` 调的 `getWebPlayerInfo`（`src/service/web-player.ts`）
+// 打的是 `/x/player/wbi/v2`，**不是**取流用的 `playurl`。playurl 的响应里基本没有
+// `subtitle`，从那里读字幕永远是空的（以前就是这个错，B 站字幕一份都没装上过）。
+// 所以 `Client.SubtitleURLs` 单独问这个接口，登录后会带 AI 字幕。
 //
 // # 地址是**协议相对**的
 //
@@ -49,6 +43,9 @@ package bili
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -133,9 +130,21 @@ func (c *Client) SubtitleURLs(ctx context.Context, bvid, cid string) ([]string, 
 		// 不是网络错也不是重试能救的：调用方没给全。
 		return nil, nil
 	}
-	d, err := c.fetchPlayurl(ctx, bvid, cid, VideoQualityUnknown)
+	// 字幕不在取流响应里，要问播放器信息接口（上游 `web-player.ts` 的
+	// `/x/player/wbi/v2`）；登录后会带 AI 字幕。
+	raw, err := c.Do(ctx, Call{
+		Method: "GET",
+		URL:    c.hostAPI + "/x/player/wbi/v2",
+		Query:  url.Values{"bvid": {bvid}, "cid": {cid}},
+		WBI:    true,
+		Buvid:  true,
+	})
 	if err != nil {
 		return nil, err
 	}
-	return subtitleURLsOf(d), nil
+	var d playurlData
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return nil, fmt.Errorf("bili: 播放器信息的返回读不懂：%w", err)
+	}
+	return subtitleURLsOf(&d), nil
 }

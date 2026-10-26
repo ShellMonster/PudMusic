@@ -199,13 +199,13 @@ func TestAnAddressThatIsNotAnAddressIsIgnored(t *testing.T) {
 	}
 }
 
-// TestSubtitleURLsAsksTheSameEndpoint 盯「音乐库那一路问字幕」用的是**同一个**
-// 取流接口。
+// TestSubtitleURLsAsksThePlayerInfoEndpoint 盯字幕地址是问播放器信息接口
+// `/x/player/wbi/v2` 取的（playurl 响应里没有字幕，以前读那里永远是空的）。
 //
 // ⚠️ 音乐库的取流走的是另一个接口（`/audio/music-service-c/url`），那个返回里
 // **没有**字幕——所以要问它背后那个投稿一次（同一个取流接口，只看 `subtitle`
 // 那一段）。
-func TestSubtitleURLsAsksTheSameEndpoint(t *testing.T) {
+func TestSubtitleURLsAsksThePlayerInfoEndpoint(t *testing.T) {
 	exp := time.Unix(1702204169+7200, 0)
 	f := newFakeBili(t)
 	f.on(pathNav, func(w http.ResponseWriter, r *http.Request) {
@@ -216,7 +216,7 @@ func TestSubtitleURLsAsksTheSameEndpoint(t *testing.T) {
 			},
 		}))
 	})
-	f.on(playurlPath, func(w http.ResponseWriter, r *http.Request) {
+	f.on("/x/player/wbi/v2", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, playurlWithSubtitle(map[string]any{
 			"duration": 100,
 			"audio": []any{

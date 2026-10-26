@@ -480,13 +480,17 @@ func (a *App) fetchBiliSubtitleNow(ctx context.Context, it Item, key string, cac
 		if ref != nil {
 			urls = ref.SubtitleURLs
 		}
-		if len(urls) == 0 && it.SubtitleBvid != "" && it.SubtitleCid != "" {
+		bvid, cid := it.SubtitleBvid, it.SubtitleCid
+		if bvid == "" || cid == "" {
+			bvid, cid = it.Bvid, it.Cid
+		}
+		if len(urls) == 0 && bvid != "" && cid != "" {
 			// 音乐库那一路：它的取流接口（`/audio/music-service-c/url`）的返回里
 			// **没有**字幕，所以要问它背后那个投稿一次（同一个取流接口，只看
 			// `subtitle` 那一段）。
 			//
 			// ⚠️ **这一次往返在后台**：它不挡播放，歌已经在放了。
-			u, err := s.Client.SubtitleURLs(ctx, it.SubtitleBvid, it.SubtitleCid)
+			u, err := s.Client.SubtitleURLs(ctx, bvid, cid)
 			if err != nil {
 				log.Printf("biu: 问不出这一首的字幕地址：%v", err)
 				return false
