@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+  <g opacity="0.16">
+    <circle cx="120" cy="80" r="70"/>
+    <circle cx="120" cy="80" r="48" stroke-dasharray="4 9"/>
+  </g>
+  <g opacity="0.9">
+    <rect x="84" y="62" width="72" height="44" rx="10"/>
+    <path d="M84 88h72"/>
+  </g>
+  <g>
+    <circle cx="156" cy="52" r="22" fill="currentColor" fill-opacity="0.16"/>
+    <path d="M148 54V42l12-3v12"/>
+    <circle cx="146" cy="54" r="3.2" fill="currentColor" stroke="none"/>
+    <circle cx="158" cy="51" r="3.2" fill="currentColor" stroke="none"/>
+    <circle cx="140" cy="97" r="2.6" fill="currentColor" stroke="none"/>
+  </g>
+</svg>

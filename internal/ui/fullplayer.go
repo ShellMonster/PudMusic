@@ -35,6 +35,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/covertint"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
@@ -581,6 +582,14 @@ func (s *Shell) viewFullBackdrop(c *ui.Context, url string) {
 			// ⚠️ 它**不接管点击**：这一层在 `probe` 底下，而 `probe` 是那个铺满整窗
 			// 的 `Modal` 盒子，点击先撞上它（见 viewFullPlayer 的注释）。
 			s.viewFullBackdropCanvas(c, url)
+			// 封面主色的光晕：压在压暗层**底下**，所以压暗层照样统一压住，字的对比度
+			// 按「压暗层盖白底」算出来的最坏情况不变。自上而下 45% → 0，取不到色时没有。
+			if hue, sat := s.tint.sync(url, s.wake.invalidate); sat > 0 {
+				if col, ok := parseHexColor(covertint.Hue{H: hue, S: sat}.Color(true)); ok {
+					ui.Box(c).Key("full-glow").Absolute().Left(0).Top(0).Right(0).Bottom(0).
+						LinearGradient(ui.LinearGradient{From: col.Alpha(0.45), To: col.Alpha(0), Angle: 180})
+				}
+			}
 			ui.Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Background(fullScrim)
 		})
 }
@@ -973,8 +982,8 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 	if rightAlign {
 		x = area.X + area.W - fullStagePadX - w
 	}
-	box := ui.Box(c).Key("full-cover").
-		Absolute().Left(x).Top(area.Y+(area.H-h)/2).Size(w, h).
+	box := shadow.FullCover(ui.Box(c).Key("full-cover").
+		Absolute().Left(x).Top(area.Y+(area.H-h)/2).Size(w, h).Radius(c.Theme().Radius)).
 		// 🔴 **可聚焦**：没有它，键盘（菜单键 / Shift+F10）**够不着**这一份
 		// 菜单——框架的 `menuKey` 找的是「焦点链上最里层那个带菜单的元素」
 		// （`mygo/ui/menu.go` 的 `menuTarget`），而焦点链上得先有这一层。
