@@ -175,11 +175,19 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 // 名字写成「开关：那一行的标题」而不是照抄标题，有两个用处：读屏念出来是
 // 「开关：上报本机播放记录」（知道这是个开关）；界面上那行标题**一字不差**地摆着，
 // 名字撞上去的话无头 Tester 的 `Find` 只会找到标题那一处，点都点不到开关。
+//
+// ⚠️ **效果看不见的那几格，拨开之后要说一句**（`saySwitchHint`）：界面上没有任何
+// 变化能告诉用户「它生效了」。说得出口的是那一句短的，说不出口的不说（理由见
+// `switch_hint.go`）。
 func (s *Shell) pickSwitch(c *ui.Context, title, key string, on bool, ro bool, set func(*app.Settings, bool)) {
 	// ⚠️ 和 pickAutoStart 一样不给 Switch 加 Key（见那里的注释：加了 Key 之后
 	// 旋钮动画每帧从头开始，那一页永远停不下来）。
-	if staticSwitch(c, &on).Label("开关：" + title).Disabled(ro).Changed() {
-		s.applySetting(key, func(cur *app.Settings) { set(cur, on) })
+	if springSwitch(c, &on).Label("开关：" + title).Disabled(ro).Changed() {
+		// ⚠️ **写成功了才说**：写失败的时候已经弹了一条「没存上」，再说一句
+		// 「开了它会怎样」就是两句话打架（`applySettingOK` 那一版）。
+		if s.applySettingOK(key, func(cur *app.Settings) { set(cur, on) }) {
+			s.saySwitchHint(title, on)
+		}
 	}
 }
 
