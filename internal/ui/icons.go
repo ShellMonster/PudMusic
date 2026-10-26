@@ -340,11 +340,15 @@ const (
 	// iconAdd 既是「关注」也是「新建收藏夹」那枚加号——上游两处用的是同一个
 	// `RiAddLine`（`music-list-item` 和 `side/collection`），而 `icons.go` 一个
 	// 文件一个名字，所以只留一个。
-	iconAdd        = "System/add-line.svg"           // 加（关注 / 新建收藏夹）
-	iconFollowDone = "System/check-line.svg"         // 已关注
-	iconMoon       = "Weather/moon-line.svg"         // 深色
-	iconSun        = "Weather/sun-line.svg"          // 浅色
-	iconComputer   = "Device/computer-line.svg"      // 跟随系统（一台显示器）
+	iconAdd        = "System/add-line.svg"      // 加（关注 / 新建收藏夹）
+	iconFollowDone = "System/check-line.svg"    // 已关注
+	iconMoon       = "Weather/moon-line.svg"    // 深色
+	iconSun        = "Weather/sun-line.svg"     // 浅色
+	iconComputer   = "Device/computer-line.svg" // 跟随系统（一台显示器）
+	// iconClock 是「定时」那一档的钟。它和 `iconEmptyLater`（稍后再看）共用同一张
+	// SVG（`System/time-line.svg`）——一个文件一个名字的规矩下，各用途给各自的
+	// 名字：别在主题那排写 `iconEmptyLater`，那个名字说的是另一件事。
+	iconClock      = "System/time-line.svg"          // 定时主题：一个钟
 	iconDisk       = "Device/hard-drive-2-line.svg"  // 磁盘
 	iconDeleteBin5 = "System/delete-bin-5-line.svg"  // 删除（另一版）
 	iconBookmark   = "Business/bookmark-line.svg"    // 书签
@@ -449,7 +453,7 @@ var iconNames = []string{
 	iconExpand, iconShrinkBack, iconPiP, iconRefresh, iconExternal,
 	iconEye, iconEyeOff, iconWarning, iconQuestion,
 	iconImport, iconExport, iconAdd, iconFollowDone,
-	iconMoon, iconSun, iconComputer, iconDisk, iconDeleteBin5,
+	iconMoon, iconSun, iconComputer, iconClock, iconDisk, iconDeleteBin5,
 	iconBookmark, iconInbox, iconChart,
 
 	// 导航、方向、展开收起
