@@ -49,12 +49,13 @@
 > 同样是预期的：点 **更多信息** → **仍要运行**。
 > 要消除它需要一张代码签名证书，本项目**没有买**。
 
-### 从源码跑 / 自己打包
+---
+
+## 怎么跑 / 怎么构建
 
 ```sh
 go run .                      # 起窗口
 go test ./...                 # 全部测试（不需要窗口）
-go test -race ./...           # 带竞态检测
 go vet ./...
 
 scripts/build.sh              # 打 macOS dmg + Windows NSIS 安装包
@@ -66,36 +67,27 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 `scripts/build.sh` 在缺 NSIS 时会**直接停下并说明**，而不是像框架那样只打一行提示
 就跳过——否则脚本「成功」了而产物里没有安装包，要等下一次签收才发现。
 
----
-
-### 封面内存缓存
-
-启动时可以用环境变量 `BIU_IMAGE_CACHE_MB` 配置内存缓存预算，单位是 MiB
-（1 MiB = 1024×1024 字节），接受 1–4096 的整数；未设置或无效时使用 32 MiB，
-无效值会写一条日志。改后重启生效，主窗口和迷你播放器共用这份缓存。
-代码里的默认值是 `internal/ui/widgets/imgcache/cache.go` 的 `DefaultMaxBytes`。
-这一档是人代选的，随时可调。96 → 32 MiB 在 BMG-263 的原 PNG 探针中
-测得堆峰值 415.0 → 298.8 MB（约省 116 MB）；这不是所有图片格式的固定收益。
+验收命令（**默认不跑界面整包**，理由见 `AGENTS.md` §1）：
 
 ```sh
-BIU_IMAGE_CACHE_MB=32 go run .
-# 已安装的 macOS 应用先退出，再从终端启动：
-BIU_IMAGE_CACHE_MB=32 /Applications/BiuGo.app/Contents/MacOS/BiuGo
+go build -trimpath -p 4 ./... && go vet -trimpath -p 4 ./... && go test -p 4 $(go list ./... | grep -v '/internal/ui$')
 ```
 
-| 预算 | 取舍 |
-|---|---|
-| 96 MiB | 保留更多已看过的封面，回滚时较少重新解码。 |
-| 32 MiB（默认） | 减少常驻图片，回滚时更容易需要读盘、解码。 |
-| 16 MiB（或更小） | 更积极淘汰，反复滚动时更常重新加载，首帧可能变慢。 |
+---
 
-内存未命中时先读磁盘缓存，磁盘也未命中才重新下载，因此网络代价取决于磁盘命中率。
-这只是图片缓存的预算：正在显示的图片受保护，可以暂时超额；它不限制整个进程的内存。
-普通大 PNG（非交错、8 位 RGB/RGBA）逐行解码；基线 JPEG（灰度或 YCbCr，
-单扫描）只保留两行 MCU 块。两者都按原来的 ApproxBiLinear 算法缩到最长边 768，
-保留相同像素，避免临时分配整张原图。渐进式 JPEG、RGB/CMYK JPEG、其他格式及
-特殊 PNG 仍走标准解码器。EXIF 只有元数据或方向为 1 的 JPEG 也会缩放；真正
-需要旋转/翻转的 JPEG 继续由框架摆正，保留原尺寸。
+## 支持什么
+
+- **本地音乐**：FLAC / MP3 / WAV / AIFF / AAC / M4A / OGG（容器→解码器的对应关系见
+  `docs/experience/audio-stack.md`《支持哪些格式》）。
+- **B 站在线取流播放**：Hi-Res 无损（`dash.flac`，要大会员）与有损 AAC（`dash.audio`，
+  最高 192K）；播放条上歌名右边的徽章点一下就能换档，换完按新档重新取流、从原位置接着播
+  （见 `docs/experience/audio-stack.md`《在线音质怎么换档》）。
+- **播放**：播放条与队列抽屉（队列里的歌能拖着重排）、音量均衡、睡眠定时、变速倍率、
+  自动更新、托盘与单实例与开机自启、系统媒体会话。
+- **网络封面缓存**：落在应用自己的缓存目录里，重启之后不用重下；目录有字节上限，
+  超了按「上次写下来的时间」淘汰最老的那几张。内存预算用 `BIU_IMAGE_CACHE_MB` 配
+  （见 `docs/experience/architecture.md`《封面缓存预算》）。
+- **跨平台**：macOS 与 Windows（首发不含 Linux）。
 
 ---
 
@@ -110,7 +102,7 @@ BIU_IMAGE_CACHE_MB=32 /Applications/BiuGo.app/Contents/MacOS/BiuGo
 |---|---|
 | **本地音乐不支持 WMA** | **明确的功能缺口。** Biu 的本地扫描白名单里有 `.wma`，本项目解不了它（还没有能用的纯 Go WMA 解码器）。扫到 `.wma` 会列出来但**播不了**——页面顶上会明写「这个目录里有我们还放不出的格式（.wma），它们会列出来但放不了。」，行里的作者那一格也写着「这个格式我们放不了」，不会让人以为文件坏了。这条是「决定还没做，但当前边界清楚」，不是「没排期」。将来要不要做还没拍板。 |
 | **Windows 上有损那一档还没在真机上验过** | B 站的有损音质（`dash.audio`，最高 192K）那一档**接上了** Windows 自带的 Media Foundation（本仓库的 `internal/service/audio/mfadec`，`IMFTransform` + `CLSID_CMSAACDecMFT`，issue #253）——**但这条还没在真 Windows 上跑过一行**：验收它的那条 CI（`windows-aac-spike.yml`）的 runner 一直没接上（账号付款的问题），所以「能不能放、放在哪、多长」**都还没有真机上的数**。⚠️ 已知的两个限制：① **ALAC 解不了**（`.m4a` / `.m4s` / `.mp4` 里装的 ALAC 音轨），而 B 站不发 ALAC；② Windows 上**在线**的有损流要**等整个文件下完才开口**——拆分片 MP4 得先把每一个 `moof` 走一遍，而 `moof` 在文件末尾；macOS 上是边下边播。 |
-| **杜比音轨不能手动选** | 杜比全景声（实测 id `30250`，`codecs` 是 `ec-3`）没有放进设置里的音质档位（只有 自动 / 无损 / 192K / 128K / 64K）。自动档在 B 站只给杜比时会取它，能不能解出取决于平台：macOS 的 AudioToolbox **解得了**，**Windows 上解不了**——Media Foundation 不带 E-AC-3，而且 Win11 24H2 移除了系统自带的 AC-3 解码器（再加上 Dolby 那边的 field-of-use 授权限制），所以这一档在 Windows 上是**划掉**的。⚠️ 「杜比 Hi-Res = `30251`」是**二手映射表**里的说法，不是公开资料的说法——公开资料（「视频伴音音质代码」一节）写的是 `30251` = **Hi-Res 无损**，实测它就是 `dash.flac` 那一档（编码 `fLaC`，见下一节）。 |
+| **杜比音轨不能手动选** | 杜比全景声（实测 id `30250`，`codecs` 是 `ec-3`）没有放进设置里的音质档位（只有 自动 / 无损 / 192K / 128K / 64K）。自动档在 B 站只给杜比时会取它，能不能解出取决于平台：macOS 的 AudioToolbox **解得了**，**Windows 上解不了**——Media Foundation 不带 E-AC-3，而且 Win11 24H2 移除了系统自带的 AC-3 解码器（再加上 Dolby 那边的 field-of-use 授权限制），所以这一档在 Windows 上是**划掉**的。⚠️ 「杜比 Hi-Res = `30251`」是**二手映射表**里的说法，不是公开资料的说法——公开资料（「视频伴音音质代码」一节）写的是 `30251` = **Hi-Res 无损**，实测它就是 `dash.flac` 那一档（编码 `fLaC`，见 `docs/experience/audio-stack.md`）。 |
 | **AIFF 只认未压缩的 PCM** | `internal/service/audio/aiff.go` 是本项目自己写的，只解未压缩的 PCM。AIFF 容器里的压缩编码（MAC3/IMA4 等）解不了。 |
 | **FLAC 解码器在本仓库里** | 裸 FLAC 走 `internal/service/audio/flacdec`（纯 Go，已逐样本验证）；**MP4 容器里的 FLAC 在 macOS 上走系统解码器**（那条路是按容器认的），**在 Windows 上落回 `flacdec`**（那里没有系统解码器）。实测 B 站那条无损流是 `48000` / 2 声道 / **24 bit**，`flacdec` 解得动。 |
 
@@ -195,187 +187,30 @@ BIU_IMAGE_CACHE_MB=32 /Applications/BiuGo.app/Contents/MacOS/BiuGo
 
 ---
 
-## 支持哪些格式
+## 文档索引
 
-认容器的是**头几个字节**，不是扩展名——本地文件和 B 站在线流走的是同一个
-`openDecoder`（`internal/service/audio/player.go`）。
+**给使用者**：上面几节就够（是什么 / 怎么跑 / 怎么构建 / 支持什么 / 已知边界 / 许可）。
 
-| 容器 | 谁在解 | 备注 |
+**给改这个仓库的人**：
+
+| 文档 | 里面是什么 | 什么时候看它 |
 |---|---|---|
-| 裸 FLAC（`.flac`） | `internal/service/audio/flacdec` | 自带解码器，已逐样本验证 |
-| MP4 家族（`.m4a` / `.m4s` / `.mp4`） | `internal/service/audio/extaf`（macOS）/ `internal/service/audio/mfadec`（Windows，⚠️ **还没在真 Windows 上验过**） | macOS 走 AudioToolbox；**Windows 上 AAC 接的是 Media Foundation**（`mfadec`）。⚠️ **MP4 里的 FLAC 在 macOS 上也走 AudioToolbox，在 Windows 上落回 `flacdec`** |
-| 裸 ADTS（`.aac`） | 同上 | 没有容器，头两字节就是同步字。⚠️ **Windows 上接的是 Media Foundation**（同样**还没在真 Windows 上验过**） |
-| MP3 | `internal/service/audio/mp3dec` | 本仓库自己解（vendor 进来的 `tphakala/go-mp3`，MIT），两个平台都能解。补了 **MPEG-2.5**、**LAME gapless**（编码器延迟被裁掉，歌和下一首接得上），打开一个文件也不再全文件扫帧头 |
-| Ogg Vorbis（`.ogg`） | `mygo/audio/vorbis` | MyGo 自带，纯 Go，两个平台都能解。⚠️ 那一行 blank import 在 `internal/service/audio/player.go`——少了它 `.ogg` 在本地音乐里**列得出来、点进去报「不支持这个音频格式」** |
-| AIFF / AIFC | `internal/service/audio/aiff.go` | 本项目写的，只认未压缩的 PCM |
-| WAV | `mygo/audio` | MyGo 自带 |
-
-注册表认不出来、而头几个字节是 `fLaC` 的，落回 `flacdec`——那是**本地裸
-`.flac` 文件**的路子（MyGo 的表是对字面量做匹配的，给变长的 magic 注册不了）。
-
-⚠️ **B 站在线的无损流不是裸 FLAC。** 实测（2026-10-23，issue #252）它的头
-16 字节是 `00 00 00 20 66 74 79 70 69 73 6f 35 00 00 00 01 69 73 6f 35`
-——`ftyp` 盒，也就是 **MP4 里的 FLAC**（素材与形状说明见
-`internal/service/bili/testdata/lossless/`）。所以在线的无损流走的是上表里
-「MP4 家族」那一行（macOS 上是系统解码器；**Windows 上 AAC 接 Media Foundation，
-而 MP4 里的 FLAC 落回 `flacdec`**），**不是** `flacdec` 的裸 FLAC 那一条。
-
-**这个平台没有 AudioToolbox 时**（Windows），先问 **Media Foundation**
-（`internal/service/audio/mfadec`）——它解 AAC（MP4 家族和裸 ADTS 两种容器）；
-它认不出来（比如 MP4 里装的是 FLAC）才落回 `flacdec`——`flacdec` 能解 MP4
-里的 FLAC，于是 B 站无损流在 Windows 上照样放得出来。
-
-**Windows 上 MP3 / WAV / FLAC / OGG / AIFF 和 MP4 里的 FLAC 能用**（不依赖 macOS
-的系统解码器）。**AAC（MP4 家族和裸 ADTS）接的是 Media Foundation**——⚠️ **那一档
-还没在真 Windows 上验过**（验收它的那条 CI 的 runner 一直没接上，见「已知边界」）。
-
-⚠️ **Windows 上还有一个代价**：Media Foundation 那条路靠 `go-m4a` 拆分片 MP4，
-而 `go-m4a` 要先把每一个 `moof` 走一遍——`moof` 在文件末尾，所以**在线**的流
-要等整个文件下完才开口（本地文件不用）。macOS 上那条路走 AudioToolbox，是
-按需读的，边下边播。
-
-FLAC 解码器是 t-0017 验证过的实现，本仓库里带着它的 64 项测试和测试素材
-（`internal/service/audio/flacdec/`）。搬进来时只改了 import 路径，代码逐字未动。
-
-## 图标
-
-图案是 `internal/platform/icon-source.png`（1024×1024，一张挑定的满幅方图），
-`resources/icon.png` 是它经 `platform.AppIcon` 缩放并切形之后的产物
-（`go generate ./internal/platform/`）。`mygo build` 从后者渲出完整尺寸集：
-
-| 平台 | 尺寸 | 档数 |
-|---|---|---|
-| macOS `.icns` | 32 / 64 / 128 / 256 / 256 / 512 / 512 / 1024 | 8 |
-| Windows `.ico` | 16 / 24 / 32 / 48 / 64 / 128 / 256 | 7 |
-
-⚠️ **图源不能缩到 512。** 下采样是从图源做的，图源 512 的话 1024 那档就是插值出来的
-模糊图——Biu 自己的 `electron/icons/logo.png` 就只有 512×512，这是它的缺陷，不要照抄。
-`internal/platform/icon_test.go` 的 `TestTheArtworkIsBigEnoughForEverySize` 守着下限。
-
-⚠️ **macOS 不会替你切圆角。** Big Sur 改的是 Apple 自家那一批图标，而那道圆角是
-**画进 .icns 里**的；第三方应用的图标形状完全由素材决定，MyGo 的 `pngToICNS` 也只
-缩放、一个像素都不动。所以留白和圆角是 `fillIcon` 切的——macOS 图标网格那一格
-（图案占 0.824，圆角半径 0.2237×图案边长）。图源因此必须是一张**铺到四个角**的
-方图，`TestTheArtworkIsFullBleed` 钉着这一条。
-
-⚠️ **托盘和应用是同一张图**（`TrayIconPNG` 就是 `AppIconPNG(32)`）。两份各画各的
-必然漂移，而症状是「Dock 上是新图标、通知区域还是旧图案」——那种错只有用户看得见，
-而没有任何一处会报错。
-
-## 在线音质
-
-B 站在线流分两档路：**Hi-Res 无损**（`dash.flac`，要大会员）和**有损 AAC**
-（`dash.audio`，最高 192K）。用户选的那一档在 `internal/service/bili/quality.go`
-里翻译成 B 站的档位 id；播放条上歌名右边的徽章点一下就能换档，换完立刻按新档
-重新取流、从原来的播放位置接着播（不需要切歌，也不需要重启）。
-⚠️ 无损那一路在两个平台都能播；有损那一路**在 Windows 上接上了**（Media
-Foundation），但**还没在真 Windows 上验过**——见「已知边界」里那条。
-
-## 怎么测
-
-测试分两层，都不需要开窗口：
-
-```sh
-# 界面层：用 MyGo 的 Tester，view 不需要真窗口就能点、能拖
-go test -v ./internal/ui/
-
-# 业务层与解码：真解码器、真播放器，只是没有声卡时不出声
-go test -v ./internal/app/ ./internal/service/audio/
-
-# 打包层：图标尺寸集、第三方许可清单与实际构建依赖对不对得上
-go test -v ./internal/platform/ ./internal/licensing/
-```
-
-音频相关的断言都只看**时间和位置**，不依赖「听得见」，所以在没有声卡的机器上也跑得过。
-
-## 代码怎么分层
-
-依赖单向，反向一律禁止：
-
-```
-internal/ui/        → internal/app/ → internal/service/ → internal/platform/
-   画界面              全部状态         解码、播放         平台差异
-（只有这一层 import mygo/ui）
-
-internal/licensing/  → 不 import 任何 internal 包（只读 go.mod 和模块缓存）
-internal/platform/cmd/, internal/licensing/cmd/   → 生成用的命令行，不进运行时
-```
-
-`main.go` 只做一件事：建状态、建窗口、把两者接上。
-
-窗口有**两扇**：主窗口（1200×800）和迷你播放器（320×100 的透明置顶小窗，
-`internal/ui/miniplayer.go`）。它们各有各的 `Shell`（一个外壳对一个窗口），
-但**播放状态是同一份 `app.App`**——所以界面上不会显示不同，前提是改完状态之后
-挨着两扇窗都唤醒（见下面第 2 条）。迷你播放器开着的时候主窗口是收起来的，两个
-窗口互斥（Biu 也是这么干的）。
-
-## 踩过坑的规矩
-
-写在代码里，也写在这里，因为它们都不是从代码本身能看出来的：
-
-1. **`Window.Update(nil)` 会 SIGSEGV，进程直接死。** 改状态用 `Update(func)`，
-   只刷画面用 `Invalidate()`。
-2. **后台投递完状态必须叫醒界面。** 只投递不唤醒，界面永远停在旧帧。
-   走 `ui.Services.Invalidate()`（见 `internal/ui/wake.go`）。
-   **而且要挨着每一扇窗叫醒**：现在有主窗口和迷你播放器两扇窗（都共用同一个
-   `app.App`），所以走的是 `App.AddWake` 那一份挨个叫醒的列表，而每扇窗建外壳
-   时登记自己那一条。只叫醒主窗口的话，迷你窗口停在旧内容（实测）。
-3. **每个 view 外面包一层 `Guard`（recover）。** MyGo 的 `Dispatch`/`drain` 都没有
-   recover，view 里 panic 会穿透 Cocoa 事件循环杀掉整个进程。
-4. **单实例锁和退出回调都在 `mygo.App.Run()` 之前装。** 锁晚一步就是两个实例
-   同时启动的竞态；回调晚一步，启动命令行里的 `biu://…` 会在它装好之前就被交付掉，
-   点链接唤起应用什么都不会发生。
-5. **建窗口只能走 `App.WhenReady`，不能直接在回调里 `NewWindow`。** `App.Run()`
-   先把事件循环转起来，`applicationDidFinishLaunching` 才把 `ready` 置上；在这
-   两件事之间主线程上 `NewWindow` 是**直接 panic** 的。第二个实例正好落在这一段
-   里（它的回调走 `postMain`），症状是「图标连点两下，应用当场崩」。
-6. **`mygo.App.RequestSingleInstanceLock()` 挡不住同时启动的两个实例**（实测
-   20 轮 17 轮两个都拿到锁：两个都 Dial 失败 → 都删掉对方的 socket 文件 → 都
-   Listen 成功）。所以 `internal/platform` 在它之上还压了一把 flock，见
-   `single_instance.go` 的注释。
-7. **提交进仓库的图标和许可清单都是生成物。** 图标图案在 `platform.AppIcon` 里
-   （图源是它 `go:embed` 的 `internal/platform/icon-source.png`），清单在
-   `go list -deps` 的结果里。换了图案或依赖忘了重新生成，仓库里躺着的是旧文件，
-   而**没有任何一处会报错**。`go generate ./internal/platform/ ./internal/licensing/`，
-   `scripts/build.sh` 每次打包前都会跑一遍并检查 `git diff`。
-8. **应用数据目录的名字不跟显示名走。** 应用 2026-10 从 `Biu MyGo` 改名成
-   `BiuGo`，而 `mygo.App.Path(mygo.PathUserData)` 默认是 `os.UserConfigDir()`
-   拼**应用名**——跟着改名走的话，老用户升级之后设置、搜索历史、快捷键、歌词缓存、
-   下载记录和界面状态会一起「消失」（数据没坏，只是不再有人去那个目录找，而症状
-   是静默的）。所以 `internal/platform/datadir.go` 把目录**钉死**在旧名字上，
-   `main()` 的第一句就调它。取舍与「什么时候该真搬」见那个文件顶上那一节。
-   连带的后果：macOS 上用户数据仍然住在
-   `~/Library/Application Support/Biu MyGo`，而应用叫 BiuGo。
-
-还有两条是 MyGo 文档里没写的，都跟「正在被拖」有关，用错了都不报错、只是拖不动：
-
-1. **不要用 `Dragging()` 判拖动。** 它报的是 `Drag`/`Draggable` 两套机制，
-   普通滑块和普通控件对它永远是 `false`（MyGo 自带的 `examples/timeline`
-   用的就是 `Dragging()`，那一处的判断是失效的）。
-2. **`Pressed()` 还要求「指针仍在控件框内」。** 进度条那种轨道横跨整个行程、
-   指针一直留在框里的控件用它没问题；**一条 8 像素宽的拖拽把手用它只能拖动
-   16 像素就卡住**——指针往左挪 9 个像素就出框了，它当场变 `false`
-   （`ui/input.go:1157`）。薄把手要用 `Dragged()` 判按着没有，再用
-   `PointerPosition()` 取指针位置（侧栏那条把手就是这么做的，见
-   `internal/ui/sidebar.go`）。
-
-   顺带：**别拿 `Dragged()` 的位移累加**。`dragX` 要到一帧结束才清掉，而一帧里
-   view 要跑好几遍（`ui/runtime.go:524`），每一遍读到的都是同一个位移，
-   累加起来就是拖快好几倍。取绝对位置就没有这个问题。
-
-## 版本
-
-MyGo 记在 `go.mod` 里，基线 **v0.6.3**（2026-10-24 从 v0.6.2 升上来）。**不锁死**：
-MyGo 是 pre-1.0、发布很快、没有兼容性承诺。升级前请重跑这里的探针（本仓库的
-测试、`library/t-0018/` 的探针、音频实验），确认计划依赖的 API 还在。
-
-**v0.5.5 起必读：`ui.Tester` 的钟站着不动了。** 动画、`Context.After`、
-双击判定全走那只钟，只有测试自己调 `tt.Advance(d)` 它才走。所以「循环
-`tt.Frame()` 等动画停下来」这类辅助函数会**静默失效**——钟不走，动画永远停在第一
-帧，而「连着几帧不动」读到的恰恰是「不动」，于是它判定「停了」放行；接下来
-`tt.Click` 照着窗口外的坐标点下去**照样返回 nil，什么也没发生**。症状是
-「点了没反应」，不是「等不到」，很容易误判成控件坏了。
-
-要等动画就走两步：**推钟**（`tt.Advance`）+ **问 `tt.FramePending()`**（view 还在
-要帧吗），**不要数帧数**。照这么写的例子见 `internal/ui/settings_test.go` 的
-`settleSettingsPage`。
+| [`AGENTS.md`](AGENTS.md) | **纪律**：验收命令、静默出错的几条铁律、项目不变量、收尾动作 | 每次 |
+| [`DESIGN.md`](DESIGN.md) | **数值**：间距、圆角、列宽、配色等拍板过的设计口径 | 动界面摆布之前 |
+| [`docs/agents/README.md`](docs/agents/README.md) | 干活细则的索引与三类文档的分工判据 | 不知道哪份文档该看哪一份时 |
+| [`docs/agents/testing.md`](docs/agents/testing.md) | 验收命令、跑测试的口径、已知会飘的那几条 | 跑测试、判一条红是真的回归还是机器忙 |
+| [`docs/agents/visual-review.md`](docs/agents/visual-review.md) | 视觉审查：跟什么比、量哪五项、留下什么 | 动界面摆布的票 |
+| [`docs/agents/cleanup.md`](docs/agents/cleanup.md) | 收尾：gopls、清理顺序、临时文件放哪 | 收尾 |
+| [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md) | 票在哪、怎么开票、怎么改票面 | 开票、拆票 |
+| [`docs/agents/ticket-template.md`](docs/agents/ticket-template.md) | 票面骨架 | 开票 |
+| [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md) | 五个 triage 角色与标签 | 看板分类 |
+| [`docs/agents/domain.md`](docs/agents/domain.md) | 领域文档（`GLOSSARY.md` / `docs/adr/`）的现状 | 造新的领域概念时 |
+| [`docs/experience/README.md`](docs/experience/README.md) | 项目经验的索引与逐条搬迁对照表 | 想知道某条规矩的来龙去脉 |
+| [`docs/experience/interface-pitfalls.md`](docs/experience/interface-pitfalls.md) | 界面层静默出错的地方（主题 / panic / 唤醒 / 行 key / 拖动 / 测试的钟） | 动界面之前 |
+| [`docs/experience/startup-and-artifacts.md`](docs/experience/startup-and-artifacts.md) | 启动顺序 / 单实例 / 生成物 / 许可清单 / 图标素材 | 动启动流程或打包时 |
+| [`docs/experience/audio-stack.md`](docs/experience/audio-stack.md) | 解码器 / 在线音质换档 / 支持哪些格式 / 解不了的格式 | 动音频时 |
+| [`docs/experience/data-and-credentials.md`](docs/experience/data-and-credentials.md) | 四个名字 / 用户数据目录 / 登录态 / 什么时候不许写兼容逻辑 | 动设置、登录态、用户数据目录时 |
+| [`docs/experience/architecture.md`](docs/experience/architecture.md) | 分层与依赖方向 / 两扇窗 / 封面缓存预算 | 动包结构时 |
+| [`docs/experience/upstream-biu.md`](docs/experience/upstream-biu.md) | 上游源码与截图怎么取 / 数值怎么对齐 / 刻意不同的地方 | 对着上游做东西时 |
+| [`docs/experience/release-and-versioning.md`](docs/experience/release-and-versioning.md) | 版本三处对上 / 发版五步 / 打包签名 / MyGo 基线 | 发版时 |
+| [`docs/experience/git-and-workflow.md`](docs/experience/git-and-workflow.md) | 提交信息 / 文件怎么拆 / 注释纪律 / worktree | 提交之前 |
