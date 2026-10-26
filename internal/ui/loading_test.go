@@ -72,9 +72,11 @@ func TestEveryFirstScreenIsACenteredSpinner(t *testing.T) {
 		// 内容区的正中）。我的关注 / 用户动态那两页的加载态在右半边那一栏里，
 		// 不是整个内容区——它们只验「有转圈」。
 		centered bool
+		// rows 报这一页的首屏是列表骨架屏（八行占位）而不是一枚转圈。
+		rows bool
 	}{
-		{name: "搜索", loading: "正在加载…", path: searchPath + "?q=%E5%91%A8%E6%9D%B0%E4%BC%A6", centered: true},
-		{name: "收藏夹", loading: "正在加载…", path: collectionPathPrefix + "12345", centered: true},
+		{name: "搜索", loading: "正在加载…", path: searchPath + "?q=%E5%91%A8%E6%9D%B0%E4%BC%A6", centered: true, rows: true},
+		{name: "收藏夹", loading: "正在加载…", path: collectionPathPrefix + "12345", centered: true, rows: true},
 		{name: "稍后再看", loading: "正在加载…", path: laterPath, centered: true},
 		{name: "历史记录", loading: "正在加载…", path: historyPath, centered: true},
 		{name: "我的关注", loading: "正在加载关注的人…", path: followPath},
@@ -93,7 +95,11 @@ func TestEveryFirstScreenIsACenteredSpinner(t *testing.T) {
 			if !ok {
 				t.Fatalf("%s 的首屏上没有那枚转圈，文字有 %q", page.name, tt.Texts())
 			}
-			if r.W != loadingSpinnerSize || r.H != loadingSpinnerSize {
+			if page.rows {
+				if r.H <= 0 || r.H > skeletonRows*skeletonRowH { // 矮窗口里会被视口截短
+					t.Errorf("%s 的首屏骨架屏高 %.0f，want (0, %d]", page.name, r.H, skeletonRows*skeletonRowH)
+				}
+			} else if r.W != loadingSpinnerSize || r.H != loadingSpinnerSize {
 				t.Errorf("%s 的首屏上那一枚是 %.0f×%.0f，want %d×%d——"+
 					"「加载中」是一枚转圈，不是一行字", page.name, r.W, r.H,
 					loadingSpinnerSize, loadingSpinnerSize)
@@ -140,9 +146,9 @@ func TestTheLoadingStateIsNotTheEmptyState(t *testing.T) {
 		t.Errorf("还在加载就说「暂无内容」——那是把「还没好」说成「没有」，文字有 %q", tt.Texts())
 	}
 	// 转圈不是一行字：15px 那一档的行高是 17.67，而它是 32 的一方块。
-	if loading.H != loadingSpinnerSize {
-		t.Errorf("加载中那一枚高 %.2f，want %d——它是一枚转圈，不是一行字",
-			loading.H, loadingSpinnerSize)
+	if loading.H != skeletonRows*skeletonRowH {
+		t.Errorf("加载中那一块高 %.2f，want %d——列表首屏是八行骨架屏，不是一行字",
+			loading.H, skeletonRows*skeletonRowH)
 	}
 
 	// 放行，让它变成「没有结果」。
