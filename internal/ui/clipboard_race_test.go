@@ -1,0 +1,279 @@
+package ui
+
+// 「复制」那一族的**先后顺序**测试（票 #556 的评审意见）。
+//
+// # 这一族量的是「剪贴板里最后留着的是不是用户最后按的那一个」
+//
+// 「复制封面」那一趟要下网络 + 解一张图 + 编一张 PNG，全在**后台 goroutine**
+// 上（主线程做会冻住界面）。于是**完成顺序和按下去的顺序可以不一样**：
+//
+//	按「复制封面」（慢） → 按「复制歌曲信息」（快） → 封面那一趟跑完了
+//
+// 如果后台那一趟不管先后，剪贴板里最后留着的就是**封面**——而用户最后按的
+// 是**歌曲信息**。症状是静默的：提示弹出来的是「封面已复制」（那一趟确实
+// 成功了），而剪贴板里的东西和用户最后一次的选择对不上。
+//
+// # 为什么用「阻塞的 HTTP 夹具」而不是「睡一会儿」
+//
+// 完成顺序必须是**确定的**：靠 `time.Sleep` 造顺序，机器一忙就翻，而翻了的
+// 时候这条测试是**绿的**（它断的是「最后留着谁」，而顺序反了的时候恰好
+// 也可能绿）。所以夹具**真的阻塞**：请求来了先等一个信号，放行之后才回。
+//
+// ⚠️ **不打真 B 站**：夹具是本地的 `httptest` 服务。
+
+import (
+	"bytes"
+	"image"
+	"image/color"
+	"image/png"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/app"
+	mygoui "github.com/egoist/mygo/ui"
+)
+
+// ---- 能控住完成顺序的夹具 ----
+
+// gatedServer 是一个**能挡住自己**的 HTTP 服务。
+//
+// 一个 URL 对应一个闸门：请求到了先等 `release` 被关掉（或超时），
+// 然后才把图交回去。
+type gatedServer struct {
+	srv *httptest.Server
+
+	mu sync.Mutex
+	// gates 按路径记着闸门。
+	gates map[string]*copyGate
+}
+
+type copyGate struct {
+	// arrived 在请求到了的时候被关掉（等它 = 等请求到了）。
+	arrived chan struct{}
+	// release 放行之后请求才回。
+	release chan struct{}
+	// once 保证 arrived 只被关一次。
+	once sync.Once
+}
+
+func newGatedServer(t *testing.T) *gatedServer {
+	t.Helper()
+	g := &gatedServer{gates: map[string]*copyGate{}}
+	g.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		gate := g.gates[r.URL.Path]
+		g.mu.Unlock()
+		if gate == nil {
+			w.Write(headerPNG(t, 8))
+			return
+		}
+		gate.once.Do(func() { close(gate.arrived) })
+		select {
+		case <-gate.release:
+		case <-time.After(10 * time.Second):
+			t.Error("闸门等超时了——放行的信号没来")
+		}
+		w.Write(headerPNG(t, 8))
+	}))
+	t.Cleanup(g.srv.Close)
+	return g
+}
+
+// gate 给某个路径装一个闸门，返回它。
+func (g *gatedServer) gate(t *testing.T, path string) *copyGate {
+	t.Helper()
+	gate := &copyGate{arrived: make(chan struct{}), release: make(chan struct{})}
+	g.mu.Lock()
+	g.gates[path] = gate
+	g.mu.Unlock()
+	return gate
+}
+
+// headerPNG 造一张 w 宽的 PNG（**宽度能认出来**就够了：判据是「剪贴板里
+// 最后那一张是几宽的」）。
+func headerPNG(t *testing.T, w int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, 8))
+	for y := range 8 {
+		for x := range w {
+			img.SetRGBA(x, y, color.RGBA{R: uint8(x * 7), G: uint8(x * 13), B: uint8(x * 29), A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// copyShellWithState 造一个外壳，而**它的状态是活的**（一个指针）。
+//
+// ⚠️ **为什么要有这一档**：这一族要测的是「两次复制**内容不同**」的顺序，
+// 而两次复制之间的状态得**换掉**（换一张封面）——`copyShell` 那一档的状态
+// 是死的（建的时候定死），换不了。
+func copyShellWithState(t *testing.T, st *app.State) (*Shell, *mygoui.Tester, *clipStub) {
+	t.Helper()
+	clip := &clipStub{}
+	sh := newTestShell(t, at(760, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			s.viewPlayBar(c, *st)
+			s.viewToasts(c)
+		}
+	}), stubbed(func(_ *testing.T, s *Shell) {
+		s.writeClipboardText = clip.writeText
+		s.writeClipboardImage = clip.writeImage
+		s.copyDone = clip.done
+	}))
+	return sh.s, sh.tt, clip
+}
+
+// ---- 判据 ----
+
+// clipboardIs 报剪贴板里最后是**图**还是**文本**，以及那个图的宽度。
+//
+// ⚠️ **判据是「最后是什么」**：桩把两次写都记着，而顺序对不对要看**最后
+// 落进去的那一次**——所以桩记的是「最后一次写的那个」。
+func clipKind(clip *clipStub) (isImage bool, width int) {
+	data := clip.imageIs()
+	if len(data) == 0 {
+		return false, 0
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		return true, -1
+	}
+	return true, img.Bounds().Dx()
+}
+
+// ---- 用例 ----
+
+// TestTheLastCopyActionWinsOverAnEarlierCover 断**后按的那一次赢**。
+//
+// ⚠️ **场景**：先按「复制封面」（那一趟被闸门挡着），再按「复制歌曲信息」
+// （同步写完），最后放行封面那一趟。
+//
+// ⚠️ **判据**：剪贴板里最后是**文本**，而且封面那一趟**一个字都没写进去**
+// （`imageCalls` 是 0）——不是「写进去又被改回来」。
+func TestTheLastCopyActionWinsOverAnEarlierCover(t *testing.T) {
+	g := newGatedServer(t)
+	gate := g.gate(t, "/slow.png")
+
+	_, tt, clip := copyShell(t, app.State{
+		HasTrack: true, Title: "一首歌", CoverURL: g.srv.URL + "/slow.png",
+	})
+
+	// 第一次：复制封面（会被闸门挡住，跑不完）。
+	if err := tt.RightClick("当前封面"); err != nil {
+		t.Fatalf("右键不了封面：%v", err)
+	}
+	if err := tt.ChooseMenuItem(copyCoverLabel); err != nil {
+		t.Fatalf("选不了 %q：%v", copyCoverLabel, err)
+	}
+	// 等那一趟真的走到网络上了（再放行才是「先发起的」）。
+	select {
+	case <-gate.arrived:
+	case <-time.After(10 * time.Second):
+		t.Fatal("封面那一趟没走到网络上")
+	}
+
+	// 第二次：复制歌曲信息（同步写完）。
+	if err := tt.RightClick("当前封面"); err != nil {
+		t.Fatalf("右键不了封面：%v", err)
+	}
+	if err := tt.ChooseMenuItem(copyInfoLabel); err != nil {
+		t.Fatalf("选不了 %q：%v", copyInfoLabel, err)
+	}
+	if clip.textIs() == "" {
+		t.Fatal("歌曲信息没进剪贴板")
+	}
+
+	// 放行封面那一趟。
+	close(gate.release)
+
+	// 等它跑完（它跑完时**什么都没写**——被后来的那一次作废了——所以只能靠
+	// 那个「结束了」的信号等，不能等剪贴板里的内容）。
+	clip.waitDone(t, 10*time.Second)
+
+	if n := clip.imageCalls(); n != 0 {
+		t.Errorf("过时的封面那一趟还是写了 %d 次剪贴板——用户最后按的是歌曲信息", n)
+	}
+	if clip.textIs() == "" {
+		t.Error("剪贴板里没有歌曲信息了")
+	}
+}
+
+// TestAnEarlierCoverDoesNotOverwriteALaterCover 断**两次封面复制也是后按的赢**。
+//
+// ⚠️ **场景**：先按「复制封面」（那一趟被闸门挡着，一张 40 宽的），换一张
+// 封面（60 宽的）再按「复制封面」，最后放行第一个。
+//
+// ⚠️ **判据**：剪贴板里最后是**后按的那一张**（60 宽），不是先按的那张
+// （40 宽）——宽度不同，所以「最后留着谁」是**认得出来的**（只数「写了几次」
+// 认不出来：两次都写了，顺序才是关键）。
+func TestAnEarlierCoverDoesNotOverwriteALaterCover(t *testing.T) {
+	// ⚠️ **两个 URL 指向同一台服务器**：封面缓存按 URL 记，而这一条要的是
+	// 「两个不同的封面」——所以是两个路径（`/slow.png` 和 `/fast.png`）。
+	gate := &copyGate{arrived: make(chan struct{}), release: make(chan struct{})}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slow.png" {
+			gate.once.Do(func() { close(gate.arrived) })
+			select {
+			case <-gate.release:
+			case <-time.After(10 * time.Second):
+			}
+			w.Write(headerPNG(t, 40))
+			return
+		}
+		w.Write(headerPNG(t, 60))
+	}))
+	defer srv.Close()
+
+	st := &app.State{HasTrack: true, Title: "一首歌", CoverURL: srv.URL + "/slow.png"}
+	_, tt, clip := copyShellWithState(t, st)
+
+	// 第一次：复制封面（被挡着）。
+	if err := tt.RightClick("当前封面"); err != nil {
+		t.Fatalf("右键不了封面：%v", err)
+	}
+	if err := tt.ChooseMenuItem(copyCoverLabel); err != nil {
+		t.Fatalf("选不了 %q：%v", copyCoverLabel, err)
+	}
+	select {
+	case <-gate.arrived:
+	case <-time.After(10 * time.Second):
+		t.Fatal("封面那一趟没走到网络上")
+	}
+
+	// 换一张封面，再复制一次（这一趟不挡）。
+	st.CoverURL = srv.URL + "/fast.png"
+	tt.Frame()
+	if err := tt.RightClick("当前封面"); err != nil {
+		t.Fatalf("右键不了封面：%v", err)
+	}
+	if err := tt.ChooseMenuItem(copyCoverLabel); err != nil {
+		t.Fatalf("选不了 %q：%v", copyCoverLabel, err)
+	}
+	// 等第二次真的写进去了。
+	waitFor(t, "后按的那一张进剪贴板了", func() bool {
+		isImage, w := clipKind(clip)
+		return isImage && w == 60
+	})
+
+	// 放行第一次。
+	close(gate.release)
+	// 等**两趟都跑完**（只等一趟的话，可能在先发起的那一趟还没写的时候就
+	// 断言了——那样这条测试就抓不住那个 bug）。
+	clip.waitDoneCount(t, 10*time.Second, 2)
+
+	isImage, w := clipKind(clip)
+	if !isImage {
+		t.Fatal("剪贴板里没有图")
+	}
+	if w != 60 {
+		t.Errorf("剪贴板里最后是 %d 宽的那一张，want 60（后按的那一次赢）", w)
+	}
+}

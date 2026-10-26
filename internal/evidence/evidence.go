@@ -4084,9 +4084,13 @@ var Items = []Item{
 			// 而且**EXIF 摆正了**（不摆正的话交出去的是一张横躺着的图）。
 			"TestSourceGivesTheOriginalBytes",
 			"TestSourceImageIsNotScaled",
+			// 封面：**交出去的和缓存里存着的不一样**（只断「尺寸是原图的尺寸」
+			// 的话，缓存没真的存下缩过的那一份，就没东西可比）。
+			"TestSourceImageIsNotTheStoredOne",
 			"TestSourceImageStraightensTheEXIFOrientation",
 			// 摆正的结果**和框架自己摆的是同一个**（对着框架比，而不是对着
-			// 一份抄过来的映射比）。
+			// 一份抄过来的映射比——而且是**逐像素**比：只比宽高的话，方向 2/4
+			// （翻转那一批）和方向 6/8（转置那一批）全都分不出来）。
 			"TestTheOrientationMatchesTheFrameworksOwn",
 			// 取不到的时候**报错**（而不是给一段空字节——空字节粘出来
 			// 是一张打不开的图）。
@@ -4098,6 +4102,13 @@ var Items = []Item{
 			// 失败**不静默**：文本那一档和封面那一档各一条。
 			"TestAFailedCopySaysSo",
 			"TestAFailedCoverCopySaysSo",
+			// 失败**不静默**：**编码**那一档（取到了图但编不成 PNG）——
+			// 「取不到」那一档在 `png.Encode` 之前就返回了，所以它盖不住这一档。
+			"TestAFailedCoverEncodeSaysSo",
+			// **后按的那一次赢**：封面复制在后台跑，完成顺序和按下去的顺序
+			// 可以不一样——先发起的封面那一趟**不许覆盖**后来的复制内容。
+			"TestTheLastCopyActionWinsOverAnEarlierCover",
+			"TestAnEarlierCoverDoesNotOverwriteALaterCover",
 			// 键盘：Tab 走到封面上，菜单键能开出这一份菜单。
 			"TestTheMenuKeyOpensTheCopyMenuOnTheCover",
 		},

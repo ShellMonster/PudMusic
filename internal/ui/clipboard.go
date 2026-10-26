@@ -40,8 +40,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"image"
 	"image/png"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -71,6 +73,82 @@ const copyNoCoverNote = "这一首没有封面，复制不了"
 // ⚠️ **不能叫「当前封面」**：里面那张图已经有一个了（`imgcache.View…`），而
 // 读屏会把两个名字都念一遍——用户听到的是「当前封面，当前封面的操作」。
 const copyCoverActionsLabel = "当前封面的操作"
+
+// copyGeneration 是「用户到这一刻为止一共按过几次复制」。
+//
+// # 它挡的是什么
+//
+// 「复制封面」那一趟要下网络 + 解一张图 + 编一张 PNG，全在**后台 goroutine**
+// 上（主线程做会冻住界面）。而那个后台完成的时候，**用户可能已经又按了别的**：
+//
+//	10:00:00  按「复制封面」（封面 A 在慢速网络上，要 3 秒）
+//	10:00:01  按「复制歌曲信息」（一瞬间就写完了）
+//	10:00:03  封面 A 的后台跑完了，把封面 A 写进剪贴板
+//
+// 于是**剪贴板里最后是封面 A**，而用户**最后按的是「复制歌曲信息」**——
+// 他粘出来的是一张图，不是他最后要的那段文字。
+//
+// 症状是**静默**的：提示弹出来的是「封面已复制」（那一趟确实成功了），
+// 而剪贴板里的东西和用户最后一次的选择对不上，没有任何报错。
+//
+// # 怎么挡
+//
+// **每一次复制动作都拿一个号**（`copyGeneration` 加一），后台那一趟跑完时
+// **比一比自己那个号是不是最新的**：
+//
+//   - **不是最新的**（用户后来又按了别的）→ **不写剪贴板**（也不弹「已复制」）：
+//     用户要的是最后一次那一份；
+//   - **是最新的** → 写进去。
+//
+// ⚠️ **「不写」而不是「写完再改回来」**：写进去再改回来，中间那一瞬间剪贴板里
+// 是过时的内容，而别的应用可能正好在读它。
+//
+// ⚠️ **文本那一档也要占号**：文本是同步写的（不等网络），但它**照样要作废
+// 前面那一趟封面**——否则「先按封面（慢）、再按文本」最后留着的还是那张图。
+// 而「先按文本（快）、再按封面（慢）」是对的：封面是**最后**按的那一个，
+// 它跑完之后写进去，正是用户要的。
+type copyGeneration struct {
+	mu sync.Mutex
+	// gen 是最后一次复制动作的号。
+	gen uint64
+}
+
+// copyGen 是**全进程一份**的代次计数器。
+//
+// ⚠️ **它必须是包级的，不能每个外壳一份**：剪贴板是**整个系统只有一份**，
+// 而主窗口和迷你播放器是**两个外壳**——两边都发起复制的话，两个各自计数
+// 的号互不相识，于是「迷你窗发起的封面（慢）、主窗发起的文本（快）」这一趟
+// 不会被作废，剪贴板最后留着的仍然是**过时的那一个**。
+//
+// ⚠️ **不是每个测试一份**：这一份是**全局状态**，而测试要能断言「这一趟被
+// 作废了」——所以测试靠**号本身**（而不是全局的当前值）来断，见
+// `copyGeneration.isCurrent`。
+var copyGen copyGeneration
+
+// next 发一个新的号，并作废前面所有的号。
+func (g *copyGeneration) next() uint64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.gen++
+	return g.gen
+}
+
+// current 报现在最新的号是多少。
+func (g *copyGeneration) current() uint64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.gen
+}
+
+// isCurrent 报 gen 还是不是**最新**的那一个。
+//
+// ⚠️ **比的是「有没有人后来又按了一次」**，不是「是不是我发的那个」——
+// 两者在只有一个动作时一样，在两个动作时不同，而这正是要挡的那一种。
+func (g *copyGeneration) isCurrent(gen uint64) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return gen == g.gen
+}
 
 // viewCopyMenu 建当前这一首的「复制」菜单。播放条上那一张封面和满屏里那一张
 // 共用它（两处的入口是同一个动作）。
@@ -189,6 +267,9 @@ func formatSongDuration(d time.Duration) string {
 // ⚠️ **失败了要说得出来**（票面要求「不静默失败」）：剪贴板写失败就弹一句
 // 提示，而不是什么都不做。
 func (s *Shell) copySongInfo(st app.State) {
+	// ⚠️ **先占号**：这一档虽然是同步写完的，但它**照样要作废前面那一趟封面**
+	// （「先按封面（慢）、再按文本」最后留着的必须是那段文字，见 `copyGeneration`）。
+	gen := copyGen.next()
 	text := songInfoText(st)
 	if text == "" {
 		s.addToast("这一首没有可复制的信息", notice.Warning)
@@ -197,6 +278,12 @@ func (s *Shell) copySongInfo(st app.State) {
 	write := s.writeClipboardText
 	if write == nil {
 		write = systemWriteClipboardText
+	}
+	// ⚠️ **写之前再看一眼号**：这一档是同步的，理论上不会有别人插进来，
+	// 但**写剪贴板本身可能花时间**（框架那一档要走主线程），而用户在
+	// 那段时间里按了「复制封面」是可能的——那时候这一段就该让位。
+	if !copyGen.isCurrent(gen) {
+		return
 	}
 	if err := write(text); err != nil {
 		s.addToast("复制不了歌曲信息："+err.Error(), notice.Danger)
@@ -223,25 +310,56 @@ func (s *Shell) copyCover(st app.State) {
 		s.addToast(copyNoCoverNote, notice.Warning)
 		return
 	}
+	// ⚠️ **占号在起后台之前**：占晚了的话，「先按封面（慢）、再按文本」这一趟
+	// 的号会被后来的文本占掉，于是这一趟跑完发现自己不是最新的——那是对的；
+	// 但反过来「先按文本、再按封面」要是占晚了，就会把**用户最后按的那一次**
+	// 作废掉（文本那一趟已经写完了，而封面这一趟被自己作废）——剪贴板里留着
+	// 的是文本，而用户最后按的是封面。所以号必须在**动作开始的那一刻**发。
+	gen := copyGen.next()
 	url := st.CoverURL
-	go s.copyCoverInBackground(url)
+	go s.copyCoverInBackground(url, gen)
 }
 
 // copyCoverInBackground 是「复制封面」的后台那一半。
-func (s *Shell) copyCoverInBackground(url string) {
+//
+// ⚠️ **gen 是这一趟自己的号**：跑完时要比一比它还是不是最新的（见
+// `copyGeneration`）。不是最新就**什么都不写**——用户后来按的那一次才是
+// 他要的。
+func (s *Shell) copyCoverInBackground(url string, gen uint64) {
+	// ⚠️ **收尾那一句话在最后**：这一趟可能什么都没写（被后来的动作作废了），
+	// 所以「它结束了」这件事**不能靠剪贴板里的内容判断**——测试要靠这一句。
+	defer func() {
+		if s.copyDone != nil {
+			s.copyDone(gen)
+		}
+	}()
 	data, err := s.coverPNG(url)
 	if err != nil {
-		s.addToast("复制不了封面："+err.Error(), notice.Danger)
-		s.wake.invalidate()
+		// ⚠️ **只有还是最新的那一趟才说话**：过时的失败不用吵用户——
+		// 用户后来已经按了别的，他要的是那一个的结果。
+		if copyGen.isCurrent(gen) {
+			s.addToast("复制不了封面："+err.Error(), notice.Danger)
+			s.wake.invalidate()
+		}
 		return
 	}
 	write := s.writeClipboardImage
 	if write == nil {
 		write = systemWriteClipboardImage
 	}
+	// ⚠️ **写之前再看一眼号**：这一段是整趟里最贵的一步（编一张 PNG），
+	// 而它在后台跑着——用户完全可能在它跑的时候又按了一次。
+	//
+	// ⚠️ **过时的那一趟不叫醒界面**：它什么也没写、什么也没说，画面上
+	// 没有变化——叫醒只是白画一帧。
+	if !copyGen.isCurrent(gen) {
+		return
+	}
 	if err := write(data); err != nil {
-		s.addToast("复制不了封面："+err.Error(), notice.Danger)
-		s.wake.invalidate()
+		if copyGen.isCurrent(gen) {
+			s.addToast("复制不了封面："+err.Error(), notice.Danger)
+			s.wake.invalidate()
+		}
 		return
 	}
 	s.addToast("封面已复制", notice.Success)
@@ -261,18 +379,36 @@ func (s *Shell) copyCoverInBackground(url string) {
 // 横躺着的图。摆正那一段在 `imgcache` 里（`SourceImage`：那边有 EXIF 的解析
 // 和全部解码器）。
 func (s *Shell) coverPNG(url string) ([]byte, error) {
-	if s.images == nil {
-		return nil, errors.New("没有封面缓存")
-	}
-	img, err := s.images.SourceImage(url)
+	img, err := s.coverImageFor(url)
 	if err != nil {
 		return nil, err
 	}
 	var buf bytes.Buffer
+	// ⚠️ **编码失败必须报出来**（票面：「编码失败有可见反馈，不静默失败」）。
+	// 而它**在生产上几乎不会发生**——所以正因如此，它**必须有测试**，否则
+	// 这一句被删掉也没有任何东西会红（测试接缝见 `Shell.coverImage`）。
 	if err := png.Encode(&buf, img); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// coverImageFor 拿这一张封面那张**能编码的图**。
+//
+// ⚠️ **默认那一档是 `s.images.SourceImage`**（原图 + EXIF 摆正，见
+// `imgcache.SourceImage`）。
+//
+// ⚠️ **接缝只给测试用**（`Shell.coverImage`）：编码失败那一档在生产上几乎
+// 不会发生，而正因如此它必须有测试——测试要造出一张**编码不了的图**，最直接
+// 的办法就是在这里换掉「取图」这一下。
+func (s *Shell) coverImageFor(url string) (image.Image, error) {
+	if s.coverImage != nil {
+		return s.coverImage(url)
+	}
+	if s.images == nil {
+		return nil, errors.New("没有封面缓存")
+	}
+	return s.images.SourceImage(url)
 }
 
 // systemWriteClipboardText 是生产那一档：把文本放进系统剪贴板。

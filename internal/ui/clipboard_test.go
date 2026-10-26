@@ -20,6 +20,7 @@ package ui
 import (
 	"bytes"
 	"errors"
+	"image"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
@@ -42,15 +43,67 @@ type clipStub struct {
 	// textErr / imageErr 是「写失败」那一档：让测试能造出失败来。
 	textErr  error
 	imageErr error
-	// textCalls / imageCalls 数着写了几次。
-	textCalls  int
-	imageCalls int
+	// textWrites / imageWrites 数着写了几次。
+	textWrites  int
+	imageWrites int
+
+	// doneGens 记着「已经结束的那几趟」的号。
+	//
+	// ⚠️ **为什么要有它**：那一趟**可能什么都没写**（被后来的动作作废了），
+	// 所以「它结束了」这件事**不能靠剪贴板里的内容判断**——光等「剪贴板变了」
+	// 会等到天亮。
+	//
+	// ⚠️ **记的是「已经结束了」而不是「等它结束」**：那一趟**可能在测试开始
+	// 等之前就结束了**（闸门一放行它就跑完了），所以这里记下的是**历史**，
+	// 而 `waitDone` 先看历史、没有再等。
+	doneGens []uint64
+}
+
+// done 是「某一趟后台复制结束了」那个信号的实现。
+func (c *clipStub) done(gen uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.doneGens = append(c.doneGens, gen)
+}
+
+// waitDone 等某一趟后台复制结束（超时就是没等到）。
+//
+// ⚠️ **它先看「已经结束了」的那几趟**：那一趟可能在测试开始等之前就跑完了
+// （闸门一放行它就结束了），而那时候还没人在等——所以历史必须留着。
+func (c *clipStub) waitDone(t *testing.T, d time.Duration) uint64 {
+	t.Helper()
+	return c.waitDoneCount(t, d, 1)
+}
+
+// waitDoneCount 等**至少 n 趟**后台复制结束。
+//
+// ⚠️ **为什么是「至少 n 趟」而不是「等某一趟」**：两趟的**完成顺序和发起
+// 顺序可以不一样**，所以「第 n 个信号」不等于「第 n 趟」——要断的是「**所有**
+// 该跑的都跑完了」，而那只能数个数。
+func (c *clipStub) waitDoneCount(t *testing.T, d time.Duration, n int) uint64 {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for {
+		c.mu.Lock()
+		if len(c.doneGens) >= n {
+			gen := c.doneGens[n-1]
+			c.doneGens = c.doneGens[n:]
+			c.mu.Unlock()
+			return gen
+		}
+		c.mu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatalf("等了 %v，后台那 %d 趟还没结束", d, n)
+			return 0
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 }
 
 func (c *clipStub) writeText(text string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.textCalls++
+	c.textWrites++
 	if c.textErr != nil {
 		return c.textErr
 	}
@@ -61,7 +114,7 @@ func (c *clipStub) writeText(text string) error {
 func (c *clipStub) writeImage(data []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.imageCalls++
+	c.imageWrites++
 	if c.imageErr != nil {
 		return c.imageErr
 	}
@@ -81,6 +134,25 @@ func (c *clipStub) imageIs() []byte {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.image
+}
+
+// imageCalls 报写了几次图（线程安全）。
+//
+// ⚠️ **它是「写了几次」而不是「写了几次成功」**：判据「过时的那一趟**一个
+// 字节都没写进去**」要的是**有没有动过剪贴板**，而不是「写进去的东西还在不在」
+// ——写进去再改回来，中间那一瞬间剪贴板里是过时的内容，而别的应用可能正好
+// 在读它。
+func (c *clipStub) imageCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.imageWrites
+}
+
+// textCalls 报写了几次文本（线程安全）。
+func (c *clipStub) textCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.textWrites
 }
 
 // ---- 摆场 ----
@@ -105,6 +177,7 @@ func copyShell(t *testing.T, st app.State) (*Shell, *mygoui.Tester, *clipStub) {
 	}), stubbed(func(_ *testing.T, s *Shell) {
 		s.writeClipboardText = clip.writeText
 		s.writeClipboardImage = clip.writeImage
+		s.copyDone = clip.done
 	}))
 	return sh.s, sh.tt, clip
 }
@@ -388,6 +461,51 @@ func TestAFailedCoverCopySaysSo(t *testing.T) {
 	})
 	if len(clip.imageIs()) != 0 {
 		t.Errorf("失败之后却往剪贴板里写了 %d 字节", len(clip.imageIs()))
+	}
+}
+
+// TestAFailedCoverEncodeSaysSo 断**编码失败有看得见的反馈**。
+//
+// ⚠️ **这一条和上面那一条量的是不同的失败**：上面那一条是「**取不到**那张图」
+// （HTTP 404，字节都没拿到），而这一条是「**取到了、编不成**」——也就是
+// `png.Encode` 自己报错那一档。
+//
+// ⚠️ **为什么不靠 404 那一档顺带覆盖**：取不到字节的时候 `coverPNG` 在
+// `png.Encode` **之前**就返回了，所以 404 那一条**根本走不到编码这一行**——
+// 把编码那一段的错误检查删掉、把失败那一句提示删掉，404 那一条照样绿。
+// **所以编码失败要有自己的一条**，判据是「编码失败那句提示说出来了」+「剪贴板
+// 里没有字节」。
+//
+// ⚠️ **怎么造出「编不成的那一张」**：`png.Encode` 对**宽或高为 0** 的图报
+// "invalid image size"（`image/png/writer.go` 的 `Encoder.Encode`）。而解码器
+// 不肯解一张 0 尺寸的图，所以那一档**造不出来**——只能把「取图」这一下换成
+// 一张 0 尺寸的图（接缝见 `Shell.coverImage`）。
+func TestAFailedCoverEncodeSaysSo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(coverPNG(t))
+	}))
+	defer srv.Close()
+
+	sh, tt, clip := copyShell(t, app.State{
+		HasTrack: true, Title: "一首歌", CoverURL: srv.URL + "/cover.png",
+	})
+	// 接上「这一张编不成」的桩：宽高都是 0 的图。
+	sh.coverImage = func(string) (image.Image, error) {
+		return image.NewRGBA(image.Rect(0, 0, 0, 0)), nil
+	}
+
+	if err := tt.RightClick("当前封面"); err != nil {
+		t.Fatalf("右键不了封面：%v", err)
+	}
+	if err := tt.ChooseMenuItem(copyCoverLabel); err != nil {
+		t.Fatalf("选不了 %q：%v", copyCoverLabel, err)
+	}
+
+	waitFrames(t, tt, "编码失败那一句说出来了", func() bool {
+		return tt.HasText("复制不了封面")
+	})
+	if len(clip.imageIs()) != 0 {
+		t.Errorf("编码失败之后却往剪贴板里写了 %d 字节", len(clip.imageIs()))
 	}
 }
 

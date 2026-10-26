@@ -20,6 +20,7 @@
 package ui
 
 import (
+	"image"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -181,6 +182,27 @@ type Shell struct {
 	// ⚠️ **同一份顾虑**（无头 Tester 里 `mygo.Clipboard.WriteImage` 会 panic），
 	// 而且它**会验一遍是不是 PNG**（`mygo/modules.go:184`）——不是 PNG 就返回错。
 	writeClipboardImage func(png []byte) error
+
+	// coverImage 是「拿这一张封面那张**能编码的图**」的那一下。
+	//
+	// ⚠️ **默认是空的**，空的时候走 `s.images.SourceImage`（也就是生产那一档）。
+	//
+	// ⚠️ **它只给测试用**：编码失败那一档（`png.Encode` 报错）在生产上**几乎
+	// 不会发生**——而正因如此，它**必须有测试**，否则那一档的代码被删了也没有
+	// 任何东西会红。测试要造出「一张编码不了的图」，而造它的最直接的办法就是
+	// 把「取图」这一下换成一张尺寸为 0 的图（`png.Encode` 对它报
+	// "invalid image size"）。
+	coverImage func(url string) (image.Image, error)
+
+	// copyDone 是「某一趟后台复制**结束了**」的那个信号。
+	//
+	// ⚠️ **它只给测试用**：生产那一档是 nil（没有这一层）。测试要靠它知道
+	// 「先发起的那一趟跑完了」——而那一趟**可能什么都没写**（被后来的动作
+	// 作废了），所以**光看剪贴板里的内容是等不到它结束的**。
+	//
+	// ⚠️ **它带一个参数**：那个号（`copyGeneration` 发的）——这样测试能
+	// 分辨「结束的是哪一趟」。
+	copyDone func(gen uint64)
 
 	// images 是网络封面缓存。整个窗口共用一份；迷你窗口借的是主窗口那一份
 	// （`adoptShared`），因为落盘的磁盘缓存目录只能有一个 writer/一本账，
