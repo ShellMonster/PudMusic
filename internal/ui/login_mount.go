@@ -6,9 +6,11 @@
 package ui
 
 import (
+	"context"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -80,15 +82,24 @@ func newCredentialTransport() *app.CredentialTransport {
 }
 
 func buildCredentialTransport() *app.CredentialTransport {
+	dialer := &net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
 	base := &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		// 代理从环境变量读（HTTP_PROXY / HTTPS_PROXY）。
-		// B 站有些地区直连不通，而用户在命令行里设一次代理
-		// 比在设置页里找「网络设置」简单得多。
-		Proxy: http.ProxyFromEnvironment,
+		// 代理走设置页那一格（`app.ProxyForSettings` 每请求现读设置快照）：
+		// http/https/socks5 三档在这里给地址；SOCKS4 http.Transport 不认，
+		// 它的隧道在下面 `DialContext` 那一半（`app.Socks4Tunnel`），两个钩子
+		// 必须成对改。「不使用代理」回落到环境变量，跟这一层从前的行为一致。
+		Proxy: func(req *http.Request) (*url.URL, error) {
+			return app.ProxyForSettings(app.ProxySnapshot(), req)
+		},
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if tunnel, ok := app.Socks4Tunnel(app.ProxySnapshot()); ok {
+				return tunnel(ctx, network, addr)
+			}
+			return dialer.DialContext(ctx, network, addr)
+		},
 		// B 站的接口全是 HTTPS。关掉 HTTP/2 是因为 HTTP/2 的连接合并
 		// 会让「一次请求带了哪些头」变得不可逐跳观察——
 		// 而凭据边界那一层恰恰要求逐跳看得见。
