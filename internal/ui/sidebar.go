@@ -320,9 +320,8 @@ func (s *Shell) viewSideBrand(c *ui.Context, collapsed bool) {
 	// `mygo/ui/context.go` 的 `TitleBar{Height, Left, Right}`）。
 	// ⚠️ 顶栏那一行**不让**这几十像素（票 #286：顶栏只盖内容区，侧栏那一片不盖），
 	// 而侧栏是通栏的 —— **两处的理由不一样**。
-	bar := c.TitleBar()
 	row := ui.Row(c).Key("side-brand").Gap(space.Px8).AlignItems(ui.Center).
-		Padding(s.sideBrandTopPad(), space.Px12, space.Px12, space.Px16+bar.Left)
+		Padding(s.sideBrandTopPad(), space.Px12, space.Px12, space.Px16)
 	if collapsed {
 		// 🔴 **折叠态必须把左右那两格内边距去掉**：侧栏折叠后是 72，而其中
 		// **9 像素是右缘那条把手和分隔线**（8 + 1）——内容区只剩 63。
@@ -346,7 +345,7 @@ func (s *Shell) viewSideBrand(c *ui.Context, collapsed bool) {
 				TextColor(ink.AccentOn(t))
 			return
 		}
-		ui.Text(c, appName).FontSize(scale.Font(c, scale.BrandName)).Bold().
+		ui.Text(c, appName).NoWrap().FontSize(scale.Font(c, scale.BrandName)).Bold().
 			TextColor(ink.AccentOn(t))
 	})
 }
@@ -367,7 +366,7 @@ func (s *Shell) viewSideBrand(c *ui.Context, collapsed bool) {
 // 上沿在 y=32——**差 2 像素**。别把这一格调小：调小 logo 就压在红黄绿底下了。
 func (s *Shell) sideBrandTopPad() float32 {
 	if runtime.GOOS == "darwin" && !s.fullScreen {
-		return 32
+		return 44
 	}
 	return 12
 }
