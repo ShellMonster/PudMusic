@@ -199,6 +199,16 @@ func (c *Client) Danmaku(ctx context.Context, cid string) ([]Danmaku, error) {
 // ⚠️ **它不会自动解**：`net/http` 只自动解 gzip，不解 deflate——所以
 // 响应体到这一层还是压着的。
 func inflateDanmaku(raw []byte) ([]byte, error) {
+	// ⚠️ **0 字节不是错**：B 站对「这个 cid 没有弹幕」有可能回一个**空的**
+	// body（实测过），而那是**正常**的一种——零条弹幕，不是错误。
+	//
+	// ⚠️ **这一条必须先判**：不然 `flate.NewReader` 会拿一个空的 reader 去解，
+	// 报出来的是一句 `unexpected EOF`——而那说的是「压缩层坏了」，
+	// 和真相（压根没有内容）**不是一回事**。
+	if len(raw) == 0 {
+		return nil, nil
+	}
+
 	r := flate.NewReader(bytes.NewReader(raw))
 	defer r.Close()
 
@@ -206,47 +216,43 @@ func inflateDanmaku(raw []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("bili: 弹幕的压缩层解不开（不是原始 deflate？）：%w", err)
 	}
-	// ⚠️ **空 body 不是错**：B 站对「这个 cid 没有弹幕」回的就是一个空的
-	// （或者只有外壳的）响应。空列表是正常的一种。
 	return out, nil
 }
 
 // parseDanmaku 解那份 XML。
 //
-// ⚠️ **流式读**：一条视频的弹幕有几百到几千条，一次性塞进一个结构体是
-// 一样的内存，但流式读能**边读边扔**——解析完只留我们要的那几项。
+// # 🔴 **为什么不是「一个 decoder 读到底」**
+//
+// 最直观的写法是 `xml.NewDecoder` + `Token()` + `DecodeElement`。那一档
+// 有个**静默**的失败：`DecodeElement` 遇到**解不开**的 `<d>` 会**报错**，
+// 而那个错**让整个 decoder 卡住**——后面的合法弹幕**一条都读不到**。
+//
+// ⚠️ **实测会踩到的那一档**：弹幕的正文是**用户自己打的字**，什么字符都
+// 可能有。`encoding/xml` 对**非法**的 XML 是**报错**的——
+// 一个**控制字符**（实测 U+0001）或一个**没定义**的实体都会触发。
+//
+// ⇒ 症状是「这个视频只有一条弹幕」（第一条之后的全丢），而界面上看着是
+// 「这个视频弹幕很少」——**看不出坏了**。
+//
+// ⇒ 所以这里**不用一个 decoder 读到底**，而是**先把 `<d>` 的边界找出来、
+// 再一条一条单独解**：解不开的**只丢那一条**，后面的照读。
+//
+// # 边界怎么找
+//
+// B 站的格式是紧挨着的 `<d p="…">正文</d>`，而实测**正文里不会出现
+// `</d>`**（三个 cid 一共 5400 条，`</d>` 的出现次数与 `<d p="` 的次数
+// **相等**，正文里也没有转义过的 `&lt;/d&gt;`）。⇒ 按 `<d p="` 开、按
+// `</d>` 收，切出来的一定是一条完整的弹幕。
+//
+// ⚠️ **切分靠的是字节查找，不是 XML 解析**——所以它对**解不开的那一条**
+// 也照样成立（那正是要靠它才救得回来的那一档）。
 func parseDanmaku(xmlBytes []byte) ([]Danmaku, error) {
-	dec := xml.NewDecoder(bytes.NewReader(xmlBytes))
-	// ⚠️ **不要严格模式**：弹幕的正文是**用户自己打的字**，什么字符都可能有
-	// （实测有 `&amp;`、`&lt;`/`&gt;`；而一个**没定义**的实体或者一个**裸**
-	// `&` 在严格模式下是**报错**的——而且报错的位置在**那一条**上，
-	// 于是后面几百条弹幕**全丢**，症状是「只显示了几条弹幕」。
-	//
-	// 非严格模式下 `encoding/xml` 会把没定义的实体原样留着、继续往下读。
-	dec.Strict = false
-
 	var out []Danmaku
-	for {
-		tok, err := dec.Token()
-		if err == io.EOF {
-			break
-		}
+	for _, seg := range danmakuSegments(xmlBytes) {
+		// ⚠️ **每一条单独解**：解不开的**只丢那一条**。
+		el, err := decodeDanmakuSegment(seg)
 		if err != nil {
-			// 🔴 **一条读不懂的弹幕不许把整份丢掉**：B 站的正文里什么字符都
-			// 可能有，而 `encoding/xml` 对**非法**的 XML 是**报错**的。
-			// 所以这里把「读不懂」当成「这一份到此为止」，保留已经读到的那些。
-			return out, nil
-		}
-		se, ok := tok.(xml.StartElement)
-		if !ok || se.Name.Local != "d" {
 			continue
-		}
-
-		var el danmakuElem
-		if err := dec.DecodeElement(&el, &se); err != nil {
-			// 🔴 **读不懂的这一条不许把整份丢掉**：已经读到的那些留着，
-			// 剩下的不读了。弹幕是装饰——少几句比一句都不显示强。
-			return out, nil
 		}
 		d, ok := danmakuOf(el)
 		if !ok {
@@ -255,6 +261,66 @@ func parseDanmaku(xmlBytes []byte) ([]Danmaku, error) {
 		out = append(out, d)
 	}
 	return out, nil
+}
+
+// decodeDanmakuSegment 解**一条**弹幕。
+//
+// ⚠️ **非严格模式**：弹幕的正文是**用户自己打的字**，什么字符都可能有。
+// 一个**没定义**的实体（`&foo;`）在严格模式下是**报错**的，而它**原样留着
+// 就挺好**（那是用户打的字）——非严格模式下 `encoding/xml` 把它原样带出来。
+//
+// ⚠️ **但控制字符仍然解不开**：U+0001 这类字符 XML 一律不许，即使非严格
+// 模式也会报错（实测）。⇒ 那一**条**被丢掉，**别的条不受影响**。
+func decodeDanmakuSegment(seg []byte) (danmakuElem, error) {
+	dec := xml.NewDecoder(bytes.NewReader(seg))
+	dec.Strict = false
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return danmakuElem{}, err
+		}
+		if err != nil {
+			return danmakuElem{}, err
+		}
+		se, ok := tok.(xml.StartElement)
+		if !ok || se.Name.Local != "d" {
+			continue
+		}
+		var el danmakuElem
+		if err := dec.DecodeElement(&el, &se); err != nil {
+			return danmakuElem{}, err
+		}
+		return el, nil
+	}
+}
+
+// danmakuSegments 把那份 XML 切成一条条 `<d>…</d>`。
+//
+// ⚠️ **切出来的是原始字节**（不是解过的）——所以调用方能一条一条**单独**
+// 解，而一条解不开不会影响别的。
+func danmakuSegments(xmlBytes []byte) [][]byte {
+	// ⚠️ **找的是 `<d p="` 而不是 `<d `**：B 站的弹幕标签**一定**带 `p`
+	// 属性（那 9 段就在那儿），而正文里出现 `<d `（一个**没转义**的 `<`）
+	// 只在「那一条本来就解不开」时可能——那时按 `<d ` 找会把它当成新的一条，
+	// 于是**接上**半截正文。
+	const start = `<d p="`
+	var out [][]byte
+	for i := 0; i < len(xmlBytes); {
+		j := bytes.Index(xmlBytes[i:], []byte(start))
+		if j < 0 {
+			break
+		}
+		j += i
+		k := bytes.Index(xmlBytes[j:], []byte("</d>"))
+		if k < 0 {
+			// 没有收尾的标签（响应被截断了）：后面没有了，收工。
+			break
+		}
+		k += j
+		out = append(out, xmlBytes[j:k+len("</d>")])
+		i = k + len("</d>")
+	}
+	return out
 }
 
 // looksLikeABlockedPage 报这堆字节是不是**B 站风控挡下来的那一页 HTML**。

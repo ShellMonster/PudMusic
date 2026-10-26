@@ -2199,8 +2199,16 @@ var Items = []Item{
 		// **一条黑字弹幕在界面上看着完全正常**。所以段数不够的那一条要丢掉。
 		//
 		// ⚠️ **一条读不懂的不许把整份丢掉**：弹幕的正文是**用户自己打的字**，
-		// 什么字符都可能有，而一个没定义的实体在严格模式下是**报错**的——
-		// 报错的位置在那一条上，于是后面几百条全丢（症状是「这个视频弹幕很少」）。
+		// 什么字符都可能有，而一个**控制字符**（实测 U+0001）在 XML 里是
+		// **报错**的——报错的位置在那一条上。
+		//
+		// 🔴 **这一档最省事的写法是错的**：用一个 `xml.Decoder` 读到底的话，
+		// 那个错**让整个 decoder 卡住**——后面的合法弹幕**一条都读不到**
+		// （症状是「这个视频只有一条弹幕」）。⇒ 解析要**一条一条单独解**：
+		// 解不开的**只丢那一条**。
+		//
+		// ⚠️ **而没定义的实体要「原样留着」**（`&foo;`）——那是用户打的字，
+		// 非严格模式把它原样带出来，**不丢那一条**。
 		Spec: "B 站那一份弹幕自己来：原始 deflate（不是 zlib）解开、XML 里 `p` 那 9 段逐段切对（时间/模式/字号/十进制颜色）、正文里的 XML 实体解开、读不出来的一条只丢那一条；拉不到要有话说",
 		Tests: []string{
 			"TestDanmakuReadsEveryFieldOfEveryLine",
@@ -2220,6 +2228,11 @@ var Items = []Item{
 			"TestDanmakuKeepsTheOrderBiliGave",
 			"TestDanmakuSaysSoWhenTheAnswerIsNotDanmaku",
 			"TestDanmakuWithTheFeatureTurnedOffIsNotAnError",
+			"TestDanmakuKeepsGoingAfterALineWithAControlCharacter",
+			"TestDanmakuGivesEveryLineItsOwnID",
+			"TestTheRealResponsesGiveTheExpectedNumberOfLines",
+			"TestTheFixtureMatchesTheServerBytes",
+			"TestDanmakuWithAnEmptyBodyIsNotAnError",
 		},
 	},
 	{
