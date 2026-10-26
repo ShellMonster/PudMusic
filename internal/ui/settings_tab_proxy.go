@@ -52,7 +52,7 @@ func (s *Shell) settingsProxy(c *ui.Context, st app.Settings, ro bool) {
 		}
 		chosen := cur.Type
 		s.settingRow(c, "代理类型", "", func() {
-			enumSelect(c, &chosen, items, "选择代理类型", proxySelectWidth, 0, ro)
+			enumSelect(c, &chosen, items, "选择代理类型", s.settingsControlFitW(c, proxySelectWidth), 0, ro)
 		})
 		if chosen != cur.Type {
 			s.applySetting("代理类型", func(s *app.Settings) { s.ProxySettings.Type = chosen })
@@ -70,17 +70,17 @@ func (s *Shell) settingsProxy(c *ui.Context, st app.Settings, ro bool) {
 		// ⚠️ **不许给输入框加 Key**：Key 只能挂在「创建时没有处理输入」的
 		// 控件上，挂上去直接 panic（`ui/element.go:658`）。
 		s.settingRow(c, "主机", "", func() {
-			ui.TextInput(c, &host).Width(settingsControlW).Label("代理主机").Placeholder("例如 127.0.0.1").Disabled(ro)
+			ui.TextInput(c, &host).Width(s.settingsControlFitW(c, settingsControlW)).Label("代理主机").Placeholder("例如 127.0.0.1").Disabled(ro)
 		})
 		s.settingRow(c, "端口", "", func() {
-			ui.TextInput(c, &port).Width(settingsControlW).Label("代理端口").Placeholder("例如 7890").Disabled(ro)
+			ui.TextInput(c, &port).Width(s.settingsControlFitW(c, settingsControlW)).Label("代理端口").Placeholder("例如 7890").Disabled(ro)
 		})
 		s.settingRow(c, "用户名", "", func() {
-			ui.TextInput(c, &user).Width(settingsControlW).Label("代理用户名").Placeholder("").Disabled(ro)
+			ui.TextInput(c, &user).Width(s.settingsControlFitW(c, settingsControlW)).Label("代理用户名").Placeholder("").Disabled(ro)
 		})
 		if showPass {
 			s.settingRow(c, "密码", "", func() {
-				ui.TextInput(c, &pass).Width(settingsControlW).Label("代理密码").Placeholder("").Password().Disabled(ro)
+				ui.TextInput(c, &pass).Width(s.settingsControlFitW(c, settingsControlW)).Label("代理密码").Placeholder("").Password().Disabled(ro)
 			})
 		}
 		if ro {
