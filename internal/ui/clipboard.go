@@ -189,9 +189,15 @@ func (c *copyClipboard) isLatest(gen uint64) bool {
 //
 // ⚠️ **写的时候不握着那把锁**（理由见类型注释里那一条「不会死锁」）。
 func (c *copyClipboard) commit(a copyAction) (bool, error) {
+	// ⚠️ **mine 是「我这一趟」的号**：收敛会把 `a` 换成**别的**那一档（把它
+	// 写回去），所以最后回答「剪贴板里是不是我这一份」时要比的是 `mine`，
+	// 不是 `a.gen`——否则**过时的封面那一趟会以为自己赢了**（它收敛之后
+	// `a.gen` 是**新**那一档的号），于是弹一句「封面已复制」——而剪贴板里
+	// 其实是那段文字。
+	mine := a.gen
 	// ⚠️ **写之前先比一次**：不是最新的一趟**什么都不写**——剪贴板里压根不
 	// 出现过时的内容（这是大多数情形：旧封面还在下网络，而文本早就写完了）。
-	if !c.isLatest(a.gen) {
+	if !c.isLatest(mine) {
 		return false, nil
 	}
 	for {
@@ -208,7 +214,7 @@ func (c *copyClipboard) commit(a copyAction) (bool, error) {
 			// ⚠️ **「我这一份现在在剪贴板里」还不够**：用户可能又按了别的
 			// （那一档还没写进去）。那时候说「已复制」是在骗人——它马上就要
 			// 被换掉。而**那一档会自己说**。
-			return c.isLatest(a.gen), nil
+			return c.isLatest(mine), nil
 		}
 		// 有一档比我新的，它在我写之前就写进去了，而我把它盖掉了 →
 		// **把它写回去**（然后再比一次）。

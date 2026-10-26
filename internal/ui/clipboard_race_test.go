@@ -401,4 +401,16 @@ func TestACoverAlreadyInsideTheWriteDoesNotWinOverALaterText(t *testing.T) {
 		t.Errorf("剪贴板里最后是 %q，want \"text\"（用户最后按的是歌曲信息）"+
 			"——写的顺序：%v", got, slot.writes())
 	}
+	// ⚠️ **过时的封面那一趟不许说「封面已复制」**：它收敛之后剪贴板里是**那段
+	// 文字**，而用户最后按的也是文字——说「封面已复制」是在骗人（用户会以为
+	// 剪贴板里是那张图，粘出去却是文字）。
+	//
+	// ⚠️ **要画帧才看得到**：提示是**画面上的状态**，而 `HasText` 读的是
+	// **最后一帧**——那一趟跑完之后还没画过帧，所以这里先画几帧。
+	tt.Frame()
+	tt.Frame()
+	if tt.HasText("封面已复制") {
+		t.Errorf("过时的封面那一趟说了「封面已复制」——剪贴板里其实是歌曲信息"+
+			"（写的顺序：%v）", slot.writes())
+	}
 }
