@@ -509,6 +509,47 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// 🔴 **评论接口那三个静默出错的坑**（票 #571）：
+		//
+		//	buvid3  请求头里一出现 buvid3，B 站就把评论列表砍到 3 条并宣称「到底了」
+		//	w_rid   走的是**不带 WBI** 的那个接口，所以请求串里不该有签名
+		//	ps      上限 30（超了 B 站默默截断，翻页从第二页起会漏掉一批）
+		//
+		// ⚠️ **buvid3 那一条要防的是两处**：「代码里没写 `Buvid: true`」**不够**
+		// ——jar 里的 cookie 是在运输层之前加上的（`http.Client.send` 里先
+		// `Jar.Cookies` 再 `RoundTrip`），而 jar 里确实会有 buvid3（登录时
+		// B 站下发的那批 cookie 全被存了下来）。所以评论请求显式写
+		// `NoBuvid: true`，在运输层把 buvid 那一族摘掉（**登录态照带**）。
+		//
+		// 还有「-404（对象不存在）」与「0 条评论」**必须说得不一样**：混成一句的
+		// 话，用户看到「这个对象不在了」会以为歌没了，而歌好好地摆在那儿。
+		//
+		// 而 **-403 在评论这一处判成「可重试」**（全局那张表仍判它不可重试——
+		// 那在别的接口上是对的，在评论接口上是错的）。
+		Spec: "评论接口：请求头里不带 buvid3（jar 里的也不带，登录态照带）、不签 WBI、ps 不超过 30；-404 与「0 条评论」说得不一样；-403 在评论这一处可重试",
+		Tests: []string{
+			"TestCommentListNeverSendsBuvid",
+			"TestCommentListNeverSendsTheBuvidThatLivesInTheJar",
+			"TestTheLoginCookiesDoNotMakeTheCommentRequestCarryBuvid",
+			"TestTheNoBuvidPathIsSafeToCallConcurrently",
+			"TestCommentListDoesNotAskForBuvid",
+			"TestCommentListIsNotSigned",
+			"TestCommentListGoesToTheUnsignedEndpoint",
+			"TestCommentListNeverAsksForMoreThanThirty",
+			"TestCommentListSendsTheTypeAndOid",
+			"TestCommentListReadsTheFieldsOffTheRealShape",
+			"TestCommentListSaysTheObjectIsGoneWhenBiliSays404",
+			"TestTheEmptyListAndTheMissingObjectSayDifferentThings",
+			"TestCommentListReadsTheEmptyPage",
+			"TestAnEmptyPageMidwayIsNotNoComments",
+			"TestCommentTreatsForbiddenAsWorthRetrying",
+			"TestIsUpperMarksOnlyTheUpAuthorsOwnComment",
+			"TestUpReplyCommentsAreNotMarkedAsTheUpper",
+			"TestAPictureWithAFractionalSizeDoesNotTakeTheWholePageDown",
+		},
+	},
+	{
+		Category: HTTP,
 		// 风控和限流**都不判成「可重试」**：界面上那枚「重试」是立刻再问一次
 		// （没有退避），而这两样要等的是时间——判成可重试的话用户点一次撞一次
 		// （票 #316 收窄了风控，票 #346 把限流收到同一档）。
