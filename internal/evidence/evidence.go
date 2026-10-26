@@ -2256,6 +2256,62 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// B 站那一份弹幕（`/x/v1/dm/list.so`）。**这一条回的不是 JSON**——
+		// 它回的是**原始 deflate 的 XML**（实测 2026-10-27：响应头
+		// `Content-Type: text/xml` + `Content-Encoding: deflate`，而 deflate 是
+		// **裸的**，头两字节 `c5 55`，不是 zlib 的 `78 xx`）。
+		//
+		// 🔴 **「解不出 JSON」是一个静默的失败**：症状是「一条弹幕都没有」，
+		// 而界面上看不出任何异样。所以另开了 `DoRaw`（拿原文不解），而**错误
+		// 分类仍走 `Do` 那一条**——「能不能重试」那张表是全项目唯一的一处
+		// （`retry.go`），`DoRaw` 自己造一套的话，弹幕那条路上的「重试」会给错。
+		//
+		// ⚠️ **压缩那一档是静默的**：拿 `compress/zlib` 去解会报一句看不懂的错
+		// （`flate: corrupt input before offset 5`），而症状是「一条弹幕都没有」。
+		// ⇒ 有一条测试专门钉「deflate 不是 zlib」。
+		//
+		// ⚠️ **`p` 那 9 段第 8 段是 19 位的大整数**（弹幕 id）——走过 `float64`
+		// 会掉精度。而 `p` 段数不够的时候，后面几段是空的 ⇒ 颜色变成 0（全黑），
+		// **一条黑字弹幕在界面上看着完全正常**。所以段数不够的那一条要丢掉。
+		//
+		// ⚠️ **一条读不懂的不许把整份丢掉**：弹幕的正文是**用户自己打的字**，
+		// 什么字符都可能有，而一个**控制字符**（实测 U+0001）在 XML 里是
+		// **报错**的——报错的位置在那一条上。
+		//
+		// 🔴 **这一档最省事的写法是错的**：用一个 `xml.Decoder` 读到底的话，
+		// 那个错**让整个 decoder 卡住**——后面的合法弹幕**一条都读不到**
+		// （症状是「这个视频只有一条弹幕」）。⇒ 解析要**一条一条单独解**：
+		// 解不开的**只丢那一条**。
+		//
+		// ⚠️ **而没定义的实体要「原样留着」**（`&foo;`）——那是用户打的字，
+		// 非严格模式把它原样带出来，**不丢那一条**。
+		Spec: "B 站那一份弹幕自己来：原始 deflate（不是 zlib）解开、XML 里 `p` 那 9 段逐段切对（时间/模式/字号/十进制颜色）、正文里的 XML 实体解开、读不出来的一条只丢那一条；拉不到要有话说",
+		Tests: []string{
+			"TestDanmakuReadsEveryFieldOfEveryLine",
+			"TestDanmakuCutsTheNineFieldsOfThePAttribute",
+			"TestDanmakuUnwrapsTheXMLEntities",
+			"TestDanmakuUnwrapsIsDeflateNotZlib",
+			"TestDoRawHandsBackTheBytesUndecoded",
+			"TestDoRawReportsTheSameErrorsAsDo",
+			"TestDanmakuAsksTheDanmakuEndpoint",
+			"TestDanmakuWithoutACidDoesNotAsk",
+			"TestDanmakuWithNoDanmakuIsNotAnError",
+			"TestDanmakuKeepsWhatItCouldReadWhenOneLineIsBroken",
+			"TestDanmakuIgnoresLinesItCannotUnderstand",
+			"TestDanmakuUnwrapsAWholeResponseThatIsDeflated",
+			"TestDanmakuKeepsTheRowIDAsAString",
+			"TestDanmakuGivesEveryLineItsOwnID",
+			"TestDanmakuKeepsTheOrderBiliGave",
+			"TestDanmakuSaysSoWhenTheAnswerIsNotDanmaku",
+			"TestDanmakuWithTheFeatureTurnedOffIsNotAnError",
+			"TestDanmakuKeepsGoingAfterALineWithAControlCharacter",
+			"TestTheRealResponsesGiveTheExpectedNumberOfLines",
+			"TestTheFixtureMatchesTheServerBytes",
+			"TestDanmakuWithAnEmptyBodyIsNotAnError",
+		},
+	},
+	{
+		Category: HTTP,
 		// 联想词那个接口（Biu 的 `getSearchSuggestMain`）。**参数逐个对着上游抄**，
 		// 少一个的症状在界面上像「联想词永远是空的那一档」，而那和「拉不到」长得
 		// 一模一样。
