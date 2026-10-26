@@ -97,6 +97,17 @@ func (s *Shell) installLifecycle() {
 	// DidBecomeActive——所以这里不会因为 RestoreFromBackground 里的
 	// App.Focus 又绕回来。
 	mygo.App.OnActivate(func(bool) { s.openWindow() })
+
+	// 系统把一个音频文件交给本应用（双击、拖到 Dock 图标上）时的那一条路。
+	//
+	// ⚠️ **必须在 Run 之前装**（框架的注释写得很明确，`mygo/app.go:470-477`）：
+	// 启动命令行里的文件是在应用 ready 之后交付的，回调装晚了那一次就永远
+	// 收不到——而「双击一个文件，应用起来却什么也没放」正是这一票要治的。
+	//
+	// ⚠️ **它排在 `OnOpenURL` 那一段的后面，不是前面**：两件事互不干扰
+	// （一个交文件、一个交链接），而文件那一条要多做一步「让开迷你播放器」
+	// （见 `openfile.go`）。
+	s.installOpenFile()
 }
 
 // handleDeepLink 是「biu://… 指到了 route」那一半：让开迷你，跳到那一页。

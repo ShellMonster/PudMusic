@@ -2004,6 +2004,15 @@ HeroUI `<Drawer>`**。
    [网易云的下一首播放](https://jingyan.baidu.com/article/ac6a9a5ea1d10c6a643eac38.html)；
    这些是历史版本对照，不代表本次运行了两个客户端。
 
+   ⚠️ **系统把一个文件交给应用这一条（票 #557，2026-10-26）也归到「立即播放」
+   那一档**：访达 / 资源管理器双击一个音频、或者把文件拖到程序坞图标上，
+   走的是 `EnqueueAndPlayNow`（追加到队尾 + 打断），**同样不清空**用户已经排好
+   的队列——它是「放这一首」，不是「放这一批」。
+
+   ⚠️ **它和「拖进窗口」不是同一件事**：拖进窗口是把文件的**父目录**加进
+   本地音乐（`localmusic_drop.go`），而双击是**直接放这一首**。两件事的用户
+   意图不同（「这批文件归我管」vs「放这一首」）。
+
    上游 Biu v1.16.0 的 [`play()`](https://github.com/wood3n/biu/blob/v1.16.0/src/store/play-list.ts#L556-L630)
    对新条目追加并立即播，**已经在列表里的那一条则是选中它、不重复入队**
    （`existItem` 那一支）；[`playList()`](https://github.com/wood3n/biu/blob/v1.16.0/src/store/play-list.ts#L643-L654)

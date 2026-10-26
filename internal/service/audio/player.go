@@ -104,7 +104,7 @@ func Open(path string) (*Player, error) {
 			// 就是改画面上的一句话。
 			//
 			// 而**多一个 sentinel** 是为了上面那一层能认出它：「这一条放不了」
-			// 得说人话（见 `internal/app/announce.go` 的 `announceErrText`），
+			// 得说人话（见 `internal/app/announce.go` 的 `FriendlyErrText`），
 			// 而认一个英文句子不如认一个类型。
 			return nil, fmt.Errorf("%s: %w", path, ErrLocalFormat)
 		}
@@ -271,7 +271,7 @@ func openDecoder(r io.ReadSeeker) (mygoaudio.Decoder, string, error) {
 // 机器放不了」。
 //
 // ⚠️ **它的话是英文的**：这一句是给日志和界面上的红字用的，而**说给用户听的
-// 那一句在上一层**（`internal/app/announce.go` 的 `announceErrText`）——
+// 那一句在上一层**（`internal/app/announce.go` 的 `FriendlyErrText`）——
 // 读屏软件是逐字念的，不能念英文系统错。
 var ErrLocalFormat = errors.New("unsupported audio format")
 
