@@ -6,12 +6,24 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ShellMonster/Biu_Go/internal/service/localmusic/localmusictest"
 )
 
-// 删文件是这个应用里**唯一**会永久毁掉用户数据的动作，所以这一组测试盯的
-// 不是「有没有报错」，而是**磁盘上还剩下什么**。
+// 删文件是这个应用里**唯一**会动用户数据文件的动作，所以这一组测试盯的
+// 不是「有没有报错」，而是**磁盘上还剩下什么**——以及**回收站里有什么**。
 //
 // 每一条规矩都有一个「拿掉修复会不会红」的对照，注释里写清楚那是哪一种拿法。
+
+// trashFor 造一个成功的假回收站，并返回它和它的废纸篓目录。
+//
+// ⚠️ **废纸篓目录是**临时目录**里的一个**：那正是「用户找得回来」的那件事
+// 能被验到的原因——文件从原处搬走了，但**在假废纸篓里还在**。
+func trashFor(t *testing.T) (*localmusictest.Fake, string) {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "废纸篓")
+	return localmusictest.Success(bin), bin
+}
 
 // exists 报路径还在不在。
 func exists(t *testing.T, path string) bool {
@@ -35,15 +47,20 @@ func trOf(t *testing.T, path string) Track {
 	return Track{Path: path, Canonical: canon}
 }
 
-// TestDeleteActuallyRemovesTheFile 钉住最基本的那一条：**真的删**。
+// TestDeleteActuallyRemovesTheFile 钉住最基本的那一条：**真的从原处搬走**。
 //
 // 规格第 83 条是「我想真的从磁盘删掉某个本地音乐文件」。只把列表里那一行
-// 去掉（不发一条 unlink）是最像的一种「实现了」——用户关了应用一看歌还在。
+// 去掉（不搬走文件）是最像的一种「实现了」——用户关了应用一看歌还在。
+//
+// ⚠️ **而且文件得在废纸篓里找得回来**（票 #558）：这才是「从永久删除改成
+// 可恢复」的那一件。只断「原处没了」的话，一个「偷偷 `os.Remove`」的实现
+// 照样全绿——而那正是这一票明确要消灭的那一种。
 func TestDeleteActuallyRemovesTheFile(t *testing.T) {
 	root := t.TempDir()
 	song := songPath(t, root, "歌.mp3")
+	trash, bin := trashFor(t)
 
-	if err := Delete(trOf(t, song), []string{root}); err != nil {
+	if err := Delete(trOf(t, song), []string{root}, trash); err != nil {
 		t.Fatal(err)
 	}
 	if exists(t, song) {
@@ -52,6 +69,10 @@ func TestDeleteActuallyRemovesTheFile(t *testing.T) {
 	// 目录本身不能跟着没了。
 	if !exists(t, root) {
 		t.Fatal("目录被一起删了")
+	}
+	// ⚠️ **它在废纸篓里**：用户能找回来。
+	if got, err := os.ReadDir(bin); err != nil || len(got) != 1 {
+		t.Fatalf("废纸篓里有 %d 项（err=%v），want 1", len(got), err)
 	}
 }
 
@@ -64,11 +85,12 @@ func TestDeleteActuallyRemovesTheFile(t *testing.T) {
 // 帧）、别的代码塞了路径进来、或者一份落盘状态还没刷新。没有这道门，
 // 「删一首」就可能变成「删掉任何一个用户能说出路径的文件」。
 func TestDeleteRefusesAPathOutsideEveryRoot(t *testing.T) {
+	trash, _ := trashFor(t)
 	root := t.TempDir()
 	outside := t.TempDir()
 	victim := songPath(t, outside, "别人的歌.mp3")
 
-	err := Delete(trOf(t, victim), []string{root})
+	err := Delete(trOf(t, victim), []string{root}, trash)
 
 	if !errors.Is(err, ErrOutsideRoots) {
 		t.Fatalf("错是 %v，want ErrOutsideRoots", err)
@@ -85,6 +107,7 @@ func TestDeleteRefusesAPathOutsideEveryRoot(t *testing.T) {
 //
 // 拿掉修复的方式：把 `filepath.Rel` 换成 `strings.HasPrefix`。
 func TestDeleteRefusesASiblingDirectoryWithTheSamePrefix(t *testing.T) {
+	trash, _ := trashFor(t)
 	parent := t.TempDir()
 	music := filepath.Join(parent, "音乐")
 	sibling := filepath.Join(parent, "音乐备份")
@@ -96,7 +119,7 @@ func TestDeleteRefusesASiblingDirectoryWithTheSamePrefix(t *testing.T) {
 	}
 	victim := songPath(t, sibling, "歌.mp3")
 
-	if err := Delete(trOf(t, victim), []string{music}); !errors.Is(err, ErrOutsideRoots) {
+	if err := Delete(trOf(t, victim), []string{music}, trash); !errors.Is(err, ErrOutsideRoots) {
 		t.Fatalf("错是 %v，want ErrOutsideRoots", err)
 	}
 	if !exists(t, victim) {
@@ -109,13 +132,14 @@ func TestDeleteRefusesASiblingDirectoryWithTheSamePrefix(t *testing.T) {
 // `os.Remove` 对**空**目录是成功的——所以没有这道检查的话，「删一首」在
 // 用户把歌删光之后就会把他整个音乐文件夹删掉，而且不报任何错。
 func TestDeleteRefusesADirectory(t *testing.T) {
+	trash, _ := trashFor(t)
 	root := t.TempDir()
 	dir := filepath.Join(root, "空的文件夹")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	err := Delete(trOf(t, dir), []string{root})
+	err := Delete(trOf(t, dir), []string{root}, trash)
 
 	if !errors.Is(err, ErrNotRegular) {
 		t.Fatalf("错是 %v，want ErrNotRegular", err)
@@ -131,6 +155,7 @@ func TestDeleteRefusesADirectory(t *testing.T) {
 // empty`，那句话对用户毫无意义——他看到的是「删这首失败：directory not
 // empty」，而他点的是一个歌名。
 func TestDeleteRefusesANonEmptyDirectory(t *testing.T) {
+	trash, _ := trashFor(t)
 	root := t.TempDir()
 	dir := filepath.Join(root, "专辑")
 	if err := os.Mkdir(dir, 0o755); err != nil {
@@ -138,7 +163,7 @@ func TestDeleteRefusesANonEmptyDirectory(t *testing.T) {
 	}
 	songPath(t, dir, "里面的歌.mp3")
 
-	err := Delete(trOf(t, dir), []string{root})
+	err := Delete(trOf(t, dir), []string{root}, trash)
 
 	if !errors.Is(err, ErrNotRegular) {
 		t.Fatalf("错是 %v，want ErrNotRegular", err)
@@ -164,6 +189,7 @@ func TestDeleteRefusesANonEmptyDirectory(t *testing.T) {
 // 拿掉修复的方式：在 Delete 里先 `EvalSymlinks` 再 `os.Remove`（Biu 上游
 // 那边为了算身份做过 `realpath`，很容易顺手就用它删）。
 func TestDeleteRemovesTheSymlinkAndNotWhatItPointsAt(t *testing.T) {
+	trash, _ := trashFor(t)
 	base := t.TempDir()
 	library := filepath.Join(base, "音乐")
 	outside := filepath.Join(base, "别处")
@@ -192,7 +218,7 @@ func TestDeleteRemovesTheSymlinkAndNotWhatItPointsAt(t *testing.T) {
 		t.Fatalf("链接那一行不在列表里：%v", pathsOf(res.Tracks))
 	}
 
-	if err := Delete(row, []string{library}); err != nil {
+	if err := Delete(row, []string{library}, trash); err != nil {
 		t.Fatal(err)
 	}
 	if exists(t, link) {
@@ -208,10 +234,11 @@ func TestDeleteRemovesTheSymlinkAndNotWhatItPointsAt(t *testing.T) {
 // 传空不是「有权限删」，是「没有依据删」。这条守的是设置没挂上、
 // 或者一次调用漏了参数的那条路。
 func TestDeleteRefusesAnEmptyRootList(t *testing.T) {
+	trash, _ := trashFor(t)
 	root := t.TempDir()
 	song := songPath(t, root, "歌.mp3")
 
-	if err := Delete(trOf(t, song), nil); !errors.Is(err, ErrOutsideRoots) {
+	if err := Delete(trOf(t, song), nil, trash); !errors.Is(err, ErrOutsideRoots) {
 		t.Fatalf("错是 %v，want ErrOutsideRoots", err)
 	}
 	if !exists(t, song) {
@@ -224,12 +251,13 @@ func TestDeleteRefusesAnEmptyRootList(t *testing.T) {
 // 这是最常见的一种（用户先在访达里删了，再回应用点删除）。它不是一个
 // 失败：界面上该说的是「已经不在了」，而不是一句红字报错。
 func TestDeleteReportsAMissingFileSeparately(t *testing.T) {
+	trash, _ := trashFor(t)
 	root := t.TempDir()
 	gone := filepath.Join(root, "早没了.mp3")
 
 	// 这一项**从没存在过**，所以没有 Canonical 可记（空的）——删除那一侧
 	// 遇到空的 Canonical 就跳过身份检查，交给 Lstat 报「不在了」。
-	if err := Delete(Track{Path: gone}, []string{root}); !errors.Is(err, ErrMissing) {
+	if err := Delete(Track{Path: gone}, []string{root}, trash); !errors.Is(err, ErrMissing) {
 		t.Fatalf("错是 %v，want ErrMissing", err)
 	}
 }
@@ -242,6 +270,7 @@ func TestDeleteReportsAMissingFileSeparately(t *testing.T) {
 // 顺带钉住另一个坑：真叫 `..foo` 的文件不该被当成「在根外面」
 // （用 `HasPrefix(rel, "..")` 判就会误伤）。
 func TestDeleteAcceptsAPathThatLooksLikeAnEscape(t *testing.T) {
+	trash, _ := trashFor(t)
 	parent := t.TempDir()
 	music := filepath.Join(parent, "音乐")
 	outside := filepath.Join(parent, "别处")
@@ -253,7 +282,7 @@ func TestDeleteAcceptsAPathThatLooksLikeAnEscape(t *testing.T) {
 	victim := songPath(t, outside, "歌.mp3")
 
 	escape := filepath.Join(music, "..", "别处", "歌.mp3")
-	if err := Delete(trOf(t, escape), []string{music}); !errors.Is(err, ErrOutsideRoots) {
+	if err := Delete(trOf(t, escape), []string{music}, trash); !errors.Is(err, ErrOutsideRoots) {
 		t.Fatalf("错是 %v，want ErrOutsideRoots", err)
 	}
 	if !exists(t, victim) {
@@ -262,7 +291,7 @@ func TestDeleteAcceptsAPathThatLooksLikeAnEscape(t *testing.T) {
 
 	// 真叫 `..foo` 的文件在音乐目录**里面**，要能删。
 	dotted := songPath(t, music, "..foo.mp3")
-	if err := Delete(trOf(t, dotted), []string{music}); err != nil {
+	if err := Delete(trOf(t, dotted), []string{music}, trash); err != nil {
 		t.Fatalf("叫 ..foo 的文件删不掉：%v", err)
 	}
 	if exists(t, dotted) {
@@ -276,6 +305,7 @@ func TestDeleteAcceptsAPathThatLooksLikeAnEscape(t *testing.T) {
 // 路径。两者不完全一样（比如带了个 `..`），Delete 不能再要求一次转换
 // 就对得上。
 func TestDeleteAcceptsRootInItsOwnFlavor(t *testing.T) {
+	trash, _ := trashFor(t)
 	base := t.TempDir()
 	music := filepath.Join(base, "音乐")
 	if err := os.MkdirAll(music, 0o755); err != nil {
@@ -290,7 +320,7 @@ func TestDeleteAcceptsRootInItsOwnFlavor(t *testing.T) {
 		music,
 	} {
 		put(t, song, []byte("again"))
-		if err := Delete(trOf(t, song), []string{root}); err != nil {
+		if err := Delete(trOf(t, song), []string{root}, trash); err != nil {
 			t.Errorf("根写成 %q 时删不掉：%v", root, err)
 		}
 	}
@@ -306,6 +336,7 @@ func TestDeleteAcceptsRootInItsOwnFlavor(t *testing.T) {
 // 两个方向都要断：**根**带空格被换掉，和**被删的文件**路径带空格被换掉。
 // 拿掉修复的方式：把任何一处的 `TrimSpace` 加回去。
 func TestDeleteRefusesARootWithATrailingSpace(t *testing.T) {
+	trash, _ := trashFor(t)
 	base := t.TempDir()
 	plain := filepath.Join(base, "Music")
 	spaced := filepath.Join(base, "Music ") // 末尾一个空格
@@ -323,7 +354,7 @@ func TestDeleteRefusesARootWithATrailingSpace(t *testing.T) {
 	if len(res.Tracks) != 1 {
 		t.Fatalf("扫到 %d 首，want 1：%v", len(res.Tracks), pathsOf(res.Tracks))
 	}
-	if err := Delete(res.Tracks[0], []string{spaced}); err != nil {
+	if err := Delete(res.Tracks[0], []string{spaced}, trash); err != nil {
 		t.Fatal(err)
 	}
 	if exists(t, chosen) {
@@ -347,11 +378,12 @@ func TestDeleteRefusesARootWithATrailingSpace(t *testing.T) {
 // 拿掉修复的方式：`Delete` 里把 `filepath.Clean(path)` 改回
 // `filepath.Clean(strings.TrimSpace(path))`。
 func TestDeleteRefusesAFileWhoseOwnPathEndsInASpace(t *testing.T) {
+	trash, _ := trashFor(t)
 	root := t.TempDir()
 	spaced := songPath(t, root, "歌 ") // 名字以空格结尾
 	decoy := songPath(t, root, "歌")   // 裁掉空格之后就是它
 
-	if err := Delete(trOf(t, spaced), []string{root}); err != nil {
+	if err := Delete(trOf(t, spaced), []string{root}, trash); err != nil {
 		t.Fatal(err)
 	}
 	if exists(t, spaced) {
@@ -372,6 +404,7 @@ func TestDeleteRefusesAFileWhoseOwnPathEndsInASpace(t *testing.T) {
 //
 // 拿掉修复的方式：去掉 `Delete` 里比对 `Track.Canonical` 的那三行。
 func TestDeleteRefusesAPathWhoseFileMoved(t *testing.T) {
+	trash, _ := trashFor(t)
 	base := t.TempDir()
 	library := filepath.Join(base, "library")
 	if err := os.MkdirAll(library, 0o755); err != nil {
@@ -399,7 +432,7 @@ func TestDeleteRefusesAPathWhoseFileMoved(t *testing.T) {
 		t.Skipf("这台机器建不了符号链接：%v", err)
 	}
 
-	err := Delete(row, []string{library})
+	err := Delete(row, []string{library}, trash)
 
 	if !errors.Is(err, ErrMoved) {
 		t.Fatalf("错是 %v，want ErrMoved", err)

@@ -14,10 +14,14 @@
 //
 // # 删文件这一条为什么收在这里
 //
-// 因为它是**唯一**一个「界面上按一下、用户的东西就没了」的动作，而界面上
+// 因为它是**唯一**一个「界面上按一下、用户的东西就动了」的动作，而界面上
 // 有两个地方能按（行里的菜单、表格的选中行）。收在一处之后，
-// `Delete` 的那三条规矩（落在某个根下、是普通文件、符号链接删链接本身）
+// `Delete` 的那三条规矩（落在某个根下、是普通文件、符号链接移链接本身）
 // 只需要在一个地方被守住——`service/localmusic` 的那三条，见 delete.go。
+//
+// ⚠️ **删是「移到系统废纸篓」，不是永久删除**（票 #558）：所以这一层要
+// 拿到「回收站」那一份零件（`LocalMusic.Trash`），而它**由界面层装**
+// （理由同 `DirWatch`：框架那侧的 API 必须在事件循环起来之后才能调）。
 //
 // 确认弹窗在界面上（用户按「删除」和「真的删」之间隔着一句话），
 // 但**删不删**这件事在这里判：界面层传来的 id 必须在当前列表里，
@@ -59,6 +63,18 @@ type DirWatch interface {
 	Watch(ctx context.Context, dir string, onChange func()) (stop func(), err error)
 }
 
+// Trash 是「把一个文件移到系统废纸篓」。
+//
+// ⚠️ **为什么是接口而不是直接调框架**：这一层（`internal/app`）不 import
+// MyGo（它不认识界面），而 `mygo.Shell.TrashItem` **必须在应用的事件循环
+// 起来之后调**（`needsApp`，见 `mygo/app.go:128`）。于是实现放在界面层
+// （`internal/ui/localmusic_trash.go`），这里只认「能把一个文件移进废纸篓」
+// 这件事。
+//
+// ⚠️ **失败时它必须把文件留在原处**，而且**不许**回退到永久删除——那是
+// 这一票（#558）拍板的语义，悄悄换回去的话界面上一个字都不会变。
+type Trash = localmusic.Trash
+
 // LocalMusic 是本地音乐这一摊的依赖。
 type LocalMusic struct {
 	// Roots 是第一次挂上来时的目录。之后以**设置里那一份**为准
@@ -69,6 +85,13 @@ type LocalMusic struct {
 
 	// Watch 盯目录。nil = 不盯。
 	Watch DirWatch
+
+	// Trash 是「移进系统废纸篓」那一份零件。**nil = 没有回收站**，
+	// 而那时的删除会**报错**（`localmusic.ErrNoTrash`）而不是永久删除。
+	//
+	// ⚠️ 生产路径上它一定装上了（`ui.MountLocalMusic`），而测试里多数
+	// 故意不装——那些用例根本不删文件。
+	Trash Trash
 }
 
 // localLibrary 是本地音乐库此刻的全部状态。
@@ -96,6 +119,8 @@ type localLibrary struct {
 	wakes []func()
 
 	watch DirWatch
+	// trash 是「移进废纸篓」那一份零件（见 `LocalMusic.Trash`）。
+	trash Trash
 	// stops 是每个根一个停掉动作，换根时挨个调。
 	stops  []func()
 	cancel context.CancelFunc
@@ -128,6 +153,7 @@ func (a *App) MountLocalMusic(l LocalMusic) {
 		roots: cleanRoots(l.Roots),
 		cache: map[string]localmusic.Meta{},
 		watch: l.Watch,
+		trash: l.Trash,
 		// ⚠️ 这里**不**开始扫描：Scan 是阻塞 IO，而 MountLocalMusic 是
 		// 在开窗口之前调用的。第一遍扫描由界面的第一帧叫起来
 		// （`RescanLocalMusic`），或者由文件监听叫起来。
@@ -180,14 +206,27 @@ func (a *App) LocalTrack(id string) (localmusic.Track, bool) {
 	return localmusic.Track{}, false
 }
 
-// DeleteLocalTrack 真的把一首从磁盘上删掉，然后把它从列表里拿掉。
+// DeleteLocalTrack 把一首移到系统废纸篓，然后把它从列表里拿掉。
 //
 // ⚠️ **路径是从列表里取的，调用方给不了**。传进来的 id 必须在当前列表里，
 // 否则一个 id 都对不上——这一层没有「按任意路径删」的入口，那是有意的。
 //
-// 三个错分得开，界面据此说不同的话：`ErrOutsideRoots` / `ErrNotRegular`
-// 是「不能删」（多半是这一行已经过期了），`ErrMissing` 是「已经不在了」
-// （不是失败，把那一行从列表里拿掉就对了）。
+// 几个错分得开，界面据此说不同的话：
+//
+//   - `ErrOutsideRoots` / `ErrNotRegular` 是「不能删」（多半是这一行已经
+//     过期了）；
+//   - `ErrMissing` 是「它已经不在了」——**它没进过废纸篓**；
+//   - `ErrTrashFailed` / `ErrNotTrashable` / `ErrDenied` 是「没能移进
+//     废纸篓」（**文件还在原处**）。
+//
+// ⚠️ **三种结果不许混成两种**：只有「真的搬进废纸篓了」那一种能让界面说
+// 「已移到系统废纸篓」。`ErrMissing` 说的是「它本来就不在了」——那一行照样
+// 从列表里拿掉（那是用户想要的结果），但界面**不许**说「已移到系统废纸篓」：
+// 那句话**承诺用户能从废纸篓里恢复**，而它压根没进过废纸篓（**说谎**）。
+//
+// ⚠️ **所以这一层不把 `ErrMissing` 改成 nil**：评审打回来的那一种正是
+// 「把「已经不在了」当成「成功了」」——回收站真失败的时候，界面说「已移到
+// 系统废纸篓」、**列表那一行也消失了**，而文件好好地躺在原处。
 func (a *App) DeleteLocalTrack(id string) error {
 	lib := a.localMusicSnapshot()
 	if lib == nil {
@@ -204,6 +243,7 @@ func (a *App) DeleteLocalTrack(id string) error {
 		}
 	}
 	roots := append([]string(nil), lib.roots...)
+	trash := lib.trash
 	lib.mu.Unlock()
 
 	if !found {
@@ -213,18 +253,26 @@ func (a *App) DeleteLocalTrack(id string) error {
 	// ⚠️ 传的是**整个 track**：删除那一侧要拿 `track.Canonical` 做一道身份
 	// 检查（`localmusic.Delete` 的规矩 4），只给路径它无从判断「这个位置上
 	// 的东西还是不是扫描时那一个」。
-	err := localmusic.Delete(track, roots)
+	//
+	// ⚠️ **第三份参数是回收站那一份零件**：它 nil 的时候删除会**报错**
+	// （`ErrNoTrash`），而**不会**退回去永久删除——那正是这一票要的语义
+	// （票 #558）。
+	err := localmusic.Delete(track, roots, trash)
 
 	lib.mu.Lock()
 	if err == nil || errors.Is(err, localmusic.ErrMissing) {
 		lib.drop(track.ID)
 	}
 	if errors.Is(err, localmusic.ErrMissing) {
-		// 用户先在访达里删了。这**不是失败**：把那一行拿掉就是用户要的
-		// 结果，再弹一句红字报错只会让人以为应用坏了。日志留着，
-		// 因为「文件从列表里消失」这件事本身值得知道。
+		// 用户先在访达里删了。那一行从列表里拿掉就是用户要的结果，而它
+		// **没进过废纸篓**——所以这个错**继续往上抛**，界面据此说
+		// 「文件已经不在了」而不是「已移到系统废纸篓」。
+		//
+		// ⚠️ **不许在这里把它改成 nil**：那正是评审打回来的那一种
+		// （界面说「已移到系统废纸篓」，而文件还在原处）。
+		//
+		// 日志留着，因为「文件从列表里消失」这件事本身值得知道。
 		log.Printf("biu: 本地音乐 %s 已经不在盘上了，把它从列表里拿掉", track.Path)
-		err = nil
 	}
 	wakes := slices.Clone(lib.wakes)
 	lib.mu.Unlock()
