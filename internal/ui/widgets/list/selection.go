@@ -37,10 +37,20 @@ import (
 // **没选中就原样还回去**：一个字节都不多画——选中的行和没选中的行长得**一个像素
 // 都不差**（票 #197：点一行不再整行刷绿）。
 //
-// 选中时做两件事（理由见文件头）：
+// 选中时做三件事（理由见文件头）：
 //
 //  1. 刷一层底色盖掉框架那一块实心主色（`rowCover`）；
-//  2. 给它一圈焦点环（`rowFocusRing`）——**ring 由调用方给**。
+//  2. **把字色拨回正文色**——框架给选中行的不止那块底，还有一层白字
+//     （`mygo/ui/table.go` 的 `node.Selected`：`Background(t.Accent).TextColor(t.AccentText)`）。
+//     底我们盖得住，**字不盖的话就漏了**：行里没写死颜色的字（动态卡的标题、
+//     作者名、行尾那枚「⋯」图标）会继承这层白，压在盖上去的浅底上就是
+//     「点过的那一行变成白字，看不清」（2026-10-26 用户实测，动态卡上撞见的）。
+//     自己带颜色的字（「赞 273」那类）不受影响——它们本来就不继承。
+//  3. 给它一圈焦点环（`rowFocusRing`）——**ring 由调用方给**。
+//
+// ⚠️ **字色设在这一层就够了，各调用方不用管**：框架的白字刷在行的**包装节点**上
+// （`mygo/ui/list.go:708` 的 `w.Selected(on)`），这里设在内层行上——子元素从
+// **最近**的祖先继承字色，包装那一层够不着它们了。
 //
 // # ring 为什么由调用方给
 //
@@ -54,7 +64,7 @@ func SelectedRow(row ui.Element, t *ui.Theme, selected, hovered, ring bool) ui.E
 	if !selected {
 		return row
 	}
-	row = row.Background(rowCover(t, hovered))
+	row = row.Background(rowCover(t, hovered)).TextColor(t.Text)
 	if ring {
 		row = rowFocusRing(row, t)
 	}

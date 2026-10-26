@@ -448,6 +448,27 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// 设置页那格代理的**消费端**（上游 Biu 的 #250 一类）：四种协议都要
+		// 真的接到请求上——http/https/socks5 翻成代理地址，socks4 由隧道拨号
+		// 接（http.Transport 不认这个 scheme）；「不使用代理」回落环境变量；
+		// 选了协议没填主机要报错而不是安静直连；改设置下一条请求就走新路。
+		// 回环（httptest 全在本机）永不代理。
+		Spec: "设置页的代理真的被所有出网请求走：四种协议、none 回落环境变量、空主机报错、改了立刻生效",
+		Tests: []string{
+			"TestProxyForSettingsMapsTheFourProtocols",
+			"TestNoProxyFollowsTheEnvironment",
+			"TestAnEmptyProxyHostIsAnErrorNotSilence",
+			"TestLoopbackRequestsAreNeverProxied",
+			"TestTheProxySettingTakesEffectOnTheNextRequest",
+			"TestTheSettingsMountFeedsTheProxySnapshot",
+			"TestTheSocks4TunnelSpeaksTheProtocol",
+			"TestTheSocks4TunnelSendsTheHostnameWhenItCannotResolve",
+			"TestTheSocks4TunnelUsesAResolvedAddressWhenItCan",
+			"TestTheSocks4ReplyCodeIsSpelledOut",
+		},
+	},
+	{
+		Category: HTTP,
 		Spec:     "WBI 签名对着公布的那组向量",
 		Tests:    []string{"TestWBISignatureMatchesThePublishedVector", "TestWBIKeysAreFetchedOnceAndCached"},
 	},
@@ -4038,6 +4059,56 @@ var Items = []Item{
 			"TestAFailedCoverCopySaysSo",
 			// 键盘：Tab 走到封面上，菜单键能开出这一份菜单。
 			"TestTheMenuKeyOpensTheCopyMenuOnTheCover",
+		},
+	},
+	{
+		// 票 #558：删本地音乐文件**改成移到系统废纸篓**（原来是永久删除）。
+		//
+		// ⚠️ **语义变了，而那一半是静默的**：以前界面上写着「不可恢复」，
+		// 现在文件进的是废纸篓、用户找得回来——留着那句话就是**对用户说假话**。
+		// 而**反过来**的那一种错更贵：悄悄回退到永久删除的话，界面上一个字
+		// 都不会变，用户以为文件在废纸篓里、而它已经没了。
+		//
+		// 🔴 **所以「文件还在不在」是这一条的主判据**，不是「有没有报错」：
+		// 成功那一条断「原处没了**而且**废纸篓里有」，失败那几条断「**原处
+		// 还在**」。只断前者的话，一个「偷偷 os.Remove」的实现照样全绿。
+		//
+		// ⚠️ **失败那一条不许有「回收站不可用就永久删」的兜底**：框架那一侧
+		// 自己就把「本来会被永久删除」的那一次拒掉了（Windows 的 progress
+		// sink），而用户看到的是「文件未删除」——那句话是**真话**。
+		Category: Negative,
+		Spec:     "删本地音乐文件是**移到系统废纸篓**而不是永久删除：成功时原处没了、废纸篓里有（找得回来）、界面上说「已移到系统废纸篓」；失败时**文件还在原处**、界面上说「文件未删除」、那一行还在列表里；**文件本来就不在了**（用户先在访达里删了）时那一行照样没掉、而界面上说「已经不在了」——**三种结果不许混成两种**，「已移到系统废纸篓」只在真的搬进去的时候说；回收站不可用（网络盘 / 跨卷 / 系统不提供）时报一个用户看得懂的错而**不删**；弹窗上不再承诺「不可恢复」",
+		Tests: []string{
+			// 成功那一条：搬走 + 找得回来 + 话说了。
+			"TestDeleteMovesTheFileIntoTheTrash",
+			"TestDeletingMovesTheFileToTheTrashAndSaysSo",
+			// 失败那几条：文件还在原处（安全线），而且话说了。
+			"TestDeleteLeavesTheFileAloneWhenTheTrashFails",
+			"TestATrashThatIsNotAvailableKeepsTheFileAndTheRow",
+			"TestATrashThatFailsSaysTheFileIsStillThere",
+			// 🔴 **失败的时候不许说「已移到系统废纸篓」**：原来错误分类对整段
+			// 系统原话做子串匹配，而 Windows 那边每一句失败的话都带同一截
+			// 「to the recycle bin」——拿它当判据的话，权限失败 / 已存在 /
+			// 文件不存在全被归成同一档；而一个叫「Not Found.mp3」的文件更
+			// 是被判成「文件已经不在了」，于是界面说成功了、列表那一行也
+			// 消失了，而文件好好地躺在原处。
+			"TestATrashThatFailsNeverSaysItMovedToTheTrash",
+			"TestDeleteDoesNotCallAMissingFileASuccess",
+			"TestClassifyTrashErrorSortsTheWindowsHRESULTs",
+			"TestClassifyTrashErrorDoesNotLetTheFileNameDecide",
+			"TestClassifyTrashErrorDoesNotReadTheWordsInsideQuotes",
+			// 🔴 **「文件本来就不在了」不许说成「已移到系统废纸篓」**：那句话
+			// 承诺用户能从废纸篓里恢复，而它压根没进过废纸篓。
+			"TestAFileThatIsAlreadyGoneNeverSaysItMovedToTheTrash",
+			"TestDeleteSaysTheFileIsAlreadyGoneWhenTheTrashFails",
+			"TestDeleteSaysTheTrashIsNotAvailable",
+			"TestDeleteSaysTheNameIsTaken",
+			// 「没装回收站」：报错，**不删**。
+			"TestDeleteWithoutATrashIsAnError",
+			// 界面上不许说谎。
+			"TestTheDeleteDialogNoLongerPromisesItIsUnrecoverable",
+			// 交给回收站的是**词法上的那一条**（符号链接那条安全线的另一半）。
+			"TestDeleteHandsTheLexicalPathToTheTrash",
 		},
 	},
 }

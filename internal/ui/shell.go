@@ -20,6 +20,7 @@
 package ui
 
 import (
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -943,10 +944,19 @@ func New(a *app.App) *Shell { return newShellWithImages(a, coverCacheDir()) }
 // ——两个实例各有一本账，谁都算不准对方。
 func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	s := &Shell{
-		app:       a,
-		router:    newRouter("/"),
-		clock:     realClock{},
-		images:    imgcache.New(imgcache.Options{Dir: imagesDir}),
+		app:    a,
+		router: newRouter("/"),
+		clock:  realClock{},
+		images: imgcache.New(imgcache.Options{
+			Dir: imagesDir,
+			// 封面字节也走全应用唯一的网络层：代理设置对它生效，超时保留
+			// 缓存自己那一档（图等不起，和取色同一个道理）。
+			Client: func() *http.Client {
+				c := newCredentialTransport().Client(nil)
+				c.Timeout = 15 * time.Second
+				return c
+			}(),
+		}),
 		autostart: systemAutoStart{},
 		pickImage: pickImageFile,
 		hotkeys:   nilGlobalShortcuts{},
