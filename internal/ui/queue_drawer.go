@@ -333,14 +333,14 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 			// 是「同一块底上的两块颜色」——深色下尤其如此（上游的卡片底和背景几乎
 			// 同色，**靠阴影分层**，见 DESIGN.md §4）。
 			//
-			// ⚠️ **面板底色取 `t.Background`（= 上游的 `bg-background`）**：上游
-			// 那一枚 Drawer 没有自己的底色类，走的是 HeroUI Drawer 的默认
-			// `bg-background`，而上游主题把 `background` 这个色定义成了**页面底色**
-			// （`src/common/constants/theme.ts`：深色 #17181a、浅色 #ffffff）。所以
-			// 那一块和底下那一页是**同一个颜色**，分开的正是上面那圈影。
+			// ⚠️ **面板底色取 `cardBackground`（= 方案的 `surface1`；经典沿用
+			// 控件那一层 `t.Surface`）**：设计规范 v0.1（DESIGN.md §零）把卡片、
+			// 弹层的底统一到这一个出口。上游那一枚 Drawer 走的是 HeroUI 的默认
+			// `bg-background`（= 页面底色）——方案时代面板和页面底**本来就不同
+			// 色**，「分得开」由底色差、上面那圈影、左缘这条线三层一起负责。
 			//
-			// 之前这里取 `t.Surface`（深色下 #27272a）——那正是 DESIGN.md §四说的
-			// 「比背景亮一级的板」。
+			// （这里曾经取 `t.Surface`，又有一段取 `t.Background` 的日子——两段
+			// 都是规范拍板之前的形状，别照着这段注释里的旧值改回去。）
 			//
 			// ⚠️ **面板是绝对定位的**（原来它是在这一行 flex 里靠 `Justify(End)`
 			// 贴右沿的）：进出场要动的是**布局位置**，而 flex 那一套摆不出

@@ -242,8 +242,8 @@ func (c *Client) SearchVideos(ctx context.Context, q VideoQuery) (VideoPage, err
 		out.Hits = append(out.Hits, VideoHit{
 			Bvid:     it.Bvid,
 			Cid:      parseCid(it.Cid),
-			Title:    stripHTML(it.Title),
-			Owner:    it.Author,
+			Title:    decodeEntities(stripHTML(it.Title)),
+			Owner:    decodeEntities(it.Author),
 			Cover:    normalizeImageURL(it.Pic),
 			Duration: parseDuration(it.Duration),
 			Mid:      it.Mid,

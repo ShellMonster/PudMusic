@@ -32,12 +32,21 @@ func TestTheShortcutDefaultsAreBiuOnes(t *testing.T) {
 		{"volumeDown", "音量减", "CommandOrControl+Down", "CommandOrControl+Alt+Down"},
 		{"toggleMiniMode", "切换mini/完整模式", "CommandOrControl+M", "CommandOrControl+Alt+M"},
 	}
-	if len(got.Shortcuts) != len(want) || len(got.GlobalShortcuts) != len(want) {
-		t.Fatalf("命令条数是 %d / %d，want %d", len(got.Shortcuts), len(got.GlobalShortcuts), len(want))
+	// 我们自己补的两条（快退 / 快进）只在应用内那一列，排在 Biu 那六条后面；
+	// 全局那一列仍然只有 Biu 的六条。
+	if len(got.Shortcuts) != len(want)+2 || len(got.GlobalShortcuts) != len(want) {
+		t.Fatalf("命令条数是 %d / %d，want %d / %d", len(got.Shortcuts), len(got.GlobalShortcuts), len(want)+2, len(want))
 	}
 	for i, w := range want {
 		checkShortcut(t, "应用内", got.Shortcuts[i], w.id, w.name, w.in)
 		checkShortcut(t, "全局", got.GlobalShortcuts[i], w.id, w.name, w.global)
+	}
+	checkShortcut(t, "应用内", got.Shortcuts[6], "seekBack", "快退 5 秒", "Shift+Left")
+	checkShortcut(t, "应用内", got.Shortcuts[7], "seekForward", "快进 5 秒", "Shift+Right")
+	for _, g := range got.GlobalShortcuts {
+		if g.ID == "seekBack" || g.ID == "seekForward" {
+			t.Errorf("「%s」不该有全局那一半（⌘⌥ 加方向键要留给别的应用）", g.ID)
+		}
 	}
 }
 

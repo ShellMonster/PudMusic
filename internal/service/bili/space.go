@@ -462,7 +462,7 @@ func upVideoPageFrom(raw []byte, q UpVideoQuery) (UpVideoPage, error) {
 		}
 		pg.Videos = append(pg.Videos, UpVideo{
 			Bvid:        v.Bvid,
-			Title:       v.Title,
+			Title:       decodeEntities(v.Title),
 			Cover:       v.Pic,
 			Duration:    upVideoDuration(v.Length),
 			Play:        int64(v.Play),
@@ -608,13 +608,13 @@ func (c *Client) SpaceSeries(ctx context.Context, mid int64, page, size int) (Sp
 	out := SpaceSeriesPage{}
 	for _, s := range d.ItemsLists.SeasonsList {
 		out.Collections = append(out.Collections, UpCollection{
-			ID: s.Meta.SeasonID, Title: s.Meta.Name, Cover: s.Meta.Cover,
+			ID: s.Meta.SeasonID, Title: decodeEntities(s.Meta.Name), Cover: s.Meta.Cover,
 			Count: s.Meta.Total, Type: collectionTypeSeason,
 		})
 	}
 	for _, s := range d.ItemsLists.SeriesList {
 		out.Collections = append(out.Collections, UpCollection{
-			ID: s.Meta.SeriesID, Title: s.Meta.Name, Cover: s.Meta.Cover,
+			ID: s.Meta.SeriesID, Title: decodeEntities(s.Meta.Name), Cover: s.Meta.Cover,
 			Count: s.Meta.Total, Type: collectionTypeSeries,
 		})
 	}
@@ -688,7 +688,7 @@ func (c *Client) SpaceFavFolders(ctx context.Context, mid int64, page, size int)
 			continue
 		}
 		out.Folders = append(out.Folders, UpCollection{
-			ID: f.ID, Title: f.Title, Cover: f.Cover, Count: f.Media, Type: collectionTypeFav,
+			ID: f.ID, Title: decodeEntities(f.Title), Cover: f.Cover, Count: f.Media, Type: collectionTypeFav,
 		})
 	}
 	// ⚠️ B 站的 `has_more` 有时候不给（老接口），所以「拿够了没有」也算一道。

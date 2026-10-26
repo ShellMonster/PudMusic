@@ -73,7 +73,11 @@ func shotEmptyStates(t *testing.T, dir, theme string, dark bool) {
 		{"41-空状态-我的关注", "我的关注", followPath, lookup(followPath).Empty.Title},
 		{"42-空状态-稍后再看", "稍后再看", laterPath, lookup(laterPath).Empty.Title},
 		{"43-空状态-历史记录", "历史记录", historyPath, lookup(historyPath).Empty.Title},
-		{"44-空状态-下载记录", "下载记录", downloadListPath, lookup(downloadListPath).Empty.Title},
+		// ⚠️ **这一条等的是「还没有下载目录」**（报告 F3 那一档）：这一族的外壳
+		// 没挂下载，`DownloadDir()` 是空串——页面画的是「连落盘的地方都没有」
+		// 那一格，不是路由表里的 `noDownloads`（「暂无内容」）。曾经等的是后者，
+		// 等的却是一句这页画不出来的话，在 main 上一直红。
+		{"44-空状态-下载记录", "下载记录", downloadListPath, noDownloadDir.Title},
 		{"45-空状态-搜索", "搜索", searchPath, searchIdle.Title},
 	} {
 		func() {

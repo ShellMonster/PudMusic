@@ -473,8 +473,19 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// 这一屏是空的，那一页的两句话连着说了「为什么空」和「怎么才能不空」。
 		//
 		// ⚠️ **顶图先画**（理由同上面那一支）。
+		//
+		// ⚠️ **这一格摆一个能点的下一步**：路由表里的 `Empty` 是包级静态数据，
+		// 装不了闭包（`emptyAction.Do` 认得「这一个壳」），所以在这里把动作
+		// 挂上——和 `downloadsEmptyState` 给「还没有下载目录」挂「去设置」
+		// 是同一个做法。路由表里那句 Hint 写的是「打开文件…或者搜一首歌」，
+		// 而 `emptyCopy` 的口径是「有能点的下一步就不画提示」（`empty.go`），
+		// 按钮选的就是那句里的头一个动作；搜就走顶栏那一个框。
+		// ⚠️ **不摆这一枚的话用户只能对着「暂无内容」猜**：未登录、或 B 站
+		// 返回了空的那一档，这一格就是屏幕上唯一的东西。
+		e := lookup(homePath).Empty
+		e.Action = &emptyAction{Label: "打开文件", Do: s.pickAndEnqueue}
 		h.viewPopTop(c, tab)
-		s.viewEmpty(c, "home:empty", lookup(homePath).Empty)
+		s.viewEmpty(c, "home:empty", e)
 	default:
 		// ⚠️ **表头在列表外面**（`rowheader.go` 文件头）：它是 `View` 的兄弟，所以列表往
 		// 下滚它不动，宽屏下滚到右边列名也还在。

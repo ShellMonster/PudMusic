@@ -8,7 +8,9 @@
   "macos": {
     "dmgTitle": "安装布丁音乐",
     "infoPlist": {
-      "LSApplicationCategoryType": "public.app-category.music"
+      "LSApplicationCategoryType": "public.app-category.music",
+      "CFBundleDevelopmentRegion": "zh-Hans",
+      "CFBundleLocalizations": ["zh-Hans"]
     }
   },
   "updates": {

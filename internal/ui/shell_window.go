@@ -282,6 +282,13 @@ func Run(a *app.App, sess *media.Session) error {
 	// 是在一个空历史上画出来的（那也是 mountSearchHistory 的用途之一）。
 	s.mountSearchHistory()
 	s.mountShortcuts()
+	// 应用的语言：简体中文。**要在 Run 之前**——应用一开起来，框架就把语言
+	// 定下来，而菜单是那之后按那个语言重新贴一次文案的（见 language.go）。
+	installLanguage()
+	// 把语言**现在就**定下来，好让紧接着建的那份菜单从头就是中文的。
+	// ⚠️ 这一句**只能在主线程上调**（生产路上就是主线程）——理由见
+	// language.go 的 `resolveLanguageNow`。
+	resolveLanguageNow()
 	// 菜单、退出、第二个实例、deep link 全在这里装。必须在 Run 之前，
 	// 否则启动命令行里的 biu:// 会在回调装好之前就被交付掉。
 	s.installLifecycle()

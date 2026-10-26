@@ -131,7 +131,7 @@ func (c *Client) FavFolders(ctx context.Context, upMid int64) ([]FavFolder, erro
 	}
 	out := make([]FavFolder, 0, len(d.List))
 	for _, f := range d.List {
-		out = append(out, FavFolder{ID: f.ID, Title: f.Title, MediaCount: f.MediaCount})
+		out = append(out, FavFolder{ID: f.ID, Title: decodeEntities(f.Title), MediaCount: f.MediaCount})
 	}
 	if len(out) == 0 {
 		return nil, ErrNoFavoriteFolder

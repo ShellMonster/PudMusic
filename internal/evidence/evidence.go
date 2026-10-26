@@ -215,6 +215,35 @@ var Items = []Item{
 	},
 	{
 		Category: Play,
+		// 起播失败自动跳过（收藏夹里夹着失效稿子那一类）：**不可重试**的错
+		// （稿件没了/没权限，重试一万次也一样）跳到下一首，**可重试**的错
+		// （网络那类）留在原地给「重试」——判据就是 `bili.Recoverable` 那张表，
+		// 两处共用，不另立一套。
+		//
+		// 🔴 全失效的收藏夹**只绕一圈**：循环/随机档的 `Advance` 永远给得出
+		// 「下一首」，不数着会无限跳下去（`App.skipStreak`，放成一首就清零）。
+		Spec: "起播失败（不可重试类）自动跳下一首；可重试类不跳；整张队列全失效只绕一圈就停",
+		Tests: []string{
+			"TestADeadSongInTheQueueIsSkippedAutomatically",
+			"TestTheWholeQueueBeingDeadStopsAfterOneRound",
+			"TestARetriableFailureDoesNotSkipToTheNextSong",
+		},
+	},
+	{
+		Category: Play,
+		// 「跑测试不出声」：macOS 的输出接的是默认输出设备（扬声器），而测试里
+		// 有一批真的会 `Play()` 的用例——不哑的话每跑一次 `go test`，喇叭就把
+		// 假解码器的台阶波、flacdec 的测试音挨个放一遍。修法是播放链最后一级在
+		// `testing.Testing()` 之下换哑的（`audio.muteDecoder`）；tap、增益、位置
+		// 都在它上游，各族断言不受影响。
+		//
+		// 🔴 **哑级必须转发 Close**：MyGo 收尾解码链靠对最后一级做 `io.Closer`
+		// 断言——不转发的话 extaf 的句柄全漏（`handles_test.go` 那两条盯着）。
+		Spec:  "go test 之下播放链最后一级是哑的（测试不出声），且关资源的链条不断",
+		Tests: []string{"TestTheLastStageIsMutedWhenTestsRun"},
+	},
+	{
+		Category: Play,
 		// 播放模式四档（顺序/循环/随机/单曲，BMG-47 A5）。「放完下一首是哪首」
 		// 这一句是**四档各有一条**——顺序停在队尾、循环绕回队尾、随机真的打乱、
 		// 单曲一步都不挪，缺一档就有一档没人管，而缺了的那一档在界面上和别的
@@ -405,6 +434,18 @@ var Items = []Item{
 	},
 
 	// ── 严格 HTTP fixture ──────────────────────────────────────────────────
+	{
+		Category: HTTP,
+		// B 站的 web 接口把文案 HTML 转义过再回（「A &amp; B」），网页端渲染时
+		// 顺手解掉，原生端要在映射层自己解——不解的话用户看到的就是
+		// 「林俊杰&amp;李健合唱…」。判据两层：helper 本身（标准实体、全角分号
+		// 的那一支、无转义原样回）和映射点真的包了（推荐流直接喂纯映射函数）。
+		Spec: "接口文案里的 HTML 实体在映射层解掉（标题、UP 名），没有转义的串原样回",
+		Tests: []string{
+			"TestDecodeEntitiesUnescapesTitleText",
+			"TestTheRecommendFeedDecodesTitleEntities",
+		},
+	},
 	{
 		Category: HTTP,
 		Spec:     "WBI 签名对着公布的那组向量",
@@ -961,6 +1002,33 @@ var Items = []Item{
 		Category: Platform,
 		Spec:     "macOS 红黄绿在不在（无边框保留控件，不是真无边框）",
 		Tests:    []string{"TestTheWindowKeepsTheSystemControls", "TestTheWindowOpensAtBiuNumbers"},
+		RealOnly: true,
+	},
+	{
+		Category: Platform,
+		// ⚠️ **「菜单栏上真的有那一栏」只有真机量得到**：菜单是系统画的
+		// （AppKit 的 NSMenu），它**不在窗口的画面里**，截图也截不到它——
+		// 无头 Tester 量得到的是「我们交给框架的那棵树长什么样」，以及
+		// 「点了之后有没有反应」（回调走的是我们自己的函数）。
+		//
+		// 真机那一份是：用辅助功能读菜单栏（项、顺序、每一项的快捷键），
+		// 再真点一次「设置…」和「关于布丁音乐」。
+		Spec: "macOS 应用菜单：「关于布丁音乐」开的是我们自己的面板（版本号、仓库、第三方许可），「设置…」在**主窗**开设置页（迷你开着也一样）",
+		Tests: []string{
+			"TestTheAppMenuColumnFollowsTheMacOrder",
+			"TestTheAboutItemIsOurOwn",
+			"TestTheSettingsItemHasTheMacShortcut",
+			"TestTheOtherColumnsAreStillThere",
+			"TestTheMenuHasFiveColumns",
+			"TestTheAppIsWrittenInChinese",
+			"TestTheSettingsMenuItemGoesToTheMainWindowEvenWithTheMiniInFront",
+			"TestTheAboutMenuItemBringsTheMainWindowBack",
+			"TestTheAboutPanelShowsTheNameTheVersionAndTheTwoEntries",
+			"TestTheAboutPanelVersionIsTheSameAsTheSettingsPage",
+			"TestTheAboutPanelRepoLinkOpensTheRepository",
+			"TestTheAboutPanelLicenseEntryOpensTheShippedNotices",
+			"TestTheAboutPanelClosesOnOK",
+		},
 		RealOnly: true,
 	},
 	{
@@ -1681,6 +1749,9 @@ var Items = []Item{
 			"TestTheSixCommandsCallTheirOwnThing",
 			"TestAShortcutRunsTheSameCommandWhicheverWayItArrives",
 			"TestTheShortcutPageSaysWhatTheTwoColumnsAreFor",
+			// 快退 / 快进那两条（`inAppOnlyShortcuts`）：键 → 分发 → seek，
+			// 以及没有歌 / 越过末尾时的钳制。
+			"TestTheSeekShortcutsMoveThePosition",
 		},
 	},
 	{

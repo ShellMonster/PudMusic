@@ -246,7 +246,12 @@ func (s *Shell) viewLyricKnobColumnWith(c *ui.Context, snap app.LyricsSnapshot, 
 		//
 		// ⚠️ **名字要留着**：钮上不再有「找歌词」三个字，而它恰恰是**没有歌词
 		// 时**唯一摆着的那个键——读屏软件得念得出它，无头 Tester 也得找得到它。
-		search := lyricKnobButton(c, lyricSearchKnobKey, iconLyricSearch, lyricSearchKnobLabel, fg)
+		//
+		// ⚠️ **三枚都带悬停提示**：钮上只有一个图标，图形说的那件事（找歌词 /
+		// 字号 / 偏移）不是谁都猜得出来的——播放条、顶栏那些图标键是同一套
+		// 配方（「图标键必配一句提示」）。无障碍名字和提示是同一句，不另编。
+		search := s.withTip(c, lyricKnobButton(c, lyricSearchKnobKey, iconLyricSearch, lyricSearchKnobLabel, fg),
+			lyricSearchKnobLabel)
 		if search.Clicked() {
 			s.openLyricSearch()
 		}
@@ -261,13 +266,15 @@ func (s *Shell) viewLyricKnobs(c *ui.Context, snap app.LyricsSnapshot, lv *lyric
 	// ⚠️ **钮上不写当前值**（上游那两个钮上就只有一个图标，
 	// `font-size-control.tsx:39-48`）：当前值在浮层里那一行（`lyricFontValueLabel`
 	// / `lyricOffsetValueLabel`），要看得展开浮层。
-	font := lyricKnobButton(c, lyricFontKnobKey, iconLyricFontSize, lyricFontKnobName, fg)
+	font := s.withTip(c, lyricKnobButton(c, lyricFontKnobKey, iconLyricFontSize, lyricFontKnobName, fg),
+		lyricFontKnobName)
 	if font.Clicked() {
 		lv.fontOpen = !lv.fontOpen
 	}
 	s.lyricFontPopover(c, font, snap, lv, ids)
 
-	offset := lyricKnobButton(c, lyricOffsetKnobKey, iconLyricOffset, lyricOffsetKnobName, fg)
+	offset := s.withTip(c, lyricKnobButton(c, lyricOffsetKnobKey, iconLyricOffset, lyricOffsetKnobName, fg),
+		lyricOffsetKnobName)
 	if offset.Clicked() {
 		lv.offsetOpen = !lv.offsetOpen
 	}

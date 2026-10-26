@@ -52,7 +52,16 @@ func TestSpecEmptyStates(t *testing.T) {
 				s.app.MountCollections(app.CollectionRefs{Client: newEmptyFolderClient(t)})
 			},
 		},
-		{"没有搜索结果", noSearchResults, "/search?q=" + url.QueryEscape("周杰伦"), searchPath, nil},
+		{"没有搜索结果", noSearchResults, "/search?q=" + url.QueryEscape("周杰伦"), searchPath,
+			// ⚠️ **搜索页得真的能搜**：结果是一条真请求带回来的，而「搜了但没有」
+			// 和「压根没搜成」在界面上是两句不同的话（后者是失败块 + 重试，见
+			// viewLoadError）。这里挂一台回**零结果**的假 B 站——裸壳的话搜索
+			// 必然失败，这一条等到的永远是失败块而不是空状态。
+			func(t *testing.T, s *Shell) {
+				f := newBiliFixture(t, 1)
+				zeroSearchResults(f)
+				searchOnRealClient(s, f.client())
+			}},
 		{"没有下载记录", noDownloads, "/download-list", "/download-list",
 			// ⚠️ **下载记录页有两种空**：「连落盘的地方都没有」和「真的没下载
 			// 过」。这一条验的是后者，所以得有一个目录（没目录时那一格说的是
@@ -162,19 +171,47 @@ func TestTheFourSpecStatesAreAllReachable(t *testing.T) {
 	}
 }
 
+// zeroSearchResults 把那台假 B 站的搜索端点顶掉：code 0、命中 0、一条都没有。
+// 「搜了但没有」和「压根没搜成」在界面上是两句不同的话，这一档要的是前者。
+func zeroSearchResults(f *biliFixture) {
+	f.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/x/web-interface/wbi/search/type" {
+			writeBiliJSON(w, map[string]any{
+				"code": 0, "message": "0", "ttl": 1,
+				"data": map[string]any{"numResults": 0, "numPages": 0, "result": []any{}},
+			})
+			return
+		}
+		f.serve(w, r)
+	})
+}
+
 // TestSearchingShowsTheNoResultsState 验搜索页两个分支都走得到，而且是靠真的
 // 敲字 + 回车走过去的——这是「用户能进入这个场景」最硬的一条证据。
+//
+// ⚠️ **得挂一台真的回零结果的 B 站**：搜索是一条真请求，「搜了但没有」和
+// 「压根没搜成」在界面上是两句不同的话（后者走失败块 + 重试）——裸壳的话
+// 走到的永远是后者。这一条烂过很久，就是从搜索接上真客户端那天开始的。
 func TestSearchingShowsTheNoResultsState(t *testing.T) {
+	f := newBiliFixture(t, 1)
+	zeroSearchResults(f)
 	s, tt := newShell(t)
+	searchOnRealClient(s, f.client())
 
 	// 还没输入：上游 pages/search/index.tsx:16 那一支。
+	//
+	// ⚠️ **两支在屏上靠页头区分**：searchIdle 和 noSearchResults 的 Title 同是
+	// 「暂无内容」、图标同是一枚，而 Hint 默认不画（`empty.go` 那条政策）——
+	// 用户看见的差别是页头那一句（「搜索」对「搜索【周杰伦】的结果」）。拿
+	// Title 断「还没输入就说了那一支」是同义反复，它红了很久就是从这里红的。
 	s.navigate(searchPath)
 	tt.Frame()
+	resultsHeader := "搜索【周杰伦】的结果"
 	if !tt.HasText(searchIdle.Title) {
 		t.Fatalf("没输入时没画「去输入」那一支，文字有 %q", tt.Texts())
 	}
-	if tt.HasText(noSearchResults.Title) {
-		t.Errorf("还没输入就说「换个词再搜」，文字有 %q", tt.Texts())
+	if tt.HasText(resultsHeader) {
+		t.Errorf("还没输入就画着结果页头，文字有 %q", tt.Texts())
 	}
 
 	// 点进搜索框，敲字 + 回车 → 到了「搜了没有结果」那一支。走的全是真实输入。
@@ -196,11 +233,11 @@ func TestSearchingShowsTheNoResultsState(t *testing.T) {
 	if got := s.router.Location(); !strings.Contains(got, "q=") {
 		t.Fatalf("回车之后 URL 上没有搜索词：%q", got)
 	}
+	// 结果页头先出来（带着搜索词），底下的空状态才画——后者那一句和 idle 的
+	// 是同一个字，settle 等它没有意义，等的是页头。
+	settleText(t, tt, resultsHeader)
 	if !tt.HasText(noSearchResults.Title) {
 		t.Errorf("搜完没有画出「没有搜索结果」，文字有 %q", tt.Texts())
-	}
-	if !tt.HasText(noSearchResults.Title) {
-		t.Errorf("搜完没有画出「换个词再搜」，文字有 %q", tt.Texts())
 	}
 }
 

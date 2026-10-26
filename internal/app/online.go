@@ -1206,6 +1206,9 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	a.loadSrc = nil
 	a.reportedErr = nil
 	a.clearErrLocked()
+	// 🔴 **这一首放起来了，跳过的账清零**（`autoSkipDead` 的保险丝）：连着失败
+	// 的那串到此为止——「跳过了几首」只对「还没放成」的那一段有意义。
+	a.skipStreak = 0
 	// 「正在取流」到此为止：播放器装上了，歌开始放了。
 	a.endLoadingLocked()
 	// ⚠️ **`pending` 不在这里清**：它是「当前这一首」，而中途断流之后
@@ -1906,6 +1909,123 @@ func (a *App) failPlay(gen int, it Item, branch string, err error) {
 	}
 	a.mu.Unlock()
 	a.failOnline(gen, it, branch, err, stage)
+	a.autoSkipDead(gen, it, err)
+}
+
+// autoSkipDead 是「这一首放不起来，自动换下一首」的那条路（起播失败专用）。
+//
+// 场景是连播一个收藏夹 / 合集：中间夹着失效的稿子（稿件删了、设了权限、
+// 地区锁了），每一首都是取流那一步就死。以前的下场是红字一挂、队列停在
+// 那首坏歌上——用户坐在那儿听不到歌，还得自己挨个点下一首。
+//
+// # 跳，还是不跳
+//
+// 🔴 **判据是 `bili.Recoverable`**，和「重试」按钮用的是同一张表：
+//   - **不可重试**（稿件没了、要会员、没权限……重试一万次也是这个答案）
+//     → 跳。留着红字等用户点「重试」是在让他做无用功。
+//   - **可重试**（网络断了、地址过期、响应被截断）→ **不跳**。这类错每一首
+//     都会撞上（网断了放谁都是死），跳过去就是把整张队列白烧一遍请求，
+//     而用户真正要做的是修网络——红字和「重试」留在他眼皮底下。
+//
+// # 保险丝
+//
+// 🔴 **`a.skipStreak` 连着数失败的起播，整个队列数满一圈就停**：循环 / 随机
+// 两档的 `Queue.Advance` 永远给得出「下一首」，不数的话一个全失效的收藏夹
+// 会无限跳下去。放成一首就清零（两处成功起播的代码块里）。上限取
+// **队列长度**：正常情况下一圈之内必然撞到活的；全死的话也只多绕一次就把
+// 话说全（「连着 N 首都放不起来」）。
+//
+// # 不跳的三种
+//
+//   - **代次变了 / 应用退了**：用户已经切了别的歌，这一趟失败没人要它——
+//     `failOnline` 把红字都省了，这里更不能去动队列。
+//   - **「恢复上次那一首」那一趟**（`failOnline` 的 restore 分支）：同样是
+//     静默的，而它的队列指针未必落在队列里，跳是没有方向的动作。
+//   - **单曲循环 / 队列到底**（`Advance` 给不出「下一首」）：自动跳的目标
+//     不存在，红字已经在屏上，照旧停下。
+//
+// ⚠️ **只罩起播失败**：`failPlay` 是唯一的调用点。放**到一半**断掉的
+// （`refreshOnlineNow` 的「换流重开」救不回来那支）不走这里——那一首用户
+// 已经听了一半，自动换歌等于替他按了下一首；红字和「重试」才是对的动作。
+func (a *App) autoSkipDead(gen int, it Item, cause error) {
+	if bili.Recoverable(cause) ||
+		errors.Is(cause, errStaleGen) || errors.Is(cause, errStreamingMissing) {
+		return
+	}
+	a.mu.Lock()
+	if a.onlineGen != gen || a.closed || a.restoreGen == gen {
+		a.mu.Unlock()
+		return
+	}
+	a.skipStreak++
+	streak := a.skipStreak
+	limit := a.queue.Len()
+	a.mu.Unlock()
+	if streak >= limit && limit > 0 {
+		a.giveUpSkipping(streak, it, cause)
+		return
+	}
+
+	// 下一首是谁只有 `Queue.Advance` 说了算（播放模式在那里面）。
+	d := a.queue.Advance()
+	if d.Kind != AdvancePlay {
+		// 单曲循环（重放的还是这首死的）或者队列到底了：红字已经在屏上。
+		a.logf("biu: %q 放不起来（%v），没有下一首可跳（%v）", it.Title, cause, d.Kind)
+		return
+	}
+	if d.Item.Path == "" && !d.Item.isOnline() {
+		a.queue.UndoStep()
+		return
+	}
+	a.logf("biu: %q 放不起来（%v），自动换下一首 %q（连着第 %d 首）",
+		it.Title, cause, d.Item.Title, streak)
+	// 念出去（无障碍）：歌没响就换了，读屏软件用户既没听见这一首失败、
+	// 也看不见队列换了人——一句话把两件事都说清。
+	a.announce(fmt.Sprintf("「%s」放不起来，自动换下一首", it.Title))
+	if err := a.play(d.Item); err != nil {
+		// 同步就接不上（没有源的那类）：退回指针，红字留给 failOnline 那一句。
+		// 异步的死（取流失败）会再回到这一支，保险丝管着圈数。
+		a.queue.UndoStep()
+	}
+}
+
+// giveUpSkipping 是保险丝烧断的那一刻：整个队列挨个试过一圈都没放起来，
+// 停下来，把话说明白。
+//
+// ⚠️ **状态的收法和 `onTrackFinished` 的 `AdvanceStop` 那一支同一个口径**
+// （`stopped` 立起来、位置归零、老播放器停在开头；`wantPlay` 不动——
+// 「用户想不想听」和「此刻有没有在响」是两栏），**但有一支例外**：起播失败
+// 不打断正在放的歌（`playOnlineFrom` 不停旧播放器）——用户是一边听着上一首
+// 一边点到这首坏歌的场合，上一首还在响就**让它接着响**，只把话说出去；
+// 「停机」那一套只落在手上那首**已经不响**的播放器上（连播到坏歌、或者
+// 第一首就死了的两种），nil 就没什么可停的。
+func (a *App) giveUpSkipping(streak int, last Item, cause error) {
+	a.mu.Lock()
+	p := a.player
+	sounding := p != nil && p.Playing()
+	if !sounding {
+		a.position, a.playing = 0, false
+		a.stopped = true
+	}
+	wake := a.wake
+	a.mu.Unlock()
+	if !sounding {
+		a.markPlaybackDirty()
+		if p != nil {
+			p.Pause()
+			p.Seek(0)
+		}
+	}
+	a.logf("biu: 连着 %d 首都放不起来，停下来了（最后一首 %q：%v）", streak, last.Title, cause)
+	// 红字是 `failOnline` 写的（最后一首的那句错），它没人清，就停在屏上。
+	if sounding {
+		a.announce(fmt.Sprintf("「%s」放不起来；刚才那一首还在放，没有动它", last.Title))
+	} else {
+		a.announce(fmt.Sprintf("连着 %d 首都放不起来，先停下来了", streak))
+	}
+	if wake != nil {
+		wake()
+	}
 }
 
 // refreshOnlineNow 从当前的播放位置重开一首。

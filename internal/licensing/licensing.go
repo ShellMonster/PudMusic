@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -36,7 +37,32 @@ import (
 // 它在 `resources/` 下面，所以 `mygo build` 会自动把它装进 app bundle 的
 // `Contents/Resources`（macOS）或可执行文件旁边（Windows）——不需要在
 // `mygo.json` 里另外登记。
-const NoticesRelPath = "resources/licenses/THIRD-PARTY-NOTICES.txt"
+//
+// ⚠️ **值是拼出来的**（`ResourcesDirName + "/" + NoticesDirName + "/" + NoticesFileName`）：
+// 运行时找这份文件要用的也是那两段（见 RuntimeNoticesPath），写死两遍的话，
+// 改了目录名而忘了改另一处，症状是**用户点了「第三方许可」什么也没发生**。
+const NoticesRelPath = ResourcesDirName + "/" + NoticesDirName + "/" + NoticesFileName
+
+const (
+	// ResourcesDirName 是仓库根下装随包资源的那一个目录。
+	ResourcesDirName = "resources"
+	// NoticesDirName 是随包资源里放许可证原文的那一个子目录。
+	NoticesDirName = "licenses"
+	// NoticesFileName 是清单文件的名字。
+	NoticesFileName = "THIRD-PARTY-NOTICES.txt"
+)
+
+// RuntimeNoticesPath 返回清单在**随包资源目录**里的位置。
+//
+// resourcesDir 是 `mygo.App.Path(mygo.PathResources)` 给的那个目录：
+// macOS 的 app bundle 里是 `Contents/Resources`，别处是可执行文件旁边。
+//
+// ⚠️ **它和 NoticesRelPath 不是同一个东西**：那一个是**相对仓库根**的
+// （生成器写文件时用），这一个**是相对随包资源目录**的（运行时找文件时用）——
+// 两者差的就是 `resources/` 这一段。
+func RuntimeNoticesPath(resourcesDir string) string {
+	return filepath.Join(resourcesDir, NoticesDirName, NoticesFileName)
+}
 
 // BiuLicenseRelPath 是 Biu 原作者的许可证原文（PolyForm Noncommercial 1.0.0）。
 //
