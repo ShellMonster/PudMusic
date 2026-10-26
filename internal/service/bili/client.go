@@ -334,7 +334,220 @@ type Call struct {
 	WBI bool
 	// Buvid 表示这次调用要带上设备标识（buvid3/buvid4）。取流接口没有它时，
 	// B 站常把请求当成可疑流量，只回一个 v_voucher、不给流。
+	//
+	// ⚠️ **不是所有接口都吃它**：评论接口带了它，B 站会把评论列表砍到 3 条
+	// 并宣称「到底了」（见 `noBuvidTransport`）。⇒ 那些接口要显式写
+	// `NoBuvid: true`。
 	Buvid bool
+	// NoBuvid 表示这一趟**不要**带设备标识（buvid3/buvid4）。
+	//
+	// # 为什么需要它（而不只是「不设 Buvid」）
+	//
+	// 🔴 **jar 里的 cookie 是在 `http.Client.send` 里加的，而那在运输层之前**
+	// （`net/http/client.go` 的 `Client.send`：先 `c.Jar.Cookies(url)` 再
+	// `req.AddCookie`，然后才 `RoundTrip`）。
+	//
+	// 所以「不设 `Buvid`」**挡不住** jar 里已有的 buvid3——那一刻 `Cookie` 头
+	// 还没长出来。而 jar 里**确实**会有 buvid3：登录成功时 B 站下发的那批
+	// cookie **全部**被存下来（`app.Account.finish` 收下 `IssuedCookies()` 的
+	// 每一条），而 B 站的 cookie 域是 `.bilibili.com`，`api.bilibili.com`
+	// 收得到。
+	//
+	// ⇒ 只能在**运输层**摘（那里 jar 已经加好了）。见 `noBuvidTransport`。
+	//
+	// ⚠️ **它只摘设备标识，登录态照带**：SESSDATA / bili_jct 那些一个都不动。
+	NoBuvid bool
+}
+
+// noBuvidTransport 是「这一趟不要带设备标识」的运输层。
+//
+// # 为什么它必须在运输层，而不能在 `Do` 里删头
+//
+// 🔴 **jar 的 cookie 是在 `http.Client.send` 里加的，而那在运输层之前**
+// （`net/http/client.go` 的 `Client.send`：先 `c.Jar.Cookies(url)` 再
+// `req.AddCookie`，然后才 `RoundTrip`）。
+//
+// 所以「在 `Do` 里把 `Cookie` 头删干净」是**没用**的：那一刻头还没长出来。
+// ⇒ 只能在**运输层**剥——那里 jar 已经把 cookie 加上去了。
+//
+// # 它剥的是哪几个
+//
+// **凡是名字以 `buvid` 开头的**（`buvid3` / `buvid4` / `buvid`…，B 站的设备
+// 标识）。实测（2026-10-26，只读探针，oid=170001，ps=20，同一个 URL 只改
+// Cookie 头）：
+//
+//	不带 buvid3                        → 20 条，cursor.is_end = false
+//	带 buvid3（带不带 buvid4 都一样）     →  3 条，cursor.is_end = true
+//	只带 b_nut                         → 20 条
+//	只带 buvid（不带 3）                → 20 条
+//
+// ⇒ **触发的是 `buvid3` 本身**，而 `b_nut` / `buvid` 实测**无害**。
+//
+// ⚠️ **摘的是整个 `buvid*` 家族，不只是 `buvid3`**：多摘两个实测无害的
+// cookie，比「漏摘一个会静默少一半数据」划算得多——这正是这个坑的形状
+// （带与不带的差别**不报错**，只是数字变小）。
+//
+// # 它不摘什么
+//
+// **登录态照带**：SESSDATA / bili_jct / DedeUserID 一个都不动。要摘的是
+// 「设备标识」，不是「凭据」。
+type noBuvidTransport struct {
+	base http.RoundTripper
+}
+
+// RoundTrip 发请求之前把 buvid 那一族从 Cookie 头里摘掉。
+func (t *noBuvidTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	if !hasBuvidCookie(req.Header) {
+		return base.RoundTrip(req)
+	}
+	// RoundTripper 的约定是**不能改调用方传进来的 Request**——克隆一份再改。
+	// 直接改的话调用方那边看到的头会凭空少一样，而那种错极难查。
+	r := req.Clone(req.Context())
+	stripBuvidCookies(r)
+	return base.RoundTrip(r)
+}
+
+// httpClientFor 报这一趟该用哪一个 http.Client。
+//
+// ⚠️ **「这一趟不要 buvid」换的是运输层，不是头**——理由见 `noBuvidTransport`。
+//
+// ⚠️ **`Buvid` 与 `NoBuvid` 互斥**，两个都设时 **`NoBuvid` 赢**：多带 buvid3
+// 的后果是**静默**少拿数据（评论列表只剩 3 条），少带顶多是 B 站觉得这个
+// 客户端「像机器人」——两边的错法不对称，所以往严的那边退。
+func (c *Client) httpClientFor(call Call) *http.Client {
+	if !call.NoBuvid {
+		return c.http
+	}
+	// ⚠️ **复制一份 `http.Client` 而不是新建一个**：jar / Timeout /
+	// CheckRedirect 都得跟原来那个一样——换掉 jar 就等于把登录态丢了。
+	// `http.Client` 里没有锁（只有 Transport / CheckRedirect / Jar / Timeout
+	// 四个字段），复制它是安全的。
+	hc := *c.http
+	hc.Transport = &noBuvidTransport{base: c.http.Transport}
+	return &hc
+}
+
+// hasBuvidCookie 报这个请求的 Cookie 头里有没有 buvid 那一族。
+//
+// ⚠️ **按原始文本判**，不用 `req.Cookies()`：那个函数会把引号剥掉，而
+// 「有没有这个 cookie」这件事**不该**取决于值的写法。
+func hasBuvidCookie(h http.Header) bool {
+	for _, raw := range h.Values("Cookie") {
+		for _, name := range cookieNames(raw) {
+			if isBuvidName(name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isBuvidName 报这个 cookie 名字是不是设备标识那一族。
+//
+// ⚠️ **按前缀判，不只判 `buvid3`**：见 `noBuvidTransport` 的注释。
+func isBuvidName(name string) bool {
+	return strings.HasPrefix(strings.ToLower(name), "buvid")
+}
+
+// cookieNames 报这个 Cookie 头里有哪几个 cookie 的名字。
+func cookieNames(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	pairs := splitCookiePairs(raw)
+	names := make([]string, 0, len(pairs))
+	for _, p := range pairs {
+		names = append(names, p.name)
+	}
+	return names
+}
+
+// stripBuvidCookies 把 buvid 那一族从请求的 Cookie 头里去掉。
+//
+// ⚠️ **按原始文本切、剩下的原样留下**：cookie 的值里可能有引号（`readCookies`
+// 会把引号剥掉），重拼就等于**改写了它们的值**。
+func stripBuvidCookies(req *http.Request) {
+	values := req.Header.Values("Cookie")
+	if len(values) == 0 {
+		return
+	}
+	kept := make([]string, 0, len(values))
+	dropped := false
+	for _, raw := range values {
+		rest := make([]string, 0, 4)
+		for _, p := range splitCookiePairs(raw) {
+			if isBuvidName(p.name) {
+				dropped = true
+				continue
+			}
+			rest = append(rest, p.raw)
+		}
+		// ⚠️ **剩下的分段原样留下**——cookie 的值里可能有引号，重拼就等于
+		// **改写了它们的值**。
+		if len(rest) == 0 {
+			continue
+		}
+		kept = append(kept, strings.Join(rest, "; "))
+	}
+	if !dropped {
+		return // 一个都没摘掉：头原样留着
+	}
+	if len(kept) == 0 {
+		req.Header.Del("Cookie")
+		return
+	}
+	req.Header.Del("Cookie")
+	for _, v := range kept {
+		req.Header.Add("Cookie", v)
+	}
+}
+
+// cookiePair 是一个 cookie 的**名字**和它的**原文**。
+type cookiePair struct {
+	name string
+	raw  string
+}
+
+// splitCookiePairs 把一个 Cookie 头切成一个个 cookie。
+//
+// ⚠️ **引号里的分号不是分隔符**：cookie 的值可能是 `SESSDATA="a;b"`，
+// 按 `;` 硬切会把它切成两半——那不是「摘掉一个 buvid」，那是**改写了
+// 别的 cookie 的值**。所以这里跟著引号走。
+func splitCookiePairs(raw string) []cookiePair {
+	var out []cookiePair
+	var cur strings.Builder
+	inQuote := false
+	for i := 0; i < len(raw); i++ {
+		ch := raw[i]
+		switch {
+		case ch == '"':
+			inQuote = !inQuote
+			cur.WriteByte(ch)
+		case ch == ';' && !inQuote:
+			if s := strings.TrimSpace(cur.String()); s != "" {
+				out = append(out, cookiePair{name: cookieNameOf(s), raw: s})
+			}
+			cur.Reset()
+		default:
+			cur.WriteByte(ch)
+		}
+	}
+	if s := strings.TrimSpace(cur.String()); s != "" {
+		out = append(out, cookiePair{name: cookieNameOf(s), raw: s})
+	}
+	return out
+}
+
+// cookieNameOf 报这一段 cookie 的名字。
+func cookieNameOf(part string) string {
+	if i := strings.IndexByte(part, '='); i > 0 {
+		return strings.TrimSpace(part[:i])
+	}
+	return strings.TrimSpace(part)
 }
 
 // Do 发一次请求，返回解好的 data 段。
@@ -418,7 +631,7 @@ func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
 		c.onReq(method, endpoint.String())
 	}
 
-	resp, err := c.http.Do(req)
+	resp, err := c.httpClientFor(call).Do(req)
 	if err != nil {
 		// 包一层而不是原样返回：调用方要能分清「没登录」（该提示重新登录）
 		// 和「网断了」（该提示检查网络）。原始的 *url.Error 不带这个信息。
