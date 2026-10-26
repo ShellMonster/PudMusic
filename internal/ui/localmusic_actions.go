@@ -10,6 +10,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -29,7 +30,7 @@ func (p *localPage) viewDeleteDialog(c *ui.Context) {
 		return
 	}
 	// 正文后面带上完整路径：歌名可能重名（「同名.mp3」在好几个目录里），
-	// 而按下按钮之后**不可恢复**——用户得能确认自己删的是哪一个文件。
+	// 而按下按钮之后文件就**动起来了**——用户得能确认自己动的是哪一个文件。
 	//
 	// ⚠️ **danger 那一档是红的**（上游 `local-music/index.tsx:180` 的
 	// `type: "danger"`）：一个绿色的「删除」和行里那个红色的「删除文件」摆在一起，
@@ -79,16 +80,36 @@ func (p *localPage) viewRemoveDirDialog(c *ui.Context) {
 	}
 }
 
-// deleteTrack 真的删。
+// deleteTrack 真的移进系统废纸篓。
 //
 // ⚠️ 删完之后**不**在这里手动改列表：那一行是 `App.DeleteLocalTrack` 改的
 // （它顺带把缓存和监听都顾上）。这里只负责把结果说出来。
+//
+// ⚠️ **两句话都必须说清「文件还在不在」**（票 #558）：这一下从「永久删除」
+// 改成了「移到系统废纸篓」，而用户最怕的那件事是「以为删了、其实还在」
+// 或者「以为还在废纸篓里、其实没了」。
+//
+// ⚠️ **「已移到系统废纸篓」只在真的搬进去的时候说**：那一句话**承诺用户
+// 能从废纸篓里恢复**，而「文件本来就不在了」（用户先在访达里删了）压根没进
+// 过废纸篓——说那句话就是**对用户说谎**。那一种说「文件已经不在了」。
 func (p *localPage) deleteTrack(tr localmusic.Track) {
-	if err := p.app.DeleteLocalTrack(tr.ID); err != nil {
-		p.say("删不掉："+err.Error(), notice.Danger)
+	err := p.app.DeleteLocalTrack(tr.ID)
+	if err != nil {
+		// ⚠️ **「文件已经不在了」不是失败**：它没进过废纸篓，所以**不许**
+		// 说「已移到系统废纸篓」，也**不许**说「文件未删除」（那一句会
+		// 让用户以为文件还在原处，而他自己在访达里删掉了）。
+		if errors.Is(err, localmusic.ErrMissing) {
+			p.say("「"+tr.Title+"」已经不在了", notice.Warning)
+			return
+		}
+		// ⚠️ **失败时文件一定还在原处**（契约见 `localmusic.Trash`）：
+		// 框架那一侧「进不了回收站就失败并把东西留在原地」，而这一层
+		// **不做任何补救性的删除**。所以这句话里那句「文件未删除」是
+		// **真话**，而它也是用户最需要听见的那一句。
+		p.say("文件未删除："+err.Error(), notice.Danger)
 		return
 	}
-	p.say("已从磁盘上删掉「"+tr.Title+"」", notice.Success)
+	p.say("已移到系统废纸篓「"+tr.Title+"」", notice.Success)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

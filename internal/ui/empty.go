@@ -21,9 +21,12 @@
 package ui
 
 import (
+	"strconv"
+
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/skeleton"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -191,6 +194,10 @@ func emptyArt(c *ui.Context, name string) {
 	if name == "" {
 		return
 	}
+	if v, ok := emptyIllustrations[name]; ok {
+		ui.Image(c, v).Height(emptyIllustrationH).TextColor(c.Theme().TextMuted)
+		return
+	}
 	ui.Icon(c, icon(name)).FontSize(emptyIconSize).TextColor(c.Theme().TextMuted)
 }
 
@@ -260,8 +267,27 @@ func (s *Shell) viewLoading(c *ui.Context, key, text string) {
 // 那一块里，四周全是行，留白大了就只剩字飘在当中（理由同 `emptyRowPad`）。
 func loadingCell(text string) func(c *ui.Context) {
 	return func(c *ui.Context) {
-		drawEmpty(c, "", loadingState(text), emptyRowPad)
+		drawSkeletonRows(c, text)
 	}
+}
+
+// skeletonRowH / skeletonRows 是列表首屏骨架屏的行高与行数（一屏大约放得下的量）。
+const (
+	skeletonRowH = 56
+	skeletonRows = 8
+)
+
+// drawSkeletonRows 画列表「第一页在途」的骨架屏：八行歌曲占位（设计稿
+// docs/design-mockups/skeleton.png）。
+//
+// ⚠️ **text 是这一块的无障碍名字**（和转圈那一档同一句话），读屏软件与测试靠它认出
+// 「这一格在加载」。页面级首屏（`viewLoading`）仍是一枚转圈，没有改。
+func drawSkeletonRows(c *ui.Context, text string) {
+	ui.Column(c).FillWidth().Label(text).Children(func() {
+		for i := range skeletonRows {
+			skeleton.Row(c, "skel:"+strconv.Itoa(i), skeletonRowH)
+		}
+	})
 }
 
 // dynamicShapesNote 是「我们只画得出三种形态」那句话。

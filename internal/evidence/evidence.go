@@ -448,6 +448,27 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// 设置页那格代理的**消费端**（上游 Biu 的 #250 一类）：四种协议都要
+		// 真的接到请求上——http/https/socks5 翻成代理地址，socks4 由隧道拨号
+		// 接（http.Transport 不认这个 scheme）；「不使用代理」回落环境变量；
+		// 选了协议没填主机要报错而不是安静直连；改设置下一条请求就走新路。
+		// 回环（httptest 全在本机）永不代理。
+		Spec: "设置页的代理真的被所有出网请求走：四种协议、none 回落环境变量、空主机报错、改了立刻生效",
+		Tests: []string{
+			"TestProxyForSettingsMapsTheFourProtocols",
+			"TestNoProxyFollowsTheEnvironment",
+			"TestAnEmptyProxyHostIsAnErrorNotSilence",
+			"TestLoopbackRequestsAreNeverProxied",
+			"TestTheProxySettingTakesEffectOnTheNextRequest",
+			"TestTheSettingsMountFeedsTheProxySnapshot",
+			"TestTheSocks4TunnelSpeaksTheProtocol",
+			"TestTheSocks4TunnelSendsTheHostnameWhenItCannotResolve",
+			"TestTheSocks4TunnelUsesAResolvedAddressWhenItCan",
+			"TestTheSocks4ReplyCodeIsSpelledOut",
+		},
+	},
+	{
+		Category: HTTP,
 		Spec:     "WBI 签名对着公布的那组向量",
 		Tests:    []string{"TestWBISignatureMatchesThePublishedVector", "TestWBIKeysAreFetchedOnceAndCached"},
 	},
@@ -484,6 +505,47 @@ var Items = []Item{
 		Tests: []string{
 			"TestANonJSONResponseIsNotTheRiskControl",
 			"TestATruncatedResponseIsNotTheRiskControl",
+		},
+	},
+	{
+		Category: HTTP,
+		// 🔴 **评论接口那三个静默出错的坑**（票 #571）：
+		//
+		//	buvid3  请求头里一出现 buvid3，B 站就把评论列表砍到 3 条并宣称「到底了」
+		//	w_rid   走的是**不带 WBI** 的那个接口，所以请求串里不该有签名
+		//	ps      上限 30（超了 B 站默默截断，翻页从第二页起会漏掉一批）
+		//
+		// ⚠️ **buvid3 那一条要防的是两处**：「代码里没写 `Buvid: true`」**不够**
+		// ——jar 里的 cookie 是在运输层之前加上的（`http.Client.send` 里先
+		// `Jar.Cookies` 再 `RoundTrip`），而 jar 里确实会有 buvid3（登录时
+		// B 站下发的那批 cookie 全被存了下来）。所以评论请求显式写
+		// `NoBuvid: true`，在运输层把 buvid 那一族摘掉（**登录态照带**）。
+		//
+		// 还有「-404（对象不存在）」与「0 条评论」**必须说得不一样**：混成一句的
+		// 话，用户看到「这个对象不在了」会以为歌没了，而歌好好地摆在那儿。
+		//
+		// 而 **-403 在评论这一处判成「可重试」**（全局那张表仍判它不可重试——
+		// 那在别的接口上是对的，在评论接口上是错的）。
+		Spec: "评论接口：请求头里不带 buvid3（jar 里的也不带，登录态照带）、不签 WBI、ps 不超过 30；-404 与「0 条评论」说得不一样；-403 在评论这一处可重试",
+		Tests: []string{
+			"TestCommentListNeverSendsBuvid",
+			"TestCommentListNeverSendsTheBuvidThatLivesInTheJar",
+			"TestTheLoginCookiesDoNotMakeTheCommentRequestCarryBuvid",
+			"TestTheNoBuvidPathIsSafeToCallConcurrently",
+			"TestCommentListDoesNotAskForBuvid",
+			"TestCommentListIsNotSigned",
+			"TestCommentListGoesToTheUnsignedEndpoint",
+			"TestCommentListNeverAsksForMoreThanThirty",
+			"TestCommentListSendsTheTypeAndOid",
+			"TestCommentListReadsTheFieldsOffTheRealShape",
+			"TestCommentListSaysTheObjectIsGoneWhenBiliSays404",
+			"TestTheEmptyListAndTheMissingObjectSayDifferentThings",
+			"TestCommentListReadsTheEmptyPage",
+			"TestAnEmptyPageMidwayIsNotNoComments",
+			"TestCommentTreatsForbiddenAsWorthRetrying",
+			"TestIsUpperMarksOnlyTheUpAuthorsOwnComment",
+			"TestUpReplyCommentsAreNotMarkedAsTheUpper",
+			"TestAPictureWithAFractionalSizeDoesNotTakeTheWholePageDown",
 		},
 	},
 	{
@@ -2155,6 +2217,62 @@ var Items = []Item{
 			"TestTheSuggestKeywordIsDebouncedBy500ms",
 			"TestTheSuggestDebounceRestartsOnEveryKeystroke",
 			"TestTheSearchWatchStopsWhenTheOverlayGoesAway",
+		},
+	},
+	{
+		Category: HTTP,
+		// B 站那一份弹幕（`/x/v1/dm/list.so`）。**这一条回的不是 JSON**——
+		// 它回的是**原始 deflate 的 XML**（实测 2026-10-27：响应头
+		// `Content-Type: text/xml` + `Content-Encoding: deflate`，而 deflate 是
+		// **裸的**，头两字节 `c5 55`，不是 zlib 的 `78 xx`）。
+		//
+		// 🔴 **「解不出 JSON」是一个静默的失败**：症状是「一条弹幕都没有」，
+		// 而界面上看不出任何异样。所以另开了 `DoRaw`（拿原文不解），而**错误
+		// 分类仍走 `Do` 那一条**——「能不能重试」那张表是全项目唯一的一处
+		// （`retry.go`），`DoRaw` 自己造一套的话，弹幕那条路上的「重试」会给错。
+		//
+		// ⚠️ **压缩那一档是静默的**：拿 `compress/zlib` 去解会报一句看不懂的错
+		// （`flate: corrupt input before offset 5`），而症状是「一条弹幕都没有」。
+		// ⇒ 有一条测试专门钉「deflate 不是 zlib」。
+		//
+		// ⚠️ **`p` 那 9 段第 8 段是 19 位的大整数**（弹幕 id）——走过 `float64`
+		// 会掉精度。而 `p` 段数不够的时候，后面几段是空的 ⇒ 颜色变成 0（全黑），
+		// **一条黑字弹幕在界面上看着完全正常**。所以段数不够的那一条要丢掉。
+		//
+		// ⚠️ **一条读不懂的不许把整份丢掉**：弹幕的正文是**用户自己打的字**，
+		// 什么字符都可能有，而一个**控制字符**（实测 U+0001）在 XML 里是
+		// **报错**的——报错的位置在那一条上。
+		//
+		// 🔴 **这一档最省事的写法是错的**：用一个 `xml.Decoder` 读到底的话，
+		// 那个错**让整个 decoder 卡住**——后面的合法弹幕**一条都读不到**
+		// （症状是「这个视频只有一条弹幕」）。⇒ 解析要**一条一条单独解**：
+		// 解不开的**只丢那一条**。
+		//
+		// ⚠️ **而没定义的实体要「原样留着」**（`&foo;`）——那是用户打的字，
+		// 非严格模式把它原样带出来，**不丢那一条**。
+		Spec: "B 站那一份弹幕自己来：原始 deflate（不是 zlib）解开、XML 里 `p` 那 9 段逐段切对（时间/模式/字号/十进制颜色）、正文里的 XML 实体解开、读不出来的一条只丢那一条；拉不到要有话说",
+		Tests: []string{
+			"TestDanmakuReadsEveryFieldOfEveryLine",
+			"TestDanmakuCutsTheNineFieldsOfThePAttribute",
+			"TestDanmakuUnwrapsTheXMLEntities",
+			"TestDanmakuUnwrapsIsDeflateNotZlib",
+			"TestDoRawHandsBackTheBytesUndecoded",
+			"TestDoRawReportsTheSameErrorsAsDo",
+			"TestDanmakuAsksTheDanmakuEndpoint",
+			"TestDanmakuWithoutACidDoesNotAsk",
+			"TestDanmakuWithNoDanmakuIsNotAnError",
+			"TestDanmakuKeepsWhatItCouldReadWhenOneLineIsBroken",
+			"TestDanmakuIgnoresLinesItCannotUnderstand",
+			"TestDanmakuUnwrapsAWholeResponseThatIsDeflated",
+			"TestDanmakuKeepsTheRowIDAsAString",
+			"TestDanmakuGivesEveryLineItsOwnID",
+			"TestDanmakuKeepsTheOrderBiliGave",
+			"TestDanmakuSaysSoWhenTheAnswerIsNotDanmaku",
+			"TestDanmakuWithTheFeatureTurnedOffIsNotAnError",
+			"TestDanmakuKeepsGoingAfterALineWithAControlCharacter",
+			"TestTheRealResponsesGiveTheExpectedNumberOfLines",
+			"TestTheFixtureMatchesTheServerBytes",
+			"TestDanmakuWithAnEmptyBodyIsNotAnError",
 		},
 	},
 	{
@@ -4018,6 +4136,56 @@ var Items = []Item{
 			"TestTheMiniLyricsCurtainSwitchSurvivesARestart",
 			// 卷帘不超出工作区（纯逻辑那一半）。
 			"TestTheMiniCurtainIsClampedToTheWorkArea",
+		},
+	},
+	{
+		// 票 #558：删本地音乐文件**改成移到系统废纸篓**（原来是永久删除）。
+		//
+		// ⚠️ **语义变了，而那一半是静默的**：以前界面上写着「不可恢复」，
+		// 现在文件进的是废纸篓、用户找得回来——留着那句话就是**对用户说假话**。
+		// 而**反过来**的那一种错更贵：悄悄回退到永久删除的话，界面上一个字
+		// 都不会变，用户以为文件在废纸篓里、而它已经没了。
+		//
+		// 🔴 **所以「文件还在不在」是这一条的主判据**，不是「有没有报错」：
+		// 成功那一条断「原处没了**而且**废纸篓里有」，失败那几条断「**原处
+		// 还在**」。只断前者的话，一个「偷偷 os.Remove」的实现照样全绿。
+		//
+		// ⚠️ **失败那一条不许有「回收站不可用就永久删」的兜底**：框架那一侧
+		// 自己就把「本来会被永久删除」的那一次拒掉了（Windows 的 progress
+		// sink），而用户看到的是「文件未删除」——那句话是**真话**。
+		Category: Negative,
+		Spec:     "删本地音乐文件是**移到系统废纸篓**而不是永久删除：成功时原处没了、废纸篓里有（找得回来）、界面上说「已移到系统废纸篓」；失败时**文件还在原处**、界面上说「文件未删除」、那一行还在列表里；**文件本来就不在了**（用户先在访达里删了）时那一行照样没掉、而界面上说「已经不在了」——**三种结果不许混成两种**，「已移到系统废纸篓」只在真的搬进去的时候说；回收站不可用（网络盘 / 跨卷 / 系统不提供）时报一个用户看得懂的错而**不删**；弹窗上不再承诺「不可恢复」",
+		Tests: []string{
+			// 成功那一条：搬走 + 找得回来 + 话说了。
+			"TestDeleteMovesTheFileIntoTheTrash",
+			"TestDeletingMovesTheFileToTheTrashAndSaysSo",
+			// 失败那几条：文件还在原处（安全线），而且话说了。
+			"TestDeleteLeavesTheFileAloneWhenTheTrashFails",
+			"TestATrashThatIsNotAvailableKeepsTheFileAndTheRow",
+			"TestATrashThatFailsSaysTheFileIsStillThere",
+			// 🔴 **失败的时候不许说「已移到系统废纸篓」**：原来错误分类对整段
+			// 系统原话做子串匹配，而 Windows 那边每一句失败的话都带同一截
+			// 「to the recycle bin」——拿它当判据的话，权限失败 / 已存在 /
+			// 文件不存在全被归成同一档；而一个叫「Not Found.mp3」的文件更
+			// 是被判成「文件已经不在了」，于是界面说成功了、列表那一行也
+			// 消失了，而文件好好地躺在原处。
+			"TestATrashThatFailsNeverSaysItMovedToTheTrash",
+			"TestDeleteDoesNotCallAMissingFileASuccess",
+			"TestClassifyTrashErrorSortsTheWindowsHRESULTs",
+			"TestClassifyTrashErrorDoesNotLetTheFileNameDecide",
+			"TestClassifyTrashErrorDoesNotReadTheWordsInsideQuotes",
+			// 🔴 **「文件本来就不在了」不许说成「已移到系统废纸篓」**：那句话
+			// 承诺用户能从废纸篓里恢复，而它压根没进过废纸篓。
+			"TestAFileThatIsAlreadyGoneNeverSaysItMovedToTheTrash",
+			"TestDeleteSaysTheFileIsAlreadyGoneWhenTheTrashFails",
+			"TestDeleteSaysTheTrashIsNotAvailable",
+			"TestDeleteSaysTheNameIsTaken",
+			// 「没装回收站」：报错，**不删**。
+			"TestDeleteWithoutATrashIsAnError",
+			// 界面上不许说谎。
+			"TestTheDeleteDialogNoLongerPromisesItIsUnrecoverable",
+			// 交给回收站的是**词法上的那一条**（符号链接那条安全线的另一半）。
+			"TestDeleteHandsTheLexicalPathToTheTrash",
 		},
 	},
 }

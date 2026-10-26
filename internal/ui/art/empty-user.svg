@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+  <g opacity="0.16">
+    <circle cx="120" cy="80" r="70"/>
+    <circle cx="120" cy="80" r="48" stroke-dasharray="4 9"/>
+  </g>
+  <g opacity="0.9">
+    <circle cx="120" cy="64" r="20"/>
+    <path d="M84 118a36 32 0 0 1 72 0"/>
+  </g>
+  <g>
+    <circle cx="160" cy="52" r="22" fill="currentColor" fill-opacity="0.16"/>
+    <path d="M152 52h16M160 44v16"/>
+  </g>
+</svg>

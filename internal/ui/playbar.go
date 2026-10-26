@@ -246,7 +246,7 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 	// 所以影是这一条唯一的分界——去掉它播放条会和内容区糊成一片（浅色下尤其
 	// 明显：两边都是 `#ffffff`）。
 	bar := shadow.PlayBar(ui.Column(c).Key("playbar").Height(playbarHeight).
-		PaddingX(playbarPadX).Background(t.Background), t)
+		PaddingX(playbarPadX).Background(s.coverWash(t, t.Background)), t)
 	bar.Children(func() {
 		// 🔴 **三列按 1:3:1 分**（上游 `playbar/index.tsx:26` 的
 		// `grid-cols-[minmax(0,1fr)_minmax(0,3fr)_minmax(0,1fr)]`）。

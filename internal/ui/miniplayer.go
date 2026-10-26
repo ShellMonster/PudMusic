@@ -618,13 +618,18 @@ func (s *Shell) viewMini(c *ui.Context) {
 	// 根底下会空出一块——而这一扇窗是**透明**的，**透明的那一块照样吃点击**
 	//（底下那个应用的按钮就点不到那几十像素）。`Fill()` 让根铺满整扇窗，
 	// 那多出来的一块是**面板自己的底**（不透明，不吃点击的那种空）。
+	//
+	// ⚠️ **底色走 `coverWash`**（上游那一档：封面取色把主色轻轻染进底）：
+	// 迷你播放器的底和播放条那一块是**同一族**（都随当前封面的色偏一下），
+	// 而这一扇窗**整个就是一张卡片**——染的是整块面板，卷帘那一段不再单独
+	// 画底（根已经铺满整扇窗了）。
 	panel := ui.Column(c).Key("mini-root").Fill()
 	if s.miniCurtain.height > 0 {
 		panel = panel.Radius(t.Radius, t.Radius, space.None, space.None)
 	} else {
 		panel = panel.Radius(t.Radius)
 	}
-	panel = panel.Background(t.Surface)
+	panel = panel.Background(s.coverWash(t, t.Surface))
 	if s.miniCurtain.height > 0 {
 		panel = shadow.Popover(panel, t)
 	}
