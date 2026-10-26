@@ -215,6 +215,22 @@ var Items = []Item{
 	},
 	{
 		Category: Play,
+		// 起播失败自动跳过（收藏夹里夹着失效稿子那一类）：**不可重试**的错
+		// （稿件没了/没权限，重试一万次也一样）跳到下一首，**可重试**的错
+		// （网络那类）留在原地给「重试」——判据就是 `bili.Recoverable` 那张表，
+		// 两处共用，不另立一套。
+		//
+		// 🔴 全失效的收藏夹**只绕一圈**：循环/随机档的 `Advance` 永远给得出
+		// 「下一首」，不数着会无限跳下去（`App.skipStreak`，放成一首就清零）。
+		Spec: "起播失败（不可重试类）自动跳下一首；可重试类不跳；整张队列全失效只绕一圈就停",
+		Tests: []string{
+			"TestADeadSongInTheQueueIsSkippedAutomatically",
+			"TestTheWholeQueueBeingDeadStopsAfterOneRound",
+			"TestARetriableFailureDoesNotSkipToTheNextSong",
+		},
+	},
+	{
+		Category: Play,
 		// 播放模式四档（顺序/循环/随机/单曲，BMG-47 A5）。「放完下一首是哪首」
 		// 这一句是**四档各有一条**——顺序停在队尾、循环绕回队尾、随机真的打乱、
 		// 单曲一步都不挪，缺一档就有一档没人管，而缺了的那一档在界面上和别的
