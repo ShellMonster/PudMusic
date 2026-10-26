@@ -313,13 +313,15 @@ func (s *Shell) commitSideWidth() {
 // ≥4.5:1 的变体，深色下原样不动），见 `widgets/ink`。
 func (s *Shell) viewSideBrand(c *ui.Context, collapsed bool) {
 	t := c.Theme()
-	// ⚠️ **名字要让开左上角那三枚系统按钮**（macOS 的红黄绿）：它们**浮在内容
-	// 上面**，而侧栏是**通栏**的（从窗口最顶开始），所以品牌这一行和它们**同一行**
+	// ⚠️ **名字不能和左上角那三枚系统按钮（macOS 的红黄绿）同一行**：它们**浮在
+	// 内容上面**，而侧栏是**通栏**的（从窗口最顶开始），所以品牌这一行和它们**同一行**
 	// ——不挪开的话名字就**顶在那三枚底下**。
-	// `bar.Left` 就是系统控件在左边占掉的宽度（真窗口上约 66 像素；
-	// `mygo/ui/context.go` 的 `TitleBar{Height, Left, Right}`）。
-	// ⚠️ 顶栏那一行**不让**这几十像素（票 #286：顶栏只盖内容区，侧栏那一片不盖），
-	// 而侧栏是通栏的 —— **两处的理由不一样**。
+	//
+	// **挪法是「往下挪一整行」**（`sideBrandTopPad` 在 macOS 上多给 12 个像素，
+	// 让名字落在那三枚**下面**那一行），**不是**横向让开 `bar.Left`：那六十几个
+	// 像素是系统控件占的宽度，让开之后名字被推到很右边去了 —— 而名字本来就该在左边。
+	// ⚠️ 顶栏那一行**也不让** `bar.Left`（票 #286：顶栏只盖内容区，侧栏那一片不盖），
+	// **两处的理由不一样**。
 	row := ui.Row(c).Key("side-brand").Gap(space.Px8).AlignItems(ui.Center).
 		Padding(s.sideBrandTopPad(), space.Px12, space.Px12, space.Px16)
 	if collapsed {
