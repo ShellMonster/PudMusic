@@ -192,7 +192,7 @@ func (s *Shell) pickSideMenu(c *ui.Context, st app.Settings, ro bool) {
 		})
 	w := st.SideMenuWidth
 	s.settingRow(c, "侧栏宽度", "", func() {
-		ui.Row(c).Key("setting:sideMenuWidth").Width(settingsControlW).MinWidth(settingsControlMinW).
+		ui.Row(c).Key("setting:sideMenuWidth").Width(s.settingsControlFitW(c, settingsControlW)).
 			Gap(space.Px12).AlignItems(ui.Center).Children(func() {
 			sl := ui.Slider(c, &w, app.MinSideMenuWidth, app.MaxSideMenuWidth).
 				Grow(1).Label("侧栏宽度").Disabled(ro)

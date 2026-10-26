@@ -95,13 +95,15 @@ var themePresets = []struct {
 	{app.ThemePresetClassic, "经典"},
 }
 
-// themeModes 是三档主题，顺序就是从左到右的顺序。设置页那三个按钮用。
+// themeModes 是四档主题，顺序就是从左到右的顺序。设置页那一排按钮用。
 //
 // ⚠️ **每一档都带一枚图标**（上游那一排是「图标 + 文字」，`system-settings.tsx:
 // 105-153`：跟随系统 `RiComputerLine`、浅色 `RiSunLine`、深色 `RiMoonLine`，
 // 都是 `size={18}`）。图标名是 `icons.go` 里的常量——「跟随系统」那一枚是
-// 这一票新加的资源（`Device/computer-line.svg`），照上游 RemixIcon 的目录
+// 票 #297 新加的资源（`Device/computer-line.svg`），照上游 RemixIcon 的目录
 // 放进去，许可证那一份没变（还是 Remix Icon License，见 `internal/licensing`）。
+// 「定时」是 #534 加的第四档（19:00~次日 07:00 用深色），用的是那批资源里的
+// `System/time-line.svg`（`iconClock`）。
 var themeModes = []struct {
 	mode  app.ThemeMode
 	label string
@@ -110,5 +112,5 @@ var themeModes = []struct {
 	{app.ThemeModeSystem, "跟随系统", iconComputer},
 	{app.ThemeModeLight, "浅色", iconSun},
 	{app.ThemeModeDark, "深色", iconMoon},
-	{app.ThemeModeSchedule, "定时", iconEmptyLater},
+	{app.ThemeModeSchedule, "定时", iconClock},
 }

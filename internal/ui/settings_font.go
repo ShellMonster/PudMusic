@@ -103,9 +103,9 @@ func (s *Shell) pickFont(c *ui.Context, st app.Settings, ro bool) {
 
 	idx := indexOfString(families, chosen)
 	sel := ui.SelectBase(c, &idx)
-	// 🔴 **定宽 180，不写 `Grow(1)`**。Biu 那一格是 `w-[180px]`
-	//（`system-settings.tsx:164`），和这一页其余的下拉（音频品质 180、代理
-	// 类型 240）是同一个数。
+	// 🔴 **定宽，不写 `Grow(1)`**。宽是控件列的基准（`selectWidth` =
+	// `settingsControlW`），走 `settingsControlFitW` 钳——窄窗口那一档不钳的话
+	// 会溢出分组卡片（900 宽实测溢出 14 像素）。
 	//
 	// 原来是 `Grow(1)`，而这一行的左边（标题 + 说明）也是 `Grow(1)`
 	//（`settingsRowEl`），于是两边平分那一行——设置页收进 900 之后，这一格
@@ -113,7 +113,7 @@ func (s *Shell) pickFont(c *ui.Context, st app.Settings, ro bool) {
 	// 任何东西了。那不是「点哪儿都行」的好心，是控件在替一整行的空间负责：
 	// 用户要按准那个 410 宽框的右下角才能展开它。
 	trigger := sel.Trigger.
-		Width(selectWidth).MinWidth(settingsControlMinW).
+		Width(s.settingsControlFitW(c, selectWidth)).
 		Radius(c.Theme().Radius).Border(1, c.Theme().Border).
 		Background(c.Theme().Surface).Padding(space.None, space.Px10).Height(settingsSelectH).AlignItems(ui.Center).Disabled(ro).
 		Label("选择字体")

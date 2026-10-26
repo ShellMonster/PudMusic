@@ -219,8 +219,8 @@ func (s *Shell) pickRadius(c *ui.Context, st app.Settings, ro bool) {
 	if st.ThemePreset != app.ThemePresetClassic {
 		v = float64(c.Theme().Radius)
 	}
-	ui.Row(c).Key("setting:borderRadius").Width(settingsControlW).
-		MinWidth(settingsControlMinW).Gap(space.Px12).
+	ui.Row(c).Key("setting:borderRadius").Width(s.settingsControlFitW(c, settingsControlW)).
+		Gap(space.Px12).
 		AlignItems(ui.Center).Children(func() {
 		sl := ui.Slider(c, &v, 0, app.MaxBorderRadius).Grow(1).Label("全局圆角").Disabled(ro)
 		if sl.Changed() {
@@ -239,7 +239,7 @@ func (s *Shell) pickAudioQuality(c *ui.Context, st app.Settings, ro bool) {
 	// 一帧一读的局部量：控件建的时候把新值写进 `quality`，紧接着这里读到的就是它。
 	// 存不进去（只读）时下一帧重新从设置里读，下拉自己弹回去。
 	quality := st.AudioQuality
-	enumSelect(c, &quality, items, "选择音质偏好", selectWidth, settingsControlMinW, ro)
+	enumSelect(c, &quality, items, "选择音质偏好", s.settingsControlFitW(c, selectWidth), 0, ro)
 	if quality != st.AudioQuality {
 		s.applySetting("音质偏好", func(cur *app.Settings) { cur.AudioQuality = quality })
 	}
@@ -252,8 +252,8 @@ func (s *Shell) pickAudioQuality(c *ui.Context, st app.Settings, ro bool) {
 // 用户最容易当成「设置没生效」的那一种形态。这一句说清两件事：下载记录页上
 // 写的就是它，下完的歌也放在那儿。
 func (s *Shell) pickDownloadPath(c *ui.Context, st app.Settings, ro bool) {
-	ui.Row(c).Key("setting:downloadPath").Width(settingsControlW).
-		MinWidth(settingsControlMinW).Gap(space.Px8).Children(func() {
+	ui.Row(c).Key("setting:downloadPath").Width(s.settingsControlFitW(c, settingsControlW)).
+		Gap(space.Px8).Children(func() {
 		pathField(c, s.downloadDirShown(st), "下载目录", ro)
 		if settingsButton(c, "选择").Width(72).Disabled(ro).Clicked() {
 			s.pickPath("下载目录", true, func(path string) {
@@ -287,8 +287,8 @@ func (s *Shell) downloadDirShown(st app.Settings) string {
 
 // pickFFmpegPath 是 FFmpeg 路径那一格，和下载目录同一套。
 func (s *Shell) pickFFmpegPath(c *ui.Context, st app.Settings, ro bool) {
-	ui.Row(c).Key("setting:ffmpegPath").Width(settingsControlW).
-		MinWidth(settingsControlMinW).Gap(space.Px8).Children(func() {
+	ui.Row(c).Key("setting:ffmpegPath").Width(s.settingsControlFitW(c, settingsControlW)).
+		Gap(space.Px8).Children(func() {
 		pathField(c, st.FFmpegPath, "FFmpeg 路径", ro)
 		if settingsButton(c, "选择").Width(72).Disabled(ro).Clicked() {
 			s.pickPath("FFmpeg 路径", false, func(path string) {
@@ -329,7 +329,7 @@ var pathField = func(c *ui.Context, path, label string, ro bool) {
 //
 // ⚠️ **宽度跟着控件列的基准走**（`settingsControlW`）：这一行里只有那两块色卡，
 // 它们不填满那一格的话，**这一行的右边缘就比上面那几行短一截**——那正是
-// 「控件列没有共同基准」的一半（UI 报告 §4 的 F-04：「右边空 91」）。
+// 「控件列没有共同基准」的一半（UI 报告 §4 的 F-04）。
 //
 // 上游是 100：它那一行的格子也就是它自己的宽度，而**色块是纯色**——宽一点
 // 不损失任何信息（颜色还是那个颜色），换来的是这一行和上面几行一样齐。
@@ -338,25 +338,33 @@ const (
 	colorItemHeight = 40
 )
 
-// colorItemWidth 是**一块**色卡多宽：那一格 300 宽，中间 12 的缝。
+// colorItemWidth 是**一块**色卡多宽：那一格 340 宽，中间 12 的缝。
 const colorItemWidth = (settingsControlW - colorItemGap) / 2
 
 // pickColors 是背景色和主色那两块。照 Biu 的 `ColorSettings`：两块并排。
 //
 // ⚠️ **两块是并排铺满控件列那一格的**（各占一半，中间 12 的缝），不是上游那个
 // 100 宽各自一块：这一行里只有它们，不铺满的话这一行的右边缘就比上面那几行
-// 短一截（UI 报告 §4 的 F-04：「右边空 91」）。
+// 短一截（UI 报告 §4 的 F-04）。
+//
+// ⚠️ **宽度走 `settingsControlFitW`**：色卡是定宽的两块，窄窗口那一档不钳的话
+// 会和下拉一样溢出分组卡片。
+//
+// ⚠️ **两列顶对齐**（`AlignItems(ui.Start)`）：这一行的 Row 默认把子项**垂直
+// 居中**，而「用默认」只出现在自定义过的那块底下——只有一块有它的时候，另一块
+// 整列被居中得往下挪（2026-10-26 用户截图实测挪了 14 像素，两块色卡一高一低）。
+// 顶对齐之后色卡永远齐着，多出来的「用默认」只在底下多占一行。
 //
 // 背景色的默认值是**空串**，意思是「跟着主题走」。Biu 那一格在值为空时显示的是
 // 当前主题的背景色（`pickerValue = isHex(value) ? value : backgroundColor`），
-// 点开挑色才写进去——照抄。上面另加一个「用默认」，Biu 没有那个出口：挑过一次之
-// 后就再也回不到「跟着主题走」，而那正是多数人想要的常态。
+// 点开挑色才写进去——照抄。标签行上另加一个「用默认」，Biu 没有那个出口：挑过一
+// 次之后就再也回不到「跟着主题走」，而那正是多数人想要的常态。
 func (s *Shell) pickColors(c *ui.Context, st app.Settings, ro bool) {
 	// 「当前主题的背景色」就是这一帧真在画的那份——ApplyTheme 在 view 最开头
 	// 已经装好了，所以 `c.Theme()` 读到的就是它，不用再拼一遍。
 	dark := c.Theme().Dark
-	ui.Row(c).Key("setting:colors").Width(settingsControlW).
-		MinWidth(settingsControlMinW).Gap(colorItemGap).Children(func() {
+	ui.Row(c).Key("setting:colors").Width(s.settingsControlFitW(c, settingsControlW)).
+		Gap(colorItemGap).AlignItems(ui.Start).Children(func() {
 		bg := pick(st.BackgroundColor != "", st.BackgroundColor, themeBackground(dark))
 		// 套了方案时，色块要显示**方案真在画的色**，不是设置里那两个已被压过的值——
 		// 否则暖纸底上摆着一块白、一块 Biu 绿，用户以为那就是当前配色。
@@ -385,48 +393,64 @@ func (s *Shell) pickColors(c *ui.Context, st app.Settings, ro bool) {
 	})
 }
 
-// colorItem 是一块颜色：一个色块 + 一个「用默认」。
+// colorItem 是一块颜色：一个**全出血的色块** + 底下一行「标签 / 用默认」。
 //
-// 色块是 `ui.ColorWell`：点它在自己的下面摆出 AppKit 那样的取色板（色相方块 +
+// # 色块就是取色板本身
+//
+// 画它的是 `ui.ColorWell`：点它在自己的下面摆出 AppKit 那样的取色板（色相方块 +
 // 亮度条 + 不透明度 + 手写 hex + 常用色），Esc 或者点外面关掉，`.Changed()` 报
-// 新颜色。取色板允许写 `#rgb` / `#rgba`，而设置那边的 normalize 只认 6 位和 8 位
-// （`internal/app/settings.go` 的 hexColor）——所以写进去之前统一补齐成 6 位，
-// 不补的话用户挑了个 `#f00`，落盘时被 normalize 悄悄换回默认色，而界面上还亮着
-// 他刚挑的那个颜色。
+// 新颜色。但框架的 ColorWell 自带一层「输入框」的壳——`t.Surface` 底、1px 描边、
+// 中间一颗 36×20 的小色块（`mygo/ui/colorpicker.go` 的 `coreColorWell`）——
+// 此前把套在一张色卡里面，那层壳把色卡的底色整个盖住，画面上是**两个输入框、
+// 每个中间一小块颜色**，看不出是色卡（2026-10-26 用户原话：「一堆省略号看不出
+// 是啥」那一张截图的下半截）。
+//
+// 现在反过来：**链 `.Background(col)` 把壳的底色换成这个颜色本身**，色块
+// 从头到脚都是它，中间那颗小色块同色相融（不透明色看不出来；半透明色的中间
+// 会露出取色板的棋盘格，正好当「这一格带透明度」的提示）。
+//
+// ⚠️ **允许写 `#rgb` / `#rgba` 的问题**：取色板允许写 3/4 位 hex，而设置那边的
+// normalize 只认 6 位和 8 位（`internal/app/settings.go` 的 hexColor）——所以
+// 写进去之前统一补齐成 6 位，不补的话用户挑了个 `#f00`，落盘时被 normalize
+// 悄悄换回默认色，而界面上还亮着他刚挑的那个颜色。
+//
+// # 「用默认」和标签同一行
+//
+// 两列的结构因此**永远一样**（色块 + 一行字），不管哪块自定义过、哪块没有——
+// 「用默认」单独占一行的话，只有一块出现它，两列就不一样高（这一行的 Row 又
+// 是居中对齐的，色卡会一高一低）。那一行左边是标签（12 / 次要色），右边是
+// 「用默认」（11 / 次要色），只在**自定义过**且**不只读**时出现。
 func (s *Shell) colorItem(c *ui.Context, label, hex string, ro, overridden bool, set func(string), reset func()) {
 	t := c.Theme()
 	col := colorOfHex(hex)
 	ui.Column(c).Grow(1).MaxWidth(colorItemWidth).Gap(space.Px4).Children(func() {
-		// ⚠️ **那一圈影是上游给的**：Biu 那一格是
-		// `<Card as="div" isPressable radius="md" shadow="sm" className="border-default
-		// w-[100px] border">`（`pages/settings/color-settings.tsx:24`）——一张
-		// HeroUI 的卡，带描边和 `shadow="sm"`。
-		//
-		// HeroUI 的 `shadow="sm"` 深浅两套值不一样（见 `widgets/shadow` 的文件头）：
-		// 浅色那套是 1 像素的**外**黑边，深色那套是 1 像素的**内**白边——深底上黑边
-		// 看不见，那道白边就是这张卡和底下那一页之间的分界。
-		swatch := shadow.HeroSmall(ui.Box(c).FillWidth().Height(colorItemHeight).
-			Radius(t.Radius).Background(col).Border(1, t.Border), t)
-		swatch.Children(func() {
-			well := ui.ColorWell(c, &col).Fill().Disabled(ro).Label(label)
-			// ⚠️ **深色那一档的白边要补在取色板这一格上**：ColorWell 是 `.Fill()`
-			// 的（铺满整格，还画着自己的 `t.Surface` 底色），于是**外面那张卡的内
-			// 阴影整个被盖住**——而深底上唯一看得见的那一层就是它（评审量过：深色下
-			// 色卡内缘一路是 `t.Surface`，没有那道白边）。
-			//
-			// 内阴影是画在**自己这一格的背景之上**（`mygo/ui/paint.go`：先背景、后内
-			// 阴影），所以补在 ColorWell 上就看得见（深色下实测 46，卡面 39）。
-			shadow.HeroInnerRim(well, t)
-			if well.Changed() {
-				set(toHex(col))
+		// ⚠️ **那一圈影是上游给的**：Biu 那一格是一张 HeroUI 的卡（描边 +
+		// `shadow="sm"`）。HeroUI 的 `shadow="sm"` 深浅两套值不一样（见
+		// `widgets/shadow` 的文件头）：浅色那套是 1 像素的**外**黑边，深色那套
+		// 是 1 像素的**内**白边——深底上黑边看不见，那道白边就是这张卡和底下
+		// 那一页之间的分界。
+		well := ui.ColorWell(c, &col).FillWidth().Height(colorItemHeight).
+			Background(col).Radius(t.Radius).Border(1, t.Border)
+		well = shadow.HeroSmall(well, t)
+		well = shadow.HeroInnerRim(well, t)
+		well.Label(label).Disabled(ro)
+		if well.Changed() {
+			set(toHex(col))
+		}
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+			ui.Text(c, label).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+			if overridden && !ro {
+				// ⚠️ **按钮的垂直内边距收成 0**：它和标签同行，行高由最高那个孩子
+				// 决定——留着 flatButton 默认那 6×2 的垂直内边距，这一行会比另一块
+				// 色卡的标签行高出一截，行内的标签被居中得往下挪，两块色卡的标签
+				// 基线就错开了（实测 5 像素）。收成 0 之后按钮的盒子和标签一样高，
+				// 两行同高、基线齐。
+				if flatButton(c, "用默认").FontSize(scale.Font(c, scale.Size11)).
+					Padding(space.None, space.Px10).TextColor(t.TextMuted).Clicked() {
+					reset()
+				}
 			}
 		})
-		ui.Text(c, label).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Center()
-		if overridden && !ro {
-			if flatButton(c, "用默认").FontSize(scale.Font(c, scale.Size11)).TextColor(t.TextMuted).Clicked() {
-				reset()
-			}
-		}
 	})
 }
 
