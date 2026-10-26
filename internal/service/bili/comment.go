@@ -8,7 +8,7 @@
 //
 // # 🔴 三个会让实现静默出错的坑（研究票 #537 的实测结论）
 //
-// ## 坑一：`Call.Buvid` 绝对不能开
+// ## 坑一：`Call.Buvid` 绝对不能开，而且要显式写 `Call.NoBuvid`
 //
 // 实测（同一客户端、同一 URL，只改 Cookie 头）：
 //
@@ -21,6 +21,20 @@
 //
 // 照抄「取流要带 buvid」这条既有习惯就会踩：症状是「评论怎么只有 3 条」，而
 // B 站那句「到底了」说得天衣无缝，界面上看不出任何异常。
+//
+// ### 🔴 「不设 `Call.Buvid`」是**不够**的
+//
+// jar 里的 cookie 是在 `http.Client.send` 里加的，而那**在运输层之前**
+// （`net/http/client.go`：`c.Jar.Cookies(url)` → `req.AddCookie` → `RoundTrip`）。
+// 所以「代码里没写 `Buvid: true`」挡不住 jar 里**已经有一枚** buvid3。
+//
+// jar 里确实会有：登录成功时 B 站下发的**全部** cookie 都被存下来
+// （`app.Account.finish` 收下 `IssuedCookies()` 的每一条），而 B 站的 cookie
+// 域是 `.bilibili.com`，`api.bilibili.com` 收得到。
+//
+// ⇒ 评论请求必须显式写 **`NoBuvid: true`**：它在**运输层**把 buvid 那一族
+// 从 Cookie 头里摘掉（那里 jar 已经加好了），而**登录态照带**
+// （SESSDATA / bili_jct 一个都不动）。见 `client.go` 的 `noBuvidTransport`。
 //
 // ⚠️ **这条的边界**：探针是**匿名**客户端测出来的。登录态下（真 SESSDATA +
 // 真 buvid3）行为可能不同。⇒ **实现时必须在登录态下复验一次**；若登录态下
@@ -445,6 +459,12 @@ func (p rawCommentPicture) toPicture() CommentPicture {
 // 理由见文件头的坑一：带 `buvid3` 会让 B 站把列表砍到 3 条并宣称「到底了」。
 // 本仓库「取流要带 buvid」的既有习惯**不能照抄到这里**。
 //
+// # 🔴 `Call.NoBuvid` 这里**必须写 true**
+//
+// 光「不设 `Buvid`」**挡不住 jar 里已经有的 buvid3**——jar 的 cookie 是在
+// 运输层之前加上的（理由见文件头坑一）。而 jar 里确实会有 buvid3（登录时
+// B 站下发的那批 cookie 全被存了下来）。
+//
 // # 🔴 `Call.WBI` 这里也**不设**
 //
 // 用的是不带 WBI 的 `/x/v2/reply/main`（理由见文件头的坑二）。
@@ -476,6 +496,10 @@ func (c *Client) CommentList(ctx context.Context, typ, oid int64, mode int, next
 		URL:    c.hostAPI + pathReplyMain,
 		Query:  q,
 		// ⚠️ **Buvid 故意不设、WBI 故意不设**——理由见文件头那三个坑。
+		//
+		// ⚠️ **`NoBuvid` 一定要写 true**：光「不设 Buvid」挡不住 jar 里已有的
+		// buvid3（jar 的 cookie 在运输层之前就加上了，理由见文件头坑一）。
+		NoBuvid: true,
 	})
 	if err != nil {
 		return CommentPage{}, wrapCommentError(err)
@@ -542,6 +566,10 @@ func (c *Client) CommentReplies(ctx context.Context, typ, oid, root int64, pn, p
 		URL:    c.hostAPI + pathReplyReply,
 		Query:  q,
 		// ⚠️ **Buvid 故意不设、WBI 故意不设**——理由见文件头那三个坑。
+		//
+		// ⚠️ **`NoBuvid` 一定要写 true**：光「不设 Buvid」挡不住 jar 里已有的
+		// buvid3（jar 的 cookie 在运输层之前就加上了，理由见文件头坑一）。
+		NoBuvid: true,
 	})
 	if err != nil {
 		return nil, 0, wrapCommentError(err)

@@ -113,6 +113,88 @@ func TestCommentListNeverSendsBuvid(t *testing.T) {
 	}
 }
 
+// TestCommentListNeverSendsTheBuvidThatLivesInTheJar 钉住「jar 里的 buvid3
+// 也不会被带出去」。
+//
+// 🔴 **这一条是上一轮评审指出来的那个洞**：上面那条
+// （`TestCommentListNeverSendsBuvid`）只在**空 jar**下跑，而 jar 是空的时
+// 「代码里没写 `Buvid: true`」就足够让断言绿。
+//
+// 但 jar **不是**空的：
+//
+//   - jar 里的 cookie 是在 `http.Client.send` 里加的，而那**在运输层之前**
+//     （`net/http/client.go`：`c.Jar.Cookies(url)` → `req.AddCookie` →
+//     `RoundTrip`）——所以「不设 `Call.Buvid`」**挡不住** jar 里已有的一枚
+//     buvid3；
+//   - jar 里**确实**会有 buvid3：登录成功时 B 站下发的**全部** cookie 都被
+//     存下来（`app.Account.finish` 收下 `IssuedCookies()` 的每一条），而
+//     B 站的 cookie 域是 `.bilibili.com`，`api.bilibili.com` 收得到。
+//
+// ⇒ 症状是「登录之后评论只有 3 条」，而 B 站那句「到底了」说得天衣无缝。
+//
+// 所以这条把 jar 装上（`SeedCookies`）再拉评论，断言**发出去的头里没有
+// buvid3**，而**登录态照带**（SESSDATA 还在——摘设备标识不是摘凭据）。
+func TestCommentListNeverSendsTheBuvidThatLivesInTheJar(t *testing.T) {
+	f, c := commentFake(t, commentFixture(t, "reply-main.json"))
+	if err := c.SeedCookies([]*http.Cookie{
+		{Name: "SESSDATA", Value: "review-only"},
+		{Name: "buvid3", Value: "REVIEW-BUVID"},
+		{Name: "buvid4", Value: "REVIEW-BUVID4"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), 0, 20); err != nil {
+		t.Fatal(err)
+	}
+	rec := lastCommentRequest(t, f)
+	ck := rec.Header.Get("Cookie")
+	if strings.Contains(ck, "buvid") {
+		t.Fatalf("评论请求带出了 jar 里的 buvid 那一族：%q（B 站会因此只给 3 条）", ck)
+	}
+	// ⚠️ **登录态必须还在**：摘的是设备标识，不是凭据。把 SESSDATA 一起摘掉
+	// 的话，登录用户看到的评论会比匿名用户还少。
+	if !strings.Contains(ck, "SESSDATA=review-only") {
+		t.Fatalf("登录态被一起摘掉了：%q", ck)
+	}
+}
+
+// TestCommentRepliesNeverSendsTheBuvidThatLivesInTheJar 楼中楼那一条路
+// 同样要挡住 jar 里的 buvid3。
+func TestCommentRepliesNeverSendsTheBuvidThatLivesInTheJar(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(pathReplyReply, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, commentFixture(t, "reply-reply.json"))
+	})
+	f.on("/x/frontend/finger/spi", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, jsonData(t, 0, "ok", map[string]any{
+			"b_3": "BUVID3-FROM-SPI",
+			"b_4": "BUVID4-FROM-SPI",
+		}))
+	})
+	c := f.client(t, Options{})
+	if err := c.SeedCookies([]*http.Cookie{
+		{Name: "SESSDATA", Value: "review-only"},
+		{Name: "buvid3", Value: "REVIEW-BUVID"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := c.CommentReplies(context.Background(), CommentTypeVideo, 117506312373775, 321942994928, 1, 20); err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range f.requests() {
+		if rec.Path != pathReplyReply {
+			continue
+		}
+		ck := rec.Header.Get("Cookie")
+		if strings.Contains(ck, "buvid") {
+			t.Fatalf("楼中楼请求带出了 jar 里的 buvid 那一族：%q", ck)
+		}
+		if !strings.Contains(ck, "SESSDATA=review-only") {
+			t.Fatalf("登录态被一起摘掉了：%q", ck)
+		}
+	}
+}
+
 // TestCommentRepliesNeverSendsBuvid 楼中楼那一条路也一样。
 func TestCommentRepliesNeverSendsBuvid(t *testing.T) {
 	f := newFakeBili(t)
@@ -759,14 +841,20 @@ func TestCommentRepliesReadsTheRealShape(t *testing.T) {
 //
 // ⚠️ **视频的 oid 是 avid（不是 bvid）**，音乐的 oid 是 auid。发错的话 B 站
 // 回 -404，而那一句是「啥都木有」——看不出是 id 发错了。
+//
+// 🔴 **断言必须钉到「这一对确切的值」**：写成「type 是 1 或 14 都算对、
+// oid 是 170001 或 563526 都算对」的话，实现**永远发同一对参数**这两条
+// 子用例照样全绿——那等于没钉。所以下面按子用例各自写死 want。
 func TestCommentListSendsTheTypeAndOid(t *testing.T) {
 	for _, tc := range []struct {
-		what string
-		typ  int
-		oid  int64
+		what     string
+		typ      int
+		oid      int64
+		wantType string
+		wantOID  string
 	}{
-		{"视频", CommentTypeVideo, 170001},
-		{"音乐库音频", CommentTypeAudio, 563526},
+		{"视频", CommentTypeVideo, 170001, "1", "170001"},
+		{"音乐库音频", CommentTypeAudio, 563526, "14", "563526"},
 	} {
 		t.Run(tc.what, func(t *testing.T) {
 			f, cl := commentFake(t, commentFixture(t, "reply-main.json"))
@@ -774,11 +862,54 @@ func TestCommentListSendsTheTypeAndOid(t *testing.T) {
 				t.Fatal(err)
 			}
 			rec := lastCommentRequest(t, f)
-			if got := rec.Query.Get("type"); got != "1" && got != "14" {
-				t.Errorf("type = %q", got)
+			if got := rec.Query.Get("type"); got != tc.wantType {
+				t.Errorf("type = %q，want %q", got, tc.wantType)
 			}
-			if got := rec.Query.Get("oid"); got != "170001" && got != "563526" {
-				t.Errorf("oid = %q", got)
+			if got := rec.Query.Get("oid"); got != tc.wantOID {
+				t.Errorf("oid = %q，want %q", got, tc.wantOID)
+			}
+		})
+	}
+}
+
+// TestCommentRepliesSendsTheTypeAndOid 楼中楼那一条路也得照发 type / oid。
+//
+// ⚠️ **同样钉到确切的值**：理由同 `TestCommentListSendsTheTypeAndOid`——
+// 「两个都算对」的断言钉不住任何东西。
+func TestCommentRepliesSendsTheTypeAndOid(t *testing.T) {
+	for _, tc := range []struct {
+		what     string
+		typ      int
+		oid      int64
+		wantType string
+		wantOID  string
+	}{
+		{"视频", CommentTypeVideo, 170001, "1", "170001"},
+		{"音乐库音频", CommentTypeAudio, 563526, "14", "563526"},
+	} {
+		t.Run(tc.what, func(t *testing.T) {
+			f := newFakeBili(t)
+			f.on(pathReplyReply, func(w http.ResponseWriter, _ *http.Request) {
+				writeJSON(w, commentFixture(t, "reply-reply.json"))
+			})
+			cl := f.client(t, Options{})
+			if _, _, err := cl.CommentReplies(context.Background(), int64(tc.typ), tc.oid, 321942994928, 1, 20); err != nil {
+				t.Fatal(err)
+			}
+			var rec recordedRequest
+			for _, r := range f.requests() {
+				if r.Path == pathReplyReply {
+					rec = r
+				}
+			}
+			if rec.Path == "" {
+				t.Fatalf("没有打给 %s 的请求", pathReplyReply)
+			}
+			if got := rec.Query.Get("type"); got != tc.wantType {
+				t.Errorf("type = %q，want %q", got, tc.wantType)
+			}
+			if got := rec.Query.Get("oid"); got != tc.wantOID {
+				t.Errorf("oid = %q，want %q", got, tc.wantOID)
 			}
 		})
 	}

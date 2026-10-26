@@ -69,6 +69,17 @@
   | `buvid3=<真值>` | **3** | **true** |
 
   ⇒ 评论这一处**绝对不能开** `bili.Call.Buvid`。
+
+  ⚠️ **光「不开」还不够**：jar 里的 cookie 是在 `http.Client.send` 里加的，
+  而那**在运输层之前**（`net/http/client.go`：`c.Jar.Cookies(url)` →
+  `req.AddCookie` → `RoundTrip`）——所以代码里没写 `Buvid: true` 也**挡不住**
+  jar 里已经有一枚 buvid3。而 jar 里**确实**会有：登录成功时 B 站下发的
+  **全部** cookie 都被存下来（`app.Account.finish` 收下 `IssuedCookies()` 的
+  每一条），B 站的 cookie 域是 `.bilibili.com`，`api.bilibili.com` 收得到。
+
+  ⇒ 评论请求显式写 **`bili.Call.NoBuvid: true`**：它在**运输层**把 buvid
+  那一族从 Cookie 头里摘掉（那里 jar 已经加好了），而**登录态照带**
+  （SESSDATA / bili_jct 一个都不动）。
 - **`/x/v2/reply/wbi/main` 少了 WBI 签名就 -403** ⇒ 用不带 WBI 的
   `/x/v2/reply/main`。
 - **匿名可用**：全程没有 SESSDATA，三个接口都正常返回。
