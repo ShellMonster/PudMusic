@@ -522,3 +522,328 @@ func TestTheProductionPathActuallyAsksBili(t *testing.T) {
 		t.Errorf("问了几趟，want 1")
 	}
 }
+
+// ---- 评审提的三条 ----
+
+// TestReviewUnresolvedSameBVidShowsThePreviousPartsDanmaku 盯「同一个 bvid 的
+// 新选择，cid 还没问出来的时候，不许拿上一分 P 的弹幕」。
+//
+// 🔴 **这是评审提的第一条 major**。
+//
+// 症状：用户在同一个投稿里换了集（B 站的搜索结果只给 bvid，cid 要问一次才
+// 知道），而问出来之前，屏幕上滚的还是**上一分 P** 的弹幕——弹幕盖住封面的时候
+// 本来就不好认，用户完全看不出发生了什么。
+//
+// ⚠️ **它是怎么发生的**：判据在 cid 缺了的时候去「正在放的那一条」（`a.online`）
+// 借，而那里的 cid 是**上一分 P** 的。借的那一下把两个不同的集当成同一集了。
+func TestReviewUnresolvedSameBVidShowsThePreviousPartsDanmaku(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	dir := t.TempDir()
+	a.MountDanmaku(danmaku.NewCache(dir))
+	a.danmakuFetch = func(_ context.Context, cid string) ([]bili.Danmaku, error) {
+		return []bili.Danmaku{{Text: "part " + cid, ID: cid}}, nil
+	}
+
+	// 上一分 P：缓存里有 BV1/333。
+	putDanmakuCurrent(a, "BV1", "333")
+	a.Danmaku()
+	waitDanmaku(t, "上一分 P 问过了", func() bool { return a.Danmaku().Ready })
+	waitDanmaku(t, "上一分 P 落盘了", func() bool {
+		_, ok := danmaku.NewCache(dir).Load("BV1", "333")
+		return ok
+	})
+
+	// 「正在放的那一条」还带着**上一分 P** 的 cid（切歌那一瞬间它就是旧的，
+	// 而新流要等取完了才装上）。
+	a.mu.Lock()
+	a.online = &onlineTrack{item: Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "333"}}
+	a.mu.Unlock()
+
+	// **同一个 bvid 的新选择**：cid 还没问出来（搜索结果那一类）。
+	a.mu.Lock()
+	a.pending = Item{Source: "online", Type: "mv", Bvid: "BV1"}
+	a.mu.Unlock()
+
+	snap := a.Danmaku()
+	if len(snap.Items) != 0 {
+		t.Errorf("cid 还没问出来，却端出了 %d 条弹幕：%+v", len(snap.Items), snap.Items)
+	}
+	if snap.Ready {
+		t.Error("cid 还没问出来，却说「有答案了」")
+	}
+	if a.DanmakuWorthAsking() {
+		t.Error("cid 还没问出来，却说「有弹幕可问」")
+	}
+}
+
+// TestReviewAStaleSameKeyFetchOverwritesTheFreshCache 盯「同一个 key 上慢的那一趟
+// 不许盖掉新写的那一份」。
+//
+// 🔴 **这是评审提的第二条 major**。
+//
+// 症状：重新进这一集，拿到的是**几分钟前**的那一批——而用户什么都没做。
+//
+// ⚠️ **可见状态是安全的，代次挡得住**：旧的那一趟回来时按代次丢掉，所以屏幕上
+// 显示的是新的一批。**但盘上不是**：那一趟照样去写缓存，而且它**写得更晚**——于是
+// 新的那份被旧的盖掉了。下次进这一集读到的就是旧的那一批。
+//
+// 这就是「代次只保护了可见状态，没有保护缓存写入」那个意思。
+func TestReviewAStaleSameKeyFetchOverwritesTheFreshCache(t *testing.T) {
+	dir := t.TempDir()
+	a := New()
+	t.Cleanup(a.Close)
+	a.MountDanmaku(danmaku.NewCache(dir))
+
+	first := make(chan struct{})
+	var calls atomic.Int32
+	a.danmakuFetch = func(_ context.Context, cid string) ([]bili.Danmaku, error) {
+		n := calls.Add(1)
+		switch n {
+		case 1:
+			// 第一趟：卡住，等它变成「慢的那一趟」。
+			<-first
+			return []bili.Danmaku{{Text: "stale", ID: "stale"}}, nil
+		default:
+			return []bili.Danmaku{{Text: "fresh", ID: "fresh"}}, nil
+		}
+	}
+
+	putDanmakuCurrent(a, "BV1", "333")
+	a.Danmaku() // 第一趟，卡着
+	waitDanmaku(t, "第一趟发出去了", func() bool { return calls.Load() == 1 })
+
+	// 换走（让第一趟变旧），再换回来：同一个 key，第二趟是新的。
+	putDanmakuCurrent(a, "BV2", "222")
+	a.Danmaku()
+	waitDanmaku(t, "第二趟回来了", func() bool { return a.Danmaku().Ready })
+	putDanmakuCurrent(a, "BV1", "333")
+	a.Danmaku()
+	waitDanmaku(t, "第三趟回来了", func() bool {
+		s := a.Danmaku()
+		return s.Ready && len(s.Items) == 1 && s.Items[0].Text == "fresh"
+	})
+	waitDanmaku(t, "新的一份落盘了", func() bool {
+		e, ok := danmaku.NewCache(dir).Load("BV1", "333")
+		return ok && len(e.Items) == 1 && e.Items[0].Text == "fresh"
+	})
+
+	// 放行第一趟（慢的那一趟）：它是旧的，**不许**盖掉新写的那份。
+	close(first)
+	waitDanmaku(t, "旧的那一趟处理完了", func() bool { return a.danmakuDropped.Load() >= 1 })
+
+	// ⚠️ **等它写盘**：代次丢弃发生在**写盘之前**，所以「被丢弃了」不等于
+	// 「写完了」——而这一条要量的正是「它有没有写」。
+	//
+	// 旧代码里那一趟会**无条件写盘**，于是盘上从 fresh 变成 stale；新代码里
+	// 它被序号挡住，盘上一直是 fresh。所以这里轮询到**内容变了**为止（或者
+	// 超时——超时就是「没写」，新代码走的就是这一支）。
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		e, ok := danmaku.NewCache(dir).Load("BV1", "333")
+		if ok && len(e.Items) == 1 && e.Items[0].Text == "stale" {
+			t.Fatalf("慢的那一趟盖掉了新的一份：%+v", e.Items)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	e, ok := danmaku.NewCache(dir).Load("BV1", "333")
+	if !ok {
+		t.Fatal("缓存文件没了")
+	}
+	if len(e.Items) != 1 || e.Items[0].Text != "fresh" {
+		t.Errorf("盘上留下的是 %+v，want fresh（慢的那一趟盖掉了新的一份）", e.Items)
+	}
+}
+
+// TestReviewCloseStillWritesTheCache 盯「Close 返回之后，缓存不再被写」。
+//
+// ⚠️ **这是评审提的 minor**（不改也不挡路，但这一版顺手修了）。
+//
+// 那一版的注释写着「代次加一 ⇒ 它不会在应用退出之后还往盘上写一份缓存」——而
+// 那句话**不成立**：代次只管可见状态，在途的那一趟照样写盘。
+func TestReviewCloseStillWritesTheCache(t *testing.T) {
+	dir := t.TempDir()
+	a := New()
+
+	gate := make(chan struct{})
+	a.MountDanmaku(danmaku.NewCache(dir))
+	a.danmakuFetch = func(context.Context, string) ([]bili.Danmaku, error) {
+		<-gate
+		return []bili.Danmaku{{Text: "after close", ID: "1"}}, nil
+	}
+
+	putDanmakuCurrent(a, "BV1", "333")
+	a.Danmaku()                       // 那一趟卡着
+	time.Sleep(50 * time.Millisecond) // 让它真的发出去了
+
+	a.Close()
+	close(gate)
+	// 给它一点时间把那一趟走完（它应该什么都不做）。
+	time.Sleep(200 * time.Millisecond)
+
+	if _, ok := danmaku.NewCache(dir).Load("BV1", "333"); ok {
+		t.Error("Close 之后缓存里多了一份「after close」")
+	}
+}
+
+// TestTheSameKeyCanBeFetchedAgainAfterItWasWritten 盯「写过一次之后，同一个 key
+// 还能再写一次」。
+//
+// ⚠️ **这是 per-key 序号的一个边界**：写完盘之后那条序号会被删掉（免得表一直
+// 长），所以下一次发起的那一趟必须还能写——而它能写，靠的是「发起时把序号
+// 记进表里」这一步。
+//
+// 症状（如果不成立）：这一集第一次存进去了，第二次再存就**存不进去**——而
+// 「7 天内再进是瞬时的」那条验收就靠它。
+func TestTheSameKeyCanBeFetchedAgainAfterItWasWritten(t *testing.T) {
+	dir := t.TempDir()
+	a := New()
+	t.Cleanup(a.Close)
+	a.MountDanmaku(danmaku.NewCache(dir))
+
+	var calls atomic.Int32
+	a.danmakuFetch = func(context.Context, string) ([]bili.Danmaku, error) {
+		n := calls.Add(1)
+		return []bili.Danmaku{{Text: "batch " + string(rune('0'+n)), ID: "id"}}, nil
+	}
+
+	putDanmakuCurrent(a, "BV1", "333")
+	a.Danmaku()
+	waitDanmaku(t, "第一次落盘了", func() bool {
+		e, ok := danmaku.NewCache(dir).Load("BV1", "333")
+		return ok && len(e.Items) == 1 && e.Items[0].Text == "batch 1"
+	})
+
+	// **同一个 App**：换走再换回来（缓存文件被删了，过期的那一种）。
+	//
+	// ⚠️ **不能停在同一集上再来一遍**：同一 key 不换集的话那一趟压根不会重新
+	// 发起（`danmakuLoaded` 挡住了）——那是既有行为，不是这一层要管的事。
+	//
+	// ⚠️ **序号表是 per-key 的**（`danmakuSeqs`），而它记的是「这个 key 最后
+	// 发起的那一趟」——所以这一条量的是「上一次写完之后（那条序号被删了），
+	// 下一次发起的那一趟仍然写得下去」。
+	if err := os.Remove(filepath.Join(dir, "BV1-333.json")); err != nil {
+		t.Fatal(err)
+	}
+	putDanmakuCurrent(a, "BV2", "222")
+	a.Danmaku()
+	waitDanmaku(t, "中间那一集问过了", func() bool { return calls.Load() >= 2 })
+	putDanmakuCurrent(a, "BV1", "333")
+	a.Danmaku()
+	waitDanmaku(t, "第二次落盘了", func() bool {
+		e, ok := danmaku.NewCache(dir).Load("BV1", "333")
+		return ok && len(e.Items) == 1 && e.Items[0].Text != "batch 1"
+	})
+}
+
+// TestNotePendingCidOnlyTouchesTheSameSong 盯「记 cid」的那一句。
+//
+// 🔴 **它必须只碰同一个 bvid 的那一条**：切歌那一瞬间，`a.pending` 可能已经换成
+// 新的一首，而这一句是**上一首**的取流回来的那时候写的——bvid 对不上就把上一首的
+// cid 写到新那一首上，那新那一集就会拿上一集的弹幕。
+//
+// ⚠️ **而这一句是「搜索结果那一路有弹幕」的全部**：cid 是取流那一趟问出来的，
+// 不记回 `pending` 的话，弹幕这一摊（它只认 `pending` 的 cid）就永远拿不到 cid。
+func TestNotePendingCidOnlyTouchesTheSameSong(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	// 这一趟的代次（`New` 之后 `onlineGen` 还是 0）。
+	a.mu.Lock()
+	gen := a.onlineGen
+	a.mu.Unlock()
+
+	// 同一首：记上去。
+	a.mu.Lock()
+	a.pending = Item{Source: "online", Type: "mv", Bvid: "BV1"}
+	a.mu.Unlock()
+	a.notePendingCid(gen, "BV1", "777")
+	a.mu.Lock()
+	got := a.pending.Cid
+	a.mu.Unlock()
+	if got != "777" {
+		t.Errorf("同一首的 cid 没记上：%q", got)
+	}
+
+	// 另一首：不许碰（那是上一首的取流回来的）。
+	a.mu.Lock()
+	a.pending = Item{Source: "online", Type: "mv", Bvid: "BV2"}
+	a.mu.Unlock()
+	a.notePendingCid(gen, "BV1", "888")
+	a.mu.Lock()
+	got = a.pending.Cid
+	a.mu.Unlock()
+	if got != "" {
+		t.Errorf("上一首的 cid 写到了新那一首上：%q", got)
+	}
+
+	// 另一个 bvid 的那一趟：不许碰（那是**上一趟**的 cid，而那一趟已经过时了）。
+	a.mu.Lock()
+	a.pending = Item{Source: "online", Type: "mv", Bvid: "BV4"}
+	a.mu.Unlock()
+	a.notePendingCid(gen+1, "BV4", "999")
+	a.mu.Lock()
+	got = a.pending.Cid
+	a.mu.Unlock()
+	if got != "" {
+		t.Errorf("过时的那一趟的 cid 写到了现在这一首上：%q", got)
+	}
+
+	// 空的一律不记。
+	a.mu.Lock()
+	a.pending = Item{Source: "online", Type: "mv", Bvid: "BV3"}
+	a.mu.Unlock()
+	a.notePendingCid(gen, "BV3", "")
+	a.notePendingCid(gen, "", "999")
+	a.mu.Lock()
+	got = a.pending.Cid
+	a.mu.Unlock()
+	if got != "" {
+		t.Errorf("空的 cid 被记上去了：%q", got)
+	}
+}
+
+// TestTheInFlightRunOfAnotherPartDoesNotWriteItsCid 盯「同一个 bvid 的另一分 P
+// 的在途那一趟，不许把自己的 cid 写到现在这一首上」。
+//
+// 🔴 **这是评审提的第一条 major 的另一半**。
+//
+// 评审提的那一条是「cid 还没问出来的时候不许拿上一分 P 的弹幕」——这一条是
+// **「cid 问出来了，但问的是上一分 P」**。
+//
+// 症状一模一样：「换了集，屏幕上滚的还是上一集的弹幕」。
+//
+// ⚠️ **为什么 bvid 对得上还不够**：多 P 的投稿**bvid 是同一个**，分 P id 才是
+// 区别。所以「按了第二集」之后 `pending` 的 bvid 还是那个 bvid——第一集那一趟
+// 回来时 bvid 是对得上的，于是它把**第一集的 cid 写到第二集上**。
+//
+// ⇒ 判据得是**代次**（那一趟还属不属于「现在这一趟」），而不是 bvid。
+func TestTheInFlightRunOfAnotherPartDoesNotWriteItsCid(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	a.mu.Lock()
+	// 「用户按的是第一集」——那一趟的代次是 1。
+	a.onlineGen++
+	gen := a.onlineGen
+	a.mu.Unlock()
+
+	// 然后用户按了**同一个投稿的第二集**：代次加一，`pending` 换成第二集
+	// （bvid 一样，cid 还没问出来）。
+	a.mu.Lock()
+	a.onlineGen++
+	a.pending = Item{Source: "online", Type: "mv", Bvid: "BV1"}
+	a.mu.Unlock()
+
+	// **第一集**那一趟回来得晚——它带着自己的 cid（777），而它已经过时了。
+	a.notePendingCid(gen, "BV1", "777")
+
+	a.mu.Lock()
+	got := a.pending.Cid
+	a.mu.Unlock()
+	if got != "" {
+		t.Errorf("上一分 P 的 cid 被写到了现在这一集上：%q", got)
+	}
+}

@@ -170,6 +170,50 @@ func danmakuIdentity(it Item) (bvid, cid string, ok bool) {
 	return it.Bvid, it.Cid, true
 }
 
+// notePendingCid 把「这一次选的到底是哪一集」记到 `pending` 上。
+//
+// # 为什么要有这一句
+//
+// B 站的搜索结果只给 bvid，而**分 P id 是取流那一趟才问出来的**（`withCid`），
+// 补出来的那一份只留在 `runOnline` 的局部变量里。而「用户刚才按的是哪一首」
+// （`a.pending`）记的是**按下去那一刻**的那一项——那时 cid 还是空的。
+//
+// ⇒ 弹幕这一摊想知道「当前这一集的 cid」，就只能问 `pending`；而 `pending` 的
+// cid 得有人写上去——就是这一句。
+//
+// ⚠️ **代次要对得上才写**：这一句是**取流那一趟**回来的时候写的，而那一趟可能
+// 已经过时了（用户早就换歌了）。代次对不上就不写。
+//
+// 🔴 **bvid 对得上还不够**：**同一个 bvid 可以有不同的分 P**（多 P 的投稿）。
+// 用户在「第一集」那一趟还在取流的时候按了「第二集」，于是 `pending` 已经换成
+// 第二集了（cid 不同，bvid 相同）——而第一集那一趟回来时 bvid 是对得上的，
+// 于是它把**第一集的 cid 写到第二集上**。
+//
+// 症状和评审提的第一条一模一样：「换了集，屏幕上滚的还是上一集的弹幕」——只是
+// 这一次不是「cid 还没问出来」，而是「cid 问出来了、但问的是上一集」。
+func (a *App) notePendingCid(gen int, bvid, cid string) {
+	if bvid == "" || cid == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.onlineGen != gen {
+		// 这一趟已经过时了（用户换歌了 / 这一趟超时了 / 应用退出了）——
+		// 它问出来的 cid 是**它自己那一趟**的，不是「现在这一首」的。
+		return
+	}
+	if a.pending.Bvid != bvid {
+		// 不是这一首（切歌那一瞬间 `pending` 已经换成新的一首，而这一句是
+		// **上一首**的取流回来的那时候写的）——那是上一首的 cid，不是新的。
+		return
+	}
+	if a.pending.Cid == cid {
+		// 已经是这一个了。
+		return
+	}
+	a.pending.Cid = cid
+}
+
 // danmakuTarget 报「当前正在放的这一集，它的弹幕是谁的」。
 //
 // # 判据
@@ -180,25 +224,23 @@ func danmakuIdentity(it Item) (bvid, cid string, ok bool) {
 // 没有 cid；音乐库条目的 cid 在 `SubtitleCid` 那一栏（那是「它背后那个投稿」的
 // 身份，而**第一版不开它**——理由见 `Item.SubtitleBvid` 的注释）。
 //
-// # cid 缺了的时候往「正在放的那一条」借
-//
-// 队列里那一项**可能还没有 cid**：B 站的搜索结果只给 bvid，而 cid 是取流那一趟
-// 问出来的（`online.go` 的 `withCid`），补出来的那一份**只留在正在放的那一条上**
-// （`onlineTrack.item`），队列里那一项还是空的。
-//
-// ⇒ 只看队列项的话，搜索结果放的歌**永远没有弹幕**（界面上一条都不滚，而用户
-// 看不到任何错处）。所以 cid 空的时候往正在放的那一条借——它的 bvid 要和队列
-// 当前项对得上，否则就是另一首歌的 cid（那更糟）。
-//
 // # 正在放的是本地文件时一律没有
 //
 // 队列里那一项可能还是上一首在线的歌（本地文件不进队列），而 `a.online` 在
 // 放本地文件时会被清掉（见 `openLocal`）。所以这一支认的是「**正在放的那
 // 一首**」，不是「队列当前的那一项」。
+//
+// # cid 缺了的时候**什么都不给**
+//
+// B 站的搜索结果只给 bvid，而 cid 是取流那一趟才问出来的（`online.go` 的
+// `withCid`）——问出来之后记到 `pending` 上（见 `App.notePendingCid`）。
+//
+// ⚠️ **问出来之前不许从别处借**：同一个 bvid 的**新选择**（换了分 P）在 cid
+// 还没问出来的时候，别处（`a.online`）留着的是**上一分 P** 的 cid——借过来
+// 就会把上一分 P 的弹幕当成这一次的答案（见 `danmakuTarget` 里那段）。
 func (a *App) danmakuTarget() (bvid, cid string, ok bool) {
 	a.mu.Lock()
 	pending := a.pending
-	online := a.online
 	a.mu.Unlock()
 
 	// 🔴 **认的是「正在放 / 正在准备放的那一首」，不是「队列当前的那一项」**。
@@ -217,17 +259,20 @@ func (a *App) danmakuTarget() (bvid, cid string, ok bool) {
 	if !pending.isOnline() || pending.Type != "mv" || pending.Bvid == "" {
 		return "", "", false
 	}
-	cur := pending
-	bvid = cur.Bvid
-	cid = cur.Cid
-	if cid == "" && online != nil && online.item.Bvid == bvid {
-		// cid 缺了的时候往正在放的那一条借：取流那一趟补出来的那一份只留在那里
-		//（队列项里那份还是空的，见 `withCid` 的注释）。
-		//
-		// ⚠️ **bvid 要对得上**：切歌的那一瞬间 `a.online` 还是**旧的那一首**
-		//（新流要等取完了才装上），那时候拿它的 cid 就是拿上一集的。
-		cid = online.item.Cid
-	}
+	// 🔴 **只认 `pending` 自己的 cid，不去别处借**。
+	//
+	// ⚠️ **借是最容易出错的那一种做法**：同一个 bvid 的**新选择**（换了分 P、或者
+	// 只是重新按了一遍同一个投稿）在 cid 还没问出来的时候，`pending.Cid` 是空的，
+	// 而「正在放的那一条」（`a.online`）里留着的是**上一分 P** 的 cid——借过来
+	// 就会把上一分 P 的弹幕当成这一次的答案端出去。
+	//
+	// 症状是「换了集，弹幕还是上一集的那一批」——而弹幕盖住封面的时候本来就
+	// 不好认，用户看不出发生了什么。
+	//
+	// ⇒ 分 P id 问出来之后**写回 `pending`**（见 `App.notePendingCid`），于是
+	// 「这一次选的到底是哪一集」只有一处知道，而那一处就是它自己。
+	bvid = pending.Bvid
+	cid = pending.Cid
 	if cid == "" {
 		return "", "", false
 	}
@@ -296,6 +341,26 @@ func (a *App) ensureDanmaku(key, bvid, cid string) {
 	// 清掉上一次的失败原因：这一趟正在问，界面上那句「问不出弹幕」就该撤了。
 	a.danmakuErr = nil
 	gen := a.danmakuGen
+	// 🔴 **在途序号**：每发起一趟就加一（**不管 key**）。
+	//
+	// 代次（`danmakuGen`）答的是「这一趟还属不属于**当前这一集**」——它挡的是
+	// 「旧歌的结果盖到新歌上」。而**缓存写入**要挡的是另一件事：**同一个 key**
+	// 上，一趟旧的（一开始发出去的）和一趟新的（后来发出去的）会**先后写同一个
+	// 缓存文件**——慢的那一趟写得更晚，于是它把新的那份盖掉了。
+	//
+	// 那一趟在**可见状态**上是按代次丢掉的（对不上就走人），但它**照样会写
+	// 盘**——于是盘上留下的是旧的那一份。
+	//
+	// ⚠️ **症状是「重新进这一集，拿到的是几分钟前的那一批」**：用户看到的是
+	// 「弹幕怎么变了」，而他什么都没做。
+	//
+	// ⇒ 写盘之前对一遍：只有**最后发起的那一趟**能写。
+	a.danmakuSeq++
+	seq := a.danmakuSeq
+	if a.danmakuSeqs == nil {
+		a.danmakuSeqs = map[string]int{}
+	}
+	a.danmakuSeqs[key] = seq
 	cache := a.danmakuCache
 	// `danmakuFetch` 是那一趟。生产上永远是 nil（走取流零件上的
 	// `bili.Client.Danmaku`），测试里替成一个假函数。
@@ -314,6 +379,9 @@ func (a *App) ensureDanmaku(key, bvid, cid string) {
 				// 现在，于是这份缓存**永远不会过期**——而过期的意义正是
 				// 「过一阵子重新拉一次」。
 				a.installDanmaku(gen, key, e.Items)
+				// 这一趟没有写盘（写盘是网络那一趟的事），所以它自己那条
+				// 序号**用不上**——留着的话表会一直长（见 `dropDanmakuSeq`）。
+				a.dropDanmakuSeq(seq, key)
 				return
 			}
 		}
@@ -321,6 +389,7 @@ func (a *App) ensureDanmaku(key, bvid, cid string) {
 			s := a.streamingSnapshot()
 			if s == nil || s.Client == nil {
 				a.finishDanmaku(gen, key, errStreamingMissing)
+				a.dropDanmakuSeq(seq, key)
 				return
 			}
 			fetch = s.Client.Danmaku
@@ -328,24 +397,89 @@ func (a *App) ensureDanmaku(key, bvid, cid string) {
 		items, err := fetch(context.Background(), cid)
 		if err != nil {
 			a.finishDanmaku(gen, key, err)
+			a.dropDanmakuSeq(seq, key)
 			return
 		}
 		a.installDanmaku(gen, key, items)
 
-		// 存进缓存（**锁外**：写盘是阻塞 IO，持有 `danmakuMu` 去等磁盘会把
-		// 界面那一帧冻住）。
-		//
-		// ⚠️ **零条也存**：B 站说「这个 cid 没有弹幕」是一份**完整的答案**，而
-		// 不存的话每进一次就要重新问一次。
-		if cache != nil {
-			if err := cache.Save(bvid, cid, danmaku.Entry{
-				Items:     items,
-				FetchedAt: time.Now(),
-			}); err != nil {
-				log.Printf("biu: 弹幕缓存写不下去：%v", err)
-			}
-		}
+		a.saveDanmakuCache(seq, key, bvid, cid, items)
 	}()
+}
+
+// saveDanmakuCache 把这一份存进缓存。**锁外调**（写盘是阻塞 IO）。
+//
+// # 两道闸
+//
+//  1. **在途序号**：只有**最后发起的那一趟**能写。慢一拍的那一趟（同 key）
+//     写得更晚，会把新的那份盖掉——症状是「重新进这一集，拿到的是几分钟前的
+//     那一批」。
+//  2. **应用还在吗**：应用退出之后不许再写盘（那个目录可能已经被删了，而写
+//     不下去只会多一条日志）。
+//
+// ⚠️ **零条也存**：B 站说「这个 cid 没有弹幕」是一份**完整的答案**，而不存
+// 的话每进一次就要重新问一次。
+func (a *App) saveDanmakuCache(seq int, key, bvid, cid string, items []bili.Danmaku) {
+	// 🔴 **写盘走这把专锁**：「检查我是不是最新的一趟」和「真的写下去」必须
+	// 在**同一个临界区**里——分开的话，中间发起的新一趟会让旧的那一趟以为
+	// 自己还是最新的，于是它写得更晚、把新的盖掉。
+	//
+	// ⚠️ **它不是 `danmakuMu`**：写盘是阻塞 IO，而 `danmakuMu` 是界面每一帧
+	// 都要的（`App.Danmaku`）。
+	a.danmakuWriteMu.Lock()
+	defer a.danmakuWriteMu.Unlock()
+
+	a.danmakuMu.Lock()
+	cache := a.danmakuCache
+	// 🔴 **按 key 对序号**：这一集最后发起的那一趟才算数。
+	//
+	// ⚠️ **不能拿全局序号对**：全局的序号会把「另一集的新一趟」也算成「比这一集
+	// 新」，于是切到另一集之后，上一集那份就落不了盘——而下次进上一集就得重新
+	// 拉一次（那就不是「7 天内再进是瞬时的」了）。
+	latest, known := a.danmakuSeqs[key]
+	stale := !known || seq != latest
+	a.danmakuMu.Unlock()
+	if cache == nil || stale {
+		// ⚠️ **过时的那一趟不许写**（它会把新写的那份盖掉）。
+		//
+		// ⚠️ **它的序号得收掉**：那一趟不会再写盘了，而留着就一直占着表。
+		// （过时的这一趟 `dropDanmakuSeq` 是空操作——表里那条是**新的一趟**的。）
+		a.dropDanmakuSeq(seq, key)
+		return
+	}
+	a.mu.Lock()
+	closed := a.closed
+	a.mu.Unlock()
+	if closed {
+		// 应用退出了：这一趟不再写盘，序号也收掉。
+		a.dropDanmakuSeq(seq, key)
+		return
+	}
+	if err := cache.Save(bvid, cid, danmaku.Entry{
+		Items:     items,
+		FetchedAt: time.Now(),
+	}); err != nil {
+		log.Printf("biu: 弹幕缓存写不下去：%v", err)
+	}
+	// 写完了就把这一条从表里拿掉：留着的话它会一直长（用户听过的每一集都留
+	// 一条）。
+	//
+	// ⚠️ **只删自己那一条**：别的 key 的序号不能碰。
+	a.dropDanmakuSeq(seq, key)
+}
+
+// dropDanmakuSeq 把这一趟的序号从表里拿掉。
+//
+// ⚠️ **只删自己那一条**：别的 key 的序号不能碰（那一集可能还有一趟在途）。
+//
+// ⚠️ **序号用完了就要删**：那一趟**没写盘**（缓存命中 / 问失败 / 应用退出了）
+// 时它就永远不会写盘了，而那条序号留着就一直占着——表会随着听过的每一集一直
+// 长（用户听一天歌就是几百条）。
+func (a *App) dropDanmakuSeq(seq int, key string) {
+	a.danmakuMu.Lock()
+	defer a.danmakuMu.Unlock()
+	if a.danmakuSeqs[key] == seq {
+		delete(a.danmakuSeqs, key)
+	}
 }
 
 // installDanmaku 把一份弹幕装到状态里并叫醒界面。
@@ -400,13 +534,28 @@ func (a *App) finishDanmaku(gen int, key string, err error) {
 
 // closeDanmaku 在应用退出时把弹幕这一摊收掉。
 //
-// ⚠️ **代次加一**：在途的那一趟回来时会发现代次变了，直接走人——于是它不会在
-// 应用退出之后还往盘上写一份缓存（那个目录可能已经被删了）。
+// # 它保证的是「Close 返回之后，缓存不再被写」
+//
+// ⚠️ **代次加一只管可见状态**：在途的那一趟回来时会发现代次变了，可见状态直接
+// 丢掉——但**它照样会去写盘**。所以光靠代次是不够的（那一版的注释就是那么写的，
+// 而那句话不成立）。
+//
+// ⇒ 这里持**写盘那把锁**：在途的那一趟要么已经写完了（那这一次 Close 等它），
+// 要么还没开始写（那它拿到锁时看见的是「已经关了」，于是走人）。
+//
+// ⚠️ **持锁期间不许拿 `a.mu`**：写盘那一段会拿 `a.mu`（查 `closed`），而
+// `App.Close` 是在**放开 `a.mu` 之后**才调这里的——所以这里拿 `a.mu` 不会死锁，
+// 但顺序必须是这样（先 `a.mu` 后这把锁，反过来就死锁了）。
 func (a *App) closeDanmaku() {
+	// 先把代次加一：在途的那一趟回来时，可见状态直接丢掉。
 	a.danmakuMu.Lock()
 	a.danmakuGen++
 	a.danmakuWanted = false
 	a.danmakuMu.Unlock()
+
+	// 再等在途的写盘（如果有）：它写完之后，这一层就再也不写了。
+	a.danmakuWriteMu.Lock()
+	a.danmakuWriteMu.Unlock()
 }
 
 // danmakuItemsOf 把服务层那一份变成界面要的那一份。

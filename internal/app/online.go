@@ -1091,6 +1091,16 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 		a.failPlay(gen, it, "问哪一集/补元信息", err)
 		return
 	}
+	// 🔴 **问出来的分 P id 记到 `pending` 上**（见 `App.notePendingCid` 的注释）。
+	//
+	// 弹幕这一摊要知道「当前这一集的 cid」，问的是 `pending`——而 `pending` 记
+	// 的是**按下去那一刻**的那一项，那时 cid 还是空的。不写回去的话，弹幕只
+	// 能问「正在放的那一条」，而那一条里的 cid 是**上一分 P** 的——同一个 bvid
+	// 换一集，屏幕上滚的还是上一集的弹幕。
+	//
+	// ⚠️ **代次要一起给**：这一趟回来的时候可能已经过时了（用户早就按了另一
+	// 首）——过时的那一趟问出来的 cid 属于它自己那一趟，不属于「现在这一首」。
+	a.notePendingCid(gen, it.Bvid, it.Cid)
 	run.timing.Part = time.Since(t0)
 	// 🔴 **代次变了就别再往下走**：问分 P / 元信息是**一次网络往返**，这一趟
 	// 等它的时候用户完全可能已经切了歌、或者超时闹钟已经响了。那就没人要这

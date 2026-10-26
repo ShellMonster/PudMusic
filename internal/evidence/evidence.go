@@ -2613,6 +2613,18 @@ var Items = []Item{
 			"TestTheFileIsNamedAfterTheBvidAndTheCid",
 			// 生产那一档（真 `bili.Client`）：前面那些都替掉了那一趟。
 			"TestTheProductionPathActuallyAsksBili",
+			// 端到端：cid 是取流那一趟问出来的（搜索结果那一路）。
+			"TestTheDanmakuComesForASongWhoseCidHadToBeAsked",
+			// 评审提的三条：
+			//  - 同一个 bvid 的新选择（cid 还没问出来）不许拿上一分 P 的弹幕
+			//  - 同一个 key 上慢的那一趟不许盖掉新写的那份缓存
+			//  - Close 之后缓存不再被写
+			"TestReviewUnresolvedSameBVidShowsThePreviousPartsDanmaku",
+			"TestReviewAStaleSameKeyFetchOverwritesTheFreshCache",
+			"TestReviewCloseStillWritesTheCache",
+			// 同一个 bvid 的**另一分 P** 的在途那一趟也不许把自己的 cid 写上
+			// （bvid 对得上不够——多 P 的投稿 bvid 是同一个）。
+			"TestTheInFlightRunOfAnotherPartDoesNotWriteItsCid",
 		},
 	},
 	{
