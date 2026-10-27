@@ -665,6 +665,70 @@ type Shell struct {
 	// 歌词，迷你播放器那一页也跟着被拽回去（反过来也一样）。
 	fullLyric lyricsView
 
+	// miniCurtain 是**迷你播放器那个卷帘**自己那一摊：开着没有、动画走到哪儿、
+	// 目标高度、以及这一帧窗该有多高。见 minicurtain.go。
+	//
+	// ⚠️ **它是迷你那个外壳的**（不是主窗口那个）：卷帘只画在迷你窗里，而
+	// 迷你窗是**另一个 `Shell` 实例**。
+	miniCurtain miniCurtainState
+
+	// miniCurtainWork 是**卷帘高度按哪块工作区算**。
+	//
+	// ⚠️ **零值 = 「问真的」**：生产路径走的是 `mygo.Screen.DisplayMatching(win)
+	// .WorkArea`（那一块是那扇窗所在的显示器的工作区）。
+	//
+	// ⚠️ **它是给无头测试用的**：`mygo.Screen` 头上有 `needsApp`
+	// （`mygo/app.go:128`），应用没 ready 的时候调它**直接 panic**，而无头
+	// Tester 里压根没有应用。所以那一档把工作区摆进来——而「卷帘不该长出
+	// 工作区」这件事本身是纯逻辑（`miniCurtainHeight`），单测断的是那一个
+	// 函数。
+	miniCurtainWork mygo.Rectangle
+
+	// miniWin 是**迷你播放器这一扇窗**的那层接口（生产实现是 `*mygo.Window`）。
+	//
+	// ⚠️ **它为什么存在**：卷帘要改的是**窗的原生尺寸**，而无头 Tester 里**没有
+	// 真窗口**（`mygo.NewWindow` 在应用没 ready 时直接 panic，
+	// `mygo/window.go:382`）。于是「关窗之前把窗高改回 84 ⇒ `StateKey` 落盘
+	// 的是 320×84」这条**在无头那一档量不到**。
+	//
+	// ⇒ 抽这一层接口，测试实现是一个**假窗**（记住最后一次 `SetSize`，能手动
+	// 触发 `OnClose`）。这样「关窗钩子有没有把高度改回 84」就变成**可测的**
+	// ——而**删掉那个钩子，这条用例必须红**。
+	//
+	// ⚠️ **别把 `s.win` 的类型整个换掉**：`s.win` 在十几处被当 `*mygo.Window`
+	// 用（`platform.RestoreFromBackground(s.win)` 那一类），换类型会波及一大片
+	// 与这一票无关的代码。所以这里只抽**迷你那一扇**要的那几样。
+	//
+	// ⚠️ **零值 = 「还没有窗」**：迷你窗建出来之前（`ensureMiniWindow` 排进
+	// `WhenReady` 之前）它就是 nil，而那一档要的是「窗高这一层逻辑对不对」。
+	miniWin miniWindow
+
+	// miniCurtainWantsKey 是「卷帘展开着，而这一扇窗还没拿到键盘」那一档。
+	//
+	// ⚠️ **它为什么存在**：展开的那一下要把键盘抢到这一扇窗上（见
+	// `miniCurtainActivate`），而那一抢**两步**里每一步都可能落空：
+	// `activateIgnoringOtherApps:` 是**异步**的（系统给别的应用一个
+	// 「别抢回去」的机会），而 `makeKeyAndOrderFront:` 只在**应用已经是
+	// 前台**的时候才把这一扇变成 key 窗口。
+	//
+	// ⇒ 实测（2026-10-27 真机，评审场景）：**四轮里有一轮**点封面之后应用
+	// **压根没被激活**（`active=false`），于是那一轮 Esc 到不了这一扇窗。
+	// 而它**不是每次都失败**——所以「多试几次」不是办法。
+	//
+	// ⇒ 这一格是那个**兜底**：`mygo.App.OnDidBecomeActive` 那一档会看到
+	// 「应用真的成了前台，而这一扇还不是 key 窗口」⇒ **再抢一次 key 窗口**。
+	// 那时候应用已经是前台了，`makeKeyAndOrderFront:` 这一句**一定**成。
+	miniCurtainWantsKey bool
+
+	// miniLyric 是**卷帘里那个歌词区**自己那一摊（滚动位置、上一帧量到的两个
+	// 框、正在滚向哪一句）。
+	//
+	// ⚠️ **不是 `lyric` 那一份，也不是 `fullLyric` 那一份**：三处画的是同一首歌
+	// 的同一份歌词，而「滚到了哪儿是各人各眼的事」——共用一份的话，在满屏里翻
+	// 一下歌词，迷你窗的卷帘也跟着被拽回去（反过来也一样）。理由同
+	// `fullplayer_lyrics.go` 的文件头那一段。
+	miniLyric lyricsView
+
 	// lyricSearch 是「搜索歌词」和「歌词预览」那两个弹窗自己那一摊：搜索框里
 	// 正在敲的字、待发的那一次搜索、切在哪个源、候选表。见 lyricssearch.go。
 	//
