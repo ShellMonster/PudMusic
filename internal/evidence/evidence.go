@@ -1584,17 +1584,17 @@ var Items = []Item{
 		// 一个「等够了就当它失败」的上限。于是用户面对的是一个不动的界面和
 		// 一片沉默——比「报错」更糟。
 		//
-		// 这一组盯三件事：**有反馈**（界面上说在取流）、**有上限**（超时按失败
-		// 处理，给一句能看懂的话）、**有痕迹**（代次变了和失败都写进日志，
+		// 这一组盯三件事：**有反馈**（取流时播放键上有那一圈光，票 #581 之后
+		// 界面上不再有「正在取流」的文字）、**有上限**（超时按失败处理，
+		// 给一句能看懂的话）、**有痕迹**（代次变了和失败都写进日志，
 		// 而日志真的落在文件里）。
-		Spec: "点了歌一直不开始：界面上说在取流、超过阈值按失败处理、代次变了和失败都写进日志",
+		Spec: "点了歌一直不开始：取流时播放键上有光圈、超过阈值按失败处理、代次变了和失败都写进日志",
 		Tests: []string{
 			"TestAPlayThatNeverStartsTurnsIntoASentence",
 			"TestAnotherSongsFailureDoesNotCancelTheWatchdog",
 			"TestTheDiscardedPlayIsWrittenDown",
 			"TestTheFailureIsWrittenDown",
-			"TestThePlayBarSaysItIsLoading",
-			"TestTheLoadingLineHasASpinner",
+			"TestThePlayBarStaysQuietWhileLoading",
 			"TestThePauseKeyIsStillThereWhileLoading",
 			"TestAFailedPlayGivesASentenceInsteadOfASpinner",
 			"TestTheFailureSentenceFitsOnOneLine",
@@ -3859,12 +3859,12 @@ var Items = []Item{
 		// 白费了——**界面上看不出任何异样**。
 		Category: Play,
 		// 票 #366（2026-10-24）。
-		Spec: "下一首的流地址在当前这首快结束时就备好（只解析地址，不预下载字节）；真播下一首不再重新取流；手动切歌重新取；队列一改就作废；预取失败无声退回且不重试；地址快过期就放弃；暂停时不预取；备的和真播的是同一首（含随机模式）",
+		Spec: "下一首的流地址在当前这首快结束时就备好（只解析地址，不预下载字节）；真播下一首不再重新取流；手动按下一首也吃备好的那一份（票 #581）；队列一改就作废；预取失败无声退回且不重试；地址快过期就放弃；暂停时不预取；备的和真播的是同一首（含随机模式）",
 		Tests: []string{
 			// 主线：备好的那一份在切歌那一刻**被用掉**（取流接口的次数停在 2）。
 			"TestTheNextTrackIsPreparedBeforeTheSwitch",
-			// 手动切歌重新取地址（次数到 3）。
-			"TestAManualSwitchResolvesTheAddressAgain",
+			// 手动按下一首吃备好的那一份（次数停在 2，票 #581）。
+			"TestAManualNextUsesThePreparedAddress",
 			// 队列一改 → 已备好的立刻作废（会重新备一份）。
 			"TestReorderingTheQueueThrowsThePreparedAddressAway",
 			// 失败无声退回（真播时按正常路径取一次），且不会每 50ms 重试。

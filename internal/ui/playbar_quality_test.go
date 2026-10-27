@@ -227,7 +227,7 @@ func TestTheBadgeMenuSwitchesQuality(t *testing.T) {
 		HasTrack:    true,
 		Title:       "在线的一首",
 		Quality:     "192K",
-		QualityPref: app.AudioQualityAuto,
+		QualityPref: app.AudioQualityHigh,
 	}
 	b := newTestShell(t, onApp(a), at(760, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
 		return func(c *mygoui.Context) {
@@ -243,7 +243,8 @@ func TestTheBadgeMenuSwitchesQuality(t *testing.T) {
 	if err := tt.Click("192K"); err != nil {
 		t.Fatalf("点不动徽章：%v（画面上的字：%q）", err, tt.Texts())
 	}
-	want := []string{"自动", "无损", "高音质", "标准", "省流量"}
+	// 票 #581：没有「自动」了，杜比是显式选项；顺序从最费流量到省流量。
+	want := []string{"无损", "杜比全景声", "高音质", "标准", "省流量"}
 	if got := tt.Menu(); !slices.Equal(got, want) {
 		t.Fatalf("菜单里的项 = %q，want %q", got, want)
 	}
