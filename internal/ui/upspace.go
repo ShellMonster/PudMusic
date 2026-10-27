@@ -946,7 +946,7 @@ func (s *Shell) spaceThumb(c *ui.Context, url string, w, h float32) {
 // 标签挂在框上，量到的就是**框**的尺寸——而框不动正是上游的样子。
 func (s *Shell) spaceThumbZoom(c *ui.Context, url string, w, h float32, zoomKey string, on bool) {
 	t := c.Theme()
-	ui.Box(c).Size(w, h).Clip().Label(url).Children(func() {
+	ui.Box(c).Size(w, h).Radius(t.Radius).Clip().Label(url).Children(func() {
 		if st := s.images.Get(url); url != "" && st.Ready() {
 			img := ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(w, h)
 			if zoomKey != "" {

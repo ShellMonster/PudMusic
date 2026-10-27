@@ -570,7 +570,7 @@ func (s *Shell) viewDynamicPics(c *ui.Context, pics []string) {
 // 起播失败由 list.Actions.PlayNow 的 Toast 说明。
 func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author bili.DynamicAuthor) {
 	t := c.Theme()
-	box := ui.Row(c).Grow(1).AlignItems(ui.Center).
+	box := ui.Row(c).Grow(1).AlignItems(ui.Center).Padding(space.Px8).
 		Radius(s.cardRadius(t)).Background(s.cardBackground(t)).Border(1, t.Border).
 		Clip().Key("dynv:" + v.Bvid)
 	if box.Clicked() {
@@ -591,7 +591,7 @@ func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author b
 		// `scrim.Overlay`（35%，图上薄黑那一档，行封面悬停压暗同款）——界面层
 		// 不许写裸的遮罩 alpha（`widgets/scrim` 的 `TestNoScrimLiteralIsLeft`）。
 		// 白三角和时长角标一样是纯白：它压在黑罩加照片上，主题色读不出来。
-		ui.Box(c).Size(dynamicCoverW, dynamicCoverH).Clip().Children(func() {
+		ui.Box(c).Size(dynamicCoverW, dynamicCoverH).Radius(t.Radius).Clip().Children(func() {
 			s.spaceThumb(c, v.Cover, dynamicCoverW, dynamicCoverH)
 			if box.Hovered() {
 				ui.Box(c).Absolute().Size(dynamicCoverW, dynamicCoverH).
