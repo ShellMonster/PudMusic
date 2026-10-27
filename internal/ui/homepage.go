@@ -210,7 +210,8 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 	h.newGrid.SetRetry(func() { h.retryNew() })
 	for i := range h.lists {
 		l := list.NewPaged(cache, acts, h.tabFetcher(i))
-		// 播放量那一列：首页三个 Tab 的接口都带着它（`RecommendItem.View`）。
+		// 播放量那一列：首页六个 Tab 里，除了「最近播放」（历史接口不带播放量）
+		// 的五个都带着它（`RecommendItem.View`）。
 		//
 		// ⚠️ **投稿时间不画**：上游首页自己就是 `hidePubTime`
 		// （`pages/music-recommend/list.tsx:49` 与 `:60`），而它那一层的
@@ -543,10 +544,12 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 }
 
 // boardCaptionText 是榜单页顶上那一行：第几期、哪天更新。缺哪样就少说哪样。
+// 期数带上「周榜」——热榜 / 原创榜取的都是 B 站音乐站的**周榜**最新一期，
+// 不说的话用户分不清「第 N 期」的节奏是什么。
 func boardCaptionText(number int, at time.Time) string {
 	var parts []string
 	if number > 0 {
-		parts = append(parts, "第 "+strconv.Itoa(number)+" 期")
+		parts = append(parts, "第 "+strconv.Itoa(number)+" 期（周榜）")
 	}
 	if !at.IsZero() {
 		parts = append(parts, at.Format("2006-01-02")+" 更新")

@@ -1,14 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-  <g opacity="0.16">
-    <circle cx="120" cy="80" r="70"/>
-    <circle cx="120" cy="80" r="48" stroke-dasharray="4 9"/>
-  </g>
-  <g opacity="0.9">
-    <rect x="88" y="104" width="64" height="10" rx="5"/>
-    <path d="M120 52v38M104 76l16 16 16-16"/>
-  </g>
-  <g>
-    <circle cx="158" cy="56" r="22" fill="currentColor" fill-opacity="0.16"/>
-    <path d="M150 58l5 5 9-10"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+  <ellipse cx="120" cy="132" rx="76" ry="10" fill="currentColor" opacity="0.10" stroke="none"/>
+  <path d="M70 57h36l12 13h52a8 8 0 0 1 8 8v43H62V65a8 8 0 0 1 8-8z" fill="currentColor" opacity="0.18" stroke="none"/>
+  <path d="M62 78h116v43H62z" stroke-width="5" opacity="0.68"/>
+  <path d="M120 50v48M101 80l19 19 19-19" stroke-width="8" opacity="0.78"/>
+  <rect x="98" y="112" width="44" height="7" rx="3.5" fill="currentColor" opacity="0.42" stroke="none"/>
 </svg>
