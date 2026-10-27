@@ -635,8 +635,15 @@ type App struct {
 	// commentsMoreTriedAt 是上一次**发起翻页**的时刻（翻页那一趟单独算退避，
 	// 不跟第一页共用——共用的话刚进这一页就点「加载更多」会被挡住）。
 	commentsMoreTriedAt time.Time
-	// commentsNext 是下一页的游标（B 站给什么就是什么，不透明）。
-	commentsNext int64
+	// commentsNext 是下一页的游标（**偏移量**，B 站给什么就是什么，不透明）。
+	//
+	// ⚠️ **它是字符串，不是数字**：`cursor.pagination_reply.next_offset` 是
+	// 一个带 base64 字符（`+` `/` `=`）的串，而**改一个字符 B 站不报错**——
+	// 它回的是第一页（见 `bili.CommentPage.NextOffset`）。
+	//
+	// ⚠️ **不是 `cursor.next`**：那一栏在「评论」档（mode=1）上带上去必挂
+	// （B 站回 `-400 min_score … must be <= max_score …`）。
+	commentsNext string
 	// commentsIsEnd 是「到底了」。
 	commentsIsEnd bool
 	// commentsAllCount 是评论总数。

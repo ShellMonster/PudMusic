@@ -550,6 +550,33 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// 🔴 **评论列表的翻页**（票 #591）：
+		//
+		//	游标    翻页走 `cursor.pagination_reply.next_offset` +
+		//	        `pagination_str`，**不是 `cursor.next`**——后者在「评论」那一档
+		//	        （`mode=1`）上带上去必挂（B 站回 `-400 min_score … must be <=
+		//	        max_score …`，因为 `support_mode` 恒为 `[2, 3]`，不含 1）。
+		//	三档    mode=3 / 1 / 2 **都能翻到第二页**，且每一页的内容**互不相同**
+		//	        （拿 rpid 比）。
+		//	同一份 「评论」（mode=1）与「最新评论」（mode=2）给的是**同一份内容**
+		//	        （实测逐条相同，而 `cursor.name` 却是不同的）⇒ 界面上不能把它
+		//	        摆成两个一模一样的档。
+		//
+		// ⚠️ **偏移量一个字都不能改**：改一个字符 B 站**不报错**，它回的是
+		// **第一页**——于是「加载更多」按下去什么都不变。
+		Spec: "评论列表的翻页：走 pagination_reply.next_offset + pagination_str（不是 cursor.next，那一个在「评论」档上必挂 -400）；三个排序档都能翻到第二页且每页内容互不相同；「评论」与「最新评论」是同一份内容，界面上不能摆成两个一样的档；偏移量原样带回去",
+		Tests: []string{
+			"TestAllThreeSortsReachTheSecondPage",
+			"TestThePagingNeverSendsTheBrokenCursor",
+			"TestTheCommentSortGivesTheSameContentAsTheLatestOne",
+			"TestTheHotSortGivesItsOwnContent",
+			"TestTheOffsetIsSentVerbatim",
+			"TestTheSortsOnScreenAreNotTwoOfTheSame",
+			"TestLoadMoreCarriesTheOffsetThroughTheCache",
+		},
+	},
+	{
+		Category: HTTP,
 		// 🔴 **评论这一摊的应用层**（票 #572）：
 		//
 		//	oid    mv 那一路的 oid 是**数字 avid**（走 `ArchiveID` 换），
