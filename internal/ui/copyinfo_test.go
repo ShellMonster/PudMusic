@@ -19,3 +19,34 @@ func TestCurrentSongInfoHasNoEmptyLines(t *testing.T) {
 		t.Errorf("本地歌曲信息 = %q", local)
 	}
 }
+
+// 没有封面的歌：播放条封面和满屏封面的菜单一样——「复制歌曲信息」可选，「复制封面」
+// 灰着且名字里说明原因；灰的那项选不中。键盘和读屏走系统原生菜单，认的就是这些标签。
+func TestTheCoverMenuExplainsWhyCopyCoverIsGreyedOut(t *testing.T) {
+	for _, full := range []bool{false, true} {
+		_, tt, _ := fullTester(t)
+		x, y := float32(40), float32(760) // 播放条封面
+		if full {
+			openFull(t, tt)
+			tt.Advance(1500 * time.Millisecond)
+			x, y = 370, 400 // 满屏封面
+		}
+		tt.RightClickAt(x, y)
+		tt.Frame()
+		got := tt.Menu()
+		want := []string{"复制歌曲信息", "复制封面（这首歌没有封面）"}
+		if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+			t.Fatalf("满屏=%v 封面右键菜单 = %q，want %q", full, got, want)
+		}
+		if err := tt.ChooseMenuItem("复制封面（这首歌没有封面）"); err == nil {
+			t.Errorf("满屏=%v 灰着的「复制封面」居然选得中", full)
+		}
+		if err := tt.ChooseMenuItem("复制歌曲信息"); err != nil {
+			t.Fatalf("选「复制歌曲信息」：%v", err)
+		}
+		tt.Frame()
+		if !tt.HasText("已复制歌曲信息") {
+			t.Errorf("满屏=%v 复制完没有提示，文字有 %q", full, tt.Texts())
+		}
+	}
+}

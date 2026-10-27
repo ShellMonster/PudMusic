@@ -77,10 +77,10 @@ func TestEveryFirstScreenIsACenteredSpinner(t *testing.T) {
 	}{
 		{name: "搜索", loading: "正在加载…", path: searchPath + "?q=%E5%91%A8%E6%9D%B0%E4%BC%A6", centered: true, rows: true},
 		{name: "收藏夹", loading: "正在加载…", path: collectionPathPrefix + "12345", centered: true, rows: true},
-		{name: "稍后再看", loading: "正在加载…", path: laterPath, centered: true},
-		{name: "历史记录", loading: "正在加载…", path: historyPath, centered: true},
-		{name: "我的关注", loading: "正在加载关注的人…", path: followPath},
-		{name: "用户动态", loading: "正在加载动态…", path: dynamicFeedPath},
+		{name: "稍后再看", loading: "正在加载…", path: laterPath, centered: true, rows: true},
+		{name: "历史记录", loading: "正在加载…", path: historyPath, centered: true, rows: true},
+		{name: "我的关注", loading: "正在加载关注的人…", path: followPath, rows: true},
+		{name: "用户动态", loading: "正在加载动态…", path: dynamicFeedPath, rows: true},
 	} {
 		t.Run(page.name, func(t *testing.T) {
 			b := newTestShell(t, blockedBiliOpts(t, true)...)
