@@ -697,6 +697,34 @@ type Shell struct {
 	// `WhenReady` 之前）它就是 nil，而那一档要的是「窗高这一层逻辑对不对」。
 	miniWin miniWindow
 
+	// miniDisplaysOff 是「显示器变了」那个订阅的**退订句柄**（票 #555）。
+	//
+	// ⚠️ **它为什么必须留着**：那个订阅是**全局**的（`mygo.Screen` 上的一
+	// 个回调列表），而迷你窗会开开关关——不摘的话，每开一次就多留一个回
+	// 调，而那个回调还**拿着这一扇窗**（窗关了它照样跑，每来一次显示器
+	// 变化就对着一个已经关了的窗调 `SetPosition`）。
+	//
+	// ⚠️ **零值 = 「没订阅」**：假窗那一档压根不订阅（无头环境里没有系统
+	// 通知），而真窗那一档是在 `attachMiniWindowTo` 里装的、在 `OnClosed`
+	// 里摘的。
+	miniDisplaysOff func()
+
+	// miniDisplays 是「这一刻有哪些显示器」那一问（**nil = 问真的**）。
+	//
+	// ⚠️ **它是给无头测试换掉的**（票 #555）：生产那一档问 `mygo.Screen`，
+	// 而 `mygo.Screen` 头上有 `needsApp`（`mygo/app.go:128`）——应用没
+	// ready 的时候调它**直接 panic**，而无头 Tester 里压根没有应用。
+	//
+	// ⇒ 于是「显示器变了之后窗被夹回可见区域」这一整条**生产路径**在无头
+	// 那一档也走得通：测试把一块假的显示器列表摆进来，而**生产那些函数
+	// 一个都不改**。
+	miniDisplays func() []mygo.Display
+
+	// miniCursor 是「指针现在在哪儿」那一问（**nil = 问真的**）。
+	//
+	// ⚠️ **理由同 `miniDisplays`**：无头那一档问不到系统。
+	miniCursor func() (mygo.Point, bool)
+
 	// miniCurtainWantsKey 是「卷帘展开着，而这一扇窗还没拿到键盘」那一档。
 	//
 	// ⚠️ **它为什么存在**：展开的那一下要把键盘抢到这一扇窗上（见
