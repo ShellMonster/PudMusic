@@ -29,6 +29,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrollbar"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/skeleton"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -152,8 +153,28 @@ func (h *homePage) viewHero(c *ui.Context, w float32) {
 		if !h.feed.newTab.loading && h.feed.newTab.started {
 			return
 		}
-		ui.Box(c).Key("home:hero:skel").Size(w, ch).Radius(t.Radius + 4).
-			Background(t.Text.Alpha(0.06)).Label("正在加载新歌速递")
+		// ⚠️ **骨架要扫光、要有形状**（2026-10-27）：原先是一块 `Text` 6% 的
+		// 平色——比空白好一点，但和列表首屏那八行（有扫光、有封面块 + 字条）
+		// 明显不是一个东西，同一屏上两种「在等」的样子。
+		//
+		// 这里照着它将来要变的形状摆：**右边一张封面、左边两行字 + 一条按钮**，
+		// 和 `viewHeroCard` 的布局对齐，数据到了只换内容、版面不跳。
+		ui.Column(c).Key("home:hero:skel").Size(w, ch).Radius(t.Radius + 4).Clip().
+			Label(loadingNewMusicText).Children(func() {
+			heroArt := min(ch*16/9, w*0.7)
+			ui.Box(c).Key("home:hero:skel:art").Size(heroArt, ch).
+				Attach(ui.AnchorTopRight, ui.AnchorTopRight).Children(func() {
+				skeleton.Block(c, "home:hero:skel:art:fill", heroArt, ch, 0)
+			})
+			ui.Column(c).Key("home:hero:skel:txt").Size(max(w-heroArt*0.7, w*0.3), ch).
+				Padding(space.Px24, space.Px24, space.Px24, space.Px28).Gap(space.Px8).
+				Justify(ui.Center).AlignItems(ui.Start).Children(func() {
+				skeleton.Block(c, "home:hero:skel:k", 72, 12, 4)
+				skeleton.Block(c, "home:hero:skel:t", min(w*0.45, 360), 24, 6)
+				skeleton.Block(c, "home:hero:skel:o", min(w*0.3, 200), 14, 4)
+				skeleton.Block(c, "home:hero:skel:btn", 96, 32, 16)
+			})
+		})
 		return
 	}
 	now := c.Now()
@@ -283,6 +304,16 @@ func (h *homePage) sectionHead(c *ui.Context, key, title, more string, go_ func(
 	})
 }
 
+// loadingNewMusicText 是总览上「新歌速递」那一块在拉时那句（骨架屏的无障碍名字）。
+//
+// ⚠️ **和「流行」Tab 那一档用同一句话**（`homepage_newmusic.go` 的骨架块）：
+// 同一块内容在两个地方等，读屏软件该读到同一句。
+const loadingNewMusicText = "正在加载新歌速递"
+
+// loadingBoardText 是总览上「排行榜」在拉时那句。
+const loadingBoardText = "正在加载排行榜"
+
+// viewNewRow 在「发现」总览上画新歌速递那一排。
 func (h *homePage) viewNewRow(c *ui.Context, w, ww float32) {
 	t := c.Theme()
 	songs := h.newGrid.songs
@@ -293,7 +324,27 @@ func (h *homePage) viewNewRow(c *ui.Context, w, ww float32) {
 	if cols > 6 {
 		cols = 6
 	}
+	cw := cellW(w, cols, homeOverviewCellGap)
+	// 🔴 **一首都没有的时候摆骨架，不要整块消失**（2026-10-27）：原先这里
+	// `len(songs) == 0` 直接 return——连「新歌速递」那个标题一起不见，数据到了
+	// 才整块冒出来，下面的磁贴/榜单跟着往下跳一大截（用户看到的是「点进首页，
+	// 版面自己动了一下」）。
+	//
+	// 三档分开：**在拉**摆卡片骨架；**拉失败**说失败（那一块自己有重试，
+	// 见 `newMusicGrid.view`）；**真的没有**什么都不摆（那是结论，不用占版面）。
 	if len(songs) == 0 {
+		if !h.feed.newTab.loading && (h.feed.newTab.started || h.feed.newTab.err != nil) {
+			return
+		}
+		ui.Column(c).Key("home:new").FillWidth().Gap(space.Px12).Children(func() {
+			h.sectionHead(c, "home:new:head", "新歌速递", "", nil)
+			ui.Row(c).Key("home:new:skel").FillWidth().Gap(space.Px16).
+				Label(loadingNewMusicText).Children(func() {
+				for i := range min(cols, 6) {
+					skeleton.Card(c, "home:new:skel:"+strconv.Itoa(i), cw)
+				}
+			})
+		})
 		return
 	}
 	total := len(songs)
@@ -301,7 +352,6 @@ func (h *homePage) viewNewRow(c *ui.Context, w, ww float32) {
 		h.newOff = max(total-cols, 0)
 	}
 	songs = songs[h.newOff:min(h.newOff+cols, total)]
-	cw := cellW(w, cols, homeOverviewCellGap)
 	ui.Column(c).Key("home:new").FillWidth().Gap(space.Px12).Children(func() {
 		h.sectionHead(c, "home:new:head", "新歌速递", "查看更多", func() { h.openTab(homePopTab) })
 		ui.Box(c).Key("home:new:stage").FillWidth().Children(func() {
@@ -345,10 +395,39 @@ func (h *homePage) viewMiniBoards(c *ui.Context, w float32) {
 	if len(newTop) > homeMiniRows {
 		newTop = newTop[:homeMiniRows]
 	}
+	cw := (w - 2*32) / 3
+	// 🔴 **三块都空的时候摆骨架，不要整块消失**（2026-10-27）：原先这里直接
+	// return——「排行榜」那个标题连同三列一起不见，数据到了整块冒出来，
+	// 下面的内容跟着往下跳。
+	//
+	// ⚠️ **只在「真的还在拉」时摆**：拉失败之后三列各自有一句「榜单还在路上」
+	// （见 `viewMiniBoard`），那时再摆骨架是在说「马上就好」，而它不会好。
 	if len(h.miniTop[0]) == 0 && len(h.miniTop[1]) == 0 && len(newTop) == 0 {
+		if !h.boardLoading() {
+			return
+		}
+		ui.Column(c).Key("home:boards").FillWidth().Gap(space.Px12).Children(func() {
+			h.sectionHead(c, "home:boards:head", "排行榜", "", nil)
+			ui.Row(c).Key("home:boards:skel").FillWidth().Gap(space.Px32).
+				AlignItems(ui.Start).Label(loadingBoardText).Children(func() {
+				for i := range 3 {
+					ui.Column(c).Key("home:boards:skel:" + strconv.Itoa(i)).Width(cw).
+						Gap(space.Px6).Children(func() {
+						skeleton.Block(c, "home:boards:skel:h:"+strconv.Itoa(i), 96, 20, 4)
+						for row := range 4 {
+							ui.Row(c).Gap(space.Px12).AlignItems(ui.Center).Children(func() {
+								skeleton.Block(c, "home:boards:skel:c:"+strconv.Itoa(i)+":"+strconv.Itoa(row),
+									homeMiniCover, homeMiniCover, 6)
+								skeleton.Block(c, "home:boards:skel:t:"+strconv.Itoa(i)+":"+strconv.Itoa(row),
+									0, 12, 4)
+							})
+						}
+					})
+				}
+			})
+		})
 		return
 	}
-	cw := (w - 2*32) / 3
 	ui.Column(c).Key("home:boards").FillWidth().Gap(space.Px12).Children(func() {
 		h.sectionHead(c, "home:boards:head", "排行榜", "", nil)
 		ui.Row(c).Key("home:boards:row").FillWidth().Gap(space.Px32).AlignItems(ui.Start).Children(func() {
@@ -357,6 +436,20 @@ func (h *homePage) viewMiniBoards(c *ui.Context, w float32) {
 			h.viewMiniBoard(c, "新歌榜", newTop, homePopTab, cw)
 		})
 	})
+}
+
+// boardLoading 报「那三列里至少还有一列在路上」。
+//
+// ⚠️ **看的是翻页列表自己的状态**（不是「有没有歌」）：空数组在三档里都出现
+// （还在拉 / 拉失败 / 真的没有），只有第一种才该摆骨架。
+func (h *homePage) boardLoading() bool {
+	for _, tab := range [2]int{homeHotTab, homeOriginalTab} {
+		if pg := h.lists[tab].Paged(); pg.Loading && pg.Loaded == 0 {
+			return true
+		}
+	}
+	st := &h.feed.newTab
+	return st.loading && len(h.newGrid.songs) == 0
 }
 
 // playAllOf 把 songs 整排放进播放：第一首立刻播，其余排进队尾。

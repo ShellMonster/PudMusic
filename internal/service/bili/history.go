@@ -168,7 +168,7 @@ func historyPageOf(d *historySearchData) HistoryPage {
 			business = historyBusinessArchive
 		}
 		out.Items = append(out.Items, HistoryItem{
-			Title: decodeEntities(it.Title), Cover: it.Cover,
+			Title: decodeEntities(it.Title), Cover: normalizeImageURL(it.Cover),
 			Bvid: it.History.Bvid, Cid: it.History.Cid,
 			Business:   business,
 			Kid:        kidOf(it.Kid, business),

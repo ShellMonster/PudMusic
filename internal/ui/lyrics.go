@@ -68,6 +68,14 @@ const (
 	// lyricsEmptyKey 是「暂无歌词」那一块的键，和歌名那一行分开。
 	lyricsEmptyKey = "page:lyrics"
 
+	// lyricsLoadingText 是「歌词还在路上」那枚转圈的无障碍名字。
+	//
+	// ⚠️ **它是转圈的名字，不是画出来的一行字**（`drawLoading` 那一档只有一枚
+	// 转圈）：读屏软件念的是这一句，而画面上什么都不写（写字的代价见
+	// `imgcache/view.go` 那一段：小字号的那一行在紧凑的块里会换行、会压到别的
+	// 东西上）。
+	lyricsLoadingText = "正在加载歌词"
+
 	// lyricsActiveScale 是正在唱的那一句放大到几倍，抄 `index.tsx:335` 的
 	// `fontSize: isActive ? fontSize * 1.5 : fontSize`。
 	//
@@ -579,6 +587,11 @@ func lyricNow(pos time.Duration, offsetMS int) time.Duration {
 // viewLyrics 画歌词区。**只有真的有歌词才画本体**；没有的那一支走
 // `viewEmpty` + `noLyrics`（那是 SPEC 点名的空状态，见 empty.go）。
 //
+// ⚠️ **「还没有」和「没有」是两档**（2026-10-27）：换歌那一下歌词要先读盘、
+// 等 B 站字幕、必要时自动找一次（最慢 25 秒）。这段时间里原先直接画
+// 「暂无歌词」——那是一个**结论**，而真相是**过程**。现在按 `snap.Loading`
+// 分成两档（上游那三选一里也有「歌词加载中...」这一档）。
+//
 // pos 是播放位置（`app.State.Position`）。
 func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Duration) {
 	lv := &s.lyric
@@ -588,6 +601,17 @@ func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Dura
 	active := lyrics.ActiveAt(snap.Rows, lyricNow(pos, snap.OffsetMS))
 	if active < 0 {
 		lv.forget()
+		if snap.Loading {
+			// ⚠️ **走共享出口**（`drawLoading`，和其余几页的加载态同一枚转圈）：
+			// 这一档说的是「还没好」，不是「没有」——摆插画 + 两行字等于说反了。
+			//
+			// ⚠️ **但这一格是「40vh 那一格」**：迷你播放器这一页的歌词区本来就
+			// 占着剩下的高度，转圈落在那一格正中不会挤到别的块（它下面那一列
+			// 旋钮还在，见下面那段）。
+			drawLoading(c, lyricsEmptyKey, lyricsLoadingText)
+			s.viewLyricKnobColumn(c, snap, false)
+			return
+		}
 		s.viewEmpty(c, lyricsEmptyKey, noLyrics)
 		// ⚠️ **「找歌词」那个旋钮这一支也要画**：上游那三个旋钮不受「有没有歌词」
 		// 影响（`index.tsx:380-398` 在歌词区的外层），而用户点它的时机恰恰是

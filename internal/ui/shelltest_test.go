@@ -13,6 +13,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shimmer"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -361,7 +362,9 @@ func newTestShell(t *testing.T, opts ...shellOpt) *testShell {
 	// ⚠️ **装的是一个新开关，不是改外壳那一个**：外壳那一个（`s.visible`）要等
 	// 外壳建好之后才拿得到，而这里是在建外壳**之前**。而「上一条测试留下的
 	// 看不见」正是要挡的那件事——换一个新的、看得见的，等于把它抹掉。
-	hover.SetVisibleFlag(hover.NewVisibleFlag())
+	flag := hover.NewVisibleFlag()
+	hover.SetVisibleFlag(flag)
+	shimmer.SetVisibleFlag(flag)
 	if sp.migration != nil {
 		migration.mu.Lock()
 		migration.r = *sp.migration
