@@ -163,6 +163,9 @@ type RecommendItem struct {
 	Duration time.Duration
 	// View 是播放量。
 	View int64
+	// ViewAt / Progress 只有最近播放填：看的时刻、看到哪儿。
+	ViewAt   time.Time
+	Progress time.Duration
 	// Item 是播放和右键菜单真正用的那一项。已是 `Source: "online"`。
 	//
 	// ⚠️ **榜上有些条目没有稿件**（纯音乐条目，`related_archive` 是空的），
@@ -203,6 +206,7 @@ func recommendItems(in []bili.RecommendItem) (out []RecommendItem, dropped int) 
 			ID: id, Title: it.Title, Cover: it.Cover,
 			Owner: it.Owner, OwnerMid: it.OwnerMid,
 			Duration: it.Duration, View: it.View,
+			ViewAt: it.ViewAt, Progress: it.Progress,
 			Item: recommendItem(it),
 		})
 	}
@@ -362,6 +366,7 @@ func (r *Recommend) recent(ctx context.Context, page int) ([]RecommendItem, int,
 		in = append(in, bili.RecommendItem{
 			Bvid: it.Bvid, Cid: it.Cid, Title: it.Title, Cover: it.Cover,
 			Owner: it.AuthorName, OwnerMid: it.AuthorMid, Duration: it.Duration,
+			ViewAt: it.ViewAt, Progress: it.Progress,
 		})
 	}
 	out, dropped := recommendItems(in)
