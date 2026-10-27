@@ -50,6 +50,13 @@ type fakeMiniWindow struct {
 	// focused 记「有没有被要求成为 key 窗口」。
 	focused bool
 
+	// focusCount 记「被要求成为 key 窗口」的次数。
+	//
+	// ⚠️ **为什么还要记次数**：`focused` 是个 bool，而「兜底那一档**又**抢了
+	// 一次」和「压根没抢」在 bool 上分不开——而「抢了几次」是要断的（多抢会
+	// 打断用户正在做的事）。
+	focusCount int
+
 	// onClose 是关窗之前那个钩子。
 	onClose func(e *mygo.CloseEvent)
 }
@@ -75,7 +82,10 @@ func (f *fakeMiniWindow) Bounds() mygo.Rectangle {
 
 func (f *fakeMiniWindow) IsDestroyed() bool { return false }
 
-func (f *fakeMiniWindow) Focus() { f.focused = true }
+func (f *fakeMiniWindow) Focus() {
+	f.focused = true
+	f.focusCount++
+}
 
 func (f *fakeMiniWindow) WorkArea() mygo.Rectangle { return f.work }
 
@@ -183,5 +193,100 @@ func TestTheMiniCurtainFocusesItsWindowWhenItOpens(t *testing.T) {
 	if !fake.focused {
 		t.Error("展开之后这一扇窗没有成为 key 窗口：Esc 到不了它" +
 			"（窗口级的 `c.Shortcut(0, ui.KeyEscape)` 要的是「键盘在这一扇窗上」）")
+	}
+}
+
+// TestTheMiniCurtainTakesTheKeyWindowWhenTheAppBecomesActive 盯那个**兜底**
+// 的一档：应用真的成了前台的时候，再抢一次 key 窗口。
+//
+// ⚠️ **它为什么存在**：`miniCurtainActivate` 那两步**都可能落空**——
+// `activateIgnoringOtherApps:` 是**异步**的（系统给别的应用一个「别抢回去」
+// 的机会），而 `makeKeyAndOrderFront:` 只在**应用已经是前台**的时候才把这一
+// 扇变成 key 窗口。⇒ **实测（2026-10-27 真机）四轮里有一轮**点封面之后应用
+// 压根没被激活（`active=false`），那一轮 Esc 就到不了这一扇窗。
+//
+// ⇒ 所以生产上有一档兜底：`mygo.App.OnDidBecomeActive` → `miniCurtainEnsureKey`
+// → 再抢一次 key 窗口（那时**应用已经是前台**，`makeKeyAndOrderFront:` 一定成）。
+//
+// ⚠️ **这一条断的就是那一档**：展开之后把「假窗记的 focus 次数」清零，模拟
+// 「展开那一下抢丢了」，再调 `miniCurtainEnsureKey` ⇒ 假窗**必须**被再抢一次。
+func TestTheMiniCurtainTakesTheKeyWindowWhenTheAppBecomesActive(t *testing.T) {
+	s, a := miniCurtainShell(t)
+	if err := enqueueTwo(a, t); err != nil {
+		t.Fatal(err)
+	}
+	a.Toggle()
+	a.PutLyricsFrom("", "[00:00.00]第一句\n[00:05.00]第二句\n", "")
+	tt := miniCurtainTester(s)
+	tt.Frame()
+
+	fake := newFakeMiniWindow()
+	s.miniWin = fake
+
+	clickCurtainCover(t, tt)
+	settleCurtain(t, tt, true)
+	if !s.miniCurtain.open {
+		t.Fatalf("起点就不对：卷帘没有展开，文字有 %q", tt.Texts())
+	}
+	if !fake.focused {
+		t.Fatal("展开之后这一扇窗没有成为 key 窗口")
+	}
+
+	// 🔴 **模拟「展开那一下抢丢了」**：把「抢过」这件事抹掉（展开那一下的
+	// `w.Focus()` 落空了），而**「我要键盘」那个凭据还在**。
+	fake.focused = false
+	fake.focusCount = 0
+
+	// 那一档兜底：应用真的成了前台 ⇒ 再抢一次 key 窗口。
+	s.miniCurtainEnsureKey()
+
+	if !fake.focused {
+		t.Error("应用成了前台之后，这一扇窗还是没有成为 key 窗口：" +
+			"Esc 到不了它（`miniCurtainEnsureKey` 没有再抢一次）")
+	}
+	if fake.focusCount != 1 {
+		t.Errorf("兜底那一档抢了 %d 次 key 窗口，want 1：多了会打断用户正在做的事",
+			fake.focusCount)
+	}
+}
+
+// TestTheMiniCurtainStopsTakingTheKeyWindowAfterItCollapses 盯「收起了就
+// 不再惦记抢键盘」。
+//
+// ⚠️ **为什么这一条要紧**：那一格（`Shell.miniCurtainWantsKey`）是展开那一下
+// 的凭据——留着它的话，应用**下一次**因为别的原因成了前台时，
+// `OnDidBecomeActive` 那一档会去抢这一扇的 key 窗口，而**那时候卷帘已经收
+// 着了**，用户根本没在用它。
+func TestTheMiniCurtainStopsTakingTheKeyWindowAfterItCollapses(t *testing.T) {
+	s, a := miniCurtainShell(t)
+	if err := enqueueTwo(a, t); err != nil {
+		t.Fatal(err)
+	}
+	a.Toggle()
+	a.PutLyricsFrom("", "[00:00.00]第一句\n[00:05.00]第二句\n", "")
+	tt := miniCurtainTester(s)
+	tt.Frame()
+
+	fake := newFakeMiniWindow()
+	s.miniWin = fake
+
+	clickCurtainCover(t, tt)
+	settleCurtain(t, tt, true)
+	if !s.miniCurtain.open {
+		t.Fatalf("起点就不对：卷帘没有展开，文字有 %q", tt.Texts())
+	}
+
+	// 收起
+	s.miniCurtainCollapse()
+	if s.miniCurtainWantsKey {
+		t.Fatal("收起之后那个「我要键盘」的凭据还留着")
+	}
+
+	// 那一档兜底再来一次：它**不该**再抢 key 窗口。
+	fake.focused = false
+	s.miniCurtainEnsureKey()
+	if fake.focused {
+		t.Error("卷帘已经收着了，应用再成前台时还是抢了这一扇的 key 窗口：" +
+			"那时候用户根本没在用它")
 	}
 }

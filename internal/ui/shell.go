@@ -697,6 +697,23 @@ type Shell struct {
 	// `WhenReady` 之前）它就是 nil，而那一档要的是「窗高这一层逻辑对不对」。
 	miniWin miniWindow
 
+	// miniCurtainWantsKey 是「卷帘展开着，而这一扇窗还没拿到键盘」那一档。
+	//
+	// ⚠️ **它为什么存在**：展开的那一下要把键盘抢到这一扇窗上（见
+	// `miniCurtainActivate`），而那一抢**两步**里每一步都可能落空：
+	// `activateIgnoringOtherApps:` 是**异步**的（系统给别的应用一个
+	// 「别抢回去」的机会），而 `makeKeyAndOrderFront:` 只在**应用已经是
+	// 前台**的时候才把这一扇变成 key 窗口。
+	//
+	// ⇒ 实测（2026-10-27 真机，评审场景）：**四轮里有一轮**点封面之后应用
+	// **压根没被激活**（`active=false`），于是那一轮 Esc 到不了这一扇窗。
+	// 而它**不是每次都失败**——所以「多试几次」不是办法。
+	//
+	// ⇒ 这一格是那个**兜底**：`mygo.App.OnDidBecomeActive` 那一档会看到
+	// 「应用真的成了前台，而这一扇还不是 key 窗口」⇒ **再抢一次 key 窗口**。
+	// 那时候应用已经是前台了，`makeKeyAndOrderFront:` 这一句**一定**成。
+	miniCurtainWantsKey bool
+
 	// miniLyric 是**卷帘里那个歌词区**自己那一摊（滚动位置、上一帧量到的两个
 	// 框、正在滚向哪一句）。
 	//

@@ -494,6 +494,22 @@ func (s *Shell) attachMiniWindowTo(w miniWindow) {
 		s.watchWindow(native)
 	}
 
+	// 🔴 **应用真的成了前台的时候，再抢一次 key 窗口**（票 #536，评审实测
+	// 抓到的那个 Esc 路径）。
+	//
+	// ⚠️ **为什么不能只靠展开那一下的两句**：`miniCurtainActivate` 里
+	// `activateIgnoringOtherApps:` 是**异步**的（系统给别的应用一个「别抢
+	// 回去」的机会），而 `makeKeyAndOrderFront:` 只在**应用已经是前台**的时候
+	// 才把这一扇变成 key 窗口。⇒ **实测四轮里有一轮**点封面之后应用压根没被
+	// 激活（`active=false`），那一轮 Esc 就到不了这一扇窗。
+	//
+	// ⇒ 这一档是那个**兜底**：应用真的成了前台（`DidBecomeActive`）时，
+	// **再抢一次**——那时候 `makeKeyAndOrderFront:` **一定**成。
+	//
+	// ⚠️ **它装在迷你这个外壳上**，不是主窗口那个：卷帘只在迷你窗里，而
+	// `Shell.miniCurtainWantsKey` 也是迷你这一份的状态。
+	mygo.App.OnDidBecomeActive(func() { s.miniCurtainEnsureKey() })
+
 	// ⚠️ **逐窗口的那些生命周期钩子装在这一层上**（`miniWindow` 那一层接口），
 	// 而不是直接装在 `*mygo.Window` 上——理由见 `attachMiniWindowLifecycle`
 	// 那一段。

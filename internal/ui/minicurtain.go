@@ -330,6 +330,14 @@ func (s *Shell) miniCurtainActivate() {
 	if mygo.App.IsReady() {
 		mygo.App.Focus()
 	}
+	// 🔴 **记下「我要这一扇拿键盘」**：上面那两句**都可能落空**（见
+	// `Shell.miniCurtainWantsKey` 那一条长注释）——`activateIgnoringOtherApps:`
+	// 是**异步**的，而 `makeKeyAndOrderFront:` 只在**应用已经是前台**的时候
+	// 才把这一扇变成 key 窗口。
+	//
+	// ⇒ 这一句是**兜底的凭据**：`OnDidBecomeActive` 那一档看到「应用真成了
+	// 前台」时会回来再抢一次 key 窗口（那时候这一句**一定**成）。
+	s.miniCurtainWantsKey = true
 	// ⚠️ **激活之后再抢 key 窗口**：`mygo.App.Focus()` 只把**应用**带到前台，
 	// 而前台应用的 key 窗口**不是这一扇**——于是键盘还是不在这一扇上。
 	// `w.Focus()` 走 `makeKeyAndOrderFront:`，它把这一扇变成 key 窗口（而
@@ -338,6 +346,30 @@ func (s *Shell) miniCurtainActivate() {
 	if w := s.miniWindow(); w != nil && !w.IsDestroyed() {
 		w.Focus()
 	}
+}
+
+// miniCurtainEnsureKey 在「应用真的成了前台」之后**再抢一次** key 窗口。
+//
+// ⚠️ **它是谁调用的**：`mygo.App.OnDidBecomeActive`（迷你那个外壳装的，
+// 见 `attachMiniWindow`）。那一档跑的时候**应用已经是前台了**——于是
+// `makeKeyAndOrderFront:` 这一句**一定**能把这一扇变成 key 窗口。
+//
+// ⚠️ **为什么还要这一档**：`miniCurtainActivate` 那两步**都可能落空**
+// （`activateIgnoringOtherApps:` 是异步的，可能被别人抢回去；系统也可能
+// 压根不激活）。⇒ 实测四轮里有一轮落空，而那一轮 Esc 到不了这一扇窗。
+//
+// ⚠️ **它只做「这一扇成为 key 窗口」**：**不再激活应用**（应用已经是前台
+// 了，而 `activateIgnoringOtherApps:` 在这一档是多余的，还会把别的应用
+// 从前台挤走）。
+func (s *Shell) miniCurtainEnsureKey() {
+	if !s.miniCurtainWantsKey {
+		return
+	}
+	w := s.miniWindow()
+	if w == nil || w.IsDestroyed() {
+		return
+	}
+	w.Focus()
 }
 
 // miniCurtainMaxHeight 算「这一扇窗现在最多能长出多高的卷帘」。
@@ -388,6 +420,11 @@ func (s *Shell) miniCurtainWorkAreaOf(w miniWindow) mygo.Rectangle {
 //
 // **幂等**（收着的时候再调一次什么也不做）。
 func (s *Shell) miniCurtainCollapse() {
+	// ⚠️ **收起了就不再惦记「抢键盘」**：那一格是展开那一下的凭据
+	// （`Shell.miniCurtainWantsKey`），而留着它的话，应用**下一次**因为别的
+	// 原因成了前台时，`OnDidBecomeActive` 那一档会去抢这一扇的 key 窗口——
+	// 而那时候卷帘已经收着了，用户根本没在用它。
+	s.miniCurtainWantsKey = false
 	if !s.miniCurtain.open && s.miniCurtain.height <= 0 {
 		// 已经收着了。⚠️ **但窗高还是得钉回 84**：上一次收起的动画中途窗被
 		// 拖走了、或者展开到一半窗被关掉，收起这一句没走完——窗就留在一个
@@ -411,6 +448,8 @@ func (s *Shell) miniCurtainCollapse() {
 // 而**中间那几帧窗比内容高**（透明的那一块在吃点击）。
 func (s *Shell) miniCurtainCollapseNow() {
 	s.miniCurtain.open = false
+	// 同 `miniCurtainCollapse`：收起了就不再惦记「抢键盘」。
+	s.miniCurtainWantsKey = false
 	s.miniCurtain.height = 0
 	s.miniCurtain.setHeight = miniHeight
 	// ⚠️ **动画通道也要归零**（`animZeroed`）：只把 `height` 归零的话，下一帧

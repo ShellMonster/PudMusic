@@ -4180,6 +4180,11 @@ var Items = []Item{
 			"TestTheMiniCurtainLeavesACollapsedHeightInTheWindowState",
 			// 展开的那一下把键盘抢到这一扇窗上（不然 Esc 到不了它）。
 			"TestTheMiniCurtainFocusesItsWindowWhenItOpens",
+			// 兜底：应用真的成了前台的时候，再抢一次 key 窗口
+			// （`activateIgnoringOtherApps:` 是异步的，第一下可能落空）。
+			"TestTheMiniCurtainTakesTheKeyWindowWhenTheAppBecomesActive",
+			// 收起了就不再惦记抢键盘（不然用户在做别的事时会被抢走）。
+			"TestTheMiniCurtainStopsTakingTheKeyWindowAfterItCollapses",
 		},
 	},
 	{
