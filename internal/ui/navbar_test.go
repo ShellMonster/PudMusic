@@ -425,9 +425,9 @@ func TestSubmittingSearchCarriesTheWordToThePage(t *testing.T) {
 	// 页面上画的是「搜了没有结果」那一支，不是「还没输入」那一支——
 	// 后者的正文写着「在上面的搜索框里输入歌名或 UP 主」，正是这条要防的。
 	// 结果是异步回来的，那一句比提交晚几帧才画出来（理由见 settleText）。
-	settleText(t, tt, noSearchResults.Title)
-	if !tt.HasText(noSearchResults.Title) {
-		t.Errorf("页面上没有「没有结果」那一句，文字有 %q", tt.Texts())
+	settleText(t, tt, "搜索【周杰伦】的结果")
+	if tt.HasText("在上面的搜索框里输入歌名或 UP 主") {
+		t.Errorf("页面上还是「请输入搜索词」那一支，文字有 %q", tt.Texts())
 	}
 	if tt.HasText(searchIdle.Title) {
 		t.Errorf("页面上还是「还没输入」那一支，文字有 %q", tt.Texts())

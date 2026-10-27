@@ -185,7 +185,7 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 		// 紧接着就是 `<ImportExport />`（`system-settings.tsx:388-402`）。两边各自
 		// 加了一段，谁在前谁在后没人对过，这里按 Biu 定下来。
 	})
-	s.settingsUpdate(c, s.app.UpdateSnapshot())
+	s.settingsUpdate(c, s.app.UpdateSnapshot(), ro)
 
 	// 「配置」段（导出 / 导入 / 从 Biu 导入），照 Biu 的位置。
 	s.settingsConfig(c)

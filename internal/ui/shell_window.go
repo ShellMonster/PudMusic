@@ -127,6 +127,11 @@ func (s *Shell) closePerWindow() {
 		s.announceRemove = nil
 	}
 
+	// 把这一扇窗从「活跃态」那本账上摘掉（理由见 notification.go 的
+	// `releaseNotification`）：不摘的话那本账会记着一扇已经没了的窗，而它
+	// 「有焦点」的话——再也弹不出系统通知。
+	s.releaseNotification()
+
 	// 封面缓存：先摘掉这一扇窗的唤醒登记（借来的那一份活得比这一扇窗久），
 	// 再放开自己那一份使用权。
 	//
@@ -273,6 +278,10 @@ func Run(a *app.App, sess *media.Session) error {
 
 	s := New(a)
 	s.media = sess
+	// 主窗口那个外壳登记一下（见 notification.go 的 `mainShellRef`）：系统通知
+	// 的那一句提示得由它弹——迷你播放器画的是「正在放什么」，而通知指向的是
+	// 主窗里的下载记录页。
+	setMainShell(s)
 	// 真的那一份全局快捷键**在这里**装上，而不是在 `New` 里：`mygo.GlobalShortcut`
 	// 的两个方法都要走事件循环，而 `New` 的调用方还有一整套测试（无头 Tester 没有
 	// 事件循环，`Register` 在那儿是直接 panic 的）。`Run` 是唯一一个真的有事件循环

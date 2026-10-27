@@ -86,8 +86,8 @@ const (
 	// 有主角；而被切的原因是**底栏高度没跟着它重算**（当时是 80）。票 #169 把
 	// 底栏按上游重排（进度 20 + 缝 8 + 播放键 + 底边距 16），48 完全
 	// 放得下。**改底栏的留白时这个高度要一起重算**，别再让它去迁就一个旧框。
-	fullPlayGlyph = 20
-	fullPlayHit   = 44
+	fullPlayGlyph = 26
+	fullPlayHit   = 56
 
 	// 顶栏：上游 `px-6 py-4`（`index.tsx:291`）——左右 24、上下 16。
 	//
@@ -983,8 +983,16 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 		x = area.X + area.W - fullStagePadX - w
 	}
 	box := shadow.FullCover(ui.Box(c).Key("full-cover").
-		Absolute().Left(x).Top(area.Y+(area.H-h)/2).Size(w, h).Radius(c.Theme().Radius).
-		ContextMenu(s.coverMenu))
+		Absolute().Left(x).Top(area.Y+(area.H-h)/2).Size(w, h).Radius(c.Theme().Radius)).
+		// 🔴 **可聚焦**：没有它，键盘（菜单键 / Shift+F10）**够不着**这一份
+		// 菜单——框架的 `menuKey` 找的是「焦点链上最里层那个带菜单的元素」
+		// （`mygo/ui/menu.go` 的 `menuTarget`），而焦点链上得先有这一层。
+		//
+		// ⚠️ **名字不能叫「当前封面」**：里面那张图已经有一个了
+		// （`imgcache.View…(...).Label("当前封面")`），读屏会把两个都念一遍。
+		Focusable().
+		Label(copyCoverActionsLabel).
+		ContextMenu(func(m *ui.Menu) { s.viewCopyMenu(st, m) })
 	if hidden {
 		box = box.Cursor(ui.CursorNone)
 	}

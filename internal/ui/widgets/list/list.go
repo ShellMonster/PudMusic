@@ -127,6 +127,9 @@ type Music struct {
 	// 时那一格空着（比如收藏夹里一条没给 fav_time 的音轨）。
 	PubTime time.Time
 
+	// Progress 是「看到哪儿」，只有最近播放填；大于 0 且有时长时，标题下面画一条细进度条。
+	Progress time.Duration
+
 	// Item 是播放和右键菜单真正用的那一项。B 站的歌以后由接口填，
 	// 现在先有本地文件（app.LocalItem）。
 	Item app.Item
@@ -174,6 +177,9 @@ func (c Columns) pubTimeTitle() string {
 // 会因为「同一个 ListState 被两个 List 显示」而 panic，`ui/list.go` 的
 // buildList）。
 type List struct {
+	// hl 是要在歌名里标出来的搜索词（空 = 不标）。见 highlight.go。
+	hl string
+
 	songs []Music
 	state ui.ListState
 

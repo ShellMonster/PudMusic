@@ -199,6 +199,36 @@ type updater struct {
 	tone   notice.Tone
 	// cancel 是这次下载的取消函数。close 调它，用户在下载中途退出应用靠的就是它。
 	cancel context.CancelFunc
+	// notifiedVersion 是「已经为哪个版本发过系统通知了」。
+	//
+	// 🔴 **它是票面第 6 条「不重复刷通知」的另一半**（票 #559）：后台检查**每小时**
+	// 一次，而**同一个新版本会被查到很多次**（用户不装它就一直查得到）——所以
+	// 不记的话，用户每小时都会收到一条一模一样的「有更新了」。
+	//
+	// ⚠️ **稳定 ID 只决定「通知中心里那一条被替换」，不决定「不再发」**：框架那
+	// 一次 `Show` 是真的会再弹一次（macOS 上同 ID 的一条再 Show 是重新弹）。
+	// 所以去重得自己记一份「这个版本已经说过了」。
+	//
+	// 🔴 **而这一份是「**这一轮**说过了」，不是「这个版本说过了」**（票 #559，
+	// 2026-10-27 的评审）：**记下它的那一层还不知道用户在不在线**——用户可能
+	// 正盯着应用看更新弹窗，而系统通知是给「用户不在」时用的（那一档是界面层
+	// 判的，见 `internal/ui/notification.go`）。于是「用户在前台时那一次」会
+	// 把这个版本**永久**记成「说过了」——而它**根本没说过**。用户随后离开，
+	// 下一次后台检查就被这一份挡住，那一条通知**永远发不出去**。
+	//
+	// ⚠️ **所以它是可以被退回去的**：界面层判完「用户在里面」就调
+	// `ReleaseUpdateNotification` 把它退回来（见下面的 `releaseUpdateNotification`），
+	// 于是下一次检查还会再问一次——而那时用户也许已经走了。
+	//
+	// ⚠️ **它跟着 `u.mu`**：它是更新器的状态，而 `check` 在后台 goroutine 上跑。
+	//
+	// ⚠️ **它不是「跨启动」的记忆**：应用重启之后后台检查又会查一遍那个版本，
+	// 而那一次**该发**（用户重启应用说明他可能没看见上一次）。要跨启动记住得
+	// 落盘，而落盘那份 `app-update.json` 是更新器的「上次查到什么」——它已经
+	// 记着 `KnownVersion` 了，而那一份的语义是「界面上该显示哪个版本」，不是
+	// 「通知发过没有」。两件事混在一份文件里会互相干扰（用户手动清掉了更新
+	// 之后又该弹一次），所以这里只在本次运行里记。
+	notifiedVersion string
 	// checkCancel 是**正在查**那一次的取消函数。
 	//
 	// 和 `cancel` 分开是因为它们是两次独立的动作，而 `close` 要把两次都收掉：
@@ -536,11 +566,41 @@ func (u *updater) check(user bool) {
 	var msg string
 	var tone notice.Tone
 	var phase UpdatePhase
+	// found 是「这一趟查到了新版本」。
+	//
+	// ⚠️ **它不能靠 `phase` 判**：`phase` 那一档只在「查失败」和「查到了」两支
+	// 里被赋值，而「查到了」那一支**并不写它**（相位是直接写进 `u.state.phase`
+	// 的）。所以这里自己记一份。
+	var found bool
 	// prefs 是**出了 u.mu 之后**才写盘的那一份（见下面 ⚠️）。
 	var prefs *updatePrefsFile
 	u.mu.Lock()
 	switch {
 	case u.closed:
+		// ⚠️ **相位也得退回去**，不能就这么留着。
+		//
+		// 这一支是「网络回来了，但应用已经退了」：上面那个 `aborted` 分支
+		// （ctx 被取消）已经把相位退回去了，而这一支**没有**——可这一支
+		// 说的是同一件事（「没有什么会来了」），而那三个字「正在检查…」是
+		// 「等一会儿就好」⇒ 界面上那个按钮会永远转下去。
+		//
+		// ⚠️ **为什么会落到这一支**：窗口在 `aborted := ctx.Err() != nil`
+		// 与下面那次 `u.mu.Lock()` 之间——
+		//
+		//	这一趟 check                    应用退出（Close → upd.close）
+		//	─────────────────────────        ────────────────────────────────
+		//	Check 回来了（ctx 还没取消）
+		//	aborted = false              ← 这一刻 ctx 还没被取消
+		//	...                            u.closed = true；checkCancel() ⇒ ctx 取消
+		//	u.mu.Lock()
+		//	switch { case u.closed: return }   ← 撞上这里 ⇒ 相位留在 Checking
+		//
+		// 而 `App.Close` 的收尾**很长**（存播放位置、结束播放记录、关播放器、
+		// 关弹幕、收下载…），`upd.close()` 还**排在最后**——所以那个窗口
+		// 有多长，取决于那段时间机器有多忙。
+		if u.state.phase == UpdateChecking {
+			u.state.phase = UpdateIdle
+		}
 		u.mu.Unlock()
 		return
 	case err != nil:
@@ -565,6 +625,7 @@ func (u *updater) check(user bool) {
 		u.state.phase = UpdateAvailable
 		u.state.latest, u.state.notes, u.state.released = rel.Version, rel.Notes, rel.Date
 		u.state.fellBack = false
+		found = true
 		// 记下「上次查到的版本」：离线启动的那一次也能在设置页看到有新版本，
 		// 不用干等网络。
 		prefs = &updatePrefsFile{LastCheck: now, KnownVersion: rel.Version}
@@ -588,7 +649,101 @@ func (u *updater) check(user bool) {
 	if prefs != nil {
 		u.prefs.put(*prefs)
 	}
+	// 🔴 **系统通知**（票 #559）：查到了新版本，而用户多半不在应用里——
+	// 而「有更新了」这一句界面上的提示，他回到应用才看得见。
+	//
+	// ⚠️ **只有后台查到的才发**：用户自己按「检查更新」的话，他正盯着设置页
+	// 看着那句话，而系统通知是给「用户不在」时用的（那是下载完成那一档的
+	// 规矩，这里是同一档）。
+	//
+	// ⚠️ **它在后台那条线上被调**（检查更新的 goroutine），而界面层那一头要读
+	// 窗口的状态——那一头是带锁的（见 `internal/ui/notification.go`），所以
+	// 跨 goroutine 读它不违反铁律一（铁律一管的是**界面状态**，不是这个）。
+	//
+	// 🔴 **而「用户要不要这条通知」是一格设置**（票 #559，票面第 3 条
+	// 「更新提醒可复用同一基础设施但另开开关」）：
+	//
+	// ⚠️ **那一格在设置文件里，而这一层拿得到它**（`SettingsSnapshot` 是线程
+	// 安全的，见 `settings_mount.go`）。而**不在这里判的话就没有别的地方判**
+	// ——界面层那一头只管「用户在不在这几扇窗里」，它不认识设置。
+	//
+	// ⚠️ **「用户自己按的」那一档仍然不发**：他正盯着设置页看着那句话，而
+	// 系统通知是给「用户不在」时用的（那是下载完成那一档的规矩，这里是同一档）。
+	if !user && found && u.updateNotificationEnabled() && u.claimUpdateNotification(rel.Version) {
+		u.notifyUpdateAvailable(rel.Version)
+	}
 	u.wake()
+}
+
+// claimUpdateNotification 记下「这个版本已经发过通知了」，并报「该不该发」。
+//
+// 🔴 **它是票面第 6 条「不重复刷通知」的另一半**（票 #559）：后台检查**每小时**
+// 一次，而**同一个新版本会被查到很多次**（用户一直不装它就一直查得到）——不记
+// 的话，用户每小时都会收到一条一模一样的「有更新了」。
+//
+// ⚠️ **而稳定 ID 不代替它**：框架那一次 `Show` 是真的会再弹一次（同一个 ID 再
+// `Show` 是**重新弹**，不是「什么都不做」），而 ID 只决定通知中心里那一条被
+// **替换**。所以「不再发」得自己记一份。
+//
+// ⚠️ **它只认版本**：换了版本就该再发一次（用户要看的正是「哪一个版本」）。
+//
+// 🔴 **而它是可以被退回去的**（票 #559，2026-10-27 的评审）：**记下它的那一层
+// 还不知道用户在不在线**——用户可能正盯着应用，而系统通知是给「用户不在」时
+// 用的（那一档是界面层判的，见 `internal/ui/notification.go`）。所以界面层判完
+// 「用户在里面」就调 `ReleaseUpdateNotification` 把这一份退回来——于是下一次
+// 检查还会再问一次，而那时用户也许已经走了。
+//
+// ⚠️ **不退回的话就是这一条 bug**：用户在前台时那一次把版本**永久**记成
+// 「说过了」（而它**根本没说过**），用户随后离开，下一次后台检查被这一份挡
+// 住，那一条通知**永远发不出去**——而界面上看不出任何异样。
+//
+// ⚠️ **它跟着 `u.mu`**：检查在后台 goroutine 上跑，而这一份是更新器的状态。
+func (u *updater) claimUpdateNotification(version string) bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if version == "" || u.notifiedVersion == version {
+		return false
+	}
+	u.notifiedVersion = version
+	return true
+}
+
+// releaseUpdateNotification 把「这个版本已经说过了」那一份退回去。
+//
+// 🔴 **它是 `claimUpdateNotification` 的另一半**（票 #559，2026-10-27 的评审）：
+// **「说过了」这句话只有在真的说过之后才成立**。而「用户在不在线」只有界面层
+// 答得了（那是窗口的状态），所以**由界面层来退**——它判完「用户在里面」就调
+// 这一句。
+//
+// ⚠️ **它只退「同一个版本」**：更新器已经记下别的版本了的话，退这一次是退不
+// 动的（那一份说的是另一个版本，不该被这一次弄丢）。
+func (u *updater) releaseUpdateNotification(version string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if version != "" && u.notifiedVersion == version {
+		u.notifiedVersion = ""
+	}
+}
+
+// ReleaseUpdateNotification 把「这个版本已经提醒过了」那一份退回去。
+//
+// 🔴 **它是票 #559 那一段的另一半**：应用层记下「这个版本说过了」，而**界面层
+// 判完发现用户正盯着应用**（所以那条系统通知没发出去）就调这一句把它退回去。
+//
+// ⚠️ **不退回的话用户就永远收不到那一条通知**：他在前台时那一次后台检查把版本
+// 记死了，而它**根本没说过**——他随后离开，下一次后台检查被挡住，那一条再也
+// 发不出去（而界面上看不出任何异样）。
+//
+// ⚠️ **它不在 `a.mu` 底下调更新器**：更新器有自己的锁（`u.mu`），而这一层拿着
+// `a.mu` 去拿另一个锁就是当场死锁。
+func (a *App) ReleaseUpdateNotification(version string) {
+	a.mu.Lock()
+	u := a.updates
+	a.mu.Unlock()
+	if u == nil {
+		return
+	}
+	u.releaseUpdateNotification(version)
 }
 
 // install 下载并装好那一个版本。
@@ -681,6 +836,60 @@ func (u *updater) wake() {
 	if fn != nil {
 		fn()
 	}
+}
+
+// notifyUpdateAvailable 把「查到了新版本」告诉界面层。
+//
+// ⚠️ **不在 `u.mu` 底下调界面层那一头**：那一头会读窗口状态（它自己带锁），
+// 而这一层拿着 `u.mu` 去调另一个包的代码就是当场死锁——死锁在这里的表现
+// 是「整个应用冻住」。
+func (u *updater) notifyUpdateAvailable(version string) {
+	a := u.app
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	notifier := a.updateNotifier
+	a.mu.Unlock()
+	if notifier != nil {
+		notifier(version)
+	}
+}
+
+// updateNotificationEnabled 报「用户要不要「有更新了」这一条系统通知」。
+//
+// ⚠️ **那一格在设置文件里**（`Settings.UpdateNotification`，见 `settings.go`），
+// 而这里读的是**当前那一份**（`SettingsSnapshot` 拿的是 store 的锁底下那份
+// 拷贝，所以跨 goroutine 读它是安全的——检查更新在后台 goroutine 上）。
+//
+// ⚠️ **没挂设置时按「开」算**：没挂设置那份 store 只在拿不到设置文件路径时
+// 才会没有，而那时候用户连设置页都看不了——按「开」算的话通知照发（而那一档
+// 本来也会降级成应用内提示），按「关」算的话用户就**永远收不到**更新提醒了。
+func (a *App) updateNotificationEnabled() bool {
+	return a.SettingsSnapshot().UpdateNotificationEnabled()
+}
+
+// updateNotificationEnabled 是更新器那一头用的那一版。
+//
+// ⚠️ **它和 `App` 那一版是同一件事**（`App` 那一版是给别处用的入口），只是
+// 这一份是从 `updater` 上调的，而 `updater` 手里有 `u.app`。
+func (u *updater) updateNotificationEnabled() bool {
+	a := u.app
+	if a == nil {
+		return true
+	}
+	return a.updateNotificationEnabled()
+}
+
+// SetUpdateNotifier 装上「查到了新版本」的那只手，由界面层装一次。
+//
+// ⚠️ **没装的时候那件事也不能丢**：界面层没装（无头测试、或者这一轮界面层
+// 没起来）时，更新器留给界面的那一句提示照旧弹（走的是 `notice` 那条线），
+// 而它不依赖系统通知。
+func (a *App) SetUpdateNotifier(fn func(version string)) {
+	a.mu.Lock()
+	a.updateNotifier = fn
+	a.mu.Unlock()
 }
 
 // errUpdateUnavailable 是「这个应用不能给自己更新」时给界面的一句话。

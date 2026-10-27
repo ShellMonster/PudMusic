@@ -314,8 +314,8 @@ func (l *List) viewCard(r ui.ListRow) {
 		// 现场版在副标题前加一枚「现场」小标签。
 		sh := ShowOf(m)
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).Children(func() {
-			ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
-				TextColor(titleColor).MaxLines(listTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
+			titleText(c, sh.Title, l.hl, titleColor).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
+				MaxLines(listTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
 			if sh.Owner != "" || sh.Live {
 				ownerLine(c, ownerRow{
 					shown: sh,
@@ -331,6 +331,7 @@ func (l *List) viewCard(r ui.ListRow) {
 					acts:  l.acts,
 				})
 			}
+			progressBar(c, m)
 		})
 
 		// ④ 播放量 / ⑤ 投稿时间：这一页有才画（见 `Columns`）。两列都
@@ -409,8 +410,8 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 
 		sh := ShowOf(m)
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px2).Children(func() {
-			ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Compact).
-				TextColor(titleColor).MaxLines(compactTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
+			titleText(c, sh.Title, l.hl, titleColor).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Compact).
+				MaxLines(compactTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
 			if sh.Owner != "" || sh.Live {
 				ownerLine(c, ownerRow{
 					shown: sh,
