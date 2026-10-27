@@ -20,6 +20,7 @@
 package ui
 
 import (
+	"github.com/ShellMonster/Biu_Go/internal/app"
 	"strconv"
 	"time"
 
@@ -324,32 +325,68 @@ func (h *homePage) viewNewRow(c *ui.Context, w, ww float32) {
 }
 
 func (h *homePage) viewMiniBoards(c *ui.Context, w float32) {
-	if len(h.miniTop[0]) == 0 && len(h.miniTop[1]) == 0 {
+	newTop := h.newGrid.songs
+	if len(newTop) > homeMiniRows {
+		newTop = newTop[:homeMiniRows]
+	}
+	if len(h.miniTop[0]) == 0 && len(h.miniTop[1]) == 0 && len(newTop) == 0 {
 		return
 	}
-	cw := cellW(w, 2, homeOverviewCellGap*2)
+	cw := (w - 2*32) / 3
 	ui.Column(c).Key("home:boards").FillWidth().Gap(space.Px12).Children(func() {
 		h.sectionHead(c, "home:boards:head", "排行榜", "", nil)
-		ui.Row(c).Key("home:boards:row").FillWidth().Gap(space.Px32).Children(func() {
-			for i, tab := range [2]int{homeHotTab, homeOriginalTab} {
-				h.viewMiniBoard(c, i, tab, cw)
-			}
+		ui.Row(c).Key("home:boards:row").FillWidth().Gap(space.Px32).AlignItems(ui.Start).Children(func() {
+			h.viewMiniBoard(c, homeTabs[homeHotTab], h.miniTop[0], homeHotTab, cw)
+			h.viewMiniBoard(c, homeTabs[homeOriginalTab], h.miniTop[1], homeOriginalTab, cw)
+			h.viewMiniBoard(c, "新歌榜", newTop, homePopTab, cw)
 		})
 	})
 }
 
-func (h *homePage) viewMiniBoard(c *ui.Context, idx, tab int, w float32) {
+// playAllOf 把 songs 整排放进播放：第一首立刻播，其余排进队尾。
+func (h *homePage) playAllOf(songs []list.Music) {
+	if len(songs) == 0 {
+		return
+	}
+	h.playNow(songs[0])
+	if h.acts.Add == nil || len(songs) < 2 {
+		return
+	}
+	its := make([]app.Item, 0, len(songs)-1)
+	for _, m := range songs[1:] {
+		its = append(its, m.Item)
+	}
+	h.acts.Add(its)
+}
+
+func (h *homePage) viewMiniBoard(c *ui.Context, name string, songs []list.Music, tab int, w float32) {
 	t := c.Theme()
-	songs := h.miniTop[idx]
-	ui.Column(c).Key("home:board:" + homeTabs[tab]).Width(w).Gap(space.Px4).Children(func() {
-		h.sectionHead(c, "home:board:head:"+homeTabs[tab], homeTabs[tab], "查看全部", func() { h.openTab(tab) })
+	ui.Column(c).Key("home:board:" + name).Width(w).Gap(space.Px4).Children(func() {
+		ui.Row(c).Key("home:board:head:" + name).FillWidth().AlignItems(ui.Center).Gap(space.Px12).Children(func() {
+			ui.Text(c, name).FontSize(scale.Font(c, scale.Size20)).Bold().TextColor(t.Text).Grow(1)
+			if len(songs) > 0 {
+				pa := ui.Row(c).Key("home:board:all:"+name).AlignItems(ui.Center).Gap(space.Px4).
+					Padding(space.Px4, space.Px10).Radius(14).Background(t.Text.Alpha(0.06)).
+					Focusable().Role(ui.RoleButton).Label("播放全部 " + name).OnClick(func() { h.playAllOf(songs) })
+				if pa.Hovered() {
+					pa = pa.Background(t.Text.Alpha(0.12))
+				}
+				pa.Children(func() {
+					ui.Icon(c, icon(iconPlayFill)).FontSize(12).TextColor(t.Text)
+					ui.Text(c, "播放全部").FontSize(scale.Font(c, scale.Size12)).TextColor(t.Text)
+				})
+			}
+			if flatLink(c, "全部").Clicked() {
+				h.openTab(tab)
+			}
+		})
 		if len(songs) == 0 {
 			ui.Text(c, "榜单还在路上").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
 			return
 		}
 		for i, m := range songs {
 			sh := list.ShowOf(m)
-			row := ui.Row(c).Key("home:board:row:"+strconv.Itoa(tab)+":"+m.ID).FillWidth().Height(homeMiniRowH).
+			row := ui.Row(c).Key("home:board:row:"+name+":"+m.ID).FillWidth().Height(homeMiniRowH).
 				AlignItems(ui.Center).Gap(space.Px12).Padding(space.None, space.Px8).Radius(t.Radius).
 				Focusable().Role(ui.RoleButton).Label(sh.Title).OnClick(func() { h.playNow(m) })
 			if row.Hovered() {
