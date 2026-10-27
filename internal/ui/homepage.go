@@ -53,7 +53,10 @@
 package ui
 
 import (
+	"github.com/ShellMonster/Biu_Go/internal/app"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
@@ -75,14 +78,26 @@ const homePath = "/"
 // 少写一个 Tab 而数组还按三个走，缺的那一屏画的是 nil 指针。Biu 那三个 Tab 是
 // 写死的（`index.tsx` 的 `RecommendTabKey` 只有 music / guichu / pop），这里
 // 跟着写死。
-const homeTabCount = 3
+const homeTabCount = 6
 
 // homeTabs 是那三个 Tab 的名字，从左到右。
 //
 // 顺序和字面都照 Biu 的 `src/pages/music-recommend/index.tsx:280-282`
 // （`<Tab key="music" title="音乐" />`、`guichu` / `鬼畜`、`pop` / `流行`）。
 // 顺序换了，用户每次开应用先看到的那一屏就跟着变了，而那是 Biu 的默认 Tab。
-var homeTabs = [homeTabCount]string{"音乐", "鬼畜", "流行"}
+//
+// 后三个是音乐发现那一组：热榜 / 原创榜（B 站音乐站每期的榜）和最近播放（登录账号
+// 的观看历史）。**「为你推荐」就是原来的「音乐」那一档**：它拉的是音乐分区的个性化
+// 推荐（B 站按登录账号的口味排），本来就是只含音乐的那一份；换名字是因为它的内容
+// 是「给这个账号的」，而不是「所有人看到的音乐」。⚠️ 没有用 B 站首页的「每日推荐」：
+// 那一份混着大量非音乐视频。
+var homeTabs = [homeTabCount]string{"为你推荐", "鬼畜", "流行", "热榜", "原创榜", "最近播放"}
+
+// homeTabNouns 是各档在「正在加载 X」「重试加载 X」「没拉出来的是：X」里的名词。
+//
+// 和 Tab 上的字分开：「为你推荐」那一档的这几句一直说「音乐推荐」（它拉的是音乐分区
+// 推荐），而「热榜推荐」「最近播放推荐」读不通，榜和历史直接说它们自己。
+var homeTabNouns = [homeTabCount]string{"音乐推荐", "鬼畜推荐", "流行推荐", "热榜", "原创榜", "最近播放"}
 
 // homePopTab 是「流行」那一档的下标，新歌速递只画在这里。
 //
@@ -91,6 +106,16 @@ var homeTabs = [homeTabCount]string{"音乐", "鬼畜", "流行"}
 // 「音乐」和「鬼畜」走的是分区推荐（`getRegionFeedRcmd`），榜上没有的东西它
 // 没有。
 const homePopTab = 2
+
+// homeRecentTab 是「最近播放」那一档的下标。它登录后才有内容，而且历史接口不给
+// 播放量，所以那一列不画。
+const homeRecentTab = 5
+
+// homeHotTab / homeOriginalTab 是两张榜的下标：序号那一列在这两档上是名次。
+const (
+	homeHotTab      = 3
+	homeOriginalTab = 4
+)
 
 // homeSongs 是首页这一屏要画的两摊歌。
 //
@@ -169,6 +194,20 @@ type homePage struct {
 	// 荐」那一格（票 #368 明令不许出现的）。
 	want      int
 	wantReady bool
+
+	// overview 为真时首页画「发现」总览（homepage_overview.go），不画 Tab 列表。
+	overview bool
+	// ovScroll / ovWidth 是总览的滚动位置和上一帧量到的内容宽。
+	ovScroll ui.ScrollState
+	// heroIdx / heroAt 是轮播横幅当前停在第几张、什么时候换上的。
+	heroIdx int
+	// newOff 是新歌速递那一排从第几首起摆（点左右箭头翻页）。
+	newOff  int
+	heroAt  time.Time
+	ovWidth float32
+	// miniTop 是两张榜（热榜、原创榜）的前几名；miniLoaded 记着取它时榜上有几首。
+	miniTop    [2][]list.Music
+	miniLoaded [2]int
 }
 
 // newHomePage 建首页这一摊状态。
@@ -180,18 +219,20 @@ type homePage struct {
 // wake 是「要一帧新画面」的动作：新歌速递那一块自己包了一层 recover，崩了靠它
 // 要下一帧（那一帧只建了一半，画出来是半张，见 guard 包的注释）。
 func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePage {
-	h := &homePage{acts: acts, newGrid: newNewMusic(cache, acts, wake)}
+	h := &homePage{acts: acts, newGrid: newNewMusic(cache, acts, wake), overview: homeStartsOnOverview}
 	// 新歌速递的「重试」回到这一页：那一块自己管不着取数（它只管画），
 	// 而重试要能重新拉那一摊。
 	h.newGrid.SetRetry(func() { h.retryNew() })
 	for i := range h.lists {
 		l := list.NewPaged(cache, acts, h.tabFetcher(i))
-		// 播放量那一列：首页三个 Tab 的接口都带着它（`RecommendItem.View`）。
+		// 播放量那一列：首页六个 Tab 里，除了「最近播放」（历史接口不带播放量）
+		// 的五个都带着它（`RecommendItem.View`）。
 		//
 		// ⚠️ **投稿时间不画**：上游首页自己就是 `hidePubTime`
 		// （`pages/music-recommend/list.tsx:49` 与 `:60`），而它那一层的
 		// `RecommendItem` 也没把 `pubdate` 带上来——照它。
-		l.SetColumns(list.Columns{PlayCount: true})
+		l.SetColumns(list.Columns{PlayCount: i != homeRecentTab, Rank: i == homeHotTab || i == homeOriginalTab,
+			PubTime: i == homeRecentTab, PubTimeTitle: "观看时间"})
 		// 「没有更多了」那一行（票 #370 的验收第 2 条）：别的页到底了就是到底了，
 		// 而这一屏要说得清——不然用户只看到列表停在半截。
 		l.SetEndView(homeEndRow)
@@ -228,6 +269,11 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 		Draw:   h.viewPopLead,
 		Label:  "新歌速递",
 		Height: h.newGrid.Height,
+	})
+	h.lists[homeRecentTab].SetLead(&list.Lead{
+		Draw:   h.viewRecentLead,
+		Label:  "继续播放",
+		Height: func() float32 { return homeRecentLeadH },
 	})
 	return h
 }
@@ -326,6 +372,12 @@ func (s *Shell) syncHome(c *ui.Context) {
 	// 画面上留着上一档）——但**它得有人收结果、有人起第一拉**，所以同步的是
 	// 它，而画出来的那一档由它自己的 `View` 同步（见 `PagedList.view`）。
 	h.lists[h.tab].Sync(c)
+	if h.overview {
+		// 总览要用两张榜的前几名：没切到那两档也得有人替它们起第一拉。
+		h.lists[homeHotTab].Sync(c)
+		h.lists[homeOriginalTab].Sync(c)
+		h.refreshMini()
+	}
 
 	// 算「要换到哪一档」和「它到了没有」。
 	//
@@ -365,6 +417,13 @@ func (s *Shell) syncHome(c *ui.Context) {
 // `syncHome` 那一层了（票 #161）——满屏开着的时候这一页不画，而那三样是「每帧
 // 都要跑」的副作用，停在画的那一半里就等于停更。
 func (h *homePage) view(c *ui.Context, s *Shell) {
+	if h.overview {
+		ui.Column(c).Key("page:"+homePath).Grow(1).Padding(space.None, pagePadX).Gap(space.Px12).
+			AlignItems(ui.Stretch).Children(func() {
+			h.viewOverview(c, s)
+		})
+		return
+	}
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
 	ui.Column(c).Key("page:"+homePath).Grow(1).Padding(space.None, pagePadX).Gap(space.Px12).
 		AlignItems(ui.Stretch).Children(func() {
@@ -399,6 +458,22 @@ func (h *homePage) viewPopLead(c *ui.Context) {
 			h.newGrid.View(c)
 			h.lists[homePopTab].Header(c, "home:header:"+strconv.Itoa(homePopTab))
 		})
+}
+
+// withPopTop 画「顶图 + 下面那一块状态」。「流行」那一档的两样一起放进一个滚动
+// 容器：新歌速递是两行大封面，窗口不高时状态那一块会被挤到窗外，滚动容器让它够得着。
+// 别的档没有顶图，直接画状态。
+func (h *homePage) withPopTop(c *ui.Context, tab int, body func()) {
+	if tab != homePopTab {
+		body()
+		return
+	}
+	ui.Scroll(c).Key("home:pop:state").Grow(1).Children(func() {
+		ui.Column(c).FillWidth().Gap(space.Px12).Children(func() {
+			h.viewPopTop(c, tab)
+			body()
+		})
+	})
 }
 
 // viewPopTop 画新歌速递那一块——**不在列表里**的那一次。
@@ -440,6 +515,10 @@ func (h *homePage) viewPopTop(c *ui.Context, tab int) {
 func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 	pg := h.lists[tab].Paged()
 	switch {
+	case tab == homeRecentTab && h.loads.mounted != nil && h.loads.mounted() && selfMidOf(h.loads) == 0:
+		// ⚠️ **先于下面几支**：没登录时那一档一个请求都没发，「一首都没有」说成
+		// 「暂无内容」会让用户以为 B 站没记着他听过什么。
+		s.viewNeedsLogin(c, "home:recent:login", recentNotLoggedIn)
 	case pg.Err != nil && pg.Loaded == 0:
 		// ⚠️ `pg.Loaded == 0` 那一半：手上已经有歌的时候不画失败（那会把
 		// 用户正在看的一屏换成一句错）。第一页失败之后「已经有歌」是不可能的，
@@ -451,10 +530,10 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// ⚠️ **顶图先画**：这一档没有列表可挂（列表一根歌都没有），而新歌速递
 		// 那一块是**这一屏的内容**（上游 `index.tsx:295`），它不因为下面那一档
 		// 没拉到就消失。
-		h.viewPopTop(c, tab)
-
-		s.viewLoadError(c, "home:fail:"+homeTabs[tab], homeTabs[tab]+"推荐", "重试加载"+homeTabs[tab]+"推荐",
-			pg.Err, func() { h.retryTab(tab) })
+		h.withPopTop(c, tab, func() {
+			s.viewLoadError(c, "home:fail:"+homeTabs[tab], homeTabNouns[tab], "重试加载"+homeTabNouns[tab],
+				pg.Err, func() { h.retryTab(tab) })
+		})
 	case pg.Loading && pg.Loaded == 0:
 		// ⚠️ 走**共用**的那一格（`drawLoading`）：上游首页那一屏也是
 		// `h-[40vh]` 那一格里的转圈（`src/pages/music-recommend/index.tsx:319`），
@@ -465,8 +544,7 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// 「正在加载」的时候，屏幕上确实一首歌都没有。
 		//
 		// ⚠️ **顶图先画**（理由同上面那一支）。
-		h.viewPopTop(c, tab)
-		drawLoading(c, "home:loading", "正在加载"+homeTabs[tab]+"推荐")
+		h.withPopTop(c, tab, func() { drawLoading(c, "home:loading", "正在加载"+homeTabNouns[tab]) })
 	case pg.Loaded == 0:
 		// ⚠️ 走 `viewEmpty`（`routes` 表里 `/` 那一条，出处和其余 13 条写在
 		// 一起），不是让 `list.List` 说它自己那句「这里还没有歌」：那句只说
@@ -484,8 +562,11 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// 返回了空的那一档，这一格就是屏幕上唯一的东西。
 		e := lookup(homePath).Empty
 		e.Action = &emptyAction{Label: "打开文件", Do: s.pickAndEnqueue}
-		h.viewPopTop(c, tab)
-		s.viewEmpty(c, "home:empty", e)
+		if tab == homeRecentTab {
+			e = recentEmpty
+			e.Action = &emptyAction{Label: "去听推荐", Do: func() { h.tab = 0 }}
+		}
+		h.withPopTop(c, tab, func() { s.viewEmpty(c, "home:empty", e) })
 	default:
 		// ⚠️ **表头在列表外面**（`rowheader.go` 文件头）：它是 `View` 的兄弟，所以列表往
 		// 下滚它不动，宽屏下滚到右边列名也还在。
@@ -493,7 +574,8 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// ⚠️ **「流行」那一档除外**：那一档的表头在**页内头部里面**（跟着新歌速递
 		// 那一块一起滚走，见 `viewPopLead`）——表头说的是下面那些歌，而新歌速递在
 		// 它们上面，表头留在列表外面就会跑到新歌速递上面去。
-		if tab != homePopTab {
+		h.viewBoardCaption(c, tab)
+		if tab != homePopTab && tab != homeRecentTab {
 			h.lists[tab].Header(c, "home:header:"+strconv.Itoa(tab))
 		}
 		h.lists[tab].View(c)
@@ -507,6 +589,73 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// 一起画的话按钮就是三枚。按它回的是**画面上画着那一档**自己的位置
 		// （见 `PagedList.ScrollTop`）——这正好是票面要的那一条。
 	}
+}
+
+// boardCaptionText 是榜单页顶上那一行：第几期、哪天更新。缺哪样就少说哪样。
+// 期数带上「周榜」——热榜 / 原创榜取的都是 B 站音乐站的**周榜**最新一期，
+// 不说的话用户分不清「第 N 期」的节奏是什么。
+func boardCaptionText(number int, at time.Time) string {
+	var parts []string
+	if number > 0 {
+		parts = append(parts, "第 "+strconv.Itoa(number)+" 期（周榜）")
+	}
+	if !at.IsZero() {
+		parts = append(parts, at.Format("2006-01-02")+" 更新")
+	}
+	return strings.Join(parts, " · ")
+}
+
+// viewBoardCaption 在热榜 / 原创榜的列表上面画期数和更新时间。别的档不画；
+// 还没拉到那一期的信息时也不画（不摆一行空话）。
+func (h *homePage) viewBoardCaption(c *ui.Context, tab int) {
+	if (tab != homeHotTab && tab != homeOriginalTab) || h.loads.board == nil {
+		return
+	}
+	n, at, ok := h.loads.board(tab)
+	if !ok {
+		return
+	}
+	text := boardCaptionText(n, at)
+	if text == "" {
+		return
+	}
+	// 榜单头图：和总览上那张磁贴同一套渐变，大字榜名 + 期数更新日期，
+	// 让二级页一眼认得出是从哪张磁贴进来的。
+	var from, to ui.Color
+	for _, tile := range homeTiles {
+		if tile.tab == tab {
+			from, to = tile.from, tile.to
+		}
+	}
+	t := c.Theme()
+	ui.Row(c).Key("home:board:hero").FillWidth().Height(homeBoardHeroH).Radius(t.Radius+4).
+		Gradient(from, to, 135).Padding(space.Px16, space.Px24).AlignItems(ui.Center).Children(func() {
+		ui.Column(c).Grow(1).Gap(space.Px6).Children(func() {
+			ui.Text(c, homeTabs[tab]).FontSize(scale.Font(c, scale.Size28)).Bold().TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(1)
+			ui.Text(c, text).Key("home:board:caption").FontSize(scale.Font(c, scale.Size13)).
+				TextColor(ui.RGBA(255, 255, 255, 0.82)).MaxLines(1)
+		})
+		items := h.lists[tab].Items()
+		if len(items) == 0 || h.acts.Add == nil {
+			return
+		}
+		btn := ui.Row(c).Key("home:board:enqueue").AlignItems(ui.Center).Gap(space.Px6).
+			Padding(space.Px8, space.Px16).Radius(20).Background(ui.RGBA(255, 255, 255, 0.2)).
+			Focusable().Role(ui.RoleButton).Label("加入播放列表").OnClick(func() {
+			its := make([]app.Item, 0, len(items))
+			for _, m := range items {
+				its = append(its, m.Item)
+			}
+			h.acts.Add(its)
+		})
+		if btn.Hovered() {
+			btn = btn.Background(ui.RGBA(255, 255, 255, 0.32))
+		}
+		btn.Children(func() {
+			ui.Icon(c, icon(iconEnqueue)).FontSize(18).TextColor(ui.RGBA(255, 255, 255, 1))
+			ui.Text(c, "加入播放列表").FontSize(scale.Font(c, scale.Size14)).TextColor(ui.RGBA(255, 255, 255, 1))
+		})
+	})
 }
 
 // viewTabs 画那三个 Tab 和「全部播放」。
@@ -540,12 +689,17 @@ func (h *homePage) viewTabs(c *ui.Context, s *Shell) {
 		// 构造的时候就已经读过了，构造之后再 `.Key()` 会 panic（`ui/element.go`
 		// 的 Key 注释：自带输入的控件都不能构造后 Key，只能构造前 `Context.Key`）。
 		// 中间的语句会把它抢走，所以这两句要紧挨着。
-		c.Key("home:tabs")
 		// ⚠️ **主 Tab 用轨道 + 滑块那一种**（`mainTabs`，见 tabs.go）：这一排
 		// 和次级排序那几排不是同一个样子（票 #138）。
 		//
 		// 首页这一排上游是 `size="lg"`（44），其余三处是 md（40）。
-		mainTabs(c, &h.tab, tabLG, homeTabs[:]...)
+		ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
+			if iconKey(c, iconSideCollapse, "返回发现", 20, false).Size(36, 36).Padding(space.None, space.Px8).Clicked() {
+				h.backToOverview()
+			}
+			c.Key("home:tabs")
+			mainTabs(c, &h.tab, tabLG, homeTabs[:]...)
+		})
 
 		// 「全部播放」：这一档的歌（**当前这一档 Tab 的**，不是三个 Tab 加起来）。
 		//

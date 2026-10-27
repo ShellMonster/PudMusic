@@ -28,7 +28,7 @@ func favWireShell(t *testing.T, created, collected int) (*Shell, *app.App, *ui.T
 	// ⚠️ 取流也要挂：**播放**走的是 `App.PlayFrom`，而它起播失败会把整个队列
 	// 原样换回去（见 queue.go 的 PlayFrom）。没挂取流的话队列永远是空的，
 	// 验到的就不是「收藏夹被放进队列了」而是「起播没成功」。
-	a.MountStreaming(app.Streaming{Client: cli, Media: b.Server.Client(), Quality: bili.AudioAuto})
+	a.MountStreaming(app.Streaming{Client: cli, Media: b.Server.Client(), Quality: bili.AudioHigh})
 	a.MountCollections(app.CollectionRefs{Client: cli, Settle: 0})
 	tt.Frame()
 	return s, a, tt, b

@@ -113,6 +113,13 @@ const (
 	//
 	// 0.5 是一半——用户按了「取消静音」，听到的应该是一半声音，不是 0。
 	DefaultUnmuteVolume = 0.5
+	// DefaultMiniLyricsCurtain 是「迷你播放器点封面展开歌词卷帘」那一格的默认
+	// 值。**默认开**（票 #536，2026-10-26 主人定的）。
+	//
+	// ⚠️ **它是 true 而不是 false**：主人 2026-10-26 先说「默认关」，后一天
+	// 更正成「默认开」——**以票面为准**（票 #536 的正文写的是「默认开着」）。
+	// 装上就有卷帘这个效果，是这一格存在的意义。
+	DefaultMiniLyricsCurtain = true
 )
 
 // 侧栏宽度的三个数，抄 Biu `src/layout/side/index.tsx:15-17`：
@@ -205,11 +212,16 @@ const (
 var DefaultThemePreset = ThemePresetWarmPaper
 
 // 音质档位。Biu 的 `AudioQuality`。
+//
+// 🔴 **没有「自动」这一档**（票 #581）：默认是有损的高品质档（音乐库 320K /
+// 投稿 192K），无损/杜比是显式选项——拿不到时由取流那层自动退到最高有损，
+// 不报错。以前这里有过 `auto`（有无损先给无损），已删：老设置文件里存着的
+// `"auto"` 由 `normalize` 的 `pickEnum` 兜底归一成 `AudioQualityHigh`，不写迁移。
 type AudioQuality string
 
 const (
-	AudioQualityAuto     AudioQuality = "auto"
 	AudioQualityLossless AudioQuality = "lossless"
+	AudioQualityDolby    AudioQuality = "dolby"
 	AudioQualityHigh     AudioQuality = "high"
 	AudioQualityMedium   AudioQuality = "medium"
 	AudioQualityLow      AudioQuality = "low"
@@ -449,8 +461,39 @@ type Settings struct {
 	// （见 internal/service/audio/normalize.go）。默认关。
 	NormalizeVolume bool `json:"normalizeVolume"`
 
+	// MiniLyricsCurtain 是「迷你播放器点封面展开歌词卷帘」那个开关。**默认开**
+	// （票 #536，2026-10-26 主人定的）。
+	//
+	// ⚠️ **用指针**，和上面那个 `Volume` 同一路数：「这份设置里没有这一格」
+	// （老版本写的文件）和「用户把卷帘关了」必须分得开——前者该给默认的
+	// **开**，后者才是关。
+	//
+	// ⚠️ **为什么不能是 `bool`**：布尔值表达不了「没设过」，而这一格的默认
+	// 恰恰是**开**——用 `bool` 的话，一份老设置文件读出来就是 false（= 关），
+	// 于是「默认开着」这件事对老用户**不成立**（而票面要的是「装上就有
+	// 卷帘」）。这一格是**新增**的键，所以 nil = 没设过 = 默认开。
+	//
+	// ⚠️ **这不是「为老数据写兼容」**（AGENTS.md §5 那条规矩针对的是老外观、
+	// 老目录、老设置值）：这里没有迁移、没有双份格式、没有兜底分支，只是
+	// 「默认」这一档落在哪儿的问题。
+	MiniLyricsCurtain *bool `json:"miniLyricsCurtain"`
+
 	// CoverAccent 是「封面取色」开关：主色跟着当前封面的色相走。默认关。
 	CoverAccent bool `json:"coverAccent"`
+
+	// UpdateNotification 是「有更新了弹系统通知」开关（票 #559）。默认**开**。
+	//
+	// ⚠️ **它默认开，而它的零值是 false**：所以「这一格不存在」（老版本写的
+	// 设置文件）和「用户把它关了」在读回来之后分不开——两者的读回来都是 false，
+	// 而老用户升级上来之后**不该**平白多一条系统通知的打扰。
+	//
+	// ⚠️ **所以这一格是指针**（`*bool`），跟 `Volume` 同一个理由：
+	// `*bool` 能把「没设过」（nil → 默认开）和「用户关了」（false）分开。
+	// 用裸 bool 的话，要么老用户升级上来就被静默关掉（那也是错的方向），要么
+	// 拿不到「用户关了」这一档。
+	//
+	// 键名是我们自己的（Biu 那边没有这一格）。
+	UpdateNotification *bool `json:"updateNotification"`
 
 	// CoverHue / CoverSat 是界面从当前封面取出来的色相（0~360）和饱和度（0~1），只在
 	// 内存里传给主题，不落盘。CoverSat 为 0 表示还没取到（或封面没颜色）。
@@ -524,6 +567,21 @@ var knownSettingsKeys = func() map[string]bool {
 	return m
 }()
 
+// MiniLyricsCurtainOn 报「迷你播放器点封面展开歌词卷帘」那一格是开是关。
+//
+// ⚠️ **nil 算「开」**：这一格的默认是开（票 #536），而 nil 是「这份设置里
+// 没有这一格」——老设置文件读出来就是 nil。界面层问这一格时走这一个方法，
+// 于是「默认开着」这件事只有一处定义（`DefaultMiniLyricsCurtain`）。
+//
+// ⚠️ 正常路径上 `normalize()` 已经把 nil 填成默认了（见 `Settings.normalize`），
+// 而这里再兜一次是因为**零值 `Settings{}`** 也可能出现（界面上手工拼的那几处）。
+func (s Settings) MiniLyricsCurtainOn() bool {
+	if s.MiniLyricsCurtain == nil {
+		return DefaultMiniLyricsCurtain
+	}
+	return *s.MiniLyricsCurtain
+}
+
 // UnmarshalJSON 读一个 Settings：已知的键按结构体读，剩下的存进 extra。
 func (s *Settings) UnmarshalJSON(b []byte) error {
 	// plain 去掉方法的那一份类型，防止 UnmarshalJSON 自己调自己。
@@ -587,6 +645,13 @@ func DefaultSettings(downloadPath string) Settings {
 	// 音量那一格是**指针**，所以每一次调用都要新的一份——共用同一个指针的话，
 	// 有人改了 `*s.Volume` 就把全局的默认值改了。
 	vol := DefaultVolume
+	// 「有更新了弹系统通知」那一格也是**指针**（理由见 `Settings.UpdateNotification`
+	// 那一格），而且它默认**开**——系统通知是低频的好事，而新装的用户还没说过
+	// 「不要」。
+	updateNotif := true
+	// 「迷你播放器点封面展开歌词卷帘」那一格同样是**指针**（理由见那个字段的
+	// 注释），而它**默认是开的**（票 #536）。
+	curtain := DefaultMiniLyricsCurtain
 	return Settings{
 		AutoStart:         false,
 		CloseWindowOption: CloseWindowHide,
@@ -595,7 +660,7 @@ func DefaultSettings(downloadPath string) Settings {
 		DownloadPath:      downloadPath,
 		PrimaryColor:      DefaultPrimaryColor,
 		BackgroundColor:   "",
-		AudioQuality:      AudioQualityAuto,
+		AudioQuality:      AudioQualityHigh,
 		HiddenMenuKeys:    []string{},
 		DisplayMode:       DisplayModeList,
 		FFmpegPath:        "",
@@ -623,6 +688,15 @@ func DefaultSettings(downloadPath string) Settings {
 		// 音量：默认 100%（老版本每一次启动都是这一档，见 DefaultVolume）。
 		Volume: &vol,
 		Muted:  false,
+		// 「有更新了弹系统通知」：默认开。
+		UpdateNotification: &updateNotif,
+
+		// 迷你播放器的歌词卷帘：**默认开**（票 #536）。
+		//
+		// ⚠️ 它是**指针**，所以每一次调用都要新的一份——共用同一个指针的话，
+		// 有人改了 `*s.MiniLyricsCurtain` 就把全局的默认值改了（和上面那个
+		// `vol` 同一路数）。
+		MiniLyricsCurtain: &curtain,
 
 		// 「上次听到哪儿」那一格：默认是空的（= 没有上次听到哪儿）。
 		//
@@ -637,6 +711,20 @@ func DefaultSettings(downloadPath string) Settings {
 		PlayMode:                             DefaultPlayMode,
 		ShouldKeepPagesOrderInRandomPlayMode: true,
 	}
+}
+
+// UpdateNotificationEnabled 报「有更新了要不要弹系统通知」。
+//
+// ⚠️ **它把「没设过」和「用户关了」分开**（理由见 `Settings.UpdateNotification`
+// 那一格）：`nil`（老版本写的文件）按**默认开**算，而 `false`（用户明确关了）
+// 是关。
+//
+// ⚠️ **裸 bool 的零值做不到这件事**：false 既是「没设过」又是「用户关了」。
+func (s Settings) UpdateNotificationEnabled() bool {
+	if s.UpdateNotification == nil {
+		return true
+	}
+	return *s.UpdateNotification
 }
 
 // 设置文件的三种坏法。三种要分开，因为要分开处理。
@@ -827,8 +915,11 @@ func (s *Settings) normalize() {
 		ThemePresetWarmPaper, ThemePresetDuskAmber, ThemePresetSoftPeach,
 		ThemePresetCeladon, ThemePresetInkPaper, ThemePresetSandalwood,
 		ThemePresetIndigoNight, ThemePresetClassic)
-	s.AudioQuality = pickEnum(s.AudioQuality, AudioQualityAuto,
-		AudioQualityAuto, AudioQualityLossless, AudioQualityHigh,
+	// 🔴 **兜底是 `AudioQualityHigh` 不是无损**：认不出来的值（包括老设置文件
+	// 里存着的 `"auto"`，票 #581 删掉的那一档）归一成默认的有损档——裸的
+	// 「无损」拿不到就退档、杜比同理，但拿不到的前提是先得有声音。
+	s.AudioQuality = pickEnum(s.AudioQuality, AudioQualityHigh,
+		AudioQualityLossless, AudioQualityDolby, AudioQualityHigh,
 		AudioQualityMedium, AudioQualityLow)
 	s.DisplayMode = pickEnum(s.DisplayMode, DisplayModeList,
 		DisplayModeCard, DisplayModeList, DisplayModeCompact)
@@ -881,6 +972,25 @@ func (s *Settings) normalize() {
 	} else {
 		v := min(max(*s.Volume, 0), 1)
 		s.Volume = &v
+	}
+	// 「有更新了弹系统通知」：nil = 「这一格不存在」（老版本写的文件）→ **默认
+	// 开**。理由见 `Settings.UpdateNotification` 那一格。
+	if s.UpdateNotification == nil {
+		v := true
+		s.UpdateNotification = &v
+	}
+	// 迷你播放器的歌词卷帘：nil = 这份设置里**没有这一格** = 默认**开**
+	// （票 #536）。
+	//
+	// ⚠️ **默认是开，所以 nil 要给 true 而不是 false**：这一格是新增的键，
+	// 而一份老设置文件读出来它就是 nil——给它 false 的话，「装上就有卷帘」
+	// 这件事对每一个老用户都不成立（而那正是票面要的）。
+	//
+	// ⚠️ **「用户关了」和「没设过」分得开**：前者是 `*ptr == false`，这里原样
+	// 留着；后者是 nil，这里给它默认。
+	if s.MiniLyricsCurtain == nil {
+		v := DefaultMiniLyricsCurtain
+		s.MiniLyricsCurtain = &v
 	}
 	if audio.EQPresetByID(s.EQPreset).ID == "flat" {
 		s.EQPreset = ""

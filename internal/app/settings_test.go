@@ -95,6 +95,15 @@ var ourOwnKeys = []string{
 	"playback",
 	"themePreset",
 	"dynamicSeen",
+	"updateNotification",
+	// 「迷你播放器点封面展开歌词卷帘」那一格（票 #536）。
+	//
+	// ⚠️ **它是 Biu 没有的键**——上游迷你播放器压根没有歌词区（BMG-280 §6
+	// 的竞品调研记着），所以这一格是**纯我们自己的**，键名也随我们起。
+	//
+	// ⚠️ **它不跟 Biu 的键名对齐**：对齐了反而会让**从 Biu 导入配置**那条路
+	// 把它当成 Biu 自己的字段搬过来（而 Biu 那边那个键管的是另一件事）。
+	"miniLyricsCurtain",
 }
 
 // TestSettingsKeysMatchBiu 逐字比对键名。
@@ -451,7 +460,7 @@ func TestNormalizeClampsBadValues(t *testing.T) {
 	if s.ThemeMode != app.ThemeModeSystem {
 		t.Errorf("不认识的 themeMode 没退回默认：%q", s.ThemeMode)
 	}
-	if s.DisplayMode != app.DisplayModeList || s.AudioQuality != app.AudioQualityAuto {
+	if s.DisplayMode != app.DisplayModeList || s.AudioQuality != app.AudioQualityHigh {
 		t.Errorf("枚举没退回默认：%q / %q", s.DisplayMode, s.AudioQuality)
 	}
 	if s.CloseWindowOption != app.CloseWindowHide || s.ProxySettings.Type != app.ProxyNone {
@@ -990,7 +999,9 @@ const ourOwnKeysJSON = `{
 	"isMuted": false,
 	"playback": {"items": [], "current": "", "positionMs": 0},
 	"themePreset": "warm-paper",
-	"dynamicSeen": {"baselines": []}
+	"dynamicSeen": {"baselines": []},
+	"updateNotification": true,
+	"miniLyricsCurtain": true
 }`
 
 // wantSettings 是「读完一份 Biu 的文件之后应该拿到的那份设置」。

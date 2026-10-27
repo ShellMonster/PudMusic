@@ -130,7 +130,7 @@ func TestRenderPlayBarReconnectShots(t *testing.T) {
 			HasTrack: base.HasTrack, Title: base.Title, Artist: base.Artist, ArtistMid: base.ArtistMid,
 			Duration: base.Duration, Position: base.Position, Rate: base.Rate, Volume: base.Volume,
 			PlayMode: base.PlayMode, Playing: true,
-			Loading: true, LoadingTitle: "刚点的那一首",
+			Loading: true,
 		}},
 		{"重连失败", app.State{
 			HasTrack: base.HasTrack, Title: base.Title, Artist: base.Artist, ArtistMid: base.ArtistMid,

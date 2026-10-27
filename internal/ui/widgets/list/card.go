@@ -314,8 +314,8 @@ func (l *List) viewCard(r ui.ListRow) {
 		// 现场版在副标题前加一枚「现场」小标签。
 		sh := ShowOf(m)
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).Children(func() {
-			ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
-				TextColor(titleColor).MaxLines(listTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
+			titleText(c, sh.Title, l.hl, titleColor).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
+				MaxLines(listTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
 			if sh.Owner != "" || sh.Live {
 				ownerLine(c, ownerRow{
 					shown: sh,
@@ -331,6 +331,7 @@ func (l *List) viewCard(r ui.ListRow) {
 					acts:  l.acts,
 				})
 			}
+			progressBar(c, m)
 		})
 
 		// ④ 播放量 / ⑤ 投稿时间：这一页有才画（见 `Columns`）。两列都
@@ -409,8 +410,8 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 
 		sh := ShowOf(m)
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px2).Children(func() {
-			ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Compact).
-				TextColor(titleColor).MaxLines(compactTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
+			titleText(c, sh.Title, l.hl, titleColor).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Compact).
+				MaxLines(compactTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
 			if sh.Owner != "" || sh.Live {
 				ownerLine(c, ownerRow{
 					shown: sh,
@@ -482,9 +483,18 @@ func (l *List) viewIndex(c *ui.Context, i int, playing bool, color ui.Color, tit
 		hover.Wave(c, "wave:"+l.songs[i].ID, width, color, title)
 		return
 	}
+	if l.cols.Rank && i < 3 {
+		ui.Text(c, indexText(i)).Width(width).TextAlign(ui.Center).Bold().
+			FontSize(scale.Font(c, font+rankTopFontBoost)).TextColor(ink.AccentOn(t)).MaxLines(1)
+		return
+	}
 	ui.Text(c, indexText(i)).Width(width).TextAlign(ui.Center).
 		FontSize(scale.Font(c, font)).TextColor(t.TextMuted).MaxLines(1)
 }
+
+// rankTopFontBoost 是榜单前三名的序号比普通序号大几号：名次是榜单这一页的主角，
+// 前三名用主色加粗放大，其余名次与普通序号一样是淡色。
+const rankTopFontBoost = 4
 
 // viewPlayCount 画播放量那一列。**这一页没装这一列时一个元素都不建**——
 // 建一个空盒子的话，那些页的右边几列会白白让出一列的宽。

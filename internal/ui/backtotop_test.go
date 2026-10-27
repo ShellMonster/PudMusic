@@ -52,8 +52,8 @@ func TestTheHomePageHasABackToTop(t *testing.T) {
 		return !tt.HasText(backTopLabel)
 	})
 	pos := listPos(tt, homeTabs[0])
-	if len(pos) == 0 || pos[0].title != "音乐 1" {
-		t.Errorf("回到顶上之后画着的是 %v，want 从「音乐 1」开始", titles(pos))
+	if len(pos) == 0 || pos[0].title != homeTabs[0]+" 1" {
+		t.Errorf("回到顶上之后画着的是 %v，want 从「%s 1」开始", titles(pos), homeTabs[0])
 	}
 }
 

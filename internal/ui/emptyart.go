@@ -4,9 +4,9 @@ import "github.com/egoist/mygo/ui"
 
 // emptyIllustrationH 是空状态插画的高度（宽按 240:160 的比例收在 144）。
 //
-// 设计稿 docs/design-mockups/empty_states.png：一枚双色调的小插画（淡的同心圆底 +
-// 线条主体 + 一枚带 16% 填充的角标），取代原来 32 的单枚线性图标。
-const emptyIllustrationH = 96
+// 设计稿 docs/design-mockups/empty_states.png：一枚有主体、有底座、有淡色层次的场景插画，
+// 取代原来 32 的单枚线性图标。
+const emptyIllustrationH = 140
 
 // emptyIllustrationFiles 是「图标名 → 插画文件」。没登记的图标（比如默认那一枚）
 // 仍画原来的单枚图标，所以这张表可以一个一个往里加。

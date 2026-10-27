@@ -592,8 +592,12 @@ func TestQualityBadgeFollowsTheRefresh(t *testing.T) {
 	})
 }
 
-// TestAutoPrefersLossless 盯「自动档优先无损」。
-func TestAutoPrefersLossless(t *testing.T) {
+// TestTheDefaultTierLeavesLosslessAlone 盯「默认档不碰无损」。
+//
+// `dash.flac` 在返回里躺着，但用户没有点名要无损——那就一个字节都别多下
+// （票 #581 改掉的旧规矩）：FLAC 的码率是 192K 的 9 倍上下，把无损混进默认档
+// 的回退路径里，等于让每一次起播都多等几倍的首缓冲。徽章必须是 192K。
+func TestTheDefaultTierLeavesLosslessAlone(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
 	url := cdnURL(f.URL, "a.flac", 2*time.Hour)
@@ -614,8 +618,8 @@ func TestAutoPrefersLossless(t *testing.T) {
 		t.Fatal(err)
 	}
 	playing(t, a, "有无损的一首")
-	if q := a.Snapshot().Quality; q != "Hi-Res 无损" {
-		t.Errorf("徽章 = %q，want Hi-Res 无损（有 flac 段时自动档必须先拿它）", q)
+	if q := a.Snapshot().Quality; q != "192K" {
+		t.Errorf("徽章 = %q，want 192K（返回里有无损也不许默认档去拿）", q)
 	}
 }
 
@@ -1110,8 +1114,8 @@ func TestAudioQualityIsHonouredAndChangeable(t *testing.T) {
 	}}})
 
 	a := newOnlineApp(t, f, t.TempDir())
-	if a.AudioQuality() != bili.AudioAuto {
-		t.Errorf("默认偏好 = %v，want AudioAuto", a.AudioQuality())
+	if a.AudioQuality() != bili.AudioHigh {
+		t.Errorf("默认偏好 = %v，want AudioHigh", a.AudioQuality())
 	}
 	a.SetAudioQuality(bili.AudioLow)
 	if a.AudioQuality() != bili.AudioLow {
@@ -1421,15 +1425,34 @@ func TestEveryPlayableEntryCanActuallyBeStreamed(t *testing.T) {
 //
 // `failQualitySwitch` 那段注释为失败那一半操过心（迟到的失败不许盖住后一次
 // 成功），这一条是它漏掉的另一半：成功的那一半也可能留下一句旧的。
+//
+// ⚠️ 失败的造法是**取流接口给了个没有音频的 dash**（真换档失败现在的形态：
+// 网络错、或者这一首压根放不了——票 #581 之后「没有无损」已经不算失败了）。
 func TestAFailedQualitySwitchDoesNotLeaveItsWordsBehind(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
 	url := cdnURL(f.URL, "a.flac", 2*time.Hour)
-	// 只有 192K 这一档：**点无损一定拿不到**，而「高音质」拿回来的正是现在这一档。
-	f.onPlayURL(map[string]any{"duration": 1, "audio": []any{map[string]any{
+	dash := map[string]any{"duration": 1, "audio": []any{map[string]any{
 		"id": int(bili.QualityHigh192), "bandwidth": 110836, "codecs": "flac",
 		"mimeType": "audio/mp4", "baseUrl": url,
-	}}})
+	}}}
+
+	var calls atomic.Int32
+	f.on("/x/player/wbi/playurl", func(w http.ResponseWriter, r *http.Request) {
+		// 按第几次调用分派：
+		//	1 = 开播（正常）
+		//	2 = 换档那一下：dash 里没有音频，取流失败
+		//	3 = 再换一档：正常，拿回来的正是正在放的那一档
+		n := calls.Add(1)
+		if n == 2 {
+			writeStreamJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
+				"data": map[string]any{"timelength": 1000,
+					"dash": map[string]any{"duration": 1}}})
+			return
+		}
+		writeStreamJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
+			"data": map[string]any{"timelength": 1000, "dash": dash}})
+	})
 
 	a := newOnlineApp(t, f, t.TempDir())
 	if err := a.Enqueue(onlineItem("BV1", "1", "只有 192K 的一首")); err != nil {
@@ -1437,13 +1460,14 @@ func TestAFailedQualitySwitchDoesNotLeaveItsWordsBehind(t *testing.T) {
 	}
 	playing(t, a, "只有 192K 的一首")
 
-	// 点「无损」：拿不到，播放条上如实说，歌照放。
-	a.SetAudioQuality(bili.AudioLossless)
-	waitFor(t, 15*time.Second, "播放条上说清没有无损", func() bool {
+	// 换一档：取流失败，播放条上如实说，歌照放。
+	a.SetAudioQuality(bili.AudioMedium)
+	waitFor(t, 15*time.Second, "播放条上说出换档失败", func() bool {
 		return a.Snapshot().Err != ""
 	})
-	if got := a.Snapshot().Err; !strings.Contains(got, "无损") {
-		t.Fatalf("播放条上写的是 %q，want 一句说清「没有无损」的话", got)
+	// 换流失败上屏的是 `ErrNoAudioFlow` 那句友好话（failOnline 走 bili.Friendly）。
+	if got := a.Snapshot().Err; !strings.Contains(got, "音频流") {
+		t.Fatalf("播放条上写的是 %q，want 一句说清取流失败的话", got)
 	}
 
 	// 改主意点「高音质」：拿回来的就是正在放的那一档 → 不打断。

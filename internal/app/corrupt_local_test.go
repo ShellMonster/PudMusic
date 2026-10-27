@@ -167,12 +167,12 @@ func TestACorruptFileNeverLooksLikeItFinished(t *testing.T) {
 			var st app.State
 			for time.Now().Before(deadline) {
 				st = a.Snapshot()
-				if st.Err != "" || reachedEnd(st) {
+				if st.Err != "" || finished(st) {
 					break
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
-			if st.Err == "" && !reachedEnd(st) {
+			if st.Err == "" && !finished(st) {
 				t.Errorf("文件是坏的，界面却一声不吭地停住了"+
 					"（Playing=%v、Err 为空、位置 %v/%v）——那看起来就是「歌放完了」",
 					st.Playing, st.Position, st.Duration)
@@ -236,6 +236,26 @@ func TestTheErrorDoesNotStickToTheNextSong(t *testing.T) {
 }
 
 // ---- 小工具 ----
+
+// finished 报这一首是不是**真的走到头了**（不管那一刻的位置是多少）。
+//
+// ⚠️ **为什么不能只看位置**：`tick` 在歌放完的那一刻会把位置**归零**
+// （`internal/app/app.go` 的 `tick`：放完了进度条该回到开头）——于是
+// 「位置停在末尾附近」只存在于**归零之前的那一瞬**。机器一忙（音频回调
+// 推不动、`tick` 那一拍晚到），那一瞬就被跳过 ⇒ 位置恒为 0 ⇒ 看着
+// 像「一声不吭地停住了」。
+//
+// 而**「放完了」这件事本身有稳定的凭据**：`State.QueueFinished`（这一串
+// 放完了）——它立在「队列走到队尾」那一支（`onTrackFinished` 的
+// `AdvanceStop`），而归零之后它一直在。
+//
+// ⚠️ **它认的是「放完了」，不是「停住了」**：用户按了停止是 `Stopped`
+// 那一栏（`wantPlay` 也落成 false ⇒ `QueueFinished` 是 false），而
+// 「解码失败一声不吭」既不立 `Stopped` 也不立 `QueueFinished` ⇒ 那一档
+// 仍然被这一条判成红。
+func finished(st app.State) bool {
+	return reachedEnd(st) || st.QueueFinished
+}
 
 // reachedEnd 报这一首是不是真的放到头了。
 //

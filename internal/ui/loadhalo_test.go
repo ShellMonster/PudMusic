@@ -8,7 +8,6 @@ package ui
 //	按钮照旧	那一枚**仍然是播放 / 暂停**：能按、名字照旧、禁用态照旧
 //	它在转	钟往前走，光跟着转（不是「代码里有个角度」）
 //	转多快	一圈 1.4 秒（对着 MUI / Material Web 那一档量的）
-//	说得清楚	第三行那句「正在取流：<歌名>」**还在**
 //	听系统的偏好	「减少动态效果」开着的时候**不转**（于是不画）
 //
 // # 判据是**画面上的像素**，不是「代码里有个角度」
@@ -20,7 +19,6 @@ import (
 	"image/color"
 	"math"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
@@ -30,9 +28,6 @@ import (
 func haloState() app.State {
 	st := budgetState()
 	st.Loading = true
-	st.LoadingTitle = "正在取的那一首"
-	st.LoadingStage = "下音频"
-	st.LoadingWait = 2 * time.Second
 	return st
 }
 
@@ -168,17 +163,6 @@ func TestThePlayKeyIsStillPlayWhileLoading(t *testing.T) {
 	}
 }
 
-// TestTheThirdLineStillSaysWhatIsLoading 断**第三行那句话还在**。
-//
-// 光圈是**即时反馈**（一眼看见「在准备」），那句话是**说明**（哪一首、卡在
-// 哪一步、等了多久）——两者说的不是一回事，所以都留。
-func TestTheThirdLineStillSaysWhatIsLoading(t *testing.T) {
-	_, tt := haloTester(t, haloState(), false)
-	if !tt.HasText("正在取流：正在取的那一首") {
-		t.Errorf("第三行那句不见了，文字有 %q", tt.Texts())
-	}
-}
-
 // TestTheHaloTurns 断**它在转**。
 //
 // 判据：钟往前走 1/4 圈（350 毫秒）之后，那些像素的平均极角转过去了。
@@ -235,7 +219,9 @@ func TestNoHaloWithoutLoading(t *testing.T) {
 // TestNoHaloWithReduceMotion 断**「减少动态效果」开着的时候不转**。
 //
 // 那一圈光**就是**动效本身：留一个不动的圈在键边上，用户只会以为那个键被
-// 选中了。而「正在取流：<歌名>」那句话还在（第三行），信息没丢。
+// 选中了。取流的时候界面上没有别的提示（票 #581 把那行字去了）——开着
+// 「减少动态效果」的用户拿到的反馈就是「没有光圈」：这是那道偏好的本意，
+// 不是漏画。
 func TestNoHaloWithReduceMotion(t *testing.T) {
 	b := newTestShell(t, at(1200, coverWinH), systemIsDark(false),
 		withView(func(s *Shell) func(*mygoui.Context) {
@@ -273,11 +259,7 @@ func TestNoHaloAfterLoadingEnds(t *testing.T) {
 //
 // 「不带光圈」那一档是靠**「减少动态效果」**去掉的（那是这一档唯一的开关，
 // 见 loadhalo.go）：于是两边的差别**只有**光圈。
-//
-// ⚠️ **那一档本身很贵（每帧五十几次分配）不是这一票的账**：那一档多出来的
-// 是**第三行那一枚 12 的转圈**——框架的转圈每一帧画 12 根辐条，每根一个
-// `var path Path` 加一个颜色，各一次分配（`mygo/ui/indicators.go`）。那是
-// 早就有的（票 #220 那一批），**不要顺手改**——另开一票。
+
 func TestTheHaloCostsAlmostNothingPerFrame(t *testing.T) {
 	measure := func(reduce bool) frameCost {
 		opts := []shellOpt{}
@@ -311,10 +293,9 @@ func TestTheHaloCostsAlmostNothingPerFrame(t *testing.T) {
 // 🔴 **看不见的窗口里空转**是满屏封面那一族的老毛病（票 #392）：那一档的
 // 绘制每一帧都要一次电，而用户**看不见**。
 //
-// ⚠️ **这一条量在满屏播放器上**：满屏那一档**不画**「正在取流」那一行（那里
-// 没有那一行），于是**光圈是唯一会自己要帧的东西**——量它停没停就是干净的。
-// 播放条那一档不行：第三行那枚 12 的转圈自己也要帧（框架的转圈不看可见性），
-// 于是光圈会被它带着一起重画。
+// ⚠️ **这一条量在满屏播放器上**：那一档的画面上**没有别的会自己要帧的东西**
+// ——于是**光圈是唯一会自己要帧的东西**，量它停没停就是干净的（票 #581 之后
+// 播放条那一档取流时也没有转圈了，但满屏那一档本来就更干净）。
 func TestTheHaloStopsWhenTheWindowIsInvisible(t *testing.T) {
 	st := haloState()
 	newFull := func() (*Shell, *mygoui.Tester) {

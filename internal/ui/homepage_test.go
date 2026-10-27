@@ -101,6 +101,10 @@ func newHome(t *testing.T, songs homeSongs) (*Shell, *ui.Tester) {
 }
 
 // fullSongs 是「三个 Tab 各四十首 + 新歌速递十二首」的一屏，够滚动也够分页。
+// homeSongTabs 是「塞得进歌、点进去就有它自己第一首」的那几档：前三档。后三档是榜和
+// 最近播放，歌是取数拉来的（最近播放没登录时还不发请求），由 homepage_discover_test.go 盯。
+const homeSongTabs = 3
+
 func fullSongs() homeSongs {
 	return homeSongs{
 		tabs: [homeTabCount][]list.Music{
@@ -197,7 +201,7 @@ func clickTab(t *testing.T, tt *ui.Tester, tab int) {
 func TestTheThreeTabsAllSwitch(t *testing.T) {
 	s, tt := newHome(t, fullSongs())
 
-	for i, name := range homeTabs {
+	for i, name := range homeTabs[:homeSongTabs] {
 		clickTab(t, tt, i)
 		if s.home.tab != i {
 			t.Errorf("点了 %q，落在第 %d 档，want %d", name, s.home.tab, i)
@@ -206,7 +210,7 @@ func TestTheThreeTabsAllSwitch(t *testing.T) {
 			t.Errorf("切到 %q，画面上没有它自己的第一首，文字有 %q", name, tt.Texts())
 		}
 		// 另外两档的歌一个都不该还在画面上。
-		for j, other := range homeTabs {
+		for j, other := range homeTabs[:homeSongTabs] {
 			if j == i {
 				continue
 			}
@@ -241,7 +245,7 @@ func TestTheHomeRouteShowsItsOwnPage(t *testing.T) {
 	if got := s.router.Path(); got != homePath {
 		t.Fatalf("点回首页停在 %q，want %q", got, homePath)
 	}
-	for _, name := range homeTabs {
+	for _, name := range homeTabs[:homeSongTabs] {
 		if !shows(tt, name) {
 			t.Errorf("首页没有画出 %q 那一档的 Tab，文字有 %q", name, tt.Texts())
 		}
@@ -360,7 +364,7 @@ func TestLeavingTheHomePageAndComingBackKeepsWhereYouWere(t *testing.T) {
 func TestNewMusicShowsOnlyOnThePopTab(t *testing.T) {
 	_, tt := newHome(t, fullSongs())
 
-	for i, name := range homeTabs {
+	for i, name := range homeTabs[:homeSongTabs] {
 		clickTab(t, tt, i)
 		shown := shows(tt, "新歌速递")
 		if want := i == homePopTab; shown != want {
@@ -520,6 +524,10 @@ func TestTheTopImagesStayWhenTheListIsEmpty(t *testing.T) {
 	if !shows(tt, "新歌速递") {
 		t.Errorf("下面那一档没歌的时候顶图不见了，文字有 %q", tt.Texts())
 	}
+	// 新歌速递是两行大封面，空状态在它下面：窗口不高时要往下滚才看得到。
+	tt.Scroll(700, 400, 0, 600)
+	homeFrame(tt)
+	settleHome(tt)
 	if !shows(tt, lookup(homePath).Empty.Title) {
 		t.Errorf("下面那一档没歌的时候空状态不见了，文字有 %q", tt.Texts())
 	}
@@ -575,7 +583,7 @@ func TestTheHomePageStillSaysWhyItIsEmpty(t *testing.T) {
 	}
 
 	_, tt := newHome(t, homeSongs{})
-	for i, name := range homeTabs {
+	for i, name := range homeTabs[:homeSongTabs] {
 		clickTab(t, tt, i)
 		if !shows(tt, want.Title) {
 			t.Errorf("「%s」上没有画出 %q，文字有 %q", name, want.Title, tt.Texts())
@@ -633,7 +641,7 @@ func TestTheLeadRowIsNeverTheCursor(t *testing.T) {
 	tt.SetFocused(true)
 	s.home.SetSongs(fullSongs())
 
-	for tab := range homeTabs {
+	for tab := range homeTabs[:homeSongTabs] {
 		clickTab(t, tt, tab)
 		// 把焦点交给这一档的列表，光标停在第一首歌上（和用户走进来时一样）。
 		s.home.lists[tab].TakeFocus()

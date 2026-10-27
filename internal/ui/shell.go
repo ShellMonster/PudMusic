@@ -20,6 +20,7 @@
 package ui
 
 import (
+	"image"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -78,6 +79,12 @@ type Shell struct {
 	// `View` 拿它决定这一帧的逐帧动画要不要继续要下一帧。
 	presence windowPresence
 
+	// notify 是这一扇窗在「活跃态」那本账上的登记号（见 notification.go）。
+	//
+	// ⚠️ **它是逐窗口一份**（主窗一个、迷你窗一个），而那本账是**整个进程
+	// 一份**——因为「用户在不在这几扇窗里」问的是全部窗。
+	notify notifyWindow
+
 	// visible 是「这一扇窗看不看得见」那一个**活的**开关，给「每帧都要一帧」
 	// 的动画用（波形那一格，见 `hover.SetVisibleFlag`）。
 	//
@@ -113,6 +120,14 @@ type Shell struct {
 
 	// tint 是封面取色的状态（见 covertint.go）。
 	tint coverTint
+	// glowWake 是满屏光晕取色用的叫醒函数，建一次存着（每帧现写方法值会建闭包）。
+	glowWake func()
+	// fullCoverKey 是满屏封面格子的键，fullCoverKeyURL 是它对应的封面地址。
+	fullCoverKey    any
+	fullCoverKeyURL string
+	// fullCoverTr 是满屏封面的共享元素转场，fullCoverTrID 是它对应的身份。
+	fullCoverTr   ui.ElementTransition
+	fullCoverTrID string
 
 	// shownPath 是上一帧画的是哪一页，syncRoute 拿它认出「换页了」。
 	shownPath string
@@ -190,6 +205,67 @@ type Shell struct {
 	// ⚠️ **别改成包级变量**：包级的可变全局会让两个窗口（主窗口 + 迷你）共享
 	// 一个桩，而这一栏是**每扇窗一份**的。
 	openExternal func(url string) error
+
+	// writeClipboardText 是「把一段文字放进剪贴板」的那一下。
+	//
+	// ⚠️ **默认是 `systemWriteClipboardText`，而无头 Tester 里那一句会 panic**
+	// （`mygo.Clipboard.WriteText` 里的 `needsApp` 见到 `App.Run` 没跑过就直接
+	// panic，见 `mygo/app.go:128`）——所以**测试会把它换成记下内容的桩**。
+	// 这一栏就是那个桩的插口。
+	//
+	// ⚠️ **别改成包级变量**：同一个理由——两个窗口各有一份。
+	writeClipboardText func(text string) error
+
+	// writeClipboardImage 是「把一张 PNG 放进剪贴板」的那一下。
+	//
+	// ⚠️ **同一份顾虑**（无头 Tester 里 `mygo.Clipboard.WriteImage` 会 panic），
+	// 而且它**会验一遍是不是 PNG**（`mygo/modules.go:184`）——不是 PNG 就返回错。
+	writeClipboardImage func(png []byte) error
+
+	// runOnMain 把一段代码放到**主线程**上执行。
+	//
+	// ⚠️ **默认是生产那一档**（`mygo.RunOnMain`）：它在主线程上**直接执行**
+	// （`mygo/loop.go:94` 的 `onMain` 里有 `isMainThread()` 短路，不排队也不
+	// 阻塞），从后台调则**排队并等它跑完**。
+	//
+	// ⚠️ **为什么「复制」这一族要它**：判号和写剪贴板必须**在同一个主线程
+	// 段里**（理由见 `clipboard.go` 的 `copyClipboard`）——主线程是**单线程
+	// 事件循环**，所以同一时刻只有一段在跑，两次写天然串行。
+	//
+	// ⚠️ **runOnMainBackground 是「从后台调」的那一档**：它**排队**并**等它跑
+	// 完**——而 **runOnMain 是「在主线程上调」的那一档**：它**直接执行**。这个
+	// 差别**就是那个竞态的机制**：后台那一趟（封面）把段投进队列（**还在排
+	// 队**），而用户按文本走的是主线程档，**绕过队列直接执行**——于是文本
+	// **先**落地，队列里那个旧封面的段**随后**才执行（理由见 `clipboard.go`）。
+	//
+	// ⚠️ **无头 Tester 里不能用生产那一档**：那一档会 `needsApp`（没跑过
+	// `App.Run` 就 panic，见 `mygo/app.go:128`），而从后台调它还会**等一个
+	// 永远不来的人**（无头环境里没有事件循环在排空那个队列）。所以测试把
+	// 它换成**一个假主线程**（见 `shelltest_test.go` 的 `mainThreadStub`）。
+	runOnMain func(fn func())
+	// runOnMainBackground 是「从后台调主线程」的那一档（排队 + 等）。
+	runOnMainBackground func(fn func())
+
+	// coverImage 是「拿这一张封面那张**能编码的图**」的那一下。
+	//
+	// ⚠️ **默认是空的**，空的时候走 `s.images.SourceImage`（也就是生产那一档）。
+	//
+	// ⚠️ **它只给测试用**：编码失败那一档（`png.Encode` 报错）在生产上**几乎
+	// 不会发生**——而正因如此，它**必须有测试**，否则那一档的代码被删了也没有
+	// 任何东西会红。测试要造出「一张编码不了的图」，而造它的最直接的办法就是
+	// 把「取图」这一下换成一张尺寸为 0 的图（`png.Encode` 对它报
+	// "invalid image size"）。
+	coverImage func(url string) (image.Image, error)
+
+	// copyDone 是「某一趟后台复制**结束了**」的那个信号。
+	//
+	// ⚠️ **它只给测试用**：生产那一档是 nil（没有这一层）。测试要靠它知道
+	// 「先发起的那一趟跑完了」——而那一趟**可能什么都没写**（被后来的动作
+	// 作废了），所以**光看剪贴板里的内容是等不到它结束的**。
+	//
+	// ⚠️ **它带一个参数**：那个号（`copyGeneration` 发的）——这样测试能
+	// 分辨「结束的是哪一趟」。
+	copyDone func(gen uint64)
 
 	// images 是网络封面缓存。整个窗口共用一份；迷你窗口借的是主窗口那一份
 	// （`adoptShared`），因为落盘的磁盘缓存目录只能有一个 writer/一本账，
@@ -320,16 +396,23 @@ type Shell struct {
 
 	// scrub 是进度条的值（0..1），held 是指针有没有按在它上面。
 	// 两个都只由 view 读写——view 永远跑在主线程上。
-	scrub float64
-	held  bool
+	//
+	// scrubPressX / scrubPressPos 是**按下去那一帧**的指针位置和播放位置：
+	// 松手的时候拿它们分「这一下是点还是拖」（章节点吸附只认点，票 #585）。
+	scrub         float64
+	held          bool
+	scrubPressX   float32
+	scrubPressPos time.Duration
 
 	// fullScrub / fullHeld 是**全屏播放器上那条**进度条自己的一份。
 	//
 	// ⚠️ 不能和上面那一份共用：两处会各自按住、各自 `ScrubStart`/`ScrubEnd`，
 	// 而 `ScrubEnd` 是一次真的 seek。共用的话在全屏里拖一下进度条，底下那条
 	// 也会跟着跳（而它这会儿压根没被按着）。
-	fullScrub float64
-	fullHeld  bool
+	fullScrub    float64
+	fullHeld     bool
+	fullPressX   float32
+	fullPressPos time.Duration
 
 	// full 是全屏播放器自己那一摊，见 fullplayer.go。
 	// **只由 view 在主线程上读写**，不跨 goroutine（铁律一）。
@@ -644,6 +727,70 @@ type Shell struct {
 	// 歌词，迷你播放器那一页也跟着被拽回去（反过来也一样）。
 	fullLyric lyricsView
 
+	// miniCurtain 是**迷你播放器那个卷帘**自己那一摊：开着没有、动画走到哪儿、
+	// 目标高度、以及这一帧窗该有多高。见 minicurtain.go。
+	//
+	// ⚠️ **它是迷你那个外壳的**（不是主窗口那个）：卷帘只画在迷你窗里，而
+	// 迷你窗是**另一个 `Shell` 实例**。
+	miniCurtain miniCurtainState
+
+	// miniCurtainWork 是**卷帘高度按哪块工作区算**。
+	//
+	// ⚠️ **零值 = 「问真的」**：生产路径走的是 `mygo.Screen.DisplayMatching(win)
+	// .WorkArea`（那一块是那扇窗所在的显示器的工作区）。
+	//
+	// ⚠️ **它是给无头测试用的**：`mygo.Screen` 头上有 `needsApp`
+	// （`mygo/app.go:128`），应用没 ready 的时候调它**直接 panic**，而无头
+	// Tester 里压根没有应用。所以那一档把工作区摆进来——而「卷帘不该长出
+	// 工作区」这件事本身是纯逻辑（`miniCurtainHeight`），单测断的是那一个
+	// 函数。
+	miniCurtainWork mygo.Rectangle
+
+	// miniWin 是**迷你播放器这一扇窗**的那层接口（生产实现是 `*mygo.Window`）。
+	//
+	// ⚠️ **它为什么存在**：卷帘要改的是**窗的原生尺寸**，而无头 Tester 里**没有
+	// 真窗口**（`mygo.NewWindow` 在应用没 ready 时直接 panic，
+	// `mygo/window.go:382`）。于是「关窗之前把窗高改回 84 ⇒ `StateKey` 落盘
+	// 的是 320×84」这条**在无头那一档量不到**。
+	//
+	// ⇒ 抽这一层接口，测试实现是一个**假窗**（记住最后一次 `SetSize`，能手动
+	// 触发 `OnClose`）。这样「关窗钩子有没有把高度改回 84」就变成**可测的**
+	// ——而**删掉那个钩子，这条用例必须红**。
+	//
+	// ⚠️ **别把 `s.win` 的类型整个换掉**：`s.win` 在十几处被当 `*mygo.Window`
+	// 用（`platform.RestoreFromBackground(s.win)` 那一类），换类型会波及一大片
+	// 与这一票无关的代码。所以这里只抽**迷你那一扇**要的那几样。
+	//
+	// ⚠️ **零值 = 「还没有窗」**：迷你窗建出来之前（`ensureMiniWindow` 排进
+	// `WhenReady` 之前）它就是 nil，而那一档要的是「窗高这一层逻辑对不对」。
+	miniWin miniWindow
+
+	// miniCurtainWantsKey 是「卷帘展开着，而这一扇窗还没拿到键盘」那一档。
+	//
+	// ⚠️ **它为什么存在**：展开的那一下要把键盘抢到这一扇窗上（见
+	// `miniCurtainActivate`），而那一抢**两步**里每一步都可能落空：
+	// `activateIgnoringOtherApps:` 是**异步**的（系统给别的应用一个
+	// 「别抢回去」的机会），而 `makeKeyAndOrderFront:` 只在**应用已经是
+	// 前台**的时候才把这一扇变成 key 窗口。
+	//
+	// ⇒ 实测（2026-10-27 真机，评审场景）：**四轮里有一轮**点封面之后应用
+	// **压根没被激活**（`active=false`），于是那一轮 Esc 到不了这一扇窗。
+	// 而它**不是每次都失败**——所以「多试几次」不是办法。
+	//
+	// ⇒ 这一格是那个**兜底**：`mygo.App.OnDidBecomeActive` 那一档会看到
+	// 「应用真的成了前台，而这一扇还不是 key 窗口」⇒ **再抢一次 key 窗口**。
+	// 那时候应用已经是前台了，`makeKeyAndOrderFront:` 这一句**一定**成。
+	miniCurtainWantsKey bool
+
+	// miniLyric 是**卷帘里那个歌词区**自己那一摊（滚动位置、上一帧量到的两个
+	// 框、正在滚向哪一句）。
+	//
+	// ⚠️ **不是 `lyric` 那一份，也不是 `fullLyric` 那一份**：三处画的是同一首歌
+	// 的同一份歌词，而「滚到了哪儿是各人各眼的事」——共用一份的话，在满屏里翻
+	// 一下歌词，迷你窗的卷帘也跟着被拽回去（反过来也一样）。理由同
+	// `fullplayer_lyrics.go` 的文件头那一段。
+	miniLyric lyricsView
+
 	// lyricSearch 是「搜索歌词」和「歌词预览」那两个弹窗自己那一摊：搜索框里
 	// 正在敲的字、待发的那一次搜索、切在哪个源、候选表。见 lyricssearch.go。
 	//
@@ -915,6 +1062,10 @@ type Shell struct {
 	// seek」——那一半就靠这对标记守住）。
 	miniScrub float64
 	miniHeld  bool
+	// miniPressX / miniPressPos 是迷你进度条按下去那一帧的记账
+	// （和播放条那一对同一个用途，见上面 scrubPressX）。
+	miniPressX   float32
+	miniPressPos time.Duration
 	// builds 记着「各个界面一共建了几遍」。**给测试看的**（见 builds.go 与
 	// framebudget_test.go）：「一帧建两遍」是静默的坏处——画面上看着没差，
 	// 而帧成本翻倍。
@@ -1009,6 +1160,10 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 		mounted: func() bool { return s.app.RecommendOf().Mounted() },
 		tab:     s.fetchHomeTab,
 		new:     s.fetchHomeNewMusic,
+		board: func(tab int) (int, time.Time, bool) {
+			p, ok := s.app.RecommendOf().BoardPeriod(tab)
+			return p.Number, p.PublishedAt, ok
+		},
 		selfMid: s.app.SelfMid,
 		wake:    s.wake.invalidate,
 	})

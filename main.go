@@ -126,6 +126,9 @@ func main() {
 	// 排在开窗口之前只是「所有零件都齐了」这件事在开窗口之前看得见一点。
 	ui.MountLyrics(a)
 
+	// 评论缓存同理：建目录（阻塞 IO），排在开窗口之前。
+	ui.MountComments(a)
+
 	// 弹幕缓存也是同一件事：建目录是阻塞 IO，排在开窗口之前。
 	// 它不发请求——真正开始取是界面第一帧问 `App.Danmaku()` 的时候。
 	ui.MountDanmaku(a)
@@ -143,6 +146,11 @@ func main() {
 	if err := ui.MountDownloads(a); err != nil {
 		log.Printf("biu: 挂下载失败，这次的下载功能用不了：%v", err)
 	}
+
+	// 系统通知也挂在开窗口之前：它要接住「点通知把应用唤起来」那一次，而那是
+	// 启动参数交付的一部分（框架的 `App.OnNotificationClick` 必须在 `App.Run`
+	// 之前装，见 `internal/ui/lifecycle.go` 的 `installNotification`）。
+	ui.MountNotifications(a)
 
 	// 系统媒体会话（浮窗 / 锁屏 / 任务栏缩略图按钮）也必须在开窗口之前挂：
 	// macOS 那一半建的时候要注册 Objective-C 的类，而注册必须在还没有 ObjC

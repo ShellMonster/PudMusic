@@ -16,6 +16,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/media"
 	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/service/comments"
 	"github.com/ShellMonster/Biu_Go/internal/service/danmaku"
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
@@ -141,32 +142,10 @@ type State struct {
 	// 🔴 **它必须有超时**：这一栏要是能一直亮着，它就成了另一种「什么都不说」
 	// （票 #282）。超过 `onlinePlayTimeout` 就按失败处理，界面上换成一句人话。
 	Loading bool
-	// LoadingTitle 是正在取的那一首的名字。空串 = 没有在取流。
+	// 🔴 **界面上没有「正在取流」的文字**（票 #581）：取流的反馈只有播放键上
+	// 那一圈光（`loadhalo.go`）。卡在哪一段、等了多久这些细节只进日志和
+	// 超时之后的那句错误话——不占播放条上的一行。
 	//
-	// ⚠️ **它不是 `Title`**：`Title` 是「正在放的那首」，而取流这一趟里正在放
-	// 的还是上一首。用户要知道的是「我刚才点的那一首在准备」，不是上一首。
-	LoadingTitle string
-	// LoadingStage 是这一趟取流**现在卡在哪一段**（票 #220）。
-	//
-	// 取值是那几个短词（见 `internal/app/online.go` 的 `loadStage*`）：
-	// 「问分集」/「问地址」/「下音频」/「解码」。
-	//
-	// 🔴 **它是为「慢」准备的**：界面上说一句「卡在『下音频』这一步」，
-	// 比一枚不说话的转圈有用得多——而分不清「网络慢」和「解码慢」的
-	// 话，用户只会觉得应用坏了。
-	LoadingStage string
-	// LoadingSlow 是「这一段已经慢到该说出来了」（票 #220）。
-	//
-	// ⚠️ **它和 `Loading` 是两件事**：`Loading` 说「还在准备」，
-	// 这一栏说「**准备得慢**」——后者要换一句**不一样的话**上屏，
-	// 否则用户看到的还是那一句「正在取流」，而他等的那个「非常慢」
-	// 一句话都没说。
-	LoadingSlow bool
-	// LoadingWait 是**当前这一段**已经等了多久。
-	//
-	// ⚠️ **它记的是「这一段」**：取流是三段串行的网络往返，每一段都
-	// 重新起算——所以这一栏是「用户此刻正在等的那一件事」。
-	LoadingWait time.Duration
 	// Starting 是「**应用还在启动中**」（票 #478）。
 	//
 	// ⚠️ **它和 `Loading` 不是一回事**：`Loading` 说「这一首还没放起来」，
@@ -177,7 +156,7 @@ type State struct {
 	// 歌名，用户看得见应用已经准备好了。
 	//
 	// 🔴 **它不是「有没有在取流」**：应用准备好了之后，用户再点一首歌，
-	// 那一趟取流**不是**「启动」——那一句「正在取流」已经说清了在等什么。
+	// 那一趟取流**不是**「启动」——播放键上那圈光已经说清了在等什么。
 	Starting bool
 	// Reconnecting 是「**正在重连**」：断流之后应用在救这一首。
 	//
@@ -232,6 +211,14 @@ type State struct {
 	// 那一批）。那种情况下 UP 名照样显示，只是**点不动**（见 `Item.ArtistMid`）。
 	ArtistMid int64
 
+	// Chapters 是当前这一首（投稿）的章节，进度条上的点画的就是它们的起点
+	// （票 #585）。空 = 没有章节（本地文件、音乐库、没问回来、或者这一条
+	// 本来就没有）——三种种情况界面上是同一个样子：一根光滑的进度条。
+	//
+	// ⚠️ **取的那一趟是异步的**：Snapshot 第一次给 nil，问回来了叫醒界面，
+	// 下一帧就有了。取数那一摊见 `chapters.go`。
+	Chapters []Chapter
+
 	// Quality 是当前这条流的音质徽章（「Hi-Res 无损」/「192K」）。
 	//
 	// 空串 = 这一首是本地文件，没有音质这回事（本地文件是什么格式和
@@ -263,14 +250,15 @@ type State struct {
 
 // App 是应用的全部状态。
 type App struct {
-	mu       sync.Mutex
-	player   *audio.Player
-	title    string
-	path     string
-	cover    string
-	position time.Duration
-	duration time.Duration
-	volume   float64
+	mu           sync.Mutex
+	folderCovers folderCoverCache
+	player       *audio.Player
+	title        string
+	path         string
+	cover        string
+	position     time.Duration
+	duration     time.Duration
+	volume       float64
 	// muted 是「静音」这一档，和 volume 分开记（票 #311）。
 	//
 	// ⚠️ **它和 volume 必须是两件事**：静音的时候 volume 一动都不动——取消静音
@@ -363,19 +351,6 @@ type App struct {
 	// 往返（见 `onlinePlayTimeout` 那段注释），每一段都重新起算——所以
 	// 「这一段等了多久」才是用户此刻真正在等的那件事。
 	loadingSince time.Time
-	// loadingSlow 是「这一段已经慢到该说出来了」（见 State.LoadingSlow）。
-	//
-	// ⚠️ **它是一个闹钟的结果，不是一个比较的结果**：界面是**按需绘制**
-	// 的（见 AGENTS.md「静默出错的几条铁律」第 3 条），所以「刚刚变慢」
-	// 这一刻必须有人去叫醒界面——比较出来的值在界面不动的时候不会变。
-	loadingSlow bool
-	// loadSlowStop 是「变慢」那个闹钟的停掉函数。
-	//
-	// ⚠️ **它和 `loadStop` 各存各的**：那一个管「这一段超时了判失败」，
-	// 这一个管「这一段慢到要告诉用户」。共用一个字段的话，先停掉另一个
-	// 就把另一个的闹钟弄丢了（那一个丢了 = 永远转圈，这一个丢了 =
-	// 慢了也不说）。
-	loadSlowStop func()
 	// loadFilled 是**上一次检查时**字节源已经下到的字节数。
 	//
 	// ⚠️ **它是「下载那一段还有没有进展」的比对基准**（见 `downloadProgressLocked`）：
@@ -557,6 +532,7 @@ type App struct {
 	loud loudnessCache
 	// autoLyricTried 记着这次运行里已经自动找过歌词的歌（见 lyrics_auto.go）。
 	autoLyricTried map[string]bool
+	noAutoLyrics   bool
 
 	sleepAt         time.Time
 	sleepStop       func()
@@ -598,6 +574,24 @@ type App struct {
 	// 测试里替成一个假函数，才能量「失败之后到底有没有再问」。
 	partsFetch func(context.Context, string) ([]bili.VideoPart, error)
 
+	// chapters 是当前这一首（投稿）的章节，chaptersKey 是它们属于哪一集
+	// （bvid+cid，多 P 的章节按集给）。见 chapters.go。
+	//
+	// ⚠️ **它自己的锁，不在 `a.mu` 里**：理由和 like 那一组一样——写它的
+	// 是网络往返回来的 goroutine，不该去抢每帧都在拿的那把。
+	chaptersMu      sync.Mutex
+	chapters        []Chapter
+	chaptersKey     string
+	chaptersLoaded  bool
+	chaptersWanted  bool
+	chaptersTriedAt time.Time
+	// chaptersFetch 是问章节的那一趟，nil = 走取流零件上的 `bili.Client.Chapters`。
+	//
+	// 和 `partsFetch` 同一条规矩：**只由界面那一侧读写**（`ensureChapters` 在
+	// 那里把它取出来递给后台那个 goroutine）。生产上永远是 nil；测试里替成
+	// 假函数。
+	chaptersFetch func(context.Context, string, string) ([]bili.Chapter, error)
+
 	// like 是当前这一首的赞 / 藏状态，likeBvid 是它属于哪一个稿件。见 like.go。
 	//
 	// ⚠️ **它自己的锁，不在 `a.mu` 里**：写它的是网络往返回来的那个 goroutine，
@@ -617,6 +611,100 @@ type App struct {
 	// 和 `partsFetch` 同一条规矩：**只由界面那一侧读写**（`ensureLike` 在那里就
 	// 把它取出来递给那个 goroutine，goroutine 不碰这个字段）。生产上永远是 nil。
 	likeFetch func(context.Context, string) (bili.ArchiveRelation, error)
+
+	// comments 是当前这一首的评论，commentsSlot 是它属于哪一个对象。见 comments.go。
+	//
+	// ⚠️ **它有自己的锁（`commentsMu`），不在 `a.mu` 里**：写它的是网络往返回来的
+	// 那个 goroutine，而 `a.mu` 是播放器那一摊的（`Snapshot` 每帧都要它）。理由
+	// 同 `likeMu` / `partsMu`。
+	commentsMu sync.Mutex
+	// commentsSlot 是这份缓存属于谁（`mv|<bvid>` / `audio|<sid>`）。换歌就重来。
+	commentsSlot string
+	// comments 是已经拿到的那些评论（主列表）。
+	comments []bili.Comment
+	// commentsErr 是最近一次问评论失败的原因。
+	commentsErr error
+	// commentsLoaded 是「主列表已经问到了」（失败**不**置它——失败之后要能再问，
+	// 理由同 `partsLoaded`）。
+	commentsLoaded bool
+	// commentsWanted 是「那一趟正在路上」。
+	commentsWanted bool
+	// commentsTriedAt 是上一次**发起**那一问的时刻，问失败之后拿它算退避
+	// （`commentsRetryAfter`）。
+	commentsTriedAt time.Time
+	// commentsMoreTriedAt 是上一次**发起翻页**的时刻（翻页那一趟单独算退避，
+	// 不跟第一页共用——共用的话刚进这一页就点「加载更多」会被挡住）。
+	commentsMoreTriedAt time.Time
+	// commentsNext 是下一页的游标（**偏移量**，B 站给什么就是什么，不透明）。
+	//
+	// ⚠️ **它是字符串，不是数字**：`cursor.pagination_reply.next_offset` 是
+	// 一个带 base64 字符（`+` `/` `=`）的串，而**改一个字符 B 站不报错**——
+	// 它回的是第一页（见 `bili.CommentPage.NextOffset`）。
+	//
+	// ⚠️ **不是 `cursor.next`**：那一栏在「评论」档（mode=1）上带上去必挂
+	// （B 站回 `-400 min_score … must be <= max_score …`）。
+	commentsNext string
+	// commentsIsEnd 是「到底了」。
+	commentsIsEnd bool
+	// commentsAllCount 是评论总数。
+	commentsAllCount int64
+	// commentsNoComments 是「这个对象在，只是还没有人评论」。
+	commentsNoComments bool
+	// commentsRefresh 是「用户按了刷新，绕过缓存」。
+	commentsRefresh bool
+	// commentsGen 是**评论代次**。每换一个槽位就加一，迟到的结果回来发现代次
+	// 变了直接丢掉（理由同 `lyricGen`）。
+	commentsGen int
+	// commentsTyp / commentsOid 是当前这一首问的是哪个对象（`type` / avid 或
+	// auid）。楼中楼要用它，**别再换一次 avid**。
+	commentsTyp int64
+	commentsOid int64
+	// commentsReplies 是楼中楼，按根评论 id 分格。
+	commentsReplies map[int64][]bili.Comment
+	// commentsRepliesTried / commentsRepliesWanted 是楼中楼那一边的退避与
+	// 「正在路上」。
+	commentsRepliesTried  map[int64]time.Time
+	commentsRepliesWanted map[int64]bool
+	// commentsAvids 记着 bvid → avid 的换算（省掉同一首歌的第二次往返）。
+	commentsAvids map[string]int64
+	// commentsAvidWaiters 是「正在换 avid 的那一趟」（bvid → 那个 chan）。
+	//
+	// 🔴 **同一时刻只发一趟**：主列表那一趟和楼中楼那一趟可能同时问同一个
+	// bvid 的 avid——两趟都发出去就是两次网络往返。
+	commentsAvidWaiters map[string]chan struct{}
+	// commentsCache 是评论缓存。挂上之前是 nil（那时的表现是「每次都要重问」，
+	// 没有别的坏处）。
+	commentsCache *comments.Cache
+	// commentsListFetch / commentsRepliesFetch / commentsArchiveIDFetch 是问
+	// 评论那几趟的替身。生产上永远是 nil（走取流零件上的那个 B 站客户端）。
+	//
+	// ⚠️ **只由界面那一侧读写**（跟 `partsFetch` 同一条规矩）：`ensureComments`
+	// 在那里就把函数取出来递给那个 goroutine，goroutine 不碰这个字段。
+	commentsListFetch commentsListFetchFunc
+	// commentsRepliesFetch 是问楼中楼那一趟。
+	commentsRepliesFetch commentsRepliesFetchFunc
+	// commentsArchiveIDFetch 是 bvid → avid 那一趟。
+	commentsArchiveIDFetch commentsArchiveIDFetchFunc
+	// commentsSeq 是**在途序号**。每发起一趟问评论就加一（不管问的是哪一页）。
+	//
+	// 🔴 **它挡的是「同一个对象上有两趟」**：用户按了「刷新」，而首次加载那一趟
+	// 还在途——两趟回来的时候，**较早的那一趟不能盖掉刷新拉回来的那一份**。
+	//
+	// ⚠️ **代次（`commentsGen`）挡不住这个**：代次是「换歌才加」，而刷新不换歌。
+	commentsSeq int
+	// commentsSeqs 记着**每个槽位最后发起的那一趟**的序号。
+	//
+	// ⚠️ **按槽位记**（不是全局序号）：全局的序号会把「另一首歌的新一趟」也算
+	// 成「比这一首新」，于是切到另一首之后，上一首那份就落不了盘了——而下次进
+	// 上一首就得重新拉一次（那就不是「第二次进是瞬时的」了）。
+	commentsSeqs map[string]int
+	// commentsWriteMu 是**写盘那把专锁**。它把「检查我是不是最新的一趟」和
+	// 「真的写下去」包在同一个临界区里——分开的话，中间发起的新一趟会让旧的
+	// 那一趟以为自己还是最新的，于是它写得更晚、把新的盖掉。
+	//
+	// ⚠️ **它不是 `commentsMu`**：写盘是阻塞 IO，而 `commentsMu` 是界面每一帧
+	// 都要的（`App.Comments`）。
+	commentsWriteMu sync.Mutex
 
 	// 弹幕这一摊，见 danmaku.go。挂上缓存之前 danmakuCache 是 nil。
 	//
@@ -780,6 +868,27 @@ type App struct {
 	announceMu  sync.Mutex
 	announces   []announceEntry
 	announceSeq uint64
+
+	// downloadNotifier 是「下载下完了，去看看」的那只手，由界面层装一次。
+	//
+	// ⚠️ **它存在这儿是因为「用户在不在这几扇窗里」只有界面层答得了**（那是
+	// 窗口的焦点状态，见 `internal/ui/notification.go`），而这一层不认识界面
+	// ——所以它只能把「这件事发生了」递过去。
+	//
+	// ⚠️ **它在后台那条线上被调**（下载队列自己那条线），而界面层那一头会读
+	// 窗口状态——那一头是带锁的，所以跨 goroutine 调它不违反铁律一。
+	downloadNotifier func(taskID, title string)
+
+	// updateNotifier 是「查到了新版本，去看看」的那只手，由界面层装一次。
+	//
+	// ⚠️ **它和 `downloadNotifier` 是两件事**：下载完成是**后台发生**的（用户
+	// 常常不在），而「有更新了」是**用户看得见**的事（设置页里明明白白写着
+	// 「发现新版本 x.y.z」，界面还会弹一条提示）。所以它走的是另一档：只有
+	// 用户不在应用里的时候才发系统通知，而界面上的那一条照旧发。
+	//
+	// ⚠️ **它在后台那条线上被调**（检查更新的 goroutine），而界面层那一头会读
+	// 窗口状态——那一头是带锁的，所以跨 goroutine 调它不违反铁律一。
+	updateNotifier func(version string)
 }
 
 // wakeEntry 是一个窗口的唤醒句柄，外加一个用来摘掉它的号。
@@ -927,7 +1036,7 @@ func (a *App) Snapshot() State {
 	defer a.mu.Unlock()
 	// ⚠️ 偏好直接从 `a.streaming` 读，**不能**调 `a.AudioQuality()`：那把锁
 	// 已经在手里了，sync.Mutex 不可重入，那样写是当场死锁。
-	pref := AudioQualityAuto
+	pref := AudioQualityHigh
 	if a.streaming != nil {
 		pref = BiliToPref(a.streaming.Quality)
 	}
@@ -961,14 +1070,6 @@ func (a *App) Snapshot() State {
 		Err:             a.errText,
 		ErrDetail:       a.errDetail,
 		Loading:         a.loading,
-		LoadingTitle:    a.loadingTitle,
-		// 🔴 **「慢」这一档是三样东西**：卡在哪一段、够不够慢、等了多久。
-		// 「够了多久」用**这一段开始的时刻**现算（见 App 里 loadingSince
-		// 那段注释）——界面每一帧都要读这一栏，而现算比另外存一栏更不容易
-		// 走偏（那一栏要跟着每一次「重新起算」一起改）。
-		LoadingStage: a.loadingStage,
-		LoadingSlow:  a.loadingSlow,
-		LoadingWait:  a.loadingWaitLocked(),
 		// 🔴 **「启动中」只在「还没有歌」的时候才为真**（见 State 里
 		// `Starting` 那段注释）：有歌的时候界面上摆的是歌名，用户看得见
 		// 应用已经准备好了。
@@ -983,6 +1084,9 @@ func (a *App) Snapshot() State {
 		QualityPref:      pref,
 		Artist:           a.artist,
 		ArtistMid:        a.artistMid,
+		// 章节走的是它自己的锁和队列的锁（形状和上面 `PlayMode` 那两行一样），
+		// 顺手把没问过的那一趟问出去——见 `chapters.go`。
+		Chapters: a.chaptersForSnapshotLocked(),
 
 		// 播放模式在队列自己的锁里，不在 `a.mu` 里——它是队列的形状，不是
 		// 播放器的状态。顺着一句一句取：`a.mu` 已经拿在手里，而 `a.queue`

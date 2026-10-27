@@ -53,6 +53,92 @@ var errRecommendMissing = errors.New("app: 首页暂时加载不出来")
 type Recommend struct {
 	// Client 是 B 站客户端。**全项目那一份**（`MountLogin` 建的那一个）。
 	Client *bili.Client
+
+	mu sync.Mutex
+	// periods 是两张榜最近一次拉到的那一期（下标 0 热榜、1 原创榜），给榜单页的
+	// 「第几期 · 更新于」那一行用。
+	periods [2]bili.ToplistPeriod
+
+	// hot 是搜索框「大家在听」那一栏的词（热榜前几首的歌名）和它的取数状态。
+	hot        []string
+	hotAt      time.Time
+	hotLoading bool
+}
+
+// hotSongsShown 是「大家在听」摆几个词；hotSongsTTL 是一份词用多久再换。
+const (
+	hotSongsShown = 8
+	hotSongsTTL   = 10 * time.Minute
+	hotSongsRetry = time.Minute
+)
+
+// HotSongTitles 是「大家在听」那一栏此刻的词（热榜前几首的歌名）。没拉到时为空。
+func (r *Recommend) HotSongTitles() []string {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.hot
+}
+
+// RefreshHotSongs 在需要时去后台拉一份热榜歌名，拉完调 wake。
+//
+// 它是每帧可调的：已经有一份且没过期、或者上一趟还在飞、或者刚失败过不久，都直接
+// 返回，不发请求。词取热榜而不是 B 站全站热搜：全站热搜是新闻、游戏，不是歌。
+func (r *Recommend) RefreshHotSongs(wake func()) {
+	if !r.Mounted() {
+		return
+	}
+	r.mu.Lock()
+	ttl := hotSongsTTL
+	if len(r.hot) == 0 {
+		ttl = hotSongsRetry
+	}
+	if r.hotLoading || (!r.hotAt.IsZero() && time.Since(r.hotAt) < ttl) {
+		r.mu.Unlock()
+		return
+	}
+	r.hotLoading = true
+	r.mu.Unlock()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		items, _, err := r.toplist(ctx, HomeTabHot, 1)
+		titles := make([]string, 0, hotSongsShown)
+		seen := map[string]bool{}
+		for _, it := range items {
+			if len(titles) == hotSongsShown {
+				break
+			}
+			if it.Title != "" && !seen[it.Title] {
+				seen[it.Title] = true
+				titles = append(titles, it.Title)
+			}
+		}
+		r.mu.Lock()
+		r.hotLoading, r.hotAt = false, time.Now()
+		if err == nil && len(titles) > 0 {
+			r.hot = titles
+		}
+		r.mu.Unlock()
+		if wake != nil {
+			wake()
+		}
+	}()
+}
+
+// BoardPeriod 是热榜 / 原创榜（HomeTabHot / HomeTabOriginal）最近一次拉到的那一期。
+// 还没拉到、或者不是榜单那两档时 ok 为 false。
+func (r *Recommend) BoardPeriod(tab int) (p bili.ToplistPeriod, ok bool) {
+	i := tab - HomeTabHot
+	if r == nil || i < 0 || i >= len(r.periods) {
+		return p, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p = r.periods[i]
+	return p, p.ID != 0
 }
 
 // Mounted 报这一摊挂上没有。界面靠它说清「还没接上」。
@@ -77,6 +163,9 @@ type RecommendItem struct {
 	Duration time.Duration
 	// View 是播放量。
 	View int64
+	// ViewAt / Progress 只有最近播放填：看的时刻、看到哪儿。
+	ViewAt   time.Time
+	Progress time.Duration
 	// Item 是播放和右键菜单真正用的那一项。已是 `Source: "online"`。
 	//
 	// ⚠️ **榜上有些条目没有稿件**（纯音乐条目，`related_archive` 是空的），
@@ -117,6 +206,7 @@ func recommendItems(in []bili.RecommendItem) (out []RecommendItem, dropped int) 
 			ID: id, Title: it.Title, Cover: it.Cover,
 			Owner: it.Owner, OwnerMid: it.OwnerMid,
 			Duration: it.Duration, View: it.View,
+			ViewAt: it.ViewAt, Progress: it.Progress,
 			Item: recommendItem(it),
 		})
 	}
@@ -171,6 +261,12 @@ const (
 	// HomeTabPop 是「流行」那一档：音乐综合榜（**不是第三个分区**，见
 	// `service/bili/recommend.go` 的文件头）。
 	HomeTabPop = 2
+	// HomeTabHot 是「热榜」那一档：B 站音乐站的热榜，取最新一期。
+	HomeTabHot = 3
+	// HomeTabOriginal 是「原创榜」那一档：同上，原创榜。
+	HomeTabOriginal = 4
+	// HomeTabRecent 是「最近播放」那一档：登录账号的观看历史（投稿）。
+	HomeTabRecent = 5
 )
 
 // HomeRegionOf 是 Tab 对应的分区号。**「流行」那一档没有分区**——它走榜。
@@ -200,6 +296,12 @@ func (r *Recommend) Feed(ctx context.Context, tab, page int) ([]RecommendItem, i
 	if !r.Mounted() {
 		return nil, 0, errRecommendMissing
 	}
+	switch tab {
+	case HomeTabHot, HomeTabOriginal:
+		return r.toplist(ctx, tab, page)
+	case HomeTabRecent:
+		return r.recent(ctx, page)
+	}
 	if tab == HomeTabPop {
 		items, err := r.Client.MusicRank(ctx, bili.MusicRankQuery{Page: page})
 		if err != nil {
@@ -215,6 +317,59 @@ func (r *Recommend) Feed(ctx context.Context, tab, page int) ([]RecommendItem, i
 		return nil, 0, err
 	}
 	out, dropped := recommendItems(items)
+	return out, dropped, nil
+}
+
+// toplist 拉热榜 / 原创榜的最新一期。
+//
+// ⚠️ **整期一次给完**（一期就是一张完整的榜），所以只有第 1 页有内容，第 2 页起
+// 一律是空的——翻页那一层照「一页空的就是到底了」收哨兵，不会为它多发请求。
+// 没有任何一期（B 站给了空榜）时同样是一页空的。
+func (r *Recommend) toplist(ctx context.Context, tab, page int) ([]RecommendItem, int, error) {
+	if page > 1 {
+		return nil, 0, nil
+	}
+	kind := bili.ToplistHot
+	if tab == HomeTabOriginal {
+		kind = bili.ToplistOriginal
+	}
+	period, err := r.Client.ToplistLatest(ctx, kind)
+	if err != nil || period.ID == 0 {
+		return nil, 0, err
+	}
+	r.mu.Lock()
+	r.periods[tab-HomeTabHot] = period
+	r.mu.Unlock()
+	items, err := r.Client.ToplistMusic(ctx, period.ID)
+	if err != nil {
+		return nil, 0, err
+	}
+	out, dropped := recommendItems(items)
+	return out, dropped, nil
+}
+
+// recent 拉第 page 页最近播放（B 站历史记录，投稿类）。
+//
+// ⚠️ **只读**：这里只调历史列表，不碰任何写接口（删除、清空、播放上报）。
+// 需要登录——没登录时 B 站回 -101，界面在发请求之前就拦下了（见
+// `internal/ui/homepage_feed.go` 的 `tabFetcher`），不靠这个错。
+//
+// 行身份走 bvid（同一部稿件重复看过只留一条，`recommendItems` 去重）：首页这一档
+// 是「再放一遍」的入口，不是历史记录页——要按观看时刻区分、要删除，去历史记录页。
+func (r *Recommend) recent(ctx context.Context, page int) ([]RecommendItem, int, error) {
+	pg, err := r.Client.HistorySearch(ctx, bili.HistoryQuery{Page: page})
+	if err != nil {
+		return nil, 0, err
+	}
+	in := make([]bili.RecommendItem, 0, len(pg.Items))
+	for _, it := range pg.Items {
+		in = append(in, bili.RecommendItem{
+			Bvid: it.Bvid, Cid: it.Cid, Title: it.Title, Cover: it.Cover,
+			Owner: it.AuthorName, OwnerMid: it.AuthorMid, Duration: it.Duration,
+			ViewAt: it.ViewAt, Progress: it.Progress,
+		})
+	}
+	out, dropped := recommendItems(in)
 	return out, dropped, nil
 }
 

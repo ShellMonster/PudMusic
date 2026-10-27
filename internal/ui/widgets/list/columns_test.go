@@ -262,3 +262,23 @@ func TestPubTimeTextCountsCalendarDays(t *testing.T) {
 		t.Errorf("20 日 23:59 对 21 日 00:01 折出来是 %q，want 昨天", got)
 	}
 }
+
+// TestTheRankColumnMakesTheTopThreeBiggerThanTheRest 钉榜单页的名次列：前三名的序号
+// 比第四名大（主色加粗放大），不开 Rank 的列表所有序号一样大。
+func TestTheRankColumnMakesTheTopThreeBiggerThanTheRest(t *testing.T) {
+	size := func(cols Columns) (first, fourth float32) {
+		_, tt := newColumnsList(t, ViewList, cols, columnsSongs())
+		a, ok1 := tt.Find("1")
+		d, ok2 := tt.Find("4")
+		if !ok1 || !ok2 {
+			t.Fatalf("找不到序号 1 / 4：%q", tt.Texts())
+		}
+		return a.H, d.H
+	}
+	if f, d := size(Columns{Rank: true}); f <= d {
+		t.Errorf("榜单页第一名序号高 %.1f，应该比第四名（%.1f）大", f, d)
+	}
+	if f, d := size(Columns{}); f != d {
+		t.Errorf("普通列表第一名序号高 %.1f，应该和第四名（%.1f）一样", f, d)
+	}
+}

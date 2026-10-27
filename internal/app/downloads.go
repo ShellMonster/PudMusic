@@ -171,10 +171,49 @@ func (a *App) downloadFinished(s download.Snapshot) {
 	switch s.Status {
 	case download.StatusDone:
 		a.announce("《" + s.Title + "》下载完成")
+		// 🔴 **系统通知**（票 #559）：用户多半不在应用里——他可能在听歌，可能
+		// 在别的应用干别的。这一句是给那种时候用的。
+		//
+		// ⚠️ **「用户在不在这几扇窗里」界面层才答得了**（那是窗口的状态），
+		// 而这一层不认识界面——所以它只是**把这件事告诉界面层**，由界面层判
+		// 完活跃态再决定弹不弹。
+		//
+		// ⚠️ **它在后台那条线上被调**，而界面层那一头要读窗口的状态——那一头
+		// 是带锁的（见 `internal/ui/notification.go` 的 `focusTracker`），所以
+		// 跨 goroutine 读它不违反铁律一（铁律一管的是**界面状态**，不是这个）。
+		a.notifyDownloadDone(s.ID, s.Title)
 	case download.StatusError:
 		// ⚠️ **剥掉内部前缀**（"download: "）：那是我们自己的说法，读屏软件
 		// 是逐字念的（理由见 `announce.go` 的 `announceErrTextOf`）。
 		a.announce("《" + s.Title + "》下载失败：" + announceErrTextOf(s.Err))
+	}
+}
+
+// SetDownloadNotifier 装上「下载下完了」的那只手，由界面层装一次。
+//
+// ⚠️ **它要的不是「用户在不在这几扇窗里」的答案，而是「这件事发生了」**——
+// 那一档只有界面层答得了（那是窗口的焦点状态），而这一层不认识界面。
+//
+// ⚠️ **没装的时候那件事也不能丢**（票面第 5 条）：界面层没装（无头测试、
+// 或者这一轮界面层没起来）时，`downloadFinished` 那一句话（读屏软件念的那
+// 一句）照旧念——那一句走的是**另一条线**（`announce`），它不依赖系统通知。
+func (a *App) SetDownloadNotifier(fn func(taskID, title string)) {
+	a.mu.Lock()
+	a.downloadNotifier = fn
+	a.mu.Unlock()
+}
+
+// notifyDownloadDone 把「下载下完了」告诉界面层。
+//
+// ⚠️ **不在 `a.mu` 底下调界面层那一头**：那一头会读窗口状态（它自己带锁），
+// 而这一层拿着 `a.mu` 去调一个别的包的代码就是当场死锁——死锁在这里的表现
+// 是「整个应用冻住」。
+func (a *App) notifyDownloadDone(taskID, title string) {
+	a.mu.Lock()
+	notifier := a.downloadNotifier
+	a.mu.Unlock()
+	if notifier != nil {
+		notifier(taskID, title)
 	}
 }
 

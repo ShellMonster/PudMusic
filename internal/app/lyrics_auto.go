@@ -97,6 +97,14 @@ func rankAutoCandidates(title string, durMS int, cands []lyrics.Candidate) []lyr
 	return out
 }
 
+// TestOnlyNoAutoLyrics 关掉自动找歌词：歌词搜索弹窗的测试要数「搜了几次」，
+// 自动找的那一次会混进同一个源的计数里。
+func (a *App) TestOnlyNoAutoLyrics() {
+	a.mu.Lock()
+	a.noAutoLyrics = true
+	a.mu.Unlock()
+}
+
 // autoSearchLyrics 在后台自动找一份歌词装上。key 是这一首的缓存键，title 是歌名。
 func (a *App) autoSearchLyrics(key, title string) {
 	query := cleanLyricTitle(title)
@@ -105,7 +113,7 @@ func (a *App) autoSearchLyrics(key, title string) {
 	}
 	a.mu.Lock()
 	srcs := a.lyricSearch.sources
-	if len(srcs) == 0 || a.autoLyricTried[key] || a.closed {
+	if len(srcs) == 0 || a.autoLyricTried[key] || a.closed || a.noAutoLyrics {
 		a.mu.Unlock()
 		return
 	}

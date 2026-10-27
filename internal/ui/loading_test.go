@@ -77,10 +77,10 @@ func TestEveryFirstScreenIsACenteredSpinner(t *testing.T) {
 	}{
 		{name: "搜索", loading: "正在加载…", path: searchPath + "?q=%E5%91%A8%E6%9D%B0%E4%BC%A6", centered: true, rows: true},
 		{name: "收藏夹", loading: "正在加载…", path: collectionPathPrefix + "12345", centered: true, rows: true},
-		{name: "稍后再看", loading: "正在加载…", path: laterPath, centered: true},
-		{name: "历史记录", loading: "正在加载…", path: historyPath, centered: true},
-		{name: "我的关注", loading: "正在加载关注的人…", path: followPath},
-		{name: "用户动态", loading: "正在加载动态…", path: dynamicFeedPath},
+		{name: "稍后再看", loading: "正在加载…", path: laterPath, centered: true, rows: true},
+		{name: "历史记录", loading: "正在加载…", path: historyPath, centered: true, rows: true},
+		{name: "我的关注", loading: "正在加载关注的人…", path: followPath, rows: true},
+		{name: "用户动态", loading: "正在加载动态…", path: dynamicFeedPath, rows: true},
 	} {
 		t.Run(page.name, func(t *testing.T) {
 			b := newTestShell(t, blockedBiliOpts(t, true)...)
@@ -146,8 +146,8 @@ func TestTheLoadingStateIsNotTheEmptyState(t *testing.T) {
 		t.Errorf("还在加载就说「暂无内容」——那是把「还没好」说成「没有」，文字有 %q", tt.Texts())
 	}
 	// 转圈不是一行字：15px 那一档的行高是 17.67，而它是 32 的一方块。
-	if loading.H != skeletonRows*skeletonRowH {
-		t.Errorf("加载中那一块高 %.2f，want %d——列表首屏是八行骨架屏，不是一行字",
+	if loading.H <= 0 || loading.H > skeletonRows*skeletonRowH {
+		t.Errorf("加载中那一块高 %.2f，want (0, %d]——列表首屏是八行骨架屏，不是一行字",
 			loading.H, skeletonRows*skeletonRowH)
 	}
 

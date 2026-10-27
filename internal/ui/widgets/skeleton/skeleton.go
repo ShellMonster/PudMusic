@@ -106,3 +106,19 @@ func Card(c *ui.Context, key string, side float32) {
 		Block(c, key+":b", side*0.5, 10, 4)
 	})
 }
+
+// Post 画一条动态占位：头像 + 名字条，下面三行正文条（最后一行短）。
+func Post(c *ui.Context, key string) {
+	ui.Column(c).Key(key).FillWidth().Padding(space.Px12).Gap(space.Px12).Children(func() {
+		ui.Row(c).Gap(space.Px12).AlignItems(ui.Center).Children(func() {
+			Block(c, key+":av", 40, 40, 20)
+			ui.Column(c).Gap(space.Px8).Children(func() {
+				Block(c, key+":n", 120, 12, 4)
+				Block(c, key+":t", 72, 10, 4)
+			})
+		})
+		Block(c, key+":l1", 0, 12, 4)
+		Block(c, key+":l2", 0, 12, 4)
+		Block(c, key+":l3", 220, 12, 4)
+	})
+}

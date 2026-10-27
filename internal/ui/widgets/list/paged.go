@@ -224,6 +224,9 @@ func NewPaged(cache *imgcache.Cache, acts Actions, fetch Fetcher) *PagedList {
 // 知道此刻画的是哪一档。
 func (p *PagedList) List() *List { return p.surf.List() }
 
+// SetHighlight 设歌名里要标出的搜索词，传空串去掉。
+func (p *PagedList) SetHighlight(q string) { p.surf.List().SetHighlight(q) }
+
 // SetSelection 装多选那一摊接线（`Selection`），传零值去掉。
 //
 // ⚠️ **别用 `p.List().SetSelection(...)`**：那只装到了列表那半边，而网格那一档

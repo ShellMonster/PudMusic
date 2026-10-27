@@ -10,12 +10,13 @@
 //
 // ## 坑一：`Call.Buvid` 绝对不能开，而且要显式写 `Call.NoBuvid`
 //
-// 实测（同一客户端、同一 URL，只改 Cookie 头）：
+// 实测（同一客户端、同一 URL，只改 Cookie 头；**匿名**客户端）：
 //
 //	不带 / 只带 foo=bar / 只带 SESSDATA   → 20 条，cursor.is_end = false
 //	带 buvid3=<真值>（带不带 buvid4 都一样） →  3 条，cursor.is_end = true
 //
-// **只要请求头里出现 `buvid3`，B 站就把评论列表截成 3 条并宣称「到底了」。**
+// **匿名客户端只要请求头里出现 `buvid3`，B 站就把评论列表截成 3 条并宣称
+// 「到底了」。**
 // 而本仓库的 `Call.Buvid` 干的正是这件事（`client.go` 里那个字段的注释在说
 // 「取流接口没有它时 B 站常把请求当成可疑流量」——**取流要带，评论不能带**）。
 //
@@ -36,9 +37,18 @@
 // 从 Cookie 头里摘掉（那里 jar 已经加好了），而**登录态照带**
 // （SESSDATA / bili_jct 一个都不动）。见 `client.go` 的 `noBuvidTransport`。
 //
-// ⚠️ **这条的边界**：探针是**匿名**客户端测出来的。登录态下（真 SESSDATA +
-// 真 buvid3）行为可能不同。⇒ **实现时必须在登录态下复验一次**；若登录态下
-// 带 buvid 也正常，那也只是「可以不带」，别改成「要带」。
+// ⚠️ **这条的边界**（2026-10-27 真机回归复验过）：那 3 条是**匿名**客户端
+// 的数。**登录态下带 buvid3 不受影响**——同一个 URL、同一枚真 buvid3：
+//
+//	匿名 + buvid3          →  3 条，is_end = true
+//	假 SESSDATA + buvid3   →  3 条，is_end = true
+//	**真登录态** + buvid3  → **20 条**，is_end = false
+//
+// 判据是**登录态成不成立**，不是「Cookie 头里有没有 SESSDATA 这个名字」。
+//
+// ⇒ **`NoBuvid: true` 仍然是对的**（它往严的那边退），但**别改成「要带」**：
+// 多带 buvid3 的坏处是**静默**少拿数据（只剩 3 条），少带的坏处顶多是
+// 「B 站觉得这个客户端像机器人」——两边的错法不对称。
 //
 // ## 坑二：用不带 WBI 的那个接口
 //
@@ -54,6 +64,49 @@
 //
 // ⇒ **本文件自己判 -403**（见 `CommentRecoverable` 与 `CommentFriendly`），
 // **不许顺手改全局那张表**——那会波及别的接口（票 #571 的纪律）。
+//
+// # 坑四：翻页走 `pagination_reply.next_offset`，**不是 `cursor.next`**
+//
+// 实测（2026-10-27 真机回归，票 #591，只发 GET）：
+//
+//	最热档（mode=3）  next 是**页码**（1 → 2 → 3 …）
+//	最新档（mode=2）  next 是**楼层号**（160595 → 160592 → …，递减）
+//	评论档（mode=1）  next 带上去**必定**回
+//	                `-400 min_score(1.000000) must be <= max_score(0.000000)`
+//
+// 根因是 `cursor.support_mode` **恒为 `[2, 3]`，不含 1**——B 站已经不支持
+// mode=1 这一档的游标了（它认得 `mode=1`，但给回来的 `next` 是另一套，
+// 拿它去翻就撞上了 B 站内部的分数区间）。
+//
+// 而 `cursor.pagination_reply.next_offset` +
+// `pagination_str={"offset":"<next_offset>"}` **三档都能翻**（实测 mode=3 /
+// 1 / 2 都翻到了第二页，而且每页内容互不相同）。
+//
+// ⚠️ **那个偏移量一个字都不能改**：改一个字符 B 站**不报错**——它回的是
+// **第一页**（实测：拿一个乱写的 offset 去问，它回 code 0 + 第一页）。于是
+// 界面上「加载更多」按下去**什么都不变**。
+//
+// # 「评论」那一档（`mode=1`）给的就是「最新评论」的同一份
+//
+// 实测（2026-10-27 真机回归，票 #591）：mode=1 与 mode=2 的内容**逐条相同**
+// ——第 1 页 19 条、第 2 页 18 条，rpid 都对得上（oid=170001 与
+// oid=114256632618805 两个对象都比过）。
+//
+// 而 B 站给这两档的 `cursor.name` 是**不同的**（「评论」/「最新评论」）——
+// **只看名字根本分不出来**。
+//
+// ⇒ 界面上**不能**把它们摆成两个不同的档（用户会以为「切了档但没生效」）。
+// 判据见 `CommentSort.SameContentAs` 与 `CommentSorts`。
+//
+// # 坑五：评论区关掉的码是 **12002**（旧码 12061 也要认）
+//
+// 实测（2026-10-27 真机回归，票 #592；BMG-303 / issue #575 / PR #605）：
+// 评论区被关掉时，**所有**评论接口一律回 `12002`「当前页面评论功能已关闭」——
+// 主列表、WBI 版、楼中楼、老接口，**一个都不例外**；而 **`12061` 一次都没出现过**。
+//
+// ⇒ `wrapCommentError` **两个码都认**（见那里的注释）。只认旧码的话这一档
+// **基本触发不到**，界面上只剩一句「B 站返回了一个看不懂的错误（12002）」——
+// 而这一档**必须和「对象不在了」「还没有人评论」分开说**（票 #571 的验收）。
 //
 // # 老接口 `/x/v2/reply` 不用
 //
@@ -98,21 +151,87 @@ const (
 
 // CommentSort 是评论列表的排序方式（`mode` 参数）。
 //
-// 这三档正好对应网易云的「最热 / 推荐 / 最新」，不用另发明。
+// 这三档对应 B 站评论区的「热门评论 / 评论 / 最新评论」，不用另发明。
+//
+// ⚠️ **「评论」那一档（`mode=1`）不是第三份内容**——它给的就是「最新评论」
+// 的同一份（实测，理由见 `CommentSortDefault` 的注释与 `SameContentAs`）。
 type CommentSort int
 
 const (
 	// CommentSortHot 是「热门评论」（`mode=3`）：只按热度。
 	CommentSortHot CommentSort = 3
-	// CommentSortDefault 是「评论」（`mode=1`）：热度 + 时间。
+	// CommentSortDefault 是「评论」（`mode=1`）。
+	//
+	// 🔴 **它给的就是「最新评论」的同一份内容**（实测 2026-10-27，票 #591）：
+	//
+	//	第 1 页  mode=1 与 mode=2 的 rpid **逐条相同**（oid=170001 与
+	//	        oid=114256632618805 两个对象都比过）
+	//	第 2 页  换成 `pagination_str` 翻之后，两档的 rpid 仍**逐条相同**
+	//
+	// 试过的别的参数也分不开：`sort=0/1/2/3`、`plat=1`、`web_location`——
+	// **全都回同一份内容**（`sort` 对这一档完全无效）。
+	//
+	// ⇒ 这一档**没有「推荐」那种独立内容**。界面上不能把它和「最新评论」
+	// 摆成两个不同的东西（摆成两个一模一样的档，用户会以为「切了档但没生效」）
+	// ——判据是 `SameContentAs`。
+	//
+	// ⚠️ **旧注释写的是「热度 + 时间」，那是错的**（AGENTS.md §7 注释不许
+	// 说谎）：B 站这一档给的是纯时间序，与「最新评论」一模一样。
 	//
 	// ⚠️ **别拿 0 当默认值发出去**：实测 `mode=0` 会被 B 站当成 `mode=3`
 	// 处理（回的是「热门评论」），而 `mode=99` 直接回 `-400 invalid mode`。
 	// 所以「没指定」要落到一个**认得出来的**档上，而不是把 0 原样发出去。
+	//
+	// ⚠️ **`cursor.support_mode` 恒为 `[2, 3]`，不含 1**（实测）⇒ B 站已经
+	// 不给这一档发能用的游标了。它的游标要改走 `pagination_reply.next_offset`
+	// （见 `CommentPage.NextOffset` 与 `CommentList`）。
 	CommentSortDefault CommentSort = 1
 	// CommentSortLatest 是「最新评论」（`mode=2`）：只按时间。
 	CommentSortLatest CommentSort = 2
 )
+
+// SameContentAs 报「这两档在 B 站那边给的是不是同一份内容」。
+//
+// 🔴 **「评论」（`mode=1`）和「最新评论」（`mode=2`）是同一份**（实测，理由见
+// `CommentSortDefault` 的注释）。⇒ 界面上**不能**把它们摆成两个不同的档：
+// 用户会以为「切了档但没生效」。
+//
+// ⚠️ **这个判据不能省**：B 站那边两档的 `cursor.name` 是不同的（「评论」/
+// 「最新评论」），而内容一模一样——只看名字的话根本分不出来。
+func (s CommentSort) SameContentAs(other CommentSort) bool {
+	return commentSortContentGroup(s) == commentSortContentGroup(other)
+}
+
+// CommentSorts 是「界面上该摆哪几档排序」。
+//
+// 🔴 **它只有两档**——「评论」（`mode=1`）那一档**不在里面**（理由见
+// `CommentSortDefault` 的注释）：
+//
+//	「评论」和「最新评论」在 B 站那边给的是**同一份内容**（实测，逐条比过
+//	rpid），而 `cursor.support_mode` 恒为 `[2, 3]`，**不含 1**——B 站已经
+//	不支持那一档的独立游标了。
+//
+// ⇒ 把它们摆成两个不同的档，用户切过去会看到**一模一样的内容**，于是以为
+// 「切了档但没生效」。
+//
+// ⚠️ **留的是「最新评论」那一档**（不是「评论」）：`mode=1` 不在 B 站的
+// `support_mode` 里，而 `mode=2` 在——**它才是 B 站现在支持的那一档**。
+func CommentSorts() []CommentSort {
+	return []CommentSort{CommentSortHot, CommentSortLatest}
+}
+
+// commentSortContentGroup 是「B 站那边同一份内容」的分组号。
+//
+// 「评论」和「最新评论」归同一组（实测它们给的是同一份），「热门评论」自己
+// 一组。
+func commentSortContentGroup(s CommentSort) int {
+	switch s {
+	case CommentSortDefault, CommentSortLatest:
+		return 1
+	default:
+		return 2
+	}
+}
 
 // commentPageSizeMax 是主列表一页最多给几条。
 //
@@ -143,7 +262,14 @@ var (
 	// 摆在那儿——**他会去重新下载一遍**。
 	ErrCommentTargetMissing = errors.New("bili: 没有这个评论对象")
 
-	// ErrCommentSectionClosed 是「UP 主把评论区关了」（12061）。
+	// ErrCommentSectionClosed 是「UP 主把评论区关了」（**12002**，旧码 12061 也认）。
+	//
+	// ⚠️ **现在 B 站回的是 12002**（2026-10-27 真机回归，票 #592）：评论区被
+	// 关掉时，**所有**评论接口（主列表 / WBI 版 / 楼中楼 / 老接口）**一律**回
+	// `12002`「当前页面评论功能已关闭」，而 **`12061` 一次都没出现过**。
+	//
+	// ⇒ **两个码都要认**（`12061` 是旧码，留着无害：多认一个码不会错）：
+	// 只认旧码的话，这一档基本触发不到，界面上就只剩一句看不懂的错。
 	//
 	// 单独一个哨兵是因为它和「0 条评论」也要分开说：这一条是**有人**关掉了它，
 	// 而 0 条是**本来就没有**。用户看到「评论区关了」知道白按了；看到
@@ -241,8 +367,12 @@ type Comment struct {
 	SubReplyEntryText string
 	// Location 是 IP 属地。
 	//
-	// ⚠️ **实测匿名取回来常常是空串**（本机取到的是空串），所以**别拿它
-	// 判「有没有」**——空串就是「B 站没给」。
+	// ⚠️ **这个键是条件出现的**：实测（2026-10-27 真机回归，1064 条评论）
+	// 只有 254 条带 `reply_control.location`，其余 810 条**压根没有这个键**
+	// （不是空串）。而 B 站**给的时候给的就是有内容的**（那 254 条一条
+	// 空串都没有）。
+	//
+	// ⇒ **别拿它判「有没有」**：空串就是「B 站没给」。
 	Location string
 
 	// IsUpper 是「这条评论是 UP 主自己发的」。
@@ -277,8 +407,36 @@ type CommentPage struct {
 	//	最热档（mode=3）  next 是**页码**（1 → 2 → 3 …）
 	//	最新档（mode=2）  next 是**楼层号**（160595 → 160592 → …，递减）
 	//
-	// 所以它是**不透明游标**：B 站给什么就原样带回去，**别自己加一**。
+	// 🔴 **这一栏**不**拿它翻页**——翻页走 `NextOffset`（理由见那一栏）。
+	// **别把它带回去**：在「评论」那一档（`mode=1`）上带上去 B 站回
+	// `-400 min_score(1.000000) must be <= max_score(0.000000)`（实测）。
+	//
+	// 它留着是因为 B 站确实给这一栏，而它记着「B 站给的是哪一档的那套游标」
+	//（`Mode` 也是同一个 `cursor` 里的东西）。
 	Next int64
+	// NextOffset 是下一页的偏移量（`cursor.pagination_reply.next_offset`）。
+	//
+	// # 🔴 **翻页走的是它，不是 `cursor.next`**
+	//
+	// ⚠️ **`cursor.next` 在「评论」那一档（mode=1）上是坏的**（2026-10-27
+	// 真机回归实测）：带上去 B 站回
+	// `-400 min_score(1.000000) must be <= max_score(0.000000)`。
+	//
+	// 根因：`cursor.support_mode` **恒为 `[2, 3]`，不含 1**——B 站已经不支持
+	// mode=1 这一档的游标了（它认得 `mode=1`，但给回来的 `next` 是另一套，
+	// 拿它去翻就撞上了 B 站内部的分数区间）。
+	//
+	// 而 `pagination_reply.next_offset` + `pagination_str={"offset":"…"}`
+	// **三档都能翻**（实测：mode=3 / 1 / 2 都翻到了第二页，而且每一页的内容
+	// 互不相同）。
+	//
+	// ⚠️ **`next_offset` 是 B 站给的字符串，一个字都别改**（它带 base64 里的
+	// `+` `/` `=`）。改一个字符，B 站**不报错**——它回的是**第一页**（实测：
+	// 拿一个乱写的 offset 去问，它回 code 0 + 第一页）——于是界面上出现
+	// 「加载更多」按下去什么都没变。
+	//
+	// ⚠️ **空了就是到底了**：`is_end=true` 的那一页没有这个键。
+	NextOffset string
 	// IsEnd 是「到底了」（`cursor.is_end`）。
 	IsEnd bool
 	// UpperMid 是这个对象的 UP 主 mid（`data.upper.mid`）。
@@ -302,11 +460,21 @@ type CommentPage struct {
 // commentReplyData 是主列表的 `data` 段。
 type commentReplyData struct {
 	Cursor struct {
-		Next     int64  `json:"next"`
-		IsEnd    bool   `json:"is_end"`
+		Next  int64 `json:"next"`
+		IsEnd bool  `json:"is_end"`
+		// ⚠️ **`all_count` 是条件出现的**（实测 2026-10-27：「一条评论都没有」
+		// 那一档压根没有这个键，不是 0）。
 		AllCount int64  `json:"all_count"`
 		Mode     int    `json:"mode"`
 		Name     string `json:"name"`
+		// PaginationReply 是**能翻页的那一组游标**（理由见
+		// `CommentPage.NextOffset`）。
+		//
+		// ⚠️ **`next_offset` 是个字符串**（带 base64 里的 `+` `/` `=`），
+		// 不是数字——按数字解会让这一整页读不出来。
+		PaginationReply struct {
+			NextOffset string `json:"next_offset"`
+		} `json:"pagination_reply"`
 	} `json:"cursor"`
 	Replies []commentReply `json:"replies"`
 	Upper   struct {
@@ -446,13 +614,45 @@ func (p rawCommentPicture) toPicture() CommentPicture {
 // 两个接口
 // ─────────────────────────────────────────────────────────────────────────────
 
+// commentPagination 是 `pagination_str` 那个查询参数的形状。
+//
+// ⚠️ **它不是 JSON 随便拼的**：B 站认的是 `{"offset":"…"}` 这一个键，而
+// **带一个不是 JSON 的串回去是 `-400 请求错误`**（实测）。
+//
+// ⚠️ **offset 原样带**：它是 B 站给的字符串（含 base64 的 `+` `/` `=`），
+// 一个字都不能改（改了的症状见 `CommentList` 的注释）。
+type commentPagination struct {
+	Offset string `json:"offset"`
+}
+
 // CommentList 拉一页评论（主列表）。
 //
 // typ 是对象类型（`CommentTypeVideo` / `CommentTypeAudio`），oid 是那个对象的
 // id（**视频是 avid，音频是 auid**——不是 bvid）。
 //
 // mode 是排序（`CommentSortHot` / `CommentSortDefault` / `CommentSortLatest`）；
-// next 是上一页给的游标（**第一页传 0**）；ps 是每页几条（**最多 30**）。
+// offset 是上一页给的**偏移量**（`CommentPage.NextOffset`，**第一页传空串**）；
+// ps 是每页几条（**最多 30**）。
+//
+// # 🔴 翻页走的是 `offset`，不是 `cursor.next`
+//
+// 实测 2026-10-27（票 #591）：`cursor.next` 在「评论」那一档（`mode=1`）上
+// **必定失败**——B 站回
+// `-400 min_score(1.000000) must be <= max_score(0.000000)`。
+//
+// 根因是 `cursor.support_mode` **恒为 `[2, 3]`，不含 1**：B 站已经不支持
+// mode=1 这一档的游标了。
+//
+// 而 `cursor.pagination_reply.next_offset` +
+// `pagination_str={"offset":"<next_offset>"}` **三档都能翻**（实测 mode=3 /
+// 1 / 2 都翻到了第二页，且每页内容互不相同）。
+//
+// ⇒ **`next` 这个参数整个换掉了**：留着一个「带上去就必挂」的参数在签名里，
+// 下一个人一定会用它。
+//
+// ⚠️ **offset 一个字都别改**：它带 base64 里的 `+` `/` `=`。改一个字符，B 站
+// **不报错**——它回的是**第一页**（实测：拿一个乱写的 offset 去问，它回
+// code 0 + 第一页）——于是界面上「加载更多」按下去什么都没变。
 //
 // # 🔴 `Call.Buvid` 这里**绝对不设**
 //
@@ -468,7 +668,7 @@ func (p rawCommentPicture) toPicture() CommentPicture {
 // # 🔴 `Call.WBI` 这里也**不设**
 //
 // 用的是不带 WBI 的 `/x/v2/reply/main`（理由见文件头的坑二）。
-func (c *Client) CommentList(ctx context.Context, typ, oid int64, mode int, next int64, ps int) (CommentPage, error) {
+func (c *Client) CommentList(ctx context.Context, typ, oid int64, mode int, offset string, ps int) (CommentPage, error) {
 	if oid <= 0 {
 		return CommentPage{}, fmt.Errorf("%w: oid 不对（%d）", ErrCommentTargetMissing, oid)
 	}
@@ -482,13 +682,22 @@ func (c *Client) CommentList(ctx context.Context, typ, oid int64, mode int, next
 		"mode": {strconv.Itoa(mode)},
 		"ps":   {strconv.Itoa(ps)},
 	}
-	// ⚠️ **`next` 只在它不是 0 的时候才带**。
+	// ⚠️ **`pagination_str` 只在有 offset 的时候才带**。
 	//
-	// 实测 `next=0` 和**不带** `next` 在最热档返回的是同一页，而在最新档
-	// （mode=2）上带一个 0 会被当成「从第 0 层开始」——那不是第一页。
-	// 而**不带**它的意思就是「从头」。
-	if next != 0 {
-		q.Set("next", strconv.FormatInt(next, 10))
+	// ⚠️ **带了空的 offset 是不对的**：实测 `pagination_str={"offset":""}`
+	// 回的是**第一页**（code 0 + 第一页那 19 条），不是错误——而空串的意思
+	// 本来是「从头」。所以这里**只在 offset 非空时才带**。
+	//
+	// ⚠️ **`pagination_str` 必须是合法的 JSON**：实测传一个不是 JSON 的串，
+	// B 站回 `-400 请求错误`（不是「读不懂」，所以别指望它自己纠正）。
+	if offset != "" {
+		// ⚠️ **用 `json.Marshal` 编，不要手拼**：offset 里有 `+` `/` `=`，
+		// 手拼一个字符串进去要处理引号转义，而 `json.Marshal` 一次搞定。
+		b, err := json.Marshal(commentPagination{Offset: offset})
+		if err != nil {
+			return CommentPage{}, fmt.Errorf("bili: 翻页游标编不出来: %w", err)
+		}
+		q.Set("pagination_str", string(b))
 	}
 
 	raw, err := c.Do(ctx, Call{
@@ -510,12 +719,13 @@ func (c *Client) CommentList(ctx context.Context, typ, oid int64, mode int, next
 		return CommentPage{}, fmt.Errorf("bili: 评论列表读不懂: %w", err)
 	}
 	page := CommentPage{
-		AllCount: d.Cursor.AllCount,
-		Next:     d.Cursor.Next,
-		IsEnd:    d.Cursor.IsEnd,
-		UpperMid: d.Upper.Mid,
-		Mode:     d.Cursor.Mode,
-		Name:     d.Cursor.Name,
+		AllCount:   d.Cursor.AllCount,
+		Next:       d.Cursor.Next,
+		NextOffset: d.Cursor.PaginationReply.NextOffset,
+		IsEnd:      d.Cursor.IsEnd,
+		UpperMid:   d.Upper.Mid,
+		Mode:       d.Cursor.Mode,
+		Name:       d.Cursor.Name,
 	}
 	for _, r := range d.Replies {
 		page.Replies = append(page.Replies, r.toComment(d.Upper.Mid))
@@ -689,8 +899,20 @@ func wrapCommentError(err error) error {
 	case -404:
 		// 「啥都木有」——**对象不存在**（不是「0 条评论」）。
 		return fmt.Errorf("%w: %s", ErrCommentTargetMissing, api.Endpoint)
-	case 12061:
-		// 「UP主已关闭评论区」。
+	case 12002, 12061:
+		// 「评论区被关了」。
+		//
+		// ⚠️ **现在 B 站回的是 12002**（2026-10-27 真机回归，票 #592）：
+		// 评论区被关掉时**所有**评论接口一律回 `12002`「当前页面评论功能已关闭」，
+		// 而 **`12061` 一次都没出现过**。
+		//
+		// ⇒ 只认旧码的话这一档**基本触发不到**，界面上说不出「评论区被关掉了」
+		// （走的是 `Friendly` 的兜底：「B 站返回了一个看不懂的错误（12002）」）。
+		//
+		// `12061` 是**旧码，留着**：多认一个码不会错（票 #592 的验收）。
+		//
+		// ⚠️ **只认这两个码**：别的码不许往这一档里塞（票 #592 的验收）——
+		// 误吞的代价是「真正的原因」被盖住（对象不在了？楼中楼那条被删了？）。
 		return fmt.Errorf("%w: %s", ErrCommentSectionClosed, api.Endpoint)
 	case 12006:
 		// 「没有该评论」——楼主那条被删了。

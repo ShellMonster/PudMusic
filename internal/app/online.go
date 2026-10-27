@@ -89,16 +89,6 @@ var errStreamingMissing = errors.New("在线播放暂时用不了")
 // 一次**——所以它的「问地址」那段可能比投稿那一段多一个往返。
 const onlinePlayTimeout = 20 * time.Second
 
-// loadSlowAfter 是「这一段慢到该告诉用户了」的门槛。
-//
-// ⚠️ **它必须明显小于 `onlinePlayTimeout`**：它的用处是让用户在**还有希望**
-// 的时候就知道「这一段慢了」——而等到超时那一刻才说，用户已经白等了
-// 20 秒，而那句话只说了「超时」。
-//
-// 取 5 秒：真机上一次取流往返是 200~400 毫秒（见 `prefetch.go` 的文件头），
-// 所以 5 秒已经是「慢得不对劲」了。
-const loadSlowAfter = 5 * time.Second
-
 // onlineLoadTotalTimeout 是「这一趟取流」**不管有没有进展**最多等多久。
 //
 // ⚠️ **它从「点下去」起算，不是从「当前这一段」起算**（`loadTripSince`）——
@@ -245,7 +235,8 @@ type Streaming struct {
 	// 发给一台存音频文件的机器没有任何理由（`spec.md`「网络」一节）。
 	// Referer 照给：B 站 CDN 不给直接 403（真机验过）。
 	Media *http.Client
-	// Quality 是默认音质偏好。零值是 AudioAuto（有无损给无损）。
+	// Quality 是默认音质偏好。零值是 `bili.AudioHigh`（最高有损，见
+	// `bili.AudioQuality` 的注释——零值必须是一档能立刻出声的有损）。
 	Quality bili.AudioQuality
 	// TempDir 是下载缓存落在哪。空 = 系统临时目录。
 	TempDir string
@@ -309,7 +300,8 @@ func (a *App) StreamingMounted() bool { return a.streamingSnapshot() != nil }
 //
 // 「立刻生效」指的是正在放的那首在线流：重新按新档取一条流，从**原来的
 // 播放位置**接着播。不需要切歌，也不需要重启应用——用户在播放条上点一下就
-// 换好了，那正是这个控件存在的意义。
+// 换好了，那正是这个控件存在的意义。设置页换档走的也是这里（见
+// `UpdateSettings`），不然那一格就是只有重启才生效的摆设。
 //
 // 三件事一起做：
 //
@@ -317,9 +309,9 @@ func (a *App) StreamingMounted() bool { return a.streamingSnapshot() != nil }
 //	缓存清掉（否则下一首还会拿旧地址）
 //	正在放的那首重新取流（这是「立刻」两个字的意思）
 //
-// 拿不到新档（要无损但没有大会员）时**不打断正在放的歌**：取流失败就把
-// 原因报到播放条上，原来那条流继续放着。用户为无损付了钱，静默降级比报错
-// 更糟，而报错不该以「歌突然停了」的形式出现。
+// 真取流失败（网络断了、付费曲每一档都要会员）时**不打断正在放的歌**：
+// 把原因报到播放条上，原来那条流继续放着。点名的档拿不到不算失败——
+// 那种情况取流那层自己退到最高有损（见 `bili.pickAudio`），歌照常换过去。
 func (a *App) SetAudioQuality(q bili.AudioQuality) {
 	a.mu.Lock()
 	if a.streaming == nil {
@@ -357,8 +349,8 @@ func (a *App) rememberAudioQuality(q bili.AudioQuality) {
 
 // restreamOnline 按新档重新取流，从原来的播放位置接着播。
 //
-// 先判「其实没变」：用户点的那一档拿回来的还是同一档（B 站只给了 192K，
-// 用户从自动点「高音质」），那就什么都别做——为一个听不出区别的改动
+// 先判「其实没变」：拿回来的和手上这条是同一档（比如点「无损」而这一首没有，
+// 退档退回来的还是 192K），那就什么都别做——为一个听不出区别的改动
 // 打断一首歌，比点了没反应更糟。
 //
 // 换流之后的处理和 `refreshOnlineNow` 一样：跳回原来的**播放位置**，那一步
@@ -501,7 +493,7 @@ func (a *App) AudioQuality() bili.AudioQuality {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.streaming == nil {
-		return bili.AudioAuto
+		return bili.AudioHigh
 	}
 	return a.streaming.Quality
 }
@@ -509,12 +501,15 @@ func (a *App) AudioQuality() bili.AudioQuality {
 // PrefToBili 把设置里那一档翻译成取流用的那一档。
 //
 // 设置里存的是字符串（落盘给人看、跨版本稳），取流那边要的是 B 站的编号。
-// 认不出来的值一律当「自动」——宁可给最好的那一档，也不要因为设置文件里
-// 多了一个字符就整条在线播放放不出来。
+// 认不出来的值一律当「高品质」——那是一档**能立刻出声**的有损（见
+// `bili.AudioQuality` 的注释），不要因为设置文件里多了一个字符就整条在线
+// 播放放不出来。
 func PrefToBili(q AudioQuality) bili.AudioQuality {
 	switch q {
 	case AudioQualityLossless:
 		return bili.AudioLossless
+	case AudioQualityDolby:
+		return bili.AudioDolby
 	case AudioQualityHigh:
 		return bili.AudioHigh
 	case AudioQualityMedium:
@@ -522,7 +517,7 @@ func PrefToBili(q AudioQuality) bili.AudioQuality {
 	case AudioQualityLow:
 		return bili.AudioLow
 	}
-	return bili.AudioAuto
+	return bili.AudioHigh
 }
 
 // BiliToPref 是 `PrefToBili` 的反方向：取流那边那一档在设置里写成什么。
@@ -531,6 +526,8 @@ func BiliToPref(q bili.AudioQuality) AudioQuality {
 	switch q {
 	case bili.AudioLossless:
 		return AudioQualityLossless
+	case bili.AudioDolby:
+		return AudioQualityDolby
 	case bili.AudioHigh:
 		return AudioQualityHigh
 	case bili.AudioMedium:
@@ -538,7 +535,7 @@ func BiliToPref(q bili.AudioQuality) AudioQuality {
 	case bili.AudioLow:
 		return AudioQualityLow
 	}
-	return AudioQualityAuto
+	return AudioQualityHigh
 }
 
 // streamingSnapshot 拿一份配好的取流零件。没挂或者缺零件时是 nil。
@@ -689,33 +686,19 @@ func (a *App) beginLoadingLocked(gen int, title, stage string) {
 	a.loadingTitle = title
 	a.loadingStage = stage
 	a.loadingSince = time.Now()
-	// 🔴 **「慢」那一档重新算**：新的一段从零开始等，而上一段慢不慢跟这一段
-	// 无关（用户此刻在等的是这一段）。
-	a.loadingSlow = false
 	// 🔴 **进度归零**：新的一段从「还没下到东西」开始。
 	a.loadFilled = -1
 	// 挂新闹钟之前先停掉上一个：连点两首时，前一个的闹钟不能替后一个喊。
 	a.stopLoadTimersLocked()
 	a.loadStop = a.after(onlinePlayTimeout, func() { a.loadTimedOut(gen, title, stage) })
-	// 🔴 **「慢」的闹钟比「超时」的早**：它的用处是在**还有希望**的时候就把
-	// 「这一段慢了」说出去，而不是等到超时才说（那时候用户已经白等了 20 秒）。
-	a.loadSlowStop = a.after(loadSlowAfter, func() { a.loadBecameSlow(gen) })
 }
 
-// stopLoadTimersLocked 把「正在取流」这一摊的两个闹钟都停掉。
+// stopLoadTimersLocked 把「正在取流」这一摊的闹钟停掉。
 // **必须在持锁时调**。
-//
-// ⚠️ **两个闹钟各停各的**（理由见 App 里 loadSlowStop 那段注释）：共用一个
-// 字段的话，先停掉另一个就把另一个的闹钟弄丢了——丢了「超时」那个 =
-// 永远转圈，丢了「慢」那个 = 慢了也不说。
 func (a *App) stopLoadTimersLocked() {
 	if a.loadStop != nil {
 		a.loadStop()
 		a.loadStop = nil
-	}
-	if a.loadSlowStop != nil {
-		a.loadSlowStop()
-		a.loadSlowStop = nil
 	}
 }
 
@@ -741,7 +724,6 @@ func (a *App) endLoadingLocked() {
 	a.loading = false
 	a.loadingTitle = ""
 	a.loadingStage = ""
-	a.loadingSlow = false
 	a.loadFilled = -1
 	// 🔴 **「启动那一段」到此为止**（票 #478）：第一次取流有结果了
 	// （成了或者败了），应用不再是在「启动」，而是在「用」。
@@ -754,7 +736,7 @@ func (a *App) endLoadingLocked() {
 
 // tripWaitLocked 报「这一趟取流从点下去到现在的多久」。**必须在持锁时调**。
 //
-// ⚠️ **它和 `loadingWaitLocked` 是两件事**：那一栏是「当前这一段」（换段就
+// ⚠️ **它和 `loadingSince` 是两件事**：那一栏是「当前这一段」（换段就
 // 重置），这一栏是「整趟」（不重置）——总闸量的是整趟（票 #220 的评审）。
 func (a *App) tripWaitLocked() time.Duration {
 	if a.loadTripSince.IsZero() {
@@ -778,34 +760,6 @@ func humanBytes(n int64) string {
 	}
 }
 
-// loadingWaitLocked 报「当前这一段已经等了多久」。**必须在持锁时调**。
-//
-// ⚠️ **没在取流时是 0**：界面上那一栏只在「正在取流」那一档里才有意义。
-func (a *App) loadingWaitLocked() time.Duration {
-	if !a.loading || a.loadingSince.IsZero() {
-		return 0
-	}
-	return time.Since(a.loadingSince)
-}
-
-// loadBecameSlow 是「这一段慢到该说了」那个闹钟响了。
-//
-// 🔴 **它只置一档，不改别的**：这一趟还在跑（还有希望），而用户此刻缺的是
-// 一句「这一段慢了」——不是一句失败。
-func (a *App) loadBecameSlow(gen int) {
-	a.mu.Lock()
-	if a.onlineGen != gen || a.closed || !a.loading {
-		a.mu.Unlock()
-		return
-	}
-	a.loadingSlow = true
-	wake := a.wake
-	a.mu.Unlock()
-	if wake != nil {
-		wake()
-	}
-}
-
 // loadTimedOut 是「点了歌之后一直没开始」的闹钟响了。
 //
 // 🔴 **它按失败处理**：超了阈值就当这一首放不起来，给用户一句能看懂的话，
@@ -823,7 +777,7 @@ func (a *App) loadBecameSlow(gen int) {
 //
 // 所以这两段的判据是「**这一段还有没有进展**」：
 //
-//	有进展	还在下 → **重新起算**，让这一段接着等（界面上「取流很慢」陪着用户）
+//	有进展	还在下 → **重新起算**，让这一段接着等
 //	没进展	卡死了 → 按失败处理（转圈停 + 一句能看懂的话）
 //
 // ⚠️ **「有进展」是拿字节源已经下到的字节数比的**（`Filled()`）：它是
@@ -848,12 +802,6 @@ func (a *App) loadTimedOut(gen int, title, stage string) {
 	if stage == loadStageBytes {
 		if a.downloadProgressLocked() && trip < onlineLoadTotalTimeout {
 			// 还在动：这一段慢，但不是死了。
-			//
-			// 🔴 **「慢」这一档在这里也置上**：能撑到 20 秒还活着，
-			// 那它**就是慢的**——而「慢」那一档的闹钟（5 秒）可能在
-			// 重新起算的时候被收掉了（`rearmLoadingLocked` 会重挂一个），
-			// 那一档不能因为「闹钟被换了一个」就丢掉。
-			a.loadingSlow = true
 			//
 			// 🔴 **重新起算的是这一段**：进度那一栏也要留着（「上次量到多少
 			// 字节」是下一次比较的基准），而「这一段从什么时候开始」要**接着
@@ -1017,22 +965,19 @@ func (a *App) downloadProgressLocked() bool {
 
 // rearmLoadingLocked 换一段（**必须在持锁时调**）。
 //
-// ⚠️ **它和 `rearmLoading` 的区别是「保留这一段的进度基准和「慢」那一档」**：
+// ⚠️ **它和 `rearmLoading` 的区别是「保留这一段的进度基准」**：
 //
 //	进度基准	下一次比较要用「上一次下到多少」，重置成 -1 的话，
 //		一个字节都不下的地址也会被判成「有进展」
-//	「慢」那一档	这一段本来就慢，重新起算**不是**让它不慢——
-//		「取流很慢」那句话要一直陪着用户等到这一段结束
 //	「从什么时候开始等」	它量的是「用户为这一段等了多久」，
 //		中途重新起算不该把它归零
 func (a *App) rearmLoadingLocked(gen int, title, stage string) {
 	if a.onlineGen != gen || a.closed || !a.loading {
 		return
 	}
-	filled, slow, since := a.loadFilled, a.loadingSlow, a.loadingSince
+	filled, since := a.loadFilled, a.loadingSince
 	a.beginLoadingLocked(gen, title, stage)
 	a.loadFilled = filled
-	a.loadingSlow = slow
 	a.loadingSince = since
 }
 
@@ -1681,10 +1626,8 @@ func (a *App) resolve(ctx context.Context, s *Streaming, it Item, pref bili.Audi
 //
 // **预取备好的地址走这里**（见 prefetch.go）：真播那一趟的 `resolve` 会先问
 // 这个缓存，命中了就**不再取流**——省下来的那几百毫秒就是这一票的收益。
-//
-// ⚠️ **只有自动切歌才走这里**：手动切歌（`App.step`）重新取流是这一票定下
-// 的规矩——用户自己按了下一首，他要的是**现在**这一首的新地址，而预取的那一
-// 份是几十秒前算的（见 prefetch.go 的「手动切歌重新取地址」）。
+// 自动切歌（`onTrackFinished`）和手动按下一首（`App.step`，票 #581）都吃
+// 预取；两个入口在用之前都比对过「备的就是这一首」。
 func (a *App) putStreamCache(it Item, ref *bili.StreamRef) {
 	a.mu.Lock()
 	a.streamCache = map[string]*bili.StreamRef{streamKey(it): ref}

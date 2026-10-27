@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 )
 
 // 最小播放队列：当前项 + 上一首 + 下一首 + 尾部追加，外加**四档播放模式**。
@@ -1588,6 +1590,19 @@ func (a *App) Prev() { a.step(-1) }
 // （见 Queue.MoveNext / MovePrev）。退回去也是退那一次挪动（UndoStep），不是
 // 「再挪回去」——随机那一档没有「再挪回去」这回事。
 func (a *App) step(delta int) {
+	// 🔴 **先摸一眼预取，再挪队列**：`MoveNext` 一跑就会把备好的那一份作废
+	// （它自己的钩子说「下一首变了」），而消费式的 `takePrefetch` 又必须拿
+	// 「下一首是谁」去比对——挪之前不知道。所以先把**值**摸出来（item/ref
+	// 的指针拷贝，预取层的状态一动不动），挪完再比对。
+	//
+	// ⚠️ **只有往前挪吃**：预取只备「下一首」，备的地址对上一首毫无用处。
+	// 用户按下一首的那一刻往往正好在预取的 15 秒窗口里，白白重新取一次流
+	// 就是白等一趟带签名的往返（票 #581）。
+	var prepared Item
+	var prefRef *bili.StreamRef
+	if delta > 0 {
+		prepared, prefRef = a.peekPreparedNext()
+	}
 	var item Item
 	var ok bool
 	if delta < 0 {
@@ -1602,6 +1617,14 @@ func (a *App) step(delta int) {
 		a.queue.UndoStep()
 		a.setErr(errNoSource.Error())
 		return
+	}
+	// 备的确实是挪到的这一首、地址也还没过期，就用它（`putStreamCache` 进
+	// 「播放前预判」那个缓存，真播的 `resolve` 命中就不再取流）。对不上就
+	// 丢掉，照常重新取——宁可多取一次，也不能把另一首的地址当成这一首的
+	// 放出去（比对判据同 `takePrefetch`）。
+	if prefRef != nil && sameStreamTarget(prepared, item) && prefRef.Usable(time.Now()) {
+		item = prepared
+		a.putStreamCache(item, prefRef)
 	}
 	if err := a.play(item); err != nil {
 		a.queue.UndoStep()
