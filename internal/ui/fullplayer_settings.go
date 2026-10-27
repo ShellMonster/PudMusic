@@ -109,6 +109,7 @@ func (s *Shell) viewFullSettings(c *ui.Context) {
 	// 是局部值——判快照的话那一行要等下一帧才跟上。
 	showLyrics, showSpectrum := prefs.ShowLyrics, prefs.ShowSpectrum
 	showCover, blurred := prefs.ShowCover, prefs.ShowBlurredBackground
+	showDanmaku := prefs.ShowDanmaku
 
 	ui.Column(c).Width(320).Padding(space.Px16).Gap(space.Px16).Children(func() {
 		s.fullSettingsHeader(c)
@@ -142,6 +143,15 @@ func (s *Shell) viewFullSettings(c *ui.Context) {
 
 		s.fullSwitchRow(c, "显示封面", &showCover, func(on bool) {
 			s.setFullPrefs(func(p *app.FullPlayerPrefs) { p.ShowCover = on })
+		})
+
+		// ⚠️ **这一格不是照抄上游的**：上游 Biu 没有弹幕（研究票 #538 的报告
+		// §6 第 6 条），所以**文案没有上游可抄**——照 Biu 的口吻写（动词开头、
+		// 四五个字）就行。
+		//
+		// ⚠️ **默认开着**（产品要求）：用户 2026-10-26 明确要的。
+		s.fullSwitchRow(c, "显示弹幕", &showDanmaku, func(on bool) {
+			s.setFullPrefs(func(p *app.FullPlayerPrefs) { p.ShowDanmaku = on })
 		})
 
 		s.fullSwitchRow(c, "显示虚化背景", &blurred, func(on bool) {

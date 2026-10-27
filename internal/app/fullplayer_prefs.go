@@ -1,4 +1,4 @@
-// 全屏播放器自己那一份偏好：四个开关、三个颜色。
+// 全屏播放器自己那一份偏好：五个开关、三个颜色。
 //
 // ## 为什么不进 `app.Settings`
 //
@@ -12,13 +12,15 @@
 //
 // ## 键名和默认值都照 Biu 的 store
 //
-// 七样一个不少（4 个开关 + 3 个颜色）。默认值也照它：歌词、封面、虚化背景开着，
-// 频谱关着，三个颜色空串（= 走各自的默认；见 `internal/ui/fullplayer.go` 的
+// Biu 那七样一个不少（4 个开关 + 3 个颜色）。默认值也照它：歌词、封面、虚化背景
+// 开着，频谱关着，三个颜色空串（= 走各自的默认；见 `internal/ui/fullplayer.go` 的
 // `fullForeground` 与 `fullplayer_spectrum.go` 的 `spectrumColorOf`）。
 //
-// ⚠️ **默认值不是零值**：`FullPlayerPrefs{}` 是三个开关全关。所以读盘是「先摆一份
+// ⚠️ **弹幕那一格是我们自己加的**（上游 Biu 没有弹幕）：一共**八样**。
+//
+// ⚠️ **默认值不是零值**：`FullPlayerPrefs{}` 是五个开关全关。所以读盘是「先摆一份
 // 默认，再拿文件里有的键盖上去」——老版本写的那份文件只有 `showSpectrum` 和
-// `spectrumColor`，新加的三个键不在里面，缺的那个必须落回默认，而不是落成 false。
+// `spectrumColor`，新加的那些键不在里面，缺的那个必须落回默认，而不是落成 false。
 
 package app
 
@@ -36,7 +38,13 @@ const (
 	// fullPlayerPrefsSchema 是这份文件的格式版本。改它的**结构**就涨它。
 	//
 	// 2：从「频谱开关 + 频谱颜色」涨到 Biu 那七样。
-	fullPlayerPrefsSchema = 2
+	//
+	// 3：加上「显示弹幕」那一个开关（**上游 Biu 没有弹幕**，所以这一项是
+	// 我们自己加的，见 `FullPlayerPrefs.ShowDanmaku`）。
+	//
+	// ⚠️ **老文件照样读**：这一层判的是「文件比我新」（那就当没有），而老
+	// 文件里**没有**的那一个键落回**默认**（弹幕默认开着）。
+	fullPlayerPrefsSchema = 3
 )
 
 // FullPlayerPrefs 是全屏播放器的偏好。
@@ -54,6 +62,13 @@ type FullPlayerPrefs struct {
 	// ShowBlurredBackground 背景用不用毛玻璃。默认 **true**；关掉时铺
 	// `BackgroundColor`（空串 = 主题背景色）。
 	ShowBlurredBackground bool `json:"showBlurredBackground"`
+	// ShowDanmaku 弹幕画不画。默认 **true**。
+	//
+	// ⚠️ **上游 Biu 没有弹幕**（研究票 #538 的报告 §6 第 6 条），所以这一项
+	// **不是照抄上游的键名**——它是我们自己加的。
+	//
+	// ⚠️ **默认开着**是产品要求的（用户 2026-10-26 明确要的）。
+	ShowDanmaku bool `json:"showDanmaku"`
 	// LyricsColor 是歌词的字色（`#rrggbb`）。空串 = 白（Biu 的默认值
 	// `lyricsColor: "#ffffff"`）。
 	LyricsColor string `json:"lyricsColor,omitempty"`
@@ -71,7 +86,7 @@ type FullPlayerPrefs struct {
 
 // DefaultFullPlayerPrefs 是 Biu 的 `defaultSettings`。
 //
-// ⚠️ 这个结构体的**零值不等于默认值**（三个默认开着的开关会变成关）。读盘、
+// ⚠️ 这个结构体的**零值不等于默认值**（五个默认开着的开关会变成关）。读盘、
 // 没挂盘、以及测试里「只改其中一样」都从这里起手。
 func DefaultFullPlayerPrefs() FullPlayerPrefs {
 	return FullPlayerPrefs{
@@ -79,6 +94,7 @@ func DefaultFullPlayerPrefs() FullPlayerPrefs {
 		ShowSpectrum:          true,
 		ShowCover:             true,
 		ShowBlurredBackground: true,
+		ShowDanmaku:           true,
 	}
 }
 
@@ -109,7 +125,7 @@ type fullPlayerPrefsStore struct {
 // load 读盘，读不到就用默认。**在挂上的时候调一次**。
 //
 // 坏文件、别的版本写的、读不出来——三种都当没有，和更新器那份同一个理由：
-// 这一份丢了最坏的结果是七个键全回到 Biu 的默认（频谱关着、另外三个开着）。
+// 这一份丢了最坏的结果是八个键全回到默认（频谱关着、另外四个开着）。
 // （和 `LoadSettings` 那边不一样是有道理的：那边丢的是用户设过的东西。）
 func (p *fullPlayerPrefsStore) load() {
 	// 先摆默认：文件不存在、读不出来、或者没有这一份的目录，`get` 都该给出
@@ -134,6 +150,7 @@ func (p *fullPlayerPrefsStore) load() {
 			ShowSpectrum          *bool   `json:"showSpectrum"`
 			ShowCover             *bool   `json:"showCover"`
 			ShowBlurredBackground *bool   `json:"showBlurredBackground"`
+			ShowDanmaku           *bool   `json:"showDanmaku"`
 			LyricsColor           *string `json:"lyricsColor"`
 			SpectrumColor         *string `json:"spectrumColor"`
 			BackgroundColor       *string `json:"backgroundColor"`
@@ -160,6 +177,9 @@ func (p *fullPlayerPrefsStore) load() {
 	}
 	if f.FullPlayer.ShowBlurredBackground != nil {
 		cur.ShowBlurredBackground = *f.FullPlayer.ShowBlurredBackground
+	}
+	if f.FullPlayer.ShowDanmaku != nil {
+		cur.ShowDanmaku = *f.FullPlayer.ShowDanmaku
 	}
 	if f.FullPlayer.LyricsColor != nil {
 		cur.LyricsColor = *f.FullPlayer.LyricsColor
@@ -251,7 +271,7 @@ func (a *App) FullPlayerPrefs() FullPlayerPrefs {
 
 // SetFullPlayerPrefs 改全屏播放器的偏好并立刻落盘。
 //
-// 为什么是「立刻」而不是像设置那样合并写：这一份只有七样，改它的动作是
+// 为什么是「立刻」而不是像设置那样合并写：这一份只有八样，改它的动作是
 // 「点一下开关 / 挑一个颜色」，一天点不了几次；而合并写要一个后台 goroutine
 // 和一个停掉它的钩子，为这么小的东西不值当。
 func (a *App) SetFullPlayerPrefs(next FullPlayerPrefs) {
