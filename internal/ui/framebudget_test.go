@@ -534,7 +534,6 @@ func budgetScreens() []budgetScreen {
 				allocs: 51,
 				bytes:  2100,
 				floor:  22,
-
 			},
 			setup: func(t *testing.T, s *Shell, tt *mygoui.Tester) {
 				// ⚠️ **直接开，不走 `openFullPlayer`**：那一条会装一个三秒的
