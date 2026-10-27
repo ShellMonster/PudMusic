@@ -40,7 +40,7 @@ func downloadApp(t *testing.T, f *collectionFixture) *App {
 	//
 	// ⚠️ Media 也要给：`streamingSnapshot` 缺 Media 就当没挂，而这一组要的
 	// 恰恰是「挂了」那一支（补 cid 要问的是 `Client`，但快照先卡 Media）。
-	a.MountStreaming(Streaming{Client: cli, Media: f.Server.Client(), Quality: bili.AudioAuto})
+	a.MountStreaming(Streaming{Client: cli, Media: f.Server.Client(), Quality: bili.AudioHigh})
 	if err := a.MountDownloads(Downloads{
 		Media:       f.Server.Client(),
 		QueueFile:   filepath.Join(t.TempDir(), "queue.json"),
@@ -279,7 +279,7 @@ func TestDownloadItemRefusesWhenDownloadsAreNotMounted(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
 	cli := clientOn(t, f)
-	a.MountStreaming(Streaming{Client: cli, Media: f.Server.Client(), Quality: bili.AudioAuto})
+	a.MountStreaming(Streaming{Client: cli, Media: f.Server.Client(), Quality: bili.AudioHigh})
 	a.MountCollections(CollectionRefs{Client: cli, Downloader: a})
 
 	var got string

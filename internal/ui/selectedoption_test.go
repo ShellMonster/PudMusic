@@ -106,13 +106,14 @@ func TestTheSelectedOptionLooksTheSameEverywhere(t *testing.T) {
 			// （`settings_enum.go` 的 `it.value == *value` 那一支）。所以这里
 			// 量的是**指针落上去**的那一项，不是「自动」那一项。
 			//
-			// ⚠️ **点的是 trigger 上画着的那个字**（「自动」），不是它的无障碍
-			// 名字（「选择音质偏好」）：后者在画面上**不占地方**，按坐标点会点空。
+			// ⚠️ **点的是 trigger 上画着的那个字**（默认档的「高品质」——票 #581
+			// 之后没有「自动」那一档了），不是它的无障碍名字（「选择音质偏好」）：
+			// 后者在画面上**不占地方**，按坐标点会点空。
 			t.Run("下拉项的高亮", func(t *testing.T) {
 				tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""), systemIsDark(dark))
 				theme := BuildTheme(app.DefaultSettings(""), dark)
-				settingRect(t, tt, s, "自动")
-				if err := tt.Click("自动"); err != nil {
+				settingRect(t, tt, s, "高品质")
+				if err := tt.Click("高品质"); err != nil {
 					t.Fatalf("点不开「音质偏好」那个下拉：%v，文字有 %q", err, tt.Texts())
 				}
 				tt.Frame()

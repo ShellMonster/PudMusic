@@ -3,7 +3,6 @@ package app_test
 import (
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -99,7 +98,7 @@ func TestSwitchingQualitySwapsTheStreamWithoutRestarting(t *testing.T) {
 // TestSwitchingToATierThatIsAlreadyPlayingChangesNothing 盯「本来就是那一档，
 // 别打断」。
 //
-// 用户从「自动」点「高音质」，而 B 站只给了 192K：拿回来的还是同一档。
+// 用户点「无损」而这首没有，退档退回来的还是 192K：拿回来的还是同一档。
 // 这时候重建播放器就是白打断一首歌——歌会顿一下、进度条会跳一下，用户
 // 什么都没换来。
 //
@@ -109,6 +108,7 @@ func TestSwitchingToATierThatIsAlreadyPlayingChangesNothing(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
 	// 只有 192K 一档：自动档和高音质档拿到的都是它。
+	// 只有 192K 一档：点无损退档退到的也是它。
 	f.onPlayURL(map[string]any{"duration": 1, "audio": []any{map[string]any{
 		"id": int(bili.QualityHigh192), "bandwidth": 110836,
 		"codecs": "flac", "mimeType": "audio/mp4", "baseUrl": cdnURL(f.URL, "a.flac", 2*time.Hour),
@@ -268,14 +268,15 @@ func TestALateFailureFromAStaleSwitchNeverReachesThePlaybar(t *testing.T) {
 	}
 }
 
-// TestAskingForLosslessWithoutItKeepsPlaying 盯「要不到就别打断」。
+// TestAskingForLosslessWithoutItFallsBack 盯「点名的档拿不到就退到最高有损」。
 //
-// 点了「无损」而账号没有大会员：取流会失败。这时候**原来那条流要继续放**，
-// 播放条上给出原因——而不是歌突然停了。
+// 点了「无损」而这首只有有损的：取流那层自己退档，歌**照样换过去**，播放条上
+// 没有错——报错等于这首歌放不出来，退档放出来才是答案（票 #581 改掉的旧规矩）。
 //
-// 用户为无损付了钱，静默降级比报错更糟；而报错也不该以「歌停了」的形式出现，
-// 那会让人以为是网络问题。
-func TestAskingForLosslessWithoutItKeepsPlaying(t *testing.T) {
+// 先降到 128K 再点无损：退回 192K 那一下**真的换了流**，验得到换流那套接线
+// （徽章跟回、位置不许倒退）；要是从 192K 直接点无损，退回来的就是正在放的
+// 那一档，走的是「其实没变」那一支，什么都验不到。
+func TestAskingForLosslessWithoutItFallsBack(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
 	// 没有 dash.flac 段：B 站只给了有损的。
@@ -290,22 +291,24 @@ func TestAskingForLosslessWithoutItKeepsPlaying(t *testing.T) {
 		return a.Snapshot().Position > 300*time.Millisecond
 	})
 
-	a.SetAudioQuality(bili.AudioLossless)
-	waitFor(t, 15*time.Second, "播放条上解释为什么没有无损", func() bool {
-		return a.Snapshot().Err != ""
+	// 先挪到 128K，把「正在放的那一档」和「退档的落点」分开。
+	a.SetAudioQuality(bili.AudioMedium)
+	waitFor(t, 30*time.Second, "徽章换到 128K", func() bool {
+		return a.Snapshot().Quality == "128K"
 	})
-	if got := a.Snapshot().Err; !strings.Contains(got, "无损") {
-		t.Errorf("话里没说清是「要不到无损」：%q", got)
-	}
 
-	// 原来那条流还在放：位置继续往前走。
+	stop := samplePosition(a)
 	before := a.Snapshot().Position
-	waitFor(t, 30*time.Second, "原来那条流继续播", func() bool {
-		return a.Snapshot().Position > before
+	a.SetAudioQuality(bili.AudioLossless)
+	waitFor(t, 30*time.Second, "退档之后徽章回到 192K", func() bool {
+		return a.Snapshot().Quality == "192K"
 	})
-	if q := a.Snapshot().Quality; q != "192K" {
-		t.Errorf("徽章变成了 %q——明明没换成无损，不该改徽章（也不该悄悄降级）", q)
+	// 换流是后台 goroutine 做的：徽章变了之后播放器可能还没换上。
+	time.Sleep(2 * time.Second)
+	if st := a.Snapshot(); st.Err != "" {
+		t.Errorf("播放条上有错：%s（点名的档拿不到不是失败，退档照放）", st.Err)
 	}
+	assertNoBacktrack(t, stop(), before)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
