@@ -64,7 +64,10 @@ var errCommentsUnavailable = errors.New("评论暂时打不开")
 // 看得见（而不是三个长得一样的裸 func 字段）。
 type (
 	// commentsListFetchFunc 是问一页评论那一趟。
-	commentsListFetchFunc func(context.Context, int64, int64, int64) (bili.CommentPage, error)
+	//
+	// ⚠️ **那个 `next` 是偏移量（字符串），不是 `cursor.next`**——理由见
+	// `bili.CommentList` 的注释与 `bili.CommentPage.NextOffset`。
+	commentsListFetchFunc func(context.Context, int64, int64, string) (bili.CommentPage, error)
 	// commentsRepliesFetchFunc 是问一层楼中楼那一趟。
 	commentsRepliesFetchFunc func(context.Context, int64, int64, int64) ([]bili.Comment, error)
 	// commentsArchiveIDFetchFunc 是 bvid → avid 那一趟。
@@ -75,8 +78,8 @@ type (
 type commentResult struct {
 	// comments 是这一页的评论。
 	comments []bili.Comment
-	// next 是下一页的游标（B 站给什么就是什么，不透明）。
-	next int64
+	// next 是下一页的游标（**偏移量**，B 站给什么就是什么，不透明）。
+	next string
 	// isEnd 是「到底了」。
 	isEnd bool
 	// allCount 是评论总数。
@@ -196,10 +199,14 @@ func (a *App) LoadMoreComments() bool {
 		a.commentsMu.Unlock()
 		return false
 	}
-	// ⚠️ **游标是 0 的时候不能再翻**：B 站的 `next` 是**不透明游标**，而
-	// `CommentList` 把 0 当成「从头」（那是第一页的写法）——拿它去翻第二页会
+	// ⚠️ **游标是空串的时候不能再翻**：B 站的偏移量是**不透明游标**，而
+	// `CommentList` 把空串当成「从头」（那是第一页的写法）——拿它去翻第二页会
 	// 把第一页再要一遍，界面上就出现一份重复的评论。
-	if a.commentsNext == 0 {
+	//
+	// ⚠️ **别拿「非空」当「能翻」**：实测 B 站给一个**乱写的** offset 时**不
+	// 报错**，它回的是第一页——所以「游标非空」不等于「这一页后面还有东西」。
+	// 真正判「还有没有」的是 `commentsIsEnd`（`cursor.is_end`）。
+	if a.commentsNext == "" {
 		a.commentsMu.Unlock()
 		return false
 	}
@@ -410,7 +417,7 @@ func (a *App) ensureComments(it Item, slot string) {
 	// ⚠️ **替身函数在这里就取出来**（界面那一侧），goroutine 不碰那些字段——
 	// 和 `partsFetch` 同一条规矩（理由见 app.go 里那一段的注释）。
 	listFetch, archiveFetch := a.commentsListFetch, a.commentsArchiveIDFetch
-	go a.loadComments(it, slot, gen, seq, 0, false, listFetch, archiveFetch)
+	go a.loadComments(it, slot, gen, seq, "", false, listFetch, archiveFetch)
 }
 
 // resetCommentsLocked 把评论这一摊整个清空，换成另一个槽位。
@@ -423,7 +430,7 @@ func (a *App) resetCommentsLocked(slot string) {
 	a.commentsLoaded = false
 	a.commentsWanted = false
 	a.commentsTriedAt = time.Time{}
-	a.commentsNext = 0
+	a.commentsNext = ""
 	a.commentsIsEnd = false
 	a.commentsAllCount = 0
 	a.commentsNoComments = false
@@ -436,7 +443,7 @@ func (a *App) resetCommentsLocked(slot string) {
 	a.commentsGen++
 }
 
-// loadComments 拉一页评论（next == 0 是第一页，否则是翻页），回来写进缓存。
+// loadComments 拉一页评论（next 是空串 = 第一页，否则是翻页），回来写进缓存。
 //
 // listFetch / archiveFetch 是**界面那一侧取好的**替身（nil = 走真的那个 B 站
 // 客户端）。goroutine 不碰 `App` 上那两个字段。
@@ -444,7 +451,7 @@ func (a *App) resetCommentsLocked(slot string) {
 // 🔴 **seq 是这一趟的在途序号**：它挡的是「同一个对象上有两趟」——较早的那一趟
 // 回来时既不许盖掉界面上的新结果，也不许盖掉盘上的新缓存（理由见
 // `ensureComments` 里那一段）。
-func (a *App) loadComments(it Item, slot string, gen, seq int, next int64, more bool,
+func (a *App) loadComments(it Item, slot string, gen, seq int, next string, more bool,
 	listFetch commentsListFetchFunc, archiveFetch commentsArchiveIDFetchFunc) {
 	typ, oid, ok, err := a.resolveCommentTarget(it, archiveFetch)
 	if err != nil {
@@ -475,7 +482,7 @@ func (a *App) loadComments(it Item, slot string, gen, seq int, next int64, more 
 		if e, hit := a.loadCommentsCache(typ, oid); hit && !refresh {
 			a.finishComments(slot, gen, seq, commentResult{
 				comments:   e.Comments,
-				next:       e.Next,
+				next:       e.NextOffset,
 				isEnd:      e.IsEnd,
 				allCount:   e.AllCount,
 				noComments: e.NoComments,
@@ -501,14 +508,14 @@ func (a *App) loadComments(it Item, slot string, gen, seq int, next int64, more 
 				a.saveCommentsCache(slot, seq, typ, oid, commentResult{
 					noComments: true,
 					loaded:     true,
-					next:       page.Next,
+					next:       page.NextOffset,
 					isEnd:      page.IsEnd,
 					allCount:   page.AllCount,
 				})
 			}
 			a.finishComments(slot, gen, seq, commentResult{
 				comments:   page.Replies,
-				next:       page.Next,
+				next:       page.NextOffset,
 				isEnd:      page.IsEnd,
 				allCount:   page.AllCount,
 				noComments: true,
@@ -525,7 +532,7 @@ func (a *App) loadComments(it Item, slot string, gen, seq int, next int64, more 
 	if !more {
 		a.saveCommentsCache(slot, seq, typ, oid, commentResult{
 			comments: page.Replies,
-			next:     page.Next,
+			next:     page.NextOffset,
 			isEnd:    page.IsEnd,
 			allCount: page.AllCount,
 			loaded:   true,
@@ -533,7 +540,7 @@ func (a *App) loadComments(it Item, slot string, gen, seq int, next int64, more 
 	}
 	a.finishComments(slot, gen, seq, commentResult{
 		comments: page.Replies,
-		next:     page.Next,
+		next:     page.NextOffset,
 		isEnd:    page.IsEnd,
 		allCount: page.AllCount,
 		loaded:   true,
@@ -772,13 +779,16 @@ func (a *App) rememberCommentOID(slot string, gen int, typ, oid int64) {
 }
 
 // fetchCommentList 问一页评论。
-func (a *App) fetchCommentList(typ, oid, next int64, fetch commentsListFetchFunc) (bili.CommentPage, error) {
+//
+// next 是**偏移量**（空串 = 第一页），不是 `cursor.next`——理由见
+// `bili.CommentList` 的注释与 `bili.CommentPage.NextOffset`。
+func (a *App) fetchCommentList(typ, oid int64, next string, fetch commentsListFetchFunc) (bili.CommentPage, error) {
 	if fetch == nil {
 		cli := a.commentsClient()
 		if cli == nil {
 			return bili.CommentPage{}, errCommentsUnavailable
 		}
-		fetch = func(ctx context.Context, typ, oid, next int64) (bili.CommentPage, error) {
+		fetch = func(ctx context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
 			return cli.CommentList(ctx, typ, oid, int(bili.CommentSortHot), next, commentsPageSize)
 		}
 	}
@@ -908,7 +918,7 @@ func (a *App) saveCommentsCache(slot string, seq int, typ, oid int64, res commen
 	}
 	_ = c.Save(typ, oid, comments.Entry{
 		FetchedAt:  time.Now().Unix(),
-		Next:       res.next,
+		NextOffset: res.next,
 		IsEnd:      res.isEnd,
 		AllCount:   res.allCount,
 		NoComments: res.noComments,

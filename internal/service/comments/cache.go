@@ -52,8 +52,14 @@ type Entry struct {
 	Oid int64 `json:"oid"`
 	// FetchedAt 是这份缓存是什么时候拉回来的（Unix 秒）。
 	FetchedAt int64 `json:"fetchedAt"`
-	// Next 是下一页的游标（B 站给什么就是什么，不透明）。
-	Next int64 `json:"next"`
+	// NextOffset 是下一页的游标（**偏移量**，B 站给什么就是什么，不透明）。
+	//
+	// ⚠️ **它是字符串**：`cursor.pagination_reply.next_offset` 带 base64 字符
+	// （`+` `/` `=`），而**改一个字符 B 站不报错**——它回的是第一页（实测）。
+	//
+	// ⚠️ **不是 `cursor.next`**：那一栏在「评论」档（mode=1）上带上去必挂
+	// （B 站回 `-400 min_score … must be <= max_score …`）。
+	NextOffset string `json:"nextOffset"`
 	// IsEnd 是「到底了」。
 	IsEnd bool `json:"isEnd"`
 	// AllCount 是评论总数。
