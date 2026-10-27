@@ -105,13 +105,13 @@ func TestHoveringARowPutsAPlayTriangleOnItsCover(t *testing.T) {
 	songs := ownersAre(5)
 	_, tt := newList(t, rec.actions(), songs)
 
-	if _, ok := tt.Find(hover.FromLabel(songs[2].Title)); ok {
+	if _, ok := tt.Find(hover.PlayLabel(songs[2].Title)); ok {
 		t.Fatalf("指针还没移上去封面就有播放三角了：%q", tt.Texts())
 	}
 
 	hoverOn(t, tt, songs[2].Title)
 
-	got, ok := tt.Find(hover.FromLabel(songs[2].Title))
+	got, ok := tt.Find(hover.PlayLabel(songs[2].Title))
 	if !ok {
 		t.Fatalf("指针移上去之后封面上没有播放三角：%q", tt.Texts())
 	}
@@ -121,7 +121,7 @@ func TestHoveringARowPutsAPlayTriangleOnItsCover(t *testing.T) {
 			got.W, got.H)
 	}
 	// 别的行**没有**：那一格三角只跟着指针走。
-	if _, ok := tt.Find(hover.FromLabel(songs[0].Title)); ok {
+	if _, ok := tt.Find(hover.PlayLabel(songs[0].Title)); ok {
 		t.Errorf("指针在第三行，第一行的封面上却有播放三角：%q", tt.Texts())
 	}
 }
@@ -134,7 +134,7 @@ func TestTheHoverTriangleIsGoneWhenThePointerLeaves(t *testing.T) {
 	_, tt := newList(t, rec.actions(), songs)
 
 	hoverOn(t, tt, songs[2].Title)
-	if _, ok := tt.Find(hover.FromLabel(songs[2].Title)); !ok {
+	if _, ok := tt.Find(hover.PlayLabel(songs[2].Title)); !ok {
 		t.Fatalf("指针移上去之后封面上没有播放三角：%q", tt.Texts())
 	}
 
@@ -142,7 +142,7 @@ func TestTheHoverTriangleIsGoneWhenThePointerLeaves(t *testing.T) {
 	// ⚠️ 淡出要走满 200ms，所以这里推钟等它走完再问——问「指针移走了的那一帧」量到
 	// 的是「刚开始淡出」，那是它应该在的样子，不是缺陷。
 	settleFade(t, tt)
-	if _, ok := tt.Find(hover.FromLabel(songs[2].Title)); ok {
+	if _, ok := tt.Find(hover.PlayLabel(songs[2].Title)); ok {
 		t.Errorf("指针移走之后那个播放三角还留着：%q", tt.Texts())
 	}
 }
@@ -178,7 +178,7 @@ func TestTheHoverTrianglePaintsWhiteOnTheDimmedCover(t *testing.T) {
 	_, tt := newList(t, rec.actions(), songs)
 
 	hoverOn(t, tt, songs[2].Title)
-	tri, ok := tt.Find(hover.FromLabel(songs[2].Title))
+	tri, ok := tt.Find(hover.PlayLabel(songs[2].Title))
 	if !ok {
 		t.Fatalf("封面上没有播放三角：%q", tt.Texts())
 	}
@@ -224,7 +224,7 @@ func TestTheHoverFeedbackFadesInOverTwoHundredMilliseconds(t *testing.T) {
 	// 只有压暗——拿它当探针，两种情形都量得到。
 	probe := func() float32 {
 		t.Helper()
-		tri, ok := tt.Find(hover.FromLabel(songs[2].Title))
+		tri, ok := tt.Find(hover.PlayLabel(songs[2].Title))
 		x := tri.X - coverSizeLeftEdge
 		if ok {
 			// 三角在的时候用三角的盒子定位（淡入之后 `Find` 才找得到它）。
@@ -245,14 +245,14 @@ func TestTheHoverFeedbackFadesInOverTwoHundredMilliseconds(t *testing.T) {
 	tt.Frame()
 	tt.Frame()
 
-	if _, ok := tt.Find(hover.FromLabel(songs[2].Title)); ok {
+	if _, ok := tt.Find(hover.PlayLabel(songs[2].Title)); ok {
 		t.Fatalf("指针移上去的第一帧封面上就有播放三角了——那不是淡入，是「啪」地一下"+
 			"出现：%q", tt.Texts())
 	}
 	start := probe()
 
 	advance(t, tt, hover.Fade/4)
-	if _, ok := tt.Find(hover.FromLabel(songs[2].Title)); !ok {
+	if _, ok := tt.Find(hover.PlayLabel(songs[2].Title)); !ok {
 		t.Fatalf("推到四分之一还找不到播放三角：%q", tt.Texts())
 	}
 	quarter := probe()
@@ -298,7 +298,7 @@ func TestThePlayTriangleGrowsWhenThePointerIsOnIt(t *testing.T) {
 
 	hoverOn(t, tt, songs[2].Title)
 	settleFade(t, tt)
-	rest, ok := tt.Find(hover.FromLabel(songs[2].Title))
+	rest, ok := tt.Find(hover.PlayLabel(songs[2].Title))
 	if !ok {
 		t.Fatalf("封面上没有播放三角：%q", tt.Texts())
 	}
@@ -308,7 +308,7 @@ func TestThePlayTriangleGrowsWhenThePointerIsOnIt(t *testing.T) {
 	tt.Frame()
 	tt.Advance(motion.GrowTime)
 	tt.Frame()
-	grown, ok := tt.Find(hover.FromLabel(songs[2].Title))
+	grown, ok := tt.Find(hover.PlayLabel(songs[2].Title))
 	if !ok {
 		t.Fatalf("指针停在三角上时它不见了：%q", tt.Texts())
 	}
@@ -320,7 +320,7 @@ func TestThePlayTriangleGrowsWhenThePointerIsOnIt(t *testing.T) {
 	}
 	// 挪到别处它跟着收回去：放大是**跟着指针**的，淡出走完这一层就整个没了。
 	hoverOff(t, tt)
-	if _, ok := tt.Find(hover.FromLabel(songs[2].Title)); ok {
+	if _, ok := tt.Find(hover.PlayLabel(songs[2].Title)); ok {
 		t.Errorf("指针移走、淡出走完之后播放三角还留着：%q", tt.Texts())
 	}
 }
@@ -337,7 +337,7 @@ func TestThePlayTrianglePlaysThatSongAndTheRestAfterIt(t *testing.T) {
 
 	hoverOn(t, tt, songs[1].Title)
 	settleFade(t, tt)
-	if err := tt.Click(hover.FromLabel(songs[1].Title)); err != nil {
+	if err := tt.Click(hover.PlayLabel(songs[1].Title)); err != nil {
 		t.Fatalf("点不了封面上那个播放三角：%v（画面：%q）", err, tt.Texts())
 	}
 
@@ -517,13 +517,13 @@ func TestHoveringACardFloatsAPlayButtonOnItsCover(t *testing.T) {
 	songs := onlineSongs(8)
 	_, tt := newGrid(t, rec.actions(), songs, 1100, gridH) // 4 列
 
-	if _, ok := tt.Find(hover.FromLabel(songs[2].Title)); ok {
+	if _, ok := tt.Find(hover.PlayLabel(songs[2].Title)); ok {
 		t.Fatalf("指针还没移上去就有播放钮了：%q", tt.Texts())
 	}
 	hoverOn(t, tt, songs[2].Title)
 	settleFade(t, tt)
 
-	btn, ok := tt.Find(hover.FromLabel(songs[2].Title))
+	btn, ok := tt.Find(hover.PlayLabel(songs[2].Title))
 	if !ok {
 		t.Fatalf("指针移到那一格之后封面右下角没有播放钮：%q", tt.Texts())
 	}
@@ -532,7 +532,7 @@ func TestHoveringACardFloatsAPlayButtonOnItsCover(t *testing.T) {
 			btn.W)
 	}
 	// 别的格**没有**：那一格跟着指针走。
-	if _, ok := tt.Find(hover.FromLabel(songs[5].Title)); ok {
+	if _, ok := tt.Find(hover.PlayLabel(songs[5].Title)); ok {
 		t.Errorf("指针在第三格，第六格上却有播放钮：%q", tt.Texts())
 	}
 }
@@ -557,7 +557,7 @@ func TestTheCardGradientBarSaysTheDuration(t *testing.T) {
 		t.Fatalf("封面底下那一行没有这一首的时长（%q）：%q",
 			formatDuration(songs[2].Duration), tt.Texts())
 	}
-	btn, ok := tt.Find(hover.FromLabel(songs[2].Title))
+	btn, ok := tt.Find(hover.PlayLabel(songs[2].Title))
 	if !ok {
 		t.Fatalf("封面上没有播放钮：%q", tt.Texts())
 	}
@@ -623,7 +623,7 @@ func TestTheCardPlayButtonPlaysThatCardAndTheRestAfterIt(t *testing.T) {
 
 	hoverOn(t, tt, songs[1].Title)
 	settleFade(t, tt)
-	if err := tt.Click(hover.FromLabel(songs[1].Title)); err != nil {
+	if err := tt.Click(hover.PlayLabel(songs[1].Title)); err != nil {
 		t.Fatalf("点不了封面上那个播放钮：%v（画面：%q）", err, tt.Texts())
 	}
 

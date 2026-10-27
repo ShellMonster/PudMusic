@@ -862,8 +862,10 @@ func (q *Queue) replaceAt(i int, item Item) bool {
 // ⚠️ **随机模式里这一跳也算「放过一首歌」**：刚才那首压进历史栈，于是「上一首」
 // 能回到它（见 setCurLocked）。
 //
-// 不导出：设 cur 只有「跳过去放」这一条路（App.PlayAt），多导出一个就多一处能
-// 把队列和播放器对不上的地方。回滚也走它（i 传 -1 就是退回「还没开始」）。
+// 不导出：设 cur 只有「跳过去放」这一条路，而那条路有两个入口——
+// `App.PlayAt`（点抽屉里的一行）和 `App.EnqueueAndPlayNow` 的「已经在队列里」
+// 那一支（票 #608，点列表里的一首）。多导出一个就多一处能把队列和播放器对不上
+// 的地方。回滚也走它（i 传 -1 就是退回「还没开始」）。
 func (q *Queue) selectAt(i int) (Item, bool) {
 	q.mu.Lock()
 	if i < 0 {
@@ -1354,15 +1356,33 @@ func (a *App) Enqueue(items ...Item) error {
 //
 // 后续切歌仍按用户选择的播放模式走。这里只接一首，批量入口用 PlayFrom。
 // 同步起播失败时把队列的当前项退回原位；异步取流失败由播放状态处理。
+//
+// # 和 PlayAt 的分界
+//
+// 两个都叫「放这一首」，但入口不同、`PlayAt` 那一档更「轻」：
+//
+//	PlayAt            点**抽屉里的一行**：正在放的就是它 → **什么都不做**（不重播）
+//	EnqueueAndPlayNow 点**列表里的一首**：正在放的就是它 → **从头再放一遍**
+//
+// 前者照的是上游的 `playListItem`（开头一句 `if (get().playId === id) return`），
+// 后者照的是上游的 `play()`。听起来不一致，但两个动作的用户意图本来就不同：
+// 抽屉里点正在放的那一行，用户想的是「把指针挪回来」；列表里点一首歌，用户想的是
+// 「放它」——重播一遍是对的。
 func (a *App) EnqueueAndPlayNow(item Item) error {
 	// 已经在队列里：定位过去，不追加。
 	//
 	// ⚠️ **取第一份**（`at` 那个下标）：抽屉按判重标识去重、只画第一份
 	// （`queueRowsFor`），而用户是照着抽屉/列表点的那一行——定位到抽屉画的那一份，
 	// 两边说的是同一行。
+	//
+	// 🔴 **播的是队列里那一份，不是调用方递进来的这一份**（和 `PlayAt` 同一个
+	// 口径）：列表那一行可能是从接口的简版数据造的（缺 `Cid` / `Cover` 之类），
+	// 而队列里那一份是当初入队时的完整数据。放简版的话，在线取流会因为缺分 P id
+	// 打不开——症状是「这一首明明在队列里，点它却报错」。
 	if at, ok := a.queue.indexByIdentity(item.Identity()); ok {
+		queued, _ := a.queue.itemAt(at)
 		a.queue.selectAt(at)
-		if err := a.play(item); err != nil {
+		if err := a.play(queued); err != nil {
 			// 退回原来那一首：队列的下标要和正在放的那首对得上（和 `step` 同一个
 			// 道理——用户点的是这一首，不该因为放不开就被放到另一首上）。
 			//

@@ -65,7 +65,7 @@ func TestRowCoverPutsATriangleInTheMiddleOfTheCover(t *testing.T) {
 		RowCover(c, cache, "", cover, true, "甲", nil)
 	})
 
-	tri, ok := tt.Find(FromLabel("甲"))
+	tri, ok := tt.Find(PlayLabel("甲"))
 	if !ok {
 		t.Fatalf("封面上没有那个播放三角，文字有 %q", tt.Texts())
 	}
@@ -88,7 +88,7 @@ func TestRowCoverHidesEverythingWhenOff(t *testing.T) {
 	tt := coverTester(t, cache, func(c *ui.Context) {
 		RowCover(c, cache, "", 48, false, "甲", nil)
 	})
-	if _, ok := tt.Find(FromLabel("甲")); ok {
+	if _, ok := tt.Find(PlayLabel("甲")); ok {
 		t.Errorf("指针不在封面上就有那个三角的标签了：%q", tt.Texts())
 	}
 }
@@ -116,7 +116,7 @@ func TestRowCoverGrowsTheTriangleOnHover(t *testing.T) {
 	on = true
 	tt.Frame()
 	settle(tt)
-	rest, ok := tt.Find(FromLabel("甲"))
+	rest, ok := tt.Find(PlayLabel("甲"))
 	if !ok {
 		t.Fatalf("指针进来之后没有那个三角：%q", tt.Texts())
 	}
@@ -126,7 +126,7 @@ func TestRowCoverGrowsTheTriangleOnHover(t *testing.T) {
 	tt.Frame()
 	tt.Advance(motion.GrowTime)
 	tt.Frame()
-	grown, ok := tt.Find(FromLabel("甲"))
+	grown, ok := tt.Find(PlayLabel("甲"))
 	if !ok {
 		t.Fatalf("指针停在三角上时它不见了：%q", tt.Texts())
 	}
@@ -152,17 +152,17 @@ func TestTheTriangleFadesInOverTwoHundredMilliseconds(t *testing.T) {
 	tt.Frame()
 	tt.Frame()
 
-	if _, ok := tt.Find(FromLabel("甲")); ok {
+	if _, ok := tt.Find(PlayLabel("甲")); ok {
 		t.Fatalf("指针移过去的第一帧就有那个三角了——那不是淡入，是「啪」地一下出现")
 	}
 	on = true
 	tt.Frame()
 	tt.Frame()
-	if _, ok := tt.Find(FromLabel("甲")); ok {
+	if _, ok := tt.Find(PlayLabel("甲")); ok {
 		t.Fatalf("刚建出来那一帧就有那个三角了（那一帧淡入还是 0）")
 	}
 	settle(tt)
-	if _, ok := tt.Find(FromLabel("甲")); !ok {
+	if _, ok := tt.Find(PlayLabel("甲")); !ok {
 		t.Fatalf("推满 %v 之后那个三角不见了", Fade)
 	}
 }
@@ -185,7 +185,7 @@ func TestCardCoverPutsThePlayButtonAtTheBottomRight(t *testing.T) {
 	tt.Frame()
 	settle(tt)
 
-	btn, ok := tt.Find(FromLabel("甲"))
+	btn, ok := tt.Find(PlayLabel("甲"))
 	if !ok {
 		t.Fatalf("封面右下角没有那个播放钮：%q", tt.Texts())
 	}
@@ -227,7 +227,7 @@ func TestCardCoverLeavesTheDurationToTheLeftOfTheButton(t *testing.T) {
 		}
 	}
 	clock, _ := tt.Find("3:05")
-	btn, _ := tt.Find(FromLabel("甲"))
+	btn, _ := tt.Find(PlayLabel("甲"))
 	if clock.X >= btn.X {
 		t.Errorf("时长在 x=%.1f、播放钮在 x=%.1f——那一半压在按钮底下了", clock.X, btn.X)
 	}
@@ -390,7 +390,7 @@ func TestThePlayButtonPopsOut(t *testing.T) {
 	tt.Frame()
 	tt.Advance(10 * time.Millisecond)
 	tt.Frame()
-	knob, ok := tt.Find(FromLabel("甲"))
+	knob, ok := tt.Find(PlayLabel("甲"))
 	if !ok {
 		t.Fatalf("指针移上去之后没有那个播放钮：%q", tt.Texts())
 	}
@@ -400,7 +400,7 @@ func TestThePlayButtonPopsOut(t *testing.T) {
 
 	tt.Advance(motion.PopTime)
 	tt.Frame()
-	knob, ok = tt.Find(FromLabel("甲"))
+	knob, ok = tt.Find(PlayLabel("甲"))
 	if !ok {
 		t.Fatalf("弹完之后那枚钮不见了：%q", tt.Texts())
 	}
@@ -429,7 +429,7 @@ func TestTheTrianglePopsOut(t *testing.T) {
 	tt.Frame()
 	tt.Advance(10 * time.Millisecond)
 	tt.Frame()
-	tri, ok := tt.Find(FromLabel("甲"))
+	tri, ok := tt.Find(PlayLabel("甲"))
 	if !ok {
 		t.Fatalf("指针移上去之后没有那个三角：%q", tt.Texts())
 	}
@@ -439,7 +439,7 @@ func TestTheTrianglePopsOut(t *testing.T) {
 
 	tt.Advance(motion.PopTime)
 	tt.Frame()
-	tri, ok = tt.Find(FromLabel("甲"))
+	tri, ok = tt.Find(PlayLabel("甲"))
 	if !ok {
 		t.Fatalf("弹完之后那枚三角不见了：%q", tt.Texts())
 	}
@@ -691,7 +691,7 @@ func TestTheProfileGlyphIsNotAPlayTriangle(t *testing.T) {
 	tt.Frame()
 	settle(tt)
 
-	play, ok := tt.Find(FromLabel("甲"))
+	play, ok := tt.Find(PlayLabel("甲"))
 	if !ok {
 		t.Fatalf("没有那个播放三角，文字有 %q", tt.Texts())
 	}

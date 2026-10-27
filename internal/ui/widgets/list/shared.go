@@ -120,9 +120,13 @@ func rowPlay(songs []Music, acts Actions, i int) {
 		return
 	}
 	if isUserItem(songs[i]) {
-		// ⚠️ **这里给的是「从这一首往后」那一段**：`Play` 的协议就是那一段
-		//（`playFrom` 那一段注释），而用户 Tab 的接线只取第一个（`openSearchUser`）。
-		playFrom(songs, acts, i)
+		// ⚠️ **只给这一项**，不是「从这一项往后那一段」：用户 Tab 的 `Play` 是
+		// `openSearchUser`，它只读 `items[0]`（那是 `playFrom` 的协议，但用户行
+		// 只有「进哪一个空间」这一件事可做）。给整段的话，一页 112 行点第一个
+		// 就要**白分配 112 项的切片**——而那一份随后被丢进垃圾桶。
+		if acts.Play != nil {
+			acts.Play([]app.Item{songs[i].Item})
+		}
 		return
 	}
 	playNow(songs, acts, i)

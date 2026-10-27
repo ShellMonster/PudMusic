@@ -16,6 +16,8 @@ package app_test
 import (
 	"testing"
 	"time"
+
+	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 )
 
 // TestEnqueueAndPlayNowSelectsAnItemThatIsAlreadyInTheQueue 是这一票的核心。
@@ -140,5 +142,41 @@ func TestEnqueueAndPlayNowDoesNotClearTheQueueAroundIt(t *testing.T) {
 		if got[i].Path != want {
 			t.Errorf("第 %d 项是 %q，want %q", i, got[i].Path, want)
 		}
+	}
+}
+
+// TestEnqueueAndPlayNowPlaysTheQueuedCopyNotTheCallersCopy 钉住「播的是队列里
+// 那一份，不是调用方递进来的这一份」（票 #608 的评审补的）。
+//
+// 用户点的那个列表行，数据可能来自一个**简版**接口（只有 bvid + 标题），而队列里
+// 那一份是当初入队时的完整数据。放简版的话，在线取流会缺分 P id / 封面，症状是
+// 「这一首明明在队列里，点它却报错」。
+//
+// 判据取的是**播放状态里的标题**（`App.play` 在那一条路上写的是它拿到的那个
+// item 的 Title）：队列里那一份写的是「队列里的标题」，调用方递进来的写的是
+// 「列表上的标题」——播的是哪一份，读出来就是哪一个。
+func TestEnqueueAndPlayNowPlaysTheQueuedCopyNotTheCallersCopy(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = readFlac(t)
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh192), 110836))
+	a := newOnlineApp(t, f, t.TempDir())
+
+	if err := a.PlayFrom(onlineItem("BV1xx", "123", "队列里的标题")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "队列里的标题")
+
+	// 调用方递进来的是同一首（同一个 bvid）的**简版**：标题不一样、cid 空着。
+	thin := onlineItem("BV1xx", "", "列表上的标题")
+	if err := a.EnqueueAndPlayNow(thin); err != nil {
+		t.Fatalf("EnqueueAndPlayNow()：%v", err)
+	}
+	playing(t, a, "队列里的标题")
+
+	if n := len(a.Queue().Items()); n != 1 {
+		t.Errorf("队列里有 %d 首，want 1（同一首不该再加一份）", n)
+	}
+	if got := a.Snapshot().Title; got == "列表上的标题" {
+		t.Errorf("播的是调用方递进来的简版（%q），应该是队列里那一份", got)
 	}
 }

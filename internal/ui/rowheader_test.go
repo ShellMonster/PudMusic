@@ -183,19 +183,19 @@ func TestHoveringALibraryRowPutsAPlayTriangleOnItsCover(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tt, _ := tc.shell(t)
 
-			if _, ok := tt.Find(hover.FromLabel(libTitles[1])); ok {
+			if _, ok := tt.Find(hover.PlayLabel(libTitles[1])); ok {
 				t.Fatalf("指针还没移上去封面就有播放三角了：%q", tt.Texts())
 			}
 			hoverShellRow(t, tt, libTitles[1])
 
-			got, ok := tt.Find(hover.FromLabel(libTitles[1]))
+			got, ok := tt.Find(hover.PlayLabel(libTitles[1]))
 			if !ok {
 				t.Fatalf("指针移上去之后封面上没有播放三角：%q", tt.Texts())
 			}
 			if got.W < 19 {
 				t.Errorf("那个播放三角只有 %.1f 宽，want 20", got.W)
 			}
-			if _, ok := tt.Find(hover.FromLabel(libTitles[0])); ok {
+			if _, ok := tt.Find(hover.PlayLabel(libTitles[0])); ok {
 				t.Errorf("指针在第二行，第一行的封面上却有播放三角：%q", tt.Texts())
 			}
 		})

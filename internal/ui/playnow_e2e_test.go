@@ -14,6 +14,8 @@ package ui
 import (
 	"fmt"
 	"net/http"
+	"os"
+	"slices"
 	"testing"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
@@ -100,6 +102,45 @@ func doubleClickSongRow(t *testing.T, tt interface {
 	t.Fatalf("滚不到「%s」那一行（画面：%q）", title, tt.Texts())
 }
 
+// upSpacePlayable 让这个假 B 站的**每一次取流都成功**（票 #608 的 E2E 要用）。
+//
+// ⚠️ **不挂的话当前项会被自动跳走**：假 B 站原本对 `playurl` 回空，`playOnline`
+// 得到的是「这一条没有单独的音频流」——那是**不可重试**的一类，于是
+// `autoSkipDead` 会一路往后跳（实测跳过 101 首才被保险丝拦住）。它**只挪指针、
+// 不动队列**，于是「当前项是点的那一首」这条断言会被它盖掉。
+func upSpacePlayable(t *testing.T, b *uiExplore) {
+	t.Helper()
+	media, err := os.ReadFile(flac(t))
+	if err != nil {
+		t.Skipf("读不到 FLAC 测试素材：%v", err)
+	}
+	// 媒体字节：CDN 那一路（`/media/…`）。
+	b.on("/media/a.flac", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "audio/mp4")
+		_, _ = w.Write(media)
+	})
+	b.on("/x/player/wbi/playurl", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{
+			"dash": map[string]any{
+				"duration": 1,
+				"audio": []any{map[string]any{
+					"id": 30280, "bandwidth": 110836, "codecs": "flac",
+					"mimeType": "audio/mp4", "baseUrl": b.URL + "/media/a.flac",
+				}},
+			},
+		})
+	})
+}
+
+// bvidList 把一串队列项摊成 bvid 列表，好让「队列内容没变」这一条断言读得懂。
+func bvidList(items []app.Item) []string {
+	out := make([]string, len(items))
+	for i, it := range items {
+		out[i] = it.Bvid
+	}
+	return out
+}
+
 // TestDoubleClickingAnUpSubmissionKeepsThePlaylist 是这一票的 E2E 钉子。
 //
 // 复现用户报的那条路：
@@ -113,6 +154,7 @@ func TestDoubleClickingAnUpSubmissionKeepsThePlaylist(t *testing.T) {
 	b := newUIExplore(t)
 	uiSpaceData(b, "投稿多的 UP", 0, 1)
 	upSpaceManyVideos(b, total)
+	upSpacePlayable(t, b)
 
 	s, tt, a := newSpaceShell(t, b, false, "")
 	openSpace(t, s, tt, 42)
@@ -137,25 +179,38 @@ func TestDoubleClickingAnUpSubmissionKeepsThePlaylist(t *testing.T) {
 	waitFor(t, "队列装进这一页的 112 首", func() bool { return a.Queue().Len() == total })
 
 	// ③ 双击第 59 首那一行。
+	before := bvidList(a.Queue().Items())
 	doubleClickSongRow(t, tt, sp, 59)
 
-	// ④ 队列还是 112 首——这一条就是用户报的那个 bug 的反面。
-	if got := a.Queue().Len(); got != total {
+	// ④ 队列还是那 112 首，**而且内容一模一样**——这一条就是用户报的那个 bug 的
+	// 反面：旧行为会把队列换成「从这一首往后」的 54 首。
+	//
+	// ⚠️ **判据是「整条队列没变」**，不是「当前项是第 59 首」：这里用的是假 B 站，
+	// 万一取流失败，`autoSkipDead` 会一路往后跳（它只挪指针、不动队列）——那会把
+	// 「当前项」这条判据盖掉，于是测试到底在验什么就说不清了。队列内容才是这一票
+	// 的判据。
+	after := bvidList(a.Queue().Items())
+	if len(after) != total {
 		t.Fatalf("双击第 59 首之后队列剩 %d 首，want 还是 %d 首（点一首歌不许把队列换成「从这一首往后」）",
-			got, total)
+			len(after), total)
+	}
+	if !slices.Equal(before, after) {
+		t.Fatalf("双击第 59 首之后队列的内容变了：\n之前 %v\n之后 %v", before, after)
 	}
 
-	// ⑤ 当前项是点的那一首（「投稿 59」是第 59 首，下标 58）。
+	// ⑤ 这一首确实在队列里，而且**当前项就指着它**（「投稿 59」是第 59 首，下标 58）。
+	//
+	// ⚠️ **这一条立得住是因为上面挂上了可播的流**（`upSpacePlayable`）：起播成功，
+	// `autoSkipDead` 不会把指针往后推。
+	if !slices.Contains(after, "BV059") {
+		t.Errorf("队列里没有点的那一首（BV059）：%v", after)
+	}
 	cur := a.Queue().CurrentIndex()
-	items := a.Queue().Items()
-	if cur < 0 || cur >= len(items) {
-		t.Fatalf("当前项是 %d，队列里只有 %d 首", cur, len(items))
+	if cur < 0 || cur >= len(after) {
+		t.Fatalf("当前项是 %d，队列里只有 %d 首", cur, len(after))
 	}
-	if got := items[cur].Title; got != "投稿 59" {
-		t.Errorf("当前项是第 %d 首（%q），want 「投稿 59」", cur+1, got)
-	}
-	if got := items[cur].Bvid; got != "BV059" {
-		t.Errorf("当前项是 %q，want BV059", got)
+	if got := after[cur]; got != "BV059" {
+		t.Errorf("当前项是第 %d 项（%q），want BV059（用户点的那一首）", cur+1, got)
 	}
 }
 
@@ -166,6 +221,7 @@ func TestDoubleClickingASongOutsideTheQueueAppendsIt(t *testing.T) {
 	b := newUIExplore(t)
 	uiSpaceData(b, "投稿多的 UP", 0, 1)
 	upSpaceManyVideos(b, total)
+	upSpacePlayable(t, b)
 
 	s, tt, a := newSpaceShell(t, b, false, "")
 	openSpace(t, s, tt, 42)
