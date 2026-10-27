@@ -391,7 +391,7 @@ func TestTheRateMenuIsSixtyWideWithASolidCurrentRow(t *testing.T) {
 			// **浮层的底色**（浅色下是白的），而字只有十几个像素——不内缩的话
 			// 众数取到的是那几个角，不是字。
 			inner := mygoui.Rect{X: cur.X + 6, Y: cur.Y + 6, W: cur.W - 12, H: cur.H - 12}
-			if got := darkestPixel(img, inner); !near(got, rgb(th.AccentText)) {
+			if got := inkOnSolid(img, inner, rgb(th.Accent)); !near(got, rgb(th.AccentText)) {
 				t.Errorf("当前那一档的字是 %v，而主色底上该是 %v"+
 					"（`t.AccentText`：主色底上读得出来的那一档）", got, rgb(th.AccentText))
 			}
@@ -563,6 +563,23 @@ func widestAccentRow(img *image.RGBA, box mygoui.Rect, accent color.RGBA) int {
 		}
 		if n > best {
 			best = n
+		}
+	}
+	return best
+}
+
+// inkOnSolid 是 box 里**离 bg 最远**的那一个像素：实心底上的字墨迹。
+//
+// ⚠️ **不按亮度挑**：主色是亮是暗取决于主题，字在亮底上最暗、在暗底上最亮。
+func inkOnSolid(img *image.RGBA, box mygoui.Rect, bg color.RGBA) color.RGBA {
+	best, bestD := bg, -1
+	for y := max(int(box.Y), img.Rect.Min.Y); y < min(int(box.Y+box.H), img.Rect.Max.Y); y++ {
+		for x := max(int(box.X), img.Rect.Min.X); x < min(int(box.X+box.W), img.Rect.Max.X); x++ {
+			p := img.RGBAAt(x, y)
+			d := absInt(int(p.R)-int(bg.R)) + absInt(int(p.G)-int(bg.G)) + absInt(int(p.B)-int(bg.B))
+			if d > bestD {
+				bestD, best = d, p
+			}
 		}
 	}
 	return best
