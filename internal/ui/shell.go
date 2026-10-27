@@ -114,6 +114,14 @@ type Shell struct {
 
 	// tint 是封面取色的状态（见 covertint.go）。
 	tint coverTint
+	// glowWake 是满屏光晕取色用的叫醒函数，建一次存着（每帧现写方法值会建闭包）。
+	glowWake func()
+	// fullCoverKey 是满屏封面格子的键，fullCoverKeyURL 是它对应的封面地址。
+	fullCoverKey    any
+	fullCoverKeyURL string
+	// fullCoverTr 是满屏封面的共享元素转场，fullCoverTrID 是它对应的身份。
+	fullCoverTr   ui.ElementTransition
+	fullCoverTrID string
 
 	// shownPath 是上一帧画的是哪一页，syncRoute 拿它认出「换页了」。
 	shownPath string
@@ -358,16 +366,23 @@ type Shell struct {
 
 	// scrub 是进度条的值（0..1），held 是指针有没有按在它上面。
 	// 两个都只由 view 读写——view 永远跑在主线程上。
-	scrub float64
-	held  bool
+	//
+	// scrubPressX / scrubPressPos 是**按下去那一帧**的指针位置和播放位置：
+	// 松手的时候拿它们分「这一下是点还是拖」（章节点吸附只认点，票 #585）。
+	scrub         float64
+	held          bool
+	scrubPressX   float32
+	scrubPressPos time.Duration
 
 	// fullScrub / fullHeld 是**全屏播放器上那条**进度条自己的一份。
 	//
 	// ⚠️ 不能和上面那一份共用：两处会各自按住、各自 `ScrubStart`/`ScrubEnd`，
 	// 而 `ScrubEnd` 是一次真的 seek。共用的话在全屏里拖一下进度条，底下那条
 	// 也会跟着跳（而它这会儿压根没被按着）。
-	fullScrub float64
-	fullHeld  bool
+	fullScrub    float64
+	fullHeld     bool
+	fullPressX   float32
+	fullPressPos time.Duration
 
 	// full 是全屏播放器自己那一摊，见 fullplayer.go。
 	// **只由 view 在主线程上读写**，不跨 goroutine（铁律一）。
@@ -953,6 +968,10 @@ type Shell struct {
 	// seek」——那一半就靠这对标记守住）。
 	miniScrub float64
 	miniHeld  bool
+	// miniPressX / miniPressPos 是迷你进度条按下去那一帧的记账
+	// （和播放条那一对同一个用途，见上面 scrubPressX）。
+	miniPressX   float32
+	miniPressPos time.Duration
 	// builds 记着「各个界面一共建了几遍」。**给测试看的**（见 builds.go 与
 	// framebudget_test.go）：「一帧建两遍」是静默的坏处——画面上看着没差，
 	// 而帧成本翻倍。
@@ -1047,6 +1066,10 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 		mounted: func() bool { return s.app.RecommendOf().Mounted() },
 		tab:     s.fetchHomeTab,
 		new:     s.fetchHomeNewMusic,
+		board: func(tab int) (int, time.Time, bool) {
+			p, ok := s.app.RecommendOf().BoardPeriod(tab)
+			return p.Number, p.PublishedAt, ok
+		},
 		selfMid: s.app.SelfMid,
 		wake:    s.wake.invalidate,
 	})

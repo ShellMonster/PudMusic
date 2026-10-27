@@ -3,6 +3,7 @@ package ui
 import (
 	"sync"
 
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -71,4 +72,24 @@ func (h *wakeHandle) invalidateIf(askSeen bool) bool {
 	}
 	svc.Invalidate()
 	return true
+}
+
+// writeClipboard 把一段文字放进系统剪贴板。要在界面线程上调（菜单被选中那一帧就是）。
+func (h *wakeHandle) writeClipboard(text string) {
+	h.mu.Lock()
+	svc, held := h.svc, h.held
+	h.mu.Unlock()
+	if held {
+		svc.WriteClipboard(text)
+	}
+}
+
+// writePNG 把一张 PNG 放进系统剪贴板。要在界面线程上调。
+func (h *wakeHandle) writePNG(b []byte) {
+	h.mu.Lock()
+	svc, held := h.svc, h.held
+	h.mu.Unlock()
+	if held {
+		svc.WriteClipboardData(transfer.New(transfer.NewItem(transfer.Bytes(transfer.PNG, b))))
+	}
 }

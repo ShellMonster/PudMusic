@@ -60,27 +60,53 @@ func TestRenderClipboardShots(t *testing.T) {
 
 			// 01 焦点**不在**封面上（日常那一档）。
 			{
-				_, tt := copyShotShell(t, st, dark, false)
+				sh, tt := copyShotShell(t, st, dark, false)
+				waitCoverReady(t, sh, tt, st.CoverURL)
 				save(t, dir, "01-播放条-封面-焦点不在-"+name+".png", tt)
 			}
 
 			// 02 焦点**在**封面上：焦点环画在封面外面 3 像素。
 			{
-				_, tt := copyShotShell(t, st, dark, false)
+				sh, tt := copyShotShell(t, st, dark, false)
 				tt.SetFocused(true)
 				focusCover(t, tt)
+				waitCoverReady(t, sh, tt, st.CoverURL)
 				save(t, dir, "02-播放条-封面-焦点在-"+name+".png", tt)
 			}
 
 			// 03 满屏播放器：焦点在封面上。
 			{
-				_, tt := copyShotShell(t, st, dark, true)
+				sh, tt := copyShotShell(t, st, dark, true)
 				tt.SetFocused(true)
 				focusCover(t, tt)
+				waitCoverReady(t, sh, tt, st.CoverURL)
 				save(t, dir, "03-满屏-封面-焦点在-"+name+".png", tt)
 			}
 		})
 	}
+}
+
+// waitCoverReady 等封面真的下回来，并且画面上已经是它了。
+//
+// # 为什么必须等
+//
+// 封面是**异步**下来的（`imgcache` 后台下载 + 解码），而落点那一帧它多半
+// **还没到**——存下来的就是「音符占位图」那一档，而不是这一票要审的那一张
+// 真封面。实测：出图用例一开始没等封面，6 张里有 1 张存成了占位图（那一档
+// 还成了「深色」那张——焦点链长短会改落点，而落点那一帧封面恰好没到）。
+//
+// ⚠️ **等的是条件，不是固定帧数**（AGENTS.md §2「不要用固定帧数 / 固定毫秒
+// 当判据」）：机器慢一点就飘，而飘的时候和被测的逻辑一点关系都没有。
+// 这里等的是缓存里那一张**真的 ready 了**（`State.Ready()`）。
+//
+// ⚠️ **落了条件之后还要再画一帧**：状态是上一帧进的信箱，**同一帧里画出来的
+// 还是上一帧的样子**——不等这一帧，存下去的还是占位图。
+func waitCoverReady(t *testing.T, sh *Shell, tt *mygoui.Tester, url string) {
+	t.Helper()
+	waitFrames(t, tt, "封面下回来了", func() bool {
+		return sh.images.Get(url).Ready()
+	})
+	tt.Frame()
 }
 
 // copyShotShell 造一个只画播放条（或满屏）那一块的外壳。
