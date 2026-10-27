@@ -1183,18 +1183,27 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 // 悬停那一档（主色）比它**亮**——「悬停让这一段更显眼」，不是更不显眼。
 func (s *Shell) viewFullProgress(c *ui.Context, st app.State, dim ui.Color) {
 	known := st.Duration > 0
+	chs := st.Chapters
+	base := s.fullRowBase(c)
 	ui.Row(c).FillWidth().Gap(space.Px10).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, scale.Size12)).TextColor(dim).
 			MinWidth(48).MaxLines(1)
-		sl := knobSlider(c, &s.fullScrub, 0, 1, knobFullLook(dim, s.fullRowBase(c))).
+		sl := knobSlider(c, &s.fullScrub, 0, 1, knobFullLook(dim, base)).
 			Grow(1).Label("全屏播放进度").Disabled(!known)
+		// 章节点画在滑块自己的画法之上（`DrawOver`；pad 是旋钮留在轨道里的
+		// 那半个宽 10，点比 6 像素的轨道粗 3；「缺口」用这一行坐着的底色，
+		// 让它熔进背景里——票 #585）。
+		sl = withChapterDots(sl, chs, st.Duration, 10, 9, base)
 		switch held := sl.Pressed(); {
 		case held && !s.fullHeld:
 			s.fullHeld = true
+			// 记下按下那一帧的指针和位置：松手时拿它们分「点 / 拖」。
+			s.fullPressX, _, _ = sl.PointerPosition()
+			s.fullPressPos = st.Position
 			s.app.ScrubStart()
 		case !held && s.fullHeld:
 			s.fullHeld = false
-			s.app.ScrubEnd(s.fullScrub)
+			s.app.ScrubEnd(snappedScrub(sl, s.fullScrub, s.fullPressX, s.fullPressPos, st.Duration, chs))
 		case !s.fullHeld && known:
 			s.fullScrub = float64(st.Position) / float64(st.Duration)
 		}

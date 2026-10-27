@@ -725,19 +725,28 @@ func (s *Shell) miniTip(c *ui.Context, anchor ui.Element, text string) ui.Elemen
 // ⚠️ 按住看的是 `Pressed()`，不是 `Dragging()`：后者报的是 Drag / Draggable
 // 两套机制，普通 Slider 对它永远是 false（实测：按下滑块移动 200 DIP，
 // Dragging 仍为 false，Pressed 为 true）。理由见 `viewProgress`。
+//
+// 章节点画在滑块自己的画法**之上**（`withChapterDotsCore`，`DrawOver`）；松手
+// 那一下按「点 / 拖」分流——点在两个章节点之间要吸附到点上，拖动原样
+// （票 #585，规则见 `chapters.go`）。
 func (s *Shell) viewMiniProgress(c *ui.Context, st app.State) {
 	known := st.Duration > 0
+	chs := st.Chapters
 
 	// key 装在 `c` 上：滑块的状态是建出来那一刻就初始化的（见上面那一条）。
 	sl := ui.Slider(c.Key("mini-progress"), &s.miniScrub, 0, 1).Grow(1).
 		Height(12).Label("播放进度").Disabled(!known)
+	sl = withChapterDotsCore(sl, chs, st.Duration)
 	switch held := sl.Pressed(); {
 	case held && !s.miniHeld:
 		s.miniHeld = true
+		// 记下按下那一帧的指针和位置：松手时拿它们分「点 / 拖」。
+		s.miniPressX, _, _ = sl.PointerPosition()
+		s.miniPressPos = st.Position
 		s.app.ScrubStart()
 	case !held && s.miniHeld:
 		s.miniHeld = false
-		s.app.ScrubEnd(s.miniScrub)
+		s.app.ScrubEnd(snappedScrub(sl, s.miniScrub, s.miniPressX, s.miniPressPos, st.Duration, chs))
 	case !s.miniHeld && known:
 		s.miniScrub = float64(st.Position) / float64(st.Duration)
 	}
