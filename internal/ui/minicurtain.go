@@ -119,6 +119,12 @@ const (
 	// miniCurtainEmptyKey 是「暂无歌词」那一块的键（铁律四）。
 	miniCurtainEmptyKey = "mini:curtain:empty"
 
+	// miniCurtainLoadingKey 是「歌词还在路上」那一块的键。
+	//
+	// ⚠️ **和空状态那个键分开**：同一个键上换内容，读屏软件读到的是同一句话；
+	// 而这两档说的是两件事（「在等」和「没有」）。
+	miniCurtainLoadingKey = "mini:curtain:loading"
+
 	// miniCurtainCoverKey 是封面那一列（**展开 / 收起的触发器**）的键。
 	miniCurtainCoverKey = "mini:curtain:cover"
 
@@ -768,6 +774,16 @@ func (s *Shell) viewMiniCurtainBody(c *ui.Context, st app.State, t *ui.Theme) {
 			// （要按得到），而歌词区是内容——放进滚动容器的话它会跟着词滚走。
 			s.viewMiniCurtainCollapse(c, t)
 			if active < 0 {
+				// ⚠️ **「还没好」和「没有」两档分开**（2026-10-27）：换歌之后歌词
+				// 要先读盘、等字幕、必要时自动找一次。原先那段时间直接写「暂无
+				// 歌词」——用户读到的是结论，而真相是过程。
+				//
+				// ⚠️ **加载中是一枚转圈**（不是一行字）：这一档说的是过程，
+				// 而「暂无歌词」是一个结论——两档摆成一样就是把过程说成结论。
+				if snap.Loading {
+					s.viewMiniCurtainLoading(c, t)
+					return
+				}
 				s.viewMiniCurtainEmpty(c, t)
 				return
 			}
@@ -826,6 +842,21 @@ func (s *Shell) viewMiniCurtainEmpty(c *ui.Context, t *ui.Theme) {
 		Children(func() {
 			ui.Text(c, noLyrics.Title).FontSize(scale.Font(c, scale.Size13)).
 				TextColor(t.TextMuted)
+		})
+}
+
+// viewMiniCurtainLoading 是「这一首的歌词还在路上」那一档。
+//
+// ⚠️ **只有一枚转圈**：空状态那一句「暂无歌词」是一个结论，而这一档说的是
+// 过程——摆成一样的话用户会把「还没好」读成「没有」（这条规矩见
+// `empty.go` 的 `emptyState.Loading`）。
+//
+// ⚠️ **它和 `miniCurtainEmptyKey` 分开**：同一个键上换内容，读屏软件读到的是
+// 同一句话，而这两档说的是两件事。
+func (s *Shell) viewMiniCurtainLoading(c *ui.Context, t *ui.Theme) {
+	ui.Box(c).Key(miniCurtainLoadingKey).Grow(1).FillWidth().Center().
+		Children(func() {
+			ui.Spinner(c).Label(lyricsLoadingText).TextColor(t.TextMuted)
 		})
 }
 

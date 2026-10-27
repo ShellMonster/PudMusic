@@ -162,7 +162,7 @@ func (c *Client) CreatedFolders(ctx context.Context, upMid, rid int64, page int)
 	out := make([]CreatedFolder, 0, len(d.List))
 	for _, f := range d.List {
 		out = append(out, CreatedFolder{
-			ID: f.ID, Title: decodeEntities(f.Title), Cover: f.Cover,
+			ID: f.ID, Title: decodeEntities(f.Title), Cover: normalizeImageURL(f.Cover),
 			Private: f.Attr&1 == 1, Default: (f.Attr>>1)&1 == 0,
 			MediaCount: f.MediaCount, Faved: f.FavState == 1,
 		})

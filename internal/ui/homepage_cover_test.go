@@ -14,6 +14,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shimmer"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -195,9 +196,13 @@ func TestTheHomeCoversDoNotGoBackToPlaceholder(t *testing.T) {
 // ⚠️ **要往里挪一个圆角**：封面是圆角裁剪的（`imgcache.View` 自己带
 // `Clip()`），角上那一点是**裁掉的**，取到的是页面底色而不是图。
 //
-// 判据是「那个点不是骨架屏的颜色」：骨架屏是 `Surface` 往 `Background` 挪
-// 一半（`imgcache/view.go` 的 `skeletonMix`），是一块平色；而这张封面是
-// 一张渐变图——差得开。
+// 判据是「那个点不是骨架屏的颜色」：骨架屏是**前景色 8% 叠出来的灰**
+// （`widgets/shimmer.BaseAlpha`），是一块平色；而这张封面是一张渐变图——
+// 差得开。
+//
+// ⚠️ **2026-10-27 换过配方**：那一档原来是 `Surface` 往 `Background` 混一半，
+// 而那个混出来的色在浅色下几乎就是白的（#fafafa 压 #ffffff）——列表里的
+// 48 像素封面于是看起来还是一块空白。现在和列表首屏那八行是同一个配方。
 func coverPixelShowsTheImage(t *testing.T, s *Shell, tt *mygoui.Tester) {
 	t.Helper()
 	rect, ok := tt.Find(songName("新歌", 1))
@@ -213,9 +218,9 @@ func coverPixelShowsTheImage(t *testing.T, s *Shell, tt *mygoui.Tester) {
 	}
 	got := img.RGBAAt(x, y)
 
-	// ⚠️ **0.5 是 `imgcache` 里那个 `skeletonMix`**（`widgets/imgcache/view.go`）：
-	// 骨架屏的底色是从 `Surface` 往 `Background` 挪一半。
-	skeleton := rgbaOf(theme.Surface.Mix(theme.Background, 0.5))
+	// ⚠️ **判据从 `imgcache` 那一档的配方现算**，不要在这里再抄一个数：
+	// 上一版就是抄了一份 `0.5`，配方一改它静默地不再成立（永远为绿）。
+	skeleton := rgbaOf(theme.Text.Alpha(shimmer.BaseAlpha))
 	if near(got, skeleton) {
 		t.Errorf("那一格画的是骨架屏（取样点 (%d,%d) 的颜色 %v 和骨架屏 %v 一样）——\n"+
 			"状态说「有图」，画面上却是占位", x, y, got, skeleton)

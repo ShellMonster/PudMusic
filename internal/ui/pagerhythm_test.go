@@ -1443,13 +1443,18 @@ func TestTheCollectionHeaderCopyIsFourteen(t *testing.T) {
 	if scale.CollectionCopy != 14 {
 		t.Errorf("scale.CollectionCopy = %d，want 14（上游 `text-sm`）", scale.CollectionCopy)
 	}
-	for _, key := range []string{"info.Intro", "collectionKindText()", "info.OwnerName"} {
+	for _, key := range []string{"info.Intro", "collectionHeaderKindText()", "info.OwnerName"} {
 		if !textUsesFontSize(t, "collectionpage.go", key, "CollectionCopy") {
 			t.Errorf("头图区的 %q 没有用 `FontSize(scale.Font(c, scale.CollectionCopy))`"+
 				"——那三行小字必须是 14", key)
 		}
 	}
 }
+
+// ⚠️ **第三行那个锚点 2026-10-27 换了名字**：原先那一句直接调
+// `collectionKindText(typ, private)`，现在走 `collectionHeaderKindText(typ, info)`
+// ——「元信息没回来时不许写出那个假 0」这条判据要读 `info.Loaded`（见那个函数
+// 的注释）。钉住的仍然是「那一行小字是 14」。
 
 // textUsesFontSize 报那个文件里那一句字有没有用 `scale.Font(c, want)` 那个字号。
 //

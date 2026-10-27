@@ -155,7 +155,7 @@ func (c *Client) SongInfo(ctx context.Context, sid string) (*SongInfo, error) {
 		// ⚠️ B 站的 duration 是**秒**。当毫秒读的话一首三分钟的歌唱成三秒。
 		Duration: time.Duration(max(d.Duration, 0)) * time.Second,
 		Bvid:     d.Bvid, Author: d.Author, Uname: d.Uname,
-		Title: decodeEntities(d.Title), Cover: d.Cover,
+		Title: decodeEntities(d.Title), Cover: normalizeImageURL(d.Cover),
 	}
 	if d.Cid > 0 {
 		out.Cid = strconv.FormatInt(d.Cid, 10)

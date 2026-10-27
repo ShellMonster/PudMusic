@@ -257,15 +257,19 @@ func (c *Client) CollectionInfo(ctx context.Context, id int64, typ CollectionTyp
 		ID:         d.ID,
 		Title:      decodeEntities(d.Title),
 		Intro:      d.Intro,
-		Cover:      d.Cover,
+		Cover:      normalizeImageURL(d.Cover),
 		Type:       typ,
 		MediaCount: d.MediaCount,
 		// ⚠️ **头像要补协议头**（`normalizeImageURL`）：B 站给的 `upper.face` 是
 		// **协议相对地址**（`//i0.hdslb.com/bfs/face/…`），而封面缓存是用
 		// `http.Client` 抓的——那种地址在 Go 那边是 `unsupported protocol scheme ""`，
-		// 抓不到，于是界面上那一枚头像永远是一块空圆（仓库里另外三处消费同一个
-		// 字段的地方都补了协议：`search.go` 的 `normalizeImageURL`、`follow.go` 的
-		// `avatarURL`、以及 UP 空间那一处）。
+		// 抓不到，于是界面上那一枚头像永远是一块空圆。
+		//
+		// ⚠️ **仓库里消费图片地址的地方都要补**：这一条原先只点了三处
+		// （`search.go` 的 `normalizeImageURL`、`follow.go` 的 `avatarURL`、UP 空间），
+		// 而漏了的一大片（动态流、稍后再看、历史、音乐库、收藏夹列表）现在也补上了；
+		// `imgcache` 在下载那一层另有一道兜底（`absoluteURL`），所以以后漏一处也
+		// 不会再变成「永久失败的空框」。
 		Owner: CollectionOwner{Mid: d.Upper.Mid, Name: d.Upper.Name,
 			Face: normalizeImageURL(d.Upper.Face)},
 		Private: d.Attr&1 == 1,
@@ -457,7 +461,7 @@ func (c *Client) CollectionMedias(ctx context.Context, id int64, sort Collection
 	for _, m := range d.Medias {
 		out = append(out, Media{
 			ID: m.ID, Type: m.Type, Bvid: m.Bvid, Page: m.Page,
-			Title: decodeEntities(m.Title), Cover: m.Cover, Owner: decodeEntities(m.Upper.Name), OwnerMid: m.Upper.Mid,
+			Title: decodeEntities(m.Title), Cover: normalizeImageURL(m.Cover), Owner: decodeEntities(m.Upper.Name), OwnerMid: m.Upper.Mid,
 			// ⚠️ B 站的 duration 是**秒**（浮点）。当毫秒解的话一首三分钟的
 			// 歌会显示成 3 秒，而且界面上没有任何地方会露出错。
 			Duration: time.Duration(float64(m.Duration) * float64(time.Second)),

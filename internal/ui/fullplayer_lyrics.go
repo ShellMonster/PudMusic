@@ -66,6 +66,11 @@ const (
 	fullLyricsAreaKey = "full:lyrics:area"
 	// fullLyricsEmptyKey 是「暂无歌词」那一块的键（铁律四）。
 	fullLyricsEmptyKey = "full:lyrics:empty"
+	// fullLyricsLoadingKey 是「歌词还在路上」那一块的键。
+	//
+	// ⚠️ **和空状态那个键分开**：同一个键上换内容，读屏软件读到的是同一句话；
+	// 而这两档说的是两件事（「在等」和「没有」）。
+	fullLyricsLoadingKey = "full:lyrics:loading"
 
 	// fullLyricsPadY 是歌词那一列**上下**的留白。
 	//
@@ -125,8 +130,16 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, area ui.Rect, hidden
 				Label("满屏歌词").
 				Children(func() {
 					if active < 0 {
-						// 空状态：没有滚动容器，旋钮列就挂在内容盒上（位置一样）。
-						s.viewFullLyricsEmpty(c)
+						// 空状态 / 加载中：没有滚动容器，旋钮列就挂在内容盒上（位置一样）。
+						//
+						// ⚠️ **两档要分开**（2026-10-27）：换歌之后歌词要先读盘、
+						// 等字幕、必要时自动找一次——那段时间里原先直接画「暂无
+						// 歌词」，用户读到的是结论而不是过程。
+						if snap.Loading {
+							s.viewFullLyricsLoading(c)
+						} else {
+							s.viewFullLyricsEmpty(c)
+						}
 						if !hidden {
 							s.viewFullLyricKnobs(c, snap, lv)
 						}
@@ -206,6 +219,26 @@ func (s *Shell) viewFullLyricsEmpty(c *ui.Context) {
 		Children(func() {
 			ui.Icon(c, icon(noLyrics.Icon)).FontSize(emptyIconSize).TextColor(dim)
 			ui.Text(c, noLyrics.Title).FontSize(scale.Font(c, scale.EmptyTitle)).TextColor(on)
+		})
+}
+
+// viewFullLyricsLoading 是「这一首的歌词还在路上」。
+//
+// ⚠️ **它和空状态的区别只在有没有那句话**：两档都在内容盒正中，而加载中
+// **只有一枚转圈**（空状态是一枚插画 + 两行字）。摆插画的话用户会把「还没好」
+// 读成「没有」（这条规矩见 `empty.go` 的 `emptyState.Loading`）。
+//
+// ⚠️ **转圈的颜色要跟着满屏那一档走**（`fullForeground` 的 `on`）：这一屏压在
+// 糊过的封面上，主题那一档的转圈在浅色封面上会糊进去。所以这里不用
+// `drawLoading`（它取的是主题的次要色），而是自己摆一枚 `ui.Spinner` 并给色。
+func (s *Shell) viewFullLyricsLoading(c *ui.Context) {
+	on, _ := s.fullForeground(c)
+	ui.Box(c).Key(fullLyricsLoadingKey).
+		Grow(1).FillWidth().Center().
+		Children(func() {
+			// ⚠️ **Label 是这一枚的无障碍名字**（框架的转圈没有可见的字）。
+			ui.Spinner(c).Size(loadingSpinnerSize, loadingSpinnerSize).
+				TextColor(on).Label(lyricsLoadingText)
 		})
 }
 

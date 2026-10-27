@@ -557,8 +557,10 @@ func (r commentReply) toComment(upperMid int64) Comment {
 		Like:   r.Like,
 		Ctime:  r.Ctime,
 
-		Uname:  r.Member.Uname,
-		Avatar: r.Member.Avatar,
+		Uname: r.Member.Uname,
+		// ⚠️ **头像要补协议头**：B 站这一族接口给的是协议相对地址
+		// （`//i0.hdslb.com/bfs/face/…`），而封面缓存用 `http.Client` 抓。
+		Avatar: normalizeImageURL(r.Member.Avatar),
 		Level:  r.Member.LevelInfo.CurrentLevel,
 		// ⚠️ **没有认证时 B 站给的是 -1**，那不是「认证类型 0」。
 		OfficialType: r.Member.OfficialVerify.Type,
@@ -603,7 +605,7 @@ type rawCommentPicture struct {
 // toPicture 把原始那张图片变成我们要的那一份。
 func (p rawCommentPicture) toPicture() CommentPicture {
 	return CommentPicture{
-		URL:    p.URL,
+		URL:    normalizeImageURL(p.URL),
 		Width:  int(p.Width.Int64()),
 		Height: int(p.Height.Int64()),
 		Size:   p.Size.Int64(),

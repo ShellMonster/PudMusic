@@ -472,6 +472,18 @@ type App struct {
 	lyricGen int
 	// lyricRows 是已经叠好译文的那一行行。
 	lyricRows []lyrics.Row
+	// lyricLoading 是「这一首的歌词还在路上」。
+	//
+	// 🔴 **它是「还没好」，不是「没有」**（2026-10-27）：换歌那一下 `lyricRows`
+	// 被清空，而歌词要先读一次盘（`loadLyrics`）、B 站字幕还要等取流回来那一趟
+	// 网络，全都没有之后还有一次自动找歌词（最长 25 秒，见 `lyrics_auto.go`）。
+	// 这段时间里界面上一直写着「暂无歌词」——用户读到的是**结论**，而真相是
+	// **过程**（上游那三选一里就有「歌词加载中...」这一档，见 `empty.go` 的
+	// 注释）。所以这一栏单独记着，界面据此画加载态。
+	//
+	// ⚠️ **它和 `HasLyrics` 不是一回事**：有词的时候它也可能是真的（换源、重新
+	// 取一份），而界面那一档只在**一条都没有**的时候才画。
+	lyricLoading bool
 	// lyricOffsetMS / lyricFontSize 是用户调过的值，切歌时同步重置成默认值。
 	lyricOffsetMS int
 	lyricFontSize float32
@@ -489,6 +501,11 @@ type App struct {
 	// 先调上一次那个（理由见 armLyricsSaveLocked）。它是**函数**而不是
 	// `*time.Timer`，是为了让测试能换成一个手动推进的假钟。
 	lyricStopTimer func()
+	// lyricLoadingTimer 是「加载中那一档」最长挂多久的兜底（见 setLyricTrack）。
+	//
+	// ⚠️ **它和 `lyricStopTimer` 不是一个东西**：那一个管偏移写盘，这一个管
+	// 「这一首的歌词还没着落」那一格什么时候落到「暂无歌词」。
+	lyricLoadingTimer func()
 
 	// lyricSearch 是「歌词搜索」那一摊，lyricPreview 是「歌词预览」那一摊，
 	// 见 lyrics_search.go。挂上歌词源之前 sources 是空的，界面上的搜索入口

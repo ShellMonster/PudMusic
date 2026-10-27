@@ -178,7 +178,7 @@ func toViewPageOf(d *toViewListData) ToViewPage {
 	for _, it := range d.List {
 		out.Items = append(out.Items, ToViewItem{
 			Aid: it.Aid, Bvid: it.Bvid, Cid: it.Cid,
-			Title: decodeEntities(it.Title), Pic: it.Pic,
+			Title: decodeEntities(it.Title), Pic: normalizeImageURL(it.Pic),
 			OwnerName: decodeEntities(it.Owner.Name), OwnerMid: it.Owner.Mid,
 			Duration: seconds(it.Duration), Progress: seconds(it.Progress),
 			PubDate: unixSeconds(it.Pubdate), AddAt: unixSeconds(it.AddAt),
