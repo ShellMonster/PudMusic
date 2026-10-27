@@ -215,8 +215,12 @@ func TestTheCoverIdentitiesAreDistinctPerKind(t *testing.T) {
 func TestTheCoverIdentitiesAreTheOnesTheOldCodeBuilt(t *testing.T) {
 	// 改之前的算法（原样照抄，`RowCover` / `cardOverlay` 那一版）：
 	// 标签是「歌名 + 空格 + 那句话」，节点键和动画键是「标签 + 后缀」。
+	//
+	// ⚠️ **那一句话票 #608 换过了**（`PlayFrom` → `PlayNow`）：行和卡片按下去
+	// 从「从这一首往后听」改成「放这一首」，所以这里跟着换。**换的只是那句话，
+	// 后缀拼法一格没动**——这一条要钉的就是后者。
 	oldRow := func(title string) (label, dim, fade, tri string) {
-		label = title + " " + PlayFrom
+		label = title + " " + PlayNow
 		return label, label + ":dim", label + ":fade", label + ":tri"
 	}
 	oldCard := func(label string) (bar, fade, btn string) {
@@ -260,7 +264,7 @@ func TestTheCoverIdentitiesAreTheOnesTheOldCodeBuilt(t *testing.T) {
 		assertSame(t, "卡片「弹出来」那一层的键", card.pop, wantCardPop)
 
 		one := idsOf(title, idsCardOne)
-		wantOneLabel := title + " " + PlayNow
+		wantOneLabel := CardOneLabel(title)
 		assertSame(t, "「只放这一首」那张卡的无障碍名字", one.label, wantOneLabel)
 		wantBar, wantCardFade, wantBtn = oldCard(wantOneLabel)
 		assertSame(t, "「只放这一首」那张卡的渐变条的键", one.bar, wantBar)

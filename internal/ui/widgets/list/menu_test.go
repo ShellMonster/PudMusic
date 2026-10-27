@@ -396,6 +396,11 @@ func audioCopies(t *testing.T, names ...string) []string {
 // 单击是选中、双击才是播放：Biu 的 music-list-item 就是这么分的
 // （`music-list-item/index.tsx` 的 onDoubleClick）。合成一处的话，选中一行的
 // 动作就顺手把队列换了。
+//
+// ⚠️ **双击走的是「这一首」那一档（`Actions.PlayNow`），不是「从这一首往后听」**
+// （票 #608，照上游 Biu 的 `play()`）：用户在列表里点一首歌，不该把已经排好的
+// 队列换成「从这一首到本页末尾」那一段——那是右键菜单里「从这一首往后听」的
+// 活儿。判据因此落在 `rec.nowed` 上，`rec.played` 必须是 0。
 func TestDoubleClickingARowPlaysIt(t *testing.T) {
 	rec := &recorded{}
 	_, tt := newList(t, rec.actions(), onlineSongs(4))
@@ -408,11 +413,14 @@ func TestDoubleClickingARowPlaysIt(t *testing.T) {
 	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
 	frame(tt)
 
-	if len(rec.played) != 1 {
-		t.Fatalf("双击之后收到 %d 次播放，want 1 次（单击只该选中）", len(rec.played))
+	if len(rec.nowed) != 1 {
+		t.Fatalf("双击之后收到 %d 次「立即播放」，want 1 次（单击只该选中）", len(rec.nowed))
 	}
-	if got := rec.played[0][0].Bvid; got != "BV2" {
+	if got := rec.nowed[0].Bvid; got != "BV2" {
 		t.Errorf("双击第二行放出来的是 %q，want BV2", got)
+	}
+	if len(rec.played) != 0 {
+		t.Errorf("双击顺手把队列换成了「从这一首往后」那一段（收到 %d 次）", len(rec.played))
 	}
 }
 

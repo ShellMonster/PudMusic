@@ -139,11 +139,11 @@ func TestTheUserRowSaysGoToHisSpaceInsteadOfPlay(t *testing.T) {
 	if _, ok := tt.Find(hover.ProfileLabel(title)); !ok {
 		t.Errorf("用户那一行的封面没有「进他的 UP 空间」那个名字，文字有 %q", tt.Texts())
 	}
-	// ② 「从这一首往后听」那一套不许再出现。
-	if _, ok := tt.Find(hover.FromLabel(title)); ok {
-		t.Errorf("用户那一行的封面上还是「从这一首往后听」那一套，文字有 %q", tt.Texts())
+	// ② 「播放」那一套（歌的封面反馈）不许再出现。
+	if _, ok := tt.Find(hover.PlayLabel(title)); ok {
+		t.Errorf("用户那一行的封面上还是歌那一套反馈（播放），文字有 %q", tt.Texts())
 	}
-	// ③ **歌那一档不许被这一票改**：同样的封面，歌还是「从这一首往后听」。
+	// ③ **歌那一档的身份不许被这一票改**：同样的封面，歌还是「播放」那一套。
 	//
 	// ⚠️ 这一条是验收第 5 条（「列表行和网格卡片的『播放』图形没被这一票改」）：
 	// 那一档的封面是**同一个控件**画出来的，两边一起改的话这一票就把「播放/暂停
@@ -153,8 +153,8 @@ func TestTheUserRowSaysGoToHisSpaceInsteadOfPlay(t *testing.T) {
 	}
 	waitFrames(t, tt, "歌曲那一页进来", loadedTo(s, searchTabSong, 1))
 	hoverShellRow(t, tt, title)
-	if _, ok := tt.Find(hover.FromLabel(title)); !ok {
-		t.Errorf("歌曲那一行的封面上没有「从这一首往后听」那一套了——这一票不该动它，文字有 %q",
+	if _, ok := tt.Find(hover.PlayLabel(title)); !ok {
+		t.Errorf("歌曲那一行的封面上没有「播放」那一套了——这一票不该动它，文字有 %q",
 			tt.Texts())
 	}
 	if _, ok := tt.Find(hover.ProfileLabel(title)); ok {
@@ -193,7 +193,7 @@ func TestTheUserCardSaysGoToHisSpaceInsteadOfPlay(t *testing.T) {
 	if _, ok := tt.Find(hover.ProfileLabel(title)); !ok {
 		t.Errorf("网格那一档的用户格子没有「进他的 UP 空间」那个名字，文字有 %q", tt.Texts())
 	}
-	if _, ok := tt.Find(hover.FromLabel(title)); ok {
-		t.Errorf("网格那一档的用户格子上还是「从这一首往后听」那一套，文字有 %q", tt.Texts())
+	if _, ok := tt.Find(hover.PlayLabel(title)); ok {
+		t.Errorf("网格那一档的用户格子上还是歌那一套反馈（播放），文字有 %q", tt.Texts())
 	}
 }

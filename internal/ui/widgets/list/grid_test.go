@@ -349,6 +349,9 @@ func songAtTopRow(t *testing.T, tt *ui.Tester) int {
 // ⚠️ 点两下而不是两下之间停一下：`Tester` 认的是平台的连击数，同一个位置连着
 // 两下才算双击。判据是**只播了一次**：双击的实现有两种错法——只认第一下（没播），
 // 或者每一遍重建都放一次（放了两三遍，队列被反复替换）。
+//
+// ⚠️ **走的是「这一首」那一档**（`Actions.PlayNow`，票 #608 照上游 Biu 的
+// `play()`），不是「从这一首往后」——点一格不清空用户已经排好的队列。
 func TestDoubleClickingACardPlaysIt(t *testing.T) {
 	rec := &recorded{}
 	g, tt := newGrid(t, rec.actions(), onlineSongs(8), 1100, gridH) // 4 列
@@ -361,11 +364,14 @@ func TestDoubleClickingACardPlaysIt(t *testing.T) {
 	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
 	frame(tt)
 
-	if len(rec.played) != 1 {
-		t.Fatalf("双击之后收到 %d 次播放，want 1 次（单击只该选中）", len(rec.played))
+	if len(rec.nowed) != 1 {
+		t.Fatalf("双击之后收到 %d 次「立即播放」，want 1 次（单击只该选中）", len(rec.nowed))
 	}
-	if got := rec.played[0][0].Bvid; got != "BV3" {
+	if got := rec.nowed[0].Bvid; got != "BV3" {
 		t.Errorf("双击第三首放出来的是 %q，want BV3", got)
+	}
+	if len(rec.played) != 0 {
+		t.Errorf("双击顺手把队列换成了「从这一首往后」那一段（收到 %d 次）", len(rec.played))
 	}
 	// 双击的那一格同时也是选中的那一格（两个手势说的是同一首）。
 	if got, ok := g.Selected(); !ok || got.Title != "在线的歌 C" {
