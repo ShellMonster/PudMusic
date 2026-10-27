@@ -526,7 +526,12 @@ var Items = []Item{
 		//
 		// 而 **-403 在评论这一处判成「可重试」**（全局那张表仍判它不可重试——
 		// 那在别的接口上是对的，在评论接口上是错的）。
-		Spec: "评论接口：请求头里不带 buvid3（jar 里的也不带，登录态照带）、不签 WBI、ps 不超过 30；-404 与「0 条评论」说得不一样；-403 在评论这一处可重试",
+		//
+		// 而 **评论区被关掉的码是 12002**（2026-10-27 真机回归，票 #592：所有
+		// 评论接口一律回 12002，旧码 12061 也要认）——只认旧码的话这一档基本
+		// 触发不到，界面上说不出「这个评论区被关掉了」。**只认这两个码**：别的码
+		// 不许被吞进这一档（吞了就把真正的原因盖住了）。
+		Spec: "评论接口：请求头里不带 buvid3（jar 里的也不带，登录态照带）、不签 WBI、ps 不超过 30；-404 与「0 条评论」说得不一样；-403 在评论这一处可重试；评论区被关掉的码（12002，旧码 12061 也认）说的是「评论区被关掉了」，别的码不被吞进去",
 		Tests: []string{
 			"TestCommentListNeverSendsBuvid",
 			"TestCommentListNeverSendsTheBuvidThatLivesInTheJar",
@@ -540,6 +545,8 @@ var Items = []Item{
 			"TestCommentListReadsTheFieldsOffTheRealShape",
 			"TestCommentListSaysTheObjectIsGoneWhenBiliSays404",
 			"TestTheEmptyListAndTheMissingObjectSayDifferentThings",
+			"TestTheClosedCommentSectionCodeIs12002",
+			"TestTheOtherCommentCodesAreNotTheClosedSection",
 			"TestCommentListReadsTheEmptyPage",
 			"TestAnEmptyPageMidwayIsNotNoComments",
 			"TestCommentTreatsForbiddenAsWorthRetrying",
@@ -593,12 +600,13 @@ var Items = []Item{
 		//	       同一对象上有两趟时，**较早的那一趟不许盖掉较新的那一份**
 		//	       （界面上的和盘上的都不许）。
 		//	local 本地文件不摆入口，**一个请求都不发**。
-		Spec: "评论这一摊（应用层）：mv 的 oid 是数字 avid、audio 的 oid 是 auid（type=14）；每帧调不会发第二个请求；失败之后能再问；换歌之后旧的结果作废；缓存命中是瞬时的、TTL 一小时、有刷新能绕过；零评论的对象也落缓存；同一对象上较早的那一趟不许盖掉较新的那一份（界面上的和盘上的）；本地文件不摆入口也不发请求",
+		Spec: "评论这一摊（应用层）：mv 的 oid 是数字 avid、audio 的 oid 是 auid（type=14）；每帧调不会发第二个请求；失败之后能再问；换歌之后旧的结果作废；缓存命中是瞬时的、TTL 一小时、有刷新能绕过；零评论的对象也落缓存；同一对象上较早的那一趟不许盖掉较新的那一份（界面上的和盘上的）；本地文件不摆入口也不发请求；评论区被关掉时界面上说的是「这个评论区被 UP 主关掉了」，不是一句看不懂的错（票 #592）",
 		Tests: []string{
 			"TestTheMVCommentOIDIsTheNumericAVID",
 			"TestTheAudioCommentOIDIsTheAUID",
 			"TestCommentsAreNotAskedTwice",
 			"TestCommentsAreAskedAgainAfterAFailure",
+			"TestTheClosedSectionIsSaidInPlainWords",
 			"TestTheCommentsOfThePreviousSongDoNotShowUp",
 			"TestTheSecondVisitIsInstant",
 			"TestTheAVIDIsRememberedAcrossRestarts",
