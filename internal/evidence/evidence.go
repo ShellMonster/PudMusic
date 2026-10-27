@@ -1517,6 +1517,7 @@ var Items = []Item{
 		Tests: []string{
 			"TestQuittingWhileDownloadingLeavesNothingBroken",
 			"TestQuittingWhileCheckingIsQuiet",
+			"TestQuittingJustAsTheCheckComesBackIsQuiet",
 			"TestThePrefsFileRoundTrips",
 			"TestACorruptPrefsFileIsIgnoredNotFatal",
 			"TestAPrefsFileFromANewerVersionIsLeftAlone",

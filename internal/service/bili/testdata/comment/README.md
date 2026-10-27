@@ -1,8 +1,9 @@
 # B 站评论接口的实测形状
 
-**2026-10-26 只读探针**（研究票 #537 的后续实测，任务 BMG-299）。只发过
-`GET /x/v2/reply/main` 与 `GET /x/v2/reply/reply`——**没有碰任何写接口**
-（没发评论、没点赞评论）。
+**2026-10-26 只读探针**（研究票 #537 的后续实测，任务 BMG-299）+
+**2026-10-27 真机回归**（票 #575，任务 BMG-303）。只发过
+`GET /x/v2/reply/main`、`GET /x/v2/reply/wbi/main` 与 `GET /x/v2/reply/reply`
+——**没有碰任何写接口**（没发评论、没点赞评论）。
 
 ## 这些文件是什么
 
@@ -70,6 +71,18 @@
 
   ⇒ 评论这一处**绝对不能开** `bili.Call.Buvid`。
 
+  ⚠️ **「3 条」是「没有登录态」时的数**（2026-10-27 真机回归实测，同一个
+  URL、同一枚真 buvid3）：
+
+  | 客户端 | 拿到的条数 | `cursor.is_end` |
+  |---|---|---|
+  | 匿名 + `buvid3` | **3** | **true** |
+  | 假 `SESSDATA` + `buvid3` | **3** | **true** |
+  | **真登录态** + `buvid3` | **20** | false |
+
+  ⇒ 判据是**登录态成不成立**，不是「Cookie 头里有没有 `SESSDATA` 这个名字」。
+  ⇒ **`NoBuvid: true` 仍然是对的**（往严的那边退），但别改成「要带」。
+
   ⚠️ **光「不开」还不够**：jar 里的 cookie 是在 `http.Client.send` 里加的，
   而那**在运输层之前**（`net/http/client.go`：`c.Jar.Cookies(url)` →
   `req.AddCookie` → `RoundTrip`）——所以代码里没写 `Buvid: true` 也**挡不住**
@@ -84,7 +97,66 @@
   `/x/v2/reply/main`。
 - **匿名可用**：全程没有 SESSDATA，三个接口都正常返回。
 
+## 🔴 2026-10-27 真机回归新发现的三条（**都不是这批 fixture 能证明的**）
+
+### 1. 「评论」那一档（`mode=1`）翻不了页，且与「最新评论」是同一份内容
+
+- 带 `cursor.next` 翻第二页 ⇒ **`-400 min_score(1.000000) must be <= max_score(0.000000)`**
+  （`mode=3` / `mode=2` 正常）。**通病**：视频（`type=1`）和音乐库音频
+  （`type=14`）都一样。
+- `cursor.support_mode` **恒为 `[2, 3]`，不含 1** ⇒ B 站已经不支持 mode=1
+  这一档的游标了。
+- 改用 `cursor.pagination_reply.next_offset` + `pagination_str={"offset":"…"}`
+  ⇒ **三档都能翻**（实测）。
+- `mode=1` 与 `mode=2` 的内容**逐条相同**（第 1、2 页都比过 rpid）。
+  ⇒ 票 #591。
+
+### 2. 评论区被关掉的码现在是 **12002**，不是 12061
+
+实测（视频 oid=455017341、音乐库音频 oid=1187010）**所有**评论接口都回
+**12002「当前页面评论功能已关闭」**（`main` / `wbi/main` / 楼中楼 / 老接口
+都试了）。12061 一次都没出现。⇒ 票 #592。
+
+### 3. 字段：条件出现的那些键，实测形状是「**压根没有那个键**」
+
+2026-10-27 真机回归一共采到 **1064 条**评论（89 份真响应）：
+
+| 键 | 在场 | 缺席 |
+|---|---|---|
+| `replies[].rpid/mid/root/parent/count/rcount/like/ctime` | 1064 | 0 |
+| `replies[].member.{mid,uname,avatar,level_info.current_level,official_verify.type,official_verify.desc}` | 1064 | 0 |
+| `replies[].member.face` | **0** | 1064（这个键压根不存在） |
+| `replies[].content.message` | 1064 | 0 |
+| `replies[].reply_control.time_desc` | 1064 | 0 |
+| `replies[].content.emote` | 253 | 811（**条件出现**） |
+| `replies[].content.pictures` | 47 | 1017（**条件出现**） |
+| `replies[].reply_control.location` | 254 | 810（**条件出现**，不是空串） |
+| `replies[].reply_control.sub_reply_entry_text` | 608 | 456（**条件出现**） |
+| `replies[].reply_control.up_reply` | 4 | 1060（**条件出现**） |
+| `cursor.{next,is_end,mode,name,pagination_reply,support_mode}` | 85 | 4 |
+| `cursor.all_count` | 66 | 19（**全都是空列表那一档**） |
+
+- ⚠️ **`cursor.all_count` 在「一条评论都没有」的那一档**（`code 0` + 空
+  `replies` + `is_end=true`）**压根没有这个键**——不是 0。
+- `content.pictures[].img_size` **仍然是 float**（实测 30 个 float / 17 个 int）
+  ⇒ 继续用 `bili.flexInt`，**别改回 int**。
+- `content.emote` 每一项的形状（实测 259 项）：
+  `{id, package_id, state, type, attr, text, url, meta:{size,suggest}, mtime, jump_title}`
+  ⇒ `bili.CommentEmote` 的字段名都对。
+- `reply_control.up_reply` **还在**（2026-10-26 那批 fixture 里也有），
+  但**按内容出现**：oid=114256632618805 的 mode=3 有 4 条带这个键，而
+  oid=170001 的 1064 条一条都没有。
+- ⚠️ **`mid == data.upper.mid` 这一条这轮没被真数据触发**：1064 条里
+  **0 条**的 `mid` 等于 `upper.mid`（没有 UP 主自己发评论的样本）。
+  ⇒ `IsUpper` 的判据仍然只有 fixture 证明，**没有真机证明**。
+
 ## 这些 fixture 证明不了什么
 
-它们证明的是**协议形状对不对**（字段名、类型、层级）。它们**证明不了**
-「B 站现在还这么返回」——那要真机回归（票 #575）。
+它们证明的是**协议形状对不对**（字段名、类型、层级）。票 #575 的真机回归
+（2026-10-27）证明了「B 站现在还这么返回」——但**它也有没覆盖到的地方**：
+
+- 真实用户的多设备 / 地域差异没测（只在本机一处网络跑）。
+- `mid == upper.mid`（「这条是 UP 主发的」）**没被真数据触发**。
+- 没找到「评论多到要翻好几页的 `type=14` 音乐库音频」——只找到 4 条的那种。
+- 风控：并发打同一个 URL 会回 **HTTP 412**（B 站按 IP 限速），串行隔
+  6~8 秒就 0 次。**412 是探针自己打太快，不是接口行为**。
