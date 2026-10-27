@@ -263,19 +263,34 @@ func miniCurtainEnabled(st app.Settings) bool {
 // miniCurtainHeight 算卷帘该有多高：按那扇窗所在显示器的工作区夹住。
 //
 // work 是那块工作区（`mygo.Screen.DisplayMatching(win).WorkArea`），win 是
-// 窗现在的位置和大小。
+// 窗现在的位置（**只有 X/Y 用得上**，见下面那一段）。
 //
 // ⚠️ **只有往下这一边会不够**：卷帘是往**下**长的，而窗的左右两边它一个
 // 像素都不占（宽度还是 320）。
 //
 // ⚠️ **不够就不展开**（返回 0）：透明窗多出来的那一块照样吃点击，而一条
 // 只有几十像素高的卷帘既读不出歌词又挡着底下的应用——那比不展开更坏。
+//
+// 🔴 **量的是「卡片底下」到工作区底边，不是「窗底下」**：
+//
+// 迷你窗是**上下两段**（`viewMini`）：上面那 84 高是卡片（那个
+// `Height(miniHeight)` 的 Row），卷帘挂在它**下面**。⇒ 卷帘能长多高，量
+// 的是**卡片底下**到工作区底边还剩多少。
+//
+// ⚠️ **为什么不能拿窗现在的高度去量**：窗展开着的时候高度是「84 + 卷帘
+// 高」——拿那个底边去量，量到的是「卷帘自己已经占掉的那一块」⇒ 目标高度
+// 一级一级往下掉（屏幕上显示高度一变，卷帘就越缩越短，最后缩成 0）。而
+// 「那块屏改了分辨率」正是最容易触发它的那一下（票 #555）。
 func miniCurtainHeight(work mygo.Rectangle, win mygo.Rectangle) int {
 	if work.Width <= 0 || work.Height <= 0 {
 		return 0
 	}
-	// 窗底到工作区底边还剩多少（底下留一道 12 的边距）。
-	down := work.Y + work.Height - (win.Y + win.Height) - miniCurtainMargin
+	// 卡片底到工作区底边还剩多少（底下留一道 12 的边距）。
+	//
+	// ⚠️ **卡片永远是 84 高**（`miniHeight`）：用户可以把窗往高里拖（迷你窗
+	// 故意没给 `DisableResize`），而卡片那一段是钉死 84 的——多出来的那一块
+	// 是面板自己的底（不透明，不吃点击的那种空，见 `viewMini`）。
+	down := work.Y + work.Height - (win.Y + miniHeight) - miniCurtainMargin
 	if down < miniCurtainMinH {
 		return 0
 	}
@@ -634,6 +649,17 @@ func (s *Shell) miniCurtainCollapseNow() {
 	s.miniCurtainWantsKey = false
 	s.miniCurtain.height = 0
 	s.miniCurtain.setHeight = miniHeight
+	// ⚠️ **目标高度也作废**：这一档是「立刻收起」，**没有动画**——而目标高度
+	// 是「卷帘全开时窗该有多高」，卷帘已经收着了，它就是**过期**的。
+	//
+	// ⚠️ **为什么这一档能作废、而动画那一档不能**（`miniCurtainCollapse`
+	// 留着它）：动画那几百毫秒里窗高是「比例 × 全开高」，全开高就是从这
+	// 个目标高度来的（见 `miniCurtainFullHeight`）——作废它，收起就变成
+	// 「一帧消失」。而这一档把弹簧**钉到 0** 了，比例恒为 0，目标高度压根
+	// 不会被问（`miniCurtainSyncHeight` 只在比例 > 0 时才去问）。
+	//
+	// ⚠️ **下一次点开会重算**（`miniCurtainToggle` 里那句 `target = h`）。
+	s.miniCurtain.target = 0
 	// ⚠️ **弹簧也要归零**：只把 `height` 归零的话，下一帧那个弹簧会从 1
 	// 往 0 走——窗于是**先弹回 320 再缩到 84**，那几百毫秒里窗比内容高
 	// （透明的那一块在吃点击），而票面要的是「**立刻收起**」。

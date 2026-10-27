@@ -10,7 +10,8 @@
 // 另外两处：
 //
 //   - `StateKey` 记住的位置**恢复回来之后不再判显示器**：那块屏要是被拔了
-//     （或者改了分辨率），窗就留在一个**谁都看不见**的地方。
+//     （或者改了分辨率），窗就留在一个**谁都看不见**的地方；而那块屏还在
+//     的话，窗又会**留在别的屏上**——从副屏打开的人压根看不见它。
 //   - 跨屏拖动之后，卷帘按哪块屏的工作区算——原来按的是主屏（见
 //     `miniWindowOf.WorkArea` 那一段的注释）。
 //
@@ -77,6 +78,11 @@ func miniRectGap(a, b mygo.Rectangle) int {
 //
 // ⚠️ **判据是「离指针多近」，不是「哪块最大」**：用户盯着哪块屏，指针就在
 // 哪块屏上——而那块屏可能是小的那块（竖着放的笔记本 + 横着的显示器）。
+//
+// ⚠️ **它跟框架那一版是同一个判据**（`mygo.Screen.DisplayNearestPoint`，
+// mygo v0.6.4 的 `modules.go:274`）：量的是「p 到那块屏的**矩形**的最短距离
+// 的平方」，一块都不重叠时取最近的那块。⇒ 生产那一档问的是系统、这一档
+// 问的是纯函数，而**两边的答案一样**。
 func miniDisplayNearestPoint(displays []mygo.Display, p mygo.Point) mygo.Display {
 	best := mygo.Display{}
 	bestGap := 0
@@ -241,14 +247,41 @@ func miniPlanKeep(displays []mygo.Display, cur mygo.Rectangle) miniPlacement {
 
 // miniPlanRestore 是「恢复了旧位置之后」再判一次。
 //
-// ⚠️ **旧位置还看得见 ⇒ 留着它**（位置记忆是这个功能本身，别把它抹掉）。
-// ⚠️ **看不见了 ⇒ 跟指针走**（那块屏被拔了 / 改了分辨率，旧位置是个谁都
-// 看不见的地方——而用户多半正盯着指针所在的那块屏）。
+// 🔴 **指针所在那块屏说了算**（票 #555 的验收：「从任意显示器打开迷你窗，
+// 首次落在指针所在显示器」）：
+//
+//   - 旧位置**就在指针那块屏上**（还看得见）⇒ **留着它**（位置记忆是这个
+//     功能本身，别把它抹掉）；
+//   - 旧位置**在别的屏上**（或者谁都看不见）⇒ 落到**指针那块屏**的工作区
+//     右上角（`miniCornerRect`，和第一次放置一个样）。
+//
+// ⚠️ **为什么不能「看得见就留着」**：框架的 `restoreWindowState`（mygo
+// v0.6.4 的 `window_state.go:133-137`）在旧位置屏外时会把窗**改成主屏居
+// 中**——于是从副屏打开的人，窗落在主屏上（他压根看不见它），而症状和
+// 「点了没反应」一模一样。
+//
+// ⚠️ **而「旧位置在别的屏上」也必须跟指针走**：那一块屏还在，可用户是在
+// **指针所在那块屏**上点的迷你播放器——旧位置在另一块屏上的时候，窗对他
+// 来说就是「没出现」。
 func miniPlanRestore(displays []mygo.Display, cur mygo.Rectangle, cursor mygo.Point, size mygo.Rectangle) miniPlacement {
-	if miniVisibleOnAny(displays, cur) {
-		return miniPlanKeep(displays, cur)
+	d := miniDisplayNearestPoint(displays, cursor)
+	if d.WorkArea.Width <= 0 || d.WorkArea.Height <= 0 {
+		return miniPlacement{}
 	}
-	return miniPlanFirst(displays, cursor, size)
+	// 旧位置就在指针那块屏上 ⇒ 留着它（位置记忆是这个功能本身）。
+	if miniRectReachable(cur, d.WorkArea) {
+		return miniPlacement{
+			Rect:    miniClampInto(cur, d.WorkArea),
+			Work:    d.WorkArea,
+			Display: d,
+		}
+	}
+	// 旧位置在别的屏上（或者谁都看不见）⇒ 落到指针那块屏的右上角。
+	return miniPlacement{
+		Rect:    miniCornerRect(d.WorkArea, size),
+		Work:    d.WorkArea,
+		Display: d,
+	}
 }
 
 // miniDisplayList 是「这一刻的显示器列表」。
@@ -301,7 +334,11 @@ func (s *Shell) miniScreen() ([]mygo.Display, mygo.Point) {
 // miniReconcileDisplay 是「重新判一次位置」：算出该在哪儿，然后挪过去。
 //
 // ⚠️ **它不挪的时候就是「哪儿也不用去」**——每一次 `SetPosition` 都是一次
-// 原生调用，而这一档跑在「显示器变了」和「窗建出来了」这两个时刻上。
+// 原生调用，而这一档只跑在「窗建出来了」那一个时刻上（`ensureMiniWindow`
+// 里那句 `miniReconcileDisplayNow`）。
+//
+// 🔴 **判据是「指针所在那块屏」**（`miniPlanRestore`）：`StateKey` 恢复出来
+// 的位置**在指针那块屏上**才作数；在别的屏上 ⇒ 跟指针走。
 func (s *Shell) miniReconcileDisplay(displays []mygo.Display, cursor mygo.Point) {
 	w := s.miniWindow()
 	if w == nil || w.IsDestroyed() || len(displays) == 0 {
@@ -341,6 +378,10 @@ func (s *Shell) miniReconcileDisplayNow() {
 // ⚠️ **改分辨率也在这一档里**：系统发的是同一个通知
 // （`NSApplicationDidChangeScreenParametersNotification`），而工作区变了
 // 之后原来那个位置可能已经超出工作区——一样要夹回去。
+//
+// 🔴 **而「窗比新的工作区还高」也在这一档里**：那一块多出来的部分是**透明**
+// 的，而透明的那一块照样吃点击——于是卷帘得**立刻收起来**，窗高回到 84
+// （见下面那一段）。
 func (s *Shell) miniOnDisplaysChanged() {
 	w := s.miniWindow()
 	if w == nil || w.IsDestroyed() {
@@ -354,6 +395,24 @@ func (s *Shell) miniOnDisplaysChanged() {
 	plan := miniPlanKeep(displays, cur)
 	if plan.Rect.Width == 0 {
 		return
+	}
+	// 🔴 **窗比新的工作区还高 ⇒ 立刻收起卷帘**（票 #555 的验收：「显示器移除
+	// / 改分辨率后窗口自动回到可用区域」）。
+	//
+	// ⚠️ **为什么必须收**：这一扇窗是**透明**的，而**多出来的那一块照样吃
+	// 点击**（`minicurtain.go` 的文件头第 1 条）——那块屏的工作区从 1080 变
+	// 成 200 之后，窗还停在 320 高，底下那 120 像素在屏幕外，而窗**还在那
+	// 儿挡着**别的应用的点击。
+	//
+	// ⚠️ **收起了位置要重算**：高度变了，「左上角该在哪儿」也跟着变
+	// （`miniClampInto` 夹的是左上角，而它取决于窗有多高）。
+	if cur.Height > plan.Work.Height {
+		s.miniCurtainCollapseNow()
+		cur = w.Bounds()
+		plan = miniPlanKeep(displays, cur)
+		if plan.Rect.Width == 0 {
+			return
+		}
 	}
 	if plan.Rect.X != cur.X || plan.Rect.Y != cur.Y {
 		w.SetPosition(plan.Rect.X, plan.Rect.Y)

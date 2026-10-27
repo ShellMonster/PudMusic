@@ -4454,7 +4454,14 @@ var Items = []Item{
 			"TestTheMiniWindowIsReconciledAfterItIsBuilt",
 			// 纯规划函数：缩放 / 旋转 / 屏外旧位置。
 			"TestTheMiniPlacementHandlesScaledAndRotatedDisplays",
-			"TestTheMiniPlacementPutsAStalePositionBackOnScreen",
+			// 恢复出来的旧位置：**指针那块屏说了算**（旧位置在别的屏上 ⇒
+			// 跟指针走；旧位置在指针那块屏上 ⇒ 留着它）。
+			"TestTheMiniPlacementFollowsTheCursorDisplayAfterARestore",
+			// 那块屏**变小**之后：展开着的窗收起来、整个落回新的工作区。
+			"TestTheMiniWindowFitsTheNewWorkAreaWhenTheDisplayShrinks",
+			// 改了分辨率之后，卷帘的目标高度按**卡片底下**重算（不是按窗
+			// 底下——那样会一级一级往下掉）。
+			"TestTheMiniCurtainRetargetsFromTheCardBottom",
 			// 卷帘按窗所在那块屏的工作区算高度。
 			"TestTheMiniCurtainUsesTheScreenItIsOn",
 		},

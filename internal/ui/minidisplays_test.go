@@ -192,30 +192,72 @@ func TestTheMiniPlacementHandlesScaledAndRotatedDisplays(t *testing.T) {
 	}
 }
 
-// TestTheMiniPlacementPutsAStalePositionBackOnScreen 盯「屏外旧位置」。
+// TestTheMiniPlacementFollowsTheCursorDisplayAfterARestore 盯「恢复出来的
+// 旧位置怎么判」。
 //
-// ⚠️ **那是 `StateKey` 记住的那个位置**：那块屏被拔了（或者改了分辨率）之后，
-// 恢复出来的就是一个**谁都看不见**的坐标。
+// 🔴 **判据是「指针所在那块屏说了算」**（票 #555 的验收：「从任意显示器打
+// 开迷你窗，首次落在指针所在显示器」）：
 //
-// ⚠️ **看得见的旧位置要留着**（位置记忆是这个功能本身）——所以这一条同时断
-// 两头：看得见 ⇒ 不动；看不见 ⇒ 跟指针走。
-func TestTheMiniPlacementPutsAStalePositionBackOnScreen(t *testing.T) {
+//   - 旧位置**就在指针那块屏上** ⇒ 留着它（位置记忆是这个功能本身）；
+//   - 旧位置**在别的屏上**（哪怕它看得见）⇒ 跟指针走；
+//   - 旧位置**谁都看不见** ⇒ 跟指针走。
+//
+// ⚠️ **中间那一条是这一票最容易漏掉的一半**：框架的 `restoreWindowState`
+// （mygo v0.6.4 的 `window_state.go:133-137`）在旧位置屏外时会把窗**改成
+// 主屏居中**——而「旧位置在主屏上、指针在副屏上」这一档，旧位置**看得
+// 见**，于是「看得见就留着」会把窗留在主屏上，而用户正盯着副屏 ⇒ 症状和
+// 「点了没反应」一模一样。
+func TestTheMiniPlacementFollowsTheCursorDisplayAfterARestore(t *testing.T) {
 	displays := miniTestDisplays()
 	size := mygo.Rectangle{Width: miniWidth, Height: miniHeight}
 
-	// ① 旧位置还在主屏上 ⇒ 留着它（**不**改成右上角）。
-	cur := mygo.Rectangle{X: 400, Y: 600, Width: miniWidth, Height: miniHeight}
-	plan := miniPlanRestore(displays, cur, mygo.Point{X: 900, Y: 400}, size)
+	// ① 旧位置就在**指针那块屏**上 ⇒ 留着它（**不**改成右上角）。
+	cur := mygo.Rectangle{X: -2400, Y: 300, Width: miniWidth, Height: miniHeight}
+	plan := miniPlanRestore(displays, cur, mygo.Point{X: -2000, Y: 100}, size)
+	if plan.Display.ID != 2 {
+		t.Fatalf("旧位置就在指针那块屏上，而它被算到了 ID=%d 那块屏上", plan.Display.ID)
+	}
 	if plan.Rect != cur {
-		t.Errorf("旧位置还看得见，却被挪到了 %+v（want %+v）：位置记忆是这个功能本身",
-			plan.Rect, cur)
+		t.Errorf("旧位置就在指针那块屏上，却被挪到了 %+v（want %+v）："+
+			"位置记忆是这个功能本身", plan.Rect, cur)
 	}
 
-	// ② 旧位置在**一块不存在的屏**上 ⇒ 跟指针走，落在指针那块屏上。
+	// ② 旧位置在**别的屏**上（看得见）⇒ 跟指针走。
+	//
+	// ⚠️ **这一条正是评审抓出来的那一条**：旧位置 (400,600) 在主屏上，而指
+	// 针在副屏上——窗必须落到副屏去。
+	other := mygo.Rectangle{X: 400, Y: 600, Width: miniWidth, Height: miniHeight}
+	plan = miniPlanRestore(displays, other, mygo.Point{X: -2000, Y: 100}, size)
+	if plan.Display.ID != 2 {
+		t.Fatalf("旧位置在别的屏上，而窗落在了 ID=%d 那块屏上（指针在 ID=2）",
+			plan.Display.ID)
+	}
+	if !miniRectInside(plan.Rect, displays[1].WorkArea) {
+		t.Errorf("窗在 %+v，不在指针那块屏的工作区 %+v 里",
+			plan.Rect, displays[1].WorkArea)
+	}
+
+	// ③ 旧位置在**一块不存在的屏**上 ⇒ 跟指针走，落在指针那块屏上。
 	stale := mygo.Rectangle{X: 4000, Y: 300, Width: miniWidth, Height: miniHeight}
 	plan = miniPlanRestore(displays, stale, mygo.Point{X: -2000, Y: 100}, size)
 	if plan.Display.ID != 2 {
 		t.Fatalf("旧位置已经没人看得见了，而窗落在了 ID=%d 那块屏上", plan.Display.ID)
+	}
+	if !miniRectInside(plan.Rect, displays[1].WorkArea) {
+		t.Errorf("窗在 %+v，不在指针那块屏的工作区 %+v 里",
+			plan.Rect, displays[1].WorkArea)
+	}
+
+	// ④ **框架那一档的兜底位置**（`restoreWindowState` 把屏外的旧位置改成
+	// **主屏居中**）⇒ 照样跟指针走。
+	//
+	// ⚠️ **这是评审探针里量到的那一个数**：(255,112) 是 320×84 在 1920×1080
+	// 的主屏上居中的位置——它**看得见**，于是「看得见就留着」会把它留在主屏。
+	centered := mygo.Rectangle{X: 255, Y: 112, Width: miniWidth, Height: miniHeight}
+	plan = miniPlanRestore(displays, centered, mygo.Point{X: -2000, Y: 400}, size)
+	if plan.Display.ID != 2 {
+		t.Fatalf("旧位置是框架居中过的 (%d,%d)，而窗落在了 ID=%d 那块屏上（指针在 ID=2）",
+			centered.X, centered.Y, plan.Display.ID)
 	}
 	if !miniRectInside(plan.Rect, displays[1].WorkArea) {
 		t.Errorf("窗在 %+v，不在指针那块屏的工作区 %+v 里",
@@ -282,8 +324,10 @@ func TestTheMiniWindowComesBackWhenItsDisplayIsRemoved(t *testing.T) {
 //
 // ⚠️ **这是 `StateKey` 那一半**：框架会把记住的位置**盖掉**建窗时给的
 // 坐标（`mygo/window_state.go` 的 `restoreWindowState`），而那一块屏要是已经
-// 被拔了，恢复出来的就是一个**谁都看不见**的地方——所以建出来之后要按当下的
-// 显示器再判一次（`ensureMiniWindow` 里那句 `miniReconcileDisplayNow`）。
+// 被拔了，恢复出来的就是一个**谁都看不见**的地方；那一块屏**还在**的话，恢
+// 复出来的位置就在**别的屏**上——从副屏打开的人看不见它。于是建出来之后要
+// 按**指针所在那块屏**再判一次（`ensureMiniWindow` 里那句
+// `miniReconcileDisplayNow`）。
 //
 // ⚠️ **它走的是生产那个函数**（`miniReconcileDisplay`），不是测试另写的一个。
 func TestTheMiniWindowIsReconciledAfterItIsBuilt(t *testing.T) {
@@ -301,11 +345,22 @@ func TestTheMiniWindowIsReconciledAfterItIsBuilt(t *testing.T) {
 		t.Errorf("窗在 %+v，不在指针那块屏的工作区 %+v 里",
 			fake.Bounds(), displays[1].WorkArea)
 	}
-	// ⚠️ **看得见的旧位置不许动**（位置记忆是这个功能本身）。
+	// 🔴 **旧位置在「别的屏」上 ⇒ 也得跟指针走**（这一条是评审抓出来的那
+	// 一半）：旧位置 (400,600) 在**主屏**上，而指针在**副屏**上——窗留在主
+	// 屏的话，从副屏打开的人压根看不见它。
 	fake.x, fake.y = 400, 600
 	s.miniReconcileDisplay(displays, mygo.Point{X: -2000, Y: 100})
-	if fake.x != 400 || fake.y != 600 {
-		t.Errorf("旧位置还看得见，却被挪到了 (%d,%d)：位置记忆是这个功能本身",
+	if !miniRectInside(fake.Bounds(), displays[1].WorkArea) {
+		t.Errorf("旧位置在主屏上、指针在副屏上，而窗还在 %+v（不在指针那块屏的"+
+			"工作区 %+v 里）：从副屏打开的人看不见它",
+			fake.Bounds(), displays[1].WorkArea)
+	}
+
+	// ⚠️ **旧位置在「指针那块屏」上 ⇒ 不许动**（位置记忆是这个功能本身）。
+	fake.x, fake.y = -2400, 300
+	s.miniReconcileDisplay(displays, mygo.Point{X: -2000, Y: 100})
+	if fake.x != -2400 || fake.y != 300 {
+		t.Errorf("旧位置就在指针那块屏上，却被挪到了 (%d,%d)：位置记忆是这个功能本身",
 			fake.x, fake.y)
 	}
 }
@@ -346,5 +401,81 @@ func TestTheMiniCurtainUsesTheScreenItIsOn(t *testing.T) {
 	if hPrimary := miniCurtainHeight(displays[0].WorkArea, cur); hPrimary != 0 {
 		t.Errorf("按主屏的工作区算居然放得下（%d）：这一条就证明不了「算的是哪块屏」",
 			hPrimary)
+	}
+}
+
+// TestTheMiniWindowFitsTheNewWorkAreaWhenTheDisplayShrinks 盯「那块屏变小
+// 之后，**展开着的**窗回到可用区域」。
+//
+// 🔴 **这一条是评审抓出来的那一条（major）**：原来那一档只把窗**挪**回工作
+// 区，而窗**还是那么高**——多出来的那一部分是**透明**的，而透明的那一块照
+// 样吃点击（`minicurtain.go` 的文件头第 1 条）——于是窗挡在屏幕外，底下那
+// 些应用的按钮点不到。
+//
+// ⚠️ **它走的是生产那条路**（`miniOnDisplaysChanged`），跑在**假窗**上。
+func TestTheMiniWindowFitsTheNewWorkAreaWhenTheDisplayShrinks(t *testing.T) {
+	s, _ := newMiniShell(t, nil)
+	fake := newFakeMiniWindow()
+	// 窗展开着（84 + 236 = 320 高），停在工作区顶上那 12。
+	fake.x, fake.y = 0, miniMargin
+	fake.height = miniHeight + miniCurtainH
+	s.attachMiniWindowTo(fake)
+	s.miniCurtain.open = true
+	s.miniCurtain.target = miniCurtainH
+	s.miniCurtain.setHeight = miniHeight + miniCurtainH
+
+	// 那块屏的工作区变成 200 高（改了分辨率）。
+	next := mygo.Rectangle{X: 0, Y: 0, Width: 1920, Height: 200}
+	fake.work = next
+	s.miniDisplays = func() []mygo.Display {
+		return []mygo.Display{{ID: 1, Primary: true, Bounds: next, WorkArea: next}}
+	}
+	s.miniOnDisplaysChanged()
+
+	if !miniRectInside(fake.Bounds(), next) {
+		t.Errorf("那块屏的工作区变成 200 高之后，窗还在 %+v，不在工作区 %+v 里："+
+			"多出来的那一块是透明的，照样吃点击",
+			fake.Bounds(), next)
+	}
+	if s.miniCurtain.open {
+		t.Errorf("窗比工作区还高，而卷帘还开着：它该收起来（窗高得回到 %d）",
+			miniHeight)
+	}
+}
+
+// TestTheMiniCurtainRetargetsFromTheCardBottom 盯「改了分辨率之后，卷帘的
+// 目标高度按**卡片底下**重算」。
+//
+// 🔴 **这一条是评审抓出来的那一条（major）的另一半**：目标高度原来量的是
+// **窗底下**——而窗展开着的时候窗底就是「卡片底 + 已经长出来的那截卷帘」
+// ⇒ 量到的是「卷帘自己已经占掉的那一块」⇒ 目标高度**一级一级往下掉**（屏
+// 幕上显示高度一变，卷帘就越缩越短，最后缩成 0）。
+//
+// ⚠️ **判据是「工作区 500 高 ⇒ 目标还是 236」**：卡片底在 y=96，500 - 96 -
+// 12 = 392 ⇒ 够 ⇒ 目标就是上限那 236；而按窗底（y=332）量的话只剩 156。
+func TestTheMiniCurtainRetargetsFromTheCardBottom(t *testing.T) {
+	for _, workHeight := range []int{500, 450} {
+		s, _ := newMiniShell(t, nil)
+		fake := newFakeMiniWindow()
+		fake.x, fake.y = 0, miniMargin
+		fake.height = miniHeight + miniCurtainH
+		next := mygo.Rectangle{X: 0, Y: 0, Width: 1920, Height: workHeight}
+		fake.work = next
+		s.attachMiniWindowTo(fake)
+		s.miniCurtain.open = true
+		s.miniCurtain.target = miniCurtainH
+		s.miniCurtain.setHeight = miniHeight + miniCurtainH
+		s.miniDisplays = func() []mygo.Display {
+			return []mygo.Display{{ID: 1, Primary: true, Bounds: next, WorkArea: next}}
+		}
+
+		s.miniOnDisplaysChanged()
+
+		if got := s.miniCurtain.target; got != miniCurtainH {
+			t.Errorf("工作区 %d 高：卷帘的目标高度是 %d，want %d"+
+				"（量的是**卡片底下**到工作区底边，不是窗底下——"+
+				"后者会一级一级往下掉）",
+				workHeight, got, miniCurtainH)
+		}
 	}
 }
