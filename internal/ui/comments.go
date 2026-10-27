@@ -560,10 +560,17 @@ func (s *Shell) viewCommentOfficial(c *ui.Context, cm bili.Comment) {
 }
 
 // viewCommentLike 是点赞数。
+//
+// ⚠️ **图标走 `likeIcon`，不直接摆 `iconLike`**：状态图标只有那四个函数是
+// 出口（`icons_test.go` 的
+// `TestTheStateIconsOnlyReachTheScreenThroughTheirFunction` 盯着这条）——
+// 绕过去的话，「哪一档配哪一张」那张表就管不到画面上。
+// 而这一页**是只读的**（赞一条评论要打写接口，这一票不打），所以恒是
+// **没赞过**那一档（空心）。
 func (s *Shell) viewCommentLike(c *ui.Context, likeText string) {
 	t := c.Theme()
 	ui.Row(c).Gap(space.Px4).AlignItems(ui.Center).Children(func() {
-		ui.Icon(c, icon(iconLike)).FontSize(14).TextColor(t.TextMuted)
+		ui.Icon(c, icon(likeIcon(false))).FontSize(14).TextColor(t.TextMuted)
 		ui.Text(c, likeText).FontSize(scale.Font(c, scale.Size12)).
 			TextColor(t.TextMuted).MaxLines(1)
 	})
