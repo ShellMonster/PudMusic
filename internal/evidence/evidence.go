@@ -932,8 +932,8 @@ var Items = []Item{
 	// ── 分页与路由 ─────────────────────────────────────────────────────────
 	{
 		Category: Paging,
-		Spec:     "14 条路由一条不少，参数路由认得出",
-		Tests:    []string{"TestFourteenRoutes", "TestParamRoutesMatch", "TestUnknownRouteShowsThe404Page"},
+		Spec:     "15 条路由一条不少，参数路由认得出",
+		Tests:    []string{"TestFifteenRoutes", "TestParamRoutesMatch", "TestUnknownRouteShowsThe404Page"},
 	},
 	{
 		Category: Paging,

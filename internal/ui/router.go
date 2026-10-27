@@ -12,12 +12,13 @@ import (
 // Layout 里登记 12 条（`/`、`later`、`history`、`follow`、`collection/:id`、
 // `user/:id`、`settings`、`download-list`、`dynamic-feed`、`local-music`、
 // `search`、`empty`），加上独立窗口的 `mini-player` 共 13 条；我们另加了第 14 条
-// `/login`（上游把登录挂在头像下拉里，我们给它一条路由）。兜底的 `*`（404）
+// `/login`（上游把登录挂在头像下拉里，我们给它一条路由）和第 15 条 `/comments`
+// （票 #573：它是「当前这一首」的附属页，**不进侧栏菜单**）。兜底的 `*`（404）
 // **不在 `routes` 表里**——它是 `notFound` 那一个单独的值，因为 404 不是一条能
 // Match 的模式（见 `viewRoutes`）。
 //
-// 换句话说：`len(routes) == 14`，加上 `notFound` 一共 15 条（`TestFourteenRoutes`
-// 钉的就是这个 15）。
+// 换句话说：`len(routes) == 15`，加上 `notFound` 一共 16 条（`TestFifteenRoutes`
+// 钉的就是这个 16）。
 type Route struct {
 	// Match 是匹配用的模式，`{id}` 是路径参数。这里写 MyGo 的写法，Biu 写的是
 	// `:id`（`src/routes.tsx`），指的是同一件事。
@@ -66,7 +67,7 @@ type Route struct {
 	Icon, ActiveIcon string
 }
 
-// routes 是那 14 条。**InMenu 的七条**，顺序就是侧栏菜单从上到下的顺序：前六条
+// routes 是那 15 条。**InMenu 的七条**，顺序就是侧栏菜单从上到下的顺序：前六条
 // 照 Biu 的 SD-04（推荐音乐 / 我的关注 / 稍后再看 / 历史记录 / 本地音乐 /
 // 下载记录），第七条「设置」是我们自己多摆的（Biu 那边设置只从头像下拉进）。
 //
@@ -201,6 +202,15 @@ var routes = []Route{
 	// 按钮进出来的（跟 Biu 把登录挂在头像下拉里是一回事）。
 	// 加进菜单的话用户每次想登录都要先在侧栏里找一圈。
 	{Match: "/login", Title: "扫码登录"},
+	// 🔴 **评论页（票 #573）**：它是「当前这一首」的**附属页**，不是一个栏目。
+	//
+	// ⚠️ **不进侧栏菜单**（`InMenu` 默认就是 false）：它讲的东西每换一首就
+	// 全变了，摆进侧栏的话用户会以为那是一个能一直待着的页面。
+	//
+	// ⚠️ **不填 `Empty`**：这一页有自己的画法（`builtPage` 里有它），而它
+	// 空着的时候画的是**它自己那句话**（「还没有人评论」/「这一首没有评论」），
+	// 不是一句没人会看到的通用空状态。
+	{Match: commentsPath, Title: "评论"},
 }
 
 // notFound 是兜底那一条：路径谁都不匹配就是它，对应 Biu 的 P-30。
@@ -373,6 +383,13 @@ func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
 		// 所以上面 `routes` 表里那一条的 `Empty` 仍然有用——它就是
 		// 「没关注任何人」那一支，别当成「已经有内容了就该清掉」。
 		return s.viewFollow
+	case commentsPath:
+		// 评论页（票 #573）：页头（**这些评论是谁的评论**）+ 虚拟滚动的评论
+		// 列表 + 楼中楼（comments.go）。
+		//
+		// ⚠️ **空状态在它自己里面画**（「还没有人评论」/「这一首没有评论」/
+		// 「正在拉评论…」），所以上面 `routes` 表里那一条**不填 `Empty`**。
+		return s.viewComments
 	}
 	return nil
 }
@@ -413,12 +430,12 @@ func (s *Shell) pageContent(c *ui.Context, r *ui.Route, rt Route) {
 // ⚠️ 这里**一条 Toast 都不弹**了（原型那版会弹「这一页还没做」和
 // 「没有…这一页」）：
 //
-//   - 「还没做」：`routes` 那 14 条里**已经有 13 条有自己的画法**（`builtPage`），
-//     加上兜底的 404 那一页，一共 14 页有内容；剩下那一条走的是这一页自己的空状态
+//   - 「还没做」：`routes` 那 15 条里**已经有 14 条有自己的画法**（`builtPage`），
+//     加上兜底的 404 那一页，一共 15 页有内容；剩下那一条走的是这一页自己的空状态
 //     ——`/empty`（它就是空状态落地页，按设计该空）。对着其中任何一页说「这一页
 //     还没做」都是在说一件假事，用户只会以为这一页坏了。
 //
-//     ⚠️ **这个 13 是算出来的**：上一轮把 `/follow` 接上画法之后，`main.go` 的抬头、
+//     ⚠️ **这个 14 是算出来的**：上一轮把 `/follow` 接上画法之后，`main.go` 的抬头、
 //     README 和**这一段**还都留着接上之前的那个数，也还把 `/follow` 列在「没有
 //     画法」那一边——而全仓没有任何一条测试读这三处，所以那三句假话一路留着。
 //     `TestTheCountsInTheProseMatchTheCountsInTheCode` 就是为这件事加的：它拿

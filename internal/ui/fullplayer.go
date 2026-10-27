@@ -1198,6 +1198,12 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 					Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), drawerTip(s.drawerOpen)).Clicked() {
 					s.drawerOpen = !s.drawerOpen
 				}
+				// 🔴 **「评论」那一枚**（票 #573）：它是「当前这一首」的评论页
+				// 的入口，而**满屏开着的时候播放条整个不画**（见 `viewMain`
+				// 那段）——所以这一枚是满屏里唯一的入口。
+				//
+				// ⚠️ **本地文件不摆**（理由同 `viewCommentsButton`）。
+				s.viewFullCommentsButton(c, st, base)
 			})
 		})
 	})

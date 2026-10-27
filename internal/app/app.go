@@ -644,6 +644,13 @@ type App struct {
 	// ⚠️ **不是 `cursor.next`**：那一栏在「评论」档（mode=1）上带上去必挂
 	// （B 站回 `-400 min_score … must be <= max_score …`）。
 	commentsNext string
+	// commentsSortMode 是当前这一首的评论按**哪一档**排（`bili.CommentSort` 的值）。
+	//
+	// 🔴 **它进缓存的判定**：同一个对象的两档排序给的是两份不同的评论，而缓存
+	// 的键只有 type + oid（理由见 `service/comments` 的 `Entry.Sort`）。
+	//
+	// ⚠️ **零值 = 「还没设」= 最热那一档**（见 `commentsSortLocked`）。
+	commentsSortMode int
 	// commentsIsEnd 是「到底了」。
 	commentsIsEnd bool
 	// commentsAllCount 是评论总数。

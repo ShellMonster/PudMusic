@@ -167,6 +167,12 @@ type Shell struct {
 	// 同样是因为即时模式：这些都得跨帧活着，而局部变量下一帧就没了。
 	search searchState
 
+	// comments 是评论页（`/comments`）的状态：列表的滚动位置、排好序的那一档、
+	// 展开了哪几条的楼中楼、正文排版的缓存（见 comments.go）。
+	//
+	// 同样是因为即时模式：滚动位置和展开的集合都得跨帧活着。
+	comments commentsPage
+
 	// notFoundAt 是进 404 的那一刻，notFoundStop 是那个每秒一跳的倒计时。
 	// 两者都只由主线程读写（syncRoute 在主线程），后台那一跳只调
 	// wakeHandle.invalidate，所以不违反铁律一、也没有竞态。

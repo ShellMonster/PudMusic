@@ -13,10 +13,10 @@
 自动更新、托盘与单实例与开机自启、系统媒体会话、网络封面缓存（落在应用自己的缓存
 目录里，重启之后不用重下；目录有字节上限，超了按「上次写下来的时间」淘汰最老的那几张）。
 
-**页面不是空壳**：登记表里的 14 条路由中 13 条有自己那一页的内容，剩下那一条走的是
+**页面不是空壳**：登记表里的 15 条路由中 14 条有自己那一页的内容，剩下那一条走的是
 这一页自己的空状态——`/empty`（空状态落地页，按设计就该是空的）。哪一页有没有接上
 真数据由 `internal/ui/realdata_test.go` 钉着，不是靠谁记得；而本文这一句里的那个
-13 也由 `TestTheCountsInTheProseMatchTheCountsInTheCode` 回头核着——加了一页却忘了
+14 也由 `TestTheCountsInTheProseMatchTheCountsInTheCode` 回头核着——加了一页却忘了
 改这三处说明，`go test` 会当场红。
 
 排期与「明确不做」的完整清单在 `docs/research/PLAN.md`。⚠️ 那个目录被 `.gitignore`

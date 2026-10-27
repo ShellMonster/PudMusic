@@ -276,11 +276,13 @@ func TestTheMiddleColumnIsThreePartsWide(t *testing.T) {
 //
 // ⚠️ **第三段的宽度是量出来的，不是写死的**：它是**跟着内容走的**（上游那一段
 // 也是 `flex`）——单 P 的稿子少一枚分集键，那一段就窄 32，而歌名那一列跟着
-// 宽 32。这个 tester 背后是一个空的 App，所以那一段里只有「收藏」一枚。
+// 宽 32。这个 tester 背后是一个空的 App，所以那一段里只有「收藏」和
+// 「评论」两枚（分集要真的 App，赞也是）。
 //
 // ⚠️ **要歌名够长**：短歌名的框是它自己的自然宽，量的是字不是容器。
-// ⚠️ **窗口要够宽**（≥ 1252）：窄窗口上左边那一列是**内容撑出来的**（244，
-// 见 `playbarLeftMinW`），不是轨道那么宽——那正是「溢出轨道」那一档。
+// ⚠️ **窗口要够宽**（≥ 1392）：窄窗口上左边那一列是**内容撑出来的**
+// （`playbarLeftMinW` = 272，票 #573 之后第三段是四枚键），不是轨道那么宽
+// ——那正是「溢出轨道」那一档。
 func TestTheLeftColumnIsOneFifthOfTheBar(t *testing.T) {
 	st := barState()
 	st.Title = "一首歌的名字很长很长很长很长很长很长很长"
@@ -295,8 +297,12 @@ func TestTheLeftColumnIsOneFifthOfTheBar(t *testing.T) {
 			}
 
 			// 第三段有多宽：量画出来的那几枚键的跨度。
+			//
+			// ⚠️ **「评论」也在里面**（票 #573 之后第三段是四枚）：漏掉它的话
+			// 量出来的第三段比真的窄 32，而歌名那一列的宽是拿第三段的宽算的
+			// ——差出来的那 32 全算到歌名头上。
 			segLo, segHi := float32(1e9), float32(-1e9)
-			for _, k := range []string{"分集", "收藏", "赞"} {
+			for _, k := range []string{"分集", "收藏", "赞", "评论"} {
 				r, ok := tt.Find(k)
 				if !ok {
 					continue
@@ -309,11 +315,19 @@ func TestTheLeftColumnIsOneFifthOfTheBar(t *testing.T) {
 			}
 
 			got := title.W
-			want := float32(width-playbarPadX*2)/5 - coverSize - 2*coverGap - (segHi - segLo)
+			// ⚠️ **左列的宽是「轨道宽」和「保底宽」里大的那个**：轨道是 1/5
+			// （上游的 `minmax(0,1fr)`），而**内容最少要 `playbarLeftMinW`**
+			// （票 #573 之后是四枚键 → 272）——窗口不够宽的时候是保底宽说话，
+			// 那一列**撑出轨道**（上游那边也是这么溢的）。
+			//
+			// ⚠️ **1280 那一档就是撑出轨道的那一档**（轨道 249.6 < 保底 272）。
+			track := float32(width-playbarPadX*2) / 5
+			leftW := max32(track, playbarLeftMinW)
+			want := leftW - coverSize - 2*coverGap - (segHi - segLo)
 			if absFloat(got-want) > 1 {
 				t.Errorf("歌名那一列只有 %.1f 宽，而它该是 %.1f——"+
 					"左边那一列是五份里的一份（上游的 1:3:1），"+
-					"而它里面是三段（封面 │ 歌名·UP名 │ 三枚键）", got, want)
+					"而它里面是三段（封面 │ 歌名·UP名 │ 那一排键）", got, want)
 			}
 		})
 	}

@@ -249,6 +249,27 @@ var realDataLedger = []realDataPage{
 		Want: []string{"扫码登录"},
 	},
 	{
+		Route: commentsPath, Title: "评论",
+		// 🔴 **这一页走的是真接口的假 B 站**：评论是 B 站给的，形状照着真
+		// 接口录下来的 fixture（`internal/service/bili/testdata/comment/`）——
+		// 而**页头那句话**是这一页最要紧的东西（用户得知道自己在读谁的评论），
+		// 所以它也在 Want 里面。
+		//
+		// ⚠️ **「这一条评论」在画面上**：正文是**自己排版自己画**的（表情要成图，
+		// 框架的文本控件只给 inline object 留位置、不画它），而**给辅助技术和
+		// 无头 Tester 的那一份**是 `.Label(...)`——所以它找得到（理由见
+		// `comments.go` 的文件头）。
+		Open: func(t *testing.T) (*Shell, *mygoui.Tester) {
+			b := newCommentBili(t, "reply-main.json")
+			s, tt := newCommentsShell(t, b, mvItem(), 1200, 900)
+			realDataWait(t, tt, "评论画出来了", func() bool {
+				return tt.HasText("大圆镜科普")
+			})
+			return s, tt
+		},
+		Want: []string{"大圆镜科普", "若将地球的四十六亿年浓缩为一天", "这个视频的评论"},
+	},
+	{
 		Route: followPath, Title: "我的关注",
 		// ✅ **BMG-47 §3 A2 的欠条已经还清**（BMG-49）。这一页现在有自己的画法
 		//（`follow.go`：分组 Tab + 虚拟网格 + 页内搜索）和自己的四个接口
