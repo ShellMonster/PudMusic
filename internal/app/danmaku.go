@@ -100,6 +100,19 @@ type DanmakuSnapshot struct {
 // ⚠️ **没有 cid 时给的是空快照，而且一个请求都不发**：本地文件和音乐库条目都
 // 走这一支，而它们**永远**没有弹幕。
 func (a *App) Danmaku() DanmakuSnapshot {
+	// ⚠️ **测试摆的那一份优先**（理由见 `App.danmakuTest`）：界面那一层要
+	// 验「画在哪、怎么动」，而生产那一路要一个在线的有 cid 的队列项 + 一趟
+	// 真的 HTTP。
+	//
+	// ⇒ 见到它就直接给，**一个请求都不发**（生产那一段整个被跳过）。
+	a.danmakuMu.Lock()
+	if a.danmakuTestSet {
+		items := a.danmakuTest
+		a.danmakuMu.Unlock()
+		return DanmakuSnapshot{Items: items, Ready: true}
+	}
+	a.danmakuMu.Unlock()
+
 	bvid, cid, ok := a.danmakuTarget()
 	if !ok {
 		return DanmakuSnapshot{}
@@ -117,6 +130,23 @@ func (a *App) Danmaku() DanmakuSnapshot {
 		return DanmakuSnapshot{}
 	}
 	return DanmakuSnapshot{Items: a.danmakuItems, Ready: a.danmakuReady}
+}
+
+// SetDanmakuForTest 直接摆一份「当前这一集的弹幕」。**只给测试用**。
+//
+// # 它绕过的正是生产那一段
+//
+// 没有 cid 的队列项、生产那一趟 HTTP、代次与缓存——界面那一层要验的是
+// 「画在哪、怎么动」，不是「怎么取」（取的那一半是 BMG-305 那一票的事，
+// 它自己带证据）。
+//
+// ⚠️ **摆空的那一份也是「摆」**（`[]DanmakuItem{}`）：那是「这一集没有
+// 弹幕」，而「没摆过」是「走生产那一路」——两件事必须分得开。
+func (a *App) SetDanmakuForTest(items []DanmakuItem) {
+	a.danmakuMu.Lock()
+	a.danmakuTestSet = true
+	a.danmakuTest = items
+	a.danmakuMu.Unlock()
 }
 
 // DanmakuWorthAsking 报「当前这一集有没有弹幕可问」。

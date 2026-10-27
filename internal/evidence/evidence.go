@@ -526,7 +526,12 @@ var Items = []Item{
 		//
 		// 而 **-403 在评论这一处判成「可重试」**（全局那张表仍判它不可重试——
 		// 那在别的接口上是对的，在评论接口上是错的）。
-		Spec: "评论接口：请求头里不带 buvid3（jar 里的也不带，登录态照带）、不签 WBI、ps 不超过 30；-404 与「0 条评论」说得不一样；-403 在评论这一处可重试",
+		//
+		// 而 **评论区被关掉的码是 12002**（2026-10-27 真机回归，票 #592：所有
+		// 评论接口一律回 12002，旧码 12061 也要认）——只认旧码的话这一档基本
+		// 触发不到，界面上说不出「这个评论区被关掉了」。**只认这两个码**：别的码
+		// 不许被吞进这一档（吞了就把真正的原因盖住了）。
+		Spec: "评论接口：请求头里不带 buvid3（jar 里的也不带，登录态照带）、不签 WBI、ps 不超过 30；-404 与「0 条评论」说得不一样；-403 在评论这一处可重试；评论区被关掉的码（12002，旧码 12061 也认）说的是「评论区被关掉了」，别的码不被吞进去",
 		Tests: []string{
 			"TestCommentListNeverSendsBuvid",
 			"TestCommentListNeverSendsTheBuvidThatLivesInTheJar",
@@ -540,12 +545,41 @@ var Items = []Item{
 			"TestCommentListReadsTheFieldsOffTheRealShape",
 			"TestCommentListSaysTheObjectIsGoneWhenBiliSays404",
 			"TestTheEmptyListAndTheMissingObjectSayDifferentThings",
+			"TestTheClosedCommentSectionCodeIs12002",
+			"TestTheOtherCommentCodesAreNotTheClosedSection",
 			"TestCommentListReadsTheEmptyPage",
 			"TestAnEmptyPageMidwayIsNotNoComments",
 			"TestCommentTreatsForbiddenAsWorthRetrying",
 			"TestIsUpperMarksOnlyTheUpAuthorsOwnComment",
 			"TestUpReplyCommentsAreNotMarkedAsTheUpper",
 			"TestAPictureWithAFractionalSizeDoesNotTakeTheWholePageDown",
+		},
+	},
+	{
+		Category: HTTP,
+		// 🔴 **评论列表的翻页**（票 #591）：
+		//
+		//	游标    翻页走 `cursor.pagination_reply.next_offset` +
+		//	        `pagination_str`，**不是 `cursor.next`**——后者在「评论」那一档
+		//	        （`mode=1`）上带上去必挂（B 站回 `-400 min_score … must be <=
+		//	        max_score …`，因为 `support_mode` 恒为 `[2, 3]`，不含 1）。
+		//	三档    mode=3 / 1 / 2 **都能翻到第二页**，且每一页的内容**互不相同**
+		//	        （拿 rpid 比）。
+		//	同一份 「评论」（mode=1）与「最新评论」（mode=2）给的是**同一份内容**
+		//	        （实测逐条相同，而 `cursor.name` 却是不同的）⇒ 界面上不能把它
+		//	        摆成两个一模一样的档。
+		//
+		// ⚠️ **偏移量一个字都不能改**：改一个字符 B 站**不报错**，它回的是
+		// **第一页**——于是「加载更多」按下去什么都不变。
+		Spec: "评论列表的翻页：走 pagination_reply.next_offset + pagination_str（不是 cursor.next，那一个在「评论」档上必挂 -400）；三个排序档都能翻到第二页且每页内容互不相同；「评论」与「最新评论」是同一份内容，界面上不能摆成两个一样的档；偏移量原样带回去",
+		Tests: []string{
+			"TestAllThreeSortsReachTheSecondPage",
+			"TestThePagingNeverSendsTheBrokenCursor",
+			"TestTheCommentSortGivesTheSameContentAsTheLatestOne",
+			"TestTheHotSortGivesItsOwnContent",
+			"TestTheOffsetIsSentVerbatim",
+			"TestTheSortsOnScreenAreNotTwoOfTheSame",
+			"TestLoadMoreCarriesTheOffsetThroughTheCache",
 		},
 	},
 	{
@@ -566,12 +600,13 @@ var Items = []Item{
 		//	       同一对象上有两趟时，**较早的那一趟不许盖掉较新的那一份**
 		//	       （界面上的和盘上的都不许）。
 		//	local 本地文件不摆入口，**一个请求都不发**。
-		Spec: "评论这一摊（应用层）：mv 的 oid 是数字 avid、audio 的 oid 是 auid（type=14）；每帧调不会发第二个请求；失败之后能再问；换歌之后旧的结果作废；缓存命中是瞬时的、TTL 一小时、有刷新能绕过；零评论的对象也落缓存；同一对象上较早的那一趟不许盖掉较新的那一份（界面上的和盘上的）；本地文件不摆入口也不发请求",
+		Spec: "评论这一摊（应用层）：mv 的 oid 是数字 avid、audio 的 oid 是 auid（type=14）；每帧调不会发第二个请求；失败之后能再问；换歌之后旧的结果作废；缓存命中是瞬时的、TTL 一小时、有刷新能绕过；零评论的对象也落缓存；同一对象上较早的那一趟不许盖掉较新的那一份（界面上的和盘上的）；本地文件不摆入口也不发请求；评论区被关掉时界面上说的是「这个评论区被 UP 主关掉了」，不是一句看不懂的错（票 #592）",
 		Tests: []string{
 			"TestTheMVCommentOIDIsTheNumericAVID",
 			"TestTheAudioCommentOIDIsTheAUID",
 			"TestCommentsAreNotAskedTwice",
 			"TestCommentsAreAskedAgainAfterAFailure",
+			"TestTheClosedSectionIsSaidInPlainWords",
 			"TestTheCommentsOfThePreviousSongDoNotShowUp",
 			"TestTheSecondVisitIsInstant",
 			"TestTheAVIDIsRememberedAcrossRestarts",
@@ -2671,6 +2706,50 @@ var Items = []Item{
 	},
 	{
 		Category: Play,
+		// 满屏播放器左边那张封面上的弹幕（**界面**那一层；取弹幕那一半是
+		// 上面那一条）。
+		//
+		// 钉的是五个「界面上看不出坏了」的点：
+		//
+		//   - **画在浮层里**：满屏整个是浮层，而浮层画在主树**之上**——弹幕
+		//     画在主树里会被满屏那层不透明的底盖住。🔴 **那个症状是静默的**：
+		//     文字**在树里**（`Texts()` 查得到），而画面上一个像素也没有。
+		//     ⇒ 「树上有没有那几行字」验不出这个坑，得看画面。
+		//   - **位移走 pose**：位置要是算在 view 里（`Absolute().Left(x)`），它
+		//     只在重建时更新——而满屏开着时界面 20 帧/秒重建，于是弹幕是 20fps
+		//     跳着走的。走 pose（只重绘那一族）是 60fps 平滑。
+		//   - **按当前位置起步**：弹幕的时间是**视频时间**，我们放的就是这个视频
+		//     的音轨 ⇒ 没有额外 offset。「从第 3 分钟开始听」就从第 3 分钟那一条
+		//     开始滚（**不是**按「播放了多久」滚）。
+		//   - **key 用弹幕自己的 rowid**：动态列表的 key 必须稳定且唯一——用下标
+		//     的话「前面插一条」会让后面所有条的状态整体错配。
+		//   - **它是装饰**：不给 Role / Label（读屏软件不念），「减少动态效果」
+		//     开着时按 20fps 跳着走，设置里能整个关掉（默认开着）。
+		//   - **同一条轨道上两条不能叠字**：两条同速从右边沿进来，不叠字当且
+		//     仅当「后一条晚的时间 × 速度 ≥ 前一条的字宽」——报告 §3.3 那条
+		//     「走出 30% 宽度」只当**时间门槛**用，它对长字不够（一条 196
+		//     像素宽的字滚了 1.8 秒之后尾巴还在封面里，下一条就进来了 ⇒
+		//     重叠 88 像素，两句话没法读）。
+		//   - **长弹幕不会提前消失**：一条弹幕待到「整个出界」为止（(封面宽
+		//     + 字宽) ÷ 速度），**没有时长上限**——早该出界的那些靠「按字数
+		//     估的宽上界」粗筛掉，而那个上界只粗筛、不砍。
+		Spec: "满屏播放器左边那张封面上的弹幕：画在封面上（浮层里，不是主树）、按当前播放位置滚、位移走 pose（60fps 平滑）、每条弹幕一个稳定且唯一的 key、同一条轨道上两条不叠字、长弹幕不会提前消失、装饰不进无障碍树、设置里能整个关掉（默认开）",
+		Tests: []string{
+			"TestTheDanmakuIsDrawnOnTheCoverOfTheFullPlayer",
+			"TestTheDanmakuUnderTheFullPlayerWouldNotBeSeen",
+			"TestTheDanmakuStartsFromTheCurrentPosition",
+			"TestTheDanmakuGlidesInsteadOfTeleporting",
+			"TestTheDanmakuJumpsWhenMotionIsReduced",
+			"TestEveryDanmakuHasItsOwnKey",
+			"TestTheDanmakuCanBeTurnedOff",
+			"TestTheFullPlayerSettingsHasTheDanmakuSwitch",
+			"TestTwoDanmakuOnTheSameLaneNeverOverlap",
+			"TestTheSameLaneWaitsForThePreviousDanmakuToClearTheEdge",
+			"TestALongDanmakuStaysUntilItHasLeftTheCover",
+		},
+	},
+	{
+		Category: Play,
 		// 「多 P 的投稿只能播第一集」（BMG-47 的 A12）那一张票的界面那一半：
 		// 播放条上有分集入口 → 打开是浮层列表、每一集有编号和标题 → 标出正在播的
 		// 那一集 → 点一集就切过去 → **单 P 不摆这个入口**。
@@ -4388,6 +4467,80 @@ var Items = []Item{
 			// 认成 scheme `c`，而按 `u.Scheme != "file"` 判的话**整个
 			// Windows 的文件关联这一档会被自己扔掉**。
 			"TestTheLaunchArgKeepsTheWindowsDriveLetter",
+		},
+	},
+	{
+		// 票 #559（板子任务 #297，2026-10-26）：后台下载完成时弹一条系统通知。
+		//
+		// ⚠️ **判据是「一扇窗都没有『有焦点**且**看得见』」**：「窗口全部隐藏」是
+		// 一档**独立**的状态，不许靠「隐藏必然先失焦」那个隐含顺序——`OnHide` 与
+		// `OnBlur` 是两个回调，谁先到不由我们决定。
+		//
+		// ⚠️ **迷你播放器那一扇的焦点要算**：它是 Panel（点它不激活应用），可它
+		// 在 macOS 上照样能拿 key（实测 2026-10-26，真窗口）。不算它的话，迷你
+		// 模式下每一次后台下载完成都会弹一条通知，而用户正看着迷你播放器听歌。
+		//
+		// ⚠️ **「互相切换」那一瞬靠「等一等」而不是「判得准」**：主窗失焦到迷你窗
+		// 拿到焦点之间有一个「两扇都没有焦点」的瞬间（实测 35~60 毫秒），而通知
+		// 是立刻弹的——所以判定延后一小会儿再判一次。
+		Category: Platform,
+		Spec:     "用户不在应用里（没有任何一扇窗『有焦点且看得见』，或窗口全部隐藏）时，后台下载完成弹一条系统通知；用户在应用里时不弹；主窗与迷你窗互相切换不误判；点通知回主窗的下载记录页；权限拒绝 / 不支持时静默降级成应用内提示而不丢事件（那句话要等用户回来还在）；同一任务用稳定 ID，同一版本不重复提醒；「有更新了」那一档另有一个独立开关；任一扇窗重新拿到焦点时清掉通知中心里的那些（**包括上一次运行留下的**——哪怕这一轮一次通知都没发过）",
+		Tests: []string{
+			// 判据本身：聚焦 / 失焦 / 迷你那一扇 / 全隐藏 / 窗口还没建出来 /
+			// 关掉的那一扇窗要摘掉。
+			"TestTheFocusSnapshotSaysWhenTheUserIsAway",
+			"TestTheMiniPlayerCountsAsTheUserBeingHere",
+			"TestAllWindowsHiddenMeansTheUserIsAway",
+			"TestAHiddenWindowDoesNotCountAsTheUserBeingHere",
+			"TestAHiddenWindowIsAwayEvenWhileItStillHasFocus",
+			"TestNoWindowYetIsNotTheUserBeingAway",
+			"TestAClosedWindowIsNotCounted",
+			// 互相切换那一瞬不误判（靠宽限期）。
+			"TestSwitchingBetweenOurOwnWindowsIsNotLeavingTheApp",
+			// 该发的时候真发了、该静默的时候真静默。
+			"TestDownloadDoneIsAnnouncedWhenTheUserIsAway",
+			"TestDownloadDoneIsSilentWhileTheUserIsHere",
+			// 稳定 ID（同一任务不堆两条）。
+			"TestTheNotificationIDIsStable",
+			// 点通知回到对应页面。
+			"TestTheNotificationGoesToTheDownloadList",
+			"TestTheUpdateNotificationGoesToTheSettings",
+			"TestAnUnknownNotificationGoesNowhere",
+			// 任一扇窗重新拿到焦点就把通知清掉（**包括上一次运行留下的那些**）。
+			"TestReturningToTheAppClearsTheNotifications",
+			"TestAFreshProcessStillClearsTheNotificationsOfEarlierRuns",
+			// 发不出去时不丢事件。
+			"TestAFailedNotificationStillSaysItInTheApp",
+			"TestAFailedNotificationStillSaysItWhenTheUserReturns",
+			"TestTheStickyNoticeIsReleasedWhenTheUserComesBack",
+			"TestTheStickyNoticeIsOnScreenWhenTheUserComesBack",
+			// 同一个版本只提醒一次（稳定 ID 不代替它）。
+			"TestTheSameVersionIsNotNotifiedTwice",
+			"TestANewVersionIsNotifiedAgain",
+			// 用户在前台发现新版本，等他离开之后**仍然**能收到那一条（两层
+			// 合起来量：应用层那一份记账也得退回来）。
+			"TestAVersionFoundWhileTheUserIsHereIsNotifiedWhenTheyLeave",
+			// 「更新提醒」那一格在设置页上摆着。
+			"TestTheUpdateNotificationSwitchIsOnTheSettingsPage",
+			// 应用层那一段接线（下载完成 / 后台查到更新会递出去）。
+			"TestADownloadThatFinishedReachesTheNotifier",
+			"TestABackgroundCheckTellsTheNotifier",
+			"TestTwoBackgroundChecksDoNotNotifyTheSameVersionTwice",
+			// 退回来那一份之后，同一个版本还能再提醒一次。
+			"TestAReleasedVersionIsNotifiedAgain",
+			"TestAReleaseDoesNotClearAnotherVersion",
+			"TestTheUpdateNotificationSwitchTurnsItOff",
+			"TestTheUpdateNotificationSwitchIsOnByDefault",
+			// 平台层那一段（问过没有 / 拒了不再问 / 失败交给上层）。
+			"TestANotificationIsNotSupportedBeforeTheAppIsReady",
+			// 「刚起来的进程」那一份账是「还没问过」那一档——
+			// 而**零值**就是那一档（否则打包的 macOS 应用一次都不会去问
+			// 框架，于是弹不出系统通知，而它静默降级成应用内提示）。
+			"TestAFreshProcessHasNotAskedYet",
+			"TestTheZeroValueOfTheSupportStateMeansNotAskedYet",
+			"TestTheSupportAnswerIsAskedOnlyOnce",
+			"TestADeniedNotificationIsNeverAskedForAgain",
+			"TestTheFailureIsHandedToTheUpperLayer",
 		},
 	},
 	{

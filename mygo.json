@@ -1,7 +1,7 @@
 {
   "name": "布丁音乐",
   "identifier": "io.github.shellmonster.biu",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "out": "build",
   "urlSchemes": ["biu"],
   "fileAssociations": [
@@ -22,6 +22,6 @@
   },
   "updates": {
     "publicKey": "oJyYKaPIGn5RA8yPM/I395n6D+wn/PdaZv58jqBDrO0=",
-    "github": "ShellMonster/Biu_Go"
+    "github": "ShellMonster/PudMusic"
   }
 }

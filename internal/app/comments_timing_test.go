@@ -36,7 +36,7 @@ func TestAnObjectWithNoCommentsIsCached(t *testing.T) {
 	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
 		return 1, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid, next int64) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		// B 站回的是「这个对象在，只是没人评论」：code 0 + 空列表 + is_end。
 		return bili.CommentPage{IsEnd: true, AllCount: 0}, bili.ErrCommentNoComments
@@ -103,15 +103,15 @@ func TestAnOlderRequestDoesNotOverwriteTheRefresh(t *testing.T) {
 	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
 		return 12345, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid, next int64) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		if first {
 			first = false
 			// ⚠️ **首次加载那一趟卡在途**：刷新要在它还在路上的时候发生。
 			<-release
-			return commentPage([]bili.Comment{{Rpid: 1, Message: "旧的"}}, 0, true), nil
+			return commentPage([]bili.Comment{{Rpid: 1, Message: "旧的"}}, "", true), nil
 		}
-		return commentPage([]bili.Comment{{Rpid: 1, Message: "刷新拉的"}}, 0, true), nil
+		return commentPage([]bili.Comment{{Rpid: 1, Message: "刷新拉的"}}, "", true), nil
 	}
 	a.Queue().Append(Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "1"})
 	a.queue.selectAt(0)
@@ -167,20 +167,20 @@ func TestAnOlderRequestDoesNotOverwriteTheCache(t *testing.T) {
 	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
 		return 1, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid, next int64) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		if oid == 111 {
 			// ⚠️ **靠「第几趟」分两趟**：两趟问的是同一个 oid。
 			switch calls.listCount() {
 			case 1:
 				<-releaseOld
-				return commentPage([]bili.Comment{{Rpid: 1, Message: "旧A"}}, 0, true), nil
+				return commentPage([]bili.Comment{{Rpid: 1, Message: "旧A"}}, "", true), nil
 			default:
 				<-releaseNew
-				return commentPage([]bili.Comment{{Rpid: 1, Message: "新A"}}, 0, true), nil
+				return commentPage([]bili.Comment{{Rpid: 1, Message: "新A"}}, "", true), nil
 			}
 		}
-		return commentPage([]bili.Comment{{Rpid: 2, Message: "B的"}}, 0, true), nil
+		return commentPage([]bili.Comment{{Rpid: 2, Message: "B的"}}, "", true), nil
 	}
 	a.Queue().Append(
 		Item{Source: "online", Type: "audio", Sid: "111"},
@@ -246,12 +246,12 @@ func TestTheNewTripStillWritesTheCacheAfterComingBack(t *testing.T) {
 	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
 		return 1, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid, next int64) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		if oid == 111 {
-			return commentPage([]bili.Comment{{Rpid: 1, Message: "A的"}}, 0, true), nil
+			return commentPage([]bili.Comment{{Rpid: 1, Message: "A的"}}, "", true), nil
 		}
-		return commentPage([]bili.Comment{{Rpid: 2, Message: "B的"}}, 0, true), nil
+		return commentPage([]bili.Comment{{Rpid: 2, Message: "B的"}}, "", true), nil
 	}
 	a.Queue().Append(
 		Item{Source: "online", Type: "audio", Sid: "111"},
