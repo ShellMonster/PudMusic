@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -395,6 +396,48 @@ func TestCommentsAreAskedAgainAfterAFailure(t *testing.T) {
 	waitCommentsFor(t, commentsWaitTimeout, "退避之后那一趟", func() bool { return calls.listCount() >= 2 })
 	if got := calls.listCount(); got != 2 {
 		t.Fatalf("过了退避窗口发了 %d 趟，want 2 —— 失败之后就再也不问了", got)
+	}
+}
+
+// TestTheClosedSectionIsSaidInPlainWords 钉住「评论区被关了」在界面上有一句人话。
+//
+// 🔴 票 #592：B 站在评论区关闭时回的是 **12002**，而仓库原来**只认 12061**
+// ⇒ 这一档基本触发不到，界面上摆的是「B 站返回了一个看不懂的错误（12002）」。
+//
+// 这一条量的是**界面上真的那句话**：应用层把错翻成人话（`bili.CommentFriendly`），
+// 用户看到的是「这个评论区被 UP 主关掉了」，**不是**一句「出错了」。
+func TestTheClosedSectionIsSaidInPlainWords(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+		return 1, nil
+	}
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+		// 这一档就是 B 站回 12002 时仓库给出的那个错（`bili` 那一层已经把它
+		// 翻成了哨兵，票 #592）。**照 `bili` 那一层翻出来的样子包**：带接口
+		// 地址——漏到界面上就是一句行话了。
+		return bili.CommentPage{}, fmt.Errorf("%w: %s", bili.ErrCommentSectionClosed, "/x/v2/reply/main")
+	}
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "130191"})
+	a.queue.selectAt(0)
+
+	a.Comments()
+	waitCommentsFor(t, commentsWaitTimeout, "那一趟回来", func() bool { return a.CommentsErr() != nil })
+
+	err := a.CommentsErr()
+	if err == nil {
+		t.Fatal("问失败了却没有记下原因")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "关掉") {
+		t.Errorf("界面上那句话是 %q，没有说评论区被关掉了", msg)
+	}
+	if strings.Contains(msg, "看不懂") {
+		t.Errorf("界面上摆的是兜底那句：%q", msg)
+	}
+	if strings.Contains(msg, "12002") || strings.Contains(msg, "/x/v2/") {
+		t.Errorf("话里漏出了原始的码或接口地址：%q", msg)
 	}
 }
 
