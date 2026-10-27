@@ -261,7 +261,7 @@ func (h *homePage) pull() {
 	}
 	// ⚠️ 换账号了：三档全部作废重来（下面那个函数顺手清了歌）。
 	h.resetForAccount()
-	if h.tab == homePopTab {
+	if h.tab == homePopTab || h.overview {
 		h.pullNew()
 	}
 }
