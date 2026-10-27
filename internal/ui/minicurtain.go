@@ -158,6 +158,9 @@ const (
 
 	// miniCurtainBodyKey 是卷帘里「歌词 / 空状态」那一块的键。
 	miniCurtainBodyKey = "mini:curtain:body"
+
+	// miniCurtainOriginKey 是卷帘左上角「歌词来自 B 站」那一行的键。
+	miniCurtainOriginKey = "mini:curtain:origin"
 )
 
 // miniCurtainFocusState 是「把键盘抢到迷你窗这一扇」那一档的状态（票 #307
@@ -232,6 +235,15 @@ type miniCurtainState struct {
 	// ⚠️ **它是「念一句」那件事的判据**：展开 / 收起各念一次，而念的那一句
 	// 只在**状态变了的那一帧**念（不然每一帧都念一遍）。
 	wasOpen bool
+
+	// lyricSnap 是「下一帧的歌词要**一次到位**，不重放那段滚过去的动画」。
+	//
+	// ⚠️ **它只在展开的那一下为真**（票 #307 §②）：展开之前歌词区压根没画
+	// 过，滚动位置是**上一首歌**留下的（或 0）——从那儿慢慢滚过来，用户看到
+	// 的是「当前句从屏幕外边爬上来」，而不是「卷帘放开，当前句就在下沿」。
+	//
+	// ⚠️ **它用完就清**（`miniCurtainLyricPlace` 里清）：一次就够。
+	lyricSnap bool
 }
 
 // miniCurtainEnabled 报「迷你播放器歌词卷帘」那一格是开是关。
@@ -298,6 +310,15 @@ func (s *Shell) miniCurtainToggle(now time.Time) bool {
 	}
 	s.miniCurtain.open = true
 	s.miniCurtain.target = h
+	// 🔴 **歌词要「一次到位」**（票 #307 §②）：展开之前歌词区压根没画过，
+	// 滚动位置是**上一首歌**留下的（或 0）——从那儿慢慢滚过来，用户看到的是
+	// 「当前句从屏幕外边爬上来」，而不是「卷帘放开，当前句就在下沿」。
+	//
+	// ⚠️ **而量到的那两个框也要作废**（`forget`）：它们是**上一次**卷帘开着
+	// 时候量的（或者是别的歌的）——拿它们算「当前句该在哪儿」，算出来的是
+	// 上一首歌的位置。
+	s.miniCurtain.lyricSnap = true
+	s.miniLyric.forget()
 	// ⚠️ **弹簧朝 1 走**（票 #307）：展开是**欠阻尼**的（ζ = 0.55）⇒ 放得快、
 	// 到底后回弹两三下、幅度递减。
 	//
@@ -463,6 +484,33 @@ func miniCurtainFocusDue(now time.Time, wantsKey bool, f miniCurtainFocusState) 
 		return false
 	}
 	return true
+}
+
+// miniCurtainFocusPending 报「激活应用那个重试窗口**还开着**」（票 #307 修
+// F1 的第二半）。
+//
+// ⚠️ **它和 `miniCurtainFocusDue` 差在「到没到下一次重试的时刻」**：
+// `Due` 问的是「**这一刻**该不该试」，而 `Pending` 问的是「**这个窗口**还
+// 有没有戏」——后者是**帧源**的判据。
+//
+// 🔴 **为什么需要它**：迷你窗是**失焦照画**的（`presence.go` 的
+// `freeWhileBlurred`），而它**自己不会**因为「还有重试要试」就多出一帧——
+// 帧是**谁要**才出的。⇒ 展开那一段有帧（弹簧在动，`spring.moving`），弹簧
+// 停稳之后**帧源就断了**，而那个 1200ms 的重试窗口**还剩大半**——于是后面
+// 那几次重试**一次都没跑**（F1 那个症状还在）。
+//
+// ⇒ **重试窗口开着就要一帧**（`miniCurtainSyncHeight` 那一处）。
+//
+// ⚠️ **它不判断「该不该试」**：那还是 `Due` 的事（四个条件一个一个断，见
+// 那个函数的注释）。这一位只管「**这个窗口还开着没有**」。
+func miniCurtainFocusPending(now time.Time, wantsKey bool, f miniCurtainFocusState) bool {
+	if !wantsKey {
+		return false
+	}
+	if !f.need || f.done {
+		return false
+	}
+	return now.Before(f.until)
 }
 
 // miniCurtainEnsureKey 在「应用真的成了前台」之后**再抢一次** key 窗口。
@@ -815,6 +863,22 @@ func (s *Shell) miniCurtainSyncHeight(c *ui.Context) {
 		c.AnimationFrame()
 	}
 
+	// 🔴 **「激活应用」那个重试窗口开着的时候也要一帧**（票 #307 修 F1 的
+	// 第二半）。
+	//
+	// ⚠️ **为什么不能只看弹簧**：弹簧停稳之后帧源就断了（上面那一支只在
+	// `moving` 的时候要帧），而那个 1200ms 的重试窗口**还剩大半**——于是
+	// 后面那几次重试**一次都没跑**，F1 那个症状（点封面之后应用没被激活）
+	// **还在**。
+	//
+	// ⚠️ **这一支的代价是「多画几帧」**：迷你窗是失焦照画的，每一帧都是
+	// 一次整窗重建。而它**只在那个窗口开着的时候**要帧——而那个窗口
+	// 一开就是「应用**没有**被激活」（激活成功的话，`OnDidBecomeActive`
+	// 那一档会把 `done` 置上，窗口当场收手，见 `miniCurtainEnsureKey`）。
+	if miniCurtainFocusPending(c.Now(), s.miniCurtainWantsKey, s.miniCurtainFocus) {
+		c.AnimationFrame()
+	}
+
 	// ⚠️ **窗口高度跟的是「画出来的高度」，不是「目标高度」**：弹簧走到一半
 	// 的时候窗高就是一半——窗高跟目标走的话，卷帘还在滑，窗就已经到位了，
 	// 那多出来的一截透明区在吃点击。
@@ -891,13 +955,31 @@ func (s *Shell) viewMiniCurtain(c *ui.Context, st app.State, t *ui.Theme, h floa
 		// 展开之后用户的手多半落在卷帘这一块上）。
 		DragWindow().
 		Children(func() {
-			s.viewMiniCurtainBody(c, st, t)
+			snap := s.app.Lyrics()
+			s.viewMiniCurtainBody(c, st, snap, t, h)
+			// ⚠️ **「歌词来自 B 站」那一行是卷帘的**绝对定位**孩子**（票
+			// #307 §②）：它**不能**占歌词区的高度——
+			//
+			// 歌词区的高度是「当前句贴着下沿」那个算法里的一个数（顶上那段
+			// 留白正好是**一整屏高**，见 `minicurtain_lyrics.go` 的文件头），
+			// 而它得**正好等于**歌词区实际的高。⇒ 说明句只能**画在歌词区
+			// 外面**。
+			//
+			// ⚠️ **它画在卷帘的左上角**（不是右上角）：右边是「收起」那一枚
+			// 按钮的地盘（见 `viewMini` 那一支），而左边是歌词的起点。
+			s.viewMiniCurtainOrigin(c, snap, t)
 		})
 }
 
-// viewMiniCurtainBody 是卷帘里面那一块：歌词（或者「暂无歌词」）+ 收起键。
-func (s *Shell) viewMiniCurtainBody(c *ui.Context, st app.State, t *ui.Theme) {
-	snap := s.app.Lyrics()
+// viewMiniCurtainBody 是卷帘里面那一块：歌词（或者「暂无歌词」）。
+//
+// ⚠️ **它底下留了 14 的边距**（下轴那一道）：票面 §② 要的是「歌词在下轴
+// **之上**」——而**贴着下沿**就是贴着**下轴的上沿**。
+//
+// ⚠️ **这 14 也决定了「歌词区有多高」那个数**（`viewMiniCurtainLyrics` 的
+// `viewH`）：而那个数必须是**正好**的（顶上那段留白要等于它），所以这里
+// 的边距和 `viewH` 必须是同一个数。
+func (s *Shell) viewMiniCurtainBody(c *ui.Context, st app.State, snap app.LyricsSnapshot, t *ui.Theme, h float32) {
 	lv := &s.miniLyric
 	// 🔴 认换歌在这一帧的最开头，早于任何一句决定（同 lyrics.go 那一处）。
 	lv.onSong(snap.Key)
@@ -912,40 +994,21 @@ func (s *Shell) viewMiniCurtainBody(c *ui.Context, st app.State, t *ui.Theme) {
 	// 由内容撑着，而内容的高度里有那份居中留白——于是「高 → 留白 → 内容更高」
 	// 一帧大一截。
 	ui.Column(c).Key(miniCurtainBodyKey).Grow(1).FillWidth().
+		// ⚠️ **底下留出下轴那一道**（14）：歌词**贴着下沿**，而下沿就是下轴
+		// 的上沿（票面 §②）。
+		Padding(space.None, space.None, miniCurtainAxisH, space.None).
 		Children(func() {
-			// ⚠️ **收起键画在**这一段的 `Children` 里面**：元素的父节点是
-			// **建它那一刻** `c.parent` 指着的那个——`Children` 之外建的元素
-			// 挂在**根**上（`mygo/ui/context.go` 的 `Children` 把 `c.parent`
-			// 存下来又还原），而根是整个窗口——那一枚键会跑到窗口的右下角去。
-			//
-			// ⚠️ **它绝对定位在卷帘的右下角**（不是跟着词滚）：它是**控件**
-			// （要按得到），而歌词区是内容——放进滚动容器的话它会跟着词滚走。
-			s.viewMiniCurtainCollapse(c, t)
 			if active < 0 {
 				s.viewMiniCurtainEmpty(c, t)
 				return
 			}
-			// ⚠️ **卷帘自己那一档字号**：满屏那一屏用的是**用户偏好里的字号**
-			//（12~48），而 320 宽里放 20px 的字（当前行 ×1.5 = 30px）一行只有
-			// 十个字。这里传一份**改了字号的快照副本**进去，而共用代码
-			// （`viewLyricLines` / `lyricLine`）一个字都不改。
-			cur := snap
-			cur.FontSize = miniCurtainFontSize
-			s.viewLyricLines(c, lv, cur, active, lyricStyle{
-				color: t.Text,
-				muted: t.TextMuted,
-				// ⚠️ **渐隐盖到 `t.Surface`**：卷帘的底是 `Surface`（上面
-				// 那一段），盖到 `t.Background` 的话，那两条渐隐带子会是
-				// **另一个色**——一眼就看出「这一块不是一张卡片」。
-				fade: t.Surface,
-				area: miniCurtainAreaKey,
-				ns:   miniCurtainNS,
-				// ⚠️ **居中**：卷帘只有 320 宽，左对齐的那些句子左沿咬在
-				// 内容盒的左沿上，右边空一大块——而「正在唱的那一句」是放大的，
-				// 居中才看得出它是当前句。
-				center: true,
-				padX:   miniCurtainPadX,
-			})
+			// 🔴 **歌词贴着下沿排**（票 #307 §②）：见
+			// `minicurtain_lyrics.go` 的文件头。
+			//
+			// ⚠️ **`viewH` = 歌词区这一帧有多高** = 卷帘高 − 下轴那一道
+			// （14）——而它**必须正好**是歌词区实际的高（顶上那段留白要等于
+			// 它，见那个文件头）。
+			s.viewMiniCurtainLyrics(c, snap, active, t, h-miniCurtainAxisH)
 		})
 
 	if active < 0 {
@@ -953,7 +1016,7 @@ func (s *Shell) viewMiniCurtainBody(c *ui.Context, st app.State, t *ui.Theme) {
 	}
 	// ⚠️ 放在整棵树建完之后：它要用容器和正在唱那一句的框，而那两个是
 	// **上一帧**量到的（理由同 lyrics.go 里那一处）。
-	lv.centre(c, active, lyricShapeOf(snap.Rows), miniCurtainFontSize, s.snapScroll)
+	s.miniCurtainLyricPlace(c, active, lyricShapeOf(snap.Rows))
 }
 
 // miniCurtainAnnounce 念一句「歌词卷帘展开 / 收起」。
@@ -983,18 +1046,57 @@ func (s *Shell) viewMiniCurtainEmpty(c *ui.Context, t *ui.Theme) {
 		})
 }
 
+// viewMiniCurtainOrigin 是卷帘左上角那一行「歌词来自 B 站 / 歌词来自搜索」。
+//
+// ⚠️ **它是卷帘的绝对定位孩子**（票 #307 §②）：它**不能**占歌词区的高度
+// ——「当前句贴着下沿」那个算法里，「歌词区有多高」是一个**要正好对上**的
+// 数（顶上那段留白正好是**一整屏高**，见 `minicurtain_lyrics.go` 的文件
+// 头），而这一行要是占了高度，那个数就差了 20 多像素 ⇒ 当前句就贴不到
+// 下沿。
+//
+// ⚠️ **它画在左上角**：右边留给「收起」那一枚按钮（它在**下轴**上，见
+// `viewMini` 那一支），而左边是歌词的起点。
+//
+// ⚠️ **它跟满屏那一屏的那一行是同一个来源**（`lyricOriginText`）：那一句
+// 说的是「这份歌词是怎么来的」，而用户分不清 B 站带来的和搜来的那两种。
+func (s *Shell) viewMiniCurtainOrigin(c *ui.Context, snap app.LyricsSnapshot, t *ui.Theme) {
+	text := lyricOriginText(snap.Origin)
+	if text == "" {
+		return
+	}
+	ui.Box(c).Key(miniCurtainOriginKey).
+		Absolute().Top(space.Px4).Left(miniCurtainPadX).
+		Children(func() {
+			ui.Text(c, text).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+		})
+}
+
 // viewMiniCurtainCollapse 是卷帘里那一枚「收起」。
 //
 // ⚠️ **它和「再点封面」是同一件事**（收起），而 Esc 是第三件。三条路都在。
+//
+// 🔴 **它画在**下轴**上**（票 #307 §②）：而它**原来**在卷帘的右下角
+// （下轴之上 4 像素）——那是「歌词当前句居中」时候的位置。
+//
+// ⚠️ **而现在歌词贴着下沿**（票面 §②：当前句的下沿就压在下轴的上沿上）
+// ⇒ 那一枚键**正好压在当前句那一行上**（当前句是放大的 19.5px，而键是
+// 16px）——一个长句子（320 宽里能放十五个字）会从**键底下穿过去**。
+//
+// ⇒ **它挪到下轴那根杆上**（根的绝对定位孩子，排在轴**之后**画，所以它
+// 压在那根杆上面）：「把杆子往上提，收起来」——而它**不再挡歌词**。
 func (s *Shell) viewMiniCurtainCollapse(c *ui.Context, t *ui.Theme) {
-	// ⚠️ **它抬到下轴（地轴）之上**（票 #307）：下轴是 14 高、贴着窗的下沿，
-	// 而它是**绝对定位的孩子**（画在根上）——绝对定位的孩子最后画，于是它
-	// 会**盖住那一枚「收起」**。⇒ 这一枚往上抬一个轴的高度（14）+ 原来那
-	// 4 的边距。
+	// ⚠️ **它绝对定位在窗的右下角**（不是跟着词滚）：它是**控件**（要按得
+	// 到），而歌词区是内容——放进滚动容器的话它会跟着词滚走。
+	//
+	// ⚠️ **它坐在下轴那根杆上**：下轴是 14 高、贴着窗的下沿，而这一枚是
+	// 14 ——**一样高**，于是它正好在那根杆上（理由见上面那一段）。
+	//
+	// ⚠️ **右边留 8**：窗的下两个角是 7 的圆角（`miniplayer.go` 那一段），
+	// 而根是 `Clip()` 的——再往右一点，这一枚的角会被那个圆角裁掉。
 	ui.Box(c).Key(miniCurtainCollapseKey).
-		Absolute().Right(space.Px4).Bottom(space.Px4 + miniCurtainAxisH).
+		Absolute().Right(space.Px8).Bottom(space.None).
 		Children(func() {
-			if flatIconButton(c, iconChevronUp, "收起歌词", 16).Clicked() {
+			if flatIconButton(c, iconChevronUp, "收起歌词", miniCurtainAxisH).Clicked() {
 				s.miniCurtainCollapse(c.Now())
 			}
 		})

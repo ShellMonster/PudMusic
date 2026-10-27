@@ -123,7 +123,7 @@ func TestTheMiniCurtainOpensWhenTheCoverIsClicked(t *testing.T) {
 	tt.Frame()
 
 	// 推钟让展开那一段动画走完（Tester 的钟站着不动）。
-	settleCurtain(t, tt, true)
+	settleCurtain(t, tt, s, true)
 
 	if !miniCurtainHasLyrics(tt) {
 		t.Errorf("点了封面之后卷帘没有展开：画面上没有歌词，文字有 %q", tt.Texts())
@@ -144,7 +144,7 @@ func TestTheMiniCurtainClosesWhenTheCoverIsClickedAgain(t *testing.T) {
 	tt := miniCurtainTester(s)
 
 	clickCurtainCover(t, tt)
-	settleCurtain(t, tt, true)
+	settleCurtain(t, tt, s, true)
 	if !miniCurtainHasLyrics(tt) {
 		t.Fatalf("卷帘没有展开，文字有 %q", tt.Texts())
 	}
@@ -156,7 +156,7 @@ func TestTheMiniCurtainClosesWhenTheCoverIsClickedAgain(t *testing.T) {
 	}
 	tt.ClickAt(cover.X+cover.W/2, cover.Y+cover.H/2)
 	tt.Frame()
-	settleCurtain(t, tt, false)
+	settleCurtain(t, tt, s, false)
 
 	if miniCurtainHasLyrics(tt) {
 		t.Errorf("再点封面之后卷帘还开着：画面上还有歌词，文字有 %q", tt.Texts())
@@ -180,7 +180,7 @@ func TestTheMiniCurtainClosesWithTheCollapseButton(t *testing.T) {
 	tt := miniCurtainTester(s)
 
 	clickCurtainCover(t, tt)
-	settleCurtain(t, tt, true)
+	settleCurtain(t, tt, s, true)
 
 	btn, ok := tt.Find("收起歌词")
 	if !ok {
@@ -188,7 +188,7 @@ func TestTheMiniCurtainClosesWithTheCollapseButton(t *testing.T) {
 	}
 	tt.ClickAt(btn.X+btn.W/2, btn.Y+btn.H/2)
 	tt.Frame()
-	settleCurtain(t, tt, false)
+	settleCurtain(t, tt, s, false)
 
 	if miniCurtainHasLyrics(tt) {
 		t.Errorf("点了收起之后卷帘还开着：画面上还有歌词，文字有 %q", tt.Texts())
@@ -217,7 +217,7 @@ func TestTheMiniCurtainHeightFollowsTheAnimation(t *testing.T) {
 	tt := miniCurtainTester(s)
 
 	clickCurtainCover(t, tt)
-	settleCurtain(t, tt, true)
+	settleCurtain(t, tt, s, true)
 
 	// 收着的时候，迷你卡片那一块是 84 高。
 	card, ok := tt.Find("展开歌词")
@@ -268,7 +268,7 @@ func TestTheMiniCurtainHeightFollowsTheAnimation(t *testing.T) {
 	}
 	// 收起之后窗高回到 84。
 	s.miniCurtainCollapse(tt.Now())
-	settleCurtain(t, tt, false)
+	settleCurtain(t, tt, s, false)
 	if got, want := s.miniCurtain.setHeight, miniHeight; got != want {
 		t.Errorf("收起之后窗高是 %d，want %d：收起之后窗必须回到 84"+
 			"（否则 `StateKey` 记的就是一个更高的尺寸）", got, want)
@@ -298,7 +298,7 @@ func TestTheMiniCurtainClosesWithEscape(t *testing.T) {
 	tt := miniCurtainTester(s)
 
 	clickCurtainCover(t, tt)
-	settleCurtain(t, tt, true)
+	settleCurtain(t, tt, s, true)
 	if !s.miniCurtain.open {
 		t.Fatalf("起点就不对：卷帘没有展开，文字有 %q", tt.Texts())
 	}
@@ -309,7 +309,7 @@ func TestTheMiniCurtainClosesWithEscape(t *testing.T) {
 	if s.miniCurtain.open {
 		t.Error("按了 Esc 之后卷帘还开着：它没有收起来")
 	}
-	settleCurtain(t, tt, false)
+	settleCurtain(t, tt, s, false)
 	if got := s.miniCurtainTargetHeight(); got != miniHeight {
 		t.Errorf("按了 Esc 之后窗该有 %d 高，want %d", got, miniHeight)
 	}
@@ -400,7 +400,7 @@ func TestTheMiniCurtainCollapsesWhenTheSwitchIsTurnedOff(t *testing.T) {
 	tt := miniCurtainTester(s)
 
 	clickCurtainCover(t, tt)
-	settleCurtain(t, tt, true)
+	settleCurtain(t, tt, s, true)
 	if !s.miniCurtain.open {
 		t.Fatalf("起点就不对：卷帘没有展开，文字有 %q", tt.Texts())
 	}
@@ -419,7 +419,7 @@ func TestTheMiniCurtainCollapsesWhenTheSwitchIsTurnedOff(t *testing.T) {
 	if s.miniCurtain.open {
 		t.Error("开关关掉之后卷帘还开着：它没有立刻收起来")
 	}
-	settleCurtain(t, tt, false)
+	settleCurtain(t, tt, s, false)
 	if got := s.miniCurtainTargetHeight(); got != miniHeight {
 		t.Errorf("开关关掉之后窗该有 %d 高，want %d", got, miniHeight)
 	}
@@ -452,7 +452,7 @@ func TestTheMiniCurtainCollapsesAtOnceWithoutBouncingBack(t *testing.T) {
 	tt := miniCurtainTester(s)
 
 	clickCurtainCover(t, tt)
-	settleCurtain(t, tt, true)
+	settleCurtain(t, tt, s, true)
 	if got := s.miniCurtain.setHeight; got != miniHeight+miniCurtainH {
 		t.Fatalf("起点就不对：窗高是 %d，want %d", got, miniHeight+miniCurtainH)
 	}
@@ -652,7 +652,7 @@ func TestRenderMiniCurtainShots(t *testing.T) {
 
 	// 展开那一版。
 	clickCurtainCover(t, tt)
-	settleCurtain(t, tt, true)
+	settleCurtain(t, tt, s, true)
 	save(t, dir, "mini-curtain-02-light-expanded.png", tt)
 
 	// 深色。
@@ -682,21 +682,36 @@ func clickCurtainCover(t *testing.T, tt *mygoui.Tester) {
 //
 // ⚠️ **判据是状态而不是时间**：`open` 是**用户意图**那个状态，动画到位
 // 的时候它已经是对的了；而**高度**到位是另一件事（动画走完）。
-func settleCurtain(t *testing.T, tt *mygoui.Tester, open bool) {
+//
+// 🔴 **判据是「弹簧停稳了」，不是「没有帧要出」**（票 #307 修 F1 的第二
+// 半）：那个「激活应用」的重试窗口（1200ms）开着的时候，迷你窗**每一帧都
+// 有帧要出**（重试要有帧源）——而它跟卷帘的动画**没关系**。⇒ 拿「没有帧
+// 要出」当「动画走完了」的判据，收起/展开的用例就会**永远等不到**（实测：
+// 推了 960ms 的钟还是「卷帘还没有变成开着」）。
+//
+// ⚠️ **而「高度不再变」也不行**：弹簧是**欠阻尼**的（回弹两三下），而**转
+// 向点附近高度几乎不动**（一帧 0.02 像素）——拿它当判据会在**第一个峰**上
+// 收手（实测：卷帘停在 233.6 而不是 236）。
+//
+// ⇒ **判据是弹簧自己那个 `moving`**：它停稳的时候正好把 `p` 钉在目标上
+// （`minicurtain_spring.go` 的停止条件那一条）。
+func settleCurtain(t *testing.T, tt *mygoui.Tester, s *Shell, open bool) {
 	t.Helper()
 	const step = 16 * time.Millisecond
-	for range 60 {
+	for range 120 {
 		tt.Advance(step)
 		tt.Frame()
-		if s := openCurtainState(tt); s == open {
-			// 高度也到位了才收手（动画走完）。
-			if open && tt.FramePending() {
-				continue
-			}
+		if openCurtainState(tt) != open {
+			// 状态还没对（歌词还没出现 / 还没消失）：接着等。
+			continue
+		}
+		// ⚠️ **弹簧停稳了 = 高度到位了**：它停稳的时候正好把 `p` 钉在目标上。
+		if !s.miniCurtain.spring.moving {
 			return
 		}
 	}
-	t.Fatalf("推了 %v 的钟，卷帘还没有变成「%v」", 60*step, open)
+	t.Fatalf("推了 %v 的钟，卷帘还没有变成「%v」（高度 %v，弹簧还在动：%v）",
+		120*step, open, s.miniCurtain.height, s.miniCurtain.spring.moving)
 }
 
 // openCurtainState 报画面上卷帘是开着还是收着。

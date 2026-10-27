@@ -811,6 +811,14 @@ func (s *Shell) viewMini(c *ui.Context) {
 		s.viewMiniCurtainAxisTop(c, t, cardBG)
 		if expanded {
 			s.viewMiniCurtainAxisBottom(c, t, cardBG)
+			// 🔴 **「收起」那一枚坐在下轴那根杆上**（票 #307 §②）：而歌词
+			// 现在**贴着下沿**（当前句的下沿就压在下轴的上沿上）——那一枚键
+			// 原来在杆之上 4 像素，**正好压在当前句那一行上**（长句子会从键
+			// 底下穿过去）。⇒ 挪到杆上，而杆是**根**的绝对定位孩子。
+			//
+			// ⚠️ **它必须排在轴**之后**画**（绝对定位的孩子最后画）：不然轴
+			// 会盖住它（轴是那根杆，而键要坐在杆上面）。
+			s.viewMiniCurtainCollapse(c, t)
 		}
 	})
 }

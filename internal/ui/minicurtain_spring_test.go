@@ -209,7 +209,7 @@ func TestTheMiniCurtainRollsUpWithoutBouncing(t *testing.T) {
 	tt.Frame()
 
 	clickCurtainCover(t, tt)
-	settleCurtain(t, tt, true)
+	settleCurtain(t, tt, s, true)
 	if !s.miniCurtain.open {
 		t.Fatalf("起点就不对：卷帘没有展开")
 	}
@@ -343,6 +343,118 @@ func TestTheMiniCurtainRetriesTheActivation(t *testing.T) {
 	}
 }
 
+// TestTheMiniCurtainReverseNeverGrows 盯「展开到一半就收起」不许先长高
+// （票 #307 修评审第 2 轮那条 major）。
+//
+// 🔴 **它量的是生产的那一个弹簧**（`miniCurtainSpring`，不是测试自己写的
+// 一份）：评审的探针就是直接驱动它——60fps，第 6 帧换目标，然后看着高度。
+//
+// ⚠️ **那一版会先长高约 7.9 像素再缩回去**（149.674 → 157.554）：因为换
+// 目标的时候**速度接着**（参考页那一套），而展开那一段的速度是**向上**的。
+// ⇒ 票面 §② 明令不许出现「窗先变大再缩回去」那种中间态（那一帧窗比内容
+// 高，透明的那一块在吃点击）。
+//
+// ⇒ **换目标 ⇒ 速度归零**（`miniCurtainSpring.start`）。
+func TestTheMiniCurtainReverseNeverGrows(t *testing.T) {
+	sp := &miniCurtainSpring{}
+	t0 := time.Now()
+	sp.start(1, t0)
+
+	// 🔴 **先放开 6 帧**（60fps ⇒ 100 毫秒）：评审的探针就是在这个时刻换
+	// 目标的——那一刻卷帘正长到一半多。
+	//
+	// ⚠️ **推的是 60fps 的整数帧**（`time.Second/60`）：无头那一档的刷新
+	// 就是 60Hz，而弹簧是**按时间积分**的——推 20 毫秒会让 `dt` 与真实帧
+	// 不一致。
+	const fps = 60
+	frame := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Second / fps) }
+	height := func(n int) float64 { return sp.step(frame(n)) }
+
+	var prev float64
+	for i := 1; i <= 6; i++ {
+		prev = height(i)
+	}
+	if prev <= 0 || prev >= 1 {
+		t.Fatalf("换目标那一刻的高度是 %.3f（want 0~1 之间）："+
+			"起点就不对（展开到一半才换目标）", prev)
+	}
+
+	// 🔴 **换目标：收起**。
+	sp.start(0, frame(6))
+
+	// 🔴 **此后每一帧都不许比换目标那一刻高**，而且**一路往下**。
+	//
+	// ⚠️ **判据是「不许涨」**（不是「不许超过目标」）：票面 §② 要的是「不许
+	// 再出现『窗先变大再缩回去』这种中间态」——而这一段的高度是**从换目标
+	// 那一刻的高度**开始的（不突然跳一下）。
+	limit := prev
+	cur := limit
+	for i := 7; i <= 60; i++ {
+		h := height(i)
+		if h > limit+1e-6 {
+			t.Errorf("第 %d 帧高度 %.3f，比换目标那一刻（%.3f）还高："+
+				"「展开到一半就收起」先长高了 %.3f ——票面 §② 不许出现"+
+				"「窗先变大再缩回去」", i, h, limit, h-limit)
+		}
+		if h > cur+1e-6 {
+			t.Errorf("第 %d 帧高度 %.3f，比上一帧（%.3f）**涨回来了**："+
+				"收起那一段不许有回弹", i, h, cur)
+		}
+		cur = h
+	}
+	if got := sp.pos; got > 0.001 {
+		t.Errorf("收起之后高度是 %.4f，want 0", got)
+	}
+}
+
+// TestTheMiniCurtainKeepsAFrameWhileTheActivationRetryIsOpen 盯「激活应用那个
+// 重试窗口开着的时候，迷你窗还要得出帧」（票 #307 修评审第 2 轮那条
+// major）。
+//
+// 🔴 **为什么这一条是必须的**：迷你窗是**失焦照画**的，而**帧是「谁要」才
+// 出的**——弹簧停稳之后就没有人要帧了，于是那个 1200ms 的重试窗口**还剩
+// 大半**，而后面那几次重试**一次都没跑**（F1 那个症状还在）。
+//
+// ⚠️ **无头这一档正好量得到**：无头 Tester 里**压根没有应用**，于是
+// `OnDidBecomeActive` 那一档**永远不触发**——而那正是「激活成功了就收手」
+// 的那个信号。⇒ 重试窗口在无头这一档**全程开着**，这一条量得到「窗口开着
+// 的时候还有没有帧源」。
+func TestTheMiniCurtainKeepsAFrameWhileTheActivationRetryIsOpen(t *testing.T) {
+	s, a := miniCurtainShell(t)
+	if err := enqueueTwo(a, t); err != nil {
+		t.Fatal(err)
+	}
+	a.Toggle()
+	a.PutLyricsFrom("", "[00:00.00]第一句\n[00:05.00]第二句\n", "")
+	tt := miniCurtainTester(s)
+	tt.Frame()
+
+	clickCurtainCover(t, tt)
+	settleCurtain(t, tt, s, true)
+
+	// 🔴 **弹簧停稳之后**：重试窗口还开着 ⇒ **必须还要帧**。
+	//
+	// ⚠️ **`settleCurtain` 那个判据是「弹簧停稳了」**（不是「没有帧要
+	// 出」）——见那个函数的注释。
+	if s.miniCurtain.spring.moving {
+		t.Fatalf("弹簧还没停稳就往下走了")
+	}
+	if !tt.FramePending() {
+		t.Errorf("弹簧停稳之后没有帧要出了，而「激活应用」那个重试窗口"+
+			"还开着（还剩 %v）：后面那几次重试**一次都不会跑**"+
+			"（迷你窗是失焦照画的，帧是「谁要」才出的）",
+			time.Until(s.miniCurtainFocus.until))
+	}
+
+	// 🔴 **窗口过了之后就不该再要帧**：不然迷你窗会**一直**重画下去
+	//（失焦照画的每一帧都是一次整窗重建）。
+	tt.Advance(miniCurtainFocusWindow + 100*time.Millisecond)
+	tt.Frame()
+	if tt.FramePending() {
+		t.Errorf("重试窗口过了之后还在要帧：迷你窗会一直重画下去")
+	}
+}
+
 // miniCurtainLum 报一个颜色的亮度。
 func miniCurtainLum(c color.RGBA) float64 {
 	return 0.299*float64(c.R) + 0.587*float64(c.G) + 0.114*float64(c.B)
@@ -405,7 +517,7 @@ func TestTheMiniCurtainHasTwoAxes(t *testing.T) {
 
 	// 展开。
 	clickCurtainCover(t, tt)
-	settleCurtain(t, tt, true)
+	settleCurtain(t, tt, s, true)
 
 	// 🔴 **下轴**：贴着卷帘下沿那一道，**画面最底下那一行就是它**。
 	img := tt.Image()
