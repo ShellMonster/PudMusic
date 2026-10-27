@@ -82,6 +82,33 @@ type copyAction struct {
 	write func() error
 }
 
+// copyConvergeError 是「**收敛**时把后来那一份写回去失败」。
+//
+// ⚠️ **它和「自己那一趟写失败」是两回事**，得分开说：
+//
+//   - 自己那一趟写失败 → 剪贴板里还是**原来那份**（用户没丢东西）→
+//     提示「复制不了…」；
+//   - 收敛写回去失败 → 剪贴板里**已经被我盖成过时的内容了**，而用户刚被
+//     告知「歌曲信息已复制」——**那句话这时是假的**。
+//
+// ⚠️ **所以这一档不能被「过时的那一趟不吵用户」那条门吞掉**：它说的不是
+// 「我这一趟过时了」，而是「剪贴板里现在留着的东西不是你以为的那一份」。
+// 票面写着「不静默失败」，而这一种失败**最静默**：画面上什么提示都没有，
+// 而用户粘出来的是一张他没要过的图。
+type copyConvergeError struct {
+	err error
+}
+
+func (e copyConvergeError) Error() string { return e.err.Error() }
+
+func (e copyConvergeError) Unwrap() error { return e.err }
+
+// isConvergeError 报 err 是不是「收敛写回去失败」。
+func isConvergeError(err error) bool {
+	var ce copyConvergeError
+	return errors.As(err, &ce)
+}
+
 // copyClipboard 是「复制」这一族**全进程一份**的状态。
 //
 // # 它挡的是什么
@@ -202,10 +229,21 @@ func (c *copyClipboard) commit(a copyAction) (bool, error) {
 	}
 	for {
 		err := a.write()
+		// ⚠️ **收敛写回去失败**：剪贴板里已经被我盖成过时的内容，而那份
+		// 内容**写不回去**了——用户粘出来的是一张他没要过的图。
+		//
+		// ⚠️ **它不能被「过时的那一趟不吵用户」那条门吞掉**：那一条挡的是
+		// 「我这一趟过时了」（用户后来按了别的，那一档会自己说），而这一种
+		// 是「**剪贴板里现在留着的东西不是你以为的那一份**」——票面写着
+		// 「不静默失败」，而这一种失败**最静默**：画面上什么提示都没有。
+		converging := a.gen != mine
 		c.mu.Lock()
 		if err != nil {
-			// 没写进去 → 剪贴板里还是原来那份 → 不用收敛。
 			c.mu.Unlock()
+			if converging {
+				return false, copyConvergeError{err: err}
+			}
+			// 没写进去 → 剪贴板里还是原来那份 → 不用收敛。
 			return false, err
 		}
 		if a.gen >= c.committed.gen {
@@ -361,6 +399,13 @@ func (s *Shell) copySongInfo(st app.State) {
 		return write(text)
 	}})
 	if err != nil {
+		// ⚠️ **收敛写回去失败**：剪贴板里现在留着的是**别的内容**，而用户
+		// 刚被告知「歌曲信息已复制」——那一句话这时是假的（见
+		// `copyConvergeError`）。
+		if isConvergeError(err) {
+			s.addToast("剪贴板里现在是别的内容："+err.Error(), notice.Danger)
+			return
+		}
 		s.addToast("复制不了歌曲信息："+err.Error(), notice.Danger)
 		return
 	}
@@ -435,6 +480,17 @@ func (s *Shell) copyCoverInBackground(url string, gen uint64) {
 		return write(data)
 	}})
 	if err != nil {
+		// ⚠️ **收敛写回去失败**：剪贴板里现在留着的是**过时的封面**，而用户
+		// 刚被告知「歌曲信息已复制」——那一句话这时是假的。
+		//
+		// ⚠️ **这一档不能被「过时的那一趟不吵用户」那条门吞掉**：那一条挡的
+		// 是「我这一趟过时了」，而这一种是「**剪贴板里不是你要的那一份**」。
+		// 静默的话，用户粘出来的是一张他没要过的图，而界面一个字都不说。
+		if isConvergeError(err) {
+			s.addToast("剪贴板里现在是别的内容："+err.Error(), notice.Danger)
+			s.wake.invalidate()
+			return
+		}
 		if copyClip.isLatest(gen) {
 			s.addToast("复制不了封面："+err.Error(), notice.Danger)
 			s.wake.invalidate()

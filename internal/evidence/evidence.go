@@ -4112,6 +4112,10 @@ var Items = []Item{
 			// **连「已经进了写剪贴板那一步」的旧封面也不许赢**：比号和写是
 			// 两件事，中间夹着一次真正的写——那一段里用户可能又按了文本。
 			"TestACoverAlreadyInsideTheWriteDoesNotWinOverALaterText",
+			// **收敛写回去失败也要说话**：那一步失败时剪贴板里留着的是
+			// 过时的封面，而用户刚被告知「歌曲信息已复制」——这一种失败
+			// **最静默**（画面上什么提示都没有，用户粘出来的是他没要过的图）。
+			"TestAFailedConvergeSaysSo",
 			// 键盘：Tab 走到封面上，菜单键能开出这一份菜单。
 			"TestTheMenuKeyOpensTheCopyMenuOnTheCover",
 		},

@@ -23,6 +23,7 @@ package ui
 
 import (
 	"bytes"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -413,4 +414,86 @@ func TestACoverAlreadyInsideTheWriteDoesNotWinOverALaterText(t *testing.T) {
 		t.Errorf("过时的封面那一趟说了「封面已复制」——剪贴板里其实是歌曲信息"+
 			"（写的顺序：%v）", slot.writes())
 	}
+}
+
+// TestAFailedConvergeSaysSo 断**收敛写回去失败有看得见的反馈**。
+//
+// ⚠️ **这一条量的是「收敛的那一下写失败了」**：旧封面那一趟已经把剪贴板盖成
+// 了它那张过时的图，而**把后来那一份写回去**这一步失败了——于是剪贴板里留着
+// 的**不是用户要的那一份**，而用户刚被告知「歌曲信息已复制」。
+//
+// ⚠️ **这一种失败最静默**：画面上什么提示都没有，而用户粘出来的是一张他没
+// 要过的图。票面写着「不静默失败」，所以这一档**必须说一句话**。
+//
+// ⚠️ **它不能被「过时的那一趟不吵用户」那条门吞掉**：那一条挡的是「我这一趟
+// 过时了」（用户后来按了别的，那一档会自己说），而这一种是「**剪贴板里不是
+// 你要的那一份**」——两件事不一样。
+func TestAFailedConvergeSaysSo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(headerPNG(t, 8))
+	}))
+	defer srv.Close()
+
+	sh, tt, clip := copyShell(t, app.State{
+		HasTrack: true, Title: "一首歌", CoverURL: srv.URL + "/cover.png",
+	})
+
+	slot := &clipSlot{}
+	arrived := make(chan struct{})
+	release := make(chan struct{})
+	var once bool
+	// ⚠️ **旧封面那一步卡住**：模拟「那一步还没落地」的那一刻。
+	sh.writeClipboardImage = func(data []byte) error {
+		if !once {
+			once = true
+			close(arrived)
+		}
+		<-release
+		slot.write("cover")
+		return clip.writeImage(data)
+	}
+	// ⚠️ **文本的写：第一次成功、第二次失败**。
+	//
+	// ⚠️ **第二次是「收敛写回去」那一下**：收敛写回去的是**剪贴板里那一档**
+	// （也就是文本那一档）的写——而文本那一档的写函数**是在它自己被发起的
+	// 那一刻就被捕获了的**（`copySongInfo` 里 `write := s.writeClipboardText`
+	// 之后闭包才拿着它）。所以这一桩必须**在文本那一趟发起之前**就装好——
+	// 事后再改接缝不生效（那一趟闭包里拿的是旧的）。
+	var textWrites int
+	sh.writeClipboardText = func(text string) error {
+		textWrites++
+		if textWrites > 1 {
+			return errors.New("剪贴板写不进去了")
+		}
+		slot.write("text")
+		return clip.writeText(text)
+	}
+
+	if err := tt.RightClick("当前封面"); err != nil {
+		t.Fatalf("右键不了封面：%v", err)
+	}
+	if err := tt.ChooseMenuItem(copyCoverLabel); err != nil {
+		t.Fatalf("选不了 %q：%v", copyCoverLabel, err)
+	}
+	select {
+	case <-arrived:
+	case <-time.After(10 * time.Second):
+		t.Fatal("旧封面那一趟没进写剪贴板那一步")
+	}
+
+	// 后按的那一次：复制歌曲信息。
+	if err := tt.RightClick("当前封面"); err != nil {
+		t.Fatalf("右键不了封面：%v", err)
+	}
+	if err := tt.ChooseMenuItem(copyInfoLabel); err != nil {
+		t.Fatalf("选不了 %q：%v", copyInfoLabel, err)
+	}
+
+	close(release)
+	clip.waitDone(t, 10*time.Second)
+
+	// ⚠️ **判据：必须有看得见的反馈**（提示是画面上的状态，要画帧才看得到）。
+	waitFrames(t, tt, "收敛失败那一句说出来了", func() bool {
+		return tt.HasText("剪贴板里现在是别的内容")
+	})
 }
