@@ -4475,6 +4475,46 @@ var Items = []Item{
 		},
 	},
 	{
+		// 票 #555：迷你播放器**跟随指针所在的显示器**。
+		//
+		// ⚠️ **这一族全是「静默」的坏法**：定位算错了、卷帘按错屏的工作区算
+		// 了、那块屏被拔了而窗留在原处——三样都不会报错，症状都是「迷你播放器
+		// 不见了」或者「点封面什么也不发生」。
+		//
+		// ⚠️ **下面那几条断的是「定位规划」那一半**（纯函数 + 生产那条路）：
+		// 无头环境里**没有真显示器**，所以「真双屏 / 插拔 / 旋转」量不到——
+		// 那几样记在 `internal/ui/miniplayer_test.go` 末尾那一节「真窗口才量
+		// 得到」里（人工清单，不在台账里装），**不拿这里的无头测试顶替**。
+		Category: Platform,
+		Spec:     "迷你播放器跟随指针所在的显示器：第一次落在指针那块屏；跨屏拖动后按那块屏的工作区算；那块屏被拔掉 / 改了分辨率之后窗回到可见区域",
+		Tests: []string{
+			// 首次放置：跟着指针走（**不是**主显示器）。
+			"TestTheMiniWindowOpensOnTheDisplayUnderTheCursor",
+			// 跨屏拖动之后，按**那块屏**的工作区算（不是主屏）。
+			"TestTheMiniWindowKeepsTheWorkAreaOfTheScreenItIsOn",
+			// 那块屏没了 / 改了分辨率 ⇒ 窗回到可见区域。
+			"TestTheMiniWindowComesBackWhenItsDisplayIsGone",
+			"TestTheMiniWindowComesBackWhenItsDisplayIsRemoved",
+			// 生产那条路：拖到谁都看不见的地方 ⇒ 拉回来。
+			"TestTheMiniWindowIsPulledBackWhenItLandsOnNoScreen",
+			// 生产那条路：建窗之后重新判一次（`StateKey` 恢复的位置可能是
+			// 一块已经不存在的屏）。
+			"TestTheMiniWindowIsReconciledAfterItIsBuilt",
+			// 纯规划函数：缩放 / 旋转 / 屏外旧位置。
+			"TestTheMiniPlacementHandlesScaledAndRotatedDisplays",
+			// 恢复出来的旧位置：**指针那块屏说了算**（旧位置在别的屏上 ⇒
+			// 跟指针走；旧位置在指针那块屏上 ⇒ 留着它）。
+			"TestTheMiniPlacementFollowsTheCursorDisplayAfterARestore",
+			// 那块屏**变小**之后：展开着的窗收起来、整个落回新的工作区。
+			"TestTheMiniWindowFitsTheNewWorkAreaWhenTheDisplayShrinks",
+			// 改了分辨率之后，卷帘的目标高度按**卡片底下**重算（不是按窗
+			// 底下——那样会一级一级往下掉）。
+			"TestTheMiniCurtainRetargetsFromTheCardBottom",
+			// 卷帘按窗所在那块屏的工作区算高度。
+			"TestTheMiniCurtainUsesTheScreenItIsOn",
+		},
+	},
+	{
 		// 票 #557：系统把一个音频文件交给本应用（双击、拖到程序坞图标）。
 		//
 		// 🔴 **这一族全是「静默」的坏法**：登记漏了、回调装晚了、扩展名对不上，

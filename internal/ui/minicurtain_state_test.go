@@ -40,6 +40,13 @@ type fakeMiniWindow struct {
 	width  int
 	height int
 
+	// x / y 是这扇窗的位置（屏幕坐标）。
+	//
+	// ⚠️ **它们是票 #555 加的**：显示器定位那一档要把窗挪回可见的工作区，
+	// 而无头环境里没有真窗口——所以假窗得记住自己被挪到哪儿去了。
+	x int
+	y int
+
 	// work 是这扇窗所在显示器的工作区。
 	//
 	// ⚠️ **它必须摆进来**：生产那一档问的是 `mygo.Screen`，而那个头上有
@@ -59,6 +66,9 @@ type fakeMiniWindow struct {
 
 	// onClose 是关窗之前那个钩子。
 	onClose func(e *mygo.CloseEvent)
+
+	// onMove 是「窗被挪动了」那个钩子（票 #555）。
+	onMove func()
 }
 
 func newFakeMiniWindow() *fakeMiniWindow {
@@ -76,8 +86,12 @@ func (f *fakeMiniWindow) SetSize(width, height int) {
 	f.width, f.height = width, height
 }
 
+func (f *fakeMiniWindow) SetPosition(x, y int) {
+	f.x, f.y = x, y
+}
+
 func (f *fakeMiniWindow) Bounds() mygo.Rectangle {
-	return mygo.Rectangle{X: 0, Y: 0, Width: f.width, Height: f.height}
+	return mygo.Rectangle{X: f.x, Y: f.y, Width: f.width, Height: f.height}
 }
 
 func (f *fakeMiniWindow) IsDestroyed() bool { return false }
@@ -88,6 +102,22 @@ func (f *fakeMiniWindow) Focus() {
 }
 
 func (f *fakeMiniWindow) WorkArea() mygo.Rectangle { return f.work }
+
+func (f *fakeMiniWindow) OnMove(fn func()) (off func()) {
+	f.onMove = fn
+	return func() { f.onMove = nil }
+}
+
+// move 触发「窗被挪动了」那个钩子。
+//
+// ⚠️ **它先挪，再触发**——和框架的顺序一样（`mygo/window.go:1687` 的
+// `Moved()`：先记状态，再叫那些钩子）。
+func (f *fakeMiniWindow) move(x, y int) {
+	f.x, f.y = x, y
+	if f.onMove != nil {
+		f.onMove()
+	}
+}
 
 // Native 返回 nil —— 假窗**没有原生那一侧**。
 //

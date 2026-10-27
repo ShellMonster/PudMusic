@@ -263,19 +263,34 @@ func miniCurtainEnabled(st app.Settings) bool {
 // miniCurtainHeight 算卷帘该有多高：按那扇窗所在显示器的工作区夹住。
 //
 // work 是那块工作区（`mygo.Screen.DisplayMatching(win).WorkArea`），win 是
-// 窗现在的位置和大小。
+// 窗现在的位置（**只有 X/Y 用得上**，见下面那一段）。
 //
 // ⚠️ **只有往下这一边会不够**：卷帘是往**下**长的，而窗的左右两边它一个
 // 像素都不占（宽度还是 320）。
 //
 // ⚠️ **不够就不展开**（返回 0）：透明窗多出来的那一块照样吃点击，而一条
 // 只有几十像素高的卷帘既读不出歌词又挡着底下的应用——那比不展开更坏。
+//
+// 🔴 **量的是「卡片底下」到工作区底边，不是「窗底下」**：
+//
+// 迷你窗是**上下两段**（`viewMini`）：上面那 84 高是卡片（那个
+// `Height(miniHeight)` 的 Row），卷帘挂在它**下面**。⇒ 卷帘能长多高，量
+// 的是**卡片底下**到工作区底边还剩多少。
+//
+// ⚠️ **为什么不能拿窗现在的高度去量**：窗展开着的时候高度是「84 + 卷帘
+// 高」——拿那个底边去量，量到的是「卷帘自己已经占掉的那一块」⇒ 目标高度
+// 一级一级往下掉（屏幕上显示高度一变，卷帘就越缩越短，最后缩成 0）。而
+// 「那块屏改了分辨率」正是最容易触发它的那一下（票 #555）。
 func miniCurtainHeight(work mygo.Rectangle, win mygo.Rectangle) int {
 	if work.Width <= 0 || work.Height <= 0 {
 		return 0
 	}
-	// 窗底到工作区底边还剩多少（底下留一道 12 的边距）。
-	down := work.Y + work.Height - (win.Y + win.Height) - miniCurtainMargin
+	// 卡片底到工作区底边还剩多少（底下留一道 12 的边距）。
+	//
+	// ⚠️ **卡片永远是 84 高**（`miniHeight`）：用户可以把窗往高里拖（迷你窗
+	// 故意没给 `DisableResize`），而卡片那一段是钉死 84 的——多出来的那一块
+	// 是面板自己的底（不透明，不吃点击的那种空，见 `viewMini`）。
+	down := work.Y + work.Height - (win.Y + miniHeight) - miniCurtainMargin
 	if down < miniCurtainMinH {
 		return 0
 	}
@@ -583,7 +598,8 @@ func (s *Shell) miniCurtainMaxHeight() int {
 // 只在应用 ready 之后才走到。
 //
 // ⚠️ **它走的是 `miniWindow` 那一层接口**：于是测试实现（假窗）可以把工作区
-// **摆进来**，不必真的问系统——而生产那一档问的是真的（`mygo.Screen`）。
+// **摆进来**，不必真的问系统——而生产那一档问的是真的（`miniWorkAreaOf`，
+// 它底下是 `mygo.Screen`，理由见 `minidisplays.go`）。
 func (s *Shell) miniCurtainWorkAreaOf(w miniWindow) mygo.Rectangle {
 	if w == nil || w.IsDestroyed() {
 		return mygo.Rectangle{}
@@ -633,6 +649,17 @@ func (s *Shell) miniCurtainCollapseNow() {
 	s.miniCurtainWantsKey = false
 	s.miniCurtain.height = 0
 	s.miniCurtain.setHeight = miniHeight
+	// ⚠️ **目标高度也作废**：这一档是「立刻收起」，**没有动画**——而目标高度
+	// 是「卷帘全开时窗该有多高」，卷帘已经收着了，它就是**过期**的。
+	//
+	// ⚠️ **为什么这一档能作废、而动画那一档不能**（`miniCurtainCollapse`
+	// 留着它）：动画那几百毫秒里窗高是「比例 × 全开高」，全开高就是从这
+	// 个目标高度来的（见 `miniCurtainFullHeight`）——作废它，收起就变成
+	// 「一帧消失」。而这一档把弹簧**钉到 0** 了，比例恒为 0，目标高度压根
+	// 不会被问（`miniCurtainSyncHeight` 只在比例 > 0 时才去问）。
+	//
+	// ⚠️ **下一次点开会重算**（`miniCurtainToggle` 里那句 `target = h`）。
+	s.miniCurtain.target = 0
 	// ⚠️ **弹簧也要归零**：只把 `height` 归零的话，下一帧那个弹簧会从 1
 	// 往 0 走——窗于是**先弹回 320 再缩到 84**，那几百毫秒里窗比内容高
 	// （透明的那一块在吃点击），而票面要的是「**立刻收起**」。
@@ -680,15 +707,22 @@ type miniWindow interface {
 	Size() (width, height int)
 	// SetSize 改窗的尺寸（原生那一边的事）。
 	SetSize(width, height int)
+	// SetPosition 把窗挪到 (x, y)（**屏幕坐标**）。
+	//
+	// ⚠️ **它是票 #555 加的**：显示器定位那一档要把窗挪回可见的工作区，
+	// 而无头那一档没有真窗口——所以这一样也得在这一层接口上（测试实现
+	// 记下最后一次位置，见 `minidisplays_test.go`）。
+	SetPosition(x, y int)
 	// Bounds 是窗现在在哪、多大。
 	Bounds() mygo.Rectangle
 	// WorkArea 是这扇窗所在显示器的工作区（**零值 = 「不知道」**）。
 	//
 	// ⚠️ **它在这一层上，是为了无头那一档**：生产实现问的是
-	// `mygo.Screen.DisplayMatching(win).WorkArea`，而 `mygo.Screen` 头上有
-	// `needsApp`（`mygo/app.go:128`）——应用没 ready 的时候调它**直接
-	// panic**，而无头 Tester 里压根没有应用。所以测试实现把工作区**摆进来**，
-	// 而「卷帘不该长出工作区」这件事本身是纯逻辑（`miniCurtainHeight`）。
+	// `miniDisplayFor(displays, win).WorkArea`（票 #555 换掉了框架那一版
+	// `mygo.Screen.DisplayMatching`），而 `mygo.Screen` 头上有 `needsApp`
+	// （`mygo/app.go:128`）——应用没 ready 的时候调它**直接 panic**，而无头
+	// Tester 里压根没有应用。所以测试实现把工作区**摆进来**，而「卷帘不该长出
+	// 工作区」这件事本身是纯逻辑（`miniCurtainHeight`）。
 	WorkArea() mygo.Rectangle
 	// Native 是底下那扇**真窗**（测试实现返回 nil）。
 	//
@@ -700,6 +734,11 @@ type miniWindow interface {
 	IsDestroyed() bool
 	// Focus 让这扇窗成为 key 窗口（**不**激活应用——它是 Panel）。
 	Focus()
+	// OnMove 装「窗被挪动了」那个钩子。
+	//
+	// ⚠️ **它是票 #555 加的**：跨屏拖动之后要重新判它落在哪块屏上（而那一档
+	// 要能**在无头那一档触发**——所以它在这一层接口上，不在 `*mygo.Window` 上）。
+	OnMove(fn func()) (off func())
 	// OnClose 装「关窗之前」那个钩子。
 	OnClose(fn func(e *mygo.CloseEvent)) (off func())
 }
@@ -709,13 +748,23 @@ type miniWindowOf struct{ w *mygo.Window }
 
 func (m miniWindowOf) Size() (int, int)          { return m.w.Size() }
 func (m miniWindowOf) SetSize(width, height int) { m.w.SetSize(width, height) }
+func (m miniWindowOf) SetPosition(x, y int)      { m.w.SetPosition(x, y) }
 func (m miniWindowOf) Bounds() mygo.Rectangle    { return m.w.Bounds() }
 func (m miniWindowOf) IsDestroyed() bool         { return m.w.IsDestroyed() }
 func (m miniWindowOf) Focus()                    { m.w.Focus() }
 func (m miniWindowOf) WorkArea() mygo.Rectangle {
-	return mygo.Screen.DisplayMatching(m.w.Bounds()).WorkArea
+	// ⚠️ **不用框架那一版**（`mygo.Screen.DisplayMatching`，票 #555）：它在
+	// 「一块屏都不重叠」时返回的是**第一块**（也就是主屏）——而窗在第二块
+	// 屏上的时候，卷帘于是按**主屏**的工作区算高度，症状是「窗拖过去了，
+	// 点封面却说什么也不发生（那儿放不下）」。
+	//
+	// ⇒ 这一版是 `miniDisplayFor`：重叠最多的那块，一块都不重叠时取最近的。
+	return miniWorkAreaOf(miniDisplayList(), m.w.Bounds())
 }
 func (m miniWindowOf) Native() *mygo.Window { return m.w }
+func (m miniWindowOf) OnMove(fn func()) (off func()) {
+	return m.w.OnMove(fn)
+}
 func (m miniWindowOf) OnClose(fn func(e *mygo.CloseEvent)) (off func()) {
 	return m.w.OnClose(fn)
 }
