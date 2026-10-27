@@ -4391,7 +4391,7 @@ var Items = []Item{
 		// 拿到焦点之间有一个「两扇都没有焦点」的瞬间（实测 35~60 毫秒），而通知
 		// 是立刻弹的——所以判定延后一小会儿再判一次。
 		Category: Platform,
-		Spec:     "用户不在应用里（没有任何一扇窗『有焦点且看得见』，或窗口全部隐藏）时，后台下载完成弹一条系统通知；用户在应用里时不弹；主窗与迷你窗互相切换不误判；点通知回主窗的下载记录页；权限拒绝 / 不支持时静默降级成应用内提示而不丢事件（那句话要等用户回来还在）；同一任务用稳定 ID，同一版本不重复提醒；「有更新了」那一档另有一个独立开关",
+		Spec:     "用户不在应用里（没有任何一扇窗『有焦点且看得见』，或窗口全部隐藏）时，后台下载完成弹一条系统通知；用户在应用里时不弹；主窗与迷你窗互相切换不误判；点通知回主窗的下载记录页；权限拒绝 / 不支持时静默降级成应用内提示而不丢事件（那句话要等用户回来还在）；同一任务用稳定 ID，同一版本不重复提醒；「有更新了」那一档另有一个独立开关；任一扇窗重新拿到焦点时清掉通知中心里的那些（**包括上一次运行留下的**——哪怕这一轮一次通知都没发过）",
 		Tests: []string{
 			// 判据本身：聚焦 / 失焦 / 迷你那一扇 / 全隐藏 / 窗口还没建出来 /
 			// 关掉的那一扇窗要摘掉。
@@ -4413,6 +4413,9 @@ var Items = []Item{
 			"TestTheNotificationGoesToTheDownloadList",
 			"TestTheUpdateNotificationGoesToTheSettings",
 			"TestAnUnknownNotificationGoesNowhere",
+			// 任一扇窗重新拿到焦点就把通知清掉（**包括上一次运行留下的那些**）。
+			"TestReturningToTheAppClearsTheNotifications",
+			"TestAFreshProcessStillClearsTheNotificationsOfEarlierRuns",
 			// 发不出去时不丢事件。
 			"TestAFailedNotificationStillSaysItInTheApp",
 			"TestAFailedNotificationStillSaysItWhenTheUserReturns",

@@ -251,15 +251,57 @@ func OnNotificationFailure(fn func(title, body string, err error)) {
 //
 // **任一扇应用窗口重新拿到焦点时就调它**（票面第 6 条）：用户已经回到应用里
 // 看着下载记录页了，通知中心里还堆着「下载完成」就是多余的。
+//
+// 🔴 **它不看「这一轮能不能发通知」那一份账**（`notifier.supported`）——
+// 票面第 6 条要清的是**上一次运行留在通知中心里的那些**，而一个刚起来的进程
+// 那一份账正是「还没问过」（`supportUnknown`，见上面那一段的注释）。于是按它
+// 跳过的话：用户切到别的应用去、下载完成（这一轮**还没发过**任何通知，于是
+// 那一份账仍然是「还没问过」）、用户再回来——**上一次运行留下的那一条永远
+// 清不掉**，而界面上看不出任何异样。
+//
+// ⚠️ **框架那一层自己会判**：macOS 上没打包成 bundle 时它直接返回（见
+// `mygo/internal/darwin/notify.go` 的 `RemoveAllNotifications`），而 Windows /
+// Linux 那边清的就是本进程发出去的那些。所以这一层不必再判一次。
 func ClearNotifications() {
-	notifier.mu.Lock()
-	known := notifier.supported
-	notifier.mu.Unlock()
-	if known != supportYes {
-		// 没发过通知就不用清（清的那一句也要过主线程）。
-		return
-	}
-	mygo.ClearNotifications()
+	clearNotifications.mu.Lock()
+	fn := clearNotifications.fn
+	clearNotifications.mu.Unlock()
+	fn()
+}
+
+// clearNotifications 是「真的去清通知」那一个动作。
+//
+// ⚠️ **它是一个可替换的接缝**（只有测试用，`SwapClearNotificationsForTest`）：
+// 框架那一层 `mygo.ClearNotifications()` 会把清除派到**主线程**上（`mygo` 的
+// `onMain` 会**等**它跑完），而无头环境里没有事件循环在排空那个队列——直接调
+// 它会**永久阻塞**（实测卡在等那个 done 通道上）。
+var clearNotifications = struct {
+	mu sync.Mutex
+	fn func()
+}{
+	fn: func() {
+		// ⚠️ **应用还没 ready 就不清**：框架那一层要一个跑起来的事件循环
+		//（清除要派到主线程上），而那之前通知中心里也没有本轮留下的任何东西。
+		if !mygo.App.IsReady() {
+			return
+		}
+		mygo.ClearNotifications()
+	},
+}
+
+// SwapClearNotificationsForTest 换掉「真的去清通知」那一个动作，返回原来那一个。
+//
+// ⚠️ **只有测试用**：生产路上它一直是 `mygo.ClearNotifications`。
+//
+// ⚠️ **为什么需要它**：框架那一层在无头环境里会**永久阻塞**（见上面那一段的
+// 注释），而这一层要验的恰恰是「窗口重新拿到焦点 ⇒ 真的清了」——所以测试
+// 得能看见那一下有没有发生。
+func SwapClearNotificationsForTest(fn func()) func() {
+	clearNotifications.mu.Lock()
+	defer clearNotifications.mu.Unlock()
+	old := clearNotifications.fn
+	clearNotifications.fn = fn
+	return old
 }
 
 // OnNotificationClick 装上「用户点了通知」的那只手。

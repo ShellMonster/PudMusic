@@ -4,10 +4,13 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/Biu_Go/internal/platform"
 )
 
 // 这一组盯的是「用户不在应用里的时候，后台下载完成要弹一条系统通知」
@@ -183,14 +186,25 @@ func TestSwitchingBetweenOurOwnWindowsIsNotLeavingTheApp(t *testing.T) {
 	// 焦点，于是它被挡下来。
 	//
 	// 这一条量的就是它：**发起之后、等过宽限期**，那一条通知不该出现。
+	grace := catchGrace(t)
 	got := captureNotify(t, func() {
 		notifyDownloadDone("BV1x|cid1", "晴天")
 	})
 
+	// ⚠️ **宽限期那一段确实排上了**：不然下面「跑它」跑的是空气——而把宽限期
+	// 那段代码整个删掉，那一版照样绿（这正是上一轮评审抓到的那个坑）。
+	if n := grace.waitPending(t); n != 1 {
+		t.Fatalf("宽限期那一段排了 %d 次，want 1 次 —— 而这一条量的是"+
+			"「通知在切换**之前**发起」那一档", n)
+	}
+
 	// 然后迷你窗拿到焦点（用户点了一下迷你播放器）——**在宽限期之内**。
 	p.set(mini, true)
 
-	time.Sleep(notifyGrace + 200*time.Millisecond)
+	// ⚠️ **宽限期到了**：测试自己跑那一段（见 `catchGrace`）——不拿固定毫秒
+	// 当判据（AGENTS.md §2）。
+	grace.fire(t)
+
 	if got.len() != 0 {
 		t.Errorf("主窗与迷你窗互相切换，却还是发了 %d 条系统通知（%v）——"+
 			"而用户正看着迷你播放器", got.len(), got.items)
@@ -260,10 +274,12 @@ func TestAHiddenWindowIsAwayEvenWhileItStillHasFocus(t *testing.T) {
 	p := newFocusProbe(t)
 	p.addShown(true, false) // 藏起来、还带着焦点标志
 
+	grace := catchGrace(t)
 	got := captureNotify(t, func() {
 		notifyDownloadDone("BV1x|cid1", "晴天")
 	})
-	time.Sleep(notifyGrace + 200*time.Millisecond)
+	grace.waitPending(t)
+	grace.fire(t)
 	if got.len() != 1 {
 		t.Fatalf("全部窗口隐藏，却只发了 %d 条系统通知，want 1 条（%v）", got.len(), got.items)
 	}
@@ -319,11 +335,14 @@ func TestDownloadDoneIsAnnouncedWhenTheUserIsAway(t *testing.T) {
 	main := p.add(false)
 	p.set(main, false) // 用户不在
 
+	grace := catchGrace(t)
 	got := captureNotify(t, func() {
 		notifyDownloadDone("BV1x|cid1", "晴天")
 	})
-	// ⚠️ **要等过宽限期**：通知是延后发的（见文件头）。
-	time.Sleep(notifyGrace + 200*time.Millisecond)
+	// ⚠️ **要等过宽限期**：通知是延后发的（见文件头）——而测试自己跑那一段，
+	// 不拿固定毫秒当判据（AGENTS.md §2）。
+	grace.waitPending(t)
+	grace.fire(t)
 	if got.len() != 1 {
 		t.Fatalf("通知发了 %d 条，want 1 条（%v）", got.len(), got.items)
 	}
@@ -345,10 +364,19 @@ func TestDownloadDoneIsSilentWhileTheUserIsHere(t *testing.T) {
 	main := p.add(true)
 	p.set(main, true) // 用户在
 
+	grace := catchGrace(t)
 	got := captureNotify(t, func() {
 		notifyDownloadDone("BV1x|cid1", "晴天")
 	})
-	time.Sleep(notifyGrace + 200*time.Millisecond)
+	// ⚠️ **它连宽限期都不排**：用户在里面 → 当场就走了。那一段是给「切换」
+	// 那一档的（焦点正在两扇窗之间搬家）。
+	//
+	// ⚠️ **而「没排」就是「永远不会发」**——所以这里不用等：跑它也是空的。
+	if n := grace.pendingCount(); n != 0 {
+		t.Errorf("用户正盯着应用，却还是排了 %d 次宽限期重判 —— "+
+			"而那一段跑完会发出一条系统通知", n)
+	}
+	grace.fire(t)
 	if got.len() != 0 {
 		t.Errorf("用户正盯着应用，却还是发了 %d 条系统通知（%v）", got.len(), got.items)
 	}
@@ -460,18 +488,23 @@ func TestAFailedNotificationStillSaysItWhenTheUserReturns(t *testing.T) {
 	old := swapMainShell(s)
 	t.Cleanup(func() { swapMainShell(old) })
 
+	// ⚠️ **普通提示的一生改短**：这一条要验的是「过了普通提示的一辈子之后，
+	// 它还在」——而那一生是两秒。测试里把它改短，免得每条都干等两秒。
+	shortToasts(t, 50*time.Millisecond)
+
 	notifyFallback("下载完成", "《晴天》下载完成", errFakeNotify)
 
-	// 用户切到别的应用去，过了一会儿才回来。
-	time.Sleep(toastLifetime + 300*time.Millisecond)
+	// ⚠️ **一条对照**：一条**普通**提示（不粘着），它到点就消失——它消失了就
+	// 证明「普通提示的一辈子过了」。
+	//
+	// ⚠️ **而它必须是条件判据**：拿固定毫秒去等，在机器忙的时候会**假通过**
+	//（AGENTS.md §2）——「它还在」这句话会在定时器还没跑到的时候就被判完。
+	s.addToast("对照", notice.Plain)
+	waitFor(t, "普通提示到期了", func() bool { return !hasToast(s, "对照") })
 
-	if len(s.toasts) == 0 {
+	if !hasToast(s, "晴天") {
 		t.Errorf("系统通知发不出去，那一句应用内提示在用户回来之前就过期了 —— " +
 			"而用户不在应用里时，界面上一个字也没有，他不会知道歌下完了")
-	}
-	// 那一句话的内容还在（不只是「有一条」）。
-	if len(s.toasts) > 0 && !strings.Contains(s.toasts[0].text, "晴天") {
-		t.Errorf("留下来那一句是 %q，want 一句带歌名的", s.toasts[0].text)
 	}
 }
 
@@ -488,6 +521,10 @@ func TestTheStickyNoticeIsReleasedWhenTheUserComesBack(t *testing.T) {
 	old := swapMainShell(s)
 	t.Cleanup(func() { swapMainShell(old) })
 
+	// ⚠️ **普通提示的一生改短**：用户回来之后它按正常的那两秒走——测试里把
+	// 那两秒改短，免得干等（而且不拿固定毫秒当判据，AGENTS.md §2）。
+	shortToasts(t, 50*time.Millisecond)
+
 	notifyFallback("下载完成", "《晴天》下载完成", errFakeNotify)
 	if len(s.toasts) == 0 {
 		t.Fatal("系统通知发不出去，可那句应用内提示压根没弹")
@@ -503,11 +540,9 @@ func TestTheStickyNoticeIsReleasedWhenTheUserComesBack(t *testing.T) {
 		t.Error("用户已经回来了，那一句还粘着 —— 它会永远赖在屏幕上")
 	}
 	// 放走之后它按正常的那两秒走：过一会儿它自己没了。
-	time.Sleep(toastLifetime + 300*time.Millisecond)
-	if len(s.toasts) != 0 {
-		t.Errorf("用户回来之后过了 %v，那一句还摆着 %d 条 —— 它该按正常的那两秒收掉",
-			toastLifetime, len(s.toasts))
-	}
+	waitFor(t, "用户回来之后那一句按正常的一生走完了", func() bool {
+		return len(dropToastTexts(s)) == 0
+	})
 }
 
 // TestTheStickyNoticeIsOnScreenWhenTheUserComesBack 钉住「用户回来时那一句
@@ -551,6 +586,48 @@ func TestTheStickyNoticeIsOnScreenWhenTheUserComesBack(t *testing.T) {
 	}
 }
 
+// TestReturningToTheAppClearsTheNotifications 钉住「任一扇窗重新拿到焦点就把
+// 通知清掉」。
+//
+// 🔴 **这是票面第 6 条**（票 #559，2026-10-27 的评审）：用户回到应用里，通知
+// 中心里不该还堆着「下载完成」——**包括上一次运行留下的那一条**。
+//
+// ⚠️ **而「上一次运行留下的那一条」是那一档里最容易被漏掉的**：新起来的进程
+// 那一份「能不能发通知」的账是「还没问过」（`supportUnknown`），而按它跳过
+// 的话，框架那一层**根本不会被调到**——于是那一条永远留在通知中心里，而界面
+// 上看不出任何异样。
+func TestReturningToTheAppClearsTheNotifications(t *testing.T) {
+	sh := newTestShell(t, withoutTester())
+	s := sh.s
+
+	// ⚠️ **这一扇窗得在账上**（`s.notify.id`）：「还没接窗口」那一档会当场返回
+	//（那是无头 Tester 的那一份）。
+	newFocusProbe(t)
+	s.notify.id = tracker().add(false, true)
+
+	// ⚠️ **换掉「真的去清」那一个动作**：框架那一层要把清除派到**主线程**上
+	// （无头环境里没有事件循环在排空那个队列——直接调它会**永久阻塞**）。
+	var mu sync.Mutex
+	calls := 0
+	old := platform.SwapClearNotificationsForTest(func() {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+	})
+	t.Cleanup(func() { platform.SwapClearNotificationsForTest(old) })
+
+	// 用户回来了：这一扇窗重新拿到焦点。
+	s.noteWindow(func(p *windowPresence) { p.focused = true })
+
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Errorf("窗口重新拿到焦点，却只清了 %d 次通知，want 1 次 —— "+
+			"而通知中心里还堆着上一次运行留下的那一条，而用户已经回到应用里了",
+			calls)
+	}
+}
+
 // TestTheSameVersionIsNotNotifiedTwice 钉住「同一个版本只提醒一次」。
 //
 // 🔴 **这是票面第 6 条「不重复刷通知」**（票 #559）：后台检查**每小时**一次，
@@ -565,10 +642,12 @@ func TestTheSameVersionIsNotNotifiedTwice(t *testing.T) {
 	resetNotifiedVersions(t)
 	p.add(false) // 用户不在
 
+	grace := catchGrace(t)
 	got := captureNotify(t, func() {
 		notifyUpdateAvailable(nil, "1.2.3")
 	})
-	time.Sleep(notifyGrace + 200*time.Millisecond)
+	grace.waitPending(t)
+	grace.fire(t)
 	if got.len() != 1 {
 		t.Fatalf("第一次提醒发了 %d 条，want 1 条（%v）", got.len(), got.items)
 	}
@@ -577,7 +656,12 @@ func TestTheSameVersionIsNotNotifiedTwice(t *testing.T) {
 	got2 := captureNotify(t, func() {
 		notifyUpdateAvailable(nil, "1.2.3")
 	})
-	time.Sleep(notifyGrace + 200*time.Millisecond)
+	// ⚠️ **它当场就被拦下了**：这一层记着「这个版本已经提醒过了」——所以它
+	// 连宽限期都不排（排了也不会发）。
+	if n := grace.pendingCount(); n != 0 {
+		t.Errorf("同一个版本又排了 %d 次宽限期重判 —— 而它该被拦下", n)
+	}
+	grace.fire(t)
 	if got2.len() != 0 {
 		t.Errorf("同一个版本提醒了 %d 次，want 1 次 —— "+
 			"而用户每小时都会收到一条一模一样的「有更新了」", got2.len())
@@ -593,10 +677,12 @@ func TestANewVersionIsNotifiedAgain(t *testing.T) {
 	resetNotifiedVersions(t)
 	p.add(false)
 
+	grace := catchGrace(t)
 	got := captureNotify(t, func() {
 		notifyUpdateAvailable(nil, "1.2.3")
 	})
-	time.Sleep(notifyGrace + 200*time.Millisecond)
+	grace.waitPending(t)
+	grace.fire(t)
 	if got.len() != 1 {
 		t.Fatalf("第一次提醒发了 %d 条，want 1 条（%v）", got.len(), got.items)
 	}
@@ -604,7 +690,8 @@ func TestANewVersionIsNotifiedAgain(t *testing.T) {
 	got2 := captureNotify(t, func() {
 		notifyUpdateAvailable(nil, "1.3.0")
 	})
-	time.Sleep(notifyGrace + 200*time.Millisecond)
+	grace.waitPending(t)
+	grace.fire(t)
 	if got2.len() != 1 {
 		t.Errorf("换了版本却只提醒了 %d 次，want 1 次（%v）", got2.len(), got2.items)
 	}
@@ -655,6 +742,25 @@ func TestAVersionFoundWhileTheUserIsHereIsNotifiedWhenTheyLeave(t *testing.T) {
 	// 这个 App。
 	MountNotifications(a)
 
+	// ⚠️ **「界面层判过了」的正向信号**：更新器把「查到了新版本」递到界面层
+	// 的那一手是 `App.SetUpdateNotifier` 装上去的那个闭包，而**它什么时候被调**
+	// 是异步的（后台检查那条线）。
+	//
+	// ⚠️ **而它不能省**：没有它，「用户在前台那一次没发通知」这一句就是在
+	// 「界面层还没判过」的时候判的——那一句会**假通过**（界面层随后判出
+	// 「用户在里面」，什么也不发，于是「没发」照样成立）。
+	//
+	// ⚠️ **而这里包一层，而不是换掉它**：包的那一层做的正是 `MountNotifications`
+	// 装的那个闭包做的事（`notifyUpdateAvailable(a, version)`），所以这一条
+	// 走的还是真的那一套接线。
+	var judged atomic.Int64
+	a.SetUpdateNotifier(func(version string) {
+		notifyUpdateAvailable(a, version)
+		judged.Add(1)
+	})
+
+	grace := catchGrace(t)
+
 	// 用户**在前台**：主窗有焦点。
 	main := p.add(true)
 	p.set(main, true)
@@ -665,9 +771,19 @@ func TestAVersionFoundWhileTheUserIsHereIsNotifiedWhenTheyLeave(t *testing.T) {
 		defer stop()
 		waitFor(t, "后台那一次查到了新版本", func() bool { return a.UpdateSnapshot().Available() })
 	})
-	time.Sleep(notifyGrace + 200*time.Millisecond)
+	// ⚠️ **等界面层判完**：只有判完了，「没发通知」这一句才是判出来的，而不是
+	// 「还没轮到它判」。
+	waitFor(t, "界面层判过了第一次", func() bool {
+		return judged.Load() >= 1
+	})
 	if got.len() != 0 {
 		t.Fatalf("用户正盯着应用，却还是发了 %d 条系统通知（%v）", got.len(), got.items)
+	}
+	// ⚠️ **而那一档不该排宽限期**：用户在里面 → 界面层当场就把两份记账退回
+	// 去（见 `releaseUpdateReminder`），压根没有延后发的那一段。
+	if n := grace.pendingCount(); n != 0 {
+		t.Errorf("用户在前台，却还是排了 %d 次宽限期重判 —— "+
+			"而那一段跑完会发出一条通知", n)
 	}
 
 	// 用户随后离开：主窗失焦（**还看得见**）。
@@ -678,8 +794,14 @@ func TestAVersionFoundWhileTheUserIsHereIsNotifiedWhenTheyLeave(t *testing.T) {
 		stop := a.StartAutoChecks()
 		defer stop()
 		waitFor(t, "后台那一次又查了一遍", func() bool { return be.checksDone() >= 2 })
+		// ⚠️ **等界面层判完第二次**：而那一次它判出「用户不在」——于是它排了
+		// 那一段延后发的（见下面）。
+		waitFor(t, "界面层判过了第二次", func() bool { return judged.Load() >= 2 })
 	})
-	time.Sleep(notifyGrace + 200*time.Millisecond)
+	// ⚠️ **宽限期到了**：通知是延后发的——测试自己跑那一段（不拿固定毫秒当
+	// 判据，AGENTS.md §2）。
+	grace.waitPending(t)
+	grace.fire(t)
 	if got2.len() != 1 {
 		t.Fatalf("用户离开之后同一个版本只发了 %d 条通知（%v），want 1 条 —— "+
 			"而他在前台发现新版本时那一条没发出去，于是他永远不知道有新版",
@@ -761,6 +883,71 @@ func (c *capturedList) at(n int) capturedNotify {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.items[n]
+}
+
+// graceCatcher 抓「宽限期到了」那一个排程。
+//
+// 🔴 **它是为了不用固定毫秒当判据**（AGENTS.md §2）：通知是**延后**发的
+// （宽限期过了才发），而「等 600ms 然后看一眼有没有」在机器忙的时候会**假
+// 通过**——「没通知」那一条断言在定时器还没跑到的时候就判完了，而它判的其实
+// 是「定时器还没跑」。
+//
+// ⚠️ **它抓的是「排程」那一个动作**：生产路上那是 `time.AfterFunc`，而测试把
+// 它换成「把回调记下来，由测试自己决定什么时候跑」。于是：
+//
+//	「该发」那几条  → 等回调排上来（证明宽限期那一段真的走到了）→ 跑它
+//	「不该发」那几条 → 跑它（主动验出「它没发」，而不是「等一会儿没等到」）
+type graceCatcher struct {
+	mu      sync.Mutex
+	pending []func()
+}
+
+// catchGrace 换掉「宽限期」那个排程，返回抓它的那一个。
+func catchGrace(t *testing.T) *graceCatcher {
+	t.Helper()
+	c := &graceCatcher{}
+	old := swapNotifyGraceSchedule(func(d time.Duration, f func()) {
+		c.mu.Lock()
+		c.pending = append(c.pending, f)
+		c.mu.Unlock()
+	})
+	t.Cleanup(func() { swapNotifyGraceSchedule(old) })
+	return c
+}
+
+// waitPending 等到有宽限期回调排上来，报它排了几个。
+//
+// ⚠️ **它等的是「排上来了」，不是「跑过了」**：跑不跑由测试自己决定（那才是
+// 判据所在）。
+func (c *graceCatcher) waitPending(t *testing.T) int {
+	t.Helper()
+	n := 0
+	waitFor(t, "宽限期那一段排上了", func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		n = len(c.pending)
+		return n > 0
+	})
+	return n
+}
+
+// pendingCount 现在排着几个。
+func (c *graceCatcher) pendingCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.pending)
+}
+
+// fire 跑掉排着的那几个宽限期回调。
+func (c *graceCatcher) fire(t *testing.T) {
+	t.Helper()
+	c.mu.Lock()
+	fns := c.pending
+	c.pending = nil
+	c.mu.Unlock()
+	for _, f := range fns {
+		f()
+	}
 }
 
 // TestTheUpdateNotificationSwitchIsOnTheSettingsPage 钉住「那一格在设置页上」。

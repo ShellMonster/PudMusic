@@ -109,6 +109,39 @@ const (
 // 而它对用户是**察觉不到**的——通知晚 0.4 秒出现，看不出来。
 const notifyGrace = 400 * time.Millisecond
 
+// notifyGraceSchedule 是「等一小会儿再判一次」那个排程的插口。
+//
+// ⚠️ **默认是 `time.AfterFunc`**（生产上就是真等一小会儿）。测试把它换成
+// 「把那一段排程记下来，由测试自己决定什么时候跑」——于是「宽限期过了之后
+// 重新判一次」那一段是**可测的**，而不用拿固定毫秒当判据（AGENTS.md §2：
+// 机器忙的时候那种判据会飘，而且飘的时候和被测的逻辑一点关系都没有）。
+//
+// ⚠️ **它带一把锁**：排程从**后台**那条线调（下载下完了那条 goroutine），
+// 而测试换它是从另一条 goroutine 上写的。
+var notifyGraceSchedule = struct {
+	mu sync.Mutex
+	fn func(d time.Duration, f func())
+}{fn: func(d time.Duration, f func()) { time.AfterFunc(d, f) }}
+
+// swapNotifyGraceSchedule 换掉那个排程，返回原来那一个。
+//
+// **只有测试用**：生产路上它一直是 `time.AfterFunc`。
+func swapNotifyGraceSchedule(fn func(d time.Duration, f func())) func(d time.Duration, f func()) {
+	notifyGraceSchedule.mu.Lock()
+	defer notifyGraceSchedule.mu.Unlock()
+	old := notifyGraceSchedule.fn
+	notifyGraceSchedule.fn = fn
+	return old
+}
+
+// afterNotifyGrace 排一段「等一小会儿再跑」。
+func afterNotifyGrace(f func()) {
+	notifyGraceSchedule.mu.Lock()
+	fn := notifyGraceSchedule.fn
+	notifyGraceSchedule.mu.Unlock()
+	fn(notifyGrace, f)
+}
+
 // notifyDownloadID 是下载任务那条通知的 ID。
 func notifyDownloadID(taskID string) string { return notifyDownloadPrefix + taskID }
 
@@ -612,7 +645,7 @@ func notifyUpdateAvailable(a *app.App, version string) {
 	}
 	// ⚠️ **和下载那一档一样等一小会儿再判**（理由见文件头）：焦点正在两扇窗
 	// 之间搬家的时候，此刻「没有一扇有焦点」而用户**并没有离开**。
-	time.AfterFunc(notifyGrace, func() {
+	afterNotifyGrace(func() {
 		if !tracker().snapshot().idle() {
 			releaseUpdateReminder(a, version)
 			return
@@ -711,7 +744,7 @@ func notifyDownloadDone(taskID, title string) {
 	//
 	// ⚠️ **而它是延后而不是丢掉**：宽限期过了之后重新看一眼——用户真的走了才
 	// 发，用户回来了就不发（那一档他已经看得见界面上的变化了）。
-	time.AfterFunc(notifyGrace, func() {
+	afterNotifyGrace(func() {
 		if !tracker().snapshot().idle() {
 			return
 		}

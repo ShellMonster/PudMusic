@@ -210,3 +210,57 @@ func TestTheClickIsHandedToTheUpperLayer(t *testing.T) {
 		t.Errorf("上层收到的是 %q", got)
 	}
 }
+
+// TestAFreshProcessStillClearsTheNotificationsOfEarlierRuns 钉住「一个新起来的
+// 进程，重新拿到焦点时也会去清通知中心里的那些」。
+//
+// 🔴 **这是票面第 6 条的真判据**（票 #559，2026-10-27 的评审）：
+//
+//	用户切到别的应用去 → 下载完成（**这一轮还没发过**任何通知）
+//	→ 用户回到应用里 → **上一次运行留在通知中心里的那一条要被清掉**
+//
+// ⚠️ **而这一轮恰恰一次通知都没发过**：于是「这一轮能不能发通知」那一份账
+// 仍然是「还没问过」（`supportUnknown`）——而按它跳过的话，框架那一层**根本
+// 不会被调到**，上一次运行留下的那一条就永远留在通知中心里。
+//
+// ⚠️ **症状是静默的**：用户回到应用里，通知中心里还堆着「下载完成」——而
+// 界面上看不出任何异样。
+func TestAFreshProcessStillClearsTheNotificationsOfEarlierRuns(t *testing.T) {
+	resetNotifier(t)
+
+	// ⚠️ **这一份账必须是「还没问过」**：那正是这一档（这一轮一次通知都没发
+	// 过）。它要是别的档，这一条就量不到那个坑了。
+	notifier.mu.Lock()
+	known := notifier.supported
+	notifier.mu.Unlock()
+	if known != supportUnknown {
+		t.Fatalf("起点就不对：这一份「能不能发通知」的账是 %d，want %d"+
+			"（还没问过）—— 而这一条量的是「这一轮一次通知都没发过」那一档",
+			known, supportUnknown)
+	}
+
+	// ⚠️ **换掉「真的去清」那一个动作**：框架那一层要把清除派到**主线程**上
+	// （`mygo` 的 `onMain` 会**等**它跑完），而无头环境里没有事件循环在排空那个
+	// 队列——直接调它会**永久阻塞**。
+	//
+	// ⚠️ **而换掉的是「真的去清」那一步**：如果 `ClearNotifications` 上面还挂着
+	// 「这一轮能不能发通知」那道闸门，这一条就红——那正是它要量的东西。
+	var mu sync.Mutex
+	calls := 0
+	old := SwapClearNotificationsForTest(func() {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+	})
+	t.Cleanup(func() { SwapClearNotificationsForTest(old) })
+
+	ClearNotifications()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Errorf("一个新进程重新拿到焦点，却只去清了 %d 次通知，want 1 次 —— "+
+			"而这一轮一次通知都没发过，于是上一次运行留在通知中心里的那一条"+
+			"永远清不掉，而用户回到应用里还看得到它", calls)
+	}
+}
