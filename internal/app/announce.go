@@ -46,7 +46,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 )
 
-// announceErrText 把一个错翻成一句**给用户听**的话。
+// FriendlyErrText 把一个错翻成一句**给用户听**的话。
 //
 // ⚠️ **不许念原始的 Go 错串**：那是 "open /Users/x/a.m4a: no such file or
 // directory" 这种英文系统错，而读屏软件是**逐字念**的——用户听到的是一串他
@@ -55,7 +55,12 @@ import (
 // ⚠️ **在线流那一路已经过了 `bili.Friendly`**（见 `online.go` 的 `failOnline`），
 // 那一档不用这里管；这里是**本地文件**和**下载**那两路——它们的错是服务层原样
 // 递过来的。
-func announceErrText(err error) string {
+//
+// ⚠️ **它对外也开着**（`FriendlyErrText`）：界面层要把本地文件的错摆到
+// 提示上（见 `internal/ui/openfile.go`），而**两处必须说同一句话**——
+// 播报说「这个文件的格式放不了」而提示说「unsupported audio format」的
+// 话，读屏软件用户和看得见的用户听到的是两件事。
+func FriendlyErrText(err error) string {
 	if err == nil {
 		return ""
 	}

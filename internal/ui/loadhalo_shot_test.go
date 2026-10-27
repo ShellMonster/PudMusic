@@ -81,10 +81,7 @@ func TestRenderLoadHaloShots(t *testing.T) {
 				HasTrack: true, Title: "正在取的那一首", Source: app.SourceOnline,
 				Duration: 3 * time.Minute, Position: 42 * time.Second,
 				Rate: 1, Volume: 0.8, PlayMode: app.PlayModeSequence,
-				Loading:      true,
-				LoadingTitle: "正在取的那一首",
-				LoadingStage: "下音频",
-				LoadingWait:  2 * time.Second,
+				Loading: true,
 			}
 			_, tt := shotTester(t, st, dark)
 			// 转到的几个位置：0（12 点）、1/4 圈、1/2 圈（6 点）。

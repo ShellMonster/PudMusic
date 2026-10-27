@@ -297,6 +297,21 @@ func newTestShell(t *testing.T, opts ...shellOpt) *testShell {
 		if sp.prefs != nil {
 			tt.SetPreferences(*sp.prefs)
 		}
+		// ⚠️ **「立刻要一帧」那一格换成 Tester 的 `Frame()`**。
+		//
+		// 框架的 `Services.Invalidate` 只置一个「有人要帧」的标记，而无头
+		// Tester **只有在有人叫它的时候才画**（`mygo/ui/headless.go` 的
+		// `invalidate` 与 `Tester.Frame()`）——于是生产上「要一帧」到了测试
+		// 里就变成了「没人画」。
+		//
+		// 而这一票第二轮评审抓的就是这一类：**「状态里记着、画面上没有」**，
+		// 而判据必须是画面上的文字（`tt.HasText`）。所以这一格必须真的画出
+		// 一帧来。
+		//
+		// ⚠️ **只接这一处**：别把它接到 `addToast` 那一层（每一条提示都要一
+		// 帧，而无头环境里那一帧要画二十遍——入场动画一直要下一帧，而钟站着
+		// 不动）。几百条测试各多二十帧，这一包就慢得没法用了。
+		s.repaint = tt.Frame
 		sh.tt = tt
 	}
 

@@ -1,0 +1,430 @@
+{
+ "code": 0,
+ "message": "OK",
+ "ttl": 1,
+ "data": {
+  "page": {
+   "num": 1,
+   "size": 20,
+   "count": 52
+  },
+  "upper": {
+   "mid": 1208823126
+  },
+  "replies": [
+   {
+    "rpid": 321943726336,
+    "oid": 117506312373775,
+    "type": 1,
+    "mid": 1790294123,
+    "root": 321942994928,
+    "parent": 321942994928,
+    "dialog": 321943726336,
+    "count": 0,
+    "rcount": 0,
+    "state": 0,
+    "fansgrade": 0,
+    "attr": 0,
+    "ctime": 1793005741,
+    "mid_str": "1790294123",
+    "oid_str": "117506312373775",
+    "rpid_str": "321943726336",
+    "root_str": "321942994928",
+    "parent_str": "321942994928",
+    "dialog_str": "321943726336",
+    "like": 19,
+    "action": 0,
+    "member": {
+     "mid": "1790294123",
+     "uname": "缺课小虎牙",
+     "avatar": "https://i2.hdslb.com/bfs/face/b1c1ebdbd4b8453d88af322373472fbfb6497bb9.webp",
+     "level_info": {
+      "current_level": 5,
+      "current_min": 0,
+      "current_exp": 0,
+      "next_exp": 0
+     },
+     "official_verify": {
+      "type": -1,
+      "desc": ""
+     }
+    },
+    "content": {
+     "message": "骗你的 木有下1️⃣呆了[间奏时光表情包_哭]",
+     "members": [],
+     "jump_url": {},
+     "max_line": 6,
+     "emote": {
+      "[间奏时光表情包_哭]": {
+       "id": 122440,
+       "package_id": 8813,
+       "state": 0,
+       "type": 3,
+       "attr": 0,
+       "text": "[间奏时光表情包_哭]",
+       "url": "https://i0.hdslb.com/bfs/garb/b052a2717f4470589c70eb37e453e49f3b219ba4.png",
+       "meta": {
+        "size": 2
+       },
+       "mtime": 1759388402,
+       "jump_title": "哭"
+      }
+     }
+    },
+    "reply_control": {
+     "max_line": 6,
+     "time_desc": "7小时前发布",
+     "support_share": true,
+     "translation_switch": 1
+    }
+   },
+   {
+    "rpid": 318239393217,
+    "oid": 117506312373775,
+    "type": 1,
+    "mid": 693890950,
+    "root": 321942994928,
+    "parent": 321942994928,
+    "dialog": 318239393217,
+    "count": 0,
+    "rcount": 0,
+    "state": 0,
+    "fansgrade": 0,
+    "attr": 0,
+    "ctime": 1793005813,
+    "mid_str": "693890950",
+    "oid_str": "117506312373775",
+    "rpid_str": "318239393217",
+    "root_str": "321942994928",
+    "parent_str": "321942994928",
+    "dialog_str": "318239393217",
+    "like": 0,
+    "action": 0,
+    "member": {
+     "mid": "693890950",
+     "uname": "雨都林",
+     "avatar": "https://i1.hdslb.com/bfs/face/c6a0f4de93377293873e5754fc793652dfe266e5.jpg",
+     "level_info": {
+      "current_level": 6,
+      "current_min": 0,
+      "current_exp": 0,
+      "next_exp": 0
+     },
+     "official_verify": {
+      "type": -1,
+      "desc": ""
+     }
+    },
+    "content": {
+     "message": "敬畏自然",
+     "members": [],
+     "jump_url": {},
+     "max_line": 6
+    },
+    "reply_control": {
+     "max_line": 6,
+     "time_desc": "7小时前发布",
+     "support_share": true,
+     "translation_switch": 1
+    }
+   },
+   {
+    "rpid": 318239736833,
+    "oid": 117506312373775,
+    "type": 1,
+    "mid": 511765396,
+    "root": 321942994928,
+    "parent": 321942994928,
+    "dialog": 318239736833,
+    "count": 0,
+    "rcount": 0,
+    "state": 0,
+    "fansgrade": 0,
+    "attr": 0,
+    "ctime": 1793006055,
+    "mid_str": "511765396",
+    "oid_str": "117506312373775",
+    "rpid_str": "318239736833",
+    "root_str": "321942994928",
+    "parent_str": "321942994928",
+    "dialog_str": "318239736833",
+    "like": 8,
+    "action": 0,
+    "member": {
+     "mid": "511765396",
+     "uname": "我就放进去我静默",
+     "avatar": "https://i1.hdslb.com/bfs/face/872d7f9a89f03c8e1f2f1f4c55e53068047ddba0.jpg",
+     "level_info": {
+      "current_level": 5,
+      "current_min": 0,
+      "current_exp": 0,
+      "next_exp": 0
+     },
+     "official_verify": {
+      "type": -1,
+      "desc": ""
+     }
+    },
+    "content": {
+     "message": "“不要碰大a”[大哭]",
+     "members": [],
+     "jump_url": {},
+     "max_line": 6,
+     "emote": {
+      "[大哭]": {
+       "id": 5,
+       "package_id": 1,
+       "state": 0,
+       "type": 1,
+       "attr": 0,
+       "text": "[大哭]",
+       "url": "https://i0.hdslb.com/bfs/emote/2caafee2e5db4db72104650d87810cc2c123fc86.png",
+       "meta": {
+        "size": 1,
+        "suggest": [
+         ""
+        ]
+       },
+       "mtime": 1668688325,
+       "jump_title": "大哭"
+      }
+     }
+    },
+    "reply_control": {
+     "max_line": 6,
+     "time_desc": "7小时前发布",
+     "support_share": true,
+     "translation_switch": 1
+    }
+   },
+   {
+    "rpid": 321944346256,
+    "oid": 117506312373775,
+    "type": 1,
+    "mid": 1924633,
+    "root": 321942994928,
+    "parent": 321942994928,
+    "dialog": 321944346256,
+    "count": 0,
+    "rcount": 0,
+    "state": 0,
+    "fansgrade": 0,
+    "attr": 0,
+    "ctime": 1793006189,
+    "mid_str": "1924633",
+    "oid_str": "117506312373775",
+    "rpid_str": "321944346256",
+    "root_str": "321942994928",
+    "parent_str": "321942994928",
+    "dialog_str": "321944346256",
+    "like": 125,
+    "action": 0,
+    "member": {
+     "mid": "1924633",
+     "uname": "糕手P_",
+     "avatar": "https://i1.hdslb.com/bfs/face/879a3755a281f40a2fc19f5c536e90ca2634f4c7.jpg",
+     "level_info": {
+      "current_level": 6,
+      "current_min": 0,
+      "current_exp": 0,
+      "next_exp": 0
+     },
+     "official_verify": {
+      "type": -1,
+      "desc": ""
+     }
+    },
+    "content": {
+     "message": "但是0.2秒就达到了全球46e年都前所未有的高度",
+     "members": [],
+     "jump_url": {},
+     "max_line": 6
+    },
+    "reply_control": {
+     "max_line": 6,
+     "time_desc": "7小时前发布",
+     "support_share": true,
+     "translation_switch": 1
+    }
+   },
+   {
+    "rpid": 318240188177,
+    "oid": 117506312373775,
+    "type": 1,
+    "mid": 57796391,
+    "root": 321942994928,
+    "parent": 321942994928,
+    "dialog": 318240188177,
+    "count": 0,
+    "rcount": 0,
+    "state": 0,
+    "fansgrade": 0,
+    "attr": 268435456,
+    "ctime": 1793006337,
+    "mid_str": "57796391",
+    "oid_str": "117506312373775",
+    "rpid_str": "318240188177",
+    "root_str": "321942994928",
+    "parent_str": "321942994928",
+    "dialog_str": "318240188177",
+    "like": 4,
+    "action": 0,
+    "member": {
+     "mid": "57796391",
+     "uname": "上帝举不起的石头",
+     "avatar": "https://i0.hdslb.com/bfs/face/member/noface.jpg",
+     "level_info": {
+      "current_level": 5,
+      "current_min": 0,
+      "current_exp": 0,
+      "next_exp": 0
+     },
+     "official_verify": {
+      "type": -1,
+      "desc": ""
+     }
+    },
+    "content": {
+     "message": "生命在于运动",
+     "members": [],
+     "jump_url": {},
+     "max_line": 6
+    },
+    "reply_control": {
+     "max_line": 6,
+     "time_desc": "7小时前发布",
+     "support_share": true,
+     "translation_switch": 1
+    }
+   },
+   {
+    "rpid": 318240141585,
+    "oid": 117506312373775,
+    "type": 1,
+    "mid": 357220182,
+    "root": 321942994928,
+    "parent": 321942994928,
+    "dialog": 318240141585,
+    "count": 0,
+    "rcount": 0,
+    "state": 0,
+    "fansgrade": 0,
+    "attr": 0,
+    "ctime": 1793006378,
+    "mid_str": "357220182",
+    "oid_str": "117506312373775",
+    "rpid_str": "318240141585",
+    "root_str": "321942994928",
+    "parent_str": "321942994928",
+    "dialog_str": "318240141585",
+    "like": 2,
+    "action": 0,
+    "member": {
+     "mid": "357220182",
+     "uname": "布鲁克林的阳光",
+     "avatar": "https://i0.hdslb.com/bfs/face/b3af27e01b6a3d5866c69d14191cc345a146794a.jpg",
+     "level_info": {
+      "current_level": 6,
+      "current_min": 0,
+      "current_exp": 0,
+      "next_exp": 0
+     },
+     "official_verify": {
+      "type": -1,
+      "desc": ""
+     }
+    },
+    "content": {
+     "message": "人类必将永存",
+     "members": [],
+     "jump_url": {},
+     "max_line": 6
+    },
+    "reply_control": {
+     "max_line": 6,
+     "time_desc": "7小时前发布",
+     "support_share": true,
+     "translation_switch": 1
+    }
+   }
+  ],
+  "root": {
+   "rpid": 321942994928,
+   "oid": 117506312373775,
+   "type": 1,
+   "mid": 1208823126,
+   "root": 0,
+   "parent": 0,
+   "dialog": 0,
+   "count": 61,
+   "rcount": 52,
+   "state": 0,
+   "fansgrade": 0,
+   "attr": 0,
+   "ctime": 1793005248,
+   "mid_str": "1208823126",
+   "oid_str": "117506312373775",
+   "rpid_str": "321942994928",
+   "root_str": "0",
+   "parent_str": "0",
+   "dialog_str": "0",
+   "like": 401,
+   "action": 0,
+   "member": {
+    "mid": "1208823126",
+    "uname": "大圆镜科普",
+    "avatar": "https://i0.hdslb.com/bfs/face/9c34ee4b8041dd6f2139c52287c8d34a0a42f230.jpg",
+    "level_info": {
+     "current_level": 6,
+     "current_min": 0,
+     "current_exp": 0,
+     "next_exp": 0
+    },
+    "official_verify": {
+     "type": 0,
+     "desc": "bilibili 知名科普UP主"
+    }
+   },
+   "content": {
+    "message": "若将地球的四十六亿年浓缩为一天，人类文明仅占午夜前的最后0.2秒。我们常自诩为地球的主人，其实不过是这颗古老星球上，最新一批过客。如果能给下一批“房客”留言，你会写点什么？",
+    "members": [],
+    "jump_url": {},
+    "max_line": 6
+   },
+   "reply_control": {
+    "max_line": 6,
+    "time_desc": "7小时前发布",
+    "sub_reply_entry_text": "共52条回复",
+    "sub_reply_title_text": "相关回复共52条",
+    "support_share": true,
+    "translation_switch": 1
+   }
+  },
+  "config": {
+   "showtopic": 0,
+   "show_up_flag": false,
+   "read_only": false
+  },
+  "control": {
+   "input_disable": false,
+   "root_input_text": "万水千山总是情，评论两句行不行",
+   "child_input_text": "万水千山总是情，评论两句行不行",
+   "giveup_input_text": "不发没关系，请继续友善哦~",
+   "screenshot_icon_state": 1,
+   "upload_picture_icon_state": 1,
+   "answer_guide_text": "需要升级成为lv2会员后才可以评论，先去答题转正吧！",
+   "answer_guide_icon_url": "http://i0.hdslb.com/bfs/emote/96940d16602cacbbac796245b7bb99fa9b5c970c.png",
+   "answer_guide_ios_url": "https://www.bilibili.com/h5/newbie/entry?navhide=1&re_src=12",
+   "answer_guide_android_url": "https://www.bilibili.com/h5/newbie/entry?navhide=1&re_src=6",
+   "bg_text": "",
+   "empty_page": null,
+   "show_type": 1,
+   "show_text": "",
+   "web_selection": false,
+   "disable_jump_emote": false,
+   "enable_charged": false,
+   "enable_cm_biz_helper": false,
+   "preload_resources": null
+  }
+ }
+}

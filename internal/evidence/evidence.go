@@ -509,6 +509,47 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// 🔴 **评论接口那三个静默出错的坑**（票 #571）：
+		//
+		//	buvid3  请求头里一出现 buvid3，B 站就把评论列表砍到 3 条并宣称「到底了」
+		//	w_rid   走的是**不带 WBI** 的那个接口，所以请求串里不该有签名
+		//	ps      上限 30（超了 B 站默默截断，翻页从第二页起会漏掉一批）
+		//
+		// ⚠️ **buvid3 那一条要防的是两处**：「代码里没写 `Buvid: true`」**不够**
+		// ——jar 里的 cookie 是在运输层之前加上的（`http.Client.send` 里先
+		// `Jar.Cookies` 再 `RoundTrip`），而 jar 里确实会有 buvid3（登录时
+		// B 站下发的那批 cookie 全被存了下来）。所以评论请求显式写
+		// `NoBuvid: true`，在运输层把 buvid 那一族摘掉（**登录态照带**）。
+		//
+		// 还有「-404（对象不存在）」与「0 条评论」**必须说得不一样**：混成一句的
+		// 话，用户看到「这个对象不在了」会以为歌没了，而歌好好地摆在那儿。
+		//
+		// 而 **-403 在评论这一处判成「可重试」**（全局那张表仍判它不可重试——
+		// 那在别的接口上是对的，在评论接口上是错的）。
+		Spec: "评论接口：请求头里不带 buvid3（jar 里的也不带，登录态照带）、不签 WBI、ps 不超过 30；-404 与「0 条评论」说得不一样；-403 在评论这一处可重试",
+		Tests: []string{
+			"TestCommentListNeverSendsBuvid",
+			"TestCommentListNeverSendsTheBuvidThatLivesInTheJar",
+			"TestTheLoginCookiesDoNotMakeTheCommentRequestCarryBuvid",
+			"TestTheNoBuvidPathIsSafeToCallConcurrently",
+			"TestCommentListDoesNotAskForBuvid",
+			"TestCommentListIsNotSigned",
+			"TestCommentListGoesToTheUnsignedEndpoint",
+			"TestCommentListNeverAsksForMoreThanThirty",
+			"TestCommentListSendsTheTypeAndOid",
+			"TestCommentListReadsTheFieldsOffTheRealShape",
+			"TestCommentListSaysTheObjectIsGoneWhenBiliSays404",
+			"TestTheEmptyListAndTheMissingObjectSayDifferentThings",
+			"TestCommentListReadsTheEmptyPage",
+			"TestAnEmptyPageMidwayIsNotNoComments",
+			"TestCommentTreatsForbiddenAsWorthRetrying",
+			"TestIsUpperMarksOnlyTheUpAuthorsOwnComment",
+			"TestUpReplyCommentsAreNotMarkedAsTheUpper",
+			"TestAPictureWithAFractionalSizeDoesNotTakeTheWholePageDown",
+		},
+	},
+	{
+		Category: HTTP,
 		// 风控和限流**都不判成「可重试」**：界面上那枚「重试」是立刻再问一次
 		// （没有退避），而这两样要等的是时间——判成可重试的话用户点一次撞一次
 		// （票 #316 收窄了风控，票 #346 把限流收到同一档）。
@@ -1543,17 +1584,17 @@ var Items = []Item{
 		// 一个「等够了就当它失败」的上限。于是用户面对的是一个不动的界面和
 		// 一片沉默——比「报错」更糟。
 		//
-		// 这一组盯三件事：**有反馈**（界面上说在取流）、**有上限**（超时按失败
-		// 处理，给一句能看懂的话）、**有痕迹**（代次变了和失败都写进日志，
+		// 这一组盯三件事：**有反馈**（取流时播放键上有那一圈光，票 #581 之后
+		// 界面上不再有「正在取流」的文字）、**有上限**（超时按失败处理，
+		// 给一句能看懂的话）、**有痕迹**（代次变了和失败都写进日志，
 		// 而日志真的落在文件里）。
-		Spec: "点了歌一直不开始：界面上说在取流、超过阈值按失败处理、代次变了和失败都写进日志",
+		Spec: "点了歌一直不开始：取流时播放键上有光圈、超过阈值按失败处理、代次变了和失败都写进日志",
 		Tests: []string{
 			"TestAPlayThatNeverStartsTurnsIntoASentence",
 			"TestAnotherSongsFailureDoesNotCancelTheWatchdog",
 			"TestTheDiscardedPlayIsWrittenDown",
 			"TestTheFailureIsWrittenDown",
-			"TestThePlayBarSaysItIsLoading",
-			"TestTheLoadingLineHasASpinner",
+			"TestThePlayBarStaysQuietWhileLoading",
 			"TestThePauseKeyIsStillThereWhileLoading",
 			"TestAFailedPlayGivesASentenceInsteadOfASpinner",
 			"TestTheFailureSentenceFitsOnOneLine",
@@ -2180,6 +2221,62 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// B 站那一份弹幕（`/x/v1/dm/list.so`）。**这一条回的不是 JSON**——
+		// 它回的是**原始 deflate 的 XML**（实测 2026-10-27：响应头
+		// `Content-Type: text/xml` + `Content-Encoding: deflate`，而 deflate 是
+		// **裸的**，头两字节 `c5 55`，不是 zlib 的 `78 xx`）。
+		//
+		// 🔴 **「解不出 JSON」是一个静默的失败**：症状是「一条弹幕都没有」，
+		// 而界面上看不出任何异样。所以另开了 `DoRaw`（拿原文不解），而**错误
+		// 分类仍走 `Do` 那一条**——「能不能重试」那张表是全项目唯一的一处
+		// （`retry.go`），`DoRaw` 自己造一套的话，弹幕那条路上的「重试」会给错。
+		//
+		// ⚠️ **压缩那一档是静默的**：拿 `compress/zlib` 去解会报一句看不懂的错
+		// （`flate: corrupt input before offset 5`），而症状是「一条弹幕都没有」。
+		// ⇒ 有一条测试专门钉「deflate 不是 zlib」。
+		//
+		// ⚠️ **`p` 那 9 段第 8 段是 19 位的大整数**（弹幕 id）——走过 `float64`
+		// 会掉精度。而 `p` 段数不够的时候，后面几段是空的 ⇒ 颜色变成 0（全黑），
+		// **一条黑字弹幕在界面上看着完全正常**。所以段数不够的那一条要丢掉。
+		//
+		// ⚠️ **一条读不懂的不许把整份丢掉**：弹幕的正文是**用户自己打的字**，
+		// 什么字符都可能有，而一个**控制字符**（实测 U+0001）在 XML 里是
+		// **报错**的——报错的位置在那一条上。
+		//
+		// 🔴 **这一档最省事的写法是错的**：用一个 `xml.Decoder` 读到底的话，
+		// 那个错**让整个 decoder 卡住**——后面的合法弹幕**一条都读不到**
+		// （症状是「这个视频只有一条弹幕」）。⇒ 解析要**一条一条单独解**：
+		// 解不开的**只丢那一条**。
+		//
+		// ⚠️ **而没定义的实体要「原样留着」**（`&foo;`）——那是用户打的字，
+		// 非严格模式把它原样带出来，**不丢那一条**。
+		Spec: "B 站那一份弹幕自己来：原始 deflate（不是 zlib）解开、XML 里 `p` 那 9 段逐段切对（时间/模式/字号/十进制颜色）、正文里的 XML 实体解开、读不出来的一条只丢那一条；拉不到要有话说",
+		Tests: []string{
+			"TestDanmakuReadsEveryFieldOfEveryLine",
+			"TestDanmakuCutsTheNineFieldsOfThePAttribute",
+			"TestDanmakuUnwrapsTheXMLEntities",
+			"TestDanmakuUnwrapsIsDeflateNotZlib",
+			"TestDoRawHandsBackTheBytesUndecoded",
+			"TestDoRawReportsTheSameErrorsAsDo",
+			"TestDanmakuAsksTheDanmakuEndpoint",
+			"TestDanmakuWithoutACidDoesNotAsk",
+			"TestDanmakuWithNoDanmakuIsNotAnError",
+			"TestDanmakuKeepsWhatItCouldReadWhenOneLineIsBroken",
+			"TestDanmakuIgnoresLinesItCannotUnderstand",
+			"TestDanmakuUnwrapsAWholeResponseThatIsDeflated",
+			"TestDanmakuKeepsTheRowIDAsAString",
+			"TestDanmakuGivesEveryLineItsOwnID",
+			"TestDanmakuKeepsTheOrderBiliGave",
+			"TestDanmakuSaysSoWhenTheAnswerIsNotDanmaku",
+			"TestDanmakuWithTheFeatureTurnedOffIsNotAnError",
+			"TestDanmakuKeepsGoingAfterALineWithAControlCharacter",
+			"TestTheRealResponsesGiveTheExpectedNumberOfLines",
+			"TestTheFixtureMatchesTheServerBytes",
+			"TestDanmakuWithAnEmptyBodyIsNotAnError",
+		},
+	},
+	{
+		Category: HTTP,
 		// 联想词那个接口（Biu 的 `getSearchSuggestMain`）。**参数逐个对着上游抄**，
 		// 少一个的症状在界面上像「联想词永远是空的那一档」，而那和「拉不到」长得
 		// 一模一样。
@@ -2492,6 +2589,42 @@ var Items = []Item{
 			// 「从侧栏移除」要清的是**它所在的那一组**（否则提示就是谎话）。
 			"TestForgettingClearsTheRowOutOfWhicheverGroupItIsIn",
 			"TestForgettingTakesTheRowOutOfBothGroups",
+		},
+	},
+	{
+		Category: HTTP,
+		// 弹幕这一条路（应用层 + 缓存那一层）：
+		//
+		//   - **代次**：换歌之后旧的那一趟回来时必须被丢掉——症状是「在听 B，
+		//     屏幕上滚着 A 的弹幕」，而弹幕盖住封面的时候本来就不好认。
+		//   - **防重入**：界面每一帧问一次，不挡住的话一次播放能发几百个请求
+		//     （B 站会风控，而症状是「怎么问不出弹幕」）。
+		//   - **缓存**：7 天之内再进是瞬时的（不发请求），过期了会重新拉。
+		//   - **没有 cid**：快照为空，且**一个请求都不发**（本地文件和音乐库条目
+		//     走这一支，而它们永远没有弹幕）。
+		Spec: "弹幕：换歌之后旧的那一趟作废、界面每帧问一次只发一趟、7 天内再进是瞬时的（不发请求）、没有 cid 时快照为空且不发任何请求",
+		Tests: []string{
+			"TestALateDanmakuFromTheOldSongNeverLands",
+			"TestEveryFrameAsksButOnlyOneGoesOut",
+			"TestTheSecondTimeIsInstant",
+			"TestAnExpiredCacheIsFetchedAgain",
+			"TestNoCidMeansNoSnapshotAndNoRequest",
+			"TestSevenDaysLaterItIsGone",
+			"TestTheFileIsNamedAfterTheBvidAndTheCid",
+			// 生产那一档（真 `bili.Client`）：前面那些都替掉了那一趟。
+			"TestTheProductionPathActuallyAsksBili",
+			// 端到端：cid 是取流那一趟问出来的（搜索结果那一路）。
+			"TestTheDanmakuComesForASongWhoseCidHadToBeAsked",
+			// 评审提的三条：
+			//  - 同一个 bvid 的新选择（cid 还没问出来）不许拿上一分 P 的弹幕
+			//  - 同一个 key 上慢的那一趟不许盖掉新写的那份缓存
+			//  - Close 之后缓存不再被写
+			"TestReviewUnresolvedSameBVidShowsThePreviousPartsDanmaku",
+			"TestReviewAStaleSameKeyFetchOverwritesTheFreshCache",
+			"TestReviewCloseStillWritesTheCache",
+			// 同一个 bvid 的**另一分 P** 的在途那一趟也不许把自己的 cid 写上
+			// （bvid 对得上不够——多 P 的投稿 bvid 是同一个）。
+			"TestTheInFlightRunOfAnotherPartDoesNotWriteItsCid",
 		},
 	},
 	{
@@ -3726,12 +3859,12 @@ var Items = []Item{
 		// 白费了——**界面上看不出任何异样**。
 		Category: Play,
 		// 票 #366（2026-10-24）。
-		Spec: "下一首的流地址在当前这首快结束时就备好（只解析地址，不预下载字节）；真播下一首不再重新取流；手动切歌重新取；队列一改就作废；预取失败无声退回且不重试；地址快过期就放弃；暂停时不预取；备的和真播的是同一首（含随机模式）",
+		Spec: "下一首的流地址在当前这首快结束时就备好（只解析地址，不预下载字节）；真播下一首不再重新取流；手动按下一首也吃备好的那一份（票 #581）；队列一改就作废；预取失败无声退回且不重试；地址快过期就放弃；暂停时不预取；备的和真播的是同一首（含随机模式）",
 		Tests: []string{
 			// 主线：备好的那一份在切歌那一刻**被用掉**（取流接口的次数停在 2）。
 			"TestTheNextTrackIsPreparedBeforeTheSwitch",
-			// 手动切歌重新取地址（次数到 3）。
-			"TestAManualSwitchResolvesTheAddressAgain",
+			// 手动按下一首吃备好的那一份（次数停在 2，票 #581）。
+			"TestAManualNextUsesThePreparedAddress",
 			// 队列一改 → 已备好的立刻作废（会重新备一份）。
 			"TestReorderingTheQueueThrowsThePreparedAddressAway",
 			// 失败无声退回（真播时按正常路径取一次），且不会每 50ms 重试。
@@ -4006,6 +4139,78 @@ var Items = []Item{
 			"TestTheEnqueueNoticeIsOnlyForRandom",
 			"TestAddingASongInRandomModeSaysItWillPlayThisRound",
 			"TestAddingASongOutsideRandomModeSaysNothing",
+		},
+	},
+	{
+		// 票 #557：系统把一个音频文件交给本应用（双击、拖到程序坞图标）。
+		//
+		// 🔴 **这一族全是「静默」的坏法**：登记漏了、回调装晚了、扩展名对不上，
+		// 三样都不会报错——症状都是「双击一个文件，应用起来了而什么也没放」。
+		//
+		// ⚠️ **三份口径必须一样**：`mygo.json` 的 `fileAssociations`（系统按它
+		// 登记）、框架按它过滤命令行（`mygo/deeplink.go` 的 `fileArgs`）、界面
+		// 按它判收不收（`internal/platform` 的 `AssociatedAudioExts`）。
+		//
+		// ⚠️ **登记的那一份是「真放得出声」的那一份**，不是扫描白名单——
+		// 扫描白名单里有 `.wma`，而我们没有 ASF 解码器（PLAN §5.4）。
+		//
+		// ⚠️ **队列语义是行级「立即播放」那一档**：追加到队尾并打断，**不清空**
+		// 用户已经排好的队列（DESIGN.md §十第 4 条）。
+		Category: Platform,
+		Spec:     "系统把一个音频文件交给本应用：已有的实例被叫回，主窗打开并放它（追加队尾并打断，不清空队列），不起第二个实例；收不下的（文件不在了、不是普通文件、格式放不了）有可见提示，而且不打断正在放的那首",
+		Tests: []string{
+			// 登记的那一份（`internal/platform`）：内容、`.wma` 不在里面、
+			// 带点和不带点是同一个格式。
+			"TestTheAssociatedExtensionsAreThePlayableOnes",
+			"TestWMAIsNotAssociated",
+			"TestIsAssociatedAudioExtAcceptsBothSpellings",
+			"TestAudioExtOfTakesTheExtensionWithoutTheDot",
+			// `mygo.json` 与代码里那一份**是同一份**，且扩展名不带点
+			//（带点会被 MyGo 的配置校验器拒绝，打包在读配置那一步就失败）。
+			"TestMygoJSONDeclaresTheSameExtensions",
+			"TestMygoJSONExtensionsCarryNoDot",
+			"TestMygoJSONStillDeclaresTheURLScheme",
+			// 框架按什么过滤命令行里的文件（照抄框架那三行）。
+			"TestTheFrameworkFiltersCommandLineFilesByTheseExtensions",
+			// 界面那一半：放起来了、队列没被清空、界面说了话。
+			"TestOpeningAFilePlaysItAndKeepsTheQueue",
+			// 迷你开着时收到文件：让开迷你，主窗口上放。
+			"TestOpeningAFileMakesRoomForTheMainWindow",
+			// 回调在 `Run` 之前装上了（装晚了那一次就永远收不到）。
+			// ⚠️ **走生产那条安装点**（`installLifecycle`）：删掉它里面那一行
+			// → 这一条红（第二轮评审实测过：上一版这一条是手工装钩子、
+			// 手工调回调，删掉生产那一行照样绿）。
+			"TestTheOpenFileHookIsInstalledBeforeRun",
+			// 第二个实例把命令行转交过来那一档也装上了（它同样要认下框架
+			// 丢掉的那一部分）。
+			"TestTheSecondInstanceHookIsInstalledBeforeRun",
+			// 三种没收下要说成三件不同的事，而且不打断正在放的那首。
+			"TestCheckOpenFileTellsTheThreeRejectionsApart",
+			"TestOpeningAMissingFileSaysSoAndKeepsPlaying",
+			"TestOpeningAnUnsupportedFormatSaysSo",
+			"TestOpeningADirectorySaysSo",
+			// 「格式放不了」那一句要说清楚支持哪些格式。
+			"TestTheUnsupportedTextSaysWhichFormatsWeTake",
+			"TestTheMissingTextSaysTheFileIsGone",
+			// 🔴 **「看得见」那一条**：不是「状态里记着」，而是**画面上真的有**
+			//（`repaint` 那一格要了帧）。主窗口那一扇、迷你那一扇各断一遍——
+			// 迷你**不画 toast**，而它常常就是用户眼前那一扇。
+			"TestARejectedFileIsVisibleOnScreen",
+			"TestARejectedFileIsVisibleWithTheMiniPlayerOpen",
+			// 提示写进状态之后**自己会要一帧**（不然界面停在旧帧上）。
+			"TestTheToastIsPaintedOnTheNextFrame",
+			// 命令行那一侧：框架在 `OnOpenFile` 之前丢掉的那一部分，
+			// **我们自己在命令行这一侧认下来**，而用户看得见。
+			"TestTheFrameworkDropsThosePathsBeforeOnOpenFile",
+			"TestTheLaunchArgsPickUpWhatTheFrameworkDrops",
+			"TestTheCommandLineRejectionsAreVisible",
+			"TestTheSecondInstanceArgsAreCheckedForTheOnesTheFrameworkDrops",
+			// 框架会交的那些我们不重复处理（重复了队列里两份同一首歌）。
+			"TestALaunchArgThatTheFrameworkDeliversIsNotHandledTwice",
+			// ⚠️ **Windows 的盘符不是 scheme**：`C:\歌.flac` 被 `url.Parse`
+			// 认成 scheme `c`，而按 `u.Scheme != "file"` 判的话**整个
+			// Windows 的文件关联这一档会被自己扔掉**。
+			"TestTheLaunchArgKeepsTheWindowsDriveLetter",
 		},
 	},
 	{
