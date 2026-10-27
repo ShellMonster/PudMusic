@@ -13,6 +13,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -317,6 +318,77 @@ func TestQuittingWhileCheckingIsQuiet(t *testing.T) {
 	}
 	if n, _ := f.app.TakeUpdateNotice(); n != "" {
 		t.Errorf("退出之后留了提示 %q", n)
+	}
+}
+
+// 退出时**网络正好回来了**：相位一样不许停在「正在查」。
+//
+// 上面那条盯的是「查一半被取消」那一条路（`aborted` 分支）。这一条盯的是
+// **另一条**：网络在退出那一刻回来了，ctx **还没**被取消 ⇒ 那一趟算到的
+// `aborted` 是 false ⇒ 它走到 `switch { case u.closed: return }` ⇒
+// **相位留在「正在查」**。
+//
+// ⚠️ 那三个字是「等一会儿就好」，而此刻**已经没有什么会来了**——界面上那个
+// 按钮会永远转下去，用户能做的只有关掉应用（`TestQuittingWhileCheckingIsQuiet`
+// 的注释里说的就是这件事；它盯的是另一条路）。
+//
+// ⚠️ **这个窗口是真的**：它的长度取决于 `App.Close()` 的收尾有多久
+// （存播放位置、结束播放记录、关播放器、关弹幕、收下载…），而 `upd.close()`
+// 还**排在最后**——机器一忙，那个窗口就宽到后台那一趟能撞进来。
+//
+// 这里把那个窗口**固定住**：用假时钟的钩子 `u.now`（`check` 在算完
+// `aborted` 之后会调它）把这一趟**钉在**窗口里，再让 `Close` 插进来。
+func TestQuittingJustAsTheCheckComesBackIsQuiet(t *testing.T) {
+	f := newUpdFixture(t, "0.1.0", nil)
+
+	f.app.mu.Lock()
+	u := f.app.updates
+	f.app.mu.Unlock()
+
+	// 假时钟的钩子：当 `check` 算完 aborted、走到窗口里时，它会调 u.now()。
+	// 这里把它当成「进到窗口里了」的信号，并把它**钉住**，直到我们放行。
+	atWindow := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	u.mu.Lock()
+	u.now = func() time.Time {
+		once.Do(func() { close(atWindow) })
+		<-release
+		return time.Now()
+	}
+	u.mu.Unlock()
+
+	// 后台那一趟检查（`StartAutoChecks` 的第一件事就是 `u.check(false)`）。
+	stop := f.app.StartAutoChecks()
+	stop()
+
+	// 等它进到窗口里。
+	select {
+	case <-atWindow:
+	case <-time.After(5 * time.Second):
+		t.Fatal("后台那一趟没进到窗口里")
+	}
+
+	// 现在退出应用：它把 `u.closed` 立起来、取消 ctx，然后在 `checkWG.Wait()`
+	// 上等这一趟 check 收工（这一趟还钉在窗口里，所以 Close 会等它）。
+	closed := make(chan struct{})
+	go func() {
+		f.app.Close()
+		close(closed)
+	}()
+
+	// 让这一趟 check 走完剩下那半步 ⇒ 它撞上 `case u.closed`。
+	time.Sleep(200 * time.Millisecond)
+	close(release)
+
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close 没回来")
+	}
+
+	if got := f.snapshot().Phase; got == UpdateChecking {
+		t.Error("退出之后相位还停在「正在查」")
 	}
 }
 
