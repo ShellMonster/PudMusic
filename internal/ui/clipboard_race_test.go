@@ -158,8 +158,9 @@ func clipKind(clip *clipStub) (isImage bool, width int) {
 // 写进去什么，剪贴板里就是什么，后来的覆盖先来的。
 //
 // ⚠️ **它记下写的顺序**：判据要看的不只是「最后是什么」，还有「写了几次、
-// 什么顺序」——收敛那一档会**把新的一份再写一遍**（见 `copyClipboard.commit`），
-// 所以顺序是 `[text cover text]` 而最后是 `text`。
+// 什么顺序」——「盖掉了又改回来」那一套会**把新的一份再写一遍**，顺序于是是
+// `[text cover text]` 而最后是 `text`。而现在那一套**删掉了**：过时的内容
+// **压根不落地**，所以顺序里**不会**有过时的那一份。
 type clipSlot struct {
 	mu    sync.Mutex
 	value string
@@ -519,8 +520,8 @@ func TestACoverAlreadyInsideTheWriteDoesNotWinOverALaterText(t *testing.T) {
 			"——写的顺序：%v", got, slot.writes())
 	}
 	// ⚠️ **判据三：旧封面那一趟**一个字都没写**——不是「写进去又被改回来」。
-	// 而「收敛」那一套会写**三次**（`[text cover text]`）——那正是它造出来的
-	// 窗口。
+	// 而「盖掉了又改回来」那一套会写**两次**（`[text cover]`）——那正是它
+	// 造出来的窗口（中间那一瞬间剪贴板里是过时的那一份）。
 	writes := slot.writes()
 	if len(writes) != 1 || writes[0] != "text" {
 		t.Errorf("写的顺序是 %v，want [text]——"+
