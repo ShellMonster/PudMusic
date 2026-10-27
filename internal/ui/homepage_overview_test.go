@@ -45,7 +45,7 @@ func TestRenderHomeOverviewShots(t *testing.T) {
 	waitFrames(t, tt, "总览", func() bool { return showsText(tt, "排行榜") })
 	save(t, dir, "140-首页总览.png", tt)
 	tt.Scroll(700, 400, 0, 600)
-	waitFrames(t, tt, "迷你榜", func() bool { return showsText(tt, "查看全部") })
+	waitFrames(t, tt, "迷你榜", func() bool { return showsText(tt, "播放全部") })
 	save(t, dir, "141-首页总览-滚到榜单.png", tt)
 }
 

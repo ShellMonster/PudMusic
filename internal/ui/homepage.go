@@ -201,6 +201,8 @@ type homePage struct {
 	ovScroll ui.ScrollState
 	// heroIdx / heroAt 是轮播横幅当前停在第几张、什么时候换上的。
 	heroIdx int
+	// newOff 是新歌速递那一排从第几首起摆（点左右箭头翻页）。
+	newOff  int
 	heroAt  time.Time
 	ovWidth float32
 	// miniTop 是两张榜（热榜、原创榜）的前几名；miniLoaded 记着取它时榜上有几首。

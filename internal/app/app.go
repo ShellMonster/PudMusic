@@ -250,14 +250,15 @@ type State struct {
 
 // App 是应用的全部状态。
 type App struct {
-	mu       sync.Mutex
-	player   *audio.Player
-	title    string
-	path     string
-	cover    string
-	position time.Duration
-	duration time.Duration
-	volume   float64
+	mu           sync.Mutex
+	folderCovers folderCoverCache
+	player       *audio.Player
+	title        string
+	path         string
+	cover        string
+	position     time.Duration
+	duration     time.Duration
+	volume       float64
 	// muted 是「静音」这一档，和 volume 分开记（票 #311）。
 	//
 	// ⚠️ **它和 volume 必须是两件事**：静音的时候 volume 一动都不动——取消静音
