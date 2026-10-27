@@ -10,11 +10,13 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/media"
 	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/service/danmaku"
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
 )
@@ -616,6 +618,75 @@ type App struct {
 	// 把它取出来递给那个 goroutine，goroutine 不碰这个字段）。生产上永远是 nil。
 	likeFetch func(context.Context, string) (bili.ArchiveRelation, error)
 
+	// 弹幕这一摊，见 danmaku.go。挂上缓存之前 danmakuCache 是 nil。
+	//
+	// ⚠️ **它自己的锁，不在 `a.mu` 里**：理由和 `likeMu` 一样——写它的是网络
+	// 往返回来的那个 goroutine，而 `a.mu` 是播放器那一摊的（`Snapshot` 每帧都要
+	// 它）。弹幕区也是**每一帧**问一次的（`App.Danmaku`），混进 `a.mu` 的话，
+	// 界面那一帧的等待时间就变成了「网络那一趟」。
+	danmakuMu     sync.Mutex
+	danmakuCache  *danmaku.Cache
+	danmakuKey    string
+	danmakuItems  []DanmakuItem
+	danmakuErr    error
+	danmakuReady  bool
+	danmakuLoaded bool
+	danmakuWanted bool
+	// danmakuGen 是**弹幕代次**。每换一次歌（或换一次集）就加一，迟到的结果回来
+	// 发现代次变了直接走人（见 `finishDanmaku`）。
+	//
+	// ⚠️ **少了它的症状是「在听 B，滚着 A 的弹幕」**：慢一拍的那一趟回来时把
+	// 旧歌的弹幕装了上去，而用户看不出发生了什么。
+	danmakuGen int
+	// danmakuDropped 是**被丢掉的那一趟**的计数（代次对不上的那一种）。
+	//
+	// ⚠️ **它只是给测试看的**：被丢掉的那一趟**什么都不改**（状态没变，就不该
+	// 叫醒界面），于是从外面看不出来「它到底处理了没有」——测试要等的正是
+	// 「旧的那一趟已经走了，而新歌的弹幕没被盖掉」。
+	//
+	// ⚠️ **它是原子计数器**：它被后台那个 goroutine 加，而测试在另一个
+	// goroutine 里读它。
+	danmakuDropped atomic.Int64
+	// danmakuSeq 是**在途序号**。每发起一趟取弹幕就加一（**不管是哪一集**）。
+	//
+	// 🔴 **它挡的是「同一个 key 上慢的那一趟把新的盖掉」**：代次
+	// （`danmakuGen`）答的是「这一趟还属不属于当前这一集」，而写盘要挡的是
+	// 另一件事——同一个 key 上两趟先后写同一个文件，慢的那一趟写得更晚。
+	// 那一趟在**可见状态**上是按代次丢掉的，但它照样会写盘，于是盘上留下的是
+	// 旧的那一份。⇒ 只有**最后发起的那一趟**能写（见 `saveDanmakuCache`）。
+	//
+	// ⚠️ **它按 key 记**（`danmakuSeqs`）：全局的序号会把「另一集的新一趟」也
+	// 算成「比这一集新」，于是切到另一集之后，上一集那份就落不了盘了——而下次
+	// 进上一集就得重新拉一次（那就不是「7 天内再进是瞬时的」了）。
+	//
+	// ⇒ per-key：每个 key 记它**自己**最后发起的那一趟的序号。
+	danmakuSeq int
+	// danmakuSeqs 是**每个 key 最后发起的那一趟的序号**（见 `danmakuSeq`）。
+	//
+	// ⚠️ **写盘成功之后就把这一条删掉**：留着的话它会一直长（用户听过的每一集
+	// 都留一条）。删掉是安全的——任何旧的一趟的序号都大于 0，而删掉之后
+	// 「查不到」就等于「不是最新的一趟」，那些旧的一趟照样被挡住。
+	danmakuSeqs map[string]int
+	// danmakuWriteMu 是**写盘那把专锁**。它把「检查我是不是最新的一一趟」和
+	// 「真的写下去」包在同一个临界区里——分开的话，中间发起的新一趟会让旧的
+	// 那一趟以为自己还是最新的。
+	//
+	// ⚠️ **它不是 `danmakuMu`**：写盘是阻塞 IO，而 `danmakuMu` 是界面每一帧
+	// 都要的（`App.Danmaku`）。
+	//
+	// ⚠️ **它也是「退出前等在途写盘」那把锁**（见 `closeDanmaku`）：Close 持它
+	// 一下就是在途写盘结束的那一刻。
+	danmakuWriteMu sync.Mutex
+	// danmakuTriedAt 是上一次**发起**那一问的时刻，问失败之后拿它算退避
+	// （`danmakuRetryAfter`）。成功之后用不上——`danmakuLoaded` 已经挡住了。
+	danmakuTriedAt time.Time
+	// danmakuFetch 是取弹幕的那一趟，nil = 走取流零件上的 `bili.Client.Danmaku`。
+	//
+	// 和 `partsFetch` / `likeFetch` 同一条规矩：**只由界面那一侧读写**
+	//（`ensureDanmaku` 在那里就把它取出来递给那个 goroutine，goroutine 不碰这个
+	// 字段）。生产上永远是 nil。
+	danmakuFetch func(context.Context, string) ([]bili.Danmaku, error)
+
 	// 本地音乐库，见 localmusic.go。挂上去之前是 nil，界面要判空。
 	localMusic *localLibrary
 
@@ -1029,7 +1100,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 		//
 		// ⚠️ **说人话，不念英文系统错**：读屏软件是**逐字念**的，而
 		// `err.Error()` 是 "open /Users/x/a.m4a: no such file or directory"。
-		a.announce("播放失败：" + announceErrText(err))
+		a.announce("播放失败：" + FriendlyErrText(err))
 		if wake != nil {
 			wake()
 		}
@@ -1155,6 +1226,9 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	a.publishMedia()
 	// 歌词跟着换歌一起换：先重置成默认值，再从缓存恢复（见 lyrics.go）。
 	a.setLyricTrack(LocalItem(path))
+	// 弹幕也跟着换歌一起换（见 danmaku.go）：本地文件压根没有弹幕，所以旧的那
+	// 一份得**作废**——不清的话界面上会继续滚上一首的弹幕。
+	a.startDanmaku(LocalItem(path))
 	if wake != nil {
 		wake()
 	}
@@ -1504,6 +1578,10 @@ func (a *App) Close() {
 	}
 	// 歌词偏移/字号那一次防抖写可能还欠着，退出前落完。
 	a.closeLyrics()
+	// 弹幕那一摊也收掉：在途的那一趟回来时会发现代次变了，可见状态直接丢掉；
+	// 而**缓存写入**由 `closeDanmaku` 自己那把锁挡着（它等在途的写盘结束，
+	// 且之后不许再写）——代次只管可见状态，管不到写盘。
+	a.closeDanmaku()
 	// 下载要**停掉并落盘**。停掉是为了别让在飞的请求在应用退出时还在往盘上
 	// 写；落盘是因为队列文件是「下到哪儿了」的唯一一份，丢了用户重启就得
 	// 从头下。写失败不往上报错：退出路径上没有用户在看。

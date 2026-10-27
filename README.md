@@ -79,6 +79,12 @@ go build -trimpath -p 4 ./... && go vet -trimpath -p 4 ./... && go test -p 4 $(g
 
 - **本地音乐**：FLAC / MP3 / WAV / AIFF / AAC / M4A / OGG（容器→解码器的对应关系见
   `docs/experience/audio-stack.md`《支持哪些格式》）。
+- **双击打开**：双击本地音频文件（或者把文件拖到程序坞图标上）会用本应用打开——
+  已经在跑的那个实例被叫回、主窗打开并放这一首，**不会再起一个实例**。
+  登记给系统的那一份扩展名是 `.mp3 .flac .wav .m4a .aac .ogg .aiff .aif .aifc`
+  （`mygo.json` 的 `fileAssociations`），**不含 `.wma`**（我们没有 ASF 解码器，见
+  「已知边界」）；系统交来一个放不了的格式时，界面会说清楚「这个格式我们放不了」
+  并列出支持哪些，而不是静悄悄地什么都不做。
 - **B 站在线取流播放**：Hi-Res 无损（`dash.flac`，要大会员）与有损 AAC（`dash.audio`，
   最高 192K）；播放条上歌名右边的徽章点一下就能换档，换完按新档重新取流、从原位置接着播
   （见 `docs/experience/audio-stack.md`《在线音质怎么换档》）。
