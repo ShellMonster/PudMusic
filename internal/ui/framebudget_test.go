@@ -179,6 +179,12 @@ type budgetScreen struct {
 	name string
 	// budget 是这一块每一帧的分配上限。
 	budget frameBudget
+	// width / height 是这一块量的时候 Tester 的窗口尺寸。
+	//
+	// ⚠️ **0 = 1200×800**（默认那一档）。而迷你播放器那一档是 320×84
+	// （卷帘展开时是 320×320）——**窗口尺寸是这一档的一部分**：版面不同，
+	// 每帧建的东西也不同（歌词那一列建几行、卷帘那一块画多少）。
+	width, height int
 	// setup 把这一块摆成「用户看得见的样子」（造好外壳之后、量之前）。
 	setup func(t *testing.T, s *Shell, tt *mygoui.Tester)
 	// draw 是**只画这一块**的那一支（`withView` 用它替掉整窗）。
@@ -573,6 +579,119 @@ func budgetScreens() []budgetScreen {
 				}
 			},
 		},
+		{
+			// 迷你播放器：收着的那一档（320×84）。
+			//
+			// **为什么给它一档**：迷你窗**失焦照画**（面板语义，见
+			// `presence.go` 的 `freeWhileBlurred`），于是它是**唯一一档
+			// 「用户没在看它，它还在画」的界面**——而它的每一帧分配是**一直**
+			// 在付的（放在桌面上一天就是几十兆）。BMG-280 §7.6 记的就是这件事：
+			// 「迷你窗现在根本没有预算」。
+			//
+			// ⚠️ **窗口尺寸是 320×84**：这一档量的是**迷你窗自己**，而它的
+			// 版面（84 高、三行控件）就是那个尺寸下的版面——按 1200×800 量的话
+			// 量到的是「另一副样子」。
+			//
+			// ⚠️ **画的是 `viewMini` 那一支**（不是整窗）：迷你窗的 view 就是
+			// `s.draw`，而它已经被 `guardAt` 包过一层了。
+			//
+			// **基线（实测）**：**改动之前**（票 #536 之前的这一扇窗）每帧
+			// **30 次分配 / 697 字节**；**改动之后**是 **32 次 / 745 字节**——
+			// **多出来的那两次**是根从「一张 `Fill()` 的卡片」变成「Column +
+			// 84 高那一行 + 卷帘」之后多建的那些元素（根本身 + 84 高那一行
+			// 那个容器），而那多出来的 48 字节是同样那两三个元素。
+			//
+			// ⚠️ **这个数是三遍跑出来的同一个数**（2026-10-27：
+			// `GOGC=10 go test ./internal/ui/ -count=3 -run
+			// 'TestEachScreenStaysInsideItsFrameBudget/迷你播放器'` ⇒ 三遍都是
+			// **32 次 / 745 字节**）——而**它跟注释对不上过一次**（上一版这里
+			// 写的是「31 次 / 729 字节」，而实测是 32 / 745）。⇒ **注释里那个
+			// 基线要对着实测改**，不然它就在说假话（而它还要拿来推上限）。
+			//
+			// ⚠️ **卷帘收着的时候一个字都不画**（`viewMiniCurtain` 那一支：
+			// `h <= 0` 就返回）——所以收着这一档**量不到歌词区**。
+			// 「展开着」是**另一档**（下一条）。
+			//
+			// **为什么上限是 38 次 / 1100 字节**：次数只比基线多 6（分配次数有
+			// ±1 的**进程级**噪声，见文件头那一段，所以余量不能只有 1）——
+			// 而这一档的「一屏」小（84 高三行控件），一次「每帧重建一整份
+			// 列表」的回归就是十几次，38 拦得住；字节按基线的**一倍半**
+			// （745 × 1.5 ≈ 1118，取 1100）。
+			name: "迷你播放器",
+			budget: frameBudget{
+				allocs: 38,
+				bytes:  1100,
+				floor:  15,
+			},
+			width: miniWidth, height: miniHeight,
+			setup: func(t *testing.T, s *Shell, tt *mygoui.Tester) {
+				// ⚠️ **要有一首歌**：没有歌的时候那一屏画的是「没有歌」那一支
+				//（一个空状态），而真实场景里迷你窗停着的时候**放着一首歌**。
+				loadPausedTrack(t, s, tt)
+			},
+			draw: func(s *Shell) func(*mygoui.Context) {
+				return func(c *mygoui.Context) {
+					s.viewMini(c)
+				}
+			},
+		},
+		{
+			// 迷你播放器歌词卷帘：展开着的那一档（320×320 = 84 + 236）。
+			//
+			// ⚠️ **它是「另一条预算」而不是同一档**：卷帘展开的时候**每一帧
+			// 多画一整块歌词区**，而迷你窗又是失焦照画的那一扇——于是这一档
+			// 的成本是**一直**在付的。BMG-280 §7 的实测：迷你窗现状 24.1 次 /
+			// 613 字节，展开态 44.5 次 / 1362 字节（+85%）。
+			//
+			// ⚠️ **窗口高度是 320**（84 + 236）：而这一档量的是**内容画到哪儿**
+			// ——歌词区画出来的高度就是它（`viewMiniCurtain` 的 `Height(h)`）。
+			//
+			// ⚠️ **歌词要摆着**：卷帘那一块**每一帧重建歌词区**（逐句重建，
+			// 理由同满屏那一档），而没有歌词的时候画的是「暂无歌词」那一支——
+			// 量到的是**最便宜的那一档**。
+			//
+			// **基线（实测）**：每帧 **52 次分配 / 1465 字节**。而**收着**那一
+			// 档是 32 次 / 745 字节——所以**卷帘本身多出来的是 20 次 / 720
+			// 字节**（那一整块歌词区：十二句逐句重建 + 那一枚收起键）。
+			//
+			// ⚠️ **这个数也是三遍跑出来的同一个数**（2026-10-27：三遍都是
+			// **52 次 / 1465 字节**）——而上一版这里写的是「51 次 / 1449
+			// 字节」。⇒ 同上：**基线要对着实测改**。
+			//
+			// ⚠️ **和 BMG-280 §7 的探针数不一样**（那边量的是 44.5 次 / 1362
+			// 字节）：那一档量的是**迷你窗的整窗**（含窗口状态那些），而这里量
+			// 的是**`viewMini` 那一支**（隔离出来画）。两个数**不是同一个口径**
+			// ——这里记的是这一条测试自己的口径，前后可比。
+			//
+			// **为什么上限是 62 次 / 2200 字节**：次数只比基线多 10（一整份歌词
+			// 多画一次就是十二三次，62 拦得住；而分配次数有 ±1 的**进程级**
+			// 噪声，所以余量不能只有 1）；字节按基线的**一倍半**
+			// （1465 × 1.5 ≈ 2198，取 2200）。
+			name: "迷你播放器歌词卷帘",
+			budget: frameBudget{
+				allocs: 62,
+				bytes:  2200,
+				floor:  26,
+			},
+			width: miniWidth, height: miniHeight + miniCurtainH,
+			setup: func(t *testing.T, s *Shell, tt *mygoui.Tester) {
+				loadPausedTrack(t, s, tt)
+				s.app.PutLyrics(budgetLRC, "")
+				// ⚠️ **直接把卷帘撑开**：走「点封面」那一条要一整套点击 + 推钟，
+				// 而这一档要量的是**展开之后**的稳态。动画值直接钉到目标
+				// （`miniCurtainState.height` / `target`），于是每一帧画的都是
+				// 展开那一版。
+				s.miniCurtain.open = true
+				s.miniCurtain.target = miniCurtainH
+				s.miniCurtain.height = miniCurtainH
+				s.miniCurtain.animSeen = true
+			},
+			draw: func(s *Shell) func(*mygoui.Context) {
+				return func(c *mygoui.Context) {
+					s.viewMini(c)
+				}
+			},
+		},
 	}
 }
 
@@ -591,9 +710,13 @@ func TestEachScreenStaysInsideItsFrameBudget(t *testing.T) {
 		t.Run(sc.name, func(t *testing.T) {
 			// 只画这一块：整窗的分配里混着侧栏、顶栏和别的页面，超了以后
 			// 报不出「是哪一块多分配的」。
-			s, tt := newShell(t, reduceMotion(), withView(func(s *Shell) func(*mygoui.Context) {
+			opts := []shellOpt{reduceMotion(), withView(func(s *Shell) func(*mygoui.Context) {
 				return sc.draw(s)
-			}))
+			})}
+			if sc.width > 0 && sc.height > 0 {
+				opts = append(opts, at(sc.width, sc.height))
+			}
+			s, tt := newShell(t, opts...)
 			sc.setup(t, s, tt)
 
 			got := measureFrames(t, tt, budgetFrames)

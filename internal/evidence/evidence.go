@@ -4183,6 +4183,52 @@ var Items = []Item{
 		},
 	},
 	{
+		// 票 #536：迷你播放器点封面展开歌词卷帘。
+		//
+		// ⚠️ **这一组是「双平台」那一类**：它动的是**窗口**（改运行时尺寸）、
+		// **状态落盘**（`StateKey` 记宽高）和**设置**（那一格开关）。
+		//
+		// ⚠️ **下面那几条只断「我们交给框架的东西」**：无头 Tester 里**没有真
+		// 窗口**，所以量不到「窗真的变高了」「`window-state.json` 里真的写着
+		// 84」「卷帘真的被工作区夹住了」「Esc 到不到得了这一扇窗」——那四样
+		// 记在 `internal/ui/miniplayer_test.go` 末尾那一节「真窗口才量得到」
+		// 里（人工清单，不在台账里装）。
+		Category: Platform,
+		Spec:     "迷你播放器点封面展开歌词卷帘（点封面 / Esc / 收起键三条路都收；开关默认开着，关着时点封面什么也不发生；展开着时把开关关掉 ⇒ 立刻收起）",
+		Tests: []string{
+			// 展开 / 收起的三条路。
+			"TestTheMiniCurtainOpensWhenTheCoverIsClicked",
+			"TestTheMiniCurtainClosesWhenTheCoverIsClickedAgain",
+			"TestTheMiniCurtainClosesWithTheCollapseButton",
+			"TestTheMiniCurtainClosesWithEscape",
+			// 窗口高度 = 84 + 卷帘高（那一扇窗是透明的，多出来的那一块照样吃
+			// 点击）。
+			"TestTheMiniCurtainHeightFollowsTheAnimation",
+			// 设置开关：默认开着 / 关着时什么也不发生 / 展开着时关掉立刻收起 /
+			// 落盘。
+			"TestTheMiniLyricsCurtainSwitchIsOnByDefault",
+			"TestTheMiniCurtainSwitchIsOnTheSettingsPage",
+			"TestTheMiniCurtainDoesNothingWhenTheSwitchIsOff",
+			"TestTheMiniCurtainCollapsesWhenTheSwitchIsTurnedOff",
+			"TestTheMiniLyricsCurtainSwitchSurvivesARestart",
+			// 卷帘不超出工作区（纯逻辑那一半）。
+			"TestTheMiniCurtainIsClampedToTheWorkArea",
+			// 「立刻收起」真的是一下子到位（而不是先弹回 320 再滑下去）——
+			// 而那 240ms 里窗比内容高（透明的那一块在吃点击）。
+			"TestTheMiniCurtainCollapsesAtOnceWithoutBouncingBack",
+			// 窗口状态落盘：展开着关窗 ⇒ 落盘的尺寸是 320×84（`StateKey` 记
+			// 宽高，而抓的是关窗那一刻）。
+			"TestTheMiniCurtainLeavesACollapsedHeightInTheWindowState",
+			// 展开的那一下把键盘抢到这一扇窗上（不然 Esc 到不了它）。
+			"TestTheMiniCurtainFocusesItsWindowWhenItOpens",
+			// 兜底：应用真的成了前台的时候，再抢一次 key 窗口
+			// （`activateIgnoringOtherApps:` 是异步的，第一下可能落空）。
+			"TestTheMiniCurtainTakesTheKeyWindowWhenTheAppBecomesActive",
+			// 收起了就不再惦记抢键盘（不然用户在做别的事时会被抢走）。
+			"TestTheMiniCurtainStopsTakingTheKeyWindowAfterItCollapses",
+		},
+	},
+	{
 		// 票 #557：系统把一个音频文件交给本应用（双击、拖到程序坞图标）。
 		//
 		// 🔴 **这一族全是「静默」的坏法**：登记漏了、回调装晚了、扩展名对不上，
