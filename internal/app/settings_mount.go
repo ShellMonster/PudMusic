@@ -181,6 +181,16 @@ func (a *App) UpdateSettings(fn func(*Settings)) (Settings, error) {
 			a.startLoudnessScan(p, path)
 		}
 	}
+	// 音质跟着这一笔设置走（理由同上面的代理）：设置页换档也是「换档」，
+	// 正在放的那首要按新档重新取流——不然那一格只有重启才生效，是句空话。
+	//
+	// 🔴 **档位没变就不调**：`SetAudioQuality` 自己会把偏好写回设置
+	// （`rememberAudioQuality`），不拦的话换档 → 写设置 → 再换档绕圈。
+	// 没挂在线播放时 `AudioQuality()` 给的是零值（高品质），真调进去也会被
+	// 它自己的「没挂取流」早退挡住。
+	if q := PrefToBili(s.AudioQuality); a.AudioQuality() != q {
+		a.SetAudioQuality(q)
+	}
 	a.invalidate()
 	return s, nil
 }

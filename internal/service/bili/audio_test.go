@@ -218,7 +218,7 @@ func TestMusicStreamURLTakesTheDefaultTier(t *testing.T) {
 	exp := time.Now().Add(3 * time.Hour)
 	f, c := songURLClient(t, songURLDataFor(2, songURL("https://cdn.example", "a.m4a", exp)))
 
-	ref, err := c.AudioStreamURL(context.Background(), testSid, AudioAuto)
+	ref, err := c.AudioStreamURL(context.Background(), testSid, AudioHigh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestMusicStreamURLPutsTheBackupAfterTheMainAddress(t *testing.T) {
 	_, c := songURLClient(t, songURLDataFor(2,
 		songURL("https://a.example", "main.m4a", time.Now()),
 		songURL("https://b.example", "backup.m4a", time.Now())))
-	ref, err := c.AudioStreamURL(context.Background(), testSid, AudioAuto)
+	ref, err := c.AudioStreamURL(context.Background(), testSid, AudioHigh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +298,7 @@ func TestTheIdentityComesFromTheAnswerNotFromTheRequest(t *testing.T) {
 	d["sid"] = 9999999
 	_, c := songURLClient(t, d)
 
-	ref, err := c.AudioStreamURL(context.Background(), testSid, AudioAuto)
+	ref, err := c.AudioStreamURL(context.Background(), testSid, AudioHigh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +321,7 @@ func TestAnAnswerWithoutASidFallsBackToTheOneWeAsked(t *testing.T) {
 	d["sid"] = 0
 	_, c := songURLClient(t, d)
 
-	ref, err := c.AudioStreamURL(context.Background(), testSid, AudioAuto)
+	ref, err := c.AudioStreamURL(context.Background(), testSid, AudioHigh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +364,7 @@ func TestAMusicPreviewIsNeverHandedBackAsAStream(t *testing.T) {
 		writeJSON(w, musicEnvelope(t, 0, "success", d))
 	})
 
-	ref, err := f.client(t, Options{}).AudioStreamURL(context.Background(), testSid, AudioAuto)
+	ref, err := f.client(t, Options{}).AudioStreamURL(context.Background(), testSid, AudioHigh)
 	if err == nil {
 		t.Fatalf("把试听片段当成流发出去了：%+v", ref)
 	}
@@ -422,27 +422,70 @@ func TestAPaidSongFallsBackToAFreeTier(t *testing.T) {
 	}
 }
 
-// TestAskingForLosslessNeverSilentlyDowngrades 点名无损时**不许**退档。
+// TestAskingForLosslessFallsBackToAFreeTier 点名无损而这首没有：退到不用会员的
+// 那一档，**放出来**（票 #581）。
 //
-// 用户为无损付了钱，静默给他一段 192K 比报错糟得多。而且只发**一次**请求：
-// 再问一次就是拿「用户点了无损」当由头多要一次带签名的往返。
-func TestAskingForLosslessNeverSilentlyDowngrades(t *testing.T) {
+// 以前的规矩是「无损拿不到就报错」；报错等于这首歌放不出来，而退档放出来
+// 加一句提示是更好的答案。退档就是再问一次，所以这里是**两次**请求。
+func TestAskingForLosslessFallsBackToAFreeTier(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(pathSongURL, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("quality") == "3" {
+			// 要 FLAC（会员曲），拿回来的是试听片段。
+			d := songURLDataFor(-1, songURL("https://cdn.example", "preview.m4a", time.Now()))
+			d["size"], d["qualities"] = 0, paidSongQualities()
+			writeJSON(w, musicEnvelope(t, 0, "success", d))
+			return
+		}
+		if q.Get("quality") != "1" {
+			t.Errorf("退档退到了 %q，want 1（qualities 里不高于 FLAC 又不用会员的最好那一档）",
+				q.Get("quality"))
+		}
+		d := songURLDataFor(1, songURL("https://cdn.example", "full.m4a", time.Now()))
+		d["qualities"] = paidSongQualities()
+		writeJSON(w, musicEnvelope(t, 0, "success", d))
+	})
+
+	ref, err := f.client(t, Options{}).AudioStreamURL(context.Background(), testSid, AudioLossless)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Label != "192K" {
+		t.Errorf("徽章 = %q，want 192K（退到不用会员的那一档）", ref.Label)
+	}
+	if n := len(f.requests()); n != 2 {
+		t.Errorf("发了 %d 次请求，want 2（一次要、一次退档）", n)
+	}
+}
+
+// TestAskingForLosslessWithNowhereToFallBackStillSaysSo 退无可退还是要说清。
+//
+// 付费曲**每一档都要会员**（`qualities` 里没有一档不用会员）：退不动，落回
+// 「要会员才有完整版」——**不能**把试听片段当成流给出去，那首歌会在用户
+// 以为还没放完的地方停住。
+func TestAskingForLosslessWithNowhereToFallBackStillSaysSo(t *testing.T) {
 	f := newFakeBili(t)
 	f.on(pathSongURL, func(w http.ResponseWriter, r *http.Request) {
 		d := songURLDataFor(-1, songURL("https://cdn.example", "preview.m4a", time.Now()))
+		// 每一档都要会员：退无可退。
 		d["size"] = 0
+		d["qualities"] = []any{
+			musicQualityItem(3, 1), musicQualityItem(2, 1),
+			musicQualityItem(1, 1), musicQualityItem(0, 1),
+		}
 		writeJSON(w, musicEnvelope(t, 0, "success", d))
 	})
 
 	_, err := f.client(t, Options{}).AudioStreamURL(context.Background(), testSid, AudioLossless)
-	if !errors.Is(err, ErrNoStream) {
-		t.Fatalf("err = %v，want ErrNoStream（没有无损就报错，不要偷偷降级）", err)
+	if !errors.Is(err, ErrPreviewOnly) {
+		t.Fatalf("err = %v，want ErrPreviewOnly（试听片段不是整首，不能当流给出去）", err)
 	}
-	if !strings.Contains(err.Error(), "无损") {
-		t.Errorf("err = %v，那句话里要出现「无损」，用户才知道自己点的什么", err)
+	if !strings.Contains(err.Error(), "会员") {
+		t.Errorf("err = %v，那句话里要出现「会员」，用户才知道差在哪", err)
 	}
 	if n := len(f.requests()); n != 1 {
-		t.Errorf("发了 %d 次请求，want 1（点名的档没有就是没有，不退档）", n)
+		t.Errorf("发了 %d 次请求，want 1（每一档都要会员，没有可退的那一档）", n)
 	}
 }
 
@@ -478,7 +521,7 @@ func TestMusicStreamURLExpiresFromTheTimeout(t *testing.T) {
 	t.Run("地址上带 deadline 就用它", func(t *testing.T) {
 		deadline := time.Now().Add(90 * time.Minute)
 		_, c := songURLClient(t, songURLDataFor(2, songURL("https://cdn.example", "a.m4a", deadline)))
-		ref, err := c.AudioStreamURL(context.Background(), testSid, AudioAuto)
+		ref, err := c.AudioStreamURL(context.Background(), testSid, AudioHigh)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -488,7 +531,7 @@ func TestMusicStreamURLExpiresFromTheTimeout(t *testing.T) {
 	})
 	t.Run("只有 timeout 就加上去", func(t *testing.T) {
 		_, c := songURLClient(t, songURLDataFor(2, "https://cdn.example/a.m4a?upsig=x"))
-		ref, err := c.AudioStreamURL(context.Background(), testSid, AudioAuto)
+		ref, err := c.AudioStreamURL(context.Background(), testSid, AudioHigh)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -500,7 +543,7 @@ func TestMusicStreamURLExpiresFromTheTimeout(t *testing.T) {
 		d := songURLDataFor(2, "https://cdn.example/a.m4a?upsig=x")
 		d["timeout"] = 0
 		_, c := songURLClient(t, d)
-		ref, err := c.AudioStreamURL(context.Background(), testSid, AudioAuto)
+		ref, err := c.AudioStreamURL(context.Background(), testSid, AudioHigh)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -515,7 +558,7 @@ func TestMusicStreamURLExpiresFromTheTimeout(t *testing.T) {
 // B 站在稿件被删时会回 code 0 + 空 cdns（同一形态见 `quality.go` 的 `playable`）。
 func TestMusicStreamURLWithNoAddressIsNotAStream(t *testing.T) {
 	_, c := songURLClient(t, songURLDataFor(2))
-	_, err := c.AudioStreamURL(context.Background(), testSid, AudioAuto)
+	_, err := c.AudioStreamURL(context.Background(), testSid, AudioHigh)
 	if !errors.Is(err, ErrNoStream) {
 		t.Fatalf("err = %v，want ErrNoStream", err)
 	}
@@ -526,7 +569,7 @@ func TestMusicStreamURLRejectsABadID(t *testing.T) {
 	f := newFakeBili(t)
 	c := f.client(t, Options{})
 	for _, sid := range []string{"", "0", "-1", "  ", "abc"} {
-		if _, err := c.AudioStreamURL(context.Background(), sid, AudioAuto); err == nil {
+		if _, err := c.AudioStreamURL(context.Background(), sid, AudioHigh); err == nil {
 			t.Errorf("sid=%q 也放过去了", sid)
 		}
 	}
@@ -697,10 +740,10 @@ func TestStandardAndLowBothLandOnTheCheapestTier(t *testing.T) {
 	if got := MusicTierFor(AudioLossless); got != MusicTierFLAC {
 		t.Errorf("无损要的是 %v，want FLAC", got)
 	}
-	// 自动档**不冒然要无损**：拿不到那一档时 B 站回的是试听片段，而这一层
-	// 不知道这个号有没有会员。
-	if got := MusicTierFor(AudioAuto); got != MusicTier320 {
-		t.Errorf("自动档要的是 %v，want 320K", got)
+	// 🔴 **音乐库没有杜比这一档**：点名「杜比」在这条路上按 320K（最高有损）
+	// 要——点名的档没有就退到最高有损，和 `pickAudio` 那头同一个规矩（票 #581）。
+	if got := MusicTierFor(AudioDolby); got != MusicTier320 {
+		t.Errorf("杜比在音乐库要的是 %v，want 320K", got)
 	}
 }
 

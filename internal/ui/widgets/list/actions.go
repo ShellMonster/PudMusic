@@ -50,6 +50,10 @@ type Actions struct {
 	// 里打开 B 站。
 	Open func(item app.Item)
 
+	// Copy 把一段文字放进系统剪贴板（「复制歌曲信息」用）。为 nil 时那一项说一句
+	// 现在还不能用。
+	Copy func(text string)
+
 	// FavSelect 打开「把这一首放进哪些收藏夹」那个**选择弹窗**
 	// （`internal/ui/folderselect.go`）。
 	//
@@ -254,3 +258,16 @@ func OpenLabel(item app.Item) string {
 // 同一个地址，而两处各拼一遍的话，改了一处另一处就会打开一个打不开的页面
 // （症状是「点了没反应」，而界面上看不出任何异样）。
 func BiliLink(item app.Item) string { return app.BiliLink(item) }
+
+// SongInfoText 是「复制歌曲信息」放进剪贴板的那段话：第一行「歌名 - 歌手」，有 B 站
+// 地址的话第二行是地址。歌手空着就只写歌名。
+func SongInfoText(m Music) string {
+	text := m.Title
+	if m.Owner != "" {
+		text += " - " + m.Owner
+	}
+	if link := BiliLink(m.Item); link != "" {
+		text += "\n" + link
+	}
+	return text
+}

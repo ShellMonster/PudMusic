@@ -477,7 +477,8 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 	}
 	if !f.started && feed.loading {
 		// 一条都都没有：第一页在途。
-		s.viewLoading(c, "feed:loading", "正在加载动态…")
+		s.applyFrameTheme(c)
+		drawPostSkeletons(c, "feed:loading", "正在加载动态…")
 		return
 	}
 	// 🔴 **「一行都没有」也分两种**：没有下一页了 → 画空状态；**还有下一页**

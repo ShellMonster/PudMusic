@@ -98,6 +98,7 @@ func menuItems(m Music) []menuItem {
 		{key: "queue", label: "添加到队列"},
 		menuSeparator,
 		{key: "open", label: OpenLabel(m.Item)},
+		{key: "copy-info", label: "复制歌曲信息"},
 		menuSeparator,
 		{key: "favorite", label: "收藏"},
 		{key: "download-audio", label: "下载音频"},
@@ -218,6 +219,13 @@ func doAction(item menuItem, i int, song Music, acts Actions, playFrom func(int)
 		if acts.Open != nil {
 			acts.Open(song.Item)
 		}
+	case "copy-info":
+		if acts.Copy == nil {
+			notify(acts, "「"+item.label+"」现在还不能用", notice.Warning)
+			return
+		}
+		acts.Copy(SongInfoText(song))
+		notify(acts, "已复制歌曲信息", notice.Success)
 	case "favorite":
 		if acts.FavSelect == nil {
 			// 说清楚比按了没反应好。**话里带上用户按的那个字**：菜单有五项，

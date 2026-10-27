@@ -66,6 +66,10 @@ type biliFixture struct {
 	suggestFail  int
 	// videoPages 顶掉分 P 列表的回包。nil 是默认那**一集**。
 	videoPages []any
+	// viewPoints 是播放器信息接口（/x/player/wbi/v2）里 `view_points` 的回包
+	// （章节，票 #585）。nil = 没有章节。viewPointsCalls 数它被叫了几次。
+	viewPoints      []any
+	viewPointsCalls int
 	// served 数**已经回了**的搜索响应。放行一个卡住的响应之后靠它知道「旧的回去
 	// 了」——不等它的话，断言可能在那一趟还在网络上时就跑完了，看着全绿其实什么
 	// 都没验到。
@@ -185,6 +189,9 @@ func (f *biliFixture) serve(w http.ResponseWriter, r *http.Request) {
 
 	case r.URL.Path == "/x/player/pagelist":
 		f.serveVideoPages(w, r)
+
+	case r.URL.Path == "/x/player/wbi/v2":
+		f.serveViewPoints(w)
 
 	case r.URL.Path == "/x/player/wbi/playurl":
 		f.servePlayURL(w, r)
@@ -358,6 +365,30 @@ func (f *biliFixture) serveVideoPages(w http.ResponseWriter, r *http.Request) {
 func (f *biliFixture) setVideoPages(pages []any) {
 	f.mu.Lock()
 	f.videoPages = pages
+	f.mu.Unlock()
+}
+
+// serveViewPoints 回播放器信息接口的章节段（票 #585）。
+//
+// ⚠️ 响应的 `data` 是**data 段本身**（`Client.Do` 拆过壳了），view_points 就挂在
+// 它上面——没有章节的时候整个字段不给（B 站对没有章节的投稿就是这样）。
+func (f *biliFixture) serveViewPoints(w http.ResponseWriter) {
+	f.mu.Lock()
+	f.viewPointsCalls++
+	points := f.viewPoints
+	f.mu.Unlock()
+
+	data := map[string]any{"bvid": "BVchapters", "cid": 1}
+	if points != nil {
+		data["view_points"] = points
+	}
+	writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1, "data": data})
+}
+
+// setViewPoints 换掉章节段的回包（nil = 没有章节）。
+func (f *biliFixture) setViewPoints(points []any) {
+	f.mu.Lock()
+	f.viewPoints = points
 	f.mu.Unlock()
 }
 

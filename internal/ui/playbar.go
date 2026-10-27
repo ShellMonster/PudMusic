@@ -524,103 +524,25 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 		if st.Err == "" {
 			s.errDetailOpen = false
 		}
-		// 它们的优先级是**错 > 重连 > 取流 > 停住**：
+		// 它们的优先级是**错 > 重连 > 停住**：
 		//
 		//	出错		一句错比一枚转圈信息量大，而转圈还在转说明还有希望
-		//	正在重连	这一首断了，我在救它——比笼统的「在准备」具体
-		//	正在取流	这一首还没放起来（上一首还在放）
+		//	正在重连	这一首断了，我在救它——比「停住了」具体
 		//	停住了	播放器在、只是不响了
 		//
-		// 它们不会同时有——出错时播放器压根没有、正在取流时上一首还在放、
-		// 而停住了说明播放器在、只是不响了。
+		// 🔴 **取流不在这一排里**（票 #581）：取流的反馈只有播放键上那一圈光
+		// （`loadhalo.go`），这一行不说话——出错时播放器压根没有、重连时上一首
+		// 停着，而停住了说明播放器在、只是不响了；取流的时候上一首还在放，
+		// 这一行为空正好不打扰。
 		switch {
 		case st.Err != "":
 			s.viewTrackError(c, st, t)
 		case st.Reconnecting:
 			s.viewTrackReconnecting(c, st, t)
-		case st.Loading:
-			s.viewTrackLoading(c, st, t)
 		case st.Stopped:
 			s.viewTrackStopped(c, st, t)
 		}
 	})
-}
-
-// viewTrackLoading 是播放条上「正在取流」那一句话（前面带一枚转圈）。
-//
-// # 为什么要有这一句
-//
-// 在线流要跑一趟网络（取流 + 开解码器），那一趟里界面上什么都不会变——
-// 歌名还是上一首的，进度条不动，也没有声音。用户看到的就是「点了没反应」
-// （票 #282 的现象：一直转圈、也不说为什么）。
-//
-// 这一句说的是「**在准备了**」，而转圈说的是「**还在等**」。两句合起来用户
-// 才知道自己没有按错，也知道要等多久（超过阈值会换成一句失败的话）。
-//
-// ⚠️ **它是灰字，不是红字**：红字是「出错了」，而这一句是「还没好」。两者的
-// 语气不一样，用户读到红色会以为已经完了。
-//
-// 🔴 **那枚转圈在这里，不在播放/暂停那一枚上**（票 #282 的评审）：取流这一趟
-// 里**上一首还在放**，把那一枚换成转圈的话用户就按不了暂停了。
-//
-// 🔴 **票 #271 又在播放键上**加了一层**光**（不是把这一枚换成转圈）：那一
-// 圈光绕着键转，说的是「**这一枚正在准备**」——按钮还在、还是播放 / 暂停、
-// 照样按得下。这一句说的是「**哪一首在准备、卡在哪一步**」，两者说的不是
-// 同一件事，所以都留（理由见 `loadhalo.go`）。
-//
-// # 🔴 **慢的时候换一句**（票 #220）
-//
-// 「正在取流：<歌名>」说的是「**在准备**」，而用户抱怨的是「**非常慢**」——
-// 那一句从头到尾不变，他等三秒和等三十秒看到的都是同一句，于是「慢」这件事
-// 在界面上**根本不存在**。
-//
-// 所以慢的时候屏幕上换成「取流很慢：<歌名>」：
-//
-//	一样长	「正在取流：」和「取流很慢：」都是五个字，歌名那一截的长度不变
-//	多一件事	用户第一次知道「它慢」——而他等下去是有理由的
-//
-// ⚠️ **完整那一句在悬停提示里**（和错误那一栏同一个做法）：那里说清
-// **卡在哪一步**（「问地址」/「下音频」/「解码」）和**等了多久**——那才是
-// 用户能据此判断「再等等」还是「换一首」的东西。
-//
-// 🔴 **这一句留着，而播放键上那圈光也留着**（票 #271）：两者说的不是同一
-// 件事——这一句是**说明**（哪一首、卡在哪一步、等了多久），光圈是**即时
-// 反馈**（余光就能看见「在准备」）。理由见 `loadhalo.go` 的「第三行那句话
-// 留着」那一节。
-func (s *Shell) viewTrackLoading(c *ui.Context, st app.State, t *ui.Theme) {
-	msg := "正在取流"
-	if st.LoadingSlow {
-		msg = "取流很慢"
-	}
-	if st.LoadingTitle != "" {
-		msg += "：" + st.LoadingTitle
-	}
-	// 悬停提示里说清**卡在哪一步**、**等了多久**。
-	tip := msg
-	if st.LoadingStage != "" {
-		tip = fmt.Sprintf("正在取流《%s》：现在卡在「%s」这一步，已经等了 %s。网络慢的时候先等等，或者点「重试」再试一次。",
-			st.LoadingTitle, st.LoadingStage, loadingWaitText(st.LoadingWait))
-	}
-	ui.Row(c).Gap(space.Px4).AlignItems(ui.Center).Children(func() {
-		// ⚠️ **转圈的无障碍名字就是「正在取流」**：转圈没有可见的字，而它是
-		// 唯一能认出「这里在等」的凭据（无头 Tester 也只认字和名字）。
-		ui.Spinner(c).Size(loadingLineSpinnerSize, loadingLineSpinnerSize).Label("正在取流")
-		// ⚠️ **一行 + 省略号，和错那一行同一个理由**（见 `viewTrackError`）：
-		// 76 高的播放条放不下两行，而超长的歌名会把这一行挤没。
-		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
-			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").Grow(1), tip)
-	})
-}
-
-// loadingWaitText 把「等了多久」说成一句人话。
-//
-// ⚠️ **不足一秒说「不到 1 秒」而不是「0 秒」**：「0 秒」读起来像「没等」，
-// 而那一刻用户其实已经等了一会儿了。
-func loadingWaitText(d time.Duration) string {
-	if d < time.Second {
-		return "不到 1 秒"
-	}
-	return fmt.Sprintf("%d 秒", int(d.Round(time.Second)/time.Second))
 }
 
 // viewTrackReconnecting 是播放条上「正在重连」那一句话（前面带一枚转圈）。
@@ -658,7 +580,7 @@ func (s *Shell) viewTrackReconnecting(c *ui.Context, st app.State, t *ui.Theme) 
 	ui.Row(c).Gap(space.Px4).AlignItems(ui.Center).Children(func() {
 		// ⚠️ **转圈的无障碍名字就是「正在重连」**：转圈没有可见的字，而它是
 		// 唯一能认出「这里在等」的凭据（无头 Tester 也只认字和名字）。
-		ui.Spinner(c).Size(loadingLineSpinnerSize, loadingLineSpinnerSize).Label("正在重连")
+		ui.Spinner(c).Size(statusLineSpinnerSize, statusLineSpinnerSize).Label("正在重连")
 		// ⚠️ **一行 + 省略号，和「正在取流」那一句同一个理由**。
 		s.withTip(c, ui.Text(c, msg).FontSize(scale.Font(c, scale.Size12)).
 			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").Grow(1), tip)
@@ -1042,7 +964,7 @@ func (s *Shell) viewDownloadButton(c *ui.Context, st app.State) {
 
 // viewQualityBadge 是歌名右边那个音质徽章（「Hi-Res 无损」/「192K」）。
 //
-// 它同时是**换音质的入口**：点一下开菜单，五档里选一档。
+// 它同时是**换音质的入口**：点一下开菜单，几档里选一档。
 //
 // 为什么是徽章而不是另摆一个控件：播放条只有 76 高，左右两边（进度条、音量、
 // 加歌）都已经占满了，而「我在放的是哪一档」这件事用户本来就在看这行字。
@@ -1087,24 +1009,51 @@ func (s *Shell) viewQualityBadge(c *ui.Context, st app.State, t *ui.Theme) {
 		Menu(func(m *ui.Menu) {
 			for _, q := range qualityChoices {
 				// `Checked` 是「当前选的是这一档」。选的和给的要能分开看：
-				// 降级发生的时候，用户要能看见自己选的和系统给的不是同一档。
+				// 降档发生的时候，用户要能看见自己选的和系统给的不是同一档。
 				if m.Item(q.Label()).
 					Checked(app.BiliToPref(q) == st.QualityPref).
 					Chosen() {
-					s.app.SetAudioQuality(q)
+					// 🔴 **点的就是当前这一档时什么都不做**：换档要重新取流，
+					// 为一个听不出区别的点击打一次网络往返是白费；下面的降档
+					// 提示也只在真的换了档的时候说。
+					if app.BiliToPref(q) != st.QualityPref {
+						s.app.SetAudioQuality(q)
+						qualitySwitchToast(s, q)
+					}
 				}
 			}
 		})
 }
 
-// qualityChoices 是徽章菜单里的五档。
+// qualitySwitchToast 在用户**切到无损 / 杜比**的那一下说一句降档规矩（票 #581）。
 //
-// 顺序从「交给 B 站决定」到「省流量」，和设置里那份一致。标签取自
+// 🔴 **只在切换那一下说，不是每放一首歌都说**：点名的档这一首没有时，取流那层
+// 自动退到最高有损（`bili.pickAudio`），照样放出来——有没有退档，看播放条上的
+// 音质徽章就知道（它显示的就是实际拿到的那一档）。每放一首歌都念一句「可能会
+// 降档」是噪音。
+//
+// 🔴 **只有无损 / 杜比要说**：这两档不是每首都有；有损三档（高/中/低）B 站
+// 基本每首都有，为它们说「可能降档」没有信息量。中/低档偶尔真的没有，那种
+// 情况徽章自己会变。
+func qualitySwitchToast(s *Shell, q bili.AudioQuality) {
+	switch q {
+	case bili.AudioLossless:
+		s.addToast("已选无损：有些歌没有无损，会自动降档播放", notice.Success)
+	case bili.AudioDolby:
+		s.addToast("已选杜比全景声：有些歌没有杜比，会自动降档播放", notice.Success)
+	}
+}
+
+// qualityChoices 是徽章菜单里的几档（票 #581 起：无损/杜比/高品质/中等/
+// 低品质，**没有「自动」**——默认就是高品质，点名的档拿不到时自动退到
+// 最高有损）。
+//
+// 顺序从「最费流量」到「省流量」，和设置里那份一致。标签取自
 // `bili.AudioQuality.Label`——那是「用户要什么」的说法，不是「B 站给了什么」
-// （后者是徽章），两者混起来就看不出有没有降级。
+// （后者是徽章），两者混起来就看不出有没有降档。
 var qualityChoices = []bili.AudioQuality{
-	bili.AudioAuto,
 	bili.AudioLossless,
+	bili.AudioDolby,
 	bili.AudioHigh,
 	bili.AudioMedium,
 	bili.AudioLow,
@@ -1231,7 +1180,7 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 	//
 	// `queue_drawer.go` 的 `viewQueueRow` 本来就是这个形状——可点的行是封面的
 	// **祖先**，所以那边浮层里画 ▶ 还是 ⤢ 都吃不掉点击。
-	wrap := ui.Row(c).Key("playbar-cover").Size(coverSize, coverSize)
+	wrap := ui.Row(c).Key("playbar-cover").Size(coverSize, coverSize).ContextMenu(s.coverMenu)
 	wrap.Children(func() {
 		// 共享元素转场留在里面那张图上（它才是转场的那一半）。
 		//
@@ -1461,12 +1410,16 @@ func (s *Shell) pickAndEnqueue() {
 // 自己撑开、**不换行**（进度条短一点，那一档的例外）。
 func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 	known := st.Duration > 0
+	chs := st.Chapters
 
 	ui.Row(c).Gap(space.Px10).AlignItems(ui.Center).WidthPercent(75).Children(func() {
 		ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, scale.Size14)).TextColor(c.Theme().TextMuted).
 			MinWidth(48).MaxLines(1)
 
 		sl := playbarProgressSlider(c, &s.scrub, 0, 1).Grow(1).Label("播放进度").Disabled(!known)
+		// 章节点画在滑块自己的画法之上（`DrawOver`；pad 是旋钮留在轨道里的
+		// 那半个宽 8，点比 4 像素的轨道粗 3——票 #585）。
+		sl = withChapterDots(sl, chs, st.Duration, 8, 7, c.Theme().Background)
 		// ⚠️ 这里必须用 Pressed()，不能用 Dragging()。
 		//
 		// Dragging() 报的是「这个控件正在拖一个值 / 正在被拖动」（Drag 与
@@ -1477,10 +1430,13 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 		switch held := sl.Pressed(); {
 		case held && !s.held:
 			s.held = true
+			// 记下按下那一帧的指针和位置：松手时拿它们分「点 / 拖」。
+			s.scrubPressX, _, _ = sl.PointerPosition()
+			s.scrubPressPos = st.Position
 			s.app.ScrubStart()
 		case !held && s.held:
 			s.held = false
-			s.app.ScrubEnd(s.scrub)
+			s.app.ScrubEnd(snappedScrub(sl, s.scrub, s.scrubPressX, s.scrubPressPos, st.Duration, chs))
 		case !s.held && known:
 			// 松手之后进度条跟着播放器走。
 			s.scrub = float64(st.Position) / float64(st.Duration)
