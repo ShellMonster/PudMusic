@@ -40,9 +40,10 @@ const (
 	homeOverviewGap     = 28
 	homeOverviewCellGap = 16
 
-	homeTileH     = 84
-	homeMiniRowH  = 56
-	homeMiniCover = 40
+	homeTileH      = 84
+	homeBoardHeroH = 112
+	homeMiniRowH   = 56
+	homeMiniCover  = 40
 )
 
 // homeStartsOnOverview 说应用打开时首页是不是先停在总览。生产里恒为 true；

@@ -593,8 +593,21 @@ func (h *homePage) viewBoardCaption(c *ui.Context, tab int) {
 	if text == "" {
 		return
 	}
-	ui.Text(c, text).Key("home:board:caption").FontSize(scale.Font(c, scale.Size13)).
-		TextColor(c.Theme().TextMuted).MaxLines(1)
+	// 榜单头图：和总览上那张磁贴同一套渐变，大字榜名 + 期数更新日期，
+	// 让二级页一眼认得出是从哪张磁贴进来的。
+	var from, to ui.Color
+	for _, tile := range homeTiles {
+		if tile.tab == tab {
+			from, to = tile.from, tile.to
+		}
+	}
+	t := c.Theme()
+	ui.Column(c).Key("home:board:hero").FillWidth().Height(homeBoardHeroH).Radius(t.Radius+4).
+		Gradient(from, to, 135).Padding(space.Px16, space.Px24).Justify(ui.Center).Gap(space.Px6).Children(func() {
+		ui.Text(c, homeTabs[tab]).FontSize(scale.Font(c, scale.Size28)).Bold().TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(1)
+		ui.Text(c, text).Key("home:board:caption").FontSize(scale.Font(c, scale.Size13)).
+			TextColor(ui.RGBA(255, 255, 255, 0.82)).MaxLines(1)
+	})
 }
 
 // viewTabs 画那三个 Tab 和「全部播放」。
