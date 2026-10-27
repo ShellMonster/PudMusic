@@ -6,6 +6,11 @@ PudMusic 使用 Go 和 [MyGo](https://github.com/egoist/mygo) 原生 UI 构建�
 
 > 项目仍在持续开发中。功能、平台支持和安装包状态会随版本变化。
 
+**页面不是空壳**：应用里的 15 条路由有 14 条接上了真实内容，剩下的那一条是
+`/empty`（空状态落地页，按设计就该是空的）。哪一页有没有接上真数据由
+`internal/ui/realdata_test.go` 钉着，不是靠谁记得；而本文这一句里的那个 14 也由
+同一条测试回头核着——加了一页却忘了改这几处说明，`go test` 会当场红。
+
 [下载 Releases](https://github.com/ShellMonster/PudMusic/releases) · [报告问题](https://github.com/ShellMonster/PudMusic/issues)
 
 ## 界面预览

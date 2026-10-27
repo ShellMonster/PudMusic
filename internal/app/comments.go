@@ -67,7 +67,12 @@ type (
 	//
 	// ⚠️ **那个 `next` 是偏移量（字符串），不是 `cursor.next`**——理由见
 	// `bili.CommentList` 的注释与 `bili.CommentPage.NextOffset`。
-	commentsListFetchFunc func(context.Context, int64, int64, string) (bili.CommentPage, error)
+	//
+	// 🔴 **那个 `mode` 是排序档**（`bili.CommentSort` 的值）：界面上要能切
+	// 「热门 / 最新」两档，而两档给的是**两份不同的评论**。签名里没有它的话，
+	// 替身（测试里的假 B 站）就看不见用户到底要了哪一档——那样「切档」这件事
+	// 在数据层根本验不了。
+	commentsListFetchFunc func(context.Context, int64, int64, int, string) (bili.CommentPage, error)
 	// commentsRepliesFetchFunc 是问一层楼中楼那一趟。
 	commentsRepliesFetchFunc func(context.Context, int64, int64, int64) ([]bili.Comment, error)
 	// commentsArchiveIDFetchFunc 是 bvid → avid 那一趟。
@@ -112,6 +117,146 @@ func (a *App) CommentsWorthAsking() bool {
 		return false
 	}
 	return commentSlotKey(it) != ""
+}
+
+// CommentsSort 报当前这一首的评论按**哪一档**排。
+//
+// 🔴 **它只有两档**（`bili.CommentSorts()`）：「热门评论」（`mode=3`）和
+// 「最新评论」（`mode=2`）。
+//
+// ⚠️ **「评论」（`mode=1`）那一档不在里面**：实测它给的是「最新评论」的
+// **同一份内容**（逐条比过 rpid），而 B 站的 `cursor.support_mode` 恒为
+// `[2, 3]` 不含它——摆成两个档的话，用户切过去看到**一模一样的内容**，于是
+// 以为「切了档但没生效」（理由见 `bili.CommentSortDefault` 的注释）。
+func (a *App) CommentsSort() bili.CommentSort {
+	a.commentsMu.Lock()
+	defer a.commentsMu.Unlock()
+	return a.commentsSortLocked()
+}
+
+// commentsSortLocked 报当前那一档。**零值 = 「还没设」= 最热那一档**。
+//
+// ⚠️ 零值不是「没有排序」：B 站不认 `mode=0`（它会当成 `mode=3` 处理），
+// 而「没指定」要落到一个**认得出来的**档上（见 `bili.normalizeCommentMode`）。
+func (a *App) commentsSortLocked() bili.CommentSort {
+	if a.commentsSortMode == 0 {
+		return bili.CommentSortHot
+	}
+	return bili.CommentSort(a.commentsSortMode)
+}
+
+// SetCommentsSort 换评论的排序档。**立刻返回**（那一趟在后台跑）。
+//
+// 换完**第一屏重新从第一条开始**：已经拿到的那些是上一档的，清掉重拉。
+//
+// 🔴 **只认 `bili.CommentSorts()` 里那两档**：给别的（特别是 `mode=1`）就
+// 当没给——理由见 `CommentsSort` 的注释（那一档和「最新」是同一份内容，
+// 而 B 站已经不给它能用的游标了）。
+//
+// ⚠️ **换档之后缓存要按档分**：同一个对象的两档是两份不同的评论，而缓存的
+// 键只有 type + oid（理由见 `service/comments` 的 `Entry.Sort`）。
+func (a *App) SetCommentsSort(sort bili.CommentSort) {
+	if !commentsSortAllowed(sort) {
+		return
+	}
+	it, ok := a.CurrentItem()
+	if !ok {
+		return
+	}
+	slot := commentSlotKey(it)
+	if slot == "" {
+		return
+	}
+
+	a.commentsMu.Lock()
+	if a.commentsSortLocked() == sort && a.commentsSlot == slot {
+		// 已经是这一档了，而且这一份就是这一档的 ⇒ 什么都不用做。
+		//
+		// ⚠️ **别在这里重拉一遍**：用户连点两下同一档，那两下会各发一趟，
+		// 而界面上的差别是零。
+		a.commentsMu.Unlock()
+		return
+	}
+	a.commentsSortMode = int(sort)
+	// 🔴 **整个清空**：已经拿到的那些是**上一档**的评论（两份不同的内容），
+	// 留着的话界面上会出现「切了档但前几屏还是上一档的」。
+	//
+	// ⚠️ **代次也一起加**（`resetCommentsLocked` 里做的）：上一档那一趟还在
+	// 路上，它回来的时候对不上代次，直接丢掉。
+	a.resetCommentsLocked(slot)
+	a.commentsMu.Unlock()
+
+	// 走一遍正常那条路（这一趟发出去，在后台跑——铁律三：view 里不许发请求）。
+	a.ensureComments(it, slot)
+}
+
+// commentsSortAllowed 报这一档是不是界面上该摆的那两档之一。
+func commentsSortAllowed(sort bili.CommentSort) bool {
+	for _, s := range bili.CommentSorts() {
+		if s == sort {
+			return true
+		}
+	}
+	return false
+}
+
+// CommentsLoading 报「有一趟评论正在路上」。
+//
+// 界面上拿它说「正在拉…」：翻页那一趟发出去之后到它回来之前，末尾那一行
+// 转着的圈就是它。
+func (a *App) CommentsLoading() bool {
+	a.commentsMu.Lock()
+	defer a.commentsMu.Unlock()
+	return a.commentsWanted
+}
+
+// CommentsHasMore 报「后面还有没有」。
+//
+// ⚠️ **它是 B 站给的那一句**（`cursor.is_end`），不是「我们拿到多少条」——
+// B 站说到底了就是到底了，而我们手上的条数可能比它少（分页只取了一部分）。
+//
+// ⚠️ **还没问到的时候它是真的**（B 站还没说「到底了」）：所以界面上的
+// 「加载更多」那一行在第一页回来之前就在那儿——那一行说的正是「正在问」。
+func (a *App) CommentsHasMore() bool {
+	a.commentsMu.Lock()
+	defer a.commentsMu.Unlock()
+	return !a.commentsIsEnd
+}
+
+// CommentsLoaded 报「已经拿到过至少一页评论」。
+//
+// ⚠️ **「一条评论都没有」也算拿到过**：那一档界面上的说法是「还没有人
+// 评论」，而它**是问出来了**（B 站说这一首还没有人评论）——不是「还没问过」。
+//
+// 它是界面层「保障①首次渲染检查」的输入（见
+// `internal/ui/widgets/list/paged.go` 的 `DecideFirstPage`）：拿到过就不用再问
+// 第一页。
+func (a *App) CommentsLoaded() bool {
+	a.commentsMu.Lock()
+	defer a.commentsMu.Unlock()
+	return a.commentsLoaded
+}
+
+// EnsureComments 保证正在问 / 已经问过当前这一首的评论。
+//
+// 🔴 **它是界面层那一半的出口**：界面（`internal/ui/comments.go`）只判
+// 「该不该问」（那一层每帧的副作用，`pageSyncs`），真正发出去的是这里——
+// 铁律三：view 里不发网络请求。
+//
+// ⚠️ **重复调它没有副作用**：内部已经判过「问过了 / 正在问」，
+// 而且失败之后有 15 秒退避（`ensureComments`）——所以界面每一帧调一次
+// 也没关系。
+func (a *App) EnsureComments() {
+	it, ok := a.CurrentItem()
+	if !ok {
+		return
+	}
+	slot := commentSlotKey(it)
+	if slot == "" {
+		// 这一首没有可问的评论（本地文件）——一个请求都不发。
+		return
+	}
+	a.ensureComments(it, slot)
 }
 
 // Comments 返回当前这一首的评论，顺手把没取过的那一次取回来。
@@ -181,6 +326,25 @@ func (a *App) CommentsAllCount() int64 {
 	return a.commentsAllCount
 }
 
+// CommentsSlot 报「当前这一首的评论」的槽位键。
+//
+// ⚠️ **界面层要它，是因为它得知道「换歌了没有」**：评论正文按 rpid 记着一份
+// 排版缓存，而**rpid 会在两首歌之间撞号**（它只是个 int64）——不按槽位清，
+// 上一首的排版就贴到这一首的评论上。
+//
+// 空串 = 「当前这一首没有可问的评论」（本地文件 / 没有歌）。
+//
+// 🔴 **口径只有这一处**（`commentSlotKey`）：界面层**不许**自己再写一份
+// ——两份口径一旦分叉，表现是「界面上在清缓存、应用层没清」，而症状只是
+// 「偶尔有一条评论的排版是错的」。
+func (a *App) CommentsSlot() string {
+	it, ok := a.CurrentItem()
+	if !ok {
+		return ""
+	}
+	return commentSlotKey(it)
+}
+
 // LoadMoreComments 按游标翻下一页。**发出去那一趟就返回 true**。
 //
 // 已经在翻、或者已经到底了，都给 false（界面上的「加载更多」据此按成不可用）。
@@ -225,6 +389,9 @@ func (a *App) LoadMoreComments() bool {
 	a.commentsWanted = true
 	a.commentsMoreTriedAt = time.Now()
 	gen := a.commentsGen
+	// 🔴 **排序档在这里取一份**：它由界面线程写（`SetCommentsSort`），而
+	// goroutine 去读它就是数据竞争（铁律一）。理由同 `next`。
+	mode := int(a.commentsSortLocked())
 	next := a.commentsNext
 	// 🔴 **在途序号**：翻页也是一趟，也要占一个序号（理由见 `ensureComments`）。
 	//
@@ -241,7 +408,7 @@ func (a *App) LoadMoreComments() bool {
 	// ⚠️ **替身函数在这里就取出来**（界面那一侧），goroutine 不碰那些字段——
 	// 和 `partsFetch` 同一条规矩（理由见 app.go 里那一段的注释）。
 	listFetch, archiveFetch := a.commentsListFetch, a.commentsArchiveIDFetch
-	go a.loadComments(it, slot, gen, seq, next, true, listFetch, archiveFetch)
+	go a.loadComments(it, slot, gen, seq, mode, next, true, listFetch, archiveFetch)
 	return true
 }
 
@@ -394,6 +561,9 @@ func (a *App) ensureComments(it Item, slot string) {
 	// 清掉上一次的失败原因：这一趟正在问，界面上那句「问不出评论」就该撤了。
 	a.commentsErr = nil
 	gen := a.commentsGen
+	// 🔴 **排序档在这里取一份**：它由界面线程写（`SetCommentsSort`），而
+	// goroutine 去读它就是数据竞争（铁律一）。
+	mode := int(a.commentsSortLocked())
 	// 🔴 **在途序号**：每发起一趟就加一（**不管槽位**）。
 	//
 	// 代次（`commentsGen`）答的是「这一趟还属不属于**当前这一首**」——它挡的是
@@ -417,7 +587,7 @@ func (a *App) ensureComments(it Item, slot string) {
 	// ⚠️ **替身函数在这里就取出来**（界面那一侧），goroutine 不碰那些字段——
 	// 和 `partsFetch` 同一条规矩（理由见 app.go 里那一段的注释）。
 	listFetch, archiveFetch := a.commentsListFetch, a.commentsArchiveIDFetch
-	go a.loadComments(it, slot, gen, seq, "", false, listFetch, archiveFetch)
+	go a.loadComments(it, slot, gen, seq, mode, "", false, listFetch, archiveFetch)
 }
 
 // resetCommentsLocked 把评论这一摊整个清空，换成另一个槽位。
@@ -448,10 +618,13 @@ func (a *App) resetCommentsLocked(slot string) {
 // listFetch / archiveFetch 是**界面那一侧取好的**替身（nil = 走真的那个 B 站
 // 客户端）。goroutine 不碰 `App` 上那两个字段。
 //
+// mode 是**排序档**（`bili.CommentSort` 的值）：它在界面线程上取好递进来
+// （理由见 `ensureComments` 里那一段）——goroutine 不许读界面线程写的字段。
+//
 // 🔴 **seq 是这一趟的在途序号**：它挡的是「同一个对象上有两趟」——较早的那一趟
 // 回来时既不许盖掉界面上的新结果，也不许盖掉盘上的新缓存（理由见
 // `ensureComments` 里那一段）。
-func (a *App) loadComments(it Item, slot string, gen, seq int, next string, more bool,
+func (a *App) loadComments(it Item, slot string, gen, seq, mode int, next string, more bool,
 	listFetch commentsListFetchFunc, archiveFetch commentsArchiveIDFetchFunc) {
 	typ, oid, ok, err := a.resolveCommentTarget(it, archiveFetch)
 	if err != nil {
@@ -479,7 +652,7 @@ func (a *App) loadComments(it Item, slot string, gen, seq int, next string, more
 		// 缓存里有就用缓存（TTL 一小时，判过期是缓存那一层的事）。
 		// ⚠️ **「刷新」那枚绕过这一段**——它是给用户主动要新的一份用的。
 		refresh := a.commentsRefreshFlag()
-		if e, hit := a.loadCommentsCache(typ, oid); hit && !refresh {
+		if e, hit := a.loadCommentsCache(typ, oid, mode); hit && !refresh {
 			a.finishComments(slot, gen, seq, commentResult{
 				comments:   e.Comments,
 				next:       e.NextOffset,
@@ -492,7 +665,7 @@ func (a *App) loadComments(it Item, slot string, gen, seq int, next string, more
 		}
 	}
 
-	page, err := a.fetchCommentList(typ, oid, next, listFetch)
+	page, err := a.fetchCommentList(typ, oid, mode, next, listFetch)
 	if err != nil {
 		// ⚠️ **「还没有人评论」不是失败**：B 站回的是 code 0 + 空列表，而这一页
 		// 照常有值（`AllCount` / `UpperMid` 那些）。混成失败的话，界面上会说
@@ -505,7 +678,7 @@ func (a *App) loadComments(it Item, slot string, gen, seq int, next string, more
 			// ⚠️ **存的是「没有人评论」这一条**（`NoComments: true`），不是一份
 			// 空列表：空列表和「还没问」在界面上分不开，会一直显示「正在问」。
 			if !more {
-				a.saveCommentsCache(slot, seq, typ, oid, commentResult{
+				a.saveCommentsCache(slot, seq, typ, oid, mode, commentResult{
 					noComments: true,
 					loaded:     true,
 					next:       page.NextOffset,
@@ -530,7 +703,7 @@ func (a *App) loadComments(it Item, slot string, gen, seq int, next string, more
 
 	// 第一页顺手写进缓存（翻页不写：缓存里放的是「第一页 + 它的游标」）。
 	if !more {
-		a.saveCommentsCache(slot, seq, typ, oid, commentResult{
+		a.saveCommentsCache(slot, seq, typ, oid, mode, commentResult{
 			comments: page.Replies,
 			next:     page.NextOffset,
 			isEnd:    page.IsEnd,
@@ -588,16 +761,28 @@ func (a *App) finishComments(slot string, gen, seq int, res commentResult) {
 		a.commentsMu.Unlock()
 		return
 	}
+	// added 是「这一趟新加进来几条」（翻页那一趟用；见下面那句判据）。
+	added := 0
 	if res.append {
 		// ⚠️ **新拼一份，不往已经发出去的那一段上追加**：`a.comments` 可能正被
 		// 界面那一帧拿着（见 Comments 的注释）。往它的底层数组里写就是**后台在改
 		// 界面正在读的东西**——数据竞争，而症状是界面上偶发地显示一条半截的评论。
-		merged := make([]bili.Comment, 0, len(a.comments)+len(res.comments))
-		merged = append(merged, a.comments...)
-		merged = append(merged, res.comments...)
+		//
+		// 🔴 **按 rpid 去重**：翻页重叠是常事——同一条评论挪了名次就会在两页
+		// 里各出现一次（B 站的分页是按热度切的，不是按 rpid 切的）。不去重的
+		// 话同一条评论会在界面上摆两行，而这一页的行身份就是 rpid（框架见同一
+		// 个父节点下有两个一样的 key 就 panic，见 `internal/ui/comments.go`）。
+		//
+		// 第二个返回值是**这一页新加进来几条**：0 = 什么新东西都没带来（理由见
+		// 下面那一句判据）。
+		merged, n := mergeCommentPages(a.comments, res.comments)
 		a.comments = merged
+		added = n
 	} else if res.comments != nil {
-		a.comments = res.comments
+		// ⚠️ **第一页也去重**：一页之内出现两条一样的 rpid 是接口的事，但
+		// 界面上那两行会共用一份状态（框架还会 panic）。
+		merged, _ := mergeCommentPages(nil, res.comments)
+		a.comments = merged
 	}
 	if res.loaded {
 		a.commentsLoaded = true
@@ -615,6 +800,21 @@ func (a *App) finishComments(slot string, gen, seq int, res commentResult) {
 	if res.loaded {
 		a.commentsNext = res.next
 		a.commentsIsEnd = res.isEnd
+		// 🔴 **无进展保护：一页没有带来任何新东西就是到底了**。
+		//
+		// 两条坏处一样（用户看着末尾那一行转圈转到天荒地老）：
+		//
+		//   - 一页空的还说「还有」：接口在骗人，或者已经到头了。
+		//   - 一页**全是重样的**：接口在重复给同一批，翻页翻不动了——而「还有」
+		//     会让自动补屏一直拉下去（每次都要一个往返）。
+		//
+		// ⇒ **加不进去就是没有**（理由同 `widgets/list/paged.go` 的那一档）。
+		//
+		// ⚠️ **只对翻页那一趟这么判**：第一页本来就可能是空的（那一首还没有
+		// 人评论），而那一档是 B 站自己说的 `is_end`。
+		if res.append && added == 0 {
+			a.commentsIsEnd = true
+		}
 		a.commentsAllCount = res.allCount
 		// ⚠️ **「还没有人评论」只在第一页说**：翻页途中碰到一个空页而
 		// `is_end` 还是 false，那是**翻页没翻完**——说成「还没有人评论」的话，
@@ -638,6 +838,42 @@ func (a *App) finishComments(slot string, gen, seq int, res commentResult) {
 	a.commentsMu.Unlock()
 
 	a.wakeComments()
+}
+
+// mergeCommentPages 把新的一页接到旧的那一页后面，**按 rpid 去重**。
+//
+// 🔴 **去重是必须的**：翻页重叠是常事——B 站的分页是按热度切的，不是按 rpid
+// 切的，所以同一条评论挪了名次就会在两页里各出现一次。而这一页的行身份就是
+// rpid（`internal/ui/comments.go` 的 `commentRowKey`），两条一样的 rpid 摆成
+// 两行的话，框架见同一个父节点下有两个一样的 key 就 panic（`ui: two elements
+// under one parent have the key ...`）——症状是**整页变成错误页**。
+//
+// ⚠️ **保留的是第一次出现的那一条**：翻页重叠时两页里那一条内容是一样的，
+// 而先来的那一页是用户已经读过的。
+//
+// 第二个返回值是**新加进去的条数**：0 = 这一页没有带来任何新东西（接口在重复
+// 给同一批，或者这一页是空的）⇒ 那是「到底了」，不许再空转拉页（理由见
+// `finishComments` 里那一句）。
+func mergeCommentPages(old, page []bili.Comment) ([]bili.Comment, int) {
+	merged := make([]bili.Comment, 0, len(old)+len(page))
+	seen := make(map[int64]bool, len(old)+len(page))
+	for _, c := range old {
+		if seen[c.Rpid] {
+			continue
+		}
+		seen[c.Rpid] = true
+		merged = append(merged, c)
+	}
+	added := 0
+	for _, c := range page {
+		if seen[c.Rpid] {
+			continue
+		}
+		seen[c.Rpid] = true
+		merged = append(merged, c)
+		added++
+	}
+	return merged, added
 }
 
 // wakeComments 叫醒界面（铁律三）。
@@ -782,17 +1018,20 @@ func (a *App) rememberCommentOID(slot string, gen int, typ, oid int64) {
 //
 // next 是**偏移量**（空串 = 第一页），不是 `cursor.next`——理由见
 // `bili.CommentList` 的注释与 `bili.CommentPage.NextOffset`。
-func (a *App) fetchCommentList(typ, oid int64, next string, fetch commentsListFetchFunc) (bili.CommentPage, error) {
+//
+// mode 是**排序档**：`bili.CommentSortHot` / `bili.CommentSortLatest`
+// （理由见 `bili.CommentSorts`——「评论」那一档不在里面）。
+func (a *App) fetchCommentList(typ, oid int64, mode int, next string, fetch commentsListFetchFunc) (bili.CommentPage, error) {
 	if fetch == nil {
 		cli := a.commentsClient()
 		if cli == nil {
 			return bili.CommentPage{}, errCommentsUnavailable
 		}
-		fetch = func(ctx context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
-			return cli.CommentList(ctx, typ, oid, int(bili.CommentSortHot), next, commentsPageSize)
+		fetch = func(ctx context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
+			return cli.CommentList(ctx, typ, oid, mode, next, commentsPageSize)
 		}
 	}
-	return fetch(context.Background(), typ, oid, next)
+	return fetch(context.Background(), typ, oid, mode, next)
 }
 
 // loadReplies 拉一层楼中楼，回来写进缓存并叫醒界面。
@@ -868,13 +1107,24 @@ func (a *App) commentsCacheSnapshot() *comments.Cache {
 	return a.commentsCache
 }
 
-// loadCommentsCache 读缓存。没有、坏了、过期了，都是「没有」。
-func (a *App) loadCommentsCache(typ, oid int64) (comments.Entry, bool) {
+// loadCommentsCache 读缓存。没有、坏了、过期了、**不是这一档排序的**，都是
+// 「没有」。
+//
+// 🔴 **排序档要对得上**：同一个对象的两档排序给的是**两份不同的评论**
+// （「热门评论」和「最新评论」），而缓存的键只有 type + oid（理由见
+// `service/comments` 的文件头与 `Entry.Sort`）。
+//
+// 不对得上就当没有 ⇒ 重新拉一遍（拉回来的那份会按这一档写进盘上）。
+func (a *App) loadCommentsCache(typ, oid int64, mode int) (comments.Entry, bool) {
 	c := a.commentsCacheSnapshot()
 	if c == nil {
 		return comments.Entry{}, false
 	}
-	return c.Load(typ, oid)
+	e, hit := c.Load(typ, oid)
+	if !hit || e.Sort != mode {
+		return comments.Entry{}, false
+	}
+	return e, true
 }
 
 // saveCommentsCache 把第一页写进缓存。
@@ -889,7 +1139,7 @@ func (a *App) loadCommentsCache(typ, oid int64) (comments.Entry, bool) {
 // 变了」，而他什么都没做。
 //
 // ⇒ 只有**最后发起的那一趟**能写盘。
-func (a *App) saveCommentsCache(slot string, seq int, typ, oid int64, res commentResult) {
+func (a *App) saveCommentsCache(slot string, seq int, typ, oid int64, mode int, res commentResult) {
 	// 🔴 **写盘走这把专锁**：「检查我是不是最新的一趟」和「真的写下去」必须在
 	// **同一个临界区**里——分开的话，中间发起的新一趟会让旧的那一趟以为自己
 	// 还是最新的，于是它写得更晚、把新的盖掉。
@@ -918,6 +1168,7 @@ func (a *App) saveCommentsCache(slot string, seq int, typ, oid int64, res commen
 	}
 	_ = c.Save(typ, oid, comments.Entry{
 		FetchedAt:  time.Now().Unix(),
+		Sort:       mode,
 		NextOffset: res.next,
 		IsEnd:      res.isEnd,
 		AllCount:   res.allCount,

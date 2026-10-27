@@ -451,10 +451,15 @@ func hasActionCue(s string) bool {
 	return false
 }
 
-// TestEmptyStatesAreDistinct 验 13 条路由的文案不是同一句。
+// TestEmptyStatesAreDistinct 验走通用空状态的那些路由，文案不是同一句。
 //
-// 全用共享默认 `暂无内容` 在上游是常态，可在这儿 13 个页面并排摆着，全一样就
+// 全用共享默认 `暂无内容` 在上游是常态，可在这儿好几个页面并排摆着，全一样就
 // 分不出谁是谁了。第二句（怎么才能不空）必须每页不同。
+//
+// ⚠️ **这里原来写着一个数（「13 条路由」）**：那个数从加 `/login` 那一轮起就
+// 过期了（票 #573 又加了一条 `/comments`），而**这一族页面的个数会随着路由
+// 表变**——于是那个数要么永远过期，要么每次加路由都要回来改一遍。**改成说
+// 「走通用空状态的那些路由」**：它不会过期，而真值在 `routes` 表里。
 func TestEmptyStatesAreDistinct(t *testing.T) {
 	s, _ := newShell(t)
 	seen := map[string]string{}

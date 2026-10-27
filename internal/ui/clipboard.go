@@ -8,9 +8,10 @@
 // 入口是**当前封面上的右键菜单**（播放条上那一张、满屏里那一张共用同一份
 // 菜单，见 `viewCopyMenu`）——而**不是**在播放条上再摆一枚键：
 //
-//   - 播放条左边那一列的宽度是被**钉死的**（`playbarLeftMinW` = 244），加一枚
-//     键就要动那个数，而那个数一动，窄窗口下歌名的宽度跟着变（那一处有
-//     `TestTheLeftBlockIsThreeSegments` 和 `playbar_layout_test.go` 钉着）。
+//   - 播放条左边那一列的宽度是被**钉死的**（`playbarLeftMinW` = 272，票 #573
+//     之后），加一枚键就要动那个数，而那个数一动，窄窗口下歌名的宽度跟着变
+//     （那一处有 `TestTheLeftBlockIsThreeSegments` 和 `playbar_layout_test.go`
+//     钉着）。
 //   - 满屏顶栏那一组是**贴着歌名**摆的（上游 `space-x-2`，齿轮紧跟歌名，
 //     8 像素——`TestTheFullPlayerGearSitsRightAfterTheTitle` 钉着），加一枚键要
 //     重算那一组的构图。
