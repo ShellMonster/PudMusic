@@ -43,21 +43,22 @@ func settleText(t *testing.T, tt *mygoui.Tester, want string) {
 	waitFrames(t, tt, "画面上出现 "+want, func() bool { return tt.HasText(want) })
 }
 
-// TestFourteenRoutes 盯住「Biu 那 14 条」这个数：少一条是漏了，多一条是编的。
+// TestFifteenRoutes 盯住「表里那 15 条」这个数：少一条是漏了，多一条是编的。
 //
-// **扫码登录不在这 14 条里**——它是本项目自己加的第 15 条（对应 Biu
-// 挂在导航栏头像下拉里的那个登录入口），所以单独断言，不混进 want。
+// **扫码登录和评论页不在这 13 条里**——它们是本项目自己加的两条（对应 Biu
+// 挂在导航栏头像下拉里的那个登录入口，和票 #573 的「当前这一首」的附属页），
+// 所以单独断言，不混进 want。
 //
 // 兜底的 404 也不是一条能 Match 的模式，而是 viewRoutes 的 default 分支，
 // 所以它不在 routes 里。
-func TestFourteenRoutes(t *testing.T) {
-	if got := len(routes) + 1; got != 15 {
-		t.Fatalf("路由一共 %d 条（表里 %d 条 + 兜底 1 条），want 15（Biu 的 14 条 + 扫码登录）", got, len(routes))
+func TestFifteenRoutes(t *testing.T) {
+	if got := len(routes) + 1; got != 16 {
+		t.Fatalf("路由一共 %d 条（表里 %d 条 + 兜底 1 条），want 16（我们的 15 条 + 兜底 1 条）", got, len(routes))
 	}
 	want := []string{
 		"/", "/follow", "/later", "/history", "/local-music", "/download-list",
 		"/settings", "/search", "/dynamic-feed", "/user/{id}", "/collection/{id}",
-		"/empty", "/mini-player",
+		"/empty", "/mini-player", "/login", "/comments",
 	}
 	for _, w := range want {
 		if got := lookup(w).Match; got != w {
@@ -242,7 +243,7 @@ func TestToastDoesNotSurviveNavigation(t *testing.T) {
 	}
 }
 
-// TestNavigationDoesNotToast「还没做」验没了：13 条路由都有页面视图了，再弹
+// TestNavigationDoesNotToast「还没做」验没了：14 条路由都有页面视图了，再弹
 // 一句「这一页还没做」等于用占位话盖住真页面（Biu 那边也是切过去就有页面）。
 func TestNavigationDoesNotToast(t *testing.T) {
 	s, tt := newShell(t)

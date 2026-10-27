@@ -143,7 +143,7 @@ func TestCommentsAreNotAskedTwice(t *testing.T) {
 		calls.addArchive(bvid)
 		return 12345, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		// ⚠️ **这一趟卡在途**：防重入要防的正是**这一段**——
 		// 「问已经发出去了、结果还没回来」的时候界面已经画了好几帧。
@@ -193,7 +193,7 @@ func TestTheMVCommentOIDIsTheNumericAVID(t *testing.T) {
 		calls.addArchive(bvid)
 		return 987654321, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		return commentPage([]bili.Comment{{Rpid: 1}}, "", true), nil
 	}
@@ -227,7 +227,7 @@ func TestTheAudioCommentOIDIsTheAUID(t *testing.T) {
 		calls.addArchive(bvid)
 		return 111, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		return commentPage([]bili.Comment{{Rpid: 1}}, "", true), nil
 	}
@@ -259,7 +259,7 @@ func TestALocalItemIsNotWorthAsking(t *testing.T) {
 		calls.addArchive(bvid)
 		return 1, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		return commentPage(nil, "", true), nil
 	}
@@ -293,7 +293,7 @@ func TestTheCommentsOfThePreviousSongDoNotShowUp(t *testing.T) {
 	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
 		return 1, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		if oid == 111 {
 			// 第一首那一趟：在途，等测试放行。
 			<-release
@@ -350,7 +350,7 @@ func TestCommentsAreAskedAgainAfterAFailure(t *testing.T) {
 		calls.addArchive(bvid)
 		return 1, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		return bili.CommentPage{}, errors.New("风控")
 	}
@@ -413,7 +413,7 @@ func TestTheClosedSectionIsSaidInPlainWords(t *testing.T) {
 	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
 		return 1, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		// 这一档就是 B 站回 12002 时仓库给出的那个错（`bili` 那一层已经把它
 		// 翻成了哨兵，票 #592）。**照 `bili` 那一层翻出来的样子包**：带接口
 		// 地址——漏到界面上就是一句行话了。
@@ -453,7 +453,7 @@ func TestTheSecondVisitIsInstant(t *testing.T) {
 		calls.addArchive(bvid)
 		return 12345, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		return commentPage([]bili.Comment{{Rpid: 7, Message: "缓存里的"}}, "", true), nil
 	}
@@ -499,7 +499,7 @@ func TestTheRefreshBypassesTheCache(t *testing.T) {
 		return 12345, nil
 	}
 	var n atomic.Int32
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		// ⚠️ **第一趟和刷新那一趟给的字不一样**：判据要能认出「刷新那一份已经
 		// 写进盘上了」。两趟给同一句话的话，判据会被第一趟满足掉，而刷新那一趟
@@ -546,7 +546,7 @@ func TestTheAVIDIsRememberedAcrossRestarts(t *testing.T) {
 		calls.addArchive(bvid)
 		return 12345, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		return commentPage([]bili.Comment{{Rpid: 7}}, "", true), nil
 	}
@@ -576,7 +576,7 @@ func TestTheAVIDIsRememberedAcrossRestarts(t *testing.T) {
 		calls.addArchive(bvid)
 		return 999, nil
 	}
-	b.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	b.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		return commentPage([]bili.Comment{{Rpid: 7}}, "", true), nil
 	}
@@ -589,6 +589,121 @@ func TestTheAVIDIsRememberedAcrossRestarts(t *testing.T) {
 	}
 }
 
+// TestARepeatedCommentIsNotAddedTwice 钉住「翻页重叠不会把同一条评论摆两遍」。
+//
+// 🔴 **翻页重叠是常事**：B 站的分页是按热度切的，不是按 rpid 切的，所以同一条
+// 评论挪了名次就会在两页里各出现一次。
+//
+// ⚠️ **不去重的坏处是「整页变成错误页」**：这一页的行身份就是 rpid（界面层
+// `internal/ui/comments.go` 的 `commentRowKey`），而框架见同一个父节点下有两个
+// 一样的 key 就 panic（`ui: two elements under one parent have the key ...`）。
+func TestARepeatedCommentIsNotAddedTwice(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	calls := &commentCalls{}
+	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+		return 1, nil
+	}
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
+		calls.addList(typ, oid, next)
+		if next == "" {
+			return commentPage([]bili.Comment{
+				{Rpid: 1, Message: "第一条"},
+				{Rpid: 2, Message: "第二条"},
+			}, "OFFSET-2", false), nil
+		}
+		// 🔴 **第二页把第一条原样再来一次**（翻页重叠），外加一条新的。
+		return commentPage([]bili.Comment{
+			{Rpid: 1, Message: "第一条"},
+			{Rpid: 3, Message: "第三条"},
+		}, "", true), nil
+	}
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "130191"})
+	a.queue.selectAt(0)
+
+	waitComments(t, a, 2, "第一页")
+	if !a.LoadMoreComments() {
+		t.Fatal("翻不了第二页")
+	}
+	waitComments(t, a, 3, "第二页")
+
+	got := a.Comments()
+	seen := map[int64]int{}
+	for _, c := range got {
+		seen[c.Rpid]++
+	}
+	if seen[1] != 1 {
+		t.Errorf("rpid 1 出现了 %d 次，want 1——翻页重叠没有去重", seen[1])
+	}
+	if seen[2] != 1 || seen[3] != 1 {
+		t.Errorf("翻页之后的内容不对：%v", got)
+	}
+}
+
+// TestAPageThatBringsNothingNewIsTheEnd 钉住「一页没有带来任何新东西就是到底
+// 了」。
+//
+// 🔴 **那是「无进展保护」**：接口在重复给同一批（或者这一页是空的），而
+// `cursor.is_end` 还说「还有」——于是自动补屏会一直拉下去，每拉一次一个往返，
+// 而用户看着末尾那一行转圈转到天荒地老。
+//
+// ⚠️ **判据是「不再有下一页」**：翻页那一趟回来之后 `CommentsHasMore()` 要是
+// false，而且**再翻也翻不动**。
+func TestAPageThatBringsNothingNewIsTheEnd(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	calls := &commentCalls{}
+	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+		return 1, nil
+	}
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
+		calls.addList(typ, oid, next)
+		if next == "" {
+			return commentPage([]bili.Comment{{Rpid: 1, Message: "第一条"}}, "OFFSET-2", false), nil
+		}
+		// 🔴 **第二页全是重样的**，而游标还说「还有下一页」。
+		return commentPage([]bili.Comment{{Rpid: 1, Message: "第一条"}}, "OFFSET-3", false), nil
+	}
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "130191"})
+	a.queue.selectAt(0)
+
+	waitComments(t, a, 1, "第一页")
+	if !a.LoadMoreComments() {
+		t.Fatal("翻不了第二页")
+	}
+	// 等第二页那一趟回来（条数不变，所以只能等「问了几趟」）。
+	waitCommentListCalls(t, calls, 2)
+	// 等它被记下来（去重 + 无进展保护）。
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && a.CommentsHasMore() {
+		time.Sleep(time.Millisecond)
+	}
+	if a.CommentsHasMore() {
+		t.Errorf("一页全是重样的之后还说「还有下一页」——自动补屏会一直空转拉页")
+	}
+	if got := len(a.Comments()); got != 1 {
+		t.Errorf("翻页之后有 %d 条，want 1（重复的那一条只算一次）", got)
+	}
+	if a.LoadMoreComments() {
+		t.Error("已经到底了还能翻——那是空转（每次都要一个往返）")
+	}
+}
+
+// waitCommentListCalls 等主列表被问到了 want 趟。
+func waitCommentListCalls(t *testing.T, c *commentCalls, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if c.listCount() >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("主列表被问了 %d 趟，want %d", c.listCount(), want)
+}
+
 // TestLoadMoreUsesTheCursor 钉住「按游标翻下一页」。
 func TestLoadMoreUsesTheCursor(t *testing.T) {
 	a := New()
@@ -598,7 +713,7 @@ func TestLoadMoreUsesTheCursor(t *testing.T) {
 	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
 		return 1, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		if next == "" {
 			return commentPage([]bili.Comment{{Rpid: 1, Message: "第一页"}}, "OFFSET-2", false), nil
@@ -658,7 +773,7 @@ func TestLoadMoreCarriesTheOffsetThroughTheCache(t *testing.T) {
 	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
 		return 1, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		if next == "" {
 			return commentPage([]bili.Comment{{Rpid: 1, Message: "第一页"}}, "OFFSET-2", false), nil
@@ -699,7 +814,7 @@ func TestTheRepliesUseTheSameObject(t *testing.T) {
 		calls.addArchive(bvid)
 		return 12345, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		return commentPage([]bili.Comment{{Rpid: 1, Count: 2}}, "", true), nil
 	}
@@ -741,7 +856,7 @@ func TestNoCommentsIsNotAFailure(t *testing.T) {
 	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
 		return 1, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		// B 站回的是「这个对象在，只是没人评论」：code 0 + 空列表 + is_end。
 		return bili.CommentPage{IsEnd: true, AllCount: 0}, bili.ErrCommentNoComments
 	}
@@ -779,7 +894,7 @@ func TestTheMVAsksAgainWhenTheAVIDCannotBeFetched(t *testing.T) {
 		calls.addArchive(bvid)
 		return 0, errors.New("断网了")
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		return commentPage(nil, "", true), nil
 	}
@@ -836,7 +951,7 @@ func TestTheAVIDIsFetchedOnlyOnce(t *testing.T) {
 		<-release
 		return 12345, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		return commentPage([]bili.Comment{{Rpid: 1}}, "", true), nil
 	}
@@ -875,4 +990,119 @@ func waitCommentsFor(t *testing.T, timeout time.Duration, what string, cond func
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("等了 %s，%s", timeout, what)
+}
+
+// TestEnsureCommentsAsksOnceAndSaysItIsLoaded 钉住「界面那一半的出口」。
+//
+// 🔴 **它是界面层保障①（首次渲染检查）的落点**：界面只判「该不该问」
+// （`internal/ui/comments.go` 的 `syncComments`），真正发出去的是这里——
+// 铁律三：view 里不发网络请求。
+//
+// ⚠️ **重复调它不许多发一趟**：界面每一帧都判一次「还没拿到过第一页」，
+// 而 `EnsureComments` 是幂等的（内部判过「问过了 / 正在问」，失败之后还有
+// 15 秒退避）——不然就是每秒一趟。
+func TestEnsureCommentsAsksOnceAndSaysItIsLoaded(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	calls := &commentCalls{}
+	release := make(chan struct{})
+	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+		return 12345, nil
+	}
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
+		calls.addList(typ, oid, next)
+		<-release
+		return commentPage([]bili.Comment{{Rpid: 1, Message: "第一条"}}, "", true), nil
+	}
+	a.Queue().Append(Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "1"})
+	a.queue.selectAt(0)
+
+	if a.CommentsLoaded() {
+		t.Errorf("还没问就说「已经拿到过」了")
+	}
+
+	a.EnsureComments()
+	waitCommentsFor(t, commentsWaitTimeout, "那一趟发出去了", func() bool {
+		return calls.listCount() >= 1
+	})
+
+	// 在途的时候问 50 次（界面就是每一帧问一次）：还是 1 趟。
+	for range 50 {
+		a.EnsureComments()
+	}
+	if got := calls.listCount(); got != 1 {
+		t.Errorf("在途的时候问了 50 次，发了 %d 趟，want 1", got)
+	}
+
+	close(release)
+	waitComments(t, a, 1, "第一趟")
+
+	// ⚠️ **拿到过第一页之后就不该再问第一页**：界面那一帧判的是
+	// 「还没拿到过吗」——拿到过就不该再问。
+	if !a.CommentsLoaded() {
+		t.Errorf("第一页回来了还说「还没拿到过」")
+	}
+	for range 50 {
+		a.EnsureComments()
+	}
+	if got := calls.listCount(); got != 1 {
+		t.Errorf("拿到过之后又问了 50 次，总共发了 %d 趟，want 1", got)
+	}
+}
+
+// TestCommentsLoadedIsTrueEvenWhenNobodyCommented 钉住「一条评论都没有也算
+// 拿到过」。
+//
+// ⚠️ **「还没有人评论」是一份完整的答案**（B 站说这个对象在，只是没人评论），
+// 不是「还没问过」——当成「还没问过」的话，界面会一遍一遍地问第一页。
+func TestCommentsLoadedIsTrueEvenWhenNobodyCommented(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+		return 1, nil
+	}
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
+		return bili.CommentPage{IsEnd: true, AllCount: 0}, bili.ErrCommentNoComments
+	}
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "130191"})
+	a.queue.selectAt(0)
+
+	a.EnsureComments()
+	waitCommentsFor(t, commentsWaitTimeout, "那一趟", func() bool {
+		return a.CommentsLoaded()
+	})
+
+	if !a.CommentsLoaded() {
+		t.Errorf("「还没有人评论」没有算成「拿到过」")
+	}
+}
+
+// TestEnsureCommentsDoesNotAskForALocalFile 钉住「本地文件一个请求都不发」。
+//
+// ⚠️ **本地音乐在 B 站上没有对应的对象**：问一个认不出来的 oid 的症状是
+// 「静默拿到空列表」——而界面上的入口压根不摆（那一层已经挡住了），这一层
+// 再挡一道。
+func TestEnsureCommentsDoesNotAskForALocalFile(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	calls := &commentCalls{}
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
+		calls.addList(typ, oid, next)
+		return commentPage(nil, "", true), nil
+	}
+	a.Queue().Append(Item{Source: "local", Type: "local", Path: "/tmp/x.mp3"})
+	a.queue.selectAt(0)
+
+	for range 20 {
+		a.EnsureComments()
+	}
+	if got := calls.listCount(); got != 0 {
+		t.Errorf("本地文件发了 %d 趟评论请求，want 0", got)
+	}
+	if a.CommentsLoaded() {
+		t.Errorf("本地文件也说「已经拿到过」了")
+	}
 }

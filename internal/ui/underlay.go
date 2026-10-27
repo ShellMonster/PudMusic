@@ -188,4 +188,5 @@ var pageSyncs = map[string]func(*Shell, *ui.Context){
 	historyPath:      (*Shell).syncHistory,
 	localMusicPath:   (*Shell).syncLocalMusic,
 	followPath:       (*Shell).syncFollow,
+	commentsPath:     (*Shell).syncComments,
 }

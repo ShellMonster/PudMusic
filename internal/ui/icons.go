@@ -402,6 +402,7 @@ const (
 	iconUser          = "User & Faces/user-line.svg"            // 用户
 	iconUserAdd       = "User & Faces/user-add-line.svg"        // 加关注的人
 	iconFeedback      = "Communication/feedback-line.svg"       // 反馈
+	iconComments      = "Communication/chat-3-line.svg"         // 评论
 )
 
 // iconNames 是这一份要备齐的图标。一个常量一个名字，漏一个立刻红
@@ -468,6 +469,7 @@ var iconNames = []string{
 	iconFileSheet, iconDraft, iconDownloadLine, iconDownloadCloud,
 	iconShield, iconChecked, iconUnchecked, iconZoomIn, iconZoomOut,
 	iconInfo, iconCloseFilled, iconTip, iconUser, iconUserAdd, iconFeedback,
+	iconComments,
 
 	// 歌词右下角那三枚旋钮
 	iconLyricFontSize, iconLyricOffset, iconLyricSearch,

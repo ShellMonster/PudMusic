@@ -36,7 +36,7 @@ func TestAnObjectWithNoCommentsIsCached(t *testing.T) {
 	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
 		return 1, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		// B 站回的是「这个对象在，只是没人评论」：code 0 + 空列表 + is_end。
 		return bili.CommentPage{IsEnd: true, AllCount: 0}, bili.ErrCommentNoComments
@@ -103,7 +103,7 @@ func TestAnOlderRequestDoesNotOverwriteTheRefresh(t *testing.T) {
 	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
 		return 12345, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		if first {
 			first = false
@@ -167,7 +167,7 @@ func TestAnOlderRequestDoesNotOverwriteTheCache(t *testing.T) {
 	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
 		return 1, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		if oid == 111 {
 			// ⚠️ **靠「第几趟」分两趟**：两趟问的是同一个 oid。
@@ -246,7 +246,7 @@ func TestTheNewTripStillWritesTheCacheAfterComingBack(t *testing.T) {
 	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
 		return 1, nil
 	}
-	a.commentsListFetch = func(_ context.Context, typ, oid int64, next string) (bili.CommentPage, error) {
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
 		if oid == 111 {
 			return commentPage([]bili.Comment{{Rpid: 1, Message: "A的"}}, "", true), nil

@@ -14,6 +14,10 @@
 // ⚠️ 最容易漏的是①和③合起来那一条：**筛选后只剩两页**。用户没滚过，容器却
 // 没填满，于是底下留一大片空白还一直转圈——那正是这一票验收里点名的失败模式。
 //
+// 🔴 **这三条的判据是共享的**（见上面「三重保障的判据」那几个纯函数）：
+// 评论页（`internal/ui/comments.go`）的底座不一样（行高是量出来的），但
+// 「该不该拉下一页」判的是同一件事 ⇒ 它调的是同一份判据，不另写一套。
+//
 // 另外两条是 Biu 没有、PLAN 的风险栏里点名要补的：
 //
 //   - **防重入**：Biu 用一个 loadLock ref。三条保障挨着跑（Biu 的 effect 也是
@@ -82,6 +86,97 @@ type Paged struct {
 	Loading bool
 	// Err 是上一次拉页的错，成功时为 nil。
 	Err error
+}
+
+// # 三重保障的判据（这一份是共享的）
+//
+// 三重保障（①首次渲染检查 / ②滚到底 / ③容器没填满）判的是同一件事：
+// **这一帧该不该拉下一页**。底座不一样的时候（音乐卡片列表 vs 评论那种
+// 变高正文），判据必须只有一份——两份判据迟早分叉，而分叉出来的那种差异
+// 极难查（一个列表会补屏，另一个不会，而且两边看着都「对」）。
+//
+// ⇒ 判据写成下面这几个纯函数，**谁用都调它**：
+//
+//   - 这一份自己（`PagedList`：见 Sync / afterFrame）
+//   - 评论页（`internal/ui/comments.go`）：底座是框架原生的 `ui.List`（行高是
+//     量出来的），但**三重保障的判据是同一份**。
+//
+// ⚠️ **判据是纯函数**：它只看传进来的状态，不碰界面状态，也不发请求——
+// 拉不拉是调用方的事。
+
+// PagingState 是「拉页那几样状态」。
+//
+// ⚠️ **它不掺任何界面上的东西**（行号、画面、滚动位置）：那些由判据的另外
+// 几个参数带进来（见 `DecideNextPage`）。
+type PagingState struct {
+	// Fetched 是「已经拿到过至少一页」。
+	Fetched bool
+	// Loading 是「有一趟在路上」。
+	Loading bool
+	// Blocked 是「上一次失败了，自动补屏先停在这儿，等人点重试」。
+	Blocked bool
+	// HasMore 是「后面还有没有」。
+	HasMore bool
+}
+
+// PagingAction 是「这一帧该做什么」。
+type PagingAction int
+
+const (
+	// PagingNone 是「什么都不做」。
+	PagingNone PagingAction = iota
+	// PagingLoadFirst 是「去拉第一页」（保障①首次渲染检查）。
+	PagingLoadFirst
+	// PagingLoadNext 是「去拉下一页」（保障②滚到底 / ③容器没填满）。
+	PagingLoadNext
+)
+
+// PagingDecision 是判据的结果。
+type PagingDecision struct {
+	// Action 是该做什么。
+	Action PagingAction
+	// Scrolled 是「用户是滚过去的」（保障②）还是「容器自己没填满」（保障③）。
+	//
+	// ⚠️ **它不影响拉不拉**，只影响「为什么拉这一趟」的说法（记日志、界面
+	// 上的一句话）——两支都是「该拉就拉」。
+	Scrolled bool
+}
+
+// MayLoadNext 报「按状态看，这一帧有可能拉下一页」。
+//
+// 它是②③的前置闸门：**正在拉 / 上一趟失败了 / 已经到底了**这三种情形下
+// 不该再拉。
+func MayLoadNext(st PagingState) bool {
+	return !st.Loading && !st.Blocked && st.HasMore
+}
+
+// DecideFirstPage 判保障①：这一帧该不该去拉第一页。
+//
+// ⚠️ **已经拿到过就不拉**（`Fetched`）：而「拿到过」包含**一条都没有**
+// ——那一档是「还没有人评论」，不是「还没问过」。
+func DecideFirstPage(st PagingState) PagingDecision {
+	if st.Fetched || st.Loading || st.Blocked {
+		return PagingDecision{}
+	}
+	return PagingDecision{Action: PagingLoadFirst}
+}
+
+// DecideNextPage 判保障②③：这一帧该不该去拉下一页。
+//
+// first/last 是**上一帧画出来**的那一段行号（`ListState.Visible()` 报的），
+// rows 是这个列表的总行数（**含末尾那一行哨兵**）。
+//
+// ⚠️ **哨兵那一行进没进画面就是全部**：它在画面外 ⇒ 等用户滚过去；它在
+// 画面里 ⇒ 该拉了（至于用户滚没滚过，只影响「为什么拉」那句话）。
+func DecideNextPage(st PagingState, first, last, rows int) PagingDecision {
+	if !MayLoadNext(st) {
+		return PagingDecision{}
+	}
+	// 末尾还在画面外：什么都不做，等用户滚过去。
+	if rows <= 0 || last < rows-1 {
+		return PagingDecision{}
+	}
+	return PagingDecision{Action: PagingLoadNext, Scrolled: first > 0}
 }
 
 // PagedList 是一个会自己往下翻页的列表。
@@ -477,7 +572,7 @@ func (p *PagedList) Sync(c *ui.Context) {
 	//     换掉——用户第一眼看到的是空列表（这条有测试钉住，见 paged_test.go 的
 	//     TestTheVeryFirstFrameAlreadySaysLoading）。
 	//   - 而且那一段没有任何东西会叫醒界面：唤醒只有「结果到了」那一次。
-	if p.page == 0 {
+	if DecideFirstPage(p.pagingState()).Action == PagingLoadFirst {
 		p.load(trigFirstRender)
 	}
 }
@@ -655,6 +750,20 @@ func (t trigger) String() string {
 	}
 }
 
+// pagingState 把这一份此刻的状态摊成判据要的形状。
+//
+// ⚠️ **Fetched 是「已经拿到过至少一页」**（`page > 0`）：而「一页是空的」也
+// 算拿到过（`apply` 里照样 `p.page = r.page`）——那一档是「没有更多了」，
+// 不是「还没问过」。
+func (p *PagedList) pagingState() PagingState {
+	return PagingState{
+		Fetched: p.page > 0,
+		Loading: p.loading,
+		Blocked: p.blocked,
+		HasMore: p.hasMore,
+	}
+}
+
 // afterFrame 是三重保障的②③（①在 view 开头，见那里）。每一帧跑一次——三条保障
 // 不是三个不同的钩子，是同一个判断（末尾那一行进没进画面）在不同时刻的三个取
 // 值，所以这里每帧问一遍：「一页刚落地那一帧」和「刚拖过窗口大小那一帧」自然
@@ -662,27 +771,31 @@ func (t trigger) String() string {
 //
 // ⚠️ 必须排在 List.View 之后：Visible 报的是**上一帧画出来**的行。
 func (p *PagedList) afterFrame() {
+	st := p.pagingState()
+
 	// 防重入闸门：正在拉、上一页失败了、或者已经到底，都不再拉。
 	// （还一页都没有的那一条不在这里，见 view。）
-	if p.loading || p.blocked || !p.hasMore {
+	if !MayLoadNext(st) {
 		return
 	}
 
 	first, last := p.surf.visible()
 	n := p.surf.rows()
-	switch {
-	case last < n-1:
-		// 末尾还在画面外。什么都不做，等用户滚过去。
-	case first > 0:
+	d := DecideNextPage(st, first, last, n)
+	if d.Action != PagingLoadNext {
+		// 末尾还在画面外（或者列表里一行都没有）。什么都不做，等用户滚过去。
+		return
+	}
+	if d.Scrolled {
 		// ② 滚到底：哨兵行进了画面，而且列表不在顶上（是用户滚过去的，
 		// 不是它自己没填满）。
 		p.load(trigScrollEnd)
-	default:
-		// ③ 加载结束后再检一次：还在顶上、末尾已经画在屏幕上 = 全部内容一屏
-		// 摆得下。**这一支就是「筛选后只剩两页」的救命的那一支**：用户没滚过，
-		// 少的就是它。
-		p.load(trigRefill)
+		return
 	}
+	// ③ 加载结束后再检一次：还在顶上、末尾已经画在屏幕上 = 全部内容一屏
+	// 摆得下。**这一支就是「筛选后只剩两页」的救命的那一支**：用户没滚过，
+	// 少的就是它。
+	p.load(trigRefill)
 }
 
 // load 拉下一页。三重保障和用户点重试最后都走这里。
