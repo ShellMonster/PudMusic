@@ -1280,11 +1280,17 @@ func (s *Shell) syncComments(c *ui.Context) {
 	// 在翻」（`commentsMentionScanMax` 那个上限），不是「用户滚到底了」——
 	// 两边都翻的话上限就是空的（列表空着，哨兵那一行一直看得见 ⇒ 一直翻）。
 	//
+	// 🔴 **判据是 `wantScan`（筛选开着而一条都没命中），不是 `scanning`**
+	// （那一档**还没查完**）：哨兵那一路（用户自己滚到底了）在筛选开着而一
+	// 条都没命中的时候**整个关掉**——查完了也一样（查完了就不用再翻，而它
+	// 自己说的那句话是「N 条评论里没有提到这首歌」）。
+	//
 	// ⚠️ **查完了就不翻了**：查完的判据是「翻到的条数盖住了 B 站给的总数」
 	// （`commentsMentionCovered`），不是「B 站说没有下一页了」——那一档说过
 	// 头的话，这一句就不诚实。
-	scanning := p.mentionOnly && p.hits == 0 && !p.names.Empty() && !p.covered
-	if !scanning {
+	wantScan := p.mentionOnly && p.hits == 0 && !p.names.Empty()
+	scanning := wantScan && !p.covered
+	if !wantScan {
 		first, last := p.state.Visible()
 		if list.DecideNextPage(st, first, last, len(p.rows)+1).Action == list.PagingLoadNext {
 			s.app.LoadMoreComments()

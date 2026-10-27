@@ -163,3 +163,22 @@ func onlyPromo(inner string) bool {
 //
 // 🔴 **空串不算**：那是「没有这一段」，不是「这一段全是宣传词」。
 func IsPromoOnly(s string) bool { return onlyPromo(s) }
+
+// ContainsPromo 报这一段里**有没有**宣传词（「官方MV」「4K修复」「高音质」…
+// ）。
+//
+// ⚠️ **它跟 `IsPromoOnly` 的区别是「全是」和「有」**：
+//
+//	IsPromoOnly   这一段**全是**宣传词（"（官方MV）"那一整个括号丢掉）
+//	ContainsPromo 这一段**里有**宣传词（"官方发布"是说明，不是歌名）
+//
+// ⚠️ **宣传词那张表仍然只有这一处**（理由同 `IsPromoOnly`）：别处要判「这一段
+// 里有没有宣传词」就走它。
+//
+// 🔴 **空串不算**：那是「没有这一段」。
+func ContainsPromo(s string) bool {
+	if strings.TrimSpace(s) == "" {
+		return false
+	}
+	return hasAny(s, promoWords)
+}

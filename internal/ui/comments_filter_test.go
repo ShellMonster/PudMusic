@@ -135,6 +135,33 @@ func commentFixtureMentionNoMore(t *testing.T, mention string) []byte {
 	return out
 }
 
+// commentFixtureMentionOnlyTheArtist 是「唯一提到人的那一条只提到了**歌
+// 手**」的那一份 fixture。
+//
+// ⚠️ **总数给的是 6**（这一页真的就给了 6 条）⇒ 零命中那句话说的是**完整**的
+// 那一句（「这个视频的 6 条评论里没有提到这首歌」）。
+func commentFixtureMentionOnlyTheArtist(t *testing.T, mention string) []byte {
+	t.Helper()
+	raw := commentFixtureWithTotal(t, "reply-main.json", 6, true)
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("fixture 读不懂：%v", err)
+	}
+	data, _ := doc["data"].(map[string]any)
+	replies, _ := data["replies"].([]any)
+	if len(replies) == 0 {
+		t.Fatalf("fixture 里一条评论都没有")
+	}
+	first, _ := replies[0].(map[string]any)
+	content, _ := first["content"].(map[string]any)
+	content["message"] = "「" + mention + "」这一段我循环了一整天"
+	out, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("fixture 编不出来：%v", err)
+	}
+	return out
+}
+
 // TestTheMentionFilterIsOffByDefault 断「开关默认是关的」。
 //
 // 🔴 **默认摆的是全部评论**：这一页是「这一首的评论」，而筛选是用户自己挑
@@ -186,9 +213,17 @@ func TestTheMentionFilterShowsOnlyTheCommentsThatMentionTheSong(t *testing.T) {
 //
 // 🔴 **B 站的标题有几种常见形状**（票 #574 的评审：「New("【晴天】") 只认出了
 // 「【晴天】」，正文里提到「晴天」的那一条被判成没提到」）：【晴天】、
-// 「歌手 - 歌名」、紧凑连字符、冒号。
+// 「歌手 - 歌名」、紧凑连字符、冒号、**两种分隔符挨在一起**。
 func TestTheMentionFilterFindsTheSongNameInsideTheTitle(t *testing.T) {
-	for _, title := range []string{"【晴天】", "周杰伦-晴天", "晴天：电影主题曲"} {
+	for _, title := range []string{
+		"【晴天】",
+		"周杰伦-晴天",
+		"晴天：电影主题曲",
+		// ⚠️ **「歌手-歌名：说明」那一档**（票 #574 的第二轮评审）：两种分隔
+		// 符挨在一起的时候要**先切外层的**，不然只认出「歌名：说明」⇒ 正文里
+		// 提到「歌名」的那一条被判成没提到 ⇒ 界面显示零命中。
+		"周杰伦-晴天：电影主题曲",
+	} {
 		t.Run(title, func(t *testing.T) {
 			b := newCommentBili(t, "reply-main.json")
 			b.mainRaw = commentFixtureMentionNoMore(t, "晴天")
@@ -206,6 +241,31 @@ func TestTheMentionFilterFindsTheSongNameInsideTheTitle(t *testing.T) {
 				t.Errorf("标题 %q 里的歌名没认出来，文字有 %q", title, tt.Texts())
 			}
 		})
+	}
+}
+
+// TestTheMentionFilterDoesNotCountTheArtistAsAMention 断「只提到歌手的那一条
+// 不算提到这首歌」。
+//
+// 🔴 **提到歌手不等于提到这首歌**（票 #574 的第二轮评审：「周杰伦：晴天」那一
+// 档把「周杰伦」收进了别名表，于是正文只提到歌手的评论也被算成提到了歌）。
+func TestTheMentionFilterDoesNotCountTheArtistAsAMention(t *testing.T) {
+	b := newCommentBili(t, "reply-main.json")
+	// ⚠️ **这一份里唯一提到人的那一条只提到了歌手**。
+	b.mainRaw = commentFixtureMentionOnlyTheArtist(t, "周杰伦")
+	it := mvItem()
+	it.Title = "周杰伦：晴天"
+	_, tt := newCommentsShell(t, b, it, 1400, 1400)
+
+	if err := tt.Click("开关：只看提到歌名的评论"); err != nil {
+		t.Fatalf("点不了那枚开关：%v（文字：%q）", err, tt.Texts())
+	}
+	// 零命中（这一份里一条都没提到「晴天」）⇒ 说的是「没有提到这首歌」。
+	commentsWait(t, tt, "说清了没有提到这首歌", func() bool {
+		return tt.HasText("这个视频的 6 条评论里没有提到这首歌")
+	})
+	if tt.HasText("1 条提到这首歌") {
+		t.Errorf("只提到歌手的那一条被算成提到这首歌了，文字有 %q", tt.Texts())
 	}
 }
 

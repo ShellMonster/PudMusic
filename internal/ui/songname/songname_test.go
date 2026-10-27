@@ -164,10 +164,9 @@ func TestTheCompactDashTitleGivesTheSongName(t *testing.T) {
 
 // TestTheColonTitleGivesTheSongName 断「晴天：电影主题曲」那一档。
 //
-// 🔴 **冒号两侧都可能是歌名**（「歌名：说明」与「歌手：歌名」两种写法 B 站
-// 都有）⇒ 两侧都当候选，免得一条都找不到。
-//
 // ⚠️ **全角和半角两种冒号都算**（B 站上两种都有）。
+//
+// 🔴 **这一档右边是说明**（"电影主题曲"）⇒ 歌名在**左边**那一段。
 func TestTheColonTitleGivesTheSongName(t *testing.T) {
 	for _, title := range []string{"晴天：电影主题曲", "晴天:电影主题曲"} {
 		tab := New(title, "某个 UP 主")
@@ -176,6 +175,72 @@ func TestTheColonTitleGivesTheSongName(t *testing.T) {
 		}
 		if !tab.Mentions("晴天的前奏一响就泪目") {
 			t.Errorf("标题 %q：正文里明明有「晴天」，却没命中", title)
+		}
+	}
+}
+
+// TestTheColonTitleDoesNotTakeTheArtistSegment 断「歌手：歌名」那一档。
+//
+// 🔴 **歌手那一段不进表**（票 #574 的第二轮评审：「New("周杰伦：晴天") 的表里
+// 有「周杰伦」，于是正文只提到歌手的评论也被算成提到了这首歌」）。
+//
+// ⇒ 这一档右边**不是**说明 ⇒ 歌名在**右边**那一段，左边那一段（署名）丢掉。
+func TestTheColonTitleDoesNotTakeTheArtistSegment(t *testing.T) {
+	tab := New("周杰伦：晴天", "某个 UP 主")
+	if has(t, tab, "周杰伦") {
+		t.Errorf("表里有「周杰伦」——那是署名，不是歌名：%q", tab.Forms())
+	}
+	if !has(t, tab, "晴天") {
+		t.Errorf("表里没有「晴天」：%q", tab.Forms())
+	}
+	if tab.Mentions("「周杰伦」这一段我循环了一整天") {
+		t.Errorf("正文里只有「周杰伦」却命中了——提到歌手不等于提到这首歌")
+	}
+	if !tab.Mentions("「晴天」这一段我循环了一整天") {
+		t.Errorf("正文里明明有「晴天」，却没命中")
+	}
+}
+
+// TestTheCompactDashAndColonTitleGivesTheSongName 断「歌手-歌名：说明」那一
+// 档。
+//
+// 🔴 **两种分隔符挨在一起的时候要先切外层的**（票 #574 的第二轮评审：
+// 「周杰伦-晴天：电影主题曲」那一档只认出了「晴天：电影主题曲」，于是正文里
+// 提到「晴天」的那一条被判成没提到，界面显示零命中）。
+func TestTheCompactDashAndColonTitleGivesTheSongName(t *testing.T) {
+	tab := New("周杰伦-晴天：电影主题曲", "某个 UP 主")
+	if !has(t, tab, "晴天") {
+		t.Errorf("表里没有「晴天」：%q", tab.Forms())
+	}
+	if has(t, tab, "周杰伦") {
+		t.Errorf("表里有「周杰伦」——那是署名，不是歌名：%q", tab.Forms())
+	}
+	if has(t, tab, "晴天：电影主题曲") {
+		t.Errorf("表里有「晴天：电影主题曲」——那一段是歌名加说明，不是歌名：%q",
+			tab.Forms())
+	}
+	if !tab.Mentions("「晴天」这一段我循环了一整天") {
+		t.Errorf("正文里明明有「晴天」，却没命中")
+	}
+	if tab.Mentions("「周杰伦」这一段我循环了一整天") {
+		t.Errorf("正文里只有「周杰伦」却命中了——提到歌手不等于提到这首歌")
+	}
+}
+
+// TestTheSongNameIsNotSwallowedByAVersionNote 断「歌名：说明」那一档不把歌名
+// 一起吞掉。
+//
+// ⚠️ **说明那一族收得紧**：「告白气球新版」「钢琴家的告白」那样的歌名**含
+// 着**「版」「钢琴」，而它们是歌名的一部分——所以「说明」那一族只收「说明自
+// 己」的那些词，不收可能出现在歌名里的那些。
+func TestTheSongNameIsNotSwallowedByAVersionNote(t *testing.T) {
+	for _, title := range []string{"周杰伦：告白气球新版", "歌手：钢琴家的告白"} {
+		tab := New(title, "某个 UP 主")
+		if tab.Empty() {
+			t.Errorf("标题 %q 给出了空表", title)
+		}
+		if has(t, tab, "周杰伦") || has(t, tab, "歌手") {
+			t.Errorf("标题 %q 的表里有署名那一段：%q", title, tab.Forms())
 		}
 	}
 }

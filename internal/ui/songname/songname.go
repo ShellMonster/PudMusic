@@ -169,28 +169,47 @@ func (t Table) Forms() []string { return t.forms }
 //	破折号「歌手 - 歌名」  歌名在**后**那一段——前面那一段是署名，而提到
 //	                      歌手不等于提到这首歌（票 #574 的评审：提到「周杰
 //	                      伦」的那些评论不该被算成提到了「晴天」）。
-//	冒号「歌名：说明」      两侧**都**可能是歌名（「歌名：说明」与「歌手：
-//	                      歌名」两种写法 B 站都有）⇒ 两侧都当候选，宁可多
-//	                      算一条，也不要一条都找不到。
+//	冒号「歌手：歌名」  歌名在**后**那一段；而「歌名：说明」（"晴天：电影
+//	                      主题曲"）是**前**那一段——判据是**右边那一段
+//	                      是不是说明**（`isDescription`）。
 //	空白「官方MV 歌名」    歌名在**后**那一段。
+//
+// ⚠️ **两种分隔符挨在一起的时候，先切外层的**：「歌手-歌名：说明」那一档，
+// 先按破折号切成「歌手」和「歌名：说明」，再把后一段按冒号切一刀 ⇒ 歌名是
+// 「歌名」（票 #574 的第二轮评审：那一档原来只认出「歌名：说明」，于是正文
+// 里提到「歌名」的那一条被判成没提到）。
 func songSegments(plain string, hints []string) []string {
 	s := strings.TrimSpace(plain)
 	if s == "" {
 		return nil
 	}
 	if head, tail, ok := cutSep(s, dashSeps, true); ok {
-		if got := plainSegments(tail, hints); len(got) > 0 {
+		// ⚠️ **后一段自己再认一遍**（递归）：「歌手-歌名：说明」那一档的
+		// 后一段是「歌名：说明」，它自己里面还有一个冒号。
+		if got := songSegments(tail, hints); len(got) > 0 {
 			return got
 		}
 		// 「晴天 - 官方MV」那一档：后一段全是宣传词 ⇒ 回前一段。
-		if got := plainSegments(head, hints); len(got) > 0 {
+		//
+		// ⚠️ **这是「X - 说明」那一档**：X 到底是歌名还是署名，从标题本身
+		// 分不出来（认得出艺人时那一段会被剔掉，见 `plainSegments`）——
+		// 而这一档**本来就没有歌名可认**（后那一段是说明）。
+		if got := songSegments(head, hints); len(got) > 0 {
 			return got
 		}
 		return nil
 	}
 	if head, tail, ok := cutSep(s, colonSeps, false); ok {
-		got := plainSegments(head, hints)
-		return append(got, plainSegments(tail, hints)...)
+		// ⚠️ **右边是说明 ⇒ 歌名在左边**（「歌名：说明」那一档）。
+		if isDescription(tail) {
+			return plainSegments(head, hints)
+		}
+		// ⚠️ **右边不是说明 ⇒ 歌名在右边**（「歌手：歌名」那一档）。
+		//
+		// 🔴 **左边那一段不进表**（票 #574 的第二轮评审：「周杰伦：晴天」那
+		// 一档把「周杰伦」收进了别名表，于是只提到歌手的评论也被算成提到
+		// 了歌）——**提到歌手不等于提到这首歌**。
+		return plainSegments(tail, hints)
 	}
 	return plainSegments(s, hints)
 }
@@ -354,6 +373,53 @@ func isQualifier(s string) bool {
 		}
 	}
 	return false
+}
+
+// isDescription 报这一段是不是**说明**（「歌名：说明」那一档的右边那一段）。
+//
+// ⚠️ **它是冒号那一档的判据**：「歌手：歌名」⇒ 右边是歌名；「歌名：说明」⇒
+// 右边是说明 ⇒ 歌名在左边。
+//
+// ⚠️ **两张表**：宣传词那张在 `widgets/title`（`ContainsPromo`），版本说明
+// 那一族在这里（`descriptionWords`）——**不自己再抄一份宣传词表**（理由见
+// `widgets/title.IsPromoOnly` 的注释）。
+func isDescription(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	// 🔴 **空串不算说明**：那是「没有这一段」。
+	if tclean.ContainsPromo(s) {
+		return true
+	}
+	// ⚠️ **版本说明那一族**：整段就是它（"电影主题曲"、"现场版"…）。
+	if isQualifier(s) {
+		return true
+	}
+	// ⚠️ **含着版本说明那一族的词**：「电影主题曲」整段不是"主题曲"（所以
+	// `isQualifier` 认不出来），但它**含着**"主题曲" ⇒ 它是说明。
+	l := strings.ToLower(s)
+	for _, w := range descriptionWords {
+		if strings.Contains(l, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// descriptionWords 是「说明」那一族的词。
+//
+// ⚠️ **收得紧**：一个词只要**可能**出现在歌名里，就不进这张表——否则「歌手：
+// 钢琴家的告白」那一档会被认成「歌名：说明」（而「版」「歌词」「钢琴」「吉他」
+// 这些恰恰都在歌名里出现过）。
+//
+// ⚠️ **宣传词不在这里**：那张表在 `widgets/title` 里（`ContainsPromo`），
+// 两边不各抄一份（理由见 `widgets/title.IsPromoOnly` 的注释）。
+var descriptionWords = []string{
+	"主题曲", "插曲", "片尾曲", "片头曲", "原声带", "纯音乐", "伴奏",
+	"现场", "演唱会", "巡演", "翻唱", "instrumental", "demo", "试听",
+	"副标题", "说明", "介绍", "解说", "live", "cover", "remix", "official",
+	"字幕", "纯享",
 }
 
 // normalize 是「匹配用的写法」：小写 + 去掉空白。
