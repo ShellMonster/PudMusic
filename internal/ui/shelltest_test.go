@@ -6,11 +6,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shimmer"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -42,6 +45,152 @@ type testShell struct {
 
 	// settingsPath 是挂上去的那份设置在盘上的位置；没挂设置时是空串。
 	settingsPath string
+}
+
+// mainThreadStub 是**一个假的主线程**。
+//
+// # 它有两档，因为框架那一档也有两档
+//
+// 框架的 `mygo.RunOnMain`（`mygo/loop.go:94`）在**主线程上直接执行** `fn`
+// （`isMainThread()` 短路，**不排队也不阻塞**），而**从后台调**它会**投递到
+// 主线程的队列里，并等它跑完**。
+//
+// ⚠️ **这个差别就是 F1 那个竞态的机制**：后台那一趟（封面）把段**投进队列**
+// ——它**还在排队**，没执行；而用户按文本走的是**主线程档**，那一档**绕过
+// 队列直接执行**——于是文本**先**落地，队列里那个旧封面的段**随后**才执行。
+// 如果那一段的判据在**段外**（投递时就判），它早就通过了，于是它执行时会把
+// 文本**覆盖掉**。
+//
+// 所以这里照框架分成两档：
+//
+//   - **主线程档**（`run`）：**直接执行**（模拟 `isMainThread()` 短路），
+//     但**拿同一把锁**——于是它和后台那一档**互斥**（生产上主线程是单线程
+//     的，同一时刻只有一段在跑）。
+//   - **后台档**（`runBackground`）：**投进队列**，由**一个专用 goroutine**
+//     取出执行，**并等它跑完**。
+//
+// ⚠️ **互斥靠那把锁**：生产上「主线程是单线程的」这件事**保证**了「判据和
+// 写」那一段跑着的期间插不进另一次复制。而测试里两档跑在**两个 goroutine**
+// 上——所以那把锁就是「单线程」在测试里的替身。
+//
+// # 为什么基座里就要有它
+//
+// 「复制」那一族（票 #556）的正确性**整个建立在「主线程是单线程的」这件事
+// 上**：判号和写放进**同一个主线程段**，于是同一时刻只有一段在跑，两次写天然
+// 串行，过时的那一份**根本不会落地**（见 `internal/ui/clipboard.go` 的
+// `copyClipboard`）。
+//
+// ⚠️ **生产那一档（`mygo.RunOnMain`）在无头 Tester 里不能用**：它会
+// `needsApp`（没跑过 `App.Run` 就 panic，见 `mygo/app.go:128`），而从后台
+// 调它还会**等一个永远不来的人**（无头环境里没有事件循环在排空那个队列）——
+// 那一等就是**挂死**，而挂死是**静默**的（测试跑到那一句就再也不动了）。
+//
+// ⚠️ **所以它装在基座里**：这样**任何**一条用到「进主线程」的测试都不可能
+// 撞上生产那一档——不是「记得换掉」，而是「压根没有那一档可撞」。
+type mainThreadStub struct {
+	// mu 是**那把锁**：生产上「主线程是单线程的」在测试里的替身（见上面的
+	// 文件头）。两档都拿它，所以同一时刻只有一段在跑。
+	mu sync.Mutex
+	// jobs 是**后台那一档的队列**。
+	jobs chan mainJob
+	// gate 是「卡住接下来那一段」的闸门（测试要造「这一段还在排队、没落地」
+	// 那一刻）。
+	//
+	// ⚠️ **它在段的开头读**（见下面的 goroutine）：而闸门是**在投递时**就
+	// 装上的（`blockNext` 在那一段**进来之前**调）——所以它卡住的正是**下一
+	// 个**进来的段。
+	gate chan struct{}
+	// entered 数着「进来过几段」。
+	entered atomic.Int64
+	// queued 数着「**从队列里取出来**了几段」（后台那一档）。
+	//
+	// ⚠️ **它和 entered 分开数**：主线程档（直接执行）也进 entered——而
+	// 「这一段还在队列里排队」这件事**只有后台那一档**才有。
+	queued atomic.Int64
+}
+
+// mainJob 是排进主线程队列的一段。
+type mainJob struct {
+	fn   func()
+	done chan struct{}
+}
+
+// newMainThreadStub 造一个假主线程，并把它收在测试结束时的清理里。
+func newMainThreadStub(t *testing.T) *mainThreadStub {
+	t.Helper()
+	m := &mainThreadStub{jobs: make(chan mainJob)}
+	// ⚠️ **一个专用 goroutine**：它就是**后台那一档**的执行者——从后台投递
+	// 过来的段都由**它**逐个执行。
+	go func() {
+		for job := range m.jobs {
+			m.entered.Add(1)
+			m.queued.Add(1)
+			// ⚠️ **闸门在段的开头读**：这一段**已经算进来了**（entered 加过了），
+			// 但它的**函数体还没跑**——这就是「这一段已经进了主线程、还没
+			// 落地」那一刻。
+			if gate := m.gate; gate != nil {
+				<-gate
+			}
+			m.mu.Lock()
+			job.fn()
+			m.mu.Unlock()
+			close(job.done)
+		}
+	}()
+	t.Cleanup(func() { close(m.jobs) })
+	return m
+}
+
+// run 是**主线程那一档**：**直接执行**（框架那一档在主线程上短路，
+// `mygo/loop.go:94`）。
+//
+// ⚠️ **它拿那把锁**：于是它和后台那一档**互斥**——生产上「主线程是单线程
+// 的」保证的就是这件事（见文件头）。
+func (m *mainThreadStub) run(fn func()) {
+	m.entered.Add(1)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	fn()
+}
+
+// runBackground 是**后台那一档**：**投进队列**，由那个专用 goroutine 执行，
+// **并等它跑完**（框架那一档从后台调时会等，`mygo/loop.go:94` 的 `<-done`）。
+//
+// ⚠️ **它和主线程档的区别就是 F1 的机制**：这一档**排队**，而主线程档
+// **绕过队列直接执行**——于是主线程档可以**先于**队列里排着的段落地。
+func (m *mainThreadStub) runBackground(fn func()) {
+	done := make(chan struct{})
+	m.jobs <- mainJob{fn: fn, done: done}
+	<-done
+}
+
+// blockNext 让**接下来那一段**卡在闸门上，直到返回的那个函数被调。
+//
+// ⚠️ **它得在那一段**进来之前**调**：闸门在段的开头读，而那一段是**从队列
+// 里被取出来**的时候才读——所以要么提前装，要么来不及。
+//
+// ⚠️ **它模拟的是「这一段还在排队、还没落地」那一刻**——而这正是那个竞态
+// 的关键位置：主线程档**绕过队列直接执行**，所以它能**插到这一段前面**。
+func (m *mainThreadStub) blockNext() (release func()) {
+	ch := make(chan struct{})
+	m.gate = ch
+	return func() {
+		m.gate = nil
+		close(ch)
+	}
+}
+
+// enteredCount 报「进来过几段」。
+func (m *mainThreadStub) enteredCount() int64 {
+	return m.entered.Load()
+}
+
+// queuedCount 报「**从队列里取出来**了几段」（后台那一档）。
+//
+// ⚠️ **它是「取出来」不是「执行完」**：闸门卡在段的开头，所以取出来的那一段
+// 可能**还没跑**——而那正是「这一段还在排队」那一刻。
+func (m *mainThreadStub) queuedCount() int64 {
+	return m.queued.Load()
 }
 
 // shellOpt 改「造一个外壳」这件事的某一样。全部可选。
@@ -213,7 +362,9 @@ func newTestShell(t *testing.T, opts ...shellOpt) *testShell {
 	// ⚠️ **装的是一个新开关，不是改外壳那一个**：外壳那一个（`s.visible`）要等
 	// 外壳建好之后才拿得到，而这里是在建外壳**之前**。而「上一条测试留下的
 	// 看不见」正是要挡的那件事——换一个新的、看得见的，等于把它抹掉。
-	hover.SetVisibleFlag(hover.NewVisibleFlag())
+	flag := hover.NewVisibleFlag()
+	hover.SetVisibleFlag(flag)
+	shimmer.SetVisibleFlag(flag)
 	if sp.migration != nil {
 		migration.mu.Lock()
 		migration.r = *sp.migration
@@ -249,9 +400,6 @@ func newTestShell(t *testing.T, opts ...shellOpt) *testShell {
 
 	s := New(a)
 	sh.s = s
-	if sp.stub != nil {
-		sp.stub(t, s)
-	}
 	// ⚠️ **这里不覆盖生产的切页档**（票 #469）：生产那一档是「不做」
 	// （`router.go` 的 `newRouter` 显式设的 `TransitionNone`）。
 	//
@@ -265,6 +413,23 @@ func newTestShell(t *testing.T, opts ...shellOpt) *testShell {
 	// 默认走生产那一档。要验动画的那一条用 `withPageAnimation()` 要回来。
 	if sp.animating {
 		s.router.Transition = mygoui.TransitionAuto
+	}
+
+	// ⚠️ **假主线程装在基座里**：生产那一档（`mygo.RunOnMain`）在无头环境里
+	// 会**挂死**（它要等一个事件循环来排空队列，而无头环境里没有那个循环）。
+	// 装在这里，于是**任何**一条用到「进主线程」的测试都不可能撞上它——
+	// 不是「记得换掉」，而是「压根没有那一档可撞」（理由见 `mainThreadStub`）。
+	//
+	// ⚠️ **两档都装**：主线程档（直接执行）和后台档（排队 + 等）——那个
+	// 差别**就是那个竞态的机制**（见 `mainThreadStub` 的文件头）。
+	main := newMainThreadStub(t)
+	s.runOnMain = main.run
+	s.runOnMainBackground = main.runBackground
+	// ⚠️ **装在 `sp.stub` 之后**：测试要换掉它的时候（`copyShellWith` 那个
+	// tweak 口子）换得掉——不然它**被基座盖回去**，而测试还以为自己换掉了
+	// （症状：那条测试造出来的交错**压根没发生**，而它照样是绿的）。
+	if sp.stub != nil {
+		sp.stub(t, s)
 	}
 
 	w, h := sp.width, sp.height
@@ -444,7 +609,7 @@ func TestALeakedMigrationReportCannotReachTheNextShell(t *testing.T) {
 		migration.mu.Unlock()
 
 		tt, s, _, _ := shellWithSettings(t, app.ThemeModeDark, true)
-		want := BuildTheme(s.app.SettingsSnapshot(), true).Background
+		want := wantBackground(t, s.app, true)
 		for f := range 3 {
 			tt.Frame()
 			// ⚠️ **推钟让入场走完**：提示是淡进来的（250ms），而 Tester 的钟

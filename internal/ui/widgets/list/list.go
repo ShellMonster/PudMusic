@@ -127,6 +127,9 @@ type Music struct {
 	// 时那一格空着（比如收藏夹里一条没给 fav_time 的音轨）。
 	PubTime time.Time
 
+	// Progress 是「看到哪儿」，只有最近播放填；大于 0 且有时长时，标题下面画一条细进度条。
+	Progress time.Duration
+
 	// Item 是播放和右键菜单真正用的那一项。B 站的歌以后由接口填，
 	// 现在先有本地文件（app.LocalItem）。
 	Item app.Item
@@ -174,6 +177,9 @@ func (c Columns) pubTimeTitle() string {
 // 会因为「同一个 ListState 被两个 List 显示」而 panic，`ui/list.go` 的
 // buildList）。
 type List struct {
+	// hl 是要在歌名里标出来的搜索词（空 = 不标）。见 highlight.go。
+	hl string
+
 	songs []Music
 	state ui.ListState
 
@@ -736,9 +742,14 @@ func (l *List) View(c *ui.Context) {
 		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击：
 		// `biu/src/components/music-list-item/index.tsx`）。
 		//
+		// ⚠️ **走「这一首」那一档**（`l.rowPlay` → 歌是 `Actions.PlayNow`、
+		// UP 主是 `Actions.Play` 进空间），不是「从这一首往后」：点一首歌不清空
+		// 用户已经排好的队列（票 #608，照上游 Biu 的 `play()`）。「从这一首往后听」
+		// 在右键菜单里，那一条才是换队列的。
+		//
 		// ⚠️ **给的是「歌的下标」**：框架那个游标记的是列表的行号，而页内头部
 		// 占着第 0 行（见 lead.go）。
-		OnSubmit(func() { l.playFrom(l.selSong()) }).
+		OnSubmit(func() { l.rowPlay(l.selSong()) }).
 		// ⚠️ **焦点环只留在「还没选中任何一行」的时候**（票 #197）。
 		//
 		// 框架默认给**整张列表**画一圈焦点环（`mygo/ui/inline.go` 的 ringShown），
@@ -870,7 +881,16 @@ func (l *List) failedRowText(c *ui.Context) {
 // 给的是**从这一首起的全部**，和 Biu 的「在 B 站打开这一首从这儿听」一致：
 // 点了一首，接下来的队列就应该是它和它后面那些，不是整个歌单从头。
 // 实现和网格共用（shared.go），两个视图的「播放」语义不可能对不上。
+//
+// ⚠️ **只有右键菜单那一项（「从这一首往后听」）还走它**：双击 / 回车 / 封面
+// 播放钮走 `playNow`（票 #608）。
 func (l *List) playFrom(i int) { playFrom(l.songs, l.acts, i) }
+
+// playNow 让第 i 首成为正在放的那首，不换队列（双击 / 回车 / 封面播放钮，票 #608）。
+func (l *List) playNow(i int) { playNow(l.songs, l.acts, i) }
+
+// rowPlay 是这一行的主操作：歌就放这一首（不换队列），UP 主就进他的空间。
+func (l *List) rowPlay(i int) { rowPlay(l.songs, l.acts, i) }
 
 // indexText 是这一行前面那个序号。Biu 是 1 起的（`#` 列）。
 func indexText(i int) string { return strconv.Itoa(i + 1) }

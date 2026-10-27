@@ -135,7 +135,7 @@ func (c *Client) SpaceAcc(ctx context.Context, mid int64) (*User, error) {
 		Mid:      d.Mid,
 		Name:     d.Name,
 		Sign:     d.Sign,
-		Face:     d.Face,
+		Face:     normalizeImageURL(d.Face),
 		Banner:   bannerOf(d),
 		Level:    d.Level,
 		Official: officialOf(d),
@@ -149,11 +149,15 @@ func (c *Client) SpaceAcc(ctx context.Context, mid int64) (*User, error) {
 //
 // 两份都没有是常态（没设头图的 UP 主占大多数），这时候给空串——
 // 界面画一块纯色，而不是画一张 B 站的空白占位图。
+//
+// ⚠️ **地址要补协议头**（`normalizeImageURL`）：B 站这一族接口给的是**协议相对
+// 地址**，而封面缓存用 `http.Client` 抓——不补的话那张头图永远是一块纯色
+// （而且是**永久失败**，一次都不重试）。
 func bannerOf(d spaceAccData) string {
 	if d.TopPhoto2.L200h != "" {
-		return d.TopPhoto2.L200h
+		return normalizeImageURL(d.TopPhoto2.L200h)
 	}
-	return d.TopPhoto
+	return normalizeImageURL(d.TopPhoto)
 }
 
 // officialOf 取认证信息，没认证给空串。
@@ -463,7 +467,7 @@ func upVideoPageFrom(raw []byte, q UpVideoQuery) (UpVideoPage, error) {
 		pg.Videos = append(pg.Videos, UpVideo{
 			Bvid:        v.Bvid,
 			Title:       decodeEntities(v.Title),
-			Cover:       v.Pic,
+			Cover:       normalizeImageURL(v.Pic),
 			Duration:    upVideoDuration(v.Length),
 			Play:        int64(v.Play),
 			Description: v.Description,
@@ -608,13 +612,13 @@ func (c *Client) SpaceSeries(ctx context.Context, mid int64, page, size int) (Sp
 	out := SpaceSeriesPage{}
 	for _, s := range d.ItemsLists.SeasonsList {
 		out.Collections = append(out.Collections, UpCollection{
-			ID: s.Meta.SeasonID, Title: decodeEntities(s.Meta.Name), Cover: s.Meta.Cover,
+			ID: s.Meta.SeasonID, Title: decodeEntities(s.Meta.Name), Cover: normalizeImageURL(s.Meta.Cover),
 			Count: s.Meta.Total, Type: collectionTypeSeason,
 		})
 	}
 	for _, s := range d.ItemsLists.SeriesList {
 		out.Collections = append(out.Collections, UpCollection{
-			ID: s.Meta.SeriesID, Title: decodeEntities(s.Meta.Name), Cover: s.Meta.Cover,
+			ID: s.Meta.SeriesID, Title: decodeEntities(s.Meta.Name), Cover: normalizeImageURL(s.Meta.Cover),
 			Count: s.Meta.Total, Type: collectionTypeSeries,
 		})
 	}
@@ -688,7 +692,7 @@ func (c *Client) SpaceFavFolders(ctx context.Context, mid int64, page, size int)
 			continue
 		}
 		out.Folders = append(out.Folders, UpCollection{
-			ID: f.ID, Title: decodeEntities(f.Title), Cover: f.Cover, Count: f.Media, Type: collectionTypeFav,
+			ID: f.ID, Title: decodeEntities(f.Title), Cover: normalizeImageURL(f.Cover), Count: f.Media, Type: collectionTypeFav,
 		})
 	}
 	// ⚠️ B 站的 `has_more` 有时候不给（老接口），所以「拿够了没有」也算一道。

@@ -128,6 +128,7 @@ func (s *Shell) syncSearch(c *ui.Context) {
 	// 🔴 设置里的「数据显示样式」在这一帧生效（`s.displayView` 的注释写了为什么
 	// 每帧都要调）。
 	st.lists[cur].list.SetView(s.displayView())
+	st.lists[cur].list.SetHighlight(keyword)
 
 	// 收后台投回来的结果、起该起的那一拉。
 	st.lists[cur].list.Sync(c)

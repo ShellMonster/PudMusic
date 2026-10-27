@@ -337,6 +337,9 @@ func (c *Cache) notify() {
 // ⚠️ **每一次 Get 都是「这一张正画在画面上」**：挤缓存时正画着的那几张不许
 // 挤（票 #358，理由见 `entry.drawn`）。
 func (c *Cache) Get(url string) State {
+	// ⚠️ **协议相对的地址在这里兜一道**（理由见 `absoluteURL`）：拿它当 key
+	// 也是同一条规范化之后的串，于是同一个地址无论服务层补没补过都是同一格。
+	url = absoluteURL(url)
 	if url == "" {
 		return State{}
 	}
@@ -446,6 +449,9 @@ func (c *Cache) start(e *entry) bool {
 //
 // 真的取消：请求带的就是这个 context，服务端收得到。
 func (c *Cache) Cancel(url string) {
+	// key 要和 `Get` 里那一个同一条规范化之后的串（见 `absoluteURL`），
+	// 否则取消的是一个永远不会被查的键。
+	url = absoluteURL(url)
 	if v, ok := c.entries.LoadAndDelete(url); ok {
 		e := v.(*entry)
 		c.forget(e)
@@ -669,6 +675,9 @@ func (c *Cache) fetch(e *entry) {
 
 // download 从网络拿这张图的字节。
 func (c *Cache) download(ctx context.Context, url string) ([]byte, error) {
+	// ⚠️ **兜一道协议**（理由见 `absoluteURL`）：漏了它，协议相对的地址会以
+	// `unsupported protocol scheme ""` 落到 `permanentError` 上，一次都不重试。
+	url = absoluteURL(url)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		// 地址本身不合法：再试多少次也是同一个结果。
@@ -690,11 +699,88 @@ func (c *Cache) download(ctx context.Context, url string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, maxImageBytes))
 }
 
+// Source 拿这张图的**原始字节**（下回来的那份，不是解码缩放之后的那份）。
+//
+// # 为什么要有这一条
+//
+// `ui.Bitmap` 的像素**读不回来**（`mygo/ui/bitmap.go`：只有 Pixelated /
+// Update / Size 三个方法），而界面上的封面正是拿字节解出来的那个 Bitmap。
+// 所以要把封面**原样**交出去（比如放进剪贴板），只有两条路：
+//
+//	① 重新下一遍 —— 浪费一次网络往返，还可能拿到的和界面上那一张不是同一份
+//	② 留住原始字节 —— 就是这一条
+//
+// # 它怎么找字节
+//
+// 先问磁盘缓存（和 `fetch` 同一个顺序）：同一张图启动第二次不用再打图床。
+// 盘上没有就下一次——**和 `fetch` 走的是同一个 `download`**（Referer、UA、
+// 字节上限都在那儿）。
+//
+// ⚠️ **它不占在途名额**（和 `fetch` 同一个理由）：这一条是**用户明确要**的
+// 一次性动作，不是一次滚列表时几十张图一起要。
+//
+// ⚠️ **它不记进 LRU**：内存缓存记的是「解码之后占多少字节」，而这一条给的
+// 是原始字节（压缩过的），两者不同量纲，混进同一本账里上限就废了。
+//
+// ⚠️ **不落盘的那一份不缓存**：拿到的字节直接交给调用方，调用方用完就扔。
+func (c *Cache) Source(url string) ([]byte, error) {
+	url = absoluteURL(url)
+	if url == "" {
+		return nil, errors.New("imgcache: 没有地址")
+	}
+	if c.closed.Load() {
+		return nil, ErrClosed
+	}
+	// 盘上那份：和 `fetch` 一样先问盘（读盘只该由后台 goroutine 调，这一处
+	// 的调用方在后台，见界面层那一处注释）。
+	if name := c.diskName(url); name != "" {
+		if data, ok := c.disk.open(name); ok {
+			return data, nil
+		}
+	}
+	data, err := c.download(c.ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+// SourceImage 拿这张图**摆正之后**的那一份（`image.Image`）。
+//
+// # 为什么要有这一条
+//
+// 要把封面**原样交出去**（比如放进剪贴板）只有两条路：
+//
+//	① 重新下一遍 —— 浪费一次网络往返，还可能拿到的和界面上那一张不是同一份
+//	② 留住原始字节 —— `Source` 就是这一条
+//
+// 而从字节到「一张能直接编码的图」中间还差一步：**EXIF 摆正**。界面上摆的是
+// 摆正后的那一张（框架的 `ui.DecodeBitmap` 按 EXIF 转），而从原始字节重新解的
+// 时候得**自己转**，否则交出去的是一张横躺着的图。
+//
+// ⚠️ **摆正这一段放在这个包里**：EXIF 的解析和四种格式的解码器注册都在这儿
+// （`scale.go` 顶上那几个 `_ "image/..."` 导入），在外面重写一遍就是两份会走偏
+// 的实现。
+//
+// ⚠️ **不缩放**：这一条给的是**原图**，不是存进缓存的那一份（那个缩到最长边
+// 768）。剪贴板要的是原图。
+//
+// ⚠️ **只该由后台 goroutine 调**：读盘和下载都在这一条里，而读盘只该由后台调
+// （见 `disk.go` 的线程模型）。
+func (c *Cache) SourceImage(url string) (image.Image, error) {
+	raw, err := c.Source(url)
+	if err != nil {
+		return nil, err
+	}
+	return decodeOriented(raw)
+}
+
 // PNG 返回这张封面的 PNG 字节（给「复制封面」放剪贴板用）。先看磁盘缓存，没有才
 // 下载；原字节已经是 PNG 就原样返回，否则解码后重新编码。
 //
 // ⚠️ 要在后台 goroutine 里调：下载和编码都是慢活，不许在 view 里调。
 func (c *Cache) PNG(ctx context.Context, url string) ([]byte, error) {
+	url = absoluteURL(url)
 	if c == nil || url == "" {
 		return nil, errors.New("imgcache: 没有封面地址")
 	}
@@ -728,11 +814,15 @@ func toPNG(data []byte) ([]byte, error) {
 }
 
 // diskName 是这个 url 在磁盘缓存里的文件名，空表示不落盘。
+//
+// ⚠️ **先补协议再算名**：盘上那份是按 URL 算出来的文件名，补没补过协议算出来
+// 是两个不同的名字——不统一的话同一张图会在盘上存两份，而第二次启动读不到
+// 第一次那份（读的是一个永远不会被写到的名字）。
 func (c *Cache) diskName(url string) string {
 	if c.disk == nil {
 		return ""
 	}
-	return diskNameFor(url)
+	return diskNameFor(absoluteURL(url))
 }
 
 // decodeWorker 是解码池的一个 worker。

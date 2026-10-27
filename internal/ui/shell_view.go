@@ -17,6 +17,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shimmer"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -52,9 +53,16 @@ func (s *Shell) View(c *ui.Context) {
 	// ⚠️ **顺带把答案刷成此刻的**：那个开关是**活的**（波形在画的时候读它），
 	// 而可见性有可能是在两次 build 之间变的（`noteWindow` 那一条路也会改它，
 	// 但这里再刷一次是保险——`presence` 是唯一的事实来源）。
+	//
+	// ⚠️ **两处都要装同一个指针**：`hover` 那边管波形和列表行上的淡入淡出，
+	// `shimmer` 那边管骨架屏和封面「正在加载」那一档的扫光。它们是两个包
+	// （互相 import 会成环，见 `widgets/shimmer` 的文件头），但装的是**同一份**
+	// 「这一扇窗看不看得见」——各装一份各的值就会出现「波形停了、骨架屏还在
+	// 烧电」。
 	visible := s.visibleFlag()
 	visible.Store(s.presence.seen())
 	hover.SetVisibleFlag(visible)
+	shimmer.SetVisibleFlag(visible)
 
 	// 从看不见恢复过来的那一帧：让那些「有中间状态」的动画一次到位（见
 	// snapScroll 的注释：同一时刻的两遍 view 都算这一帧）。

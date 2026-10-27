@@ -362,6 +362,27 @@ func (a *App) peekPreparedNext() (Item, *bili.StreamRef) {
 	return a.prefetch.item, a.prefetch.ref
 }
 
+// TestOnlyPrefetchReady 报「下一首的地址**已经备好了**」。**只给测试用**。
+//
+// ⚠️ **为什么测试需要它**：预取有**两段**——
+//
+//	请求发出去了   → 取流接口的调用次数 +1（**这是「在途」**）
+//	地址回来了     → 预取状态落成 `prefetchReady`（**这是「就绪」**）
+//
+// 而「按下一首吃不吃预取」这件事**只在就绪的时候才成立**：在途的时候
+// 手上压根没有地址可用，按下一首照常重新取一次流是**对的**。
+//
+// ⚠️ **别拿「请求发出去了」当「备好了」**：那两件事之间有一整个网络往返
+// （B 站取流接口带签名，几十到几百毫秒），机器一忙那一拍就过去了 ⇒
+// 拿着「在途」去按下一首 ⇒ 必然重新取流 ⇒ 判据（取流次数）多一次。
+//
+// 名字里带 TestOnly 是为了 grep 一下就找得到（理由同 `SetVideoOpener`）。
+func (a *App) TestOnlyPrefetchReady() bool {
+	a.prefetchMu.Lock()
+	defer a.prefetchMu.Unlock()
+	return a.prefetch != nil && a.prefetch.state == prefetchReady
+}
+
 // takePrefetch 取出「备好的那一份」，给真播下一首用。
 //
 // 它同时是**黑名单的出口**：备失败的那一份在这里被丢掉（状态清空），于是

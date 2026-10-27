@@ -127,6 +127,9 @@ type RecommendItem struct {
 	View int64
 	// Duration 是时长。音乐榜那个是**秒**（`related_archive.duration`）。
 	Duration time.Duration
+	// ViewAt / Progress 只有「最近播放」（观看历史）填：什么时候看的、看到哪儿。
+	ViewAt   time.Time
+	Progress time.Duration
 }
 
 // errReadRecommend 是「HTTP 200、code 0，但 data 的形状不是我们认识的那个」。

@@ -30,7 +30,7 @@ const updateSection = "关于应用"
 //
 // 它画三样东西：当前版本（有更新时接一个箭头和新版本号）、一句话说明、以及那个
 // 按钮。三样都从 `st` 现读，每帧一次——界面层不缓存更新状态（那是 `App` 的事）。
-func (s *Shell) settingsUpdate(c *ui.Context, st app.UpdateState) {
+func (s *Shell) settingsUpdate(c *ui.Context, st app.UpdateState, ro bool) {
 	if !s.app.UpdateMounted() {
 		// 没挂上更新（例如 `MountUpdates` 拿不到应用数据目录而提前返回的那种
 		// 情况）就不摆这一段。摆一个永远关着的按钮加一句「不能自动更新」，是在
@@ -41,8 +41,45 @@ func (s *Shell) settingsUpdate(c *ui.Context, st app.UpdateState) {
 	s.settingGroup(c, updateSection, func() {
 		s.settingRowEl(c, func() { s.updateVersionTitle(c, st) }, s.updateHint(st),
 			func() { s.settingsUpdateButton(c, st) })
+		// 🔴 **「有更新了弹系统通知」那一格**（票 #559，票面第 3 条「更新提醒
+		// 可复用同一基础设施但另开开关」）。
+		//
+		// ⚠️ **它摆在这一段里**：它说的是「有更新了」这一件事怎么告诉用户，而
+		// 「有更新了」是这一段的东西。摆在别处（比如「系统」那一段）的话，用户
+		// 找不到它——而它是**默认开着**的一格（理由见
+		// `app.Settings.UpdateNotification`），用户想关掉它得先找到它。
+		// ⚠️ **这一格写的是设置文件**，所以它吃 `ro`（设置只读时一个字都不许写
+		// 回去）：上面那一行（版本 / 检查更新）写的是更新器自己那一份
+		// （`app-update.json`），所以它不吃——两件事不一样。
+		s.settingRow(c, updateNotificationTitle, "",
+			func() { s.pickUpdateNotification(c, ro) })
 	})
 	s.viewUpdateDialog(c, st)
+}
+
+// updateNotificationTitle 是那一格的标题。
+//
+// ⚠️ **它和 `switchHint` 的键是同一个字**（见 `switch_hint.go`）：那一格的效果
+// 在界面上**看不出来**（用户不在应用里时，通知弹在通知中心，而不在界面上），
+// 所以拨开之后要有一句话说明它会做什么——而那句话是按标题查表的。
+const updateNotificationTitle = "更新提醒"
+
+// pickUpdateNotification 是「有更新了弹系统通知」那一格。
+//
+// ⚠️ **它读设置的方式和别的开关一样**（每帧从 `st` 读），而 `st` 是设置页
+// 画的时候传进来的那份快照——所以这一格不用自己缓存。
+//
+// ⚠️ **它存的是指针**（`UpdateNotification` 是 `*bool`，理由见
+// `app.Settings.UpdateNotification`）：「没设过」（nil）和「用户关了」（false）
+// 必须分得开，否则老用户升级上来就会平白多一条通知的打扰。
+func (s *Shell) pickUpdateNotification(c *ui.Context, ro bool) {
+	st := s.app.SettingsSnapshot()
+	on := st.UpdateNotificationEnabled()
+	s.pickSwitch(c, updateNotificationTitle, updateNotificationTitle, on, ro,
+		func(cur *app.Settings, v bool) {
+			b := v
+			cur.UpdateNotification = &b
+		})
 }
 
 // updateVersionTitle 是那一行的标题。

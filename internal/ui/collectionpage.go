@@ -41,6 +41,8 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/skeleton"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -600,8 +602,20 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 	ui.Row(c).Key("collection-header").Gap(space.Px16).Padding(space.Px20, space.Px20, space.Px20).
 		Radius(t.Radius * 2).LinearGradient(glow).
 		Children(func() {
-			// ① 封面。空地址时 imgcache 画空框（没给封面的收藏夹真的有）。
-			imgcache.View(c, s.images, info.Cover, collectionCoverW, collectionCoverH)
+			// ① 封面。
+			//
+			// ⚠️ **元信息还没回来时传空地址就是「画成没有封面」**（2026-10-27）：
+			// `info.Cover` 在 `!Loaded` 时是空串，而 `imgcache` 把空地址当
+			// 「**本来就没有**」那一档画（浅底 + 描边框 + 图片图标）——于是一个
+			// **有封面**的收藏夹在打开的头几帧里会先画成「没有封面」，数据到了
+			// 才换成图。那两档的含义是相反的。
+			//
+			// 所以 `!Loaded` 时直接画「正在加载」那一档（一块带扫光的灰）。
+			if info.Loaded {
+				shadow.TailwindLG(imgcache.View(c, s.images, info.Cover, collectionCoverW, collectionCoverH))
+			} else {
+				shadow.TailwindLG(imgcache.Loading(c, collectionCoverW, collectionCoverH, imgcache.Shape{}))
+			}
 
 			ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(collectionHeadGap).Children(func() {
 				// ⚠️ **这个标题是 30（`scale.CollectionTitle`），不是页标题那个数**：
@@ -618,13 +632,30 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 				// ③ 类型 + 条目数。Biu 写的是「{公开|私密}收藏夹 • N 条视频」
 				// （`header/index.tsx:88-96`）——**条目数永远说「条视频」**，
 				// 上游连音频也是这么写的，这里照抄。
-				ui.Text(c, collectionKindText(p.ref.Type, info.Private)+" • "+
-					strconv.Itoa(info.MediaCount)+" 条视频").
+				//
+				// 🔴 **没拉到之前不写数**（2026-10-27）：`CollectionInfo` 在
+				// `!Loaded` 时是零值，照写就是**「公开收藏夹 • 0 条视频」**——
+				// 那个 0 是**假数**（真实值可能是几百），和 UP 空间那边
+				// 「粉丝数 0」是同一种错（见 `SpaceHeader.StatOK` 的注释）。
+				// 这一档只写类型，数等到手了再补。
+				ui.Text(c, collectionHeaderKindText(p.ref.Type, info)).
 					FontSize(scale.Font(c, scale.CollectionCopy)).LineHeight(leading.Copy).
 					TextColor(t.TextMuted).MaxLines(1)
 
 				// ④ 创建者：一枚 24 的圆头像 + 14 的昵称（上游是一个 `User`）。
-				if info.OwnerName != "" {
+				//
+				// ⚠️ **没拉到之前这一行要留位**（2026-10-27）：`OwnerName` 在
+				// `!Loaded` 时是空串，原先整行不画——数据到了这一行凭空冒出来，
+				// 头图区高度跳一截（下面的操作条和列表跟着往下走）。所以那一档
+				// 摆一行**同高的骨架**（一个 24 的圆 + 一道 14 高的字条）。
+				if !info.Loaded {
+					ui.Row(c).Key("collection-owner:skel").Gap(space.Px8).Center().
+						Label(collectionOwnerLoadingText).Children(func() {
+						skeleton.Block(c, "collection-owner:skel:av",
+							collectionOwnerAvatarSize, collectionOwnerAvatarSize, collectionOwnerAvatarSize/2)
+						skeleton.Block(c, "collection-owner:skel:n", 96, 14, 4)
+					})
+				} else if info.OwnerName != "" {
 					ui.Row(c).Gap(space.Px8).Center().Children(func() {
 						s.viewCollectionOwnerAvatar(c, info.OwnerFace, info.OwnerMid)
 						// 🔴 **名字是一枚可点的名字型链接**（票 BMG-253）：这一行
@@ -645,11 +676,19 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 		})
 }
 
+// collectionOwnerLoadingText 是创建者那一行骨架的无障碍名字。
+const collectionOwnerLoadingText = "正在加载收藏夹信息"
+
 // viewCollectionOwnerAvatar 是创建者那一枚圆头像（`collectionOwnerAvatarSize`）。
 //
-// 地址空着、还没下回来、或者下失败时画一块同色的圆占位——**头像这一格不消失**：
+// 地址空着、还没下回来、或者下失败时画一块圆占位——**头像这一格不消失**：
 // 它是「创建者」那一行的开头，消失之后那一行只剩一个名字，左边凭空空出一格；
 // 而占位的大小和真头像一样，换上来的时候那一行不会动。
+//
+// 🔴 **有地址的三态交给 `imgcache`**（2026-10-27）：这一格原先只判 `Ready()`，
+// 其余三种画的是同一块 `Surface` 圆——而它下面的底就是 `Surface`，于是那一格
+// 在加载中看着**什么都没画**（一块和底同色的圆）。现在加载中带扫光、失败带
+// 描边框和人形，和「他压根没设头像」分得开。
 //
 // 🔴 **它是一枚按钮**（票 BMG-253）：这一行原先整个都点不动——用户看到「某某
 // 创建的」却进不去他的空间。悬停时外面多一圈主色的环（和顶栏那个头像同一套，
@@ -668,9 +707,10 @@ func (s *Shell) viewCollectionOwnerAvatar(c *ui.Context, face string, mid int64)
 	draw := func(label string) {
 		ui.Box(c).Size(side, side).Radius(side / 2).Clip().
 			Background(t.Surface).Label(label).Children(func() {
-			if st := s.images.Get(face); face != "" && st.Ready() {
-				ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(side, side)
+			if face == "" {
+				return
 			}
+			imgcache.States(c, s.images, face, side, side, side/2, imgcache.AvatarShape())
 		})
 	}
 	if mid <= 0 {
@@ -722,6 +762,24 @@ func collectionKindText(typ bili.CollectionType, private bool) string {
 		return "私密收藏夹"
 	}
 	return "公开收藏夹"
+}
+
+// collectionHeaderKindText 是头图区第三行那整句话：类型 + 条目数。
+//
+// 🔴 **元信息没回来时不写数**（2026-10-27）：`CollectionInfo` 在 `!Loaded` 时
+// 是零值，`MediaCount` 就是 0——照写出来是**「公开收藏夹 • 0 条视频」**，
+// 而那个 0 是**假数**（真实值可能是几百上千）。用户会相信它，而且它看起来
+// 完全正常。和 UP 空间那边「粉丝数 0」是同一种错（见 `SpaceHeader.StatOK`
+// 那一段的账）。
+//
+// ⚠️ **类型这一半照画**：那是从路由上就能确定的（这一页是收藏夹还是合集），
+// 不依赖接口——把它也藏掉的话那一行在加载中只剩一段空白。
+func collectionHeaderKindText(typ bili.CollectionType, info app.CollectionInfo) string {
+	kind := collectionKindText(typ, info.Private)
+	if !info.Loaded {
+		return kind
+	}
+	return kind + " • " + strconv.Itoa(info.MediaCount) + " 条视频"
 }
 
 // ── 操作条 ─────────────────────────────────────────────────────────────────

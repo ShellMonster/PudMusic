@@ -129,18 +129,14 @@ const (
 	triTint = scrim.OnScrim
 )
 
-// PlayFrom 是「按下去从这一首往后听」这句话。
+// PlayNow 是「按下去放这一首」这句话。
 //
-// ⚠️ 「按下去」和**双击那一行**是同一件事（`playFrom`），所以提示是这一句而不是
-// 「播放」：说「播放」的话用户第一次按下去会发现整张歌单都换了队列——那正是它该做
-// 的事，只是那句话没有提前说。
-const PlayFrom = "从这一首往后听"
-
-// PlayNow 是「按下去加这一首并立即播」这句话。
+// ⚠️ **双击一行 / 回车 / 点封面上的播放三角说的都是这一句**（票 #608）：队列里已经
+// 有这一首就跳过去放它，没有就加到队尾——**原来排好的队列都留着**。
 //
-// ⚠️ 和 PlayFrom 分开：首页「新歌速递」那张卡片按下去保留原队列、追加并立即播这一首
-// （上游 `new-music-top.tsx` 的 `handlePlay`），说「从这一首往后听」会提前许诺一
-// 件那一下不做的事。
+// ⚠️ **它原来是「从这一首往后听」**（`PlayFrom`，票 #608 删掉了）：那时候那一圈
+// 反馈按下去真的是 `playFrom`（换掉整条队列）。行为改成只放这一首之后，那句话
+// 就成了一句没有兑现的许诺——读屏软件用户按下去听到的和看到的不一样。
 const PlayNow = "播放"
 
 // PlayingMark 是「这一行正在放」那句话，无障碍标签和无头 Tester 都靠它认这一行。
@@ -150,17 +146,23 @@ const PlayNow = "播放"
 // 的一个结论。
 const PlayingMark = "正在播放"
 
-// FromLabel 是列表行封面上那个播放三角的标签。**带上歌名**：读屏软件读的是标签而不
-// 是画出来的那几个字，光说「从这一首往后听」的话用户听到的是一句没头没尾的话，得自
-// 己猜是哪一首。顺带它让这一行在 Tester 里可认（`Tester.Find` 认标签）。
-func FromLabel(title string) string { return title + " " + PlayFrom }
-
-// PlayLabel 是「加这一首并立即播」那枚播放钮的标签，理由同 FromLabel。
+// PlayLabel 是「放这一首」那枚播放钮的标签。**带上歌名**：读屏软件读的是标签而不
+// 是画出来的那几个字，光说「播放」的话用户听到的是一句没头没尾的话，得自己猜是
+// 哪一首。顺带它让这一行在 Tester 里可认（`Tester.Find` 认标签）。
 func PlayLabel(title string) string { return title + " " + PlayNow }
+
+// CardOneLabel 是首页「新歌速递」那张卡片上播放钮的标签。
+//
+// ⚠️ **和 `PlayLabel` 说同一件事、用不同的字**：两块反馈可能出现在同一个盒子里，
+// 而节点键是「label + 后缀」——label 一样就是两个节点抢一个身份（理由见 `packIDs`）。
+const cardOneTip = "播放这一首"
+
+// CardOneLabel 是 `cardOneTip` 那一句带上歌名的那一份。
+func CardOneLabel(title string) string { return title + " " + cardOneTip }
 
 // ProfileTip 是「按下去进他的 UP 空间」那一句提示。
 //
-// # 为什么它和 `PlayFrom` 是两句话
+// # 为什么它和「播放」是两句话
 //
 // 搜索页「用户」那一档的行**不是歌**：按下去是跳到那个 UP 主的主页
 // （`internal/ui/searchresults.go` 的 `openSearchUser` → `navigate("/user/" + mid)`）。
@@ -174,7 +176,7 @@ func PlayLabel(title string) string { return title + " " + PlayNow }
 // 说了还是对不上。
 const ProfileTip = "进他的 UP 空间"
 
-// ProfileLabel 是那一档的无障碍名（带上名字），理由同 FromLabel。
+// ProfileLabel 是那一档的无障碍名（带上名字），理由同 PlayLabel。
 func ProfileLabel(title string) string { return title + " " + ProfileTip }
 
 // profileIcon 是「进这个人的空间」那一枚图形：一个人。
@@ -203,7 +205,7 @@ const (
 	glyphProfile
 )
 
-// PlayingLabel 是那个跳动波形的标签，理由同 FromLabel。
+// PlayingLabel 是那个跳动波形的标签，理由同 PlayLabel。
 func PlayingLabel(title string) string { return title + " " + PlayingMark }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -322,15 +324,32 @@ func idsOf(title string, kind idsKind) ids {
 }
 
 // packIDs 算出那一份身份。**只在歌名变了的时候走一次**。
+//
+// ⚠️ **label 是「按下去会怎样」那句话说给读屏软件的那一份**，它必须和 `tip`
+// （画面上悬停时露出来的那句）说的是同一件事：
+//
+//	idsRow / idsCard   → `PlayLabel`（放这一首，票 #608）
+//	idsCardOne         → `PlayLabel`（同上，首页新歌速递那一块）
+//	idsRowProfile 等   → `ProfileLabel`（进他的 UP 空间）
+//
+// ⚠️ **两处「放这一首」的 label 必须长得不一样**（`PlayLabel` 和 `CardOneLabel`）：
+// 这两块反馈**可能出现在同一个盒子里**（首页「新歌速递」那张卡和它右边那一列
+// 网格），而节点键是「label + 后缀」——label 一样就是两个节点抢一个身份，
+// 框架按「父 + 键」认节点，重了当场就是错配（票 #407 的那条测试盯着这一点）。
+// 两句话说的还是同一件事，只是「播放」和「播放这一首」两个说法。
+//
+// ⚠️ **`idsRow` / `idsCard` 以前是「从这一首往后听」**：那时候
+// 那一圈反馈按下去确实是 `playFrom`。票 #608 把它改成只放这一首之后，这里**必须
+// 跟着改**——不然读屏软件念的还是「从这一首往后听」，而按下去只放一首。
 func packIDs(title string, kind idsKind) ids {
 	var out ids
 	switch kind {
 	case idsCardOne:
-		out.label = PlayLabel(title)
+		out.label = CardOneLabel(title)
 	case idsRowProfile, idsCardProfile:
 		out.label = ProfileLabel(title)
 	default:
-		out.label = FromLabel(title)
+		out.label = PlayLabel(title)
 	}
 	switch kind {
 	case idsCard, idsCardOne, idsCardProfile:
@@ -467,7 +486,11 @@ func drawTri(p *ui.Painter, r ui.Rect, c ui.Color) {
 // 列表行
 // ─────────────────────────────────────────────────────────────────────────────
 
-// RowCover 是「列表行的封面 + 它上面那一圈 hover 反馈」，按下去是**从这一首往后听**。
+// RowCover 是「列表行的封面 + 它上面那一圈 hover 反馈」，按下去**放这一首**。
+//
+// ⚠️ **不是「从这一首往后听」了**（票 #608）：那一圈反馈按下去走的是列表行的
+// 主操作（`list.rowPlay` → `Actions.PlayNow`），只放这一首、不换队列。所以提示和
+// 无障碍名都是 `PlayNow`——读屏软件念的和做的是同一件事。
 //
 // 代替直接调 `imgcache.View`：反馈是**贴在封面上**的，它得知道封面有多大、又摆在
 // 哪儿。调用方手里只有「一个 48×48 的封面」，所以连盒子一起给了。
@@ -478,7 +501,7 @@ func drawTri(p *ui.Painter, r ui.Rect, c ui.Color) {
 // 是 140 高跟着格子宽走，那一边收两个（见 CardCover）。
 func RowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 	on bool, title string, play func()) {
-	rowCover(c, cache, url, size, on, title, idsOf(title, idsRow), PlayFrom, glyphPlay, play)
+	rowCover(c, cache, url, size, on, title, idsOf(title, idsRow), PlayNow, glyphPlay, play)
 }
 
 // RowCoverProfile 是同一圈反馈，但按下去是**进他的 UP 空间**。
@@ -591,7 +614,11 @@ func rowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 // 网格卡片
 // ─────────────────────────────────────────────────────────────────────────────
 
-// CardCover 是「网格卡片的封面 + 它上面那一圈 hover 反馈」。
+// CardCover 是「网格卡片的封面 + 它上面那一圈 hover 反馈」，按下去**放这一首**。
+//
+// ⚠️ **不是「从这一首往后接」了**（票 #608）：网格那一格的双击 / 回车 / 这一枚
+// 封面钮走的是 `Grid.rowPlay` → `Actions.PlayNow`，只放这一首、不换队列。提示和
+// 无障碍名因此是 `PlayNow`。
 //
 // playCount 是封面底部那一行左边的播放量、clock 是右边的时长。**任一个是空串就不画
 // 那半边**（本地音乐没有播放量，见 `list/grid.go` 里那一段注释）——画一列空白比不画
@@ -601,7 +628,7 @@ func rowCover(c *ui.Context, cache *imgcache.Cache, url string, size float32,
 // 类，两边都是「封面 + 两行字浮在页面上」，那不是差距（票面「不要做」里点名了）。
 func CardCover(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 	on bool, playCount, clock, title string, play func()) {
-	cardCover(c, cache, url, w, h, on, playCount, clock, idsOf(title, idsCard), PlayFrom, glyphPlay, play, false)
+	cardCover(c, cache, url, w, h, on, playCount, clock, idsOf(title, idsCard), PlayNow, glyphPlay, play, false)
 }
 
 // CardCoverProfile 是同一圈反馈，但按下去是**进他的 UP 空间**。
@@ -613,10 +640,11 @@ func CardCoverProfile(c *ui.Context, cache *imgcache.Cache, url string, w, h flo
 	cardCover(c, cache, url, w, h, on, playCount, clock, idsOf(title, idsCardProfile), ProfileTip, glyphProfile, play, false)
 }
 
-// CardCoverOne 是同一圈反馈，但按下去**加这一首并立即播**（`PlayNow`）。
+// CardCoverOne 是同一圈反馈，按下去**放这一首**（`PlayNow`）——和 `CardCover`
+// 现在是同一个语义（票 #608 之后两者一致了）。
 //
-// 首页「新歌速递」那一块用它：那张卡片单击就追加并立即播这一首（上游
-// `new-music-top.tsx` 的 `handlePlay`），和网格卡片「从这一首往后接」不是一件事。
+// 首页「新歌速递」那一块用它：那张卡片单击就放这一首（上游
+// `new-music-top.tsx` 的 `handlePlay`）。它比 `CardCover` 多的**只有封面那一圈影**，
 // 两处的视觉是同一套——同一个应用里同一个手势不该长出两个样子。
 //
 // ⚠️ **只有这一处的封面自己带一圈影**（`shadow-md`，上游
@@ -625,7 +653,7 @@ func CardCoverProfile(c *ui.Context, cache *imgcache.Cache, url string, w, h flo
 // 它只有底下那条渐变和右下角那个带影的播放钮。
 func CardCoverOne(c *ui.Context, cache *imgcache.Cache, url string, w, h float32,
 	on bool, title string, play func()) {
-	cardCover(c, cache, url, w, h, on, "", "", idsOf(title, idsCardOne), PlayNow, glyphPlay, play, true)
+	cardCover(c, cache, url, w, h, on, "", "", idsOf(title, idsCardOne), cardOneTip, glyphPlay, play, true)
 }
 
 // cardCover 是 CardCover / CardCoverOne / CardCoverProfile 共用的那一层：

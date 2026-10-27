@@ -261,7 +261,7 @@ func (h *homePage) pull() {
 	}
 	// ⚠️ 换账号了：三档全部作废重来（下面那个函数顺手清了歌）。
 	h.resetForAccount()
-	if h.tab == homePopTab {
+	if h.tab == homePopTab || h.overview {
 		h.pullNew()
 	}
 }
@@ -360,7 +360,8 @@ func homeMusicOf(items []app.RecommendItem) []list.Music {
 			ID: it.ID, Title: it.Title, Cover: it.Cover, Owner: it.Owner,
 			Duration: it.Duration, Item: it.Item,
 			// 播放量：网格卡片封面底部那一条渐变上画的是它（`Music.View`）。
-			View: it.View,
+			View:    it.View,
+			PubTime: it.ViewAt, Progress: it.Progress,
 		})
 	}
 	return out

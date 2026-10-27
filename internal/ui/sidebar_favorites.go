@@ -912,10 +912,17 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 // ⚠️ **不给它发请求**：封面地址是那两个列表接口本来就给的一格（见
 // `app.Favorite` 的注释），每行另发一次就是 N 次网络往返。
 func (s *Shell) viewFavoriteCover(c *ui.Context, f app.Favorite) {
-	// `CoverURL` 顺手把协议补上（`//i0.hdslb.com/…` → `https://…`）并拼上
-	// 图床的裁剪参数——侧栏这一枚只有 32 宽，要原图是白下几十倍。
-	imgcache.View(c, s.images, imgcache.CoverURL(f.Cover, imgcache.ParamsSquare),
-		favCoverSize, favCoverSize)
+	// 封面三层兜底：① 接口给的封面（第一首）；② 它没有或拉不下来（第一首失效了）
+	// 就沿用夹里下一首有效的封面（后台只拉第一页、每夹一次）；③ 一首都没有就画默认封面。
+	cover := f.Cover
+	if cover == "" || s.images.Get(imgcache.CoverURL(cover, imgcache.ParamsSquare)).Err != nil {
+		cover = s.app.FolderFallbackCover(f)
+	}
+	if cover == "" {
+		defaultCover(c, favCoverSize)
+		return
+	}
+	imgcache.View(c, s.images, imgcache.CoverURL(cover, imgcache.ParamsSquare), favCoverSize, favCoverSize)
 }
 
 // favCountText 是「N 首」那一句。

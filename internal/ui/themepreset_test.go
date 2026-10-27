@@ -140,10 +140,7 @@ func TestPickingAPresetOnTheSettingsPage(t *testing.T) {
 		t.Errorf("方案选了，主题强调色还是 %v", got.Accent)
 	}
 
-	r, ok := tt.Find("全局圆角")
-	if !ok {
-		t.Fatalf("设置页上没有圆角滑块，文字有 %q", tt.Texts())
-	}
+	r := settingRect(t, tt, s, "全局圆角")
 	x, y := r.X+r.W*0.85, r.Y+r.H/2
 	tt.Press(x, y)
 	tt.Frame()

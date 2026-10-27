@@ -362,10 +362,9 @@ func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 		// 主色当字（浅色下取压深的那一档，理由见 `widgets/ink`）；没赞是空心
 		// 拇指 + 次要色。
 		col := t.TextMuted
-		thumb := iconLike
+		thumb := likeIcon(liked)
 		if liked {
 			col = ink.AccentOn(t)
-			thumb = iconLikeFilled
 		}
 		btn := flat.ButtonContent(c, func(c *ui.Context) {
 			ui.Icon(c, icon(thumb)).FontSize(18).TextColor(col)
@@ -567,11 +566,12 @@ func (s *Shell) viewDynamicPics(c *ui.Context, pics []string) {
 // ⚠️ **行数照参考图**（B 站 UP 主页那张图）：标题 **1 行**、描述 **2 行**。
 // 上游那一版是标题 2 行、描述 1 行。
 //
-// 整块可点：追加这首并立即播，保留原队列（票 #337）。
+// 整块可点：放这一首并立即播，保留原队列（票 #337 定的方向；票 #608 照上游
+// `play()` 补上「已经在队列里就定位过去、不重复入队」那一支）。
 // 起播失败由 list.Actions.PlayNow 的 Toast 说明。
 func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author bili.DynamicAuthor) {
 	t := c.Theme()
-	box := ui.Row(c).Grow(1).AlignItems(ui.Center).
+	box := ui.Row(c).Grow(1).AlignItems(ui.Center).Padding(space.Px8).
 		Radius(s.cardRadius(t)).Background(s.cardBackground(t)).Border(1, t.Border).
 		Clip().Key("dynv:" + v.Bvid)
 	if box.Clicked() {
@@ -592,7 +592,7 @@ func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author b
 		// `scrim.Overlay`（35%，图上薄黑那一档，行封面悬停压暗同款）——界面层
 		// 不许写裸的遮罩 alpha（`widgets/scrim` 的 `TestNoScrimLiteralIsLeft`）。
 		// 白三角和时长角标一样是纯白：它压在黑罩加照片上，主题色读不出来。
-		ui.Box(c).Size(dynamicCoverW, dynamicCoverH).Clip().Children(func() {
+		ui.Box(c).Size(dynamicCoverW, dynamicCoverH).Radius(t.Radius).Clip().Children(func() {
 			s.spaceThumb(c, v.Cover, dynamicCoverW, dynamicCoverH)
 			if box.Hovered() {
 				ui.Box(c).Absolute().Size(dynamicCoverW, dynamicCoverH).

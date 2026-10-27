@@ -86,8 +86,8 @@ const (
 	// 有主角；而被切的原因是**底栏高度没跟着它重算**（当时是 80）。票 #169 把
 	// 底栏按上游重排（进度 20 + 缝 8 + 播放键 + 底边距 16），48 完全
 	// 放得下。**改底栏的留白时这个高度要一起重算**，别再让它去迁就一个旧框。
-	fullPlayGlyph = 20
-	fullPlayHit   = 44
+	fullPlayGlyph = 26
+	fullPlayHit   = 56
 
 	// 顶栏：上游 `px-6 py-4`（`index.tsx:291`）——左右 24、上下 16。
 	//
@@ -353,6 +353,28 @@ type fullPlayer struct {
 	// bgDraws 是这张画布被重画了几次。**给测试看的**：毛玻璃每帧重渲一遍就是
 	// 这里在涨（那在软件渲染上是 80~100 毫秒一帧）。
 	bgDraws int
+
+	// coverRect 是**满屏那张封面此刻在窗口里的那块**（x / y / 宽 / 高）。
+	//
+	// ⚠️ **弹幕要画在它上面**（见 `danmaku.go`），而弹幕层是**另一个浮层**
+	// ——浮层拿不到主树里那个元素的位置，所以这一块得由画封面的那一支
+	// （`viewFullCover`）**写下来**。
+	//
+	// ⚠️ **它跟着歌词那个开关走**：歌词开着的时候封面在左边那一列，
+	// 关着的时候它在整窗正中（见 `viewFullStage`）——弹幕跟着封面走。
+	//
+	// ⚠️ **零值 = 没有封面可放**（封面关着 / 视频铺满整窗）：弹幕那一层
+	// 就不建。
+	coverRect ui.Rect
+
+	// danmaku 是弹幕那一摊跨帧的状态（见 `danmaku.go`）。
+	//
+	// ⚠️ **它挂在满屏这一摊上**：弹幕只在满屏播放器里出现，而这一摊的
+	// 生命周期就是满屏播放器开着的那段时间。
+	danmaku danmakuLayer
+
+	// danmakuBuf 是弹幕那一层每帧要画的那几条（复用的缓冲，免得每帧分配）。
+	danmakuBuf []danmakuVisible
 }
 
 // partRow 是分集列表里的一行。
@@ -386,6 +408,12 @@ func (s *Shell) viewFullPlayer(c *ui.Context, st app.State) {
 	}
 	// 记一笔「满屏建了一遍」——给「一帧建了几遍」那条测试数（见 builds.go）。
 	s.builds.full++
+	// ⚠️ **每一帧先清掉封面那一块**：弹幕是画在封面**上面**的（见
+	// `danmaku.go`），而「封面此刻在窗口里的哪一块」是 `viewFullCover` 写下
+	// 的——它**这一帧不一定跑**（视频铺满整窗那一档就不画封面）。
+	//
+	// ⇒ 不清的话弹幕会画在**上一帧**封面待的那一块，而那一块现在什么都没有。
+	s.full.coverRect = ui.Rect{}
 	if !st.HasTrack {
 		// 🔴 **不能在这里关掉自己**。
 		//
@@ -450,6 +478,22 @@ func (s *Shell) viewFullPlayer(c *ui.Context, st app.State) {
 			}
 		}
 	})
+
+	// 弹幕：压在满屏左列那张封面上。
+	//
+	// 🔴 **它必须走 `ui.Overlay`，而且建在满屏那一层之后**：满屏播放器整个
+	// 是一层浮层（上面那个 `ui.Overlay`），浮层画在主树**之上**——弹幕画在
+	// 主树里的话会被满屏那层不透明的底整个盖住（症状是「文字在树里、画面上
+	// 一个像素也没有」，见 `danmaku.go` 的注释）。
+	//
+	// ⚠️ **建在满屏之后**才有「压在封面上」这个效果：框架的浮层都挂在同一
+	// 个 overlay root 上，**后建的在上**（`mygo/ui/context.go` 的
+	// `overlayRoot`）。
+	//
+	// ⚠️ **在抽屉之前还是之后都行**：弹幕在封面上，而抽屉盖住的是右边那一
+	// 半——两者不重叠。放在抽屉**之前**是为了「弹幕被抽屉盖住」这件事压根
+	// 不可能发生（弹幕在封面那一块，抽屉在右边）。
+	s.viewFullDanmaku(c, st)
 
 	// 播放列表抽屉。**排在这里**（`Overlay` 之后）才会画在满屏上面：框架的
 	// 浮层都挂在同一个 overlay root 上，后建的在上。`viewMain` 那边在全屏开着
@@ -961,6 +1005,10 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 	// ——`index.tsx:328`）。本地那一半的判据（`!isLocal`）不在这一层：本地文件
 	// 没有封面时画的是占位图，关掉它照样是「中间不摆东西」，和上游同一个结果。
 	if !s.app.FullPlayerPrefs().ShowCover {
+		// ⚠️ **顺手把那一块清掉**：弹幕是画在封面**上面**的，而封面关掉了
+		// 就没有那一块可画——不清的话弹幕会画在**上一次**封面待的那一块
+		// （那地方现在什么都没有）。
+		s.full.coverRect = ui.Rect{}
 		return
 	}
 	// 靠右沿摆的时候，封面得**装得进那一栏减去左右留白**（上游那一栏是
@@ -982,9 +1030,26 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 	if rightAlign {
 		x = area.X + area.W - fullStagePadX - w
 	}
+	// ⚠️ **记下封面此刻在窗口里的那一块**：弹幕是**另一个浮层**（见
+	// `danmaku.go`），浮层拿不到这一层里的位置——所以这一块得写在这儿，
+	// 弹幕那一层才画得到。
+	//
+	// ⚠️ **它跟着视频那一路走**：视频开着的时候封面那一块是 16:9（见上面
+	// 那句 `h = w * 9 / 16`），于是弹幕的区域也是 16:9 的那一块。
+	s.full.coverRect = ui.Rect{
+		X: x, Y: area.Y + (area.H-h)/2, W: w, H: h,
+	}
 	box := shadow.FullCover(ui.Box(c).Key("full-cover").
-		Absolute().Left(x).Top(area.Y+(area.H-h)/2).Size(w, h).Radius(c.Theme().Radius).
-		ContextMenu(s.coverMenu))
+		Absolute().Left(x).Top(area.Y+(area.H-h)/2).Size(w, h).Radius(c.Theme().Radius)).
+		// 🔴 **可聚焦**：没有它，键盘（菜单键 / Shift+F10）**够不着**这一份
+		// 菜单——框架的 `menuKey` 找的是「焦点链上最里层那个带菜单的元素」
+		// （`mygo/ui/menu.go` 的 `menuTarget`），而焦点链上得先有这一层。
+		//
+		// ⚠️ **名字不能叫「当前封面」**：里面那张图已经有一个了
+		// （`imgcache.View…(...).Label("当前封面")`），读屏会把两个都念一遍。
+		Focusable().
+		Label(copyCoverActionsLabel).
+		ContextMenu(func(m *ui.Menu) { s.viewCopyMenu(st, m) })
 	if hidden {
 		box = box.Cursor(ui.CursorNone)
 	}

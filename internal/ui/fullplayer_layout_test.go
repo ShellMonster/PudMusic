@@ -222,13 +222,13 @@ func TestTheFullPlayerBottomBarPaddingAndMaxWidth(t *testing.T) {
 
 	// 上游那几个类名换算出来的字面量：px-12 = 48、mb-4 = 16、max-w-6xl = 1152；
 	// 播放键的盒子是 64（设计规范 §5 的满屏主播放键）。
-	const wantPadX, wantMargin, wantMaxW, wantHit = 48, 16, 1152, 44
+	const wantPadX, wantMargin, wantMaxW, wantHit = 48, 16, 1152, 56
 	play, ok := tt.Find(fullPlayLabel(s))
 	if !ok {
 		t.Fatalf("找不到播放键，文字有 %q", tt.Texts())
 	}
 	if play.W != wantHit || play.H != wantHit {
-		t.Errorf("播放键是 %.0fx%.0f，want %dx%d（设计规范 §5 满屏主播放键 44）",
+		t.Errorf("播放键是 %.0fx%.0f，want %dx%d（满屏主播放键 56，2026-10 播放键放大）",
 			play.W, play.H, wantHit, wantHit)
 	}
 	if d := float32(fullWinH) - (play.Y + play.H) - wantMargin; d != 0 {
@@ -455,8 +455,8 @@ func TestTheFullPlayerPlayGlyphIsTwentyEight(t *testing.T) {
 			}
 		}
 	}
-	if d := x1 - x0 + 1; d < 40 || d > 44 {
-		t.Errorf("满屏播放键的圆直径是 %d，want 40~44（规范 44）", d)
+	if d := x1 - x0 + 1; d < 50 || d > 56 {
+		t.Errorf("满屏播放键的圆直径是 %d，want 50~56（播放键 56）", d)
 	}
 }
 

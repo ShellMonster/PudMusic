@@ -526,7 +526,12 @@ var Items = []Item{
 		//
 		// 而 **-403 在评论这一处判成「可重试」**（全局那张表仍判它不可重试——
 		// 那在别的接口上是对的，在评论接口上是错的）。
-		Spec: "评论接口：请求头里不带 buvid3（jar 里的也不带，登录态照带）、不签 WBI、ps 不超过 30；-404 与「0 条评论」说得不一样；-403 在评论这一处可重试",
+		//
+		// 而 **评论区被关掉的码是 12002**（2026-10-27 真机回归，票 #592：所有
+		// 评论接口一律回 12002，旧码 12061 也要认）——只认旧码的话这一档基本
+		// 触发不到，界面上说不出「这个评论区被关掉了」。**只认这两个码**：别的码
+		// 不许被吞进这一档（吞了就把真正的原因盖住了）。
+		Spec: "评论接口：请求头里不带 buvid3（jar 里的也不带，登录态照带）、不签 WBI、ps 不超过 30；-404 与「0 条评论」说得不一样；-403 在评论这一处可重试；评论区被关掉的码（12002，旧码 12061 也认）说的是「评论区被关掉了」，别的码不被吞进去",
 		Tests: []string{
 			"TestCommentListNeverSendsBuvid",
 			"TestCommentListNeverSendsTheBuvidThatLivesInTheJar",
@@ -540,12 +545,83 @@ var Items = []Item{
 			"TestCommentListReadsTheFieldsOffTheRealShape",
 			"TestCommentListSaysTheObjectIsGoneWhenBiliSays404",
 			"TestTheEmptyListAndTheMissingObjectSayDifferentThings",
+			"TestTheClosedCommentSectionCodeIs12002",
+			"TestTheOtherCommentCodesAreNotTheClosedSection",
 			"TestCommentListReadsTheEmptyPage",
 			"TestAnEmptyPageMidwayIsNotNoComments",
 			"TestCommentTreatsForbiddenAsWorthRetrying",
 			"TestIsUpperMarksOnlyTheUpAuthorsOwnComment",
 			"TestUpReplyCommentsAreNotMarkedAsTheUpper",
 			"TestAPictureWithAFractionalSizeDoesNotTakeTheWholePageDown",
+		},
+	},
+	{
+		Category: HTTP,
+		// 🔴 **评论列表的翻页**（票 #591）：
+		//
+		//	游标    翻页走 `cursor.pagination_reply.next_offset` +
+		//	        `pagination_str`，**不是 `cursor.next`**——后者在「评论」那一档
+		//	        （`mode=1`）上带上去必挂（B 站回 `-400 min_score … must be <=
+		//	        max_score …`，因为 `support_mode` 恒为 `[2, 3]`，不含 1）。
+		//	三档    mode=3 / 1 / 2 **都能翻到第二页**，且每一页的内容**互不相同**
+		//	        （拿 rpid 比）。
+		//	同一份 「评论」（mode=1）与「最新评论」（mode=2）给的是**同一份内容**
+		//	        （实测逐条相同，而 `cursor.name` 却是不同的）⇒ 界面上不能把它
+		//	        摆成两个一模一样的档。
+		//
+		// ⚠️ **偏移量一个字都不能改**：改一个字符 B 站**不报错**，它回的是
+		// **第一页**——于是「加载更多」按下去什么都不变。
+		Spec: "评论列表的翻页：走 pagination_reply.next_offset + pagination_str（不是 cursor.next，那一个在「评论」档上必挂 -400）；三个排序档都能翻到第二页且每页内容互不相同；「评论」与「最新评论」是同一份内容，界面上不能摆成两个一样的档；偏移量原样带回去",
+		Tests: []string{
+			"TestAllThreeSortsReachTheSecondPage",
+			"TestThePagingNeverSendsTheBrokenCursor",
+			"TestTheCommentSortGivesTheSameContentAsTheLatestOne",
+			"TestTheHotSortGivesItsOwnContent",
+			"TestTheOffsetIsSentVerbatim",
+			"TestTheSortsOnScreenAreNotTwoOfTheSame",
+			"TestLoadMoreCarriesTheOffsetThroughTheCache",
+		},
+	},
+	{
+		Category: HTTP,
+		// 🔴 **评论这一摊的应用层**（票 #572）：
+		//
+		//	oid    mv 那一路的 oid 是**数字 avid**（走 `ArchiveID` 换），
+		//	       audio 那一路是 **auid**（`type=14`）。漏了换 avid ⇒ **静默
+		//	       拿到空列表**（B 站把认不出来的 oid 判成「没有评论」）。
+		//	防重入 界面每一帧都调 `Comments()`，每一帧都发一次请求的话 B 站
+		//	       会以为我们在刷。
+		//	退避  失败之后**要能再问**（不是一次失败就再也不问）。
+		//	换歌  迟到的结果回来发现 oid 对不上就丢——不然刚换的歌上面挂着
+		//	       上一首的评论。
+		//	缓存  同一首歌第二次进是**瞬时的**（不发请求）；TTL 一小时；
+		//	       键带 type（`1-12345` 和 `14-12345` 是两个文件）。
+		//	时序  零评论的对象**也要落缓存**（不然第二次进又要问一遍）；
+		//	       同一对象上有两趟时，**较早的那一趟不许盖掉较新的那一份**
+		//	       （界面上的和盘上的都不许）。
+		//	local 本地文件不摆入口，**一个请求都不发**。
+		Spec: "评论这一摊（应用层）：mv 的 oid 是数字 avid、audio 的 oid 是 auid（type=14）；每帧调不会发第二个请求；失败之后能再问；换歌之后旧的结果作废；缓存命中是瞬时的、TTL 一小时、有刷新能绕过；零评论的对象也落缓存；同一对象上较早的那一趟不许盖掉较新的那一份（界面上的和盘上的）；本地文件不摆入口也不发请求；评论区被关掉时界面上说的是「这个评论区被 UP 主关掉了」，不是一句看不懂的错（票 #592）",
+		Tests: []string{
+			"TestTheMVCommentOIDIsTheNumericAVID",
+			"TestTheAudioCommentOIDIsTheAUID",
+			"TestCommentsAreNotAskedTwice",
+			"TestCommentsAreAskedAgainAfterAFailure",
+			"TestTheClosedSectionIsSaidInPlainWords",
+			"TestTheCommentsOfThePreviousSongDoNotShowUp",
+			"TestTheSecondVisitIsInstant",
+			"TestTheAVIDIsRememberedAcrossRestarts",
+			"TestTheRefreshBypassesTheCache",
+			"TestALocalItemIsNotWorthAsking",
+			"TestLoadMoreUsesTheCursor",
+			"TestTheRepliesUseTheSameObject",
+			"TestNoCommentsIsNotAFailure",
+			"TestTheMVAsksAgainWhenTheAVIDCannotBeFetched",
+			"TestTheKeyCarriesTheType",
+			"TestTheTwoObjectsGetTwoFiles",
+			"TestAnExpiredEntryIsAsGoodAsMissing",
+			"TestAnObjectWithNoCommentsIsCached",
+			"TestAnOlderRequestDoesNotOverwriteTheRefresh",
+			"TestAnOlderRequestDoesNotOverwriteTheCache",
 		},
 	},
 	{
@@ -1476,6 +1552,7 @@ var Items = []Item{
 		Tests: []string{
 			"TestQuittingWhileDownloadingLeavesNothingBroken",
 			"TestQuittingWhileCheckingIsQuiet",
+			"TestQuittingJustAsTheCheckComesBackIsQuiet",
 			"TestThePrefsFileRoundTrips",
 			"TestACorruptPrefsFileIsIgnoredNotFatal",
 			"TestAPrefsFileFromANewerVersionIsLeftAlone",
@@ -2629,6 +2706,50 @@ var Items = []Item{
 	},
 	{
 		Category: Play,
+		// 满屏播放器左边那张封面上的弹幕（**界面**那一层；取弹幕那一半是
+		// 上面那一条）。
+		//
+		// 钉的是五个「界面上看不出坏了」的点：
+		//
+		//   - **画在浮层里**：满屏整个是浮层，而浮层画在主树**之上**——弹幕
+		//     画在主树里会被满屏那层不透明的底盖住。🔴 **那个症状是静默的**：
+		//     文字**在树里**（`Texts()` 查得到），而画面上一个像素也没有。
+		//     ⇒ 「树上有没有那几行字」验不出这个坑，得看画面。
+		//   - **位移走 pose**：位置要是算在 view 里（`Absolute().Left(x)`），它
+		//     只在重建时更新——而满屏开着时界面 20 帧/秒重建，于是弹幕是 20fps
+		//     跳着走的。走 pose（只重绘那一族）是 60fps 平滑。
+		//   - **按当前位置起步**：弹幕的时间是**视频时间**，我们放的就是这个视频
+		//     的音轨 ⇒ 没有额外 offset。「从第 3 分钟开始听」就从第 3 分钟那一条
+		//     开始滚（**不是**按「播放了多久」滚）。
+		//   - **key 用弹幕自己的 rowid**：动态列表的 key 必须稳定且唯一——用下标
+		//     的话「前面插一条」会让后面所有条的状态整体错配。
+		//   - **它是装饰**：不给 Role / Label（读屏软件不念），「减少动态效果」
+		//     开着时按 20fps 跳着走，设置里能整个关掉（默认开着）。
+		//   - **同一条轨道上两条不能叠字**：两条同速从右边沿进来，不叠字当且
+		//     仅当「后一条晚的时间 × 速度 ≥ 前一条的字宽」——报告 §3.3 那条
+		//     「走出 30% 宽度」只当**时间门槛**用，它对长字不够（一条 196
+		//     像素宽的字滚了 1.8 秒之后尾巴还在封面里，下一条就进来了 ⇒
+		//     重叠 88 像素，两句话没法读）。
+		//   - **长弹幕不会提前消失**：一条弹幕待到「整个出界」为止（(封面宽
+		//     + 字宽) ÷ 速度），**没有时长上限**——早该出界的那些靠「按字数
+		//     估的宽上界」粗筛掉，而那个上界只粗筛、不砍。
+		Spec: "满屏播放器左边那张封面上的弹幕：画在封面上（浮层里，不是主树）、按当前播放位置滚、位移走 pose（60fps 平滑）、每条弹幕一个稳定且唯一的 key、同一条轨道上两条不叠字、长弹幕不会提前消失、装饰不进无障碍树、设置里能整个关掉（默认开）",
+		Tests: []string{
+			"TestTheDanmakuIsDrawnOnTheCoverOfTheFullPlayer",
+			"TestTheDanmakuUnderTheFullPlayerWouldNotBeSeen",
+			"TestTheDanmakuStartsFromTheCurrentPosition",
+			"TestTheDanmakuGlidesInsteadOfTeleporting",
+			"TestTheDanmakuJumpsWhenMotionIsReduced",
+			"TestEveryDanmakuHasItsOwnKey",
+			"TestTheDanmakuCanBeTurnedOff",
+			"TestTheFullPlayerSettingsHasTheDanmakuSwitch",
+			"TestTwoDanmakuOnTheSameLaneNeverOverlap",
+			"TestTheSameLaneWaitsForThePreviousDanmakuToClearTheEdge",
+			"TestALongDanmakuStaysUntilItHasLeftTheCover",
+		},
+	},
+	{
+		Category: Play,
 		// 「多 P 的投稿只能播第一集」（BMG-47 的 A12）那一张票的界面那一半：
 		// 播放条上有分集入口 → 打开是浮层列表、每一集有编号和标题 → 标出正在播的
 		// 那一集 → 点一集就切过去 → **单 P 不摆这个入口**。
@@ -3249,7 +3370,13 @@ var Items = []Item{
 		// （上游那几页的首屏，见 `internal/ui/loading.go` 的文件头）。所以这一条
 		// 里关于加载态的两句都改了：不再是「同一个格子」，而是「同一枚转圈 +
 		// 40vh 那一格」。
-		Spec: "页面节奏：七页的横向页边距是同一个数、页标题是同一个字号（收藏夹那一页的大标题另算，是 30）；主 Tab 与次级排序不是同一个样子；搜索页**没有页内输入框**，当前关键词显示在**顶栏**那个框里（且切页回来不覆盖用户正在敲的字）；「加载中」在每一页上都是**同一枚居中的转圈**（32，落在 40vh 那一格的正中），而它和「没有结果」是**两档**（转圈 vs 插画 + 两行字）；没登录时那一页说「先登录」而不摆空列表；小字的行高是定好的；搜索联想浮层里命中的那几个字被标出来",
+		//
+		// ⚠️ **2026-10-27 又分了一档**：**列表首屏**（搜索 / 收藏夹 / 稍后再看 /
+		// 历史 / 关注 / 动态 / UP 空间投稿）成八行骨架屏（`loadingCell`），
+		// **页面级**（首页三个 Tab、本地音乐扫描）仍是那枚转圈。「同一件事在每一页
+		// 上长得一样」现在按「同一类列表用同一种骨架」读（见 DESIGN.md「加载态」，
+		// `TestEveryLoadingStateIsDrawnTheSameWay` 判的是骨架高度，不是转圈直径）。
+		Spec: "页面节奏：七页的横向页边距是同一个数、页标题是同一个字号（收藏夹那一页的大标题另算，是 30）；主 Tab 与次级排序不是同一个样子；搜索页**没有页内输入框**，当前关键词显示在**顶栏**那个框里（且切页回来不覆盖用户正在敲的字）；「加载中」分两档——**列表首屏是八行骨架屏**（同一类列表同一种骨架），**页面级首屏是同一枚居中的转圈**（32，落在 40vh 那一格的正中）；它和「没有结果」是**两档**（骨架/转圈 vs 插画 + 两行字）；没登录时那一页说「先登录」而不摆空列表；小字的行高是定好的；搜索联想浮层里命中的那几个字被标出来",
 		Tests: []string{
 			// 页边距（七页逐页量内容区最靠左的那一笔）+ 页标题（代码里同一个常量，
 			// 画面上墨迹一样宽）。
@@ -3814,12 +3941,26 @@ var Items = []Item{
 	},
 	{
 		// 票 #337 覆盖 #299：单首保留队列，显式批量/区段替换队列。
+		// 票 #608 覆盖 #337 的那一处「同一首已经在队列里时照样再加一份」：
+		// 照上游 Biu 的 `play()` 改成**定位已有那一份**，不再重复入队。
 		Category: Play,
-		Spec:     "立即播放追加这一首并打断，旧队列保留；批量入口替换这一批并从第一首播；从这一首往后听/下一首播放/添加到队列保持区段替换/当前后插入/队尾追加的语义",
+		Spec:     "点一首歌保留旧队列（已在队列里就定位、不在才追加）；批量入口替换这一批并从第一首播；从这一首往后听/下一首播放/添加到队列保持区段替换/当前后插入/队尾追加的语义",
 		Tests: []string{
 			"TestEnqueueAndPlayNowAppendsAndStartsTheNewSong",
-			// 同一首已经在队列里时**照样再加一份**（与上游那一处不同）。
-			"TestEnqueueAndPlayNowAppendsTheSameSongTwice",
+			// 同一首已经在队列里时**定位过去，不再追加一份**（照上游）。
+			"TestEnqueueAndPlayNowSelectsTheSameSongInsteadOfAppending",
+			// 已经在队列里的那一首：长度不变、当前项指过去、放的是它（票 #608）。
+			"TestEnqueueAndPlayNowSelectsAnItemThatIsAlreadyInTheQueue",
+			// 不在队列里的那一首：追加到队尾并立即播（票 #608）。
+			"TestEnqueueAndPlayNowAppendsASongThatIsNotInTheQueue",
+			// 队列里同一首排了两遍时，定位到用户点的那一份（票 #608）。
+			"TestEnqueueAndPlayNowLocatesTheDuplicateNotTheFirstCopy",
+			// 点一首歌不清空周围的歌（票 #608）。
+			"TestEnqueueAndPlayNowDoesNotClearTheQueueAroundIt",
+			// E2E：投稿页 112 首「全部播放」之后双击第 59 首，队列还是 112 首，
+			// 当前项是第 59 首；点一首不在队列里的会追加（票 #608）。
+			"TestDoubleClickingAnUpSubmissionKeepsThePlaylist",
+			"TestDoubleClickingASongOutsideTheQueueAppendsIt",
 			"TestEnqueueAndPlayNowKeepsTheOldSelectionOnFailure",
 			"TestThePlayNowEntryAppendsAndStartsThatSong",
 			"TestThePlayAllButtonReplacesQueueAndStartsAtItsFirstSong",
@@ -4142,6 +4283,81 @@ var Items = []Item{
 		},
 	},
 	{
+		// 🔴 **这一条的错法也是「静默」的**：用户右键封面按了「复制歌曲信息」，
+		// 什么都没发生——而他以为复制好了（按下去没有报错、没有弹窗、没有声音）。
+		// 而「复制封面」那一档更坏：写进去的是**空字节或者一段坏字节**，用户
+		// 在别的应用里粘出来的是**一张打不开的图**。
+		//
+		// 而**没有封面时按不动那一项、也不说为什么**是同一种坏处：用户以为
+		// 程序坏了。
+		Category: Platform,
+		// 票 #556（issue #556）。
+		//
+		// ⚠️ **这一组量的是「剪贴板里到底有什么」**，不是「调了哪个函数」——
+		// 后者是实现，前者是用户看见的东西（文本要逐字，图要能解开）。
+		Spec: "当前这一首的信息能复制成可读文本（歌名 / UP 主 / 时长 / BVID / 链接 / 路径，**没有的字段整行不出现**，没有多余前缀，歌名和界面上摆的是同一个）；当前封面能复制成一张**能解开的 PNG**；**没有封面时那一项按不动且说清楚为什么**，也不往剪贴板里写图；复制失败有**看得见的反馈**；键盘（菜单键 / Shift+F10）够得着这一份菜单",
+		Tests: []string{
+			// 文本：逐字（**多一个前缀用户粘进聊天框还得手删一行**）。
+			"TestTheSongInfoTextHasEveryField",
+			// 文本：**没有的字段整行不出现**（留一行空的「UP主：」更难读）。
+			"TestTheSongInfoTextOmitsTheFieldsThatAreNotThere",
+			// 文本：**音频 id 不是 BVID**（报错了用户拿着它搜会搜到别的东西）。
+			"TestTheSongInfoTextDoesNotCallAnAudioIDSomethingItIsNot",
+			// 文本：歌名**和界面上摆的是同一个**（清洗过的那一份）。
+			"TestTheSongInfoTextUsesTheNameOnScreen",
+			// 文本：没有多余前缀。
+			"TestTheSongInfoTextHasNoExtraPrefix",
+			// 菜单：那两项**真的在菜单里**（少建一项那一项就永远点不到）。
+			"TestTheCoverMenuOffersTheTwoCopyActions",
+			// 走菜单按下去，文本**真的进了剪贴板**。
+			"TestChoosingCopySongInfoPutsTheTextOnTheClipboard",
+			// 封面：剪贴板里那张**能被解开**（别的应用要能贴）。
+			"TestCopyCoverPutsAPNGOnTheClipboard",
+			// 封面：**交出去的是原图**（不是缓存里缩到 768 的那一份），
+			// 而且**EXIF 摆正了**（不摆正的话交出去的是一张横躺着的图）。
+			"TestSourceGivesTheOriginalBytes",
+			"TestSourceImageIsNotScaled",
+			// 封面：**交出去的和缓存里存着的不一样**（只断「尺寸是原图的尺寸」
+			// 的话，缓存没真的存下缩过的那一份，就没东西可比）。
+			"TestSourceImageIsNotTheStoredOne",
+			"TestSourceImageStraightensTheEXIFOrientation",
+			// 摆正的结果**和框架自己摆的是同一个**（对着框架比，而不是对着
+			// 一份抄过来的映射比——而且是**逐像素**比：只比宽高的话，方向 2/4
+			// （翻转那一批）和方向 6/8（转置那一批）全都分不出来）。
+			"TestTheOrientationMatchesTheFrameworksOwn",
+			// 取不到的时候**报错**（而不是给一段空字节——空字节粘出来
+			// 是一张打不开的图）。
+			"TestSourceOnAnEmptyURLSaysSo",
+			"TestSourceAfterCloseSaysSo",
+			// 没有封面：**不写图**，那一项是灰的，而且说清楚为什么。
+			"TestTheCopyCoverItemIsGreyWithoutACover",
+			"TestCopyCoverWithoutACoverWritesNothing",
+			// 失败**不静默**：文本那一档和封面那一档各一条。
+			"TestAFailedCopySaysSo",
+			"TestAFailedCoverCopySaysSo",
+			// 失败**不静默**：**编码**那一档（取到了图但编不成 PNG）——
+			// 「取不到」那一档在 `png.Encode` 之前就返回了，所以它盖不住这一档。
+			"TestAFailedCoverEncodeSaysSo",
+			// **后按的那一次赢**：封面复制在后台跑，完成顺序和按下去的顺序
+			// 可以不一样——先发起的封面那一趟**不许覆盖**后来的复制内容。
+			"TestTheLastCopyActionWinsOverAnEarlierCover",
+			"TestAnEarlierCoverDoesNotOverwriteALaterCover",
+			// **判号和写在同一个主线程段里**：旧封面的段**还在队列里排队**
+			// 的时候，用户按的文本**先**落地；旧封面的段随后执行时，判号
+			// 已经不通过了——所以它**一个字都不写**（不是落地了再改回来）。
+			"TestACoverAlreadyInsideTheWriteDoesNotWinOverALaterText",
+			// **一轮里只有一段在跑**：主线程是单线程的，所以一个段跑着的
+			// 期间另一个段进不来（这一条量的是「串行」这个前提本身）。
+			"TestOnlyOneSectionRunsAtATimeOnTheMainThread",
+			// **两档真的是两档**：主线程档**绕过队列**直接执行，后台档
+			// **排队**——而那个差别**就是那个竞态的机制**（桩把两档混成
+			// 一样的话，那个交错压根不会发生，而测它的用例照样是绿的）。
+			"TestTheMainThreadSectionGoesStraightThroughWhileABackgroundOneWaits",
+			// 键盘：Tab 走到封面上，菜单键能开出这一份菜单。
+			"TestTheMenuKeyOpensTheCopyMenuOnTheCover",
+		},
+	},
+	{
 		// 票 #536：迷你播放器点封面展开歌词卷帘。
 		//
 		// ⚠️ **这一组是「双平台」那一类**：它动的是**窗口**（改运行时尺寸）、
@@ -4185,6 +4401,29 @@ var Items = []Item{
 			"TestTheMiniCurtainTakesTheKeyWindowWhenTheAppBecomesActive",
 			// 收起了就不再惦记抢键盘（不然用户在做别的事时会被抢走）。
 			"TestTheMiniCurtainStopsTakingTheKeyWindowAfterItCollapses",
+			// 票 #307：卷轴展开（弹簧回弹 + 两道轴）。
+			//
+			// ⚠️ **这一组是「动画」那一类**：它量的是**逐帧**的东西——几帧到
+			// 全开、回弹几下、每一帧的窗高。
+			//
+			// - 展开是弹簧：150~180ms 到全开，回弹两三下、幅度递减。
+			"TestTheMiniCurtainUnrollsWithASpring",
+			// - 收起不弹（过阻尼），一路收回 84。
+			"TestTheMiniCurtainRollsUpWithoutBouncing",
+			// - 两道轴：上轴在顶边，下轴贴着下沿（改窗高它也贴着）。
+			"TestTheMiniCurtainHasTwoAxes",
+			// - 激活失败了就再试（F1 那个判据）。
+			"TestTheMiniCurtainRetriesTheActivation",
+			// - 展开到一半就收起：**不许先长高**（换目标 = 速度归零）。
+			"TestTheMiniCurtainReverseNeverGrows",
+			// - 重试窗口开着的时候**还要得出帧**（迷你窗是失焦照画的，
+			//   帧是「谁要」才出的——弹簧停稳之后帧源就断了）。
+			"TestTheMiniCurtainKeepsAFrameWhileTheActivationRetryIsOpen",
+			// - 歌词**贴着下沿排**（票 #307 §②）：当前句的下沿压在下轴的
+			//   上沿上，而当前句**不在中间**。
+			"TestTheMiniCurtainLyricsHugTheBottom",
+			// - **普通点击**（指针那一跳）封面 ⇒ 激活那一档跑了 ⇒ Esc 收得起。
+			"TestTheMiniCurtainAnswersAPointerClickAndTakesTheKeyboard",
 		},
 	},
 	{
@@ -4293,6 +4532,80 @@ var Items = []Item{
 		},
 	},
 	{
+		// 票 #559（板子任务 #297，2026-10-26）：后台下载完成时弹一条系统通知。
+		//
+		// ⚠️ **判据是「一扇窗都没有『有焦点**且**看得见』」**：「窗口全部隐藏」是
+		// 一档**独立**的状态，不许靠「隐藏必然先失焦」那个隐含顺序——`OnHide` 与
+		// `OnBlur` 是两个回调，谁先到不由我们决定。
+		//
+		// ⚠️ **迷你播放器那一扇的焦点要算**：它是 Panel（点它不激活应用），可它
+		// 在 macOS 上照样能拿 key（实测 2026-10-26，真窗口）。不算它的话，迷你
+		// 模式下每一次后台下载完成都会弹一条通知，而用户正看着迷你播放器听歌。
+		//
+		// ⚠️ **「互相切换」那一瞬靠「等一等」而不是「判得准」**：主窗失焦到迷你窗
+		// 拿到焦点之间有一个「两扇都没有焦点」的瞬间（实测 35~60 毫秒），而通知
+		// 是立刻弹的——所以判定延后一小会儿再判一次。
+		Category: Platform,
+		Spec:     "用户不在应用里（没有任何一扇窗『有焦点且看得见』，或窗口全部隐藏）时，后台下载完成弹一条系统通知；用户在应用里时不弹；主窗与迷你窗互相切换不误判；点通知回主窗的下载记录页；权限拒绝 / 不支持时静默降级成应用内提示而不丢事件（那句话要等用户回来还在）；同一任务用稳定 ID，同一版本不重复提醒；「有更新了」那一档另有一个独立开关；任一扇窗重新拿到焦点时清掉通知中心里的那些（**包括上一次运行留下的**——哪怕这一轮一次通知都没发过）",
+		Tests: []string{
+			// 判据本身：聚焦 / 失焦 / 迷你那一扇 / 全隐藏 / 窗口还没建出来 /
+			// 关掉的那一扇窗要摘掉。
+			"TestTheFocusSnapshotSaysWhenTheUserIsAway",
+			"TestTheMiniPlayerCountsAsTheUserBeingHere",
+			"TestAllWindowsHiddenMeansTheUserIsAway",
+			"TestAHiddenWindowDoesNotCountAsTheUserBeingHere",
+			"TestAHiddenWindowIsAwayEvenWhileItStillHasFocus",
+			"TestNoWindowYetIsNotTheUserBeingAway",
+			"TestAClosedWindowIsNotCounted",
+			// 互相切换那一瞬不误判（靠宽限期）。
+			"TestSwitchingBetweenOurOwnWindowsIsNotLeavingTheApp",
+			// 该发的时候真发了、该静默的时候真静默。
+			"TestDownloadDoneIsAnnouncedWhenTheUserIsAway",
+			"TestDownloadDoneIsSilentWhileTheUserIsHere",
+			// 稳定 ID（同一任务不堆两条）。
+			"TestTheNotificationIDIsStable",
+			// 点通知回到对应页面。
+			"TestTheNotificationGoesToTheDownloadList",
+			"TestTheUpdateNotificationGoesToTheSettings",
+			"TestAnUnknownNotificationGoesNowhere",
+			// 任一扇窗重新拿到焦点就把通知清掉（**包括上一次运行留下的那些**）。
+			"TestReturningToTheAppClearsTheNotifications",
+			"TestAFreshProcessStillClearsTheNotificationsOfEarlierRuns",
+			// 发不出去时不丢事件。
+			"TestAFailedNotificationStillSaysItInTheApp",
+			"TestAFailedNotificationStillSaysItWhenTheUserReturns",
+			"TestTheStickyNoticeIsReleasedWhenTheUserComesBack",
+			"TestTheStickyNoticeIsOnScreenWhenTheUserComesBack",
+			// 同一个版本只提醒一次（稳定 ID 不代替它）。
+			"TestTheSameVersionIsNotNotifiedTwice",
+			"TestANewVersionIsNotifiedAgain",
+			// 用户在前台发现新版本，等他离开之后**仍然**能收到那一条（两层
+			// 合起来量：应用层那一份记账也得退回来）。
+			"TestAVersionFoundWhileTheUserIsHereIsNotifiedWhenTheyLeave",
+			// 「更新提醒」那一格在设置页上摆着。
+			"TestTheUpdateNotificationSwitchIsOnTheSettingsPage",
+			// 应用层那一段接线（下载完成 / 后台查到更新会递出去）。
+			"TestADownloadThatFinishedReachesTheNotifier",
+			"TestABackgroundCheckTellsTheNotifier",
+			"TestTwoBackgroundChecksDoNotNotifyTheSameVersionTwice",
+			// 退回来那一份之后，同一个版本还能再提醒一次。
+			"TestAReleasedVersionIsNotifiedAgain",
+			"TestAReleaseDoesNotClearAnotherVersion",
+			"TestTheUpdateNotificationSwitchTurnsItOff",
+			"TestTheUpdateNotificationSwitchIsOnByDefault",
+			// 平台层那一段（问过没有 / 拒了不再问 / 失败交给上层）。
+			"TestANotificationIsNotSupportedBeforeTheAppIsReady",
+			// 「刚起来的进程」那一份账是「还没问过」那一档——
+			// 而**零值**就是那一档（否则打包的 macOS 应用一次都不会去问
+			// 框架，于是弹不出系统通知，而它静默降级成应用内提示）。
+			"TestAFreshProcessHasNotAskedYet",
+			"TestTheZeroValueOfTheSupportStateMeansNotAskedYet",
+			"TestTheSupportAnswerIsAskedOnlyOnce",
+			"TestADeniedNotificationIsNeverAskedForAgain",
+			"TestTheFailureIsHandedToTheUpperLayer",
+		},
+	},
+	{
 		// 票 #558：删本地音乐文件**改成移到系统废纸篓**（原来是永久删除）。
 		//
 		// ⚠️ **语义变了，而那一半是静默的**：以前界面上写着「不可恢复」，
@@ -4340,6 +4653,44 @@ var Items = []Item{
 			"TestTheDeleteDialogNoLongerPromisesItIsUnrecoverable",
 			// 交给回收站的是**词法上的那一条**（符号链接那条安全线的另一半）。
 			"TestDeleteHandsTheLexicalPathToTheTrash",
+		},
+	},
+	{
+		// 归「双平台」那一组：这一票修的是**「有加载态、但画得看不见」**那一整族。
+		//
+		// 🔴 **每一条的错法都是静默的**：不报错、不崩、不写日志，界面只是
+		// 「看着不对劲」——
+		//
+		//	① 封面/头像/头图「加载中」那一档的底色是 Surface 往 Background 混一半，
+		//	   浅色下每通道只差 4：48 像素的封面在浅色页面上**等于一块空白**
+		//	② 头像 / 头图 / 缩略图只判 Ready()，其余三种画**同一块纯色**；
+		//	   而失败之后那块纯色**永远不变**
+		//	③ 服务层有的接口补了图片协议头、有的没补：没补的那些
+		//	   `http.NewRequest` 报 `unsupported protocol scheme ""`，
+		//	   被 `isPermanent` 判成**永久失败**（一次都不重试）
+		//	④ 换歌那一刻歌词立刻说「暂无歌词」——那是一个**结论**，而真相是
+		//	   读盘 / 字幕 / 自动找词那一串**过程**（最长 30 秒）
+		//	⑤ 动态流左栏第一页在途时画的是「全部」那一行，和「一个都没关注」
+		//	   一模一样
+		//	⑥ 总览的新歌速递 / 排行榜在没数据时**整块消失**，数据到了整块冒出来，
+		//	   下面的内容跟着跳一截
+		//	⑦ 收藏夹页头在元信息没回来时写「公开收藏夹 • **0** 条视频」——那个 0
+		//	   是假数（和 UP 空间「粉丝数 0」同一种错），创建者那一行整行不画
+		Category: Platform,
+		Spec:     "「在等」这件事在每一处都看得见、而且和「没有」分得开：封面 / 头像 / 头图 / 缩略图的加载档是**带扫光的灰块 + 一枚淡图形**（浅色下也看得出是一块占位），失败档是描边框 + 图形，没有地址档是描边框 + 调用方给的图形——三档在画面上分得开；歌词在切歌之后先报「正在加载」，有条目之前不写「暂无歌词」，最长 30 秒兜底落到「暂无歌词」；动态流左栏第一页在途时说「正在加载关注的人…」；首页总览的新歌速递和排行榜在拉时摆骨架（不是整块消失）；收藏夹页头在元信息没回来时不写「0 条视频」（只写类型），封面走加载档，创建者那一行留位；图片地址协议相对的也能真的拉下来（服务层补 + `imgcache.absoluteURL` 兜底）；热榜 / 原创榜那一档的页头（榜名 + 期数 + 表头）**跟着列表一起滚走**，不钉在顶上",
+		Tests: []string{
+			"TestTheCoverLoadingFillIsVisibleOnALightPage",
+			"TestTheCoverLoadingCellShimmers",
+			"TestTheAuthorPaneSaysItIsLoading",
+			"TestTheNewMusicRowShowsSkeletonsInsteadOfVanishing",
+			"TestTheCollectionHeaderDoesNotClaimZeroMedia",
+			"TestTheCollectionOwnerRowKeepsItsSlot",
+			"TestTheBoardHeroScrollsAwayWithTheList",
+			"TestTheShimmerFlagIsTheWindowsOwnFlag",
+			"TestAbsoluteURLMakesProtocolRelativeAddressesFetchable",
+			"TestProtocolRelativeAddressesAreNotPermanentFailures",
+			"TestLyricsReportLoadingUntilTheyHaveSomething",
+			"TestLyricsLoadingFallsBackWhenNothingWillEverArrive",
 		},
 	},
 }

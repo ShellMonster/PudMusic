@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing v* tag to build'
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish ${{ github.ref_name }}
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install NSIS
+        run: brew install nsis
+
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
+            tag="${{ inputs.tag }}"
+          fi
+          [[ "$tag" == v* ]] || { echo "tag must start with v: $tag" >&2; exit 1; }
+          version="${tag#v}"
+          actual="$(python3 - <<'PY'
+          import json
+          print(json.load(open('mygo.json'))['version'])
+          PY
+          )"
+          [[ "$actual" == "$version" ]] || {
+            echo "mygo.json version $actual does not match tag $tag" >&2
+            exit 1
+          }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Verify update signing key
+        run: |
+          test -n "$MYGO_UPDATER_PRIVATE_KEY" || {
+            echo 'Missing MYGO_UPDATER_PRIVATE_KEY repository secret.' >&2
+            exit 1
+          }
+
+      - name: Run release checks
+        run: |
+          go build -trimpath -p 4 ./...
+          go vet -trimpath -p 4 ./...
+          go test -p 4 $(go list ./... | grep -v '/internal/ui$')
+          go test ./internal/licensing/
+          go generate ./internal/platform/ ./internal/licensing/
+          git diff --exit-code -- resources
+
+      - name: Generate release notes
+        run: scripts/generate-release-notes.sh '${{ steps.release.outputs.tag }}' release-notes.md
+
+      - name: Build and upload draft release assets
+        run: |
+          go tool mygo build \
+            -platform darwin/arm64,darwin/amd64,windows/amd64,windows/arm64 \
+            -upload
+
+      - name: Update draft release notes
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file release-notes.md --draft
+
+      - name: Summarize release
+        run: |
+          {
+            echo '### Draft release created'
+            echo
+            echo "Tag: ${{ steps.release.outputs.tag }}"
+            echo
+            echo 'The release is a draft. Review its assets and publish it from GitHub when ready.'
+          } >> "$GITHUB_STEP_SUMMARY"
