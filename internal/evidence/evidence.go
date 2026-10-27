@@ -625,6 +625,54 @@ var Items = []Item{
 		},
 	},
 	{
+		Category: Paging,
+		// 🔴 **独立评论页 `/comments`**（票 #573）：
+		//
+		//	语义    页头必须说得清「这些评论到底是谁的评论」：`audio` 是
+		//	        「**这首歌的评论**」，`mv` 是「**这个视频的评论**」
+		//	        （三种条目拿到的评论语义不同：视频的评论在聊视频本身，
+		//	        不一定是这首歌），`local` **不摆入口**。
+		//	档位    排序只摆两档（最热 / 最新）——B 站那个「评论」档
+		//	        （`mode=1`）和「最新」给的是**同一份内容**（票 #591 实测），
+		//	        摆成两个一模一样的档就是骗人。
+		//	去重    翻页重叠会让同一条评论进两页，而这一页的行身份就是 rpid
+		//	        ⇒ 两行共用一份状态，框架还会 panic（**整页变成错误页**）。
+		//	截断    长正文折起来时，切点不许落在表情占位符里面——半个
+		//	        `[妙啊]` 是字面量，而表情必须成图。
+		//	三重保障 判据**复用 `internal/ui/widgets/list/paged.go` 里那一份**
+		//	        （①首次渲染检查 / ②滚到底 / ③容器没填满）：这一页的底座
+		//	        不一样（行高是量出来的），但「该不该拉下一页」判的是同一件事
+		//	        ⇒ 两份判据迟早分叉，而分叉出来的差异极难查。
+		Spec: "独立评论页：页头分别说清「这首歌的评论」和「这个视频的评论」、本地文件不摆入口；排序只摆两档；翻页重叠不破版（行身份唯一）；长正文折起来不切坏表情占位符；拉页的三重保障复用 widgets/list/paged.go 里那一份判据",
+		Tests: []string{
+			"TestTheCommentsHeaderSaysWhoseCommentsTheseAre",
+			"TestTheCommentsPageIsNotInTheSidebarMenu",
+			"TestTheUpperBadgeOnlyShowsForTheUpperAuthor",
+			"TestTheEmoteIsDrawnAsAnImage",
+			"TestALongCommentIsNeverCutInTheMiddleOfAnEmote",
+			"TestALongCommentIsFoldedWithoutBreakingTheRow",
+			"TestAPageThatRepeatsACommentDoesNotBreakThePage",
+			"TestTheCommentRowsHaveOneKeyEach",
+			"TestTheSortHasOnlyTwoTiers",
+			"TestSwitchingTheSortStartsFromTheFirstCommentAgain",
+			"TestTheListLoadsMoreWhenItReachesTheEnd",
+			"TestTheLoadingRowSaysItIsLoading",
+			"TestTheCommentsKeyIsNotShownForALocalFile",
+			"TestTheCommentsKeyIsShownForAnOnlineTrack",
+			"TestTheCommentsKeyDoesNotTouchTheProgressBar",
+			"TestTheFullPlayerHasACommentsKey",
+			"TestTheCommentsPageAsksForTheNextPageOnlyOnceWhileItIsInFlight",
+			"TestTheCommentsPageStopsAskingWhenThereIsNoMore",
+			"TestTheFirstPageIsOnlyAskedForOnce",
+			"TestTheNextPageIsOnlyAskedForWhenTheSentinelIsOnScreen",
+			"TestTheRefillBranchAndTheScrollBranchAreToldApart",
+			"TestMayLoadNextIsTheGateForTheNextPage",
+			"TestEnsureCommentsAsksOnceAndSaysItIsLoaded",
+			"TestCommentsLoadedIsTrueEvenWhenNobodyCommented",
+			"TestEnsureCommentsDoesNotAskForALocalFile",
+		},
+	},
+	{
 		Category: HTTP,
 		// 风控和限流**都不判成「可重试」**：界面上那枚「重试」是立刻再问一次
 		// （没有退避），而这两样要等的是时间——判成可重试的话用户点一次撞一次

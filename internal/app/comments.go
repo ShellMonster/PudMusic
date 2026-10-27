@@ -223,6 +223,42 @@ func (a *App) CommentsHasMore() bool {
 	return !a.commentsIsEnd
 }
 
+// CommentsLoaded 报「已经拿到过至少一页评论」。
+//
+// ⚠️ **「一条评论都没有」也算拿到过**：那一档界面上的说法是「还没有人
+// 评论」，而它**是问出来了**（B 站说这一首还没有人评论）——不是「还没问过」。
+//
+// 它是界面层「保障①首次渲染检查」的输入（见
+// `internal/ui/widgets/list/paged.go` 的 `DecideFirstPage`）：拿到过就不用再问
+// 第一页。
+func (a *App) CommentsLoaded() bool {
+	a.commentsMu.Lock()
+	defer a.commentsMu.Unlock()
+	return a.commentsLoaded
+}
+
+// EnsureComments 保证正在问 / 已经问过当前这一首的评论。
+//
+// 🔴 **它是界面层那一半的出口**：界面（`internal/ui/comments.go`）只判
+// 「该不该问」（那一层每帧的副作用，`pageSyncs`），真正发出去的是这里——
+// 铁律三：view 里不发网络请求。
+//
+// ⚠️ **重复调它没有副作用**：内部已经判过「问过了 / 正在问」，
+// 而且失败之后有 15 秒退避（`ensureComments`）——所以界面每一帧调一次
+// 也没关系。
+func (a *App) EnsureComments() {
+	it, ok := a.CurrentItem()
+	if !ok {
+		return
+	}
+	slot := commentSlotKey(it)
+	if slot == "" {
+		// 这一首没有可问的评论（本地文件）——一个请求都不发。
+		return
+	}
+	a.ensureComments(it, slot)
+}
+
 // Comments 返回当前这一首的评论，顺手把没取过的那一次取回来。
 //
 // **返回的是缓存**：第一次那一趟还没回来时给的是 nil，界面上是「正在问」。

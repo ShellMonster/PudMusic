@@ -40,10 +40,14 @@
 // 框架原生的 `ui.List`（它的行高是量出来的：`mygo/ui/list.go` 的 `listHeights`
 // 量一行记一行，没量过的按平均估），行画法自己写。
 //
-// ⚠️ **拉页那三重保障也没有直接复用** `widgets/list/paged.go`：那一档的底座
-// 是「音乐卡片 + 三档视图切换」，而这一页是**变高正文 + 表情图**。三条保障
-// （首次渲染检查 / 滚到底 / 加载完再查一次）在这里是同一个判据（末尾那一行
-// 进没进画面），自己写更直白——见 `syncComments`。
+// ⚠️ **底座不一样，但三重保障的判据是同一份**：这一页用不了
+// `widgets/list`（那一档是定高 64 的音乐行，而这一页是**变高正文 + 表情图**
+// ——行高是量出来的），但「这一帧该不该拉下一页」判的是同一件事
+// ⇒ **判据复用 `widgets/list/paged.go` 里那一份**（`DecideFirstPage` /
+// `DecideNextPage` / `PagingState`），不另写一套。
+//
+// 两份判据迟早分叉，而分叉出来的那种差异极难查（一个列表会补屏，另一个
+// 不会，而且两边看着都「对」）——见 `syncComments`。
 //
 // # 正文是「自己画」的（表情要成图）
 //
@@ -936,11 +940,16 @@ func inkAccentText(c *ui.Context) ui.Color {
 // 🔴 **三件要发网络请求的事全在这里**（铁律三）：排序切换 / 刷新 / 翻页，
 // 外加展开楼中楼之后去问那一层。view 一件都不做（文件头）。
 //
-// # 翻页那三重保障在这里是**同一个判据**
+// # 翻页那三重保障在这里是**同一份判据**
 //
 //	① 首次渲染检查：内容一换就查一次容器填没填满
 //	② 滚到底：末尾那一行（哨兵）进了画面就拉下一页
 //	③ 加载结束后再查一次
+//
+// ⚠️ **判据复用 `widgets/list/paged.go` 里那一份**（`DecideFirstPage` /
+// `DecideNextPage`）：这一页的底座不一样（行高是量出来的），但「这一帧该不该
+// 拉下一页」判的是同一件事——**两份判据迟早分叉**，而分叉出来的那种差异极难
+// 查（一个列表会补屏，另一个不会，而且两边看着都「对」）。
 //
 // 三条都是「**末尾那一行进没进画面**」——`ListState.Visible()` 报的是**上一帧**
 // 的行（`mygo/ui/list.go` 的 `Visible` 注释），而这个判据每帧问一次，
@@ -1008,8 +1017,34 @@ func (s *Shell) syncComments(c *ui.Context) {
 		p.rebuildRows(cm, s.app.CommentReplies)
 	}
 
-	// 🔴 **翻页**：末尾那一行进画面了就拉下一页。
-	if _, last := p.state.Visible(); last >= len(p.rows) && s.app.CommentsHasMore() {
+	// 🔴 **三重保障**：判据是 `widgets/list/paged.go` 里那一份（不另写一套）。
+	//
+	// ⚠️ **Blocked 恒为 false**：应用层那一档**没有**「挡住等人点重试」这个
+	// 状态——失败之后它自己按 15 秒退避再问（`ensureComments` /
+	// `LoadMoreComments`）。映成 true 的话，「翻页失败之后自动重试同一页」这
+	// 条就没有了（用户只能点末尾那行的「重试」，而那一键走
+	// `RefreshComments` ⇒ 回到第一页 ⇒ 体验倒退）。
+	st := list.PagingState{
+		// 「已经拿到过至少一页」——**一条评论都没有也算拿到过**（那一档是
+		// 「还没有人评论」，不是「还没问过」）。
+		Fetched: s.app.CommentsLoaded(),
+		// 「有一趟在路上」：它挡的是重复发（应用层本来也拒，挡住只是少调
+		// 一次）。
+		Loading: s.app.CommentsLoading(),
+		Blocked: false,
+		HasMore: s.app.CommentsHasMore(),
+	}
+	// ① 首次渲染检查：还没拿到过第一页就去问（问的动作在应用层，界面只
+	// 记下意图——铁律三）。
+	if list.DecideFirstPage(st).Action == list.PagingLoadFirst {
+		s.app.EnsureComments()
+	}
+	// ②③ 末尾那一行（哨兵）进了画面就拉下一页。
+	//
+	// ⚠️ **哨兵是列表多出来的那一行**（`len(p.rows)+1`），它的行号就是
+	// `len(p.rows)`——和 `paged.go` 的口径一样（那边哨兵也占一行）。
+	first, last := p.state.Visible()
+	if list.DecideNextPage(st, first, last, len(p.rows)+1).Action == list.PagingLoadNext {
 		s.app.LoadMoreComments()
 	}
 }

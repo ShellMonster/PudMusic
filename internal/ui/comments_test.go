@@ -1021,3 +1021,89 @@ func commentsPlaybarTester(t *testing.T, it app.Item, w int, opts ...shellOpt) (
 	ts.tt.Frame()
 	return ts.tt, ts.s
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 三重保障：判据是 widgets/list/paged.go 里那一份
+// ─────────────────────────────────────────────────────────────────────────────
+
+// commentFixtureWithNoMore 是「这一页之后就没有了」的那一份 fixture。
+//
+// ⚠️ **形状照着真 fixture，只把 `cursor.is_end` 摆成 true**：B 站说到底了就是
+// 到底了，而那一档是三重保障里「后面还有没有」那一条的输入。
+func commentFixtureWithNoMore(t *testing.T, name string) []byte {
+	t.Helper()
+	var doc map[string]any
+	if err := json.Unmarshal(commentFixtureBytes(t, name), &doc); err != nil {
+		t.Fatalf("fixture %s 读不懂：%v", name, err)
+	}
+	data, _ := doc["data"].(map[string]any)
+	cursor, _ := data["cursor"].(map[string]any)
+	cursor["is_end"] = true
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("fixture %s 编不出来：%v", name, err)
+	}
+	return raw
+}
+
+// TestTheCommentsPageAsksForTheNextPageOnlyOnceWhileItIsInFlight 断「在途的时候
+// 不重复发」。
+//
+// 🔴 **这是三重保障里「正在拉」那一条**：翻页那一趟在路上的时候，界面每一帧
+// 都在判「该不该拉下一页」——判据说「在途 ⇒ 别拉」，所以请求数停在 2
+// （第一页 + 那一趟翻页）。
+//
+// ⚠️ **判据要是自己写的**，这一条最容易被写成「每帧都问一次」（而应用层挡住
+// 了，于是看不出来）——那正是判据要分出去的理由：**一处判据，两个底座共用**。
+func TestTheCommentsPageAsksForTheNextPageOnlyOnceWhileItIsInFlight(t *testing.T) {
+	b := newCommentBili(t, "reply-main.json")
+	hold := make(chan struct{})
+	b.mu.Lock()
+	b.hold = hold
+	b.mu.Unlock()
+	t.Cleanup(func() {
+		select {
+		case <-hold:
+		default:
+			close(hold)
+		}
+	})
+
+	_, tt := newCommentsShell(t, b, mvItem(), 1400, 1400)
+
+	commentsWait(t, tt, "末尾那一行在拉了", func() bool {
+		return tt.HasText("正在拉")
+	})
+
+	// 在途的时候再跑几十帧：请求数不许涨。
+	for range 30 {
+		tt.Frame()
+	}
+	if got := b.mainCallCount(); got != 2 {
+		t.Errorf("翻页那一趟在途的时候又发了 %d 趟（总共 %d 趟），want 2", got-2, got)
+	}
+
+	close(hold)
+}
+
+// TestTheCommentsPageStopsAskingWhenThereIsNoMore 断「到底了就停手」。
+//
+// ⚠️ **判据里的「后面还有没有」那一条**：B 站说到底了（`cursor.is_end`）就是
+// 到底了——这时候再问就是白问（而 B 站会当我们在刷）。
+//
+// ⚠️ **判据要是自己写的**，这一条最容易被写成「一直问下去，用户滚到底才停」
+// ——那也是「每一帧问一次」的形状。
+func TestTheCommentsPageStopsAskingWhenThereIsNoMore(t *testing.T) {
+	b := newCommentBili(t, "reply-main.json")
+	b.mainRaw = commentFixtureWithNoMore(t, "reply-main.json")
+
+	_, tt := newCommentsShell(t, b, mvItem(), 1400, 1400)
+
+	// 多跑几十帧，确认它不再问。
+	for range 30 {
+		tt.Frame()
+	}
+	if got := b.mainCallCount(); got != 1 {
+		t.Errorf("B 站说了「到底了」之后又问了 %d 趟（总共 %d 趟），want 1", got-1, got)
+	}
+}

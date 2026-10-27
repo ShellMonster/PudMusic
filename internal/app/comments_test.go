@@ -991,3 +991,118 @@ func waitCommentsFor(t *testing.T, timeout time.Duration, what string, cond func
 	}
 	t.Fatalf("等了 %s，%s", timeout, what)
 }
+
+// TestEnsureCommentsAsksOnceAndSaysItIsLoaded 钉住「界面那一半的出口」。
+//
+// 🔴 **它是界面层保障①（首次渲染检查）的落点**：界面只判「该不该问」
+// （`internal/ui/comments.go` 的 `syncComments`），真正发出去的是这里——
+// 铁律三：view 里不发网络请求。
+//
+// ⚠️ **重复调它不许多发一趟**：界面每一帧都判一次「还没拿到过第一页」，
+// 而 `EnsureComments` 是幂等的（内部判过「问过了 / 正在问」，失败之后还有
+// 15 秒退避）——不然就是每秒一趟。
+func TestEnsureCommentsAsksOnceAndSaysItIsLoaded(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	calls := &commentCalls{}
+	release := make(chan struct{})
+	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+		return 12345, nil
+	}
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
+		calls.addList(typ, oid, next)
+		<-release
+		return commentPage([]bili.Comment{{Rpid: 1, Message: "第一条"}}, "", true), nil
+	}
+	a.Queue().Append(Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "1"})
+	a.queue.selectAt(0)
+
+	if a.CommentsLoaded() {
+		t.Errorf("还没问就说「已经拿到过」了")
+	}
+
+	a.EnsureComments()
+	waitCommentsFor(t, commentsWaitTimeout, "那一趟发出去了", func() bool {
+		return calls.listCount() >= 1
+	})
+
+	// 在途的时候问 50 次（界面就是每一帧问一次）：还是 1 趟。
+	for range 50 {
+		a.EnsureComments()
+	}
+	if got := calls.listCount(); got != 1 {
+		t.Errorf("在途的时候问了 50 次，发了 %d 趟，want 1", got)
+	}
+
+	close(release)
+	waitComments(t, a, 1, "第一趟")
+
+	// ⚠️ **拿到过第一页之后就不该再问第一页**：界面那一帧判的是
+	// 「还没拿到过吗」——拿到过就不该再问。
+	if !a.CommentsLoaded() {
+		t.Errorf("第一页回来了还说「还没拿到过」")
+	}
+	for range 50 {
+		a.EnsureComments()
+	}
+	if got := calls.listCount(); got != 1 {
+		t.Errorf("拿到过之后又问了 50 次，总共发了 %d 趟，want 1", got)
+	}
+}
+
+// TestCommentsLoadedIsTrueEvenWhenNobodyCommented 钉住「一条评论都没有也算
+// 拿到过」。
+//
+// ⚠️ **「还没有人评论」是一份完整的答案**（B 站说这个对象在，只是没人评论），
+// 不是「还没问过」——当成「还没问过」的话，界面会一遍一遍地问第一页。
+func TestCommentsLoadedIsTrueEvenWhenNobodyCommented(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+		return 1, nil
+	}
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
+		return bili.CommentPage{IsEnd: true, AllCount: 0}, bili.ErrCommentNoComments
+	}
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "130191"})
+	a.queue.selectAt(0)
+
+	a.EnsureComments()
+	waitCommentsFor(t, commentsWaitTimeout, "那一趟", func() bool {
+		return a.CommentsLoaded()
+	})
+
+	if !a.CommentsLoaded() {
+		t.Errorf("「还没有人评论」没有算成「拿到过」")
+	}
+}
+
+// TestEnsureCommentsDoesNotAskForALocalFile 钉住「本地文件一个请求都不发」。
+//
+// ⚠️ **本地音乐在 B 站上没有对应的对象**：问一个认不出来的 oid 的症状是
+// 「静默拿到空列表」——而界面上的入口压根不摆（那一层已经挡住了），这一层
+// 再挡一道。
+func TestEnsureCommentsDoesNotAskForALocalFile(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	calls := &commentCalls{}
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
+		calls.addList(typ, oid, next)
+		return commentPage(nil, "", true), nil
+	}
+	a.Queue().Append(Item{Source: "local", Type: "local", Path: "/tmp/x.mp3"})
+	a.queue.selectAt(0)
+
+	for range 20 {
+		a.EnsureComments()
+	}
+	if got := calls.listCount(); got != 0 {
+		t.Errorf("本地文件发了 %d 趟评论请求，want 0", got)
+	}
+	if a.CommentsLoaded() {
+		t.Errorf("本地文件也说「已经拿到过」了")
+	}
+}
