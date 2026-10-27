@@ -3,6 +3,7 @@ package ui
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 func startOnOverview(t *testing.T) {
@@ -46,4 +47,16 @@ func TestRenderHomeOverviewShots(t *testing.T) {
 	tt.Scroll(700, 400, 0, 600)
 	waitFrames(t, tt, "迷你榜", func() bool { return showsText(tt, "查看全部") })
 	save(t, dir, "141-首页总览-滚到榜单.png", tt)
+}
+
+func TestTheHeroBannerAdvancesByItselfAndStopsWhenHovered(t *testing.T) {
+	startOnOverview(t)
+	s, tt, _ := newHomeShell(t, homeDiscoverFake(t))
+	waitFrames(t, tt, "横幅", func() bool { return len(s.home.heroSongs()) > 1 })
+	waitFrames(t, tt, "横幅起了表", func() bool { return !s.home.heroAt.IsZero() })
+	if s.home.heroIdx != 0 {
+		t.Fatalf("一开始应停在第 1 张，实际 %d", s.home.heroIdx)
+	}
+	tt.Advance(homeHeroEvery + time.Second)
+	waitFrames(t, tt, "自动换到下一张", func() bool { return s.home.heroIdx == 1 })
 }

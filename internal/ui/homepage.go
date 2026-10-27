@@ -198,7 +198,10 @@ type homePage struct {
 	overview bool
 	// ovScroll / ovWidth 是总览的滚动位置和上一帧量到的内容宽。
 	ovScroll ui.ScrollState
-	ovWidth  float32
+	// heroIdx / heroAt 是轮播横幅当前停在第几张、什么时候换上的。
+	heroIdx int
+	heroAt  time.Time
+	ovWidth float32
 	// miniTop 是两张榜（热榜、原创榜）的前几名；miniLoaded 记着取它时榜上有几首。
 	miniTop    [2][]list.Music
 	miniLoaded [2]int
