@@ -16,6 +16,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/media"
 	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/Biu_Go/internal/service/comments"
 	"github.com/ShellMonster/Biu_Go/internal/service/danmaku"
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
@@ -609,6 +610,93 @@ type App struct {
 	// 和 `partsFetch` 同一条规矩：**只由界面那一侧读写**（`ensureLike` 在那里就
 	// 把它取出来递给那个 goroutine，goroutine 不碰这个字段）。生产上永远是 nil。
 	likeFetch func(context.Context, string) (bili.ArchiveRelation, error)
+
+	// comments 是当前这一首的评论，commentsSlot 是它属于哪一个对象。见 comments.go。
+	//
+	// ⚠️ **它有自己的锁（`commentsMu`），不在 `a.mu` 里**：写它的是网络往返回来的
+	// 那个 goroutine，而 `a.mu` 是播放器那一摊的（`Snapshot` 每帧都要它）。理由
+	// 同 `likeMu` / `partsMu`。
+	commentsMu sync.Mutex
+	// commentsSlot 是这份缓存属于谁（`mv|<bvid>` / `audio|<sid>`）。换歌就重来。
+	commentsSlot string
+	// comments 是已经拿到的那些评论（主列表）。
+	comments []bili.Comment
+	// commentsErr 是最近一次问评论失败的原因。
+	commentsErr error
+	// commentsLoaded 是「主列表已经问到了」（失败**不**置它——失败之后要能再问，
+	// 理由同 `partsLoaded`）。
+	commentsLoaded bool
+	// commentsWanted 是「那一趟正在路上」。
+	commentsWanted bool
+	// commentsTriedAt 是上一次**发起**那一问的时刻，问失败之后拿它算退避
+	// （`commentsRetryAfter`）。
+	commentsTriedAt time.Time
+	// commentsMoreTriedAt 是上一次**发起翻页**的时刻（翻页那一趟单独算退避，
+	// 不跟第一页共用——共用的话刚进这一页就点「加载更多」会被挡住）。
+	commentsMoreTriedAt time.Time
+	// commentsNext 是下一页的游标（B 站给什么就是什么，不透明）。
+	commentsNext int64
+	// commentsIsEnd 是「到底了」。
+	commentsIsEnd bool
+	// commentsAllCount 是评论总数。
+	commentsAllCount int64
+	// commentsNoComments 是「这个对象在，只是还没有人评论」。
+	commentsNoComments bool
+	// commentsRefresh 是「用户按了刷新，绕过缓存」。
+	commentsRefresh bool
+	// commentsGen 是**评论代次**。每换一个槽位就加一，迟到的结果回来发现代次
+	// 变了直接丢掉（理由同 `lyricGen`）。
+	commentsGen int
+	// commentsTyp / commentsOid 是当前这一首问的是哪个对象（`type` / avid 或
+	// auid）。楼中楼要用它，**别再换一次 avid**。
+	commentsTyp int64
+	commentsOid int64
+	// commentsReplies 是楼中楼，按根评论 id 分格。
+	commentsReplies map[int64][]bili.Comment
+	// commentsRepliesTried / commentsRepliesWanted 是楼中楼那一边的退避与
+	// 「正在路上」。
+	commentsRepliesTried  map[int64]time.Time
+	commentsRepliesWanted map[int64]bool
+	// commentsAvids 记着 bvid → avid 的换算（省掉同一首歌的第二次往返）。
+	commentsAvids map[string]int64
+	// commentsAvidWaiters 是「正在换 avid 的那一趟」（bvid → 那个 chan）。
+	//
+	// 🔴 **同一时刻只发一趟**：主列表那一趟和楼中楼那一趟可能同时问同一个
+	// bvid 的 avid——两趟都发出去就是两次网络往返。
+	commentsAvidWaiters map[string]chan struct{}
+	// commentsCache 是评论缓存。挂上之前是 nil（那时的表现是「每次都要重问」，
+	// 没有别的坏处）。
+	commentsCache *comments.Cache
+	// commentsListFetch / commentsRepliesFetch / commentsArchiveIDFetch 是问
+	// 评论那几趟的替身。生产上永远是 nil（走取流零件上的那个 B 站客户端）。
+	//
+	// ⚠️ **只由界面那一侧读写**（跟 `partsFetch` 同一条规矩）：`ensureComments`
+	// 在那里就把函数取出来递给那个 goroutine，goroutine 不碰这个字段。
+	commentsListFetch commentsListFetchFunc
+	// commentsRepliesFetch 是问楼中楼那一趟。
+	commentsRepliesFetch commentsRepliesFetchFunc
+	// commentsArchiveIDFetch 是 bvid → avid 那一趟。
+	commentsArchiveIDFetch commentsArchiveIDFetchFunc
+	// commentsSeq 是**在途序号**。每发起一趟问评论就加一（不管问的是哪一页）。
+	//
+	// 🔴 **它挡的是「同一个对象上有两趟」**：用户按了「刷新」，而首次加载那一趟
+	// 还在途——两趟回来的时候，**较早的那一趟不能盖掉刷新拉回来的那一份**。
+	//
+	// ⚠️ **代次（`commentsGen`）挡不住这个**：代次是「换歌才加」，而刷新不换歌。
+	commentsSeq int
+	// commentsSeqs 记着**每个槽位最后发起的那一趟**的序号。
+	//
+	// ⚠️ **按槽位记**（不是全局序号）：全局的序号会把「另一首歌的新一趟」也算
+	// 成「比这一首新」，于是切到另一首之后，上一首那份就落不了盘了——而下次进
+	// 上一首就得重新拉一次（那就不是「第二次进是瞬时的」了）。
+	commentsSeqs map[string]int
+	// commentsWriteMu 是**写盘那把专锁**。它把「检查我是不是最新的一趟」和
+	// 「真的写下去」包在同一个临界区里——分开的话，中间发起的新一趟会让旧的
+	// 那一趟以为自己还是最新的，于是它写得更晚、把新的盖掉。
+	//
+	// ⚠️ **它不是 `commentsMu`**：写盘是阻塞 IO，而 `commentsMu` 是界面每一帧
+	// 都要的（`App.Comments`）。
+	commentsWriteMu sync.Mutex
 
 	// 弹幕这一摊，见 danmaku.go。挂上缓存之前 danmakuCache 是 nil。
 	//
